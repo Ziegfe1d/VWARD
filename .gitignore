@@ -1,12 +1,33 @@
+# Runtime output
 *.log
+*.pid
+*.lock
+*.out
+*.rc
+runtime/
+state/
+
+# Backups and temporary files
+backups/
 *.bak
+*.backup
 *.tmp
-*.swp
-.DS_Store
-Thumbs.db
-private/
-secrets/
+*.new
+*~
+
+# Device-local and generated configuration
+config/local/
+hints.conf
+skip-domains.conf
+wg-failopen.disabled
+
+# Private material and router diagnostics
 *.key
-*.conf.private
+*.pem
+*.p12
+*.pfx
 startup-config*
 self-test*
+running-config*
+querylog.json*
+sessions*

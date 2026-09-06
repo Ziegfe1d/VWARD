@@ -1,0 +1,151 @@
+#!/bin/sh
+
+PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+SUP_DAEMON="/opt/bin/crond-supervisor.sh"
+SUP_PIDFILE="/opt/var/run/crond-supervisor.pid"
+SUP_LOCK="/tmp/crond-supervisor.lock"
+SUP_LOG="/opt/var/log/crond-supervisor.log"
+
+SUP_WAIT=6
+
+
+_sup_alive()
+{
+    P=$(cat "$SUP_PIDFILE" 2>/dev/null)
+
+    [ -n "$P" ] || return 1
+    kill -0 "$P" 2>/dev/null || return 1
+
+    ps w |
+    awk -v p="$P" '
+        $1==p &&
+        $6=="/opt/bin/crond-supervisor.sh" {
+            found=1
+        }
+
+        END {
+            exit found ? 0 : 1
+        }
+    '
+}
+
+
+_sup_start()
+{
+    if _sup_alive; then
+        P=$(cat "$SUP_PIDFILE")
+        echo "crond supervisor already running PID=$P"
+        return 0
+    fi
+
+    rm -f "$SUP_PIDFILE"
+    rm -rf "$SUP_LOCK"
+
+    if command -v setsid >/dev/null 2>&1; then
+        setsid "$SUP_DAEMON" >> "$SUP_LOG" 2>&1 &
+    else
+        "$SUP_DAEMON" >> "$SUP_LOG" 2>&1 &
+    fi
+
+    P=$!
+
+    N=0
+
+    while [ "$N" -lt "$SUP_WAIT" ]; do
+
+        sleep 1
+
+        if _sup_alive; then
+            P=$(cat "$SUP_PIDFILE")
+            echo "crond supervisor started PID=$P"
+            return 0
+        fi
+
+        N=$((N + 1))
+    done
+
+    echo "crond supervisor failed to start"
+    return 1
+}
+
+
+_sup_stop()
+{
+    P=$(cat "$SUP_PIDFILE" 2>/dev/null)
+
+    if [ -n "$P" ] &&
+       kill -0 "$P" 2>/dev/null; then
+
+        kill "$P" 2>/dev/null
+
+        N=0
+
+        while kill -0 "$P" 2>/dev/null &&
+              [ "$N" -lt 5 ]; do
+            sleep 1
+            N=$((N + 1))
+        done
+
+        kill -0 "$P" 2>/dev/null &&
+            kill -9 "$P" 2>/dev/null
+    fi
+
+    rm -f "$SUP_PIDFILE"
+    rm -rf "$SUP_LOCK"
+
+    echo "crond supervisor stopped"
+    return 0
+}
+
+
+_sup_status()
+{
+    if _sup_alive; then
+        P=$(cat "$SUP_PIDFILE")
+
+        echo "crond supervisor RUNNING PID=$P"
+
+        echo -n "Heartbeat: "
+        cat /tmp/crond-supervisor.last 2>/dev/null ||
+            echo "NONE"
+
+        return 0
+    fi
+
+    echo "crond supervisor STOPPED"
+    return 1
+}
+
+
+case "$1" in
+    start)
+        _sup_start
+        _SUP_RC=$?
+        ;;
+
+    stop)
+        _sup_stop
+        _SUP_RC=$?
+        ;;
+
+    restart)
+        _sup_stop
+        sleep 1
+        _sup_start
+        _SUP_RC=$?
+        ;;
+
+    status)
+        _sup_status
+        _SUP_RC=$?
+        ;;
+
+    *)
+        echo "Usage: S92crond-supervisor {start|stop|restart|status}"
+        _SUP_RC=1
+        ;;
+esac
+
+return "$_SUP_RC" 2>/dev/null || exit "$_SUP_RC"

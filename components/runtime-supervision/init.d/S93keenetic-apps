@@ -1,0 +1,50 @@
+#!/opt/bin/sh
+
+LIGHTTPD="/opt/sbin/lighttpd"
+CONF="/opt/etc/keenetic-apps/lighttpd.conf"
+PIDFILE="/opt/var/run/keenetic-apps-lighttpd.pid"
+
+case "$1" in
+
+start)
+
+    if [ -r "$PIDFILE" ]; then
+
+        PID="$(cat "$PIDFILE")"
+
+        if kill -0 "$PID" 2>/dev/null; then
+            exit 0
+        fi
+
+        rm -f "$PIDFILE"
+    fi
+
+    "$LIGHTTPD" -f "$CONF"
+    ;;
+
+stop)
+
+    if [ -r "$PIDFILE" ]; then
+
+        PID="$(cat "$PIDFILE")"
+
+        kill "$PID" 2>/dev/null
+
+        rm -f "$PIDFILE"
+    fi
+    ;;
+
+restart)
+
+    "$0" stop
+    sleep 1
+    "$0" start
+    ;;
+
+*)
+
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+    ;;
+
+esac
