@@ -1,0 +1,12 @@
+*.log
+*.bak
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+private/
+secrets/
+*.key
+*.conf.private
+startup-config*
+self-test*

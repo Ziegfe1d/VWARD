@@ -1,0 +1,5575 @@
+<!doctype html>
+<html lang="ru" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>VWARD — v28 Live</title>
+<style>
+:root{
+  --bg:#f4f7fb;
+  --panel:#ffffff;
+  --panel-2:#f8fafc;
+  --panel-3:#eef3f8;
+  --text:#172033;
+  --muted:#6f7d91;
+  --line:#dfe6ef;
+  --line-2:#cfd8e6;
+  --green:#18a874;
+  --green-2:#0d8e60;
+  --green-soft:#e9f8f2;
+  --blue:#2f73f3;
+  --blue-soft:#edf4ff;
+  --violet:#765ad8;
+  --violet-soft:#f2eeff;
+  --amber:#d79314;
+  --amber-soft:#fff6df;
+  --red:#d65353;
+  --red-soft:#fff0f0;
+  --shadow:0 14px 34px rgba(43,57,79,.07);
+  --shadow-sm:0 4px 14px rgba(43,57,79,.055);
+  --r:18px;
+  --rs:12px;
+  --sidebar:258px;
+}
+html[data-theme="dark"]{
+  --bg:#0d131d;
+  --panel:#141c27;
+  --panel-2:#101822;
+  --panel-3:#1b2634;
+  --text:#eef4fb;
+  --muted:#92a1b5;
+  --line:#263241;
+  --line-2:#344456;
+  --green:#43d9a0;
+  --green-2:#30c991;
+  --green-soft:rgba(67,217,160,.11);
+  --blue:#6aa6ff;
+  --blue-soft:rgba(106,166,255,.11);
+  --violet:#aa94ff;
+  --violet-soft:rgba(170,148,255,.11);
+  --amber:#efbf60;
+  --amber-soft:rgba(239,191,96,.11);
+  --red:#ff7f7f;
+  --red-soft:rgba(255,127,127,.11);
+  --shadow:0 18px 42px rgba(0,0,0,.24);
+  --shadow-sm:0 5px 16px rgba(0,0,0,.18);
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
+button,input{font:inherit}
+button{color:inherit}
+svg{display:block}
+body{min-height:100vh}
+.app{min-height:100vh}
+
+.sidebar{
+  position:fixed;left:0;top:0;bottom:0;width:var(--sidebar);z-index:40;
+  background:color-mix(in srgb,var(--panel) 96%,transparent);
+  border-right:1px solid var(--line);
+  padding:18px 14px;
+}
+.brand{display:flex;align-items:center;gap:12px;padding:4px 8px 20px}
+.brandmark{
+  width:44px;height:44px;border-radius:14px;display:grid;place-items:center;color:#fff;
+  background:linear-gradient(135deg,#1fbb83,#0d8d61);
+  box-shadow:0 10px 24px rgba(24,168,116,.22)
+}
+.brandmark svg{width:25px;height:25px}
+.brand h1{margin:0;font-size:16px;line-height:1.2;letter-spacing:-.01em}
+.brand small{display:block;margin-top:3px;font-size:10px;color:var(--muted)}
+.nav-label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:10px 12px 7px}
+.nav{display:flex;flex-direction:column;gap:4px}
+.nav button{
+  width:100%;display:flex;align-items:center;gap:11px;border:0;background:transparent;
+  padding:10px 11px;border-radius:11px;cursor:pointer;text-align:left;
+  color:var(--muted);font-size:12px;transition:.15s ease;
+}
+.nav button:hover{background:var(--panel-2);color:var(--text)}
+.nav button.active{background:var(--green-soft);color:var(--green-2);font-weight:700}
+.nav-icon{width:21px;height:21px;display:grid;place-items:center;flex:0 0 21px}
+.nav-icon svg{width:18px;height:18px}
+.side-card{
+  position:absolute;left:14px;right:14px;bottom:14px;
+  border:1px solid var(--line);border-radius:14px;background:var(--panel-2);
+  padding:12px;box-shadow:var(--shadow-sm)
+}
+.router-row{display:flex;align-items:center;gap:10px}
+.router-box{width:34px;height:34px;border-radius:10px;background:var(--blue-soft);color:var(--blue);display:grid;place-items:center}
+.router-box svg{width:18px;height:18px}
+.router-row strong{display:block;font-size:11px}
+.router-row span{display:block;font-size:9px;color:var(--muted);margin-top:2px}
+.side-health{display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:9px;color:var(--muted)}
+.side-health b{color:var(--green)}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;background:currentColor}
+.main{margin-left:var(--sidebar);min-height:100vh}
+
+.topbar{
+  position:sticky;top:0;z-index:30;height:72px;padding:0 26px;
+  display:flex;align-items:center;justify-content:space-between;
+  background:color-mix(in srgb,var(--panel) 90%,transparent);
+  backdrop-filter:blur(15px);border-bottom:1px solid var(--line)
+}
+.page-head h2{margin:0;font-size:20px;letter-spacing:-.02em}
+.page-head p{margin:4px 0 0;font-size:10px;color:var(--muted)}
+.top-right{display:flex;gap:8px;align-items:center}
+.chip{
+  display:inline-flex;align-items:center;gap:7px;padding:8px 10px;border-radius:999px;
+  border:1px solid var(--line);background:var(--panel);font-size:10px;color:var(--muted);box-shadow:var(--shadow-sm)
+}
+.chip strong{color:var(--text)}
+.icon-btn,.btn{
+  border:1px solid var(--line);background:var(--panel);border-radius:10px;cursor:pointer;
+  box-shadow:var(--shadow-sm);transition:.15s ease
+}
+.icon-btn{width:36px;height:36px;display:grid;place-items:center}
+.icon-btn:hover,.btn:hover{transform:translateY(-1px);border-color:var(--line-2)}
+.icon-btn svg{width:17px;height:17px}
+.btn{padding:8px 11px;font-size:10px;display:inline-flex;align-items:center;gap:7px}
+.btn.primary{background:var(--green);border-color:var(--green);color:#fff}
+.btn.danger{background:var(--red-soft);border-color:color-mix(in srgb,var(--red) 35%,var(--line));color:var(--red)}
+.btn.ghost{background:transparent;box-shadow:none}
+.content{max-width:1620px;margin:0 auto;padding:24px 26px 36px}
+.section{display:none}
+.section.active{display:block}
+
+.hero{
+  padding:22px;border-radius:20px;border:1px solid color-mix(in srgb,var(--green) 22%,var(--line));
+  background:
+    radial-gradient(circle at 85% 10%,color-mix(in srgb,var(--green) 12%,transparent),transparent 31%),
+    linear-gradient(135deg,var(--panel),color-mix(in srgb,var(--green-soft) 58%,var(--panel)));
+  box-shadow:var(--shadow);display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:18px
+}
+.hero-left{display:flex;gap:14px;align-items:center}
+.hero-icon{width:50px;height:50px;border-radius:16px;background:var(--green-soft);color:var(--green);display:grid;place-items:center}
+.hero-icon svg{width:27px;height:27px}
+.hero h3{font-size:20px;margin:0 0 5px;letter-spacing:-.02em}
+.hero p{margin:0;color:var(--muted);font-size:10px}
+.hero-status{text-align:right}
+.hero-status strong{display:block;font-size:28px;color:var(--green);letter-spacing:-.03em}
+.hero-status span{font-size:9px;color:var(--muted)}
+
+.grid{display:grid;gap:16px}
+.grid.apps{grid-template-columns:repeat(4,minmax(0,1fr))}
+.grid.two{grid-template-columns:1.35fr .65fr;margin-top:16px}
+.grid.half{grid-template-columns:1fr 1fr}
+.grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.card{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--shadow-sm);padding:17px
+}
+.app-card{position:relative;overflow:hidden;cursor:pointer;transition:.18s ease}
+.app-card:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.app-card::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--accent,var(--green))}
+.app-card.green{--accent:var(--green)}.app-card.blue{--accent:var(--blue)}.app-card.violet{--accent:var(--violet)}.app-card.amber{--accent:var(--amber)}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:13px}
+.card-title{display:flex;gap:9px;align-items:center}
+.card-icon{width:31px;height:31px;border-radius:10px;display:grid;place-items:center}
+.card-icon svg{width:17px;height:17px}
+.c-green{background:var(--green-soft);color:var(--green)}
+.c-blue{background:var(--blue-soft);color:var(--blue)}
+.c-violet{background:var(--violet-soft);color:var(--violet)}
+.c-amber{background:var(--amber-soft);color:var(--amber)}
+.card h3{font-size:12px;margin:0}
+.metric{font-size:25px;font-weight:780;letter-spacing:-.025em;margin:4px 0}
+.sub{font-size:9px;color:var(--muted)}
+.status{
+  display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border-radius:999px;font-size:9px;font-weight:750;
+  letter-spacing:.01em
+}
+.status::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.ok{background:var(--green-soft);color:var(--green)}
+.info{background:var(--blue-soft);color:var(--blue)}
+.warn{background:var(--amber-soft);color:var(--amber)}
+.bad{background:var(--red-soft);color:var(--red)}
+.kv{display:grid;grid-template-columns:1fr auto;gap:8px 12px;margin-top:13px;font-size:10px}
+.kv span:nth-child(odd){color:var(--muted)}
+.kv span:nth-child(even){text-align:right;font-weight:600}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.sep{height:1px;background:var(--line);margin:14px 0}
+
+.health-strip{
+  margin-top:16px;display:grid;grid-template-columns:repeat(5,1fr);gap:10px;
+  border:1px solid var(--line);background:var(--panel);border-radius:16px;padding:10px;box-shadow:var(--shadow-sm)
+}
+.health-item{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:11px;background:var(--panel-2)}
+.health-item i{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px var(--green-soft)}
+.health-item b{display:block;font-size:10px}
+.health-item span{display:block;font-size:8px;color:var(--muted);margin-top:2px}
+
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.toolbar h3{font-size:15px;margin:0}
+.toolbar .meta{font-size:9px;color:var(--muted);margin-top:3px}
+.actions{display:flex;gap:7px;flex-wrap:wrap}
+.table-wrap{overflow:auto}
+.table{width:100%;border-collapse:collapse;min-width:680px;font-size:10px}
+.table th{padding:9px;color:var(--muted);font-weight:700;text-align:left;background:var(--panel-2);border-bottom:1px solid var(--line)}
+.table th:first-child{border-radius:8px 0 0 8px}.table th:last-child{border-radius:0 8px 8px 0}
+.table td{padding:10px 9px;border-bottom:1px solid var(--line)}
+.table tr:last-child td{border-bottom:0}
+
+.path{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:0;align-items:center;margin-top:8px
+}
+.path-node{position:relative;text-align:center;padding:14px 8px}
+.path-node:not(:last-child)::after{
+  content:"";position:absolute;right:-18px;top:50%;width:36px;height:2px;background:var(--green)
+}
+.node-ico{width:38px;height:38px;border-radius:12px;background:var(--green-soft);color:var(--green);display:grid;place-items:center;margin:0 auto 8px}
+.node-ico svg{width:19px;height:19px}
+.path-node b{display:block;font-size:10px}
+.path-node span{font-size:8px;color:var(--muted)}
+
+.recovery-steps{display:flex;flex-direction:column;gap:10px}
+.step{
+  display:grid;grid-template-columns:32px 1fr auto;gap:10px;align-items:center;
+  padding:11px;border-radius:12px;background:var(--panel-2);border:1px solid var(--line)
+}
+.step-num{width:28px;height:28px;border-radius:9px;background:var(--green-soft);color:var(--green);display:grid;place-items:center;font-weight:800;font-size:10px}
+.step b{display:block;font-size:10px}
+.step span{display:block;font-size:8px;color:var(--muted);margin-top:2px}
+.step small{font-size:8px;color:var(--muted)}
+
+.job-list{display:flex;flex-direction:column}
+.job{display:grid;grid-template-columns:1fr 110px 88px;gap:12px;align-items:center;padding:11px 0;border-bottom:1px solid var(--line)}
+.job:last-child{border-bottom:0}
+.job-name{display:flex;align-items:center;gap:9px}
+.job-name i{width:8px;height:8px;border-radius:50%;background:var(--green)}
+.job strong{font-size:10px}
+.job p{font-size:8px;color:var(--muted);margin:3px 0 0}
+.job time{font-size:9px;color:var(--muted)}
+.log-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.log-tab{border:1px solid var(--line);background:var(--panel);padding:6px 9px;border-radius:8px;font-size:9px;cursor:pointer}
+.log-tab.active{background:var(--green-soft);color:var(--green);border-color:color-mix(in srgb,var(--green) 30%,var(--line))}
+.log-tools{display:flex;gap:7px;align-items:center}
+.search{border:1px solid var(--line);background:var(--panel-2);border-radius:9px;padding:7px 9px;font-size:9px;color:var(--text);outline:none;min-width:220px}
+.logbox{
+  height:360px;overflow:auto;border:1px solid var(--line);border-radius:13px;background:#0c1119;color:#bcc9dd;
+  padding:13px;font:10px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap
+}
+.notice{padding:11px 12px;border-radius:12px;background:var(--blue-soft);border:1px solid color-mix(in srgb,var(--blue) 28%,var(--line));font-size:9px;color:var(--muted);line-height:1.45}
+.notice b{color:var(--blue)}
+.storage{margin-top:12px}
+.progress{height:7px;border-radius:999px;background:var(--panel-3);border:1px solid var(--line);overflow:hidden}
+.progress i{display:block;height:100%;width:1%;background:linear-gradient(90deg,var(--green),#61ddb3);border-radius:999px}
+
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:20px;z-index:100}
+.modal.open{display:flex}
+.modal-box{width:min(460px,100%);background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:19px;box-shadow:var(--shadow)}
+.modal-box h3{margin:0 0 8px;font-size:15px}
+.modal-box p{font-size:10px;color:var(--muted);line-height:1.5;margin:0}
+.modal-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:16px}
+.toast{
+  position:fixed;right:20px;bottom:20px;z-index:110;background:var(--text);color:var(--panel);
+  padding:10px 12px;border-radius:11px;font-size:9px;box-shadow:var(--shadow);opacity:0;transform:translateY(10px);pointer-events:none;transition:.18s ease
+}
+.toast.show{opacity:1;transform:translateY(0)}
+
+.mobile-nav{display:none}
+
+@media(max-width:1180px){
+  .grid.apps{grid-template-columns:repeat(2,1fr)}
+  .grid.two{grid-template-columns:1fr}
+  .health-strip{grid-template-columns:repeat(3,1fr)}
+}
+@media(max-width:800px){
+  :root{--sidebar:76px}
+  .sidebar{padding:14px 10px}
+  .brand{justify-content:center;padding:4px 0 18px}
+  .brand h1,.brand small,.nav-label,.nav button span,.side-card{display:none}
+  .nav button{justify-content:center;padding:11px}
+  .main{margin-left:76px}
+  .topbar{padding:0 16px}
+  .top-right .chip:nth-child(2){display:none}
+  .content{padding:18px 16px 92px}
+  .grid.apps,.grid.half,.grid.three{grid-template-columns:1fr}
+  .health-strip{grid-template-columns:1fr 1fr}
+  .hero{align-items:flex-start}
+}
+@media(max-width:560px){
+  :root{--sidebar:0px}
+  .sidebar{display:none}
+  .main{margin-left:0}
+  .topbar{height:64px}
+  .page-head h2{font-size:17px}
+  .top-right .chip{display:none}
+  .grid.apps{grid-template-columns:1fr}
+  .health-strip{grid-template-columns:1fr}
+  .hero{display:block}
+  .hero-status{text-align:left;margin-top:14px}
+  .path{grid-template-columns:1fr 1fr;gap:10px}
+  .path-node:not(:last-child)::after{display:none}
+  .toolbar{align-items:flex-start;flex-direction:column}
+  .search{min-width:0;width:100%}
+  .mobile-nav{
+    display:grid;grid-template-columns:repeat(5,1fr);position:fixed;left:10px;right:10px;bottom:10px;z-index:70;
+    background:color-mix(in srgb,var(--panel) 92%,transparent);backdrop-filter:blur(14px);
+    border:1px solid var(--line);border-radius:16px;padding:6px;box-shadow:var(--shadow)
+  }
+  .mobile-nav button{border:0;background:transparent;color:var(--muted);border-radius:10px;padding:8px 4px;font-size:8px;cursor:pointer}
+  .mobile-nav button.active{background:var(--green-soft);color:var(--green);font-weight:700}
+  .mobile-nav svg{width:17px;height:17px;margin:0 auto 3px}
+}
+
+/* ===== v4 POLISH: typography, rhythm, page finish ===== */
+html{
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  text-rendering:optimizeLegibility;
+}
+body{
+  font-size:14px;
+  line-height:1.45;
+  letter-spacing:-.003em;
+}
+button,input{letter-spacing:0}
+::selection{background:color-mix(in srgb,var(--green) 22%,transparent)}
+
+.sidebar{padding:20px 15px}
+.brand{gap:13px;padding:3px 9px 22px}
+.brandmark{width:46px;height:46px;border-radius:15px}
+.brand h1{font-size:17px;font-weight:760;letter-spacing:-.025em}
+.brand small{font-size:11px;line-height:1.3}
+.nav-label{font-size:10px;font-weight:700;letter-spacing:.105em;padding:12px 12px 8px}
+.nav{gap:5px}
+.nav button{
+  padding:11px 12px;
+  border-radius:12px;
+  font-size:13px;
+  font-weight:560;
+}
+.nav button.active{font-weight:720}
+.nav-icon{width:22px;height:22px;flex-basis:22px}
+.nav-icon svg{width:18.5px;height:18.5px}
+
+.side-card{padding:13px;border-radius:15px}
+.router-row strong{font-size:12px}
+.router-row span{font-size:10px}
+.side-health{font-size:10px}
+
+.topbar{height:76px;padding:0 30px}
+.page-head h2{
+  font-size:22px;
+  font-weight:770;
+  letter-spacing:-.035em;
+}
+.page-head p{font-size:11px;line-height:1.35;margin-top:5px}
+.top-right{gap:9px}
+.chip{padding:8px 11px;font-size:11px}
+.icon-btn{width:38px;height:38px;border-radius:11px}
+.btn{
+  padding:9px 12px;
+  border-radius:10px;
+  font-size:11px;
+  font-weight:650;
+}
+.btn.primary{font-weight:720}
+
+.content{
+  max-width:1560px;
+  padding:28px 30px 44px;
+}
+.section.active{
+  animation:sectionIn .18s ease-out;
+}
+@keyframes sectionIn{
+  from{opacity:.25;transform:translateY(3px)}
+  to{opacity:1;transform:none}
+}
+
+.hero{
+  padding:24px 25px;
+  border-radius:20px;
+  margin-bottom:20px;
+}
+.hero-left{gap:16px}
+.hero-icon{width:52px;height:52px;border-radius:16px}
+.hero h3{
+  font-size:22px;
+  font-weight:780;
+  letter-spacing:-.035em;
+  margin-bottom:6px;
+}
+.hero p{
+  font-size:11.5px;
+  line-height:1.5;
+  max-width:760px;
+}
+.hero-status strong{font-size:29px;font-weight:820}
+.hero-status span{font-size:10px}
+
+.grid{gap:18px}
+.grid.two,.grid.half{margin-top:18px}
+.card{
+  padding:19px;
+  border-radius:18px;
+}
+.card-head{margin-bottom:14px}
+.card h3{
+  font-size:13px;
+  font-weight:730;
+  letter-spacing:-.012em;
+}
+.card-title{gap:10px}
+.card-icon{
+  width:34px;height:34px;border-radius:11px;
+  font-size:10px;font-weight:760
+}
+.card-icon svg{width:18px;height:18px}
+.metric{
+  font-size:28px;
+  font-weight:810;
+  letter-spacing:-.035em;
+  line-height:1.12;
+  margin:6px 0 6px;
+}
+.sub{
+  font-size:10.5px;
+  line-height:1.4;
+}
+.status{
+  gap:6px;
+  padding:5px 9px;
+  font-size:10px;
+  font-weight:760;
+}
+.status::before{width:6.5px;height:6.5px}
+.kv{
+  gap:9px 14px;
+  margin-top:15px;
+  font-size:11px;
+  line-height:1.35;
+}
+.kv span:nth-child(even){font-weight:650}
+.sep{margin:16px 0}
+
+.health-strip{
+  margin-top:18px;
+  gap:11px;
+  padding:11px;
+  border-radius:17px;
+}
+.health-item{gap:10px;padding:10px 11px;border-radius:12px}
+.health-item b{font-size:11px;font-weight:720}
+.health-item span{font-size:9.5px;line-height:1.35;margin-top:3px}
+
+.toolbar{
+  gap:14px;
+  margin-bottom:16px;
+  min-height:36px;
+}
+.toolbar h3{
+  font-size:17px;
+  font-weight:780;
+  letter-spacing:-.025em;
+}
+.toolbar .meta{
+  font-size:10.5px;
+  line-height:1.35;
+  margin-top:4px;
+}
+.actions{gap:8px}
+
+.table{
+  font-size:11px;
+  line-height:1.4;
+}
+.table th{
+  padding:10px 11px;
+  font-size:10px;
+  letter-spacing:.01em;
+}
+.table td{padding:11px}
+.table tbody tr:hover td{background:color-mix(in srgb,var(--panel-2) 75%,transparent)}
+
+.path{margin-top:10px}
+.path-node{padding:16px 9px}
+.node-ico{width:40px;height:40px;border-radius:12px;margin-bottom:9px}
+.path-node b{font-size:11px;font-weight:730}
+.path-node span{font-size:9.5px;line-height:1.3}
+.path-node:not(:last-child)::after{height:1.5px}
+
+.recovery-steps{gap:11px}
+.step{
+  grid-template-columns:34px 1fr auto;
+  gap:11px;
+  padding:12px;
+  border-radius:13px;
+}
+.step-num{width:30px;height:30px;border-radius:10px;font-size:11px}
+.step b{font-size:11px;font-weight:740}
+.step span{font-size:9.5px;line-height:1.35;margin-top:3px}
+.step small{font-size:9px}
+
+.job{
+  grid-template-columns:minmax(0,1fr) 112px 92px;
+  gap:14px;
+  padding:12px 1px;
+}
+.job-name{gap:10px}
+.job strong{font-size:11px;font-weight:720}
+.job p{font-size:9.5px;line-height:1.4;margin-top:4px}
+.job time{font-size:10px}
+
+.notice{
+  padding:12px 13px;
+  border-radius:12px;
+  font-size:10px;
+  line-height:1.55;
+}
+.log-tabs{gap:7px;margin-bottom:12px}
+.log-tab{
+  padding:7px 10px;
+  border-radius:9px;
+  font-size:10px;
+  font-weight:650;
+}
+.search{
+  padding:8px 10px;
+  border-radius:10px;
+  font-size:10px;
+  min-width:240px;
+}
+.logbox{
+  height:390px;
+  padding:15px;
+  border-radius:14px;
+  font-size:10.8px;
+  line-height:1.7;
+}
+.modal-box{padding:21px;border-radius:19px}
+.modal-box h3{font-size:16px}
+.modal-box p{font-size:11px;line-height:1.55}
+.toast{font-size:10px;padding:11px 13px}
+
+/* Page-specific refinement */
+#wan .grid.three .card,
+#automation .grid.three .card,
+#system .grid.three .card{
+  min-height:150px;
+}
+#wireguard .grid.half .card{min-height:170px}
+#routing .card,
+#automation .card,
+#logs .card,
+#system .card{
+  box-shadow:var(--shadow-sm);
+}
+#logs .card{padding:17px}
+#system .notice{max-width:1000px}
+#overview .app-card{min-height:235px}
+#overview .app-card .kv{margin-top:16px}
+#overview .app-card .metric{margin-top:8px}
+
+/* More restrained depth and borders */
+html[data-theme="light"] .card,
+html[data-theme="light"] .hero,
+html[data-theme="light"] .health-strip{
+  box-shadow:0 8px 26px rgba(54,70,92,.055);
+}
+html[data-theme="light"] .app-card:hover{
+  box-shadow:0 14px 32px rgba(54,70,92,.09);
+}
+
+/* Mobile typography */
+@media(max-width:800px){
+  .topbar{height:70px;padding:0 18px}
+  .content{padding:20px 18px 96px}
+  .page-head h2{font-size:20px}
+  .page-head p{font-size:10.5px}
+  .hero h3{font-size:20px}
+  .hero p{font-size:11px}
+  .toolbar h3{font-size:16px}
+  .card{padding:17px}
+  .metric{font-size:26px}
+}
+@media(max-width:560px){
+  body{font-size:13px}
+  .topbar{height:66px;padding:0 14px}
+  .content{padding:16px 13px 92px}
+  .page-head h2{font-size:18px}
+  .page-head p{font-size:10px}
+  .hero{padding:18px}
+  .hero-left{align-items:flex-start}
+  .hero-icon{width:46px;height:46px}
+  .hero h3{font-size:18px}
+  .hero-status strong{font-size:25px}
+  .card{padding:16px;border-radius:16px}
+  .grid{gap:13px}
+  .metric{font-size:25px}
+  .kv{font-size:10.5px}
+  .toolbar{margin-bottom:13px}
+  .toolbar h3{font-size:15px}
+  .job{grid-template-columns:1fr auto;gap:10px}
+  .job .status{grid-column:2}
+  .job time{grid-column:2}
+  .search{width:100%;min-width:0}
+  .logbox{height:330px;font-size:10.3px}
+}
+
+
+/* ===== v5 MOBILE-FIRST POLISH ===== */
+
+/* General density */
+.card{overflow:hidden}
+.toolbar h3,.page-head h2,.hero h3,.brand h1{font-feature-settings:"kern" 1}
+.metric{font-variant-numeric:tabular-nums}
+.kv span:nth-child(even),.table td,.job time{font-variant-numeric:tabular-nums}
+.status{white-space:nowrap}
+
+/* Keep long technical values from breaking layouts */
+.mono,.job strong,.kv span,.notice,.sub,.table td{
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+
+/* Better page rhythm on desktop too */
+.section > .toolbar:first-child{margin-bottom:18px}
+#overview .grid.two{align-items:start}
+#wireguard .grid.half{align-items:start}
+#wan .grid.half{align-items:start}
+
+/* WAN table should never force the whole page wider */
+#wan .table{min-width:0}
+#wan .table th:nth-child(1){width:34%}
+#wan .table th:nth-child(2){width:24%}
+#wan .table th:nth-child(3){width:42%}
+
+/* Routing row alignment */
+#routing .job{
+  grid-template-columns:minmax(0,1fr) 86px 92px;
+}
+#routing .job time{text-align:right}
+#routing .job .status{justify-self:end}
+
+/* Logs */
+#logs .log-tools{min-width:min(420px,100%)}
+#logs .search{flex:1}
+#logs .logbox{scrollbar-gutter:stable}
+
+/* Mobile navigation */
+.mobile-nav{
+  padding-bottom:max(6px,env(safe-area-inset-bottom));
+}
+@media(max-width:800px){
+  /* Important: tables must not create horizontal overflow */
+  .table{
+    min-width:0 !important;
+    width:100%;
+    table-layout:fixed;
+  }
+  .table th,.table td{
+    white-space:normal;
+  }
+
+  /* Remove redundant in-page title blocks; sticky header already shows them */
+  #wan > .toolbar:first-child > div:first-child,
+  #wireguard > .toolbar:first-child > div:first-child,
+  #routing > .toolbar:first-child > div:first-child,
+  #automation > .toolbar:first-child > div:first-child,
+  #logs > .toolbar:first-child > div:first-child,
+  #system > .toolbar:first-child > div:first-child{
+    display:none;
+  }
+  #wan > .toolbar:first-child,
+  #wireguard > .toolbar:first-child,
+  #routing > .toolbar:first-child,
+  #automation > .toolbar:first-child,
+  #logs > .toolbar:first-child,
+  #system > .toolbar:first-child{
+    min-height:0;
+    margin:0 0 14px;
+  }
+
+  /* Cards become denser on handheld */
+  #overview .app-card,
+  #wan .grid.three .card,
+  #automation .grid.three .card,
+  #system .grid.three .card,
+  #wireguard .grid.half .card{
+    min-height:0 !important;
+  }
+
+  #wireguard .grid.half .card{
+    padding:16px;
+  }
+  #wireguard .kv{
+    margin-top:12px;
+    gap:8px 12px;
+  }
+
+  /* WAN: hide technical source column on small screens */
+  #wan .table th:nth-child(3),
+  #wan .table td:nth-child(3){
+    display:none;
+  }
+  #wan .table th:nth-child(1){width:58%}
+  #wan .table th:nth-child(2){width:42%}
+
+  /* Safety note may wrap freely */
+  #wan .notice{
+    white-space:normal;
+    overflow:visible;
+  }
+
+  /* Routing: compact rows, status stays aligned */
+  #routing .job{
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:8px 12px;
+    padding:12px 0;
+    align-items:start;
+  }
+  #routing .job-name{
+    grid-row:1 / span 2;
+    align-items:flex-start;
+  }
+  #routing .job time{
+    grid-column:2;
+    grid-row:1;
+    padding-top:1px;
+  }
+  #routing .job .status{
+    grid-column:2;
+    grid-row:2;
+    justify-self:end;
+  }
+
+  /* Logs: filter bar behaves like a phone toolbar */
+  #logs .log-tools{
+    width:100%;
+    min-width:0;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:8px;
+  }
+  #logs .search{
+    width:100%;
+    min-width:0;
+  }
+  #logs .logbox{
+    height:46vh;
+    min-height:280px;
+    max-height:480px;
+  }
+
+  /* more room above the fixed bottom nav */
+  .content{padding-bottom:118px}
+}
+
+@media(max-width:560px){
+  :root{
+    --r:16px;
+    --rs:11px;
+  }
+  body{
+    font-size:13px;
+    line-height:1.42;
+  }
+
+  .topbar{
+    height:64px;
+    padding:0 14px;
+  }
+  .page-head h2{
+    font-size:18px;
+    line-height:1.15;
+    letter-spacing:-.028em;
+  }
+  .page-head p{
+    margin-top:5px;
+    font-size:10px;
+    line-height:1.25;
+    max-width:320px;
+  }
+  .top-right{gap:7px}
+  .icon-btn{
+    width:38px;
+    height:38px;
+    border-radius:12px;
+  }
+
+  .content{
+    padding:16px 12px 112px;
+  }
+
+  /* Overview */
+  .hero{
+    padding:17px;
+    margin-bottom:14px;
+    border-radius:17px;
+  }
+  .hero-left{
+    gap:12px;
+  }
+  .hero-icon{
+    width:44px;
+    height:44px;
+    border-radius:14px;
+    flex:0 0 44px;
+  }
+  .hero h3{
+    font-size:18px;
+    line-height:1.15;
+    margin-bottom:5px;
+  }
+  .hero p{
+    font-size:10.5px;
+    line-height:1.45;
+  }
+  .hero-status{
+    margin-top:14px;
+    padding-top:13px;
+    border-top:1px solid color-mix(in srgb,var(--green) 20%,var(--line));
+  }
+  .hero-status strong{
+    font-size:25px;
+    line-height:1;
+  }
+  .hero-status span{
+    display:block;
+    margin-top:6px;
+    font-size:9.5px;
+  }
+
+  .grid{gap:12px}
+  .grid.two,.grid.half{margin-top:12px}
+  .card{
+    padding:15px;
+    border-radius:16px;
+  }
+  .card-head{
+    margin-bottom:12px;
+    align-items:center;
+  }
+  .card h3{
+    font-size:12.5px;
+  }
+  .card-icon{
+    width:32px;
+    height:32px;
+    border-radius:10px;
+  }
+  .metric{
+    font-size:25px;
+    margin:5px 0;
+  }
+  .sub{font-size:10px}
+  .kv{
+    margin-top:13px;
+    gap:8px 10px;
+    font-size:10.5px;
+  }
+  .status{
+    font-size:9.5px;
+    padding:5px 8px;
+  }
+
+  #overview .app-card{
+    min-height:0;
+  }
+  #overview .app-card .metric{
+    margin-top:4px;
+  }
+  #overview .app-card .kv{
+    margin-top:13px;
+  }
+
+  .health-strip{
+    margin-top:12px;
+    padding:8px;
+    gap:7px;
+  }
+  .health-item{
+    padding:9px 10px;
+  }
+  .health-item b{font-size:10.5px}
+  .health-item span{font-size:9px}
+
+  /* Primary action toolbars: one clean row */
+  #wan > .toolbar:first-child .actions,
+  #routing > .toolbar:first-child .actions{
+    width:100%;
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  #wan > .toolbar:first-child .actions{
+    grid-template-columns:1fr 1fr;
+  }
+  #wan > .toolbar:first-child .actions .btn:first-child{
+    grid-column:1 / -1;
+  }
+  #wireguard > .toolbar:first-child .btn,
+  #automation > .toolbar:first-child .btn,
+  #system > .toolbar:first-child .btn{
+    width:auto;
+  }
+
+  .btn{
+    min-height:40px;
+    padding:9px 11px;
+    justify-content:center;
+  }
+
+  /* WAN */
+  #wan .grid.three{
+    gap:10px;
+  }
+  #wan .grid.three .card{
+    padding:14px 15px;
+  }
+  #wan .grid.three .metric{
+    font-size:23px;
+  }
+  #wan .path{
+    grid-template-columns:repeat(4,1fr);
+    gap:4px;
+  }
+  #wan .path-node{
+    padding:10px 2px;
+  }
+  #wan .node-ico{
+    width:34px;
+    height:34px;
+    margin-bottom:7px;
+  }
+  #wan .path-node b{
+    font-size:9.5px;
+  }
+  #wan .path-node span{
+    font-size:8px;
+  }
+  #wan .table{
+    font-size:10px;
+  }
+  #wan .table th,
+  #wan .table td{
+    padding:10px 8px;
+  }
+  #wan .recovery-steps{
+    gap:8px;
+  }
+  #wan .step{
+    grid-template-columns:32px minmax(0,1fr);
+    padding:11px;
+    gap:10px;
+  }
+  #wan .step small{
+    display:none;
+  }
+  #wan .step-num{
+    width:30px;
+    height:30px;
+  }
+  #wan .notice{
+    margin-top:10px !important;
+    font-size:9.5px;
+    line-height:1.45;
+  }
+
+  /* WireGuard */
+  #wireguard .grid.half{
+    gap:12px;
+  }
+  #wireguard .card{
+    padding:15px;
+  }
+  #wireguard .card-head{
+    margin-bottom:14px;
+  }
+
+  /* Routing */
+  #routing > .toolbar:first-child .actions{
+    gap:8px;
+  }
+  #routing .card{
+    padding:14px 15px;
+  }
+  #routing .job{
+    padding:11px 0;
+  }
+  #routing .job strong{
+    font-size:10.5px;
+    line-height:1.25;
+  }
+  #routing .job p{
+    font-size:9px;
+    margin-top:3px;
+  }
+  #routing .job time{
+    font-size:9.5px;
+    white-space:nowrap;
+  }
+
+  /* Logs */
+  #logs .toolbar{
+    margin-bottom:12px;
+  }
+  #logs .log-tools{
+    grid-template-columns:minmax(0,1fr) 105px;
+  }
+  #logs .log-tabs{
+    gap:6px;
+    overflow-x:auto;
+    flex-wrap:nowrap;
+    padding-bottom:2px;
+    scrollbar-width:none;
+  }
+  #logs .log-tabs::-webkit-scrollbar{display:none}
+  #logs .log-tab{
+    flex:0 0 auto;
+    padding:7px 10px;
+    font-size:9.5px;
+  }
+  #logs .logbox{
+    height:43vh;
+    min-height:260px;
+    max-height:400px;
+    padding:13px;
+    font-size:10px;
+    line-height:1.62;
+  }
+
+  /* Compact fixed nav */
+  .mobile-nav{
+    left:12px;
+    right:12px;
+    bottom:max(10px,env(safe-area-inset-bottom));
+    border-radius:17px;
+    padding:5px;
+    grid-template-columns:repeat(5,1fr);
+  }
+  .mobile-nav button{
+    min-width:0;
+    padding:7px 2px 6px;
+    font-size:8px;
+    line-height:1.15;
+  }
+  .mobile-nav svg{
+    width:17px;
+    height:17px;
+    margin-bottom:3px;
+  }
+}
+
+
+/* ===== v6: icon consistency + single refresh control ===== */
+svg{
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.btn svg{
+  width:15px;
+  height:15px;
+  flex:0 0 15px;
+}
+.icon-btn svg{
+  width:18px;
+  height:18px;
+}
+.card-icon svg{
+  width:18px;
+  height:18px;
+}
+.mobile-nav svg{
+  stroke-width:1.9;
+}
+.page-refresh-note{
+  display:none;
+}
+
+
+/* ===== v7 FINAL UI PASS ===== */
+
+/* Overview: less dashboard-noise, stronger hierarchy */
+#overview .app-card{
+  min-height:215px;
+}
+#overview .app-card .metric{
+  font-size:26px;
+}
+#overview .app-card .sub{
+  min-height:14px;
+}
+#overview .grid.two .card{
+  min-height:100%;
+}
+
+/* Make technical states visually calmer */
+.kv span:nth-child(even){
+  color:var(--text);
+}
+.status.info{
+  font-weight:700;
+}
+
+/* Topbar feels more like one shell for all pages */
+.topbar{
+  box-shadow:0 1px 0 color-mix(in srgb,var(--line) 85%,transparent);
+}
+.page-head p{
+  max-width:560px;
+}
+
+/* More sheet for mobile */
+.more-sheet{display:none}
+@media(max-width:560px){
+  .more-sheet{
+    position:fixed;
+    inset:0;
+    z-index:95;
+    pointer-events:none;
+  }
+  .more-sheet.open{
+    display:block;
+    pointer-events:auto;
+  }
+  .more-backdrop{
+    position:absolute;
+    inset:0;
+    background:rgba(5,10,18,.48);
+    backdrop-filter:blur(2px);
+  }
+  .more-panel{
+    position:absolute;
+    left:10px;
+    right:10px;
+    bottom:max(10px,env(safe-area-inset-bottom));
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:20px;
+    box-shadow:0 24px 65px rgba(0,0,0,.28);
+    padding:8px 10px 10px;
+    animation:moreUp .16s ease-out;
+  }
+  @keyframes moreUp{
+    from{transform:translateY(18px);opacity:.4}
+    to{transform:none;opacity:1}
+  }
+  .more-handle{
+    width:34px;
+    height:4px;
+    border-radius:999px;
+    background:var(--line-2);
+    margin:2px auto 8px;
+  }
+  .more-title{
+    font-size:15px;
+    font-weight:780;
+    padding:5px 7px 8px;
+  }
+  .more-item{
+    width:100%;
+    border:0;
+    background:transparent;
+    display:grid;
+    grid-template-columns:40px minmax(0,1fr) 18px;
+    gap:10px;
+    align-items:center;
+    padding:10px 7px;
+    border-radius:13px;
+    text-align:left;
+    cursor:pointer;
+  }
+  .more-item:active{
+    background:var(--panel-2);
+  }
+  .more-ico{
+    width:38px;
+    height:38px;
+    border-radius:11px;
+    background:var(--green-soft);
+    color:var(--green);
+    display:grid;
+    place-items:center;
+  }
+  .more-ico svg{
+    width:18px;
+    height:18px;
+  }
+  .more-item b{
+    display:block;
+    font-size:11.5px;
+  }
+  .more-item small{
+    display:block;
+    margin-top:2px;
+    color:var(--muted);
+    font-size:9px;
+    line-height:1.3;
+  }
+  .more-arrow{
+    color:var(--muted);
+    font-size:22px;
+    line-height:1;
+  }
+
+  /* Current "More" state */
+  .mobile-nav #moreBtn.active{
+    background:var(--green-soft);
+    color:var(--green);
+    font-weight:700;
+  }
+
+  /* Cleaner compact overview */
+  #overview .app-card{
+    min-height:0;
+  }
+  #overview .app-card .kv{
+    margin-top:11px;
+  }
+  #overview .health-strip{
+    margin-top:11px;
+  }
+
+  /* Logs available via More, so page can use full screen comfortably */
+  #logs .logbox{
+    height:48vh;
+    max-height:460px;
+  }
+}
+
+/* Desktop cards: avoid excessive empty space */
+@media(min-width:1181px){
+  #wireguard .grid.half .card{min-height:160px}
+  #wan .grid.three .card{min-height:142px}
+  #system .grid.three .card{min-height:140px}
+}
+
+
+/* ===== v8: mobile finishing pass from real phone screenshots ===== */
+
+@media(max-width:560px){
+  /* Header slightly calmer and less tall */
+  .topbar{
+    height:62px;
+    padding:0 13px;
+  }
+  .page-head h2{
+    font-size:17.5px;
+  }
+  .page-head p{
+    font-size:9.7px;
+    max-width:285px;
+  }
+  .icon-btn{
+    width:36px;
+    height:36px;
+    border-radius:11px;
+  }
+
+  /* Content gets a little more breathing room horizontally, but less vertically */
+  .content{
+    padding:14px 12px 102px;
+  }
+
+  /* Overview hero: shorter, cleaner */
+  .hero{
+    padding:15px 16px;
+    margin-bottom:12px;
+  }
+  .hero-icon{
+    width:42px;
+    height:42px;
+    flex-basis:42px;
+  }
+  .hero h3{
+    font-size:17px;
+  }
+  .hero p{
+    font-size:10.2px;
+  }
+  .hero-status{
+    margin-top:12px;
+    padding-top:11px;
+  }
+  .hero-status strong{
+    font-size:24px;
+  }
+
+  /* Cards: reduce "air" seen in screenshots */
+  .card{
+    padding:14px 15px;
+  }
+  .metric{
+    font-size:24px;
+  }
+  .kv{
+    margin-top:11px;
+    gap:7px 10px;
+  }
+  #overview .app-card .kv{
+    margin-top:10px;
+  }
+  #overview .app-card{
+    border-radius:15px;
+  }
+
+  /* Bottom navigation: lower and substantially smaller */
+  .mobile-nav{
+    left:10px;
+    right:10px;
+    bottom:max(7px,env(safe-area-inset-bottom));
+    border-radius:15px;
+    padding:4px;
+    min-height:64px;
+  }
+  .mobile-nav button{
+    padding:5px 2px 4px;
+    min-height:54px;
+    border-radius:11px;
+    font-size:7.6px;
+  }
+  .mobile-nav svg,
+  .mobile-nav #moreIcon svg{
+    width:16px;
+    height:16px;
+    margin:0 auto 3px;
+  }
+  .mobile-nav #moreIcon{
+    display:block;
+    line-height:0;
+  }
+
+  /* Logs: use screen efficiently, no giant empty terminal */
+  #logs .log-tools{
+    display:block;
+    width:100%;
+  }
+  #logs .search{
+    width:100%;
+    min-height:39px;
+  }
+  #logs .card{
+    padding:13px;
+  }
+  #logs .log-tabs{
+    margin-bottom:10px;
+  }
+  #logs .log-tab{
+    padding:7px 9px;
+  }
+  #logs .logbox{
+    height:300px;
+    min-height:220px;
+    max-height:42vh;
+    padding:12px;
+    font-size:9.8px;
+    line-height:1.55;
+  }
+
+  /* WireGuard cards: less unused vertical space */
+  #wireguard .grid.half .card{
+    padding:14px 15px;
+  }
+  #wireguard .kv{
+    margin-top:10px;
+  }
+
+  /* Routing rows from screenshots: compact but readable */
+  #routing .job{
+    padding:10px 0;
+  }
+  #routing .job strong{
+    font-size:10.2px;
+  }
+  #routing .job p{
+    font-size:8.8px;
+  }
+
+  /* WAN page: keep action row compact */
+  #wan > .toolbar:first-child .actions{
+    gap:7px;
+  }
+  #wan > .toolbar:first-child .actions .btn{
+    min-height:38px;
+  }
+
+  /* Sheet aligns visually with the smaller nav */
+  .more-panel{
+    left:10px;
+    right:10px;
+    bottom:max(7px,env(safe-area-inset-bottom));
+    border-radius:18px;
+  }
+}
+
+/* Prevent fixed navigation from visually touching last content block */
+@media(max-width:560px){
+  .section::after{
+    content:"";
+    display:block;
+    height:18px;
+  }
+}
+
+
+/* ===== v9 external interfaces ===== */
+.ext-mark{
+  margin-left:auto;
+  font-size:13px;
+  color:var(--muted);
+  opacity:.75;
+}
+.external-nav button:hover .ext-mark{
+  color:var(--green);
+}
+.quick-links{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+  margin:0 0 18px;
+}
+.quick-link{
+  border:1px solid var(--line);
+  background:var(--panel);
+  color:var(--text);
+  border-radius:14px;
+  padding:11px 13px;
+  display:grid;
+  grid-template-columns:36px minmax(0,1fr) 18px;
+  gap:10px;
+  align-items:center;
+  text-align:left;
+  cursor:pointer;
+  box-shadow:var(--shadow-sm);
+  transition:.15s ease;
+}
+.quick-link:hover{
+  border-color:var(--line-2);
+  transform:translateY(-1px);
+}
+.quick-ico{
+  width:36px;height:36px;border-radius:11px;display:grid;place-items:center;
+}
+.quick-ico svg{width:19px;height:19px}
+.router-link-ico{background:var(--blue-soft);color:var(--blue)}
+.agh-link-ico{background:var(--green-soft);color:var(--green)}
+.quick-link b{display:block;font-size:11px}
+.quick-link small{display:block;font-size:9px;color:var(--muted);margin-top:2px}
+.quick-arrow{font-size:17px;color:var(--muted)}
+.more-sep{height:1px;background:var(--line);margin:6px 4px}
+.ext-router{background:var(--blue-soft)!important;color:var(--blue)!important}
+.ext-agh{background:var(--green-soft)!important;color:var(--green)!important}
+
+.external-form{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+}
+.external-form label span{
+  display:block;
+  font-size:10px;
+  color:var(--muted);
+  margin:0 0 6px 2px;
+}
+.url-input{
+  width:100%;
+  border:1px solid var(--line);
+  background:var(--panel-2);
+  color:var(--text);
+  border-radius:10px;
+  padding:9px 10px;
+  outline:none;
+  font-size:10px;
+}
+.url-input:focus{
+  border-color:color-mix(in srgb,var(--green) 55%,var(--line));
+  box-shadow:0 0 0 3px var(--green-soft);
+}
+.external-actions{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:12px;
+}
+
+@media(max-width:800px){
+  .quick-links{grid-template-columns:1fr 1fr}
+  .external-form{grid-template-columns:1fr}
+}
+@media(max-width:560px){
+  .quick-links{
+    gap:8px;
+    margin-bottom:12px;
+  }
+  .quick-link{
+    grid-template-columns:32px minmax(0,1fr) 14px;
+    padding:9px 10px;
+    gap:8px;
+    border-radius:12px;
+  }
+  .quick-ico{width:32px;height:32px;border-radius:10px}
+  .quick-ico svg{width:17px;height:17px}
+  .quick-link b{font-size:10px}
+  .quick-link small{font-size:8.4px}
+  .quick-arrow{font-size:15px}
+  .external-actions{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+  }
+  .external-actions .btn:first-child{
+    grid-column:1 / -1;
+  }
+}
+
+
+/* ===== v10 UNIFIED SCALE SYSTEM =====
+   One mobile type scale, one spacing scale, one card scale.
+   This intentionally normalizes previous per-page overrides.
+*/
+
+:root{
+  --ui-page-title: 22px;
+  --ui-page-sub: 11px;
+  --ui-section-title: 17px;
+  --ui-card-title: 13px;
+  --ui-body: 11px;
+  --ui-meta: 10px;
+  --ui-micro: 9px;
+  --ui-metric: 28px;
+  --ui-pill: 10px;
+
+  --ui-card-pad: 18px;
+  --ui-card-gap: 16px;
+  --ui-page-gap: 18px;
+  --ui-radius: 18px;
+  --ui-control-h: 40px;
+}
+
+/* Reset inconsistent inherited sizing */
+.page-head h2,
+.toolbar h3,
+.card h3,
+.hero h3,
+.quick-link b,
+.more-item b,
+.job strong,
+.path-node b,
+.step b{
+  line-height:1.25;
+}
+.page-head p,
+.toolbar .meta,
+.sub,
+.kv,
+.quick-link small,
+.more-item small,
+.job p,
+.path-node span,
+.step span,
+.notice{
+  line-height:1.45;
+}
+
+/* Unified desktop/tablet scale */
+.page-head h2{font-size:var(--ui-page-title);font-weight:780}
+.page-head p{font-size:var(--ui-page-sub)}
+.toolbar h3{font-size:var(--ui-section-title);font-weight:760}
+.toolbar .meta{font-size:var(--ui-meta)}
+.card{padding:var(--ui-card-pad);border-radius:var(--ui-radius)}
+.card h3{font-size:var(--ui-card-title);font-weight:730}
+.metric{font-size:var(--ui-metric);line-height:1.08}
+.sub{font-size:var(--ui-meta)}
+.kv{font-size:var(--ui-body)}
+.status{font-size:var(--ui-pill);min-height:28px;padding:5px 9px}
+.btn{font-size:var(--ui-body);min-height:var(--ui-control-h);padding:9px 12px}
+.quick-link b{font-size:var(--ui-body)}
+.quick-link small{font-size:var(--ui-micro)}
+.notice{font-size:var(--ui-meta)}
+.table{font-size:var(--ui-body)}
+.table th{font-size:var(--ui-meta)}
+.job strong{font-size:var(--ui-body)}
+.job p{font-size:var(--ui-meta)}
+.job time{font-size:var(--ui-meta)}
+.path-node b{font-size:var(--ui-body)}
+.path-node span{font-size:var(--ui-micro)}
+.step b{font-size:var(--ui-body)}
+.step span{font-size:var(--ui-meta)}
+.step small{font-size:var(--ui-micro)}
+
+/* Normalize spacing between all major page blocks */
+.section > * + *{margin-top:var(--ui-page-gap)}
+.section > .toolbar + *{margin-top:0}
+.grid{gap:var(--ui-card-gap)}
+.grid.two,.grid.half{margin-top:var(--ui-card-gap)}
+.quick-links{margin-bottom:var(--ui-card-gap)}
+.health-strip{margin-top:var(--ui-card-gap)}
+
+/* Normalize card internals */
+.card-head{margin-bottom:14px}
+.kv{margin-top:14px;gap:9px 12px}
+.sep{margin:15px 0}
+.recovery-steps{gap:10px}
+.job{padding:11px 0}
+
+/* Keep action buttons visually identical everywhere */
+.actions .btn,
+#wan > .toolbar:first-child .btn,
+#routing > .toolbar:first-child .btn{
+  min-height:var(--ui-control-h);
+  font-size:var(--ui-body);
+}
+
+/* Avoid oversized or undersized special cards */
+#overview .app-card,
+#wireguard .grid.half .card,
+#wan .grid.three .card,
+#automation .grid.three .card,
+#system .grid.three .card{
+  min-height:0 !important;
+}
+
+/* HERO follows the same type system */
+.hero{padding:21px 22px}
+.hero h3{font-size:21px;font-weight:780}
+.hero p{font-size:var(--ui-body)}
+.hero-status strong{font-size:30px}
+.hero-status span{font-size:var(--ui-meta)}
+
+/* External quick links */
+.quick-link{
+  min-height:64px;
+  padding:11px 12px;
+}
+.quick-ico{width:36px;height:36px}
+.quick-arrow{font-size:16px}
+
+/* Routing rows: fixed visual rhythm */
+#routing .job{
+  grid-template-columns:minmax(0,1fr) 84px 102px;
+  align-items:center;
+}
+#routing .job time{text-align:right}
+#routing .job .status{justify-self:end}
+
+/* Logs */
+#logs .search{
+  min-height:var(--ui-control-h);
+  font-size:var(--ui-body);
+}
+#logs .log-tab{
+  min-height:34px;
+  font-size:var(--ui-meta);
+}
+#logs .logbox{
+  font-size:10.5px;
+  line-height:1.6;
+}
+
+/* ===== MOBILE: one exact scale everywhere ===== */
+@media(max-width:560px){
+  :root{
+    --ui-page-title: 18px;
+    --ui-page-sub: 10.5px;
+    --ui-section-title: 15px;
+    --ui-card-title: 13px;
+    --ui-body: 11px;
+    --ui-meta: 10px;
+    --ui-micro: 9px;
+    --ui-metric: 26px;
+    --ui-pill: 10px;
+
+    --ui-card-pad: 16px;
+    --ui-card-gap: 12px;
+    --ui-page-gap: 12px;
+    --ui-radius: 16px;
+    --ui-control-h: 42px;
+  }
+
+  body{
+    font-size:var(--ui-body);
+    line-height:1.45;
+  }
+
+  .topbar{
+    height:64px;
+    padding:0 14px;
+  }
+  .page-head h2{
+    font-size:var(--ui-page-title) !important;
+    line-height:1.15;
+  }
+  .page-head p{
+    font-size:var(--ui-page-sub) !important;
+    line-height:1.3;
+    margin-top:4px;
+  }
+  .icon-btn{
+    width:38px;
+    height:38px;
+    border-radius:11px;
+  }
+
+  .content{
+    padding:14px 12px 104px;
+  }
+
+  /* All cards use the exact same mobile padding/radius */
+  .card,
+  #wireguard .grid.half .card,
+  #wan .grid.three .card,
+  #routing .card,
+  #automation .card,
+  #logs .card,
+  #system .card{
+    padding:var(--ui-card-pad) !important;
+    border-radius:var(--ui-radius) !important;
+  }
+
+  .grid,
+  .grid.apps,
+  .grid.two,
+  .grid.half,
+  .grid.three{
+    gap:var(--ui-card-gap) !important;
+  }
+  .grid.two,.grid.half{
+    margin-top:var(--ui-card-gap) !important;
+  }
+
+  /* Hero is no longer a different scale */
+  .hero{
+    padding:var(--ui-card-pad);
+    border-radius:var(--ui-radius);
+    margin-bottom:var(--ui-card-gap);
+  }
+  .hero-left{gap:12px}
+  .hero-icon{
+    width:42px;
+    height:42px;
+    flex:0 0 42px;
+    border-radius:13px;
+  }
+  .hero h3{
+    font-size:17px !important;
+    line-height:1.18;
+  }
+  .hero p{
+    font-size:var(--ui-body) !important;
+    line-height:1.45;
+  }
+  .hero-status{
+    margin-top:12px;
+    padding-top:12px;
+  }
+  .hero-status strong{
+    font-size:var(--ui-metric) !important;
+  }
+  .hero-status span{
+    font-size:var(--ui-meta) !important;
+  }
+
+  /* All card titles / metrics / metadata now use one scale */
+  .card h3{
+    font-size:var(--ui-card-title) !important;
+    line-height:1.2;
+  }
+  .metric{
+    font-size:var(--ui-metric) !important;
+    line-height:1.08;
+    margin:5px 0;
+  }
+  .sub{
+    font-size:var(--ui-meta) !important;
+  }
+  .kv{
+    font-size:var(--ui-body) !important;
+    margin-top:12px !important;
+    gap:8px 10px !important;
+  }
+  .status{
+    font-size:var(--ui-pill) !important;
+    min-height:28px;
+    padding:5px 8px;
+  }
+
+  /* Quick links match cards, not a separate visual language */
+  .quick-links{
+    gap:8px;
+    margin-bottom:var(--ui-card-gap);
+  }
+  .quick-link{
+    min-height:66px;
+    padding:10px 11px;
+    border-radius:13px;
+  }
+  .quick-link b{
+    font-size:var(--ui-body) !important;
+  }
+  .quick-link small{
+    font-size:var(--ui-micro) !important;
+  }
+
+  /* WAN buttons: one format */
+  #wan > .toolbar:first-child .actions{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+    width:100%;
+  }
+  #wan > .toolbar:first-child .actions .btn{
+    min-height:var(--ui-control-h) !important;
+    font-size:var(--ui-body) !important;
+  }
+  #wan > .toolbar:first-child .actions .btn:first-child{
+    grid-column:1/-1;
+  }
+
+  /* WAN summary cards: same size family */
+  #wan .grid.three .card{
+    min-height:136px !important;
+  }
+  #wan .grid.three .metric{
+    font-size:24px !important;
+  }
+
+  /* Path to internet: compact but same typography */
+  #wan .path{
+    grid-template-columns:repeat(4,1fr);
+    gap:4px;
+  }
+  #wan .path-node{
+    padding:10px 2px;
+  }
+  #wan .node-ico{
+    width:34px;
+    height:34px;
+  }
+  #wan .path-node b{
+    font-size:var(--ui-meta) !important;
+  }
+  #wan .path-node span{
+    font-size:8.5px !important;
+  }
+
+  /* Восстановление steps */
+  #wan .step{
+    grid-template-columns:32px minmax(0,1fr);
+    gap:10px;
+    padding:11px;
+  }
+  #wan .step b{
+    font-size:var(--ui-body) !important;
+  }
+  #wan .step span{
+    font-size:var(--ui-meta) !important;
+  }
+  #wan .step small{display:none}
+
+  /* WireGuard: same visual size as WAN cards */
+  #wireguard .grid.half .card{
+    min-height:168px !important;
+  }
+  #wireguard .card-head{
+    margin-bottom:13px !important;
+  }
+  #wireguard .kv{
+    margin-top:12px !important;
+  }
+
+  /* Routing list: normalize title, secondary text, schedule and status */
+  #routing > .toolbar:first-child .actions{
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+    width:100%;
+  }
+  #routing .job{
+    grid-template-columns:minmax(0,1fr) 78px;
+    gap:8px 10px;
+    padding:11px 0;
+  }
+  #routing .job-name{
+    grid-row:1 / span 2;
+    align-items:flex-start;
+  }
+  #routing .job strong{
+    font-size:var(--ui-body) !important;
+  }
+  #routing .job p{
+    font-size:var(--ui-meta) !important;
+  }
+  #routing .job time{
+    font-size:var(--ui-meta) !important;
+  }
+  #routing .job .status{
+    font-size:var(--ui-pill) !important;
+  }
+
+  /* Logs: same control sizes, smaller but consistent monospace */
+  #logs .search{
+    min-height:var(--ui-control-h);
+    font-size:var(--ui-body) !important;
+  }
+  #logs .log-tab{
+    min-height:34px;
+    font-size:var(--ui-meta) !important;
+  }
+  #logs .logbox{
+    height:300px;
+    min-height:230px;
+    max-height:42vh;
+    font-size:10.2px !important;
+    line-height:1.58;
+  }
+
+  /* More sheet follows same typography */
+  .more-title{
+    font-size:var(--ui-section-title) !important;
+  }
+  .more-item b{
+    font-size:var(--ui-body) !important;
+  }
+  .more-item small{
+    font-size:var(--ui-meta) !important;
+  }
+
+  /* Bottom nav: same every page, no page-dependent scale */
+  .mobile-nav{
+    min-height:66px;
+    left:10px;
+    right:10px;
+    padding:4px;
+    border-radius:15px;
+  }
+  .mobile-nav button{
+    min-height:54px;
+    font-size:8px !important;
+    border-radius:11px;
+  }
+  .mobile-nav svg,
+  .mobile-nav #moreIcon svg{
+    width:16px;
+    height:16px;
+  }
+}
+
+
+/* ===== v12 AUDIT FIXES ===== */
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+.metric,.kv span,.job strong,.notice,.mono{overflow-wrap:anywhere}
+
+@media(min-width:561px) and (max-width:900px){
+  #overview .grid.apps{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+  #wan .grid.three,#automation .grid.three,#system .grid.three{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+  #wan .grid.three .card:last-child,#automation .grid.three .card:last-child,#system .grid.three .card:last-child{grid-column:1/-1}
+}
+
+@media(max-width:560px){
+  html,body{height:100%;overflow:hidden}
+  .app{
+    height:100vh;
+    height:100dvh;
+    min-height:0;
+    display:grid;
+    grid-template-rows:minmax(0,1fr) auto;
+    overflow:hidden;
+  }
+  .main{
+    min-height:0;
+    height:auto;
+    overflow-y:auto;
+    overflow-x:hidden;
+    overscroll-behavior-y:contain;
+    -webkit-overflow-scrolling:touch;
+  }
+  .content{padding-bottom:18px !important}
+  .section::after{display:none !important}
+  .mobile-nav{
+    position:relative !important;
+    left:auto !important;
+    right:auto !important;
+    bottom:auto !important;
+    width:auto;
+    margin:0 10px max(7px,env(safe-area-inset-bottom));
+    z-index:70;
+  }
+  .more-panel{bottom:84px !important}
+
+  #wan .grid.three .metric,
+  #system .metric,
+  #overview .metric,
+  #automation .metric{font-size:var(--ui-metric) !important}
+
+  #wan .grid.three .card{min-height:128px !important}
+  #wireguard .grid.half .card{min-height:156px !important}
+
+  .quick-link{grid-template-columns:32px minmax(0,1fr) 14px}
+  .quick-link b,.quick-link small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  #logs .logbox{
+    height:min(34dvh,280px) !important;
+    min-height:220px !important;
+    max-height:280px !important;
+  }
+
+  .btn,.search,.url-input{min-height:var(--ui-control-h)}
+
+  #routing .job{grid-template-columns:minmax(0,1fr) 88px !important}
+  #routing .job time,#routing .job .status{justify-self:end;text-align:right}
+}
+
+
+/* ===== v14: RUSSIAN UI + TYPOGRAPHY + MOTION + TOUCH ===== */
+:root{
+  --motion-fast:140ms;
+  --motion-ui:220ms;
+  --motion-page:260ms;
+  --ease-ui:cubic-bezier(.2,.75,.25,1);
+}
+
+html{scroll-behavior:smooth}
+body{
+  font-weight:430;
+  letter-spacing:-.006em;
+}
+.page-head h2,.hero h3,.toolbar h3,.card h3,.more-title,.more-item b{
+  letter-spacing:-.028em;
+}
+.page-head h2{font-weight:780}
+.hero h3{font-weight:760}
+.toolbar h3{font-weight:740}
+.card h3{font-weight:690}
+.kv span:nth-child(even){font-weight:630}
+.metric{font-weight:790}
+.sub,.page-head p,.toolbar .meta,.job p,.more-item small,.quick-link small{font-weight:430}
+
+/* Global theme transitions without animating layout. */
+body,.sidebar,.topbar,.card,.hero,.health-strip,.quick-link,.btn,.icon-btn,
+.mobile-nav,.more-panel,.modal-box,.status,.job,.step,.log-tab,.url-input{
+  transition:
+    background-color var(--motion-ui) var(--ease-ui),
+    border-color var(--motion-ui) var(--ease-ui),
+    color var(--motion-ui) var(--ease-ui),
+    box-shadow var(--motion-ui) var(--ease-ui);
+}
+
+/* Interactive elements share one press language. */
+button,.app-card,.quick-link,.more-item,.log-tab,.nav button,.mobile-nav button{
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+button,.app-card,.quick-link,.more-item,.log-tab,.nav button,.mobile-nav button{
+  position:relative;
+  overflow:hidden;
+}
+button:focus-visible,.app-card:focus-visible,.quick-link:focus-visible,.more-item:focus-visible,.log-tab:focus-visible{
+  outline:2px solid color-mix(in srgb,var(--green) 72%,white 8%);
+  outline-offset:2px;
+}
+.is-pressed{
+  transform:scale(.982)!important;
+  transition:transform var(--motion-fast) var(--ease-ui)!important;
+}
+.tap-selected{
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--green) 45%,transparent),var(--shadow-sm)!important;
+}
+.tap-ripple{
+  position:absolute;
+  width:12px;height:12px;
+  border-radius:50%;
+  pointer-events:none;
+  background:color-mix(in srgb,var(--green) 28%,white 4%);
+  transform:translate(-50%,-50%) scale(0);
+  opacity:.85;
+  animation:tapRipple 520ms var(--ease-ui) forwards;
+  z-index:0;
+}
+button > *, .quick-link > *, .more-item > *, .app-card > *{position:relative;z-index:1}
+@keyframes tapRipple{
+  to{transform:translate(-50%,-50%) scale(24);opacity:0}
+}
+
+/* Status dots breathe subtly, not like an alert. */
+.status.ok::before,.health-item i{
+  animation:statusBreath 2.6s ease-in-out infinite;
+}
+@keyframes statusBreath{
+  0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--green) 0%,transparent)}
+  50%{box-shadow:0 0 0 4px color-mix(in srgb,var(--green) 12%,transparent)}
+}
+
+/* Direction-aware page transitions. */
+.section.active{animation:none!important}
+.section.page-enter-forward{animation:pageForward var(--motion-page) var(--ease-ui) both!important}
+.section.page-enter-back{animation:pageBack var(--motion-page) var(--ease-ui) both!important}
+.section.page-enter-fade{animation:pageFade 190ms ease-out both!important}
+@keyframes pageForward{
+  from{opacity:0;transform:translateX(18px)}
+  to{opacity:1;transform:none}
+}
+@keyframes pageBack{
+  from{opacity:0;transform:translateX(-18px)}
+  to{opacity:1;transform:none}
+}
+@keyframes pageFade{
+  from{opacity:0;transform:translateY(3px)}
+  to{opacity:1;transform:none}
+}
+
+/* Bottom navigation selection animation. */
+.mobile-nav button::after{
+  content:"";
+  position:absolute;
+  left:24%;right:24%;bottom:3px;
+  height:2px;border-radius:99px;
+  background:var(--green);
+  transform:scaleX(0);
+  opacity:0;
+  transition:transform var(--motion-ui) var(--ease-ui),opacity var(--motion-ui) var(--ease-ui);
+}
+.mobile-nav button.active::after{transform:scaleX(1);opacity:.95}
+.mobile-nav button.active svg{animation:navPop 240ms var(--ease-ui)}
+@keyframes navPop{0%{transform:scale(.84)}65%{transform:scale(1.08)}100%{transform:scale(1)}}
+
+/* More sheet and modal get proper open/close motion. */
+.more-sheet{
+  display:block!important;
+  visibility:hidden;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity 180ms ease,visibility 0s linear 180ms;
+}
+.more-sheet .more-backdrop{opacity:0;transition:opacity 180ms ease}
+.more-sheet .more-panel{transform:translateY(26px) scale(.99);opacity:0;transition:transform 220ms var(--ease-ui),opacity 180ms ease}
+.more-sheet.open{
+  visibility:visible;
+  opacity:1;
+  pointer-events:auto;
+  transition-delay:0s;
+}
+.more-sheet.open .more-backdrop{opacity:1}
+.more-sheet.open .more-panel{transform:none;opacity:1}
+
+.modal{
+  display:flex!important;
+  visibility:hidden;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity 170ms ease,visibility 0s linear 170ms;
+}
+.modal .modal-box{transform:translateY(10px) scale(.985);opacity:0;transition:transform 210ms var(--ease-ui),opacity 170ms ease}
+.modal.open{visibility:visible;opacity:1;pointer-events:auto;transition-delay:0s}
+.modal.open .modal-box{transform:none;opacity:1}
+.toast{transition:opacity 180ms ease,transform 180ms var(--ease-ui)}
+
+/* Russian copy is a little wider; give labels room. */
+#routing .job{grid-template-columns:minmax(0,1fr) 84px 112px}
+#wireguard .kv,#overview .kv{grid-template-columns:minmax(0,1fr) auto}
+
+@media(max-width:560px){
+  /* Slightly more readable mobile type without making cards bulky. */
+  :root{
+    --ui-page-title:18px;
+    --ui-page-sub:10.7px;
+    --ui-card-title:13.4px;
+    --ui-body:11.3px;
+    --ui-meta:10.2px;
+    --ui-metric:26px;
+  }
+  body{font-weight:435}
+  .page-head h2{font-size:var(--ui-page-title)!important}
+  .page-head p{font-size:var(--ui-page-sub)!important}
+  .card h3{font-size:var(--ui-card-title)!important}
+  .kv,.btn,.job strong,.quick-link b,.more-item b{font-size:var(--ui-body)!important}
+  .sub,.toolbar .meta,.job p,.quick-link small,.more-item small{font-size:var(--ui-meta)!important}
+
+  /* Russian status pills need a touch more horizontal room. */
+  .status{padding-left:9px;padding-right:9px}
+
+  /* Gesture hint lives only through motion; no extra text on screen. */
+  .content{overscroll-behavior-x:contain}
+}
+
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.001ms!important;
+    animation-iteration-count:1!important;
+    transition-duration:.001ms!important;
+    scroll-behavior:auto!important;
+  }
+}
+
+
+/* ===== v15 settings + list editors ===== */
+.settings-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+}
+.settings-card{
+  min-height:100%;
+}
+.setting-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:14px;
+  align-items:center;
+  padding:11px 0;
+  border-bottom:1px solid var(--line);
+}
+.setting-row:last-of-type{border-bottom:0}
+.setting-row b{
+  display:block;
+  font-size:11px;
+  line-height:1.3;
+}
+.setting-row small{
+  display:block;
+  margin-top:3px;
+  color:var(--muted);
+  font-size:9.5px;
+  line-height:1.4;
+}
+.switch{
+  position:relative;
+  width:44px;
+  height:26px;
+  flex:0 0 44px;
+}
+.switch input{
+  position:absolute;
+  opacity:0;
+  pointer-events:none;
+}
+.switch span{
+  position:absolute;
+  inset:0;
+  border-radius:999px;
+  background:var(--panel-3);
+  border:1px solid var(--line);
+  transition:.18s ease;
+  cursor:pointer;
+}
+.switch span::after{
+  content:"";
+  position:absolute;
+  width:20px;
+  height:20px;
+  left:2px;
+  top:2px;
+  border-radius:50%;
+  background:var(--panel);
+  box-shadow:0 2px 6px rgba(0,0,0,.18);
+  transition:.18s ease;
+}
+.switch input:checked + span{
+  background:var(--green);
+  border-color:var(--green);
+}
+.switch input:checked + span::after{
+  transform:translateX(18px);
+  background:#fff;
+}
+.settings-fields{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin-top:14px;
+}
+.settings-fields label span,
+.bulk-grid label span{
+  display:block;
+  font-size:9.5px;
+  color:var(--muted);
+  margin:0 0 6px 2px;
+}
+.settings-fields input,
+.list-add input,
+.bulk-grid textarea{
+  width:100%;
+  border:1px solid var(--line);
+  background:var(--panel-2);
+  color:var(--text);
+  border-radius:10px;
+  outline:none;
+}
+.settings-fields input,
+.list-add input{
+  min-height:40px;
+  padding:8px 10px;
+  font-size:10.5px;
+}
+.settings-fields input:focus,
+.list-add input:focus,
+.bulk-grid textarea:focus{
+  border-color:color-mix(in srgb,var(--green) 55%,var(--line));
+  box-shadow:0 0 0 3px var(--green-soft);
+}
+.settings-toolbar{margin-top:22px!important}
+
+.list-editor-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+}
+.list-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:12px;
+}
+.list-head h3{margin:0;font-size:13px}
+.list-head .meta{margin-top:4px}
+.count-badge{
+  min-width:30px;
+  height:26px;
+  padding:0 8px;
+  border-radius:999px;
+  display:grid;
+  place-items:center;
+  background:var(--green-soft);
+  color:var(--green);
+  font-size:10px;
+  font-weight:750;
+}
+.list-add{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:8px;
+}
+.chip-list{
+  display:flex;
+  flex-wrap:wrap;
+  gap:7px;
+  min-height:72px;
+  margin:12px 0;
+  padding:10px;
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  border-radius:12px;
+  align-content:flex-start;
+}
+.domain-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  min-height:30px;
+  padding:5px 7px 5px 9px;
+  border-radius:999px;
+  background:var(--panel);
+  border:1px solid var(--line);
+  font-size:10px;
+}
+.domain-chip button{
+  width:20px;
+  height:20px;
+  border:0;
+  border-radius:50%;
+  background:transparent;
+  color:var(--muted);
+  cursor:pointer;
+  display:grid;
+  place-items:center;
+  padding:0;
+}
+.domain-chip button:hover{
+  background:var(--red-soft);
+  color:var(--red);
+}
+.empty-list{
+  color:var(--muted);
+  font-size:10px;
+  padding:5px 2px;
+}
+.list-actions{
+  display:flex;
+  gap:7px;
+  flex-wrap:wrap;
+}
+
+.bulk-editor{margin-top:16px}
+.bulk-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+}
+.bulk-grid textarea{
+  min-height:180px;
+  resize:vertical;
+  padding:10px 11px;
+  font:10.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+
+@media(max-width:900px){
+  .settings-grid,
+  .list-editor-grid,
+  .bulk-grid{
+    grid-template-columns:1fr;
+  }
+}
+@media(max-width:560px){
+  .settings-grid,
+  .list-editor-grid{
+    gap:12px;
+  }
+  .settings-card,
+  .list-card,
+  .bulk-editor{
+    padding:16px!important;
+  }
+  .setting-row{
+    padding:10px 0;
+  }
+  .settings-fields{
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+  }
+  .switch{
+    width:42px;
+    height:24px;
+  }
+  .switch span::after{
+    width:18px;
+    height:18px;
+  }
+  .switch input:checked + span::after{
+    transform:translateX(18px);
+  }
+  .list-add{
+    grid-template-columns:minmax(0,1fr) 96px;
+  }
+  .list-actions{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+  }
+  .list-actions .btn{
+    padding-left:7px;
+    padding-right:7px;
+  }
+  .bulk-grid textarea{
+    min-height:150px;
+  }
+}
+
+
+/* ===== v16 POLISH: settings + editors + micro-interactions ===== */
+
+:root{
+  --focus-ring:0 0 0 3px color-mix(in srgb,var(--green) 18%,transparent);
+}
+
+/* Settings page composition */
+#settings .settings-grid,
+#settings .list-editor-grid{
+  align-items:start;
+}
+#settings .toolbar{
+  position:relative;
+}
+.settings-actions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.save-state{
+  display:inline-flex;
+  align-items:center;
+  min-height:28px;
+  padding:5px 9px;
+  border-radius:999px;
+  border:1px solid var(--line);
+  background:var(--panel-2);
+  color:var(--muted);
+  font-size:9.5px;
+  font-weight:700;
+  transition:.18s ease;
+}
+.save-state::before{
+  content:"";
+  width:6px;height:6px;border-radius:50%;
+  background:var(--green);
+  margin-right:6px;
+}
+.save-state.dirty{
+  color:var(--amber);
+  background:var(--amber-soft);
+  border-color:color-mix(in srgb,var(--amber) 28%,var(--line));
+}
+.save-state.dirty::before{background:var(--amber)}
+
+.settings-card{
+  position:relative;
+  overflow:hidden;
+}
+.settings-card::before{
+  content:"";
+  position:absolute;
+  left:0;top:0;bottom:0;
+  width:3px;
+  background:transparent;
+  transition:.18s ease;
+}
+.settings-card:focus-within::before{
+  background:var(--green);
+}
+
+.setting-row{
+  transition:background .14s ease,padding .14s ease;
+}
+.setting-row:hover{
+  background:color-mix(in srgb,var(--panel-2) 68%,transparent);
+  margin-left:-8px;
+  margin-right:-8px;
+  padding-left:8px;
+  padding-right:8px;
+  border-radius:10px;
+}
+.setting-row b{
+  font-size:11.2px;
+  font-weight:720;
+}
+.setting-row small{
+  font-size:9.6px;
+}
+
+/* Switches */
+.switch{
+  width:46px;
+  height:27px;
+}
+.switch span{
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--line) 80%,transparent);
+}
+.switch span::after{
+  width:21px;height:21px;
+}
+.switch input:checked + span::after{
+  transform:translateX(19px);
+}
+.switch input:focus-visible + span{
+  box-shadow:var(--focus-ring);
+}
+.switch:active span::after{
+  width:23px;
+}
+.switch input:checked:active + span::after{
+  transform:translateX(17px);
+}
+
+/* Form controls */
+.settings-fields{
+  padding-top:2px;
+}
+.settings-fields label,
+.bulk-grid label{
+  position:relative;
+}
+.settings-fields label span,
+.bulk-grid label span{
+  font-weight:650;
+  color:var(--muted);
+}
+.settings-fields input,
+.list-add input,
+.bulk-grid textarea{
+  transition:border-color .16s ease,box-shadow .16s ease,background .16s ease;
+}
+.settings-fields input:hover,
+.list-add input:hover,
+.bulk-grid textarea:hover{
+  border-color:var(--line-2);
+}
+.settings-fields input:focus,
+.list-add input:focus,
+.bulk-grid textarea:focus{
+  box-shadow:var(--focus-ring);
+}
+.settings-fields input:disabled{
+  opacity:.48;
+  cursor:not-allowed;
+}
+.settings-hint{
+  margin-top:10px;
+  padding:9px 10px;
+  border-radius:10px;
+  background:var(--panel-2);
+  color:var(--muted);
+  font-size:9.3px;
+  line-height:1.45;
+}
+
+/* List editors */
+.list-card{
+  position:relative;
+  overflow:hidden;
+}
+.list-card::after{
+  content:"";
+  position:absolute;
+  left:0;right:0;bottom:0;
+  height:3px;
+}
+.list-card:first-child::after{background:var(--violet)}
+.list-card:nth-child(2)::after{background:var(--blue)}
+
+.list-title-line{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.list-mode{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:34px;
+  height:22px;
+  padding:0 7px;
+  border-radius:999px;
+  font-size:8.5px;
+  font-weight:800;
+  letter-spacing:.03em;
+}
+.vpn-mode{background:var(--violet-soft);color:var(--violet)}
+.direct-mode{background:var(--blue-soft);color:var(--blue)}
+
+.list-add input{
+  min-height:42px;
+}
+.list-add .btn{
+  min-width:96px;
+}
+.chip-list{
+  min-height:84px;
+  max-height:212px;
+  overflow:auto;
+  scrollbar-width:thin;
+  scrollbar-color:var(--line-2) transparent;
+}
+.domain-chip{
+  max-width:100%;
+  transition:transform .12s ease,border-color .12s ease,background .12s ease;
+}
+.domain-chip:hover{
+  transform:translateY(-1px);
+  border-color:var(--line-2);
+}
+.domain-chip > span{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  max-width:240px;
+}
+.domain-chip button{
+  font-size:16px;
+  line-height:1;
+}
+.count-badge{
+  font-variant-numeric:tabular-nums;
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--green) 18%,transparent);
+}
+.list-actions .btn{
+  flex:1 1 auto;
+}
+.bulk-editor{
+  position:relative;
+}
+.bulk-editor::before{
+  content:"";
+  position:absolute;
+  left:18px;right:18px;top:0;
+  height:1px;
+  background:linear-gradient(90deg,transparent,var(--line-2),transparent);
+}
+.bulk-grid textarea{
+  min-height:190px;
+  tab-size:2;
+}
+
+/* Button feedback */
+.btn{
+  transition:transform .12s ease,background .14s ease,border-color .14s ease,box-shadow .14s ease;
+}
+.btn:active{
+  transform:scale(.985);
+}
+.btn:focus-visible{
+  outline:none;
+  box-shadow:var(--focus-ring);
+}
+.btn.primary{
+  box-shadow:0 5px 14px color-mix(in srgb,var(--green) 18%,transparent);
+}
+.btn.primary:hover{
+  background:var(--green-2);
+  border-color:var(--green-2);
+}
+
+/* Settings dirty visual */
+#settings.settings-dirty .settings-card{
+  border-color:color-mix(in srgb,var(--amber) 13%,var(--line));
+}
+
+/* Mobile */
+@media(max-width:560px){
+  #settings .toolbar:first-child{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+  }
+  #settings .settings-actions{
+    width:100%;
+    display:grid;
+    grid-template-columns:auto 1fr 1fr;
+    gap:7px;
+  }
+  #settings .settings-actions .btn{
+    min-width:0;
+  }
+  .save-state{
+    justify-self:start;
+  }
+
+  .settings-fields{
+    grid-template-columns:1fr 1fr;
+  }
+  .setting-row{
+    gap:10px;
+  }
+  .setting-row:hover{
+    margin-left:0;
+    margin-right:0;
+    padding-left:0;
+    padding-right:0;
+    background:transparent;
+  }
+
+  .switch{
+    width:44px;
+    height:26px;
+  }
+  .switch span::after{
+    width:20px;height:20px;
+  }
+  .switch input:checked + span::after{
+    transform:translateX(18px);
+  }
+
+  .list-head{
+    align-items:center;
+  }
+  .list-add{
+    grid-template-columns:minmax(0,1fr) 100px;
+  }
+  .list-actions{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+  }
+  .list-actions .btn:last-child{
+    grid-column:1/-1;
+  }
+  .chip-list{
+    min-height:76px;
+    max-height:180px;
+  }
+  .domain-chip > span{
+    max-width:210px;
+  }
+  .bulk-grid textarea{
+    min-height:155px;
+  }
+}
+
+
+/* ===== v17 COMPACT UI =====
+   Normal state stays quiet. Large attention blocks are reserved for faults.
+*/
+:root{
+  --ui-page-title:20px;
+  --ui-page-sub:10.5px;
+  --ui-section-title:16px;
+  --ui-card-title:12.5px;
+  --ui-body:10.5px;
+  --ui-meta:9.5px;
+  --ui-micro:8.8px;
+  --ui-metric:24px;
+  --ui-pill:9.5px;
+}
+
+.hero.hero-compact{
+  min-height:70px;
+  padding:14px 18px;
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  margin-bottom:14px;
+  background:
+    radial-gradient(circle at 92% 10%,color-mix(in srgb,var(--green) 8%,transparent),transparent 34%),
+    linear-gradient(135deg,var(--panel),color-mix(in srgb,var(--green-soft) 42%,var(--panel)));
+}
+.hero.hero-compact .hero-left{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+.hero.hero-compact .hero-icon{
+  width:38px;
+  height:38px;
+  flex:0 0 38px;
+  border-radius:12px;
+}
+.hero.hero-compact .hero-icon svg{
+  width:21px;
+  height:21px;
+}
+.hero.hero-compact h3{
+  margin:0;
+  font-size:16px!important;
+  line-height:1.2;
+  font-weight:760;
+  letter-spacing:-.02em;
+}
+
+.metric{
+  font-size:var(--ui-metric)!important;
+  line-height:1.08;
+}
+#overview .app-card .metric{
+  font-size:23px!important;
+}
+#wan .grid.three .metric{
+  font-size:22px!important;
+}
+.card{
+  padding:16px;
+}
+#overview .app-card{
+  min-height:0!important;
+}
+#overview .app-card .kv{
+  margin-top:10px;
+}
+.card-head{
+  margin-bottom:11px;
+}
+.kv{
+  margin-top:11px;
+  gap:7px 10px;
+}
+.quick-link{
+  min-height:58px;
+}
+.quick-link b{
+  font-size:10.5px;
+}
+.quick-link small{
+  font-size:8.9px;
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  line-height:1.25;
+}
+.quick-link > span:nth-child(2){
+  min-width:0;
+}
+#overview .metric,
+#wan .metric{
+  letter-spacing:-.025em;
+}
+
+@media(max-width:560px){
+  :root{
+    --ui-page-title:17px;
+    --ui-page-sub:10px;
+    --ui-section-title:14.5px;
+    --ui-card-title:12px;
+    --ui-body:10.3px;
+    --ui-meta:9.4px;
+    --ui-micro:8.5px;
+    --ui-metric:22px;
+    --ui-pill:9px;
+
+    --ui-card-pad:14px;
+    --ui-card-gap:10px;
+    --ui-page-gap:10px;
+    --ui-radius:15px;
+    --ui-control-h:40px;
+  }
+
+  .topbar{
+    height:60px;
+    padding:0 13px;
+  }
+  .page-head h2{
+    font-size:17px!important;
+  }
+  .page-head p{
+    font-size:9.8px!important;
+  }
+  .icon-btn{
+    width:36px;
+    height:36px;
+  }
+
+  .content{
+    padding:12px 12px 100px;
+  }
+
+  .hero.hero-compact{
+    min-height:60px;
+    padding:11px 13px;
+    margin-bottom:10px;
+    border-radius:15px;
+  }
+  .hero.hero-compact .hero-left{
+    gap:10px;
+  }
+  .hero.hero-compact .hero-icon{
+    width:34px;
+    height:34px;
+    flex-basis:34px;
+    border-radius:10px;
+  }
+  .hero.hero-compact .hero-icon svg{
+    width:19px;
+    height:19px;
+  }
+  .hero.hero-compact h3{
+    font-size:15px!important;
+    line-height:1.15;
+  }
+
+  .card,
+  #wireguard .grid.half .card,
+  #wan .grid.three .card,
+  #routing .card,
+  #automation .card,
+  #logs .card,
+  #system .card,
+  #settings .card{
+    padding:14px!important;
+    border-radius:15px!important;
+  }
+
+  .card h3{
+    font-size:12px!important;
+  }
+  .metric{
+    font-size:22px!important;
+  }
+  #overview .app-card .metric{
+    font-size:21px!important;
+  }
+  #wan .grid.three .metric{
+    font-size:21px!important;
+  }
+  .sub{
+    font-size:9.4px!important;
+  }
+  .kv{
+    font-size:10.2px!important;
+    gap:7px 9px!important;
+    margin-top:10px!important;
+  }
+  .status{
+    font-size:9px!important;
+    min-height:26px;
+    padding:4px 8px;
+  }
+
+  .quick-links{
+    gap:8px;
+    margin-bottom:10px;
+  }
+  .quick-link{
+    min-height:58px;
+    padding:9px 10px;
+  }
+  .quick-ico{
+    width:30px;
+    height:30px;
+  }
+  .quick-link b{
+    font-size:10px!important;
+  }
+  .quick-link small{
+    font-size:8.4px!important;
+    line-height:1.2;
+  }
+
+  .health-strip{
+    margin-top:10px;
+  }
+
+  .mobile-nav{
+    min-height:62px;
+  }
+  .mobile-nav button{
+    min-height:50px;
+    font-size:7.6px!important;
+  }
+}
+
+/* Prepared compact fault states for backend */
+.hero.hero-compact.is-warning{
+  border-color:color-mix(in srgb,var(--amber) 35%,var(--line));
+  background:linear-gradient(135deg,var(--panel),var(--amber-soft));
+}
+.hero.hero-compact.is-warning .hero-icon{
+  color:var(--amber);
+  background:var(--amber-soft);
+}
+.hero.hero-compact.is-error{
+  border-color:color-mix(in srgb,var(--red) 38%,var(--line));
+  background:linear-gradient(135deg,var(--panel),var(--red-soft));
+}
+.hero.hero-compact.is-error .hero-icon{
+  color:var(--red);
+  background:var(--red-soft);
+}
+
+
+/* ===== v18 TYPOGRAPHY + ICON SCALE =====
+   Slightly larger type/icons, without returning to oversized cards.
+*/
+:root{
+  --ui-page-title:21px;
+  --ui-page-sub:11px;
+  --ui-section-title:16.5px;
+  --ui-card-title:13px;
+  --ui-body:11px;
+  --ui-meta:10px;
+  --ui-micro:9px;
+  --ui-metric:25px;
+  --ui-pill:10px;
+}
+
+/* Global icon normalization */
+svg{
+  stroke-width:1.9;
+}
+.nav-icon svg{width:19px;height:19px}
+.card-icon{
+  width:35px;
+  height:35px;
+}
+.card-icon svg{width:19px;height:19px}
+.icon-btn{
+  width:39px;
+  height:39px;
+}
+.icon-btn svg{width:19px;height:19px}
+.quick-ico{
+  width:38px;
+  height:38px;
+}
+.quick-ico svg{width:20px;height:20px}
+.node-ico{
+  width:41px;
+  height:41px;
+}
+.node-ico svg{width:20px;height:20px}
+.more-ico{
+  width:40px;
+  height:40px;
+}
+.more-ico svg{width:19px;height:19px}
+
+/* Type scale */
+.page-head h2{
+  font-size:var(--ui-page-title)!important;
+}
+.page-head p{
+  font-size:var(--ui-page-sub)!important;
+}
+.toolbar h3{
+  font-size:var(--ui-section-title)!important;
+}
+.card h3{
+  font-size:var(--ui-card-title)!important;
+}
+.kv,
+.setting-row b,
+.job strong,
+.path-node b,
+.step b,
+.quick-link b{
+  font-size:var(--ui-body)!important;
+}
+.sub,
+.toolbar .meta,
+.setting-row small,
+.job p,
+.path-node span,
+.step span,
+.notice{
+  font-size:var(--ui-meta)!important;
+}
+.status{
+  font-size:var(--ui-pill)!important;
+}
+.metric{
+  font-size:var(--ui-metric)!important;
+}
+
+/* Compact hero remains compact, only icon/text get a modest boost */
+.hero.hero-compact{
+  min-height:74px;
+}
+.hero.hero-compact .hero-icon{
+  width:41px;
+  height:41px;
+  flex-basis:41px;
+}
+.hero.hero-compact .hero-icon svg{
+  width:23px;
+  height:23px;
+}
+.hero.hero-compact h3{
+  font-size:17px!important;
+}
+
+/* Quick links */
+.quick-link{
+  min-height:62px;
+}
+.quick-link b{
+  font-size:11px!important;
+}
+.quick-link small{
+  font-size:9.2px!important;
+}
+
+/* Mobile */
+@media(max-width:560px){
+  :root{
+    --ui-page-title:18px;
+    --ui-page-sub:10.5px;
+    --ui-section-title:15px;
+    --ui-card-title:12.6px;
+    --ui-body:10.8px;
+    --ui-meta:9.8px;
+    --ui-micro:8.8px;
+    --ui-metric:23px;
+    --ui-pill:9.4px;
+  }
+
+  .topbar{
+    height:62px;
+  }
+  .page-head h2{
+    font-size:18px!important;
+  }
+  .page-head p{
+    font-size:10.3px!important;
+  }
+
+  .icon-btn{
+    width:38px;
+    height:38px;
+  }
+  .icon-btn svg{
+    width:18.5px;
+    height:18.5px;
+  }
+
+  .hero.hero-compact{
+    min-height:64px;
+    padding:12px 14px;
+  }
+  .hero.hero-compact .hero-icon{
+    width:38px;
+    height:38px;
+    flex-basis:38px;
+  }
+  .hero.hero-compact .hero-icon svg{
+    width:21px;
+    height:21px;
+  }
+  .hero.hero-compact h3{
+    font-size:16px!important;
+  }
+
+  .card-icon{
+    width:34px;
+    height:34px;
+  }
+  .card-icon svg{
+    width:18px;
+    height:18px;
+  }
+
+  .quick-ico{
+    width:34px;
+    height:34px;
+  }
+  .quick-ico svg{
+    width:18px;
+    height:18px;
+  }
+
+  .metric{
+    font-size:23px!important;
+  }
+  #overview .app-card .metric{
+    font-size:22px!important;
+  }
+  #wan .grid.three .metric{
+    font-size:22px!important;
+  }
+
+  .card h3{
+    font-size:12.6px!important;
+  }
+  .kv{
+    font-size:10.8px!important;
+  }
+  .sub{
+    font-size:9.8px!important;
+  }
+  .status{
+    font-size:9.4px!important;
+  }
+
+  .mobile-nav{
+    min-height:64px;
+  }
+  .mobile-nav button{
+    min-height:52px;
+    font-size:8px!important;
+  }
+  .mobile-nav svg,
+  .mobile-nav #moreIcon svg{
+    width:18px;
+    height:18px;
+  }
+
+  .more-ico{
+    width:39px;
+    height:39px;
+  }
+  .more-ico svg{
+    width:19px;
+    height:19px;
+  }
+
+  .switch{
+    transform:scale(1.03);
+    transform-origin:right center;
+  }
+}
+
+
+/* ===== v19 READABILITY PASS =====
+   Global mobile-first typography lift for all pages: WAN, WG, Routing, Logs, Settings, More.
+   Keeps layout dense but improves reading distance.
+*/
+:root{
+  --read-title:22px;
+  --read-subtitle:12px;
+  --read-section:17px;
+  --read-card-title:13.6px;
+  --read-body:11.6px;
+  --read-meta:10.6px;
+  --read-micro:9.6px;
+  --read-metric:26px;
+  --read-pill:10.4px;
+}
+
+html, body{
+  text-rendering:optimizeLegibility;
+  -webkit-font-smoothing:antialiased;
+}
+
+.page-head h2{
+  font-size:var(--read-title)!important;
+  line-height:1.14!important;
+}
+.page-head p{
+  font-size:var(--read-subtitle)!important;
+  line-height:1.35!important;
+}
+.toolbar h3,
+.section-title{
+  font-size:var(--read-section)!important;
+  line-height:1.18!important;
+}
+.card h3,
+.quick-link b,
+.sheet-title,
+.more-card-title{
+  font-size:var(--read-card-title)!important;
+  line-height:1.2!important;
+}
+.kv,
+.setting-row b,
+.form-row label,
+.logs-head,
+.sheet-label,
+.quick-link b{
+  font-size:var(--read-body)!important;
+  line-height:1.36!important;
+}
+.sub,
+.toolbar .meta,
+.setting-row small,
+.job p,
+.path-node span,
+.step span,
+.notice,
+.quick-link small,
+.more-card small,
+.sheet-sub,
+label small{
+  font-size:var(--read-meta)!important;
+  line-height:1.4!important;
+}
+.status,
+.chip,
+.tag,
+.badge{
+  font-size:var(--read-pill)!important;
+}
+.metric{
+  font-size:var(--read-metric)!important;
+  line-height:1.04!important;
+}
+.hero.hero-compact h3{
+  font-size:17.5px!important;
+}
+.hero.hero-compact .hero-icon{
+  width:42px!important;
+  height:42px!important;
+  flex-basis:42px!important;
+}
+.hero.hero-compact .hero-icon svg{
+  width:24px!important;
+  height:24px!important;
+}
+.card-icon,
+.quick-ico,
+.node-ico,
+.more-ico{
+  transform:scale(1.06);
+  transform-origin:center;
+}
+.icon-btn svg,
+.card-icon svg,
+.quick-ico svg,
+.node-ico svg,
+.more-ico svg,
+.nav-icon svg{
+  stroke-width:2!important;
+}
+
+.job strong{
+  font-size:12px!important;
+  line-height:1.22!important;
+}
+.job p{
+  font-size:10.8px!important;
+}
+.job time{
+  font-size:10.2px!important;
+}
+.job .status{
+  padding:7px 12px!important;
+}
+
+.quick-link{
+  min-height:66px!important;
+}
+.quick-link b{
+  font-size:11.8px!important;
+}
+.quick-link small{
+  font-size:10.1px!important;
+}
+
+.table th{
+  font-size:10.7px!important;
+}
+.table td{
+  font-size:10.6px!important;
+}
+pre, code, .mono{
+  font-size:10.5px!important;
+  line-height:1.45!important;
+}
+
+.sheet .item-title,
+.more-card b{
+  font-size:12.2px!important;
+}
+.sheet .item-sub,
+.more-card small{
+  font-size:10.5px!important;
+}
+
+button,
+.btn,
+.pill-btn,
+.segment button,
+.tab,
+.tab-btn{
+  font-size:11.6px!important;
+}
+
+.mobile-nav button{
+  font-size:8.6px!important;
+}
+.mobile-nav .nav-icon{
+  width:23px!important;
+  height:23px!important;
+}
+.mobile-nav .nav-icon svg{
+  width:19px!important;
+  height:19px!important;
+}
+
+#routing .job strong,
+#automation .job strong{
+  font-size:12.2px!important;
+}
+#routing .job p,
+#automation .job p{
+  font-size:10.9px!important;
+}
+
+#wireguard .kv,
+#wan .kv,
+#overview .kv,
+#settings .kv{
+  font-size:11.5px!important;
+}
+#wireguard .sub,
+#wan .sub,
+#overview .sub,
+#settings .sub{
+  font-size:10.7px!important;
+}
+
+@media (max-width:560px){
+  :root{
+    --read-title:18.8px;
+    --read-subtitle:11.3px;
+    --read-section:15.8px;
+    --read-card-title:13.2px;
+    --read-body:11.4px;
+    --read-meta:10.5px;
+    --read-micro:9.5px;
+    --read-metric:24px;
+    --read-pill:10.2px;
+  }
+
+  .page-head h2{font-size:18.8px!important}
+  .page-head p{font-size:11.3px!important}
+
+  .card{
+    border-radius:20px!important;
+  }
+
+  .hero.hero-compact{
+    padding:13px 14px!important;
+    min-height:68px!important;
+  }
+  .hero.hero-compact h3{
+    font-size:16.4px!important;
+  }
+  .hero.hero-compact .hero-icon{
+    width:40px!important;
+    height:40px!important;
+    flex-basis:40px!important;
+  }
+  .hero.hero-compact .hero-icon svg{
+    width:23px!important;
+    height:23px!important;
+  }
+
+  .card h3{font-size:13.2px!important}
+  .metric{font-size:24px!important}
+  .kv{font-size:11.4px!important}
+  .sub{font-size:10.5px!important}
+  .status,.chip,.tag,.badge{font-size:10.2px!important}
+
+  .job strong{font-size:12px!important}
+  .job p{font-size:10.8px!important}
+  .job time{font-size:10.2px!important}
+
+  .quick-link{
+    min-height:68px!important;
+  }
+  .quick-link b{
+    font-size:11.8px!important;
+  }
+  .quick-link small{
+    font-size:10.1px!important;
+  }
+
+  .table th{font-size:10.6px!important}
+  .table td{font-size:10.4px!important}
+  pre, code, .mono{font-size:10.4px!important}
+
+  .mobile-nav{
+    min-height:66px!important;
+  }
+  .mobile-nav button{
+    font-size:8.7px!important;
+    padding-top:8px!important;
+    padding-bottom:8px!important;
+  }
+  .mobile-nav .nav-icon svg{
+    width:19px!important;
+    height:19px!important;
+  }
+
+  .sheet .item-title,
+  .more-card b{
+    font-size:12.3px!important;
+  }
+  .sheet .item-sub,
+  .more-card small{
+    font-size:10.5px!important;
+  }
+
+  .segment button,
+  .tab,
+  .tab-btn,
+  .btn{
+    font-size:11.4px!important;
+  }
+}
+
+
+/* ===== v20 FINAL MICRO-POLISH / READY TO CONNECT =====
+   Typography stays at v19 scale; this pass only normalizes rhythm,
+   alignment, hit targets and mobile spacing across all pages.
+*/
+:root{
+  --space-1:6px;
+  --space-2:10px;
+  --space-3:12px;
+  --space-4:16px;
+  --space-5:20px;
+  --space-6:24px;
+  --control-h:42px;
+}
+
+/* Global vertical rhythm */
+.section > * + *{
+  margin-top:16px;
+}
+.section > .toolbar:first-child{
+  margin-top:0;
+  margin-bottom:16px;
+}
+.grid,
+.settings-grid,
+.list-editor-grid{
+  gap:16px!important;
+}
+.grid.two,
+.grid.half{
+  margin-top:16px!important;
+}
+.card{
+  padding:17px!important;
+}
+.card-head{
+  margin-bottom:12px!important;
+}
+.kv{
+  margin-top:12px!important;
+  gap:8px 12px!important;
+}
+
+/* Make values sit on a cleaner shared right edge */
+.kv{
+  grid-template-columns:minmax(0,1fr) max-content!important;
+}
+.kv span:nth-child(even){
+  min-width:84px;
+  text-align:right;
+}
+
+/* Controls: one height everywhere */
+.btn,
+.icon-btn,
+.search,
+.settings-fields input,
+.list-add input,
+.url-input{
+  min-height:var(--control-h);
+}
+.btn{
+  border-radius:11px!important;
+}
+.actions{
+  align-items:center;
+}
+
+/* Cards should not feel artificially stretched */
+#overview .app-card,
+#wireguard .grid.half .card,
+#wan .grid.three .card,
+#automation .grid.three .card,
+#system .grid.three .card{
+  min-height:0!important;
+}
+
+/* Quick links: equal geometry */
+.quick-links{
+  gap:10px!important;
+}
+.quick-link{
+  min-height:68px!important;
+  padding:11px 12px!important;
+  grid-template-columns:38px minmax(0,1fr) 18px!important;
+}
+.quick-link > span:nth-child(2){
+  min-width:0;
+}
+.quick-link small{
+  display:block;
+  margin-top:3px;
+}
+
+/* Routing rows line up consistently */
+#routing .job{
+  grid-template-columns:minmax(0,1fr) 92px 112px!important;
+  gap:12px!important;
+  padding:13px 0!important;
+  align-items:center!important;
+}
+#routing .job time{
+  text-align:right;
+  white-space:nowrap;
+}
+#routing .job .status{
+  justify-self:end;
+}
+
+/* WireGuard: both cards use same internal rhythm */
+#wireguard .grid.half .card{
+  padding:18px!important;
+}
+#wireguard .kv{
+  margin-top:14px!important;
+}
+
+/* WAN summary cards share one minimum composition */
+#wan .grid.three .card{
+  padding:18px!important;
+}
+#wan .grid.three .card .metric{
+  margin-top:10px!important;
+}
+
+/* Settings / list editors */
+.setting-row{
+  padding:12px 0!important;
+}
+.settings-fields{
+  gap:10px!important;
+}
+.list-add{
+  gap:10px!important;
+}
+.list-actions{
+  gap:8px!important;
+}
+.chip-list{
+  margin:12px 0!important;
+}
+
+/* Logs */
+#logs .logbox{
+  border-radius:14px!important;
+}
+#logs .log-tools{
+  align-items:center;
+}
+
+/* More sheet */
+.more-item{
+  min-height:58px;
+}
+.more-item + .more-item{
+  margin-top:2px;
+}
+
+/* Bottom nav geometry */
+.mobile-nav{
+  box-shadow:0 14px 34px rgba(0,0,0,.22)!important;
+}
+
+/* Mobile normalization */
+@media(max-width:560px){
+  :root{
+    --control-h:40px;
+  }
+
+  .content{
+    padding:14px 12px 102px!important;
+  }
+
+  .section > * + *{
+    margin-top:12px;
+  }
+  .section > .toolbar:first-child{
+    margin-bottom:12px;
+  }
+
+  .grid,
+  .settings-grid,
+  .list-editor-grid{
+    gap:12px!important;
+  }
+  .grid.two,
+  .grid.half{
+    margin-top:12px!important;
+  }
+
+  .card,
+  #wireguard .grid.half .card,
+  #wan .grid.three .card,
+  #routing .card,
+  #automation .card,
+  #logs .card,
+  #system .card,
+  #settings .card{
+    padding:15px!important;
+  }
+
+  .card-head{
+    margin-bottom:11px!important;
+  }
+
+  .kv{
+    margin-top:11px!important;
+    gap:8px 10px!important;
+  }
+  .kv span:nth-child(even){
+    min-width:78px;
+  }
+
+  .quick-links{
+    gap:8px!important;
+    margin-bottom:12px!important;
+  }
+  .quick-link{
+    min-height:64px!important;
+    padding:10px 11px!important;
+    grid-template-columns:36px minmax(0,1fr) 16px!important;
+  }
+
+  /* WAN actions: full width and even */
+  #wan > .toolbar:first-child .actions{
+    display:grid!important;
+    grid-template-columns:1fr 1fr!important;
+    width:100%!important;
+    gap:8px!important;
+  }
+  #wan > .toolbar:first-child .actions .btn:first-child{
+    grid-column:1 / -1;
+  }
+
+  /* Routing: left content + compact right rail */
+  #routing .job{
+    grid-template-columns:minmax(0,1fr) 92px!important;
+    grid-template-rows:auto auto!important;
+    gap:7px 10px!important;
+    padding:12px 0!important;
+  }
+  #routing .job-name{
+    grid-row:1 / span 2!important;
+    align-items:flex-start!important;
+  }
+  #routing .job time{
+    grid-column:2!important;
+    grid-row:1!important;
+  }
+  #routing .job .status{
+    grid-column:2!important;
+    grid-row:2!important;
+  }
+
+  /* WireGuard */
+  #wireguard .grid.half .card{
+    padding:16px!important;
+  }
+
+  /* Logs */
+  #logs .logbox{
+    height:310px!important;
+    min-height:240px!important;
+    max-height:42vh!important;
+  }
+
+  /* Settings */
+  #settings .settings-actions{
+    gap:8px!important;
+  }
+  .settings-fields{
+    gap:8px!important;
+  }
+  .list-add{
+    grid-template-columns:minmax(0,1fr) 104px!important;
+    gap:8px!important;
+  }
+
+  /* Safe space for fixed mobile navigation */
+  .section::after{
+    height:22px!important;
+  }
+
+  .mobile-nav{
+    left:10px!important;
+    right:10px!important;
+    bottom:max(8px,env(safe-area-inset-bottom))!important;
+    min-height:66px!important;
+    border-radius:16px!important;
+    padding:4px!important;
+  }
+}
+
+/* Tablet: avoid oversized single-column cards */
+@media(min-width:561px) and (max-width:900px){
+  .grid.apps,
+  .settings-grid,
+  .list-editor-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  }
+  .grid.three{
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  }
+  .grid.three > :last-child:nth-child(odd){
+    grid-column:1 / -1;
+  }
+}
+
+
+/* ===== v21 LIVE BACKEND ===== */
+.live-stale{opacity:.72}
+.live-error{color:var(--red)!important}
+.live-warn{color:var(--amber)!important}
+.health-item.is-bad i{background:var(--red)!important;box-shadow:0 0 0 4px var(--red-soft)!important}
+.health-item.is-warn i{background:var(--amber)!important;box-shadow:0 0 0 4px var(--amber-soft)!important}
+#backendChip.error{border-color:color-mix(in srgb,var(--red) 40%,var(--line));background:var(--red-soft)}
+#backendChip.ok{border-color:color-mix(in srgb,var(--green) 35%,var(--line));background:var(--green-soft)}
+
+
+/* ===== v22 LIVE CLEANUP ===== */
+@media(max-width:560px){
+  /* Show a tiny backend state on mobile; keep uptime hidden. */
+  .top-right #backendChip{
+    display:flex!important;
+    min-height:32px!important;
+    height:32px!important;
+    padding:0 9px!important;
+    border-radius:999px!important;
+    font-size:8.8px!important;
+    gap:5px!important;
+  }
+  .top-right #backendChip .dot{
+    width:6px!important;
+    height:6px!important;
+  }
+  .top-right #backendState{
+    font-size:8.8px!important;
+    letter-spacing:.02em;
+  }
+  .top-right .chip:nth-child(2){
+    display:none!important;
+  }
+}
+
+
+/* ===== v24 LIVE AUDIT FIXES ===== */
+.agh-title{
+  white-space:normal!important;
+  overflow:visible!important;
+  text-overflow:clip!important;
+  line-height:1.08!important;
+}
+.log-tabs{
+  overflow-x:auto!important;
+  overflow-y:hidden!important;
+  flex-wrap:nowrap!important;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+  padding-bottom:2px;
+}
+.log-tabs::-webkit-scrollbar{display:none}
+.log-tab{
+  flex:0 0 auto!important;
+  white-space:nowrap!important;
+}
+.build-tag{
+  margin-top:12px;
+  padding-top:10px;
+  border-top:1px solid var(--line);
+  color:var(--muted);
+  font-size:9.5px;
+  font-weight:700;
+  text-align:right;
+}
+.hero.hero-compact.is-warning{
+  border-color:color-mix(in srgb,var(--amber) 34%,var(--line))!important;
+  background:linear-gradient(135deg,var(--panel),color-mix(in srgb,var(--amber-soft) 68%,var(--panel)))!important;
+}
+.hero.hero-compact.is-warning .hero-icon{
+  color:var(--amber)!important;
+  background:var(--amber-soft)!important;
+}
+.hero.hero-compact.is-error{
+  border-color:color-mix(in srgb,var(--red) 40%,var(--line))!important;
+  background:linear-gradient(135deg,var(--panel),color-mix(in srgb,var(--red-soft) 70%,var(--panel)))!important;
+}
+.hero.hero-compact.is-error .hero-icon{
+  color:var(--red)!important;
+  background:var(--red-soft)!important;
+}
+#routing .job-name,
+#routing .job-name > div{
+  min-width:0!important;
+}
+#routing .job p{
+  overflow-wrap:anywhere;
+}
+@media(max-width:560px){
+  .quick-link .agh-title{
+    font-size:11.1px!important;
+  }
+  .log-tabs{
+    margin-right:-4px;
+    padding-right:8px;
+  }
+  .log-tab{
+    min-height:40px!important;
+  }
+}
+
+
+/* ===== v25 STATUS IN TITLES ===== */
+.title-status{
+  font-weight:650;
+  color:var(--muted);
+  white-space:nowrap;
+}
+.title-status.is-ok{color:var(--green)}
+.title-status.is-warn{color:var(--amber)}
+.title-status.is-bad{color:var(--red)}
+.compact-status{
+  opacity:.72;
+}
+@media(max-width:560px){
+  .title-status{
+    font-size:.92em;
+  }
+  /* Status is already readable in title; keep pill as a small color marker only. */
+  .compact-status{
+    font-size:0!important;
+    width:12px!important;
+    min-width:12px!important;
+    height:12px!important;
+    min-height:12px!important;
+    padding:0!important;
+    border:0!important;
+    background:transparent!important;
+    box-shadow:none!important;
+    opacity:1!important;
+  }
+  .compact-status::before{
+    width:9px!important;
+    height:9px!important;
+    margin:0!important;
+  }
+}
+
+
+/* ===== v26 STATUS CLEANUP ===== */
+.page-title-status{
+  font-weight:650;
+  color:var(--muted);
+  white-space:nowrap;
+}
+.page-title-status.is-ok{color:var(--green)}
+.page-title-status.is-warn{color:var(--amber)}
+.page-title-status.is-bad{color:var(--red)}
+
+@media(max-width:560px){
+  .page-title-status{
+    font-size:.86em;
+  }
+  #wireguard .grid.half .card .kv{
+    margin-top:16px!important;
+  }
+  #routing .job p{
+    max-width:100%;
+  }
+}
+
+
+/* ===== v27 COMPACT STATUS CARDS ===== */
+#overview .overview-status-sub{
+  margin-top:2px!important;
+  margin-bottom:14px!important;
+  font-size:10.7px!important;
+}
+#overview .app-card .card-head{
+  margin-bottom:7px!important;
+}
+#overview .app-card .kv{
+  margin-top:0!important;
+}
+#overview .app-card{
+  padding-top:15px!important;
+  padding-bottom:15px!important;
+}
+#wan .detail-status-sub{
+  margin-top:2px!important;
+  margin-bottom:10px!important;
+}
+@media(max-width:560px){
+  #overview .app-card{
+    padding:14px!important;
+  }
+  #overview .overview-status-sub{
+    font-size:10.3px!important;
+    margin-bottom:12px!important;
+  }
+  #overview .app-card .card-head{
+    margin-bottom:6px!important;
+  }
+}
+
+
+/* ===== v28 DOCK GEOMETRY FIX =====
+   Final override: previous legacy mobile rule made the dock position:relative,
+   so later left/right offsets did not actually center it.
+*/
+@media(max-width:560px){
+  .mobile-nav{
+    position:fixed!important;
+    left:50%!important;
+    right:auto!important;
+    bottom:max(8px,env(safe-area-inset-bottom))!important;
+
+    width:calc(100% - 24px)!important;
+    max-width:calc(100% - 24px)!important;
+    margin:0!important;
+
+    transform:translateX(-50%)!important;
+    box-sizing:border-box!important;
+
+    min-height:66px!important;
+    padding:4px!important;
+    border-radius:16px!important;
+    z-index:70!important;
+  }
+
+  /* Content must finish above the fixed dock. */
+  .content{
+    padding-bottom:104px!important;
+  }
+
+  /* Sheet sits above the same centered dock. */
+  .more-panel{
+    bottom:82px!important;
+  }
+}
+
+</style>
+</head>
+<body>
+<div class="app">
+
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brandmark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 15h16v4H4z"/><path d="M8 15V9m8 6V9"/><path d="M6 7c3.5-3 8.5-3 12 0"/><path d="M9 10c1.8-1.5 4.2-1.5 6 0"/></svg>
+    </div>
+    <div><h1>Keenetic Apps</h1><small>центр локальных сервисов</small></div>
+  </div>
+
+  <div class="nav-label">Приложения</div>
+  <nav class="nav">
+    <button class="active" data-section="overview"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 11 12 4l8 7v9H4z"/><path d="M9 20v-6h6v6"/></svg></span><span>Обзор</span></button>
+    <button data-section="wan"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg></span><span>WAN Guardian</span></button>
+    <button data-section="wireguard"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="16" r="3"/><path d="M10.2 13.8 16 8"/><circle cx="17.5" cy="6.5" r="2.5"/><path d="m13.2 10.8 2 2m-4.1.1 2 2"/></svg></span><span>WireGuard</span></button>
+    <button data-section="routing"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 6h7a3 3 0 0 1 3 3v6"/><path d="m12 12 3 3 3-3"/><circle cx="5" cy="6" r="2"/><circle cx="18" cy="18" r="2"/></svg></span><span>Маршрутизация</span></button>
+    <button data-section="automation"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><span>Автоматизация</span></button>
+  </nav>
+
+  <div class="nav-label">Система</div>
+  <nav class="nav">
+    <button data-section="logs"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3.5h9l3 3V20.5H6z"/><path d="M15 3.5v4h4"/><path d="M9 11h6M9 14.5h6M9 18h4"/></svg></span><span>Логи</span></button>
+    <button data-section="system"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A7 7 0 0 0 15 6l-.3-2.6h-4L10.5 6A7 7 0 0 0 9 7.1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A7 7 0 0 0 10.5 18l.2 2.6h4L15 18a7 7 0 0 0 1.5-1.1l2.4 1 2-3.4-2-1.5c.1-.3.1-.7.1-1z"/></svg></span><span>Система</span></button>
+    <button data-section="settings"><span class="nav-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path d="M4 7h10M18 7h2M4 17h2M10 17h10"/>
+        <circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>
+      </svg>
+    </span><span>Настройки</span></button>
+  </nav>
+
+
+  <div class="nav-label">Внешние интерфейсы</div>
+  <nav class="nav external-nav">
+    <button type="button" data-external="router">
+      <span class="nav-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M4 14h16v5H4z"/><path d="M8 14V9m8 5V9"/><path d="M6 7c3.5-3 8.5-3 12 0"/>
+          <path d="M18 4h3v3"/><path d="m21 4-5 5"/>
+        </svg>
+      </span>
+      <span>Keenetic</span>
+      <span class="ext-mark">↗</span>
+    </button>
+    <button type="button" data-external="agh">
+      <span class="nav-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M12 3 5 6v5c0 4.7 2.8 8 7 10 4.2-2 7-5.3 7-10V6z"/>
+          <path d="m9 12 2 2 4-4"/><path d="M18 4h3v3"/><path d="m21 4-4 4"/>
+        </svg>
+      </span>
+      <span>AdGuard Home</span>
+      <span class="ext-mark">↗</span>
+    </button>
+  </nav>
+
+  <div class="side-card">
+    <div class="router-row">
+      <div class="router-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 14h16v5H4z"/><path d="M8 14V9m8 5V9"/><path d="M6 7c3.5-3 8.5-3 12 0"/></svg></div>
+      <div><strong>Viva KN-1913</strong><span>KeeneticOS 5.1.4</span></div>
+    </div>
+    <div class="side-health"><span>Система</span><b>● В СЕТИ</b></div>
+  </div>
+</aside>
+
+<main class="main">
+  <header class="topbar">
+    <div class="page-head"><h2 id="pageTitle">Обзор</h2><p id="pageSub">Сервисы, WAN и автоматизация</p></div>
+    <div class="top-right">
+      <div class="chip" id="backendChip"><span class="dot" id="backendDot" style="color:var(--amber)"></span><strong id="backendState">ПОДКЛЮЧЕНИЕ</strong></div>
+      <div class="chip">Время работы <strong id="routerUptime">—</strong></div>
+      <button class="icon-btn" id="themeBtn" title="Переключить тему" aria-label="Переключить тему"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg></button>
+      <button class="icon-btn" id="refreshBtn" title="Обновить текущую страницу" aria-label="Обновить текущую страницу"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 6v5h-5"/><path d="M19 11a7 7 0 1 0 1 5"/></svg></button>
+    </div>
+  </header>
+
+  <div class="content">
+
+    <section id="overview" class="section active">
+      <div class="hero hero-compact" id="healthHero">
+        <div class="hero-left">
+          <div class="hero-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="m4 13 5 5L20 7"/>
+            </svg>
+          </div>
+          <h3 id="heroText">Проверяем состояние…</h3>
+        </div>
+      </div>
+
+      <div class="quick-links">
+        <button class="quick-link" type="button" data-external="router">
+          <span class="quick-ico router-link-ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M4 14h16v5H4z"/><path d="M8 14V9m8 5V9"/><path d="M6 7c3.5-3 8.5-3 12 0"/>
+            </svg>
+          </span>
+          <span><b>Keenetic</b><small>Веб-интерфейс роутера</small></span>
+          <span class="quick-arrow">↗</span>
+        </button>
+
+        <button class="quick-link" type="button" data-external="agh">
+          <span class="quick-ico agh-link-ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M12 3 5 6v5c0 4.7 2.8 8 7 10 4.2-2 7-5.3 7-10V6z"/>
+              <path d="m9 12 2 2 4-4"/>
+            </svg>
+          </span>
+          <span><b class="agh-title">AdGuard Home</b><small>Панель DNS-фильтрации</small></span>
+          <span class="quick-arrow">↗</span>
+        </button>
+      </div>
+
+      <div class="grid apps">
+        <article class="card app-card green" data-go="wan" tabindex="0" role="button" aria-label="Открыть WAN Guardian">
+          <div class="card-head"><div class="card-title"><div class="card-icon c-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg></div><h3>WAN Guardian <span class="title-status" id="ovWanTitleStatus">(—)</span></h3></div><span class="status ok compact-status" id="ovWanPill">АКТИВЕН</span></div>
+          <div class="sub overview-status-sub" id="ovWanSub">v0.3-recovery · действий не было</div>
+          <div class="kv"><span>ISP</span><span id="ovWanIsp">—</span><span>Шлюз</span><span id="ovWanGateway">—</span><span>Этап восстановления</span><span id="ovWanStage">0</span></div>
+        </article>
+
+        <article class="card app-card blue" data-go="wireguard" tabindex="0" role="button" aria-label="Открыть WireGuard">
+          <div class="card-head"><div class="card-title"><div class="card-icon c-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="17" r="3"/><circle cx="17" cy="7" r="3"/><path d="m9.5 14.5 5-5"/></svg></div><h3>WireGuard <span class="title-status" id="ovWgTitleStatus">(—)</span></h3></div><span class="status ok compact-status" id="ovWgPill">—</span></div>
+          <div class="sub overview-status-sub" id="ovWgSub">WireGuard0 + WireGuard1</div>
+          <div class="kv"><span>WireGuard0</span><span id="ovWg0">—</span><span>WireGuard1</span><span id="ovWg1">—</span><span>Транспорт</span><span>ISP</span></div>
+        </article>
+
+        <article class="card app-card violet" data-go="routing" tabindex="0" role="button" aria-label="Открыть маршрутизацию">
+          <div class="card-head"><div class="card-title"><div class="card-icon c-violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h10"/><path d="m11 4 3 3-3 3"/><path d="M20 17H10"/><path d="m13 14-3 3 3 3"/></svg></div><h3>Маршрутизация <span class="title-status" id="ovRoutingTitleStatus">(—)</span></h3></div><span class="status ok compact-status" id="ovRoutingPill">—</span></div>
+          <div class="sub overview-status-sub" id="ovRoutingSub">доменные правила и сверка</div>
+          <div class="kv"><span>Автообслуживание</span><span>5 мин</span><span>Последний запуск</span><span id="ovRoutingLast">—</span><span>Последний код</span><span id="ovRoutingRc">—</span></div>
+        </article>
+
+        <article class="card app-card amber" data-go="automation" tabindex="0" role="button" aria-label="Открыть автоматизацию">
+          <div class="card-head"><div class="card-title"><div class="card-icon c-amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></div><h3>Автоматизация <span class="title-status" id="ovAutomationTitleStatus">(—)</span></h3></div><span class="status ok compact-status" id="ovAutomationPill">—</span></div>
+          <div class="sub overview-status-sub">планировщик + контроль сервисов</div>
+          <div class="kv"><span>crond</span><span id="ovCrond">—</span><span>Контроль сервиса</span><span id="ovSupervisor">—</span><span>Последний код</span><span id="ovGuardianRc">—</span></div>
+        </article>
+      </div>
+
+      <div class="health-strip">
+        <div class="health-item" id="healthInternet"><i></i><div><b>Интернет</b><span id="healthInternetText">—</span></div></div>
+        <div class="health-item" id="healthIsp"><i></i><div><b>ISP</b><span id="healthIspText">—</span></div></div>
+        <div class="health-item" id="healthWg"><i></i><div><b>WireGuard</b><span id="healthWgText">—</span></div></div>
+        <div class="health-item" id="healthCron"><i></i><div><b>crond</b><span id="healthCronText">—</span></div></div>
+        <div class="health-item" id="healthAgh"><i></i><div><b>AdGuard Home</b><span id="healthAghText">—</span></div></div>
+      </div>
+
+      <div class="grid two">
+        <div class="card">
+          <div class="toolbar"><div><h3>Последние события</h3><div class="meta">Только важные изменения состояния</div></div><button class="btn ghost" data-go="logs">Открыть логи →</button></div>
+          <div class="job-list">
+            <div class="job"><div class="job-name"><i></i><div><strong>WAN Guardian v0.3 активирован</strong><p>Восстановление включено, текущий WAN не изменялся.</p></div></div><time>23:56</time><span class="status ok">Норма</span></div>
+            <div class="job"><div class="job-name"><i></i><div><strong>Проверка автозапуска Cron</strong><p>Автозапуск Guardian подтверждён, RC=0.</p></div></div><time>23:33</time><span class="status ok">Норма</span></div>
+            <div class="job"><div class="job-name"><i></i><div><strong>Проверки RCI / PHY / ISP</strong><p>Все уровни диагностики подтвердили исправное состояние.</p></div></div><time>23:18</time><span class="status ok">Норма</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="toolbar"><div><h3>Ресурсы</h3><div class="meta">Entware и USB</div></div><span class="status ok">ЗАПИСЬ</span></div>
+          <div class="kv"><span>/opt</span><span>ext4</span><span>Свободно</span><span id="sysFree">—</span><span>Занято</span><span id="sysUsed">—</span><span>jq</span><span>1.8.1</span><span>ndmc</span><span>/bin/ndmc</span></div>
+          <div class="storage"><div class="progress"><i></i></div></div>
+          <div class="notice" style="margin-top:12px"><b>AdGuard Home не меняем.</b> Здесь только показываем статус внешнего сервиса.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="wan" class="section">
+      <div class="toolbar">
+        <div><h3>WAN Guardian</h3><div class="meta">Диагностика и автовосстановление WAN</div></div>
+        <div class="actions"><button class="btn" data-toast="Проверка WAN запущена"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M20 6v5h-5"/><path d="M19 11a7 7 0 1 0 1 5"/></svg>Проверить сейчас</button><button class="btn" data-confirm="Обновить DHCP">Обновить DHCP</button><button class="btn danger" data-confirm="Перезапустить WAN">Перезапустить WAN</button></div>
+      </div>
+
+      <div class="grid three">
+        <div class="card"><div class="card-head"><h3>Текущее состояние <span class="title-status" id="wanStateTitleStatus">(—)</span></h3><span class="status ok compact-status" id="wanStatePill">—</span></div><div class="sub detail-status-sub" id="wanStateSub">—</div></div>
+        <div class="card"><div class="card-head"><h3>ISP <span class="title-status" id="wanIspTitleStatus">(—)</span></h3><span class="status ok compact-status" id="wanIspPill">—</span></div><div class="metric" id="wanIspMetric">—</div><div class="sub" id="wanIspSub">—</div></div>
+        <div class="card"><div class="card-head"><h3>IPv4 <span class="title-status" id="wanIpTitleStatus">(—)</span></h3><span class="status ok compact-status" id="wanIpPill">DHCP</span></div><div class="metric" id="wanIpMetric">—</div><div class="sub" id="wanIpSub">—</div></div>
+      </div>
+
+      <div class="grid half" style="margin-top:16px">
+        <div class="card">
+          <div class="toolbar"><div><h3>Путь до Интернета</h3><div class="meta">Независимые уровни проверки</div></div><span class="status ok" id="wanPathPill">—</span></div>
+          <div class="path">
+            <div class="path-node"><div class="node-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14"/><path d="M8 8v8m8-8v8"/></svg></div><b>PHY</b><span id="wanPhyText">—</span></div>
+            <div class="path-node"><div class="node-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 7h14v10H5z"/><path d="M8 10h8M8 14h4"/></svg></div><b>DHCP</b><span id="wanDhcpText">—</span></div>
+            <div class="path-node"><div class="node-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h16"/><path d="m16 8 4 4-4 4"/></svg></div><b>Шлюз</b><span id="wanGatewayText">—</span></div>
+            <div class="path-node"><div class="node-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4a13 13 0 0 1 0 16M12 4a13 13 0 0 0 0 16"/></svg></div><b>Интернет</b><span id="wanInternetText">—</span></div>
+          </div>
+          <div class="sep"></div>
+          <table class="table">
+            <thead><tr><th>Проверка</th><th>Результат</th><th>Источник</th></tr></thead>
+            <tbody>
+              <tr><td>Внешняя проверка 1</td><td><span class="status info">Нет данных</span></td><td class="mono">1.0.0.1 через eth3</td></tr>
+              <tr><td>Внешняя проверка 2</td><td><span class="status info">Нет данных</span></td><td class="mono">77.88.8.1 через eth3</td></tr>
+              <tr><td>RCI Интернет</td><td><span class="status ok" id="wanRciTablePill">—</span></td><td class="mono">show/internet/status</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="toolbar"><div><h3>Политика восстановления</h3><div class="meta">v0.3-recovery</div></div><span class="status ok">ВКЛЮЧЕНО</span></div>
+          <div class="recovery-steps">
+            <div class="step"><div class="step-num">1</div><div><b>3 одинаковых сбоя подряд</b><span>Единичный сбой не запускает восстановление.</span></div><small>проверка</small></div>
+            <div class="step"><div class="step-num">2</div><div><b>Обновить DHCP</b><span>Сбой DHCP, шлюза или Интернета.</span></div><small>пауза 10 мин</small></div>
+            <div class="step"><div class="step-num">3</div><div><b>Перезапуск ISP: выкл → 5 с → вкл</b><span>Если обновление DHCP не помогло или пропала физическая линия.</span></div><small>пауза 30 мин</small></div>
+          </div>
+          <div class="notice" style="margin-top:12px"><b>Предохранители:</b> пауза после загрузки 180 с, до 3 обновлений DHCP/час, 2 перезапуска WAN/час и 6/сутки. Перезагрузка роутера отключена.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="wireguard" class="section">
+      <div class="toolbar"><div><h3>WireGuard</h3><div class="meta">Туннели и защитные скрипты</div></div></div>
+      <div class="grid half">
+        <div class="card"><div class="card-head"><div class="card-title"><div class="card-icon c-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="16" r="3"/><path d="M10.2 13.8 16 8"/><circle cx="17.5" cy="6.5" r="2.5"/><path d="m13.2 10.8 2 2"/></svg></div><h3>WireGuard0 <span class="title-status" id="wg0TitleStatus">(—)</span></h3></div><span class="status ok compact-status" id="wg0Pill">—</span></div><div class="kv"><span>Транспорт</span><span>ISP</span><span>Состояние</span><span id="wg0State">—</span></div></div>
+        <div class="card"><div class="card-head"><div class="card-title"><div class="card-icon c-violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="16" r="3"/><path d="M10.2 13.8 16 8"/><circle cx="17.5" cy="6.5" r="2.5"/><path d="m13.2 10.8 2 2"/></svg></div><h3>WireGuard1 <span class="title-status" id="wg1TitleStatus">(—)</span></h3></div><span class="status ok compact-status" id="wg1Pill">—</span></div><div class="kv"><span>Транспорт</span><span>ISP</span><span>Состояние</span><span id="wg1State">—</span></div></div>
+      </div>
+    </section>
+
+    <section id="routing" class="section">
+      <div class="toolbar"><div><h3>Маршрутизация</h3><div class="meta">Доменные правила и ночные проверки</div></div><div class="actions"><button class="btn" data-toast="Аудит запущен в демо-режиме"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/><path d="M8.5 11h5M11 8.5v5"/></svg>Аудит</button><button class="btn" data-confirm="Night reconcile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 7h10"/><path d="m11 4 3 3-3 3"/><path d="M20 17H10"/><path d="m13 14-3 3 3 3"/></svg>Сверить правила</button></div></div>
+      <div class="card">
+        <div class="job-list">
+          <div class="job"><div class="job-name"><i id="routeAutoDot"></i><div><strong>adaptive-auto-maint.sh</strong><p id="routeAutoText">Автоматическое обслуживание маршрутов.</p></div></div><time>каждые 5 мин</time><span class="status info" id="routeAutoPill">—</span></div>
+          <div class="job"><div class="job-name"><i></i><div><strong>S91adaptive-live</strong><p>Контроль фонового процесса.</p></div></div><time>каждую минуту</time><span class="status info">Нет данных</span></div>
+          <div class="job"><div class="job-name"><i></i><div><strong>vpn-domain-audit-chain.sh</strong><p>Ночной аудит доменов.</p></div></div><time>00:10</time><span class="status info">По расписанию</span></div>
+          <div class="job"><div class="job-name"><i></i><div><strong>adaptive-hints-update.sh</strong><p>Обновление служебных подсказок.</p></div></div><time>04:25</time><span class="status info">По расписанию</span></div>
+          <div class="job"><div class="job-name"><i></i><div><strong>adaptive-housekeeping.sh</strong><p>Очистка служебных данных.</p></div></div><time>04:45</time><span class="status info">По расписанию</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="automation" class="section">
+      <div class="toolbar"><div><h3>Автоматизация</h3><div class="meta">Cron, контроль сервисов и фоновые задания</div></div></div>
+      <div class="grid three">
+        <div class="card"><div class="card-head"><h3>crond <span class="title-status" id="crondTitleStatus">(—)</span></h3><span class="status ok compact-status" id="crondPill">—</span></div><div class="metric" id="crondMetric">—</div><div class="sub">/opt/sbin/crond</div></div>
+        <div class="card"><div class="card-head"><h3>Контроль сервиса <span class="title-status" id="supervisorTitleStatus">(—)</span></h3><span class="status ok compact-status" id="supervisorPill">—</span></div><div class="metric" id="supervisorMetric">—</div><div class="sub">crond-supervisor.sh</div></div>
+        <div class="card"><div class="card-head"><h3>Контроль заданий</h3><span class="status info" id="trackedCronPill">—</span></div><div class="metric" id="trackedCronMetric">—</div><div class="sub">WAN · WG · маршрутизация</div></div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <div class="table-wrap"><table class="table"><thead><tr><th>Задание</th><th>Расписание</th><th>Последний код</th><th>Статус</th></tr></thead><tbody>
+          <tr><td class="mono">wan-guardian.sh</td><td>* * * * *</td><td id="cronGuardianRc">—</td><td><span class="status info" id="cronGuardianPill">—</span></td></tr>
+          <tr><td class="mono">wg-health-chain</td><td>* * * * *</td><td id="cronWgRc">—</td><td><span class="status info" id="cronWgPill">—</span></td></tr>
+          <tr><td class="mono">adaptive-auto-maint.sh</td><td>*/5 * * * *</td><td id="cronRoutingRc">—</td><td><span class="status info" id="cronRoutingPill">—</span></td></tr>
+          <tr><td class="mono">vpn-domain-audit-chain.sh</td><td>10 0 * * *</td><td>—</td><td><span class="status info">По расписанию</span></td></tr>
+        </tbody></table></div>
+      </div>
+    </section>
+
+    <section id="logs" class="section">
+      <div class="toolbar">
+        <div><h3>Логи</h3><div class="meta">Журналы сервисов</div></div>
+        <div class="log-tools"><input class="search" id="logSearch" placeholder="Фильтр по тексту..."></div>
+      </div>
+      <div class="card">
+        <div class="log-tabs">
+          <button class="log-tab active" data-log="wan">WAN Guardian</button>
+          <button class="log-tab" data-log="recovery">Восстановление</button>
+          <button class="log-tab" data-log="cron">Cron</button>
+          <button class="log-tab" data-log="routing">Маршруты</button>
+        </div>
+        <div class="logbox" id="logbox"></div>
+      </div>
+    </section>
+
+
+    <section id="settings" class="section">
+      <div class="toolbar">
+        <div>
+          <h3>Настройки</h3>
+          <div class="meta">Параметры наших сервисов. Пока сохраняются локально в браузере.</div>
+        </div>
+        <div class="settings-actions">
+          <span class="save-state" id="settingsSaveState">Сохранено</span>
+          <button class="btn" id="resetUiSettings">Сбросить</button>
+          <button class="btn primary" id="saveUiSettings">Сохранить</button>
+        </div>
+      </div>
+
+      <div class="settings-grid">
+
+        <div class="card settings-card">
+          <div class="card-head">
+            <div class="card-title">
+              <div class="card-icon c-green">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg>
+              </div>
+              <h3>WAN Guardian</h3>
+            </div>
+            <span class="status ok">Включён</span>
+          </div>
+
+          <div class="setting-row">
+            <div><b>Мониторинг WAN</b><small>Проверка состояния каждую минуту.</small></div>
+            <label class="switch"><input type="checkbox" data-setting="wan_monitor" checked><span></span></label>
+          </div>
+          <div class="setting-row">
+            <div><b>Автовосстановление</b><small>Обновление DHCP → перезапуск WAN при подтверждённом сбое.</small></div>
+            <label class="switch"><input type="checkbox" data-setting="wan_recovery" checked><span></span></label>
+          </div>
+          <div class="setting-row">
+            <div><b>Логировать переходы</b><small>Писать только изменения состояния и recovery-действия.</small></div>
+            <label class="switch"><input type="checkbox" data-setting="wan_logging" checked><span></span></label>
+          </div>
+
+          <div class="settings-fields recovery-fields">
+            <label><span>Подтверждений сбоя</span><input type="number" min="1" max="10" value="3" data-setting="wan_confirm"></label>
+            <label><span>Задержка после загрузки, сек</span><input type="number" min="30" max="900" value="180" data-setting="wan_boot_grace"></label>
+            <label><span>Пауза после DHCP, сек</span><input type="number" min="60" max="3600" value="600" data-setting="wan_renew_cd"></label>
+            <label><span>Пауза после WAN, сек</span><input type="number" min="300" max="7200" value="1800" data-setting="wan_bounce_cd"></label>
+          </div>
+          <div class="settings-hint">Параметры восстановления активны только при включённом автовосстановлении.</div>
+        </div>
+
+        <div class="card settings-card">
+          <div class="card-head">
+            <div class="card-title">
+              <div class="card-icon c-blue">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <circle cx="8" cy="16" r="3"/><path d="M10.2 13.8 16 8"/><circle cx="17.5" cy="6.5" r="2.5"/>
+                </svg>
+              </div>
+              <h3>WireGuard</h3>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div><b>Контроль туннелей</b><small>Контроль состояния туннелей.</small></div>
+            <label class="switch"><input type="checkbox" data-setting="wg_health" checked><span></span></label>
+          </div>
+          <div class="setting-row">
+            <div><b>Защита fail-open</b><small>Защитная логика при проблемах WireGuard.</small></div>
+            <label class="switch"><input type="checkbox" data-setting="wg_failopen" checked><span></span></label>
+          </div>
+          <div class="setting-row">
+            <div><b>Показывать трафик RX/TX</b><small>Выводить трафик и возраст handshake после подключения backend.</small></div>
+            <label class="switch"><input type="checkbox" data-setting="wg_traffic" checked><span></span></label>
+          </div>
+        </div>
+
+        <div class="card settings-card">
+          <div class="card-head">
+            <div class="card-title">
+              <div class="card-icon c-violet">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 6h7a3 3 0 0 1 3 3v6"/><path d="m12 12 3 3 3-3"/><circle cx="5" cy="6" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+              </div>
+              <h3>Adaptive Routing</h3>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div><b>Автообслуживание</b><small>Автоматическое обслуживание правил.</small></div>
+            <label class="switch"><input type="checkbox" data-setting="route_auto" checked><span></span></label>
+          </div>
+          <div class="setting-row">
+            <div><b>Live-контроль</b><small>Проверка живого маршрута каждую минуту.</small></div>
+            <label class="switch"><input type="checkbox" data-setting="route_live" checked><span></span></label>
+          </div>
+          <div class="setting-row">
+            <div><b>Ночной аудит</b><small>Проверка доменных правил и ночная сверка.</small></div>
+            <label class="switch"><input type="checkbox" data-setting="route_night" checked><span></span></label>
+          </div>
+          <div class="setting-row">
+            <div><b>Служебная очистка</b><small>Очистка временных и устаревших данных.</small></div>
+            <label class="switch"><input type="checkbox" data-setting="route_housekeeping" checked><span></span></label>
+          </div>
+        </div>
+
+        <div class="card settings-card">
+          <div class="card-head">
+            <div class="card-title">
+              <div class="card-icon c-amber">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>
+              </div>
+              <h3>Автоматизация</h3>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div><b>Контроль сервисов</b><small>Следить за crond и нашими службами.</small></div>
+            <label class="switch"><input type="checkbox" data-setting="supervisor" checked><span></span></label>
+          </div>
+          <div class="setting-row">
+            <div><b>Показывать служебные задания</b><small>Отображать housekeeping и служебные cron-задачи.</small></div>
+            <label class="switch"><input type="checkbox" data-setting="show_system_jobs" checked><span></span></label>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="toolbar settings-toolbar">
+        <div>
+          <h3>Редакторы списков</h3>
+          <div class="meta">Доменные списки для нашей маршрутизации. AdGuard Home остаётся отдельным сервисом.</div>
+        </div>
+      </div>
+
+      <div class="list-editor-grid">
+
+        <div class="card list-card">
+          <div class="list-head">
+            <div>
+              <div class="list-title-line"><h3>Через VPN</h3><span class="list-mode vpn-mode">WG</span></div>
+              <div class="meta">Домены, которые должны идти через WireGuard.</div>
+            </div>
+            <span class="count-badge" data-count-for="vpn">0</span>
+          </div>
+
+          <div class="list-add">
+            <input id="vpnListInput" placeholder="например: example.com">
+            <button class="btn primary" data-add-list="vpn">Добавить</button>
+          </div>
+
+          <div class="chip-list" data-list="vpn"></div>
+
+          <div class="list-actions">
+            <button class="btn" data-sort-list="vpn">Сортировать</button>
+            <button class="btn" data-copy-list="vpn">Копировать</button>
+            <button class="btn danger" data-clear-list="vpn">Очистить</button>
+          </div>
+        </div>
+
+        <div class="card list-card">
+          <div class="list-head">
+            <div>
+              <div class="list-title-line"><h3>Напрямую</h3><span class="list-mode direct-mode">ISP</span></div>
+              <div class="meta">Домены, которые должны идти напрямую через ISP.</div>
+            </div>
+            <span class="count-badge" data-count-for="direct">0</span>
+          </div>
+
+          <div class="list-add">
+            <input id="directListInput" placeholder="например: example.com">
+            <button class="btn primary" data-add-list="direct">Добавить</button>
+          </div>
+
+          <div class="chip-list" data-list="direct"></div>
+
+          <div class="list-actions">
+            <button class="btn" data-sort-list="direct">Сортировать</button>
+            <button class="btn" data-copy-list="direct">Копировать</button>
+            <button class="btn danger" data-clear-list="direct">Очистить</button>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="card bulk-editor">
+        <div class="toolbar">
+          <div>
+            <h3>Редактор списком</h3>
+            <div class="meta">По одному домену на строку. Пустые строки игнорируются.</div>
+          </div>
+        </div>
+
+        <div class="bulk-grid">
+          <label>
+            <span>Через VPN</span>
+            <textarea id="vpnBulk"></textarea>
+          </label>
+          <label>
+            <span>Напрямую</span>
+            <textarea id="directBulk"></textarea>
+          </label>
+        </div>
+
+        <div class="actions" style="margin-top:12px">
+          <button class="btn primary" id="applyBulk">Применить</button>
+          <button class="btn" id="exportLists">Экспортировать TXT</button>
+        </div>
+
+        <div class="notice" style="margin-top:12px">
+          Пока это frontend-макет: изменения сохраняются в браузере и не отправляются на роутер.
+          Когда подключим backend, эти редакторы будут менять реальные файлы наших списков через безопасный API.
+        </div>
+      </div>
+    </section>
+
+    <section id="system" class="section">
+      <div class="toolbar"><div><h3>Система</h3><div class="meta">Инфраструктура наших приложений</div></div></div>
+      <div class="grid three">
+        <div class="card"><div class="card-head"><h3>Роутер</h3><span class="status ok">В СЕТИ</span></div><div class="metric" id="sysRouterModel">—</div><div class="sub" id="sysRouterVersion">—</div></div>
+        <div class="card"><div class="card-head"><h3>/opt</h3><span class="status ok">ЗАПИСЬ</span></div><div class="metric">57,6 ГБ</div><div class="sub">свободно из 57,8 ГБ · ext4</div></div>
+        <div class="card"><div class="card-head"><h3>Зависимости</h3><span class="status ok">Норма</span></div><div class="kv"><span>jq</span><span>1.8.1</span><span>curl</span><span>8.15.0</span><span>ndmc</span><span>/bin/ndmc</span></div></div>
+      </div>
+      
+      <div class="card external-settings" style="margin-top:16px">
+        <div class="toolbar">
+          <div>
+            <h3>Внешние интерфейсы</h3>
+            <div class="meta">Адреса переходов из этой панели</div>
+          </div>
+          <span class="status info">Локально</span>
+        </div>
+
+        <div class="external-form">
+          <label>
+            <span>Настройки Keenetic</span>
+            <input id="routerUrlInput" class="url-input mono" type="text" autocomplete="off">
+          </label>
+          <label>
+            <span>AdGuard Home</span>
+            <input id="aghUrlInput" class="url-input mono" type="text" autocomplete="off">
+          </label>
+        </div>
+
+        <div class="external-actions">
+          <button class="btn primary" id="saveExternalUrls" type="button">Сохранить адреса</button>
+          <button class="btn" type="button" data-external="router">Открыть Keenetic ↗</button>
+          <button class="btn" type="button" data-external="agh">Открыть AGH ↗</button>
+        </div>
+
+        <div class="notice" style="margin-top:12px">
+          Адреса сохраняются только в браузере. При размещении панели на роутере Keenetic по умолчанию открывается на том же локальном IP, а AGH — на том же IP с портом 3001.
+        </div>
+      </div>
+
+<div class="card" style="margin-top:16px"><div class="notice"><b>Принцип:</b> панель управляет только нашими приложениями. AdGuard Home остаётся отдельным сервисом и не модифицируется.</div><div class="build-tag">VWARD UI v0.1 · live backend</div></div>
+    </section>
+
+  </div>
+</main>
+
+
+<nav class="mobile-nav">
+  <button class="active" data-section="overview">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 11 12 4l8 7v9H4z"/><path d="M9.5 20v-6h5v6"/></svg>
+    Обзор
+  </button>
+  <button data-section="wan">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg>
+    WAN
+  </button>
+  <button data-section="wireguard">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="8" cy="16" r="3"/><path d="M10.2 13.8 16 8"/><circle cx="17.5" cy="6.5" r="2.5"/><path d="m13.2 10.8 2 2"/></svg>
+    WG
+  </button>
+  <button data-section="routing">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 6h7a3 3 0 0 1 3 3v6"/><path d="m12 12 3 3 3-3"/><circle cx="5" cy="6" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+    Маршр.
+  </button>
+  <button id="moreBtn" type="button">
+    <span id="moreIcon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>
+    </span>
+    <span id="moreLabel">Ещё</span>
+  </button>
+</nav>
+
+
+
+<div class="more-sheet" id="moreSheet" aria-hidden="true">
+  <div class="more-backdrop" id="moreBackdrop"></div>
+  <div class="more-panel">
+    <div class="more-handle"></div>
+    <div class="more-title">Ещё</div>
+
+    <button class="more-item" data-more-section="automation">
+      <span class="more-ico">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>
+      </span>
+      <span><b>Автоматизация</b><small>Cron, контроль сервисов и фоновые задания</small></span>
+      <span class="more-arrow">›</span>
+    </button>
+
+    <button class="more-item" data-more-section="logs">
+      <span class="more-ico">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 3.5h9l3 3V20.5H6z"/><path d="M15 3.5v4h4"/><path d="M9 11h6M9 14.5h6M9 18h4"/></svg>
+      </span>
+      <span><b>Логи</b><small>WAN, восстановление, Cron и маршруты</small></span>
+      <span class="more-arrow">›</span>
+    </button>
+
+
+    
+    <button class="more-item" data-more-section="settings">
+      <span class="more-ico">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path d="M4 7h10M18 7h2M4 17h2M10 17h10"/>
+          <circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>
+        </svg>
+      </span>
+      <span><b>Настройки</b><small>Переключатели, лимиты и списки</small></span>
+      <span class="more-arrow">›</span>
+    </button>
+
+    <div class="more-sep"></div>
+
+    <button class="more-item" type="button" data-external="router">
+      <span class="more-ico ext-router">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 14h16v5H4z"/><path d="M8 14V9m8 5V9"/><path d="M6 7c3.5-3 8.5-3 12 0"/></svg>
+      </span>
+      <span><b>Настройки Keenetic</b><small>Веб-интерфейс роутера</small></span>
+      <span class="more-arrow">↗</span>
+    </button>
+
+    <button class="more-item" type="button" data-external="agh">
+      <span class="more-ico ext-agh">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3 5 6v5c0 4.7 2.8 8 7 10 4.2-2 7-5.3 7-10V6z"/><path d="m9 12 2 2 4-4"/></svg>
+      </span>
+      <span><b class="agh-title">AdGuard Home</b><small>Панель DNS-фильтрации</small></span>
+      <span class="more-arrow">↗</span>
+    </button>
+
+    <button class="more-item" data-more-section="system">
+      <span class="more-ico">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A7 7 0 0 0 15 6l-.3-2.6h-4L10.5 6A7 7 0 0 0 9 7.1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A7 7 0 0 0 10.5 18l.2 2.6h4L15 18a7 7 0 0 0 1.5-1.1l2.4 1 2-3.4-2-1.5c.1-.3.1-.7.1-1z"/></svg>
+      </span>
+      <span><b>Система</b><small>Роутер, /opt и зависимости</small></span>
+      <span class="more-arrow">›</span>
+    </button>
+  </div>
+</div>
+
+<div class="modal" id="modal">
+  <div class="modal-box">
+    <h3 id="modalTitle">Подтверждение</h3>
+    <p>Это пока визуальный макет. Реальная команда на роутер отправлена не будет.</p>
+    <div class="modal-actions"><button class="btn" id="cancelModal">Отмена</button><button class="btn danger" id="confirmModal">Подтвердить</button></div>
+  </div>
+</div>
+<div class="toast" id="toast">Готово</div>
+
+<script>
+const pageMeta={
+  overview:['Обзор','Сервисы, WAN и автоматизация'],
+  wan:['WAN Guardian','Диагностика и автовосстановление WAN'],
+  wireguard:['WireGuard','Туннели и контроль связи'],
+  routing:['Маршрутизация','Адаптивная маршрутизация и доменные правила'],
+  automation:['Автоматизация','Cron, контроль сервисов и фоновые задания'],
+  logs:['Логи','Журналы сервисов'],
+  system:['Система','Роутер, /opt и зависимости']
+};
+
+const primarySections=['overview','wan','wireguard','routing'];
+const allSections=['overview','wan','wireguard','routing','automation','logs','system'];
+let currentSection=document.querySelector('.section.active')?.id || 'overview';
+
+function switchSection(id,opts={}){
+  if(!document.getElementById(id)) return;
+  const previous=currentSection;
+  const same=previous===id;
+
+  document.querySelectorAll('.section').forEach(x=>{
+    x.classList.remove('active','page-enter-forward','page-enter-back','page-enter-fade');
+  });
+
+  const next=document.getElementById(id);
+  next.classList.add('active');
+
+  if(!same){
+    const a=allSections.indexOf(previous);
+    const b=allSections.indexOf(id);
+    const cls=opts.direction || (a>=0&&b>=0 ? (b>a?'page-enter-forward':'page-enter-back') : 'page-enter-fade');
+    next.classList.add(cls);
+    window.setTimeout(()=>next.classList.remove(cls),320);
+  }
+
+  document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));
+
+  const moreBtn=document.getElementById('moreBtn');
+  const moreLabel=document.getElementById('moreLabel');
+  const moreIcon=document.getElementById('moreIcon');
+
+  if(moreBtn){
+    const hidden=['automation','logs','settings','system'].includes(id);
+    moreBtn.classList.toggle('active',hidden);
+
+    const iconMap={
+      logs:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 3.5h9l3 3V20.5H6z"/><path d="M15 3.5v4h4"/><path d="M9 11h6M9 14.5h6M9 18h4"/></svg>`,
+      automation:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>`,
+      settings:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>`,
+      system:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A7 7 0 0 0 15 6l-.3-2.6h-4L10.5 6A7 7 0 0 0 9 7.1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A7 7 0 0 0 10.5 18l.2 2.6h4L15 18a7 7 0 0 0 1.5-1.1l2.4 1 2-3.4-2-1.5c.1-.3.1-.7.1-1z"/></svg>`,
+      more:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>`
+    };
+
+    if(id==='logs'){
+      moreLabel.textContent='Логи';
+      moreIcon.innerHTML=iconMap.logs;
+    }else if(id==='automation'){
+      moreLabel.textContent='Авто';
+      moreIcon.innerHTML=iconMap.automation;
+    }else if(id==='settings'){
+      moreLabel.textContent='Настр.';
+      moreIcon.innerHTML=iconMap.settings;
+    }else if(id==='system'){
+      moreLabel.textContent='Система';
+      moreIcon.innerHTML=iconMap.system;
+    }else{
+      moreLabel.textContent='Ещё';
+      moreIcon.innerHTML=iconMap.more;
+    }
+  }
+
+  const m=pageMeta[id]||[id,''];
+  document.getElementById('pageTitle').textContent=m[0];
+  document.getElementById('pageSub').textContent=m[1];
+  currentSection=id;
+
+  if(!opts.keepScroll){
+    window.scrollTo({top:0,behavior:opts.gesture?'auto':'smooth'});
+  }
+}
+
+document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>switchSection(b.dataset.section)));
+document.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>switchSection(b.dataset.go)));
+
+/* Touch navigation: horizontal swipe across the four main pages. */
+let swipeStart=null;
+const swipeRoot=document.querySelector('.content');
+function swipeBlocked(target){
+  return !!target.closest('input,textarea,select,button,.logbox,.more-panel,.modal-box');
+}
+if(swipeRoot){
+  swipeRoot.addEventListener('touchstart',e=>{
+    if(e.touches.length!==1 || swipeBlocked(e.target)){swipeStart=null;return;}
+    const t=e.touches[0];
+    swipeStart={x:t.clientX,y:t.clientY,time:Date.now()};
+  },{passive:true});
+
+  swipeRoot.addEventListener('touchend',e=>{
+    if(!swipeStart || e.changedTouches.length!==1){swipeStart=null;return;}
+    const t=e.changedTouches[0];
+    const dx=t.clientX-swipeStart.x;
+    const dy=t.clientY-swipeStart.y;
+    const dt=Date.now()-swipeStart.time;
+    swipeStart=null;
+
+    if(dt>750 || Math.abs(dx)<72 || Math.abs(dx)<Math.abs(dy)*1.25) return;
+    const i=primarySections.indexOf(currentSection);
+    if(i<0) return;
+
+    if(dx<0){
+      if(i<primarySections.length-1){
+        switchSection(primarySections[i+1],{gesture:true,direction:'page-enter-forward'});
+      }else{
+        openMore();
+      }
+    }else if(i>0){
+      switchSection(primarySections[i-1],{gesture:true,direction:'page-enter-back'});
+    }
+  },{passive:true});
+}
+
+/* Swipe the More sheet down to close. */
+let moreSwipeY=null;
+const morePanelEl=document.querySelector('.more-panel');
+if(morePanelEl){
+  morePanelEl.addEventListener('touchstart',e=>{
+    if(e.touches.length===1) moreSwipeY=e.touches[0].clientY;
+  },{passive:true});
+  morePanelEl.addEventListener('touchend',e=>{
+    if(moreSwipeY===null || e.changedTouches.length!==1) return;
+    const dy=e.changedTouches[0].clientY-moreSwipeY;
+    moreSwipeY=null;
+    if(dy>64) closeMore();
+  },{passive:true});
+}
+
+/* Unified tap feedback and ripple. */
+const pressSelector='button,.app-card,.quick-link,.more-item,.log-tab,.nav button,.mobile-nav button';
+document.addEventListener('pointerdown',e=>{
+  const el=e.target.closest(pressSelector);
+  if(!el || el.disabled) return;
+  el.classList.add('is-pressed');
+
+  const r=el.getBoundingClientRect();
+  const ripple=document.createElement('span');
+  ripple.className='tap-ripple';
+  ripple.style.left=(e.clientX-r.left)+'px';
+  ripple.style.top=(e.clientY-r.top)+'px';
+  el.appendChild(ripple);
+  window.setTimeout(()=>ripple.remove(),560);
+});
+['pointerup','pointercancel','pointerleave'].forEach(type=>{
+  document.addEventListener(type,e=>{
+    const el=e.target.closest?.(pressSelector);
+    if(el) el.classList.remove('is-pressed');
+  },true);
+});
+
+document.addEventListener('click',e=>{
+  const el=e.target.closest('.app-card,.quick-link,.more-item,.log-tab');
+  if(!el) return;
+  el.classList.add('tap-selected');
+  window.setTimeout(()=>el.classList.remove('tap-selected'),320);
+});
+
+
+
+const moreSheet=document.getElementById('moreSheet');
+const moreBtn=document.getElementById('moreBtn');
+const moreBackdrop=document.getElementById('moreBackdrop');
+
+function openMore(){
+  moreSheet.classList.add('open');
+  moreSheet.setAttribute('aria-hidden','false');
+}
+function closeMore(){
+  moreSheet.classList.remove('open');
+  moreSheet.setAttribute('aria-hidden','true');
+}
+if(moreBtn) moreBtn.addEventListener('click',openMore);
+if(moreBackdrop) moreBackdrop.addEventListener('click',closeMore);
+document.querySelectorAll('[data-more-section]').forEach(b=>b.addEventListener('click',()=>{
+  closeMore();
+  switchSection(b.dataset.moreSection);
+}));
+
+
+function defaultRouterUrl(){
+  const proto=(location.protocol==='http:'||location.protocol==='https:')?location.protocol:'http:';
+  const host=location.hostname||'192.168.1.1';
+  return `${proto}//${host}/`;
+}
+function defaultAghUrl(){
+  const proto=(location.protocol==='http:'||location.protocol==='https:')?location.protocol:'http:';
+  const host=location.hostname||'192.168.1.1';
+  return `${proto}//${host}:3001/`;
+}
+function normalizeUrl(v,fallback){
+  let s=(v||'').trim();
+  if(!s) return fallback;
+  if(!/^https?:\/\//i.test(s)) s='http://'+s;
+  return s.endsWith('/')?s:s+'/';
+}
+function getExternalUrl(kind){
+  if(kind==='router'){
+    return normalizeUrl(localStorage.getItem('kapps-router-url'),defaultRouterUrl());
+  }
+  return normalizeUrl(localStorage.getItem('kapps-agh-url'),defaultAghUrl());
+}
+function openExternal(kind){
+  const url=getExternalUrl(kind);
+  window.open(url,'_blank','noopener');
+}
+document.querySelectorAll('[data-external]').forEach(b=>{
+  b.addEventListener('click',()=>{
+    closeMore();
+    openExternal(b.dataset.external);
+  });
+});
+
+const routerUrlInput=document.getElementById('routerUrlInput');
+const aghUrlInput=document.getElementById('aghUrlInput');
+if(routerUrlInput) routerUrlInput.value=getExternalUrl('router');
+if(aghUrlInput) aghUrlInput.value=getExternalUrl('agh');
+
+const saveExternalUrls=document.getElementById('saveExternalUrls');
+if(saveExternalUrls){
+  saveExternalUrls.addEventListener('click',()=>{
+    const r=normalizeUrl(routerUrlInput.value,defaultRouterUrl());
+    const a=normalizeUrl(aghUrlInput.value,defaultAghUrl());
+    localStorage.setItem('kapps-router-url',r);
+    localStorage.setItem('kapps-agh-url',a);
+    routerUrlInput.value=r;
+    aghUrlInput.value=a;
+    showToast('Адреса сохранены');
+  });
+}
+
+
+document.addEventListener('keydown',e=>{
+  const el=e.target.closest?.('[role="button"][data-go]');
+  if(!el || (e.key!=='Enter' && e.key!==' ')) return;
+  e.preventDefault();
+  switchSection(el.dataset.go);
+});
+
+
+/* ===== Settings + list editors ===== */
+const UI_SETTINGS_KEY='kapps-ui-settings-v15';
+const UI_LISTS_KEY='kapps-ui-lists-v15';
+
+const defaultLists={
+  vpn:[
+    'instagram.com',
+    'facebook.com',
+    'sex-studentki.team'
+  ],
+  direct:[
+    'openai.com',
+    'chatgpt.com',
+    'claude.ai',
+    'gemini.google.com'
+  ]
+};
+
+function loadJson(key,fallback){
+  try{
+    const v=JSON.parse(localStorage.getItem(key));
+    return v ?? fallback;
+  }catch(e){
+    return fallback;
+  }
+}
+function saveJson(key,value){
+  localStorage.setItem(key,JSON.stringify(value));
+}
+function normalizeDomain(v){
+  let s=(v||'').trim().toLowerCase();
+  s=s.replace(/^https?:\/\//,'').replace(/\/.*$/,'').replace(/^\.+|\.+$/g,'');
+  return s;
+}
+
+let listState=loadJson(UI_LISTS_KEY,defaultLists);
+if(!Array.isArray(listState.vpn)) listState.vpn=[...defaultLists.vpn];
+if(!Array.isArray(listState.direct)) listState.direct=[...defaultLists.direct];
+
+function uniqueDomains(arr){
+  return [...new Set(arr.map(normalizeDomain).filter(Boolean))];
+}
+listState.vpn=uniqueDomains(listState.vpn);
+listState.direct=uniqueDomains(listState.direct);
+
+function renderDomainList(name){
+  const box=document.querySelector(`[data-list="${name}"]`);
+  const count=document.querySelector(`[data-count-for="${name}"]`);
+  if(!box) return;
+  const arr=listState[name]||[];
+  box.innerHTML='';
+  if(!arr.length){
+    const empty=document.createElement('div');
+    empty.className='empty-list';
+    empty.textContent='Список пуст';
+    box.appendChild(empty);
+  }else{
+    arr.forEach(domain=>{
+      const chip=document.createElement('div');
+      chip.className='domain-chip';
+      const text=document.createElement('span');
+      text.textContent=domain;
+      const del=document.createElement('button');
+      del.type='button';
+      del.setAttribute('aria-label','Удалить '+domain);
+      del.textContent='×';
+      del.addEventListener('click',()=>{
+        listState[name]=listState[name].filter(x=>x!==domain);
+        persistLists();
+      });
+      chip.append(text,del);
+      box.appendChild(chip);
+    });
+  }
+  if(count) count.textContent=arr.length;
+  syncBulkEditors();
+}
+function renderAllLists(){
+  renderDomainList('vpn');
+  renderDomainList('direct');
+}
+function syncBulkEditors(){
+  const a=document.getElementById('vpnBulk');
+  const b=document.getElementById('directBulk');
+  if(a && document.activeElement!==a) a.value=(listState.vpn||[]).join('\n');
+  if(b && document.activeElement!==b) b.value=(listState.direct||[]).join('\n');
+}
+function persistLists(){
+  listState.vpn=uniqueDomains(listState.vpn||[]);
+  listState.direct=uniqueDomains(listState.direct||[]);
+  saveJson(UI_LISTS_KEY,listState);
+  renderAllLists();
+}
+
+document.querySelectorAll('[data-add-list]').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    const name=btn.dataset.addList;
+    const input=document.getElementById(name==='vpn'?'vpnListInput':'directListInput');
+    const d=normalizeDomain(input.value);
+    if(!d) return;
+    if(!listState[name].includes(d)) listState[name].push(d);
+    input.value='';
+    persistLists();
+    showToast('Домен добавлен');
+  });
+});
+['vpn','direct'].forEach(name=>{
+  const input=document.getElementById(name==='vpn'?'vpnListInput':'directListInput');
+  if(input){
+    input.addEventListener('keydown',e=>{
+      if(e.key==='Enter'){
+        e.preventDefault();
+        document.querySelector(`[data-add-list="${name}"]`)?.click();
+      }
+    });
+  }
+});
+document.querySelectorAll('[data-sort-list]').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    listState[btn.dataset.sortList].sort((a,b)=>a.localeCompare(b,'ru'));
+    persistLists();
+  });
+});
+document.querySelectorAll('[data-clear-list]').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    listState[btn.dataset.clearList]=[];
+    persistLists();
+    showToast('Список очищен');
+  });
+});
+document.querySelectorAll('[data-copy-list]').forEach(btn=>{
+  btn.addEventListener('click',async()=>{
+    const txt=(listState[btn.dataset.copyList]||[]).join('\n');
+    try{
+      await navigator.clipboard.writeText(txt);
+      showToast('Список скопирован');
+    }catch(e){
+      showToast('Буфер обмена недоступен');
+    }
+  });
+});
+document.getElementById('applyBulk')?.addEventListener('click',()=>{
+  listState.vpn=uniqueDomains(document.getElementById('vpnBulk').value.split(/\r?\n/));
+  listState.direct=uniqueDomains(document.getElementById('directBulk').value.split(/\r?\n/));
+  persistLists();
+  showToast('Списки применены');
+});
+document.getElementById('exportLists')?.addEventListener('click',()=>{
+  const txt=
+`# Через VPN
+${(listState.vpn||[]).join('\n')}
+
+# Напрямую
+${(listState.direct||[]).join('\n')}
+`;
+  const blob=new Blob([txt],{type:'text/plain;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='keenetic-routing-lists.txt';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+});
+
+function readSettingsFromUi(){
+  const out={};
+  document.querySelectorAll('[data-setting]').forEach(el=>{
+    out[el.dataset.setting]=el.type==='checkbox'?el.checked:el.value;
+  });
+  return out;
+}
+function applySettingsToUi(obj){
+  document.querySelectorAll('[data-setting]').forEach(el=>{
+    if(!(el.dataset.setting in obj)) return;
+    if(el.type==='checkbox') el.checked=!!obj[el.dataset.setting];
+    else el.value=obj[el.dataset.setting];
+  });
+}
+const savedUiSettings=loadJson(UI_SETTINGS_KEY,{});
+applySettingsToUi(savedUiSettings);
+
+document.getElementById('saveUiSettings')?.addEventListener('click',()=>{
+  saveJson(UI_SETTINGS_KEY,readSettingsFromUi());
+  showToast('Настройки сохранены');
+});
+document.getElementById('resetUiSettings')?.addEventListener('click',()=>{
+  localStorage.removeItem(UI_SETTINGS_KEY);
+  document.querySelectorAll('[data-setting]').forEach(el=>{
+    if(el.type==='checkbox') el.checked=el.defaultChecked;
+    else el.value=el.defaultValue;
+  });
+  showToast('Настройки сброшены');
+});
+
+renderAllLists();
+
+
+/* ===== v16 settings polish ===== */
+const settingsSection=document.getElementById('settings');
+const saveState=document.getElementById('settingsSaveState');
+let settingsDirty=false;
+
+function setSettingsDirty(v){
+  settingsDirty=!!v;
+  if(settingsSection) settingsSection.classList.toggle('settings-dirty',settingsDirty);
+  if(saveState){
+    saveState.classList.toggle('dirty',settingsDirty);
+    saveState.textContent=settingsDirty?'Есть изменения':'Сохранено';
+  }
+}
+
+function syncRecoveryFields(){
+  const recovery=document.querySelector('[data-setting="wan_recovery"]');
+  document.querySelectorAll('.recovery-fields input').forEach(el=>{
+    el.disabled=recovery ? !recovery.checked : false;
+  });
+}
+
+document.querySelectorAll('#settings [data-setting]').forEach(el=>{
+  el.addEventListener('change',()=>{
+    setSettingsDirty(true);
+    syncRecoveryFields();
+  });
+  el.addEventListener('input',()=>setSettingsDirty(true));
+});
+syncRecoveryFields();
+
+const originalSaveButton=document.getElementById('saveUiSettings');
+if(originalSaveButton){
+  originalSaveButton.addEventListener('click',()=>{
+    setSettingsDirty(false);
+  });
+}
+const originalResetButton=document.getElementById('resetUiSettings');
+if(originalResetButton){
+  originalResetButton.addEventListener('click',()=>{
+    setTimeout(()=>{
+      setSettingsDirty(false);
+      syncRecoveryFields();
+    },0);
+  });
+}
+
+function looksLikeDomain(v){
+  return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i.test(v);
+}
+
+document.querySelectorAll('[data-add-list]').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    const name=btn.dataset.addList;
+    const input=document.getElementById(name==='vpn'?'vpnListInput':'directListInput');
+    const d=normalizeDomain(input?.value||'');
+    if(!d) return;
+    if(!looksLikeDomain(d)){
+      input?.focus();
+      input?.animate(
+        [{transform:'translateX(0)'},{transform:'translateX(-4px)'},{transform:'translateX(4px)'},{transform:'translateX(0)'}],
+        {duration:180,easing:'ease-out'}
+      );
+      showToast('Проверь доменное имя');
+      return;
+    }
+  },true);
+});
+
+/* Double click/tap on a domain chip copies it */
+document.addEventListener('dblclick',async e=>{
+  const chip=e.target.closest('.domain-chip');
+  if(!chip) return;
+  const value=chip.querySelector('span')?.textContent||'';
+  if(!value) return;
+  try{
+    await navigator.clipboard.writeText(value);
+    showToast('Домен скопирован');
+  }catch(_){}
+});
+
+const themeBtn=document.getElementById('themeBtn');
+themeBtn.addEventListener('click',()=>{
+  const root=document.documentElement;
+  const next=root.dataset.theme==='dark'?'light':'dark';
+  root.dataset.theme=next;
+  localStorage.setItem('kapps-theme',next);
+});
+const savedTheme=localStorage.getItem('kapps-theme');
+if(savedTheme) document.documentElement.dataset.theme=savedTheme;
+
+const toast=document.getElementById('toast');
+function showToast(text){
+  toast.textContent=text;toast.classList.add('show');
+  clearTimeout(window.__toastTimer);
+  window.__toastTimer=setTimeout(()=>toast.classList.remove('show'),1300);
+}
+document.querySelectorAll('[data-toast]').forEach(b=>b.addEventListener('click',()=>showToast(b.dataset.toast)));
+document.getElementById('refreshBtn').addEventListener('click',()=>showToast('Сводка обновлена'));
+
+const modal=document.getElementById('modal');
+document.querySelectorAll('[data-confirm]').forEach(b=>b.addEventListener('click',()=>{
+  document.getElementById('modalTitle').textContent='Подтвердить: '+b.dataset.confirm;
+  modal.classList.add('open');
+}));
+document.getElementById('cancelModal').addEventListener('click',()=>modal.classList.remove('open'));
+document.getElementById('confirmModal').addEventListener('click',()=>{modal.classList.remove('open');showToast('Демо: команда не отправлена')});
+modal.addEventListener('click',e=>{if(e.target===modal) modal.classList.remove('open')});
+
+const logs={
+  wan:`2026-09-05 23:26:04+0300 class=HEALTHY previous=NONE carrier=1 link=up internet=true
+2026-09-05 23:33:01+0300 cron wan-guardian.sh rc=0
+2026-09-05 23:56:25+0300 version=0.3-recovery class=HEALTHY action=NONE`,
+  recovery:`2026-09-05 23:56:25+0300 recovery=ENABLED
+confirm_failures=3
+renew_cooldown=600
+bounce_cooldown=1800
+reboot=DISABLED
+# Реальных recovery-действий пока не было.`,
+  cron:`crond: wan-guardian.sh rc=0
+crond: wg-health-watch.sh rc=0
+crond: wg-failopen-guard.sh rc=0
+crond: adaptive-auto-maint.sh rc=0
+crond-supervisor: RUNNING`,
+  routing:`adaptive-auto-maint: OK
+adaptive-live-watchdog: OK
+vpn-domain-audit-chain: scheduled 00:10
+adaptive-hints-update: scheduled 04:25
+adaptive-housekeeping: scheduled 04:45`
+};
+let currentLog='wan';
+const logbox=document.getElementById('logbox');
+const logSearch=document.getElementById('logSearch');
+function renderLog(){
+  const q=logSearch.value.trim().toLowerCase();
+  const lines=logs[currentLog].split('\n');
+  logbox.textContent=q?lines.filter(x=>x.toLowerCase().includes(q)).join('\n'):lines.join('\n');
+}
+renderLog();
+document.querySelectorAll('.log-tab').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.log-tab').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');currentLog=b.dataset.log;renderLog();
+}));
+logSearch.addEventListener('input',renderLog);
+
+/* ===== v21 LIVE BACKEND (READ-ONLY) ===== */
+
+/* ===== v24 aggregate + translation ===== */
+
+
+
+function titleCaseStatus(v){
+  const s=String(v||'—').trim();
+  const map={
+    'ИСПРАВНО':'Исправно',
+    'НЕТ ЛИНИИ':'Нет линии',
+    'СБОЙ DHCP':'Сбой DHCP',
+    'СБОЙ ШЛЮЗА':'Сбой шлюза',
+    'НЕТ ИНТЕРНЕТА':'Нет интернета',
+    'СБОЙ DNS':'Сбой DNS',
+    'НЕИЗВЕСТНО':'Неизвестно'
+  };
+  return map[s] || (s ? s.charAt(0).toUpperCase()+s.slice(1).toLowerCase() : '—');
+}
+
+function setPageTitleStatus(id,text,state=''){
+  const el=document.getElementById(id);
+  if(!el) return;
+  el.textContent=`(${text})`;
+  el.classList.remove('is-ok','is-warn','is-bad');
+  if(state) el.classList.add(`is-${state}`);
+}
+function shortLocalRun(v){
+  if(!v) return 'Последний запуск: —';
+  const d=new Date(v);
+  if(!Number.isNaN(d.getTime())){
+    return `Последний запуск: ${d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'})}, ${d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}`;
+  }
+  // Entware date format e.g. Sun Sep 6 01:40:09 MSK 2026
+  const m=String(v).match(/\b(\d{1,2}:\d{2})(?::\d{2})?\b/);
+  return m ? `Последний запуск: ${m[1]}` : `Последний запуск: ${v}`;
+}
+
+function setTitleStatus(id,text,state=''){
+  const el=document.getElementById(id);
+  if(!el) return;
+  el.textContent=`(${text})`;
+  el.classList.remove('is-ok','is-warn','is-bad');
+  if(state) el.classList.add(`is-${state}`);
+}
+
+function ruState(v){
+  const s=String(v??'').toLowerCase();
+  if(s==='up'||s==='yes'||s==='true'||s==='running') return 'В сети';
+  if(s==='down'||s==='no'||s==='false'||s==='stopped') return 'Не в сети';
+  return v||'—';
+}
+function setRcPill(id, rc){
+  const ok=String(rc)==='0';
+  const known=rc!==undefined && rc!==null && String(rc)!=='';
+  setPill(id, known ? ok : null, known ? (ok?'Норма':'Ошибка') : 'Нет данных');
+}
+function updateAggregateHero(w, wg0ok, wg1ok, s){
+  const hero=document.getElementById('healthHero');
+  const text=document.getElementById('heroText');
+  if(!hero||!text) return;
+
+  hero.classList.remove('is-warning','is-error');
+
+  const wanOk=w.class==='HEALTHY' && w.internet===true;
+  const serviceOk=!!s.crond && !!s.supervisor && !!s.adguard;
+  const wgCount=(wg0ok?1:0)+(wg1ok?1:0);
+
+  if(!wanOk){
+    hero.classList.add('is-error');
+    text.textContent='Есть проблема с интернетом';
+  }else if(wgCount<2 || !serviceOk){
+    hero.classList.add('is-warning');
+    text.textContent='Есть отклонения';
+  }else{
+    text.textContent='Всё работает штатно';
+  }
+}
+
+const KAPPS_API_PORT=8088;
+
+function apiBase(){
+  try{
+    const r=new URL(getExternalUrl('router'));
+    return `${r.protocol}//${r.hostname}:${KAPPS_API_PORT}/cgi-bin/api.cgi`;
+  }catch(_){
+    return `http://192.168.1.1:${KAPPS_API_PORT}/cgi-bin/api.cgi`;
+  }
+}
+function setText(id,val,fallback='—'){
+  const el=document.getElementById(id);
+  if(el) el.textContent=(val===undefined||val===null||val==='')?fallback:String(val);
+}
+function setPill(id,ok,text){
+  const el=document.getElementById(id);
+  if(!el) return;
+  el.textContent=text;
+  el.classList.remove('ok','warn','bad','info');
+  el.classList.add(ok===true?'ok':ok===false?'bad':'warn');
+}
+function yes(v){return v===true||v==='true'||v==='yes'||v==='up'||v==='running'}
+function fmtUptime(sec){
+  sec=Number(sec||0);
+  if(!Number.isFinite(sec)||sec<=0) return '—';
+  const d=Math.floor(sec/86400), h=Math.floor((sec%86400)/3600), m=Math.floor((sec%3600)/60);
+  return d>0?`${d} д ${h} ч`:`${h} ч ${m} мин`;
+}
+function fmtWanClass(c){
+  const map={
+    HEALTHY:'ИСПРАВНО',
+    PHY_DOWN:'НЕТ ЛИНИИ',
+    DHCP_FAILURE:'СБОЙ DHCP',
+    GATEWAY_FAILURE:'СБОЙ ШЛЮЗА',
+    INTERNET_FAILURE:'НЕТ ИНТЕРНЕТА',
+    DNS_ONLY_FAILURE:'СБОЙ DNS',
+    UNKNOWN:'НЕИЗВЕСТНО'
+  };
+  return map[c]||c||'—';
+}
+function applyHealth(id,ok,text){
+  const el=document.getElementById(id);
+  if(!el) return;
+  el.classList.toggle('is-bad',ok===false);
+  el.classList.toggle('is-warn',ok===null);
+  setText(id+'Text',text);
+}
+function applyLiveStatus(data){
+  const w=data.wan||{}, wg=data.wg||{}, s=data.services||{}, c=data.cron||{}, r=data.router||{};
+  const healthy=w.class==='HEALTHY';
+  const speed=w.speed?`${w.speed} Мбит/с`:'—';
+  const duplex=w.duplex==='full'?'полный':(w.duplex||'—');
+  const wg0ok=yes(wg.wg0?.link)||yes(wg.wg0?.connected)||yes(wg.wg0?.state);
+  const wg1ok=yes(wg.wg1?.link)||yes(wg.wg1?.connected)||yes(wg.wg1?.state);
+  const wgCount=(wg0ok?1:0)+(wg1ok?1:0);
+
+  setText('routerUptime',fmtUptime(r.uptime_sec));
+  setText('sysRouterModel',r.model);
+  setText('sysRouterVersion',r.version?`KeeneticOS ${r.version}`:'—');
+
+  setPill('ovWanPill',healthy,healthy?'АКТИВЕН':'ВНИМАНИЕ');
+  setTitleStatus('ovWanTitleStatus',titleCaseStatus(fmtWanClass(w.class)),healthy?'ok':'bad');
+  setPageTitleStatus('pageWanStatus',titleCaseStatus(fmtWanClass(w.class)),healthy?'ok':'bad');
+  setText('ovWanSub',`${w.version||'WAN Guardian'} · ${w.action&&w.action!=='NONE'?'действие: '+w.action:'действий не было'}`);
+  setText('ovWanIsp',w.speed?`${w.speed} / ${duplex}`:'—');
+  setText('ovWanGateway',w.gateway);
+  setText('ovWanStage',w.recovery_stage ?? 0);
+
+  setPill('ovWgPill',wgCount===2?true:(wgCount===0?false:null),`${wgCount} из 2`);
+  setTitleStatus('ovWgTitleStatus',`${wgCount} из 2`,wgCount===2?'ok':wgCount===0?'bad':'warn');
+  setPageTitleStatus('pageWgStatus',`${wgCount} из 2`,wgCount===2?'ok':wgCount===0?'bad':'warn');
+  setText('ovWgSub','WireGuard0 + WireGuard1 через ISP');
+  setText('ovWg0',wg0ok?'В сети':'Не в сети');
+  setText('ovWg1',wg1ok?'В сети':'Не в сети');
+
+  const routeOk=String(c.routing_rc)==='0';
+  setPill('ovRoutingPill',routeOk,routeOk?'Норма':'Ошибка');
+  setTitleStatus('ovRoutingTitleStatus',routeOk?'Норма':'Ошибка',routeOk?'ok':'bad');
+  setPageTitleStatus('pageRoutingStatus',routeOk?'Норма':'Ошибка',routeOk?'ok':'bad');
+  setText('ovRoutingLast',c.routing_last||'—');
+  setText('ovRoutingRc',c.routing_rc ?? '—');
+  setText('ovRoutingSub',routeOk?'последняя сверка без ошибок':'последняя сверка завершилась с ошибкой');
+  setText('routeAutoText',c.routing_last?shortLocalRun(c.routing_last):'Автоматическое обслуживание маршрутов.');
+  setRcPill('routeAutoPill',c.routing_rc);
+
+  const automationOk=!!s.crond && !!s.supervisor && String(c.guardian_rc)==='0';
+  setPill('ovAutomationPill',automationOk,automationOk?'Норма':'Внимание');
+  setTitleStatus('ovAutomationTitleStatus',automationOk?'Норма':'Внимание',automationOk?'ok':'warn');
+
+  setText('ovCrond',s.crond?'Работает':'Остановлен');
+  setText('ovSupervisor',s.supervisor?'Работает':'Остановлен');
+  setText('ovGuardianRc',c.guardian_rc ?? '—');
+
+  applyHealth('healthInternet',w.internet===true,w.internet===true?'RCI: доступен':'нет доступа');
+  applyHealth('healthIsp',yes(w.link)&&!!w.address,yes(w.link)?`линия активна · ${w.address?'DHCP в норме':'нет IPv4'}`:'линия неактивна');
+  applyHealth('healthWg',wgCount===2,`${wgCount} из 2 туннелей`);
+  applyHealth('healthCron',!!s.crond,s.crond?'планировщик работает':'планировщик остановлен');
+  applyHealth('healthAgh',!!s.adguard,s.adguard?'сервис работает':'сервис не запущен');
+
+  setPill('wanStatePill',healthy,healthy?'В СЕТИ':'ВНИМАНИЕ');
+  setTitleStatus('wanStateTitleStatus',titleCaseStatus(fmtWanClass(w.class)),healthy?'ok':'bad');
+  setText('wanStateSub',`Сбоев подряд: ${w.recovery_count ?? 0} · этап восстановления: ${w.recovery_stage ?? 0}`);
+
+  setPill('wanIspPill',yes(w.link),yes(w.link)?'В СЕТИ':'НЕТ ЛИНИИ');
+  setTitleStatus('wanIspTitleStatus',yes(w.link)?'В сети':'Нет линии',yes(w.link)?'ok':'bad');
+  setText('wanIspMetric',speed);
+  setText('wanIspSub',`${duplex} дуплекс · carrier=${w.carrier ?? '—'} · eth3`);
+
+  setPill('wanIpPill',!!w.address,!!w.address?'DHCP':'НЕТ IPv4');
+  setTitleStatus('wanIpTitleStatus',w.address?'DHCP':'Нет IPv4',w.address?'ok':'bad');
+  setText('wanIpMetric',w.address);
+  setText('wanIpSub',w.gateway?`шлюз ${w.gateway}`:'шлюз —');
+
+  setText('wanPhyText',yes(w.link)?'линия активна':'нет линии');
+  setText('wanDhcpText',w.address?'IPv4 активен':'IPv4 отсутствует');
+  setText('wanGatewayText',w.gateway||'—');
+  setText('wanInternetText',w.internet===true?'RCI: доступен':'RCI: недоступен');
+  setPill('wanPathPill',healthy && w.internet===true, healthy && w.internet===true?'Всё в норме':'Есть проблема');
+  setPill('wanRciTablePill',w.internet===true,w.internet===true?'Да':'Нет');
+
+  setPill('wg0Pill',wg0ok,wg0ok?'В СЕТИ':'НЕТ СВЯЗИ');
+  setTitleStatus('wg0TitleStatus',wg0ok?'В сети':'Нет связи',wg0ok?'ok':'bad');
+  setText('wg0State',ruState(wg.wg0?.state||wg.wg0?.link));
+  setPill('wg1Pill',wg1ok,wg1ok?'В СЕТИ':'НЕТ СВЯЗИ');
+  setTitleStatus('wg1TitleStatus',wg1ok?'В сети':'Нет связи',wg1ok?'ok':'bad');
+  setText('wg1State',ruState(wg.wg1?.state||wg.wg1?.link));
+
+  setPill('crondPill',!!s.crond,s.crond?'Работает':'Остановлен');
+  setTitleStatus('crondTitleStatus',s.crond?'Работает':'Остановлен',s.crond?'ok':'bad');
+  setText('crondMetric',s.crond_pid?`PID ${s.crond_pid}`:(s.crond?'АКТИВЕН':'ОСТАНОВЛЕН'));
+  setPill('supervisorPill',!!s.supervisor,s.supervisor?'Работает':'Остановлен');
+  setTitleStatus('supervisorTitleStatus',s.supervisor?'Работает':'Остановлен',s.supervisor?'ok':'bad');
+  setText('supervisorMetric',s.supervisor?'АКТИВЕН':'ОСТАНОВЛЕН');
+
+  setText('cronGuardianRc',c.guardian_rc);
+  setText('cronWgRc',c.wg_rc);
+  setText('cronRoutingRc',c.routing_rc);
+  setRcPill('cronGuardianPill',c.guardian_rc);
+  setRcPill('cronWgPill',c.wg_rc);
+  setRcPill('cronRoutingPill',c.routing_rc);
+
+  const tracked=[c.guardian_rc,c.wg_rc,c.routing_rc].filter(v=>v!==undefined&&v!==null&&String(v)!=='');
+  const trackedOk=tracked.filter(v=>String(v)==='0').length;
+  setText('trackedCronMetric',tracked.length?`${trackedOk} / ${tracked.length}`:'—');
+  setPill('trackedCronPill',tracked.length===3 && trackedOk===3,tracked.length?`${trackedOk} из ${tracked.length}`:'Нет данных');
+
+  updateAggregateHero(w,wg0ok,wg1ok,s);
+
+  const chip=document.getElementById('backendChip');
+  chip?.classList.remove('error');
+  chip?.classList.add('ok');
+  setText('backendState','LIVE');
+  const dot=document.getElementById('backendDot');
+  if(dot) dot.style.color='var(--green)';
+}
+function backendOffline(){
+  const chip=document.getElementById('backendChip');
+  chip?.classList.remove('ok');
+  chip?.classList.add('error');
+  setText('backendState','НЕТ BACKEND');
+  const dot=document.getElementById('backendDot');
+  if(dot) dot.style.color='var(--red)';
+  const hero=document.getElementById('healthHero');
+  const text=document.getElementById('heroText');
+  if(hero){hero.classList.remove('is-warning');hero.classList.add('is-error');}
+  if(text) text.textContent='Нет связи с backend';
+}
+async function refreshLiveData(show=false){
+  try{
+    const res=await fetch(`${apiBase()}?action=status&_=${Date.now()}`,{cache:'no-store',mode:'cors'});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const data=await res.json();
+    if(!data.ok) throw new Error('backend');
+    applyLiveStatus(data);
+    if(show) showToast('Живые данные обновлены');
+    return true;
+  }catch(e){
+    backendOffline();
+    if(show) showToast('Backend недоступен');
+    return false;
+  }
+}
+async function loadLiveLog(name){
+  try{
+    const res=await fetch(`${apiBase()}?action=log&name=${encodeURIComponent(name)}&_=${Date.now()}`,{cache:'no-store',mode:'cors'});
+    if(!res.ok) throw new Error();
+    logs[name]=await res.text();
+    if(currentLog===name) renderLog();
+  }catch(_){}
+}
+async function refreshAllLogs(){
+  await Promise.all(['wan','recovery','cron','routing'].map(loadLiveLog));
+}
+
+document.getElementById('refreshBtn')?.addEventListener('click',()=>{
+  refreshLiveData(true);
+  if(document.getElementById('logs')?.classList.contains('active')) refreshAllLogs();
+});
+
+document.querySelectorAll('.log-tab').forEach(btn=>{
+  btn.addEventListener('click',()=>loadLiveLog(btn.dataset.log));
+});
+
+refreshLiveData(false);
+setInterval(()=>refreshLiveData(false),15000);
+
+</script>
+</div>
+</body>
+</html>
