@@ -1,58 +1,46 @@
-# Архитектура
+# Architecture
 
-## Принцип изоляции
+VWARD is a set of cooperating POSIX shell services and a small lighttpd/CGI web interface for KeeneticOS with Entware.
 
-VWARD не должен вмешиваться в системный web UI роутера.
+## Source versus runtime
 
-- `/usr/sbin/nginx` — системный компонент Keenetic, не изменяем.
-- AdGuard Home — отдельный сервис, не изменяем.
-- Apps Center — отдельный lighttpd из Entware.
+The repository contains program source, init scripts, configuration examples and the managed cron schedule. An installed system separates:
 
-## Frontend
+- `/opt/bin` and service definitions — installed program files;
+- `/opt/etc` — device-local configuration;
+- `/opt/var/lib` — persistent runtime state;
+- `/opt/var/log` — logs;
+- `/opt/var/backups` — local backups;
+- `/tmp` — transient locks, probes and cron status.
 
-`web/index.html`
+Future source updates must preserve local configuration and state.
 
-Mobile-first HTML/CSS/JS. Получает live-данные от локального CGI API.
+## Components
 
-## Backend
+### Adaptive routing
 
-Планируемый публичный backend:
+The adaptive scripts inspect Keenetic FQDN groups and DNS activity, probe direct ISP and WireGuard paths, and maintain the `AdaptiveAuto` group. `agh-adaptive-live.sh` observes DNS traffic; `adaptive-auto-maint.sh` rechecks previously adapted domains.
 
-- read-only status по умолчанию;
-- whitelist разрешённых действий;
-- никаких ключей WireGuard в API;
-- LAN-only;
-- JSON ответы;
-- timeout на все внешние/RCI вызовы.
+### VPN audit and reconciliation
 
-## WAN Guardian
+The audit chain reads the live Keenetic configuration through `ndmc`, tests routing targets, records state and reconciles domains or subnets routed through `Wireguard1`.
 
-WAN Guardian будет отдельным компонентом с понятной политикой восстановления:
+### WireGuard protection
 
-- диагностика;
-- DHCP renew;
-- controlled interface bounce;
-- cooldown;
-- rate-limit;
-- без автоматической перезагрузки роутера по умолчанию.
+`wg-health-watch.sh` records health. `wg-failopen-guard.sh` uses that state to protect connectivity and can alter `Wireguard1` state.
 
-Перед публикацией локальная реализация должна быть очищена от привязок к конкретной конфигурации.
+### WAN recovery
 
-## Platform adapters
+`wan-guardian.sh` performs staged checks and recovery against the `ISP` interface and physical WAN device. `wan-recovery-actuator.sh` is the narrow DHCP-renew actuator.
 
-VWARD проектируется как независимое ядро с адаптерами платформ:
+### Runtime supervision
 
-```text
-VWARD Core
-├── VPN
-├── WAN
-├── Automation
-├── Recovery
-├── Diagnostics
-└── Adapters
-    ├── Keenetic   (первый поддерживаемый)
-    ├── OpenWrt    (планируется)
-    └── AsusWRT    (планируется)
-```
+Entware init scripts control crond, the adaptive live process, its supervisor and the web service. The managed cron schedule invokes periodic jobs and writes transient status into `/tmp`.
 
-Логика VWARD не должна зависеть от `ndmc`/RCI напрямую. Эти вызовы относятся к Keenetic adapter.
+### Web UI
+
+lighttpd serves `web/index.html`; `web/cgi-bin/api.cgi` reports local status using `jq`, RCI endpoints and runtime files.
+
+## Current maturity
+
+The router snapshot proves these components are in active use on the source device. Portability, installation, automated configuration discovery, test fixtures and a transactional updater remain development work.

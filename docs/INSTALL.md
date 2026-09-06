@@ -1,31 +1,18 @@
-# Установка
+# Installation status
 
-## Сейчас
+There is currently no supported automated installer.
 
-Текущий snapshot рассчитан на уже работающий локальный web-сервис проекта:
+The repository records the working source layout and exact runtime destinations in [INSTALLATION_MAP.md](INSTALLATION_MAP.md). It does not authorize copying files to a production router without review.
 
-- document root: `/opt/share/keenetic-apps/www`
-- UI: `/opt/share/keenetic-apps/www/index.html`
-- порт панели: `8088`
+Before a future installation process is implemented, it must:
 
-Для обновления только HTML после публикации репозитория:
+1. validate KeeneticOS and Entware prerequisites;
+2. discover or request device-specific interface, LAN, DNS and FQDN-group values;
+3. install program files separately from local configuration and state;
+4. preserve file modes from the installation map;
+5. install the managed cron fragment without overwriting unrelated user cron entries;
+6. validate syntax and dependencies;
+7. start services only after explicit confirmation;
+8. provide backup and rollback.
 
-```sh
-/opt/bin/wget -qO-   https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/scripts/update-ui.sh   | /opt/bin/sh
-```
-
-## Что будет в public v1.0
-
-Планируется один installer, который:
-
-1. проверит Keenetic/Entware;
-2. определит LAN IP;
-3. поставит нужные Entware-пакеты;
-4. не затронет системный nginx Keenetic;
-5. поднимет отдельный lighttpd только на LAN;
-6. установит frontend/backend;
-7. создаст сервис и updater;
-8. выполнит health-check;
-9. при ошибке откатит изменения.
-
-До завершения этого этапа `0.1.0-dev` нельзя считать универсальным one-click installer.
+The current migration made no changes to the router.

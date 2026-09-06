@@ -1,9 +1,7 @@
 # WAN Guardian
 
-Компонент пока намеренно не опубликован в development snapshot.
+The source in `scripts/` is imported unchanged from the working router snapshot.
 
-Локальная версия уже работает, но перед публичным релизом требуется:
-- убрать привязки к конкретному интерфейсу/провайдеру;
-- вынести настройки в config;
-- добавить dry-run;
-- провести security/recovery audit.
+`wan-guardian.sh` performs staged diagnosis and recovery for the current device's `ISP` / `eth3` WAN path. `wan-recovery-actuator.sh` performs the narrow DHCP client renewal action.
+
+These identifiers are device-specific and must be parameterized or detected before the component is considered portable.

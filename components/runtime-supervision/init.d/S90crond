@@ -1,0 +1,33 @@
+#!/bin/sh
+
+PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+CROND=/opt/sbin/crond
+CRONDIR=/opt/var/spool/cron/crontabs
+LOG=/opt/var/log/crond.log
+
+case "$1" in
+    start)
+        mkdir -p "$CRONDIR" /opt/var/log
+
+        if pidof crond >/dev/null 2>&1; then
+            exit 0
+        fi
+
+        "$CROND" -b -l 8 -L "$LOG" -c "$CRONDIR"
+        ;;
+
+    stop)
+        killall crond 2>/dev/null
+        ;;
+
+    restart)
+        "$0" stop
+        sleep 1
+        "$0" start
+        ;;
+
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac

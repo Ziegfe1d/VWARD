@@ -1,41 +1,18 @@
 # Roadmap
 
-## Этап 1 — repository foundation
-- [x] структура репозитория;
-- [x] текущий frontend;
-- [x] updater HTML;
-- [x] README / SECURITY / LICENSE;
-- [ ] создать отдельный GitHub repository;
-- [ ] залить initial commit.
+## Current: 0.1.0-dev
 
-## Этап 2 — универсализация backend
-- [ ] убрать привязки к KN-1913;
-- [ ] auto-detect WAN/LAN/WireGuard interfaces;
-- [ ] конфигурационный файл вместо hardcode;
-- [ ] sanitised diagnostics;
-- [ ] API schema version.
+- canonical source tree imported from the verified working installation;
+- source/runtime/configuration boundaries documented;
+- installation map and dependency inventory recorded;
+- generated and device-local data excluded.
 
-## Этап 3 — WAN Guardian
-- [ ] вынести в независимый component;
-- [ ] profile/config;
-- [ ] install/update/uninstall;
-- [ ] dry-run;
-- [ ] logging/rotation;
-- [ ] recovery audit.
+## Next stage
 
-## Этап 4 — public installer
-- [ ] one-command installer;
-- [ ] preflight;
-- [ ] dependencies;
-- [ ] backup;
-- [ ] rollback;
-- [ ] uninstall;
-- [ ] update channel stable/dev.
+- parameterize device-specific values without changing working behavior;
+- add an installer that detects safe Keenetic defaults and preserves local config;
+- add shell/static validation suitable for the BusyBox/Entware environment;
+- define health checks and fixtures that do not touch a production router;
+- implement the staged, checksum-verified updater design in [UPDATER_ARCHITECTURE.md](UPDATER_ARCHITECTURE.md).
 
-## Этап 5 — public v1.0
-- [ ] тесты на нескольких моделях Keenetic;
-- [ ] screenshots;
-- [ ] troubleshooting;
-- [ ] release archive;
-- [ ] GitHub Release;
-- [ ] issue templates.
+No automated update or remote deployment is part of the current migration.

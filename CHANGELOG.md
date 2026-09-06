@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Imported the working VWARD shell, init, CGI and web sources from the verified
+  2026-09-06 read-only router snapshot.
+- Added the production cron schedule as managed source.
+- Added the installation map, dependency inventory and future updater design.
+- Classified generated and device-local configuration separately from source.
+- Removed the obsolete initial UI-only updater placeholder.
+
 ## 0.1.0-dev — 2026-09-06
 
 - Добавлен текущий frontend snapshot v28.
