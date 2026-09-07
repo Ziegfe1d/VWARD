@@ -11,9 +11,8 @@ rollback_internal=${VWARD_INTERNAL_ROLLBACK:-0}
 if [ "$rollback_internal" = 1 ]; then
     internal_token=${VWARD_INTERNAL_ROLLBACK_TOKEN:-}
     lock_owner=$(sed -n '1p' "$VU_RUN_DIR/updater.lock/owner" 2>/dev/null || :)
-    barrier_pid=$(sed -n '1p' "$VU_BARRIER_LOCK/pid" 2>/dev/null || :)
-    token_pid=${internal_token%%:*}
-    [ -n "$internal_token" ] && [ "$internal_token" = "$lock_owner" ] && [ "$token_pid" = "$barrier_pid" ] || vu_die "$VU_SAFETY_ERROR" "Internal rollback ownership validation failed"
+    barrier_owner=$(sed -n '1p' "$VU_BARRIER_LOCK/owner" 2>/dev/null || :)
+    [ -n "$internal_token" ] && [ "$internal_token" = "$lock_owner" ] && [ "$internal_token" = "$barrier_owner" ] || vu_die "$VU_SAFETY_ERROR" "Internal rollback ownership validation failed"
 fi
 
 rollback_cleanup() {
@@ -30,6 +29,7 @@ if [ "$rollback_internal" != 1 ]; then
     vu_lock_acquire || vu_die "$VU_DEFERRED" "Another updater transaction is active"
     trap rollback_cleanup EXIT HUP INT TERM
     [ "$barrier_integration_ready" = 1 ] || vu_die "$VU_SAFETY_ERROR" "Rollback barrier integration is disabled"
+    vu_cleanup_orphan_staging || vu_die "$VU_SAFETY_ERROR" "Cannot clean orphan staging"
     vu_barrier_enter || vu_die "$VU_SAFETY_ERROR" "Cannot enter rollback barrier"
 fi
 
@@ -65,10 +65,8 @@ done < "$backup/files.tsv"
 
 count=0
 while IFS="$(printf '\t')" read -r target existed mode original_sha backup_sha; do
-    count=$((count + 1))
-    if [ -n "$VU_ROOT_PREFIX" ] && [ "${VWARD_TEST_FAIL_ROLLBACK_AT:-0}" = "$count" ]; then
-        rollback_fail "Injected rollback interruption"
-    fi
+    count=$((count+1))
+    [ -z "$VU_ROOT_PREFIX" ] || [ "${VWARD_TEST_FAIL_ROLLBACK_AT:-0}" != "$count" ] || rollback_fail "Injected rollback interruption"
     destination=$VU_ROOT_PREFIX$target
     if [ "$existed" = 1 ]; then
         source=$backup/files$target
@@ -79,19 +77,18 @@ while IFS="$(printf '\t')" read -r target existed mode original_sha backup_sha; 
         restored_mode=$(stat -c '%a' "$destination" 2>/dev/null || :)
         [ "$restored_sha" = "$original_sha" ] && [ "$restored_mode" = "${mode#0}" ] || rollback_fail "Restored file verification failed for $target"
     else
-        vu_safe_target "$target" || vu_die "$VU_ROLLBACK_ERROR" "Unsafe rollback target"
-        rm -f "$destination" || vu_die "$VU_ROLLBACK_ERROR" "Cannot remove newly installed $target"
+        rm -f "$destination" || rollback_fail "Cannot remove newly installed $target"
     fi
 done < "$backup/files.tsv"
 
 committed_existed=$(sed -n '1p' "$backup/committed.existed" 2>/dev/null || :)
 case "$committed_existed" in
-    1) [ -r "$backup/committed.state" ] || rollback_fail "Committed metadata backup is missing"
-       vu_atomic_write "$VU_COMMITTED_FILE" "$backup/committed.state" || rollback_fail "Cannot restore committed metadata" ;;
+    1) [ -r "$backup/committed.state" ] || rollback_fail "Committed metadata backup is missing"; vu_atomic_write "$VU_COMMITTED_FILE" "$backup/committed.state" || rollback_fail "Cannot restore committed metadata" ;;
     0) rm -f "$VU_COMMITTED_FILE" || rollback_fail "Cannot remove newly committed metadata" ;;
     *) rollback_fail "Committed metadata backup flag is invalid" ;;
 esac
 
+# Trust state is intentionally NOT rolled back. It is monotonic anti-replay state.
 sync
 vu_transition ROLLED_BACK
 vu_log INFO "Rollback completed from $backup"
