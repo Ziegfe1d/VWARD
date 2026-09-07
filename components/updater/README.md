@@ -1,25 +1,24 @@
 # VWARD Smart Updater v1
 
-This directory contains an implementation-stage updater. It is not deployed and is disabled by default.
+Smart Updater v1 is implementation-stage code. It is **not deployed** and remains disabled by default.
 
-The updater persists a verified pending manifest, downloads a content-addressed tar package only after scheduling and staging-space preflight, creates a hash-verified targeted backup, replaces only allow-listed program files, runs a health profile and rolls back on failure. It never installs configuration, state, logs or backups.
+The updater consumes a signed manifest, persists verified pending updates, waits according to CRITICAL / IMPORTANT / ROUTINE policy, stages and verifies the package, creates a targeted hash-verified backup, enters the cooperative update barrier, replaces only exact VWARD-owned runtime paths, runs a bounded health check and rolls back on failure.
 
-## Commands
+## Safety model
 
-- vward-update.sh --status
-- vward-update.sh --check
-- vward-update.sh --dry-run
-- vward-update.sh --apply
-- vward-update.sh --rollback
-- vward-update.sh --recover
-- vward-update-watch.sh --once
+- Ed25519 authenticates the canonical `.signed` manifest; SHA-256 protects package/payload integrity.
+- `trust.state` records the monotonic highest signed sequence ever accepted. Rollback never lowers it.
+- `quarantine.state` suppresses unattended retries of an update that already failed install/health and was rolled back.
+- `committed.state` describes what is installed; it is deliberately separate from trust state.
+- HTTP 304 with no pending update is a normal idle condition.
+- Only transport/network failures receive short fast retries. Deferred, invalid, incompatible, quarantined, install, health and rollback failures wait for the normal watcher cycle or operator action.
+- Request/barrier markers and the updater process lock carry ownership tokens and have conservative stale-owner recovery.
+- Apply uses a two-phase handshake: pre-check -> update-requested -> drain -> barrier -> post-barrier recheck -> backup/install.
 
-Exit codes are grouped by outcome: 0 success, 10 no update, 20 deferred, 30-33 validation/safety failures, and 40-42 install/health/rollback failures.
+## Package limits
+
+The signed package declares both compressed `size` and `unpacked_size`. Local configuration separately caps manifest, package and unpacked sizes. Downloads are bounded during transfer and checked again afterward. Target free-space accounting is cumulative per filesystem.
 
 ## Production gate
 
-Automatic apply requires the `auto_apply` master switch, the matching `auto_critical`, `auto_important` or `auto_routine` switch, and `barrier_integration_ready=1`. All default to zero. The barrier flag must remain zero until existing mutating VWARD jobs honor the shared update barrier. The repository currently provides no installer for this subsystem and no production signing key.
-
-Committed anti-replay metadata is stored as one atomic snapshot. Transaction journal and pending feed state are separate, so recovery can choose deterministically between finalizing the new commit and restoring both old files and old metadata. Standalone rollback/recovery acquire the same stale-aware lock and barrier as apply; an internally triggered rollback reuses ownership to avoid deadlock.
-
-Configuration examples and the JSON Schema live under `config/updater/`. See the updater documents under `docs/` for policy, state transitions, recovery and signing details.
+Automatic apply also requires `barrier_integration_ready=1`. This must stay `0` until all mutating VWARD jobs honor the shared barrier protocol. No production signing key is stored in this repository, no installer is enabled, and no router deployment is performed by this branch.
