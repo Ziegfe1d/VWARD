@@ -22,11 +22,12 @@
         "package": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["url", "sha256", "size"],
+          "required": ["url", "sha256", "size", "unpacked_size"],
           "properties": {
             "url": {"type": "string", "pattern": "^https://"},
             "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-            "size": {"type": "integer", "minimum": 1}
+            "size": {"type": "integer", "minimum": 1},
+            "unpacked_size": {"type": "integer", "minimum": 1}
           }
         },
         "compatibility": {
