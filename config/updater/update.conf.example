@@ -5,24 +5,22 @@ auto_critical=0
 auto_important=0
 auto_routine=0
 
-# HTTPS endpoint for the signed feed manifest.
 manifest_url=https://updates.example.invalid/vward/dev/update-manifest.json
 public_key_file=/opt/etc/vward/update-public.pem
 channel=dev
 
-# ROUTINE and IMPORTANT updates are restricted to this local-time window.
 safe_window_start=03:00
 safe_window_end=05:00
 
 minimum_free_kb=8192
+max_manifest_size=262144
 max_package_size=16777216
+max_unpacked_size=67108864
 staging_multiplier=3
 backup_keep=3
 health_timeout_seconds=30
 check_interval_seconds=900
 request_timeout_seconds=120
-# After these delays, the priority may use the first hard-safe point outside
-# the preferred clock window.
 important_max_delay_seconds=7200
 routine_max_delay_seconds=86400
 current_version_file=/opt/share/vward/VERSION
