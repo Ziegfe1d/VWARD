@@ -53,17 +53,16 @@ jobs:
       - name: Fix Pass 3 simulations
         run: tests/updater/run-fix-pass-3-simulations.sh
 
-      - name: Diagnostic updater hashes
-        run: |
-          sha256sum \
-            components/updater/vward-update-watch.sh \
-            tests/updater/run-fix-pass-2-simulations.sh \
-            components/updater/vward-update-common.sh \
-            components/updater/vward-update-common-base.sh \
-            components/updater/vward-update-hardening.sh \
-            components/updater/vward-update-rollback.sh \
-            tests/updater/run-fix-pass-3-simulations.sh \
-            .github/workflows/updater-ci.yml
-
       - name: Repository SHA256 manifest
         run: sha256sum -c SHA256SUMS
+
+      - name: SHA256 manifest coverage
+        run: |
+          set -eu
+          git ls-files | grep -v '^SHA256SUMS$' | LC_ALL=C sort > /tmp/vward-tracked.txt
+          awk '{print $2}' SHA256SUMS | LC_ALL=C sort > /tmp/vward-manifest.txt
+          diff -u /tmp/vward-tracked.txt /tmp/vward-manifest.txt
+          tracked_count=$(wc -l < /tmp/vward-tracked.txt | tr -d ' ')
+          manifest_count=$(wc -l < /tmp/vward-manifest.txt | tr -d ' ')
+          test "$tracked_count" = "$manifest_count"
+          printf 'SHA256 coverage: %s/%s tracked files\n' "$manifest_count" "$tracked_count"
