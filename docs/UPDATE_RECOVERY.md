@@ -1,11 +1,21 @@
-# Smart Updater v1 recovery
+# Smart Updater recovery
 
-Before replacement, the updater copies only affected existing program files and records target, existence, mode, original SHA-256 and backup SHA-256. It also saves the previous complete committed-state snapshot. All backup payloads are validated before rollback touches any installed file; every restored hash and mode is checked afterward.
+The updater treats program replacement as a multi-file transaction, not as one filesystem-atomic operation.
 
-Staging may be on another filesystem because staged files are never renamed directly into place. The final temporary sibling is copied completely, assigned its declared mode and renamed beside its target. A multi-file package is a journaled transaction, not one filesystem-atomic operation.
+## Durable state
 
-If installation or health verification fails, internal rollback reuses the apply lock and barrier without reacquiring them. Standalone rollback and recovery acquire both before touching installed files. The --recover command rolls back an incomplete transaction or finalizes a COMMIT_PREPARED transaction whose atomic committed snapshot already matches the candidate.
+- `committed.state`: currently installed version/update metadata.
+- `trust.state`: monotonic highest accepted signed sequence; never rolled back.
+- `journal.state`: current transaction phase and active backup.
+- `pending/`: verified deferred manifest/package cache.
+- `quarantine.state`: update that failed unattended apply and was successfully rolled back.
 
-Backups live under /opt/var/backups/vward and state under /opt/var/lib/vward/updater. Neither is part of a release package. Backup pruning and service restart orchestration are designed but intentionally not active until component ownership and restart order are validated on a non-production router.
+Committed metadata is written as one atomic snapshot. Recovery therefore resolves to either old files + old committed metadata or new files + new committed metadata.
 
-Updater self-replacement uses the stable vward-update-bootstrap.sh launcher and a current slot symlink. Slot creation and switching are not enabled by the current package installer; they require a separately verified updater health profile.
+## Crash and power-loss handling
+
+Before mutation the complete package is staged and verified and a targeted backup is created. Each replacement is written to a sibling temporary file, hashed, chmodded, synced and renamed. On restart, an interrupted INSTALLING/VERIFYING/ROLLING_BACK transaction uses the recorded backup; COMMIT_PREPARED is finalized only when the atomic committed snapshot already identifies the candidate, otherwise it is rolled back.
+
+Updater process locks, `vward-update-requested` and `vward-update.lock` carry ownership tokens. Dead owners are recovered conservatively; live or malformed/foreign ownership is never silently removed.
+
+Orphan `transaction.*` staging directories are removed only after updater mutual exclusion is acquired and only under the exact updater staging directory. Persistent pending cache is not part of that cleanup.
