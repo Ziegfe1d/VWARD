@@ -10,6 +10,7 @@ on:
       - 'config/updater/**'
       - 'tests/updater/**'
       - '.github/workflows/updater-ci.yml'
+      - 'SHA256SUMS'
 
 permissions:
   contents: read
@@ -32,6 +33,14 @@ jobs:
             dash -n "$f"
           done
 
+      - name: Executable modes
+        run: |
+          set -eu
+          for f in components/updater/*.sh tests/updater/*.sh; do
+            mode=$(git ls-files -s "$f" | awk '{print $1}')
+            test "$mode" = 100755
+          done
+
       - name: Base updater simulations
         run: tests/updater/run-simulations.sh
 
@@ -40,3 +49,6 @@ jobs:
 
       - name: Fix Pass 2 simulations
         run: tests/updater/run-fix-pass-2-simulations.sh
+
+      - name: Repository SHA256 manifest
+        run: sha256sum -c SHA256SUMS
