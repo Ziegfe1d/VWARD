@@ -41,6 +41,10 @@ Entware init scripts control crond, the adaptive live process, its supervisor an
 
 lighttpd serves `web/index.html`; `web/cgi-bin/api.cgi` reports local status using `jq`, RCI endpoints and runtime files.
 
+### Smart Updater v1
+
+The disabled implementation-stage updater consumes a signed versioned feed rather than a mutable Git tree. It separates manifest checking, package staging, targeted backup, deterministic installation, health verification and rollback. Local configuration and runtime data are outside its target allow-list. No installer, production signing key or router deployment is included.
+
 ## Current maturity
 
-The router snapshot proves these components are in active use on the source device. Portability, installation, automated configuration discovery, test fixtures and a transactional updater remain development work.
+The router snapshot proves the imported runtime components are in active use on the source device. Portability, installation and automated configuration discovery remain development work. Smart Updater v1 has code and isolated simulations, but production barrier integration and device validation remain outstanding.

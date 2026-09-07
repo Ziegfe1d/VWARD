@@ -1,0 +1,68 @@
+name: Smart Updater CI
+
+on:
+  push:
+    branches:
+      - feature/smart-updater-v1
+  pull_request:
+    paths:
+      - 'components/updater/**'
+      - 'config/updater/**'
+      - 'tests/updater/**'
+      - '.github/workflows/updater-ci.yml'
+      - 'SHA256SUMS'
+
+permissions:
+  contents: read
+
+jobs:
+  updater-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq openssl dash
+
+      - name: Shell syntax
+        run: |
+          set -eu
+          for f in components/updater/*.sh tests/updater/*.sh; do
+            sh -n "$f"
+            dash -n "$f"
+          done
+
+      - name: Executable modes
+        run: |
+          set -eu
+          for f in components/updater/*.sh tests/updater/*.sh; do
+            mode=$(git ls-files -s "$f" | awk '{print $1}')
+            test "$mode" = 100755
+          done
+
+      - name: Base updater simulations
+        run: tests/updater/run-simulations.sh
+
+      - name: Fix Pass 1 simulations
+        run: tests/updater/run-fix-pass-1-simulations.sh
+
+      - name: Fix Pass 2 simulations
+        run: tests/updater/run-fix-pass-2-simulations.sh
+
+      - name: Fix Pass 3 simulations
+        run: tests/updater/run-fix-pass-3-simulations.sh
+
+      - name: Repository SHA256 manifest
+        run: sha256sum -c SHA256SUMS
+
+      - name: SHA256 manifest coverage
+        run: |
+          set -eu
+          git ls-files | grep -v '^SHA256SUMS$' | LC_ALL=C sort > /tmp/vward-tracked.txt
+          awk '{print $2}' SHA256SUMS | LC_ALL=C sort > /tmp/vward-manifest.txt
+          diff -u /tmp/vward-tracked.txt /tmp/vward-manifest.txt
+          tracked_count=$(wc -l < /tmp/vward-tracked.txt | tr -d ' ')
+          manifest_count=$(wc -l < /tmp/vward-manifest.txt | tr -d ' ')
+          test "$tracked_count" = "$manifest_count"
+          printf 'SHA256 coverage: %s/%s tracked files\n' "$manifest_count" "$tracked_count"

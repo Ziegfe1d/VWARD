@@ -1,0 +1,28 @@
+# VWARD Smart Updater v1 is disabled by default.
+update_enabled=0
+auto_apply=0
+auto_critical=0
+auto_important=0
+auto_routine=0
+
+manifest_url=https://updates.example.invalid/vward/dev/update-manifest.json
+public_key_file=/opt/etc/vward/update-public.pem
+channel=dev
+
+safe_window_start=03:00
+safe_window_end=05:00
+important_max_delay_seconds=7200
+routine_max_delay_seconds=86400
+
+minimum_free_kb=8192
+max_manifest_size=262144
+max_package_size=16777216
+max_unpacked_size=67108864
+backup_keep=3
+health_timeout_seconds=30
+check_interval_seconds=900
+request_timeout_seconds=120
+current_version_file=/opt/share/vward/VERSION
+
+# Keep 0 until all mutating VWARD jobs honor the shared request/barrier protocol.
+barrier_integration_ready=0

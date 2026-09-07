@@ -18,6 +18,8 @@ This list is based on command references in the imported source and the package 
 - `lighttpd-mod-cgi` — CGI API;
 - `busybox` — Entware shell/crond and core utilities used by init scripts;
 - `ca-bundle` — TLS validation for HTTPS requests.
+- `openssl-util` (conditional) — Ed25519 manifest verification for Smart Updater v1;
+- `tar` with gzip support (conditional) — updater package inspection and staging.
 
 Package dependencies such as `libcurl`, `libopenssl`, `libpcap`, `zlib` and the C runtime are resolved by Entware and are not direct VWARD install targets.
 
@@ -26,4 +28,4 @@ Package dependencies such as `libcurl`, `libopenssl`, `libpcap`, `zlib` and the 
 - `adguardhome-go` is required only for the AdGuard Home query-log discovery path; VWARD does not vendor its binary or database.
 - `opt-ndmsv2` provides Entware/Keenetic integration on the working installation.
 
-`wget` is not a direct requirement of the imported working VWARD. The obsolete UI-only `scripts/update-ui.sh` was removed, and no supported GitHub-to-router updater currently exists. Only the future design is documented in [UPDATER_ARCHITECTURE.md](UPDATER_ARCHITECTURE.md).
+`wget` is not a direct requirement of the imported working VWARD. The obsolete UI-only `scripts/update-ui.sh` was removed. Smart Updater v1 is implementation-stage, disabled and not deployed; it does not yet constitute a supported GitHub-to-router updater. Its deployment gates are documented in [UPDATER_ARCHITECTURE.md](UPDATER_ARCHITECTURE.md).
