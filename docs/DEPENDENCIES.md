@@ -26,4 +26,4 @@ Package dependencies such as `libcurl`, `libopenssl`, `libpcap`, `zlib` and the 
 - `adguardhome-go` is required only for the AdGuard Home query-log discovery path; VWARD does not vendor its binary or database.
 - `opt-ndmsv2` provides Entware/Keenetic integration on the working installation.
 
-`wget` is not a direct requirement of the imported working scripts. The repository's legacy `scripts/update-ui.sh` is retained from the original snapshot but is not the supported installation/update mechanism.
+`wget` is not a direct requirement of the imported working VWARD. The obsolete UI-only `scripts/update-ui.sh` was removed, and no supported GitHub-to-router updater currently exists. Only the future design is documented in [UPDATER_ARCHITECTURE.md](UPDATER_ARCHITECTURE.md).

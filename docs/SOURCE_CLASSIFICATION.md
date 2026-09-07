@@ -1,6 +1,6 @@
 # Router source classification
 
-The archive `VWARD_router_source_20260906-235502.tar.gz` contains 36 files. Its archive SHA-256 and all 30 entries in its internal `SHA256SUMS` were verified before migration.
+The archive `VWARD_router_source_20260906-235502.tar.gz` contains 36 files. Its archive SHA-256 and all 34 entries in its internal `SHA256SUMS` were verified before migration.
 
 ## Source published
 
