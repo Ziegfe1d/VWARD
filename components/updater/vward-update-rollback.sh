@@ -16,8 +16,8 @@ if [ "$rollback_internal" = 1 ]; then
 fi
 
 rollback_cleanup() {
-    [ "$rollback_internal" = 1 ] || vu_barrier_leave
-    [ "$rollback_internal" = 1 ] || vu_lock_release
+    [ "$rollback_internal" = 1 ] || vu_barrier_leave || :
+    [ "$rollback_internal" = 1 ] || vu_lock_release || :
 }
 
 rollback_fail() {
@@ -28,8 +28,9 @@ rollback_fail() {
 if [ "$rollback_internal" != 1 ]; then
     vu_lock_acquire || vu_die "$VU_DEFERRED" "Another updater transaction is active"
     trap rollback_cleanup EXIT HUP INT TERM
+    vu_barrier_recover_stale || vu_die "$VU_SAFETY_ERROR" "Stale or foreign update barrier cannot be recovered safely"
+    vu_staging_cleanup_orphans || vu_die "$VU_SAFETY_ERROR" "Cannot clean stale updater staging"
     [ "$barrier_integration_ready" = 1 ] || vu_die "$VU_SAFETY_ERROR" "Rollback barrier integration is disabled"
-    vu_cleanup_orphan_staging || vu_die "$VU_SAFETY_ERROR" "Cannot clean orphan staging"
     vu_barrier_enter || vu_die "$VU_SAFETY_ERROR" "Cannot enter rollback barrier"
 fi
 
@@ -65,8 +66,8 @@ done < "$backup/files.tsv"
 
 count=0
 while IFS="$(printf '\t')" read -r target existed mode original_sha backup_sha; do
-    count=$((count+1))
-    [ -z "$VU_ROOT_PREFIX" ] || [ "${VWARD_TEST_FAIL_ROLLBACK_AT:-0}" != "$count" ] || rollback_fail "Injected rollback interruption"
+    count=$((count + 1))
+    if [ -n "$VU_ROOT_PREFIX" ] && [ "${VWARD_TEST_FAIL_ROLLBACK_AT:-0}" = "$count" ]; then rollback_fail "Injected rollback interruption"; fi
     destination=$VU_ROOT_PREFIX$target
     if [ "$existed" = 1 ]; then
         source=$backup/files$target
@@ -83,12 +84,12 @@ done < "$backup/files.tsv"
 
 committed_existed=$(sed -n '1p' "$backup/committed.existed" 2>/dev/null || :)
 case "$committed_existed" in
-    1) [ -r "$backup/committed.state" ] || rollback_fail "Committed metadata backup is missing"; vu_atomic_write "$VU_COMMITTED_FILE" "$backup/committed.state" || rollback_fail "Cannot restore committed metadata" ;;
+    1) [ -r "$backup/committed.state" ] || rollback_fail "Committed metadata backup is missing"
+       vu_atomic_write "$VU_COMMITTED_FILE" "$backup/committed.state" || rollback_fail "Cannot restore committed metadata" ;;
     0) rm -f "$VU_COMMITTED_FILE" || rollback_fail "Cannot remove newly committed metadata" ;;
     *) rollback_fail "Committed metadata backup flag is invalid" ;;
 esac
 
-# Trust state is intentionally NOT rolled back. It is monotonic anti-replay state.
 sync
 vu_transition ROLLED_BACK
 vu_log INFO "Rollback completed from $backup"

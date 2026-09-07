@@ -1,23 +1,24 @@
 # Smart Updater v1 policy
 
-Smart Updater v1 is not production-deployed.
+Smart Updater v1 is implementation-stage code and is not deployed. It is disabled by default.
 
-## Priorities
+Priorities:
 
-- **CRITICAL**: bypasses the preferred clock window and uses the first hard-safe point. Integrity, authenticity, compatibility, disk, barrier and rollback requirements are never bypassed.
-- **IMPORTANT**: prefers the safe window; after the configurable default 2-hour deadline it may use the first hard-safe point outside that clock window.
-- **ROUTINE**: prefers the quiet window; after the configurable default 24-hour delay it becomes eligible at the first hard-safe point.
+- **CRITICAL**: first hard-safe point; time window may be bypassed, but signature, compatibility, space, activity and barrier checks are mandatory.
+- **IMPORTANT**: first safe window; after the configurable default two-hour delay, first hard-safe point outside the preferred clock window is allowed.
+- **ROUTINE**: prefers the quiet window; after the configurable default 24-hour delay, first hard-safe point is allowed.
 
-`auto_apply` is the master unattended switch. `auto_critical`, `auto_important` and `auto_routine` independently control each class; all default to zero.
+`auto_apply` is the master switch. `auto_critical`, `auto_important` and `auto_routine` independently control unattended application. All default to zero.
 
-## Pending, idle and retry semantics
+A verified deferred update remains pending across watcher cycles and reboot. HTTP 304 with no pending update is a normal no-update state. Exact already-installed manifests received with HTTP 200 are also treated as no-update.
 
-A verified deferred update remains pending across watcher cycles and reboot. HTTP 304 means only that the feed is unchanged: pending is re-evaluated, while 304 with no pending update is normal idle success. An exact already-installed signed update received via HTTP 200 is also a normal no-update condition.
+## Trust and replay policy
 
-Only transient transport/network failures use short bounded fast retries. Deferred/safety states, signature/hash failures, incompatibility/replay, quarantine, install/health failures and rollback failures do not spin in immediate retry loops.
+Installed state and trust state are separate:
 
-## Trust and quarantine
+- `committed.state` = what is installed;
+- `trust.state` = highest signed sequence already accepted.
 
-`committed.state` records installed version/update/sequence. `trust.state` separately records the highest signed sequence ever accepted. Lower sequences are rejected even after rollback; an equal sequence is accepted only for the identical update ID and canonical signed-manifest hash.
+The highest trusted sequence never decreases on rollback. A lower sequence is rejected. Reuse of the exact same highest sequence is allowed only when both update ID and canonical signed-manifest hash match. Same sequence with changed signed content is rejected.
 
-When install or health-check fails and automatic rollback succeeds, that exact update is persisted in `quarantine.state`. The unattended watcher will not retry it. A higher signed sequence may proceed normally.
+An update that fails install or health-check and is rolled back successfully is persisted in `quarantine.state`; unattended watcher runs do not retry that exact update. A newer sequence may proceed.
