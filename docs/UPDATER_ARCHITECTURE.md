@@ -4,16 +4,18 @@ Smart Updater v1 is implemented for code audit but is not deployed or production
 
 The source of truth is a versioned release feed, not a mutable Git branch:
 
-1. fetch a small signed manifest with conditional ETag requests;
+1. fetch a small signed manifest with conditional ETag requests and persist verified pending metadata;
 2. validate schema, channel, version, sequence and compatibility;
 3. verify the canonical signed object with a pinned Ed25519 public key;
-4. download a content-addressed package into staging;
+4. enforce package-size and staging-space limits before downloading a content-addressed package;
 5. verify package size, SHA-256 and every payload entry;
 6. wait for the safe window and update barrier;
-7. create a targeted backup and persistent transaction journal;
+7. create a hash-verified targeted backup and persistent transaction journal;
 8. write temporary sibling files and atomically rename each target;
 9. run the selected component-aware health profile;
-10. commit state or deterministically roll back.
+10. atomically replace the complete committed metadata snapshot or deterministically roll back files and metadata.
+
+HTTP 304 means only that the feed is unchanged. The watcher still evaluates persistent pending state against the priority deadline, quiet window, per-priority automatic policy and hard safety gates. Verified pending artifacts are retained while deferred and removed after commit.
 
 ## Ownership boundaries
 

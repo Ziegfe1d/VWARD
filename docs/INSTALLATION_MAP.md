@@ -32,6 +32,10 @@ This map is derived from the verified 2026-09-06 router snapshot. Modes are the 
 | `config/adaptive-route/services.conf.example` | initial `/opt/etc/adaptive-route/services.conf` | 0644 |
 | `config/cron/root.crontab` | managed entries in `/opt/var/spool/cron/crontabs/root` | 0600 observed |
 
+## Planned updater bootstrap mapping
+
+The verified router snapshot does not currently contain `/opt/share/vward/VERSION` or Smart Updater files. A future installer must explicitly copy repository `VERSION` to `/opt/share/vward/VERSION` as the one-time bootstrap version and install the updater separately. After the first committed update, `/opt/var/lib/vward/updater/committed.state` is authoritative; the bootstrap file is only a fallback when committed state does not yet exist. This mapping is planned and was not applied to the router.
+
 ## Not mapped as source
 
 | Snapshot file | Classification | Policy |

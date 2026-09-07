@@ -101,7 +101,7 @@ jq '.signature="AAAA"' "$MANIFEST" > "$MANIFEST.bad" && MANIFEST=$MANIFEST.bad
 expect_code 'invalid signature rejected' 31 run_update --dry-run
 
 new_root replay; make_package replay; make_manifest replay ROUTINE 1 0.1.1-dev
-printf '%s\n' 'last_sequence=1' > "$ROOT/opt/var/lib/vward/updater/state"
+    printf 'installed_version=0.1.0-dev\ninstalled_update_id=old\nlast_sequence=1\nmanifest_hash=old\nlast_health_check=old\n' > "$ROOT/opt/var/lib/vward/updater/committed.state"
 set +e
 run_update --dry-run >/dev/null 2>&1; replay_code=$?
 new_root downgrade; make_package downgrade; make_manifest downgrade ROUTINE 1 0.0.9
@@ -135,10 +135,16 @@ set -e
 
 new_root health; make_package health; make_manifest health CRITICAL 1 0.1.1-dev
 set +e
-VWARD_TEST_FORCE_HEALTH_FAIL=1 run_update --apply >/dev/null 2>&1
+VWARD_TEST_FORCE_HEALTH_FAIL=1 run_update --apply >"$WORK/health.out" 2>&1
 code=$?
 set -e
-[ "$code" -eq 41 ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = old ] && pass 'health failure rolls back' || fail 'health failure rollback'
+if [ "$code" -eq 41 ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = old ]; then
+    pass 'health failure rolls back'
+else
+    sed 's/^/  # /' "$WORK/health.out"
+    printf '  # code=%s content=%s phase=%s\n' "$code" "$(cat "$ROOT/opt/bin/adaptive-route.sh")" "$(sed -n 's/^phase=//p' "$ROOT/opt/var/lib/vward/updater/journal.state" 2>/dev/null || :)"
+    fail 'health failure rollback'
+fi
 
 new_root rollback; make_package rollback; make_manifest rollback CRITICAL 1 0.1.1-dev
 run_update --apply >/dev/null 2>&1
@@ -151,8 +157,12 @@ expect_code 'interrupted rollback is reported' 42 env VWARD_TEST_FAIL_ROLLBACK_A
 new_root recovery; make_package recovery; make_manifest recovery CRITICAL 1 0.1.1-dev
 mkdir -p "$ROOT/opt/var/backups/vward/recovery/files/opt/bin"
 cp "$ROOT/opt/bin/adaptive-route.sh" "$ROOT/opt/var/backups/vward/recovery/files/opt/bin/adaptive-route.sh"
-printf '/opt/bin/adaptive-route.sh\t1\t644\n' > "$ROOT/opt/var/backups/vward/recovery/files.tsv"
-printf 'phase=INSTALLING\nactive_backup=%s\n' "$ROOT/opt/var/backups/vward/recovery" > "$ROOT/opt/var/lib/vward/updater/state"
+recovery_sha=$(sha256sum "$ROOT/opt/bin/adaptive-route.sh" | awk '{print $1}')
+printf '/opt/bin/adaptive-route.sh\t1\t644\t%s\t%s\n' "$recovery_sha" "$recovery_sha" > "$ROOT/opt/var/backups/vward/recovery/files.tsv"
+printf '0\n' > "$ROOT/opt/var/backups/vward/recovery/committed.existed"
+recovery_index_sha=$(sha256sum "$ROOT/opt/var/backups/vward/recovery/files.tsv" | awk '{print $1}')
+printf 'index_sha=%s\ncommitted_sha=-\n' "$recovery_index_sha" > "$ROOT/opt/var/backups/vward/recovery/backup.meta"
+printf 'phase=INSTALLING\nactive_backup=%s\n' "$ROOT/opt/var/backups/vward/recovery" > "$ROOT/opt/var/lib/vward/updater/journal.state"
 expect_code 'interrupted transaction recovers' 0 env VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" "$UPDATER/vward-update.sh" --recover
 
 new_root bootstrap
