@@ -1,20 +1,44 @@
-# Future updater architecture
+# Smart Updater v1 architecture
 
-No updater is implemented in this migration.
+Smart Updater v1 is implemented for code audit but is not deployed or production ready. It is disabled by default and has neither an installer nor a production signing key.
 
-A future updater must treat GitHub as source and the router as an installed copy:
+The source of truth is a versioned release feed, not a mutable Git branch:
 
-1. read a versioned manifest;
-2. download into a staging directory;
-3. verify SHA-256 for every payload;
-4. check KeeneticOS, Entware, schema and free-space compatibility;
-5. back up the current program files and record local configuration/state ownership;
-6. install with same-filesystem atomic replacement;
-7. restore declared modes and ownership;
-8. restart only affected services in dependency order;
-9. run bounded health checks;
-10. mark success and prune old backups.
+1. fetch a small signed manifest with conditional ETag requests;
+2. validate schema, channel, version, sequence and compatibility;
+3. verify the canonical signed object with a pinned Ed25519 public key;
+4. download a content-addressed package into staging;
+5. verify package size, SHA-256 and every payload entry;
+6. wait for the safe window and update barrier;
+7. create a targeted backup and persistent transaction journal;
+8. write temporary sibling files and atomically rename each target;
+9. run the selected component-aware health profile;
+10. commit state or deterministically roll back.
 
-On any failure, restore the backup, restore service state and report a clear error.
+## Ownership boundaries
 
-The updater must never overwrite device-local configuration, `/opt/var/lib` state, logs or backups. It must not use `git pull` or `git clone` inside the production tree.
+Package targets are allow-listed program locations. The updater rejects device-local configuration, generated hints, runtime state, logs, temporary data, backups and credentials. It does not use `git pull` or `git clone` in the installation tree.
+
+## Barrier integration points
+
+Before deployment, these mutating jobs must decline new work while `/tmp/vward-update-requested` or `/tmp/vward-update.lock` exists and must expose an active transaction marker while inside a critical section:
+
+- adaptive-auto-maint and adaptive-housekeeping;
+- agh-adaptive-live and adaptive-hints-update;
+- vpn-domain-audit-chain and vpn-night-reconcile;
+- wg-health-watch and wg-failopen-guard;
+- crond-supervisor;
+- wan-guardian.
+
+The updater checks known legacy locks, but that is not a substitute for cooperative barrier support. Therefore `barrier_integration_ready` defaults to zero and unattended apply fails closed.
+
+## Deployment gates
+
+- review and publish a real Ed25519 public key with an offline signing procedure;
+- confirm OpenSSL Ed25519 support and shell utility behavior on the target Entware build;
+- integrate the barrier into current jobs without changing their routing behavior;
+- define exact affected-service restart order and bounded health probes;
+- validate backup pruning, permissions and ownership on a non-production router;
+- provide a separate installer and A/B updater-slot activation procedure.
+
+Until all gates pass, the code is for audit and filesystem simulation only.

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Ziegfe1d/VWARD/schemas/update-manifest-v1.json",
+  "title": "VWARD Smart Updater v1 feed manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["signed", "signature"],
+  "properties": {
+    "signed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "update_id", "sequence", "version", "channel", "priority", "published_at", "min_updater_version", "package", "compatibility", "affected_components", "affected_services", "health_profile", "requires_reboot", "rollback_policy", "signature"],
+      "properties": {
+        "schema": {"const": 1},
+        "update_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "sequence": {"type": "integer", "minimum": 1},
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"},
+        "channel": {"enum": ["stable", "dev"]},
+        "priority": {"enum": ["ROUTINE", "IMPORTANT", "CRITICAL"]},
+        "published_at": {"type": "string", "format": "date-time"},
+        "min_updater_version": {"type": "string"},
+        "package": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["url", "sha256", "size"],
+          "properties": {
+            "url": {"type": "string", "pattern": "^https://"},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "size": {"type": "integer", "minimum": 1}
+          }
+        },
+        "compatibility": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["min_vward", "max_vward"],
+          "properties": {
+            "min_vward": {"type": "string"},
+            "max_vward": {"type": "string"}
+          }
+        },
+        "affected_components": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "affected_services": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "health_profile": {"enum": ["default", "updater"]},
+        "requires_reboot": {"type": "boolean"},
+        "rollback_policy": {"enum": ["automatic", "manual"]},
+        "signature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["algorithm", "key_id"],
+          "properties": {
+            "algorithm": {"const": "Ed25519"},
+            "key_id": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "signature": {"type": "string", "minLength": 1}
+  }
+}

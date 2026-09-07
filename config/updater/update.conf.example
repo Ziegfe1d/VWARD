@@ -1,0 +1,22 @@
+# VWARD Smart Updater v1 is disabled by default.
+update_enabled=0
+auto_apply=0
+
+# HTTPS endpoint for the signed feed manifest.
+manifest_url=https://updates.example.invalid/vward/dev/update-manifest.json
+public_key_file=/opt/etc/vward/update-public.pem
+channel=dev
+
+# ROUTINE and IMPORTANT updates are restricted to this local-time window.
+safe_window_start=03:00
+safe_window_end=05:00
+
+minimum_free_kb=8192
+backup_keep=3
+health_timeout_seconds=30
+check_interval_seconds=900
+request_timeout_seconds=120
+current_version_file=/opt/share/vward/VERSION
+
+# Keep at 0 until all mutating VWARD jobs honor the updater barrier.
+barrier_integration_ready=0
