@@ -1,15 +1,23 @@
 # Smart Updater v1 policy
 
-Smart Updater v1 is implementation-stage code and is not deployed. It is disabled by default.
+Smart Updater v1 is not production-deployed.
 
-The feed assigns one of three priorities:
+## Priorities
 
-- ROUTINE: prefers the quiet window and becomes eligible at the first hard-safe point after the configurable 24-hour default maximum delay.
-- IMPORTANT: uses the first safe window and becomes eligible at the first hard-safe point after the configurable two-hour default deadline.
-- CRITICAL: may bypass the time window, but never signature, compatibility, free-space, activity or barrier checks.
+- **CRITICAL**: bypasses the preferred clock window and uses the first hard-safe point. Integrity, authenticity, compatibility, disk, barrier and rollback requirements are never bypassed.
+- **IMPORTANT**: prefers the safe window; after the configurable default 2-hour deadline it may use the first hard-safe point outside that clock window.
+- **ROUTINE**: prefers the quiet window; after the configurable default 24-hour delay it becomes eligible at the first hard-safe point.
 
-`auto_apply` is the master unattended switch. `auto_critical`, `auto_important` and `auto_routine` independently enable each class. All four default to zero.
+`auto_apply` is the master unattended switch. `auto_critical`, `auto_important` and `auto_routine` independently control each class; all default to zero.
 
-The updater accepts only a higher SemVer 2.0 version, including prerelease precedence, and a strictly increasing signed sequence for the configured channel. This blocks downgrade and replay. A verified deferred manifest, its first-seen time and priority remain pending across watcher cycles and reboot; HTTP 304 triggers reevaluation of that pending update. Dry-run validates a package using isolated runtime paths and cannot modify updater production state.
+## Pending, idle and retry semantics
 
-Local configuration, generated lists, runtime state, logs and backups are never package targets. Automatic apply remains unavailable until current VWARD mutating processes participate in the barrier protocol.
+A verified deferred update remains pending across watcher cycles and reboot. HTTP 304 means only that the feed is unchanged: pending is re-evaluated, while 304 with no pending update is normal idle success. An exact already-installed signed update received via HTTP 200 is also a normal no-update condition.
+
+Only transient transport/network failures use short bounded fast retries. Deferred/safety states, signature/hash failures, incompatibility/replay, quarantine, install/health failures and rollback failures do not spin in immediate retry loops.
+
+## Trust and quarantine
+
+`committed.state` records installed version/update/sequence. `trust.state` separately records the highest signed sequence ever accepted. Lower sequences are rejected even after rollback; an equal sequence is accepted only for the identical update ID and canonical signed-manifest hash.
+
+When install or health-check fails and automatic rollback succeeds, that exact update is persisted in `quarantine.state`. The unattended watcher will not retry it. A higher signed sequence may proceed normally.
