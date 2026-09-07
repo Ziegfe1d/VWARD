@@ -50,5 +50,20 @@ jobs:
       - name: Fix Pass 2 simulations
         run: tests/updater/run-fix-pass-2-simulations.sh
 
+      - name: Fix Pass 3 simulations
+        run: tests/updater/run-fix-pass-3-simulations.sh
+
+      - name: Diagnostic updater hashes
+        run: |
+          sha256sum \
+            components/updater/vward-update-watch.sh \
+            tests/updater/run-fix-pass-2-simulations.sh \
+            components/updater/vward-update-common.sh \
+            components/updater/vward-update-common-base.sh \
+            components/updater/vward-update-hardening.sh \
+            components/updater/vward-update-rollback.sh \
+            tests/updater/run-fix-pass-3-simulations.sh \
+            .github/workflows/updater-ci.yml
+
       - name: Repository SHA256 manifest
         run: sha256sum -c SHA256SUMS
