@@ -372,8 +372,7 @@ vu_manifest_validate() {
       (.signed | type == "object") and
       ((.signature | type) == "string" and (.signature | length) > 0) and
       (.signed.schema == 1) and
-      ((.signed.update_id | type) == "string" and
-       (.signed.update_id | test("^[A-Za-z0-9._-]+$"))) and
+      (.signed.update_id | type == "string") and
       (.signed.sequence as $sequence |
         ($sequence | type) == "number" and
         $sequence >= 1 and
@@ -385,8 +384,7 @@ vu_manifest_validate() {
       (.signed.min_updater_version | type == "string") and
       ((.signed.package.url | type) == "string" and
        (.signed.package.url | startswith("https://"))) and
-      ((.signed.package.sha256 | type) == "string" and
-       (.signed.package.sha256 | test("^[0-9a-f]{64}$"))) and
+      (.signed.package.sha256 | type == "string") and
       (.signed.package.size as $package_size |
         ($package_size | type) == "number" and
         $package_size > 0 and
@@ -408,7 +406,20 @@ vu_manifest_validate() {
       (.signed.signature.algorithm == "Ed25519") and
       ((.signed.signature.key_id | type) == "string" and
        (.signed.signature.key_id | length) > 0)
-    ' "$manifest" >/dev/null 2>&1
+    ' "$manifest" >/dev/null 2>&1 || return 1
+
+    manifest_update_id=$(jq -r '.signed.update_id' "$manifest") || return 1
+    case "$manifest_update_id" in
+        ''|*[!A-Za-z0-9._-]*) return 1 ;;
+    esac
+
+    manifest_package_sha=$(jq -r '.signed.package.sha256' "$manifest") || return 1
+    [ "${#manifest_package_sha}" -eq 64 ] || return 1
+    case "$manifest_package_sha" in
+        *[!0-9a-f]*) return 1 ;;
+    esac
+
+    return 0
 }
 
 vu_signed_hash() {
@@ -689,10 +700,21 @@ vu_local_target() {
 vu_package_validate() {
     package_dir=$1
     package_manifest=$package_dir/package-manifest.json
-    jq -e '.schema == 1 and (.files | type == "array" and length > 0) and all(.files[]; (.source | type == "string") and (.target | type == "string") and (.sha256 | test("^[0-9a-f]{64}$")) and (.mode | test("^(0644|0755)$")) and (.component | type == "string" and length > 0) and (.restart_policy | IN("none", "deferred")) and (.config_policy == "program-only"))' "$package_manifest" >/dev/null 2>&1 || return 1
+    jq -e '.schema == 1 and
+      ((.files | type) == "array" and (.files | length) > 0) and
+      all(.files[];
+        (.source | type) == "string" and
+        (.target | type) == "string" and
+        (.sha256 | type) == "string" and
+        (.mode | type) == "string" and
+        ((.component | type) == "string" and (.component | length) > 0) and
+        (.restart_policy | IN("none", "deferred")) and
+        (.config_policy == "program-only"))' "$package_manifest" >/dev/null 2>&1 || return 1
     jq -r '.files[] | [.source,.target,.sha256,.mode] | @tsv' "$package_manifest" |
     while IFS="$(printf '\t')" read -r source target expected mode; do
         case "$source" in ''|..|/*|*../*|../*|*/..) return 1 ;; esac
+        [ "${#expected}" -eq 64 ] || return 1
+        case "$expected" in *[!0-9a-f]*) return 1 ;; esac
         vu_safe_target "$target" || return 1
         vu_local_target "$target" && return 1
         [ -f "$package_dir/$source" ] || return 1
