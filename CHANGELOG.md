@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added the canonical VWARD Platform component registry and unified product
+  names without changing runtime filenames, paths or the active signed feed.
 - Added updater-owned runtime quiescing/resume orchestration, Entware-compatible
   file-mode verification and recovery-aware idempotent updater installation.
 - Added the signed `0.1.2-dev` runtime-barrier acceptance package.

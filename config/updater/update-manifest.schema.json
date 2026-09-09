@@ -39,7 +39,32 @@
             "max_vward": {"type": "string"}
           }
         },
-        "affected_components": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "affected_components": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "platform-core",
+              "route-engine",
+              "route-reconciler",
+              "route-tools",
+              "tunnel-guard",
+              "wan-guard",
+              "policy-sync",
+              "runtime",
+              "console",
+              "update-engine",
+              "bootstrap",
+              "adaptive-routing",
+              "wireguard-protection",
+              "wan-guardian",
+              "vpn-audit",
+              "runtime-supervision",
+              "web-ui",
+              "updater"
+            ]
+          },
+          "uniqueItems": true
+        },
         "affected_services": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
         "health_profile": {"enum": ["default", "updater"]},
         "requires_reboot": {"type": "boolean"},

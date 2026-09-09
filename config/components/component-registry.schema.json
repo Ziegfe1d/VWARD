@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Ziegfe1d/VWARD/schemas/component-registry-v1.json",
+  "title": "VWARD component registry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "platform", "platform_version", "component_version_policy", "components"],
+  "properties": {
+    "schema": {"const": 1},
+    "platform": {"const": "VWARD Platform"},
+    "platform_version": {"type": "string", "minLength": 1},
+    "component_version_policy": {"const": "platform-release"},
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "name_ru", "legacy_ids", "update_method", "health_profile", "runtime_targets"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "name": {"type": "string", "pattern": "^VWARD "},
+          "name_ru": {"type": "string", "minLength": 1},
+          "legacy_ids": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true
+          },
+          "update_method": {"enum": ["signed-package", "slot-installer"]},
+          "health_profile": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "runtime_targets": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "pattern": "^/opt/"},
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  }
+}

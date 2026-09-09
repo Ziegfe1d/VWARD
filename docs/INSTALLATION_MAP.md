@@ -1,5 +1,9 @@
 # Installation map
 
+Canonical logical ownership is defined by
+`config/components/component-registry.json`. Existing repository directories
+and runtime filenames remain unchanged for backward compatibility.
+
 This map is derived from the verified 2026-09-06 router snapshot. Modes are the observed runtime modes.
 
 | Repository source | Runtime destination | Mode |

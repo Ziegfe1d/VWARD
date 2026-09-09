@@ -2,7 +2,7 @@
 
 VPN · WAN · Automation · Recovery · Diagnostics — local network utilities platform for Keenetic routers with Entware.
 
-Current version: **0.1.0-dev**. This is a development snapshot, not a stable release.
+Current version: **0.1.2-dev**. This is a development release, not a stable release.
 
 The repository now reflects the source files from a verified read-only snapshot of the working router installation captured on 2026-09-06. The router installation remains device-specific; this repository is the canonical source tree.
 
@@ -21,11 +21,12 @@ Some scripts can change Keenetic routing or interface state when installed and s
 
 ## Repository layout
 
-- `components/adaptive-routing/` — adaptive routing scripts;
-- `components/vpn-audit/` — audit and reconciliation scripts;
-- `components/wireguard-protection/` — WireGuard monitoring and fail-open guard;
-- `components/wan-guardian/` — WAN diagnosis and recovery;
-- `components/runtime-supervision/` — crond supervisor and init scripts;
+- `components/adaptive-routing/` — VWARD Route Engine, Route Reconciler and Route Tools sources;
+- `components/vpn-audit/` — VWARD Policy Sync sources;
+- `components/wireguard-protection/` — VWARD Tunnel Guard sources;
+- `components/wan-guardian/` — VWARD WAN Guard sources;
+- `components/runtime-supervision/` — VWARD Runtime sources;
+- `components/updater/` — VWARD Update Engine sources;
 - `config/` — reproducible cron source and configuration examples;
 - `web/` — dashboard, CGI API and lighttpd configuration;
 - `docs/` — architecture, installation map, dependencies and migration policy.
@@ -34,9 +35,11 @@ Some scripts can change Keenetic routing or interface state when installed and s
 
 The imported working source currently contains values from one Keenetic installation, including `192.168.1.1`, `192.168.1.0/24`, `eth3`, `ISP`, `nwg1`, `Wireguard0`, `Wireguard1` and `domain-list22`. They are documented in [INSTALLATION_MAP.md](docs/INSTALLATION_MAP.md) and must not be assumed universal.
 
-No automatic installer or GitHub-to-router updater is implemented. Do not clone or pull this repository directly into `/opt`.
-
-Smart Updater v1 now has an implementation-stage subsystem under `components/updater/`, with signed-manifest validation, staging, rollback and simulations. It is **not deployed**, has no production signing key, remains disabled by default and is not yet a supported GitHub-to-router update mechanism.
+VWARD Update Engine v1 uses an Ed25519-signed feed, targeted packages,
+verified backup, atomic replacement, updater-owned runtime quiescing and
+deterministic rollback. Production automatic updates were enabled only after
+live-router apply, rollback and service-resume acceptance passed. Do not clone
+or pull this repository directly into `/opt`.
 
 ## Generated and local data
 
@@ -47,6 +50,7 @@ Smart Updater v1 now has an implementation-stage subsystem under `components/upd
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Component model and canonical names](docs/COMPONENT_MODEL.md)
 - [Installation map](docs/INSTALLATION_MAP.md)
 - [Dependencies](docs/DEPENDENCIES.md)
 - [Install status](docs/INSTALL.md)
