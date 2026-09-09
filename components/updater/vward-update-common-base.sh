@@ -373,7 +373,10 @@ vu_manifest_validate() {
       (.signature | type == "string" and length > 0) and
       (.signed.schema == 1) and
       (.signed.update_id | type == "string" and test("^[A-Za-z0-9._-]+$")) and
-      (.signed.sequence | type == "number" and floor == . and . >= 1) and
+      (.signed.sequence as $sequence |
+        ($sequence | type) == "number" and
+        $sequence >= 1 and
+        $sequence == ($sequence | floor)) and
       (.signed.version | type == "string") and
       (.signed.channel | type == "string") and
       (.signed.priority | IN("ROUTINE", "IMPORTANT", "CRITICAL")) and
@@ -381,8 +384,17 @@ vu_manifest_validate() {
       (.signed.min_updater_version | type == "string") and
       (.signed.package.url | type == "string" and startswith("https://")) and
       (.signed.package.sha256 | test("^[0-9a-f]{64}$")) and
-      (.signed.package.size | type == "number" and floor == . and . > 0) and
-      (((.signed.package.unpacked_size | type == "number" and floor == . and . > 0)) or (((env.VWARD_ROOT_PREFIX // "") != "") and ((env.VWARD_TEST_PACKAGE // "") != "") and ((.signed.package | has("unpacked_size")) | not))) and
+      (.signed.package.size as $package_size |
+        ($package_size | type) == "number" and
+        $package_size > 0 and
+        $package_size == ($package_size | floor)) and
+      (((.signed.package.unpacked_size as $unpacked_size |
+          ($unpacked_size | type) == "number" and
+          $unpacked_size > 0 and
+          $unpacked_size == ($unpacked_size | floor))) or
+       (((env.VWARD_ROOT_PREFIX // "") != "") and
+        ((env.VWARD_TEST_PACKAGE // "") != "") and
+        ((.signed.package | has("unpacked_size")) | not))) and
       (.signed.compatibility.min_vward | type == "string") and
       (.signed.compatibility.max_vward | type == "string") and
       (.signed.affected_components | type == "array") and
