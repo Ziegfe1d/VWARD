@@ -239,10 +239,13 @@ fi
 
 rm -rf "$SLOT" || fail "cannot retire inactive updater slot"
 mv "$SLOT_STAGE" "$SLOT" || fail "cannot activate updater slot directory"
-ln -s "$SLOT" "$UPDATER_ROOT/current.new.$$" ||
-    fail "cannot create updater slot link"
-mv -f "$UPDATER_ROOT/current.new.$$" "$CURRENT" ||
-    fail "cannot activate updater slot"
+# BusyBox mv treats a symlink-to-directory destination as a directory and can
+# move the candidate link inside the active slot. ln -sfn performs the tested
+# no-dereference replacement required on Keenetic/Entware.
+ln -sfn "$SLOT" "$CURRENT" || fail "cannot activate updater slot"
+ACTIVE_AFTER=$(CDPATH= cd -- "$CURRENT" 2>/dev/null && pwd -P) ||
+    fail "cannot resolve activated updater slot"
+[ "$ACTIVE_AFTER" = "$SLOT" ] || fail "updater slot activation verification failed"
 
 {
     grep -vF "$CRON_MARK" "$BACKUP/crontab.before"

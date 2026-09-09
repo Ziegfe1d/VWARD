@@ -2,6 +2,7 @@
 
 ## 0.1.3-dev — Component-aware selective updates
 
+- Corrected updater-slot activation for BusyBox `mv` symlink-to-directory semantics and added post-swap verification.
 - Enforced canonical component ownership across the signed feed, package manifest and bundled registry.
 - Added rejection of unknown/mismatched components, duplicate targets or sources, incorrect modes, missing dependencies and undeclared package files.
 - Added atomic per-component installed state with rollback support and `--status-components`.
