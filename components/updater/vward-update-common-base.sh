@@ -370,9 +370,10 @@ vu_manifest_validate() {
     jq -e '
       type == "object" and
       (.signed | type == "object") and
-      (.signature | type == "string" and length > 0) and
+      ((.signature | type) == "string" and (.signature | length) > 0) and
       (.signed.schema == 1) and
-      (.signed.update_id | type == "string" and test("^[A-Za-z0-9._-]+$")) and
+      ((.signed.update_id | type) == "string" and
+       (.signed.update_id | test("^[A-Za-z0-9._-]+$"))) and
       (.signed.sequence as $sequence |
         ($sequence | type) == "number" and
         $sequence >= 1 and
@@ -382,8 +383,10 @@ vu_manifest_validate() {
       (.signed.priority | IN("ROUTINE", "IMPORTANT", "CRITICAL")) and
       (.signed.published_at | type == "string") and
       (.signed.min_updater_version | type == "string") and
-      (.signed.package.url | type == "string" and startswith("https://")) and
-      (.signed.package.sha256 | test("^[0-9a-f]{64}$")) and
+      ((.signed.package.url | type) == "string" and
+       (.signed.package.url | startswith("https://"))) and
+      ((.signed.package.sha256 | type) == "string" and
+       (.signed.package.sha256 | test("^[0-9a-f]{64}$"))) and
       (.signed.package.size as $package_size |
         ($package_size | type) == "number" and
         $package_size > 0 and
@@ -403,7 +406,8 @@ vu_manifest_validate() {
       (.signed.requires_reboot | type == "boolean") and
       (.signed.rollback_policy | IN("automatic", "manual")) and
       (.signed.signature.algorithm == "Ed25519") and
-      (.signed.signature.key_id | type == "string" and length > 0)
+      ((.signed.signature.key_id | type) == "string" and
+       (.signed.signature.key_id | length) > 0)
     ' "$manifest" >/dev/null 2>&1
 }
 
