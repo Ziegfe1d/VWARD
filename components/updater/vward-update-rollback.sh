@@ -102,7 +102,7 @@ while IFS="$(printf '\t')" read -r target existed mode original_sha backup_sha; 
         cp "$source" "$tmp" && chmod "$mode" "$tmp" && sync && mv -f "$tmp" "$destination" ||
             rollback_fail "Cannot restore $target"
         restored_sha=$(sha256sum "$destination" | awk '{print $1}')
-        restored_mode=$(stat -c '%a' "$destination" 2>/dev/null || :)
+        restored_mode=$(vu_file_mode "$destination")
         [ "$restored_sha" = "$original_sha" ] && [ "$restored_mode" = "${mode#0}" ] ||
             rollback_fail "Restored file verification failed for $target"
     else

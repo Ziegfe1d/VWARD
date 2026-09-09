@@ -177,6 +177,11 @@ vu_atomic_write() {
     sync
 }
 
+vu_file_mode() {
+    path=$1
+    find "$path" -prune -printf '%m\n' 2>/dev/null | sed -n '1p'
+}
+
 vu_committed_get() { vu_state_get "$1" "$VU_COMMITTED_FILE"; }
 vu_trust_get() { vu_state_get "$1" "$VU_TRUST_FILE"; }
 vu_pending_get() { vu_state_get "$1" "$VU_PENDING_DIR/pending.state"; }

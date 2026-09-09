@@ -154,7 +154,8 @@ create_backup() {
         vu_safe_target "$target" || exit 1
         source=$VU_ROOT_PREFIX$target
         if [ -e "$source" ]; then
-            mode=$(stat -c '%a' "$source" 2>/dev/null || printf '%s' "$new_mode")
+            mode=$(vu_file_mode "$source")
+            [ -n "$mode" ] || exit 1
             mkdir -p "$backup/files$(dirname "$target")" || exit 1
             cp -p "$source" "$backup/files$target" || exit 1
             original_sha=$(sha256sum "$source" | awk '{print $1}')
