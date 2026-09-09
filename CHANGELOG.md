@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added updater-owned runtime quiescing/resume orchestration, Entware-compatible
+  file-mode verification and recovery-aware idempotent updater installation.
+- Added the signed `0.1.2-dev` runtime-barrier acceptance package.
 - Added the signed Smart Updater production bootstrap, pinned Ed25519 public
   key, check-only production configuration and live-router installer.
 - Corrected the Keenetic updater health probe to use the supported

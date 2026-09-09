@@ -196,18 +196,24 @@ for F in $UPDATER_FILES; do
     chmod 0755 "$SLOT/$F" || fail "cannot chmod $F"
 done
 
-cp "$WORK/files/update-public.pem" "$PUBLIC_KEY" ||
-    fail "cannot install public key"
-chmod 0644 "$PUBLIC_KEY" || fail "cannot chmod public key"
+if [ "$HAD_PUBLIC_KEY" = 0 ]; then
+    cp "$WORK/files/update-public.pem" "$PUBLIC_KEY" ||
+        fail "cannot install public key"
+    chmod 0644 "$PUBLIC_KEY" || fail "cannot chmod public key"
+fi
 
-cp "$WORK/files/update.conf" "$CONFIG" ||
-    fail "cannot install updater configuration"
-chmod 0600 "$CONFIG" || fail "cannot chmod updater configuration"
+if [ "$HAD_CONFIG" = 0 ]; then
+    cp "$WORK/files/update.conf" "$CONFIG" ||
+        fail "cannot install updater configuration"
+    chmod 0600 "$CONFIG" || fail "cannot chmod updater configuration"
+fi
 
 # Bootstrap represents the currently installed router source state.
-printf '%s\n' '0.1.0-dev' > "$ROOT/VERSION" ||
-    fail "cannot initialize VWARD version"
-chmod 0644 "$ROOT/VERSION"
+if [ "$HAD_VERSION" = 0 ]; then
+    printf '%s\n' '0.1.0-dev' > "$ROOT/VERSION" ||
+        fail "cannot initialize VWARD version"
+    chmod 0644 "$ROOT/VERSION"
+fi
 
 ln -s "$SLOT" "$UPDATER_ROOT/current.new.$$" ||
     fail "cannot create updater slot link"
@@ -247,7 +253,14 @@ else
             PENDING_STATUS=RECOVERY_REQUIRED
             ;;
         *)
-            fail "verified pending manifest was not stored"
+            INSTALLED_VERSION=$(sed -n '1p' "$ROOT/VERSION" 2>/dev/null || :)
+            REPOSITORY_VERSION=$(sed -n '1p' "$WORK/files/VERSION" 2>/dev/null || :)
+            if [ -n "$INSTALLED_VERSION" ] &&
+               [ "$INSTALLED_VERSION" = "$REPOSITORY_VERSION" ]; then
+                PENDING_STATUS=NO_UPDATE
+            else
+                fail "verified pending manifest was not stored"
+            fi
             ;;
     esac
 fi

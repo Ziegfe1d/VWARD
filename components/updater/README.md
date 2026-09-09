@@ -28,7 +28,11 @@ The updater uses a signed feed manifest, a versioned tar.gz package, exact VWARD
 - `vward-update.sh --rollback`
 - `vward-update.sh --recover`
 
-Automatic apply requires `auto_apply=1`, the matching per-priority flag, and `barrier_integration_ready=1`. The latter must remain zero until existing VWARD mutating jobs implement the shared barrier protocol.
+Automatic apply requires `auto_apply=1`, the matching per-priority flag, and
+`barrier_integration_ready=1`. The updater-owned runtime quiescing path stops
+the cron supervisor, cron and Adaptive Live, drains active jobs, and restores
+only services that were running before the transaction. These switches remain
+zero until that path passes live-router apply/rollback acceptance.
 
 The bootstrap installer pins the production Ed25519 public key, installs the
 updater in slot A, preserves any previous installation, and schedules signed

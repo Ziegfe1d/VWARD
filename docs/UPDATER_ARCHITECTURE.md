@@ -15,8 +15,8 @@ Flow:
 7. download the package with a signed-size transport bound;
 8. verify package SHA-256/size and tar declared unpacked size;
 9. extract and verify actual unpacked bytes plus every payload hash/target/mode;
-10. pre-check activity and cumulative backup/target filesystem space;
-11. request update barrier, drain jobs, acquire barrier and re-check activity;
+10. quiesce the cron supervisor, cron and Adaptive Live, then drain active jobs;
+11. pre-check activity and space, acquire the owned barrier and re-check activity;
 12. create targeted verified backup and install via sibling-file atomic rename;
 13. run bounded health check;
 14. atomically commit installation metadata or deterministically roll back;
@@ -32,7 +32,7 @@ HTTP 304 with no pending update is a normal idle state. Deferred/quarantined/saf
 
 ## Remaining automatic-apply gates
 
-- cooperative barrier integration in current VWARD jobs;
-- service restart order and bounded component health probes;
+- live-router acceptance of updater-owned runtime quiescing and resume;
+- broader component-specific restart profiles when future payloads require them;
 - backup pruning and A/B updater activation;
 - live-router apply/rollback acceptance before enabling `auto_apply`.

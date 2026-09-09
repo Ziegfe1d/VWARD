@@ -53,6 +53,10 @@ VU_REQUEST_OWNED=0
 VU_BARRIER_OWNED=0
 VU_LOCK_OWNED=0
 VU_LOCK_TOKEN=
+VU_RUNTIME_QUIESCED=0
+VU_RESTART_CROND=0
+VU_RESTART_LIVE=0
+VU_RESTART_SUPERVISOR=0
 VU_COMMITTED_FILE=$VU_STATE_DIR/committed.state
 VU_JOURNAL_FILE=$VU_STATE_DIR/journal.state
 VU_PENDING_DIR=$VU_STATE_DIR/pending
@@ -740,9 +744,70 @@ vu_in_safe_window() {
 
 vu_activity_clear() {
     [ ! -e "$VU_RUN_DIR/runtime-active" ] || return 1
-    for conflict in "$VU_ROOT_PREFIX/tmp/adaptive-auto-maint.lock" "$VU_ROOT_PREFIX/tmp/agh-adaptive-live.lock" "$VU_ROOT_PREFIX/tmp/vpn-domain-audit.lock" "$VU_ROOT_PREFIX/tmp/vpn-night-reconcile.lock" "$VU_ROOT_PREFIX/tmp/wg-failopen.lock" "$VU_ROOT_PREFIX/tmp/wan-guardian.lock"; do
+    for conflict in "$VU_ROOT_PREFIX/tmp/adaptive-auto-maint.lock" "$VU_ROOT_PREFIX/tmp/agh-adaptive-live.lock" "$VU_ROOT_PREFIX/tmp/vpn-domain-audit.lock" "$VU_ROOT_PREFIX/tmp/vpn-night-reconcile.lock" "$VU_ROOT_PREFIX/tmp/wg-failopen.lock" "$VU_ROOT_PREFIX/tmp/wan-guardian.lock" "$VU_ROOT_PREFIX/tmp/wan-guardian.lock.d"; do
         [ ! -e "$conflict" ] || return 1
     done
+    return 0
+}
+
+vu_runtime_quiesce() {
+    [ "$VU_RUNTIME_QUIESCED" = 0 ] || return 0
+
+    if [ -n "$VU_ROOT_PREFIX" ]; then
+        VU_RUNTIME_QUIESCED=1
+        return 0
+    fi
+
+    supervisor_pid=$(sed -n '1p' /opt/var/run/crond-supervisor.pid 2>/dev/null || :)
+    live_pid=$(sed -n '1p' /opt/var/run/agh-adaptive-live.pid 2>/dev/null || :)
+
+    [ -z "$supervisor_pid" ] || ! kill -0 "$supervisor_pid" 2>/dev/null || VU_RESTART_SUPERVISOR=1
+    pidof crond >/dev/null 2>&1 && VU_RESTART_CROND=1
+    [ -z "$live_pid" ] || ! kill -0 "$live_pid" 2>/dev/null || VU_RESTART_LIVE=1
+    VU_RUNTIME_QUIESCED=1
+
+    if [ "$VU_RESTART_SUPERVISOR" = 1 ]; then
+        /opt/etc/init.d/S92crond-supervisor stop >/dev/null 2>&1 || return 1
+    fi
+    if [ "$VU_RESTART_CROND" = 1 ]; then
+        /opt/etc/init.d/S90crond stop >/dev/null 2>&1 || return 1
+    fi
+    if [ "$VU_RESTART_LIVE" = 1 ]; then
+        /opt/etc/init.d/S91adaptive-live stop >/dev/null 2>&1 || return 1
+    fi
+
+    waited=0
+    while ! vu_activity_clear && [ "$waited" -lt "$request_timeout_seconds" ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    vu_activity_clear || return 1
+    pidof crond >/dev/null 2>&1 && return 1
+
+    VU_RUNTIME_QUIESCED=1
+    vu_log INFO "Runtime quiesced for update"
+    return 0
+}
+
+vu_runtime_resume() {
+    [ "$VU_RUNTIME_QUIESCED" = 1 ] || return 0
+
+    if [ -z "$VU_ROOT_PREFIX" ]; then
+        resume_rc=0
+        if [ "$VU_RESTART_CROND" = 1 ]; then
+            /opt/etc/init.d/S90crond start >/dev/null 2>&1 || resume_rc=1
+        fi
+        if [ "$VU_RESTART_LIVE" = 1 ]; then
+            /opt/etc/init.d/S91adaptive-live start >/dev/null 2>&1 || resume_rc=1
+        fi
+        if [ "$VU_RESTART_SUPERVISOR" = 1 ]; then
+            /opt/etc/init.d/S92crond-supervisor start >/dev/null 2>&1 || resume_rc=1
+        fi
+        [ "$resume_rc" -eq 0 ] || return 1
+        vu_log INFO "Runtime resumed after update"
+    fi
+
+    VU_RUNTIME_QUIESCED=0
     return 0
 }
 

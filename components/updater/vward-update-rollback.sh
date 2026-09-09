@@ -37,6 +37,7 @@ fi
 
 rollback_cleanup() {
     [ "$rollback_internal" = 1 ] || vu_barrier_leave || :
+    [ "$rollback_internal" = 1 ] || vu_runtime_resume || vu_log ERROR "Runtime resume failed after rollback"
     [ "$rollback_internal" = 1 ] || vu_lock_release || :
 }
 
@@ -51,6 +52,7 @@ if [ "$rollback_internal" != 1 ]; then
     vu_barrier_recover_stale || vu_die "$VU_SAFETY_ERROR" "Stale or foreign update barrier cannot be recovered safely"
     vu_staging_cleanup_orphans || vu_die "$VU_SAFETY_ERROR" "Cannot clean stale updater staging"
     [ "$barrier_integration_ready" = 1 ] || vu_die "$VU_SAFETY_ERROR" "Rollback barrier integration is disabled"
+    vu_runtime_quiesce || vu_die "$VU_SAFETY_ERROR" "Cannot quiesce runtime for rollback"
     vu_barrier_enter || vu_die "$VU_SAFETY_ERROR" "Cannot enter rollback barrier"
 fi
 
