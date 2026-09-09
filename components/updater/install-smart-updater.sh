@@ -235,13 +235,27 @@ case "$WATCH_RC" in
         ;;
 esac
 
-[ -r "$STATE/pending/manifest.json" ] ||
-    fail "verified pending manifest was not stored"
+if [ -r "$STATE/pending/manifest.json" ]; then
+    PENDING_STATUS=VERIFIED
+else
+    CURRENT_PHASE=$(sed -n 's/^phase=//p' "$STATE/journal.state" 2>/dev/null || :)
+    case "$CURRENT_PHASE" in
+        RECOVERY_REQUIRED|ROLLING_BACK)
+            # An existing interrupted transaction may have already consumed
+            # its pending manifest. Keep the newly installed updater so its
+            # corrected rollback path can complete deterministic recovery.
+            PENDING_STATUS=RECOVERY_REQUIRED
+            ;;
+        *)
+            fail "verified pending manifest was not stored"
+            ;;
+    esac
+fi
 
 MUTATION_STARTED=0
 
 echo "BOOTSTRAP_BACKUP=$BACKUP"
 echo "UPDATER_MODE=CHECK_ONLY"
 echo "AUTO_APPLY=0"
-echo "PENDING_UPDATE=VERIFIED"
+echo "PENDING_UPDATE=$PENDING_STATUS"
 echo "BOOTSTRAP_RESULT=PASS"
