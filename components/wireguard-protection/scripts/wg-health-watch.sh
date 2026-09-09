@@ -5,8 +5,15 @@ export PATH
 
 DIR="/opt/var/lib/wg-health"
 STATE="$DIR/state"
+RCI_CACHE="$DIR/interface-rci-cache"
 LOG="/opt/var/log/wg-health.log"
 LOCK="/tmp/wg-health-watch.lock"
+
+WG_IF="nwg1"
+
+# Healthy WG only needs an NDM snapshot periodically.
+# Any anomaly forces an immediate refresh.
+RCI_REFRESH_INTERVAL=900
 
 mkdir -p "$DIR"
 
@@ -27,7 +34,9 @@ cleanup()
 {
     rm -rf "$LOCK"
 }
+
 trap cleanup EXIT INT TERM
+
 
 OLD_STATUS="UNKNOWN"
 FAIL_COUNT=0
@@ -54,7 +63,7 @@ probe()
 
     curl -4 -k \
       --noproxy '*' \
-      --interface nwg1 \
+      --interface "$WG_IF" \
       --connect-timeout 1 \
       --max-time 2 \
       -sS -o /dev/null \
@@ -62,7 +71,42 @@ probe()
 }
 
 
-# СНАЧАЛА реальный трафик.
+NOW_EPOCH=$(date +%s)
+
+
+# ------------------------------------------------------------
+# LOCAL INTERFACE STATE
+# ------------------------------------------------------------
+
+IF_EXISTS=0
+CARRIER="unknown"
+ADDR=""
+FLAGS=""
+LOCAL_IF_OK=0
+
+if [ -d "/sys/class/net/$WG_IF" ]; then
+    IF_EXISTS=1
+    CARRIER=$(cat "/sys/class/net/$WG_IF/carrier" 2>/dev/null || echo unknown)
+
+    ADDR=$(
+        ip -4 addr show dev "$WG_IF" 2>/dev/null |
+        awk '/inet / {print $2; exit}'
+    )
+
+    FLAGS=$(ip link show "$WG_IF" 2>/dev/null | head -1)
+
+    if [ "$CARRIER" = "1" ] &&
+       [ -n "$ADDR" ] &&
+       echo "$FLAGS" | grep -q 'UP'; then
+        LOCAL_IF_OK=1
+    fi
+fi
+
+
+# ------------------------------------------------------------
+# REAL WG TRAFFIC
+# ------------------------------------------------------------
+
 P1=0
 P2=0
 
@@ -76,36 +120,128 @@ if [ "$P1" -eq 1 ] || [ "$P2" -eq 1 ]; then
 fi
 
 
-# ПОТОМ состояние Keenetic.
-INFO=$(ndmc -c "show interface Wireguard1" 2>/dev/null)
+# ------------------------------------------------------------
+# CACHED KEENETIC STATE
+# ------------------------------------------------------------
 
-CONFIG_STATE=$(echo "$INFO" | awk '/^[[:space:]]*state:/ {print $2; exit}')
-LINK_STATE=$(echo "$INFO" | awk '/^[[:space:]]*link:/ {print $2; exit}')
-ONLINE_STATE=$(echo "$INFO" | awk '/^[[:space:]]*online:/ {print $2; exit}')
+CONFIG_STATE="unknown"
+LINK_STATE="unknown"
+ONLINE_STATE="unknown"
+HS=999999
+LAST_RCI=0
 
-IF_OK=0
+if [ -f "$RCI_CACHE" ]; then
+    CONFIG_STATE=$(awk -F= '$1=="CONFIG_STATE"{print $2}' "$RCI_CACHE")
+    LINK_STATE=$(awk -F= '$1=="LINK_STATE"{print $2}' "$RCI_CACHE")
+    ONLINE_STATE=$(awk -F= '$1=="ONLINE_STATE"{print $2}' "$RCI_CACHE")
+    HS=$(awk -F= '$1=="HANDSHAKE_AGE"{print $2}' "$RCI_CACHE")
+    LAST_RCI=$(awk -F= '$1=="LAST_RCI"{print $2}' "$RCI_CACHE")
+fi
 
-echo "$INFO" | grep -q 'link: up' &&
-echo "$INFO" | grep -q 'online: yes' &&
-    IF_OK=1
-
-HS=$(
-    echo "$INFO" |
-    awk '/last-handshake:/ {
-        print $2
-        exit
-    }'
-)
+[ -n "$CONFIG_STATE" ] || CONFIG_STATE="unknown"
+[ -n "$LINK_STATE" ] || LINK_STATE="unknown"
+[ -n "$ONLINE_STATE" ] || ONLINE_STATE="unknown"
 
 case "$HS" in
     ''|*[!0-9]*) HS=999999 ;;
 esac
 
+case "$LAST_RCI" in
+    ''|*[!0-9]*) LAST_RCI=0 ;;
+esac
+
+RCI_AGE=$((NOW_EPOCH - LAST_RCI))
+
+case "$RCI_AGE" in
+    -*)
+        RCI_AGE=999999
+        ;;
+esac
+
+
+# ------------------------------------------------------------
+# RCI REFRESH POLICY
+# ------------------------------------------------------------
+
+NEED_RCI=0
+
+[ "$LAST_RCI" -eq 0 ] && NEED_RCI=1
+[ "$RCI_AGE" -ge "$RCI_REFRESH_INTERVAL" ] && NEED_RCI=1
+
+# Any real/local anomaly gets an immediate authoritative snapshot.
+[ "$LOCAL_IF_OK" -ne 1 ] && NEED_RCI=1
+[ "$NET_OK" -ne 1 ] && NEED_RCI=1
+[ "$OLD_STATUS" != "UP" ] && NEED_RCI=1
+
+RCI_REFRESHED=0
+RCI_OK=0
+
+if [ "$NEED_RCI" -eq 1 ]; then
+
+    INFO=$(ndmc -c "show interface Wireguard1" 2>/dev/null)
+
+    if [ -n "$INFO" ]; then
+
+        CONFIG_STATE=$(
+            echo "$INFO" |
+            awk '/^[[:space:]]*state:/ {print $2; exit}'
+        )
+
+        LINK_STATE=$(
+            echo "$INFO" |
+            awk '/^[[:space:]]*link:/ {print $2; exit}'
+        )
+
+        ONLINE_STATE=$(
+            echo "$INFO" |
+            awk '/^[[:space:]]*online:/ {print $2; exit}'
+        )
+
+        HS=$(
+            echo "$INFO" |
+            awk '/last-handshake:/ {
+                print $2
+                exit
+            }'
+        )
+
+        [ -n "$CONFIG_STATE" ] || CONFIG_STATE="unknown"
+        [ -n "$LINK_STATE" ] || LINK_STATE="unknown"
+        [ -n "$ONLINE_STATE" ] || ONLINE_STATE="unknown"
+
+        case "$HS" in
+            ''|*[!0-9]*) HS=999999 ;;
+        esac
+
+        CTMP="$RCI_CACHE.tmp.$$"
+
+        {
+            echo "CONFIG_STATE=$CONFIG_STATE"
+            echo "LINK_STATE=$LINK_STATE"
+            echo "ONLINE_STATE=$ONLINE_STATE"
+            echo "HANDSHAKE_AGE=$HS"
+            echo "LAST_RCI=$NOW_EPOCH"
+        } > "$CTMP" &&
+        mv "$CTMP" "$RCI_CACHE"
+
+        LAST_RCI=$NOW_EPOCH
+        RCI_AGE=0
+        RCI_REFRESHED=1
+        RCI_OK=1
+    fi
+fi
+
+
+# ------------------------------------------------------------
+# HEALTH DECISION
+# ------------------------------------------------------------
+
+IF_OK="$LOCAL_IF_OK"
+
 HS_OK=0
 [ "$HS" -le 300 ] && HS_OK=1
 
-
-# Реальный проход трафика — главный критерий.
+# Real traffic remains the primary criterion.
 GOOD=0
 
 if [ "$IF_OK" -eq 1 ] &&
@@ -127,6 +263,7 @@ if [ "$GOOD" -eq 1 ]; then
         else
             STATUS="RECOVERING"
         fi
+
     else
         STATUS="UP"
     fi
@@ -144,36 +281,51 @@ else
 fi
 
 
-NOW_EPOCH=$(date +%s)
 NOW_TEXT=$(date '+%Y-%m-%d %H:%M:%S')
-TMP="$STATE.tmp.$$"
+TMP_STATE="$STATE.tmp.$$"
 
 {
     echo "STATUS=$STATUS"
     echo "LAST_CHECK=$NOW_EPOCH"
     echo "FAIL_COUNT=$FAIL_COUNT"
     echo "OK_COUNT=$OK_COUNT"
+
+    # Kept for wg-failopen compatibility.
     echo "CONFIG_STATE=${CONFIG_STATE:-unknown}"
     echo "LINK_STATE=${LINK_STATE:-unknown}"
     echo "ONLINE_STATE=${ONLINE_STATE:-unknown}"
+
     echo "INTERFACE_OK=$IF_OK"
+    echo "LOCAL_IF_EXISTS=$IF_EXISTS"
+    echo "LOCAL_CARRIER=$CARRIER"
+    echo "LOCAL_ADDRESS=${ADDR:-none}"
+
     echo "HANDSHAKE_AGE=$HS"
     echo "HANDSHAKE_OK=$HS_OK"
+
     echo "PROBE_1=$P1"
     echo "PROBE_2=$P2"
     echo "NETWORK_OK=$NET_OK"
-} > "$TMP"
 
-mv "$TMP" "$STATE"
+    echo "RCI_REFRESHED=$RCI_REFRESHED"
+    echo "RCI_OK=$RCI_OK"
+    echo "RCI_LAST=$LAST_RCI"
+    echo "RCI_AGE=$RCI_AGE"
+} > "$TMP_STATE"
+
+mv "$TMP_STATE" "$STATE"
+
 
 if [ "$STATUS" != "$OLD_STATUS" ]; then
-    echo "$NOW_TEXT|$OLD_STATUS->$STATUS|if=$IF_OK|hs=$HS|p1=$P1|p2=$P2" \
+    echo "$NOW_TEXT|$OLD_STATUS->$STATUS|if=$IF_OK|hs=$HS|p1=$P1|p2=$P2|rci=$RCI_REFRESHED" \
         >> "$LOG"
 fi
+
 
 echo "WG_STATUS=$STATUS"
 echo "Interface=$IF_OK Network=$NET_OK HandshakeAge=$HS"
 echo "Probe1=$P1 Probe2=$P2"
 echo "FailCount=$FAIL_COUNT OkCount=$OK_COUNT"
+echo "RCI_Refreshed=$RCI_REFRESHED RCI_Age=$RCI_AGE"
 
 exit 0

@@ -121,6 +121,33 @@ probe_result()
 }
 
 
+probe()
+{
+    H="$1"
+    IFACE="$2"
+    IP="$3"
+
+    PR=$(probe_result "$H" "$IFACE" "$IP")
+
+    OLDIFS="$IFS"
+    IFS='|'
+    set -- $PR
+    PRC="$1"
+    PCODE="$2"
+    IFS="$OLDIFS"
+
+    case "$PRC" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+
+    [ "$PRC" -eq 0 ] || return 1
+    [ "$PCODE" != "000" ] || return 1
+    [ "$PCODE" != "451" ] || return 1
+
+    return 0
+}
+
+
 classify_isp_vs_vpn()
 {
     H="$1"

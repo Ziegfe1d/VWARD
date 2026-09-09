@@ -10,6 +10,10 @@
 - Removed the obsolete initial UI-only updater placeholder.
 - Added the disabled, implementation-stage Smart Updater v1 subsystem, signed
   manifest schema, rollback model and isolated simulation suite. It is not deployed.
+- Synchronized the verified 2026-09-09 production fixes: Adaptive maintenance
+  probe compatibility, Adaptive Live group-refresh throttling, self-healing
+  tcpdump watchdog grace, cached WireGuard RCI checks, and bounded log/storage
+  housekeeping with the active hourly cron schedule.
 
 ## 0.1.0-dev — 2026-09-06
 

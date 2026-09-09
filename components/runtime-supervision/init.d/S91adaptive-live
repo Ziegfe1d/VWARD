@@ -9,7 +9,7 @@ LOG="/opt/var/log/agh-adaptive-live.log"
 
 LIVE_LOCK="/tmp/agh-adaptive-live.lock"
 CONTROL_LOCK="/tmp/S91adaptive-live.control.lock"
-
+CHILD_STATE="/tmp/S91adaptive-live.tcpdump-missing"
 START_WAIT=12
 STOP_WAIT=6
 CONTROL_WAIT=20
@@ -111,16 +111,20 @@ kill_adaptive_tcpdump()
 }
 
 
+
 clean_service()
 {
     kill_all_live
     kill_adaptive_tcpdump
 
     rm -f "$PIDFILE"
+    rm -f "$CHILD_STATE"
     rm -rf "$LIVE_LOCK"
 }
 
 
+# Core health belongs to the main Live process.
+# tcpdump is a self-healing child owned by agh-adaptive-live.sh.
 service_healthy()
 {
     PID=$(cat "$PIDFILE" 2>/dev/null)
@@ -132,10 +136,8 @@ service_healthy()
     kill -0 "$PID" 2>/dev/null || return 1
 
     LCNT=$(adaptive_live_pids | wc -l)
-    TCNT=$(adaptive_tcpdump_pids | wc -l)
 
     [ "$LCNT" -eq 1 ] || return 1
-    [ "$TCNT" -eq 1 ] || return 1
 
     return 0
 }
@@ -144,21 +146,51 @@ service_healthy()
 start_service()
 {
     if service_healthy; then
+
         PID=$(cat "$PIDFILE")
-        echo "Adaptive Live already running PID=$PID tcpdump=1"
-        return 0
+        TCNT=$(adaptive_tcpdump_pids | wc -l)
+
+        if [ "$TCNT" -eq 1 ]; then
+            rm -f "$CHILD_STATE"
+            echo "Adaptive Live already running PID=$PID tcpdump=1"
+            return 0
+        fi
+
+        # tcpdump can legitimately disappear briefly while Live
+        # performs its own 2-second self-healing cycle.
+        sleep 3
+
+        if ! service_healthy; then
+            echo "Adaptive Live core became unhealthy during child grace"
+        else
+            TCNT=$(adaptive_tcpdump_pids | wc -l)
+
+            if [ "$TCNT" -eq 1 ]; then
+                rm -f "$CHILD_STATE"
+                echo "Adaptive Live child recovered PID=$PID tcpdump=1"
+                return 0
+            fi
+
+            MISS=$(cat "$CHILD_STATE" 2>/dev/null)
+
+            case "$MISS" in
+                ''|*[!0-9]*) MISS=0 ;;
+            esac
+
+            MISS=$((MISS + 1))
+            echo "$MISS" > "$CHILD_STATE"
+
+            if [ "$MISS" -lt 3 ]; then
+                echo "Adaptive Live core healthy PID=$PID tcpdump=$TCNT child_grace=$MISS/3"
+                return 0
+            fi
+
+            echo "Adaptive Live tcpdump unhealthy for 3 consecutive watchdog checks - restarting"
+        fi
     fi
 
-    # Небольшая повторная проверка:
-    # Live мог как раз перезапускать свой tcpdump.
-    sleep 2
-
-    if service_healthy; then
-        PID=$(cat "$PIDFILE")
-        echo "Adaptive Live recovered PID=$PID tcpdump=1"
-        return 0
-    fi
-
+    # Only core failure, duplicate core process, or persistent child
+    # failure reaches this point.
     clean_service
 
     "$SCRIPT" >> "$LOG" 2>&1 &
@@ -180,6 +212,8 @@ start_service()
            [ "$LCNT" -eq 1 ] &&
            [ "$TCNT" -eq 1 ]; then
 
+            rm -f "$CHILD_STATE"
+
             echo "Adaptive Live started PID=$PID tcpdump=1 wait=${N}s"
             return 0
         fi
@@ -188,18 +222,17 @@ start_service()
         N=$((N + 1))
     done
 
-    echo "Adaptive Live failed health check after ${START_WAIT}s"
+    echo "Adaptive Live failed startup health check after ${START_WAIT}s"
 
     clean_service
     return 1
 }
-
-
 stop_service()
 {
     clean_service
     echo "Adaptive Live stopped"
 }
+
 
 
 status_service()
@@ -211,10 +244,22 @@ status_service()
     TCNT=$(adaptive_tcpdump_pids | wc -l)
 
     if service_healthy; then
-        echo "Adaptive Live RUNNING PID=$PID"
+
+        if [ "$TCNT" -eq 1 ]; then
+            echo "Adaptive Live RUNNING PID=$PID"
+            echo "Adaptive process count=1"
+            echo "Adaptive tcpdump count=1"
+            return 0
+        fi
+
+        MISS=$(cat "$CHILD_STATE" 2>/dev/null)
+        [ -n "$MISS" ] || MISS=0
+
+        echo "Adaptive Live RUNNING/DEGRADED PID=$PID"
         echo "Adaptive process count=1"
-        echo "Adaptive tcpdump count=1"
-        return 0
+        echo "Adaptive tcpdump count=$TCNT"
+        echo "Adaptive tcpdump missing streak=$MISS/3"
+        return 1
     fi
 
     echo "Adaptive Live UNHEALTHY/STOPPED"
@@ -225,8 +270,6 @@ status_service()
 
     return 1
 }
-
-
 case "$1" in
 
     status)

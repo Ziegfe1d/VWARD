@@ -27,7 +27,7 @@ CONNECT_TIMEOUT=2
 MAX_TIME=3
 
 # Изменения групп перечитываем максимум раз в минуту.
-GROUP_REFRESH=60
+GROUP_REFRESH=300
 
 # Обычный DIRECT-домен можно перепроверить уже через минуту.
 DIRECT_COOLDOWN=60
