@@ -74,6 +74,13 @@ if [ "$(sed -n '1p' "$backup/committed.existed" 2>/dev/null || :)" = 1 ]; then
         rollback_fail "Committed metadata backup hash mismatch"
 fi
 
+expected_components_sha=$(vu_state_get components_sha "$backup/backup.meta" 2>/dev/null || :)
+if [ "$(sed -n '1p' "$backup/components.existed" 2>/dev/null || :)" = 1 ]; then
+    actual_components_sha=$(sha256sum "$backup/components.json" 2>/dev/null | awk '{print $1}')
+    [ -n "$expected_components_sha" ] && [ "$expected_components_sha" = "$actual_components_sha" ] ||
+        rollback_fail "Component metadata backup hash mismatch"
+fi
+
 vu_transition ROLLING_BACK
 
 while IFS="$(printf '\t')" read -r target existed mode original_sha backup_sha; do
@@ -125,6 +132,14 @@ case "$committed_existed" in
     *)
         rollback_fail "Committed metadata backup flag is invalid"
         ;;
+esac
+
+components_existed=$(sed -n '1p' "$backup/components.existed" 2>/dev/null || printf '-')
+case "$components_existed" in
+    1) vu_atomic_write "$VU_COMPONENT_STATE_FILE" "$backup/components.json" || rollback_fail "Cannot restore component metadata" ;;
+    0) rm -f "$VU_COMPONENT_STATE_FILE" || rollback_fail "Cannot remove new component metadata" ;;
+    -) : ;; # Backward compatibility with backups created before component state existed.
+    *) rollback_fail "Component metadata backup flag is invalid" ;;
 esac
 
 sync

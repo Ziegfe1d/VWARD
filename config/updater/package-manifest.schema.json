@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Ziegfe1d/VWARD/schemas/package-manifest-v1.json",
+  "title": "VWARD selective update package manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "files"],
+  "properties": {
+    "schema": {"const": 1},
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "target", "sha256", "mode", "component", "restart_policy", "config_policy"],
+        "properties": {
+          "source": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+          "target": {"type": "string", "pattern": "^/opt/"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "mode": {"enum": ["0644", "0755"]},
+          "component": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "restart_policy": {"enum": ["none", "deferred"]},
+          "config_policy": {"const": "program-only"}
+        }
+      }
+    }
+  }
+}

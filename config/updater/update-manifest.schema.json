@@ -66,7 +66,7 @@
           "uniqueItems": true
         },
         "affected_services": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-        "health_profile": {"enum": ["default", "updater"]},
+        "health_profile": {"enum": ["default", "updater", "route-engine", "route-tools", "tunnel-guard", "wan-guard", "policy-sync", "runtime", "console"]},
         "requires_reboot": {"type": "boolean"},
         "rollback_policy": {"enum": ["automatic", "manual"]},
         "signature": {

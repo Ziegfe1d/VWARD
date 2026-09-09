@@ -3,12 +3,14 @@ name: Smart Updater CI
 on:
   push:
     branches:
-      - feature/smart-updater-v1
+      - main
   pull_request:
     paths:
       - 'components/updater/**'
       - 'config/updater/**'
+      - 'config/components/**'
       - 'tests/updater/**'
+      - 'updates/dev/**'
       - '.github/workflows/updater-ci.yml'
       - 'SHA256SUMS'
 

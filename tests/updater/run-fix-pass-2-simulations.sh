@@ -45,7 +45,7 @@ make_package(){
   printf 'wan-%s\n' "$label" > "$PKGDIR/files/wan-guardian.sh"
   one=$(sha256sum "$PKGDIR/files/adaptive-route.sh"|awk '{print $1}')
   two=$(sha256sum "$PKGDIR/files/wan-guardian.sh"|awk '{print $1}')
-  jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"adaptive-routing",restart_policy:"none",config_policy:"program-only"},{source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guardian",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
+  jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guardian",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
   PACKAGE=$WORK/pkg-$label.tar.gz
   tar -czf "$PACKAGE" -C "$PKGDIR" .
   UNPACKED=$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{s+=$1} END {print s+0}')
@@ -58,7 +58,7 @@ make_manifest(){
   unpacked=${unpacked_override:-$UNPACKED}
   MANIFEST=$WORK/manifest-$label.json
   signed=$WORK/signed-$label.json
-  jq -n --arg id "$label" --arg ver "$version" --arg pri "$priority" --arg sha "$sha" --argjson size "$size" --argjson unpacked "$unpacked" --argjson seq "$sequence" '{schema:1,update_id:$id,sequence:$seq,version:$ver,channel:"dev",priority:$pri,published_at:"2026-09-07T00:00:00Z",min_updater_version:"1.0.0",package:{url:"https://example.invalid/package.tar.gz",sha256:$sha,size:$size,unpacked_size:$unpacked},compatibility:{min_vward:"0.1.0-dev",max_vward:"0.1.0-dev"},affected_components:["adaptive-routing","wan-guardian"],affected_services:[],health_profile:"default",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"test-key"}}' > "$signed"
+  jq -n --arg id "$label" --arg ver "$version" --arg pri "$priority" --arg sha "$sha" --argjson size "$size" --argjson unpacked "$unpacked" --argjson seq "$sequence" '{schema:1,update_id:$id,sequence:$seq,version:$ver,channel:"dev",priority:$pri,published_at:"2026-09-07T00:00:00Z",min_updater_version:"1.0.0",package:{url:"https://example.invalid/package.tar.gz",sha256:$sha,size:$size,unpacked_size:$unpacked},compatibility:{min_vward:"0.1.0-dev",max_vward:"0.1.0-dev"},affected_components:["route-tools","wan-guard"],affected_services:[],health_profile:"default",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"test-key"}}' > "$signed"
   jq -cS . "$signed" > "$signed.canon"
   openssl pkeyutl -sign -inkey "$WORK/private.pem" -rawin -in "$signed.canon" -out "$signed.sig"
   sig=$(openssl base64 -A -in "$signed.sig")
@@ -137,12 +137,30 @@ set +e; run_watch 500 >/dev/null 2>&1; rc=$?; set -e
 new_root allow
 if VWARD_ROOT_PREFIX=$ROOT VWARD_UPDATE_CONFIG=$CONFIG sh -c '. "$1"; vu_safe_target /opt/bin/adaptive-route.sh && vu_safe_target /opt/etc/init.d/S90crond && ! vu_safe_target /opt/bin/other.sh && ! vu_safe_target /opt/etc/init.d/S99foreign' sh "$UPDATER/vward-update-common.sh"; then ok 'exact VWARD target ownership enforced'; else bad 'strict ownership'; fi
 
+new_root component-owner; make_package component-owner
+jq '(.files[0].component)="route-engine"' "$PKGDIR/package-manifest.json" > "$PKGDIR/package-manifest.next" && mv "$PKGDIR/package-manifest.next" "$PKGDIR/package-manifest.json"
+tar -czf "$PACKAGE" -C "$PKGDIR" .; UNPACKED=$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{s+=$1} END {print s+0}'); make_manifest component-owner CRITICAL 1 0.1.1-dev
+COMMAND=--dry-run; set +e; run_update >/dev/null 2>&1; rc=$?; set -e; unset COMMAND
+[ "$rc" -eq 31 ] && ok 'component and target owner mismatch rejected' || bad 'component owner validation'
+
+new_root package-extra; make_package package-extra
+printf 'undeclared\n' > "$PKGDIR/files/undeclared.txt"
+tar -czf "$PACKAGE" -C "$PKGDIR" .; UNPACKED=$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{s+=$1} END {print s+0}'); make_manifest package-extra CRITICAL 1 0.1.1-dev
+COMMAND=--dry-run; set +e; run_update >/dev/null 2>&1; rc=$?; set -e; unset COMMAND
+[ "$rc" -eq 31 ] && ok 'undeclared package payload rejected' || bad 'undeclared payload validation'
+
+new_root component-state; make_package component-state; make_manifest component-state CRITICAL 1 0.1.1-dev
+set +e; run_update >/dev/null 2>&1; apply_rc=$?; set -e
+component_count=$(jq '.components | length' "$STATE/components.json" 2>/dev/null || printf 0)
+set +e; env VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" "$UPDATER/vward-update-rollback.sh" >/dev/null 2>&1; rollback_rc=$?; set -e
+[ "$apply_rc" -eq 0 ] && [ "$component_count" -eq 2 ] && [ "$rollback_rc" -eq 0 ] && [ ! -e "$STATE/components.json" ] && ok 'component state commits and rolls back atomically' || bad 'component state transaction'
+
 new_root cumulative; make_package cumulative
 printf 'minimum_free_kb=0\n' >> "$CONFIG"
 awk 'BEGIN{for(i=0;i<1300;i++)printf "A"; printf "\n"}' > "$PKGDIR/files/adaptive-route.sh"
 awk 'BEGIN{for(i=0;i<1300;i++)printf "B"; printf "\n"}' > "$PKGDIR/files/wan-guardian.sh"
 one=$(sha256sum "$PKGDIR/files/adaptive-route.sh"|awk '{print $1}'); two=$(sha256sum "$PKGDIR/files/wan-guardian.sh"|awk '{print $1}')
-jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"adaptive-routing",restart_policy:"none",config_policy:"program-only"},{source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guardian",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
+jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guardian",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
 tar -czf "$PACKAGE" -C "$PKGDIR" .
 UNPACKED=$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{s+=$1} END {print s+0}')
 make_manifest cumulative CRITICAL 1 0.1.1-dev

@@ -3,6 +3,169 @@
 # Focused safety overrides for VWARD Smart Updater v1.
 # This file is sourced after vward-update-common-base.sh.
 
+VU_COMPONENT_STATE_FILE=$VU_STATE_DIR/components.json
+if [ -r "$SELF_DIR/component-registry.json" ]; then
+    VU_COMPONENT_REGISTRY=$SELF_DIR/component-registry.json
+else
+    VU_COMPONENT_REGISTRY=$SELF_DIR/../../config/components/component-registry.json
+fi
+
+vu_component_registry_validate() {
+    [ -r "$VU_COMPONENT_REGISTRY" ] || return 1
+    jq -e '
+      .schema == 1 and
+      (.components | type == "array" and length > 0) and
+      ([.components[].id] | length == (unique | length)) and
+      ([.components[].runtime_targets[]] | length == (unique | length)) and
+      all(.components[];
+        (.id | type == "string" and length > 0) and
+        (.legacy_ids | type == "array") and
+        (.update_method | IN("signed-package", "slot-installer")) and
+        (.health_profile | type == "string" and length > 0) and
+        (.runtime_targets | type == "array" and length > 0) and
+        ((.depends_on // []) | type == "array"))
+    ' "$VU_COMPONENT_REGISTRY" >/dev/null 2>&1 || return 1
+    jq -r '.components[] | (.depends_on // [])[]' "$VU_COMPONENT_REGISTRY" |
+    while IFS= read -r dependency; do
+        jq -e --arg dependency "$dependency" 'any(.components[]; .id == $dependency)' "$VU_COMPONENT_REGISTRY" >/dev/null 2>&1 || exit 1
+    done
+}
+
+vu_component_canonical() {
+    requested=$1
+    jq -r --arg requested "$requested" '
+      first(.components[] | select(.id == $requested or (.legacy_ids | index($requested) != null)) | .id) // empty
+    ' "$VU_COMPONENT_REGISTRY"
+}
+
+vu_component_owner() {
+    target=$1
+    jq -r --arg target "$target" '
+      first(.components[] | select(.runtime_targets | index($target) != null) | .id) // empty
+    ' "$VU_COMPONENT_REGISTRY"
+}
+
+vu_component_dependencies_ready() {
+    manifest=$1 package_manifest=$2
+    for component in $(jq -r '.signed.affected_components[]' "$manifest" | while read -r id; do vu_component_canonical "$id"; done | sort -u); do
+        for dependency in $(jq -r --arg component "$component" '.components[] | select(.id == $component) | (.depends_on // [])[]' "$VU_COMPONENT_REGISTRY"); do
+            jq -r --arg dependency "$dependency" '.components[] | select(.id == $dependency) | .runtime_targets[]' "$VU_COMPONENT_REGISTRY" |
+            while IFS= read -r target; do
+                [ -e "$VU_ROOT_PREFIX$target" ] || jq -e --arg target "$target" 'any(.files[]; .target == $target)' "$package_manifest" >/dev/null 2>&1 || exit 1
+            done || return 1
+        done
+    done
+}
+
+vu_target_mode_allowed() {
+    target=$1 mode=$2
+    case "$target" in
+        /opt/share/vward/VERSION|/opt/etc/keenetic-apps/lighttpd.conf|/opt/share/keenetic-apps/www/index.html)
+            [ "$mode" = 0644 ] ;;
+        *) [ "$mode" = 0755 ] ;;
+    esac
+}
+
+# Cross-check signed components, package components and authoritative target owners.
+vu_package_validate() {
+    package_dir=$1
+    manifest=${2:-}
+    package_manifest=$package_dir/package-manifest.json
+    [ -r "$manifest" ] || return 1
+    vu_component_registry_validate || return 1
+    jq -e '.schema == 1 and
+      ((.files | type) == "array" and (.files | length) > 0) and
+      ([.files[].source] | length == (unique | length)) and
+      ([.files[].target] | length == (unique | length)) and
+      all(.files[];
+        (.source | type) == "string" and
+        (.target | type) == "string" and
+        (.sha256 | type) == "string" and
+        (.mode | type) == "string" and
+        ((.component | type) == "string" and (.component | length) > 0) and
+        (.restart_policy | IN("none", "deferred")) and
+        (.config_policy == "program-only"))' "$package_manifest" >/dev/null 2>&1 || return 1
+
+    validation_dir=${package_dir%/*}
+    declared_components=$validation_dir/declared-components
+    packaged_components=$validation_dir/packaged-components
+    jq -r '.signed.affected_components[]' "$manifest" | while IFS= read -r component; do
+        canonical=$(vu_component_canonical "$component")
+        [ -n "$canonical" ] || exit 1
+        printf '%s\n' "$canonical"
+    done | sort -u > "$declared_components" || return 1
+    [ -s "$declared_components" ] || return 1
+
+    jq -r '.files[].component' "$package_manifest" | while IFS= read -r component; do
+        canonical=$(vu_component_canonical "$component")
+        [ -n "$canonical" ] || exit 1
+        [ "$canonical" != update-engine ] || exit 1
+        printf '%s\n' "$canonical"
+    done | sort -u > "$packaged_components" || return 1
+    cmp -s "$declared_components" "$packaged_components" || return 1
+    vu_component_dependencies_ready "$manifest" "$package_manifest" || return 1
+    profile=$(jq -r '.signed.health_profile' "$manifest")
+    case "$profile" in
+        default) : ;;
+        updater) grep -qx update-engine "$declared_components" || return 1 ;;
+        *)
+            profile_matches=$(jq -r --arg profile "$profile" '.components[] | select(.health_profile == $profile) | .id' "$VU_COMPONENT_REGISTRY")
+            matched=0
+            for id in $profile_matches; do grep -qx "$id" "$declared_components" && matched=1; done
+            [ "$matched" = 1 ] || return 1
+            ;;
+    esac
+
+    jq -r '.files[] | [.source,.target,.sha256,.mode,.component] | @tsv' "$package_manifest" |
+    while IFS="$(printf '\t')" read -r source target expected mode component; do
+        case "$source" in ''|..|/*|*../*|../*|*/..) return 1 ;; esac
+        [ "${#expected}" -eq 64 ] || return 1
+        case "$expected" in *[!0-9a-f]*) return 1 ;; esac
+        vu_safe_target "$target" || return 1
+        vu_local_target "$target" && return 1
+        canonical=$(vu_component_canonical "$component")
+        owner=$(vu_component_owner "$target")
+        [ -n "$canonical" ] && [ "$canonical" = "$owner" ] || return 1
+        vu_target_mode_allowed "$target" "$mode" || return 1
+        [ -f "$package_dir/$source" ] || return 1
+        actual=$(sha256sum "$package_dir/$source" | awk '{print $1}')
+        [ "$actual" = "$expected" ] || return 1
+    done || return 1
+
+    actual_files=$validation_dir/actual-files
+    expected_files=$validation_dir/expected-files
+    find "$package_dir" -type f | sed "s#^$package_dir/##" | sort > "$actual_files" || return 1
+    { printf '%s\n' package-manifest.json; jq -r '.files[].source' "$package_manifest"; } | sort > "$expected_files"
+    cmp -s "$actual_files" "$expected_files"
+}
+
+vu_component_state_write() {
+    manifest=$1 package_dir=$2 health_time=$3
+    state_tmp=$VU_STATE_DIR/components.new.$$
+    if [ -r "$VU_COMPONENT_STATE_FILE" ]; then
+        cp "$VU_COMPONENT_STATE_FILE" "$state_tmp" || return 1
+    else
+        printf '%s\n' '{"schema":1,"components":{}}' > "$state_tmp" || return 1
+    fi
+    version=$(jq -r '.signed.version' "$manifest")
+    update_id=$(jq -r '.signed.update_id' "$manifest")
+    sequence=$(jq -r '.signed.sequence' "$manifest")
+    for component in $(jq -r '.files[].component' "$package_dir/package-manifest.json" | while read -r id; do vu_component_canonical "$id"; done | sort -u); do
+        files=$(jq -c --arg component "$component" --slurpfile registry "$VU_COMPONENT_REGISTRY" '
+          reduce .files[] as $f ({};
+            ($registry[0].components[] | select(.id == $component) | ([.id] + .legacy_ids)) as $ids |
+            if ($ids | index($f.component)) != null then . + {($f.target): $f.sha256} else . end)
+        ' "$package_dir/package-manifest.json") || return 1
+        jq --arg component "$component" --arg version "$version" --arg update_id "$update_id" \
+           --argjson sequence "$sequence" --arg installed_at "$health_time" --argjson files "$files" \
+          '.schema=1 | .components[$component]={release:$version,update_id:$update_id,sequence:$sequence,installed_at:$installed_at,health:"PASS",files:$files}' \
+          "$state_tmp" > "$state_tmp.next" || return 1
+        mv -f "$state_tmp.next" "$state_tmp" || return 1
+    done
+    vu_atomic_write "$VU_COMPONENT_STATE_FILE" "$state_tmp" || return 1
+    rm -f "$state_tmp"
+}
+
 # Accept the retired staging_multiplier key silently for compatibility with
 # older local test/config material while using signed compressed+unpacked sizes.
 vu_assign_config() {

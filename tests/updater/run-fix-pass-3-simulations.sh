@@ -48,7 +48,7 @@ make_package() {
     two=$(sha256sum "$PKGDIR/files/wan-guardian.sh" | awk '{print $1}')
     jq -n --arg one "$one" --arg two "$two" \
       '{schema:1,files:[
-        {source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"adaptive-routing",restart_policy:"none",config_policy:"program-only"},
+        {source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},
         {source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guardian",restart_policy:"none",config_policy:"program-only"}
       ]}' > "$PKGDIR/package-manifest.json"
     PACKAGE=$WORK/pkg-$label.tar.gz
@@ -67,7 +67,7 @@ make_manifest() {
         published_at:"2026-09-07T00:00:00Z",min_updater_version:"1.0.0",
         package:{url:"https://example.invalid/package.tar.gz",sha256:$sha,size:$size,unpacked_size:$unpacked},
         compatibility:{min_vward:"0.1.0-dev",max_vward:"0.1.0-dev"},
-        affected_components:["adaptive-routing","wan-guardian"],affected_services:[],
+        affected_components:["route-tools","wan-guard"],affected_services:[],
         health_profile:"default",requires_reboot:false,rollback_policy:"automatic",
         signature:{algorithm:"Ed25519",key_id:"test-key"}}' > "$signed"
     jq -cS . "$signed" > "$signed.canon"

@@ -6,7 +6,7 @@ SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$SELF_DIR/vward-update-common.sh"
 
 usage() {
-    printf '%s\n' 'Usage: vward-update.sh --status|--check|--dry-run|--apply|--apply-pending|--rollback|--recover'
+    printf '%s\n' 'Usage: vward-update.sh --status|--status-components|--check|--dry-run|--apply|--apply-pending|--rollback|--recover'
 }
 
 cleanup() {
@@ -125,7 +125,7 @@ download_and_unpack() {
     tar -xzf "$package" -C "$package_dir" || vu_die "$VU_VERIFY_ERROR" "Package extraction failed"
     actual_unpacked=$(find "$package_dir" -type f -exec wc -c {} \; | awk '{sum += $1} END {print sum+0}')
     [ "$actual_unpacked" -eq "$expected_unpacked" ] || vu_die "$VU_VERIFY_ERROR" "Extracted size mismatch"
-    vu_package_validate "$package_dir" || vu_die "$VU_VERIFY_ERROR" "Package manifest validation failed"
+    vu_package_validate "$package_dir" "$manifest" || vu_die "$VU_VERIFY_ERROR" "Package/component registry validation failed"
     VU_PACKAGE_DIR=$package_dir
 }
 
@@ -136,7 +136,7 @@ print_plan() {
     printf 'Priority: %s\n' "$(jq -r '.signed.priority' "$manifest")"
     printf 'Sequence: %s\n' "$(jq -r '.signed.sequence' "$manifest")"
     printf '%s\n' 'Files:'
-    jq -r '.files[] | "  \(.target) mode=\(.mode)"' "$package_dir/package-manifest.json"
+    jq -r '.files[] | "  [\(.component)] \(.target) mode=\(.mode)"' "$package_dir/package-manifest.json"
 }
 
 create_backup() {
@@ -149,6 +149,12 @@ create_backup() {
         printf '%s\n' 1 > "$backup/committed.existed"
     else
         printf '%s\n' 0 > "$backup/committed.existed"
+    fi
+    if [ -r "$VU_COMPONENT_STATE_FILE" ]; then
+        cp "$VU_COMPONENT_STATE_FILE" "$backup/components.json" || vu_die "$VU_INSTALL_ERROR" "Cannot back up component state"
+        printf '%s\n' 1 > "$backup/components.existed"
+    else
+        printf '%s\n' 0 > "$backup/components.existed"
     fi
     jq -r '.files[] | [.target,.mode] | @tsv' "$package_dir/package-manifest.json" |
     while IFS="$(printf '\t')" read -r target new_mode; do
@@ -169,7 +175,8 @@ create_backup() {
     done || vu_die "$VU_INSTALL_ERROR" "Backup failed"
     index_sha=$(sha256sum "$backup/files.tsv" | awk '{print $1}')
     if [ -r "$backup/committed.state" ]; then committed_sha=$(sha256sum "$backup/committed.state" | awk '{print $1}'); else committed_sha=-; fi
-    printf 'index_sha=%s\ncommitted_sha=%s\n' "$index_sha" "$committed_sha" > "$backup/backup.meta" || vu_die "$VU_INSTALL_ERROR" "Cannot write backup metadata"
+    if [ -r "$backup/components.json" ]; then components_sha=$(sha256sum "$backup/components.json" | awk '{print $1}'); else components_sha=-; fi
+    printf 'index_sha=%s\ncommitted_sha=%s\ncomponents_sha=%s\n' "$index_sha" "$committed_sha" "$components_sha" > "$backup/backup.meta" || vu_die "$VU_INSTALL_ERROR" "Cannot write backup metadata"
     vu_journal_set active_backup "$backup" || vu_die "$VU_INSTALL_ERROR" "Cannot record backup"
     VU_BACKUP=$backup
 }
@@ -182,6 +189,13 @@ install_package() {
         count=$((count + 1))
         if [ -n "$VU_ROOT_PREFIX" ] && [ "${VWARD_TEST_FAIL_INSTALL_AT:-0}" = "$count" ]; then exit 1; fi
         destination=$VU_ROOT_PREFIX$target
+        if [ -f "$destination" ]; then
+            current_sha=$(sha256sum "$destination" | awk '{print $1}')
+            current_mode=$(vu_file_mode "$destination")
+            if [ "$current_sha" = "$expected" ] && [ "$current_mode" = "${mode#0}" ]; then
+                continue
+            fi
+        fi
         mkdir -p "$(dirname "$destination")" || exit 1
         tmp=$destination.vward-new.$$
         cp "$package_dir/$source" "$tmp" || exit 1
@@ -266,6 +280,7 @@ apply_update() {
     sequence=$(jq -r '.signed.sequence' "$manifest")
     version=$(jq -r '.signed.version' "$manifest")
     health_time=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    vu_component_state_write "$manifest" "$package_dir" "$health_time" || vu_die "$VU_INSTALL_ERROR" "Cannot commit component state"
     vu_journal_set candidate_version "$version" || vu_die "$VU_INSTALL_ERROR" "Cannot journal candidate version"
     vu_journal_set candidate_update_id "$update_id" || vu_die "$VU_INSTALL_ERROR" "Cannot journal candidate update id"
     vu_journal_set candidate_sequence "$sequence" || vu_die "$VU_INSTALL_ERROR" "Cannot journal candidate sequence"
@@ -301,7 +316,7 @@ use_pending_manifest=0
 [ "$command" = --apply-pending ] && use_pending_manifest=1
 
 vu_load_config
-vu_require_commands awk cmp cp curl date df find grep jq kill mkdir mv openssl sed sha256sum sleep stat tar tr wc
+vu_require_commands awk cmp cp curl date df find grep jq kill mkdir mv openssl sed sha256sum sleep sort stat tar tr wc
 
 case "$command" in
     --status)
@@ -310,6 +325,9 @@ case "$command" in
             "$(vu_state_get phase "$VU_JOURNAL_FILE" 2>/dev/null || printf IDLE)" \
             "$(vu_committed_get last_sequence 2>/dev/null || printf 0)" \
             "$(vu_trust_get highest_seen_sequence 2>/dev/null || vu_committed_get last_sequence 2>/dev/null || printf 0)"
+        exit "$VU_OK" ;;
+    --status-components)
+        if [ -r "$VU_COMPONENT_STATE_FILE" ]; then jq . "$VU_COMPONENT_STATE_FILE"; else printf '%s\n' '{"schema":1,"components":{}}'; fi
         exit "$VU_OK" ;;
     --rollback) exec "$SELF_DIR/vward-update-rollback.sh" ;;
     --recover)

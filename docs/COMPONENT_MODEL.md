@@ -53,5 +53,15 @@ package file entry carries the matching component ID. Backup, atomic replace,
 health verification and rollback operate only on those declared files.
 
 Component-specific health profiles are reserved in the registry but remain a
-separate implementation gate. Until a profile is implemented and accepted on
-the router, publishing must use an already supported conservative profile.
+separate production acceptance gate. Smart Updater 1.1 implements the named
+profiles; publishing uses `default` until the relevant profile has passed on
+the router.
+
+Smart Updater 1.1 enforces registry ownership before installation. The
+canonicalized component set in the signed feed must exactly equal the component
+set in the package. A package cannot write another component's target or carry
+undeclared payload files.
+
+Component installation state is stored separately from platform-wide committed
+state. One release can therefore update only one component while preserving one
+platform SemVer and a complete rollback transaction.

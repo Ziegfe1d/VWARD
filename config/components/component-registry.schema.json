@@ -28,6 +28,11 @@
           },
           "update_method": {"enum": ["signed-package", "slot-installer"]},
           "health_profile": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "depends_on": {
+            "type": "array",
+            "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+            "uniqueItems": true
+          },
           "runtime_targets": {
             "type": "array",
             "minItems": 1,

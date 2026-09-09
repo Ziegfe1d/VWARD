@@ -57,7 +57,7 @@ make_package() {
     printf '%s\n' "wan-$label" > "$PKGDIR/files/wan-guardian.sh"
     digest=$(sha256sum "$PKGDIR/files/adaptive-route.sh" | awk '{print $1}')
     wan_digest=$(sha256sum "$PKGDIR/files/wan-guardian.sh" | awk '{print $1}')
-    jq -n --arg digest "$digest" --arg wan_digest "$wan_digest" '{schema:1,files:[{source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$digest,mode:"0755",component:"adaptive-routing",restart_policy:"none",config_policy:"program-only"},{source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$wan_digest,mode:"0755",component:"wan-guardian",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
+    jq -n --arg digest "$digest" --arg wan_digest "$wan_digest" '{schema:1,files:[{source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$digest,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$wan_digest,mode:"0755",component:"wan-guardian",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
     PACKAGE=$WORK/package-$label.tar.gz
     tar -czf "$PACKAGE" -C "$PKGDIR" .
 }
@@ -69,7 +69,7 @@ make_manifest() {
     MANIFEST=$WORK/manifest-$label.json
     signed=$WORK/signed-$label.json
     jq -n --arg version "$version" --arg priority "$priority" --arg sha "$sha" --argjson size "$size" --argjson sequence "$sequence" \
-      '{schema:1,update_id:("test-"+($sequence|tostring)+"-"+$priority),sequence:$sequence,version:$version,channel:"dev",priority:$priority,published_at:"2026-09-07T00:00:00Z",min_updater_version:"1.0.0",package:{url:"https://example.invalid/package.tar.gz",sha256:$sha,size:$size},compatibility:{min_vward:"0.1.0-dev",max_vward:"0.1.0-dev"},affected_components:["adaptive-routing","wan-guardian"],affected_services:[],health_profile:"default",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"test-key"}}' > "$signed"
+      '{schema:1,update_id:("test-"+($sequence|tostring)+"-"+$priority),sequence:$sequence,version:$version,channel:"dev",priority:$priority,published_at:"2026-09-07T00:00:00Z",min_updater_version:"1.0.0",package:{url:"https://example.invalid/package.tar.gz",sha256:$sha,size:$size},compatibility:{min_vward:"0.1.0-dev",max_vward:"0.1.0-dev"},affected_components:["route-tools","wan-guard"],affected_services:[],health_profile:"default",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"test-key"}}' > "$signed"
     jq -cS . "$signed" > "$signed.canonical"
     openssl pkeyutl -sign -inkey "$WORK/private.pem" -rawin -in "$signed.canonical" -out "$signed.sig"
     signature=$(openssl base64 -A -in "$signed.sig")

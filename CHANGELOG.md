@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3-dev — Component-aware selective updates
+
+- Enforced canonical component ownership across the signed feed, package manifest and bundled registry.
+- Added rejection of unknown/mismatched components, duplicate targets or sources, incorrect modes, missing dependencies and undeclared package files.
+- Added atomic per-component installed state with rollback support and `--status-components`.
+- Added component-specific health profiles while retaining the accepted default profile and legacy component aliases.
+- Kept Update Engine self-update isolated behind the existing atomic slot installer.
+
 ## Unreleased
 
 - Added the canonical VWARD Platform component registry and unified product

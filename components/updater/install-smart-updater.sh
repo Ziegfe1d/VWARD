@@ -8,7 +8,8 @@ export PATH
 BASE_URL=${VWARD_REPOSITORY_RAW_URL:-https://raw.githubusercontent.com/Ziegfe1d/VWARD/main}
 ROOT=/opt/share/vward
 UPDATER_ROOT=$ROOT/updater
-SLOT=$UPDATER_ROOT/slots/A
+SLOT_A=$UPDATER_ROOT/slots/A
+SLOT_B=$UPDATER_ROOT/slots/B
 CURRENT=$UPDATER_ROOT/current
 CONFIG_DIR=/opt/etc/vward
 CONFIG=$CONFIG_DIR/update.conf
@@ -96,6 +97,16 @@ ndmc -c "show version" >/dev/null 2>&1 || fail "Keenetic control plane is unavai
 mkdir -p "$WORK/files" "$BACKUP" ||
     fail "cannot create bootstrap directories"
 
+ACTIVE_SLOT=
+if [ -d "$CURRENT" ]; then
+    ACTIVE_SLOT=$(CDPATH= cd -- "$CURRENT" 2>/dev/null && pwd -P) || ACTIVE_SLOT=
+fi
+case "$ACTIVE_SLOT" in
+    "$SLOT_A") SLOT=$SLOT_B ;;
+    *) SLOT=$SLOT_A ;;
+esac
+SLOT_STAGE=$SLOT.new.$$
+
 download()
 {
     URL=$1
@@ -134,6 +145,14 @@ for F in $UPDATER_FILES; do
 
     sh -n "$WORK/files/$F" || fail "shell syntax failed: $F"
 done
+
+download "$BASE_URL/config/components/component-registry.json" "$WORK/files/component-registry.json" ||
+    fail "cannot download component registry"
+EXPECTED=$(awk -v p="config/components/component-registry.json" '$2==p {print $1; exit}' "$WORK/SHA256SUMS")
+ACTUAL=$(sha256sum "$WORK/files/component-registry.json" | awk '{print $1}')
+[ -n "$EXPECTED" ] && [ "$ACTUAL" = "$EXPECTED" ] || fail "SHA256 mismatch: component registry"
+jq -e '.schema == 1 and (.components | type == "array") and (.components | length > 0)' \
+    "$WORK/files/component-registry.json" >/dev/null 2>&1 || fail "invalid component registry"
 
 for SPEC in \
     "config/updater/update-public.pem|update-public.pem" \
@@ -187,14 +206,17 @@ crontab -l > "$BACKUP/crontab.before" 2>/dev/null || : > "$BACKUP/crontab.before
 
 MUTATION_STARTED=1
 
-mkdir -p "$SLOT" "$CONFIG_DIR" "$STATE/pending" "$LOG" \
+mkdir -p "$SLOT_STAGE" "$CONFIG_DIR" "$STATE/pending" "$LOG" \
     /opt/var/cache/vward/updater /opt/var/run/vward ||
     fail "cannot create updater runtime layout"
 
 for F in $UPDATER_FILES; do
-    cp "$WORK/files/$F" "$SLOT/$F" || fail "cannot install $F"
-    chmod 0755 "$SLOT/$F" || fail "cannot chmod $F"
+    cp "$WORK/files/$F" "$SLOT_STAGE/$F" || fail "cannot install $F"
+    chmod 0755 "$SLOT_STAGE/$F" || fail "cannot chmod $F"
 done
+cp "$WORK/files/component-registry.json" "$SLOT_STAGE/component-registry.json" ||
+    fail "cannot install component registry"
+chmod 0644 "$SLOT_STAGE/component-registry.json" || fail "cannot chmod component registry"
 
 if [ "$HAD_PUBLIC_KEY" = 0 ]; then
     cp "$WORK/files/update-public.pem" "$PUBLIC_KEY" ||
@@ -215,6 +237,8 @@ if [ "$HAD_VERSION" = 0 ]; then
     chmod 0644 "$ROOT/VERSION"
 fi
 
+rm -rf "$SLOT" || fail "cannot retire inactive updater slot"
+mv "$SLOT_STAGE" "$SLOT" || fail "cannot activate updater slot directory"
 ln -s "$SLOT" "$UPDATER_ROOT/current.new.$$" ||
     fail "cannot create updater slot link"
 mv -f "$UPDATER_ROOT/current.new.$$" "$CURRENT" ||

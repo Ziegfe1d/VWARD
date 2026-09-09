@@ -16,6 +16,27 @@ case "$profile" in
     updater)
         required="$VU_ROOT_PREFIX/opt/share/vward/updater/current/vward-update.sh"
         ;;
+    route-engine)
+        required="$VU_ROOT_PREFIX/opt/bin/agh-adaptive-live.sh $VU_ROOT_PREFIX/opt/bin/adaptive-auto-maint.sh"
+        ;;
+    route-tools)
+        required="$VU_ROOT_PREFIX/opt/bin/adaptive-route.sh $VU_ROOT_PREFIX/opt/bin/agh-adaptive-route.sh"
+        ;;
+    tunnel-guard)
+        required="$VU_ROOT_PREFIX/opt/bin/wg-health-watch.sh $VU_ROOT_PREFIX/opt/bin/wg-failopen-guard.sh"
+        ;;
+    wan-guard)
+        required="$VU_ROOT_PREFIX/opt/bin/wan-guardian.sh $VU_ROOT_PREFIX/opt/bin/wan-recovery-actuator.sh"
+        ;;
+    policy-sync)
+        required="$VU_ROOT_PREFIX/opt/bin/vpn-domain-audit.sh $VU_ROOT_PREFIX/opt/bin/vpn-subnet-sync.sh"
+        ;;
+    runtime)
+        required="$VU_ROOT_PREFIX/opt/bin/crond-supervisor.sh $VU_ROOT_PREFIX/opt/etc/init.d/S91adaptive-live"
+        ;;
+    console)
+        required="$VU_ROOT_PREFIX/opt/share/keenetic-apps/www/index.html $VU_ROOT_PREFIX/opt/share/keenetic-apps/www/cgi-bin/api.cgi"
+        ;;
     *) vu_die "$VU_CONFIG_ERROR" "Unknown health profile: $profile" ;;
 esac
 

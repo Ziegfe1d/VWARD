@@ -26,11 +26,21 @@ Flow:
 
 Only exact VWARD runtime paths from `docs/INSTALLATION_MAP.md` plus the planned `/opt/share/vward/VERSION` bootstrap target are installable. Device-local configuration, generated files, state, logs, backups and credentials are never payload targets.
 
+The active updater slot contains the authoritative component registry. Before
+quiescing runtime, Smart Updater 1.1 verifies the exact signed/package component
+set, canonical target ownership, permitted mode, unique sources and targets,
+declared dependencies, every payload SHA-256 and the absence of undeclared
+archive files.
+
+Successful commit writes both platform-wide `committed.state` and selective
+`components.json`. Both are transactionally backed up and restored. Update
+Engine itself remains protected from normal packages and uses slot installation.
+
 ## Watcher behavior
 
 HTTP 304 with no pending update is a normal idle state. Deferred/quarantined/safety/verification/compatibility/install/health outcomes are not fast-retried. Only explicitly transient network/HTTP conditions use short bounded retries; all other outcomes wait for the normal watcher interval or a new/manual action.
 
 ## Future extension gates
 
-- broader component-specific restart profiles when future payloads require them;
-- backup pruning and A/B updater activation;
+- signed file removal, only when a real component consolidation requires it;
+- A/B updater activation beyond the accepted slot installer.

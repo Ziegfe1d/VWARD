@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "VWARD Platform",
-  "platform_version": "0.1.2-dev",
+  "platform_version": "0.1.3-dev",
   "component_version_policy": "platform-release",
   "components": [
     {
@@ -29,6 +29,7 @@
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "route-engine",
+      "depends_on": ["route-engine"],
       "runtime_targets": ["/opt/bin/adaptive-auto-maint.sh"]
     },
     {
@@ -120,6 +121,7 @@
       "legacy_ids": ["updater"],
       "update_method": "slot-installer",
       "health_profile": "updater",
+      "depends_on": ["platform-core"],
       "runtime_targets": ["/opt/share/vward/updater/current"]
     }
   ]

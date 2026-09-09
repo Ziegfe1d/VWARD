@@ -5,6 +5,15 @@ and updater-owned service-quiescing acceptance passed.
 
 The updater uses a signed feed manifest, a versioned tar.gz package, exact VWARD target ownership, targeted hash-verified backups, transaction journaling, per-file sibling replacement, health checks and deterministic rollback.
 
+## Component-aware selective updates
+
+- `affected_components` in the signed feed and `component` in every package file are normalized through the bundled component registry.
+- Every target must belong to that exact component; unknown components, duplicate targets/sources, undeclared payload files and component-set mismatches fail before the runtime barrier.
+- Legacy component IDs remain accepted as aliases, while installed state is always written with canonical IDs.
+- Only declared files participate in backup, replacement and rollback. Byte- and mode-identical files are not rewritten.
+- `/opt/var/lib/vward/updater/components.json` records the release, update, sequence, health result and installed hashes for components changed by successful transactions. Rollback restores this state atomically.
+- `update-engine` remains isolated behind the accepted slot installer; a regular signed package cannot overwrite the updater that is executing it.
+
 ## Lifecycle safety
 
 - `committed.state` records the actually installed version/update.
@@ -20,6 +29,7 @@ The updater uses a signed feed manifest, a versioned tar.gz package, exact VWARD
 ## Commands
 
 - `vward-update.sh --status`
+- `vward-update.sh --status-components`
 - `vward-update.sh --check`
 - `vward-update.sh --dry-run`
 - `vward-update.sh --apply`
