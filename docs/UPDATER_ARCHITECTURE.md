@@ -1,8 +1,8 @@
 # Smart Updater v1 architecture
 
-Smart Updater v1 has a check-only production bootstrap. Automatic application
-remains a separate gate until live-router rollback and service-quiescing
-acceptance has passed.
+Smart Updater v1 has a signed production feed and updater-owned runtime
+quiescing. Automatic application was enabled after live-router apply, rollback
+and service-resume acceptance passed.
 
 Flow:
 
@@ -30,9 +30,7 @@ Only exact VWARD runtime paths from `docs/INSTALLATION_MAP.md` plus the planned 
 
 HTTP 304 with no pending update is a normal idle state. Deferred/quarantined/safety/verification/compatibility/install/health outcomes are not fast-retried. Only explicitly transient network/HTTP conditions use short bounded retries; all other outcomes wait for the normal watcher interval or a new/manual action.
 
-## Remaining automatic-apply gates
+## Future extension gates
 
-- live-router acceptance of updater-owned runtime quiescing and resume;
 - broader component-specific restart profiles when future payloads require them;
 - backup pruning and A/B updater activation;
-- live-router apply/rollback acceptance before enabling `auto_apply`.

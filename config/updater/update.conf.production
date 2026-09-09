@@ -1,11 +1,11 @@
 # VWARD Smart Updater production bootstrap configuration.
-# Automatic download/check is enabled. Automatic installation remains gated
-# until live-router rollback acceptance is complete.
+# Signed checks and automatic installation are enabled after live-router
+# apply, rollback and updater-owned runtime-barrier acceptance passed.
 update_enabled=1
-auto_apply=0
-auto_critical=0
-auto_important=0
-auto_routine=0
+auto_apply=1
+auto_critical=1
+auto_important=1
+auto_routine=1
 
 manifest_url=https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/update-manifest.json
 public_key_file=/opt/etc/vward/update-public.pem
@@ -26,5 +26,4 @@ check_interval_seconds=900
 request_timeout_seconds=120
 current_version_file=/opt/share/vward/VERSION
 
-# Keep disabled until cooperative job/service quiescing passes production tests.
-barrier_integration_ready=0
+barrier_integration_ready=1
