@@ -85,7 +85,8 @@ cleanup()
 
 trap cleanup EXIT INT TERM
 
-for C in awk cmp cp curl date df find grep jq kill mkdir mv openssl sed +         sha256sum sleep stat tar tr wc; do
+for C in awk cmp cp curl date df find grep jq kill mkdir mv openssl sed \
+         sha256sum sleep stat tar tr wc; do
     command -v "$C" >/dev/null 2>&1 || fail "missing command: $C"
 done
 
@@ -100,7 +101,16 @@ download()
     URL=$1
     DEST=$2
 
-    curl --fail --silent --show-error --location +        --proto '=https' +        --tlsv1.2 +        --connect-timeout 15 +        --max-time 120 +        --retry 3 +        --retry-all-errors +        --max-filesize 1048576 +        --output "$DEST.part" +        "$URL" ||
+    curl --fail --silent --show-error --location \
+        --proto '=https' \
+        --tlsv1.2 \
+        --connect-timeout 15 \
+        --max-time 120 \
+        --retry 3 \
+        --retry-all-errors \
+        --max-filesize 1048576 \
+        --output "$DEST.part" \
+        "$URL" ||
         return 1
 
     mv "$DEST.part" "$DEST"
@@ -114,7 +124,8 @@ for F in $UPDATER_FILES; do
         fail "cannot download $F"
 
     EXPECTED=$(
-        awk -v p="components/updater/$F" '$2==p {print $1; exit}' +            "$WORK/SHA256SUMS"
+        awk -v p="components/updater/$F" '$2==p {print $1; exit}' \
+            "$WORK/SHA256SUMS"
     )
     ACTUAL=$(sha256sum "$WORK/files/$F" | awk '{print $1}')
 
