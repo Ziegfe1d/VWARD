@@ -1,0 +1,30 @@
+# VWARD Smart Updater production bootstrap configuration.
+# Automatic download/check is enabled. Automatic installation remains gated
+# until live-router rollback acceptance is complete.
+update_enabled=1
+auto_apply=0
+auto_critical=0
+auto_important=0
+auto_routine=0
+
+manifest_url=https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/update-manifest.json
+public_key_file=/opt/etc/vward/update-public.pem
+channel=dev
+
+safe_window_start=03:00
+safe_window_end=05:00
+important_max_delay_seconds=7200
+routine_max_delay_seconds=86400
+
+minimum_free_kb=8192
+max_manifest_size=262144
+max_package_size=16777216
+max_unpacked_size=67108864
+backup_keep=3
+health_timeout_seconds=30
+check_interval_seconds=900
+request_timeout_seconds=120
+current_version_file=/opt/share/vward/VERSION
+
+# Keep disabled until cooperative job/service quiescing passes production tests.
+barrier_integration_ready=0

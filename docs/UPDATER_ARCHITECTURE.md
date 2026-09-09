@@ -1,6 +1,8 @@
 # Smart Updater v1 architecture
 
-Smart Updater v1 is implemented for code audit and filesystem simulation but is not deployed or production-ready.
+Smart Updater v1 has a check-only production bootstrap. Automatic application
+remains a separate gate until live-router rollback and service-quiescing
+acceptance has passed.
 
 Flow:
 
@@ -28,11 +30,9 @@ Only exact VWARD runtime paths from `docs/INSTALLATION_MAP.md` plus the planned 
 
 HTTP 304 with no pending update is a normal idle state. Deferred/quarantined/safety/verification/compatibility/install/health outcomes are not fast-retried. Only explicitly transient network/HTTP conditions use short bounded retries; all other outcomes wait for the normal watcher interval or a new/manual action.
 
-## Deployment gates
+## Remaining automatic-apply gates
 
-- production Ed25519 key and reviewed offline signing process;
-- target Entware validation for OpenSSL Ed25519, curl `--max-filesize`, tar listing format and shell utilities;
 - cooperative barrier integration in current VWARD jobs;
 - service restart order and bounded component health probes;
 - backup pruning and A/B updater activation;
-- non-production Keenetic test before any live-router deployment.
+- live-router apply/rollback acceptance before enabling `auto_apply`.

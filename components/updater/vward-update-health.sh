@@ -25,7 +25,7 @@ done
 
 if [ -z "$VU_ROOT_PREFIX" ]; then
     command -v ndmc >/dev/null 2>&1 || vu_die "$VU_HEALTH_ERROR" "ndmc is unavailable"
-    ndmc show version >/dev/null 2>&1 || vu_die "$VU_HEALTH_ERROR" "Keenetic control plane is unavailable"
+    ndmc -c "show version" >/dev/null 2>&1 || vu_die "$VU_HEALTH_ERROR" "Keenetic control plane is unavailable"
 fi
 
 vu_log INFO "Health profile $profile passed"

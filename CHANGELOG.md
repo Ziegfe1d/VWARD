@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added the signed Smart Updater production bootstrap, pinned Ed25519 public
+  key, check-only production configuration and live-router installer.
+- Corrected the Keenetic updater health probe to use the supported
+  `ndmc -c "show version"` invocation.
 - Imported the working VWARD shell, init, CGI and web sources from the verified
   2026-09-06 read-only router snapshot.
 - Added the production cron schedule as managed source.
