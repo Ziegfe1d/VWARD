@@ -64,7 +64,7 @@ mutation-часть пока не переведена на общий role cont
 
 ### VWARD WAN Guard
 
-VWARD Discovery уже умеет определять WAN/uplink по фактическим свойствам RCI и роль
+VWARD Discovery умеет определять WAN/uplink по фактическим свойствам RCI и роль
 `wan-guard`. VPN-role `misc` исключается из WAN target. Для PPPoE и других логических
 подключений сохраняются сам logical uplink и нижележащий `via` interface.
 
@@ -82,19 +82,24 @@ Init-скрипты управляют crond, Adaptive Live, supervisor и ве�
 В Beta он определяет WireGuard inventory, роль Tunnel Guard, WAN inventory и роль
 WAN Guard без изменения конфигурации Keenetic.
 
+Команда `snapshot` собирает эти данные одним проходом и предназначена для потребителей,
+которым нужны несколько частей topology одновременно. Это уменьшает повторные RCI и
+system-name запросы.
+
 ### VWARD Console
 
 lighttpd отдаёт `web/index.html`; `web/cgi-bin/api.cgi` собирает локальные статусы
 через `jq`, RCI, VWARD Discovery и runtime-файлы. API работает по allowlist и не
 выдаёт ключи VPN.
 
-WireGuard inventory Console получает только из общего `vward-discovery.sh`. Собственная
-логика полного `show/interface` и фильтрация `WireguardN` из Console удалены. При
-недоступном Discovery API возвращает read-only состояние `UNAVAILABLE`, а не угадывает
-имя интерфейса.
+Console выполняет один `vward-discovery.sh snapshot` на status request. WireGuard и
+WAN topology берутся из этого общего snapshot. Собственная логика полного
+`show/interface`, фильтрация `WireguardN` и прямой `show/interface?name=ISP` удалены.
 
-WAN-блок Console пока использует legacy RCI `ISP` и является следующим read-only
-consumer для общего `wan-guard` contract.
+Для WAN API публикует discovery state, фактические RCI/Linux IDs и `via` mapping.
+Класс, действие и recovery counters пока приходят из legacy `wan-guardian.sh` и
+явно маркируются `observer_source=legacy-wan-guardian`. Таким образом read-only
+topology уже унифицирована, а high-risk recovery остаётся отдельным этапом.
 
 ### VWARD Update Engine
 
@@ -107,7 +112,7 @@ manifest, staging, target-specific backup, остановка принадлеж
 
 Runtime-компоненты и автоматическое обновление прошли приёмку на целевом
 Keenetic/Entware. В Beta `0.2.x` выполняется Discovery First и Zero-Hardcode refactor.
-WireGuard discovery, Tunnel Guard health, Console WireGuard inventory и read-only WAN
+WireGuard discovery, Tunnel Guard health, Console network topology и read-only WAN
 role discovery уже переведены. Переносимость не считается завершённой, пока WAN
 observer/recovery, fail-open, Policy Sync и Route Engine не используют общий role
 mapping.
