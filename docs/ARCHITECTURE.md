@@ -81,7 +81,7 @@ WAN Guard разделён на независимые слои обнаруже
 unresolved Linux mapping или physical carrier down observer не делает guessed/unbound
 probes. Observer не содержит `ndmc`, DHCP renew или interface down/up.
 
-`wan-recovery-plan.sh` - отдельный type-aware Recovery Planner в режиме `dryrun`.
+`wan-recovery-plan.sh` - type-aware Recovery Planner в режиме `dryrun`.
 Перед любым планом он требует свежий observer state, повторно читает текущую роль
 `wan-guard`, сверяет `rci_id` и `linux_if` и ждёт заданное число подтверждённых
 ошибок. Результат ограничен решениями `HOLD`, `DEFER`, `BLOCKED` и `PLAN`; фактическое
@@ -91,17 +91,30 @@ Planner различает logical session и physical path. Подтвержд�
 session failure может дать план `SESSION_RECONNECT`, подтверждённый физический path
 failure - `INTERFACE_RECONNECT`. `PHY_DOWN`, DNS-only failure, ambiguity, stale/mismatch
 и физический `ADDRESS_FAILURE` без доказанной DHCP-capability не разрешают mutation.
-Сам Planner не содержит `ndmc`, DHCP renew или interface down/up и пока не включён в
-cron.
+
+`wan-recovery-actuator.sh` тоже переведён на общий role contract, но пока работает
+только в `dryrun`. Он принимает только типизированное действие и ожидаемые RCI/Linux
+IDs от Planner, затем самостоятельно повторяет `wan-guard` discovery. Любая смена роли,
+mapping или типа uplink между PLAN и ACT приводит к `BLOCKED`.
+
+Actuator не принимает shell-команду, не использует `eval`, не содержит `ISP`, `eth3`,
+DHCP renew или подготовленных `ndmc` command strings. После успешной проверки он
+возвращает только тип будущей RCI-операции и `EXECUTED=NO`.
+
+Отдельный end-to-end regression test проверяет Planner -> Actuator для физического и
+логического WAN, а также TOCTOU-защиту при смене WAN role после планирования.
 
 `wan-guardian.sh` остаётся отдельным legacy mutating recovery path с существующими
-cooldown/rate-limit и installation-specific моделью. `wan-recovery-actuator.sh` пока
-остаётся legacy dry-run actuator и ещё не связан с новым Planner. Следующий этап -
-сделать динамический dry-run actuator, который независимо повторно подтвердит роль и
-capability непосредственно перед возможным действием.
+cooldown/rate-limit и installation-specific моделью. Новый Planner/Actuator к нему
+пока не подключены и из cron не запускаются.
 
-Такое разделение позволяет принять discovery, observer и decision layer раньше
-high-risk mutation и не выдавать dry-run планирование за уже завершённую миграцию
+Update Engine дополнен отдельным `vward-update-runtime-policy.sh`, который разрешает
+установку новых WAN runtime targets и учитывает observer lock при quiescing. Это не
+меняет базовый updater contract и позволяет держать target policy маленькой и
+проверяемой.
+
+Такое разделение позволяет принять discovery, observer, decision и validation layers
+раньше high-risk mutation и не выдавать dry-run готовность за уже завершённую миграцию
 восстановления.
 
 ### VWARD Runtime
@@ -135,8 +148,8 @@ WAN topology берутся из этого общего snapshot. Собств�
 Legacy recovery телеметрия остаётся отдельной: `wan.action`, recovery counters и
 legacy class читаются из `wan-guardian.sh` и маркируются
 `recovery_source=legacy-wan-guardian`. Frontend определяет здоровье WAN по
-`wan.status`, а не по глобальному Internet status. Новый Recovery Planner пока не
-подключён к Console как управляющий источник и не инициирует действий.
+`wan.status`, а не по глобальному Internet status. Новый Recovery Planner/Actuator
+пока не являются управляющим источником Console и не инициируют действий.
 
 ### VWARD Update Engine
 
@@ -145,11 +158,15 @@ manifest, staging, target-specific backup, остановка принадлеж
 установка, health-check, commit либо rollback. `/opt/etc` и runtime data не входят
 в allowlist целей пакета.
 
+Runtime target policy расширена отдельным post-hardening слоем, чтобы новые Discovery-
+driven WAN файлы были installable и участвовали в quiescing без опасного массового
+редактирования базовой updater library.
+
 ## Текущая зрелость
 
 Runtime-компоненты и автоматическое обновление прошли приёмку на целевом
 Keenetic/Entware. В Beta `0.2.x` выполняется Discovery First и Zero-Hardcode refactor.
 WireGuard discovery, Tunnel Guard health, Console network topology, WAN role discovery,
-WAN read-only observer и WAN Recovery Planner dry-run уже переведены на общий role
-contract. Переносимость не считается завершённой, пока mutating WAN actuator/recovery,
-fail-open, Policy Sync и Route Engine не используют общий role mapping.
+WAN read-only observer, Recovery Planner и Discovery-validated dry-run Actuator уже
+используют общий role contract. Переносимость не считается завершённой, пока реальные
+WAN mutations, fail-open, Policy Sync и Route Engine не используют тот же контракт.
