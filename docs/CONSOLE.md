@@ -32,10 +32,37 @@ WAN API больше не запрашивает `show/interface?name=ISP`. Вы
 `REQUIRES_SELECTION`, `STALE_MAPPING`, `INVALID_MAPPING` или другое состояние, а CGI
 не угадывает `ISP`/`ethN`.
 
-Поля `wan.class`, `wan.action`, recovery counters и часть diagnostic detail пока
-поступают из существующего `wan-guardian.sh`. API явно отмечает это как
-`observer_source=legacy-wan-guardian`. Это переходное состояние: topology уже единая,
-но high-risk WAN observer/recovery ещё не мигрирован.
+## WAN observer и recovery
+
+WAN health и recovery намеренно разделены.
+
+`wan.status` и `wan.class` Console читает из `/opt/var/lib/wan-health/state`, который
+создаёт read-only `wan-health-watch.sh`. API маркирует источник как
+`observer_source=wan-health-watch`. Вкладка журнала WAN читает
+`/opt/var/log/wan-health.log`.
+
+Observer state принимается только если он согласован с текущим Discovery snapshot:
+
+- возраст не больше 180 секунд;
+- текущий `wan-guard` role имеет `READY`;
+- observer сам получил `DISCOVERY_STATE=READY`;
+- observer `RCI_ID` совпадает с текущим `wan.rci_id`;
+- при известном Linux mapping observer `LINUX_IF` совпадает с текущим `wan.linux_if`.
+
+При нарушении этих условий Console возвращает `UNKNOWN` с классом
+`OBSERVER_STALE`, `OBSERVER_ROLE_MISMATCH`, `OBSERVER_MAPPING_MISMATCH`,
+`OBSERVER_DISCOVERY_MISMATCH` либо текущим Discovery failure. Старое `UP` после смены
+uplink не сохраняется до следующего observer cycle.
+
+`wan.action`, `recovery_count`, `recovery_stage` и `legacy_recovery_class` пока
+поступают из существующего `wan-guardian.sh`. API явно маркирует это как
+`recovery_source=legacy-wan-guardian`. Таким образом read-only observer уже переведён
+на общий role contract, а high-risk recovery ещё нет.
+
+Frontend определяет зелёный WAN по `wan.status == UP`. Глобальное поле `wan.internet`
+остаётся диагностическим и больше не используется как источник здоровья WAN-карточки,
+hero, настроек или session chart. Это важно при multi-WAN: другой рабочий uplink не
+может скрыть отказ выбранной роли.
 
 Если общий Discovery недоступен или возвращает некорректный snapshot, Console работает
 fail-safe: общий `discovery.state=UNAVAILABLE`, WireGuard inventory пуст, WAN role не
@@ -55,6 +82,10 @@ shell, произвольные paths или команды `ndmc`.
 
 Разрешены только имена `wan`, `recovery`, `cron`, `routing`, `updater`, `tunnel`,
 `policy`, `console`. Каждое имя жёстко связано со своим файлом в `api.cgi`.
+
+- `wan` -> read-only observer log `/opt/var/log/wan-health.log`;
+- `recovery` -> legacy recovery log `/opt/var/log/wan-guardian-recovery.log`.
+
 Произвольный path передать нельзя. Содержимое не выходит за пределы LAN, но может
 содержать локальные домены, поэтому его нельзя публиковать без проверки.
 
@@ -67,11 +98,14 @@ shell, произвольные paths или команды `ndmc`.
 5. Проверить `discovery.state=READY`.
 6. Проверить, что `wg.discovery.state=READY` и WireGuard IDs совпадают с Discovery.
 7. Проверить, что `wan.discovery.state=READY` и `wan.rci_id/linux_if` совпадают с ролью `wan-guard`.
-8. Для PPPoE дополнительно сверить `via_rci_id` и `via_linux_if`.
-9. Проверить светлую и тёмную темы.
-10. Проверить 320, 360, 768 и 1440 CSS px, portrait и landscape.
-11. Увеличить масштаб до 200% и проверить keyboard focus.
-12. Изменение updater-флагов проверять только в контролируемом окне с backup.
+8. Проверить `wan.observer_source=wan-health-watch` и свежий `observer_age_seconds`.
+9. Проверить, что `wan.status/class` совпадают с `/opt/var/lib/wan-health/state`.
+10. Для PPPoE дополнительно сверить `via_rci_id` и `via_linux_if`.
+11. Проверить, что `wan.recovery_source=legacy-wan-guardian`, пока recovery не мигрирован.
+12. Проверить светлую и тёмную темы.
+13. Проверить 320, 360, 768 и 1440 CSS px, portrait и landscape.
+14. Увеличить масштаб до 200% и проверить keyboard focus.
+15. Изменение updater-флагов проверять только в контролируемом окне с backup.
 
 Source tests не заменяют проверку установленной Console. Если source и runtime hashes
 различаются, сначала нужно определить установленный package/slot и причину расхождения.
