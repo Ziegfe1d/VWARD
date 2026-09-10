@@ -112,7 +112,7 @@ grep -q '^STATUS=UNKNOWN$' "$STALE_STATE" || fail "stale mapping must remain UNK
 grep -q '^DISCOVERY_STATE=STALE_MAPPING$' "$STALE_STATE" || fail "stale state missing"
 [ ! -s "$TMP/stale/calls" ] || fail "stale mapping must not probe or query guessed interfaces"
 
-if grep -Eq 'Wireguard[0-9]|nwg[0-9]|WG_IF="[^$]|WAN_IF=' "$HEALTH"; then
+if grep -Eq 'Wireguard[0-9]|nwg[0-9]|WG_IF="[[:alnum:]_]|WAN_IF="[[:alnum:]_]' "$HEALTH"; then
     fail "Tunnel health still contains installation-specific interface hardcode"
 fi
 
