@@ -24,7 +24,7 @@ lighttpd/CGI-панели для KeeneticOS с Entware.
 
 Цепочка принятия решений:
 
-`DISCOVER -> CLASSIFY -> VALIDATE -> SELECT BY ROLE -> ACT`
+`DISCOVER -> CLASSIFY -> VALIDATE -> SELECT BY ROLE -> PLAN -> ACT`
 
 Компоненты не должны конструировать имена `WireguardN`, `nwgN`, `ethN` или другие
 installation-specific идентификаторы. Если роль нельзя определить однозначно,
@@ -64,7 +64,8 @@ mutation-часть пока не переведена на общий role cont
 
 ### VWARD WAN Guard
 
-WAN Guard теперь разделён на независимые слои наблюдения и восстановления.
+WAN Guard разделён на независимые слои обнаружения, наблюдения, планирования и
+выполнения recovery.
 
 `VWARD Discovery` определяет WAN/uplink по фактическим свойствам RCI и роль
 `wan-guard`. VPN-role `misc` исключается из WAN target. Для PPPoE и других логических
@@ -80,12 +81,28 @@ WAN Guard теперь разделён на независимые слои н�
 unresolved Linux mapping или physical carrier down observer не делает guessed/unbound
 probes. Observer не содержит `ndmc`, DHCP renew или interface down/up.
 
-`wan-guardian.sh` пока остаётся отдельным legacy recovery path с существующими
-cooldown/rate-limit и mutation-командами. Он запускается отдельной cron строкой и не
-цепляется к `wan-health-watch.sh`. `wan-recovery-actuator.sh` этим этапом не изменён.
+`wan-recovery-plan.sh` - отдельный type-aware Recovery Planner в режиме `dryrun`.
+Перед любым планом он требует свежий observer state, повторно читает текущую роль
+`wan-guard`, сверяет `rci_id` и `linux_if` и ждёт заданное число подтверждённых
+ошибок. Результат ограничен решениями `HOLD`, `DEFER`, `BLOCKED` и `PLAN`; фактическое
+выполнение всегда `EXECUTED=NO`.
 
-Такое разделение позволяет принять новую диагностику раньше high-risk recovery и не
-выдавать read-only refactor за уже завершённую миграцию восстановления.
+Planner различает logical session и physical path. Подтверждённый PPPoE/логический
+session failure может дать план `SESSION_RECONNECT`, подтверждённый физический path
+failure - `INTERFACE_RECONNECT`. `PHY_DOWN`, DNS-only failure, ambiguity, stale/mismatch
+и физический `ADDRESS_FAILURE` без доказанной DHCP-capability не разрешают mutation.
+Сам Planner не содержит `ndmc`, DHCP renew или interface down/up и пока не включён в
+cron.
+
+`wan-guardian.sh` остаётся отдельным legacy mutating recovery path с существующими
+cooldown/rate-limit и installation-specific моделью. `wan-recovery-actuator.sh` пока
+остаётся legacy dry-run actuator и ещё не связан с новым Planner. Следующий этап -
+сделать динамический dry-run actuator, который независимо повторно подтвердит роль и
+capability непосредственно перед возможным действием.
+
+Такое разделение позволяет принять discovery, observer и decision layer раньше
+high-risk mutation и не выдавать dry-run планирование за уже завершённую миграцию
+восстановления.
 
 ### VWARD Runtime
 
@@ -118,7 +135,8 @@ WAN topology берутся из этого общего snapshot. Собств�
 Legacy recovery телеметрия остаётся отдельной: `wan.action`, recovery counters и
 legacy class читаются из `wan-guardian.sh` и маркируются
 `recovery_source=legacy-wan-guardian`. Frontend определяет здоровье WAN по
-`wan.status`, а не по глобальному Internet status.
+`wan.status`, а не по глобальному Internet status. Новый Recovery Planner пока не
+подключён к Console как управляющий источник и не инициирует действий.
 
 ### VWARD Update Engine
 
@@ -131,7 +149,7 @@ manifest, staging, target-specific backup, остановка принадлеж
 
 Runtime-компоненты и автоматическое обновление прошли приёмку на целевом
 Keenetic/Entware. В Beta `0.2.x` выполняется Discovery First и Zero-Hardcode refactor.
-WireGuard discovery, Tunnel Guard health, Console network topology, WAN role discovery
-и WAN read-only observer уже переведены на общий role contract. Переносимость не
-считается завершённой, пока WAN recovery, fail-open, Policy Sync и Route Engine не
-используют общий role mapping.
+WireGuard discovery, Tunnel Guard health, Console network topology, WAN role discovery,
+WAN read-only observer и WAN Recovery Planner dry-run уже переведены на общий role
+contract. Переносимость не считается завершённой, пока mutating WAN actuator/recovery,
+fail-open, Policy Sync и Route Engine не используют общий role mapping.
