@@ -480,6 +480,34 @@ wan_guard_selection()
     esac
 }
 
+discovery_snapshot()
+{
+    TUNNEL_ROLE="$(tunnel_guard_selection 2>/dev/null || true)"
+    WAN_ROLE="$(wan_guard_selection 2>/dev/null || true)"
+
+    printf '%s\n' "$TUNNEL_ROLE" | "$JQ" -e 'type == "object"' >/dev/null 2>&1 ||
+        TUNNEL_ROLE='{"schema":1,"provider":"vward-discovery","role":"tunnel-guard","state":"UNAVAILABLE"}'
+
+    printf '%s\n' "$WAN_ROLE" | "$JQ" -e 'type == "object"' >/dev/null 2>&1 ||
+        WAN_ROLE='{"schema":1,"provider":"vward-discovery","role":"wan-guard","state":"UNAVAILABLE"}'
+
+    "$JQ" -n -c \
+        --argjson wireguard "$WIREGUARD_JSON" \
+        --argjson wan "$WAN_JSON" \
+        --argjson tunnel_role "$TUNNEL_ROLE" \
+        --argjson wan_role "$WAN_ROLE" '{
+            schema:1,
+            provider:"vward-discovery",
+            kind:"snapshot",
+            wireguard:{count:($wireguard|length),interfaces:$wireguard},
+            wan:{count:($wan|length),interfaces:$wan},
+            roles:{
+                tunnel_guard:$tunnel_role,
+                wan_guard:$wan_role
+            }
+        }'
+}
+
 COMMAND="${1:-wireguard}"
 
 case "$COMMAND" in
@@ -495,8 +523,11 @@ case "$COMMAND" in
     wan-guard)
         wan_guard_selection
         ;;
+    snapshot)
+        discovery_snapshot
+        ;;
     *)
-        echo "Usage: vward-discovery.sh {wireguard|tunnel-guard|wan|wan-guard}" >&2
+        echo "Usage: vward-discovery.sh {wireguard|tunnel-guard|wan|wan-guard|snapshot}" >&2
         exit 64
         ;;
 esac
