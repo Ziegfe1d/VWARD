@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   repository-consistency:
@@ -88,3 +89,15 @@ jobs:
           manifest_count=$(wc -l < /tmp/vward-manifest.txt | tr -d ' ')
           test "$tracked_count" = "$manifest_count"
           printf 'SHA256 coverage: %s/%s tracked files\n' "$manifest_count" "$tracked_count"
+
+  dispatch-transition:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-transition]')
+    needs:
+      - repository-consistency
+      - updater-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch transition publish workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-transition-hotfix.yml --ref main
