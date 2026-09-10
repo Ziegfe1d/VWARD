@@ -1,35 +1,34 @@
-# VWARD Smart Updater v1.2
+# VWARD Update Engine v1.2
 
-Smart Updater v1 uses signed automatic installation after live-router rollback
-and updater-owned service-quiescing acceptance passed.
+Движок устанавливает подписанные обновления после пройденной live-router приёмки
+apply, rollback, runtime quiescing и возобновления служб.
 
-Version 1.2 adds a live VWARD Console service/API health probe for console-only
-updates; failed activation is rolled back by the existing transaction engine.
+## Выборочные обновления компонентов
 
-The updater uses a signed feed manifest, a versioned tar.gz package, exact VWARD target ownership, targeted hash-verified backups, transaction journaling, per-file sibling replacement, health checks and deterministic rollback.
+- `affected_components` и component ID каждого package file нормализуются registry.
+- Target должен принадлежать указанному компоненту; неизвестные IDs, duplicates,
+  undeclared payload и несовпадение component sets отклоняются до runtime barrier.
+- Legacy IDs принимаются как aliases, state записывается с canonical IDs.
+- Backup/replace/rollback затрагивают только объявленные changed files.
+- `components.json` хранит release, update, sequence, health и installed hashes.
+- `update-engine` защищён slot installer и не заменяет сам себя обычным package.
 
-## Component-aware selective updates
+## Безопасность жизненного цикла
 
-- `affected_components` in the signed feed and `component` in every package file are normalized through the bundled component registry.
-- Every target must belong to that exact component; unknown components, duplicate targets/sources, undeclared payload files and component-set mismatches fail before the runtime barrier.
-- Legacy component IDs remain accepted as aliases, while installed state is always written with canonical IDs.
-- Only declared files participate in backup, replacement and rollback. Byte- and mode-identical files are not rewritten.
-- `/opt/var/lib/vward/updater/components.json` records the release, update, sequence, health result and installed hashes for components changed by successful transactions. Rollback restores this state atomically.
-- `update-engine` remains isolated behind the accepted slot installer; a regular signed package cannot overwrite the updater that is executing it.
+- `committed.state` - установленная версия и update;
+- `trust.state` - highest accepted signed sequence, не уменьшается при rollback;
+- `quarantine.state` - запрет unattended retry known-bad update;
+- `pending/` - verified update до apply, supersede или quarantine;
+- stale locks/markers восстанавливаются только при доказанно мёртвом owner;
+- malformed или foreign ownership обрабатывается fail-closed.
 
-## Lifecycle safety
+## Расписание
 
-- `committed.state` records the actually installed version/update.
-- `trust.state` records the highest signed sequence ever accepted. Rollback never lowers it.
-- `quarantine.state` blocks unattended retry of an update that failed install/health and was rolled back successfully.
-- `pending/` survives watcher cycles and 304 responses until the update is applied, superseded or quarantined.
-- stale updater process locks and stale request/barrier markers are recovered only when ownership can be proven dead; malformed/foreign ownership fails closed.
+CRITICAL использует первую hard-safe точку. IMPORTANT предпочитает safe window и
+эскалируется после deadline. ROUTINE предпочитает quiet window и имеет более длинный
+deadline. Signature, integrity, compatibility, space и barrier checks обязательны.
 
-## Scheduling
-
-`CRITICAL` uses the first hard-safe point. `IMPORTANT` prefers the safe window and escalates after its configurable deadline. `ROUTINE` prefers the quiet window and escalates after its longer configurable deadline. Hard safety, signature, integrity, space and barrier checks are never bypassed.
-
-## Commands
+## Команды
 
 - `vward-update.sh --status`
 - `vward-update.sh --status-components`
@@ -40,13 +39,10 @@ The updater uses a signed feed manifest, a versioned tar.gz package, exact VWARD
 - `vward-update.sh --rollback`
 - `vward-update.sh --recover`
 
-Automatic apply requires `auto_apply=1`, the matching per-priority flag, and
-`barrier_integration_ready=1`. The updater-owned runtime quiescing path stops
-the cron supervisor, cron and Adaptive Live, drains active jobs, and restores
-only services that were running before the transaction. The production policy
-enables these switches after the live-router acceptance completed successfully.
+Automatic apply требует `auto_apply=1`, соответствующего priority flag и
+`barrier_integration_ready=1`. Quiescing останавливает supervisor, cron и Adaptive
+Live, ждёт active jobs и возвращает только ранее работавшие службы.
 
-The bootstrap installer pins the production Ed25519 public key, installs the
-updater in slot A, preserves any previous installation, and schedules signed
-feed checks. The private signing key is never stored in this repository or on
-the router.
+Bootstrap устанавливает pinned Ed25519 public key, updater slot, сохраняет прежнюю
+установку и добавляет signed-feed checks. Private signing key не хранится здесь или
+на роутере.

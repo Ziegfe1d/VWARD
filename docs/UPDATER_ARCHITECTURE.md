@@ -1,46 +1,43 @@
-# Smart Updater v1 architecture
+# Архитектура VWARD Update Engine
 
-Smart Updater v1 has a signed production feed and updater-owned runtime
-quiescing. Automatic application was enabled after live-router apply, rollback
-and service-resume acceptance passed.
+Update Engine использует подписанный production feed и собственный runtime. На
+целевом роутере пройдены автоматическое применение, rollback и возобновление служб.
 
-Flow:
+## Последовательность
 
-1. fetch a small signed manifest with bounded size and optional ETag;
-2. verify structure, channel, SemVer, signature and compatibility;
-3. enforce monotonic trust (`trust.state`) and quarantine policy;
-4. persist a verified pending update;
-5. wait according to CRITICAL/IMPORTANT/ROUTINE scheduling policy;
-6. preflight compressed/unpacked staging size;
-7. download the package with a signed-size transport bound;
-8. verify package SHA-256/size and tar declared unpacked size;
-9. extract and verify actual unpacked bytes plus every payload hash/target/mode;
-10. quiesce the cron supervisor, cron and Adaptive Live, then drain active jobs;
-11. pre-check activity and space, acquire the owned barrier and re-check activity;
-12. create targeted verified backup and install via sibling-file atomic rename;
-13. run bounded health check;
-14. atomically commit installation metadata or deterministically roll back;
-15. quarantine an update that failed install/health after successful rollback.
+1. Скачать manifest с ограничением размера и optional ETag.
+2. Проверить schema, channel, SemVer, signature и compatibility.
+3. Применить monotonic trust и quarantine policy.
+4. Сохранить verified pending update.
+5. Дождаться окна согласно приоритету.
+6. Выполнить preflight activity/space.
+7. Скачать package с signed size bound.
+8. Проверить SHA-256, compressed/unpacked size и tar metadata.
+9. Проверить каждый payload hash, target, owner и mode.
+10. Остановить supervisor, cron и Adaptive Live; дождаться активных jobs.
+11. Захватить owned barrier и повторить safety checks.
+12. Создать verified targeted backup и заменить файлы sibling rename.
+13. Выполнить component health profile.
+14. Atomically commit metadata либо deterministically rollback.
+15. Quarantine release после неудачной установки/health и успешного rollback.
 
-## Ownership boundaries
+## Границы владения
 
-Only exact VWARD runtime paths from `docs/INSTALLATION_MAP.md` plus the planned `/opt/share/vward/VERSION` bootstrap target are installable. Device-local configuration, generated files, state, logs, backups and credentials are never payload targets.
+Разрешены только точные VWARD paths из installation map и VERSION target. Local
+configuration, generated files, state, logs, backups и credentials запрещены.
+Registry из активного updater slot определяет ownership. Update Engine проверяет
+совпадение component set feed/package, зависимости и отсутствие undeclared payload.
 
-The active updater slot contains the authoritative component registry. Before
-quiescing runtime, Smart Updater 1.1 verifies the exact signed/package component
-set, canonical target ownership, permitted mode, unique sources and targets,
-declared dependencies, every payload SHA-256 and the absence of undeclared
-archive files.
+Успешный commit обновляет `committed.state` и `components.json`. Update Engine нельзя
+перезаписать обычным package: для него используется slot installer.
 
-Successful commit writes both platform-wide `committed.state` and selective
-`components.json`. Both are transactionally backed up and restored. Update
-Engine itself remains protected from normal packages and uses slot installation.
+## Watcher
 
-## Watcher behavior
+HTTP 304 без pending update - нормальный IDLE. Deferred, quarantined, safety,
+verification, compatibility, install и health outcomes не запускают быстрый retry.
+Короткие bounded retries разрешены только для явно transient network/HTTP ошибок.
 
-HTTP 304 with no pending update is a normal idle state. Deferred/quarantined/safety/verification/compatibility/install/health outcomes are not fast-retried. Only explicitly transient network/HTTP conditions use short bounded retries; all other outcomes wait for the normal watcher interval or a new/manual action.
+## Следующие gates
 
-## Future extension gates
-
-- signed file removal, only when a real component consolidation requires it;
-- A/B updater activation beyond the accepted slot installer.
+- signed file removal только для реальной component consolidation;
+- дальнейшая A/B-активация updater только после отдельной acceptance.

@@ -1,67 +1,41 @@
-# VWARD component model
+# Модель компонентов VWARD
 
-VWARD Platform is one product composed of independently updateable logical
-components. Component IDs are stable machine names used by signed manifests,
-package metadata, logs and future UI/API output. Display names always use the
-`VWARD` prefix.
+VWARD Platform - один продукт с независимо обновляемыми логическими компонентами.
+Component ID - стабильное машинное имя для signed manifests, package metadata,
+state и API. Пользовательское имя берётся из component registry.
 
-| Component ID | Display name | Responsibility |
+| ID | Каноническое имя | Ответственность |
 |---|---|---|
-| `platform-core` | VWARD Platform Core | Platform release marker and shared platform metadata |
-| `route-engine` | VWARD Route Engine | Live DNS-driven adaptive routing |
-| `route-reconciler` | VWARD Route Reconciler | Hysteresis-based DIRECT recovery and route cleanup |
-| `route-tools` | VWARD Route Tools | Routing probes, resolution, hints and one-shot route operations |
-| `tunnel-guard` | VWARD Tunnel Guard | WireGuard health and fail-open protection |
-| `wan-guard` | VWARD WAN Guard | WAN diagnosis and bounded recovery |
-| `policy-sync` | VWARD Policy Sync | VPN policy audit, reconciliation and subnet synchronization |
-| `runtime` | VWARD Runtime | Init scripts, cron supervision and housekeeping |
-| `console` | VWARD Console | Web interface, CGI API and lighttpd configuration |
-| `update-engine` | VWARD Update Engine | Signed update transactions and deterministic rollback |
+| `platform-core` | VWARD Platform Core | Версия и общие metadata платформы |
+| `route-engine` | VWARD Route Engine | Адаптивная маршрутизация по DNS |
+| `route-reconciler` | VWARD Route Reconciler | Сверка DIRECT и очистка маршрутов |
+| `route-tools` | VWARD Route Tools | Пробы, resolve, hints и разовые операции |
+| `tunnel-guard` | VWARD Tunnel Guard | Здоровье WireGuard и fail-open |
+| `wan-guard` | VWARD WAN Guard | Диагностика и ограниченное восстановление WAN |
+| `policy-sync` | VWARD Policy Sync | Аудит и синхронизация VPN-политик |
+| `runtime` | VWARD Runtime | Init, cron supervision и housekeeping |
+| `console` | VWARD Console | Web UI, CGI API и lighttpd |
+| `update-engine` | VWARD Update Engine | Подписанные транзакции и rollback |
 
-The authoritative machine-readable mapping is
-`config/components/component-registry.json`.
+Authoritative mapping: `config/components/component-registry.json`.
 
-## Compatibility rules
+## Совместимость
 
-- Existing runtime filenames, init names, cron commands and filesystem paths do
-  not change during the naming migration.
-- `legacy_ids` are accepted only for already published manifests, historical
-  state and migration tooling. New packages use canonical component IDs.
-- A runtime target belongs to exactly one canonical component.
-- Device-local configuration, persistent state, logs, backups and secrets do
-  not belong to update payloads.
-- `update-engine` uses the verified slot installer. It is not a normal
-  self-replacing signed-package target.
+- Runtime filenames, init names, cron commands и paths не меняются без миграции.
+- `legacy_ids` принимаются для опубликованных manifests/state и migration tooling.
+- Новые packages используют канонические IDs.
+- Одна runtime-цель принадлежит ровно одному компоненту.
+- Local config, state, logs, backups и secrets не являются update payload.
+- `update-engine` обновляется slot installer, а не обычным package.
 
-## Version policy
+## Версии и выборочные обновления
 
-The platform keeps one SemVer release number in `VERSION`. Ordinary components
-inherit the platform release that last changed them; unchanged components are
-not rewritten merely to synchronize a displayed version. The updater records
-the installed release, update ID, sequence and hashes of files it actually
-replaces.
+Платформа хранит один SemVer в `VERSION`. Компонент наследует release, который
+последним изменил его; неизменённый файл не переписывается ради номера версии.
+Feed объявляет `affected_components`, а каждый файл package - matching component ID.
+Backup, replace, health и rollback касаются только объявленных целей.
 
-Independent component version numbers are not introduced at this stage. If a
-future compatibility boundary requires one, it must be added as a registry
-schema change rather than embedded ad hoc in shell scripts.
-
-## Selective update policy
-
-A signed package contains only files that need to change. Its
-`affected_components` list names their canonical components, while every
-package file entry carries the matching component ID. Backup, atomic replace,
-health verification and rollback operate only on those declared files.
-
-Component-specific health profiles are reserved in the registry but remain a
-separate production acceptance gate. Smart Updater 1.1 implements the named
-profiles; publishing uses `default` until the relevant profile has passed on
-the router.
-
-Smart Updater 1.1 enforces registry ownership before installation. The
-canonicalized component set in the signed feed must exactly equal the component
-set in the package. A package cannot write another component's target or carry
-undeclared payload files.
-
-Component installation state is stored separately from platform-wide committed
-state. One release can therefore update only one component while preserving one
-platform SemVer and a complete rollback transaction.
+Update Engine требует точного совпадения component set в feed и package, проверяет
+ownership, mode, уникальность source/target, зависимости, SHA-256 и отсутствие
+необъявленных payload-файлов. Component state и platform committed state фиксируются
+транзакционно.

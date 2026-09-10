@@ -1,18 +1,21 @@
-# Roadmap
+# Дорожная карта
 
-## Current: 0.1.0-dev
+## Текущее состояние: 0.1.5-dev
 
-- canonical source tree imported from the verified working installation;
-- source/runtime/configuration boundaries documented;
-- installation map and dependency inventory recorded;
-- generated and device-local data excluded.
+- исходное рабочее состояние импортировано в каноническое дерево;
+- определены границы source/runtime/config/state;
+- VWARD Update Engine с подписанным feed прошёл live-router acceptance;
+- добавлена компонентная VWARD Console с allowlisted настройками updater;
+- локальные, сгенерированные и чувствительные данные исключены из Git.
 
-## Next stage
+## Следующий этап
 
-- parameterize device-specific values without changing working behavior;
-- add an installer that detects safe Keenetic defaults and preserves local config;
-- add shell/static validation suitable for the BusyBox/Entware environment;
-- define health checks and fixtures that do not touch a production router;
-- implement the staged, checksum-verified updater design in [UPDATER_ARCHITECTURE.md](UPDATER_ARCHITECTURE.md).
+- параметризовать device-specific значения без изменения рабочего поведения;
+- создать проверяемый first-install path с discovery и сохранением local config;
+- расширить BusyBox/static и Console regression-тесты;
+- завершить унификацию пользовательских имён компонентов;
+- развивать настройки только через узкие транзакционные API.
 
-No automated update or remote deployment is part of the current migration.
+Высокорисковое переименование runtime-файлов, init-команд и state paths отложено до
+отдельной совместимой миграции. Новый release/tag в рамках документационных и UI-правок
+не создаётся.

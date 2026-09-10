@@ -1,4 +1,4 @@
-# VWARD Smart Updater v1 is disabled by default.
+# VWARD Update Engine v1 is disabled by default.
 update_enabled=0
 auto_apply=0
 auto_critical=0

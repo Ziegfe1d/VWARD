@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Ziegfe1d/VWARD/schemas/update-manifest-v1.json",
-  "title": "VWARD Smart Updater v1 feed manifest",
+  "title": "VWARD Update Engine v1 feed manifest",
   "type": "object",
   "additionalProperties": false,
   "required": ["signed", "signature"],

@@ -1,56 +1,64 @@
-# Architecture
+# Архитектура VWARD
 
-VWARD is a set of cooperating POSIX shell services and a small lighttpd/CGI web interface for KeeneticOS with Entware.
+VWARD - единая платформа из взаимодействующих POSIX shell-служб и локальной
+lighttpd/CGI-панели для KeeneticOS с Entware.
 
-## Source versus runtime
+## Исходники и установленная система
 
-The repository contains program source, init scripts, configuration examples and the managed cron schedule. An installed system separates:
+Репозиторий хранит программы, init-скрипты, примеры конфигурации и управляемое
+расписание cron. В установленной системе данные разделены:
 
-- `/opt/bin` and service definitions — installed program files;
-- `/opt/etc` — device-local configuration;
-- `/opt/var/lib` — persistent runtime state;
-- `/opt/var/log` — logs;
-- `/opt/var/backups` — local backups;
-- `/tmp` — transient locks, probes and cron status.
+- `/opt/bin` и `/opt/etc/init.d` - программы и службы;
+- `/opt/etc` - локальная конфигурация устройства;
+- `/opt/var/lib` - постоянное состояние;
+- `/opt/var/log` - журналы;
+- `/opt/var/backups` - резервные копии;
+- `/tmp` - временные locks, probes и статусы cron.
 
-Future source updates must preserve local configuration and state.
+Обновление программы не должно заменять локальную конфигурацию или состояние.
 
-## Components
+## Компоненты
 
-### VWARD Route Engine, Reconciler and Tools
+### VWARD Route Engine, Reconciler и Tools
 
-The adaptive scripts inspect Keenetic FQDN groups and DNS activity, probe direct ISP and WireGuard paths, and maintain the `AdaptiveAuto` group. `agh-adaptive-live.sh` observes DNS traffic; `adaptive-auto-maint.sh` rechecks previously adapted domains.
+Проверяют FQDN-группы Keenetic и DNS-активность, тестируют прямой и WireGuard-пути,
+поддерживают группу `AdaptiveAuto`. `agh-adaptive-live.sh` наблюдает DNS-трафик,
+`adaptive-auto-maint.sh` перепроверяет ранее адаптированные домены.
 
 ### VWARD Policy Sync
 
-The audit chain reads the live Keenetic configuration through `ndmc`, tests routing targets, records state and reconciles domains or subnets routed through `Wireguard1`.
+Через `ndmc` читает активную конфигурацию Keenetic, проверяет цели маршрутизации,
+сохраняет состояние и сверяет домены/подсети, направленные через `Wireguard1`.
 
 ### VWARD Tunnel Guard
 
-`wg-health-watch.sh` records health. `wg-failopen-guard.sh` uses that state to protect connectivity and can alter `Wireguard1` state.
+`wg-health-watch.sh` фиксирует здоровье туннеля. `wg-failopen-guard.sh` использует
+это состояние для защиты связи и при необходимости меняет состояние `Wireguard1`.
 
 ### VWARD WAN Guard
 
-`wan-guardian.sh` performs staged checks and recovery against the `ISP` interface and physical WAN device. `wan-recovery-actuator.sh` is the narrow DHCP-renew actuator.
+`wan-guardian.sh` выполняет ступенчатую диагностику и восстановление подключения
+`ISP`/физического WAN. `wan-recovery-actuator.sh` ограничен обновлением DHCP-клиента.
 
 ### VWARD Runtime
 
-Entware init scripts control crond, the adaptive live process, its supervisor and the web service. The managed cron schedule invokes periodic jobs and writes transient status into `/tmp`.
+Init-скрипты управляют crond, Adaptive Live, supervisor и веб-службой. Cron запускает
+периодические задания и пишет временные результаты в `/tmp`.
 
 ### VWARD Console
 
-lighttpd serves `web/index.html`; `web/cgi-bin/api.cgi` reports local status using `jq`, RCI endpoints and runtime files.
+lighttpd отдаёт `web/index.html`; `web/cgi-bin/api.cgi` собирает локальные статусы
+через `jq`, RCI и runtime-файлы. API работает по allowlist и не выдаёт ключи VPN.
 
-### VWARD Update Engine v1
+### VWARD Update Engine
 
-The production updater consumes an Ed25519-signed versioned feed rather than a
-mutable Git tree. It separates manifest checking, package staging, targeted
-backup, runtime quiescing, deterministic installation, health verification and
-rollback. Local configuration and runtime data are outside its target
-allow-list.
+Получает подписанный Ed25519 feed вместо изменяемого Git-дерева. Этапы: проверка
+manifest, staging, target-specific backup, остановка принадлежащих VWARD процессов,
+установка, health-check, commit либо rollback. `/opt/etc` и runtime data не входят
+в allowlist целей пакета.
 
-## Current maturity
+## Текущая зрелость
 
-The imported runtime components and automatic updater have passed live-router
-acceptance on the current Keenetic/Entware target. Portability to other router
-models and automated configuration discovery remain development work.
+Runtime-компоненты и автоматическое обновление прошли приёмку на целевом
+Keenetic/Entware. Переносимость на другие модели и автоматическое discovery всех
+device-specific параметров остаются работой версии `0.x-dev`.

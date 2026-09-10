@@ -1,22 +1,22 @@
 {
   "signed": {
     "schema": 1,
-    "update_id": "vward-0.1.5-dev-interactive-console-size-fix",
-    "sequence": 2026090907,
-    "version": "0.1.5-dev",
+    "update_id": "vward-0.1.6-dev-console-docs",
+    "sequence": 2026091001,
+    "version": "0.1.6-dev",
     "channel": "dev",
     "priority": "ROUTINE",
-    "published_at": "2026-09-10T06:38:00Z",
+    "published_at": "2026-09-10T12:28:02Z",
     "min_updater_version": "1.2.0",
     "package": {
-      "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-0.1.5-dev.tar.gz",
-      "sha256": "e44a62b36ac6c3745b69e5cdf5fcc514ea1599984268510d9ce8e85a6d377bc3",
-      "size": 13468,
-      "unpacked_size": 42482
+      "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-0.1.6-dev.tar.gz",
+      "sha256": "e551f9299ca68d2d00b228850a8087becc2b29e1ec70009eab9289e329c0640e",
+      "size": 15965,
+      "unpacked_size": 51991
     },
     "compatibility": {
       "min_vward": "0.1.4-dev",
-      "max_vward": "0.1.4-dev"
+      "max_vward": "0.1.5-dev"
     },
     "affected_components": [
       "platform-core",
@@ -31,5 +31,5 @@
       "key_id": "vward-prod-2026-01"
     }
   },
-  "signature": "1gcBcKqldX0jwqjZOOPVMkNBb+mD0IBzNRM/ooPfkZo3xP6+GUkuPdqSpDEUhY33n7xitbLH6DBoRhHEPluBCQ=="
+  "signature": "xlMu5Oy+Ci2Whm1Hba0dfUz92aheGmoeG2stp5fC2Vf9zdIkDzGR8eykN2bNXAkUnsEajw4mJZF7H1w7QiezCQ=="
 }

@@ -1,4 +1,4 @@
-# VWARD Smart Updater production bootstrap configuration.
+# VWARD Update Engine production bootstrap configuration.
 # Signed checks and automatic installation are enabled after live-router
 # apply, rollback and updater-owned runtime-barrier acceptance passed.
 update_enabled=1

@@ -1,23 +1,28 @@
-# Smart Updater v1 state machine
+# Машина состояний VWARD Update Engine
 
-Persistent transaction phases include:
+Обычный путь:
 
-`IDLE -> CHECKING -> VERIFIED -> AVAILABLE/WAITING_WINDOW -> BACKING_UP -> INSTALLING -> VERIFYING -> COMMIT_PREPARED -> COMMITTED`
+`IDLE → CHECKING → VERIFIED → AVAILABLE → STAGING → INSTALLING → VERIFYING → COMMITTED`
 
-Failure/recovery phases include:
+Восстановление:
 
-`ROLLING_BACK -> ROLLED_BACK` and `RECOVERY_REQUIRED`.
+`ROLLING_BACK → ROLLED_BACK` либо `RECOVERY_REQUIRED`.
 
-`committed.state` is atomically replaced only after health success. `journal.state` records transaction phase, candidate metadata and active backup. Recovery from `COMMIT_PREPARED` finalizes the new transaction only when the atomic committed snapshot already matches the candidate; otherwise it restores the old files/metadata from backup.
+`committed.state` заменяется атомарно только после успешного health-check.
+`journal.state` хранит phase, candidate metadata и active backup. При
+`COMMIT_PREPARED` recovery завершает новую транзакцию только когда committed snapshot
+уже совпадает с candidate; иначе восстанавливает старые files/metadata.
 
-`trust.state`, `quarantine.state` and `pending/` are independent from committed installation state so rollback cannot accidentally reopen replay windows or trigger repeated unattended installation of a known-bad release.
+`trust.state`, `quarantine.state` и `pending/` независимы от installed state, поэтому
+rollback не открывает replay window и не повторяет unattended known-bad release.
 
-The updater owns one mkdir-based process lock. Update coordination is two-phase:
+Один mkdir-based process lock защищает updater. Координация runtime двухфазная:
 
-1. set owned `vward-update-requested` marker;
-2. drain cooperative VWARD jobs;
-3. acquire owned `vward-update.lock` barrier;
-4. re-check activity/conflict locks under the barrier;
-5. only then enter backup/install.
+1. создать owned `vward-update-requested` marker;
+2. остановить VWARD-owned services и дождаться jobs;
+3. захватить owned `vward-update.lock` barrier;
+4. повторно проверить activity/conflict locks;
+5. выполнить transaction и восстановить только ранее работавшие services.
 
-Stale request/barrier ownership is recovered only for a proven-dead updater owner. Live, malformed or foreign ownership blocks the transaction.
+Stale ownership восстанавливается только для доказанно мёртвого updater owner. Live,
+malformed или foreign ownership блокирует транзакцию.

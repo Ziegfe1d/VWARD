@@ -1,31 +1,32 @@
-# Dependencies
+# Зависимости
 
-This list is based on command references in the imported source and the package inventory of the working installation.
+Список основан на фактических вызовах команд и составе рабочей установки.
 
-## KeeneticOS requirements
+## KeeneticOS
 
-- `ndmc` and Keenetic RCI on `127.0.0.1:79`;
-- interface and FQDN object-group commands used by the scripts;
-- standard Keenetic interface state and running-configuration output;
-- a compatible BusyBox base for `sh`, `awk`, `sed`, `grep`, `sort`, `wc`, `tail`, `tr`, `cut`, `date`, `sleep`, `mkdir`, `mv`, `cp`, `rm`, `pidof`, `killall`, `nslookup`, `ping` and related utilities.
+- `ndmc` и Keenetic RCI на `127.0.0.1:79`;
+- команды интерфейсов и FQDN object groups, используемые скриптами;
+- совместимая BusyBox-среда с POSIX `sh` и базовыми утилитами.
 
-## Required Entware packages
+## Обязательные пакеты Entware
 
-- `curl` — HTTP probes, RCI queries and generated hint downloads;
-- `jq` — JSON parsing and CGI output;
-- `tcpdump` — live DNS observation;
-- `lighttpd` — local dashboard service;
-- `lighttpd-mod-cgi` — CGI API;
-- `busybox` — Entware shell/crond and core utilities used by init scripts;
-- `ca-bundle` — TLS validation for HTTPS requests.
-- `openssl-util` (conditional) — Ed25519 manifest verification for Smart Updater v1;
-- `tar` with gzip support (conditional) — updater package inspection and staging.
+- `busybox` - shell, crond и базовые команды;
+- `curl` - HTTP/RCI probes и загрузки;
+- `jq` - JSON в CGI и updater;
+- `tcpdump` - наблюдение DNS;
+- `lighttpd`, `lighttpd-mod-cgi` - VWARD Console;
+- `ca-bundle` - проверка HTTPS;
+- `openssl-util` - проверка Ed25519-подписей;
+- `tar` с gzip - распаковка update packages.
 
-Package dependencies such as `libcurl`, `libopenssl`, `libpcap`, `zlib` and the C runtime are resolved by Entware and are not direct VWARD install targets.
+Транзитивные библиотеки Entware не являются отдельными целями VWARD.
 
-## Conditional integration
+## Условные интеграции
 
-- `adguardhome-go` is required only for the AdGuard Home query-log discovery path; VWARD does not vendor its binary or database.
-- `opt-ndmsv2` provides Entware/Keenetic integration on the working installation.
+- `adguardhome-go` нужен только для query-log discovery; VWARD не включает его binary
+  и database.
+- `opt-ndmsv2` обеспечивает интеграцию Entware/Keenetic на рабочем устройстве.
 
-`wget` is not a direct requirement of the imported working VWARD. The obsolete UI-only `scripts/update-ui.sh` was removed. Smart Updater v1 is implementation-stage, disabled and not deployed; it does not yet constitute a supported GitHub-to-router updater. Its deployment gates are documented in [UPDATER_ARCHITECTURE.md](UPDATER_ARCHITECTURE.md).
+`wget` не требуется. Устаревший `scripts/update-ui.sh` удалён. VWARD Update Engine
+развёрнут на целевом роутере; автоматическое применение определяется локальными
+allowlisted-флагами.
