@@ -42,17 +42,39 @@ Linux-интерфейс сопоставляется по фактическо�
 - сохранённый `tunnel_guard_rci_id` существует -> `READY`, `configured`;
 - сохранённый ID исчез -> `STALE_MAPPING`.
 
-При `REQUIRES_SELECTION` и `STALE_MAPPING` будущие управляющие компоненты должны
-работать fail-safe и не выполнять mutation до валидного role mapping.
+При `REQUIRES_SELECTION` и `STALE_MAPPING` управляющие компоненты должны работать
+fail-safe и не выполнять mutation до валидного role mapping.
 
 Конфигурация role mapping читается из `/opt/etc/vward/discovery.conf`.
-На этом этапе VWARD Discovery не записывает этот файл и не меняет Keenetic.
+VWARD Discovery сам не записывает этот файл и не меняет Keenetic.
 
 Пример:
 
 ```text
 tunnel_guard_rci_id=OfficeTunnel
 ```
+
+## Интеграция Tunnel Guard health
+
+В `0.2.0-beta.1` read-only health watcher уже использует роль `tunnel-guard` из
+VWARD Discovery.
+
+`wg-health-watch.sh`:
+
+- не содержит фиксированного `WireguardN` для RCI;
+- не содержит фиксированного `nwgN` для сетевых probe;
+- получает `rci_id` и `linux_if` из discovery result;
+- запрашивает RCI только по уже обнаруженному `rci_id`;
+- выполняет network probe только через уже сопоставленный `linux_if`;
+- связывает RCI cache с конкретным `RCI_ID`, чтобы не использовать cache другого туннеля;
+- сохраняет discovery state и фактические IDs в health state для дальнейшей интеграции.
+
+Если mapping неоднозначен, устарел, discovery недоступен или Linux interface не
+сопоставлен, health state становится `UNKNOWN`. В таком состоянии watcher не делает
+пробных запросов к предполагаемым интерфейсам и не выполняет mutation.
+
+`wg-failopen-guard.sh` на этом этапе ещё не переведён на новый role contract и не
+изменялся. Это намеренное разделение read-only наблюдения и high-risk mutation.
 
 ## Совместимость Keenetic/Entware
 
@@ -73,16 +95,18 @@ Repository tests проверяют:
 - явный role mapping;
 - stale mapping;
 - сопоставление Linux interface по адресу;
+- healthy Tunnel Guard через произвольные `rci_id` и `linux_if`;
+- отсутствие probe/RCI query при `REQUIRES_SELECTION` и `STALE_MAPPING`;
+- read-only характер health watcher;
 - отсутствие installation-specific `WireguardN`, `nwgN`, LAN subnet и policy-list ID
-  в самом discovery provider;
+  в discovery provider;
 - отсутствие зависимости от jq regex.
 
 ## Следующие этапы
 
-После отдельного acceptance этого read-only слоя:
-
-1. перевести VWARD Console на общий discovery provider;
-2. перевести read-only часть Tunnel Guard;
-3. добавить динамическое обнаружение WAN/uplink;
-4. только после тестов переводить fail-open mutations;
-5. затем переводить Policy Sync и Route Engine на role mapping.
+1. Перевести VWARD Console на общий discovery provider вместо собственной логики.
+2. Добавить динамическое обнаружение WAN/uplink и role selection.
+3. После отдельного тестирования перевести `wg-failopen-guard.sh` на фактические
+   Tunnel/WAN role IDs.
+4. Затем переводить Policy Sync и Route Engine на общий role mapping.
+5. После стабилизации discovery перейти к due-based/idle-aware Maintenance Coordinator.
