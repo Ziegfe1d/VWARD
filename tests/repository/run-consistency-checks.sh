@@ -14,7 +14,8 @@ grep -Fq "**$VERSION**" README.md || fail "README version differs"
 
 for DOC in docs/INSTALL.md docs/INSTALLATION_MAP.md docs/DEPENDENCIES.md docs/CONSOLE.md \
     docs/NAMING_MIGRATION.md docs/UPDATER_ARCHITECTURE.md \
-    docs/UPDATE_POLICY.md docs/UPDATE_RECOVERY.md docs/UPDATE_SECURITY.md
+    docs/UPDATE_POLICY.md docs/UPDATE_RECOVERY.md docs/UPDATE_SECURITY.md \
+    docs/DISCOVERY.md
 do
     [ -r "$DOC" ] || fail "missing documentation: $DOC"
 done
@@ -41,6 +42,9 @@ do
     grep -Fq "'$ID':" web/index.html || fail "Console component mapping missing: $ID"
 done
 
+grep -Fq '"/opt/bin/vward-discovery.sh"' config/components/component-registry.json ||
+    fail "VWARD Discovery runtime target missing"
+
 for LOG_NAME in wan recovery cron routing updater tunnel policy console
 do
     grep -Fq "data-log=\"$LOG_NAME\"" web/index.html ||
@@ -52,9 +56,11 @@ done
 sh -n web/cgi-bin/api.cgi || fail "Console API syntax"
 python3 tests/repository/check-console-bindings.py || fail "Console bindings"
 for SCRIPT in components/*/scripts/*.sh components/runtime-supervision/init.d/* \
-    components/updater/*.sh tests/updater/*.sh
+    components/updater/*.sh tests/updater/*.sh tests/repository/*.sh
 do
     sh -n "$SCRIPT" || fail "shell syntax: $SCRIPT"
 done
+
+tests/repository/test-discovery.sh || fail "VWARD Discovery tests"
 
 echo "CONSISTENCY_CHECKS=PASS"
