@@ -3,13 +3,18 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-DIR="/opt/var/lib/wg-health"
+DIR="${VWARD_WG_HEALTH_DIR:-/opt/var/lib/wg-health}"
 STATE="$DIR/state"
 RCI_CACHE="$DIR/interface-rci-cache"
-LOG="/opt/var/log/wg-health.log"
-LOCK="/tmp/wg-health-watch.lock"
+LOG="${VWARD_WG_HEALTH_LOG:-/opt/var/log/wg-health.log}"
+LOCK="${VWARD_WG_HEALTH_LOCK:-/tmp/wg-health-watch.lock}"
 
-WG_IF="nwg1"
+JQ="${VWARD_JQ:-/opt/bin/jq}"
+DISCOVERY="${VWARD_DISCOVERY_BIN:-/opt/bin/vward-discovery.sh}"
+CURL_BIN="${VWARD_CURL:-curl}"
+NDMC_BIN="${VWARD_NDMC:-ndmc}"
+IP_BIN="${VWARD_IP:-ip}"
+SYS_CLASS_NET="${VWARD_SYS_CLASS_NET:-/sys/class/net}"
 
 # Healthy WG only needs an NDM snapshot periodically.
 # Any anomaly forces an immediate refresh.
@@ -38,6 +43,42 @@ cleanup()
 trap cleanup EXIT INT TERM
 
 
+# ------------------------------------------------------------
+# DISCOVERY / ROLE SELECTION
+# ------------------------------------------------------------
+
+DISCOVERY_STATE="UNKNOWN"
+DISCOVERY_SELECTION=""
+DISCOVERY_MAPPING=""
+WG_RCI_ID=""
+WG_IF=""
+DISCOVERY_USABLE=0
+
+if [ -x "$DISCOVERY" ] && [ -x "$JQ" ]; then
+    DISCOVERY_JSON="$($DISCOVERY tunnel-guard 2>/dev/null)"
+    DISCOVERY_RC=$?
+
+    if printf '%s\n' "$DISCOVERY_JSON" | "$JQ" -e . >/dev/null 2>&1; then
+        DISCOVERY_STATE="$(printf '%s\n' "$DISCOVERY_JSON" | "$JQ" -r '.state // "UNKNOWN"')"
+        DISCOVERY_SELECTION="$(printf '%s\n' "$DISCOVERY_JSON" | "$JQ" -r '.selection // ""')"
+        WG_RCI_ID="$(printf '%s\n' "$DISCOVERY_JSON" | "$JQ" -r '.interface.rci_id // ""')"
+        WG_IF="$(printf '%s\n' "$DISCOVERY_JSON" | "$JQ" -r '.interface.linux_if // ""')"
+        DISCOVERY_MAPPING="$(printf '%s\n' "$DISCOVERY_JSON" | "$JQ" -r '.interface.mapping // ""')"
+    else
+        DISCOVERY_STATE="INVALID_RESULT"
+    fi
+else
+    DISCOVERY_RC=127
+    DISCOVERY_STATE="UNAVAILABLE"
+fi
+
+if [ "$DISCOVERY_STATE" = "READY" ] &&
+   [ -n "$WG_RCI_ID" ] &&
+   [ -n "$WG_IF" ]; then
+    DISCOVERY_USABLE=1
+fi
+
+
 OLD_STATUS="UNKNOWN"
 FAIL_COUNT=0
 OK_COUNT=0
@@ -61,7 +102,9 @@ probe()
 {
     URL="$1"
 
-    curl -4 -k \
+    [ "$DISCOVERY_USABLE" -eq 1 ] || return 1
+
+    "$CURL_BIN" -4 -k \
       --noproxy '*' \
       --interface "$WG_IF" \
       --connect-timeout 1 \
@@ -84,16 +127,17 @@ ADDR=""
 FLAGS=""
 LOCAL_IF_OK=0
 
-if [ -d "/sys/class/net/$WG_IF" ]; then
+if [ "$DISCOVERY_USABLE" -eq 1 ] &&
+   [ -d "$SYS_CLASS_NET/$WG_IF" ]; then
     IF_EXISTS=1
-    CARRIER=$(cat "/sys/class/net/$WG_IF/carrier" 2>/dev/null || echo unknown)
+    CARRIER=$(cat "$SYS_CLASS_NET/$WG_IF/carrier" 2>/dev/null || echo unknown)
 
     ADDR=$(
-        ip -4 addr show dev "$WG_IF" 2>/dev/null |
+        "$IP_BIN" -4 addr show dev "$WG_IF" 2>/dev/null |
         awk '/inet / {print $2; exit}'
     )
 
-    FLAGS=$(ip link show "$WG_IF" 2>/dev/null | head -1)
+    FLAGS=$("$IP_BIN" link show "$WG_IF" 2>/dev/null | head -1)
 
     if [ "$CARRIER" = "1" ] &&
        [ -n "$ADDR" ] &&
@@ -110,8 +154,10 @@ fi
 P1=0
 P2=0
 
-probe "https://1.1.1.1/cdn-cgi/trace" && P1=1
-probe "https://8.8.8.8/" && P2=1
+if [ "$DISCOVERY_USABLE" -eq 1 ]; then
+    probe "https://1.1.1.1/cdn-cgi/trace" && P1=1
+    probe "https://8.8.8.8/" && P2=1
+fi
 
 NET_OK=0
 
@@ -131,11 +177,16 @@ HS=999999
 LAST_RCI=0
 
 if [ -f "$RCI_CACHE" ]; then
-    CONFIG_STATE=$(awk -F= '$1=="CONFIG_STATE"{print $2}' "$RCI_CACHE")
-    LINK_STATE=$(awk -F= '$1=="LINK_STATE"{print $2}' "$RCI_CACHE")
-    ONLINE_STATE=$(awk -F= '$1=="ONLINE_STATE"{print $2}' "$RCI_CACHE")
-    HS=$(awk -F= '$1=="HANDSHAKE_AGE"{print $2}' "$RCI_CACHE")
-    LAST_RCI=$(awk -F= '$1=="LAST_RCI"{print $2}' "$RCI_CACHE")
+    CACHED_RCI_ID=$(awk -F= '$1=="RCI_ID"{print $2}' "$RCI_CACHE")
+
+    # A cache created for a different tunnel must never be reused.
+    if [ -n "$WG_RCI_ID" ] && [ "$CACHED_RCI_ID" = "$WG_RCI_ID" ]; then
+        CONFIG_STATE=$(awk -F= '$1=="CONFIG_STATE"{print $2}' "$RCI_CACHE")
+        LINK_STATE=$(awk -F= '$1=="LINK_STATE"{print $2}' "$RCI_CACHE")
+        ONLINE_STATE=$(awk -F= '$1=="ONLINE_STATE"{print $2}' "$RCI_CACHE")
+        HS=$(awk -F= '$1=="HANDSHAKE_AGE"{print $2}' "$RCI_CACHE")
+        LAST_RCI=$(awk -F= '$1=="LAST_RCI"{print $2}' "$RCI_CACHE")
+    fi
 fi
 
 [ -n "$CONFIG_STATE" ] || CONFIG_STATE="unknown"
@@ -165,20 +216,22 @@ esac
 
 NEED_RCI=0
 
-[ "$LAST_RCI" -eq 0 ] && NEED_RCI=1
-[ "$RCI_AGE" -ge "$RCI_REFRESH_INTERVAL" ] && NEED_RCI=1
+if [ "$DISCOVERY_USABLE" -eq 1 ]; then
+    [ "$LAST_RCI" -eq 0 ] && NEED_RCI=1
+    [ "$RCI_AGE" -ge "$RCI_REFRESH_INTERVAL" ] && NEED_RCI=1
 
-# Any real/local anomaly gets an immediate authoritative snapshot.
-[ "$LOCAL_IF_OK" -ne 1 ] && NEED_RCI=1
-[ "$NET_OK" -ne 1 ] && NEED_RCI=1
-[ "$OLD_STATUS" != "UP" ] && NEED_RCI=1
+    # Any real/local anomaly gets an immediate authoritative snapshot.
+    [ "$LOCAL_IF_OK" -ne 1 ] && NEED_RCI=1
+    [ "$NET_OK" -ne 1 ] && NEED_RCI=1
+    [ "$OLD_STATUS" != "UP" ] && NEED_RCI=1
+fi
 
 RCI_REFRESHED=0
 RCI_OK=0
 
-if [ "$NEED_RCI" -eq 1 ]; then
+if [ "$NEED_RCI" -eq 1 ] && [ -n "$WG_RCI_ID" ]; then
 
-    INFO=$(ndmc -c "show interface Wireguard1" 2>/dev/null)
+    INFO=$("$NDMC_BIN" -c "show interface $WG_RCI_ID" 2>/dev/null)
 
     if [ -n "$INFO" ]; then
 
@@ -216,6 +269,7 @@ if [ "$NEED_RCI" -eq 1 ]; then
         CTMP="$RCI_CACHE.tmp.$$"
 
         {
+            echo "RCI_ID=$WG_RCI_ID"
             echo "CONFIG_STATE=$CONFIG_STATE"
             echo "LINK_STATE=$LINK_STATE"
             echo "ONLINE_STATE=$ONLINE_STATE"
@@ -241,42 +295,47 @@ IF_OK="$LOCAL_IF_OK"
 HS_OK=0
 [ "$HS" -le 300 ] && HS_OK=1
 
-# Real traffic remains the primary criterion.
-GOOD=0
-
-if [ "$IF_OK" -eq 1 ] &&
-   [ "$NET_OK" -eq 1 ]; then
-    GOOD=1
-fi
-
-
-if [ "$GOOD" -eq 1 ]; then
-
+if [ "$DISCOVERY_USABLE" -ne 1 ]; then
+    STATUS="UNKNOWN"
     FAIL_COUNT=0
-    OK_COUNT=$((OK_COUNT + 1))
+    OK_COUNT=0
+else
+    # Real traffic remains the primary criterion.
+    GOOD=0
 
-    if [ "$OLD_STATUS" = "DOWN" ] ||
-       [ "$OLD_STATUS" = "RECOVERING" ]; then
+    if [ "$IF_OK" -eq 1 ] &&
+       [ "$NET_OK" -eq 1 ]; then
+        GOOD=1
+    fi
 
-        if [ "$OK_COUNT" -ge 2 ]; then
-            STATUS="UP"
+    if [ "$GOOD" -eq 1 ]; then
+
+        FAIL_COUNT=0
+        OK_COUNT=$((OK_COUNT + 1))
+
+        if [ "$OLD_STATUS" = "DOWN" ] ||
+           [ "$OLD_STATUS" = "RECOVERING" ]; then
+
+            if [ "$OK_COUNT" -ge 2 ]; then
+                STATUS="UP"
+            else
+                STATUS="RECOVERING"
+            fi
+
         else
-            STATUS="RECOVERING"
+            STATUS="UP"
         fi
 
     else
-        STATUS="UP"
-    fi
 
-else
+        OK_COUNT=0
+        FAIL_COUNT=$((FAIL_COUNT + 1))
 
-    OK_COUNT=0
-    FAIL_COUNT=$((FAIL_COUNT + 1))
-
-    if [ "$FAIL_COUNT" -ge 2 ]; then
-        STATUS="DOWN"
-    else
-        STATUS="DEGRADED"
+        if [ "$FAIL_COUNT" -ge 2 ]; then
+            STATUS="DOWN"
+        else
+            STATUS="DEGRADED"
+        fi
     fi
 fi
 
@@ -289,6 +348,13 @@ TMP_STATE="$STATE.tmp.$$"
     echo "LAST_CHECK=$NOW_EPOCH"
     echo "FAIL_COUNT=$FAIL_COUNT"
     echo "OK_COUNT=$OK_COUNT"
+
+    echo "DISCOVERY_STATE=$DISCOVERY_STATE"
+    echo "DISCOVERY_RC=$DISCOVERY_RC"
+    echo "DISCOVERY_SELECTION=$DISCOVERY_SELECTION"
+    echo "DISCOVERY_MAPPING=$DISCOVERY_MAPPING"
+    echo "RCI_ID=${WG_RCI_ID:-none}"
+    echo "LINUX_IF=${WG_IF:-none}"
 
     # Kept for wg-failopen compatibility.
     echo "CONFIG_STATE=${CONFIG_STATE:-unknown}"
@@ -317,12 +383,13 @@ mv "$TMP_STATE" "$STATE"
 
 
 if [ "$STATUS" != "$OLD_STATUS" ]; then
-    echo "$NOW_TEXT|$OLD_STATUS->$STATUS|if=$IF_OK|hs=$HS|p1=$P1|p2=$P2|rci=$RCI_REFRESHED" \
+    echo "$NOW_TEXT|$OLD_STATUS->$STATUS|discovery=$DISCOVERY_STATE|rci=${WG_RCI_ID:-none}|if=${WG_IF:-none}|if_ok=$IF_OK|hs=$HS|p1=$P1|p2=$P2|rci_refresh=$RCI_REFRESHED" \
         >> "$LOG"
 fi
 
 
 echo "WG_STATUS=$STATUS"
+echo "Discovery=$DISCOVERY_STATE Selection=${DISCOVERY_SELECTION:-none} RCI=${WG_RCI_ID:-none} LinuxIF=${WG_IF:-none}"
 echo "Interface=$IF_OK Network=$NET_OK HandshakeAge=$HS"
 echo "Probe1=$P1 Probe2=$P2"
 echo "FailCount=$FAIL_COUNT OkCount=$OK_COUNT"
