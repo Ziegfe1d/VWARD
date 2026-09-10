@@ -33,6 +33,14 @@ grep -Fq 'bottom:max(10px,env(safe-area-inset-bottom))' web/index.html ||
     fail "mobile toolbar safe-area handling missing"
 grep -Fq "if(id==='logs')loadLog(logName);window.scrollTo(0,0)" web/index.html ||
     fail "Logs must load before compatibility-safe scroll"
+grep -Fq "wanUp=w.status==='UP'" web/index.html ||
+    fail "Console WAN visual state must use observer status"
+grep -Fq 'wan:[w.internet===true' web/index.html >/dev/null &&
+    fail "Console WAN card must not use global Internet status as health"
+grep -Fq "badge('wanPill',w.internet===true" web/index.html >/dev/null &&
+    fail "Console WAN pill must not use global Internet status as health"
+grep -Fq 'wan:w.internet===true?1:0' web/index.html >/dev/null &&
+    fail "Console WAN history must not use global Internet status as health"
 
 for ID in platform-core route-engine route-reconciler route-tools tunnel-guard \
     wan-guard policy-sync runtime console update-engine
@@ -76,6 +84,12 @@ grep -Fq 'recovery_source:"legacy-wan-guardian"' web/cgi-bin/api.cgi ||
     fail "Console API must keep legacy WAN recovery source explicit"
 grep -Fq 'WAN_CLASS="OBSERVER_STALE"' web/cgi-bin/api.cgi ||
     fail "Console API must fail safe on stale WAN observer state"
+grep -Fq 'WAN_CLASS="OBSERVER_ROLE_MISMATCH"' web/cgi-bin/api.cgi ||
+    fail "Console API must reject WAN observer state from another RCI role"
+grep -Fq 'WAN_CLASS="OBSERVER_MAPPING_MISMATCH"' web/cgi-bin/api.cgi ||
+    fail "Console API must reject WAN observer state from another Linux mapping"
+grep -Fq 'WAN_CLASS="DISCOVERY_${WAN_DISCOVERY_STATE}"' web/cgi-bin/api.cgi ||
+    fail "Console API must prefer current WAN Discovery failure over stale health"
 grep -Fq 'FILE=/opt/var/log/wan-health.log' web/cgi-bin/api.cgi ||
     fail "Console WAN log must use WAN observer log"
 grep -Fq 'GOUT=/tmp/wan-guardian.cron.out' web/cgi-bin/api.cgi ||
@@ -103,6 +117,8 @@ grep -Fq '"$DISCOVERY" wan-guard' "$WAN_OBSERVER" ||
     fail "WAN observer must consume wan-guard role"
 grep -Fq 'VWARD_WAN_HEALTH_DIR' "$WAN_OBSERVER" ||
     fail "WAN observer state contract missing"
+grep -Fq '[ "$INTERNET" = "true" ] && [ "$NETWORK_OK" -eq 1 ]' "$WAN_OBSERVER" ||
+    fail "WAN HEALTHY classification must require a bound selected-path probe"
 if grep -Eq 'ip dhcp client renew|interface [^" ]+ (down|up)|[Nn][Dd][Mm][Cc]' "$WAN_OBSERVER"; then
     fail "read-only WAN observer contains mutation command"
 fi
