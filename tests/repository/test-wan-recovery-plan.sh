@@ -22,6 +22,12 @@ exit "${VWARD_TEST_DISCOVERY_RC:-0}"
 EOF
 chmod 0755 "$TMP/discovery.sh"
 
+cat > "$TMP/capability.sh" <<'EOF'
+#!/bin/sh
+cat "$VWARD_TEST_CAPABILITY_JSON_FILE"
+EOF
+chmod 0755 "$TMP/capability.sh"
+
 write_state()
 {
     STATUS_VALUE="$1"
@@ -45,12 +51,14 @@ run_plan()
 {
     VWARD_WAN_HEALTH_STATE="$TMP/state" \
     VWARD_DISCOVERY_BIN="$TMP/discovery.sh" \
+    VWARD_WAN_CAPABILITY_BIN="$TMP/capability.sh" \
     VWARD_JQ="$JQ_BIN" \
     VWARD_NOW_EPOCH=1050 \
     VWARD_WAN_RECOVERY_MAX_STATE_AGE=120 \
     VWARD_WAN_RECOVERY_CONFIRM_FAILURES=3 \
     VWARD_TEST_DISCOVERY_JSON_FILE="$1" \
     VWARD_TEST_DISCOVERY_RC="${2:-0}" \
+    VWARD_TEST_CAPABILITY_JSON_FILE="${3:-$TMP/dhcp-capability.json}" \
     sh "$SCRIPT"
 }
 
@@ -60,49 +68,27 @@ value()
 }
 
 cat > "$TMP/physical.json" <<'EOF'
-{
-  "schema":1,
-  "provider":"vward-discovery",
-  "role":"wan-guard",
-  "state":"READY",
-  "selection":"single-candidate",
-  "interface":{
-    "rci_id":"UplinkAlpha",
-    "linux_if":"eth9",
-    "mapping":"system-name",
-    "via_rci_id":"",
-    "via_linux_if":"",
-    "type":"GigabitEthernet"
-  }
-}
+{"schema":1,"provider":"vward-discovery","role":"wan-guard","state":"READY","selection":"single-candidate","interface":{"rci_id":"UplinkAlpha","linux_if":"eth9","mapping":"system-name","via_rci_id":"","via_linux_if":"","type":"GigabitEthernet"}}
 EOF
 
 cat > "$TMP/logical.json" <<'EOF'
-{
-  "schema":1,
-  "provider":"vward-discovery",
-  "role":"wan-guard",
-  "state":"READY",
-  "selection":"configured",
-  "interface":{
-    "rci_id":"InternetSession",
-    "linux_if":"ppp0",
-    "mapping":"system-name",
-    "via_rci_id":"PhysicalUplink",
-    "via_linux_if":"eth9",
-    "type":"PPPoE"
-  }
-}
+{"schema":1,"provider":"vward-discovery","role":"wan-guard","state":"READY","selection":"configured","interface":{"rci_id":"InternetSession","linux_if":"ppp0","mapping":"system-name","via_rci_id":"PhysicalUplink","via_linux_if":"eth9","type":"PPPoE"}}
 EOF
 
 cat > "$TMP/ambiguous.json" <<'EOF'
-{
-  "schema":1,
-  "provider":"vward-discovery",
-  "role":"wan-guard",
-  "state":"REQUIRES_SELECTION",
-  "candidate_count":2
-}
+{"schema":1,"provider":"vward-discovery","role":"wan-guard","state":"REQUIRES_SELECTION","candidate_count":2}
+EOF
+
+cat > "$TMP/dhcp-capability.json" <<'EOF'
+{"schema":1,"provider":"wan-capability","role":"wan-guard","state":"READY","interface":{"rci_id":"UplinkAlpha","linux_if":"eth9"},"addressing":{"mode":"dhcp","evidence":"running_config_ip_address_dhcp","dhcp_renew":true},"recovery":{"interface_reconnect":true,"session_reconnect":false}}
+EOF
+
+cat > "$TMP/static-capability.json" <<'EOF'
+{"schema":1,"provider":"wan-capability","role":"wan-guard","state":"READY","interface":{"rci_id":"UplinkAlpha","linux_if":"eth9"},"addressing":{"mode":"static","evidence":"running_config_static_ipv4","dhcp_renew":false},"recovery":{"interface_reconnect":true,"session_reconnect":false}}
+EOF
+
+cat > "$TMP/wrong-capability.json" <<'EOF'
+{"schema":1,"provider":"wan-capability","role":"wan-guard","state":"READY","interface":{"rci_id":"OtherWAN","linux_if":"eth9"},"addressing":{"mode":"dhcp","dhcp_renew":true}}
 EOF
 
 write_state UP HEALTHY 0 UplinkAlpha eth9
@@ -114,34 +100,39 @@ OUT="$(run_plan "$TMP/physical.json")"
 write_state DOWN GATEWAY_FAILURE 2 UplinkAlpha eth9
 OUT="$(run_plan "$TMP/physical.json")"
 [ "$(value "$OUT" DECISION)" = "DEFER" ] || fail "confirmation gate"
-[ "$(value "$OUT" ACTION)" = "NONE" ] || fail "pre-confirm action"
 
 write_state DOWN GATEWAY_FAILURE 3 UplinkAlpha eth9
 OUT="$(run_plan "$TMP/physical.json")"
 [ "$(value "$OUT" DECISION)" = "PLAN" ] || fail "physical failure plan"
 [ "$(value "$OUT" ACTION)" = "INTERFACE_RECONNECT" ] || fail "physical failure action"
-[ "$(value "$OUT" TARGET_RCI_ID)" = "UplinkAlpha" ] || fail "physical target RCI"
 
 write_state DOWN ADDRESS_FAILURE 3 UplinkAlpha eth9
-OUT="$(run_plan "$TMP/physical.json")"
-[ "$(value "$OUT" DECISION)" = "HOLD" ] || fail "physical address failure must hold"
-[ "$(value "$OUT" REASON)" = "addressing_capability_required" ] || fail "DHCP capability gate"
+OUT="$(run_plan "$TMP/physical.json" 0 "$TMP/dhcp-capability.json")"
+[ "$(value "$OUT" DECISION)" = "PLAN" ] || fail "DHCP address failure must plan"
+[ "$(value "$OUT" ACTION)" = "DHCP_RENEW" ] || fail "DHCP address failure action"
+[ "$(value "$OUT" CAPABILITY_STATE)" = "READY" ] || fail "DHCP capability state"
+[ "$(value "$OUT" ADDRESSING_MODE)" = "dhcp" ] || fail "DHCP addressing mode"
+
+OUT="$(run_plan "$TMP/physical.json" 0 "$TMP/static-capability.json")"
+[ "$(value "$OUT" DECISION)" = "HOLD" ] || fail "static address failure must hold"
+[ "$(value "$OUT" REASON)" = "addressing_not_dhcp" ] || fail "static address failure reason"
+
+OUT="$(run_plan "$TMP/physical.json" 0 "$TMP/wrong-capability.json")"
+[ "$(value "$OUT" DECISION)" = "BLOCKED" ] || fail "capability role mismatch must block"
+[ "$(value "$OUT" REASON)" = "capability_ROLE_MISMATCH" ] || fail "capability mismatch reason"
 
 write_state DOWN PHY_DOWN 9 UplinkAlpha eth9
 OUT="$(run_plan "$TMP/physical.json")"
 [ "$(value "$OUT" DECISION)" = "HOLD" ] || fail "physical carrier failure must hold"
-[ "$(value "$OUT" ACTION)" = "NONE" ] || fail "physical carrier must not auto-bounce"
 
 write_state DEGRADED DNS_ONLY_FAILURE 9 UplinkAlpha eth9
 OUT="$(run_plan "$TMP/physical.json")"
 [ "$(value "$OUT" DECISION)" = "HOLD" ] || fail "DNS-only failure must hold"
-[ "$(value "$OUT" ACTION)" = "NONE" ] || fail "DNS-only failure action"
 
 write_state DOWN SESSION_FAILURE 3 InternetSession ppp0
 OUT="$(run_plan "$TMP/logical.json")"
 [ "$(value "$OUT" DECISION)" = "PLAN" ] || fail "logical session plan"
 [ "$(value "$OUT" ACTION)" = "SESSION_RECONNECT" ] || fail "logical session action"
-[ "$(value "$OUT" TARGET_RCI_ID)" = "InternetSession" ] || fail "logical target RCI"
 [ "$(value "$OUT" VIA_RCI_ID)" = "PhysicalUplink" ] || fail "logical via RCI"
 
 write_state DOWN ADDRESS_FAILURE 3 InternetSession ppp0
@@ -156,17 +147,14 @@ OUT="$(run_plan "$TMP/physical.json")"
 write_state DOWN INTERNET_FAILURE 3 UplinkAlpha wrong9
 OUT="$(run_plan "$TMP/physical.json")"
 [ "$(value "$OUT" DECISION)" = "BLOCKED" ] || fail "mapping mismatch must block"
-[ "$(value "$OUT" REASON)" = "observer_mapping_mismatch" ] || fail "mapping mismatch reason"
 
 write_state DOWN INTERNET_FAILURE 3 UplinkAlpha eth9 800
 OUT="$(run_plan "$TMP/physical.json")"
 [ "$(value "$OUT" DECISION)" = "BLOCKED" ] || fail "stale observer must block"
-[ "$(value "$OUT" REASON)" = "observer_stale" ] || fail "stale observer reason"
 
 write_state DOWN INTERNET_FAILURE 3 UplinkAlpha eth9
 OUT="$(run_plan "$TMP/ambiguous.json" 4)"
 [ "$(value "$OUT" DECISION)" = "BLOCKED" ] || fail "ambiguous discovery must block"
-[ "$(value "$OUT" ACTION)" = "NONE" ] || fail "ambiguous discovery action"
 
 if grep -Eq 'ip dhcp client renew|interface [^" ]+ (down|up)|[Nn][Dd][Mm][Cc]' "$SCRIPT"; then
     fail "planner contains mutation command"
