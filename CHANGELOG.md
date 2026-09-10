@@ -10,7 +10,10 @@
 - При нескольких туннелях VWARD не выбирает случайный интерфейс; допускается явный `tunnel_guard_rci_id`.
 - `wg-health-watch.sh` переведён на read-only role selection через VWARD Discovery: RCI и Linux ID берутся из обнаруженного объекта, а не из жёстких имён.
 - При неоднозначном или устаревшем mapping Tunnel Guard health остаётся `UNKNOWN` и не выполняет пробных RCI/network-запросов к угаданным интерфейсам.
-- Добавлены repository tests для 0/1/N туннелей, произвольных RCI ID, stale mapping, discovery-driven health и Entware `jq` без ONIGURUMA.
+- VWARD Console API переведён на общий WireGuard inventory из `/opt/bin/vward-discovery.sh`; собственный полный `show/interface` и фильтрация `WireguardN` удалены.
+- Для совместимости frontend поле `wg.interfaces[].name` теперь является alias фактического `rci_id`; API также публикует `wg.discovery.provider/state`.
+- При недоступном Discovery Console работает fail-safe и возвращает пустой WireGuard inventory со статусом `UNAVAILABLE`, не угадывая имена интерфейсов.
+- Добавлены repository checks для 0/1/N туннелей, произвольных RCI ID, stale mapping, discovery-driven health, Console Discovery contract и Entware `jq` без ONIGURUMA.
 - High-risk fail-open mutations, WAN selection, Policy Sync и Route Engine этим этапом пока не переключаются.
 
 ## 0.1.7-dev: критический переходный hotfix VWARD Console
