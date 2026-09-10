@@ -100,4 +100,4 @@ jobs:
       - name: Dispatch transition publish workflow
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run build-transition-hotfix.yml --ref main
+        run: gh workflow run build-transition-hotfix.yml --ref main -R Ziegfe1d/VWARD
