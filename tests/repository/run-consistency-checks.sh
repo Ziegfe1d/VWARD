@@ -45,6 +45,19 @@ done
 grep -Fq '"/opt/bin/vward-discovery.sh"' config/components/component-registry.json ||
     fail "VWARD Discovery runtime target missing"
 
+grep -Fq 'DISCOVERY="${VWARD_DISCOVERY:-/opt/bin/vward-discovery.sh}"' web/cgi-bin/api.cgi ||
+    fail "Console API does not declare the shared Discovery provider"
+grep -Fq '"$DISCOVERY" wireguard' web/cgi-bin/api.cgi ||
+    fail "Console API does not consume WireGuard inventory from VWARD Discovery"
+grep -Fq 'name:(.rci_id // "")' web/cgi-bin/api.cgi ||
+    fail "Console API compatibility alias must come from discovered rci_id"
+grep -Fq 'wg_discovery_state' web/cgi-bin/api.cgi ||
+    fail "Console API does not expose Discovery state"
+grep -Fq "'http://127.0.0.1:79/rci/show/interface'" web/cgi-bin/api.cgi >/dev/null &&
+    fail "Console API must not maintain a second full interface inventory"
+grep -Eq 'Wireguard[0-9]|nwg[0-9]' web/cgi-bin/api.cgi >/dev/null &&
+    fail "Console API contains installation-specific WireGuard hardcode"
+
 for LOG_NAME in wan recovery cron routing updater tunnel policy console
 do
     grep -Fq "data-log=\"$LOG_NAME\"" web/index.html ||
