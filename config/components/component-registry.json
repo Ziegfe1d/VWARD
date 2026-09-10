@@ -1,26 +1,34 @@
 {
   "schema": 1,
   "platform": "VWARD Platform",
-  "platform_version": "0.1.7-dev",
+  "platform_version": "0.2.0-beta.1",
   "component_version_policy": "platform-release",
   "components": [
     {
       "id": "platform-core",
       "name": "VWARD Platform Core",
       "name_ru": "Ядро платформы VWARD",
-      "legacy_ids": ["bootstrap"],
+      "legacy_ids": [
+        "bootstrap"
+      ],
       "update_method": "signed-package",
       "health_profile": "default",
-      "runtime_targets": ["/opt/share/vward/VERSION"]
+      "runtime_targets": [
+        "/opt/share/vward/VERSION"
+      ]
     },
     {
       "id": "route-engine",
       "name": "VWARD Route Engine",
       "name_ru": "Движок адаптивной маршрутизации VWARD",
-      "legacy_ids": ["adaptive-routing"],
+      "legacy_ids": [
+        "adaptive-routing"
+      ],
       "update_method": "signed-package",
       "health_profile": "route-engine",
-      "runtime_targets": ["/opt/bin/agh-adaptive-live.sh"]
+      "runtime_targets": [
+        "/opt/bin/agh-adaptive-live.sh"
+      ]
     },
     {
       "id": "route-reconciler",
@@ -29,8 +37,12 @@
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "route-engine",
-      "depends_on": ["route-engine"],
-      "runtime_targets": ["/opt/bin/adaptive-auto-maint.sh"]
+      "depends_on": [
+        "route-engine"
+      ],
+      "runtime_targets": [
+        "/opt/bin/adaptive-auto-maint.sh"
+      ]
     },
     {
       "id": "route-tools",
@@ -51,7 +63,9 @@
       "id": "tunnel-guard",
       "name": "VWARD Tunnel Guard",
       "name_ru": "Защита VPN-туннеля VWARD",
-      "legacy_ids": ["wireguard-protection"],
+      "legacy_ids": [
+        "wireguard-protection"
+      ],
       "update_method": "signed-package",
       "health_profile": "tunnel-guard",
       "runtime_targets": [
@@ -63,7 +77,9 @@
       "id": "wan-guard",
       "name": "VWARD WAN Guard",
       "name_ru": "Защита WAN VWARD",
-      "legacy_ids": ["wan-guardian"],
+      "legacy_ids": [
+        "wan-guardian"
+      ],
       "update_method": "signed-package",
       "health_profile": "wan-guard",
       "runtime_targets": [
@@ -75,7 +91,9 @@
       "id": "policy-sync",
       "name": "VWARD Policy Sync",
       "name_ru": "Синхронизация сетевых политик VWARD",
-      "legacy_ids": ["vpn-audit"],
+      "legacy_ids": [
+        "vpn-audit"
+      ],
       "update_method": "signed-package",
       "health_profile": "policy-sync",
       "runtime_targets": [
@@ -89,10 +107,13 @@
       "id": "runtime",
       "name": "VWARD Runtime",
       "name_ru": "Среда выполнения VWARD",
-      "legacy_ids": ["runtime-supervision"],
+      "legacy_ids": [
+        "runtime-supervision"
+      ],
       "update_method": "signed-package",
       "health_profile": "runtime",
       "runtime_targets": [
+        "/opt/bin/vward-discovery.sh",
         "/opt/bin/adaptive-housekeeping.sh",
         "/opt/bin/crond-supervisor.sh",
         "/opt/etc/init.d/S90crond",
@@ -105,7 +126,9 @@
       "id": "console",
       "name": "VWARD Console",
       "name_ru": "Панель управления VWARD",
-      "legacy_ids": ["web-ui"],
+      "legacy_ids": [
+        "web-ui"
+      ],
       "update_method": "signed-package",
       "health_profile": "console",
       "runtime_targets": [
@@ -118,11 +141,17 @@
       "id": "update-engine",
       "name": "VWARD Update Engine",
       "name_ru": "Движок обновлений VWARD",
-      "legacy_ids": ["updater"],
+      "legacy_ids": [
+        "updater"
+      ],
       "update_method": "slot-installer",
       "health_profile": "updater",
-      "depends_on": ["platform-core"],
-      "runtime_targets": ["/opt/share/vward/updater/current"]
+      "depends_on": [
+        "platform-core"
+      ],
+      "runtime_targets": [
+        "/opt/share/vward/updater/current"
+      ]
     }
   ]
 }
