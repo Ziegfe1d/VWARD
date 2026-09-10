@@ -3,7 +3,7 @@ PATH="/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
 JQ=/opt/bin/jq
-WGET=/opt/bin/wget
+CURL=/opt/bin/curl
 
 header_json()
 {
@@ -49,7 +49,8 @@ qget()
 
 fetch_json()
 {
-    DATA="$("$WGET" -qO- --timeout=3 --tries=1 "$1" 2>/dev/null)"
+    DATA="$("$CURL" --fail --silent --show-error \
+        --connect-timeout 2 --max-time 3 "$1" 2>/dev/null)"
 
     echo "$DATA" |
     "$JQ" -c . 2>/dev/null ||

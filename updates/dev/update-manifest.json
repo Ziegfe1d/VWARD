@@ -6,13 +6,13 @@
     "version": "0.1.4-dev",
     "channel": "dev",
     "priority": "ROUTINE",
-    "published_at": "2026-09-09T23:55:00Z",
+    "published_at": "2026-09-10T01:10:00Z",
     "min_updater_version": "1.2.0",
     "package": {
       "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-0.1.4-dev.tar.gz",
-      "sha256": "dbfb2de0f2ec2a44fbfe139f367872323a767052546b1430482ffb831019264b",
-      "size": 41636,
-      "unpacked_size": 183439
+      "sha256": "27b0c9b59317a000ffdfb945f34674e827c645e02721da8290a23af22e3ab734",
+      "size": 41648,
+      "unpacked_size": 183484
     },
     "compatibility": {
       "min_vward": "0.1.3-dev",
@@ -31,5 +31,5 @@
       "key_id": "vward-prod-2026-01"
     }
   },
-  "signature": "ULuc+pnGZzlYCGJnaRItI55ocggH3SICDAkwjKTNJaucTI/c55QLydLBy03hyfz4DN9dERFhN3EPVdZ9jnvrDw=="
+  "signature": "EPNO7JuXZR5toRlPPie7WeaflM0eebh9AkKYPhc5WCln/KzOJaYHL76Vhoz2eBiT0Cg52tqeoTM2Y7Ij3bsoDg=="
 }
