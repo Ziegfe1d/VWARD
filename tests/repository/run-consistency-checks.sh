@@ -52,10 +52,11 @@ done
 
 grep -Fq '"/opt/bin/vward-discovery.sh"' config/components/component-registry.json ||
     fail "VWARD Discovery runtime target missing"
-grep -Fq '"/opt/bin/wan-health-watch.sh"' config/components/component-registry.json ||
-    fail "WAN observer runtime target missing"
-grep -Fq '"/opt/bin/wan-recovery-plan.sh"' config/components/component-registry.json ||
-    fail "WAN Recovery Planner runtime target missing"
+for TARGET in /opt/bin/wan-health-watch.sh /opt/bin/wan-capability.sh /opt/bin/wan-recovery-plan.sh /opt/bin/wan-recovery-actuator.sh
+do
+    grep -Fq "\"$TARGET\"" config/components/component-registry.json ||
+        fail "WAN Guard runtime target missing: $TARGET"
+done
 
 grep -Fq '/opt/bin/wan-health-watch.sh > /tmp/wan-health-watch.cron.out' config/cron/root.crontab ||
     fail "separate WAN observer cron missing"
@@ -64,9 +65,11 @@ grep -Fq '/opt/bin/wan-guardian.sh > /tmp/wan-guardian.cron.out' config/cron/roo
 WAN_HEALTH_CRON_COUNT=$(grep -Fc '/opt/bin/wan-health-watch.sh > /tmp/wan-health-watch.cron.out' config/cron/root.crontab || true)
 WAN_GUARDIAN_CRON_COUNT=$(grep -Fc '/opt/bin/wan-guardian.sh > /tmp/wan-guardian.cron.out' config/cron/root.crontab || true)
 WAN_PLAN_CRON_COUNT=$(grep -Fc '/opt/bin/wan-recovery-plan.sh' config/cron/root.crontab || true)
+WAN_ACTUATOR_CRON_COUNT=$(grep -Fc '/opt/bin/wan-recovery-actuator.sh' config/cron/root.crontab || true)
 [ "$WAN_HEALTH_CRON_COUNT" -eq 1 ] || fail "WAN observer cron must exist exactly once"
 [ "$WAN_GUARDIAN_CRON_COUNT" -eq 1 ] || fail "legacy WAN recovery cron must exist exactly once"
 [ "$WAN_PLAN_CRON_COUNT" -eq 0 ] || fail "dry-run WAN Recovery Planner must not be scheduled yet"
+[ "$WAN_ACTUATOR_CRON_COUNT" -eq 0 ] || fail "dry-run WAN actuator must not be scheduled yet"
 grep -F '/opt/bin/wan-health-watch.sh' config/cron/root.crontab | grep -Fq '/opt/bin/wan-guardian.sh' &&
     fail "WAN observer and recovery must not be chained in one cron entry"
 
@@ -76,87 +79,73 @@ grep -Fq '"$DISCOVERY" snapshot' web/cgi-bin/api.cgi ||
     fail "Console API does not consume the unified Discovery snapshot"
 grep -Fq 'name:(.rci_id // "")' web/cgi-bin/api.cgi ||
     fail "Console API compatibility alias must come from discovered rci_id"
-grep -Fq 'wg_discovery_state' web/cgi-bin/api.cgi ||
-    fail "Console API does not expose WireGuard Discovery state"
-grep -Fq 'wan_discovery_state' web/cgi-bin/api.cgi ||
-    fail "Console API does not expose WAN Discovery state"
-grep -Fq 'WAN_HEALTH_STATE=/opt/var/lib/wan-health/state' web/cgi-bin/api.cgi ||
-    fail "Console API does not consume WAN observer state"
-grep -Fq 'observer_source:"wan-health-watch"' web/cgi-bin/api.cgi ||
-    fail "Console API must identify the Discovery-driven WAN observer"
-grep -Fq 'recovery_source:"legacy-wan-guardian"' web/cgi-bin/api.cgi ||
-    fail "Console API must keep legacy WAN recovery source explicit"
-grep -Fq 'WAN_CLASS="OBSERVER_STALE"' web/cgi-bin/api.cgi ||
-    fail "Console API must fail safe on stale WAN observer state"
-grep -Fq 'WAN_CLASS="OBSERVER_ROLE_MISMATCH"' web/cgi-bin/api.cgi ||
-    fail "Console API must reject WAN observer state from another RCI role"
-grep -Fq 'WAN_CLASS="OBSERVER_MAPPING_MISMATCH"' web/cgi-bin/api.cgi ||
-    fail "Console API must reject WAN observer state from another Linux mapping"
-grep -Fq 'WAN_CLASS="DISCOVERY_${WAN_DISCOVERY_STATE}"' web/cgi-bin/api.cgi ||
-    fail "Console API must prefer current WAN Discovery failure over stale health"
-grep -Fq 'FILE=/opt/var/log/wan-health.log' web/cgi-bin/api.cgi ||
-    fail "Console WAN log must use WAN observer log"
-grep -Fq 'GOUT=/tmp/wan-guardian.cron.out' web/cgi-bin/api.cgi ||
-    fail "Console API must keep recovery telemetry separate from observer state"
-grep -Fq "'http://127.0.0.1:79/rci/show/interface'" web/cgi-bin/api.cgi >/dev/null &&
-    fail "Console API must not maintain a second full interface inventory"
-grep -Fq 'show/interface?name=ISP' web/cgi-bin/api.cgi >/dev/null &&
-    fail "Console API must not hardcode the WAN role as ISP"
-grep -Eq 'Wireguard[0-9]|nwg[0-9]' web/cgi-bin/api.cgi >/dev/null &&
-    fail "Console API contains installation-specific WireGuard hardcode"
+grep -Fq 'wg_discovery_state' web/cgi-bin/api.cgi || fail "Console API does not expose WireGuard Discovery state"
+grep -Fq 'wan_discovery_state' web/cgi-bin/api.cgi || fail "Console API does not expose WAN Discovery state"
+grep -Fq 'WAN_HEALTH_STATE=/opt/var/lib/wan-health/state' web/cgi-bin/api.cgi || fail "Console API does not consume WAN observer state"
+grep -Fq 'observer_source:"wan-health-watch"' web/cgi-bin/api.cgi || fail "Console API must identify the Discovery-driven WAN observer"
+grep -Fq 'recovery_source:"legacy-wan-guardian"' web/cgi-bin/api.cgi || fail "Console API must keep legacy WAN recovery source explicit"
+grep -Fq 'WAN_CLASS="OBSERVER_STALE"' web/cgi-bin/api.cgi || fail "Console API must fail safe on stale WAN observer state"
+grep -Fq 'WAN_CLASS="OBSERVER_ROLE_MISMATCH"' web/cgi-bin/api.cgi || fail "Console API must reject WAN observer state from another RCI role"
+grep -Fq 'WAN_CLASS="OBSERVER_MAPPING_MISMATCH"' web/cgi-bin/api.cgi || fail "Console API must reject WAN observer state from another Linux mapping"
+grep -Fq 'WAN_CLASS="DISCOVERY_${WAN_DISCOVERY_STATE}"' web/cgi-bin/api.cgi || fail "Console API must prefer current WAN Discovery failure over stale health"
+grep -Fq 'FILE=/opt/var/log/wan-health.log' web/cgi-bin/api.cgi || fail "Console WAN log must use WAN observer log"
+grep -Fq 'GOUT=/tmp/wan-guardian.cron.out' web/cgi-bin/api.cgi || fail "Console API must keep recovery telemetry separate from observer state"
+grep -Fq "'http://127.0.0.1:79/rci/show/interface'" web/cgi-bin/api.cgi >/dev/null && fail "Console API must not maintain a second full interface inventory"
+grep -Fq 'show/interface?name=ISP' web/cgi-bin/api.cgi >/dev/null && fail "Console API must not hardcode the WAN role as ISP"
+grep -Eq 'Wireguard[0-9]|nwg[0-9]' web/cgi-bin/api.cgi >/dev/null && fail "Console API contains installation-specific WireGuard hardcode"
 
 SNAPSHOT_CALLS=$(grep -Fc '"$DISCOVERY" snapshot' web/cgi-bin/api.cgi || true)
-[ "$SNAPSHOT_CALLS" -eq 1 ] ||
-    fail "Console API must perform exactly one Discovery snapshot per status request"
+[ "$SNAPSHOT_CALLS" -eq 1 ] || fail "Console API must perform exactly one Discovery snapshot per status request"
 
-grep -Fq 'discovery_snapshot()' components/runtime-supervision/scripts/vward-discovery.sh ||
-    fail "Discovery snapshot implementation missing"
-grep -Fq 'select(((.value.role // []) | index("misc")) == null)' \
-    components/runtime-supervision/scripts/vward-discovery.sh ||
-    fail "WAN discovery must exclude VPN misc role"
+grep -Fq 'discovery_snapshot()' components/runtime-supervision/scripts/vward-discovery.sh || fail "Discovery snapshot implementation missing"
+grep -Fq 'select(((.value.role // []) | index("misc")) == null)' components/runtime-supervision/scripts/vward-discovery.sh || fail "WAN discovery must exclude VPN misc role"
 
 WAN_OBSERVER=components/wan-guardian/scripts/wan-health-watch.sh
 [ -x "$WAN_OBSERVER" ] || fail "WAN observer must be executable"
-grep -Fq '"$DISCOVERY" wan-guard' "$WAN_OBSERVER" ||
-    fail "WAN observer must consume wan-guard role"
-grep -Fq 'VWARD_WAN_HEALTH_DIR' "$WAN_OBSERVER" ||
-    fail "WAN observer state contract missing"
-grep -Fq '[ "$INTERNET" = "true" ] && [ "$NETWORK_OK" -eq 1 ]' "$WAN_OBSERVER" ||
-    fail "WAN HEALTHY classification must require a bound selected-path probe"
-if grep -Eq 'ip dhcp client renew|interface [^" ]+ (down|up)|[Nn][Dd][Mm][Cc]' "$WAN_OBSERVER"; then
-    fail "read-only WAN observer contains mutation command"
-fi
-if grep -Eq 'Wireguard[0-9]|nwg[0-9]|eth3|192\.168\.|show/interface\?name=ISP' "$WAN_OBSERVER"; then
-    fail "WAN observer contains installation-specific network hardcode"
-fi
+grep -Fq '"$DISCOVERY" wan-guard' "$WAN_OBSERVER" || fail "WAN observer must consume wan-guard role"
+grep -Fq 'VWARD_WAN_HEALTH_DIR' "$WAN_OBSERVER" || fail "WAN observer state contract missing"
+grep -Fq '[ "$INTERNET" = "true" ] && [ "$NETWORK_OK" -eq 1 ]' "$WAN_OBSERVER" || fail "WAN HEALTHY classification must require a bound selected-path probe"
+if grep -Eq 'ip dhcp client renew|interface [^" ]+ (down|up)|[Nn][Dd][Mm][Cc]' "$WAN_OBSERVER"; then fail "read-only WAN observer contains mutation command"; fi
+if grep -Eq 'Wireguard[0-9]|nwg[0-9]|eth3|192\.168\.|show/interface\?name=ISP' "$WAN_OBSERVER"; then fail "WAN observer contains installation-specific network hardcode"; fi
+
+WAN_CAPABILITY=components/wan-guardian/scripts/wan-capability.sh
+[ -x "$WAN_CAPABILITY" ] || fail "WAN Capability Provider must be executable"
+grep -Fq 'show running-config' "$WAN_CAPABILITY" || fail "WAN Capability Provider must use read-only running-config"
+grep -Fq 'running_config_ip_address_dhcp' "$WAN_CAPABILITY" || fail "WAN Capability Provider DHCP evidence missing"
+grep -Fq 'dhcp_renew:$dhcp_renew' "$WAN_CAPABILITY" || fail "WAN Capability Provider DHCP capability output missing"
+if grep -Eq 'ip dhcp client renew|interface [^" ]+ (down|up)|system config-save|(^|[[:space:]])eval([[:space:]]|$)' "$WAN_CAPABILITY"; then fail "WAN Capability Provider contains mutation command"; fi
 
 WAN_PLANNER=components/wan-guardian/scripts/wan-recovery-plan.sh
 [ -x "$WAN_PLANNER" ] || fail "WAN Recovery Planner must be executable"
 grep -Fq 'MODE="dryrun"' "$WAN_PLANNER" || fail "WAN Recovery Planner must remain dry-run"
 grep -Fq 'EXECUTED=NO' "$WAN_PLANNER" || fail "WAN Recovery Planner execution guard missing"
 grep -Fq '"$DISCOVERY" wan-guard' "$WAN_PLANNER" || fail "WAN Recovery Planner must revalidate wan-guard role"
+grep -Fq 'VWARD_WAN_CAPABILITY_BIN' "$WAN_PLANNER" || fail "WAN Recovery Planner capability provider missing"
 grep -Fq 'observer_role_mismatch' "$WAN_PLANNER" || fail "WAN Recovery Planner RCI revalidation missing"
 grep -Fq 'observer_mapping_mismatch' "$WAN_PLANNER" || fail "WAN Recovery Planner Linux mapping revalidation missing"
-grep -Fq 'addressing_capability_required' "$WAN_PLANNER" || fail "WAN Recovery Planner DHCP capability gate missing"
-if grep -Eq 'ip dhcp client renew|interface [^" ]+ (down|up)|[Nn][Dd][Mm][Cc]' "$WAN_PLANNER"; then
-    fail "WAN Recovery Planner contains mutation command"
-fi
-if grep -Eq 'Wireguard[0-9]|nwg[0-9]|eth3|192\.168\.|show/interface\?name=ISP' "$WAN_PLANNER"; then
-    fail "WAN Recovery Planner contains installation-specific network hardcode"
-fi
+grep -Fq 'DHCP_RENEW_CAPABLE' "$WAN_PLANNER" || fail "WAN Recovery Planner DHCP capability gate missing"
+grep -Fq 'emit PLAN DHCP_RENEW confirmed_dhcp_address_failure' "$WAN_PLANNER" || fail "WAN Recovery Planner DHCP plan missing"
+if grep -Eq 'ip dhcp client renew|interface [^" ]+ (down|up)|[Nn][Dd][Mm][Cc]' "$WAN_PLANNER"; then fail "WAN Recovery Planner contains mutation command"; fi
+if grep -Eq 'Wireguard[0-9]|nwg[0-9]|eth3|192\.168\.|show/interface\?name=ISP' "$WAN_PLANNER"; then fail "WAN Recovery Planner contains installation-specific network hardcode"; fi
+
+WAN_ACTUATOR=components/wan-guardian/scripts/wan-recovery-actuator.sh
+[ -x "$WAN_ACTUATOR" ] || fail "WAN Recovery Actuator must be executable"
+grep -Fq 'MODE="dryrun"' "$WAN_ACTUATOR" || fail "WAN Recovery Actuator must remain dry-run"
+grep -Fq 'EXECUTED=NO' "$WAN_ACTUATOR" || fail "WAN Recovery Actuator execution guard missing"
+grep -Fq 'SESSION_RECONNECT|INTERFACE_RECONNECT|DHCP_RENEW' "$WAN_ACTUATOR" || fail "WAN Recovery Actuator typed action allowlist missing"
+grep -Fq 'RCI_DHCP_RENEW' "$WAN_ACTUATOR" || fail "WAN Recovery Actuator DHCP execution kind missing"
+grep -Fq 'VWARD_WAN_CAPABILITY_BIN' "$WAN_ACTUATOR" || fail "WAN Recovery Actuator capability revalidation missing"
+if grep -Eq 'ip dhcp client renew|(^|[^A-Za-z])ndmc([^A-Za-z]|$)|(^|[[:space:]])eval([[:space:]]|$)|IFACE=["'"']?ISP' "$WAN_ACTUATOR"; then fail "dry-run WAN actuator contains executable mutation or legacy hardcode"; fi
 
 for LOG_NAME in wan recovery cron routing updater tunnel policy console
 do
-    grep -Fq "data-log=\"$LOG_NAME\"" web/index.html ||
-        fail "Console log tab missing: $LOG_NAME"
-    grep -Eq "^[[:space:]]*$LOG_NAME\)" web/cgi-bin/api.cgi ||
-        fail "Console log allowlist missing: $LOG_NAME"
+    grep -Fq "data-log=\"$LOG_NAME\"" web/index.html || fail "Console log tab missing: $LOG_NAME"
+    grep -Eq "^[[:space:]]*$LOG_NAME\)" web/cgi-bin/api.cgi || fail "Console log allowlist missing: $LOG_NAME"
 done
 
 sh -n web/cgi-bin/api.cgi || fail "Console API syntax"
 python3 tests/repository/check-console-bindings.py || fail "Console bindings"
-for SCRIPT in components/*/scripts/*.sh components/runtime-supervision/init.d/* \
-    components/updater/*.sh tests/updater/*.sh tests/repository/*.sh
+for SCRIPT in components/*/scripts/*.sh components/runtime-supervision/init.d/* components/updater/*.sh tests/updater/*.sh tests/repository/*.sh
 do
     sh -n "$SCRIPT" || fail "shell syntax: $SCRIPT"
 done
