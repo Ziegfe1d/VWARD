@@ -51,7 +51,7 @@ run_plan()
     VWARD_WAN_RECOVERY_CONFIRM_FAILURES=3 \
     VWARD_TEST_DISCOVERY_JSON_FILE="$1" \
     VWARD_TEST_DISCOVERY_RC="${2:-0}" \
-    "$SCRIPT"
+    sh "$SCRIPT"
 }
 
 value()
