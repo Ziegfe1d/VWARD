@@ -24,10 +24,15 @@ export SELF_DIR
 
 . "$UPDATER/vward-update-common.sh"
 
-vu_safe_target /opt/bin/wan-health-watch.sh ||
-    fail "WAN observer target is not allowed by updater"
-vu_safe_target /opt/bin/wan-recovery-plan.sh ||
-    fail "WAN Recovery Planner target is not allowed by updater"
+for target in \
+    /opt/bin/wan-health-watch.sh \
+    /opt/bin/wan-capability.sh \
+    /opt/bin/wan-recovery-plan.sh \
+    /opt/bin/wan-recovery-actuator.sh
+do
+    vu_safe_target "$target" || fail "WAN target is not allowed by updater: $target"
+done
+
 if vu_safe_target /opt/bin/not-a-vward-target.sh; then
     fail "unknown updater target must remain denied"
 fi
@@ -42,6 +47,7 @@ vu_activity_clear || fail "activity gate did not recover after observer lock rem
 
 for target in \
     wan-health-watch.sh \
+    wan-capability.sh \
     wan-recovery-plan.sh \
     wan-guardian.sh \
     wan-recovery-actuator.sh
@@ -53,12 +59,24 @@ done
 VWARD_ROOT_PREFIX="$ROOTFS" sh "$HEALTH" wan-guard >/dev/null 2>&1 ||
     fail "wan-guard health profile rejected complete runtime set"
 
+rm -f "$ROOTFS/opt/bin/wan-capability.sh"
+if VWARD_ROOT_PREFIX="$ROOTFS" sh "$HEALTH" wan-guard >/dev/null 2>&1; then
+    fail "wan-guard health must fail when capability provider is missing"
+fi
+printf '#!/bin/sh\nexit 0\n' > "$ROOTFS/opt/bin/wan-capability.sh"
+chmod 0755 "$ROOTFS/opt/bin/wan-capability.sh"
+
 rm -f "$ROOTFS/opt/bin/wan-recovery-plan.sh"
 if VWARD_ROOT_PREFIX="$ROOTFS" sh "$HEALTH" wan-guard >/dev/null 2>&1; then
     fail "wan-guard health must fail when Recovery Planner is missing"
 fi
 
-for target in /opt/bin/wan-health-watch.sh /opt/bin/wan-recovery-plan.sh; do
+for target in \
+    /opt/bin/wan-health-watch.sh \
+    /opt/bin/wan-capability.sh \
+    /opt/bin/wan-recovery-plan.sh \
+    /opt/bin/wan-recovery-actuator.sh
+do
     jq -e --arg target "$target" '
         any(.components[];
             .id == "wan-guard" and
