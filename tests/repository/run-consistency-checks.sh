@@ -44,6 +44,19 @@ done
 
 grep -Fq '"/opt/bin/vward-discovery.sh"' config/components/component-registry.json ||
     fail "VWARD Discovery runtime target missing"
+grep -Fq '"/opt/bin/wan-health-watch.sh"' config/components/component-registry.json ||
+    fail "WAN observer runtime target missing"
+
+grep -Fq '/opt/bin/wan-health-watch.sh > /tmp/wan-health-watch.cron.out' config/cron/root.crontab ||
+    fail "separate WAN observer cron missing"
+grep -Fq '/opt/bin/wan-guardian.sh > /tmp/wan-guardian.cron.out' config/cron/root.crontab ||
+    fail "legacy WAN recovery cron missing"
+WAN_HEALTH_CRON_COUNT=$(grep -Fc '/opt/bin/wan-health-watch.sh > /tmp/wan-health-watch.cron.out' config/cron/root.crontab || true)
+WAN_GUARDIAN_CRON_COUNT=$(grep -Fc '/opt/bin/wan-guardian.sh > /tmp/wan-guardian.cron.out' config/cron/root.crontab || true)
+[ "$WAN_HEALTH_CRON_COUNT" -eq 1 ] || fail "WAN observer cron must exist exactly once"
+[ "$WAN_GUARDIAN_CRON_COUNT" -eq 1 ] || fail "legacy WAN recovery cron must exist exactly once"
+grep -F '/opt/bin/wan-health-watch.sh' config/cron/root.crontab | grep -Fq '/opt/bin/wan-guardian.sh' &&
+    fail "WAN observer and recovery must not be chained in one cron entry"
 
 grep -Fq 'DISCOVERY="${VWARD_DISCOVERY:-/opt/bin/vward-discovery.sh}"' web/cgi-bin/api.cgi ||
     fail "Console API does not declare the shared Discovery provider"
@@ -55,8 +68,18 @@ grep -Fq 'wg_discovery_state' web/cgi-bin/api.cgi ||
     fail "Console API does not expose WireGuard Discovery state"
 grep -Fq 'wan_discovery_state' web/cgi-bin/api.cgi ||
     fail "Console API does not expose WAN Discovery state"
-grep -Fq 'observer_source:"legacy-wan-guardian"' web/cgi-bin/api.cgi ||
-    fail "Console API must label transitional legacy WAN observer data"
+grep -Fq 'WAN_HEALTH_STATE=/opt/var/lib/wan-health/state' web/cgi-bin/api.cgi ||
+    fail "Console API does not consume WAN observer state"
+grep -Fq 'observer_source:"wan-health-watch"' web/cgi-bin/api.cgi ||
+    fail "Console API must identify the Discovery-driven WAN observer"
+grep -Fq 'recovery_source:"legacy-wan-guardian"' web/cgi-bin/api.cgi ||
+    fail "Console API must keep legacy WAN recovery source explicit"
+grep -Fq 'WAN_CLASS="OBSERVER_STALE"' web/cgi-bin/api.cgi ||
+    fail "Console API must fail safe on stale WAN observer state"
+grep -Fq 'FILE=/opt/var/log/wan-health.log' web/cgi-bin/api.cgi ||
+    fail "Console WAN log must use WAN observer log"
+grep -Fq 'GOUT=/tmp/wan-guardian.cron.out' web/cgi-bin/api.cgi ||
+    fail "Console API must keep recovery telemetry separate from observer state"
 grep -Fq "'http://127.0.0.1:79/rci/show/interface'" web/cgi-bin/api.cgi >/dev/null &&
     fail "Console API must not maintain a second full interface inventory"
 grep -Fq 'show/interface?name=ISP' web/cgi-bin/api.cgi >/dev/null &&
@@ -73,6 +96,19 @@ grep -Fq 'discovery_snapshot()' components/runtime-supervision/scripts/vward-dis
 grep -Fq 'select(((.value.role // []) | index("misc")) == null)' \
     components/runtime-supervision/scripts/vward-discovery.sh ||
     fail "WAN discovery must exclude VPN misc role"
+
+WAN_OBSERVER=components/wan-guardian/scripts/wan-health-watch.sh
+[ -x "$WAN_OBSERVER" ] || fail "WAN observer must be executable"
+grep -Fq '"$DISCOVERY" wan-guard' "$WAN_OBSERVER" ||
+    fail "WAN observer must consume wan-guard role"
+grep -Fq 'VWARD_WAN_HEALTH_DIR' "$WAN_OBSERVER" ||
+    fail "WAN observer state contract missing"
+if grep -Eq 'ip dhcp client renew|interface [^" ]+ (down|up)|[Nn][Dd][Mm][Cc]' "$WAN_OBSERVER"; then
+    fail "read-only WAN observer contains mutation command"
+fi
+if grep -Eq 'Wireguard[0-9]|nwg[0-9]|eth3|192\.168\.|show/interface\?name=ISP' "$WAN_OBSERVER"; then
+    fail "WAN observer contains installation-specific network hardcode"
+fi
 
 for LOG_NAME in wan recovery cron routing updater tunnel policy console
 do
