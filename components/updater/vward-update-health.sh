@@ -55,7 +55,7 @@ if [ -z "$VU_ROOT_PREFIX" ]; then
 
         console_ping=$(/opt/bin/curl --fail --silent --show-error \
             --connect-timeout 2 --max-time 5 \
-            'http://127.0.0.1:8088/cgi-bin/api.cgi?action=ping' 2>/dev/null || true)
+            'http://192.168.1.1:8088/cgi-bin/api.cgi?action=ping' 2>/dev/null || true)
         printf '%s\n' "$console_ping" | /opt/bin/jq -e \
             '.ok == true and .service == "vward-console"' >/dev/null 2>&1 ||
             vu_die "$VU_HEALTH_ERROR" "VWARD Console API health check failed"

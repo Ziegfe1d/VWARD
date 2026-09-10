@@ -1,12 +1,12 @@
 {
   "signed": {
     "schema": 1,
-    "update_id": "vward-0.1.4-dev-console",
-    "sequence": 2026090904,
+    "update_id": "vward-0.1.4-dev-console-bind-fix",
+    "sequence": 2026090905,
     "version": "0.1.4-dev",
     "channel": "dev",
     "priority": "ROUTINE",
-    "published_at": "2026-09-10T01:10:00Z",
+    "published_at": "2026-09-10T01:15:00Z",
     "min_updater_version": "1.2.0",
     "package": {
       "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-0.1.4-dev.tar.gz",
@@ -31,5 +31,5 @@
       "key_id": "vward-prod-2026-01"
     }
   },
-  "signature": "EPNO7JuXZR5toRlPPie7WeaflM0eebh9AkKYPhc5WCln/KzOJaYHL76Vhoz2eBiT0Cg52tqeoTM2Y7Ij3bsoDg=="
+  "signature": "EkByp6GvuVEJYPRdz8xD4z3AjCbmPCUpz5gY6R/IULZWcOSLSEHE4YMEPGeGxQ8xqxV5CMFDzUAefXrBkvkCDg=="
 }
