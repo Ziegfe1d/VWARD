@@ -8,8 +8,10 @@
 - Linux-интерфейс сопоставляется по фактическому адресу; имя `nwgN` не конструируется.
 - Для роли Tunnel Guard введены состояния `READY`, `NOT_FOUND`, `REQUIRES_SELECTION` и `STALE_MAPPING`.
 - При нескольких туннелях VWARD не выбирает случайный интерфейс; допускается явный `tunnel_guard_rci_id`.
-- Добавлены repository tests для 0/1/N туннелей, произвольных RCI ID, stale mapping и Entware `jq` без ONIGURUMA.
-- Discovery provider пока read-only: high-risk fail-open, Policy Sync и Route Engine mutations этим изменением не переключаются.
+- `wg-health-watch.sh` переведён на read-only role selection через VWARD Discovery: RCI и Linux ID берутся из обнаруженного объекта, а не из жёстких имён.
+- При неоднозначном или устаревшем mapping Tunnel Guard health остаётся `UNKNOWN` и не выполняет пробных RCI/network-запросов к угаданным интерфейсам.
+- Добавлены repository tests для 0/1/N туннелей, произвольных RCI ID, stale mapping, discovery-driven health и Entware `jq` без ONIGURUMA.
+- High-risk fail-open mutations, WAN selection, Policy Sync и Route Engine этим этапом пока не переключаются.
 
 ## 0.1.7-dev: критический переходный hotfix VWARD Console
 
