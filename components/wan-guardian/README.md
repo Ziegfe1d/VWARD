@@ -1,6 +1,6 @@
 # VWARD WAN Guard
 
-VWARD WAN Guard разделён на независимые слои обнаружения, наблюдения, capability, планирования и выполнения recovery.
+VWARD WAN Guard разделён на независимые слои обнаружения, наблюдения, capability, планирования, валидации действия и execution gate.
 
 `VWARD Discovery` определяет фактическую роль `wan-guard`, RCI ID, Linux-интерфейс и `via` для логических uplink. Компоненты WAN Guard не должны угадывать `ISP`, `ethN` или другие installation-specific имена.
 
@@ -16,10 +16,14 @@ Planner различает логический и физический uplink. 
 
 Actuator не принимает shell-команду, не использует `eval`, не содержит `ISP`, `eth3`, готового `ip dhcp client renew` или подготовленных `ndmc` command strings. После успешной проверки он возвращает только `RESULT=READY`, тип будущей операции (`RCI_SESSION_RECONNECT`, `RCI_INTERFACE_RECONNECT` или `RCI_DHCP_RENEW`) и `EXECUTED=NO`.
 
+`wan-recovery-controller.sh` - единственный новый Execution Gate. Он также работает только в `dryrun`, создаёт собственный transient lock, запускает Planner, пропускает к Actuator только `DECISION=PLAN`, проверяет typed action/target handoff и требует от обоих нижележащих слоёв `EXECUTED=NO`. `HOLD`, `DEFER` и `BLOCKED` не вызывают Actuator. Неизвестный action, другой target, неправильный execution kind или попытка нижнего слоя сообщить об исполнении приводят к `BLOCKED`.
+
+Controller сам не содержит `ndmc`, `eval`, DHCP-команд или installation-specific target. Он зарегистрирован как runtime-target WAN Guard и учитывается Update Engine при health/quiescing, но намеренно не включён в cron до отдельной приёмки реальных mutation.
+
 Для логического reconnect обязательно наличие валидных `via_rci_id` и `via_linux_if`. Для физического reconnect/DHCP наличие logical `via` блокирует действие. Это не позволяет применить физическую recovery-операцию к PPPoE/другому логическому uplink или наоборот.
 
-`wan-guardian.sh` пока остаётся legacy recovery path рабочего роутера. Его существующие cooldown/rate-limit и текущая модель `ISP`/`eth3` этим этапом не меняются. Новый Capability/Planner/Actuator не подключены к его mutating path и не запускаются из cron.
+`wan-guardian.sh` пока остаётся legacy recovery path рабочего роутера. Его существующие cooldown/rate-limit и текущая модель `ISP`/`eth3` этим этапом не меняются. Новый Capability/Planner/Actuator/Controller не подключены к его mutating path.
 
-Repository tests отдельно проверяют Capability Provider, Planner, Actuator и полный Planner -> Actuator pipeline. Покрыты TOCTOU-сценарии смены WAN role и смены DHCP capability после планирования. В обоих случаях Actuator обязан вернуть `BLOCKED` и ничего не выполнять.
+Repository tests отдельно проверяют Capability Provider, Planner, Actuator, Planner -> Actuator pipeline и Controller. Покрыты TOCTOU-сценарии смены WAN role и смены DHCP capability после планирования, а также блокировка обхода Planner и конкурентного запуска Controller. Во всех новых слоях фактическое действие остаётся `EXECUTED=NO`.
 
-Следующий этап - спроектировать отдельный execution gate с собственным lock, cooldown/rate-limit, повторным pre-check, post-check и безопасным recovery/rollback поведением. Реальные mutation разрешать только после отдельного Beta acceptance и проверки exact RCI operations на целевом Keenetic.
+Следующий этап - определить и отдельно принять exact RCI mutation для `SESSION_RECONNECT`, `INTERFACE_RECONNECT` и `DHCP_RENEW`, добавить cooldown/rate-limit, post-check и recovery state. Реальные mutation разрешать только в одном Actuator через Controller после отдельного Beta acceptance и проверки на целевом Keenetic.
