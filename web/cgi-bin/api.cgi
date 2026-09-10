@@ -222,15 +222,39 @@ INET="$(
     'http://127.0.0.1:79/rci/show/internet/status'
 )"
 
-WG0="$(
+IFACES="$(
     fetch_json \
-    'http://127.0.0.1:79/rci/show/interface?name=Wireguard0'
+    'http://127.0.0.1:79/rci/show/interface'
 )"
 
-WG1="$(
-    fetch_json \
-    'http://127.0.0.1:79/rci/show/interface?name=Wireguard1'
+WG_NAMES="$(
+    printf '%s\n' "$IFACES" |
+    "$JQ" -r 'keys[]' 2>/dev/null |
+    grep -E '^Wireguard[0-9][0-9]*$'
 )"
+
+WG_INTERFACES="$(
+    printf '%s\n' "$WG_NAMES" |
+    while IFS= read -r WG_NAME
+    do
+        [ -n "$WG_NAME" ] || continue
+
+        printf '%s\n' "$IFACES" |
+        "$JQ" -c --arg n "$WG_NAME" '
+            .[$n] |
+            {
+                name:$n,
+                description:(.description // ""),
+                link:(.link // ""),
+                connected:(.connected // ""),
+                state:(.state // "")
+            }
+        ' 2>/dev/null
+    done |
+    "$JQ" -s -c '.' 2>/dev/null
+)"
+
+[ -n "$WG_INTERFACES" ] || WG_INTERFACES='[]'
 
 GOUT=/tmp/wan-guardian.cron.out
 
@@ -358,8 +382,7 @@ header_json
   --argjson ver "$VER" \
   --argjson isp "$ISP" \
   --argjson inet "$INET" \
-  --argjson wg0 "$WG0" \
-  --argjson wg1 "$WG1" \
+  --argjson wg_interfaces "$WG_INTERFACES" \
   --arg gv "$GVERSION" \
   --arg gm "$GMODE" \
   --arg gc "$GCLASS" \
@@ -494,17 +517,8 @@ header_json
   },
 
   wg:{
-    wg0:{
-      link:($wg0.link // ""),
-      connected:($wg0.connected // ""),
-      state:($wg0.state // "")
-    },
-
-    wg1:{
-      link:($wg1.link // ""),
-      connected:($wg1.connected // ""),
-      state:($wg1.state // "")
-    },
+    interfaces:$wg_interfaces,
+    total:($wg_interfaces|length),
     down_streak:($down_streak|tonumber? // 0),
     failopen_active:($failopen_active=="1")
   },
