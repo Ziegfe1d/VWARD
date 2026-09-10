@@ -4,12 +4,14 @@
 автоматического восстановления, диагностики и безопасных обновлений на роутерах
 Keenetic с Entware.
 
-Текущая версия: **0.1.7-dev**. Это версия для разработки, а не стабильный релиз.
+Текущая Beta-линия: **0.2.0-beta.1**. Это тестовая ветка глубокой универсализации
+VWARD. Стабильная/переходная линия 0.1.x развивается отдельно в `main`.
 
 VWARD работает на самом роутере и объединяет несколько согласованных компонентов.
 Часть компонентов наблюдает за сетью, часть может менять маршрутизацию, WireGuard или
-WAN. Перенос на другой роутер требует проверки локальных имён интерфейсов, адресов и
-политик - копировать файлы в `/opt` вслепую нельзя.
+WAN. В Beta начат переход к модели Discovery First: компоненты должны определять
+фактические интерфейсы и роли во время выполнения, а не зависеть от имён конкретной
+домашней установки.
 
 ## Компоненты
 
@@ -22,7 +24,7 @@ WAN. Перенос на другой роутер требует проверк
 | VWARD Tunnel Guard | Контроль WireGuard и fail-open защита |
 | VWARD WAN Guard | Диагностика и ступенчатое восстановление WAN |
 | VWARD Policy Sync | Сверка доменных и сетевых политик VPN |
-| VWARD Runtime | Cron, init-скрипты и фоновые процессы |
+| VWARD Runtime | Cron, discovery, init-скрипты и фоновые процессы |
 | VWARD Console | Локальная веб-панель, журналы и безопасные настройки |
 | VWARD Update Engine | Подписанные компонентные обновления и rollback |
 
@@ -31,6 +33,14 @@ WAN. Перенос на другой роутер требует проверк
 Старые имена каталогов и скриптов пока сохранены для совместимости; это не отдельные
 продукты. План унификации: [`docs/NAMING_MIGRATION.md`](docs/NAMING_MIGRATION.md).
 
+## Discovery First
+
+В Beta-линии вводится общий read-only слой `VWARD Discovery`, который входит в
+`VWARD Runtime`. Первый этап обнаруживает WireGuard по фактическому типу RCI, а не по
+имени или номеру интерфейса, и не выбирает случайный туннель при неоднозначности.
+
+Архитектура и fail-safe правила: [`docs/DISCOVERY.md`](docs/DISCOVERY.md).
+
 ## Поддерживаемая среда
 
 - KeeneticOS с `ndmc` и локальным RCI;
@@ -38,8 +48,8 @@ WAN. Перенос на другой роутер требует проверк
 - POSIX `sh`/BusyBox и [зависимости VWARD](docs/DEPENDENCIES.md);
 - локальный доступ к VWARD Console через LAN.
 
-Production-профиль проверен на текущем Keenetic/Entware-устройстве автора.
-Автоматическая переносимость на любые модели Keenetic пока не заявлена.
+Production-профиль 0.1.x проверен на текущем Keenetic/Entware-устройстве автора.
+Beta 0.2.x пока не заявляется как production-ready.
 
 ## Установка
 
@@ -51,23 +61,32 @@ Production-профиль проверен на текущем Keenetic/Entware-
 6. Только после этого разрешайте автоматическое применение обновлений.
 
 Полный путь, команды проверки, recovery и удаление: [`docs/INSTALL.md`](docs/INSTALL.md).
-Карта source → runtime: [`docs/INSTALLATION_MAP.md`](docs/INSTALLATION_MAP.md).
+Карта source -> runtime: [`docs/INSTALLATION_MAP.md`](docs/INSTALLATION_MAP.md).
 
 ## Параметры конкретного роутера
 
-В текущем профиле ещё встречаются `192.168.1.1`, `192.168.1.0/24`, `eth3`, `ISP`,
-`nwg1`, `Wireguard0`, `Wireguard1` и `domain-list22`. Это значения одной рабочей
-установки, не универсальные defaults. Перед установкой сопоставьте их со своим
-устройством по [`docs/INSTALLATION_MAP.md`](docs/INSTALLATION_MAP.md).
+В legacy runtime-коде 0.1.x ещё встречаются значения конкретной установки, включая
+имена WAN/VPN-интерфейсов, локальные подсети и ID policy groups. В 0.2.x они должны
+постепенно заменяться discovery/role mapping без массового небезопасного search/replace.
+
+Перенос на другую установку пока требует проверки по
+[`docs/INSTALLATION_MAP.md`](docs/INSTALLATION_MAP.md).
 
 ## Обновления
 
 VWARD Update Engine получает подписанный Ed25519 manifest и устанавливает только
 разрешённые цели из компонентного пакета. Используются staging, backup, health-check,
-атомарная активация слота и rollback. Механизм прошёл live-router
-apply/rollback/service-resume acceptance на целевом устройстве.
+атомарная активация слота и rollback.
 
-Не клонируйте Git-репозиторий прямо в `/opt` и не заменяйте им локальную конфигурацию.
+Целевая модель каналов:
+- `main` - Stable;
+- `beta` - Beta;
+- `CRITICAL` - приоритет доставки, а не отдельный канал.
+
+Production private signing key не хранится в репозитории. Пока ключ недоступен,
+новые Beta-пакеты можно собирать и тестировать, но нельзя публиковать как доверенные
+автоматические обновления.
+
 См. [`docs/UPDATER_ARCHITECTURE.md`](docs/UPDATER_ARCHITECTURE.md),
 [`docs/UPDATE_POLICY.md`](docs/UPDATE_POLICY.md) и
 [`docs/UPDATE_RECOVERY.md`](docs/UPDATE_RECOVERY.md).
@@ -87,14 +106,15 @@ apply/rollback/service-resume acceptance на целевом устройств�
 - `components/` - исходники компонентов;
 - `config/` - схемы, примеры конфигурации и управляемый cron;
 - `web/` - VWARD Console, CGI API и lighttpd;
-- `updates/` - опубликованный dev-feed и подписанные пакеты;
-- `tests/` - симуляции VWARD Update Engine;
+- `updates/` - опубликованные подписанные feeds и пакеты;
+- `tests/` - repository и Update Engine simulations;
 - `docs/` - установка, архитектура, эксплуатация и recovery.
 
 ## Документация
 
 - [Установка, проверка, восстановление и удаление](docs/INSTALL.md)
 - [Архитектура](docs/ARCHITECTURE.md)
+- [Discovery First и role mapping](docs/DISCOVERY.md)
 - [Модель компонентов](docs/COMPONENT_MODEL.md)
 - [Карта установки](docs/INSTALLATION_MAP.md)
 - [Зависимости](docs/DEPENDENCIES.md)
