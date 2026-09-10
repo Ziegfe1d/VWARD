@@ -1,30 +1,104 @@
-name: Build VWARD transition hotfix candidate
+name: Publish VWARD transition hotfix
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
     paths:
-      - 'web/cgi-bin/api.cgi'
-      - 'web/index.html'
       - '.github/workflows/build-transition-hotfix.yml'
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: vward-production-publish
+  cancel-in-progress: false
 
 jobs:
-  build-candidate:
+  publish-transition-hotfix:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    env:
+      VWARD_SIGNING_KEY_PEM: ${{ secrets.VWARD_PROD_ED25519_PRIVATE_KEY_PEM }}
+      VWARD_SIGNING_KEY_LEGACY: ${{ secrets.VWARD_PROD_ED25519_PRIVATE_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Build unsigned 0.1.7-dev candidate
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq openssl dash
+
+      - name: Preflight release state
         shell: bash
         run: |
           set -euo pipefail
 
-          VERSION='0.1.7-dev'
+          VERSION="$(sed -n '1p' VERSION)"
+          REGISTRY_VERSION="$(jq -r '.platform_version' config/components/component-registry.json)"
+          CURRENT_SEQUENCE="$(jq -r '.signed.sequence' updates/dev/update-manifest.json)"
+          CURRENT_VERSION="$(jq -r '.signed.version' updates/dev/update-manifest.json)"
+          CURRENT_UPDATE_ID="$(jq -r '.signed.update_id' updates/dev/update-manifest.json)"
+
+          test "$VERSION" = '0.1.7-dev'
+          test "$REGISTRY_VERSION" = "$VERSION"
+
+          if [ "$CURRENT_SEQUENCE" = '2026091002' ]; then
+            test "$CURRENT_VERSION" = '0.1.7-dev'
+            test "$CURRENT_UPDATE_ID" = 'vward-0.1.7-dev-wireguard-discovery'
+            echo "ALREADY_PUBLISHED=1" >> "$GITHUB_ENV"
+            echo "Release 0.1.7-dev sequence 2026091002 is already published."
+            exit 0
+          fi
+
+          test "$CURRENT_SEQUENCE" = '2026091001'
+          test "$CURRENT_VERSION" = '0.1.6-dev'
+          test "$CURRENT_UPDATE_ID" = 'vward-0.1.6-dev-console-docs'
+
+          echo "ALREADY_PUBLISHED=0" >> "$GITHUB_ENV"
+
+      - name: Refresh repository SHA256 manifest in workspace
+        if: env.ALREADY_PUBLISHED != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/SHA256SUMS"
+          : > "$tmp"
+          while IFS= read -r f; do
+            [ "$f" = "SHA256SUMS" ] && continue
+            sha256sum "$f" >> "$tmp"
+          done < <(git ls-files | LC_ALL=C sort)
+          mv "$tmp" SHA256SUMS
+
+      - name: Repository and updater tests
+        if: env.ALREADY_PUBLISHED != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tests/repository/run-consistency-checks.sh
+
+          for f in components/updater/*.sh tests/updater/*.sh; do
+            sh -n "$f"
+            dash -n "$f"
+          done
+
+          tests/updater/run-simulations.sh
+          tests/updater/run-fix-pass-1-simulations.sh
+          tests/updater/run-fix-pass-2-simulations.sh
+          tests/updater/run-fix-pass-3-simulations.sh
+
+          sha256sum -c SHA256SUMS
+
+      - name: Build reproducible unsigned candidate
+        if: env.ALREADY_PUBLISHED != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="$(sed -n '1p' VERSION)"
           UPDATE_ID='vward-0.1.7-dev-wireguard-discovery'
           SEQUENCE='2026091002'
           OUT="$RUNNER_TEMP/vward-candidate"
@@ -34,13 +108,13 @@ jobs:
           rm -rf "$OUT"
           mkdir -p "$PKGDIR/files/web/cgi-bin"
 
-          printf '%s\n' "$VERSION" > "$PKGDIR/files/VERSION"
+          cp VERSION "$PKGDIR/files/VERSION"
           cp web/index.html "$PKGDIR/files/web/index.html"
           cp web/cgi-bin/api.cgi "$PKGDIR/files/web/cgi-bin/api.cgi"
 
-          version_sha=$(sha256sum "$PKGDIR/files/VERSION" | awk '{print $1}')
-          index_sha=$(sha256sum "$PKGDIR/files/web/index.html" | awk '{print $1}')
-          api_sha=$(sha256sum "$PKGDIR/files/web/cgi-bin/api.cgi" | awk '{print $1}')
+          version_sha="$(sha256sum "$PKGDIR/files/VERSION" | awk '{print $1}')"
+          index_sha="$(sha256sum "$PKGDIR/files/web/index.html" | awk '{print $1}')"
+          api_sha="$(sha256sum "$PKGDIR/files/web/cgi-bin/api.cgi" | awk '{print $1}')"
 
           jq -n \
             --arg version_sha "$version_sha" \
@@ -81,12 +155,13 @@ jobs:
 
           test "$(jq -r '.schema' "$PKGDIR/package-manifest.json")" = 1
           test "$(jq '.files|length' "$PKGDIR/package-manifest.json")" = 3
-          grep -q 'wg.interfaces' web/index.html || grep -q 'g.interfaces' web/index.html
+
+          grep -q 'g.interfaces' web/index.html
           ! grep -Eq 'g\.wg0|g\.wg1|WireGuard0' web/index.html
           ! grep -Eq 'name=Wireguard0|name=Wireguard1|WG0=|WG1=' web/cgi-bin/api.cgi
           sh -n web/cgi-bin/api.cgi
 
-          unpacked_size=$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{sum+=$1} END{print sum+0}')
+          unpacked_size="$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{sum+=$1} END{print sum+0}')"
 
           tar \
             --sort=name \
@@ -97,9 +172,9 @@ jobs:
             -czf "$ARTIFACT" \
             -C "$PKGDIR" .
 
-          package_sha=$(sha256sum "$ARTIFACT" | awk '{print $1}')
-          package_size=$(wc -c < "$ARTIFACT" | tr -d ' ')
-          declared_size=$(tar -tvzf "$ARTIFACT" | awk '$1 ~ /^-/ {sum+=$3} END{print sum+0}')
+          package_sha="$(sha256sum "$ARTIFACT" | awk '{print $1}')"
+          package_size="$(wc -c < "$ARTIFACT" | tr -d ' ')"
+          declared_size="$(tar -tvzf "$ARTIFACT" | awk '$1 ~ /^-/ {sum+=$3} END{print sum+0}')"
           test "$declared_size" = "$unpacked_size"
 
           jq -n \
@@ -134,6 +209,12 @@ jobs:
 
           cp "$PKGDIR/package-manifest.json" "$OUT/package-manifest.json"
 
+          echo "VWARD_OUT=$OUT" >> "$GITHUB_ENV"
+          echo "VWARD_ARTIFACT=$ARTIFACT" >> "$GITHUB_ENV"
+          echo "VWARD_PACKAGE_SHA=$package_sha" >> "$GITHUB_ENV"
+          echo "VWARD_PACKAGE_SIZE=$package_size" >> "$GITHUB_ENV"
+          echo "VWARD_UNPACKED_SIZE=$unpacked_size" >> "$GITHUB_ENV"
+
           echo "CANDIDATE_VERSION=$VERSION"
           echo "CANDIDATE_UPDATE_ID=$UPDATE_ID"
           echo "CANDIDATE_SEQUENCE=$SEQUENCE"
@@ -142,15 +223,256 @@ jobs:
           echo "PACKAGE_SHA256=$package_sha"
           echo "PACKAGE_SIZE=$package_size"
           echo "UNPACKED_SIZE=$unpacked_size"
+
+      - name: Detect production signing key
+        if: env.ALREADY_PUBLISHED != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "${VWARD_SIGNING_KEY_PEM:-}" ]; then
+            printf '%s\n' "$VWARD_SIGNING_KEY_PEM" > "$RUNNER_TEMP/vward-prod-key.pem"
+            echo "SIGNING_AVAILABLE=1" >> "$GITHUB_ENV"
+          elif [ -n "${VWARD_SIGNING_KEY_LEGACY:-}" ]; then
+            printf '%s\n' "$VWARD_SIGNING_KEY_LEGACY" > "$RUNNER_TEMP/vward-prod-key.pem"
+            echo "SIGNING_AVAILABLE=1" >> "$GITHUB_ENV"
+          else
+            echo "SIGNING_AVAILABLE=0" >> "$GITHUB_ENV"
+          fi
+
+      - name: Verify production key identity
+        if: env.ALREADY_PUBLISHED != '1' && env.SIGNING_AVAILABLE == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          KEY="$RUNNER_TEMP/vward-prod-key.pem"
+          chmod 600 "$KEY"
+
+          openssl pkey -in "$KEY" -check -noout >/dev/null
+
+          private_pub="$(
+            openssl pkey -in "$KEY" -pubout -outform DER |
+            sha256sum |
+            awk '{print $1}'
+          )"
+          trusted_pub="$(
+            openssl pkey -pubin -in config/updater/update-public.pem -outform DER |
+            sha256sum |
+            awk '{print $1}'
+          )"
+
+          test "$private_pub" = "$trusted_pub"
+          echo "PRODUCTION_KEY_MATCH=YES"
+
+      - name: Sign and verify update manifest
+        if: env.ALREADY_PUBLISHED != '1' && env.SIGNING_AVAILABLE == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="$(sed -n '1p' VERSION)"
+          OUT="$VWARD_OUT"
+          KEY="$RUNNER_TEMP/vward-prod-key.pem"
+          SIGNED="$OUT/signed.json"
+          CANONICAL="$OUT/signed.canonical.json"
+          SIG="$OUT/signature.bin"
+          MANIFEST="$OUT/update-manifest.json"
+          PUBLISHED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+          jq -n \
+            --arg update_id 'vward-0.1.7-dev-wireguard-discovery' \
+            --arg version "$VERSION" \
+            --arg channel 'dev' \
+            --arg priority 'CRITICAL' \
+            --arg published_at "$PUBLISHED_AT" \
+            --arg url "https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-$VERSION.tar.gz" \
+            --arg sha256 "$VWARD_PACKAGE_SHA" \
+            --argjson size "$VWARD_PACKAGE_SIZE" \
+            --argjson unpacked_size "$VWARD_UNPACKED_SIZE" \
+            '{
+              schema:1,
+              update_id:$update_id,
+              sequence:2026091002,
+              version:$version,
+              channel:$channel,
+              priority:$priority,
+              published_at:$published_at,
+              min_updater_version:"1.2.0",
+              package:{
+                url:$url,
+                sha256:$sha256,
+                size:$size,
+                unpacked_size:$unpacked_size
+              },
+              compatibility:{
+                min_vward:"0.1.6-dev",
+                max_vward:"0.1.6-dev"
+              },
+              affected_components:["platform-core","console"],
+              affected_services:[],
+              health_profile:"console",
+              requires_reboot:false,
+              rollback_policy:"automatic",
+              signature:{
+                algorithm:"Ed25519",
+                key_id:"vward-prod-2026-01"
+              }
+            }' > "$SIGNED"
+
+          jq -cS . "$SIGNED" > "$CANONICAL"
+          openssl pkeyutl -sign -inkey "$KEY" -rawin -in "$CANONICAL" -out "$SIG"
+          signature="$(openssl base64 -A -in "$SIG")"
+
+          jq -n \
+            --slurpfile signed "$SIGNED" \
+            --arg signature "$signature" \
+            '{signed:$signed[0],signature:$signature}' > "$MANIFEST"
+
+          jq -cS '.signed' "$MANIFEST" > "$OUT/verify.canonical.json"
+          jq -r '.signature' "$MANIFEST" |
+            openssl base64 -d -A > "$OUT/verify.signature.bin"
+
+          openssl pkeyutl \
+            -verify \
+            -pubin \
+            -inkey config/updater/update-public.pem \
+            -rawin \
+            -in "$OUT/verify.canonical.json" \
+            -sigfile "$OUT/verify.signature.bin"
+
+          test "$(jq -r '.signed.sequence' "$MANIFEST")" = '2026091002'
+          test "$(jq -r '.signed.channel' "$MANIFEST")" = 'dev'
+          test "$(jq -r '.signed.priority' "$MANIFEST")" = 'CRITICAL'
+          test "$(jq -r '.signed.package.sha256' "$MANIFEST")" = "$VWARD_PACKAGE_SHA"
+
+          echo "MANIFEST_SIGNATURE=VERIFIED"
+
+      - name: Dry-run signed package through VWARD Update Engine
+        if: env.ALREADY_PUBLISHED != '1' && env.SIGNING_AVAILABLE == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ROOT="$RUNNER_TEMP/vward-dryrun"
+          CONFIG="$ROOT/opt/etc/vward/update.conf"
+          MANIFEST="$VWARD_OUT/update-manifest.json"
+
+          rm -rf "$ROOT"
+          mkdir -p \
+            "$ROOT/opt/etc/vward" \
+            "$ROOT/opt/share/vward" \
+            "$ROOT/opt/var/lib/vward/updater" \
+            "$ROOT/opt/var/cache/vward/updater" \
+            "$ROOT/opt/var/backups/vward" \
+            "$ROOT/opt/var/run/vward"
+
+          cp config/updater/update-public.pem "$ROOT/opt/etc/vward/update-public.pem"
+          printf '%s\n' '0.1.6-dev' > "$ROOT/opt/share/vward/VERSION"
+
+          cat > "$CONFIG" <<EOF
+          update_enabled=1
+          auto_apply=1
+          auto_critical=1
+          auto_important=1
+          auto_routine=1
+          manifest_url=https://example.invalid/update-manifest.json
+          public_key_file=$ROOT/opt/etc/vward/update-public.pem
+          channel=dev
+          safe_window_start=03:00
+          safe_window_end=05:00
+          minimum_free_kb=0
+          max_manifest_size=262144
+          max_package_size=16777216
+          max_unpacked_size=67108864
+          backup_keep=3
+          barrier_integration_ready=1
+          current_version_file=$ROOT/opt/share/vward/VERSION
+          health_timeout_seconds=30
+          check_interval_seconds=900
+          request_timeout_seconds=120
+          important_max_delay_seconds=7200
+          routine_max_delay_seconds=86400
+          minimum_updater_version=1.2.0
+          EOF
+
+          VWARD_ROOT_PREFIX="$ROOT" \
+          VWARD_UPDATE_CONFIG="$CONFIG" \
+          VWARD_TEST_MANIFEST="$MANIFEST" \
+          VWARD_TEST_PACKAGE="$VWARD_ARTIFACT" \
+            components/updater/vward-update.sh --dry-run
+
+          echo "UPDATER_DRY_RUN=OK"
+
+      - name: Publish signed legacy dev bridge
+        if: env.ALREADY_PUBLISHED != '1' && env.SIGNING_AVAILABLE == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DEST_PACKAGE="updates/dev/packages/vward-0.1.7-dev.tar.gz"
+          DEST_MANIFEST="updates/dev/update-manifest.json"
+
+          cp "$VWARD_ARTIFACT" "$DEST_PACKAGE"
+          cp "$VWARD_OUT/update-manifest.json" "$DEST_MANIFEST"
+
+          git add "$DEST_PACKAGE" "$DEST_MANIFEST"
+
+          tmp="$RUNNER_TEMP/SHA256SUMS.publish"
+          : > "$tmp"
+          while IFS= read -r f; do
+            [ "$f" = "SHA256SUMS" ] && continue
+            sha256sum "$f" >> "$tmp"
+          done < <(git ls-files | LC_ALL=C sort)
+          mv "$tmp" SHA256SUMS
+
+          sha256sum -c SHA256SUMS
+
+          git add SHA256SUMS
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git commit -m 'Publish signed VWARD 0.1.7-dev critical hotfix'
+          git push origin HEAD:main
+
+          echo "PUBLICATION_STATE=SIGNED_PUBLISHED"
+          echo "PUBLISHED_SEQUENCE=2026091002"
+
+      - name: Persist source SHA256 manifest when signing is unavailable
+        if: env.ALREADY_PUBLISHED != '1' && env.SIGNING_AVAILABLE != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! git diff --quiet -- SHA256SUMS; then
+            git add SHA256SUMS
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Refresh SHA256 manifest for 0.1.7-dev source'
+            git push origin HEAD:main
+          fi
+
           echo "PUBLICATION_STATE=SIGNING_REQUIRED"
 
-      - name: Upload unsigned candidate
+      - name: Upload candidate artifact
+        if: env.ALREADY_PUBLISHED != '1'
         uses: actions/upload-artifact@v4
         with:
-          name: vward-0.1.7-dev-unsigned-candidate
+          name: vward-0.1.7-dev-transition-candidate
           path: |
-            ${{ runner.temp }}/vward-candidate/vward-0.1.7-dev.tar.gz
-            ${{ runner.temp }}/vward-candidate/package-manifest.json
-            ${{ runner.temp }}/vward-candidate/candidate-metadata.json
-          if-no-files-found: error
+            ${{ env.VWARD_OUT }}/vward-0.1.7-dev.tar.gz
+            ${{ env.VWARD_OUT }}/package-manifest.json
+            ${{ env.VWARD_OUT }}/candidate-metadata.json
+            ${{ env.VWARD_OUT }}/update-manifest.json
+          if-no-files-found: warn
           retention-days: 7
+
+      - name: Stop before publication without production key
+        if: env.ALREADY_PUBLISHED != '1' && env.SIGNING_AVAILABLE != '1'
+        shell: bash
+        run: |
+          echo "::error::Production Ed25519 signing key is not configured in GitHub Secrets."
+          echo "::error::Expected VWARD_PROD_ED25519_PRIVATE_KEY_PEM or VWARD_PROD_ED25519_PRIVATE_KEY."
+          echo "SIGNING_REQUIRED"
+          exit 78
