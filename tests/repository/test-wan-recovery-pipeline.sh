@@ -6,6 +6,7 @@ PLANNER="$ROOT/components/wan-guardian/scripts/wan-recovery-plan.sh"
 ACTUATOR="$ROOT/components/wan-guardian/scripts/wan-recovery-actuator.sh"
 TMP="${TMPDIR:-/tmp}/vward-wan-pipeline-test.$$"
 DISCOVERY="$TMP/discovery.sh"
+CAPABILITY="$TMP/capability.sh"
 STATE="$TMP/state"
 mkdir -p "$TMP"
 trap 'rm -rf "$TMP"' EXIT INT TERM
@@ -32,6 +33,19 @@ esac
 EOF
 chmod 0755 "$DISCOVERY"
 
+cat > "$CAPABILITY" <<'EOF'
+#!/bin/sh
+case "${VWARD_TEST_CAP_MODE:-dhcp}" in
+    dhcp)
+        printf '%s\n' '{"schema":1,"provider":"wan-capability","role":"wan-guard","state":"READY","interface":{"rci_id":"UplinkAlpha","linux_if":"wan0"},"addressing":{"mode":"dhcp","evidence":"running_config_ip_address_dhcp","dhcp_renew":true},"recovery":{"interface_reconnect":true,"session_reconnect":false}}'
+        ;;
+    static)
+        printf '%s\n' '{"schema":1,"provider":"wan-capability","role":"wan-guard","state":"READY","interface":{"rci_id":"UplinkAlpha","linux_if":"wan0"},"addressing":{"mode":"static","evidence":"running_config_static_ipv4","dhcp_renew":false},"recovery":{"interface_reconnect":true,"session_reconnect":false}}'
+        ;;
+esac
+EOF
+chmod 0755 "$CAPABILITY"
+
 value()
 {
     printf '%s\n' "$1" | awk -F= -v k="$2" '$1==k {print substr($0,index($0,"=")+1); exit}'
@@ -56,17 +70,21 @@ run_planner()
 {
     VWARD_WAN_HEALTH_STATE="$STATE" \
     VWARD_DISCOVERY_BIN="$DISCOVERY" \
+    VWARD_WAN_CAPABILITY_BIN="$CAPABILITY" \
     VWARD_JQ="$(command -v jq)" \
     VWARD_NOW_EPOCH=1000 \
     VWARD_TEST_SCENARIO="$1" \
+    VWARD_TEST_CAP_MODE="${2:-dhcp}" \
     sh "$PLANNER"
 }
 
 run_actuator()
 {
     VWARD_DISCOVERY_BIN="$DISCOVERY" \
+    VWARD_WAN_CAPABILITY_BIN="$CAPABILITY" \
     VWARD_JQ="$(command -v jq)" \
     VWARD_TEST_SCENARIO="$1" \
+    VWARD_TEST_CAP_MODE="${5:-dhcp}" \
     sh "$ACTUATOR" "$2" "$3" "$4"
 }
 
@@ -94,12 +112,28 @@ ACT="$(run_actuator logical "$ACTION" "$RCI_ID" "$LINUX_IF")"
 [ "$(value "$ACT" EXECUTION_KIND)" = RCI_SESSION_RECONNECT ] || fail "logical execution kind mismatch"
 [ "$(value "$ACT" EXECUTED)" = NO ] || fail "logical pipeline executed a mutation"
 
-# TOCTOU guard: the role changes after planning, before actuation.
-ACT="$(run_actuator replacement "$ACTION" "$RCI_ID" "$LINUX_IF")"
+write_state UplinkAlpha wan0 ADDRESS_FAILURE
+PLAN="$(run_planner physical dhcp)"
+[ "$(value "$PLAN" DECISION)" = PLAN ] || fail "DHCP planner did not produce PLAN"
+ACTION="$(value "$PLAN" ACTION)"
+RCI_ID="$(value "$PLAN" TARGET_RCI_ID)"
+LINUX_IF="$(value "$PLAN" TARGET_LINUX_IF)"
+[ "$ACTION" = DHCP_RENEW ] || fail "DHCP planner action mismatch"
+ACT="$(run_actuator physical "$ACTION" "$RCI_ID" "$LINUX_IF" dhcp)"
+[ "$(value "$ACT" RESULT)" = READY ] || fail "DHCP actuator rejected planner output"
+[ "$(value "$ACT" EXECUTION_KIND)" = RCI_DHCP_RENEW ] || fail "DHCP execution kind mismatch"
+[ "$(value "$ACT" EXECUTED)" = NO ] || fail "DHCP pipeline executed a mutation"
+
+# Capability TOCTOU: addressing changed after planning.
+ACT="$(run_actuator physical "$ACTION" "$RCI_ID" "$LINUX_IF" static)"
+[ "$(value "$ACT" RESULT)" = BLOCKED ] || fail "DHCP action must block after capability change"
+[ "$(value "$ACT" REASON)" = addressing_not_dhcp ] || fail "DHCP capability change reason mismatch"
+
+# Role TOCTOU: WAN role changed after planning.
+ACT="$(run_actuator replacement INTERFACE_RECONNECT UplinkAlpha wan0)"
 [ "$(value "$ACT" RESULT)" = BLOCKED ] || fail "changed WAN role must block actuation"
 [ "$(value "$ACT" REASON)" = target_role_mismatch ] || fail "changed WAN role reason mismatch"
 
-# The pipeline contract must stay typed, not shell-command based.
 for forbidden in 'COMMAND=' 'COMMAND_DOWN=' 'COMMAND_UP='; do
     if printf '%s\n%s\n' "$PLAN" "$ACT" | grep -Fq "$forbidden"; then
         fail "pipeline exposed executable command text"
