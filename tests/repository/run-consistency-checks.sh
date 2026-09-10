@@ -54,6 +54,8 @@ grep -Fq '"/opt/bin/vward-discovery.sh"' config/components/component-registry.js
     fail "VWARD Discovery runtime target missing"
 grep -Fq '"/opt/bin/wan-health-watch.sh"' config/components/component-registry.json ||
     fail "WAN observer runtime target missing"
+grep -Fq '"/opt/bin/wan-recovery-plan.sh"' config/components/component-registry.json ||
+    fail "WAN Recovery Planner runtime target missing"
 
 grep -Fq '/opt/bin/wan-health-watch.sh > /tmp/wan-health-watch.cron.out' config/cron/root.crontab ||
     fail "separate WAN observer cron missing"
@@ -61,8 +63,10 @@ grep -Fq '/opt/bin/wan-guardian.sh > /tmp/wan-guardian.cron.out' config/cron/roo
     fail "legacy WAN recovery cron missing"
 WAN_HEALTH_CRON_COUNT=$(grep -Fc '/opt/bin/wan-health-watch.sh > /tmp/wan-health-watch.cron.out' config/cron/root.crontab || true)
 WAN_GUARDIAN_CRON_COUNT=$(grep -Fc '/opt/bin/wan-guardian.sh > /tmp/wan-guardian.cron.out' config/cron/root.crontab || true)
+WAN_PLAN_CRON_COUNT=$(grep -Fc '/opt/bin/wan-recovery-plan.sh' config/cron/root.crontab || true)
 [ "$WAN_HEALTH_CRON_COUNT" -eq 1 ] || fail "WAN observer cron must exist exactly once"
 [ "$WAN_GUARDIAN_CRON_COUNT" -eq 1 ] || fail "legacy WAN recovery cron must exist exactly once"
+[ "$WAN_PLAN_CRON_COUNT" -eq 0 ] || fail "dry-run WAN Recovery Planner must not be scheduled yet"
 grep -F '/opt/bin/wan-health-watch.sh' config/cron/root.crontab | grep -Fq '/opt/bin/wan-guardian.sh' &&
     fail "WAN observer and recovery must not be chained in one cron entry"
 
@@ -124,6 +128,21 @@ if grep -Eq 'ip dhcp client renew|interface [^" ]+ (down|up)|[Nn][Dd][Mm][Cc]' "
 fi
 if grep -Eq 'Wireguard[0-9]|nwg[0-9]|eth3|192\.168\.|show/interface\?name=ISP' "$WAN_OBSERVER"; then
     fail "WAN observer contains installation-specific network hardcode"
+fi
+
+WAN_PLANNER=components/wan-guardian/scripts/wan-recovery-plan.sh
+[ -x "$WAN_PLANNER" ] || fail "WAN Recovery Planner must be executable"
+grep -Fq 'MODE="dryrun"' "$WAN_PLANNER" || fail "WAN Recovery Planner must remain dry-run"
+grep -Fq 'EXECUTED=NO' "$WAN_PLANNER" || fail "WAN Recovery Planner execution guard missing"
+grep -Fq '"$DISCOVERY" wan-guard' "$WAN_PLANNER" || fail "WAN Recovery Planner must revalidate wan-guard role"
+grep -Fq 'observer_role_mismatch' "$WAN_PLANNER" || fail "WAN Recovery Planner RCI revalidation missing"
+grep -Fq 'observer_mapping_mismatch' "$WAN_PLANNER" || fail "WAN Recovery Planner Linux mapping revalidation missing"
+grep -Fq 'addressing_capability_required' "$WAN_PLANNER" || fail "WAN Recovery Planner DHCP capability gate missing"
+if grep -Eq 'ip dhcp client renew|interface [^" ]+ (down|up)|[Nn][Dd][Mm][Cc]' "$WAN_PLANNER"; then
+    fail "WAN Recovery Planner contains mutation command"
+fi
+if grep -Eq 'Wireguard[0-9]|nwg[0-9]|eth3|192\.168\.|show/interface\?name=ISP' "$WAN_PLANNER"; then
+    fail "WAN Recovery Planner contains installation-specific network hardcode"
 fi
 
 for LOG_NAME in wan recovery cron routing updater tunnel policy console
