@@ -29,39 +29,27 @@ grep -Fq 'function svgIcon' web/index.html || fail "local SVG icon system missin
 grep -Fq 'componentNames=' web/index.html || fail "component display mapping missing"
 grep -Fq 'id="settings"' web/index.html || fail "safe settings overview missing"
 grep -Fq 'border-radius:28px' web/index.html || fail "floating mobile toolbar missing"
-grep -Fq 'bottom:max(10px,env(safe-area-inset-bottom))' web/index.html ||
-    fail "mobile toolbar safe-area handling missing"
-grep -Fq "if(id==='logs')loadLog(logName);window.scrollTo(0,0)" web/index.html ||
-    fail "Logs must load before compatibility-safe scroll"
-grep -Fq "wanUp=w.status==='UP'" web/index.html ||
-    fail "Console WAN visual state must use observer status"
-grep -Fq 'wan:[w.internet===true' web/index.html >/dev/null &&
-    fail "Console WAN card must not use global Internet status as health"
-grep -Fq "badge('wanPill',w.internet===true" web/index.html >/dev/null &&
-    fail "Console WAN pill must not use global Internet status as health"
-grep -Fq 'wan:w.internet===true?1:0' web/index.html >/dev/null &&
-    fail "Console WAN history must not use global Internet status as health"
+grep -Fq 'bottom:max(10px,env(safe-area-inset-bottom))' web/index.html || fail "mobile toolbar safe-area handling missing"
+grep -Fq "if(id==='logs')loadLog(logName);window.scrollTo(0,0)" web/index.html || fail "Logs must load before compatibility-safe scroll"
+grep -Fq "wanUp=w.status==='UP'" web/index.html || fail "Console WAN visual state must use observer status"
+grep -Fq 'wan:[w.internet===true' web/index.html >/dev/null && fail "Console WAN card must not use global Internet status as health"
+grep -Fq "badge('wanPill',w.internet===true" web/index.html >/dev/null && fail "Console WAN pill must not use global Internet status as health"
+grep -Fq 'wan:w.internet===true?1:0' web/index.html >/dev/null && fail "Console WAN history must not use global Internet status as health"
 
-for ID in platform-core route-engine route-reconciler route-tools tunnel-guard \
-    wan-guard policy-sync runtime console update-engine
+for ID in platform-core route-engine route-reconciler route-tools tunnel-guard wan-guard policy-sync runtime console update-engine
 do
-    grep -Fq "\"id\": \"$ID\"" config/components/component-registry.json ||
-        fail "registry component missing: $ID"
+    grep -Fq "\"id\": \"$ID\"" config/components/component-registry.json || fail "registry component missing: $ID"
     grep -Fq "'$ID':" web/index.html || fail "Console component mapping missing: $ID"
 done
 
-grep -Fq '"/opt/bin/vward-discovery.sh"' config/components/component-registry.json ||
-    fail "VWARD Discovery runtime target missing"
+grep -Fq '"/opt/bin/vward-discovery.sh"' config/components/component-registry.json || fail "VWARD Discovery runtime target missing"
 for TARGET in /opt/bin/wan-health-watch.sh /opt/bin/wan-capability.sh /opt/bin/wan-recovery-plan.sh /opt/bin/wan-recovery-actuator.sh
 do
-    grep -Fq "\"$TARGET\"" config/components/component-registry.json ||
-        fail "WAN Guard runtime target missing: $TARGET"
+    grep -Fq "\"$TARGET\"" config/components/component-registry.json || fail "WAN Guard runtime target missing: $TARGET"
 done
 
-grep -Fq '/opt/bin/wan-health-watch.sh > /tmp/wan-health-watch.cron.out' config/cron/root.crontab ||
-    fail "separate WAN observer cron missing"
-grep -Fq '/opt/bin/wan-guardian.sh > /tmp/wan-guardian.cron.out' config/cron/root.crontab ||
-    fail "legacy WAN recovery cron missing"
+grep -Fq '/opt/bin/wan-health-watch.sh > /tmp/wan-health-watch.cron.out' config/cron/root.crontab || fail "separate WAN observer cron missing"
+grep -Fq '/opt/bin/wan-guardian.sh > /tmp/wan-guardian.cron.out' config/cron/root.crontab || fail "legacy WAN recovery cron missing"
 WAN_HEALTH_CRON_COUNT=$(grep -Fc '/opt/bin/wan-health-watch.sh > /tmp/wan-health-watch.cron.out' config/cron/root.crontab || true)
 WAN_GUARDIAN_CRON_COUNT=$(grep -Fc '/opt/bin/wan-guardian.sh > /tmp/wan-guardian.cron.out' config/cron/root.crontab || true)
 WAN_PLAN_CRON_COUNT=$(grep -Fc '/opt/bin/wan-recovery-plan.sh' config/cron/root.crontab || true)
@@ -70,15 +58,11 @@ WAN_ACTUATOR_CRON_COUNT=$(grep -Fc '/opt/bin/wan-recovery-actuator.sh' config/cr
 [ "$WAN_GUARDIAN_CRON_COUNT" -eq 1 ] || fail "legacy WAN recovery cron must exist exactly once"
 [ "$WAN_PLAN_CRON_COUNT" -eq 0 ] || fail "dry-run WAN Recovery Planner must not be scheduled yet"
 [ "$WAN_ACTUATOR_CRON_COUNT" -eq 0 ] || fail "dry-run WAN actuator must not be scheduled yet"
-grep -F '/opt/bin/wan-health-watch.sh' config/cron/root.crontab | grep -Fq '/opt/bin/wan-guardian.sh' &&
-    fail "WAN observer and recovery must not be chained in one cron entry"
+grep -F '/opt/bin/wan-health-watch.sh' config/cron/root.crontab | grep -Fq '/opt/bin/wan-guardian.sh' && fail "WAN observer and recovery must not be chained in one cron entry"
 
-grep -Fq 'DISCOVERY="${VWARD_DISCOVERY:-/opt/bin/vward-discovery.sh}"' web/cgi-bin/api.cgi ||
-    fail "Console API does not declare the shared Discovery provider"
-grep -Fq '"$DISCOVERY" snapshot' web/cgi-bin/api.cgi ||
-    fail "Console API does not consume the unified Discovery snapshot"
-grep -Fq 'name:(.rci_id // "")' web/cgi-bin/api.cgi ||
-    fail "Console API compatibility alias must come from discovered rci_id"
+grep -Fq 'DISCOVERY="${VWARD_DISCOVERY:-/opt/bin/vward-discovery.sh}"' web/cgi-bin/api.cgi || fail "Console API does not declare the shared Discovery provider"
+grep -Fq '"$DISCOVERY" snapshot' web/cgi-bin/api.cgi || fail "Console API does not consume the unified Discovery snapshot"
+grep -Fq 'name:(.rci_id // "")' web/cgi-bin/api.cgi || fail "Console API compatibility alias must come from discovered rci_id"
 grep -Fq 'wg_discovery_state' web/cgi-bin/api.cgi || fail "Console API does not expose WireGuard Discovery state"
 grep -Fq 'wan_discovery_state' web/cgi-bin/api.cgi || fail "Console API does not expose WAN Discovery state"
 grep -Fq 'WAN_HEALTH_STATE=/opt/var/lib/wan-health/state' web/cgi-bin/api.cgi || fail "Console API does not consume WAN observer state"
@@ -135,7 +119,11 @@ grep -Fq 'EXECUTED=NO' "$WAN_ACTUATOR" || fail "WAN Recovery Actuator execution 
 grep -Fq 'SESSION_RECONNECT|INTERFACE_RECONNECT|DHCP_RENEW' "$WAN_ACTUATOR" || fail "WAN Recovery Actuator typed action allowlist missing"
 grep -Fq 'RCI_DHCP_RENEW' "$WAN_ACTUATOR" || fail "WAN Recovery Actuator DHCP execution kind missing"
 grep -Fq 'VWARD_WAN_CAPABILITY_BIN' "$WAN_ACTUATOR" || fail "WAN Recovery Actuator capability revalidation missing"
-if grep -Eq 'ip dhcp client renew|(^|[^A-Za-z])ndmc([^A-Za-z]|$)|(^|[[:space:]])eval([[:space:]]|$)|IFACE=["'"']?ISP' "$WAN_ACTUATOR"; then fail "dry-run WAN actuator contains executable mutation or legacy hardcode"; fi
+for FORBIDDEN in 'ip dhcp client renew' 'IFACE="ISP"' 'IFACE=ISP' 'show/interface?name=ISP' 'eth3' 'COMMAND=' 'COMMAND_DOWN=' 'COMMAND_UP='
+do
+    grep -Fq "$FORBIDDEN" "$WAN_ACTUATOR" && fail "dry-run WAN actuator contains forbidden token: $FORBIDDEN"
+done
+if grep -Eq '(^|[^A-Za-z])ndmc([^A-Za-z]|$)|(^|[[:space:]])eval([[:space:]]|$)' "$WAN_ACTUATOR"; then fail "dry-run WAN actuator contains executable mutation"; fi
 
 for LOG_NAME in wan recovery cron routing updater tunnel policy console
 do
