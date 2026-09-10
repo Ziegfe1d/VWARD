@@ -19,12 +19,16 @@
 - WAN observer привязывает gateway/external probes к фактическому `PATH_IF`. Глобальный Keenetic Internet status больше не может сам по себе классифицировать выбранный WAN как `HEALTHY`, поэтому другой uplink не маскирует его отказ.
 - При ambiguous/stale/invalid role, unresolved Linux mapping или physical carrier down WAN observer работает fail-safe и не запускает guessed/unbound probes.
 - WAN observer пишет атомарный state в `/opt/var/lib/wan-health/state`, переходы в `/opt/var/log/wan-health.log` и запускается отдельным cron entry независимо от legacy recovery.
+- Добавлен type-aware `wan-recovery-plan.sh` в обязательном режиме `dryrun`. Он повторно проверяет текущую роль `wan-guard`, свежесть observer state и совпадение RCI/Linux mapping перед выдачей любого плана.
+- Recovery Planner использует решения `HOLD`, `DEFER`, `BLOCKED`, `PLAN`, различает `SESSION_RECONNECT` для логических uplink и `INTERFACE_RECONNECT` для подтверждённых физических path failures и всегда возвращает `EXECUTED=NO`.
+- `PHY_DOWN`, DNS-only failure, ambiguity/stale/mismatch и физический `ADDRESS_FAILURE` без доказанной DHCP-capability не дают Planner права на автоматическую mutation. Тип Ethernet не считается доказательством DHCP.
+- Recovery Planner зарегистрирован как runtime-target `VWARD WAN Guard`, покрыт behavioral tests и намеренно не включён в cron до отдельной приёмки динамического actuator.
 - VWARD Console переведена на один Discovery snapshot на status request. Собственный full interface inventory, фильтрация `WireguardN` и прямой `show/interface?name=ISP` из CGI удалены.
 - Для совместимости frontend `wg.interfaces[].name` остаётся alias фактического `rci_id`; API публикует `wg.discovery` и `wan.discovery`, а также реальные WAN `rci_id`, `linux_if`, `via_*` и тип uplink.
 - `wan.status` и `wan.class` Console получает из `wan-health-watch`. State старше 180 секунд, другой observer RCI/Linux mapping или текущий не-READY WAN role отвергаются как `UNKNOWN`.
 - Frontend определяет состояние WAN по `wan.status`, а не по глобальному `wan.internet`, включая Overview, hero, настройки и session chart.
 - Legacy `wan-guardian.sh` пока остаётся отдельным recovery path. `wan.action`, recovery counters и legacy class явно маркируются `recovery_source=legacy-wan-guardian`; mutating WAN recovery этим этапом не менялся.
-- Repository tests покрывают 0/1/N туннелей, произвольные RCI ID, stale mapping, discovery-driven health, Ethernet/PPPoE WAN, несколько uplink, VPN exclusion, selected-path probe isolation, Console snapshot/observer contracts и Entware `jq` без ONIGURUMA.
+- Repository tests покрывают 0/1/N туннелей, произвольные RCI ID, stale mapping, discovery-driven health, Ethernet/PPPoE WAN, несколько uplink, VPN exclusion, selected-path probe isolation, Recovery Planner decision gates, Console snapshot/observer contracts и Entware `jq` без ONIGURUMA.
 - High-risk fail-open и WAN recovery mutations, Policy Sync и Route Engine этим этапом пока не переключаются.
 
 ## 0.1.7-dev: критический переходный hotfix VWARD Console
