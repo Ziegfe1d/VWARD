@@ -169,7 +169,7 @@ if [ "$ACTION" = "log" ]; then
 
     case "$NAME" in
         wan)
-            FILE=/opt/var/log/wan-guardian.log
+            FILE=/opt/var/log/wan-health.log
             ;;
         recovery)
             FILE=/opt/var/log/wan-guardian-recovery.log
@@ -285,6 +285,61 @@ if [ -x "$DISCOVERY" ]; then
     fi
 fi
 
+WAN_HEALTH_STATE=/opt/var/lib/wan-health/state
+WAN_STATUS="UNKNOWN"
+WAN_CLASS="OBSERVER_UNAVAILABLE"
+WAN_OBSERVER_LAST=""
+WAN_OBSERVER_AGE=-1
+WAN_OBSERVER_FAIL=0
+WAN_OBSERVER_OK=0
+WAN_CARRIER="unknown"
+
+wan_health_value()
+{
+    awk -F= -v k="$1" '$1==k {
+        print substr($0,index($0,"=")+1)
+        exit
+    }' "$WAN_HEALTH_STATE" 2>/dev/null
+}
+
+if [ -r "$WAN_HEALTH_STATE" ]; then
+    WAN_STATUS="$(wan_health_value STATUS)"
+    WAN_CLASS="$(wan_health_value CLASS)"
+    WAN_OBSERVER_LAST="$(wan_health_value LAST_CHECK)"
+    WAN_OBSERVER_FAIL="$(wan_health_value FAIL_COUNT)"
+    WAN_OBSERVER_OK="$(wan_health_value OK_COUNT)"
+    WAN_CARRIER="$(wan_health_value CARRIER)"
+
+    [ -n "$WAN_STATUS" ] || WAN_STATUS="UNKNOWN"
+    [ -n "$WAN_CLASS" ] || WAN_CLASS="UNKNOWN"
+    [ -n "$WAN_CARRIER" ] || WAN_CARRIER="unknown"
+
+    case "$WAN_OBSERVER_FAIL" in
+        ''|*[!0-9]*) WAN_OBSERVER_FAIL=0 ;;
+    esac
+
+    case "$WAN_OBSERVER_OK" in
+        ''|*[!0-9]*) WAN_OBSERVER_OK=0 ;;
+    esac
+
+    case "$WAN_OBSERVER_LAST" in
+        ''|*[!0-9]*)
+            WAN_OBSERVER_AGE=-1
+            ;;
+        *)
+            WAN_OBSERVER_AGE=$(($(date +%s) - WAN_OBSERVER_LAST))
+            case "$WAN_OBSERVER_AGE" in
+                -*) WAN_OBSERVER_AGE=-1 ;;
+            esac
+            ;;
+    esac
+
+    if [ "$WAN_OBSERVER_AGE" -lt 0 ] || [ "$WAN_OBSERVER_AGE" -gt 180 ]; then
+        WAN_STATUS="UNKNOWN"
+        WAN_CLASS="OBSERVER_STALE"
+    fi
+fi
+
 GOUT=/tmp/wan-guardian.cron.out
 
 GVERSION="$(
@@ -322,7 +377,6 @@ detail()
     }'
 }
 
-CARRIER="$(detail carrier)"
 REC_COUNT="$(detail recovery_count)"
 REC_STAGE="$(detail recovery_stage)"
 
@@ -354,6 +408,9 @@ ADGUARD=1
 UPTIME_SEC="$(
     cut -d. -f1 /proc/uptime 2>/dev/null
 )"
+
+WHRC="$(cat /tmp/wan-health-watch.cron.rc 2>/dev/null)"
+WHLAST="$(cat /tmp/wan-health-watch.cron.last 2>/dev/null)"
 
 GRC="$(cat /tmp/wan-guardian.cron.rc 2>/dev/null)"
 GLAST="$(cat /tmp/wan-guardian.cron.last 2>/dev/null)"
@@ -419,9 +476,14 @@ header_json
   --arg wg_discovery_state "$WG_DISCOVERY_STATE" \
   --arg gv "$GVERSION" \
   --arg gm "$GMODE" \
-  --arg gc "$GCLASS" \
+  --arg legacy_gc "$GCLASS" \
   --arg ga "$GACTION" \
-  --arg carrier "$CARRIER" \
+  --arg wan_status "$WAN_STATUS" \
+  --arg wan_class "$WAN_CLASS" \
+  --arg wan_observer_age "$WAN_OBSERVER_AGE" \
+  --arg wan_observer_fail "$WAN_OBSERVER_FAIL" \
+  --arg wan_observer_ok "$WAN_OBSERVER_OK" \
+  --arg carrier "$WAN_CARRIER" \
   --arg rcnt "$REC_COUNT" \
   --arg rstage "$REC_STAGE" \
   --arg crond "$CROND" \
@@ -429,6 +491,8 @@ header_json
   --arg supervisor "$SUPERVISOR" \
   --arg adguard "$ADGUARD" \
   --arg uptime "$UPTIME_SEC" \
+  --arg whrc "$WHRC" \
+  --arg whlast "$WHLAST" \
   --arg grc "$GRC" \
   --arg glast "$GLAST" \
   --arg wgrc "$WGRC" \
@@ -525,8 +589,14 @@ header_json
       state:$wan_discovery_state,
       selection:$wan_discovery_selection
     },
-    observer_source:"legacy-wan-guardian",
-    class:$gc,
+    observer_source:"wan-health-watch",
+    recovery_source:"legacy-wan-guardian",
+    status:$wan_status,
+    class:$wan_class,
+    observer_age_seconds:($wan_observer_age|tonumber? // -1),
+    observer_fail_count:($wan_observer_fail|tonumber? // 0),
+    observer_ok_count:($wan_observer_ok|tonumber? // 0),
+    legacy_recovery_class:$legacy_gc,
     version:$gv,
     mode:$gm,
     action:$ga,
@@ -592,6 +662,8 @@ header_json
   },
 
   cron:{
+    wan_health_rc:$whrc,
+    wan_health_last:$whlast,
     guardian_rc:$grc,
     guardian_last:$glast,
     wg_rc:$wgrc,
