@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.5-dev — Interactive VWARD Console
+
+- Rebuilt VWARD Console as a Keenetic-inspired component dashboard with
+  clickable cards, responsive navigation and real session sparklines.
+- Added detailed read-only component screens and a guarded editor for the four
+  existing Smart Updater automatic-apply policy flags.
+- Kept routing, tunnel, WAN recovery and other production settings read-only.
+
 ## 0.1.3-dev — Component-aware selective updates
 
 - Corrected updater-slot activation for BusyBox `mv` symlink-to-directory semantics and added post-swap verification.

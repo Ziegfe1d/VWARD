@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "VWARD Platform",
-  "platform_version": "0.1.4-dev",
+  "platform_version": "0.1.5-dev",
   "component_version_policy": "platform-release",
   "components": [
     {

@@ -23,7 +23,7 @@ header_text()
 }
 
 case "${REQUEST_METHOD:-GET}" in
-    GET) ;;
+    GET|POST) ;;
     OPTIONS)
         header_json
         echo '{"ok":true}'
@@ -61,13 +61,100 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log) ;;
+    status|ping|log|settings) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
         exit 0
         ;;
 esac
+
+if [ "${REQUEST_METHOD:-GET}" = POST ] && [ "$ACTION" != settings ]; then
+    echo 'Status: 405 Method Not Allowed'
+    header_json
+    echo '{"ok":false,"error":"method_not_allowed"}'
+    exit 0
+fi
+
+if [ "$ACTION" = "settings" ]; then
+    header_json
+
+    [ "${REQUEST_METHOD:-GET}" = POST ] || {
+        echo '{"ok":false,"error":"method_not_allowed"}'
+        exit 0
+    }
+    [ "${HTTP_X_VWARD_REQUEST:-}" = console ] || {
+        echo '{"ok":false,"error":"request_guard_failed"}'
+        exit 0
+    }
+    [ ! -e /opt/var/run/vward/updater.lock ] || {
+        echo '{"ok":false,"error":"updater_busy"}'
+        exit 0
+    }
+
+    LENGTH=${CONTENT_LENGTH:-0}
+    case "$LENGTH" in ''|*[!0-9]*) LENGTH=0 ;; esac
+    [ "$LENGTH" -gt 0 ] && [ "$LENGTH" -le 256 ] || {
+        echo '{"ok":false,"error":"invalid_body"}'
+        exit 0
+    }
+    BODY=$(dd bs=1 count="$LENGTH" 2>/dev/null)
+
+    value()
+    {
+        printf '%s\n' "$BODY" | tr '&' '\n' |
+        awk -F= -v k="$1" '$1==k {print $2; exit}'
+    }
+
+    AUTO_APPLY=$(value auto_apply)
+    AUTO_CRITICAL=$(value auto_critical)
+    AUTO_IMPORTANT=$(value auto_important)
+    AUTO_ROUTINE=$(value auto_routine)
+    for FLAG in "$AUTO_APPLY" "$AUTO_CRITICAL" "$AUTO_IMPORTANT" "$AUTO_ROUTINE"; do
+        case "$FLAG" in 0|1) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+    done
+
+    CONFIG=/opt/etc/vward/update.conf
+    [ -r "$CONFIG" ] && [ -w "$CONFIG" ] || {
+        echo '{"ok":false,"error":"config_unavailable"}'
+        exit 0
+    }
+    STAMP=$(date '+%Y%m%d-%H%M%S')
+    BACKUP=/opt/var/backups/vward/update.conf.console-$STAMP
+    mkdir -p /opt/var/backups/vward || {
+        echo '{"ok":false,"error":"backup_failed"}'
+        exit 0
+    }
+    cp -p "$CONFIG" "$BACKUP" || {
+        echo '{"ok":false,"error":"backup_failed"}'
+        exit 0
+    }
+    TMP=$CONFIG.new.$$
+    sed \
+        -e "s/^auto_apply=.*/auto_apply=$AUTO_APPLY/" \
+        -e "s/^auto_critical=.*/auto_critical=$AUTO_CRITICAL/" \
+        -e "s/^auto_important=.*/auto_important=$AUTO_IMPORTANT/" \
+        -e "s/^auto_routine=.*/auto_routine=$AUTO_ROUTINE/" \
+        "$CONFIG" > "$TMP" && chmod 0600 "$TMP" && mv "$TMP" "$CONFIG" || {
+            cp -p "$BACKUP" "$CONFIG" 2>/dev/null
+            rm -f "$TMP"
+            echo '{"ok":false,"error":"write_failed"}'
+            exit 0
+        }
+    grep -q "^auto_apply=$AUTO_APPLY$" "$CONFIG" &&
+    grep -q "^auto_critical=$AUTO_CRITICAL$" "$CONFIG" &&
+    grep -q "^auto_important=$AUTO_IMPORTANT$" "$CONFIG" &&
+    grep -q "^auto_routine=$AUTO_ROUTINE$" "$CONFIG" || {
+        cp -p "$BACKUP" "$CONFIG" 2>/dev/null
+        echo '{"ok":false,"error":"verification_failed"}'
+        exit 0
+    }
+    printf '%s|CONSOLE_SETTINGS|auto_apply=%s critical=%s important=%s routine=%s\n' \
+        "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$AUTO_APPLY" "$AUTO_CRITICAL" "$AUTO_IMPORTANT" "$AUTO_ROUTINE" \
+        >> /opt/var/log/vward/console-audit.log
+    echo '{"ok":true,"result":"saved"}'
+    exit 0
+fi
 
 if [ "$ACTION" = "ping" ]; then
     header_json
@@ -224,7 +311,24 @@ ACTIVE_SLOT="$(CDPATH= cd -- /opt/share/vward/updater/current 2>/dev/null && pwd
 
 UPDATE_ENABLED="$(sed -n 's/^update_enabled=//p' /opt/etc/vward/update.conf 2>/dev/null)"
 AUTO_APPLY="$(sed -n 's/^auto_apply=//p' /opt/etc/vward/update.conf 2>/dev/null)"
+AUTO_CRITICAL="$(sed -n 's/^auto_critical=//p' /opt/etc/vward/update.conf 2>/dev/null)"
+AUTO_IMPORTANT="$(sed -n 's/^auto_important=//p' /opt/etc/vward/update.conf 2>/dev/null)"
+AUTO_ROUTINE="$(sed -n 's/^auto_routine=//p' /opt/etc/vward/update.conf 2>/dev/null)"
 BARRIER_READY="$(sed -n 's/^barrier_integration_ready=//p' /opt/etc/vward/update.conf 2>/dev/null)"
+UPDATE_CHANNEL="$(sed -n 's/^channel=//p' /opt/etc/vward/update.conf 2>/dev/null)"
+SAFE_START="$(sed -n 's/^safe_window_start=//p' /opt/etc/vward/update.conf 2>/dev/null)"
+SAFE_END="$(sed -n 's/^safe_window_end=//p' /opt/etc/vward/update.conf 2>/dev/null)"
+CHECK_INTERVAL="$(sed -n 's/^check_interval_seconds=//p' /opt/etc/vward/update.conf 2>/dev/null)"
+
+LIVE_PID="$(cat /opt/var/run/agh-adaptive-live.pid 2>/dev/null)"
+CONSOLE_PID="$(cat /opt/var/run/keenetic-apps-lighttpd.pid 2>/dev/null)"
+LIVE_COUNT="$(ps w 2>/dev/null | awk '$6=="/opt/bin/agh-adaptive-live.sh"{n++} END{print n+0}')"
+TCPDUMP_COUNT="$(ps w 2>/dev/null | awk '$5=="tcpdump" && index($0,"dst host 192.168.1.1"){n++} END{print n+0}')"
+FAILOPEN_STATE=/opt/var/lib/wg-failopen/state
+DOWN_STREAK="$(sed -n 's/^DOWN_STREAK=//p' "$FAILOPEN_STATE" 2>/dev/null)"
+FAILOPEN_ACTIVE="$(sed -n 's/^FAILOPEN_ACTIVE=//p' "$FAILOPEN_STATE" 2>/dev/null)"
+[ -n "$DOWN_STREAK" ] || DOWN_STREAK=0
+[ -n "$FAILOPEN_ACTIVE" ] || FAILOPEN_ACTIVE=0
 
 OPT_TOTAL_KB="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $2}')"
 OPT_USED_KB="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $3}')"
@@ -271,7 +375,20 @@ header_json
   --arg active_slot "$ACTIVE_SLOT" \
   --arg update_enabled "$UPDATE_ENABLED" \
   --arg auto_apply "$AUTO_APPLY" \
+  --arg auto_critical "$AUTO_CRITICAL" \
+  --arg auto_important "$AUTO_IMPORTANT" \
+  --arg auto_routine "$AUTO_ROUTINE" \
   --arg barrier_ready "$BARRIER_READY" \
+  --arg update_channel "$UPDATE_CHANNEL" \
+  --arg safe_start "$SAFE_START" \
+  --arg safe_end "$SAFE_END" \
+  --arg check_interval "$CHECK_INTERVAL" \
+  --arg live_pid "$LIVE_PID" \
+  --arg console_pid "$CONSOLE_PID" \
+  --arg live_count "$LIVE_COUNT" \
+  --arg tcpdump_count "$TCPDUMP_COUNT" \
+  --arg down_streak "$DOWN_STREAK" \
+  --arg failopen_active "$FAILOPEN_ACTIVE" \
   --argjson components "$COMPONENTS" \
   --arg opt_total_kb "$OPT_TOTAL_KB" \
   --arg opt_used_kb "$OPT_USED_KB" \
@@ -297,7 +414,13 @@ header_json
     active_slot:($active_slot | split("/") | last),
     update_enabled:($update_enabled=="1"),
     auto_apply:($auto_apply=="1"),
+    auto_critical:($auto_critical=="1"),
+    auto_important:($auto_important=="1"),
+    auto_routine:($auto_routine=="1"),
     barrier_ready:($barrier_ready=="1"),
+    channel:$update_channel,
+    safe_window:($safe_start+"–"+$safe_end),
+    check_interval_seconds:($check_interval|tonumber? // 0),
     components:$components
   },
 
@@ -369,14 +492,20 @@ header_json
       link:($wg1.link // ""),
       connected:($wg1.connected // ""),
       state:($wg1.state // "")
-    }
+    },
+    down_streak:($down_streak|tonumber? // 0),
+    failopen_active:($failopen_active=="1")
   },
 
   services:{
     crond:($crond=="1"),
     crond_pid:$crond_pid,
     supervisor:($supervisor=="1"),
-    adguard:($adguard=="1")
+    adguard:($adguard=="1"),
+    adaptive_live_pid:$live_pid,
+    adaptive_live_count:($live_count|tonumber? // 0),
+    tcpdump_count:($tcpdump_count|tonumber? // 0),
+    console_pid:$console_pid
   },
 
   cron:{
