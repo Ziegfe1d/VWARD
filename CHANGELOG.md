@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0-beta.1: Discovery First foundation
+
+- Начата отдельная Beta-линия глубокой универсализации VWARD.
+- Добавлен read-only `VWARD Discovery` в составе `VWARD Runtime`.
+- WireGuard inventory определяется по фактическому RCI `type == "Wireguard"`, а не по имени, номеру или количеству интерфейсов.
+- Linux-интерфейс сопоставляется по фактическому адресу; имя `nwgN` не конструируется.
+- Для роли Tunnel Guard введены состояния `READY`, `NOT_FOUND`, `REQUIRES_SELECTION` и `STALE_MAPPING`.
+- При нескольких туннелях VWARD не выбирает случайный интерфейс; допускается явный `tunnel_guard_rci_id`.
+- Добавлены repository tests для 0/1/N туннелей, произвольных RCI ID, stale mapping и Entware `jq` без ONIGURUMA.
+- Discovery provider пока read-only: high-risk fail-open, Policy Sync и Route Engine mutations этим изменением не переключаются.
+
 ## 0.1.7-dev: критический переходный hotfix VWARD Console
 
 - Удалена жёсткая привязка Console к `Wireguard0` и `Wireguard1`.
