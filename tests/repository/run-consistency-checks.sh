@@ -47,16 +47,32 @@ grep -Fq '"/opt/bin/vward-discovery.sh"' config/components/component-registry.js
 
 grep -Fq 'DISCOVERY="${VWARD_DISCOVERY:-/opt/bin/vward-discovery.sh}"' web/cgi-bin/api.cgi ||
     fail "Console API does not declare the shared Discovery provider"
-grep -Fq '"$DISCOVERY" wireguard' web/cgi-bin/api.cgi ||
-    fail "Console API does not consume WireGuard inventory from VWARD Discovery"
+grep -Fq '"$DISCOVERY" snapshot' web/cgi-bin/api.cgi ||
+    fail "Console API does not consume the unified Discovery snapshot"
 grep -Fq 'name:(.rci_id // "")' web/cgi-bin/api.cgi ||
     fail "Console API compatibility alias must come from discovered rci_id"
 grep -Fq 'wg_discovery_state' web/cgi-bin/api.cgi ||
-    fail "Console API does not expose Discovery state"
+    fail "Console API does not expose WireGuard Discovery state"
+grep -Fq 'wan_discovery_state' web/cgi-bin/api.cgi ||
+    fail "Console API does not expose WAN Discovery state"
+grep -Fq 'observer_source:"legacy-wan-guardian"' web/cgi-bin/api.cgi ||
+    fail "Console API must label transitional legacy WAN observer data"
 grep -Fq "'http://127.0.0.1:79/rci/show/interface'" web/cgi-bin/api.cgi >/dev/null &&
     fail "Console API must not maintain a second full interface inventory"
+grep -Fq 'show/interface?name=ISP' web/cgi-bin/api.cgi >/dev/null &&
+    fail "Console API must not hardcode the WAN role as ISP"
 grep -Eq 'Wireguard[0-9]|nwg[0-9]' web/cgi-bin/api.cgi >/dev/null &&
     fail "Console API contains installation-specific WireGuard hardcode"
+
+SNAPSHOT_CALLS=$(grep -Fc '"$DISCOVERY" snapshot' web/cgi-bin/api.cgi || true)
+[ "$SNAPSHOT_CALLS" -eq 1 ] ||
+    fail "Console API must perform exactly one Discovery snapshot per status request"
+
+grep -Fq 'discovery_snapshot()' components/runtime-supervision/scripts/vward-discovery.sh ||
+    fail "Discovery snapshot implementation missing"
+grep -Fq 'select(((.value.role // []) | index("misc")) == null)' \
+    components/runtime-supervision/scripts/vward-discovery.sh ||
+    fail "WAN discovery must exclude VPN misc role"
 
 for LOG_NAME in wan recovery cron routing updater tunnel policy console
 do
