@@ -17,7 +17,6 @@ concurrency:
 
 jobs:
   publish-transition-hotfix:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     env:
       VWARD_SIGNING_KEY_PEM: ${{ secrets.VWARD_PROD_ED25519_PRIVATE_KEY_PEM }}
