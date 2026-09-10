@@ -72,7 +72,7 @@ ce7f25a9f95671126cd5ec252db5115ae250a1dbfab814b2fbdeaa57e1fc9105  updates/dev/pa
 9c12f8c09e565ce56707596a4b81085a4f838f51bbece299e40c9b7d101bd9f1  updates/dev/packages/vward-0.1.3-dev.tar.gz
 27b0c9b59317a000ffdfb945f34674e827c645e02721da8290a23af22e3ab734  updates/dev/packages/vward-0.1.4-dev.tar.gz
 e44a62b36ac6c3745b69e5cdf5fcc514ea1599984268510d9ce8e85a6d377bc3  updates/dev/packages/vward-0.1.5-dev.tar.gz
-0bde394112ad417ce3f7423364af18e4358ef8db7a066f9f80b8d5007c8cbe3f  updates/dev/update-manifest.json
+364d991edd45d57cfba12293fbc67d6e9758dc6f7bdf3e2606e38b6ac1e2a261  updates/dev/update-manifest.json
 a47655f886063396222695382b5dde69e533642ad27ed845affe5b001dd61e61  web/cgi-bin/api.cgi
 b8ab5c607d46d00bf72ecbf4b5215b5991be2d54337702d15ff6b6b2543da353  web/index.html
 ed660883a4a39d3ce0411c95182c6da68941e411fc7fdcfeaeca5883f23ae82d  web/lighttpd.conf
