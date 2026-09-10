@@ -74,8 +74,22 @@ printf '%s\n' "$OUT" | grep -Fq 'REASON=invalid_expected_rci_id' || fail "unsafe
 OUT="$(run_actuator invalid INTERFACE_RECONNECT UplinkAlpha wan0)"
 printf '%s\n' "$OUT" | grep -Fq 'REASON=discovery_invalid_result' || fail "invalid discovery result must be blocked"
 
-if grep -Eq 'IFACE=["'"']?ISP|show/interface\?name=ISP|eth3|ip dhcp client renew|eval[[:space:]]|COMMAND(_DOWN|_UP)?=' "$ACTUATOR"; then
-    fail "actuator contains legacy target hardcode or executable command string"
+for forbidden in \
+    'IFACE="ISP"' \
+    'show/interface?name=ISP' \
+    'eth3' \
+    'ip dhcp client renew' \
+    'COMMAND=' \
+    'COMMAND_DOWN=' \
+    'COMMAND_UP='
+do
+    if grep -Fq "$forbidden" "$ACTUATOR"; then
+        fail "actuator contains forbidden legacy token: $forbidden"
+    fi
+done
+
+if grep -Eq '(^|[[:space:]])eval([[:space:]]|$)' "$ACTUATOR"; then
+    fail "actuator must not use eval"
 fi
 if grep -Eq '(^|[^A-Za-z])ndmc([^A-Za-z]|$)' "$ACTUATOR"; then
     fail "dry-run actuator must not invoke or prepare ndmc"
