@@ -1,0 +1,156 @@
+name: Build VWARD transition hotfix candidate
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'web/cgi-bin/api.cgi'
+      - 'web/index.html'
+      - '.github/workflows/build-transition-hotfix.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build unsigned 0.1.7-dev candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION='0.1.7-dev'
+          UPDATE_ID='vward-0.1.7-dev-wireguard-discovery'
+          SEQUENCE='2026091002'
+          OUT="$RUNNER_TEMP/vward-candidate"
+          PKGDIR="$OUT/package"
+          ARTIFACT="$OUT/vward-$VERSION.tar.gz"
+
+          rm -rf "$OUT"
+          mkdir -p "$PKGDIR/files/web/cgi-bin"
+
+          printf '%s\n' "$VERSION" > "$PKGDIR/files/VERSION"
+          cp web/index.html "$PKGDIR/files/web/index.html"
+          cp web/cgi-bin/api.cgi "$PKGDIR/files/web/cgi-bin/api.cgi"
+
+          version_sha=$(sha256sum "$PKGDIR/files/VERSION" | awk '{print $1}')
+          index_sha=$(sha256sum "$PKGDIR/files/web/index.html" | awk '{print $1}')
+          api_sha=$(sha256sum "$PKGDIR/files/web/cgi-bin/api.cgi" | awk '{print $1}')
+
+          jq -n \
+            --arg version_sha "$version_sha" \
+            --arg index_sha "$index_sha" \
+            --arg api_sha "$api_sha" \
+            '{
+              schema:1,
+              files:[
+                {
+                  source:"files/VERSION",
+                  target:"/opt/share/vward/VERSION",
+                  mode:"0644",
+                  sha256:$version_sha,
+                  component:"platform-core",
+                  restart_policy:"none",
+                  config_policy:"program-only"
+                },
+                {
+                  source:"files/web/index.html",
+                  target:"/opt/share/keenetic-apps/www/index.html",
+                  mode:"0644",
+                  sha256:$index_sha,
+                  component:"console",
+                  restart_policy:"none",
+                  config_policy:"program-only"
+                },
+                {
+                  source:"files/web/cgi-bin/api.cgi",
+                  target:"/opt/share/keenetic-apps/www/cgi-bin/api.cgi",
+                  mode:"0755",
+                  sha256:$api_sha,
+                  component:"console",
+                  restart_policy:"none",
+                  config_policy:"program-only"
+                }
+              ]
+            }' > "$PKGDIR/package-manifest.json"
+
+          test "$(jq -r '.schema' "$PKGDIR/package-manifest.json")" = 1
+          test "$(jq '.files|length' "$PKGDIR/package-manifest.json")" = 3
+          grep -q 'wg.interfaces' web/index.html || grep -q 'g.interfaces' web/index.html
+          ! grep -Eq 'g\.wg0|g\.wg1|WireGuard0' web/index.html
+          ! grep -Eq 'name=Wireguard0|name=Wireguard1|WG0=|WG1=' web/cgi-bin/api.cgi
+          sh -n web/cgi-bin/api.cgi
+
+          unpacked_size=$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{sum+=$1} END{print sum+0}')
+
+          tar \
+            --sort=name \
+            --mtime='UTC 1970-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -czf "$ARTIFACT" \
+            -C "$PKGDIR" .
+
+          package_sha=$(sha256sum "$ARTIFACT" | awk '{print $1}')
+          package_size=$(wc -c < "$ARTIFACT" | tr -d ' ')
+          declared_size=$(tar -tvzf "$ARTIFACT" | awk '$1 ~ /^-/ {sum+=$3} END{print sum+0}')
+          test "$declared_size" = "$unpacked_size"
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg update_id "$UPDATE_ID" \
+            --argjson sequence "$SEQUENCE" \
+            --arg package_file "vward-$VERSION.tar.gz" \
+            --arg package_sha256 "$package_sha" \
+            --argjson package_size "$package_size" \
+            --argjson unpacked_size "$unpacked_size" \
+            '{
+              candidate:true,
+              signed:false,
+              publication_state:"SIGNING_REQUIRED",
+              version:$version,
+              update_id:$update_id,
+              sequence:$sequence,
+              channel:"dev",
+              intended_migration_role:"legacy-dev-bridge",
+              priority:"CRITICAL",
+              package_file:$package_file,
+              package_sha256:$package_sha256,
+              package_size:$package_size,
+              unpacked_size:$unpacked_size,
+              compatibility:{min_vward:"0.1.6-dev",max_vward:"0.1.6-dev"},
+              affected_components:["platform-core","console"],
+              health_profile:"console",
+              requires_reboot:false,
+              rollback_policy:"automatic",
+              signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}
+            }' > "$OUT/candidate-metadata.json"
+
+          cp "$PKGDIR/package-manifest.json" "$OUT/package-manifest.json"
+
+          echo "CANDIDATE_VERSION=$VERSION"
+          echo "CANDIDATE_UPDATE_ID=$UPDATE_ID"
+          echo "CANDIDATE_SEQUENCE=$SEQUENCE"
+          echo "CANDIDATE_CHANNEL=dev"
+          echo "CANDIDATE_PRIORITY=CRITICAL"
+          echo "PACKAGE_SHA256=$package_sha"
+          echo "PACKAGE_SIZE=$package_size"
+          echo "UNPACKED_SIZE=$unpacked_size"
+          echo "PUBLICATION_STATE=SIGNING_REQUIRED"
+
+      - name: Upload unsigned candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: vward-0.1.7-dev-unsigned-candidate
+          path: |
+            ${{ runner.temp }}/vward-candidate/vward-0.1.7-dev.tar.gz
+            ${{ runner.temp }}/vward-candidate/package-manifest.json
+            ${{ runner.temp }}/vward-candidate/candidate-metadata.json
+          if-no-files-found: error
+          retention-days: 7
