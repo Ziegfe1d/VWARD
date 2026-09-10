@@ -22,7 +22,7 @@ done
 
 grep -E 'Smart Updater|>Update</button>|192\.168\.1\.1' web/index.html >/dev/null &&
     fail "Console contains legacy naming or universal device hardcode"
-grep -E '\?\.|\?\?|scrollTo\(\{' web/index.html >/dev/null &&
+grep -E '\?\.[A-Za-z_$]|\?\.\[|\?\.\(|\?\?|scrollTo\(\{' web/index.html >/dev/null &&
     fail "Console contains incompatible mobile JavaScript"
 
 grep -Fq 'function svgIcon' web/index.html || fail "local SVG icon system missing"
