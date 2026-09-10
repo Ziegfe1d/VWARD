@@ -7,7 +7,7 @@ cd "$ROOT"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 VERSION=$(sed -n '1p' VERSION)
-REGISTRY_VERSION=$(sed -n 's/.*"platform_version": "\([^"]*\)".*/\1/p' config/components/component-registry.json)
+REGISTRY_VERSION=$(jq -r '.platform_version // empty' config/components/component-registry.json)
 [ -n "$VERSION" ] || fail "VERSION is empty"
 [ "$VERSION" = "$REGISTRY_VERSION" ] || fail "VERSION and registry differ"
 grep -Fq "**$VERSION**" README.md || fail "README version differs"
@@ -38,14 +38,14 @@ grep -Fq 'wan:w.internet===true?1:0' web/index.html >/dev/null && fail "Console 
 
 for ID in platform-core route-engine route-reconciler route-tools tunnel-guard wan-guard policy-sync runtime console update-engine
 do
-    grep -Fq "\"id\": \"$ID\"" config/components/component-registry.json || fail "registry component missing: $ID"
+    jq -e --arg id "$ID" 'any(.components[]; .id == $id)' config/components/component-registry.json >/dev/null || fail "registry component missing: $ID"
     grep -Fq "'$ID':" web/index.html || fail "Console component mapping missing: $ID"
 done
 
-grep -Fq '"/opt/bin/vward-discovery.sh"' config/components/component-registry.json || fail "VWARD Discovery runtime target missing"
-for TARGET in /opt/bin/wan-health-watch.sh /opt/bin/wan-capability.sh /opt/bin/wan-recovery-plan.sh /opt/bin/wan-recovery-actuator.sh
+jq -e 'any(.components[]; .id == "runtime" and (.runtime_targets | index("/opt/bin/vward-discovery.sh") != null))' config/components/component-registry.json >/dev/null || fail "VWARD Discovery runtime target missing"
+for TARGET in /opt/bin/wan-health-watch.sh /opt/bin/wan-capability.sh /opt/bin/wan-recovery-plan.sh /opt/bin/wan-recovery-actuator.sh /opt/bin/wan-recovery-controller.sh
 do
-    grep -Fq "\"$TARGET\"" config/components/component-registry.json || fail "WAN Guard runtime target missing: $TARGET"
+    jq -e --arg target "$TARGET" 'any(.components[]; .id == "wan-guard" and (.runtime_targets | index($target) != null))' config/components/component-registry.json >/dev/null || fail "WAN Guard runtime target missing: $TARGET"
 done
 
 grep -Fq '/opt/bin/wan-health-watch.sh > /tmp/wan-health-watch.cron.out' config/cron/root.crontab || fail "separate WAN observer cron missing"
@@ -54,10 +54,12 @@ WAN_HEALTH_CRON_COUNT=$(grep -Fc '/opt/bin/wan-health-watch.sh > /tmp/wan-health
 WAN_GUARDIAN_CRON_COUNT=$(grep -Fc '/opt/bin/wan-guardian.sh > /tmp/wan-guardian.cron.out' config/cron/root.crontab || true)
 WAN_PLAN_CRON_COUNT=$(grep -Fc '/opt/bin/wan-recovery-plan.sh' config/cron/root.crontab || true)
 WAN_ACTUATOR_CRON_COUNT=$(grep -Fc '/opt/bin/wan-recovery-actuator.sh' config/cron/root.crontab || true)
+WAN_CONTROLLER_CRON_COUNT=$(grep -Fc '/opt/bin/wan-recovery-controller.sh' config/cron/root.crontab || true)
 [ "$WAN_HEALTH_CRON_COUNT" -eq 1 ] || fail "WAN observer cron must exist exactly once"
 [ "$WAN_GUARDIAN_CRON_COUNT" -eq 1 ] || fail "legacy WAN recovery cron must exist exactly once"
 [ "$WAN_PLAN_CRON_COUNT" -eq 0 ] || fail "dry-run WAN Recovery Planner must not be scheduled yet"
 [ "$WAN_ACTUATOR_CRON_COUNT" -eq 0 ] || fail "dry-run WAN actuator must not be scheduled yet"
+[ "$WAN_CONTROLLER_CRON_COUNT" -eq 0 ] || fail "dry-run WAN recovery controller must not be scheduled yet"
 grep -F '/opt/bin/wan-health-watch.sh' config/cron/root.crontab | grep -Fq '/opt/bin/wan-guardian.sh' && fail "WAN observer and recovery must not be chained in one cron entry"
 
 grep -Fq 'DISCOVERY="${VWARD_DISCOVERY:-/opt/bin/vward-discovery.sh}"' web/cgi-bin/api.cgi || fail "Console API does not declare the shared Discovery provider"
@@ -124,6 +126,20 @@ do
     grep -Fq "$FORBIDDEN" "$WAN_ACTUATOR" && fail "dry-run WAN actuator contains forbidden token: $FORBIDDEN"
 done
 if grep -Eq '(^|[^A-Za-z])ndmc([^A-Za-z]|$)|(^|[[:space:]])eval([[:space:]]|$)' "$WAN_ACTUATOR"; then fail "dry-run WAN actuator contains executable mutation"; fi
+
+WAN_CONTROLLER=components/wan-guardian/scripts/wan-recovery-controller.sh
+[ -x "$WAN_CONTROLLER" ] || fail "WAN Recovery Controller must be executable"
+grep -Fq 'MODE="dryrun"' "$WAN_CONTROLLER" || fail "WAN Recovery Controller must remain dry-run"
+grep -Fq 'VWARD_WAN_RECOVERY_PLANNER' "$WAN_CONTROLLER" || fail "WAN Recovery Controller planner contract missing"
+grep -Fq 'VWARD_WAN_RECOVERY_ACTUATOR' "$WAN_CONTROLLER" || fail "WAN Recovery Controller actuator contract missing"
+grep -Fq 'wan-recovery-controller.lock' "$WAN_CONTROLLER" || fail "WAN Recovery Controller lock missing"
+grep -Fq 'PLANNER_EXECUTED' "$WAN_CONTROLLER" || fail "WAN Recovery Controller planner execution guard missing"
+grep -Fq 'ACTUATOR_EXECUTED' "$WAN_CONTROLLER" || fail "WAN Recovery Controller actuator execution guard missing"
+grep -Fq 'EXECUTED=NO' "$WAN_CONTROLLER" || fail "WAN Recovery Controller dry-run output guard missing"
+for FORBIDDEN in 'ndmc' 'eval ' 'ip dhcp client renew' 'IFACE="ISP"' 'COMMAND='
+do
+    grep -Fq "$FORBIDDEN" "$WAN_CONTROLLER" && fail "WAN Recovery Controller contains forbidden execution token: $FORBIDDEN"
+done
 
 for LOG_NAME in wan recovery cron routing updater tunnel policy console
 do
