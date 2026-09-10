@@ -6,6 +6,7 @@ export PATH
 MODE="dryrun"
 STATE="${VWARD_WAN_HEALTH_STATE:-/opt/var/lib/wan-health/state}"
 DISCOVERY="${VWARD_DISCOVERY_BIN:-/opt/bin/vward-discovery.sh}"
+CAPABILITY="${VWARD_WAN_CAPABILITY_BIN:-/opt/bin/wan-capability.sh}"
 JQ="${VWARD_JQ:-/opt/bin/jq}"
 MAX_STATE_AGE="${VWARD_WAN_RECOVERY_MAX_STATE_AGE:-120}"
 CONFIRM_FAILURES="${VWARD_WAN_RECOVERY_CONFIRM_FAILURES:-3}"
@@ -38,6 +39,8 @@ emit()
     echo "CLASS=${CLASS:-UNKNOWN}"
     echo "FAIL_COUNT=${FAIL_COUNT:-0}"
     echo "DISCOVERY_STATE=${DISCOVERY_STATE:-UNAVAILABLE}"
+    echo "CAPABILITY_STATE=${CAPABILITY_STATE:-NOT_CHECKED}"
+    echo "ADDRESSING_MODE=${ADDRESSING_MODE:-unknown}"
     echo "TARGET_RCI_ID=${CURRENT_RCI_ID:-none}"
     echo "TARGET_LINUX_IF=${CURRENT_LINUX_IF:-none}"
     echo "TARGET_TYPE=${CURRENT_TYPE:-unknown}"
@@ -45,6 +48,41 @@ emit()
     echo "VIA_LINUX_IF=${CURRENT_VIA_LINUX_IF:-none}"
     echo "EXECUTED=NO"
     exit 0
+}
+
+load_capability()
+{
+    [ -x "$CAPABILITY" ] || {
+        CAPABILITY_STATE="UNAVAILABLE"
+        return 1
+    }
+
+    CAPABILITY_JSON="$("$CAPABILITY" 2>/dev/null || true)"
+    if ! printf '%s\n' "$CAPABILITY_JSON" |
+        "$JQ" -e 'type == "object" and .provider == "wan-capability" and .role == "wan-guard"' >/dev/null 2>&1
+    then
+        CAPABILITY_STATE="INVALID_RESULT"
+        return 1
+    fi
+
+    CAPABILITY_STATE="$(printf '%s\n' "$CAPABILITY_JSON" | "$JQ" -r '.state // "UNAVAILABLE"')"
+    [ "$CAPABILITY_STATE" = "READY" ] || return 1
+
+    CAP_RCI_ID="$(printf '%s\n' "$CAPABILITY_JSON" | "$JQ" -r '.interface.rci_id // ""')"
+    CAP_LINUX_IF="$(printf '%s\n' "$CAPABILITY_JSON" | "$JQ" -r '.interface.linux_if // ""')"
+    ADDRESSING_MODE="$(printf '%s\n' "$CAPABILITY_JSON" | "$JQ" -r '.addressing.mode // "unknown"')"
+    DHCP_RENEW_CAPABLE="$(printf '%s\n' "$CAPABILITY_JSON" | "$JQ" -r '.addressing.dhcp_renew // false')"
+
+    [ "$CAP_RCI_ID" = "$CURRENT_RCI_ID" ] || {
+        CAPABILITY_STATE="ROLE_MISMATCH"
+        return 1
+    }
+    [ "$CAP_LINUX_IF" = "$CURRENT_LINUX_IF" ] || {
+        CAPABILITY_STATE="MAPPING_MISMATCH"
+        return 1
+    }
+
+    return 0
 }
 
 case "$MAX_STATE_AGE" in
@@ -81,8 +119,7 @@ esac
 [ -x "$DISCOVERY" ] || emit BLOCKED NONE discovery_unavailable
 [ -x "$JQ" ] || emit BLOCKED NONE jq_unavailable
 
-DISCOVERY_JSON="$("$DISCOVERY" wan-guard 2>/dev/null)"
-DISCOVERY_RC=$?
+DISCOVERY_JSON="$("$DISCOVERY" wan-guard 2>/dev/null || true)"
 
 if ! printf '%s\n' "$DISCOVERY_JSON" |
     "$JQ" -e 'type == "object" and .role == "wan-guard"' >/dev/null 2>&1
@@ -145,7 +182,16 @@ case "$CLASS" in
         if [ "$LOGICAL_UPLINK" -eq 1 ]; then
             emit PLAN SESSION_RECONNECT confirmed_logical_address_failure
         fi
-        emit HOLD NONE addressing_capability_required
+
+        if ! load_capability; then
+            emit BLOCKED NONE "capability_$CAPABILITY_STATE"
+        fi
+
+        if [ "$ADDRESSING_MODE" = "dhcp" ] && [ "$DHCP_RENEW_CAPABLE" = "true" ]; then
+            emit PLAN DHCP_RENEW confirmed_dhcp_address_failure
+        fi
+
+        emit HOLD NONE addressing_not_dhcp
         ;;
 
     LINK_FAILURE|GATEWAY_FAILURE|INTERNET_FAILURE)
