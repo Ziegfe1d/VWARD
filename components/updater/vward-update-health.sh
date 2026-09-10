@@ -26,7 +26,7 @@ case "$profile" in
         required="$VU_ROOT_PREFIX/opt/bin/wg-health-watch.sh $VU_ROOT_PREFIX/opt/bin/wg-failopen-guard.sh"
         ;;
     wan-guard)
-        required="$VU_ROOT_PREFIX/opt/bin/wan-health-watch.sh $VU_ROOT_PREFIX/opt/bin/wan-recovery-plan.sh $VU_ROOT_PREFIX/opt/bin/wan-guardian.sh $VU_ROOT_PREFIX/opt/bin/wan-recovery-actuator.sh"
+        required="$VU_ROOT_PREFIX/opt/bin/wan-health-watch.sh $VU_ROOT_PREFIX/opt/bin/wan-capability.sh $VU_ROOT_PREFIX/opt/bin/wan-recovery-plan.sh $VU_ROOT_PREFIX/opt/bin/wan-recovery-actuator.sh $VU_ROOT_PREFIX/opt/bin/wan-guardian.sh"
         ;;
     policy-sync)
         required="$VU_ROOT_PREFIX/opt/bin/vpn-domain-audit.sh $VU_ROOT_PREFIX/opt/bin/vpn-subnet-sync.sh"
