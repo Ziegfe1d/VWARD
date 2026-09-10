@@ -6,7 +6,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Keenetic Apps Center — v28 Live</title>
+<title>VWARD Console</title>
 <style>
 :root{
   --bg:#f4f7fb;
@@ -4083,15 +4083,15 @@ button,
     <div class="brandmark">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 15h16v4H4z"/><path d="M8 15V9m8 6V9"/><path d="M6 7c3.5-3 8.5-3 12 0"/><path d="M9 10c1.8-1.5 4.2-1.5 6 0"/></svg>
     </div>
-    <div><h1>Keenetic Apps</h1><small>центр локальных сервисов</small></div>
+    <div><h1>VWARD Console</h1><small>управление платформой</small></div>
   </div>
 
   <div class="nav-label">Приложения</div>
   <nav class="nav">
     <button class="active" data-section="overview"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 11 12 4l8 7v9H4z"/><path d="M9 20v-6h6v6"/></svg></span><span>Обзор</span></button>
-    <button data-section="wan"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg></span><span>WAN Guardian</span></button>
-    <button data-section="wireguard"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="16" r="3"/><path d="M10.2 13.8 16 8"/><circle cx="17.5" cy="6.5" r="2.5"/><path d="m13.2 10.8 2 2m-4.1.1 2 2"/></svg></span><span>WireGuard</span></button>
-    <button data-section="routing"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 6h7a3 3 0 0 1 3 3v6"/><path d="m12 12 3 3 3-3"/><circle cx="5" cy="6" r="2"/><circle cx="18" cy="18" r="2"/></svg></span><span>Маршрутизация</span></button>
+    <button data-section="wan"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg></span><span>WAN Guard</span></button>
+    <button data-section="wireguard"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="16" r="3"/><path d="M10.2 13.8 16 8"/><circle cx="17.5" cy="6.5" r="2.5"/><path d="m13.2 10.8 2 2m-4.1.1 2 2"/></svg></span><span>Tunnel Guard</span></button>
+    <button data-section="routing"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 6h7a3 3 0 0 1 3 3v6"/><path d="m12 12 3 3 3-3"/><circle cx="5" cy="6" r="2"/><circle cx="18" cy="18" r="2"/></svg></span><span>Route Engine</span></button>
     <button data-section="automation"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><span>Автоматизация</span></button>
   </nav>
 
@@ -4245,7 +4245,7 @@ button,
     <section id="wan" class="section">
       <div class="toolbar">
         <div><h3>WAN Guardian</h3><div class="meta">Диагностика и автовосстановление WAN</div></div>
-        <div class="actions"><button class="btn" data-toast="Проверка WAN запущена"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M20 6v5h-5"/><path d="M19 11a7 7 0 1 0 1 5"/></svg>Проверить сейчас</button><button class="btn" data-confirm="Обновить DHCP">Обновить DHCP</button><button class="btn danger" data-confirm="Перезапустить WAN">Перезапустить WAN</button></div>
+        <div class="actions"><button class="btn" disabled title="Console работает только для чтения"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M20 6v5h-5"/><path d="M19 11a7 7 0 1 0 1 5"/></svg>Проверить сейчас</button><button class="btn" disabled title="Console работает только для чтения">Обновить DHCP</button><button class="btn danger" disabled title="Console работает только для чтения">Перезапустить WAN</button></div>
       </div>
 
       <div class="grid three">
@@ -4295,7 +4295,7 @@ button,
     </section>
 
     <section id="routing" class="section">
-      <div class="toolbar"><div><h3>Маршрутизация</h3><div class="meta">Доменные правила и ночные проверки</div></div><div class="actions"><button class="btn" data-toast="Аудит запущен в демо-режиме"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/><path d="M8.5 11h5M11 8.5v5"/></svg>Аудит</button><button class="btn" data-confirm="Night reconcile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 7h10"/><path d="m11 4 3 3-3 3"/><path d="M20 17H10"/><path d="m13 14-3 3 3 3"/></svg>Сверить правила</button></div></div>
+      <div class="toolbar"><div><h3>Route Engine</h3><div class="meta">Доменные правила и ночные проверки</div></div><div class="actions"><button class="btn" disabled title="Console работает только для чтения"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/><path d="M8.5 11h5M11 8.5v5"/></svg>Аудит</button><button class="btn" disabled title="Console работает только для чтения"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 7h10"/><path d="m11 4 3 3-3 3"/><path d="M20 17H10"/><path d="m13 14-3 3 3 3"/></svg>Сверить правила</button></div></div>
       <div class="card">
         <div class="job-list">
           <div class="job"><div class="job-name"><i id="routeAutoDot"></i><div><strong>adaptive-auto-maint.sh</strong><p id="routeAutoText">Автоматическое обслуживание маршрутов.</p></div></div><time>каждые 5 мин</time><span class="status info" id="routeAutoPill">—</span></div>
@@ -4344,17 +4344,24 @@ button,
     <section id="settings" class="section">
       <div class="toolbar">
         <div>
-          <h3>Настройки</h3>
-          <div class="meta">Параметры наших сервисов. Пока сохраняются локально в браузере.</div>
+          <h3>Настройки платформы</h3>
+          <div class="meta">Политика обновлений и состояние компонентов. Только просмотр.</div>
         </div>
-        <div class="settings-actions">
+        <div class="settings-actions" hidden>
           <span class="save-state" id="settingsSaveState">Сохранено</span>
           <button class="btn" id="resetUiSettings">Сбросить</button>
           <button class="btn primary" id="saveUiSettings">Сохранить</button>
         </div>
       </div>
 
-      <div class="settings-grid">
+      <div class="grid three">
+        <div class="card"><div class="card-head"><h3>Smart Updater</h3><span class="status info" id="settingsUpdaterPill">—</span></div><div class="metric" id="settingsUpdaterMode">—</div><div class="sub" id="settingsUpdaterPhase">—</div></div>
+        <div class="card"><div class="card-head"><h3>Runtime Barrier</h3><span class="status info" id="settingsBarrierPill">—</span></div><div class="metric" id="settingsActiveSlot">—</div><div class="sub">активный слот Update Engine</div></div>
+        <div class="card"><div class="card-head"><h3>Компоненты</h3><span class="status info">РЕЕСТР</span></div><div class="metric" id="settingsComponentCount">—</div><div class="sub">установленных записей версий</div></div>
+      </div>
+      <div class="notice" style="margin-top:16px"><b>Безопасный режим:</b> Console не изменяет конфигурацию роутера. Обновления выполняет подписанный Smart Updater согласно <code>/opt/etc/vward/update.conf</code>.</div>
+
+      <div class="settings-grid" hidden>
 
         <div class="card settings-card">
           <div class="card-head">
@@ -4464,14 +4471,14 @@ button,
 
       </div>
 
-      <div class="toolbar settings-toolbar">
+      <div class="toolbar settings-toolbar" hidden>
         <div>
           <h3>Редакторы списков</h3>
           <div class="meta">Доменные списки для нашей маршрутизации. AdGuard Home остаётся отдельным сервисом.</div>
         </div>
       </div>
 
-      <div class="list-editor-grid">
+      <div class="list-editor-grid" hidden>
 
         <div class="card list-card">
           <div class="list-head">
@@ -4521,7 +4528,7 @@ button,
 
       </div>
 
-      <div class="card bulk-editor">
+      <div class="card bulk-editor" hidden>
         <div class="toolbar">
           <div>
             <h3>Редактор списком</h3>
@@ -4554,10 +4561,11 @@ button,
 
     <section id="system" class="section">
       <div class="toolbar"><div><h3>Система</h3><div class="meta">Инфраструктура наших приложений</div></div></div>
-      <div class="grid three">
+      <div class="grid apps">
+        <div class="card"><div class="card-head"><h3>VWARD Platform</h3><span class="status info" id="sysPlatformPhase">—</span></div><div class="metric" id="sysVwardVersion">—</div><div class="sub" id="sysPlatformUpdate">—</div><div class="kv"><span>Последовательность</span><span id="sysSequence">—</span><span>Update Engine</span><span id="sysSlot">—</span></div></div>
         <div class="card"><div class="card-head"><h3>Роутер</h3><span class="status ok">В СЕТИ</span></div><div class="metric" id="sysRouterModel">—</div><div class="sub" id="sysRouterVersion">—</div></div>
-        <div class="card"><div class="card-head"><h3>/opt</h3><span class="status ok">ЗАПИСЬ</span></div><div class="metric">57,6 ГБ</div><div class="sub">свободно из 57,8 ГБ · ext4</div></div>
-        <div class="card"><div class="card-head"><h3>Зависимости</h3><span class="status ok">Норма</span></div><div class="kv"><span>jq</span><span>1.8.1</span><span>curl</span><span>8.15.0</span><span>ndmc</span><span>/bin/ndmc</span></div></div>
+        <div class="card"><div class="card-head"><h3>/opt</h3><span class="status ok">ЗАПИСЬ</span></div><div class="metric" id="sysOptFree">—</div><div class="sub" id="sysOptStorage">—</div></div>
+        <div class="card"><div class="card-head"><h3>Зависимости</h3><span class="status ok">Норма</span></div><div class="kv"><span>jq</span><span id="sysJq">—</span><span>curl</span><span id="sysCurl">—</span><span>lighttpd</span><span id="sysLighttpd">—</span></div></div>
       </div>
       
       <div class="card external-settings" style="margin-top:16px">
@@ -5248,27 +5256,7 @@ document.getElementById('cancelModal').addEventListener('click',()=>modal.classL
 document.getElementById('confirmModal').addEventListener('click',()=>{modal.classList.remove('open');showToast('Демо: команда не отправлена')});
 modal.addEventListener('click',e=>{if(e.target===modal) modal.classList.remove('open')});
 
-const logs={
-  wan:`2026-09-05 23:26:04+0300 class=HEALTHY previous=NONE carrier=1 link=up internet=true
-2026-09-05 23:33:01+0300 cron wan-guardian.sh rc=0
-2026-09-05 23:56:25+0300 version=0.3-recovery class=HEALTHY action=NONE`,
-  recovery:`2026-09-05 23:56:25+0300 recovery=ENABLED
-confirm_failures=3
-renew_cooldown=600
-bounce_cooldown=1800
-reboot=DISABLED
-# Реальных recovery-действий пока не было.`,
-  cron:`crond: wan-guardian.sh rc=0
-crond: wg-health-watch.sh rc=0
-crond: wg-failopen-guard.sh rc=0
-crond: adaptive-auto-maint.sh rc=0
-crond-supervisor: RUNNING`,
-  routing:`adaptive-auto-maint: OK
-adaptive-live-watchdog: OK
-vpn-domain-audit-chain: scheduled 00:10
-adaptive-hints-update: scheduled 04:25
-adaptive-housekeeping: scheduled 04:45`
-};
+const logs={wan:'Загрузка…',recovery:'Загрузка…',cron:'Загрузка…',routing:'Загрузка…'};
 let currentLog='wan';
 const logbox=document.getElementById('logbox');
 const logSearch=document.getElementById('logSearch');
@@ -5363,15 +5351,8 @@ function updateAggregateHero(w, wg0ok, wg1ok, s){
   }
 }
 
-const KAPPS_API_PORT=8088;
-
 function apiBase(){
-  try{
-    const r=new URL(getExternalUrl('router'));
-    return `${r.protocol}//${r.hostname}:${KAPPS_API_PORT}/cgi-bin/api.cgi`;
-  }catch(_){
-    return `http://192.168.1.1:${KAPPS_API_PORT}/cgi-bin/api.cgi`;
-  }
+  return '/cgi-bin/api.cgi';
 }
 function setText(id,val,fallback='—'){
   const el=document.getElementById(id);
@@ -5412,6 +5393,7 @@ function applyHealth(id,ok,text){
 }
 function applyLiveStatus(data){
   const w=data.wan||{}, wg=data.wg||{}, s=data.services||{}, c=data.cron||{}, r=data.router||{};
+  const p=data.platform||{}, storage=data.storage||{}, deps=data.dependencies||{};
   const healthy=w.class==='HEALTHY';
   const speed=w.speed?`${w.speed} Мбит/с`:'—';
   const duplex=w.duplex==='full'?'полный':(w.duplex||'—');
@@ -5422,6 +5404,24 @@ function applyLiveStatus(data){
   setText('routerUptime',fmtUptime(r.uptime_sec));
   setText('sysRouterModel',r.model);
   setText('sysRouterVersion',r.version?`KeeneticOS ${r.version}`:'—');
+  setText('sysVwardVersion',p.version);
+  setText('sysPlatformPhase',p.phase||'IDLE');
+  setText('sysPlatformUpdate',p.auto_apply?'автоматические обновления включены':'автоматические обновления выключены');
+  setText('sysSequence',p.last_sequence);
+  setText('sysSlot',p.active_slot?`слот ${p.active_slot}`:'—');
+  const freeGb=Number(storage.free_kb||0)/1048576;
+  const totalGb=Number(storage.total_kb||0)/1048576;
+  setText('sysOptFree',freeGb>0?`${freeGb.toFixed(1)} ГБ`:'—');
+  setText('sysOptStorage',totalGb>0?`свободно из ${totalGb.toFixed(1)} ГБ · ${storage.filesystem||'—'}`:'—');
+  setText('sysJq',deps.jq);
+  setText('sysCurl',deps.curl);
+  setText('sysLighttpd',deps.lighttpd);
+  setText('settingsUpdaterMode',p.auto_apply?'АВТО':'РУЧНОЙ');
+  setText('settingsUpdaterPhase',`состояние: ${p.phase||'IDLE'} · sequence ${p.last_sequence||0}`);
+  setPill('settingsUpdaterPill',p.update_enabled,p.update_enabled?'ВКЛЮЧЁН':'ВЫКЛЮЧЕН');
+  setText('settingsActiveSlot',p.active_slot?`СЛОТ ${p.active_slot}`:'—');
+  setPill('settingsBarrierPill',p.barrier_ready,p.barrier_ready?'ГОТОВ':'НЕ ГОТОВ');
+  setText('settingsComponentCount',Object.keys(p.components||{}).length);
 
   setPill('ovWanPill',healthy,healthy?'АКТИВЕН':'ВНИМАНИЕ');
   setTitleStatus('ovWanTitleStatus',titleCaseStatus(fmtWanClass(w.class)),healthy?'ok':'bad');
@@ -5532,7 +5532,7 @@ function backendOffline(){
 }
 async function refreshLiveData(show=false){
   try{
-    const res=await fetch(`${apiBase()}?action=status&_=${Date.now()}`,{cache:'no-store',mode:'cors'});
+    const res=await fetch(`${apiBase()}?action=status&_=${Date.now()}`,{cache:'no-store'});
     if(!res.ok) throw new Error('HTTP '+res.status);
     const data=await res.json();
     if(!data.ok) throw new Error('backend');
@@ -5547,7 +5547,7 @@ async function refreshLiveData(show=false){
 }
 async function loadLiveLog(name){
   try{
-    const res=await fetch(`${apiBase()}?action=log&name=${encodeURIComponent(name)}&_=${Date.now()}`,{cache:'no-store',mode:'cors'});
+    const res=await fetch(`${apiBase()}?action=log&name=${encodeURIComponent(name)}&_=${Date.now()}`,{cache:'no-store'});
     if(!res.ok) throw new Error();
     logs[name]=await res.text();
     if(currentLog===name) renderLog();
@@ -5567,6 +5567,7 @@ document.querySelectorAll('.log-tab').forEach(btn=>{
 });
 
 refreshLiveData(false);
+refreshAllLogs();
 setInterval(()=>refreshLiveData(false),15000);
 
 </script>

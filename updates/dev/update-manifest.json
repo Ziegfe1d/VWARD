@@ -1,26 +1,29 @@
 {
   "signed": {
     "schema": 1,
-    "update_id": "vward-0.1.3-dev-component-platform",
-    "sequence": 2026090903,
-    "version": "0.1.3-dev",
+    "update_id": "vward-0.1.4-dev-console",
+    "sequence": 2026090904,
+    "version": "0.1.4-dev",
     "channel": "dev",
     "priority": "ROUTINE",
-    "published_at": "2026-09-09T23:20:00Z",
-    "min_updater_version": "1.1.0",
+    "published_at": "2026-09-09T23:55:00Z",
+    "min_updater_version": "1.2.0",
     "package": {
-      "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-0.1.3-dev.tar.gz",
-      "sha256": "9c12f8c09e565ce56707596a4b81085a4f838f51bbece299e40c9b7d101bd9f1",
-      "size": 406,
-      "unpacked_size": 347
+      "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-0.1.4-dev.tar.gz",
+      "sha256": "dbfb2de0f2ec2a44fbfe139f367872323a767052546b1430482ffb831019264b",
+      "size": 41636,
+      "unpacked_size": 183439
     },
     "compatibility": {
-      "min_vward": "0.1.2-dev",
-      "max_vward": "0.1.2-dev"
+      "min_vward": "0.1.3-dev",
+      "max_vward": "0.1.3-dev"
     },
-    "affected_components": ["platform-core"],
+    "affected_components": [
+      "platform-core",
+      "console"
+    ],
     "affected_services": [],
-    "health_profile": "default",
+    "health_profile": "console",
     "requires_reboot": false,
     "rollback_policy": "automatic",
     "signature": {
@@ -28,5 +31,5 @@
       "key_id": "vward-prod-2026-01"
     }
   },
-  "signature": "6HYqVtXWdZ9qlPUYHAmG699Xd0nG3ZZhRKdsJ8pKEViQ8GUz4KGq4cvcFuTP/G4ULHm2H/2phrFsFdl4/VhyCg=="
+  "signature": "ULuc+pnGZzlYCGJnaRItI55ocggH3SICDAkwjKTNJaucTI/c55QLydLBy03hyfz4DN9dERFhN3EPVdZ9jnvrDw=="
 }

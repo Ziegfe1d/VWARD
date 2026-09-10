@@ -8,30 +8,34 @@ WGET=/opt/bin/wget
 header_json()
 {
     echo 'Content-Type: application/json; charset=utf-8'
-    echo 'Access-Control-Allow-Origin: *'
-    echo 'Access-Control-Allow-Methods: GET, OPTIONS'
-    echo 'Access-Control-Allow-Headers: Content-Type'
-    echo 'Access-Control-Allow-Private-Network: true'
     echo 'Cache-Control: no-store'
+    echo 'X-Content-Type-Options: nosniff'
+    echo "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'"
     echo
 }
 
 header_text()
 {
     echo 'Content-Type: text/plain; charset=utf-8'
-    echo 'Access-Control-Allow-Origin: *'
-    echo 'Access-Control-Allow-Methods: GET, OPTIONS'
-    echo 'Access-Control-Allow-Headers: Content-Type'
-    echo 'Access-Control-Allow-Private-Network: true'
     echo 'Cache-Control: no-store'
+    echo 'X-Content-Type-Options: nosniff'
     echo
 }
 
-if [ "$REQUEST_METHOD" = "OPTIONS" ]; then
-    header_json
-    echo '{"ok":true}'
-    exit 0
-fi
+case "${REQUEST_METHOD:-GET}" in
+    GET) ;;
+    OPTIONS)
+        header_json
+        echo '{"ok":true}'
+        exit 0
+        ;;
+    *)
+        echo 'Status: 405 Method Not Allowed'
+        header_json
+        echo '{"ok":false,"error":"method_not_allowed"}'
+        exit 0
+        ;;
+esac
 
 qget()
 {
@@ -45,7 +49,7 @@ qget()
 
 fetch_json()
 {
-    DATA="$("$WGET" -qO- "$1" 2>/dev/null)"
+    DATA="$("$WGET" -qO- --timeout=3 --tries=1 "$1" 2>/dev/null)"
 
     echo "$DATA" |
     "$JQ" -c . 2>/dev/null ||
@@ -55,9 +59,18 @@ fetch_json()
 ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
+case "$ACTION" in
+    status|ping|log) ;;
+    *)
+        header_json
+        echo '{"ok":false,"error":"unknown_action"}'
+        exit 0
+        ;;
+esac
+
 if [ "$ACTION" = "ping" ]; then
     header_json
-    echo '{"ok":true,"service":"keenetic-apps-backend"}'
+    echo '{"ok":true,"service":"vward-console"}'
     exit 0
 fi
 
@@ -198,6 +211,29 @@ WGLAST="$(cat /tmp/wg-health-chain.cron.last 2>/dev/null)"
 RRC="$(cat /tmp/adaptive-auto-maint.cron.rc 2>/dev/null)"
 RLAST="$(cat /tmp/adaptive-auto-maint.cron.last 2>/dev/null)"
 
+VWARD_VERSION="$(sed -n '1p' /opt/share/vward/VERSION 2>/dev/null)"
+UPDATER_STATE=/opt/var/lib/vward/updater
+COMPONENTS="$($JQ -c '.components // {}' "$UPDATER_STATE/components.json" 2>/dev/null || echo '{}')"
+INSTALLED_UPDATE_ID="$(sed -n 's/^installed_update_id=//p' "$UPDATER_STATE/committed.state" 2>/dev/null)"
+LAST_SEQUENCE="$(sed -n 's/^last_sequence=//p' "$UPDATER_STATE/committed.state" 2>/dev/null)"
+LAST_HEALTH="$(sed -n 's/^last_health_check=//p' "$UPDATER_STATE/committed.state" 2>/dev/null)"
+UPDATE_PHASE="$(sed -n 's/^phase=//p' "$UPDATER_STATE/journal.state" 2>/dev/null)"
+HIGHEST_SEQUENCE="$(sed -n 's/^highest_seen_sequence=//p' "$UPDATER_STATE/trust.state" 2>/dev/null)"
+ACTIVE_SLOT="$(CDPATH= cd -- /opt/share/vward/updater/current 2>/dev/null && pwd -P)"
+
+UPDATE_ENABLED="$(sed -n 's/^update_enabled=//p' /opt/etc/vward/update.conf 2>/dev/null)"
+AUTO_APPLY="$(sed -n 's/^auto_apply=//p' /opt/etc/vward/update.conf 2>/dev/null)"
+BARRIER_READY="$(sed -n 's/^barrier_integration_ready=//p' /opt/etc/vward/update.conf 2>/dev/null)"
+
+OPT_TOTAL_KB="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $2}')"
+OPT_USED_KB="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $3}')"
+OPT_FREE_KB="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $4}')"
+OPT_FS="$(df -PT /opt 2>/dev/null | awk 'NR==2 {print $2}')"
+
+JQ_VERSION="$($JQ --version 2>/dev/null)"
+CURL_VERSION="$(curl --version 2>/dev/null | awk 'NR==1 {print $2}')"
+LIGHTTPD_VERSION="$(/opt/sbin/lighttpd -v 2>&1 | awk 'NR==1 {print $1}')"
+
 header_json
 
 "$JQ" -n \
@@ -225,11 +261,58 @@ header_json
   --arg wglast "$WGLAST" \
   --arg rrc "$RRC" \
   --arg rlast "$RLAST" \
+  --arg vward_version "$VWARD_VERSION" \
+  --arg installed_update_id "$INSTALLED_UPDATE_ID" \
+  --arg last_sequence "$LAST_SEQUENCE" \
+  --arg last_health "$LAST_HEALTH" \
+  --arg update_phase "$UPDATE_PHASE" \
+  --arg highest_sequence "$HIGHEST_SEQUENCE" \
+  --arg active_slot "$ACTIVE_SLOT" \
+  --arg update_enabled "$UPDATE_ENABLED" \
+  --arg auto_apply "$AUTO_APPLY" \
+  --arg barrier_ready "$BARRIER_READY" \
+  --argjson components "$COMPONENTS" \
+  --arg opt_total_kb "$OPT_TOTAL_KB" \
+  --arg opt_used_kb "$OPT_USED_KB" \
+  --arg opt_free_kb "$OPT_FREE_KB" \
+  --arg opt_fs "$OPT_FS" \
+  --arg jq_version "$JQ_VERSION" \
+  --arg curl_version "$CURL_VERSION" \
+  --arg lighttpd_version "$LIGHTTPD_VERSION" \
 '
 {
   ok:true,
 
   timestamp:$ts,
+
+  platform:{
+    name:"VWARD Platform",
+    version:$vward_version,
+    installed_update_id:$installed_update_id,
+    last_sequence:($last_sequence|tonumber? // 0),
+    highest_seen_sequence:($highest_sequence|tonumber? // 0),
+    last_health_check:$last_health,
+    phase:(if $update_phase=="" then "IDLE" else $update_phase end),
+    active_slot:($active_slot | split("/") | last),
+    update_enabled:($update_enabled=="1"),
+    auto_apply:($auto_apply=="1"),
+    barrier_ready:($barrier_ready=="1"),
+    components:$components
+  },
+
+  storage:{
+    total_kb:($opt_total_kb|tonumber? // 0),
+    used_kb:($opt_used_kb|tonumber? // 0),
+    free_kb:($opt_free_kb|tonumber? // 0),
+    filesystem:$opt_fs
+  },
+
+  dependencies:{
+    jq:$jq_version,
+    curl:$curl_version,
+    lighttpd:$lighttpd_version,
+    ndmc:"/bin/ndmc"
+  },
 
   router:{
     model:($ver.model // $ver.device // ""),

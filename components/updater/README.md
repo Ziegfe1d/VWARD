@@ -1,7 +1,10 @@
-# VWARD Smart Updater v1
+# VWARD Smart Updater v1.2
 
 Smart Updater v1 uses signed automatic installation after live-router rollback
 and updater-owned service-quiescing acceptance passed.
+
+Version 1.2 adds a live VWARD Console service/API health probe for console-only
+updates; failed activation is rolled back by the existing transaction engine.
 
 The updater uses a signed feed manifest, a versioned tar.gz package, exact VWARD target ownership, targeted hash-verified backups, transaction journaling, per-file sibling replacement, health checks and deterministic rollback.
 

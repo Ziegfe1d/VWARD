@@ -45,7 +45,7 @@ check_interval_seconds=900
 request_timeout_seconds=120
 important_max_delay_seconds=7200
 routine_max_delay_seconds=86400
-minimum_updater_version=1.1.0
+minimum_updater_version=1.2.0
 
 VU_REQUEST_MARKER=${VU_ROOT_PREFIX}/tmp/vward-update-requested
 VU_BARRIER_LOCK=${VU_ROOT_PREFIX}/tmp/vward-update.lock

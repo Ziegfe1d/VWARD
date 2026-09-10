@@ -47,6 +47,18 @@ done
 if [ -z "$VU_ROOT_PREFIX" ]; then
     command -v ndmc >/dev/null 2>&1 || vu_die "$VU_HEALTH_ERROR" "ndmc is unavailable"
     ndmc -c "show version" >/dev/null 2>&1 || vu_die "$VU_HEALTH_ERROR" "Keenetic control plane is unavailable"
+
+    if [ "$profile" = console ]; then
+        console_pid=$(cat /opt/var/run/keenetic-apps.pid 2>/dev/null || true)
+        [ -n "$console_pid" ] && kill -0 "$console_pid" 2>/dev/null ||
+            vu_die "$VU_HEALTH_ERROR" "VWARD Console service is unavailable"
+
+        console_ping=$(/opt/bin/wget -qO- --timeout=3 --tries=1 \
+            'http://127.0.0.1:8088/cgi-bin/api.cgi?action=ping' 2>/dev/null || true)
+        printf '%s\n' "$console_ping" | /opt/bin/jq -e \
+            '.ok == true and .service == "vward-console"' >/dev/null 2>&1 ||
+            vu_die "$VU_HEALTH_ERROR" "VWARD Console API health check failed"
+    fi
 fi
 
 vu_log INFO "Health profile $profile passed"
