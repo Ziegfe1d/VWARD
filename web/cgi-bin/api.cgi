@@ -213,36 +213,44 @@ VER="$(
     'http://127.0.0.1:79/rci/show/version'
 )"
 
-ISP="$(
-    fetch_json \
-    'http://127.0.0.1:79/rci/show/interface?name=ISP'
-)"
-
 INET="$(
     fetch_json \
     'http://127.0.0.1:79/rci/show/internet/status'
 )"
 
+DISCOVERY_PROVIDER=vward-discovery
+DISCOVERY_STATE=UNAVAILABLE
 WG_DISCOVERY_STATE=UNAVAILABLE
-WG_DISCOVERY_PROVIDER=vward-discovery
 WG_INTERFACES='[]'
+WAN_DISCOVERY_STATE=UNAVAILABLE
+WAN_DISCOVERY_SELECTION=''
+WAN_INTERFACE='{}'
 
 if [ -x "$DISCOVERY" ]; then
-    WG_DISCOVERY="$(
-        "$DISCOVERY" wireguard 2>/dev/null
+    DISCOVERY_SNAPSHOT="$(
+        "$DISCOVERY" snapshot 2>/dev/null
     )"
 
-    if printf '%s\n' "$WG_DISCOVERY" |
+    if printf '%s\n' "$DISCOVERY_SNAPSHOT" |
         "$JQ" -e '
             type == "object" and
-            .kind == "wireguard" and
-            (.interfaces | type == "array")
+            .kind == "snapshot" and
+            (.wireguard.interfaces | type == "array") and
+            (.wan.interfaces | type == "array") and
+            (.roles.tunnel_guard | type == "object") and
+            (.roles.wan_guard | type == "object")
         ' >/dev/null 2>&1
     then
+        DISCOVERY_PROVIDER="$(
+            printf '%s\n' "$DISCOVERY_SNAPSHOT" |
+            "$JQ" -r '.provider // "vward-discovery"' 2>/dev/null
+        )"
+        DISCOVERY_STATE=READY
+
         WG_INTERFACES="$(
-            printf '%s\n' "$WG_DISCOVERY" |
+            printf '%s\n' "$DISCOVERY_SNAPSHOT" |
             "$JQ" -c '[
-                .interfaces[] |
+                .wireguard.interfaces[] |
                 {
                     name:(.rci_id // ""),
                     rci_id:(.rci_id // ""),
@@ -258,13 +266,22 @@ if [ -x "$DISCOVERY" ]; then
                 }
             ]' 2>/dev/null
         )"
-
         [ -n "$WG_INTERFACES" ] || WG_INTERFACES='[]'
-        WG_DISCOVERY_PROVIDER="$(
-            printf '%s\n' "$WG_DISCOVERY" |
-            "$JQ" -r '.provider // "vward-discovery"' 2>/dev/null
-        )"
         WG_DISCOVERY_STATE=READY
+
+        WAN_DISCOVERY_STATE="$(
+            printf '%s\n' "$DISCOVERY_SNAPSHOT" |
+            "$JQ" -r '.roles.wan_guard.state // "UNAVAILABLE"' 2>/dev/null
+        )"
+        WAN_DISCOVERY_SELECTION="$(
+            printf '%s\n' "$DISCOVERY_SNAPSHOT" |
+            "$JQ" -r '.roles.wan_guard.selection // ""' 2>/dev/null
+        )"
+        WAN_INTERFACE="$(
+            printf '%s\n' "$DISCOVERY_SNAPSHOT" |
+            "$JQ" -c '.roles.wan_guard.interface // {}' 2>/dev/null
+        )"
+        [ -n "$WAN_INTERFACE" ] || WAN_INTERFACE='{}'
     fi
 fi
 
@@ -392,10 +409,13 @@ header_json
 "$JQ" -n \
   --arg ts "$(date '+%Y-%m-%dT%H:%M:%S%z')" \
   --argjson ver "$VER" \
-  --argjson isp "$ISP" \
+  --argjson wan_interface "$WAN_INTERFACE" \
   --argjson inet "$INET" \
+  --arg discovery_provider "$DISCOVERY_PROVIDER" \
+  --arg discovery_state "$DISCOVERY_STATE" \
+  --arg wan_discovery_state "$WAN_DISCOVERY_STATE" \
+  --arg wan_discovery_selection "$WAN_DISCOVERY_SELECTION" \
   --argjson wg_interfaces "$WG_INTERFACES" \
-  --arg wg_discovery_provider "$WG_DISCOVERY_PROVIDER" \
   --arg wg_discovery_state "$WG_DISCOVERY_STATE" \
   --arg gv "$GVERSION" \
   --arg gm "$GMODE" \
@@ -494,21 +514,40 @@ header_json
     uptime_sec:($uptime|tonumber? // 0)
   },
 
+  discovery:{
+    provider:$discovery_provider,
+    state:$discovery_state
+  },
+
   wan:{
+    discovery:{
+      provider:$discovery_provider,
+      state:$wan_discovery_state,
+      selection:$wan_discovery_selection
+    },
+    observer_source:"legacy-wan-guardian",
     class:$gc,
     version:$gv,
     mode:$gm,
     action:$ga,
 
-    link:($isp.link // ""),
-    connected:($isp.connected // ""),
-    state:($isp.state // ""),
+    rci_id:($wan_interface.rci_id // ""),
+    interface_name:($wan_interface.interface_name // ""),
+    linux_if:($wan_interface.linux_if // ""),
+    mapping:($wan_interface.mapping // ""),
+    via_rci_id:($wan_interface.via_rci_id // ""),
+    via_linux_if:($wan_interface.via_linux_if // ""),
+    type:($wan_interface.type // ""),
 
-    address:($isp.address // ""),
+    link:($wan_interface.link // ""),
+    connected:($wan_interface.connected // ""),
+    state:($wan_interface.state // ""),
+
+    address:($wan_interface.address // ""),
     gateway:($inet.gateway.address // ""),
 
-    speed:($isp.port.speed // ""),
-    duplex:($isp.port.duplex // ""),
+    speed:($wan_interface.port_speed // ""),
+    duplex:($wan_interface.port_duplex // ""),
     carrier:$carrier,
 
     gateway_accessible:
@@ -532,7 +571,7 @@ header_json
 
   wg:{
     discovery:{
-      provider:$wg_discovery_provider,
+      provider:$discovery_provider,
       state:$wg_discovery_state
     },
     interfaces:$wg_interfaces,
