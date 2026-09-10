@@ -286,12 +286,16 @@ if [ -x "$DISCOVERY" ]; then
 fi
 
 WAN_HEALTH_STATE=/opt/var/lib/wan-health/state
+WAN_OBSERVER_PRESENT=0
 WAN_STATUS="UNKNOWN"
 WAN_CLASS="OBSERVER_UNAVAILABLE"
 WAN_OBSERVER_LAST=""
 WAN_OBSERVER_AGE=-1
 WAN_OBSERVER_FAIL=0
 WAN_OBSERVER_OK=0
+WAN_OBSERVER_DISCOVERY_STATE="UNAVAILABLE"
+WAN_OBSERVER_RCI_ID=""
+WAN_OBSERVER_LINUX_IF=""
 WAN_CARRIER="unknown"
 
 wan_health_value()
@@ -303,15 +307,22 @@ wan_health_value()
 }
 
 if [ -r "$WAN_HEALTH_STATE" ]; then
+    WAN_OBSERVER_PRESENT=1
     WAN_STATUS="$(wan_health_value STATUS)"
     WAN_CLASS="$(wan_health_value CLASS)"
     WAN_OBSERVER_LAST="$(wan_health_value LAST_CHECK)"
     WAN_OBSERVER_FAIL="$(wan_health_value FAIL_COUNT)"
     WAN_OBSERVER_OK="$(wan_health_value OK_COUNT)"
+    WAN_OBSERVER_DISCOVERY_STATE="$(wan_health_value DISCOVERY_STATE)"
+    WAN_OBSERVER_RCI_ID="$(wan_health_value RCI_ID)"
+    WAN_OBSERVER_LINUX_IF="$(wan_health_value LINUX_IF)"
     WAN_CARRIER="$(wan_health_value CARRIER)"
 
     [ -n "$WAN_STATUS" ] || WAN_STATUS="UNKNOWN"
     [ -n "$WAN_CLASS" ] || WAN_CLASS="UNKNOWN"
+    [ -n "$WAN_OBSERVER_DISCOVERY_STATE" ] || WAN_OBSERVER_DISCOVERY_STATE="UNAVAILABLE"
+    [ "$WAN_OBSERVER_RCI_ID" = "none" ] && WAN_OBSERVER_RCI_ID=""
+    [ "$WAN_OBSERVER_LINUX_IF" = "none" ] && WAN_OBSERVER_LINUX_IF=""
     [ -n "$WAN_CARRIER" ] || WAN_CARRIER="unknown"
 
     case "$WAN_OBSERVER_FAIL" in
@@ -333,11 +344,39 @@ if [ -r "$WAN_HEALTH_STATE" ]; then
             esac
             ;;
     esac
+fi
 
-    if [ "$WAN_OBSERVER_AGE" -lt 0 ] || [ "$WAN_OBSERVER_AGE" -gt 180 ]; then
-        WAN_STATUS="UNKNOWN"
-        WAN_CLASS="OBSERVER_STALE"
-    fi
+WAN_CURRENT_RCI_ID="$(
+    printf '%s\n' "$WAN_INTERFACE" |
+    "$JQ" -r '.rci_id // ""' 2>/dev/null
+)"
+WAN_CURRENT_LINUX_IF="$(
+    printf '%s\n' "$WAN_INTERFACE" |
+    "$JQ" -r '.linux_if // ""' 2>/dev/null
+)"
+
+if [ "$WAN_DISCOVERY_STATE" != "READY" ]; then
+    WAN_STATUS="UNKNOWN"
+    WAN_CLASS="DISCOVERY_${WAN_DISCOVERY_STATE}"
+elif [ "$WAN_OBSERVER_PRESENT" -ne 1 ]; then
+    WAN_STATUS="UNKNOWN"
+    WAN_CLASS="OBSERVER_UNAVAILABLE"
+elif [ "$WAN_OBSERVER_AGE" -lt 0 ] || [ "$WAN_OBSERVER_AGE" -gt 180 ]; then
+    WAN_STATUS="UNKNOWN"
+    WAN_CLASS="OBSERVER_STALE"
+elif [ "$WAN_OBSERVER_DISCOVERY_STATE" != "READY" ]; then
+    WAN_STATUS="UNKNOWN"
+    WAN_CLASS="OBSERVER_DISCOVERY_MISMATCH"
+elif [ -z "$WAN_CURRENT_RCI_ID" ]; then
+    WAN_STATUS="UNKNOWN"
+    WAN_CLASS="DISCOVERY_INVALID_RESULT"
+elif [ "$WAN_OBSERVER_RCI_ID" != "$WAN_CURRENT_RCI_ID" ]; then
+    WAN_STATUS="UNKNOWN"
+    WAN_CLASS="OBSERVER_ROLE_MISMATCH"
+elif [ -n "$WAN_CURRENT_LINUX_IF" ] &&
+     [ "$WAN_OBSERVER_LINUX_IF" != "$WAN_CURRENT_LINUX_IF" ]; then
+    WAN_STATUS="UNKNOWN"
+    WAN_CLASS="OBSERVER_MAPPING_MISMATCH"
 fi
 
 GOUT=/tmp/wan-guardian.cron.out
