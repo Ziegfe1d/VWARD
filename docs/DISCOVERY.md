@@ -1,276 +1,147 @@
 # VWARD Discovery
 
-`VWARD Discovery` - read-only слой обнаружения фактической сетевой топологии. Он входит
-в `VWARD Runtime` и не является отдельным продуктом.
+`VWARD Discovery` - read-only слой обнаружения фактической сетевой топологии. Он входит в `VWARD Runtime` и не является отдельным продуктом.
 
 ## Принцип
 
-VWARD должна работать по цепочке:
+VWARD работает по цепочке:
 
 `DISCOVER -> CLASSIFY -> VALIDATE -> SELECT BY ROLE -> PLAN -> ACT`
 
-Компоненты не должны угадывать имена интерфейсов или использовать значения конкретной
-установки как обязательные runtime-константы.
+Компоненты не должны угадывать имена интерфейсов или использовать значения конкретной установки как обязательные runtime-константы.
 
 ## Сопоставление RCI и Linux
 
-Для RCI-интерфейса Discovery сначала запрашивает штатное системное имя Keenetic через
-`show/interface/system-name?name=<RCI_ID>`. Если оно недоступно, допускается read-only
-fallback по фактическому IPv4-адресу из RCI и `ip addr`.
+Для RCI-интерфейса Discovery сначала запрашивает штатное системное имя Keenetic через `show/interface/system-name?name=<RCI_ID>`. Если оно недоступно, допускается read-only fallback по фактическому IPv4-адресу из RCI и `ip addr`.
 
-Имена вида `nwgN`, `ethN` и номера интерфейсов не конструируются из RCI ID. Если
-однозначное сопоставление невозможно, `linux_if` остаётся пустым и `mapping` получает
-значение `unresolved`.
+Имена вида `nwgN`, `ethN` и номера интерфейсов не конструируются из RCI ID. Если однозначное сопоставление невозможно, `linux_if` остаётся пустым и `mapping` получает значение `unresolved`.
 
-## WireGuard inventory
+## WireGuard inventory и роль Tunnel Guard
 
-`vward-discovery.sh wireguard` читает полный RCI inventory интерфейсов и выбирает
-объекты по фактическому `type == "Wireguard"`, а не по имени `Wireguard0`,
-`Wireguard1` или номеру интерфейса.
+`vward-discovery.sh wireguard` читает полный RCI inventory и выбирает объекты по фактическому `type == "Wireguard"`, а не по имени `Wireguard0`, `Wireguard1` или номеру интерфейса.
 
-Для каждого найденного туннеля возвращаются `rci_id`, `linux_if`, `mapping`,
-`description`, `index`, `address`, `link`, `connected` и `state`.
-
-## Выбор роли Tunnel Guard
-
-`vward-discovery.sh tunnel-guard` не выбирает случайный туннель:
-
+`vward-discovery.sh tunnel-guard` использует fail-safe selection:
 - 0 кандидатов -> `NOT_FOUND`;
-- ровно 1 кандидат -> `READY`, `single-candidate`;
+- 1 кандидат -> `READY`, `single-candidate`;
 - несколько кандидатов -> `REQUIRES_SELECTION`;
 - сохранённый `tunnel_guard_rci_id` существует -> `READY`, `configured`;
 - сохранённый ID исчез -> `STALE_MAPPING`.
 
-Конфигурация role mapping читается из `/opt/etc/vward/discovery.conf`.
-VWARD Discovery сам не записывает этот файл и не меняет Keenetic.
+Role mapping читается из `/opt/etc/vward/discovery.conf`. Discovery сам этот файл не изменяет.
 
-Пример:
+## WAN inventory и роль WAN Guard
 
-```text
-tunnel_guard_rci_id=OfficeTunnel
-```
+`vward-discovery.sh wan` строит список интернет-uplink по фактическим свойствам RCI, а не по имени `ISP` или Linux-интерфейсу.
 
-## WAN/uplink inventory
-
-`vward-discovery.sh wan` строит read-only список интернет-uplink по фактическим
-свойствам RCI, а не по имени `ISP` или Linux-интерфейсу.
-
-Автоматическим WAN-кандидатом считается интерфейс, у которого одновременно:
-
+Автоматическим WAN-кандидатом является интерфейс, у которого одновременно:
 - `global == true`;
 - `defaultgw == true`;
 - `security-level == public`;
 - роль `misc` отсутствует.
 
-Последнее правило принципиально: VPN-туннель с default route не должен становиться
-целью WAN Guard. Оно применяется и к автоматическому выбору, и к явному mapping.
+VPN с default route не должен становиться целью WAN Guard только из-за наличия default route.
 
-Для WAN возвращаются `rci_id`, `interface_name`, `linux_if`, `mapping`, тип,
-роль, адрес, состояние, `defaultgw`, `priority` и `security_level`.
+Для WAN возвращаются фактические `rci_id`, `linux_if`, mapping, type, role, address, state, `defaultgw`, priority и security level. Для PPPoE и других логических подключений дополнительно сохраняются `via_rci_id`, `via_linux_if` и `via_mapping`.
 
-Для логических подключений, например PPPoE, дополнительно сохраняются `via_rci_id`,
-`via_linux_if` и `via_mapping`. Это позволяет отличать логический uplink от нижнего
-физического интерфейса и выбирать recovery по типу подключения.
+`vward-discovery.sh wan-guard` поддерживает:
+- `NOT_FOUND`;
+- `READY`;
+- `REQUIRES_SELECTION`;
+- `STALE_MAPPING`;
+- `INVALID_MAPPING`.
 
-## Выбор роли WAN Guard
-
-`vward-discovery.sh wan-guard` использует тот же fail-safe подход:
-
-- 0 кандидатов -> `NOT_FOUND`;
-- ровно 1 кандидат -> `READY`, `single-candidate`;
-- несколько кандидатов -> `REQUIRES_SELECTION`;
-- `wan_guard_rci_id` существует и является допустимым public/global uplink без роли
-  `misc` -> `READY`, `configured`;
-- сохранённый ID исчез -> `STALE_MAPPING`;
-- сохранённый ID существует, но не является допустимым WAN target -> `INVALID_MAPPING`.
-
-Явно выбранный WAN остаётся выбранным, даже если временно теряет `defaultgw`. Это нужно,
-чтобы recovery-логика могла диагностировать именно назначенный uplink во время отказа,
-не переключаясь самовольно на другой маршрут.
-
-Пример:
-
-```text
-wan_guard_rci_id=GigabitEthernet1
-```
+Явно выбранный WAN остаётся выбранным при временной потере `defaultgw`, чтобы recovery диагностировала назначенный uplink, а не самовольно переключалась на другой.
 
 ## Unified snapshot
 
-`vward-discovery.sh snapshot` выполняет один discovery-проход и возвращает единый
-machine-readable объект:
-
+`vward-discovery.sh snapshot` выполняет один discovery-проход и возвращает:
 - `wireguard.interfaces`;
 - `wan.interfaces`;
 - `roles.tunnel_guard`;
 - `roles.wan_guard`.
 
-Snapshot нужен потребителям, которым одновременно требуются несколько частей topology.
-VWARD Console использует один snapshot на status request, а не запускает отдельный
-полный RCI inventory для WireGuard и WAN. Это уменьшает число RCI/system-name обращений
-и сохраняет один источник истины.
+VWARD Console использует один snapshot на status request, что уменьшает повторные RCI/system-name обращения и сохраняет единый источник истины.
 
-## Интеграция Tunnel Guard health
+## Tunnel Guard health
 
-В `0.2.0-beta.1` read-only health watcher использует роль `tunnel-guard` из VWARD
-Discovery.
+В Beta `wg-health-watch.sh` использует роль `tunnel-guard` из VWARD Discovery. Он получает реальные `rci_id` и `linux_if`; при ambiguity, stale mapping или unresolved Linux mapping health становится `UNKNOWN` без guessed probes и mutation.
 
-`wg-health-watch.sh`:
+`wg-failopen-guard.sh` пока остаётся следующим high-risk этапом Zero-Hardcode refactor.
 
-- не содержит фиксированного `WireguardN` для RCI;
-- не содержит фиксированного `nwgN` для network probe;
-- получает `rci_id` и `linux_if` из discovery result;
-- запрашивает RCI только по уже обнаруженному `rci_id`;
-- выполняет network probe только через уже сопоставленный `linux_if`;
-- связывает RCI cache с конкретным `RCI_ID`;
-- сохраняет discovery state и фактические IDs в health state.
+## WAN Guard health
 
-Если mapping неоднозначен, устарел, discovery недоступен или Linux interface не
-сопоставлен, health state становится `UNKNOWN`. В таком состоянии watcher не делает
-пробных запросов к предполагаемым интерфейсам и не выполняет mutation.
+`wan-health-watch.sh` - отдельный read-only observer. Он использует только discovered роль `wan-guard`, различает logical `PATH_IF` и physical `PHYSICAL_IF`, а probes привязывает к фактическому выбранному path.
 
-`wg-failopen-guard.sh` пока не переведён на новый role contract. Это намеренное
-разделение read-only наблюдения и high-risk mutation.
+Глобальный Keenetic Internet status используется только как дополнительный диагностический сигнал. Он не может самостоятельно сделать выбранный WAN `HEALTHY`, поэтому другой рабочий uplink не маскирует отказ наблюдаемой роли.
 
-## Интеграция WAN Guard health
+При `REQUIRES_SELECTION`, `STALE_MAPPING`, `INVALID_MAPPING`, unresolved Linux mapping или physical carrier down observer работает fail-safe и не запускает guessed/unbound probes.
 
-`wan-health-watch.sh` является отдельным read-only observer и использует только роль
-`wan-guard` из VWARD Discovery. Он не содержит `ndmc`, DHCP renew, interface down/up
-или других сетевых mutation.
+State атомарно записывается в `/opt/var/lib/wan-health/state`, журнал - `/opt/var/log/wan-health.log`.
 
-Observer различает логический и физический путь:
+## WAN capability и recovery pipeline
 
-- `PATH_IF` - фактический `linux_if` выбранного WAN, через который привязываются probes;
-- `PHYSICAL_IF` - `via_linux_if` для PPPoE/логического uplink либо тот же `linux_if`
-  для обычного Ethernet.
+Подробный authoritative контракт находится в `docs/WAN_RECOVERY_PIPELINE.md`.
 
-Gateway и внешние probes выполняются только с `-I PATH_IF`. Глобальный
-`show/internet/status` используется как дополнительный диагностический сигнал, но не
-может сам по себе сделать выбранный WAN здоровым. `HEALTHY` требует успешного probe,
-привязанного именно к выбранному WAN path. Поэтому другой рабочий uplink не маскирует
-отказ наблюдаемой роли.
+Текущая Beta-цепочка:
 
-При `REQUIRES_SELECTION`, `STALE_MAPPING`, `INVALID_MAPPING`, недоступном Discovery или
-неразрешённом Linux mapping observer возвращает `UNKNOWN` и не запускает guessed/unbound
-probes. При физическом carrier down внешние probes также не выполняются.
+`Discovery -> Observer -> Capability -> Planner -> Controller -> Actuator`
 
-Состояние атомарно записывается в `/opt/var/lib/wan-health/state`, переходы class/status
-журналируются в `/opt/var/log/wan-health.log`. Observer запускается отдельной cron
-строкой и не объединён с legacy recovery.
+`wan-capability.sh` является read-only Capability Provider. Он повторно подтверждает текущую роль `wan-guard`, читает `show running-config`, но не публикует сам конфиг. DHCP считается подтверждённым только при фактическом `ip address dhcp` в блоке выбранного интерфейса. Тип `GigabitEthernet` сам по себе не является доказательством DHCP.
 
-## WAN Recovery Planner dry-run
+`wan-recovery-plan.sh` остаётся `dryrun` и всегда возвращает `EXECUTED=NO`. Он требует свежий observer state, повторную проверку WAN role/mapping и заданное число подтверждённых ошибок.
 
-`wan-recovery-plan.sh` - отдельный decision layer. Он уже использует role contract,
-но намеренно не выполняет сетевых действий и пока не запускается из cron.
+Допустимые планы:
+- logical/session failure -> `SESSION_RECONNECT`;
+- confirmed physical path failure -> `INTERFACE_RECONNECT`;
+- physical `ADDRESS_FAILURE` + подтверждённый DHCP -> `DHCP_RENEW`.
 
-Перед выдачей любого плана Planner:
+Static/unknown capability, DNS-only failure, physical carrier down, ambiguity, stale/mismatch и недостаточное число подтверждений не дают права на mutation.
 
-- требует свежий `/opt/var/lib/wan-health/state`;
-- повторно вызывает `vward-discovery.sh wan-guard`;
-- требует `state == READY`;
-- сверяет observer `RCI_ID` с текущим `rci_id`;
-- сверяет observer `LINUX_IF` с текущим `linux_if`;
-- требует заданное число подтверждённых ошибок;
-- возвращает только `HOLD`, `DEFER`, `BLOCKED` или `PLAN`;
-- всегда публикует `EXECUTED=NO`.
+`wan-recovery-actuator.sh` тоже остаётся `dryrun`. Он повторно валидирует роль, mapping и, для DHCP, capability непосредственно перед готовностью к действию. Он не принимает shell-command text, не использует `eval` и всегда возвращает `EXECUTED=NO`.
 
-Type-aware правила первой версии:
+`wan-recovery-controller.sh` является единственным новым Execution Gate. Он пропускает к Actuator только `DECISION=PLAN`, проверяет typed action/target handoff, использует собственный lock и также всегда возвращает `EXECUTED=NO`.
 
-- `UP/HEALTHY` -> `HOLD`;
-- `UNKNOWN`, stale observer, role/mapping mismatch или неготовый Discovery -> `BLOCKED`;
-- `DEGRADED`, DNS-only и utility/discovery классы -> `HOLD`;
-- `PHY_DOWN` -> `HOLD`, без слепого bounce;
-- до порога подтверждений -> `DEFER`;
-- логический `SESSION_FAILURE` -> `PLAN SESSION_RECONNECT`;
-- логический `ADDRESS_FAILURE` -> `PLAN SESSION_RECONNECT`, а не DHCP renew;
-- физический `ADDRESS_FAILURE` -> `HOLD addressing_capability_required`;
-- подтверждённый logical path failure -> `PLAN SESSION_RECONNECT`;
-- подтверждённый physical path failure -> `PLAN INTERFACE_RECONNECT`;
-- `ROUTE_FAILURE` -> `HOLD route_recheck_required`.
-
-Ключевой принцип: тип `GigabitEthernet` сам по себе не доказывает DHCP-capability.
-Поэтому новый Planner не наследует слепой `DHCP_RENEW` из legacy recovery. Capability
-должна быть положительно обнаружена отдельным этапом до появления такого action.
-
-Planner не содержит `ndmc`, DHCP renew, interface down/up, `ISP`, `eth3` или других
-installation-specific targets. `wan-guardian.sh` пока остаётся отдельным legacy
-mutating path, а `wan-recovery-actuator.sh` - отдельным legacy dry-run actuator. Новый
-Planner с ними не связан.
+Новые Planner/Controller/Actuator пока не запускаются из cron. Реальный production recovery остаётся в legacy `wan-guardian.sh` до отдельной приёмки mutating path.
 
 ## Интеграция VWARD Console
 
-Console API использует общий `VWARD Discovery` через один вызов `snapshot`.
-`api.cgi` больше не выполняет отдельный полный `show/interface`, не фильтрует
-`WireguardN` и не запрашивает WAN через `show/interface?name=ISP`.
+Console API использует один `vward-discovery.sh snapshot`. CGI больше не поддерживает отдельный full interface inventory, не фильтрует `WireguardN` и не запрашивает WAN через `show/interface?name=ISP`.
 
-Для WireGuard compatibility-поле `name` сохранено как alias фактического `rci_id`.
-В `wg.discovery` публикуются provider и state.
+Для WireGuard compatibility-поле `name` остаётся alias фактического `rci_id`. WAN API публикует discovery state и фактические RCI/Linux IDs.
 
-WAN topology выбирается через `roles.wan_guard`. API публикует
-`wan.discovery.state/selection`, фактические `rci_id`, `linux_if`, `via_rci_id`,
-`via_linux_if` и тип uplink.
+`wan.status` и `wan.class` приходят из `/opt/var/lib/wan-health/state`. Stale observer state, другой RCI/Linux mapping или текущий не-READY `wan-guard` переводят отображаемое состояние в `UNKNOWN`.
 
-Поля `wan.status` и `wan.class` приходят из `/opt/var/lib/wan-health/state` и помечены
-`observer_source=wan-health-watch`. State старше 180 секунд считается `OBSERVER_STALE`.
-Кроме возраста API сверяет observer state с текущим Discovery snapshot: другой RCI ID,
-другая Linux-привязка или текущий не-READY WAN role переводят отображаемое состояние
-в `UNKNOWN`, а не оставляют старое `UP`.
-
-`wan.action`, `recovery_count`, `recovery_stage` и legacy recovery class пока читаются
-из существующего `wan-guardian.sh` и помечены `recovery_source=legacy-wan-guardian`.
-Observer и recovery остаются раздельными источниками до отдельной миграции mutating path.
-Recovery Planner пока не является управляющим источником Console и не инициирует action.
-
-Frontend использует `wan.status`, а не глобальный `internet=true`, для WAN-карточки,
-hero, настроек и session chart. Поэтому резервный рабочий uplink не делает отказавший
-выбранный WAN визуально зелёным.
-
-Если `/opt/bin/vward-discovery.sh` отсутствует, не исполняется или возвращает
-некорректный snapshot, Console работает fail-safe: общий `discovery.state=UNAVAILABLE`,
-WireGuard inventory пуст, WAN role не подменяется guessed interface.
+Legacy recovery telemetry пока явно маркируется `recovery_source=legacy-wan-guardian`. Frontend определяет здоровье WAN по `wan.status`, а не по глобальному `internet=true`.
 
 ## Совместимость Keenetic/Entware
 
-Production-логика не должна зависеть от regex-функций `jq` `test()`, `match()` или
-`sub()`, потому что целевой Entware `jq` может быть собран без ONIGURUMA.
+Production-логика не должна зависеть от regex-функций `jq` `test()`, `match()` или `sub()`, потому что целевой Entware `jq` может быть собран без ONIGURUMA.
 
-Скрипты используют обычные JSON-операции `jq` и POSIX/BusyBox-совместимые `sh`/`awk`.
+Скрипты должны оставаться POSIX/BusyBox-совместимыми. Desktop Linux acceptance сам по себе не заменяет проверку целевого Keenetic runtime.
 
 ## Тестируемые инварианты
 
-Repository tests проверяют:
-
-- 0/1/N WireGuard и произвольные RCI ID;
-- explicit и stale Tunnel Guard mapping;
-- системное Linux-имя с fallback по адресу;
-- discovery-driven Tunnel Guard health без guessed probes;
-- один WAN, несколько WAN и explicit WAN mapping;
-- PPPoE `via` и нижележащий Linux-интерфейс;
-- сохранение выбранной WAN-роли при временной потере `defaultgw`;
-- `STALE_MAPPING` и `INVALID_MAPPING` для WAN;
-- исключение VPN `misc` из WAN inventory и explicit mapping;
-- отдельный read-only WAN observer без mutation-команд;
-- probes WAN observer привязаны к discovered `PATH_IF`;
-- глобально рабочий другой uplink не может классифицировать выбранный WAN как `HEALTHY`;
-- ambiguity, carrier down и unresolved mapping не запускают guessed probes;
-- Recovery Planner остаётся dry-run и всегда `EXECUTED=NO`;
-- Planner повторно проверяет текущую WAN role, freshness и RCI/Linux mapping;
-- Planner не планирует DHCP renew без подтверждённой addressing capability;
-- Planner различает logical session reconnect и physical interface reconnect;
-- Planner не запускается из cron до отдельной приёмки actuator;
-- Console выполняет ровно один Discovery snapshot на status request;
-- Console сверяет WAN observer state с текущим role mapping и freshness;
-- Console visual WAN state использует `wan.status`, а не глобальный `internet`;
-- observer и legacy recovery запускаются отдельными cron entries;
-- отсутствие installation-specific `WireguardN`, `nwgN`, LAN subnet и policy-list ID
-  в самом discovery provider;
-- отсутствие зависимости от jq regex.
+Repository tests покрывают:
+- 0/1/N WireGuard и произвольные RCI IDs;
+- explicit/stale role mapping;
+- RCI -> Linux mapping;
+- WAN Ethernet/PPPoE и `via`;
+- несколько uplink и исключение VPN `misc`;
+- observer selected-path isolation;
+- DHCP/static/logical capability без утечки running-config credentials;
+- Planner/Actuator typed actions;
+- Planner -> Actuator pipeline;
+- TOCTOU смены WAN role;
+- TOCTOU смены DHCP capability;
+- Controller lock и запрет обхода Planner;
+- `EXECUTED=NO` во всех новых recovery слоях;
+- отсутствие `ISP`, `eth3`, guessed WireGuard IDs и jq ONIGURUMA-зависимости в новом Discovery-driven path.
 
 ## Следующие этапы
 
-1. Сделать динамический WAN actuator в `dryrun`: повторная role/capability validation непосредственно перед action.
-2. Отдельно обнаруживать capability подключения, включая DHCP, без вывода из имени или типа интерфейса.
-3. Только после отдельного acceptance подключать Planner к actuator и решать вопрос реальных mutation.
-4. После этого убрать legacy `ISP`/`eth3` из mutating WAN paths.
-5. Перевести `wg-failopen-guard.sh` на фактические Tunnel/WAN role IDs.
-6. Затем переводить Policy Sync и Route Engine на общий role mapping.
-7. После стабилизации discovery/recovery перейти к due-based/idle-aware Maintenance Coordinator.
+1. Отдельно принять exact mutation для `DHCP_RENEW`, `INTERFACE_RECONNECT`, `SESSION_RECONNECT` на целевом Keenetic.
+2. Добавить execution-enable switch с default `off`, cooldown/rate-limit, post-check и persistent recovery state.
+3. Только после live acceptance заменять legacy `wan-guardian.sh` новым Controller/Actuator path.
+4. Затем перевести `wg-failopen-guard.sh` на Tunnel/WAN roles.
+5. После этого переводить Policy Sync и Route Engine на общий role contract.
+6. Затем переходить к due-based/idle-aware Maintenance Coordinator.
