@@ -205,6 +205,7 @@ wan_interface_json()
             via_mapping:$via_mapping,
             description:(.description // ""),
             type:(.type // ""),
+            role:(.role // []),
             index:(.index // null),
             address:(.address // ""),
             link:(.link // ""),
@@ -246,6 +247,7 @@ WAN_IDS="$(
         select((.value.global // false) == true) |
         select((.value.defaultgw // false) == true) |
         select((.value["security-level"] // "") == "public") |
+        select(((.value.role // []) | index("misc")) == null) |
         .key
     ' 2>/dev/null
 )"
@@ -408,7 +410,8 @@ wan_guard_selection()
             printf '%s\n' "$INTERFACES" |
             "$JQ" -r --arg n "$PREFERRED" '
                 ((.[$n].global // false) == true) and
-                ((.[$n]["security-level"] // "") == "public")
+                ((.[$n]["security-level"] // "") == "public") and
+                (((.[$n].role // []) | index("misc")) == null)
             ' 2>/dev/null
         )"
 
