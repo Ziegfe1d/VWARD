@@ -54,6 +54,7 @@ run_watch()
     VWARD_SYS_CLASS_NET="$TMP/sys" \
     VWARD_TEST_DISCOVERY_JSON_FILE="$1" \
     VWARD_TEST_DISCOVERY_RC="${2:-0}" \
+    VWARD_TEST_PING_RC="${3:-0}" \
     VWARD_TEST_PING_LOG="$TMP/ping.log" \
     "$SCRIPT" >/dev/null
 }
@@ -100,6 +101,14 @@ grep -Fq -- '-I eth9 1.0.0.1' "$TMP/ping.log" ||
     fail "probe not bound to discovered WAN interface"
 grep -Fq -- '-I eth9 77.88.8.1' "$TMP/ping.log" ||
     fail "second probe not bound to discovered WAN interface"
+
+# A different/global healthy uplink must not mask failure of the selected WAN.
+: > "$TMP/ping.log"
+run_watch "$TMP/wan.json" 0 1
+[ "$(awk -F= '$1=="STATUS"{print $2}' "$STATE")" = "DEGRADED" ] ||
+    fail "global Internet status must not mask selected WAN probe failure"
+[ "$(awk -F= '$1=="CLASS"{print $2}' "$STATE")" = "DEGRADED" ] ||
+    fail "selected WAN probe failure must not classify HEALTHY"
 
 cat > "$TMP/ambiguous.json" <<'EOF'
 {
@@ -166,6 +175,7 @@ run_watch "$TMP/wan.json"
 [ ! -s "$TMP/ping.log" ] ||
     fail "physical down state must not run external probes"
 
+echo 1 > "$TMP/sys/eth9/carrier"
 cat > "$TMP/unresolved.json" <<'EOF'
 {
   "schema":1,
