@@ -288,8 +288,7 @@ elif [ "$WAN_DEFAULTGW" != "true" ]; then
     CLASS="ROUTE_FAILURE"
 elif [ "$NETWORK_OK" -eq 1 ] && [ "$DNS_ACCESSIBLE" != "true" ]; then
     CLASS="DNS_ONLY_FAILURE"
-elif [ "$INTERNET" = "true" ] &&
-     { [ "$NETWORK_OK" -eq 1 ] || [ "$GATEWAY_ACCESSIBLE" = "true" ]; }; then
+elif [ "$INTERNET" = "true" ] && [ "$NETWORK_OK" -eq 1 ]; then
     CLASS="HEALTHY"
 elif [ "$PING_GW" -ne 0 ] &&
      [ "$GATEWAY_ACCESSIBLE" != "true" ] &&
