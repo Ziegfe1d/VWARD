@@ -5,16 +5,20 @@
 - Начата отдельная Beta-линия глубокой универсализации VWARD.
 - Добавлен read-only `VWARD Discovery` в составе `VWARD Runtime`.
 - WireGuard inventory определяется по фактическому RCI `type == "Wireguard"`, а не по имени, номеру или количеству интерфейсов.
-- Linux-интерфейс сопоставляется по фактическому адресу; имя `nwgN` не конструируется.
+- RCI ID сопоставляется с Linux-интерфейсом через штатный Keenetic `system-name`; fallback по фактическому IPv4-адресу остаётся только для read-only discovery.
 - Для роли Tunnel Guard введены состояния `READY`, `NOT_FOUND`, `REQUIRES_SELECTION` и `STALE_MAPPING`.
 - При нескольких туннелях VWARD не выбирает случайный интерфейс; допускается явный `tunnel_guard_rci_id`.
 - `wg-health-watch.sh` переведён на read-only role selection через VWARD Discovery: RCI и Linux ID берутся из обнаруженного объекта, а не из жёстких имён.
 - При неоднозначном или устаревшем mapping Tunnel Guard health остаётся `UNKNOWN` и не выполняет пробных RCI/network-запросов к угаданным интерфейсам.
 - VWARD Console API переведён на общий WireGuard inventory из `/opt/bin/vward-discovery.sh`; собственный полный `show/interface` и фильтрация `WireguardN` удалены.
-- Для совместимости frontend поле `wg.interfaces[].name` теперь является alias фактического `rci_id`; API также публикует `wg.discovery.provider/state`.
+- Для совместимости frontend поле `wg.interfaces[].name` является alias фактического `rci_id`; API также публикует `wg.discovery.provider/state`.
 - При недоступном Discovery Console работает fail-safe и возвращает пустой WireGuard inventory со статусом `UNAVAILABLE`, не угадывая имена интерфейсов.
-- Добавлены repository checks для 0/1/N туннелей, произвольных RCI ID, stale mapping, discovery-driven health, Console Discovery contract и Entware `jq` без ONIGURUMA.
-- High-risk fail-open mutations, WAN selection, Policy Sync и Route Engine этим этапом пока не переключаются.
+- Добавлены read-only команды `vward-discovery.sh wan` и `wan-guard` для динамического определения интернет-uplink без привязки к `ISP` и `ethN`.
+- WAN-кандидаты классифицируются по RCI `global/defaultgw/security-level`, а VPN-role `misc` исключается из автоматического и explicit WAN mapping.
+- Для логических uplink, включая PPPoE, Discovery сохраняет сам RCI/Linux interface и нижележащие `via_rci_id` / `via_linux_if`, чтобы будущий recovery был type-aware.
+- WAN role поддерживает `READY`, `NOT_FOUND`, `REQUIRES_SELECTION`, `STALE_MAPPING` и `INVALID_MAPPING`; явно выбранный uplink сохраняет роль при временной потере `defaultgw`.
+- Repository tests покрывают 0/1/N туннелей, произвольные RCI ID, stale mapping, discovery-driven health, Console Discovery contract, Ethernet/PPPoE WAN, несколько uplink, VPN exclusion и Entware `jq` без ONIGURUMA.
+- High-risk fail-open и WAN recovery mutations, Policy Sync и Route Engine этим этапом пока не переключаются.
 
 ## 0.1.7-dev: критический переходный hotfix VWARD Console
 
