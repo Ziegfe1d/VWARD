@@ -64,14 +64,28 @@ mutation-часть пока не переведена на общий role cont
 
 ### VWARD WAN Guard
 
-VWARD Discovery умеет определять WAN/uplink по фактическим свойствам RCI и роль
-`wan-guard`. VPN-role `misc` исключается из WAN target. Для PPPoE и других логических
-подключений сохраняются сам logical uplink и нижележащий `via` interface.
+WAN Guard теперь разделён на независимые слои наблюдения и восстановления.
 
-Сам `wan-guardian.sh` пока выполняет диагностику и восстановление через legacy WAN
-модель. Его read-only observer и recovery actuator будут переводиться отдельно, чтобы
-не смешивать обнаружение с сетевыми mutation. `wan-recovery-actuator.sh` пока остаётся
-в текущем безопасном объёме.
+`VWARD Discovery` определяет WAN/uplink по фактическим свойствам RCI и роль
+`wan-guard`. VPN-role `misc` исключается из WAN target. Для PPPoE и других логических
+подключений сохраняются logical uplink и нижележащий `via` interface.
+
+`wan-health-watch.sh` - read-only observer. Он получает только discovered роль,
+привязывает network probes к фактическому `PATH_IF`, отдельно отслеживает физический
+`PHYSICAL_IF` и атомарно пишет `/opt/var/lib/wan-health/state`. Для PPPoE path probe
+идёт через логический интерфейс, а physical carrier проверяется через `via_linux_if`.
+
+Глобальный Keenetic Internet status не может самостоятельно дать observer класс
+`HEALTHY`: нужен успешный probe через выбранный WAN. При ambiguity, stale mapping,
+unresolved Linux mapping или physical carrier down observer не делает guessed/unbound
+probes. Observer не содержит `ndmc`, DHCP renew или interface down/up.
+
+`wan-guardian.sh` пока остаётся отдельным legacy recovery path с существующими
+cooldown/rate-limit и mutation-командами. Он запускается отдельной cron строкой и не
+цепляется к `wan-health-watch.sh`. `wan-recovery-actuator.sh` этим этапом не изменён.
+
+Такое разделение позволяет принять новую диагностику раньше high-risk recovery и не
+выдавать read-only refactor за уже завершённую миграцию восстановления.
 
 ### VWARD Runtime
 
@@ -96,10 +110,15 @@ Console выполняет один `vward-discovery.sh snapshot` на status re
 WAN topology берутся из этого общего snapshot. Собственная логика полного
 `show/interface`, фильтрация `WireguardN` и прямой `show/interface?name=ISP` удалены.
 
-Для WAN API публикует discovery state, фактические RCI/Linux IDs и `via` mapping.
-Класс, действие и recovery counters пока приходят из legacy `wan-guardian.sh` и
-явно маркируются `observer_source=legacy-wan-guardian`. Таким образом read-only
-topology уже унифицирована, а high-risk recovery остаётся отдельным этапом.
+Для WAN API публикует discovery state и фактические RCI/Linux IDs. `wan.status` и
+`wan.class` берутся из read-only `/opt/var/lib/wan-health/state`. State старше 180
+секунд, состояние от другого `rci_id` или другой Linux-привязки, а также текущий
+не-READY `wan-guard` role переводят Console в `UNKNOWN`.
+
+Legacy recovery телеметрия остаётся отдельной: `wan.action`, recovery counters и
+legacy class читаются из `wan-guardian.sh` и маркируются
+`recovery_source=legacy-wan-guardian`. Frontend определяет здоровье WAN по
+`wan.status`, а не по глобальному Internet status.
 
 ### VWARD Update Engine
 
@@ -112,7 +131,7 @@ manifest, staging, target-specific backup, остановка принадлеж
 
 Runtime-компоненты и автоматическое обновление прошли приёмку на целевом
 Keenetic/Entware. В Beta `0.2.x` выполняется Discovery First и Zero-Hardcode refactor.
-WireGuard discovery, Tunnel Guard health, Console network topology и read-only WAN
-role discovery уже переведены. Переносимость не считается завершённой, пока WAN
-observer/recovery, fail-open, Policy Sync и Route Engine не используют общий role
-mapping.
+WireGuard discovery, Tunnel Guard health, Console network topology, WAN role discovery
+и WAN read-only observer уже переведены на общий role contract. Переносимость не
+считается завершённой, пока WAN recovery, fail-open, Policy Sync и Route Engine не
+используют общий role mapping.
