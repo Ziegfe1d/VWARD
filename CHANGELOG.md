@@ -12,14 +12,19 @@
 - При неоднозначном или устаревшем mapping Tunnel Guard health остаётся `UNKNOWN` и не выполняет пробных RCI/network-запросов к угаданным интерфейсам.
 - Добавлены read-only команды `wan` и `wan-guard` для динамического определения internet uplink без привязки к `ISP` и `ethN`.
 - WAN-кандидаты классифицируются по RCI `global/defaultgw/security-level`, а VPN-role `misc` исключается из автоматического и explicit WAN mapping.
-- Для логических uplink, включая PPPoE, Discovery сохраняет сам RCI/Linux interface и нижележащие `via_rci_id` / `via_linux_if`, чтобы будущий recovery был type-aware.
+- Для логических uplink, включая PPPoE, Discovery сохраняет сам RCI/Linux interface и нижележащие `via_rci_id` / `via_linux_if`, чтобы recovery мог стать type-aware.
 - WAN role поддерживает `READY`, `NOT_FOUND`, `REQUIRES_SELECTION`, `STALE_MAPPING` и `INVALID_MAPPING`; явно выбранный uplink сохраняет роль при временной потере `defaultgw`.
 - Добавлен единый `vward-discovery.sh snapshot`, который одним проходом возвращает WireGuard/WAN inventories и роли Tunnel Guard/WAN Guard.
+- Добавлен отдельный read-only `wan-health-watch.sh`. Он использует discovered `wan-guard`, разделяет logical `PATH_IF` и physical `PHYSICAL_IF`, поддерживает PPPoE `via` и не содержит `ndmc`, DHCP renew или interface down/up.
+- WAN observer привязывает gateway/external probes к фактическому `PATH_IF`. Глобальный Keenetic Internet status больше не может сам по себе классифицировать выбранный WAN как `HEALTHY`, поэтому другой uplink не маскирует его отказ.
+- При ambiguous/stale/invalid role, unresolved Linux mapping или physical carrier down WAN observer работает fail-safe и не запускает guessed/unbound probes.
+- WAN observer пишет атомарный state в `/opt/var/lib/wan-health/state`, переходы в `/opt/var/log/wan-health.log` и запускается отдельным cron entry независимо от legacy recovery.
 - VWARD Console переведена на один Discovery snapshot на status request. Собственный full interface inventory, фильтрация `WireguardN` и прямой `show/interface?name=ISP` из CGI удалены.
 - Для совместимости frontend `wg.interfaces[].name` остаётся alias фактического `rci_id`; API публикует `wg.discovery` и `wan.discovery`, а также реальные WAN `rci_id`, `linux_if`, `via_*` и тип uplink.
-- При недоступном Discovery Console работает fail-safe и не угадывает WireGuard/WAN интерфейсы.
-- Legacy `wan-guardian.sh` ещё поставляет `class`, `action` и recovery counters; API явно отмечает эти поля как `observer_source=legacy-wan-guardian` до отдельной миграции observer/recovery.
-- Repository tests покрывают 0/1/N туннелей, произвольные RCI ID, stale mapping, discovery-driven health, Ethernet/PPPoE WAN, несколько uplink, VPN exclusion, Console snapshot contract и Entware `jq` без ONIGURUMA.
+- `wan.status` и `wan.class` Console получает из `wan-health-watch`. State старше 180 секунд, другой observer RCI/Linux mapping или текущий не-READY WAN role отвергаются как `UNKNOWN`.
+- Frontend определяет состояние WAN по `wan.status`, а не по глобальному `wan.internet`, включая Overview, hero, настройки и session chart.
+- Legacy `wan-guardian.sh` пока остаётся отдельным recovery path. `wan.action`, recovery counters и legacy class явно маркируются `recovery_source=legacy-wan-guardian`; mutating WAN recovery этим этапом не менялся.
+- Repository tests покрывают 0/1/N туннелей, произвольные RCI ID, stale mapping, discovery-driven health, Ethernet/PPPoE WAN, несколько uplink, VPN exclusion, selected-path probe isolation, Console snapshot/observer contracts и Entware `jq` без ONIGURUMA.
 - High-risk fail-open и WAN recovery mutations, Policy Sync и Route Engine этим этапом пока не переключаются.
 
 ## 0.1.7-dev: критический переходный hotfix VWARD Console
