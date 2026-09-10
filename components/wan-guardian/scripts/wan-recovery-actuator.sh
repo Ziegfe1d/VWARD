@@ -6,6 +6,7 @@ export PATH
 VERSION="0.2.0-beta.1-dryrun"
 MODE="dryrun"
 DISCOVERY="${VWARD_DISCOVERY_BIN:-/opt/bin/vward-discovery.sh}"
+CAPABILITY="${VWARD_WAN_CAPABILITY_BIN:-/opt/bin/wan-capability.sh}"
 JQ="${VWARD_JQ:-/opt/bin/jq}"
 
 ACTION="${1:-}"
@@ -22,6 +23,8 @@ emit()
     echo "RESULT=$RESULT"
     echo "ACTION=${ACTION:-NONE}"
     echo "REASON=$REASON"
+    echo "CAPABILITY_STATE=${CAPABILITY_STATE:-NOT_CHECKED}"
+    echo "ADDRESSING_MODE=${ADDRESSING_MODE:-unknown}"
     echo "TARGET_RCI_ID=${CURRENT_RCI_ID:-none}"
     echo "TARGET_LINUX_IF=${CURRENT_LINUX_IF:-none}"
     echo "TARGET_TYPE=${CURRENT_TYPE:-unknown}"
@@ -41,8 +44,43 @@ valid_linux_if()
     printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9_.:@+-]+$'
 }
 
+load_capability()
+{
+    [ -x "$CAPABILITY" ] || {
+        CAPABILITY_STATE="UNAVAILABLE"
+        return 1
+    }
+
+    CAPABILITY_JSON="$("$CAPABILITY" 2>/dev/null || true)"
+    if ! printf '%s\n' "$CAPABILITY_JSON" |
+        "$JQ" -e 'type == "object" and .provider == "wan-capability" and .role == "wan-guard"' >/dev/null 2>&1
+    then
+        CAPABILITY_STATE="INVALID_RESULT"
+        return 1
+    fi
+
+    CAPABILITY_STATE="$(printf '%s\n' "$CAPABILITY_JSON" | "$JQ" -r '.state // "UNAVAILABLE"')"
+    [ "$CAPABILITY_STATE" = "READY" ] || return 1
+
+    CAP_RCI_ID="$(printf '%s\n' "$CAPABILITY_JSON" | "$JQ" -r '.interface.rci_id // ""')"
+    CAP_LINUX_IF="$(printf '%s\n' "$CAPABILITY_JSON" | "$JQ" -r '.interface.linux_if // ""')"
+    ADDRESSING_MODE="$(printf '%s\n' "$CAPABILITY_JSON" | "$JQ" -r '.addressing.mode // "unknown"')"
+    DHCP_RENEW_CAPABLE="$(printf '%s\n' "$CAPABILITY_JSON" | "$JQ" -r '.addressing.dhcp_renew // false')"
+
+    [ "$CAP_RCI_ID" = "$CURRENT_RCI_ID" ] || {
+        CAPABILITY_STATE="ROLE_MISMATCH"
+        return 1
+    }
+    [ "$CAP_LINUX_IF" = "$CURRENT_LINUX_IF" ] || {
+        CAPABILITY_STATE="MAPPING_MISMATCH"
+        return 1
+    }
+
+    return 0
+}
+
 case "$ACTION" in
-    SESSION_RECONNECT|INTERFACE_RECONNECT)
+    SESSION_RECONNECT|INTERFACE_RECONNECT|DHCP_RENEW)
         ;;
     '')
         emit BLOCKED missing_action
@@ -98,6 +136,16 @@ case "$ACTION" in
         [ -z "$CURRENT_VIA_RCI_ID" ] || emit BLOCKED physical_uplink_required
         EXECUTION_KIND="RCI_INTERFACE_RECONNECT"
         ;;
+
+    DHCP_RENEW)
+        [ -z "$CURRENT_VIA_RCI_ID" ] || emit BLOCKED physical_uplink_required
+        if ! load_capability; then
+            emit BLOCKED "capability_$CAPABILITY_STATE"
+        fi
+        [ "$ADDRESSING_MODE" = "dhcp" ] || emit BLOCKED addressing_not_dhcp
+        [ "$DHCP_RENEW_CAPABLE" = "true" ] || emit BLOCKED dhcp_renew_not_capable
+        EXECUTION_KIND="RCI_DHCP_RENEW"
+        ;;
 esac
 
 echo "VERSION=$VERSION"
@@ -106,6 +154,8 @@ echo "RESULT=READY"
 echo "ACTION=$ACTION"
 echo "REASON=validated_dryrun"
 echo "EXECUTION_KIND=$EXECUTION_KIND"
+echo "CAPABILITY_STATE=${CAPABILITY_STATE:-NOT_CHECKED}"
+echo "ADDRESSING_MODE=${ADDRESSING_MODE:-unknown}"
 echo "TARGET_RCI_ID=$CURRENT_RCI_ID"
 echo "TARGET_LINUX_IF=$CURRENT_LINUX_IF"
 echo "TARGET_TYPE=${CURRENT_TYPE:-unknown}"
