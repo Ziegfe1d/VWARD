@@ -83,6 +83,7 @@
       "update_method": "signed-package",
       "health_profile": "wan-guard",
       "runtime_targets": [
+        "/opt/bin/wan-health-watch.sh",
         "/opt/bin/wan-guardian.sh",
         "/opt/bin/wan-recovery-actuator.sh"
       ]
