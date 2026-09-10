@@ -49,7 +49,7 @@ if [ -z "$VU_ROOT_PREFIX" ]; then
     ndmc -c "show version" >/dev/null 2>&1 || vu_die "$VU_HEALTH_ERROR" "Keenetic control plane is unavailable"
 
     if [ "$profile" = console ]; then
-        console_pid=$(cat /opt/var/run/keenetic-apps.pid 2>/dev/null || true)
+        console_pid=$(cat /opt/var/run/keenetic-apps-lighttpd.pid 2>/dev/null || true)
         [ -n "$console_pid" ] && kill -0 "$console_pid" 2>/dev/null ||
             vu_die "$VU_HEALTH_ERROR" "VWARD Console service is unavailable"
 
