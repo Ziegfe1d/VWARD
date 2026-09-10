@@ -61,6 +61,9 @@ do
     sh -n "$SCRIPT" || fail "shell syntax: $SCRIPT"
 done
 
-tests/repository/test-discovery.sh || fail "VWARD Discovery tests"
+for TEST in tests/repository/test-*.sh
+do
+    "$TEST" || fail "repository test: $TEST"
+done
 
 echo "CONSISTENCY_CHECKS=PASS"
