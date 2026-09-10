@@ -4,6 +4,7 @@ export PATH
 
 JQ=/opt/bin/jq
 CURL=/opt/bin/curl
+DISCOVERY="${VWARD_DISCOVERY:-/opt/bin/vward-discovery.sh}"
 
 header_json()
 {
@@ -222,39 +223,50 @@ INET="$(
     'http://127.0.0.1:79/rci/show/internet/status'
 )"
 
-IFACES="$(
-    fetch_json \
-    'http://127.0.0.1:79/rci/show/interface'
-)"
+WG_DISCOVERY_STATE=UNAVAILABLE
+WG_DISCOVERY_PROVIDER=vward-discovery
+WG_INTERFACES='[]'
 
-WG_NAMES="$(
-    printf '%s\n' "$IFACES" |
-    "$JQ" -r 'keys[]' 2>/dev/null |
-    grep -E '^Wireguard[0-9][0-9]*$'
-)"
+if [ -x "$DISCOVERY" ]; then
+    WG_DISCOVERY="$(
+        "$DISCOVERY" wireguard 2>/dev/null
+    )"
 
-WG_INTERFACES="$(
-    printf '%s\n' "$WG_NAMES" |
-    while IFS= read -r WG_NAME
-    do
-        [ -n "$WG_NAME" ] || continue
+    if printf '%s\n' "$WG_DISCOVERY" |
+        "$JQ" -e '
+            type == "object" and
+            .kind == "wireguard" and
+            (.interfaces | type == "array")
+        ' >/dev/null 2>&1
+    then
+        WG_INTERFACES="$(
+            printf '%s\n' "$WG_DISCOVERY" |
+            "$JQ" -c '[
+                .interfaces[] |
+                {
+                    name:(.rci_id // ""),
+                    rci_id:(.rci_id // ""),
+                    linux_if:(.linux_if // ""),
+                    mapping:(.mapping // ""),
+                    description:(.description // ""),
+                    type:(.type // ""),
+                    index:(.index // null),
+                    address:(.address // ""),
+                    link:(.link // ""),
+                    connected:(.connected // ""),
+                    state:(.state // "")
+                }
+            ]' 2>/dev/null
+        )"
 
-        printf '%s\n' "$IFACES" |
-        "$JQ" -c --arg n "$WG_NAME" '
-            .[$n] |
-            {
-                name:$n,
-                description:(.description // ""),
-                link:(.link // ""),
-                connected:(.connected // ""),
-                state:(.state // "")
-            }
-        ' 2>/dev/null
-    done |
-    "$JQ" -s -c '.' 2>/dev/null
-)"
-
-[ -n "$WG_INTERFACES" ] || WG_INTERFACES='[]'
+        [ -n "$WG_INTERFACES" ] || WG_INTERFACES='[]'
+        WG_DISCOVERY_PROVIDER="$(
+            printf '%s\n' "$WG_DISCOVERY" |
+            "$JQ" -r '.provider // "vward-discovery"' 2>/dev/null
+        )"
+        WG_DISCOVERY_STATE=READY
+    fi
+fi
 
 GOUT=/tmp/wan-guardian.cron.out
 
@@ -383,6 +395,8 @@ header_json
   --argjson isp "$ISP" \
   --argjson inet "$INET" \
   --argjson wg_interfaces "$WG_INTERFACES" \
+  --arg wg_discovery_provider "$WG_DISCOVERY_PROVIDER" \
+  --arg wg_discovery_state "$WG_DISCOVERY_STATE" \
   --arg gv "$GVERSION" \
   --arg gm "$GMODE" \
   --arg gc "$GCLASS" \
@@ -517,6 +531,10 @@ header_json
   },
 
   wg:{
+    discovery:{
+      provider:$wg_discovery_provider,
+      state:$wg_discovery_state
+    },
     interfaces:$wg_interfaces,
     total:($wg_interfaces|length),
     down_streak:($down_streak|tonumber? // 0),
