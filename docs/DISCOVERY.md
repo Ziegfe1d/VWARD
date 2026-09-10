@@ -97,6 +97,21 @@ wan_guard_rci_id=GigabitEthernet1
 На текущем этапе WAN discovery только читает данные. `wan-guardian.sh` и его recovery
 commands ещё не переведены на этот role contract и не изменяются автоматически.
 
+## Unified snapshot
+
+`vward-discovery.sh snapshot` выполняет один discovery-проход и возвращает единый
+machine-readable объект:
+
+- `wireguard.interfaces`;
+- `wan.interfaces`;
+- `roles.tunnel_guard`;
+- `roles.wan_guard`.
+
+Snapshot нужен потребителям, которым одновременно требуются несколько частей topology.
+В частности VWARD Console использует один snapshot на status request, а не запускает
+отдельный полный RCI inventory для WireGuard и WAN. Это уменьшает число RCI/system-name
+обращений и сохраняет один источник истины.
+
 ## Интеграция Tunnel Guard health
 
 В `0.2.0-beta.1` read-only health watcher использует роль `tunnel-guard` из VWARD
@@ -121,19 +136,24 @@ Discovery.
 
 ## Интеграция VWARD Console
 
-Console API использует общий `VWARD Discovery` для WireGuard inventory. `api.cgi`
-больше не выполняет отдельный полный `show/interface` и не фильтрует интерфейсы по
-шаблону `WireguardN`.
+Console API использует общий `VWARD Discovery` через один вызов `snapshot`.
+`api.cgi` больше не выполняет отдельный полный `show/interface`, не фильтрует
+`WireguardN` и не запрашивает WAN через `show/interface?name=ISP`.
 
-Для совместимости с текущим frontend поле `name` сохранено как alias фактического
-`rci_id`. В `wg.discovery` публикуются `provider` и `state`.
+Для WireGuard compatibility-поле `name` сохранено как alias фактического `rci_id`.
+В `wg.discovery` публикуются provider и state.
+
+WAN выбирается через `roles.wan_guard`. API публикует `wan.discovery.state/selection`,
+фактические `rci_id`, `linux_if`, `via_rci_id`, `via_linux_if` и тип uplink.
+Если role mapping неоднозначен или недействителен, Console не угадывает `ISP`/`ethN`.
+
+Поля `wan.class`, `wan.action` и recovery counters пока приходят из legacy
+`wan-guardian.sh` и явно отмечены `observer_source=legacy-wan-guardian`. Это позволяет
+перевести topology read-only раньше high-risk recovery mutations, не смешивая этапы.
 
 Если `/opt/bin/vward-discovery.sh` отсутствует, не исполняется или возвращает
-некорректный контракт, Console работает fail-safe: `wg.discovery.state=UNAVAILABLE`,
-а `wg.interfaces=[]`. API не переключается на угадывание имён.
-
-WAN-блок Console пока использует legacy-модель и будет переведён на `wan-guard`
-отдельным read-only этапом после стабилизации WAN discovery.
+некорректный snapshot, Console работает fail-safe: общий `discovery.state=UNAVAILABLE`,
+WireGuard inventory пуст, WAN role не подменяется guessed interface.
 
 ## Совместимость Keenetic/Entware
 
@@ -154,19 +174,20 @@ Repository tests проверяют:
 - PPPoE `via` и нижележащий Linux-интерфейс;
 - сохранение выбранной WAN-роли при временной потере `defaultgw`;
 - `STALE_MAPPING` и `INVALID_MAPPING` для WAN;
-- исключение VPN `misc` из WAN inventory;
-- Console использует общий Discovery как единственный WireGuard inventory provider;
+- исключение VPN `misc` из WAN inventory и explicit mapping;
+- Console выполняет ровно один Discovery snapshot на status request;
+- Console не содержит собственного full interface inventory, `name=ISP` или
+  installation-specific WireGuard hardcode;
 - отсутствие installation-specific `WireguardN`, `nwgN`, LAN subnet и policy-list ID
   в самом discovery provider;
 - отсутствие зависимости от jq regex.
 
 ## Следующие этапы
 
-1. Перевести read-only WAN-блок VWARD Console на общий `wan-guard` contract.
-2. Разделить/перевести read-only диагностику WAN Guard на discovered role без recovery
+1. Разделить/перевести read-only диагностику WAN Guard на discovered role без recovery
    mutation.
-3. После отдельного acceptance сделать type-aware WAN recovery и только затем убрать
+2. После отдельного acceptance сделать type-aware WAN recovery и только затем убрать
    legacy `ISP`/`eth3` из mutating paths.
-4. Перевести `wg-failopen-guard.sh` на фактические Tunnel/WAN role IDs.
-5. Затем переводить Policy Sync и Route Engine на общий role mapping.
-6. После стабилизации discovery перейти к due-based/idle-aware Maintenance Coordinator.
+3. Перевести `wg-failopen-guard.sh` на фактические Tunnel/WAN role IDs.
+4. Затем переводить Policy Sync и Route Engine на общий role mapping.
+5. После стабилизации discovery перейти к due-based/idle-aware Maintenance Coordinator.
