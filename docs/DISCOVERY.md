@@ -7,7 +7,7 @@
 
 VWARD должна работать по цепочке:
 
-`DISCOVER -> CLASSIFY -> VALIDATE -> SELECT BY ROLE -> ACT`
+`DISCOVER -> CLASSIFY -> VALIDATE -> SELECT BY ROLE -> PLAN -> ACT`
 
 Компоненты не должны угадывать имена интерфейсов или использовать значения конкретной
 установки как обязательные runtime-константы.
@@ -70,7 +70,7 @@ tunnel_guard_rci_id=OfficeTunnel
 
 Для логических подключений, например PPPoE, дополнительно сохраняются `via_rci_id`,
 `via_linux_if` и `via_mapping`. Это позволяет отличать логический uplink от нижнего
-физического интерфейса и в дальнейшем выбирать recovery по типу подключения.
+физического интерфейса и выбирать recovery по типу подключения.
 
 ## Выбор роли WAN Guard
 
@@ -157,8 +157,44 @@ probes. При физическом carrier down внешние probes такж�
 журналируются в `/opt/var/log/wan-health.log`. Observer запускается отдельной cron
 строкой и не объединён с legacy recovery.
 
-`wan-guardian.sh` пока остаётся отдельным legacy recovery path. Его mutating часть не
-переведена на новый role contract этим этапом.
+## WAN Recovery Planner dry-run
+
+`wan-recovery-plan.sh` - отдельный decision layer. Он уже использует role contract,
+но намеренно не выполняет сетевых действий и пока не запускается из cron.
+
+Перед выдачей любого плана Planner:
+
+- требует свежий `/opt/var/lib/wan-health/state`;
+- повторно вызывает `vward-discovery.sh wan-guard`;
+- требует `state == READY`;
+- сверяет observer `RCI_ID` с текущим `rci_id`;
+- сверяет observer `LINUX_IF` с текущим `linux_if`;
+- требует заданное число подтверждённых ошибок;
+- возвращает только `HOLD`, `DEFER`, `BLOCKED` или `PLAN`;
+- всегда публикует `EXECUTED=NO`.
+
+Type-aware правила первой версии:
+
+- `UP/HEALTHY` -> `HOLD`;
+- `UNKNOWN`, stale observer, role/mapping mismatch или неготовый Discovery -> `BLOCKED`;
+- `DEGRADED`, DNS-only и utility/discovery классы -> `HOLD`;
+- `PHY_DOWN` -> `HOLD`, без слепого bounce;
+- до порога подтверждений -> `DEFER`;
+- логический `SESSION_FAILURE` -> `PLAN SESSION_RECONNECT`;
+- логический `ADDRESS_FAILURE` -> `PLAN SESSION_RECONNECT`, а не DHCP renew;
+- физический `ADDRESS_FAILURE` -> `HOLD addressing_capability_required`;
+- подтверждённый logical path failure -> `PLAN SESSION_RECONNECT`;
+- подтверждённый physical path failure -> `PLAN INTERFACE_RECONNECT`;
+- `ROUTE_FAILURE` -> `HOLD route_recheck_required`.
+
+Ключевой принцип: тип `GigabitEthernet` сам по себе не доказывает DHCP-capability.
+Поэтому новый Planner не наследует слепой `DHCP_RENEW` из legacy recovery. Capability
+должна быть положительно обнаружена отдельным этапом до появления такого action.
+
+Planner не содержит `ndmc`, DHCP renew, interface down/up, `ISP`, `eth3` или других
+installation-specific targets. `wan-guardian.sh` пока остаётся отдельным legacy
+mutating path, а `wan-recovery-actuator.sh` - отдельным legacy dry-run actuator. Новый
+Planner с ними не связан.
 
 ## Интеграция VWARD Console
 
@@ -182,6 +218,7 @@ WAN topology выбирается через `roles.wan_guard`. API публик
 `wan.action`, `recovery_count`, `recovery_stage` и legacy recovery class пока читаются
 из существующего `wan-guardian.sh` и помечены `recovery_source=legacy-wan-guardian`.
 Observer и recovery остаются раздельными источниками до отдельной миграции mutating path.
+Recovery Planner пока не является управляющим источником Console и не инициирует action.
 
 Frontend использует `wan.status`, а не глобальный `internet=true`, для WAN-карточки,
 hero, настроек и session chart. Поэтому резервный рабочий uplink не делает отказавший
@@ -215,6 +252,11 @@ Repository tests проверяют:
 - probes WAN observer привязаны к discovered `PATH_IF`;
 - глобально рабочий другой uplink не может классифицировать выбранный WAN как `HEALTHY`;
 - ambiguity, carrier down и unresolved mapping не запускают guessed probes;
+- Recovery Planner остаётся dry-run и всегда `EXECUTED=NO`;
+- Planner повторно проверяет текущую WAN role, freshness и RCI/Linux mapping;
+- Planner не планирует DHCP renew без подтверждённой addressing capability;
+- Planner различает logical session reconnect и physical interface reconnect;
+- Planner не запускается из cron до отдельной приёмки actuator;
 - Console выполняет ровно один Discovery snapshot на status request;
 - Console сверяет WAN observer state с текущим role mapping и freshness;
 - Console visual WAN state использует `wan.status`, а не глобальный `internet`;
@@ -225,8 +267,10 @@ Repository tests проверяют:
 
 ## Следующие этапы
 
-1. Спроектировать и протестировать type-aware WAN recovery поверх `wan-guard` role.
-2. Только после отдельного acceptance убрать legacy `ISP`/`eth3` из mutating WAN paths.
-3. Перевести `wg-failopen-guard.sh` на фактические Tunnel/WAN role IDs.
-4. Затем переводить Policy Sync и Route Engine на общий role mapping.
-5. После стабилизации discovery перейти к due-based/idle-aware Maintenance Coordinator.
+1. Сделать динамический WAN actuator в `dryrun`: повторная role/capability validation непосредственно перед action.
+2. Отдельно обнаруживать capability подключения, включая DHCP, без вывода из имени или типа интерфейса.
+3. Только после отдельного acceptance подключать Planner к actuator и решать вопрос реальных mutation.
+4. После этого убрать legacy `ISP`/`eth3` из mutating WAN paths.
+5. Перевести `wg-failopen-guard.sh` на фактические Tunnel/WAN role IDs.
+6. Затем переводить Policy Sync и Route Engine на общий role mapping.
+7. После стабилизации discovery/recovery перейти к due-based/idle-aware Maintenance Coordinator.
