@@ -31,7 +31,11 @@
 - VWARD Console использует один Discovery snapshot на status request; собственный full interface inventory, `WireguardN` filtering и `show/interface?name=ISP` удалены.
 - `wan.status`/`wan.class` приходят из WAN Observer и проходят freshness + RCI/Linux mapping validation; legacy recovery telemetry маркируется отдельно.
 - Component registry consistency проверяется структурно через `jq`, а не через формат-зависимый grep.
-- Реальный execution на рабочем роутере пока не включён, Controller не стоит в cron, legacy `wan-guardian.sh` остаётся production recovery path до отдельной live Beta acceptance.
+- Read-only preflight на реальном KN-1913 подтвердил Discovery `GigabitEthernet1 -> eth3`, DHCP capability, `UP/HEALTHY` observer state и zero-write Controller path без изменений production VWARD.
+- Controlled live acceptance `DHCP_RENEW` на KN-1913 пройден: Planner выдал `PLAN/DHCP_RENEW`, Actuator выполнил `RCI_DHCP_RENEW`, Controller завершил `RESULT=SUCCESS`, `POSTCHECK=HEALTHY`, `EXECUTED=YES`.
+- После live DHCP recovery WAN сохранил тот же адрес `100.85.218.53`, `link=up`, `connected=yes`, `defaultgw=true`; persistent state и audit log зафиксировали одну успешную attempt.
+- Успешный DHCP live-test не считается автоматической приёмкой `INTERFACE_RECONNECT` или `SESSION_RECONNECT`; эти действия требуют отдельных контролируемых live acceptance.
+- Controller по-прежнему не стоит в cron, execution default остаётся `0`, legacy `wan-guardian.sh` остаётся production recovery path до завершения live acceptance всего нового stack.
 - High-risk fail-open, Policy Sync и Route Engine ещё не полностью переведены на общий Zero-Hardcode role mapping.
 
 ## 0.1.7-dev: критический переходный hotfix VWARD Console
