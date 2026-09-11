@@ -24,7 +24,7 @@ lighttpd/CGI-панели для KeeneticOS с Entware.
 
 Цепочка принятия решений:
 
-`DISCOVER -> CLASSIFY -> VALIDATE -> SELECT BY ROLE -> PLAN -> ACT`
+`DISCOVER -> CLASSIFY -> VALIDATE -> SELECT BY ROLE -> PLAN -> GATE -> ACT -> VERIFY`
 
 Компоненты не должны конструировать имена `WireguardN`, `nwgN`, `ethN` или другие
 installation-specific идентификаторы. Если роль нельзя определить однозначно,
@@ -64,78 +64,71 @@ mutation-часть пока не переведена на общий role cont
 
 ### VWARD WAN Guard
 
-WAN Guard разделён на независимые слои обнаружения, наблюдения, capability,
-планирования, validation и будущего выполнения recovery.
+Новый WAN recovery stack разделён на:
+
+`Discovery -> Observer -> Capability -> Planner -> Controller -> Actuator -> Observer post-check`
 
 `VWARD Discovery` определяет WAN/uplink по фактическим свойствам RCI и роль
 `wan-guard`. VPN-role `misc` исключается из WAN target. Для PPPoE и других логических
 подключений сохраняются logical uplink и нижележащий `via` interface.
 
-`wan-health-watch.sh` - read-only observer. Он получает только discovered роль,
-привязывает network probes к фактическому `PATH_IF`, отдельно отслеживает физический
-`PHYSICAL_IF` и атомарно пишет `/opt/var/lib/wan-health/state`. Для PPPoE path probe
-идёт через логический интерфейс, а physical carrier проверяется через `via_linux_if`.
+`wan-health-watch.sh` - read-only observer. Он привязывает network probes к
+фактическому `PATH_IF`, отдельно отслеживает физический `PHYSICAL_IF` и атомарно пишет
+`/opt/var/lib/wan-health/state`. Глобальный Internet status не может самостоятельно
+дать класс `HEALTHY`.
 
-Глобальный Keenetic Internet status не может самостоятельно дать observer класс
-`HEALTHY`: нужен успешный probe через выбранный WAN. При ambiguity, stale mapping,
-unresolved Linux mapping или physical carrier down observer не делает guessed/unbound
-probes. Observer не содержит `ndmc`, DHCP renew или interface down/up.
+`wan-capability.sh` - read-only Capability Provider. Он повторно получает роль
+`wan-guard` и читает `show running-config`, но наружу возвращает только нормализованные
+признаки capability. DHCP считается доказанным только при фактическом
+`ip address dhcp`; тип Ethernet не является достаточным основанием. Содержимое
+running-config и credentials не публикуются.
 
-`wan-capability.sh` - отдельный read-only Capability Provider. Он повторно получает
-текущую роль `wan-guard` и читает `show running-config`, но наружу возвращает только
-нормализованные признаки capability. Для физического WAN DHCP считается доказанным
-только при фактическом `ip address dhcp`; сам тип Ethernet не является достаточным
-основанием. Содержимое running-config, логины и пароли в результат не публикуются.
+`wan-recovery-plan.sh` всегда остаётся `dryrun`. Он требует свежий observer state,
+повторно проверяет роль/mapping, ждёт подтверждённое число ошибок и выдаёт только
+`HOLD`, `DEFER`, `BLOCKED` или `PLAN`. Допустимые typed actions:
+`SESSION_RECONNECT`, `INTERFACE_RECONNECT`, capability-gated `DHCP_RENEW`.
 
-`wan-recovery-plan.sh` - type-aware Recovery Planner в режиме `dryrun`.
-Перед любым планом он требует свежий observer state, повторно читает текущую роль
-`wan-guard`, сверяет `rci_id` и `linux_if` и ждёт заданное число подтверждённых
-ошибок. Результат ограничен решениями `HOLD`, `DEFER`, `BLOCKED` и `PLAN`; фактическое
-выполнение всегда `EXECUTED=NO`.
+`wan-recovery-controller.sh` - единственный Execution Gate. По умолчанию
+`VWARD_WAN_RECOVERY_EXECUTION_ENABLED=0`, поэтому никакая mutation нового stack не
+выполняется. Controller не включён в cron.
 
-Planner различает logical session и physical path. Подтверждённый PPPoE/логический
-session failure может дать план `SESSION_RECONNECT`, подтверждённый физический path
-failure - `INTERFACE_RECONNECT`. Физический `ADDRESS_FAILURE` может дать
-`DHCP_RENEW` только после положительной проверки Capability Provider. `PHY_DOWN`,
-DNS-only failure, ambiguity, stale/mismatch, static/unknown addressing не разрешают
-такой DHCP action.
+При явном enable Controller до Actuator проверяет собственный lock, активность Update
+Engine, legacy WAN recovery и Tunnel Guard mutation, затем применяет cooldown и
+rate-limit. Каждая live attempt резервируется в persistent state и audit log до
+Actuator call.
 
-`wan-recovery-actuator.sh` использует тот же Discovery/role contract и остаётся
-`dryrun`. Он принимает только типизированные действия `SESSION_RECONNECT`,
-`INTERFACE_RECONNECT` или `DHCP_RENEW` вместе с ожидаемыми RCI/Linux IDs, затем
-самостоятельно повторяет `wan-guard` discovery. Для `DHCP_RENEW` он дополнительно
-повторно вызывает Capability Provider. Любая смена роли, mapping или DHCP-capability
-между PLAN и ACT приводит к `BLOCKED`.
+`wan-recovery-actuator.sh` - единственный новый слой с exact network operations.
+Прямой live-вызов требует одновременно execution enable и внутренний Controller auth.
+Actuator непосредственно перед действием повторно валидирует discovered WAN; для
+DHCP дополнительно повторяет Capability Provider.
 
-Actuator не принимает shell-команду, не использует `eval`, не содержит legacy `ISP`
-или заранее сформированных `ndmc` command strings. После успешной проверки он
-возвращает только тип будущей RCI-операции и `EXECUTED=NO`.
+Exact operations используют только фактический RCI ID:
 
-`wan-recovery-controller.sh` - единая Execution Gate точка нового recovery stack.
-Controller получает решение только от Planner, блокирует неподдерживаемые действия,
-использует отдельный lock, вызывает Actuator только для валидного `PLAN` и требует,
-чтобы Planner и Actuator оставались `dryrun` с `EXECUTED=NO`. Controller сам не
-содержит network mutation и не запускается из cron.
+- `DHCP_RENEW` -> `interface <rci-id> ip dhcp client renew`;
+- `INTERFACE_RECONNECT` -> `interface <rci-id> down`, затем `up`;
+- `SESSION_RECONNECT` -> `down/up` логического RCI interface, а не physical `via`.
 
-Repository tests проверяют Observer/Capability/Planner/Controller/Actuator отдельно и
-полную цепочку Planner -> Actuator, включая TOCTOU-защиту при смене WAN role и при
-смене DHCP addressing между планированием и validation.
+`ndmc` запускается с очищенным `LD_LIBRARY_PATH`. `eval`, произвольный command text,
+installation-specific WAN name и `system configuration save` не используются. При
+ошибке первого `up` Actuator делает один best-effort повтор `up`.
 
-`wan-guardian.sh` остаётся отдельным legacy mutating recovery path с существующими
-cooldown/rate-limit и installation-specific моделью. Новый recovery stack к нему
-пока не подключён и реальные сетевые действия через Controller не разрешены.
+После `EXECUTED=YES` Controller повторно запускает WAN Observer. Recovery считается
+`SUCCESS` только если свежий state показывает тот же RCI/Linux target и
+`STATUS=UP`, `CLASS=HEALTHY`. Иначе факт mutation сохраняется, но результат остаётся
+`RECOVERY_UNCONFIRMED`.
 
-Update Engine дополнен отдельным `vward-update-runtime-policy.sh`, который разрешает
-установку новых WAN runtime targets и учитывает observer/controller locks при
-quiescing. Это не меняет базовый updater contract и позволяет держать target policy
-маленькой и проверяемой.
+Policy defaults Controller: cooldown 300 секунд, окно 3600 секунд, максимум 3 попытки,
+3 post-check с интервалом 3 секунды. Это изменяемые policy defaults, не свойства
+конкретной установки.
 
-Подробный authoritative контракт нового WAN recovery stack описан в
-`docs/WAN_RECOVERY_PIPELINE.md`.
+`wan-guardian.sh` остаётся отдельным legacy mutating production path. Новый stack не
+заменяет его автоматически и до live-приёмки не запускается по расписанию.
 
-Такое разделение позволяет принять discovery, observer, capability, decision и
-validation layers раньше high-risk mutation и не выдавать dry-run готовность за уже
-завершённую миграцию восстановления.
+Update Engine допускает установку новых WAN runtime targets и учитывает controller
+lock при quiescing. Controller в обратную сторону блокирует live mutation при
+updater lock/barrier/request.
+
+Authoritative контракт: `docs/WAN_RECOVERY_PIPELINE.md`.
 
 ### VWARD Runtime
 
@@ -167,9 +160,8 @@ WAN topology берутся из этого общего snapshot. Собств�
 
 Legacy recovery телеметрия остаётся отдельной: `wan.action`, recovery counters и
 legacy class читаются из `wan-guardian.sh` и маркируются
-`recovery_source=legacy-wan-guardian`. Frontend определяет здоровье WAN по
-`wan.status`, а не по глобальному Internet status. Новый Recovery Planner/Controller/
-Actuator пока не являются управляющим источником Console и не инициируют действий.
+`recovery_source=legacy-wan-guardian`. Новый gated recovery stack пока не является
+production управляющим источником Console.
 
 ### VWARD Update Engine
 
@@ -179,15 +171,16 @@ manifest, staging, target-specific backup, остановка принадлеж
 в allowlist целей пакета.
 
 Runtime target policy расширена отдельным post-hardening слоем, чтобы новые Discovery-
-driven WAN файлы были installable и участвовали в quiescing без опасного массового
-редактирования базовой updater library.
+driven WAN файлы были installable и участвовали в quiescing без массового изменения
+базовой updater library.
 
 ## Текущая зрелость
 
-Runtime-компоненты и автоматическое обновление прошли приёмку на целевом
-Keenetic/Entware. В Beta `0.2.x` выполняется Discovery First и Zero-Hardcode refactor.
-WireGuard discovery, Tunnel Guard health, Console network topology, WAN role discovery,
-WAN read-only observer, Capability Provider, Recovery Planner, dry-run Execution Gate и
-Discovery-validated dry-run Actuator уже используют общий role contract. Переносимость
-не считается завершённой, пока реальные WAN mutations, fail-open, Policy Sync и Route
-Engine не используют тот же контракт.
+В Beta `0.2.x` уже реализованы общий Discovery contract, WireGuard/Tunnel health,
+Console network topology, WAN Observer, Capability Provider, Planner, gated Controller,
+exact-operation Actuator и post-check logic. Код real WAN operations существует, но
+execution default остаётся `0`, Controller не стоит в cron и live-приёмка на целевом
+Keenetic ещё не выполнена.
+
+Переносимость не считается завершённой, пока новый WAN stack не пройдёт live acceptance,
+а fail-open, Policy Sync и Route Engine не используют тот же Zero-Hardcode role mapping.
