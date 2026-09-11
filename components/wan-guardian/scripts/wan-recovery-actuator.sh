@@ -99,8 +99,8 @@ load_capability()
 
 run_ndmc()
 {
-    NDMC_COMMAND="$1"
-    LD_LIBRARY_PATH= "$NDMC" -c "$NDMC_COMMAND" >/dev/null 2>&1
+    NDMC_LINE="$1"
+    LD_LIBRARY_PATH= "$NDMC" -c "$NDMC_LINE" >/dev/null 2>&1
 }
 
 execute_reconnect()
