@@ -6,7 +6,7 @@
 
 VWARD работает по цепочке:
 
-`DISCOVER -> CLASSIFY -> VALIDATE -> SELECT BY ROLE -> PLAN -> ACT`
+`DISCOVER -> CLASSIFY -> VALIDATE -> SELECT BY ROLE -> PLAN -> GATE -> ACT -> VERIFY`
 
 Компоненты не должны угадывать имена интерфейсов или использовать значения конкретной установки как обязательные runtime-константы.
 
@@ -31,7 +31,7 @@ Role mapping читается из `/opt/etc/vward/discovery.conf`. Discovery с
 
 ## WAN inventory и роль WAN Guard
 
-`vward-discovery.sh wan` строит список интернет-uplink по фактическим свойствам RCI, а не по имени `ISP` или Linux-интерфейсу.
+`vward-discovery.sh wan` строит список internet uplink по фактическим свойствам RCI, а не по имени `ISP` или Linux-интерфейсу.
 
 Автоматическим WAN-кандидатом является интерфейс, у которого одновременно:
 - `global == true`;
@@ -84,9 +84,9 @@ State атомарно записывается в `/opt/var/lib/wan-health/stat
 
 Текущая Beta-цепочка:
 
-`Discovery -> Observer -> Capability -> Planner -> Controller -> Actuator`
+`Discovery -> Observer -> Capability -> Planner -> Controller -> Actuator -> Observer post-check`
 
-`wan-capability.sh` является read-only Capability Provider. Он повторно подтверждает текущую роль `wan-guard`, читает `show running-config`, но не публикует сам конфиг. DHCP считается подтверждённым только при фактическом `ip address dhcp` в блоке выбранного интерфейса. Тип `GigabitEthernet` сам по себе не является доказательством DHCP.
+`wan-capability.sh` является read-only Capability Provider. Он повторно подтверждает текущую роль `wan-guard`, читает `show running-config`, но не публикует сам конфиг. DHCP считается подтверждённым только при фактическом `ip address dhcp` в блоке выбранного интерфейса. Тип Ethernet сам по себе не является доказательством DHCP.
 
 `wan-recovery-plan.sh` остаётся `dryrun` и всегда возвращает `EXECUTED=NO`. Он требует свежий observer state, повторную проверку WAN role/mapping и заданное число подтверждённых ошибок.
 
@@ -97,11 +97,20 @@ State атомарно записывается в `/opt/var/lib/wan-health/stat
 
 Static/unknown capability, DNS-only failure, physical carrier down, ambiguity, stale/mismatch и недостаточное число подтверждений не дают права на mutation.
 
-`wan-recovery-actuator.sh` тоже остаётся `dryrun`. Он повторно валидирует роль, mapping и, для DHCP, capability непосредственно перед готовностью к действию. Он не принимает shell-command text, не использует `eval` и всегда возвращает `EXECUTED=NO`.
+`wan-recovery-controller.sh` является единственным Execution Gate. Default `VWARD_WAN_RECOVERY_EXECUTION_ENABLED=0`, Controller не включён в cron. При default-off он только валидирует Planner -> Actuator handoff и не пишет recovery state.
 
-`wan-recovery-controller.sh` является единственным новым Execution Gate. Он пропускает к Actuator только `DECISION=PLAN`, проверяет typed action/target handoff, использует собственный lock и также всегда возвращает `EXECUTED=NO`.
+Если execution явно включён, Controller перед Actuator блокирует конфликт с Update Engine, legacy WAN recovery и Tunnel Guard mutation, применяет cooldown/rate-limit, резервирует attempt в persistent state и пишет audit record.
 
-Новые Planner/Controller/Actuator пока не запускаются из cron. Реальный production recovery остаётся в legacy `wan-guardian.sh` до отдельной приёмки mutating path.
+`wan-recovery-actuator.sh` содержит exact operations, но live path требует одновременно execution enable и внутренний Controller authorization. Actuator повторно валидирует роль/mapping и, для DHCP, capability непосредственно перед mutation.
+
+Exact operations используют только discovered RCI ID:
+- `DHCP_RENEW` -> `interface <rci-id> ip dhcp client renew`;
+- physical reconnect -> `interface <rci-id> down/up`;
+- logical/session reconnect -> `down/up` логического RCI interface, а не physical `via`.
+
+После успешной mutation Controller повторно запускает WAN Observer. Recovery становится `SUCCESS` только при свежем `UP/HEALTHY` для тех же RCI/Linux IDs; иначе результат остаётся `RECOVERY_UNCONFIRMED`.
+
+Новый stack по-прежнему не является production path: execution на рабочем роутере не включён, Controller не стоит в cron, legacy `wan-guardian.sh` продолжает выполнять текущий recovery.
 
 ## Интеграция VWARD Console
 
@@ -129,19 +138,20 @@ Repository tests покрывают:
 - несколько uplink и исключение VPN `misc`;
 - observer selected-path isolation;
 - DHCP/static/logical capability без утечки running-config credentials;
-- Planner/Actuator typed actions;
-- Planner -> Actuator pipeline;
-- TOCTOU смены WAN role;
-- TOCTOU смены DHCP capability;
-- Controller lock и запрет обхода Planner;
-- `EXECUTED=NO` во всех новых recovery слоях;
+- Planner typed actions;
+- Actuator default-off и Controller authorization;
+- exact mock recovery operations;
+- TOCTOU смены WAN role и DHCP capability;
+- Controller lock, cooldown, rate-limit и mutating-component conflict;
+- persistent recovery state/audit;
+- post-check success/failure и target matching;
 - отсутствие `ISP`, `eth3`, guessed WireGuard IDs и jq ONIGURUMA-зависимости в новом Discovery-driven path.
 
 ## Следующие этапы
 
-1. Отдельно принять exact mutation для `DHCP_RENEW`, `INTERFACE_RECONNECT`, `SESSION_RECONNECT` на целевом Keenetic.
-2. Добавить execution-enable switch с default `off`, cooldown/rate-limit, post-check и persistent recovery state.
-3. Только после live acceptance заменять legacy `wan-guardian.sh` новым Controller/Actuator path.
+1. Выполнить read-only preflight нового gated WAN recovery stack на целевом Keenetic.
+2. Провести одну контролируемую live mutation с немедленным post-check и планом отката.
+3. Только после live acceptance решать вопрос о замене legacy `wan-guardian.sh` и scheduling Controller.
 4. Затем перевести `wg-failopen-guard.sh` на Tunnel/WAN roles.
 5. После этого переводить Policy Sync и Route Engine на общий role contract.
 6. Затем переходить к due-based/idle-aware Maintenance Coordinator.
