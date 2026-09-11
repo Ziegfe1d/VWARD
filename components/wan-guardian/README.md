@@ -1,29 +1,43 @@
 # VWARD WAN Guard
 
-VWARD WAN Guard разделён на независимые слои обнаружения, наблюдения, capability, планирования, валидации действия и execution gate.
+VWARD WAN Guard разделён на независимые слои обнаружения, наблюдения, capability, планирования, execution gate, actuator и post-check.
 
 `VWARD Discovery` определяет фактическую роль `wan-guard`, RCI ID, Linux-интерфейс и `via` для логических uplink. Компоненты WAN Guard не должны угадывать `ISP`, `ethN` или другие installation-specific имена.
 
 `wan-health-watch.sh` - read-only observer. Он использует фактические `rci_id` и `linux_if`, учитывает `via` для PPPoE/логических uplink и выполняет только диагностические проверки. При неоднозначном или неразрешённом mapping он работает fail-safe и не запускает непривязанные сетевые probes.
 
-`wan-capability.sh` - read-only Capability Provider. Он запускается только по требованию recovery, повторно подтверждает роль `wan-guard` и читает `show running-config`, но наружу не публикует сам конфиг. Provider возвращает только безопасную классификацию addressing/recovery capability. DHCP считается подтверждённым только при фактической строке `ip address dhcp` в блоке выбранного RCI-интерфейса. Тип `GigabitEthernet` сам по себе не считается доказательством DHCP.
+`wan-capability.sh` - read-only Capability Provider. Он запускается только по требованию recovery, повторно подтверждает роль `wan-guard` и читает `show running-config`, но наружу не публикует сам конфиг. DHCP считается подтверждённым только при фактическом `ip address dhcp` в блоке выбранного RCI-интерфейса. Тип Ethernet сам по себе не считается доказательством DHCP.
 
-`wan-recovery-plan.sh` - type-aware Recovery Planner в режиме `dryrun`. Он читает свежий observer state, повторно проверяет текущую роль `wan-guard` и совпадение RCI/Linux mapping, ждёт подтверждённого числа ошибок и выдаёт только решение `HOLD`, `DEFER`, `BLOCKED` или `PLAN`. Planner всегда возвращает `EXECUTED=NO` и не содержит network mutation.
+`wan-recovery-plan.sh` - type-aware Recovery Planner. Он всегда остаётся `dryrun`, использует свежий observer state, повторно проверяет роль/mapping и выдаёт только `HOLD`, `DEFER`, `BLOCKED` или `PLAN`. Разрешённые typed actions: `SESSION_RECONNECT`, `INTERFACE_RECONNECT`, а также capability-gated `DHCP_RENEW`.
 
-Planner различает логический и физический uplink. Для PPPoE/логического session failure он может запланировать `SESSION_RECONNECT`. Для подтверждённого физического path failure - `INTERFACE_RECONNECT`. Для физического `ADDRESS_FAILURE` Planner обращается к Capability Provider и может выдать `DHCP_RENEW` только при `state=READY`, совпадении RCI/Linux mapping, `addressing.mode=dhcp` и `dhcp_renew=true`. Static, unknown, stale, mismatch и неоднозначные состояния не дают права на DHCP action.
+`wan-recovery-controller.sh` - единственный Execution Gate. По умолчанию `VWARD_WAN_RECOVERY_EXECUTION_ENABLED=0`, поэтому Controller и Actuator работают без mutation. Live path не включён в cron.
 
-`wan-recovery-actuator.sh` переведён на тот же Discovery/Capability contract, но пока также работает только в `dryrun`. Он принимает только типизированные действия `SESSION_RECONNECT`, `INTERFACE_RECONNECT` или `DHCP_RENEW` вместе с ожидаемыми RCI/Linux IDs. Непосредственно перед готовностью к действию он заново запускает Discovery, а для DHCP ещё раз проверяет Capability Provider.
+При явном execution enable Controller до Actuator проверяет:
+- собственный lock;
+- Update Engine lock/barrier/request;
+- legacy WAN recovery lock;
+- Tunnel Guard mutation lock;
+- cooldown;
+- max attempts per window;
+- возможность persistent state/audit write.
 
-Actuator не принимает shell-команду, не использует `eval`, не содержит `ISP`, `eth3`, готового `ip dhcp client renew` или подготовленных `ndmc` command strings. После успешной проверки он возвращает только `RESULT=READY`, тип будущей операции (`RCI_SESSION_RECONNECT`, `RCI_INTERFACE_RECONNECT` или `RCI_DHCP_RENEW`) и `EXECUTED=NO`.
+Каждая live attempt резервируется до mutation. После успешного Actuator call Controller запускает `wan-health-watch.sh` и считает recovery успешным только при свежем `UP/HEALTHY` для тех же `rci_id` и `linux_if`. Иначе результат остаётся `RECOVERY_UNCONFIRMED`.
 
-`wan-recovery-controller.sh` - единственный новый Execution Gate. Он также работает только в `dryrun`, создаёт собственный transient lock, запускает Planner, пропускает к Actuator только `DECISION=PLAN`, проверяет typed action/target handoff и требует от обоих нижележащих слоёв `EXECUTED=NO`. `HOLD`, `DEFER` и `BLOCKED` не вызывают Actuator. Неизвестный action, другой target, неправильный execution kind или попытка нижнего слоя сообщить об исполнении приводят к `BLOCKED`.
+`wan-recovery-actuator.sh` - единственный новый слой с exact network operations. Даже при `execution_enabled=1` прямой live-вызов без внутреннего `VWARD_WAN_RECOVERY_CONTROLLER_AUTH=1` блокируется.
 
-Controller сам не содержит `ndmc`, `eval`, DHCP-команд или installation-specific target. Он зарегистрирован как runtime-target WAN Guard и учитывается Update Engine при health/quiescing, но намеренно не включён в cron до отдельной приёмки реальных mutation.
+Exact operations используют только повторно обнаруженный RCI ID:
+- `DHCP_RENEW`: `interface <rci-id> ip dhcp client renew`;
+- `INTERFACE_RECONNECT`: `interface <rci-id> down`, затем `up`;
+- `SESSION_RECONNECT`: `down/up` именно logical RCI interface, а не physical `via`.
 
-Для логического reconnect обязательно наличие валидных `via_rci_id` и `via_linux_if`. Для физического reconnect/DHCP наличие logical `via` блокирует действие. Это не позволяет применить физическую recovery-операцию к PPPoE/другому логическому uplink или наоборот.
+Actuator запускает `ndmc` с очищенным `LD_LIBRARY_PATH`, не использует `eval`, не принимает произвольный shell command text и не вызывает `system configuration save`. Если первый `up` после reconnect не проходит, выполняется один best-effort повтор `up`.
 
-`wan-guardian.sh` пока остаётся legacy recovery path рабочего роутера. Его существующие cooldown/rate-limit и текущая модель `ISP`/`eth3` этим этапом не меняются. Новый Capability/Planner/Actuator/Controller не подключены к его mutating path.
+Policy defaults Controller: cooldown 300 секунд, окно 3600 секунд, максимум 3 попытки, 3 post-check с интервалом 3 секунды. Это изменяемые recovery-policy defaults, а не installation-specific свойства роутера.
 
-Repository tests отдельно проверяют Capability Provider, Planner, Actuator, Planner -> Actuator pipeline и Controller. Покрыты TOCTOU-сценарии смены WAN role и смены DHCP capability после планирования, а также блокировка обхода Planner и конкурентного запуска Controller. Во всех новых слоях фактическое действие остаётся `EXECUTED=NO`.
+`wan-guardian.sh` пока остаётся legacy production recovery path рабочего роутера. Новый stack не заменяет его автоматически и execution на реальном устройстве пока не включён.
 
-Следующий этап - определить и отдельно принять exact RCI mutation для `SESSION_RECONNECT`, `INTERFACE_RECONNECT` и `DHCP_RENEW`, добавить cooldown/rate-limit, post-check и recovery state. Реальные mutation разрешать только в одном Actuator через Controller после отдельного Beta acceptance и проверки на целевом Keenetic.
+Repository tests покрывают default-off, direct-actuator authorization guard, exact mock `ndmc` operations, DHCP capability, role/mapping TOCTOU, cooldown, rate limit, updater/legacy/tunnel conflicts, persistent audit state и post-check success/failure.
+
+Authoritative описание: `docs/WAN_RECOVERY_PIPELINE.md`.
+
+Следующий этап - read-only preflight и одна контролируемая live-приёмка на целевом Keenetic. До неё `execution_enabled` остаётся `0`, Controller не добавляется в cron, legacy recovery остаётся production path.
