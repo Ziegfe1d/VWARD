@@ -1,6 +1,6 @@
 # VWARD WAN Recovery Pipeline
 
-Этот документ является authoritative описанием новой Discovery-driven цепочки восстановления WAN в Beta `0.2.x`.
+Этот документ является authoritative описанием Discovery-driven цепочки восстановления WAN в Beta `0.2.x`.
 
 ## Статус
 
@@ -8,19 +8,21 @@
 
 `Discovery -> Observer -> Capability -> Planner -> Controller -> Actuator -> Observer post-check`
 
-Planner остаётся полностью read-only/dry-run. Controller и Actuator содержат подготовленный execution path, но он **выключен по умолчанию**: `VWARD_WAN_RECOVERY_EXECUTION_ENABLED=0`. Controller не включён в cron, поэтому новый stack сам по себе не выполняет recovery на роутере. Фактический рабочий production recovery пока остаётся в legacy `wan-guardian.sh`.
+Planner остаётся полностью read-only/dry-run. Controller и Actuator содержат execution path, но он **выключен по умолчанию**: `VWARD_WAN_RECOVERY_EXECUTION_ENABLED=0`. Controller не включён в cron, поэтому новый stack сам по себе не выполняет recovery на роутере. Фактический production recovery пока остаётся в legacy `wan-guardian.sh`.
 
-Live acceptance на Keenetic Viva KN-1913 подтвердил первый реальный action:
+Live acceptance на Keenetic Viva KN-1913 подтвердил два реальных action для текущей физической DHCP topology:
 - `DHCP_RENEW` прошёл через полный Controller path;
-- Discovery определил `GigabitEthernet1 -> eth3` без installation-specific hardcode;
-- Capability Provider подтвердил `addressing.mode=dhcp` по фактическому `ip address dhcp`;
-- Planner выдал `PLAN / DHCP_RENEW`;
-- Actuator выполнил `RCI_DHCP_RENEW`;
-- Controller получил `RESULT=SUCCESS`, `POSTCHECK=HEALTHY`, `EXECUTED=YES`;
-- после операции WAN остался `UP/HEALTHY`, адрес и default route сохранились;
-- persistent recovery state и audit log корректно зафиксировали одну успешную попытку.
+- `INTERFACE_RECONNECT` прошёл через полный Controller path;
+- Discovery в обоих тестах определил `GigabitEthernet1 -> eth3` без installation-specific hardcode;
+- перед reconnect SSH safety check подтвердил, что текущая Termius-сессия идёт через LAN `br0`, а не через WAN;
+- Planner выдал `PLAN / DHCP_RENEW` и отдельно `PLAN / INTERFACE_RECONNECT`;
+- Actuator выполнил `RCI_DHCP_RENEW` и отдельно `RCI_INTERFACE_RECONNECT`;
+- Controller в обоих случаях завершил `RESULT=SUCCESS`, `POSTCHECK=HEALTHY`, `EXECUTED=YES`;
+- после обеих операций WAN вернулся в `UP/HEALTHY`, сохранились `link=up`, `connected=yes`, `defaultgw=true` и тот же адрес;
+- persistent recovery state и audit log корректно зафиксировали по одной успешной попытке;
+- аварийный delayed `up` rescue при `INTERFACE_RECONNECT` не понадобился.
 
-Это принятие относится только к `DHCP_RENEW` на фактически проверенной topology. `INTERFACE_RECONNECT` и `SESSION_RECONNECT` требуют отдельной live acceptance и пока не считаются принятыми на реальном устройстве.
+`SESSION_RECONNECT` на текущем KN-1913 не принимается и не моделируется искусственно: фактический Capability Provider возвращает `session_reconnect=false`, потому что текущий WAN является физическим DHCP uplink без logical `via`.
 
 ## 1. Discovery
 
@@ -165,7 +167,7 @@ Live acceptance для `DHCP_RENEW` на KN-1913: **пройдено**.
 
 Если первый `up` не проходит, допускается один best-effort повтор `up`, чтобы не оставить интерфейс выключенным после частичного reconnect.
 
-Live acceptance для `INTERFACE_RECONNECT`: **ещё не выполнено**.
+Live acceptance для `INTERFACE_RECONNECT` на KN-1913: **пройдено**. Перед mutation подтверждено, что SSH management path шёл через LAN `br0`, не через тестируемый WAN. После down/up Controller получил свежий `UP/HEALTHY`; отдельный rescue `up` не потребовался.
 
 ### SESSION_RECONNECT
 
@@ -175,7 +177,7 @@ Live acceptance для `INTERFACE_RECONNECT`: **ещё не выполнено**
 2. короткая bounded pause;
 3. `ndmc -c "interface <logical-discovered-rci-id> up"`
 
-Live acceptance для `SESSION_RECONNECT`: **ещё не выполнено**.
+Live acceptance для `SESSION_RECONNECT`: **не применимо к текущей topology KN-1913**. Тест разрешён только на реальном logical uplink, для которого Discovery/Capability подтверждают соответствующий `via` mapping и `session_reconnect=true`.
 
 Actuator очищает `LD_LIBRARY_PATH` только для запуска `ndmc`, чтобы не наследовать Entware library path в Keenetic control-plane process.
 
@@ -201,7 +203,7 @@ Execution kinds:
 
 Если post-check не подтверждает выбранный WAN, результат остаётся `RECOVERY_UNCONFIRMED`, хотя факт выполненной mutation сохраняется как `EXECUTED=YES`.
 
-Live DHCP acceptance подтвердил этот post-check на реальном KN-1913: observer вернулся в `UP/HEALTHY` для того же `GigabitEthernet1 / eth3`.
+Live acceptance подтвердил post-check для обоих применимых actions на реальном KN-1913: `DHCP_RENEW` и `INTERFACE_RECONNECT` вернули observer в `UP/HEALTHY` для того же `GigabitEthernet1 / eth3`.
 
 ## 8. Cooldown и rate limit
 
@@ -218,7 +220,7 @@ State хранит минимум:
 
 Rollback часов назад блокирует новый live attempt через `clock_regressed`, а не обнуляет защитные интервалы.
 
-Live DHCP acceptance подтвердил создание state/audit records и `WINDOW_COUNT=1` после единственной успешной операции.
+Оба live acceptance подтвердили создание state/audit records и `WINDOW_COUNT=1` для отдельно изолированной попытки.
 
 ## 9. TOCTOU protection
 
@@ -242,19 +244,27 @@ Health profile `wan-guard` требует полный runtime stack, включ
 
 ## 11. Что пока запрещено
 
-До завершения live acceptance всего recovery stack запрещено:
-- добавлять Controller в cron;
-- постоянно включать execution на рабочем роутере;
-- автоматически заменять legacy `wan-guardian.sh` новым stack;
-- считать успешный `DHCP_RENEW` автоматическим доказательством безопасности `INTERFACE_RECONNECT` или `SESSION_RECONNECT`;
+Несмотря на успешные live acceptance `DHCP_RENEW` и `INTERFACE_RECONNECT`, пока запрещено:
+- добавлять Controller в cron без отдельного rollout/rollback этапа;
+- постоянно включать execution на рабочем роутере до установки и shadow-наблюдения нового stack;
+- автоматически заменять legacy `wan-guardian.sh` новым stack одним шагом;
+- считать физические KN-1913 tests доказательством `SESSION_RECONNECT` для logical topology;
 - обходить Controller прямым вызовом live Actuator.
 
 Planner и Controller не содержат `ndmc`; exact network commands существуют только в Actuator за двумя gates.
 
 ## 12. Следующий этап
 
-`DHCP_RENEW` live path принят на текущем KN-1913.
+Для текущей физической DHCP topology KN-1913 live acceptance применимых recovery actions завершён:
+- `DHCP_RENEW`: принято;
+- `INTERFACE_RECONNECT`: принято;
+- `SESSION_RECONNECT`: не применимо к текущей topology и остаётся gated до появления подходящего logical WAN.
 
-Следующий отдельный этап - controlled live acceptance `INTERFACE_RECONNECT` на физическом WAN. Он должен проводиться отдельно, с теми же Discovery/Controller guards, одним action и обязательным post-check. `SESSION_RECONNECT` проверяется только на подходящей logical topology и не должен искусственно моделироваться на физическом WAN.
+Следующий этап - не ещё одна искусственная mutation, а controlled rollout нового WAN stack:
+1. установить Beta runtime files через штатный Update Engine/пакет;
+2. оставить `VWARD_WAN_RECOVERY_EXECUTION_ENABLED=0`;
+3. включить Observer/Planner/Controller только в shadow/dry-run режиме;
+4. проверить, что новый stack не конфликтует с legacy `wan-guardian.sh`, Tunnel Guard и Update Engine;
+5. после периода стабильного shadow-наблюдения подготовить отдельный cutover plan с rollback для замены legacy recovery.
 
-До завершения этих этапов `execution_enabled` по умолчанию остаётся `0`, Controller не входит в cron, а legacy recovery остаётся production path.
+До отдельного cutover `execution_enabled` по умолчанию остаётся `0`, Controller не входит в production cron, а legacy recovery остаётся production path.
