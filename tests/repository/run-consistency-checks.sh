@@ -15,7 +15,7 @@ grep -Fq "**$VERSION**" README.md || fail "README version differs"
 for DOC in docs/INSTALL.md docs/INSTALLATION_MAP.md docs/DEPENDENCIES.md docs/CONSOLE.md \
     docs/NAMING_MIGRATION.md docs/UPDATER_ARCHITECTURE.md \
     docs/UPDATE_POLICY.md docs/UPDATE_RECOVERY.md docs/UPDATE_SECURITY.md \
-    docs/DISCOVERY.md
+    docs/DISCOVERY.md docs/WAN_RECOVERY_PIPELINE.md
 do
     [ -r "$DOC" ] || fail "missing documentation: $DOC"
 done
