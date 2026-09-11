@@ -57,9 +57,9 @@ WAN_ACTUATOR_CRON_COUNT=$(grep -Fc '/opt/bin/wan-recovery-actuator.sh' config/cr
 WAN_CONTROLLER_CRON_COUNT=$(grep -Fc '/opt/bin/wan-recovery-controller.sh' config/cron/root.crontab || true)
 [ "$WAN_HEALTH_CRON_COUNT" -eq 1 ] || fail "WAN observer cron must exist exactly once"
 [ "$WAN_GUARDIAN_CRON_COUNT" -eq 1 ] || fail "legacy WAN recovery cron must exist exactly once"
-[ "$WAN_PLAN_CRON_COUNT" -eq 0 ] || fail "dry-run WAN Recovery Planner must not be scheduled yet"
-[ "$WAN_ACTUATOR_CRON_COUNT" -eq 0 ] || fail "dry-run WAN actuator must not be scheduled yet"
-[ "$WAN_CONTROLLER_CRON_COUNT" -eq 0 ] || fail "dry-run WAN recovery controller must not be scheduled yet"
+[ "$WAN_PLAN_CRON_COUNT" -eq 0 ] || fail "WAN Recovery Planner must not be scheduled yet"
+[ "$WAN_ACTUATOR_CRON_COUNT" -eq 0 ] || fail "WAN actuator must not be scheduled directly"
+[ "$WAN_CONTROLLER_CRON_COUNT" -eq 0 ] || fail "WAN recovery controller must not be scheduled before live acceptance"
 grep -F '/opt/bin/wan-health-watch.sh' config/cron/root.crontab | grep -Fq '/opt/bin/wan-guardian.sh' && fail "WAN observer and recovery must not be chained in one cron entry"
 
 grep -Fq 'DISCOVERY="${VWARD_DISCOVERY:-/opt/bin/vward-discovery.sh}"' web/cgi-bin/api.cgi || fail "Console API does not declare the shared Discovery provider"
@@ -116,27 +116,42 @@ if grep -Eq 'Wireguard[0-9]|nwg[0-9]|eth3|192\.168\.|show/interface\?name=ISP' "
 
 WAN_ACTUATOR=components/wan-guardian/scripts/wan-recovery-actuator.sh
 [ -x "$WAN_ACTUATOR" ] || fail "WAN Recovery Actuator must be executable"
-grep -Fq 'MODE="dryrun"' "$WAN_ACTUATOR" || fail "WAN Recovery Actuator must remain dry-run"
-grep -Fq 'EXECUTED=NO' "$WAN_ACTUATOR" || fail "WAN Recovery Actuator execution guard missing"
-grep -Fq 'SESSION_RECONNECT|INTERFACE_RECONNECT|DHCP_RENEW' "$WAN_ACTUATOR" || fail "WAN Recovery Actuator typed action allowlist missing"
-grep -Fq 'RCI_DHCP_RENEW' "$WAN_ACTUATOR" || fail "WAN Recovery Actuator DHCP execution kind missing"
-grep -Fq 'VWARD_WAN_CAPABILITY_BIN' "$WAN_ACTUATOR" || fail "WAN Recovery Actuator capability revalidation missing"
-for FORBIDDEN in 'ip dhcp client renew' 'IFACE="ISP"' 'IFACE=ISP' 'show/interface?name=ISP' 'eth3' 'COMMAND=' 'COMMAND_DOWN=' 'COMMAND_UP='
+for REQUIRED in \
+    'VWARD_WAN_RECOVERY_EXECUTION_ENABLED:-0' \
+    'VWARD_WAN_RECOVERY_CONTROLLER_AUTH:-0' \
+    'controller_authorization_required' \
+    'LD_LIBRARY_PATH= "$NDMC"' \
+    'interface $CURRENT_RCI_ID down' \
+    'interface $CURRENT_RCI_ID up' \
+    'interface $CURRENT_RCI_ID ip dhcp client renew' \
+    'RCI_DHCP_RENEW'
 do
-    grep -Fq "$FORBIDDEN" "$WAN_ACTUATOR" && fail "dry-run WAN actuator contains forbidden token: $FORBIDDEN"
+    grep -Fq "$REQUIRED" "$WAN_ACTUATOR" || fail "WAN Recovery Actuator gated operation missing: $REQUIRED"
 done
-if grep -Eq '(^|[^A-Za-z])ndmc([^A-Za-z]|$)|(^|[[:space:]])eval([[:space:]]|$)' "$WAN_ACTUATOR"; then fail "dry-run WAN actuator contains executable mutation"; fi
+for FORBIDDEN in 'IFACE="ISP"' 'IFACE=ISP' 'show/interface?name=ISP' 'eth3' 'COMMAND_DOWN=' 'COMMAND_UP=' 'system configuration save'
+do
+    grep -Fq "$FORBIDDEN" "$WAN_ACTUATOR" && fail "WAN actuator contains forbidden legacy/persistence token: $FORBIDDEN"
+done
+if grep -Eq '(^|[[:space:]])eval([[:space:]]|$)' "$WAN_ACTUATOR"; then fail "WAN actuator must not use eval"; fi
 
 WAN_CONTROLLER=components/wan-guardian/scripts/wan-recovery-controller.sh
 [ -x "$WAN_CONTROLLER" ] || fail "WAN Recovery Controller must be executable"
-grep -Fq 'MODE="dryrun"' "$WAN_CONTROLLER" || fail "WAN Recovery Controller must remain dry-run"
-grep -Fq 'VWARD_WAN_RECOVERY_PLANNER' "$WAN_CONTROLLER" || fail "WAN Recovery Controller planner contract missing"
-grep -Fq 'VWARD_WAN_RECOVERY_ACTUATOR' "$WAN_CONTROLLER" || fail "WAN Recovery Controller actuator contract missing"
-grep -Fq 'wan-recovery-controller.lock' "$WAN_CONTROLLER" || fail "WAN Recovery Controller lock missing"
-grep -Fq 'PLANNER_EXECUTED' "$WAN_CONTROLLER" || fail "WAN Recovery Controller planner execution guard missing"
-grep -Fq 'ACTUATOR_EXECUTED' "$WAN_CONTROLLER" || fail "WAN Recovery Controller actuator execution guard missing"
-grep -Fq 'EXECUTED=NO' "$WAN_CONTROLLER" || fail "WAN Recovery Controller dry-run output guard missing"
-for FORBIDDEN in 'ndmc' 'eval ' 'ip dhcp client renew' 'IFACE="ISP"' 'COMMAND='
+for REQUIRED in \
+    'VWARD_WAN_RECOVERY_EXECUTION_ENABLED:-0' \
+    'VWARD_WAN_RECOVERY_COOLDOWN_SEC:-300' \
+    'VWARD_WAN_RECOVERY_WINDOW_SEC:-3600' \
+    'VWARD_WAN_RECOVERY_MAX_ATTEMPTS:-3' \
+    'VWARD_WAN_RECOVERY_POSTCHECK_ATTEMPTS:-3' \
+    'VWARD_WAN_RECOVERY_CONTROLLER_AUTH=1' \
+    'mutating_component_conflict' \
+    'cooldown_active' \
+    'rate_limit_reached' \
+    'RECOVERY_UNCONFIRMED' \
+    'postcheck_health'
+do
+    grep -Fq "$REQUIRED" "$WAN_CONTROLLER" || fail "WAN Recovery Controller execution policy missing: $REQUIRED"
+done
+for FORBIDDEN in 'ndmc' 'eval ' 'ip dhcp client renew' 'IFACE="ISP"' 'COMMAND=' 'system configuration save'
 do
     grep -Fq "$FORBIDDEN" "$WAN_CONTROLLER" && fail "WAN Recovery Controller contains forbidden execution token: $FORBIDDEN"
 done
