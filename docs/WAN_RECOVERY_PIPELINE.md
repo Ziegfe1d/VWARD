@@ -4,15 +4,15 @@
 
 ## Статус
 
-Текущая цепочка полностью собрана и протестирована в режиме `dryrun`:
+Текущая цепочка:
 
-`Discovery -> Observer -> Capability -> Planner -> Controller -> Actuator`
+`Discovery -> Observer -> Capability -> Planner -> Controller -> Actuator -> Observer post-check`
 
-Новые Planner, Controller и Actuator не выполняют сетевых mutation и не запускаются из cron. Фактический рабочий recovery на роутере пока остаётся в legacy `wan-guardian.sh` до отдельной приёмки mutating path.
+Planner остаётся полностью read-only/dry-run. Controller и Actuator теперь содержат подготовленный execution path, но он **выключен по умолчанию**: `VWARD_WAN_RECOVERY_EXECUTION_ENABLED=0`. Controller не включён в cron, поэтому новый stack сам по себе не выполняет recovery на роутере. Фактический рабочий production recovery пока остаётся в legacy `wan-guardian.sh` до отдельной live-приёмки.
 
 ## 1. Discovery
 
-`vward-discovery.sh wan-guard` определяет выбранный WAN по фактическому RCI state и role mapping. Код не предполагает имена `ISP`, `eth3` или любую конкретную нумерацию интерфейсов.
+`vward-discovery.sh wan-guard` определяет выбранный WAN по фактическому RCI state и role mapping. Код не предполагает имена `ISP`, `eth3` или конкретную нумерацию интерфейсов.
 
 Для выбранного uplink сохраняются:
 - `rci_id`;
@@ -53,7 +53,7 @@ DHCP считается доказанным только при фактиче�
 
 ## 4. Recovery Planner
 
-`wan-recovery-plan.sh` работает только в `MODE=dryrun` и всегда возвращает `EXECUTED=NO`.
+`wan-recovery-plan.sh` всегда работает в `MODE=dryrun` и возвращает `EXECUTED=NO`.
 
 Перед PLAN он проверяет:
 - свежесть observer state;
@@ -72,85 +72,174 @@ DHCP считается доказанным только при фактиче�
 Разрешённые typed actions:
 - `SESSION_RECONNECT` для подтверждённого отказа логической сессии/path;
 - `INTERFACE_RECONNECT` для подтверждённого физического path failure;
-- `DHCP_RENEW` только для физического `ADDRESS_FAILURE`, когда Capability Provider повторно подтверждает `addressing.mode=dhcp` и `dhcp_renew=true`.
+- `DHCP_RENEW` только для физического `ADDRESS_FAILURE`, когда Capability Provider подтверждает `addressing.mode=dhcp` и `dhcp_renew=true`.
 
 `PHY_DOWN`, DNS-only failure, stale/ambiguous/mismatched state и неизвестная addressing capability не дают права на mutation.
 
 ## 5. Recovery Controller
 
-`wan-recovery-controller.sh` является единственным новым Execution Gate.
+`wan-recovery-controller.sh` является единственным Execution Gate нового stack.
 
-Сейчас Controller также работает только в `MODE=dryrun` и всегда возвращает `EXECUTED=NO`.
+### Default OFF
 
-Controller:
-- создаёт `/tmp/wan-recovery-controller.lock`;
-- запускает Planner;
-- не вызывает Actuator для `HOLD`, `DEFER` или `BLOCKED`;
-- принимает только `DECISION=PLAN`;
-- разрешает только известные typed actions;
-- передаёт в Actuator action + ожидаемые RCI/Linux IDs, а не shell-команду;
-- проверяет ответ Actuator;
-- блокирует несоответствие action, target, execution kind или execution guard.
+Без явного `VWARD_WAN_RECOVERY_EXECUTION_ENABLED=1` Controller работает как dry-run validation gate:
+- вызывает Planner;
+- вызывает Actuator только для валидного `PLAN`;
+- требует `MODE=dryrun` и `EXECUTED=NO`;
+- не создаёт persistent recovery state или audit log;
+- не выполняет network mutation.
 
-Controller не содержит `ndmc`, `eval`, готовых recovery commands или installation-specific target.
+### Execute path
+
+Даже при `VWARD_WAN_RECOVERY_EXECUTION_ENABLED=1` Controller не передаёт shell-команду. Он передаёт Actuator только typed action и ожидаемые RCI/Linux IDs.
+
+До вызова Actuator Controller:
+- держит `/tmp/wan-recovery-controller.lock`;
+- требует валидный Planner result;
+- блокируется при активном Update Engine barrier/lock/request;
+- блокируется при legacy WAN recovery lock;
+- блокируется при Tunnel Guard fail-open mutation lock;
+- проверяет cooldown;
+- проверяет rate-limit window;
+- резервирует попытку в persistent state;
+- пишет audit record до mutation.
+
+Консервативные defaults являются policy defaults, а не свойствами конкретного роутера:
+- cooldown: `300` секунд;
+- rate-limit window: `3600` секунд;
+- max attempts: `3`;
+- post-check attempts: `3`;
+- delay между повторными post-check: `3` секунды.
+
+Все значения доступны как отдельные runtime policy variables и не зависят от имени WAN, модели роутера или topology.
+
+Persistent state по умолчанию: `/opt/var/lib/wan-recovery/state`.
+Audit log по умолчанию: `/opt/var/log/wan-recovery.log`.
 
 ## 6. Recovery Actuator
 
-`wan-recovery-actuator.sh` является единственным местом, где в будущем могут появиться реальные WAN mutation. Сейчас mutation в нём отсутствуют.
+`wan-recovery-actuator.sh` является единственным новым слоем, где разрешены exact network operations.
 
-Actuator повторно проверяет актуальный `wan-guard` непосредственно перед готовностью к операции. Для DHCP он повторно вызывает Capability Provider.
+Actuator всегда заново проверяет актуальный `wan-guard` непосредственно перед operation. Для DHCP он повторно вызывает Capability Provider.
 
-Текущие execution kinds:
+При default `execution_enabled=0` Actuator только возвращает readiness и `EXECUTED=NO`.
+
+Для live path одновременно обязательны:
+- `VWARD_WAN_RECOVERY_EXECUTION_ENABLED=1`;
+- внутренний `VWARD_WAN_RECOVERY_CONTROLLER_AUTH=1`, устанавливаемый Controller;
+- валидный discovered RCI/Linux mapping;
+- совместимый typed action;
+- дополнительная DHCP capability revalidation для `DHCP_RENEW`.
+
+Прямой запуск Actuator только с `execution_enabled=1`, но без Controller authorization, блокируется.
+
+Exact operations:
+
+### DHCP_RENEW
+
+Выполняется только для доказанного DHCP WAN:
+
+`ndmc -c "interface <discovered-rci-id> ip dhcp client renew"`
+
+### INTERFACE_RECONNECT
+
+Только для physical WAN без logical `via`:
+
+1. `ndmc -c "interface <discovered-rci-id> down"`
+2. короткая bounded pause;
+3. `ndmc -c "interface <discovered-rci-id> up"`
+
+Если первый `up` не проходит, допускается один best-effort повтор `up`, чтобы не оставить интерфейс выключенным после частичного reconnect.
+
+### SESSION_RECONNECT
+
+Только для logical uplink с валидным `via` mapping. Переключается именно logical RCI interface, а не физический `via`:
+
+1. `ndmc -c "interface <logical-discovered-rci-id> down"`
+2. короткая bounded pause;
+3. `ndmc -c "interface <logical-discovered-rci-id> up"`
+
+Actuator очищает `LD_LIBRARY_PATH` только для запуска `ndmc`, чтобы не наследовать Entware library path в Keenetic control-plane process.
+
+Recovery не вызывает `system configuration save`: временный reconnect не должен отдельно фиксировать пользовательскую конфигурацию.
+
+Actuator не принимает произвольный command text, не использует `eval` и не строит имя интерфейса из номера или шаблона.
+
+Execution kinds:
 - `RCI_SESSION_RECONNECT`;
 - `RCI_INTERFACE_RECONNECT`;
 - `RCI_DHCP_RENEW`.
 
-Это только тип будущей операции. При текущем Beta state результат остаётся `EXECUTED=NO`.
+## 7. Post-check
 
-Actuator не принимает произвольный command text, не использует `eval` и не строит имя интерфейса из номера или шаблона.
+Успешный возврат `ndmc` сам по себе не означает успешный recovery.
 
-## 7. TOCTOU protection
+После `EXECUTED=YES` Controller повторно запускает `wan-health-watch.sh` и принимает recovery как `SUCCESS` только если свежий observer state одновременно показывает:
+- тот же `RCI_ID`;
+- тот же `LINUX_IF`;
+- `STATUS=UP`;
+- `CLASS=HEALTHY`;
+- `LAST_CHECK` не старше момента recovery attempt.
 
-Role/capability перепроверяются после Planner и до будущей mutation.
+Если post-check не подтверждает выбранный WAN, результат остаётся `RECOVERY_UNCONFIRMED`, хотя факт выполненной mutation сохраняется как `EXECUTED=YES`.
 
-Regression tests проверяют минимум два изменения между PLAN и ACT:
-- WAN role изменилась -> Actuator возвращает `BLOCKED`;
-- DHCP capability изменилась на static -> `DHCP_RENEW` возвращает `BLOCKED`.
+## 8. Cooldown и rate limit
 
-Таким образом, решение Planner не является бессрочным разрешением на действие.
+Каждая live attempt резервируется до Actuator call. Это консервативно: даже crash/неопределённый результат не позволяет немедленно повторять потенциально разрушительную операцию бесконечно.
 
-## 8. Update Engine integration
+State хранит минимум:
+- `LAST_ATTEMPT_EPOCH`;
+- `LAST_SUCCESS_EPOCH`;
+- `WINDOW_START_EPOCH`;
+- `WINDOW_COUNT`;
+- последний action;
+- последние RCI/Linux IDs;
+- последний result.
 
-Все новые WAN runtime files зарегистрированы как targets компонента `wan-guard` и разрешены Update Engine.
+Rollback часов назад блокирует новый live attempt через `clock_regressed`, а не обнуляет защитные интервалы.
 
-`vward-update-runtime-policy.sh` содержит актуальный target allowlist и учитывает WAN observer/controller locks при quiescing.
+## 9. TOCTOU protection
 
-Health profile `wan-guard` требует полный runtime stack, включая Discovery-driven observer, Capability Provider, Planner, Actuator и Controller.
+Role/capability перепроверяются после Planner и непосредственно перед mutation.
 
-## 9. Что пока запрещено
+Regression tests проверяют минимум:
+- WAN role изменилась после PLAN -> Actuator `BLOCKED`;
+- DHCP capability изменилась на static -> `DHCP_RENEW` `BLOCKED`;
+- direct live Actuator без Controller authorization -> `BLOCKED`;
+- updater/legacy WAN/Tunnel mutation conflict -> Controller `BLOCKED` до Actuator.
 
-До отдельной Beta acceptance запрещено:
-- включать Controller/Planner/Actuator в cron;
-- выполнять `ndmc` из новых Planner/Controller;
-- выполнять recovery mutation из Controller;
-- автоматически заменять legacy `wan-guardian.sh`;
-- считать dry-run acceptance доказательством безопасной mutation на реальном роутере.
+Решение Planner не является бессрочным разрешением на действие.
 
-## 10. Следующий этап
+## 10. Update Engine integration
 
-Перед включением реальных действий необходимо отдельно принять exact operation для каждого action:
-- `DHCP_RENEW`;
-- `INTERFACE_RECONNECT`;
-- `SESSION_RECONNECT`.
+Все WAN runtime files зарегистрированы как targets компонента `wan-guard` и разрешены Update Engine.
 
-Затем в Controller/Actuator добавить:
-- явный execution enable switch с default `off`;
-- cooldown;
-- rate limit / max recoveries per window;
-- повторный pre-check непосредственно перед mutation;
-- post-check через новый observer cycle;
-- persistent recovery state и audit log;
-- безопасное поведение при неуспешном post-check;
-- блокировку при конфликте с VWARD Update Engine и другими mutating components.
+`vward-update-runtime-policy.sh` учитывает WAN observer/controller locks при quiescing. В обратную сторону Controller проверяет updater lock/barrier/request до live mutation.
 
-Реальные mutation разрешаются только после отдельной приёмки на целевом Keenetic. До этого legacy recovery остаётся рабочим production path.
+Health profile `wan-guard` требует полный runtime stack, включая Observer, Capability Provider, Planner, Actuator и Controller.
+
+## 11. Что пока запрещено
+
+До отдельной live Beta acceptance запрещено:
+- добавлять Controller в cron;
+- включать execution на рабочем роутере;
+- автоматически заменять legacy `wan-guardian.sh` новым stack;
+- считать mock/CI acceptance доказательством безопасной mutation на конкретном WAN;
+- обходить Controller прямым вызовом live Actuator.
+
+Planner и Controller не содержат `ndmc`; exact network commands существуют только в Actuator за двумя gates.
+
+## 12. Следующий этап
+
+Текущий этап считается готовым после полного CI и SHA acceptance.
+
+Перед live-enable требуется отдельная read-only проверка на целевом Keenetic:
+- фактический `wan-guard` discovery;
+- фактическая addressing capability;
+- наличие `/bin/ndmc` и корректность control-plane call из Entware environment;
+- отсутствие конфликтующих locks;
+- dry-run Controller result на реальном observer state;
+- backup текущих VWARD runtime files;
+- отдельный план отката.
+
+Только после этой проверки можно провести одну контролируемую live mutation с немедленной post-check приёмкой. До этого `execution_enabled` остаётся `0`, Controller не входит в cron, а legacy recovery остаётся production path.
