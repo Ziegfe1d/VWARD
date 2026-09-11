@@ -34,8 +34,10 @@
 - Read-only preflight на реальном KN-1913 подтвердил Discovery `GigabitEthernet1 -> eth3`, DHCP capability, `UP/HEALTHY` observer state и zero-write Controller path без изменений production VWARD.
 - Controlled live acceptance `DHCP_RENEW` на KN-1913 пройден: Planner выдал `PLAN/DHCP_RENEW`, Actuator выполнил `RCI_DHCP_RENEW`, Controller завершил `RESULT=SUCCESS`, `POSTCHECK=HEALTHY`, `EXECUTED=YES`.
 - После live DHCP recovery WAN сохранил тот же адрес `100.85.218.53`, `link=up`, `connected=yes`, `defaultgw=true`; persistent state и audit log зафиксировали одну успешную attempt.
-- Успешный DHCP live-test не считается автоматической приёмкой `INTERFACE_RECONNECT` или `SESSION_RECONNECT`; эти действия требуют отдельных контролируемых live acceptance.
-- Controller по-прежнему не стоит в cron, execution default остаётся `0`, legacy `wan-guardian.sh` остаётся production recovery path до завершения live acceptance всего нового stack.
+- Controlled live acceptance `INTERFACE_RECONNECT` на KN-1913 пройден отдельно: SSH safety check подтвердил management path через LAN `br0`, Planner выдал `PLAN/INTERFACE_RECONNECT`, Actuator выполнил `RCI_INTERFACE_RECONNECT`, Controller завершил `RESULT=SUCCESS`, `POSTCHECK=HEALTHY`, `EXECUTED=YES`.
+- После physical down/up WAN вернулся в `UP/HEALTHY` с тем же `GigabitEthernet1 -> eth3`, тем же адресом и default route; аварийный delayed `up` rescue не понадобился.
+- Для текущей физической DHCP topology оба применимых live action (`DHCP_RENEW`, `INTERFACE_RECONNECT`) приняты. `SESSION_RECONNECT` не моделируется искусственно: текущий Capability Provider возвращает `session_reconnect=false`, поэтому его live acceptance откладывается до реального logical uplink.
+- Controller по-прежнему не стоит в cron, execution default остаётся `0`, legacy `wan-guardian.sh` остаётся production recovery path до отдельного controlled rollout/cutover нового stack.
 - High-risk fail-open, Policy Sync и Route Engine ещё не полностью переведены на общий Zero-Hardcode role mapping.
 
 ## 0.1.7-dev: критический переходный hotfix VWARD Console
