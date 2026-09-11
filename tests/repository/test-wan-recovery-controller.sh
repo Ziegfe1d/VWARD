@@ -99,9 +99,15 @@ case "$ACTION" in
     *) KIND=RCI_INTERFACE_RECONNECT ;;
 esac
 
+if [ "${VWARD_WAN_RECOVERY_EXECUTION_ENABLED:-0}" = 1 ]; then
+    MODE_OUT=execute
+else
+    MODE_OUT=dryrun
+fi
+
 if [ "${VWARD_TEST_ACT_MODE:-ready}" = blocked ]; then
     cat <<OUT
-MODE=${VWARD_WAN_RECOVERY_EXECUTION_ENABLED:-0}
+MODE=$MODE_OUT
 RESULT=BLOCKED
 ACTION=$ACTION
 REASON=capability_changed
