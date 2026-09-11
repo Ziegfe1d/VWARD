@@ -19,21 +19,26 @@
 - WAN observer привязывает gateway/external probes к фактическому `PATH_IF`. Глобальный Keenetic Internet status больше не может сам по себе классифицировать выбранный WAN как `HEALTHY`, поэтому другой uplink не маскирует его отказ.
 - При ambiguous/stale/invalid role, unresolved Linux mapping или physical carrier down WAN observer работает fail-safe и не запускает guessed/unbound probes.
 - WAN observer пишет атомарный state в `/opt/var/lib/wan-health/state`, переходы в `/opt/var/log/wan-health.log` и запускается отдельным cron entry независимо от legacy recovery.
+- Добавлен read-only `wan-capability.sh`. Он повторно валидирует текущую роль `wan-guard`, классифицирует addressing по `show running-config` и не публикует содержимое конфигурации или credentials.
+- DHCP capability считается доказанной только при фактическом `ip address dhcp`; тип Ethernet сам по себе больше не даёт права на DHCP renew.
 - Добавлен type-aware `wan-recovery-plan.sh` в обязательном режиме `dryrun`. Он повторно проверяет текущую роль `wan-guard`, свежесть observer state и совпадение RCI/Linux mapping перед выдачей любого плана.
-- Recovery Planner использует решения `HOLD`, `DEFER`, `BLOCKED`, `PLAN`, различает `SESSION_RECONNECT` для логических uplink и `INTERFACE_RECONNECT` для подтверждённых физических path failures и всегда возвращает `EXECUTED=NO`.
-- `PHY_DOWN`, DNS-only failure, ambiguity/stale/mismatch и физический `ADDRESS_FAILURE` без доказанной DHCP-capability не дают Planner права на автоматическую mutation. Тип Ethernet не считается доказательством DHCP.
-- Recovery Planner зарегистрирован как runtime-target `VWARD WAN Guard`, покрыт behavioral tests и намеренно не включён в cron до отдельной приёмки динамического actuator.
-- Добавлен `vward-update-runtime-policy.sh`: Update Engine теперь разрешает установку Discovery-driven WAN observer/Planner и учитывает observer lock при quiescing, не раздувая базовый updater policy.
-- `wan-recovery-actuator.sh` переведён с legacy `ISP`/DHCP command strings на Discovery-validated dry-run contract. Он принимает только `SESSION_RECONNECT` или `INTERFACE_RECONNECT`, повторно проверяет актуальные WAN RCI/Linux IDs и всегда возвращает `EXECUTED=NO`.
-- Dynamic actuator не использует `eval`, не принимает shell-команды и не содержит подготовленных `ndmc` command strings; логический и физический reconnect взаимно блокируются при несовместимом типе uplink.
-- Добавлен end-to-end Planner -> Actuator behavioral test. Он проверяет physical/logical recovery plan и TOCTOU-защиту: смена WAN role между PLAN и actuation приводит к `BLOCKED`.
+- Recovery Planner использует решения `HOLD`, `DEFER`, `BLOCKED`, `PLAN`, различает `SESSION_RECONNECT`, `INTERFACE_RECONNECT` и capability-gated `DHCP_RENEW`, всегда возвращая `EXECUTED=NO`.
+- `PHY_DOWN`, DNS-only failure, ambiguity/stale/mismatch, static или unknown addressing не дают Planner права на DHCP mutation.
+- `wan-recovery-actuator.sh` переведён с legacy `ISP`/DHCP command strings на Discovery-validated dry-run contract. Он принимает только типизированные recovery actions, повторно проверяет актуальные WAN RCI/Linux IDs и для `DHCP_RENEW` повторно подтверждает capability.
+- Dynamic actuator не использует `eval`, не принимает shell-команды и не содержит подготовленных `ndmc` command strings; логический, физический и DHCP recovery paths блокируются при несовместимом runtime state.
+- Добавлен `wan-recovery-controller.sh` как единая dry-run Execution Gate. Он принимает решение только от Planner, держит отдельный lock, вызывает Actuator только для валидного `PLAN` и требует `EXECUTED=NO` на обоих слоях.
+- Controller не содержит сетевых mutation и не включён в cron. Legacy `wan-guardian.sh` остаётся единственным текущим mutating WAN recovery path до отдельной Beta/live приёмки.
+- Добавлены behavioral и end-to-end tests для Capability/Planner/Controller/Actuator, включая TOCTOU-сценарии смены WAN role и смены DHCP -> static между PLAN и ACT.
+- Добавлен authoritative `docs/WAN_RECOVERY_PIPELINE.md` с единым контрактом нового WAN recovery stack без дублирования архитектурных правил по нескольким документам.
+- Добавлен `vward-update-runtime-policy.sh`: Update Engine разрешает установку Discovery-driven WAN runtime targets и учитывает observer/controller locks при quiescing, не раздувая базовый updater policy.
 - VWARD Console переведена на один Discovery snapshot на status request. Собственный full interface inventory, фильтрация `WireguardN` и прямой `show/interface?name=ISP` из CGI удалены.
 - Для совместимости frontend `wg.interfaces[].name` остаётся alias фактического `rci_id`; API публикует `wg.discovery` и `wan.discovery`, а также реальные WAN `rci_id`, `linux_if`, `via_*` и тип uplink.
 - `wan.status` и `wan.class` Console получает из `wan-health-watch`. State старше 180 секунд, другой observer RCI/Linux mapping или текущий не-READY WAN role отвергаются как `UNKNOWN`.
 - Frontend определяет состояние WAN по `wan.status`, а не по глобальному `wan.internet`, включая Overview, hero, настройки и session chart.
-- Legacy `wan-guardian.sh` пока остаётся отдельным recovery path. `wan.action`, recovery counters и legacy class явно маркируются `recovery_source=legacy-wan-guardian`; mutating WAN recovery этим этапом не менялся.
-- Repository tests покрывают 0/1/N туннелей, произвольные RCI ID, stale mapping, discovery-driven health, Ethernet/PPPoE WAN, несколько uplink, VPN exclusion, selected-path probe isolation, Recovery Planner/Actuator decision gates, Planner -> Actuator pipeline, Console snapshot/observer contracts и Entware `jq` без ONIGURUMA.
-- High-risk fail-open и реальные WAN recovery mutations, Policy Sync и Route Engine этим этапом пока не переключаются.
+- Legacy recovery telemetry остаётся явно маркированной `recovery_source=legacy-wan-guardian`; новый dry-run stack пока не является управляющим источником Console.
+- Repository consistency переведён с формат-зависимого поиска component registry на структурные `jq`-проверки runtime targets и component IDs.
+- Repository tests покрывают 0/1/N туннелей, произвольные RCI ID, stale mapping, discovery-driven health, Ethernet/PPPoE WAN, несколько uplink, VPN exclusion, selected-path probe isolation, capability gating, Recovery Planner/Controller/Actuator decision gates, end-to-end recovery pipeline, Console snapshot/observer contracts и Entware `jq` без ONIGURUMA.
+- High-risk fail-open, реальные WAN recovery mutations, Policy Sync и Route Engine этим этапом пока не переключаются.
 
 ## 0.1.7-dev: критический переходный hotfix VWARD Console
 
