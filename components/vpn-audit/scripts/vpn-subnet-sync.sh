@@ -2,10 +2,11 @@
 
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 
-VERSION="1.0"
+VERSION="1.1"
 WG="Wireguard1"
 
-BASE="https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv4"
+ITDOG_BASE="https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv4"
+LOYAL_BASE="https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text"
 
 STATE="/opt/var/lib/vpn-subnets"
 OWNED="$STATE/owned.routes"
@@ -65,6 +66,22 @@ download() {
     fi
 
     return 1
+}
+
+download_optional() {
+    URL="$1"
+    OUT="$2"
+    LABEL="$3"
+
+    if download "$URL" "$OUT"; then
+        echo "SOURCE_$LABEL=OK"
+        return 0
+    fi
+
+    rm -f "$OUT"
+    echo "SOURCE_$LABEL=UNAVAILABLE"
+    log "WARN supplemental source unavailable label=$LABEL url=$URL"
+    return 0
 }
 
 normalize_ipv4() {
@@ -161,7 +178,7 @@ ndm() {
         return 1
     fi
 
-    echo "$OUT" | grep -Eqi 'error\[|syntax error|not found' && {
+    echo "$OUT" | grep -Eqi 'error\[|syntax error|not found|no such entry' && {
         log "NDM_FAIL cmd=$CMD result=$OUT"
         return 1
     }
@@ -170,47 +187,95 @@ ndm() {
 }
 
 echo "SUBNET_SYNC_VERSION=$VERSION"
-echo "SOURCE=itdoginfo/allow-domains"
+echo "SOURCES=itdoginfo/allow-domains+Loyalsoldier/geoip"
 echo "INTERFACE=$WG"
 
 # =========================================================
-# СКАЧИВАЕМ СВЕЖИЕ СПИСКИ
+# СКАЧИВАЕМ ОСНОВНЫЕ СПИСКИ ITDOG
 # =========================================================
 
-download "$BASE/telegram.lst" "$WORK/telegram.raw" || {
+download "$ITDOG_BASE/telegram.lst" "$WORK/telegram.itdog.raw" || {
     echo "ERROR=TELEGRAM_DOWNLOAD_FAILED"
-    log "ABORT Telegram download failed"
+    log "ABORT Telegram itdog download failed"
     exit 1
 }
 
-download "$BASE/meta.lst" "$WORK/meta.raw" || {
-    download "$BASE/Meta.lst" "$WORK/meta.raw" || {
+download "$ITDOG_BASE/meta.lst" "$WORK/meta.itdog.raw" || {
+    download "$ITDOG_BASE/Meta.lst" "$WORK/meta.itdog.raw" || {
         echo "ERROR=META_DOWNLOAD_FAILED"
-        log "ABORT Meta download failed"
+        log "ABORT Meta itdog download failed"
         exit 1
     }
 }
 
-download "$BASE/twitter.lst" "$WORK/twitter.raw" || {
-    download "$BASE/Twitter.lst" "$WORK/twitter.raw" || {
+download "$ITDOG_BASE/twitter.lst" "$WORK/twitter.itdog.raw" || {
+    download "$ITDOG_BASE/Twitter.lst" "$WORK/twitter.itdog.raw" || {
         echo "ERROR=TWITTER_DOWNLOAD_FAILED"
-        log "ABORT Twitter download failed"
+        log "ABORT Twitter itdog download failed"
         exit 1
     }
 }
 
-download "$BASE/discord.lst" "$WORK/discord.raw" || {
-    download "$BASE/Discord.lst" "$WORK/discord.raw" || {
+download "$ITDOG_BASE/discord.lst" "$WORK/discord.itdog.raw" || {
+    download "$ITDOG_BASE/Discord.lst" "$WORK/discord.itdog.raw" || {
         echo "ERROR=DISCORD_DOWNLOAD_FAILED"
-        log "ABORT Discord download failed"
+        log "ABORT Discord itdog download failed"
         exit 1
     }
 }
 
-normalize_ipv4 < "$WORK/telegram.raw" > "$WORK/telegram"
-normalize_ipv4 < "$WORK/meta.raw"     > "$WORK/meta"
-normalize_ipv4 < "$WORK/twitter.raw"  > "$WORK/twitter"
-normalize_ipv4 < "$WORK/discord.raw"  > "$WORK/discord.full"
+# =========================================================
+# ДОПОЛНИТЕЛЬНЫЕ GEOIP-СПИСКИ LOYALSOLDIER
+#
+# Берём только сервисные диапазоны.
+# Целые страны и shared Cloudflare/CloudFront не импортируем.
+# =========================================================
+
+download_optional \
+    "$LOYAL_BASE/telegram.txt" \
+    "$WORK/telegram.loyal.raw" \
+    "LOYALSOLDIER_TELEGRAM"
+
+download_optional \
+    "$LOYAL_BASE/facebook.txt" \
+    "$WORK/meta.loyal.raw" \
+    "LOYALSOLDIER_FACEBOOK"
+
+download_optional \
+    "$LOYAL_BASE/twitter.txt" \
+    "$WORK/twitter.loyal.raw" \
+    "LOYALSOLDIER_TWITTER"
+
+# =========================================================
+# НОРМАЛИЗАЦИЯ И ОБЪЕДИНЕНИЕ
+# =========================================================
+
+normalize_ipv4 < "$WORK/telegram.itdog.raw" > "$WORK/telegram.itdog"
+normalize_ipv4 < "$WORK/meta.itdog.raw"     > "$WORK/meta.itdog"
+normalize_ipv4 < "$WORK/twitter.itdog.raw"  > "$WORK/twitter.itdog"
+normalize_ipv4 < "$WORK/discord.itdog.raw"  > "$WORK/discord.full"
+
+: > "$WORK/telegram.loyal"
+: > "$WORK/meta.loyal"
+: > "$WORK/twitter.loyal"
+
+[ -f "$WORK/telegram.loyal.raw" ] &&
+    normalize_ipv4 < "$WORK/telegram.loyal.raw" > "$WORK/telegram.loyal"
+
+[ -f "$WORK/meta.loyal.raw" ] &&
+    normalize_ipv4 < "$WORK/meta.loyal.raw" > "$WORK/meta.loyal"
+
+[ -f "$WORK/twitter.loyal.raw" ] &&
+    normalize_ipv4 < "$WORK/twitter.loyal.raw" > "$WORK/twitter.loyal"
+
+cat "$WORK/telegram.itdog" "$WORK/telegram.loyal" |
+sort -u > "$WORK/telegram"
+
+cat "$WORK/meta.itdog" "$WORK/meta.loyal" |
+sort -u > "$WORK/meta"
+
+cat "$WORK/twitter.itdog" "$WORK/twitter.loyal" |
+sort -u > "$WORK/twitter"
 
 # =========================================================
 # DISCORD
@@ -228,10 +293,17 @@ META="$(wc -l < "$WORK/meta")"
 TW="$(wc -l < "$WORK/twitter")"
 DC="$(wc -l < "$WORK/discord")"
 
-echo "TELEGRAM_CIDR=$TG"
-echo "META_CIDR=$META"
-echo "TWITTER_CIDR=$TW"
-echo "DISCORD_SAFE_CIDR=$DC"
+TG_ITDOG="$(wc -l < "$WORK/telegram.itdog")"
+TG_LOYAL="$(wc -l < "$WORK/telegram.loyal")"
+META_ITDOG="$(wc -l < "$WORK/meta.itdog")"
+META_LOYAL="$(wc -l < "$WORK/meta.loyal")"
+TW_ITDOG="$(wc -l < "$WORK/twitter.itdog")"
+TW_LOYAL="$(wc -l < "$WORK/twitter.loyal")"
+
+echo "TELEGRAM_CIDR=$TG | itdog=$TG_ITDOG loyal=$TG_LOYAL"
+echo "META_CIDR=$META | itdog=$META_ITDOG loyal=$META_LOYAL"
+echo "TWITTER_CIDR=$TW | itdog=$TW_ITDOG loyal=$TW_LOYAL"
+echo "DISCORD_SAFE_CIDR=$DC | itdog=$DC"
 
 # Защита от пустого/битого источника.
 if [ "$TG" -lt 5 ]; then
@@ -319,7 +391,6 @@ while IFS='|' read -r CIDR SERVICE; do
     else
         ERRORS=$((ERRORS + 1))
     fi
-
 done < "$WORK/wanted"
 
 # =========================================================
@@ -352,7 +423,6 @@ while IFS='|' read -r CIDR SERVICE; do
         printf '%s|%s\n' "$CIDR" "$SERVICE" >> "$WORK/next-owned"
         ERRORS=$((ERRORS + 1))
     fi
-
 done < "$OWNED"
 
 sort -u "$WORK/next-owned" > "$WORK/owned.sorted"
@@ -393,7 +463,7 @@ echo "MANAGED_DISCORD=$DC_MANAGED"
 echo "ERRORS=$ERRORS"
 echo "CONFIG_SAVE=$SAVE"
 
-log "SYNC wanted=$WANTED managed=$MANAGED added=$ADDED removed=$REMOVED manual=$EXISTING_MANUAL errors=$ERRORS save=$SAVE"
+log "SYNC version=$VERSION wanted=$WANTED managed=$MANAGED added=$ADDED removed=$REMOVED manual=$EXISTING_MANUAL errors=$ERRORS save=$SAVE"
 
 if [ "$ERRORS" -eq 0 ]; then
     echo "SUBNET_SYNC=OK"
