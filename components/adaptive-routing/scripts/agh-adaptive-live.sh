@@ -993,8 +993,12 @@ handle_hint()
     fi
 
     # Первый вход или DIRECT давно не подтверждался:
-    # сразу VPN, без предварительной серии ISP/WG-проб.
-    add_hint_adaptive "$HOST"
+    # внешний hint является только сигналом к адаптивной проверке.
+    # Решение принимает обычный Adaptive Live:
+    # ISP FAIL x2 + WG OK x2 -> VPN, иначе DIRECT/наблюдение.
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_ADAPTIVE_CHECK|$HOST" \
+        >> "$EVENT_LOG"
+    handle_new "$HOST"
 }
 
 handle_host()
