@@ -29,9 +29,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m trace --trace hotfix/apply_vpn_hotfix.py
+          python3 hotfix/apply_vpn_hotfix.py
 
-      - name: Validate hotfix before commit
+      - name: Shell syntax
         shell: bash
         run: |
           set -euo pipefail
@@ -39,7 +39,17 @@ jobs:
           sh -n components/vpn-audit/scripts/vpn-night-reconcile.sh
           dash -n components/vpn-audit/scripts/vpn-domain-audit.sh
           dash -n components/vpn-audit/scripts/vpn-night-reconcile.sh
+
+      - name: VPN safety regression
+        shell: bash
+        run: |
+          set -euo pipefail
           python3 tests/repository/check-vpn-audit-safety.py
+
+      - name: Repository consistency
+        shell: bash
+        run: |
+          set -euo pipefail
           tests/repository/run-consistency-checks.sh
 
       - name: Remove bootstrap and refresh SHA256 manifest
