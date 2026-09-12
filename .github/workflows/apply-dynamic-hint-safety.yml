@@ -1,0 +1,70 @@
+name: Apply dynamic hint safety patch
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/apply-dynamic-hint-safety.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Bootstrap dynamic hint safety patch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Make external hints decision-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('components/adaptive-routing/scripts/agh-adaptive-live.sh')
+          text = p.read_text(encoding='utf-8')
+
+          old = '''    # Первый вход или DIRECT давно не подтверждался:\n    # сразу VPN, без предварительной серии ISP/WG-проб.\n    add_hint_adaptive "$HOST"\n'''
+
+          new = '''    # Первый вход или DIRECT давно не подтверждался:\n    # внешний hint является только сигналом к адаптивной проверке.\n    # Решение принимает обычный Adaptive Live:\n    # ISP FAIL x2 + WG OK x2 -> VPN, иначе DIRECT/наблюдение.\n    echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_ADAPTIVE_CHECK|$HOST" \\\n        >> "$EVENT_LOG"\n    handle_new "$HOST"\n'''
+
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one legacy hint block, found {text.count(old)}')
+
+          p.write_text(text.replace(old, new), encoding='utf-8', newline='\n')
+          PY
+
+          sh -n components/adaptive-routing/scripts/agh-adaptive-live.sh
+
+      - name: Remove bootstrap and refresh manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git rm .github/workflows/apply-dynamic-hint-safety.yml
+
+          tmp="$RUNNER_TEMP/SHA256SUMS"
+          : > "$tmp"
+          while IFS= read -r f; do
+            [ "$f" = "SHA256SUMS" ] && continue
+            sha256sum "$f" >> "$tmp"
+          done < <(git ls-files | LC_ALL=C sort)
+          mv "$tmp" SHA256SUMS
+
+          tests/repository/run-consistency-checks.sh
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add components/adaptive-routing/scripts/agh-adaptive-live.sh SHA256SUMS
+          git commit -m 'Make external hints adaptive instead of forced VPN'
+          git push origin HEAD:main
