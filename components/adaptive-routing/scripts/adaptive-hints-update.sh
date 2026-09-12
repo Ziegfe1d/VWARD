@@ -3,23 +3,25 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-VERSION="2.0"
+VERSION="3.0"
 
 DIR="/opt/etc/adaptive-route"
+STATE="/opt/var/lib/adaptive-hints"
+CACHE="$STATE/sources"
 DEST="$DIR/hints.conf"
+CATALOG="$DIR/hints-catalog.tsv"
+INCLUDES="$DIR/hints-includes.tsv"
 LOG="/opt/var/log/adaptive-hints-update.log"
 
-RUS="/tmp/hints-russia.$$"
-TG="/tmp/hints-telegram.$$"
-NEW="/tmp/hints-new.$$"
-V2DIR="/tmp/hints-v2fly.$$"
+WORK="/tmp/adaptive-hints.$$"
+ITDOG_ARCH="$WORK/itdog.tar.gz"
+V2_ARCH="$WORK/v2fly.tar.gz"
 
-mkdir -p "$DIR" "$V2DIR"
+mkdir -p "$DIR" "$CACHE" "$WORK"
 
 cleanup()
 {
-    rm -f "$RUS" "$TG" "$NEW"
-    rm -rf "$V2DIR"
+    rm -rf "$WORK"
 }
 trap cleanup EXIT INT TERM
 
@@ -29,33 +31,28 @@ fetch()
     OUT="$2"
 
     curl -4 -f -L \
-      --connect-timeout 5 \
-      --max-time 30 \
+      --connect-timeout 10 \
+      --max-time 90 \
       -sS "$URL" -o "$OUT"
 }
 
-normalize()
+extract_archive()
 {
-    awk '
-    {
-        gsub(/\r/,"")
-        gsub(/^[ \t]+|[ \t]+$/,"")
+    ARCH="$1"
+    OUTDIR="$2"
 
-        if ($0=="" || substr($0,1,1)=="#")
-            next
-
-        d=tolower($0)
-
-        sub(/^\*\./,"",d)
-        sub(/^\./,"",d)
-        sub(/\.$/,"",d)
-
-        if (d ~ /^[a-z0-9_-]+(\.[a-z0-9_-]+)*$/)
-            print d
-    }'
+    mkdir -p "$OUTDIR"
+    tar -xzf "$ARCH" -C "$OUTDIR" >/dev/null 2>&1
 }
 
-normalize_v2fly()
+category_name()
+{
+    basename "$1" |
+    sed 's/\.[^.]*$//' |
+    tr '[:upper:]' '[:lower:]'
+}
+
+normalize_domains()
 {
     awk '
     {
@@ -84,76 +81,191 @@ normalize_v2fly()
     }'
 }
 
-fetch_v2fly()
+update_itdog()
 {
-    NAME="$1"
-    OUT="$V2DIR/$NAME.raw"
-    URL="https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/$NAME"
+    TMP="$WORK/itdog.tsv"
 
-    if fetch "$URL" "$OUT"; then
-        COUNT=$(normalize_v2fly < "$OUT" | wc -l)
-        echo "V2FLY_$NAME=$COUNT"
-        return 0
+    if ! fetch \
+      "https://codeload.github.com/itdoginfo/allow-domains/tar.gz/refs/heads/main" \
+      "$ITDOG_ARCH"; then
+        echo "SOURCE_ITDOG=UNAVAILABLE"
+        return 1
     fi
 
-    rm -f "$OUT"
-    echo "WARN_V2FLY_$NAME=DOWNLOAD_FAILED"
+    if ! extract_archive "$ITDOG_ARCH" "$WORK/itdog"; then
+        echo "SOURCE_ITDOG=EXTRACT_FAILED"
+        return 1
+    fi
+
+    : > "$TMP"
+    COUNT_FILES=0
+
+    find "$WORK/itdog" -type f -name '*.lst' 2>/dev/null |
+    while IFS= read -r FILE; do
+        case "$FILE" in
+            */Subnets/*) continue ;;
+        esac
+
+        CAT="$(category_name "$FILE")"
+        [ -n "$CAT" ] || continue
+
+        normalize_domains < "$FILE" |
+        awk -v s="itdog" -v c="$CAT" '
+            NF { print $0 "|" s "|" c }
+        ' >> "$TMP"
+    done
+
+    sort -u "$TMP" > "$TMP.sorted"
+    mv "$TMP.sorted" "$TMP"
+    COUNT="$(wc -l < "$TMP" 2>/dev/null)"
+    [ -n "$COUNT" ] || COUNT=0
+
+    if [ "$COUNT" -lt 100 ]; then
+        echo "SOURCE_ITDOG=BAD_COUNT:$COUNT"
+        return 1
+    fi
+
+    cp "$TMP" "$CACHE/itdog.tsv.new" || return 1
+    mv "$CACHE/itdog.tsv.new" "$CACHE/itdog.tsv" || return 1
+
+    echo "SOURCE_ITDOG=OK:$COUNT"
     return 0
 }
 
-fetch \
-"https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/inside-raw.lst" \
-"$RUS" || exit 1
+update_v2fly()
+{
+    TMP="$WORK/v2fly.tsv"
+    INC="$WORK/v2fly-includes.tsv"
 
-fetch \
-"https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/telegram.lst" \
-"$TG" || exit 1
+    if ! fetch \
+      "https://codeload.github.com/v2fly/domain-list-community/tar.gz/refs/heads/master" \
+      "$V2_ARCH"; then
+        echo "SOURCE_V2FLY=UNAVAILABLE"
+        return 1
+    fi
 
-for NAME in \
-    tiktok \
-    telegram \
-    twitter \
-    facebook \
-    instagram \
-    discord
-do
-    fetch_v2fly "$NAME"
+    if ! extract_archive "$V2_ARCH" "$WORK/v2fly"; then
+        echo "SOURCE_V2FLY=EXTRACT_FAILED"
+        return 1
+    fi
+
+    DATA=""
+    for ROOT in "$WORK"/v2fly/*; do
+        [ -d "$ROOT/data" ] || continue
+        DATA="$ROOT/data"
+        break
+    done
+
+    [ -n "$DATA" ] || {
+        echo "SOURCE_V2FLY=NO_DATA"
+        return 1
+    }
+
+    : > "$TMP"
+    : > "$INC"
+
+    for FILE in "$DATA"/*; do
+        [ -f "$FILE" ] || continue
+
+        CAT="$(category_name "$FILE")"
+        [ -n "$CAT" ] || continue
+
+        normalize_domains < "$FILE" |
+        awk -v s="v2fly" -v c="$CAT" '
+            NF { print $0 "|" s "|" c }
+        ' >> "$TMP"
+
+        awk -v p="$CAT" '
+        {
+            gsub(/\r/,"")
+            gsub(/^[ \t]+|[ \t]+$/,"")
+
+            if (tolower($0) ~ /^include:/) {
+                x=tolower($0)
+                sub(/^include:/,"",x)
+                split(x,a,/[ \t]+/)
+                if (a[1] ~ /^[a-z0-9_.-]+$/)
+                    print "v2fly|" p "|" a[1]
+            }
+        }' "$FILE" >> "$INC"
+    done
+
+    sort -u "$TMP" > "$TMP.sorted"
+    mv "$TMP.sorted" "$TMP"
+    sort -u "$INC" > "$INC.sorted"
+    mv "$INC.sorted" "$INC"
+
+    COUNT="$(wc -l < "$TMP" 2>/dev/null)"
+    CATS="$(awk -F'|' '{print $3}' "$TMP" | sort -u | wc -l)"
+    [ -n "$COUNT" ] || COUNT=0
+    [ -n "$CATS" ] || CATS=0
+
+    if [ "$COUNT" -lt 1000 ] || [ "$CATS" -lt 100 ]; then
+        echo "SOURCE_V2FLY=BAD_COUNT:domains=$COUNT categories=$CATS"
+        return 1
+    fi
+
+    cp "$TMP" "$CACHE/v2fly.tsv.new" || return 1
+    mv "$CACHE/v2fly.tsv.new" "$CACHE/v2fly.tsv" || return 1
+
+    cp "$INC" "$CACHE/v2fly-includes.tsv.new" || return 1
+    mv "$CACHE/v2fly-includes.tsv.new" "$CACHE/v2fly-includes.tsv" || return 1
+
+    echo "SOURCE_V2FLY=OK:domains=$COUNT categories=$CATS"
+    return 0
+}
+
+update_itdog || true
+update_v2fly || true
+
+MERGED="$WORK/merged.tsv"
+INC_MERGED="$WORK/includes.tsv"
+
+: > "$MERGED"
+: > "$INC_MERGED"
+
+for FILE in "$CACHE/itdog.tsv" "$CACHE/v2fly.tsv"; do
+    [ -s "$FILE" ] || continue
+    cat "$FILE" >> "$MERGED"
 done
 
-{
-    normalize < "$RUS"
-    normalize < "$TG"
+[ -s "$CACHE/v2fly-includes.tsv" ] &&
+    cat "$CACHE/v2fly-includes.tsv" >> "$INC_MERGED"
 
-    for FILE in "$V2DIR"/*.raw; do
-        [ -f "$FILE" ] || continue
-        normalize_v2fly < "$FILE"
-    done
-} | sort -u > "$NEW"
+sort -u "$MERGED" > "$MERGED.sorted"
+mv "$MERGED.sorted" "$MERGED"
 
-RCOUNT=$(normalize < "$RUS" | wc -l)
-TCOUNT=$(normalize < "$TG" | wc -l)
-V2COUNT=$(
-    {
-        for FILE in "$V2DIR"/*.raw; do
-            [ -f "$FILE" ] || continue
-            normalize_v2fly < "$FILE"
-        done
-    } | sort -u | wc -l
-)
-TOTAL=$(wc -l < "$NEW")
+sort -u "$INC_MERGED" > "$INC_MERGED.sorted"
+mv "$INC_MERGED.sorted" "$INC_MERGED"
 
-[ "$RCOUNT" -ge 500 ] || exit 2
-[ "$TCOUNT" -ge 10 ] || exit 3
-[ "$TOTAL" -ge 500 ] || exit 4
+TOTAL_ROWS="$(wc -l < "$MERGED" 2>/dev/null)"
+TOTAL_DOMAINS="$(cut -d'|' -f1 "$MERGED" | sort -u | wc -l)"
+TOTAL_CATS="$(cut -d'|' -f3 "$MERGED" | sort -u | wc -l)"
+[ -n "$TOTAL_ROWS" ] || TOTAL_ROWS=0
+[ -n "$TOTAL_DOMAINS" ] || TOTAL_DOMAINS=0
+[ -n "$TOTAL_CATS" ] || TOTAL_CATS=0
 
-cp "$NEW" "$DEST.new" || exit 5
-mv "$DEST.new" "$DEST" || exit 6
+if [ "$TOTAL_DOMAINS" -lt 1000 ]; then
+    echo "ERROR=NO_HEALTHY_DOMAIN_CATALOG"
+    exit 4
+fi
 
-echo "$(date '+%Y-%m-%d %H:%M:%S')|OK|version=$VERSION|itdog_russia=$RCOUNT|itdog_telegram=$TCOUNT|v2fly=$V2COUNT|total=$TOTAL" \
+cut -d'|' -f1 "$MERGED" | sort -u > "$WORK/hints.conf"
+
+cp "$MERGED" "$CATALOG.new" || exit 5
+mv "$CATALOG.new" "$CATALOG" || exit 6
+
+cp "$INC_MERGED" "$INCLUDES.new" || exit 7
+mv "$INCLUDES.new" "$INCLUDES" || exit 8
+
+cp "$WORK/hints.conf" "$DEST.new" || exit 9
+mv "$DEST.new" "$DEST" || exit 10
+
+echo "$(date '+%Y-%m-%d %H:%M:%S')|OK|version=$VERSION|rows=$TOTAL_ROWS|domains=$TOTAL_DOMAINS|categories=$TOTAL_CATS" \
 >> "$LOG"
 
 echo "HINTS_UPDATE_VERSION=$VERSION"
-echo "ITDOG_RUSSIA=$RCOUNT"
-echo "ITDOG_TELEGRAM=$TCOUNT"
-echo "V2FLY_TOTAL=$V2COUNT"
-echo "TOTAL=$TOTAL"
+echo "DOMAIN_ROWS=$TOTAL_ROWS"
+echo "UNIQUE_DOMAINS=$TOTAL_DOMAINS"
+echo "CATEGORIES=$TOTAL_CATS"
+echo "MODE=DYNAMIC_ALL_LISTS"
