@@ -25,6 +25,21 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      - name: Normalize guarded bootstrap pattern
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('hotfix/apply_vpn_hotfix.py')
+          s = p.read_text(encoding='utf-8')
+          old = '''    ' >> "$MEMBERS"\ndone''',\n    '''
+          new = '''    ' >> "$MEMBERS"\n\ndone''',\n    '''
+          if s.count(old) != 1:
+              raise SystemExit(f'bootstrap member-block guard count={s.count(old)}')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+
       - name: Apply guarded transforms
         shell: bash
         run: |
