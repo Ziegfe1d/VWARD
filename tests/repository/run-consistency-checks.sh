@@ -51,6 +51,7 @@ done
 
 sh -n web/cgi-bin/api.cgi || fail "Console API syntax"
 python3 tests/repository/check-console-bindings.py || fail "Console bindings"
+python3 tests/repository/check-vpn-audit-safety.py || fail "VPN audit safety"
 for SCRIPT in components/*/scripts/*.sh components/runtime-supervision/init.d/* \
     components/updater/*.sh tests/updater/*.sh
 do

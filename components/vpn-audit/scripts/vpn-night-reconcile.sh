@@ -60,7 +60,7 @@ cleanup()
     rm -f \
         "$CFG" \
         "$MEMBERS" \
-        "$ROLLBACK"
+        "$ROLLBACK" \
         "$POSTSAVE"
 
     rm -rf "$LOCK"
@@ -93,6 +93,75 @@ force_vpn_match()
         esac
     done < "$F"
 
+    return 1
+}
+
+# Exact FQDN-group parser. Group names are compared as fields, so
+# domain-list1 can never absorb domain-list10..domain-list19.
+group_members()
+{
+    G="$1"
+    FILE="$2"
+
+    awk -v wanted="$G" '
+        $1=="object-group" && $2=="fqdn" {
+            active=($3==wanted)
+            next
+        }
+
+        /^!/ {
+            active=0
+            next
+        }
+
+        active && $1=="include" {
+            print tolower($2)
+        }
+    ' "$FILE"
+}
+
+# Keenetic/ndmc can report a semantic CLI error in text even when the
+# process exit code is zero. Treat both transport and semantic errors
+# as failures before any change is accepted into rollback state.
+ndm_cmd()
+{
+    CMD="$1"
+
+    NDM_LAST_OUT="$(ndmc -c "$CMD" 2>&1)"
+    NDM_LAST_RC=$?
+
+    [ "$NDM_LAST_RC" -eq 0 ] || return 1
+
+    printf '%s\n' "$NDM_LAST_OUT" |
+    grep -Eqi 'error\[|syntax error|not found|no such entry' &&
+        return 1
+
+    return 0
+}
+
+
+# Returns:
+#   0 - membership exists
+#   1 - membership is absent
+#   2 - running-config could not be verified
+membership_state()
+{
+    G="$1"
+    H=$(printf '%s\n' "$2" | tr 'A-Z' 'a-z')
+    VCFG="/tmp/vpn-reconcile-verify.$$"
+
+    if ! ndmc -c "show running-config" > "$VCFG" 2>/dev/null ||
+       [ ! -s "$VCFG" ]; then
+        rm -f "$VCFG"
+        return 2
+    fi
+
+    if group_members "$G" "$VCFG" | grep -Fxq "$H"; then
+        rm -f "$VCFG"
+        return 0
+    fi
+
+    rm -f "$VCFG"
     return 1
 }
 
@@ -283,16 +352,10 @@ WG_GROUPS=$(
 : > "$MEMBERS"
 
 for G in $WG_GROUPS; do
-
-    sed -n \
-        "/^object-group fqdn $G/,/^!/p" \
-        "$CFG" |
-    awk -v g="$G" '
-    $1=="include" {
-        print g "|" tolower($2)
-    }
-    ' >> "$MEMBERS"
-
+    group_members "$G" "$CFG" |
+    awk -v g="$G" '{
+        print g "|" $0
+    }' >> "$MEMBERS"
 done
 
 sort -u "$MEMBERS" -o "$MEMBERS"
@@ -535,13 +598,19 @@ while IFS='|' read -r HOST CAND_GROUP CAND_STREAK CAND_CODE CAND_TIME; do
 
     for G in $GROUPS; do
 
-        if ndmc -c \
-           "no object-group fqdn $G include $HOST" \
-           >/dev/null 2>&1; then
+        if ! ndm_cmd "no object-group fqdn $G include $HOST"; then
+            echo "REMOVE_NDM_ERROR: $G | $HOST | $NDM_LAST_OUT"
+            HOST_ERROR=1
+            break
+        fi
 
+        membership_state "$G" "$HOST"
+        MEMBER_RC=$?
+
+        if [ "$MEMBER_RC" -eq 1 ]; then
             echo "$G|$HOST" >> "$HOST_REMOVED"
-
         else
+            echo "REMOVE_VERIFY_ERROR: $G | $HOST | state=$MEMBER_RC"
             HOST_ERROR=1
             break
         fi
@@ -550,7 +619,7 @@ while IFS='|' read -r HOST CAND_GROUP CAND_STREAK CAND_CODE CAND_TIME; do
 
     # --------------------------------------------------------
     # Если хотя бы одно удаление не получилось —
-    # возвращаем уже удалённые memberships.
+    # возвращаем только подтверждённо удалённые memberships.
     # --------------------------------------------------------
 
     if [ "$HOST_ERROR" -ne 0 ]; then
@@ -558,17 +627,29 @@ while IFS='|' read -r HOST CAND_GROUP CAND_STREAK CAND_CODE CAND_TIME; do
         echo "REMOVE_ERROR: $HOST"
         echo "ROLLBACK_HOST: $HOST"
 
+        HOST_ROLLBACK_ERRORS=0
+
         while IFS='|' read -r RG RH; do
 
             [ -n "$RG" ] || continue
 
-            ndmc -c \
-                "object-group fqdn $RG include $RH" \
-                >/dev/null 2>&1 || true
+            if ndm_cmd "object-group fqdn $RG include $RH"; then
+                membership_state "$RG" "$RH"
+                MEMBER_RC=$?
+
+                if [ "$MEMBER_RC" -ne 0 ]; then
+                    HOST_ROLLBACK_ERRORS=$((HOST_ROLLBACK_ERRORS + 1))
+                fi
+            else
+                HOST_ROLLBACK_ERRORS=$((HOST_ROLLBACK_ERRORS + 1))
+            fi
 
         done < "$HOST_REMOVED"
 
         rm -f "$HOST_REMOVED"
+
+        [ "$HOST_ROLLBACK_ERRORS" -eq 0 ] ||
+            echo "ROLLBACK_HOST_ERRORS=$HOST_ROLLBACK_ERRORS"
 
         ERRORS=$((ERRORS + 1))
         continue
@@ -604,9 +685,7 @@ done < "$CANDIDATES"
 
 if [ "$DIRTY" -eq 1 ]; then
 
-    if ndmc -c \
-       "system configuration save" \
-       >/dev/null 2>&1; then
+    if ndm_cmd "system configuration save"; then
 
         echo 0 > "$LIVE_STATE/groups-refresh"
 
@@ -641,7 +720,7 @@ if [ "$DIRTY" -eq 1 ]; then
 
     else
 
-        echo "CONFIG_SAVE_ERROR"
+        echo "CONFIG_SAVE_ERROR: $NDM_LAST_OUT"
         echo "GLOBAL_ROLLBACK_START"
 
         ROLLBACK_ERRORS=0
@@ -650,18 +729,20 @@ if [ "$DIRTY" -eq 1 ]; then
 
             [ -n "$G" ] || continue
 
-            if ! ndmc -c \
-               "object-group fqdn $G include $H" \
-               >/dev/null 2>&1; then
+            if ndm_cmd "object-group fqdn $G include $H"; then
+                membership_state "$G" "$H"
+                MEMBER_RC=$?
 
+                if [ "$MEMBER_RC" -ne 0 ]; then
+                    ROLLBACK_ERRORS=$((ROLLBACK_ERRORS + 1))
+                fi
+            else
                 ROLLBACK_ERRORS=$((ROLLBACK_ERRORS + 1))
             fi
 
         done < "$ROLLBACK"
 
-        ndmc -c \
-            "system configuration save" \
-            >/dev/null 2>&1 || true
+        ndm_cmd "system configuration save" || true
 
         echo 0 > "$LIVE_STATE/groups-refresh"
 

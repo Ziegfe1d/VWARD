@@ -46,10 +46,39 @@ cleanup()
 
 trap cleanup EXIT INT TERM
 
+
+# Exact FQDN-group parser. Group names are compared as fields, so
+# domain-list1 can never absorb domain-list10..domain-list19.
+group_members()
+{
+    G="$1"
+    FILE="$2"
+
+    awk -v wanted="$G" '
+        $1=="object-group" && $2=="fqdn" {
+            active=($3==wanted)
+            next
+        }
+
+        /^!/ {
+            active=0
+            next
+        }
+
+        active && $1=="include" {
+            print tolower($2)
+        }
+    ' "$FILE"
+}
+
 START_EPOCH=$(date +%s)
 START_TEXT=$(date '+%Y-%m-%d %H:%M:%S')
 
-ndmc -c "show running-config" > "$RUNCFG" 2>/dev/null
+if ! ndmc -c "show running-config" > "$RUNCFG" 2>/dev/null ||
+   [ ! -s "$RUNCFG" ]; then
+    echo "ERROR: cannot read running-config"
+    exit 1
+fi
 
 WG_GROUPS=$(
     sed -n '/^dns-proxy/,/^!/p' "$RUNCFG" |
@@ -61,12 +90,10 @@ WG_GROUPS=$(
 : > "$TARGETS"
 
 for GROUP in $WG_GROUPS; do
-    sed -n "/^object-group fqdn $GROUP/,/^!/p" "$RUNCFG" |
-    awk -v g="$GROUP" '
-        $1=="include" {
-            print g "|" $2
-        }
-    '
+    group_members "$GROUP" "$RUNCFG" |
+    awk -v g="$GROUP" '{
+        print g "|" $0
+    }'
 done | sort -u | awk -F'|' '!seen[$2]++' > "$TARGETS"
 
 TOTAL=$(wc -l < "$TARGETS")
