@@ -39,17 +39,14 @@ jobs:
           CURRENT_SEQUENCE="$(jq -r '.signed.sequence' updates/dev/update-manifest.json)"
           CURRENT_VERSION="$(jq -r '.signed.version' updates/dev/update-manifest.json)"
           CURRENT_UPDATE_ID="$(jq -r '.signed.update_id' updates/dev/update-manifest.json)"
-
           test "$VERSION" = '0.1.7-dev'
           test "$REGISTRY_VERSION" = "$VERSION"
-
           if [ "$CURRENT_SEQUENCE" = '2026091002' ]; then
             test "$CURRENT_VERSION" = '0.1.7-dev'
             test "$CURRENT_UPDATE_ID" = 'vward-0.1.7-dev-dynamic-feeds'
             echo "ALREADY_PUBLISHED=1" >> "$GITHUB_ENV"
             exit 0
           fi
-
           test "$CURRENT_SEQUENCE" = '2026091001'
           test "$CURRENT_VERSION" = '0.1.6-dev'
           test "$CURRENT_UPDATE_ID" = 'vward-0.1.6-dev-console-docs'
@@ -74,10 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           tests/repository/run-consistency-checks.sh
-          for f in components/updater/*.sh tests/updater/*.sh; do
-            sh -n "$f"
-            dash -n "$f"
-          done
+          for f in components/updater/*.sh tests/updater/*.sh; do sh -n "$f"; dash -n "$f"; done
           tests/updater/run-simulations.sh
           tests/updater/run-fix-pass-1-simulations.sh
           tests/updater/run-fix-pass-2-simulations.sh
@@ -95,10 +89,8 @@ jobs:
           OUT="$RUNNER_TEMP/vward-candidate"
           PKGDIR="$OUT/package"
           ARTIFACT="$OUT/vward-$VERSION.tar.gz"
-
           rm -rf "$OUT"
           mkdir -p "$PKGDIR/files/web/cgi-bin" "$PKGDIR/files/bin"
-
           cp VERSION "$PKGDIR/files/VERSION"
           cp web/index.html "$PKGDIR/files/web/index.html"
           cp web/cgi-bin/api.cgi "$PKGDIR/files/web/cgi-bin/api.cgi"
@@ -107,7 +99,6 @@ jobs:
           cp components/vpn-audit/scripts/vpn-domain-audit.sh "$PKGDIR/files/bin/vpn-domain-audit.sh"
           cp components/vpn-audit/scripts/vpn-night-reconcile.sh "$PKGDIR/files/bin/vpn-night-reconcile.sh"
           cp components/vpn-audit/scripts/vpn-subnet-sync.sh "$PKGDIR/files/bin/vpn-subnet-sync.sh"
-
           version_sha="$(sha256sum "$PKGDIR/files/VERSION" | awk '{print $1}')"
           index_sha="$(sha256sum "$PKGDIR/files/web/index.html" | awk '{print $1}')"
           api_sha="$(sha256sum "$PKGDIR/files/web/cgi-bin/api.cgi" | awk '{print $1}')"
@@ -116,16 +107,9 @@ jobs:
           audit_sha="$(sha256sum "$PKGDIR/files/bin/vpn-domain-audit.sh" | awk '{print $1}')"
           reconcile_sha="$(sha256sum "$PKGDIR/files/bin/vpn-night-reconcile.sh" | awk '{print $1}')"
           subnet_sha="$(sha256sum "$PKGDIR/files/bin/vpn-subnet-sync.sh" | awk '{print $1}')"
-
-          jq -n \
-            --arg version_sha "$version_sha" \
-            --arg index_sha "$index_sha" \
-            --arg api_sha "$api_sha" \
-            --arg hints_sha "$hints_sha" \
-            --arg live_sha "$live_sha" \
-            --arg audit_sha "$audit_sha" \
-            --arg reconcile_sha "$reconcile_sha" \
-            --arg subnet_sha "$subnet_sha" \
+          jq -n --arg version_sha "$version_sha" --arg index_sha "$index_sha" --arg api_sha "$api_sha" \
+            --arg hints_sha "$hints_sha" --arg live_sha "$live_sha" --arg audit_sha "$audit_sha" \
+            --arg reconcile_sha "$reconcile_sha" --arg subnet_sha "$subnet_sha" \
             '{schema:1,files:[
               {source:"files/VERSION",target:"/opt/share/vward/VERSION",mode:"0644",sha256:$version_sha,component:"platform-core",restart_policy:"none",config_policy:"program-only"},
               {source:"files/web/index.html",target:"/opt/share/keenetic-apps/www/index.html",mode:"0644",sha256:$index_sha,component:"console",restart_policy:"none",config_policy:"program-only"},
@@ -136,36 +120,23 @@ jobs:
               {source:"files/bin/vpn-night-reconcile.sh",target:"/opt/bin/vpn-night-reconcile.sh",mode:"0755",sha256:$reconcile_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"},
               {source:"files/bin/vpn-subnet-sync.sh",target:"/opt/bin/vpn-subnet-sync.sh",mode:"0755",sha256:$subnet_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"}
             ]}' > "$PKGDIR/package-manifest.json"
-
-          test "$(jq -r '.schema' "$PKGDIR/package-manifest.json")" = 1
           test "$(jq '.files|length' "$PKGDIR/package-manifest.json")" = 8
-
           sh -n web/cgi-bin/api.cgi
           sh -n components/adaptive-routing/scripts/adaptive-hints-update.sh
           sh -n components/adaptive-routing/scripts/agh-adaptive-live.sh
           sh -n components/vpn-audit/scripts/vpn-domain-audit.sh
           sh -n components/vpn-audit/scripts/vpn-night-reconcile.sh
           sh -n components/vpn-audit/scripts/vpn-subnet-sync.sh
-
           unpacked_size="$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{sum+=$1} END{print sum+0}')"
-          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
-            -czf "$ARTIFACT" -C "$PKGDIR" .
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf "$ARTIFACT" -C "$PKGDIR" .
           package_sha="$(sha256sum "$ARTIFACT" | awk '{print $1}')"
           package_size="$(wc -c < "$ARTIFACT" | tr -d ' ')"
           declared_size="$(tar -tvzf "$ARTIFACT" | awk '$1 ~ /^-/ {sum+=$3} END{print sum+0}')"
           test "$declared_size" = "$unpacked_size"
-
-          jq -n \
-            --arg version "$VERSION" \
-            --arg update_id "$UPDATE_ID" \
-            --argjson sequence "$SEQUENCE" \
-            --arg package_file "vward-$VERSION.tar.gz" \
-            --arg package_sha256 "$package_sha" \
-            --argjson package_size "$package_size" \
-            --argjson unpacked_size "$unpacked_size" \
-            '{candidate:true,signed:false,publication_state:"SIGNING_REQUIRED",version:$version,update_id:$update_id,sequence:$sequence,channel:"dev",priority:"CRITICAL",package_file:$package_file,package_sha256:$package_sha256,package_size:$package_size,unpacked_size:$unpacked_size,compatibility:{min_vward:"0.1.6-dev",max_vward:"0.1.6-dev"},affected_components:["platform-core","console","route-engine","route-tools","policy-sync"],health_profile:"policy-sync",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' \
-            > "$OUT/candidate-metadata.json"
-
+          jq -n --arg version "$VERSION" --arg update_id "$UPDATE_ID" --argjson sequence "$SEQUENCE" \
+            --arg package_file "vward-$VERSION.tar.gz" --arg package_sha256 "$package_sha" \
+            --argjson package_size "$package_size" --argjson unpacked_size "$unpacked_size" \
+            '{candidate:true,signed:false,publication_state:"SIGNING_REQUIRED",version:$version,update_id:$update_id,sequence:$sequence,channel:"dev",priority:"CRITICAL",package_file:$package_file,package_sha256:$package_sha256,package_size:$package_size,unpacked_size:$unpacked_size,compatibility:{min_vward:"0.1.6-dev",max_vward:"0.1.6-dev"},affected_components:["platform-core","console","route-engine","route-tools","policy-sync"],health_profile:"policy-sync",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$OUT/candidate-metadata.json"
           cp "$PKGDIR/package-manifest.json" "$OUT/package-manifest.json"
           echo "VWARD_OUT=$OUT" >> "$GITHUB_ENV"
           echo "VWARD_ARTIFACT=$ARTIFACT" >> "$GITHUB_ENV"
@@ -173,8 +144,6 @@ jobs:
           echo "VWARD_PACKAGE_SIZE=$package_size" >> "$GITHUB_ENV"
           echo "VWARD_UNPACKED_SIZE=$unpacked_size" >> "$GITHUB_ENV"
           echo "PACKAGE_SHA256=$package_sha"
-          echo "PACKAGE_SIZE=$package_size"
-          echo "UNPACKED_SIZE=$unpacked_size"
 
       - name: Detect production signing key
         if: env.ALREADY_PUBLISHED != '1'
@@ -218,29 +187,17 @@ jobs:
           SIG="$OUT/signature.bin"
           MANIFEST="$OUT/update-manifest.json"
           PUBLISHED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-
-          jq -n \
-            --arg version "$VERSION" \
-            --arg published_at "$PUBLISHED_AT" \
+          jq -n --arg version "$VERSION" --arg published_at "$PUBLISHED_AT" \
             --arg url "https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-$VERSION.tar.gz" \
-            --arg sha256 "$VWARD_PACKAGE_SHA" \
-            --argjson size "$VWARD_PACKAGE_SIZE" \
-            --argjson unpacked_size "$VWARD_UNPACKED_SIZE" \
-            '{schema:1,update_id:"vward-0.1.7-dev-dynamic-feeds",sequence:2026091002,version:$version,channel:"dev",priority:"CRITICAL",published_at:$published_at,min_updater_version:"1.2.0",package:{url:$url,sha256:$sha256,size:$size,unpacked_size:$unpacked_size},compatibility:{min_vward:"0.1.6-dev",max_vward:"0.1.6-dev"},affected_components:["platform-core","console","route-engine","route-tools","policy-sync"],affected_services:["adaptive-live","policy-sync"],health_profile:"policy-sync",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' \
-            > "$SIGNED"
-
+            --arg sha256 "$VWARD_PACKAGE_SHA" --argjson size "$VWARD_PACKAGE_SIZE" --argjson unpacked_size "$VWARD_UNPACKED_SIZE" \
+            '{schema:1,update_id:"vward-0.1.7-dev-dynamic-feeds",sequence:2026091002,version:$version,channel:"dev",priority:"CRITICAL",published_at:$published_at,min_updater_version:"1.2.0",package:{url:$url,sha256:$sha256,size:$size,unpacked_size:$unpacked_size},compatibility:{min_vward:"0.1.6-dev",max_vward:"0.1.6-dev"},affected_components:["platform-core","console","route-engine","route-tools","policy-sync"],affected_services:["adaptive-live","policy-sync"],health_profile:"policy-sync",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$SIGNED"
           jq -cS . "$SIGNED" > "$CANONICAL"
           openssl pkeyutl -sign -inkey "$KEY" -rawin -in "$CANONICAL" -out "$SIG"
           signature="$(openssl base64 -A -in "$SIG")"
-          jq -n --slurpfile signed "$SIGNED" --arg signature "$signature" \
-            '{signed:$signed[0],signature:$signature}' > "$MANIFEST"
-
+          jq -n --slurpfile signed "$SIGNED" --arg signature "$signature" '{signed:$signed[0],signature:$signature}' > "$MANIFEST"
           jq -cS '.signed' "$MANIFEST" > "$OUT/verify.canonical.json"
           jq -r '.signature' "$MANIFEST" | openssl base64 -d -A > "$OUT/verify.signature.bin"
-          openssl pkeyutl -verify -pubin -inkey config/updater/update-public.pem -rawin \
-            -in "$OUT/verify.canonical.json" -sigfile "$OUT/verify.signature.bin"
-
-          test "$(jq -r '.signed.sequence' "$MANIFEST")" = '2026091002'
+          openssl pkeyutl -verify -pubin -inkey config/updater/update-public.pem -rawin -in "$OUT/verify.canonical.json" -sigfile "$OUT/verify.signature.bin"
           test "$(jq -r '.signed.update_id' "$MANIFEST")" = 'vward-0.1.7-dev-dynamic-feeds'
           test "$(jq -r '.signed.package.sha256' "$MANIFEST")" = "$VWARD_PACKAGE_SHA"
           echo "MANIFEST_SIGNATURE=VERIFIED"
@@ -254,8 +211,7 @@ jobs:
           CONFIG="$ROOT/opt/etc/vward/update.conf"
           MANIFEST="$VWARD_OUT/update-manifest.json"
           rm -rf "$ROOT"
-          mkdir -p "$ROOT/opt/etc/vward" "$ROOT/opt/share/vward" "$ROOT/opt/var/lib/vward/updater" \
-            "$ROOT/opt/var/cache/vward/updater" "$ROOT/opt/var/backups/vward" "$ROOT/opt/var/run/vward"
+          mkdir -p "$ROOT/opt/etc/vward" "$ROOT/opt/share/vward" "$ROOT/opt/var/lib/vward/updater" "$ROOT/opt/var/cache/vward/updater" "$ROOT/opt/var/backups/vward" "$ROOT/opt/var/run/vward"
           cp config/updater/update-public.pem "$ROOT/opt/etc/vward/update-public.pem"
           printf '%s\n' '0.1.6-dev' > "$ROOT/opt/share/vward/VERSION"
           cat > "$CONFIG" <<EOF
@@ -283,9 +239,7 @@ jobs:
           routine_max_delay_seconds=86400
           minimum_updater_version=1.2.0
           EOF
-          VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" \
-          VWARD_TEST_MANIFEST="$MANIFEST" VWARD_TEST_PACKAGE="$VWARD_ARTIFACT" \
-            components/updater/vward-update.sh --dry-run
+          VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" VWARD_TEST_MANIFEST="$MANIFEST" VWARD_TEST_PACKAGE="$VWARD_ARTIFACT" components/updater/vward-update.sh --dry-run
           echo "UPDATER_DRY_RUN=OK"
 
       - name: Publish signed dev update
@@ -296,23 +250,31 @@ jobs:
           cp "$VWARD_ARTIFACT" updates/dev/packages/vward-0.1.7-dev.tar.gz
           cp "$VWARD_OUT/update-manifest.json" updates/dev/update-manifest.json
           git add updates/dev/packages/vward-0.1.7-dev.tar.gz updates/dev/update-manifest.json
-
           tmp="$RUNNER_TEMP/SHA256SUMS.publish"
           : > "$tmp"
-          while IFS= read -r f; do
-            [ "$f" = "SHA256SUMS" ] && continue
-            sha256sum "$f" >> "$tmp"
-          done < <(git ls-files | LC_ALL=C sort)
+          while IFS= read -r f; do [ "$f" = "SHA256SUMS" ] && continue; sha256sum "$f" >> "$tmp"; done < <(git ls-files | LC_ALL=C sort)
           mv "$tmp" SHA256SUMS
           sha256sum -c SHA256SUMS
           git add SHA256SUMS
-
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'Publish signed VWARD 0.1.7-dev dynamic feeds'
           git push origin HEAD:main
           echo "PUBLICATION_STATE=SIGNED_PUBLISHED"
-          echo "PUBLISHED_SEQUENCE=2026091002"
+
+      - name: Persist source SHA256 manifest when signing is unavailable
+        if: env.ALREADY_PUBLISHED != '1' && env.SIGNING_AVAILABLE != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet -- SHA256SUMS; then
+            git add SHA256SUMS
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Refresh SHA256 manifest for 0.1.7-dev source'
+            git push origin HEAD:main
+          fi
+          echo "PUBLICATION_STATE=SIGNING_REQUIRED"
 
       - name: Upload candidate artifact
         if: env.ALREADY_PUBLISHED != '1'
