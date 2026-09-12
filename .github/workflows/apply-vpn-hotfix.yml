@@ -1,0 +1,71 @@
+name: Apply VPN audit safety hotfix
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/apply-vpn-hotfix.yml'
+      - 'hotfix/apply_vpn_hotfix.py'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vward-vpn-audit-hotfix
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply guarded transforms
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 hotfix/apply_vpn_hotfix.py
+
+      - name: Validate hotfix before commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n components/vpn-audit/scripts/vpn-domain-audit.sh
+          sh -n components/vpn-audit/scripts/vpn-night-reconcile.sh
+          dash -n components/vpn-audit/scripts/vpn-domain-audit.sh
+          dash -n components/vpn-audit/scripts/vpn-night-reconcile.sh
+          python3 tests/repository/check-vpn-audit-safety.py
+          tests/repository/run-consistency-checks.sh
+
+      - name: Remove bootstrap and refresh SHA256 manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f hotfix/apply_vpn_hotfix.py .github/workflows/apply-vpn-hotfix.yml
+          rmdir hotfix 2>/dev/null || true
+          git add -A
+
+          tmp="$RUNNER_TEMP/SHA256SUMS"
+          : > "$tmp"
+          while IFS= read -r f; do
+            [ "$f" = "SHA256SUMS" ] && continue
+            sha256sum "$f" >> "$tmp"
+          done < <(git ls-files | LC_ALL=C sort)
+          mv "$tmp" SHA256SUMS
+          git add SHA256SUMS
+          sha256sum -c SHA256SUMS
+
+      - name: Commit hotfix atomically to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git diff --cached --check
+          git commit -m "Fix VPN audit group isolation and rollback safety"
+          git push origin HEAD:main
