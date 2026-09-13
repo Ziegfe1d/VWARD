@@ -127,6 +127,21 @@ if [ "$ACTION" = "settings-data" ]; then
     SETTINGS_AUTO_CRITICAL=$(setting_value auto_critical)
     SETTINGS_AUTO_IMPORTANT=$(setting_value auto_important)
     SETTINGS_AUTO_ROUTINE=$(setting_value auto_routine)
+    SETTINGS_UPDATE_ENABLED=$(setting_value update_enabled)
+    SETTINGS_CHANNEL=$(setting_value channel)
+    SETTINGS_CHECK_INTERVAL=$(setting_value check_interval_seconds)
+    SETTINGS_SAFE_WINDOW_START=$(setting_value safe_window_start)
+    SETTINGS_SAFE_WINDOW_END=$(setting_value safe_window_end)
+    SETTINGS_IMPORTANT_DELAY=$(setting_value important_max_delay_seconds)
+    SETTINGS_ROUTINE_DELAY=$(setting_value routine_max_delay_seconds)
+    SETTINGS_MINIMUM_FREE=$(setting_value minimum_free_kb)
+    SETTINGS_MAX_MANIFEST=$(setting_value max_manifest_size)
+    SETTINGS_MAX_PACKAGE=$(setting_value max_package_size)
+    SETTINGS_MAX_UNPACKED=$(setting_value max_unpacked_size)
+    SETTINGS_BACKUP_KEEP=$(setting_value backup_keep)
+    SETTINGS_HEALTH_TIMEOUT=$(setting_value health_timeout_seconds)
+    SETTINGS_REQUEST_TIMEOUT=$(setting_value request_timeout_seconds)
+    SETTINGS_BARRIER_READY=$(setting_value barrier_integration_ready)
     "$JQ" -c \
       --argjson profile_ready "$PROFILE_READY" \
       --arg lan_address "${VWARD_LAN_ADDRESS:-}" \
@@ -145,7 +160,22 @@ if [ "$ACTION" = "settings-data" ]; then
       --arg auto_apply "$SETTINGS_AUTO_APPLY" \
       --arg auto_critical "$SETTINGS_AUTO_CRITICAL" \
       --arg auto_important "$SETTINGS_AUTO_IMPORTANT" \
-      --arg auto_routine "$SETTINGS_AUTO_ROUTINE" '
+      --arg auto_routine "$SETTINGS_AUTO_ROUTINE" \
+      --arg update_enabled "$SETTINGS_UPDATE_ENABLED" \
+      --arg channel "$SETTINGS_CHANNEL" \
+      --arg check_interval_seconds "$SETTINGS_CHECK_INTERVAL" \
+      --arg safe_window_start "$SETTINGS_SAFE_WINDOW_START" \
+      --arg safe_window_end "$SETTINGS_SAFE_WINDOW_END" \
+      --arg important_max_delay_seconds "$SETTINGS_IMPORTANT_DELAY" \
+      --arg routine_max_delay_seconds "$SETTINGS_ROUTINE_DELAY" \
+      --arg minimum_free_kb "$SETTINGS_MINIMUM_FREE" \
+      --arg max_manifest_size "$SETTINGS_MAX_MANIFEST" \
+      --arg max_package_size "$SETTINGS_MAX_PACKAGE" \
+      --arg max_unpacked_size "$SETTINGS_MAX_UNPACKED" \
+      --arg backup_keep "$SETTINGS_BACKUP_KEEP" \
+      --arg health_timeout_seconds "$SETTINGS_HEALTH_TIMEOUT" \
+      --arg request_timeout_seconds "$SETTINGS_REQUEST_TIMEOUT" \
+      --arg barrier_integration_ready "$SETTINGS_BARRIER_READY" '
         def raw_value:
           if .key=="VWARD_LAN_ADDRESS" then $lan_address
           elif .key=="VWARD_LAN_SUBNET" then $lan_subnet
@@ -164,6 +194,21 @@ if [ "$ACTION" = "settings-data" ]; then
           elif .key=="auto_critical" then $auto_critical
           elif .key=="auto_important" then $auto_important
           elif .key=="auto_routine" then $auto_routine
+          elif .key=="update_enabled" then $update_enabled
+          elif .key=="channel" then $channel
+          elif .key=="check_interval_seconds" then $check_interval_seconds
+          elif .key=="safe_window_start" then $safe_window_start
+          elif .key=="safe_window_end" then $safe_window_end
+          elif .key=="important_max_delay_seconds" then $important_max_delay_seconds
+          elif .key=="routine_max_delay_seconds" then $routine_max_delay_seconds
+          elif .key=="minimum_free_kb" then $minimum_free_kb
+          elif .key=="max_manifest_size" then $max_manifest_size
+          elif .key=="max_package_size" then $max_package_size
+          elif .key=="max_unpacked_size" then $max_unpacked_size
+          elif .key=="backup_keep" then $backup_keep
+          elif .key=="health_timeout_seconds" then $health_timeout_seconds
+          elif .key=="request_timeout_seconds" then $request_timeout_seconds
+          elif .key=="barrier_integration_ready" then $barrier_integration_ready
           else "" end;
         def typed($v): if .type=="boolean" then ($v=="1") elif .type=="integer" and ($v|test("^[0-9]+$")) then ($v|tonumber) else $v end;
         {ok:true,schema:.schema,profile_ready:$profile_ready,authentication_required_for_device_write:true,

@@ -15,7 +15,7 @@ schema = json.loads(schema_path.read_text(encoding="utf-8"))
 assert registry["schema"] == 1
 assert schema["properties"]["schema"]["const"] == 1
 settings = registry["settings"]
-assert len(settings) >= 17
+assert len(settings) >= 32
 assert len({item["id"] for item in settings}) == len(settings)
 required = {"id", "component", "section", "label_ru", "description_ru", "source", "key", "type", "editable", "secret", "restart_requirement", "risk"}
 for item in settings:
@@ -48,7 +48,26 @@ VWARD_RCI_BASE=http://127.0.0.1:79/rci
 """, encoding="utf-8")
     device.chmod(0o600)
     update = tmp / "update.conf"
-    update.write_text("auto_apply=1\nauto_critical=1\nauto_important=0\nauto_routine=0\n", encoding="utf-8")
+    update.write_text("""update_enabled=1
+auto_apply=1
+auto_critical=1
+auto_important=0
+auto_routine=0
+channel=dev
+safe_window_start=03:00
+safe_window_end=05:00
+important_max_delay_seconds=7200
+routine_max_delay_seconds=86400
+minimum_free_kb=8192
+max_manifest_size=262144
+max_package_size=16777216
+max_unpacked_size=67108864
+backup_keep=3
+health_timeout_seconds=30
+check_interval_seconds=900
+request_timeout_seconds=120
+barrier_integration_ready=1
+""", encoding="utf-8")
     env = os.environ | {
         "REQUEST_METHOD": "GET",
         "QUERY_STRING": "action=settings-data",
@@ -69,6 +88,14 @@ VWARD_RCI_BASE=http://127.0.0.1:79/rci
     assert by_id["device.console_port"]["effective"] == 9088
     assert by_id["update.auto_apply"]["effective"] is True
     assert by_id["update.auto_important"]["effective"] is False
+    assert by_id["update.enabled"]["effective"] is True
+    assert by_id["update.channel"]["effective"] == "dev"
+    assert by_id["update.check_interval"]["effective"] == 900
+    assert by_id["update.safe_window_start"]["effective"] == "03:00"
+    assert by_id["update.max_package_size"]["effective"] == 16777216
+    assert by_id["update.barrier_ready"]["effective"] is True
     assert by_id["device.lan_address"]["editable"] is False
+    assert "manifest_url" not in {item["key"] for item in payload["settings"]}
+    assert "public_key_file" not in {item["key"] for item in payload["settings"]}
 
 print("SETTINGS_REGISTRY=PASS")

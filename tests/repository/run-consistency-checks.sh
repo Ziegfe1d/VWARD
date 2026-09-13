@@ -52,6 +52,7 @@ done
 
 sh -n web/cgi-bin/api.cgi || fail "Console API syntax"
 python3 tests/repository/check-console-bindings.py || fail "Console bindings"
+python3 tests/repository/check-console-responsive.py || fail "Console responsive layout"
 python3 tests/repository/check-console-security.py || fail "Console security"
 python3 tests/repository/check-device-profile.py || fail "Device profile"
 python3 tests/repository/check-settings-registry.py || fail "Settings registry"
