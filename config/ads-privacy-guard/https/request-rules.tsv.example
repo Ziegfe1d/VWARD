@@ -1,0 +1,4 @@
+# enabled<TAB>id<TAB>domain<TAB>scope<TAB>kind<TAB>value<TAB>action<TAB>comment
+# Supported kinds: path_prefix, path_exact. Supported action: block.
+# Arbitrary regular expressions are intentionally NOT accepted by this candidate.
+# 0	ozon-example	api.ozon.ru	exact	path_prefix	/example/ad-endpoint	block	Example only; not a discovered Ozon endpoint

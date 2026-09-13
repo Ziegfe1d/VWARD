@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Ziegfe1d/VWARD/schemas/ads-privacy-guard-source-registry-v1.json",
+  "title": "VWARD Ads & Privacy Guard source registry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "name",
+    "policy",
+    "sources"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policy": {
+      "type": "object"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "vendor",
+          "independence_group",
+          "purpose",
+          "enabled",
+          "weight",
+          "single_source_block",
+          "format",
+          "min_entries",
+          "max_bytes",
+          "urls",
+          "homepage",
+          "default_mode"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "vendor": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "independence_group": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "purpose": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "weight": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "single_source_block": {
+            "type": "boolean"
+          },
+          "format": {
+            "enum": [
+              "adblock",
+              "hosts",
+              "domains"
+            ]
+          },
+          "min_entries": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_bytes": {
+            "type": "integer",
+            "minimum": 1024
+          },
+          "urls": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "uniqueItems": true
+          },
+          "homepage": {
+            "type": "string",
+            "format": "uri"
+          },
+          "default_mode": {
+            "enum": [
+              "active",
+              "check",
+              "off"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

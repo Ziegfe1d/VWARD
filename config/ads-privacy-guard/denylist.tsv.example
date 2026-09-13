@@ -1,0 +1,4 @@
+# pattern|scope|note
+# scope: exact or suffix
+# Entries here are always included in the VWARD-managed block output.
+# bad.example|exact|manual confirmed advertising domain

@@ -1,0 +1,6 @@
+# id|title|target_group|catalog|enabled
+x-twitter|X / Twitter|AUTO|@catalogs/x-twitter.domains|1
+4pda|4PDA|AUTO|@catalogs/4pda.domains|1
+steam|Steam|AUTO|@catalogs/steam.domains|1
+epic-games|Epic Games|AUTO|@catalogs/epic-games.domains|1
+adult|18+|AUTO|@catalogs/adult.domains|1

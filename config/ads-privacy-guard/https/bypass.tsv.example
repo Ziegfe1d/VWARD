@@ -1,0 +1,3 @@
+# enabled<TAB>domain<TAB>scope<TAB>comment
+# Bypass is evaluated before intercept in the generated PAC file.
+# Put banking, identity, medical and other sensitive services here when needed.

@@ -1,0 +1,11 @@
+# source_id|mode|note
+# mode: active = can contribute to automatic verdict; check = evidence only; off = ignored
+hagezi-pro|active|primary reference
+hagezi-pro-plus|check|aggressive corroboration only
+hagezi-popup|active|dedicated popup/redirect evidence
+adguard-dns|active|primary reference
+adguard-popup|active|dedicated popup evidence
+easylist|check|corroboration
+easyprivacy|check|tracking corroboration
+oisd-small|check|corroboration
+onehosts-lite|check|corroboration

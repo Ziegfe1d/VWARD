@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "status": "planned-placeholder",
+  "profiles": [
+    {
+      "id": "standard",
+      "name_ru": "Стандартный",
+      "categories": [
+        "ads",
+        "popup_redirect",
+        "tracking",
+        "analytics"
+      ],
+      "aggressiveness": "balanced"
+    },
+    {
+      "id": "strict",
+      "name_ru": "Строгий",
+      "categories": [
+        "ads",
+        "popup_redirect",
+        "tracking",
+        "analytics",
+        "telemetry",
+        "affiliate",
+        "mail_tracking",
+        "social_tracking",
+        "resource_abuse"
+      ],
+      "aggressiveness": "strict"
+    },
+    {
+      "id": "tv-iot",
+      "name_ru": "TV / IoT",
+      "categories": [
+        "ads",
+        "tracking",
+        "analytics",
+        "telemetry",
+        "resource_abuse"
+      ],
+      "aggressiveness": "strict"
+    },
+    {
+      "id": "observe",
+      "name_ru": "Только наблюдение",
+      "categories": [
+        "ads",
+        "popup_redirect",
+        "tracking",
+        "analytics",
+        "telemetry",
+        "affiliate",
+        "mail_tracking",
+        "social_tracking"
+      ],
+      "aggressiveness": "observe_only"
+    }
+  ],
+  "assignments": []
+}

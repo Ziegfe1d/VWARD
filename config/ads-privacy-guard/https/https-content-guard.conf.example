@@ -1,0 +1,29 @@
+# VWARD HTTPS Content Guard local configuration.
+# Install as /opt/etc/vward/ads-privacy-guard/https/https-content-guard.conf
+# and chmod 0600. Disabled by default.
+
+HTTPS_GUARD_ENABLED=0
+HTTPS_GUARD_PROVIDER=3proxy
+HTTPS_GUARD_MODE=explicit_proxy
+
+# Safe default: loopback only. For a LAN client explicitly set the router LAN IP
+# and the allowed client/CIDR. Never use a WAN-facing address.
+HTTPS_PROXY_BIND=127.0.0.1
+HTTPS_PROXY_ADVERTISE_HOST=
+HTTPS_PROXY_PORT=3128
+HTTPS_ALLOWED_CLIENTS=127.0.0.1
+HTTPS_MAX_CONNECTIONS=32
+
+# Local CA. Generation is explicit: vward-ads-privacy-https.sh ca-init --confirm
+HTTPS_CA_DAYS=1825
+
+# Debug logging can contain host/path information and is therefore OFF by default.
+HTTPS_DEBUG_LOG=0
+
+# Optional explicit dependency overrides. Empty = auto-discovery.
+HTTPS_3PROXY_BIN=
+HTTPS_3PROXY_PROCESS_NAME=3proxy
+HTTPS_SSL_PLUGIN=
+HTTPS_PCRE_PLUGIN=
+HTTPS_UPSTREAM_CA_FILE=
+HTTPS_OPENSSL_BIN=

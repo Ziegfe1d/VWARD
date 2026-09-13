@@ -1,0 +1,6 @@
+{"data":[
+ {"time":"2026-09-13T10:00:00+03:00","client":"192.0.2.10","question":{"name":"allowed.example"},"reason":"NotFilteredNotFound"},
+ {"time":"2026-09-13T10:00:01+03:00","client":"192.0.2.10","question":{"name":"whitelisted.example"},"reason":"NotFilteredWhiteList"},
+ {"time":"2026-09-13T10:00:02+03:00","client":"192.0.2.10","question":{"name":"rewrite.example"},"reason":"Rewrite"},
+ {"time":"2026-09-13T10:00:03+03:00","client":"192.0.2.10","question":{"name":"blocked.example"},"reason":"FilteredBlackList"}
+]}

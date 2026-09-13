@@ -1,0 +1,122 @@
+# VWARD Ads & Privacy Guard local configuration.
+# Copy to /opt/etc/vward/ads-privacy-guard/ads-privacy-guard.conf.
+# Local configuration is preserved across signed VWARD updates.
+#
+# Console-safe settings are intentionally a subset of this file and are changed
+# only through a validated settings path with backup/rollback.
+
+# Master switch. 0 disables automatic work and scanner execution.
+ENABLED=1
+
+# Automatic analysis mode:
+#   manual    - no automatic domain scans; "Проверить сейчас" still available
+#   scheduled - periodic batch scans
+#   dynamic   - low-load near-continuous mode driven by query-log changes
+RUN_MODE=scheduled
+
+# Scheduled mode.
+SCHEDULE_INTERVAL_MIN=10
+
+# Dynamic mode. A lightweight scheduler tick may run every minute, but the heavy
+# classifier runs only when the AdGuard Home query log changed, the minimum
+# interval elapsed and load/memory/storage gates pass.
+DYNAMIC_MIN_INTERVAL_SEC=120
+DYNAMIC_MAX_LOAD_PER_CPU_X100=80
+DYNAMIC_MIN_MEM_AVAILABLE_KB=16384
+DYNAMIC_MIN_OPT_FREE_KB=32768
+DYNAMIC_SCAN_TAIL_LINES=5000
+DYNAMIC_MAX_CANDIDATES_PER_RUN=100
+
+# Evidence source refresh is independent from scan mode.
+AUTO_SOURCE_UPDATE=1
+SOURCE_UPDATE_INTERVAL_HOURS=24
+
+# Query input. auto prefers the official AdGuard Home querylog API and falls back
+# to persisted querylog files only when the API cannot be read. The reader accepts
+# ordinary allowed requests only; whitelist/rewrite/blocked results are excluded.
+QUERY_SOURCE=auto
+
+# Number of recent records considered per normal batch. Dynamic mode remains
+# low-load and is not a packet-by-packet sniffer.
+SCAN_TAIL_LINES=20000
+MAX_CANDIDATES_PER_RUN=500
+
+# Evidence policy. Scores use max(weight) per independence_group.
+BLOCK_SCORE=150
+REVIEW_SCORE=60
+MIN_INDEPENDENT_GROUPS=2
+MIN_SOURCE_INDEXES=3
+
+# Cache / recheck policy.
+ALLOW_TTL_DAYS=30
+TRUST_TTL_DAYS=180
+SUSPECT_TTL_HOURS=24
+BLOCK_RECHECK_DAYS=30
+
+# Heuristics are intentionally conservative and never auto-block on their own.
+HEURISTIC_REVIEW_SCORE=20
+
+# Source downloader limits.
+SOURCE_CONNECT_TIMEOUT=10
+SOURCE_MAX_TIME=120
+MIN_HEALTHY_SOURCES=3
+
+# Publication mode:
+#   staged         - build VWARD rules only; never mutate AdGuard Home (default/safest)
+#   user_rules_api - merge only the VWARD-owned marker block through the official
+#                    AdGuard Home filtering API; no YAML editing and no AGH restart
+PUBLISH_MODE=staged
+
+# Automatic VWARD rules are exact-host rules by default. suffix deliberately blocks
+# a domain and all subdomains and should be enabled only after acceptance testing.
+AUTO_RULE_SCOPE=exact
+
+# Optional explicit AGH control API base. Leave empty to derive address/port from
+# the current VWARD Device Profile. Example shape: http://HOST:PORT/control
+AGH_API_BASE=
+AGH_API_CONNECT_TIMEOUT=3
+AGH_API_MAX_TIME=15
+
+# Automatic publication is separate from analysis. Keeping AUTO_PUBLISH=0 allows
+# dynamic/scheduled analysis without changing AdGuard Home on every cycle.
+AUTO_PUBLISH=0
+
+# Optional executable called as: <script> DOMAIN
+# Output contract: VERDICT|CONFIDENCE|REASON
+# VERDICT: BLOCK, ALLOW, TRUST, SUSPECT or REVIEW.
+# Empty by default. This is the extension point for future reputation/AI providers.
+EXTERNAL_VERIFIER_COMMAND=
+
+
+# -----------------------------------------------------------------------------
+# Protection categories (candidate contract).
+# The initial core uses feed evidence as a whole. These switches are reserved for
+# category-aware classification/publishing and are shown in the UI template.
+# Until category-aware matching is implemented, changing them must not be exposed
+# as an active Console action.
+CATEGORY_ADS=1
+CATEGORY_POPUP_REDIRECT=1
+CATEGORY_TRACKING=1
+CATEGORY_ANALYTICS=1
+CATEGORY_TELEMETRY=0
+CATEGORY_AFFILIATE=1
+CATEGORY_MAIL_TRACKING=1
+CATEGORY_SOCIAL_TRACKING=1
+CATEGORY_RESOURCE_ABUSE=1
+
+# Future modules. Reserved and disabled by default. They must remain UI placeholders
+# until each backend contract has implementation + tests.
+FEATURE_PRIVACY_MONITOR=0
+FEATURE_CLIENT_PROFILES=0
+FEATURE_ANTI_BYPASS_MONITOR=0
+FEATURE_BREAKAGE_ASSISTANT=0
+FEATURE_CNAME_TRACKING=0
+FEATURE_TEMPORARY_EXCEPTIONS=0
+
+# Planned local source overrides: source-id|off/check/active|comment.
+# ACTIVE contributes to automatic verdict policy; CHECK is evidence-only; OFF is ignored.
+SOURCE_OVERRIDES_FILE=/opt/etc/vward/ads-privacy-guard/source-overrides.tsv
+
+# Planned per-client profiles. File is local state/config and must never be overwritten
+# by signed package updates.
+CLIENT_PROFILES_FILE=/opt/etc/vward/ads-privacy-guard/client-profiles.json

@@ -1,0 +1,4 @@
+# pattern|scope|note
+# scope: exact or suffix
+# Entries here are never auto-blocked.
+# example.com|exact|manual exception

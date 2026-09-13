@@ -1,0 +1,40 @@
+# pattern|scope|class|recheck_days|never_auto_block|note
+# Exact-only by default. Suffix scope must be used only for infrastructure whose
+# whole namespace is intentionally trusted. Do not add broad vendor suffixes just
+# because the vendor is famous: large vendors also operate advertising/telemetry.
+google.com|exact|trusted-core|365|1|Google root
+www.google.com|exact|trusted-core|365|1|Google Search
+accounts.google.com|exact|trusted-core|365|1|Google Accounts
+mail.google.com|exact|trusted-core|365|1|Gmail web
+play.google.com|exact|trusted-core|365|1|Google Play web
+fonts.googleapis.com|exact|trusted-service|365|1|Google Fonts API
+fonts.gstatic.com|exact|trusted-service|365|1|Google Fonts static
+clients3.google.com|exact|trusted-service|180|1|Google client service
+clients4.google.com|exact|trusted-service|180|1|Google client service
+connectivitycheck.gstatic.com|exact|trusted-service|365|1|Android connectivity check
+safebrowsing.google.com|exact|trusted-service|365|1|Google Safe Browsing
+yandex.ru|exact|trusted-core|365|1|Yandex root
+www.yandex.ru|exact|trusted-core|365|1|Yandex web
+passport.yandex.ru|exact|trusted-core|365|1|Yandex authentication
+mail.yandex.ru|exact|trusted-core|365|1|Yandex Mail
+imap.yandex.ru|exact|trusted-service|365|1|Yandex Mail IMAP
+apple.com|exact|trusted-core|365|1|Apple root
+www.apple.com|exact|trusted-core|365|1|Apple web
+icloud.com|exact|trusted-core|365|1|iCloud root
+www.icloud.com|exact|trusted-core|365|1|iCloud web
+mesu.apple.com|exact|trusted-service|365|1|Apple update metadata
+gdmf.apple.com|exact|trusted-service|365|1|Apple software metadata
+swscan.apple.com|exact|trusted-service|365|1|Apple software update scan
+ozon.ru|exact|trusted-core|365|1|Ozon root
+www.ozon.ru|exact|trusted-core|365|1|Ozon web
+wildberries.ru|exact|trusted-core|365|1|Wildberries root
+www.wildberries.ru|exact|trusted-core|365|1|Wildberries web
+microsoft.com|exact|trusted-core|365|1|Microsoft root
+www.microsoft.com|exact|trusted-core|365|1|Microsoft web
+login.microsoftonline.com|exact|trusted-core|365|1|Microsoft authentication
+github.com|exact|trusted-core|365|1|GitHub root
+api.github.com|exact|trusted-service|365|1|GitHub API
+raw.githubusercontent.com|exact|trusted-service|365|1|GitHub raw content
+cdn.jsdelivr.net|exact|trusted-service|365|1|jsDelivr CDN
+wikipedia.org|exact|trusted-core|365|1|Wikipedia root
+www.wikipedia.org|exact|trusted-core|365|1|Wikipedia web

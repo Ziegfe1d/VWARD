@@ -1,0 +1,249 @@
+{
+  "schema": 1,
+  "name": "VWARD Ads & Privacy Guard Evidence Sources",
+  "policy": {
+    "note": "Sources are evidence indexes, not automatically installed as AdGuard Home filters.",
+    "independence": "Scores use the maximum weight per independence_group so correlated lists from one family are not double-counted.",
+    "source_modes": "active contributes to automatic verdict policy; check is evidence-only; off is ignored and not refreshed."
+  },
+  "sources": [
+    {
+      "id": "hagezi-pro",
+      "name": "HaGeZi Multi PRO",
+      "vendor": "hagezi",
+      "independence_group": "hagezi",
+      "purpose": "ads-tracking-security",
+      "enabled": true,
+      "weight": 85,
+      "single_source_block": false,
+      "format": "adblock",
+      "min_entries": 100000,
+      "max_bytes": 33554432,
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/pro.txt",
+        "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.txt"
+      ],
+      "homepage": "https://github.com/hagezi/dns-blocklists",
+      "default_mode": "active"
+    },
+    {
+      "id": "hagezi-pro-plus",
+      "name": "HaGeZi Multi PRO++",
+      "vendor": "hagezi",
+      "independence_group": "hagezi",
+      "purpose": "ads-tracking-security-aggressive",
+      "enabled": true,
+      "weight": 80,
+      "single_source_block": false,
+      "format": "adblock",
+      "min_entries": 100000,
+      "max_bytes": 41943040,
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/pro.plus.txt",
+        "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.plus.txt"
+      ],
+      "homepage": "https://github.com/hagezi/dns-blocklists",
+      "default_mode": "check"
+    },
+    {
+      "id": "hagezi-popup",
+      "name": "HaGeZi Pop-Up Ads",
+      "vendor": "hagezi",
+      "independence_group": "hagezi",
+      "purpose": "popup-ads",
+      "enabled": true,
+      "weight": 100,
+      "single_source_block": true,
+      "format": "adblock",
+      "min_entries": 10000,
+      "max_bytes": 16777216,
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/popupads.txt",
+        "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/popupads.txt"
+      ],
+      "homepage": "https://github.com/hagezi/dns-blocklists",
+      "default_mode": "active"
+    },
+    {
+      "id": "adguard-dns",
+      "name": "AdGuard DNS Filter",
+      "vendor": "adguard",
+      "independence_group": "adguard-easylist-family",
+      "purpose": "ads-tracking",
+      "enabled": true,
+      "weight": 90,
+      "single_source_block": false,
+      "format": "adblock",
+      "min_entries": 10000,
+      "max_bytes": 33554432,
+      "urls": [
+        "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt"
+      ],
+      "homepage": "https://github.com/AdguardTeam/AdGuardSDNSFilter",
+      "default_mode": "active"
+    },
+    {
+      "id": "adguard-popup",
+      "name": "AdGuard DNS Popup Hosts",
+      "vendor": "adguard",
+      "independence_group": "adguard-easylist-family",
+      "purpose": "popup-ads",
+      "enabled": true,
+      "weight": 100,
+      "single_source_block": true,
+      "format": "adblock",
+      "min_entries": 1000,
+      "max_bytes": 16777216,
+      "urls": [
+        "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/adguard_popup_filter.txt"
+      ],
+      "homepage": "https://github.com/AdguardTeam/AdGuardSDNSFilter",
+      "default_mode": "active"
+    },
+    {
+      "id": "easylist",
+      "name": "EasyList",
+      "vendor": "easylist",
+      "independence_group": "adguard-easylist-family",
+      "purpose": "ads",
+      "enabled": true,
+      "weight": 75,
+      "single_source_block": false,
+      "format": "adblock",
+      "min_entries": 1000,
+      "max_bytes": 33554432,
+      "urls": [
+        "https://easylist.to/easylist/easylist.txt"
+      ],
+      "homepage": "https://easylist.to/",
+      "default_mode": "check"
+    },
+    {
+      "id": "easyprivacy",
+      "name": "EasyPrivacy",
+      "vendor": "easylist",
+      "independence_group": "adguard-easylist-family",
+      "purpose": "tracking",
+      "enabled": true,
+      "weight": 70,
+      "single_source_block": false,
+      "format": "adblock",
+      "min_entries": 1000,
+      "max_bytes": 33554432,
+      "urls": [
+        "https://easylist.to/easylist/easyprivacy.txt"
+      ],
+      "homepage": "https://easylist.to/",
+      "default_mode": "check"
+    },
+    {
+      "id": "oisd-small",
+      "name": "OISD Small",
+      "vendor": "oisd",
+      "independence_group": "oisd",
+      "purpose": "ads",
+      "enabled": true,
+      "weight": 70,
+      "single_source_block": false,
+      "format": "adblock",
+      "min_entries": 1000,
+      "max_bytes": 33554432,
+      "urls": [
+        "https://small.oisd.nl/"
+      ],
+      "homepage": "https://oisd.nl/",
+      "default_mode": "check"
+    },
+    {
+      "id": "onehosts-lite",
+      "name": "1Hosts Lite",
+      "vendor": "onehosts",
+      "independence_group": "onehosts",
+      "purpose": "ads-tracking-security",
+      "enabled": true,
+      "weight": 70,
+      "single_source_block": false,
+      "format": "adblock",
+      "min_entries": 50000,
+      "max_bytes": 33554432,
+      "urls": [
+        "https://raw.githubusercontent.com/badmojr/1Hosts/master/Lite/adblock.txt",
+        "https://cdn.jsdelivr.net/gh/badmojr/1Hosts@master/Lite/adblock.txt"
+      ],
+      "homepage": "https://github.com/badmojr/1Hosts",
+      "default_mode": "check"
+    },
+    {
+      "id": "peter-lowe",
+      "name": "Peter Lowe's Blocklist",
+      "vendor": "peter-lowe",
+      "independence_group": "peter-lowe",
+      "purpose": "ads-tracking",
+      "enabled": true,
+      "weight": 65,
+      "single_source_block": false,
+      "format": "adblock",
+      "min_entries": 1000,
+      "max_bytes": 16777216,
+      "urls": [
+        "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&showintro=1&mimetype=plaintext"
+      ],
+      "homepage": "https://pgl.yoyo.org/adservers/",
+      "default_mode": "check"
+    },
+    {
+      "id": "stevenblack",
+      "name": "StevenBlack Unified Hosts",
+      "vendor": "stevenblack",
+      "independence_group": "stevenblack",
+      "purpose": "ads-malware",
+      "enabled": true,
+      "weight": 65,
+      "single_source_block": false,
+      "format": "hosts",
+      "min_entries": 10000,
+      "max_bytes": 33554432,
+      "urls": [
+        "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
+      ],
+      "homepage": "https://github.com/StevenBlack/hosts",
+      "default_mode": "check"
+    },
+    {
+      "id": "awavenue-ads",
+      "name": "AWAvenue Ads Rule",
+      "vendor": "awavenue",
+      "independence_group": "awavenue",
+      "purpose": "mobile-ads",
+      "enabled": true,
+      "weight": 70,
+      "single_source_block": false,
+      "format": "adblock",
+      "min_entries": 1000,
+      "max_bytes": 16777216,
+      "urls": [
+        "https://raw.githubusercontent.com/TG-Twilight/AWAvenue-Ads-Rule/main/AWAvenue-Ads-Rule.txt"
+      ],
+      "homepage": "https://github.com/TG-Twilight/AWAvenue-Ads-Rule",
+      "default_mode": "check"
+    },
+    {
+      "id": "shadowwhisperer-tracking",
+      "name": "ShadowWhisperer Tracking List",
+      "vendor": "shadowwhisperer",
+      "independence_group": "shadowwhisperer",
+      "purpose": "tracking",
+      "enabled": true,
+      "weight": 60,
+      "single_source_block": false,
+      "format": "domains",
+      "min_entries": 100,
+      "max_bytes": 16777216,
+      "urls": [
+        "https://raw.githubusercontent.com/ShadowWhisperer/BlockLists/master/Lists/Tracking"
+      ],
+      "homepage": "https://github.com/ShadowWhisperer/BlockLists",
+      "default_mode": "check"
+    }
+  ]
+}

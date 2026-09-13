@@ -1,0 +1,48 @@
+<!-- Merge into the existing Dev.7 Settings section. Do not add a new top-level nav item. -->
+<div class="panel" id="adsPrivacyPanel">
+  <div class="panel-head"><div><h3>VWARD Ads &amp; Privacy Guard</h3><div class="sub">Дополняет AdGuard Home: реклама, трекинг, аналитика и нежелательные редиректы</div></div><span class="pill" id="adsPrivacyPill">Нет данных</span></div>
+  <div class="stats" id="adsPrivacyStats"></div>
+  <div class="settings vward-settings-groups" id="adsPrivacySettings">
+    <section class="vward-settings-group"><div class="vward-group-title"><span class="vward-group-icon" aria-hidden="true">●</span><div><h4>Основное</h4><small>Состояние и режим работы</small></div></div><div class="vward-setting-grid">
+      <div class="setting"><div><b>Компонент включён</b><small>Отключение сохраняет историю и правила.</small></div><label class="switch"><input id="adsEnabled" type="checkbox"><i></i></label></div>
+      <div class="setting"><div><b>Пауза</b><small>Временно останавливает автоматические циклы.</small></div><button class="btn" data-icon="pause" id="adsPauseResume">Пауза</button></div>
+      <div class="setting"><div><b>Режим работы</b><small>Ручной, по расписанию или динамический.</small></div><select class="input" id="adsRunMode"><option value="manual">Ручной</option><option value="scheduled">По расписанию</option><option value="dynamic">Динамический</option></select></div>
+      <div class="setting"><div><b>Интервал расписания</b><small>От 5 до 1440 минут.</small></div><input class="input" id="adsScheduleInterval" type="number" min="5" max="1440"></div>
+      <div class="setting"><div><b>Интервал динамики</b><small>От 60 до 3600 секунд.</small></div><input class="input" id="adsDynamicInterval" type="number" min="60" max="3600"></div>
+    </div></section>
+    <section class="vward-settings-group"><div class="vward-group-title"><span class="vward-group-icon" aria-hidden="true">◆</span><div><h4>Ресурсы</h4><small>Ограничения нагрузки KN-1913</small></div></div><div class="vward-setting-grid">
+      <div class="setting"><div><b>Допустимая нагрузка CPU</b><small>Load average на логическое ядро, x100.</small></div><input class="input" id="adsLoadLimit" type="number" min="20" max="300"></div>
+      <div class="setting"><div><b>Свободная память</b><small>Минимум доступной памяти, КиБ.</small></div><input class="input" id="adsMinMem" type="number" min="4096" max="1048576"></div>
+      <div class="setting"><div><b>Свободное место /opt</b><small>Минимальный запас перед циклом, КиБ.</small></div><input class="input" id="adsMinOpt" type="number" min="8192" max="10485760"></div>
+      <div class="setting"><div><b>Домены за цикл</b><small>От 10 до 500 новых кандидатов.</small></div><input class="input" id="adsDynamicCandidates" type="number" min="10" max="500"></div>
+    </div></section>
+    <section class="vward-settings-group"><div class="vward-group-title"><span class="vward-group-icon" aria-hidden="true">■</span><div><h4>Источники и публикация</h4><small>Базы, DNS и правила AdGuard Home</small></div></div><div class="vward-setting-grid">
+      <div class="setting"><div><b>Автообновление баз</b><small>Обновляются источники «Активен» и «Проверка».</small></div><label class="switch"><input id="adsAutoSources" type="checkbox"><i></i></label></div>
+      <div class="setting"><div><b>Интервал обновления баз</b><small>От 6 до 168 часов.</small></div><input class="input" id="adsSourceHours" type="number" min="6" max="168"></div>
+      <div class="setting"><div><b>Источник истории DNS</b><small>Авто выбирает API AGH с файловым резервом.</small></div><select class="input" id="adsQuerySource"><option value="auto">Автоматически</option><option value="api">Только API</option><option value="file">Только файл</option></select></div>
+      <div class="setting"><div><b>Область автоматических правил</b><small>Точный адрес безопаснее блокировки всех поддоменов.</small></div><select class="input" id="adsAutoRuleScope"><option value="exact">Только точный адрес</option><option value="suffix">Домен и поддомены</option></select></div>
+      <div class="setting"><div><b>Режим публикации</b><small>Подготовка не меняет AGH; API управляет только блоком VWARD.</small></div><select class="input" id="adsPublishMode"><option value="staged">Только подготовка</option><option value="user_rules_api">Публикация через API AdGuard Home</option></select></div>
+      <div class="setting vward-setting-risk"><div><b>Автопубликация</b><small>Изменяет правила автоматически. По умолчанию выключена.</small></div><label class="switch"><input id="adsAutoPublish" type="checkbox"><i></i></label></div>
+    </div></section>
+  </div>
+  <div class="actions action-wrap vward-action-bar"><button class="btn" data-icon="undo" id="adsSettingsReload">Отменить</button><button class="btn primary" data-icon="save" id="adsSettingsSave">Сохранить</button><button class="btn" data-icon="scan" id="adsRunNow">Проверить сейчас</button><button class="btn" data-icon="refresh" id="adsUpdateSourcesNow">Обновить базы</button><button class="btn" data-icon="publish" id="adsPublishNow">Опубликовать правила</button></div>
+  <pre class="action-result" id="adsActionResult" hidden></pre>
+</div>
+
+
+<div class="panel" id="adsHttpsPanel">
+  <div class="panel-head"><div><h3>HTTPS Content Guard</h3><div class="sub">Опциональная фильтрация HTTPS-запросов через явный proxy/PAC. По умолчанию выключена.</div></div><span class="pill" id="adsHttpsPill">Нет данных</span></div>
+  <div class="stats" id="adsHttpsStats"></div>
+  <div class="components" id="adsHttpsDetails"><div class="empty">Загрузка…</div></div>
+  <div class="actions action-wrap vward-action-bar"><button class="btn" data-icon="refresh" id="adsHttpsRefresh">Обновить</button><button class="btn" data-icon="check" id="adsHttpsValidate">Проверить</button><button class="btn" data-icon="key" id="adsHttpsCaInit">Создать CA</button><button class="btn primary" data-icon="play" id="adsHttpsStart">Запустить</button><button class="btn" data-icon="stop" id="adsHttpsStop">Остановить</button></div>
+  <pre class="action-result" id="adsHttpsActionResult" hidden></pre>
+</div>
+
+<div class="panel" id="adsSourcesPanel"><div class="panel-head"><div><h3>Источники проверки</h3><div class="sub">Выключен - не используется; Проверка - только подтверждение; Активен - участвует в решении.</div></div><button class="btn" data-icon="refresh" id="adsSourcesRefresh">Обновить список</button></div><div class="components" id="adsSourcesList"><div class="empty">Загрузка…</div></div></div>
+
+<div class="two">
+  <div class="panel"><div class="panel-head"><div><h3>Проверить домен</h3><div class="sub">Ручной probe ставится в очередь и не держит CGI открытым.</div></div></div><div class="probe-bar"><input class="input" id="adsProbeDomain" placeholder="example.org" autocomplete="off" spellcheck="false"><button class="btn primary" id="adsProbeBtn">Проверить</button></div><div class="components" id="adsJobState"><div class="empty">Нет активной задачи</div></div></div>
+  <div class="panel"><div class="panel-head"><div><h3>Свои правила</h3><div class="sub">Ручные ALLOW/BLOCK выше автоматики.</div></div></div><div class="probe-bar"><input class="input" id="adsRuleDomain" placeholder="example.org" autocomplete="off" spellcheck="false"><select class="input" id="adsRuleScope"><option value="exact">Только hostname</option><option value="suffix">Домен + поддомены</option></select></div><div class="actions action-wrap"><button class="btn" id="adsRuleAllow">Разрешить</button><button class="btn" id="adsRuleBlock">Блокировать</button><button class="btn" id="adsRuleRemove">Удалить override</button></div><div class="components" id="adsManualRules"></div></div>
+</div>
+
+<div class="panel"><div class="panel-head"><div><h3>Будущие возможности</h3><div class="sub">UI-задел без ложной имитации работающего backend.</div></div><span class="pill">ROADMAP</span></div><div class="components"><div class="row"><b>Privacy Monitor<small>Профиль трекеров и телеметрии по клиентам</small></b><span class="pill">Будущее</span></div><div class="row"><b>Client Protection Profiles<small>Standard / Strict / TV-IoT / Observe</small></b><span class="pill">Будущее</span></div><div class="row"><b>Anti-Bypass<small>Наблюдение известных DoH/DoT/DoQ обходов</small></b><span class="pill">Будущее</span></div><div class="row"><b>Breakage Assistant<small>Последние VWARD-блокировки клиента и безопасный временный ALLOW</small></b><span class="pill">Будущее</span></div></div></div>

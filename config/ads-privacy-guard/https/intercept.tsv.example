@@ -1,0 +1,3 @@
+# enabled<TAB>domain<TAB>scope<TAB>comment
+# Keep empty by default. Only explicitly selected domains are sent through MITM.
+# 0	api.ozon.ru	exact	Example only; enable after CA/client acceptance testing

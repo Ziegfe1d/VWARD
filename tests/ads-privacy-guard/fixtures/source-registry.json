@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "sources": [
+    {"id":"popup","name":"Popup","vendor":"vendor-a","independence_group":"vendor-a-popup","purpose":"popup-ads","enabled":true,"weight":100,"single_source_block":true,"format":"adblock","min_entries":1,"max_bytes":100000,"urls":[]},
+    {"id":"feed-a","name":"Feed A","vendor":"vendor-a","independence_group":"vendor-a","purpose":"ads","enabled":true,"weight":80,"single_source_block":false,"format":"adblock","min_entries":1,"max_bytes":100000,"urls":[]},
+    {"id":"feed-b","name":"Feed B","vendor":"vendor-b","independence_group":"vendor-b","purpose":"ads","enabled":true,"weight":80,"single_source_block":false,"format":"adblock","min_entries":1,"max_bytes":100000,"urls":[]}
+  ]
+}

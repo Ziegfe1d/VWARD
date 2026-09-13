@@ -1,0 +1,12 @@
+! comment
+||ads.example.com^
+||sub.example.org^$third-party
+@@||allow.example.net^
+0.0.0.0 hosts.example.io
+127.0.0.1 hosts2.example.io
+plain.example.dev
+example.com/path/ad.js
+##.cosmetic
+/path/only
+||parent.example.net^
+@@||safe.parent.example.net^
