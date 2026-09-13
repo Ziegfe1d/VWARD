@@ -24,7 +24,9 @@ vward_valid_ipv4()
 vward_discover_wan_device()
 {
     ip -4 route show default 2>/dev/null |
-        awk '$1=="default" {for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}'
+        awk '$1=="default" {for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' |
+        sort -u |
+        awk 'NR==1{first=$0} NR>1{many=1} END{if(!many) print first}'
 }
 
 vward_discover_tunnel_device()
@@ -87,6 +89,13 @@ vward_profile_load()
     [ -n "${VWARD_PROBE_DNS:-}" ] || VWARD_PROBE_DNS=$VWARD_DNS_SERVER
     vward_valid_ipv4 "$VWARD_PROBE_DNS" || vward_profile_error "invalid probe DNS server"
 
+    [ -n "${VWARD_ADGUARD_ADDRESS:-}" ] || VWARD_ADGUARD_ADDRESS=$VWARD_LAN_ADDRESS
+    vward_valid_ipv4 "$VWARD_ADGUARD_ADDRESS" || vward_profile_error "invalid AdGuard Home address"
+    VWARD_ADGUARD_PORT=${VWARD_ADGUARD_PORT:-3000}
+    case "$VWARD_ADGUARD_PORT" in ''|*[!0-9]*) vward_profile_error "invalid AdGuard Home port" ;; esac
+    [ "$VWARD_ADGUARD_PORT" -ge 1 ] && [ "$VWARD_ADGUARD_PORT" -le 65535 ] ||
+        vward_profile_error "AdGuard Home port must be 1..65535"
+
     [ -n "${VWARD_TUNNEL_DEVICE:-}" ] || VWARD_TUNNEL_DEVICE=$(vward_discover_tunnel_device)
     vward_valid_ifname "${VWARD_TUNNEL_DEVICE:-}" ||
         vward_profile_error "tunnel device is missing or ambiguous"
@@ -104,6 +113,7 @@ vward_profile_load()
     export VWARD_RCI_BASE VWARD_CONSOLE_PORT VWARD_WAN_DEVICE VWARD_LAN_ADDRESS
     export VWARD_LAN_SUBNET VWARD_DNS_SERVER VWARD_TUNNEL_DEVICE
     export VWARD_PROBE_DNS
+    export VWARD_ADGUARD_ADDRESS VWARD_ADGUARD_PORT
     export VWARD_TUNNEL_INTERFACE VWARD_POLICY_GROUP
     export VWARD_WAN_INTERFACE
 }

@@ -22,6 +22,8 @@ metadata.
 | `components/runtime/init.d/*` | `/opt/etc/init.d/<то же имя>` | 0755 |
 | `web/lighttpd.conf` | `/opt/etc/vward/console/lighttpd.conf` | 0644 |
 | `web/index.html` | `/opt/share/vward/console/www/index.html` | 0644 |
+| `web/assets/vward-console.css` | `/opt/share/vward/console/www/assets/vward-console.css` | 0644 |
+| `web/assets/vward-console.js` | `/opt/share/vward/console/www/assets/vward-console.js` | 0644 |
 | `web/cgi-bin/api.cgi` | `/opt/share/vward/console/www/cgi-bin/api.cgi` | 0755 |
 | `config/route-engine/*.conf.example` | начальный local config без `.example` | 0644 |
 | `config/cron/root.crontab` | VWARD entries в root crontab | 0600 |

@@ -1075,8 +1075,9 @@ while :; do
     mkfifo "$RAW" || exit 1
 
 
+    CAPTURE_FILTER="src net $VWARD_LAN_SUBNET and not src host $VWARD_DNS_SERVER and dst host $VWARD_DNS_SERVER and (udp dst port 53 or tcp dst port 53)"
     tcpdump -ni any -l -vv \
-        'src net $VWARD_LAN_SUBNET and not src host $VWARD_DNS_SERVER and dst host $VWARD_DNS_SERVER and (udp dst port 53 or tcp dst port 53)' \
+        "$CAPTURE_FILTER" \
         > "$RAW" 2>/dev/null &
 
     TCP_PID=$!

@@ -85,16 +85,21 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="$(sed -n '1p' VERSION)"
-          UPDATE_ID='vward-0.1.7-beta-control-plane'
-          SEQUENCE='2026091301'
+          UPDATE_ID='vward-0.2.0-dev.4-console-audit'
+          SEQUENCE='2026091302'
           OUT="$RUNNER_TEMP/vward-candidate"
           PKGDIR="$OUT/package"
           ARTIFACT="$OUT/vward-$VERSION.tar.gz"
           rm -rf "$OUT"
-          mkdir -p "$PKGDIR/files/web/cgi-bin" "$PKGDIR/files/bin"
+          mkdir -p "$PKGDIR/files/web/cgi-bin" "$PKGDIR/files/web/assets" "$PKGDIR/files/bin" "$PKGDIR/files/lib" "$PKGDIR/files/etc"
           cp VERSION "$PKGDIR/files/VERSION"
           cp web/index.html "$PKGDIR/files/web/index.html"
+          cp web/assets/vward-console.css "$PKGDIR/files/web/assets/vward-console.css"
+          cp web/assets/vward-console.js "$PKGDIR/files/web/assets/vward-console.js"
           cp web/cgi-bin/api.cgi "$PKGDIR/files/web/cgi-bin/api.cgi"
+          cp web/lighttpd.conf "$PKGDIR/files/etc/lighttpd.conf"
+          cp components/runtime/lib/vward-device-profile.sh "$PKGDIR/files/lib/vward-device-profile.sh"
+          cp components/wan-guard/scripts/vward-wan-guard.sh "$PKGDIR/files/bin/vward-wan-guard.sh"
           cp components/route-tools/scripts/vward-route-hints-update.sh "$PKGDIR/files/bin/vward-route-hints-update.sh"
           cp components/route-engine/scripts/vward-route-engine.sh "$PKGDIR/files/bin/vward-route-engine.sh"
           cp components/policy-sync/scripts/vward-policy-audit.sh "$PKGDIR/files/bin/vward-policy-audit.sh"
@@ -102,27 +107,39 @@ jobs:
           cp components/policy-sync/scripts/vward-policy-sync.sh "$PKGDIR/files/bin/vward-policy-sync.sh"
           version_sha="$(sha256sum "$PKGDIR/files/VERSION" | awk '{print $1}')"
           index_sha="$(sha256sum "$PKGDIR/files/web/index.html" | awk '{print $1}')"
+          css_sha="$(sha256sum "$PKGDIR/files/web/assets/vward-console.css" | awk '{print $1}')"
+          js_sha="$(sha256sum "$PKGDIR/files/web/assets/vward-console.js" | awk '{print $1}')"
           api_sha="$(sha256sum "$PKGDIR/files/web/cgi-bin/api.cgi" | awk '{print $1}')"
+          lighttpd_sha="$(sha256sum "$PKGDIR/files/etc/lighttpd.conf" | awk '{print $1}')"
+          profile_sha="$(sha256sum "$PKGDIR/files/lib/vward-device-profile.sh" | awk '{print $1}')"
+          wan_sha="$(sha256sum "$PKGDIR/files/bin/vward-wan-guard.sh" | awk '{print $1}')"
           hints_sha="$(sha256sum "$PKGDIR/files/bin/vward-route-hints-update.sh" | awk '{print $1}')"
           live_sha="$(sha256sum "$PKGDIR/files/bin/vward-route-engine.sh" | awk '{print $1}')"
           audit_sha="$(sha256sum "$PKGDIR/files/bin/vward-policy-audit.sh" | awk '{print $1}')"
           reconcile_sha="$(sha256sum "$PKGDIR/files/bin/vward-policy-reconcile.sh" | awk '{print $1}')"
           subnet_sha="$(sha256sum "$PKGDIR/files/bin/vward-policy-sync.sh" | awk '{print $1}')"
-          jq -n --arg version_sha "$version_sha" --arg index_sha "$index_sha" --arg api_sha "$api_sha" \
+          jq -n --arg version_sha "$version_sha" --arg index_sha "$index_sha" --arg css_sha "$css_sha" --arg js_sha "$js_sha" --arg api_sha "$api_sha" \
+            --arg lighttpd_sha "$lighttpd_sha" --arg profile_sha "$profile_sha" --arg wan_sha "$wan_sha" \
             --arg hints_sha "$hints_sha" --arg live_sha "$live_sha" --arg audit_sha "$audit_sha" \
             --arg reconcile_sha "$reconcile_sha" --arg subnet_sha "$subnet_sha" \
             '{schema:1,files:[
               {source:"files/VERSION",target:"/opt/share/vward/VERSION",mode:"0644",sha256:$version_sha,component:"platform-core",restart_policy:"none",config_policy:"program-only"},
               {source:"files/web/index.html",target:"/opt/share/vward/console/www/index.html",mode:"0644",sha256:$index_sha,component:"console",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/web/assets/vward-console.css",target:"/opt/share/vward/console/www/assets/vward-console.css",mode:"0644",sha256:$css_sha,component:"console",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/web/assets/vward-console.js",target:"/opt/share/vward/console/www/assets/vward-console.js",mode:"0644",sha256:$js_sha,component:"console",restart_policy:"none",config_policy:"program-only"},
               {source:"files/web/cgi-bin/api.cgi",target:"/opt/share/vward/console/www/cgi-bin/api.cgi",mode:"0755",sha256:$api_sha,component:"console",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/etc/lighttpd.conf",target:"/opt/etc/vward/console/lighttpd.conf",mode:"0644",sha256:$lighttpd_sha,component:"console",restart_policy:"deferred",config_policy:"program-only"},
+              {source:"files/lib/vward-device-profile.sh",target:"/opt/lib/vward/vward-device-profile.sh",mode:"0755",sha256:$profile_sha,component:"runtime",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/bin/vward-wan-guard.sh",target:"/opt/bin/vward-wan-guard.sh",mode:"0755",sha256:$wan_sha,component:"wan-guard",restart_policy:"none",config_policy:"program-only"},
               {source:"files/bin/vward-route-hints-update.sh",target:"/opt/bin/vward-route-hints-update.sh",mode:"0755",sha256:$hints_sha,component:"route-tools",restart_policy:"none",config_policy:"program-only"},
               {source:"files/bin/vward-route-engine.sh",target:"/opt/bin/vward-route-engine.sh",mode:"0755",sha256:$live_sha,component:"route-engine",restart_policy:"none",config_policy:"program-only"},
               {source:"files/bin/vward-policy-audit.sh",target:"/opt/bin/vward-policy-audit.sh",mode:"0755",sha256:$audit_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"},
               {source:"files/bin/vward-policy-reconcile.sh",target:"/opt/bin/vward-policy-reconcile.sh",mode:"0755",sha256:$reconcile_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"},
               {source:"files/bin/vward-policy-sync.sh",target:"/opt/bin/vward-policy-sync.sh",mode:"0755",sha256:$subnet_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"}
             ]}' > "$PKGDIR/package-manifest.json"
-          test "$(jq '.files|length' "$PKGDIR/package-manifest.json")" = 8
+          test "$(jq '.files|length' "$PKGDIR/package-manifest.json")" = 13
           sh -n web/cgi-bin/api.cgi
+          node --check web/assets/vward-console.js
           sh -n components/route-tools/scripts/vward-route-hints-update.sh
           sh -n components/route-engine/scripts/vward-route-engine.sh
           sh -n components/policy-sync/scripts/vward-policy-audit.sh
@@ -137,7 +154,7 @@ jobs:
           jq -n --arg version "$VERSION" --arg update_id "$UPDATE_ID" --argjson sequence "$SEQUENCE" \
             --arg package_file "vward-$VERSION.tar.gz" --arg package_sha256 "$package_sha" \
             --argjson package_size "$package_size" --argjson unpacked_size "$unpacked_size" \
-            '{candidate:true,signed:false,publication_state:"SIGNING_REQUIRED",version:$version,update_id:$update_id,sequence:$sequence,channel:"dev",priority:"CRITICAL",package_file:$package_file,package_sha256:$package_sha256,package_size:$package_size,unpacked_size:$unpacked_size,compatibility:{min_vward:"0.1.6-dev",max_vward:"0.1.6-dev"},affected_components:["platform-core","console","route-engine","route-tools","policy-sync"],health_profile:"policy-sync",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$OUT/candidate-metadata.json"
+            '{candidate:true,signed:false,publication_state:"SIGNING_REQUIRED",version:$version,update_id:$update_id,sequence:$sequence,channel:"dev",priority:"CRITICAL",package_file:$package_file,package_sha256:$package_sha256,package_size:$package_size,unpacked_size:$unpacked_size,compatibility:{min_vward:"0.2.0-dev.3",max_vward:"0.2.0-dev.3"},affected_components:["platform-core","console","runtime","wan-guard","route-engine","route-tools","policy-sync"],health_profile:"console",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$OUT/candidate-metadata.json"
           cp "$PKGDIR/package-manifest.json" "$OUT/package-manifest.json"
           echo "VWARD_OUT=$OUT" >> "$GITHUB_ENV"
           echo "VWARD_ARTIFACT=$ARTIFACT" >> "$GITHUB_ENV"

@@ -112,6 +112,37 @@ if [ "$ACTION" = "security-data" ]; then
         echo '{"ok":false,"error":"method_not_allowed"}'
         exit 0
     }
+    CONSOLE_RUNTIME_CONFIG=${VWARD_CONSOLE_RUNTIME_CONFIG:-/opt/var/run/vward/console-lighttpd.conf}
+    LISTENER_ADDRESS=
+    LISTENER_PORT=
+    LISTENER_SCOPE=unknown
+    LISTENER_WILDCARD=null
+    SOCKET_STATE=unknown
+    CONFIG_TEST=unknown
+    MOD_SETENV=unknown
+
+    if [ -r "$CONSOLE_RUNTIME_CONFIG" ]; then
+        LISTENER_ADDRESS=$(awk -F'"' '/^[[:space:]]*server\.bind[[:space:]]*=/{print $2; exit}' "$CONSOLE_RUNTIME_CONFIG")
+        LISTENER_PORT=$(awk -F= '/^[[:space:]]*server\.port[[:space:]]*=/{gsub(/[[:space:]]/,"",$2); print $2; exit}' "$CONSOLE_RUNTIME_CONFIG")
+        case "$LISTENER_ADDRESS" in
+            0.0.0.0|::|'') LISTENER_SCOPE=all; LISTENER_WILDCARD=true ;;
+            "$VWARD_LAN_ADDRESS") LISTENER_SCOPE=lan; LISTENER_WILDCARD=false ;;
+            *) LISTENER_SCOPE=custom; LISTENER_WILDCARD=false ;;
+        esac
+        grep -q '"mod_setenv"' "$CONSOLE_RUNTIME_CONFIG" && MOD_SETENV=enabled || MOD_SETENV=disabled
+        if [ -x /opt/sbin/lighttpd ]; then
+            /opt/sbin/lighttpd -tt -f "$CONSOLE_RUNTIME_CONFIG" >/dev/null 2>&1 && CONFIG_TEST=pass || CONFIG_TEST=fail
+        fi
+    fi
+
+    if [ -n "$LISTENER_PORT" ]; then
+        if command -v ss >/dev/null 2>&1; then
+            ss -ltn 2>/dev/null | awk -v p=":$LISTENER_PORT" 'NR>1 && index($4,p)==length($4)-length(p)+1{found=1} END{exit !found}' && SOCKET_STATE=listening || SOCKET_STATE=not_listening
+        elif command -v netstat >/dev/null 2>&1; then
+            netstat -ltn 2>/dev/null | awk -v p=":$LISTENER_PORT" 'NR>2 && index($4,p)==length($4)-length(p)+1{found=1} END{exit !found}' && SOCKET_STATE=listening || SOCKET_STATE=not_listening
+        fi
+    fi
+
     "$JQ" -n \
       --argjson ready "$PROFILE_READY" \
       --arg lan_address "${VWARD_LAN_ADDRESS:-}" \
@@ -123,7 +154,16 @@ if [ "$ACTION" = "security-data" ]; then
       --arg tunnel_interface "${VWARD_TUNNEL_INTERFACE:-}" \
       --arg policy_group "${VWARD_POLICY_GROUP:-}" \
       --arg console_port "${VWARD_CONSOLE_PORT:-}" \
-      '{ok:true,profile_ready:$ready,listener:{scope:"lan",address:$lan_address,port:$console_port,wildcard:false},profile:{lan_address:$lan_address,lan_subnet:$lan_subnet,dns_server:$dns_server,wan_device:$wan_device,wan_interface:$wan_interface,tunnel_device:$tunnel_device,tunnel_interface:$tunnel_interface,policy_group:$policy_group},api:{mutation_guard:true,cors:false,directory_listing:false,authentication:false}}'
+      --arg adguard_address "${VWARD_ADGUARD_ADDRESS:-}" \
+      --arg adguard_port "${VWARD_ADGUARD_PORT:-}" \
+      --arg listener_address "$LISTENER_ADDRESS" \
+      --arg listener_port "$LISTENER_PORT" \
+      --arg listener_scope "$LISTENER_SCOPE" \
+      --argjson listener_wildcard "$LISTENER_WILDCARD" \
+      --arg socket_state "$SOCKET_STATE" \
+      --arg config_test "$CONFIG_TEST" \
+      --arg mod_setenv "$MOD_SETENV" \
+      '{ok:true,profile_ready:$ready,listener:{scope:$listener_scope,address:$listener_address,port:$listener_port,wildcard:$listener_wildcard,socket_state:$socket_state,source:"generated_config"},profile:{lan_address:$lan_address,lan_subnet:$lan_subnet,dns_server:$dns_server,wan_device:$wan_device,wan_interface:$wan_interface,tunnel_device:$tunnel_device,tunnel_interface:$tunnel_interface,policy_group:$policy_group,console_port:$console_port,adguard_address:$adguard_address,adguard_port:$adguard_port},external_services:{adguard:{address:$adguard_address,port:$adguard_port}},server:{config_test:$config_test,mod_setenv:$mod_setenv},api:{mutation_guard:true,cors:false,directory_listing:false,authentication:false}}'
     exit 0
 fi
 

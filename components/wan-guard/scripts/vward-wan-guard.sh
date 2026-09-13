@@ -298,7 +298,7 @@ wan_recover()
 
         ACTION="WAN_BOUNCE"
 
-        LD_LIBRARY_PATH= /bin/ndmc -c "interface ISP down" \
+        LD_LIBRARY_PATH= /bin/ndmc -c "interface $VWARD_WAN_INTERFACE down" \
             >/tmp/vward-wan-guard.ndmc.down 2>&1
         WR_DOWN_RC=$?
 
@@ -311,7 +311,7 @@ wan_recover()
         do
             WR_UP_TRIES=$((WR_UP_TRIES + 1))
 
-            LD_LIBRARY_PATH= /bin/ndmc -c "interface ISP up" \
+            LD_LIBRARY_PATH= /bin/ndmc -c "interface $VWARD_WAN_INTERFACE up" \
                 >/tmp/vward-wan-guard.ndmc.up 2>&1
             WR_UP_RC=$?
 
@@ -372,7 +372,7 @@ wan_recover()
 
     ACTION="DHCP_RENEW"
 
-    LD_LIBRARY_PATH= /bin/ndmc -c "interface ISP ip dhcp client renew" \
+    LD_LIBRARY_PATH= /bin/ndmc -c "interface $VWARD_WAN_INTERFACE ip dhcp client renew" \
         >/tmp/vward-wan-guard.ndmc.renew 2>&1
     WR_RENEW_RC=$?
 

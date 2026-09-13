@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0-dev.4: аудит Console и строгий CSP
+
+- CSS и JavaScript вынесены из HTML в локальные assets; CSP больше не конфликтует
+  со страницей, а inline-style устранены.
+- Исправлена ранняя ошибка инициализации JavaScript, добавлены тайм-ауты запросов,
+  предупреждение о несохранённых настройках и мобильный переход в Security.
+- Security API читает сгенерированную конфигурацию lighttpd, проверяет bind/port,
+  состояние сокета, `mod_setenv` и `lighttpd -tt`, сохраняя `UNKNOWN`, когда факт
+  нельзя подтвердить.
+- Адрес и порт AdGuard Home перенесены в Device Profile и используются Console.
+- WAN Guard использует профильный интерфейс, несколько default route считаются
+  неоднозначностью, а tcpdump получает раскрытый безопасный фильтр без `eval`.
+- Assets добавлены в registry, updater allowlist, health profile, карту установки,
+  dev package workflow и регрессионные проверки.
+
 ## 0.2.0-dev.3: Device Profile и VWARD Security
 
 - Фиксированные LAN address/subnet, DNS, WAN device, tunnel device/interface и

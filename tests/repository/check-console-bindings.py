@@ -9,7 +9,9 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 html = (root / "web/index.html").read_text(encoding="utf-8")
+js = (root / "web/assets/vward-console.js").read_text(encoding="utf-8")
 api = (root / "web/cgi-bin/api.cgi").read_text(encoding="utf-8")
+ui = html + "\n" + js
 
 
 def fail(message: str) -> None:
@@ -21,7 +23,7 @@ section_links = set(re.findall(r'data-section="([^"]+)"', html))
 go_links = {
     value for value in re.findall(r'data-go="([^"]+)"', html) if "+" not in value
 }
-map_ids = set(re.findall(r"([a-z]+):\['", html))
+map_ids = set(re.findall(r"([a-z]+):\['", js))
 
 missing_sections = (section_links | go_links) - section_ids
 if missing_sections:
@@ -44,12 +46,14 @@ for marker in ("helpBtn", "helpPanel", "logSearch", "logRefresh", "logAuto", "lo
     if f'id="{marker}"' not in html:
         fail(f"нет элемента Console: {marker}")
 
-if "navigator.clipboard.writeText" not in html or "fallbackCopy" not in html:
+if "navigator.clipboard.writeText" not in js or "fallbackCopy" not in js:
     fail("копирование журнала не имеет Clipboard/fallback binding")
-if "navigator.share" not in html:
+if "navigator.share" not in js:
     fail("поделиться журналом не связано с Web Share API")
+if "return await fetch(url" not in js or "return await apiFetch(url" in js:
+    fail("Console request timeout wrapper is recursive or disconnected")
 
-if 'action=route-data' not in html or 'route-data' not in api:
+if 'action=route-data' not in js or 'route-data' not in api:
     fail("Route Engine read-only data endpoint is not bound")
 if 'id="routeDataRefresh"' not in html:
     fail("Route Engine data refresh control is missing")
@@ -71,11 +75,11 @@ for token in ("ROUTE_RECONCILE", "POLICY_REFRESH", "POLICY_RECONCILE", "APPLY_UP
 for marker in ("settingsSearch", "prefTheme", "prefRefresh", "prefLogInterval", "prefLogCount", "prefLogWrap", "updateActionState"):
     if f'id="{marker}"' not in html:
         fail(f"нет settings/update-state элемента: {marker}")
-if 'action=update-data' not in html or 'update-data' not in api:
+if 'action=update-data' not in js or 'update-data' not in api:
     fail("Update Engine action availability endpoint is not bound")
 if 'state_action_not_allowed' not in api or 'rollback_unavailable' not in api or 'recovery_not_required' not in api:
     fail("Update Engine server-side state preconditions are incomplete")
-if "count='+encodeURIComponent(prefs.logCount)" not in html:
+if "count='+encodeURIComponent(prefs.logCount)" not in js:
     fail("bounded log tail preference is not bound")
 
 
@@ -89,14 +93,7 @@ if 'Runtime сейчас не хранит отдельную достоверн
 
 node = shutil.which("node")
 if node:
-    start = html.find("<script>")
-    end = html.find("</script>", start + 8)
-    if start < 0 or end < 0:
-        fail("inline Console JavaScript block is missing")
-    with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8", delete=False) as f:
-        f.write(html[start + len("<script>"):end])
-        js_path = f.name
-    result = subprocess.run([node, "--check", js_path], capture_output=True, text=True)
+    result = subprocess.run([node, "--check", root / "web/assets/vward-console.js"], capture_output=True, text=True)
     if result.returncode != 0:
         fail("Console JavaScript syntax: " + (result.stderr.strip() or result.stdout.strip()))
 

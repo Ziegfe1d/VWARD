@@ -20,18 +20,18 @@ do
     [ -r "$DOC" ] || fail "missing documentation: $DOC"
 done
 
-grep -E 'Smart Updater|>Update</button>|192\.168\.1\.1' web/index.html >/dev/null &&
+grep -E 'Smart Updater|>Update</button>|192\.168\.1\.1' web/index.html web/assets/vward-console.js >/dev/null &&
     fail "Console contains legacy naming or universal device hardcode"
-grep -E '\?\.|\?\?|scrollTo\(\{' web/index.html >/dev/null &&
+grep -E '\?\.|\?\?|scrollTo\(\{' web/assets/vward-console.js >/dev/null &&
     fail "Console contains incompatible mobile JavaScript"
 
-grep -Fq 'function svgIcon' web/index.html || fail "local SVG icon system missing"
-grep -Fq 'componentNames=' web/index.html || fail "component display mapping missing"
+grep -Fq 'function svgIcon' web/assets/vward-console.js || fail "local SVG icon system missing"
+grep -Fq 'componentNames=' web/assets/vward-console.js || fail "component display mapping missing"
 grep -Fq 'id="settings"' web/index.html || fail "safe settings overview missing"
-grep -Fq 'border-radius:28px' web/index.html || fail "floating mobile toolbar missing"
-grep -Fq 'bottom:max(10px,env(safe-area-inset-bottom))' web/index.html ||
+grep -Fq 'border-radius:28px' web/assets/vward-console.css || fail "floating mobile toolbar missing"
+grep -Fq 'bottom:max(10px,env(safe-area-inset-bottom))' web/assets/vward-console.css ||
     fail "mobile toolbar safe-area handling missing"
-grep -Fq "if(id==='logs')loadLogs(false);if(id==='route')loadRouteData(false);if(id==='updater')loadUpdateData(false);if(id==='security')loadSecurity(false);renderHelp();setHelp(false);window.scrollTo(0,0)" web/index.html ||
+grep -Fq "if(id==='logs')loadLogs(false);if(id==='route')loadRouteData(false);if(id==='updater')loadUpdateData(false);if(id==='security')loadSecurity(false);renderHelp();setHelp(false);window.scrollTo(0,0)" web/assets/vward-console.js ||
     fail "Logs/route-data/help must update before compatibility-safe scroll"
 
 for ID in platform-core route-engine route-reconciler route-tools tunnel-guard \
@@ -39,7 +39,7 @@ for ID in platform-core route-engine route-reconciler route-tools tunnel-guard \
 do
     grep -Fq "\"id\": \"$ID\"" config/components/component-registry.json ||
         fail "registry component missing: $ID"
-    grep -Fq "'$ID':" web/index.html || fail "Console component mapping missing: $ID"
+    grep -Fq "'$ID':" web/assets/vward-console.js || fail "Console component mapping missing: $ID"
 done
 
 for LOG_NAME in wan recovery cron routing updater tunnel policy console
@@ -54,6 +54,10 @@ sh -n web/cgi-bin/api.cgi || fail "Console API syntax"
 python3 tests/repository/check-console-bindings.py || fail "Console bindings"
 python3 tests/repository/check-console-security.py || fail "Console security"
 python3 tests/repository/check-device-profile.py || fail "Device profile"
+grep -Fq 'interface $VWARD_WAN_INTERFACE down' components/wan-guard/scripts/vward-wan-guard.sh || fail "WAN down action is not profile-bound"
+grep -Fq 'interface $VWARD_WAN_INTERFACE up' components/wan-guard/scripts/vward-wan-guard.sh || fail "WAN up action is not profile-bound"
+grep -Fq '"$CAPTURE_FILTER"' components/route-engine/scripts/vward-route-engine.sh || fail "DNS capture filter is not expanded safely"
+grep -Fq "'src net \$VWARD_LAN_SUBNET" components/route-engine/scripts/vward-route-engine.sh && fail "DNS capture filter remains single-quoted"
 python3 tests/repository/check-policy-sync-safety.py || fail "VPN audit safety"
 for SCRIPT in components/*/scripts/*.sh components/runtime/init.d/* \
     components/update-engine/*.sh tests/updater/*.sh
