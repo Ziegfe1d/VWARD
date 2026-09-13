@@ -6,19 +6,19 @@ snapshot и package metadata.
 
 | Исходник | Runtime-цель | Mode |
 |---|---|---:|
-| `components/adaptive-routing/scripts/adaptive-2ip-test.sh` | `/opt/bin/adaptive-2ip-test.sh` | 0755 |
-| `components/adaptive-routing/scripts/adaptive-auto-maint.sh` | `/opt/bin/adaptive-auto-maint.sh` | 0755 |
-| `components/adaptive-routing/scripts/adaptive-hints-update.sh` | `/opt/bin/adaptive-hints-update.sh` | 0755 |
-| `components/adaptive-routing/scripts/adaptive-housekeeping.sh` | `/opt/bin/adaptive-housekeeping.sh` | 0755 |
-| `components/adaptive-routing/scripts/adaptive-resolve4.sh` | `/opt/bin/adaptive-resolve4.sh` | 0755 |
-| `components/adaptive-routing/scripts/adaptive-route.sh` | `/opt/bin/adaptive-route.sh` | 0755 |
-| `components/adaptive-routing/scripts/agh-adaptive-live.sh` | `/opt/bin/agh-adaptive-live.sh` | 0755 |
-| `components/adaptive-routing/scripts/agh-adaptive-route.sh` | `/opt/bin/agh-adaptive-route.sh` | 0755 |
-| `components/vpn-audit/scripts/*.sh` | `/opt/bin/<то же имя>` | 0755 |
-| `components/wireguard-protection/scripts/*.sh` | `/opt/bin/<то же имя>` | 0755 |
-| `components/wan-guardian/scripts/*.sh` | `/opt/bin/<то же имя>` | 0755 |
-| `components/runtime-supervision/scripts/crond-supervisor.sh` | `/opt/bin/crond-supervisor.sh` | 0755 |
-| `components/runtime-supervision/init.d/*` | `/opt/etc/init.d/<то же имя>` | 0755 |
+| `components/route-tools/scripts/adaptive-2ip-test.sh` | `/opt/bin/adaptive-2ip-test.sh` | 0755 |
+| `components/route-reconciler/scripts/adaptive-auto-maint.sh` | `/opt/bin/adaptive-auto-maint.sh` | 0755 |
+| `components/route-tools/scripts/adaptive-hints-update.sh` | `/opt/bin/adaptive-hints-update.sh` | 0755 |
+| `components/runtime/scripts/adaptive-housekeeping.sh` | `/opt/bin/adaptive-housekeeping.sh` | 0755 |
+| `components/route-tools/scripts/adaptive-resolve4.sh` | `/opt/bin/adaptive-resolve4.sh` | 0755 |
+| `components/route-tools/scripts/adaptive-route.sh` | `/opt/bin/adaptive-route.sh` | 0755 |
+| `components/route-engine/scripts/agh-adaptive-live.sh` | `/opt/bin/agh-adaptive-live.sh` | 0755 |
+| `components/route-tools/scripts/agh-adaptive-route.sh` | `/opt/bin/agh-adaptive-route.sh` | 0755 |
+| `components/policy-sync/scripts/*.sh` | `/opt/bin/<то же имя>` | 0755 |
+| `components/tunnel-guard/scripts/*.sh` | `/opt/bin/<то же имя>` | 0755 |
+| `components/wan-guard/scripts/*.sh` | `/opt/bin/<то же имя>` | 0755 |
+| `components/runtime/scripts/crond-supervisor.sh` | `/opt/bin/crond-supervisor.sh` | 0755 |
+| `components/runtime/init.d/*` | `/opt/etc/init.d/<то же имя>` | 0755 |
 | `web/lighttpd.conf` | `/opt/etc/keenetic-apps/lighttpd.conf` | 0644 |
 | `web/index.html` | `/opt/share/keenetic-apps/www/index.html` | 0644 |
 | `web/cgi-bin/api.cgi` | `/opt/share/keenetic-apps/www/cgi-bin/api.cgi` | 0755 |

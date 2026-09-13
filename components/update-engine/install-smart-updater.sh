@@ -131,11 +131,11 @@ download "$BASE_URL/SHA256SUMS" "$WORK/SHA256SUMS" ||
     fail "cannot download SHA256SUMS"
 
 for F in $UPDATER_FILES; do
-    download "$BASE_URL/components/updater/$F" "$WORK/files/$F" ||
+    download "$BASE_URL/components/update-engine/$F" "$WORK/files/$F" ||
         fail "cannot download $F"
 
     EXPECTED=$(
-        awk -v p="components/updater/$F" '$2==p {print $1; exit}' \
+        awk -v p="components/update-engine/$F" '$2==p {print $1; exit}' \
             "$WORK/SHA256SUMS"
     )
     ACTUAL=$(sha256sum "$WORK/files/$F" | awk '{print $1}')

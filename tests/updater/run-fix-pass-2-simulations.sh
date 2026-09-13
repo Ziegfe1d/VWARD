@@ -2,7 +2,7 @@
 set -eu
 
 REPO=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-UPDATER=$REPO/components/updater
+UPDATER=$REPO/components/update-engine
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/vward-fix-pass-2.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 passed=0
@@ -45,7 +45,7 @@ make_package(){
   printf 'wan-%s\n' "$label" > "$PKGDIR/files/wan-guardian.sh"
   one=$(sha256sum "$PKGDIR/files/adaptive-route.sh"|awk '{print $1}')
   two=$(sha256sum "$PKGDIR/files/wan-guardian.sh"|awk '{print $1}')
-  jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guardian",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
+  jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guard",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
   PACKAGE=$WORK/pkg-$label.tar.gz
   tar -czf "$PACKAGE" -C "$PKGDIR" .
   UNPACKED=$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{s+=$1} END {print s+0}')
@@ -160,7 +160,7 @@ printf 'minimum_free_kb=0\n' >> "$CONFIG"
 awk 'BEGIN{for(i=0;i<1300;i++)printf "A"; printf "\n"}' > "$PKGDIR/files/adaptive-route.sh"
 awk 'BEGIN{for(i=0;i<1300;i++)printf "B"; printf "\n"}' > "$PKGDIR/files/wan-guardian.sh"
 one=$(sha256sum "$PKGDIR/files/adaptive-route.sh"|awk '{print $1}'); two=$(sha256sum "$PKGDIR/files/wan-guardian.sh"|awk '{print $1}')
-jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guardian",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
+jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guard",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
 tar -czf "$PACKAGE" -C "$PKGDIR" .
 UNPACKED=$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{s+=$1} END {print s+0}')
 make_manifest cumulative CRITICAL 1 0.1.1-dev

@@ -8,8 +8,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-AUDIT = ROOT / "components/vpn-audit/scripts/vpn-domain-audit.sh"
-RECONCILE = ROOT / "components/vpn-audit/scripts/vpn-night-reconcile.sh"
+AUDIT = ROOT / "components/policy-sync/scripts/vpn-domain-audit.sh"
+RECONCILE = ROOT / "components/policy-sync/scripts/vpn-night-reconcile.sh"
 
 
 def fail(message: str) -> None:

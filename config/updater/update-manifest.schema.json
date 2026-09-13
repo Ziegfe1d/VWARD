@@ -52,15 +52,7 @@
               "policy-sync",
               "runtime",
               "console",
-              "update-engine",
-              "bootstrap",
-              "adaptive-routing",
-              "wireguard-protection",
-              "wan-guardian",
-              "vpn-audit",
-              "runtime-supervision",
-              "web-ui",
-              "updater"
+              "update-engine"
             ]
           },
           "uniqueItems": true

@@ -2,7 +2,7 @@
 set -eu
 
 REPO=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-UPDATER=$REPO/components/updater
+UPDATER=$REPO/components/update-engine
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/vward-fix-pass-3.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 
@@ -49,7 +49,7 @@ make_package() {
     jq -n --arg one "$one" --arg two "$two" \
       '{schema:1,files:[
         {source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},
-        {source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guardian",restart_policy:"none",config_policy:"program-only"}
+        {source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guard",restart_policy:"none",config_policy:"program-only"}
       ]}' > "$PKGDIR/package-manifest.json"
     PACKAGE=$WORK/pkg-$label.tar.gz
     tar -czf "$PACKAGE" -C "$PKGDIR" .

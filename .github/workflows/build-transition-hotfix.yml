@@ -72,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           tests/repository/run-consistency-checks.sh
-          for f in components/updater/*.sh tests/updater/*.sh; do sh -n "$f"; dash -n "$f"; done
+          for f in components/update-engine/*.sh tests/updater/*.sh; do sh -n "$f"; dash -n "$f"; done
           tests/updater/run-simulations.sh
           tests/updater/run-fix-pass-1-simulations.sh
           tests/updater/run-fix-pass-2-simulations.sh
@@ -95,11 +95,11 @@ jobs:
           cp VERSION "$PKGDIR/files/VERSION"
           cp web/index.html "$PKGDIR/files/web/index.html"
           cp web/cgi-bin/api.cgi "$PKGDIR/files/web/cgi-bin/api.cgi"
-          cp components/adaptive-routing/scripts/adaptive-hints-update.sh "$PKGDIR/files/bin/adaptive-hints-update.sh"
-          cp components/adaptive-routing/scripts/agh-adaptive-live.sh "$PKGDIR/files/bin/agh-adaptive-live.sh"
-          cp components/vpn-audit/scripts/vpn-domain-audit.sh "$PKGDIR/files/bin/vpn-domain-audit.sh"
-          cp components/vpn-audit/scripts/vpn-night-reconcile.sh "$PKGDIR/files/bin/vpn-night-reconcile.sh"
-          cp components/vpn-audit/scripts/vpn-subnet-sync.sh "$PKGDIR/files/bin/vpn-subnet-sync.sh"
+          cp components/route-tools/scripts/adaptive-hints-update.sh "$PKGDIR/files/bin/adaptive-hints-update.sh"
+          cp components/route-engine/scripts/agh-adaptive-live.sh "$PKGDIR/files/bin/agh-adaptive-live.sh"
+          cp components/policy-sync/scripts/vpn-domain-audit.sh "$PKGDIR/files/bin/vpn-domain-audit.sh"
+          cp components/policy-sync/scripts/vpn-night-reconcile.sh "$PKGDIR/files/bin/vpn-night-reconcile.sh"
+          cp components/policy-sync/scripts/vpn-subnet-sync.sh "$PKGDIR/files/bin/vpn-subnet-sync.sh"
           version_sha="$(sha256sum "$PKGDIR/files/VERSION" | awk '{print $1}')"
           index_sha="$(sha256sum "$PKGDIR/files/web/index.html" | awk '{print $1}')"
           api_sha="$(sha256sum "$PKGDIR/files/web/cgi-bin/api.cgi" | awk '{print $1}')"
@@ -123,11 +123,11 @@ jobs:
             ]}' > "$PKGDIR/package-manifest.json"
           test "$(jq '.files|length' "$PKGDIR/package-manifest.json")" = 8
           sh -n web/cgi-bin/api.cgi
-          sh -n components/adaptive-routing/scripts/adaptive-hints-update.sh
-          sh -n components/adaptive-routing/scripts/agh-adaptive-live.sh
-          sh -n components/vpn-audit/scripts/vpn-domain-audit.sh
-          sh -n components/vpn-audit/scripts/vpn-night-reconcile.sh
-          sh -n components/vpn-audit/scripts/vpn-subnet-sync.sh
+          sh -n components/route-tools/scripts/adaptive-hints-update.sh
+          sh -n components/route-engine/scripts/agh-adaptive-live.sh
+          sh -n components/policy-sync/scripts/vpn-domain-audit.sh
+          sh -n components/policy-sync/scripts/vpn-night-reconcile.sh
+          sh -n components/policy-sync/scripts/vpn-subnet-sync.sh
           unpacked_size="$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{sum+=$1} END{print sum+0}')"
           tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf "$ARTIFACT" -C "$PKGDIR" .
           package_sha="$(sha256sum "$ARTIFACT" | awk '{print $1}')"
@@ -240,7 +240,7 @@ jobs:
           routine_max_delay_seconds=86400
           minimum_updater_version=1.2.0
           EOF
-          VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" VWARD_TEST_MANIFEST="$MANIFEST" VWARD_TEST_PACKAGE="$VWARD_ARTIFACT" components/updater/vward-update.sh --dry-run
+          VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" VWARD_TEST_MANIFEST="$MANIFEST" VWARD_TEST_PACKAGE="$VWARD_ARTIFACT" components/update-engine/vward-update.sh --dry-run
           echo "UPDATER_DRY_RUN=OK"
 
       - name: Publish signed dev update

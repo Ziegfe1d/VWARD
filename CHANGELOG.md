@@ -13,6 +13,10 @@
   завершения VWARD Console.
 - В актуальных исходных комментариях старое имя Smart Updater заменено на каноническое
   VWARD Update Engine без изменения runtime-логики.
+- Source-дерево напрямую переведено на канонические каталоги Route Engine, Route
+  Reconciler, Route Tools, Tunnel Guard, WAN Guard, Policy Sync, Runtime и Update Engine.
+- Legacy component IDs удалены из Dev registry и schema; переходные aliases и wrappers
+  в Dev не создаются.
 
 ## 0.1.7-beta: критический переходный hotfix VWARD Console
 

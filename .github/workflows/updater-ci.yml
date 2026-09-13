@@ -7,7 +7,7 @@ on:
       - dev
   pull_request:
     paths:
-      - 'components/updater/**'
+      - 'components/update-engine/**'
       - 'config/updater/**'
       - 'config/components/**'
       - 'tests/updater/**'
@@ -46,7 +46,7 @@ jobs:
       - name: Shell syntax
         run: |
           set -eu
-          for f in components/updater/*.sh tests/updater/*.sh; do
+          for f in components/update-engine/*.sh tests/updater/*.sh; do
             sh -n "$f"
             dash -n "$f"
           done
@@ -54,7 +54,7 @@ jobs:
       - name: Executable modes
         run: |
           set -eu
-          for f in components/updater/*.sh tests/updater/*.sh; do
+          for f in components/update-engine/*.sh tests/updater/*.sh; do
             mode=$(git ls-files -s "$f" | awk '{print $1}')
             test "$mode" = 100755
           done

@@ -100,7 +100,7 @@ ip -4 route show
 
 ## 6. Bootstrap VWARD Update Engine
 
-`components/updater/install-smart-updater.sh` - production bootstrap только движка
+`components/update-engine/install-smart-updater.sh` - production bootstrap только движка
 обновлений. Он проверяет зависимости и control plane, скачивает файлы по HTTPS,
 сверяет `SHA256SUMS`, устанавливает pinned Ed25519 public key, создаёт backup,
 активирует slot и добавляет одну помеченную cron-строку.

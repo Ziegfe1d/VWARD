@@ -4,8 +4,8 @@
 *.lock
 *.out
 *.rc
-runtime/
-state/
+/runtime/
+/state/
 
 # Backups and temporary files
 backups/
