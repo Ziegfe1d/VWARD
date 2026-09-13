@@ -37,6 +37,15 @@ if missing_logs:
 if len(log_tabs) != 8:
     fail(f"ожидалось 8 вкладок журналов, найдено {len(log_tabs)}")
 
+for marker in ("helpBtn", "helpPanel", "logSearch", "logRefresh", "logAuto", "logCopy", "logSave", "logShare"):
+    if f'id="{marker}"' not in html:
+        fail(f"нет элемента Console: {marker}")
+
+if "navigator.clipboard.writeText" not in html or "fallbackCopy" not in html:
+    fail("копирование журнала не имеет Clipboard/fallback binding")
+if "navigator.share" not in html:
+    fail("поделиться журналом не связано с Web Share API")
+
 for name in ("overview", "settings", "logs"):
     desktop = len(re.findall(rf'<button[^>]+data-section="{name}"', html))
     if desktop < 1:
