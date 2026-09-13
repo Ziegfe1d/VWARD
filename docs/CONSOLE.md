@@ -49,3 +49,33 @@ API не принимает произвольные shell-команды, paths
 
 Source tests не заменяют проверку установленной Console. Если source и runtime hashes
 различаются, сначала нужно определить установленный package/slot и причину расхождения.
+
+## Control plane: безопасные ручные операции
+
+Console source поддерживает четыре явных API-направления: `diagnostics`, `route-probe`,
+`control` и `update-control`. Ни одно из них не принимает shell-команду, path или `ndmc`
+строку от браузера. `route-probe` принимает только валидированный домен или IPv4 и
+сопоставляет его с локальными каталогами/state и фиксированным снимком running-config.
+
+Разрешённые component actions: обновление доменных hints, запуск Route Reconciler,
+обновление/сверка Policy Sync и health probe Tunnel Guard. Операции, способные менять
+маршруты, требуют отдельного server-side confirmation token. Одновременно выполняется
+только одна Console action; при активной updater transaction component actions
+блокируются. Результат и RC попадают в Console audit log без секретов.
+
+VWARD Update Engine вызывается только штатными флагами `--check`, `--apply-pending`,
+`--rollback` и `--recover`. Apply/retry/rollback/recovery требуют отдельного
+подтверждения. Signature/trust/sequence проверки остаются внутри Update Engine и через
+Console не отключаются.
+
+VWARD WAN Guard намеренно не запускается принудительно из Console под видом простой
+проверки: текущий рабочий цикл способен инициировать recovery. Кнопка «Проверить WAN»
+обновляет только read-only RCI/status. Это ограничение сохраняется до появления
+отдельного доказуемо безопасного WAN probe/actuator path.
+
+## Диагностика
+
+`diagnostics` выполняет только фиксированный набор read-only проверок: `/opt`, основные
+зависимости, `crond`, supervisor, AdGuard Home, Adaptive Live, WAN, WireGuard, lighttpd,
+активный Update Engine slot и update config. Ответ возвращает `PASS/WARN/FAIL/UNKNOWN`
+с короткой причиной. Произвольные команды и произвольные файлы недоступны.

@@ -49,10 +49,23 @@ if "navigator.clipboard.writeText" not in html or "fallbackCopy" not in html:
 if "navigator.share" not in html:
     fail("поделиться журналом не связано с Web Share API")
 
-if 'action=route-data' not in html or 'route-data)' not in api:
+if 'action=route-data' not in html or 'route-data' not in api:
     fail("Route Engine read-only data endpoint is not bound")
 if 'id="routeDataRefresh"' not in html:
     fail("Route Engine data refresh control is missing")
+
+
+for marker in ("runDiagnostics", "routeProbeBtn", "routeProbeValue", "tunnelHealthBtn", "updateActionResult", "routeActionResult"):
+    if f'id="{marker}"' not in html:
+        fail(f"нет control-plane элемента: {marker}")
+for action in ("diagnostics", "route-probe", "control", "update-control"):
+    if action not in api:
+        fail(f"нет API action: {action}")
+if "action=exec" in api or "action=file" in api or "action=ndmc" in api:
+    fail("обнаружен запрещённый generic control API")
+for token in ("ROUTE_RECONCILE", "POLICY_REFRESH", "POLICY_RECONCILE", "APPLY_UPDATE", "ROLLBACK_UPDATE", "RECOVER_UPDATE"):
+    if token not in api:
+        fail(f"нет server-side confirmation token: {token}")
 
 node = shutil.which("node")
 if node:

@@ -61,7 +61,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|route-data) ;;
+    status|ping|log|settings|route-data|diagnostics|route-probe|control|update-control) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -69,11 +69,16 @@ case "$ACTION" in
         ;;
 esac
 
-if [ "${REQUEST_METHOD:-GET}" = POST ] && [ "$ACTION" != settings ]; then
-    echo 'Status: 405 Method Not Allowed'
-    header_json
-    echo '{"ok":false,"error":"method_not_allowed"}'
-    exit 0
+if [ "${REQUEST_METHOD:-GET}" = POST ]; then
+    case "$ACTION" in
+        settings|control|update-control) ;;
+        *)
+            echo 'Status: 405 Method Not Allowed'
+            header_json
+            echo '{"ok":false,"error":"method_not_allowed"}'
+            exit 0
+            ;;
+    esac
 fi
 
 if [ "$ACTION" = "settings" ]; then
@@ -99,6 +104,12 @@ if [ "$ACTION" = "settings" ]; then
         exit 0
     }
     BODY=$(dd bs=1 count="$LENGTH" 2>/dev/null)
+
+    UNKNOWN_KEYS="$(printf '%s\n' "$BODY" | tr '&' '\n' | cut -d= -f1 | awk '$0!="auto_apply" && $0!="auto_critical" && $0!="auto_important" && $0!="auto_routine" {print; exit}')"
+    [ -z "$UNKNOWN_KEYS" ] || {
+        echo '{"ok":false,"error":"unknown_parameter"}'
+        exit 0
+    }
 
     value()
     {
@@ -280,6 +291,291 @@ if [ "$ACTION" = "route-data" ]; then
             last_sync:$ip_last
         }
       }'
+    exit 0
+fi
+
+
+if [ "$ACTION" = "diagnostics" ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || {
+        echo '{"ok":false,"error":"method_not_allowed"}'
+        exit 0
+    }
+
+    diag_status()
+    {
+        if "$@" >/dev/null 2>&1; then echo PASS; else echo FAIL; fi
+    }
+
+    OPT_STATUS="$(diag_status df -Pk /opt)"
+    JQ_STATUS="$(diag_status command -v "$JQ")"
+    CURL_STATUS="$(diag_status command -v "$CURL")"
+    TCPDUMP_STATUS="$(diag_status command -v tcpdump)"
+    LIGHTTPD_STATUS="$(diag_status command -v lighttpd)"
+    CROND_STATUS=FAIL
+    SUPERVISOR_STATUS=FAIL
+    ADGUARD_STATUS=FAIL
+    ADAPTIVE_STATUS=FAIL
+    ps 2>/dev/null | grep -q '[c]rond -b' && CROND_STATUS=PASS
+    ps 2>/dev/null | grep -q '[c]rond-supervisor.sh' && SUPERVISOR_STATUS=PASS
+    ps 2>/dev/null | grep -q '[A]dGuardHome' && ADGUARD_STATUS=PASS
+    ps 2>/dev/null | grep -q '[a]gh-adaptive-live.sh' && ADAPTIVE_STATUS=PASS
+
+    UPDATE_STATUS=FAIL
+    [ -x /opt/share/vward/updater/current/vward-update.sh ] && UPDATE_STATUS=PASS
+    CONFIG_STATUS=FAIL
+    [ -r /opt/etc/vward/update.conf ] && CONFIG_STATUS=PASS
+    CGI_STATUS=PASS
+
+    WAN_JSON="$(fetch_json 'http://127.0.0.1:79/rci/show/internet/status')"
+    WAN_STATUS="$(printf '%s\\n' "$WAN_JSON" | "$JQ" -r 'if (.internet // .connected // false) == true then "PASS" else "WARN" end' 2>/dev/null)"
+    case "$WAN_STATUS" in PASS|WARN) ;; *) WAN_STATUS=UNKNOWN ;; esac
+
+    IF_JSON="$(fetch_json 'http://127.0.0.1:79/rci/show/interface')"
+    WG_COUNT="$(printf '%s\\n' "$IF_JSON" | "$JQ" -r '[keys[] | select(test("^Wireguard[0-9]+$"))] | length' 2>/dev/null)"
+    case "$WG_COUNT" in ''|*[!0-9]*) WG_COUNT=0 ;; esac
+    [ "$WG_COUNT" -gt 0 ] && WG_STATUS=PASS || WG_STATUS=WARN
+
+    OPT_FREE="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $4+0}')"
+    [ -n "$OPT_FREE" ] || OPT_FREE=0
+    LAST_WAN_RC="$(cat /tmp/wan-guardian.cron.rc 2>/dev/null)"
+    LAST_WG_RC="$(cat /tmp/wg-health-chain.cron.rc 2>/dev/null)"
+    LAST_ROUTE_RC="$(cat /tmp/adaptive-auto-maint.cron.rc 2>/dev/null)"
+
+    "$JQ" -n \
+      --arg opt "$OPT_STATUS" --arg jq "$JQ_STATUS" --arg curl "$CURL_STATUS" \
+      --arg tcpdump "$TCPDUMP_STATUS" --arg lighttpd "$LIGHTTPD_STATUS" \
+      --arg crond "$CROND_STATUS" --arg supervisor "$SUPERVISOR_STATUS" \
+      --arg adguard "$ADGUARD_STATUS" --arg adaptive "$ADAPTIVE_STATUS" \
+      --arg updater "$UPDATE_STATUS" --arg config "$CONFIG_STATUS" --arg cgi "$CGI_STATUS" \
+      --arg wan "$WAN_STATUS" --arg wg "$WG_STATUS" \
+      --arg wan_rc "$LAST_WAN_RC" --arg wg_rc "$LAST_WG_RC" --arg route_rc "$LAST_ROUTE_RC" \
+      --argjson wg_count "$WG_COUNT" --argjson opt_free "$OPT_FREE" \
+      '{ok:true,checks:[
+        {id:"console-api",component:"console",label:"Console API",status:$cgi,detail:"CGI отвечает"},
+        {id:"opt",component:"runtime",label:"Хранилище /opt",status:$opt,detail:("Свободно КБ: "+($opt_free|tostring))},
+        {id:"jq",component:"runtime",label:"jq",status:$jq,detail:"JSON обработчик"},
+        {id:"curl",component:"runtime",label:"curl",status:$curl,detail:"HTTP клиент"},
+        {id:"tcpdump",component:"route-engine",label:"tcpdump",status:$tcpdump,detail:"Наблюдение DNS"},
+        {id:"lighttpd",component:"console",label:"lighttpd",status:$lighttpd,detail:"Локальный web server"},
+        {id:"crond",component:"runtime",label:"crond",status:$crond,detail:("Последний WAN RC: "+$wan_rc)},
+        {id:"supervisor",component:"runtime",label:"VWARD Runtime supervisor",status:$supervisor,detail:"Контроль crond"},
+        {id:"adguard",component:"route-engine",label:"AdGuard Home",status:$adguard,detail:"DNS service"},
+        {id:"adaptive",component:"route-engine",label:"Adaptive Live",status:$adaptive,detail:("Последний route RC: "+$route_rc)},
+        {id:"wan",component:"wan-guard",label:"WAN",status:$wan,detail:"Read-only RCI probe"},
+        {id:"wg",component:"tunnel-guard",label:"WireGuard",status:$wg,detail:("Найдено туннелей: "+($wg_count|tostring)+"; cron RC: "+$wg_rc)},
+        {id:"updater",component:"update-engine",label:"VWARD Update Engine",status:$updater,detail:"Активный updater slot"},
+        {id:"update-config",component:"update-engine",label:"Update config",status:$config,detail:"Конфигурация доступна для чтения"}
+      ]}'
+    exit 0
+fi
+
+if [ "$ACTION" = "route-probe" ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || {
+        echo '{"ok":false,"error":"method_not_allowed"}'
+        exit 0
+    }
+
+    TYPE="$(qget type)"
+    VALUE="$(qget value | tr '[:upper:]' '[:lower:]')"
+    [ "${#VALUE}" -le 253 ] || {
+        echo '{"ok":false,"error":"value_too_long"}'
+        exit 0
+    }
+
+    HINT_CATALOG=/opt/etc/adaptive-route/hints-catalog.tsv
+    ADAPTIVE_PERSIST=/opt/var/lib/adaptive-live/adaptive-persist.txt
+    IP_CATALOG=/opt/var/lib/vpn-subnets/catalog
+    IP_ACTIVE=/opt/var/lib/vpn-subnets/active.categories
+    IP_OWNED=/opt/var/lib/vpn-subnets/owned.dynamic.routes
+    RUNCFG=/tmp/vward-console-route-probe.$$
+    ndmc -c "show running-config" 2>/dev/null | tr -d '\r' > "$RUNCFG"
+    trap 'rm -f "$RUNCFG"' EXIT INT TERM
+
+    valid_ipv4()
+    {
+        printf '%s\\n' "$1" | awk -F. 'NF==4 {for(i=1;i<=4;i++){if($i !~ /^[0-9]+$/ || $i<0 || $i>255) exit 1} exit 0} {exit 1}'
+    }
+
+    ip_matches_file()
+    {
+        IP="$1" FILE="$2" awk '
+        function ipn(s,a){split(s,a,"."); return ((a[1]*256+a[2])*256+a[3])*256+a[4]}
+        BEGIN{target=ipn(ENVIRON["IP"])}
+        {n=split($0,b,"/"); if(n!=2) next; net=ipn(b[1]); p=b[2]+0; if(p<0||p>32) next; size=2^(32-p); base=int(net/size)*size; if(target>=base && target<base+size){print $0; exit}}
+        ' "$FILE" 2>/dev/null
+    }
+
+    prefix_mask()
+    {
+        P="$1"
+        awk -v p="$P" 'BEGIN{for(i=1;i<=4;i++){bits=p-(i-1)*8;if(bits>=8)o=255;else if(bits<=0)o=0;else o=256-2^(8-bits);printf "%s%d",(i>1?".":""),o}print ""}'
+    }
+
+    case "$TYPE" in
+        domain)
+            case "$VALUE" in
+                ''|.*|*.|*..*|*[!a-z0-9.-]*)
+                    echo '{"ok":false,"error":"invalid_domain"}'
+                    exit 0
+                    ;;
+            esac
+
+            DNS_OUT="$(/opt/bin/adaptive-resolve4.sh "$VALUE" 2>/dev/null)"
+            IPS="$(printf '%s\\n' "$DNS_OUT" | awk '/^Address [0-9]+:/ && $3 ~ /^[0-9]+\\./ {print $3}' | sort -u | head -n 12)"
+            IPS_JSON="$(printf '%s\\n' "$IPS" | "$JQ" -Rsc 'split("\\n")|map(select(length>0))')"
+
+            HINTS_JSON="$(
+                if [ -r "$HINT_CATALOG" ]; then
+                    awk -F'|' -v h="$VALUE" '
+                    NF>=3 {d=tolower($1); if(h==d || (length(h)>length(d) && substr(h,length(h)-length(d))=="." d)) print $2 "|" $3 "|" $1}' "$HINT_CATALOG" |
+                    sort -u | head -n 40 | "$JQ" -Rsc 'split("\\n")|map(select(length>0)|split("|")|{source:.[0],category:.[1],match:.[2]})'
+                else echo '[]'; fi
+            )"
+
+            ADAPTIVE=false
+            [ -r "$ADAPTIVE_PERSIST" ] && grep -Fxiq "$VALUE" "$ADAPTIVE_PERSIST" && ADAPTIVE=true
+
+            GROUPS="$(awk -v h="$VALUE" '
+                /^object-group fqdn /{g=$3;next}
+                /^!/{g="";next}
+                g!="" && $1=="include" && tolower($2)==h {print g}
+            ' "$RUNCFG" | sort -u)"
+            GROUPS_JSON="$(printf '%s\\n' "$GROUPS" | "$JQ" -Rsc 'split("\\n")|map(select(length>0))')"
+            ROUTES_JSON="$(
+                printf '%s\\n' "$GROUPS" | while IFS= read -r G; do
+                    [ -n "$G" ] || continue
+                    awk -v g="$G" '$1=="route" && $2=="object-group" && $3==g {print g "|" $4}' "$RUNCFG"
+                done | sort -u | "$JQ" -Rsc 'split("\\n")|map(select(length>0)|split("|")|{group:.[0],interface:.[1]})'
+            )"
+
+            "$JQ" -n --arg type domain --arg value "$VALUE" \
+              --argjson ips "$IPS_JSON" --argjson hints "$HINTS_JSON" \
+              --argjson adaptive "$ADAPTIVE" --argjson groups "$GROUPS_JSON" --argjson routes "$ROUTES_JSON" \
+              '{ok:true,type:$type,value:$value,dns:{ipv4:$ips},hints:$hints,adaptive_auto:$adaptive,groups:$groups,routes:$routes}'
+            ;;
+        ip)
+            valid_ipv4 "$VALUE" || {
+                echo '{"ok":false,"error":"invalid_ipv4"}'
+                exit 0
+            }
+
+            MATCHES_FILE=/tmp/vward-console-ip-matches.$$
+            : > "$MATCHES_FILE"
+            if [ -r "$IP_ACTIVE" ]; then
+                while IFS= read -r CAT; do
+                    [ -n "$CAT" ] || continue
+                    FILE="$IP_CATALOG/$CAT.cidr"
+                    [ -r "$FILE" ] || continue
+                    CIDR="$(ip_matches_file "$VALUE" "$FILE")"
+                    [ -n "$CIDR" ] && printf '%s|%s\\n' "$CAT" "$CIDR" >> "$MATCHES_FILE"
+                done < "$IP_ACTIVE"
+            fi
+            MATCHES_JSON="$(head -n 40 "$MATCHES_FILE" | "$JQ" -Rsc 'split("\\n")|map(select(length>0)|split("|")|{category:.[0],cidr:.[1]})')"
+
+            OWNED_CIDR=""
+            if [ -r "$IP_OWNED" ]; then OWNED_CIDR="$(ip_matches_file "$VALUE" "$IP_OWNED")"; fi
+            CONFIGURED=false
+            ROUTE_INTERFACE=""
+            if [ -n "$OWNED_CIDR" ]; then
+                NET="${OWNED_CIDR%/*}"; PREFIX="${OWNED_CIDR#*/}"; MASK="$(prefix_mask "$PREFIX")"
+                if grep -Fqx "ip route $NET $MASK Wireguard1 auto" "$RUNCFG"; then
+                    CONFIGURED=true
+                    ROUTE_INTERFACE=Wireguard1
+                fi
+            fi
+            rm -f "$MATCHES_FILE"
+
+            "$JQ" -n --arg type ip --arg value "$VALUE" --arg owned "$OWNED_CIDR" --arg iface "$ROUTE_INTERFACE" \
+              --argjson matches "$MATCHES_JSON" --argjson configured "$CONFIGURED" \
+              '{ok:true,type:$type,value:$value,policy_matches:$matches,owned_cidr:$owned,configured_route:$configured,interface:$iface}'
+            ;;
+        *)
+            echo '{"ok":false,"error":"invalid_probe_type"}'
+            ;;
+    esac
+    exit 0
+fi
+
+if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = POST ] || {
+        echo '{"ok":false,"error":"method_not_allowed"}'
+        exit 0
+    }
+    [ "${HTTP_X_VWARD_REQUEST:-}" = console ] || {
+        echo '{"ok":false,"error":"request_guard_failed"}'
+        exit 0
+    }
+
+    LENGTH=${CONTENT_LENGTH:-0}
+    case "$LENGTH" in ''|*[!0-9]*) LENGTH=0 ;; esac
+    [ "$LENGTH" -gt 0 ] && [ "$LENGTH" -le 256 ] || {
+        echo '{"ok":false,"error":"invalid_body"}'
+        exit 0
+    }
+    BODY=$(dd bs=1 count="$LENGTH" 2>/dev/null)
+    UNKNOWN_KEYS="$(printf '%s\\n' "$BODY" | tr '&' '\\n' | cut -d= -f1 | awk '$0!="op" && $0!="confirm" {print; exit}')"
+    [ -z "$UNKNOWN_KEYS" ] || {
+        echo '{"ok":false,"error":"unknown_parameter"}'
+        exit 0
+    }
+    cvalue(){ printf '%s\\n' "$BODY" | tr '&' '\\n' | awk -F= -v k="$1" '$1==k{print $2;exit}'; }
+    OP="$(cvalue op)"
+    CONFIRM="$(cvalue confirm)"
+
+    LOCK=/tmp/vward-console-control.lock
+    if ! mkdir "$LOCK" 2>/dev/null; then
+        echo '{"ok":false,"error":"control_busy"}'
+        exit 0
+    fi
+    trap 'rm -rf "$LOCK"' EXIT INT TERM
+
+    if [ "$ACTION" = control ] && [ -e /opt/var/run/vward/updater.lock ]; then
+        echo '{"ok":false,"error":"updater_busy"}'
+        exit 0
+    fi
+
+    CMD=""; ARG=""; REQUIRED=""; LABEL=""
+    if [ "$ACTION" = control ]; then
+        case "$OP" in
+            refresh-hints) CMD=/opt/bin/adaptive-hints-update.sh; LABEL=refresh-hints ;;
+            route-reconcile) CMD=/opt/bin/adaptive-auto-maint.sh; REQUIRED=ROUTE_RECONCILE; LABEL=route-reconcile ;;
+            policy-refresh) CMD=/opt/bin/vpn-subnet-sync.sh; ARG=sync; REQUIRED=POLICY_REFRESH; LABEL=policy-refresh ;;
+            policy-reconcile) CMD=/opt/bin/vpn-subnet-sync.sh; ARG=--reconcile; REQUIRED=POLICY_RECONCILE; LABEL=policy-reconcile ;;
+            tunnel-health) CMD=/opt/bin/wg-health-watch.sh; LABEL=tunnel-health ;;
+            *) echo '{"ok":false,"error":"unknown_control_action"}'; exit 0 ;;
+        esac
+    else
+        CMD=/opt/share/vward/updater/current/vward-update.sh
+        case "$OP" in
+            check) ARG=--check; LABEL=update-check ;;
+            apply) ARG=--apply-pending; REQUIRED=APPLY_UPDATE; LABEL=update-apply ;;
+            retry) ARG=--apply-pending; REQUIRED=RETRY_UPDATE; LABEL=update-retry ;;
+            rollback) ARG=--rollback; REQUIRED=ROLLBACK_UPDATE; LABEL=update-rollback ;;
+            recover) ARG=--recover; REQUIRED=RECOVER_UPDATE; LABEL=update-recover ;;
+            *) echo '{"ok":false,"error":"unknown_update_action"}'; exit 0 ;;
+        esac
+    fi
+
+    [ -x "$CMD" ] || {
+        echo '{"ok":false,"error":"action_unavailable"}'
+        exit 0
+    }
+    [ -z "$REQUIRED" ] || [ "$CONFIRM" = "$REQUIRED" ] || {
+        echo '{"ok":false,"error":"confirmation_required"}'
+        exit 0
+    }
+
+    START="$(date '+%Y-%m-%dT%H:%M:%S%z')"
+    if [ -n "$ARG" ]; then OUT="$("$CMD" "$ARG" 2>&1)"; else OUT="$("$CMD" 2>&1)"; fi
+    RC=$?
+    SAFE_OUT="$(printf '%s\\n' "$OUT" | tail -n 120)"
+    printf '%s|CONSOLE_ACTION|action=%s rc=%s\\n' "$START" "$LABEL" "$RC" >> /opt/var/log/vward/console-audit.log
+    OUT_JSON="$(printf '%s' "$SAFE_OUT" | "$JQ" -Rs .)"
+    if [ "$RC" -eq 0 ]; then OK=true; else OK=false; fi
+    printf '{"ok":%s,"action":"%s","rc":%s,"output":%s}\\n' "$OK" "$LABEL" "$RC" "$OUT_JSON"
     exit 0
 fi
 
