@@ -2,8 +2,8 @@
 PATH="/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
-JQ=/opt/bin/jq
-CURL=/opt/bin/curl
+JQ=${JQ:-/opt/bin/jq}
+CURL=${CURL:-/opt/bin/curl}
 
 VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 VWARD_RCI_BASE=http://127.0.0.1:79/rci
@@ -71,7 +71,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|security-data|route-data|diagnostics|route-probe|update-data|control|update-control) ;;
+    status|ping|log|settings|settings-data|security-data|route-data|diagnostics|route-probe|update-data|control|update-control) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -104,6 +104,74 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             exit 0
             ;;
     esac
+fi
+
+if [ "$ACTION" = "settings-data" ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || {
+        echo '{"ok":false,"error":"method_not_allowed"}'
+        exit 0
+    }
+    SETTINGS_REGISTRY=${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}
+    UPDATE_CONFIG=${VWARD_UPDATE_CONFIG:-/opt/etc/vward/update.conf}
+    [ -r "$SETTINGS_REGISTRY" ] || {
+        echo '{"ok":false,"error":"settings_registry_unavailable"}'
+        exit 0
+    }
+    setting_value()
+    {
+        [ -r "$UPDATE_CONFIG" ] || return 0
+        awk -F= -v key="$1" '$1==key {print substr($0,index($0,"=")+1); exit}' "$UPDATE_CONFIG"
+    }
+    SETTINGS_AUTO_APPLY=$(setting_value auto_apply)
+    SETTINGS_AUTO_CRITICAL=$(setting_value auto_critical)
+    SETTINGS_AUTO_IMPORTANT=$(setting_value auto_important)
+    SETTINGS_AUTO_ROUTINE=$(setting_value auto_routine)
+    "$JQ" -c \
+      --argjson profile_ready "$PROFILE_READY" \
+      --arg lan_address "${VWARD_LAN_ADDRESS:-}" \
+      --arg lan_subnet "${VWARD_LAN_SUBNET:-}" \
+      --arg dns_server "${VWARD_DNS_SERVER:-}" \
+      --arg probe_dns "${VWARD_PROBE_DNS:-}" \
+      --arg adguard_address "${VWARD_ADGUARD_ADDRESS:-}" \
+      --arg adguard_port "${VWARD_ADGUARD_PORT:-}" \
+      --arg wan_device "${VWARD_WAN_DEVICE:-}" \
+      --arg wan_interface "${VWARD_WAN_INTERFACE:-}" \
+      --arg tunnel_device "${VWARD_TUNNEL_DEVICE:-}" \
+      --arg tunnel_interface "${VWARD_TUNNEL_INTERFACE:-}" \
+      --arg policy_group "${VWARD_POLICY_GROUP:-}" \
+      --arg console_port "${VWARD_CONSOLE_PORT:-}" \
+      --arg rci_base "${VWARD_RCI_BASE:-}" \
+      --arg auto_apply "$SETTINGS_AUTO_APPLY" \
+      --arg auto_critical "$SETTINGS_AUTO_CRITICAL" \
+      --arg auto_important "$SETTINGS_AUTO_IMPORTANT" \
+      --arg auto_routine "$SETTINGS_AUTO_ROUTINE" '
+        def raw_value:
+          if .key=="VWARD_LAN_ADDRESS" then $lan_address
+          elif .key=="VWARD_LAN_SUBNET" then $lan_subnet
+          elif .key=="VWARD_DNS_SERVER" then $dns_server
+          elif .key=="VWARD_PROBE_DNS" then $probe_dns
+          elif .key=="VWARD_ADGUARD_ADDRESS" then $adguard_address
+          elif .key=="VWARD_ADGUARD_PORT" then $adguard_port
+          elif .key=="VWARD_WAN_DEVICE" then $wan_device
+          elif .key=="VWARD_WAN_INTERFACE" then $wan_interface
+          elif .key=="VWARD_TUNNEL_DEVICE" then $tunnel_device
+          elif .key=="VWARD_TUNNEL_INTERFACE" then $tunnel_interface
+          elif .key=="VWARD_POLICY_GROUP" then $policy_group
+          elif .key=="VWARD_CONSOLE_PORT" then $console_port
+          elif .key=="VWARD_RCI_BASE" then $rci_base
+          elif .key=="auto_apply" then $auto_apply
+          elif .key=="auto_critical" then $auto_critical
+          elif .key=="auto_important" then $auto_important
+          elif .key=="auto_routine" then $auto_routine
+          else "" end;
+        def typed($v): if .type=="boolean" then ($v=="1") elif .type=="integer" and ($v|test("^[0-9]+$")) then ($v|tonumber) else $v end;
+        {ok:true,schema:.schema,profile_ready:$profile_ready,authentication_required_for_device_write:true,
+         settings:[.settings[] | select(.secret==false) | . as $item | (raw_value) as $raw |
+           . + {current:typed($raw),effective:typed($raw),discovered:null,
+                validation:(if $raw=="" then "unknown" elif .source=="device.conf" and ($profile_ready|not) then "unverified" else "valid" end)}]}
+      ' "$SETTINGS_REGISTRY" 2>/dev/null || echo '{"ok":false,"error":"settings_registry_invalid"}'
+    exit 0
 fi
 
 if [ "$ACTION" = "security-data" ]; then

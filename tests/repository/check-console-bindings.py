@@ -77,6 +77,11 @@ for marker in ("settingsSearch", "prefTheme", "prefRefresh", "prefLogInterval", 
         fail(f"нет settings/update-state элемента: {marker}")
 if 'action=update-data' not in js or 'update-data' not in api:
     fail("Update Engine action availability endpoint is not bound")
+if 'action=settings-data' not in js or 'settings-data' not in api:
+    fail("unified settings registry endpoint is not bound")
+for marker in ("settingsCatalog", "settingsCatalogPill"):
+    if f'id="{marker}"' not in html:
+        fail(f"нет элемента единого каталога настроек: {marker}")
 if 'state_action_not_allowed' not in api or 'rollback_unavailable' not in api or 'recovery_not_required' not in api:
     fail("Update Engine server-side state preconditions are incomplete")
 if "count='+encodeURIComponent(prefs.logCount)" not in js:

@@ -35,7 +35,7 @@ case "$profile" in
         required="$VU_ROOT_PREFIX/opt/bin/vward-cron-supervisor.sh $VU_ROOT_PREFIX/opt/etc/init.d/S91vward-route-engine"
         ;;
     console)
-        required="$VU_ROOT_PREFIX/opt/share/vward/console/www/index.html $VU_ROOT_PREFIX/opt/share/vward/console/www/assets/vward-console.css $VU_ROOT_PREFIX/opt/share/vward/console/www/assets/vward-console.js $VU_ROOT_PREFIX/opt/share/vward/console/www/cgi-bin/api.cgi"
+        required="$VU_ROOT_PREFIX/opt/share/vward/settings-registry.json $VU_ROOT_PREFIX/opt/share/vward/console/www/index.html $VU_ROOT_PREFIX/opt/share/vward/console/www/assets/vward-console.css $VU_ROOT_PREFIX/opt/share/vward/console/www/assets/vward-console.js $VU_ROOT_PREFIX/opt/share/vward/console/www/cgi-bin/api.cgi"
         ;;
     *) vu_die "$VU_CONFIG_ERROR" "Unknown health profile: $profile" ;;
 esac

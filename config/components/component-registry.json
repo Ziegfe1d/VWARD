@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "VWARD Platform",
-  "platform_version": "0.2.0-dev.4",
+  "platform_version": "0.2.0-dev.5",
   "component_version_policy": "platform-release",
   "components": [
     {
@@ -114,7 +114,8 @@
         "/opt/share/vward/console/www/index.html",
         "/opt/share/vward/console/www/assets/vward-console.css",
         "/opt/share/vward/console/www/assets/vward-console.js",
-        "/opt/share/vward/console/www/cgi-bin/api.cgi"
+        "/opt/share/vward/console/www/cgi-bin/api.cgi",
+        "/opt/share/vward/settings-registry.json"
       ]
     },
     {

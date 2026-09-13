@@ -25,6 +25,7 @@ metadata.
 | `web/assets/vward-console.css` | `/opt/share/vward/console/www/assets/vward-console.css` | 0644 |
 | `web/assets/vward-console.js` | `/opt/share/vward/console/www/assets/vward-console.js` | 0644 |
 | `web/cgi-bin/api.cgi` | `/opt/share/vward/console/www/cgi-bin/api.cgi` | 0755 |
+| `config/settings/settings-registry.json` | `/opt/share/vward/settings-registry.json` | 0644 |
 | `config/route-engine/*.conf.example` | начальный local config без `.example` | 0644 |
 | `config/cron/root.crontab` | VWARD entries в root crontab | 0600 |
 | `config/device.conf.example` | `/opt/etc/vward/device.conf` при неоднозначном discovery | 0600 |

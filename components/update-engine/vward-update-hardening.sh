@@ -60,7 +60,7 @@ vu_component_dependencies_ready() {
 vu_target_mode_allowed() {
     target=$1 mode=$2
     case "$target" in
-        /opt/share/vward/VERSION|/opt/etc/vward/console/lighttpd.conf|/opt/share/vward/console/www/index.html|/opt/share/vward/console/www/assets/vward-console.css|/opt/share/vward/console/www/assets/vward-console.js)
+        /opt/share/vward/VERSION|/opt/share/vward/settings-registry.json|/opt/etc/vward/console/lighttpd.conf|/opt/share/vward/console/www/index.html|/opt/share/vward/console/www/assets/vward-console.css|/opt/share/vward/console/www/assets/vward-console.js)
             [ "$mode" = 0644 ] ;;
         *) [ "$mode" = 0755 ] ;;
     esac

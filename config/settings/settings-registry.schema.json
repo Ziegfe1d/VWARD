@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VWARD Settings Registry",
+  "type": "object",
+  "required": ["schema", "settings"],
+  "properties": {
+    "schema": {"const": 1},
+    "settings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "component", "section", "label_ru", "description_ru", "source", "key", "type", "editable", "secret", "restart_requirement", "risk"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9_.-]+$"},
+          "component": {"type": "string"},
+          "section": {"type": "string"},
+          "label_ru": {"type": "string"},
+          "description_ru": {"type": "string"},
+          "source": {"enum": ["device.conf", "update.conf", "browser"]},
+          "key": {"type": "string", "pattern": "^[A-Za-z0-9_]+$"},
+          "type": {"enum": ["boolean", "integer", "ipv4", "cidr4", "interface", "string", "url"]},
+          "editable": {"type": "boolean"},
+          "secret": {"type": "boolean"},
+          "restart_requirement": {"enum": ["none", "component", "console-deferred"]},
+          "risk": {"enum": ["low", "medium", "high"]},
+          "allowed_values": {"type": "array"},
+          "minimum": {"type": "integer"},
+          "maximum": {"type": "integer"},
+          "read_only_reason": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

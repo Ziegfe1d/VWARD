@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0-dev.5: единый каталог настроек
+
+- Добавлен формальный Settings Registry со схемой и 17 параметрами Device Profile
+  и Update Engine.
+- Новый read-only API `settings-data` возвращает текущие и эффективные значения,
+  источник, тип, риск, требование перезапуска, validation и причину ограничения.
+- HTML-центр настроек строит единый каталог из API и группирует параметры по
+  назначению вместо дублирования статических карточек.
+- Device Profile остаётся read-only до настоящей авторизации; CSRF-заголовок не
+  выдаётся за подтверждение пользователя.
+- Registry включён в component ownership, updater allowlist, health checks и карту
+  установки; добавлен сквозной тест registry → CGI API → типизированный JSON.
+
 ## 0.2.0-dev.4: аудит Console и строгий CSP
 
 - CSS и JavaScript вынесены из HTML в локальные assets; CSP больше не конфликтует

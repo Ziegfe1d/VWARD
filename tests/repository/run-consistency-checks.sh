@@ -31,7 +31,7 @@ grep -Fq 'id="settings"' web/index.html || fail "safe settings overview missing"
 grep -Fq 'border-radius:28px' web/assets/vward-console.css || fail "floating mobile toolbar missing"
 grep -Fq 'bottom:max(10px,env(safe-area-inset-bottom))' web/assets/vward-console.css ||
     fail "mobile toolbar safe-area handling missing"
-grep -Fq "if(id==='logs')loadLogs(false);if(id==='route')loadRouteData(false);if(id==='updater')loadUpdateData(false);if(id==='security')loadSecurity(false);renderHelp();setHelp(false);window.scrollTo(0,0)" web/assets/vward-console.js ||
+grep -Fq "if(id==='logs')loadLogs(false);if(id==='route')loadRouteData(false);if(id==='updater')loadUpdateData(false);if(id==='security')loadSecurity(false);if(id==='settings')loadSettingsData(false);renderHelp();setHelp(false);window.scrollTo(0,0)" web/assets/vward-console.js ||
     fail "Logs/route-data/help must update before compatibility-safe scroll"
 
 for ID in platform-core route-engine route-reconciler route-tools tunnel-guard \
@@ -54,6 +54,7 @@ sh -n web/cgi-bin/api.cgi || fail "Console API syntax"
 python3 tests/repository/check-console-bindings.py || fail "Console bindings"
 python3 tests/repository/check-console-security.py || fail "Console security"
 python3 tests/repository/check-device-profile.py || fail "Device profile"
+python3 tests/repository/check-settings-registry.py || fail "Settings registry"
 grep -Fq 'interface $VWARD_WAN_INTERFACE down' components/wan-guard/scripts/vward-wan-guard.sh || fail "WAN down action is not profile-bound"
 grep -Fq 'interface $VWARD_WAN_INTERFACE up' components/wan-guard/scripts/vward-wan-guard.sh || fail "WAN up action is not profile-bound"
 grep -Fq '"$CAPTURE_FILTER"' components/route-engine/scripts/vward-route-engine.sh || fail "DNS capture filter is not expanded safely"
