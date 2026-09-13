@@ -26,7 +26,7 @@ jobs:
           python3 .github/scripts/console-gap-close-bootstrap-fix.py
           python3 .github/scripts/console-gap-close-once.py
           git rm .github/workflows/console-gap-close-once.yml
-          git rm .github/scripts/console-gap-close-once.py
+          git rm -f .github/scripts/console-gap-close-once.py
           git rm .github/scripts/console-gap-close-bootstrap-fix.py
 
           tmp="$RUNNER_TEMP/SHA256SUMS"
