@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Focused safety overrides for VWARD Smart Updater v1.
+# Focused safety overrides for VWARD Update Engine.
 # This file is sourced after vward-update-common-base.sh.
 
 VU_COMPONENT_STATE_FILE=$VU_STATE_DIR/components.json

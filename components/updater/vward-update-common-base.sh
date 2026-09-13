@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Shared primitives for VWARD Smart Updater v1. POSIX sh only.
+# Shared primitives for VWARD Update Engine. POSIX sh only.
 
 VU_OK=0
 VU_NO_UPDATE=10

@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Loader for VWARD Smart Updater shared primitives.
+# Loader for VWARD Update Engine shared primitives.
 # The stable core is kept separate so focused hardening overrides can remain small and auditable.
 
 if [ -n "${SELF_DIR:-}" ] && [ -r "$SELF_DIR/vward-update-common-base.sh" ]; then
