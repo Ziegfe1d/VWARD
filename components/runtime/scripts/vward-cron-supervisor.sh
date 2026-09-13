@@ -3,10 +3,10 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-PIDFILE="/opt/var/run/crond-supervisor.pid"
-LOCK="/tmp/crond-supervisor.lock"
-LOG="/opt/var/log/crond-supervisor.log"
-HEARTBEAT="/tmp/crond-supervisor.last"
+PIDFILE="/opt/var/run/vward/cron-supervisor.pid"
+LOCK="/tmp/vward-cron-supervisor.lock"
+LOG="/opt/var/log/vward-cron-supervisor.log"
+HEARTBEAT="/tmp/vward-cron-supervisor.last"
 
 INTERVAL=10
 

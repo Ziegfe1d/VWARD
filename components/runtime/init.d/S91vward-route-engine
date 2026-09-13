@@ -3,6 +3,11 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || exit 1
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
 PIDFILE="/opt/var/run/vward/route-engine.pid"
 SCRIPT="/opt/bin/vward-route-engine.sh"
 LOG="/opt/var/log/vward-route-engine.log"
@@ -61,10 +66,10 @@ adaptive_live_pids()
 adaptive_tcpdump_pids()
 {
     ps w |
-    awk '
+    awk -v subnet="$VWARD_LAN_SUBNET" -v address="$VWARD_LAN_ADDRESS" '
         $5=="tcpdump" &&
-        index($0,"src net 192.168.1.0/24") &&
-        index($0,"dst host 192.168.1.1") {
+        index($0,"src net " subnet) &&
+        index($0,"dst host " address) {
             print $1
         }
     '

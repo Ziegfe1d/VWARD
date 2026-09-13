@@ -3,11 +3,17 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
 GROUP="AdaptiveAuto"
 
-WAN="eth3"
-WG="nwg1"
-DNS="9.9.9.10"
+WAN="$VWARD_WAN_DEVICE"
+WG="$VWARD_TUNNEL_DEVICE"
+DNS="$VWARD_PROBE_DNS"
 
 STATE_DIR="/opt/var/lib/vward/route-engine"
 
@@ -300,7 +306,7 @@ agh_blocked()
 {
     H="$1"
 
-    OUT=$(nslookup "$H" 192.168.1.1 2>&1)
+    OUT=$(nslookup "$H" $VWARD_DNS_SERVER 2>&1)
 
     echo "$OUT" |
     grep -qE 'Address [0-9]+: (0\.0\.0\.0|::)$'
@@ -568,7 +574,7 @@ add_adaptive()
         save_state "$H" "AUTO_VPN"
 
         # Помогаем Keenetic сразу наполнить runtime FQDN IP.
-        nslookup "$H" 192.168.1.1 >/dev/null 2>&1
+        nslookup "$H" $VWARD_DNS_SERVER >/dev/null 2>&1
 
         echo "$(date '+%Y-%m-%d %H:%M:%S')|AUTO_VPN|$H|$GROUP" \
             >> "$EVENT_LOG"
@@ -942,7 +948,7 @@ add_hint_adaptive()
 
         save_state "$H" "AUTO_VPN"
 
-        nslookup "$H" 192.168.1.1 >/dev/null 2>&1
+        nslookup "$H" $VWARD_DNS_SERVER >/dev/null 2>&1
 
         echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_AUTO_VPN|$H|$GROUP" >> "$EVENT_LOG"
         echo "HINT_AUTO_VPN: $H"
@@ -1070,7 +1076,7 @@ while :; do
 
 
     tcpdump -ni any -l -vv \
-        'src net 192.168.1.0/24 and not src host 192.168.1.1 and dst host 192.168.1.1 and (udp dst port 53 or tcp dst port 53)' \
+        'src net $VWARD_LAN_SUBNET and not src host $VWARD_DNS_SERVER and dst host $VWARD_DNS_SERVER and (udp dst port 53 or tcp dst port 53)' \
         > "$RAW" 2>/dev/null &
 
     TCP_PID=$!

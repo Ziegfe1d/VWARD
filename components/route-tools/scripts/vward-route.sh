@@ -2,6 +2,12 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
 CONF="/opt/etc/vward/route-engine/services.conf"
 STATE_DIR="/opt/var/lib/vward/route-tools"
 LOG="/opt/var/log/vward-route.log"
@@ -79,7 +85,7 @@ check_service()
         CURRENT="ISP"
     fi
 
-    IP=$(nslookup "$HOST" 9.9.9.10 2>/dev/null | \
+    IP=$(nslookup "$HOST" "$VWARD_PROBE_DNS" 2>/dev/null | \
         awk '/^Address [0-9]+:/ && $3 ~ /^[0-9]+\./ {ip=$3} END{print ip}')
 
     RESULT="FAIL"
@@ -143,7 +149,7 @@ check_service()
 
             log "$NAME $HOST SWITCH ISP->VPN"
 
-            nslookup "$HOST" 192.168.1.1 >/dev/null 2>&1
+            nslookup "$HOST" $VWARD_DNS_SERVER >/dev/null 2>&1
         else
             ACTION="SWITCH_FAILED"
             log "$NAME $HOST ERROR ISP->VPN"

@@ -3,8 +3,14 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
 VERSION="2.0"
-WG="nwg1"
+WG="$VWARD_TUNNEL_DEVICE"
 MODE="${1:-sync}"
 
 STATE="/opt/var/lib/vward/policy-sync"

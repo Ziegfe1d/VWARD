@@ -31,7 +31,7 @@ grep -Fq 'id="settings"' web/index.html || fail "safe settings overview missing"
 grep -Fq 'border-radius:28px' web/index.html || fail "floating mobile toolbar missing"
 grep -Fq 'bottom:max(10px,env(safe-area-inset-bottom))' web/index.html ||
     fail "mobile toolbar safe-area handling missing"
-grep -Fq "if(id==='logs')loadLogs(false);if(id==='route')loadRouteData(false);if(id==='updater')loadUpdateData(false);renderHelp();setHelp(false);window.scrollTo(0,0)" web/index.html ||
+grep -Fq "if(id==='logs')loadLogs(false);if(id==='route')loadRouteData(false);if(id==='updater')loadUpdateData(false);if(id==='security')loadSecurity(false);renderHelp();setHelp(false);window.scrollTo(0,0)" web/index.html ||
     fail "Logs/route-data/help must update before compatibility-safe scroll"
 
 for ID in platform-core route-engine route-reconciler route-tools tunnel-guard \
@@ -53,6 +53,7 @@ done
 sh -n web/cgi-bin/api.cgi || fail "Console API syntax"
 python3 tests/repository/check-console-bindings.py || fail "Console bindings"
 python3 tests/repository/check-console-security.py || fail "Console security"
+python3 tests/repository/check-device-profile.py || fail "Device profile"
 python3 tests/repository/check-policy-sync-safety.py || fail "VPN audit safety"
 for SCRIPT in components/*/scripts/*.sh components/runtime/init.d/* \
     components/update-engine/*.sh tests/updater/*.sh

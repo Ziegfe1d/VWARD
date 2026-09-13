@@ -3,10 +3,16 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
 GROUP="AdaptiveAuto"
-WAN="eth3"
-WG="nwg1"
-DNS="9.9.9.10"
+WAN="$VWARD_WAN_DEVICE"
+WG="$VWARD_TUNNEL_DEVICE"
+DNS="$VWARD_PROBE_DNS"
 
 AGH_LOG="/opt/etc/AdGuardHome/data/querylog.json"
 SKIP_FILE="/opt/etc/vward/route-engine/skip-domains.conf"
@@ -337,7 +343,7 @@ while read HOST; do
 
             # Форсируем новый DNS-запрос через Keenetic,
             # чтобы FQDN-маршрут быстрее получил IP.
-            nslookup "$HOST" 192.168.1.1 >/dev/null 2>&1
+            nslookup "$HOST" $VWARD_DNS_SERVER >/dev/null 2>&1
 
             printf "%-42s ADDED_TO_%s\n" "$HOST" "$GROUP"
 

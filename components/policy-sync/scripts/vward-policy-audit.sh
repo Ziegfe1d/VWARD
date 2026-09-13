@@ -3,9 +3,15 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-WAN="eth3"
-WG="nwg1"
-DNS="9.9.9.10"
+
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
+WAN="$VWARD_WAN_DEVICE"
+WG="$VWARD_TUNNEL_DEVICE"
+DNS="$VWARD_PROBE_DNS"
 
 CONNECT_TIMEOUT=2
 MAX_TIME=3
@@ -15,9 +21,9 @@ STATE_DIR="/opt/var/lib/vward/policy-audit"
 LOG="/opt/var/log/vward-policy-audit.log"
 SUMMARY_LOG="/opt/var/log/vward-policy-audit-summary.log"
 
-RUNCFG="/tmp/vpn-audit-running.$$"
-TARGETS="/tmp/vpn-audit-targets.$$"
-CURRENT_TARGETS="/tmp/vpn-audit-current.$$"
+RUNCFG="/tmp/vward-policy-audit-running.$$"
+TARGETS="/tmp/vward-policy-audit-targets.$$"
+CURRENT_TARGETS="/tmp/vward-policy-audit-current.$$"
 CANDIDATES="$STATE_DIR/candidates.txt"
 LOCK="/tmp/vward-policy-sync.lock"
 
@@ -82,9 +88,9 @@ fi
 
 WG_GROUPS=$(
     sed -n '/^dns-proxy/,/^!/p' "$RUNCFG" |
-    awk '$1=="route" &&
+    awk -v wg="$WG" '$1=="route" &&
          $2=="object-group" &&
-         $4=="nwg1" {print $3}'
+         $4==wg {print $3}'
 )
 
 : > "$TARGETS"

@@ -6,7 +6,8 @@ CONF = (ROOT / "web/lighttpd.conf").read_text()
 API = (ROOT / "web/cgi-bin/api.cgi").read_text()
 UI = (ROOT / "web/index.html").read_text()
 
-assert 'server.bind = "192.168.1.1"' in CONF
+assert 'server.bind = "@VWARD_CONSOLE_BIND@"' in CONF
+assert 'server.port = @VWARD_CONSOLE_PORT@' in CONF
 assert 'server.bind = "0.0.0.0"' not in CONF
 assert 'server.bind = "::"' not in CONF
 assert 'dir-listing.activate = "disable"' in CONF
@@ -20,4 +21,7 @@ assert '${HTTP_X_VWARD_REQUEST:-}' in API
 assert 'application/x-www-form-urlencoded' in API
 assert "'X-VWARD-Request':'console'" in UI
 assert "Access-Control-Allow-Origin" not in API + CONF
+for marker in ('id="security"', 'id="securityRefresh"', 'action=security-data'):
+    assert marker in UI
+assert 'security-data' in API
 print("console security checks: PASS")

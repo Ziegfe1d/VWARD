@@ -1,11 +1,17 @@
 #!/bin/sh
 
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || exit 1
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
+
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
 HOST="$1"
 
-DNS1="${ADAPTIVE_DNS1:-9.9.9.10}"
+DNS1="$VWARD_PROBE_DNS"
 DNS2="${ADAPTIVE_DNS2:-149.112.112.10}"
 
 [ -n "$HOST" ] || exit 1

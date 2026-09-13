@@ -3,6 +3,12 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
 MODE="AUTO"
 
 HEALTH="/opt/var/lib/vward/tunnel-health/state"
@@ -12,8 +18,8 @@ STATE="$DIR/state"
 LOG="/opt/var/log/vward-tunnel-guard.log"
 LOCK="/tmp/vward-tunnel-guard-guard.lock"
 
-WAN_IF="eth3"
-WG_IF="nwg1"
+WAN_IF="$VWARD_WAN_DEVICE"
+WG_IF="$VWARD_TUNNEL_DEVICE"
 
 MAX_HEALTH_AGE=180
 DOWN_CONFIRM=1
@@ -110,7 +116,7 @@ if [ -f "$DISABLE_FILE" ]; then
     # Если WG был выключен именно Fail-Open автоматом,
     # при аварийном запрете автоматики сначала возвращаем его UP.
     if [ "$FAILOPEN_ACTIVE" -eq 1 ]; then
-        if ndmc -c "interface nwg1 up" >/dev/null 2>&1; then
+        if ndmc -c "interface $VWARD_TUNNEL_INTERFACE up" >/dev/null 2>&1; then
             RESTORED=1
             sleep 4
         fi
@@ -241,7 +247,7 @@ else
 
                             elif [ "$MODE" = "AUTO" ]; then
 
-                                if ndmc -c "interface nwg1 down" \
+                                if ndmc -c "interface $VWARD_TUNNEL_INTERFACE down" \
                                    >/dev/null 2>&1; then
 
                                     FAILOPEN_ACTIVE=1
@@ -288,7 +294,7 @@ else
 
                         LAST_RECOVERY_TEST=$NOW
 
-                        if ndmc -c "interface nwg1 up" \
+                        if ndmc -c "interface $VWARD_TUNNEL_INTERFACE up" \
                            >/dev/null 2>&1; then
 
                             sleep 4
@@ -304,7 +310,7 @@ else
 
                             else
 
-                                ndmc -c "interface nwg1 down" \
+                                ndmc -c "interface $VWARD_TUNNEL_INTERFACE down" \
                                     >/dev/null 2>&1
 
                                 ACTION="RECOVERY_FAILED"

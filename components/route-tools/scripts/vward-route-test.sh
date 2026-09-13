@@ -1,8 +1,14 @@
 #!/bin/sh
 
+
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
 HOST="2ip.io"
-GROUP="domain-list22"
-WAN="eth3"
+GROUP="${VWARD_POLICY_GROUP:-}"
+WAN="$VWARD_WAN_DEVICE"
 FORCE_FAIL="${FORCE_FAIL:-0}"
 
 echo "===== ADAPTIVE ROUTE TEST ====="
@@ -13,7 +19,7 @@ echo
 ndmc -c "no object-group fqdn $GROUP include $HOST" >/dev/null 2>&1
 sleep 2
 
-IP=$(nslookup "$HOST" 9.9.9.10 2>/dev/null | \
+IP=$(nslookup "$HOST" "$VWARD_PROBE_DNS" 2>/dev/null | \
 awk '/^Address [0-9]+:/ && $3 ~ /^[0-9]+\./ {ip=$3} END{print ip}')
 
 echo "$HOST -> $IP"
@@ -56,7 +62,7 @@ else
     echo "ROUTE: WireGuard"
 
     ndmc -c "object-group fqdn $GROUP include $HOST" >/dev/null 2>&1
-    nslookup "$HOST" 192.168.1.1 >/dev/null 2>&1
+    nslookup "$HOST" $VWARD_DNS_SERVER >/dev/null 2>&1
     sleep 2
 fi
 

@@ -2,14 +2,24 @@
 
 PATH="/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
 
+
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
 VERSION="0.3-recovery"
 MODE="recovery"
 
-ETH="eth3"
+ETH="$VWARD_WAN_DEVICE"
+[ -n "${VWARD_WAN_INTERFACE:-}" ] || {
+    echo "VWARD logical WAN interface is not configured" >&2
+    exit 1
+}
 BOOT_GRACE=180
 
-RCI_ISP="http://127.0.0.1:79/rci/show/interface?name=ISP"
-RCI_NET="http://127.0.0.1:79/rci/show/internet/status"
+RCI_ISP="$VWARD_RCI_BASE/show/interface?name=$VWARD_WAN_INTERFACE"
+RCI_NET="$VWARD_RCI_BASE/show/internet/status"
 
 LOG="/opt/var/log/vward-wan-guard.log"
 STATE="/tmp/vward-wan-guard.state"

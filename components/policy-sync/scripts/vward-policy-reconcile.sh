@@ -3,8 +3,14 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-WAN="eth3"
-WG="nwg1"
+
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
+WAN="$VWARD_WAN_DEVICE"
+WG="$VWARD_TUNNEL_DEVICE"
 
 AUDIT="/opt/bin/vward-policy-audit.sh"
 
@@ -333,15 +339,15 @@ fi
 # ============================================================
 # BUILD CURRENT WIREGUARD1 MEMBERSHIP
 #
-# Только группы, реально маршрутизируемые через nwg1.
+# Только группы, реально маршрутизируемые через выбранный туннель.
 # AdaptiveAuto исключён — у него собственный автомат.
 # ============================================================
 
 WG_GROUPS=$(
-    awk '
+    awk -v wg="$WG" '
     $1=="route" &&
     $2=="object-group" &&
-    $4=="nwg1" &&
+    $4==wg &&
     $3!="AdaptiveAuto" {
         print $3
     }
@@ -491,7 +497,7 @@ while IFS='|' read -r HOST CAND_GROUP CAND_STREAK CAND_CODE CAND_TIME; do
 
     # --------------------------------------------------------
     # Проверяем, что домен всё ещё реально находится хотя бы
-    # в одной nwg1 FQDN-группе.
+    # в одной туннельной FQDN-группе.
     # --------------------------------------------------------
 
     GROUPS=$(
@@ -513,7 +519,7 @@ while IFS='|' read -r HOST CAND_GROUP CAND_STREAK CAND_CODE CAND_TIME; do
     # Не трогаем домен, если AdGuard блокирует его локально.
     # --------------------------------------------------------
 
-    AGH="$(nslookup "$HOST" 192.168.1.1 2>&1)"
+    AGH="$(nslookup "$HOST" $VWARD_DNS_SERVER 2>&1)"
 
     if echo "$AGH" |
        grep -qE 'Address [0-9]+: (0\.0\.0\.0|::)$'; then
@@ -586,7 +592,7 @@ while IFS='|' read -r HOST CAND_GROUP CAND_STREAK CAND_CODE CAND_TIME; do
     # --------------------------------------------------------
     # TRANSACTION PER HOST
     #
-    # Удаляем домен из ВСЕХ nwg1-групп, иначе дубль
+    # Удаляем домен из ВСЕХ туннельных групп, иначе дубль
     # продолжит отправлять его через VPN.
     # --------------------------------------------------------
 

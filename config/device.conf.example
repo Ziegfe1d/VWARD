@@ -1,0 +1,13 @@
+# Copy to /opt/etc/vward/device.conf only when discovery is ambiguous.
+# Empty values are discovered at runtime and must resolve to exactly one candidate.
+VWARD_LAN_ADDRESS=
+VWARD_LAN_SUBNET=
+VWARD_DNS_SERVER=
+VWARD_PROBE_DNS=
+VWARD_WAN_DEVICE=
+VWARD_WAN_INTERFACE=
+VWARD_TUNNEL_DEVICE=
+VWARD_TUNNEL_INTERFACE=
+VWARD_POLICY_GROUP=
+VWARD_CONSOLE_PORT=8088
+VWARD_RCI_BASE=http://127.0.0.1:79/rci

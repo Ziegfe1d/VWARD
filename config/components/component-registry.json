@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "VWARD Platform",
-  "platform_version": "0.2.0-dev.2",
+  "platform_version": "0.2.0-dev.3",
   "component_version_policy": "platform-release",
   "components": [
     {
@@ -95,6 +95,7 @@
       "runtime_targets": [
         "/opt/bin/vward-housekeeping.sh",
         "/opt/bin/vward-cron-supervisor.sh",
+        "/opt/lib/vward/vward-device-profile.sh",
         "/opt/etc/init.d/S90crond",
         "/opt/etc/init.d/S91vward-route-engine",
         "/opt/etc/init.d/S92vward-runtime",

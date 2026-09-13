@@ -1,8 +1,25 @@
 #!/opt/bin/sh
 
 LIGHTTPD="/opt/sbin/lighttpd"
-CONF="/opt/etc/vward/console/lighttpd.conf"
+TEMPLATE="/opt/etc/vward/console/lighttpd.conf"
+CONF="/opt/var/run/vward/console-lighttpd.conf"
 PIDFILE="/opt/var/run/vward-console-lighttpd.pid"
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+
+prepare_config()
+{
+    [ -r "$VWARD_PROFILE_LIB" ] && [ -r "$TEMPLATE" ] || return 1
+    . "$VWARD_PROFILE_LIB"
+    vward_profile_load || return 1
+    mkdir -p /opt/var/run/vward || return 1
+    TMP="$CONF.new.$$"
+    sed -e "s/@VWARD_CONSOLE_BIND@/$VWARD_LAN_ADDRESS/g" \
+        -e "s/@VWARD_CONSOLE_PORT@/$VWARD_CONSOLE_PORT/g" \
+        "$TEMPLATE" > "$TMP" || return 1
+    chmod 0600 "$TMP" || return 1
+    "$LIGHTTPD" -tt -f "$TMP" >/dev/null 2>&1 || { rm -f "$TMP"; return 1; }
+    mv "$TMP" "$CONF"
+}
 
 case "$1" in
 
@@ -19,6 +36,7 @@ start)
         rm -f "$PIDFILE"
     fi
 
+    prepare_config || exit 1
     "$LIGHTTPD" -f "$CONF"
     ;;
 

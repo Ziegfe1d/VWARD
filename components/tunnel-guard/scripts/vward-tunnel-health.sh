@@ -3,13 +3,19 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
 DIR="/opt/var/lib/vward/tunnel-health"
 STATE="$DIR/state"
 RCI_CACHE="$DIR/interface-rci-cache"
 LOG="/opt/var/log/vward-tunnel-health.log"
 LOCK="/tmp/vward-tunnel-health-watch.lock"
 
-WG_IF="nwg1"
+WG_IF="$VWARD_TUNNEL_DEVICE"
 
 # Healthy WG only needs an NDM snapshot periodically.
 # Any anomaly forces an immediate refresh.
@@ -178,7 +184,7 @@ RCI_OK=0
 
 if [ "$NEED_RCI" -eq 1 ]; then
 
-    INFO=$(ndmc -c "show interface nwg1" 2>/dev/null)
+    INFO=$(ndmc -c "show interface $VWARD_TUNNEL_INTERFACE" 2>/dev/null)
 
     if [ -n "$INFO" ]; then
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0-dev.3: Device Profile и VWARD Security
+
+- Фиксированные LAN address/subnet, DNS, WAN device, tunnel device/interface и
+  policy group удалены из runtime-компонентов и сведены в единый Device Profile.
+- Добавлено fail-closed обнаружение: неоднозначный WAN, LAN или туннель не выбирается
+  автоматически.
+- Конфигурация lighttpd генерируется init-скриптом из проверенного профиля; wildcard
+  bind не используется.
+- В Console добавлен read-only раздел VWARD Security с listener, Device Profile и
+  состоянием защитных ограничений API; из общих настроек добавлен переход в него.
+- Update Engine health check использует обнаруженный адрес и порт Console.
+
 ## 0.2.0-dev.2: runtime-унификация и защита Console
 
 - Runtime-файлы, init/cron, PID, lock, state, log и configuration paths напрямую

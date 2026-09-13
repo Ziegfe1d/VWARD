@@ -1,7 +1,7 @@
 # Security hardening
 
-The `dev` branch uses a LAN-only Console listener by default:
-`192.168.1.1:8088`. Wildcard listeners are rejected by repository tests.
+The `dev` branch generates a LAN-only Console listener from the validated Device
+Profile. Wildcard listeners are rejected by repository tests.
 
 Console mutations accept only `POST` requests with the expected form content
 type and the `X-VWARD-Request: console` request guard. The API does not expose
@@ -16,7 +16,8 @@ firewall rules. Before any `dev` deployment, verify them on the target:
 ss -lntup 2>/dev/null || netstat -lntup
 ```
 
-Expected VWARD-owned listener: TCP `192.168.1.1:8088` only. Any WAN exposure,
+Expected VWARD-owned listener: TCP on the configured LAN address and Console port
+only. Any WAN exposure,
 wildcard bind, or unexpected listener blocks deployment until investigated.
 
 The custom request header is a CSRF barrier, not user authentication. Until an

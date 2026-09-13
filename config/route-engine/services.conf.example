@@ -1,2 +1,2 @@
 # NAME|HOST|GROUP|WAN|URL|FAIL_THRESHOLD|SUCCESS_THRESHOLD
-2IP|2ip.io|domain-list22|eth3|https://2ip.io/ru/|3|3
+2IP|2ip.io|YOUR_POLICY_GROUP|YOUR_WAN_DEVICE|https://2ip.io/ru/|3|3

@@ -22,7 +22,7 @@ POLICY="
 /opt/var/log/vward-policy-sync-sync.log|262144
 /opt/var/log/vward-route-hints.log|262144
 /opt/var/log/vward-route.log|262144
-/opt/var/log/crond-supervisor.log|262144
+/opt/var/log/vward-cron-supervisor.log|262144
 "
 
 KEEP=2

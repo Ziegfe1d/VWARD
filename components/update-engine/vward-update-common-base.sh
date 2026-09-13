@@ -694,7 +694,7 @@ vu_safe_target() {
     target=$1
     case "$target" in *../*|*/..|*/./*|*//* ) return 1 ;; esac
     case "$target" in
-        /opt/bin/vward-route-test.sh|/opt/bin/vward-route-reconciler.sh|/opt/bin/vward-route-hints-update.sh|/opt/bin/vward-housekeeping.sh|/opt/bin/vward-route-resolve4.sh|/opt/bin/vward-route.sh|/opt/bin/vward-route-engine.sh|/opt/bin/vward-route-discovery.sh|/opt/bin/vward-cron-supervisor.sh|/opt/bin/vward-policy-chain.sh|/opt/bin/vward-policy-audit.sh|/opt/bin/vward-policy-reconcile.sh|/opt/bin/vward-policy-sync.sh|/opt/bin/vward-wan-guard.sh|/opt/bin/vward-wan-recovery.sh|/opt/bin/vward-tunnel-guard.sh|/opt/bin/vward-tunnel-health.sh|/opt/etc/init.d/S90crond|/opt/etc/init.d/S91vward-route-engine|/opt/etc/init.d/S92vward-runtime|/opt/etc/init.d/S93vward-console|/opt/etc/vward/console/lighttpd.conf|/opt/share/vward/console/www/index.html|/opt/share/vward/console/www/cgi-bin/api.cgi|/opt/share/vward/VERSION) return 0 ;;
+        /opt/bin/vward-route-test.sh|/opt/bin/vward-route-reconciler.sh|/opt/bin/vward-route-hints-update.sh|/opt/bin/vward-housekeeping.sh|/opt/bin/vward-route-resolve4.sh|/opt/bin/vward-route.sh|/opt/bin/vward-route-engine.sh|/opt/bin/vward-route-discovery.sh|/opt/bin/vward-cron-supervisor.sh|/opt/bin/vward-policy-chain.sh|/opt/bin/vward-policy-audit.sh|/opt/bin/vward-policy-reconcile.sh|/opt/bin/vward-policy-sync.sh|/opt/bin/vward-wan-guard.sh|/opt/bin/vward-wan-recovery.sh|/opt/bin/vward-tunnel-guard.sh|/opt/bin/vward-tunnel-health.sh|/opt/lib/vward/vward-device-profile.sh|/opt/etc/init.d/S90crond|/opt/etc/init.d/S91vward-route-engine|/opt/etc/init.d/S92vward-runtime|/opt/etc/init.d/S93vward-console|/opt/etc/vward/console/lighttpd.conf|/opt/share/vward/console/www/index.html|/opt/share/vward/console/www/cgi-bin/api.cgi|/opt/share/vward/VERSION) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -758,7 +758,7 @@ vu_runtime_quiesce() {
         return 0
     fi
 
-    supervisor_pid=$(sed -n '1p' /opt/var/run/crond-supervisor.pid 2>/dev/null || :)
+    supervisor_pid=$(sed -n '1p' /opt/var/run/vward/cron-supervisor.pid 2>/dev/null || :)
     live_pid=$(sed -n '1p' /opt/var/run/vward/route-engine.pid 2>/dev/null || :)
 
     [ -z "$supervisor_pid" ] || ! kill -0 "$supervisor_pid" 2>/dev/null || VU_RESTART_SUPERVISOR=1

@@ -3,10 +3,16 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
 GROUP="AdaptiveAuto"
-WAN="eth3"
-WG="nwg1"
-DNS="9.9.9.10"
+WAN="$VWARD_WAN_DEVICE"
+WG="$VWARD_TUNNEL_DEVICE"
+DNS="$VWARD_PROBE_DNS"
 
 STATE="/opt/var/lib/vward/route-engine"
 LOG="/opt/var/log/vward-route-engine-events.log"
@@ -485,7 +491,7 @@ while [ "$DONE" -lt "$MAX_PER_RUN" ] &&
 
     [ -z "$H" ] && continue
 
-    AGH=$(nslookup "$H" 192.168.1.1 2>&1)
+    AGH=$(nslookup "$H" $VWARD_DNS_SERVER 2>&1)
 
     if echo "$AGH" |
        grep -qE 'Address [0-9]+: (0\.0\.0\.0|::)$'; then

@@ -17,8 +17,8 @@
 
 ## 3. Удаление жёстких привязок
 
-- заменить `eth3`, `192.168.1.1`, `192.168.1.0/24`, `nwg1`, `nwg1` и
-  `domain-list22` значениями профиля;
+- [x] заменить фиксированные LAN, WAN, DNS, tunnel и policy group значениями
+  единого Device Profile;
 - менять компоненты по одному с отдельными тестами, health-check и rollback;
 - не менять одновременно Route Engine, Tunnel Guard и Policy Sync.
 

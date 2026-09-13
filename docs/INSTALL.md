@@ -58,18 +58,20 @@ done
 
 ## 4. Обязательное discovery устройства
 
-До копирования runtime-файлов определите:
+Установите `vward-device-profile.sh`, затем при необходимости скопируйте
+`config/device.conf.example` в `/opt/etc/vward/device.conf`. Пустыми можно оставить
+только значения, для которых discovery возвращает ровно одного кандидата.
 
-| Что | Значение рабочего профиля | Требуемое действие |
+| Что | Параметр | Требуемое действие |
 |---|---|---|
-| LAN/router address | `192.168.1.1` | подтвердить свой LAN-адрес |
-| LAN subnet | `192.168.1.0/24` | определить фактическую подсеть |
-| WAN connection | `ISP` | определить имя активного подключения |
-| physical WAN | `eth3` | определить устройство физического WAN |
-| VPN connections | `Wireguard0/1` | выбрать реальные интерфейсы |
-| curl device | `nwg1` | сопоставить с выбранным WireGuard |
-| managed FQDN group | `AdaptiveAuto` | проверить отсутствие конфликта |
-| policy group | `domain-list22` | выбрать локальную группу или отключить сценарий |
+| LAN/router address | `VWARD_LAN_ADDRESS` | обнаружить или задать LAN-адрес |
+| LAN subnet | `VWARD_LAN_SUBNET` | обнаружить или задать подсеть |
+| WAN connection | `VWARD_WAN_INTERFACE` | явно задать логическое имя Keenetic |
+| physical WAN | `VWARD_WAN_DEVICE` | обнаружить или задать сетевое устройство |
+| VPN device | `VWARD_TUNNEL_DEVICE` | обнаружить или выбрать устройство туннеля |
+| VPN interface | `VWARD_TUNNEL_INTERFACE` | сопоставить с логическим интерфейсом Keenetic |
+| policy group | `VWARD_POLICY_GROUP` | явно выбрать локальную FQDN-группу |
+| Console | `VWARD_CONSOLE_PORT` | оставить непривилегированный порт или задать свой |
 
 Используйте read-only команды и интерфейс Keenetic:
 
@@ -151,8 +153,8 @@ crontab -l | grep VWARD
 
 ## 8. VWARD Console
 
-Console - локальная панель наблюдения. Фактический адрес и порт определяются
-установленным `lighttpd.conf`; не считайте `192.168.1.1:8088` универсальным адресом.
+Console - локальная панель наблюдения. Init-скрипт генерирует рабочий lighttpd config
+из проверенных `VWARD_LAN_ADDRESS` и `VWARD_CONSOLE_PORT`.
 Frontend использует same-origin API. Внешние ссылки строятся от текущего LAN-host.
 
 Редактируются только четыре allowlisted boolean-флага VWARD Update Engine. Backend

@@ -5,6 +5,15 @@ export PATH
 JQ=/opt/bin/jq
 CURL=/opt/bin/curl
 
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+VWARD_RCI_BASE=http://127.0.0.1:79/rci
+PROFILE_READY=false
+if [ -r "$VWARD_PROFILE_LIB" ]; then
+    . "$VWARD_PROFILE_LIB"
+    vward_profile_load >/dev/null 2>&1 && PROFILE_READY=true
+fi
+[ -n "${VWARD_WAN_INTERFACE:-}" ] && [ -n "${VWARD_POLICY_GROUP:-}" ] || PROFILE_READY=false
+
 header_json()
 {
     echo 'Content-Type: application/json; charset=utf-8'
@@ -62,7 +71,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|route-data|diagnostics|route-probe|update-data|control|update-control) ;;
+    status|ping|log|settings|security-data|route-data|diagnostics|route-probe|update-data|control|update-control) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -95,6 +104,27 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             exit 0
             ;;
     esac
+fi
+
+if [ "$ACTION" = "security-data" ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || {
+        echo '{"ok":false,"error":"method_not_allowed"}'
+        exit 0
+    }
+    "$JQ" -n \
+      --argjson ready "$PROFILE_READY" \
+      --arg lan_address "${VWARD_LAN_ADDRESS:-}" \
+      --arg lan_subnet "${VWARD_LAN_SUBNET:-}" \
+      --arg dns_server "${VWARD_DNS_SERVER:-}" \
+      --arg wan_device "${VWARD_WAN_DEVICE:-}" \
+      --arg wan_interface "${VWARD_WAN_INTERFACE:-}" \
+      --arg tunnel_device "${VWARD_TUNNEL_DEVICE:-}" \
+      --arg tunnel_interface "${VWARD_TUNNEL_INTERFACE:-}" \
+      --arg policy_group "${VWARD_POLICY_GROUP:-}" \
+      --arg console_port "${VWARD_CONSOLE_PORT:-}" \
+      '{ok:true,profile_ready:$ready,listener:{scope:"lan",address:$lan_address,port:$console_port,wildcard:false},profile:{lan_address:$lan_address,lan_subnet:$lan_subnet,dns_server:$dns_server,wan_device:$wan_device,wan_interface:$wan_interface,tunnel_device:$tunnel_device,tunnel_interface:$tunnel_interface,policy_group:$policy_group},api:{mutation_guard:true,cors:false,directory_listing:false,authentication:false}}'
+    exit 0
 fi
 
 if [ "$ACTION" = "settings" ]; then
@@ -339,11 +369,11 @@ if [ "$ACTION" = "diagnostics" ]; then
     [ -r /opt/etc/vward/update.conf ] && CONFIG_STATUS=PASS
     CGI_STATUS=PASS
 
-    WAN_JSON="$(fetch_json 'http://127.0.0.1:79/rci/show/internet/status')"
+    WAN_JSON="$(fetch_json "$VWARD_RCI_BASE/show/internet/status")"
     WAN_STATUS="$(printf '%s\\n' "$WAN_JSON" | "$JQ" -r 'if (.internet // .connected // false) == true then "PASS" else "WARN" end' 2>/dev/null)"
     case "$WAN_STATUS" in PASS|WARN) ;; *) WAN_STATUS=UNKNOWN ;; esac
 
-    IF_JSON="$(fetch_json 'http://127.0.0.1:79/rci/show/interface')"
+    IF_JSON="$(fetch_json "$VWARD_RCI_BASE/show/interface")"
     WG_COUNT="$(printf '%s\\n' "$IF_JSON" | "$JQ" -r '[keys[] | select(test("^Wireguard[0-9]+$"))] | length' 2>/dev/null)"
     case "$WG_COUNT" in ''|*[!0-9]*) WG_COUNT=0 ;; esac
     [ "$WG_COUNT" -gt 0 ] && WG_STATUS=PASS || WG_STATUS=WARN
@@ -494,9 +524,9 @@ if [ "$ACTION" = "route-probe" ]; then
             ROUTE_INTERFACE=""
             if [ -n "$OWNED_CIDR" ]; then
                 NET="${OWNED_CIDR%/*}"; PREFIX="${OWNED_CIDR#*/}"; MASK="$(prefix_mask "$PREFIX")"
-                if grep -Fqx "ip route $NET $MASK nwg1 auto" "$RUNCFG"; then
+                if [ -n "${VWARD_TUNNEL_DEVICE:-}" ] && grep -Fqx "ip route $NET $MASK $VWARD_TUNNEL_DEVICE auto" "$RUNCFG"; then
                     CONFIGURED=true
-                    ROUTE_INTERFACE=nwg1
+                    ROUTE_INTERFACE=$VWARD_TUNNEL_DEVICE
                 fi
             fi
             rm -f "$MATCHES_FILE"
@@ -786,22 +816,20 @@ fi
 
 VER="$(
     fetch_json \
-    'http://127.0.0.1:79/rci/show/version'
+    "$VWARD_RCI_BASE/show/version"
 )"
 
-ISP="$(
-    fetch_json \
-    'http://127.0.0.1:79/rci/show/interface?name=ISP'
-)"
+ISP='{}'
+[ -z "${VWARD_WAN_INTERFACE:-}" ] || ISP="$(fetch_json "$VWARD_RCI_BASE/show/interface?name=$VWARD_WAN_INTERFACE")"
 
 INET="$(
     fetch_json \
-    'http://127.0.0.1:79/rci/show/internet/status'
+    "$VWARD_RCI_BASE/show/internet/status"
 )"
 
 IFACES="$(
     fetch_json \
-    'http://127.0.0.1:79/rci/show/interface'
+    "$VWARD_RCI_BASE/show/interface"
 )"
 
 WG_NAMES="$(
@@ -960,6 +988,7 @@ header_json
   --argjson isp "$ISP" \
   --argjson inet "$INET" \
   --argjson wg_interfaces "$WG_INTERFACES" \
+  --arg managed_tunnel "${VWARD_TUNNEL_DEVICE:-}" \
   --arg gv "$GVERSION" \
   --arg gm "$GMODE" \
   --arg gc "$GCLASS" \
@@ -1095,6 +1124,7 @@ header_json
 
   wg:{
     interfaces:$wg_interfaces,
+    managed_device:$managed_tunnel,
     total:($wg_interfaces|length),
     down_streak:($down_streak|tonumber? // 0),
     failopen_active:($failopen_active=="1")
