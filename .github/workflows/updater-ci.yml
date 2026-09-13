@@ -91,7 +91,9 @@ jobs:
           printf 'SHA256 coverage: %s/%s tracked files\n' "$manifest_count" "$tracked_count"
 
   dispatch-transition:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-transition]')
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-transition]')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '[publish-transition]'))
     needs:
       - repository-consistency
       - updater-tests
