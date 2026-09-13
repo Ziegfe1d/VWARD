@@ -30,8 +30,8 @@ grep -Fq 'id="settings"' web/index.html || fail "safe settings overview missing"
 grep -Fq 'border-radius:28px' web/index.html || fail "floating mobile toolbar missing"
 grep -Fq 'bottom:max(10px,env(safe-area-inset-bottom))' web/index.html ||
     fail "mobile toolbar safe-area handling missing"
-grep -Fq "if(id==='logs')loadLogs(false);renderHelp();setHelp(false);window.scrollTo(0,0)" web/index.html ||
-    fail "Logs/help must update before compatibility-safe scroll"
+grep -Fq "if(id==='logs')loadLogs(false);if(id==='route')loadRouteData(false);renderHelp();setHelp(false);window.scrollTo(0,0)" web/index.html ||
+    fail "Logs/route-data/help must update before compatibility-safe scroll"
 
 for ID in platform-core route-engine route-reconciler route-tools tunnel-guard \
     wan-guard policy-sync runtime console update-engine

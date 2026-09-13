@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -45,6 +48,24 @@ if "navigator.clipboard.writeText" not in html or "fallbackCopy" not in html:
     fail("копирование журнала не имеет Clipboard/fallback binding")
 if "navigator.share" not in html:
     fail("поделиться журналом не связано с Web Share API")
+
+if 'action=route-data' not in html or 'route-data)' not in api:
+    fail("Route Engine read-only data endpoint is not bound")
+if 'id="routeDataRefresh"' not in html:
+    fail("Route Engine data refresh control is missing")
+
+node = shutil.which("node")
+if node:
+    start = html.find("<script>")
+    end = html.find("</script>", start + 8)
+    if start < 0 or end < 0:
+        fail("inline Console JavaScript block is missing")
+    with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8", delete=False) as f:
+        f.write(html[start + len("<script>"):end])
+        js_path = f.name
+    result = subprocess.run([node, "--check", js_path], capture_output=True, text=True)
+    if result.returncode != 0:
+        fail("Console JavaScript syntax: " + (result.stderr.strip() or result.stdout.strip()))
 
 for name in ("overview", "settings", "logs"):
     desktop = len(re.findall(rf'<button[^>]+data-section="{name}"', html))

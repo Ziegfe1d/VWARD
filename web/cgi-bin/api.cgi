@@ -61,7 +61,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings) ;;
+    status|ping|log|settings|route-data) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -153,6 +153,133 @@ if [ "$ACTION" = "settings" ]; then
         "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$AUTO_APPLY" "$AUTO_CRITICAL" "$AUTO_IMPORTANT" "$AUTO_ROUTINE" \
         >> /opt/var/log/vward/console-audit.log
     echo '{"ok":true,"result":"saved"}'
+    exit 0
+fi
+
+if [ "$ACTION" = "route-data" ]; then
+    header_json
+
+    [ "${REQUEST_METHOD:-GET}" = GET ] || {
+        echo '{"ok":false,"error":"method_not_allowed"}'
+        exit 0
+    }
+
+    HINT_CATALOG=/opt/etc/adaptive-route/hints-catalog.tsv
+    ADAPTIVE_PERSIST=/opt/var/lib/adaptive-live/adaptive-persist.txt
+    IP_INDEX=/opt/var/lib/vpn-subnets/catalog.index
+    IP_ACTIVE=/opt/var/lib/vpn-subnets/active.categories
+    IP_OWNED=/opt/var/lib/vpn-subnets/owned.dynamic.routes
+    IP_ITDOG=/opt/var/lib/vpn-subnets/source-catalog/itdog
+    IP_LOYAL=/opt/var/lib/vpn-subnets/source-catalog/loyalsoldier
+
+    DOMAIN_ROWS=0
+    DOMAIN_UNIQUE=0
+    DOMAIN_CATEGORIES=0
+    DOMAIN_ITDOG=0
+    DOMAIN_V2FLY=0
+
+    if [ -r "$HINT_CATALOG" ]; then
+        HSTATS="$(awk -F'|' '
+            NF>=3 {
+                rows++
+                domains[$1]=1
+                categories[$3]=1
+                sources[$2]++
+            }
+            END {
+                dc=0; cc=0
+                for (x in domains) dc++
+                for (x in categories) cc++
+                printf "%d|%d|%d|%d|%d", rows+0,dc+0,cc+0,sources["itdog"]+0,sources["v2fly"]+0
+            }
+        ' "$HINT_CATALOG" 2>/dev/null)"
+        DOMAIN_ROWS="$(printf '%s' "$HSTATS" | cut -d'|' -f1)"
+        DOMAIN_UNIQUE="$(printf '%s' "$HSTATS" | cut -d'|' -f2)"
+        DOMAIN_CATEGORIES="$(printf '%s' "$HSTATS" | cut -d'|' -f3)"
+        DOMAIN_ITDOG="$(printf '%s' "$HSTATS" | cut -d'|' -f4)"
+        DOMAIN_V2FLY="$(printf '%s' "$HSTATS" | cut -d'|' -f5)"
+    fi
+
+    ADAPTIVE_COUNT="$(wc -l < "$ADAPTIVE_PERSIST" 2>/dev/null)"
+    [ -n "$ADAPTIVE_COUNT" ] || ADAPTIVE_COUNT=0
+    ADAPTIVE_RECENT="$(
+        if [ -r "$ADAPTIVE_PERSIST" ]; then
+            tail -n 20 "$ADAPTIVE_PERSIST" 2>/dev/null |
+            "$JQ" -Rsc 'split("\n") | map(select(length>0))'
+        else
+            echo '[]'
+        fi
+    )"
+
+    IP_CATEGORIES=0
+    IP_CIDR_TOTAL=0
+    if [ -r "$IP_INDEX" ]; then
+        ISTATS="$(awk -F'|' 'NF>=2 {c++; n+=$2} END {printf "%d|%d",c+0,n+0}' "$IP_INDEX" 2>/dev/null)"
+        IP_CATEGORIES="$(printf '%s' "$ISTATS" | cut -d'|' -f1)"
+        IP_CIDR_TOTAL="$(printf '%s' "$ISTATS" | cut -d'|' -f2)"
+    fi
+
+    ACTIVE_COUNT="$(wc -l < "$IP_ACTIVE" 2>/dev/null)"
+    MANAGED_ROUTES="$(wc -l < "$IP_OWNED" 2>/dev/null)"
+    [ -n "$ACTIVE_COUNT" ] || ACTIVE_COUNT=0
+    [ -n "$MANAGED_ROUTES" ] || MANAGED_ROUTES=0
+
+    ACTIVE_CATEGORIES="$(
+        if [ -r "$IP_ACTIVE" ]; then
+            head -n 40 "$IP_ACTIVE" 2>/dev/null |
+            "$JQ" -Rsc 'split("\n") | map(select(length>0))'
+        else
+            echo '[]'
+        fi
+    )"
+
+    ITDOG_IP_CATEGORIES="$(find "$IP_ITDOG" -type f -name '*.cidr' 2>/dev/null | wc -l)"
+    LOYAL_IP_CATEGORIES="$(find "$IP_LOYAL" -type f -name '*.cidr' 2>/dev/null | wc -l)"
+    [ -n "$ITDOG_IP_CATEGORIES" ] || ITDOG_IP_CATEGORIES=0
+    [ -n "$LOYAL_IP_CATEGORIES" ] || LOYAL_IP_CATEGORIES=0
+
+    HINT_LAST="$(tail -n 1 /opt/var/log/adaptive-hints-update.log 2>/dev/null)"
+    IP_LAST="$(tail -n 1 /opt/var/log/vpn-subnet-sync.log 2>/dev/null)"
+
+    "$JQ" -n \
+      --arg ts "$(date '+%Y-%m-%dT%H:%M:%S%z')" \
+      --arg hint_last "$HINT_LAST" \
+      --arg ip_last "$IP_LAST" \
+      --argjson domain_rows "$DOMAIN_ROWS" \
+      --argjson domain_unique "$DOMAIN_UNIQUE" \
+      --argjson domain_categories "$DOMAIN_CATEGORIES" \
+      --argjson domain_itdog "$DOMAIN_ITDOG" \
+      --argjson domain_v2fly "$DOMAIN_V2FLY" \
+      --argjson adaptive_count "$ADAPTIVE_COUNT" \
+      --argjson adaptive_recent "$ADAPTIVE_RECENT" \
+      --argjson ip_categories "$IP_CATEGORIES" \
+      --argjson ip_cidr_total "$IP_CIDR_TOTAL" \
+      --argjson active_count "$ACTIVE_COUNT" \
+      --argjson managed_routes "$MANAGED_ROUTES" \
+      --argjson active_categories "$ACTIVE_CATEGORIES" \
+      --argjson itdog_ip_categories "$ITDOG_IP_CATEGORIES" \
+      --argjson loyal_ip_categories "$LOYAL_IP_CATEGORIES" \
+      '{
+        ok:true,
+        ts:$ts,
+        domains:{
+            rows:$domain_rows,
+            unique:$domain_unique,
+            categories:$domain_categories,
+            sources:{itdog:$domain_itdog,v2fly:$domain_v2fly},
+            last_update:$hint_last
+        },
+        adaptive:{count:$adaptive_count,recent:$adaptive_recent},
+        ip:{
+            categories:$ip_categories,
+            cidr_total:$ip_cidr_total,
+            active_count:$active_count,
+            managed_routes:$managed_routes,
+            source_categories:{itdog:$itdog_ip_categories,loyalsoldier:$loyal_ip_categories},
+            active:$active_categories,
+            last_sync:$ip_last
+        }
+      }'
     exit 0
 fi
 
