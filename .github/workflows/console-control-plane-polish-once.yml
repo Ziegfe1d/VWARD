@@ -34,7 +34,7 @@ jobs:
           PY
           python3 .github/scripts/console-polish-once.py
           git rm .github/workflows/console-control-plane-polish-once.yml
-          git rm .github/scripts/console-polish-once.py
+          git rm -f .github/scripts/console-polish-once.py
 
           tmp="$RUNNER_TEMP/SHA256SUMS"
           : > "$tmp"
