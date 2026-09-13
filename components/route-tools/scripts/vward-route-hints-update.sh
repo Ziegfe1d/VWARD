@@ -5,15 +5,15 @@ export PATH
 
 VERSION="3.0"
 
-DIR="/opt/etc/adaptive-route"
-STATE="/opt/var/lib/adaptive-hints"
+DIR="/opt/etc/vward/route-engine"
+STATE="/opt/var/lib/vward/route-hints"
 CACHE="$STATE/sources"
 DEST="$DIR/hints.conf"
 CATALOG="$DIR/hints-catalog.tsv"
 INCLUDES="$DIR/hints-includes.tsv"
-LOG="/opt/var/log/adaptive-hints-update.log"
+LOG="/opt/var/log/vward-route-hints.log"
 
-WORK="/tmp/adaptive-hints.$$"
+WORK="/tmp/vward-route-hints.$$"
 ITDOG_ARCH="$WORK/itdog.tar.gz"
 V2_ARCH="$WORK/v2fly.tar.gz"
 

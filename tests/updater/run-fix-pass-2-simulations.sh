@@ -18,12 +18,12 @@ openssl pkey -in "$WORK/private.pem" -pubout -out "$WORK/public.pem" >/dev/null 
 new_root(){
   label=$1
   ROOT=$WORK/root-$label
-  mkdir -p "$ROOT/opt/etc/vward" "$ROOT/opt/etc/keenetic-apps" "$ROOT/opt/share/vward" "$ROOT/opt/bin" "$ROOT/opt/share/keenetic-apps/www/cgi-bin" "$ROOT/opt/var/lib/vward/updater" "$ROOT/tmp"
+  mkdir -p "$ROOT/opt/etc/vward" "$ROOT/opt/etc/vward/console" "$ROOT/opt/share/vward" "$ROOT/opt/bin" "$ROOT/opt/share/vward/console/www/cgi-bin" "$ROOT/opt/var/lib/vward/updater" "$ROOT/tmp"
   cp "$WORK/public.pem" "$ROOT/opt/etc/vward/update-public.pem"
   printf '0.1.0-dev\n' > "$ROOT/opt/share/vward/VERSION"
-  printf 'old\n' > "$ROOT/opt/bin/adaptive-route.sh"
-  printf 'wan\n' > "$ROOT/opt/bin/wan-guardian.sh"
-  printf 'html\n' > "$ROOT/opt/share/keenetic-apps/www/index.html"
+  printf 'old\n' > "$ROOT/opt/bin/vward-route.sh"
+  printf 'wan\n' > "$ROOT/opt/bin/vward-wan-guard.sh"
+  printf 'html\n' > "$ROOT/opt/share/vward/console/www/index.html"
   CONFIG=$ROOT/opt/etc/vward/update.conf
   {
     printf '%s\n' 'update_enabled=1' 'auto_apply=1' 'auto_critical=1' 'auto_important=1' 'auto_routine=1' 'channel=dev'
@@ -41,11 +41,11 @@ make_package(){
   label=$1
   PKGDIR=$WORK/pkg-$label
   mkdir -p "$PKGDIR/files"
-  printf 'new-%s\n' "$label" > "$PKGDIR/files/adaptive-route.sh"
-  printf 'wan-%s\n' "$label" > "$PKGDIR/files/wan-guardian.sh"
-  one=$(sha256sum "$PKGDIR/files/adaptive-route.sh"|awk '{print $1}')
-  two=$(sha256sum "$PKGDIR/files/wan-guardian.sh"|awk '{print $1}')
-  jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guard",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
+  printf 'new-%s\n' "$label" > "$PKGDIR/files/vward-route.sh"
+  printf 'wan-%s\n' "$label" > "$PKGDIR/files/vward-wan-guard.sh"
+  one=$(sha256sum "$PKGDIR/files/vward-route.sh"|awk '{print $1}')
+  two=$(sha256sum "$PKGDIR/files/vward-wan-guard.sh"|awk '{print $1}')
+  jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/vward-route.sh",target:"/opt/bin/vward-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/vward-wan-guard.sh",target:"/opt/bin/vward-wan-guard.sh",sha256:$two,mode:"0755",component:"wan-guard",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
   PACKAGE=$WORK/pkg-$label.tar.gz
   tar -czf "$PACKAGE" -C "$PKGDIR" .
   UNPACKED=$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{s+=$1} END {print s+0}')
@@ -80,11 +80,11 @@ set +e; run_watch 200 >/dev/null 2>&1; rc=$?; set -e
 new_root quarantine; make_package qbad; make_manifest qbad CRITICAL 1 0.1.1-dev
 set +e; VWARD_TEST_FAIL_INSTALL_AT=2 run_update >/dev/null 2>&1; rc=$?; set -e
 qseq=$(sed -n 's/^sequence=//p' "$STATE/quarantine.state" 2>/dev/null || :)
-[ "$rc" -eq 40 ] && [ "$qseq" = 1 ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = old ] && ok 'failed install is quarantined after rollback' || bad 'install quarantine'
+[ "$rc" -eq 40 ] && [ "$qseq" = 1 ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = old ] && ok 'failed install is quarantined after rollback' || bad 'install quarantine'
 ATTEMPT_FILE=$WORK/q-attempts; printf '0\n' > "$ATTEMPT_FILE"
 set +e; run_watch 304 >/dev/null 2>&1; rc=$?; set -e
 attempts=$(cat "$ATTEMPT_FILE")
-[ "$rc" -eq 11 ] && [ "$attempts" -eq 1 ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = old ] && ok 'quarantined update is not auto-retried' || bad 'quarantine retry block'
+[ "$rc" -eq 11 ] && [ "$attempts" -eq 1 ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = old ] && ok 'quarantined update is not auto-retried' || bad 'quarantine retry block'
 make_package qgood; make_manifest qgood CRITICAL 2 0.1.2-dev
 set +e; run_watch 200 >/dev/null 2>&1; rc=$?; set -e
 [ "$rc" -eq 0 ] && [ "$(sed -n 's/^last_sequence=//p' "$STATE/committed.state")" = 2 ] && ok 'higher sequence proceeds after old quarantine' || bad 'quarantine higher sequence'
@@ -92,7 +92,7 @@ set +e; run_watch 200 >/dev/null 2>&1; rc=$?; set -e
 new_root healthq; make_package healthq; make_manifest healthq CRITICAL 1 0.1.1-dev
 set +e; VWARD_TEST_FORCE_HEALTH_FAIL=1 run_update >/dev/null 2>&1; rc=$?; set -e
 reason=$(sed -n 's/^failure_class=//p' "$STATE/quarantine.state" 2>/dev/null || :)
-[ "$rc" -eq 41 ] && [ "$reason" = health ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = old ] && ok 'health failure is quarantined after rollback' || bad 'health quarantine'
+[ "$rc" -eq 41 ] && [ "$reason" = health ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = old ] && ok 'health failure is quarantined after rollback' || bad 'health quarantine'
 
 new_root trust; make_package t10; make_manifest t10 CRITICAL 10 0.1.10-dev
 COMMAND=--check; run_update >/dev/null 2>&1; unset COMMAND
@@ -135,7 +135,7 @@ set +e; run_watch 500 >/dev/null 2>&1; rc=$?; set -e
 [ "$rc" -eq 34 ] && [ "$(cat "$ATTEMPT_FILE")" -eq 4 ] && ok 'transient network result uses bounded fast retries' || bad 'network retry classification'
 
 new_root allow
-if VWARD_ROOT_PREFIX=$ROOT VWARD_UPDATE_CONFIG=$CONFIG sh -c '. "$1"; vu_safe_target /opt/bin/adaptive-route.sh && vu_safe_target /opt/etc/init.d/S90crond && ! vu_safe_target /opt/bin/other.sh && ! vu_safe_target /opt/etc/init.d/S99foreign' sh "$UPDATER/vward-update-common.sh"; then ok 'exact VWARD target ownership enforced'; else bad 'strict ownership'; fi
+if VWARD_ROOT_PREFIX=$ROOT VWARD_UPDATE_CONFIG=$CONFIG sh -c '. "$1"; vu_safe_target /opt/bin/vward-route.sh && vu_safe_target /opt/etc/init.d/S90crond && ! vu_safe_target /opt/bin/other.sh && ! vu_safe_target /opt/etc/init.d/S99foreign' sh "$UPDATER/vward-update-common.sh"; then ok 'exact VWARD target ownership enforced'; else bad 'strict ownership'; fi
 
 new_root component-owner; make_package component-owner
 jq '(.files[0].component)="route-engine"' "$PKGDIR/package-manifest.json" > "$PKGDIR/package-manifest.next" && mv "$PKGDIR/package-manifest.next" "$PKGDIR/package-manifest.json"
@@ -157,15 +157,15 @@ set +e; env VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" "$UPDATER/vw
 
 new_root cumulative; make_package cumulative
 printf 'minimum_free_kb=0\n' >> "$CONFIG"
-awk 'BEGIN{for(i=0;i<1300;i++)printf "A"; printf "\n"}' > "$PKGDIR/files/adaptive-route.sh"
-awk 'BEGIN{for(i=0;i<1300;i++)printf "B"; printf "\n"}' > "$PKGDIR/files/wan-guardian.sh"
-one=$(sha256sum "$PKGDIR/files/adaptive-route.sh"|awk '{print $1}'); two=$(sha256sum "$PKGDIR/files/wan-guardian.sh"|awk '{print $1}')
-jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guard",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
+awk 'BEGIN{for(i=0;i<1300;i++)printf "A"; printf "\n"}' > "$PKGDIR/files/vward-route.sh"
+awk 'BEGIN{for(i=0;i<1300;i++)printf "B"; printf "\n"}' > "$PKGDIR/files/vward-wan-guard.sh"
+one=$(sha256sum "$PKGDIR/files/vward-route.sh"|awk '{print $1}'); two=$(sha256sum "$PKGDIR/files/vward-wan-guard.sh"|awk '{print $1}')
+jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/vward-route.sh",target:"/opt/bin/vward-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/vward-wan-guard.sh",target:"/opt/bin/vward-wan-guard.sh",sha256:$two,mode:"0755",component:"wan-guard",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
 tar -czf "$PACKAGE" -C "$PKGDIR" .
 UNPACKED=$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{s+=$1} END {print s+0}')
 make_manifest cumulative CRITICAL 1 0.1.1-dev
 set +e; VWARD_TEST_FREE_TARGET_KB=2 run_update >/dev/null 2>&1; rc=$?; set -e
-[ "$rc" -eq 33 ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = old ] && ok 'cumulative target space rejects transaction before install' || bad 'cumulative target space'
+[ "$rc" -eq 33 ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = old ] && ok 'cumulative target space rejects transaction before install' || bad 'cumulative target space'
 
 new_root unpacked; make_package unpacked; bad_unpacked=$((UNPACKED-1)); make_manifest unpacked CRITICAL 1 0.1.1-dev "$bad_unpacked"
 COMMAND=--dry-run; set +e; run_update >/dev/null 2>&1; rc=$?; set -e; unset COMMAND
@@ -178,7 +178,7 @@ COMMAND=--check; set +e; run_update >/dev/null 2>&1; rc=$?; set -e; unset COMMAN
 
 new_root race; make_package race; make_manifest race CRITICAL 1 0.1.1-dev
 set +e; VWARD_TEST_CONFLICT_AFTER_BARRIER=1 run_update >/dev/null 2>&1; rc=$?; set -e
-[ "$rc" -eq 33 ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = old ] && ok 'post-barrier race is rejected before install' || bad 'two-phase barrier recheck'
+[ "$rc" -eq 33 ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = old ] && ok 'post-barrier race is rejected before install' || bad 'two-phase barrier recheck'
 
 new_root verify-retry; make_package verify-retry; make_manifest verify-retry CRITICAL 1 0.1.1-dev
 jq '.signature="AAAA"' "$MANIFEST" > "$MANIFEST.bad"; MANIFEST=$MANIFEST.bad

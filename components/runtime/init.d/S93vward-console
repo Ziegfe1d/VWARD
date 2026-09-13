@@ -1,8 +1,8 @@
 #!/opt/bin/sh
 
 LIGHTTPD="/opt/sbin/lighttpd"
-CONF="/opt/etc/keenetic-apps/lighttpd.conf"
-PIDFILE="/opt/var/run/keenetic-apps-lighttpd.pid"
+CONF="/opt/etc/vward/console/lighttpd.conf"
+PIDFILE="/opt/var/run/vward-console-lighttpd.pid"
 
 case "$1" in
 

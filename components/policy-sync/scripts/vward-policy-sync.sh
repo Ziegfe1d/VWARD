@@ -4,10 +4,10 @@ PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
 VERSION="2.0"
-WG="Wireguard1"
+WG="nwg1"
 MODE="${1:-sync}"
 
-STATE="/opt/var/lib/vpn-subnets"
+STATE="/opt/var/lib/vward/policy-sync"
 SOURCE_ROOT="$STATE/source-catalog"
 ITDOG_SRC="$SOURCE_ROOT/itdog"
 LOYAL_SRC="$SOURCE_ROOT/loyalsoldier"
@@ -17,10 +17,10 @@ OWNED="$STATE/owned.dynamic.routes"
 ACTIVE="$STATE/active.categories"
 LOCK="$STATE/lock"
 
-HINT_CATALOG="/opt/etc/adaptive-route/hints-catalog.tsv"
-HINT_INCLUDES="/opt/etc/adaptive-route/hints-includes.tsv"
+HINT_CATALOG="/opt/etc/vward/route-engine/hints-catalog.tsv"
+HINT_INCLUDES="/opt/etc/vward/route-engine/hints-includes.tsv"
 
-LOG="/opt/var/log/vpn-subnet-sync.log"
+LOG="/opt/var/log/vward-policy-sync-sync.log"
 WORK="$STATE/work.$$"
 
 ITDOG_ARCH="$WORK/itdog.tar.gz"
@@ -378,7 +378,7 @@ collect_vpn_domains()
 {
     RUN="$1"
     GROUPS="$WORK/vpn-groups"
-    DOMAINS="$WORK/vpn-domains"
+    DOMAINS="$WORK/policy-domains"
 
     awk -v wg="$WG" '
         $1=="route" &&
@@ -665,7 +665,7 @@ if [ ! -s "$RUN" ]; then
     exit 1
 fi
 
-DOMAINS="$WORK/vpn-domains"
+DOMAINS="$WORK/policy-domains"
 CATS="$WORK/desired-categories"
 
 collect_vpn_domains "$RUN" > "$DOMAINS"

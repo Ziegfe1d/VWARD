@@ -3,11 +3,11 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-DIR="/opt/var/lib/wg-health"
+DIR="/opt/var/lib/vward/tunnel-health"
 STATE="$DIR/state"
 RCI_CACHE="$DIR/interface-rci-cache"
-LOG="/opt/var/log/wg-health.log"
-LOCK="/tmp/wg-health-watch.lock"
+LOG="/opt/var/log/vward-tunnel-health.log"
+LOCK="/tmp/vward-tunnel-health-watch.lock"
 
 WG_IF="nwg1"
 
@@ -178,7 +178,7 @@ RCI_OK=0
 
 if [ "$NEED_RCI" -eq 1 ]; then
 
-    INFO=$(ndmc -c "show interface Wireguard1" 2>/dev/null)
+    INFO=$(ndmc -c "show interface nwg1" 2>/dev/null)
 
     if [ -n "$INFO" ]; then
 
@@ -290,7 +290,7 @@ TMP_STATE="$STATE.tmp.$$"
     echo "FAIL_COUNT=$FAIL_COUNT"
     echo "OK_COUNT=$OK_COUNT"
 
-    # Kept for wg-failopen compatibility.
+    # Kept for the previous tunnel-guard state format.
     echo "CONFIG_STATE=${CONFIG_STATE:-unknown}"
     echo "LINK_STATE=${LINK_STATE:-unknown}"
     echo "ONLINE_STATE=${ONLINE_STATE:-unknown}"

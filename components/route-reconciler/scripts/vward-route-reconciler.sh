@@ -8,16 +8,16 @@ WAN="eth3"
 WG="nwg1"
 DNS="9.9.9.10"
 
-STATE="/opt/var/lib/adaptive-live"
-LOG="/opt/var/log/adaptive-live-events.log"
+STATE="/opt/var/lib/vward/route-engine"
+LOG="/opt/var/log/vward-route-engine-events.log"
 
-LOCK="/tmp/adaptive-auto-maint.lock"
-CHANGE="/tmp/adaptive-route-change.lock"
-TARGETS="/tmp/adaptive-maint-targets.$$"
+LOCK="/tmp/vward-route-reconciler-maint.lock"
+CHANGE="/tmp/vward-route-change.lock"
+TARGETS="/tmp/vward-route-reconciler-targets.$$"
 CURSOR="$STATE/maint-cursor"
 PERSIST="$STATE/adaptive-persist.txt"
 
-HYST_DIR="/opt/var/lib/adaptive-maint"
+HYST_DIR="/opt/var/lib/vward/route-reconciler"
 DIRECT_OK_THRESHOLD=3
 DIRECT_OK_MIN_INTERVAL=240
 
@@ -70,7 +70,7 @@ esac
 force_vpn_match()
 {
     H=$(echo "$1" | tr 'A-Z' 'a-z')
-    F="/opt/etc/adaptive-route/force-vpn.conf"
+    F="/opt/etc/vward/route-engine/force-vpn.conf"
 
     [ -f "$F" ] || return 1
 
@@ -272,7 +272,7 @@ remove_adaptive()
     fi
 
     MIP=$(
-        /opt/bin/adaptive-resolve4.sh "$H" 2>/dev/null |
+        /opt/bin/vward-route-resolve4.sh "$H" 2>/dev/null |
         awk '/^Address [0-9]+:/ &&
              $3 ~ /^[0-9]+\./ {ip=$3}
              END {print ip}'
@@ -390,7 +390,7 @@ remove_adaptive()
         return 1
     fi
 
-    PBACK_DIR="/opt/var/backups/adaptive-maint"
+    PBACK_DIR="/opt/var/backups/vward/route-reconciler"
     mkdir -p "$PBACK_DIR"
 
     PBACK="$PBACK_DIR/persist-$(date '+%Y%m%d-%H%M%S')-${SAFE_H}-$$.txt"
@@ -494,7 +494,7 @@ while [ "$DONE" -lt "$MAX_PER_RUN" ] &&
     fi
 
     IP=$(
-        /opt/bin/adaptive-resolve4.sh "$H" 2>/dev/null |
+        /opt/bin/vward-route-resolve4.sh "$H" 2>/dev/null |
         awk '/^Address [0-9]+:/ &&
              $3 ~ /^[0-9]+\./ {ip=$3}
              END {print ip}'

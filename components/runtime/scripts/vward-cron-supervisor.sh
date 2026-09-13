@@ -53,13 +53,13 @@ log_event()
 
 recover_critical()
 {
-    /opt/etc/init.d/S91adaptive-live start \
+    /opt/etc/init.d/S91vward-route-engine start \
         >/dev/null 2>&1
 
-    /opt/bin/wg-health-watch.sh \
+    /opt/bin/vward-tunnel-health.sh \
         >/dev/null 2>&1
 
-    /opt/bin/wg-failopen-guard.sh \
+    /opt/bin/vward-tunnel-guard.sh \
         >/dev/null 2>&1
 }
 

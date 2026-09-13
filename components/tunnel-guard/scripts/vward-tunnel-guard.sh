@@ -5,12 +5,12 @@ export PATH
 
 MODE="AUTO"
 
-HEALTH="/opt/var/lib/wg-health/state"
+HEALTH="/opt/var/lib/vward/tunnel-health/state"
 
-DIR="/opt/var/lib/wg-failopen"
+DIR="/opt/var/lib/vward/tunnel-guard"
 STATE="$DIR/state"
-LOG="/opt/var/log/wg-failopen.log"
-LOCK="/tmp/wg-failopen-guard.lock"
+LOG="/opt/var/log/vward-tunnel-guard.log"
+LOCK="/tmp/vward-tunnel-guard-guard.lock"
 
 WAN_IF="eth3"
 WG_IF="nwg1"
@@ -18,7 +18,7 @@ WG_IF="nwg1"
 MAX_HEALTH_AGE=180
 DOWN_CONFIRM=1
 RECOVERY_INTERVAL=300
-DISABLE_FILE="/opt/etc/adaptive-route/wg-failopen.disabled"
+DISABLE_FILE="/opt/etc/vward/tunnel-guard.disabled"
 
 mkdir -p "$DIR"
 
@@ -110,7 +110,7 @@ if [ -f "$DISABLE_FILE" ]; then
     # Если WG был выключен именно Fail-Open автоматом,
     # при аварийном запрете автоматики сначала возвращаем его UP.
     if [ "$FAILOPEN_ACTIVE" -eq 1 ]; then
-        if ndmc -c "interface Wireguard1 up" >/dev/null 2>&1; then
+        if ndmc -c "interface nwg1 up" >/dev/null 2>&1; then
             RESTORED=1
             sleep 4
         fi
@@ -241,7 +241,7 @@ else
 
                             elif [ "$MODE" = "AUTO" ]; then
 
-                                if ndmc -c "interface Wireguard1 down" \
+                                if ndmc -c "interface nwg1 down" \
                                    >/dev/null 2>&1; then
 
                                     FAILOPEN_ACTIVE=1
@@ -288,7 +288,7 @@ else
 
                         LAST_RECOVERY_TEST=$NOW
 
-                        if ndmc -c "interface Wireguard1 up" \
+                        if ndmc -c "interface nwg1 up" \
                            >/dev/null 2>&1; then
 
                             sleep 4
@@ -299,12 +299,12 @@ else
                                 DOWN_STREAK=0
                                 ACTION="FAILOPEN_RECOVERED"
 
-                                /opt/bin/wg-health-watch.sh \
+                                /opt/bin/vward-tunnel-health.sh \
                                     >/dev/null 2>&1 || true
 
                             else
 
-                                ndmc -c "interface Wireguard1 down" \
+                                ndmc -c "interface nwg1 down" \
                                     >/dev/null 2>&1
 
                                 ACTION="RECOVERY_FAILED"

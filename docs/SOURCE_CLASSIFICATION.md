@@ -13,13 +13,13 @@
 
 ## Generated
 
-`/opt/etc/adaptive-route/hints.conf` создаётся из внешних allow-domain lists. Он не
+`/opt/etc/vward/route-engine/hints.conf` создаётся из внешних allow-domain lists. Он не
 публикуется как source.
 
 ## Local configuration и state
 
 - `skip-domains.conf` - локальная routing policy;
-- `wg-failopen.disabled` - control state, отсутствовавший в snapshot;
+- `tunnel-guard.disabled` - control state, отсутствовавший в snapshot;
 - `/opt/var/lib`, `/opt/var/log`, `/tmp`, backups и PID/lock files.
 
 Они сохраняются при обновлении и не входят в package payload.

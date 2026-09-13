@@ -6,17 +6,17 @@ export PATH
 WAN="eth3"
 WG="nwg1"
 
-AUDIT="/opt/bin/vpn-domain-audit.sh"
+AUDIT="/opt/bin/vward-policy-audit.sh"
 
-STATE_DIR="/opt/var/lib/vpn-audit"
-LIVE_STATE="/opt/var/lib/adaptive-live"
+STATE_DIR="/opt/var/lib/vward/policy-audit"
+LIVE_STATE="/opt/var/lib/vward/route-engine"
 
 CANDIDATES="$STATE_DIR/candidates.txt"
 
-LOG="/opt/var/log/vpn-night-reconcile.log"
-EVENT_LOG="/opt/var/log/adaptive-live-events.log"
+LOG="/opt/var/log/vward-policy-reconcile.log"
+EVENT_LOG="/opt/var/log/vward-route-engine-events.log"
 
-LOCK="/tmp/vpn-domain-audit.lock"
+LOCK="/tmp/vward-policy-sync.lock"
 
 CFG="/tmp/vpn-reconcile-running.$$"
 MEMBERS="/tmp/vpn-reconcile-members.$$"
@@ -76,7 +76,7 @@ trap cleanup EXIT INT TERM
 force_vpn_match()
 {
     H=$(echo "$1" | tr 'A-Z' 'a-z')
-    F="/opt/etc/adaptive-route/force-vpn.conf"
+    F="/opt/etc/vward/route-engine/force-vpn.conf"
 
     [ -f "$F" ] || return 1
 
@@ -333,7 +333,7 @@ fi
 # ============================================================
 # BUILD CURRENT WIREGUARD1 MEMBERSHIP
 #
-# Только группы, реально маршрутизируемые через Wireguard1.
+# Только группы, реально маршрутизируемые через nwg1.
 # AdaptiveAuto исключён — у него собственный автомат.
 # ============================================================
 
@@ -341,7 +341,7 @@ WG_GROUPS=$(
     awk '
     $1=="route" &&
     $2=="object-group" &&
-    $4=="Wireguard1" &&
+    $4=="nwg1" &&
     $3!="AdaptiveAuto" {
         print $3
     }
@@ -491,7 +491,7 @@ while IFS='|' read -r HOST CAND_GROUP CAND_STREAK CAND_CODE CAND_TIME; do
 
     # --------------------------------------------------------
     # Проверяем, что домен всё ещё реально находится хотя бы
-    # в одной Wireguard1 FQDN-группе.
+    # в одной nwg1 FQDN-группе.
     # --------------------------------------------------------
 
     GROUPS=$(
@@ -527,7 +527,7 @@ while IFS='|' read -r HOST CAND_GROUP CAND_STREAK CAND_CODE CAND_TIME; do
     # --------------------------------------------------------
 
     IP=$(
-        /opt/bin/adaptive-resolve4.sh \
+        /opt/bin/vward-route-resolve4.sh \
             "$HOST" 2>/dev/null |
         awk '
         /^Address [0-9]+:/ &&
@@ -586,7 +586,7 @@ while IFS='|' read -r HOST CAND_GROUP CAND_STREAK CAND_CODE CAND_TIME; do
     # --------------------------------------------------------
     # TRANSACTION PER HOST
     #
-    # Удаляем домен из ВСЕХ Wireguard1-групп, иначе дубль
+    # Удаляем домен из ВСЕХ nwg1-групп, иначе дубль
     # продолжит отправлять его через VPN.
     # --------------------------------------------------------
 

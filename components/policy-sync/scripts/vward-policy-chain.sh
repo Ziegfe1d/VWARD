@@ -2,11 +2,11 @@
 
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 
-AUDIT="/opt/bin/vpn-domain-audit.sh"
-SUBNET="/opt/bin/vpn-subnet-sync.sh"
+AUDIT="/opt/bin/vward-policy-audit.sh"
+SUBNET="/opt/bin/vward-policy-sync.sh"
 
-SUMMARY="/opt/var/log/vpn-audit-summary.log"
-LOG="/opt/var/log/vpn-audit-chain.log"
+SUMMARY="/opt/var/log/vward-policy-audit-summary.log"
+LOG="/opt/var/log/vward-policy-audit-chain.log"
 
 WAIT_STEP=2
 MAX_WAIT=60

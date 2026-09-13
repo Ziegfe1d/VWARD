@@ -14,7 +14,8 @@ grep -Fq "**$VERSION**" README.md || fail "README version differs"
 
 for DOC in docs/INSTALL.md docs/INSTALLATION_MAP.md docs/DEPENDENCIES.md docs/CONSOLE.md \
     docs/NAMING_MIGRATION.md docs/UPDATER_ARCHITECTURE.md \
-    docs/UPDATE_POLICY.md docs/UPDATE_RECOVERY.md docs/UPDATE_SECURITY.md
+    docs/UPDATE_POLICY.md docs/UPDATE_RECOVERY.md docs/UPDATE_SECURITY.md \
+    docs/SECURITY_HARDENING.md
 do
     [ -r "$DOC" ] || fail "missing documentation: $DOC"
 done
@@ -51,7 +52,8 @@ done
 
 sh -n web/cgi-bin/api.cgi || fail "Console API syntax"
 python3 tests/repository/check-console-bindings.py || fail "Console bindings"
-python3 tests/repository/check-vpn-audit-safety.py || fail "VPN audit safety"
+python3 tests/repository/check-console-security.py || fail "Console security"
+python3 tests/repository/check-policy-sync-safety.py || fail "VPN audit safety"
 for SCRIPT in components/*/scripts/*.sh components/runtime/init.d/* \
     components/update-engine/*.sh tests/updater/*.sh
 do

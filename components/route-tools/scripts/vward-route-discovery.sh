@@ -9,16 +9,16 @@ WG="nwg1"
 DNS="9.9.9.10"
 
 AGH_LOG="/opt/etc/AdGuardHome/data/querylog.json"
-SKIP_FILE="/opt/etc/adaptive-route/skip-domains.conf"
+SKIP_FILE="/opt/etc/vward/route-engine/skip-domains.conf"
 
-STATE_DIR="/opt/var/lib/adaptive-discovery"
-LOG="/opt/var/log/adaptive-discovery.log"
+STATE_DIR="/opt/var/lib/vward/route-discovery"
+LOG="/opt/var/log/vward-route-discovery.log"
 
-RUNCFG="/tmp/adaptive-discovery.running.$$"
-KNOWN="/tmp/adaptive-discovery.known.$$"
-RECENT="/tmp/adaptive-discovery.recent.$$"
+RUNCFG="/tmp/vward-route-discovery.running.$$"
+KNOWN="/tmp/vward-route-discovery.known.$$"
+RECENT="/tmp/vward-route-discovery.recent.$$"
 
-LOCK="/tmp/agh-adaptive-route.lock"
+LOCK="/tmp/vward-route-discovery.lock"
 
 RECENT_LINES=800
 MAX_PROBES=4
@@ -52,8 +52,8 @@ cleanup()
 trap cleanup EXIT INT TERM
 
 # Не мешаем ночному полному аудиту.
-if [ -d /tmp/vpn-domain-audit.lock ]; then
-    NIGHT_PID=$(cat /tmp/vpn-domain-audit.lock/pid 2>/dev/null)
+if [ -d /tmp/vward-policy-sync.lock ]; then
+    NIGHT_PID=$(cat /tmp/vward-policy-sync.lock/pid 2>/dev/null)
 
     if [ -n "$NIGHT_PID" ] && kill -0 "$NIGHT_PID" 2>/dev/null; then
         echo "Night VPN audit is running (PID $NIGHT_PID); discovery skipped."
@@ -61,7 +61,7 @@ if [ -d /tmp/vpn-domain-audit.lock ]; then
     fi
 
     echo "Removing stale night-audit lock"
-    rm -rf /tmp/vpn-domain-audit.lock
+    rm -rf /tmp/vward-policy-sync.lock
 fi
 
 [ -f "$AGH_LOG" ] || {

@@ -34,12 +34,12 @@ openssl pkey -in "$WORK/private.pem" -pubout -out "$WORK/public.pem" >/dev/null 
 new_root() {
     ROOT=$WORK/root-$1
     mkdir -p "$ROOT/opt/etc/vward" "$ROOT/opt/share/vward" "$ROOT/opt/bin" \
-        "$ROOT/opt/share/keenetic-apps/www" "$ROOT/opt/var/lib/vward/updater"
+        "$ROOT/opt/share/vward/console/www" "$ROOT/opt/var/lib/vward/updater"
     cp "$WORK/public.pem" "$ROOT/opt/etc/vward/update-public.pem"
     printf '%s\n' '0.1.0-dev' > "$ROOT/opt/share/vward/VERSION"
-    printf '%s\n' old > "$ROOT/opt/bin/adaptive-route.sh"
-    printf '%s\n' wan > "$ROOT/opt/bin/wan-guardian.sh"
-    printf '%s\n' html > "$ROOT/opt/share/keenetic-apps/www/index.html"
+    printf '%s\n' old > "$ROOT/opt/bin/vward-route.sh"
+    printf '%s\n' wan > "$ROOT/opt/bin/vward-wan-guard.sh"
+    printf '%s\n' html > "$ROOT/opt/share/vward/console/www/index.html"
     CONFIG=$ROOT/opt/etc/vward/update.conf
     {
         printf '%s\n' 'update_enabled=1' 'auto_apply=0' 'channel=dev'
@@ -53,11 +53,11 @@ make_package() {
     label=$1
     PKGDIR=$WORK/package-$label
     mkdir -p "$PKGDIR/files"
-    printf '%s\n' "new-$label" > "$PKGDIR/files/adaptive-route.sh"
-    printf '%s\n' "wan-$label" > "$PKGDIR/files/wan-guardian.sh"
-    digest=$(sha256sum "$PKGDIR/files/adaptive-route.sh" | awk '{print $1}')
-    wan_digest=$(sha256sum "$PKGDIR/files/wan-guardian.sh" | awk '{print $1}')
-    jq -n --arg digest "$digest" --arg wan_digest "$wan_digest" '{schema:1,files:[{source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$digest,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$wan_digest,mode:"0755",component:"wan-guard",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
+    printf '%s\n' "new-$label" > "$PKGDIR/files/vward-route.sh"
+    printf '%s\n' "wan-$label" > "$PKGDIR/files/vward-wan-guard.sh"
+    digest=$(sha256sum "$PKGDIR/files/vward-route.sh" | awk '{print $1}')
+    wan_digest=$(sha256sum "$PKGDIR/files/vward-wan-guard.sh" | awk '{print $1}')
+    jq -n --arg digest "$digest" --arg wan_digest "$wan_digest" '{schema:1,files:[{source:"files/vward-route.sh",target:"/opt/bin/vward-route.sh",sha256:$digest,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/vward-wan-guard.sh",target:"/opt/bin/vward-wan-guard.sh",sha256:$wan_digest,mode:"0755",component:"wan-guard",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
     PACKAGE=$WORK/package-$label.tar.gz
     tar -czf "$PACKAGE" -C "$PKGDIR" .
 }
@@ -131,18 +131,18 @@ set +e
 VWARD_TEST_FAIL_INSTALL_AT=2 run_update --apply >/dev/null 2>&1
 code=$?
 set -e
-[ "$code" -eq 40 ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = old ] && pass 'install failure rolls back' || fail 'install failure rollback'
+[ "$code" -eq 40 ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = old ] && pass 'install failure rolls back' || fail 'install failure rollback'
 
 new_root health; make_package health; make_manifest health CRITICAL 1 0.1.1-dev
 set +e
 VWARD_TEST_FORCE_HEALTH_FAIL=1 run_update --apply >"$WORK/health.out" 2>&1
 code=$?
 set -e
-if [ "$code" -eq 41 ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = old ]; then
+if [ "$code" -eq 41 ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = old ]; then
     pass 'health failure rolls back'
 else
     sed 's/^/  # /' "$WORK/health.out"
-    printf '  # code=%s content=%s phase=%s\n' "$code" "$(cat "$ROOT/opt/bin/adaptive-route.sh")" "$(sed -n 's/^phase=//p' "$ROOT/opt/var/lib/vward/updater/journal.state" 2>/dev/null || :)"
+    printf '  # code=%s content=%s phase=%s\n' "$code" "$(cat "$ROOT/opt/bin/vward-route.sh")" "$(sed -n 's/^phase=//p' "$ROOT/opt/var/lib/vward/updater/journal.state" 2>/dev/null || :)"
     fail 'health failure rollback'
 fi
 
@@ -156,9 +156,9 @@ expect_code 'interrupted rollback is reported' 42 env VWARD_TEST_FAIL_ROLLBACK_A
 
 new_root recovery; make_package recovery; make_manifest recovery CRITICAL 1 0.1.1-dev
 mkdir -p "$ROOT/opt/var/backups/vward/recovery/files/opt/bin"
-cp "$ROOT/opt/bin/adaptive-route.sh" "$ROOT/opt/var/backups/vward/recovery/files/opt/bin/adaptive-route.sh"
-recovery_sha=$(sha256sum "$ROOT/opt/bin/adaptive-route.sh" | awk '{print $1}')
-printf '/opt/bin/adaptive-route.sh\t1\t644\t%s\t%s\n' "$recovery_sha" "$recovery_sha" > "$ROOT/opt/var/backups/vward/recovery/files.tsv"
+cp "$ROOT/opt/bin/vward-route.sh" "$ROOT/opt/var/backups/vward/recovery/files/opt/bin/vward-route.sh"
+recovery_sha=$(sha256sum "$ROOT/opt/bin/vward-route.sh" | awk '{print $1}')
+printf '/opt/bin/vward-route.sh\t1\t644\t%s\t%s\n' "$recovery_sha" "$recovery_sha" > "$ROOT/opt/var/backups/vward/recovery/files.tsv"
 printf '0\n' > "$ROOT/opt/var/backups/vward/recovery/committed.existed"
 recovery_index_sha=$(sha256sum "$ROOT/opt/var/backups/vward/recovery/files.tsv" | awk '{print $1}')
 printf 'index_sha=%s\ncommitted_sha=-\n' "$recovery_index_sha" > "$ROOT/opt/var/backups/vward/recovery/backup.meta"

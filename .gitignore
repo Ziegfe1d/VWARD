@@ -19,7 +19,7 @@ backups/
 config/local/
 hints.conf
 skip-domains.conf
-wg-failopen.disabled
+tunnel-guard.disabled
 
 # Private material and router diagnostics
 *.key

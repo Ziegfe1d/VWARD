@@ -3,13 +3,13 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-PIDFILE="/opt/var/run/agh-adaptive-live.pid"
-SCRIPT="/opt/bin/agh-adaptive-live.sh"
-LOG="/opt/var/log/agh-adaptive-live.log"
+PIDFILE="/opt/var/run/vward/route-engine.pid"
+SCRIPT="/opt/bin/vward-route-engine.sh"
+LOG="/opt/var/log/vward-route-engine.log"
 
-LIVE_LOCK="/tmp/agh-adaptive-live.lock"
-CONTROL_LOCK="/tmp/S91adaptive-live.control.lock"
-CHILD_STATE="/tmp/S91adaptive-live.tcpdump-missing"
+LIVE_LOCK="/tmp/vward-route-engine.lock"
+CONTROL_LOCK="/tmp/S91vward-route-engine.control.lock"
+CHILD_STATE="/tmp/S91vward-route-engine.tcpdump-missing"
 START_WAIT=12
 STOP_WAIT=6
 CONTROL_WAIT=20
@@ -51,7 +51,7 @@ adaptive_live_pids()
 {
     ps w |
     awk '
-        $6=="/opt/bin/agh-adaptive-live.sh" {
+        $6=="/opt/bin/vward-route-engine.sh" {
             print $1
         }
     '
@@ -124,7 +124,7 @@ clean_service()
 
 
 # Core health belongs to the main Live process.
-# tcpdump is a self-healing child owned by agh-adaptive-live.sh.
+# tcpdump is a self-healing child owned by vward-route-engine.sh.
 service_healthy()
 {
     PID=$(cat "$PIDFILE" 2>/dev/null)

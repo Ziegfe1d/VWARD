@@ -9,19 +9,19 @@ WAN="eth3"
 WG="nwg1"
 DNS="9.9.9.10"
 
-STATE_DIR="/opt/var/lib/adaptive-live"
+STATE_DIR="/opt/var/lib/vward/route-engine"
 
 MANUAL="$STATE_DIR/manual-domains.txt"
 ADAPTIVE="$STATE_DIR/adaptive-domains.txt"
 PERSIST="$STATE_DIR/adaptive-persist.txt"
 REFRESH_TS="$STATE_DIR/groups-refresh"
 
-EVENT_LOG="/opt/var/log/adaptive-live-events.log"
+EVENT_LOG="/opt/var/log/vward-route-engine-events.log"
 
-LOCK="/tmp/agh-adaptive-live.lock"
-CHANGE_LOCK="/tmp/adaptive-route-change.lock"
+LOCK="/tmp/vward-route-engine.lock"
+CHANGE_LOCK="/tmp/vward-route-change.lock"
 
-RAW="/tmp/adaptive-live-dns.$$"
+RAW="/tmp/vward-route-engine-dns.$$"
 
 CONNECT_TIMEOUT=2
 MAX_TIME=3
@@ -100,8 +100,8 @@ refresh_sets()
         return 0
     fi
 
-    CFG="/tmp/adaptive-live-running.$$"
-    ALL="/tmp/adaptive-live-all.$$"
+    CFG="/tmp/vward-route-engine-running.$$"
+    ALL="/tmp/vward-route-engine-all.$$"
 
     if ! ndmc -c "show running-config" > "$CFG" 2>/dev/null ||
        [ ! -s "$CFG" ]; then
@@ -183,7 +183,7 @@ is_adaptive()
 is_special()
 {
     H="$1"
-    F="/opt/etc/adaptive-route/skip-domains.conf"
+    F="/opt/etc/vward/route-engine/skip-domains.conf"
 
     [ -f "$F" ] || return 1
 
@@ -309,7 +309,7 @@ agh_blocked()
 
 resolve_ipv4()
 {
-    /opt/bin/adaptive-resolve4.sh "$1" 2>/dev/null |
+    /opt/bin/vward-route-resolve4.sh "$1" 2>/dev/null |
     awk '
         /^Address [0-9]+:/ &&
         $3 ~ /^[0-9]+\./ {
@@ -430,9 +430,9 @@ restore_adaptive_from_persist()
         return 1
     }
 
-    CFG="/tmp/adaptive-restore-cfg.$$"
-    CUR="/tmp/adaptive-restore-cur.$$"
-    WANT="/tmp/adaptive-restore-want.$$"
+    CFG="/tmp/vward-route-restore-cfg.$$"
+    CUR="/tmp/vward-route-restore-cur.$$"
+    WANT="/tmp/vward-route-restore-want.$$"
 
     if ! ndmc -c "show running-config" > "$CFG" 2>/dev/null ||
        [ ! -s "$CFG" ]; then
@@ -517,7 +517,7 @@ add_adaptive()
     refresh_sets
 
     if is_manual_known "$H" || parent_list_match "$H" "$MANUAL" || \
-       is_special "$H" || parent_list_match "$H" "/opt/etc/adaptive-route/skip-domains.conf" || \
+       is_special "$H" || parent_list_match "$H" "/opt/etc/vward/route-engine/skip-domains.conf" || \
        is_adaptive "$H"; then
         echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_ABORT_STATE|$H" >> "$EVENT_LOG"
         change_unlock
@@ -596,7 +596,7 @@ remove_adaptive()
     H="$1"
 
     # Removal from AdaptiveAuto is owned exclusively by
-    # adaptive-auto-maint.sh with 3-step hysteresis.
+    # vward-route-reconciler.sh with 3-step hysteresis.
     return 0
 }
 
@@ -900,9 +900,9 @@ add_hint_adaptive()
     if is_manual_known "$H" || \
        parent_list_match "$H" "$MANUAL" || \
        is_special "$H" || \
-       parent_list_match "$H" "/opt/etc/adaptive-route/skip-domains.conf" || \
+       parent_list_match "$H" "/opt/etc/vward/route-engine/skip-domains.conf" || \
        is_adaptive "$H" || \
-       ! parent_list_match "$H" "/opt/etc/adaptive-route/hints.conf"; then
+       ! parent_list_match "$H" "/opt/etc/vward/route-engine/hints.conf"; then
 
         change_unlock
         return 0
@@ -1036,14 +1036,14 @@ handle_host()
 
 
     # Aeternia / специальные исключения.
-    if is_special "$HOST" || parent_list_match "$HOST" "/opt/etc/adaptive-route/skip-domains.conf"; then
+    if is_special "$HOST" || parent_list_match "$HOST" "/opt/etc/vward/route-engine/skip-domains.conf"; then
         return
     fi
 
 
 
     # Hint / Preload V5
-    if parent_list_match "$HOST" "/opt/etc/adaptive-route/hints.conf"; then
+    if parent_list_match "$HOST" "/opt/etc/vward/route-engine/hints.conf"; then
         handle_hint "$HOST"
         return
     fi

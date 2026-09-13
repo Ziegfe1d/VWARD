@@ -2,11 +2,11 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-CONF="/opt/etc/adaptive-route/services.conf"
-STATE_DIR="/opt/var/lib/adaptive-route"
-LOG="/opt/var/log/adaptive-route.log"
-LOCK="/tmp/adaptive-route.lock"
-RUNCFG="/tmp/adaptive-route.running"
+CONF="/opt/etc/vward/route-engine/services.conf"
+STATE_DIR="/opt/var/lib/vward/route-tools"
+LOG="/opt/var/log/vward-route.log"
+LOCK="/tmp/vward-route.lock"
+RUNCFG="/tmp/vward-route.running"
 
 mkdir -p "$STATE_DIR"
 

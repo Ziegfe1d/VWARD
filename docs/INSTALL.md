@@ -100,7 +100,7 @@ ip -4 route show
 
 ## 6. Bootstrap VWARD Update Engine
 
-`components/update-engine/install-smart-updater.sh` - production bootstrap только движка
+`components/update-engine/install-vward-update-engine.sh` - production bootstrap только движка
 обновлений. Он проверяет зависимости и control plane, скачивает файлы по HTTPS,
 сверяет `SHA256SUMS`, устанавливает pinned Ed25519 public key, создаёт backup,
 активирует slot и добавляет одну помеченную cron-строку.
@@ -134,7 +134,7 @@ key на роутере находиться не должен.
 
 ```sh
 test -r /opt/share/vward/VERSION && sed -n '1p' /opt/share/vward/VERSION
-ps w | grep '[a]gh-adaptive-live.sh'
+ps w | grep '[v]ward-route-engine.sh'
 ps w | grep '[c]rond-supervisor.sh'
 crontab -l | grep VWARD
 /opt/share/vward/updater/current/vward-update.sh --status

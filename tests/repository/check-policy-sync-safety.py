@@ -8,8 +8,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-AUDIT = ROOT / "components/policy-sync/scripts/vpn-domain-audit.sh"
-RECONCILE = ROOT / "components/policy-sync/scripts/vpn-night-reconcile.sh"
+AUDIT = ROOT / "components/policy-sync/scripts/vward-policy-audit.sh"
+RECONCILE = ROOT / "components/policy-sync/scripts/vward-policy-reconcile.sh"
 
 
 def fail(message: str) -> None:
@@ -53,9 +53,9 @@ for name, source in (("audit", audit_source), ("reconcile", reconcile_source)):
 
     fixture = """\
 dns-proxy
-    route object-group domain-list1 Wireguard1
-    route object-group domain-list10 Wireguard1
-    route object-group domain-list11 Wireguard1
+    route object-group domain-list1 nwg1
+    route object-group domain-list10 nwg1
+    route object-group domain-list11 nwg1
 !
 object-group fqdn domain-list1
     description Youtube
@@ -158,4 +158,4 @@ with tempfile.TemporaryDirectory() as td:
     if result.returncode != 0:
         fail(f"membership_state missed clashmini.com in domain-list11: rc={result.returncode}")
 
-print("VPN_AUDIT_SAFETY=PASS")
+print("POLICY_SYNC_SAFETY=PASS")

@@ -20,13 +20,13 @@ openssl pkey -in "$WORK/private.pem" -pubout -out "$WORK/public.pem" >/dev/null 
 new_root() {
     label=$1
     ROOT=$WORK/root-$label
-    mkdir -p "$ROOT/opt/etc/vward" "$ROOT/opt/etc/keenetic-apps" "$ROOT/opt/share/vward" \
-        "$ROOT/opt/bin" "$ROOT/opt/share/keenetic-apps/www/cgi-bin" "$ROOT/opt/var/lib/vward/updater"
+    mkdir -p "$ROOT/opt/etc/vward" "$ROOT/opt/etc/vward/console" "$ROOT/opt/share/vward" \
+        "$ROOT/opt/bin" "$ROOT/opt/share/vward/console/www/cgi-bin" "$ROOT/opt/var/lib/vward/updater"
     cp "$WORK/public.pem" "$ROOT/opt/etc/vward/update-public.pem"
     printf '%s\n' '0.1.0-dev' > "$ROOT/opt/share/vward/VERSION"
-    printf '%s\n' old > "$ROOT/opt/bin/adaptive-route.sh"
-    printf '%s\n' wan > "$ROOT/opt/bin/wan-guardian.sh"
-    printf '%s\n' html > "$ROOT/opt/share/keenetic-apps/www/index.html"
+    printf '%s\n' old > "$ROOT/opt/bin/vward-route.sh"
+    printf '%s\n' wan > "$ROOT/opt/bin/vward-wan-guard.sh"
+    printf '%s\n' html > "$ROOT/opt/share/vward/console/www/index.html"
     CONFIG=$ROOT/opt/etc/vward/update.conf
     {
         printf '%s\n' 'update_enabled=1' 'auto_apply=1' 'auto_critical=1' 'auto_important=1' 'auto_routine=1' 'channel=dev'
@@ -44,11 +44,11 @@ make_package() {
     label=$1
     PKGDIR=$WORK/package-$label
     mkdir -p "$PKGDIR/files"
-    printf '%s\n' "new-$label" > "$PKGDIR/files/adaptive-route.sh"
-    printf '%s\n' "wan-$label" > "$PKGDIR/files/wan-guardian.sh"
-    one=$(sha256sum "$PKGDIR/files/adaptive-route.sh" | awk '{print $1}')
-    two=$(sha256sum "$PKGDIR/files/wan-guardian.sh" | awk '{print $1}')
-    jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guard",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
+    printf '%s\n' "new-$label" > "$PKGDIR/files/vward-route.sh"
+    printf '%s\n' "wan-$label" > "$PKGDIR/files/vward-wan-guard.sh"
+    one=$(sha256sum "$PKGDIR/files/vward-route.sh" | awk '{print $1}')
+    two=$(sha256sum "$PKGDIR/files/vward-wan-guard.sh" | awk '{print $1}')
+    jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/vward-route.sh",target:"/opt/bin/vward-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/vward-wan-guard.sh",target:"/opt/bin/vward-wan-guard.sh",sha256:$two,mode:"0755",component:"wan-guard",restart_policy:"none",config_policy:"program-only"}]}' > "$PKGDIR/package-manifest.json"
     PACKAGE=$WORK/package-$label.tar.gz
     tar -czf "$PACKAGE" -C "$PKGDIR" .
 }
@@ -90,16 +90,16 @@ set +e; VWARD_TEST_FREE_STAGING_KB=0 run_update >/dev/null 2>&1; code=$?; set -e
 
 new_root backup-space; make_package backup-space; make_manifest backup-space CRITICAL
 set +e; VWARD_TEST_FREE_BACKUP_KB=0 run_update >/dev/null 2>&1; code=$?; set -e
-[ "$code" -eq 33 ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = old ] && ok 'backup space blocks install' || bad 'backup space preflight'
+[ "$code" -eq 33 ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = old ] && ok 'backup space blocks install' || bad 'backup space preflight'
 
 new_root target-space; make_package target-space; make_manifest target-space CRITICAL
 set +e; VWARD_TEST_FREE_TARGET_KB=0 run_update >/dev/null 2>&1; code=$?; set -e
-[ "$code" -eq 33 ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = old ] && ok 'target space blocks sibling replacement' || bad 'target space preflight'
+[ "$code" -eq 33 ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = old ] && ok 'target space blocks sibling replacement' || bad 'target space preflight'
 
 # Allow-list matches the verified installation map.
 new_root allowlist
 allowlist_check() {
-    VWARD_ROOT_PREFIX=$ROOT VWARD_UPDATE_CONFIG=$CONFIG sh -c '. "$1"; vu_safe_target /opt/etc/keenetic-apps/lighttpd.conf && ! vu_safe_target /opt/etc/lighttpd/lighttpd.conf' sh "$UPDATER/vward-update-common.sh"
+    VWARD_ROOT_PREFIX=$ROOT VWARD_UPDATE_CONFIG=$CONFIG sh -c '. "$1"; vu_safe_target /opt/etc/vward/console/lighttpd.conf && ! vu_safe_target /opt/etc/lighttpd/lighttpd.conf' sh "$UPDATER/vward-update-common.sh"
 }
 assert 'real lighttpd target accepted and old path rejected' allowlist_check
 
@@ -133,11 +133,11 @@ set -e
 pending_before=$(sed -n 's/^update_id=//p' "$STATE/pending/pending.state" 2>/dev/null || :)
 env VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" VWARD_TEST_HTTP_STATUS=304 VWARD_TEST_PACKAGE="$PACKAGE" VWARD_TEST_NOW_HM=03:30 VWARD_TEST_NOW_EPOCH=2000 "$UPDATER/vward-update-watch.sh" --once >"$WORK/pending-second.out" 2>&1
 installed=$(sed -n 's/^installed_update_id=//p' "$STATE/committed.state")
-if [ "$first_code" -eq 20 ] && [ "$pending_before" = pending304 ] && [ "$installed" = pending304 ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = new-pending304 ]; then
+if [ "$first_code" -eq 20 ] && [ "$pending_before" = pending304 ] && [ "$installed" = pending304 ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = new-pending304 ]; then
     ok 'deferred pending survives 304 and later applies'
 else
     sed 's/^/  # first: /' "$WORK/pending-first.out"; sed 's/^/  # second: /' "$WORK/pending-second.out"
-    printf '  # first_code=%s pending=%s installed=%s content=%s\n' "$first_code" "$pending_before" "$installed" "$(cat "$ROOT/opt/bin/adaptive-route.sh")"
+    printf '  # first_code=%s pending=%s installed=%s content=%s\n' "$first_code" "$pending_before" "$installed" "$(cat "$ROOT/opt/bin/vward-route.sh")"
     bad 'pending 304 retry'
 fi
 
@@ -176,7 +176,7 @@ for point in after_installed_version after_sequence before_snapshot; do
     set +e; VWARD_TEST_CRASH_COMMIT=$point run_update >/dev/null 2>&1; crash_code=$?; set -e
     env VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" "$UPDATER/vward-update.sh" --recover >/dev/null 2>&1
     committed=$(sed -n 's/^installed_update_id=//p' "$STATE/committed.state")
-    [ "$crash_code" -eq 99 ] && [ "$committed" = bootstrap ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = old ] && ok "commit crash $point restores old transaction" || bad "commit crash $point"
+    [ "$crash_code" -eq 99 ] && [ "$committed" = bootstrap ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = old ] && ok "commit crash $point restores old transaction" || bad "commit crash $point"
 done
 
 # Crash after atomic snapshot finalizes the new transaction on recovery.
@@ -184,23 +184,23 @@ new_root crash-after; make_package crash-after; make_manifest crash-after CRITIC
 set +e; VWARD_TEST_CRASH_COMMIT=after_snapshot run_update >/dev/null 2>&1; crash_code=$?; set -e
 env VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" "$UPDATER/vward-update.sh" --recover >/dev/null 2>&1
 committed=$(sed -n 's/^installed_update_id=//p' "$STATE/committed.state")
-[ "$crash_code" -eq 99 ] && [ "$committed" = crash-after ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = new-crash-after ] && ok 'post-snapshot recovery finalizes new transaction' || bad 'post-snapshot recovery'
+[ "$crash_code" -eq 99 ] && [ "$committed" = crash-after ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = new-crash-after ] && ok 'post-snapshot recovery finalizes new transaction' || bad 'post-snapshot recovery'
 
 # Explicit rollback restores program files and previous committed metadata.
 new_root metadata-rollback; make_package metadata-rollback; make_manifest metadata-rollback CRITICAL
 run_update >/dev/null 2>&1
 env VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" "$UPDATER/vward-update-rollback.sh" >/dev/null 2>&1
 committed=$(sed -n 's/^installed_update_id=//p' "$STATE/committed.state")
-[ "$committed" = bootstrap ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = old ] && ok 'rollback restores committed metadata and files' || bad 'rollback metadata restore'
+[ "$committed" = bootstrap ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = old ] && ok 'rollback restores committed metadata and files' || bad 'rollback metadata restore'
 
 # Corrupted backup is rejected before restore and leaves a stable recovery state.
 new_root corrupt-backup; make_package corrupt-backup; make_manifest corrupt-backup CRITICAL
 run_update >/dev/null 2>&1
 backup=$(sed -n 's/^active_backup=//p' "$STATE/journal.state")
-printf corrupt >> "$backup/files/opt/bin/adaptive-route.sh"
+printf corrupt >> "$backup/files/opt/bin/vward-route.sh"
 set +e; env VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" "$UPDATER/vward-update-rollback.sh" >/dev/null 2>&1; corrupt_code=$?; set -e
 phase=$(sed -n 's/^phase=//p' "$STATE/journal.state")
-[ "$corrupt_code" -eq 42 ] && [ "$phase" = RECOVERY_REQUIRED ] && [ "$(cat "$ROOT/opt/bin/adaptive-route.sh")" = new-corrupt-backup ] && ok 'corrupted backup fails closed' || bad 'backup corruption rejection'
+[ "$corrupt_code" -eq 42 ] && [ "$phase" = RECOVERY_REQUIRED ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = new-corrupt-backup ] && ok 'corrupted backup fails closed' || bad 'backup corruption rejection'
 
 # Successful apply cleans transaction staging and pending artifacts.
 new_root cleanup; make_package cleanup; make_manifest cleanup CRITICAL

@@ -19,12 +19,12 @@ new_root() {
     label=$1
     ROOT=$WORK/root-$label
     mkdir -p "$ROOT/opt/etc/vward" "$ROOT/opt/share/vward" "$ROOT/opt/bin" \
-        "$ROOT/opt/share/keenetic-apps/www" "$ROOT/opt/var/lib/vward/updater" "$ROOT/tmp"
+        "$ROOT/opt/share/vward/console/www" "$ROOT/opt/var/lib/vward/updater" "$ROOT/tmp"
     cp "$WORK/public.pem" "$ROOT/opt/etc/vward/update-public.pem"
     printf '0.1.0-dev\n' > "$ROOT/opt/share/vward/VERSION"
-    awk 'BEGIN{for(i=0;i<1900;i++)printf "O";printf "\n"}' > "$ROOT/opt/bin/adaptive-route.sh"
-    awk 'BEGIN{for(i=0;i<1900;i++)printf "W";printf "\n"}' > "$ROOT/opt/bin/wan-guardian.sh"
-    printf 'html\n' > "$ROOT/opt/share/keenetic-apps/www/index.html"
+    awk 'BEGIN{for(i=0;i<1900;i++)printf "O";printf "\n"}' > "$ROOT/opt/bin/vward-route.sh"
+    awk 'BEGIN{for(i=0;i<1900;i++)printf "W";printf "\n"}' > "$ROOT/opt/bin/vward-wan-guard.sh"
+    printf 'html\n' > "$ROOT/opt/share/vward/console/www/index.html"
     CONFIG=$ROOT/opt/etc/vward/update.conf
     {
         printf '%s\n' 'update_enabled=1' 'auto_apply=1' 'auto_critical=1' 'auto_important=1' 'auto_routine=1' 'channel=dev'
@@ -42,14 +42,14 @@ make_package() {
     label=$1
     PKGDIR=$WORK/pkg-$label
     mkdir -p "$PKGDIR/files"
-    awk 'BEGIN{for(i=0;i<1900;i++)printf "N";printf "\n"}' > "$PKGDIR/files/adaptive-route.sh"
-    awk 'BEGIN{for(i=0;i<1900;i++)printf "V";printf "\n"}' > "$PKGDIR/files/wan-guardian.sh"
-    one=$(sha256sum "$PKGDIR/files/adaptive-route.sh" | awk '{print $1}')
-    two=$(sha256sum "$PKGDIR/files/wan-guardian.sh" | awk '{print $1}')
+    awk 'BEGIN{for(i=0;i<1900;i++)printf "N";printf "\n"}' > "$PKGDIR/files/vward-route.sh"
+    awk 'BEGIN{for(i=0;i<1900;i++)printf "V";printf "\n"}' > "$PKGDIR/files/vward-wan-guard.sh"
+    one=$(sha256sum "$PKGDIR/files/vward-route.sh" | awk '{print $1}')
+    two=$(sha256sum "$PKGDIR/files/vward-wan-guard.sh" | awk '{print $1}')
     jq -n --arg one "$one" --arg two "$two" \
       '{schema:1,files:[
-        {source:"files/adaptive-route.sh",target:"/opt/bin/adaptive-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},
-        {source:"files/wan-guardian.sh",target:"/opt/bin/wan-guardian.sh",sha256:$two,mode:"0755",component:"wan-guard",restart_policy:"none",config_policy:"program-only"}
+        {source:"files/vward-route.sh",target:"/opt/bin/vward-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},
+        {source:"files/vward-wan-guard.sh",target:"/opt/bin/vward-wan-guard.sh",sha256:$two,mode:"0755",component:"wan-guard",restart_policy:"none",config_policy:"program-only"}
       ]}' > "$PKGDIR/package-manifest.json"
     PACKAGE=$WORK/pkg-$label.tar.gz
     tar -czf "$PACKAGE" -C "$PKGDIR" .

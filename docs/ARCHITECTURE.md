@@ -22,23 +22,23 @@ lighttpd/CGI-панели для KeeneticOS с Entware.
 ### VWARD Route Engine, Reconciler и Tools
 
 Проверяют FQDN-группы Keenetic и DNS-активность, тестируют прямой и WireGuard-пути,
-поддерживают группу `AdaptiveAuto`. `agh-adaptive-live.sh` наблюдает DNS-трафик,
-`adaptive-auto-maint.sh` перепроверяет ранее адаптированные домены.
+поддерживают группу `AdaptiveAuto`. `vward-route-engine.sh` наблюдает DNS-трафик,
+`vward-route-reconciler.sh` перепроверяет ранее адаптированные домены.
 
 ### VWARD Policy Sync
 
 Через `ndmc` читает активную конфигурацию Keenetic, проверяет цели маршрутизации,
-сохраняет состояние и сверяет домены/подсети, направленные через `Wireguard1`.
+сохраняет состояние и сверяет домены/подсети, направленные через `nwg1`.
 
 ### VWARD Tunnel Guard
 
-`wg-health-watch.sh` фиксирует здоровье туннеля. `wg-failopen-guard.sh` использует
-это состояние для защиты связи и при необходимости меняет состояние `Wireguard1`.
+`vward-tunnel-health.sh` фиксирует здоровье туннеля. `vward-tunnel-guard.sh` использует
+это состояние для защиты связи и при необходимости меняет состояние `nwg1`.
 
 ### VWARD WAN Guard
 
-`wan-guardian.sh` выполняет ступенчатую диагностику и восстановление подключения
-`ISP`/физического WAN. `wan-recovery-actuator.sh` ограничен обновлением DHCP-клиента.
+`vward-wan-guard.sh` выполняет ступенчатую диагностику и восстановление подключения
+`ISP`/физического WAN. `vward-wan-recovery.sh` ограничен обновлением DHCP-клиента.
 
 ### VWARD Runtime
 

@@ -11,15 +11,15 @@ CONNECT_TIMEOUT=2
 MAX_TIME=3
 SUCCESS_THRESHOLD=3
 
-STATE_DIR="/opt/var/lib/vpn-audit"
-LOG="/opt/var/log/vpn-audit.log"
-SUMMARY_LOG="/opt/var/log/vpn-audit-summary.log"
+STATE_DIR="/opt/var/lib/vward/policy-audit"
+LOG="/opt/var/log/vward-policy-audit.log"
+SUMMARY_LOG="/opt/var/log/vward-policy-audit-summary.log"
 
 RUNCFG="/tmp/vpn-audit-running.$$"
 TARGETS="/tmp/vpn-audit-targets.$$"
 CURRENT_TARGETS="/tmp/vpn-audit-current.$$"
 CANDIDATES="$STATE_DIR/candidates.txt"
-LOCK="/tmp/vpn-domain-audit.lock"
+LOCK="/tmp/vward-policy-sync.lock"
 
 mkdir -p "$STATE_DIR" /opt/var/log
 
@@ -84,7 +84,7 @@ WG_GROUPS=$(
     sed -n '/^dns-proxy/,/^!/p' "$RUNCFG" |
     awk '$1=="route" &&
          $2=="object-group" &&
-         $4=="Wireguard1" {print $3}'
+         $4=="nwg1" {print $3}'
 )
 
 : > "$TARGETS"
@@ -143,7 +143,7 @@ while IFS='|' read GROUP HOST; do
     esac
 
     IP=$(
-        /opt/bin/adaptive-resolve4.sh "$HOST" 2>/dev/null |
+        /opt/bin/vward-route-resolve4.sh "$HOST" 2>/dev/null |
         awk '/^Address [0-9]+:/ &&
              $3 ~ /^[0-9]+\./ {ip=$3}
              END {print ip}'

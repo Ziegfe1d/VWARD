@@ -95,39 +95,39 @@ jobs:
           cp VERSION "$PKGDIR/files/VERSION"
           cp web/index.html "$PKGDIR/files/web/index.html"
           cp web/cgi-bin/api.cgi "$PKGDIR/files/web/cgi-bin/api.cgi"
-          cp components/route-tools/scripts/adaptive-hints-update.sh "$PKGDIR/files/bin/adaptive-hints-update.sh"
-          cp components/route-engine/scripts/agh-adaptive-live.sh "$PKGDIR/files/bin/agh-adaptive-live.sh"
-          cp components/policy-sync/scripts/vpn-domain-audit.sh "$PKGDIR/files/bin/vpn-domain-audit.sh"
-          cp components/policy-sync/scripts/vpn-night-reconcile.sh "$PKGDIR/files/bin/vpn-night-reconcile.sh"
-          cp components/policy-sync/scripts/vpn-subnet-sync.sh "$PKGDIR/files/bin/vpn-subnet-sync.sh"
+          cp components/route-tools/scripts/vward-route-hints-update.sh "$PKGDIR/files/bin/vward-route-hints-update.sh"
+          cp components/route-engine/scripts/vward-route-engine.sh "$PKGDIR/files/bin/vward-route-engine.sh"
+          cp components/policy-sync/scripts/vward-policy-audit.sh "$PKGDIR/files/bin/vward-policy-audit.sh"
+          cp components/policy-sync/scripts/vward-policy-reconcile.sh "$PKGDIR/files/bin/vward-policy-reconcile.sh"
+          cp components/policy-sync/scripts/vward-policy-sync.sh "$PKGDIR/files/bin/vward-policy-sync.sh"
           version_sha="$(sha256sum "$PKGDIR/files/VERSION" | awk '{print $1}')"
           index_sha="$(sha256sum "$PKGDIR/files/web/index.html" | awk '{print $1}')"
           api_sha="$(sha256sum "$PKGDIR/files/web/cgi-bin/api.cgi" | awk '{print $1}')"
-          hints_sha="$(sha256sum "$PKGDIR/files/bin/adaptive-hints-update.sh" | awk '{print $1}')"
-          live_sha="$(sha256sum "$PKGDIR/files/bin/agh-adaptive-live.sh" | awk '{print $1}')"
-          audit_sha="$(sha256sum "$PKGDIR/files/bin/vpn-domain-audit.sh" | awk '{print $1}')"
-          reconcile_sha="$(sha256sum "$PKGDIR/files/bin/vpn-night-reconcile.sh" | awk '{print $1}')"
-          subnet_sha="$(sha256sum "$PKGDIR/files/bin/vpn-subnet-sync.sh" | awk '{print $1}')"
+          hints_sha="$(sha256sum "$PKGDIR/files/bin/vward-route-hints-update.sh" | awk '{print $1}')"
+          live_sha="$(sha256sum "$PKGDIR/files/bin/vward-route-engine.sh" | awk '{print $1}')"
+          audit_sha="$(sha256sum "$PKGDIR/files/bin/vward-policy-audit.sh" | awk '{print $1}')"
+          reconcile_sha="$(sha256sum "$PKGDIR/files/bin/vward-policy-reconcile.sh" | awk '{print $1}')"
+          subnet_sha="$(sha256sum "$PKGDIR/files/bin/vward-policy-sync.sh" | awk '{print $1}')"
           jq -n --arg version_sha "$version_sha" --arg index_sha "$index_sha" --arg api_sha "$api_sha" \
             --arg hints_sha "$hints_sha" --arg live_sha "$live_sha" --arg audit_sha "$audit_sha" \
             --arg reconcile_sha "$reconcile_sha" --arg subnet_sha "$subnet_sha" \
             '{schema:1,files:[
               {source:"files/VERSION",target:"/opt/share/vward/VERSION",mode:"0644",sha256:$version_sha,component:"platform-core",restart_policy:"none",config_policy:"program-only"},
-              {source:"files/web/index.html",target:"/opt/share/keenetic-apps/www/index.html",mode:"0644",sha256:$index_sha,component:"console",restart_policy:"none",config_policy:"program-only"},
-              {source:"files/web/cgi-bin/api.cgi",target:"/opt/share/keenetic-apps/www/cgi-bin/api.cgi",mode:"0755",sha256:$api_sha,component:"console",restart_policy:"none",config_policy:"program-only"},
-              {source:"files/bin/adaptive-hints-update.sh",target:"/opt/bin/adaptive-hints-update.sh",mode:"0755",sha256:$hints_sha,component:"route-tools",restart_policy:"none",config_policy:"program-only"},
-              {source:"files/bin/agh-adaptive-live.sh",target:"/opt/bin/agh-adaptive-live.sh",mode:"0755",sha256:$live_sha,component:"route-engine",restart_policy:"none",config_policy:"program-only"},
-              {source:"files/bin/vpn-domain-audit.sh",target:"/opt/bin/vpn-domain-audit.sh",mode:"0755",sha256:$audit_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"},
-              {source:"files/bin/vpn-night-reconcile.sh",target:"/opt/bin/vpn-night-reconcile.sh",mode:"0755",sha256:$reconcile_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"},
-              {source:"files/bin/vpn-subnet-sync.sh",target:"/opt/bin/vpn-subnet-sync.sh",mode:"0755",sha256:$subnet_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"}
+              {source:"files/web/index.html",target:"/opt/share/vward/console/www/index.html",mode:"0644",sha256:$index_sha,component:"console",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/web/cgi-bin/api.cgi",target:"/opt/share/vward/console/www/cgi-bin/api.cgi",mode:"0755",sha256:$api_sha,component:"console",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/bin/vward-route-hints-update.sh",target:"/opt/bin/vward-route-hints-update.sh",mode:"0755",sha256:$hints_sha,component:"route-tools",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/bin/vward-route-engine.sh",target:"/opt/bin/vward-route-engine.sh",mode:"0755",sha256:$live_sha,component:"route-engine",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/bin/vward-policy-audit.sh",target:"/opt/bin/vward-policy-audit.sh",mode:"0755",sha256:$audit_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/bin/vward-policy-reconcile.sh",target:"/opt/bin/vward-policy-reconcile.sh",mode:"0755",sha256:$reconcile_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/bin/vward-policy-sync.sh",target:"/opt/bin/vward-policy-sync.sh",mode:"0755",sha256:$subnet_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"}
             ]}' > "$PKGDIR/package-manifest.json"
           test "$(jq '.files|length' "$PKGDIR/package-manifest.json")" = 8
           sh -n web/cgi-bin/api.cgi
-          sh -n components/route-tools/scripts/adaptive-hints-update.sh
-          sh -n components/route-engine/scripts/agh-adaptive-live.sh
-          sh -n components/policy-sync/scripts/vpn-domain-audit.sh
-          sh -n components/policy-sync/scripts/vpn-night-reconcile.sh
-          sh -n components/policy-sync/scripts/vpn-subnet-sync.sh
+          sh -n components/route-tools/scripts/vward-route-hints-update.sh
+          sh -n components/route-engine/scripts/vward-route-engine.sh
+          sh -n components/policy-sync/scripts/vward-policy-audit.sh
+          sh -n components/policy-sync/scripts/vward-policy-reconcile.sh
+          sh -n components/policy-sync/scripts/vward-policy-sync.sh
           unpacked_size="$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{sum+=$1} END{print sum+0}')"
           tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf "$ARTIFACT" -C "$PKGDIR" .
           package_sha="$(sha256sum "$ARTIFACT" | awk '{print $1}')"

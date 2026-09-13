@@ -11,9 +11,9 @@ BOOT_GRACE=180
 RCI_ISP="http://127.0.0.1:79/rci/show/interface?name=ISP"
 RCI_NET="http://127.0.0.1:79/rci/show/internet/status"
 
-LOG="/opt/var/log/wan-guardian.log"
-STATE="/tmp/wan-guardian.state"
-LOCKDIR="/tmp/wan-guardian.lock.d"
+LOG="/opt/var/log/vward-wan-guard.log"
+STATE="/tmp/vward-wan-guard.state"
+LOCKDIR="/tmp/vward-wan-guard.lock.d"
 
 CURL="/opt/bin/curl"
 JQ="/opt/bin/jq"
@@ -38,7 +38,7 @@ lock_is_live()
 
     [ -d "/proc/$LPID" ] || return 1
 
-    grep -Fq "wan-guardian.sh" "/proc/$LPID/cmdline" 2>/dev/null
+    grep -Fq "vward-wan-guard.sh" "/proc/$LPID/cmdline" 2>/dev/null
 }
 
 cleanup()
@@ -131,8 +131,8 @@ emit_state()
 
 # WAN_GUARDIAN_RECOVERY_V03
 
-REC_DIR="/tmp/wan-guardian-recovery"
-REC_LOG="/opt/var/log/wan-guardian-recovery.log"
+REC_DIR="/tmp/vward-wan-guard-recovery"
+REC_LOG="/opt/var/log/vward-wan-guard-recovery.log"
 
 CONFIRM_FAILURES=3
 
@@ -289,7 +289,7 @@ wan_recover()
         ACTION="WAN_BOUNCE"
 
         LD_LIBRARY_PATH= /bin/ndmc -c "interface ISP down" \
-            >/tmp/wan-guardian.ndmc.down 2>&1
+            >/tmp/vward-wan-guard.ndmc.down 2>&1
         WR_DOWN_RC=$?
 
         sleep 5
@@ -302,7 +302,7 @@ wan_recover()
             WR_UP_TRIES=$((WR_UP_TRIES + 1))
 
             LD_LIBRARY_PATH= /bin/ndmc -c "interface ISP up" \
-                >/tmp/wan-guardian.ndmc.up 2>&1
+                >/tmp/vward-wan-guard.ndmc.up 2>&1
             WR_UP_RC=$?
 
             [ "$WR_UP_RC" -eq 0 ] && break
@@ -363,7 +363,7 @@ wan_recover()
     ACTION="DHCP_RENEW"
 
     LD_LIBRARY_PATH= /bin/ndmc -c "interface ISP ip dhcp client renew" \
-        >/tmp/wan-guardian.ndmc.renew 2>&1
+        >/tmp/vward-wan-guard.ndmc.renew 2>&1
     WR_RENEW_RC=$?
 
     echo "$WR_NOW" > "$REC_DIR/last_renew"

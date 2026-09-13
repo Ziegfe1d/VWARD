@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0-dev.2: runtime-унификация и защита Console
+
+- Runtime-файлы, init/cron, PID, lock, state, log и configuration paths напрямую
+  переведены в каноническое пространство имён VWARD без aliases и wrappers.
+- Update Engine allowlist, health checks, backup/rollback simulations, registry и
+  release workflow синхронизированы с новыми runtime-targets.
+- Console сохраняет LAN-only bind `192.168.1.1:8088`; wildcard bind запрещён тестом.
+- Для всех изменяющих API-запросов обязателен request guard и form content type;
+  удалён ненужный CORS-preflight путь.
+- Добавлены browser security headers, запрет directory listing и выдачи файлов с
+  типичными backup/editor suffixes.
+- Проверка живых сокетов и firewall остаётся обязательным блокирующим этапом перед
+  первой установкой Dev на роутер.
+
 ## 0.2.0-dev.1: начало основной dev-линии
 
 - Ветка `dev` синхронизирована с полностью подписанной базой `0.1.7-beta`.
@@ -24,7 +38,7 @@
 - Журналы переведены с одиночных вкладок на компактный multi-source workspace: выбор нескольких источников, поиск, счётчик строк, ручное и автоматическое обновление, копирование, TXT-сохранение и системный Share.
 - Добавлена общая контекстная лампочка-подсказка; текст зависит от открытого раздела и текущего backend-state.
 - Detail pages очищены от повторяющихся заголовков, видимые статусы и служебные поля частично русифицированы, графики получили скруглённые окончания и соединения.
-- Удалена жёсткая привязка Console к `Wireguard0` и `Wireguard1`.
+- Удалена жёсткая привязка Console к `Wireguard0` и `nwg1`.
 - Console API теперь обнаруживает фактические WireGuard-интерфейсы динамически через RCI и отдаёт их как `wg.interfaces[]`.
 - Frontend поддерживает 0, 1 и несколько туннелей без фиксированных `g.wg0` / `g.wg1`.
 - Исправлен подтверждённый случай, когда запрос отсутствующего `Wireguard0` постоянно загрязнял системный журнал Keenetic.

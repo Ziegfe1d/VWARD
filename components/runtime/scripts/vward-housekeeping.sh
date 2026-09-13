@@ -3,25 +3,25 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-HOUSE_LOG="/opt/var/log/adaptive-housekeeping.log"
+HOUSE_LOG="/opt/var/log/vward-housekeeping.log"
 
 # Формат:
 # файл|максимальный_размер_байт
 POLICY="
 /opt/var/log/crond.log|524288
-/opt/var/log/adaptive-live-events.log|524288
-/opt/var/log/agh-adaptive-live.log|262144
-/opt/var/log/wg-health.log|262144
-/opt/var/log/wg-failopen.log|262144
-/opt/var/log/wan-guardian.log|262144
-/opt/var/log/wan-guardian-recovery.log|262144
-/opt/var/log/vpn-audit.log|524288
-/opt/var/log/vpn-audit-summary.log|262144
-/opt/var/log/vpn-audit-chain.log|262144
-/opt/var/log/vpn-night-reconcile.log|262144
-/opt/var/log/vpn-subnet-sync.log|262144
-/opt/var/log/adaptive-hints-update.log|262144
-/opt/var/log/adaptive-route.log|262144
+/opt/var/log/vward-route-engine-events.log|524288
+/opt/var/log/vward-route-engine.log|262144
+/opt/var/log/vward-tunnel-health.log|262144
+/opt/var/log/vward-tunnel-guard.log|262144
+/opt/var/log/vward-wan-guard.log|262144
+/opt/var/log/vward-wan-guard-recovery.log|262144
+/opt/var/log/vward-policy-audit.log|524288
+/opt/var/log/vward-policy-audit-summary.log|262144
+/opt/var/log/vward-policy-audit-chain.log|262144
+/opt/var/log/vward-policy-reconcile.log|262144
+/opt/var/log/vward-policy-sync-sync.log|262144
+/opt/var/log/vward-route-hints.log|262144
+/opt/var/log/vward-route.log|262144
 /opt/var/log/crond-supervisor.log|262144
 "
 

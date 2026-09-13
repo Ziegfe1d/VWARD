@@ -11,31 +11,31 @@ profile=${1:-default}
 
 case "$profile" in
     default)
-        required="$VU_ROOT_PREFIX/opt/bin/adaptive-route.sh $VU_ROOT_PREFIX/opt/bin/wan-guardian.sh $VU_ROOT_PREFIX/opt/share/keenetic-apps/www/index.html"
+        required="$VU_ROOT_PREFIX/opt/bin/vward-route.sh $VU_ROOT_PREFIX/opt/bin/vward-wan-guard.sh $VU_ROOT_PREFIX/opt/share/vward/console/www/index.html"
         ;;
     updater)
         required="$VU_ROOT_PREFIX/opt/share/vward/updater/current/vward-update.sh"
         ;;
     route-engine)
-        required="$VU_ROOT_PREFIX/opt/bin/agh-adaptive-live.sh $VU_ROOT_PREFIX/opt/bin/adaptive-auto-maint.sh"
+        required="$VU_ROOT_PREFIX/opt/bin/vward-route-engine.sh $VU_ROOT_PREFIX/opt/bin/vward-route-reconciler.sh"
         ;;
     route-tools)
-        required="$VU_ROOT_PREFIX/opt/bin/adaptive-route.sh $VU_ROOT_PREFIX/opt/bin/agh-adaptive-route.sh"
+        required="$VU_ROOT_PREFIX/opt/bin/vward-route.sh $VU_ROOT_PREFIX/opt/bin/vward-route-discovery.sh"
         ;;
     tunnel-guard)
-        required="$VU_ROOT_PREFIX/opt/bin/wg-health-watch.sh $VU_ROOT_PREFIX/opt/bin/wg-failopen-guard.sh"
+        required="$VU_ROOT_PREFIX/opt/bin/vward-tunnel-health.sh $VU_ROOT_PREFIX/opt/bin/vward-tunnel-guard.sh"
         ;;
     wan-guard)
-        required="$VU_ROOT_PREFIX/opt/bin/wan-guardian.sh $VU_ROOT_PREFIX/opt/bin/wan-recovery-actuator.sh"
+        required="$VU_ROOT_PREFIX/opt/bin/vward-wan-guard.sh $VU_ROOT_PREFIX/opt/bin/vward-wan-recovery.sh"
         ;;
     policy-sync)
-        required="$VU_ROOT_PREFIX/opt/bin/vpn-domain-audit.sh $VU_ROOT_PREFIX/opt/bin/vpn-subnet-sync.sh"
+        required="$VU_ROOT_PREFIX/opt/bin/vward-policy-audit.sh $VU_ROOT_PREFIX/opt/bin/vward-policy-sync.sh"
         ;;
     runtime)
-        required="$VU_ROOT_PREFIX/opt/bin/crond-supervisor.sh $VU_ROOT_PREFIX/opt/etc/init.d/S91adaptive-live"
+        required="$VU_ROOT_PREFIX/opt/bin/vward-cron-supervisor.sh $VU_ROOT_PREFIX/opt/etc/init.d/S91vward-route-engine"
         ;;
     console)
-        required="$VU_ROOT_PREFIX/opt/share/keenetic-apps/www/index.html $VU_ROOT_PREFIX/opt/share/keenetic-apps/www/cgi-bin/api.cgi"
+        required="$VU_ROOT_PREFIX/opt/share/vward/console/www/index.html $VU_ROOT_PREFIX/opt/share/vward/console/www/cgi-bin/api.cgi"
         ;;
     *) vu_die "$VU_CONFIG_ERROR" "Unknown health profile: $profile" ;;
 esac
@@ -49,7 +49,7 @@ if [ -z "$VU_ROOT_PREFIX" ]; then
     ndmc -c "show version" >/dev/null 2>&1 || vu_die "$VU_HEALTH_ERROR" "Keenetic control plane is unavailable"
 
     if [ "$profile" = console ]; then
-        console_pid=$(cat /opt/var/run/keenetic-apps-lighttpd.pid 2>/dev/null || true)
+        console_pid=$(cat /opt/var/run/vward-console-lighttpd.pid 2>/dev/null || true)
         [ -n "$console_pid" ] && kill -0 "$console_pid" 2>/dev/null ||
             vu_die "$VU_HEALTH_ERROR" "VWARD Console service is unavailable"
 

@@ -10,6 +10,9 @@ header_json()
     echo 'Content-Type: application/json; charset=utf-8'
     echo 'Cache-Control: no-store'
     echo 'X-Content-Type-Options: nosniff'
+    echo 'X-Frame-Options: DENY'
+    echo 'Referrer-Policy: no-referrer'
+    echo 'Permissions-Policy: camera=(), geolocation=(), microphone=()'
     echo "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'"
     echo
 }
@@ -19,16 +22,14 @@ header_text()
     echo 'Content-Type: text/plain; charset=utf-8'
     echo 'Cache-Control: no-store'
     echo 'X-Content-Type-Options: nosniff'
+    echo 'X-Frame-Options: DENY'
+    echo 'Referrer-Policy: no-referrer'
+    echo 'Permissions-Policy: camera=(), geolocation=(), microphone=()'
     echo
 }
 
 case "${REQUEST_METHOD:-GET}" in
     GET|POST) ;;
-    OPTIONS)
-        header_json
-        echo '{"ok":true}'
-        exit 0
-        ;;
     *)
         echo 'Status: 405 Method Not Allowed'
         header_json
@@ -70,6 +71,21 @@ case "$ACTION" in
 esac
 
 if [ "${REQUEST_METHOD:-GET}" = POST ]; then
+    [ "${HTTP_X_VWARD_REQUEST:-}" = console ] || {
+        echo 'Status: 403 Forbidden'
+        header_json
+        echo '{"ok":false,"error":"request_guard_failed"}'
+        exit 0
+    }
+    case "${CONTENT_TYPE:-}" in
+        application/x-www-form-urlencoded|application/x-www-form-urlencoded\;*) ;;
+        *)
+            echo 'Status: 415 Unsupported Media Type'
+            header_json
+            echo '{"ok":false,"error":"unsupported_media_type"}'
+            exit 0
+            ;;
+    esac
     case "$ACTION" in
         settings|control|update-control) ;;
         *)
@@ -86,10 +102,6 @@ if [ "$ACTION" = "settings" ]; then
 
     [ "${REQUEST_METHOD:-GET}" = POST ] || {
         echo '{"ok":false,"error":"method_not_allowed"}'
-        exit 0
-    }
-    [ "${HTTP_X_VWARD_REQUEST:-}" = console ] || {
-        echo '{"ok":false,"error":"request_guard_failed"}'
         exit 0
     }
     [ ! -e /opt/var/run/vward/updater.lock ] || {
@@ -175,13 +187,13 @@ if [ "$ACTION" = "route-data" ]; then
         exit 0
     }
 
-    HINT_CATALOG=/opt/etc/adaptive-route/hints-catalog.tsv
-    ADAPTIVE_PERSIST=/opt/var/lib/adaptive-live/adaptive-persist.txt
-    IP_INDEX=/opt/var/lib/vpn-subnets/catalog.index
-    IP_ACTIVE=/opt/var/lib/vpn-subnets/active.categories
-    IP_OWNED=/opt/var/lib/vpn-subnets/owned.dynamic.routes
-    IP_ITDOG=/opt/var/lib/vpn-subnets/source-catalog/itdog
-    IP_LOYAL=/opt/var/lib/vpn-subnets/source-catalog/loyalsoldier
+    HINT_CATALOG=/opt/etc/vward/route-engine/hints-catalog.tsv
+    ADAPTIVE_PERSIST=/opt/var/lib/vward/route-engine/adaptive-persist.txt
+    IP_INDEX=/opt/var/lib/vward/policy-sync/catalog.index
+    IP_ACTIVE=/opt/var/lib/vward/policy-sync/active.categories
+    IP_OWNED=/opt/var/lib/vward/policy-sync/owned.dynamic.routes
+    IP_ITDOG=/opt/var/lib/vward/policy-sync/source-catalog/itdog
+    IP_LOYAL=/opt/var/lib/vward/policy-sync/source-catalog/loyalsoldier
 
     DOMAIN_ROWS=0
     DOMAIN_UNIQUE=0
@@ -249,8 +261,8 @@ if [ "$ACTION" = "route-data" ]; then
     [ -n "$ITDOG_IP_CATEGORIES" ] || ITDOG_IP_CATEGORIES=0
     [ -n "$LOYAL_IP_CATEGORIES" ] || LOYAL_IP_CATEGORIES=0
 
-    HINT_LAST="$(tail -n 1 /opt/var/log/adaptive-hints-update.log 2>/dev/null)"
-    IP_LAST="$(tail -n 1 /opt/var/log/vpn-subnet-sync.log 2>/dev/null)"
+    HINT_LAST="$(tail -n 1 /opt/var/log/vward-route-hints.log 2>/dev/null)"
+    IP_LAST="$(tail -n 1 /opt/var/log/vward-policy-sync-sync.log 2>/dev/null)"
 
     "$JQ" -n \
       --arg ts "$(date '+%Y-%m-%dT%H:%M:%S%z')" \
@@ -319,7 +331,7 @@ if [ "$ACTION" = "diagnostics" ]; then
     ps 2>/dev/null | grep -q '[c]rond -b' && CROND_STATUS=PASS
     ps 2>/dev/null | grep -q '[c]rond-supervisor.sh' && SUPERVISOR_STATUS=PASS
     ps 2>/dev/null | grep -q '[A]dGuardHome' && ADGUARD_STATUS=PASS
-    ps 2>/dev/null | grep -q '[a]gh-adaptive-live.sh' && ADAPTIVE_STATUS=PASS
+    ps 2>/dev/null | grep -q '[v]ward-route-engine.sh' && ADAPTIVE_STATUS=PASS
 
     UPDATE_STATUS=FAIL
     [ -x /opt/share/vward/updater/current/vward-update.sh ] && UPDATE_STATUS=PASS
@@ -338,9 +350,9 @@ if [ "$ACTION" = "diagnostics" ]; then
 
     OPT_FREE="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $4+0}')"
     [ -n "$OPT_FREE" ] || OPT_FREE=0
-    LAST_WAN_RC="$(cat /tmp/wan-guardian.cron.rc 2>/dev/null)"
-    LAST_WG_RC="$(cat /tmp/wg-health-chain.cron.rc 2>/dev/null)"
-    LAST_ROUTE_RC="$(cat /tmp/adaptive-auto-maint.cron.rc 2>/dev/null)"
+    LAST_WAN_RC="$(cat /tmp/vward-wan-guard.cron.rc 2>/dev/null)"
+    LAST_WG_RC="$(cat /tmp/vward-tunnel-health-chain.cron.rc 2>/dev/null)"
+    LAST_ROUTE_RC="$(cat /tmp/vward-route-reconciler-maint.cron.rc 2>/dev/null)"
 
     "$JQ" -n \
       --arg opt "$OPT_STATUS" --arg jq "$JQ_STATUS" --arg curl "$CURL_STATUS" \
@@ -386,11 +398,11 @@ if [ "$ACTION" = "route-probe" ]; then
         exit 0
     }
 
-    HINT_CATALOG=/opt/etc/adaptive-route/hints-catalog.tsv
-    ADAPTIVE_PERSIST=/opt/var/lib/adaptive-live/adaptive-persist.txt
-    IP_CATALOG=/opt/var/lib/vpn-subnets/catalog
-    IP_ACTIVE=/opt/var/lib/vpn-subnets/active.categories
-    IP_OWNED=/opt/var/lib/vpn-subnets/owned.dynamic.routes
+    HINT_CATALOG=/opt/etc/vward/route-engine/hints-catalog.tsv
+    ADAPTIVE_PERSIST=/opt/var/lib/vward/route-engine/adaptive-persist.txt
+    IP_CATALOG=/opt/var/lib/vward/policy-sync/catalog
+    IP_ACTIVE=/opt/var/lib/vward/policy-sync/active.categories
+    IP_OWNED=/opt/var/lib/vward/policy-sync/owned.dynamic.routes
     RUNCFG=/tmp/vward-console-route-probe.$$
     ndmc -c "show running-config" 2>/dev/null | tr -d '\r' > "$RUNCFG"
     trap 'rm -f "$RUNCFG"' EXIT INT TERM
@@ -424,7 +436,7 @@ if [ "$ACTION" = "route-probe" ]; then
                     ;;
             esac
 
-            DNS_OUT="$(/opt/bin/adaptive-resolve4.sh "$VALUE" 2>/dev/null)"
+            DNS_OUT="$(/opt/bin/vward-route-resolve4.sh "$VALUE" 2>/dev/null)"
             IPS="$(printf '%s\\n' "$DNS_OUT" | awk '/^Address [0-9]+:/ && $3 ~ /^[0-9]+\\./ {print $3}' | sort -u | head -n 12)"
             IPS_JSON="$(printf '%s\\n' "$IPS" | "$JQ" -Rsc 'split("\\n")|map(select(length>0))')"
 
@@ -482,9 +494,9 @@ if [ "$ACTION" = "route-probe" ]; then
             ROUTE_INTERFACE=""
             if [ -n "$OWNED_CIDR" ]; then
                 NET="${OWNED_CIDR%/*}"; PREFIX="${OWNED_CIDR#*/}"; MASK="$(prefix_mask "$PREFIX")"
-                if grep -Fqx "ip route $NET $MASK Wireguard1 auto" "$RUNCFG"; then
+                if grep -Fqx "ip route $NET $MASK nwg1 auto" "$RUNCFG"; then
                     CONFIGURED=true
-                    ROUTE_INTERFACE=Wireguard1
+                    ROUTE_INTERFACE=nwg1
                 fi
             fi
             rm -f "$MATCHES_FILE"
@@ -625,10 +637,6 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
         echo '{"ok":false,"error":"method_not_allowed"}'
         exit 0
     }
-    [ "${HTTP_X_VWARD_REQUEST:-}" = console ] || {
-        echo '{"ok":false,"error":"request_guard_failed"}'
-        exit 0
-    }
 
     LENGTH=${CONTENT_LENGTH:-0}
     case "$LENGTH" in ''|*[!0-9]*) LENGTH=0 ;; esac
@@ -661,11 +669,11 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
     CMD=""; ARG=""; REQUIRED=""; LABEL=""
     if [ "$ACTION" = control ]; then
         case "$OP" in
-            refresh-hints) CMD=/opt/bin/adaptive-hints-update.sh; LABEL=refresh-hints ;;
-            route-reconcile) CMD=/opt/bin/adaptive-auto-maint.sh; REQUIRED=ROUTE_RECONCILE; LABEL=route-reconcile ;;
-            policy-refresh) CMD=/opt/bin/vpn-subnet-sync.sh; ARG=sync; REQUIRED=POLICY_REFRESH; LABEL=policy-refresh ;;
-            policy-reconcile) CMD=/opt/bin/vpn-subnet-sync.sh; ARG=--reconcile; REQUIRED=POLICY_RECONCILE; LABEL=policy-reconcile ;;
-            tunnel-health) CMD=/opt/bin/wg-health-watch.sh; LABEL=tunnel-health ;;
+            refresh-hints) CMD=/opt/bin/vward-route-hints-update.sh; LABEL=refresh-hints ;;
+            route-reconcile) CMD=/opt/bin/vward-route-reconciler.sh; REQUIRED=ROUTE_RECONCILE; LABEL=route-reconcile ;;
+            policy-refresh) CMD=/opt/bin/vward-policy-sync.sh; ARG=sync; REQUIRED=POLICY_REFRESH; LABEL=policy-refresh ;;
+            policy-reconcile) CMD=/opt/bin/vward-policy-sync.sh; ARG=--reconcile; REQUIRED=POLICY_RECONCILE; LABEL=policy-reconcile ;;
+            tunnel-health) CMD=/opt/bin/vward-tunnel-health.sh; LABEL=tunnel-health ;;
             *) echo '{"ok":false,"error":"unknown_control_action"}'; exit 0 ;;
         esac
     else
@@ -733,25 +741,25 @@ if [ "$ACTION" = "log" ]; then
 
     case "$NAME" in
         wan)
-            FILE=/opt/var/log/wan-guardian.log
+            FILE=/opt/var/log/vward-wan-guard.log
             ;;
         recovery)
-            FILE=/opt/var/log/wan-guardian-recovery.log
+            FILE=/opt/var/log/vward-wan-guard-recovery.log
             ;;
         cron)
             FILE=/opt/var/log/crond.log
             ;;
         routing)
-            FILE=/tmp/adaptive-auto-maint.cron.out
+            FILE=/tmp/vward-route-reconciler-maint.cron.out
             ;;
         updater)
             FILE=/opt/var/log/vward/updater-watch.log
             ;;
         tunnel)
-            FILE=/opt/var/log/wg-failopen.log
+            FILE=/opt/var/log/vward-tunnel-guard.log
             ;;
         policy)
-            FILE=/opt/var/log/vpn-audit-summary.log
+            FILE=/opt/var/log/vward-policy-audit-summary.log
             ;;
         console)
             FILE=/opt/var/log/vward/console-audit.log
@@ -825,7 +833,7 @@ WG_INTERFACES="$(
 
 [ -n "$WG_INTERFACES" ] || WG_INTERFACES='[]'
 
-GOUT=/tmp/wan-guardian.cron.out
+GOUT=/tmp/vward-wan-guard.cron.out
 
 GVERSION="$(
     sed -n 's/^VERSION=//p' "$GOUT" 2>/dev/null |
@@ -895,14 +903,14 @@ UPTIME_SEC="$(
     cut -d. -f1 /proc/uptime 2>/dev/null
 )"
 
-GRC="$(cat /tmp/wan-guardian.cron.rc 2>/dev/null)"
-GLAST="$(cat /tmp/wan-guardian.cron.last 2>/dev/null)"
+GRC="$(cat /tmp/vward-wan-guard.cron.rc 2>/dev/null)"
+GLAST="$(cat /tmp/vward-wan-guard.cron.last 2>/dev/null)"
 
-WGRC="$(cat /tmp/wg-health-chain.cron.rc 2>/dev/null)"
-WGLAST="$(cat /tmp/wg-health-chain.cron.last 2>/dev/null)"
+WGRC="$(cat /tmp/vward-tunnel-health-chain.cron.rc 2>/dev/null)"
+WGLAST="$(cat /tmp/vward-tunnel-health-chain.cron.last 2>/dev/null)"
 
-RRC="$(cat /tmp/adaptive-auto-maint.cron.rc 2>/dev/null)"
-RLAST="$(cat /tmp/adaptive-auto-maint.cron.last 2>/dev/null)"
+RRC="$(cat /tmp/vward-route-reconciler-maint.cron.rc 2>/dev/null)"
+RLAST="$(cat /tmp/vward-route-reconciler-maint.cron.last 2>/dev/null)"
 
 VWARD_VERSION="$(sed -n '1p' /opt/share/vward/VERSION 2>/dev/null)"
 UPDATER_STATE=/opt/var/lib/vward/updater
@@ -925,11 +933,11 @@ SAFE_START="$(sed -n 's/^safe_window_start=//p' /opt/etc/vward/update.conf 2>/de
 SAFE_END="$(sed -n 's/^safe_window_end=//p' /opt/etc/vward/update.conf 2>/dev/null)"
 CHECK_INTERVAL="$(sed -n 's/^check_interval_seconds=//p' /opt/etc/vward/update.conf 2>/dev/null)"
 
-LIVE_PID="$(cat /opt/var/run/agh-adaptive-live.pid 2>/dev/null)"
-CONSOLE_PID="$(cat /opt/var/run/keenetic-apps-lighttpd.pid 2>/dev/null)"
-LIVE_COUNT="$(ps w 2>/dev/null | awk '$6=="/opt/bin/agh-adaptive-live.sh"{n++} END{print n+0}')"
+LIVE_PID="$(cat /opt/var/run/vward/route-engine.pid 2>/dev/null)"
+CONSOLE_PID="$(cat /opt/var/run/vward-console-lighttpd.pid 2>/dev/null)"
+LIVE_COUNT="$(ps w 2>/dev/null | awk '$6=="/opt/bin/vward-route-engine.sh"{n++} END{print n+0}')"
 TCPDUMP_COUNT="$(ps w 2>/dev/null | awk '$5=="tcpdump" && index($0,"udp dst port 53"){n++} END{print n+0}')"
-FAILOPEN_STATE=/opt/var/lib/wg-failopen/state
+FAILOPEN_STATE=/opt/var/lib/vward/tunnel-guard/state
 DOWN_STREAK="$(sed -n 's/^DOWN_STREAK=//p' "$FAILOPEN_STATE" 2>/dev/null)"
 FAILOPEN_ACTIVE="$(sed -n 's/^FAILOPEN_ACTIVE=//p' "$FAILOPEN_STATE" 2>/dev/null)"
 [ -n "$DOWN_STREAK" ] || DOWN_STREAK=0

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "VWARD Platform",
-  "platform_version": "0.2.0-dev.1",
+  "platform_version": "0.2.0-dev.2",
   "component_version_policy": "platform-release",
   "components": [
     {
@@ -20,7 +20,7 @@
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "route-engine",
-      "runtime_targets": ["/opt/bin/agh-adaptive-live.sh"]
+      "runtime_targets": ["/opt/bin/vward-route-engine.sh"]
     },
     {
       "id": "route-reconciler",
@@ -30,7 +30,7 @@
       "update_method": "signed-package",
       "health_profile": "route-engine",
       "depends_on": ["route-engine"],
-      "runtime_targets": ["/opt/bin/adaptive-auto-maint.sh"]
+      "runtime_targets": ["/opt/bin/vward-route-reconciler.sh"]
     },
     {
       "id": "route-tools",
@@ -40,11 +40,11 @@
       "update_method": "signed-package",
       "health_profile": "route-tools",
       "runtime_targets": [
-        "/opt/bin/adaptive-2ip-test.sh",
-        "/opt/bin/adaptive-hints-update.sh",
-        "/opt/bin/adaptive-resolve4.sh",
-        "/opt/bin/adaptive-route.sh",
-        "/opt/bin/agh-adaptive-route.sh"
+        "/opt/bin/vward-route-test.sh",
+        "/opt/bin/vward-route-hints-update.sh",
+        "/opt/bin/vward-route-resolve4.sh",
+        "/opt/bin/vward-route.sh",
+        "/opt/bin/vward-route-discovery.sh"
       ]
     },
     {
@@ -55,8 +55,8 @@
       "update_method": "signed-package",
       "health_profile": "tunnel-guard",
       "runtime_targets": [
-        "/opt/bin/wg-health-watch.sh",
-        "/opt/bin/wg-failopen-guard.sh"
+        "/opt/bin/vward-tunnel-health.sh",
+        "/opt/bin/vward-tunnel-guard.sh"
       ]
     },
     {
@@ -67,8 +67,8 @@
       "update_method": "signed-package",
       "health_profile": "wan-guard",
       "runtime_targets": [
-        "/opt/bin/wan-guardian.sh",
-        "/opt/bin/wan-recovery-actuator.sh"
+        "/opt/bin/vward-wan-guard.sh",
+        "/opt/bin/vward-wan-recovery.sh"
       ]
     },
     {
@@ -79,10 +79,10 @@
       "update_method": "signed-package",
       "health_profile": "policy-sync",
       "runtime_targets": [
-        "/opt/bin/vpn-domain-audit-chain.sh",
-        "/opt/bin/vpn-domain-audit.sh",
-        "/opt/bin/vpn-night-reconcile.sh",
-        "/opt/bin/vpn-subnet-sync.sh"
+        "/opt/bin/vward-policy-chain.sh",
+        "/opt/bin/vward-policy-audit.sh",
+        "/opt/bin/vward-policy-reconcile.sh",
+        "/opt/bin/vward-policy-sync.sh"
       ]
     },
     {
@@ -93,12 +93,12 @@
       "update_method": "signed-package",
       "health_profile": "runtime",
       "runtime_targets": [
-        "/opt/bin/adaptive-housekeeping.sh",
-        "/opt/bin/crond-supervisor.sh",
+        "/opt/bin/vward-housekeeping.sh",
+        "/opt/bin/vward-cron-supervisor.sh",
         "/opt/etc/init.d/S90crond",
-        "/opt/etc/init.d/S91adaptive-live",
-        "/opt/etc/init.d/S92crond-supervisor",
-        "/opt/etc/init.d/S93keenetic-apps"
+        "/opt/etc/init.d/S91vward-route-engine",
+        "/opt/etc/init.d/S92vward-runtime",
+        "/opt/etc/init.d/S93vward-console"
       ]
     },
     {
@@ -109,9 +109,9 @@
       "update_method": "signed-package",
       "health_profile": "console",
       "runtime_targets": [
-        "/opt/etc/keenetic-apps/lighttpd.conf",
-        "/opt/share/keenetic-apps/www/index.html",
-        "/opt/share/keenetic-apps/www/cgi-bin/api.cgi"
+        "/opt/etc/vward/console/lighttpd.conf",
+        "/opt/share/vward/console/www/index.html",
+        "/opt/share/vward/console/www/cgi-bin/api.cgi"
       ]
     },
     {
