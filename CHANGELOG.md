@@ -12,8 +12,8 @@
 - Адрес и порт AdGuard Home перенесены в Device Profile и используются Console.
 - WAN Guard использует профильный интерфейс, несколько default route считаются
   неоднозначностью, а tcpdump получает раскрытый безопасный фильтр без `eval`.
-- Assets добавлены в registry, updater allowlist, health profile, карту установки,
-  dev package workflow и регрессионные проверки.
+- Assets добавлены в registry, updater allowlist, health profile, карту установки
+  и регрессионные проверки. Переходный Beta workflow оставлен неизменным.
 
 ## 0.2.0-dev.3: Device Profile и VWARD Security
 
