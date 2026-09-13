@@ -79,3 +79,19 @@ VWARD WAN Guard намеренно не запускается принудит�
 зависимости, `crond`, supervisor, AdGuard Home, Adaptive Live, WAN, WireGuard, lighttpd,
 активный Update Engine slot и update config. Ответ возвращает `PASS/WARN/FAIL/UNKNOWN`
 с короткой причиной. Произвольные команды и произвольные файлы недоступны.
+
+## Settings layer и доступность Update Engine actions
+
+Раздел Settings различает три типа значений: `READ ONLY` для фактического состояния
+роутера, `EDITABLE` для четырёх разрешённых параметров VWARD Update Engine и `LOCAL`
+для настроек интерфейса/журналов, сохраняемых только в браузере. Есть поиск по
+настройкам. Локально настраиваются тема, компактность, минимум анимации, polling
+Console, интервал автообновления журналов, 50/100/150/200 строк на источник и перенос
+длинных строк. Backend жёстко ограничивает log tail диапазоном 20..200.
+
+`update-data` читает только updater state/pending/backup/lock и возвращает набор
+разрешённых действий. Console скрывает операции, которые сейчас не разрешены.
+`update-control` повторяет критические precondition checks server-side: apply требует
+pending manifest и допустимую фазу, rollback требует валидный recorded backup, recovery
+показывается только для прерванных transaction phases. Окончательные trust/signature/
+sequence/compatibility проверки остаются внутри VWARD Update Engine.

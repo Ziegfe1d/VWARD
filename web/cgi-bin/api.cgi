@@ -61,7 +61,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|route-data|diagnostics|route-probe|control|update-control) ;;
+    status|ping|log|settings|route-data|diagnostics|route-probe|update-data|control|update-control) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -163,7 +163,7 @@ if [ "$ACTION" = "settings" ]; then
     printf '%s|CONSOLE_SETTINGS|auto_apply=%s critical=%s important=%s routine=%s\n' \
         "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$AUTO_APPLY" "$AUTO_CRITICAL" "$AUTO_IMPORTANT" "$AUTO_ROUTINE" \
         >> /opt/var/log/vward/console-audit.log
-    echo '{"ok":true,"result":"saved"}'
+    echo '{"ok":true,"result":"saved","verified":true,"backup_created":true,"requires_restart":false}'
     exit 0
 fi
 
@@ -498,6 +498,97 @@ if [ "$ACTION" = "route-probe" ]; then
     exit 0
 fi
 
+
+if [ "$ACTION" = "update-data" ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || {
+        echo '{"ok":false,"error":"method_not_allowed"}'
+        exit 0
+    }
+
+    STATE=/opt/var/lib/vward/updater
+    JOURNAL=$STATE/journal.state
+    PENDING_DIR=$STATE/pending
+    RUN_LOCK=/opt/var/run/vward/updater.lock
+    PHASE="$(sed -n 's/^phase=//p' "$JOURNAL" 2>/dev/null | tail -n 1)"
+    [ -n "$PHASE" ] || PHASE=IDLE
+
+    BUSY=false
+    OWNER="$(sed -n '1p' "$RUN_LOCK/owner" 2>/dev/null)"
+    PID="${OWNER%%:*}"
+    case "$PID" in
+        ''|*[!0-9]*) ;;
+        *)
+            if kill -0 "$PID" 2>/dev/null && [ -r "/proc/$PID/cmdline" ] &&
+               tr '\000' ' ' < "/proc/$PID/cmdline" | grep -q 'vward-update'; then
+                BUSY=true
+            fi
+            ;;
+    esac
+
+    PENDING=false
+    PENDING_VERSION=""
+    PENDING_PRIORITY=""
+    PENDING_SEQUENCE=""
+    if [ -r "$PENDING_DIR/manifest.json" ] && [ -r "$PENDING_DIR/pending.state" ]; then
+        if "$JQ" -e '.signed.version and .signed.priority and .signed.sequence' "$PENDING_DIR/manifest.json" >/dev/null 2>&1; then
+            PENDING=true
+            PENDING_VERSION="$($JQ -r '.signed.version' "$PENDING_DIR/manifest.json" 2>/dev/null)"
+            PENDING_PRIORITY="$($JQ -r '.signed.priority' "$PENDING_DIR/manifest.json" 2>/dev/null)"
+            PENDING_SEQUENCE="$($JQ -r '.signed.sequence' "$PENDING_DIR/manifest.json" 2>/dev/null)"
+        fi
+    fi
+
+    ACTIVE_BACKUP="$(sed -n 's/^active_backup=//p' "$JOURNAL" 2>/dev/null | tail -n 1)"
+    ROLLBACK=false
+    case "$ACTIVE_BACKUP" in
+        /opt/var/backups/vward/*)
+            [ -r "$ACTIVE_BACKUP/files.tsv" ] && [ -r "$ACTIVE_BACKUP/backup.meta" ] && ROLLBACK=true
+            ;;
+    esac
+
+    UPDATE_ENABLED="$(sed -n 's/^update_enabled=//p' /opt/etc/vward/update.conf 2>/dev/null | tail -n 1)"
+    [ "$UPDATE_ENABLED" = 1 ] || UPDATE_ENABLED=0
+
+    CHECK_ALLOWED=false
+    APPLY_ALLOWED=false
+    RETRY_ALLOWED=false
+    ROLLBACK_ALLOWED=false
+    RECOVER_ALLOWED=false
+
+    if [ "$BUSY" = false ] && [ "$UPDATE_ENABLED" = 1 ]; then
+        CHECK_ALLOWED=true
+        if [ "$PENDING" = true ]; then
+            case "$PHASE" in
+                AVAILABLE|VERIFIED|IDLE|COMMITTED) APPLY_ALLOWED=true ;;
+                FAILED) RETRY_ALLOWED=true ;;
+            esac
+        fi
+        [ "$ROLLBACK" = true ] && ROLLBACK_ALLOWED=true
+        case "$PHASE" in
+            INSTALLING|VERIFYING|ROLLING_BACK|RECOVERY_REQUIRED|COMMIT_PREPARED|CHECKING|VERIFIED|BACKING_UP)
+                RECOVER_ALLOWED=true
+                ;;
+        esac
+    fi
+
+    "$JQ" -n \
+      --arg phase "$PHASE" \
+      --arg version "$PENDING_VERSION" \
+      --arg priority "$PENDING_PRIORITY" \
+      --arg sequence "$PENDING_SEQUENCE" \
+      --argjson busy "$BUSY" \
+      --argjson pending "$PENDING" \
+      --argjson rollback "$ROLLBACK" \
+      --argjson check_allowed "$CHECK_ALLOWED" \
+      --argjson apply_allowed "$APPLY_ALLOWED" \
+      --argjson retry_allowed "$RETRY_ALLOWED" \
+      --argjson rollback_allowed "$ROLLBACK_ALLOWED" \
+      --argjson recover_allowed "$RECOVER_ALLOWED" \
+      '{ok:true,phase:$phase,busy:$busy,pending:{present:$pending,version:$version,priority:$priority,sequence:$sequence},rollback_available:$rollback,allowed:{check:$check_allowed,apply:$apply_allowed,retry:$retry_allowed,rollback:$rollback_allowed,recover:$recover_allowed}}'
+    exit 0
+fi
+
 if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
     header_json
     [ "${REQUEST_METHOD:-GET}" = POST ] || {
@@ -549,12 +640,33 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
         esac
     else
         CMD=/opt/share/vward/updater/current/vward-update.sh
+        USTATE=/opt/var/lib/vward/updater
+        UPHASE="$(sed -n 's/^phase=//p' "$USTATE/journal.state" 2>/dev/null | tail -n 1)"
+        [ -n "$UPHASE" ] || UPHASE=IDLE
+        UPENDING=0
+        [ -r "$USTATE/pending/manifest.json" ] && [ -r "$USTATE/pending/pending.state" ] && UPENDING=1
+        UBACKUP="$(sed -n 's/^active_backup=//p' "$USTATE/journal.state" 2>/dev/null | tail -n 1)"
+        UROLLBACK=0
+        case "$UBACKUP" in /opt/var/backups/vward/*) [ -r "$UBACKUP/files.tsv" ] && [ -r "$UBACKUP/backup.meta" ] && UROLLBACK=1 ;; esac
         case "$OP" in
             check) ARG=--check; LABEL=update-check ;;
-            apply) ARG=--apply-pending; REQUIRED=APPLY_UPDATE; LABEL=update-apply ;;
-            retry) ARG=--apply-pending; REQUIRED=RETRY_UPDATE; LABEL=update-retry ;;
-            rollback) ARG=--rollback; REQUIRED=ROLLBACK_UPDATE; LABEL=update-rollback ;;
-            recover) ARG=--recover; REQUIRED=RECOVER_UPDATE; LABEL=update-recover ;;
+            apply)
+                [ "$UPENDING" -eq 1 ] || { echo '{"ok":false,"error":"no_pending_update"}'; exit 0; }
+                case "$UPHASE" in AVAILABLE|VERIFIED|IDLE|COMMITTED) ;; *) echo '{"ok":false,"error":"state_action_not_allowed"}'; exit 0 ;; esac
+                ARG=--apply-pending; REQUIRED=APPLY_UPDATE; LABEL=update-apply
+                ;;
+            retry)
+                [ "$UPENDING" -eq 1 ] && [ "$UPHASE" = FAILED ] || { echo '{"ok":false,"error":"state_action_not_allowed"}'; exit 0; }
+                ARG=--apply-pending; REQUIRED=RETRY_UPDATE; LABEL=update-retry
+                ;;
+            rollback)
+                [ "$UROLLBACK" -eq 1 ] || { echo '{"ok":false,"error":"rollback_unavailable"}'; exit 0; }
+                ARG=--rollback; REQUIRED=ROLLBACK_UPDATE; LABEL=update-rollback
+                ;;
+            recover)
+                case "$UPHASE" in INSTALLING|VERIFYING|ROLLING_BACK|RECOVERY_REQUIRED|COMMIT_PREPARED|CHECKING|VERIFIED|BACKING_UP) ;; *) echo '{"ok":false,"error":"recovery_not_required"}'; exit 0 ;; esac
+                ARG=--recover; REQUIRED=RECOVER_UPDATE; LABEL=update-recover
+                ;;
             *) echo '{"ok":false,"error":"unknown_update_action"}'; exit 0 ;;
         esac
     fi
@@ -619,10 +731,14 @@ if [ "$ACTION" = "log" ]; then
             ;;
     esac
 
+    COUNT="$(qget count)"
+    case "$COUNT" in ''|*[!0-9]*) COUNT=200 ;; esac
+    [ "$COUNT" -ge 20 ] 2>/dev/null && [ "$COUNT" -le 200 ] 2>/dev/null || COUNT=200
+
     header_text
 
     if [ -n "$FILE" ] && [ -r "$FILE" ]; then
-        tail -n 200 "$FILE" 2>/dev/null
+        tail -n "$COUNT" "$FILE" 2>/dev/null
     else
         echo "Лог пока пуст или недоступен."
     fi

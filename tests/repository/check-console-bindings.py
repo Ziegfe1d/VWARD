@@ -67,6 +67,17 @@ for token in ("ROUTE_RECONCILE", "POLICY_REFRESH", "POLICY_RECONCILE", "APPLY_UP
     if token not in api:
         fail(f"нет server-side confirmation token: {token}")
 
+
+for marker in ("settingsSearch", "prefTheme", "prefRefresh", "prefLogInterval", "prefLogCount", "prefLogWrap", "updateActionState"):
+    if f'id="{marker}"' not in html:
+        fail(f"нет settings/update-state элемента: {marker}")
+if 'action=update-data' not in html or 'update-data' not in api:
+    fail("Update Engine action availability endpoint is not bound")
+if 'state_action_not_allowed' not in api or 'rollback_unavailable' not in api or 'recovery_not_required' not in api:
+    fail("Update Engine server-side state preconditions are incomplete")
+if "count='+encodeURIComponent(prefs.logCount)" not in html:
+    fail("bounded log tail preference is not bound")
+
 node = shutil.which("node")
 if node:
     start = html.find("<script>")
