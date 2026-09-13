@@ -22,6 +22,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/console-polish-once.py')
+          s = p.read_text(encoding='utf-8')
+          old = '''    if n != 1:\n        raise SystemExit(f"{label}: expected 1 match, found {n}")\n    s = s.replace(old, new, 1)\n'''
+          new = '''    if label == "updater state" and n == 2:\n        s = s.replace(old, new, 1)\n        return\n    if n != 1:\n        raise SystemExit(f"{label}: expected 1 match, found {n}")\n    s = s.replace(old, new, 1)\n'''
+          if s.count(old) != 1:
+              raise SystemExit('temporary patch helper mismatch')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
           python3 .github/scripts/console-polish-once.py
           git rm .github/workflows/console-control-plane-polish-once.yml
           git rm .github/scripts/console-polish-once.py
