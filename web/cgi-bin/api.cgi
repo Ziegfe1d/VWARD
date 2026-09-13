@@ -378,7 +378,9 @@ if [ "$ACTION" = "route-probe" ]; then
     }
 
     TYPE="$(qget type)"
-    VALUE="$(qget value | tr '[:upper:]' '[:lower:]')"
+    RAW_VALUE="$(qget value)"
+    VALUE="$RAW_VALUE"
+    [ "$TYPE" = group ] || VALUE="$(printf '%s' "$VALUE" | tr '[:upper:]' '[:lower:]')"
     [ "${#VALUE}" -le 253 ] || {
         echo '{"ok":false,"error":"value_too_long"}'
         exit 0
@@ -490,6 +492,34 @@ if [ "$ACTION" = "route-probe" ]; then
             "$JQ" -n --arg type ip --arg value "$VALUE" --arg owned "$OWNED_CIDR" --arg iface "$ROUTE_INTERFACE" \
               --argjson matches "$MATCHES_JSON" --argjson configured "$CONFIGURED" \
               '{ok:true,type:$type,value:$value,policy_matches:$matches,owned_cidr:$owned,configured_route:$configured,interface:$iface}'
+            ;;
+        group)
+            case "$VALUE" in
+                ''|*[!A-Za-z0-9._-]*)
+                    echo '{"ok":false,"error":"invalid_group"}'
+                    exit 0
+                    ;;
+            esac
+            GROUP_NAME="$(awk -v wanted="$VALUE" '$1=="object-group" && $2=="fqdn" && tolower($3)==tolower(wanted){print $3; exit}' "$RUNCFG")"
+            [ -n "$GROUP_NAME" ] || {
+                echo '{"ok":false,"error":"group_not_found"}'
+                exit 0
+            }
+            MEMBER_COUNT="$(awk -v wanted="$GROUP_NAME" '
+                $1=="object-group" && $2=="fqdn" {g=$3; next}
+                $1=="!" {g=""; next}
+                g==wanted && $1=="include" {n++}
+                END{print n+0}
+            ' "$RUNCFG")"
+            MEMBERS_JSON="$(awk -v wanted="$GROUP_NAME" '
+                $1=="object-group" && $2=="fqdn" {g=$3; next}
+                $1=="!" {g=""; next}
+                g==wanted && $1=="include" {print $2}
+            ' "$RUNCFG" | sort -u | head -n 100 | "$JQ" -Rsc 'split("\n")|map(select(length>0))')"
+            ROUTES_JSON="$(awk -v g="$GROUP_NAME" '$1=="route" && $2=="object-group" && $3==g {print $4}' "$RUNCFG" | sort -u | "$JQ" -Rsc 'split("\n")|map(select(length>0))')"
+            "$JQ" -n --arg type group --arg value "$VALUE" --arg group "$GROUP_NAME" \
+              --argjson member_count "$MEMBER_COUNT" --argjson members "$MEMBERS_JSON" --argjson routes "$ROUTES_JSON" \
+              '{ok:true,type:$type,value:$value,group:$group,member_count:$member_count,members:$members,routes:$routes}'
             ;;
         *)
             echo '{"ok":false,"error":"invalid_probe_type"}'

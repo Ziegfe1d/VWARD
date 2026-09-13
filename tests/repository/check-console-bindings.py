@@ -78,6 +78,15 @@ if 'state_action_not_allowed' not in api or 'rollback_unavailable' not in api or
 if "count='+encodeURIComponent(prefs.logCount)" not in html:
     fail("bounded log tail preference is not bound")
 
+
+for marker in ("logAll", "logReset", "tunnelSelect", "tunnelSelectedStats", "routeListSearch", "routeListSort"):
+    if f'id="{marker}"' not in html:
+        fail(f"нет финального элемента prompt-gap closure: {marker}")
+if '<option value="group">FQDN-группа</option>' not in html or 'group_not_found' not in api:
+    fail("FQDN group probe is incomplete")
+if 'Runtime сейчас не хранит отдельную достоверную state-machine очереди' not in html:
+    fail("Route Engine lifecycle limitation is not disclosed")
+
 node = shutil.which("node")
 if node:
     start = html.find("<script>")

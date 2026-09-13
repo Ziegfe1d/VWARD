@@ -95,3 +95,22 @@ Console, интервал автообновления журналов, 50/100/
 pending manifest и допустимую фазу, rollback требует валидный recorded backup, recovery
 показывается только для прерванных transaction phases. Окончательные trust/signature/
 sequence/compatibility проверки остаются внутри VWARD Update Engine.
+
+## Финальное закрытие control-plane требований
+
+Журналы имеют явные «Все» и «Сброс». Tunnel Guard показывает selector всех
+обнаруженных WireGuard-интерфейсов, но ручной health probe остаётся привязан к
+управляемому VWARD-туннелю; остальные интерфейсы read-only, пока нет безопасного
+per-tunnel actuator.
+
+Route Engine добавляет локальный фильтр/сортировку ограниченных списков, время
+обновления доменных источников, последнюю Policy Sync сверку и её `added/removed`.
+`route-probe` поддерживает домен/DNS, IPv4 и точную FQDN-группу. Групповой probe
+возвращает не более 100 участников и назначенные интерфейсы маршрутов.
+
+Текущий Adaptive Live не сохраняет отдельный структурированный lifecycle для очереди
+`discovered/pending/processing/excluded/error`; Console намеренно не синтезирует такие
+счётчики из логов. Они появятся только после добавления authoritative runtime state.
+Также нет отдельного безопасного «обновить один компонент»: VWARD Update Engine
+устанавливает подписанный component-aware package как одну транзакцию. Console не
+обходит эту модель.
