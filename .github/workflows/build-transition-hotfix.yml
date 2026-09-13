@@ -1,3 +1,4 @@
+# Merge-triggered signed publication for the 0.1.7-beta transition.
 name: Publish VWARD 0.1.7-beta control plane
 
 on:
