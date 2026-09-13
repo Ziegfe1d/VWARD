@@ -1,29 +1,32 @@
 {
   "signed": {
     "schema": 1,
-    "update_id": "vward-0.1.6-dev-console-docs",
-    "sequence": 2026091001,
-    "version": "0.1.6-dev",
+    "update_id": "vward-0.1.7-beta-control-plane",
+    "sequence": 2026091301,
+    "version": "0.1.7-beta",
     "channel": "dev",
-    "priority": "ROUTINE",
-    "published_at": "2026-09-10T12:28:02Z",
+    "priority": "CRITICAL",
+    "published_at": "2026-09-13T03:12:24Z",
     "min_updater_version": "1.2.0",
     "package": {
-      "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-0.1.6-dev.tar.gz",
-      "sha256": "e551f9299ca68d2d00b228850a8087becc2b29e1ec70009eab9289e329c0640e",
-      "size": 15965,
-      "unpacked_size": 51991
+      "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-0.1.7-beta.tar.gz",
+      "sha256": "11edc7768c6a58f14e4a0e54f8652f1361adc5bc79bf5b92dc4a607315175fa5",
+      "size": 49124,
+      "unpacked_size": 189153
     },
     "compatibility": {
-      "min_vward": "0.1.4-dev",
-      "max_vward": "0.1.5-dev"
+      "min_vward": "0.1.6-dev",
+      "max_vward": "0.1.6-dev"
     },
     "affected_components": [
       "platform-core",
-      "console"
+      "console",
+      "route-engine",
+      "route-tools",
+      "policy-sync"
     ],
     "affected_services": [],
-    "health_profile": "console",
+    "health_profile": "policy-sync",
     "requires_reboot": false,
     "rollback_policy": "automatic",
     "signature": {
@@ -31,5 +34,5 @@
       "key_id": "vward-prod-2026-01"
     }
   },
-  "signature": "xlMu5Oy+Ci2Whm1Hba0dfUz92aheGmoeG2stp5fC2Vf9zdIkDzGR8eykN2bNXAkUnsEajw4mJZF7H1w7QiezCQ=="
+  "signature": "F37Bj9eVGyGd3m4V/7mdEue4Bi2opOKOSuSiHmW3HijHCe69RWQtAq7WI8/zGQUSTKabdAdmyWQoVysNW/cVCA=="
 }

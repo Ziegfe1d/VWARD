@@ -1,5 +1,5 @@
 e9250f2d1e75f23c6995b182f4c281b0940da3e2ed5b2a29970e3007df6e79a7  .github/ISSUE_TEMPLATE/bug_report.md
-0ffa9ed99a9602243034b9aff2a07ecb23bdb92d614a364ab233d797212f77b0  .github/workflows/build-transition-hotfix.yml
+cd23fdb12d68298e24851f969176fde62644f4e44e96b6af751f20e632d68bbc  .github/workflows/build-transition-hotfix.yml
 d540c5a5ae7145cc0b85f1433b3bcff4ca4fc379c4ebf704d881390b34ea5342  .github/workflows/updater-ci.yml
 ae0e9e9ae313b082ec80cb489f38a7bc73184fdd929dd95852226145d8d55d36  .gitignore
 a22a70d797c9236a69c5e60305db612f14795fe923448d7f8bdfce1eda9721b4  CHANGELOG.md
@@ -79,7 +79,8 @@ ce7f25a9f95671126cd5ec252db5115ae250a1dbfab814b2fbdeaa57e1fc9105  updates/dev/pa
 27b0c9b59317a000ffdfb945f34674e827c645e02721da8290a23af22e3ab734  updates/dev/packages/vward-0.1.4-dev.tar.gz
 e44a62b36ac6c3745b69e5cdf5fcc514ea1599984268510d9ce8e85a6d377bc3  updates/dev/packages/vward-0.1.5-dev.tar.gz
 e551f9299ca68d2d00b228850a8087becc2b29e1ec70009eab9289e329c0640e  updates/dev/packages/vward-0.1.6-dev.tar.gz
-870e2793bc4ad1eb14fa16fa45c8afa479f7fc441e307ee08161314a4041c669  updates/dev/update-manifest.json
+11edc7768c6a58f14e4a0e54f8652f1361adc5bc79bf5b92dc4a607315175fa5  updates/dev/packages/vward-0.1.7-beta.tar.gz
+0f681e0b796ad4d182fee256e6307ca7952677b2f4137cb84d24708db2cc1faa  updates/dev/update-manifest.json
 f3eece4e148d5979f8410067a73029b4457e4d92708fbabfd9c262a47e94888f  web/cgi-bin/api.cgi
 fc9815a812e7f31271197f106ab8a01068a727449f307472c282e0accd93d639  web/index.html
 ed660883a4a39d3ce0411c95182c6da68941e411fc7fdcfeaeca5883f23ae82d  web/lighttpd.conf
