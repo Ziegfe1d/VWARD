@@ -23,6 +23,16 @@ jobs:
         run: |
           set -euo pipefail
           python3 .github/scripts/route-readonly-once.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tests/repository/run-consistency-checks.sh')
+          s = p.read_text(encoding='utf-8')
+          old = '''grep -Fq "if(id==='logs')loadLogs(false);renderHelp();setHelp(false);window.scrollTo(0,0)" web/index.html ||\n    fail "Logs/help must update before compatibility-safe scroll"'''
+          new = '''grep -Fq "if(id==='logs')loadLogs(false);if(id==='route')loadRouteData(false);renderHelp();setHelp(false);window.scrollTo(0,0)" web/index.html ||\n    fail "Logs/route-data/help must update before compatibility-safe scroll"'''
+          if s.count(old) != 1:
+              raise SystemExit('route navigation consistency assertion mismatch')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
           git rm .github/workflows/route-readonly-once.yml
           git rm .github/scripts/route-readonly-once.py
 
