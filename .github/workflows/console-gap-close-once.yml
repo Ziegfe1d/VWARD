@@ -1,0 +1,59 @@
+name: One-shot final VWARD Console gap closure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/console-gap-close-once.yml'
+      - '.github/scripts/console-gap-close-once.py'
+
+permissions:
+  contents: write
+
+jobs:
+  close-gaps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply final prompt gap closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/console-gap-close-once.py
+          git rm .github/workflows/console-gap-close-once.yml
+          git rm .github/scripts/console-gap-close-once.py
+
+          tmp="$RUNNER_TEMP/SHA256SUMS"
+          : > "$tmp"
+          while IFS= read -r f; do
+            [ "$f" = "SHA256SUMS" ] && continue
+            sha256sum "$f" >> "$tmp"
+          done < <(git ls-files | LC_ALL=C sort)
+          mv "$tmp" SHA256SUMS
+
+      - name: Validate repository, Console and updater
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/repository/check-console-bindings.py
+          tests/repository/run-consistency-checks.sh
+          sh -n web/cgi-bin/api.cgi
+          sha256sum -c SHA256SUMS
+          tests/updater/run-simulations.sh
+          tests/updater/run-fix-pass-1-simulations.sh
+          tests/updater/run-fix-pass-2-simulations.sh
+          tests/updater/run-fix-pass-3-simulations.sh
+
+      - name: Commit final prompt gap closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git status --short
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Close final Console control-plane prompt gaps'
+          git push origin HEAD:main
