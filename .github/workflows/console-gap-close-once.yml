@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/console-gap-close-once.yml'
       - '.github/scripts/console-gap-close-once.py'
+      - '.github/scripts/console-gap-close-bootstrap-fix.py'
 
 permissions:
   contents: write
@@ -22,9 +23,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 .github/scripts/console-gap-close-bootstrap-fix.py
           python3 .github/scripts/console-gap-close-once.py
           git rm .github/workflows/console-gap-close-once.yml
           git rm .github/scripts/console-gap-close-once.py
+          git rm .github/scripts/console-gap-close-bootstrap-fix.py
 
           tmp="$RUNNER_TEMP/SHA256SUMS"
           : > "$tmp"
