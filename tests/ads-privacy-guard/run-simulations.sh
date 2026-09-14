@@ -7,6 +7,8 @@ fail(){ echo "FAIL: $*" >&2; exit 1; }; pass(){ echo "PASS: $*"; }
 T="$ROOT/tests/ads-privacy-guard"
 LIB="$ROOT/components/ads-privacy-guard/lib/vward-ads-privacy-common.sh"; S="$ROOT/components/ads-privacy-guard/scripts"; MAIN="$S/vward-ads-privacy-guard.sh"
 JQ="$(command -v jq)"; CURL="$(command -v curl)"; [ -x "$JQ" ] || fail jq; [ -x "$CURL" ] || fail curl
+# Fixtures belong to the unprivileged CI user. Production keeps this check enabled.
+export ADS_REQUIRE_SECURE_CONFIG=0
 
 # 1 syntax gates
 for F in "$ROOT"/components/ads-privacy-guard/lib/*.sh "$S"/*.sh; do busybox sh -n "$F" || fail "BusyBox syntax: $F"; done
@@ -78,9 +80,7 @@ cat > "$TMP/bin/query-reader" <<EOF2
 cat "$TMP/query.tsv"
 EOF2
 chmod +x "$TMP/bin/query-reader"
-# CI runners are intentionally unprivileged. Production keeps secure-config
-# validation enabled by default; only this isolated simulation fixture disables it.
-BASEENV="ADS_REQUIRE_SECURE_CONFIG=0 VWARD_ADS_LIB=$LIB VWARD_ADS_ETC=$CETC VWARD_ADS_STATE=$CST VWARD_ADS_LOG_DIR=$TMP/log VWARD_ADS_BACKUP_ROOT=$TMP/backups VWARD_ADS_SHARE=$CSH VWARD_ADS_CONFIG=$CETC/ads-privacy-guard.conf VWARD_ADS_SOURCE_REGISTRY=$CSH/source-registry.json VWARD_ADS_TRUST_BUILTIN=$CSH/trust-core.tsv VWARD_ADS_ALLOWLIST=$CETC/allowlist.tsv VWARD_ADS_DENYLIST=$CETC/denylist.tsv VWARD_ADS_JQ=$JQ VWARD_ADS_QUERY_READER=$TMP/bin/query-reader"
+BASEENV="VWARD_ADS_LIB=$LIB VWARD_ADS_ETC=$CETC VWARD_ADS_STATE=$CST VWARD_ADS_LOG_DIR=$TMP/log VWARD_ADS_BACKUP_ROOT=$TMP/backups VWARD_ADS_SHARE=$CSH VWARD_ADS_CONFIG=$CETC/ads-privacy-guard.conf VWARD_ADS_SOURCE_REGISTRY=$CSH/source-registry.json VWARD_ADS_TRUST_BUILTIN=$CSH/trust-core.tsv VWARD_ADS_ALLOWLIST=$CETC/allowlist.tsv VWARD_ADS_DENYLIST=$CETC/denylist.tsv VWARD_ADS_JQ=$JQ VWARD_ADS_QUERY_READER=$TMP/bin/query-reader"
 env $BASEENV busybox sh "$MAIN" scan > "$TMP/class.out" 2>&1 || { cat "$TMP/class.out"; fail classifier; }
 STATE="$CST/verdicts.tsv"; RULES="$CST/generated/vward-ads-privacy-guard.rules"
 grep -q '^badpopup.xyz|BLOCK|BLOCK|' "$STATE" || fail popup_block
