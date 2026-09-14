@@ -242,7 +242,10 @@ Live publisher candidate through the official AdGuard Home filtering API. It rea
 the complete `user_rules` array, removes only a previous marker-delimited VWARD block,
 preserves all unrelated rules, appends the new VWARD block and submits the complete
 array through `filtering/set_rules`. The result is read back and verified. A failed
-write or verification triggers a best-effort API rollback to the saved previous array.
+write or verification triggers an API rollback to the saved previous array; rollback
+is reported successful only after an exact read-back verification. Immediately before
+the wholesale write, the publisher also compares the live array with its original
+snapshot and aborts if another actor changed it.
 
 No direct `AdGuardHome.yaml` rewrite and no AGH restart are part of candidate v5.
 Default remains `staged` until live Dev staging confirms API compatibility on the
@@ -252,6 +255,11 @@ target AdGuard Home build.
 
 Candidate v5 adds an explicit runtime-control layer. Automatic work is owned by
 `vward-ads-privacy-scheduler.sh`, not by multiple unrelated cron entries.
+
+Long actions use an atomic file-per-job spool with a single worker. Claimed jobs remain
+durable until their result and final status have been persisted. After interruption,
+completed results are finalized without rerunning; an abandoned job without a result is
+requeued for at-least-once execution.
 
 Modes:
 

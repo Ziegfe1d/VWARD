@@ -27,7 +27,7 @@
 ! VWARD ADS & PRIVACY GUARD END
 ```
 
-`filtering/set_rules` replaces the complete AGH user-rules array. Therefore the publisher first reads the current array, strips only an existing VWARD marker block, preserves every remaining entry, appends the new VWARD block, writes the complete array, reads it back, and rolls back the saved previous array if write/verification fails.
+`filtering/set_rules` replaces the complete AGH user-rules array. Therefore the publisher first reads the current array, strips only an existing VWARD marker block, preserves every remaining entry, appends the new VWARD block, and rechecks that the live array is unchanged before writing. A concurrent change aborts the operation before mutation. The publisher then reads the result back; write/verification failure restores the saved previous array, and rollback succeeds only after exact read-back verification.
 
 ## Rule precedence inside VWARD
 

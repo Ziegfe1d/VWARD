@@ -98,19 +98,40 @@ ROLLBACK_JSON="$WORK/rollback.json"
 rollback()
 {
     echo "ROLLBACK=START"
-    ads_agh_api_post "filtering/set_rules" "$ROLLBACK_JSON" "$WORK/rollback.out" >/dev/null 2>&1 || true
-    echo "ROLLBACK=DONE"
+    if ! ads_agh_api_post "filtering/set_rules" "$ROLLBACK_JSON" "$WORK/rollback.out" >/dev/null 2>&1; then
+        echo "ROLLBACK=FAILED"
+        return 1
+    fi
+    if ! ads_agh_api_get "filtering/status" "$WORK/rollback-status.json" >/dev/null 2>&1; then
+        echo "ROLLBACK=FAILED"
+        return 1
+    fi
+    if ! "$ADS_JQ" -e --slurpfile expected "$ROLLBACK_JSON" \
+        '.user_rules == $expected[0].rules' "$WORK/rollback-status.json" >/dev/null 2>&1; then
+        echo "ROLLBACK=FAILED"
+        return 1
+    fi
+    echo "ROLLBACK=VERIFIED"
+    return 0
 }
 
+# filtering/set_rules replaces the complete array. Abort rather than overwrite
+# any manual or external change made since our initial snapshot.
+PREAPPLY_JSON="$WORK/filtering-status.preapply.json"
+ads_agh_api_get "filtering/status" "$PREAPPLY_JSON" || ads_die "cannot recheck AdGuard Home rules before publish"
+"$ADS_JQ" -e --slurpfile before "$STATUS_JSON" \
+    '.user_rules == $before[0].user_rules' "$PREAPPLY_JSON" >/dev/null 2>&1 || \
+    ads_die "AdGuard Home user_rules changed during publish; retry required"
+
 if ! ads_agh_api_post "filtering/set_rules" "$WORK/set-rules.json" "$WORK/set-rules.out"; then
-    rollback
-    ads_die "AdGuard Home set_rules failed"
+    rollback || ads_die "AdGuard Home set_rules failed and rollback could not be verified"
+    ads_die "AdGuard Home set_rules failed; previous user rules restored"
 fi
 
 VERIFY_JSON="$WORK/filtering-status.after.json"
 if ! ads_agh_api_get "filtering/status" "$VERIFY_JSON"; then
-    rollback
-    ads_die "cannot verify AdGuard Home rules after publish"
+    rollback || ads_die "publish verification failed and rollback could not be verified"
+    ads_die "cannot verify AdGuard Home rules after publish; previous user rules restored"
 fi
 
 "$ADS_JQ" -e --slurpfile expected "$WORK/set-rules.json" '
@@ -119,7 +140,7 @@ fi
   (.user_rules | index("! VWARD ADS & PRIVACY GUARD END") != null) and
   (($expected[0].rules - .user_rules) | length == 0)
 ' "$VERIFY_JSON" >/dev/null 2>&1 || {
-    rollback
+    rollback || ads_die "publish verification failed and rollback could not be verified"
     ads_die "verification failed; previous user rules restored"
 }
 

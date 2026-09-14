@@ -179,6 +179,26 @@ env $PENV busybox sh "$S/vward-ads-privacy-publish.sh" apply --confirm > "$TMP/p
 grep -q '^ADGUARD_RESTART=NO$' "$TMP/pubapply.out" || fail no_restart
 pass "AdGuard Home user_rules ownership publisher"
 
+# A concurrent manual change after the initial snapshot must abort before POST.
+cp "$TMP/agh-status.json" "$TMP/agh-status.concurrent.json"; rm -f "$TMP/agh-get-count" "$TMP/agh-post-seen"
+cat > "$TMP/bin/fakecurl-agh-concurrent" <<EOF2
+#!/bin/sh
+OUT=""; URL=""; while [ \$# -gt 0 ]; do case "\$1" in -o) OUT="\$2"; shift 2;; --data-binary|-u|-H|--connect-timeout|--max-time) shift 2;; -f|-sS) shift;; *) URL="\$1"; shift;; esac; done
+case "\$URL" in
+  */filtering/status)
+    N=0; [ -r "$TMP/agh-get-count" ] && N=\$(cat "$TMP/agh-get-count"); N=\$((N+1)); echo \$N > "$TMP/agh-get-count"
+    if [ \$N -eq 2 ]; then "$JQ" '.user_rules += ["||concurrent.example^"]' "$TMP/agh-status.concurrent.json" > "$TMP/agh-concurrent.new" && mv "$TMP/agh-concurrent.new" "$TMP/agh-status.concurrent.json"; fi
+    cp "$TMP/agh-status.concurrent.json" "\$OUT";;
+  */filtering/set_rules) touch "$TMP/agh-post-seen"; echo '{}' > "\$OUT";;
+  *) exit 22;;
+esac
+EOF2
+chmod +x "$TMP/bin/fakecurl-agh-concurrent"
+if env $PENV VWARD_ADS_CURL="$TMP/bin/fakecurl-agh-concurrent" busybox sh "$S/vward-ads-privacy-publish.sh" apply --confirm > "$TMP/pubconcurrent.out" 2>&1; then fail pub_concurrent_should_abort; fi
+grep -q 'changed during publish' "$TMP/pubconcurrent.out" || { cat "$TMP/pubconcurrent.out"; fail pub_concurrent_message; }
+[ ! -e "$TMP/agh-post-seen" ] || fail pub_concurrent_overwrite
+pass "publisher concurrent-change guard"
+
 # 10 validated settings and secure config
 SETETC="$TMP/setetc"; SETST="$TMP/setstate"; mkdir -p "$SETETC" "$SETST/work"
 cp "$ROOT/config/ads-privacy-guard/ads-privacy-guard.conf.example" "$SETETC/ads-privacy-guard.conf"; chmod 600 "$SETETC/ads-privacy-guard.conf"
@@ -205,7 +225,20 @@ grep -q '^JOB=QUEUED$' "$TMP/jobq.out" || fail job_queued_status
 [ ! -e "$TMP/job-runs" ] || fail job_ran_synchronously
 env $JENV busybox sh "$S/vward-ads-privacy-job.sh" worker > "$TMP/jobw.out" || fail job_worker
 [ "$(wc -l < "$TMP/job-runs")" -eq 1 ] || fail job_run_count
-pass "background job queue"
+
+# Concurrent producers use independent atomic spool files: no lost update.
+i=1; while [ $i -le 12 ]; do env $JENV busybox sh "$S/vward-ads-privacy-job.sh" enqueue scan > "$TMP/jobq.$i.out" & i=$((i+1)); done
+wait
+env $JENV busybox sh "$S/vward-ads-privacy-job.sh" status > "$TMP/jobs.out"
+grep -q '^JOB_QUEUE=12$' "$TMP/jobs.out" || { cat "$TMP/jobs.out"; fail job_concurrent_enqueue; }
+
+# An abandoned claimed job is requeued and executed by the next worker.
+mkdir -p "$JST/jobs/running"
+printf '00000000000000-recover|scan||1\n' > "$JST/jobs/running/00000000000000-recover.job"
+env $JENV busybox sh "$S/vward-ads-privacy-job.sh" worker > "$TMP/jobrecover.out" || fail job_recovery
+grep -q '^JOB_ID=00000000000000-recover$' "$TMP/jobrecover.out" || { cat "$TMP/jobrecover.out"; fail job_recovery_order; }
+[ "$(wc -l < "$TMP/job-runs")" -eq 2 ] || fail job_recovery_run
+pass "durable concurrent job queue and recovery"
 
 # 12 stale lock recovery
 mkdir -p "$JST/test.lock"; echo 999999 > "$JST/test.lock/pid"; echo 1 > "$JST/test.lock/started"
