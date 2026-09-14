@@ -109,6 +109,7 @@
       "update_method": "signed-package",
       "health_profile": "runtime",
       "runtime_targets": [
+        "/opt/etc/init.d/S89vward-update-recovery",
         "/opt/bin/vward-housekeeping.sh",
         "/opt/bin/vward-cron-supervisor.sh",
         "/opt/lib/vward/vward-device-profile.sh",

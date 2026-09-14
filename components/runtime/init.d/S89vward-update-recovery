@@ -1,0 +1,73 @@
+#!/bin/sh
+
+PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+UPDATER=${VWARD_UPDATER:-/opt/share/vward/updater/current/vward-update.sh}
+STATE_DIR=${VWARD_UPDATE_STATE_DIR:-/opt/var/lib/vward/updater}
+JOURNAL=${VWARD_UPDATE_JOURNAL:-$STATE_DIR/journal.state}
+FAILED=${VWARD_UPDATE_RECOVERY_FAILED:-$STATE_DIR/boot-recovery.failed}
+LOG=${VWARD_UPDATE_RECOVERY_LOG:-/opt/var/log/vward/updater-recovery.log}
+
+phase()
+{
+    sed -n 's/^phase=//p' "$JOURNAL" 2>/dev/null | sed -n '1p'
+}
+
+record_failure()
+{
+    tmp=$FAILED.tmp.$$
+    mkdir -p "$STATE_DIR" "$(dirname "$LOG")" 2>/dev/null || :
+    {
+        printf 'failed_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        printf 'phase=%s\n' "$(phase)"
+        printf 'rc=%s\n' "$1"
+    } > "$tmp" 2>/dev/null && mv "$tmp" "$FAILED" 2>/dev/null || rm -f "$tmp"
+}
+
+recover()
+{
+    current=$(phase)
+    case "$current" in
+        CHECKING|VERIFIED|BACKING_UP|INSTALLING|VERIFYING|COMMIT_PREPARED|ROLLING_BACK|RECOVERY_REQUIRED)
+            ;;
+        *)
+            rm -f "$FAILED"
+            printf 'VWARD updater boot recovery: no interrupted transaction\n'
+            return 0
+            ;;
+    esac
+
+    if [ ! -x "$UPDATER" ]; then
+        record_failure 127
+        printf 'VWARD updater boot recovery: updater unavailable, phase=%s\n' "$current" >&2
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$LOG")" 2>/dev/null || :
+    printf '%s phase=%s action=recover\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$current" >> "$LOG" 2>/dev/null || :
+    "$UPDATER" --recover >> "$LOG" 2>&1
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+        rm -f "$FAILED"
+        printf 'VWARD updater boot recovery: completed from phase=%s\n' "$current"
+        return 0
+    fi
+
+    record_failure "$rc"
+    printf 'VWARD updater boot recovery: failed phase=%s rc=%s\n' "$current" "$rc" >&2
+    return "$rc"
+}
+
+case "${1:-}" in
+    start|restart) recover ;;
+    stop) exit 0 ;;
+    status)
+        if [ -r "$FAILED" ]; then
+            cat "$FAILED"
+            exit 1
+        fi
+        printf 'phase=%s\nboot_recovery=OK\n' "$(phase)"
+        ;;
+    *) echo "Usage: S89vward-update-recovery {start|stop|restart|status}" >&2; exit 1 ;;
+esac

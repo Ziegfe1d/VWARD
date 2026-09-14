@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validate the signed-package source-to-runtime map against the component registry."""
 import json
+import re
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
@@ -50,5 +51,12 @@ slot_components = {
 }
 if slot_components & {row[0] for row in rows}:
     raise SystemExit("FAIL: slot-installer component included in signed package map")
+
+common = (root / "components/update-engine/vward-update-common-base.sh").read_text(encoding="utf-8")
+safe_body = common.split("vu_safe_target() {", 1)[1].split("vu_local_target() {", 1)[0]
+allowed_targets = set(re.findall(r"/opt/[A-Za-z0-9._/-]+", safe_body))
+not_allowed = sorted(set(targets) - allowed_targets)
+if not_allowed:
+    raise SystemExit("FAIL: package targets rejected by updater allowlist: " + repr(not_allowed))
 
 print(f"PACKAGE_MAP=PASS targets={len(rows)}")

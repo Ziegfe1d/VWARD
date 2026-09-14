@@ -24,6 +24,7 @@ policy-sync	components/policy-sync/scripts/vward-policy-audit.sh	/opt/bin/vward-
 policy-sync	components/policy-sync/scripts/vward-policy-reconcile.sh	/opt/bin/vward-policy-reconcile.sh	0755
 policy-sync	components/policy-sync/scripts/vward-policy-sync.sh	/opt/bin/vward-policy-sync.sh	0755
 runtime	components/runtime/scripts/vward-housekeeping.sh	/opt/bin/vward-housekeeping.sh	0755
+runtime	components/runtime/init.d/S89vward-update-recovery	/opt/etc/init.d/S89vward-update-recovery	0755
 runtime	components/runtime/scripts/vward-cron-supervisor.sh	/opt/bin/vward-cron-supervisor.sh	0755
 runtime	components/runtime/lib/vward-device-profile.sh	/opt/lib/vward/vward-device-profile.sh	0755
 runtime	components/runtime/init.d/S90crond	/opt/etc/init.d/S90crond	0755

@@ -48,6 +48,11 @@ public key, config и updater slot отдельно. После первого c
 `/opt/var/lib/vward/updater/committed.state` - authoritative transaction state.
 Targets берутся только из подписанного package manifest и allowlist.
 
+S89vward-update-recovery запускается раньше cron и остальных служб VWARD.
+При незавершённой фазе транзакции он вызывает только штатный
+vward-update.sh --recover, пишет отдельный журнал и сохраняет
+boot-recovery.failed, если автоматическое восстановление не завершилось.
+
 ## Не является source
 
 | Файл | Класс | Политика |
