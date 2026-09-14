@@ -80,7 +80,7 @@ EOF2
 chmod +x "$TMP/bin/query-reader"
 # CI runners are intentionally unprivileged. Production keeps secure-config
 # validation enabled by default; only this isolated simulation fixture disables it.
-BASEENV="VWARD_REQUIRE_SECURE_CONFIG=0 VWARD_ADS_LIB=$LIB VWARD_ADS_ETC=$CETC VWARD_ADS_STATE=$CST VWARD_ADS_LOG_DIR=$TMP/log VWARD_ADS_BACKUP_ROOT=$TMP/backups VWARD_ADS_SHARE=$CSH VWARD_ADS_CONFIG=$CETC/ads-privacy-guard.conf VWARD_ADS_SOURCE_REGISTRY=$CSH/source-registry.json VWARD_ADS_TRUST_BUILTIN=$CSH/trust-core.tsv VWARD_ADS_ALLOWLIST=$CETC/allowlist.tsv VWARD_ADS_DENYLIST=$CETC/denylist.tsv VWARD_ADS_JQ=$JQ VWARD_ADS_QUERY_READER=$TMP/bin/query-reader"
+BASEENV="ADS_REQUIRE_SECURE_CONFIG=0 VWARD_ADS_LIB=$LIB VWARD_ADS_ETC=$CETC VWARD_ADS_STATE=$CST VWARD_ADS_LOG_DIR=$TMP/log VWARD_ADS_BACKUP_ROOT=$TMP/backups VWARD_ADS_SHARE=$CSH VWARD_ADS_CONFIG=$CETC/ads-privacy-guard.conf VWARD_ADS_SOURCE_REGISTRY=$CSH/source-registry.json VWARD_ADS_TRUST_BUILTIN=$CSH/trust-core.tsv VWARD_ADS_ALLOWLIST=$CETC/allowlist.tsv VWARD_ADS_DENYLIST=$CETC/denylist.tsv VWARD_ADS_JQ=$JQ VWARD_ADS_QUERY_READER=$TMP/bin/query-reader"
 env $BASEENV busybox sh "$MAIN" scan > "$TMP/class.out" 2>&1 || { cat "$TMP/class.out"; fail classifier; }
 STATE="$CST/verdicts.tsv"; RULES="$CST/generated/vward-ads-privacy-guard.rules"
 grep -q '^badpopup.xyz|BLOCK|BLOCK|' "$STATE" || fail popup_block

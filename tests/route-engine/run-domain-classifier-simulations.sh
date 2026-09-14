@@ -10,7 +10,8 @@ fail(){ echo "FAIL: $*" >&2; exit 1; }; pass(){ echo "PASS: $*"; }
 
 cp "$ROOT/config/route-engine/categories.tsv.example" "$TMP/etc/categories.tsv"
 for f in "$ROOT"/components/route-engine/data/catalogs/*.domains; do cp "$f" "$TMP/etc/catalogs/$(basename "$f")"; done
-ENV="VWARD_DOMAIN_CLASSIFIER_LIB=$LIB VWARD_ROUTE_ETC=$TMP/etc VWARD_ROUTE_STATE=$TMP/state VWARD_CATEGORY_REGISTRY=$TMP/etc/categories.tsv VWARD_CATEGORY_CATALOG_DIR=$TMP/etc/catalogs"
+# CI runners are intentionally unprivileged; production keeps this check enabled.
+ENV="VWARD_REQUIRE_SECURE_CONFIG=0 VWARD_DOMAIN_CLASSIFIER_LIB=$LIB VWARD_ROUTE_ETC=$TMP/etc VWARD_ROUTE_STATE=$TMP/state VWARD_CATEGORY_REGISTRY=$TMP/etc/categories.tsv VWARD_CATEGORY_CATALOG_DIR=$TMP/etc/catalogs"
 
 cat > "$TMP/etc/domain-classifier.conf" <<'EOF2'
 AUTO_CLASSIFY_THRESHOLD=96
