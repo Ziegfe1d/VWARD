@@ -1,23 +1,38 @@
-# Merge-triggered signed publication for the 0.1.7-beta transition.
-name: Publish VWARD 0.1.7-beta control plane
+name: Build VWARD dev candidate
 
 on:
   workflow_dispatch:
+    inputs:
+      sequence:
+        description: Monotonic update sequence for a signed candidate
+        required: false
+        type: string
+      min_vward:
+        description: Minimum installed VWARD version
+        required: false
+        default: 0.1.7-beta
+        type: string
   push:
     branches:
-      - main
+      - dev
     paths:
-      - '.github/workflows/build-transition-hotfix.yml'
+      - VERSION
+      - components/**
+      - config/components/**
+      - config/settings/**
+      - scripts/build-update-candidate.sh
+      - web/**
+      - .github/workflows/build-dev-release.yml
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: vward-production-publish
+  group: vward-dev-candidate-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  publish-control-plane:
+  build-candidate:
     runs-on: ubuntu-latest
     env:
       VWARD_SIGNING_KEY_PEM: ${{ secrets.VWARD_PROD_ED25519_PRIVATE_KEY_PEM }}
@@ -25,274 +40,84 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Install test dependencies
+      - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y jq openssl dash
 
-      - name: Preflight release state
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(sed -n '1p' VERSION)"
-          REGISTRY_VERSION="$(jq -r '.platform_version' config/components/component-registry.json)"
-          CURRENT_SEQUENCE="$(jq -r '.signed.sequence' updates/dev/update-manifest.json)"
-          CURRENT_VERSION="$(jq -r '.signed.version' updates/dev/update-manifest.json)"
-          CURRENT_UPDATE_ID="$(jq -r '.signed.update_id' updates/dev/update-manifest.json)"
-          test "$VERSION" = '0.1.7-beta'
-          test "$REGISTRY_VERSION" = "$VERSION"
-          if [ "$CURRENT_SEQUENCE" = '2026091301' ]; then
-            test "$CURRENT_VERSION" = '0.1.7-beta'
-            test "$CURRENT_UPDATE_ID" = 'vward-0.1.7-beta-control-plane'
-            echo "ALREADY_PUBLISHED=1" >> "$GITHUB_ENV"
-            exit 0
-          fi
-          test "$CURRENT_SEQUENCE" = '2026091001'
-          test "$CURRENT_VERSION" = '0.1.6-dev'
-          test "$CURRENT_UPDATE_ID" = 'vward-0.1.6-dev-console-docs'
-          echo "ALREADY_PUBLISHED=0" >> "$GITHUB_ENV"
-
-      - name: Refresh repository SHA256 manifest in workspace
-        if: env.ALREADY_PUBLISHED != '1'
-        shell: bash
-        run: |
-          set -euo pipefail
-          tmp="$RUNNER_TEMP/SHA256SUMS"
-          : > "$tmp"
-          while IFS= read -r f; do
-            [ "$f" = "SHA256SUMS" ] && continue
-            sha256sum "$f" >> "$tmp"
-          done < <(git ls-files | LC_ALL=C sort)
-          mv "$tmp" SHA256SUMS
-
-      - name: Repository and updater tests
-        if: env.ALREADY_PUBLISHED != '1'
+      - name: Validate repository
         shell: bash
         run: |
           set -euo pipefail
           tests/repository/run-consistency-checks.sh
-          for f in components/update-engine/*.sh tests/updater/*.sh; do sh -n "$f"; dash -n "$f"; done
-          tests/updater/run-simulations.sh
-          tests/updater/run-fix-pass-1-simulations.sh
-          tests/updater/run-fix-pass-2-simulations.sh
-          tests/updater/run-fix-pass-3-simulations.sh
+          tests/run-package-validation.sh
+          for file in components/update-engine/*.sh tests/updater/*.sh; do
+            sh -n "$file"
+            dash -n "$file"
+          done
           sha256sum -c SHA256SUMS
 
-      - name: Build reproducible unsigned candidate
-        if: env.ALREADY_PUBLISHED != '1'
+      - name: Build complete reproducible candidate
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="$(sed -n '1p' VERSION)"
-          UPDATE_ID='vward-0.1.7-beta-control-plane'
-          SEQUENCE='2026091301'
           OUT="$RUNNER_TEMP/vward-candidate"
-          PKGDIR="$OUT/package"
-          ARTIFACT="$OUT/vward-$VERSION.tar.gz"
-          rm -rf "$OUT"
-          mkdir -p "$PKGDIR/files/web/cgi-bin" "$PKGDIR/files/bin"
-          cp VERSION "$PKGDIR/files/VERSION"
-          cp web/index.html "$PKGDIR/files/web/index.html"
-          cp web/cgi-bin/api.cgi "$PKGDIR/files/web/cgi-bin/api.cgi"
-          cp components/route-tools/scripts/vward-route-hints-update.sh "$PKGDIR/files/bin/vward-route-hints-update.sh"
-          cp components/route-engine/scripts/vward-route-engine.sh "$PKGDIR/files/bin/vward-route-engine.sh"
-          cp components/policy-sync/scripts/vward-policy-audit.sh "$PKGDIR/files/bin/vward-policy-audit.sh"
-          cp components/policy-sync/scripts/vward-policy-reconcile.sh "$PKGDIR/files/bin/vward-policy-reconcile.sh"
-          cp components/policy-sync/scripts/vward-policy-sync.sh "$PKGDIR/files/bin/vward-policy-sync.sh"
-          version_sha="$(sha256sum "$PKGDIR/files/VERSION" | awk '{print $1}')"
-          index_sha="$(sha256sum "$PKGDIR/files/web/index.html" | awk '{print $1}')"
-          api_sha="$(sha256sum "$PKGDIR/files/web/cgi-bin/api.cgi" | awk '{print $1}')"
-          hints_sha="$(sha256sum "$PKGDIR/files/bin/vward-route-hints-update.sh" | awk '{print $1}')"
-          live_sha="$(sha256sum "$PKGDIR/files/bin/vward-route-engine.sh" | awk '{print $1}')"
-          audit_sha="$(sha256sum "$PKGDIR/files/bin/vward-policy-audit.sh" | awk '{print $1}')"
-          reconcile_sha="$(sha256sum "$PKGDIR/files/bin/vward-policy-reconcile.sh" | awk '{print $1}')"
-          subnet_sha="$(sha256sum "$PKGDIR/files/bin/vward-policy-sync.sh" | awk '{print $1}')"
-          jq -n --arg version_sha "$version_sha" --arg index_sha "$index_sha" --arg api_sha "$api_sha" \
-            --arg hints_sha "$hints_sha" --arg live_sha "$live_sha" --arg audit_sha "$audit_sha" \
-            --arg reconcile_sha "$reconcile_sha" --arg subnet_sha "$subnet_sha" \
-            '{schema:1,files:[
-              {source:"files/VERSION",target:"/opt/share/vward/VERSION",mode:"0644",sha256:$version_sha,component:"platform-core",restart_policy:"none",config_policy:"program-only"},
-              {source:"files/web/index.html",target:"/opt/share/vward/console/www/index.html",mode:"0644",sha256:$index_sha,component:"console",restart_policy:"none",config_policy:"program-only"},
-              {source:"files/web/cgi-bin/api.cgi",target:"/opt/share/vward/console/www/cgi-bin/api.cgi",mode:"0755",sha256:$api_sha,component:"console",restart_policy:"none",config_policy:"program-only"},
-              {source:"files/bin/vward-route-hints-update.sh",target:"/opt/bin/vward-route-hints-update.sh",mode:"0755",sha256:$hints_sha,component:"route-tools",restart_policy:"none",config_policy:"program-only"},
-              {source:"files/bin/vward-route-engine.sh",target:"/opt/bin/vward-route-engine.sh",mode:"0755",sha256:$live_sha,component:"route-engine",restart_policy:"none",config_policy:"program-only"},
-              {source:"files/bin/vward-policy-audit.sh",target:"/opt/bin/vward-policy-audit.sh",mode:"0755",sha256:$audit_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"},
-              {source:"files/bin/vward-policy-reconcile.sh",target:"/opt/bin/vward-policy-reconcile.sh",mode:"0755",sha256:$reconcile_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"},
-              {source:"files/bin/vward-policy-sync.sh",target:"/opt/bin/vward-policy-sync.sh",mode:"0755",sha256:$subnet_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"}
-            ]}' > "$PKGDIR/package-manifest.json"
-          test "$(jq '.files|length' "$PKGDIR/package-manifest.json")" = 8
-          sh -n web/cgi-bin/api.cgi
-          sh -n components/route-tools/scripts/vward-route-hints-update.sh
-          sh -n components/route-engine/scripts/vward-route-engine.sh
-          sh -n components/policy-sync/scripts/vward-policy-audit.sh
-          sh -n components/policy-sync/scripts/vward-policy-reconcile.sh
-          sh -n components/policy-sync/scripts/vward-policy-sync.sh
-          unpacked_size="$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{sum+=$1} END{print sum+0}')"
-          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf "$ARTIFACT" -C "$PKGDIR" .
-          package_sha="$(sha256sum "$ARTIFACT" | awk '{print $1}')"
-          package_size="$(wc -c < "$ARTIFACT" | tr -d ' ')"
-          declared_size="$(tar -tvzf "$ARTIFACT" | awk '$1 ~ /^-/ {sum+=$3} END{print sum+0}')"
-          test "$declared_size" = "$unpacked_size"
-          jq -n --arg version "$VERSION" --arg update_id "$UPDATE_ID" --argjson sequence "$SEQUENCE" \
-            --arg package_file "vward-$VERSION.tar.gz" --arg package_sha256 "$package_sha" \
-            --argjson package_size "$package_size" --argjson unpacked_size "$unpacked_size" \
-            '{candidate:true,signed:false,publication_state:"SIGNING_REQUIRED",version:$version,update_id:$update_id,sequence:$sequence,channel:"dev",priority:"CRITICAL",package_file:$package_file,package_sha256:$package_sha256,package_size:$package_size,unpacked_size:$unpacked_size,compatibility:{min_vward:"0.1.6-dev",max_vward:"0.1.6-dev"},affected_components:["platform-core","console","route-engine","route-tools","policy-sync"],health_profile:"policy-sync",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$OUT/candidate-metadata.json"
-          cp "$PKGDIR/package-manifest.json" "$OUT/package-manifest.json"
+          bash scripts/build-update-candidate.sh "$OUT"
+          test "$(jq '.files | length' "$OUT/package-manifest.json")" = "$(awk -F '\t' '!/^#/ && NF {n++} END {print n+0}' config/components/package-map.tsv)"
           echo "VWARD_OUT=$OUT" >> "$GITHUB_ENV"
-          echo "VWARD_ARTIFACT=$ARTIFACT" >> "$GITHUB_ENV"
-          echo "VWARD_PACKAGE_SHA=$package_sha" >> "$GITHUB_ENV"
-          echo "VWARD_PACKAGE_SIZE=$package_size" >> "$GITHUB_ENV"
-          echo "VWARD_UNPACKED_SIZE=$unpacked_size" >> "$GITHUB_ENV"
-          echo "PACKAGE_SHA256=$package_sha"
+          echo "VWARD_ARTIFACT=$(find "$OUT" -maxdepth 1 -name 'vward-*.tar.gz' -type f -print -quit)" >> "$GITHUB_ENV"
 
-      - name: Detect production signing key
-        if: env.ALREADY_PUBLISHED != '1'
+      - name: Prepare signed manifest when production key is available
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
+        env:
+          INPUT_SEQUENCE: ${{ inputs.sequence }}
+          INPUT_MIN_VWARD: ${{ inputs.min_vward }}
         run: |
           set -euo pipefail
-          if [ -n "${VWARD_SIGNING_KEY_PEM:-}" ]; then
-            printf '%s\n' "$VWARD_SIGNING_KEY_PEM" > "$RUNNER_TEMP/vward-prod-key.pem"
-            echo "SIGNING_AVAILABLE=1" >> "$GITHUB_ENV"
-          elif [ -n "${VWARD_SIGNING_KEY_LEGACY:-}" ]; then
-            printf '%s\n' "$VWARD_SIGNING_KEY_LEGACY" > "$RUNNER_TEMP/vward-prod-key.pem"
-            echo "SIGNING_AVAILABLE=1" >> "$GITHUB_ENV"
-          else
-            echo "SIGNING_AVAILABLE=0" >> "$GITHUB_ENV"
-          fi
-
-      - name: Verify production key identity
-        if: env.ALREADY_PUBLISHED != '1' && env.SIGNING_AVAILABLE == '1'
-        shell: bash
-        run: |
-          set -euo pipefail
-          umask 077
+          [ -n "$INPUT_SEQUENCE" ] || { echo "::error::sequence is required for a signed candidate"; exit 2; }
+          case "$INPUT_SEQUENCE" in *[!0-9]*|'') echo "::error::sequence must be a positive integer"; exit 2 ;; esac
           KEY="$RUNNER_TEMP/vward-prod-key.pem"
+          if [ -n "${VWARD_SIGNING_KEY_PEM:-}" ]; then
+            printf '%s\n' "$VWARD_SIGNING_KEY_PEM" > "$KEY"
+          elif [ -n "${VWARD_SIGNING_KEY_LEGACY:-}" ]; then
+            printf '%s\n' "$VWARD_SIGNING_KEY_LEGACY" > "$KEY"
+          else
+            echo "::error::Production Ed25519 signing key is not configured"
+            exit 78
+          fi
           chmod 600 "$KEY"
-          openssl pkey -in "$KEY" -check -noout >/dev/null
           private_pub="$(openssl pkey -in "$KEY" -pubout -outform DER | sha256sum | awk '{print $1}')"
           trusted_pub="$(openssl pkey -pubin -in config/updater/update-public.pem -outform DER | sha256sum | awk '{print $1}')"
-          test "$private_pub" = "$trusted_pub"
-          echo "PRODUCTION_KEY_MATCH=YES"
+          [ "$private_pub" = "$trusted_pub" ] || { echo "::error::Signing key does not match trusted public key"; exit 31; }
 
-      - name: Sign and verify update manifest
-        if: env.ALREADY_PUBLISHED != '1' && env.SIGNING_AVAILABLE == '1'
-        shell: bash
-        run: |
-          set -euo pipefail
           VERSION="$(sed -n '1p' VERSION)"
-          OUT="$VWARD_OUT"
-          KEY="$RUNNER_TEMP/vward-prod-key.pem"
-          SIGNED="$OUT/signed.json"
-          CANONICAL="$OUT/signed.canonical.json"
-          SIG="$OUT/signature.bin"
-          MANIFEST="$OUT/update-manifest.json"
+          PACKAGE_SHA="$(jq -r '.package_sha256' "$VWARD_OUT/candidate-metadata.json")"
+          PACKAGE_SIZE="$(jq -r '.package_size' "$VWARD_OUT/candidate-metadata.json")"
+          UNPACKED_SIZE="$(jq -r '.unpacked_size' "$VWARD_OUT/candidate-metadata.json")"
+          COMPONENTS="$(awk -F '\t' '!/^#/ && NF {print $1}' config/components/package-map.tsv | LC_ALL=C sort -u | jq -R . | jq -s .)"
           PUBLISHED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-          jq -n --arg version "$VERSION" --arg published_at "$PUBLISHED_AT" \
-            --arg url "https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-$VERSION.tar.gz" \
-            --arg sha256 "$VWARD_PACKAGE_SHA" --argjson size "$VWARD_PACKAGE_SIZE" --argjson unpacked_size "$VWARD_UNPACKED_SIZE" \
-            '{schema:1,update_id:"vward-0.1.7-beta-control-plane",sequence:2026091301,version:$version,channel:"dev",priority:"CRITICAL",published_at:$published_at,min_updater_version:"1.2.0",package:{url:$url,sha256:$sha256,size:$size,unpacked_size:$unpacked_size},compatibility:{min_vward:"0.1.6-dev",max_vward:"0.1.6-dev"},affected_components:["platform-core","console","route-engine","route-tools","policy-sync"],affected_services:[],health_profile:"policy-sync",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$SIGNED"
-          jq -cS . "$SIGNED" > "$CANONICAL"
-          openssl pkeyutl -sign -inkey "$KEY" -rawin -in "$CANONICAL" -out "$SIG"
-          signature="$(openssl base64 -A -in "$SIG")"
-          jq -n --slurpfile signed "$SIGNED" --arg signature "$signature" '{signed:$signed[0],signature:$signature}' > "$MANIFEST"
-          jq -cS '.signed' "$MANIFEST" > "$OUT/verify.canonical.json"
-          jq -r '.signature' "$MANIFEST" | openssl base64 -d -A > "$OUT/verify.signature.bin"
-          openssl pkeyutl -verify -pubin -inkey config/updater/update-public.pem -rawin -in "$OUT/verify.canonical.json" -sigfile "$OUT/verify.signature.bin"
-          test "$(jq -r '.signed.update_id' "$MANIFEST")" = 'vward-0.1.7-beta-control-plane'
-          test "$(jq -r '.signed.package.sha256' "$MANIFEST")" = "$VWARD_PACKAGE_SHA"
-          echo "MANIFEST_SIGNATURE=VERIFIED"
+          URL="https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/packages/vward-$VERSION.tar.gz"
+          jq -n --arg version "$VERSION" --arg update_id "vward-$VERSION" --argjson sequence "$INPUT_SEQUENCE" \
+            --arg published_at "$PUBLISHED_AT" --arg url "$URL" --arg sha256 "$PACKAGE_SHA" \
+            --argjson size "$PACKAGE_SIZE" --argjson unpacked_size "$UNPACKED_SIZE" \
+            --arg min_vward "$INPUT_MIN_VWARD" --argjson components "$COMPONENTS" \
+            '{schema:1,update_id:$update_id,sequence:$sequence,version:$version,channel:"dev",priority:"ROUTINE",published_at:$published_at,min_updater_version:"1.2.0",package:{url:$url,sha256:$sha256,size:$size,unpacked_size:$unpacked_size},compatibility:{min_vward:$min_vward,max_vward:$version},affected_components:$components,affected_services:[],health_profile:"default",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$VWARD_OUT/signed.json"
+          jq -cS . "$VWARD_OUT/signed.json" > "$VWARD_OUT/signed.canonical.json"
+          openssl pkeyutl -sign -inkey "$KEY" -rawin -in "$VWARD_OUT/signed.canonical.json" -out "$VWARD_OUT/signature.bin"
+          SIGNATURE="$(openssl base64 -A -in "$VWARD_OUT/signature.bin")"
+          jq -n --slurpfile signed "$VWARD_OUT/signed.json" --arg signature "$SIGNATURE" '{signed:$signed[0],signature:$signature}' > "$VWARD_OUT/update-manifest.json"
+          jq -cS '.signed' "$VWARD_OUT/update-manifest.json" > "$VWARD_OUT/verify.canonical.json"
+          jq -r '.signature' "$VWARD_OUT/update-manifest.json" | openssl base64 -d -A > "$VWARD_OUT/verify.signature.bin"
+          openssl pkeyutl -verify -pubin -inkey config/updater/update-public.pem -rawin -in "$VWARD_OUT/verify.canonical.json" -sigfile "$VWARD_OUT/verify.signature.bin"
 
-      - name: Dry-run signed package through VWARD Update Engine
-        if: env.ALREADY_PUBLISHED != '1' && env.SIGNING_AVAILABLE == '1'
-        shell: bash
-        run: |
-          set -euo pipefail
-          ROOT="$RUNNER_TEMP/vward-dryrun"
-          CONFIG="$ROOT/opt/etc/vward/update.conf"
-          MANIFEST="$VWARD_OUT/update-manifest.json"
-          rm -rf "$ROOT"
-          mkdir -p "$ROOT/opt/etc/vward" "$ROOT/opt/share/vward" "$ROOT/opt/var/lib/vward/updater" "$ROOT/opt/var/cache/vward/updater" "$ROOT/opt/var/backups/vward" "$ROOT/opt/var/run/vward"
-          cp config/updater/update-public.pem "$ROOT/opt/etc/vward/update-public.pem"
-          printf '%s\n' '0.1.6-dev' > "$ROOT/opt/share/vward/VERSION"
-          cat > "$CONFIG" <<EOF
-          update_enabled=1
-          auto_apply=1
-          auto_critical=1
-          auto_important=1
-          auto_routine=1
-          manifest_url=https://example.invalid/update-manifest.json
-          public_key_file=$ROOT/opt/etc/vward/update-public.pem
-          channel=dev
-          safe_window_start=03:00
-          safe_window_end=05:00
-          minimum_free_kb=0
-          max_manifest_size=262144
-          max_package_size=16777216
-          max_unpacked_size=67108864
-          backup_keep=3
-          barrier_integration_ready=1
-          current_version_file=$ROOT/opt/share/vward/VERSION
-          health_timeout_seconds=30
-          check_interval_seconds=900
-          request_timeout_seconds=120
-          important_max_delay_seconds=7200
-          routine_max_delay_seconds=86400
-          minimum_updater_version=1.2.0
-          EOF
-          VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" VWARD_TEST_MANIFEST="$MANIFEST" VWARD_TEST_PACKAGE="$VWARD_ARTIFACT" components/update-engine/vward-update.sh --dry-run
-          echo "UPDATER_DRY_RUN=OK"
-
-      - name: Publish signed dev update
-        if: env.ALREADY_PUBLISHED != '1' && env.SIGNING_AVAILABLE == '1'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cp "$VWARD_ARTIFACT" updates/dev/packages/vward-0.1.7-beta.tar.gz
-          cp "$VWARD_OUT/update-manifest.json" updates/dev/update-manifest.json
-          git add updates/dev/packages/vward-0.1.7-beta.tar.gz updates/dev/update-manifest.json
-          tmp="$RUNNER_TEMP/SHA256SUMS.publish"
-          : > "$tmp"
-          while IFS= read -r f; do [ "$f" = "SHA256SUMS" ] && continue; sha256sum "$f" >> "$tmp"; done < <(git ls-files | LC_ALL=C sort)
-          mv "$tmp" SHA256SUMS
-          sha256sum -c SHA256SUMS
-          git add SHA256SUMS
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Publish signed VWARD 0.1.7-beta control plane'
-          git push origin HEAD:main
-          echo "PUBLICATION_STATE=SIGNED_PUBLISHED"
-
-      - name: Persist source SHA256 manifest when signing is unavailable
-        if: env.ALREADY_PUBLISHED != '1' && env.SIGNING_AVAILABLE != '1'
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! git diff --quiet -- SHA256SUMS; then
-            git add SHA256SUMS
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git commit -m 'Refresh SHA256 manifest for 0.1.7-beta source'
-            git push origin HEAD:main
-          fi
-          echo "PUBLICATION_STATE=SIGNING_REQUIRED"
-
-      - name: Upload candidate artifact
-        if: env.ALREADY_PUBLISHED != '1'
+      - name: Upload candidate
         uses: actions/upload-artifact@v4
         with:
-          name: vward-0.1.7-beta-control-plane-candidate
+          name: vward-dev-candidate-${{ github.sha }}
           path: |
-            ${{ env.VWARD_OUT }}/vward-0.1.7-beta.tar.gz
+            ${{ env.VWARD_OUT }}/vward-*.tar.gz
             ${{ env.VWARD_OUT }}/package-manifest.json
             ${{ env.VWARD_OUT }}/candidate-metadata.json
             ${{ env.VWARD_OUT }}/update-manifest.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
-
-      - name: Stop before publication without production key
-        if: env.ALREADY_PUBLISHED != '1' && env.SIGNING_AVAILABLE != '1'
-        shell: bash
-        run: |
-          echo "::error::Production Ed25519 signing key is not configured."
-          exit 78
