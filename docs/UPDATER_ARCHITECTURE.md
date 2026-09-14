@@ -3,6 +3,18 @@
 Update Engine использует подписанный production feed и собственный runtime. На
 целевом роутере пройдены автоматическое применение, rollback и возобновление служб.
 
+## Полный health profile
+
+Подписанный полный пакет использует профиль full. Установленный
+/opt/share/vward/package-map.tsv является машинным перечнем runtime targets.
+Профиль проверяет наличие и executable mode, POSIX shell syntax всех скриптов
+и init hooks, JSON-синтаксис реестров, состояние Update Engine и фактический
+ping Console. Ads & Privacy Guard запускает собственный functional health,
+если его локальная конфигурация уже создана.
+
+Проверки не выполняют WAN recovery, изменение маршрутов, публикацию правил
+AdGuard или переключение туннелей.
+
 ## Последовательность
 
 1. Скачать manifest с ограничением размера и optional ETag.

@@ -1,5 +1,6 @@
 # component	source	target	mode
 platform-core	VERSION	/opt/share/vward/VERSION	0644
+platform-core	config/components/package-map.tsv	/opt/share/vward/package-map.tsv	0644
 route-engine	components/route-engine/scripts/vward-route-engine.sh	/opt/bin/vward-route-engine.sh	0755
 route-engine	components/route-engine/scripts/vward-domain-classifier.sh	/opt/bin/vward-domain-classifier.sh	0755
 route-engine	components/route-engine/scripts/vward-domain-migrate-dry-run.sh	/opt/bin/vward-domain-migrate-dry-run.sh	0755

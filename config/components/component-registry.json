@@ -12,7 +12,8 @@
       "update_method": "signed-package",
       "health_profile": "default",
       "runtime_targets": [
-        "/opt/share/vward/VERSION"
+        "/opt/share/vward/VERSION",
+        "/opt/share/vward/package-map.tsv"
       ]
     },
     {

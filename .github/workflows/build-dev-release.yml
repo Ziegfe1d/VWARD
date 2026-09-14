@@ -102,7 +102,7 @@ jobs:
             --arg published_at "$PUBLISHED_AT" --arg url "$URL" --arg sha256 "$PACKAGE_SHA" \
             --argjson size "$PACKAGE_SIZE" --argjson unpacked_size "$UNPACKED_SIZE" \
             --arg min_vward "$INPUT_MIN_VWARD" --argjson components "$COMPONENTS" \
-            '{schema:1,update_id:$update_id,sequence:$sequence,version:$version,channel:"dev",priority:"ROUTINE",published_at:$published_at,min_updater_version:"1.2.0",package:{url:$url,sha256:$sha256,size:$size,unpacked_size:$unpacked_size},compatibility:{min_vward:$min_vward,max_vward:$version},affected_components:$components,affected_services:[],health_profile:"default",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$VWARD_OUT/signed.json"
+            '{schema:1,update_id:$update_id,sequence:$sequence,version:$version,channel:"dev",priority:"ROUTINE",published_at:$published_at,min_updater_version:"1.2.0",package:{url:$url,sha256:$sha256,size:$size,unpacked_size:$unpacked_size},compatibility:{min_vward:$min_vward,max_vward:$version},affected_components:$components,affected_services:[],health_profile:"full",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$VWARD_OUT/signed.json"
           jq -cS . "$VWARD_OUT/signed.json" > "$VWARD_OUT/signed.canonical.json"
           openssl pkeyutl -sign -inkey "$KEY" -rawin -in "$VWARD_OUT/signed.canonical.json" -out "$VWARD_OUT/signature.bin"
           SIGNATURE="$(openssl base64 -A -in "$VWARD_OUT/signature.bin")"
