@@ -17,6 +17,7 @@ on:
       - dev
     paths:
       - VERSION
+      - SHA256SUMS
       - components/**
       - config/components/**
       - config/settings/**
