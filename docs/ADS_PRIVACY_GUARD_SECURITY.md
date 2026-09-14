@@ -94,8 +94,16 @@ full scan of large PRO/PRO++ indexes. Before classifier execution it checks paus
 query-log change, elapsed interval, scan lock, load average per CPU, available memory
 and free `/opt` space. A failed resource gate yields `DEFERRED`, not a forced scan.
 
+### 14. Lock ownership and stale recovery
 
-### 14. HTTPS Content Guard isolation
+Component locks are atomic root-only directories containing PID, acquisition epoch and
+the Linux process starttime. PID plus starttime prevents a recycled PID from being
+mistaken for the original owner. Stale takeover first atomically renames the old lock,
+so competing breakers cannot delete a successor's lock. Release verifies ownership and
+removes only known metadata files; symlink lock paths are rejected and recursive deletion
+of the public lock path is forbidden.
+
+### 15. HTTPS Content Guard isolation
 
 HTTPS Content Guard is disabled by default and uses explicit-proxy mode only. It does not
 own iptables/NAT state. CA private keys are root-only local files and are never returned by

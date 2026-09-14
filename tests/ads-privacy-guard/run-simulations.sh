@@ -243,7 +243,19 @@ pass "durable concurrent job queue and recovery"
 # 12 stale lock recovery
 mkdir -p "$JST/test.lock"; echo 999999 > "$JST/test.lock/pid"; echo 1 > "$JST/test.lock/started"
 VWARD_ADS_ETC="$JETC" VWARD_ADS_STATE="$JST" VWARD_ADS_LOG_DIR="$TMP/log" VWARD_ADS_BACKUP_ROOT="$TMP/backups" VWARD_ADS_SHARE="$TMP/share" busybox sh -c '. "$1"; ads_lock_acquire "$2" 1 && echo OK' sh "$LIB" "$JST/test.lock" | grep -q OK || fail stale_lock
-pass "stale lock recovery"
+
+# A live but reused PID is detected by Linux process starttime.
+mkdir -p "$JST/reused.lock"; echo $$ > "$JST/reused.lock/pid"; echo 1 > "$JST/reused.lock/started"; echo impossible-start > "$JST/reused.lock/pid_start"
+VWARD_ADS_ETC="$JETC" VWARD_ADS_STATE="$JST" VWARD_ADS_LOG_DIR="$TMP/log" VWARD_ADS_BACKUP_ROOT="$TMP/backups" VWARD_ADS_SHARE="$TMP/share" busybox sh -c '. "$1"; ads_lock_acquire "$2" 1 && echo OK' sh "$LIB" "$JST/reused.lock" | grep -q OK || fail reused_pid_lock
+
+# Release is ownership-checked and a symlink is never followed or removed.
+mkdir -p "$JST/foreign.lock"; echo 999999 > "$JST/foreign.lock/pid"; echo 1 > "$JST/foreign.lock/started"; echo unknown > "$JST/foreign.lock/pid_start"
+VWARD_ADS_ETC="$JETC" VWARD_ADS_STATE="$JST" VWARD_ADS_LOG_DIR="$TMP/log" VWARD_ADS_BACKUP_ROOT="$TMP/backups" VWARD_ADS_SHARE="$TMP/share" busybox sh -c '. "$1"; ! ads_lock_release "$2"' sh "$LIB" "$JST/foreign.lock" || fail foreign_lock_release
+[ -d "$JST/foreign.lock" ] || fail foreign_lock_removed
+mkdir -p "$JST/lock-target"; touch "$JST/lock-target/keep"; ln -s "$JST/lock-target" "$JST/symlink.lock"
+VWARD_ADS_ETC="$JETC" VWARD_ADS_STATE="$JST" VWARD_ADS_LOG_DIR="$TMP/log" VWARD_ADS_BACKUP_ROOT="$TMP/backups" VWARD_ADS_SHARE="$TMP/share" busybox sh -c '. "$1"; ! ads_lock_acquire "$2" 1' sh "$LIB" "$JST/symlink.lock" || fail symlink_lock_acquire
+[ -f "$JST/lock-target/keep" ] && [ -L "$JST/symlink.lock" ] || fail symlink_lock_damage
+pass "ownership-safe stale lock recovery"
 
 # 13 source updater last-known-good cache and ACTIVE/OFF behavior
 UETC="$TMP/uetc"; UST="$TMP/ustate"; USH="$TMP/ushare"; mkdir -p "$UETC" "$UST/work" "$USH"

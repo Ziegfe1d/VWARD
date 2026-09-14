@@ -82,36 +82,80 @@ ads_load_config()
     . "$ADS_CONFIG"
 }
 
+ads_pid_start() (
+    ads_ps_pid="${1:-$$}"
+    case "$ads_ps_pid" in ''|*[!0-9]*) return 1 ;; esac
+    [ -r "/proc/$ads_ps_pid/stat" ] || return 1
+    # starttime is field 22. Strip pid/comm first because comm may contain spaces.
+    sed 's/^.*) //' "/proc/$ads_ps_pid/stat" 2>/dev/null | awk 'NF>=20 {print $20; exit}'
+)
+
+ads_lock_create() (
+    ads_lc_dir="$1"
+    mkdir "$ads_lc_dir" 2>/dev/null || return 1
+    chmod 0700 "$ads_lc_dir" 2>/dev/null || { rmdir "$ads_lc_dir" 2>/dev/null; return 1; }
+    ads_lc_started="$(ads_epoch)"
+    ads_lc_pid_start="$(ads_pid_start $$ 2>/dev/null)" || ads_lc_pid_start=unknown
+    if ! printf '%s\n' "$$" > "$ads_lc_dir/pid" ||
+       ! printf '%s\n' "$ads_lc_started" > "$ads_lc_dir/started" ||
+       ! printf '%s\n' "$ads_lc_pid_start" > "$ads_lc_dir/pid_start"; then
+        rm -f "$ads_lc_dir/pid" "$ads_lc_dir/started" "$ads_lc_dir/pid_start" 2>/dev/null
+        rmdir "$ads_lc_dir" 2>/dev/null
+        return 1
+    fi
+    chmod 0600 "$ads_lc_dir/pid" "$ads_lc_dir/started" "$ads_lc_dir/pid_start" 2>/dev/null || {
+        rm -f "$ads_lc_dir/pid" "$ads_lc_dir/started" "$ads_lc_dir/pid_start" 2>/dev/null
+        rmdir "$ads_lc_dir" 2>/dev/null
+        return 1
+    }
+)
+
 ads_lock_acquire() (
     ads_l_dir="$1"
     ads_l_stale="$(ads_num "${2:-900}" 900)"
-    if mkdir "$ads_l_dir" 2>/dev/null; then
-        echo "$$" > "$ads_l_dir/pid" 2>/dev/null || true
-        ads_epoch > "$ads_l_dir/started" 2>/dev/null || true
-        return 0
-    fi
+    [ -n "$ads_l_dir" ] || return 1
+    [ ! -L "$ads_l_dir" ] || return 1
+    ads_lock_create "$ads_l_dir" && return 0
+    [ -d "$ads_l_dir" ] && [ ! -L "$ads_l_dir" ] || return 1
 
     ads_l_pid="$(cat "$ads_l_dir/pid" 2>/dev/null)"
     case "$ads_l_pid" in ''|*[!0-9]*) ads_l_pid=0 ;; esac
+    ads_l_alive=0
     if [ "$ads_l_pid" -gt 0 ] && kill -0 "$ads_l_pid" 2>/dev/null; then
-        return 1
+        ads_l_saved_start="$(cat "$ads_l_dir/pid_start" 2>/dev/null)"
+        ads_l_live_start="$(ads_pid_start "$ads_l_pid" 2>/dev/null)" || ads_l_live_start=unknown
+        # Legacy locks have no pid_start and retain their former conservative
+        # liveness behavior. New locks distinguish a reused PID.
+        if [ -z "$ads_l_saved_start" ] || [ "$ads_l_saved_start" = unknown ] || [ "$ads_l_saved_start" = "$ads_l_live_start" ]; then
+            ads_l_alive=1
+        fi
     fi
+    [ "$ads_l_alive" -eq 0 ] || return 1
 
     ads_l_started="$(ads_num "$(cat "$ads_l_dir/started" 2>/dev/null)" 0)"
     ads_l_now="$(ads_epoch)"
-    if [ "$ads_l_started" -eq 0 ] || [ $((ads_l_now - ads_l_started)) -ge "$ads_l_stale" ]; then
-        rm -rf "$ads_l_dir" 2>/dev/null || return 1
-        if mkdir "$ads_l_dir" 2>/dev/null; then
-            echo "$$" > "$ads_l_dir/pid" 2>/dev/null || true
-            echo "$ads_l_now" > "$ads_l_dir/started" 2>/dev/null || true
-            return 0
-        fi
-    fi
-    return 1
+    [ "$ads_l_started" -eq 0 ] || [ $((ads_l_now - ads_l_started)) -ge "$ads_l_stale" ] || return 1
+
+    # Atomic rename elects exactly one stale-lock breaker. Never recursively
+    # delete the public lock path: it may already belong to a successor.
+    ads_l_old="${ads_l_dir}.stale.$$"
+    [ ! -e "$ads_l_old" ] && [ ! -L "$ads_l_old" ] || return 1
+    mv "$ads_l_dir" "$ads_l_old" 2>/dev/null || return 1
+    rm -f "$ads_l_old/pid" "$ads_l_old/started" "$ads_l_old/pid_start" 2>/dev/null
+    rmdir "$ads_l_old" 2>/dev/null || true
+    ads_lock_create "$ads_l_dir"
 )
 
 ads_lock_release() (
-    [ -n "${1:-}" ] && rm -rf "$1" 2>/dev/null || true
+    ads_lr_dir="${1:-}"
+    [ -n "$ads_lr_dir" ] && [ -d "$ads_lr_dir" ] && [ ! -L "$ads_lr_dir" ] || return 1
+    ads_lr_pid="$(cat "$ads_lr_dir/pid" 2>/dev/null)"
+    [ "$ads_lr_pid" = "$$" ] || return 1
+    ads_lr_saved_start="$(cat "$ads_lr_dir/pid_start" 2>/dev/null)"
+    ads_lr_own_start="$(ads_pid_start $$ 2>/dev/null)" || ads_lr_own_start=unknown
+    [ -z "$ads_lr_saved_start" ] || [ "$ads_lr_saved_start" = unknown ] || [ "$ads_lr_saved_start" = "$ads_lr_own_start" ] || return 1
+    rm -f "$ads_lr_dir/pid" "$ads_lr_dir/started" "$ads_lr_dir/pid_start" 2>/dev/null || return 1
+    rmdir "$ads_lr_dir" 2>/dev/null
 )
 
 ads_atomic_copy() (
