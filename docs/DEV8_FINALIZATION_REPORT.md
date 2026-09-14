@@ -39,3 +39,15 @@ Base commit: `938c0f8c47a51f55f1344aa25e05abc9b3e1f1a3`
 ## Remaining acceptance boundary
 
 Static responsive and interaction contracts are verified. Pixel-level acceptance in a real Chromium render and a physical Keenetic/KN-1913 smoke test remain NOT VERIFIED in this environment because the browser runtime and target device are unavailable.
+
+## Repeat audit and polish
+
+Second pass completed on 2026-09-14:
+
+- Fixed SVG action icons being removed after the first busy-state cycle.
+- Fixed the Ads save button becoming enabled again after a successful save with no remaining changes.
+- Removed the non-functional future-roadmap panel from the active settings flow.
+- Replaced decorative Ads glyphs with the same stroke-based SVG language used by Console controls.
+- Clarified Russian UI copy for sources, manual rules and writable settings.
+- Removed the obsolete `candidate` suffix from the integrated domain classifier runtime version and validation message.
+- Added regression assertions for these cases.

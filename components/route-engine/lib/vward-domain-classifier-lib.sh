@@ -1,5 +1,5 @@
 #!/bin/sh
-VWARD_CLASSIFIER_VERSION="0.2.0-dev.8-candidate"
+VWARD_CLASSIFIER_VERSION="0.2.0-dev.8"
 VWARD_ROUTE_ETC="${VWARD_ROUTE_ETC:-/opt/etc/vward/route-engine}"
 VWARD_ROUTE_STATE="${VWARD_ROUTE_STATE:-/opt/var/lib/vward/route-engine}"
 VWARD_CLASSIFIER_CONFIG="${VWARD_CLASSIFIER_CONFIG:-$VWARD_ROUTE_ETC/domain-classifier.conf}"
@@ -26,7 +26,7 @@ vdc_load_config(){
   VWARD_CLASSIFIER_BATCH_SIZE="$(vdc_num "${CLASSIFIER_BATCH_SIZE:-$VWARD_CLASSIFIER_BATCH_SIZE}" 25)"
   [ "$VWARD_AUTO_CLASSIFY_THRESHOLD" -ge 70 ] && [ "$VWARD_AUTO_CLASSIFY_THRESHOLD" -le 100 ] || { echo "AUTO_CLASSIFY_THRESHOLD out of range" >&2; return 1; }
   [ "$VWARD_CLASSIFIER_BATCH_SIZE" -ge 1 ] && [ "$VWARD_CLASSIFIER_BATCH_SIZE" -le 100 ] || { echo "CLASSIFIER_BATCH_SIZE out of range" >&2; return 1; }
-  case "${MIGRATION_MODE:-dry-run}" in off|dry-run) ;; *) echo "MIGRATION_MODE must be off or dry-run in this candidate" >&2; return 1;; esac
+  case "${MIGRATION_MODE:-dry-run}" in off|dry-run) ;; *) echo "MIGRATION_MODE must be off or dry-run" >&2; return 1;; esac
 }
 vdc_lock_acquire(){
   vdc_la_now="$(date +%s)"; mkdir -p "$VWARD_ROUTE_STATE" || return 1

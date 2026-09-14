@@ -17,6 +17,7 @@ required_css = (
     "/* Final visual polish - dev.8 */",
     "bottom:calc(var(--mobile-nav-h) + env(safe-area-inset-bottom) + 18px)",
     ".btn-icon .icon",
+    ".vward-group-icon svg",
 )
 for marker in required_css:
     assert marker in css, marker

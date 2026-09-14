@@ -101,6 +101,15 @@ for action in ("ads-data", "ads-https-data", "ads-settings", "ads-control", "ads
         fail(f"нет Ads & Privacy Guard API action: {action}")
 if "bindAdsPrivacyGuard()" not in js or "action=ads-data" not in js:
     fail("Ads & Privacy Guard UI не связан с active Console JavaScript")
+for marker in ("adsUpdateDirty", "adsSnapshot", "adsDirty"):
+    if marker not in js:
+        fail(f"нет Ads dirty-state marker: {marker}")
+if "button.textContent=label" in js or "button.id==='adsSettingsSave'" not in js:
+    fail("Ads busy-state ломает иконку или состояние кнопки сохранения")
+if "Будущие возможности" in html or "ROADMAP" in html:
+    fail("в active Console остался недействующий roadmap-блок")
+if 'class="vward-group-icon" aria-hidden="true"><svg' not in html:
+    fail("группы Ads не используют единые SVG-иконки")
 
 
 for marker in ("logAll", "logReset", "tunnelSelect", "tunnelSelectedStats", "routeListSearch", "routeListSort"):
