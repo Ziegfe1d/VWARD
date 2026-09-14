@@ -15,6 +15,7 @@ for glyph in ("⌂", "↻", "⌁", "◇", "⇄", "◷", "▣", "▱", "≡", "�
     assert glyph not in html + js, glyph
 
 declared = set(re.findall(r"([A-Za-z][A-Za-z0-9]*):'", js.split("function iconSvg", 1)[0]))
+declared.update(re.findall(r"ICON_PATHS\.([A-Za-z][A-Za-z0-9]*)=", js))
 used = set(re.findall(r'data-icon="([A-Za-z][A-Za-z0-9]*)"', html))
 used.update(re.findall(r"'([A-Za-z][A-Za-z0-9]*)'", js.split("const CONTROL_ICONS=", 1)[1].split(";", 1)[0]))
 assert used <= declared, f"icons used without canonical path: {sorted(used - declared)}"

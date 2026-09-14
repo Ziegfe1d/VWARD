@@ -63,3 +63,14 @@ Final design-system pass completed on 2026-09-14:
 - Added shared typography and icon-size tokens, consistent button/icon alignment and mobile navigation sizing.
 - Replaced the text chevron in settings accordions with a CSS-drawn control using the same line weight.
 - Added a repository gate that rejects legacy glyph icons, multiple renderers, unknown icon identifiers and one-off static SVGs.
+
+## Configurable overview cards
+
+Completed on 2026-09-14:
+
+- Added `Плитка` and `Список` choices to the existing overview-card editor.
+- Kept card visibility, ordering and view selection in one local browser preference.
+- Added a responsive compact list layout for desktop and mobile without changing card data or navigation behavior.
+- Preserved keyboard activation and drag/order controls in both views.
+- Made reset restore the full card set, default order and tile view.
+- Added repository checks for both view controls, persistence and responsive list styling.

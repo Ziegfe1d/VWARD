@@ -27,18 +27,23 @@ assert "График появится после второго замера" in
 assert "wanActionText" in js
 assert "vward-dashboard" in js
 assert "dashboardOrder" in js and "dashboardHidden" in js
+assert "dashboardView='grid'" in js and "view:dashboardView" in js
+assert "[data-dashboard-view]" in js
 assert "draggable=" in js and "ondrop=" in js
 assert "storage-bar" in js and "storageBar" in js
 assert "data-chart=\"'+d[0]" not in js
 assert "<details class=\"catalog-group\">" in js
 for marker in ("dashboardEdit", "dashboardEditor", "dashboardList", "dashboardReset"):
     assert f'id="{marker}"' in html
+assert 'data-dashboard-view="grid"' in html
+assert 'data-dashboard-view="list"' in html
 assert 'data-section="updater" data-icon="refresh">Обновления</button>' in html
 assert 'data-section="settings" data-icon="settings">Настройки</button>' in html
 assert "style=" not in html
 assert "onclick=" not in html
 assert "overflow-x:hidden" in css
 assert "grid-template-columns:repeat(2,minmax(0,1fr))" in css
+assert ".cards[data-view=list]" in css
 assert "@media(max-width:359px){.card{min-height:174px}" in css
 
 print("CONSOLE_RESPONSIVE=PASS")

@@ -115,6 +115,9 @@ if 'class="vward-group-icon" data-icon="shield"' not in html:
 for marker in ("logAll", "logReset", "tunnelSelect", "tunnelSelectedStats", "routeListSearch", "routeListSort"):
     if f'id="{marker}"' not in html:
         fail(f"нет финального элемента prompt-gap closure: {marker}")
+for marker in ('data-dashboard-view="grid"', 'data-dashboard-view="list"', "syncDashboardView", "view:dashboardView"):
+    if marker not in ui:
+        fail(f"нет настройки вида карточек: {marker}")
 if '<option value="group">FQDN-группа</option>' not in html or 'group_not_found' not in api:
     fail("FQDN group probe is incomplete")
 if 'Runtime сейчас не хранит отдельную достоверную state-machine очереди' not in html:
