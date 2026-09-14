@@ -51,3 +51,15 @@ Second pass completed on 2026-09-14:
 - Clarified Russian UI copy for sources, manual rules and writable settings.
 - Removed the obsolete `candidate` suffix from the integrated domain classifier runtime version and validation message.
 - Added regression assertions for these cases.
+
+## Canonical icon and typography pass
+
+Final design-system pass completed on 2026-09-14:
+
+- Consolidated navigation, cards, toolbar, actions, status groups and utility controls into one `ICON_PATHS` registry and one SVG renderer.
+- Standardized every icon on a `24 × 24` viewBox, two-pixel rounded stroke, inherited color and explicit decorative accessibility behavior.
+- Removed the legacy character-to-icon conversion and separate Ads action-icon implementation.
+- Replaced symbol-based navigation, card chevrons, editor arrows, close control and external-link marks with canonical SVG icons.
+- Added shared typography and icon-size tokens, consistent button/icon alignment and mobile navigation sizing.
+- Replaced the text chevron in settings accordions with a CSS-drawn control using the same line weight.
+- Added a repository gate that rejects legacy glyph icons, multiple renderers, unknown icon identifiers and one-off static SVGs.

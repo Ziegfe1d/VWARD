@@ -108,7 +108,7 @@ if "button.textContent=label" in js or "button.id==='adsSettingsSave'" not in js
     fail("Ads busy-state ломает иконку или состояние кнопки сохранения")
 if "Будущие возможности" in html or "ROADMAP" in html:
     fail("в active Console остался недействующий roadmap-блок")
-if 'class="vward-group-icon" aria-hidden="true"><svg' not in html:
+if 'class="vward-group-icon" data-icon="shield"' not in html:
     fail("группы Ads не используют единые SVG-иконки")
 
 

@@ -25,7 +25,7 @@ grep -E 'Smart Updater|>Update</button>|192\.168\.1\.1' web/index.html web/asset
 grep -E '\?\.|\?\?|scrollTo\(\{' web/assets/vward-console.js >/dev/null &&
     fail "Console contains incompatible mobile JavaScript"
 
-grep -Fq 'function svgIcon' web/assets/vward-console.js || fail "local SVG icon system missing"
+grep -Fq 'function iconSvg' web/assets/vward-console.js || fail "canonical SVG icon system missing"
 grep -Fq 'componentNames=' web/assets/vward-console.js || fail "component display mapping missing"
 grep -Fq 'id="settings"' web/index.html || fail "safe settings overview missing"
 grep -Fq 'border-radius:28px' web/assets/vward-console.css || fail "floating mobile toolbar missing"
@@ -58,6 +58,7 @@ done
 sh -n web/cgi-bin/api.cgi || fail "Console API syntax"
 python3 tests/repository/check-console-bindings.py || fail "Console bindings"
 python3 tests/repository/check-console-responsive.py || fail "Console responsive layout"
+python3 tests/repository/check-console-icon-system.py || fail "Console icon and typography system"
 python3 tests/repository/check-console-security.py || fail "Console security"
 python3 tests/repository/check-device-profile.py || fail "Device profile"
 python3 tests/repository/check-settings-registry.py || fail "Settings registry"

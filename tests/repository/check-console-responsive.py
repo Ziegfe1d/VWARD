@@ -16,7 +16,7 @@ required_css = (
     "@media(max-width:359px)",
     "/* Final visual polish - dev.8 */",
     "bottom:calc(var(--mobile-nav-h) + env(safe-area-inset-bottom) + 18px)",
-    ".btn-icon .icon",
+    ".btn.has-icon .icon",
     ".vward-group-icon svg",
 )
 for marker in required_css:
@@ -33,8 +33,8 @@ assert "data-chart=\"'+d[0]" not in js
 assert "<details class=\"catalog-group\">" in js
 for marker in ("dashboardEdit", "dashboardEditor", "dashboardList", "dashboardReset"):
     assert f'id="{marker}"' in html
-assert "<br>Обновл.</button>" in html
-assert "<br>Настр.</button>" in html
+assert 'data-section="updater" data-icon="refresh">Обновления</button>' in html
+assert 'data-section="settings" data-icon="settings">Настройки</button>' in html
 assert "style=" not in html
 assert "onclick=" not in html
 assert "overflow-x:hidden" in css
