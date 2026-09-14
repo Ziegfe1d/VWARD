@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Candidate integration gate for the VWARD Dev.7 unified settings registry."""
+"""Integration gate for Ads & Privacy Guard in the authoritative settings registry."""
 import json
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-frag = json.loads((ROOT / 'config/settings/settings-registry.fragment.json').read_text(encoding='utf-8'))
-items = frag['settings']
+registry = json.loads((ROOT / 'config/settings/settings-registry.json').read_text(encoding='utf-8'))
+items = [x for x in registry['settings'] if x['component'] == 'ads-privacy-guard']
 assert items and len({x['id'] for x in items}) == len(items)
 allowed_keys = {
  'ENABLED','RUN_MODE','SCHEDULE_INTERVAL_MIN','DYNAMIC_MIN_INTERVAL_SEC',

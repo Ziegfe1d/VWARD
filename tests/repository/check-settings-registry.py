@@ -15,15 +15,26 @@ schema = json.loads(schema_path.read_text(encoding="utf-8"))
 assert registry["schema"] == 1
 assert schema["properties"]["schema"]["const"] == 1
 settings = registry["settings"]
-assert len(settings) >= 32
+assert len(settings) >= 46
 assert len({item["id"] for item in settings}) == len(settings)
 required = {"id", "component", "section", "label_ru", "description_ru", "source", "key", "type", "editable", "secret", "restart_requirement", "risk"}
+editable_update = {"auto_apply", "auto_critical", "auto_important", "auto_routine"}
+editable_ads = {
+    "ENABLED", "RUN_MODE", "SCHEDULE_INTERVAL_MIN", "DYNAMIC_MIN_INTERVAL_SEC",
+    "DYNAMIC_MAX_LOAD_PER_CPU_X100", "DYNAMIC_MIN_MEM_AVAILABLE_KB",
+    "DYNAMIC_MIN_OPT_FREE_KB", "DYNAMIC_MAX_CANDIDATES_PER_RUN",
+    "AUTO_SOURCE_UPDATE", "SOURCE_UPDATE_INTERVAL_HOURS", "QUERY_SOURCE",
+    "AUTO_RULE_SCOPE", "PUBLISH_MODE", "AUTO_PUBLISH",
+}
 for item in settings:
     assert required <= item.keys(), item["id"]
     assert item["secret"] is False, item["id"]
     if item["editable"]:
-        assert item["source"] == "update.conf"
-        assert item["key"] in {"auto_apply", "auto_critical", "auto_important", "auto_routine"}
+        if item["source"] == "update.conf":
+            assert item["key"] in editable_update
+        else:
+            assert item["source"] == "ads-privacy-guard.conf"
+            assert item["key"] in editable_ads
     else:
         assert item.get("read_only_reason"), item["id"]
 
@@ -68,6 +79,23 @@ check_interval_seconds=900
 request_timeout_seconds=120
 barrier_integration_ready=1
 """, encoding="utf-8")
+    ads = tmp / "ads-privacy-guard.conf"
+    ads.write_text("""ENABLED=0
+RUN_MODE=manual
+SCHEDULE_INTERVAL_MIN=30
+DYNAMIC_MIN_INTERVAL_SEC=300
+DYNAMIC_MAX_LOAD_PER_CPU_X100=120
+DYNAMIC_MIN_MEM_AVAILABLE_KB=32768
+DYNAMIC_MIN_OPT_FREE_KB=65536
+DYNAMIC_MAX_CANDIDATES_PER_RUN=50
+AUTO_SOURCE_UPDATE=1
+SOURCE_UPDATE_INTERVAL_HOURS=24
+QUERY_SOURCE=auto
+AUTO_RULE_SCOPE=exact
+PUBLISH_MODE=staged
+AUTO_PUBLISH=0
+""", encoding="utf-8")
+    ads.chmod(0o600)
     env = os.environ | {
         "REQUEST_METHOD": "GET",
         "QUERY_STRING": "action=settings-data",
@@ -76,6 +104,7 @@ barrier_integration_ready=1
         "VWARD_DEVICE_CONFIG": str(device),
         "VWARD_SETTINGS_REGISTRY": str(registry_path),
         "VWARD_UPDATE_CONFIG": str(update),
+        "VWARD_ADS_CONFIG": str(ads),
     }
     result = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=env, text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
@@ -94,6 +123,11 @@ barrier_integration_ready=1
     assert by_id["update.safe_window_start"]["effective"] == "03:00"
     assert by_id["update.max_package_size"]["effective"] == 16777216
     assert by_id["update.barrier_ready"]["effective"] is True
+    assert by_id["ads.enabled"]["effective"] is False
+    assert by_id["ads.run_mode"]["effective"] == "manual"
+    assert by_id["ads.dynamic_interval"]["effective"] == 300
+    assert by_id["ads.publish_mode"]["effective"] == "staged"
+    assert by_id["ads.auto_publish"]["effective"] is False
     assert by_id["device.lan_address"]["editable"] is False
     assert "manifest_url" not in {item["key"] for item in payload["settings"]}
     assert "public_key_file" not in {item["key"] for item in payload["settings"]}

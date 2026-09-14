@@ -18,6 +18,12 @@ def fail(message: str) -> None:
     raise SystemExit(f"FAIL: {message}")
 
 
+html_ids = re.findall(r'\bid="([^"]+)"', html)
+duplicate_ids = sorted({item for item in html_ids if html_ids.count(item) > 1})
+if duplicate_ids:
+    fail("повторяющиеся id: " + ", ".join(duplicate_ids))
+
+
 section_ids = set(re.findall(r'<section class="section(?: active)?" id="([^"]+)"', html))
 section_links = set(re.findall(r'data-section="([^"]+)"', html))
 go_links = {
@@ -86,6 +92,15 @@ if 'state_action_not_allowed' not in api or 'rollback_unavailable' not in api or
     fail("Update Engine server-side state preconditions are incomplete")
 if "count='+encodeURIComponent(prefs.logCount)" not in js:
     fail("bounded log tail preference is not bound")
+
+for marker in ("adsPrivacyPanel", "adsEnabled", "adsSettingsSave", "adsRunNow", "adsPublishNow", "adsHttpsPanel", "adsSourcesPanel", "adsProbeBtn", "adsRuleAllow"):
+    if f'id="{marker}"' not in html:
+        fail(f"нет Ads & Privacy Guard элемента: {marker}")
+for action in ("ads-data", "ads-https-data", "ads-settings", "ads-control", "ads-https-control"):
+    if action not in api:
+        fail(f"нет Ads & Privacy Guard API action: {action}")
+if "bindAdsPrivacyGuard()" not in js or "action=ads-data" not in js:
+    fail("Ads & Privacy Guard UI не связан с active Console JavaScript")
 
 
 for marker in ("logAll", "logReset", "tunnelSelect", "tunnelSelectedStats", "routeListSearch", "routeListSort"):

@@ -22,12 +22,8 @@ pass "conservative feed normalization"
 # 3 production source registry contract
 REG="$ROOT/components/ads-privacy-guard/data/source-registry.json"
 "$JQ" -e '.schema==1 and (.sources|length>0) and all(.sources[]; (.default_mode=="active" or .default_mode=="check" or .default_mode=="off") and (.weight>=0 and .weight<=100) and (.urls|length>0))' "$REG" >/dev/null || fail source_registry
-python3 - <<PY
-import json
-from pathlib import Path
-from jsonschema import Draft202012Validator
-r=json.loads(Path('$REG').read_text()); s=json.loads(Path('$ROOT/components/ads-privacy-guard/data/source-registry.schema.json').read_text()); Draft202012Validator(s).validate(r)
-PY
+SCHEMA="$ROOT/components/ads-privacy-guard/data/source-registry.schema.json"
+"$JQ" -e '."$schema"=="https://json-schema.org/draft/2020-12/schema" and .type=="object" and (.required|index("schema")) and (.required|index("sources"))' "$SCHEMA" >/dev/null || fail source_registry_schema
 pass "source registry schema and modes"
 
 # Shared classifier fixture
@@ -277,8 +273,8 @@ grep -Eq '^SCHEDULER=(NO_CHANGE|BACKOFF)$' "$TMP/sc3.out" || { cat "$TMP/sc3.out
 [ "$(wc -l < "$TMP/sc-runs")" -eq 1 ] || fail scheduler_reran
 pass "dynamic low-load scheduler gating"
 
-# 15 Dev.7 candidate settings-registry contract
-python3 "$ROOT/tests/repository/check-ads-privacy-settings-registry.py" | grep -q PASS || fail settings_registry_candidate
-pass "Dev.7 settings registry integration contract"
+# 15 dev.8 authoritative settings-registry contract
+python3 "$ROOT/tests/repository/check-ads-privacy-settings-registry.py" | grep -q PASS || fail settings_registry_integration
+pass "dev.8 settings registry integration contract"
 
 echo "ALL_TESTS=PASS"

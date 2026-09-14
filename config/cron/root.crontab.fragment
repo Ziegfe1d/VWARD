@@ -1,5 +1,0 @@
-# VWARD Ads & Privacy Guard - proposed Dev schedule.
-# One lightweight scheduler tick owns automatic analysis and source refresh.
-# It does not mean a heavy scan every minute: the scheduler checks mode, pause state,
-# query-log change, elapsed interval and load/memory/storage gates first.
-* * * * * /opt/bin/vward-ads-privacy-scheduler.sh > /tmp/vward-ads-scheduler.cron.out 2>&1; RC=$?; date > /tmp/vward-ads-scheduler.cron.last; echo $RC > /tmp/vward-ads-scheduler.cron.rc; if [ $RC -eq 0 ]; then date > /tmp/vward-ads-scheduler.cron.ok; else date > /tmp/vward-ads-scheduler.cron.fail; fi

@@ -37,6 +37,9 @@ case "$profile" in
     console)
         required="$VU_ROOT_PREFIX/opt/share/vward/settings-registry.json $VU_ROOT_PREFIX/opt/share/vward/console/www/index.html $VU_ROOT_PREFIX/opt/share/vward/console/www/assets/vward-console.css $VU_ROOT_PREFIX/opt/share/vward/console/www/assets/vward-console.js $VU_ROOT_PREFIX/opt/share/vward/console/www/cgi-bin/api.cgi"
         ;;
+    ads-privacy-guard)
+        required="$VU_ROOT_PREFIX/opt/bin/vward-ads-privacy-health.sh $VU_ROOT_PREFIX/opt/bin/vward-ads-privacy-scheduler.sh $VU_ROOT_PREFIX/opt/share/vward/ads-privacy-guard/vward-ads-privacy-common.sh $VU_ROOT_PREFIX/opt/share/vward/ads-privacy-guard/source-registry.json"
+        ;;
     *) vu_die "$VU_CONFIG_ERROR" "Unknown health profile: $profile" ;;
 esac
 

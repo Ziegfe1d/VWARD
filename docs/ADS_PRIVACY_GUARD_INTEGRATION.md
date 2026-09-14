@@ -1,10 +1,10 @@
 # Интеграция Ads & Privacy Guard в VWARD dev
 
-Этот документ описывает будущий merge. В текущем архиве ничего не применено.
+Этот документ фиксирует активную интеграцию в VWARD 0.2.0-dev.8.
 
 ## 1. Новый component ID
 
-Предлагается:
+Используется:
 
 ```text
 id: ads-privacy-guard
@@ -12,22 +12,18 @@ name: VWARD Ads & Privacy Guard
 name_ru: Анализ рекламы и трекинга VWARD
 ```
 
-Component registry fragment находится в:
-
-```text
-config/components/component-registry.fragment.json
-```
+Авторитетная запись находится в `config/components/component-registry.json`.
 
 ## 2. Source/runtime mapping
 
-См. `INSTALLATION_MAP.fragment.md`.
+См. `docs/INSTALLATION_MAP.md`.
 
 Код устанавливается в `/opt/bin` и `/opt/share/vward/ads-privacy-guard`.
 Local config создаётся только при первом install и затем не является update payload.
 
 ## 3. Scheduler / cron
 
-Предложение v2: один cron owner:
+Используется один cron owner:
 
 ```text
 * * * * * /opt/bin/vward-ads-privacy-scheduler.sh ...
@@ -42,14 +38,14 @@ PAUSED, RUN_MODE, query-log change, elapsed interval, load average per CPU, MemA
 
 ## 4. Console API
 
-Добавить GET `ads-data`: health/status, counts, last run/source update, review queue,
+GET `ads-data` возвращает health/status, counts, last run/source update, review queue,
 runtime current domain/progress, scheduler phase/reason/next due, manual override counts.
 
-Добавить GET/POST `ads-settings`: только whitelist параметров через
+GET/POST `ads-settings` использует только whitelist параметров через
 `vward-ads-privacy-settings.sh`, с backup, validation, atomic replace и audit. Нельзя принимать
 произвольный shell config. Включение `AUTO_PUBLISH=1` требует confirm token.
 
-Добавить POST `ads-control` через существующий `X-VWARD-Request: console` guard:
+POST `ads-control` использует существующий `X-VWARD-Request: console` guard:
 
 - `scan`;
 - `sources-update`;
@@ -59,7 +55,7 @@ runtime current domain/progress, scheduler phase/reason/next due, manual overrid
 
 Никаких arbitrary command/domain shell interpolation. Domain и scope валидируются.
 
-API fragment: `web/fragments/api-ads-privacy-guard.fragment.cgi`.
+Активный API: `web/cgi-bin/api.cgi`.
 
 ## 5. Console UI
 
@@ -74,10 +70,8 @@ API fragment: `web/fragments/api-ads-privacy-guard.fragment.cgi`.
    ручной scan/source update/publish.
 3. Свои правила: domain, exact/suffix, always allow, always block, remove override.
 
-Fragments:
-
-- `web/fragments/ads-privacy-guard-ui.fragment.html`;
-- `web/fragments/ads-privacy-guard-settings.fragment.html`.
+Активная реализация: `web/index.html`, `web/assets/vward-console.css` и
+`web/assets/vward-console.js`.
 
 ## 6. Diagnostics
 
@@ -145,7 +139,7 @@ Keep HTTPS filtering under the existing `ads-privacy-guard` component id. Instal
 HTTPS control script and provider libraries as package-owned files, but seed local HTTPS
 config/TSV files only on first install. Never overwrite CA/private keys during update.
 
-Console fragment adds read-only status plus guarded `validate`, `ca-init`, `start`, `stop`
+Console adds read-only status plus guarded `validate`, `ca-init`, `start`, `stop`
 actions. CA creation/start require explicit confirmation. A future editor for intercept,
 bypass and request-path rules must use validated transactions; raw proxy config must never
 be accepted from the browser.

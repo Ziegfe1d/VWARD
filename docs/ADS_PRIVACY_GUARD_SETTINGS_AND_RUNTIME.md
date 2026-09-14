@@ -197,7 +197,8 @@ Enabling `AUTO_PUBLISH=1` требует отдельного подтвержд
    `Обновить базы`, `Применить`.
 3. **Свои правила** - domain, exact/suffix, always allow, always block, remove.
 
-Рабочий fragment: `web/fragments/ads-privacy-guard-settings.fragment.html`.
+Рабочая реализация встроена в `web/index.html`, `web/assets/vward-console.css`,
+`web/assets/vward-console.js` и `web/cgi-bin/api.cgi`.
 
 ## 11. Acceptance для low-load режима
 

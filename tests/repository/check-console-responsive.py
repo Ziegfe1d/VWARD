@@ -14,6 +14,9 @@ required_css = (
     "grid-template-columns:repeat(7,minmax(0,1fr))",
     "min-height:35dvh",
     "@media(max-width:359px)",
+    "/* Final visual polish - dev.8 */",
+    "bottom:calc(var(--mobile-nav-h) + env(safe-area-inset-bottom) + 18px)",
+    ".btn-icon .icon",
 )
 for marker in required_css:
     assert marker in css, marker
@@ -33,5 +36,8 @@ assert "<br>Обновл.</button>" in html
 assert "<br>Настр.</button>" in html
 assert "style=" not in html
 assert "onclick=" not in html
+assert "overflow-x:hidden" in css
+assert "grid-template-columns:repeat(2,minmax(0,1fr))" in css
+assert "@media(max-width:359px){.card{min-height:174px}" in css
 
 print("CONSOLE_RESPONSIVE=PASS")

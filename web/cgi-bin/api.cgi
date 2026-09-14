@@ -71,7 +71,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|settings-data|security-data|route-data|diagnostics|route-probe|update-data|control|update-control) ;;
+    status|ping|log|settings|settings-data|security-data|route-data|diagnostics|route-probe|update-data|control|update-control|ads-data|ads-https-data|ads-settings|ads-control|ads-https-control) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -96,7 +96,7 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             ;;
     esac
     case "$ACTION" in
-        settings|control|update-control) ;;
+        settings|control|update-control|ads-settings|ads-control|ads-https-control) ;;
         *)
             echo 'Status: 405 Method Not Allowed'
             header_json
@@ -104,6 +104,84 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             exit 0
             ;;
     esac
+fi
+
+ads_kv_json(){ [ -r "$1" ] && awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' "$1" | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}'; }
+ads_valid_domain(){ printf '%s\n' "$1" | awk 'length($0)>0&&length($0)<=253&&index($0,".")>0&&$0!~/\.\./ {n=split($0,a,".");for(i=1;i<=n;i++)if(length(a[i])<1||length(a[i])>63||a[i]!~/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/)exit 1;exit 0}{exit 1}'; }
+ads_valid_source_id(){ printf '%s\n' "$1" | awk 'length($0)>=1&&length($0)<=64&&$0~/^[a-z0-9][a-z0-9._-]*$/{exit 0}{exit 1}'; }
+ads_console_tmp(){ umask 077; mktemp "/tmp/vward-console-${1}.XXXXXX"; }
+
+if [ "$ACTION" = ads-data ]; then
+  header_json; [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+  AETC=/opt/etc/vward/ads-privacy-guard; AST=/opt/var/lib/vward/ads-privacy-guard; ASH=/opt/share/vward/ads-privacy-guard
+  SETTINGS=/opt/bin/vward-ads-privacy-settings.sh; SRCCTL=/opt/bin/vward-ads-privacy-source-control.sh; JOB=/opt/bin/vward-ads-privacy-job.sh
+  SETJSON="$([ -x "$SETTINGS" ] && "$SETTINGS" show 2>/dev/null | awk -F= '$1!="PAUSED"&&NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}')"
+  PAUSED="$([ -r "$AST/control.state" ] && awk -F= '$1=="paused"{print $2;exit}' "$AST/control.state")"; [ "$PAUSED" = 1 ] || PAUSED=0
+  BLOCKED="$(awk -F'|' '$3=="BLOCK"{n++}END{print n+0}' "$AST/verdicts.tsv" 2>/dev/null)"; REVIEW="$(awk -F'|' '$2=="SUSPECT"{n++}END{print n+0}' "$AST/verdicts.tsv" 2>/dev/null)"; ALLOW="$(awk -F'|' '$2=="ALLOW"{n++}END{print n+0}' "$AST/verdicts.tsv" 2>/dev/null)"; TRUST="$(awk -F'|' '$2=="TRUST"{n++}END{print n+0}' "$AST/verdicts.tsv" 2>/dev/null)"
+  MANUAL="$({ awk -F'|' 'NF>=2&&$1!~/^[[:space:]]*#/{print "allow|"$1"|"$2"|"$3}' "$AETC/allowlist.tsv" 2>/dev/null; awk -F'|' 'NF>=2&&$1!~/^[[:space:]]*#/{print "block|"$1"|"$2"|"$3}' "$AETC/denylist.tsv" 2>/dev/null; } | head -n 300 | "$JQ" -Rn '[inputs|split("|")|{type:.[0],domain:.[1],scope:.[2],note:(.[3:]|join("|"))}]')"
+  SOURCES="$([ -x "$SRCCTL" ] && "$SRCCTL" list 2>/dev/null | "$JQ" -Rn --arg state "$AST/sources" '[inputs|split("|")|{id:.[0],mode:.[1],name:.[2],cached:(.[3]=="1"),purpose:.[4]}]' || echo '[]')"
+  JOBS="$([ -x "$JOB" ] && "$JOB" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}')"
+  LAST_OUTPUT_PATH="$(printf '%s' "$JOBS" | "$JQ" -r '.LAST_output // ""' 2>/dev/null)"; LAST_OUTPUT=""
+  case "$LAST_OUTPUT_PATH" in "$AST/jobs/"*.out) [ -r "$LAST_OUTPUT_PATH" ] && LAST_OUTPUT="$(head -c 20000 "$LAST_OUTPUT_PATH" 2>/dev/null)" ;; esac
+  "$JQ" -n --argjson paused "$([ "$PAUSED" = 1 ]&&echo true||echo false)" --argjson settings "$SETJSON" --argjson sources "$SOURCES" --argjson manual "$MANUAL" --argjson jobsraw "$JOBS" --arg job_output "$LAST_OUTPUT" --argjson b "${BLOCKED:-0}" --argjson r "${REVIEW:-0}" --argjson a "${ALLOW:-0}" --argjson t "${TRUST:-0}" '{ok:true,component:"ads-privacy-guard",paused:$paused,settings:$settings,sources:$sources,manual_rules:$manual,counts:{blocked:$b,review:$r,allow:$a,trust:$t},jobs:{queued:($jobsraw.JOB_QUEUE//"0"|tonumber?//0),current:{state:($jobsraw.CURRENT_state//"IDLE"),type:($jobsraw.CURRENT_type//"")},last:{state:($jobsraw.LAST_state//"NONE"),type:($jobsraw.LAST_type//""),output:$job_output}}}'
+  exit 0
+fi
+
+
+if [ "$ACTION" = ads-https-data ]; then
+  header_json; [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+  HTTPSCTL=/opt/bin/vward-ads-privacy-https.sh
+  [ -x "$HTTPSCTL" ] || { echo '{"ok":false,"error":"https_backend_missing"}'; exit 0; }
+  OUT="$(ads_console_tmp ads-https-data)" || { echo '{"ok":false,"error":"temporary_file_failed"}'; exit 0; }; "$HTTPSCTL" status >"$OUT" 2>&1; RC=$?
+  if [ "$RC" -ne 0 ]; then RES="$(head -c 12000 "$OUT")"; rm -f "$OUT"; "$JQ" -n --arg output "$RES" --argjson rc "$RC" '{ok:false,error:"https_status_failed",rc:$rc,output:$output}'; exit 0; fi
+  STATUS="$(awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' "$OUT" | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}')"; rm -f "$OUT"
+  "$JQ" -n --argjson status "$STATUS" '{ok:true,status:$status}'
+  exit 0
+fi
+
+if [ "$ACTION" = ads-https-control ]; then
+  header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }; [ ! -e /opt/var/run/vward/updater.lock ] || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+  LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ]&&[ "$LEN" -le 512 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }; BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
+  val(){ printf '%s\n' "$BODY"|tr '&' '\n'|awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
+  OP="$(val op)"; CONFIRM="$(val confirm)"; case "$OP" in validate|render|pac|stop) ;; ca-init) [ "$CONFIRM" = HTTPS_CA_INIT ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;; start|restart) [ "$CONFIRM" = HTTPS_START ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
+  HTTPSCTL=/opt/bin/vward-ads-privacy-https.sh; [ -x "$HTTPSCTL" ] || { echo '{"ok":false,"error":"https_backend_missing"}'; exit 0; }
+  OUT="$(ads_console_tmp ads-https-control)" || { echo '{"ok":false,"error":"temporary_file_failed"}'; exit 0; }; RC=0
+  case "$OP" in ca-init) "$HTTPSCTL" ca-init --confirm >"$OUT" 2>&1||RC=$? ;; start) "$HTTPSCTL" start --confirm >"$OUT" 2>&1||RC=$? ;; restart) "$HTTPSCTL" restart --confirm >"$OUT" 2>&1||RC=$? ;; *) "$HTTPSCTL" "$OP" >"$OUT" 2>&1||RC=$? ;; esac
+  RES="$(head -c 12000 "$OUT" 2>/dev/null)"; rm -f "$OUT"; printf '%s|ADS_HTTPS|op=%s rc=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$OP" "$RC" >>/opt/var/log/vward/console-audit.log
+  "$JQ" -n --argjson ok "$([ "$RC" -eq 0 ]&&echo true||echo false)" --argjson rc "$RC" --arg output "$RES" '{ok:$ok,rc:$rc,output:$output}'
+  exit 0
+fi
+
+if [ "$ACTION" = ads-settings ]; then
+  header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }; [ ! -e /opt/var/run/vward/updater.lock ] || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+  LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ]&&[ "$LEN" -le 3072 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }; BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
+  val(){ printf '%s\n' "$BODY"|tr '&' '\n'|awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
+  UNKNOWN="$(printf '%s\n' "$BODY"|tr '&' '\n'|cut -d= -f1|awk '$0!="ENABLED"&&$0!="RUN_MODE"&&$0!="SCHEDULE_INTERVAL_MIN"&&$0!="DYNAMIC_MIN_INTERVAL_SEC"&&$0!="DYNAMIC_MAX_LOAD_PER_CPU_X100"&&$0!="DYNAMIC_MIN_MEM_AVAILABLE_KB"&&$0!="DYNAMIC_MIN_OPT_FREE_KB"&&$0!="DYNAMIC_MAX_CANDIDATES_PER_RUN"&&$0!="AUTO_SOURCE_UPDATE"&&$0!="SOURCE_UPDATE_INTERVAL_HOURS"&&$0!="QUERY_SOURCE"&&$0!="AUTO_RULE_SCOPE"&&$0!="PUBLISH_MODE"&&$0!="AUTO_PUBLISH"&&$0!="confirm"{print;exit}')"; [ -z "$UNKNOWN" ] || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
+  set -- set; for K in ENABLED RUN_MODE SCHEDULE_INTERVAL_MIN DYNAMIC_MIN_INTERVAL_SEC DYNAMIC_MAX_LOAD_PER_CPU_X100 DYNAMIC_MIN_MEM_AVAILABLE_KB DYNAMIC_MIN_OPT_FREE_KB DYNAMIC_MAX_CANDIDATES_PER_RUN AUTO_SOURCE_UPDATE SOURCE_UPDATE_INTERVAL_HOURS QUERY_SOURCE AUTO_RULE_SCOPE PUBLISH_MODE AUTO_PUBLISH; do V="$(val "$K")"; [ -n "$V" ]&&set -- "$@" "$K" "$V"; done
+  [ "$(val AUTO_PUBLISH)" != 1 ] || [ "$(val confirm)" = ADS_AUTO_PUBLISH ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+  SETTINGSCTL=/opt/bin/vward-ads-privacy-settings.sh; [ -x "$SETTINGSCTL" ] || { echo '{"ok":false,"error":"settings_backend_missing"}'; exit 0; }
+  OUT="$(ads_console_tmp ads-settings)" || { echo '{"ok":false,"error":"temporary_file_failed"}'; exit 0; }; "$SETTINGSCTL" "$@" >"$OUT" 2>&1; RC=$?; RES="$(head -c 12000 "$OUT")"; rm -f "$OUT"; "$JQ" -n --argjson ok "$([ "$RC" -eq 0 ]&&echo true||echo false)" --argjson rc "$RC" --arg output "$RES" '{ok:$ok,rc:$rc,output:$output}'; exit 0
+fi
+
+if [ "$ACTION" = ads-control ]; then
+  header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }; [ ! -e /opt/var/run/vward/updater.lock ] || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+  LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ]&&[ "$LEN" -le 1024 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }; BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
+  val(){ printf '%s\n' "$BODY"|tr '&' '\n'|awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
+  OP="$(val op)"; DOMAIN="$(val domain|tr '[:upper:]' '[:lower:]')"; SCOPE="$(val scope)"; [ -n "$SCOPE" ]||SCOPE=exact
+  case "$OP" in pause|resume|allow|block|remove-override|source-mode|enqueue) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
+  case "$OP" in
+    allow|block|remove-override) ads_valid_domain "$DOMAIN" || { echo '{"ok":false,"error":"invalid_domain"}'; exit 0; }; case "$SCOPE" in exact|suffix) ;; *) echo '{"ok":false,"error":"invalid_scope"}'; exit 0 ;; esac ;;
+    source-mode) SID="$(val source)"; MODE="$(val mode)"; ads_valid_source_id "$SID" || { echo '{"ok":false,"error":"invalid_source"}'; exit 0; }; case "$MODE" in off|check|active) ;; *) echo '{"ok":false,"error":"invalid_source_mode"}'; exit 0 ;; esac ;;
+    enqueue) JOB="$(val job)"; case "$JOB" in scan|sources-update|rules-rebuild) ;; publish) [ "$(val confirm)" = ADS_PUBLISH ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;; probe) ads_valid_domain "$DOMAIN" || { echo '{"ok":false,"error":"invalid_domain"}'; exit 0; } ;; *) echo '{"ok":false,"error":"invalid_job"}'; exit 0 ;; esac ;;
+  esac
+  RC=0; OUT="$(ads_console_tmp ads-control)" || { echo '{"ok":false,"error":"temporary_file_failed"}'; exit 0; }
+  case "$OP" in
+    pause|resume) /opt/bin/vward-ads-privacy-control.sh "$OP" >"$OUT" 2>&1||RC=$? ;;
+    allow|block|remove-override) C="$OP"; [ "$OP" = remove-override ]&&C=remove; /opt/bin/vward-ads-privacy-control.sh "$C" "$DOMAIN" "$SCOPE" >"$OUT" 2>&1||RC=$? ;;
+    source-mode) /opt/bin/vward-ads-privacy-source-control.sh set "$SID" "$MODE" >"$OUT" 2>&1||RC=$? ;;
+    enqueue) /opt/bin/vward-ads-privacy-job.sh enqueue "$JOB" "$DOMAIN" >"$OUT" 2>&1||RC=$? ;;
+  esac
+  RES="$(head -c 12000 "$OUT" 2>/dev/null)"; rm -f "$OUT"; printf '%s|ADS_CONTROL|op=%s rc=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$OP" "$RC" >>/opt/var/log/vward/console-audit.log; "$JQ" -n --argjson ok "$([ "$RC" -eq 0 ]&&echo true||echo false)" --argjson rc "$RC" --arg result "$RES" '{ok:$ok,rc:$rc,result:$result}'; exit 0
 fi
 
 if [ "$ACTION" = "settings-data" ]; then
@@ -114,6 +192,7 @@ if [ "$ACTION" = "settings-data" ]; then
     }
     SETTINGS_REGISTRY=${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}
     UPDATE_CONFIG=${VWARD_UPDATE_CONFIG:-/opt/etc/vward/update.conf}
+    ADS_CONFIG=${VWARD_ADS_CONFIG:-/opt/etc/vward/ads-privacy-guard/ads-privacy-guard.conf}
     [ -r "$SETTINGS_REGISTRY" ] || {
         echo '{"ok":false,"error":"settings_registry_unavailable"}'
         exit 0
@@ -122,6 +201,11 @@ if [ "$ACTION" = "settings-data" ]; then
     {
         [ -r "$UPDATE_CONFIG" ] || return 0
         awk -F= -v key="$1" '$1==key {print substr($0,index($0,"=")+1); exit}' "$UPDATE_CONFIG"
+    }
+    ads_setting_value()
+    {
+        [ -r "$ADS_CONFIG" ] || return 0
+        awk -F= -v key="$1" '$1==key {print substr($0,index($0,"=")+1); exit}' "$ADS_CONFIG"
     }
     SETTINGS_AUTO_APPLY=$(setting_value auto_apply)
     SETTINGS_AUTO_CRITICAL=$(setting_value auto_critical)
@@ -142,6 +226,20 @@ if [ "$ACTION" = "settings-data" ]; then
     SETTINGS_HEALTH_TIMEOUT=$(setting_value health_timeout_seconds)
     SETTINGS_REQUEST_TIMEOUT=$(setting_value request_timeout_seconds)
     SETTINGS_BARRIER_READY=$(setting_value barrier_integration_ready)
+    SETTINGS_ADS_ENABLED=$(ads_setting_value ENABLED)
+    SETTINGS_ADS_RUN_MODE=$(ads_setting_value RUN_MODE)
+    SETTINGS_ADS_SCHEDULE_INTERVAL=$(ads_setting_value SCHEDULE_INTERVAL_MIN)
+    SETTINGS_ADS_DYNAMIC_INTERVAL=$(ads_setting_value DYNAMIC_MIN_INTERVAL_SEC)
+    SETTINGS_ADS_DYNAMIC_LOAD=$(ads_setting_value DYNAMIC_MAX_LOAD_PER_CPU_X100)
+    SETTINGS_ADS_DYNAMIC_MEM=$(ads_setting_value DYNAMIC_MIN_MEM_AVAILABLE_KB)
+    SETTINGS_ADS_DYNAMIC_OPT=$(ads_setting_value DYNAMIC_MIN_OPT_FREE_KB)
+    SETTINGS_ADS_DYNAMIC_CANDIDATES=$(ads_setting_value DYNAMIC_MAX_CANDIDATES_PER_RUN)
+    SETTINGS_ADS_AUTO_SOURCES=$(ads_setting_value AUTO_SOURCE_UPDATE)
+    SETTINGS_ADS_SOURCE_INTERVAL=$(ads_setting_value SOURCE_UPDATE_INTERVAL_HOURS)
+    SETTINGS_ADS_QUERY_SOURCE=$(ads_setting_value QUERY_SOURCE)
+    SETTINGS_ADS_RULE_SCOPE=$(ads_setting_value AUTO_RULE_SCOPE)
+    SETTINGS_ADS_PUBLISH_MODE=$(ads_setting_value PUBLISH_MODE)
+    SETTINGS_ADS_AUTO_PUBLISH=$(ads_setting_value AUTO_PUBLISH)
     "$JQ" -c \
       --argjson profile_ready "$PROFILE_READY" \
       --arg lan_address "${VWARD_LAN_ADDRESS:-}" \
@@ -175,7 +273,21 @@ if [ "$ACTION" = "settings-data" ]; then
       --arg backup_keep "$SETTINGS_BACKUP_KEEP" \
       --arg health_timeout_seconds "$SETTINGS_HEALTH_TIMEOUT" \
       --arg request_timeout_seconds "$SETTINGS_REQUEST_TIMEOUT" \
-      --arg barrier_integration_ready "$SETTINGS_BARRIER_READY" '
+      --arg barrier_integration_ready "$SETTINGS_BARRIER_READY" \
+      --arg ads_enabled "$SETTINGS_ADS_ENABLED" \
+      --arg ads_run_mode "$SETTINGS_ADS_RUN_MODE" \
+      --arg ads_schedule_interval "$SETTINGS_ADS_SCHEDULE_INTERVAL" \
+      --arg ads_dynamic_interval "$SETTINGS_ADS_DYNAMIC_INTERVAL" \
+      --arg ads_dynamic_load "$SETTINGS_ADS_DYNAMIC_LOAD" \
+      --arg ads_dynamic_mem "$SETTINGS_ADS_DYNAMIC_MEM" \
+      --arg ads_dynamic_opt "$SETTINGS_ADS_DYNAMIC_OPT" \
+      --arg ads_dynamic_candidates "$SETTINGS_ADS_DYNAMIC_CANDIDATES" \
+      --arg ads_auto_sources "$SETTINGS_ADS_AUTO_SOURCES" \
+      --arg ads_source_interval "$SETTINGS_ADS_SOURCE_INTERVAL" \
+      --arg ads_query_source "$SETTINGS_ADS_QUERY_SOURCE" \
+      --arg ads_rule_scope "$SETTINGS_ADS_RULE_SCOPE" \
+      --arg ads_publish_mode "$SETTINGS_ADS_PUBLISH_MODE" \
+      --arg ads_auto_publish "$SETTINGS_ADS_AUTO_PUBLISH" '
         def raw_value:
           if .key=="VWARD_LAN_ADDRESS" then $lan_address
           elif .key=="VWARD_LAN_SUBNET" then $lan_subnet
@@ -209,6 +321,20 @@ if [ "$ACTION" = "settings-data" ]; then
           elif .key=="health_timeout_seconds" then $health_timeout_seconds
           elif .key=="request_timeout_seconds" then $request_timeout_seconds
           elif .key=="barrier_integration_ready" then $barrier_integration_ready
+          elif .key=="ENABLED" then $ads_enabled
+          elif .key=="RUN_MODE" then $ads_run_mode
+          elif .key=="SCHEDULE_INTERVAL_MIN" then $ads_schedule_interval
+          elif .key=="DYNAMIC_MIN_INTERVAL_SEC" then $ads_dynamic_interval
+          elif .key=="DYNAMIC_MAX_LOAD_PER_CPU_X100" then $ads_dynamic_load
+          elif .key=="DYNAMIC_MIN_MEM_AVAILABLE_KB" then $ads_dynamic_mem
+          elif .key=="DYNAMIC_MIN_OPT_FREE_KB" then $ads_dynamic_opt
+          elif .key=="DYNAMIC_MAX_CANDIDATES_PER_RUN" then $ads_dynamic_candidates
+          elif .key=="AUTO_SOURCE_UPDATE" then $ads_auto_sources
+          elif .key=="SOURCE_UPDATE_INTERVAL_HOURS" then $ads_source_interval
+          elif .key=="QUERY_SOURCE" then $ads_query_source
+          elif .key=="AUTO_RULE_SCOPE" then $ads_rule_scope
+          elif .key=="PUBLISH_MODE" then $ads_publish_mode
+          elif .key=="AUTO_PUBLISH" then $ads_auto_publish
           else "" end;
         def typed($v): if .type=="boolean" then ($v=="1") elif .type=="integer" and ($v|test("^[0-9]+$")) then ($v|tonumber) else $v end;
         {ok:true,schema:.schema,profile_ready:$profile_ready,authentication_required_for_device_write:true,

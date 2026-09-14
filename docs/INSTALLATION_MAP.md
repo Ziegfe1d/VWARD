@@ -13,6 +13,10 @@ metadata.
 | `components/route-tools/scripts/vward-route-resolve4.sh` | `/opt/bin/vward-route-resolve4.sh` | 0755 |
 | `components/route-tools/scripts/vward-route.sh` | `/opt/bin/vward-route.sh` | 0755 |
 | `components/route-engine/scripts/vward-route-engine.sh` | `/opt/bin/vward-route-engine.sh` | 0755 |
+| `components/route-engine/scripts/vward-domain-classifier.sh` | `/opt/bin/vward-domain-classifier.sh` | 0755 |
+| `components/route-engine/scripts/vward-domain-migrate-dry-run.sh` | `/opt/bin/vward-domain-migrate-dry-run.sh` | 0755 |
+| `components/route-engine/lib/vward-domain-classifier-lib.sh` | `/opt/lib/vward/vward-domain-classifier-lib.sh` | 0644 |
+| `components/route-engine/data/catalogs/*` | `/opt/share/vward/route-engine/catalogs/<то же имя>` | 0644 |
 | `components/route-tools/scripts/vward-route-discovery.sh` | `/opt/bin/vward-route-discovery.sh` | 0755 |
 | `components/policy-sync/scripts/*.sh` | `/opt/bin/<то же имя>` | 0755 |
 | `components/tunnel-guard/scripts/*.sh` | `/opt/bin/<то же имя>` | 0755 |
@@ -20,6 +24,12 @@ metadata.
 | `components/runtime/scripts/vward-cron-supervisor.sh` | `/opt/bin/vward-cron-supervisor.sh` | 0755 |
 | `components/runtime/lib/vward-device-profile.sh` | `/opt/lib/vward/vward-device-profile.sh` | 0755 |
 | `components/runtime/init.d/*` | `/opt/etc/init.d/<то же имя>` | 0755 |
+| `components/ads-privacy-guard/scripts/*.sh` | `/opt/bin/<то же имя>` | 0755 |
+| `components/ads-privacy-guard/lib/vward-ads-privacy-common.sh` | `/opt/share/vward/ads-privacy-guard/vward-ads-privacy-common.sh` | 0644 |
+| `components/ads-privacy-guard/data/source-registry.json` | `/opt/share/vward/ads-privacy-guard/source-registry.json` | 0644 |
+| `components/ads-privacy-guard/data/trust-core.tsv` | `/opt/share/vward/ads-privacy-guard/trust-core.tsv` | 0644 |
+| `components/ads-privacy-guard/https/vward-ads-privacy-https-common.sh` | `/opt/share/vward/ads-privacy-guard/https/vward-ads-privacy-https-common.sh` | 0644 |
+| `components/ads-privacy-guard/https/providers/3proxy.sh` | `/opt/share/vward/ads-privacy-guard/https/providers/3proxy.sh` | 0644 |
 | `web/lighttpd.conf` | `/opt/etc/vward/console/lighttpd.conf` | 0644 |
 | `web/index.html` | `/opt/share/vward/console/www/index.html` | 0644 |
 | `web/assets/vward-console.css` | `/opt/share/vward/console/www/assets/vward-console.css` | 0644 |
@@ -27,6 +37,7 @@ metadata.
 | `web/cgi-bin/api.cgi` | `/opt/share/vward/console/www/cgi-bin/api.cgi` | 0755 |
 | `config/settings/settings-registry.json` | `/opt/share/vward/settings-registry.json` | 0644 |
 | `config/route-engine/*.conf.example` | начальный local config без `.example` | 0644 |
+| `config/ads-privacy-guard/**.example` | начальный local config без `.example`, только если отсутствует | 0600 |
 | `config/cron/root.crontab` | VWARD entries в root crontab | 0600 |
 | `config/device.conf.example` | `/opt/etc/vward/device.conf` при неоднозначном discovery | 0600 |
 

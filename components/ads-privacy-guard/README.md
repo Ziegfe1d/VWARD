@@ -69,7 +69,7 @@ Additional scripts:
 - `vward-ads-privacy-settings.sh` - validated Console-safe settings transaction;
 - `vward-ads-privacy-control.sh pause|resume|status` - persistent pause and runtime visibility.
 
-The proposed cron calls only scheduler once per minute. In dynamic mode the classifier
+The active VWARD cron calls only the scheduler once per minute. In dynamic mode the classifier
 runs only when the persisted AGH query log changed and resource gates pass. This is
 intentional to keep CPU/I/O low on router-class hardware.
 

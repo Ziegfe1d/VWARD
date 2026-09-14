@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,4 +37,27 @@ assert '/assets/vward-console.css' in UI and '/assets/vward-console.js' in UI
 assert 'wildcard:false' not in API
 assert 'CONSOLE_RUNTIME_CONFIG' in API and 'socket_state' in API and 'config_test' in API
 assert ':3000/' not in UI + JS
+
+jq = shutil.which("jq")
+assert jq
+
+def call_ads(body: str, guard: str = "console") -> dict:
+    env = os.environ | {
+        "REQUEST_METHOD": "POST",
+        "QUERY_STRING": "action=ads-control",
+        "CONTENT_TYPE": "application/x-www-form-urlencoded",
+        "CONTENT_LENGTH": str(len(body.encode())),
+        "HTTP_X_VWARD_REQUEST": guard,
+        "JQ": jq,
+        "VWARD_PROFILE_LIB": "/nonexistent",
+    }
+    result = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], input=body, env=env, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout.split("\n\n", 1)[1])
+
+assert call_ads("op=allow&domain=bad..example&scope=exact")["error"] == "invalid_domain"
+assert call_ads("op=allow&domain=_bad.example&scope=exact")["error"] == "invalid_domain"
+assert call_ads("op=source-mode&source=bad%2Fid&mode=active")["error"] == "invalid_source"
+assert call_ads("op=source-mode&source=good-source&mode=unsafe")["error"] == "invalid_source_mode"
+assert call_ads("op=pause", guard="wrong")["error"] == "request_guard_failed"
 print("console security checks: PASS")

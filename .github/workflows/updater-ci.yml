@@ -41,7 +41,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install test dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq openssl dash
+        run: sudo apt-get update && sudo apt-get install -y jq openssl dash busybox
+
+      - name: Ads, HTTPS and domain classifier simulations
+        run: tests/run-package-validation.sh
 
       - name: Shell syntax
         run: |
