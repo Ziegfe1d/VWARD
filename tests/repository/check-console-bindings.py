@@ -16,6 +16,17 @@ def fail(message: str) -> None:
     raise SystemExit(f"FAIL: {message}")
 
 
+script_start = html.find("<script>")
+script_end = html.find("</script>", script_start + 8)
+if script_start < 0 or script_end < 0:
+    fail("inline Console JavaScript block is missing")
+script = html[script_start + len("<script>"):script_end]
+dollar_init = script.find("const $=id=>document.getElementById(id)")
+help_bootstrap = script.find("$('helpBtn').innerHTML=svgIcon('bulb')")
+if dollar_init < 0 or help_bootstrap < 0 or dollar_init > help_bootstrap:
+    fail("Console bootstrap uses $ before initialization")
+
+
 section_ids = set(re.findall(r'<section class="section(?: active)?" id="([^"]+)"', html))
 section_links = set(re.findall(r'data-section="([^"]+)"', html))
 go_links = {
