@@ -34,7 +34,7 @@ jobs:
           test "$ACTUAL" = "$EXPECTED"
 
       - name: Apply the already accepted router logging change
-        shell: python3
+        shell: 'python3 {0}'
         run: |
           from pathlib import Path
 
