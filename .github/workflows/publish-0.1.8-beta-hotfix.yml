@@ -33,7 +33,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = 'a25671d0f566c91a737643dbb41a82c12af5a413'
+          BASE='a25671d0f566c91a737643dbb41a82c12af5a413'
+          git merge-base --is-ancestor "$BASE" HEAD
+          UNEXPECTED="$(git diff --name-only "$BASE"..HEAD | grep -Fvx '.github/workflows/publish-0.1.8-beta-hotfix.yml' || true)"
+          if [ -n "$UNEXPECTED" ]; then
+            echo 'FAIL: unexpected files changed since validated source baseline'
+            printf '%s\n' "$UNEXPECTED"
+            exit 1
+          fi
           test "$(sed -n '1p' VERSION)" = '0.1.7-beta'
           test "$(jq -r '.platform_version' config/components/component-registry.json)" = '0.1.7-beta'
           test "$(jq -r '.signed.version' updates/dev/update-manifest.json)" = '0.1.7-beta'
