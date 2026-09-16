@@ -33,75 +33,95 @@ jobs:
           echo "SOURCE_SHA=$ACTUAL"
           test "$ACTUAL" = "$EXPECTED"
 
-      - name: Apply the already accepted router logging change
-        shell: 'python3 {0}'
+      - name: Diagnose exact add_adaptive structure
+        shell: bash
         run: |
+          set -euo pipefail
+          FILE='components/adaptive-routing/scripts/agh-adaptive-live.sh'
+          echo "ADD_FUNCTIONS=$(grep -F -c 'add_adaptive()' "$FILE")"
+          echo "DIRECT_MARKERS=$(grep -F -c 'if probe "$H" "$WAN" "$GIP"; then' "$FILE")"
+          echo "WG_MARKERS=$(grep -F -c 'if ! probe "$H" "$WG" "$GIP"; then' "$FILE")"
+          echo "AUTO_VPN_LOGS=$(grep -F -c '|AUTO_VPN|$H|$GROUP"' "$FILE")"
+          test "$(grep -F -c 'add_adaptive()' "$FILE")" -eq 1
+
+      - name: Apply accepted router logging change inside add_adaptive only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
           from pathlib import Path
 
           path = Path('components/adaptive-routing/scripts/agh-adaptive-live.sh')
           text = path.read_text(encoding='utf-8')
 
-          direct_old = '''    if probe "$H" "$WAN" "$GIP"; then
-              save_state "$H" "DIRECT_OK"
-              echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_ABORT_DIRECT_RECOVERED|$H" >> "$EVENT_LOG"
-              change_unlock
-              return 0
-          fi
+          start_marker = 'add_adaptive()\n{\n'
+          end_marker = '\n\n# ------------------------------------------------------------\n# REMOVE FROM VPN -> DIRECT'
 
-          if ! probe "$H" "$WG" "$GIP"; then
-          '''
-          direct_new = '''    if probe "$H" "$WAN" "$GIP"; then
-              save_state "$H" "DIRECT_OK"
-              echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_ABORT_DIRECT_RECOVERED|$H" >> "$EVENT_LOG"
-              change_unlock
-              return 0
-          fi
+          if text.count(start_marker) != 1:
+              raise SystemExit(f'FAIL: add_adaptive start count={text.count(start_marker)}')
 
-          DIRECT_RC=$P_RC
-          DIRECT_CODE=$P_CODE
-          DIRECT_TIME=$P_TIME
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          body = text[start:end]
+          lines = body.splitlines(keepends=True)
 
-          if ! probe "$H" "$WG" "$GIP"; then
-          '''
+          direct_line = '    if probe "$H" "$WAN" "$GIP"; then\n'
+          wg_line = '    if ! probe "$H" "$WG" "$GIP"; then\n'
+          ndmc_line = '    OUT=$(ndmc -c "object-group fqdn $GROUP include $H" 2>&1)\n'
 
-          vpn_old = '''    if ! probe "$H" "$WG" "$GIP"; then
-              save_state "$H" "ISP_FAIL_WG_FAIL"
-              echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_ABORT_WG_FAIL|$H" >> "$EVENT_LOG"
-              change_unlock
-              return 0
-          fi
+          def unique_index(line, label):
+              hits = [i for i, value in enumerate(lines) if value == line]
+              if len(hits) != 1:
+                  raise SystemExit(f'FAIL: {label} count={len(hits)}, expected=1 in add_adaptive')
+              return hits[0]
 
-          OUT=$(ndmc -c "object-group fqdn $GROUP include $H" 2>&1)
-          '''
-          vpn_new = '''    if ! probe "$H" "$WG" "$GIP"; then
-              save_state "$H" "ISP_FAIL_WG_FAIL"
-              echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_ABORT_WG_FAIL|$H" >> "$EVENT_LOG"
-              change_unlock
-              return 0
-          fi
+          direct_i = unique_index(direct_line, 'direct probe')
+          wg_i = unique_index(wg_line, 'wg probe')
+          ndmc_i = unique_index(ndmc_line, 'ndmc add')
 
-          VPN_RC=$P_RC
-          VPN_CODE=$P_CODE
-          VPN_TIME=$P_TIME
+          if not (direct_i < wg_i < ndmc_i):
+              raise SystemExit('FAIL: unexpected add_adaptive marker order')
 
-          OUT=$(ndmc -c "object-group fqdn $GROUP include $H" 2>&1)
-          '''
+          direct_fi = next((i for i in range(direct_i + 1, wg_i) if lines[i] == '    fi\n'), None)
+          if direct_fi is None:
+              raise SystemExit('FAIL: direct probe closing fi not found')
 
-          log_old = '''        echo "$(date '+%Y-%m-%d %H:%M:%S')|AUTO_VPN|$H|$GROUP" \\
-              >> "$EVENT_LOG"
-          '''
-          log_new = '''        echo "$(date '+%Y-%m-%d %H:%M:%S')|AUTO_VPN|$H|$GROUP|reason=DIRECT_UNAVAILABLE_VPN_OK|ip=$GIP|dns=IPV4_OK|adguard=NOT_BLOCKED|direct_rc=$DIRECT_RC|direct_http=$DIRECT_CODE|direct_time=$DIRECT_TIME|vpn_rc=$VPN_RC|vpn_http=$VPN_CODE|vpn_time=$VPN_TIME" \\
-              >> "$EVENT_LOG"
-          '''
+          lines[direct_fi + 1:direct_fi + 1] = [
+              '\n',
+              '    DIRECT_RC=$P_RC\n',
+              '    DIRECT_CODE=$P_CODE\n',
+              '    DIRECT_TIME=$P_TIME\n',
+          ]
 
-          for label, old in [('direct capture', direct_old), ('vpn capture', vpn_old), ('reason log', log_old)]:
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'FAIL: {label} marker count={count}, expected=1')
+          wg_i = unique_index(wg_line, 'wg probe after direct capture')
+          ndmc_i = unique_index(ndmc_line, 'ndmc add after direct capture')
+          wg_fi = next((i for i in range(wg_i + 1, ndmc_i) if lines[i] == '    fi\n'), None)
+          if wg_fi is None:
+              raise SystemExit('FAIL: wg probe closing fi not found')
 
-          text = text.replace(direct_old, direct_new, 1)
-          text = text.replace(vpn_old, vpn_new, 1)
-          text = text.replace(log_old, log_new, 1)
+          lines[wg_fi + 1:wg_fi + 1] = [
+              '\n',
+              '    VPN_RC=$P_RC\n',
+              '    VPN_CODE=$P_CODE\n',
+              '    VPN_TIME=$P_TIME\n',
+          ]
+
+          log_hits = [
+              i for i, value in enumerate(lines)
+              if '|AUTO_VPN|$H|$GROUP" \\' in value
+          ]
+          if len(log_hits) != 1:
+              raise SystemExit(f'FAIL: AUTO_VPN reason-log target count={len(log_hits)}, expected=1 in add_adaptive')
+
+          i = log_hits[0]
+          old = '|AUTO_VPN|$H|$GROUP"'
+          new = '|AUTO_VPN|$H|$GROUP|reason=DIRECT_UNAVAILABLE_VPN_OK|ip=$GIP|dns=IPV4_OK|adguard=NOT_BLOCKED|direct_rc=$DIRECT_RC|direct_http=$DIRECT_CODE|direct_time=$DIRECT_TIME|vpn_rc=$VPN_RC|vpn_http=$VPN_CODE|vpn_time=$VPN_TIME"'
+          if lines[i].count(old) != 1:
+              raise SystemExit('FAIL: AUTO_VPN log replacement marker mismatch')
+          lines[i] = lines[i].replace(old, new, 1)
+
+          new_body = ''.join(lines)
+          new_text = text[:start] + new_body + text[end:]
 
           required = [
               'DIRECT_RC=$P_RC',
@@ -116,11 +136,15 @@ jobs:
               'vpn_http=$VPN_CODE',
           ]
           for marker in required:
-              if text.count(marker) != 1:
-                  raise SystemExit(f'FAIL: post-patch marker {marker!r} count={text.count(marker)}')
+              if new_body.count(marker) != 1:
+                  raise SystemExit(f'FAIL: post-patch marker {marker!r} count={new_body.count(marker)} in add_adaptive')
 
-          path.write_text(text, encoding='utf-8')
+          if new_text.count('reason=DIRECT_UNAVAILABLE_VPN_OK') != 1:
+              raise SystemExit('FAIL: reason marker escaped add_adaptive scope')
+
+          path.write_text(new_text, encoding='utf-8')
           print('PATCH_STRUCTURE=PASS')
+          PY
 
       - name: Syntax and scope checks
         shell: bash
@@ -131,6 +155,7 @@ jobs:
           test "$(grep -F -c 'reason=DIRECT_UNAVAILABLE_VPN_OK' "$FILE")" -eq 1
           test "$(grep -F -c 'DIRECT_RC=$P_RC' "$FILE")" -eq 1
           test "$(grep -F -c 'VPN_RC=$P_RC' "$FILE")" -eq 1
+          echo "PATCHED_SHA=$(sha256sum "$FILE" | awk '{print $1}')"
           echo 'SYNTAX_SCOPE=PASS'
 
       - name: Remove one-shot workflow and refresh repository hashes
