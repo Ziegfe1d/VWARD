@@ -545,12 +545,20 @@ add_adaptive()
         return 0
     fi
 
+    DIRECT_RC=$P_RC
+    DIRECT_CODE=$P_CODE
+    DIRECT_TIME=$P_TIME
+
     if ! probe "$H" "$WG" "$GIP"; then
         save_state "$H" "ISP_FAIL_WG_FAIL"
         echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_ABORT_WG_FAIL|$H" >> "$EVENT_LOG"
         change_unlock
         return 0
     fi
+
+    VPN_RC=$P_RC
+    VPN_CODE=$P_CODE
+    VPN_TIME=$P_TIME
 
     OUT=$(ndmc -c "object-group fqdn $GROUP include $H" 2>&1)
     RC=$?
@@ -570,7 +578,7 @@ add_adaptive()
         # Помогаем Keenetic сразу наполнить runtime FQDN IP.
         nslookup "$H" 192.168.1.1 >/dev/null 2>&1
 
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|AUTO_VPN|$H|$GROUP" \
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|AUTO_VPN|$H|$GROUP|reason=DIRECT_UNAVAILABLE_VPN_OK|ip=$GIP|dns=IPV4_OK|adguard=NOT_BLOCKED|direct_rc=$DIRECT_RC|direct_http=$DIRECT_CODE|direct_time=$DIRECT_TIME|vpn_rc=$VPN_RC|vpn_http=$VPN_CODE|vpn_time=$VPN_TIME" \
             >> "$EVENT_LOG"
 
         echo "AUTO_VPN: $H"
