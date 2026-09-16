@@ -83,9 +83,17 @@ jobs:
           if text.count(marker) != 1:
               raise SystemExit('FAIL: changelog marker mismatch')
           p.write_text(text.replace(marker, entry, 1), encoding='utf-8')
+          readme = Path('README.md')
+          text = readme.read_text(encoding='utf-8')
+          old = 'Текущая версия: **0.1.7-beta**.'
+          new = 'Текущая версия: **0.1.8-beta**.'
+          if text.count(old) != 1:
+              raise SystemExit('FAIL: readme version marker mismatch')
+          readme.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
           test "$(sed -n '1p' VERSION)" = '0.1.8-beta'
           test "$(jq -r '.platform_version' config/components/component-registry.json)" = '0.1.8-beta'
+          grep -Fq '**0.1.8-beta**' README.md
           echo 'RELEASE_METADATA=PASS'
 
       - name: Detect and verify production Ed25519 key
@@ -273,7 +281,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git add VERSION CHANGELOG.md config/components/component-registry.json web/index.html tests/repository/check-console-bindings.py updates/dev/packages/vward-0.1.8-beta.tar.gz updates/dev/update-manifest.json SHA256SUMS
+          git add VERSION README.md CHANGELOG.md config/components/component-registry.json web/index.html tests/repository/check-console-bindings.py updates/dev/packages/vward-0.1.8-beta.tar.gz updates/dev/update-manifest.json SHA256SUMS
           git diff --cached --check
           git diff --cached --quiet && { echo 'Nothing to commit'; exit 1; }
           git config user.name 'github-actions[bot]'
