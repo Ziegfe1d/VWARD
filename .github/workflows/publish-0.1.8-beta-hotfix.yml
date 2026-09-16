@@ -1,6 +1,7 @@
 name: Publish VWARD 0.1.8-beta hotfix
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
