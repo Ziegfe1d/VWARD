@@ -1,0 +1,287 @@
+name: Publish VWARD 0.1.8-beta hotfix
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-0.1.8-beta-hotfix.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vward-production-publish
+  cancel-in-progress: false
+
+jobs:
+  publish-beta-hotfix:
+    runs-on: ubuntu-latest
+    env:
+      VWARD_SIGNING_KEY_PEM: ${{ secrets.VWARD_PROD_ED25519_PRIVATE_KEY_PEM }}
+      VWARD_SIGNING_KEY_LEGACY: ${{ secrets.VWARD_PROD_ED25519_PRIVATE_KEY }}
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq openssl dash
+
+      - name: Preflight exact published baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'a25671d0f566c91a737643dbb41a82c12af5a413'
+          test "$(sed -n '1p' VERSION)" = '0.1.7-beta'
+          test "$(jq -r '.platform_version' config/components/component-registry.json)" = '0.1.7-beta'
+          test "$(jq -r '.signed.version' updates/dev/update-manifest.json)" = '0.1.7-beta'
+          test "$(jq -r '.signed.sequence' updates/dev/update-manifest.json)" = '2026091301'
+          test "$(jq -r '.signed.update_id' updates/dev/update-manifest.json)" = 'vward-0.1.7-beta-control-plane'
+          test "$(sha256sum web/index.html | awk '{print $1}')" = '30a4e114c71b4bfba1e371427181a3256ecddb045ab9d4d5b639a14ebebfd326'
+          test "$(sha256sum components/adaptive-routing/scripts/agh-adaptive-live.sh | awk '{print $1}')" = 'a4798d22fcfa584291f07d78bd3205dfe49cabb3f83fe9f7c3afdfbf230b7c0c'
+          echo 'BASELINE=PASS'
+
+      - name: Source regression and updater tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/repository/check-console-bindings.py
+          tests/repository/run-consistency-checks.sh
+          for f in components/updater/*.sh tests/updater/*.sh; do
+            sh -n "$f"
+            dash -n "$f"
+          done
+          tests/updater/run-simulations.sh
+          tests/updater/run-fix-pass-1-simulations.sh
+          tests/updater/run-fix-pass-2-simulations.sh
+          tests/updater/run-fix-pass-3-simulations.sh
+          echo 'SOURCE_TESTS=PASS'
+
+      - name: Prepare 0.1.8-beta source metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' '0.1.8-beta' > VERSION
+          tmp="$RUNNER_TEMP/component-registry.json"
+          jq '.platform_version="0.1.8-beta"' config/components/component-registry.json > "$tmp"
+          mv "$tmp" config/components/component-registry.json
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('CHANGELOG.md')
+          text = p.read_text(encoding='utf-8')
+          marker = '# Changelog\n\n'
+          entry = '''# Changelog\n\n## 0.1.8-beta: исправление запуска VWARD Console\n\n- Исправлен порядок инициализации JavaScript: DOM-помощник `$` теперь создаётся до первого использования, из-за чего Console больше не должна зависать на «Проверяем платформу...» с неработающей навигацией.\n- Добавлен постоянный регрессионный тест порядка запуска Console.\n- В релиз включено уже принятое на реальном Keenetic расширенное логирование AdaptiveAuto с причиной автоматического добавления домена в VPN и результатами прямой/VPN-проверки.\n- Developers 2.0 / ветка `dev` не изменялись.\n\n'''
+          if text.count(marker) != 1:
+              raise SystemExit('FAIL: changelog marker mismatch')
+          p.write_text(text.replace(marker, entry, 1), encoding='utf-8')
+          PY
+          test "$(sed -n '1p' VERSION)" = '0.1.8-beta'
+          test "$(jq -r '.platform_version' config/components/component-registry.json)" = '0.1.8-beta'
+          echo 'RELEASE_METADATA=PASS'
+
+      - name: Detect and verify production Ed25519 key
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          KEY="$RUNNER_TEMP/vward-prod-key.pem"
+          if [ -n "${VWARD_SIGNING_KEY_PEM:-}" ]; then
+            printf '%s\n' "$VWARD_SIGNING_KEY_PEM" > "$KEY"
+          elif [ -n "${VWARD_SIGNING_KEY_LEGACY:-}" ]; then
+            printf '%s\n' "$VWARD_SIGNING_KEY_LEGACY" > "$KEY"
+          else
+            echo 'FAIL: production Ed25519 signing key is unavailable'
+            exit 78
+          fi
+          chmod 600 "$KEY"
+          openssl pkey -in "$KEY" -check -noout >/dev/null
+          private_pub="$(openssl pkey -in "$KEY" -pubout -outform DER | sha256sum | awk '{print $1}')"
+          trusted_pub="$(openssl pkey -pubin -in config/updater/update-public.pem -outform DER | sha256sum | awk '{print $1}')"
+          test "$private_pub" = "$trusted_pub"
+          echo 'PRODUCTION_KEY_MATCH=YES'
+
+      - name: Build reproducible 0.1.8-beta package
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION='0.1.8-beta'
+          UPDATE_ID='vward-0.1.8-beta-console-bootstrap'
+          SEQUENCE='2026091601'
+          OUT="$RUNNER_TEMP/vward-018"
+          PKGDIR="$OUT/package"
+          ARTIFACT="$OUT/vward-$VERSION.tar.gz"
+          rm -rf "$OUT"
+          mkdir -p "$PKGDIR/files/web/cgi-bin" "$PKGDIR/files/bin"
+          cp VERSION "$PKGDIR/files/VERSION"
+          cp web/index.html "$PKGDIR/files/web/index.html"
+          cp web/cgi-bin/api.cgi "$PKGDIR/files/web/cgi-bin/api.cgi"
+          cp components/adaptive-routing/scripts/adaptive-hints-update.sh "$PKGDIR/files/bin/adaptive-hints-update.sh"
+          cp components/adaptive-routing/scripts/agh-adaptive-live.sh "$PKGDIR/files/bin/agh-adaptive-live.sh"
+          cp components/vpn-audit/scripts/vpn-domain-audit.sh "$PKGDIR/files/bin/vpn-domain-audit.sh"
+          cp components/vpn-audit/scripts/vpn-night-reconcile.sh "$PKGDIR/files/bin/vpn-night-reconcile.sh"
+          cp components/vpn-audit/scripts/vpn-subnet-sync.sh "$PKGDIR/files/bin/vpn-subnet-sync.sh"
+
+          version_sha="$(sha256sum "$PKGDIR/files/VERSION" | awk '{print $1}')"
+          index_sha="$(sha256sum "$PKGDIR/files/web/index.html" | awk '{print $1}')"
+          api_sha="$(sha256sum "$PKGDIR/files/web/cgi-bin/api.cgi" | awk '{print $1}')"
+          hints_sha="$(sha256sum "$PKGDIR/files/bin/adaptive-hints-update.sh" | awk '{print $1}')"
+          live_sha="$(sha256sum "$PKGDIR/files/bin/agh-adaptive-live.sh" | awk '{print $1}')"
+          audit_sha="$(sha256sum "$PKGDIR/files/bin/vpn-domain-audit.sh" | awk '{print $1}')"
+          reconcile_sha="$(sha256sum "$PKGDIR/files/bin/vpn-night-reconcile.sh" | awk '{print $1}')"
+          subnet_sha="$(sha256sum "$PKGDIR/files/bin/vpn-subnet-sync.sh" | awk '{print $1}')"
+
+          jq -n --arg version_sha "$version_sha" --arg index_sha "$index_sha" --arg api_sha "$api_sha" \
+            --arg hints_sha "$hints_sha" --arg live_sha "$live_sha" --arg audit_sha "$audit_sha" \
+            --arg reconcile_sha "$reconcile_sha" --arg subnet_sha "$subnet_sha" \
+            '{schema:1,files:[
+              {source:"files/VERSION",target:"/opt/share/vward/VERSION",mode:"0644",sha256:$version_sha,component:"platform-core",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/web/index.html",target:"/opt/share/keenetic-apps/www/index.html",mode:"0644",sha256:$index_sha,component:"console",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/web/cgi-bin/api.cgi",target:"/opt/share/keenetic-apps/www/cgi-bin/api.cgi",mode:"0755",sha256:$api_sha,component:"console",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/bin/adaptive-hints-update.sh",target:"/opt/bin/adaptive-hints-update.sh",mode:"0755",sha256:$hints_sha,component:"route-tools",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/bin/agh-adaptive-live.sh",target:"/opt/bin/agh-adaptive-live.sh",mode:"0755",sha256:$live_sha,component:"route-engine",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/bin/vpn-domain-audit.sh",target:"/opt/bin/vpn-domain-audit.sh",mode:"0755",sha256:$audit_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/bin/vpn-night-reconcile.sh",target:"/opt/bin/vpn-night-reconcile.sh",mode:"0755",sha256:$reconcile_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"},
+              {source:"files/bin/vpn-subnet-sync.sh",target:"/opt/bin/vpn-subnet-sync.sh",mode:"0755",sha256:$subnet_sha,component:"policy-sync",restart_policy:"none",config_policy:"program-only"}
+            ]}' > "$PKGDIR/package-manifest.json"
+
+          test "$(jq '.files|length' "$PKGDIR/package-manifest.json")" = 8
+          sh -n web/cgi-bin/api.cgi
+          sh -n components/adaptive-routing/scripts/adaptive-hints-update.sh
+          sh -n components/adaptive-routing/scripts/agh-adaptive-live.sh
+          sh -n components/vpn-audit/scripts/vpn-domain-audit.sh
+          sh -n components/vpn-audit/scripts/vpn-night-reconcile.sh
+          sh -n components/vpn-audit/scripts/vpn-subnet-sync.sh
+
+          unpacked_size="$(find "$PKGDIR" -type f -exec wc -c {} \; | awk '{sum+=$1} END{print sum+0}')"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf "$ARTIFACT" -C "$PKGDIR" .
+          package_sha="$(sha256sum "$ARTIFACT" | awk '{print $1}')"
+          package_size="$(wc -c < "$ARTIFACT" | tr -d ' ')"
+          declared_size="$(tar -tvzf "$ARTIFACT" | awk '$1 ~ /^-/ {sum+=$3} END{print sum+0}')"
+          test "$declared_size" = "$unpacked_size"
+
+          echo "VWARD_OUT=$OUT" >> "$GITHUB_ENV"
+          echo "VWARD_ARTIFACT=$ARTIFACT" >> "$GITHUB_ENV"
+          echo "VWARD_PACKAGE_SHA=$package_sha" >> "$GITHUB_ENV"
+          echo "VWARD_PACKAGE_SIZE=$package_size" >> "$GITHUB_ENV"
+          echo "VWARD_UNPACKED_SIZE=$unpacked_size" >> "$GITHUB_ENV"
+          echo "PACKAGE_SHA256=$package_sha"
+          echo "INDEX_SHA256=$index_sha"
+          echo "LIVE_SHA256=$live_sha"
+
+      - name: Sign and verify 0.1.8-beta manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$VWARD_OUT"
+          KEY="$RUNNER_TEMP/vward-prod-key.pem"
+          SIGNED="$OUT/signed.json"
+          CANONICAL="$OUT/signed.canonical.json"
+          SIG="$OUT/signature.bin"
+          MANIFEST="$OUT/update-manifest.json"
+          PUBLISHED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          jq -n --arg published_at "$PUBLISHED_AT" \
+            --arg url 'https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-0.1.8-beta.tar.gz' \
+            --arg sha256 "$VWARD_PACKAGE_SHA" --argjson size "$VWARD_PACKAGE_SIZE" --argjson unpacked_size "$VWARD_UNPACKED_SIZE" \
+            '{schema:1,update_id:"vward-0.1.8-beta-console-bootstrap",sequence:2026091601,version:"0.1.8-beta",channel:"dev",priority:"CRITICAL",published_at:$published_at,min_updater_version:"1.2.0",package:{url:$url,sha256:$sha256,size:$size,unpacked_size:$unpacked_size},compatibility:{min_vward:"0.1.7-beta",max_vward:"0.1.7-beta"},affected_components:["platform-core","console","route-engine","route-tools","policy-sync"],affected_services:[],health_profile:"policy-sync",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$SIGNED"
+          jq -cS . "$SIGNED" > "$CANONICAL"
+          openssl pkeyutl -sign -inkey "$KEY" -rawin -in "$CANONICAL" -out "$SIG"
+          signature="$(openssl base64 -A -in "$SIG")"
+          jq -n --slurpfile signed "$SIGNED" --arg signature "$signature" '{signed:$signed[0],signature:$signature}' > "$MANIFEST"
+          jq -cS '.signed' "$MANIFEST" > "$OUT/verify.canonical.json"
+          jq -r '.signature' "$MANIFEST" | openssl base64 -d -A > "$OUT/verify.signature.bin"
+          openssl pkeyutl -verify -pubin -inkey config/updater/update-public.pem -rawin -in "$OUT/verify.canonical.json" -sigfile "$OUT/verify.signature.bin"
+          test "$(jq -r '.signed.version' "$MANIFEST")" = '0.1.8-beta'
+          test "$(jq -r '.signed.sequence' "$MANIFEST")" = '2026091601'
+          test "$(jq -r '.signed.package.sha256' "$MANIFEST")" = "$VWARD_PACKAGE_SHA"
+          echo 'MANIFEST_SIGNATURE=VERIFIED'
+
+      - name: Dry-run signed package from current 0.1.7-beta
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/vward-dryrun"
+          CONFIG="$ROOT/opt/etc/vward/update.conf"
+          MANIFEST="$VWARD_OUT/update-manifest.json"
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/opt/etc/vward" "$ROOT/opt/share/vward" "$ROOT/opt/var/lib/vward/updater" "$ROOT/opt/var/cache/vward/updater" "$ROOT/opt/var/backups/vward" "$ROOT/opt/var/run/vward"
+          cp config/updater/update-public.pem "$ROOT/opt/etc/vward/update-public.pem"
+          printf '%s\n' '0.1.7-beta' > "$ROOT/opt/share/vward/VERSION"
+          cat > "$CONFIG" <<EOF
+          update_enabled=1
+          auto_apply=1
+          auto_critical=1
+          auto_important=1
+          auto_routine=1
+          manifest_url=https://example.invalid/update-manifest.json
+          public_key_file=$ROOT/opt/etc/vward/update-public.pem
+          channel=dev
+          safe_window_start=03:00
+          safe_window_end=05:00
+          minimum_free_kb=0
+          max_manifest_size=262144
+          max_package_size=16777216
+          max_unpacked_size=67108864
+          backup_keep=3
+          barrier_integration_ready=1
+          current_version_file=$ROOT/opt/share/vward/VERSION
+          health_timeout_seconds=30
+          check_interval_seconds=900
+          request_timeout_seconds=120
+          important_max_delay_seconds=7200
+          routine_max_delay_seconds=86400
+          minimum_updater_version=1.2.0
+          EOF
+          VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" VWARD_TEST_MANIFEST="$MANIFEST" VWARD_TEST_PACKAGE="$VWARD_ARTIFACT" components/updater/vward-update.sh --dry-run
+          echo 'UPDATER_DRY_RUN=PASS'
+
+      - name: Stage signed feed and final repository state
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$VWARD_ARTIFACT" updates/dev/packages/vward-0.1.8-beta.tar.gz
+          cp "$VWARD_OUT/update-manifest.json" updates/dev/update-manifest.json
+          git rm '.github/workflows/publish-0.1.8-beta-hotfix.yml'
+
+          tmp="$RUNNER_TEMP/SHA256SUMS.final"
+          : > "$tmp"
+          while IFS= read -r f; do
+            [ "$f" = 'SHA256SUMS' ] && continue
+            sha256sum "$f" >> "$tmp"
+          done < <(git ls-files | LC_ALL=C sort)
+          mv "$tmp" SHA256SUMS
+
+          test "$(jq -r '.signed.version' updates/dev/update-manifest.json)" = '0.1.8-beta'
+          test "$(jq -r '.signed.sequence' updates/dev/update-manifest.json)" = '2026091601'
+          test "$(jq -r '.platform_version' config/components/component-registry.json)" = '0.1.8-beta'
+          test "$(sed -n '1p' VERSION)" = '0.1.8-beta'
+          python3 tests/repository/check-console-bindings.py
+          tests/repository/run-consistency-checks.sh
+          sha256sum -c SHA256SUMS
+          git diff --check
+          echo 'FINAL_ACCEPTANCE=PASS'
+
+      - name: Commit and publish signed 0.1.8-beta
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add VERSION CHANGELOG.md config/components/component-registry.json web/index.html tests/repository/check-console-bindings.py updates/dev/packages/vward-0.1.8-beta.tar.gz updates/dev/update-manifest.json SHA256SUMS
+          git diff --cached --check
+          git diff --cached --quiet && { echo 'Nothing to commit'; exit 1; }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Publish signed VWARD 0.1.8-beta console bootstrap hotfix'
+          git push origin HEAD:main
+          echo 'PUBLICATION_STATE=SIGNED_PUBLISHED'
+
+      - name: Upload signed candidate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: vward-0.1.8-beta-signed-evidence
+          path: |
+            ${{ env.VWARD_OUT }}/vward-0.1.8-beta.tar.gz
+            ${{ env.VWARD_OUT }}/package/package-manifest.json
+            ${{ env.VWARD_OUT }}/update-manifest.json
+          if-no-files-found: error
+          retention-days: 7
