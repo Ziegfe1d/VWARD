@@ -1,0 +1,76 @@
+name: Fix publisher preflight
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/fix-publisher-preflight.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vward-publisher-preflight-fix
+  cancel-in-progress: false
+
+jobs:
+  fix-publisher-preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact publisher baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE='.github/workflows/publish-0.1.8-beta-hotfix.yml'
+          EXPECTED='aba7eda705f91fbd2307f1f29ec59d7638c3d2d9'
+          ACTUAL="$(git hash-object "$FILE")"
+          echo "PUBLISHER_BLOB=$ACTUAL"
+          test "$ACTUAL" = "$EXPECTED"
+
+      - name: Correct preflight without changing release logic
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/publish-0.1.8-beta-hotfix.yml')
+          text = path.read_text(encoding='utf-8')
+          old = "          test \"$(git rev-parse HEAD)\" = 'a25671d0f566c91a737643dbb41a82c12af5a413'\n"
+          new = '''          BASE='a25671d0f566c91a737643dbb41a82c12af5a413'\n          git merge-base --is-ancestor "$BASE" HEAD\n          UNEXPECTED="$(git diff --name-only "$BASE"..HEAD | grep -Fvx '.github/workflows/publish-0.1.8-beta-hotfix.yml' || true)"\n          if [ -n "$UNEXPECTED" ]; then\n            echo 'FAIL: unexpected files changed since validated source baseline'\n            printf '%s\\n' "$UNEXPECTED"\n            exit 1\n          fi\n'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'FAIL: preflight marker count={count}, expected=1')
+          text = text.replace(old, new, 1)
+          if text.count("git merge-base --is-ancestor \"$BASE\" HEAD") != 1:
+              raise SystemExit('FAIL: corrected ancestry guard missing')
+          if text.count("grep -Fvx '.github/workflows/publish-0.1.8-beta-hotfix.yml'") != 1:
+              raise SystemExit('FAIL: corrected scope guard missing')
+          path.write_text(text, encoding='utf-8')
+          print('PREFLIGHT_PATCH=PASS')
+          PY
+          git diff --check
+
+      - name: Remove one-shot correction workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm '.github/workflows/fix-publisher-preflight.yml'
+
+      - name: Commit corrected publisher
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add '.github/workflows/publish-0.1.8-beta-hotfix.yml'
+          git diff --cached --check
+          git diff --cached --quiet && { echo 'Nothing to commit'; exit 1; }
+          git commit -m 'Fix signed beta publisher preflight'
+          git push origin HEAD:main
