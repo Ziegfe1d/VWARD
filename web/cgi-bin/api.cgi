@@ -712,9 +712,22 @@ if [ "$ACTION" = "route-probe" ]; then
     IP_CATALOG=/opt/var/lib/vward/policy-sync/catalog
     IP_ACTIVE=/opt/var/lib/vward/policy-sync/active.categories
     IP_OWNED=/opt/var/lib/vward/policy-sync/owned.dynamic.routes
-    RUNCFG=/tmp/vward-console-route-probe.$$
+    umask 077
+    RUNCFG="$(mktemp /tmp/vward-console-route-probe.XXXXXX 2>/dev/null)" || {
+        echo '{"ok":false,"error":"temporary_file_unavailable"}'
+        exit 0
+    }
+    MATCHES_FILE=""
+
+    route_probe_cleanup()
+    {
+        rm -f "$RUNCFG"
+        [ -z "$MATCHES_FILE" ] || rm -f "$MATCHES_FILE"
+    }
+    trap route_probe_cleanup EXIT
+    trap 'exit 1' HUP INT TERM
+
     ndmc -c "show running-config" 2>/dev/null | tr -d '\r' > "$RUNCFG"
-    trap 'rm -f "$RUNCFG"' EXIT INT TERM
 
     valid_ipv4()
     {
@@ -784,8 +797,10 @@ if [ "$ACTION" = "route-probe" ]; then
                 exit 0
             }
 
-            MATCHES_FILE=/tmp/vward-console-ip-matches.$$
-            : > "$MATCHES_FILE"
+            MATCHES_FILE="$(mktemp /tmp/vward-console-ip-matches.XXXXXX 2>/dev/null)" || {
+                echo '{"ok":false,"error":"temporary_file_unavailable"}'
+                exit 0
+            }
             if [ -r "$IP_ACTIVE" ]; then
                 while IFS= read -r CAT; do
                     [ -n "$CAT" ] || continue
@@ -809,6 +824,7 @@ if [ "$ACTION" = "route-probe" ]; then
                 fi
             fi
             rm -f "$MATCHES_FILE"
+            MATCHES_FILE=""
 
             "$JQ" -n --arg type ip --arg value "$VALUE" --arg owned "$OWNED_CIDR" --arg iface "$ROUTE_INTERFACE" \
               --argjson matches "$MATCHES_JSON" --argjson configured "$CONFIGURED" \

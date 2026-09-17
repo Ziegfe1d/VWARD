@@ -38,6 +38,23 @@ assert 'wildcard:false' not in API
 assert 'CONSOLE_RUNTIME_CONFIG' in API and 'socket_state' in API and 'config_test' in API
 assert ':3000/' not in UI + JS
 
+# Root CGI scratch files must not use predictable PID-derived names.  A local
+# user could pre-create those paths as symlinks and make the Console disclose
+# or overwrite arbitrary files when it captures the running configuration.
+route_probe = API.split('if [ "$ACTION" = "route-probe" ]; then', 1)[1].split(
+    'if [ "$ACTION" = "update-data" ]; then', 1
+)[0]
+assert '/tmp/vward-console-route-probe.$$' not in route_probe
+assert '/tmp/vward-console-ip-matches.$$' not in route_probe
+assert 'umask 077' in route_probe
+assert 'RUNCFG="$(mktemp /tmp/vward-console-route-probe.XXXXXX 2>/dev/null)" || {' in route_probe
+assert 'MATCHES_FILE="$(mktemp /tmp/vward-console-ip-matches.XXXXXX 2>/dev/null)" || {' in route_probe
+assert route_probe.count('"error":"temporary_file_unavailable"') == 2
+assert 'rm -f "$RUNCFG"' in route_probe
+assert '[ -z "$MATCHES_FILE" ] || rm -f "$MATCHES_FILE"' in route_probe
+assert 'trap route_probe_cleanup EXIT' in route_probe
+assert "trap 'exit 1' HUP INT TERM" in route_probe
+
 jq = shutil.which("jq")
 assert jq
 
