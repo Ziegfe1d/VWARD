@@ -9,6 +9,7 @@ if command -v node >/dev/null 2>&1; then node --check "$ROOT/web/assets/vward-co
 python3 "$ROOT/tests/repository/check-ads-privacy-settings-registry.py" >/dev/null
 python3 "$ROOT/tests/repository/check-ads-privacy-integration.py" >/dev/null
 python3 "$ROOT/tests/repository/check-console-icon-system.py" >/dev/null
+"$ROOT/tests/repository/check-external-archive-safety.sh"
 TERM=xterm "$ROOT/tests/ads-privacy-guard/run-simulations.sh"
 TERM=xterm "$ROOT/tests/ads-privacy-guard/run-https-simulations.sh"
 TERM=xterm "$ROOT/tests/route-engine/run-domain-classifier-simulations.sh"

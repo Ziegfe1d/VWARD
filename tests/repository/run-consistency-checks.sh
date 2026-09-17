@@ -73,6 +73,7 @@ grep -Fq 'interface $VWARD_WAN_INTERFACE up' components/wan-guard/scripts/vward-
 grep -Fq '"$CAPTURE_FILTER"' components/route-engine/scripts/vward-route-engine.sh || fail "DNS capture filter is not expanded safely"
 grep -Fq "'src net \$VWARD_LAN_SUBNET" components/route-engine/scripts/vward-route-engine.sh && fail "DNS capture filter remains single-quoted"
 python3 tests/repository/check-policy-sync-safety.py || fail "VPN audit safety"
+sh tests/repository/check-external-archive-safety.sh || fail "External archive safety"
 for SCRIPT in components/*/scripts/*.sh components/runtime/init.d/* \
     components/update-engine/*.sh tests/updater/*.sh
 do

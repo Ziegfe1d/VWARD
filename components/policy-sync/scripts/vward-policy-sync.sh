@@ -33,6 +33,9 @@ ITDOG_ARCH="$WORK/itdog.tar.gz"
 LOYAL_JSON="$WORK/loyal.json"
 
 MAX_CATEGORY_ROUTES=2000
+MAX_SOURCE_ARCHIVE_BYTES=${MAX_SOURCE_ARCHIVE_BYTES:-33554432}
+MAX_SOURCE_UNPACKED_BYTES=${MAX_SOURCE_UNPACKED_BYTES:-67108864}
+MAX_SOURCE_ARCHIVE_ENTRIES=${MAX_SOURCE_ARCHIVE_ENTRIES:-20000}
 
 mkdir -p "$STATE" "$SOURCE_ROOT"
 
@@ -60,11 +63,40 @@ download()
 {
     URL="$1"
     OUT="$2"
+    LIMIT_BLOCKS=$(( (MAX_SOURCE_ARCHIVE_BYTES + 511) / 512 ))
 
-    curl -4 -f -L \
-      --connect-timeout 10 \
-      --max-time 120 \
-      -sS "$URL" -o "$OUT"
+    (
+      ulimit -f "$LIMIT_BLOCKS" || exit 1
+      curl -4 -f -L \
+        --connect-timeout 10 \
+        --max-time 120 \
+        --max-filesize "$MAX_SOURCE_ARCHIVE_BYTES" \
+        -sS "$URL" -o "$OUT"
+    ) || return 1
+    SIZE="$(wc -c < "$OUT" 2>/dev/null | tr -d ' ')"
+    case "$SIZE" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$SIZE" -le "$MAX_SOURCE_ARCHIVE_BYTES" ]
+}
+
+archive_validate()
+{
+    ARCH="$1"
+    OUTDIR="$2"
+    LIST="$OUTDIR/.vward-archive-list.$$"
+    VERBOSE="$OUTDIR/.vward-archive-verbose.$$"
+
+    tar -tzf "$ARCH" > "$LIST" 2>/dev/null || { rm -f "$LIST" "$VERBOSE"; return 1; }
+    tar -tvzf "$ARCH" > "$VERBOSE" 2>/dev/null || { rm -f "$LIST" "$VERBOSE"; return 1; }
+    awk -v max_entries="${MAX_SOURCE_ARCHIVE_ENTRIES:-20000}" '
+      $0=="" || $0==".." || $0 ~ /^\// || $0 ~ /^\.\.\// || $0 ~ /\/\.\.\// || $0 ~ /\/\.\.$/ {exit 1}
+      {n++} END {if (n>max_entries) exit 1}
+    ' "$LIST" || { rm -f "$LIST" "$VERBOSE"; return 1; }
+    awk -v max_bytes="${MAX_SOURCE_UNPACKED_BYTES:-67108864}" '
+      substr($0,1,1)!="-" && substr($0,1,1)!="d" {exit 1}
+      $3 !~ /^[0-9]+$/ {exit 1}
+      {sum += $3} END {if (sum>max_bytes) exit 1}
+    ' "$VERBOSE" || { rm -f "$LIST" "$VERBOSE"; return 1; }
+    rm -f "$LIST" "$VERBOSE"
 }
 
 extract_archive()
@@ -72,7 +104,8 @@ extract_archive()
     ARCH="$1"
     OUTDIR="$2"
 
-    mkdir -p "$OUTDIR"
+    mkdir -p "$OUTDIR" || return 1
+    archive_validate "$ARCH" "$OUTDIR" || return 1
     tar -xzf "$ARCH" -C "$OUTDIR" >/dev/null 2>&1
 }
 
