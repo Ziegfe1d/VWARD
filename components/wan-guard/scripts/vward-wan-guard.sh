@@ -28,8 +28,11 @@ LOCKDIR="/tmp/vward-wan-guard.lock.d"
 CURL="/opt/bin/curl"
 JQ="/opt/bin/jq"
 PING="/opt/bin/ping"
+NDMC=${NDMC:-/bin/ndmc}
 
 LOCK_OWNED=0
+WAN_BOUNCE_PHASE=IDLE
+WAN_CANCEL_REQUESTED=0
 
 now()
 {
@@ -143,6 +146,7 @@ emit_state()
 
 REC_DIR="/tmp/vward-wan-guard-recovery"
 REC_LOG="/opt/var/log/vward-wan-guard-recovery.log"
+WAN_BOUNCE_MARKER="$REC_DIR/owned-down"
 
 CONFIRM_FAILURES=3
 
@@ -210,6 +214,77 @@ wg_bucket_inc()
 
     echo "$WR_KEY" > "$REC_DIR/${WR_PREFIX}_key"
     echo "$WR_COUNT" > "$REC_DIR/${WR_PREFIX}_count"
+}
+
+wan_run_up()
+{
+    WR_UP_RC=1
+    WR_UP_TRIES=0
+
+    while [ "$WR_UP_TRIES" -lt 3 ]
+    do
+        WR_UP_TRIES=$((WR_UP_TRIES + 1))
+
+        LD_LIBRARY_PATH= "$NDMC" -c "interface $VWARD_WAN_INTERFACE up" \
+            >/tmp/vward-wan-guard.ndmc.up 2>&1
+        WR_UP_RC=$?
+
+        [ "$WR_UP_RC" -eq 0 ] && return 0
+        [ "$WR_UP_TRIES" -ge 3 ] || sleep 2
+    done
+
+    return 1
+}
+
+wan_restore_incomplete_bounce()
+{
+    [ -f "$WAN_BOUNCE_MARKER" ] || return 0
+
+    WR_MARKER_INTERFACE="$(cat "$WAN_BOUNCE_MARKER" 2>/dev/null)"
+    if [ "$WR_MARKER_INTERFACE" != "$VWARD_WAN_INTERFACE" ]; then
+        mv "$WAN_BOUNCE_MARKER" "$WAN_BOUNCE_MARKER.invalid.$$" 2>/dev/null ||
+            rm -f "$WAN_BOUNCE_MARKER"
+        printf '%s action=WAN_BOUNCE_MARKER_REJECTED expected=%s actual=%s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S%z')" \
+            "$VWARD_WAN_INTERFACE" \
+            "$WR_MARKER_INTERFACE" >> "$REC_LOG"
+        return 0
+    fi
+
+    if wan_run_up; then
+        rm -f "$WAN_BOUNCE_MARKER"
+        printf '%s action=WAN_BOUNCE_RECOVERY interface=%s up_rc=0 up_tries=%s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S%z')" \
+            "$VWARD_WAN_INTERFACE" \
+            "$WR_UP_TRIES" >> "$REC_LOG"
+        return 0
+    fi
+
+    printf '%s action=WAN_BOUNCE_RECOVERY_FAILED interface=%s up_rc=%s up_tries=%s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S%z')" \
+        "$VWARD_WAN_INTERFACE" \
+        "$WR_UP_RC" \
+        "$WR_UP_TRIES" >> "$REC_LOG"
+    return 1
+}
+
+wan_signal_exit()
+{
+    if [ "$WAN_BOUNCE_PHASE" = DOWN_COMMAND ]; then
+        WAN_CANCEL_REQUESTED=1
+        return
+    fi
+
+    trap '' 1 2 15
+    if [ "$WAN_BOUNCE_PHASE" = OWNED_DOWN ]; then
+        if wan_run_up >/dev/null 2>&1; then
+            rm -f "$WAN_BOUNCE_MARKER"
+            WAN_BOUNCE_PHASE=IDLE
+        fi
+    else
+        wan_restore_incomplete_bounce >/dev/null 2>&1 || true
+    fi
+    exit 1
 }
 
 wan_recover()
@@ -298,27 +373,37 @@ wan_recover()
 
         ACTION="WAN_BOUNCE"
 
-        LD_LIBRARY_PATH= /bin/ndmc -c "interface $VWARD_WAN_INTERFACE down" \
+        umask 077
+        WAN_BOUNCE_PHASE=DOWN_COMMAND
+        LD_LIBRARY_PATH= "$NDMC" -c "interface $VWARD_WAN_INTERFACE down" \
             >/tmp/vward-wan-guard.ndmc.down 2>&1
         WR_DOWN_RC=$?
 
+        if [ "$WR_DOWN_RC" -ne 0 ]; then
+            WAN_BOUNCE_PHASE=IDLE
+            ACTION="WAN_BOUNCE_DOWN_FAILED"
+            DETAIL="$DETAIL recovery_count=$WR_FAIL_COUNT recovery_stage=$WR_STAGE down_rc=$WR_DOWN_RC"
+            [ "$WAN_CANCEL_REQUESTED" = 0 ] || exit 1
+            return
+        fi
+
+        WAN_BOUNCE_PHASE=OWNED_DOWN
+        if ! printf '%s\n' "$VWARD_WAN_INTERFACE" > "$WAN_BOUNCE_MARKER"; then
+            ACTION="WAN_BOUNCE_MARKER_FAILED"
+            wan_run_up >/dev/null 2>&1 || true
+            [ "$WR_UP_RC" -ne 0 ] || WAN_BOUNCE_PHASE=IDLE
+            DETAIL="$DETAIL recovery_count=$WR_FAIL_COUNT recovery_stage=$WR_STAGE down_rc=$WR_DOWN_RC up_rc=$WR_UP_RC"
+            return
+        fi
+
+        [ "$WAN_CANCEL_REQUESTED" = 0 ] || wan_signal_exit
+
         sleep 5
 
-        WR_UP_RC=1
-        WR_UP_TRIES=0
-
-        while [ "$WR_UP_TRIES" -lt 3 ]
-        do
-            WR_UP_TRIES=$((WR_UP_TRIES + 1))
-
-            LD_LIBRARY_PATH= /bin/ndmc -c "interface $VWARD_WAN_INTERFACE up" \
-                >/tmp/vward-wan-guard.ndmc.up 2>&1
-            WR_UP_RC=$?
-
-            [ "$WR_UP_RC" -eq 0 ] && break
-
-            sleep 2
-        done
+        if wan_run_up; then
+            rm -f "$WAN_BOUNCE_MARKER"
+            WAN_BOUNCE_PHASE=IDLE
+        fi
 
         echo "$WR_NOW" > "$REC_DIR/last_bounce"
 
@@ -401,7 +486,13 @@ then
 fi
 
 trap cleanup 0
-trap 'cleanup; exit 1' 1 2 15
+trap wan_signal_exit 1 2 15
+
+if ! wan_restore_incomplete_bounce; then
+    echo "CLASS=WAN_RECOVERY_FAILED"
+    echo "ACTION=WAN_BOUNCE_UP_FAILED"
+    exit 1
+fi
 
 UPTIME="$(awk '{print int($1)}' /proc/uptime 2>/dev/null)"
 
