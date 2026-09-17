@@ -80,6 +80,7 @@ ce7f25a9f95671126cd5ec252db5115ae250a1dbfab814b2fbdeaa57e1fc9105  updates/dev/pa
 e44a62b36ac6c3745b69e5cdf5fcc514ea1599984268510d9ce8e85a6d377bc3  updates/dev/packages/vward-0.1.5-dev.tar.gz
 e551f9299ca68d2d00b228850a8087becc2b29e1ec70009eab9289e329c0640e  updates/dev/packages/vward-0.1.6-dev.tar.gz
 11edc7768c6a58f14e4a0e54f8652f1361adc5bc79bf5b92dc4a607315175fa5  updates/dev/packages/vward-0.1.7-beta.tar.gz
+bcec63e3151b82b60a8b5918a4036b6b195278126fc05508085fe574ee61a4c3  updates/dev/packages/vward-0.1.8-beta.tar.gz
 329a8771b552b4ebbcba8b16d305fc84831d0aadb906ed486c079da6dec8d38f  updates/dev/update-manifest.json
 f3eece4e148d5979f8410067a73029b4457e4d92708fbabfd9c262a47e94888f  web/cgi-bin/api.cgi
 30a4e114c71b4bfba1e371427181a3256ecddb045ab9d4d5b639a14ebebfd326  web/index.html
