@@ -98,6 +98,16 @@ if '<option value="group">FQDN-группа</option>' not in html or 'group_not_
 if 'Runtime сейчас не хранит отдельную достоверную state-machine очереди' not in html:
     fail("Route Engine lifecycle limitation is not disclosed")
 
+tcpdump_counter = re.search(r'^TCPDUMP_COUNT=.*$', api, re.MULTILINE)
+if not tcpdump_counter:
+    fail("Console API tcpdump counter is missing")
+tcpdump_counter_source = tcpdump_counter.group(0)
+if 'udp dst port 53' in tcpdump_counter_source:
+    fail("Console API tcpdump counter depends on the truncated ps command tail")
+for marker in ('src net 192.168.1.0/24', 'dst host 192.168.1.1'):
+    if marker not in tcpdump_counter_source:
+        fail(f"Console API tcpdump counter is missing stable marker: {marker}")
+
 node = shutil.which("node")
 if node:
     start = html.find("<script>")

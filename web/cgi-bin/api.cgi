@@ -928,7 +928,7 @@ CHECK_INTERVAL="$(sed -n 's/^check_interval_seconds=//p' /opt/etc/vward/update.c
 LIVE_PID="$(cat /opt/var/run/agh-adaptive-live.pid 2>/dev/null)"
 CONSOLE_PID="$(cat /opt/var/run/keenetic-apps-lighttpd.pid 2>/dev/null)"
 LIVE_COUNT="$(ps w 2>/dev/null | awk '$6=="/opt/bin/agh-adaptive-live.sh"{n++} END{print n+0}')"
-TCPDUMP_COUNT="$(ps w 2>/dev/null | awk '$5=="tcpdump" && index($0,"udp dst port 53"){n++} END{print n+0}')"
+TCPDUMP_COUNT="$(ps w 2>/dev/null | awk '$5=="tcpdump" && index($0,"src net 192.168.1.0/24") && index($0,"dst host 192.168.1.1"){n++} END{print n+0}')"
 FAILOPEN_STATE=/opt/var/lib/wg-failopen/state
 DOWN_STREAK="$(sed -n 's/^DOWN_STREAK=//p' "$FAILOPEN_STATE" 2>/dev/null)"
 FAILOPEN_ACTIVE="$(sed -n 's/^FAILOPEN_ACTIVE=//p' "$FAILOPEN_STATE" 2>/dev/null)"
