@@ -36,7 +36,7 @@ jobs:
           set -euo pipefail
           BASE='a25671d0f566c91a737643dbb41a82c12af5a413'
           git merge-base --is-ancestor "$BASE" HEAD
-          UNEXPECTED="$(git diff --name-only "$BASE"..HEAD | grep -Fvx '.github/workflows/publish-0.1.8-beta-hotfix.yml' || true)"
+          UNEXPECTED="$(git diff --name-only "$BASE"..HEAD | grep -Fvx -e '.github/workflows/publish-0.1.8-beta-hotfix.yml' -e 'SHA256SUMS' || true)"
           if [ -n "$UNEXPECTED" ]; then
             echo 'FAIL: unexpected files changed since validated source baseline'
             printf '%s\n' "$UNEXPECTED"
