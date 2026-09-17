@@ -1,22 +1,22 @@
 {
   "signed": {
     "schema": 1,
-    "update_id": "vward-0.1.7-beta-control-plane",
-    "sequence": 2026091301,
-    "version": "0.1.7-beta",
+    "update_id": "vward-0.1.8-beta-console-bootstrap",
+    "sequence": 2026091601,
+    "version": "0.1.8-beta",
     "channel": "dev",
     "priority": "CRITICAL",
-    "published_at": "2026-09-13T03:12:24Z",
+    "published_at": "2026-09-17T02:52:51Z",
     "min_updater_version": "1.2.0",
     "package": {
-      "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-0.1.7-beta.tar.gz",
-      "sha256": "11edc7768c6a58f14e4a0e54f8652f1361adc5bc79bf5b92dc4a607315175fa5",
-      "size": 49124,
-      "unpacked_size": 189153
+      "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-0.1.8-beta.tar.gz",
+      "sha256": "bcec63e3151b82b60a8b5918a4036b6b195278126fc05508085fe574ee61a4c3",
+      "size": 49245,
+      "unpacked_size": 189486
     },
     "compatibility": {
-      "min_vward": "0.1.6-dev",
-      "max_vward": "0.1.6-dev"
+      "min_vward": "0.1.7-beta",
+      "max_vward": "0.1.7-beta"
     },
     "affected_components": [
       "platform-core",
@@ -34,5 +34,5 @@
       "key_id": "vward-prod-2026-01"
     }
   },
-  "signature": "F37Bj9eVGyGd3m4V/7mdEue4Bi2opOKOSuSiHmW3HijHCe69RWQtAq7WI8/zGQUSTKabdAdmyWQoVysNW/cVCA=="
+  "signature": "VKOagMJ7rLfjWPuj0hCHFm6H/bFYfOo/Emf13gvaumUxNu92GFZriYUJld4RBSlW/2Z6RSkD5vGKwpNXQGmSCw=="
 }
