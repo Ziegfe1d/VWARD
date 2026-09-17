@@ -1243,7 +1243,7 @@ CHECK_INTERVAL="$(sed -n 's/^check_interval_seconds=//p' /opt/etc/vward/update.c
 LIVE_PID="$(cat /opt/var/run/vward/route-engine.pid 2>/dev/null)"
 CONSOLE_PID="$(cat /opt/var/run/vward-console-lighttpd.pid 2>/dev/null)"
 LIVE_COUNT="$(ps w 2>/dev/null | awk '$6=="/opt/bin/vward-route-engine.sh"{n++} END{print n+0}')"
-TCPDUMP_COUNT="$(ps w 2>/dev/null | awk '$5=="tcpdump" && index($0,"udp dst port 53"){n++} END{print n+0}')"
+TCPDUMP_COUNT="$(ps w 2>/dev/null | awk -v subnet="$VWARD_LAN_SUBNET" -v address="$VWARD_LAN_ADDRESS" '$5=="tcpdump" && index($0,"src net " subnet) && index($0,"dst host " address){n++} END{print n+0}')"
 FAILOPEN_STATE=/opt/var/lib/vward/tunnel-guard/state
 DOWN_STREAK="$(sed -n 's/^DOWN_STREAK=//p' "$FAILOPEN_STATE" 2>/dev/null)"
 FAILOPEN_ACTIVE="$(sed -n 's/^FAILOPEN_ACTIVE=//p' "$FAILOPEN_STATE" 2>/dev/null)"
