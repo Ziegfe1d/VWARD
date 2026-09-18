@@ -8,6 +8,9 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo "FAIL: common library not found" >&2; exit 1; }
 . "$LIB"
+ads_admission_enter ads-settings
+trap ads_admission_leave EXIT
+trap 'exit 1' HUP INT TERM
 
 ads_mkdirs || ads_die "cannot create component directories"
 [ -r "$ADS_CONFIG" ] || ads_die "config not readable: $ADS_CONFIG"
@@ -105,7 +108,7 @@ cp -p "$ADS_CONFIG" "$BACKUP_DIR/ads-privacy-guard.conf.before" || ads_die "conf
 
 WORK="$ADS_STATE/work/settings.$$"
 mkdir -p "$WORK" || ads_die "cannot create settings workdir"
-trap 'rm -rf "$WORK"' EXIT
+trap 'rm -rf "$WORK"; ads_admission_leave' EXIT
 trap 'exit 1' HUP INT TERM
 cp "$ADS_CONFIG" "$WORK/current" || ads_die "cannot stage config"
 

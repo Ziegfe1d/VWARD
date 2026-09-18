@@ -8,6 +8,7 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo "FAIL: common library not found" >&2; exit 1; }
 . "$LIB"
+ads_admission_enter ads-publish
 
 MODE="${1:-dry-run}"
 CONFIRM="${2:-}"
@@ -42,7 +43,7 @@ if ! ads_lock_acquire "$LOCK" "${PUBLISH_LOCK_STALE_SEC:-300}"; then
     echo "PUBLISH_STATUS=ALREADY_RUNNING"
     exit 0
 fi
-cleanup(){ rm -rf "$WORK"; ads_lock_release "$LOCK"; }
+cleanup(){ rm -rf "$WORK"; ads_lock_release "$LOCK"; ads_admission_leave; }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 

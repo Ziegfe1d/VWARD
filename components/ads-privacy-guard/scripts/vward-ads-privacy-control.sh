@@ -6,6 +6,9 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo "FAIL: common library not found" >&2; exit 1; }
 . "$LIB"
+ads_admission_enter ads-control
+trap ads_admission_leave EXIT
+trap 'exit 1' HUP INT TERM
 ads_mkdirs || ads_die "cannot create component directories"
 [ -r "$ADS_CONFIG" ] && ads_load_config
 
@@ -33,7 +36,7 @@ chmod 0600 "$ADS_ALLOWLIST" "$ADS_DENYLIST" 2>/dev/null || ads_die "cannot prote
 STAMP="$(date '+%Y%m%d-%H%M%S')"; BACKUP_DIR="$ADS_BACKUP_ROOT/manual/$STAMP"; mkdir -p "$BACKUP_DIR" || ads_die "cannot create control backup"; chmod 0700 "$BACKUP_DIR"
 cp -p "$ADS_ALLOWLIST" "$BACKUP_DIR/allowlist.tsv.before" || ads_die "allowlist backup failed"; cp -p "$ADS_DENYLIST" "$BACKUP_DIR/denylist.tsv.before" || ads_die "denylist backup failed"
 ALLOW_TMP="${ADS_ALLOWLIST}.new.$$"; DENY_TMP="${ADS_DENYLIST}.new.$$"
-trap 'rm -f "$ALLOW_TMP" "$DENY_TMP" "$ALLOW_TMP.sorted" "$DENY_TMP.sorted"' EXIT
+trap 'rm -f "$ALLOW_TMP" "$DENY_TMP" "$ALLOW_TMP.sorted" "$DENY_TMP.sorted"; ads_admission_leave' EXIT
 trap 'exit 1' HUP INT TERM
 awk -F'|' -v d="$DOMAIN" '$1!=d {print}' "$ADS_ALLOWLIST" > "$ALLOW_TMP" || ads_die "allowlist build failed"; awk -F'|' -v d="$DOMAIN" '$1!=d {print}' "$ADS_DENYLIST" > "$DENY_TMP" || ads_die "denylist build failed"
 case "$OP" in allow) printf '%s|%s|manual allow; never auto block\n' "$DOMAIN" "$SCOPE" >> "$ALLOW_TMP" ;; block) printf '%s|%s|manual confirmed block\n' "$DOMAIN" "$SCOPE" >> "$DENY_TMP" ;; remove) ;; esac

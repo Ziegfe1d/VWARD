@@ -8,6 +8,10 @@ VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 [ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
 . "$VWARD_PROFILE_LIB"
 vward_profile_load || exit 1
+VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+[ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
+. "$VWARD_ADMISSION_LIB"
+vward_admission_enter route-engine || exit $?
 
 GROUP="AdaptiveAuto"
 
@@ -77,6 +81,7 @@ cleanup()
 
     rm -f "$RAW"
     rm -rf "$LOCK"
+    vward_admission_leave 2>/dev/null || true
 
     echo "$(date '+%Y-%m-%d %H:%M:%S')|STOP" >> "$EVENT_LOG"
 }

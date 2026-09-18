@@ -6,6 +6,9 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo "FAIL: common library not found" >&2; exit 1; }
 . "$LIB"
+ads_admission_enter ads-source-control
+trap ads_admission_leave EXIT
+trap 'exit 1' HUP INT TERM
 ads_mkdirs || ads_die "cannot create component directories"
 ads_require "$ADS_JQ"
 [ -r "$ADS_CONFIG" ] && ads_load_config

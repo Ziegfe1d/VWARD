@@ -231,6 +231,13 @@ vu_owner_token_valid() {
     printf '%s\n' "$1" | grep -Eq '^[1-9][0-9]*:[0-9]+:vward-update$'
 }
 
+vu_pid_start() {
+    proc_pid=$1
+    case "$proc_pid" in ''|*[!0-9]*) return 1 ;; esac
+    [ -r "/proc/$proc_pid/stat" ] || return 1
+    sed 's/^.*) //' "/proc/$proc_pid/stat" 2>/dev/null | awk 'NF>=20 {print $20; exit}'
+}
+
 vu_owner_status() {
     token=$1
     vu_owner_token_valid "$token" || return 2
@@ -293,8 +300,8 @@ vu_barrier_recover_stale() {
     barrier_exists=0
     request_token=
     barrier_token=
-    [ -e "$VU_REQUEST_MARKER" ] && request_exists=1
-    [ -d "$VU_BARRIER_LOCK" ] && barrier_exists=1
+    { [ -e "$VU_REQUEST_MARKER" ] || [ -L "$VU_REQUEST_MARKER" ]; } && request_exists=1
+    { [ -e "$VU_BARRIER_LOCK" ] || [ -L "$VU_BARRIER_LOCK" ]; } && barrier_exists=1
     [ "$request_exists" -eq 0 ] && [ "$barrier_exists" -eq 0 ] && return 0
 
     if [ "$request_exists" -eq 1 ]; then
@@ -694,7 +701,7 @@ vu_safe_target() {
     target=$1
     case "$target" in *../*|*/..|*/./*|*//* ) return 1 ;; esac
     case "$target" in
-        /opt/bin/vward-route-test.sh|/opt/bin/vward-route-reconciler.sh|/opt/bin/vward-route-hints-update.sh|/opt/bin/vward-housekeeping.sh|/opt/bin/vward-route-resolve4.sh|/opt/bin/vward-route.sh|/opt/bin/vward-route-engine.sh|/opt/bin/vward-route-discovery.sh|/opt/bin/vward-cron-supervisor.sh|/opt/bin/vward-policy-chain.sh|/opt/bin/vward-policy-audit.sh|/opt/bin/vward-policy-reconcile.sh|/opt/bin/vward-policy-sync.sh|/opt/bin/vward-wan-guard.sh|/opt/bin/vward-wan-recovery.sh|/opt/bin/vward-tunnel-guard.sh|/opt/bin/vward-tunnel-health.sh|/opt/lib/vward/vward-device-profile.sh|/opt/etc/init.d/S89vward-update-recovery|/opt/etc/init.d/S90crond|/opt/etc/init.d/S91vward-route-engine|/opt/etc/init.d/S92vward-runtime|/opt/etc/init.d/S93vward-console|/opt/etc/vward/console/lighttpd.conf|/opt/share/vward/console/www/index.html|/opt/share/vward/console/www/assets/vward-console.css|/opt/share/vward/console/www/assets/vward-console.js|/opt/share/vward/console/www/cgi-bin/api.cgi|/opt/share/vward/settings-registry.json|/opt/share/vward/package-map.tsv|/opt/share/vward/VERSION) return 0 ;;
+        /opt/bin/vward-route-test.sh|/opt/bin/vward-route-reconciler.sh|/opt/bin/vward-route-hints-update.sh|/opt/bin/vward-housekeeping.sh|/opt/bin/vward-route-resolve4.sh|/opt/bin/vward-route.sh|/opt/bin/vward-route-engine.sh|/opt/bin/vward-route-discovery.sh|/opt/bin/vward-cron-supervisor.sh|/opt/bin/vward-policy-chain.sh|/opt/bin/vward-policy-audit.sh|/opt/bin/vward-policy-reconcile.sh|/opt/bin/vward-policy-sync.sh|/opt/bin/vward-wan-guard.sh|/opt/bin/vward-wan-recovery.sh|/opt/bin/vward-tunnel-guard.sh|/opt/bin/vward-tunnel-health.sh|/opt/lib/vward/vward-device-profile.sh|/opt/lib/vward/vward-runtime-admission.sh|/opt/etc/init.d/S89vward-update-recovery|/opt/etc/init.d/S90crond|/opt/etc/init.d/S91vward-route-engine|/opt/etc/init.d/S92vward-runtime|/opt/etc/init.d/S93vward-console|/opt/etc/vward/console/lighttpd.conf|/opt/share/vward/console/www/index.html|/opt/share/vward/console/www/assets/vward-console.css|/opt/share/vward/console/www/assets/vward-console.js|/opt/share/vward/console/www/cgi-bin/api.cgi|/opt/share/vward/settings-registry.json|/opt/share/vward/package-map.tsv|/opt/share/vward/VERSION) return 0 ;;
         /opt/bin/vward-ads-privacy-guard.sh|/opt/bin/vward-ads-privacy-sources-update.sh|/opt/bin/vward-ads-privacy-publish.sh|/opt/bin/vward-ads-privacy-probe.sh|/opt/bin/vward-ads-privacy-control.sh|/opt/bin/vward-ads-privacy-scheduler.sh|/opt/bin/vward-ads-privacy-settings.sh|/opt/bin/vward-ads-privacy-source-control.sh|/opt/bin/vward-ads-privacy-query-read.sh|/opt/bin/vward-ads-privacy-rules-rebuild.sh|/opt/bin/vward-ads-privacy-job.sh|/opt/bin/vward-ads-privacy-health.sh|/opt/bin/vward-ads-privacy-https.sh) return 0 ;;
         /opt/bin/vward-domain-classifier.sh|/opt/bin/vward-domain-migrate-dry-run.sh|/opt/lib/vward/vward-domain-classifier-lib.sh) return 0 ;;
         /opt/share/vward/ads-privacy-guard/vward-ads-privacy-common.sh|/opt/share/vward/ads-privacy-guard/source-registry.json|/opt/share/vward/ads-privacy-guard/trust-core.tsv|/opt/share/vward/ads-privacy-guard/https/vward-ads-privacy-https-common.sh|/opt/share/vward/ads-privacy-guard/https/providers/3proxy.sh) return 0 ;;
@@ -747,8 +754,45 @@ vu_in_safe_window() {
 }
 
 vu_activity_clear() {
+    active_root="$VU_ROOT_PREFIX/tmp/vward-runtime-active"
+    if [ -d "$active_root" ] && [ ! -L "$active_root" ]; then
+        active_owner_uid=${VWARD_ADMISSION_OWNER_UID:-$(id -u)}
+        [ "$(stat -c '%u %a' "$active_root" 2>/dev/null)" = "$active_owner_uid 700" ] || return 1
+        for active_slot in "$active_root"/*; do
+            [ -e "$active_slot" ] || continue
+            [ -d "$active_slot" ] && [ ! -L "$active_slot" ] || return 1
+            active_pid=$(cat "$active_slot/pid" 2>/dev/null) || return 1
+            active_saved_start=$(cat "$active_slot/pid_start" 2>/dev/null) || return 1
+            case "$active_pid:$active_saved_start" in *[!0-9:]*|:*|*:) return 1 ;; esac
+            active_live_start=$(vu_pid_start "$active_pid" 2>/dev/null || :)
+            [ -z "$active_live_start" ] || [ "$active_live_start" != "$active_saved_start" ] || return 1
+            active_reap="${active_slot}.stale.$$"
+            [ ! -e "$active_reap" ] || return 1
+            mv "$active_slot" "$active_reap" 2>/dev/null || return 1
+            rm -f "$active_reap/pid" "$active_reap/pid_start" "$active_reap/component" 2>/dev/null || return 1
+            rmdir "$active_reap" 2>/dev/null || return 1
+        done
+    elif [ -e "$active_root" ]; then
+        return 1
+    fi
     [ ! -e "$VU_RUN_DIR/runtime-active" ] || return 1
-    for conflict in "$VU_ROOT_PREFIX/tmp/vward-route-reconciler-maint.lock" "$VU_ROOT_PREFIX/tmp/vward-route-engine.lock" "$VU_ROOT_PREFIX/tmp/vward-policy-sync.lock" "$VU_ROOT_PREFIX/tmp/vward-policy-reconcile.lock" "$VU_ROOT_PREFIX/tmp/vward-tunnel-guard.lock" "$VU_ROOT_PREFIX/tmp/vward-wan-guard.lock" "$VU_ROOT_PREFIX/tmp/vward-wan-guard.lock.d"; do
+    for conflict in \
+        "$VU_ROOT_PREFIX/tmp/vward-route-reconciler-maint.lock" \
+        "$VU_ROOT_PREFIX/tmp/vward-route-engine.lock" \
+        "$VU_ROOT_PREFIX/tmp/vward-policy-sync.lock" \
+        "$VU_ROOT_PREFIX/tmp/vward-policy-reconcile.lock" \
+        "$VU_ROOT_PREFIX/tmp/vward-tunnel-health-watch.lock" \
+        "$VU_ROOT_PREFIX/tmp/vward-tunnel-guard-guard.lock" \
+        "$VU_ROOT_PREFIX/tmp/vward-wan-guard.lock" \
+        "$VU_ROOT_PREFIX/tmp/vward-wan-guard.lock.d" \
+        "$VU_ROOT_PREFIX/tmp/vward-route.lock" \
+        "$VU_ROOT_PREFIX/tmp/vward-route-discovery.lock" \
+        "$VU_ROOT_PREFIX/opt/var/lib/vward/policy-sync/lock" \
+        "$VU_ROOT_PREFIX/opt/var/lib/vward/route-engine/classifier.lock" \
+        "$VU_ROOT_PREFIX/opt/var/lib/vward/ads-privacy-guard/scan.lock" \
+        "$VU_ROOT_PREFIX/opt/var/lib/vward/ads-privacy-guard/sources-update.lock" \
+        "$VU_ROOT_PREFIX/opt/var/lib/vward/ads-privacy-guard/publish.lock" \
+        "$VU_ROOT_PREFIX/opt/var/lib/vward/ads-privacy-guard/jobs/worker.lock"; do
         [ ! -e "$conflict" ] || return 1
     done
     return 0
@@ -853,11 +897,16 @@ vu_hard_safety_check() {
     done
 }
 
-vu_barrier_enter() {
+vu_barrier_request() {
     vu_barrier_recover_stale || return 1
     mkdir -p "$(dirname "$VU_REQUEST_MARKER")" || return 1
-    printf '%s\n' "$VU_LOCK_TOKEN" > "$VU_REQUEST_MARKER" || return 1
+    [ ! -e "$VU_REQUEST_MARKER" ] && [ ! -L "$VU_REQUEST_MARKER" ] || return 1
+    (umask 077; set -C; printf '%s\n' "$VU_LOCK_TOKEN" > "$VU_REQUEST_MARKER") 2>/dev/null || return 1
     VU_REQUEST_OWNED=1
+}
+
+vu_barrier_enter() {
+    [ "$VU_REQUEST_OWNED" = 1 ] || vu_barrier_request || return 1
     waited=0
     while ! vu_activity_clear && [ "$waited" -lt "$request_timeout_seconds" ]; do
         sleep 1

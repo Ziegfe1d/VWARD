@@ -3,6 +3,11 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+[ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
+. "$VWARD_ADMISSION_LIB"
+vward_admission_enter route-hints-update || exit $?
+
 VERSION="3.0"
 
 DIR="/opt/etc/vward/route-engine"
@@ -25,6 +30,7 @@ mkdir -p "$DIR" "$CACHE" "$WORK"
 cleanup()
 {
     rm -rf "$WORK"
+    vward_admission_leave 2>/dev/null || true
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM

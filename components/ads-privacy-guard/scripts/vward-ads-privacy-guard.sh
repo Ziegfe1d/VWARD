@@ -8,6 +8,7 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo "FAIL: common library not found" >&2; exit 1; }
 . "$LIB"
+ads_admission_enter ads-guard
 
 MODE="${1:-scan}"
 case "$MODE" in
@@ -83,6 +84,7 @@ cleanup()
     rm -rf "$WORK"
     ads_lock_release "$LOCK"
     runtime_status idle "" 0 0
+    ads_admission_leave
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM

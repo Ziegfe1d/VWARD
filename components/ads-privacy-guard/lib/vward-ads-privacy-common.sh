@@ -59,6 +59,21 @@ ads_num()
 
 ads_require() { [ -x "$1" ] || ads_die "required executable missing: $1"; }
 
+ads_admission_enter()
+{
+    ads_ae_component=${1:-ads-privacy}
+    ads_ae_lib=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+    [ -r "$ads_ae_lib" ] || ads_ae_lib="${SELF_DIR:-.}/../../runtime/lib/vward-runtime-admission.sh"
+    [ -r "$ads_ae_lib" ] || ads_die "runtime admission library unavailable"
+    . "$ads_ae_lib"
+    vward_admission_enter "$ads_ae_component" || exit $?
+}
+
+ads_admission_leave()
+{
+    command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null || true
+}
+
 ads_mkdirs()
 {
     mkdir -p "$ADS_ETC" "$ADS_STATE" "$ADS_STATE/sources" "$ADS_STATE/generated" \

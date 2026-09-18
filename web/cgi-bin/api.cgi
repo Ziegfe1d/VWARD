@@ -110,6 +110,14 @@ ads_kv_json(){ [ -r "$1" ] && awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "
 ads_valid_domain(){ printf '%s\n' "$1" | awk 'length($0)>0&&length($0)<=253&&index($0,".")>0&&$0!~/\.\./ {n=split($0,a,".");for(i=1;i<=n;i++)if(length(a[i])<1||length(a[i])>63||a[i]!~/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/)exit 1;exit 0}{exit 1}'; }
 ads_valid_source_id(){ printf '%s\n' "$1" | awk 'length($0)>=1&&length($0)<=64&&$0~/^[a-z0-9][a-z0-9._-]*$/{exit 0}{exit 1}'; }
 ads_console_tmp(){ umask 077; mktemp "/tmp/vward-console-${1}.XXXXXX"; }
+updater_mutation_busy(){ [ -e /opt/var/run/vward/updater.lock ] || [ -L /opt/var/run/vward/updater.lock ] || [ -e /tmp/vward-update-requested ] || [ -L /tmp/vward-update-requested ] || [ -e /tmp/vward-update.lock ] || [ -L /tmp/vward-update.lock ]; }
+console_mutation_enter(){
+  VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+  [ -r "$VWARD_ADMISSION_LIB" ] || return 1
+  . "$VWARD_ADMISSION_LIB"
+  vward_admission_enter console-mutation
+}
+console_mutation_leave(){ command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null || true; }
 
 if [ "$ACTION" = ads-data ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
@@ -140,7 +148,7 @@ if [ "$ACTION" = ads-https-data ]; then
 fi
 
 if [ "$ACTION" = ads-https-control ]; then
-  header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }; [ ! -e /opt/var/run/vward/updater.lock ] || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+  header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }; ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; trap console_mutation_leave EXIT
   LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ]&&[ "$LEN" -le 512 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }; BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
   val(){ printf '%s\n' "$BODY"|tr '&' '\n'|awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
   OP="$(val op)"; CONFIRM="$(val confirm)"; case "$OP" in validate|render|pac|stop) ;; ca-init) [ "$CONFIRM" = HTTPS_CA_INIT ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;; start|restart) [ "$CONFIRM" = HTTPS_START ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
@@ -153,7 +161,7 @@ if [ "$ACTION" = ads-https-control ]; then
 fi
 
 if [ "$ACTION" = ads-settings ]; then
-  header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }; [ ! -e /opt/var/run/vward/updater.lock ] || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+  header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }; ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; trap console_mutation_leave EXIT
   LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ]&&[ "$LEN" -le 3072 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }; BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
   val(){ printf '%s\n' "$BODY"|tr '&' '\n'|awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
   UNKNOWN="$(printf '%s\n' "$BODY"|tr '&' '\n'|cut -d= -f1|awk '$0!="ENABLED"&&$0!="RUN_MODE"&&$0!="SCHEDULE_INTERVAL_MIN"&&$0!="DYNAMIC_MIN_INTERVAL_SEC"&&$0!="DYNAMIC_MAX_LOAD_PER_CPU_X100"&&$0!="DYNAMIC_MIN_MEM_AVAILABLE_KB"&&$0!="DYNAMIC_MIN_OPT_FREE_KB"&&$0!="DYNAMIC_MAX_CANDIDATES_PER_RUN"&&$0!="AUTO_SOURCE_UPDATE"&&$0!="SOURCE_UPDATE_INTERVAL_HOURS"&&$0!="QUERY_SOURCE"&&$0!="AUTO_RULE_SCOPE"&&$0!="PUBLISH_MODE"&&$0!="AUTO_PUBLISH"&&$0!="confirm"{print;exit}')"; [ -z "$UNKNOWN" ] || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
@@ -164,7 +172,7 @@ if [ "$ACTION" = ads-settings ]; then
 fi
 
 if [ "$ACTION" = ads-control ]; then
-  header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }; [ ! -e /opt/var/run/vward/updater.lock ] || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+  header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }; ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; trap console_mutation_leave EXIT
   LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ]&&[ "$LEN" -le 1024 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }; BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
   val(){ printf '%s\n' "$BODY"|tr '&' '\n'|awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
   OP="$(val op)"; DOMAIN="$(val domain|tr '[:upper:]' '[:lower:]')"; SCOPE="$(val scope)"; [ -n "$SCOPE" ]||SCOPE=exact
@@ -413,10 +421,15 @@ if [ "$ACTION" = "settings" ]; then
         echo '{"ok":false,"error":"method_not_allowed"}'
         exit 0
     }
-    [ ! -e /opt/var/run/vward/updater.lock ] || {
+    ! updater_mutation_busy || {
         echo '{"ok":false,"error":"updater_busy"}'
         exit 0
     }
+    console_mutation_enter || {
+        echo '{"ok":false,"error":"updater_busy"}'
+        exit 0
+    }
+    trap console_mutation_leave EXIT
 
     LENGTH=${CONTENT_LENGTH:-0}
     case "$LENGTH" in ''|*[!0-9]*) LENGTH=0 ;; esac
@@ -984,12 +997,15 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
         echo '{"ok":false,"error":"control_busy"}'
         exit 0
     fi
-    trap 'rm -rf "$LOCK"' EXIT
+    trap 'rm -rf "$LOCK"; console_mutation_leave' EXIT
     trap 'exit 1' HUP INT TERM
 
-    if [ "$ACTION" = control ] && [ -e /opt/var/run/vward/updater.lock ]; then
+    if [ "$ACTION" = control ] && updater_mutation_busy; then
         echo '{"ok":false,"error":"updater_busy"}'
         exit 0
+    fi
+    if [ "$ACTION" = control ]; then
+        console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
     fi
 
     CMD=""; ARG=""; REQUIRED=""; LABEL=""

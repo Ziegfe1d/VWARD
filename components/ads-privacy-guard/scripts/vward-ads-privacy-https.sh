@@ -6,6 +6,9 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo "FAIL: common library not found" >&2; exit 1; }
 . "$LIB"
+ads_admission_enter ads-https
+trap ads_admission_leave EXIT
+trap 'exit 1' HUP INT TERM
 HTTPS_LIB="${VWARD_ADS_HTTPS_LIB:-/opt/share/vward/ads-privacy-guard/https/vward-ads-privacy-https-common.sh}"
 [ -r "$HTTPS_LIB" ] || HTTPS_LIB="$SELF_DIR/../https/vward-ads-privacy-https-common.sh"
 [ -r "$HTTPS_LIB" ] || { echo "FAIL: HTTPS common library not found" >&2; exit 1; }

@@ -232,6 +232,7 @@ quarantine_after_rollback() {
 apply_update() {
     manifest=$1
     package_dir=$2
+    vu_barrier_request || vu_die "$VU_SAFETY_ERROR" "Could not publish the update request"
     vu_runtime_quiesce || vu_die "$VU_SAFETY_ERROR" "Could not quiesce VWARD runtime"
     vu_hard_safety_check "$package_dir" || vu_die "$VU_SAFETY_ERROR" "Pre-barrier safety, space or activity check failed"
     vu_barrier_enter || vu_die "$VU_SAFETY_ERROR" "Could not enter the update barrier"
@@ -337,6 +338,7 @@ case "$command" in
         vu_barrier_recover_stale || vu_die "$VU_SAFETY_ERROR" "Stale or foreign update barrier cannot be recovered safely"
         vu_staging_cleanup_orphans || vu_die "$VU_SAFETY_ERROR" "Cannot clean stale updater staging"
         [ "$barrier_integration_ready" = 1 ] || vu_die "$VU_SAFETY_ERROR" "Recovery barrier integration is disabled"
+        vu_barrier_request || vu_die "$VU_SAFETY_ERROR" "Cannot publish recovery request"
         vu_runtime_quiesce || vu_die "$VU_SAFETY_ERROR" "Cannot quiesce runtime for recovery"
         vu_barrier_enter || vu_die "$VU_SAFETY_ERROR" "Cannot enter recovery barrier"
         phase=$(vu_state_get phase "$VU_JOURNAL_FILE" 2>/dev/null || printf IDLE)

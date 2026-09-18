@@ -67,6 +67,7 @@ def call_ads(body: str, guard: str = "console") -> dict:
         "HTTP_X_VWARD_REQUEST": guard,
         "JQ": jq,
         "VWARD_PROFILE_LIB": "/nonexistent",
+        "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
     }
     result = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], input=body, env=env, text=True, capture_output=True)
     assert result.returncode == 0, result.stderr

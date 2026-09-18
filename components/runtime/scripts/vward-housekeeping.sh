@@ -3,6 +3,14 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+[ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
+. "$VWARD_ADMISSION_LIB"
+vward_admission_enter housekeeping || exit $?
+cleanup() { vward_admission_leave 2>/dev/null || true; }
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
 HOUSE_LOG="/opt/var/log/vward-housekeeping.log"
 
 # Формат:

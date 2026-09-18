@@ -9,6 +9,15 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || { echo "FAIL: common library not found" >&2; exit 1; }
 . "$LIB"
 
+VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+[ -r "$VWARD_ADMISSION_LIB" ] || VWARD_ADMISSION_LIB="$SELF_DIR/../../runtime/lib/vward-runtime-admission.sh"
+[ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
+. "$VWARD_ADMISSION_LIB"
+vward_admission_enter ads-scheduler || exit $?
+cleanup() { vward_admission_leave 2>/dev/null || true; }
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
 ads_mkdirs || ads_die "cannot create component directories"
 ads_load_config
 

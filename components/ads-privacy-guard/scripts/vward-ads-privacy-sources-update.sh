@@ -6,6 +6,7 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo "FAIL: common library not found" >&2; exit 1; }
 . "$LIB"
+ads_admission_enter ads-sources-update
 
 ads_mkdirs || ads_die "cannot create component directories"
 ads_require "$ADS_JQ"; ads_require "$ADS_CURL"; ads_load_config
@@ -13,7 +14,7 @@ ads_require "$ADS_JQ"; ads_require "$ADS_CURL"; ads_load_config
 LOCK="$ADS_STATE/sources-update.lock"
 ads_lock_acquire "$LOCK" "${SOURCE_LOCK_STALE_SEC:-900}" || { echo "SOURCES_UPDATE=ALREADY_RUNNING"; exit 0; }
 WORK="$ADS_STATE/work/sources-update.$$"; mkdir -p "$WORK" || ads_die "cannot create work directory"
-cleanup(){ rm -rf "$WORK"; ads_lock_release "$LOCK"; }
+cleanup(){ rm -rf "$WORK"; ads_lock_release "$LOCK"; ads_admission_leave; }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
