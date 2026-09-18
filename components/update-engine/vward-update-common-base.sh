@@ -255,12 +255,27 @@ vu_owner_status() {
 vu_lock_acquire() {
     mkdir -p "$VU_RUN_DIR" || return 1
     lock=$VU_RUN_DIR/updater.lock
+    reclaim=$VU_RUN_DIR/updater.lock.reclaim
+    [ ! -L "$lock" ] && [ ! -e "$reclaim" ] && [ ! -L "$reclaim" ] || return 1
     if mkdir "$lock" 2>/dev/null; then
         VU_LOCK_TOKEN="$$:$(date +%s):vward-update"
-        printf '%s\n' "$VU_LOCK_TOKEN" > "$lock/owner" || return 1
+        if ! printf '%s\n' "$VU_LOCK_TOKEN" > "$lock/owner"; then
+            rmdir "$lock" 2>/dev/null
+            return 1
+        fi
+        if [ -e "$reclaim" ] || [ -L "$reclaim" ]; then
+            current=$(sed -n '1p' "$lock/owner" 2>/dev/null || :)
+            if [ "$current" = "$VU_LOCK_TOKEN" ]; then
+                rm -f "$lock/owner" 2>/dev/null
+                rmdir "$lock" 2>/dev/null
+            fi
+            VU_LOCK_TOKEN=
+            return 1
+        fi
         VU_LOCK_OWNED=1
         return 0
     fi
+    [ -d "$lock" ] && [ ! -L "$lock" ] || return 1
     [ -r "$lock/owner" ] || return 1
     owner=$(sed -n '1p' "$lock/owner")
     vu_owner_status "$owner"
@@ -268,19 +283,59 @@ vu_lock_acquire() {
     [ "$owner_status" -eq 1 ] || return 1
     case "$lock" in
         */opt/var/run/vward/updater.lock|*/tmp/vward-updater-dryrun.*/run/updater.lock)
+            mkdir "$reclaim" 2>/dev/null || return 1
+            reclaim_token="$$:$(date +%s):vward-update-reclaim"
+            if ! printf '%s\n' "$reclaim_token" > "$reclaim/owner"; then
+                rmdir "$reclaim" 2>/dev/null
+                return 1
+            fi
+            if [ -n "$VU_ROOT_PREFIX" ] && [ -n "${VWARD_TEST_UPDATER_RECLAIM_HOLD:-}" ]; then
+                : > "${VWARD_TEST_UPDATER_RECLAIM_HOLD}.ready"
+                while [ -e "$VWARD_TEST_UPDATER_RECLAIM_HOLD" ]; do sleep 1; done
+            fi
             current=$(sed -n '1p' "$lock/owner" 2>/dev/null || :)
-            [ "$current" = "$owner" ] || return 1
-            rm -f "$lock/owner" || return 1
-            rmdir "$lock" 2>/dev/null || return 1
+            if [ "$current" != "$owner" ]; then
+                rm -f "$reclaim/owner" 2>/dev/null
+                rmdir "$reclaim" 2>/dev/null
+                return 1
+            fi
+            if [ -n "$VU_ROOT_PREFIX" ] && [ "${VWARD_TEST_UPDATER_SUCCESSOR_AFTER_STALE:-0}" = 1 ]; then
+                rm -f "$lock/owner" || return 1
+                rmdir "$lock" 2>/dev/null || return 1
+                mkdir "$lock" 2>/dev/null || return 1
+                printf '%s\n' 'test-successor-owner' > "$lock/owner" || return 1
+            fi
+            current=$(sed -n '1p' "$lock/owner" 2>/dev/null || :)
+            if [ "$current" != "$owner" ]; then
+                rm -f "$reclaim/owner" 2>/dev/null
+                rmdir "$reclaim" 2>/dev/null
+                return 1
+            fi
+            if ! rm -f "$lock/owner" || ! rmdir "$lock" 2>/dev/null; then
+                rm -f "$reclaim/owner" 2>/dev/null
+                rmdir "$reclaim" 2>/dev/null
+                return 1
+            fi
             ;;
         *) return 1 ;;
     esac
     if mkdir "$lock" 2>/dev/null; then
         VU_LOCK_TOKEN="$$:$(date +%s):vward-update"
-        printf '%s\n' "$VU_LOCK_TOKEN" > "$lock/owner" || return 1
+        if ! printf '%s\n' "$VU_LOCK_TOKEN" > "$lock/owner"; then
+            rmdir "$lock" 2>/dev/null
+            rm -f "$reclaim/owner" 2>/dev/null
+            rmdir "$reclaim" 2>/dev/null
+            return 1
+        fi
+        current=$(sed -n '1p' "$reclaim/owner" 2>/dev/null || :)
+        [ "$current" = "$reclaim_token" ] || return 1
+        rm -f "$reclaim/owner" || return 1
+        rmdir "$reclaim" 2>/dev/null || return 1
         VU_LOCK_OWNED=1
         return 0
     fi
+    rm -f "$reclaim/owner" 2>/dev/null
+    rmdir "$reclaim" 2>/dev/null
     return 1
 }
 
