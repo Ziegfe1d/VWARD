@@ -30,6 +30,29 @@ fi
 [ -f "$TARGET/owner" ] || fail "symlink target owner was modified"
 rm -f "$LOCK"
 
+# Special owner files must be rejected before a reader can block on them.
+mkdir "$LOCK"
+mkfifo "$LOCK/owner"
+FIFO_RESULT="$TMP/fifo-result"
+(
+    if vu_lock_acquire; then
+        printf 'accepted\n' > "$FIFO_RESULT"
+    else
+        printf 'rejected\n' > "$FIFO_RESULT"
+    fi
+) &
+FIFO_PID=$!
+sleep 1
+if kill -0 "$FIFO_PID" 2>/dev/null; then
+    kill "$FIFO_PID" 2>/dev/null || :
+    wait "$FIFO_PID" 2>/dev/null || :
+    fail "FIFO owner blocked lock acquisition"
+fi
+wait "$FIFO_PID"
+[ "$(cat "$FIFO_RESULT" 2>/dev/null)" = rejected ] || fail "FIFO owner was accepted"
+rm -f "$LOCK/owner"
+rmdir "$LOCK"
+
 mkdir "$RECLAIM"
 printf 'test-reclaimer\n' > "$RECLAIM/owner"
 if vu_lock_acquire; then

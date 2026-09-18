@@ -276,7 +276,7 @@ vu_lock_acquire() {
         return 0
     fi
     [ -d "$lock" ] && [ ! -L "$lock" ] || return 1
-    [ -r "$lock/owner" ] || return 1
+    [ -f "$lock/owner" ] && [ ! -L "$lock/owner" ] && [ -r "$lock/owner" ] || return 1
     owner=$(sed -n '1p' "$lock/owner")
     vu_owner_status "$owner"
     owner_status=$?
