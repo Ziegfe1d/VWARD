@@ -50,7 +50,8 @@ cleanup()
 {
     rm -rf "$WORK" "$LOCK"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 touch "$OWNED"
 

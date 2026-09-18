@@ -50,7 +50,8 @@ cleanup()
     rm -f "$RUNCFG" "$TARGETS" "$CURRENT_TARGETS"
 }
 
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 
 # Exact FQDN-group parser. Group names are compared as fields, so

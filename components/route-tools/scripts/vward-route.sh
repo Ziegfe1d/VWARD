@@ -27,7 +27,8 @@ cleanup()
     rm -rf "$LOCK"
     rm -f "$RUNCFG"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 log()
 {

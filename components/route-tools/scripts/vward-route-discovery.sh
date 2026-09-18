@@ -55,7 +55,8 @@ cleanup()
     rm -rf "$LOCK"
     rm -f "$RUNCFG" "$KNOWN" "$RECENT"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 # Не мешаем ночному полному аудиту.
 if [ -d /tmp/vward-policy-sync.lock ]; then

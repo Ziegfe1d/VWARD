@@ -32,7 +32,9 @@ ca_init()
     if [ -e "$ADS_HTTPS_CA_KEY" ] || [ -e "$ADS_HTTPS_CA_CERT" ] || [ -e "$ADS_HTTPS_LEAF_KEY" ]; then
         ads_die "CA already exists; refusing to overwrite"
     fi
-    work="$ADS_HTTPS_RUNTIME_DIR/ca-init.$$"; mkdir -p "$work" || ads_die "cannot stage CA"; chmod 0700 "$work"; trap 'rm -rf "$work"' EXIT INT TERM
+    work="$ADS_HTTPS_RUNTIME_DIR/ca-init.$$"; mkdir -p "$work" || ads_die "cannot stage CA"; chmod 0700 "$work"
+    trap 'rm -rf "$work"' EXIT
+    trap 'exit 1' HUP INT TERM
     cat > "$work/ca.cnf" <<'EOC'
 [req]
 prompt = no

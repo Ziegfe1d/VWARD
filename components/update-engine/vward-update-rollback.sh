@@ -48,7 +48,8 @@ rollback_fail() {
 
 if [ "$rollback_internal" != 1 ]; then
     vu_lock_acquire || vu_die "$VU_DEFERRED" "Another updater transaction is active"
-    trap rollback_cleanup EXIT HUP INT TERM
+    trap rollback_cleanup EXIT
+    trap 'exit 1' HUP INT TERM
     vu_barrier_recover_stale || vu_die "$VU_SAFETY_ERROR" "Stale or foreign update barrier cannot be recovered safely"
     vu_staging_cleanup_orphans || vu_die "$VU_SAFETY_ERROR" "Cannot clean stale updater staging"
     [ "$barrier_integration_ready" = 1 ] || vu_die "$VU_SAFETY_ERROR" "Rollback barrier integration is disabled"

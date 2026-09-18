@@ -332,7 +332,8 @@ case "$command" in
     --rollback) exec "$SELF_DIR/vward-update-rollback.sh" ;;
     --recover)
         vu_lock_acquire || vu_die "$VU_DEFERRED" "Another updater transaction is active"
-        trap cleanup EXIT HUP INT TERM
+        trap cleanup EXIT
+        trap 'exit 1' HUP INT TERM
         vu_barrier_recover_stale || vu_die "$VU_SAFETY_ERROR" "Stale or foreign update barrier cannot be recovered safely"
         vu_staging_cleanup_orphans || vu_die "$VU_SAFETY_ERROR" "Cannot clean stale updater staging"
         [ "$barrier_integration_ready" = 1 ] || vu_die "$VU_SAFETY_ERROR" "Recovery barrier integration is disabled"
@@ -360,7 +361,8 @@ esac
 
 [ "$update_enabled" = 1 ] || vu_die "$VU_DEFERRED" "Updater is disabled"
 vu_lock_acquire || vu_die "$VU_DEFERRED" "Another updater process is active"
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 vu_barrier_recover_stale || vu_die "$VU_SAFETY_ERROR" "Stale or foreign update barrier cannot be recovered safely"
 vu_staging_cleanup_orphans || vu_die "$VU_SAFETY_ERROR" "Cannot clean stale updater staging"
 [ "$command" = --dry-run ] || vu_transition CHECKING

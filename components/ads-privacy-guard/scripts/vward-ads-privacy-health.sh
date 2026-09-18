@@ -20,7 +20,9 @@ fi
 QUERY_SOURCE="${QUERY_SOURCE:-auto}"; PUBLISH_MODE="${PUBLISH_MODE:-staged}"
 echo "ENABLED=${ENABLED:-1}"; echo "RUN_MODE=${RUN_MODE:-scheduled}"; echo "QUERY_SOURCE=$QUERY_SOURCE"; echo "PUBLISH_MODE=$PUBLISH_MODE"
 
-API_OK=0; API_TMP="${TMPDIR:-/tmp}/vward-ads-health-api.$$"; trap 'rm -f "$API_TMP"' EXIT INT TERM
+API_OK=0; API_TMP="${TMPDIR:-/tmp}/vward-ads-health-api.$$"
+trap 'rm -f "$API_TMP"' EXIT
+trap 'exit 1' HUP INT TERM
 if [ "$QUERY_SOURCE" != file ] && ads_agh_api_get 'querylog?limit=1&response_status=all' "$API_TMP" >/dev/null 2>&1 && "$ADS_JQ" -e '.data|type=="array"' "$API_TMP" >/dev/null 2>&1; then API_OK=1; fi
 echo "ADGUARD_API=$([ "$API_OK" -eq 1 ] && echo PASS || echo UNAVAILABLE)"
 FILE_OK=0; [ -r "$ADS_QUERYLOG" ] && FILE_OK=1; echo "ADGUARD_QUERYLOG_FILE=$([ "$FILE_OK" -eq 1 ] && echo PASS || echo UNAVAILABLE)"

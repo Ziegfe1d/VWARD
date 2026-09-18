@@ -93,7 +93,8 @@ recover_jobs()
 run_one()
 {
     ads_lock_acquire "$LOCK" "${JOB_LOCK_STALE_SEC:-1800}" || { echo "JOB_WORKER=BUSY"; return 0; }
-    trap 'ads_lock_release "$LOCK"' EXIT INT TERM
+    trap 'ads_lock_release "$LOCK"' EXIT
+    trap 'exit 1' HUP INT TERM
     recover_jobs || ads_die "cannot recover job spool"
     jw_job="$(find "$QUEUED" -type f -name '*.job' 2>/dev/null | sort | sed -n '1p')"
     [ -n "$jw_job" ] || { echo "JOB_WORKER=IDLE"; return 0; }

@@ -14,7 +14,8 @@ LOCK="$ADS_STATE/sources-update.lock"
 ads_lock_acquire "$LOCK" "${SOURCE_LOCK_STALE_SEC:-900}" || { echo "SOURCES_UPDATE=ALREADY_RUNNING"; exit 0; }
 WORK="$ADS_STATE/work/sources-update.$$"; mkdir -p "$WORK" || ads_die "cannot create work directory"
 cleanup(){ rm -rf "$WORK"; ads_lock_release "$LOCK"; }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 SOURCE_TOTAL=0; SOURCE_OK=0; SOURCE_FAILED=0; UPDATED=0; ACTIVE_OK=0; CHECK_OK=0; OFF_COUNT=0
 

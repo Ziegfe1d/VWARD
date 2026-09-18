@@ -15,7 +15,8 @@ case "$QUERY_SOURCE" in auto|api|file) ;; *) ads_die "QUERY_SOURCE must be auto,
 
 read_api() (
     qr_tmp="${TMPDIR:-/tmp}/vward-ads-query-api.$$"
-    trap 'rm -f "$qr_tmp"' EXIT INT TERM
+    trap 'rm -f "$qr_tmp"' EXIT
+    trap 'exit 1' HUP INT TERM
     ads_agh_api_get "querylog?limit=$LINES&response_status=all" "$qr_tmp" || return 1
     "$ADS_JQ" -e '.data | type=="array"' "$qr_tmp" >/dev/null 2>&1 || return 1
     "$ADS_JQ" -r '

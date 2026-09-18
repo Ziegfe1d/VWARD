@@ -43,7 +43,8 @@ if ! ads_lock_acquire "$LOCK" "${PUBLISH_LOCK_STALE_SEC:-300}"; then
     exit 0
 fi
 cleanup(){ rm -rf "$WORK"; ads_lock_release "$LOCK"; }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 STATUS_JSON="$WORK/filtering-status.json"
 ads_agh_api_get "filtering/status" "$STATUS_JSON" || ads_die "AdGuard Home filtering/status API unavailable"

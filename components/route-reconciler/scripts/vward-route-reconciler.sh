@@ -50,7 +50,8 @@ cleanup()
     rm -rf "$LOCK"
     rm -f "$TARGETS"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 
 ndmc -c "show running-config" 2>/dev/null |

@@ -71,7 +71,8 @@ vdc_catalog_add() (
   vdc_ca_file="$(vdc_catalog_path "$vdc_ca_category")"; [ -n "$vdc_ca_file" ] || return 3
   mkdir -p "$(dirname "$vdc_ca_file")" || return 4
   vdc_lock_acquire || return 7
-  trap 'vdc_lock_release' EXIT INT TERM
+  trap 'vdc_lock_release' EXIT
+  trap 'exit 1' HUP INT TERM
   if [ -r "$vdc_ca_file" ] && awk -v d="$vdc_ca_host" '$1==d{f=1}END{exit !f}' "$vdc_ca_file"; then return 0; fi
   vdc_ca_tmp="${vdc_ca_file}.new.$$"; { [ -r "$vdc_ca_file" ] && cat "$vdc_ca_file"; printf '%s\n' "$vdc_ca_host"; } | awk 'NF&&$1!~/^#/' | sort -u > "$vdc_ca_tmp" || { rm -f "$vdc_ca_tmp"; return 5; }
   chmod 0600 "$vdc_ca_tmp" || { rm -f "$vdc_ca_tmp"; return 6; }; mv "$vdc_ca_tmp" "$vdc_ca_file"

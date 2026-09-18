@@ -84,7 +84,8 @@ cleanup()
     ads_lock_release "$LOCK"
     runtime_status idle "" 0 0
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 RAW="$WORK/query.tsv"
 STATS="$WORK/candidates.tsv"

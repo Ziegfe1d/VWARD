@@ -984,7 +984,8 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
         echo '{"ok":false,"error":"control_busy"}'
         exit 0
     fi
-    trap 'rm -rf "$LOCK"' EXIT INT TERM
+    trap 'rm -rf "$LOCK"' EXIT
+    trap 'exit 1' HUP INT TERM
 
     if [ "$ACTION" = control ] && [ -e /opt/var/run/vward/updater.lock ]; then
         echo '{"ok":false,"error":"updater_busy"}'

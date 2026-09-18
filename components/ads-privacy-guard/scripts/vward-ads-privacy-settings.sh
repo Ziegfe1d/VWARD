@@ -105,7 +105,8 @@ cp -p "$ADS_CONFIG" "$BACKUP_DIR/ads-privacy-guard.conf.before" || ads_die "conf
 
 WORK="$ADS_STATE/work/settings.$$"
 mkdir -p "$WORK" || ads_die "cannot create settings workdir"
-trap 'rm -rf "$WORK"' EXIT INT TERM
+trap 'rm -rf "$WORK"' EXIT
+trap 'exit 1' HUP INT TERM
 cp "$ADS_CONFIG" "$WORK/current" || ads_die "cannot stage config"
 
 while [ "$#" -gt 0 ]; do
