@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0-dev.9: Wi-Fi Client Guard foundation
+
+- Добавлен новый канонический компонент `VWARD Wi-Fi Client Guard` только в ветку
+  `dev`; beta-feed и beta runtime не изменяются.
+- Заложен read-only мониторинг `show associations` с нормализацией MAC/AP/RSSI,
+  ограниченной историей сэмплов и фиксацией переходов между 2.4 и 5 ГГц.
+- Добавлен анализатор, который формирует `OK/WARNING` и рекомендации `bind_2g/review`
+  по настраиваемым порогам, не меняя конфигурацию роутера.
+- Добавлен отдельный control-контур только для `bind-2g`, `bind-5g` и `auto`:
+  строгая валидация MAC/Bridge, explicit confirmation, backup running-config,
+  сохранение startup configuration, acceptance и попытка rollback при ошибке.
+- `CONTROL_ENABLED=0` и `AUTO_APPLY=0` являются безопасными значениями по умолчанию;
+  cron и изменяющий Console API пока не подключаются до live read-only acceptance.
+- Component registry, package map, updater allowlist/health profile, Console display
+  mapping, документация и repository consistency checks синхронизированы.
+
 ## 0.2.0-dev.8: Ads & Privacy Guard integration candidate
 
 - Добавлен source/design-кандидат `VWARD Ads & Privacy Guard` с безопасным
