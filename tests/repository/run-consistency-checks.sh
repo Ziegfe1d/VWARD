@@ -40,7 +40,7 @@ do
 done
 
 for ID in platform-core route-engine route-reconciler route-tools tunnel-guard \
-    wan-guard policy-sync runtime console update-engine ads-privacy-guard
+    wan-guard wifi-client-guard policy-sync runtime console update-engine ads-privacy-guard
 do
     grep -Fq "\"id\": \"$ID\"" config/components/component-registry.json ||
         fail "registry component missing: $ID"
@@ -64,6 +64,7 @@ python3 tests/repository/check-device-profile.py || fail "Device profile"
 python3 tests/repository/check-settings-registry.py || fail "Settings registry"
 python3 tests/repository/check-update-schema-registry.py || fail "Updater schema registry"
 python3 tests/repository/check-package-map.py || fail "Signed package map"
+python3 tests/repository/check-wifi-client-guard.py || fail "Wi-Fi Client Guard safety"
 sh tests/repository/check-update-boot-recovery.sh || fail "Updater boot recovery"
 sh tests/repository/check-full-health-profile.sh || fail "Full update health profile"
 python3 tests/repository/check-ads-privacy-settings-registry.py || fail "Ads & Privacy Guard settings registry"
