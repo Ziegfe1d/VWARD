@@ -35,6 +35,17 @@
 - унифицировать карточки, журналы, настройки и диагностику без новых лишних разделов;
 - после функциональной готовности выполнить финальную адаптивную полировку.
 
+## 6. VWARD Wi-Fi Client Guard
+
+- [x] добавить канонический component ID, package ownership и updater allowlist;
+- [x] заложить read-only мониторинг `show associations`, bounded history и анализ переключений;
+- [x] заложить отдельный allowlisted control с backup, acceptance и rollback;
+- [ ] провести read-only acceptance на KN-1913 без изменения Wi-Fi конфигурации;
+- [ ] после acceptance добавить read-only карточку и список клиентов в Console;
+- [ ] только затем подключить подтверждаемое ручное `2.4 / 5 / Auto` через Console;
+- [ ] автоматическое исправление оставить opt-in для конкретных устройств и включать
+  только после отдельного регрессионного цикла.
+
 ## Контрольные ворота
 
 Каждый проход: repository consistency, POSIX/BusyBox syntax, updater simulations,
