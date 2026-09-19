@@ -43,6 +43,17 @@ lighttpd/CGI-панели для KeeneticOS с Entware.
 `vward-wan-guard.sh` выполняет ступенчатую диагностику и восстановление подключения
 `ISP`/физического WAN. `vward-wan-recovery.sh` ограничен обновлением DHCP-клиента.
 
+### VWARD Wi-Fi Client Guard
+
+`vward-wifi-client-monitor.sh` читает только `show associations`, нормализует AP, RSSI,
+скорость и uptime клиентов и сохраняет ограниченную историю в `/opt/var/lib/vward/wifi-client-guard`.
+`vward-wifi-client-analyze.sh` считает переключения диапазонов и слабые 5 ГГц-сэмплы и
+формирует рекомендацию без изменения конфигурации. `vward-wifi-client-control.sh`
+принимает только allowlisted действия `bind-2g`, `bind-5g` и `auto`, валидирует MAC и
+Bridge, создаёт backup, сохраняет Keenetic configuration и проверяет результат. В
+0.2.0-dev.9 автоматическое применение и Console mutation для этого компонента отключены
+до live read-only acceptance на целевом Keenetic.
+
 ### VWARD Runtime
 
 Init-скрипты управляют crond, Adaptive Live, supervisor и веб-службой. Cron запускает
