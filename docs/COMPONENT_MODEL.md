@@ -12,6 +12,7 @@ state и API. Пользовательское имя берётся из compon
 | `route-tools` | VWARD Route Tools | Пробы, resolve, hints и разовые операции |
 | `tunnel-guard` | VWARD Tunnel Guard | Здоровье WireGuard и fail-open |
 | `wan-guard` | VWARD WAN Guard | Диагностика и ограниченное восстановление WAN |
+| `wifi-client-guard` | VWARD Wi-Fi Client Guard | Анализ стабильности Wi-Fi клиентов и безопасное управление диапазоном |
 | `policy-sync` | VWARD Policy Sync | Аудит и синхронизация VPN-политик |
 | `runtime` | VWARD Runtime | Init, cron supervision и housekeeping |
 | `console` | VWARD Console | Web UI, CGI API и lighttpd |
