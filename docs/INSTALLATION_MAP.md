@@ -21,6 +21,7 @@ metadata.
 | `components/policy-sync/scripts/*.sh` | `/opt/bin/<то же имя>` | 0755 |
 | `components/tunnel-guard/scripts/*.sh` | `/opt/bin/<то же имя>` | 0755 |
 | `components/wan-guard/scripts/*.sh` | `/opt/bin/<то же имя>` | 0755 |
+| `components/wifi-client-guard/scripts/*.sh` | `/opt/bin/<то же имя>` | 0755 |
 | `components/runtime/scripts/vward-cron-supervisor.sh` | `/opt/bin/vward-cron-supervisor.sh` | 0755 |
 | `components/runtime/lib/vward-device-profile.sh` | `/opt/lib/vward/vward-device-profile.sh` | 0755 |
 | `components/runtime/init.d/*` | `/opt/etc/init.d/<то же имя>` | 0755 |
@@ -37,6 +38,7 @@ metadata.
 | `web/cgi-bin/api.cgi` | `/opt/share/vward/console/www/cgi-bin/api.cgi` | 0755 |
 | `config/settings/settings-registry.json` | `/opt/share/vward/settings-registry.json` | 0644 |
 | `config/route-engine/*.conf.example` | начальный local config без `.example` | 0644 |
+| `config/wifi-client-guard/*.conf.example` | начальный local config без `.example`, только после read-only acceptance | 0600 |
 | `config/ads-privacy-guard/**.example` | начальный local config без `.example`, только если отсутствует | 0600 |
 | `config/cron/root.crontab` | VWARD entries в root crontab | 0600 |
 | `config/device.conf.example` | `/opt/etc/vward/device.conf` при неоднозначном discovery | 0600 |
