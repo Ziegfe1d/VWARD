@@ -8,6 +8,8 @@ STATE_DIR=${VWARD_UPDATE_STATE_DIR:-/opt/var/lib/vward/updater}
 JOURNAL=${VWARD_UPDATE_JOURNAL:-$STATE_DIR/journal.state}
 FAILED=${VWARD_UPDATE_RECOVERY_FAILED:-$STATE_DIR/boot-recovery.failed}
 LOG=${VWARD_UPDATE_RECOVERY_LOG:-/opt/var/log/vward/updater-recovery.log}
+RUN_DIR=${VWARD_UPDATE_RUN_DIR:-/opt/var/run/vward}
+BOOT_ID_FILE=${VWARD_UPDATE_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}
 
 phase()
 {
@@ -25,8 +27,119 @@ record_failure()
     } > "$tmp" 2>/dev/null && mv "$tmp" "$FAILED" 2>/dev/null || rm -f "$tmp"
 }
 
+boot_id()
+{
+    value=$(sed -n '1p' "$BOOT_ID_FILE" 2>/dev/null || :)
+    printf '%s\n' "$value" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$' || return 1
+    printf '%s\n' "$value"
+}
+
+release_recovery_gate()
+{
+    [ "${RECOVERY_GATE_OWNED:-0}" = 1 ] || return 0
+    current=$(sed -n '1p' "$RECOVERY_GATE/owner" 2>/dev/null || :)
+    [ "$current" = "$RECOVERY_GATE_TOKEN" ] || return 1
+    rm -f "$RECOVERY_GATE/owner" || return 1
+    rmdir "$RECOVERY_GATE" 2>/dev/null || return 1
+    RECOVERY_GATE_OWNED=0
+}
+
+read_reclaim_owner()
+{
+    owner_file=$1
+    [ -f "$owner_file" ] && [ ! -L "$owner_file" ] && [ -r "$owner_file" ] || return 1
+    [ "$(wc -l < "$owner_file" 2>/dev/null | tr -d ' ')" = 1 ] || return 1
+    token=$(sed -n '1p' "$owner_file" 2>/dev/null || :)
+    token_bytes=$(wc -c < "$owner_file" 2>/dev/null | tr -d ' ')
+    [ "$token_bytes" = "$((${#token} + 1))" ] || return 1
+    printf '%s\n' "$token" | LC_ALL=C grep -Eq \
+        '^[A-Za-z0-9][A-Za-z0-9._-]*:[1-9][0-9]*:[0-9]+:vward-update-reclaim$' || return 1
+
+    token_boot=${token%%:*}
+    token_rest=${token#*:}
+    token_pid=${token_rest%%:*}
+    token_rest=${token_rest#*:}
+    token_started=${token_rest%%:*}
+    token_role=${token_rest#*:}
+    [ "$token_role" = vward-update-reclaim ] || return 1
+}
+
+recover_reclaim_gate()
+{
+    reclaim=$RUN_DIR/updater.lock.reclaim
+    RECOVERY_GATE=$RUN_DIR/updater.lock.recovery
+    [ ! -e "$RECOVERY_GATE" ] && [ ! -L "$RECOVERY_GATE" ] || return 1
+    [ ! -e "$reclaim" ] && [ ! -L "$reclaim" ] && return 0
+    mkdir -p "$RUN_DIR" 2>/dev/null || return 1
+    mkdir "$RECOVERY_GATE" 2>/dev/null || return 1
+    RECOVERY_GATE_TOKEN="$$:$(date +%s):vward-update-recovery"
+    if ! printf '%s\n' "$RECOVERY_GATE_TOKEN" > "$RECOVERY_GATE/owner"; then
+        rmdir "$RECOVERY_GATE" 2>/dev/null
+        return 1
+    fi
+    RECOVERY_GATE_OWNED=1
+
+    if ! { [ -d "$reclaim" ] && [ ! -L "$reclaim" ] && \
+        [ "$(find "$reclaim" -mindepth 1 -maxdepth 1 -print 2>/dev/null | wc -l | tr -d ' ')" = 1 ] && \
+        read_reclaim_owner "$reclaim/owner"; }; then
+        release_recovery_gate || :
+        return 1
+    fi
+    original_token=$token
+
+    current_boot=$(boot_id) || { release_recovery_gate || :; return 1; }
+    if [ "$token_boot" = "$current_boot" ]; then
+        release_recovery_gate || :
+        return 1
+    fi
+
+    if [ -n "${VWARD_TEST_RECOVERY_HOLD:-}" ]; then
+        : > "${VWARD_TEST_RECOVERY_HOLD}.ready"
+        while [ -e "$VWARD_TEST_RECOVERY_HOLD" ]; do sleep 1; done
+    fi
+
+    quarantine=$RUN_DIR/updater.lock.reclaim.quarantine.$current_boot.$$
+    owner_hold=$RUN_DIR/updater.lock.recovery.owner.$$
+    if [ -e "$quarantine" ] || [ -L "$quarantine" ] || [ -e "$owner_hold" ] || [ -L "$owner_hold" ]; then
+        release_recovery_gate || :
+        return 1
+    fi
+    mv "$reclaim" "$quarantine" 2>/dev/null || { release_recovery_gate || :; return 1; }
+
+    if ! { [ "${VWARD_TEST_RECOVERY_FAIL_AFTER_QUARANTINE:-0}" != 1 ] && \
+        [ "$(find "$quarantine" -mindepth 1 -maxdepth 1 -print 2>/dev/null | wc -l | tr -d ' ')" = 1 ] && \
+        read_reclaim_owner "$quarantine/owner" && [ "$token" = "$original_token" ]; }; then
+        if [ ! -e "$reclaim" ] && [ ! -L "$reclaim" ] && mv "$quarantine" "$reclaim" 2>/dev/null; then
+            release_recovery_gate || :
+        fi
+        return 1
+    fi
+
+    if ! mv "$quarantine/owner" "$owner_hold" 2>/dev/null; then
+        [ ! -e "$reclaim" ] && [ ! -L "$reclaim" ] && mv "$quarantine" "$reclaim" 2>/dev/null || :
+        release_recovery_gate || :
+        return 1
+    fi
+    if ! rmdir "$quarantine" 2>/dev/null; then
+        if [ ! -e "$quarantine/owner" ] && mv "$owner_hold" "$quarantine/owner" 2>/dev/null && \
+            [ ! -e "$reclaim" ] && [ ! -L "$reclaim" ] && mv "$quarantine" "$reclaim" 2>/dev/null; then
+            release_recovery_gate || :
+        fi
+        return 1
+    fi
+    rm -f "$owner_hold" || return 1
+    release_recovery_gate || return 1
+    printf 'VWARD updater boot recovery: removed old-boot reclaim gate\n'
+}
+
 recover()
 {
+    if ! recover_reclaim_gate; then
+        record_failure 33
+        printf 'VWARD updater boot recovery: unsafe reclaim gate\n' >&2
+        return 33
+    fi
+
     current=$(phase)
     case "$current" in
         CHECKING|VERIFIED|BACKING_UP|INSTALLING|VERIFYING|COMMIT_PREPARED|ROLLING_BACK|RECOVERY_REQUIRED)

@@ -21,7 +21,9 @@ new_root() {
     label=$1
     ROOT=$WORK/root-$label
     mkdir -p "$ROOT/opt/etc/vward" "$ROOT/opt/etc/vward/console" "$ROOT/opt/share/vward" \
-        "$ROOT/opt/bin" "$ROOT/opt/share/vward/console/www/cgi-bin" "$ROOT/opt/var/lib/vward/updater"
+        "$ROOT/opt/bin" "$ROOT/opt/share/vward/console/www/cgi-bin" "$ROOT/opt/var/lib/vward/updater" \
+        "$ROOT/proc/sys/kernel/random"
+    printf 'test-boot-id\n' > "$ROOT/proc/sys/kernel/random/boot_id"
     cp "$WORK/public.pem" "$ROOT/opt/etc/vward/update-public.pem"
     printf '%s\n' '0.1.0-dev' > "$ROOT/opt/share/vward/VERSION"
     printf '%s\n' old > "$ROOT/opt/bin/vward-route.sh"

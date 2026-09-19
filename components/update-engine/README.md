@@ -20,6 +20,8 @@ apply, rollback, runtime quiescing и возобновления служб.
 - `quarantine.state` - запрет unattended retry known-bad update;
 - `pending/` - verified update до apply, supersede или quarantine;
 - stale locks/markers восстанавливаются только при доказанно мёртвом owner;
+- reclaim gate содержит `boot_id` и после аварийного завершения снимается только
+  boot-recovery при доказанном переходе между загрузками;
 - malformed или foreign ownership обрабатывается fail-closed.
 
 ## Расписание

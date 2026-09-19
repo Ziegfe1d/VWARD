@@ -22,6 +22,7 @@ VU_LOG_DIR=${VWARD_UPDATE_LOG_DIR:-${VU_ROOT_PREFIX}/opt/var/log/vward}
 VU_BACKUP_DIR=${VWARD_UPDATE_BACKUP_DIR:-${VU_ROOT_PREFIX}/opt/var/backups/vward}
 VU_RUN_DIR=${VWARD_UPDATE_RUN_DIR:-${VU_ROOT_PREFIX}/opt/var/run/vward}
 VU_STAGING_DIR=${VWARD_UPDATE_STAGING_DIR:-${VU_ROOT_PREFIX}/opt/var/cache/vward/updater}
+VU_BOOT_ID_FILE=${VWARD_UPDATE_BOOT_ID_FILE:-${VU_ROOT_PREFIX}/proc/sys/kernel/random/boot_id}
 
 update_enabled=0
 auto_apply=0
@@ -231,6 +232,15 @@ vu_owner_token_valid() {
     printf '%s\n' "$1" | grep -Eq '^[1-9][0-9]*:[0-9]+:vward-update$'
 }
 
+vu_boot_id() {
+    boot_id=${VWARD_UPDATE_BOOT_ID:-}
+    if [ -z "$boot_id" ] && [ -r "$VU_BOOT_ID_FILE" ]; then
+        boot_id=$(sed -n '1p' "$VU_BOOT_ID_FILE" 2>/dev/null || :)
+    fi
+    printf '%s\n' "$boot_id" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$' || return 1
+    printf '%s\n' "$boot_id"
+}
+
 vu_pid_start() {
     proc_pid=$1
     case "$proc_pid" in ''|*[!0-9]*) return 1 ;; esac
@@ -256,14 +266,16 @@ vu_lock_acquire() {
     mkdir -p "$VU_RUN_DIR" || return 1
     lock=$VU_RUN_DIR/updater.lock
     reclaim=$VU_RUN_DIR/updater.lock.reclaim
-    [ ! -L "$lock" ] && [ ! -e "$reclaim" ] && [ ! -L "$reclaim" ] || return 1
+    recovery=$VU_RUN_DIR/updater.lock.recovery
+    [ ! -L "$lock" ] && [ ! -e "$reclaim" ] && [ ! -L "$reclaim" ] && \
+        [ ! -e "$recovery" ] && [ ! -L "$recovery" ] || return 1
     if mkdir "$lock" 2>/dev/null; then
         VU_LOCK_TOKEN="$$:$(date +%s):vward-update"
         if ! printf '%s\n' "$VU_LOCK_TOKEN" > "$lock/owner"; then
             rmdir "$lock" 2>/dev/null
             return 1
         fi
-        if [ -e "$reclaim" ] || [ -L "$reclaim" ]; then
+        if [ -e "$reclaim" ] || [ -L "$reclaim" ] || [ -e "$recovery" ] || [ -L "$recovery" ]; then
             current=$(sed -n '1p' "$lock/owner" 2>/dev/null || :)
             if [ "$current" = "$VU_LOCK_TOKEN" ]; then
                 rm -f "$lock/owner" 2>/dev/null
@@ -284,7 +296,11 @@ vu_lock_acquire() {
     case "$lock" in
         */opt/var/run/vward/updater.lock|*/tmp/vward-updater-dryrun.*/run/updater.lock)
             mkdir "$reclaim" 2>/dev/null || return 1
-            reclaim_token="$$:$(date +%s):vward-update-reclaim"
+            reclaim_boot_id=$(vu_boot_id) || {
+                rmdir "$reclaim" 2>/dev/null
+                return 1
+            }
+            reclaim_token="$reclaim_boot_id:$$:$(date +%s):vward-update-reclaim"
             if ! printf '%s\n' "$reclaim_token" > "$reclaim/owner"; then
                 rmdir "$reclaim" 2>/dev/null
                 return 1

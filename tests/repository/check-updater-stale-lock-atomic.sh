@@ -10,14 +10,25 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 VWARD_ROOT_PREFIX="$TMP/root"
 VWARD_UPDATE_CONFIG="$TMP/update.conf"
+VWARD_UPDATE_BOOT_ID="test-boot-id"
 SELF_DIR="$ROOT/components/update-engine"
-export VWARD_ROOT_PREFIX VWARD_UPDATE_CONFIG SELF_DIR
+export VWARD_ROOT_PREFIX VWARD_UPDATE_CONFIG VWARD_UPDATE_BOOT_ID SELF_DIR
 mkdir -p "$VWARD_ROOT_PREFIX/opt/var/run/vward"
 : > "$VWARD_UPDATE_CONFIG"
 . "$COMMON"
 
 LOCK="$VU_RUN_DIR/updater.lock"
 RECLAIM="$VU_RUN_DIR/updater.lock.reclaim"
+RECOVERY="$VU_RUN_DIR/updater.lock.recovery"
+
+mkdir "$RECOVERY"
+printf 'boot-recovery\n' > "$RECOVERY/owner"
+if vu_lock_acquire; then
+    fail "acquire bypassed an active boot-recovery gate"
+fi
+[ ! -e "$LOCK" ] || fail "lock was published while boot recovery was active"
+rm -f "$RECOVERY/owner"
+rmdir "$RECOVERY"
 
 TARGET="$TMP/external-lock"
 mkdir "$TARGET"
@@ -104,6 +115,8 @@ FIRST_PID=$!
 WAITED=0
 while [ ! -e "$HOLD.ready" ] && [ "$WAITED" -lt 5 ]; do sleep 1; WAITED=$((WAITED + 1)); done
 [ -e "$HOLD.ready" ] || fail "first reclaimer did not acquire reclaim gate"
+TOKEN_OK=1
+grep -q '^test-boot-id:[1-9][0-9]*:[0-9][0-9]*:vward-update-reclaim$' "$RECLAIM/owner" || TOKEN_OK=0
 if VWARD_TEST_UPDATER_SUCCESSOR_AFTER_STALE=0 vu_lock_acquire; then
     fail "second reclaimer entered through the reclaim gate"
 fi
@@ -116,6 +129,7 @@ while [ ! -e "$RESULT" ] && [ "$WAITED" -lt 5 ]; do sleep 1; WAITED=$((WAITED + 
 [ "$(cat "$RESULT" 2>/dev/null)" = acquired ] || fail "elected reclaimer did not acquire lock"
 : > "$RELEASE"
 wait "$FIRST_PID"
+[ "$TOKEN_OK" -eq 1 ] || fail "reclaim owner token does not bind ownership to boot_id"
 [ ! -e "$LOCK" ] || fail "elected owner did not release lock"
 [ ! -e "$RECLAIM" ] || fail "reclaim gate remains after successful acquisition"
 

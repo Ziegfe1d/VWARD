@@ -12,6 +12,13 @@ VERIFYING, COMMIT_PREPARED, ROLLING_BACK и RECOVERY_REQUIRED передаютс
 /opt/var/log/vward/updater-recovery.log. Проверки подписи и целостности при
 этом не отключаются.
 
+Boot hook также проверяет `/opt/var/run/vward/updater.lock.reclaim`. Валидный
+reclaim-токен содержит `boot_id`, PID, время создания и фиксированную роль. Gate
+от предыдущей загрузки атомарно переименовывается в локальный quarantine и
+удаляется только после повторной проверки token. Same-boot token, неизвестный
+формат, дополнительные файлы и символические ссылки не изменяются: recovery
+завершается fail-closed и сохраняет `boot-recovery.failed`.
+
 До замены сохраняются только затрагиваемые program files. Backup index содержит path,
 mode и SHA-256. Rollback проверяет index, metadata и payload перед восстановлением,
 а затем проверяет восстановленные hashes/modes.
