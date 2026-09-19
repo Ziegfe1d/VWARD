@@ -1,0 +1,19 @@
+# VWARD Wi-Fi Client Guard local configuration
+# This file is intentionally NOT auto-created by a signed package.
+
+ENABLED=0
+CONTROL_ENABLED=0
+AUTO_APPLY=0
+
+# Must be confirmed by read-only discovery on the target Keenetic before enabling control.
+HOME_BRIDGE=Bridge0
+
+# AP-name classification used only for analysis. Empty/unknown matches remain UNKNOWN.
+AP_2G_PATTERN='(^|/)AccessPoint$|WifiMaster0'
+AP_5G_PATTERN='AccessPoint_5G|WifiMaster1'
+
+SAMPLE_RETENTION_SEC=172800
+WINDOW_SEC=86400
+BAND_SWITCH_WARN=20
+WEAK_5G_SAMPLE_WARN=5
+WEAK_5G_RSSI=-75
