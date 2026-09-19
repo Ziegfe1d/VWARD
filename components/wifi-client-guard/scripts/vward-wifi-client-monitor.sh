@@ -67,7 +67,8 @@ cleanup()
 {
     rm -f "$RAW" "$PARSED" "$CURRENT_NEW" "$STATE_DIR/samples.prune.$$" "$STATE_DIR/events.prune.$$"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 73' HUP INT TERM
 
 ndmc -c 'show associations' > "$RAW" 2>&1 || { log ERROR "show associations failed"; exit 1; }
 
