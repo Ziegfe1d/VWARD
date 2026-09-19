@@ -20,6 +20,9 @@ tunnel-guard	components/tunnel-guard/scripts/vward-tunnel-health.sh	/opt/bin/vwa
 tunnel-guard	components/tunnel-guard/scripts/vward-tunnel-guard.sh	/opt/bin/vward-tunnel-guard.sh	0755
 wan-guard	components/wan-guard/scripts/vward-wan-guard.sh	/opt/bin/vward-wan-guard.sh	0755
 wan-guard	components/wan-guard/scripts/vward-wan-recovery.sh	/opt/bin/vward-wan-recovery.sh	0755
+wifi-client-guard	components/wifi-client-guard/scripts/vward-wifi-client-monitor.sh	/opt/bin/vward-wifi-client-monitor.sh	0755
+wifi-client-guard	components/wifi-client-guard/scripts/vward-wifi-client-analyze.sh	/opt/bin/vward-wifi-client-analyze.sh	0755
+wifi-client-guard	components/wifi-client-guard/scripts/vward-wifi-client-control.sh	/opt/bin/vward-wifi-client-control.sh	0755
 policy-sync	components/policy-sync/scripts/vward-policy-chain.sh	/opt/bin/vward-policy-chain.sh	0755
 policy-sync	components/policy-sync/scripts/vward-policy-audit.sh	/opt/bin/vward-policy-audit.sh	0755
 policy-sync	components/policy-sync/scripts/vward-policy-reconcile.sh	/opt/bin/vward-policy-reconcile.sh	0755
