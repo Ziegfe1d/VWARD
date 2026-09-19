@@ -73,7 +73,7 @@ a5e3cfe1b67be2162028de744c9d2798c579c5fe1d92f7257d240e424b21a334  components/wan
 84483ba159d501ec29cc5a38f1e0287911679b684d6f4597d86ec18bc443be87  components/wan-guard/scripts/vward-wan-recovery.sh
 d04f820015c546028d4fcf861ad9275d3272a07d2ccbb711cd53d288810e6fa0  components/wifi-client-guard/scripts/vward-wifi-client-analyze.sh
 91c5659137d3637af92fb5036e0fe00d6202a04a4e6f600043652c368c0ad5a6  components/wifi-client-guard/scripts/vward-wifi-client-control.sh
-342b3ee1a8ac51b5bbeb6deb20f74d1e59972761727f25d9824ab56f32362e03  components/wifi-client-guard/scripts/vward-wifi-client-monitor.sh
+0562e060dbd0557a4cf6cfe1ec23a2a7b7db4e83ac6113eb5ce8f939718657b4  components/wifi-client-guard/scripts/vward-wifi-client-monitor.sh
 a9f5f952696eea4ecf54032d3c9177b9227e6886d01ac08bd6facb9adf5a61c5  config/ads-privacy-guard/ads-privacy-guard.conf.example
 8cd293b4f378579925f007f12aafe7ffc71d2e62d7f24067f996b8c532eb0184  config/ads-privacy-guard/allowlist.tsv.example
 8fc7241f885aacb21b266acea644eda293e4b9c9fadf38ab75d78c06d43c9724  config/ads-privacy-guard/client-profiles.json.example
