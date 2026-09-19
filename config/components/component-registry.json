@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "VWARD Platform",
-  "platform_version": "0.2.0-dev.8",
+  "platform_version": "0.2.0-dev.9",
   "component_version_policy": "platform-release",
   "components": [
     {
@@ -86,6 +86,22 @@
       "runtime_targets": [
         "/opt/bin/vward-wan-guard.sh",
         "/opt/bin/vward-wan-recovery.sh"
+      ]
+    },
+    {
+      "id": "wifi-client-guard",
+      "name": "VWARD Wi-Fi Client Guard",
+      "name_ru": "Контроль Wi-Fi клиентов VWARD",
+      "legacy_ids": [],
+      "update_method": "signed-package",
+      "health_profile": "wifi-client-guard",
+      "depends_on": [
+        "runtime"
+      ],
+      "runtime_targets": [
+        "/opt/bin/vward-wifi-client-monitor.sh",
+        "/opt/bin/vward-wifi-client-analyze.sh",
+        "/opt/bin/vward-wifi-client-control.sh"
       ]
     },
     {
