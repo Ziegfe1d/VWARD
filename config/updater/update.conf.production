@@ -7,7 +7,7 @@ auto_critical=1
 auto_important=1
 auto_routine=1
 
-manifest_url=https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/update-manifest.json
+manifest_url=https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/update-manifest.json
 public_key_file=/opt/etc/vward/update-public.pem
 channel=dev
 
