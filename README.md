@@ -108,6 +108,7 @@ apply/rollback/service-resume acceptance на целевом устройств�
 - [Безопасность обновлений](docs/UPDATE_SECURITY.md)
 - [Идентификация и восстановление ключа подписи](docs/SIGNING_KEY_RECOVERY.md)
 - [Политика веток и версий](docs/BRANCH_POLICY.md)
+- [Единый план от Dev до Final](docs/MASTER_PLAN_0.2_TO_FINAL.md)
 - [План разработки 0.2.0-dev](docs/DEV_0.2_PLAN.md)
 - [Дорожная карта](docs/ROADMAP.md)
 

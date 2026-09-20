@@ -4,17 +4,23 @@
 
 - исходное рабочее состояние импортировано в каноническое дерево;
 - определены границы source/runtime/config/state;
-- VWARD Update Engine с подписанным feed прошёл live-router acceptance;
+- VWARD Update Engine прошёл live-router acceptance; новый Dev package/feed ещё не
+  выпущен;
 - добавлена компонентная VWARD Console с allowlisted настройками updater;
 - локальные, сгенерированные и чувствительные данные исключены из Git.
 
+## Текущий P0-блокер
+
+`updates/dev/update-manifest.json` содержит исторический `0.1.7-beta` и не
+соответствует исходникам `0.2.0-dev.9`. До подготовки настоящего signed candidate
+установка Dev на роутер запрещена.
+
 ## Следующий этап
 
-- параметризовать device-specific значения без изменения рабочего поведения;
-- создать проверяемый first-install path с discovery и сохранением local config;
-- расширить BusyBox/static и Console regression-тесты;
-- завершить унификацию пользовательских имён компонентов;
-- развивать настройки только через узкие транзакционные API.
+- закрыть P0 выпускного контура;
+- выполнить read-only и manual acceptance Wi-Fi Client Guard на KN-1913;
+- завершить BusyBox/Entware, Console/API, lock/temp-file и data-plane проверки;
+- затем пройти RC1 gate.
 
 Высокорисковое переименование runtime-файлов, init-команд и state paths отложено до
 отдельной совместимой миграции. Новый release/tag в рамках документационных и UI-правок
@@ -29,5 +35,5 @@
   продолжается в `dev`.
 - Исторические подписанные пакеты `0.1.x-dev` не переименовываются задним числом.
 
-Подробные правила выпуска: `docs/BRANCH_POLICY.md`. Очерёдность полной разработки:
-`docs/DEV_0.2_PLAN.md`.
+Канонический порядок работы: [`MASTER_PLAN_0.2_TO_FINAL.md`](MASTER_PLAN_0.2_TO_FINAL.md).
+Остальные документы раскрывают отдельные области, а не заменяют этот план.
