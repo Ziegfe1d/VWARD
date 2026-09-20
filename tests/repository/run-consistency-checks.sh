@@ -11,6 +11,7 @@ REGISTRY_VERSION=$(sed -n 's/.*"platform_version": "\([^"]*\)".*/\1/p' config/co
 [ -n "$VERSION" ] || fail "VERSION is empty"
 [ "$VERSION" = "$REGISTRY_VERSION" ] || fail "VERSION and registry differ"
 grep -Fq "**$VERSION**" README.md || fail "README version differs"
+python3 tests/repository/check-version-synchronization.py || fail "Version synchronization"
 
 for DOC in docs/INSTALL.md docs/INSTALLATION_MAP.md docs/DEPENDENCIES.md docs/CONSOLE.md \
     docs/NAMING_MIGRATION.md docs/UPDATER_ARCHITECTURE.md \
@@ -63,6 +64,7 @@ python3 tests/repository/check-console-security.py || fail "Console security"
 python3 tests/repository/check-device-profile.py || fail "Device profile"
 python3 tests/repository/check-settings-registry.py || fail "Settings registry"
 python3 tests/repository/check-update-schema-registry.py || fail "Updater schema registry"
+python3 tests/repository/check-dev-release-pipeline.py || fail "Dev release pipeline"
 python3 tests/repository/check-package-map.py || fail "Signed package map"
 python3 tests/repository/check-wifi-client-guard.py || fail "Wi-Fi Client Guard safety"
 sh tests/repository/check-update-boot-recovery.sh || fail "Updater boot recovery"

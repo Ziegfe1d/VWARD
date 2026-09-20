@@ -7,7 +7,7 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-VWARD_ADS_VERSION="0.2.0-dev.8"
+VWARD_ADS_VERSION="0.2.0-dev.9"
 
 ADS_ETC="${VWARD_ADS_ETC:-/opt/etc/vward/ads-privacy-guard}"
 ADS_STATE="${VWARD_ADS_STATE:-/opt/var/lib/vward/ads-privacy-guard}"

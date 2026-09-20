@@ -26,7 +26,7 @@ on:
       - .github/workflows/build-dev-release.yml
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: vward-dev-candidate-${{ github.ref }}
@@ -43,7 +43,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq openssl dash
+        run: sudo apt-get update && sudo apt-get install -y jq openssl dash busybox
 
       - name: Validate repository
         shell: bash
@@ -67,7 +67,7 @@ jobs:
           echo "VWARD_OUT=$OUT" >> "$GITHUB_ENV"
           echo "VWARD_ARTIFACT=$(find "$OUT" -maxdepth 1 -name 'vward-*.tar.gz' -type f -print -quit)" >> "$GITHUB_ENV"
 
-      - name: Prepare signed manifest when production key is available
+      - name: Prepare and stage signed dev feed
         if: github.event_name == 'workflow_dispatch'
         shell: bash
         env:
@@ -87,29 +87,26 @@ jobs:
             exit 78
           fi
           chmod 600 "$KEY"
-          private_pub="$(openssl pkey -in "$KEY" -pubout -outform DER | sha256sum | awk '{print $1}')"
-          trusted_pub="$(openssl pkey -pubin -in config/updater/update-public.pem -outform DER | sha256sum | awk '{print $1}')"
-          [ "$private_pub" = "$trusted_pub" ] || { echo "::error::Signing key does not match trusted public key"; exit 31; }
+          VWARD_SIGNING_KEY_FILE="$KEY" bash scripts/prepare-dev-release.sh "$RUNNER_TEMP/vward-release" "$INPUT_SEQUENCE" "$INPUT_MIN_VWARD" --stage
 
-          VERSION="$(sed -n '1p' VERSION)"
-          PACKAGE_SHA="$(jq -r '.package_sha256' "$VWARD_OUT/candidate-metadata.json")"
-          PACKAGE_SIZE="$(jq -r '.package_size' "$VWARD_OUT/candidate-metadata.json")"
-          UNPACKED_SIZE="$(jq -r '.unpacked_size' "$VWARD_OUT/candidate-metadata.json")"
-          COMPONENTS="$(awk -F '\t' '!/^#/ && NF {print $1}' config/components/package-map.tsv | LC_ALL=C sort -u | jq -R . | jq -s .)"
-          PUBLISHED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-          URL="https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/packages/vward-$VERSION.tar.gz"
-          jq -n --arg version "$VERSION" --arg update_id "vward-$VERSION" --argjson sequence "$INPUT_SEQUENCE" \
-            --arg published_at "$PUBLISHED_AT" --arg url "$URL" --arg sha256 "$PACKAGE_SHA" \
-            --argjson size "$PACKAGE_SIZE" --argjson unpacked_size "$UNPACKED_SIZE" \
-            --arg min_vward "$INPUT_MIN_VWARD" --argjson components "$COMPONENTS" \
-            '{schema:1,update_id:$update_id,sequence:$sequence,version:$version,channel:"dev",priority:"ROUTINE",published_at:$published_at,min_updater_version:"1.2.0",package:{url:$url,sha256:$sha256,size:$size,unpacked_size:$unpacked_size},compatibility:{min_vward:$min_vward,max_vward:$version},affected_components:$components,affected_services:[],health_profile:"full",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$VWARD_OUT/signed.json"
-          jq -cS . "$VWARD_OUT/signed.json" > "$VWARD_OUT/signed.canonical.json"
-          openssl pkeyutl -sign -inkey "$KEY" -rawin -in "$VWARD_OUT/signed.canonical.json" -out "$VWARD_OUT/signature.bin"
-          SIGNATURE="$(openssl base64 -A -in "$VWARD_OUT/signature.bin")"
-          jq -n --slurpfile signed "$VWARD_OUT/signed.json" --arg signature "$SIGNATURE" '{signed:$signed[0],signature:$signature}' > "$VWARD_OUT/update-manifest.json"
-          jq -cS '.signed' "$VWARD_OUT/update-manifest.json" > "$VWARD_OUT/verify.canonical.json"
-          jq -r '.signature' "$VWARD_OUT/update-manifest.json" | openssl base64 -d -A > "$VWARD_OUT/verify.signature.bin"
-          openssl pkeyutl -verify -pubin -inkey config/updater/update-public.pem -rawin -in "$VWARD_OUT/verify.canonical.json" -sigfile "$VWARD_OUT/verify.signature.bin"
+      - name: Validate staged signed feed
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          tests/repository/run-consistency-checks.sh
+          tests/run-package-validation.sh
+          sha256sum -c SHA256SUMS
+
+      - name: Publish staged signed feed to dev
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add SHA256SUMS updates/dev scripts/prepare-dev-release.sh scripts/refresh-sha256sums.sh .github/workflows/build-dev-release.yml tests/repository/check-dev-release-pipeline.py tests/repository/run-consistency-checks.sh
+          git diff --cached --quiet && { echo "No feed changes to publish"; exit 0; }
+          git commit -m "publish(dev): signed ${{ inputs.sequence }} candidate"
+          git push origin HEAD:dev
 
       - name: Upload candidate
         uses: actions/upload-artifact@v4
