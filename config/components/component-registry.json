@@ -101,7 +101,8 @@
       "runtime_targets": [
         "/opt/bin/vward-wifi-client-monitor.sh",
         "/opt/bin/vward-wifi-client-analyze.sh",
-        "/opt/bin/vward-wifi-client-control.sh"
+        "/opt/bin/vward-wifi-client-control.sh",
+        "/opt/bin/vward-wifi-client-scheduler.sh"
       ]
     },
     {

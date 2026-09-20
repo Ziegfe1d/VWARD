@@ -11,6 +11,7 @@ expected={
     "/opt/bin/vward-wifi-client-monitor.sh",
     "/opt/bin/vward-wifi-client-analyze.sh",
     "/opt/bin/vward-wifi-client-control.sh",
+    "/opt/bin/vward-wifi-client-scheduler.sh",
 }
 if set(component["runtime_targets"]) != expected:
     raise SystemExit("FAIL: unexpected Wi-Fi Client Guard runtime targets")
@@ -37,8 +38,27 @@ if "mac band" in monitor or "system configuration save" in monitor:
     raise SystemExit("FAIL: monitor must remain read-only")
 
 doc=(root/"docs/WIFI_CLIENT_GUARD.md").read_text(encoding="utf-8")
-for marker in ("AUTO_APPLY=0","cron не добавлен","изменяющий Console API не добавлен"):
+for marker in ("AUTO_APPLY=0","read-only API/экран Console","планировщик"):
     if marker not in doc:
         raise SystemExit(f"FAIL: staged rollout contract missing: {marker}")
+
+scheduler=(root/"components/wifi-client-guard/scripts/vward-wifi-client-scheduler.sh").read_text(encoding="utf-8")
+for marker in ("ENABLED=0", "vward-wifi-client-monitor.sh --once", "vward-wifi-client-analyze.sh --once"):
+    if marker not in scheduler:
+        raise SystemExit(f"FAIL: scheduler marker missing: {marker}")
+
+cron=(root/"config/cron/root.crontab").read_text(encoding="utf-8")
+if "/opt/bin/vward-wifi-client-scheduler.sh" not in cron:
+    raise SystemExit("FAIL: Wi-Fi Client Guard scheduler is not registered in cron")
+
+api=(root/"web/cgi-bin/api.cgi").read_text(encoding="utf-8")
+for marker in ("wifi-data", 'component:\"wifi-client-guard\"', "wifi-control", "WIFI_BIND_2G"):
+    if marker not in api:
+        raise SystemExit(f"FAIL: Console Wi-Fi API marker missing: {marker}")
+
+ui=(root/"web/assets/vward-console.js").read_text(encoding="utf-8")
+for marker in ("loadWifiData", "renderWifiData", "wifi-client-guard"):
+    if marker not in ui:
+        raise SystemExit(f"FAIL: Console Wi-Fi UI marker missing: {marker}")
 
 print("WIFI_CLIENT_GUARD=PASS")

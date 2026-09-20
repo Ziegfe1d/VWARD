@@ -51,8 +51,9 @@ MAC, AP, классифицированный диапазон, RSSI, txrate, up
 - `ENABLED=0`;
 - `CONTROL_ENABLED=0`;
 - `AUTO_APPLY=0`;
-- cron не добавлен;
-- изменяющий Console API не добавлен;
+- планировщик добавлен, но при `ENABLED=0` не вызывает collector и не меняет состояние;
+- read-only API/экран Console доступны для просмотра локального состояния;
+- изменяющий Console API требует `CONTROL_ENABLED=1` и exact confirmation token;
 - beta-ветка и beta-feed не меняются.
 
 ## Следующие ворота
@@ -60,8 +61,8 @@ MAC, AP, классифицированный диапазон, RSSI, txrate, up
 1. На KN-1913 выполнить только read-only `show associations` и проверить фактические
    AP names, RSSI и поведение parser на реальных клиентах.
 2. Включить collector вручную без control и сравнить статистику с журналами Keenetic.
-3. Добавить read-only API/карточку Console.
+3. Проверить read-only API/экран Console на данных реального collector.
 4. Прогнать отдельный manual control acceptance с backup и rollback.
-5. Только после этого разрешать кнопку `2.4 / 5 / Auto` в Console.
+5. Только после этого локально включать `CONTROL_ENABLED=1` и разрешать кнопку `2.4 / 5 / Auto` в Console.
 6. Автоматическое исправление оставить opt-in на уровне конкретного MAC и внедрять
    отдельным этапом.

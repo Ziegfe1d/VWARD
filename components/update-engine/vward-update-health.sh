@@ -55,7 +55,7 @@ case "$profile" in
         required="$VU_ROOT_PREFIX/opt/bin/vward-policy-audit.sh $VU_ROOT_PREFIX/opt/bin/vward-policy-sync.sh"
         ;;
     wifi-client-guard)
-        required="$VU_ROOT_PREFIX/opt/bin/vward-wifi-client-monitor.sh $VU_ROOT_PREFIX/opt/bin/vward-wifi-client-analyze.sh $VU_ROOT_PREFIX/opt/bin/vward-wifi-client-control.sh"
+        required="$VU_ROOT_PREFIX/opt/bin/vward-wifi-client-monitor.sh $VU_ROOT_PREFIX/opt/bin/vward-wifi-client-analyze.sh $VU_ROOT_PREFIX/opt/bin/vward-wifi-client-control.sh $VU_ROOT_PREFIX/opt/bin/vward-wifi-client-scheduler.sh"
         ;;
     runtime)
         required="$VU_ROOT_PREFIX/opt/bin/vward-cron-supervisor.sh $VU_ROOT_PREFIX/opt/etc/init.d/S91vward-route-engine"
