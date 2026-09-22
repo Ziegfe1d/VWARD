@@ -27,30 +27,22 @@ grep -E '\?\.|\?\?|scrollTo\(\{' web/assets/vward-console.js >/dev/null &&
     fail "Console contains incompatible mobile JavaScript"
 
 grep -Fq 'function iconSvg' web/assets/vward-console.js || fail "canonical SVG icon system missing"
-grep -Fq 'componentNames=' web/assets/vward-console.js || fail "component display mapping missing"
-grep -Fq 'id="settings"' web/index.html || fail "safe settings overview missing"
+grep -Fq "{ id: 'settings', title: 'Настройки'" web/assets/vward-console.js || fail "settings section missing"
 grep -Fq 'border-radius:28px' web/assets/vward-console.css || fail "floating mobile toolbar missing"
-grep -Fq 'bottom:max(10px,env(safe-area-inset-bottom))' web/assets/vward-console.css ||
+grep -Fq 'env(safe-area-inset-bottom,0px)' web/assets/vward-console.css ||
     fail "mobile toolbar safe-area handling missing"
-for BINDING in "if(id==='logs')loadLogs(false)" "if(id==='route')loadRouteData(false)" \
-    "if(id==='updater')loadUpdateData(false)" "if(id==='security')loadSecurity(false)" \
-    "loadSettingsData(false)" "renderHelp();setHelp(false);window.scrollTo(0,0)"
-do
-    grep -Fq "$BINDING" web/assets/vward-console.js ||
-        fail "Console navigation binding missing: $BINDING"
-done
 
 for ID in platform-core route-engine route-reconciler route-tools tunnel-guard \
     wan-guard wifi-client-guard policy-sync runtime console update-engine ads-privacy-guard
 do
     grep -Fq "\"id\": \"$ID\"" config/components/component-registry.json ||
         fail "registry component missing: $ID"
-    grep -Fq "'$ID':" web/assets/vward-console.js || fail "Console component mapping missing: $ID"
+    grep -Fq "{ id: '$ID', name: '" web/assets/vward-console.js || fail "Console component mapping missing: $ID"
 done
 
-for LOG_NAME in wan recovery cron routing updater tunnel policy console
+for LOG_NAME in wan recovery cron routing updater tunnel policy console wifi ads
 do
-    grep -Fq "data-log=\"$LOG_NAME\"" web/index.html ||
+    grep -Fq "{ id: '$LOG_NAME', label: '" web/assets/vward-console.js ||
         fail "Console log tab missing: $LOG_NAME"
     grep -Eq "^[[:space:]]*$LOG_NAME\)" web/cgi-bin/api.cgi ||
         fail "Console log allowlist missing: $LOG_NAME"

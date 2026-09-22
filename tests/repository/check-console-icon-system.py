@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Console icons: one registry, one grid, one stroke width, no emoji or one-off SVG."""
+
 import re
 from pathlib import Path
 
@@ -7,28 +9,15 @@ html = (ROOT / "web/index.html").read_text(encoding="utf-8")
 js = (ROOT / "web/assets/vward-console.js").read_text(encoding="utf-8")
 css = (ROOT / "web/assets/vward-console.css").read_text(encoding="utf-8")
 
-assert "const ICON_PATHS=" in js
-assert "function iconSvg(" in js and "function hydrateIcons(" in js
-for obsolete in ("symbolIcons", "function svgIcon(", "function actionIcon("):
-    assert obsolete not in js, obsolete
-for glyph in ("⌂", "↻", "⌁", "◇", "⇄", "◷", "▣", "▱", "≡", "◐", "⚙"):
-    assert glyph not in html + js, glyph
-
-declared = set(re.findall(r"([A-Za-z][A-Za-z0-9]*):'", js.split("function iconSvg", 1)[0]))
-declared.update(re.findall(r"ICON_PATHS\.([A-Za-z][A-Za-z0-9]*)=", js))
-used = set(re.findall(r'data-icon="([A-Za-z][A-Za-z0-9]*)"', html))
-used.update(re.findall(r"'([A-Za-z][A-Za-z0-9]*)'", js.split("const CONTROL_ICONS=", 1)[1].split(";", 1)[0]))
-assert used <= declared, f"icons used without canonical path: {sorted(used - declared)}"
-
-for marker in (
-    "/* Canonical icon and typography system - dev.8 */",
-    "--font-ui:",
-    "--icon-sm:",
-    ".icon-only",
-    ".mobile button.has-icon",
-    ".catalog-group>summary:before{content:\"\"",
-):
-    assert marker in css, marker
-
-assert html.count('viewBox="0 0 24 24"') == 0, "static one-off SVG bypasses canonical registry"
+assert "const ICON_PATHS = {" in js and "function iconSvg(" in js, "canonical icon registry missing"
+declared = set(re.findall(r"^  ([A-Za-z][A-Za-z0-9]*): '", js.split("const ICON_PATHS = {", 1)[1].split("};", 1)[0], re.M))
+used = set(re.findall(r"ico\('([A-Za-z][A-Za-z0-9]*)'", js)) | set(re.findall(r"icon: '([A-Za-z][A-Za-z0-9]*)'", js))
+used |= set(re.findall(r"btn\('[a-z-]+', '([A-Za-z][A-Za-z0-9]*)'", js))
+missing = sorted(used - declared)
+assert not missing, "icons used but not declared: " + ", ".join(missing)
+assert js.count('viewBox="0 0 24 24"') == 1, "icons must be built only by iconSvg"
+assert 'viewBox=' not in html, "static one-off SVG bypasses the icon registry"
+for glyph in ("↗", "⚙", "🔄", "✓", "✕", "☀", "🌙"):
+    assert glyph not in html + js, f"text glyph used instead of an icon: {glyph}"
+assert ".icon{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}" in css, "single icon stroke style missing"
 print("CONSOLE_ICON_SYSTEM=PASS")

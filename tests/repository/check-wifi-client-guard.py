@@ -57,7 +57,7 @@ for marker in ("wifi-data", 'component:\"wifi-client-guard\"', "wifi-control", "
         raise SystemExit(f"FAIL: Console Wi-Fi API marker missing: {marker}")
 
 ui=(root/"web/assets/vward-console.js").read_text(encoding="utf-8")
-for marker in ("loadWifiData", "renderWifiData", "wifi-client-guard"):
+for marker in ("apiGet('wifi-data')", "'wifi-control'", "function wifiClientPage", "WIFI_BIND_2G"):
     if marker not in ui:
         raise SystemExit(f"FAIL: Console Wi-Fi UI marker missing: {marker}")
 

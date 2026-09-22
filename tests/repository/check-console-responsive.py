@@ -1,49 +1,64 @@
 #!/usr/bin/env python3
+"""Console CSS contract: one layer of rules, both themes, phone layout."""
+
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 css = (ROOT / "web/assets/vward-console.css").read_text(encoding="utf-8")
-js = (ROOT / "web/assets/vward-console.js").read_text(encoding="utf-8")
-html = (ROOT / "web/index.html").read_text(encoding="utf-8")
 
-required_css = (
-    "/* Dashboard and settings hierarchy — dev.7 */",
-    "--mobile-nav-h:86px",
-    "env(safe-area-inset-bottom)",
-    ".wide.chart-empty",
-    "grid-template-columns:repeat(7,minmax(0,1fr))",
-    "min-height:35dvh",
-    "@media(max-width:359px)",
-    "/* Final visual polish - dev.8 */",
-    "bottom:calc(var(--mobile-nav-h) + env(safe-area-inset-bottom) + 18px)",
-    ".btn.has-icon .icon",
-    ".vward-group-icon svg",
-)
-for marker in required_css:
-    assert marker in css, marker
 
-assert "classList.toggle('chart-empty',a.length<2)" in js
-assert "График появится после второго замера" in js
-assert "wanActionText" in js
-assert "vward-dashboard" in js
-assert "dashboardOrder" in js and "dashboardHidden" in js
-assert "dashboardView='grid'" in js and "view:dashboardView" in js
-assert "[data-dashboard-view]" in js
-assert "draggable=" in js and "ondrop=" in js
-assert "storage-bar" in js and "storageBar" in js
-assert "data-chart=\"'+d[0]" not in js
-assert "<details class=\"catalog-group\">" in js
-for marker in ("dashboardEdit", "dashboardEditor", "dashboardList", "dashboardReset"):
-    assert f'id="{marker}"' in html
-assert 'data-dashboard-view="grid"' in html
-assert 'data-dashboard-view="list"' in html
-assert 'data-section="updater" data-icon="refresh">Обновления</button>' in html
-assert 'data-section="settings" data-icon="settings">Настройки</button>' in html
-assert "style=" not in html
-assert "onclick=" not in html
-assert "overflow-x:hidden" in css
-assert "grid-template-columns:repeat(2,minmax(0,1fr))" in css
-assert ".cards[data-view=list]" in css
-assert "@media(max-width:359px){.card{min-height:174px}" in css
+def fail(message: str) -> None:
+    raise SystemExit(f"FAIL: {message}")
+
+
+def blocks(text):
+    """Yield (context, selector) for every rule; context is the enclosing @media or ''."""
+    depth, i, context, start = 0, 0, [], 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "{":
+            head = text[start:i].strip()
+            if head.startswith("@"):
+                context.append(head)
+            else:
+                yield (" ".join(context), head)
+                end = text.index("}", i)
+                i, start = end + 1, end + 1
+                continue
+            start = i + 1
+        elif ch == "}":
+            if context:
+                context.pop()
+            start = i + 1
+        i += 1
+
+
+body = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+seen = {}
+for context, selector in blocks(body):
+    for single in (s.strip() for s in selector.split(",")):
+        key = (context, single)
+        seen[key] = seen.get(key, 0) + 1
+duplicates = sorted(f"{c or 'base'}: {s}" for (c, s), n in seen.items() if n > 1 and not c.startswith("@keyframes"))
+# The dark palette is declared twice on purpose: for the OS preference and for the explicit toggle.
+duplicates = [d for d in duplicates if ":root" not in d]
+if duplicates:
+    fail("селектор задан повторно в одном контексте (правьте существующее правило): " + "; ".join(duplicates[:8]))
+
+for marker in (
+    ":root{", '@media (prefers-color-scheme:dark){:root:not([data-theme="light"])', ':root[data-theme="dark"]',
+    "color-scheme:dark", "body{height:100%;margin:0;background:var(--bg)",
+    "@media (min-width:900px)", "@media (max-width:379px)",
+    ".tabbar{position:fixed", "border-radius:28px", "env(safe-area-inset-bottom,0px)",
+    "user-select:none", ".kv-row.stack", ".cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))",
+    "@media (hover:hover)", "@media (prefers-reduced-motion:reduce)", ":focus-visible",
+):
+    if marker not in css:
+        fail(f"нет обязательного правила: {marker}")
+
+colors = re.findall(r"#[0-9a-fA-F]{3,8}\b", body.split("*{box-sizing", 1)[1])
+if len(colors) > 6:
+    fail("цвета заданы вне токенов: " + ", ".join(colors[:6]))
 
 print("CONSOLE_RESPONSIVE=PASS")

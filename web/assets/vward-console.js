@@ -1,90 +1,826 @@
 'use strict';
-const $=id=>document.getElementById(id);
-const ICON_PATHS={home:'<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5M9.5 20v-6h5v6"/>',platform:'<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',refresh:'<path d="M20 7v5h-5"/><path d="M19 12a7 7 0 1 0-2 5"/><path d="m20 7-3-3"/>',wan:'<path d="M4 12h16"/><path d="m8 8-4 4 4 4M16 8l4 4-4 4"/>',shield:'<path d="M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6l8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/>',lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/>',route:'<circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M8 6h4a4 4 0 0 1 4 4v6M6 8v8a2 2 0 0 0 2 2h8"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',console:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12 15h5"/>',storage:'<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',logs:'<path d="M7 5h13M7 12h13M7 19h13"/><circle cx="3.5" cy="5" r=".75"/><circle cx="3.5" cy="12" r=".75"/><circle cx="3.5" cy="19" r=".75"/>',theme:'<path d="M20 15.5A8 8 0 0 1 8.5 4 8 8 0 1 0 20 15.5Z"/>',settings:'<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a8 8 0 0 0-1.8-1L14.4 3h-4.8l-.3 3.1a8 8 0 0 0-1.8 1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 1.8 1l.3 3.1h4.8l.3-3.1a8 8 0 0 0 1.8-1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z"/>',bulb:'<path d="M9 18h6M10 22h4"/><path d="M8.2 14.7A7 7 0 1 1 15.8 14.7C14.7 15.5 14.4 16.2 14.4 17H9.6c0-.8-.3-1.5-1.4-2.3Z"/>',undo:'<path d="M9 7H4V2"/><path d="M4 7a9 9 0 1 1-1 8"/>',save:'<path d="M5 3h12l3 3v15H4V3Z"/><path d="M8 3v6h8V3M8 21v-7h8v7"/>',search:'<circle cx="11" cy="11" r="7"/><path d="m16 16 5 5"/>',publish:'<path d="M12 16V3M7 8l5-5 5 5"/><path d="M5 14v7h14v-7"/>',check:'<path d="m5 12 4 4L19 6"/>',key:'<circle cx="8" cy="12" r="4"/><path d="M12 12h9M17 12v3M20 12v2"/>',play:'<path d="m8 5 11 7-11 7Z"/>',stop:'<rect x="6" y="6" width="12" height="12" rx="1"/>',pause:'<path d="M8 5v14M16 5v14"/>',close:'<path d="m6 6 12 12M18 6 6 18"/>',chevronRight:'<path d="m9 5 7 7-7 7"/>',chevronUp:'<path d="m5 15 7-7 7 7"/>',chevronDown:'<path d="m5 9 7 7 7-7"/>',external:'<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v6H5V6h6"/>',edit:'<path d="M4 20h4l11-11-4-4L4 16v4ZM13 7l4 4"/>',reset:'<path d="M4 7v5h5"/><path d="M5 12a7 7 0 1 0 2-5"/>'};
-function iconSvg(name){return '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">'+(ICON_PATHS[name]||ICON_PATHS.platform)+'</svg>'}
-function hydrateIcons(root=document){const nodes=Array.from(root.querySelectorAll('[data-icon]'));if(root.matches&&root.matches('[data-icon]'))nodes.unshift(root);nodes.forEach(e=>{if(Array.from(e.children).some(c=>c.classList.contains('icon')))return;e.insertAdjacentHTML('afterbegin',iconSvg(e.dataset.icon));e.classList.add('has-icon')})}
-ICON_PATHS.wifi='<path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r=".75"/>';ICON_PATHS.chevronLeft='<path d="m15 5-7 7 7 7"/>';
-ICON_PATHS.grid='<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>';
-ICON_PATHS.list='<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r=".75"/><circle cx="4.5" cy="12" r=".75"/><circle cx="4.5" cy="18" r=".75"/>';
-const CONTROL_ICONS={dashboardEdit:'edit',dashboardReset:'reset',wanCheckBtn:'check',tunnelHealthBtn:'check',routeDataRefresh:'refresh',routeProbeBtn:'search',securityRefresh:'refresh',runDiagnostics:'check',openKeenetic:'external',openAgh:'external',logAll:'check',logReset:'reset',logRefresh:'refresh',logCopy:'save',logSave:'save',logShare:'external',adsProbeBtn:'search',adsRuleAllow:'check',adsRuleBlock:'shield',adsRuleRemove:'undo'};
-for(const [id,name] of Object.entries(CONTROL_ICONS)){const e=$(id);if(e)e.dataset.icon=name}
-document.querySelectorAll('.back').forEach(e=>{e.dataset.icon='chevronLeft';e.textContent=e.textContent.replace(/^←\s*/,'')});
-document.querySelectorAll('[data-log-open]').forEach(e=>e.dataset.icon='logs');
-document.querySelectorAll('[data-update-op]').forEach(e=>e.dataset.icon=({check:'search',apply:'play',retry:'refresh',rollback:'undo',recover:'refresh'})[e.dataset.updateOp]);
-for(const id of ['openKeenetic','openAgh']){const e=$(id);if(e)e.textContent=e.textContent.replace(/\s*↗$/,'')}
-hydrateIcons();
-const M={overview:['Обзор','Состояние платформы и компонентов'],platform:['VWARD Platform','Версии компонентов'],updater:['VWARD Update Engine','Политика обновлений'],wan:['VWARD WAN Guard','Доступность WAN'],tunnel:['VWARD Tunnel Guard','WireGuard и fail-open'],route:['VWARD Route Engine','Адаптивная маршрутизация'],runtime:['VWARD Runtime','Cron и службы'],console:['VWARD Console','Веб-служба и API'],storage:['Хранилище','USB и /opt'],security:['VWARD Security','Сетевой профиль и поверхность доступа'],settings:['Настройки','Параметры и диагностика VWARD'],logs:['Журналы','События компонентов']},componentNames={'platform-core':'VWARD Platform Core','route-engine':'VWARD Route Engine','route-reconciler':'VWARD Route Reconciler','route-tools':'VWARD Route Tools','tunnel-guard':'VWARD Tunnel Guard','wan-guard':'VWARD WAN Guard','policy-sync':'VWARD Policy Sync','runtime':'VWARD Runtime','console':'VWARD Console','update-engine':'VWARD Update Engine','ads-privacy-guard':'VWARD Ads & Privacy Guard','wifi-client-guard':'VWARD Wi-Fi Client Guard'};
-let busy=false,data=null,securityData=null,latency=0,settingsDirty=false,adsDirty=false,adsSnapshot='',activeSection='overview',logAuto=true,logRaw={},logUpdated='',routeDataBusy=false,settingsDataBusy=false,routeData=null,updateData=null,refreshTimer=null,logTimer=null,prefs={theme:'system',compact:false,motion:false,refresh:15,logInterval:30,logCount:200,logWrap:true};const logLabels={wan:'WAN',recovery:'Восстановление',cron:'Задания',routing:'Маршруты',updater:'Обновления',tunnel:'VPN',policy:'Политики',console:'Console'};const H={platform:[],updater:[],wan:[],tunnel:[],route:[],runtime:[],console:[],storage:[]};
-async function apiFetch(url,options={}){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),8000);try{return await fetch(url,{...options,signal:controller.signal})}catch(e){if(e.name==="AbortError")throw Error("Тайм-аут запроса");throw e}finally{clearTimeout(timer)}}
-function txt(id,v){const e=$(id);if(e)e.textContent=v===undefined||v===null||v===''?'-':String(v)}function badge(id,ok,s){const e=$(id);if(e){e.className='pill '+(ok===true?'ok':ok===false?'bad':'warn');e.textContent=s||'-'}}function notify(s){const e=$('toast');e.textContent=s;e.classList.add('show');clearTimeout(window.t);window.t=setTimeout(()=>e.classList.remove('show'),1600)}
-function helpMessage(){const d=data||{},p=d.platform||{},w=d.wan||{},g=d.wg||{},s=d.services||{},c=d.cron||{};switch(activeSection){case'overview':return w.internet===true&&s.adaptive_live_count===1?'Все основные контуры отвечают. Если карточка показывает предупреждение, откройте её для причины и связанных данных.':'Есть отклонение. Откройте карточку с предупреждением и проверьте связанный журнал.';case'updater':return 'Update Engine: '+phaseText(p.phase)+'. Автоприменение '+(p.auto_apply?'включено':'выключено')+'. Здесь меняются только четыре проверенные политики автообновления.';case'wan':return w.internet===true?'WAN доступен, вмешательство не требуется. Последний класс: '+wanClassText(w.class)+'.':'WAN недоступен или нестабилен. Сначала проверьте состояние и журнал WAN; опасных команд восстановления в Console пока нет.';case'tunnel':return (g.interfaces||[]).length?'Обнаружено туннелей: '+(g.interfaces||[]).length+'. Fail-open '+(g.failopen_active?'активен':'не активен')+'. Ключи через Console не передаются.':'WireGuard-туннели сейчас не обнаружены. Проверьте VPN-журнал и состояние Runtime.';case'route':{const rd=routeData||{},dd=rd.domains||{},ii=rd.ip||{};return s.adaptive_live_count===1&&s.tcpdump_count===1?'Adaptive Live работает и наблюдает DNS. Каталог: '+valueOrDash(dd.unique)+' доменов, '+valueOrDash(ii.active_count)+' активных IP-категорий. Обслуживание маршрутов: '+rcText(c.routing_rc)+'.':'Route Engine требует внимания. Проверьте Adaptive Live, наблюдение DNS и журнал маршрутов.';}case'runtime':return s.crond&&s.supervisor?'Планировщик и supervisor работают. Runtime поддерживает фоновые задачи VWARD.':'Один из runtime-компонентов не отвечает. Проверьте crond, supervisor и журнал заданий.';case'logs':return 'Выберите один или несколько источников, используйте поиск, затем скопируйте, сохраните или поделитесь текущим отфильтрованным результатом.';case'security':return 'Показаны фактическая привязка Console, живой сокет и результаты проверки lighttpd. UNKNOWN означает, что факт нельзя подтвердить на этом устройстве.';case'settings':return 'Изменяемые параметры вынесены в Update Engine. Остальные настройки пока показаны только для чтения, пока нет безопасного backend path.';default:return 'Здесь показано фактическое состояние компонента. Управление появляется только для действий с безопасным allowlisted backend path.'}}function renderHelp(){txt('helpTitle',(M[activeSection]&&M[activeSection][0]?M[activeSection][0]+' · подсказка':'Подсказка'));txt('helpText',helpMessage())}function setHelp(open){$('helpPanel').classList.toggle('show',open);$('helpBtn').setAttribute('aria-expanded',open?'true':'false')}$('helpBtn').onclick=()=>setHelp(!$('helpPanel').classList.contains('show'));$('helpClose').onclick=()=>setHelp(false);document.addEventListener('keydown',e=>{if(e.key==='Escape')setHelp(false)});
-function go(id){if(!$(id)||!M[id])return;activeSection=id;document.querySelectorAll('.section').forEach(e=>e.classList.toggle('active',e.id===id));document.querySelectorAll('[data-section]').forEach(e=>{const active=e.dataset.section===id;e.classList.toggle('active',active);if(active)e.setAttribute('aria-current','page');else e.removeAttribute('aria-current')});txt('pageTitle',M[id][0]);txt('pageSub',M[id][1]);if(id==='logs')loadLogs(false);if(id==='route')loadRouteData(false);if(id==='updater')loadUpdateData(false);if(id==='security')loadSecurity(false);if(id==='settings'){loadSettingsData(false);adsFetchData().catch(()=>{});adsHttpsFetch().catch(()=>{})}renderHelp();setHelp(false);window.scrollTo(0,0)}
-document.querySelectorAll('[data-section],[data-go]').forEach(e=>e.onclick=()=>go(e.dataset.section||e.dataset.go));
-function phaseText(x){return ({COMMITTED:'Установлено',IDLE:'Ожидание',CHECKING:'Проверка',VERIFIED:'Проверено',AVAILABLE:'Доступно обновление',APPLYING:'Установка',ROLLING_BACK:'Откат',ROLLED_BACK:'Откат выполнен',RECOVERING:'Восстановление',FAILED:'Ошибка'}[String(x||'').toUpperCase()]||valueOrDash(x))}function wanClassText(x){return ({HEALTHY:'Норма',OK:'Норма',DEGRADED:'Нестабильно',DOWN:'Нет связи',RECOVERY:'Восстановление',UNKNOWN:'Нет данных'}[String(x||'').toUpperCase()]||valueOrDash(x))}function wanActionText(x){return ({NONE:'Действий нет',CHECK:'Проверка',RECOVERY:'Восстановление',REBOOT:'Перезапуск'}[String(x||'').toUpperCase()]||valueOrDash(x))}function rcText(x){return String(x)==='0'?'Норма':(x===undefined||x===null||x===''?'-':'Код '+x)}function valueOrDash(x){return x===undefined||x===null||x===''?'-':x}function esc(x){return String(valueOrDash(x)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function gb(x){return (Number(x)/1048576).toFixed(1)+' ГБ'}function online(x){return ['up','yes','true','running'].includes(String(x||'').toLowerCase())}function stat(a){return a.map(x=>'<div class="stat"><span>'+esc(x[0])+'</span><b>'+esc(x[1])+'</b></div>').join('')}
-const defs=[['platform','platform','VWARD Platform','платформа и компоненты'],['updater','refresh','VWARD Update','подписанные обновления'],['wan','wan','VWARD WAN','доступность интернета'],['tunnel','shield','VWARD VPN','WireGuard и fail-open'],['route','route','VWARD Routes','адаптивные маршруты'],['runtime','clock','VWARD Runtime','cron и службы'],['console','console','VWARD Console','веб-служба и API'],['storage','storage','Хранилище','USB и /opt']];
-const dashboardDefault=defs.map(d=>d[0]);let dashboardOrder=dashboardDefault.slice(),dashboardHidden=[],dashboardView='grid';try{const saved=JSON.parse(localStorage.getItem('vward-dashboard')||'{}'),valid=Array.isArray(saved.order)&&saved.order.length===dashboardDefault.length&&dashboardDefault.every(x=>saved.order.includes(x));if(valid)dashboardOrder=saved.order;if(Array.isArray(saved.hidden))dashboardHidden=saved.hidden.filter(x=>dashboardDefault.includes(x));if(['grid','list'].includes(saved.view))dashboardView=saved.view}catch(e){}function saveDashboard(){try{localStorage.setItem('vward-dashboard',JSON.stringify({order:dashboardOrder,hidden:dashboardHidden,view:dashboardView}))}catch(e){}}
-function renderDashboard(){const byId=Object.fromEntries(defs.map(d=>[d[0],d]));$('cards').dataset.view=dashboardView;$('cards').innerHTML=dashboardOrder.filter(id=>!dashboardHidden.includes(id)).map(id=>{const d=byId[id],storage=id==='storage'?'<div class="storage-bar" aria-label="Заполнение хранилища"><i id="storageBar"></i></div>':'';return '<article class="card" draggable="'+(!$('dashboardEditor').hidden)+'" data-go="'+id+'" tabindex="0" role="link" aria-label="Открыть '+d[2]+'"><div class="card-top"><i class="card-icon">'+iconSvg(d[1])+'</i><span class="pill" id="c-'+id+'-p">-</span></div><div class="card-copy"><h3>'+d[2]+'</h3><small>'+d[3]+'</small></div><div class="metric" id="c-'+id+'-m">-</div><div class="metric-sub" id="c-'+id+'-s">Загрузка...</div>'+storage+'<i class="arrow">'+iconSvg('chevronRight')+'</i></article>'}).join('');document.querySelectorAll('.card[data-go]').forEach(e=>{e.onclick=()=>go(e.dataset.go);e.onkeydown=x=>{if(x.key==='Enter'||x.key===' '){x.preventDefault();go(e.dataset.go)}};e.ondragstart=x=>x.dataTransfer.setData('text/plain',e.dataset.go);e.ondragover=x=>x.preventDefault();e.ondrop=x=>{x.preventDefault();const from=x.dataTransfer.getData('text/plain'),to=e.dataset.go;if(from===to)return;dashboardOrder.splice(dashboardOrder.indexOf(from),1);dashboardOrder.splice(dashboardOrder.indexOf(to),0,from);saveDashboard();renderDashboard();renderDashboardEditor();if(data)fill(data,latency)}})}
-function renderDashboardEditor(){const byId=Object.fromEntries(defs.map(d=>[d[0],d]));$('dashboardList').innerHTML=dashboardOrder.map((id,i)=>'<div class="dashboard-row"><label><input type="checkbox" data-dashboard-toggle="'+id+'" '+(dashboardHidden.includes(id)?'':'checked')+'> '+byId[id][2]+'</label><span><button class="btn icon-only" data-icon="chevronUp" data-dashboard-up="'+id+'" aria-label="Поднять"></button><button class="btn icon-only" data-icon="chevronDown" data-dashboard-down="'+id+'" aria-label="Опустить"></button></span></div>').join('');hydrateIcons($('dashboardList'));document.querySelectorAll('[data-dashboard-toggle]').forEach(e=>e.onchange=()=>{const id=e.dataset.dashboardToggle;if(e.checked)dashboardHidden=dashboardHidden.filter(x=>x!==id);else if(dashboardHidden.length<dashboardDefault.length-1)dashboardHidden.push(id);else{e.checked=true;return notify('Нужно оставить хотя бы одну карточку')}saveDashboard();renderDashboard();if(data)fill(data,latency)});function move(id,delta){const i=dashboardOrder.indexOf(id),j=i+delta;if(j<0||j>=dashboardOrder.length)return;[dashboardOrder[i],dashboardOrder[j]]=[dashboardOrder[j],dashboardOrder[i]];saveDashboard();renderDashboard();renderDashboardEditor();if(data)fill(data,latency)}document.querySelectorAll('[data-dashboard-up]').forEach(e=>e.onclick=()=>move(e.dataset.dashboardUp,-1));document.querySelectorAll('[data-dashboard-down]').forEach(e=>e.onclick=()=>move(e.dataset.dashboardDown,1))}
-function syncDashboardView(){document.querySelectorAll('[data-dashboard-view]').forEach(e=>{const active=e.dataset.dashboardView===dashboardView;e.classList.toggle('active',active);e.setAttribute('aria-pressed',active?'true':'false')})}renderDashboard();renderDashboardEditor();syncDashboardView();document.querySelectorAll('[data-dashboard-view]').forEach(e=>e.onclick=()=>{dashboardView=e.dataset.dashboardView;saveDashboard();syncDashboardView();renderDashboard();if(data)fill(data,latency)});$('dashboardEdit').onclick=()=>{const open=$('dashboardEditor').hidden;$('dashboardEditor').hidden=!open;$('dashboardEdit').setAttribute('aria-expanded',open?'true':'false');$('dashboardEdit').textContent=open?'Готово':'Настроить карточки';hydrateIcons();renderDashboard();if(data)fill(data,latency)};$('dashboardReset').onclick=()=>{dashboardOrder=dashboardDefault.slice();dashboardHidden=[];dashboardView='grid';saveDashboard();syncDashboardView();renderDashboard();renderDashboardEditor();if(data)fill(data,latency);notify('Карточки восстановлены')};
-function push(k,v){if(Number.isFinite(v)){H[k].push(v);if(H[k].length>40)H[k].shift()}}function draw(k){document.querySelectorAll('[data-chart="'+k+'"]').forEach(e=>{const a=H[k];e.classList.toggle('chart-empty',a.length<2);if(a.length<2){e.innerHTML='<div class="empty">График появится после второго замера</div>';return}const w=300,h=90,p=6,lo=Math.min(...a),hi=Math.max(...a),r=hi-lo||1,pts=a.map((v,i)=>(p+i*(w-2*p)/(a.length-1))+','+(h-p-(v-lo)*(h-2*p)/r)).join(' ');e.innerHTML='<svg class="spark" viewBox="0 0 300 90" preserveAspectRatio="none"><line x1="0" y1="84" x2="300" y2="84" stroke="var(--line)"/><polyline points="'+pts+'" fill="none" stroke="var(--blue)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>'})}
-function interfaceState(x){return x&&(x.link||x.connected||x.state)}function renderTunnelSelector(wi,g){const sel=$('tunnelSelect'),prev=sel.value,items=Array.isArray(wi)?wi:[];sel.innerHTML=items.length?items.map(x=>'<option value="'+esc(x.name)+'">'+esc(x.description||x.name)+'</option>').join(''):'<option value="">Туннели не найдены</option>';if(items.some(x=>x.name===prev))sel.value=prev;const x=items.find(v=>v.name===sel.value)||items[0];if(!x){$('tunnelSelectedStats').innerHTML='<div class="empty">WireGuard-интерфейсы не обнаружены</div>';return}const managed=x.name===g.managed_device;$('tunnelSelectedStats').innerHTML=stat([['Интерфейс',x.name],['Описание',x.description||'-'],['Состояние',online(interfaceState(x))?'В сети':'Не в сети'],['Link',valueOrDash(x.link)],['Connected',valueOrDash(x.connected)],['VWARD Tunnel Guard',managed?'Управляемый туннель':'Только наблюдение'],['Fail-open',managed?(g.failopen_active?'Активен':'Не активен'):'Не относится']])}function fill(d,ms){data=d;latency=ms;const p=d.platform||{},w=d.wan||{},g=d.wg||{},s=d.services||{},c=d.cron||{},z=d.storage||{},com=p.components||{},wi=Array.isArray(g.interfaces)?g.interfaces:[],tn=wi.length,t=wi.filter(x=>online(interfaceState(x))).length,rt=s.crond&&s.supervisor&&s.adaptive_live_count===1&&s.tcpdump_count===1,up=p.phase==='COMMITTED'||p.phase==='IDLE',pct=z.total_kb?100*z.used_kb/z.total_kb:0;
-$('liveDot').className='dot ok';txt('liveText','LIVE');txt('sideVersion','VWARD '+p.version);txt('heroTitle',w.internet===true&&rt?'Всё работает штатно':'Есть отклонения');txt('heroSub','VWARD '+p.version+' · '+phaseText(p.phase)+' · API '+ms+' мс');
-const C={platform:[up,phaseText(p.phase),p.version,Object.keys(com).length+' компонентов'],updater:[p.update_enabled,p.auto_apply?'Авто':'Ручной',phaseText(p.phase),'№ '+valueOrDash(p.last_sequence)+' · слот '+valueOrDash(p.active_slot)],wan:[w.internet===true,wanClassText(w.class),w.internet===true?'В сети':'Нет связи',w.address||'IPv4 отсутствует'],tunnel:[tn>0&&t===tn,t+' из '+tn,t+' / '+tn,g.failopen_active?'fail-open активен':'fail-open не активен'],route:[String(c.routing_rc)==='0','RC '+valueOrDash(c.routing_rc),s.adaptive_live_count===1?'LIVE':'STOP','PID '+valueOrDash(s.adaptive_live_pid)+' · tcpdump '+valueOrDash(s.tcpdump_count)],runtime:[rt,rt?'Норма':'Внимание',rt?'Работает':'Проверить','crond '+(s.crond?'on':'off')+' · supervisor '+(s.supervisor?'on':'off')],console:[true,'LIVE',ms+' мс','lighttpd PID '+valueOrDash(s.console_pid)],storage:[pct<90,pct.toFixed(1)+'%',gb(z.free_kb),'свободно · '+z.filesystem]};Object.entries(C).forEach(([k,v])=>{badge('c-'+k+'-p',v[0],v[1]);txt('c-'+k+'-m',v[2]);txt('c-'+k+'-s',v[3])});
-const storageBar=$('storageBar');if(storageBar)storageBar.style.width=Math.max(0,Math.min(100,pct))+'%';badge('platformPill',up,phaseText(p.phase));$('platformStats').innerHTML=stat([['Версия',p.version],['ID обновления',p.installed_update_id],['Последовательность',p.last_sequence],['Максимальная принятая',p.highest_seen_sequence],['Активный слот',p.active_slot],['Последняя проверка',p.last_health_check]]);$('componentList').innerHTML=Object.keys(com).length?Object.entries(com).map(([k,v])=>'<div class="row"><b>'+esc(componentNames[k]||k)+'<small>'+esc(k)+'</small></b><span>'+esc(v.release)+'</span><span class="pill '+(v.health==='PASS'?'ok':'warn')+'">'+esc(v.health)+'</span></div>').join(''):'<div class="empty">История компонента ещё не записана</div>';
-badge('updaterPill',p.update_enabled,p.update_enabled?'Включён':'Выключен');$('updaterStats').innerHTML=stat([['Состояние',phaseText(p.phase)],['Канал',p.channel],['Безопасное окно',p.safe_window],['Интервал',Math.round((p.check_interval_seconds||0)/60)+' мин'],['Барьер',p.barrier_ready?'Готов':'Не готов'],['Слот',p.active_slot]]);renderSettings(p);
-badge('wanPill',w.internet===true,wanClassText(w.class));$('wanStats').innerHTML=stat([['Состояние',wanClassText(w.class)],['Режим',valueOrDash(w.mode)],['Последнее действие',wanActionText(w.action)],['IPv4',w.address],['Шлюз',w.gateway],['Восстановление',String(valueOrDash(w.recovery_stage))+' · попыток '+String(valueOrDash(w.recovery_count))]]);
-badge('tunnelPill',tn>0&&t===tn,t+' из '+tn);$('tunnelStats').innerHTML=stat((wi.length?wi.map(x=>[x.name||'WireGuard',online(interfaceState(x))?'В сети':'Не в сети']):[['WireGuard','Не найден']]).concat([['Неудачных проверок подряд',valueOrDash(g.down_streak)],['Fail-open активен',g.failopen_active?'Да':'Нет']]));renderTunnelSelector(wi,g);
-badge('routePill',s.adaptive_live_count===1&&s.tcpdump_count===1,'Работает');$('routeStats').innerHTML=stat([['Adaptive Live PID',s.adaptive_live_pid],['Процессов Adaptive Live',s.adaptive_live_count],['Наблюдение DNS',s.tcpdump_count===1?'Работает':'Остановлено'],['Обслуживание маршрутов',rcText(c.routing_rc)],['Последний запуск',c.routing_last]]);
-badge('runtimePill',rt,rt?'Норма':'Внимание');$('runtimeStats').innerHTML=stat([['Планировщик crond',s.crond?'Работает':'Остановлен'],['Supervisor',s.supervisor?'Работает':'Остановлен'],['AdGuard Home',s.adguard?'Работает':'Остановлен'],['Проверка WAN',rcText(c.guardian_rc)],['Проверка VPN',rcText(c.wg_rc)],['Маршрутизация',rcText(c.routing_rc)]]);
-$('consoleStats').innerHTML=stat([['Версия',p.version],['PID lighttpd',s.console_pid],['Адрес',location.host],['API','Работает · тот же источник'],['Ответ API',ms+' мс'],['Безопасность','Разрешённые действия']]);badge('storagePill',pct<90,pct.toFixed(1)+'%');$('storageStats').innerHTML=stat([['Всего',gb(z.total_kb)],['Использовано',gb(z.used_kb)],['Свободно',gb(z.free_kb)],['Файловая система',z.filesystem]]);
-$('settingsDevice').innerHTML=stat([['Модель',d.router&&d.router.model],['KeeneticOS',d.router&&d.router.version],['Версия VWARD',p.version],['Файловая система',z.filesystem]]);$('settingsNetwork').innerHTML=stat([['WAN',w.internet===true?'В сети':'Нет связи'],['IPv4',w.address],['WireGuard',t+' из '+tn],['Маршрутизация',String(c.routing_rc)==='0'?'Норма':'Проверить']]);$('settingsUpdate').innerHTML=stat([['Канал',p.channel],['Состояние',phaseText(p.phase)],['Автоприменение',p.auto_apply?'Включено':'Выключено'],['Активный слот',p.active_slot]]);if(!$('settingsDiagnostics').querySelector('.diag-list'))$('settingsDiagnostics').innerHTML=stat([['API',ms+' мс'],['crond',s.crond?'Работает':'Остановлен'],['Supervisor',s.supervisor?'Работает':'Остановлен'],['Свободно',gb(z.free_kb)]]);
-const vals={platform:Object.values(com).length?Object.values(com).filter(x=>x.health==='PASS').length/Object.values(com).length:1,updater:up?1:p.phase==='FAILED'?0:.5,wan:w.internet===true?1:0,tunnel:tn>0?t/tn:0,route:String(c.routing_rc)==='0'?1:0,runtime:[s.crond,s.supervisor,s.adguard,s.adaptive_live_count===1].filter(Boolean).length/4,console:ms,storage:pct};Object.entries(vals).forEach(([k,v])=>{push(k,v);draw(k)})}
-function listRows(items,emptyText){return items&&items.length?items.map(x=>'<div class="row"><b>'+esc(x)+'</b><span></span><span class="pill ok">активно</span></div>').join(''):'<div class="empty">'+esc(emptyText)+'</div>'}function routeItems(items){const q=($('routeListSearch').value||'').trim().toLowerCase(),dir=$('routeListSort').value==='desc'?-1:1;return [...(items||[])].filter(x=>!q||String(x).toLowerCase().includes(q)).sort((a,b)=>String(a).localeCompare(String(b),'ru')*dir)}function syncMetric(s,k){const m=String(s||'').match(new RegExp('(?:^|\\s)'+k+'=([0-9]+)'));return m?m[1]:'-'}function renderRouteData(r){routeData=r;const d=r.domains||{},a=r.adaptive||{},ip=r.ip||{},ds=d.sources||{},ics=ip.source_categories||{};badge('domainCatalogPill',d.unique>0,d.unique?d.unique+' доменов':'Нет данных');$('domainCatalogStats').innerHTML=stat([['Уникальных доменов',d.unique],['Категорий',d.categories],['itdoginfo, записей',ds.itdog],['V2Fly, записей',ds.v2fly],['AdaptiveAuto',a.count],['Всего связей',d.rows],['Последнее обновление',d.last_update||'-']]);$('adaptiveDomainList').innerHTML='<div class="sub route-caption">Домены AdaptiveAuto · ограниченный persistent view</div>'+listRows(routeItems(a.recent||[]),'AdaptiveAuto пока пуст');badge('ipCatalogPill',ip.categories>0,ip.active_count+' активных');$('ipCatalogStats').innerHTML=stat([['IP/CIDR категорий',ip.categories],['CIDR в каталоге',ip.cidr_total],['Активных категорий',ip.active_count],['Маршрутов Policy Sync',ip.managed_routes],['itdoginfo, категорий',ics.itdog],['Loyalsoldier, категорий',ics.loyalsoldier],['Добавлено / удалено',syncMetric(ip.last_sync,'added')+' / '+syncMetric(ip.last_sync,'removed')],['Последняя сверка',ip.last_sync||'-']]);$('activeIpCategoryList').innerHTML='<div class="sub route-caption">Активные IP-категории</div>'+listRows(routeItems(ip.active||[]),'Активных IP-категорий пока нет');const when=new Date();txt('routeDataUpdated','Обновлено '+when.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}));renderHelp()}async function loadRouteData(show=true){if(routeDataBusy)return;routeDataBusy=true;$('routeDataRefresh').disabled=true;txt('routeDataUpdated','Получение фактических каталогов...');try{const r=await apiFetch('/cgi-bin/api.cgi?action=route-data&_='+Date.now(),{cache:'no-store'}),x=await r.json();if(!x.ok)throw Error(x.error||'route_data_failed');renderRouteData(x);if(show)notify('Сведения маршрутизации обновлены')}catch(e){txt('routeDataUpdated','Ошибка: '+e.message);badge('domainCatalogPill',false,'Недоступно');badge('ipCatalogPill',false,'Недоступно')}finally{routeDataBusy=false;$('routeDataRefresh').disabled=false}}$('routeDataRefresh').onclick=()=>loadRouteData(true);$('routeListSearch').oninput=()=>{if(routeData)renderRouteData(routeData)};$('routeListSort').onchange=()=>{if(routeData)renderRouteData(routeData)};
-async function loadSecurity(show=true){try{const r=await apiFetch('/cgi-bin/api.cgi?action=security-data&_='+Date.now(),{cache:'no-store'}),x=await r.json();if(!x.ok)throw Error(x.error||'security_data_failed');securityData=x;const l=x.listener||{},p=x.profile||{},a=x.api||{},srv=x.server||{};const wildcard=l.wildcard===true?'ОПАСНО':l.wildcard===false?'Запрещён':'Неизвестно';badge('securityPill',x.profile_ready&&l.wildcard===false,x.profile_ready?'Профиль проверен':'Требуется проверка');$('securityListener').innerHTML=stat([['Область доступа',l.scope==='lan'?'Только LAN':valueOrDash(l.scope)],['Фактический адрес',valueOrDash(l.address)],['Фактический порт',valueOrDash(l.port)],['Сокет',valueOrDash(l.socket_state)],['Wildcard',wildcard],['Источник',valueOrDash(l.source)]]);$('securityProfile').innerHTML=stat([['LAN',valueOrDash(p.lan_address)],['Подсеть',valueOrDash(p.lan_subnet)],['DNS',valueOrDash(p.dns_server)],['WAN device',valueOrDash(p.wan_device)],['WAN interface',valueOrDash(p.wan_interface)],['Tunnel device',valueOrDash(p.tunnel_device)],['Tunnel interface',valueOrDash(p.tunnel_interface)],['Policy group',valueOrDash(p.policy_group)],['AdGuard Home',p.adguard_address&&p.adguard_port?p.adguard_address+':'+p.adguard_port:'-']]);$('securityApi').innerHTML=stat([['POST guard',a.mutation_guard?'Включён':'Выключен'],['CORS',a.cors?'Включён':'Выключен'],['Directory listing',a.directory_listing?'Включён':'Выключен'],['Авторизация',a.authentication?'Включена':'Не реализована'],['lighttpd -tt',valueOrDash(srv.config_test)],['mod_setenv',valueOrDash(srv.mod_setenv)]]);txt('securityNotice',x.profile_ready&&l.wildcard===false?'Профиль и эффективная привязка Console проверены. Firewall остаётся UNKNOWN до отдельной живой проверки правил.':'Есть неопределённые или небезопасные параметры. Проверь device.conf, сгенерированный lighttpd config и живой сокет.');if(show)notify('Security-проверка обновлена')}catch(e){badge('securityPill',false,'Ошибка');txt('securityNotice','Security API недоступен: '+e.message)}}$('securityRefresh').onclick=()=>loadSecurity(true);
-function showActionResult(id,x){const e=$(id);e.hidden=false;e.textContent=(x.output||x.error||'Нет подробностей');e.scrollTop=0}async function postConsoleAction(endpoint,op,confirmValue,resultId){const q=new URLSearchParams({op:op});if(confirmValue)q.set('confirm',confirmValue);const el=$(resultId);if(el){el.hidden=false;el.textContent='Выполняется...'}try{const r=await apiFetch('/cgi-bin/api.cgi?action='+endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-VWARD-Request':'console'},body:q}),x=await r.json();if(el)showActionResult(resultId,x);if(!x.ok)throw Error(x.error||('RC '+x.rc));notify('Операция выполнена');await refresh();if(activeSection==='route')loadRouteData(false);if(activeSection==='updater')loadUpdateData(false);return x}catch(e){if(el){el.hidden=false;el.textContent='Ошибка: '+e.message}notify('Ошибка: '+e.message);throw e}}
-function openFilteredLog(name){document.querySelectorAll('#logSources input[data-log]').forEach(x=>{x.checked=x.dataset.log===name});go('logs');loadLogs(false)}document.querySelectorAll('[data-log-open]').forEach(b=>b.onclick=()=>openFilteredLog(b.dataset.logOpen));
-$('wanCheckBtn').onclick=()=>refresh(true);$('tunnelHealthBtn').onclick=()=>postConsoleAction('control','tunnel-health','', 'tunnelActionResult');$('tunnelSelect').onchange=()=>{const d=data||{};renderTunnelSelector(((d.wg||{}).interfaces)||[],d.wg||{})};
-const controlConfirm={"route-reconcile":['ROUTE_RECONCILE','AdaptiveAuto будет сверена штатным VWARD Route Reconciler. Продолжить?'],"policy-refresh":['POLICY_REFRESH','Policy Sync обновит внешние IP/CIDR-каталоги и может изменить принадлежащие ему маршруты. Продолжить?'],"policy-reconcile":['POLICY_RECONCILE','Policy Sync сверит принадлежащие ему IP-маршруты с текущим каталогом. Продолжить?']};document.querySelectorAll('[data-control-op]').forEach(b=>b.onclick=async()=>{const op=b.dataset.controlOp,c=controlConfirm[op],token=c?(confirm(c[1])?c[0]:null):'';if(c&&!token)return;b.disabled=true;try{await postConsoleAction('control',op,token,'routeActionResult')}catch(e){}finally{b.disabled=false}});
-function renderUpdateData(x){updateData=x;const a=x.allowed||{},p=x.pending||{};document.querySelectorAll('[data-update-op]').forEach(b=>{const op=b.dataset.updateOp;b.hidden=!Boolean(a[op]);b.disabled=Boolean(x.busy)});const bits=['Состояние: '+phaseText(x.phase)];if(x.busy)bits.push('идёт операция');if(p.present)bits.push('pending '+valueOrDash(p.version)+' · '+valueOrDash(p.priority)+' · seq '+valueOrDash(p.sequence));if(x.rollback_available)bits.push('rollback доступен');txt('updateActionState',bits.join(' · '))}async function loadUpdateData(show=true){try{const r=await apiFetch('/cgi-bin/api.cgi?action=update-data&_='+Date.now(),{cache:'no-store'}),x=await r.json();if(!x.ok)throw Error(x.error);renderUpdateData(x);if(show)notify('Состояние Update Engine обновлено')}catch(e){txt('updateActionState','Не удалось определить доступные действия: '+e.message);document.querySelectorAll('[data-update-op]').forEach(b=>{b.hidden=b.dataset.updateOp!=='check'})}}
-const updateConfirm={apply:['APPLY_UPDATE','Установить уже проверенное pending-обновление? Console может кратко перезапуститься.'],retry:['RETRY_UPDATE','Повторить установку pending-обновления через штатную state machine?'],rollback:['ROLLBACK_UPDATE','Запустить штатный rollback VWARD Update Engine?'],recover:['RECOVER_UPDATE','Запустить штатное recovery прерванной транзакции?']};document.querySelectorAll('[data-update-op]').forEach(b=>b.onclick=async()=>{const op=b.dataset.updateOp,c=updateConfirm[op],token=c?(confirm(c[1])?c[0]:null):'';if(c&&!token)return;b.disabled=true;try{await postConsoleAction('update-control',op,token,'updateActionResult')}catch(e){}finally{b.disabled=false}});
-function renderProbe(x){if(x.type==='domain'){const hints=(x.hints||[]).map(h=>h.source+' / '+h.category+' · '+h.match),routes=(x.routes||[]).map(r=>r.group+' → '+r.interface);$('routeProbeResult').innerHTML=stat([['Домен',x.value],['IPv4',(x.dns&&x.dns.ipv4||[]).join(', ')||'Не разрешён'],['AdaptiveAuto',x.adaptive_auto?'Да':'Нет'],['Группы',(x.groups||[]).join(', ')||'Нет'],['Маршрут',routes.join(', ')||'Прямое правило не найдено'],['Каталог',hints.join('; ')||'Совпадений нет']])}else if(x.type==='ip'){$('routeProbeResult').innerHTML=stat([['IPv4',x.value],['Policy Sync',(x.policy_matches||[]).map(m=>m.category+' '+m.cidr).join('; ')||'Совпадений нет'],['Owned CIDR',x.owned_cidr||'Нет'],['Настроенный маршрут',x.configured_route?'Да':'Нет'],['Интерфейс',x.interface||'Не определён']])}else{$('routeProbeResult').innerHTML=stat([['FQDN-группа',x.group||x.value],['Участников',x.member_count],['Показано',(x.members||[]).length],['Домены',(x.members||[]).join(', ')||'Группа пуста'],['Маршруты',(x.routes||[]).join(', ')||'Не назначены']])}}async function runRouteProbe(){const type=$('routeProbeType').value,value=$('routeProbeValue').value.trim();if(!value)return notify('Введите значение');$('routeProbeBtn').disabled=true;$('routeProbeResult').innerHTML='<div class="empty">Проверяем...</div>';try{const r=await apiFetch('/cgi-bin/api.cgi?action=route-probe&type='+encodeURIComponent(type)+'&value='+encodeURIComponent(value)+'&_='+Date.now(),{cache:'no-store'}),x=await r.json();if(!x.ok)throw Error(x.error);renderProbe(x)}catch(e){$('routeProbeResult').innerHTML='<div class="empty">Ошибка: '+esc(e.message)+'</div>'}finally{$('routeProbeBtn').disabled=false}}$('routeProbeBtn').onclick=runRouteProbe;$('routeProbeValue').addEventListener('keydown',e=>{if(e.key==='Enter')runRouteProbe()});$('routeProbeType').onchange=()=>{const t=$('routeProbeType').value;$('routeProbeValue').placeholder=t==='domain'?'example.org':t==='ip'?'203.0.113.10':'domain-list1';$('routeProbeBtn').textContent=t==='domain'?'Проверить / разрешить DNS':'Проверить'};
-function diagBadge(s){return s==='PASS'?'ok':s==='FAIL'?'bad':'warn'}async function runDiagnostics(show=true){$('runDiagnostics').disabled=true;try{const r=await apiFetch('/cgi-bin/api.cgi?action=diagnostics&_='+Date.now(),{cache:'no-store'}),x=await r.json();if(!x.ok)throw Error(x.error);$('settingsDiagnostics').innerHTML='<div class="diag-list">'+(x.checks||[]).map(c=>'<div class="row"><b>'+esc(c.label)+'<small>'+esc(c.detail||'')+'</small></b><span class="pill '+diagBadge(c.status)+'">'+esc(c.status)+'</span></div>').join('')+'</div>';if(show)notify('Диагностика завершена')}catch(e){$('settingsDiagnostics').innerHTML='<div class="empty">Ошибка диагностики: '+esc(e.message)+'</div>'}finally{$('runDiagnostics').disabled=false}}$('runDiagnostics').onclick=()=>runDiagnostics(true);
-function settingValue(x){if(x===true)return 'Включено';if(x===false)return 'Выключено';return valueOrDash(x)}function renderSettingsCatalog(x){const groups={};(x.settings||[]).forEach(s=>(groups[s.section]||(groups[s.section]=[])).push(s));const html=Object.entries(groups).map(([name,items])=>'<details class="catalog-group"><summary><span>'+esc(name)+'</span><span class="pill">'+items.length+'</span></summary><div class="catalog-items">'+items.map(s=>{const same=String(s.current)===String(s.effective),technical='<details class="setting-technical"><summary>Источник и ограничение</summary><small>'+esc(s.component)+' · '+esc(s.source)+' · '+esc(s.key)+'</small><small>'+esc(s.editable?'Изменяется в разделе Update Engine':s.read_only_reason||'Изменение недоступно')+'</small></details>';return '<div class="catalog-setting"><div><b>'+esc(s.label_ru)+'</b><small>'+esc(s.description_ru)+'</small></div><div class="catalog-values"><span>'+(same?'Значение':'Текущее')+': <b>'+esc(settingValue(s.current))+'</b></span>'+(same?'':'<span>Эффективное: <b>'+esc(settingValue(s.effective))+'</b></span>')+'</div><div class="catalog-access"><span class="pill '+(s.editable?'ok':'')+'">'+(s.editable?'ДОСТУПНО':'ТОЛЬКО ЧТЕНИЕ')+'</span><span class="pill '+(s.validation==='valid'?'ok':'warn')+'">'+(s.validation==='valid'?'ПРОВЕРЕНО':esc(s.validation))+'</span></div>'+technical+'</div>'}).join('')+'</div></details>').join('');$('settingsCatalog').innerHTML=html||'<div class="empty">Каталог пуст</div>';badge('settingsCatalogPill',x.profile_ready,x.settings.length+' параметров');}async function loadSettingsData(show=true){if(settingsDataBusy)return;settingsDataBusy=true;try{const r=await apiFetch('/cgi-bin/api.cgi?action=settings-data&_='+Date.now(),{cache:'no-store'}),x=await r.json();if(!x.ok)throw Error(x.error||'settings_data_failed');renderSettingsCatalog(x);if(show)notify('Технические параметры обновлены')}catch(e){badge('settingsCatalogPill',false,'Недоступно');$('settingsCatalog').innerHTML='<div class="empty">Ошибка: '+esc(e.message)+'</div>'}finally{settingsDataBusy=false}}
-function renderSettings(p){if(settingsDirty)return;const a=[['auto_apply','Автоматическое применение','Главный переключатель',p.auto_apply],['auto_critical','Критические','Критические обновления',p.auto_critical],['auto_important','Важные','Важные обновления',p.auto_important],['auto_routine','Плановые','Плановые обновления',p.auto_routine]];$('updaterForm').innerHTML=a.map(x=>'<label class="setting"><span><b>'+x[1]+'</b><small>'+x[2]+' · /opt/etc/vward/update.conf · restart не требуется</small></span><span class="switch"><input name="'+x[0]+'" type="checkbox" '+(x[3]?'checked':'')+'><i></i></span></label>').join('')+'<div class="actions"><span class="sub" id="saveState">Без изменений</span><button class="btn" type="button" id="cancelSettings">Отмена</button><button class="btn primary" type="submit">Сохранить</button></div>';$('cancelSettings').onclick=()=>{settingsDirty=false;renderSettings(((data||{}).platform)||{});notify('Изменения отменены')}}
-async function refresh(show=false){if(busy)return;busy=true;const t=performance.now();try{const r=await apiFetch('/cgi-bin/api.cgi?action=status&_='+Date.now(),{cache:'no-store'}),d=await r.json();if(!d.ok)throw Error(d.error);fill(d,Math.round(performance.now()-t));renderHelp();if(show)notify('Данные обновлены')}catch(e){$('liveDot').className='dot bad';txt('liveText','Нет связи');txt('heroTitle','Console API недоступен');txt('heroSub',e.message)}finally{busy=false}}
-$('refreshBtn').onclick=()=>refresh(true);function restartTimers(){if(refreshTimer)clearInterval(refreshTimer);if(logTimer)clearInterval(logTimer);refreshTimer=setInterval(refresh,Math.max(15,Number(prefs.refresh)||15)*1000);logTimer=setInterval(()=>{if(activeSection==='logs'&&logAuto)loadLogs(false)},Math.max(15,Number(prefs.logInterval)||30)*1000)}$('updaterForm').addEventListener('change',()=>{settingsDirty=true;txt('saveState','Есть изменения')});$('updaterForm').onsubmit=async e=>{e.preventDefault();if(!confirm('Сохранить политику обновлений VWARD?'))return;const f=new FormData(e.target),q=new URLSearchParams();['auto_apply','auto_critical','auto_important','auto_routine'].forEach(k=>q.set(k,f.has(k)?'1':'0'));const b=e.target.querySelector('button');b.disabled=true;txt('saveState','Сохранение...');try{const r=await apiFetch('/cgi-bin/api.cgi?action=settings',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-VWARD-Request':'console'},body:q}),x=await r.json();if(!x.ok)throw Error(x.error);settingsDirty=false;notify('Настройки сохранены');await refresh();await loadSettingsData(false);txt('saveState',x.verified&&x.backup_created?'Сохранено · проверено · backup создан':'Сохранено')}catch(x){txt('saveState','Ошибка: '+x.message)}finally{b.disabled=false}};
-function selectedLogs(){return Array.from(document.querySelectorAll('#logSources input[data-log]:checked')).map(e=>e.dataset.log)}function visibleLogText(){const q=($('logSearch').value||'').trim().toLowerCase(),parts=[];selectedLogs().forEach(n=>{const raw=logRaw[n];if(raw===undefined)return;let lines=String(raw).split(/\r?\n/);if(q)lines=lines.filter(x=>x.toLowerCase().includes(q));if(lines.length)parts.push('===== '+logLabels[n]+' =====\n'+lines.join('\n'))});return parts.join('\n\n').trim()}function renderLogs(){const names=selectedLogs(),text=visibleLogText(),lines=text?text.split(/\r?\n/).length:0;txt('logbox',text||'Нет строк для выбранных источников и фильтра.');txt('logCount',lines+' строк');$('logCount').className='pill '+(lines?'log-ok':'');txt('logMeta','Источники: '+(names.map(n=>logLabels[n]).join(', ')||'не выбраны')+' · '+(logUpdated?'обновлено '+logUpdated:'ещё не обновлялось')+' · авто '+(logAuto?'вкл':'выкл'))}async function loadLogs(show=true){const names=selectedLogs();document.querySelectorAll('#logSources .log-source').forEach(x=>x.classList.toggle('selected',x.querySelector('input').checked));if(!names.length){logRaw={};renderLogs();return}$('logbox').classList.add('loading');txt('logbox','Загрузка...');const next={...logRaw};await Promise.all(names.map(async n=>{try{const r=await apiFetch('/cgi-bin/api.cgi?action=log&name='+encodeURIComponent(n)+'&count='+encodeURIComponent(prefs.logCount)+'&_='+Date.now(),{cache:'no-store'});next[n]=await r.text()}catch(e){next[n]='Журнал недоступен: '+e.message}}));logRaw=next;logUpdated=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});$('logbox').classList.remove('loading');renderLogs();if(show)notify('Журналы обновлены');renderHelp()}function fallbackCopy(t){const a=document.createElement('textarea');a.value=t;a.className='hidden-copy';document.body.appendChild(a);a.select();const ok=document.execCommand('copy');a.remove();return ok}document.querySelectorAll('#logSources input[data-log]').forEach(e=>e.onchange=()=>loadLogs(false));$('logAll').onclick=()=>{document.querySelectorAll('#logSources input[data-log]').forEach(x=>x.checked=true);loadLogs(false)};$('logReset').onclick=()=>{document.querySelectorAll('#logSources input[data-log]').forEach(x=>x.checked=false);$('logSearch').value='';loadLogs(false)};$('logSearch').oninput=renderLogs;$('logRefresh').onclick=()=>loadLogs(true);$('logAuto').onchange=e=>{logAuto=e.target.checked;notify(logAuto?'Автообновление включено':'Автообновление выключено')};$('logCopy').onclick=async()=>{const t=visibleLogText();if(!t)return notify('Нет данных для копирования');try{if(navigator.clipboard&&navigator.clipboard.writeText)await navigator.clipboard.writeText(t);else if(!fallbackCopy(t))throw Error('copy');notify('Скопировано')}catch(e){try{fallbackCopy(t)?notify('Скопировано'):notify('Копирование недоступно')}catch(_){notify('Копирование недоступно')}}};$('logSave').onclick=()=>{const t=visibleLogText();if(!t)return notify('Нет данных для сохранения');const d=new Date(),stamp=d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')+'-'+String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0')+String(d.getSeconds()).padStart(2,'0'),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t+'\n'],{type:'text/plain;charset=utf-8'}));a.download='VWARD-журнал-'+stamp+'.txt';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},0);notify('Файл подготовлен')};$('logShare').onclick=async()=>{const t=visibleLogText();if(!t)return notify('Нет данных для отправки');try{const file=new File([t+'\n'],'VWARD-журнал.txt',{type:'text/plain'});if(navigator.canShare&&navigator.canShare({files:[file]}))await navigator.share({title:'VWARD Журнал',files:[file]});else if(navigator.share)await navigator.share({title:'VWARD Журнал',text:t});else throw Error('unsupported')}catch(e){if(e.name!=='AbortError')notify('Системная отправка недоступна')}};
-function systemTheme(){return window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}function applyPrefs(){document.documentElement.dataset.theme=prefs.theme==='system'?systemTheme():prefs.theme;document.documentElement.dataset.density=prefs.compact?'compact':'normal';document.documentElement.dataset.motion=prefs.motion?'reduce':'normal';$('logbox').classList.toggle('nowrap',!prefs.logWrap);if($('prefTheme'))$('prefTheme').value=prefs.theme;if($('prefCompact'))$('prefCompact').checked=prefs.compact;if($('prefMotion'))$('prefMotion').checked=prefs.motion;if($('prefRefresh'))$('prefRefresh').value=String(prefs.refresh);if($('prefLogInterval'))$('prefLogInterval').value=String(prefs.logInterval);if($('prefLogCount'))$('prefLogCount').value=String(prefs.logCount);if($('prefLogWrap'))$('prefLogWrap').checked=prefs.logWrap;restartTimers()}function loadPrefs(){try{const raw=JSON.parse(localStorage.getItem('vward-prefs')||'{}');prefs={...prefs,...raw}}catch(e){};const theme=prefs.theme; if(!['system','light','dark'].includes(theme))prefs.theme='system';if(![15,30,60].includes(Number(prefs.refresh)))prefs.refresh=15;if(![15,30,60,120].includes(Number(prefs.logInterval)))prefs.logInterval=30;if(![50,100,150,200].includes(Number(prefs.logCount)))prefs.logCount=200;prefs.compact=Boolean(prefs.compact);prefs.motion=Boolean(prefs.motion);prefs.logWrap=prefs.logWrap!==false}function savePrefs(){try{localStorage.setItem('vward-prefs',JSON.stringify(prefs))}catch(e){}applyPrefs()}loadPrefs();applyPrefs();if(window.matchMedia){const mq=window.matchMedia('(prefers-color-scheme: dark)');if(mq.addEventListener)mq.addEventListener('change',()=>{if(prefs.theme==='system')applyPrefs()})}$('settingsSearch').oninput=e=>{const q=e.target.value.trim().toLowerCase();document.querySelectorAll('#settingsGrid .settings-block').forEach(b=>{b.hidden=q&&!((b.dataset.settingsSearch||'')+' '+b.textContent).toLowerCase().includes(q)})};$('prefTheme').onchange=e=>{prefs.theme=e.target.value;savePrefs()};$('prefCompact').onchange=e=>{prefs.compact=e.target.checked;savePrefs()};$('prefMotion').onchange=e=>{prefs.motion=e.target.checked;savePrefs()};$('prefRefresh').onchange=e=>{prefs.refresh=Number(e.target.value);savePrefs()};$('prefLogInterval').onchange=e=>{prefs.logInterval=Number(e.target.value);savePrefs()};$('prefLogCount').onchange=e=>{prefs.logCount=Number(e.target.value);savePrefs();if(activeSection==='logs')loadLogs(false)};$('prefLogWrap').onchange=e=>{prefs.logWrap=e.target.checked;savePrefs()};$('themeBtn').onclick=()=>{prefs.theme=(document.documentElement.dataset.theme==='dark'?'light':'dark');savePrefs()};$('openKeenetic').onclick=()=>open(location.protocol+'//'+location.hostname+'/','_blank','noopener');$('openAgh').onclick=()=>{const a=((securityData||{}).external_services||{}).adguard||{},host=a.address||location.hostname,port=a.port;if(!port)return notify('Адрес AdGuard Home не настроен');open(location.protocol+'//'+host+':'+port+'/','_blank','noopener')};window.addEventListener('beforeunload',e=>{if(settingsDirty){e.preventDefault();e.returnValue=''}});loadSecurity(false);refresh();
+(function () {
 
-const adsFieldMap={ENABLED:'adsEnabled',RUN_MODE:'adsRunMode',SCHEDULE_INTERVAL_MIN:'adsScheduleInterval',DYNAMIC_MIN_INTERVAL_SEC:'adsDynamicInterval',DYNAMIC_MAX_LOAD_PER_CPU_X100:'adsLoadLimit',DYNAMIC_MIN_MEM_AVAILABLE_KB:'adsMinMem',DYNAMIC_MIN_OPT_FREE_KB:'adsMinOpt',DYNAMIC_MAX_CANDIDATES_PER_RUN:'adsDynamicCandidates',AUTO_SOURCE_UPDATE:'adsAutoSources',SOURCE_UPDATE_INTERVAL_HOURS:'adsSourceHours',QUERY_SOURCE:'adsQuerySource',AUTO_RULE_SCOPE:'adsAutoRuleScope',PUBLISH_MODE:'adsPublishMode',AUTO_PUBLISH:'adsAutoPublish'};
-async function adsButtonTask(button,task){if(!button||button.disabled)return;button.disabled=true;button.setAttribute('aria-busy','true');try{return await task()}finally{button.disabled=false;button.removeAttribute('aria-busy');if(button.id==='adsSettingsSave')adsUpdateDirty()}}
-function adsSetField(k,v){const e=$(adsFieldMap[k]);if(!e)return;if(e.type==='checkbox')e.checked=String(v)==='1'||v===true;else e.value=String(v===undefined||v===null?'':v)}
-function adsFormBody(){const q=new URLSearchParams();for(const [k,id] of Object.entries(adsFieldMap)){const e=$(id);if(!e)continue;q.set(k,e.type==='checkbox'?(e.checked?'1':'0'):e.value)}return q}
-function adsUpdateDirty(){const panel=$('adsPrivacySettings'),save=$('adsSettingsSave');adsDirty=Boolean(panel&&adsSnapshot&&adsFormBody().toString()!==adsSnapshot);const valid=!panel||Array.from(panel.querySelectorAll('input,select')).every(e=>e.checkValidity());if(save)save.disabled=!adsDirty||!valid}
-async function adsFetchData(){const r=await apiFetch('/cgi-bin/api.cgi?action=ads-data');const j=await r.json();if(!j.ok)throw Error(j.error||'ads-data');const counts=j.counts||{},jobs=j.jobs||{};badge('adsPrivacyPill',true,j.paused?'Пауза':'Работает');$('adsPrivacyStats').innerHTML=stat([['Блокировка',counts.blocked||0],['Проверка',counts.review||0],['Разрешено',counts.allow||0],['Доверено',counts.trust||0],['Очередь',jobs.queued||0]]);for(const [k,v] of Object.entries(j.settings||{}))adsSetField(k,v);adsSnapshot=adsFormBody().toString();adsDirty=false;adsUpdateDirty();$('adsPauseResume').textContent=j.paused?'Продолжить':'Пауза';renderAdsSources(j.sources||[]);renderAdsManual(j.manual_rules||[]);renderAdsJobs(jobs);return j}
-function renderAdsSources(a){const e=$('adsSourcesList');if(!e)return;e.innerHTML=a.length?a.map(x=>'<div class="row"><b>'+esc(x.name||x.id)+'<small>'+esc(x.purpose||'')+'</small></b><select class="input" aria-label="Режим источника '+esc(x.name||x.id)+'" data-ads-source="'+esc(x.id)+'"><option value="off"'+(x.mode==='off'?' selected':'')+'>Выключен</option><option value="check"'+(x.mode==='check'?' selected':'')+'>Проверка</option><option value="active"'+(x.mode==='active'?' selected':'')+'>Активен</option></select><span class="pill '+(x.cached?'ok':'warn')+'">'+(x.cached?'Кэш готов':'Нет кэша')+'</span></div>').join(''):'<div class="empty">Источники не найдены</div>';e.querySelectorAll('[data-ads-source]').forEach(s=>s.onchange=()=>{s.disabled=true;adsPostControl('source-mode',{source:s.dataset.adsSource,mode:s.value}).catch(e=>notify(e.message)).finally(()=>{s.disabled=false})})}
-function renderAdsManual(a){const e=$('adsManualRules');if(e)e.innerHTML=a.length?a.map(x=>'<div class="row"><b>'+esc(x.domain)+'<small>'+esc(x.type.toUpperCase()+' · '+x.scope)+'</small></b><span class="pill">MANUAL</span></div>').join(''):'<div class="empty">Ручных правил нет</div>'}
-function renderAdsJobs(j){const e=$('adsJobState');if(!e)return;const c=j.current||{},l=j.last||{};e.innerHTML='<div class="row"><b>Текущая<small>'+esc(c.type||'Нет')+'</small></b><span class="pill">'+esc(c.state||'IDLE')+'</span></div><div class="row"><b>Последняя<small>'+esc(l.type||'-')+'</small></b><span class="pill">'+esc(l.state||'-')+'</span></div>'+(l.output?'<pre class="action-result">'+esc(l.output)+'</pre>':'')}
-async function adsPostControl(op,extra={}){const q=new URLSearchParams({op,...extra});const r=await apiFetch('/cgi-bin/api.cgi?action=ads-control',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-VWARD-Request':'console'},body:q});const j=await r.json();if(!j.ok)throw Error(j.error||'ads-control');notify(j.result||'Готово');await adsFetchData();return j}
-async function adsSave(){const q=adsFormBody();if(q.get('AUTO_PUBLISH')==='1'&&!confirm('Включить автоматическую публикацию VWARD-правил в AdGuard Home?'))return;q.set('confirm',q.get('AUTO_PUBLISH')==='1'?'ADS_AUTO_PUBLISH':'');const r=await apiFetch('/cgi-bin/api.cgi?action=ads-settings',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-VWARD-Request':'console'},body:q});const j=await r.json();if(!j.ok)throw Error(j.error||'ads-settings');notify('Настройки сохранены');await adsFetchData()}
+/* ---------- Утилиты ---------- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const dom = d => esc(d).replace(/\./g, '.<wbr>');
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* хранилище браузера недоступно */ } },
+  del(k) { try { localStorage.removeItem(k); } catch (e) { /* хранилище браузера недоступно */ } }
+};
+const num = v => (v == null || v === '' || isNaN(Number(v))) ? null : Number(v);
+const fmtInt = v => num(v) == null ? '—' : Number(v).toLocaleString('ru-RU');
+const fmtKB = kb => { const n = num(kb); if (n == null) return '—'; if (n >= 1048576) return (n / 1048576).toFixed(1).replace('.', ',') + ' ГБ'; if (n >= 1024) return Math.round(n / 1024) + ' МБ'; return n + ' КБ'; };
+const fmtUptime = s => { const n = num(s); if (n == null) return '—'; const d = Math.floor(n / 86400), h = Math.floor(n % 86400 / 3600), m = Math.floor(n % 3600 / 60); return d ? d + ' д ' + h + ' ч' : h ? h + ' ч ' + m + ' мин' : m + ' мин'; };
+const fmtSpeed = v => { const n = num(v); return n == null ? '' : n >= 1000 ? (n / 1000).toString().replace('.', ',') + ' Гбит/с' : n + ' Мбит/с'; };
+const isTrue = v => v === true || v === 'true' || v === '1' || v === 1 || v === 'yes' || v === 'up';
+const IPV4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
+const DOMAIN = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 
-async function adsHttpsFetch(){const r=await apiFetch('/cgi-bin/api.cgi?action=ads-https-data');const j=await r.json();if(!j.ok)throw Error(j.error||'ads-https-data');const d=j.status||{};const running=String(d.RUNNING||'0')==='1';const ready=String(d.PROVIDER_READY||'0')==='1';badge('adsHttpsPill',running,running?'Работает':(ready?'Готов':'Не готов'));$('adsHttpsStats').innerHTML=stat([['Запущен',running?'Да':'Нет'],['Центр сертификации',String(d.CA_READY||'0')==='1'?'Готов':'Нет'],['Провайдер',ready?'Готов':'Нет'],['Адреса',d.INTERCEPT_COUNT||0],['Правила',d.RULE_COUNT||0]]);$('adsHttpsDetails').innerHTML='<div class="row"><b>Режим<small>'+esc(d.MODE||'-')+'</small></b><span class="pill">'+esc(d.PROVIDER||'-')+'</span></div><div class="row"><b>Прокси<small>'+esc((d.PROXY_ADVERTISE_HOST||d.PROXY_BIND||'-')+':'+(d.PROXY_PORT||'-'))+'</small></b><span class="pill">Явный</span></div><div class="row"><b>Отпечаток сертификата<small>'+esc(d.CA_SHA256_FINGERPRINT||'Не создан')+'</small></b><span class="pill">Локальный</span></div><div class="row"><b>Файл PAC<small>'+esc(d.PAC_FILE||'-')+'</small></b><span class="pill">Выборочно</span></div>';return j}
-async function adsHttpsControl(op,confirmToken=''){const q=new URLSearchParams({op});if(confirmToken)q.set('confirm',confirmToken);const r=await apiFetch('/cgi-bin/api.cgi?action=ads-https-control',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-VWARD-Request':'console'},body:q});const j=await r.json();if(!j.ok)throw Error(j.output||j.error||'ads-https-control');const e=$('adsHttpsActionResult');if(e){e.hidden=false;e.textContent=j.output||'Готово'}notify('HTTPS Content Guard: готово');await adsHttpsFetch();return j}
-function bindAdsHttpsGuard(){if(!$('adsHttpsPanel'))return;$('adsHttpsRefresh').onclick=e=>adsButtonTask(e.currentTarget,()=>adsHttpsFetch()).catch(e=>notify(e.message));$('adsHttpsValidate').onclick=e=>adsButtonTask(e.currentTarget,()=>adsHttpsControl('validate')).catch(e=>notify(e.message));$('adsHttpsCaInit').onclick=e=>{const b=e.currentTarget;if(confirm('Создать локальный центр сертификации VWARD? Приватный ключ останется только на роутере.'))adsButtonTask(b,()=>adsHttpsControl('ca-init','HTTPS_CA_INIT')).catch(e=>notify(e.message))};$('adsHttpsStart').onclick=e=>{const b=e.currentTarget;if(confirm('Запустить HTTPS Content Guard? Используй только тестовое устройство с установленным сертификатом VWARD и PAC.'))adsButtonTask(b,()=>adsHttpsControl('start','HTTPS_START')).catch(e=>notify(e.message))};$('adsHttpsStop').onclick=e=>adsButtonTask(e.currentTarget,()=>adsHttpsControl('stop')).catch(e=>notify(e.message))}
+/* ---------- Иконки: одна сетка 24×24, одна толщина линии ---------- */
+const ICON_PATHS = {
+  home: '<path d="M4 10.5 12 4l8 6.5"/><path d="M6 9v11h4.5v-5.5h3V20H18V9"/>',
+  platform: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>',
+  refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5V9H15"/>',
+  globe: '<circle cx="12" cy="12" r="8"/><path d="M4 12h16"/><path d="M12 4c2.2 2.3 3.2 5 3.2 8s-1 5.7-3.2 8c-2.2-2.3-3.2-5-3.2-8s1-5.7 3.2-8z"/>',
+  shield: '<path d="M12 3.8 5.5 6.3v5c0 4.2 2.7 7.4 6.5 8.9 3.8-1.5 6.5-4.7 6.5-8.9v-5z"/><path d="m9.3 12.2 1.9 1.9 3.6-3.8"/>',
+  route: '<circle cx="6.5" cy="17.5" r="2"/><circle cx="17.5" cy="6.5" r="2"/><path d="M8.5 17.5H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/>',
+  wifi: '<path d="M3.5 9.5a12 12 0 0 1 17 0"/><path d="M6.5 12.8a7.8 7.8 0 0 1 11 0"/><path d="M9.5 16a3.6 3.6 0 0 1 5 0"/><path d="M12 19.2h.01"/>',
+  block: '<circle cx="12" cy="12" r="8"/><path d="m6.4 6.4 11.2 11.2"/>',
+  lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/><path d="M12 14.5v2"/>',
+  sliders: '<path d="M4 7h9"/><path d="M17 7h3"/><circle cx="15" cy="7" r="2"/><path d="M4 17h3"/><path d="M11 17h9"/><circle cx="9" cy="17" r="2"/>',
+  logs: '<path d="M9 6.5h11"/><path d="M9 12h11"/><path d="M9 17.5h11"/><path d="M4.5 6.5h.01"/><path d="M4.5 12h.01"/><path d="M4.5 17.5h.01"/>',
+  runtime: '<circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/>',
+  storage: '<ellipse cx="12" cy="6.5" rx="7" ry="2.5"/><path d="M5 6.5v11c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-11"/><path d="M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/>',
+  bell: '<path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 1.5H5z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>',
+  sun: '<circle cx="12" cy="12" r="3.8"/><path d="M12 3.5v1.8M12 18.7v1.8M3.5 12h1.8M18.7 12h1.8M6 6l1.3 1.3M16.7 16.7 18 18M6 18l1.3-1.3M16.7 7.3 18 6"/>',
+  moon: '<path d="M19.5 14.2A7.8 7.8 0 1 1 9.8 4.5a6.2 6.2 0 0 0 9.7 9.7z"/>',
+  auto: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/>',
+  back: '<path d="M19 12H5.5"/><path d="m11 6-6 6 6 6"/>',
+  chevron: '<path d="m9.5 6 6 6-6 6"/>',
+  close: '<path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/>',
+  alert: '<path d="M12 4.5 3.5 19h17z"/><path d="M12 10v4"/><path d="M12 16.8h.01"/>',
+  check: '<path d="m5.5 12.5 4 4 9-9"/>',
+  edit: '<path d="M5 19h3.5L18.2 9.3a2 2 0 0 0-2.8-2.8L5.7 16.2z"/><path d="m14 8 2.8 2.8"/>',
+  eye: '<path d="M3 12s3.3-6 9-6 9 6 9 6-3.3 6-9 6-9-6-9-6z"/><circle cx="12" cy="12" r="2.5"/>',
+  eyeOff: '<path d="M4 4l16 16"/><path d="M9.9 6.3A9 9 0 0 1 12 6c5.7 0 9 6 9 6a15 15 0 0 1-2.6 3.3M6.3 7.7A15 15 0 0 0 3 12s3.3 6 9 6a8.7 8.7 0 0 0 3.6-.8"/>',
+  more: '<path d="M5.5 12h.01M12 12h.01M18.5 12h.01"/>',
+  undo: '<path d="M9 14.5 4.5 10 9 5.5"/><path d="M4.5 10H14a5.5 5.5 0 0 1 0 11h-2"/>',
+  up: '<path d="m6 15 6-6 6 6"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/>',
+  share: '<circle cx="17.5" cy="6" r="2.2"/><circle cx="6.5" cy="12" r="2.2"/><circle cx="17.5" cy="18" r="2.2"/><path d="m8.5 11 7-3.9M8.5 13l7 3.9"/>',
+  save: '<path d="M12 4.5v10"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 19.5h14"/>',
+  archive: '<rect x="4" y="4.5" width="16" height="4.5" rx="1.5"/><path d="M5.5 9v9a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5V9"/><path d="M10 13h4"/>',
+  wrap: '<path d="M4 6.5h16"/><path d="M4 12h12.5a3 3 0 0 1 0 6H13"/><path d="m15 16-2 2 2 2"/><path d="M4 17.5h5"/>',
+  external: '<path d="M14 4.5h5.5V10"/><path d="M19.5 4.5 11 13"/><path d="M18 13.5V18a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 5 18V8a1.5 1.5 0 0 1 1.5-1.5H11"/>',
+  user: '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>'
+};
+function iconSvg(name, cls) { return '<svg class="icon' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + (ICON_PATHS[name] || ICON_PATHS.platform) + '</svg>'; }
+const ico = iconSvg;
 
-function bindAdsPrivacyGuard(){if(!$('adsPrivacyPanel'))return;bindAdsHttpsGuard();$('adsPrivacySettings').querySelectorAll('input,select').forEach(e=>{e.addEventListener('input',adsUpdateDirty);e.addEventListener('change',adsUpdateDirty)});adsUpdateDirty();$('adsSettingsReload').onclick=e=>adsButtonTask(e.currentTarget,()=>adsFetchData()).catch(e=>notify(e.message));$('adsSettingsSave').onclick=e=>adsButtonTask(e.currentTarget,()=>adsSave()).catch(e=>notify(e.message));$('adsPauseResume').onclick=e=>adsButtonTask(e.currentTarget,()=>adsPostControl($('adsPauseResume').textContent==='Продолжить'?'resume':'pause')).catch(e=>notify(e.message));$('adsRunNow').onclick=e=>adsButtonTask(e.currentTarget,()=>adsPostControl('enqueue',{job:'scan'})).catch(e=>notify(e.message));$('adsUpdateSourcesNow').onclick=e=>adsButtonTask(e.currentTarget,()=>adsPostControl('enqueue',{job:'sources-update'})).catch(e=>notify(e.message));$('adsPublishNow').onclick=e=>{const b=e.currentTarget;if(confirm('Опубликовать только принадлежащий VWARD блок правил в AdGuard Home?'))adsButtonTask(b,()=>adsPostControl('enqueue',{job:'publish',confirm:'ADS_PUBLISH'})).catch(e=>notify(e.message))};$('adsProbeBtn').onclick=e=>adsButtonTask(e.currentTarget,()=>adsPostControl('enqueue',{job:'probe',domain:$('adsProbeDomain').value})).catch(e=>notify(e.message));$('adsRuleAllow').onclick=e=>adsButtonTask(e.currentTarget,()=>adsPostControl('allow',{domain:$('adsRuleDomain').value,scope:$('adsRuleScope').value})).catch(e=>notify(e.message));$('adsRuleBlock').onclick=e=>adsButtonTask(e.currentTarget,()=>adsPostControl('block',{domain:$('adsRuleDomain').value,scope:$('adsRuleScope').value})).catch(e=>notify(e.message));$('adsRuleRemove').onclick=e=>adsButtonTask(e.currentTarget,()=>adsPostControl('remove-override',{domain:$('adsRuleDomain').value,scope:$('adsRuleScope').value})).catch(e=>notify(e.message));$('adsSourcesRefresh').onclick=e=>adsButtonTask(e.currentTarget,()=>adsFetchData()).catch(e=>notify(e.message));}
+/* ---------- API ---------- */
+const API = '/cgi-bin/api.cgi';
+async function apiFetch(url, options) {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 10000);
+  try { return await fetch(url, Object.assign({ cache: 'no-store' }, options || {}, { signal: controller.signal })); }
+  catch (e) { throw new Error(e.name === 'AbortError' ? 'роутер не ответил за 10 секунд' : 'нет связи с роутером'); }
+  finally { clearTimeout(timer); }
+}
+async function apiGet(action, params) {
+  const q = new URLSearchParams(Object.assign({ action: action }, params || {}));
+  const r = await apiFetch(API + '?' + q.toString());
+  return r.json();
+}
+async function apiText(action, params) {
+  const q = new URLSearchParams(Object.assign({ action: action }, params || {}));
+  const r = await apiFetch(API + '?' + q.toString());
+  return r.text();
+}
+async function apiPost(action, fields) {
+  const r = await apiFetch(API + '?action=' + encodeURIComponent(action), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-VWARD-Request': 'console' },
+    body: new URLSearchParams(fields).toString()
+  });
+  return r.json();
+}
+const API_ERRORS = {
+  updater_busy: 'идёт обновление, повторите позже', confirmation_required: 'требуется подтверждение',
+  action_unavailable: 'действие недоступно на этом роутере', invalid_domain: 'неверный домен',
+  invalid_ipv4: 'неверный IPv4-адрес', control_busy: 'другое действие ещё выполняется',
+  no_pending_update: 'нет загруженного обновления', state_action_not_allowed: 'в текущем состоянии обновления это недоступно',
+  rollback_unavailable: 'нет резервной копии для отката', recovery_not_required: 'восстановление не требуется',
+  config_unavailable: 'файл настроек недоступен', invalid_mac: 'неверный MAC-адрес'
+};
+const errText = x => API_ERRORS[x && x.error] || (x && x.error) || ('код ' + (x && x.rc));
 
-window.addEventListener('beforeunload',e=>{if(adsDirty){e.preventDefault();e.returnValue=''}});
-document.addEventListener('visibilitychange',()=>{if(document.hidden)return;refresh();if(activeSection==='logs'&&logAuto)loadLogs(false)});
-bindAdsPrivacyGuard();
+/* ---------- Данные ---------- */
+const S = { status: null, route: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, logs: {}, errors: {}, loadedAt: {} };
+const LOADERS = {
+  status: () => apiGet('status'), route: () => apiGet('route-data'), update: () => apiGet('update-data'),
+  security: () => apiGet('security-data'), diag: () => apiGet('diagnostics'), wifi: () => apiGet('wifi-data'),
+  ads: () => apiGet('ads-data'), https: () => apiGet('ads-https-data')
+};
+const inflight = {};
+async function load(key, force) {
+  if (inflight[key]) return inflight[key];
+  if (!force && S[key] && Date.now() - (S.loadedAt[key] || 0) < 5000) return S[key];
+  inflight[key] = (async () => {
+    try { S[key] = await LOADERS[key](); S.errors[key] = null; }
+    catch (e) { S.errors[key] = e.message; }
+    finally { S.loadedAt[key] = Date.now(); delete inflight[key]; }
+    return S[key];
+  })();
+  return inflight[key];
+}
+const st = () => S.status || {};
+const plat = () => st().platform || {};
+const prof = () => (S.security && S.security.profile) || {};
 
-/* Wi-Fi Client Guard stays opt-in: this screen can observe immediately, while
-   mutation is delegated to the guarded local control script. */
-M.wifi=['VWARD Wi-Fi Client Guard','Наблюдение клиентов и ручные band-правила'];
-const wifiNav=document.createElement('button');wifiNav.dataset.section='wifi';wifiNav.dataset.icon='wifi';wifiNav.textContent='Wi-Fi клиенты';const routeNav=document.querySelector('.sidebar [data-section="route"]');if(routeNav)routeNav.insertAdjacentElement('afterend',wifiNav);wifiNav.onclick=()=>go('wifi');hydrateIcons(wifiNav);
-const wifiSection=document.createElement('section');wifiSection.className='section';wifiSection.id='wifi';wifiSection.innerHTML='<button class="back" data-go="overview">← Назад к обзору</button><div class="panel"><div class="panel-head"><div><h2>Wi-Fi Client Guard</h2><div class="sub">Фактическая история клиентов, без автоматического изменения Wi-Fi</div></div><span class="pill" id="wifiPill">Загрузка</span></div><div class="stats" id="wifiStats"><div class="empty">Откройте раздел для загрузки локального состояния.</div></div><div class="actions"><button class="btn" id="wifiRefresh">Обновить</button><button class="btn" data-log-open="cron">Журнал заданий</button></div></div><div class="panel"><div class="panel-head"><div><h3>Клиенты и рекомендации</h3><div class="sub">Рекомендация не применяет правило сама.</div></div><span class="pill">OPT-IN</span></div><div class="components" id="wifiClients"><div class="empty">Нет данных collector.</div></div></div><div class="panel"><div class="panel-head"><div><h3>Ручное правило диапазона</h3><div class="sub">Доступно лишь при локальном CONTROL_ENABLED=1 и точном подтверждении.</div></div><span class="pill" id="wifiControlPill">Заблокировано</span></div><div class="probe-bar"><input class="input" id="wifiMac" placeholder="aa:bb:cc:dd:ee:ff" autocomplete="off" spellcheck="false"><select class="input" id="wifiOperation"><option value="bind-2g">Закрепить за 2.4 ГГц</option><option value="bind-5g">Закрепить за 5 ГГц</option><option value="auto">Снять правило</option></select><input class="input" id="wifiConfirm" placeholder="Токен подтверждения" autocomplete="off" spellcheck="false"><button class="btn primary" id="wifiApply">Применить</button></div><pre class="action-result" id="wifiActionResult" hidden></pre></div><div class="notice">По умолчанию сбор и control выключены. Console не запускает произвольные shell/ndmc-команды; разрешены только 2.4 ГГц, 5 ГГц и снятие band-правила.</div>';
-const runtimeSection=$('runtime');if(runtimeSection)runtimeSection.insertAdjacentElement('beforebegin',wifiSection);wifiSection.querySelector('[data-go]').onclick=()=>go('overview');
-wifiSection.querySelector('[data-log-open]').onclick=()=>go('logs');
-function renderWifiData(x){wifiData=x;const on=Boolean(x.enabled),ctl=Boolean(x.control_enabled),a=Boolean(x.auto_apply),s=x.scheduler||{};badge('wifiPill',on,on?'Наблюдение':'Выключено');badge('wifiControlPill',ctl&&!a,ctl&&!a?'Готово':'Заблокировано');$('wifiStats').innerHTML=stat([['Collector',on?'Включён':'Выключен'],['Control',ctl?'Разрешён':'Выключен'],['Автоприменение',a?'Включено':'Выключено'],['Клиентов в анализе',x.count||0],['Последний cron',s.last||'-'],['Код cron',s.rc===undefined?'-':s.rc]]);$('wifiApply').disabled=!ctl||a;const rows=(x.clients||[]).map(c=>'<div class="row"><b>'+esc(c.mac)+'<small>'+esc(c.band)+' · '+esc(c.reason)+'</small></b><span>'+esc(c.switches)+' переходов · '+esc(c.weak_5g)+' weak 5G</span><span class="pill '+(c.health==='OK'?'ok':'warn')+'">'+esc(c.recommendation)+'</span></div>').join('');$('wifiClients').innerHTML=rows||'<div class="empty">Collector ещё не собрал данных или выключен.</div>';renderHelp()}
-async function loadWifiData(show=true){if(wifiDataBusy)return;wifiDataBusy=true;$('wifiRefresh').disabled=true;try{const r=await apiFetch('/cgi-bin/api.cgi?action=wifi-data&_='+Date.now(),{cache:'no-store'}),x=await r.json();if(!x.ok)throw Error(x.error||'wifi_data_failed');renderWifiData(x);if(show)notify('Wi-Fi Client Guard обновлён')}catch(e){badge('wifiPill',false,'Недоступно');$('wifiStats').innerHTML='<div class="empty">Ошибка: '+esc(e.message)+'</div>'}finally{wifiDataBusy=false;$('wifiRefresh').disabled=false}}
-$('wifiRefresh').onclick=()=>loadWifiData(true);$('wifiApply').onclick=async()=>{const op=$('wifiOperation').value,mac=$('wifiMac').value.trim(),confirmToken=$('wifiConfirm').value.trim();if(!wifiData||!wifiData.control_enabled)return notify('Локальный CONTROL_ENABLED выключен');if(!confirmToken)return notify('Нужен точный токен подтверждения');if(!confirm('Применить '+op+' для '+mac+'?'))return;const b=$('wifiApply');b.disabled=true;try{const q=new URLSearchParams({op,mac,confirm:confirmToken}),r=await apiFetch('/cgi-bin/api.cgi?action=wifi-control',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','X-VWARD-Request':'console'},body:q}),x=await r.json();const out=$('wifiActionResult');out.hidden=false;out.textContent=x.output||x.error||'Нет вывода';if(!x.ok)throw Error(x.error||'wifi_control_failed');notify('Band-правило применено');await loadWifiData(false)}catch(e){notify('Wi-Fi control: '+e.message)}finally{b.disabled=false}};
+/* ---------- Структура разделов ---------- */
+const PAGES = [
+  { id: 'overview', title: 'Обзор', icon: 'home', group: 'Главное', data: ['status', 'route', 'wifi', 'ads'] },
+  { id: 'logs', title: 'Журналы', icon: 'logs', group: 'Главное', data: [] },
+  { id: 'wan', title: 'Интернет', icon: 'globe', group: 'Сеть', data: ['status', 'security'] },
+  { id: 'vpn', title: 'VPN', icon: 'shield', group: 'Сеть', data: ['status', 'security'] },
+  { id: 'routes', title: 'Маршрутизация', icon: 'route', group: 'Сеть', data: ['route', 'security', 'status'] },
+  { id: 'wifi', title: 'Wi-Fi клиенты', icon: 'wifi', group: 'Сеть', data: ['wifi', 'security'] },
+  { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security'] },
+  { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security'] },
+  { id: 'updates', title: 'Обновления', icon: 'refresh', group: 'VWARD', data: ['status', 'update'] },
+  { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security'] }
+];
+const SHORT = { overview: 'Обзор', logs: 'Журналы', wan: 'Интернет', vpn: 'VPN', routes: 'Маршруты', wifi: 'Wi-Fi', ads: 'Реклама', system: 'Система', updates: 'Обновл.', settings: 'Настройки' };
+const COMPONENTS = [
+  { id: 'route-engine', name: 'Движок маршрутизации', desc: 'Отправляет выбранные домены через VPN и ведёт AdaptiveAuto.', deps: ['runtime'], page: 'routes', log: 'routing' },
+  { id: 'route-reconciler', name: 'Сверка маршрутов', desc: 'Каждые 5 минут сверяет маршруты роутера с каталогом и исправляет расхождения.', deps: ['route-engine', 'runtime'], page: 'routes', log: 'routing' },
+  { id: 'route-tools', name: 'Инструменты маршрутов', desc: 'Проверка адресов и обновление подсказок каталога.', deps: ['runtime'], page: 'routes', log: 'routing' },
+  { id: 'policy-sync', name: 'IP-категории', desc: 'Раз в сутки обновляет IP-категории и маршруты по ним.', deps: ['runtime'], page: 'routes', log: 'policy' },
+  { id: 'tunnel-guard', name: 'Защита VPN', desc: 'Следит за туннелем WireGuard и включает fail-open, если VPN упал.', deps: ['runtime'], page: 'vpn', log: 'tunnel' },
+  { id: 'wan-guard', name: 'Защита интернета', desc: 'Проверяет интернет и поэтапно восстанавливает подключение.', deps: ['runtime'], page: 'wan', log: 'wan' },
+  { id: 'wifi-client-guard', name: 'Контроль Wi-Fi клиентов', desc: 'Наблюдает за переходами клиентов между 2.4 и 5 ГГц.', deps: ['runtime'], page: 'wifi', log: 'wifi' },
+  { id: 'ads-privacy-guard', name: 'Блокировка рекламы', desc: 'Управляет правилами AdGuard Home и источниками списков.', deps: ['runtime'], page: 'ads', log: 'ads' },
+  { id: 'runtime', name: 'Среда выполнения', desc: 'cron, supervisor и служебная очистка. На ней работают почти все компоненты.', deps: [], page: 'system', log: 'cron' },
+  { id: 'console', name: 'Console', desc: 'Этот веб-интерфейс и его API.', deps: ['runtime'], page: 'settings', log: 'console' },
+  { id: 'update-engine', name: 'Установщик обновлений', desc: 'Проверяет, устанавливает и откатывает подписанные обновления.', deps: ['platform-core'], page: 'updates', log: 'updater' },
+  { id: 'platform-core', name: 'Ядро платформы', desc: 'Версия, реестр компонентов и карта установки.', deps: [], page: 'system', log: 'console' }
+];
+const comp = id => COMPONENTS.find(c => c.id === id);
+const LOG_TABS = [
+  { id: 'wan', label: 'Интернет' }, { id: 'recovery', label: 'Восстановление' }, { id: 'tunnel', label: 'VPN' },
+  { id: 'routing', label: 'Маршрутизация' }, { id: 'policy', label: 'IP-категории' }, { id: 'wifi', label: 'Wi-Fi' },
+  { id: 'ads', label: 'Реклама' }, { id: 'updater', label: 'Обновления' }, { id: 'cron', label: 'Расписание' }, { id: 'console', label: 'Console' }
+];
+const logLabel = id => (LOG_TABS.find(t => t.id === id) || {}).label || id;
+const DETAILS = {
+  'd-components': { title: 'Компоненты', parent: 'system' },
+  'd-diag': { title: 'Диагностика', parent: 'system' },
+  'd-cron': { title: 'Задания по расписанию', parent: 'system' },
+  'd-adaptive': { title: 'AdaptiveAuto', parent: 'routes' },
+  'd-ipcats': { title: 'Активные IP-категории', parent: 'routes' },
+  'd-rules': { title: 'Мои правила', parent: 'ads' },
+  'd-sources': { title: 'Источники списков', parent: 'ads' },
+  'd-jobs': { title: 'Задания', parent: 'ads' },
+  'd-https': { title: 'HTTPS-фильтр', parent: 'ads' }
+};
+COMPONENTS.forEach(c => { DETAILS['c-' + c.id] = { title: c.name, parent: 'd-components' }; });
+function page(id) {
+  if (!id) return null;
+  const p = PAGES.find(x => x.id === id);
+  if (p) return p;
+  if (DETAILS[id]) return Object.assign({ id: id }, DETAILS[id]);
+  if (id.startsWith('t-')) return { id: id, title: id.slice(2), parent: 'vpn' };
+  if (id.startsWith('w-')) return { id: id, title: id.slice(2), parent: 'wifi' };
+  return null;
+}
+const parentOf = id => { const p = page(id); return p && p.parent; };
+const navId = id => { let x = id; while (parentOf(x)) x = parentOf(x); return x; };
+const DATA_FOR = id => { const p = PAGES.find(x => x.id === navId(id)); return p ? p.data : []; };
+
+/* ---------- Состояние интерфейса ---------- */
+const TAB_MAX = 4, TAB_DEFAULT = ['overview', 'wan', 'vpn', 'logs'];
+let tabIds = store.get('vward-tabs', TAB_DEFAULT).filter(id => PAGES.some(p => p.id === id)).slice(0, TAB_MAX);
+if (!tabIds.length) tabIds = TAB_DEFAULT.slice();
+let theme = store.get('vward-theme', 'system');
+let refreshSec = store.get('vward-refresh', 15);
+const CARD_IDS = ['system', 'updates', 'wan', 'vpn', 'routes', 'wifi', 'ads', 'runtime', 'storage'];
+let cardOrder = store.get('vward-card-order', CARD_IDS).filter(id => CARD_IDS.includes(id));
+CARD_IDS.forEach(id => { if (!cardOrder.includes(id)) cardOrder.push(id); });
+let hiddenCards = store.get('vward-card-hidden', []).filter(id => CARD_IDS.includes(id));
+let cardView = store.get('vward-card-view', 'grid'); if (!['grid', 'list'].includes(cardView)) cardView = 'grid';
+let current = 'overview', editing = false, confirm = null, logTab = 'wan', logWrap = true, actionResult = null;
+let updDraft = null;
+
+/* ---------- Построение блоков ---------- */
+function panel(title, body, opts) {
+  opts = opts || {};
+  const p = page(current), same = p && p.title === title, extra = opts.readonly || opts.right;
+  const head = same && !extra ? '' : '<div class="panel-head">' + (same ? '' : '<h2>' + esc(title) + '</h2>') + (opts.readonly ? '<span class="note">' + ico('lock') + 'Только чтение</span>' : '') + (opts.right || '') + '</div>';
+  return '<section class="panel' + (same ? ' no-title' : '') + '"' + (same ? ' aria-label="' + esc(title) + '"' : '') + '>' + head + (opts.desc ? '<p class="panel-desc">' + esc(opts.desc) + '</p>' : '') + body + '</section>';
+}
+/* Строка: [название, значение, метка состояния, переход (страница или http-адрес), доп. атрибуты перехода, подсказка] */
+function kv(rows) {
+  return '<dl class="kv">' + rows.filter(Boolean).map(r => {
+    const ext = r[3] && /^https?:/.test(r[3]);
+    const val = r[2] ? '<span class="pill ' + r[2] + '">' + esc(r[1]) + '</span>' : '<span class="num">' + esc(r[1]) + '</span>';
+    const link = r[3] && !ext;
+    return '<div class="kv-row' + (link ? ' link" role="button" tabindex="0" data-go="' + esc(r[3]) + '"' + (r[4] || '') : '"') + ' data-key="' + esc(r[0]) + '"><dt>' + esc(r[0]) + (r[5] ? '<span class="hint">' + esc(r[5]) + '</span>' : '') + '</dt><dd>' +
+      (ext ? '<a class="kv-ext" href="' + esc(r[3]) + '" target="_blank" rel="noopener">' + val + ico('external', 'chev') + '</a>' : val + (link ? ico('chevron', 'chev') : '')) + '</dd></div>';
+  }).join('') + '</dl>';
+}
+function ctrlRow(key, control, hint, cls) { return '<div class="kv-row' + (cls ? ' ' + cls : '') + '" data-key="' + esc(key) + '"><dt>' + esc(key) + (hint ? '<span class="hint">' + esc(hint) + '</span>' : '') + '</dt><dd>' + control + '</dd></div>'; }
+const sw = (attr, on, label, disabled) => '<label class="switch"><input type="checkbox" ' + attr + (on ? ' checked' : '') + (disabled ? ' disabled' : '') + ' aria-label="' + esc(label) + '"><i></i></label>';
+const sel = (attr, label, opts, value) => '<select class="input compact" ' + attr + ' aria-label="' + esc(label) + '">' + opts.map(o => '<option value="' + esc(o[0]) + '"' + (String(value) === String(o[0]) ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select>';
+const btn = (act, icon, label, cls, extra) => '<button class="btn' + (cls ? ' ' + cls : '') + '" type="button" data-act="' + act + '"' + (extra || '') + '>' + (icon ? ico(icon) : '') + esc(label) + '</button>';
+const empty = t => '<div class="empty">' + esc(t) + '</div>';
+function confirmBox(id, text, yesLabel, danger) {
+  if (!confirm || confirm.id !== id) return '';
+  return '<div class="confirm"><span>' + esc(text) + '</span><button class="btn small ' + (danger ? 'danger' : 'primary') + '" type="button" data-act="confirm-yes">' + esc(yesLabel) + '</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>';
+}
+function resultBox(id) {
+  if (!actionResult || actionResult.id !== id) return '';
+  return '<pre class="logbox result">' + esc(actionResult.text) + '</pre>';
+}
+function loadError(keys) {
+  const errs = keys.map(k => S.errors[k]).filter(Boolean);
+  return errs.length ? '<p class="field-warn">Часть данных не получена: ' + esc(errs[0]) + '. Повторим автоматически.</p>' : '';
+}
+
+/* ---------- Уведомления ---------- */
+function notifications() {
+  const n = [], s = S.status;
+  if (S.errors.status) n.push({ sev: 'crit', title: 'Нет связи с Console API', text: S.errors.status, to: 'system' });
+  if (!s) return n;
+  const w = s.wan || {}, wg = s.wg || {}, sv = s.services || {}, p = s.platform || {}, stg = s.storage || {};
+  if (w.internet === false) n.push({ sev: 'crit', title: 'Нет интернета', text: 'Защита интернета восстанавливает подключение', to: 'wan' });
+  const tunnels = wg.interfaces || [], down = tunnels.filter(t => !isTrue(t.connected));
+  if (down.length) n.push({ sev: 'warn', title: down.length === tunnels.length ? 'VPN не в сети' : 'Не все туннели в сети', text: down.map(t => t.name + (t.description ? ' · ' + t.description : '')).join(', '), to: 'vpn' });
+  if (isTrue(wg.failopen_active)) n.push({ sev: 'warn', title: 'Включён fail-open', text: 'Трафик списков VPN временно идёт напрямую', to: 'vpn' });
+  if (sv.crond === false || sv.supervisor === false) n.push({ sev: 'crit', title: 'Задания по расписанию остановлены', text: 'cron или supervisor не запущен', to: 'd-cron' });
+  const total = num(stg.total_kb), free = num(stg.free_kb);
+  if (total && free != null && free / total < 0.1) n.push({ sev: 'warn', title: 'Мало места в хранилище', text: 'свободно ' + fmtKB(free), to: 'system' });
+  if (['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase)) n.push({ sev: 'crit', title: 'Обновление требует внимания', text: phaseText(p.phase), to: 'updates' });
+  if (S.update && S.update.pending && S.update.pending.present) n.push({ sev: 'warn', title: 'Доступно обновление', text: S.update.pending.version || '', to: 'updates' });
+  const wc = ((S.wifi && S.wifi.clients) || []).filter(c => c.health === 'WARNING').length;
+  if (wc) n.push({ sev: 'warn', title: 'Wi-Fi: ' + wc + ' ' + plural(wc, 'клиент требует', 'клиента требуют', 'клиентов требуют') + ' внимания', text: 'частые переходы между 2.4 и 5 ГГц', to: 'wifi' });
+  if (S.ads && S.ads.paused) n.push({ sev: 'warn', title: 'Блокировка рекламы на паузе', text: 'реклама не блокируется', to: 'ads' });
+  return n;
+}
+function plural(n, one, few, many) { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; }
+function phaseText(p) { return ({ IDLE: 'Ожидание', CHECKING: 'Проверка', AVAILABLE: 'Доступно обновление', VERIFIED: 'Проверено', BACKING_UP: 'Резервная копия', INSTALLING: 'Установка', VERIFYING: 'Проверка установки', COMMIT_PREPARED: 'Завершение', COMMITTED: 'Установлено', ROLLING_BACK: 'Откат', FAILED: 'Ошибка', RECOVERY_REQUIRED: 'Нужно восстановление' })[p] || p || '—'; }
+
+/* ---------- Карточки обзора ---------- */
+function cardData(id) {
+  const s = st(), p = plat(), w = s.wan || {}, wg = s.wg || {}, sv = s.services || {}, g = s.storage || {}, r = S.route || {}, wf = S.wifi || {}, a = S.ads || {};
+  const tunnels = wg.interfaces || [], up = tunnels.filter(t => isTrue(t.connected)).length;
+  const comps = Object.keys(p.components || {}).length;
+  const warnWifi = (wf.clients || []).filter(c => c.health === 'WARNING').length;
+  switch (id) {
+    case 'system': return { icon: 'platform', title: 'Система', to: 'system', value: p.version || '—', sub: comps ? comps + ' ' + plural(comps, 'компонент', 'компонента', 'компонентов') : 'версия VWARD', pill: p.version ? ['ok', 'Норма'] : ['', '—'] };
+    case 'updates': return { icon: 'refresh', title: 'Обновления', to: 'updates', value: phaseText(p.phase), sub: '№ ' + (p.last_sequence || 0) + (p.active_slot ? ' · слот ' + p.active_slot : ''), pill: ['info', isTrue(p.auto_apply) ? 'График' : 'Вручную'] };
+    case 'wan': return { icon: 'globe', title: 'Интернет', to: 'wan', value: w.internet ? 'В сети' : s.wan ? 'Нет связи' : '—', sub: (w.address || 'адрес не получен') + (w.speed ? ' · ' + fmtSpeed(w.speed) : ''), pill: w.internet ? ['ok', 'Норма'] : s.wan ? ['crit', 'Сбой'] : ['', '—'] };
+    case 'vpn': return { icon: 'shield', title: 'VPN', to: 'vpn', value: up + ' из ' + tunnels.length, sub: isTrue(wg.failopen_active) ? 'fail-open включён' : 'fail-open не активен', pill: !tunnels.length ? ['', 'Нет туннелей'] : up === tunnels.length ? ['ok', 'Норма'] : ['warn', 'Внимание'] };
+    case 'routes': return { icon: 'route', title: 'Маршрутизация', to: 'routes', value: fmtInt(r.ip && r.ip.managed_routes) + ' ' + plural(num(r.ip && r.ip.managed_routes) || 0, 'маршрут', 'маршрута', 'маршрутов'), sub: fmtInt(r.domains && r.domains.unique) + ' доменов · ' + fmtInt(r.domains && r.domains.categories) + ' категорий', pill: S.route ? ['ok', 'Норма'] : ['', '—'] };
+    case 'wifi': return { icon: 'wifi', title: 'Wi-Fi клиенты', to: 'wifi', value: fmtInt(wf.count) + ' ' + plural(num(wf.count) || 0, 'клиент', 'клиента', 'клиентов'), sub: wf.enabled ? (warnWifi ? warnWifi + ' требуют внимания' : 'без замечаний') : 'сбор данных выключен', pill: !S.wifi ? ['', '—'] : warnWifi ? ['warn', 'Внимание'] : wf.enabled ? ['ok', 'Норма'] : ['', 'Выключен'] };
+    case 'ads': { const c = a.counts || {}; return { icon: 'block', title: 'Реклама', to: 'ads', value: fmtInt(c.blocked), sub: 'заблокировано доменов', pill: !S.ads ? ['', '—'] : a.paused ? ['warn', 'Пауза'] : ['ok', 'Норма'] }; }
+    case 'runtime': return { icon: 'runtime', title: 'Среда выполнения', to: 'system', value: sv.crond && sv.supervisor ? 'Работает' : s.services ? 'Сбой' : '—', sub: 'cron · supervisor', pill: sv.crond && sv.supervisor ? ['ok', 'Норма'] : s.services ? ['crit', 'Сбой'] : ['', '—'] };
+    case 'storage': { const t = num(g.total_kb), f = num(g.free_kb), used = t ? Math.round((t - f) / t * 100) : null; return { icon: 'storage', title: 'Хранилище', to: 'system', value: fmtKB(f), sub: 'свободно' + (t ? ' из ' + fmtKB(t) : '') + (g.filesystem ? ' · ' + g.filesystem : ''), pill: used == null ? ['', '—'] : used > 90 ? ['warn', used + ' %'] : ['ok', used + ' %'], meter: used }; }
+  }
+  return null;
+}
+
+/* ---------- Разделы ---------- */
+const RENDER = {
+  overview() {
+    const list = cardOrder.filter(id => editing || !hiddenCards.includes(id));
+    const ts = S.loadedAt.status ? new Date(S.loadedAt.status).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '—';
+    let html = '<div class="overview-bar"><span>Обновлено ' + ts + '</span><button class="icon-btn" type="button" data-act="reload" aria-label="Обновить данные">' + ico('refresh') + '</button><span class="spacer"></span>' +
+      (editing ? btn('edit', 'check', 'Готово', 'small primary') : btn('edit', 'edit', 'Настроить', 'small')) + '</div>';
+    if (editing) html += '<div class="edit-bar"><span>Вид</span><div class="segmented" role="group" aria-label="Вид карточек"><button type="button" data-view="grid" aria-pressed="' + (cardView === 'grid') + '">' + ico('platform') + 'Плитки</button><button type="button" data-view="list" aria-pressed="' + (cardView === 'list') + '">' + ico('logs') + 'Список</button></div><button class="link-btn" type="button" data-act="cards-reset">Сбросить</button></div>';
+    html += '<div class="cards' + (editing ? ' editing' : '') + '" data-view="' + cardView + '">' + list.map((id, n) => {
+      const c = cardData(id), h = hiddenCards.includes(id);
+      return '<div class="card' + (h ? ' is-hidden' : '') + '"' + (editing ? '' : ' role="button" tabindex="0" data-go="' + c.to + '"') + '><div class="card-icon">' + ico(c.icon) + '</div><span class="pill ' + c.pill[0] + '">' + esc(c.pill[1]) + '</span><div class="card-title">' + esc(c.title) + '</div><div class="card-value num">' + esc(c.value) + '</div><div class="card-sub">' + esc(c.sub) + '</div>' +
+        (c.meter != null ? '<div class="meter"><i data-width="' + c.meter + '"></i></div>' : '') +
+        (editing ? '<div class="card-edit"><button class="icon-btn" type="button" data-card-move="' + id + ':up" aria-label="Выше"' + (n === 0 ? ' disabled' : '') + '>' + ico('up') + '</button><button class="icon-btn" type="button" data-card-move="' + id + ':down" aria-label="Ниже"' + (n === list.length - 1 ? ' disabled' : '') + '>' + ico('down') + '</button><button class="icon-btn" type="button" data-card-toggle="' + id + '" aria-label="' + (h ? 'Показать' : 'Скрыть') + ' карточку">' + ico(h ? 'eyeOff' : 'eye') + '</button></div>' : '') + '</div>';
+    }).join('') + '</div>';
+    return loadError(['status']) + html;
+  },
+
+  wan() {
+    const w = st().wan || {}, pr = prof(), stage = num(w.recovery_stage) || 0;
+    const steps = ['3 неудачные проверки подряд', 'обновить адрес по DHCP - не чаще раза в 10 минут, до 3 в час', 'переподключить интерфейс - не чаще раза в 30 минут, до 6 в сутки'];
+    return loadError(['status']) +
+      panel('Подключение', kv([
+        ['Состояние', w.internet ? 'В сети' : 'Нет связи', w.internet ? 'ok' : 'crit'],
+        ['Интерфейс', (pr.wan_interface || '—') + (pr.wan_device ? ' (' + pr.wan_device + ')' : '')],
+        ['Кабель', isTrue(w.carrier) ? 'подключён' + (w.speed ? ' · ' + fmtSpeed(w.speed) : '') : 'нет сигнала'],
+        ['IPv4', w.address || '—'],
+        ['Шлюз', (w.gateway || '—') + (w.gateway ? (w.gateway_accessible ? ' · доступен' : ' · недоступен') : '')],
+        ['DNS', w.dns_accessible ? 'отвечает' : 'не отвечает']
+      ]) + '<div class="panel-actions even">' + btn('reload', 'check', 'Проверить') + btn('open-log', 'logs', 'Журнал', '', ' data-log-tab="wan"') + '</div>', { desc: 'Интерфейс определён автоматически.' }) +
+      panel('Защита интернета', '<p class="panel-desc">Порядок восстановления:</p><ol class="steps">' + steps.map((x, i) => '<li' + (i + 1 === stage ? ' class="now"' : '') + '>' + esc(x) + '</li>').join('') + '</ol>' +
+        kv([['Сейчас', stage ? 'Восстановление, шаг ' + stage : 'Норма', stage ? 'warn' : 'ok'], ['Попыток восстановления подряд', String(num(w.recovery_count) || 0)], ['История восстановлений', 'журнал', '', 'logs', ' data-log-go="recovery"']]));
+  },
+
+  vpn() {
+    const wg = st().wg || {}, list = wg.interfaces || [], managed = prof().tunnel_interface || '';
+    const row = t => { const up = isTrue(t.connected); return '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.name) + (t.description ? ' · ' + esc(t.description) : '') + '</b><small>' + (t.name === managed ? '<span class="st ok">для маршрутов</span> · ' : '') + esc(t.state || '') + '</small></div><span class="pill ' + (up ? 'ok' : 'warn') + '">' + (up ? 'В сети' : 'Не в сети') + '</span>' + ico('chevron', 'chev') + '</li>'; };
+    return loadError(['status']) +
+      panel('Туннели', list.length ? '<ul class="rows">' + list.map(row).join('') + '</ul>' : empty('Туннели WireGuard не найдены'), { desc: 'Туннели WireGuard найдены автоматически. Нажмите на туннель, чтобы открыть подробности.' }) +
+      panel('Защита VPN', kv([
+        ['fail-open', isTrue(wg.failopen_active) ? 'Включён' : 'Не активен', isTrue(wg.failopen_active) ? 'warn' : ''],
+        ['Проверка туннеля', 'каждую минуту', '', 'logs', ' data-log-go="tunnel"'],
+        ['Потерь подряд', String(num(wg.down_streak) || 0)]
+      ]) + '<div class="panel-actions even">' + btn('tunnel-health', 'check', 'Проверить') + btn('open-log', 'logs', 'Журнал', '', ' data-log-tab="tunnel"') + '</div>' + resultBox('tunnel-health'),
+      { desc: 'Если туннель упал, трафик из списков VPN временно идёт напрямую, пока VPN не восстановится.' });
+  },
+
+  routes() {
+    const r = S.route || {}, d = r.domains || {}, ip = r.ip || {}, ad = r.adaptive || {}, pr = prof();
+    return loadError(['route']) +
+      panel('Сводка', kv([
+        ['Туннель для маршрутов', pr.tunnel_interface || '—', '', 'vpn'],
+        ['Доменов в каталоге', fmtInt(d.unique)],
+        ['Категорий доменов', fmtInt(d.categories)],
+        ['Маршрутов VWARD', fmtInt(ip.managed_routes)],
+        ['Группа маршрутизации', pr.policy_group || '—']
+      ])) +
+      panel('Что идёт через VPN', kv([
+        ['AdaptiveAuto', fmtInt(ad.count) + ' ' + plural(num(ad.count) || 0, 'домен', 'домена', 'доменов'), '', 'd-adaptive'],
+        ['Активные IP-категории', fmtInt(ip.active_count) + ' из ' + fmtInt(ip.categories), '', 'd-ipcats'],
+        ['Источники каталога', 'itdog ' + fmtInt(d.sources && d.sources.itdog) + ' · v2fly ' + fmtInt(d.sources && d.sources.v2fly)]
+      ])) +
+      panel('Проверить адрес', '<form class="inline-form" data-form="probe"><input class="input" id="probeInput" placeholder="домен или IPv4, например claude.ai" aria-label="Домен или IPv4" autocomplete="off"><button class="btn primary" type="submit">' + ico('search') + 'Проверить</button></form><div id="probeResult"></div>', { desc: 'Покажет, через какой интерфейс пойдёт трафик.' }) +
+      panel('Обслуживание', kv([
+        ['Сверка маршрутов', 'каждые 5 минут', '', 'logs', ' data-log-go="routing"'],
+        ['Каталог обновлён', d.last_update || '—'],
+        ['IP-категории обновлены', ip.last_sync || '—', '', 'logs', ' data-log-go="policy"']
+      ]) +
+        (confirmBox('route-reconcile', 'Сверить маршруты роутера с каталогом сейчас?', 'Выполнить') || confirmBox('policy-refresh', 'Скачать IP-категории заново и пересобрать маршруты? Это займёт 1-2 минуты.', 'Выполнить') ||
+          '<div class="panel-actions even">' + btn('ask', 'check', 'Сверить маршруты', '', ' data-confirm="route-reconcile"') + btn('ask', 'refresh', 'Обновить IP-категории', '', ' data-confirm="policy-refresh"') + btn('refresh-hints', 'refresh', 'Обновить подсказки') + '</div>') +
+        resultBox('routes'));
+  },
+
+  wifi() {
+    const w = S.wifi || {}, clients = w.clients || [], sc = w.scheduler || {};
+    return loadError(['wifi']) +
+      panel('Контроль Wi-Fi клиентов', kv([
+        ['Сбор данных', w.enabled ? 'Включён' : 'Выключен', w.enabled ? 'ok' : ''],
+        ['Ручное управление', w.control_enabled ? 'Включено' : 'Выключено', w.control_enabled ? 'info' : ''],
+        ['Домашний сегмент', prof().lan_interface || '—'],
+        ['Последний сбор', sc.last ? sc.last + (num(sc.rc) === 0 ? ' · успешно' : ' · код ' + sc.rc) : '—', '', 'logs', ' data-log-go="wifi"']
+      ]), { desc: 'Сбор данных и ручное управление включаются в файле wifi-client-guard.conf на роутере.' }) +
+      panel('Клиенты', clients.length ? '<ul class="rows">' + clients.map(c => '<li class="row link" role="button" tabindex="0" data-go="w-' + esc(c.mac) + '"><div class="row-main"><b class="mono">' + esc(c.mac) + ' · ' + esc(bandText(c.band)) + '</b><small>' + fmtInt(c.switches) + ' ' + plural(num(c.switches) || 0, 'переход', 'перехода', 'переходов') + (num(c.weak_5g) ? ' · слабый 5 ГГц ' + c.weak_5g + ' раз' : '') + (c.min_5g_rssi && c.min_5g_rssi !== '-' ? ' · мин. ' + esc(c.min_5g_rssi) + ' дБм' : '') + '</small></div><span class="pill ' + (c.health === 'WARNING' ? 'warn' : 'ok') + '">' + esc(recText(c)) + '</span>' + ico('chevron', 'chev') + '</li>').join('') + '</ul>' : empty(w.enabled ? 'Клиентов пока нет' : 'Сбор данных выключен'), { desc: 'Рекомендации не применяются автоматически.' });
+  },
+
+  ads() {
+    const a = S.ads || {}, c = a.counts || {}, s = a.settings || {}, j = a.jobs || {}, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
+    const aghHost = ag.address || location.hostname, aghUrl = ag.port ? 'http://' + aghHost + ':' + ag.port + '/' : '';
+    const runMode = s.RUN_MODE || 'scheduled';
+    return loadError(['ads']) +
+      panel('Блокировка', '<dl class="kv">' + ctrlRow('Блокировка рекламы и трекеров', sw('data-ads-pause', !a.paused, 'Блокировка рекламы', !S.ads), a.paused ? 'на паузе - реклама не блокируется' : '') + '</dl>' +
+        kv([aghUrl ? ['AdGuard Home', aghHost + ':' + ag.port, '', aghUrl] : ['AdGuard Home', 'адрес не настроен']])) +
+      panel('Списки и правила', kv([
+        ['Заблокировано доменов', fmtInt(c.blocked)],
+        ['На проверке', fmtInt(c.review), num(c.review) ? 'warn' : ''],
+        ['Разрешено автоматически', fmtInt(num(c.allow) != null ? num(c.allow) + (num(c.trust) || 0) : null)],
+        ['Мои правила', fmtInt((a.manual_rules || []).length), '', 'd-rules'],
+        ['Источники', (a.sources || []).filter(x => x.mode === 'active').length + ' из ' + (a.sources || []).length + ' активны', '', 'd-sources'],
+        ['Задания', j.current && j.current.state && j.current.state !== 'IDLE' ? 'выполняется' : (num(j.queued) ? j.queued + ' в очереди' : 'нет активных'), '', 'd-jobs'],
+        ['HTTPS-фильтр', S.https && S.https.ok ? (S.https.status && isTrue(S.https.status.ENABLED) ? 'Включён' : 'Выключен') : 'недоступен', '', 'd-https']
+      ])) +
+      panel('Публикация в AdGuard Home', kv([['Публиковать автоматически', isTrue(s.AUTO_PUBLISH) ? 'Включено' : 'Выключено', '', null, '', 'без ручного подтверждения']]) +
+        (confirmBox('ads-publish', 'Отправить правила в AdGuard Home? Они применятся сразу.', 'Опубликовать') || '<div class="panel-actions">' + btn('ask', 'check', 'Опубликовать правила', 'primary', ' data-confirm="ads-publish"') + '</div>')) +
+      panel('Проверить домен', '<form class="inline-form" data-form="ads-probe"><input class="input" id="adsProbe" placeholder="например, mc.yandex.ru" aria-label="Домен" autocomplete="off"><button class="btn primary" type="submit">' + ico('search') + 'Проверить</button></form>', { desc: 'Проверка ставится в очередь заданий; результат появится в «Задания».' }) +
+      panel('Настройки блокировки', '<dl class="kv">' +
+        ctrlRow('Режим работы', sel('data-ads-set="RUN_MODE"', 'Режим работы', [['scheduled', 'По расписанию'], ['dynamic', 'По запросам'], ['manual', 'Вручную']], runMode), ({ scheduled: 'новые домены проверяются пачкой раз в интервал', dynamic: 'каждый новый домен проверяется сразу', manual: 'проверка только по кнопке' })[runMode]) +
+        (runMode === 'scheduled' ? ctrlRow('Интервал', sel('data-ads-set="SCHEDULE_INTERVAL_MIN"', 'Интервал', [['5', '5 минут'], ['10', '10 минут'], ['30', '30 минут'], ['60', '1 час']], s.SCHEDULE_INTERVAL_MIN || '10')) : '') +
+        ctrlRow('Обновлять источники автоматически', sw('data-ads-set="AUTO_SOURCE_UPDATE"', isTrue(s.AUTO_SOURCE_UPDATE), 'Обновлять источники автоматически', !S.ads), 'раз в ' + (s.SOURCE_UPDATE_INTERVAL_HOURS || 24) + ' ч') +
+        ctrlRow('Новые правила применять к', sel('data-ads-set="AUTO_RULE_SCOPE"', 'Новые правила', [['exact', 'Только домену'], ['suffix', 'Домену и поддоменам']], s.AUTO_RULE_SCOPE || 'exact')) +
+        '</dl>' + resultBox('ads'));
+  },
+
+  system() {
+    const s = st(), r = s.router || {}, p = plat(), g = s.storage || {}, dg = S.diag && S.diag.checks || [];
+    const bad = dg.filter(x => x.status !== 'PASS').length;
+    return loadError(['status']) +
+      panel('Устройство', kv([
+        ['Модель', r.model || '—'], ['KeeneticOS', r.version || '—'],
+        ['Веб-интерфейс Keenetic', prof().lan_address || location.hostname, '', 'http://' + (prof().lan_address || location.hostname) + '/'],
+        ['Версия VWARD', p.version || '—', '', 'updates'], ['Время работы', fmtUptime(r.uptime_sec)]
+      ])) +
+      panel('Состояние', kv([
+        ['Компоненты', COMPONENTS.length + ' ' + plural(COMPONENTS.length, 'компонент', 'компонента', 'компонентов'), '', 'd-components'],
+        ['Задания по расписанию', (s.services && s.services.crond ? 'cron работает' : 'cron остановлен'), s.services && s.services.crond ? '' : 'crit', 'd-cron'],
+        ['Диагностика', dg.length ? (dg.length - bad) + ' из ' + dg.length + ' в норме' : 'не запускалась', bad ? 'warn' : '', 'd-diag']
+      ])) +
+      panel('Хранилище', kv([['Свободно', fmtKB(g.free_kb) + ' из ' + fmtKB(g.total_kb)], ['Файловая система', g.filesystem || '—'], ['Служебная очистка', 'каждый час', '', 'logs', ' data-log-go="cron"']]));
+  },
+
+  updates() {
+    const p = plat(), u = S.update || {}, al = u.allowed || {}, pend = u.pending || {};
+    const savedMode = isTrue(p.auto_apply) ? 'schedule' : 'manual', mode = updDraft ? updDraft.mode : savedMode;
+    const dirty = mode !== savedMode;
+    const acts = [];
+    if (al.check) acts.push(btn('update-op', 'refresh', 'Проверить', 'primary', ' data-op="check"'));
+    if (al.apply) acts.push(btn('ask', 'save', 'Установить ' + (pend.version || ''), 'primary', ' data-confirm="update-apply"'));
+    if (al.retry) acts.push(btn('ask', 'refresh', 'Повторить', '', ' data-confirm="update-retry"'));
+    if (al.rollback) acts.push(btn('ask', 'undo', 'Откатить', 'danger', ' data-confirm="update-rollback"'));
+    if (al.recover) acts.push(btn('ask', 'alert', 'Восстановить', 'danger', ' data-confirm="update-recover"'));
+    const conf = confirmBox('update-apply', 'Установить обновление ' + (pend.version || '') + '? Компоненты перезапустятся.', 'Установить') ||
+      confirmBox('update-retry', 'Повторить установку обновления?', 'Повторить') ||
+      confirmBox('update-rollback', 'Вернуть предыдущую версию? Компоненты перезапустятся.', 'Откатить', true) ||
+      confirmBox('update-recover', 'Восстановить прерванное обновление?', 'Восстановить', true);
+    return loadError(['update', 'status']) +
+      panel('Состояние', kv([
+        ['Состояние', phaseText(u.phase || p.phase), (u.phase || p.phase) === 'FAILED' ? 'crit' : 'ok'],
+        ['Версия', (p.version || '—') + ' · № ' + (p.last_sequence || 0)],
+        pend.present ? ['Доступно', (pend.version || '') + (pend.priority ? ' · ' + pend.priority : ''), 'info'] : null,
+        ['Последняя проверка', p.last_health_check || '—', '', 'logs', ' data-log-go="updater"'],
+        ['Откат', u.rollback_available ? 'Доступен' : 'Недоступен', u.rollback_available ? 'info' : '']
+      ]) + (conf || (acts.length ? '<div class="panel-actions even">' + acts.join('') + '</div>' : '')) + resultBox('updates')) +
+      panel('Настройки обновлений', '<dl class="kv">' +
+        ctrlRow('Установка обновлений', sel('data-upd="mode"', 'Установка обновлений', [['schedule', 'По расписанию'], ['manual', 'Вручную']], mode), mode === 'schedule' ? 'в окно установки, критические исправления - сразу' : 'только проверка и уведомление') +
+        '</dl>' + kv([
+          mode === 'schedule' ? ['Окно установки', p.safe_window || '—'] : null,
+          ['Канал', p.channel === 'dev' ? 'Dev' : p.channel === 'beta' ? 'Бета' : (p.channel || '—')],
+          ['Интервал проверки', p.check_interval_seconds ? Math.round(p.check_interval_seconds / 60) + ' мин' : '—']
+        ]) +
+        (dirty ? '<div class="save-bar"><span>Есть несохранённые изменения</span>' + btn('upd-cancel', '', 'Отменить', 'small') + btn('upd-save', '', 'Сохранить', 'small primary') + '</div>' : ''),
+      { desc: 'Канал, окно установки и интервал пока меняются в update.conf на роутере.' });
+  },
+
+  settings() {
+    const sec = S.security || {}, l = sec.listener || {}, api = sec.api || {};
+    return loadError(['security']) +
+      panel('Доступ к Console', kv([
+        ['Адрес Console', (l.address || location.hostname) + ':' + (l.port || location.port || '80')],
+        ['Вход по учётной записи Keenetic', api.authentication ? 'Включён' : 'Выключен', api.authentication ? 'ok' : 'warn'],
+        ['Защита запросов', api.mutation_guard ? 'Включена' : 'Выключена', api.mutation_guard ? 'ok' : 'crit'],
+        ['Доступ с других сайтов', api.cors ? 'Разрешён' : 'Запрещён', api.cors ? 'crit' : 'ok']
+      ]) + (api.authentication ? '' : '<p class="field-warn">Пока вход выключен, Console открыта любому устройству в домашней сети.</p>'),
+      { desc: 'Вход по логину и паролю Keenetic появится в отдельном этапе; на время разработки он выключен.' }) +
+      panel('Нижняя панель на телефоне', '<div class="tabbar preview" data-key="Разделы на панели">' + tabsHtml() + '</div><dl class="kv">' + PAGES.map(p => {
+        const on = tabIds.includes(p.id), i = tabIds.indexOf(p.id);
+        return ctrlRow(p.title, (on ? '<span class="order-btns"><button class="icon-btn" type="button" data-move="' + p.id + ':up" aria-label="Выше"' + (i === 0 ? ' disabled' : '') + '>' + ico('up') + '</button><button class="icon-btn" type="button" data-move="' + p.id + ':down" aria-label="Ниже"' + (i === tabIds.length - 1 ? ' disabled' : '') + '>' + ico('down') + '</button></span>' : '') + sw('data-tabpick="' + p.id + '"', on, 'Показывать «' + p.title + '» на панели'));
+      }).join('') + '</dl>', { desc: 'До ' + TAB_MAX + ' разделов и их порядок. Остальные разделы - в меню «Ещё».' }) +
+      panel('Интерфейс', '<dl class="kv">' + ctrlRow('Обновлять данные', sel('data-pref="refresh"', 'Обновлять данные', [['15', 'каждые 15 секунд'], ['30', 'каждые 30 секунд'], ['60', 'каждую минуту']], refreshSec)) + '</dl><div class="panel-actions">' + btn('ui-reset', 'undo', 'Сбросить вид Console') + '</div>', { desc: 'Порядок и вид карточек, нижняя панель и тема хранятся в этом браузере.' });
+  },
+
+  logs() {
+    const text = S.logs[logTab];
+    return '<section class="panel" aria-label="Журналы"><div class="panel-head"><div class="panel-tools">' +
+      '<button class="icon-btn" type="button" data-act="log-copy" aria-label="Копировать" title="Копировать">' + ico('copy') + '</button>' +
+      '<button class="icon-btn" type="button" data-act="log-share" aria-label="Поделиться" title="Поделиться">' + ico('share') + '</button>' +
+      '<button class="icon-btn" type="button" data-act="log-save" aria-label="Сохранить журнал в .txt" title="Сохранить журнал в .txt">' + ico('save') + '</button>' +
+      '<button class="icon-btn" type="button" data-act="log-save-all" aria-label="Сохранить все журналы" title="Сохранить все журналы">' + ico('archive') + '</button>' +
+      '<button class="icon-btn" type="button" data-act="log-wrap" aria-pressed="' + logWrap + '" aria-label="Перенос строк" title="Перенос строк">' + ico('wrap') + '</button>' +
+      '<button class="icon-btn" type="button" data-act="log-reload" aria-label="Обновить журнал" title="Обновить журнал">' + ico('refresh') + '</button></div></div>' +
+      '<div class="segmented" role="group" aria-label="Журнал">' + LOG_TABS.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
+      '<pre class="logbox' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + esc(text == null ? 'Загрузка…' : text) + '</pre></section>';
+  },
+
+  'd-components'() {
+    const pc = plat().components || {};
+    return panel('Компоненты', '<ul class="rows">' + COMPONENTS.map(c => { const x = pc[c.id] || {}; return '<li class="row link" role="button" tabindex="0" data-go="c-' + c.id + '"><div class="row-main"><b>' + esc(c.name) + '</b><small>' + esc(x.release || plat().version || '—') + (x.installed_at ? ' · установлен ' + esc(x.installed_at) : '') + '</small></div><span class="pill ' + (x.health === 'PASS' ? 'ok' : '') + '">' + (x.health === 'PASS' ? 'Норма' : 'Нет данных') + '</span>' + ico('chevron', 'chev') + '</li>'; }).join('') + '</ul>');
+  },
+  'd-diag'() {
+    const d = S.diag, map = { 'console-api': 'settings', opt: 'system', lighttpd: 'c-console', crond: 'd-cron', supervisor: 'c-runtime', adguard: 'ads', adaptive: 'c-route-engine', updater: 'updates', config: 'updates', wan: 'wan', wg: 'vpn' };
+    return panel('Диагностика', (d && d.checks ? '<ul class="rows">' + d.checks.map(x => { const to = map[x.id]; return '<li class="row' + (to ? ' link" role="button" tabindex="0" data-go="' + to + '"' : '"') + '><div class="row-main"><b>' + esc(x.label) + '</b><small>' + esc(x.detail || '') + '</small></div><span class="pill ' + (x.status === 'PASS' ? 'ok' : x.status === 'FAIL' ? 'crit' : 'warn') + '">' + (x.status === 'PASS' ? 'Норма' : x.status === 'FAIL' ? 'Сбой' : 'Внимание') + '</span>' + (to ? ico('chevron', 'chev') : '') + '</li>'; }).join('') + '</ul>' : empty(S.errors.diag ? 'Диагностика не выполнена: ' + S.errors.diag : 'Загрузка…')) +
+      '<div class="panel-actions">' + btn('diag-run', 'check', 'Запустить проверку', 'primary') + '</div>');
+  },
+  'd-cron'() {
+    const c = st().cron || {}, sv = st().services || {};
+    const jobs = [['Защита интернета', c.guardian_rc, c.guardian_last, 'wan-guard'], ['Защита VPN', c.wg_rc, c.wg_last, 'tunnel-guard'], ['Сверка маршрутов', c.routing_rc, c.routing_last, 'route-reconciler']];
+    return panel('Служба расписания', kv([['cron', sv.crond ? 'Работает' : 'Остановлен', sv.crond ? 'ok' : 'crit'], ['Supervisor', sv.supervisor ? 'Работает' : 'Остановлен', sv.supervisor ? 'ok' : 'crit']])) +
+      panel('Последние запуски', '<ul class="rows">' + jobs.map(j => { const ok = String(j[1]) === '0'; return '<li class="row link" role="button" tabindex="0" data-go="c-' + j[3] + '"><div class="row-main"><b>' + esc(j[0]) + '</b><small>' + esc(j[2] || 'ещё не запускалось') + '</small></div><span class="pill ' + (j[1] === '' || j[1] == null ? '' : ok ? 'ok' : 'crit') + '">' + (j[1] === '' || j[1] == null ? 'Нет данных' : ok ? 'Успешно' : 'Код ' + esc(j[1])) + '</span>' + ico('chevron', 'chev') + '</li>'; }).join('') + '</ul>');
+  },
+  'd-adaptive'() {
+    const rec = (S.route && S.route.adaptive && S.route.adaptive.recent) || [];
+    return panel('AdaptiveAuto', rec.length ? '<ul class="rows">' + rec.map(d => '<li class="row"><div class="row-main"><b>' + dom(typeof d === 'string' ? d : d.domain || '') + '</b><small>недоступен напрямую - идёт через VPN</small></div></li>').join('') + '</ul>' : empty('Пока пусто'), { desc: 'Домены, которые VWARD сам отправил через VPN после неудачной прямой проверки.' });
+  },
+  'd-ipcats'() {
+    const act = (S.route && S.route.ip && S.route.ip.active) || [];
+    return panel('Активные IP-категории', act.length ? '<ul class="rows">' + act.map(x => '<li class="row"><div class="row-main"><b>' + esc(typeof x === 'string' ? x : x.name || '') + '</b></div><span class="pill ok">Через VPN</span></li>').join('') + '</ul>' : empty('Активных категорий нет'), { desc: 'Сети сервисов, которые идут через VPN по IP-адресам.' });
+  },
+  'd-rules'() {
+    const rules = (S.ads && S.ads.manual_rules) || [];
+    return panel('Добавить правило', '<form class="inline-form" data-form="ads-rule"><input class="input" id="adsRuleDomain" placeholder="домен, например example.com" aria-label="Домен" autocomplete="off"><select class="input compact" id="adsRuleType" aria-label="Действие"><option value="block">Блокировать</option><option value="allow">Разрешить</option></select><select class="input compact" id="adsRuleScope" aria-label="Область"><option value="exact">Только домен</option><option value="suffix">С поддоменами</option></select><button class="btn primary" type="submit">Добавить</button></form>' + resultBox('ads-rule')) +
+      panel('Мои правила', rules.length ? '<ul class="rows">' + rules.map(r => '<li class="row"><div class="row-main"><b>' + dom(r.domain) + '</b><small><span class="st ' + (r.type === 'allow' ? 'ok' : 'crit') + '">' + (r.type === 'allow' ? 'разрешён' : 'заблокирован') + '</span> · ' + (r.scope === 'suffix' ? 'домен и поддомены' : 'только домен') + '</small></div><button class="icon-btn" type="button" title="Удалить правило" data-ads-remove="' + esc(r.domain) + '" data-scope="' + esc(r.scope || 'exact') + '" aria-label="Удалить правило ' + esc(r.domain) + '">' + ico('close') + '</button></li>').join('') + '</ul>' : empty('Правил пока нет'), { desc: 'Ручные правила важнее списков и автоматических решений.' });
+  },
+  'd-sources'() {
+    const src = (S.ads && S.ads.sources) || [];
+    return panel('Источники списков', src.length ? '<ul class="rows">' + src.map(x => '<li class="row"><div class="row-main"><b>' + esc(x.name || x.id) + '</b><small>' + esc(x.purpose || '') + (x.cached ? ' · загружен' : ' · ещё не загружен') + '</small></div>' + sel('data-ads-source="' + esc(x.id) + '"', 'Режим ' + (x.name || x.id), [['off', 'Выключен'], ['check', 'Проверка'], ['active', 'Активен']], x.mode) + '</li>').join('') + '</ul>' : empty('Источники не найдены'), { desc: '«Проверка» - источник учитывается при оценке, но сам ничего не блокирует. «Активен» - блокирует.' });
+  },
+  'd-jobs'() {
+    const j = (S.ads && S.ads.jobs) || {}, cur = j.current || {}, last = j.last || {};
+    return panel('Задания', kv([['Сейчас', cur.state && cur.state !== 'IDLE' ? (cur.type || cur.state) : 'нет активных', cur.state && cur.state !== 'IDLE' ? 'info' : ''], ['В очереди', fmtInt(j.queued || 0)], ['Последнее', (last.type || '—') + (last.state ? ' · ' + last.state : '')]]) +
+      '<div class="panel-actions even">' + btn('ads-job', 'search', 'Проверить новые домены', '', ' data-job="scan"') + btn('ads-job', 'refresh', 'Обновить источники', '', ' data-job="sources-update"') + btn('ads-job', 'check', 'Пересобрать правила', '', ' data-job="rules-rebuild"') + '</div>' +
+      (last.output ? '<pre class="logbox">' + esc(last.output) + '</pre>' : '') + resultBox('ads-job'));
+  },
+  'd-https'() {
+    const h = S.https;
+    if (!h || !h.ok) return panel('HTTPS-фильтр', empty(h && h.error === 'https_backend_missing' ? 'HTTPS-фильтр не установлен на этом роутере' : 'Состояние недоступно'));
+    const s = h.status || {};
+    return panel('HTTPS-фильтр', kv(Object.keys(s).slice(0, 12).map(k => [k, s[k]])) +
+      (confirmBox('https-start', 'Запустить HTTPS-фильтр? Устройства, использующие прокси, пойдут через него.', 'Запустить') || confirmBox('https-ca', 'Создать собственный сертификат для HTTPS-фильтра?', 'Создать') ||
+        '<div class="panel-actions even">' + btn('https-op', 'check', 'Проверить настройки', '', ' data-op="validate"') + btn('ask', 'refresh', 'Запустить', '', ' data-confirm="https-start"') + btn('https-op', 'close', 'Остановить', '', ' data-op="stop"') + btn('ask', 'lock', 'Создать сертификат', '', ' data-confirm="https-ca"') + '</div>') + resultBox('https'),
+      { desc: 'Экспериментальный фильтр в режиме явного прокси. По умолчанию выключен.' });
+  }
+};
+function bandText(b) { return b === '5' ? '5 ГГц' : b === '2.4' ? '2.4 ГГц' : 'диапазон неизвестен'; }
+function recText(c) { return c.recommendation === 'bind_2g' ? 'Закрепить за 2.4' : c.recommendation === 'review' ? 'Проверить' : c.health === 'WARNING' ? 'Внимание' : 'Норма'; }
+
+function tunnelPage(name) {
+  const t = ((st().wg || {}).interfaces || []).find(x => x.name === name) || { name: name };
+  const up = isTrue(t.connected), managed = prof().tunnel_interface === name;
+  return panel(name + (t.description ? ' · ' + t.description : ''), kv([
+    ['Состояние', up ? 'В сети' : 'Не в сети', up ? 'ok' : 'warn'], ['Канал связи', t.link || '—'], ['Статус интерфейса', t.state || '—'],
+    ['Используется для маршрутов', managed ? 'Да' : 'Нет', managed ? 'info' : '']
+  ]), { desc: managed ? 'Через этот туннель идут все домены и сети из «Маршрутизации».' : 'Туннель для маршрутов задаётся в device.conf на роутере.' });
+}
+function wifiClientPage(mac) {
+  const c = ((S.wifi && S.wifi.clients) || []).find(x => x.mac === mac) || { mac: mac };
+  const ctl = S.wifi && S.wifi.control_enabled;
+  const ops = [['auto', 'Авто', 'WIFI_BAND_AUTO'], ['bind-2g', 'Только 2.4 ГГц', 'WIFI_BIND_2G'], ['bind-5g', 'Только 5 ГГц', 'WIFI_BIND_5G']];
+  return panel(mac, kv([['Сейчас', bandText(c.band)], ['Состояние', recText(c), c.health === 'WARNING' ? 'warn' : 'ok'], ['Переходов за окно', fmtInt(c.switches)], ['Слабый 5 ГГц', fmtInt(c.weak_5g) + ' раз'], ['Мин. сигнал 5 ГГц', c.min_5g_rssi && c.min_5g_rssi !== '-' ? c.min_5g_rssi + ' дБм' : '—'], ['Причина', c.reason || '—']])) +
+    panel('Диапазон для устройства', '<div class="segmented" role="group" aria-label="Диапазон">' + ops.map(o => '<button type="button" data-wifi-bind="' + o[0] + '" aria-pressed="false"' + (ctl ? '' : ' disabled') + '>' + o[1] + '</button>').join('') + '</div>' +
+      (ctl ? '' : '<p class="panel-desc">Закрепление выключено: включите CONTROL_ENABLED в wifi-client-guard.conf на роутере.</p>') +
+      (confirm && confirm.id === 'wifi-bind' ? '<div class="confirm"><span>Применить «' + esc(ops.find(o => o[0] === confirm.op)[1]) + '» для ' + esc(mac) + '? Перед изменением сохранится резервная копия настроек, при ошибке изменение откатится.</span><button class="btn small primary" type="button" data-act="confirm-yes">Применить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '') + resultBox('wifi'),
+    { desc: 'Закрепление через штатную настройку Keenetic для зарегистрированных устройств.' });
+}
+function compPage(c) {
+  const x = (plat().components || {})[c.id] || {}, dependents = COMPONENTS.filter(d => d.deps.includes(c.id));
+  const link = id => '<li class="row link" role="button" tabindex="0" data-go="c-' + id + '"><div class="row-main"><b>' + esc(comp(id).name) + '</b></div>' + ico('chevron', 'chev') + '</li>';
+  return panel(c.name, kv([['Состояние', x.health === 'PASS' ? 'Норма' : 'Нет данных', x.health === 'PASS' ? 'ok' : ''], ['Версия', x.release || plat().version || '—'], ['Установлен', x.installed_at || '—'], ['Обновление', x.update_id || '—']]) +
+    '<div class="panel-actions even">' + (c.page ? '<button class="btn" type="button" data-go="' + c.page + '">Открыть раздел</button>' : '') + btn('open-log', 'logs', 'Журнал', '', ' data-log-tab="' + c.log + '"') + '</div>', { desc: c.desc }) +
+    panel('Зависит от', c.deps.length ? '<ul class="rows">' + c.deps.map(link).join('') + '</ul>' : '<p class="panel-desc">Ни от чего не зависит.</p>') +
+    panel('От него зависят', dependents.length ? '<ul class="rows">' + dependents.map(d => link(d.id)).join('') + '</ul>' : '<p class="panel-desc">Никто не зависит.</p>');
+}
+
+/* ---------- Навигация ---------- */
+function tabsHtml() {
+  const cur = navId(current);
+  return tabIds.map(id => '<button class="tab" type="button" data-tab="' + id + '"' + (id === cur ? ' aria-current="page"' : '') + '>' + ico(page(id).icon) + '<span>' + SHORT[id] + '</span></button>').join('') +
+    '<button class="tab" type="button" data-tab="more"' + (tabIds.includes(cur) ? '' : ' aria-current="page"') + '>' + ico('more') + '<span>Ещё</span></button>';
+}
+function renderNav() {
+  const cur = navId(current), warnPages = new Set(notifications().map(n => navId(n.to)));
+  let html = '', g = '';
+  PAGES.forEach(p => {
+    if (p.group !== g) { g = p.group; html += '<div class="nav-group">' + g + '</div>'; }
+    html += '<button class="nav-item" type="button" data-go="' + p.id + '"' + (p.id === cur ? ' aria-current="page"' : '') + '>' + ico(p.icon) + '<span>' + p.title + '</span>' + (warnPages.has(p.id) ? '<span class="dot" aria-label="Есть уведомление"></span>' : '') + '</button>';
+  });
+  $('sideNav').innerHTML = html;
+  $('tabbar').innerHTML = tabsHtml();
+  document.documentElement.style.setProperty('--tabs', tabIds.length + 1);
+  const n = notifications().length;
+  $('bellBtn').innerHTML = ico('bell') + (n ? '<span class="badge">' + n + '</span>' : '');
+  $('bellBtn').setAttribute('aria-label', n ? 'Уведомления: ' + n : 'Уведомления');
+  const r = st().router || {};
+  $('brandModel').textContent = r.model || 'роутер';
+  $('sideVersion').textContent = 'VWARD ' + (plat().version || '');
+}
+function render() {
+  const p = page(current);
+  $('pageTitle').textContent = p.title;
+  document.title = p.title + ' · VWARD Console';
+  const back = $('backBtn');
+  back.classList.toggle('detail', !!p.parent);
+  back.hidden = current === 'overview';
+  back.setAttribute('aria-label', p.parent ? 'Назад: ' + page(p.parent).title : 'Назад к обзору');
+  const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
+  $('content').innerHTML = html;
+  document.querySelectorAll('.meter i[data-width]').forEach(i => { i.style.width = Math.max(0, Math.min(100, Number(i.dataset.width))) + '%'; });
+  document.querySelectorAll('.tabbar.preview').forEach(t => t.style.setProperty('--tabs', tabIds.length + 1));
+  renderNav();
+}
+function go(id, key) {
+  if (!page(id)) id = 'overview';
+  if (current === 'updates' && id !== 'updates') updDraft = null;
+  current = id; editing = false; confirm = null; actionResult = null;
+  closeLayer(); render(); window.scrollTo(0, 0);
+  if (key) { const row = [...document.querySelectorAll('[data-key]')].find(r => r.dataset.key === key); if (row) { row.scrollIntoView({ block: 'center' }); row.classList.add('flash'); } }
+  refreshPage();
+}
+async function refreshPage() {
+  const id = current, keys = DATA_FOR(id).slice();
+  if (id === 'logs') { loadLog(logTab); return; }
+  if (id.startsWith('t-')) keys.push('status');
+  if (id.startsWith('w-')) keys.push('wifi');
+  if (id === 'd-https' || id === 'ads') keys.push('https');
+  await Promise.all(keys.map(k => load(k)));
+  if (current === id && !editing && !document.activeElement.matches('input,select,textarea')) render();
+}
+async function loadLog(tab, force) {
+  if (!force && S.logs[tab] != null) { render(); }
+  try { S.logs[tab] = await apiText('log', { name: tab, count: 200 }); }
+  catch (e) { S.logs[tab] = 'Журнал недоступен: ' + e.message; }
+  if (current === 'logs' && logTab === tab) { const b = $('logBox'); if (b) b.textContent = S.logs[tab]; else render(); }
+}
+
+/* ---------- Всплывающие панели ---------- */
+function closeLayer() { $('layer').innerHTML = ''; ['searchBtn', 'bellBtn'].forEach(b => $(b).setAttribute('aria-expanded', 'false')); }
+function openSheet(title, body, cls, btnId) {
+  closeLayer();
+  $('layer').innerHTML = '<div class="scrim" data-act="close"></div><div class="sheet ' + (cls || '') + '" role="dialog" aria-label="' + esc(title || 'Поиск') + '">' + (title ? '<div class="sheet-head"><h2>' + esc(title) + '</h2><button class="icon-btn" type="button" data-act="close" aria-label="Закрыть">' + ico('close') + '</button></div>' : '') + body + '</div>';
+  if (btnId) $(btnId).setAttribute('aria-expanded', 'true');
+}
+function openNotes() {
+  const n = notifications();
+  openSheet('Уведомления', '<div class="sheet-body">' + (n.length ? n.map(x => '<button class="note-item" type="button" data-go="' + x.to + '"><span class="sev ' + x.sev + '">' + ico('alert') + '</span><span><b>' + esc(x.title) + '</b><small>' + esc(x.text) + '</small></span></button>').join('') : empty('Всё работает штатно')) + '</div>', '', 'bellBtn');
+}
+const SEARCH_INDEX = [
+  ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Задания по расписанию'], ['system', 'Свободно'],
+  ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'История восстановлений'],
+  ['vpn', 'fail-open'], ['vpn', 'Проверка туннеля'],
+  ['routes', 'Туннель для маршрутов'], ['routes', 'AdaptiveAuto'], ['routes', 'Активные IP-категории'], ['routes', 'Группа маршрутизации'],
+  ['wifi', 'Домашний сегмент'], ['wifi', 'Ручное управление'],
+  ['ads', 'AdGuard Home'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
+  ['updates', 'Установка обновлений'], ['updates', 'Канал'], ['updates', 'Интервал проверки'],
+  ['settings', 'Адрес Console'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели'], ['settings', 'Обновлять данные']
+];
+function openSearch() {
+  openSheet('', '<div class="search-box">' + ico('search') + '<input id="searchInput" placeholder="Раздел, параметр или компонент" aria-label="Поиск по Console" autocomplete="off"><button class="icon-btn" type="button" data-act="close" aria-label="Закрыть">' + ico('close') + '</button></div><div class="sheet-body" id="searchResults"></div>', 'search', 'searchBtn');
+  const i = $('searchInput'); i.focus(); renderResults('');
+}
+function renderResults(q) {
+  q = q.trim().toLowerCase();
+  const out = [], pages = PAGES.filter(p => !q || p.title.toLowerCase().includes(q));
+  const params = SEARCH_INDEX.filter(x => q && (x[1] + ' ' + page(x[0]).title).toLowerCase().includes(q));
+  const comps = COMPONENTS.filter(c => q && c.name.toLowerCase().includes(q));
+  if (pages.length) out.push('<div class="result-group">Разделы</div>' + pages.map(p => '<button class="result" type="button" data-go="' + p.id + '">' + ico(p.icon) + '<span>' + esc(p.title) + '</span></button>').join(''));
+  if (params.length) out.push('<div class="result-group">Параметры</div>' + params.map(x => '<button class="result" type="button" data-go="' + x[0] + '" data-key="' + esc(x[1]) + '">' + ico(page(x[0]).icon) + '<span>' + esc(x[1]) + '<small>' + esc(page(x[0]).title) + '</small></span></button>').join(''));
+  if (comps.length) out.push('<div class="result-group">Компоненты</div>' + comps.map(c => '<button class="result" type="button" data-go="c-' + c.id + '">' + ico('platform') + '<span>' + esc(c.name) + '<small>Система · Компоненты</small></span></button>').join(''));
+  $('searchResults').innerHTML = out.join('') || empty('Ничего не найдено');
+}
+function toast(msg) {
+  const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg;
+  $('toasts').appendChild(t); setTimeout(() => t.remove(), 3200);
+}
+
+/* ---------- Действия ---------- */
+async function runAction(resultId, action, fields, okMsg) {
+  actionResult = { id: resultId, text: 'Выполняется…' }; render();
+  try {
+    const x = await apiPost(action, fields);
+    actionResult = { id: resultId, text: (x.output || x.result || '').trim() || (x.ok ? 'Готово' : 'Ошибка: ' + errText(x)) };
+    toast(x.ok ? okMsg : 'Не выполнено: ' + errText(x));
+    return x;
+  } catch (e) { actionResult = { id: resultId, text: 'Ошибка: ' + e.message }; toast('Ошибка: ' + e.message); return null; }
+  finally { render(); }
+}
+const CONFIRMED = {
+  'route-reconcile': () => runAction('routes', 'control', { op: 'route-reconcile', confirm: 'ROUTE_RECONCILE' }, 'Маршруты сверены').then(() => load('route', true)).then(render),
+  'policy-refresh': () => runAction('routes', 'control', { op: 'policy-refresh', confirm: 'POLICY_REFRESH' }, 'IP-категории обновлены').then(() => load('route', true)).then(render),
+  'update-apply': () => updateOp('apply', 'APPLY_UPDATE'),
+  'update-retry': () => updateOp('retry', 'RETRY_UPDATE'),
+  'update-rollback': () => updateOp('rollback', 'ROLLBACK_UPDATE'),
+  'update-recover': () => updateOp('recover', 'RECOVER_UPDATE'),
+  'ads-publish': () => runAction('ads', 'ads-control', { op: 'enqueue', job: 'publish', confirm: 'ADS_PUBLISH' }, 'Публикация поставлена в очередь').then(() => load('ads', true)).then(render),
+  'https-start': () => runAction('https', 'ads-https-control', { op: 'start', confirm: 'HTTPS_START' }, 'HTTPS-фильтр запущен').then(() => load('https', true)).then(render),
+  'https-ca': () => runAction('https', 'ads-https-control', { op: 'ca-init', confirm: 'HTTPS_CA_INIT' }, 'Сертификат создан').then(() => load('https', true)).then(render),
+  'wifi-bind': c => { const op = c.op, mac = current.slice(2), token = { 'bind-2g': 'WIFI_BIND_2G', 'bind-5g': 'WIFI_BIND_5G', auto: 'WIFI_BAND_AUTO' }[op]; return runAction('wifi', 'wifi-control', { op: op, mac: mac, confirm: token }, 'Диапазон изменён').then(() => load('wifi', true)).then(render); }
+};
+function updateOp(op, token) {
+  return runAction('updates', 'update-control', token ? { op: op, confirm: token } : { op: op }, 'Операция обновления выполнена').then(() => Promise.all([load('update', true), load('status', true)])).then(render);
+}
+async function adsControl(fields, okMsg, resultId) {
+  const x = await runAction(resultId || 'ads', 'ads-control', fields, okMsg);
+  await load('ads', true); render(); return x;
+}
+async function adsSetting(key, value) {
+  const fields = {}; fields[key] = value;
+  if (key === 'AUTO_PUBLISH' && value === '1') fields.confirm = 'ADS_AUTO_PUBLISH';
+  const x = await runAction('ads', 'ads-settings', fields, 'Сохранено');
+  await load('ads', true); render(); return x;
+}
+function download(name, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+  const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+const today = () => new Date().toISOString().slice(0, 10);
+function copyText(text) {
+  const fallback = () => {
+    const box = $('logBox'); if (!box) return;
+    const r = document.createRange(); r.selectNodeContents(box); const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    let ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    toast(ok ? 'Журнал скопирован' : 'Текст выделен - скопируйте его вручную');
+  };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(() => toast('Журнал скопирован'), fallback);
+  else fallback();
+}
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-go],[data-act],[data-tab],[data-card-toggle],[data-log],[data-move],[data-card-move],[data-view],[data-ads-remove],[data-wifi-bind],[data-log-go]');
+  if (!t || t.disabled) return;
+  if (t.dataset.cardToggle) { const id = t.dataset.cardToggle; hiddenCards = hiddenCards.includes(id) ? hiddenCards.filter(x => x !== id) : hiddenCards.concat(id); store.set('vward-card-hidden', hiddenCards); render(); return; }
+  if (t.dataset.cardMove) { const [id, dir] = t.dataset.cardMove.split(':'), i = cardOrder.indexOf(id), j = i + (dir === 'up' ? -1 : 1); if (j >= 0 && j < cardOrder.length) { [cardOrder[i], cardOrder[j]] = [cardOrder[j], cardOrder[i]]; store.set('vward-card-order', cardOrder); render(); } return; }
+  if (t.dataset.move) { const [id, dir] = t.dataset.move.split(':'), i = tabIds.indexOf(id), j = i + (dir === 'up' ? -1 : 1); if (j >= 0 && j < tabIds.length) { [tabIds[i], tabIds[j]] = [tabIds[j], tabIds[i]]; store.set('vward-tabs', tabIds); render(); } return; }
+  if (t.dataset.view) { cardView = t.dataset.view; store.set('vward-card-view', cardView); render(); return; }
+  if (t.dataset.logGo) logTab = t.dataset.logGo;
+  if (t.dataset.go) { if (t.closest('.preview')) return; go(t.dataset.go, t.dataset.key); return; }
+  if (t.dataset.log) { logTab = t.dataset.log; render(); loadLog(logTab, true); return; }
+  if (t.dataset.adsRemove) { adsControl({ op: 'remove-override', domain: t.dataset.adsRemove, scope: t.dataset.scope || 'exact' }, 'Правило удалено', 'ads-rule'); return; }
+  if (t.dataset.wifiBind) { confirm = { id: 'wifi-bind', op: t.dataset.wifiBind }; render(); return; }
+  if (t.dataset.tab) {
+    if (t.closest('.preview')) return;
+    if (t.dataset.tab === 'more') { const cur = navId(current); openSheet('Ещё', '<div class="sheet-body">' + PAGES.filter(p => !tabIds.includes(p.id)).map(p => '<button class="menu-item" type="button" data-go="' + p.id + '"' + (p.id === cur ? ' aria-current="page"' : '') + '>' + ico(p.icon) + '<span>' + esc(p.title) + '</span>' + ico('chevron', 'chev') + '</button>').join('') + '</div>'); }
+    else go(t.dataset.tab);
+    return;
+  }
+  const a = t.dataset.act;
+  if (a === 'close') closeLayer();
+  else if (a === 'reload') { Promise.all(DATA_FOR(current).map(k => load(k, true))).then(() => { render(); toast('Данные обновлены'); }); }
+  else if (a === 'edit') { editing = !editing; render(); }
+  else if (a === 'cards-reset') { cardOrder = CARD_IDS.slice(); hiddenCards = []; cardView = 'grid'; ['vward-card-order', 'vward-card-hidden', 'vward-card-view'].forEach(k => store.del(k)); render(); toast('Карточки сброшены'); }
+  else if (a === 'ask') { confirm = { id: t.dataset.confirm }; render(); }
+  else if (a === 'confirm-no') { confirm = null; render(); }
+  else if (a === 'confirm-yes') { const c = confirm; confirm = null; if (c && CONFIRMED[c.id]) CONFIRMED[c.id](c); else render(); }
+  else if (a === 'open-log') { logTab = t.dataset.logTab; go('logs'); }
+  else if (a === 'tunnel-health') runAction('tunnel-health', 'control', { op: 'tunnel-health' }, 'Проверка туннеля выполнена').then(() => load('status', true)).then(render);
+  else if (a === 'refresh-hints') runAction('routes', 'control', { op: 'refresh-hints' }, 'Подсказки обновлены');
+  else if (a === 'update-op') updateOp(t.dataset.op);
+  else if (a === 'upd-cancel') { updDraft = null; render(); }
+  else if (a === 'upd-save') {
+    const p = plat(), on = updDraft && updDraft.mode === 'schedule' ? '1' : '0';
+    runAction('updates', 'settings', { auto_apply: on, auto_critical: isTrue(p.auto_critical) ? '1' : '0', auto_important: isTrue(p.auto_important) ? '1' : '0', auto_routine: isTrue(p.auto_routine) ? '1' : '0' }, 'Настройки обновлений сохранены')
+      .then(() => load('status', true)).then(() => { updDraft = null; render(); });
+  }
+  else if (a === 'diag-run') { load('diag', true).then(() => { render(); toast('Диагностика выполнена'); }); }
+  else if (a === 'ads-job') adsControl({ op: 'enqueue', job: t.dataset.job }, 'Задание поставлено в очередь', 'ads-job');
+  else if (a === 'https-op') runAction('https', 'ads-https-control', { op: t.dataset.op }, 'Готово').then(() => load('https', true)).then(render);
+  else if (a === 'ui-reset') {
+    ['vward-card-order', 'vward-card-hidden', 'vward-card-view', 'vward-tabs', 'vward-theme', 'vward-refresh'].forEach(k => store.del(k));
+    cardOrder = CARD_IDS.slice(); hiddenCards = []; cardView = 'grid'; tabIds = TAB_DEFAULT.slice(); theme = 'system'; refreshSec = 15;
+    applyTheme(); restartTimer(); render(); toast('Вид Console сброшен');
+  }
+  else if (a === 'log-reload') loadLog(logTab, true);
+  else if (a === 'log-wrap') { logWrap = !logWrap; t.setAttribute('aria-pressed', logWrap); const b = $('logBox'); if (b) b.classList.toggle('nowrap', !logWrap); }
+  else if (a === 'log-copy') copyText(S.logs[logTab] || '');
+  else if (a === 'log-share') {
+    const text = S.logs[logTab] || '';
+    if (navigator.share) navigator.share({ title: 'Журнал VWARD: ' + logLabel(logTab), text: text }).catch(err => { if (err && err.name !== 'AbortError') toast('Поделиться не удалось - используйте «Сохранить»'); });
+    else toast('«Поделиться» недоступно в этом браузере - используйте «Копировать» или «Сохранить»');
+  }
+  else if (a === 'log-save') download('vward-' + logTab + '-' + today() + '.txt', S.logs[logTab] || '');
+  else if (a === 'log-save-all') {
+    Promise.all(LOG_TABS.map(tb => apiText('log', { name: tb.id, count: 200 }).then(x => '===== ' + tb.label + ' =====\n' + x, e => '===== ' + tb.label + ' =====\nнедоступен: ' + e.message)))
+      .then(parts => download('vward-logs-' + today() + '.txt', parts.join('\n\n')));
+  }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeLayer();
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.getAttribute && e.target.getAttribute('role') === 'button') { e.preventDefault(); e.target.click(); }
+});
+document.addEventListener('input', e => { if (e.target.id === 'searchInput') renderResults(e.target.value); });
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset.tabpick) {
+    const id = t.dataset.tabpick;
+    if (t.checked) { if (tabIds.length >= TAB_MAX) { t.checked = false; toast('На панели помещается не больше ' + TAB_MAX + ' разделов'); return; } tabIds.push(id); }
+    else { if (tabIds.length <= 1) { t.checked = true; toast('Оставьте хотя бы один раздел'); return; } tabIds = tabIds.filter(x => x !== id); }
+    store.set('vward-tabs', tabIds); render(); return;
+  }
+  if (t.dataset.upd) { updDraft = Object.assign({}, updDraft || {}, { [t.dataset.upd]: t.value }); render(); return; }
+  if (t.dataset.pref === 'refresh') { refreshSec = Number(t.value); store.set('vward-refresh', refreshSec); restartTimer(); toast('Сохранено'); return; }
+  if (t.hasAttribute('data-ads-pause')) { adsControl({ op: t.checked ? 'resume' : 'pause' }, t.checked ? 'Блокировка включена' : 'Блокировка на паузе'); return; }
+  if (t.dataset.adsSet) { adsSetting(t.dataset.adsSet, t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value); return; }
+  if (t.dataset.adsSource) { adsControl({ op: 'source-mode', source: t.dataset.adsSource, mode: t.value }, 'Режим источника изменён', 'ads-rule'); return; }
+});
+document.addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = e.target.dataset.form;
+  if (f === 'probe') {
+    const v = $('probeInput').value.trim().toLowerCase(), box = $('probeResult');
+    if (!IPV4.test(v) && !DOMAIN.test(v)) { box.innerHTML = '<p class="panel-desc">Введите домен или IPv4-адрес.</p>'; return; }
+    box.innerHTML = '<p class="panel-desc">Проверяем…</p>';
+    try {
+      const x = await apiGet('route-probe', { type: IPV4.test(v) ? 'ip' : 'domain', value: v });
+      if (!x.ok) { box.innerHTML = '<p class="field-warn">' + esc(errText(x)) + '</p>'; return; }
+      box.innerHTML = x.type === 'ip' ? kv([['Адрес', x.value], ['Категории', (x.policy_matches || []).map(m => m.category).join(', ') || 'нет'], ['Маршрут VWARD', x.configured_route ? 'через ' + x.interface : 'нет', x.configured_route ? 'info' : '']])
+        : kv([['Домен', x.value], ['IPv4', ((x.dns && x.dns.ipv4) || []).join(', ') || 'не найден'], ['Группы', (x.groups || []).join(', ') || 'нет'], ['Маршрут', (x.routes || []).map(r => r.group + ' → ' + r.interface).join(', ') || 'напрямую', (x.routes || []).length ? 'info' : ''], ['AdaptiveAuto', x.adaptive_auto ? 'Да' : 'Нет']]);
+    } catch (err) { box.innerHTML = '<p class="field-warn">Ошибка: ' + esc(err.message) + '</p>'; }
+  }
+  if (f === 'ads-probe') {
+    const v = $('adsProbe').value.trim().toLowerCase();
+    if (!DOMAIN.test(v)) { toast('Введите домен, например example.com'); return; }
+    await adsControl({ op: 'enqueue', job: 'probe', domain: v }, 'Проверка поставлена в очередь - см. «Задания»');
+  }
+  if (f === 'ads-rule') {
+    const v = $('adsRuleDomain').value.trim().toLowerCase();
+    if (!DOMAIN.test(v)) { toast('Введите домен, например example.com'); return; }
+    await adsControl({ op: $('adsRuleType').value, domain: v, scope: $('adsRuleScope').value }, 'Правило добавлено', 'ads-rule');
+  }
+});
+
+/* ---------- Тема и обновление данных ---------- */
+function applyTheme() {
+  const r = document.documentElement;
+  if (theme === 'system') r.removeAttribute('data-theme'); else r.setAttribute('data-theme', theme);
+  $('themeBtn').innerHTML = ico(theme === 'light' ? 'sun' : theme === 'dark' ? 'moon' : 'auto');
+  $('themeBtn').setAttribute('aria-label', 'Тема: ' + ({ system: 'как в системе', light: 'светлая', dark: 'тёмная' })[theme]);
+}
+let timer = null;
+function restartTimer() {
+  if (timer) clearInterval(timer);
+  if (![15, 30, 60].includes(refreshSec)) refreshSec = 15;
+  timer = setInterval(() => { if (!document.hidden && current !== 'logs') refreshPage(); load('status', true).then(renderNav); }, refreshSec * 1000);
+}
+
+$('backBtn').innerHTML = ico('back');
+$('backBtn').addEventListener('click', () => go(parentOf(current) || 'overview'));
+$('searchBtn').innerHTML = ico('search');
+$('searchBtn').addEventListener('click', openSearch);
+$('bellBtn').addEventListener('click', openNotes);
+$('themeBtn').addEventListener('click', () => { theme = ({ system: 'light', light: 'dark', dark: 'system' })[theme] || 'system'; store.set('vward-theme', theme); applyTheme(); toast('Тема: ' + ({ system: 'как в системе', light: 'светлая', dark: 'тёмная' })[theme]); });
+applyTheme();
+render();
+Promise.all(['status', 'security', 'update'].map(k => load(k))).then(() => { render(); refreshPage(); });
+restartTimer();
+})();

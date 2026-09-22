@@ -1152,6 +1152,12 @@ if [ "$ACTION" = "log" ]; then
         console)
             FILE=/opt/var/log/vward/console-audit.log
             ;;
+        wifi)
+            FILE=/opt/var/log/vward-wifi-client-guard.log
+            ;;
+        ads)
+            FILE=/opt/var/log/vward-ads-privacy-guard.log
+            ;;
         *)
             FILE=
             ;;

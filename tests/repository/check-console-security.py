@@ -25,11 +25,9 @@ assert 'GET|POST) ;;' in API
 assert 'OPTIONS)' not in API
 assert '${HTTP_X_VWARD_REQUEST:-}' in API
 assert 'application/x-www-form-urlencoded' in API
-assert "'X-VWARD-Request':'console'" in JS
+assert "'X-VWARD-Request': 'console'" in JS
 assert "Access-Control-Allow-Origin" not in API + CONF
-for marker in ('id="security"', 'id="securityRefresh"'):
-    assert marker in UI
-assert 'action=security-data' in JS
+assert "apiGet('security-data')" in JS
 assert 'security-data' in API
 assert '<style' not in UI and '<script>' not in UI and 'style="' not in UI + JS
 assert "script-src 'self'" in CONF and "style-src 'self'" in CONF
