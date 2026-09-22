@@ -72,7 +72,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|settings-data|security-data|route-data|diagnostics|route-probe|update-data|control|update-control|wifi-data|wifi-control|ads-data|ads-https-data|ads-settings|ads-control|ads-https-control) ;;
+    status|ping|log|settings|settings-data|security-data|route-data|diagnostics|route-probe|update-data|control|update-control|config-data|config|wifi-data|wifi-control|ads-data|ads-https-data|ads-settings|ads-control|ads-https-control) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -97,7 +97,7 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             ;;
     esac
     case "$ACTION" in
-        settings|control|update-control|wifi-control|ads-settings|ads-control|ads-https-control) ;;
+        settings|control|update-control|config|wifi-control|ads-settings|ads-control|ads-https-control) ;;
         *)
             echo 'Status: 405 Method Not Allowed'
             header_json
@@ -160,6 +160,91 @@ if [ "$ACTION" = wifi-control ]; then
     OUT_JSON="$(printf '%s' "$OUT" | tail -n 80 | "$JQ" -Rs .)"
     [ "$RC" -eq 0 ] && OK=true || OK=false
     printf '{"ok":%s,"action":"wifi-%s","rc":%s,"output":%s}\n' "$OK" "$OP" "$RC" "$OUT_JSON"
+    exit 0
+fi
+
+CONFIG_ETC=${VWARD_CONSOLE_ETC:-/opt/etc/vward}
+CONFIG_ROUTE_STATE=${VWARD_ROUTE_STATE:-/opt/var/lib/vward/route-engine}
+CONFIG_HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
+
+if [ "$ACTION" = config-data ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    list_json(){ "$JQ" -Rn '[inputs|select(length>0)]'; }
+    kv_get(){ awk -F= -v k="$2" '$1==k{print substr($0,index($0,"=")+1);exit}' "$1" 2>/dev/null; }
+    ROUTER=false; ROUTE_DOMAINS='[]'
+    if [ "$PROFILE_READY" = true ]; then
+        RUNNING="$("${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r')"
+        if [ -n "$RUNNING" ]; then
+            ROUTER=true
+            ROUTE_DOMAINS="$(printf '%s\n' "$RUNNING" | awk -v g="$VWARD_POLICY_GROUP" '
+                /^object-group fqdn / {cur=$3; next}
+                /^!/ {cur=""; next}
+                cur==g && $1=="include" {print tolower($2)}' | head -n 500 | list_json)"
+        fi
+    fi
+    FORCE="$(sed 's/#.*//' "$CONFIG_ETC/route-engine/force-vpn.conf" 2>/dev/null | awk 'NF{print tolower($1)}' | head -n 500 | list_json)"
+    ADAPT="$(tr -d '\r' < "$CONFIG_ROUTE_STATE/adaptive-persist.txt" 2>/dev/null | awk 'NF{print tolower($1)}' | head -n 500 | list_json)"
+    CATS="$(awk -F'|' 'NF>=5 && $1!~/^[[:space:]]*#/ {print $1 "\t" $2 "\t" $5}' "$CONFIG_ETC/route-engine/categories.tsv" 2>/dev/null | head -n 100 |
+        "$JQ" -Rn '[inputs|split("\t")|{id:.[0],title:.[1],enabled:(.[2]=="1")}]')"
+    TG=true; [ -e "$CONFIG_ETC/tunnel-guard.disabled" ] && TG=false
+    WCONF=${VWARD_WIFI_CLIENT_GUARD_CONF:-$CONFIG_ETC/wifi-client-guard.conf}
+    UCONF=${VWARD_UPDATE_CONFIG:-$CONFIG_ETC/update.conf}
+    wnum(){ V="$(kv_get "$WCONF" "$1")"; case "$V" in ''|*[!0-9-]*) V=$2;; esac; printf '%s' "$V"; }
+    W_EN="$(kv_get "$WCONF" ENABLED)"; [ "$W_EN" = 1 ] || W_EN=0
+    W_CTL="$(kv_get "$WCONF" CONTROL_ENABLED)"; [ "$W_CTL" = 1 ] || W_CTL=0
+    "$JQ" -n \
+      --arg group "${VWARD_POLICY_GROUP:-}" --argjson router "$ROUTER" \
+      --argjson route_domains "${ROUTE_DOMAINS:-[]}" --argjson force "${FORCE:-[]}" --argjson adaptive "${ADAPT:-[]}" \
+      --argjson categories "${CATS:-[]}" --argjson tunnel_guard "$TG" \
+      --argjson w_en "$W_EN" --argjson w_ctl "$W_CTL" \
+      --arg w_window "$(wnum WINDOW_SEC 86400)" --arg w_switch "$(wnum BAND_SWITCH_WARN 20)" \
+      --arg w_weak "$(wnum WEAK_5G_SAMPLE_WARN 5)" --arg w_rssi "$(wnum WEAK_5G_RSSI -75)" \
+      --arg u_start "$(kv_get "$UCONF" safe_window_start)" --arg u_end "$(kv_get "$UCONF" safe_window_end)" \
+      --arg u_interval "$(kv_get "$UCONF" check_interval_seconds)" \
+      --argjson writable "$([ -x "$CONFIG_HELPER" ] && echo true || echo false)" \
+      '{ok:true,writable:$writable,
+        route:{group:$group,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories},
+        tunnel_guard:{enabled:$tunnel_guard},
+        wifi:{ENABLED:($w_en==1),CONTROL_ENABLED:($w_ctl==1),WINDOW_SEC:($w_window|(tonumber? // null)),BAND_SWITCH_WARN:($w_switch|(tonumber? // null)),WEAK_5G_SAMPLE_WARN:($w_weak|(tonumber? // null)),WEAK_5G_RSSI:($w_rssi|(tonumber? // null))},
+        update:{safe_window_start:$u_start,safe_window_end:$u_end,check_interval_seconds:($u_interval|(tonumber? // null))}}'
+    exit 0
+fi
+
+if [ "$ACTION" = config ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+    console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+    trap console_mutation_leave EXIT
+    LENGTH=${CONTENT_LENGTH:-0}; case "$LENGTH" in ''|*[!0-9]*) LENGTH=0;; esac
+    [ "$LENGTH" -gt 0 ] && [ "$LENGTH" -le 512 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }
+    BODY=$(dd bs=1 count="$LENGTH" 2>/dev/null)
+    UNKNOWN="$(printf '%s\n' "$BODY" | tr '&' '\n' | cut -d= -f1 | awk '$0!="op"&&$0!="action"&&$0!="target"&&$0!="value"&&$0!="confirm"{print;exit}')"
+    [ -z "$UNKNOWN" ] || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
+    # Only the characters the helper accepts; ':' and '-' may arrive percent-encoded.
+    fval(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}' | sed 's/%3[Aa]/:/g;s/%2[Dd]/-/g'; }
+    OP="$(fval op)"; ACT="$(fval action)"; TARGET="$(fval target)"; VALUE="$(fval value)"; CONFIRM="$(fval confirm)"
+    for F in "$OP" "$ACT" "$TARGET" "$VALUE" "$CONFIRM"; do
+        case "$F" in *[!A-Za-z0-9._:-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+        [ "${#F}" -le 253 ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }
+    done
+    REQUIRED=
+    case "$OP" in
+        route-domain|force-vpn|adaptive) set -- "$OP" "$ACT" "$TARGET" ;;
+        domain-category|wifi|update) set -- "$OP" "$TARGET" "$VALUE" ;;
+        tunnel-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=TUNNEL_GUARD_DISABLE ;;
+        *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
+    esac
+    [ "$OP:$TARGET:$VALUE" != wifi:CONTROL_ENABLED:1 ] || REQUIRED=WIFI_CONTROL_ENABLE
+    [ -z "$REQUIRED" ] || [ "$CONFIRM" = "$REQUIRED" ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+    [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+    OUT="$("$CONFIG_HELPER" "$@" 2>/dev/null | tail -n 1)"
+    case "$OUT" in
+        result=changed|result=unchanged) "$JQ" -cn --arg op "$OP" --arg r "${OUT#result=}" '{ok:true,op:$op,result:$r}' ;;
+        error=*) E="${OUT#error=}"; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac; "$JQ" -cn --arg op "$OP" --arg e "$E" '{ok:false,op:$op,error:$e}' ;;
+        *) "$JQ" -cn --arg op "$OP" '{ok:false,op:$op,error:"helper_failed"}' ;;
+    esac
     exit 0
 fi
 

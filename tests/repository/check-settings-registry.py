@@ -18,7 +18,8 @@ settings = registry["settings"]
 assert len(settings) >= 46
 assert len({item["id"] for item in settings}) == len(settings)
 required = {"id", "component", "section", "label_ru", "description_ru", "source", "key", "type", "editable", "secret", "restart_requirement", "risk"}
-editable_update = {"auto_apply", "auto_critical", "auto_important", "auto_routine"}
+editable_update = {"auto_apply", "auto_critical", "auto_important", "auto_routine",
+                   "safe_window_start", "safe_window_end", "check_interval_seconds"}
 editable_ads = {
     "ENABLED", "RUN_MODE", "SCHEDULE_INTERVAL_MIN", "DYNAMIC_MIN_INTERVAL_SEC",
     "DYNAMIC_MAX_LOAD_PER_CPU_X100", "DYNAMIC_MIN_MEM_AVAILABLE_KB",

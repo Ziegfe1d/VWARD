@@ -310,13 +310,12 @@
       "source": "update.conf",
       "key": "check_interval_seconds",
       "type": "integer",
-      "minimum": 60,
+      "minimum": 300,
       "maximum": 86400,
-      "editable": false,
+      "editable": true,
       "secret": false,
       "restart_requirement": "component",
-      "risk": "medium",
-      "read_only_reason": "Редактирование расписания через Console пока не реализовано"
+      "risk": "medium"
     },
     {
       "id": "update.safe_window_start",
@@ -327,11 +326,10 @@
       "source": "update.conf",
       "key": "safe_window_start",
       "type": "string",
-      "editable": false,
+      "editable": true,
       "secret": false,
       "restart_requirement": "none",
-      "risk": "medium",
-      "read_only_reason": "Редактирование расписания через Console пока не реализовано"
+      "risk": "medium"
     },
     {
       "id": "update.safe_window_end",
@@ -342,11 +340,10 @@
       "source": "update.conf",
       "key": "safe_window_end",
       "type": "string",
-      "editable": false,
+      "editable": true,
       "secret": false,
       "restart_requirement": "none",
-      "risk": "medium",
-      "read_only_reason": "Редактирование расписания через Console пока не реализовано"
+      "risk": "medium"
     },
     {
       "id": "update.important_delay",

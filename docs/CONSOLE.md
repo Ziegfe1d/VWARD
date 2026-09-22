@@ -21,12 +21,34 @@ Read-only карточка клиентов и изменяющий Wi-Fi contro
 
 ## Что можно изменять
 
-Только `auto_apply`, `auto_critical`, `auto_important` и `auto_routine`. API принимает
-POST только с заголовком `X-VWARD-Request: console`, ограничивает body, проверяет все
-значения, блокирует запись во время updater transaction, создаёт backup, заменяет
-config атомарно и проверяет результат.
+API принимает POST только с заголовком `X-VWARD-Request: console`, ограничивает body,
+проверяет все значения и блокирует запись во время updater transaction.
 
-WAN, WireGuard и маршрутизация доступны только для чтения. `route-data` читает только
+- `settings`: `auto_apply`, `auto_critical`, `auto_important`, `auto_routine` в `update.conf`.
+- `config` (текущие значения - `config-data`) передаёт изменение в
+  `/opt/bin/vward-console-config.sh`, единственный путь записи настроек из Console:
+
+| op | Что меняет | Где хранится |
+| --- | --- | --- |
+| `route-domain add/remove` | «Мои домены» через VPN | FQDN-группа `VWARD_POLICY_GROUP` в Keenetic |
+| `force-vpn add/remove` | «Всегда через VPN» | `/opt/etc/vward/route-engine/force-vpn.conf` |
+| `adaptive pin/remove` | закрепить домен в «Моих доменах» или вернуть напрямую | группа `AdaptiveAuto`, `adaptive-persist.txt`, `adaptive-domains.txt` |
+| `domain-category ID 0/1` | категория доменов | `/opt/etc/vward/route-engine/categories.tsv` |
+| `tunnel-guard 0/1` | Защита VPN (выключение - токен `TUNNEL_GUARD_DISABLE`) | `/opt/etc/vward/tunnel-guard.disabled` |
+| `wifi KEY VALUE` | `ENABLED`, `CONTROL_ENABLED` (включение - токен `WIFI_CONTROL_ENABLE`), `WINDOW_SEC`, `BAND_SWITCH_WARN`, `WEAK_5G_SAMPLE_WARN`, `WEAK_5G_RSSI` | `/opt/etc/vward/wifi-client-guard.conf` |
+| `update KEY VALUE` | `safe_window_start`, `safe_window_end`, `check_interval_seconds` | `/opt/etc/vward/update.conf` |
+
+Helper принимает только перечисленные ключи и строгие значения (домен - только буквы, цифры,
+дефис и точки; числа - в пределах, без ведущих нулей; время - `ЧЧ:ММ`, начало окна не равно
+концу), работает в runtime admission, делает резервную копию в
+`/opt/var/backups/vward/console-config` (последние 20 на файл), пишет файл атомарно с
+сохранением прав и проверяет результат. Группы Keenetic меняются под общей блокировкой
+`/tmp/vward-route-change.lock`; если Keenetic отклонил команду или результат не
+подтвердился по `show running-config`, изменение откатывается. После изменения групп
+выполняется `system configuration save`, а движок маршрутизации перечитывает группы. Каждое
+изменение записывается в `/opt/var/log/vward/console-audit.log` (`CONSOLE_CONFIG`).
+
+WAN и выбор туннеля доступны только для чтения. `route-data` читает только
 фиксированные generated/state paths VWARD и не принимает path или команду от frontend.
 API не принимает произвольные shell-команды, paths или команды `ndmc`.
 

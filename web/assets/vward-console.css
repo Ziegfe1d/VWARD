@@ -127,8 +127,6 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .kv-row .hint{display:block;margin-top:2px;color:var(--faint);font-size:var(--fs-xs)}
 .kv-row.sub dt{padding-left:14px}
 .field-warn{margin:0 16px 8px;padding:8px 12px;border-radius:var(--r-md);background:var(--warn-soft);color:var(--warn);font-size:var(--fs-sm)}
-.save-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 16px 16px;padding:10px 12px;border-radius:var(--r-md);background:var(--accent-soft);font-size:var(--fs-sm)}
-.save-bar span{flex:1 1 160px;color:var(--text)}
 
 /* Метки состояния */
 .pill{display:inline-flex;align-items:center;gap:5px;flex:none;height:22px;padding-inline:8px;border-radius:11px;font-size:var(--fs-xs);font-weight:650;white-space:nowrap;background:var(--surface-2);color:var(--muted)}
@@ -187,6 +185,7 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
   .card-title{font-size:12px}
   .card-value{font-size:var(--fs-md)}
   .tab{font-size:10px}
+  .topbar-title h1{font-size:var(--fs-md);line-height:1.2;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 }
 
 /* Списки строк (клиенты, туннели, компоненты) */
