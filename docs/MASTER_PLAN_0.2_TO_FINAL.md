@@ -41,7 +41,9 @@
 - collector без control, сверка samples/analysis с Keenetic;
 - отдельный manual control acceptance с backup, save, read-back и rollback;
 - data-plane матрица DNS → AGH → upstream → WAN/WireGuard;
-- reboot/recovery, locks, storage и cron на KN-1913.
+- reboot/recovery, locks, storage и cron на целевом роутере;
+- проверка автоматического Device Profile: несколько WireGuard, гостевой сегмент,
+  фактические ответы RCI `show interface` и `show interface system-name`.
 
 ### P1: исходники и Console
 

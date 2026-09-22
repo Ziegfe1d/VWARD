@@ -124,6 +124,21 @@
       "read_only_reason": "Требуется авторизация"
     },
     {
+      "id": "device.lan_interface",
+      "component": "wifi-client-guard",
+      "section": "Интерфейсы и политики",
+      "label_ru": "Home segment",
+      "description_ru": "Интерфейс Keenetic CLI, которому принадлежит LAN-адрес",
+      "source": "device.conf",
+      "key": "VWARD_LAN_INTERFACE",
+      "type": "interface",
+      "editable": false,
+      "secret": false,
+      "restart_requirement": "component",
+      "risk": "high",
+      "read_only_reason": "Требуется авторизация"
+    },
+    {
       "id": "device.tunnel_device",
       "component": "tunnel-guard",
       "section": "Интерфейсы и политики",

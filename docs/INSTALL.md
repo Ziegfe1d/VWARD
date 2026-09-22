@@ -59,18 +59,37 @@ done
 ## 4. Обязательное discovery устройства
 
 Установите `vward-device-profile.sh`, затем при необходимости скопируйте
-`config/device.conf.example` в `/opt/etc/vward/device.conf`. Пустыми можно оставить
-только значения, для которых discovery возвращает ровно одного кандидата.
+`config/device.conf.example` в `/opt/etc/vward/device.conf`. Модель роутера и имена
+интерфейсов не зашиты: Device Profile строит карту интерфейсов через Keenetic RCI
+(`show interface`, `show interface system-name`) и running-config и кэширует её в
+`/tmp/vward-device-map.tsv` на 5 минут. Пустыми можно оставить значения, для которых
+discovery возвращает ровно одного кандидата; при неоднозначности загрузка профиля
+завершается ошибкой со списком кандидатов.
+
+Правила discovery:
+
+- WireGuard-туннели ищутся по типу интерфейса, а не по имени (`Wireguard0`,
+  `Wireguard1`, ...). Если туннель один, он выбирается сразу; если их несколько,
+  выбирается единственный, на который уже ссылаются `route object-group` или
+  `ip route`; иначе нужно задать `VWARD_TUNNEL_INTERFACE`;
+- `VWARD_WAN_INTERFACE` - интерфейс Keenetic, чьё системное имя совпадает с
+  устройством маршрута по умолчанию;
+- LAN - единственный глобальный IPv4-адрес вне WAN/туннелей; при гостевых сегментах
+  выбирается сегмент с `security-level: private`. `VWARD_LAN_INTERFACE` - его имя
+  в Keenetic CLI;
+- `VWARD_POLICY_GROUP` - единственная FQDN-группа, маршрутизируемая в выбранный туннель,
+  кроме собственной группы VWARD `AdaptiveAuto`.
 
 | Что | Параметр | Требуемое действие |
 |---|---|---|
 | LAN/router address | `VWARD_LAN_ADDRESS` | обнаружить или задать LAN-адрес |
 | LAN subnet | `VWARD_LAN_SUBNET` | обнаружить или задать подсеть |
-| WAN connection | `VWARD_WAN_INTERFACE` | явно задать логическое имя Keenetic |
+| home segment | `VWARD_LAN_INTERFACE` | обнаружить или задать логическое имя Keenetic |
+| WAN connection | `VWARD_WAN_INTERFACE` | обнаружить или задать логическое имя Keenetic |
 | physical WAN | `VWARD_WAN_DEVICE` | обнаружить или задать сетевое устройство |
 | VPN device | `VWARD_TUNNEL_DEVICE` | обнаружить или выбрать устройство туннеля |
-| VPN interface | `VWARD_TUNNEL_INTERFACE` | сопоставить с логическим интерфейсом Keenetic |
-| policy group | `VWARD_POLICY_GROUP` | явно выбрать локальную FQDN-группу |
+| VPN interface | `VWARD_TUNNEL_INTERFACE` | обнаружить или выбрать туннель при нескольких |
+| policy group | `VWARD_POLICY_GROUP` | обнаружить или выбрать локальную FQDN-группу |
 | Console | `VWARD_CONSOLE_PORT` | оставить непривилегированный порт или задать свой |
 
 Используйте read-only команды и интерфейс Keenetic:
@@ -218,7 +237,7 @@ backup local config/state и удаления только VWARD-owned targets.
 ## 13. Известные ограничения
 
 - нет поддерживаемой установки всей системы «с нуля»;
-- discovery большинства сетевых параметров ещё не автоматизирован;
+- автоматический Device Profile ещё не прошёл live acceptance на реальном роутере;
 - текущие runtime-имена сохранены для совместимости;
 - live acceptance относится к целевому устройству, а не ко всем Keenetic;
 - версия `0.x-dev` может менять внутренние схемы при документированной миграции.

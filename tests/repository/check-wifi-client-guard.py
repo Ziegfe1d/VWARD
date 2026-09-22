@@ -61,4 +61,53 @@ for marker in ("loadWifiData", "renderWifiData", "wifi-client-guard"):
     if marker not in ui:
         raise SystemExit(f"FAIL: Console Wi-Fi UI marker missing: {marker}")
 
+for marker in ("HOME_BRIDGE=\n", "AP_2G_PATTERN=\n", "AP_5G_PATTERN=\n"):
+    if marker not in cfg:
+        raise SystemExit(f"FAIL: Wi-Fi Client Guard must discover device values by default: {marker.strip()}")
+if "VWARD_LAN_INTERFACE" not in control or "vward_discover_lan_interface" not in control:
+    raise SystemExit("FAIL: control must take the home segment from the device profile")
+
+import os, subprocess, tempfile
+with tempfile.TemporaryDirectory() as tmp:
+    tmp=Path(tmp)
+    tools=tmp/"tools"; tools.mkdir()
+    (tmp/"interface.json").write_text(json.dumps({
+        "WifiMaster3": {"type": "WifiMaster", "channel": 44},
+        "WifiMaster3/AccessPoint1": {"type": "AccessPoint", "interface-name": "HomeFast"},
+        "WifiMaster6": {"type": "WifiMaster", "band": "2.4GHz", "channel": 40},
+        "WifiMaster6/AccessPoint0": {"type": "AccessPoint", "interface-name": "HomeSlow"},
+        "WifiMaster9": {"type": "WifiMaster"},
+        "WifiMaster9/AccessPoint0": {"type": "AccessPoint"},
+    }))
+    (tools/"curl").write_text(f'#!/bin/sh\nfor URL do :; done\ncase "$URL" in */show/interface) cat "{tmp}/interface.json" ;; *) exit 22 ;; esac\n')
+    (tools/"ndmc").write_text("""#!/bin/sh
+[ "$2" = "show associations" ] || exit 1
+cat <<'EOF'
+station:
+    mac: AA:AA:AA:AA:AA:01
+    ap: WifiMaster3/AccessPoint1
+    rssi: -61
+station:
+    mac: AA:AA:AA:AA:AA:02
+    ap: HomeSlow
+    rssi: -48
+station:
+    mac: AA:AA:AA:AA:AA:03
+    ap: WifiMaster9/AccessPoint0
+    rssi: -50
+EOF
+""")
+    for tool in ("curl","ndmc"): (tools/tool).chmod(0o755)
+    conf=tmp/"wifi.conf"; conf.write_text("ENABLED=1\n")
+    env=os.environ|{"PATH":f"{tools}{os.pathsep}{os.environ['PATH']}","VWARD_CURL_BIN":str(tools/"curl"),
+                    "VWARD_WIFI_CLIENT_GUARD_CONF":str(conf),"VWARD_WIFI_CLIENT_GUARD_STATE":str(tmp/"state"),
+                    "VWARD_WIFI_CLIENT_GUARD_LOG":str(tmp/"wifi.log")}
+    result=subprocess.run(["sh",str(root/"components/wifi-client-guard/scripts/vward-wifi-client-monitor.sh"),"--once"],env=env,text=True,capture_output=True)
+    if result.returncode != 0:
+        raise SystemExit(f"FAIL: monitor simulation rc={result.returncode}: {result.stderr}")
+    bands={line.split("\t")[1]:line.split("\t")[3] for line in (tmp/"state/current.tsv").read_text().splitlines()}
+    expected_bands={"aa:aa:aa:aa:aa:01":"5","aa:aa:aa:aa:aa:02":"2.4","aa:aa:aa:aa:aa:03":"unknown"}
+    if bands != expected_bands:
+        raise SystemExit(f"FAIL: AP band discovery {bands} != {expected_bands}")
+
 print("WIFI_CLIENT_GUARD=PASS")

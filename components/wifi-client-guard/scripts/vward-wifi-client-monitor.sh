@@ -4,9 +4,10 @@ set -u
 CONF=${VWARD_WIFI_CLIENT_GUARD_CONF:-/opt/etc/vward/wifi-client-guard.conf}
 STATE_DIR=${VWARD_WIFI_CLIENT_GUARD_STATE:-/opt/var/lib/vward/wifi-client-guard}
 LOG=${VWARD_WIFI_CLIENT_GUARD_LOG:-/opt/var/log/vward-wifi-client-guard.log}
+RCI_BASE=${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}
 ENABLED=0
-AP_2G_PATTERN='(^|/)AccessPoint$|WifiMaster0'
-AP_5G_PATTERN='AccessPoint_5G|WifiMaster1'
+AP_2G_PATTERN=
+AP_5G_PATTERN=
 SAMPLE_RETENTION_SEC=172800
 
 [ ! -r "$CONF" ] || . "$CONF"
@@ -24,6 +25,42 @@ valid_positive()
     [ "$1" -gt 0 ]
 }
 
+tool()
+{
+    command -v "$1" 2>/dev/null && return 0
+    [ -x "/opt/bin/$1" ] && printf '%s\n' "/opt/bin/$1"
+}
+
+# Band comes from the radio itself (band field, else channel number); AP and
+# radio names are never assumed to mean 2.4 or 5 GHz.
+discover_ap_bands()
+{
+    curl_bin=${VWARD_CURL_BIN:-$(tool curl)}
+    jq_bin=${VWARD_JQ_BIN:-$(tool jq)}
+    [ -n "$curl_bin" ] && [ -n "$jq_bin" ] || return 1
+    "$curl_bin" --fail --silent --connect-timeout 2 --max-time 4 "$RCI_BASE/show/interface" 2>/dev/null |
+    "$jq_bin" -r '
+        def band_of(r):
+            ((r.band // "") | tostring | ascii_downcase) as $b |
+            ([(r.channel // "") | tostring | scan("^[0-9]+")][0] // "") as $c |
+            if ($b | test("^2")) then "2.4"
+            elif ($b | test("^5")) then "5"
+            elif ($b | test("^6")) then "unknown"
+            elif $c == "" then "unknown"
+            elif ($c | tonumber) >= 1 and ($c | tonumber) <= 14 then "2.4"
+            elif ($c | tonumber) >= 32 and ($c | tonumber) <= 177 then "5"
+            else "unknown" end;
+        . as $all |
+        to_entries[] | select(.value | type == "object") |
+        select((.value.type // "") | test("^accesspoint$"; "i")) |
+        (band_of(.value) as $own |
+            if $own != "unknown" then $own
+            else band_of($all[(.key | split("/")[0])] // {}) end) as $band |
+        select($band != "unknown") |
+        (.key, (.value["interface-name"] // empty)) + "\t" + $band
+    ' 2>/dev/null | awk -F '\t' 'NF==2 && $1 ~ /^[A-Za-z0-9_.\/:-]+$/'
+}
+
 band_for_ap()
 {
     ap=$1
@@ -32,7 +69,8 @@ band_for_ap()
     elif [ -n "$AP_2G_PATTERN" ] && printf '%s\n' "$ap" | grep -Eq "$AP_2G_PATTERN"; then
         printf '2.4\n'
     else
-        printf 'unknown\n'
+        awk -F '\t' -v ap="$ap" '$1==ap {band=$2; exit} END{print (band=="" ? "unknown" : band)}' "$AP_BANDS" 2>/dev/null ||
+            printf 'unknown\n'
     fi
 }
 
@@ -59,16 +97,24 @@ CURRENT_NEW="$STATE_DIR/current.tsv.$$"
 CURRENT="$STATE_DIR/current.tsv"
 SAMPLES="$STATE_DIR/samples.tsv"
 EVENTS="$STATE_DIR/events.tsv"
+AP_BANDS="$STATE_DIR/ap-bands.tsv"
+AP_BANDS_NEW="$STATE_DIR/ap-bands.tsv.$$"
 NOW="$(date +%s)"
 MIN=$((NOW - SAMPLE_RETENTION_SEC))
 TAB="$(printf '\t')"
 
 cleanup()
 {
-    rm -f "$RAW" "$PARSED" "$CURRENT_NEW" "$STATE_DIR/samples.prune.$$" "$STATE_DIR/events.prune.$$"
+    rm -f "$RAW" "$PARSED" "$CURRENT_NEW" "$AP_BANDS_NEW" "$STATE_DIR/samples.prune.$$" "$STATE_DIR/events.prune.$$"
 }
 trap cleanup EXIT
 trap 'exit 73' HUP INT TERM
+
+if discover_ap_bands > "$AP_BANDS_NEW" && [ -s "$AP_BANDS_NEW" ]; then
+    mv -f "$AP_BANDS_NEW" "$AP_BANDS" || exit 1
+else
+    log WARN "AP band discovery unavailable; using last known map"
+fi
 
 ndmc -c 'show associations' > "$RAW" 2>&1 || { log ERROR "show associations failed"; exit 1; }
 

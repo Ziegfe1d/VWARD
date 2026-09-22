@@ -57,7 +57,15 @@ esac
 [ "$CONTROL_ENABLED" = 1 ] || die 20 "control disabled"
 [ "$AUTO_APPLY" = 0 ] || die 21 "AUTO_APPLY is reserved and must remain 0 in this dev stage"
 valid_mac "$MAC" || die 2 "invalid MAC"
-valid_bridge "$HOME_BRIDGE" || die 2 "invalid HOME_BRIDGE"
+if [ -z "$HOME_BRIDGE" ]; then
+    VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+    [ -r "$VWARD_PROFILE_LIB" ] || die 2 "device profile library is unavailable"
+    . "$VWARD_PROFILE_LIB"
+    vward_profile_load >/dev/null 2>&1 || :
+    HOME_BRIDGE=${VWARD_LAN_INTERFACE:-}
+    [ -n "$HOME_BRIDGE" ] || HOME_BRIDGE=$(vward_discover_lan_interface 2>/dev/null)
+fi
+valid_bridge "$HOME_BRIDGE" || die 2 "home bridge is missing or ambiguous; set HOME_BRIDGE"
 [ "$CONFIRM" = "$REQUIRED" ] || die 22 "confirmation required"
 
 CFG="$(ndmc -c 'show running-config' 2>/dev/null)" || die 1 "running-config unavailable"

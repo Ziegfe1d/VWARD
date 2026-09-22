@@ -74,5 +74,7 @@ manifest, staging, target-specific backup, остановка принадлеж
 ## Текущая зрелость
 
 Runtime-компоненты и автоматическое обновление прошли приёмку на целевом
-Keenetic/Entware. Переносимость на другие модели и автоматическое discovery всех
-device-specific параметров остаются работой версии `0.x-dev`.
+Keenetic/Entware. Device Profile не привязан к модели и именам интерфейсов: WAN, LAN,
+домашний сегмент, WireGuard-туннели, policy group и диапазоны Wi-Fi определяются через
+Keenetic RCI и running-config. Live acceptance автоматического discovery остаётся работой
+версии `0.x-dev`.

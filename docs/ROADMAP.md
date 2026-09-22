@@ -18,7 +18,7 @@
 ## Следующий этап
 
 - закрыть P0 выпускного контура;
-- выполнить read-only и manual acceptance Wi-Fi Client Guard на KN-1913;
+- выполнить read-only и manual acceptance Wi-Fi Client Guard на целевом роутере Keenetic;
 - завершить BusyBox/Entware, Console/API, lock/temp-file и data-plane проверки;
 - затем пройти RC1 gate.
 

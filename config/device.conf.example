@@ -2,6 +2,7 @@
 # Empty values are discovered at runtime and must resolve to exactly one candidate.
 VWARD_LAN_ADDRESS=
 VWARD_LAN_SUBNET=
+VWARD_LAN_INTERFACE=
 VWARD_DNS_SERVER=
 VWARD_PROBE_DNS=
 VWARD_ADGUARD_ADDRESS=

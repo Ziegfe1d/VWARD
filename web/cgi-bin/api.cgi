@@ -301,6 +301,7 @@ if [ "$ACTION" = "settings-data" ]; then
       --arg adguard_port "${VWARD_ADGUARD_PORT:-}" \
       --arg wan_device "${VWARD_WAN_DEVICE:-}" \
       --arg wan_interface "${VWARD_WAN_INTERFACE:-}" \
+      --arg lan_interface "${VWARD_LAN_INTERFACE:-}" \
       --arg tunnel_device "${VWARD_TUNNEL_DEVICE:-}" \
       --arg tunnel_interface "${VWARD_TUNNEL_INTERFACE:-}" \
       --arg policy_group "${VWARD_POLICY_GROUP:-}" \
@@ -348,6 +349,7 @@ if [ "$ACTION" = "settings-data" ]; then
           elif .key=="VWARD_ADGUARD_PORT" then $adguard_port
           elif .key=="VWARD_WAN_DEVICE" then $wan_device
           elif .key=="VWARD_WAN_INTERFACE" then $wan_interface
+          elif .key=="VWARD_LAN_INTERFACE" then $lan_interface
           elif .key=="VWARD_TUNNEL_DEVICE" then $tunnel_device
           elif .key=="VWARD_TUNNEL_INTERFACE" then $tunnel_interface
           elif .key=="VWARD_POLICY_GROUP" then $policy_group
@@ -709,7 +711,7 @@ if [ "$ACTION" = "diagnostics" ]; then
     case "$WAN_STATUS" in PASS|WARN) ;; *) WAN_STATUS=UNKNOWN ;; esac
 
     IF_JSON="$(fetch_json "$VWARD_RCI_BASE/show/interface")"
-    WG_COUNT="$(printf '%s\\n' "$IF_JSON" | "$JQ" -r '[keys[] | select(test("^Wireguard[0-9]+$"))] | length' 2>/dev/null)"
+    WG_COUNT="$(printf '%s\\n' "$IF_JSON" | "$JQ" -r '[to_entries[] | select((.value | type) == "object" and ((.value.type // "") | test("^wireguard$"; "i")))] | length' 2>/dev/null)"
     case "$WG_COUNT" in ''|*[!0-9]*) WG_COUNT=0 ;; esac
     [ "$WG_COUNT" -gt 0 ] && WG_STATUS=PASS || WG_STATUS=WARN
 
@@ -1189,8 +1191,7 @@ IFACES="$(
 
 WG_NAMES="$(
     printf '%s\n' "$IFACES" |
-    "$JQ" -r 'keys[]' 2>/dev/null |
-    grep -E '^Wireguard[0-9][0-9]*$'
+    "$JQ" -r 'to_entries[] | select((.value | type) == "object" and ((.value.type // "") | test("^wireguard$"; "i"))) | .key' 2>/dev/null
 )"
 
 WG_INTERFACES="$(

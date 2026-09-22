@@ -42,7 +42,7 @@
 - [x] добавить канонический component ID, package ownership и updater allowlist;
 - [x] заложить read-only мониторинг `show associations`, bounded history и анализ переключений;
 - [x] заложить отдельный allowlisted control с backup, acceptance и rollback;
-- [ ] провести read-only acceptance на KN-1913 без изменения Wi-Fi конфигурации;
+- [ ] провести read-only acceptance на целевом роутере без изменения Wi-Fi конфигурации;
 - [x] добавить read-only карточку и список клиентов в Console;
 - [x] подключить guarded ручное `2.4 / 5 / Auto` через Console; локальный control
   остаётся выключенным до hardware acceptance;

@@ -5,12 +5,14 @@ ENABLED=0
 CONTROL_ENABLED=0
 AUTO_APPLY=0
 
-# Must be confirmed by read-only discovery on the target Keenetic before enabling control.
-HOME_BRIDGE=Bridge0
+# Empty: the home segment is discovered as the Keenetic interface that owns the
+# LAN address from the device profile. Set only when discovery is ambiguous.
+HOME_BRIDGE=
 
-# AP-name classification used only for analysis. Empty/unknown matches remain UNKNOWN.
-AP_2G_PATTERN='(^|/)AccessPoint$|WifiMaster0'
-AP_5G_PATTERN='AccessPoint_5G|WifiMaster1'
+# Empty: each access point's band is read from its radio (band or channel) via
+# Keenetic RCI. Optional regex overrides; unmatched APs remain UNKNOWN.
+AP_2G_PATTERN=
+AP_5G_PATTERN=
 
 SAMPLE_RETENTION_SEC=172800
 WINDOW_SEC=86400

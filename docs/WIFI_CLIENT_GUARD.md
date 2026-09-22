@@ -16,8 +16,13 @@ Read-only collector использует только `ndmc -c 'show association
 MAC, AP, классифицированный диапазон, RSSI, txrate, uptime и epoch. История ограничена
 по времени и хранится в `/opt/var/lib/vward/wifi-client-guard`.
 
-Классификация AP -> band задаётся локальными regex-паттернами. Неизвестный AP остаётся
-`unknown`; компонент не угадывает диапазон.
+Классификация AP -> band определяется автоматически через Keenetic RCI `show interface`:
+для каждой точки доступа (`type: AccessPoint`) берётся поле `band`, а при его отсутствии -
+номер канала её радиомодуля (1-14 -> 2.4 ГГц, 32-177 -> 5 ГГц). Имена вида
+`WifiMaster0`/`AccessPoint_5G` не используются как признак диапазона. Последняя успешная
+карта хранится в `ap-bands.tsv`. `AP_2G_PATTERN`/`AP_5G_PATTERN` - необязательные
+локальные переопределения. Неизвестный AP остаётся `unknown`; компонент не угадывает
+диапазон.
 
 ## Анализ
 
@@ -41,6 +46,10 @@ MAC, AP, классифицированный диапазон, RSSI, txrate, up
 - `bind-5g MAC WIFI_BIND_5G`;
 - `auto MAC WIFI_BAND_AUTO`.
 
+Домашний сегмент (`HOME_BRIDGE`) по умолчанию не задаётся: control берёт
+`VWARD_LAN_INTERFACE` из Device Profile - интерфейс Keenetic, которому принадлежит
+LAN-адрес. Если сегмент не определяется однозначно, mutation отклоняется.
+
 До mutation проверяются `CONTROL_ENABLED=1`, точный формат MAC, безопасное имя bridge,
 регистрация клиента и confirmation token. Перед изменением сохраняется running-config.
 После команды выполняется `system configuration save` и повторная проверка правила;
@@ -58,8 +67,9 @@ MAC, AP, классифицированный диапазон, RSSI, txrate, up
 
 ## Следующие ворота
 
-1. На KN-1913 выполнить только read-only `show associations` и проверить фактические
-   AP names, RSSI и поведение parser на реальных клиентах.
+1. На целевом роутере Keenetic (модель определяется автоматически) выполнить только
+   read-only `show associations` и проверить фактические AP names, RSSI, автоматически
+   определённые диапазоны точек доступа и поведение parser на реальных клиентах.
 2. Включить collector вручную без control и сравнить статистику с журналами Keenetic.
 3. Проверить read-only API/экран Console на данных реального collector.
 4. Прогнать отдельный manual control acceptance с backup и rollback.
