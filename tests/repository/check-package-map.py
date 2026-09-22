@@ -59,4 +59,19 @@ not_allowed = sorted(set(targets) - allowed_targets)
 if not_allowed:
     raise SystemExit("FAIL: package targets rejected by updater allowlist: " + repr(not_allowed))
 
+import subprocess
+updater = root / "components/update-engine"
+check = "\n".join(
+    f'vu_safe_target "{target}" || echo "target {target}"\n'
+    f'vu_target_mode_allowed "{target}" "{mode}" || echo "mode {target} {mode}"'
+    for _, _, target, mode in rows
+)
+result = subprocess.run(
+    ["sh", "-c", f'. "{updater}/vward-update-common-base.sh" >/dev/null 2>&1; '
+                 f'. "{updater}/vward-update-hardening.sh" >/dev/null 2>&1; {check}'],
+    text=True, capture_output=True,
+)
+if result.stdout.strip():
+    raise SystemExit("FAIL: package map rejected by updater install rules: " + result.stdout.strip())
+
 print(f"PACKAGE_MAP=PASS targets={len(rows)}")

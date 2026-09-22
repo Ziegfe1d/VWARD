@@ -68,6 +68,14 @@ fi
 valid_bridge "$HOME_BRIDGE" || die 2 "home bridge is missing or ambiguous; set HOME_BRIDGE"
 [ "$CONFIRM" = "$REQUIRED" ] || die 22 "confirmation required"
 
+VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+[ -r "$VWARD_ADMISSION_LIB" ] || die 1 "runtime admission library is unavailable"
+. "$VWARD_ADMISSION_LIB"
+cleanup() { vward_admission_leave 2>/dev/null || true; }
+trap cleanup EXIT
+trap 'exit 73' HUP INT TERM
+vward_admission_enter wifi-client-control || die 75 "update in progress; Wi-Fi control deferred"
+
 CFG="$(ndmc -c 'show running-config' 2>/dev/null)" || die 1 "running-config unavailable"
 printf '%s\n' "$CFG" | grep -Eiq "known host .* $MAC$|host $MAC permit" || die 23 "MAC is not a registered host"
 

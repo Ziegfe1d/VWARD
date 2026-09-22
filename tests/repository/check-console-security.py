@@ -78,4 +78,35 @@ assert call_ads("op=allow&domain=_bad.example&scope=exact")["error"] == "invalid
 assert call_ads("op=source-mode&source=bad%2Fid&mode=active")["error"] == "invalid_source"
 assert call_ads("op=source-mode&source=good-source&mode=unsafe")["error"] == "invalid_source_mode"
 assert call_ads("op=pause", guard="wrong")["error"] == "request_guard_failed"
+
+assert "\\\\" not in API, "double-escaped sequences print literal backslashes in BusyBox printf/tr/awk/jq"
+
+
+def call_api(query: str, body: str = "", method: str = "GET") -> dict:
+    env = os.environ | {
+        "REQUEST_METHOD": method,
+        "QUERY_STRING": query,
+        "CONTENT_TYPE": "application/x-www-form-urlencoded",
+        "CONTENT_LENGTH": str(len(body.encode())),
+        "HTTP_X_VWARD_REQUEST": "console",
+        "JQ": jq,
+        "VWARD_PROFILE_LIB": "/nonexistent",
+        "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
+    }
+    result = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], input=body, env=env, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout.split("\n\n", 1)[1])
+
+env_rci_down = os.environ | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=status", "JQ": jq,
+                             "CURL": "/bin/false", "VWARD_PROFILE_LIB": "/nonexistent"}
+status = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=env_rci_down, text=True, capture_output=True)
+assert json.loads(status.stdout.split("\n\n", 1)[1]).get("ok") is True, "status must survive an unavailable RCI"
+
+probe = call_api("action=route-probe&type=ip&value=203.0.113.7")
+assert probe.get("ok") is True and probe["value"] == "203.0.113.7", probe
+assert call_api("action=route-probe&type=ip&value=203.0.113.300")["error"] == "invalid_ipv4"
+# Parsed op reaches the allowlist (the command itself is absent in the test tree).
+assert call_api("action=control", "op=route-reconcile&confirm=ROUTE_RECONCILE", "POST")["error"] == "action_unavailable"
+assert call_api("action=control", "op=bogus&confirm=X", "POST")["error"] == "unknown_control_action"
+assert call_api("action=update-control", "op=check", "POST")["error"] == "action_unavailable"
 print("console security checks: PASS")

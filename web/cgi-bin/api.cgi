@@ -62,9 +62,10 @@ fetch_json()
     DATA="$("$CURL" --fail --silent --show-error \
         --connect-timeout 2 --max-time 3 "$1" 2>/dev/null)"
 
-    echo "$DATA" |
-    "$JQ" -c . 2>/dev/null ||
-    echo '{}'
+    FETCH_OUT="$(printf '%s\n' "$DATA" |
+        "$JQ" -cs 'if length == 1 and (.[0] | type) == "object" then .[0] else {} end' 2>/dev/null)"
+    [ -n "$FETCH_OUT" ] || FETCH_OUT='{}'
+    printf '%s\n' "$FETCH_OUT"
 }
 
 ACTION="$(qget action)"
@@ -707,11 +708,11 @@ if [ "$ACTION" = "diagnostics" ]; then
     CGI_STATUS=PASS
 
     WAN_JSON="$(fetch_json "$VWARD_RCI_BASE/show/internet/status")"
-    WAN_STATUS="$(printf '%s\\n' "$WAN_JSON" | "$JQ" -r 'if (.internet // .connected // false) == true then "PASS" else "WARN" end' 2>/dev/null)"
+    WAN_STATUS="$(printf '%s\n' "$WAN_JSON" | "$JQ" -r 'if (.internet // .connected // false) == true then "PASS" else "WARN" end' 2>/dev/null)"
     case "$WAN_STATUS" in PASS|WARN) ;; *) WAN_STATUS=UNKNOWN ;; esac
 
     IF_JSON="$(fetch_json "$VWARD_RCI_BASE/show/interface")"
-    WG_COUNT="$(printf '%s\\n' "$IF_JSON" | "$JQ" -r '[to_entries[] | select((.value | type) == "object" and ((.value.type // "") | test("^wireguard$"; "i")))] | length' 2>/dev/null)"
+    WG_COUNT="$(printf '%s\n' "$IF_JSON" | "$JQ" -r '[to_entries[] | select((.value | type) == "object" and ((.value.type // "") | test("^wireguard$"; "i")))] | length' 2>/dev/null)"
     case "$WG_COUNT" in ''|*[!0-9]*) WG_COUNT=0 ;; esac
     [ "$WG_COUNT" -gt 0 ] && WG_STATUS=PASS || WG_STATUS=WARN
 
@@ -789,16 +790,16 @@ if [ "$ACTION" = "route-probe" ]; then
 
     valid_ipv4()
     {
-        printf '%s\\n' "$1" | awk -F. 'NF==4 {for(i=1;i<=4;i++){if($i !~ /^[0-9]+$/ || $i<0 || $i>255) exit 1} exit 0} {exit 1}'
+        printf '%s\n' "$1" | awk -F. 'NF==4 {for(i=1;i<=4;i++){if($i !~ /^[0-9]+$/ || $i<0 || $i>255) exit 1} exit 0} {exit 1}'
     }
 
     ip_matches_file()
     {
-        IP="$1" FILE="$2" awk '
+        IP="$1" awk '
         function ipn(s,a){split(s,a,"."); return ((a[1]*256+a[2])*256+a[3])*256+a[4]}
         BEGIN{target=ipn(ENVIRON["IP"])}
         {n=split($0,b,"/"); if(n!=2) next; net=ipn(b[1]); p=b[2]+0; if(p<0||p>32) next; size=2^(32-p); base=int(net/size)*size; if(target>=base && target<base+size){print $0; exit}}
-        ' "$FILE" 2>/dev/null
+        ' "$2" 2>/dev/null
     }
 
     prefix_mask()
@@ -817,14 +818,14 @@ if [ "$ACTION" = "route-probe" ]; then
             esac
 
             DNS_OUT="$(/opt/bin/vward-route-resolve4.sh "$VALUE" 2>/dev/null)"
-            IPS="$(printf '%s\\n' "$DNS_OUT" | awk '/^Address [0-9]+:/ && $3 ~ /^[0-9]+\\./ {print $3}' | sort -u | head -n 12)"
-            IPS_JSON="$(printf '%s\\n' "$IPS" | "$JQ" -Rsc 'split("\\n")|map(select(length>0))')"
+            IPS="$(printf '%s\n' "$DNS_OUT" | awk '/^Address [0-9]+:/ && $3 ~ /^[0-9]+\./ {print $3}' | sort -u | head -n 12)"
+            IPS_JSON="$(printf '%s\n' "$IPS" | "$JQ" -Rsc 'split("\n")|map(select(length>0))')"
 
             HINTS_JSON="$(
                 if [ -r "$HINT_CATALOG" ]; then
                     awk -F'|' -v h="$VALUE" '
                     NF>=3 {d=tolower($1); if(h==d || (length(h)>length(d) && substr(h,length(h)-length(d))=="." d)) print $2 "|" $3 "|" $1}' "$HINT_CATALOG" |
-                    sort -u | head -n 40 | "$JQ" -Rsc 'split("\\n")|map(select(length>0)|split("|")|{source:.[0],category:.[1],match:.[2]})'
+                    sort -u | head -n 40 | "$JQ" -Rsc 'split("\n")|map(select(length>0)|split("|")|{source:.[0],category:.[1],match:.[2]})'
                 else echo '[]'; fi
             )"
 
@@ -836,12 +837,12 @@ if [ "$ACTION" = "route-probe" ]; then
                 /^!/{g="";next}
                 g!="" && $1=="include" && tolower($2)==h {print g}
             ' "$RUNCFG" | sort -u)"
-            GROUPS_JSON="$(printf '%s\\n' "$GROUPS" | "$JQ" -Rsc 'split("\\n")|map(select(length>0))')"
+            GROUPS_JSON="$(printf '%s\n' "$GROUPS" | "$JQ" -Rsc 'split("\n")|map(select(length>0))')"
             ROUTES_JSON="$(
-                printf '%s\\n' "$GROUPS" | while IFS= read -r G; do
+                printf '%s\n' "$GROUPS" | while IFS= read -r G; do
                     [ -n "$G" ] || continue
                     awk -v g="$G" '$1=="route" && $2=="object-group" && $3==g {print g "|" $4}' "$RUNCFG"
-                done | sort -u | "$JQ" -Rsc 'split("\\n")|map(select(length>0)|split("|")|{group:.[0],interface:.[1]})'
+                done | sort -u | "$JQ" -Rsc 'split("\n")|map(select(length>0)|split("|")|{group:.[0],interface:.[1]})'
             )"
 
             "$JQ" -n --arg type domain --arg value "$VALUE" \
@@ -865,10 +866,10 @@ if [ "$ACTION" = "route-probe" ]; then
                     FILE="$IP_CATALOG/$CAT.cidr"
                     [ -r "$FILE" ] || continue
                     CIDR="$(ip_matches_file "$VALUE" "$FILE")"
-                    [ -n "$CIDR" ] && printf '%s|%s\\n' "$CAT" "$CIDR" >> "$MATCHES_FILE"
+                    [ -n "$CIDR" ] && printf '%s|%s\n' "$CAT" "$CIDR" >> "$MATCHES_FILE"
                 done < "$IP_ACTIVE"
             fi
-            MATCHES_JSON="$(head -n 40 "$MATCHES_FILE" | "$JQ" -Rsc 'split("\\n")|map(select(length>0)|split("|")|{category:.[0],cidr:.[1]})')"
+            MATCHES_JSON="$(head -n 40 "$MATCHES_FILE" | "$JQ" -Rsc 'split("\n")|map(select(length>0)|split("|")|{category:.[0],cidr:.[1]})')"
 
             OWNED_CIDR=""
             if [ -r "$IP_OWNED" ]; then OWNED_CIDR="$(ip_matches_file "$VALUE" "$IP_OWNED")"; fi
@@ -1028,12 +1029,12 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
         exit 0
     }
     BODY=$(dd bs=1 count="$LENGTH" 2>/dev/null)
-    UNKNOWN_KEYS="$(printf '%s\\n' "$BODY" | tr '&' '\\n' | cut -d= -f1 | awk '$0!="op" && $0!="confirm" {print; exit}')"
+    UNKNOWN_KEYS="$(printf '%s\n' "$BODY" | tr '&' '\n' | cut -d= -f1 | awk '$0!="op" && $0!="confirm" {print; exit}')"
     [ -z "$UNKNOWN_KEYS" ] || {
         echo '{"ok":false,"error":"unknown_parameter"}'
         exit 0
     }
-    cvalue(){ printf '%s\\n' "$BODY" | tr '&' '\\n' | awk -F= -v k="$1" '$1==k{print $2;exit}'; }
+    cvalue(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print $2;exit}'; }
     OP="$(cvalue op)"
     CONFIRM="$(cvalue confirm)"
 
@@ -1108,11 +1109,11 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
     START="$(date '+%Y-%m-%dT%H:%M:%S%z')"
     if [ -n "$ARG" ]; then OUT="$("$CMD" "$ARG" 2>&1)"; else OUT="$("$CMD" 2>&1)"; fi
     RC=$?
-    SAFE_OUT="$(printf '%s\\n' "$OUT" | tail -n 120)"
-    printf '%s|CONSOLE_ACTION|action=%s rc=%s\\n' "$START" "$LABEL" "$RC" >> /opt/var/log/vward/console-audit.log
+    SAFE_OUT="$(printf '%s\n' "$OUT" | tail -n 120)"
+    printf '%s|CONSOLE_ACTION|action=%s rc=%s\n' "$START" "$LABEL" "$RC" >> /opt/var/log/vward/console-audit.log
     OUT_JSON="$(printf '%s' "$SAFE_OUT" | "$JQ" -Rs .)"
     if [ "$RC" -eq 0 ]; then OK=true; else OK=false; fi
-    printf '{"ok":%s,"action":"%s","rc":%s,"output":%s}\\n' "$OK" "$LABEL" "$RC" "$OUT_JSON"
+    printf '{"ok":%s,"action":"%s","rc":%s,"output":%s}\n' "$OK" "$LABEL" "$RC" "$OUT_JSON"
     exit 0
 fi
 

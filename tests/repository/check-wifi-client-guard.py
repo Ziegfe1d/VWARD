@@ -43,7 +43,7 @@ for marker in ("AUTO_APPLY=0","read-only API/экран Console","планиро
         raise SystemExit(f"FAIL: staged rollout contract missing: {marker}")
 
 scheduler=(root/"components/wifi-client-guard/scripts/vward-wifi-client-scheduler.sh").read_text(encoding="utf-8")
-for marker in ("ENABLED=0", "vward-wifi-client-monitor.sh --once", "vward-wifi-client-analyze.sh --once"):
+for marker in ("ENABLED=0", 'vward-wifi-client-monitor.sh" --once', 'vward-wifi-client-analyze.sh" --once', "vward_admission_enter wifi-client-guard"):
     if marker not in scheduler:
         raise SystemExit(f"FAIL: scheduler marker missing: {marker}")
 
@@ -109,5 +109,43 @@ EOF
     expected_bands={"aa:aa:aa:aa:aa:01":"5","aa:aa:aa:aa:aa:02":"2.4","aa:aa:aa:aa:aa:03":"unknown"}
     if bands != expected_bands:
         raise SystemExit(f"FAIL: AP band discovery {bands} != {expected_bands}")
+
+if "vward_admission_enter wifi-client-control" not in control:
+    raise SystemExit("FAIL: Wi-Fi control must not mutate the router during an update")
+
+with tempfile.TemporaryDirectory() as tmp:
+    tmp=Path(tmp)
+    (tmp/"root/tmp").mkdir(parents=True)
+    bindir=tmp/"bin"; bindir.mkdir()
+    for name in ("monitor","analyze"):
+        script=bindir/f"vward-wifi-client-{name}.sh"
+        script.write_text(f'#!/bin/sh\necho {name} >> "{tmp}/ran"\n'); script.chmod(0o755)
+    conf=tmp/"wifi.conf"; conf.write_text("ENABLED=1\n")
+    lock=tmp/"wifi.lock"
+    env=os.environ|{"VWARD_WIFI_CLIENT_GUARD_CONF":str(conf),"VWARD_WIFI_CLIENT_GUARD_LOCK":str(lock),
+                    "VWARD_WIFI_CLIENT_GUARD_BIN":str(bindir),"VWARD_ROOT_PREFIX":str(tmp/"root"),
+                    "VWARD_ADMISSION_LIB":str(root/"components/runtime/lib/vward-runtime-admission.sh")}
+    scheduler=["sh",str(root/"components/wifi-client-guard/scripts/vward-wifi-client-scheduler.sh")]
+    def ran():
+        return (tmp/"ran").read_text().split() if (tmp/"ran").exists() else []
+
+    (tmp/"root/tmp/vward-update-requested").write_text("x")
+    if subprocess.run(scheduler,env=env).returncode != 75 or ran():
+        raise SystemExit("FAIL: Wi-Fi scheduler must yield to a requested update")
+    (tmp/"root/tmp/vward-update-requested").unlink()
+
+    holder=subprocess.Popen(["sleep","30"])
+    try:
+        start=subprocess.run(["sh","-c",f'. "{env["VWARD_ADMISSION_LIB"]}"; vward_admission_pid_start {holder.pid}'],text=True,capture_output=True).stdout.strip()
+        lock.mkdir(); (lock/"pid").write_text(f"{holder.pid}\n"); (lock/"pid_start").write_text(start+"\n")
+        if subprocess.run(scheduler,env=env).returncode != 0 or ran():
+            raise SystemExit("FAIL: Wi-Fi scheduler must not overlap a live run")
+    finally:
+        holder.kill(); holder.wait()
+
+    if subprocess.run(scheduler,env=env).returncode != 0 or ran() != ["monitor","analyze"]:
+        raise SystemExit(f"FAIL: Wi-Fi scheduler must reclaim a stale lock and run: {ran()}")
+    if lock.exists():
+        raise SystemExit("FAIL: Wi-Fi scheduler must release its lock")
 
 print("WIFI_CLIENT_GUARD=PASS")
