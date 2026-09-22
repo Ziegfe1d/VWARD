@@ -109,5 +109,9 @@ assert call_api("action=route-probe&type=ip&value=203.0.113.300")["error"] == "i
 # Parsed op reaches the allowlist (the command itself is absent in the test tree).
 assert call_api("action=control", "op=route-reconcile&confirm=ROUTE_RECONCILE", "POST")["error"] == "action_unavailable"
 assert call_api("action=control", "op=bogus&confirm=X", "POST")["error"] == "unknown_control_action"
+for op in ("wan-renew", "wan-bounce"):
+    assert call_api("action=control", f"op={op}", "POST")["error"] in ("action_unavailable", "confirmation_required")
+assert 'wan-bounce) CMD=/opt/bin/vward-wan-recovery.sh; ARG=wan-bounce; REQUIRED=WAN_BOUNCE' in API
+assert 'wan-renew) CMD=/opt/bin/vward-wan-recovery.sh; ARG=dhcp-renew; REQUIRED=WAN_RENEW' in API
 assert call_api("action=update-control", "op=check", "POST")["error"] == "action_unavailable"
 print("console security checks: PASS")

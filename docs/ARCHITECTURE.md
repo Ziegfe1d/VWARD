@@ -41,7 +41,9 @@ lighttpd/CGI-панели для KeeneticOS с Entware.
 ### VWARD WAN Guard
 
 `vward-wan-guard.sh` выполняет ступенчатую диагностику и восстановление подключения
-`ISP`/физического WAN. `vward-wan-recovery.sh` ограничен обновлением DHCP-клиента.
+WAN-интерфейса из профиля устройства; флаг `/opt/etc/vward/wan-guard.disabled` оставляет
+только проверку. `vward-wan-recovery.sh` - ручные «Обновить адрес» и «Переподключить» из
+Console с той же блокировкой и маркером владения, что у WAN Guard.
 
 ### VWARD Wi-Fi Client Guard
 

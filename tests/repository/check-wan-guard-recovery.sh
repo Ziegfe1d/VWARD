@@ -198,4 +198,20 @@ if grep -Fq 'interface ISP up' "$WAN_TEST_LOG"; then
     fail "rejected down was incorrectly compensated after TERM"
 fi
 
+# Automatic recovery switched off from the Console: classify, but never act,
+# and do not accumulate failures that would fire right after re-enabling.
+: > "$WAN_TEST_LOG"
+rm -rf "$REC_DIR"; mkdir -p "$REC_DIR"
+WAN_GUARD_DISABLE_FILE="$WORK/wan-guard.disabled"
+: > "$WAN_GUARD_DISABLE_FILE"
+CONFIRM_FAILURES=1
+DETAIL=test
+wan_recover PHY_DOWN
+[ "$ACTION" = DISABLED_BY_USER ] || fail "disabled guard has wrong action: $ACTION"
+[ ! -s "$WAN_TEST_LOG" ] || fail "disabled guard touched the WAN interface"
+[ "$(cat "$REC_DIR/fail_count")" = 0 ] || fail "disabled guard accumulated failures"
+rm -f "$WAN_GUARD_DISABLE_FILE"
+wan_recover PHY_DOWN
+grep -Fq 'interface ISP down' "$WAN_TEST_LOG" || fail "re-enabled guard does not act"
+
 echo WAN_GUARD_RECOVERY=PASS

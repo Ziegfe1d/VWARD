@@ -33,6 +33,8 @@ CURL="/opt/bin/curl"
 JQ="/opt/bin/jq"
 PING="/opt/bin/ping"
 NDMC=${NDMC:-/bin/ndmc}
+# Present = automatic recovery off; the connection is still checked and logged.
+WAN_GUARD_DISABLE_FILE=${VWARD_WAN_GUARD_DISABLE_FILE:-/opt/etc/vward/wan-guard.disabled}
 
 LOCK_OWNED=0
 WAN_BOUNCE_PHASE=IDLE
@@ -55,7 +57,8 @@ lock_is_live()
 
     [ -d "/proc/$LPID" ] || return 1
 
-    grep -Fq "vward-wan-guard.sh" "/proc/$LPID/cmdline" 2>/dev/null
+    # The manual recovery tool shares this lock.
+    grep -Eq "vward-wan-(guard|recovery)[.]sh" "/proc/$LPID/cmdline" 2>/dev/null
 }
 
 cleanup()
@@ -300,6 +303,13 @@ wan_recover()
 
     mkdir -p "$REC_DIR"
 
+    if [ -n "${WAN_GUARD_DISABLE_FILE:-}" ] && [ -e "$WAN_GUARD_DISABLE_FILE" ]; then
+        wg_reset_all
+        ACTION="DISABLED_BY_USER"
+        DETAIL="$DETAIL recovery_count=0 recovery_stage=0 automation=disabled"
+        return
+    fi
+
     WR_FAIL_COUNT="$(wg_num "$REC_DIR/fail_count" 0)"
     WR_STAGE="$(wg_num "$REC_DIR/stage" 0)"
     WR_PREV_CLASS="$(cat "$REC_DIR/fail_class" 2>/dev/null)"
@@ -462,7 +472,7 @@ wan_recover()
 
     ACTION="DHCP_RENEW"
 
-    LD_LIBRARY_PATH= /bin/ndmc -c "interface $VWARD_WAN_INTERFACE ip dhcp client renew" \
+    LD_LIBRARY_PATH= "$NDMC" -c "interface $VWARD_WAN_INTERFACE ip dhcp client renew" \
         >/tmp/vward-wan-guard.ndmc.renew 2>&1
     WR_RENEW_RC=$?
 

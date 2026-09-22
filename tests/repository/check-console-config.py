@@ -257,6 +257,7 @@ with tempfile.TemporaryDirectory() as tmp:
         ("op=update&target=manifest_url&value=x", "invalid_setting"),
         ("op=route-domain&action=add&target=bad..example", "invalid_domain"),
         ("op=tunnel&target=Wireguard1", "confirmation_required"),
+        ("op=wan-guard&value=0", "confirmation_required"),
         ("op=tunnel&target=a%3Bb&confirm=TUNNEL_SWITCH", "invalid_value"),
     ):
         got = post(body)
@@ -266,6 +267,12 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("tunnel guard must not be disabled without confirmation")
     if post("op=tunnel-guard&value=0&confirm=TUNNEL_GUARD_DISABLE")["result"] != "changed" or not (etc / "tunnel-guard.disabled").exists():
         fail("confirmed tunnel guard disable")
+    if post("op=wan-guard&value=0&confirm=WAN_GUARD_DISABLE")["result"] != "changed" or not (etc / "wan-guard.disabled").exists():
+        fail("confirmed WAN guard disable")
+    if api("action=config-data")["wan_guard"] != {"enabled": False}:
+        fail("config-data must report the WAN guard flag")
+    if post("op=wan-guard&value=1")["result"] != "changed" or (etc / "wan-guard.disabled").exists():
+        fail("WAN guard enable")
     if post("op=wifi&target=CONTROL_ENABLED&value=1&confirm=WIFI_CONTROL_ENABLE")["result"] != "changed":
         fail("confirmed Wi-Fi control enable")
     if api("action=config", "op=wifi", "GET").get("error") != "method_not_allowed":

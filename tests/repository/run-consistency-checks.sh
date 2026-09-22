@@ -71,6 +71,7 @@ grep -Fq '"$CAPTURE_FILTER"' components/route-engine/scripts/vward-route-engine.
 grep -Fq "'src net \$VWARD_LAN_SUBNET" components/route-engine/scripts/vward-route-engine.sh && fail "DNS capture filter remains single-quoted"
 python3 tests/repository/check-policy-sync-safety.py || fail "VPN audit safety"
 sh tests/repository/check-wan-guard-recovery.sh || fail "WAN recovery cancellation safety"
+python3 tests/repository/check-wan-manual-recovery.py || fail "Manual WAN recovery"
 sh tests/repository/check-runtime-pid-safety.sh || fail "Runtime PID identity safety"
 sh tests/repository/check-terminating-signal-traps.sh || fail "Terminating signal trap safety"
 sh tests/repository/check-runtime-update-admission.sh || fail "Runtime update admission safety"

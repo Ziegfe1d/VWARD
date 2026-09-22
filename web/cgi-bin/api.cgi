@@ -188,6 +188,7 @@ if [ "$ACTION" = config-data ]; then
     CATS="$(awk -F'|' 'NF>=5 && $1!~/^[[:space:]]*#/ {print $1 "\t" $2 "\t" $5}' "$CONFIG_ETC/route-engine/categories.tsv" 2>/dev/null | head -n 100 |
         "$JQ" -Rn '[inputs|split("\t")|{id:.[0],title:.[1],enabled:(.[2]=="1")}]')"
     TG=true; [ -e "$CONFIG_ETC/tunnel-guard.disabled" ] && TG=false
+    WG_ON=true; [ -e "$CONFIG_ETC/wan-guard.disabled" ] && WG_ON=false
     WCONF=${VWARD_WIFI_CLIENT_GUARD_CONF:-$CONFIG_ETC/wifi-client-guard.conf}
     UCONF=${VWARD_UPDATE_CONFIG:-$CONFIG_ETC/update.conf}
     wnum(){ V="$(kv_get "$WCONF" "$1")"; case "$V" in ''|*[!0-9-]*) V=$2;; esac; printf '%s' "$V"; }
@@ -196,7 +197,7 @@ if [ "$ACTION" = config-data ]; then
     "$JQ" -n \
       --arg group "${VWARD_POLICY_GROUP:-}" --argjson router "$ROUTER" \
       --argjson route_domains "${ROUTE_DOMAINS:-[]}" --argjson force "${FORCE:-[]}" --argjson adaptive "${ADAPT:-[]}" \
-      --argjson categories "${CATS:-[]}" --argjson tunnel_guard "$TG" \
+      --argjson categories "${CATS:-[]}" --argjson tunnel_guard "$TG" --argjson wan_guard "$WG_ON" \
       --argjson w_en "$W_EN" --argjson w_ctl "$W_CTL" \
       --arg w_window "$(wnum WINDOW_SEC 86400)" --arg w_switch "$(wnum BAND_SWITCH_WARN 20)" \
       --arg w_weak "$(wnum WEAK_5G_SAMPLE_WARN 5)" --arg w_rssi "$(wnum WEAK_5G_RSSI -75)" \
@@ -205,7 +206,7 @@ if [ "$ACTION" = config-data ]; then
       --argjson writable "$([ -x "$CONFIG_HELPER" ] && echo true || echo false)" \
       '{ok:true,writable:$writable,
         route:{group:$group,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories},
-        tunnel_guard:{enabled:$tunnel_guard},
+        tunnel_guard:{enabled:$tunnel_guard},wan_guard:{enabled:$wan_guard},
         wifi:{ENABLED:($w_en==1),CONTROL_ENABLED:($w_ctl==1),WINDOW_SEC:($w_window|(tonumber? // null)),BAND_SWITCH_WARN:($w_switch|(tonumber? // null)),WEAK_5G_SAMPLE_WARN:($w_weak|(tonumber? // null)),WEAK_5G_RSSI:($w_rssi|(tonumber? // null))},
         update:{safe_window_start:$u_start,safe_window_end:$u_end,check_interval_seconds:($u_interval|(tonumber? // null))}}'
     exit 0
@@ -234,6 +235,7 @@ if [ "$ACTION" = config ]; then
         route-domain|force-vpn|adaptive) set -- "$OP" "$ACT" "$TARGET" ;;
         domain-category|wifi|update) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=TUNNEL_GUARD_DISABLE ;;
+        wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;
         tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
         *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
     esac
@@ -1148,6 +1150,8 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
             policy-refresh) CMD=/opt/bin/vward-policy-sync.sh; ARG=sync; REQUIRED=POLICY_REFRESH; LABEL=policy-refresh ;;
             policy-reconcile) CMD=/opt/bin/vward-policy-sync.sh; ARG=--reconcile; REQUIRED=POLICY_RECONCILE; LABEL=policy-reconcile ;;
             tunnel-health) CMD=/opt/bin/vward-tunnel-health.sh; LABEL=tunnel-health ;;
+            wan-renew) CMD=/opt/bin/vward-wan-recovery.sh; ARG=dhcp-renew; REQUIRED=WAN_RENEW; LABEL=wan-renew ;;
+            wan-bounce) CMD=/opt/bin/vward-wan-recovery.sh; ARG=wan-bounce; REQUIRED=WAN_BOUNCE; LABEL=wan-bounce ;;
             *) echo '{"ok":false,"error":"unknown_control_action"}'; exit 0 ;;
         esac
     else

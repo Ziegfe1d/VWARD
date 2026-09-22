@@ -37,6 +37,7 @@ API принимает POST только с заголовком `X-VWARD-Reques
 | `tunnel-guard 0/1` | Защита VPN (выключение - токен `TUNNEL_GUARD_DISABLE`) | `/opt/etc/vward/tunnel-guard.disabled` |
 | `wifi KEY VALUE` | `ENABLED`, `CONTROL_ENABLED` (включение - токен `WIFI_CONTROL_ENABLE`), `WINDOW_SEC`, `BAND_SWITCH_WARN`, `WEAK_5G_SAMPLE_WARN`, `WEAK_5G_RSSI` | `/opt/etc/vward/wifi-client-guard.conf` |
 | `update KEY VALUE` | `safe_window_start`, `safe_window_end`, `check_interval_seconds` | `/opt/etc/vward/update.conf` |
+| `wan-guard 0/1` | Защита интернета (выключение - токен `WAN_GUARD_DISABLE`) | `/opt/etc/vward/wan-guard.disabled` |
 | `tunnel NAME` | туннель для маршрутов (токен `TUNNEL_SWITCH`) | DNS-маршруты групп в Keenetic, `/opt/etc/vward/device.conf` |
 
 Helper принимает только перечисленные ключи и строгие значения (домен - только буквы, цифры,
@@ -109,7 +110,8 @@ Console source поддерживает четыре явных API-направ
 сопоставляет его с локальными каталогами/state и фиксированным снимком running-config.
 
 Разрешённые component actions: обновление доменных hints, запуск Route Reconciler,
-обновление/сверка Policy Sync и health probe Tunnel Guard. Операции, способные менять
+обновление/сверка Policy Sync, health probe Tunnel Guard, «Обновить адрес» (`wan-renew`,
+токен `WAN_RENEW`) и «Переподключить» (`wan-bounce`, токен `WAN_BOUNCE`). Операции, способные менять
 маршруты, требуют отдельного server-side confirmation token. Одновременно выполняется
 только одна Console action; при активной updater transaction component actions
 блокируются. Результат и RC попадают в Console audit log без секретов.
@@ -120,9 +122,18 @@ VWARD Update Engine вызывается только штатными флаг�
 Console не отключаются.
 
 VWARD WAN Guard намеренно не запускается принудительно из Console под видом простой
-проверки: текущий рабочий цикл способен инициировать recovery. Кнопка «Проверить WAN»
-обновляет только read-only RCI/status. Это ограничение сохраняется до появления
-отдельного доказуемо безопасного WAN probe/actuator path.
+проверки: его рабочий цикл способен инициировать recovery. Кнопка «Проверить» обновляет
+только read-only RCI/status. Ручные действия выполняет отдельный
+`vward-wan-recovery.sh` (`dhcp-renew` / `wan-bounce`) для интерфейса из профиля устройства:
+он берёт ту же блокировку, что WAN Guard, перед отключением записывает маркер владения
+(незавершённое переподключение поднимает сам инструмент по сигналу или следующий запуск
+WAN Guard) и допускает не больше одного ручного действия в минуту. Ручные действия не
+расходуют лимиты автоматического восстановления и пишутся в журнал восстановлений.
+
+Выключенная Защита интернета (`wan-guard.disabled`) продолжает раз в минуту проверять и
+журналировать связь, но не обновляет адрес и не переподключает интерфейс
+(`ACTION=DISABLED_BY_USER`); счётчики неудач при этом не накапливаются. Незавершённое
+переподключение восстанавливается и в выключенном состоянии.
 
 ## Диагностика
 

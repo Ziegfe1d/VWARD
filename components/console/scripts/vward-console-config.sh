@@ -23,6 +23,7 @@ ADAPTIVE_GROUP=AdaptiveAuto
 FORCE_FILE="$ETC/route-engine/force-vpn.conf"
 CATEGORY_FILE="$ETC/route-engine/categories.tsv"
 TUNNEL_GUARD_FLAG="$ETC/tunnel-guard.disabled"
+WAN_GUARD_FLAG="$ETC/wan-guard.disabled"
 WIFI_FILE=${VWARD_WIFI_CLIENT_GUARD_CONF:-$ETC/wifi-client-guard.conf}
 UPDATE_FILE=${VWARD_UPDATE_CONFIG:-$ETC/update.conf}
 POLICY_STATE=${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}
@@ -280,15 +281,16 @@ op_domain_category() {
     done_ok "domain-category $1=$2" changed
 }
 
-op_tunnel_guard() {
-    case "$1" in
-        1) [ -e "$TUNNEL_GUARD_FLAG" ] || done_ok "tunnel-guard enabled" unchanged
-           rm -f "$TUNNEL_GUARD_FLAG" || die write_failed ;;
-        0) [ ! -e "$TUNNEL_GUARD_FLAG" ] || done_ok "tunnel-guard disabled" unchanged
-           mkdir -p "$(dirname "$TUNNEL_GUARD_FLAG")" && printf 'disabled from VWARD Console %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$TUNNEL_GUARD_FLAG" || die write_failed ;;
+# op_guard_flag NAME FLAG-FILE 0|1: a guard is disabled while its flag file exists.
+op_guard_flag() {
+    case "$3" in
+        1) [ -e "$2" ] || done_ok "$1 enabled" unchanged
+           rm -f "$2" || die write_failed ;;
+        0) [ ! -e "$2" ] || done_ok "$1 disabled" unchanged
+           mkdir -p "$(dirname "$2")" && printf 'disabled from VWARD Console %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$2" || die write_failed ;;
         *) die invalid_value 64 ;;
     esac
-    done_ok "tunnel-guard enabled=$1" changed
+    done_ok "$1 enabled=$3" changed
 }
 
 op_wifi() {
@@ -453,7 +455,7 @@ op_tunnel() {
 
 [ "$#" -ge 2 ] && [ "$#" -le 3 ] || die usage 64
 OP=$1; shift
-case "$OP" in tunnel-guard|tunnel) [ "$#" -eq 1 ] || die usage 64 ;; *) [ "$#" -eq 2 ] || die usage 64 ;; esac
+case "$OP" in tunnel-guard|wan-guard|tunnel) [ "$#" -eq 1 ] || die usage 64 ;; *) [ "$#" -eq 2 ] || die usage 64 ;; esac
 ARG1=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
 ARG2=${2:-}
 case "$OP" in wifi|update|tunnel) ARG1=$1 ;; esac
@@ -469,7 +471,8 @@ case "$OP" in
     force-vpn) op_force_vpn "$ARG1" "$ARG2" ;;
     adaptive) op_adaptive "$ARG1" "$ARG2" ;;
     domain-category) op_domain_category "$ARG1" "$ARG2" ;;
-    tunnel-guard) op_tunnel_guard "$ARG1" ;;
+    tunnel-guard) op_guard_flag tunnel-guard "$TUNNEL_GUARD_FLAG" "$ARG1" ;;
+    wan-guard) op_guard_flag wan-guard "$WAN_GUARD_FLAG" "$ARG1" ;;
     tunnel) op_tunnel "$ARG1" ;;
     wifi) op_wifi "$ARG1" "$ARG2" ;;
     update) op_update "$ARG1" "$ARG2" ;;
