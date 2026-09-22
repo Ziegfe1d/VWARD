@@ -102,6 +102,9 @@ env_rci_down = os.environ | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=st
 status = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=env_rci_down, text=True, capture_output=True)
 assert json.loads(status.stdout.split("\n\n", 1)[1]).get("ok") is True, "status must survive an unavailable RCI"
 
+assert "?//" not in API, "jq 1.7 parses '?//' as the destructuring operator; write '(x? // y)'"
+assert call_api("action=ads-data").get("ok") is True, "ads-data must render without Ads Guard state"
+
 probe = call_api("action=route-probe&type=ip&value=203.0.113.7")
 assert probe.get("ok") is True and probe["value"] == "203.0.113.7", probe
 assert call_api("action=route-probe&type=ip&value=203.0.113.300")["error"] == "invalid_ipv4"

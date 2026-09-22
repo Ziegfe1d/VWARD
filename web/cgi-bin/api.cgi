@@ -129,7 +129,7 @@ if [ "$ACTION" = wifi-data ]; then
     ENABLED="$(wconf ENABLED)"; [ "$ENABLED" = 1 ] || ENABLED=0
     CONTROL_ENABLED="$(wconf CONTROL_ENABLED)"; [ "$CONTROL_ENABLED" = 1 ] || CONTROL_ENABLED=0
     AUTO_APPLY="$(wconf AUTO_APPLY)"; [ "$AUTO_APPLY" = 1 ] || AUTO_APPLY=0
-    CLIENTS="$(awk -F '\t' 'NF>=9 && $2 ~ /^([0-9a-fA-F][0-9a-fA-F]:){5}[0-9a-fA-F][0-9a-fA-F]$/ {print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 "\t" $8 "\t" $9}' "$WSTATE/analysis.tsv" 2>/dev/null | head -n 100 | "$JQ" -Rn '[inputs|split("\t")|{mac:.[0],band:.[1],health:.[2],recommendation:.[3],reason:.[4],switches:(.[5]|tonumber?//0),weak_5g:(.[6]|tonumber?//0),min_5g_rssi:.[7]}]')"
+    CLIENTS="$(awk -F '\t' 'NF>=9 && $2 ~ /^([0-9a-fA-F][0-9a-fA-F]:){5}[0-9a-fA-F][0-9a-fA-F]$/ {print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 "\t" $8 "\t" $9}' "$WSTATE/analysis.tsv" 2>/dev/null | head -n 100 | "$JQ" -Rn '[inputs|split("\t")|{mac:.[0],band:.[1],health:.[2],recommendation:.[3],reason:.[4],switches:(.[5]|(tonumber? // 0)),weak_5g:(.[6]|(tonumber? // 0)),min_5g_rssi:.[7]}]')"
     [ -n "$CLIENTS" ] || CLIENTS='[]'
     RC="$(cat /tmp/vward-wifi-client-guard.cron.rc 2>/dev/null)"; case "$RC" in ''|*[!0-9]*) RC=-1;; esac
     LAST="$(cat /tmp/vward-wifi-client-guard.cron.last 2>/dev/null | tr '\n' ' ' | cut -c1-80)"
@@ -175,7 +175,7 @@ if [ "$ACTION" = ads-data ]; then
   JOBS="$([ -x "$JOB" ] && "$JOB" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}')"
   LAST_OUTPUT_PATH="$(printf '%s' "$JOBS" | "$JQ" -r '.LAST_output // ""' 2>/dev/null)"; LAST_OUTPUT=""
   case "$LAST_OUTPUT_PATH" in "$AST/jobs/"*.out) [ -r "$LAST_OUTPUT_PATH" ] && LAST_OUTPUT="$(head -c 20000 "$LAST_OUTPUT_PATH" 2>/dev/null)" ;; esac
-  "$JQ" -n --argjson paused "$([ "$PAUSED" = 1 ]&&echo true||echo false)" --argjson settings "$SETJSON" --argjson sources "$SOURCES" --argjson manual "$MANUAL" --argjson jobsraw "$JOBS" --arg job_output "$LAST_OUTPUT" --argjson b "${BLOCKED:-0}" --argjson r "${REVIEW:-0}" --argjson a "${ALLOW:-0}" --argjson t "${TRUST:-0}" '{ok:true,component:"ads-privacy-guard",paused:$paused,settings:$settings,sources:$sources,manual_rules:$manual,counts:{blocked:$b,review:$r,allow:$a,trust:$t},jobs:{queued:($jobsraw.JOB_QUEUE//"0"|tonumber?//0),current:{state:($jobsraw.CURRENT_state//"IDLE"),type:($jobsraw.CURRENT_type//"")},last:{state:($jobsraw.LAST_state//"NONE"),type:($jobsraw.LAST_type//""),output:$job_output}}}'
+  "$JQ" -n --argjson paused "$([ "$PAUSED" = 1 ]&&echo true||echo false)" --argjson settings "$SETJSON" --argjson sources "$SOURCES" --argjson manual "$MANUAL" --argjson jobsraw "$JOBS" --arg job_output "$LAST_OUTPUT" --argjson b "${BLOCKED:-0}" --argjson r "${REVIEW:-0}" --argjson a "${ALLOW:-0}" --argjson t "${TRUST:-0}" '{ok:true,component:"ads-privacy-guard",paused:$paused,settings:$settings,sources:$sources,manual_rules:$manual,counts:{blocked:$b,review:$r,allow:$a,trust:$t},jobs:{queued:($jobsraw.JOB_QUEUE//"0"|(tonumber? // 0)),current:{state:($jobsraw.CURRENT_state//"IDLE"),type:($jobsraw.CURRENT_type//"")},last:{state:($jobsraw.LAST_state//"NONE"),type:($jobsraw.LAST_type//""),output:$job_output}}}'
   exit 0
 fi
 
