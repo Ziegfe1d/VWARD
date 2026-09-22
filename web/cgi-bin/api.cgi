@@ -234,6 +234,7 @@ if [ "$ACTION" = config ]; then
         route-domain|force-vpn|adaptive) set -- "$OP" "$ACT" "$TARGET" ;;
         domain-category|wifi|update) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=TUNNEL_GUARD_DISABLE ;;
+        tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
         *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
     esac
     [ "$OP:$TARGET:$VALUE" != wifi:CONTROL_ENABLED:1 ] || REQUIRED=WIFI_CONTROL_ENABLE

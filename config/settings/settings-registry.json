@@ -151,7 +151,7 @@
       "secret": false,
       "restart_requirement": "component",
       "risk": "high",
-      "read_only_reason": "Требуется авторизация"
+      "read_only_reason": "Меняется переключением туннеля: VPN → туннель → «Использовать для маршрутов»"
     },
     {
       "id": "device.tunnel_interface",
@@ -166,7 +166,7 @@
       "secret": false,
       "restart_requirement": "component",
       "risk": "high",
-      "read_only_reason": "Требуется авторизация"
+      "read_only_reason": "Меняется переключением туннеля: VPN → туннель → «Использовать для маршрутов»"
     },
     {
       "id": "device.policy_group",
@@ -181,7 +181,7 @@
       "secret": false,
       "restart_requirement": "component",
       "risk": "high",
-      "read_only_reason": "Требуется авторизация"
+      "read_only_reason": "Меняется переключением туннеля: VPN → туннель → «Использовать для маршрутов»"
     },
     {
       "id": "device.console_port",

@@ -54,6 +54,7 @@ python3 tests/repository/check-console-responsive.py || fail "Console responsive
 python3 tests/repository/check-console-icon-system.py || fail "Console icon and typography system"
 python3 tests/repository/check-console-security.py || fail "Console security"
 python3 tests/repository/check-console-config.py || fail "Console configuration writer"
+python3 tests/repository/check-console-tunnel.py || fail "Console tunnel switch"
 python3 tests/repository/check-device-profile.py || fail "Device profile"
 python3 tests/repository/check-settings-registry.py || fail "Settings registry"
 python3 tests/repository/check-update-schema-registry.py || fail "Updater schema registry"

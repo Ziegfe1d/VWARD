@@ -24,6 +24,8 @@ LOYAL_SRC="$SOURCE_ROOT/loyalsoldier"
 CATALOG="$STATE/catalog"
 INDEX="$STATE/catalog.index"
 OWNED="$STATE/owned.dynamic.routes"
+# Device the owned routes point to; differs from $WG after the tunnel for routes changed.
+OWNED_DEVICE="$STATE/owned.interface"
 ACTIVE="$STATE/active.categories"
 LOCK="$STATE/lock"
 
@@ -588,6 +590,38 @@ reconcile_routes()
     REMOVED=0
     EXISTING=0
     ERRORS=0
+    MOVED=0
+
+    # The tunnel for routes changed: withdraw owned routes from the previous
+    # device first; they are re-added through $WG below.  Routes that could not be
+    # withdrawn stay owned by the previous device and are retried next run.
+    PREV_WG="$(cat "$OWNED_DEVICE" 2>/dev/null)"
+    case "$PREV_WG" in *[!A-Za-z0-9_.:-]*) PREV_WG="" ;; esac
+    if [ -n "$PREV_WG" ] && [ "$PREV_WG" != "$WG" ]; then
+        LEFT="$WORK/left-owned"
+        : > "$LEFT"
+        while IFS= read -r CIDR; do
+            [ -n "$CIDR" ] || continue
+            NET="${CIDR%/*}"
+            MASK="$(prefix_mask "${CIDR#*/}")" || continue
+            if ndm "no ip route $NET $MASK $PREV_WG"; then
+                MOVED=$((MOVED + 1))
+            else
+                echo "$CIDR" >> "$LEFT"
+                ERRORS=$((ERRORS + 1))
+            fi
+        done < "$OWNED"
+        mv "$LEFT" "$OWNED"
+        if [ -s "$OWNED" ]; then
+            ndm "system configuration save" || true
+            echo "MOVED_FROM=$PREV_WG"
+            echo "MOVE_PENDING=$(wc -l < "$OWNED")"
+            log "MOVE from=$PREV_WG to=$WG withdrawn=$MOVED pending=$(wc -l < "$OWNED")"
+            return 1
+        fi
+        log "MOVE from=$PREV_WG to=$WG withdrawn=$MOVED"
+    fi
+    echo "$WG" > "$OWNED_DEVICE"
 
     while IFS= read -r CIDR; do
         [ -n "$CIDR" ] || continue
@@ -638,7 +672,7 @@ reconcile_routes()
     cp "$CATS" "$ACTIVE.new"
     mv "$ACTIVE.new" "$ACTIVE"
 
-    if [ "$ADDED" -gt 0 ] || [ "$REMOVED" -gt 0 ]; then
+    if [ "$ADDED" -gt 0 ] || [ "$REMOVED" -gt 0 ] || [ "$MOVED" -gt 0 ]; then
         if ndm "system configuration save"; then
             SAVE="YES"
         else
@@ -653,6 +687,7 @@ reconcile_routes()
     echo "WANTED_CIDR=$(wc -l < "$WANTED")"
     echo "ADDED=$ADDED"
     echo "REMOVED=$REMOVED"
+    [ "$MOVED" -eq 0 ] || echo "MOVED=$MOVED"
     echo "EXISTING_UNMANAGED=$EXISTING"
     echo "MANAGED_DYNAMIC=$(wc -l < "$OWNED")"
     echo "ERRORS=$ERRORS"

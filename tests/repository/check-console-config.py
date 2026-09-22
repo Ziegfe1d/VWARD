@@ -256,6 +256,8 @@ with tempfile.TemporaryDirectory() as tmp:
         ("op=wifi&target=ENABLED&value=1&extra=1", "unknown_parameter"),
         ("op=update&target=manifest_url&value=x", "invalid_setting"),
         ("op=route-domain&action=add&target=bad..example", "invalid_domain"),
+        ("op=tunnel&target=Wireguard1", "confirmation_required"),
+        ("op=tunnel&target=a%3Bb&confirm=TUNNEL_SWITCH", "invalid_value"),
     ):
         got = post(body)
         if got.get("error") != err:

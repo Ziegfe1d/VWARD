@@ -25,19 +25,36 @@ CATEGORY_FILE="$ETC/route-engine/categories.tsv"
 TUNNEL_GUARD_FLAG="$ETC/tunnel-guard.disabled"
 WIFI_FILE=${VWARD_WIFI_CLIENT_GUARD_CONF:-$ETC/wifi-client-guard.conf}
 UPDATE_FILE=${VWARD_UPDATE_CONFIG:-$ETC/update.conf}
+POLICY_STATE=${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}
+TUNNEL_GUARD_STATE=${VWARD_TUNNEL_GUARD_STATE:-/opt/var/lib/vward/tunnel-guard/state}
+TUNNEL_HEALTH_STATE=${VWARD_TUNNEL_HEALTH_STATE:-/opt/var/lib/vward/tunnel-health/state}
+ROUTE_ENGINE_INIT=${VWARD_ROUTE_ENGINE_INIT:-/opt/etc/init.d/S91vward-route-engine}
+POLICY_SYNC_BIN=${VWARD_POLICY_SYNC_BIN:-/opt/bin/vward-policy-sync.sh}
 PERSIST="$ROUTE_STATE/adaptive-persist.txt"
 ADAPTIVE="$ROUTE_STATE/adaptive-domains.txt"
 REFRESH_TS="$ROUTE_STATE/groups-refresh"
 
 LOCKED=0
+POLICY_LOCKED=0
 RUNCFG=
 TMPFILE=
+JOURNAL=
+DEVCONF_ORIG=
+DEVCONF_EXISTED=
+TXN=0
 
 die() { printf 'error=%s\n' "$1"; exit "${2:-1}"; }
 
 cleanup() {
+    if [ "$TXN" = 1 ]; then
+        TXN=0
+        tunnel_undo || { audit "tunnel rollback incomplete"; printf 'error=rollback_incomplete\n'; }
+    fi
     [ -z "$TMPFILE" ] || rm -f "$TMPFILE"
     [ -z "$RUNCFG" ] || rm -f "$RUNCFG"
+    [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves"
+    [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
+    [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
     [ "$LOCKED" != 1 ] || rm -rf "$CHANGE_LOCK"
     command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null
     return 0
@@ -130,7 +147,7 @@ ndm() {
     out=$("$NDMC" -c "$1" 2>&1)
     rc=$?
     [ "$rc" -eq 0 ] || return 1
-    printf '%s\n' "$out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command)' && return 1
+    printf '%s\n' "$out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found|no such entry)' && return 1
     return 0
 }
 
@@ -300,14 +317,146 @@ op_update() {
     done_ok "update $1=$2" changed
 }
 
+# ---------- Tunnel for routes ----------
+#
+# Moves VWARD's routing to another WireGuard tunnel: the Keenetic DNS routes of
+# the policy group and AdaptiveAuto are re-pointed (new route first, then the old
+# one is withdrawn), device.conf records the tunnel and pins the policy group,
+# and the profile must load with it.  While TXN=1 any exit (error or signal)
+# undoes the executed steps in reverse order through the EXIT trap.  policy-sync
+# then moves its own IP routes (owned.interface).
+
+tunnel_undo() {
+    # Undo the router steps recorded in the journal, newest first.  Every step is
+    # attempted; returns 1 when any of them failed.
+    undo_rc=0
+    if [ -n "$JOURNAL" ] && [ -s "$JOURNAL" ]; then
+        awk '{a[NR]=$0} END{for (i=NR;i>0;i--) print a[i]}' "$JOURNAL" |
+            { bad=0; while IFS= read -r undo; do ndm "$undo" || bad=1; done; exit "$bad"; } || undo_rc=1
+    fi
+    case "$DEVCONF_EXISTED" in
+        1) cp -p "$DEVCONF_ORIG" "$VWARD_DEVICE_CONFIG" || undo_rc=1 ;;
+        0) rm -f "$VWARD_DEVICE_CONFIG" || undo_rc=1 ;;
+    esac
+    rm -f "$VWARD_DEVICE_MAP_CACHE"
+    return "$undo_rc"
+}
+
+route_present() {
+    # route_present GROUP TARGET: a DNS route of GROUP to TARGET exists.
+    awk -v g="$1" -v t="$2" '$1=="route" && $2=="object-group" && $3==g && $4==t {f=1} END{exit f ? 0 : 1}' "$RUNCFG"
+}
+
+op_tunnel() {
+    case "$1" in ''|*[!A-Za-z0-9_./:-]*) die invalid_tunnel 64 ;; esac
+    [ "${#1}" -le 64 ] || die invalid_tunnel 64
+    load_profile
+    OLD_IF=$VWARD_TUNNEL_INTERFACE OLD_DEV=$VWARD_TUNNEL_DEVICE GROUP=$VWARD_POLICY_GROUP NEW_IF=$1
+    [ "$NEW_IF" != "$OLD_IF" ] || done_ok "tunnel $NEW_IF" unchanged
+    [ "$(awk -F= '$1=="FAILOPEN_ACTIVE"{print $2}' "$TUNNEL_GUARD_STATE" 2>/dev/null)" != 1 ] || die failopen_active
+
+    rm -f "$VWARD_DEVICE_MAP_CACHE"
+    map=$(vward_device_map 2>/dev/null) || die router_config_unavailable
+    NEW_DEV=$(vward_map_tunnels "$map" | awk -v n="$NEW_IF" '$1==n {print $2; exit}')
+    vward_valid_ifname "$NEW_DEV" || die unknown_tunnel 64
+
+    change_lock
+    mkdir -p "$POLICY_STATE" && mkdir "$POLICY_STATE/lock" 2>/dev/null || die policy_sync_busy 75
+    POLICY_LOCKED=1
+    JOURNAL=$(mktemp /tmp/vward-console-tunnel.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    DEVCONF_ORIG=$(mktemp /tmp/vward-console-devconf.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    TXN=1
+    snapshot
+
+    # ctx<TAB>group<TAB>target<TAB>options for every VWARD group routed to the old tunnel.
+    moves=$(awk -v g1="$GROUP" -v g2="$ADAPTIVE_GROUP" -v i="$OLD_IF" -v d="$OLD_DEV" '
+        /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1) ? "dns-proxy" : ""}
+        /^!/ {ctx = ""}
+        $1=="route" && $2=="object-group" && ($3==g1 || $3==g2) && ($4==i || $4==d) {
+            opt = ""; for (k = 5; k <= NF; k++) opt = opt (opt == "" ? "" : " ") $k
+            print (ctx == "" ? "-" : ctx) "\t" $3 "\t" $4 "\t" (opt == "" ? "-" : opt)
+        }' "$RUNCFG")
+    tab=$(printf '\t')
+    printf '%s\n' "$moves" | while IFS="$tab" read -r ctx g t opt; do
+        [ -n "$g" ] || continue
+        case "$opt" in -|auto|reject|"auto reject"|"reject auto") ;; *) exit 1 ;; esac
+    done || die unsupported_route
+
+    # 1. New routes first, so the groups never lose their route.
+    printf '%s\n' "$moves" > "$JOURNAL.moves"
+    while IFS="$tab" read -r ctx g t opt; do
+        [ -n "$g" ] || continue
+        p=; [ "$ctx" = - ] || p="$ctx "
+        o=; [ "$opt" = - ] || o=" $opt"
+        nt=$NEW_IF; [ "$t" = "$OLD_DEV" ] && [ "$OLD_DEV" != "$OLD_IF" ] && nt=$NEW_DEV
+        route_present "$g" "$nt" && continue
+        ndm "${p}route object-group $g $nt$o" || die router_rejected
+        echo "${p}no route object-group $g $nt" >> "$JOURNAL"
+    done < "$JOURNAL.moves"
+    # 2. Withdraw the old routes.
+    while IFS="$tab" read -r ctx g t opt; do
+        [ -n "$g" ] || continue
+        p=; [ "$ctx" = - ] || p="$ctx "
+        o=; [ "$opt" = - ] || o=" $opt"
+        ndm "${p}no route object-group $g $t" || die router_rejected
+        echo "${p}route object-group $g $t$o" >> "$JOURNAL"
+    done < "$JOURNAL.moves"
+    # 3. The router must show exactly the new routing.
+    snapshot
+    while IFS="$tab" read -r ctx g t opt; do
+        [ -n "$g" ] || continue
+        nt=$NEW_IF; [ "$t" = "$OLD_DEV" ] && [ "$OLD_DEV" != "$OLD_IF" ] && nt=$NEW_DEV
+        route_present "$g" "$nt" && ! route_present "$g" "$t" || die verification_failed
+    done < "$JOURNAL.moves"
+    moved=$(grep -c . "$JOURNAL.moves")
+
+    # 4. device.conf: the tunnel, and the policy group pinned so discovery no
+    #    longer depends on which tunnel its route points to.
+    DEVCONF_EXISTED=0
+    if [ -f "$VWARD_DEVICE_CONFIG" ]; then
+        cp -p "$VWARD_DEVICE_CONFIG" "$DEVCONF_ORIG" || die backup_failed
+        DEVCONF_EXISTED=1
+    fi
+    backup_file "$VWARD_DEVICE_CONFIG" || die backup_failed
+    new_tmp "$VWARD_DEVICE_CONFIG" || die write_failed
+    { [ ! -f "$VWARD_DEVICE_CONFIG" ] || cat "$VWARD_DEVICE_CONFIG"; } | awk -v i="$NEW_IF" -v d="$NEW_DEV" -v g="$GROUP" '
+        BEGIN {v["VWARD_TUNNEL_INTERFACE"]=i; v["VWARD_TUNNEL_DEVICE"]=d; v["VWARD_POLICY_GROUP"]=g}
+        { k=$0; sub(/=.*/, "", k); if (k in v) { if (!(k in done)) print k "=" v[k]; done[k]=1; next } print }
+        END {for (k in v) if (!(k in done)) print k "=" v[k]}' > "$TMPFILE" || die write_failed
+    install_tmp "$VWARD_DEVICE_CONFIG" 0600 || die write_failed
+    rm -f "$VWARD_DEVICE_MAP_CACHE"
+    (
+        unset VWARD_TUNNEL_INTERFACE VWARD_TUNNEL_DEVICE VWARD_POLICY_GROUP
+        vward_profile_load >/dev/null 2>&1 &&
+            [ "$VWARD_TUNNEL_INTERFACE" = "$NEW_IF" ] && [ "$VWARD_TUNNEL_DEVICE" = "$NEW_DEV" ] &&
+            [ "$VWARD_POLICY_GROUP" = "$GROUP" ]
+    ) || die profile_verification_failed
+
+    # 5. Persist the router configuration; nothing half-applied survives a reboot.
+    save_router || die config_save_failed
+    TXN=0
+
+    # 6. Runtime state belonged to the previous tunnel.
+    if [ -s "$POLICY_STATE/owned.dynamic.routes" ] && [ ! -s "$POLICY_STATE/owned.interface" ]; then
+        echo "$OLD_DEV" > "$POLICY_STATE/owned.interface"
+    fi
+    rm -f "$TUNNEL_GUARD_STATE" "$TUNNEL_HEALTH_STATE"
+    rm -rf "$POLICY_STATE/lock"; POLICY_LOCKED=0
+    rm -rf "$CHANGE_LOCK"; LOCKED=0
+    [ ! -x "$ROUTE_ENGINE_INIT" ] || "$ROUTE_ENGINE_INIT" restart </dev/null >/dev/null 2>&1 || true
+    # IP routes follow in the background (policy-sync withdraws them from the old device).
+    [ ! -x "$POLICY_SYNC_BIN" ] || (trap '' HUP; exec "$POLICY_SYNC_BIN" --reconcile) </dev/null >/dev/null 2>&1 &
+    done_ok "tunnel $OLD_IF($OLD_DEV) -> $NEW_IF($NEW_DEV) group=$GROUP routes=$moved" changed
+}
+
 # ---------- Entry ----------
 
 [ "$#" -ge 2 ] && [ "$#" -le 3 ] || die usage 64
 OP=$1; shift
-[ "$OP" = tunnel-guard ] || [ "$#" -eq 2 ] || die usage 64
+case "$OP" in tunnel-guard|tunnel) [ "$#" -eq 1 ] || die usage 64 ;; *) [ "$#" -eq 2 ] || die usage 64 ;; esac
 ARG1=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
 ARG2=${2:-}
-case "$OP" in wifi|update) ARG1=$1 ;; esac
+case "$OP" in wifi|update|tunnel) ARG1=$1 ;; esac
 case "$OP" in route-domain|force-vpn|adaptive) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 
 ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
@@ -320,7 +469,8 @@ case "$OP" in
     force-vpn) op_force_vpn "$ARG1" "$ARG2" ;;
     adaptive) op_adaptive "$ARG1" "$ARG2" ;;
     domain-category) op_domain_category "$ARG1" "$ARG2" ;;
-    tunnel-guard) [ "$#" -eq 1 ] || die usage 64; op_tunnel_guard "$ARG1" ;;
+    tunnel-guard) op_tunnel_guard "$ARG1" ;;
+    tunnel) op_tunnel "$ARG1" ;;
     wifi) op_wifi "$ARG1" "$ARG2" ;;
     update) op_update "$ARG1" "$ARG2" ;;
     *) die invalid_operation 64 ;;

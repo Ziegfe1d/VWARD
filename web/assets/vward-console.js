@@ -100,7 +100,12 @@ const API_ERRORS = {
   config_save_failed: 'роутер не сохранил конфигурацию', router_config_unavailable: 'не удалось прочитать конфигурацию роутера',
   route_change_busy: 'маршруты сейчас меняет другая задача, повторите', profile_unavailable: 'профиль устройства не определён',
   policy_group_unavailable: 'группа маршрутизации не найдена', list_full: 'список заполнен', backup_failed: 'не удалось сделать резервную копию',
-  write_failed: 'не удалось записать файл'
+  write_failed: 'не удалось записать файл', invalid_tunnel: 'недопустимое имя туннеля', unknown_tunnel: 'туннель не найден или это не WireGuard',
+  failopen_active: 'включён fail-open: дождитесь восстановления туннеля', policy_sync_busy: 'идёт обновление IP-категорий, повторите позже',
+  unsupported_route: 'правило маршрута группы задано нестандартно: переключите туннель в веб-интерфейсе Keenetic',
+  profile_verification_failed: 'профиль устройства не принял новый туннель, изменения отменены',
+  rollback_incomplete: 'откат не завершён: проверьте маршруты групп в веб-интерфейсе Keenetic',
+  temporary_file_unavailable: 'нет места для временного файла'
 };
 const errText = x => API_ERRORS[x && x.error] || (x && x.error) || ('код ' + (x && x.rc));
 
@@ -562,12 +567,15 @@ function bandText(b) { return b === '5' ? '5 ГГц' : b === '2.4' ? '2.4 ГГц
 function recText(c) { return c.recommendation === 'bind_2g' ? 'Закрепить за 2.4' : c.recommendation === 'review' ? 'Проверить' : c.health === 'WARNING' ? 'Внимание' : 'Норма'; }
 
 function tunnelPage(name) {
-  const t = ((st().wg || {}).interfaces || []).find(x => x.name === name) || { name: name };
-  const up = isTrue(t.connected), managed = prof().tunnel_interface === name;
+  const wg = st().wg || {}, t = (wg.interfaces || []).find(x => x.name === name) || { name: name };
+  const up = isTrue(t.connected), cur = prof().tunnel_interface, managed = cur === name, failopen = isTrue(wg.failopen_active);
+  const use = managed ? '' : failopen ? '<p class="field-warn">Сейчас включён fail-open: переключение станет доступно, когда ' + esc(cur || 'текущий туннель') + ' восстановится.</p>' :
+    confirmBox('tunnel-use', 'Перевести маршруты VWARD' + (cur ? ' с ' + cur : '') + ' на ' + name + '? Мои домены, AdaptiveAuto и IP-категории пойдут через ' + name + '.' + (up ? '' : ' Туннель сейчас не в сети: сайты из списков VPN будут недоступны, пока он не подключится.'), 'Переключить', !up) ||
+    '<div class="panel-actions">' + btn('ask', 'route', 'Использовать для маршрутов', up ? 'primary' : '', ' data-confirm="tunnel-use"' + (cfgOk() ? '' : ' disabled')) + '</div>';
   return panel(name + (t.description ? ' · ' + t.description : ''), kv([
     ['Состояние', up ? 'В сети' : 'Не в сети', up ? 'ok' : 'warn'], ['Канал связи', t.link || '—'], ['Статус интерфейса', t.state || '—'],
     ['Используется для маршрутов', managed ? 'Да' : 'Нет', managed ? 'info' : '']
-  ]), { desc: managed ? 'Через этот туннель идут все домены и сети из «Маршрутизации».' : 'Туннель для маршрутов задаётся в device.conf на роутере.' });
+  ]) + use + cfgNote(), { desc: managed ? 'Через этот туннель идут все домены и сети из «Маршрутизации».' : 'Переключение переносит маршруты групп в Keenetic, сохраняет выбор в device.conf и отменяется целиком при любой ошибке.' });
 }
 function wifiClientPage(mac) {
   const c = ((S.wifi && S.wifi.clients) || []).find(x => x.mac === mac) || { mac: mac };
@@ -709,6 +717,7 @@ const CONFIRMED = {
   'ads-publish': () => runAction('ads', 'ads-control', { op: 'enqueue', job: 'publish', confirm: 'ADS_PUBLISH' }, 'Публикация поставлена в очередь').then(() => load('ads', true)).then(render),
   'https-start': () => runAction('https', 'ads-https-control', { op: 'start', confirm: 'HTTPS_START' }, 'HTTPS-фильтр запущен').then(() => load('https', true)).then(render),
   'https-ca': () => runAction('https', 'ads-https-control', { op: 'ca-init', confirm: 'HTTPS_CA_INIT' }, 'Сертификат создан').then(() => load('https', true)).then(render),
+  'tunnel-use': () => { const name = current.slice(2); toast('Переключаем маршруты на ' + name + '…'); return cfgSet({ op: 'tunnel', target: name, confirm: 'TUNNEL_SWITCH' }, 'Маршруты VWARD идут через ' + name, ['status', 'security', 'route']); },
   'tg-off': () => cfgSet({ op: 'tunnel-guard', value: '0', confirm: 'TUNNEL_GUARD_DISABLE' }, 'Защита VPN выключена', ['status']),
   'wifi-ctl-on': () => cfgSet({ op: 'wifi', target: 'CONTROL_ENABLED', value: '1', confirm: 'WIFI_CONTROL_ENABLE' }, 'Ручное управление включено', ['wifi']),
   'wifi-bind': c => { const op = c.op, mac = current.slice(2), token = { 'bind-2g': 'WIFI_BIND_2G', 'bind-5g': 'WIFI_BIND_5G', auto: 'WIFI_BAND_AUTO' }[op]; return runAction('wifi', 'wifi-control', { op: op, mac: mac, confirm: token }, 'Диапазон изменён').then(() => load('wifi', true)).then(render); }

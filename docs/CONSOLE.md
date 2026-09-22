@@ -37,6 +37,7 @@ API принимает POST только с заголовком `X-VWARD-Reques
 | `tunnel-guard 0/1` | Защита VPN (выключение - токен `TUNNEL_GUARD_DISABLE`) | `/opt/etc/vward/tunnel-guard.disabled` |
 | `wifi KEY VALUE` | `ENABLED`, `CONTROL_ENABLED` (включение - токен `WIFI_CONTROL_ENABLE`), `WINDOW_SEC`, `BAND_SWITCH_WARN`, `WEAK_5G_SAMPLE_WARN`, `WEAK_5G_RSSI` | `/opt/etc/vward/wifi-client-guard.conf` |
 | `update KEY VALUE` | `safe_window_start`, `safe_window_end`, `check_interval_seconds` | `/opt/etc/vward/update.conf` |
+| `tunnel NAME` | туннель для маршрутов (токен `TUNNEL_SWITCH`) | DNS-маршруты групп в Keenetic, `/opt/etc/vward/device.conf` |
 
 Helper принимает только перечисленные ключи и строгие значения (домен - только буквы, цифры,
 дефис и точки; числа - в пределах, без ведущих нулей; время - `ЧЧ:ММ`, начало окна не равно
@@ -48,7 +49,31 @@ Helper принимает только перечисленные ключи и 
 выполняется `system configuration save`, а движок маршрутизации перечитывает группы. Каждое
 изменение записывается в `/opt/var/log/vward/console-audit.log` (`CONSOLE_CONFIG`).
 
-WAN и выбор туннеля доступны только для чтения. `route-data` читает только
+Переключение туннеля (`tunnel`) принимает только WireGuard-интерфейс из карты устройства и
+не выполняется, пока активен fail-open или идёт policy-sync. Под блокировкой маршрутов и
+policy-sync оно:
+
+1. добавляет маршрут `route object-group` к новому туннелю для группы «Моих доменов» и
+   `AdaptiveAuto` (в том же контексте `dns-proxy` и с теми же опциями `auto`/`reject`, в той же
+   форме имени - логической или системной), затем снимает маршрут к старому туннелю; другие
+   группы не трогает;
+2. проверяет результат по `show running-config`;
+3. записывает в `device.conf` `VWARD_TUNNEL_INTERFACE`, `VWARD_TUNNEL_DEVICE` и закрепляет
+   `VWARD_POLICY_GROUP`, после чего профиль устройства должен загрузиться с новыми значениями;
+4. сохраняет конфигурацию роутера.
+
+Любая ошибка на этих шагах (и сигнал) откатывает выполненные шаги в обратном порядке; если
+откат не удался целиком, ответ - `rollback_incomplete`. После успеха сбрасывается состояние
+Защиты VPN, перезапускается движок маршрутизации и в фоне запускается
+`vward-policy-sync.sh --reconcile`: policy-sync помнит устройство своих IP-маршрутов
+(`owned.interface`), снимает их со старого туннеля и добавляет через новый; маршруты, которые
+не удалось снять, остаются за старым устройством и повторяются при следующем запуске.
+
+Точный синтаксис `dns-proxy route object-group` / `dns-proxy no route object-group`
+нужно один раз проверить на роутере: неверная форма команды не меняет маршрутизацию
+(отказ или откат по проверке), но переключение не выполнится.
+
+WAN доступен только для чтения. `route-data` читает только
 фиксированные generated/state paths VWARD и не принимает path или команду от frontend.
 API не принимает произвольные shell-команды, paths или команды `ndmc`.
 
