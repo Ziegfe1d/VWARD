@@ -53,6 +53,7 @@ ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-schedul
 ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-settings.sh	/opt/bin/vward-ads-privacy-settings.sh	0755
 ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-source-control.sh	/opt/bin/vward-ads-privacy-source-control.sh	0755
 ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-query-read.sh	/opt/bin/vward-ads-privacy-query-read.sh	0755
+ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-view.sh	/opt/bin/vward-ads-privacy-view.sh	0755
 ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-rules-rebuild.sh	/opt/bin/vward-ads-privacy-rules-rebuild.sh	0755
 ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-job.sh	/opt/bin/vward-ads-privacy-job.sh	0755
 ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-health.sh	/opt/bin/vward-ads-privacy-health.sh	0755

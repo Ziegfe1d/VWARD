@@ -11,6 +11,8 @@ channel=dev
 
 safe_window_start=03:00
 safe_window_end=05:00
+# window: wait for the safe window; any: install as soon as allowed ("Автоматически").
+apply_window=window
 important_max_delay_seconds=7200
 routine_max_delay_seconds=86400
 

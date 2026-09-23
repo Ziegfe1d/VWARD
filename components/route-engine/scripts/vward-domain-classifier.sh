@@ -10,6 +10,8 @@ EOF
  printf 'HOST=%s\nCATEGORY=%s\nCONFIDENCE=%s\nREASON=%s\nSOURCE=%s\n' "$(vdc_normalize_host "$host")" "$category" "$confidence" "$reason" "$source"; exit "$rc";;
  batch) limit="$VWARD_CLASSIFIER_BATCH_SIZE"; n=0; while IFS= read -r host && [ "$n" -lt "$limit" ]; do [ -n "$host" ] || continue; result="$(vdc_classify "$host")" || true; printf '%s|%s\n' "$(vdc_normalize_host "$host")" "$result"; n=$((n+1)); done;;
  catalog-add)
+  # Automatic categorisation of new domains switched off in the Console.
+  [ "$VWARD_CLASSIFIER_ENABLED" = 1 ] || { echo CATALOG_ADD=SKIPPED; echo REASON=classifier_disabled; exit 0; }
   VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
   [ -r "$VWARD_ADMISSION_LIB" ] || VWARD_ADMISSION_LIB="$(CDPATH= cd -- "$(dirname -- "$0")/../../runtime/lib" 2>/dev/null && pwd)/vward-runtime-admission.sh"
   [ -r "$VWARD_ADMISSION_LIB" ] || { echo CATALOG_ADD=FAIL; echo REASON=admission_library_missing; exit 2; }

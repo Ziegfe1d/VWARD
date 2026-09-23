@@ -66,9 +66,12 @@ const ico = iconSvg;
 const API = '/cgi-bin/api.cgi';
 async function apiFetch(url, options) {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 10000);
-  try { return await fetch(url, Object.assign({ cache: 'no-store' }, options || {}, { signal: controller.signal })); }
+  let r;
+  try { r = await fetch(url, Object.assign({ cache: 'no-store', credentials: 'same-origin' }, options || {}, { signal: controller.signal })); }
   catch (e) { throw new Error(e.name === 'AbortError' ? 'роутер не ответил за 10 секунд' : 'нет связи с роутером'); }
   finally { clearTimeout(timer); }
+  if (r.status === 401) { showLogin(); throw new Error('нужно войти'); }
+  return r;
 }
 async function apiGet(action, params) {
   const q = new URLSearchParams(Object.assign({ action: action }, params || {}));
@@ -100,22 +103,30 @@ const API_ERRORS = {
   config_save_failed: 'роутер не сохранил конфигурацию', router_config_unavailable: 'не удалось прочитать конфигурацию роутера',
   route_change_busy: 'маршруты сейчас меняет другая задача, повторите', profile_unavailable: 'профиль устройства не определён',
   policy_group_unavailable: 'группа маршрутизации не найдена', list_full: 'список заполнен', backup_failed: 'не удалось сделать резервную копию',
-  write_failed: 'не удалось записать файл', invalid_tunnel: 'недопустимое имя туннеля', unknown_tunnel: 'туннель не найден или это не WireGuard',
+  write_failed: 'не удалось записать файл', custom_manifest_url: 'адрес манифеста задан вручную - канал меняется в update.conf', invalid_tunnel: 'недопустимое имя туннеля', unknown_tunnel: 'туннель не найден или это не WireGuard',
   failopen_active: 'включён fail-open: дождитесь восстановления туннеля', policy_sync_busy: 'идёт обновление IP-категорий, повторите позже',
   unsupported_route: 'правило маршрута группы задано нестандартно: переключите туннель в веб-интерфейсе Keenetic',
   profile_verification_failed: 'профиль устройства не принял новый туннель, изменения отменены',
   rollback_incomplete: 'откат не завершён: проверьте маршруты групп в веб-интерфейсе Keenetic',
   temporary_file_unavailable: 'нет места для временного файла', component_disabled: 'компонент выключен: включите его в «Система → Компоненты»',
-  core_component: 'базовый компонент нельзя выключить', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен'
+  core_component: 'базовый компонент нельзя выключить', wrong_credentials: 'неверный логин или пароль', too_many_attempts: 'слишком много попыток - подождите 5 минут',
+  router_auth_unavailable: 'роутер не ответил на проверку пароля', invalid_login: 'недопустимый логин', auth_required: 'нужно войти', invalid_url: 'неверный адрес: нужен https без пробелов и логина', invalid_format: 'неизвестный формат списка',
+  adguard_unavailable: 'AdGuard Home не ответил', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен'
 };
 const errText = x => API_ERRORS[x && x.error] || (x && x.error) || ('код ' + (x && x.rc));
 
 /* ---------- Данные ---------- */
-const S = { status: null, route: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, logs: {}, errors: {}, loadedAt: {} };
+const S = { auth: null, cron: null, status: null, route: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, qlog: null, review: null, blocked: null, logs: {}, errors: {}, loadedAt: {} };
+const ADSV = { filter: 'all', search: '', blockedSearch: '' };
 const LOADERS = {
   status: () => apiGet('status'), route: () => apiGet('route-data'), update: () => apiGet('update-data'),
   security: () => apiGet('security-data'), diag: () => apiGet('diagnostics'), wifi: () => apiGet('wifi-data'),
-  ads: () => apiGet('ads-data'), https: () => apiGet('ads-https-data'), config: () => apiGet('config-data')
+  ads: () => apiGet('ads-data'), https: () => apiGet('ads-https-data'), config: () => apiGet('config-data'),
+  adsstats: () => apiGet('ads-view', { view: 'stats' }), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
+  qlog: () => apiGet('ads-view', { view: 'querylog', filter: ADSV.filter, search: ADSV.search }),
+  review: () => apiGet('ads-view', { view: 'list', kind: 'review' }),
+  cron: () => apiGet('cron-data'), auth: () => apiGet('auth'),
+  blocked: () => apiGet('ads-view', { view: 'list', kind: 'blocked', search: ADSV.blockedSearch })
 };
 const inflight = {};
 async function load(key, force) {
@@ -144,10 +155,10 @@ const PAGES = [
   { id: 'vpn', title: 'VPN', icon: 'shield', group: 'Сеть', data: ['status', 'security', 'config'] },
   { id: 'routes', title: 'Маршрутизация', icon: 'route', group: 'Сеть', data: ['route', 'security', 'status', 'config'] },
   { id: 'wifi', title: 'Wi-Fi клиенты', icon: 'wifi', group: 'Сеть', data: ['wifi', 'security', 'config'] },
-  { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security'] },
+  { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adsstats', 'adspub'] },
   { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config'] },
   { id: 'updates', title: 'Обновления', icon: 'refresh', group: 'VWARD', data: ['status', 'update', 'config'] },
-  { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security'] }
+  { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth'] }
 ];
 const SHORT = { overview: 'Обзор', logs: 'Журналы', wan: 'Интернет', vpn: 'VPN', routes: 'Маршруты', wifi: 'Wi-Fi', ads: 'Реклама', system: 'Система', updates: 'Обновл.', settings: 'Настройки' };
 const COMPONENTS = [
@@ -195,7 +206,12 @@ const DETAILS = {
   'd-force': { title: 'Всегда через VPN', parent: 'routes' },
   'd-dcats': { title: 'Категории доменов', parent: 'routes' },
   'd-adaptive': { title: 'AdaptiveAuto', parent: 'routes' },
+  'd-services': { title: 'Проверяемые сервисы', parent: 'routes' },
   'd-ipcats': { title: 'Активные IP-категории', parent: 'routes' },
+  'd-querylog': { title: 'Журнал запросов', parent: 'ads' },
+  'd-review': { title: 'На проверке', parent: 'ads' },
+  'd-blocked': { title: 'Заблокировано', parent: 'ads' },
+  'd-adcats': { title: 'Категории блокировки', parent: 'ads' },
   'd-rules': { title: 'Мои правила', parent: 'ads' },
   'd-sources': { title: 'Источники списков', parent: 'ads' },
   'd-jobs': { title: 'Задания', parent: 'ads' },
@@ -226,6 +242,7 @@ let cardOrder = store.get('vward-card-order', CARD_IDS).filter(id => CARD_IDS.in
 CARD_IDS.forEach(id => { if (!cardOrder.includes(id)) cardOrder.push(id); });
 let hiddenCards = store.get('vward-card-hidden', []).filter(id => CARD_IDS.includes(id));
 let cardView = store.get('vward-card-view', 'grid'); if (!['grid', 'list'].includes(cardView)) cardView = 'grid';
+let authForm = false, loginOpen = false;
 let current = 'overview', editing = false, confirm = null, logTab = 'wan', logWrap = true, actionResult = null;
 
 /* ---------- Построение блоков ---------- */
@@ -351,13 +368,14 @@ const RENDER = {
 
   vpn() {
     const wg = st().wg || {}, list = wg.interfaces || [], managed = prof().tunnel_interface || '';
-    const row = t => { const up = isTrue(t.connected); return '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.name) + (t.description ? ' · ' + esc(t.description) : '') + '</b><small>' + (t.name === managed ? '<span class="st ok">для маршрутов</span> · ' : '') + esc(t.state || '') + '</small></div><span class="pill ' + (up ? 'ok' : 'warn') + '">' + (up ? 'В сети' : 'Не в сети') + '</span>' + ico('chevron', 'chev') + '</li>'; };
+    const row = t => { const up = isTrue(t.connected); return '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.name) + (t.description ? ' · ' + esc(t.description) : '') + '</b><small>' + (t.name === managed ? '<span class="st ok">для маршрутов</span> · ' : '') + esc(t.handshake != null ? 'рукопожатие ' + agoText(num(t.handshake)) : (t.state || '')) + '</small></div><span class="pill ' + (up ? 'ok' : 'warn') + '">' + (up ? 'В сети' : 'Не в сети') + '</span>' + ico('chevron', 'chev') + '</li>'; };
     return loadError(['status']) +
       panel('Туннели', list.length ? '<ul class="rows">' + list.map(row).join('') + '</ul>' : empty('Туннели WireGuard не найдены'), { desc: 'Туннели WireGuard найдены автоматически. Нажмите на туннель, чтобы открыть подробности.' }) +
       panel('Защита VPN', '<dl class="kv">' + ctrlRow('Автоматическая защита', sw('data-cfg-tg', !S.config || cfg().tunnel_guard.enabled !== false, 'Автоматическая защита VPN', !cfgOk())) + '</dl>' +
         confirmBox('tg-off', 'Выключить защиту VPN? Если туннель упадёт, сайты из списков VPN станут недоступны, пока он не восстановится.', 'Выключить', true) + kv([
         ['fail-open', isTrue(wg.failopen_active) ? 'Включён' : 'Не активен', isTrue(wg.failopen_active) ? 'warn' : ''],
         ['Проверка туннеля', 'каждую минуту', '', 'logs', ' data-log-go="tunnel"'],
+        ['Попытка восстановления', 'каждые 5 минут', '', null, '', 'пока включён fail-open'],
         ['Потерь подряд', String(num(wg.down_streak) || 0)]
       ]) + '<div class="panel-actions even">' + btn('tunnel-health', 'check', 'Проверить') + btn('open-log', 'logs', 'Журнал', '', ' data-log-tab="tunnel"') + '</div>' + resultBox('tunnel-health'),
       { desc: 'Если туннель упал, трафик из списков VPN временно идёт напрямую, пока VPN не восстановится.' });
@@ -370,7 +388,7 @@ const RENDER = {
         ['Туннель для маршрутов', pr.tunnel_interface || '—', '', 'vpn'],
         ['Доменов в каталоге', fmtInt(d.unique)],
         ['Категорий в каталоге', fmtInt(d.categories)],
-        ['Маршрутов VWARD', fmtInt(ip.managed_routes)],
+        ['Маршрутов VWARD', fmtInt(ip.managed_routes), '', 'd-ipcats'],
         ['Группа маршрутизации', pr.policy_group || '—']
       ])) +
       panel('Что идёт через VPN', kv([
@@ -378,9 +396,14 @@ const RENDER = {
         ['Всегда через VPN', S.config ? countText((cfgRoute().force_vpn || []).length) : '—', '', 'd-force'],
         ['Категории доменов', S.config ? (cfgRoute().categories || []).filter(c => c.enabled).length + ' из ' + (cfgRoute().categories || []).length + ' включены' : '—', '', 'd-dcats'],
         ['AdaptiveAuto', S.config ? countText((cfgRoute().adaptive || []).length) : fmtInt(ad.count) + ' ' + plural(num(ad.count) || 0, 'домен', 'домена', 'доменов'), '', 'd-adaptive'],
-        ['Активные IP-категории', fmtInt(ip.active_count) + ' из ' + fmtInt(ip.categories), '', 'd-ipcats'],
+        ['IP-категории', fmtInt(ip.active_count) + ' активны из ' + fmtInt(ip.categories), '', 'd-ipcats'],
+        ['Проверяемые сервисы', fmtInt((r.services || []).length), '', 'd-services'],
         ['Источники каталога', 'itdog ' + fmtInt(d.sources && d.sources.itdog) + ' · v2fly ' + fmtInt(d.sources && d.sources.v2fly)]
       ])) +
+      panel('Настройки маршрутизации', '<dl class="kv">' +
+        ctrlRow('AdaptiveAuto', sw('data-cfg-rt="adaptive-mode"', cfgRoute().adaptive_enabled !== false, 'AdaptiveAuto', !cfgOk()), 'отправлять через VPN домены, недоступные напрямую') +
+        ctrlRow('Автоопределение категории', sw('data-cfg-rt="classifier"', cfgRoute().classifier_enabled !== false, 'Автоопределение категории новых доменов', !cfgOk()), 'новые домены попадают в подходящую категорию') +
+        '</dl>', { desc: 'Выключение AdaptiveAuto не убирает уже добавленные домены - только перестаёт добавлять новые.' }) +
       panel('Проверить адрес', '<form class="inline-form" data-form="probe"><input class="input" id="probeInput" placeholder="домен или IPv4, например claude.ai" aria-label="Домен или IPv4" autocomplete="off"><button class="btn primary" type="submit">' + ico('search') + 'Проверить</button></form><div id="probeResult"></div>', { desc: 'Покажет, через какой интерфейс пойдёт трафик.' }) +
       panel('Обслуживание', kv([
         ['Сверка маршрутов', 'каждые 5 минут', '', 'logs', ' data-log-go="routing"'],
@@ -415,21 +438,28 @@ const RENDER = {
   ads() {
     const a = S.ads || {}, c = a.counts || {}, s = a.settings || {}, j = a.jobs || {}, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
     const aghHost = ag.address || location.hostname, aghUrl = ag.port ? 'http://' + aghHost + ':' + ag.port + '/' : '';
-    const runMode = s.RUN_MODE || 'scheduled';
+    const runMode = s.RUN_MODE || 'scheduled', st1 = S.adsstats, pub = S.adspub || {};
+    const pending = (num(pub.added) || 0) + (num(pub.removed) || 0);
     return loadError(['ads']) +
       panel('Блокировка', '<dl class="kv">' + ctrlRow('Блокировка рекламы и трекеров', sw('data-ads-pause', !a.paused, 'Блокировка рекламы', !S.ads), a.paused ? 'на паузе - реклама не блокируется' : '') + '</dl>' +
-        kv([aghUrl ? ['AdGuard Home', aghHost + ':' + ag.port, '', aghUrl] : ['AdGuard Home', 'адрес не настроен']])) +
+        kv([aghUrl ? ['AdGuard Home', aghHost + ':' + ag.port, '', aghUrl] : ['AdGuard Home', 'адрес не настроен'],
+          st1 && st1.ok ? ['Запросов за сутки', fmtInt(st1.queries), '', 'd-querylog'] : ['Запросов за сутки', 'AdGuard Home не ответил', '', 'd-querylog'],
+          st1 && st1.ok ? ['Заблокировано за сутки', fmtInt(st1.blocked) + (st1.queries ? ' · ' + Math.round(100 * st1.blocked / st1.queries) + '%' : ''), '', 'd-querylog', ' data-qfilter="blocked"'] : null])) +
       panel('Списки и правила', kv([
-        ['Заблокировано доменов', fmtInt(c.blocked)],
-        ['На проверке', fmtInt(c.review), num(c.review) ? 'warn' : ''],
+        ['Журнал запросов', 'последние 100', '', 'd-querylog'],
+        ['Заблокировано доменов', fmtInt(c.blocked), '', 'd-blocked'],
+        ['На проверке', fmtInt(c.review), num(c.review) ? 'warn' : '', 'd-review'],
+        ['Категории блокировки', (a.categories || []).filter(x => x.active).length + ' из ' + (a.categories || []).length + ' включены', '', 'd-adcats'],
         ['Разрешено автоматически', fmtInt(num(c.allow) != null ? num(c.allow) + (num(c.trust) || 0) : null)],
         ['Мои правила', fmtInt((a.manual_rules || []).length), '', 'd-rules'],
         ['Источники', (a.sources || []).filter(x => x.mode === 'active').length + ' из ' + (a.sources || []).length + ' активны', '', 'd-sources'],
         ['Задания', j.current && j.current.state && j.current.state !== 'IDLE' ? 'выполняется' : (num(j.queued) ? j.queued + ' в очереди' : 'нет активных'), '', 'd-jobs'],
         ['HTTPS-фильтр', S.https && S.https.ok ? (S.https.status && isTrue(S.https.status.ENABLED) ? 'Включён' : 'Выключен') : 'недоступен', '', 'd-https']
       ])) +
-      panel('Публикация в AdGuard Home', kv([['Публиковать автоматически', isTrue(s.AUTO_PUBLISH) ? 'Включено' : 'Выключено', '', null, '', 'без ручного подтверждения']]) +
-        (confirmBox('ads-publish', 'Отправить правила в AdGuard Home? Они применятся сразу.', 'Опубликовать') || '<div class="panel-actions">' + btn('ask', 'check', 'Опубликовать правила', 'primary', ' data-confirm="ads-publish"') + '</div>')) +
+      panel('Публикация в AdGuard Home', kv([['Не опубликовано', !pub.ok ? '—' : pending ? pending + ' ' + plural(pending, 'изменение', 'изменения', 'изменений') : 'всё опубликовано', pending ? 'warn' : 'ok', null, '', pub.ok && pub.mode === 'staged' ? 'режим подготовки: правила собираются, но не отправляются' : '']]) +
+        '<dl class="kv">' + ctrlRow('Публиковать автоматически', sw('data-ads-autopub', isTrue(s.AUTO_PUBLISH), 'Публиковать автоматически', !S.ads), 'новые правила уходят в AdGuard Home без подтверждения') + '</dl>' +
+        (confirmBox('ads-autopub', 'Публиковать правила автоматически? Новые правила будут применяться в AdGuard Home без вашего подтверждения.', 'Включить') ||
+         confirmBox('ads-publish', 'Отправить правила в AdGuard Home? Они применятся сразу.', 'Опубликовать') || '<div class="panel-actions">' + btn('ask', 'check', 'Опубликовать правила', 'primary', ' data-confirm="ads-publish"') + '</div>')) +
       panel('Проверить домен', '<form class="inline-form" data-form="ads-probe"><input class="input" id="adsProbe" placeholder="например, mc.yandex.ru" aria-label="Домен" autocomplete="off"><button class="btn primary" type="submit">' + ico('search') + 'Проверить</button></form>', { desc: 'Проверка ставится в очередь заданий; результат появится в «Задания».' }) +
       panel('Настройки блокировки', '<dl class="kv">' +
         ctrlRow('Режим работы', sel('data-ads-set="RUN_MODE"', 'Режим работы', [['scheduled', 'По расписанию'], ['dynamic', 'По запросам'], ['manual', 'Вручную']], runMode), ({ scheduled: 'новые домены проверяются пачкой раз в интервал', dynamic: 'каждый новый домен проверяется сразу', manual: 'проверка только по кнопке' })[runMode]) +
@@ -453,12 +483,14 @@ const RENDER = {
         ['Задания по расписанию', (s.services && s.services.crond ? 'cron работает' : 'cron остановлен'), s.services && s.services.crond ? '' : 'crit', 'd-cron'],
         ['Диагностика', dg.length ? (dg.length - bad) + ' из ' + dg.length + ' в норме' : 'не запускалась', bad ? 'warn' : '', 'd-diag']
       ])) +
-      panel('Хранилище', kv([['Свободно', fmtKB(g.free_kb) + ' из ' + fmtKB(g.total_kb)], ['Файловая система', g.filesystem || '—'], ['Служебная очистка', 'каждый час', '', 'logs', ' data-log-go="cron"']]));
+      panel('Хранилище', kv([['Свободно', fmtKB(g.free_kb) + ' из ' + fmtKB(g.total_kb)], ['Файловая система', g.filesystem || '—'], ['Сжатие журналов', 'каждый час', '', 'd-cron']]) +
+        '<div class="panel-actions">' + btn('housekeeping', 'archive', 'Сжать журналы сейчас') + '</div>' + resultBox('storage'),
+        { desc: 'Журналы больше лимита сжимаются, хранятся две предыдущие копии.' });
   },
 
   updates() {
     const p = plat(), u = S.update || {}, al = u.allowed || {}, pend = u.pending || {};
-    const mode = isTrue(p.auto_apply) ? 'schedule' : 'manual', uc = cfg().update || {};
+    const uc = cfg().update || {}, mode = !isTrue(p.auto_apply) ? 'manual' : uc.apply_window === 'any' ? 'auto' : 'schedule', feed = uc.feed;
     const winStart = uc.safe_window_start || String(p.safe_window || '').split(/\s*[-–]\s*/)[0], winEnd = uc.safe_window_end || String(p.safe_window || '').split(/\s*[-–]\s*/)[1];
     const interval = uc.check_interval_seconds || p.check_interval_seconds;
     const acts = [];
@@ -480,23 +512,28 @@ const RENDER = {
         ['Откат', u.rollback_available ? 'Доступен' : 'Недоступен', u.rollback_available ? 'info' : '']
       ]) + (conf || (acts.length ? '<div class="panel-actions even">' + acts.join('') + '</div>' : '')) + resultBox('updates')) +
       panel('Настройки обновлений', '<dl class="kv">' +
-        ctrlRow('Установка обновлений', sel('data-upd="mode"', 'Установка обновлений', [['schedule', 'По расписанию'], ['manual', 'Вручную']], mode), mode === 'schedule' ? 'в окно установки, критические исправления - сразу' : 'только проверка и уведомление') +
+        ctrlRow('Установка обновлений', sel('data-upd="mode"', 'Установка обновлений', [['auto', 'Автоматически'], ['schedule', 'По расписанию'], ['manual', 'Вручную']], mode), ({ auto: 'сразу после проверки подписи', schedule: 'в окно установки, критические исправления - сразу', manual: 'только проверка и уведомление' })[mode]) +
         (mode === 'schedule' ? ctrlRow('Окно установки', '<span class="time-range">' + sel('data-cfg-upd="safe_window_start"', 'Начало окна установки', withCur(HOURS, winStart, ''), winStart) + '–' + sel('data-cfg-upd="safe_window_end"', 'Конец окна установки', withCur(HOURS, winEnd, ''), winEnd) + '</span>', '', 'stack') : '') +
         ctrlRow('Интервал проверки', sel('data-cfg-upd="check_interval_seconds"', 'Интервал проверки', withCur([[900, '15 минут'], [1800, '30 минут'], [3600, '1 час'], [10800, '3 часа'], [21600, '6 часов'], [43200, '12 часов'], [86400, '24 часа']], interval, ' с'), interval)) +
-        '</dl>' + kv([['Канал', p.channel === 'dev' ? 'Dev' : p.channel === 'beta' ? 'Бета' : (p.channel || '—')]]),
-      { desc: 'Изменения сохраняются сразу. Канал обновлений меняется в update.conf на роутере.' });
+        (feed === 'beta' || feed === 'dev' ? ctrlRow('Канал', sel('data-upd-feed', 'Канал обновлений', [['beta', 'Бета'], ['dev', 'Dev']], feed), feed === 'dev' ? 'сборки в разработке, возможны ошибки' : 'проверенные сборки') : '') +
+        '</dl>' + (feed === 'custom' ? kv([['Канал', 'свой адрес манифеста', '', null, '', 'задан в update.conf на роутере']]) : '') +
+        confirmBox('feed-dev', 'Перейти на канал Dev? Это сборки в разработке: в них возможны ошибки. Вернуться на бету можно в любой момент - обновления с беты придут, когда она догонит установленную версию.', 'Перейти', true),
+      { desc: 'Изменения сохраняются сразу. Подпись и защита от отката версии проверяются на любом канале.' });
   },
 
   settings() {
-    const sec = S.security || {}, l = sec.listener || {}, api = sec.api || {};
+    const sec = S.security || {}, l = sec.listener || {}, api = sec.api || {}, au = S.auth || {};
     return loadError(['security']) +
-      panel('Доступ к Console', kv([
-        ['Адрес Console', (l.address || location.hostname) + ':' + (l.port || location.port || '80')],
-        ['Вход по учётной записи Keenetic', api.authentication ? 'Включён' : 'Выключен', api.authentication ? 'ok' : 'warn'],
-        ['Защита запросов', api.mutation_guard ? 'Включена' : 'Выключена', api.mutation_guard ? 'ok' : 'crit'],
-        ['Доступ с других сайтов', api.cors ? 'Разрешён' : 'Запрещён', api.cors ? 'crit' : 'ok']
-      ]) + (api.authentication ? '' : '<p class="field-warn">Пока вход выключен, Console открыта любому устройству в домашней сети.</p>'),
-      { desc: 'Вход по логину и паролю Keenetic появится в отдельном этапе; на время разработки он выключен.' }) +
+      panel('Доступ к Console', '<dl class="kv">' + ctrlRow('Вход по учётной записи Keenetic', sw('data-auth', !!(au.enabled || authForm), 'Вход по учётной записи Keenetic', !S.auth),
+          au.enabled ? (au.logged_in ? 'вы вошли как ' + au.login + ' · сессия ' + au.session_hours + ' ч' : 'нужен вход') : 'пароль проверяет роутер, VWARD его не хранит') + '</dl>' +
+        (authForm && !au.enabled ? '<form class="inline-form" data-form="auth-enable"><input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Включить вход</button></form><p class="panel-desc">Введите логин и пароль от веб-интерфейса роутера: вход включится, только если роутер их примет.</p>' : '') +
+        confirmBox('auth-off', 'Выключить вход? Console снова будет открыта любому устройству в домашней сети.', 'Выключить', true) +
+        kv([
+          ['Адрес Console', (l.address || location.hostname) + ':' + (l.port || location.port || '80')],
+          ['Защита запросов', api.mutation_guard ? 'Включена' : 'Выключена', api.mutation_guard ? 'ok' : 'crit'],
+          ['Доступ с других сайтов', api.cors ? 'Разрешён' : 'Запрещён', api.cors ? 'crit' : 'ok']
+        ]) + (au.enabled ? (au.logged_in ? '<div class="panel-actions">' + btn('logout', 'undo', 'Выйти') + '</div>' : '') : '<p class="field-warn">Пока вход выключен, Console открыта любому устройству в домашней сети.</p>'),
+      { desc: 'Сессия действует ' + (au.session_hours || 12) + ' ч. После 5 неверных попыток вход блокируется на 5 минут.' }) +
       panel('Нижняя панель на телефоне', '<div class="tabbar preview" data-key="Разделы на панели">' + tabsHtml() + '</div><dl class="kv">' + PAGES.map(p => {
         const on = tabIds.includes(p.id), i = tabIds.indexOf(p.id);
         return ctrlRow(p.title, (on ? '<span class="order-btns"><button class="icon-btn" type="button" data-move="' + p.id + ':up" aria-label="Выше"' + (i === 0 ? ' disabled' : '') + '>' + ico('up') + '</button><button class="icon-btn" type="button" data-move="' + p.id + ':down" aria-label="Ниже"' + (i === tabIds.length - 1 ? ' disabled' : '') + '>' + ico('down') + '</button></span>' : '') + sw('data-tabpick="' + p.id + '"', on, 'Показывать «' + p.title + '» на панели'));
@@ -527,10 +564,14 @@ const RENDER = {
       '<div class="panel-actions">' + btn('diag-run', 'check', 'Запустить проверку', 'primary') + '</div>');
   },
   'd-cron'() {
-    const c = st().cron || {}, sv = st().services || {};
-    const jobs = [['Защита интернета', c.guardian_rc, c.guardian_last, 'wan-guard'], ['Защита VPN', c.wg_rc, c.wg_last, 'tunnel-guard'], ['Сверка маршрутов', c.routing_rc, c.routing_last, 'route-reconciler']];
+    const sv = st().services || {}, cr = S.cron;
+    const jobs = cr && cr.ok ? cr.jobs : [];
+    const row = x => { const comp = JOB_COMPONENT[x.name] || x.component, on = compOn(comp), ok = x.rc === 0;
+      return '<li class="row link" role="button" tabindex="0" data-go="c-' + esc(comp) + '"><div class="row-main"><b>' + esc(JOB_NAMES[x.name] || x.name) + '</b><small>' + esc(cronText(x.schedule)) + ' · ' + esc(x.last || 'ещё не запускалось') + '</small></div>' +
+        '<span class="pill ' + (!on ? 'warn' : x.rc == null ? '' : ok ? 'ok' : 'crit') + '">' + (!on ? 'Выключен' : x.rc == null ? 'Нет данных' : ok ? 'Успешно' : 'Код ' + x.rc) + '</span>' + ico('chevron', 'chev') + '</li>'; };
     return panel('Служба расписания', kv([['cron', sv.crond ? 'Работает' : 'Остановлен', sv.crond ? 'ok' : 'crit'], ['Supervisor', sv.supervisor ? 'Работает' : 'Остановлен', sv.supervisor ? 'ok' : 'crit']])) +
-      panel('Последние запуски', '<ul class="rows">' + jobs.map(j => { const ok = String(j[1]) === '0'; return '<li class="row link" role="button" tabindex="0" data-go="c-' + j[3] + '"><div class="row-main"><b>' + esc(j[0]) + '</b><small>' + esc(j[2] || 'ещё не запускалось') + '</small></div><span class="pill ' + (j[1] === '' || j[1] == null ? '' : ok ? 'ok' : 'crit') + '">' + (j[1] === '' || j[1] == null ? 'Нет данных' : ok ? 'Успешно' : 'Код ' + esc(j[1])) + '</span>' + ico('chevron', 'chev') + '</li>'; }).join('') + '</ul>');
+      panel('Задания', !cr ? empty('Загрузка…') : !cr.ok ? empty(errText(cr)) : jobs.length ? '<ul class="rows">' + jobs.map(row).join('') + '</ul>' : empty('Задания не найдены'),
+        { desc: 'Все задания VWARD из crontab роутера. Нажмите на задание, чтобы открыть его компонент.' });
   },
   'd-mydomains'() {
     const r = cfgRoute(), list = r.domains || [];
@@ -554,8 +595,37 @@ const RENDER = {
       { desc: 'Домены, которые VWARD сам отправил через VPN после неудачной прямой проверки. «Закрепить» переносит домен в мои домены, «убрать» - возвращает на прямой маршрут.' });
   },
   'd-ipcats'() {
-    const act = (S.route && S.route.ip && S.route.ip.active) || [];
-    return panel('Активные IP-категории', act.length ? '<ul class="rows">' + act.map(x => '<li class="row"><div class="row-main"><b>' + esc(typeof x === 'string' ? x : x.name || '') + '</b></div><span class="pill ok">Через VPN</span></li>').join('') + '</ul>' : empty('Активных категорий нет'), { desc: 'Сети сервисов, которые идут через VPN по IP-адресам.' });
+    const ip = (S.route && S.route.ip) || {}, act = ip.active || [], idx = (ip.index || []).slice().sort((a, b) => (act.includes(b.name) - act.includes(a.name)) || a.name.localeCompare(b.name)), off = cfgRoute().ip_excluded || [];
+    return cfgNote() + panel('IP-категории', idx.length ? '<dl class="kv">' + idx.map(x => ctrlRow(x.name, sw('data-ipcat="' + esc(x.name) + '"', !off.includes(x.name), 'IP-категория ' + x.name, !cfgOk()), fmtInt(x.cidr) + ' ' + plural(x.cidr, 'сеть', 'сети', 'сетей') + (act.includes(x.name) ? ' · сейчас через VPN' : ''))).join('') + '</dl>' : empty('Каталог IP-категорий ещё не загружен'),
+      { desc: 'Категория включается автоматически, когда её домены идут через VPN. Выключенная категория не получит маршрутов; изменение применится при следующей сверке IP-категорий.' });
+  },
+  'd-services'() {
+    const list = (S.route && S.route.services) || [];
+    return panel('Проверяемые сервисы', list.length ? '<ul class="rows">' + list.map(x => '<li class="row"><div class="row-main"><b>' + esc(x.name) + '</b><small>' + dom(x.host) + (x.fails ? ' · неудач подряд: ' + x.fails : '') + '</small></div><span class="pill ' + (x.oks != null && x.oks > 0 ? 'info' : '') + '">' + (x.fails == null && x.oks == null ? 'ещё не проверялся' : 'проверяется') + '</span></li>').join('') + '</ul>' : empty('Сервисы не заданы'),
+      { desc: 'Сервисы из services.conf: VWARD проверяет их напрямую и переключает через VPN, если прямой доступ пропал.' });
+  },
+  'd-querylog'() {
+    const q = S.qlog, f = [['all', 'Все'], ['blocked', 'Заблокированные'], ['allowed', 'Разрешённые'], ['review', 'На проверке']];
+    return panel('Журнал запросов', '<div class="segmented" role="group" aria-label="Фильтр">' + f.map(x => '<button type="button" data-qfilter="' + x[0] + '" aria-pressed="' + (ADSV.filter === x[0]) + '">' + x[1] + '</button>').join('') + '</div>' +
+      '<form class="inline-form" data-form="ads-qsearch"><input class="input" name="q" value="' + esc(ADSV.search) + '" placeholder="часть домена, например yandex" aria-label="Поиск по домену" autocomplete="off"><button class="btn" type="submit">' + ico('search') + 'Найти</button></form>' +
+      (!q ? empty('Загрузка…') : !q.ok ? empty(q.error === 'adguard_unavailable' ? 'AdGuard Home не ответил' : errText(q)) : q.entries.length ? '<ul class="rows">' + q.entries.map(e => '<li class="row"><div class="row-main"><b>' + dom(e.domain) + '</b><small><span class="st ' + (e.blocked ? 'crit' : 'ok') + '">' + (e.blocked ? 'заблокирован' : 'разрешён') + '</span>' + (e.verdict === 'SUSPECT' ? ' · на проверке' : '') + ' · ' + esc(fmtTime(e.time)) + ' · ' + esc(e.client) + '</small></div><span class="row-acts">' + adsRuleBtn(e.domain, e.blocked ? 'allow' : 'block') + '</span></li>').join('') + '</ul>' : empty('Запросов не найдено')),
+      { desc: 'Последние запросы из AdGuard Home. Кнопка у строки добавляет правило для этого домена.' });
+  },
+  'd-review'() {
+    const r = S.review;
+    return panel('На проверке', !r ? empty('Загрузка…') : !r.ok ? empty(errText(r)) : r.entries.length ? '<ul class="rows">' + r.entries.map(e => '<li class="row"><div class="row-main"><b>' + dom(e.domain) + '</b><small>' + esc(reasonText(e.reason)) + (e.action === 'BLOCK' ? ' · <span class="st crit">пока заблокирован</span>' : '') + '</small></div><span class="row-acts">' + adsRuleBtn(e.domain, 'allow') + adsRuleBtn(e.domain, 'block') + '</span></li>').join('') + '</ul>' : empty('Нечего проверять'),
+      { desc: 'Домены, по которым источники расходятся. Решение сохраняется как ваше правило.' });
+  },
+  'd-blocked'() {
+    const r = S.blocked;
+    return panel('Заблокировано', '<form class="inline-form" data-form="ads-bsearch"><input class="input" name="q" value="' + esc(ADSV.blockedSearch) + '" placeholder="часть домена" aria-label="Поиск по домену" autocomplete="off"><button class="btn" type="submit">' + ico('search') + 'Найти</button></form>' +
+      (!r ? empty('Загрузка…') : !r.ok ? empty(errText(r)) : r.entries.length ? '<ul class="rows">' + r.entries.map(e => '<li class="row"><div class="row-main"><b>' + dom(e.domain) + '</b><small>' + esc(reasonText(e.reason)) + '</small></div><span class="row-acts">' + adsRuleBtn(e.domain, 'allow') + '</span></li>').join('') + '</ul>' + (r.total > r.entries.length ? '<p class="panel-desc">Показаны ' + r.entries.length + ' из ' + fmtInt(r.total) + ' - уточните поиск.</p>' : '') : empty('Ничего не найдено')),
+      { desc: 'Домены, которые VWARD заблокировал автоматически.' });
+  },
+  'd-adcats'() {
+    const cats = (S.ads && S.ads.categories) || [];
+    return panel('Категории блокировки', cats.length ? '<dl class="kv">' + cats.map(c => ctrlRow(catText(c.id), sw('data-ads-cat="' + esc(c.id) + '"', c.active > 0, 'Категория ' + catText(c.id), !S.ads), c.active + ' из ' + c.total + ' ' + plural(c.total, 'источника', 'источников', 'источников') + ' включены')).join('') + '</dl>' : empty('Категории не найдены'),
+      { desc: 'Выключение категории выключает все её источники; включение возвращает им режим по умолчанию.' });
   },
   'd-rules'() {
     const rules = (S.ads && S.ads.manual_rules) || [];
@@ -564,7 +634,9 @@ const RENDER = {
   },
   'd-sources'() {
     const src = (S.ads && S.ads.sources) || [];
-    return panel('Источники списков', src.length ? '<ul class="rows">' + src.map(x => '<li class="row"><div class="row-main"><b>' + esc(x.name || x.id) + '</b><small>' + esc(x.purpose || '') + (x.cached ? ' · загружен' : ' · ещё не загружен') + '</small></div>' + sel('data-ads-source="' + esc(x.id) + '"', 'Режим ' + (x.name || x.id), [['off', 'Выключен'], ['check', 'Проверка'], ['active', 'Активен']], x.mode) + '</li>').join('') + '</ul>' : empty('Источники не найдены'), { desc: '«Проверка» - источник учитывается при оценке, но сам ничего не блокирует. «Активен» - блокирует.' });
+    return panel('Источники списков', src.length ? '<ul class="rows">' + src.map(x => '<li class="row"><div class="row-main"><b>' + esc(x.name || x.id) + '</b><small>' + esc(catText(x.purpose)) + (x.cached ? ' · загружен' : ' · ещё не загружен') + '</small></div>' + sel('data-ads-source="' + esc(x.id) + '"', 'Режим ' + (x.name || x.id), [['off', 'Выключен'], ['check', 'Проверка'], ['active', 'Активен']], x.mode) + (x.custom ? '<button class="icon-btn" type="button" data-ads-srcdel="' + esc(x.id) + '" aria-label="Удалить источник" title="Удалить источник">' + ico('close') + '</button>' : '') + '</li>').join('') + '</ul>' : empty('Источники не найдены'), { desc: '«Проверка» - источник учитывается при оценке, но сам ничего не блокирует. «Активен» - блокирует.' }) +
+      panel('Добавить свой источник', '<form class="inline-form" data-form="ads-srcadd"><input class="input" name="url" placeholder="https://example.org/list.txt" aria-label="Адрес списка" autocomplete="off" inputmode="url"><select class="input compact" name="format" aria-label="Формат"><option value="adblock">Adblock</option><option value="hosts">hosts</option><option value="domains">Список доменов</option></select><button class="btn primary" type="submit">Добавить</button></form>' + resultBox('ads-src'),
+        { desc: 'Только https. Новый источник начинает в режиме «Проверка»; размер и формат проверяются при загрузке - список больше 8 МБ или меньше 10 записей не принимается. До 10 своих источников.' });
   },
   'd-jobs'() {
     const j = (S.ads && S.ads.jobs) || {}, cur = j.current || {}, last = j.last || {};
@@ -589,6 +661,26 @@ function cfgNote() { return !S.config ? '' : !S.config.writable ? '<p class="fie
 function addForm(op, placeholder) { return '<form class="inline-form" data-form="cfg-add" data-op="' + op + '"><input class="input" name="domain" placeholder="' + esc(placeholder) + '" aria-label="Домен" autocomplete="off"' + (cfgOk() ? '' : ' disabled') + '><button class="btn primary" type="submit"' + (cfgOk() ? '' : ' disabled') + '>Добавить</button></form>'; }
 function rowBtn(op, action, d, icon, label) { return '<button class="icon-btn" type="button" data-cfg-op="' + op + '" data-cfg-action="' + action + '" data-cfg-target="' + esc(d) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (cfgOk() ? '' : ' disabled') + '>' + ico(icon) + '</button>'; }
 function domainRows(list, acts, sub) { return list.length ? '<ul class="rows">' + list.map(d => '<li class="row"><div class="row-main"><b>' + dom(d) + '</b>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div><span class="row-acts">' + acts(d) + '</span></li>').join('') + '</ul>' : ''; }
+const CAT_NAMES = { 'ads-tracking-security': 'Реклама, трекеры и угрозы', 'ads-tracking-security-aggressive': 'Усиленная защита', 'popup-ads': 'Всплывающая реклама', 'ads-tracking': 'Реклама и трекеры', ads: 'Реклама', tracking: 'Трекеры', 'ads-malware': 'Реклама и вредоносные сайты', 'mobile-ads': 'Реклама в приложениях', custom: 'Свои источники' };
+const catText = id => CAT_NAMES[id] || id || '';
+const REASONS = { source_consensus: 'несколько источников согласны', single_source: 'только один источник', block_revalidation_pending: 'ждёт повторной проверки', block_evidence_disappeared_review: 'источники больше не подтверждают', no_block_evidence: 'нет причин блокировать' };
+const reasonText = r => REASONS[r] || (r || '').replace(/_/g, ' ');
+function fmtTime(t) { const d = new Date(t); return isNaN(d) ? (t || '') : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+function adsRuleBtn(d, type) { return '<button class="icon-btn" type="button" data-ads-rule="' + type + '" data-domain="' + esc(d) + '" aria-label="' + (type === 'allow' ? 'Разрешить ' : 'Заблокировать ') + esc(d) + '" title="' + (type === 'allow' ? 'Разрешить' : 'Заблокировать') + '">' + ico(type === 'allow' ? 'check' : 'block') + '</button>'; }
+async function adsViews() { await Promise.all(['ads', 'adspub', 'qlog', 'review', 'blocked'].map(k => S[k] || k === 'ads' || k === 'adspub' ? load(k, true) : null)); render(); }
+function fmtBytes(b) { b = num(b); if (b == null) return '—'; const u = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ']; let i = 0; while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; } return (i ? b.toFixed(1) : String(b)) + ' ' + u[i]; }
+function agoText(sec) { if (sec == null || isNaN(sec)) return '—'; if (sec < 60) return sec + ' с назад'; if (sec < 3600) return Math.round(sec / 60) + ' мин назад'; if (sec < 86400) return Math.round(sec / 3600) + ' ч назад'; return Math.round(sec / 86400) + ' д назад'; }
+const JOB_NAMES = { 'vward-route-reconciler.sh': 'Сверка маршрутов', 'S91vward-route-engine': 'Сторож движка маршрутизации', 'vward-policy-chain.sh': 'Обновление IP-категорий', 'vward-route-hints-update.sh': 'Подсказки каталога', 'vward-tunnel-health.sh': 'Защита VPN', 'S92vward-runtime': 'Сторож supervisor', 'vward-wan-guard.sh': 'Защита интернета', 'vward-housekeeping.sh': 'Сжатие журналов', 'vward-ads-privacy-scheduler.sh': 'Блокировка рекламы', 'vward-wifi-client-scheduler.sh': 'Контроль Wi-Fi клиентов' };
+const JOB_COMPONENT = { 'S91vward-route-engine': 'route-engine' };
+function cronText(c) {
+  const f = String(c || '').split(' ');
+  if (f.length !== 5) return c || '';
+  if (f.join(' ') === '* * * * *') return 'каждую минуту';
+  if (/^\*\/\d+$/.test(f[0]) && f.slice(1).join(' ') === '* * * *') return 'каждые ' + f[0].slice(2) + ' мин';
+  if (/^\d+$/.test(f[0]) && f.slice(1).join(' ') === '* * * *') return 'каждый час в :' + ('0' + f[0]).slice(-2);
+  if (/^\d+$/.test(f[0]) && /^\d+$/.test(f[1]) && f.slice(2).join(' ') === '* * *') return 'каждый день в ' + ('0' + f[1]).slice(-2) + ':' + ('0' + f[0]).slice(-2);
+  return c;
+}
 function bandText(b) { return b === '5' ? '5 ГГц' : b === '2.4' ? '2.4 ГГц' : 'диапазон неизвестен'; }
 function recText(c) { return c.recommendation === 'bind_2g' ? 'Закрепить за 2.4' : c.recommendation === 'review' ? 'Проверить' : c.health === 'WARNING' ? 'Внимание' : 'Норма'; }
 
@@ -600,6 +692,9 @@ function tunnelPage(name) {
     '<div class="panel-actions">' + btn('ask', 'route', 'Использовать для маршрутов', up ? 'primary' : '', ' data-confirm="tunnel-use"' + (cfgOk() ? '' : ' disabled')) + '</div>';
   return panel(name + (t.description ? ' · ' + t.description : ''), kv([
     ['Состояние', up ? 'В сети' : 'Не в сети', up ? 'ok' : 'warn'], ['Канал связи', t.link || '—'], ['Статус интерфейса', t.state || '—'],
+    ['Сервер', t.endpoint || '—'], ['Адрес в туннеле', t.address || '—'], ['MTU', t.mtu != null ? String(t.mtu) : '—'],
+    ['Последнее рукопожатие', t.handshake != null ? agoText(num(t.handshake)) : '—', t.handshake != null && num(t.handshake) > 180 ? 'warn' : ''],
+    ['Трафик', t.rx != null || t.tx != null ? '↓ ' + fmtBytes(t.rx) + ' · ↑ ' + fmtBytes(t.tx) : '—'],
     ['Используется для маршрутов', managed ? 'Да' : 'Нет', managed ? 'info' : '']
   ]) + use + cfgNote(), { desc: managed ? 'Через этот туннель идут все домены и сети из «Маршрутизации».' : 'Переключение переносит маршруты групп в Keenetic, сохраняет выбор в device.conf и отменяется целиком при любой ошибке.' });
 }
@@ -681,6 +776,10 @@ async function refreshPage() {
   if (id.startsWith('t-')) keys.push('status');
   if (id.startsWith('w-')) keys.push('wifi');
   if (id === 'd-https' || id === 'ads') keys.push('https');
+  if (id === 'd-querylog') keys.push('qlog');
+  if (id === 'd-cron') keys.push('cron');
+  if (id === 'd-review') keys.push('review');
+  if (id === 'd-blocked') keys.push('blocked');
   await Promise.all(keys.map(k => load(k)));
   if (current === id && !editing && !document.activeElement.matches('input,select,textarea')) render();
 }
@@ -692,11 +791,16 @@ async function loadLog(tab, force) {
 }
 
 /* ---------- Всплывающие панели ---------- */
-function closeLayer() { $('layer').innerHTML = ''; ['searchBtn', 'bellBtn'].forEach(b => $(b).setAttribute('aria-expanded', 'false')); }
+function closeLayer() { loginOpen = false; $('layer').innerHTML = ''; ['searchBtn', 'bellBtn'].forEach(b => $(b).setAttribute('aria-expanded', 'false')); }
 function openSheet(title, body, cls, btnId) {
   closeLayer();
   $('layer').innerHTML = '<div class="scrim" data-act="close"></div><div class="sheet ' + (cls || '') + '" role="dialog" aria-label="' + esc(title || 'Поиск') + '">' + (title ? '<div class="sheet-head"><h2>' + esc(title) + '</h2><button class="icon-btn" type="button" data-act="close" aria-label="Закрыть">' + ico('close') + '</button></div>' : '') + body + '</div>';
   if (btnId) $(btnId).setAttribute('aria-expanded', 'true');
+}
+function showLogin() {
+  if (loginOpen) return;
+  openSheet('Вход в VWARD Console', '<div class="sheet-body"><form class="inline-form" data-form="login"><input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Войти</button></form><p class="panel-desc">Логин и пароль от веб-интерфейса роутера.</p></div>');
+  loginOpen = true;
 }
 function openNotes() {
   const n = notifications();
@@ -706,9 +810,9 @@ const SEARCH_INDEX = [
   ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Задания по расписанию'], ['system', 'Свободно'],
   ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Автоматическое восстановление'], ['wan', 'История восстановлений'],
   ['vpn', 'Автоматическая защита'], ['vpn', 'fail-open'], ['vpn', 'Проверка туннеля'],
-  ['routes', 'Туннель для маршрутов'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'AdaptiveAuto'], ['routes', 'Активные IP-категории'], ['routes', 'Группа маршрутизации'],
+  ['routes', 'Туннель для маршрутов'], ['routes', 'AdaptiveAuto'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
-  ['ads', 'AdGuard Home'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
+  ['ads', 'AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
   ['updates', 'Установка обновлений'], ['updates', 'Окно установки'], ['updates', 'Интервал проверки'], ['updates', 'Канал'],
   ['settings', 'Адрес Console'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели'], ['settings', 'Обновлять данные']
 ];
@@ -752,6 +856,9 @@ const CONFIRMED = {
   'ads-publish': () => runAction('ads', 'ads-control', { op: 'enqueue', job: 'publish', confirm: 'ADS_PUBLISH' }, 'Публикация поставлена в очередь').then(() => load('ads', true)).then(render),
   'https-start': () => runAction('https', 'ads-https-control', { op: 'start', confirm: 'HTTPS_START' }, 'HTTPS-фильтр запущен').then(() => load('https', true)).then(render),
   'https-ca': () => runAction('https', 'ads-https-control', { op: 'ca-init', confirm: 'HTTPS_CA_INIT' }, 'Сертификат создан').then(() => load('https', true)).then(render),
+  'auth-off': () => apiPost('auth', { op: 'disable', confirm: 'CONSOLE_AUTH_DISABLE' }).then(x => { toast(x.ok ? 'Вход выключен' : 'Не выключено: ' + errText(x)); return Promise.all([load('auth', true), load('security', true)]); }).then(render, () => render()),
+  'ads-autopub': () => adsSetting('AUTO_PUBLISH', '1').then(() => load('adspub', true)).then(render),
+  'feed-dev': () => cfgSet({ op: 'update-feed', target: 'dev', confirm: 'UPDATE_FEED_DEV' }, 'Канал: Dev'),
   'comp-off': () => { const id = current.slice(2); return cfgSet({ op: 'component', target: id, value: '0', confirm: 'COMPONENT_DISABLE' }, '«' + comp(id).name + '» выключен', ['status']); },
   'comp-on': () => { const id = current.slice(2); return cfgSet({ op: 'component', target: id, value: '1' }, '«' + comp(id).name + '» включён', ['status']); },
   'tunnel-use': () => { const name = current.slice(2); toast('Переключаем маршруты на ' + name + '…'); return cfgSet({ op: 'tunnel', target: name, confirm: 'TUNNEL_SWITCH' }, 'Маршруты VWARD идут через ' + name, ['status', 'security', 'route']); },
@@ -786,6 +893,16 @@ async function wanOp(op, token, okMsg) {
   toast(text); actionResult = { id: 'wan', text: text };
   await load('status', true); render();
 }
+/* «Автоматически» и «По расписанию» различаются окном установки (apply_window). */
+async function updateMode(mode) {
+  const p = plat(), on = mode === 'manual' ? '0' : '1';
+  if (mode !== 'manual') {
+    const x = await apiPost('config', { op: 'update', target: 'apply_window', value: mode === 'auto' ? 'any' : 'window' }).catch(e => ({ ok: false, error: e.message }));
+    if (!x.ok) { toast('Не сохранено: ' + errText(x)); await load('config', true); render(); return; }
+  }
+  await runAction('updates', 'settings', { auto_apply: on, auto_critical: isTrue(p.auto_critical) ? '1' : '0', auto_important: isTrue(p.auto_important) ? '1' : '0', auto_routine: isTrue(p.auto_routine) ? '1' : '0' }, 'Настройки обновлений сохранены');
+  await Promise.all([load('status', true), load('config', true)]); render();
+}
 function updateOp(op, token) {
   return runAction('updates', 'update-control', token ? { op: op, confirm: token } : { op: op }, 'Операция обновления выполнена').then(() => Promise.all([load('update', true), load('status', true)])).then(render);
 }
@@ -817,16 +934,20 @@ function copyText(text) {
 }
 
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-go],[data-act],[data-tab],[data-card-toggle],[data-log],[data-move],[data-card-move],[data-view],[data-ads-remove],[data-wifi-bind],[data-log-go],[data-cfg-op]');
+  const t = e.target.closest('[data-go],[data-act],[data-tab],[data-card-toggle],[data-log],[data-move],[data-card-move],[data-view],[data-ads-remove],[data-wifi-bind],[data-log-go],[data-cfg-op],[data-ads-rule],[data-qfilter],[data-ads-srcdel]');
   if (!t || t.disabled) return;
   if (t.dataset.cardToggle) { const id = t.dataset.cardToggle; hiddenCards = hiddenCards.includes(id) ? hiddenCards.filter(x => x !== id) : hiddenCards.concat(id); store.set('vward-card-hidden', hiddenCards); render(); return; }
   if (t.dataset.cardMove) { const [id, dir] = t.dataset.cardMove.split(':'), i = cardOrder.indexOf(id), j = i + (dir === 'up' ? -1 : 1); if (j >= 0 && j < cardOrder.length) { [cardOrder[i], cardOrder[j]] = [cardOrder[j], cardOrder[i]]; store.set('vward-card-order', cardOrder); render(); } return; }
   if (t.dataset.move) { const [id, dir] = t.dataset.move.split(':'), i = tabIds.indexOf(id), j = i + (dir === 'up' ? -1 : 1); if (j >= 0 && j < tabIds.length) { [tabIds[i], tabIds[j]] = [tabIds[j], tabIds[i]]; store.set('vward-tabs', tabIds); render(); } return; }
   if (t.dataset.view) { cardView = t.dataset.view; store.set('vward-card-view', cardView); render(); return; }
   if (t.dataset.logGo) logTab = t.dataset.logGo;
+  if (t.dataset.qfilter && t.dataset.go) { ADSV.filter = t.dataset.qfilter; S.qlog = null; }
   if (t.dataset.go) { if (t.closest('.preview')) return; go(t.dataset.go, t.dataset.key); return; }
   if (t.dataset.log) { logTab = t.dataset.log; render(); loadLog(logTab, true); return; }
   if (t.dataset.adsRemove) { adsControl({ op: 'remove-override', domain: t.dataset.adsRemove, scope: t.dataset.scope || 'exact' }, 'Правило удалено', 'ads-rule'); return; }
+  if (t.dataset.qfilter && !t.dataset.go) { ADSV.filter = t.dataset.qfilter; S.qlog = null; render(); load('qlog', true).then(render); return; }
+  if (t.dataset.adsRule) { const d = t.dataset.domain; t.disabled = true; adsControl({ op: t.dataset.adsRule, domain: d, scope: 'exact' }, (t.dataset.adsRule === 'allow' ? d + ' разрешён' : d + ' заблокирован'), 'ads-rule').then(adsViews); return; }
+  if (t.dataset.adsSrcdel) { t.disabled = true; adsControl({ op: 'source-delete', source: t.dataset.adsSrcdel }, 'Источник удалён', 'ads-src'); return; }
   if (t.dataset.cfgOp) { const d = t.dataset.cfgTarget, msg = { 'route-domain': d + ' убран из VPN', 'force-vpn': d + ' убран из списка', adaptive: t.dataset.cfgAction === 'pin' ? d + ' закреплён в моих доменах' : d + ' идёт напрямую' }[t.dataset.cfgOp]; t.disabled = true; cfgSet({ op: t.dataset.cfgOp, action: t.dataset.cfgAction, target: d }, msg, ['route']); return; }
   if (t.dataset.wifiBind) { confirm = { id: 'wifi-bind', op: t.dataset.wifiBind }; render(); return; }
   if (t.dataset.tab) {
@@ -845,6 +966,8 @@ document.addEventListener('click', e => {
   else if (a === 'confirm-yes') { const c = confirm; confirm = null; if (c && CONFIRMED[c.id]) CONFIRMED[c.id](c); else render(); }
   else if (a === 'open-log') { logTab = t.dataset.logTab; go('logs'); }
   else if (a === 'tunnel-health') runAction('tunnel-health', 'control', { op: 'tunnel-health' }, 'Проверка туннеля выполнена').then(() => load('status', true)).then(render);
+  else if (a === 'logout') apiPost('auth', { op: 'logout' }).then(() => { toast('Вы вышли'); S.auth = null; showLogin(); });
+  else if (a === 'housekeeping') runAction('storage', 'control', { op: 'housekeeping' }, 'Журналы проверены').then(() => load('status', true)).then(render);
   else if (a === 'refresh-hints') runAction('routes', 'control', { op: 'refresh-hints' }, 'Подсказки обновлены');
   else if (a === 'update-op') updateOp(t.dataset.op);
   else if (a === 'diag-run') { load('diag', true).then(() => { render(); toast('Диагностика выполнена'); }); }
@@ -882,10 +1005,10 @@ document.addEventListener('change', e => {
     else { if (tabIds.length <= 1) { t.checked = true; toast('Оставьте хотя бы один раздел'); return; } tabIds = tabIds.filter(x => x !== id); }
     store.set('vward-tabs', tabIds); render(); return;
   }
-  if (t.dataset.upd) {
-    const p = plat(), on = t.value === 'schedule' ? '1' : '0';
-    runAction('updates', 'settings', { auto_apply: on, auto_critical: isTrue(p.auto_critical) ? '1' : '0', auto_important: isTrue(p.auto_important) ? '1' : '0', auto_routine: isTrue(p.auto_routine) ? '1' : '0' }, 'Настройки обновлений сохранены')
-      .then(() => load('status', true)).then(render);
+  if (t.dataset.upd) { updateMode(t.value); return; }
+  if (t.hasAttribute('data-upd-feed')) {
+    if (t.value === 'dev') { t.value = 'beta'; confirm = { id: 'feed-dev' }; render(); }
+    else cfgSet({ op: 'update-feed', target: 'beta' }, 'Канал: Бета');
     return;
   }
   if (t.dataset.comp) {
@@ -903,11 +1026,22 @@ document.addEventListener('change', e => {
     if (key === 'CONTROL_ENABLED' && v === '1') { t.checked = false; confirm = { id: 'wifi-ctl-on' }; render(); return; }
     cfgSet({ op: 'wifi', target: key, value: v }, 'Сохранено', ['wifi']); return;
   }
+  if (t.dataset.cfgRt) { cfgSet({ op: t.dataset.cfgRt, value: t.checked ? '1' : '0' }, 'Сохранено'); return; }
+  if (t.dataset.ipcat) { cfgSet({ op: 'ip-category', target: t.dataset.ipcat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена - применится при следующей сверке'); return; }
   if (t.dataset.cfgCat) { cfgSet({ op: 'domain-category', target: t.dataset.cfgCat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена'); return; }
   if (t.dataset.cfgUpd) { cfgSet({ op: 'update', target: t.dataset.cfgUpd, value: t.value }, 'Сохранено', ['status']); return; }
   if (t.dataset.pref === 'refresh') { refreshSec = Number(t.value); store.set('vward-refresh', refreshSec); restartTimer(); toast('Сохранено'); return; }
   if (t.hasAttribute('data-ads-pause')) { adsControl({ op: t.checked ? 'resume' : 'pause' }, t.checked ? 'Блокировка включена' : 'Блокировка на паузе'); return; }
   if (t.dataset.adsSet) { adsSetting(t.dataset.adsSet, t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value); return; }
+  if (t.hasAttribute('data-auth')) {
+    const au = S.auth || {};
+    if (t.checked && !au.enabled) { authForm = true; render(); }
+    else if (!t.checked && authForm && !au.enabled) { authForm = false; render(); }
+    else if (!t.checked && au.enabled) { t.checked = true; confirm = { id: 'auth-off' }; render(); }
+    return;
+  }
+  if (t.hasAttribute('data-ads-autopub')) { if (t.checked) { t.checked = false; confirm = { id: 'ads-autopub' }; render(); } else adsSetting('AUTO_PUBLISH', '0').then(() => load('adspub', true)).then(render); return; }
+  if (t.dataset.adsCat) { adsControl({ op: 'source-category', category: t.dataset.adsCat, state: t.checked ? 'on' : 'off' }, t.checked ? 'Категория включена' : 'Категория выключена', 'ads-rule'); return; }
   if (t.dataset.adsSource) { adsControl({ op: 'source-mode', source: t.dataset.adsSource, mode: t.value }, 'Режим источника изменён', 'ads-rule'); return; }
 });
 document.addEventListener('submit', async e => {
@@ -929,6 +1063,32 @@ document.addEventListener('submit', async e => {
     if (!DOMAIN.test(v)) { toast('Введите домен, например example.com'); return; }
     const x = await cfgSet({ op: e.target.dataset.op, action: 'add', target: v }, v + ' добавлен', ['route']);
     if (x && x.ok) { const again = document.querySelector('form[data-form="cfg-add"] input'); if (again) again.value = ''; }
+  }
+  if (f === 'login' || f === 'auth-enable') {
+    const login = e.target.querySelector('[name=login]').value.trim(), password = e.target.querySelector('[name=password]').value;
+    if (!/^[A-Za-z0-9._@-]{1,64}$/.test(login) || !password) { toast('Введите логин и пароль'); return; }
+    let x;
+    try { x = await apiPost('auth', { op: f === 'login' ? 'login' : 'enable', login: login, password: password }); }
+    catch (err) { toast('Ошибка: ' + err.message); return; }
+    e.target.querySelector('[name=password]').value = '';
+    if (!x.ok) { toast(errText(x)); return; }
+    loginOpen = false; authForm = false; closeLayer();
+    toast(f === 'login' ? 'Вы вошли' : 'Вход включён');
+    await Promise.all(['auth', 'security', 'status'].map(k => load(k, true)));
+    refreshPage();
+  }
+  if (f === 'ads-qsearch' || f === 'ads-bsearch') {
+    const v = e.target.querySelector('input').value.trim().toLowerCase();
+    if (v && !/^[a-z0-9.-]{1,100}$/.test(v)) { toast('Только буквы, цифры, точки и дефисы'); return; }
+    if (f === 'ads-qsearch') { ADSV.search = v; S.qlog = null; render(); await load('qlog', true); }
+    else { ADSV.blockedSearch = v; S.blocked = null; render(); await load('blocked', true); }
+    render();
+  }
+  if (f === 'ads-srcadd') {
+    const url = e.target.querySelector('[name=url]').value.trim();
+    if (!/^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?\/[A-Za-z0-9._~\/%+=&?-]*$/.test(url) || url.length > 300) { toast('Нужен адрес https://…, без пробелов и логина'); return; }
+    const x = await adsControl({ op: 'source-add', url: url, format: e.target.querySelector('[name=format]').value }, 'Источник добавлен в режиме «Проверка»', 'ads-src');
+    if (x && x.ok) adsControl({ op: 'enqueue', job: 'sources-update' }, 'Источник добавлен, загрузка поставлена в очередь', 'ads-src');
   }
   if (f === 'ads-probe') {
     const v = $('adsProbe').value.trim().toLowerCase();

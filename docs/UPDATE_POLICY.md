@@ -9,6 +9,17 @@ Update Engine развёрнут и принят на целевом роуте�
   первая hard-safe точка вне окна.
 - **ROUTINE** - quiet window; после более длинного deadline разрешена hard-safe точка.
 
+`apply_window` задаёт, ждут ли IMPORTANT и ROUTINE окна: `window` (по умолчанию) - как
+выше; `any` - устанавливаются в первой hard-safe точке сразу после проверки («Автоматически»
+в Console). Подпись, trust, replay, compatibility и health checks от этого не зависят.
+
+Канал в Console («Бета» / «Dev») - это ветка, чей подписанный feed читает updater: меняется
+только ветка в стандартном `manifest_url`
+(`https://raw.githubusercontent.com/<owner>/<repo>/<beta|dev>/updates/<feed>/update-manifest.json`).
+Подписанный `channel`, ключ и защита от отката версии не меняются: после перехода с Dev на
+бету обновления придут, когда бета догонит установленную версию. Свой адрес манифеста Console
+не переписывает.
+
 Verified deferred update сохраняется между watcher cycles и reboot. HTTP 304 без
 pending и exact already-installed manifest по HTTP 200 считаются no-update.
 

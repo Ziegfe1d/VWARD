@@ -128,6 +128,16 @@ schedule_check() {
 }
 assert 'IMPORTANT deadline and ROUTINE lazy escalation' schedule_check
 
+# apply_window=any ("Автоматически" in the Console): no waiting for the window.
+any_window_check() {
+    printf '%s\n' 'apply_window=any' >> "$CONFIG"
+    VWARD_TEST_NOW_HM=12:00 VWARD_TEST_NOW_EPOCH=10000 VWARD_ROOT_PREFIX=$ROOT VWARD_UPDATE_CONFIG=$CONFIG sh -c '. "$1"; vu_load_config; vu_schedule_ready IMPORTANT 9999 && vu_schedule_ready ROUTINE 9999' sh "$UPDATER/vward-update-common.sh" || return 1
+    printf '%s\n' 'apply_window=sometimes' >> "$CONFIG"
+    if VWARD_ROOT_PREFIX=$ROOT VWARD_UPDATE_CONFIG=$CONFIG sh -c '. "$1"; vu_load_config' sh "$UPDATER/vward-update-common.sh" >/dev/null 2>&1; then return 1; fi
+    sed -i '/^apply_window=/d' "$CONFIG"
+}
+assert 'apply_window=any applies without waiting; invalid value rejected' any_window_check
+
 # Pending survives an unchanged (304) watcher cycle and applies in the later window.
 new_root pending304; make_package pending304; make_manifest pending304 ROUTINE
 set +e

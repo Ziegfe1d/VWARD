@@ -182,6 +182,7 @@ vu_assign_config() {
         channel) channel=$value ;;
         safe_window_start) safe_window_start=$value ;;
         safe_window_end) safe_window_end=$value ;;
+        apply_window) apply_window=$value ;;
         minimum_free_kb) minimum_free_kb=$value ;;
         max_manifest_size) max_manifest_size=$value ;;
         max_package_size) max_package_size=$value ;;

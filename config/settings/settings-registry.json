@@ -299,7 +299,7 @@
       "secret": false,
       "restart_requirement": "component",
       "risk": "high",
-      "read_only_reason": "Смена канала требует отдельной проверки источника и подписи"
+      "read_only_reason": "Подписанный канал не меняется; источник (ветка beta или dev) выбирается в «Обновлениях»"
     },
     {
       "id": "update.check_interval",
@@ -340,6 +340,24 @@
       "source": "update.conf",
       "key": "safe_window_end",
       "type": "string",
+      "editable": true,
+      "secret": false,
+      "restart_requirement": "none",
+      "risk": "medium"
+    },
+    {
+      "id": "update.apply_window",
+      "component": "update-engine",
+      "section": "Update Engine · расписание",
+      "label_ru": "Когда устанавливать",
+      "description_ru": "window - важные и плановые обновления ждут безопасного окна; any - устанавливаются сразу",
+      "source": "update.conf",
+      "key": "apply_window",
+      "type": "enum",
+      "allowed": [
+        "window",
+        "any"
+      ],
       "editable": true,
       "secret": false,
       "restart_requirement": "none",

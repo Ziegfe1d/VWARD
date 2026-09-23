@@ -31,6 +31,8 @@ EVENT_LOG="/opt/var/log/vward-route-engine-events.log"
 
 LOCK="/tmp/vward-route-engine.lock"
 CHANGE_LOCK="/tmp/vward-route-change.lock"
+# Present: AdaptiveAuto adds nothing new; domains already in it stay (Console switch).
+ADAPTIVE_DISABLED="${VWARD_ADAPTIVE_DISABLED_FLAG:-/opt/etc/vward/route-engine/adaptive.disabled}"
 
 RAW="/tmp/vward-route-engine-dns.$$"
 
@@ -524,6 +526,11 @@ add_adaptive()
 {
     H="$1"
 
+    if [ -e "$ADAPTIVE_DISABLED" ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_SKIP_ADAPTIVE_OFF|$H" >> "$EVENT_LOG"
+        return 0
+    fi
+
     change_lock || return 1
     # FINAL_GUARD_V4_ADD
     echo 0 > "$REFRESH_TS"
@@ -898,6 +905,11 @@ wg_quick_ok()
 add_hint_adaptive()
 {
     H="$1"
+
+    if [ -e "$ADAPTIVE_DISABLED" ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_SKIP_ADAPTIVE_OFF|$H" >> "$EVENT_LOG"
+        return 0
+    fi
 
     change_lock || return 1
 

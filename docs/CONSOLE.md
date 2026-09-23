@@ -39,6 +39,12 @@ API принимает POST только с заголовком `X-VWARD-Reques
 | `update KEY VALUE` | `safe_window_start`, `safe_window_end`, `check_interval_seconds` | `/opt/etc/vward/update.conf` |
 | `wan-guard 0/1` | Защита интернета (выключение - токен `WAN_GUARD_DISABLE`) | `/opt/etc/vward/wan-guard.disabled` |
 | `component ID 0/1` | компонент включён (выключение - токен `COMPONENT_DISABLE`) | `/opt/etc/vward/components/<id>.disabled` |
+| `update apply_window window/any` | «По расписанию» / «Автоматически» (вместе с `auto_apply` через `settings`) | `/opt/etc/vward/update.conf` |
+| `update-feed beta/dev` | канал: ветка подписанного feed (Dev - токен `UPDATE_FEED_DEV`) | `manifest_url` в `update.conf` |
+| `adaptive-mode 0/1` | AdaptiveAuto добавляет новые домены | `/opt/etc/vward/route-engine/adaptive.disabled` |
+| `classifier 0/1` | автоопределение категории новых доменов | `CLASSIFIER_ENABLED` в `domain-classifier.conf` |
+| `ip-category NAME 0/1` | IP-категория может получать маршруты | `/opt/etc/vward/policy-sync/excluded.categories` |
+| `console-auth 0/1` | вход по учётной записи Keenetic (только через `auth`) | `/opt/etc/vward/console/auth.conf` |
 | `tunnel NAME` | туннель для маршрутов (токен `TUNNEL_SWITCH`) | DNS-маршруты групп в Keenetic, `/opt/etc/vward/device.conf` |
 
 Helper принимает только перечисленные ключи и строгие значения (домен - только буквы, цифры,
@@ -74,6 +80,38 @@ policy-sync оно:
 Точный синтаксис `dns-proxy route object-group` / `dns-proxy no route object-group`
 нужно один раз проверить на роутере: неверная форма команды не меняет маршрутизацию
 (отказ или откат по проверке), но переключение не выполнится.
+
+### Реклама и трекеры
+
+- `ads-view` (GET, только чтение, `vward-ads-privacy-view.sh`): `querylog` - журнал запросов
+  AdGuard Home с фильтром (все / заблокированные / разрешённые / на проверке) и поиском по части
+  домена; `stats` - счётчики AdGuard Home за сутки; `list review|blocked` - домены на проверке и
+  заблокированные VWARD (из `verdicts.tsv`); `publish-status` - правила, отличающиеся от
+  опубликованных (публикация сохраняет `published.rules`).
+- `ads-control`: кроме правил и режимов источников - `source-add` (свой список по https: адрес
+  без логина и пробелов, формат `adblock`/`hosts`/`domains`, до 10 списков, старт в режиме
+  «Проверка»; размер до 8 МБ и не меньше 10 записей проверяются при загрузке),
+  `source-delete` (только свои), `source-category` (все источники категории выключаются или
+  возвращаются в режим по умолчанию). Свои источники хранятся в `custom-sources.json` и
+  собираются в реестр только из проверенных полей; встроенный источник они не заменяют.
+
+### Задания по расписанию
+
+`cron-data` читает установленный crontab (`/opt/var/spool/cron/crontabs/root`) и файлы
+`/tmp/<задание>.cron.last|rc`: расписание, последний запуск, код возврата и компонент
+каждого задания. `control` `housekeeping` сжимает журналы больше лимита (две копии).
+
+### Вход в Console
+
+Выключен по умолчанию (`auth.conf`, `AUTH_ENABLED=0`). Когда включён, все действия API, кроме
+`auth` и `ping`, требуют сессию: без неё ответ `401 auth_required`, а Console показывает форму
+входа. Пароль проверяет роутер по схеме Keenetic: `GET /auth` даёт `X-NDM-Realm` и
+`X-NDM-Challenge`, VWARD отправляет `sha256(challenge + md5(login:realm:password))`; пароль
+не записывается на диск и не попадает в аргументы процессов. Сессия - случайный токен в cookie
+`HttpOnly; SameSite=Strict`, на диске (`/tmp/vward-console-sessions`) только его sha256 и срок
+(`SESSION_HOURS`, 12 ч). После 5 неверных попыток за 5 минут вход блокируется на 5 минут.
+Включение требует рабочих логина и пароля, выключение - сессии и подтверждения
+`CONSOLE_AUTH_DISABLE`. Оболочка страницы без данных отдаётся lighttpd напрямую.
 
 ### Компоненты
 

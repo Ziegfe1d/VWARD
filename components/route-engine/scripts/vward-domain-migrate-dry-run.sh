@@ -4,6 +4,7 @@ LIB="${VWARD_DOMAIN_CLASSIFIER_LIB:-/opt/lib/vward/vward-domain-classifier-lib.s
 [ -r "$LIB" ] || { echo MIGRATION=FAIL; echo REASON=library_missing; exit 2; }; . "$LIB"
 vdc_load_config || { echo MIGRATION=FAIL; echo REASON=config_invalid; exit 2; }
 case "${MIGRATION_MODE:-dry-run}" in off) echo MIGRATION=OFF; exit 0;; dry-run) ;; esac
+[ "$VWARD_CLASSIFIER_ENABLED" = 1 ] || { echo MIGRATION=OFF; echo REASON=classifier_disabled; exit 0; }
 host="$(vdc_normalize_host "${1:-}")"; result="$(vdc_classify "$host")" || true
 IFS='|' read -r category confidence reason source <<EOF
 $result

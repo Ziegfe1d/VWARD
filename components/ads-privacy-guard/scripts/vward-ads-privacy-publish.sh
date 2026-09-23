@@ -146,6 +146,8 @@ fi
     ads_die "verification failed; previous user rules restored"
 }
 
+# What is live now; the Console counts unpublished changes against it.
+ads_atomic_copy "$RULES" "$ADS_STATE/published.rules" 0644 || ads_log "PUBLISH_RECORD_FAILED"
 ads_log "PUBLISH_OK|mode=user_rules_api|rules=$RULE_COUNT|backup=$BACKUP_DIR"
 echo "PUBLISH_STATUS=PASS"
 echo "OWNERSHIP=VWARD_MARKER_BLOCK_ONLY"

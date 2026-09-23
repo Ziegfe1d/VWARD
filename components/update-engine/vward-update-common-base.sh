@@ -34,6 +34,8 @@ public_key_file=${VU_ROOT_PREFIX}/opt/etc/vward/update-public.pem
 channel=dev
 safe_window_start=03:00
 safe_window_end=05:00
+# window: IMPORTANT/ROUTINE wait for the safe window; any: apply as soon as allowed.
+apply_window=window
 minimum_free_kb=8192
 max_manifest_size=262144
 max_package_size=16777216
@@ -94,6 +96,7 @@ vu_assign_config() {
         channel) channel=$value ;;
         safe_window_start) safe_window_start=$value ;;
         safe_window_end) safe_window_end=$value ;;
+        apply_window) apply_window=$value ;;
         minimum_free_kb) minimum_free_kb=$value ;;
         max_manifest_size) max_manifest_size=$value ;;
         max_package_size) max_package_size=$value ;;
@@ -130,6 +133,7 @@ vu_load_config() {
         printf '%s\n' "$numeric_value" | grep -Eq '^[0-9]+$' || vu_die "$VU_CONFIG_ERROR" "Numeric config value is invalid"
     done
     [ "$max_manifest_size" -gt 0 ] && [ "$max_package_size" -gt 0 ] && [ "$max_unpacked_size" -gt 0 ] || vu_die "$VU_CONFIG_ERROR" "Size limits must be greater than zero"
+    case "$apply_window" in window|any) ;; *) vu_die "$VU_CONFIG_ERROR" "apply_window must be window or any" ;; esac
     for window_value in "$safe_window_start" "$safe_window_end"; do
         printf '%s\n' "$window_value" | grep -Eq '^([01][0-9]|2[0-3]):[0-5][0-9]$' || vu_die "$VU_CONFIG_ERROR" "Safe-window time is invalid"
     done
@@ -774,7 +778,7 @@ vu_safe_target() {
     case "$target" in
         /opt/bin/vward-route-test.sh|/opt/bin/vward-route-reconciler.sh|/opt/bin/vward-route-hints-update.sh|/opt/bin/vward-housekeeping.sh|/opt/bin/vward-route-resolve4.sh|/opt/bin/vward-route.sh|/opt/bin/vward-route-engine.sh|/opt/bin/vward-route-discovery.sh|/opt/bin/vward-cron-supervisor.sh|/opt/bin/vward-policy-chain.sh|/opt/bin/vward-policy-audit.sh|/opt/bin/vward-policy-reconcile.sh|/opt/bin/vward-policy-sync.sh|/opt/bin/vward-wan-guard.sh|/opt/bin/vward-wan-recovery.sh|/opt/bin/vward-tunnel-guard.sh|/opt/bin/vward-tunnel-health.sh|/opt/lib/vward/vward-device-profile.sh|/opt/lib/vward/vward-runtime-admission.sh|/opt/etc/init.d/S89vward-update-recovery|/opt/etc/init.d/S90crond|/opt/etc/init.d/S91vward-route-engine|/opt/etc/init.d/S92vward-runtime|/opt/etc/init.d/S93vward-console|/opt/etc/vward/console/lighttpd.conf|/opt/share/vward/console/www/index.html|/opt/share/vward/console/www/assets/vward-console.css|/opt/share/vward/console/www/assets/vward-console.js|/opt/share/vward/console/www/cgi-bin/api.cgi|/opt/bin/vward-console-config.sh|/opt/share/vward/settings-registry.json|/opt/share/vward/package-map.tsv|/opt/share/vward/VERSION) return 0 ;;
         /opt/bin/vward-wifi-client-monitor.sh|/opt/bin/vward-wifi-client-analyze.sh|/opt/bin/vward-wifi-client-control.sh|/opt/bin/vward-wifi-client-scheduler.sh) return 0 ;;
-        /opt/bin/vward-ads-privacy-guard.sh|/opt/bin/vward-ads-privacy-sources-update.sh|/opt/bin/vward-ads-privacy-publish.sh|/opt/bin/vward-ads-privacy-probe.sh|/opt/bin/vward-ads-privacy-control.sh|/opt/bin/vward-ads-privacy-scheduler.sh|/opt/bin/vward-ads-privacy-settings.sh|/opt/bin/vward-ads-privacy-source-control.sh|/opt/bin/vward-ads-privacy-query-read.sh|/opt/bin/vward-ads-privacy-rules-rebuild.sh|/opt/bin/vward-ads-privacy-job.sh|/opt/bin/vward-ads-privacy-health.sh|/opt/bin/vward-ads-privacy-https.sh) return 0 ;;
+        /opt/bin/vward-ads-privacy-guard.sh|/opt/bin/vward-ads-privacy-sources-update.sh|/opt/bin/vward-ads-privacy-publish.sh|/opt/bin/vward-ads-privacy-probe.sh|/opt/bin/vward-ads-privacy-control.sh|/opt/bin/vward-ads-privacy-scheduler.sh|/opt/bin/vward-ads-privacy-settings.sh|/opt/bin/vward-ads-privacy-source-control.sh|/opt/bin/vward-ads-privacy-query-read.sh|/opt/bin/vward-ads-privacy-view.sh|/opt/bin/vward-ads-privacy-rules-rebuild.sh|/opt/bin/vward-ads-privacy-job.sh|/opt/bin/vward-ads-privacy-health.sh|/opt/bin/vward-ads-privacy-https.sh) return 0 ;;
         /opt/bin/vward-domain-classifier.sh|/opt/bin/vward-domain-migrate-dry-run.sh|/opt/lib/vward/vward-domain-classifier-lib.sh) return 0 ;;
         /opt/share/vward/ads-privacy-guard/vward-ads-privacy-common.sh|/opt/share/vward/ads-privacy-guard/source-registry.json|/opt/share/vward/ads-privacy-guard/trust-core.tsv|/opt/share/vward/ads-privacy-guard/https/vward-ads-privacy-https-common.sh|/opt/share/vward/ads-privacy-guard/https/providers/3proxy.sh) return 0 ;;
         /opt/share/vward/route-engine/catalogs/4pda.domains|/opt/share/vward/route-engine/catalogs/adult.domains|/opt/share/vward/route-engine/catalogs/epic-games.domains|/opt/share/vward/route-engine/catalogs/steam.domains|/opt/share/vward/route-engine/catalogs/x-twitter.domains) return 0 ;;
@@ -817,6 +821,7 @@ vu_package_validate() {
 }
 
 vu_in_safe_window() {
+    [ "$apply_window" != any ] || return 0
     now=${VWARD_TEST_NOW_HM:-$(date '+%H:%M')}
     if [ "$safe_window_start" \< "$safe_window_end" ]; then
         [ "$now" \> "$safe_window_start" ] && [ "$now" \< "$safe_window_end" ]

@@ -57,6 +57,8 @@ python3 tests/repository/check-console-config.py || fail "Console configuration 
 python3 tests/repository/check-console-tunnel.py || fail "Console tunnel switch"
 python3 tests/repository/check-component-graph.py || fail "Component dependency graph"
 python3 tests/repository/check-component-resilience.py || fail "Component disable resilience"
+python3 tests/repository/check-ads-console.py || fail "Ads Console functions"
+python3 tests/repository/check-console-auth.py || fail "Console login"
 python3 tests/repository/check-device-profile.py || fail "Device profile"
 python3 tests/repository/check-settings-registry.py || fail "Settings registry"
 python3 tests/repository/check-update-schema-registry.py || fail "Updater schema registry"

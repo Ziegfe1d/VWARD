@@ -28,6 +28,8 @@ OWNED="$STATE/owned.dynamic.routes"
 # Device the owned routes point to; differs from $WG after the tunnel for routes changed.
 OWNED_DEVICE="$STATE/owned.interface"
 ACTIVE="$STATE/active.categories"
+# Categories switched off in the Console never get routes, even if their domains are routed.
+EXCLUDED="${VWARD_POLICY_EXCLUDED:-/opt/etc/vward/policy-sync/excluded.categories}"
 LOCK="$STATE/lock"
 
 HINT_CATALOG="/opt/etc/vward/route-engine/hints-catalog.tsv"
@@ -751,6 +753,10 @@ CATS="$WORK/desired-categories"
 
 collect_vpn_domains "$RUN" > "$DOMAINS"
 collect_categories "$DOMAINS" "$CATS"
+if [ -s "$EXCLUDED" ]; then
+    grep -vxF -f "$EXCLUDED" "$CATS" > "$CATS.kept" || true
+    mv "$CATS.kept" "$CATS"
+fi
 
 echo "VPN_DOMAINS=$(wc -l < "$DOMAINS")"
 echo "MATCHED_IP_CATEGORIES=$(wc -l < "$CATS")"

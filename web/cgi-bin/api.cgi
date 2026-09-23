@@ -72,7 +72,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|settings-data|security-data|route-data|diagnostics|route-probe|update-data|control|update-control|config-data|config|wifi-data|wifi-control|ads-data|ads-https-data|ads-settings|ads-control|ads-https-control) ;;
+    status|ping|log|settings|settings-data|security-data|route-data|diagnostics|route-probe|update-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -97,7 +97,7 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             ;;
     esac
     case "$ACTION" in
-        settings|control|update-control|config|wifi-control|ads-settings|ads-control|ads-https-control) ;;
+        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control) ;;
         *)
             echo 'Status: 405 Method Not Allowed'
             header_json
@@ -110,6 +110,8 @@ fi
 ads_kv_json(){ [ -r "$1" ] && awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' "$1" | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}'; }
 ads_valid_domain(){ printf '%s\n' "$1" | awk 'length($0)>0&&length($0)<=253&&index($0,".")>0&&$0!~/\.\./ {n=split($0,a,".");for(i=1;i<=n;i++)if(length(a[i])<1||length(a[i])>63||a[i]!~/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/)exit 1;exit 0}{exit 1}'; }
 ads_valid_source_id(){ printf '%s\n' "$1" | awk 'length($0)>=1&&length($0)<=64&&$0~/^[a-z0-9][a-z0-9._-]*$/{exit 0}{exit 1}'; }
+# Strict form decoding for URLs: printable ASCII only, anything else is refused.
+form_url_decode(){ printf '%s' "$1" | awk 'BEGIN{h="0123456789abcdef"} {s=tolower($0); o=""; while (match(s, /%[0-9a-f][0-9a-f]/)) { c=(index(h,substr(s,RSTART+1,1))-1)*16+index(h,substr(s,RSTART+2,1))-1; if (c<33||c>126) exit 1; o=o substr($0,1,RSTART-1) sprintf("%c",c); $0=substr($0,RSTART+3); s=substr(s,RSTART+3)} print o $0}'; }
 ads_console_tmp(){ umask 077; mktemp "/tmp/vward-console-${1}.XXXXXX"; }
 updater_mutation_busy(){ [ -e /opt/var/run/vward/updater.lock ] || [ -L /opt/var/run/vward/updater.lock ] || [ -e /tmp/vward-update-requested ] || [ -L /tmp/vward-update-requested ] || [ -e /tmp/vward-update.lock ] || [ -L /tmp/vward-update.lock ]; }
 console_mutation_enter(){
@@ -121,6 +123,144 @@ console_mutation_enter(){
 COMPONENT_STATE=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
 component_disabled(){ [ -e "$COMPONENT_STATE/$1.disabled" ]; }
 console_mutation_leave(){ command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null || true; }
+
+CONFIG_ETC=${VWARD_CONSOLE_ETC:-/opt/etc/vward}
+CONFIG_ROUTE_STATE=${VWARD_ROUTE_STATE:-/opt/var/lib/vward/route-engine}
+CONFIG_HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
+
+# ---------- Console login with the Keenetic account ----------
+# Off by default.  The router checks the password (challenge-response on its
+# own /auth); VWARD keeps only a hash of the session token with an expiry.
+AUTH_CONF=${VWARD_CONSOLE_AUTH_CONF:-/opt/etc/vward/console/auth.conf}
+AUTH_SESSIONS=${VWARD_CONSOLE_SESSIONS:-/tmp/vward-console-sessions}
+AUTH_URL=${VWARD_KEENETIC_AUTH_URL:-http://127.0.0.1/auth}
+AUTH_ENABLED=0
+[ "$(awk -F= '$1=="AUTH_ENABLED"{print $2; exit}' "$AUTH_CONF" 2>/dev/null)" = 1 ] && AUTH_ENABLED=1
+AUTH_HOURS="$(awk -F= '$1=="SESSION_HOURS"{print $2; exit}' "$AUTH_CONF" 2>/dev/null)"
+case "$AUTH_HOURS" in ''|*[!0-9]*) AUTH_HOURS=12 ;; esac
+[ "$AUTH_HOURS" -ge 1 ] && [ "$AUTH_HOURS" -le 168 ] || AUTH_HOURS=12
+AUTH_LOGIN=""
+
+auth_cookie_token(){ printf '%s\n' "${HTTP_COOKIE:-}" | tr ';' '\n' | sed 's/^ *//' | awk -F= '$1=="vward_session"{print $2; exit}'; }
+auth_token_id(){ printf '%s' "$1" | sha256sum | cut -c1-64; }
+auth_session_valid(){
+    at="$(auth_cookie_token)"
+    case "$at" in ''|*[!0-9a-f]*) return 1 ;; esac
+    [ "${#at}" -eq 64 ] || return 1
+    af="$AUTH_SESSIONS/$(auth_token_id "$at")"
+    [ -f "$af" ] && [ ! -L "$af" ] || return 1
+    aexp="$(awk -F= '$1=="expires"{print $2; exit}' "$af")"
+    case "$aexp" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$(date +%s)" -lt "$aexp" ] || { rm -f "$af"; return 1; }
+    AUTH_LOGIN="$(awk -F= '$1=="login"{print $2; exit}' "$af")"
+}
+
+if [ "$AUTH_ENABLED" = 1 ] && [ "$ACTION" != auth ] && [ "$ACTION" != ping ] && ! auth_session_valid; then
+    echo 'Status: 401 Unauthorized'
+    header_json
+    echo '{"ok":false,"error":"auth_required"}'
+    exit 0
+fi
+
+if [ "$ACTION" = auth ]; then
+    if [ "${REQUEST_METHOD:-GET}" = GET ]; then
+        header_json
+        LOGGED=false; auth_session_valid && LOGGED=true
+        "$JQ" -cn --argjson enabled "$([ "$AUTH_ENABLED" = 1 ] && echo true || echo false)" --argjson logged "$LOGGED" --arg login "$AUTH_LOGIN" --argjson hours "$AUTH_HOURS" \
+            '{ok:true,enabled:$enabled,logged_in:$logged,login:$login,session_hours:$hours}'
+        exit 0
+    fi
+    LENGTH=${CONTENT_LENGTH:-0}; case "$LENGTH" in ''|*[!0-9]*) LENGTH=0;; esac
+    [ "$LENGTH" -gt 0 ] && [ "$LENGTH" -le 1024 ] || { header_json; echo '{"ok":false,"error":"invalid_body"}'; exit 0; }
+    BODY=$(dd bs=1 count="$LENGTH" 2>/dev/null)
+    aval(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
+    AOP="$(aval op)"
+    umask 077
+    mkdir -p "$AUTH_SESSIONS" 2>/dev/null; chmod 0700 "$AUTH_SESSIONS" 2>/dev/null
+    FAILS="$AUTH_SESSIONS/.failures"
+
+    # Password field decoded to raw bytes from stdin, so it never appears in argv.
+    auth_password_bytes(){ printf '%s\n' "$BODY" | tr '&' '\n' | LC_ALL=C awk -F= '
+        BEGIN {h = "0123456789abcdef"}
+        $1 == "password" {
+            v = substr($0, index($0, "=") + 1); gsub(/\+/, " ", v); o = ""
+            while (match(tolower(v), /%[0-9a-f][0-9a-f]/)) {
+                c = (index(h, tolower(substr(v, RSTART + 1, 1))) - 1) * 16 + index(h, tolower(substr(v, RSTART + 2, 1))) - 1
+                o = o substr(v, 1, RSTART - 1) sprintf("%c", c); v = substr(v, RSTART + 3)
+            }
+            printf "%s", o v; exit
+        }'; }
+
+    # Challenge-response against the router: never sends or stores the password.
+    auth_keenetic(){
+        ak_login="$1"; ak_jar="$(mktemp /tmp/vward-console-auth.XXXXXX)" || return 2; ak_hdr="$ak_jar.h"; ak_body="$ak_jar.b"
+        ak_code="$("$CURL" -s -o /dev/null -D "$ak_hdr" -c "$ak_jar" --connect-timeout 3 --max-time 6 -w '%{http_code}' "$AUTH_URL" 2>/dev/null)"
+        if [ "$ak_code" != 401 ]; then rm -f "$ak_jar" "$ak_hdr" "$ak_body"; return 2; fi
+        ak_realm="$(tr -d '\r' < "$ak_hdr" | awk -F': ' 'tolower($1)=="x-ndm-realm"{print $2; exit}')"
+        ak_chal="$(tr -d '\r' < "$ak_hdr" | awk -F': ' 'tolower($1)=="x-ndm-challenge"{print $2; exit}')"
+        case "$ak_realm$ak_chal" in *[!A-Za-z0-9._\ -]*|'') rm -f "$ak_jar" "$ak_hdr" "$ak_body"; return 2 ;; esac
+        ak_md5="$({ printf '%s:%s:' "$ak_login" "$ak_realm"; auth_password_bytes; } | md5sum | cut -c1-32)"
+        ak_sha="$(printf '%s%s' "$ak_chal" "$ak_md5" | sha256sum | cut -c1-64)"
+        printf '{"login":"%s","password":"%s"}' "$ak_login" "$ak_sha" > "$ak_body"
+        ak_code="$("$CURL" -s -o /dev/null -b "$ak_jar" -c "$ak_jar" -H 'Content-Type: application/json' --data-binary "@$ak_body" --connect-timeout 3 --max-time 6 -w '%{http_code}' "$AUTH_URL" 2>/dev/null)"
+        rm -f "$ak_jar" "$ak_hdr" "$ak_body"
+        [ "$ak_code" = 200 ] && return 0
+        return 1
+    }
+
+    auth_new_session(){
+        find "$AUTH_SESSIONS" -type f ! -name '.*' -mmin +$((AUTH_HOURS * 60)) -exec rm -f {} + 2>/dev/null
+        an_token="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+        [ "${#an_token}" -eq 64 ] || return 1
+        printf 'login=%s\nexpires=%s\n' "$1" $(( $(date +%s) + AUTH_HOURS * 3600 )) > "$AUTH_SESSIONS/$(auth_token_id "$an_token")" || return 1
+        AUTH_COOKIE="vward_session=$an_token; Path=/; HttpOnly; SameSite=Strict; Max-Age=$((AUTH_HOURS * 3600))"
+    }
+
+    auth_login_checked(){
+        # Brute force: 5 failures within 5 minutes block further attempts for 5 minutes.
+        now="$(date +%s)"
+        recent="$(awk -v n="$now" '$1+0 > n-300 {c++} END{print c+0}' "$FAILS" 2>/dev/null)"
+        [ "${recent:-0}" -lt 5 ] || { header_json; echo '{"ok":false,"error":"too_many_attempts"}'; exit 0; }
+        ALOGIN="$(aval login)"
+        printf '%s\n' "$ALOGIN" | grep -Eq '^[A-Za-z0-9._@-]{1,64}$' || { header_json; echo '{"ok":false,"error":"invalid_login"}'; exit 0; }
+        auth_keenetic "$ALOGIN"; arc=$?
+        if [ "$arc" = 2 ]; then header_json; echo '{"ok":false,"error":"router_auth_unavailable"}'; exit 0; fi
+        if [ "$arc" != 0 ]; then
+            echo "$now" >> "$FAILS"; tail -n 20 "$FAILS" > "$FAILS.t" 2>/dev/null && mv "$FAILS.t" "$FAILS"
+            printf '%s|CONSOLE_AUTH|login_failed login=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$ALOGIN" >> /opt/var/log/vward/console-audit.log 2>/dev/null
+            header_json; echo '{"ok":false,"error":"wrong_credentials"}'; exit 0
+        fi
+        : > "$FAILS"
+    }
+
+    case "$AOP" in
+        login|enable)
+            auth_login_checked
+            if [ "$AOP" = enable ]; then
+                [ -x "$CONFIG_HELPER" ] || { header_json; echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+                AOUT="$("$CONFIG_HELPER" console-auth 1 2>/dev/null | tail -n 1)"
+                case "$AOUT" in result=*) ;; *) header_json; "$JQ" -cn --arg e "${AOUT#error=}" '{ok:false,error:$e}'; exit 0 ;; esac
+            fi
+            auth_new_session "$ALOGIN" || { header_json; echo '{"ok":false,"error":"session_failed"}'; exit 0; }
+            printf '%s|CONSOLE_AUTH|%s login=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$AOP" "$ALOGIN" >> /opt/var/log/vward/console-audit.log 2>/dev/null
+            echo "Set-Cookie: $AUTH_COOKIE"; header_json; echo '{"ok":true}'
+            ;;
+        logout)
+            at="$(auth_cookie_token)"; case "$at" in ''|*[!0-9a-f]*) ;; *) rm -f "$AUTH_SESSIONS/$(auth_token_id "$at")" ;; esac
+            echo 'Set-Cookie: vward_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0'; header_json; echo '{"ok":true}'
+            ;;
+        disable)
+            header_json
+            [ "$AUTH_ENABLED" = 0 ] || auth_session_valid || { echo '{"ok":false,"error":"auth_required"}'; exit 0; }
+            [ "$(aval confirm)" = CONSOLE_AUTH_DISABLE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+            [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+            AOUT="$("$CONFIG_HELPER" console-auth 0 2>/dev/null | tail -n 1)"
+            case "$AOUT" in result=*) echo '{"ok":true}' ;; *) "$JQ" -cn --arg e "${AOUT#error=}" '{ok:false,error:$e}' ;; esac
+            ;;
+        *) header_json; echo '{"ok":false,"error":"invalid_operation"}' ;;
+    esac
+    exit 0
+fi
 
 if [ "$ACTION" = wifi-data ]; then
     header_json
@@ -166,9 +306,6 @@ if [ "$ACTION" = wifi-control ]; then
     exit 0
 fi
 
-CONFIG_ETC=${VWARD_CONSOLE_ETC:-/opt/etc/vward}
-CONFIG_ROUTE_STATE=${VWARD_ROUTE_STATE:-/opt/var/lib/vward/route-engine}
-CONFIG_HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
 
 if [ "$ACTION" = config-data ]; then
     header_json
@@ -192,6 +329,9 @@ if [ "$ACTION" = config-data ]; then
         "$JQ" -Rn '[inputs|split("\t")|{id:.[0],title:.[1],enabled:(.[2]=="1")}]')"
     TG=true; [ -e "$CONFIG_ETC/tunnel-guard.disabled" ] && TG=false
     WG_ON=true; [ -e "$CONFIG_ETC/wan-guard.disabled" ] && WG_ON=false
+    AD_ON=true; [ -e "$CONFIG_ETC/route-engine/adaptive.disabled" ] && AD_ON=false
+    CL_ON=true; [ "$(kv_get "$CONFIG_ETC/route-engine/domain-classifier.conf" CLASSIFIER_ENABLED)" = 0 ] && CL_ON=false
+    IPX="$(awk 'NF{print $1}' "${VWARD_POLICY_EXCLUDED:-$CONFIG_ETC/policy-sync/excluded.categories}" 2>/dev/null | head -n 500 | list_json)"
     WCONF=${VWARD_WIFI_CLIENT_GUARD_CONF:-$CONFIG_ETC/wifi-client-guard.conf}
     UCONF=${VWARD_UPDATE_CONFIG:-$CONFIG_ETC/update.conf}
     wnum(){ V="$(kv_get "$WCONF" "$1")"; case "$V" in ''|*[!0-9-]*) V=$2;; esac; printf '%s' "$V"; }
@@ -205,17 +345,20 @@ if [ "$ACTION" = config-data ]; then
       --arg group "${VWARD_POLICY_GROUP:-}" --argjson router "$ROUTER" \
       --argjson route_domains "${ROUTE_DOMAINS:-[]}" --argjson force "${FORCE:-[]}" --argjson adaptive "${ADAPT:-[]}" \
       --argjson categories "${CATS:-[]}" --argjson tunnel_guard "$TG" --argjson wan_guard "$WG_ON" --argjson components "$COMPONENTS" \
+      --argjson adaptive_on "$AD_ON" --argjson classifier_on "$CL_ON" --argjson ip_excluded "${IPX:-[]}" \
       --argjson w_en "$W_EN" --argjson w_ctl "$W_CTL" \
       --arg w_window "$(wnum WINDOW_SEC 86400)" --arg w_switch "$(wnum BAND_SWITCH_WARN 20)" \
       --arg w_weak "$(wnum WEAK_5G_SAMPLE_WARN 5)" --arg w_rssi "$(wnum WEAK_5G_RSSI -75)" \
       --arg u_start "$(kv_get "$UCONF" safe_window_start)" --arg u_end "$(kv_get "$UCONF" safe_window_end)" \
       --arg u_interval "$(kv_get "$UCONF" check_interval_seconds)" \
+      --arg u_window "$(kv_get "$UCONF" apply_window)" \
+      --arg u_feed "$(kv_get "$UCONF" manifest_url | sed -n -E 's#^https://raw[.]githubusercontent[.]com/[^/]+/[^/]+/(beta|dev)/updates/[a-z0-9-]+/update-manifest[.]json$#\1#p')" \
       --argjson writable "$([ -x "$CONFIG_HELPER" ] && echo true || echo false)" \
       '{ok:true,writable:$writable,
-        route:{group:$group,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories},
+        route:{group:$group,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
         tunnel_guard:{enabled:$tunnel_guard},wan_guard:{enabled:$wan_guard},components:$components,
         wifi:{ENABLED:($w_en==1),CONTROL_ENABLED:($w_ctl==1),WINDOW_SEC:($w_window|(tonumber? // null)),BAND_SWITCH_WARN:($w_switch|(tonumber? // null)),WEAK_5G_SAMPLE_WARN:($w_weak|(tonumber? // null)),WEAK_5G_RSSI:($w_rssi|(tonumber? // null))},
-        update:{safe_window_start:$u_start,safe_window_end:$u_end,check_interval_seconds:($u_interval|(tonumber? // null))}}'
+        update:{safe_window_start:$u_start,safe_window_end:$u_end,check_interval_seconds:($u_interval|(tonumber? // null)),apply_window:(if $u_window == "any" then "any" else "window" end),feed:(if $u_feed == "" then "custom" else $u_feed end)}}'
     exit 0
 fi
 
@@ -244,7 +387,10 @@ if [ "$ACTION" = config ]; then
         tunnel-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=TUNNEL_GUARD_DISABLE ;;
         wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;
         component) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=COMPONENT_DISABLE ;;
+        adaptive-mode|classifier) set -- "$OP" "$VALUE" ;;
+        ip-category) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
+        update-feed) set -- "$OP" "$TARGET"; [ "$TARGET" != dev ] || REQUIRED=UPDATE_FEED_DEV ;;
         *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
     esac
     [ "$OP:$TARGET:$VALUE" != wifi:CONTROL_ENABLED:1 ] || REQUIRED=WIFI_CONTROL_ENABLE
@@ -259,6 +405,49 @@ if [ "$ACTION" = config ]; then
     exit 0
 fi
 
+if [ "$ACTION" = cron-data ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    CRONTAB=${VWARD_CRONTAB:-/opt/var/spool/cron/crontabs/root}
+    [ -r "$CRONTAB" ] || CRONTAB=${VWARD_CRONTAB_SHIPPED:-/opt/etc/vward/cron/root.crontab}
+    COMPONENT_REGISTRY=${VWARD_COMPONENT_REGISTRY:-/opt/share/vward/updater/current/component-registry.json}
+    OWNERS="$("$JQ" -c '[.components[] | .id as $id | .runtime_targets[] | {(.): $id}] | add // {}' "$COMPONENT_REGISTRY" 2>/dev/null)"
+    [ -n "$OWNERS" ] || OWNERS='{}'
+    # One row per job: the 5 schedule fields, the entry point and its status file prefix.
+    JOBS="$(awk '$1 !~ /^#/ && NF >= 6 {
+            match($0, /\/opt\/(bin|etc\/init\.d)\/[A-Za-z0-9_.-]+/); script = (RSTART ? substr($0, RSTART, RLENGTH) : "")
+            match($0, /date > \/tmp\/[A-Za-z0-9_.-]+\.cron\.last/); tag = (RSTART ? substr($0, RSTART + 12, RLENGTH - 22) : "")
+            if (script != "") print $1 " " $2 " " $3 " " $4 " " $5 "\t" script "\t" tag
+        }' "$CRONTAB" 2>/dev/null | head -n 40 |
+        while IFS="$(printf '\t')" read -r SCHED SCRIPT TAG; do
+            case "$TAG" in ''|*[!A-Za-z0-9_.-]*) LASTV=""; RCV="" ;; *)
+                LASTV="$(head -n 1 "/tmp/$TAG.cron.last" 2>/dev/null | cut -c1-60)"; RCV="$(head -n 1 "/tmp/$TAG.cron.rc" 2>/dev/null)" ;; esac
+            case "$RCV" in *[!0-9]*) RCV="" ;; esac
+            printf '%s\t%s\t%s\t%s\n' "$SCHED" "$SCRIPT" "$LASTV" "$RCV"
+        done | "$JQ" -Rn --argjson owners "$OWNERS" '[inputs | split("\t") | {schedule: .[0], script: .[1], name: (.[1] | split("/") | last), component: ($owners[.[1]] // ""), last: .[2], rc: (.[3] | tonumber? // null)}]')"
+    [ -n "$JOBS" ] || JOBS='[]'
+    CRON_UP=false; pidof crond >/dev/null 2>&1 && CRON_UP=true
+    "$JQ" -cn --argjson jobs "$JOBS" --argjson up "$CRON_UP" '{ok: true, crond: $up, jobs: $jobs}'
+    exit 0
+fi
+
+if [ "$ACTION" = ads-view ]; then
+  header_json; [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+  V="$(qget view)"; F="$(qget filter)"; Q="$(qget search | tr '[:upper:]' '[:lower:]')"; K="$(qget kind)"
+  for X in "$V" "$F" "$Q" "$K"; do case "$X" in *[!a-z0-9.-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac; done
+  case "$V" in querylog|stats|list|publish-status) ;; *) echo '{"ok":false,"error":"invalid_view"}'; exit 0 ;; esac
+  VIEW_BIN=${VWARD_ADS_VIEW_BIN:-/opt/bin/vward-ads-privacy-view.sh}; [ -x "$VIEW_BIN" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+  case "$V" in
+    querylog) OUTV="$("$VIEW_BIN" querylog "${F:-all}" "$Q" 2>/dev/null)" ;;
+    stats) OUTV="$("$VIEW_BIN" stats 2>/dev/null)" ;;
+    list) OUTV="$("$VIEW_BIN" list "$K" "$Q" 2>/dev/null)" ;;
+    publish-status) OUTV="$("$VIEW_BIN" publish-status 2>/dev/null)" ;;
+    *) echo '{"ok":false,"error":"invalid_view"}'; exit 0 ;;
+  esac
+  printf '%s\n' "$OUTV" | "$JQ" -ce 'if type == "object" then . else error end' 2>/dev/null || echo '{"ok":false,"error":"view_failed"}'
+  exit 0
+fi
+
 if [ "$ACTION" = ads-data ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
   AETC=/opt/etc/vward/ads-privacy-guard; AST=/opt/var/lib/vward/ads-privacy-guard; ASH=/opt/share/vward/ads-privacy-guard
@@ -267,11 +456,11 @@ if [ "$ACTION" = ads-data ]; then
   PAUSED="$([ -r "$AST/control.state" ] && awk -F= '$1=="paused"{print $2;exit}' "$AST/control.state")"; [ "$PAUSED" = 1 ] || PAUSED=0
   BLOCKED="$(awk -F'|' '$3=="BLOCK"{n++}END{print n+0}' "$AST/verdicts.tsv" 2>/dev/null)"; REVIEW="$(awk -F'|' '$2=="SUSPECT"{n++}END{print n+0}' "$AST/verdicts.tsv" 2>/dev/null)"; ALLOW="$(awk -F'|' '$2=="ALLOW"{n++}END{print n+0}' "$AST/verdicts.tsv" 2>/dev/null)"; TRUST="$(awk -F'|' '$2=="TRUST"{n++}END{print n+0}' "$AST/verdicts.tsv" 2>/dev/null)"
   MANUAL="$({ awk -F'|' 'NF>=2&&$1!~/^[[:space:]]*#/{print "allow|"$1"|"$2"|"$3}' "$AETC/allowlist.tsv" 2>/dev/null; awk -F'|' 'NF>=2&&$1!~/^[[:space:]]*#/{print "block|"$1"|"$2"|"$3}' "$AETC/denylist.tsv" 2>/dev/null; } | head -n 300 | "$JQ" -Rn '[inputs|split("|")|{type:.[0],domain:.[1],scope:.[2],note:(.[3:]|join("|"))}]')"
-  SOURCES="$([ -x "$SRCCTL" ] && "$SRCCTL" list 2>/dev/null | "$JQ" -Rn --arg state "$AST/sources" '[inputs|split("|")|{id:.[0],mode:.[1],name:.[2],cached:(.[3]=="1"),purpose:.[4]}]' || echo '[]')"
+  SOURCES="$([ -x "$SRCCTL" ] && "$SRCCTL" list 2>/dev/null | "$JQ" -Rn --arg state "$AST/sources" '[inputs|split("|")|{id:.[0],mode:.[1],name:.[2],cached:(.[3]=="1"),purpose:.[4],custom:(.[5]=="1")}]' || echo '[]')"
   JOBS="$([ -x "$JOB" ] && "$JOB" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}')"
   LAST_OUTPUT_PATH="$(printf '%s' "$JOBS" | "$JQ" -r '.LAST_output // ""' 2>/dev/null)"; LAST_OUTPUT=""
   case "$LAST_OUTPUT_PATH" in "$AST/jobs/"*.out) [ -r "$LAST_OUTPUT_PATH" ] && LAST_OUTPUT="$(head -c 20000 "$LAST_OUTPUT_PATH" 2>/dev/null)" ;; esac
-  "$JQ" -n --argjson paused "$([ "$PAUSED" = 1 ]&&echo true||echo false)" --argjson settings "$SETJSON" --argjson sources "$SOURCES" --argjson manual "$MANUAL" --argjson jobsraw "$JOBS" --arg job_output "$LAST_OUTPUT" --argjson b "${BLOCKED:-0}" --argjson r "${REVIEW:-0}" --argjson a "${ALLOW:-0}" --argjson t "${TRUST:-0}" '{ok:true,component:"ads-privacy-guard",paused:$paused,settings:$settings,sources:$sources,manual_rules:$manual,counts:{blocked:$b,review:$r,allow:$a,trust:$t},jobs:{queued:($jobsraw.JOB_QUEUE//"0"|(tonumber? // 0)),current:{state:($jobsraw.CURRENT_state//"IDLE"),type:($jobsraw.CURRENT_type//"")},last:{state:($jobsraw.LAST_state//"NONE"),type:($jobsraw.LAST_type//""),output:$job_output}}}'
+  "$JQ" -n --argjson paused "$([ "$PAUSED" = 1 ]&&echo true||echo false)" --argjson settings "$SETJSON" --argjson sources "$SOURCES" --argjson manual "$MANUAL" --argjson jobsraw "$JOBS" --arg job_output "$LAST_OUTPUT" --argjson b "${BLOCKED:-0}" --argjson r "${REVIEW:-0}" --argjson a "${ALLOW:-0}" --argjson t "${TRUST:-0}" '{ok:true,component:"ads-privacy-guard",paused:$paused,settings:$settings,sources:$sources,manual_rules:$manual,counts:{blocked:$b,review:$r,allow:$a,trust:$t},categories:($sources | group_by(.purpose) | map({id:.[0].purpose, total:length, active:(map(select(.mode != "off")) | length)})),jobs:{queued:($jobsraw.JOB_QUEUE//"0"|(tonumber? // 0)),current:{state:($jobsraw.CURRENT_state//"IDLE"),type:($jobsraw.CURRENT_type//"")},last:{state:($jobsraw.LAST_state//"NONE"),type:($jobsraw.LAST_type//""),output:$job_output}}}'
   exit 0
 fi
 
@@ -318,10 +507,15 @@ if [ "$ACTION" = ads-control ]; then
   LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ]&&[ "$LEN" -le 1024 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }; BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
   val(){ printf '%s\n' "$BODY"|tr '&' '\n'|awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
   OP="$(val op)"; DOMAIN="$(val domain|tr '[:upper:]' '[:lower:]')"; SCOPE="$(val scope)"; [ -n "$SCOPE" ]||SCOPE=exact
-  case "$OP" in pause|resume|allow|block|remove-override|source-mode|enqueue) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
+  case "$OP" in pause|resume|allow|block|remove-override|source-mode|source-add|source-delete|source-category|enqueue) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
   case "$OP" in
     allow|block|remove-override) ads_valid_domain "$DOMAIN" || { echo '{"ok":false,"error":"invalid_domain"}'; exit 0; }; case "$SCOPE" in exact|suffix) ;; *) echo '{"ok":false,"error":"invalid_scope"}'; exit 0 ;; esac ;;
     source-mode) SID="$(val source)"; MODE="$(val mode)"; ads_valid_source_id "$SID" || { echo '{"ok":false,"error":"invalid_source"}'; exit 0; }; case "$MODE" in off|check|active) ;; *) echo '{"ok":false,"error":"invalid_source_mode"}'; exit 0 ;; esac ;;
+    source-add) SURL="$(form_url_decode "$(val url)")" || { echo '{"ok":false,"error":"invalid_url"}'; exit 0; }; SFMT="$(val format)"
+      printf '%s\n' "$SURL" | grep -Eq '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._~/%+=&?-]*$' && [ "${#SURL}" -le 300 ] || { echo '{"ok":false,"error":"invalid_url"}'; exit 0; }
+      case "$SFMT" in adblock|hosts|domains) ;; *) echo '{"ok":false,"error":"invalid_format"}'; exit 0 ;; esac ;;
+    source-delete) SID="$(val source)"; case "$SID" in custom-*) ads_valid_source_id "$SID" || { echo '{"ok":false,"error":"invalid_source"}'; exit 0; } ;; *) echo '{"ok":false,"error":"invalid_source"}'; exit 0 ;; esac ;;
+    source-category) SPUR="$(val category)"; SST="$(val state)"; case "$SPUR" in ''|*[!a-z-]*) echo '{"ok":false,"error":"invalid_category"}'; exit 0 ;; esac; case "$SST" in on|off) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac ;;
     enqueue) JOB="$(val job)"; case "$JOB" in scan|sources-update|rules-rebuild) ;; publish) [ "$(val confirm)" = ADS_PUBLISH ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;; probe) ads_valid_domain "$DOMAIN" || { echo '{"ok":false,"error":"invalid_domain"}'; exit 0; } ;; *) echo '{"ok":false,"error":"invalid_job"}'; exit 0 ;; esac ;;
   esac
   RC=0; OUT="$(ads_console_tmp ads-control)" || { echo '{"ok":false,"error":"temporary_file_failed"}'; exit 0; }
@@ -329,6 +523,9 @@ if [ "$ACTION" = ads-control ]; then
     pause|resume) /opt/bin/vward-ads-privacy-control.sh "$OP" >"$OUT" 2>&1||RC=$? ;;
     allow|block|remove-override) C="$OP"; [ "$OP" = remove-override ]&&C=remove; /opt/bin/vward-ads-privacy-control.sh "$C" "$DOMAIN" "$SCOPE" >"$OUT" 2>&1||RC=$? ;;
     source-mode) /opt/bin/vward-ads-privacy-source-control.sh set "$SID" "$MODE" >"$OUT" 2>&1||RC=$? ;;
+    source-add) /opt/bin/vward-ads-privacy-source-control.sh add "$SURL" "$SFMT" >"$OUT" 2>&1||RC=$? ;;
+    source-delete) /opt/bin/vward-ads-privacy-source-control.sh delete "$SID" >"$OUT" 2>&1||RC=$? ;;
+    source-category) /opt/bin/vward-ads-privacy-source-control.sh category "$SPUR" "$SST" >"$OUT" 2>&1||RC=$? ;;
     enqueue) /opt/bin/vward-ads-privacy-job.sh enqueue "$JOB" "$DOMAIN" >"$OUT" 2>&1||RC=$? ;;
   esac
   RES="$(head -c 12000 "$OUT" 2>/dev/null)"; rm -f "$OUT"; printf '%s|ADS_CONTROL|op=%s rc=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$OP" "$RC" >>/opt/var/log/vward/console-audit.log; "$JQ" -n --argjson ok "$([ "$RC" -eq 0 ]&&echo true||echo false)" --argjson rc "$RC" --arg result "$RES" '{ok:$ok,rc:$rc,result:$result}'; exit 0
@@ -554,7 +751,8 @@ if [ "$ACTION" = "security-data" ]; then
       --arg socket_state "$SOCKET_STATE" \
       --arg config_test "$CONFIG_TEST" \
       --arg mod_setenv "$MOD_SETENV" \
-      '{ok:true,profile_ready:$ready,listener:{scope:$listener_scope,address:$listener_address,port:$listener_port,wildcard:$listener_wildcard,socket_state:$socket_state,source:"generated_config"},profile:{lan_address:$lan_address,lan_subnet:$lan_subnet,dns_server:$dns_server,wan_device:$wan_device,wan_interface:$wan_interface,tunnel_device:$tunnel_device,tunnel_interface:$tunnel_interface,policy_group:$policy_group,console_port:$console_port,adguard_address:$adguard_address,adguard_port:$adguard_port},external_services:{adguard:{address:$adguard_address,port:$adguard_port}},server:{config_test:$config_test,mod_setenv:$mod_setenv},api:{mutation_guard:true,cors:false,directory_listing:false,authentication:false}}'
+      --argjson authentication "$([ "$AUTH_ENABLED" = 1 ] && echo true || echo false)" \
+      '{ok:true,profile_ready:$ready,listener:{scope:$listener_scope,address:$listener_address,port:$listener_port,wildcard:$listener_wildcard,socket_state:$socket_state,source:"generated_config"},profile:{lan_address:$lan_address,lan_subnet:$lan_subnet,dns_server:$dns_server,wan_device:$wan_device,wan_interface:$wan_interface,tunnel_device:$tunnel_device,tunnel_interface:$tunnel_interface,policy_group:$policy_group,console_port:$console_port,adguard_address:$adguard_address,adguard_port:$adguard_port},external_services:{adguard:{address:$adguard_address,port:$adguard_port}},server:{config_test:$config_test,mod_setenv:$mod_setenv},api:{mutation_guard:true,cors:false,directory_listing:false,authentication:$authentication}}'
     exit 0
 fi
 
@@ -722,6 +920,14 @@ if [ "$ACTION" = "route-data" ]; then
         fi
     )"
 
+    IP_INDEX_JSON="$(awk -F'|' 'NF>=2 && $1 ~ /^[a-z0-9][a-z0-9._-]*$/ {print $1 "\t" $2}' "$IP_INDEX" 2>/dev/null | head -n 300 | "$JQ" -Rn '[inputs | split("\t") | {name: .[0], cidr: (.[1] | tonumber? // 0)}]')"
+    [ -n "$IP_INDEX_JSON" ] || IP_INDEX_JSON='[]'
+    SERVICES_JSON="$(awk -F'|' 'NF>=3 && $1 !~ /^[[:space:]]*#/ && $2 ~ /^[A-Za-z0-9.-]+$/ {print $1 "\t" $2}' /opt/etc/vward/route-engine/services.conf 2>/dev/null | head -n 50 |
+        while IFS="$(printf '\t')" read -r SNAME SHOST; do
+            SF="$(awk -F= '$1=="FAILS"{print $2}' "/opt/var/lib/vward/route-tools/$SHOST.state" 2>/dev/null)"; SO="$(awk -F= '$1=="OKS"{print $2}' "/opt/var/lib/vward/route-tools/$SHOST.state" 2>/dev/null)"
+            printf '%s\t%s\t%s\t%s\n' "$SNAME" "$SHOST" "${SF:-}" "${SO:-}"
+        done | "$JQ" -Rn '[inputs | split("\t") | {name: .[0], host: .[1], fails: (.[2] | tonumber? // null), oks: (.[3] | tonumber? // null)}]')"
+    [ -n "$SERVICES_JSON" ] || SERVICES_JSON='[]'
     ITDOG_IP_CATEGORIES="$(find "$IP_ITDOG" -type f -name '*.cidr' 2>/dev/null | wc -l)"
     LOYAL_IP_CATEGORIES="$(find "$IP_LOYAL" -type f -name '*.cidr' 2>/dev/null | wc -l)"
     [ -n "$ITDOG_IP_CATEGORIES" ] || ITDOG_IP_CATEGORIES=0
@@ -748,6 +954,7 @@ if [ "$ACTION" = "route-data" ]; then
       --argjson active_categories "$ACTIVE_CATEGORIES" \
       --argjson itdog_ip_categories "$ITDOG_IP_CATEGORIES" \
       --argjson loyal_ip_categories "$LOYAL_IP_CATEGORIES" \
+      --argjson ip_index "$IP_INDEX_JSON" --argjson services "$SERVICES_JSON" \
       '{
         ok:true,
         ts:$ts,
@@ -766,8 +973,10 @@ if [ "$ACTION" = "route-data" ]; then
             managed_routes:$managed_routes,
             source_categories:{itdog:$itdog_ip_categories,loyalsoldier:$loyal_ip_categories},
             active:$active_categories,
+            index:$ip_index,
             last_sync:$ip_last
-        }
+        },
+        services:$services
       }'
     exit 0
 fi
@@ -1160,6 +1369,7 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
             policy-refresh) COMP=policy-sync; CMD=/opt/bin/vward-policy-sync.sh; ARG=sync; REQUIRED=POLICY_REFRESH; LABEL=policy-refresh ;;
             policy-reconcile) COMP=policy-sync; CMD=/opt/bin/vward-policy-sync.sh; ARG=--reconcile; REQUIRED=POLICY_RECONCILE; LABEL=policy-reconcile ;;
             tunnel-health) COMP=tunnel-guard; CMD=/opt/bin/vward-tunnel-health.sh; LABEL=tunnel-health ;;
+            housekeeping) CMD=/opt/bin/vward-housekeeping.sh; LABEL=housekeeping ;;
             wan-renew) COMP=wan-guard; CMD=/opt/bin/vward-wan-recovery.sh; ARG=dhcp-renew; REQUIRED=WAN_RENEW; LABEL=wan-renew ;;
             wan-bounce) COMP=wan-guard; CMD=/opt/bin/vward-wan-recovery.sh; ARG=wan-bounce; REQUIRED=WAN_BOUNCE; LABEL=wan-bounce ;;
             *) echo '{"ok":false,"error":"unknown_control_action"}'; exit 0 ;;
@@ -1314,12 +1524,21 @@ WG_INTERFACES="$(
         printf '%s\n' "$IFACES" |
         "$JQ" -c --arg n "$WG_NAME" '
             .[$n] |
+            ((.wireguard.peer // .peer // []) | if type == "array" then (.[0] // {}) elif type == "object" then . else {} end) as $p |
             {
                 name:$n,
                 description:(.description // ""),
                 link:(.link // ""),
                 connected:(.connected // ""),
-                state:(.state // "")
+                state:(.state // ""),
+                address:((.address // "") | tostring),
+                mtu:(.mtu // null),
+                uptime:(.uptime // null),
+                endpoint:((($p["remote-endpoint-address"] // $p.endpoint // $p["remote-address"] // "") | tostring)
+                    + (if ($p["remote-port"] // null) != null then ":" + ($p["remote-port"] | tostring) else "" end)),
+                rx:($p.rxbytes // $p["rx-bytes"] // .rxbytes // null),
+                tx:($p.txbytes // $p["tx-bytes"] // .txbytes // null),
+                handshake:($p["last-handshake"] // $p.handshake // null)
             }
         ' 2>/dev/null
     done |

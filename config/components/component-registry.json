@@ -257,6 +257,7 @@
         "/opt/bin/vward-ads-privacy-settings.sh",
         "/opt/bin/vward-ads-privacy-source-control.sh",
         "/opt/bin/vward-ads-privacy-query-read.sh",
+        "/opt/bin/vward-ads-privacy-view.sh",
         "/opt/bin/vward-ads-privacy-rules-rebuild.sh",
         "/opt/bin/vward-ads-privacy-job.sh",
         "/opt/bin/vward-ads-privacy-health.sh",

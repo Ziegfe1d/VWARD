@@ -114,4 +114,15 @@ for op in ("wan-renew", "wan-bounce"):
 assert 'wan-bounce) COMP=wan-guard; CMD=/opt/bin/vward-wan-recovery.sh; ARG=wan-bounce; REQUIRED=WAN_BOUNCE' in API
 assert 'wan-renew) COMP=wan-guard; CMD=/opt/bin/vward-wan-recovery.sh; ARG=dhcp-renew; REQUIRED=WAN_RENEW' in API
 assert call_api("action=update-control", "op=check", "POST")["error"] == "action_unavailable"
+# Ads views and source management: strict input before anything runs.
+assert call_api("action=ads-view&view=querylog&search=a%26b")["error"] == "invalid_value"
+assert call_api("action=ads-view&view=shell")["error"] in ("invalid_view", "action_unavailable")
+assert call_ads("op=source-add&url=http%3A%2F%2Fx.example%2Fl.txt&format=hosts")["error"] == "invalid_url"
+assert call_ads("op=source-add&url=https%3A%2F%2Fuser%40x.example%2Fl.txt&format=hosts")["error"] == "invalid_url"
+assert call_ads("op=source-add&url=https%3A%2F%2Fx.example%2F%0Al.txt&format=hosts")["error"] == "invalid_url"
+assert call_ads("op=source-add&url=https%3A%2F%2Fx.example%2Fl.txt&format=json")["error"] == "invalid_format"
+assert call_ads("op=source-delete&source=hagezi-pro")["error"] == "invalid_source"
+assert call_ads("op=source-category&category=ads%3Breboot&state=off")["error"] == "invalid_category"
+# A valid address decodes and reaches the (absent) source tool.
+assert call_ads("op=source-add&url=https%3A%2F%2Flists.example.org%2Fa.txt%3Fv%3D1&format=adblock").get("error") is None
 print("console security checks: PASS")

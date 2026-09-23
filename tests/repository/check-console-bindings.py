@@ -114,4 +114,9 @@ tcpdump_counter = re.search(r"^TCPDUMP_COUNT=.*$", api, re.MULTILINE)
 if not tcpdump_counter or "udp dst port 53" in tcpdump_counter.group(0):
     fail("Console API tcpdump counter is missing or depends on the truncated ps command tail")
 
+# Texts that describe a component's timing must match the component.
+guard = (root / "components/tunnel-guard/scripts/vward-tunnel-guard.sh").read_text(encoding="utf-8")
+if "RECOVERY_INTERVAL=300" not in guard or "['Попытка восстановления', 'каждые 5 минут'" not in js:
+    fail("VPN recovery interval shown in the Console differs from vward-tunnel-guard.sh")
+
 print("CONSOLE_BINDINGS=PASS")

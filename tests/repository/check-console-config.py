@@ -198,6 +198,37 @@ with tempfile.TemporaryDirectory() as tmp:
     if upd.read_text() != "update_enabled=1\nsafe_window_start=02:30\nsafe_window_end=05:00\ncheck_interval_seconds=3600\n":
         fail(f"update.conf written incorrectly: {upd.read_text()!r}")
 
+    # Feed: only the branch of a standard URL changes; custom URLs are left alone.
+    upd.write_text(upd.read_text() + "manifest_url=https://raw.githubusercontent.com/Owner/Repo/dev/updates/dev/update-manifest.json\n")
+    run("update-feed", "beta", expect="result=changed")
+    if "manifest_url=https://raw.githubusercontent.com/Owner/Repo/beta/updates/dev/update-manifest.json" not in upd.read_text():
+        fail(f"feed switch rewrote the URL wrongly: {upd.read_text()!r}")
+    run("update-feed", "beta", expect="result=unchanged")
+    run("update-feed", "main", expect="error=invalid_value")
+    run("update", "apply_window", "any", expect="result=changed")
+    run("update", "apply_window", "never", expect="error=invalid_value")
+    text = upd.read_text().replace("Owner/Repo/beta", "Owner/Repo/dev")
+    upd.write_text(text.replace("https://raw.githubusercontent.com", "https://mirror.example"))
+    run("update-feed", "beta", expect="error=custom_manifest_url")
+    upd.write_text(text)
+    # Routing switches: AdaptiveAuto additions, classifier, excluded IP categories.
+    run("adaptive-mode", "0", expect="result=changed")
+    if not (etc / "route-engine/adaptive.disabled").exists():
+        fail("AdaptiveAuto switch must create its flag")
+    run("adaptive-mode", "1", expect="result=changed")
+    run("classifier", "0", expect="result=changed")
+    if "CLASSIFIER_ENABLED=0" not in (etc / "route-engine/domain-classifier.conf").read_text() or \
+            stat.S_IMODE((etc / "route-engine/domain-classifier.conf").stat().st_mode) != 0o600:
+        fail("classifier switch must write a 0600 config")
+    run("classifier", "2", expect="error=invalid_value")
+    excluded = etc / "policy-sync/excluded.categories"
+    run("ip-category", "youtube", "0", expect="result=changed")
+    run("ip-category", "telegram", "0", expect="result=changed")
+    run("ip-category", "youtube", "0", expect="result=unchanged")
+    run("ip-category", "youtube", "1", expect="result=changed")
+    if excluded.read_text() != "telegram\n":
+        fail(f"excluded categories: {excluded.read_text()!r}")
+    run("ip-category", "../etc/passwd", "0", expect="error=invalid_category")
     if not any((tmp / "backup").glob("update.conf.*")):
         fail("changes must leave a backup")
     audit = (tmp / "audit.log").read_text()
@@ -234,7 +265,7 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("config-data tunnel guard")
     if data["wifi"] != {"ENABLED": True, "CONTROL_ENABLED": False, "WINDOW_SEC": 86400, "BAND_SWITCH_WARN": 20, "WEAK_5G_SAMPLE_WARN": 5, "WEAK_5G_RSSI": -70}:
         fail(f"config-data wifi: {data['wifi']}")
-    if data["update"] != {"safe_window_start": "02:30", "safe_window_end": "05:00", "check_interval_seconds": 3600}:
+    if data["update"] != {"safe_window_start": "02:30", "safe_window_end": "05:00", "check_interval_seconds": 3600, "apply_window": "any", "feed": "dev"}:
         fail(f"config-data update: {data['update']}")
 
     post = lambda body: api("action=config", body, "POST")
@@ -257,6 +288,7 @@ with tempfile.TemporaryDirectory() as tmp:
         ("op=update&target=manifest_url&value=x", "invalid_setting"),
         ("op=route-domain&action=add&target=bad..example", "invalid_domain"),
         ("op=tunnel&target=Wireguard1", "confirmation_required"),
+        ("op=update-feed&target=dev", "confirmation_required"),
         ("op=wan-guard&value=0", "confirmation_required"),
         ("op=tunnel&target=a%3Bb&confirm=TUNNEL_SWITCH", "invalid_value"),
     ):

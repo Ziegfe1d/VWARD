@@ -24,6 +24,10 @@ FORCE_FILE="$ETC/route-engine/force-vpn.conf"
 CATEGORY_FILE="$ETC/route-engine/categories.tsv"
 TUNNEL_GUARD_FLAG="$ETC/tunnel-guard.disabled"
 WAN_GUARD_FLAG="$ETC/wan-guard.disabled"
+ADAPTIVE_FLAG="$ETC/route-engine/adaptive.disabled"
+CLASSIFIER_FILE="$ETC/route-engine/domain-classifier.conf"
+IP_EXCLUDED=${VWARD_POLICY_EXCLUDED:-$ETC/policy-sync/excluded.categories}
+AUTH_CONF=${VWARD_CONSOLE_AUTH_CONF:-$ETC/console/auth.conf}
 WIFI_FILE=${VWARD_WIFI_CLIENT_GUARD_CONF:-$ETC/wifi-client-guard.conf}
 UPDATE_FILE=${VWARD_UPDATE_CONFIG:-$ETC/update.conf}
 POLICY_STATE=${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}
@@ -316,10 +320,39 @@ op_update() {
             other=safe_window_end; [ "$1" = safe_window_end ] && other=safe_window_start
             [ "$(awk -F= -v k="$other" '$1==k{print $2;exit}' "$UPDATE_FILE")" != "$2" ] || die invalid_window 64 ;;
         check_interval_seconds) valid_int_range "$2" 300 86400 || die invalid_value 64 ;;
+        apply_window) case "$2" in window|any) ;; *) die invalid_value 64 ;; esac ;;
         *) die invalid_setting 64 ;;
     esac
     set_kv "$UPDATE_FILE" "$1" "$2" 0600 || done_ok "update $1=$2" unchanged
     done_ok "update $1=$2" changed
+}
+
+# ip-category NAME 0|1: 0 excludes the IP category from VPN routes.
+op_ip_category() {
+    printf '%s\n' "$1" | grep -Eq '^[a-z0-9][a-z0-9._-]{0,63}$' || die invalid_category 64
+    case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
+    have=0; [ -f "$IP_EXCLUDED" ] && grep -Fqx -- "$1" "$IP_EXCLUDED" && have=1
+    [ "$2" = 0 ] && [ "$have" = 1 ] && done_ok "ip-category $1=0" unchanged
+    [ "$2" = 1 ] && [ "$have" = 0 ] && done_ok "ip-category $1=1" unchanged
+    backup_file "$IP_EXCLUDED" || die backup_failed
+    new_tmp "$IP_EXCLUDED" || die write_failed
+    { [ ! -f "$IP_EXCLUDED" ] || grep -Fvx -- "$1" "$IP_EXCLUDED"; [ "$2" = 1 ] || printf '%s\n' "$1"; } > "$TMPFILE"
+    [ "$(grep -c . "$TMPFILE")" -le 500 ] || die list_full
+    install_tmp "$IP_EXCLUDED" 0644 || die write_failed
+    done_ok "ip-category $1=$2" changed
+}
+
+# update-feed beta|dev: which branch's signed feed the updater follows.  Only the
+# branch in a standard raw.githubusercontent.com URL is replaced; the signed
+# channel, the key and the anti-replay checks stay as they are.
+op_update_feed() {
+    case "$1" in beta|dev) ;; *) die invalid_value 64 ;; esac
+    [ -f "$UPDATE_FILE" ] || die config_unavailable
+    url=$(awk -F= '$1=="manifest_url"{print substr($0,index($0,"=")+1);exit}' "$UPDATE_FILE")
+    new=$(printf '%s\n' "$url" | sed -n -E "s#^(https://raw\.githubusercontent\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/)(beta|dev)(/updates/[a-z0-9-]+/update-manifest\.json)\$#\1$1\3#p")
+    [ -n "$new" ] || die custom_manifest_url
+    set_kv "$UPDATE_FILE" manifest_url "$new" 0600 || done_ok "update-feed $1" unchanged
+    done_ok "update-feed $1" changed
 }
 
 # ---------- Tunnel for routes ----------
@@ -514,7 +547,7 @@ op_component() {
 
 [ "$#" -ge 2 ] && [ "$#" -le 3 ] || die usage 64
 OP=$1; shift
-case "$OP" in tunnel-guard|wan-guard|tunnel) [ "$#" -eq 1 ] || die usage 64 ;; *) [ "$#" -eq 2 ] || die usage 64 ;; esac
+case "$OP" in tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth) [ "$#" -eq 1 ] || die usage 64 ;; *) [ "$#" -eq 2 ] || die usage 64 ;; esac
 ARG1=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
 ARG2=${2:-}
 case "$OP" in wifi|update|tunnel) ARG1=$1 ;; esac
@@ -533,6 +566,15 @@ case "$OP" in
     tunnel-guard) op_guard_flag tunnel-guard "$TUNNEL_GUARD_FLAG" "$ARG1" ;;
     wan-guard) op_guard_flag wan-guard "$WAN_GUARD_FLAG" "$ARG1" ;;
     component) op_component "$ARG1" "$ARG2" ;;
+    adaptive-mode) op_guard_flag adaptive "$ADAPTIVE_FLAG" "$ARG1" ;;
+    classifier) case "$ARG1" in 0|1) ;; *) die invalid_value 64 ;; esac
+        set_kv "$CLASSIFIER_FILE" CLASSIFIER_ENABLED "$ARG1" 0600 || done_ok "classifier enabled=$ARG1" unchanged
+        done_ok "classifier enabled=$ARG1" changed ;;
+    ip-category) op_ip_category "$ARG1" "$ARG2" ;;
+    console-auth) case "$ARG1" in 0|1) ;; *) die invalid_value 64 ;; esac
+        set_kv "$AUTH_CONF" AUTH_ENABLED "$ARG1" 0600 || done_ok "console-auth enabled=$ARG1" unchanged
+        done_ok "console-auth enabled=$ARG1" changed ;;
+    update-feed) op_update_feed "$ARG1" ;;
     tunnel) op_tunnel "$ARG1" ;;
     wifi) op_wifi "$ARG1" "$ARG2" ;;
     update) op_update "$ARG1" "$ARG2" ;;

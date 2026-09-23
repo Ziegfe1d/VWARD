@@ -31,6 +31,32 @@ ADS_CURL="${VWARD_ADS_CURL:-/opt/bin/curl}"
 ADS_DEVICE_PROFILE_LIB="${VWARD_ADS_DEVICE_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"
 ADS_DEVICE_CONFIG="${VWARD_ADS_DEVICE_CONFIG:-/opt/etc/vward/device.conf}"
 ADS_AGH_AUTH_FILE="${VWARD_ADS_AGH_AUTH_FILE:-$ADS_ETC/agh-api.auth}"
+ADS_CUSTOM_SOURCES="${VWARD_ADS_CUSTOM_SOURCES:-$ADS_ETC/custom-sources.json}"
+
+# User sources added from the Console are merged into the built-in registry.
+# Every field is rebuilt from a strictly validated subset, so a hand-edited
+# file cannot add options, weights or URLs outside the allowed form.
+ads_source_registry_merge()
+{
+    [ -s "$ADS_CUSTOM_SOURCES" ] && [ -r "$ADS_SOURCE_REGISTRY" ] && [ -x "$ADS_JQ" ] || return 0
+    ads_srm_out="$ADS_STATE/source-registry.merged.json"
+    mkdir -p "$ADS_STATE" 2>/dev/null || return 0
+    "$ADS_JQ" -s '
+        .[0] as $b
+        | [.[1].sources[]?
+           | select((.id | type) == "string" and (.id | test("^custom-[a-f0-9]{10}$")))
+           | select((.url | type) == "string" and (.url | test("^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._~/%+=&?-]*$")) and (.url | length) <= 300)
+           | select(.format | IN("adblock", "hosts", "domains"))
+           | {id, name: ("Свой: " + (.url | sub("^https://"; "") | .[:60])), vendor: "custom", independence_group: .id,
+              purpose: "custom", enabled: true, weight: 40, single_source_block: false, format,
+              min_entries: 10, max_bytes: 8388608, urls: [.url], homepage: .url, default_mode: "check", custom: true}] as $c
+        | $b | .sources += [$c[] | select(.id as $i | ($b.sources | map(.id) | index($i)) == null)] | .sources |= .[:40]
+    ' "$ADS_SOURCE_REGISTRY" "$ADS_CUSTOM_SOURCES" > "$ads_srm_out.$$" 2>/dev/null &&
+        mv -f "$ads_srm_out.$$" "$ads_srm_out" 2>/dev/null &&
+        ADS_SOURCE_REGISTRY="$ads_srm_out" || rm -f "$ads_srm_out.$$" 2>/dev/null
+    return 0
+}
+ads_source_registry_merge
 
 ads_now() { date '+%Y-%m-%d %H:%M:%S'; }
 ads_epoch() { date '+%s'; }
