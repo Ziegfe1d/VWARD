@@ -1,5 +1,24 @@
 # Changelog
 
+## Не выпущено: переход beta → 0.2
+
+`scripts/beta-to-dev-cutover.sh` — отдельный шаг для роутера, где уже установлена beta:
+останавливает три демона beta через их собственный `init.d stop`, убирает 8 cron-строк
+beta и добавляет 10 cron-строк dev, убирает три init-скрипта beta (`S91adaptive-live`,
+`S92crond-supervisor`, `S93keenetic-apps`; `S90crond` общий, не трогается), архивирует
+и убирает остальные файлы beta. Бэкапит crontab, `show running-config` и весь runtime
+beta в `/opt/var/backups/vward/cutover/<метка времени>` до любых изменений; есть
+`--check`, `--list-backups` и `--rollback`. Сам пакет 0.2 не ставит — это по-прежнему
+делает штатный signed Update Engine после cutover. Подробности:
+`docs/RELEASE_0.2.0.md`.
+
+Проверено на эмуляторе роутера, в CI: `tests/perf/check-cutover-emulated.py` —
+`--apply` на настоящих файлах beta, затем настоящий signed-кандидат 0.2 через обычный
+`vward-update.sh --apply`, без единого процесса beta после; отдельно `--rollback`
+восстанавливает crontab, init-скрипты и программы побайтно. Новый
+`tests/repository/check-cutover-cron-parity.py` не даёт cron-строкам dev, встроенным в
+скрипт, разойтись с `config/cron/root.crontab`.
+
 ## Не выпущено: перенос из beta
 
 Перед RC2 сверены все коммиты `beta`, отсутствующие в `dev` (`git log origin/dev..origin/beta`).

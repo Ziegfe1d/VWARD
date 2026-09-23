@@ -84,8 +84,9 @@ sh tests/repository/check-terminating-signal-traps.sh || fail "Terminating signa
 sh tests/repository/check-runtime-update-admission.sh || fail "Runtime update admission safety"
 sh tests/repository/check-updater-stale-lock-atomic.sh || fail "Updater stale-lock atomicity"
 sh tests/repository/check-external-archive-safety.sh || fail "External archive safety"
+python3 tests/repository/check-cutover-cron-parity.py || fail "Cutover cron parity"
 for SCRIPT in components/*/scripts/*.sh components/runtime/init.d/* \
-    components/update-engine/*.sh tests/updater/*.sh
+    components/update-engine/*.sh tests/updater/*.sh scripts/beta-to-dev-cutover.sh
 do
     sh -n "$SCRIPT" || fail "shell syntax: $SCRIPT"
 done

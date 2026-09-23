@@ -21,5 +21,7 @@ int main(void)
             if (interval) sleep(interval);
         }
         fclose(f);
+        /* An empty or exhausted file must not spin the loop. */
+        sleep(interval ? interval : 1);
     }
 }

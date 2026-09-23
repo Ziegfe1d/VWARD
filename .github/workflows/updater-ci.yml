@@ -45,8 +45,14 @@ jobs:
       - name: Install emulator dependencies
         run: sudo apt-get update && sudo apt-get install -y jq openssl busybox strace gcc libc6-dev
 
+      - name: Fetch beta for the cutover rehearsal
+        run: git fetch --no-tags --depth=1 origin beta:refs/remotes/origin/beta
+
       - name: Route engine on the router emulator
         run: sudo python3 tests/perf/check-route-engine-emulated.py
+
+      - name: Beta to 0.2 cutover on the router emulator
+        run: sudo python3 tests/perf/check-cutover-emulated.py
 
       - name: Resource budget on the router emulator
         run: |
