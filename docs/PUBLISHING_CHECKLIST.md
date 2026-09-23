@@ -1,6 +1,6 @@
 # Чек-лист публичного релиза
 
-Используется только на Final gate после RC1–RC3. Полная последовательность и
+Используется на этапах RP2 и RETAIL (после RC1, RC2 и RP1). Полная последовательность и
 доказательства: [`MASTER_PLAN_0.2_TO_FINAL.md`](MASTER_PLAN_0.2_TO_FINAL.md).
 
 - [ ] нет PrivateKey/PresharedKey/API tokens;

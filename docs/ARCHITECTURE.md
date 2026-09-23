@@ -52,8 +52,8 @@ Console с той же блокировкой и маркером владени
 `vward-wifi-client-analyze.sh` считает переключения диапазонов и слабые 5 ГГц-сэмплы и
 формирует рекомендацию без изменения конфигурации. `vward-wifi-client-control.sh`
 принимает только allowlisted действия `bind-2g`, `bind-5g` и `auto`, валидирует MAC и
-Bridge, создаёт backup, сохраняет Keenetic configuration и проверяет результат. В
-0.2.0-dev.9 автоматическое применение и Console mutation для этого компонента отключены
+Bridge, создаёт backup, сохраняет Keenetic configuration и проверяет результат. По
+умолчанию автоматическое применение и управление из Console для этого компонента выключены
 до live read-only acceptance на целевом Keenetic.
 
 ### VWARD Runtime

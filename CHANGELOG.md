@@ -1,6 +1,23 @@
 # Changelog
 
-## Не выпущено: Device Profile без привязки к модели и именам интерфейсов
+## 0.2.0-rc.1: RC1, feature complete
+
+Первый кандидат линии 0.2. Этапы выпуска: RC1 → RC2 → RP1 → RP2 → RETAIL
+(`docs/RELEASE_0.2.0.md`). Signed feed публикуется отдельно после GO владельца.
+
+### Выпускной контур
+
+- Release rehearsal `tests/updater/run-release-rehearsal.sh`, в CI и перед подписью: настоящий
+  candidate подписывается штатным `prepare-dev-release.sh` одноразовым ключом, ставится поверх
+  файлов signed beta-пакетов (`0.1.9-beta`), проходит full health и полностью откатывается.
+  Одноразовый ключ нельзя записать в feed (`--stage` отклоняется).
+- Исправлено: updater отклонял любой настоящий пакет 0.2, потому что шаблон lighttpd
+  лежал в локальной конфигурации `/opt/etc/vward/console/`. Теперь шаблон находится в
+  `/opt/share/vward/console/lighttpd.conf`.
+- Исправлено: проверка пакета не принимала `health_profile: "full"`, который ставит release script.
+- `min_vward` по умолчанию в workflow выпуска — `0.1.9-beta`.
+
+### Device Profile без привязки к модели и именам интерфейсов
 
 - Device Profile строит карту интерфейсов через Keenetic RCI (`show interface`,
   `show interface system-name`) и running-config, кэш `/tmp/vward-device-map.tsv` на 5 минут.

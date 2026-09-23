@@ -1,17 +1,17 @@
-# VWARD 0.2 → Final: единый план
+# VWARD 0.2: единый план от RC1 до RETAIL
 
-## Статус на 20.09.2026
+## Статус на 23.09.2026
 
-- исходники: `0.2.0-dev.9`;
-- активная линия разработки: `dev`;
-- роутер, package и update feed не являются средой для незавершённого Dev-кода;
-- Wi-Fi Client Guard имеет scheduler, Console API/UI и guarded manual control, но
-  локально выключен: `ENABLED=0`, `CONTROL_ENABLED=0`, `AUTO_APPLY=0`;
-- текущий dev feed содержит исторический manifest `0.1.7-beta` и не соответствует
-  исходникам `0.2.0-dev.9`.
+- исходники: `0.2.0-rc.1` (этап RC1, feature complete);
+- активная линия разработки: `dev`; рабочий роутер остаётся на `0.1.9-beta` (ветка `beta`);
+- signed feed ветки `dev` ещё содержит исторический manifest `0.1.7-beta`: подписанный
+  RC1 публикуется только после GO владельца (см. [`RELEASE_0.2.0.md`](RELEASE_0.2.0.md));
+- Wi-Fi Client Guard по умолчанию выключен: `ENABLED=0`, `CONTROL_ENABLED=0`, `AUTO_APPLY=0`.
 
-Последний пункт — **P0 release blocker**. До выпуска нового настоящего signed package
-нельзя устанавливать Dev на роутер и нельзя считать feed готовым.
+**P0 RC1 blocker — переход beta → 0.2.** Пакет 0.2 ставит файлы под каноническими
+именами, но не переключает cron, init и state рабочей beta-установки со старых
+скриптов. До появления проверенного cutover-установщика RC1 нельзя применять на
+рабочем роутере, даже если подпись и rehearsal проходят.
 
 ## Правила
 
@@ -25,66 +25,54 @@
 5. `main`, production feed и VERSION не меняются до отдельного release gate.
 6. После каждого этапа фиксируются: commit, CI, тесты, открытые риски и gate.
 
-## Этап 0 — доводка Dev до pre-RC
+## Этапы выпуска
 
-### P0: выпускной контур
+`RC1 → RC2 → RP1 → RP2 → RETAIL`. Версии: `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.0-rp.1`,
+`0.2.0-rp.2`, `0.2.0`. Updater упорядочивает их именно так (`vu_version_cmp`);
+каждый этап публикуется новым signed manifest с большим `sequence`.
 
-- привести `VERSION`, package, manifest, compatibility, sequence, SHA256SUMS и feed
-  к одному кандидату;
-- собрать package только из package map и подписать штатным Ed25519-ключом;
-- отдельно проверить подпись, package SHA, ownership и clean staging install;
-- не публиковать package/feed до успешного локального и CI acceptance.
+### RC1 — feature complete (`0.2.0-rc.1`)
 
-### P1: реальное устройство
+Новых функций после RC1 не добавлять. Сделано в коде: Console с записью настроек,
+выбор туннеля, защита интернета, компоненты с проверкой зависимостей, Ads, cron,
+вход по учётной записи Keenetic; release rehearsal
+(`tests/updater/run-release-rehearsal.sh`): настоящий candidate подписывается штатным
+`prepare-dev-release.sh` одноразовым ключом, ставится поверх файлов настоящих beta-пакетов,
+проходит full health и полностью откатывается.
 
-- read-only acceptance Wi-Fi: `show associations`, реальные AP names, RSSI и parser;
-- collector без control, сверка samples/analysis с Keenetic;
-- отдельный manual control acceptance с backup, save, read-back и rollback;
-- data-plane матрица DNS → AGH → upstream → WAN/WireGuard;
-- reboot/recovery, locks, storage и cron на целевом роутере;
-- проверка автоматического Device Profile: несколько WireGuard, гостевой сегмент,
-  фактические ответы RCI `show interface` и `show interface system-name`.
+Gate RC1:
 
-### P1: исходники и Console
+- repository/security/updater/package tests и rehearsal: PASS в CI;
+- cutover beta → 0.2 (cron, init, lighttpd, device.conf, state): реализован и проверен
+  на копии роутера — **открыт**;
+- три проверки на роутере из [`CONSOLE_REWORK.md`](CONSOLE_REWORK.md) — **открыты**;
+- clean install, upgrade, rollback, reboot recovery, Console critical actions,
+  data-plane probes и 24–48 часов наблюдения на целевом роутере;
+- решение владельца: GO на подпись и публикацию RC1.
 
-- BusyBox/Entware syntax и package validation в совместимой среде;
-- полная цепочка Console action → API → backend → real state → UI;
-- аудит lock, PID, temporary files, atomic replace и interrupted state;
-- source-of-truth для update, WAN, VPN, DNS, routing, Ads и Wi-Fi;
-- актуализация README, install/recovery runbooks и UI labels.
-
-### Gate pre-RC
-
-- Critical: 0;
-- P0 feed mismatch: закрыт;
-- repository/security/updater/package tests: PASS;
-- BusyBox/Entware validation: PASS;
-- live acceptance: PASS для затронутых компонентов;
-- решение владельца: GO на RC1.
-
-## RC1 — feature complete
-
-Новых функций после RC1 не добавлять. Обязательны: signed candidate, clean install,
-upgrade, rollback, reboot recovery, Console critical actions, data-plane probes и
-24–48 часов наблюдения.
-
-## RC2 — reliability
+### RC2 — reliability (`0.2.0-rc.2`)
 
 Только исправления дефектов RC1 с regression-тестами. Обязательны: RC1→RC2 update,
 rollback, interrupted update, WAN/DNS/GitHub recovery, storage/CPU/RAM контроль и
 3–7 суток soak.
 
-## RC3 — final rehearsal
+### RP1 — release preview (`0.2.0-rp.1`)
 
 Code freeze. Обязательны: fresh-clone reproducible build, независимая verify подписи,
-clean install, update/rollback chain, power-loss rehearsal, UI matrix, runbook и
-7 суток unattended soak. Critical/High: 0.
+clean install, update/rollback chain, power-loss rehearsal, UI matrix (320/390/1366 px),
+runbook и 7 суток unattended soak. Critical/High: 0.
 
-## Final 0.2.0
+### RP2 — последний preview (`0.2.0-rp.2`)
 
-Только после явного GO владельца: approved RC commit, VERSION/metadata, signed
-release package, отдельная verify подписи, release notes, staged router rollout и
-post-install проверка DNS, WAN, VPN, routes, Console, cron, logs и recovery.
+Только исправления, найденные на RP1, и документация. Обязательны: RP1→RP2 update,
+повтор power-loss и rollback, staged rollout на второй роутер (если есть), чек-лист
+[`PUBLISHING_CHECKLIST.md`](PUBLISHING_CHECKLIST.md) без открытых пунктов.
+
+### RETAIL — 0.2.0
+
+Только после явного GO владельца: тот же код, что RP2, кроме VERSION/metadata;
+signed release package, отдельная verify подписи, release notes, staged router rollout
+и post-install проверка DNS, WAN, VPN, routes, Console, cron, logs и recovery.
 
 ## Доказательства для каждого gate
 

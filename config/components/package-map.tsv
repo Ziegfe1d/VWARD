@@ -37,7 +37,7 @@ runtime	components/runtime/init.d/S90crond	/opt/etc/init.d/S90crond	0755
 runtime	components/runtime/init.d/S91vward-route-engine	/opt/etc/init.d/S91vward-route-engine	0755
 runtime	components/runtime/init.d/S92vward-runtime	/opt/etc/init.d/S92vward-runtime	0755
 runtime	components/runtime/init.d/S93vward-console	/opt/etc/init.d/S93vward-console	0755
-console	web/lighttpd.conf	/opt/etc/vward/console/lighttpd.conf	0644
+console	web/lighttpd.conf	/opt/share/vward/console/lighttpd.conf	0644
 console	web/index.html	/opt/share/vward/console/www/index.html	0644
 console	web/assets/vward-console.css	/opt/share/vward/console/www/assets/vward-console.css	0644
 console	web/assets/vward-console.js	/opt/share/vward/console/www/assets/vward-console.js	0644

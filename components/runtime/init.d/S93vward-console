@@ -1,7 +1,7 @@
 #!/opt/bin/sh
 
 LIGHTTPD="/opt/sbin/lighttpd"
-TEMPLATE="/opt/etc/vward/console/lighttpd.conf"
+TEMPLATE="/opt/share/vward/console/lighttpd.conf"
 CONF="/opt/var/run/vward/console-lighttpd.conf"
 PIDFILE="/opt/var/run/vward-console-lighttpd.pid"
 VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}

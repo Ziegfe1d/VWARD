@@ -6,6 +6,8 @@ BUILD="$ROOT/scripts/build-update-candidate.sh"
 REFRESH="$ROOT/scripts/refresh-sha256sums.sh"
 PUBKEY="$ROOT/config/updater/update-public.pem"
 KEY=${VWARD_SIGNING_KEY_FILE:-}
+# Rehearsals sign with a throwaway key; such output is never staged into the feed.
+REHEARSAL_PUBKEY=${VWARD_REHEARSAL_PUBLIC_KEY:-}
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
@@ -16,6 +18,10 @@ MIN_VWARD=$3
 STAGE=0
 [ "${4:-}" = "" ] || [ "${4:-}" = "--stage" ] || fail "unknown option: ${4:-}"
 [ "${4:-}" != "--stage" ] || STAGE=1
+if [ -n "$REHEARSAL_PUBKEY" ]; then
+    [ "$STAGE" -eq 0 ] || fail "a rehearsal key cannot be staged into the feed"
+    PUBKEY=$REHEARSAL_PUBKEY
+fi
 
 case "$SEQUENCE" in ''|*[!0-9]*) fail "sequence must be a positive integer" ;; esac
 [ "$SEQUENCE" -gt 0 ] || fail "sequence must be a positive integer"

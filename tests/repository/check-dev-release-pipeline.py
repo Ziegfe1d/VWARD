@@ -11,6 +11,8 @@ if "busybox" not in workflow:
     raise SystemExit("FAIL: dev build workflow does not install BusyBox")
 if "scripts/prepare-dev-release.sh" not in workflow:
     raise SystemExit("FAIL: dev build workflow does not use canonical release preparer")
+if "tests/updater/run-release-rehearsal.sh" not in workflow.split("Prepare and stage signed dev feed")[0]:
+    raise SystemExit("FAIL: dev build workflow signs before the release rehearsal")
 if not publisher.is_file():
     raise SystemExit("FAIL: canonical dev release preparer is missing")
 if "https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/update-manifest.json" not in production_config:
@@ -24,6 +26,7 @@ for marker in (
     "openssl pkeyutl -verify",
     "SIGNING_REQUIRED",
     "PUBLISH_READY",
+    "a rehearsal key cannot be staged into the feed",
 ):
     if marker not in body:
         raise SystemExit(f"FAIL: dev release preparer misses {marker}")

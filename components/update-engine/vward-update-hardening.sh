@@ -60,7 +60,7 @@ vu_component_dependencies_ready() {
 vu_target_mode_allowed() {
     target=$1 mode=$2
     case "$target" in
-        /opt/share/vward/VERSION|/opt/share/vward/package-map.tsv|/opt/share/vward/settings-registry.json|/opt/etc/vward/console/lighttpd.conf|/opt/share/vward/console/www/index.html|/opt/share/vward/console/www/assets/vward-console.css|/opt/share/vward/console/www/assets/vward-console.js|/opt/share/vward/ads-privacy-guard/*|/opt/share/vward/ads-privacy-guard/https/*|/opt/share/vward/ads-privacy-guard/https/providers/*|/opt/share/vward/route-engine/catalogs/*|/opt/lib/vward/vward-domain-classifier-lib.sh|/opt/lib/vward/vward-runtime-admission.sh)
+        /opt/share/vward/VERSION|/opt/share/vward/package-map.tsv|/opt/share/vward/settings-registry.json|/opt/share/vward/console/lighttpd.conf|/opt/share/vward/console/www/index.html|/opt/share/vward/console/www/assets/vward-console.css|/opt/share/vward/console/www/assets/vward-console.js|/opt/share/vward/ads-privacy-guard/*|/opt/share/vward/ads-privacy-guard/https/*|/opt/share/vward/ads-privacy-guard/https/providers/*|/opt/share/vward/route-engine/catalogs/*|/opt/lib/vward/vward-domain-classifier-lib.sh|/opt/lib/vward/vward-runtime-admission.sh)
             [ "$mode" = 0644 ] ;;
         *) [ "$mode" = 0755 ] ;;
     esac
@@ -107,6 +107,8 @@ vu_package_validate() {
     profile=$(jq -r '.signed.health_profile' "$manifest")
     case "$profile" in
         default) : ;;
+        # full checks every package map target, whatever the component set.
+        full) : ;;
         updater) grep -qx update-engine "$declared_components" || return 1 ;;
         *)
             profile_matches=$(jq -r --arg profile "$profile" '.components[] | select(.health_profile == $profile) | .id' "$VU_COMPONENT_REGISTRY")

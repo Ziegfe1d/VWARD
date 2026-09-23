@@ -31,7 +31,7 @@ metadata.
 | `components/ads-privacy-guard/data/trust-core.tsv` | `/opt/share/vward/ads-privacy-guard/trust-core.tsv` | 0644 |
 | `components/ads-privacy-guard/https/vward-ads-privacy-https-common.sh` | `/opt/share/vward/ads-privacy-guard/https/vward-ads-privacy-https-common.sh` | 0644 |
 | `components/ads-privacy-guard/https/providers/3proxy.sh` | `/opt/share/vward/ads-privacy-guard/https/providers/3proxy.sh` | 0644 |
-| `web/lighttpd.conf` | `/opt/etc/vward/console/lighttpd.conf` | 0644 |
+| `web/lighttpd.conf` | `/opt/share/vward/console/lighttpd.conf` | 0644 |
 | `web/index.html` | `/opt/share/vward/console/www/index.html` | 0644 |
 | `web/assets/vward-console.css` | `/opt/share/vward/console/www/assets/vward-console.css` | 0644 |
 | `web/assets/vward-console.js` | `/opt/share/vward/console/www/assets/vward-console.js` | 0644 |

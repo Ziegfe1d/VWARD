@@ -103,7 +103,7 @@ set +e; VWARD_TEST_FREE_TARGET_KB=0 run_update >/dev/null 2>&1; code=$?; set -e
 # Allow-list matches the verified installation map.
 new_root allowlist
 allowlist_check() {
-    VWARD_ROOT_PREFIX=$ROOT VWARD_UPDATE_CONFIG=$CONFIG sh -c '. "$1"; vu_safe_target /opt/etc/vward/console/lighttpd.conf && ! vu_safe_target /opt/etc/lighttpd/lighttpd.conf' sh "$UPDATER/vward-update-common.sh"
+    VWARD_ROOT_PREFIX=$ROOT VWARD_UPDATE_CONFIG=$CONFIG sh -c '. "$1"; vu_safe_target /opt/share/vward/console/lighttpd.conf && ! vu_safe_target /opt/etc/lighttpd/lighttpd.conf' sh "$UPDATER/vward-update-common.sh"
 }
 assert 'real lighttpd target accepted and old path rejected' allowlist_check
 

@@ -74,6 +74,11 @@ jobs:
       - name: Fix Pass 3 simulations
         run: tests/updater/run-fix-pass-3-simulations.sh
 
+      - name: Release rehearsal over beta
+        run: |
+          git fetch --no-tags --depth=1 origin beta:refs/remotes/origin/beta || echo "beta branch unavailable: minimal seed"
+          tests/updater/run-release-rehearsal.sh
+
       - name: Computed repository SHA256
         run: |
           set -eu

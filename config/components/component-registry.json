@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "VWARD Platform",
-  "platform_version": "0.2.0-dev.9",
+  "platform_version": "0.2.0-rc.1",
   "component_version_policy": "platform-release",
   "components": [
     {
@@ -208,7 +208,7 @@
       "requires_running": [],
       "uses": [],
       "runtime_targets": [
-        "/opt/etc/vward/console/lighttpd.conf",
+        "/opt/share/vward/console/lighttpd.conf",
         "/opt/share/vward/console/www/index.html",
         "/opt/share/vward/console/www/assets/vward-console.css",
         "/opt/share/vward/console/www/assets/vward-console.js",
