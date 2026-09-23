@@ -2,6 +2,9 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd -P)
+# device.conf belongs to root on the router; the test fixtures belong to the runner.
+VWARD_DEVICE_CONFIG_OWNER_UID=$(id -u)
+export VWARD_DEVICE_CONFIG_OWNER_UID
 cd "$ROOT"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }

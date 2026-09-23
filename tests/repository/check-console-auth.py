@@ -52,6 +52,7 @@ if grep -q '"login":"{LOGIN}","password":"{expected}"' "$data"; then printf 200;
         "VWARD_CONSOLE_CONFIG_BIN": str(ROOT / "components/console/scripts/vward-console-config.sh"),
         "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
         "VWARD_ROOT_PREFIX": str(tmp / "root"), "VWARD_CONSOLE_AUDIT_LOG": str(tmp / "audit.log"),
+        "VWARD_CONSOLE_BACKUP_DIR": str(tmp / "backup"),
     }
 
     def call(query, body=None, cookie=""):

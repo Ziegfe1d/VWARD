@@ -228,7 +228,9 @@ vward_profile_load()
     if [ -r "$VWARD_DEVICE_CONFIG" ]; then
         _vp_meta=$(stat -c '%u %a' "$VWARD_DEVICE_CONFIG" 2>/dev/null) ||
             { vward_profile_error "cannot inspect device.conf"; return 1; }
-        case "$_vp_meta" in "0 600"|"0 400") ;; *)
+        # Tests running unprivileged name their own uid; on the router it is root.
+        _vp_owner=${VWARD_DEVICE_CONFIG_OWNER_UID:-0}
+        case "$_vp_meta" in "$_vp_owner 600"|"$_vp_owner 400") ;; *)
             vward_profile_error "device.conf must be root-owned and mode 0600 or 0400"; return 1
             ;;
         esac
