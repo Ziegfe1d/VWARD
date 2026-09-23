@@ -1,0 +1,4 @@
+#!/bin/sh
+# Router BusyBox "ps w" layout: PID USER VSZ STAT COMMAND, without the
+# "{comm}" prefix that some BusyBox builds add for scripts.
+/bin/busybox ps -o pid,user,vsz,stat,args | /bin/busybox sed 's/ {[^}]*} / /'

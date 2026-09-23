@@ -35,6 +35,8 @@ AUTO_SOURCE_UPDATE="${AUTO_SOURCE_UPDATE:-1}"
 SOURCE_UPDATE_INTERVAL_HOURS="$(ads_num "${SOURCE_UPDATE_INTERVAL_HOURS:-24}" 24)"
 
 STATE_FILE="$ADS_STATE/scheduler.state"
+SOURCE_RETRY_FILE="${VWARD_ADS_SOURCE_RETRY:-/tmp/vward-ads-source-retry}"
+SOURCE_RETRY_SEC="$(ads_num "${SOURCE_RETRY_SEC:-3600}" 3600)"
 STATUS_FILE="${VWARD_ADS_SCHEDULER_STATUS:-/tmp/vward-ads-scheduler.status}"
 SCAN="${VWARD_ADS_SCANNER:-/opt/bin/vward-ads-privacy-guard.sh}"
 [ -x "$SCAN" ] || SCAN="$SELF_DIR/vward-ads-privacy-guard.sh"
@@ -45,17 +47,27 @@ JOB="${VWARD_ADS_JOB_WORKER:-/opt/bin/vward-ads-privacy-job.sh}"
 QUERY_READER="${VWARD_ADS_QUERY_READER:-/opt/bin/vward-ads-privacy-query-read.sh}"
 [ -x "$QUERY_READER" ] || QUERY_READER="$SELF_DIR/vward-ads-privacy-query-read.sh"
 
-state_get()
+# Loads the persisted scheduler state into ST_SCAN, ST_SOURCE and ST_SIG.
+state_load()
 {
-    K="$1"
+    ST_SCAN="" ST_SOURCE="" ST_SIG=""
     [ -r "$STATE_FILE" ] || return 0
-    awk -F= -v k="$K" '$1==k {print substr($0,index($0,"=")+1); exit}' "$STATE_FILE"
+    while IFS='=' read -r K V; do
+        case "$K" in
+            last_scan_epoch) [ -n "$ST_SCAN" ] || ST_SCAN=$V ;;
+            last_source_epoch) [ -n "$ST_SOURCE" ] || ST_SOURCE=$V ;;
+            last_query_signature) [ -n "$ST_SIG" ] || ST_SIG=$V ;;
+        esac
+    done < "$STATE_FILE"
 }
 
+# The scheduler runs every minute; the state on USB is rewritten only when a
+# value changes, and the temporary copy is built in RAM.
 state_write()
 {
     LS="$1" LSO="$2" SIG="$3"
-    TMP="$ADS_STATE/work/scheduler-state.$$"
+    [ "$LS|$LSO|$SIG" != "$ST_SCAN|$ST_SOURCE|$ST_SIG" ] || [ ! -r "$STATE_FILE" ] || return 0
+    TMP="/tmp/vward-ads-scheduler-state.$$"
     {
         echo "last_scan_epoch=$LS"
         echo "last_source_epoch=$LSO"
@@ -121,10 +133,10 @@ resource_gate()
 }
 
 NOW="$(ads_epoch)"
-LAST_SCAN="$(ads_num "$(state_get last_scan_epoch)" 0)"
-LAST_SOURCE="$(ads_num "$(state_get last_source_epoch)" 0)"
-OLD_SIG="$(state_get last_query_signature)"
-NEW_SIG="$(query_signature)"
+state_load
+LAST_SCAN="$(ads_num "$ST_SCAN" 0)"
+LAST_SOURCE="$(ads_num "$ST_SOURCE" 0)"
+OLD_SIG=$ST_SIG
 
 if ! ads_bool "$ENABLED"; then
     status_write disabled component_disabled 0
@@ -171,14 +183,21 @@ fi
 # Source refresh is independent from scan mode, but still respects resource gates.
 if ads_bool "$AUTO_SOURCE_UPDATE" && [ -x "$SOURCES" ]; then
     SOURCE_DUE=$((LAST_SOURCE + SOURCE_UPDATE_INTERVAL_HOURS * 3600))
-    if [ "$NOW" -ge "$SOURCE_DUE" ]; then
+    # A failed update is retried after SOURCE_RETRY_SEC, not on every tick:
+    # without a network each attempt would download and rewrite files each minute.
+    LAST_TRY=0
+    [ ! -r "$SOURCE_RETRY_FILE" ] || read -r LAST_TRY < "$SOURCE_RETRY_FILE" 2>/dev/null
+    LAST_TRY="$(ads_num "$LAST_TRY" 0)"
+    if [ "$NOW" -ge "$SOURCE_DUE" ] && [ "$NOW" -ge $((LAST_TRY + SOURCE_RETRY_SEC)) ]; then
         GATE="$(resource_gate)"
         if [ $? -eq 0 ]; then
             status_write source-update due "$SOURCE_DUE"
             if "$SOURCES"; then
                 LAST_SOURCE="$NOW"
+                rm -f "$SOURCE_RETRY_FILE"
             else
-                ads_log "SCHEDULER|source-update-failed"
+                echo "$NOW" > "$SOURCE_RETRY_FILE" 2>/dev/null || true
+                ads_log "SCHEDULER|source-update-failed|retry_after=${SOURCE_RETRY_SEC}s"
             fi
         else
             status_write deferred "source_$GATE" "$SOURCE_DUE"
@@ -209,6 +228,8 @@ case "$RUN_MODE" in
         ;;
     dynamic)
         DUE=$((LAST_SCAN + DYNAMIC_MIN_INTERVAL_SEC))
+        # Only dynamic mode needs the query-log signature before a scan.
+        NEW_SIG="$(query_signature)"
         [ "$NEW_SIG" != "$OLD_SIG" ] || {
             state_write "$LAST_SCAN" "$LAST_SOURCE" "$NEW_SIG" >/dev/null 2>&1 || true
             status_write idle no_new_querylog "$DUE"

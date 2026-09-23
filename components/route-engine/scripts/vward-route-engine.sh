@@ -35,6 +35,15 @@ CHANGE_LOCK="/tmp/vward-route-change.lock"
 ADAPTIVE_DISABLED="${VWARD_ADAPTIVE_DISABLED_FLAG:-/opt/etc/vward/route-engine/adaptive.disabled}"
 
 RAW="/tmp/vward-route-engine-dns.$$"
+HOSTS="/tmp/vward-route-engine-hosts.$$"
+
+# Results of ordinary domain checks change every few minutes and are cheap to
+# repeat, so they live in RAM. Only AdaptiveAuto decisions stay on USB.
+VOLATILE_DIR="${VWARD_ROUTE_VOLATILE_STATE:-/tmp/vward-route-engine-state}"
+
+# A name seen again within this many seconds is not handled again: every
+# handler has a cooldown of at least a minute.
+DEDUP_WINDOW=30
 
 CONNECT_TIMEOUT=2
 MAX_TIME=3
@@ -53,8 +62,9 @@ FAIL_COOLDOWN=300
 ADAPTIVE_RECHECK=60
 
 TCP_PID=""
+AWK_PID=""
 
-mkdir -p "$STATE_DIR"
+mkdir -p "$STATE_DIR" "$VOLATILE_DIR"
 
 
 # ------------------------------------------------------------
@@ -81,8 +91,9 @@ cleanup()
 {
     [ -n "$TCP_PID" ] && kill "$TCP_PID" 2>/dev/null
     [ -n "$TCP_PID" ] && wait "$TCP_PID" 2>/dev/null
+    [ -n "$AWK_PID" ] && kill "$AWK_PID" 2>/dev/null
 
-    rm -f "$RAW"
+    rm -f "$RAW" "$HOSTS"
     rm -rf "$LOCK"
     vward_admission_leave 2>/dev/null || true
 
@@ -103,7 +114,7 @@ refresh_sets()
     LAST=0
 
     [ -f "$REFRESH_TS" ] &&
-        LAST=$(cat "$REFRESH_TS" 2>/dev/null)
+        read -r LAST < "$REFRESH_TS" 2>/dev/null
 
     case "$LAST" in
         ''|*[!0-9]*) LAST=0 ;;
@@ -154,8 +165,14 @@ refresh_sets()
     ' "$ALL" |
     sort -u > "${MANUAL}.new"
 
-    mv "${ADAPTIVE}.new" "$ADAPTIVE"
-    mv "${MANUAL}.new" "$MANUAL"
+    # Unchanged lists are not rewritten on USB.
+    for L in "$ADAPTIVE" "$MANUAL"; do
+        if cmp -s "$L.new" "$L"; then
+            rm -f "$L.new"
+        else
+            mv "$L.new" "$L"
+        fi
+    done
 
     echo "$NOW" > "$REFRESH_TS"
 
@@ -167,11 +184,15 @@ is_manual_known()
 {
     H="$1"
 
-    grep -Fxq "$H" "$MANUAL" 2>/dev/null &&
-        return 0
+    [ -f "$MANUAL" ] || return 1
 
-    # Поддержка явных wildcard-записей.
+    # Exact name or an explicit "*." wildcard entry.
     awk -v h="$H" '
+        $0 == h {
+            found=1
+            exit
+        }
+
         /^\*\./ {
             d=substr($0,3)
 
@@ -228,9 +249,44 @@ is_special()
 # STATE
 # ------------------------------------------------------------
 
-state_file()
+# Sets SF_OPT (USB), SF_TMP (RAM) and SF (the copy to read) for a domain.
+state_path()
 {
-    echo "$STATE_DIR/$(echo "$1" | tr '/:*?' '____').state"
+    case "$1" in
+        *[/:*?]*) SF_NAME=$(echo "$1" | tr '/:*?' '____') ;;
+        *) SF_NAME=$1 ;;
+    esac
+
+    SF_OPT="$STATE_DIR/$SF_NAME.state"
+    SF_TMP="$VOLATILE_DIR/$SF_NAME.state"
+
+    # The newer copy wins: policy reconcile publishes DIRECT_OK on USB.
+    if [ -f "$SF_TMP" ] &&
+       { [ ! -f "$SF_OPT" ] || [ "$SF_TMP" -nt "$SF_OPT" ]; }; then
+        SF=$SF_TMP
+    else
+        SF=$SF_OPT
+    fi
+}
+
+
+# Sets ST_STATUS and ST_LAST from the state of a domain (empty when none).
+read_state()
+{
+    ST_STATUS=""
+    ST_LAST=""
+
+    state_path "$1"
+    [ -f "$SF" ] || return 1
+
+    while IFS='=' read -r K V; do
+        case "$K" in
+            STATUS) ST_STATUS=$V ;;
+            LAST_CHECK) ST_LAST=$V ;;
+        esac
+    done < "$SF"
+
+    return 0
 }
 
 
@@ -239,7 +295,19 @@ save_state()
     H="$1"
     STATUS="$2"
 
-    STATE=$(state_file "$H")
+    state_path "$H"
+
+    case "$STATUS" in
+        AUTO_VPN|BROKEN|ADAPTIVE_*)
+            STATE=$SF_OPT
+            OTHER=$SF_TMP
+            ;;
+        *)
+            STATE=$SF_TMP
+            OTHER=$SF_OPT
+            ;;
+    esac
+
     TMP="${STATE}.tmp.$$"
 
     {
@@ -249,18 +317,20 @@ save_state()
     } > "$TMP"
 
     mv "$TMP" "$STATE"
+
+    [ ! -e "$OTHER" ] || rm -f "$OTHER"
 }
 
 
 regular_cooldown()
 {
     H="$1"
-    STATE=$(state_file "$H")
 
-    [ -f "$STATE" ] || return 1
-
-    STATUS=$(awk -F= '$1=="STATUS"{print $2}' "$STATE")
-    LAST=$(awk -F= '$1=="LAST_CHECK"{print $2}' "$STATE")
+    # PREV_STATUS: the last result, so that only changes reach the event log.
+    read_state "$H" || { PREV_STATUS=""; return 1; }
+    PREV_STATUS=$ST_STATUS
+    STATUS=$ST_STATUS
+    LAST=$ST_LAST
 
     case "$LAST" in
         ''|*[!0-9]*) return 1 ;;
@@ -290,11 +360,9 @@ regular_cooldown()
 adaptive_due()
 {
     H="$1"
-    STATE=$(state_file "$H")
 
-    [ -f "$STATE" ] || return 0
-
-    LAST=$(awk -F= '$1=="LAST_CHECK"{print $2}' "$STATE")
+    read_state "$H" || return 0
+    LAST=$ST_LAST
 
     case "$LAST" in
         ''|*[!0-9]*) return 0 ;;
@@ -715,6 +783,16 @@ handle_adaptive()
 # NEW / UNKNOWN DOMAIN
 # ------------------------------------------------------------
 
+# Logs a check result only when it differs from the previous one: a domain
+# that stays DIRECT_OK is re-checked every minute and would flood the log.
+event_result()
+{
+    [ "$1" = "$PREV_STATUS" ] && return 0
+
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|$2" >> "$EVENT_LOG"
+}
+
+
 handle_new()
 {
     HOST="$1"
@@ -726,8 +804,7 @@ handle_new()
 
         save_state "$HOST" "AGH_BLOCKED"
 
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BLOCKED|$HOST" \
-            >> "$EVENT_LOG"
+        event_result AGH_BLOCKED "AGH_BLOCKED|$HOST"
 
         return
     fi
@@ -739,8 +816,7 @@ handle_new()
 
         save_state "$HOST" "NO_IPV4"
 
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|NO_IPV4|$HOST" \
-            >> "$EVENT_LOG"
+        event_result NO_IPV4 "NO_IPV4|$HOST"
 
         return
     fi
@@ -751,8 +827,7 @@ handle_new()
 
         save_state "$HOST" "DIRECT_OK"
 
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|DIRECT_OK|$HOST|$P_CODE|$P_TIME" \
-            >> "$EVENT_LOG"
+        event_result DIRECT_OK "DIRECT_OK|$HOST|$P_CODE|$P_TIME"
 
         return
     fi
@@ -765,8 +840,7 @@ handle_new()
 
         save_state "$HOST" "DIRECT_OK"
 
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|DIRECT_OK_RETRY|$HOST|$P_CODE|$P_TIME" \
-            >> "$EVENT_LOG"
+        event_result DIRECT_OK "DIRECT_OK_RETRY|$HOST|$P_CODE|$P_TIME"
 
         return
     fi
@@ -777,8 +851,7 @@ handle_new()
 
         save_state "$HOST" "ISP_FAIL_WG_FAIL"
 
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|ISP_FAIL_WG_FAIL|$HOST" \
-            >> "$EVENT_LOG"
+        event_result ISP_FAIL_WG_FAIL "ISP_FAIL_WG_FAIL|$HOST"
 
         return
     fi
@@ -791,8 +864,7 @@ handle_new()
 
         save_state "$HOST" "ISP_FAIL_WG_UNSTABLE"
 
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|ISP_FAIL_WG_UNSTABLE|$HOST" \
-            >> "$EVENT_LOG"
+        event_result ISP_FAIL_WG_UNSTABLE "ISP_FAIL_WG_UNSTABLE|$HOST"
 
         return
     fi
@@ -845,12 +917,10 @@ parent_list_match()
 hint_direct_fresh()
 {
     H="$1"
-    F=$(state_file "$H")
 
-    [ -f "$F" ] || return 1
-
-    HS=$(awk -F= '$1=="STATUS"{print $2}' "$F")
-    HL=$(awk -F= '$1=="LAST_CHECK"{print $2}' "$F")
+    read_state "$H" || return 1
+    HS=$ST_STATUS
+    HL=$ST_LAST
 
     [ "$HS" = "DIRECT_OK" ] || return 1
 
@@ -867,13 +937,10 @@ hint_direct_fresh()
 hint_direct_known()
 {
     H="$1"
-    F=$(state_file "$H")
 
-    [ -f "$F" ] || return 1
+    read_state "$H" || return 1
 
-    HS=$(awk -F= '$1=="STATUS"{print $2}' "$F")
-
-    [ "$HS" = "DIRECT_OK" ]
+    [ "$ST_STATUS" = "DIRECT_OK" ]
 }
 
 wg_quick_probe()
@@ -1028,7 +1095,10 @@ handle_hint()
 
 handle_host()
 {
-    HOST=$(echo "$1" | tr 'A-Z' 'a-z')
+    case "$1" in
+        *[A-Z]*) HOST=$(echo "$1" | tr 'A-Z' 'a-z') ;;
+        *) HOST=$1 ;;
+    esac
     HOST=${HOST%.}
 
     [ -z "$HOST" ] && return
@@ -1039,7 +1109,10 @@ handle_host()
             ;;
     esac
 
-    echo "$HOST" | grep -q '\.' || return
+    case "$HOST" in
+        *.*) ;;
+        *) return ;;
+    esac
 
 
 
@@ -1090,8 +1163,9 @@ refresh_sets
 
 while :; do
 
-    rm -f "$RAW"
+    rm -f "$RAW" "$HOSTS"
     mkfifo "$RAW" || exit 1
+    mkfifo "$HOSTS" || exit 1
 
 
     CAPTURE_FILTER="src net $VWARD_LAN_SUBNET and not src host $VWARD_DNS_SERVER and dst host $VWARD_DNS_SERVER and (udp dst port 53 or tcp dst port 53)"
@@ -1102,39 +1176,56 @@ while :; do
     TCP_PID=$!
 
 
-    while IFS= read -r LINE; do
+    # One awk for the whole capture: takes the query name from each line and
+    # drops names already handled within DEDUP_WINDOW seconds, so a DNS query
+    # costs no process of its own.
+    awk -v window="$DEDUP_WINDOW" '
+        {
+            now=systime()
 
-        HOST=$(
-            echo "$LINE" |
-            awk '
-                {
-                    for (i=1; i<NF; i++) {
+            for (i=1; i<NF; i++) {
 
-                        if ($i=="A?" ||
-                            $i=="AAAA?" ||
-                            $i=="HTTPS?") {
+                if ($i=="A?" ||
+                    $i=="AAAA?" ||
+                    $i=="HTTPS?") {
 
-                            h=$(i+1)
-                            sub(/\.$/,"",h)
+                    h=tolower($(i+1))
+                    sub(/\.$/,"",h)
 
-                            print h
-                            exit
-                        }
+                    if (h!="" && (!(h in seen) || now-seen[h]>=window)) {
+                        seen[h]=now
+                        print h
+                        fflush()
                     }
+
+                    break
                 }
-            '
-        )
+            }
+
+            if (++lines % 2000 == 0)
+                for (k in seen)
+                    if (now-seen[k]>=window)
+                        delete seen[k]
+        }
+    ' < "$RAW" > "$HOSTS" &
+
+    AWK_PID=$!
+
+
+    while IFS= read -r HOST; do
 
         [ -n "$HOST" ] &&
             handle_host "$HOST"
 
-    done < "$RAW"
+    done < "$HOSTS"
 
 
     wait "$TCP_PID" 2>/dev/null
     TCP_PID=""
+    wait "$AWK_PID" 2>/dev/null
+    AWK_PID=""
 
-    rm -f "$RAW"
+    rm -f "$RAW" "$HOSTS"
 
     echo "$(date '+%Y-%m-%d %H:%M:%S')|TCPDUMP_RESTART" \
         >> "$EVENT_LOG"

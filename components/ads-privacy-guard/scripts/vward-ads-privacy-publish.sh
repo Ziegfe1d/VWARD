@@ -35,9 +35,9 @@ if [ "$PUBLISH_MODE" = staged ]; then
     exit 0
 fi
 
-WORK="$ADS_STATE/work/publish.$$"
+WORK="$(ads_scratch_dir publish)"
 LOCK="$ADS_STATE/publish.lock"
-mkdir -p "$WORK" || ads_die "cannot create publish work directory"
+mkdir -m 700 "$WORK" || ads_die "cannot create publish work directory"
 if ! ads_lock_acquire "$LOCK" "${PUBLISH_LOCK_STALE_SEC:-300}"; then
     rm -rf "$WORK"
     echo "PUBLISH_STATUS=ALREADY_RUNNING"

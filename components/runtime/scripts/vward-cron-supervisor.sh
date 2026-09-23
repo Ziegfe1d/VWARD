@@ -10,7 +10,7 @@ HEARTBEAT="/tmp/vward-cron-supervisor.last"
 
 INTERVAL=10
 
-mkdir -p /opt/var/run /opt/var/log
+mkdir -p /opt/var/run/vward /opt/var/log
 
 
 if ! mkdir "$LOCK" 2>/dev/null; then

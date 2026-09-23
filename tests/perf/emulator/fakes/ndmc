@@ -1,0 +1,14 @@
+#!/bin/sh
+# Fake Keenetic ndmc: a healthy router. Changes are accepted and logged.
+cmd=
+while [ $# -gt 0 ]; do case "$1" in -c) cmd=$2; shift 2 ;; *) shift ;; esac; done
+case "$cmd" in
+    'show running-config') cat /emu/running-config ;;
+    'show version') printf 'release: 4.3.2\nmodel: Emulated\n' ;;
+    'show associations'|'show associations failed') cat /emu/associations ;;
+    'show interface '*) printf 'id: %s\nstate: up\nlink: up\nconnected: yes\n' "${cmd#show interface }" ;;
+    'show object-group fqdn '*) awk -v g="${cmd##* }" '$1=="object-group"&&$3==g{f=1;next} /^!/{f=0} f&&$1=="include"{print "  fqdn: " $2}' /emu/running-config ;;
+    show*) : ;;
+    *) printf '%s\n' "$cmd" >> /emu/ndmc-changes.log ;;
+esac
+exit 0

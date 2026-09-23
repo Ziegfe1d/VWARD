@@ -116,15 +116,25 @@ vu_assign_config() {
 
 vu_load_config() {
     [ -r "$VU_CONFIG" ] || return 0
+    # One awk normalises the whole file (key without blanks, value trimmed);
+    # the loop then runs without a process per line.
+    vu_config_lines=$(awk '{
+        i = index($0, "=")
+        if (i) { k = substr($0, 1, i - 1); v = substr($0, i + 1) } else { k = $0; v = "" }
+        gsub(/[ \t\r]/, "", k)
+        sub(/^[[:space:]]+/, "", v)
+        sub(/[[:space:]]+$/, "", v)
+        print k "=" v
+    }' "$VU_CONFIG") || return 1
     while IFS='=' read -r key value; do
-        key=$(printf '%s' "$key" | tr -d ' \t\r')
-        value=$(printf '%s' "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         case "$value" in
             \"*\") value=${value#\"}; value=${value%\"} ;;
             \'*\') value=${value#\'}; value=${value%\'} ;;
         esac
         vu_assign_config "$key" "$value"
-    done < "$VU_CONFIG"
+    done <<VU_CONFIG_EOF
+$vu_config_lines
+VU_CONFIG_EOF
     case "$update_enabled:$auto_apply:$auto_critical:$auto_important:$auto_routine:$barrier_integration_ready" in
         [01]:[01]:[01]:[01]:[01]:[01]) ;;
         *) vu_die "$VU_CONFIG_ERROR" "Boolean config values must be 0 or 1" ;;

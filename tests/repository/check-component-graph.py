@@ -56,7 +56,8 @@ STATE_OWNER = {
     "/opt/var/lib/vward/route-engine": "route-engine",
     "/opt/etc/vward/route-engine/hints-catalog.tsv": "route-tools",
     "/opt/var/lib/vward/policy-sync": "policy-sync",
-    "/opt/var/lib/vward/tunnel-health": "tunnel-guard",
+    "/tmp/vward-tunnel-health": "tunnel-guard",
+    "/tmp/vward-route-engine-state": "route-engine",
     "/opt/var/lib/vward/tunnel-guard": "tunnel-guard",
     "/opt/var/lib/vward/wifi-client-guard": "wifi-client-guard",
 }

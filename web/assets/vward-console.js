@@ -1110,11 +1110,20 @@ function applyTheme() {
   $('themeBtn').setAttribute('aria-label', 'Тема: ' + ({ system: 'как в системе', light: 'светлая', dark: 'тёмная' })[theme]);
 }
 let timer = null;
+// A hidden tab does not poll the router; it catches up as soon as it is shown.
+function tick() {
+  if (document.hidden) return;
+  if (current !== 'logs') refreshPage();
+  load('status', true).then(renderNav);
+}
 function restartTimer() {
   if (timer) clearInterval(timer);
   if (![15, 30, 60].includes(refreshSec)) refreshSec = 15;
-  timer = setInterval(() => { if (!document.hidden && current !== 'logs') refreshPage(); load('status', true).then(renderNav); }, refreshSec * 1000);
+  timer = setInterval(tick, refreshSec * 1000);
 }
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && Date.now() - (S.loadedAt.status || 0) >= refreshSec * 1000) tick();
+});
 
 $('backBtn').innerHTML = ico('back');
 $('backBtn').addEventListener('click', () => go(parentOf(current) || 'overview'));

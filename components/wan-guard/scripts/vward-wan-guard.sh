@@ -545,40 +545,47 @@ NET_JSON="$(
         "$RCI_NET" 2>/dev/null
 )"
 
-if [ -z "$ISP_JSON" ] || \
-   ! printf '%s' "$ISP_JSON" | "$JQ" -e . >/dev/null 2>&1
-then
+# One jq per answer instead of one per field: this runs every minute.
+US=$(printf '\037')
+
+ISP_FIELDS="$(printf '%s' "$ISP_JSON" | "$JQ" -r '
+    select(type == "object") |
+    [.link // "unknown", .port.link // "unknown", .connected // "unknown",
+     .state // "unknown", .address // "", .defaultgw // false,
+     .summary.layer.ipv4 // "unknown"] | map(tostring) | join("\u001f")' 2>/dev/null)"
+
+if [ -z "$ISP_JSON" ] || [ -z "$ISP_FIELDS" ]; then
     emit_state \
         "UTILITY_DEGRADED" \
         "reason=isp_rci_unavailable"
     exit 0
 fi
 
-if [ -z "$NET_JSON" ] || \
-   ! printf '%s' "$NET_JSON" | "$JQ" -e . >/dev/null 2>&1
-then
+NET_FIELDS="$(printf '%s' "$NET_JSON" | "$JQ" -r '
+    select(type == "object") |
+    [.gateway.address // "", ."gateway-accessible" // false,
+     ."dns-accessible" // false, .internet // false, .reliable // false] |
+    map(tostring) | join("\u001f")' 2>/dev/null)"
+
+if [ -z "$NET_JSON" ] || [ -z "$NET_FIELDS" ]; then
     emit_state \
         "UTILITY_DEGRADED" \
         "reason=internet_rci_unavailable"
     exit 0
 fi
 
-LINK="$(printf '%s' "$ISP_JSON" | "$JQ" -r '.link // "unknown"')"
-PORT_LINK="$(printf '%s' "$ISP_JSON" | "$JQ" -r '.port.link // "unknown"')"
-CONNECTED="$(printf '%s' "$ISP_JSON" | "$JQ" -r '.connected // "unknown"')"
-STATE_RCI="$(printf '%s' "$ISP_JSON" | "$JQ" -r '.state // "unknown"')"
-ADDRESS="$(printf '%s' "$ISP_JSON" | "$JQ" -r '.address // ""')"
-DEFAULTGW="$(printf '%s' "$ISP_JSON" | "$JQ" -r '.defaultgw // false')"
-LAYER_IPV4="$(printf '%s' "$ISP_JSON" | "$JQ" -r '.summary.layer.ipv4 // "unknown"')"
+IFS="$US" read -r LINK PORT_LINK CONNECTED STATE_RCI ADDRESS DEFAULTGW LAYER_IPV4 <<FIELDS
+$ISP_FIELDS
+FIELDS
 
-GW="$(printf '%s' "$NET_JSON" | "$JQ" -r '.gateway.address // ""')"
-GW_ACCESSIBLE="$(printf '%s' "$NET_JSON" | "$JQ" -r '."gateway-accessible" // false')"
-DNS_ACCESSIBLE="$(printf '%s' "$NET_JSON" | "$JQ" -r '."dns-accessible" // false')"
-INTERNET="$(printf '%s' "$NET_JSON" | "$JQ" -r '.internet // false')"
-RELIABLE="$(printf '%s' "$NET_JSON" | "$JQ" -r '.reliable // false')"
+IFS="$US" read -r GW GW_ACCESSIBLE DNS_ACCESSIBLE INTERNET RELIABLE <<FIELDS
+$NET_FIELDS
+FIELDS
 
-CARRIER="$(cat "/sys/class/net/$ETH/carrier" 2>/dev/null || echo unknown)"
-OPERSTATE="$(cat "/sys/class/net/$ETH/operstate" 2>/dev/null || echo unknown)"
+read -r CARRIER < "/sys/class/net/$ETH/carrier" 2>/dev/null || CARRIER=unknown
+read -r OPERSTATE < "/sys/class/net/$ETH/operstate" 2>/dev/null || OPERSTATE=unknown
+[ -n "$CARRIER" ] || CARRIER=unknown
+[ -n "$OPERSTATE" ] || OPERSTATE=unknown
 
 PING_GW=1
 PING_CF=1

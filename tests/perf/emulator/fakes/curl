@@ -1,0 +1,40 @@
+#!/bin/sh
+# Fake curl: Keenetic RCI and AdGuard Home answer from /emu; any other address
+# is a reachable site, except names in /emu/blocked-direct, which answer only
+# through the tunnel (nwg1). -w prints the HTTP code.
+url= out= write= hdr= iface=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o|--output) out=$2; shift 2 ;;
+        -D|--dump-header) hdr=$2; shift 2 ;;
+        -w|--write-out) write=$2; shift 2 ;;
+        --interface) iface=$2; shift 2 ;;
+        --connect-timeout|--max-time|-m|--noproxy|-H|--header|-u|--user|-d|--data|--data-binary|--data-urlencode|-X|--request|-c|--cookie-jar|-b|--cookie|--cacert|--resolve|-e|--retry|--retry-delay|-A|--user-agent|--limit-rate|--max-filesize|-K|--config|--proto|--retry-max-time) shift 2 ;;
+        -*) shift ;;
+        *) url=$1; shift ;;
+    esac
+done
+host=${url#*://}
+host=${host%%/*}
+if [ "$iface" != nwg1 ] && [ -r /emu/blocked-direct ] && grep -qx "$host" /emu/blocked-direct; then
+    [ -z "$write" ] || printf '%s' "$write" | sed 's/%{http_code}/000/g;s/%{[a-z_]*}/0/g'
+    exit 28
+fi
+body() {
+    case "$url" in
+        */rci/show/interface) cat /emu/rci-interface.json ;;
+        */rci/show/interface/system-name\?name=*) n=${url##*name=}; jq -n --arg n "$n" '$n' | sed 's/Bridge0/br0/;s/Wireguard1/nwg1/;s/ISP/eth2.2/' ;;
+        */rci/show/interface\?name=*) cat /emu/rci-isp.json ;;
+        */rci/show/internet/status) cat /emu/rci-internet.json ;;
+        */rci/*) echo '{}' ;;
+        */control/status) echo '{"running":true,"protection_enabled":true,"version":"v0.107.0"}' ;;
+        */control/stats*|*/control/querylog*) echo '{"data":[],"num_dns_queries":0}' ;;
+        */control/*) echo '{}' ;;
+        */update-manifest.json) cat /emu/update-manifest.json ;;
+        *) echo 'ok' ;;
+    esac
+}
+[ -z "$hdr" ] || printf 'HTTP/1.1 200 OK\r\nETag: "emu"\r\n\r\n' > "$hdr"
+if [ -n "$out" ]; then body > "$out"; else body; fi
+[ -z "$write" ] || printf '%s' "$write" | sed 's/%{http_code}/200/g;s/%{[a-z_]*}/0/g'
+exit 0

@@ -16,7 +16,7 @@ vward_admission_enter tunnel-guard || exit $?
 
 MODE="AUTO"
 
-HEALTH="/opt/var/lib/vward/tunnel-health/state"
+HEALTH="${VWARD_TUNNEL_HEALTH_STATE:-/tmp/vward-tunnel-health/state}"
 
 DIR="/opt/var/lib/vward/tunnel-guard"
 STATE="$DIR/state"
@@ -90,11 +90,21 @@ DOWN_STREAK=0
 FAILOPEN_ACTIVE=0
 LAST_RECOVERY_TEST=0
 
+OLD_MODE=""
+OLD_ACTION=""
+
 if [ -f "$STATE" ]; then
-    DOWN_STREAK=$(awk -F= '$1=="DOWN_STREAK"{print $2}' "$STATE")
-    FAILOPEN_ACTIVE=$(awk -F= '$1=="FAILOPEN_ACTIVE"{print $2}' "$STATE")
-    LAST_RECOVERY_TEST=$(awk -F= '$1=="LAST_RECOVERY_TEST"{print $2}' "$STATE")
+    while IFS='=' read -r K V; do
+        case "$K" in
+            MODE) OLD_MODE=$V ;;
+            DOWN_STREAK) DOWN_STREAK=$V ;;
+            FAILOPEN_ACTIVE) FAILOPEN_ACTIVE=$V ;;
+            LAST_RECOVERY_TEST) LAST_RECOVERY_TEST=$V ;;
+            LAST_ACTION) OLD_ACTION=$V ;;
+        esac
+    done < "$STATE"
 fi
+OLD_STREAK=$DOWN_STREAK OLD_ACTIVE=$FAILOPEN_ACTIVE OLD_RECOVERY=$LAST_RECOVERY_TEST
 
 case "$DOWN_STREAK" in
     ''|*[!0-9]*) DOWN_STREAK=0 ;;
@@ -168,9 +178,17 @@ if [ ! -f "$HEALTH" ]; then
 
 else
 
-    WG_STATUS=$(awk -F= '$1=="STATUS"{print $2}' "$HEALTH")
-    LAST_CHECK=$(awk -F= '$1=="LAST_CHECK"{print $2}' "$HEALTH")
-    CONFIG_STATE=$(awk -F= '$1=="CONFIG_STATE"{print $2}' "$HEALTH")
+    WG_STATUS=""
+    LAST_CHECK=""
+    CONFIG_STATE=""
+
+    while IFS='=' read -r K V; do
+        case "$K" in
+            STATUS) WG_STATUS=$V ;;
+            LAST_CHECK) LAST_CHECK=$V ;;
+            CONFIG_STATE) CONFIG_STATE=$V ;;
+        esac
+    done < "$HEALTH"
 
     [ -n "$CONFIG_STATE" ] || CONFIG_STATE="unknown"
 
@@ -340,18 +358,25 @@ else
 fi
 
 
-TMP="$STATE.tmp.$$"
+# The state survives reboots (fail-open must be undone), so it stays on USB,
+# but it is rewritten only when something in it changes.
+if [ "$MODE|$DOWN_STREAK|$FAILOPEN_ACTIVE|$LAST_RECOVERY_TEST|$ACTION" != \
+     "$OLD_MODE|$OLD_STREAK|$OLD_ACTIVE|$OLD_RECOVERY|$OLD_ACTION" ] ||
+   [ ! -f "$STATE" ]; then
 
-{
-    echo "MODE=$MODE"
-    echo "DOWN_STREAK=$DOWN_STREAK"
-    echo "FAILOPEN_ACTIVE=$FAILOPEN_ACTIVE"
-    echo "LAST_RECOVERY_TEST=$LAST_RECOVERY_TEST"
-    echo "LAST_ACTION=$ACTION"
-    echo "LAST_RUN=$NOW"
-} > "$TMP"
+    TMP="$STATE.tmp.$$"
 
-mv "$TMP" "$STATE"
+    {
+        echo "MODE=$MODE"
+        echo "DOWN_STREAK=$DOWN_STREAK"
+        echo "FAILOPEN_ACTIVE=$FAILOPEN_ACTIVE"
+        echo "LAST_RECOVERY_TEST=$LAST_RECOVERY_TEST"
+        echo "LAST_ACTION=$ACTION"
+        echo "LAST_RUN=$NOW"
+    } > "$TMP"
+
+    mv "$TMP" "$STATE"
+fi
 
 
 case "$ACTION" in

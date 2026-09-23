@@ -1,0 +1,15 @@
+#!/bin/sh
+# Fake iproute2 for a healthy router: LAN br0, WAN eth2.2, tunnel nwg1.
+a="$*"
+case "$a" in
+    *'route show'*|*'route'|'-4 route'*|'route list'*|*'route show table'*) cat /emu/ip-route ;;
+    *'route get'*) echo '1.1.1.1 via 203.0.113.1 dev eth2.2 src 203.0.113.10 uid 0' ;;
+    *'addr show dev nwg1'*|*'address show dev nwg1'*) printf '9: nwg1: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420\n    inet 10.8.0.2/32 scope global nwg1\n' ;;
+    *'addr show dev eth2.2'*) printf '4: eth2.2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\n    inet 203.0.113.10/24 scope global eth2.2\n' ;;
+    *'-o -4 addr show'*) printf '3: br0    inet 192.0.2.1/24 brd 192.0.2.255 scope global br0\n4: eth2.2    inet 203.0.113.10/24 scope global eth2.2\n9: nwg1    inet 10.8.0.2/32 scope global nwg1\n' ;;
+    *'addr'*) printf '3: br0: <UP>\n    inet 192.0.2.1/24 scope global br0\n' ;;
+    *'link show'*) printf '9: %s: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 state UNKNOWN\n' "${a##* }" ;;
+    *'neigh'*) : ;;
+    *) printf '%s\n' "$a" >> /emu/ip-changes.log ;;
+esac
+exit 0

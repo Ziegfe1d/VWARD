@@ -11,6 +11,8 @@ on:
       - 'config/updater/**'
       - 'config/components/**'
       - 'tests/updater/**'
+      - 'tests/perf/**'
+      - 'components/**'
       - 'tests/repository/**'
       - 'docs/**'
       - 'README.md'
@@ -33,6 +35,24 @@ jobs:
         uses: actions/checkout@v4
       - name: Documentation, naming and shell consistency
         run: tests/repository/run-consistency-checks.sh
+
+  resource-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install emulator dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq openssl busybox strace gcc libc6-dev
+
+      - name: Route engine on the router emulator
+        run: sudo python3 tests/perf/check-route-engine-emulated.py
+
+      - name: Resource budget on the router emulator
+        run: |
+          sudo python3 tests/perf/run-resource-audit.py --seconds 30 \
+            --budget tests/perf/resource-budget.json --markdown "$RUNNER_TEMP/resource-audit.md"
+          cat "$RUNNER_TEMP/resource-audit.md" >> "$GITHUB_STEP_SUMMARY"
 
   updater-tests:
     runs-on: ubuntu-latest

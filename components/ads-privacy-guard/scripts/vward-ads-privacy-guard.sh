@@ -77,8 +77,8 @@ if ! ads_lock_acquire "$LOCK"; then
     exit 0
 fi
 
-WORK="$ADS_STATE/work/scan.$$"
-mkdir -p "$WORK" || ads_die "cannot create work directory"
+WORK="$(ads_scratch_dir scan)"
+mkdir -m 700 "$WORK" || ads_die "cannot create work directory"
 cleanup()
 {
     rm -rf "$WORK"
@@ -494,9 +494,9 @@ if [ "$HEALTHY_INDEXES" -lt "$MIN_SOURCE_INDEXES" ] && [ "$PENDING_COUNT" -gt 0 
     ads_log "SCAN_DEGRADED|healthy_indexes=$HEALTHY_INDEXES|min=$MIN_SOURCE_INDEXES"
 fi
 
-ads_atomic_copy "$NEW_STATE" "$VERDICTS" 0644 || ads_die "cannot install verdict state"
-ads_atomic_copy "$NEW_RULES" "$GENERATED" 0644 || ads_die "cannot install generated rules"
-ads_atomic_copy "$NEW_REVIEW" "$REVIEW_QUEUE" 0644 || ads_die "cannot install review queue"
+ads_install_if_changed "$NEW_STATE" "$VERDICTS" 0644 || ads_die "cannot install verdict state"
+ads_install_if_changed "$NEW_RULES" "$GENERATED" 0644 || ads_die "cannot install generated rules"
+ads_install_if_changed "$NEW_REVIEW" "$REVIEW_QUEUE" 0644 || ads_die "cannot install review queue"
 
 BLOCKED_COUNT="$(awk -F'|' '$3=="BLOCK"{n++}END{print n+0}' "$VERDICTS")"
 REVIEW_COUNT="$(awk -F'|' '$2=="SUSPECT"{n++}END{print n+0}' "$VERDICTS")"

@@ -1,0 +1,3 @@
+#!/bin/sh
+case "$*" in *latest-handshakes*) printf 'peerkey=\t%s\n' "$(date +%s)" ;; *transfer*) printf 'peerkey=\t1000\t2000\n' ;; *) : ;; esac
+exit 0

@@ -1,0 +1,20 @@
+{
+  "comment": "Limits for tests/perf/run-resource-audit.py on the router emulator: processes (execs) and file operations on USB (opt_ops) per run; daemons per minute at one DNS query per second. Measured values of 0.2.0-rc.1 after the audit plus headroom.",
+  "jobs": {
+    "route-engine watchdog (S91)": {"execs": 18, "opt_ops": 0},
+    "tunnel health": {"execs": 32, "opt_ops": 0},
+    "tunnel guard": {"execs": 24, "opt_ops": 0},
+    "runtime watchdog (S92)": {"execs": 8, "opt_ops": 0},
+    "WAN guard": {"execs": 38, "opt_ops": 0},
+    "ads scheduler": {"execs": 40, "opt_ops": 0},
+    "route reconciler": {"execs": 70, "opt_ops": 4},
+    "Wi-Fi scheduler": {"execs": 6, "opt_ops": 0},
+    "housekeeping": {"execs": 28, "opt_ops": 3},
+    "updater check": {"execs": 90, "opt_ops": 24},
+    "ads scan (empty query log)": {"execs": 105, "opt_ops": 16}
+  },
+  "daemons": {
+    "route engine": {"execs": 400, "opt_ops": 20},
+    "cron supervisor": {"execs": 24, "opt_ops": 1}
+  }
+}

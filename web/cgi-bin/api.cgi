@@ -68,6 +68,34 @@ fetch_json()
     printf '%s\n' "$FETCH_OUT"
 }
 
+# kv_file FILE KEY=VAR...: sets each VAR to the last value of KEY in a
+# KEY=VALUE file without starting a process. Variable names come from this
+# script only; values are assigned, never evaluated.
+kv_file()
+{
+    kv_f=$1
+    shift
+    for kv_p; do eval "${kv_p#*=}="; done
+    [ -r "$kv_f" ] || return 0
+    while IFS= read -r kv_line || [ -n "$kv_line" ]; do
+        kv_k=${kv_line%%=*}
+        [ "$kv_k" != "$kv_line" ] || continue
+        kv_v=${kv_line#*=}
+        for kv_p; do
+            [ "$kv_k" = "${kv_p%%=*}" ] && eval "${kv_p#*=}=\$kv_v"
+        done
+    done < "$kv_f"
+}
+
+# read_first FILE VAR: first line of FILE into VAR, empty when unreadable.
+read_first()
+{
+    eval "$2="
+    [ -r "$1" ] || return 0
+    IFS= read -r rf_line < "$1" || [ -n "$rf_line" ] || return 0
+    eval "$2=\$rf_line"
+}
+
 ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
@@ -1510,161 +1538,120 @@ IFACES="$(
     "$VWARD_RCI_BASE/show/interface"
 )"
 
-WG_NAMES="$(
-    printf '%s\n' "$IFACES" |
-    "$JQ" -r 'to_entries[] | select((.value | type) == "object" and ((.value.type // "") | test("^wireguard$"; "i"))) | .key' 2>/dev/null
-)"
-
 WG_INTERFACES="$(
-    printf '%s\n' "$WG_NAMES" |
-    while IFS= read -r WG_NAME
-    do
-        [ -n "$WG_NAME" ] || continue
-
-        printf '%s\n' "$IFACES" |
-        "$JQ" -c --arg n "$WG_NAME" '
-            .[$n] |
-            ((.wireguard.peer // .peer // []) | if type == "array" then (.[0] // {}) elif type == "object" then . else {} end) as $p |
-            {
-                name:$n,
-                description:(.description // ""),
-                link:(.link // ""),
-                connected:(.connected // ""),
-                state:(.state // ""),
-                address:((.address // "") | tostring),
-                mtu:(.mtu // null),
-                uptime:(.uptime // null),
-                endpoint:((($p["remote-endpoint-address"] // $p.endpoint // $p["remote-address"] // "") | tostring)
-                    + (if ($p["remote-port"] // null) != null then ":" + ($p["remote-port"] | tostring) else "" end)),
-                rx:($p.rxbytes // $p["rx-bytes"] // .rxbytes // null),
-                tx:($p.txbytes // $p["tx-bytes"] // .txbytes // null),
-                handshake:($p["last-handshake"] // $p.handshake // null)
-            }
-        ' 2>/dev/null
-    done |
-    "$JQ" -s -c '.' 2>/dev/null
+    printf '%s\n' "$IFACES" |
+    "$JQ" -c '[
+        to_entries[] |
+        select((.value | type) == "object" and ((.value.type // "") | test("^wireguard$"; "i"))) |
+        .key as $n | .value |
+        ((.wireguard.peer // .peer // []) | if type == "array" then (.[0] // {}) elif type == "object" then . else {} end) as $p |
+        {
+            name:$n,
+            description:(.description // ""),
+            link:(.link // ""),
+            connected:(.connected // ""),
+            state:(.state // ""),
+            address:((.address // "") | tostring),
+            mtu:(.mtu // null),
+            uptime:(.uptime // null),
+            endpoint:((($p["remote-endpoint-address"] // $p.endpoint // $p["remote-address"] // "") | tostring)
+                + (if ($p["remote-port"] // null) != null then ":" + ($p["remote-port"] | tostring) else "" end)),
+            rx:($p.rxbytes // $p["rx-bytes"] // .rxbytes // null),
+            tx:($p.txbytes // $p["tx-bytes"] // .txbytes // null),
+            handshake:($p["last-handshake"] // $p.handshake // null)
+        }
+    ]' 2>/dev/null
 )"
 
 [ -n "$WG_INTERFACES" ] || WG_INTERFACES='[]'
 
 GOUT=/tmp/vward-wan-guard.cron.out
 
-GVERSION="$(
-    sed -n 's/^VERSION=//p' "$GOUT" 2>/dev/null |
-    tail -n 1
-)"
+# Last WAN guard report: one pass over the file instead of a pipeline per field.
+GVERSION="" GMODE="" GCLASS="" GACTION="" DETAIL=""
+if [ -r "$GOUT" ]; then
+    while IFS= read -r GLINE || [ -n "$GLINE" ]; do
+        case "$GLINE" in
+            VERSION=*) GVERSION=${GLINE#VERSION=} ;;
+            MODE=*) GMODE=${GLINE#MODE=} ;;
+            CLASS=*) GCLASS=${GLINE#CLASS=} ;;
+            ACTION=*) GACTION=${GLINE#ACTION=} ;;
+            carrier=*) DETAIL=$GLINE ;;
+        esac
+    done < "$GOUT"
+fi
 
-GMODE="$(
-    sed -n 's/^MODE=//p' "$GOUT" 2>/dev/null |
-    tail -n 1
-)"
-
-GCLASS="$(
-    sed -n 's/^CLASS=//p' "$GOUT" 2>/dev/null |
-    tail -n 1
-)"
-
-GACTION="$(
-    sed -n 's/^ACTION=//p' "$GOUT" 2>/dev/null |
-    tail -n 1
-)"
-
-DETAIL="$(
-    grep '^carrier=' "$GOUT" 2>/dev/null |
-    tail -n 1
-)"
-
-detail()
-{
-    echo "$DETAIL" |
-    tr ' ' '\n' |
-    awk -F= -v k="$1" '$1==k {
-        print $2
-        exit
-    }'
-}
-
-CARRIER="$(detail carrier)"
-REC_COUNT="$(detail recovery_count)"
-REC_STAGE="$(detail recovery_stage)"
+CARRIER="" REC_COUNT="" REC_STAGE=""
+for DWORD in $DETAIL; do
+    case "$DWORD" in
+        carrier=*) [ -n "$CARRIER" ] || CARRIER=${DWORD#carrier=} ;;
+        recovery_count=*) [ -n "$REC_COUNT" ] || REC_COUNT=${DWORD#recovery_count=} ;;
+        recovery_stage=*) [ -n "$REC_STAGE" ] || REC_STAGE=${DWORD#recovery_stage=} ;;
+    esac
+done
 
 [ -n "$REC_COUNT" ] || REC_COUNT=0
 [ -n "$REC_STAGE" ] || REC_STAGE=0
 
+# One process list for every process check.
+set -- $(ps w 2>/dev/null | awk -v subnet="$VWARD_LAN_SUBNET" -v address="$VWARD_LAN_ADDRESS" '
+    /[c]rond -b/ && crond == "" { crond = $1 }
+    /[c]rond-supervisor.sh/ { sup = 1 }
+    /[A]dGuardHome/ { agh = 1 }
+    $6 == "/opt/bin/vward-route-engine.sh" || ($5 ~ /^[{]/ && $7 == "/opt/bin/vward-route-engine.sh") { live++ }
+    $5 == "tcpdump" && index($0, "src net " subnet) && index($0, "dst host " address) { tcp++ }
+    END { print (crond == "" ? "-" : crond), sup + 0, agh + 0, live + 0, tcp + 0 }')
+CROND_PID=${1:--}
+[ "$CROND_PID" != - ] || CROND_PID=""
+SUPERVISOR=${2:-0}
+ADGUARD=${3:-0}
+LIVE_COUNT=${4:-0}
+TCPDUMP_COUNT=${5:-0}
 CROND=0
-SUPERVISOR=0
-ADGUARD=0
-
-CROND_PID="$(
-    ps 2>/dev/null |
-    awk '/[c]rond -b/ {
-        print $1
-        exit
-    }'
-)"
-
 [ -n "$CROND_PID" ] && CROND=1
 
-ps 2>/dev/null |
-grep -q '[c]rond-supervisor.sh' &&
-SUPERVISOR=1
+read -r UPTIME_SEC _ < /proc/uptime 2>/dev/null || UPTIME_SEC=""
+UPTIME_SEC=${UPTIME_SEC%%.*}
 
-ps 2>/dev/null |
-grep -q '[A]dGuardHome' &&
-ADGUARD=1
+read_first /tmp/vward-wan-guard.cron.rc GRC
+read_first /tmp/vward-wan-guard.cron.last GLAST
+read_first /tmp/vward-tunnel-health-chain.cron.rc WGRC
+read_first /tmp/vward-tunnel-health-chain.cron.last WGLAST
+read_first /tmp/vward-route-reconciler-maint.cron.rc RRC
+read_first /tmp/vward-route-reconciler-maint.cron.last RLAST
 
-UPTIME_SEC="$(
-    cut -d. -f1 /proc/uptime 2>/dev/null
-)"
-
-GRC="$(cat /tmp/vward-wan-guard.cron.rc 2>/dev/null)"
-GLAST="$(cat /tmp/vward-wan-guard.cron.last 2>/dev/null)"
-
-WGRC="$(cat /tmp/vward-tunnel-health-chain.cron.rc 2>/dev/null)"
-WGLAST="$(cat /tmp/vward-tunnel-health-chain.cron.last 2>/dev/null)"
-
-RRC="$(cat /tmp/vward-route-reconciler-maint.cron.rc 2>/dev/null)"
-RLAST="$(cat /tmp/vward-route-reconciler-maint.cron.last 2>/dev/null)"
-
-VWARD_VERSION="$(sed -n '1p' /opt/share/vward/VERSION 2>/dev/null)"
+read_first /opt/share/vward/VERSION VWARD_VERSION
 UPDATER_STATE=/opt/var/lib/vward/updater
 COMPONENTS="$($JQ -c '.components // {}' "$UPDATER_STATE/components.json" 2>/dev/null || echo '{}')"
-INSTALLED_UPDATE_ID="$(sed -n 's/^installed_update_id=//p' "$UPDATER_STATE/committed.state" 2>/dev/null)"
-LAST_SEQUENCE="$(sed -n 's/^last_sequence=//p' "$UPDATER_STATE/committed.state" 2>/dev/null)"
-LAST_HEALTH="$(sed -n 's/^last_health_check=//p' "$UPDATER_STATE/committed.state" 2>/dev/null)"
-UPDATE_PHASE="$(sed -n 's/^phase=//p' "$UPDATER_STATE/journal.state" 2>/dev/null)"
-HIGHEST_SEQUENCE="$(sed -n 's/^highest_seen_sequence=//p' "$UPDATER_STATE/trust.state" 2>/dev/null)"
+kv_file "$UPDATER_STATE/committed.state" installed_update_id=INSTALLED_UPDATE_ID last_sequence=LAST_SEQUENCE last_health_check=LAST_HEALTH
+kv_file "$UPDATER_STATE/journal.state" phase=UPDATE_PHASE
+kv_file "$UPDATER_STATE/trust.state" highest_seen_sequence=HIGHEST_SEQUENCE
 ACTIVE_SLOT="$(CDPATH= cd -- /opt/share/vward/updater/current 2>/dev/null && pwd -P)"
 
-UPDATE_ENABLED="$(sed -n 's/^update_enabled=//p' /opt/etc/vward/update.conf 2>/dev/null)"
-AUTO_APPLY="$(sed -n 's/^auto_apply=//p' /opt/etc/vward/update.conf 2>/dev/null)"
-AUTO_CRITICAL="$(sed -n 's/^auto_critical=//p' /opt/etc/vward/update.conf 2>/dev/null)"
-AUTO_IMPORTANT="$(sed -n 's/^auto_important=//p' /opt/etc/vward/update.conf 2>/dev/null)"
-AUTO_ROUTINE="$(sed -n 's/^auto_routine=//p' /opt/etc/vward/update.conf 2>/dev/null)"
-BARRIER_READY="$(sed -n 's/^barrier_integration_ready=//p' /opt/etc/vward/update.conf 2>/dev/null)"
-UPDATE_CHANNEL="$(sed -n 's/^channel=//p' /opt/etc/vward/update.conf 2>/dev/null)"
-SAFE_START="$(sed -n 's/^safe_window_start=//p' /opt/etc/vward/update.conf 2>/dev/null)"
-SAFE_END="$(sed -n 's/^safe_window_end=//p' /opt/etc/vward/update.conf 2>/dev/null)"
-CHECK_INTERVAL="$(sed -n 's/^check_interval_seconds=//p' /opt/etc/vward/update.conf 2>/dev/null)"
+kv_file /opt/etc/vward/update.conf update_enabled=UPDATE_ENABLED auto_apply=AUTO_APPLY \
+    auto_critical=AUTO_CRITICAL auto_important=AUTO_IMPORTANT auto_routine=AUTO_ROUTINE \
+    barrier_integration_ready=BARRIER_READY channel=UPDATE_CHANNEL safe_window_start=SAFE_START \
+    safe_window_end=SAFE_END check_interval_seconds=CHECK_INTERVAL
 
-LIVE_PID="$(cat /opt/var/run/vward/route-engine.pid 2>/dev/null)"
-CONSOLE_PID="$(cat /opt/var/run/vward-console-lighttpd.pid 2>/dev/null)"
-LIVE_COUNT="$(ps w 2>/dev/null | awk '$6=="/opt/bin/vward-route-engine.sh"{n++} END{print n+0}')"
-TCPDUMP_COUNT="$(ps w 2>/dev/null | awk -v subnet="$VWARD_LAN_SUBNET" -v address="$VWARD_LAN_ADDRESS" '$5=="tcpdump" && index($0,"src net " subnet) && index($0,"dst host " address){n++} END{print n+0}')"
-FAILOPEN_STATE=/opt/var/lib/vward/tunnel-guard/state
-DOWN_STREAK="$(sed -n 's/^DOWN_STREAK=//p' "$FAILOPEN_STATE" 2>/dev/null)"
-FAILOPEN_ACTIVE="$(sed -n 's/^FAILOPEN_ACTIVE=//p' "$FAILOPEN_STATE" 2>/dev/null)"
+read_first /opt/var/run/vward/route-engine.pid LIVE_PID
+read_first /opt/var/run/vward-console-lighttpd.pid CONSOLE_PID
+kv_file /opt/var/lib/vward/tunnel-guard/state DOWN_STREAK=DOWN_STREAK FAILOPEN_ACTIVE=FAILOPEN_ACTIVE
 [ -n "$DOWN_STREAK" ] || DOWN_STREAK=0
 [ -n "$FAILOPEN_ACTIVE" ] || FAILOPEN_ACTIVE=0
 
-OPT_TOTAL_KB="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $2}')"
-OPT_USED_KB="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $3}')"
-OPT_FREE_KB="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $4}')"
-OPT_FS="$(df -PT /opt 2>/dev/null | awk 'NR==2 {print $2}')"
+set -- $(df -PTk /opt 2>/dev/null | awk 'NR==2 {print $2, $3, $4, $5}')
+OPT_FS=${1:-} OPT_TOTAL_KB=${2:-} OPT_USED_KB=${3:-} OPT_FREE_KB=${4:-}
 
-JQ_VERSION="$($JQ --version 2>/dev/null)"
-CURL_VERSION="$(curl --version 2>/dev/null | awk 'NR==1 {print $2}')"
-LIGHTTPD_VERSION="$(/opt/sbin/lighttpd -v 2>&1 | awk 'NR==1 {print $1}')"
+# Tool versions change only with opkg; they are cached in RAM until then.
+VERSIONS_CACHE=/tmp/vward-console-versions
+if [ ! -s "$VERSIONS_CACHE" ] || [ /opt/lib/opkg/status -nt "$VERSIONS_CACHE" ]; then
+    {
+        echo "jq=$($JQ --version 2>/dev/null)"
+        echo "curl=$(curl --version 2>/dev/null | awk 'NR==1 {print $2}')"
+        echo "lighttpd=$(/opt/sbin/lighttpd -v 2>&1 | awk 'NR==1 {print $1}')"
+    } > "$VERSIONS_CACHE.$$" 2>/dev/null && mv "$VERSIONS_CACHE.$$" "$VERSIONS_CACHE" 2>/dev/null
+fi
+kv_file "$VERSIONS_CACHE" jq=JQ_VERSION curl=CURL_VERSION lighttpd=LIGHTTPD_VERSION
 
 header_json
 

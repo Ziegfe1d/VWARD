@@ -60,11 +60,14 @@ control_unlock()
 }
 
 
+# BusyBox "ps w" prints "PID USER VSZ STAT /bin/sh SCRIPT"; some builds add
+# "{comm}" before the command, so the script may be one field later.
 adaptive_live_pids()
 {
     ps w |
     awk '
-        $6=="/opt/bin/vward-route-engine.sh" {
+        $6=="/opt/bin/vward-route-engine.sh" ||
+        ($5 ~ /^[{]/ && $7=="/opt/bin/vward-route-engine.sh") {
             print $1
         }
     '
@@ -205,6 +208,8 @@ start_service()
     # Only core failure, duplicate core process, or persistent child
     # failure reaches this point.
     clean_service
+
+    mkdir -p "${PIDFILE%/*}" || return 1
 
     "$SCRIPT" >> "$LOG" 2>&1 &
     PID=$!

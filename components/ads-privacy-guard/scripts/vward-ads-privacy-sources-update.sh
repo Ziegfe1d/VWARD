@@ -13,7 +13,7 @@ ads_require "$ADS_JQ"; ads_require "$ADS_CURL"; ads_load_config
 [ -r "$ADS_SOURCE_REGISTRY" ] || ads_die "source registry not readable"
 LOCK="$ADS_STATE/sources-update.lock"
 ads_lock_acquire "$LOCK" "${SOURCE_LOCK_STALE_SEC:-900}" || { echo "SOURCES_UPDATE=ALREADY_RUNNING"; exit 0; }
-WORK="$ADS_STATE/work/sources-update.$$"; mkdir -p "$WORK" || ads_die "cannot create work directory"
+WORK="$(ads_scratch_dir sources-update)"; mkdir -m 700 "$WORK" || ads_die "cannot create work directory"
 cleanup(){ rm -rf "$WORK"; ads_lock_release "$LOCK"; ads_admission_leave; }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM

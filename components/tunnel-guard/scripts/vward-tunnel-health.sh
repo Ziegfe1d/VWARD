@@ -14,7 +14,8 @@ VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admissio
 vward_component_gate tunnel-guard
 vward_admission_enter tunnel-health || exit $?
 
-DIR="/opt/var/lib/vward/tunnel-health"
+# The health snapshot is rebuilt every minute, so it lives in RAM, not on USB.
+DIR="${VWARD_TUNNEL_HEALTH_DIR:-/tmp/vward-tunnel-health}"
 STATE="$DIR/state"
 RCI_CACHE="$DIR/interface-rci-cache"
 LOG="/opt/var/log/vward-tunnel-health.log"
@@ -56,9 +57,13 @@ FAIL_COUNT=0
 OK_COUNT=0
 
 if [ -f "$STATE" ]; then
-    OLD_STATUS=$(awk -F= '$1=="STATUS"{print $2}' "$STATE")
-    FAIL_COUNT=$(awk -F= '$1=="FAIL_COUNT"{print $2}' "$STATE")
-    OK_COUNT=$(awk -F= '$1=="OK_COUNT"{print $2}' "$STATE")
+    while IFS='=' read -r K V; do
+        case "$K" in
+            STATUS) OLD_STATUS=$V ;;
+            FAIL_COUNT) FAIL_COUNT=$V ;;
+            OK_COUNT) OK_COUNT=$V ;;
+        esac
+    done < "$STATE"
 fi
 
 case "$FAIL_COUNT" in
@@ -144,11 +149,15 @@ HS=999999
 LAST_RCI=0
 
 if [ -f "$RCI_CACHE" ]; then
-    CONFIG_STATE=$(awk -F= '$1=="CONFIG_STATE"{print $2}' "$RCI_CACHE")
-    LINK_STATE=$(awk -F= '$1=="LINK_STATE"{print $2}' "$RCI_CACHE")
-    ONLINE_STATE=$(awk -F= '$1=="ONLINE_STATE"{print $2}' "$RCI_CACHE")
-    HS=$(awk -F= '$1=="HANDSHAKE_AGE"{print $2}' "$RCI_CACHE")
-    LAST_RCI=$(awk -F= '$1=="LAST_RCI"{print $2}' "$RCI_CACHE")
+    while IFS='=' read -r K V; do
+        case "$K" in
+            CONFIG_STATE) CONFIG_STATE=$V ;;
+            LINK_STATE) LINK_STATE=$V ;;
+            ONLINE_STATE) ONLINE_STATE=$V ;;
+            HANDSHAKE_AGE) HS=$V ;;
+            LAST_RCI) LAST_RCI=$V ;;
+        esac
+    done < "$RCI_CACHE"
 fi
 
 [ -n "$CONFIG_STATE" ] || CONFIG_STATE="unknown"

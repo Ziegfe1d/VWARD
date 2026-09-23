@@ -208,6 +208,26 @@ ads_atomic_copy() (
     mv "$ads_ac_tmp" "$ads_ac_dest" || { rm -f "$ads_ac_tmp"; return 1; }
 )
 
+# Installs SRC only when it differs from DEST: an unchanged result is not
+# rewritten on USB.
+ads_install_if_changed()
+{
+    cmp -s "$1" "$2" 2>/dev/null && return 0
+    ads_atomic_copy "$1" "$2" "${3:-0644}"
+}
+
+# Scratch directory for one run: RAM when /tmp has room, USB otherwise.
+ads_scratch_dir()
+{
+    ads_sd_need="$(ads_num "${ADS_SCRATCH_RAM_MIN_KB:-32768}" 32768)"
+    ads_sd_free="$(df -Pk /tmp 2>/dev/null | awk 'NR==2 {print $4+0}')"
+    if [ "$(ads_num "$ads_sd_free" 0)" -ge "$ads_sd_need" ]; then
+        echo "/tmp/vward-ads-$1.$$"
+    else
+        echo "$ADS_STATE/work/$1.$$"
+    fi
+}
+
 ads_valid_domain()
 {
     printf '%s\n' "$1" | awk '

@@ -1,0 +1,4 @@
+#!/bin/sh
+# BusyBox-style answer: "Address N:" lines, as vward-route-resolve4.sh parses.
+printf 'Server:    192.0.2.1\nAddress 1: 192.0.2.1\n\nName:      %s\nAddress 1: 198.51.100.7\n' "${1:-example.com}"
+exit 0
