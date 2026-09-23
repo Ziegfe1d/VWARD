@@ -10,11 +10,6 @@
 - signed feed ветки `dev` ещё содержит исторический `0.1.7-beta`: RC1 публикуется
   после GO владельца.
 
-## Блокеры RC1
-
-- cutover beta → 0.2: пакет не переключает cron, init, lighttpd и state старой установки;
-- три проверки на роутере: `dns-proxy route object-group`, ответ `/auth`, поля WireGuard в RCI.
-
 ## Этапы
 
 RC1 → RC2 → RP1 → RP2 → RETAIL (`0.2.0`). Условия этапов:

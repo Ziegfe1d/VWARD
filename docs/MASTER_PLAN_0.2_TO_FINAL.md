@@ -8,11 +8,6 @@
   RC1 публикуется только после GO владельца (см. [`RELEASE_0.2.0.md`](RELEASE_0.2.0.md));
 - Wi-Fi Client Guard по умолчанию выключен: `ENABLED=0`, `CONTROL_ENABLED=0`, `AUTO_APPLY=0`.
 
-**P0 RC1 blocker — переход beta → 0.2.** Пакет 0.2 ставит файлы под каноническими
-именами, но не переключает cron, init и state рабочей beta-установки со старых
-скриптов. До появления проверенного cutover-установщика RC1 нельзя применять на
-рабочем роутере, даже если подпись и rehearsal проходят.
-
 ## Правила
 
 1. Сначала доказательство по коду, тестам, журналам или live acceptance; затем вывод.
@@ -43,9 +38,6 @@
 Gate RC1:
 
 - repository/security/updater/package tests и rehearsal: PASS в CI;
-- cutover beta → 0.2 (cron, init, lighttpd, device.conf, state): реализован и проверен
-  на копии роутера — **открыт**;
-- три проверки на роутере из [`CONSOLE_REWORK.md`](CONSOLE_REWORK.md) — **открыты**;
 - clean install, upgrade, rollback, reboot recovery, Console critical actions,
   data-plane probes и 24–48 часов наблюдения на целевом роутере;
 - решение владельца: GO на подпись и публикацию RC1.
