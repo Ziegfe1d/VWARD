@@ -1,5 +1,21 @@
 # Changelog
 
+## Не выпущено: перенос из beta
+
+Перед RC2 сверены все коммиты `beta`, отсутствующие в `dev` (`git log origin/dev..origin/beta`).
+Из 19 коммитов 18 — инфраструктура публикации 0.1.8-beta/0.1.9-beta (одноразовые workflow) и уже
+покрытый в dev тест на усечённый вывод `ps w` для счётчика `tcpdump`. Перенесён один реальный
+функциональный фрагмент:
+
+- Route Engine: событие `AUTO_VPN` в журнале снабжено причиной решения
+  (`reason=DIRECT_UNAVAILABLE_VPN_OK`) и результатами прямой/VPN-проверки (`direct_rc`,
+  `direct_http`, `direct_time`, `vpn_rc`, `vpn_http`, `vpn_time`) — то же расширенное
+  логирование, что уже проверено на реальном роутере в beta 0.1.8. Добавлена проверка в
+  `tests/perf/check-route-engine-emulated.py`.
+
+Не перенесено: `AGENTS.md` из beta (инструкции для агента, написанные под ветку `main` как
+рабочую; для `dev` действует `docs/BRANCH_POLICY.md`, `AGENTS.md` не заводили).
+
 ## 0.2.0-rc.1: RC1, feature complete
 
 Первый кандидат линии 0.2. Этапы выпуска: RC1 → RC2 → RP1 → RP2 → RETAIL

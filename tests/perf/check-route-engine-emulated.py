@@ -87,6 +87,10 @@ try:
     events = (root / "opt/var/log/vward-route-engine-events.log").read_text()
     if events.count("|direct-one.example|") != 1:
         fail(f"direct site should be checked and logged once:\n{events}")
+    auto_vpn = next((l for l in events.splitlines() if "|AUTO_VPN|blocked-site.example|" in l), None)
+    if not auto_vpn or "reason=DIRECT_UNAVAILABLE_VPN_OK" not in auto_vpn or \
+       "direct_rc=" not in auto_vpn or "vpn_rc=" not in auto_vpn:
+        fail(f"AUTO_VPN event should carry the direct/VPN probe reason:\n{auto_vpn}")
     if (ram_state / "youtube.com.state").exists() or (opt_state / "youtube.com.state").exists():
         fail("manual group name was checked")
 
