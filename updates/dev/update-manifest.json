@@ -1,32 +1,38 @@
 {
   "signed": {
     "schema": 1,
-    "update_id": "vward-0.1.7-beta-control-plane",
-    "sequence": 2026091301,
-    "version": "0.1.7-beta",
+    "update_id": "vward-0.2.0-rc.1",
+    "sequence": 2026092301,
+    "version": "0.2.0-rc.1",
     "channel": "dev",
-    "priority": "CRITICAL",
-    "published_at": "2026-09-13T03:12:24Z",
+    "priority": "ROUTINE",
+    "published_at": "2026-09-23T12:23:48Z",
     "min_updater_version": "1.2.0",
     "package": {
-      "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/main/updates/dev/packages/vward-0.1.7-beta.tar.gz",
-      "sha256": "11edc7768c6a58f14e4a0e54f8652f1361adc5bc79bf5b92dc4a607315175fa5",
-      "size": 49124,
-      "unpacked_size": 189153
+      "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/packages/vward-0.2.0-rc.1.tar.gz",
+      "sha256": "8df89b7d83e945de5b6607ca52afeb4b7804b7744617a701d189700ee4034d21",
+      "size": 176080,
+      "unpacked_size": 708507
     },
     "compatibility": {
-      "min_vward": "0.1.6-dev",
-      "max_vward": "0.1.6-dev"
+      "min_vward": "0.1.9-beta",
+      "max_vward": "0.2.0-rc.1"
     },
     "affected_components": [
-      "platform-core",
+      "ads-privacy-guard",
       "console",
+      "platform-core",
+      "policy-sync",
       "route-engine",
+      "route-reconciler",
       "route-tools",
-      "policy-sync"
+      "runtime",
+      "tunnel-guard",
+      "wan-guard",
+      "wifi-client-guard"
     ],
     "affected_services": [],
-    "health_profile": "policy-sync",
+    "health_profile": "full",
     "requires_reboot": false,
     "rollback_policy": "automatic",
     "signature": {
@@ -34,5 +40,5 @@
       "key_id": "vward-prod-2026-01"
     }
   },
-  "signature": "F37Bj9eVGyGd3m4V/7mdEue4Bi2opOKOSuSiHmW3HijHCe69RWQtAq7WI8/zGQUSTKabdAdmyWQoVysNW/cVCA=="
+  "signature": "sOJYjHg5LE1V6WTuYMvd6Aw8LMeGkGKmHD0j8qfEgr9Hi+XlTy6hu1Au4YbhXrmHK/1zxJmoUCtZKbcrJJtXDA=="
 }
