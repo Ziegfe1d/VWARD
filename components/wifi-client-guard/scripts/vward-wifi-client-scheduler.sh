@@ -12,6 +12,7 @@ ENABLED=0
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
 . "$VWARD_ADMISSION_LIB"
+vward_component_gate wifi-client-guard
 vward_admission_enter wifi-client-guard || exit $?
 
 LOCK_OWNED=0

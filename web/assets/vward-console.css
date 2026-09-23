@@ -45,7 +45,7 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .main{min-width:0;display:flex;flex-direction:column}
 .topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;display:flex;align-items:center;gap:8px;height:var(--topbar-h);padding-inline:16px;background:var(--surface);border-bottom:1px solid var(--line)}
 .topbar-title{flex:1;min-width:0;display:flex;align-items:center;gap:8px}
-.topbar-title h1{margin:0;font-size:var(--fs-lg);font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar-title h1{margin:0;font-size:var(--fs-lg);font-weight:650;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .icon-btn{position:relative;display:inline-grid;place-items:center;width:40px;height:40px;border:0;border-radius:var(--r-md);background:transparent;color:var(--muted)}
 .icon-btn:active{background:var(--surface-2)}
 @media (hover:hover){.icon-btn:hover{background:var(--surface-2);color:var(--text)}}
@@ -185,7 +185,7 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
   .card-title{font-size:12px}
   .card-value{font-size:var(--fs-md)}
   .tab{font-size:10px}
-  .topbar-title h1{font-size:var(--fs-md);line-height:1.2;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .topbar-title h1{font-size:var(--fs-md)}
 }
 
 /* Списки строк (клиенты, туннели, компоненты) */

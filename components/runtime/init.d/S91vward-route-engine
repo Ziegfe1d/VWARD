@@ -8,6 +8,14 @@ VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 . "$VWARD_PROFILE_LIB"
 vward_profile_load || exit 1
 
+# Component switch: when route-engine is disabled, start/restart stop it instead.
+VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+COMPONENT_ENABLED=1
+if [ -r "$VWARD_ADMISSION_LIB" ]; then
+    . "$VWARD_ADMISSION_LIB"
+    vward_component_enabled route-engine || COMPONENT_ENABLED=0
+fi
+
 PIDFILE="/opt/var/run/vward/route-engine.pid"
 SCRIPT="/opt/bin/vward-route-engine.sh"
 LOG="/opt/var/log/vward-route-engine.log"
@@ -290,6 +298,12 @@ case "$1" in
 
         trap 'control_unlock' EXIT
         trap 'exit 1' INT TERM
+
+        if [ "$COMPONENT_ENABLED" = 0 ] && [ "$1" != stop ]; then
+            stop_service >/dev/null 2>&1
+            echo "COMPONENT_DISABLED=route-engine"
+            exit 0
+        fi
 
         case "$1" in
             start)

@@ -6,6 +6,7 @@ export PATH
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
 . "$VWARD_ADMISSION_LIB"
+vward_component_gate route-tools
 vward_admission_enter route-hints-update || exit $?
 
 VERSION="3.0"

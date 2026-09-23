@@ -71,6 +71,7 @@ valid_bridge "$HOME_BRIDGE" || die 2 "home bridge is missing or ambiguous; set H
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$VWARD_ADMISSION_LIB" ] || die 1 "runtime admission library is unavailable"
 . "$VWARD_ADMISSION_LIB"
+vward_component_gate wifi-client-guard 69
 cleanup() { vward_admission_leave 2>/dev/null || true; }
 trap cleanup EXIT
 trap 'exit 73' HUP INT TERM

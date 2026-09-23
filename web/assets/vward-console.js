@@ -105,7 +105,8 @@ const API_ERRORS = {
   unsupported_route: 'правило маршрута группы задано нестандартно: переключите туннель в веб-интерфейсе Keenetic',
   profile_verification_failed: 'профиль устройства не принял новый туннель, изменения отменены',
   rollback_incomplete: 'откат не завершён: проверьте маршруты групп в веб-интерфейсе Keenetic',
-  temporary_file_unavailable: 'нет места для временного файла'
+  temporary_file_unavailable: 'нет места для временного файла', component_disabled: 'компонент выключен: включите его в «Система → Компоненты»',
+  core_component: 'базовый компонент нельзя выключить', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен'
 };
 const errText = x => API_ERRORS[x && x.error] || (x && x.error) || ('код ' + (x && x.rc));
 
@@ -144,26 +145,42 @@ const PAGES = [
   { id: 'routes', title: 'Маршрутизация', icon: 'route', group: 'Сеть', data: ['route', 'security', 'status', 'config'] },
   { id: 'wifi', title: 'Wi-Fi клиенты', icon: 'wifi', group: 'Сеть', data: ['wifi', 'security', 'config'] },
   { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security'] },
-  { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security'] },
+  { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config'] },
   { id: 'updates', title: 'Обновления', icon: 'refresh', group: 'VWARD', data: ['status', 'update', 'config'] },
   { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security'] }
 ];
 const SHORT = { overview: 'Обзор', logs: 'Журналы', wan: 'Интернет', vpn: 'VPN', routes: 'Маршруты', wifi: 'Wi-Fi', ads: 'Реклама', system: 'Система', updates: 'Обновл.', settings: 'Настройки' };
 const COMPONENTS = [
-  { id: 'route-engine', name: 'Движок маршрутизации', desc: 'Отправляет выбранные домены через VPN и ведёт AdaptiveAuto.', deps: ['runtime'], page: 'routes', log: 'routing' },
-  { id: 'route-reconciler', name: 'Сверка маршрутов', desc: 'Каждые 5 минут сверяет маршруты роутера с каталогом и исправляет расхождения.', deps: ['route-engine', 'runtime'], page: 'routes', log: 'routing' },
-  { id: 'route-tools', name: 'Инструменты маршрутов', desc: 'Проверка адресов и обновление подсказок каталога.', deps: ['runtime'], page: 'routes', log: 'routing' },
-  { id: 'policy-sync', name: 'IP-категории', desc: 'Раз в сутки обновляет IP-категории и маршруты по ним.', deps: ['runtime'], page: 'routes', log: 'policy' },
-  { id: 'tunnel-guard', name: 'Защита VPN', desc: 'Следит за туннелем WireGuard и включает fail-open, если VPN упал.', deps: ['runtime'], page: 'vpn', log: 'tunnel' },
-  { id: 'wan-guard', name: 'Защита интернета', desc: 'Проверяет интернет и поэтапно восстанавливает подключение.', deps: ['runtime'], page: 'wan', log: 'wan' },
-  { id: 'wifi-client-guard', name: 'Контроль Wi-Fi клиентов', desc: 'Наблюдает за переходами клиентов между 2.4 и 5 ГГц.', deps: ['runtime'], page: 'wifi', log: 'wifi' },
-  { id: 'ads-privacy-guard', name: 'Блокировка рекламы', desc: 'Управляет правилами AdGuard Home и источниками списков.', deps: ['runtime'], page: 'ads', log: 'ads' },
-  { id: 'runtime', name: 'Среда выполнения', desc: 'cron, supervisor и служебная очистка. На ней работают почти все компоненты.', deps: [], page: 'system', log: 'cron' },
-  { id: 'console', name: 'Console', desc: 'Этот веб-интерфейс и его API.', deps: ['runtime'], page: 'settings', log: 'console' },
-  { id: 'update-engine', name: 'Установщик обновлений', desc: 'Проверяет, устанавливает и откатывает подписанные обновления.', deps: ['platform-core'], page: 'updates', log: 'updater' },
-  { id: 'platform-core', name: 'Ядро платформы', desc: 'Версия, реестр компонентов и карта установки.', deps: [], page: 'system', log: 'console' }
+  { id: 'route-engine', name: 'Движок маршрутизации', desc: 'Отправляет выбранные домены через VPN и ведёт AdaptiveAuto.', when: 'постоянно, как служба', page: 'routes', log: 'routing' },
+  { id: 'route-reconciler', name: 'Сверка маршрутов', desc: 'Каждые 5 минут сверяет маршруты роутера с каталогом и исправляет расхождения.', when: 'каждые 5 минут', page: 'routes', log: 'routing' },
+  { id: 'route-tools', name: 'Инструменты маршрутов', desc: 'Проверка адресов и обновление подсказок каталога.', when: 'подсказки - раз в сутки', page: 'routes', log: 'routing' },
+  { id: 'policy-sync', name: 'IP-категории', desc: 'Раз в сутки обновляет IP-категории и маршруты по ним.', when: 'раз в сутки, в 00:10', page: 'routes', log: 'policy' },
+  { id: 'tunnel-guard', name: 'Защита VPN', desc: 'Следит за туннелем WireGuard и включает fail-open, если VPN упал.', when: 'каждую минуту', page: 'vpn', log: 'tunnel' },
+  { id: 'wan-guard', name: 'Защита интернета', desc: 'Проверяет интернет и поэтапно восстанавливает подключение.', when: 'каждую минуту', page: 'wan', log: 'wan' },
+  { id: 'wifi-client-guard', name: 'Контроль Wi-Fi клиентов', desc: 'Наблюдает за переходами клиентов между 2.4 и 5 ГГц.', when: 'каждые 5 минут', page: 'wifi', log: 'wifi' },
+  { id: 'ads-privacy-guard', name: 'Блокировка рекламы', desc: 'Управляет правилами AdGuard Home и источниками списков.', when: 'каждую минуту', page: 'ads', log: 'ads' },
+  { id: 'runtime', name: 'Среда выполнения', desc: 'cron, supervisor и служебная очистка. На ней работают почти все компоненты.', when: 'постоянно', page: 'system', log: 'cron' },
+  { id: 'console', name: 'Console', desc: 'Этот веб-интерфейс и его API.', when: 'постоянно', page: 'settings', log: 'console' },
+  { id: 'update-engine', name: 'Установщик обновлений', desc: 'Проверяет, устанавливает и откатывает подписанные обновления.', when: 'по настройкам обновлений', page: 'updates', log: 'updater' },
+  { id: 'platform-core', name: 'Ядро платформы', desc: 'Версия, реестр компонентов и карта установки.', when: 'не запускается - это файлы версии и карты установки', page: 'system', log: 'console' }
 ];
 const comp = id => COMPONENTS.find(c => c.id === id);
+/* Граф компонентов приходит из реестра через API (config-data). */
+const graphOf = id => ((cfg().components) || []).find(x => x.id === id);
+const compOn = id => { const g = graphOf(id); return !g || g.enabled !== false; };
+/* Что включится или выключится вместе с компонентом - как в vward-console-config.sh. */
+function compCascade(id, off) {
+  const g = cfg().components || [];
+  let set = [id], grow = true;
+  while (grow) {
+    const add = off ? g.filter(x => x.requires_running.some(d => set.includes(d))).map(x => x.id)
+      : g.filter(x => set.includes(x.id)).reduce((a, x) => a.concat(x.requires_running), []);
+    const fresh = add.filter(x => !set.includes(x));
+    grow = fresh.length > 0; set = set.concat(fresh);
+  }
+  return set.slice(1).filter(x => off ? compOn(x) : !compOn(x));
+}
+const compNames = ids => ids.map(x => '«' + ((comp(x) || {}).name || x) + '»').join(', ');
 const LOG_TABS = [
   { id: 'wan', label: 'Интернет' }, { id: 'recovery', label: 'Восстановление' }, { id: 'tunnel', label: 'VPN' },
   { id: 'routing', label: 'Маршрутизация' }, { id: 'policy', label: 'IP-категории' }, { id: 'wifi', label: 'Wi-Fi' },
@@ -263,6 +280,8 @@ function notifications() {
   if (S.update && S.update.pending && S.update.pending.present) n.push({ sev: 'warn', title: 'Доступно обновление', text: S.update.pending.version || '', to: 'updates' });
   const wc = ((S.wifi && S.wifi.clients) || []).filter(c => c.health === 'WARNING').length;
   if (wc) n.push({ sev: 'warn', title: 'Wi-Fi: ' + wc + ' ' + plural(wc, 'клиент требует', 'клиента требуют', 'клиентов требуют') + ' внимания', text: 'частые переходы между 2.4 и 5 ГГц', to: 'wifi' });
+  const offComps = ((S.config && S.config.components) || []).filter(x => x.enabled === false);
+  if (offComps.length) n.push({ sev: 'warn', title: 'Выключено компонентов: ' + offComps.length, text: offComps.map(x => (comp(x.id) || {}).name || x.id).join(', '), to: 'd-components' });
   if (S.config && S.config.wan_guard && S.config.wan_guard.enabled === false) n.push({ sev: 'warn', title: 'Защита интернета выключена', text: 'при сбое интернет не восстановится автоматически', to: 'wan' });
   if (S.config && S.config.tunnel_guard && S.config.tunnel_guard.enabled === false) n.push({ sev: 'warn', title: 'Защита VPN выключена', text: 'при падении туннеля сайты из списков VPN будут недоступны', to: 'vpn' });
   if (S.ads && S.ads.paused) n.push({ sev: 'warn', title: 'Блокировка рекламы на паузе', text: 'реклама не блокируется', to: 'ads' });
@@ -500,7 +519,7 @@ const RENDER = {
 
   'd-components'() {
     const pc = plat().components || {};
-    return panel('Компоненты', '<ul class="rows">' + COMPONENTS.map(c => { const x = pc[c.id] || {}; return '<li class="row link" role="button" tabindex="0" data-go="c-' + c.id + '"><div class="row-main"><b>' + esc(c.name) + '</b><small>' + esc(x.release || plat().version || '—') + (x.installed_at ? ' · установлен ' + esc(x.installed_at) : '') + '</small></div><span class="pill ' + (x.health === 'PASS' ? 'ok' : '') + '">' + (x.health === 'PASS' ? 'Норма' : 'Нет данных') + '</span>' + ico('chevron', 'chev') + '</li>'; }).join('') + '</ul>');
+    return panel('Компоненты', '<ul class="rows">' + COMPONENTS.map(c => { const x = pc[c.id] || {}; return '<li class="row link" role="button" tabindex="0" data-go="c-' + c.id + '"><div class="row-main"><b>' + esc(c.name) + '</b><small>' + esc(x.release || plat().version || '—') + (x.installed_at ? ' · установлен ' + esc(x.installed_at) : '') + '</small></div>' + (compOn(c.id) ? '<span class="pill ' + (x.health === 'PASS' ? 'ok' : '') + '">' + (x.health === 'PASS' ? 'Норма' : 'Нет данных') + '</span>' : '<span class="pill warn">Выключен</span>') + ico('chevron', 'chev') + '</li>'; }).join('') + '</ul>');
   },
   'd-diag'() {
     const d = S.diag, map = { 'console-api': 'settings', opt: 'system', lighttpd: 'c-console', crond: 'd-cron', supervisor: 'c-runtime', adguard: 'ads', adaptive: 'c-route-engine', updater: 'updates', config: 'updates', wan: 'wan', wg: 'vpn' };
@@ -595,12 +614,21 @@ function wifiClientPage(mac) {
     { desc: 'Закрепление через штатную настройку Keenetic для зарегистрированных устройств.' });
 }
 function compPage(c) {
-  const x = (plat().components || {})[c.id] || {}, dependents = COMPONENTS.filter(d => d.deps.includes(c.id));
-  const link = id => '<li class="row link" role="button" tabindex="0" data-go="c-' + id + '"><div class="row-main"><b>' + esc(comp(id).name) + '</b></div>' + ico('chevron', 'chev') + '</li>';
-  return panel(c.name, kv([['Состояние', x.health === 'PASS' ? 'Норма' : 'Нет данных', x.health === 'PASS' ? 'ok' : ''], ['Версия', x.release || plat().version || '—'], ['Установлен', x.installed_at || '—'], ['Обновление', x.update_id || '—']]) +
-    '<div class="panel-actions even">' + (c.page ? '<button class="btn" type="button" data-go="' + c.page + '">Открыть раздел</button>' : '') + btn('open-log', 'logs', 'Журнал', '', ' data-log-tab="' + c.log + '"') + '</div>', { desc: c.desc }) +
-    panel('Зависит от', c.deps.length ? '<ul class="rows">' + c.deps.map(link).join('') + '</ul>' : '<p class="panel-desc">Ни от чего не зависит.</p>') +
-    panel('От него зависят', dependents.length ? '<ul class="rows">' + dependents.map(d => link(d.id)).join('') + '</ul>' : '<p class="panel-desc">Никто не зависит.</p>');
+  const x = (plat().components || {})[c.id] || {}, g = graphOf(c.id), on = compOn(c.id), core = !!(g && g.core);
+  const all = cfg().components || [];
+  const link = (id, note) => '<li class="row link" role="button" tabindex="0" data-go="c-' + id + '"><div class="row-main"><b>' + esc((comp(id) || {}).name || id) + '</b>' + (note ? '<small>' + esc(note) + '</small>' : '') + '</div>' + (compOn(id) ? '' : '<span class="pill warn">Выключен</span>') + ico('chevron', 'chev') + '</li>';
+  const deps = g ? g.depends_on : [], needs = g ? g.requires_running : [];
+  const users = all.filter(d => d.depends_on.includes(c.id) || d.uses.includes(c.id));
+  const off = compCascade(c.id, true), onWith = compCascade(c.id, false);
+  const stale = all.filter(d => d.uses.includes(c.id) && compOn(d.id) && !off.includes(d.id)).map(d => d.id);
+  const sw1 = core ? '<span class="num">Всегда</span>' : sw('data-comp="' + c.id + '"', on, 'Компонент «' + c.name + '» включён', !cfgOk() || !g);
+  return panel(c.name, '<dl class="kv">' + ctrlRow('Компонент включён', sw1, core ? 'базовый компонент: без него VWARD не работает' : on ? '' : 'файлы установлены, но компонент не запускается') + '</dl>' +
+      (confirmBox('comp-off', 'Выключить «' + c.name + '»?' + (off.length ? ' Вместе с ним остановятся: ' + compNames(off) + '.' : '') + (stale.length ? ' На устаревших данных продолжат работать: ' + compNames(stale) + '.' : '') + ' Файлы и настройки останутся, включить можно в любой момент.', 'Выключить', true) ||
+       confirmBox('comp-on', 'Включить «' + c.name + '»? Вместе с ним включатся: ' + compNames(onWith) + '.', 'Включить')) +
+      kv([['Состояние', !on ? 'Выключен' : x.health === 'PASS' ? 'Норма' : 'Нет данных', !on ? 'warn' : x.health === 'PASS' ? 'ok' : ''], ['Запуск', c.when], ['Версия', x.release || plat().version || '—'], ['Установлен', x.installed_at || '—'], ['Обновление', x.update_id || '—']]) +
+      '<div class="panel-actions even">' + (c.page ? '<button class="btn" type="button" data-go="' + c.page + '">Открыть раздел</button>' : '') + btn('open-log', 'logs', 'Журнал', '', ' data-log-tab="' + c.log + '"') + '</div>' + cfgNote(), { desc: c.desc }) +
+    panel('Зависит от', !g ? empty('Загрузка…') : deps.length ? '<ul class="rows">' + deps.map(id => link(id, needs.includes(id) ? 'нужен работающим' : 'использует его файлы')).join('') + '</ul>' : '<p class="panel-desc">Ни от чего не зависит.</p>') +
+    panel('От него зависят', !g ? empty('Загрузка…') : users.length ? '<ul class="rows">' + users.map(d => link(d.id, d.requires_running.includes(c.id) ? 'остановится вместе с ним' : d.depends_on.includes(c.id) ? 'использует его файлы' : 'использует его данные')).join('') + '</ul>' : '<p class="panel-desc">Никто не зависит.</p>');
 }
 
 /* ---------- Навигация ---------- */
@@ -724,6 +752,8 @@ const CONFIRMED = {
   'ads-publish': () => runAction('ads', 'ads-control', { op: 'enqueue', job: 'publish', confirm: 'ADS_PUBLISH' }, 'Публикация поставлена в очередь').then(() => load('ads', true)).then(render),
   'https-start': () => runAction('https', 'ads-https-control', { op: 'start', confirm: 'HTTPS_START' }, 'HTTPS-фильтр запущен').then(() => load('https', true)).then(render),
   'https-ca': () => runAction('https', 'ads-https-control', { op: 'ca-init', confirm: 'HTTPS_CA_INIT' }, 'Сертификат создан').then(() => load('https', true)).then(render),
+  'comp-off': () => { const id = current.slice(2); return cfgSet({ op: 'component', target: id, value: '0', confirm: 'COMPONENT_DISABLE' }, '«' + comp(id).name + '» выключен', ['status']); },
+  'comp-on': () => { const id = current.slice(2); return cfgSet({ op: 'component', target: id, value: '1' }, '«' + comp(id).name + '» включён', ['status']); },
   'tunnel-use': () => { const name = current.slice(2); toast('Переключаем маршруты на ' + name + '…'); return cfgSet({ op: 'tunnel', target: name, confirm: 'TUNNEL_SWITCH' }, 'Маршруты VWARD идут через ' + name, ['status', 'security', 'route']); },
   'wg-off': () => cfgSet({ op: 'wan-guard', value: '0', confirm: 'WAN_GUARD_DISABLE' }, 'Защита интернета выключена'),
   'wan-renew': () => wanOp('wan-renew', 'WAN_RENEW', 'Адрес запрошен заново'),
@@ -856,6 +886,14 @@ document.addEventListener('change', e => {
     const p = plat(), on = t.value === 'schedule' ? '1' : '0';
     runAction('updates', 'settings', { auto_apply: on, auto_critical: isTrue(p.auto_critical) ? '1' : '0', auto_important: isTrue(p.auto_important) ? '1' : '0', auto_routine: isTrue(p.auto_routine) ? '1' : '0' }, 'Настройки обновлений сохранены')
       .then(() => load('status', true)).then(render);
+    return;
+  }
+  if (t.dataset.comp) {
+    const id = t.dataset.comp, want = t.checked;
+    t.checked = !want;
+    if (!want) { confirm = { id: 'comp-off' }; render(); }
+    else if (compCascade(id, false).length) { confirm = { id: 'comp-on' }; render(); }
+    else cfgSet({ op: 'component', target: id, value: '1' }, '«' + comp(id).name + '» включён', ['status']);
     return;
   }
   if (t.hasAttribute('data-cfg-wg')) { if (!t.checked) { t.checked = true; confirm = { id: 'wg-off' }; render(); } else cfgSet({ op: 'wan-guard', value: '1' }, 'Защита интернета включена'); return; }

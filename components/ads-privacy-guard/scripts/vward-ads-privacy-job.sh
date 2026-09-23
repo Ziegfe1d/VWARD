@@ -9,6 +9,7 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 . "$LIB"
 ads_admission_enter ads-job
 trap ads_admission_leave EXIT
+vward_component_gate ads-privacy-guard
 trap 'exit 1' HUP INT TERM
 ads_mkdirs || ads_die "cannot create component directories"
 [ -r "$ADS_CONFIG" ] && ads_load_config

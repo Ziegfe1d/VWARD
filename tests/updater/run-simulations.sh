@@ -4,6 +4,7 @@ set -eu
 
 REPO=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 UPDATER=$REPO/components/update-engine
+. "$REPO/tests/updater/seed-runtime.sh"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/vward-updater-test.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 
@@ -47,6 +48,7 @@ new_root() {
         printf 'current_version_file=%s\n' "$ROOT/opt/share/vward/VERSION"
         printf '%s\n' 'minimum_free_kb=1' 'barrier_integration_ready=1' 'safe_window_start=00:00' 'safe_window_end=23:59'
     } > "$CONFIG"
+    seed_runtime "$ROOT" || exit 1
 }
 
 make_package() {

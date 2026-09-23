@@ -38,6 +38,7 @@ API принимает POST только с заголовком `X-VWARD-Reques
 | `wifi KEY VALUE` | `ENABLED`, `CONTROL_ENABLED` (включение - токен `WIFI_CONTROL_ENABLE`), `WINDOW_SEC`, `BAND_SWITCH_WARN`, `WEAK_5G_SAMPLE_WARN`, `WEAK_5G_RSSI` | `/opt/etc/vward/wifi-client-guard.conf` |
 | `update KEY VALUE` | `safe_window_start`, `safe_window_end`, `check_interval_seconds` | `/opt/etc/vward/update.conf` |
 | `wan-guard 0/1` | Защита интернета (выключение - токен `WAN_GUARD_DISABLE`) | `/opt/etc/vward/wan-guard.disabled` |
+| `component ID 0/1` | компонент включён (выключение - токен `COMPONENT_DISABLE`) | `/opt/etc/vward/components/<id>.disabled` |
 | `tunnel NAME` | туннель для маршрутов (токен `TUNNEL_SWITCH`) | DNS-маршруты групп в Keenetic, `/opt/etc/vward/device.conf` |
 
 Helper принимает только перечисленные ключи и строгие значения (домен - только буквы, цифры,
@@ -73,6 +74,25 @@ policy-sync оно:
 Точный синтаксис `dns-proxy route object-group` / `dns-proxy no route object-group`
 нужно один раз проверить на роутере: неверная форма команды не меняет маршрутизацию
 (отказ или откат по проверке), но переключение не выполнится.
+
+### Компоненты
+
+Граф берётся из `component-registry.json` (в Console - через `config-data`):
+
+- `depends_on` - компонент использует файлы другого (проверяется и установщиком обновлений);
+- `requires_running` - компонент не может работать без другого: при выключении зависимого
+  компонента он выключается вместе с ним, при включении - включает его;
+- `uses` - мягкая связь: компонент продолжит работать на последних данных другого;
+- `core` - Ядро платформы, Среда выполнения, Console и Обновления; выключить нельзя.
+
+Выключенный компонент остаётся установленным: файлы, настройки и проверки здоровья
+обновлений не меняются. Его точки входа (cron, supervisor, `S91vward-route-engine`, ручные
+инструменты) проверяют `vward_component_gate` и завершаются без действий
+(`COMPONENT_DISABLED=<id>`); движок маршрутизации останавливается сразу. Ручные действия
+Console выключенного компонента возвращают `component_disabled`. Защита VPN не
+выключается, пока активен fail-open. Выключение Блокировки рекламы не снимает уже
+опубликованные в AdGuard Home правила, выключение IP-категорий не удаляет уже созданные
+маршруты - они перестают обновляться.
 
 WAN доступен только для чтения. `route-data` читает только
 фиксированные generated/state paths VWARD и не принимает path или команду от frontend.

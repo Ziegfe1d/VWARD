@@ -3,6 +3,22 @@
 # Two-phase admission protocol shared by runtime mutators and the updater.
 VWARD_ADMISSION_OWNED=${VWARD_ADMISSION_OWNED:-0}
 VWARD_ADMISSION_SLOT=${VWARD_ADMISSION_SLOT:-}
+# Component switch: a disabled component keeps its files, but its entry points
+# do nothing while <id>.disabled exists here (written by the Console).
+VWARD_COMPONENT_STATE=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
+
+vward_component_enabled() {
+    case "${1:-}" in ''|*[!a-z0-9-]*) return 0 ;; esac
+    [ ! -e "$VWARD_COMPONENT_STATE/$1.disabled" ]
+}
+
+# vward_component_gate ID [RC]: leave quietly when the component is disabled.
+# Scheduled jobs exit 0; manual tools pass a non-zero RC.
+vward_component_gate() {
+    vward_component_enabled "$1" && return 0
+    echo "COMPONENT_DISABLED=$1"
+    exit "${2:-0}"
+}
 
 vward_admission_pid_start() {
     va_pid=${1:-$$}

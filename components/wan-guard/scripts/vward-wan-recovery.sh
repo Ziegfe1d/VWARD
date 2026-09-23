@@ -22,6 +22,7 @@ esac
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "ERROR=ADMISSION_UNAVAILABLE"; exit 1; }
 . "$VWARD_ADMISSION_LIB"
+vward_component_gate wan-guard 69
 vward_admission_enter wan-recovery || { echo "ERROR=UPDATER_BUSY"; exit 75; }
 
 NDMC=${NDMC:-/bin/ndmc}

@@ -3,6 +3,7 @@ set -eu
 
 REPO=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 UPDATER=$REPO/components/update-engine
+. "$REPO/tests/updater/seed-runtime.sh"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/vward-fix-pass-3.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 
@@ -36,6 +37,7 @@ new_root() {
     } > "$CONFIG"
     STATE=$ROOT/opt/var/lib/vward/updater
     printf 'installed_version=0.1.0-dev\ninstalled_update_id=bootstrap\nlast_sequence=0\nmanifest_hash=bootstrap\nlast_health_check=bootstrap\n' > "$STATE/committed.state"
+    seed_runtime "$ROOT" || exit 1
 }
 
 make_package() {

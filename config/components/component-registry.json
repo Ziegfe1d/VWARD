@@ -11,6 +11,10 @@
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "default",
+      "core": true,
+      "depends_on": [],
+      "requires_running": [],
+      "uses": [],
       "runtime_targets": [
         "/opt/share/vward/VERSION",
         "/opt/share/vward/package-map.tsv"
@@ -23,6 +27,15 @@
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "route-engine",
+      "core": false,
+      "depends_on": [
+        "runtime",
+        "route-tools"
+      ],
+      "requires_running": [],
+      "uses": [
+        "route-tools"
+      ],
       "runtime_targets": [
         "/opt/bin/vward-route-engine.sh",
         "/opt/bin/vward-domain-classifier.sh",
@@ -42,9 +55,16 @@
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "route-engine",
+      "core": false,
       "depends_on": [
+        "runtime",
+        "route-engine",
+        "route-tools"
+      ],
+      "requires_running": [
         "route-engine"
       ],
+      "uses": [],
       "runtime_targets": [
         "/opt/bin/vward-route-reconciler.sh"
       ]
@@ -56,6 +76,12 @@
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "route-tools",
+      "core": false,
+      "depends_on": [
+        "runtime"
+      ],
+      "requires_running": [],
+      "uses": [],
       "runtime_targets": [
         "/opt/bin/vward-route-test.sh",
         "/opt/bin/vward-route-hints-update.sh",
@@ -71,6 +97,12 @@
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "tunnel-guard",
+      "core": false,
+      "depends_on": [
+        "runtime"
+      ],
+      "requires_running": [],
+      "uses": [],
       "runtime_targets": [
         "/opt/bin/vward-tunnel-health.sh",
         "/opt/bin/vward-tunnel-guard.sh"
@@ -83,6 +115,12 @@
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "wan-guard",
+      "core": false,
+      "depends_on": [
+        "runtime"
+      ],
+      "requires_running": [],
+      "uses": [],
       "runtime_targets": [
         "/opt/bin/vward-wan-guard.sh",
         "/opt/bin/vward-wan-recovery.sh"
@@ -95,9 +133,12 @@
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "wifi-client-guard",
+      "core": false,
       "depends_on": [
         "runtime"
       ],
+      "requires_running": [],
+      "uses": [],
       "runtime_targets": [
         "/opt/bin/vward-wifi-client-monitor.sh",
         "/opt/bin/vward-wifi-client-analyze.sh",
@@ -112,6 +153,16 @@
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "policy-sync",
+      "core": false,
+      "depends_on": [
+        "runtime",
+        "route-tools"
+      ],
+      "requires_running": [],
+      "uses": [
+        "route-tools",
+        "route-engine"
+      ],
       "runtime_targets": [
         "/opt/bin/vward-policy-chain.sh",
         "/opt/bin/vward-policy-audit.sh",
@@ -126,6 +177,10 @@
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "runtime",
+      "core": true,
+      "depends_on": [],
+      "requires_running": [],
+      "uses": [],
       "runtime_targets": [
         "/opt/etc/init.d/S89vward-update-recovery",
         "/opt/bin/vward-housekeeping.sh",
@@ -145,6 +200,13 @@
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "console",
+      "core": true,
+      "depends_on": [
+        "runtime",
+        "platform-core"
+      ],
+      "requires_running": [],
+      "uses": [],
       "runtime_targets": [
         "/opt/etc/vward/console/lighttpd.conf",
         "/opt/share/vward/console/www/index.html",
@@ -162,9 +224,12 @@
       "legacy_ids": [],
       "update_method": "slot-installer",
       "health_profile": "updater",
+      "core": true,
       "depends_on": [
         "platform-core"
       ],
+      "requires_running": [],
+      "uses": [],
       "runtime_targets": [
         "/opt/share/vward/updater/current"
       ]
@@ -176,9 +241,12 @@
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "ads-privacy-guard",
+      "core": false,
       "depends_on": [
         "runtime"
       ],
+      "requires_running": [],
+      "uses": [],
       "runtime_targets": [
         "/opt/bin/vward-ads-privacy-guard.sh",
         "/opt/bin/vward-ads-privacy-sources-update.sh",

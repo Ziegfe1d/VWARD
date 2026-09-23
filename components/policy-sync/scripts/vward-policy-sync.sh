@@ -11,6 +11,7 @@ vward_profile_load || exit 1
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
 . "$VWARD_ADMISSION_LIB"
+vward_component_gate policy-sync
 vward_admission_enter policy-sync || exit $?
 
 VERSION="2.0"

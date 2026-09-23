@@ -509,6 +509,9 @@ if ! wan_restore_incomplete_bounce; then
     exit 1
 fi
 
+# Disabled: an interrupted bounce above was still finished; nothing else runs.
+vward_component_gate wan-guard
+
 UPTIME="$(awk '{print int($1)}' /proc/uptime 2>/dev/null)"
 
 case "$UPTIME" in

@@ -31,6 +31,9 @@ TUNNEL_GUARD_STATE=${VWARD_TUNNEL_GUARD_STATE:-/opt/var/lib/vward/tunnel-guard/s
 TUNNEL_HEALTH_STATE=${VWARD_TUNNEL_HEALTH_STATE:-/opt/var/lib/vward/tunnel-health/state}
 ROUTE_ENGINE_INIT=${VWARD_ROUTE_ENGINE_INIT:-/opt/etc/init.d/S91vward-route-engine}
 POLICY_SYNC_BIN=${VWARD_POLICY_SYNC_BIN:-/opt/bin/vward-policy-sync.sh}
+COMPONENT_REGISTRY=${VWARD_COMPONENT_REGISTRY:-/opt/share/vward/updater/current/component-registry.json}
+COMPONENT_STATE=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
+JQ=${JQ:-jq}
 PERSIST="$ROUTE_STATE/adaptive-persist.txt"
 ADAPTIVE="$ROUTE_STATE/adaptive-domains.txt"
 REFRESH_TS="$ROUTE_STATE/groups-refresh"
@@ -451,6 +454,62 @@ op_tunnel() {
     done_ok "tunnel $OLD_IF($OLD_DEV) -> $NEW_IF($NEW_DEV) group=$GROUP routes=$moved" changed
 }
 
+# ---------- Components ----------
+#
+# Disabling a component also disables everything that requires it running
+# (requires_running, transitively); enabling one also enables what it requires.
+# Core components are never disabled.  Files stay installed; entry points check
+# <id>.disabled through vward_component_gate.
+
+component_closure() {
+    # component_closure ID 0|1: the affected component ids, one per line.
+    "$JQ" -r --arg id "$1" --arg mode "$2" '
+        . as $r
+        | def step($s):
+            if $mode == "0" then [$r.components[] | select(any(.requires_running[]?; IN($s[]))) | .id]
+            else [$r.components[] | select(.id | IN($s[])) | .requires_running[]?] end;
+        [$id] | until((step(.) - .) == []; . + (step(.) - .) | unique) | .[]' "$COMPONENT_REGISTRY"
+}
+
+op_component() {
+    case "$1" in ''|*[!a-z0-9-]*) die invalid_component 64 ;; esac
+    case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
+    [ -r "$COMPONENT_REGISTRY" ] || die registry_unavailable
+    "$JQ" -e --arg id "$1" 'any(.components[]; .id == $id)' "$COMPONENT_REGISTRY" >/dev/null 2>&1 || die invalid_component 64
+    set_ids=$(component_closure "$1" "$2") || die registry_unavailable
+    if [ "$2" = 0 ]; then
+        for c in $set_ids; do
+            "$JQ" -e --arg id "$c" 'any(.components[]; .id == $id and .core == true)' "$COMPONENT_REGISTRY" >/dev/null &&
+                die core_component 64
+        done
+        # A guard that holds the tunnel down must restore it before it stops.
+        case " $(echo $set_ids) " in *" tunnel-guard "*)
+            [ "$(awk -F= '$1=="FAILOPEN_ACTIVE"{print $2}' "$TUNNEL_GUARD_STATE" 2>/dev/null)" != 1 ] || die failopen_active ;;
+        esac
+    fi
+    changed=
+    mkdir -p "$COMPONENT_STATE" || die write_failed
+    for c in $set_ids; do
+        flag="$COMPONENT_STATE/$c.disabled"
+        if [ "$2" = 0 ] && [ ! -e "$flag" ]; then
+            printf 'disabled from VWARD Console %s (with %s)\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$1" > "$flag" || die write_failed
+            changed="$changed $c"
+        elif [ "$2" = 1 ] && [ -e "$flag" ]; then
+            rm -f "$flag" || die write_failed
+            changed="$changed $c"
+        fi
+    done
+    [ -n "$changed" ] || done_ok "component $1 enabled=$2" unchanged
+    # The route engine is a daemon; the other components are driven by cron.
+    case " $changed " in *" route-engine "*)
+        if [ -x "$ROUTE_ENGINE_INIT" ]; then
+            if [ "$2" = 0 ]; then "$ROUTE_ENGINE_INIT" stop; else "$ROUTE_ENGINE_INIT" start; fi </dev/null >/dev/null 2>&1 || true
+        fi ;;
+    esac
+    echo "affected=$(echo $changed | tr ' ' ',')"
+    done_ok "component $1 enabled=$2 affected=$(echo $changed | tr ' ' ',')" changed
+}
+
 # ---------- Entry ----------
 
 [ "$#" -ge 2 ] && [ "$#" -le 3 ] || die usage 64
@@ -473,6 +532,7 @@ case "$OP" in
     domain-category) op_domain_category "$ARG1" "$ARG2" ;;
     tunnel-guard) op_guard_flag tunnel-guard "$TUNNEL_GUARD_FLAG" "$ARG1" ;;
     wan-guard) op_guard_flag wan-guard "$WAN_GUARD_FLAG" "$ARG1" ;;
+    component) op_component "$ARG1" "$ARG2" ;;
     tunnel) op_tunnel "$ARG1" ;;
     wifi) op_wifi "$ARG1" "$ARG2" ;;
     update) op_update "$ARG1" "$ARG2" ;;

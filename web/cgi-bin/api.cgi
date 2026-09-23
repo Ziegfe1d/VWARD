@@ -118,6 +118,8 @@ console_mutation_enter(){
   . "$VWARD_ADMISSION_LIB"
   vward_admission_enter console-mutation
 }
+COMPONENT_STATE=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
+component_disabled(){ [ -e "$COMPONENT_STATE/$1.disabled" ]; }
 console_mutation_leave(){ command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null || true; }
 
 if [ "$ACTION" = wifi-data ]; then
@@ -154,6 +156,7 @@ if [ "$ACTION" = wifi-control ]; then
     case "$OP" in bind-2g) REQUIRED=WIFI_BIND_2G;; bind-5g) REQUIRED=WIFI_BIND_5G;; auto) REQUIRED=WIFI_BAND_AUTO;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
     printf '%s\n' "$MAC" | grep -Eiq '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || { echo '{"ok":false,"error":"invalid_mac"}'; exit 0; }
     [ "$CONFIRM" = "$REQUIRED" ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+    ! component_disabled wifi-client-guard || { echo '{"ok":false,"error":"component_disabled"}'; exit 0; }
     WCTL=/opt/bin/vward-wifi-client-control.sh; [ -x "$WCTL" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
     OUT="$("$WCTL" "$OP" "$MAC" "$CONFIRM" 2>&1)"; RC=$?
     printf '%s|CONSOLE_ACTION|action=wifi-%s mac=%s rc=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$OP" "$MAC" "$RC" >> /opt/var/log/vward/console-audit.log
@@ -192,12 +195,16 @@ if [ "$ACTION" = config-data ]; then
     WCONF=${VWARD_WIFI_CLIENT_GUARD_CONF:-$CONFIG_ETC/wifi-client-guard.conf}
     UCONF=${VWARD_UPDATE_CONFIG:-$CONFIG_ETC/update.conf}
     wnum(){ V="$(kv_get "$WCONF" "$1")"; case "$V" in ''|*[!0-9-]*) V=$2;; esac; printf '%s' "$V"; }
+    COMPONENT_REGISTRY=${VWARD_COMPONENT_REGISTRY:-/opt/share/vward/updater/current/component-registry.json}
+    DISABLED="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && basename "$F" .disabled; done | list_json)"
+    COMPONENTS="$("$JQ" -c --argjson off "${DISABLED:-[]}" '[.components[] | {id, core:(.core == true), depends_on:(.depends_on // []), requires_running:(.requires_running // []), uses:(.uses // []), enabled:((.id | IN($off[])) | not)}]' "$COMPONENT_REGISTRY" 2>/dev/null)"
+    [ -n "$COMPONENTS" ] || COMPONENTS='[]'
     W_EN="$(kv_get "$WCONF" ENABLED)"; [ "$W_EN" = 1 ] || W_EN=0
     W_CTL="$(kv_get "$WCONF" CONTROL_ENABLED)"; [ "$W_CTL" = 1 ] || W_CTL=0
     "$JQ" -n \
       --arg group "${VWARD_POLICY_GROUP:-}" --argjson router "$ROUTER" \
       --argjson route_domains "${ROUTE_DOMAINS:-[]}" --argjson force "${FORCE:-[]}" --argjson adaptive "${ADAPT:-[]}" \
-      --argjson categories "${CATS:-[]}" --argjson tunnel_guard "$TG" --argjson wan_guard "$WG_ON" \
+      --argjson categories "${CATS:-[]}" --argjson tunnel_guard "$TG" --argjson wan_guard "$WG_ON" --argjson components "$COMPONENTS" \
       --argjson w_en "$W_EN" --argjson w_ctl "$W_CTL" \
       --arg w_window "$(wnum WINDOW_SEC 86400)" --arg w_switch "$(wnum BAND_SWITCH_WARN 20)" \
       --arg w_weak "$(wnum WEAK_5G_SAMPLE_WARN 5)" --arg w_rssi "$(wnum WEAK_5G_RSSI -75)" \
@@ -206,7 +213,7 @@ if [ "$ACTION" = config-data ]; then
       --argjson writable "$([ -x "$CONFIG_HELPER" ] && echo true || echo false)" \
       '{ok:true,writable:$writable,
         route:{group:$group,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories},
-        tunnel_guard:{enabled:$tunnel_guard},wan_guard:{enabled:$wan_guard},
+        tunnel_guard:{enabled:$tunnel_guard},wan_guard:{enabled:$wan_guard},components:$components,
         wifi:{ENABLED:($w_en==1),CONTROL_ENABLED:($w_ctl==1),WINDOW_SEC:($w_window|(tonumber? // null)),BAND_SWITCH_WARN:($w_switch|(tonumber? // null)),WEAK_5G_SAMPLE_WARN:($w_weak|(tonumber? // null)),WEAK_5G_RSSI:($w_rssi|(tonumber? // null))},
         update:{safe_window_start:$u_start,safe_window_end:$u_end,check_interval_seconds:($u_interval|(tonumber? // null))}}'
     exit 0
@@ -236,6 +243,7 @@ if [ "$ACTION" = config ]; then
         domain-category|wifi|update) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=TUNNEL_GUARD_DISABLE ;;
         wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;
+        component) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=COMPONENT_DISABLE ;;
         tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
         *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
     esac
@@ -281,6 +289,7 @@ fi
 
 if [ "$ACTION" = ads-https-control ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }; ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; trap console_mutation_leave EXIT
+  ! component_disabled ads-privacy-guard || { echo '{"ok":false,"error":"component_disabled"}'; exit 0; }
   LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ]&&[ "$LEN" -le 512 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }; BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
   val(){ printf '%s\n' "$BODY"|tr '&' '\n'|awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
   OP="$(val op)"; CONFIRM="$(val confirm)"; case "$OP" in validate|render|pac|stop) ;; ca-init) [ "$CONFIRM" = HTTPS_CA_INIT ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;; start|restart) [ "$CONFIRM" = HTTPS_START ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
@@ -305,6 +314,7 @@ fi
 
 if [ "$ACTION" = ads-control ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }; ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; trap console_mutation_leave EXIT
+  ! component_disabled ads-privacy-guard || { echo '{"ok":false,"error":"component_disabled"}'; exit 0; }
   LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ]&&[ "$LEN" -le 1024 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }; BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
   val(){ printf '%s\n' "$BODY"|tr '&' '\n'|awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
   OP="$(val op)"; DOMAIN="$(val domain|tr '[:upper:]' '[:lower:]')"; SCOPE="$(val scope)"; [ -n "$SCOPE" ]||SCOPE=exact
@@ -1142,16 +1152,16 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
         console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
     fi
 
-    CMD=""; ARG=""; REQUIRED=""; LABEL=""
+    CMD=""; ARG=""; REQUIRED=""; LABEL=""; COMP=""
     if [ "$ACTION" = control ]; then
         case "$OP" in
-            refresh-hints) CMD=/opt/bin/vward-route-hints-update.sh; LABEL=refresh-hints ;;
-            route-reconcile) CMD=/opt/bin/vward-route-reconciler.sh; REQUIRED=ROUTE_RECONCILE; LABEL=route-reconcile ;;
-            policy-refresh) CMD=/opt/bin/vward-policy-sync.sh; ARG=sync; REQUIRED=POLICY_REFRESH; LABEL=policy-refresh ;;
-            policy-reconcile) CMD=/opt/bin/vward-policy-sync.sh; ARG=--reconcile; REQUIRED=POLICY_RECONCILE; LABEL=policy-reconcile ;;
-            tunnel-health) CMD=/opt/bin/vward-tunnel-health.sh; LABEL=tunnel-health ;;
-            wan-renew) CMD=/opt/bin/vward-wan-recovery.sh; ARG=dhcp-renew; REQUIRED=WAN_RENEW; LABEL=wan-renew ;;
-            wan-bounce) CMD=/opt/bin/vward-wan-recovery.sh; ARG=wan-bounce; REQUIRED=WAN_BOUNCE; LABEL=wan-bounce ;;
+            refresh-hints) COMP=route-tools; CMD=/opt/bin/vward-route-hints-update.sh; LABEL=refresh-hints ;;
+            route-reconcile) COMP=route-reconciler; CMD=/opt/bin/vward-route-reconciler.sh; REQUIRED=ROUTE_RECONCILE; LABEL=route-reconcile ;;
+            policy-refresh) COMP=policy-sync; CMD=/opt/bin/vward-policy-sync.sh; ARG=sync; REQUIRED=POLICY_REFRESH; LABEL=policy-refresh ;;
+            policy-reconcile) COMP=policy-sync; CMD=/opt/bin/vward-policy-sync.sh; ARG=--reconcile; REQUIRED=POLICY_RECONCILE; LABEL=policy-reconcile ;;
+            tunnel-health) COMP=tunnel-guard; CMD=/opt/bin/vward-tunnel-health.sh; LABEL=tunnel-health ;;
+            wan-renew) COMP=wan-guard; CMD=/opt/bin/vward-wan-recovery.sh; ARG=dhcp-renew; REQUIRED=WAN_RENEW; LABEL=wan-renew ;;
+            wan-bounce) COMP=wan-guard; CMD=/opt/bin/vward-wan-recovery.sh; ARG=wan-bounce; REQUIRED=WAN_BOUNCE; LABEL=wan-bounce ;;
             *) echo '{"ok":false,"error":"unknown_control_action"}'; exit 0 ;;
         esac
     else
@@ -1187,6 +1197,10 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
         esac
     fi
 
+    [ -z "$COMP" ] || ! component_disabled "$COMP" || {
+        echo '{"ok":false,"error":"component_disabled"}'
+        exit 0
+    }
     [ -x "$CMD" ] || {
         echo '{"ok":false,"error":"action_unavailable"}'
         exit 0
