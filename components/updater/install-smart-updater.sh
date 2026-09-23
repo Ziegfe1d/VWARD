@@ -5,7 +5,7 @@ set -u
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-BASE_URL=${VWARD_REPOSITORY_RAW_URL:-https://raw.githubusercontent.com/Ziegfe1d/VWARD/main}
+BASE_URL=${VWARD_REPOSITORY_RAW_URL:-https://raw.githubusercontent.com/Ziegfe1d/VWARD/beta}
 ROOT=/opt/share/vward
 UPDATER_ROOT=$ROOT/updater
 SLOT_A=$UPDATER_ROOT/slots/A
