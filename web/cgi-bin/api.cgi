@@ -161,7 +161,7 @@ CONFIG_HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
 # own /auth); VWARD keeps only a hash of the session token with an expiry.
 AUTH_CONF=${VWARD_CONSOLE_AUTH_CONF:-/opt/etc/vward/console/auth.conf}
 AUTH_SESSIONS=${VWARD_CONSOLE_SESSIONS:-/tmp/vward-console-sessions}
-AUTH_URL=${VWARD_KEENETIC_AUTH_URL:-http://127.0.0.1/auth}
+AUTH_URL=${VWARD_KEENETIC_AUTH_URL:-http://${VWARD_LAN_ADDRESS:-127.0.0.1}/auth}
 AUTH_ENABLED=0
 [ "$(awk -F= '$1=="AUTH_ENABLED"{print $2; exit}' "$AUTH_CONF" 2>/dev/null)" = 1 ] && AUTH_ENABLED=1
 AUTH_HOURS="$(awk -F= '$1=="SESSION_HOURS"{print $2; exit}' "$AUTH_CONF" 2>/dev/null)"
