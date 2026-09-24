@@ -198,6 +198,26 @@ with tempfile.TemporaryDirectory() as tmp:
     if upd.read_text() != "update_enabled=1\nsafe_window_start=02:30\nsafe_window_end=05:00\ncheck_interval_seconds=3600\n":
         fail(f"update.conf written incorrectly: {upd.read_text()!r}")
 
+    # One install time: the window opens then and closes an hour later, also across midnight.
+    run("update", "install_time", "23:00", expect="result=changed")
+    if "safe_window_start=23:00\nsafe_window_end=00:00\n" not in upd.read_text():
+        fail(f"install time must set a one-hour window: {upd.read_text()!r}")
+    run("update", "install_time", "23:00", expect="result=unchanged")
+    run("update", "install_time", "3:00", expect="error=invalid_value")
+    run("update", "install_time", "04:00", expect="result=changed")
+    if "safe_window_start=04:00\nsafe_window_end=05:00\n" not in upd.read_text():
+        fail(f"install time written incorrectly: {upd.read_text()!r}")
+
+    # Internet guard limits: only known keys in their ranges.
+    wanp = etc / "wan-guard.conf"
+    run("wan-param", "CONFIRM_FAILURES", "5", expect="result=changed")
+    run("wan-param", "CONFIRM_FAILURES", "0", expect="error=invalid_value")
+    run("wan-param", "RENEW_COOLDOWN", "30", expect="error=invalid_value")
+    run("wan-param", "MAX_BOUNCE_DAY", "12", expect="result=changed")
+    run("wan-param", "BOOT_GRACE", "10", expect="error=invalid_setting")
+    if wanp.read_text() != "CONFIRM_FAILURES=5\nMAX_BOUNCE_DAY=12\n":
+        fail(f"wan-guard.conf written incorrectly: {wanp.read_text()!r}")
+
     # Feed: only the branch of a standard URL changes; custom URLs are left alone.
     upd.write_text(upd.read_text() + "manifest_url=https://raw.githubusercontent.com/Owner/Repo/dev/updates/dev/update-manifest.json\n")
     run("update-feed", "beta", expect="result=changed")
@@ -265,8 +285,10 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("config-data tunnel guard")
     if data["wifi"] != {"ENABLED": True, "CONTROL_ENABLED": False, "WINDOW_SEC": 86400, "BAND_SWITCH_WARN": 20, "WEAK_5G_SAMPLE_WARN": 5, "WEAK_5G_RSSI": -70}:
         fail(f"config-data wifi: {data['wifi']}")
-    if data["update"] != {"safe_window_start": "02:30", "safe_window_end": "05:00", "check_interval_seconds": 3600, "apply_window": "any", "feed": "dev"}:
+    if data["update"] != {"safe_window_start": "04:00", "safe_window_end": "05:00", "check_interval_seconds": 3600, "apply_window": "any", "feed": "dev"}:
         fail(f"config-data update: {data['update']}")
+    if data["wan_guard"]["params"] != {"CONFIRM_FAILURES": 5, "RENEW_COOLDOWN": 600, "BOUNCE_COOLDOWN": 1800, "MAX_RENEW_HOUR": 3, "MAX_BOUNCE_HOUR": 2, "MAX_BOUNCE_DAY": 12}:
+        fail(f"config-data wan-guard params: {data['wan_guard']}")
 
     post = lambda body: api("action=config", body, "POST")
     if post("op=update&target=safe_window_end&value=06%3A15") != {"ok": True, "op": "update", "result": "changed"}:
@@ -301,7 +323,7 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("confirmed tunnel guard disable")
     if post("op=wan-guard&value=0&confirm=WAN_GUARD_DISABLE")["result"] != "changed" or not (etc / "wan-guard.disabled").exists():
         fail("confirmed WAN guard disable")
-    if api("action=config-data")["wan_guard"] != {"enabled": False}:
+    if api("action=config-data")["wan_guard"]["enabled"] is not False:
         fail("config-data must report the WAN guard flag")
     if post("op=wan-guard&value=1")["result"] != "changed" or (etc / "wan-guard.disabled").exists():
         fail("WAN guard enable")

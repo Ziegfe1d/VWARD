@@ -31,6 +31,7 @@ CLASSIFIER_FILE="$ETC/route-engine/domain-classifier.conf"
 IP_EXCLUDED=${VWARD_POLICY_EXCLUDED:-$ETC/policy-sync/excluded.categories}
 AUTH_CONF=${VWARD_CONSOLE_AUTH_CONF:-$ETC/console/auth.conf}
 WIFI_FILE=${VWARD_WIFI_CLIENT_GUARD_CONF:-$ETC/wifi-client-guard.conf}
+WAN_PARAM_FILE=${VWARD_WAN_GUARD_CONF:-$ETC/wan-guard.conf}
 UPDATE_FILE=${VWARD_UPDATE_CONFIG:-$ETC/update.conf}
 POLICY_STATE=${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}
 TUNNEL_GUARD_STATE=${VWARD_TUNNEL_GUARD_STATE:-/opt/var/lib/vward/tunnel-guard/state}
@@ -320,9 +321,32 @@ op_wifi() {
     done_ok "wifi $1=$2" changed
 }
 
+# wan-param KEY VALUE: recovery limits of the internet guard, same ranges as vward-wan-guard.sh.
+op_wan_param() {
+    case "$1" in
+        CONFIRM_FAILURES|MAX_RENEW_HOUR) valid_int_range "$2" 1 10 || die invalid_value 64 ;;
+        RENEW_COOLDOWN) valid_int_range "$2" 60 7200 || die invalid_value 64 ;;
+        BOUNCE_COOLDOWN) valid_int_range "$2" 300 21600 || die invalid_value 64 ;;
+        MAX_BOUNCE_HOUR) valid_int_range "$2" 1 6 || die invalid_value 64 ;;
+        MAX_BOUNCE_DAY) valid_int_range "$2" 1 24 || die invalid_value 64 ;;
+        *) die invalid_setting 64 ;;
+    esac
+    set_kv "$WAN_PARAM_FILE" "$1" "$2" 0644 || done_ok "wan-param $1=$2" unchanged
+    done_ok "wan-param $1=$2" changed
+}
+
 op_update() {
     [ -f "$UPDATE_FILE" ] || die config_unavailable
     case "$1" in
+        install_time)
+            # One install time: the window opens then and closes an hour later.
+            printf '%s\n' "$2" | grep -Eq '^([01][0-9]|2[0-3]):[0-5][0-9]$' || die invalid_value 64
+            end=$(printf '%s\n' "$2" | awk -F: '{printf "%02d:%s\n", ($1 + 1) % 24, $2}')
+            a=0; b=0
+            set_kv "$UPDATE_FILE" safe_window_start "$2" 0600 && a=1
+            set_kv "$UPDATE_FILE" safe_window_end "$end" 0600 && b=1
+            [ "$a$b" != 00 ] || done_ok "update install_time=$2" unchanged
+            done_ok "update install_time=$2" changed ;;
         safe_window_start|safe_window_end)
             printf '%s\n' "$2" | grep -Eq '^([01][0-9]|2[0-3]):[0-5][0-9]$' || die invalid_value 64
             other=safe_window_end; [ "$1" = safe_window_end ] && other=safe_window_start
@@ -735,7 +759,7 @@ OP=$1; shift
 case "$OP" in tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth) [ "$#" -eq 1 ] || die usage 64 ;; *) [ "$#" -eq 2 ] || die usage 64 ;; esac
 ARG1=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
 ARG2=${2:-}
-case "$OP" in wifi|update|tunnel|domain-list|domain-list-watch) ARG1=$1 ;; esac
+case "$OP" in wifi|update|wan-param|tunnel|domain-list|domain-list-watch) ARG1=$1 ;; esac
 case "$OP" in route-domain|force-vpn|adaptive) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 
 ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
@@ -765,5 +789,6 @@ case "$OP" in
     domain-list-watch) op_domain_list_watch "$ARG1" "$ARG2" ;;
     wifi) op_wifi "$ARG1" "$ARG2" ;;
     update) op_update "$ARG1" "$ARG2" ;;
+    wan-param) op_wan_param "$ARG1" "$ARG2" ;;
     *) die invalid_operation 64 ;;
 esac

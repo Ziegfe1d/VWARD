@@ -398,6 +398,12 @@ if [ "$ACTION" = config-data ]; then
     IPX="$(awk 'NF{print $1}' "${VWARD_POLICY_EXCLUDED:-$CONFIG_ETC/policy-sync/excluded.categories}" 2>/dev/null | head -n 500 | list_json)"
     WCONF=${VWARD_WIFI_CLIENT_GUARD_CONF:-$CONFIG_ETC/wifi-client-guard.conf}
     UCONF=${VWARD_UPDATE_CONFIG:-$CONFIG_ETC/update.conf}
+    GCONF=${VWARD_WAN_GUARD_CONF:-$CONFIG_ETC/wan-guard.conf}
+    gnum(){ V="$(kv_get "$GCONF" "$1")"; case "$V" in ''|*[!0-9]*) V=$2;; esac; printf '%s' "$V"; }
+    WAN_PARAMS="$("$JQ" -cn --arg a "$(gnum CONFIRM_FAILURES 3)" --arg b "$(gnum RENEW_COOLDOWN 600)" --arg c "$(gnum BOUNCE_COOLDOWN 1800)" \
+        --arg d "$(gnum MAX_RENEW_HOUR 3)" --arg e "$(gnum MAX_BOUNCE_HOUR 2)" --arg f "$(gnum MAX_BOUNCE_DAY 6)" \
+        '{CONFIRM_FAILURES:($a|tonumber),RENEW_COOLDOWN:($b|tonumber),BOUNCE_COOLDOWN:($c|tonumber),MAX_RENEW_HOUR:($d|tonumber),MAX_BOUNCE_HOUR:($e|tonumber),MAX_BOUNCE_DAY:($f|tonumber)}')"
+    [ -n "$WAN_PARAMS" ] || WAN_PARAMS='{}'
     wnum(){ V="$(kv_get "$WCONF" "$1")"; case "$V" in ''|*[!0-9-]*) V=$2;; esac; printf '%s' "$V"; }
     COMPONENT_REGISTRY=${VWARD_COMPONENT_REGISTRY:-/opt/share/vward/updater/current/component-registry.json}
     DISABLED="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && basename "$F" .disabled; done | list_json)"
@@ -411,6 +417,7 @@ if [ "$ACTION" = config-data ]; then
       --argjson categories "${CATS:-[]}" --argjson tunnel_guard "$TG" --argjson wan_guard "$WG_ON" --argjson components "$COMPONENTS" \
       --argjson adaptive_on "$AD_ON" --argjson classifier_on "$CL_ON" --argjson ip_excluded "${IPX:-[]}" \
       --argjson w_en "$W_EN" --argjson w_ctl "$W_CTL" \
+      --argjson wan_params "$WAN_PARAMS" \
       --arg w_window "$(wnum WINDOW_SEC 86400)" --arg w_switch "$(wnum BAND_SWITCH_WARN 20)" \
       --arg w_weak "$(wnum WEAK_5G_SAMPLE_WARN 5)" --arg w_rssi "$(wnum WEAK_5G_RSSI -75)" \
       --arg u_start "$(kv_get "$UCONF" safe_window_start)" --arg u_end "$(kv_get "$UCONF" safe_window_end)" \
@@ -420,7 +427,7 @@ if [ "$ACTION" = config-data ]; then
       --argjson writable "$([ -x "$CONFIG_HELPER" ] && echo true || echo false)" \
       '{ok:true,writable:$writable,
         route:{group:$group,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
-        tunnel_guard:{enabled:$tunnel_guard},wan_guard:{enabled:$wan_guard},components:$components,
+        tunnel_guard:{enabled:$tunnel_guard},wan_guard:{enabled:$wan_guard,params:$wan_params},components:$components,
         wifi:{ENABLED:($w_en==1),CONTROL_ENABLED:($w_ctl==1),WINDOW_SEC:($w_window|(tonumber? // null)),BAND_SWITCH_WARN:($w_switch|(tonumber? // null)),WEAK_5G_SAMPLE_WARN:($w_weak|(tonumber? // null)),WEAK_5G_RSSI:($w_rssi|(tonumber? // null))},
         update:{safe_window_start:$u_start,safe_window_end:$u_end,check_interval_seconds:($u_interval|(tonumber? // null)),apply_window:(if $u_window == "any" then "any" else "window" end),feed:(if $u_feed == "" then "custom" else $u_feed end)}}'
     exit 0
@@ -447,7 +454,7 @@ if [ "$ACTION" = config ]; then
     REQUIRED=
     case "$OP" in
         route-domain|force-vpn|adaptive) set -- "$OP" "$ACT" "$TARGET" ;;
-        domain-category|wifi|update) set -- "$OP" "$TARGET" "$VALUE" ;;
+        domain-category|wifi|update|wan-param) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=TUNNEL_GUARD_DISABLE ;;
         wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;
         component) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=COMPONENT_DISABLE ;;

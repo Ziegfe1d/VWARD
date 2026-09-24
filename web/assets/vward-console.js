@@ -159,8 +159,7 @@ const PAGES = [
   { id: 'wifi', title: 'Wi-Fi клиенты', icon: 'wifi', group: 'Сеть', data: ['wifi', 'security', 'config'] },
   { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adsstats', 'adspub'] },
   { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config'] },
-  { id: 'updates', title: 'Обновления', icon: 'refresh', group: 'VWARD', data: ['status', 'update', 'config'] },
-  { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth'] }
+  { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth', 'status', 'update', 'config'] }
 ];
 const SHORT = { overview: 'Обзор', logs: 'Журналы', wan: 'Интернет', vpn: 'VPN', lists: 'Списки', routes: 'Маршруты', wifi: 'Wi-Fi', ads: 'Реклама', system: 'Система', updates: 'Обновл.', settings: 'Настройки' };
 const COMPONENTS = [
@@ -203,7 +202,8 @@ const logLabel = id => (LOG_TABS.find(t => t.id === id) || {}).label || id;
 const DETAILS = {
   'd-components': { title: 'Компоненты', parent: 'system' },
   'd-diag': { title: 'Диагностика', parent: 'system' },
-  'd-cron': { title: 'Задания по расписанию', parent: 'system' },
+  'd-cron': { title: 'Задания по расписанию', parent: 'd-diag' },
+  updates: { title: 'Обновления', parent: 'settings', data: ['status', 'update', 'config'] },
   'd-mydomains': { title: 'Мои домены', parent: 'routes' },
   'd-force': { title: 'Всегда через VPN', parent: 'routes' },
   'd-dcats': { title: 'Категории доменов', parent: 'routes' },
@@ -231,13 +231,13 @@ function page(id) {
 }
 const parentOf = id => { const p = page(id); return p && p.parent; };
 const navId = id => { let x = id; while (parentOf(x)) x = parentOf(x); return x; };
-const DATA_FOR = id => { const p = PAGES.find(x => x.id === navId(id)); return p ? p.data : []; };
+const DATA_FOR = id => { if (DETAILS[id] && DETAILS[id].data) return DETAILS[id].data; const p = PAGES.find(x => x.id === navId(id)); return p ? p.data : []; };
 
 /* ---------- Состояние интерфейса ---------- */
 const TAB_MAX = 4, TAB_DEFAULT = ['overview', 'wan', 'vpn', 'logs'];
 let tabIds = store.get('vward-tabs', TAB_DEFAULT).filter(id => PAGES.some(p => p.id === id)).slice(0, TAB_MAX);
 if (!tabIds.length) tabIds = TAB_DEFAULT.slice();
-let theme = store.get('vward-theme', 'system');
+let theme = store.get('vward-theme', 'system'); if (!['system', 'time', 'light', 'dark'].includes(theme)) theme = 'system';
 const REFRESH_SEC = 15;
 const CARD_IDS = ['system', 'updates', 'wan', 'vpn', 'lists', 'routes', 'wifi', 'ads', 'runtime', 'storage'];
 let cardOrder = store.get('vward-card-order', CARD_IDS).filter(id => CARD_IDS.includes(id));
@@ -267,7 +267,7 @@ function kv(rows) {
 }
 function ctrlRow(key, control, hint, cls) { return '<div class="kv-row' + (cls ? ' ' + cls : '') + '" data-key="' + esc(key) + '"><dt>' + esc(key) + (hint ? '<span class="hint">' + esc(hint) + '</span>' : '') + '</dt><dd>' + control + '</dd></div>'; }
 const sw = (attr, on, label, disabled) => '<label class="switch"><input type="checkbox" ' + attr + (on ? ' checked' : '') + (disabled ? ' disabled' : '') + ' aria-label="' + esc(label) + '"><i></i></label>';
-const sel = (attr, label, opts, value) => '<select class="input compact" ' + attr + ' aria-label="' + esc(label) + '">' + opts.map(o => '<option value="' + esc(o[0]) + '"' + (String(value) === String(o[0]) ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select>';
+const sel = (attr, label, opts, value) => '<select class="input compact" ' + attr + ' aria-label="' + esc(label) + '">' + opts.map(o => '<option value="' + esc(o[0]) + '"' + (String(value) === String(o[0]) ? ' selected' : '') + (o[2] ? ' disabled' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select>';
 const btn = (act, icon, label, cls, extra) => '<button class="btn' + (cls ? ' ' + cls : '') + '" type="button" data-act="' + act + '"' + (extra || '') + '>' + (icon ? ico(icon) : '') + esc(label) + '</button>';
 const empty = t => '<div class="empty">' + esc(t) + '</div>';
 function confirmBox(id, text, yesLabel, danger) {
@@ -354,7 +354,10 @@ const RENDER = {
 
   wan() {
     const w = st().wan || {}, pr = prof(), stage = num(w.recovery_stage) || 0, guardOn = !S.config || !cfg().wan_guard || cfg().wan_guard.enabled !== false;
-    const steps = ['3 неудачные проверки подряд', 'обновить адрес по DHCP - не чаще раза в 10 минут, до 3 в час', 'переподключить интерфейс - не чаще раза в 30 минут, до 6 в сутки'];
+    const gp = Object.assign({ CONFIRM_FAILURES: 3, RENEW_COOLDOWN: 600, BOUNCE_COOLDOWN: 1800, MAX_RENEW_HOUR: 3, MAX_BOUNCE_HOUR: 2, MAX_BOUNCE_DAY: 6 }, (cfg().wan_guard || {}).params);
+    const steps = [gp.CONFIRM_FAILURES + ' ' + plural(gp.CONFIRM_FAILURES, 'неудачная проверка', 'неудачные проверки', 'неудачных проверок') + ' подряд', 'обновить адрес по DHCP - не чаще раза в ' + durText(gp.RENEW_COOLDOWN) + ', до ' + gp.MAX_RENEW_HOUR + ' в час', 'переподключить интерфейс - не чаще раза в ' + durText(gp.BOUNCE_COOLDOWN) + ', до ' + gp.MAX_BOUNCE_HOUR + ' в час и ' + gp.MAX_BOUNCE_DAY + ' в сутки'];
+    const gsel = (key, label, opts, unit) => sel('data-cfg-wanp="' + key + '"' + (cfgOk() ? '' : ' disabled'), label, withCur(opts, gp[key], unit || ''), gp[key]);
+    const counts = n => Array.from({ length: n }, (x, i) => [i + 1, String(i + 1)]);
     return loadError(['status']) +
       panel('Подключение', kv([
         ['Состояние', w.internet ? 'В сети' : 'Нет связи', w.internet ? 'ok' : 'crit'],
@@ -371,7 +374,15 @@ const RENDER = {
       panel('Защита интернета', '<dl class="kv">' + ctrlRow('Автоматическое восстановление', sw('data-cfg-wg', guardOn, 'Автоматическое восстановление интернета', !cfgOk())) + '</dl>' +
         confirmBox('wg-off', 'Выключить автоматическое восстановление? Связь продолжит проверяться, но при сбое интернет придётся восстанавливать вручную.', 'Выключить', true) +
         (guardOn ? '<p class="panel-desc">Порядок восстановления:</p><ol class="steps">' + steps.map((x, i) => '<li' + (i + 1 === stage ? ' class="now"' : '') + '>' + esc(x) + '</li>').join('') + '</ol>' : '<p class="field-warn">Выключено: связь проверяется каждую минуту, но интернет не восстанавливается автоматически.</p>') +
-        kv([guardOn ? ['Сейчас', stage ? 'Восстановление, шаг ' + stage : 'Норма', stage ? 'warn' : 'ok'] : null, guardOn ? ['Попыток восстановления подряд', String(num(w.recovery_count) || 0)] : null, ['История восстановлений', 'журнал', '', 'logs', ' data-log-go="recovery"']]));
+        kv([guardOn ? ['Сейчас', stage ? 'Восстановление, шаг ' + stage : 'Норма', stage ? 'warn' : 'ok'] : null, guardOn ? ['Попыток восстановления подряд', String(num(w.recovery_count) || 0)] : null, ['История восстановлений', 'журнал', '', 'logs', ' data-log-go="recovery"']])) +
+      (guardOn ? panel('Параметры восстановления', '<dl class="kv">' +
+        ctrlRow('Сбоев до начала восстановления', gsel('CONFIRM_FAILURES', 'Сбоев до начала восстановления', counts(10)), 'проверка идёт раз в минуту') +
+        ctrlRow('Пауза между обновлениями адреса', gsel('RENEW_COOLDOWN', 'Пауза между обновлениями адреса', [[60, '1 минута'], [300, '5 минут'], [600, '10 минут'], [1800, '30 минут'], [3600, '1 час']], ' с')) +
+        ctrlRow('Обновлений адреса в час', gsel('MAX_RENEW_HOUR', 'Обновлений адреса в час', counts(10))) +
+        ctrlRow('Пауза между переподключениями', gsel('BOUNCE_COOLDOWN', 'Пауза между переподключениями', [[300, '5 минут'], [900, '15 минут'], [1800, '30 минут'], [3600, '1 час'], [7200, '2 часа']], ' с')) +
+        ctrlRow('Переподключений в час', gsel('MAX_BOUNCE_HOUR', 'Переподключений в час', counts(6))) +
+        ctrlRow('Переподключений в сутки', gsel('MAX_BOUNCE_DAY', 'Переподключений в сутки', counts(24))) + '</dl>' + cfgNote(),
+        { desc: 'Как быстро и как часто Защита интернета вмешивается при сбое. Значения по умолчанию подходят большинству подключений.' }) : '');
   },
 
   vpn() {
@@ -489,7 +500,6 @@ const RENDER = {
       ])) +
       panel('Состояние', kv([
         ['Компоненты', COMPONENTS.length + ' ' + plural(COMPONENTS.length, 'компонент', 'компонента', 'компонентов'), '', 'd-components'],
-        ['Задания по расписанию', (s.services && s.services.crond ? 'cron работает' : 'cron остановлен'), s.services && s.services.crond ? '' : 'crit', 'd-cron'],
         ['Диагностика', dg.length ? (dg.length - bad) + ' из ' + dg.length + ' в норме' : 'не запускалась', bad ? 'warn' : '', 'd-diag']
       ])) +
       panel('Хранилище', kv([['Свободно', fmtKB(g.free_kb) + ' из ' + fmtKB(g.total_kb)], ['Файловая система', g.filesystem || '—'], ['Сжатие журналов', 'каждый час', '', 'd-cron']]) +
@@ -500,7 +510,7 @@ const RENDER = {
   updates() {
     const p = plat(), u = S.update || {}, al = u.allowed || {}, pend = u.pending || {};
     const uc = cfg().update || {}, mode = !isTrue(p.auto_apply) ? 'manual' : uc.apply_window === 'any' ? 'auto' : 'schedule', feed = uc.feed;
-    const winStart = uc.safe_window_start || String(p.safe_window || '').split(/\s*[-–]\s*/)[0], winEnd = uc.safe_window_end || String(p.safe_window || '').split(/\s*[-–]\s*/)[1];
+    const winStart = uc.safe_window_start || String(p.safe_window || '').split(/\s*[-–]\s*/)[0];
     const interval = uc.check_interval_seconds || p.check_interval_seconds;
     const acts = [];
     if (al.check) acts.push(btn('update-op', 'refresh', 'Проверить', 'primary', ' data-op="check"'));
@@ -521,18 +531,23 @@ const RENDER = {
         ['Откат', u.rollback_available ? 'Доступен' : 'Недоступен', u.rollback_available ? 'info' : '']
       ]) + (conf || (acts.length ? '<div class="panel-actions even">' + acts.join('') + '</div>' : '')) + resultBox('updates')) +
       panel('Настройки обновлений', '<dl class="kv">' +
-        ctrlRow('Установка обновлений', sel('data-upd="mode"', 'Установка обновлений', [['auto', 'Автоматически'], ['schedule', 'По расписанию'], ['manual', 'Вручную']], mode), ({ auto: 'сразу после проверки подписи', schedule: 'в окно установки, критические исправления - сразу', manual: 'только проверка и уведомление' })[mode]) +
-        (mode === 'schedule' ? ctrlRow('Окно установки', '<span class="time-range">' + sel('data-cfg-upd="safe_window_start"', 'Начало окна установки', withCur(HOURS, winStart, ''), winStart) + '–' + sel('data-cfg-upd="safe_window_end"', 'Конец окна установки', withCur(HOURS, winEnd, ''), winEnd) + '</span>', '', 'stack') : '') +
+        ctrlRow('Установка обновлений', sel('data-upd="mode"', 'Установка обновлений', [['auto', 'Автоматическая'], ['schedule', 'По расписанию'], ['manual', 'Ручная']], mode), ({ auto: 'сразу после проверки подписи', schedule: 'в ' + (winStart || '03:00') + ', критические исправления - сразу', manual: 'только проверка и уведомление' })[mode]) +
+        (mode === 'schedule' ? ctrlRow('Время установки', sel('data-cfg-upd="install_time"', 'Время установки', withCur(HOURS, winStart, ''), winStart), 'обновление ставится при первой проверке после этого времени') : '') +
         ctrlRow('Интервал проверки', sel('data-cfg-upd="check_interval_seconds"', 'Интервал проверки', withCur([[900, '15 минут'], [1800, '30 минут'], [3600, '1 час'], [10800, '3 часа'], [21600, '6 часов'], [43200, '12 часов'], [86400, '24 часа']], interval, ' с'), interval)) +
-        (feed === 'beta' || feed === 'dev' ? ctrlRow('Канал', sel('data-upd-feed', 'Канал обновлений', [['beta', 'Бета'], ['dev', 'Dev']], feed), feed === 'dev' ? 'сборки в разработке, возможны ошибки' : 'проверенные сборки') : '') +
+        (feed === 'beta' || feed === 'dev' ? ctrlRow('Канал', sel('data-upd-feed', 'Канал обновлений', [['stable', 'Стабильный (рекомендуется)', true], ['beta', 'Бета'], ['dev', 'Девелоперский']], feed), feed === 'dev' ? 'сборки в разработке, возможны ошибки' : 'проверенные сборки; стабильный канал откроется с первым выпуском') : '') +
         '</dl>' + (feed === 'custom' ? kv([['Канал', 'свой адрес манифеста', '', null, '', 'задан в update.conf на роутере']]) : '') +
-        confirmBox('feed-dev', 'Перейти на канал Dev? Это сборки в разработке: в них возможны ошибки. Вернуться на бету можно в любой момент - обновления с беты придут, когда она догонит установленную версию.', 'Перейти', true),
+        confirmBox('feed-dev', 'Перейти на девелоперский канал? Это сборки в разработке: в них возможны ошибки. Вернуться на бету можно в любой момент - обновления с беты придут, когда она догонит установленную версию.', 'Перейти', true),
       { desc: 'Изменения сохраняются сразу. Подпись и защита от отката версии проверяются на любом канале.' });
   },
 
   settings() {
     const sec = S.security || {}, l = sec.listener || {}, api = sec.api || {}, au = S.auth || {};
+    const p = plat(), u = S.update || {}, updMode = !isTrue(p.auto_apply) ? 'ручная' : (cfg().update || {}).apply_window === 'any' ? 'автоматическая' : 'по расписанию';
     return loadError(['security']) +
+      panel('Программа VWARD', kv([
+        ['Версия и обновления', (p.version || '—') + (u.pending && u.pending.present ? ' · доступно ' + (u.pending.version || '') : ' · установка ' + updMode), u.pending && u.pending.present ? 'info' : '', 'updates']
+      ]) + '<dl class="kv">' + ctrlRow('Тема', sel('data-theme-pick', 'Тема оформления', Object.keys(THEMES).map(k => [k, THEMES[k].charAt(0).toUpperCase() + THEMES[k].slice(1)]), theme), theme === 'time' ? 'светлая с 07:00 до 20:00, тёмная ночью' : '') + '</dl>',
+        { desc: 'Версия, обновления и оформление. Тема хранится в этом браузере.' }) +
       panel('Доступ к VWARD', '<dl class="kv">' + ctrlRow('Вход по учётной записи Keenetic', sw('data-auth', !!(au.enabled || authForm), 'Вход по учётной записи Keenetic', !S.auth),
           au.enabled ? (au.logged_in ? 'вы вошли как ' + au.login + ' · сессия ' + au.session_hours + ' ч' : 'нужен вход') : 'пароль проверяет роутер, VWARD его не хранит') + '</dl>' +
         (authForm && !au.enabled ? '<form class="inline-form" data-form="auth-enable"><input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Включить вход</button></form><p class="panel-desc">Введите логин и пароль от веб-интерфейса роутера: вход включится, только если роутер их примет.</p>' : '') +
@@ -567,8 +582,11 @@ const RENDER = {
     return panel('Компоненты', '<ul class="rows">' + COMPONENTS.map(c => { const x = pc[c.id] || {}; return '<li class="row link" role="button" tabindex="0" data-go="c-' + c.id + '"><div class="row-main"><b>' + esc(c.name) + '</b><small>' + esc(x.release || plat().version || '—') + (x.installed_at ? ' · установлен ' + esc(x.installed_at) : '') + '</small></div>' + (compOn(c.id) ? '<span class="pill ' + (x.health === 'PASS' ? 'ok' : '') + '">' + (x.health === 'PASS' ? 'Норма' : 'Нет данных') + '</span>' : '<span class="pill warn">Выключен</span>') + ico('chevron', 'chev') + '</li>'; }).join('') + '</ul>');
   },
   'd-diag'() {
-    const d = S.diag, map = { 'console-api': 'settings', opt: 'system', lighttpd: 'c-console', crond: 'd-cron', supervisor: 'c-runtime', adguard: 'ads', adaptive: 'c-route-engine', updater: 'updates', config: 'updates', wan: 'wan', wg: 'vpn' };
-    return panel('Диагностика', (d && d.checks ? '<ul class="rows">' + d.checks.map(x => { const to = map[x.id]; return '<li class="row' + (to ? ' link" role="button" tabindex="0" data-go="' + to + '"' : '"') + '><div class="row-main"><b>' + esc(x.label) + '</b><small>' + esc(x.detail || '') + '</small></div><span class="pill ' + (x.status === 'PASS' ? 'ok' : x.status === 'FAIL' ? 'crit' : 'warn') + '">' + (x.status === 'PASS' ? 'Норма' : x.status === 'FAIL' ? 'Сбой' : 'Внимание') + '</span>' + (to ? ico('chevron', 'chev') : '') + '</li>'; }).join('') + '</ul>' : empty(S.errors.diag ? 'Диагностика не выполнена: ' + S.errors.diag : 'Загрузка…')) +
+    const d = S.diag, map = { 'console-api': 'settings', opt: 'system', lighttpd: 'c-console', crond: 'd-cron', supervisor: 'd-cron', adguard: 'ads', adaptive: 'c-route-engine', updater: 'updates', config: 'updates', wan: 'wan', wg: 'vpn' };
+    const sv = st().services || {};
+    return panel('Задания по расписанию', kv([['Задания по расписанию', sv.crond && sv.supervisor ? 'Работают' : sv.crond ? 'Supervisor остановлен' : 'cron остановлен', sv.crond && sv.supervisor ? 'ok' : 'crit', 'd-cron']]),
+        { desc: 'Здесь - сводка. Нажмите, чтобы открыть список заданий и их последние запуски.' }) +
+      panel('Диагностика', (d && d.checks ? '<ul class="rows">' + d.checks.map(x => { const to = map[x.id]; return '<li class="row' + (to ? ' link" role="button" tabindex="0" data-go="' + to + '"' : '"') + '><div class="row-main"><b>' + esc(x.label) + '</b><small>' + esc(x.detail || '') + '</small></div><span class="pill ' + (x.status === 'PASS' ? 'ok' : x.status === 'FAIL' ? 'crit' : 'warn') + '">' + (x.status === 'PASS' ? 'Норма' : x.status === 'FAIL' ? 'Сбой' : 'Внимание') + '</span>' + (to ? ico('chevron', 'chev') : '') + '</li>'; }).join('') + '</ul>' : empty(S.errors.diag ? 'Диагностика не выполнена: ' + S.errors.diag : 'Загрузка…')) +
       '<div class="panel-actions">' + btn('diag-run', 'check', 'Запустить проверку', 'primary') + '</div>');
   },
   'd-cron'() {
@@ -677,6 +695,7 @@ const RENDER = {
       { desc: 'Экспериментальный фильтр в режиме явного прокси. По умолчанию выключен.' });
   }
 };
+function durText(sec) { sec = Number(sec) || 0; return sec % 3600 === 0 ? (sec / 3600 === 1 ? 'час' : sec / 3600 + ' ч') : Math.round(sec / 60) + ' мин'; }
 const HOURS = Array.from({ length: 24 }, (x, i) => { const h = (i < 10 ? '0' : '') + i + ':00'; return [h, h]; });
 function withCur(opts, v, unit) { return v == null || v === '' || opts.some(o => String(o[0]) === String(v)) ? opts : opts.concat([[v, v + unit]]); }
 function countText(n) { return n + ' ' + plural(n, 'домен', 'домена', 'доменов'); }
@@ -861,15 +880,15 @@ function openNotes() {
   openSheet('Уведомления', '<div class="sheet-body">' + (n.length ? n.map(x => '<button class="note-item" type="button" data-go="' + x.to + '"><span class="sev ' + x.sev + '">' + ico('alert') + '</span><span><b>' + esc(x.title) + '</b><small>' + esc(x.text) + '</small></span></button>').join('') : empty('Всё работает штатно')) + '</div>', '', 'bellBtn');
 }
 const SEARCH_INDEX = [
-  ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Задания по расписанию'], ['system', 'Свободно'],
+  ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Свободно'],
   ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Автоматическое восстановление'], ['wan', 'История восстановлений'],
   ['vpn', 'Автоматическая защита'], ['vpn', 'fail-open'], ['vpn', 'Проверка туннеля'],
   ['lists', 'Использовано строк'],
   ['routes', 'Туннель для маршрутов'], ['routes', 'AdaptiveAuto'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
   ['ads', 'AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
-  ['updates', 'Установка обновлений'], ['updates', 'Окно установки'], ['updates', 'Интервал проверки'], ['updates', 'Канал'],
-  ['settings', 'Адрес VWARD'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
+  ['updates', 'Установка обновлений'], ['updates', 'Время установки'], ['updates', 'Интервал проверки'], ['updates', 'Канал'],
+  ['settings', 'Адрес VWARD'], ['settings', 'Тема'], ['settings', 'Версия и обновления'], ['d-diag', 'Задания по расписанию'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
 ];
 function openSearch() {
   openSheet('', '<div class="search-box">' + ico('search') + '<input id="searchInput" placeholder="Раздел, параметр или компонент" aria-label="Поиск по VWARD" autocomplete="off"><button class="icon-btn" type="button" data-act="close" aria-label="Закрыть">' + ico('close') + '</button></div><div class="sheet-body" id="searchResults"></div>', 'search', 'searchBtn');
@@ -1108,6 +1127,8 @@ document.addEventListener('change', e => {
   if (t.dataset.cfgRt) { cfgSet({ op: t.dataset.cfgRt, value: t.checked ? '1' : '0' }, 'Сохранено'); return; }
   if (t.dataset.ipcat) { cfgSet({ op: 'ip-category', target: t.dataset.ipcat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена - применится при следующей сверке'); return; }
   if (t.dataset.cfgCat) { cfgSet({ op: 'domain-category', target: t.dataset.cfgCat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена'); return; }
+  if (t.hasAttribute('data-theme-pick')) { setTheme(t.value); return; }
+  if (t.dataset.cfgWanp) { cfgSet({ op: 'wan-param', target: t.dataset.cfgWanp, value: t.value }, 'Сохранено', ['config']); return; }
   if (t.dataset.cfgUpd) { cfgSet({ op: 'update', target: t.dataset.cfgUpd, value: t.value }, 'Сохранено', ['status']); return; }
   if (t.hasAttribute('data-ads-pause')) { adsControl({ op: t.checked ? 'resume' : 'pause' }, t.checked ? 'Блокировка включена' : 'Блокировка на паузе'); return; }
   if (t.dataset.adsSet) { adsSetting(t.dataset.adsSet, t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value); return; }
@@ -1181,16 +1202,21 @@ document.addEventListener('submit', async e => {
 });
 
 /* ---------- Тема и обновление данных ---------- */
+// «По времени суток»: светлая с 07:00 до 20:00, тёмная ночью.
+const THEMES = { system: 'как в системе', time: 'по времени суток', light: 'светлая', dark: 'тёмная' };
 function applyTheme() {
-  const r = document.documentElement;
-  if (theme === 'system') r.removeAttribute('data-theme'); else r.setAttribute('data-theme', theme);
+  const r = document.documentElement, h = new Date().getHours();
+  const t = theme === 'time' ? (h >= 7 && h < 20 ? 'light' : 'dark') : theme;
+  if (t === 'system') r.removeAttribute('data-theme'); else r.setAttribute('data-theme', t);
   $('themeBtn').innerHTML = ico(theme === 'light' ? 'sun' : theme === 'dark' ? 'moon' : 'auto');
-  $('themeBtn').setAttribute('aria-label', 'Тема: ' + ({ system: 'как в системе', light: 'светлая', dark: 'тёмная' })[theme]);
+  $('themeBtn').setAttribute('aria-label', 'Тема: ' + THEMES[theme]);
 }
+function setTheme(v) { theme = THEMES[v] ? v : 'system'; store.set('vward-theme', theme); applyTheme(); if (current === 'settings') render(); }
 let timer = null;
 // A hidden tab does not poll the router; it catches up as soon as it is shown.
 function tick() {
   if (document.hidden) return;
+  if (theme === 'time') applyTheme();
   if (current !== 'logs') refreshPage();
   load('status', true).then(renderNav);
 }
@@ -1205,7 +1231,9 @@ document.addEventListener('visibilitychange', () => {
 $('backBtn').innerHTML = ico('back');
 $('backBtn').addEventListener('click', () => { if (histDepth() > 0) history.back(); else go(parentOf(current) || 'overview', null, 'replace'); });
 window.addEventListener('popstate', e => {
-  const s = e.state || { p: 'overview', d: 0 };
+  // No state: the address was typed or a link changed only the hash.
+  const s = e.state || { p: decodeURIComponent(location.hash.slice(1)) || 'overview', d: 0 };
+  if (!e.state) history.replaceState({ p: page(s.p) ? s.p : 'overview', d: histDepth() }, '', location.hash);
   if ($('layer').innerHTML) closeLayer(true);
   if (s.p !== current) go(s.p, null, 'pop');
 });
@@ -1213,7 +1241,7 @@ WIDE.addEventListener('change', renderNav);
 $('searchBtn').innerHTML = ico('search');
 $('searchBtn').addEventListener('click', openSearch);
 $('bellBtn').addEventListener('click', openNotes);
-$('themeBtn').addEventListener('click', () => { theme = ({ system: 'light', light: 'dark', dark: 'system' })[theme] || 'system'; store.set('vward-theme', theme); applyTheme(); toast('Тема: ' + ({ system: 'как в системе', light: 'светлая', dark: 'тёмная' })[theme]); });
+$('themeBtn').addEventListener('click', () => { setTheme(({ system: 'time', time: 'light', light: 'dark', dark: 'system' })[theme] || 'system'); toast('Тема: ' + THEMES[theme]); });
 applyTheme();
 { const h = decodeURIComponent(location.hash.slice(1)); if (page(h)) current = h; }
 history.replaceState({ p: current, d: 0 }, '', '#' + current);

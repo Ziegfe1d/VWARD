@@ -165,6 +165,26 @@ MAX_RENEW_HOUR=3
 MAX_BOUNCE_HOUR=2
 MAX_BOUNCE_DAY=6
 
+# Values set in VWARD (wan-guard.conf) replace the defaults above when they are in range.
+WAN_GUARD_CONF=${VWARD_WAN_GUARD_CONF:-/opt/etc/vward/wan-guard.conf}
+wg_conf_apply()
+{
+    [ -r "$WAN_GUARD_CONF" ] || return 0
+    while IFS='=' read -r WC_KEY WC_VALUE; do
+        case "$WC_VALUE" in ''|*[!0-9]*) continue ;; esac
+        case "$WC_KEY" in
+            CONFIRM_FAILURES) [ "$WC_VALUE" -ge 1 ] && [ "$WC_VALUE" -le 10 ] && CONFIRM_FAILURES=$WC_VALUE ;;
+            RENEW_COOLDOWN) [ "$WC_VALUE" -ge 60 ] && [ "$WC_VALUE" -le 7200 ] && RENEW_COOLDOWN=$WC_VALUE ;;
+            BOUNCE_COOLDOWN) [ "$WC_VALUE" -ge 300 ] && [ "$WC_VALUE" -le 21600 ] && BOUNCE_COOLDOWN=$WC_VALUE ;;
+            MAX_RENEW_HOUR) [ "$WC_VALUE" -ge 1 ] && [ "$WC_VALUE" -le 10 ] && MAX_RENEW_HOUR=$WC_VALUE ;;
+            MAX_BOUNCE_HOUR) [ "$WC_VALUE" -ge 1 ] && [ "$WC_VALUE" -le 6 ] && MAX_BOUNCE_HOUR=$WC_VALUE ;;
+            MAX_BOUNCE_DAY) [ "$WC_VALUE" -ge 1 ] && [ "$WC_VALUE" -le 24 ] && MAX_BOUNCE_DAY=$WC_VALUE ;;
+        esac
+    done < "$WAN_GUARD_CONF"
+    return 0
+}
+wg_conf_apply
+
 wg_num()
 {
     WR_VALUE="$(cat "$1" 2>/dev/null)"
