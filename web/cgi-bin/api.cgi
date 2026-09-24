@@ -102,7 +102,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control) ;;
+    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -127,7 +127,7 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             ;;
     esac
     case "$ACTION" in
-        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control) ;;
+        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth) ;;
         *)
             echo 'Status: 405 Method Not Allowed'
             header_json
@@ -532,7 +532,8 @@ if [ "$ACTION" = ads-data ]; then
   JOBS="$([ -x "$JOB" ] && "$JOB" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}')"
   LAST_OUTPUT_PATH="$(printf '%s' "$JOBS" | "$JQ" -r '.LAST_output // ""' 2>/dev/null)"; LAST_OUTPUT=""
   case "$LAST_OUTPUT_PATH" in "$AST/jobs/"*.out) [ -r "$LAST_OUTPUT_PATH" ] && LAST_OUTPUT="$(head -c 20000 "$LAST_OUTPUT_PATH" 2>/dev/null)" ;; esac
-  "$JQ" -n --argjson paused "$([ "$PAUSED" = 1 ]&&echo true||echo false)" --argjson settings "$SETJSON" --argjson sources "$SOURCES" --argjson manual "$MANUAL" --argjson jobsraw "$JOBS" --arg job_output "$LAST_OUTPUT" --argjson b "${BLOCKED:-0}" --argjson r "${REVIEW:-0}" --argjson a "${ALLOW:-0}" --argjson t "${TRUST:-0}" '{ok:true,component:"ads-privacy-guard",paused:$paused,settings:$settings,sources:$sources,manual_rules:$manual,counts:{blocked:$b,review:$r,allow:$a,trust:$t},categories:($sources | group_by(.purpose) | map({id:.[0].purpose, total:length, active:(map(select(.mode != "off")) | length)})),jobs:{queued:($jobsraw.JOB_QUEUE//"0"|(tonumber? // 0)),current:{state:($jobsraw.CURRENT_state//"IDLE"),type:($jobsraw.CURRENT_type//"")},last:{state:($jobsraw.LAST_state//"NONE"),type:($jobsraw.LAST_type//""),output:$job_output}}}'
+  AGH_ON=false; [ -s "${VWARD_ADS_AGH_AUTH_FILE:-$AETC/agh-api.auth}" ] && AGH_ON=true
+  "$JQ" -n --argjson agh "$AGH_ON" --argjson paused "$([ "$PAUSED" = 1 ]&&echo true||echo false)" --argjson settings "$SETJSON" --argjson sources "$SOURCES" --argjson manual "$MANUAL" --argjson jobsraw "$JOBS" --arg job_output "$LAST_OUTPUT" --argjson b "${BLOCKED:-0}" --argjson r "${REVIEW:-0}" --argjson a "${ALLOW:-0}" --argjson t "${TRUST:-0}" '{ok:true,component:"ads-privacy-guard",agh_connected:$agh,paused:$paused,settings:$settings,sources:$sources,manual_rules:$manual,counts:{blocked:$b,review:$r,allow:$a,trust:$t},categories:($sources | group_by(.purpose) | map({id:.[0].purpose, total:length, active:(map(select(.mode != "off")) | length)})),jobs:{queued:($jobsraw.JOB_QUEUE//"0"|(tonumber? // 0)),current:{state:($jobsraw.CURRENT_state//"IDLE"),type:($jobsraw.CURRENT_type//"")},last:{state:($jobsraw.LAST_state//"NONE"),type:($jobsraw.LAST_type//""),output:$job_output}}}'
   exit 0
 fi
 
@@ -559,6 +560,58 @@ if [ "$ACTION" = ads-https-control ]; then
   case "$OP" in ca-init) "$HTTPSCTL" ca-init --confirm >"$OUT" 2>&1||RC=$? ;; start) "$HTTPSCTL" start --confirm >"$OUT" 2>&1||RC=$? ;; restart) "$HTTPSCTL" restart --confirm >"$OUT" 2>&1||RC=$? ;; *) "$HTTPSCTL" "$OP" >"$OUT" 2>&1||RC=$? ;; esac
   RES="$(head -c 12000 "$OUT" 2>/dev/null)"; rm -f "$OUT"; printf '%s|ADS_HTTPS|op=%s rc=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$OP" "$RC" >>/opt/var/log/vward/console-audit.log
   "$JQ" -n --argjson ok "$([ "$RC" -eq 0 ]&&echo true||echo false)" --argjson rc "$RC" --arg output "$RES" '{ok:$ok,rc:$rc,output:$output}'
+  exit 0
+fi
+
+# agh-auth: connect VWARD to AdGuard Home's API.  The login is checked against
+# AdGuard Home itself before it is kept; the password never reaches argv or a log.
+if [ "$ACTION" = agh-auth ]; then
+  header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+  ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+  console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; trap console_mutation_leave EXIT
+  LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ] && [ "$LEN" -le 1024 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }
+  BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
+  val(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
+  AGH_AUTH=${VWARD_ADS_AGH_AUTH_FILE:-/opt/etc/vward/ads-privacy-guard/agh-api.auth}
+  AGH_BASE="http://${VWARD_ADGUARD_ADDRESS:-127.0.0.1}:${VWARD_ADGUARD_PORT:-3000}/control"
+  case "$(val op)" in
+    connect)
+      ALOGIN="$(val login)"
+      printf '%s\n' "$ALOGIN" | grep -Eq '^[A-Za-z0-9._@-]{1,64}$' || { echo '{"ok":false,"error":"invalid_login"}'; exit 0; }
+      # Decoded password, printable ASCII only; kept in a variable, never in argv.
+      APASS="$(printf '%s\n' "$BODY" | tr '&' '\n' | LC_ALL=C awk -F= '
+        BEGIN {h = "0123456789abcdef"}
+        $1 == "password" {
+          v = substr($0, index($0, "=") + 1); gsub(/\+/, " ", v); o = ""
+          while (match(tolower(v), /%[0-9a-f][0-9a-f]/)) {
+            c = (index(h, tolower(substr(v, RSTART + 1, 1))) - 1) * 16 + index(h, tolower(substr(v, RSTART + 2, 1))) - 1
+            if (c < 32 || c > 126) exit 1
+            o = o substr(v, 1, RSTART - 1) sprintf("%c", c); v = substr(v, RSTART + 3)
+          }
+          printf "%s", o v; exit
+        }')" || { echo '{"ok":false,"error":"invalid_password"}'; exit 0; }
+      [ -n "$APASS" ] && [ "${#APASS}" -le 128 ] || { echo '{"ok":false,"error":"invalid_password"}'; exit 0; }
+      # curl reads the credentials from a config on stdin: "user" with \ and " escaped.
+      AESC="$(printf '%s:%s' "$ALOGIN" "$APASS" | awk 'BEGIN {b = sprintf("%c", 92); q = sprintf("%c", 34)}
+        {for (i = 1; i <= length($0); i++) {c = substr($0, i, 1); printf "%s", ((c == b || c == q) ? b : "") c}}')"
+      ACODE="$(printf 'user = "%s"\n' "$AESC" | "$CURL" -K - -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 6 "$AGH_BASE/status" 2>/dev/null)"
+      case "$ACODE" in
+        200) ;;
+        401|403) echo '{"ok":false,"error":"wrong_credentials"}'; exit 0 ;;
+        *) echo '{"ok":false,"error":"adguard_unavailable"}'; exit 0 ;;
+      esac
+      umask 077; mkdir -p "$(dirname "$AGH_AUTH")" || { echo '{"ok":false,"error":"write_failed"}'; exit 0; }
+      ATMP="$(mktemp "$AGH_AUTH.XXXXXX" 2>/dev/null)" || { echo '{"ok":false,"error":"write_failed"}'; exit 0; }
+      printf '%s:%s\n' "$ALOGIN" "$APASS" > "$ATMP" && chmod 0600 "$ATMP" && mv -f "$ATMP" "$AGH_AUTH" || { rm -f "$ATMP"; echo '{"ok":false,"error":"write_failed"}'; exit 0; }
+      printf '%s|CONSOLE_ACTION|action=agh-connect login=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$ALOGIN" >> /opt/var/log/vward/console-audit.log 2>/dev/null
+      echo '{"ok":true,"connected":true}' ;;
+    disconnect)
+      [ "$(val confirm)" = AGH_DISCONNECT ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+      rm -f "$AGH_AUTH" || { echo '{"ok":false,"error":"write_failed"}'; exit 0; }
+      printf '%s|CONSOLE_ACTION|action=agh-disconnect\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >> /opt/var/log/vward/console-audit.log 2>/dev/null
+      echo '{"ok":true,"connected":false}' ;;
+    *) echo '{"ok":false,"error":"invalid_operation"}' ;;
+  esac
   exit 0
 fi
 

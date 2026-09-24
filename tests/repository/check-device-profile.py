@@ -60,6 +60,24 @@ VWARD_ADGUARD_PORT=3080
     assert result.returncode == 0, result.stderr
     assert result.stdout == "10.20.30.1|wg7|9088|10.20.30.2|3080"
 
+    # AdGuard Home's own config gives the port (and address) when device.conf does not.
+    agh = tmp / "AdGuardHome.yaml"
+    base = "\n".join(l for l in config.read_text().splitlines() if not l.startswith("VWARD_ADGUARD_")) + "\n"
+    config.write_text(base)
+    probe = 'vward_profile_load; printf "%s|%s" "$VWARD_ADGUARD_ADDRESS" "$VWARD_ADGUARD_PORT"'
+    for yaml, want in (
+        ("http:\n  pprof:\n    port: 6060\n  address: 10.20.30.1:3001\n  session_ttl: 720h\nusers:\n  - name: admin\n", "10.20.30.1|3001"),
+        ("bind_host: 0.0.0.0\nbind_port: 8083\n", "10.20.30.1|8083"),
+        ("dns:\n  port: 53\n", "10.20.30.1|3000"),
+    ):
+        agh.write_text(yaml)
+        result = run(probe, env | {"VWARD_ADGUARD_CONFIG": str(agh)})
+        assert result.returncode == 0 and result.stdout == want, (yaml, result.stdout, result.stderr)
+    config.write_text(base + "VWARD_ADGUARD_PORT=3080\n")
+    agh.write_text("http:\n  address: 10.20.30.1:3001\n")
+    result = run(probe, env | {"VWARD_ADGUARD_CONFIG": str(agh)})
+    assert result.stdout == "10.20.30.1|3080", "device.conf must win over AdGuard's config"
+
 # Simulated Keenetic with deliberately unusual names: nothing may depend on
 # Wireguard0/1, Bridge0, WifiMaster0/1 or a particular router model.
 INTERFACES = {

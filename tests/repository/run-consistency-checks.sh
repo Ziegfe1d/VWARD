@@ -69,6 +69,7 @@ python3 tests/repository/check-console-domain-lists.py || fail "Console domain l
 python3 tests/repository/check-list-watch.py || fail "Route engine list watch"
 python3 tests/repository/check-wan-guard-params.py || fail "Internet guard limits"
 python3 tests/repository/check-console-tunnel-probe.py || fail "Console tunnel check"
+python3 tests/repository/check-console-agh-auth.py || fail "Console AdGuard Home login"
 python3 tests/repository/check-console-tunnel.py || fail "Console tunnel switch"
 python3 tests/repository/check-component-graph.py || fail "Component dependency graph"
 python3 tests/repository/check-component-resilience.py || fail "Component disable resilience"

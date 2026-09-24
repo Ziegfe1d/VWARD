@@ -3,6 +3,7 @@
 VWARD_DEVICE_CONFIG=${VWARD_DEVICE_CONFIG:-/opt/etc/vward/device.conf}
 VWARD_DEVICE_MAP_CACHE=${VWARD_DEVICE_MAP_CACHE:-/tmp/vward-device-map.tsv}
 VWARD_DEVICE_MAP_TTL=${VWARD_DEVICE_MAP_TTL:-300}
+VWARD_ADGUARD_CONFIG=${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}
 VWARD_SYSFS_NET=${VWARD_SYSFS_NET:-/sys/class/net}
 VWARD_OWNED_GROUPS=${VWARD_OWNED_GROUPS:-AdaptiveAuto}
 
@@ -284,6 +285,24 @@ vward_profile_load()
     [ -n "${VWARD_PROBE_DNS:-}" ] || VWARD_PROBE_DNS=$VWARD_DNS_SERVER
     vward_valid_ipv4 "$VWARD_PROBE_DNS" || { vward_profile_error "invalid probe DNS server"; return 1; }
 
+    # Where AdGuard Home really listens: its own config (http.address, or the
+    # older bind_host/bind_port), unless device.conf says otherwise.
+    if [ -z "${VWARD_ADGUARD_PORT:-}" ] && [ -r "$VWARD_ADGUARD_CONFIG" ]; then
+        _vp_agh=$(awk '
+            /^http:/ {h = 1; next}
+            /^[^ ]/ {h = 0}
+            h && $1 == "address:" {print $2; exit}
+            $1 == "bind_host:" {bh = $2}
+            $1 == "bind_port:" {bp = $2}
+            END {if (bh != "" && bp != "") print bh ":" bp}' "$VWARD_ADGUARD_CONFIG" 2>/dev/null | head -n 1 | tr -d '"\047')
+        case "$_vp_agh" in
+            *:*) _vp_agh_host=${_vp_agh%:*}; _vp_agh_port=${_vp_agh##*:}
+                 case "$_vp_agh_port" in ''|*[!0-9]*) ;; *) VWARD_ADGUARD_PORT=$_vp_agh_port ;; esac
+                 if [ -z "${VWARD_ADGUARD_ADDRESS:-}" ] && [ "$_vp_agh_host" != 0.0.0.0 ] && vward_valid_ipv4 "$_vp_agh_host"; then
+                     VWARD_ADGUARD_ADDRESS=$_vp_agh_host
+                 fi ;;
+        esac
+    fi
     [ -n "${VWARD_ADGUARD_ADDRESS:-}" ] || VWARD_ADGUARD_ADDRESS=$VWARD_LAN_ADDRESS
     vward_valid_ipv4 "$VWARD_ADGUARD_ADDRESS" || { vward_profile_error "invalid AdGuard Home address"; return 1; }
     VWARD_ADGUARD_PORT=${VWARD_ADGUARD_PORT:-3000}

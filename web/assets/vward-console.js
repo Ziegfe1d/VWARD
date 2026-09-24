@@ -110,7 +110,7 @@ const API_ERRORS = {
   profile_verification_failed: 'профиль устройства не принял новый туннель, изменения отменены',
   rollback_incomplete: 'откат не завершён: проверьте маршруты групп в веб-интерфейсе Keenetic',
   temporary_file_unavailable: 'нет места для временного файла', component_disabled: 'компонент выключен: включите его в «Система → Компоненты»',
-  core_component: 'базовый компонент нельзя выключить', wrong_credentials: 'неверный логин или пароль', too_many_attempts: 'слишком много попыток - подождите 5 минут',
+  core_component: 'базовый компонент нельзя выключить', wrong_credentials: 'неверный логин или пароль', invalid_password: 'пароль: только латиница, цифры и обычные знаки, до 128 символов', too_many_attempts: 'слишком много попыток - подождите 5 минут',
   router_auth_unavailable: 'роутер не ответил на проверку пароля', invalid_login: 'недопустимый логин', auth_required: 'нужно войти', invalid_url: 'неверный адрес: нужен https без пробелов и логина', invalid_format: 'неизвестный формат списка',
   adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен'
 };
@@ -463,8 +463,10 @@ const RENDER = {
     return loadError(['ads']) +
       panel('Блокировка', '<dl class="kv">' + ctrlRow('Блокировка рекламы и трекеров', sw('data-ads-pause', !a.paused, 'Блокировка рекламы', !S.ads), a.paused ? 'на паузе - реклама не блокируется' : '') + '</dl>' +
         kv([aghUrl ? ['AdGuard Home', aghHost + ':' + ag.port, '', aghUrl] : ['AdGuard Home', 'адрес не настроен'],
-          st1 && st1.ok ? ['Запросов за сутки', fmtInt(st1.queries), '', 'd-querylog'] : ['Запросов за сутки', 'AdGuard Home не ответил', '', 'd-querylog'],
+          S.ads ? ['Подключение VWARD', a.agh_connected ? 'Подключено' : 'Не подключено', a.agh_connected ? 'ok' : 'warn'] : null,
+          st1 && st1.ok ? ['Запросов за сутки', fmtInt(st1.queries), '', 'd-querylog'] : ['Запросов за сутки', st1 ? errText(st1) : 'загрузка…', st1 ? 'warn' : '', 'd-querylog'],
           st1 && st1.ok ? ['Заблокировано за сутки', fmtInt(st1.blocked) + (st1.queries ? ' · ' + Math.round(100 * st1.blocked / st1.queries) + '%' : ''), '', 'd-querylog', ' data-qfilter="blocked"'] : null])) +
+      aghConnectPanel(a) +
       panel('Списки и правила', kv([
         ['Журнал запросов', 'последние 100', '', 'd-querylog'],
         ['Заблокировано доменов', fmtInt(c.blocked), '', 'd-blocked'],
@@ -752,6 +754,14 @@ function tunnelPage(name) {
     tunnelProbePanel(name);
 }
 // Filled only by «Проверить сейчас»: the router does not do this in the background.
+// AdGuard Home asks for a login: VWARD keeps it (root-only file) after AdGuard accepts it.
+function aghConnectPanel(a) {
+  if (!S.ads) return '';
+  if (a.agh_connected) return panel('Подключение к AdGuard Home', (confirmBox('agh-off', 'Отключить VWARD от AdGuard Home? Статистика и журнал запросов перестанут показываться.', 'Отключить', true) ||
+    '<div class="panel-actions">' + btn('ask', 'undo', 'Отключить', '', ' data-confirm="agh-off"') + '</div>'), { desc: 'VWARD читает статистику и журнал запросов AdGuard Home под сохранённым логином.' });
+  return panel('Подключение к AdGuard Home', '<form class="inline-form" data-form="agh-connect"><input class="input" name="login" placeholder="логин AdGuard Home" aria-label="Логин AdGuard Home" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль AdGuard Home" autocomplete="current-password"><button class="btn primary" type="submit">Подключить</button></form>',
+    { desc: 'Логин и пароль от веб-интерфейса AdGuard Home. VWARD сначала проверит их у AdGuard Home, потом сохранит в файл, доступный только root.' });
+}
 function tunnelProbePanel(name) {
   const r = S.tprobe[name], ex = r && r.exit, sv = (r && r.server) || {}, pg = (r && r.ping) || {};
   const place = ex ? [ex.city, ex.region, ex.country].filter(Boolean).join(', ') : '';
@@ -949,6 +959,7 @@ const CONFIRMED = {
   'ads-publish': () => runAction('ads', 'ads-control', { op: 'enqueue', job: 'publish', confirm: 'ADS_PUBLISH' }, 'Публикация поставлена в очередь').then(() => load('ads', true)).then(render),
   'https-start': () => runAction('https', 'ads-https-control', { op: 'start', confirm: 'HTTPS_START' }, 'HTTPS-фильтр запущен').then(() => load('https', true)).then(render),
   'https-ca': () => runAction('https', 'ads-https-control', { op: 'ca-init', confirm: 'HTTPS_CA_INIT' }, 'Сертификат создан').then(() => load('https', true)).then(render),
+  'agh-off': () => apiPost('agh-auth', { op: 'disconnect', confirm: 'AGH_DISCONNECT' }).then(x => { toast(x.ok ? 'AdGuard Home отключён' : 'Не отключено: ' + errText(x)); return load('ads', true); }).then(render, () => render()),
   'auth-off': () => apiPost('auth', { op: 'disable', confirm: 'CONSOLE_AUTH_DISABLE' }).then(x => { toast(x.ok ? 'Вход выключен' : 'Не выключено: ' + errText(x)); return Promise.all([load('auth', true), load('security', true)]); }).then(render, () => render()),
   'ads-autopub': () => adsSetting('AUTO_PUBLISH', '1').then(() => load('adspub', true)).then(render),
   'feed-dev': () => cfgSet({ op: 'update-feed', target: 'dev', confirm: 'UPDATE_FEED_DEV' }, 'Канал: Dev'),
@@ -1186,6 +1197,17 @@ document.addEventListener('submit', async e => {
     if (!DOMAIN.test(v)) { toast('Введите домен, например example.com'); return; }
     const x = await cfgSet({ op: e.target.dataset.op, action: 'add', target: v }, v + ' добавлен', ['route']);
     if (x && x.ok) { const again = document.querySelector('form[data-form="cfg-add"] input'); if (again) again.value = ''; }
+  }
+  if (f === 'agh-connect') {
+    const login = e.target.querySelector('[name=login]').value.trim(), password = e.target.querySelector('[name=password]').value;
+    if (!/^[A-Za-z0-9._@-]{1,64}$/.test(login) || !password) { toast('Введите логин и пароль AdGuard Home'); return; }
+    let x;
+    try { x = await apiPost('agh-auth', { op: 'connect', login: login, password: password }); }
+    catch (err) { toast('Ошибка: ' + err.message); return; }
+    e.target.querySelector('[name=password]').value = '';
+    if (!x.ok) { toast(errText(x)); return; }
+    toast('AdGuard Home подключён');
+    await Promise.all([load('ads', true), load('adsstats', true)]); render(); return;
   }
   if (f === 'login' || f === 'auth-enable') {
     const login = e.target.querySelector('[name=login]').value.trim(), password = e.target.querySelector('[name=password]').value;
