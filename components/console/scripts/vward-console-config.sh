@@ -696,6 +696,14 @@ op_domain_list_watch() {
     done_ok "domain-list-watch $1 $2" changed
 }
 
+# smartdns-guard 0|1: 0 lets AdaptiveAuto take Smart DNS domains again.
+op_smartdns_guard() {
+    case "$1" in 0|1) ;; *) die invalid_value 64 ;; esac
+    set_kv "$LISTS_CONF" smartdns_guard "$1" 0644 || done_ok "smartdns-guard $1" unchanged
+    mkdir -p "$ROUTE_STATE" 2>/dev/null && echo 0 > "$REFRESH_TS" 2>/dev/null
+    done_ok "smartdns-guard $1" changed
+}
+
 # ---------- Components ----------
 #
 # Disabling a component also disables everything that requires it running
@@ -756,7 +764,7 @@ op_component() {
 
 [ "$#" -ge 2 ] && [ "$#" -le 3 ] || die usage 64
 OP=$1; shift
-case "$OP" in tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth) [ "$#" -eq 1 ] || die usage 64 ;; *) [ "$#" -eq 2 ] || die usage 64 ;; esac
+case "$OP" in tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|smartdns-guard) [ "$#" -eq 1 ] || die usage 64 ;; *) [ "$#" -eq 2 ] || die usage 64 ;; esac
 ARG1=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
 ARG2=${2:-}
 case "$OP" in wifi|update|wan-param|tunnel|domain-list|domain-list-watch) ARG1=$1 ;; esac
@@ -787,6 +795,7 @@ case "$OP" in
     tunnel) op_tunnel "$ARG1" ;;
     domain-list) op_domain_list "$ARG1" "$ARG2" ;;
     domain-list-watch) op_domain_list_watch "$ARG1" "$ARG2" ;;
+    smartdns-guard) op_smartdns_guard "$ARG1" ;;
     wifi) op_wifi "$ARG1" "$ARG2" ;;
     update) op_update "$ARG1" "$ARG2" ;;
     wan-param) op_wan_param "$ARG1" "$ARG2" ;;

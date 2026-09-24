@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Smart DNS guard: lists-data flags tunnel lists that hold Smart DNS domains,
+the switch is written by the Console helper, and AdaptiveAuto skips those domains."""
+
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+ENGINE = (ROOT / "components/route-engine/scripts/vward-route-engine.sh").read_text()
+
+RUNNING = """dns-proxy
+    route object-group domain-list4 ISP auto
+    route object-group domain-list9 Wireguard0 auto
+    route object-group domain-list7 Wireguard0 auto
+    route object-group domain-list5 Wireguard0 auto
+    https upstream https://x.example/dns-query dnsm on ISP domain gemini.google.com
+    https upstream https://x.example/dns-query dnsm on ISP domain anthropic.com
+!
+object-group fqdn domain-list4
+    include claude.ai
+    include anthropic.com
+!
+object-group fqdn domain-list9
+    include google.com
+!
+object-group fqdn domain-list7
+    include telegram.org
+!
+object-group fqdn domain-list5
+    include api.anthropic.com
+!
+"""
+
+
+def fail(message: str) -> None:
+    raise SystemExit(f"FAIL: {message}")
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    ndmc = tmp / "ndmc"
+    ndmc.write_text(f'#!/bin/sh\n[ "$2" = "show running-config" ] && cat "{tmp}/running"\n')
+    ndmc.chmod(0o755)
+    (tmp / "running").write_text(RUNNING)
+    lists_conf = tmp / "etc/route-engine/domain-lists.conf"
+    lists_conf.parent.mkdir(parents=True)
+    env = os.environ | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=lists-data", "JQ": shutil.which("jq"),
+                        "VWARD_NDMC": str(ndmc), "VWARD_PROFILE_LIB": "/nonexistent", "VWARD_TUNNEL_INTERFACE": "Wireguard0",
+                        "VWARD_DOMAIN_LISTS_CONF": str(lists_conf)}
+
+    def lists():
+        r = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=env, text=True, capture_output=True)
+        return json.loads(r.stdout.split("\n\n", 1)[1])
+
+    data = lists()
+    got = {l["name"]: l["smartdns_conflict"] for l in data["lists"]}
+    # google.com in a tunnel list takes gemini.google.com; api.anthropic.com sits under anthropic.com.
+    if got != {"domain-list4": False, "domain-list9": True, "domain-list7": False, "domain-list5": True}:
+        fail(f"conflicts: {got}")
+    if data["smartdns_domains"] != ["gemini.google.com", "anthropic.com"] or data["smartdns_guard"] is not True:
+        fail(f"Smart DNS summary: {data['smartdns_domains']} {data['smartdns_guard']}")
+    lists_conf.write_text("smartdns_guard=0\n")
+    if lists()["smartdns_guard"] is not False:
+        fail("the switch state is not reported")
+
+# The engine keeps a list of Smart DNS domains and checks it before AdaptiveAuto.
+host = ENGINE[ENGINE.index("handle_host()\n"):]
+if host.index('parent_list_match "$HOST" "$SMARTDNS"') > host.index('if is_adaptive "$HOST"'):
+    fail("Smart DNS domains must be skipped before AdaptiveAuto handles a host")
+awk = ENGINE[ENGINE.index("            /^[^ \\t!]/ {ctx"):ENGINE.index("' \"$CFG\" | sort -u > \"$SMARTDNS\"")]
+r = subprocess.run(["awk", "\n".join(awk.splitlines())], input=RUNNING, text=True, capture_output=True)
+if sorted(r.stdout.split()) != ["anthropic.com", "gemini.google.com"]:
+    fail(f"engine Smart DNS extraction: {r.stdout!r}")
+
+print("CONSOLE_SMARTDNS=PASS")

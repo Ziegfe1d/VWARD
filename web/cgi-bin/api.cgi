@@ -458,7 +458,7 @@ if [ "$ACTION" = config ]; then
         tunnel-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=TUNNEL_GUARD_DISABLE ;;
         wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;
         component) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=COMPONENT_DISABLE ;;
-        adaptive-mode|classifier) set -- "$OP" "$VALUE" ;;
+        adaptive-mode|classifier|smartdns-guard) set -- "$OP" "$VALUE" ;;
         ip-category) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
         domain-list|domain-list-watch) set -- "$OP" "$TARGET" "$VALUE" ;;
@@ -1148,6 +1148,31 @@ if [ "$ACTION" = "diagnostics" ]; then
     case "$WG_COUNT" in ''|*[!0-9]*) WG_COUNT=0 ;; esac
     [ "$WG_COUNT" -gt 0 ] && WG_STATUS=PASS || WG_STATUS=WARN
 
+    # Smart DNS: each domain bound to a DNS-over-HTTPS server must resolve to an
+    # address that leaves through the provider, never through a tunnel.
+    SMARTDNS_STATUS=PASS SMARTDNS_DETAIL="Smart DNS не используется"
+    SD_DOMAINS="$("${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r' | awk '
+        /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
+        ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print tolower($NF)}' | sort -u | head -n 16)"
+    if [ -n "$SD_DOMAINS" ]; then
+        SD_BAD=""; SD_N=0
+        for SD in $SD_DOMAINS; do
+            case "$SD" in *[!a-z0-9.-]*) continue ;; esac
+            SD_IP="$(nslookup "$SD" "${VWARD_DNS_SERVER:-127.0.0.1}" 2>/dev/null | awk '/^Name:/ {n = 1; next} n {for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) {print $i; exit}}')"
+            [ -n "$SD_IP" ] || continue
+            SD_N=$((SD_N + 1))
+            SD_DEV="$(ip route get "$SD_IP" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')"
+            if [ -n "$SD_DEV" ] && { [ "$SD_DEV" = "${VWARD_TUNNEL_DEVICE:-}" ] || [ -d "/sys/class/net/$SD_DEV/wireguard" ] || [ "$(cat "/sys/class/net/$SD_DEV/type" 2>/dev/null)" = 65534 ]; }; then
+                SD_BAD="$SD_BAD $SD($SD_IP→$SD_DEV)"
+            fi
+        done
+        if [ -n "$SD_BAD" ]; then
+            SMARTDNS_STATUS=FAIL SMARTDNS_DETAIL="Уходит в туннель:$SD_BAD - Smart DNS не работает для всех своих доменов. Проверьте «Доменные списки»."
+        else
+            SMARTDNS_DETAIL="Доменов: $(printf '%s\n' "$SD_DOMAINS" | wc -l | tr -d ' '), проверено адресов: $SD_N, все идут через провайдера"
+        fi
+    fi
+
     OPT_FREE="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $4+0}')"
     [ -n "$OPT_FREE" ] || OPT_FREE=0
     LAST_WAN_RC="$(cat /tmp/vward-wan-guard.cron.rc 2>/dev/null)"
@@ -1161,6 +1186,7 @@ if [ "$ACTION" = "diagnostics" ]; then
       --arg adguard "$ADGUARD_STATUS" --arg adaptive "$ADAPTIVE_STATUS" \
       --arg updater "$UPDATE_STATUS" --arg config "$CONFIG_STATUS" --arg cgi "$CGI_STATUS" \
       --arg wan "$WAN_STATUS" --arg wg "$WG_STATUS" \
+      --arg smartdns "$SMARTDNS_STATUS" --arg smartdns_detail "$SMARTDNS_DETAIL" \
       --arg wan_rc "$LAST_WAN_RC" --arg wg_rc "$LAST_WG_RC" --arg route_rc "$LAST_ROUTE_RC" \
       --argjson wg_count "$WG_COUNT" --argjson opt_free "$OPT_FREE" \
       '{ok:true,checks:[
@@ -1176,6 +1202,7 @@ if [ "$ACTION" = "diagnostics" ]; then
         {id:"adaptive",component:"route-engine",label:"Adaptive Live",status:$adaptive,detail:("Последний route RC: "+$route_rc)},
         {id:"wan",component:"wan-guard",label:"WAN",status:$wan,detail:"Read-only RCI probe"},
         {id:"wg",component:"tunnel-guard",label:"WireGuard",status:$wg,detail:("Найдено туннелей: "+($wg_count|tostring)+"; cron RC: "+$wg_rc)},
+        {id:"smartdns",component:"route-engine",label:"Smart DNS мимо VPN",status:$smartdns,detail:$smartdns_detail},
         {id:"updater",component:"update-engine",label:"VWARD Update Engine",status:$updater,detail:"Активный updater slot"},
         {id:"update-config",component:"update-engine",label:"Update config",status:$config,detail:"Конфигурация доступна для чтения"}
       ]}'
@@ -1421,6 +1448,7 @@ if [ "$ACTION" = lists-data ]; then
         ctx && $1 == "route" && $2 == "object-group" {print "R\t" $3 "\t" $4}
         ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print "D\t" tolower($NF)}
     ' | "$JQ" -Rn --arg tun "${VWARD_TUNNEL_INTERFACE:-}" --arg dev "${VWARD_TUNNEL_DEVICE:-}" --arg wan "${VWARD_WAN_INTERFACE:-}" \
+        --argjson guard "$([ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" = 0 ] && echo false || echo true)" \
         --argjson watched "$WATCHED" --argjson returns "$RETURNS" --argjson auto "$AUTO" '
         reduce (inputs | split("\t")) as $r ({g: {}, order: [], r: {}, doh: []};
             if $r[0] == "G" then (if .g[$r[1]] then . else .g[$r[1]] = {description: "", domains: []} | .order += [$r[1]] end)
@@ -1430,11 +1458,15 @@ if [ "$ACTION" = lists-data ]; then
             elif $r[0] == "D" then .doh += [$r[1]]
             else . end)
         | . as $s
-        | {ok: true, tunnel: $tun, doh_used: ($s.doh | length), doh_limit: 8,
+        | {ok: true, tunnel: $tun, doh_used: ($s.doh | length), doh_limit: 8, smartdns_domains: $s.doh, smartdns_guard: $guard,
            lists: [$s.order[] | select(. != "AdaptiveAuto") | . as $n | $s.g[$n] as $l | ($s.r[$n] // "") as $t |
              {name: $n, description: $l.description, count: ($l.domains | length), domains: $l.domains[:200], route: $t,
               via: (if $t == "" then "none" elif $t == $tun or $t == $dev then "vpn" elif $t == "ISP" or $t == $wan then "bypass" else "other" end),
               doh: [$s.doh[] as $d | select(any($l.domains[] as $i | $d == $i or ($d | endswith("." + $i)); .)) | $d],
+              # Smart DNS answers every domain with one proxy address: one such domain in a
+              # tunnel list sends that address - and every Smart DNS service - into the tunnel.
+              smartdns_conflict: ((($t == $tun or $t == $dev) and $t != "") and
+                any($s.doh[] as $d | $l.domains[] as $i | $d == $i or ($d | endswith("." + $i)) or ($i | endswith("." + $d)); .)),
               watch: ($watched | index([$n]) != null), returnable: ($returns | index([$n]) != null),
               auto: ($auto[$n] // null)}]}'
     exit 0

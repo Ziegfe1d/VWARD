@@ -287,6 +287,8 @@ function loadError(keys) {
 function notifications() {
   const n = [], s = S.status;
   if (S.errors.status) n.push({ sev: 'crit', title: 'Нет связи с роутером', text: S.errors.status, to: 'system' });
+  const sdc = ((S.lists && S.lists.lists) || []).filter(l => l.smartdns_conflict);
+  if (sdc.length) n.push({ sev: 'warn', title: 'Smart DNS уйдёт в VPN', text: 'Домены Smart DNS есть в списках через VPN: ' + sdc.map(l => l.description || l.name).join(', '), to: 'lists' });
   if (!s) return n;
   const w = s.wan || {}, wg = s.wg || {}, sv = s.services || {}, p = s.platform || {}, stg = s.storage || {};
   if (w.internet === false) n.push({ sev: 'crit', title: 'Нет интернета', text: 'Защита интернета восстанавливает подключение', to: 'wan' });
@@ -584,7 +586,7 @@ const RENDER = {
     return panel('Компоненты', '<ul class="rows">' + COMPONENTS.map(c => { const x = pc[c.id] || {}; return '<li class="row link" role="button" tabindex="0" data-go="c-' + c.id + '"><div class="row-main"><b>' + esc(c.name) + '</b><small>' + esc(x.release || plat().version || '—') + (x.installed_at ? ' · установлен ' + esc(x.installed_at) : '') + '</small></div>' + (compOn(c.id) ? '<span class="pill ' + (x.health === 'PASS' ? 'ok' : '') + '">' + (x.health === 'PASS' ? 'Норма' : 'Нет данных') + '</span>' : '<span class="pill warn">Выключен</span>') + ico('chevron', 'chev') + '</li>'; }).join('') + '</ul>');
   },
   'd-diag'() {
-    const d = S.diag, map = { 'console-api': 'settings', opt: 'system', lighttpd: 'c-console', crond: 'd-cron', supervisor: 'd-cron', adguard: 'ads', adaptive: 'c-route-engine', updater: 'updates', config: 'updates', wan: 'wan', wg: 'vpn' };
+    const d = S.diag, map = { 'console-api': 'settings', opt: 'system', lighttpd: 'c-console', crond: 'd-cron', supervisor: 'd-cron', adguard: 'ads', adaptive: 'c-route-engine', updater: 'updates', config: 'updates', wan: 'wan', wg: 'vpn', smartdns: 'lists' };
     const sv = st().services || {};
     return panel('Задания по расписанию', kv([['Задания по расписанию', sv.crond && sv.supervisor ? 'Работают' : sv.crond ? 'Supervisor остановлен' : 'cron остановлен', sv.crond && sv.supervisor ? 'ok' : 'crit', 'd-cron']]),
         { desc: 'Здесь - сводка. Нажмите, чтобы открыть список заданий и их последние запуски.' }) +
@@ -624,13 +626,16 @@ const RENDER = {
     const row = l => {
       const can = ok && (viaIs(l, 'vpn') || viaIs(l, 'bypass')), title = l.description || l.name;
       return '<li class="row"><div class="row-main"><b>' + esc(title) + '</b><small>' + fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + ' · ' + esc(path(l)) + '</small>' +
+        (l.smartdns_conflict ? '<small class="field-warn">В списке есть домены Smart DNS: их общий адрес уйдёт в VPN, и Smart DNS перестанет работать для всех сервисов. Переведите список в обход VPN или уберите эти домены.</small>' : '') +
         (l.auto && viaIs(l, 'vpn') ? '<small class="field-warn">Переведён на VPN автоматически ' + esc(l.auto.at) + ': не открылся ' + esc(l.auto.host) + '</small>' : '') + '</div>' +
         '<span class="row-acts"><label class="row-switch">В обход VPN' + sw('data-list-bypass="' + esc(l.name) + '"', viaIs(l, 'bypass'), 'В обход VPN: ' + title, !can) + '</label>' +
         '<label class="row-switch">Следить' + sw('data-list-watch="' + esc(l.name) + '"', l.watch, 'Следить: ' + title, !ok) + '</label></span></li>';
     };
     return cfgNote() + panel('Доменные списки', items.length ? '<ul class="rows">' + items.map(row).join('') + '</ul>' : empty('В Keenetic нет доменных списков'),
       { desc: '«В обход VPN» выключен — список идёт через туннель ' + (L.tunnel || '') + ', строки Smart DNS его доменов на это время убираются. «Следить» — если сервис из списка, идущего в обход VPN, перестанет открываться, VWARD сам переведёт список на VPN.' }) +
-      panel('Smart DNS', kv([['Использовано строк', fmtInt(L.doh_used) + ' из ' + fmtInt(L.doh_limit), L.doh_used >= L.doh_limit ? 'warn' : '']]), { desc: 'Keenetic хранит не больше ' + L.doh_limit + ' строк DNS-over-HTTPS. Когда список уходит на VPN, его строки освобождаются.' });
+      panel('Smart DNS', '<dl class="kv">' + ctrlRow('Защита Smart DNS', sw('data-smartdns-guard', L.smartdns_guard !== false, 'Защита Smart DNS', !ok), 'AdaptiveAuto не отправляет домены Smart DNS в VPN') + '</dl>' +
+        kv([['Использовано строк', fmtInt(L.doh_used) + ' из ' + fmtInt(L.doh_limit), L.doh_used >= L.doh_limit ? 'warn' : ''], ['Домены', (L.smartdns_domains || []).join(', ') || 'нет']]),
+        { desc: 'Smart DNS отвечает на все свои домены одним адресом прокси. Если этот адрес уйдёт в VPN, перестанут работать все сервисы Smart DNS сразу. Keenetic хранит не больше ' + L.doh_limit + ' строк DNS-over-HTTPS.' });
   },
   'd-adaptive'() {
     const list = S.config ? cfgRoute().adaptive || [] : (S.route && S.route.adaptive && S.route.adaptive.recent) || [];
@@ -1163,6 +1168,7 @@ document.addEventListener('change', e => {
   if (t.dataset.ipcat) { cfgSet({ op: 'ip-category', target: t.dataset.ipcat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена - применится при следующей сверке'); return; }
   if (t.dataset.cfgCat) { cfgSet({ op: 'domain-category', target: t.dataset.cfgCat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена'); return; }
   if (t.hasAttribute('data-theme-pick')) { setTheme(t.value); return; }
+  if (t.hasAttribute('data-smartdns-guard')) { cfgSet({ op: 'smartdns-guard', value: t.checked ? '1' : '0' }, t.checked ? 'Защита Smart DNS включена' : 'Защита Smart DNS выключена', ['lists']); return; }
   if (t.dataset.cfgWanp) { cfgSet({ op: 'wan-param', target: t.dataset.cfgWanp, value: t.value }, 'Сохранено', ['config']); return; }
   if (t.dataset.cfgUpd) { cfgSet({ op: 'update', target: t.dataset.cfgUpd, value: t.value }, 'Сохранено', ['status']); return; }
   if (t.hasAttribute('data-ads-pause')) { adsControl({ op: t.checked ? 'resume' : 'pause' }, t.checked ? 'Блокировка включена' : 'Блокировка на паузе'); return; }

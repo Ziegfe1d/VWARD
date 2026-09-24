@@ -40,6 +40,9 @@ HOSTS="/tmp/vward-route-engine-hosts.$$"
 # Results of ordinary domain checks change every few minutes and are cheap to
 # repeat, so they live in RAM. Only AdaptiveAuto decisions stay on USB.
 VOLATILE_DIR="${VWARD_ROUTE_VOLATILE_STATE:-/tmp/vward-route-engine-state}"
+# Smart DNS (DNS-over-HTTPS bound to domains) answers with a proxy address that
+# must stay on the provider: AdaptiveAuto never takes those domains.
+SMARTDNS="$VOLATILE_DIR/smartdns-domains.txt"
 
 # Domain lists routed around the tunnel whose watch switch is on (Console):
 # when their service fails on that path, the list is moved into the tunnel
@@ -131,7 +134,8 @@ refresh_sets()
 
     if [ $((NOW - LAST)) -lt "$GROUP_REFRESH" ] &&
        [ -f "$MANUAL" ] &&
-       [ -f "$ADAPTIVE" ]; then
+       [ -f "$ADAPTIVE" ] &&
+       [ -f "$SMARTDNS" ]; then
         return 0
     fi
 
@@ -175,6 +179,16 @@ refresh_sets()
     sort -u > "${MANUAL}.new"
 
     list_watch_map "$CFG" "$ALL"
+
+    mkdir -p "$VOLATILE_DIR" 2>/dev/null
+    if [ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" = 0 ]; then
+        : > "$SMARTDNS"
+    else
+        awk '
+            /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
+            ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print tolower($NF)}
+        ' "$CFG" | sort -u > "$SMARTDNS"
+    fi
 
     # Unchanged lists are not rewritten on USB.
     for L in "$ADAPTIVE" "$MANUAL"; do
@@ -1239,6 +1253,11 @@ handle_host()
         return
     fi
 
+
+    # Smart DNS: адрес прокси общий для всех его доменов, в VPN его не отправляем.
+    if parent_list_match "$HOST" "$SMARTDNS"; then
+        return
+    fi
 
     # AdaptiveAuto обслуживается двусторонне.
     if is_adaptive "$HOST"; then
