@@ -142,6 +142,14 @@ with tempfile.TemporaryDirectory() as td:
         assert "CHECKING --check" in run["output"] and "done" in run["output"], run
     finally:
         del os.environ["VWARD_UPDATER_BIN"], os.environ["VWARD_CONSOLE_UPDATE_RUN"]
+with tempfile.TemporaryDirectory() as td:
+    os.environ["VWARD_CONSOLE_CONTROL_RUN"] = td
+    try:
+        idle = call_api("action=control-data")
+        assert idle.get("ok") is True and idle["run"]["running"] is False and idle["run"]["rc"] is None, idle
+    finally:
+        del os.environ["VWARD_CONSOLE_CONTROL_RUN"]
+assert 'refresh-hints|route-reconcile|policy-refresh|policy-reconcile|housekeeping) run_detached "$CONTROL_RUN_DIR" control_busy' in API
 # Ads views and source management: strict input before anything runs.
 assert call_api("action=ads-view&view=querylog&search=a%26b")["error"] == "invalid_value"
 assert call_api("action=ads-view&view=shell")["error"] in ("invalid_view", "action_unavailable")

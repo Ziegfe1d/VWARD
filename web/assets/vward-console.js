@@ -848,8 +848,8 @@ async function runAction(resultId, action, fields, okMsg) {
   finally { render(); }
 }
 const CONFIRMED = {
-  'route-reconcile': () => runAction('routes', 'control', { op: 'route-reconcile', confirm: 'ROUTE_RECONCILE' }, 'Маршруты сверены').then(() => load('route', true)).then(render),
-  'policy-refresh': () => runAction('routes', 'control', { op: 'policy-refresh', confirm: 'POLICY_REFRESH' }, 'IP-категории обновлены').then(() => load('route', true)).then(render),
+  'route-reconcile': () => runLong('routes', 'control', { op: 'route-reconcile', confirm: 'ROUTE_RECONCILE' }, 'control-data', 'Маршруты сверены').then(() => load('route', true)).then(render),
+  'policy-refresh': () => runLong('routes', 'control', { op: 'policy-refresh', confirm: 'POLICY_REFRESH' }, 'control-data', 'IP-категории обновлены').then(() => load('route', true)).then(render),
   'update-apply': () => updateOp('apply', 'APPLY_UPDATE'),
   'update-retry': () => updateOp('retry', 'RETRY_UPDATE'),
   'update-rollback': () => updateOp('rollback', 'ROLLBACK_UPDATE'),
@@ -904,12 +904,13 @@ async function updateMode(mode) {
   await runAction('updates', 'settings', { auto_apply: on, auto_critical: isTrue(p.auto_critical) ? '1' : '0', auto_important: isTrue(p.auto_important) ? '1' : '0', auto_routine: isTrue(p.auto_routine) ? '1' : '0' }, 'Настройки обновлений сохранены');
   await Promise.all([load('status', true), load('config', true)]); render();
 }
-/* The router runs the updater in the background: an install takes longer than one request may wait. */
-async function updateOp(op, token) {
-  const show = text => { actionResult = { id: 'updates', text: text }; render(); };
+/* Long operations run in the background on the router: they outlast the 10-second request.
+   The Console polls dataAction and shows the output until the run finishes. */
+async function runLong(resultId, action, fields, dataAction, okMsg) {
+  const show = text => { actionResult = { id: resultId, text: text }; render(); };
   show('Запускаем…');
   let x;
-  try { x = await apiPost('update-control', token ? { op: op, confirm: token } : { op: op }); }
+  try { x = await apiPost(action, fields); }
   catch (e) { toast('Ошибка: ' + e.message); show('Ошибка: ' + e.message); return; }
   if (!x.ok) { toast('Не выполнено: ' + errText(x)); show('Ошибка: ' + errText(x)); return; }
   let run = {};
@@ -917,13 +918,16 @@ async function updateOp(op, token) {
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 3000));
     let u;
-    try { u = await apiGet('update-data'); } catch (e) { continue; }
+    try { u = await apiGet(dataAction); } catch (e) { continue; }
     run = u.run || {};
-    show((run.output || '').trim() || 'Этап: ' + (u.phase || '…'));
+    show((run.output || '').trim() || (u.phase ? 'Этап: ' + u.phase : 'Выполняется…'));
     if (run.finished) break;
   }
-  toast(!run.finished ? 'Обновление ещё идёт, проверьте позже' : run.rc === 0 ? 'Операция обновления выполнена' : 'Не выполнено: код ' + run.rc);
-  await Promise.all([load('update', true), load('status', true)]); render();
+  toast(!run.finished ? 'Ещё выполняется, проверьте позже' : run.rc === 0 ? okMsg : 'Не выполнено: код ' + run.rc);
+}
+function updateOp(op, token) {
+  return runLong('updates', 'update-control', token ? { op: op, confirm: token } : { op: op }, 'update-data', 'Операция обновления выполнена')
+    .then(() => Promise.all([load('update', true), load('status', true)])).then(render);
 }
 async function adsControl(fields, okMsg, resultId) {
   const x = await runAction(resultId || 'ads', 'ads-control', fields, okMsg);
@@ -986,8 +990,8 @@ document.addEventListener('click', e => {
   else if (a === 'open-log') { logTab = t.dataset.logTab; go('logs'); }
   else if (a === 'tunnel-health') runAction('tunnel-health', 'control', { op: 'tunnel-health' }, 'Проверка туннеля выполнена').then(() => load('status', true)).then(render);
   else if (a === 'logout') apiPost('auth', { op: 'logout' }).then(() => { toast('Вы вышли'); S.auth = null; showLogin(); });
-  else if (a === 'housekeeping') runAction('storage', 'control', { op: 'housekeeping' }, 'Журналы проверены').then(() => load('status', true)).then(render);
-  else if (a === 'refresh-hints') runAction('routes', 'control', { op: 'refresh-hints' }, 'Подсказки обновлены');
+  else if (a === 'housekeeping') runLong('storage', 'control', { op: 'housekeeping' }, 'control-data', 'Журналы проверены').then(() => load('status', true)).then(render);
+  else if (a === 'refresh-hints') runLong('routes', 'control', { op: 'refresh-hints' }, 'control-data', 'Подсказки обновлены').then(() => load('route', true)).then(render);
   else if (a === 'update-op') updateOp(t.dataset.op);
   else if (a === 'diag-run') { load('diag', true).then(() => { render(); toast('Диагностика выполнена'); }); }
   else if (a === 'ads-job') adsControl({ op: 'enqueue', job: t.dataset.job }, 'Задание поставлено в очередь', 'ads-job');

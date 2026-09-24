@@ -1,5 +1,5 @@
 #!/bin/sh
-VWARD_CLASSIFIER_VERSION="0.2.0-rc.1.fix.4"
+VWARD_CLASSIFIER_VERSION="0.2.0-rc.1.fix.5"
 VWARD_ROUTE_ETC="${VWARD_ROUTE_ETC:-/opt/etc/vward/route-engine}"
 VWARD_ROUTE_STATE="${VWARD_ROUTE_STATE:-/opt/var/lib/vward/route-engine}"
 VWARD_CLASSIFIER_CONFIG="${VWARD_CLASSIFIER_CONFIG:-$VWARD_ROUTE_ETC/domain-classifier.conf}"
