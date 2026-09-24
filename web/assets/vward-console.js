@@ -237,7 +237,7 @@ const TAB_MAX = 4, TAB_DEFAULT = ['overview', 'wan', 'vpn', 'logs'];
 let tabIds = store.get('vward-tabs', TAB_DEFAULT).filter(id => PAGES.some(p => p.id === id)).slice(0, TAB_MAX);
 if (!tabIds.length) tabIds = TAB_DEFAULT.slice();
 let theme = store.get('vward-theme', 'system');
-let refreshSec = store.get('vward-refresh', 15);
+const REFRESH_SEC = 15;
 const CARD_IDS = ['system', 'updates', 'wan', 'vpn', 'lists', 'routes', 'wifi', 'ads', 'runtime', 'storage'];
 let cardOrder = store.get('vward-card-order', CARD_IDS).filter(id => CARD_IDS.includes(id));
 CARD_IDS.forEach((id, i) => { if (!cardOrder.includes(id)) cardOrder.splice(Math.min(i, cardOrder.length), 0, id); });
@@ -544,8 +544,7 @@ const RENDER = {
       panel('Нижняя панель на телефоне', '<div class="tabbar preview" data-key="Разделы на панели">' + tabsHtml() + '</div><dl class="kv">' + PAGES.map(p => {
         const on = tabIds.includes(p.id), i = tabIds.indexOf(p.id);
         return ctrlRow(p.title, (on ? '<span class="order-btns"><button class="icon-btn" type="button" data-move="' + p.id + ':up" aria-label="Выше"' + (i === 0 ? ' disabled' : '') + '>' + ico('up') + '</button><button class="icon-btn" type="button" data-move="' + p.id + ':down" aria-label="Ниже"' + (i === tabIds.length - 1 ? ' disabled' : '') + '>' + ico('down') + '</button></span>' : '') + sw('data-tabpick="' + p.id + '"', on, 'Показывать «' + p.title + '» на панели'));
-      }).join('') + '</dl>', { desc: 'До ' + TAB_MAX + ' разделов и их порядок. Остальные разделы - в меню «Ещё».' }) +
-      panel('Интерфейс', '<dl class="kv">' + ctrlRow('Обновлять данные', sel('data-pref="refresh"', 'Обновлять данные', [['15', 'каждые 15 секунд'], ['30', 'каждые 30 секунд'], ['60', 'каждую минуту']], refreshSec)) + '</dl><div class="panel-actions">' + btn('ui-reset', 'undo', 'Сбросить вид Console') + '</div>', { desc: 'Порядок и вид карточек, нижняя панель и тема хранятся в этом браузере.' });
+      }).join('') + '</dl>', { desc: 'До ' + TAB_MAX + ' разделов и их порядок. Остальные разделы - в меню «Ещё».' });
   },
 
   logs() {
@@ -837,7 +836,7 @@ const SEARCH_INDEX = [
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
   ['ads', 'AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
   ['updates', 'Установка обновлений'], ['updates', 'Окно установки'], ['updates', 'Интервал проверки'], ['updates', 'Канал'],
-  ['settings', 'Адрес Console'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели'], ['settings', 'Обновлять данные']
+  ['settings', 'Адрес Console'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
 ];
 function openSearch() {
   openSheet('', '<div class="search-box">' + ico('search') + '<input id="searchInput" placeholder="Раздел, параметр или компонент" aria-label="Поиск по Console" autocomplete="off"><button class="icon-btn" type="button" data-act="close" aria-label="Закрыть">' + ico('close') + '</button></div><div class="sheet-body" id="searchResults"></div>', 'search', 'searchBtn');
@@ -1018,11 +1017,6 @@ document.addEventListener('click', e => {
   else if (a === 'diag-run') { load('diag', true).then(() => { render(); toast('Диагностика выполнена'); }); }
   else if (a === 'ads-job') adsControl({ op: 'enqueue', job: t.dataset.job }, 'Задание поставлено в очередь', 'ads-job');
   else if (a === 'https-op') runAction('https', 'ads-https-control', { op: t.dataset.op }, 'Готово').then(() => load('https', true)).then(render);
-  else if (a === 'ui-reset') {
-    ['vward-card-order', 'vward-card-hidden', 'vward-card-view', 'vward-tabs', 'vward-theme', 'vward-refresh'].forEach(k => store.del(k));
-    cardOrder = CARD_IDS.slice(); hiddenCards = []; cardView = 'grid'; tabIds = TAB_DEFAULT.slice(); theme = 'system'; refreshSec = 15;
-    applyTheme(); restartTimer(); render(); toast('Вид Console сброшен');
-  }
   else if (a === 'log-reload') loadLog(logTab, true);
   else if (a === 'log-wrap') { logWrap = !logWrap; t.setAttribute('aria-pressed', logWrap); const b = $('logBox'); if (b) b.classList.toggle('nowrap', !logWrap); }
   else if (a === 'log-copy') copyText(S.logs[logTab] || '');
@@ -1082,7 +1076,6 @@ document.addEventListener('change', e => {
   if (t.dataset.ipcat) { cfgSet({ op: 'ip-category', target: t.dataset.ipcat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена - применится при следующей сверке'); return; }
   if (t.dataset.cfgCat) { cfgSet({ op: 'domain-category', target: t.dataset.cfgCat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена'); return; }
   if (t.dataset.cfgUpd) { cfgSet({ op: 'update', target: t.dataset.cfgUpd, value: t.value }, 'Сохранено', ['status']); return; }
-  if (t.dataset.pref === 'refresh') { refreshSec = Number(t.value); store.set('vward-refresh', refreshSec); restartTimer(); toast('Сохранено'); return; }
   if (t.hasAttribute('data-ads-pause')) { adsControl({ op: t.checked ? 'resume' : 'pause' }, t.checked ? 'Блокировка включена' : 'Блокировка на паузе'); return; }
   if (t.dataset.adsSet) { adsSetting(t.dataset.adsSet, t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value); return; }
   if (t.hasAttribute('data-auth')) {
@@ -1170,11 +1163,10 @@ function tick() {
 }
 function restartTimer() {
   if (timer) clearInterval(timer);
-  if (![15, 30, 60].includes(refreshSec)) refreshSec = 15;
-  timer = setInterval(tick, refreshSec * 1000);
+  timer = setInterval(tick, REFRESH_SEC * 1000);
 }
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && Date.now() - (S.loadedAt.status || 0) >= refreshSec * 1000) tick();
+  if (!document.hidden && Date.now() - (S.loadedAt.status || 0) >= REFRESH_SEC * 1000) tick();
 });
 
 $('backBtn').innerHTML = ico('back');
