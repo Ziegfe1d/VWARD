@@ -222,6 +222,20 @@ run_health_bounded() {
     wait "$health_pid"
 }
 
+# Nothing starts the Console before boot on a first install (beta cutover),
+# so the health check would always find it stopped. Returns 0 when started here.
+console_start_for_health() {
+    case "$1" in console|full) ;; *) return 1 ;; esac
+    [ -z "$VU_ROOT_PREFIX" ] && [ -x /opt/etc/init.d/S93vward-console ] || return 1
+    console_pid=$(cat /opt/var/run/vward-console-lighttpd.pid 2>/dev/null || :)
+    if [ -n "$console_pid" ] && kill -0 "$console_pid" 2>/dev/null; then
+        return 1
+    fi
+    /opt/etc/init.d/S93vward-console start >/dev/null 2>&1 ||
+        vu_log WARN "VWARD Console did not start before the health check"
+    return 0
+}
+
 quarantine_after_rollback() {
     manifest=$1
     reason=$2
@@ -265,7 +279,11 @@ apply_update() {
     sync
     vu_transition VERIFYING
     profile=$(jq -r '.signed.health_profile' "$manifest")
+    console_started=0
+    console_start_for_health "$profile" && console_started=1
     if ! run_health_bounded "$profile"; then
+        # Rollback may remove the init script, so stop what was started here first.
+        [ "$console_started" = 0 ] || /opt/etc/init.d/S93vward-console stop >/dev/null 2>&1 || :
         rollback_policy=$(jq -r '.signed.rollback_policy' "$manifest")
         if [ "$rollback_policy" = automatic ]; then
             if VWARD_INTERNAL_ROLLBACK=1 VWARD_INTERNAL_ROLLBACK_TOKEN="$VU_LOCK_TOKEN" "$SELF_DIR/vward-update-rollback.sh" "$backup"; then
