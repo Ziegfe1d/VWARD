@@ -844,7 +844,8 @@ vu_activity_clear() {
     active_root="$VU_ROOT_PREFIX/tmp/vward-runtime-active"
     if [ -d "$active_root" ] && [ ! -L "$active_root" ]; then
         active_owner_uid=${VWARD_ADMISSION_OWNER_UID:-$(id -u)}
-        [ "$(stat -c '%u %a' "$active_root" 2>/dev/null)" = "$active_owner_uid 700" ] || return 1
+        # Keenetic's BusyBox stat has no -c, so owner and mode come from ls.
+        [ "$(ls -ldn "$active_root" 2>/dev/null | awk '{sub(/[.+]$/, "", $1); print $3, $1}')" = "$active_owner_uid drwx------" ] || return 1
         for active_slot in "$active_root"/*; do
             [ -e "$active_slot" ] || continue
             [ -d "$active_slot" ] && [ ! -L "$active_slot" ] || return 1

@@ -100,8 +100,8 @@ vward_map_filter()
 vward_device_map()
 {
     if [ -f "$VWARD_DEVICE_MAP_CACHE" ] && [ ! -L "$VWARD_DEVICE_MAP_CACHE" ] &&
-        [ "$(stat -c %u "$VWARD_DEVICE_MAP_CACHE" 2>/dev/null)" = "$(id -u)" ]; then
-        _vp_age=$(( $(date +%s) - $(stat -c %Y "$VWARD_DEVICE_MAP_CACHE" 2>/dev/null || echo 0) ))
+        [ "$(ls -ln "$VWARD_DEVICE_MAP_CACHE" 2>/dev/null | awk '{print $3}')" = "$(id -u)" ]; then
+        _vp_age=$(( $(date +%s) - $(date -r "$VWARD_DEVICE_MAP_CACHE" +%s 2>/dev/null || echo 0) ))
         if [ "$_vp_age" -ge 0 ] && [ "$_vp_age" -lt "$VWARD_DEVICE_MAP_TTL" ]; then
             vward_map_filter < "$VWARD_DEVICE_MAP_CACHE"
             return 0
@@ -226,11 +226,12 @@ vward_profile_load()
     VWARD_CONSOLE_PORT=${VWARD_CONSOLE_PORT:-8088}
 
     if [ -r "$VWARD_DEVICE_CONFIG" ]; then
-        _vp_meta=$(stat -c '%u %a' "$VWARD_DEVICE_CONFIG" 2>/dev/null) ||
-            { vward_profile_error "cannot inspect device.conf"; return 1; }
+        # Keenetic's BusyBox stat has no -c, so owner and mode come from ls.
+        _vp_meta=$(ls -ln "$VWARD_DEVICE_CONFIG" 2>/dev/null | awk '{sub(/[.+]$/, "", $1); print $3, $1}')
+        [ -n "$_vp_meta" ] || { vward_profile_error "cannot inspect device.conf"; return 1; }
         # Tests running unprivileged name their own uid; on the router it is root.
         _vp_owner=${VWARD_DEVICE_CONFIG_OWNER_UID:-0}
-        case "$_vp_meta" in "$_vp_owner 600"|"$_vp_owner 400") ;; *)
+        case "$_vp_meta" in "$_vp_owner -rw-------"|"$_vp_owner -r--------") ;; *)
             vward_profile_error "device.conf must be root-owned and mode 0600 or 0400"; return 1
             ;;
         esac

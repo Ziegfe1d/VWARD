@@ -106,7 +106,9 @@ backup_file() {
 # keeping the mode of the existing file.
 install_tmp() {
     mode=$2
-    [ -f "$1" ] && mode=$(stat -c '%a' "$1" 2>/dev/null || echo "$2")
+    # Keenetic's BusyBox stat has no -c, so the mode comes from ls.
+    [ -f "$1" ] && mode=$(ls -ln "$1" 2>/dev/null | awk '{m=0; for (i=2;i<=10;i++) m=m*2+(substr($1,i,1)!="-"); printf "%o\n", m}')
+    [ -n "$mode" ] || mode=$2
     chmod "$mode" "$TMPFILE" && mv "$TMPFILE" "$1" || return 1
     TMPFILE=
 }

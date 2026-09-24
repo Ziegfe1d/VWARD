@@ -55,9 +55,10 @@ vward_admission_enter() {
         (umask 077; mkdir "$va_active") 2>/dev/null || return 1
     fi
     [ -d "$va_active" ] || return 1
-    va_active_meta=$(stat -c '%u %a' "$va_active" 2>/dev/null) || return 1
+    # Keenetic's BusyBox stat has no -c, so owner and mode come from ls.
+    va_active_meta=$(ls -ldn "$va_active" 2>/dev/null | awk '{sub(/[.+]$/, "", $1); print $3, $1}')
     va_owner_uid=${VWARD_ADMISSION_OWNER_UID:-$(id -u)}
-    [ "$va_active_meta" = "$va_owner_uid 700" ] || return 1
+    [ "$va_active_meta" = "$va_owner_uid drwx------" ] || return 1
     va_start=$(vward_admission_pid_start $$ 2>/dev/null) || return 1
     va_slot="$va_active/$va_component.$$.$va_start"
     (umask 077; mkdir "$va_slot") 2>/dev/null || return 1

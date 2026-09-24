@@ -109,8 +109,9 @@ ads_mkdirs()
 ads_secure_file_ok() (
     ads_sf_file="$1"
     [ -r "$ads_sf_file" ] || return 1
-    ads_sf_meta="$(stat -c '%u %a' "$ads_sf_file" 2>/dev/null)" || return 1
-    case "$ads_sf_meta" in "0 600"|"0 400") return 0 ;; *) return 1 ;; esac
+    # Keenetic's BusyBox stat has no -c, so owner and mode come from ls.
+    ads_sf_meta="$(ls -ln "$ads_sf_file" 2>/dev/null | awk '{sub(/[.+]$/, "", $1); print $3, $1}')"
+    case "$ads_sf_meta" in "0 -rw-------"|"0 -r--------") return 0 ;; *) return 1 ;; esac
 )
 
 ads_load_config()
@@ -332,8 +333,8 @@ ads_agh_api_base() (
 
 ads_agh_curl_auth_args() (
     if [ -r "$ADS_AGH_AUTH_FILE" ]; then
-        ads_auth_meta="$(stat -c '%u %a' "$ADS_AGH_AUTH_FILE" 2>/dev/null)" || return 1
-        case "$ads_auth_meta" in "0 600"|"0 400") ;; *) return 1 ;; esac
+        ads_auth_meta="$(ls -ln "$ADS_AGH_AUTH_FILE" 2>/dev/null | awk '{sub(/[.+]$/, "", $1); print $3, $1}')"
+        case "$ads_auth_meta" in "0 -rw-------"|"0 -r--------") ;; *) return 1 ;; esac
         printf '%s\n' "$(cat "$ADS_AGH_AUTH_FILE")"
     fi
 )

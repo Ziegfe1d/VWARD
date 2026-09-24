@@ -26,6 +26,9 @@ done
 
 grep -E 'Smart Updater|>Update</button>|192\.168\.1\.1' web/index.html web/assets/vward-console.js >/dev/null &&
     fail "Console contains legacy naming or universal device hardcode"
+# Keenetic's BusyBox stat has no -c; the CI host's BusyBox does, so only this catches it.
+grep -rnE '(^|[^A-Za-z_])stat +(-c|--format|--printf)' components web scripts >/dev/null &&
+    fail "router code uses stat -c, which Keenetic BusyBox lacks"
 grep -E '\?\.|\?\?|scrollTo\(\{' web/assets/vward-console.js >/dev/null &&
     fail "Console contains incompatible mobile JavaScript"
 

@@ -14,8 +14,9 @@ VWARD_CLASSIFIER_LOCK_STALE_SEC="${VWARD_CLASSIFIER_LOCK_STALE_SEC:-900}"
 vdc_num(){ case "${1:-}" in ''|*[!0-9]*) printf '%s\n' "$2";; *) printf '%s\n' "$1";; esac; }
 vdc_secure_file_ok(){
   [ -r "$1" ] || return 1
-  vdc_meta="$(stat -c '%u %a' "$1" 2>/dev/null)" || return 1
-  case "$vdc_meta" in '0 600'|'0 400') return 0;; *) return 1;; esac
+  # Keenetic's BusyBox stat has no -c, so owner and mode come from ls.
+  vdc_meta="$(ls -ln "$1" 2>/dev/null | awk '{sub(/[.+]$/, "", $1); print $3, $1}')"
+  case "$vdc_meta" in '0 -rw-------'|'0 -r--------') return 0;; *) return 1;; esac
 }
 vdc_load_config(){
   [ -r "$VWARD_CLASSIFIER_CONFIG" ] || return 0
