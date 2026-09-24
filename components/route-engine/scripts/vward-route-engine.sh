@@ -41,6 +41,15 @@ HOSTS="/tmp/vward-route-engine-hosts.$$"
 # repeat, so they live in RAM. Only AdaptiveAuto decisions stay on USB.
 VOLATILE_DIR="${VWARD_ROUTE_VOLATILE_STATE:-/tmp/vward-route-engine-state}"
 
+# Domain lists routed around the tunnel whose watch switch is on (Console):
+# when their service fails on that path, the list is moved into the tunnel
+# through the Console writer, the same way as the manual switch.
+LISTS_CONF="${VWARD_DOMAIN_LISTS_CONF:-/opt/etc/vward/route-engine/domain-lists.conf}"
+LIST_WATCH_MAP="$VOLATILE_DIR/list-watch.map"
+LIST_WATCH_COOLDOWN=60
+LIST_WATCH_FAILS=2
+CONSOLE_CONFIG_BIN="${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}"
+
 # A name seen again within this many seconds is not handled again: every
 # handler has a cooldown of at least a minute.
 DEDUP_WINDOW=30
@@ -164,6 +173,8 @@ refresh_sets()
         }
     ' "$ALL" |
     sort -u > "${MANUAL}.new"
+
+    list_watch_map "$CFG" "$ALL"
 
     # Unchanged lists are not rewritten on USB.
     for L in "$ADAPTIVE" "$MANUAL"; do
@@ -1101,6 +1112,99 @@ handle_hint()
     handle_new "$HOST"
 }
 
+list_watch_map()
+{
+    # "domain group" for each watched list whose DNS route avoids the tunnel.
+    [ -s "$LISTS_CONF" ] || { rm -f "$LIST_WATCH_MAP"; return 0; }
+
+    awk -F= '$1 ~ /^watch\./ && $2 == "1" {print substr($1, 7)}' "$LISTS_CONF" > "$LIST_WATCH_MAP.watch"
+
+    awk -v tun="$VWARD_TUNNEL_INTERFACE" -v dev="$WG" -v w="$LIST_WATCH_MAP.watch" '
+        BEGIN {while ((getline g < w) > 0) watched[g] = 1}
+        FILENAME == ARGV[1] {
+            if ($0 ~ /^[^ \t!]/) ctx = ($1 == "dns-proxy" && NF == 1)
+            if ($0 ~ /^!/) ctx = 0
+            if (ctx && $1 == "route" && $2 == "object-group" && ($3 in watched) && $4 != tun && $4 != dev)
+                around[$3] = 1
+            next
+        }
+        {split($0, f, "|"); if (f[1] in around) print f[2], f[1]}
+    ' "$1" "$2" > "$LIST_WATCH_MAP.new"
+
+    mv -f "$LIST_WATCH_MAP.new" "$LIST_WATCH_MAP"
+    rm -f "$LIST_WATCH_MAP.watch"
+}
+
+
+list_watch_check()
+{
+    # A watched list's service is checked the way the client reaches it: the
+    # router's DNS answer (Smart DNS included) through the ISP.  Failure is a
+    # dead connection, 451, or a redirect to a region/blocked page; 403 is not,
+    # Cloudflare answers it to any script.
+    [ -s "$LIST_WATCH_MAP" ] || return 0
+
+    LW_G=$(awk -v h="$1" '{
+        n = length($1)
+        if (h == $1 || (length(h) > n && substr(h, length(h) - n) == "." $1)) {print $2; exit}
+    }' "$LIST_WATCH_MAP")
+    [ -n "$LW_G" ] || return 0
+
+    LW_ST="$VOLATILE_DIR/list-watch.$LW_G"
+    LW_NOW=$(date +%s)
+    LW_LAST=0
+    LW_FAILS=0
+    [ -f "$LW_ST" ] && read -r LW_LAST LW_FAILS < "$LW_ST" 2>/dev/null
+    case "$LW_LAST" in ''|*[!0-9]*) LW_LAST=0 ;; esac
+    case "$LW_FAILS" in ''|*[!0-9]*) LW_FAILS=0 ;; esac
+    [ $((LW_NOW - LW_LAST)) -ge "$LIST_WATCH_COOLDOWN" ] || return 0
+
+    LW_IP=$(resolve_ipv4 "$1")
+    [ -n "$LW_IP" ] || return 0
+
+    LW_OUT=$(
+        curl -4 \
+            --noproxy '*' \
+            --interface "$WAN" \
+            --resolve "$1:443:$LW_IP" \
+            --connect-timeout "$CONNECT_TIMEOUT" \
+            --max-time "$MAX_TIME" \
+            -A "Mozilla/5.0" \
+            -s \
+            -o /dev/null \
+            -w '%{http_code} %{redirect_url}' \
+            "https://$1/" 2>/dev/null
+    )
+    LW_CODE=${LW_OUT%% *}
+    LW_LOC=${LW_OUT#* }
+    [ -n "$LW_CODE" ] || LW_CODE=000
+
+    case "$LW_CODE:$(printf '%s' "$LW_LOC" | tr 'A-Z' 'a-z')" in
+        000:*|451:*|*unavailable*|*region*|*restricted*|*not-available*|*blocked*)
+            LW_FAILS=$((LW_FAILS + 1))
+            ;;
+        *)
+            echo "$LW_NOW 0" > "$LW_ST"
+            return 0
+            ;;
+    esac
+
+    echo "$LW_NOW $LW_FAILS" > "$LW_ST"
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|LIST_BYPASS_FAIL|$1|$LW_G|code=$LW_CODE|location=$LW_LOC|fails=$LW_FAILS" >> "$EVENT_LOG"
+    [ "$LW_FAILS" -ge "$LIST_WATCH_FAILS" ] || return 0
+
+    if ! wg_quick_ok; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|LIST_AUTO_VPN_SKIP|$1|$LW_G|reason=WG_DOWN" >> "$EVENT_LOG"
+        return 0
+    fi
+
+    LW_RES=$("$CONSOLE_CONFIG_BIN" domain-list "$LW_G" vpn 2>/dev/null | tail -n 1)
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|LIST_AUTO_VPN|$1|$LW_G|$LW_RES" >> "$EVENT_LOG"
+    rm -f "$LW_ST"
+    echo 0 > "$REFRESH_TS"
+}
+
+
 handle_host()
 {
     case "$1" in
@@ -1126,6 +1230,8 @@ handle_host()
 
 
     refresh_sets
+
+    list_watch_check "$HOST"
 
 
     # Все ручные Keenetic FQDN-группы live-контур не меняет.

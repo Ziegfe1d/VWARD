@@ -116,10 +116,10 @@ const API_ERRORS = {
 const errText = x => API_ERRORS[x && x.error] || (x && x.error) || ('код ' + (x && x.rc));
 
 /* ---------- Данные ---------- */
-const S = { auth: null, cron: null, status: null, route: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, qlog: null, review: null, blocked: null, logs: {}, errors: {}, loadedAt: {} };
+const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, qlog: null, review: null, blocked: null, logs: {}, errors: {}, loadedAt: {} };
 const ADSV = { filter: 'all', search: '', blockedSearch: '' };
 const LOADERS = {
-  status: () => apiGet('status'), route: () => apiGet('route-data'), update: () => apiGet('update-data'),
+  status: () => apiGet('status'), route: () => apiGet('route-data'), update: () => apiGet('update-data'), lists: () => apiGet('lists-data'),
   security: () => apiGet('security-data'), diag: () => apiGet('diagnostics'), wifi: () => apiGet('wifi-data'),
   ads: () => apiGet('ads-data'), https: () => apiGet('ads-https-data'), config: () => apiGet('config-data'),
   adsstats: () => apiGet('ads-view', { view: 'stats' }), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
@@ -149,10 +149,11 @@ const cfgRoute = () => cfg().route || {};
 
 /* ---------- Структура разделов ---------- */
 const PAGES = [
-  { id: 'overview', title: 'Обзор', icon: 'home', group: 'Главное', data: ['status', 'route', 'wifi', 'ads'] },
+  { id: 'overview', title: 'Обзор', icon: 'home', group: 'Главное', data: ['status', 'route', 'wifi', 'ads', 'lists'] },
   { id: 'logs', title: 'Журналы', icon: 'logs', group: 'Главное', data: [] },
   { id: 'wan', title: 'Интернет', icon: 'globe', group: 'Сеть', data: ['status', 'security', 'config'] },
   { id: 'vpn', title: 'VPN', icon: 'shield', group: 'Сеть', data: ['status', 'security', 'config'] },
+  { id: 'lists', title: 'Доменные списки', icon: 'route', group: 'Сеть', data: ['lists', 'config'] },
   { id: 'routes', title: 'Маршрутизация', icon: 'route', group: 'Сеть', data: ['route', 'security', 'status', 'config'] },
   { id: 'wifi', title: 'Wi-Fi клиенты', icon: 'wifi', group: 'Сеть', data: ['wifi', 'security', 'config'] },
   { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adsstats', 'adspub'] },
@@ -237,9 +238,9 @@ let tabIds = store.get('vward-tabs', TAB_DEFAULT).filter(id => PAGES.some(p => p
 if (!tabIds.length) tabIds = TAB_DEFAULT.slice();
 let theme = store.get('vward-theme', 'system');
 let refreshSec = store.get('vward-refresh', 15);
-const CARD_IDS = ['system', 'updates', 'wan', 'vpn', 'routes', 'wifi', 'ads', 'runtime', 'storage'];
+const CARD_IDS = ['system', 'updates', 'wan', 'vpn', 'lists', 'routes', 'wifi', 'ads', 'runtime', 'storage'];
 let cardOrder = store.get('vward-card-order', CARD_IDS).filter(id => CARD_IDS.includes(id));
-CARD_IDS.forEach(id => { if (!cardOrder.includes(id)) cardOrder.push(id); });
+CARD_IDS.forEach((id, i) => { if (!cardOrder.includes(id)) cardOrder.splice(Math.min(i, cardOrder.length), 0, id); });
 let hiddenCards = store.get('vward-card-hidden', []).filter(id => CARD_IDS.includes(id));
 let cardView = store.get('vward-card-view', 'grid'); if (!['grid', 'list'].includes(cardView)) cardView = 'grid';
 let authForm = false, loginOpen = false;
@@ -308,6 +309,7 @@ function plural(n, one, few, many) { const a = n % 10, b = n % 100; return a ===
 function phaseText(p) { return ({ IDLE: 'Ожидание', CHECKING: 'Проверка', AVAILABLE: 'Доступно обновление', VERIFIED: 'Проверено', BACKING_UP: 'Резервная копия', INSTALLING: 'Установка', VERIFYING: 'Проверка установки', COMMIT_PREPARED: 'Завершение', COMMITTED: 'Установлено', ROLLING_BACK: 'Откат', FAILED: 'Ошибка', RECOVERY_REQUIRED: 'Нужно восстановление' })[p] || p || '—'; }
 
 /* ---------- Карточки обзора ---------- */
+const viaIs = (l, v) => l.via === v;
 function cardData(id) {
   const s = st(), p = plat(), w = s.wan || {}, wg = s.wg || {}, sv = s.services || {}, g = s.storage || {}, r = S.route || {}, wf = S.wifi || {}, a = S.ads || {};
   const tunnels = wg.interfaces || [], up = tunnels.filter(t => isTrue(t.connected)).length;
@@ -318,6 +320,10 @@ function cardData(id) {
     case 'updates': return { icon: 'refresh', title: 'Обновления', to: 'updates', value: phaseText(p.phase), sub: '№ ' + (p.last_sequence || 0) + (p.active_slot ? ' · слот ' + p.active_slot : ''), pill: ['info', isTrue(p.auto_apply) ? 'График' : 'Вручную'] };
     case 'wan': return { icon: 'globe', title: 'Интернет', to: 'wan', value: w.internet ? 'В сети' : s.wan ? 'Нет связи' : '—', sub: (w.address || 'адрес не получен') + (w.speed ? ' · ' + fmtSpeed(w.speed) : ''), pill: w.internet ? ['ok', 'Норма'] : s.wan ? ['crit', 'Сбой'] : ['', '—'] };
     case 'vpn': return { icon: 'shield', title: 'VPN', to: 'vpn', value: up + ' из ' + tunnels.length, sub: isTrue(wg.failopen_active) ? 'fail-open включён' : 'fail-open не активен', pill: !tunnels.length ? ['', 'Нет туннелей'] : up === tunnels.length ? ['ok', 'Норма'] : ['warn', 'Внимание'] };
+    case 'lists': {
+      const ls = (S.lists && S.lists.lists) || [], vpn = ls.filter(l => viaIs(l, 'vpn')).length, around = ls.filter(l => viaIs(l, 'bypass')).length, auto = ls.filter(l => l.auto && viaIs(l, 'vpn')).length;
+      return { icon: 'route', title: 'Доменные списки', to: 'lists', value: S.lists ? vpn + ' через VPN' : '—', sub: S.lists ? around + ' в обход VPN' : 'списки Keenetic', pill: !S.lists ? ['', '—'] : auto ? ['warn', 'Переведено авто: ' + auto] : ['info', ls.length + ' ' + plural(ls.length, 'список', 'списка', 'списков')] };
+    }
     case 'routes': return { icon: 'route', title: 'Маршрутизация', to: 'routes', value: fmtInt(r.ip && r.ip.managed_routes) + ' ' + plural(num(r.ip && r.ip.managed_routes) || 0, 'маршрут', 'маршрута', 'маршрутов'), sub: fmtInt(r.domains && r.domains.unique) + ' доменов · ' + fmtInt(r.domains && r.domains.categories) + ' категорий', pill: S.route ? ['ok', 'Норма'] : ['', '—'] };
     case 'wifi': return { icon: 'wifi', title: 'Wi-Fi клиенты', to: 'wifi', value: fmtInt(wf.count) + ' ' + plural(num(wf.count) || 0, 'клиент', 'клиента', 'клиентов'), sub: wf.enabled ? (warnWifi ? warnWifi + ' требуют внимания' : 'без замечаний') : 'сбор данных выключен', pill: !S.wifi ? ['', '—'] : warnWifi ? ['warn', 'Внимание'] : wf.enabled ? ['ok', 'Норма'] : ['', 'Выключен'] };
     case 'ads': { const c = a.counts || {}; return { icon: 'block', title: 'Реклама', to: 'ads', value: fmtInt(c.blocked), sub: 'заблокировано доменов', pill: !S.ads ? ['', '—'] : a.paused ? ['warn', 'Пауза'] : ['ok', 'Норма'] }; }
@@ -590,6 +596,21 @@ const RENDER = {
     return cfgNote() + panel('Категории доменов', cats.length ? '<dl class="kv">' + cats.map(c => ctrlRow(c.title || c.id, sw('data-cfg-cat="' + esc(c.id) + '"', c.enabled, 'Категория ' + (c.title || c.id), !cfgOk()))).join('') + '</dl>' : empty('Категории не найдены'),
       { desc: 'Новые домены из включённых категорий автоматически попадают в VPN.' });
   },
+  lists() {
+    if (!S.lists) return loadError(['lists']) + panel('Доменные списки', empty('Загрузка…'));
+    const L = S.lists, items = L.lists || [], ok = cfgOk();
+    const path = l => viaIs(l, 'vpn') ? 'через VPN' : viaIs(l, 'bypass') ? 'в обход VPN' + (l.doh.length ? ', Smart DNS: ' + l.doh.join(', ') : '') : viaIs(l, 'none') ? 'без маршрута' : 'через ' + l.route;
+    const row = l => {
+      const can = ok && (viaIs(l, 'vpn') || viaIs(l, 'bypass')), title = l.description || l.name;
+      return '<li class="row"><div class="row-main"><b>' + esc(title) + '</b><small>' + fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + ' · ' + esc(path(l)) + '</small>' +
+        (l.auto && viaIs(l, 'vpn') ? '<small class="field-warn">Переведён на VPN автоматически ' + esc(l.auto.at) + ': не открылся ' + esc(l.auto.host) + '</small>' : '') + '</div>' +
+        '<span class="row-acts"><label class="row-switch">В обход VPN' + sw('data-list-bypass="' + esc(l.name) + '"', viaIs(l, 'bypass'), 'В обход VPN: ' + title, !can) + '</label>' +
+        '<label class="row-switch">Следить' + sw('data-list-watch="' + esc(l.name) + '"', l.watch, 'Следить: ' + title, !ok) + '</label></span></li>';
+    };
+    return cfgNote() + panel('Доменные списки', items.length ? '<ul class="rows">' + items.map(row).join('') + '</ul>' : empty('В Keenetic нет доменных списков'),
+      { desc: '«В обход VPN» выключен — список идёт через туннель ' + (L.tunnel || '') + ', строки Smart DNS его доменов на это время убираются. «Следить» — если сервис из списка, идущего в обход VPN, перестанет открываться, VWARD сам переведёт список на VPN.' }) +
+      panel('Smart DNS', kv([['Использовано строк', fmtInt(L.doh_used) + ' из ' + fmtInt(L.doh_limit), L.doh_used >= L.doh_limit ? 'warn' : '']]), { desc: 'Keenetic хранит не больше ' + L.doh_limit + ' строк DNS-over-HTTPS. Когда список уходит на VPN, его строки освобождаются.' });
+  },
   'd-adaptive'() {
     const list = S.config ? cfgRoute().adaptive || [] : (S.route && S.route.adaptive && S.route.adaptive.recent) || [];
     return cfgNote() + panel('AdaptiveAuto', domainRows(list.map(d => typeof d === 'string' ? d : d.domain || ''), d => rowBtn('adaptive', 'pin', d, 'lock', 'Закрепить ' + d + ' в моих доменах') + rowBtn('adaptive', 'remove', d, 'close', 'Вернуть ' + d + ' на прямой маршрут'), 'недоступен напрямую - идёт через VPN') || empty('Пока пусто'),
@@ -811,6 +832,7 @@ const SEARCH_INDEX = [
   ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Задания по расписанию'], ['system', 'Свободно'],
   ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Автоматическое восстановление'], ['wan', 'История восстановлений'],
   ['vpn', 'Автоматическая защита'], ['vpn', 'fail-open'], ['vpn', 'Проверка туннеля'],
+  ['lists', 'Использовано строк'],
   ['routes', 'Туннель для маршрутов'], ['routes', 'AdaptiveAuto'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
   ['ads', 'AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
@@ -1042,6 +1064,13 @@ document.addEventListener('change', e => {
     else cfgSet({ op: 'component', target: id, value: '1' }, '«' + comp(id).name + '» включён', ['status']);
     return;
   }
+  if (t.dataset.listBypass) {
+    const g = t.dataset.listBypass, around = t.checked;
+    t.disabled = true;
+    cfgSet({ op: 'domain-list', target: g, value: around ? 'bypass' : 'vpn' }, around ? 'Список идёт в обход VPN' : 'Список идёт через VPN', ['lists']);
+    return;
+  }
+  if (t.dataset.listWatch) { cfgSet({ op: 'domain-list-watch', target: t.dataset.listWatch, value: t.checked ? '1' : '0' }, t.checked ? 'Слежение включено' : 'Слежение выключено', ['lists']); return; }
   if (t.hasAttribute('data-cfg-wg')) { if (!t.checked) { t.checked = true; confirm = { id: 'wg-off' }; render(); } else cfgSet({ op: 'wan-guard', value: '1' }, 'Защита интернета включена'); return; }
   if (t.hasAttribute('data-cfg-tg')) { if (!t.checked) { t.checked = true; confirm = { id: 'tg-off' }; render(); } else cfgSet({ op: 'tunnel-guard', value: '1' }, 'Защита VPN включена', ['status']); return; }
   if (t.dataset.cfgWifi) {

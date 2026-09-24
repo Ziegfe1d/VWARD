@@ -34,7 +34,8 @@
       ],
       "requires_running": [],
       "uses": [
-        "route-tools"
+        "route-tools",
+        "console"
       ],
       "runtime_targets": [
         "/opt/bin/vward-route-engine.sh",

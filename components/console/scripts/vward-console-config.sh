@@ -23,6 +23,8 @@ ADAPTIVE_GROUP=AdaptiveAuto
 FORCE_FILE="$ETC/route-engine/force-vpn.conf"
 CATEGORY_FILE="$ETC/route-engine/categories.tsv"
 TUNNEL_GUARD_FLAG="$ETC/tunnel-guard.disabled"
+LISTS_CONF="$ETC/route-engine/domain-lists.conf"
+LISTS_STATE="$ETC/route-engine/domain-lists"
 WAN_GUARD_FLAG="$ETC/wan-guard.disabled"
 ADAPTIVE_FLAG="$ETC/route-engine/adaptive.disabled"
 CLASSIFIER_FILE="$ETC/route-engine/domain-classifier.conf"
@@ -60,7 +62,7 @@ cleanup() {
     fi
     [ -z "$TMPFILE" ] || rm -f "$TMPFILE"
     [ -z "$RUNCFG" ] || rm -f "$RUNCFG"
-    [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves"
+    [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.doh"
     [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
     [ "$LOCKED" != 1 ] || rm -rf "$CHANGE_LOCK"
@@ -161,11 +163,15 @@ ndm() {
     return 0
 }
 
-load_profile() {
+load_profile_base() {
     lib=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
     [ -r "$lib" ] || die profile_unavailable
     . "$lib"
     vward_profile_load >/dev/null 2>&1 || die profile_unavailable
+}
+
+load_profile() {
+    load_profile_base
     case "${VWARD_POLICY_GROUP:-}" in ''|"$ADAPTIVE_GROUP") die policy_group_unavailable ;; esac
     case "$VWARD_POLICY_GROUP" in *[!A-Za-z0-9_.-]*) die policy_group_unavailable ;; esac
 }
@@ -372,7 +378,12 @@ tunnel_undo() {
     undo_rc=0
     if [ -n "$JOURNAL" ] && [ -s "$JOURNAL" ]; then
         awk '{a[NR]=$0} END{for (i=NR;i>0;i--) print a[i]}' "$JOURNAL" |
-            { bad=0; while IFS= read -r undo; do ndm "$undo" || bad=1; done; exit "$bad"; } || undo_rc=1
+            { bad=0; while IFS= read -r undo; do
+                case "$undo" in
+                    "DOH-REMOVE "*) doh_remove "${undo#DOH-REMOVE }" || bad=1 ;;
+                    *) ndm "$undo" || bad=1 ;;
+                esac
+              done; exit "$bad"; } || undo_rc=1
     fi
     case "$DEVCONF_EXISTED" in
         1) cp -p "$DEVCONF_ORIG" "$VWARD_DEVICE_CONFIG" || undo_rc=1 ;;
@@ -489,6 +500,178 @@ op_tunnel() {
     done_ok "tunnel $OLD_IF($OLD_DEV) -> $NEW_IF($NEW_DEV) group=$GROUP routes=$moved" changed
 }
 
+# ---------- Domain lists: around the tunnel or through it ----------
+#
+# A list routed around the tunnel (to the ISP, often with a Smart DNS such as
+# Aeternia answering for some of its domains) can be moved into the tunnel and
+# back.  Into the tunnel, the Smart DNS lines for the list's domains are taken
+# out too: their answers point at the Smart DNS proxy, which does not serve
+# connections arriving from the tunnel.  The previous route and those lines are
+# kept in $LISTS_STATE/<group> and put back on return.  Every router step is
+# journaled and undone in reverse on any failure, like op_tunnel.
+
+valid_group() {
+    case "$1" in ''|*[!A-Za-z0-9_.-]*) return 1 ;; esac
+    [ "${#1}" -le 64 ] && [ "$1" != "$ADAPTIVE_GROUP" ]
+}
+
+group_route() {
+    # group_route GROUP: "target<TAB>options" of the group's dns-proxy route.
+    awk -v g="$1" '
+        /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
+        /^!/ {ctx = 0}
+        ctx && $1 == "route" && $2 == "object-group" && $3 == g {
+            o = ""; for (k = 5; k <= NF; k++) o = o (o == "" ? "" : " ") $k
+            print $4 "\t" (o == "" ? "-" : o); exit
+        }' "$RUNCFG"
+}
+
+doh_lines() {
+    # All dns-proxy https upstream lines, without indentation.
+    awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
+        ctx && $1 == "https" && $2 == "upstream" {sub(/^[ \t]+/, ""); print}' "$RUNCFG"
+}
+
+group_doh_lines() {
+    # Smart DNS lines whose domain is a domain of GROUP or below one.
+    { awk -v g="$1" '/^object-group fqdn / {cur = $3; next} /^!/ {cur = ""}
+        cur == g && $1 == "include" {print "I " tolower($2)}' "$RUNCFG"
+      doh_lines | awk '$(NF-1) == "domain" {print "D " $0}'; } |
+    awk '$1 == "I" {inc[$2] = 1; next}
+        {line = substr($0, 3); d = tolower($NF)
+         while (d != "") { if (d in inc) {print line; break}
+                           i = index(d, "."); d = i ? substr(d, i + 1) : "" }}'
+}
+
+doh_present() { doh_lines | grep -qxF -- "$1"; }
+
+doh_remove() {
+    # doh_remove LINE: take one Smart DNS line out.  Keenetic's delete syntax is
+    # not documented for per-domain upstreams, so the forms are tried in turn and
+    # each is verified; a form that also took other lines puts them back.
+    # Returns 0 removed, 1 not removable, 2 other lines were affected.
+    set -- "$1" $1
+    dr_url=$4 dr_dom=$(eval "printf '%s' \"\${$#}\"")
+    dr_on=$(printf '%s\n' "$1" | awk '{for (i = 1; i < NF; i++) if ($i == "on") {print $(i+1); exit}}')
+    dr_before=$(mktemp /tmp/vward-console-doh.XXXXXX 2>/dev/null) || return 1
+    snapshot; doh_lines > "$dr_before"
+    dr_rc=1
+    dr_other_lost=0
+    for dr_form in "no $1" ${dr_on:+"no https upstream $dr_url on $dr_on domain $dr_dom"} "no https upstream $dr_url domain $dr_dom"; do
+        ndm "dns-proxy $dr_form" || :
+        snapshot
+        while IFS= read -r dr_other; do
+            [ "$dr_other" != "$1" ] || continue
+            doh_present "$dr_other" && continue
+            ndm "dns-proxy $dr_other" || :
+            dr_other_lost=1
+        done < "$dr_before"
+        [ "$dr_other_lost" = 0 ] || snapshot
+        doh_present "$1" || { dr_rc=0; break; }
+    done
+    rm -f "$dr_before"
+    if [ "$dr_other_lost" = 1 ]; then
+        # An unsafe form: leave the line as it was, the caller aborts.
+        doh_present "$1" || ndm "dns-proxy $1" || :
+        return 2
+    fi
+    return "$dr_rc"
+}
+
+wan_route_target() {
+    # Where a list goes around the tunnel when nothing was recorded: the target
+    # other lists already use for the ISP, else the WAN interface.
+    t=$(awk -v w="$VWARD_WAN_INTERFACE" '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
+        ctx && $1 == "route" && $2 == "object-group" && ($4 == "ISP" || $4 == w) {print $4; exit}' "$RUNCFG")
+    printf '%s\n' "${t:-$VWARD_WAN_INTERFACE}"
+}
+
+op_domain_list() {
+    valid_group "$1" || die invalid_group 64
+    case "$2" in vpn|bypass) ;; *) die invalid_value 64 ;; esac
+    load_profile_base
+    G=$1 TUN=$VWARD_TUNNEL_INTERFACE
+    vward_valid_ndm_name "$TUN" || die tunnel_unavailable
+    change_lock
+    JOURNAL=$(mktemp /tmp/vward-console-lists.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    TXN=1
+    snapshot
+    grep -qx "object-group fqdn $G" "$RUNCFG" || die unknown_group 64
+    tab=$(printf '\t')
+    cur=$(group_route "$G")
+    cur_t=${cur%%"$tab"*} cur_o=${cur#*"$tab"}
+    [ -n "$cur" ] || cur_o=-
+    saved="$LISTS_STATE/$G"
+
+    if [ "$2" = vpn ]; then
+        [ "$cur_t" != "$TUN" ] || { TXN=0; done_ok "domain-list $G vpn" unchanged; }
+        group_doh_lines "$G" > "$JOURNAL.doh"
+        # 1. The tunnel route first, so the list never loses its route.
+        ndm "dns-proxy route object-group $G $TUN auto" || die router_rejected
+        echo "dns-proxy no route object-group $G $TUN" >> "$JOURNAL"
+        if [ -n "$cur_t" ]; then
+            ndm "dns-proxy no route object-group $G $cur_t" || die router_rejected
+            o=; [ "$cur_o" = - ] || o=" $cur_o"
+            echo "dns-proxy route object-group $G $cur_t$o" >> "$JOURNAL"
+        fi
+        # 2. Smart DNS answers would send the tunnel to the Smart DNS proxy.
+        while IFS= read -r L; do
+            [ -n "$L" ] || continue
+            doh_remove "$L"; rc=$?
+            [ "$rc" = 0 ] || { [ "$rc" = 2 ] && die doh_remove_unsafe; die doh_remove_failed; }
+            echo "dns-proxy $L" >> "$JOURNAL"
+        done < "$JOURNAL.doh"
+        # 3. Verify, then remember how to come back.
+        snapshot
+        route_present "$G" "$TUN" || die verification_failed
+        [ -z "$cur_t" ] || ! route_present "$G" "$cur_t" || die verification_failed
+        while IFS= read -r L; do [ -z "$L" ] || ! doh_present "$L" || die verification_failed; done < "$JOURNAL.doh"
+        new_tmp "$saved" || die write_failed
+        { printf 'route=%s\t%s\n' "${cur_t:--}" "$cur_o"; sed -n 's/^./doh=&/p' "$JOURNAL.doh"; } > "$TMPFILE" || die write_failed
+        install_tmp "$saved" 0600 || die write_failed
+        detail="route=${cur_t:--}->$TUN doh=$(grep -c . "$JOURNAL.doh")"
+    else
+        rt=$(sed -n 's/^route=//p' "$saved" 2>/dev/null)
+        if [ -n "$rt" ]; then new_t=${rt%%"$tab"*} new_o=${rt#*"$tab"}; else new_t=$(wan_route_target) new_o=auto; fi
+        [ "$cur_t" = "$TUN" ] || { TXN=0; done_ok "domain-list $G bypass" unchanged; }
+        sed -n 's/^doh=//p' "$saved" 2>/dev/null > "$JOURNAL.doh"
+        if [ "$new_t" != - ]; then
+            o=; [ "$new_o" = - ] || o=" $new_o"
+            ndm "dns-proxy route object-group $G $new_t$o" || die router_rejected
+            echo "dns-proxy no route object-group $G $new_t" >> "$JOURNAL"
+        fi
+        ndm "dns-proxy no route object-group $G $TUN" || die router_rejected
+        echo "dns-proxy route object-group $G $TUN auto" >> "$JOURNAL"
+        while IFS= read -r L; do
+            [ -n "$L" ] || continue
+            doh_present "$L" && continue
+            out=$("$NDMC" -c "dns-proxy $L" 2>&1)
+            case "$out" in *"limit exceeded"*) die doh_limit ;; esac
+            printf '%s\n' "$out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found)' && die router_rejected
+            echo "DOH-REMOVE $L" >> "$JOURNAL"
+        done < "$JOURNAL.doh"
+        snapshot
+        [ "$new_t" = - ] || route_present "$G" "$new_t" || die verification_failed
+        ! route_present "$G" "$TUN" || die verification_failed
+        while IFS= read -r L; do [ -z "$L" ] || doh_present "$L" || die verification_failed; done < "$JOURNAL.doh"
+        detail="route=$TUN->$new_t doh=$(grep -c . "$JOURNAL.doh")"
+    fi
+
+    save_router || die config_save_failed
+    TXN=0
+    [ "$2" = vpn ] || rm -f "$saved"
+    done_ok "domain-list $G $2 $detail" changed
+}
+
+op_domain_list_watch() {
+    valid_group "$1" || die invalid_group 64
+    case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
+    set_kv "$LISTS_CONF" "watch.$1" "$2" 0644 || done_ok "domain-list-watch $1 $2" unchanged
+    # The route engine rebuilds its watch map on the next group refresh.
+    mkdir -p "$ROUTE_STATE" 2>/dev/null && echo 0 > "$REFRESH_TS" 2>/dev/null
+    done_ok "domain-list-watch $1 $2" changed
+}
+
 # ---------- Components ----------
 #
 # Disabling a component also disables everything that requires it running
@@ -552,7 +735,7 @@ OP=$1; shift
 case "$OP" in tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth) [ "$#" -eq 1 ] || die usage 64 ;; *) [ "$#" -eq 2 ] || die usage 64 ;; esac
 ARG1=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
 ARG2=${2:-}
-case "$OP" in wifi|update|tunnel) ARG1=$1 ;; esac
+case "$OP" in wifi|update|tunnel|domain-list|domain-list-watch) ARG1=$1 ;; esac
 case "$OP" in route-domain|force-vpn|adaptive) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 
 ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
@@ -578,6 +761,8 @@ case "$OP" in
         done_ok "console-auth enabled=$ARG1" changed ;;
     update-feed) op_update_feed "$ARG1" ;;
     tunnel) op_tunnel "$ARG1" ;;
+    domain-list) op_domain_list "$ARG1" "$ARG2" ;;
+    domain-list-watch) op_domain_list_watch "$ARG1" "$ARG2" ;;
     wifi) op_wifi "$ARG1" "$ARG2" ;;
     update) op_update "$ARG1" "$ARG2" ;;
     *) die invalid_operation 64 ;;

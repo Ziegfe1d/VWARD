@@ -57,8 +57,8 @@ if forms - form_handlers:
 
 # Navigation: every page and detail page has a renderer, every static link resolves.
 pages = set(re.findall(r"\{ id: '([a-z]+)', title: '[^']+', icon: '[a-z]+', group:", js))
-if len(pages) != 10:
-    fail(f"ожидалось 10 разделов, найдено {len(pages)}")
+if len(pages) != 11:
+    fail(f"ожидалось 11 разделов, найдено {len(pages)}")
 details = set(re.findall(r"^  '(d-[a-z-]+)': \{ title:", js, re.MULTILINE))
 renderers = set(re.findall(r"^  ([a-z]+)\(\) \{", js, re.MULTILINE)) | set(re.findall(r"^  '(d-[a-z-]+)'\(\) \{", js, re.MULTILINE))
 if (pages | details) - renderers:

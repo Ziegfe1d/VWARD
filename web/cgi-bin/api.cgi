@@ -102,7 +102,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|settings-data|security-data|route-data|diagnostics|route-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control) ;;
+    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -454,6 +454,7 @@ if [ "$ACTION" = config ]; then
         adaptive-mode|classifier) set -- "$OP" "$VALUE" ;;
         ip-category) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
+        domain-list|domain-list-watch) set -- "$OP" "$TARGET" "$VALUE" ;;
         update-feed) set -- "$OP" "$TARGET"; [ "$TARGET" != dev ] || REQUIRED=UPDATE_FEED_DEV ;;
         *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
     esac
@@ -1295,6 +1296,49 @@ if [ "$ACTION" = "route-probe" ]; then
     exit 0
 fi
 
+
+if [ "$ACTION" = lists-data ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    RUNNING="$("${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r')"
+    [ -n "$RUNNING" ] || { echo '{"ok":false,"error":"router_config_unavailable"}'; exit 0; }
+    LISTS_CONF=${VWARD_DOMAIN_LISTS_CONF:-$CONFIG_ETC/route-engine/domain-lists.conf}
+    LISTS_STATE=$CONFIG_ETC/route-engine/domain-lists
+    WATCHED="$(awk -F= '$1 ~ /^watch\./ && $2 == "1" {print substr($1, 7)}' "$LISTS_CONF" 2>/dev/null | "$JQ" -Rn '[inputs | select(length > 0)]')"
+    RETURNS="$(ls "$LISTS_STATE" 2>/dev/null | "$JQ" -Rn '[inputs | select(length > 0)]')"
+    AUTO="$(grep -h '|LIST_AUTO_VPN|' "${VWARD_ROUTE_EVENTS_LOG:-/opt/var/log/vward-route-engine-events.log}" 2>/dev/null | tail -n 50 |
+        awk -F'|' 'NF >= 4 {print $4 "\t" $1 "\t" $3}' | "$JQ" -Rn '[inputs | split("\t") | {(.[0]): {at: .[1], host: .[2]}}] | add // {}')"
+    [ -n "$WATCHED" ] || WATCHED='[]'
+    [ -n "$RETURNS" ] || RETURNS='[]'
+    [ -n "$AUTO" ] || AUTO='{}'
+    # G name / N name description / I name domain / R name target / D domain (Smart DNS)
+    printf '%s\n' "$RUNNING" | awk '
+        /^object-group fqdn / {cur = $3; print "G\t" cur "\t"; next}
+        /^!/ {cur = ""; ctx = 0}
+        /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
+        cur != "" && $1 == "description" {d = $0; sub(/^[ \t]*description[ \t]*/, "", d); gsub(/"/, "", d); print "N\t" cur "\t" d}
+        cur != "" && $1 == "include" {print "I\t" cur "\t" tolower($2)}
+        ctx && $1 == "route" && $2 == "object-group" {print "R\t" $3 "\t" $4}
+        ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print "D\t" tolower($NF)}
+    ' | "$JQ" -Rn --arg tun "${VWARD_TUNNEL_INTERFACE:-}" --arg dev "${VWARD_TUNNEL_DEVICE:-}" --arg wan "${VWARD_WAN_INTERFACE:-}" \
+        --argjson watched "$WATCHED" --argjson returns "$RETURNS" --argjson auto "$AUTO" '
+        reduce (inputs | split("\t")) as $r ({g: {}, order: [], r: {}, doh: []};
+            if $r[0] == "G" then (if .g[$r[1]] then . else .g[$r[1]] = {description: "", domains: []} | .order += [$r[1]] end)
+            elif $r[0] == "N" then .g[$r[1]].description = $r[2]
+            elif $r[0] == "I" then .g[$r[1]].domains += [$r[2]]
+            elif $r[0] == "R" then .r[$r[1]] = (.r[$r[1]] // $r[2])
+            elif $r[0] == "D" then .doh += [$r[1]]
+            else . end)
+        | . as $s
+        | {ok: true, tunnel: $tun, doh_used: ($s.doh | length), doh_limit: 8,
+           lists: [$s.order[] | select(. != "AdaptiveAuto") | . as $n | $s.g[$n] as $l | ($s.r[$n] // "") as $t |
+             {name: $n, description: $l.description, count: ($l.domains | length), domains: $l.domains[:200], route: $t,
+              via: (if $t == "" then "none" elif $t == $tun or $t == $dev then "vpn" elif $t == "ISP" or $t == $wan then "bypass" else "other" end),
+              doh: [$s.doh[] as $d | select(any($l.domains[] as $i | $d == $i or ($d | endswith("." + $i)); .)) | $d],
+              watch: ($watched | index([$n]) != null), returnable: ($returns | index([$n]) != null),
+              auto: ($auto[$n] // null)}]}'
+    exit 0
+fi
 
 if [ "$ACTION" = "control-data" ]; then
     header_json
