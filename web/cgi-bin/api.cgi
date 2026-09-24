@@ -1310,6 +1310,18 @@ if [ "$ACTION" = "update-data" ]; then
             ;;
     esac
 
+    # Last update operation started from the Console (see update-control).
+    URUN=${VWARD_CONSOLE_UPDATE_RUN:-/opt/var/run/vward/console-update}
+    RUN_LABEL="$(sed -n 's/^label=//p' "$URUN/run.meta" 2>/dev/null)"
+    RUN_STARTED="$(sed -n 's/^started=//p' "$URUN/run.meta" 2>/dev/null)"
+    RUN_PID="$(sed -n 's/^pid=//p' "$URUN/run.meta" 2>/dev/null)"
+    RUN_RC="$(sed -n 's/^rc=//p' "$URUN/run.meta" 2>/dev/null)"
+    case "$RUN_RC" in ''|*[!0-9]*) RUN_RC=null ;; esac
+    RUN_ACTIVE=false
+    [ "$RUN_RC" = null ] && [ -n "$RUN_PID" ] && kill -0 "$RUN_PID" 2>/dev/null && RUN_ACTIVE=true
+    [ "$RUN_ACTIVE" = false ] || BUSY=true
+    RUN_OUTPUT="$(tail -n 40 "$URUN/run.log" 2>/dev/null | grep -v '^  \[')"
+
     UPDATE_ENABLED="$(sed -n 's/^update_enabled=//p' /opt/etc/vward/update.conf 2>/dev/null | tail -n 1)"
     [ "$UPDATE_ENABLED" = 1 ] || UPDATE_ENABLED=0
 
@@ -1348,7 +1360,13 @@ if [ "$ACTION" = "update-data" ]; then
       --argjson retry_allowed "$RETRY_ALLOWED" \
       --argjson rollback_allowed "$ROLLBACK_ALLOWED" \
       --argjson recover_allowed "$RECOVER_ALLOWED" \
-      '{ok:true,phase:$phase,busy:$busy,pending:{present:$pending,version:$version,priority:$priority,sequence:$sequence},rollback_available:$rollback,allowed:{check:$check_allowed,apply:$apply_allowed,retry:$retry_allowed,rollback:$rollback_allowed,recover:$recover_allowed}}'
+      --arg run_label "$RUN_LABEL" \
+      --arg run_started "$RUN_STARTED" \
+      --argjson run_active "$RUN_ACTIVE" \
+      --argjson run_rc "$RUN_RC" \
+      --arg run_output "$RUN_OUTPUT" \
+      '{ok:true,phase:$phase,busy:$busy,pending:{present:$pending,version:$version,priority:$priority,sequence:$sequence},rollback_available:$rollback,allowed:{check:$check_allowed,apply:$apply_allowed,retry:$retry_allowed,rollback:$rollback_allowed,recover:$recover_allowed},
+        run:{label:$run_label,started:$run_started,running:$run_active,finished:($run_rc != null),rc:$run_rc,output:$run_output}}'
     exit 0
 fi
 
@@ -1405,7 +1423,7 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
             *) echo '{"ok":false,"error":"unknown_control_action"}'; exit 0 ;;
         esac
     else
-        CMD=/opt/share/vward/updater/current/vward-update.sh
+        CMD=${VWARD_UPDATER_BIN:-/opt/share/vward/updater/current/vward-update.sh}
         USTATE=/opt/var/lib/vward/updater
         UPHASE="$(sed -n 's/^phase=//p' "$USTATE/journal.state" 2>/dev/null | tail -n 1)"
         [ -n "$UPHASE" ] || UPHASE=IDLE
@@ -1451,6 +1469,27 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
     }
 
     START="$(date '+%Y-%m-%dT%H:%M:%S%z')"
+    if [ "$ACTION" = update-control ]; then
+        # An install outlasts the browser's 10-second request, so the updater runs
+        # detached and update-data reports its phase and result.
+        URUN=${VWARD_CONSOLE_UPDATE_RUN:-/opt/var/run/vward/console-update}
+        mkdir -p "$URUN" || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+        UPID="$(sed -n 's/^pid=//p' "$URUN/run.meta" 2>/dev/null)"
+        if ! grep -q '^rc=' "$URUN/run.meta" 2>/dev/null && [ -n "$UPID" ] && kill -0 "$UPID" 2>/dev/null; then
+            echo '{"ok":false,"error":"updater_busy"}'
+            exit 0
+        fi
+        printf 'label=%s\nstarted=%s\n' "$LABEL" "$START" > "$URUN/run.meta"
+        (
+            "$CMD" "$ARG" > "$URUN/run.log" 2>&1
+            URC=$?
+            printf 'rc=%s\n' "$URC" >> "$URUN/run.meta"
+            printf '%s|CONSOLE_ACTION|action=%s rc=%s\n' "$START" "$LABEL" "$URC" >> /opt/var/log/vward/console-audit.log
+        ) </dev/null >/dev/null 2>&1 &
+        printf 'pid=%s\n' "$!" >> "$URUN/run.meta"
+        printf '{"ok":true,"action":"%s","started":true}\n' "$LABEL"
+        exit 0
+    fi
     if [ -n "$ARG" ]; then OUT="$("$CMD" "$ARG" 2>&1)"; else OUT="$("$CMD" 2>&1)"; fi
     RC=$?
     SAFE_OUT="$(printf '%s\n' "$OUT" | tail -n 120)"

@@ -903,8 +903,26 @@ async function updateMode(mode) {
   await runAction('updates', 'settings', { auto_apply: on, auto_critical: isTrue(p.auto_critical) ? '1' : '0', auto_important: isTrue(p.auto_important) ? '1' : '0', auto_routine: isTrue(p.auto_routine) ? '1' : '0' }, 'Настройки обновлений сохранены');
   await Promise.all([load('status', true), load('config', true)]); render();
 }
-function updateOp(op, token) {
-  return runAction('updates', 'update-control', token ? { op: op, confirm: token } : { op: op }, 'Операция обновления выполнена').then(() => Promise.all([load('update', true), load('status', true)])).then(render);
+/* The router runs the updater in the background: an install takes longer than one request may wait. */
+async function updateOp(op, token) {
+  const show = text => { actionResult = { id: 'updates', text: text }; render(); };
+  show('Запускаем…');
+  let x;
+  try { x = await apiPost('update-control', token ? { op: op, confirm: token } : { op: op }); }
+  catch (e) { toast('Ошибка: ' + e.message); show('Ошибка: ' + e.message); return; }
+  if (!x.ok) { toast('Не выполнено: ' + errText(x)); show('Ошибка: ' + errText(x)); return; }
+  let run = {};
+  const deadline = Date.now() + 15 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 3000));
+    let u;
+    try { u = await apiGet('update-data'); } catch (e) { continue; }
+    run = u.run || {};
+    show((run.output || '').trim() || 'Этап: ' + (u.phase || '…'));
+    if (run.finished) break;
+  }
+  toast(!run.finished ? 'Обновление ещё идёт, проверьте позже' : run.rc === 0 ? 'Операция обновления выполнена' : 'Не выполнено: код ' + run.rc);
+  await Promise.all([load('update', true), load('status', true)]); render();
 }
 async function adsControl(fields, okMsg, resultId) {
   const x = await runAction(resultId || 'ads', 'ads-control', fields, okMsg);

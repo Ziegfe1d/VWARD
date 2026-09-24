@@ -3,6 +3,8 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -114,6 +116,32 @@ for op in ("wan-renew", "wan-bounce"):
 assert 'wan-bounce) COMP=wan-guard; CMD=/opt/bin/vward-wan-recovery.sh; ARG=wan-bounce; REQUIRED=WAN_BOUNCE' in API
 assert 'wan-renew) COMP=wan-guard; CMD=/opt/bin/vward-wan-recovery.sh; ARG=dhcp-renew; REQUIRED=WAN_RENEW' in API
 assert call_api("action=update-control", "op=check", "POST")["error"] == "action_unavailable"
+# Update operations run detached: an install outlasts the browser's request, so
+# update-control returns at once and update-data reports the phase and result.
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    fake = td / "vward-update.sh"
+    fake.write_text('#!/bin/sh\necho "State transition: CHECKING $1"\nsleep 3\necho done\nexit 20\n')
+    fake.chmod(0o755)
+    os.environ["VWARD_UPDATER_BIN"] = str(fake)
+    os.environ["VWARD_CONSOLE_UPDATE_RUN"] = str(td / "run")
+    try:
+        began = time.monotonic()
+        got = call_api("action=update-control", "op=check", "POST")
+        assert got.get("ok") is True and got.get("started") is True, got
+        assert time.monotonic() - began < 2, "update-control must not wait for the updater"
+        assert call_api("action=update-control", "op=check", "POST")["error"] == "updater_busy"
+        data = call_api("action=update-data")
+        assert data["busy"] is True and data["run"]["running"] is True and data["run"]["label"] == "update-check", data
+        for _ in range(60):
+            run = call_api("action=update-data")["run"]
+            if run["finished"]:
+                break
+            time.sleep(0.25)
+        assert run["finished"] is True and run["running"] is False and run["rc"] == 20, run
+        assert "CHECKING --check" in run["output"] and "done" in run["output"], run
+    finally:
+        del os.environ["VWARD_UPDATER_BIN"], os.environ["VWARD_CONSOLE_UPDATE_RUN"]
 # Ads views and source management: strict input before anything runs.
 assert call_api("action=ads-view&view=querylog&search=a%26b")["error"] == "invalid_value"
 assert call_api("action=ads-view&view=shell")["error"] in ("invalid_view", "action_unavailable")
