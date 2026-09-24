@@ -1523,6 +1523,9 @@ if [ "$ACTION" = "log" ]; then
         routing)
             FILE=/tmp/vward-route-reconciler-maint.cron.out
             ;;
+        adaptive)
+            FILE=/opt/var/log/vward-route-engine-events.log
+            ;;
         updater)
             FILE=/opt/var/log/vward/updater-watch.log
             ;;

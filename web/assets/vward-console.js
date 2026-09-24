@@ -162,7 +162,7 @@ const PAGES = [
 ];
 const SHORT = { overview: 'Обзор', logs: 'Журналы', wan: 'Интернет', vpn: 'VPN', routes: 'Маршруты', wifi: 'Wi-Fi', ads: 'Реклама', system: 'Система', updates: 'Обновл.', settings: 'Настройки' };
 const COMPONENTS = [
-  { id: 'route-engine', name: 'Движок маршрутизации', desc: 'Отправляет выбранные домены через VPN и ведёт AdaptiveAuto.', when: 'постоянно, как служба', page: 'routes', log: 'routing' },
+  { id: 'route-engine', name: 'Движок маршрутизации', desc: 'Отправляет выбранные домены через VPN и ведёт AdaptiveAuto.', when: 'постоянно, как служба', page: 'routes', log: 'adaptive' },
   { id: 'route-reconciler', name: 'Сверка маршрутов', desc: 'Каждые 5 минут сверяет маршруты роутера с каталогом и исправляет расхождения.', when: 'каждые 5 минут', page: 'routes', log: 'routing' },
   { id: 'route-tools', name: 'Инструменты маршрутов', desc: 'Проверка адресов и обновление подсказок каталога.', when: 'подсказки - раз в сутки', page: 'routes', log: 'routing' },
   { id: 'policy-sync', name: 'IP-категории', desc: 'Раз в сутки обновляет IP-категории и маршруты по ним.', when: 'раз в сутки, в 00:10', page: 'routes', log: 'policy' },
@@ -194,7 +194,7 @@ function compCascade(id, off) {
 const compNames = ids => ids.map(x => '«' + ((comp(x) || {}).name || x) + '»').join(', ');
 const LOG_TABS = [
   { id: 'wan', label: 'Интернет' }, { id: 'recovery', label: 'Восстановление' }, { id: 'tunnel', label: 'VPN' },
-  { id: 'routing', label: 'Маршрутизация' }, { id: 'policy', label: 'IP-категории' }, { id: 'wifi', label: 'Wi-Fi' },
+  { id: 'adaptive', label: 'AdaptiveAuto' }, { id: 'routing', label: 'Сверка маршрутов' }, { id: 'policy', label: 'IP-категории' }, { id: 'wifi', label: 'Wi-Fi' },
   { id: 'ads', label: 'Реклама' }, { id: 'updater', label: 'Обновления' }, { id: 'cron', label: 'Расписание' }, { id: 'console', label: 'Console' }
 ];
 const logLabel = id => (LOG_TABS.find(t => t.id === id) || {}).label || id;
@@ -406,6 +406,7 @@ const RENDER = {
         '</dl>', { desc: 'Выключение AdaptiveAuto не убирает уже добавленные домены - только перестаёт добавлять новые.' }) +
       panel('Проверить адрес', '<form class="inline-form" data-form="probe"><input class="input" id="probeInput" placeholder="домен или IPv4, например claude.ai" aria-label="Домен или IPv4" autocomplete="off"><button class="btn primary" type="submit">' + ico('search') + 'Проверить</button></form><div id="probeResult"></div>', { desc: 'Покажет, через какой интерфейс пойдёт трафик.' }) +
       panel('Обслуживание', kv([
+        ['Решения AdaptiveAuto', 'журнал проверок доменов', '', 'logs', ' data-log-go="adaptive"'],
         ['Сверка маршрутов', 'каждые 5 минут', '', 'logs', ' data-log-go="routing"'],
         ['Каталог обновлён', d.last_update || '—'],
         ['IP-категории обновлены', ip.last_sync || '—', '', 'logs', ' data-log-go="policy"']
