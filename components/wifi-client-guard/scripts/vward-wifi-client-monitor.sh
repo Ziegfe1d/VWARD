@@ -124,18 +124,19 @@ ndmc -c 'show associations' > "$RAW" 2>&1 || { log ERROR "show associations fail
 
 awk '
 function trim(s){gsub(/^[[:space:]]+|[[:space:]]+$/,"",s);return s}
-function emit(){if(mac!="") print tolower(mac) "\t" ap "\t" txrate "\t" uptime "\t" rssi}
+function emit(){if(mac!="") print tolower(mac) "\t" ap "\t" txrate "\t" uptime "\t" rssi;mac="";ap="";txrate="";uptime="";rssi=""}
 {
-    line=$0
-    sub(/^[[:space:]]*/,"",line)
-    if(line=="station:"){emit();mac="";ap="";txrate="";uptime="";rssi="";next}
+    # Keenetic pads block headers ("station: "), so trim both ends.
+    line=trim($0)
+    if(line=="station:"||line=="station"){emit();next}
     key=line
     sub(/:.*/,"",key)
     key=trim(key)
     val=line
     sub(/^[^:]*:[[:space:]]*/,"",val)
     val=trim(val)
-    if(key=="mac") mac=val
+    # Every station starts with its mac: a second mac closes the previous one.
+    if(key=="mac"){emit();mac=val}
     else if(key=="ap") ap=val
     else if(key=="txrate") txrate=val
     else if(key=="uptime") uptime=val

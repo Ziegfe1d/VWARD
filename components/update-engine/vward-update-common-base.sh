@@ -198,7 +198,22 @@ vu_atomic_write() {
 
 vu_file_mode() {
     path=$1
-    find "$path" -prune -printf '%m\n' 2>/dev/null | sed -n '1p'
+    mode=$(find "$path" -prune -printf '%m\n' 2>/dev/null | sed -n '1p')
+    case "$mode" in
+        [0-7]*) printf '%s\n' "$mode"; return 0 ;;
+    esac
+    # BusyBox find has no -printf: read the permission bits from ls.
+    ls -ldn "$path" 2>/dev/null | awk 'NR == 1 {
+        p = substr($1, 2, 9); m = 0; s = 0
+        for (i = 1; i <= 9; i++) {
+            c = substr(p, i, 1); b = (i - 1) % 3
+            v = (b == 0) ? 4 : (b == 1) ? 2 : 1
+            if (c == "r" || c == "w" || c == "x") m += v * (i <= 3 ? 64 : i <= 6 ? 8 : 1)
+            if (c == "s" || c == "t") { m += (i <= 3 ? 64 : i <= 6 ? 8 : 1); s += (i == 3 ? 4 : i == 6 ? 2 : 1) }
+            if (c == "S" || c == "T") s += (i == 3 ? 4 : i == 6 ? 2 : 1)
+        }
+        printf "%s%o\n", (s ? s : ""), m
+    }'
 }
 
 vu_committed_get() { vu_state_get "$1" "$VU_COMMITTED_FILE"; }

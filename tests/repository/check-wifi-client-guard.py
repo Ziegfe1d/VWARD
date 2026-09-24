@@ -87,11 +87,11 @@ station:
     mac: AA:AA:AA:AA:AA:01
     ap: WifiMaster3/AccessPoint1
     rssi: -61
-station:
+        station: 
     mac: AA:AA:AA:AA:AA:02
     ap: HomeSlow
     rssi: -48
-station:
+        station: 
     mac: AA:AA:AA:AA:AA:03
     ap: WifiMaster9/AccessPoint0
     rssi: -50

@@ -1069,7 +1069,7 @@ if [ "$ACTION" = "diagnostics" ]; then
     ADGUARD_STATUS=FAIL
     ADAPTIVE_STATUS=FAIL
     ps 2>/dev/null | grep -q '[c]rond -b' && CROND_STATUS=PASS
-    ps 2>/dev/null | grep -q '[c]rond-supervisor.sh' && SUPERVISOR_STATUS=PASS
+    ps 2>/dev/null | grep -q '[v]ward-cron-supervisor.sh' && SUPERVISOR_STATUS=PASS
     ps 2>/dev/null | grep -q '[A]dGuardHome' && ADGUARD_STATUS=PASS
     ps 2>/dev/null | grep -q '[v]ward-route-engine.sh' && ADAPTIVE_STATUS=PASS
 
@@ -1695,7 +1695,7 @@ done
 # One process list for every process check.
 set -- $(ps w 2>/dev/null | awk -v subnet="$VWARD_LAN_SUBNET" -v address="$VWARD_LAN_ADDRESS" '
     /[c]rond -b/ && crond == "" { crond = $1 }
-    /[c]rond-supervisor.sh/ { sup = 1 }
+    /[v]ward-cron-supervisor.sh/ { sup = 1 }
     /[A]dGuardHome/ { agh = 1 }
     $6 == "/opt/bin/vward-route-engine.sh" || ($5 ~ /^[{]/ && $7 == "/opt/bin/vward-route-engine.sh") { live++ }
     $5 == "tcpdump" && index($0, "src net " subnet) && index($0, "dst host " address) { tcp++ }

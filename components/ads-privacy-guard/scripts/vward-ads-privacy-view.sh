@@ -25,6 +25,16 @@ trap 'exit 1' HUP INT TERM
 fail() { printf '{"ok":false,"error":"%s"}\n' "$1"; exit 0; }
 search_ok() { case "$1" in *[!a-z0-9.-]*) return 1 ;; esac; [ "${#1}" -le 100 ]; }
 
+# Why AdGuard Home did not answer: no address in the profile, a login is needed, or it is down.
+agh_fail() {
+    [ "$1" = 2 ] && fail adguard_not_configured
+    if [ "$1" = 22 ]; then
+        code=$("$ADS_CURL" -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 5 "$(ads_agh_api_base)/status" 2>/dev/null)
+        case "$code" in 401|403) fail adguard_auth_required ;; esac
+    fi
+    fail adguard_unavailable
+}
+
 new_tmp() { TMP=$(mktemp "${TMPDIR:-/tmp}/vward-ads-view.XXXXXX" 2>/dev/null) || fail temporary_file_unavailable; }
 
 # Verdict map for the query log: domain -> verdict/action.
@@ -46,7 +56,7 @@ case "${1:-}" in
         new_tmp
         QUERY="querylog?limit=$LIMIT&response_status=$STATUS"
         [ -z "$SEARCH" ] || QUERY="$QUERY&search=$SEARCH"
-        ads_agh_api_get "$QUERY" "$TMP" >/dev/null 2>&1 || fail adguard_unavailable
+        ads_agh_api_get "$QUERY" "$TMP" >/dev/null 2>&1 || agh_fail $?
         "$ADS_JQ" -e '.data | type == "array"' "$TMP" >/dev/null 2>&1 || fail adguard_unavailable
         "$ADS_JQ" -c --argjson v "$(verdict_json)" --arg filter "$FILTER" '
             [.data[]? | {
@@ -60,7 +70,7 @@ case "${1:-}" in
         ;;
     stats)
         new_tmp
-        ads_agh_api_get "stats" "$TMP" >/dev/null 2>&1 || fail adguard_unavailable
+        ads_agh_api_get "stats" "$TMP" >/dev/null 2>&1 || agh_fail $?
         "$ADS_JQ" -c '{ok: true,
             queries: (.num_dns_queries // 0), blocked: (.num_blocked_filtering // 0),
             avg_ms: (((.avg_processing_time // 0) * 1000) | floor),

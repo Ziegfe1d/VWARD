@@ -111,7 +111,7 @@ const API_ERRORS = {
   temporary_file_unavailable: 'нет места для временного файла', component_disabled: 'компонент выключен: включите его в «Система → Компоненты»',
   core_component: 'базовый компонент нельзя выключить', wrong_credentials: 'неверный логин или пароль', too_many_attempts: 'слишком много попыток - подождите 5 минут',
   router_auth_unavailable: 'роутер не ответил на проверку пароля', invalid_login: 'недопустимый логин', auth_required: 'нужно войти', invalid_url: 'неверный адрес: нужен https без пробелов и логина', invalid_format: 'неизвестный формат списка',
-  adguard_unavailable: 'AdGuard Home не ответил', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен'
+  adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен'
 };
 const errText = x => API_ERRORS[x && x.error] || (x && x.error) || ('код ' + (x && x.rc));
 
@@ -431,7 +431,7 @@ const RENDER = {
         ctrlRow('Ручное управление', sw('data-cfg-wifi="CONTROL_ENABLED"', wc.CONTROL_ENABLED, 'Ручное закрепление диапазона', !cfgOk()), 'закрепление устройства за 2.4 или 5 ГГц по вашей команде') +
         '</dl>' + confirmBox('wifi-ctl-on', 'Разрешить закреплять устройства за диапазоном? Изменение применяется только по вашей команде для выбранного устройства.', 'Разрешить') + kv([
         ['Домашний сегмент', prof().lan_interface || '—'],
-        ['Последний сбор', sc.last ? sc.last + (num(sc.rc) === 0 ? ' · успешно' : ' · код ' + sc.rc) : '—', '', 'logs', ' data-log-go="wifi"']
+        ['Последний сбор', sc.last ? fmtStamp(sc.last) + (num(sc.rc) === 0 ? ' · успешно' : ' · код ' + sc.rc) : '—', '', 'logs', ' data-log-go="wifi"']
       ])) +
       panel('Клиенты', clients.length ? '<ul class="rows">' + clients.map(c => '<li class="row link" role="button" tabindex="0" data-go="w-' + esc(c.mac) + '"><div class="row-main"><b class="mono">' + esc(c.mac) + ' · ' + esc(bandText(c.band)) + '</b><small>' + fmtInt(c.switches) + ' ' + plural(num(c.switches) || 0, 'переход', 'перехода', 'переходов') + (num(c.weak_5g) ? ' · слабый 5 ГГц ' + c.weak_5g + ' раз' : '') + (c.min_5g_rssi && c.min_5g_rssi !== '-' ? ' · мин. ' + esc(c.min_5g_rssi) + ' дБм' : '') + '</small></div><span class="pill ' + (c.health === 'WARNING' ? 'warn' : 'ok') + '">' + esc(recText(c)) + '</span>' + ico('chevron', 'chev') + '</li>').join('') + '</ul>' : empty(w.enabled ? 'Клиентов пока нет' : 'Сбор данных выключен'), { desc: 'Рекомендации не применяются автоматически.' }) +
       panel('Когда предупреждать', '<dl class="kv">' +
@@ -515,7 +515,7 @@ const RENDER = {
         ['Состояние', phaseText(u.phase || p.phase), (u.phase || p.phase) === 'FAILED' ? 'crit' : 'ok'],
         ['Версия', (p.version || '—') + ' · № ' + (p.last_sequence || 0)],
         pend.present ? ['Доступно', (pend.version || '') + (pend.priority ? ' · ' + pend.priority : ''), 'info'] : null,
-        ['Последняя проверка', p.last_health_check || '—', '', 'logs', ' data-log-go="updater"'],
+        ['Последняя проверка', fmtStamp(p.last_health_check) || '—', '', 'logs', ' data-log-go="updater"'],
         ['Откат', u.rollback_available ? 'Доступен' : 'Недоступен', u.rollback_available ? 'info' : '']
       ]) + (conf || (acts.length ? '<div class="panel-actions even">' + acts.join('') + '</div>' : '')) + resultBox('updates')) +
       panel('Настройки обновлений', '<dl class="kv">' +
@@ -573,7 +573,7 @@ const RENDER = {
     const sv = st().services || {}, cr = S.cron;
     const jobs = cr && cr.ok ? cr.jobs : [];
     const row = x => { const comp = JOB_COMPONENT[x.name] || x.component, on = compOn(comp), ok = x.rc === 0;
-      return '<li class="row link" role="button" tabindex="0" data-go="c-' + esc(comp) + '"><div class="row-main"><b>' + esc(JOB_NAMES[x.name] || x.name) + '</b><small>' + esc(cronText(x.schedule)) + ' · ' + esc(x.last || 'ещё не запускалось') + '</small></div>' +
+      return '<li class="row link" role="button" tabindex="0" data-go="c-' + esc(comp) + '"><div class="row-main"><b>' + esc(JOB_NAMES[x.name] || x.name) + '</b><small>' + esc(cronText(x.schedule)) + ' · ' + esc(fmtStamp(x.last) || 'ещё не запускалось') + '</small></div>' +
         '<span class="pill ' + (!on ? 'warn' : x.rc == null ? '' : ok ? 'ok' : 'crit') + '">' + (!on ? 'Выключен' : x.rc == null ? 'Нет данных' : ok ? 'Успешно' : 'Код ' + x.rc) + '</span>' + ico('chevron', 'chev') + '</li>'; };
     return panel('Служба расписания', kv([['cron', sv.crond ? 'Работает' : 'Остановлен', sv.crond ? 'ok' : 'crit'], ['Supervisor', sv.supervisor ? 'Работает' : 'Остановлен', sv.supervisor ? 'ok' : 'crit']])) +
       panel('Задания', !cr ? empty('Загрузка…') : !cr.ok ? empty(errText(cr)) : jobs.length ? '<ul class="rows">' + jobs.map(row).join('') + '</ul>' : empty('Задания не найдены'),
@@ -629,7 +629,7 @@ const RENDER = {
     const q = S.qlog, f = [['all', 'Все'], ['blocked', 'Заблокированные'], ['allowed', 'Разрешённые'], ['review', 'На проверке']];
     return panel('Журнал запросов', '<div class="segmented" role="group" aria-label="Фильтр">' + f.map(x => '<button type="button" data-qfilter="' + x[0] + '" aria-pressed="' + (ADSV.filter === x[0]) + '">' + x[1] + '</button>').join('') + '</div>' +
       '<form class="inline-form" data-form="ads-qsearch"><input class="input" name="q" value="' + esc(ADSV.search) + '" placeholder="часть домена, например yandex" aria-label="Поиск по домену" autocomplete="off"><button class="btn" type="submit">' + ico('search') + 'Найти</button></form>' +
-      (!q ? empty('Загрузка…') : !q.ok ? empty(q.error === 'adguard_unavailable' ? 'AdGuard Home не ответил' : errText(q)) : q.entries.length ? '<ul class="rows">' + q.entries.map(e => '<li class="row"><div class="row-main"><b>' + dom(e.domain) + '</b><small><span class="st ' + (e.blocked ? 'crit' : 'ok') + '">' + (e.blocked ? 'заблокирован' : 'разрешён') + '</span>' + (e.verdict === 'SUSPECT' ? ' · на проверке' : '') + ' · ' + esc(fmtTime(e.time)) + ' · ' + esc(e.client) + '</small></div><span class="row-acts">' + adsRuleBtn(e.domain, e.blocked ? 'allow' : 'block') + '</span></li>').join('') + '</ul>' : empty('Запросов не найдено')),
+      (!q ? empty('Загрузка…') : !q.ok ? empty(errText(q)) : q.entries.length ? '<ul class="rows">' + q.entries.map(e => '<li class="row"><div class="row-main"><b>' + dom(e.domain) + '</b><small><span class="st ' + (e.blocked ? 'crit' : 'ok') + '">' + (e.blocked ? 'заблокирован' : 'разрешён') + '</span>' + (e.verdict === 'SUSPECT' ? ' · на проверке' : '') + ' · ' + esc(fmtTime(e.time)) + ' · ' + esc(e.client) + '</small></div><span class="row-acts">' + adsRuleBtn(e.domain, e.blocked ? 'allow' : 'block') + '</span></li>').join('') + '</ul>' : empty('Запросов не найдено')),
       { desc: 'Последние запросы из AdGuard Home. Кнопка у строки добавляет правило для этого домена.' });
   },
   'd-review'() {
@@ -686,6 +686,15 @@ const CAT_NAMES = { 'ads-tracking-security': 'Реклама, трекеры и 
 const catText = id => CAT_NAMES[id] || id || '';
 const REASONS = { source_consensus: 'несколько источников согласны', single_source: 'только один источник', block_revalidation_pending: 'ждёт повторной проверки', block_evidence_disappeared_review: 'источники больше не подтверждают', no_block_evidence: 'нет причин блокировать' };
 const reasonText = r => REASONS[r] || (r || '').replace(/_/g, ' ');
+// Router stamps come from `date` ("Thu Sep 24 18:20:02 MSK 2026"), ISO or epoch seconds.
+const MON = { Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12 };
+function fmtStamp(t) {
+  if (t == null || t === '') return '';
+  const s = String(t).trim(), m = /^[A-Z][a-z]{2} ([A-Z][a-z]{2}) +(\d{1,2}) (\d\d:\d\d)(?::\d\d)?(?: \S+)? (\d{4})$/.exec(s);
+  if (m && MON[m[1]]) return ('0' + m[2]).slice(-2) + '.' + ('0' + MON[m[1]]).slice(-2) + ' ' + m[3];
+  if (/^\d{9,10}$/.test(s)) return fmtTime(Number(s) * 1000);
+  return fmtTime(s);
+}
 function fmtTime(t) { const d = new Date(t); return isNaN(d) ? (t || '') : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
 function adsRuleBtn(d, type) { return '<button class="icon-btn" type="button" data-ads-rule="' + type + '" data-domain="' + esc(d) + '" aria-label="' + (type === 'allow' ? 'Разрешить ' : 'Заблокировать ') + esc(d) + '" title="' + (type === 'allow' ? 'Разрешить' : 'Заблокировать') + '">' + ico(type === 'allow' ? 'check' : 'block') + '</button>'; }
 async function adsViews() { await Promise.all(['ads', 'adspub', 'qlog', 'review', 'blocked'].map(k => S[k] || k === 'ads' || k === 'adspub' ? load(k, true) : null)); render(); }
