@@ -20,7 +20,7 @@ def fail(message: str) -> None:
 
 
 # Shell markup: stable anchors only, no inline code or styles (CSP: script-src/style-src 'self').
-for marker in ("sideNav", "pageTitle", "content", "tabbar", "layer", "toasts", "backBtn", "searchBtn", "bellBtn", "themeBtn"):
+for marker in ("pageTitle", "content", "tabbar", "layer", "toasts", "backBtn", "searchBtn", "bellBtn", "themeBtn"):
     if f'id="{marker}"' not in html:
         fail(f"нет элемента каркаса Console: {marker}")
 html_ids = re.findall(r'\bid="([^"]+)"', html)

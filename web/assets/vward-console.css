@@ -41,7 +41,6 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 
 /* Каркас */
 .app{display:grid;grid-template-columns:1fr;min-height:100%}
-.sidebar{display:none}
 .main{min-width:0;display:flex;flex-direction:column}
 .topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;display:flex;align-items:center;gap:8px;height:var(--topbar-h);padding-inline:16px;background:var(--surface);border-bottom:1px solid var(--line)}
 .topbar-title{flex:1;min-width:0;display:flex;align-items:center;gap:8px}
@@ -52,44 +51,33 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .icon-btn[aria-expanded="true"]{background:var(--accent-soft);color:var(--accent)}
 .badge{position:absolute;top:5px;right:5px;min-width:17px;height:17px;padding-inline:4px;border-radius:9px;background:var(--crit);color:#fff;font-size:11px;font-weight:700;line-height:17px;text-align:center;border:2px solid var(--surface)}
 .back-btn[hidden]{display:none}
-@media (min-width:900px){.back-btn:not(.detail){display:none!important}}
 .content{width:100%;max-width:1080px;margin-inline:auto;padding:16px 16px calc(var(--tabbar-space) + 20px);display:flex;flex-direction:column;gap:16px}
 
-/* Нижняя панель (телефон) */
+/* Нижняя панель */
 .tabbar{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));z-index:20;display:grid;grid-template-columns:repeat(var(--tabs,5),minmax(0,1fr));column-gap:2px;height:var(--tabbar-h);padding:6px;background:var(--surface);border:1px solid var(--line);border-radius:28px;box-shadow:0 8px 24px rgba(12,20,32,.16)}
-.tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:0;border:0;border-radius:22px;background:transparent;color:var(--muted);font-size:11px;font-weight:550}
-.tab span{max-width:100%;white-space:nowrap}
+.tab{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:0;border:0;border-radius:22px;background:transparent;color:var(--muted);font-size:11px;font-weight:550}
+.tab span{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tab[aria-current="page"]{color:var(--accent);background:var(--accent-soft)}
 .tab[aria-current="page"] .icon{stroke-width:2.1}
 
-/* Боковая панель (компьютер) */
+/* Широкий экран: та же нижняя панель, в ней все разделы */
 @media (min-width:900px){
-  .app{grid-template-columns:240px minmax(0,1fr)}
-  .sidebar{display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh;padding:16px 12px;background:var(--surface);border-right:1px solid var(--line);overflow-y:auto}
-  .tabbar{display:none}
-  .content{padding-bottom:32px}
+  .tabbar{left:50%;right:auto;width:min(1080px,calc(100% - 20px));transform:translateX(-50%)}
+  .tab{font-size:11.5px}
   .topbar{padding-inline:24px}
 }
-.brand{display:flex;align-items:center;gap:10px;padding:4px 8px 12px}
-.brand-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:var(--accent);color:var(--accent-text);font-weight:800}
-.brand b{display:block;font-size:var(--fs-md)}
-.brand small{color:var(--muted);font-size:var(--fs-xs)}
-.nav-group{margin:12px 8px 4px;color:var(--faint);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
-.nav-item{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border:0;border-radius:var(--r-sm);background:transparent;color:var(--muted);font-size:var(--fs-sm);font-weight:550;text-align:left}
-@media (hover:hover){.nav-item:hover{background:var(--surface-2);color:var(--text)}}
-.nav-item[aria-current="page"]{background:var(--accent-soft);color:var(--accent)}
-.nav-item .dot{margin-left:auto;width:7px;height:7px;border-radius:50%;background:var(--warn)}
-.sidebar-foot{margin-top:auto;padding:8px;color:var(--faint);font-size:var(--fs-xs)}
+.tab .dot{position:absolute;top:6px;right:calc(50% - 16px);width:7px;height:7px;border-radius:50%;background:var(--warn)}
 
 /* Панели и список «название — значение» */
-.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg)}
-.panel-head{display:flex;align-items:center;gap:8px;padding:14px 16px 6px}
-.panel-head h2{margin:0;font-size:var(--fs-md);font-weight:650}
-.panel-head .note{margin-left:auto;flex:none;display:inline-flex;align-items:center;gap:4px;color:var(--faint);font-size:var(--fs-xs);white-space:nowrap}
-.panel-head .note .icon{width:14px;height:14px}
+.block{display:flex;flex-direction:column;gap:6px;min-width:0}
+.block-head{display:flex;align-items:center;gap:8px;min-height:24px;padding-inline:4px}
+.block-head h2{margin:0;font-size:var(--fs-md);font-weight:650}
+.block-desc{margin:0;padding-inline:4px;color:var(--muted);font-size:var(--fs-sm)}
+.panel{padding-block:4px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg)}
+.block-head .note{margin-left:auto;flex:none;display:inline-flex;align-items:center;gap:4px;color:var(--faint);font-size:var(--fs-xs);white-space:nowrap}
+.block-head .note .icon{width:14px;height:14px}
 .panel-desc{margin:0;padding:0 16px 8px;color:var(--muted);font-size:var(--fs-sm)}
-.panel.no-title{padding-top:8px}
-.panel.no-title>.panel-desc:first-child{padding-top:6px}
+.panel>.panel-desc:first-child{padding-top:8px}
 .kv{margin:0;padding:0 16px 6px}
 .kv-row{display:flex;align-items:center;gap:12px;min-height:44px;padding-block:8px;border-top:1px solid var(--line)}
 .kv-row:first-child{border-top:0}
@@ -218,6 +206,7 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .switch input:checked+i::after{transform:translateX(18px)}
 .switch input:focus-visible+i{outline:2px solid var(--accent);outline-offset:2px}
 .segmented{display:flex;flex-wrap:wrap;gap:4px;padding:4px;margin:0 16px 12px;background:var(--surface-2);border-radius:var(--r-md)}
+.panel>.segmented:first-child{margin-top:12px}
 .segmented button{flex:0 0 auto;padding:6px 12px;border:0;border-radius:var(--r-sm);background:transparent;color:var(--muted);font-size:var(--fs-sm);font-weight:600;white-space:nowrap}
 .segmented button[aria-pressed="true"]{background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
 .tabbar.preview{position:static;margin:4px 16px 12px;box-shadow:none}

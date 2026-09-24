@@ -31,6 +31,7 @@ const ICON_PATHS = {
   block: '<circle cx="12" cy="12" r="8"/><path d="m6.4 6.4 11.2 11.2"/>',
   lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/><path d="M12 14.5v2"/>',
   sliders: '<path d="M4 7h9"/><path d="M17 7h3"/><circle cx="15" cy="7" r="2"/><path d="M4 17h3"/><path d="M11 17h9"/><circle cx="9" cy="17" r="2"/>',
+  list: '<rect x="4.5" y="3.5" width="15" height="17" rx="2"/><path d="M8 8h8"/><path d="M8 12h8"/><path d="M8 16h5"/>',
   logs: '<path d="M9 6.5h11"/><path d="M9 12h11"/><path d="M9 17.5h11"/><path d="M4.5 6.5h.01"/><path d="M4.5 12h.01"/><path d="M4.5 17.5h.01"/>',
   runtime: '<circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/>',
   storage: '<ellipse cx="12" cy="6.5" rx="7" ry="2.5"/><path d="M5 6.5v11c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-11"/><path d="M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/>',
@@ -153,7 +154,7 @@ const PAGES = [
   { id: 'logs', title: 'Журналы', icon: 'logs', group: 'Главное', data: [] },
   { id: 'wan', title: 'Интернет', icon: 'globe', group: 'Сеть', data: ['status', 'security', 'config'] },
   { id: 'vpn', title: 'VPN', icon: 'shield', group: 'Сеть', data: ['status', 'security', 'config'] },
-  { id: 'lists', title: 'Доменные списки', icon: 'route', group: 'Сеть', data: ['lists', 'config'] },
+  { id: 'lists', title: 'Доменные списки', icon: 'list', group: 'Сеть', data: ['lists', 'config'] },
   { id: 'routes', title: 'Маршрутизация', icon: 'route', group: 'Сеть', data: ['route', 'security', 'status', 'config'] },
   { id: 'wifi', title: 'Wi-Fi клиенты', icon: 'wifi', group: 'Сеть', data: ['wifi', 'security', 'config'] },
   { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adsstats', 'adspub'] },
@@ -161,7 +162,7 @@ const PAGES = [
   { id: 'updates', title: 'Обновления', icon: 'refresh', group: 'VWARD', data: ['status', 'update', 'config'] },
   { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth'] }
 ];
-const SHORT = { overview: 'Обзор', logs: 'Журналы', wan: 'Интернет', vpn: 'VPN', routes: 'Маршруты', wifi: 'Wi-Fi', ads: 'Реклама', system: 'Система', updates: 'Обновл.', settings: 'Настройки' };
+const SHORT = { overview: 'Обзор', logs: 'Журналы', wan: 'Интернет', vpn: 'VPN', lists: 'Списки', routes: 'Маршруты', wifi: 'Wi-Fi', ads: 'Реклама', system: 'Система', updates: 'Обновл.', settings: 'Настройки' };
 const COMPONENTS = [
   { id: 'route-engine', name: 'Движок маршрутизации', desc: 'Отправляет выбранные домены через VPN и ведёт AdaptiveAuto.', when: 'постоянно, как служба', page: 'routes', log: 'adaptive' },
   { id: 'route-reconciler', name: 'Сверка маршрутов', desc: 'Каждые 5 минут сверяет маршруты роутера с каталогом и исправляет расхождения.', when: 'каждые 5 минут', page: 'routes', log: 'routing' },
@@ -172,7 +173,7 @@ const COMPONENTS = [
   { id: 'wifi-client-guard', name: 'Контроль Wi-Fi клиентов', desc: 'Наблюдает за переходами клиентов между 2.4 и 5 ГГц.', when: 'каждые 5 минут', page: 'wifi', log: 'wifi' },
   { id: 'ads-privacy-guard', name: 'Блокировка рекламы', desc: 'Управляет правилами AdGuard Home и источниками списков.', when: 'каждую минуту', page: 'ads', log: 'ads' },
   { id: 'runtime', name: 'Среда выполнения', desc: 'cron, supervisor и служебная очистка. На ней работают почти все компоненты.', when: 'постоянно', page: 'system', log: 'cron' },
-  { id: 'console', name: 'Console', desc: 'Этот веб-интерфейс и его API.', when: 'постоянно', page: 'settings', log: 'console' },
+  { id: 'console', name: 'Веб-интерфейс VWARD', desc: 'Эта страница управления и её API.', when: 'постоянно', page: 'settings', log: 'console' },
   { id: 'update-engine', name: 'Установщик обновлений', desc: 'Проверяет, устанавливает и откатывает подписанные обновления.', when: 'по настройкам обновлений', page: 'updates', log: 'updater' },
   { id: 'platform-core', name: 'Ядро платформы', desc: 'Версия, реестр компонентов и карта установки.', when: 'не запускается - это файлы версии и карты установки', page: 'system', log: 'console' }
 ];
@@ -196,7 +197,7 @@ const compNames = ids => ids.map(x => '«' + ((comp(x) || {}).name || x) + '»')
 const LOG_TABS = [
   { id: 'wan', label: 'Интернет' }, { id: 'recovery', label: 'Восстановление' }, { id: 'tunnel', label: 'VPN' },
   { id: 'adaptive', label: 'AdaptiveAuto' }, { id: 'routing', label: 'Сверка маршрутов' }, { id: 'policy', label: 'IP-категории' }, { id: 'wifi', label: 'Wi-Fi' },
-  { id: 'ads', label: 'Реклама' }, { id: 'updater', label: 'Обновления' }, { id: 'cron', label: 'Расписание' }, { id: 'console', label: 'Console' }
+  { id: 'ads', label: 'Реклама' }, { id: 'updater', label: 'Обновления' }, { id: 'cron', label: 'Расписание' }, { id: 'console', label: 'Веб-интерфейс' }
 ];
 const logLabel = id => (LOG_TABS.find(t => t.id === id) || {}).label || id;
 const DETAILS = {
@@ -247,11 +248,12 @@ let authForm = false, loginOpen = false;
 let current = 'overview', editing = false, confirm = null, logTab = 'wan', logWrap = true, actionResult = null;
 
 /* ---------- Построение блоков ---------- */
+// The heading and its description sit above the card; the card holds only the content.
 function panel(title, body, opts) {
   opts = opts || {};
   const p = page(current), same = p && p.title === title, extra = opts.readonly || opts.right;
-  const head = same && !extra ? '' : '<div class="panel-head">' + (same ? '' : '<h2>' + esc(title) + '</h2>') + (opts.readonly ? '<span class="note">' + ico('lock') + 'Только чтение</span>' : '') + (opts.right || '') + '</div>';
-  return '<section class="panel' + (same ? ' no-title' : '') + '"' + (same ? ' aria-label="' + esc(title) + '"' : '') + '>' + head + (opts.desc ? '<p class="panel-desc">' + esc(opts.desc) + '</p>' : '') + body + '</section>';
+  const head = same && !extra ? '' : '<div class="block-head">' + (same ? '' : '<h2>' + esc(title) + '</h2>') + (opts.readonly ? '<span class="note">' + ico('lock') + 'Только чтение</span>' : '') + (opts.right || '') + '</div>';
+  return '<section class="block"' + (same ? ' aria-label="' + esc(title) + '"' : '') + '>' + head + (opts.desc ? '<p class="block-desc">' + esc(opts.desc) + '</p>' : '') + (body ? '<div class="panel">' + body + '</div>' : '') + '</section>';
 }
 /* Строка: [название, значение, метка состояния, переход (страница или http-адрес), доп. атрибуты перехода, подсказка] */
 function kv(rows) {
@@ -284,7 +286,7 @@ function loadError(keys) {
 /* ---------- Уведомления ---------- */
 function notifications() {
   const n = [], s = S.status;
-  if (S.errors.status) n.push({ sev: 'crit', title: 'Нет связи с Console API', text: S.errors.status, to: 'system' });
+  if (S.errors.status) n.push({ sev: 'crit', title: 'Нет связи с роутером', text: S.errors.status, to: 'system' });
   if (!s) return n;
   const w = s.wan || {}, wg = s.wg || {}, sv = s.services || {}, p = s.platform || {}, stg = s.storage || {};
   if (w.internet === false) n.push({ sev: 'crit', title: 'Нет интернета', text: 'Защита интернета восстанавливает подключение', to: 'wan' });
@@ -531,15 +533,15 @@ const RENDER = {
   settings() {
     const sec = S.security || {}, l = sec.listener || {}, api = sec.api || {}, au = S.auth || {};
     return loadError(['security']) +
-      panel('Доступ к Console', '<dl class="kv">' + ctrlRow('Вход по учётной записи Keenetic', sw('data-auth', !!(au.enabled || authForm), 'Вход по учётной записи Keenetic', !S.auth),
+      panel('Доступ к VWARD', '<dl class="kv">' + ctrlRow('Вход по учётной записи Keenetic', sw('data-auth', !!(au.enabled || authForm), 'Вход по учётной записи Keenetic', !S.auth),
           au.enabled ? (au.logged_in ? 'вы вошли как ' + au.login + ' · сессия ' + au.session_hours + ' ч' : 'нужен вход') : 'пароль проверяет роутер, VWARD его не хранит') + '</dl>' +
         (authForm && !au.enabled ? '<form class="inline-form" data-form="auth-enable"><input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Включить вход</button></form><p class="panel-desc">Введите логин и пароль от веб-интерфейса роутера: вход включится, только если роутер их примет.</p>' : '') +
-        confirmBox('auth-off', 'Выключить вход? Console снова будет открыта любому устройству в домашней сети.', 'Выключить', true) +
+        confirmBox('auth-off', 'Выключить вход? VWARD снова будет открыт любому устройству в домашней сети.', 'Выключить', true) +
         kv([
-          ['Адрес Console', (l.address || location.hostname) + ':' + (l.port || location.port || '80')],
+          ['Адрес VWARD', (l.address || location.hostname) + ':' + (l.port || location.port || '80')],
           ['Защита запросов', api.mutation_guard ? 'Включена' : 'Выключена', api.mutation_guard ? 'ok' : 'crit'],
           ['Доступ с других сайтов', api.cors ? 'Разрешён' : 'Запрещён', api.cors ? 'crit' : 'ok']
-        ]) + (au.enabled ? (au.logged_in ? '<div class="panel-actions">' + btn('logout', 'undo', 'Выйти') + '</div>' : '') : '<p class="field-warn">Пока вход выключен, Console открыта любому устройству в домашней сети.</p>'),
+        ]) + (au.enabled ? (au.logged_in ? '<div class="panel-actions">' + btn('logout', 'undo', 'Выйти') + '</div>' : '') : '<p class="field-warn">Пока вход выключен, VWARD открыт любому устройству в домашней сети.</p>'),
       { desc: 'Сессия действует ' + (au.session_hours || 12) + ' ч. После 5 неверных попыток вход блокируется на 5 минут.' }) +
       panel('Нижняя панель на телефоне', '<div class="tabbar preview" data-key="Разделы на панели">' + tabsHtml() + '</div><dl class="kv">' + PAGES.map(p => {
         const on = tabIds.includes(p.id), i = tabIds.indexOf(p.id);
@@ -549,15 +551,15 @@ const RENDER = {
 
   logs() {
     const text = S.logs[logTab];
-    return '<section class="panel" aria-label="Журналы"><div class="panel-head"><div class="panel-tools">' +
+    return '<section class="block" aria-label="Журналы"><div class="block-head"><div class="panel-tools">' +
       '<button class="icon-btn" type="button" data-act="log-copy" aria-label="Копировать" title="Копировать">' + ico('copy') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-share" aria-label="Поделиться" title="Поделиться">' + ico('share') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-save" aria-label="Сохранить журнал в .txt" title="Сохранить журнал в .txt">' + ico('save') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-save-all" aria-label="Сохранить все журналы" title="Сохранить все журналы">' + ico('archive') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-wrap" aria-pressed="' + logWrap + '" aria-label="Перенос строк" title="Перенос строк">' + ico('wrap') + '</button>' +
-      '<button class="icon-btn" type="button" data-act="log-reload" aria-label="Обновить журнал" title="Обновить журнал">' + ico('refresh') + '</button></div></div>' +
+      '<button class="icon-btn" type="button" data-act="log-reload" aria-label="Обновить журнал" title="Обновить журнал">' + ico('refresh') + '</button></div></div><div class="panel">' +
       '<div class="segmented" role="group" aria-label="Журнал">' + LOG_TABS.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
-      '<pre class="logbox' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + esc(text == null ? 'Загрузка…' : text) + '</pre></section>';
+      '<pre class="logbox' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + esc(text == null ? 'Загрузка…' : text) + '</pre></div></section>';
   },
 
   'd-components'() {
@@ -678,7 +680,7 @@ const RENDER = {
 const HOURS = Array.from({ length: 24 }, (x, i) => { const h = (i < 10 ? '0' : '') + i + ':00'; return [h, h]; });
 function withCur(opts, v, unit) { return v == null || v === '' || opts.some(o => String(o[0]) === String(v)) ? opts : opts.concat([[v, v + unit]]); }
 function countText(n) { return n + ' ' + plural(n, 'домен', 'домена', 'доменов'); }
-function cfgNote() { return !S.config ? '' : !S.config.writable ? '<p class="field-warn">Изменение настроек из Console недоступно: на роутере нет vward-console-config.sh. Установите обновление VWARD.</p>' : ''; }
+function cfgNote() { return !S.config ? '' : !S.config.writable ? '<p class="field-warn">Изменение настроек из VWARD недоступно: на роутере нет vward-console-config.sh. Установите обновление VWARD.</p>' : ''; }
 function addForm(op, placeholder) { return '<form class="inline-form" data-form="cfg-add" data-op="' + op + '"><input class="input" name="domain" placeholder="' + esc(placeholder) + '" aria-label="Домен" autocomplete="off"' + (cfgOk() ? '' : ' disabled') + '><button class="btn primary" type="submit"' + (cfgOk() ? '' : ' disabled') + '>Добавить</button></form>'; }
 function rowBtn(op, action, d, icon, label) { return '<button class="icon-btn" type="button" data-cfg-op="' + op + '" data-cfg-action="' + action + '" data-cfg-target="' + esc(d) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (cfgOk() ? '' : ' disabled') + '>' + ico(icon) + '</button>'; }
 function domainRows(list, acts, sub) { return list.length ? '<ul class="rows">' + list.map(d => '<li class="row"><div class="row-main"><b>' + dom(d) + '</b>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div><span class="row-acts">' + acts(d) + '</span></li>').join('') + '</ul>' : ''; }
@@ -757,46 +759,60 @@ function compPage(c) {
 }
 
 /* ---------- Навигация ---------- */
+// A wide screen holds every section in the bar; a phone holds the chosen ones plus «Ещё».
+const WIDE = window.matchMedia('(min-width: 900px)');
+const barIds = () => WIDE.matches ? PAGES.map(p => p.id) : tabIds;
 function tabsHtml() {
   const cur = navId(current);
+  if (WIDE.matches) return barIds().map(id => '<button class="tab" type="button" data-tab="' + id + '"' + (id === cur ? ' aria-current="page"' : '') + '>' + ico(page(id).icon) + '<span>' + SHORT[id] + '</span></button>').join('');
   return tabIds.map(id => '<button class="tab" type="button" data-tab="' + id + '"' + (id === cur ? ' aria-current="page"' : '') + '>' + ico(page(id).icon) + '<span>' + SHORT[id] + '</span></button>').join('') +
     '<button class="tab" type="button" data-tab="more"' + (tabIds.includes(cur) ? '' : ' aria-current="page"') + '>' + ico('more') + '<span>Ещё</span></button>';
 }
 function renderNav() {
   const cur = navId(current), warnPages = new Set(notifications().map(n => navId(n.to)));
-  let html = '', g = '';
-  PAGES.forEach(p => {
-    if (p.group !== g) { g = p.group; html += '<div class="nav-group">' + g + '</div>'; }
-    html += '<button class="nav-item" type="button" data-go="' + p.id + '"' + (p.id === cur ? ' aria-current="page"' : '') + '>' + ico(p.icon) + '<span>' + p.title + '</span>' + (warnPages.has(p.id) ? '<span class="dot" aria-label="Есть уведомление"></span>' : '') + '</button>';
-  });
-  $('sideNav').innerHTML = html;
   $('tabbar').innerHTML = tabsHtml();
-  document.documentElement.style.setProperty('--tabs', tabIds.length + 1);
+  $('tabbar').querySelectorAll('[data-tab]').forEach(t => { if (warnPages.has(t.dataset.tab) && t.dataset.tab !== cur) t.insertAdjacentHTML('beforeend', '<span class="dot" aria-label="Есть уведомление"></span>'); });
+  document.documentElement.style.setProperty('--tabs', WIDE.matches ? barIds().length : tabIds.length + 1);
   const n = notifications().length;
   $('bellBtn').innerHTML = ico('bell') + (n ? '<span class="badge">' + n + '</span>' : '');
   $('bellBtn').setAttribute('aria-label', n ? 'Уведомления: ' + n : 'Уведомления');
-  const r = st().router || {};
-  $('brandModel').textContent = r.model || 'роутер';
-  $('sideVersion').textContent = 'VWARD ' + (plat().version || '');
+}
+// Only the blocks whose markup changed are replaced: the rest keep their scroll, focus and open details.
+let rendered = null;
+function patchContent(html, whole) {
+  const box = $('content'), t = document.createElement('template');
+  t.innerHTML = html;
+  t.content.querySelectorAll('.meter i[data-width]').forEach(i => { i.style.width = Math.max(0, Math.min(100, Number(i.dataset.width))) + '%'; });
+  const fresh = [...t.content.children], old = [...box.children];
+  if (whole || fresh.length !== old.length) { box.replaceChildren(t.content); return; }
+  fresh.forEach((n, i) => { if (!old[i].isEqualNode(n)) old[i].replaceWith(n); });
 }
 function render() {
   const p = page(current);
   $('pageTitle').textContent = p.title;
-  document.title = p.title + ' · VWARD Console';
+  document.title = p.title + ' · VWARD';
   const back = $('backBtn');
   back.classList.toggle('detail', !!p.parent);
   back.hidden = current === 'overview';
   back.setAttribute('aria-label', p.parent ? 'Назад: ' + page(p.parent).title : 'Назад к обзору');
   const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
-  $('content').innerHTML = html;
-  document.querySelectorAll('.meter i[data-width]').forEach(i => { i.style.width = Math.max(0, Math.min(100, Number(i.dataset.width))) + '%'; });
+  patchContent(html, rendered !== current);
+  rendered = current;
   document.querySelectorAll('.tabbar.preview').forEach(t => t.style.setProperty('--tabs', tabIds.length + 1));
   renderNav();
 }
-function go(id, key) {
+// Every section is a browser history entry, so the back button and the back gesture stay inside VWARD.
+// mode: 'pop' - called from history, 'replace' - no new entry.
+const histDepth = () => (history.state && history.state.d) || 0;
+function go(id, key, mode) {
   if (!page(id)) id = 'overview';
+  if (mode !== 'pop') {
+    const sheet = history.state && history.state.sheet;
+    if (mode === 'replace' || sheet) history.replaceState({ p: id, d: histDepth() }, '', '#' + id);
+    else if (id !== current) history.pushState({ p: id, d: histDepth() + 1 }, '', '#' + id);
+  }
   current = id; editing = false; confirm = null; actionResult = null;
-  closeLayer(); render(); window.scrollTo(0, 0);
+  closeLayer(true); render(); window.scrollTo(0, 0);
   if (key) { const row = [...document.querySelectorAll('[data-key]')].find(r => r.dataset.key === key); if (row) { row.scrollIntoView({ block: 'center' }); row.classList.add('flash'); } }
   refreshPage();
 }
@@ -810,8 +826,9 @@ async function refreshPage() {
   if (id === 'd-cron') keys.push('cron');
   if (id === 'd-review') keys.push('review');
   if (id === 'd-blocked') keys.push('blocked');
-  await Promise.all(keys.map(k => load(k)));
-  if (current === id && !editing && !document.activeElement.matches('input,select,textarea')) render();
+  // Each answer is drawn as soon as it arrives: a slow source does not hold the others back.
+  const draw = () => { if (current === id && !editing && !document.activeElement.matches('input,select,textarea')) render(); };
+  await Promise.all(keys.map(k => load(k).then(draw, draw)));
 }
 async function loadLog(tab, force) {
   if (!force && S.logs[tab] != null) { render(); }
@@ -821,15 +838,22 @@ async function loadLog(tab, force) {
 }
 
 /* ---------- Всплывающие панели ---------- */
-function closeLayer() { loginOpen = false; $('layer').innerHTML = ''; ['searchBtn', 'bellBtn'].forEach(b => $(b).setAttribute('aria-expanded', 'false')); }
+function closeLayer(fromHistory) {
+  const open = !!$('layer').innerHTML;
+  loginOpen = false; $('layer').innerHTML = '';
+  if (open && !fromHistory && history.state && history.state.sheet) history.back();
+  ['searchBtn', 'bellBtn'].forEach(b => $(b).setAttribute('aria-expanded', 'false'));
+}
+// An open sheet is a history entry too: «back» closes it instead of leaving the section.
 function openSheet(title, body, cls, btnId) {
-  closeLayer();
+  closeLayer(true);
+  if (!(history.state && history.state.sheet)) history.pushState({ p: current, d: histDepth() + 1, sheet: 1 }, '', '#' + current);
   $('layer').innerHTML = '<div class="scrim" data-act="close"></div><div class="sheet ' + (cls || '') + '" role="dialog" aria-label="' + esc(title || 'Поиск') + '">' + (title ? '<div class="sheet-head"><h2>' + esc(title) + '</h2><button class="icon-btn" type="button" data-act="close" aria-label="Закрыть">' + ico('close') + '</button></div>' : '') + body + '</div>';
   if (btnId) $(btnId).setAttribute('aria-expanded', 'true');
 }
 function showLogin() {
   if (loginOpen) return;
-  openSheet('Вход в VWARD Console', '<div class="sheet-body"><form class="inline-form" data-form="login"><input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Войти</button></form><p class="panel-desc">Логин и пароль от веб-интерфейса роутера.</p></div>');
+  openSheet('Вход в VWARD', '<div class="sheet-body"><form class="inline-form" data-form="login"><input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Войти</button></form><p class="panel-desc">Логин и пароль от веб-интерфейса роутера.</p></div>');
   loginOpen = true;
 }
 function openNotes() {
@@ -845,10 +869,10 @@ const SEARCH_INDEX = [
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
   ['ads', 'AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
   ['updates', 'Установка обновлений'], ['updates', 'Окно установки'], ['updates', 'Интервал проверки'], ['updates', 'Канал'],
-  ['settings', 'Адрес Console'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
+  ['settings', 'Адрес VWARD'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
 ];
 function openSearch() {
-  openSheet('', '<div class="search-box">' + ico('search') + '<input id="searchInput" placeholder="Раздел, параметр или компонент" aria-label="Поиск по Console" autocomplete="off"><button class="icon-btn" type="button" data-act="close" aria-label="Закрыть">' + ico('close') + '</button></div><div class="sheet-body" id="searchResults"></div>', 'search', 'searchBtn');
+  openSheet('', '<div class="search-box">' + ico('search') + '<input id="searchInput" placeholder="Раздел, параметр или компонент" aria-label="Поиск по VWARD" autocomplete="off"><button class="icon-btn" type="button" data-act="close" aria-label="Закрыть">' + ico('close') + '</button></div><div class="sheet-body" id="searchResults"></div>', 'search', 'searchBtn');
   const i = $('searchInput'); i.focus(); renderResults('');
 }
 function renderResults(q) {
@@ -1179,12 +1203,20 @@ document.addEventListener('visibilitychange', () => {
 });
 
 $('backBtn').innerHTML = ico('back');
-$('backBtn').addEventListener('click', () => go(parentOf(current) || 'overview'));
+$('backBtn').addEventListener('click', () => { if (histDepth() > 0) history.back(); else go(parentOf(current) || 'overview', null, 'replace'); });
+window.addEventListener('popstate', e => {
+  const s = e.state || { p: 'overview', d: 0 };
+  if ($('layer').innerHTML) closeLayer(true);
+  if (s.p !== current) go(s.p, null, 'pop');
+});
+WIDE.addEventListener('change', renderNav);
 $('searchBtn').innerHTML = ico('search');
 $('searchBtn').addEventListener('click', openSearch);
 $('bellBtn').addEventListener('click', openNotes);
 $('themeBtn').addEventListener('click', () => { theme = ({ system: 'light', light: 'dark', dark: 'system' })[theme] || 'system'; store.set('vward-theme', theme); applyTheme(); toast('Тема: ' + ({ system: 'как в системе', light: 'светлая', dark: 'тёмная' })[theme]); });
 applyTheme();
+{ const h = decodeURIComponent(location.hash.slice(1)); if (page(h)) current = h; }
+history.replaceState({ p: current, d: 0 }, '', '#' + current);
 render();
 Promise.all(['status', 'security', 'update'].map(k => load(k))).then(() => { render(); refreshPage(); });
 restartTimer();

@@ -1104,7 +1104,7 @@ if [ "$ACTION" = "diagnostics" ]; then
       --arg wan_rc "$LAST_WAN_RC" --arg wg_rc "$LAST_WG_RC" --arg route_rc "$LAST_ROUTE_RC" \
       --argjson wg_count "$WG_COUNT" --argjson opt_free "$OPT_FREE" \
       '{ok:true,checks:[
-        {id:"console-api",component:"console",label:"Console API",status:$cgi,detail:"CGI отвечает"},
+        {id:"console-api",component:"console",label:"Веб-интерфейс VWARD",status:$cgi,detail:"API отвечает"},
         {id:"opt",component:"runtime",label:"Хранилище /opt",status:$opt,detail:("Свободно КБ: "+($opt_free|tostring))},
         {id:"jq",component:"runtime",label:"jq",status:$jq,detail:"JSON обработчик"},
         {id:"curl",component:"runtime",label:"curl",status:$curl,detail:"HTTP клиент"},
