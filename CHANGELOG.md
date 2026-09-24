@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0-rc.1.fix.1: исправление RC1
+
+Найдено при первой установке 0.2 на реальный Keenetic (KN-1913): BusyBox роутера
+собран без `stat -c`. Из-за этого не проходил вход в runtime (`vward-runtime-admission.sh`),
+и все задачи VWARD по cron — route-engine, tunnel-guard, wan-guard, policy-sync, Ads —
+завершались с `rc=1`, ничего не делая; Console не получала данных. Та же проверка в
+updater заблокировала бы все следующие обновления. Владелец и права файла теперь
+берутся из `ls -ln`, время — из `date -r`. На CI-хосте BusyBox умеет `stat -c`, поэтому
+`run-consistency-checks.sh` теперь запрещает `stat -c` в коде роутера.
+
 ## Не выпущено: переход beta → 0.2
 
 `scripts/beta-to-dev-cutover.sh` — отдельный шаг для роутера, где уже установлена beta:
