@@ -104,7 +104,7 @@ const API_ERRORS = {
   config_save_failed: 'роутер не сохранил конфигурацию', router_config_unavailable: 'не удалось прочитать конфигурацию роутера',
   route_change_busy: 'маршруты сейчас меняет другая задача, повторите', profile_unavailable: 'профиль устройства не определён',
   policy_group_unavailable: 'группа маршрутизации не найдена', list_full: 'список заполнен', backup_failed: 'не удалось сделать резервную копию',
-  write_failed: 'не удалось записать файл', custom_manifest_url: 'адрес манифеста задан вручную - канал меняется в update.conf', invalid_tunnel: 'недопустимое имя туннеля', unknown_tunnel: 'туннель не найден или это не WireGuard',
+  write_failed: 'не удалось записать файл', custom_manifest_url: 'адрес манифеста задан вручную - канал меняется в update.conf', invalid_tunnel: 'недопустимое имя туннеля', tunnel_device_missing: 'туннель не поднят на роутере', unknown_tunnel: 'туннель не найден или это не WireGuard',
   failopen_active: 'включён fail-open: дождитесь восстановления туннеля', policy_sync_busy: 'идёт обновление IP-категорий, повторите позже',
   unsupported_route: 'правило маршрута группы задано нестандартно: переключите туннель в веб-интерфейсе Keenetic',
   profile_verification_failed: 'профиль устройства не принял новый туннель, изменения отменены',
@@ -117,7 +117,7 @@ const API_ERRORS = {
 const errText = x => API_ERRORS[x && x.error] || (x && x.error) || ('код ' + (x && x.rc));
 
 /* ---------- Данные ---------- */
-const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, qlog: null, review: null, blocked: null, logs: {}, errors: {}, loadedAt: {} };
+const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
 const ADSV = { filter: 'all', search: '', blockedSearch: '' };
 const LOADERS = {
   status: () => apiGet('status'), route: () => apiGet('route-data'), update: () => apiGet('update-data'), lists: () => apiGet('lists-data'),
@@ -746,8 +746,27 @@ function tunnelPage(name) {
     ['Сервер', t.endpoint || '—'], ['Адрес в туннеле', t.address || '—'], ['MTU', t.mtu != null ? String(t.mtu) : '—'],
     ['Последнее рукопожатие', t.handshake != null ? agoText(num(t.handshake)) : '—', t.handshake != null && num(t.handshake) > 180 ? 'warn' : ''],
     ['Трафик', t.rx != null || t.tx != null ? '↓ ' + fmtBytes(t.rx) + ' · ↑ ' + fmtBytes(t.tx) : '—'],
+    ['Время работы', t.uptime != null ? fmtUptime(t.uptime) : '—'],
     ['Используется для маршрутов', managed ? 'Да' : 'Нет', managed ? 'info' : '']
-  ]) + use + cfgNote(), { desc: managed ? 'Через этот туннель идут все домены и сети из «Маршрутизации».' : 'Переключение переносит маршруты групп в Keenetic, сохраняет выбор в device.conf и отменяется целиком при любой ошибке.' });
+  ]) + use + cfgNote(), { desc: managed ? 'Через этот туннель идут все домены и сети из «Маршрутизации».' : 'Переключение переносит маршруты групп в Keenetic, сохраняет выбор в device.conf и отменяется целиком при любой ошибке.' }) +
+    tunnelProbePanel(name);
+}
+// Filled only by «Проверить сейчас»: the router does not do this in the background.
+function tunnelProbePanel(name) {
+  const r = S.tprobe[name], ex = r && r.exit, sv = (r && r.server) || {}, pg = (r && r.ping) || {};
+  const place = ex ? [ex.city, ex.region, ex.country].filter(Boolean).join(', ') : '';
+  const body = !r ? '' : r.busy ? empty('Проверка… до 10 секунд') : !r.ok ? empty(errText(r)) : kv([
+    ['Внешний IP', ex ? ex.ip : 'не определён', ex ? '' : 'warn'],
+    ['Местоположение', place || '—'],
+    ['Провайдер', (ex && ex.org) || '—'],
+    ['Пинг до ' + (pg.target || '1.1.1.1'), pg.avg_ms != null ? Math.round(pg.avg_ms) + ' мс' : 'нет ответа', pg.avg_ms != null ? '' : 'warn'],
+    ['Потери', pg.loss != null ? pg.loss + '%' : '—', pg.loss ? (pg.loss >= 50 ? 'crit' : 'warn') : ''],
+    ['Сервер', (sv.host || '—') + (sv.port ? ':' + sv.port : '')],
+    ['Обфускация AmneziaWG', sv.awg ? 'Включена' : 'Выключена'],
+    ['Keepalive', sv.keepalive ? sv.keepalive + ' с' : 'выключен']
+  ]) + '<p class="panel-desc">Проверено в ' + esc(r.at) + '</p>';
+  return panel('Проверка туннеля', body + '<div class="panel-actions">' + btn('tunnel-probe', 'check', 'Проверить сейчас', 'primary', ' data-name="' + esc(name) + '"' + (r && r.busy ? ' disabled' : '')) + '</div>',
+    { desc: 'Внешний адрес и страна выхода, пинг и потери внутри туннеля, настройки сервера. Запускается только по кнопке.' });
 }
 function wifiClientPage(mac) {
   const c = ((S.wifi && S.wifi.clients) || []).find(x => x.mac === mac) || { mac: mac };
@@ -1061,6 +1080,11 @@ document.addEventListener('click', e => {
   else if (a === 'confirm-no') { confirm = null; render(); }
   else if (a === 'confirm-yes') { const c = confirm; confirm = null; if (c && CONFIRMED[c.id]) CONFIRMED[c.id](c); else render(); }
   else if (a === 'open-log') { logTab = t.dataset.logTab; go('logs'); }
+  else if (a === 'tunnel-probe') {
+    const n = t.dataset.name; S.tprobe[n] = { busy: true }; render();
+    apiGet('tunnel-probe', { name: n }).then(r => r, e => ({ ok: false, error: e.message }))
+      .then(r => { S.tprobe[n] = Object.assign(r, { at: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) }); render(); });
+  }
   else if (a === 'tunnel-health') runAction('tunnel-health', 'control', { op: 'tunnel-health' }, 'Проверка туннеля выполнена').then(() => load('status', true)).then(render);
   else if (a === 'logout') apiPost('auth', { op: 'logout' }).then(() => { toast('Вы вышли'); S.auth = null; showLogin(); });
   else if (a === 'housekeeping') runLong('storage', 'control', { op: 'housekeeping' }, 'control-data', 'Журналы проверены').then(() => load('status', true)).then(render);

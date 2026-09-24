@@ -102,7 +102,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control) ;;
+    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -1126,6 +1126,46 @@ if [ "$ACTION" = "diagnostics" ]; then
         {id:"updater",component:"update-engine",label:"VWARD Update Engine",status:$updater,detail:"Активный updater slot"},
         {id:"update-config",component:"update-engine",label:"Update config",status:$config,detail:"Конфигурация доступна для чтения"}
       ]}'
+    exit 0
+fi
+
+# tunnel-probe NAME: on demand only - exit address and its location through the
+# tunnel, ping and loss inside it, and the peer settings from the router config.
+if [ "$ACTION" = tunnel-probe ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    NAME="$(qget name)"
+    case "$NAME" in ''|*[!A-Za-z0-9]*) echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0 ;; esac
+    # Only a WireGuard interface the device map knows; its kernel device comes from the map too.
+    command -v vward_map_tunnels >/dev/null 2>&1 || { echo '{"ok":false,"error":"profile_unavailable"}'; exit 0; }
+    DEV="$(vward_map_tunnels "$(vward_device_map 2>/dev/null)" | awk -v n="$NAME" '$1 == n {print $2; exit}')"
+    [ -n "$DEV" ] && vward_valid_ifname "$DEV" && [ -e "${VWARD_SYSFS_NET:-/sys/class/net}/$DEV" ] || { echo '{"ok":false,"error":"tunnel_device_missing"}'; exit 0; }
+    PROBE_DIR="$(mktemp -d /tmp/vward-console-tunnel.XXXXXX 2>/dev/null)" || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
+    trap 'rm -rf "$PROBE_DIR"' EXIT
+    PING_TARGET=1.1.1.1
+    "${VWARD_PING:-ping}" -I "$DEV" -c 4 -W 2 "$PING_TARGET" > "$PROBE_DIR/ping" 2>&1 &
+    PING_PID=$!
+    "$CURL" --interface "$DEV" --silent --max-time 5 https://ipinfo.io/json > "$PROBE_DIR/exit" 2>/dev/null || :
+    PEER="$("${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r' |
+        awk -v n="interface $NAME" '$0 == n {on = 1; next} on && /^!/ {exit} on {sub(/^ +/, ""); print}')"
+    wait "$PING_PID" 2>/dev/null
+    ENDPOINT="$(printf '%s\n' "$PEER" | awk '$1 == "endpoint" {print $2; exit}')"
+    KEEPALIVE="$(printf '%s\n' "$PEER" | awk '$1 == "keepalive-interval" {print $2; exit}')"
+    AWG=false; printf '%s\n' "$PEER" | grep -q '^wireguard asc ' && AWG=true
+    PING_STATS="$(awk '/packet loss/ {for (i = 1; i <= NF; i++) if ($i ~ /%$/) {loss = $i; sub(/%/, "", loss)}}
+        /min\/avg\/max/ {split($0, a, "= "); split(a[2], b, "/"); avg = b[2]}
+        END {print (loss == "" ? "-" : loss), (avg == "" ? "-" : avg)}' "$PROBE_DIR/ping")"
+    EXIT_JSON="$("$JQ" -c 'if type == "object" and (.ip // "") != "" then {ip, city: (.city // ""), region: (.region // ""), country: (.country // ""), org: (.org // "")} else null end' "$PROBE_DIR/exit" 2>/dev/null)"
+    [ -n "$EXIT_JSON" ] || EXIT_JSON=null
+    "$JQ" -cn --arg name "$NAME" --arg dev "$DEV" --arg endpoint "$ENDPOINT" --arg keepalive "$KEEPALIVE" \
+        --argjson awg "$AWG" --argjson exit "$EXIT_JSON" --arg target "$PING_TARGET" \
+        --arg loss "${PING_STATS% *}" --arg avg "${PING_STATS#* }" \
+        '{ok: true, name: $name, device: $dev,
+          server: {host: ($endpoint | if . == "" then null else (split(":") | .[0:-1] | join(":")) end),
+                   port: ($endpoint | if . == "" then null else (split(":") | last | tonumber? // null) end),
+                   keepalive: ($keepalive | tonumber? // null), awg: $awg},
+          exit: $exit,
+          ping: {target: $target, loss: ($loss | tonumber? // null), avg_ms: ($avg | tonumber? // null)}}'
     exit 0
 fi
 
