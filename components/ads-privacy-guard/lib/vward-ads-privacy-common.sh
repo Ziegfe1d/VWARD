@@ -7,7 +7,7 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-VWARD_ADS_VERSION="0.2.0-rc.1.fix.2"
+VWARD_ADS_VERSION="0.2.0-rc.1.fix.3"
 
 ADS_ETC="${VWARD_ADS_ETC:-/opt/etc/vward/ads-privacy-guard}"
 ADS_STATE="${VWARD_ADS_STATE:-/opt/var/lib/vward/ads-privacy-guard}"
@@ -41,13 +41,21 @@ ads_source_registry_merge()
     [ -s "$ADS_CUSTOM_SOURCES" ] && [ -r "$ADS_SOURCE_REGISTRY" ] && [ -x "$ADS_JQ" ] || return 0
     ads_srm_out="$ADS_STATE/source-registry.merged.json"
     mkdir -p "$ADS_STATE" 2>/dev/null || return 0
+    # No regex: Entware jq is built without Oniguruma.
     "$ADS_JQ" -s '
+        def only($allowed): ($allowed | explode) as $a | explode | all(.[]; . as $c | $a | index([$c]) != null);
+        def alnum: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        def custom_id: startswith("custom-") and length == 17 and (.[7:] | only("0123456789abcdef"));
+        def host_port: split(":") | (.[0] | length > 0 and only(alnum + ".-"))
+            and (length == 1 or (length == 2 and (.[1] | length >= 1 and length <= 5 and only("0123456789"))));
+        def https_url: startswith("https://") and (.[8:] | (index("/") // -1) as $s
+            | $s > 0 and (.[:$s] | host_port) and (.[$s:] | only(alnum + "._~/%+=&?-")));
         .[0] as $b
         | [.[1].sources[]?
-           | select((.id | type) == "string" and (.id | test("^custom-[a-f0-9]{10}$")))
-           | select((.url | type) == "string" and (.url | test("^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._~/%+=&?-]*$")) and (.url | length) <= 300)
+           | select((.id | type) == "string" and (.id | custom_id))
+           | select((.url | type) == "string" and (.url | https_url) and (.url | length) <= 300)
            | select(.format | IN("adblock", "hosts", "domains"))
-           | {id, name: ("Свой: " + (.url | sub("^https://"; "") | .[:60])), vendor: "custom", independence_group: .id,
+           | {id, name: ("Свой: " + (.url | ltrimstr("https://") | .[:60])), vendor: "custom", independence_group: .id,
               purpose: "custom", enabled: true, weight: 40, single_source_block: false, format,
               min_entries: 10, max_bytes: 8388608, urls: [.url], homepage: .url, default_mode: "check", custom: true}] as $c
         | $b | .sources += [$c[] | select(.id as $i | ($b.sources | map(.id) | index($i)) == null)] | .sources |= .[:40]

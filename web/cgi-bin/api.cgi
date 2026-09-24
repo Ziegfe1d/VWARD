@@ -12,7 +12,9 @@ if [ -r "$VWARD_PROFILE_LIB" ]; then
     . "$VWARD_PROFILE_LIB"
     vward_profile_load >/dev/null 2>&1 && PROFILE_READY=true
 fi
-[ -n "${VWARD_WAN_INTERFACE:-}" ] && [ -n "${VWARD_POLICY_GROUP:-}" ] || PROFILE_READY=false
+# No policy group is fine: only the domain operations need one, and
+# vward-console-config.sh refuses those itself.
+[ -n "${VWARD_WAN_INTERFACE:-}" ] || PROFILE_READY=false
 
 header_json()
 {
@@ -713,7 +715,7 @@ if [ "$ACTION" = "settings-data" ]; then
           elif .key=="PUBLISH_MODE" then $ads_publish_mode
           elif .key=="AUTO_PUBLISH" then $ads_auto_publish
           else "" end;
-        def typed($v): if .type=="boolean" then ($v=="1") elif .type=="integer" and ($v|test("^[0-9]+$")) then ($v|tonumber) else $v end;
+        def typed($v): if .type=="boolean" then ($v=="1") elif .type=="integer" and ($v | length > 0 and all(explode[]; . >= 48 and . <= 57)) then ($v|tonumber) else $v end;
         {ok:true,schema:.schema,profile_ready:$profile_ready,authentication_required_for_device_write:true,
          settings:[.settings[] | select(.secret==false) | . as $item | (raw_value) as $raw |
            . + {current:typed($raw),effective:typed($raw),discovered:null,
@@ -1047,7 +1049,7 @@ if [ "$ACTION" = "diagnostics" ]; then
     case "$WAN_STATUS" in PASS|WARN) ;; *) WAN_STATUS=UNKNOWN ;; esac
 
     IF_JSON="$(fetch_json "$VWARD_RCI_BASE/show/interface")"
-    WG_COUNT="$(printf '%s\n' "$IF_JSON" | "$JQ" -r '[to_entries[] | select((.value | type) == "object" and ((.value.type // "") | test("^wireguard$"; "i")))] | length' 2>/dev/null)"
+    WG_COUNT="$(printf '%s\n' "$IF_JSON" | "$JQ" -r '[to_entries[] | select((.value | type) == "object" and ((.value.type // "") | tostring | ascii_downcase == "wireguard"))] | length' 2>/dev/null)"
     case "$WG_COUNT" in ''|*[!0-9]*) WG_COUNT=0 ;; esac
     [ "$WG_COUNT" -gt 0 ] && WG_STATUS=PASS || WG_STATUS=WARN
 
@@ -1542,7 +1544,7 @@ WG_INTERFACES="$(
     printf '%s\n' "$IFACES" |
     "$JQ" -c '[
         to_entries[] |
-        select((.value | type) == "object" and ((.value.type // "") | test("^wireguard$"; "i"))) |
+        select((.value | type) == "object" and ((.value.type // "") | tostring | ascii_downcase == "wireguard")) |
         .key as $n | .value |
         ((.wireguard.peer // .peer // []) | if type == "array" then (.[0] // {}) elif type == "object" then . else {} end) as $p |
         {

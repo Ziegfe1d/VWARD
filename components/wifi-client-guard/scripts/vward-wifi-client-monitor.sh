@@ -40,19 +40,23 @@ discover_ap_bands()
     [ -n "$curl_bin" ] && [ -n "$jq_bin" ] || return 1
     "$curl_bin" --fail --silent --connect-timeout 2 --max-time 4 "$RCI_BASE/show/interface" 2>/dev/null |
     "$jq_bin" -r '
+        # No regex: Entware jq is built without Oniguruma.
+        def lead_digits: explode | . as $e
+            | ([range(0; length) | select($e[.] < 48 or $e[.] > 57)] | first // ($e | length)) as $n
+            | $e[:$n] | implode;
         def band_of(r):
             ((r.band // "") | tostring | ascii_downcase) as $b |
-            ([(r.channel // "") | tostring | scan("^[0-9]+")][0] // "") as $c |
-            if ($b | test("^2")) then "2.4"
-            elif ($b | test("^5")) then "5"
-            elif ($b | test("^6")) then "unknown"
+            ((r.channel // "") | tostring | lead_digits) as $c |
+            if ($b | startswith("2")) then "2.4"
+            elif ($b | startswith("5")) then "5"
+            elif ($b | startswith("6")) then "unknown"
             elif $c == "" then "unknown"
             elif ($c | tonumber) >= 1 and ($c | tonumber) <= 14 then "2.4"
             elif ($c | tonumber) >= 32 and ($c | tonumber) <= 177 then "5"
             else "unknown" end;
         . as $all |
         to_entries[] | select(.value | type == "object") |
-        select((.value.type // "") | test("^accesspoint$"; "i")) |
+        select((.value.type // "") | tostring | ascii_downcase == "accesspoint") |
         (band_of(.value) as $own |
             if $own != "unknown" then $own
             else band_of($all[(.key | split("/")[0])] // {}) end) as $band |

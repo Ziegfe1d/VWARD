@@ -29,6 +29,11 @@ grep -E 'Smart Updater|>Update</button>|192\.168\.1\.1' web/index.html web/asset
 # Keenetic's BusyBox stat has no -c; the CI host's BusyBox does, so only this catches it.
 grep -rnE '(^|[^A-Za-z_])stat +(-c|--format|--printf)' components web scripts >/dev/null &&
     fail "router code uses stat -c, which Keenetic BusyBox lacks"
+# Entware jq is built without Oniguruma: test/match/sub and friends fail at run time.
+# awk's sub/gsub/match take commas, jq's take semicolons.
+grep -rnE --include='*.sh' --include='*.cgi' '(^|[^a-z_])(test|capture|scan|splits)\(|(sub|gsub|match)\("[^"]*";' \
+    components web scripts >/dev/null &&
+    fail "router jq uses a regex function, which Entware jq lacks"
 grep -E '\?\.|\?\?|scrollTo\(\{' web/assets/vward-console.js >/dev/null &&
     fail "Console contains incompatible mobile JavaScript"
 
