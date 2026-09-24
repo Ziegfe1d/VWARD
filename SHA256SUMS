@@ -24,7 +24,7 @@ e966894b657a2aa4c78015a254629d1c4eff162b8c88a5e071fceb38262cbc12  components/ads
 2c2f9d13476a23317bd36b731d35318b2ed4068529c4b2e32311755a67223871  components/ads-privacy-guard/scripts/vward-ads-privacy-publish.sh
 4cd7801737b6731b8d9268a1df4359fcc7ac8d1185761d102656e09d1ba42fbb  components/ads-privacy-guard/scripts/vward-ads-privacy-query-read.sh
 9d5cb9ecaedf9aa52e76a864b394d8340bed4dccd4acff8a1352f931bb812395  components/ads-privacy-guard/scripts/vward-ads-privacy-rules-rebuild.sh
-0a4f78334170765ffd544516699d697e3fbd955b297a952d5be450304d13f6d2  components/ads-privacy-guard/scripts/vward-ads-privacy-scheduler.sh
+a636e8ac04a67b3f5d5881a4688a68db8b83f7848994fd2f7137d2ed55ac9561  components/ads-privacy-guard/scripts/vward-ads-privacy-scheduler.sh
 94ed3a489de49235487b648a7f4e6f81e8df127a4a58b1527717b52e23db44c4  components/ads-privacy-guard/scripts/vward-ads-privacy-settings.sh
 555ca1f3693a0ec58cbbf038ea793556f6a375acacb9967deb57f78dd15a4d85  components/ads-privacy-guard/scripts/vward-ads-privacy-source-control.sh
 5633c1ca6af7c1086a621783752834a3d955cdd3ba046db075e9ebebb6ff7ca6  components/ads-privacy-guard/scripts/vward-ads-privacy-sources-update.sh
@@ -153,7 +153,7 @@ afe82df94d814b394834b648073c322e6479505f049fe3b1cf49dd0a3c8d1acd  docs/WIFI_CLIE
 23394d5e19d1bd47844eea2237816fc5dfa5ba7dd6b66dd11c1fabedae59f9a2  tests/ads-privacy-guard/fixtures/source-normalize.txt
 e8427749414f3cd8a89c370a164afa6ab432b9f6b2fb743294c7b6ff7498fb9d  tests/ads-privacy-guard/fixtures/source-registry.json
 14affbecceb160e950b4e5e4d956ed8d8b7f880f764eb162d31b3cbd2ebb73f1  tests/ads-privacy-guard/run-https-simulations.sh
-d3d4a42edc7cad5a1deacbfd0817a79785e872ce679364aaf77f006d0eddfd2a  tests/ads-privacy-guard/run-simulations.sh
+71ee3ce97925eabfac2602bd631d4b32c2eee1e81819f11f1f825c3b74578cb9  tests/ads-privacy-guard/run-simulations.sh
 c5bf924d2cee12aad1bf5b6c74faabc3572430eae73a2b43d7951c02721c0dca  tests/perf/check-cutover-emulated.py
 a0dc4a8f65928cbf5f72d468ad2fd95131cf200a85fcbafb0d789f2363cca9dd  tests/perf/check-route-engine-emulated.py
 3dc05b423fe463ce9934816886df1861f6b4234b33a0a37f0c05457f4c7750bc  tests/perf/emulator/build-rootfs-beta.sh

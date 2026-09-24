@@ -19,6 +19,9 @@ cleanup() { vward_admission_leave 2>/dev/null || true; }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
+# Cron runs this every minute; until Ads is set up there is nothing to schedule.
+[ -e "$ADS_CONFIG" ] || { echo "SCHEDULER=NOT_CONFIGURED"; exit 0; }
+
 ads_mkdirs || ads_die "cannot create component directories"
 ads_load_config
 

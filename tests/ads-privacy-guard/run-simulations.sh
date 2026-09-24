@@ -309,6 +309,9 @@ exit 0
 EOF2
 chmod +x "$TMP/scbin/query" "$TMP/scbin/scan"
 SCENV="VWARD_ADS_LIB=$LIB VWARD_ADS_ETC=$SCETC VWARD_ADS_STATE=$SCST VWARD_ADS_LOG_DIR=$TMP/log VWARD_ADS_BACKUP_ROOT=$TMP/backups VWARD_ADS_SHARE=$TMP/share VWARD_ADS_CONFIG=$SCETC/ads-privacy-guard.conf VWARD_ADS_QUERY_READER=$TMP/scbin/query VWARD_ADS_SCANNER=$TMP/scbin/scan VWARD_ADS_SOURCES_UPDATER=$TMP/scbin/no-source VWARD_ADS_JOB_WORKER=$TMP/scbin/no-job"
+env $SCENV VWARD_ADS_CONFIG="$SCETC/absent.conf" busybox sh "$S/vward-ads-privacy-scheduler.sh" > "$TMP/sc0.out" ||
+    { cat "$TMP/sc0.out"; fail scheduler_not_configured; }
+grep -q '^SCHEDULER=NOT_CONFIGURED$' "$TMP/sc0.out" || fail scheduler_not_configured_state
 env $SCENV busybox sh "$S/vward-ads-privacy-scheduler.sh" > "$TMP/sc1.out" || fail scheduler_manual
 grep -q '^SCHEDULER=MANUAL_IDLE$' "$TMP/sc1.out" || fail scheduler_manual_state
 sed -i 's/^RUN_MODE=manual$/RUN_MODE=dynamic/' "$SCETC/ads-privacy-guard.conf"
