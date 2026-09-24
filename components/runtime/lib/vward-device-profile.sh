@@ -69,6 +69,8 @@ vward_build_device_map()
     while IFS="$_vp_tab" read -r _vp_ndm _vp_type _vp_level
     do
         vward_valid_ndm_name "$_vp_ndm" || continue
+        # Switch ports share their parent's kernel name and would make it ambiguous.
+        [ "$_vp_type" = Port ] && continue
         vward_valid_ndm_name "$_vp_type" || _vp_type=-
         vward_valid_ndm_name "$_vp_level" || _vp_level=-
         _vp_sys=$("$_vp_curl" --fail --silent --connect-timeout 2 --max-time 3 \
@@ -93,6 +95,7 @@ vward_map_filter()
 {
     awk -F '\t' '
         {for (i=1;i<=NF;i++) if ($i !~ /^[A-Za-z0-9_.\/:-]+$/) next}
+        $1=="I" && $3=="Port" {next}
         ($1=="I" && NF==5) || ($1=="R" && NF==3) || ($1=="S" && NF==2)
     '
 }

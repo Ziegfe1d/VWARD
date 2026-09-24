@@ -69,9 +69,13 @@ INTERFACES = {
     "Wireguard3": {"type": "Wireguard", "security-level": "public"},
     "Wireguard8": {"type": "Wireguard", "security-level": "public"},
     "WifiMaster0/AccessPoint2": {"type": "AccessPoint"},
+    # Switch ports report their parent's kernel name, as on a real KN-1913.
+    "0": {"type": "Port"},
+    "4": {"type": "Port"},
 }
 SYSTEM_NAMES = {"GigabitEthernet0/Vlan4": "eth2.4", "Bridge2": "br2", "Bridge5": "br5",
-                "Wireguard3": "nwg3", "Wireguard8": "nwg8", "WifiMaster0/AccessPoint2": "ra2"}
+                "Wireguard3": "nwg3", "Wireguard8": "nwg8", "WifiMaster0/AccessPoint2": "ra2",
+                "0": "eth2.4", "4": "br2"}
 
 
 def keenetic(tmp, running_config, wan_routes=("default via 100.64.0.1 dev eth2.4",)):
