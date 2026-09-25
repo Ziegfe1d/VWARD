@@ -117,12 +117,14 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .field-warn{margin:0 16px 8px;padding:8px 12px;border-radius:var(--r-md);background:var(--warn-soft);color:var(--warn);font-size:var(--fs-sm)}
 
 /* Метки состояния */
-.pill{display:inline-flex;align-items:center;gap:5px;flex:none;height:22px;padding-inline:8px;border-radius:11px;font-size:var(--fs-xs);font-weight:650;white-space:nowrap;background:var(--surface-2);color:var(--muted)}
-.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
-.pill.ok{background:var(--ok-soft);color:var(--ok)}
-.pill.warn{background:var(--warn-soft);color:var(--warn)}
-.pill.crit{background:var(--crit-soft);color:var(--crit)}
-.pill.info{background:var(--accent-soft);color:var(--accent)}
+/* Status: a coloured dot and plain text, no badge background. */
+.pill{display:inline-flex;align-items:center;gap:6px;flex:none;font-size:var(--fs-sm);font-weight:550;white-space:nowrap;color:var(--text)}
+.pill::before{content:"";flex:none;width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.pill.ok::before{background:var(--ok)}
+.pill.warn::before{background:var(--warn)}
+.pill.crit::before{background:var(--crit)}
+.pill.crit{color:var(--crit)}
+.pill.info::before{background:var(--accent)}
 
 /* Кнопки */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding-inline:14px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--surface);color:var(--text);font-size:var(--fs-sm);font-weight:600}
@@ -169,7 +171,7 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 @media (max-width:379px){
   .card{padding:10px}
   .card-icon{width:32px;height:32px}
-  .card>.pill{height:20px;padding-inline:6px;font-size:11px}
+  .card>.pill{font-size:11px}
   .card-title{font-size:12px}
   .card-value{font-size:var(--fs-md)}
   .tab{font-size:10px}
