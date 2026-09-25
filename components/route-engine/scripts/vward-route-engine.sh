@@ -528,6 +528,17 @@ persist_sync_cache()
 }
 
 
+# A name Keenetic takes in "object-group fqdn ... include": lower-case letters,
+# digits, dots and inner hyphens, no empty label, at most 253 characters.
+# Anything else is refused by the router ("argument parse error").
+valid_fqdn()
+{
+    case "$1" in
+        ''|*[!a-z0-9.-]*|.*|*.|*..*|-*|*-|*-.*|*.-*) return 1 ;;
+    esac
+    [ "${#1}" -le 253 ]
+}
+
 restore_adaptive_from_persist()
 {
     if [ ! -f "$PERSIST" ]; then
@@ -570,6 +581,8 @@ restore_adaptive_from_persist()
     RC=0
     ADDED=0
     REMOVED=0
+    SKIPPED=0
+    FAILS=0
 
     while IFS= read -r H; do
         [ -n "$H" ] || continue
@@ -589,12 +602,20 @@ restore_adaptive_from_persist()
         [ -n "$H" ] || continue
 
         if ! grep -Fxq "$H" "$CUR"; then
-            if ndmc -c \
-              "object-group fqdn $GROUP include $H" \
-              >/dev/null 2>&1; then
+            # A saved name the router would refuse is not sent at all.
+            if ! valid_fqdn "$H"; then
+                SKIPPED=$((SKIPPED + 1))
+                continue
+            fi
+            if OUT=$(ndmc -c "object-group fqdn $GROUP include $H" 2>&1); then
                 ADDED=$((ADDED + 1))
             else
                 RC=1
+                FAILS=$((FAILS + 1))
+                # The router's own words for the first few, to know why.
+                [ "$FAILS" -gt 3 ] ||
+                    echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_FAIL|$H|$(printf '%s' "$OUT" | tr '\n|' '  ' | cut -c1-160)" \
+                        >> "$EVENT_LOG"
             fi
         fi
     done < "$WANT"
@@ -606,10 +627,10 @@ restore_adaptive_from_persist()
     change_unlock
 
     if [ "$RC" -eq 0 ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_OK|added=$ADDED|removed=$REMOVED" \
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_OK|added=$ADDED|removed=$REMOVED|skipped=$SKIPPED" \
             >> "$EVENT_LOG"
     else
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_PARTIAL|added=$ADDED|removed=$REMOVED" \
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_PARTIAL|added=$ADDED|removed=$REMOVED|skipped=$SKIPPED|failed=$FAILS" \
             >> "$EVENT_LOG"
     fi
 
@@ -1243,6 +1264,9 @@ handle_host()
         *.*) ;;
         *) return ;;
     esac
+
+    # Service names (_dmarc...), odd tcpdump tokens and the like never reach Keenetic.
+    valid_fqdn "$HOST" || return
 
 
 
