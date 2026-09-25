@@ -41,7 +41,7 @@ control_lock()
         if [ -n "$OLD" ] &&
            ! kill -0 "$OLD" 2>/dev/null; then
 
-            rm -rf "$CONTROL_LOCK"
+            rm -rf "${CONTROL_LOCK:?}"
             continue
         fi
 
@@ -58,7 +58,7 @@ control_lock()
 
 control_unlock()
 {
-    rm -rf "$CONTROL_LOCK"
+    rm -rf "${CONTROL_LOCK:?}"
 }
 
 
@@ -153,7 +153,7 @@ clean_service()
 
     rm -f "$PIDFILE"
     rm -f "$CHILD_STATE"
-    rm -rf "$LIVE_LOCK"
+    rm -rf "${LIVE_LOCK:?}"
 }
 
 

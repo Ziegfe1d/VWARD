@@ -92,7 +92,7 @@ if ! mkdir "$LOCK" 2>/dev/null; then
         exit 0
     fi
 
-    rm -rf "$LOCK"
+    rm -rf "${LOCK:?}"
     mkdir "$LOCK" || exit 1
 fi
 
@@ -106,7 +106,7 @@ cleanup()
     [ -n "$AWK_PID" ] && kill "$AWK_PID" 2>/dev/null
 
     rm -f "$RAW" "$HOSTS"
-    rm -rf "$LOCK"
+    rm -rf "${LOCK:?}"
     vward_admission_leave 2>/dev/null || true
 
     echo "$(date '+%Y-%m-%d %H:%M:%S')|STOP" >> "$EVENT_LOG"
@@ -485,7 +485,7 @@ change_lock()
         if [ -n "$OLD" ] &&
            ! kill -0 "$OLD" 2>/dev/null; then
 
-            rm -rf "$CHANGE_LOCK"
+            rm -rf "${CHANGE_LOCK:?}"
             continue
         fi
 
@@ -502,7 +502,7 @@ change_lock()
 
 change_unlock()
 {
-    rm -rf "$CHANGE_LOCK"
+    rm -rf "${CHANGE_LOCK:?}"
 }
 
 

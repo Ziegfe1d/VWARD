@@ -40,7 +40,7 @@ if ! mkdir "$LOCK" 2>/dev/null; then
         exit 0
     fi
 
-    rm -rf "$LOCK"
+    rm -rf "${LOCK:?}"
     mkdir "$LOCK" || exit 1
 fi
 
@@ -48,7 +48,7 @@ echo $$ > "$LOCK/pid"
 
 cleanup()
 {
-    rm -rf "$LOCK"
+    rm -rf "${LOCK:?}"
     vward_admission_leave 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -163,7 +163,7 @@ if [ -f "$DISABLE_FILE" ]; then
     echo "RestoredWG=$RESTORED"
     echo "Mode=$MODE"
 
-    rm -rf "$LOCK"
+    rm -rf "${LOCK:?}"
     exit 0
 fi
 WG_STATUS="UNKNOWN"

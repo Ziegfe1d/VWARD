@@ -60,7 +60,7 @@ run_up()
 cleanup()
 {
     if [ "$LOCK_OWNED" = 1 ] && [ "$(cat "$LOCKDIR/pid" 2>/dev/null)" = "$$" ]; then
-        rm -rf "$LOCKDIR" 2>/dev/null
+        rm -rf "${LOCKDIR:?}" 2>/dev/null
     fi
     vward_admission_leave 2>/dev/null || true
 }
@@ -93,7 +93,7 @@ acquire_lock()
 {
     if ! mkdir "$LOCKDIR" 2>/dev/null; then
         lock_is_live && return 1
-        rm -rf "$LOCKDIR" 2>/dev/null || return 1
+        rm -rf "${LOCKDIR:?}" 2>/dev/null || return 1
         mkdir "$LOCKDIR" 2>/dev/null || return 1
     fi
     printf '%s\n' "$$" > "$LOCKDIR/pid"

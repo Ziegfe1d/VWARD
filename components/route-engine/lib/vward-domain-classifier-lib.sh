@@ -38,7 +38,7 @@ vdc_lock_acquire(){
   [ "$vdc_la_pid" -gt 0 ] && kill -0 "$vdc_la_pid" 2>/dev/null && return 1
   vdc_la_started="$(vdc_num "$(cat "$VWARD_CLASSIFIER_LOCK/started" 2>/dev/null)" 0)"
   [ "$vdc_la_started" -eq 0 ] || [ $((vdc_la_now-vdc_la_started)) -ge "$(vdc_num "$VWARD_CLASSIFIER_LOCK_STALE_SEC" 900)" ] || return 1
-  rm -rf "$VWARD_CLASSIFIER_LOCK" 2>/dev/null || return 1
+  rm -rf "${VWARD_CLASSIFIER_LOCK:?}" 2>/dev/null || return 1
   mkdir "$VWARD_CLASSIFIER_LOCK" 2>/dev/null || return 1
   vdc_lock_owner "$vdc_la_now"
 }
@@ -48,7 +48,7 @@ vdc_lock_owner(){
   printf '%s\n' "$$" > "$VWARD_CLASSIFIER_LOCK/pid"; printf '%s\n' "$1" > "$VWARD_CLASSIFIER_LOCK/started"
   sed 's/^.*) //' "/proc/$$/stat" 2>/dev/null | awk 'NF>=20 {print $20; exit}' > "$VWARD_CLASSIFIER_LOCK/pid_start" 2>/dev/null || :
 }
-vdc_lock_release(){ [ -n "${VWARD_CLASSIFIER_LOCK:-}" ] && rm -rf "$VWARD_CLASSIFIER_LOCK" 2>/dev/null || true; }
+vdc_lock_release(){ [ -n "${VWARD_CLASSIFIER_LOCK:-}" ] && rm -rf "${VWARD_CLASSIFIER_LOCK:?}" 2>/dev/null || true; }
 
 vdc_normalize_host(){ printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^\.//;s/\.$//'; }
 vdc_valid_host(){ printf '%s\n' "$1" | awk 'length($0)<1||length($0)>253||$0~/\.\./||$0!~/^[a-z0-9_][a-z0-9_.-]*[a-z0-9_]$/||index($0,".")==0{exit 1}{exit 0}'; }

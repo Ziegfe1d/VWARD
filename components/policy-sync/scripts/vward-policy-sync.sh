@@ -242,14 +242,14 @@ replace_source_dir()
     DEST="$2"
 
     OLD="${DEST}.old.$$"
-    rm -rf "$OLD"
+    rm -rf "${OLD:?}"
 
     if [ -d "$DEST" ]; then
         mv "$DEST" "$OLD" || return 1
     fi
 
     if mv "$NEW" "$DEST"; then
-        rm -rf "$OLD"
+        rm -rf "${OLD:?}"
         return 0
     fi
 
@@ -408,7 +408,7 @@ build_catalog()
     fi
 
     OLD="${CATALOG}.old.$$"
-    rm -rf "$OLD"
+    rm -rf "${OLD:?}"
 
     [ -d "$CATALOG" ] && mv "$CATALOG" "$OLD"
 
@@ -417,7 +417,7 @@ build_catalog()
         return 1
     fi
 
-    rm -rf "$OLD"
+    rm -rf "${OLD:?}"
 
     cp "$IDX" "$INDEX.new" || return 1
     mv "$INDEX.new" "$INDEX" || return 1

@@ -19,7 +19,7 @@ ads_mkdirs || ads_die "cannot create component directories"
 VERDICTS="$ADS_STATE/verdicts.tsv"
 WORK="/tmp/vward-ads-probe.$$"
 mkdir -p "$WORK" || ads_die "cannot create work directory"
-trap 'rm -rf "$WORK"' EXIT
+trap 'rm -rf "${WORK:?}"' EXIT
 trap 'exit 1' HUP INT TERM
 
 echo "============================================================"

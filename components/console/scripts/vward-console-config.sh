@@ -73,7 +73,7 @@ cleanup() {
     [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.doh" "$JOURNAL.agh" "$JOURNAL.agh.inc" "$JOURNAL.agh.undo"
     [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
-    [ "$LOCKED" != 1 ] || rm -rf "$CHANGE_LOCK"
+    [ "$LOCKED" != 1 ] || rm -rf "${CHANGE_LOCK:?}"
     command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null
     return 0
 }
@@ -152,7 +152,7 @@ change_lock() {
     while ! mkdir "$CHANGE_LOCK" 2>/dev/null; do
         old=$(cat "$CHANGE_LOCK/pid" 2>/dev/null)
         if [ -n "$old" ] && ! kill -0 "$old" 2>/dev/null; then
-            rm -rf "$CHANGE_LOCK"
+            rm -rf "${CHANGE_LOCK:?}"
             continue
         fi
         n=$((n + 1))
@@ -543,7 +543,7 @@ op_tunnel() {
     fi
     rm -f "$TUNNEL_GUARD_STATE" "$TUNNEL_HEALTH_STATE"
     rm -rf "$POLICY_STATE/lock"; POLICY_LOCKED=0
-    rm -rf "$CHANGE_LOCK"; LOCKED=0
+    rm -rf "${CHANGE_LOCK:?}"; LOCKED=0
     [ ! -x "$ROUTE_ENGINE_INIT" ] || "$ROUTE_ENGINE_INIT" restart </dev/null >/dev/null 2>&1 || true
     # IP routes follow in the background (policy-sync withdraws them from the old device).
     [ ! -x "$POLICY_SYNC_BIN" ] || (trap '' HUP; exec "$POLICY_SYNC_BIN" --reconcile) </dev/null >/dev/null 2>&1 &

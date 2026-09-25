@@ -49,7 +49,7 @@ if ! mkdir "$LOCK" 2>/dev/null; then
     fi
 
     echo "Removing stale lock: $LOCK"
-    rm -rf "$LOCK"
+    rm -rf "${LOCK:?}"
     mkdir "$LOCK" 2>/dev/null || exit 1
 fi
 
@@ -57,7 +57,7 @@ echo $$ > "$LOCK/pid"
 
 cleanup()
 {
-    rm -rf "$LOCK"
+    rm -rf "${LOCK:?}"
     rm -f "$RUNCFG" "$KNOWN" "$RECENT"
     vward_admission_leave 2>/dev/null || true
 }

@@ -29,7 +29,7 @@ fi
 
 cleanup()
 {
-    rm -rf "$LOCK"
+    rm -rf "${LOCK:?}"
     rm -f "$RUNCFG"
     vward_admission_leave 2>/dev/null || true
 }

@@ -269,7 +269,7 @@ retire_init_scripts() {
 cleanup_legacy_files() {
     for p in $BETA_LEGACY_PATHS; do
         [ -e "$p" ] || continue
-        rm -rf "$p" 2>>"$LOG" || log_line "WARN|could not remove $p, left in place"
+        rm -rf "${p:?}" 2>>"$LOG" || log_line "WARN|could not remove $p, left in place"
     done
 }
 

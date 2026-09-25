@@ -441,7 +441,7 @@ vu_staging_cleanup_orphans() {
     [ -d "$VU_STAGING_DIR" ] || return 0
     for orphan in "$VU_STAGING_DIR"/transaction.*; do
         [ -d "$orphan" ] || continue
-        case "$orphan" in "$VU_STAGING_DIR"/transaction.[0-9]*) rm -rf "$orphan" || return 1 ;; *) return 1 ;; esac
+        case "$orphan" in "$VU_STAGING_DIR"/transaction.[0-9]*) rm -rf "${orphan:?}" || return 1 ;; *) return 1 ;; esac
     done
 }
 

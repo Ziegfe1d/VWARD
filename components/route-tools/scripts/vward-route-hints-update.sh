@@ -30,7 +30,7 @@ mkdir -p "$DIR" "$CACHE" "$WORK"
 
 cleanup()
 {
-    rm -rf "$WORK"
+    rm -rf "${WORK:?}"
     vward_admission_leave 2>/dev/null || true
 }
 trap cleanup EXIT

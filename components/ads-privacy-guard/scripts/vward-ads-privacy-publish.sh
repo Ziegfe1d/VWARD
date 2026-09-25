@@ -39,11 +39,11 @@ WORK="$(ads_scratch_dir publish)"
 LOCK="$ADS_STATE/publish.lock"
 mkdir -m 700 "$WORK" || ads_die "cannot create publish work directory"
 if ! ads_lock_acquire "$LOCK" "${PUBLISH_LOCK_STALE_SEC:-300}"; then
-    rm -rf "$WORK"
+    rm -rf "${WORK:?}"
     echo "PUBLISH_STATUS=ALREADY_RUNNING"
     exit 0
 fi
-cleanup(){ rm -rf "$WORK"; ads_lock_release "$LOCK"; ads_admission_leave; }
+cleanup(){ rm -rf "${WORK:?}"; ads_lock_release "$LOCK"; ads_admission_leave; }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 

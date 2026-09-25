@@ -81,7 +81,7 @@ WORK="$(ads_scratch_dir scan)"
 mkdir -m 700 "$WORK" || ads_die "cannot create work directory"
 cleanup()
 {
-    rm -rf "$WORK"
+    rm -rf "${WORK:?}"
     ads_lock_release "$LOCK"
     runtime_status idle "" 0 0
     ads_admission_leave

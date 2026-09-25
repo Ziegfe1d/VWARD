@@ -108,7 +108,7 @@ case "${1:-}" in
         TMP=$D/x
         get() { ads_agh_api_get "$1" "$D/$2" >/dev/null 2>&1 || { rm -f "$D/$2"; return 1; }; }
         get status status.json; rc=$?
-        [ "$rc" = 0 ] || { ads_agh_api_get status "$D/x" >/dev/null 2>&1; r=$?; rm -rf "$D"; agh_fail "$r"; }
+        [ "$rc" = 0 ] || { ads_agh_api_get status "$D/x" >/dev/null 2>&1; r=$?; rm -rf "${D:?}"; agh_fail "$r"; }
         get filtering/status filtering.json
         get blocked_services/all services-all.json || get blocked_services/services services-old.json
         get blocked_services/get services-get.json || get blocked_services/list services-list.json
@@ -130,8 +130,8 @@ case "${1:-}" in
                   blocked: (if $sget != null then ($sget.ids // []) else ($slist // []) end)} end),
              safebrowsing: (if $sb == null then null else ($sb.enabled == true) end),
              parental: (if $pc == null then null else ($pc.enabled == true) end),
-             safesearch: (if $ss == null then null else ($ss.enabled == true) end)}' 2>/dev/null || { rm -rf "$D"; fail adguard_unavailable; }
-        rm -rf "$D"
+             safesearch: (if $ss == null then null else ($ss.enabled == true) end)}' 2>/dev/null || { rm -rf "${D:?}"; fail adguard_unavailable; }
+        rm -rf "${D:?}"
         ;;
     *)
         fail invalid_view

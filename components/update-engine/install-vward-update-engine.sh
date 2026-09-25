@@ -46,10 +46,10 @@ rollback_bootstrap()
     fi
 
     if [ "$HAD_UPDATER" = 1 ] && [ -d "$BACKUP/updater" ]; then
-        rm -rf "$UPDATER_ROOT"
+        rm -rf "${UPDATER_ROOT:?}"
         cp -pR "$BACKUP/updater" "$UPDATER_ROOT" >/dev/null 2>&1 || :
     else
-        rm -rf "$UPDATER_ROOT"
+        rm -rf "${UPDATER_ROOT:?}"
     fi
 
     if [ "$HAD_CONFIG" = 1 ]; then
@@ -81,7 +81,7 @@ fail()
 
 cleanup()
 {
-    rm -rf "$WORK"
+    rm -rf "${WORK:?}"
 }
 
 trap cleanup EXIT
@@ -238,7 +238,7 @@ if [ "$HAD_VERSION" = 0 ]; then
     chmod 0644 "$ROOT/VERSION"
 fi
 
-rm -rf "$SLOT" || fail "cannot retire inactive updater slot"
+rm -rf "${SLOT:?}" || fail "cannot retire inactive updater slot"
 mv "$SLOT_STAGE" "$SLOT" || fail "cannot activate updater slot directory"
 # BusyBox mv treats a symlink-to-directory destination as a directory and can
 # move the candidate link inside the active slot. ln -sfn performs the tested

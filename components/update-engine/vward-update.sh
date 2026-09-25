@@ -14,10 +14,10 @@ cleanup() {
     vu_runtime_resume || vu_log ERROR "Runtime resume failed"
     vu_lock_release || :
     if [ -n "${dry_run_staging:-}" ]; then
-        case "$dry_run_staging" in */tmp/vward-updater-dryrun.*) rm -rf "$dry_run_staging" ;; esac
+        case "$dry_run_staging" in */tmp/vward-updater-dryrun.*) rm -rf "${dry_run_staging:?}" ;; esac
     fi
     if [ -n "${transaction_staging:-}" ]; then
-        case "$transaction_staging" in "$VU_STAGING_DIR"/transaction.*) rm -rf "$transaction_staging" ;; esac
+        case "$transaction_staging" in "$VU_STAGING_DIR"/transaction.*) rm -rf "${transaction_staging:?}" ;; esac
     fi
     for transient in update-manifest.json signed.json signature.bin; do
         rm -f "$VU_STAGING_DIR/$transient"

@@ -22,7 +22,7 @@ if ! mkdir "$LOCK" 2>/dev/null; then
         exit 0
     fi
 
-    rm -rf "$LOCK"
+    rm -rf "${LOCK:?}"
     mkdir "$LOCK" || exit 1
 fi
 
@@ -38,7 +38,7 @@ cleanup()
     [ "$CUR" = "$$" ] &&
         rm -f "$PIDFILE"
 
-    rm -rf "$LOCK"
+    rm -rf "${LOCK:?}"
 }
 
 trap cleanup EXIT

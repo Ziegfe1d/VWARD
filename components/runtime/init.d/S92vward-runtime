@@ -93,7 +93,7 @@ _sup_start()
     fi
 
     rm -f "$SUP_PIDFILE"
-    rm -rf "$SUP_LOCK"
+    rm -rf "${SUP_LOCK:?}"
 
     if command -v setsid >/dev/null 2>&1; then
         setsid "$SUP_DAEMON" >> "$SUP_LOG" 2>&1 &

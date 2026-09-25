@@ -69,7 +69,7 @@ cleanup()
 
         if [ "$OWNER" = "$$" ]
         then
-            rm -rf "$LOCKDIR" 2>/dev/null || true
+            rm -rf "${LOCKDIR:?}" 2>/dev/null || true
         fi
     fi
     vward_admission_leave 2>/dev/null || true
@@ -100,7 +100,7 @@ acquire_lock()
         return 1
     fi
 
-    rm -rf "$LOCKDIR" 2>/dev/null || {
+    rm -rf "${LOCKDIR:?}" 2>/dev/null || {
         echo "CLASS=LOCK_ERROR"
         echo "ACTION=${ACTION:-NONE}"
         return 1

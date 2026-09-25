@@ -44,7 +44,7 @@ if ! mkdir "$LOCK" 2>/dev/null; then
         exit 0
     fi
 
-    rm -rf "$LOCK"
+    rm -rf "${LOCK:?}"
     mkdir "$LOCK" || exit 1
 fi
 
@@ -52,7 +52,7 @@ echo $$ > "$LOCK/pid"
 
 cleanup()
 {
-    rm -rf "$LOCK"
+    rm -rf "${LOCK:?}"
     rm -f "$TARGETS"
     vward_admission_leave 2>/dev/null || true
 }
@@ -260,7 +260,7 @@ remove_adaptive()
         OLD=$(cat "$CHANGE/pid" 2>/dev/null)
 
         if [ -n "$OLD" ] && ! kill -0 "$OLD" 2>/dev/null; then
-            rm -rf "$CHANGE"
+            rm -rf "${CHANGE:?}"
             mkdir "$CHANGE" || return 1
         else
             return 1
@@ -274,13 +274,13 @@ remove_adaptive()
          sed -n '/^object-group fqdn AdaptiveAuto/,/^!/p' |
          awk '$1=="include"{print $2}' |
          grep -Fxq "$H"; then
-        rm -rf "$CHANGE"
+        rm -rf "${CHANGE:?}"
         return 0
     fi
 
     if force_vpn_match "$H"; then
         echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_FORCE_VPN|$H" >> "$LOG"
-        rm -rf "$CHANGE"
+        rm -rf "${CHANGE:?}"
         return 0
     fi
 
@@ -320,7 +320,7 @@ remove_adaptive()
             rm -f "$HYST_DIR/$SAFE_H.state"
             save_state "$H" "ADAPTIVE_ISP_BAD"
             echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_ISP_BAD|$H|ISP=$IC|VPN=$VC" >> "$LOG"
-            rm -rf "$CHANGE"
+            rm -rf "${CHANGE:?}"
             return 0
             ;;
 
@@ -329,7 +329,7 @@ remove_adaptive()
             rm -f "$HYST_DIR/$SAFE_H.state"
             save_state "$H" "ADAPTIVE_ISP_UNKNOWN"
             echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_ISP_UNKNOWN|$H|ISP=$IC|VPN=$VC" >> "$LOG"
-            rm -rf "$CHANGE"
+            rm -rf "${CHANGE:?}"
             return 0
             ;;
     esac
@@ -365,7 +365,7 @@ remove_adaptive()
 
         echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_DIRECT_CONFIRM_WAIT|$H|streak=$HSTREAK" >> "$LOG"
 
-        rm -rf "$CHANGE"
+        rm -rf "${CHANGE:?}"
         return 0
     fi
 
@@ -389,7 +389,7 @@ remove_adaptive()
 
         echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_DIRECT_CONFIRM|$H|streak=$HSTREAK/$DIRECT_OK_THRESHOLD" >> "$LOG"
 
-        rm -rf "$CHANGE"
+        rm -rf "${CHANGE:?}"
         return 0
     fi
 
@@ -399,7 +399,7 @@ remove_adaptive()
 
     if [ ! -f "$PERSIST" ]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_MISSING_MAINT|$H" >> "$LOG"
-        rm -rf "$CHANGE"
+        rm -rf "${CHANGE:?}"
         return 1
     fi
 
@@ -410,7 +410,7 @@ remove_adaptive()
 
     if ! cp -p "$PERSIST" "$PBACK"; then
         echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_BACKUP_ERROR|$H" >> "$LOG"
-        rm -rf "$CHANGE"
+        rm -rf "${CHANGE:?}"
         return 1
     fi
 
@@ -418,7 +418,7 @@ remove_adaptive()
 
     if ! awk -v h="$H" '$0 != h {print}' "$PERSIST" > "$PTMP"; then
         rm -f "$PTMP"
-        rm -rf "$CHANGE"
+        rm -rf "${CHANGE:?}"
         return 1
     fi
 
@@ -444,7 +444,7 @@ remove_adaptive()
 
             echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_SAVE_ROLLBACK|$H|error=$ROLLBACK_ERROR" >> "$LOG"
 
-            rm -rf "$CHANGE"
+            rm -rf "${CHANGE:?}"
             return 1
         fi
 
@@ -464,7 +464,7 @@ remove_adaptive()
 
             echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_COMMIT_ROLLBACK|$H" >> "$LOG"
 
-            rm -rf "$CHANGE"
+            rm -rf "${CHANGE:?}"
             return 1
         fi
 
@@ -481,7 +481,7 @@ remove_adaptive()
         echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_REMOVE_ERROR|$H" >> "$LOG"
     fi
 
-    rm -rf "$CHANGE"
+    rm -rf "${CHANGE:?}"
 }
 
 DONE=0

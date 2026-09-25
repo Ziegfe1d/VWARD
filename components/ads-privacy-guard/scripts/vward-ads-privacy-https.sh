@@ -36,7 +36,7 @@ ca_init()
         ads_die "CA already exists; refusing to overwrite"
     fi
     work="$ADS_HTTPS_RUNTIME_DIR/ca-init.$$"; mkdir -p "$work" || ads_die "cannot stage CA"; chmod 0700 "$work"
-    trap 'rm -rf "$work"' EXIT
+    trap 'rm -rf "${work:?}"' EXIT
     trap 'exit 1' HUP INT TERM
     cat > "$work/ca.cnf" <<'EOC'
 [req]

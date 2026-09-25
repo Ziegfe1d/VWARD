@@ -36,7 +36,7 @@ if ! mkdir "$LOCK" 2>/dev/null; then
         exit 0
     fi
 
-    rm -rf "$LOCK"
+    rm -rf "${LOCK:?}"
     mkdir "$LOCK" || exit 1
 fi
 
@@ -44,7 +44,7 @@ echo $$ > "$LOCK/pid"
 
 cleanup()
 {
-    rm -rf "$LOCK"
+    rm -rf "${LOCK:?}"
     vward_admission_leave 2>/dev/null || true
 }
 

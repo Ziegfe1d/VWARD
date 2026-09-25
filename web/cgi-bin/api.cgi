@@ -593,7 +593,6 @@ if [ "$ACTION" = config-data ]; then
     header_json
     [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
     list_json(){ "$JQ" -Rn '[inputs|select(length>0)]'; }
-    kv_get(){ awk -F= -v k="$2" '$1==k{print substr($0,index($0,"=")+1);exit}' "$1" 2>/dev/null; }
     ROUTER=false; ROUTE_DOMAINS='[]'
     if [ "$PROFILE_READY" = true ]; then
         RUNNING="$(ndm_cached running 10 "show running-config")"
@@ -606,29 +605,33 @@ if [ "$ACTION" = config-data ]; then
         fi
     fi
     FORCE="$(sed 's/#.*//' "$CONFIG_ETC/route-engine/force-vpn.conf" 2>/dev/null | awk 'NF{print tolower($1)}' | head -n 500 | list_json)"
-    ADAPT="$(tr -d '\r' < "$CONFIG_ROUTE_STATE/adaptive-persist.txt" 2>/dev/null | awk 'NF{print tolower($1)}' | head -n 500 | list_json)"
+    ADAPT="$(awk '{sub(/\r$/, "")} NF {print tolower($1)}' "$CONFIG_ROUTE_STATE/adaptive-persist.txt" 2>/dev/null | head -n 500 | list_json)"
     CATS="$(awk -F'|' 'NF>=5 && $1!~/^[[:space:]]*#/ {print $1 "\t" $2 "\t" $5}' "$CONFIG_ETC/route-engine/categories.tsv" 2>/dev/null | head -n 100 |
         "$JQ" -Rn '[inputs|split("\t")|{id:.[0],title:.[1],enabled:(.[2]=="1")}]')"
     TG=true; [ -e "$CONFIG_ETC/tunnel-guard.disabled" ] && TG=false
     WG_ON=true; [ -e "$CONFIG_ETC/wan-guard.disabled" ] && WG_ON=false
     AD_ON=true; [ -e "$CONFIG_ETC/route-engine/adaptive.disabled" ] && AD_ON=false
-    CL_ON=true; [ "$(kv_get "$CONFIG_ETC/route-engine/domain-classifier.conf" CLASSIFIER_ENABLED)" = 0 ] && CL_ON=false
+    kv_file "$CONFIG_ETC/route-engine/domain-classifier.conf" CLASSIFIER_ENABLED=CL_FLAG
+    CL_ON=true; [ "$CL_FLAG" = 0 ] && CL_ON=false
     IPX="$(awk 'NF{print $1}' "${VWARD_POLICY_EXCLUDED:-$CONFIG_ETC/policy-sync/excluded.categories}" 2>/dev/null | head -n 500 | list_json)"
     WCONF=${VWARD_WIFI_CLIENT_GUARD_CONF:-$CONFIG_ETC/wifi-client-guard.conf}
     UCONF=${VWARD_UPDATE_CONFIG:-$CONFIG_ETC/update.conf}
     GCONF=${VWARD_WAN_GUARD_CONF:-$CONFIG_ETC/wan-guard.conf}
-    gnum(){ V="$(kv_get "$GCONF" "$1")"; case "$V" in ''|*[!0-9]*) V=$2;; esac; printf '%s' "$V"; }
-    WAN_PARAMS="$("$JQ" -cn --arg a "$(gnum CONFIRM_FAILURES 3)" --arg b "$(gnum RENEW_COOLDOWN 600)" --arg c "$(gnum BOUNCE_COOLDOWN 1800)" \
-        --arg d "$(gnum MAX_RENEW_HOUR 3)" --arg e "$(gnum MAX_BOUNCE_HOUR 2)" --arg f "$(gnum MAX_BOUNCE_DAY 6)" \
+    kv_file "$GCONF" CONFIRM_FAILURES=G_CF RENEW_COOLDOWN=G_RC BOUNCE_COOLDOWN=G_BC MAX_RENEW_HOUR=G_MRH MAX_BOUNCE_HOUR=G_MBH MAX_BOUNCE_DAY=G_MBD
+    gnum(){ case "$1" in ''|*[!0-9]*) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
+    WAN_PARAMS="$("$JQ" -cn --arg a "$(gnum "$G_CF" 3)" --arg b "$(gnum "$G_RC" 600)" --arg c "$(gnum "$G_BC" 1800)" \
+        --arg d "$(gnum "$G_MRH" 3)" --arg e "$(gnum "$G_MBH" 2)" --arg f "$(gnum "$G_MBD" 6)" \
         '{CONFIRM_FAILURES:($a|tonumber),RENEW_COOLDOWN:($b|tonumber),BOUNCE_COOLDOWN:($c|tonumber),MAX_RENEW_HOUR:($d|tonumber),MAX_BOUNCE_HOUR:($e|tonumber),MAX_BOUNCE_DAY:($f|tonumber)}')"
     [ -n "$WAN_PARAMS" ] || WAN_PARAMS='{}'
-    wnum(){ V="$(kv_get "$WCONF" "$1")"; case "$V" in ''|*[!0-9-]*) V=$2;; esac; printf '%s' "$V"; }
+    kv_file "$WCONF" ENABLED=W_EN CONTROL_ENABLED=W_CTL WINDOW_SEC=W_WIN BAND_SWITCH_WARN=W_SW WEAK_5G_SAMPLE_WARN=W_WEAK WEAK_5G_RSSI=W_RSSI
+    wnum(){ case "$1" in ''|*[!0-9-]*) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
+    kv_file "$UCONF" safe_window_start=U_START safe_window_end=U_END check_interval_seconds=U_INTERVAL apply_window=U_WINDOW manifest_url=U_URL
     COMPONENT_REGISTRY=${VWARD_COMPONENT_REGISTRY:-/opt/share/vward/updater/current/component-registry.json}
     DISABLED="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && basename "$F" .disabled; done | list_json)"
     COMPONENTS="$("$JQ" -c --argjson off "${DISABLED:-[]}" '[.components[] | {id, core:(.core == true), depends_on:(.depends_on // []), requires_running:(.requires_running // []), uses:(.uses // []), enabled:((.id | IN($off[])) | not)}]' "$COMPONENT_REGISTRY" 2>/dev/null)"
     [ -n "$COMPONENTS" ] || COMPONENTS='[]'
-    W_EN="$(kv_get "$WCONF" ENABLED)"; [ "$W_EN" = 1 ] || W_EN=0
-    W_CTL="$(kv_get "$WCONF" CONTROL_ENABLED)"; [ "$W_CTL" = 1 ] || W_CTL=0
+    [ "$W_EN" = 1 ] || W_EN=0
+    [ "$W_CTL" = 1 ] || W_CTL=0
     "$JQ" -n \
       --arg group "${VWARD_POLICY_GROUP:-}" --argjson router "$ROUTER" \
       --argjson route_domains "${ROUTE_DOMAINS:-[]}" --argjson force "${FORCE:-[]}" --argjson adaptive "${ADAPT:-[]}" \
@@ -636,12 +639,10 @@ if [ "$ACTION" = config-data ]; then
       --argjson adaptive_on "$AD_ON" --argjson classifier_on "$CL_ON" --argjson ip_excluded "${IPX:-[]}" \
       --argjson w_en "$W_EN" --argjson w_ctl "$W_CTL" \
       --argjson wan_params "$WAN_PARAMS" \
-      --arg w_window "$(wnum WINDOW_SEC 86400)" --arg w_switch "$(wnum BAND_SWITCH_WARN 20)" \
-      --arg w_weak "$(wnum WEAK_5G_SAMPLE_WARN 5)" --arg w_rssi "$(wnum WEAK_5G_RSSI -75)" \
-      --arg u_start "$(kv_get "$UCONF" safe_window_start)" --arg u_end "$(kv_get "$UCONF" safe_window_end)" \
-      --arg u_interval "$(kv_get "$UCONF" check_interval_seconds)" \
-      --arg u_window "$(kv_get "$UCONF" apply_window)" \
-      --arg u_feed "$(kv_get "$UCONF" manifest_url | sed -n -E 's#^https://raw[.]githubusercontent[.]com/[^/]+/[^/]+/(beta|dev)/updates/[a-z0-9-]+/update-manifest[.]json$#\1#p')" \
+      --arg w_window "$(wnum "$W_WIN" 86400)" --arg w_switch "$(wnum "$W_SW" 20)" \
+      --arg w_weak "$(wnum "$W_WEAK" 5)" --arg w_rssi "$(wnum "$W_RSSI" -75)" \
+      --arg u_start "$U_START" --arg u_end "$U_END" --arg u_interval "$U_INTERVAL" --arg u_window "$U_WINDOW" \
+      --arg u_feed "$(printf '%s\n' "$U_URL" | sed -n -E 's#^https://raw[.]githubusercontent[.]com/[^/]+/[^/]+/(beta|dev)/updates/[a-z0-9-]+/update-manifest[.]json$#\1#p')" \
       --argjson writable "$([ -x "$CONFIG_HELPER" ] && echo true || echo false)" \
       '{ok:true,writable:$writable,
         route:{group:$group,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
@@ -738,7 +739,7 @@ fi
 
 if [ "$ACTION" = ads-data ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
-  AETC=/opt/etc/vward/ads-privacy-guard; AST=/opt/var/lib/vward/ads-privacy-guard; ASH=/opt/share/vward/ads-privacy-guard
+  AETC=/opt/etc/vward/ads-privacy-guard; AST=/opt/var/lib/vward/ads-privacy-guard
   SETTINGS=/opt/bin/vward-ads-privacy-settings.sh; SRCCTL=/opt/bin/vward-ads-privacy-source-control.sh; JOB=/opt/bin/vward-ads-privacy-job.sh
   SETJSON="$([ -x "$SETTINGS" ] && "$SETTINGS" show 2>/dev/null | awk -F= '$1!="PAUSED"&&NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}')"
   PAUSED="$([ -r "$AST/control.state" ] && awk -F= '$1=="paused"{print $2;exit}' "$AST/control.state")"; [ "$PAUSED" = 1 ] || PAUSED=0
@@ -1171,49 +1172,22 @@ if [ "$ACTION" = "settings-data" ]; then
         echo '{"ok":false,"error":"settings_registry_unavailable"}'
         exit 0
     }
-    setting_value()
-    {
-        [ -r "$UPDATE_CONFIG" ] || return 0
-        awk -F= -v key="$1" '$1==key {print substr($0,index($0,"=")+1); exit}' "$UPDATE_CONFIG"
-    }
-    ads_setting_value()
-    {
-        [ -r "$ADS_CONFIG" ] || return 0
-        awk -F= -v key="$1" '$1==key {print substr($0,index($0,"=")+1); exit}' "$ADS_CONFIG"
-    }
-    SETTINGS_AUTO_APPLY=$(setting_value auto_apply)
-    SETTINGS_AUTO_CRITICAL=$(setting_value auto_critical)
-    SETTINGS_AUTO_IMPORTANT=$(setting_value auto_important)
-    SETTINGS_AUTO_ROUTINE=$(setting_value auto_routine)
-    SETTINGS_UPDATE_ENABLED=$(setting_value update_enabled)
-    SETTINGS_CHANNEL=$(setting_value channel)
-    SETTINGS_CHECK_INTERVAL=$(setting_value check_interval_seconds)
-    SETTINGS_SAFE_WINDOW_START=$(setting_value safe_window_start)
-    SETTINGS_SAFE_WINDOW_END=$(setting_value safe_window_end)
-    SETTINGS_IMPORTANT_DELAY=$(setting_value important_max_delay_seconds)
-    SETTINGS_ROUTINE_DELAY=$(setting_value routine_max_delay_seconds)
-    SETTINGS_MINIMUM_FREE=$(setting_value minimum_free_kb)
-    SETTINGS_MAX_MANIFEST=$(setting_value max_manifest_size)
-    SETTINGS_MAX_PACKAGE=$(setting_value max_package_size)
-    SETTINGS_MAX_UNPACKED=$(setting_value max_unpacked_size)
-    SETTINGS_BACKUP_KEEP=$(setting_value backup_keep)
-    SETTINGS_HEALTH_TIMEOUT=$(setting_value health_timeout_seconds)
-    SETTINGS_REQUEST_TIMEOUT=$(setting_value request_timeout_seconds)
-    SETTINGS_BARRIER_READY=$(setting_value barrier_integration_ready)
-    SETTINGS_ADS_ENABLED=$(ads_setting_value ENABLED)
-    SETTINGS_ADS_RUN_MODE=$(ads_setting_value RUN_MODE)
-    SETTINGS_ADS_SCHEDULE_INTERVAL=$(ads_setting_value SCHEDULE_INTERVAL_MIN)
-    SETTINGS_ADS_DYNAMIC_INTERVAL=$(ads_setting_value DYNAMIC_MIN_INTERVAL_SEC)
-    SETTINGS_ADS_DYNAMIC_LOAD=$(ads_setting_value DYNAMIC_MAX_LOAD_PER_CPU_X100)
-    SETTINGS_ADS_DYNAMIC_MEM=$(ads_setting_value DYNAMIC_MIN_MEM_AVAILABLE_KB)
-    SETTINGS_ADS_DYNAMIC_OPT=$(ads_setting_value DYNAMIC_MIN_OPT_FREE_KB)
-    SETTINGS_ADS_DYNAMIC_CANDIDATES=$(ads_setting_value DYNAMIC_MAX_CANDIDATES_PER_RUN)
-    SETTINGS_ADS_AUTO_SOURCES=$(ads_setting_value AUTO_SOURCE_UPDATE)
-    SETTINGS_ADS_SOURCE_INTERVAL=$(ads_setting_value SOURCE_UPDATE_INTERVAL_HOURS)
-    SETTINGS_ADS_QUERY_SOURCE=$(ads_setting_value QUERY_SOURCE)
-    SETTINGS_ADS_RULE_SCOPE=$(ads_setting_value AUTO_RULE_SCOPE)
-    SETTINGS_ADS_PUBLISH_MODE=$(ads_setting_value PUBLISH_MODE)
-    SETTINGS_ADS_AUTO_PUBLISH=$(ads_setting_value AUTO_PUBLISH)
+    # One pass over each file, no process per key.
+    kv_file "$UPDATE_CONFIG" auto_apply=SETTINGS_AUTO_APPLY auto_critical=SETTINGS_AUTO_CRITICAL \
+        auto_important=SETTINGS_AUTO_IMPORTANT auto_routine=SETTINGS_AUTO_ROUTINE update_enabled=SETTINGS_UPDATE_ENABLED \
+        channel=SETTINGS_CHANNEL check_interval_seconds=SETTINGS_CHECK_INTERVAL safe_window_start=SETTINGS_SAFE_WINDOW_START \
+        safe_window_end=SETTINGS_SAFE_WINDOW_END important_max_delay_seconds=SETTINGS_IMPORTANT_DELAY \
+        routine_max_delay_seconds=SETTINGS_ROUTINE_DELAY minimum_free_kb=SETTINGS_MINIMUM_FREE \
+        max_manifest_size=SETTINGS_MAX_MANIFEST max_package_size=SETTINGS_MAX_PACKAGE max_unpacked_size=SETTINGS_MAX_UNPACKED \
+        backup_keep=SETTINGS_BACKUP_KEEP health_timeout_seconds=SETTINGS_HEALTH_TIMEOUT \
+        request_timeout_seconds=SETTINGS_REQUEST_TIMEOUT barrier_integration_ready=SETTINGS_BARRIER_READY
+    kv_file "$ADS_CONFIG" ENABLED=SETTINGS_ADS_ENABLED RUN_MODE=SETTINGS_ADS_RUN_MODE \
+        SCHEDULE_INTERVAL_MIN=SETTINGS_ADS_SCHEDULE_INTERVAL DYNAMIC_MIN_INTERVAL_SEC=SETTINGS_ADS_DYNAMIC_INTERVAL \
+        DYNAMIC_MAX_LOAD_PER_CPU_X100=SETTINGS_ADS_DYNAMIC_LOAD DYNAMIC_MIN_MEM_AVAILABLE_KB=SETTINGS_ADS_DYNAMIC_MEM \
+        DYNAMIC_MIN_OPT_FREE_KB=SETTINGS_ADS_DYNAMIC_OPT DYNAMIC_MAX_CANDIDATES_PER_RUN=SETTINGS_ADS_DYNAMIC_CANDIDATES \
+        AUTO_SOURCE_UPDATE=SETTINGS_ADS_AUTO_SOURCES SOURCE_UPDATE_INTERVAL_HOURS=SETTINGS_ADS_SOURCE_INTERVAL \
+        QUERY_SOURCE=SETTINGS_ADS_QUERY_SOURCE AUTO_RULE_SCOPE=SETTINGS_ADS_RULE_SCOPE \
+        PUBLISH_MODE=SETTINGS_ADS_PUBLISH_MODE AUTO_PUBLISH=SETTINGS_ADS_AUTO_PUBLISH
     "$JQ" -c \
       --argjson profile_ready "$PROFILE_READY" \
       --arg lan_address "${VWARD_LAN_ADDRESS:-}" \
@@ -1772,7 +1746,7 @@ if [ "$ACTION" = tunnel-probe ]; then
     DEV="$(vward_map_tunnels "$(vward_device_map 2>/dev/null)" | awk -v n="$NAME" '$1 == n {print $2; exit}')"
     [ -n "$DEV" ] && vward_valid_ifname "$DEV" && [ -e "${VWARD_SYSFS_NET:-/sys/class/net}/$DEV" ] || { echo '{"ok":false,"error":"tunnel_device_missing"}'; exit 0; }
     PROBE_DIR="$(mktemp -d /tmp/vward-console-tunnel.XXXXXX 2>/dev/null)" || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
-    trap 'rm -rf "$PROBE_DIR"' EXIT
+    trap 'rm -rf "${PROBE_DIR:?}"' EXIT
     PING_TARGET=1.1.1.1
     "${VWARD_PING:-ping}" -I "$DEV" -c 4 -W 2 "$PING_TARGET" > "$PROBE_DIR/ping" 2>&1 &
     PING_PID=$!

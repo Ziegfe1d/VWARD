@@ -32,7 +32,7 @@ esac
 #   service ID 0|1
 if [ "$OP" = agh ]; then
   W="$(mktemp -d "${TMPDIR:-/tmp}/vward-ads-agh.XXXXXX" 2>/dev/null)" || ads_die "cannot create a work directory"
-  trap 'rm -rf "$W"; ads_admission_leave' EXIT
+  trap 'rm -rf "${W:?}"; ads_admission_leave' EXIT
   AG_SET="${2:-}" A1="${3:-}" A2="${4:-}"
   agfail() { echo "CONTROL=FAIL"; echo "ERROR=$1"; ads_log "CONTROL|agh|$AG_SET|error=$1"; exit 1; }
   bool() { case "$1" in 1) echo true ;; 0) echo false ;; *) agfail invalid_value ;; esac; }
