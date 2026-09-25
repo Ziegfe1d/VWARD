@@ -1526,7 +1526,8 @@ if [ "$ACTION" = "diagnostics" ]; then
         AGH_MAIN_UP="$(awk '/^[^ #]/ {d = ($1 == "dns:"); u = 0; next} /^  [a-z_]+:/ {u = d && ($1 == "upstream_dns:"); next}
             u && $1 == "-" {sub(/^[ \t]*-[ \t]*/, ""); gsub(/["\047]/, ""); if ($0 !~ /^\[/) print}' "$AGH_Y" 2>/dev/null)"
         KN_TO_AGH="$(printf '%s\n' "$DIAG_RC" | awk -v p=":${AGH_DNS_PORT:-x}" '$1 == "ip" && $2 == "name-server" && index($3, p) {print $3; exit}')"
-        LAN_IP="${VWARD_LAN_ADDRESS:-192.168.1.1}"
+        # The router: its LAN address from the profile, or loopback.
+        LAN_IP="${VWARD_LAN_ADDRESS:-127.0.0.1}"
         if printf '%s\n' "$AGH_MAIN_UP" | grep -Eq "^(udp://|tcp://)?($LAN_IP|127\.0\.0\.1|localhost)(:53)?$"; then
             DNS_STATUS=FAIL DNS_DETAIL="AdGuard Home отправляет запросы обратно роутеру ($LAN_IP) - петля: Keenetic будет отбрасывать запросы. Укажите в AdGuard Home внешние серверы."
         elif [ -n "$KN_TO_AGH" ]; then
