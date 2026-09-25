@@ -83,6 +83,7 @@ python3 tests/repository/check-console-devices.py || fail "Only registered devic
 python3 tests/repository/check-route-engine-names.py || fail "Route engine sends only valid names"
 python3 tests/repository/check-route-engine-watchdog.py || fail "Watchdog counts engine cores, not subshells"
 python3 tests/repository/check-console-diagnostics-dns.py || fail "Diagnostics: DNS chain, files as installed"
+python3 tests/repository/check-console-ndm-cache.py || fail "Console caches Keenetic answers briefly"
 python3 tests/repository/check-console-tunnel.py || fail "Console tunnel switch"
 python3 tests/repository/check-component-graph.py || fail "Component dependency graph"
 python3 tests/repository/check-component-resilience.py || fail "Component disable resilience"

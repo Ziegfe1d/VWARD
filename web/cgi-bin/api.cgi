@@ -70,6 +70,30 @@ fetch_json()
     printf '%s\n' "$FETCH_OUT"
 }
 
+# ndm_cached NAME TTL COMMAND: a Keenetic "show" answer kept TTL seconds in RAM
+# (root-only), so a console refreshing every few seconds does not make the
+# router serialize its whole configuration each time.  Any POST drops the
+# cache first, so a change is never followed by the old state.  With ndmc
+# replaced (tests) the cache is off unless VWARD_CONSOLE_CACHE_TTL says otherwise.
+NDM_CACHE_DIR=${VWARD_CONSOLE_CACHE_DIR:-/tmp/vward-console-cache}
+ndm_cached()
+{
+    nc_file="$NDM_CACHE_DIR/$1" nc_ttl="$2"
+    [ -z "${VWARD_NDMC:-}" ] || nc_ttl=${VWARD_CONSOLE_CACHE_TTL:-0}
+    [ -z "${VWARD_CONSOLE_CACHE_TTL:-}" ] || nc_ttl=$VWARD_CONSOLE_CACHE_TTL
+    if [ "$nc_ttl" -gt 0 ] 2>/dev/null && [ -r "$nc_file" ]; then
+        nc_at=0; read -r nc_at < "$nc_file" || nc_at=0
+        case "$nc_at" in ''|*[!0-9]*) nc_at=0 ;; esac
+        if [ $(( $(date +%s) - nc_at )) -lt "$nc_ttl" ]; then sed 1d "$nc_file"; return 0; fi
+    fi
+    nc_out="$("${VWARD_NDMC:-ndmc}" -c "$3" 2>/dev/null | tr -d '\r')"
+    [ -n "$nc_out" ] || return 1
+    if [ "$nc_ttl" -gt 0 ] 2>/dev/null; then
+        (umask 077; mkdir -p "$NDM_CACHE_DIR" && { date +%s; printf '%s\n' "$nc_out"; } > "$nc_file.$$" && mv -f "$nc_file.$$" "$nc_file") 2>/dev/null
+    fi
+    printf '%s\n' "$nc_out"
+}
+
 # kv_file FILE KEY=VAR...: sets each VAR to the last value of KEY in a
 # KEY=VALUE file without starting a process. Variable names come from this
 # script only; values are assigned, never evaluated.
@@ -111,6 +135,7 @@ case "$ACTION" in
 esac
 
 if [ "${REQUEST_METHOD:-GET}" = POST ]; then
+    rm -rf "${NDM_CACHE_DIR:?}"
     [ "${HTTP_X_VWARD_REQUEST:-}" = console ] || {
         echo 'Status: 403 Forbidden'
         header_json
@@ -437,7 +462,7 @@ if [ "$ACTION" = config-data ]; then
     kv_get(){ awk -F= -v k="$2" '$1==k{print substr($0,index($0,"=")+1);exit}' "$1" 2>/dev/null; }
     ROUTER=false; ROUTE_DOMAINS='[]'
     if [ "$PROFILE_READY" = true ]; then
-        RUNNING="$("${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r')"
+        RUNNING="$(ndm_cached running 10 "show running-config")"
         if [ -n "$RUNNING" ]; then
             ROUTER=true
             ROUTE_DOMAINS="$(printf '%s\n' "$RUNNING" | awk -v g="$VWARD_POLICY_GROUP" '
@@ -1492,7 +1517,7 @@ if [ "$ACTION" = "diagnostics" ]; then
     # Smart DNS: each domain bound to a DNS-over-HTTPS server must resolve to an
     # address that leaves through the provider, never through a tunnel.
     SMARTDNS_STATUS=PASS SMARTDNS_DETAIL="Smart DNS не используется"
-    DIAG_RC="$("${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r')"
+    DIAG_RC="$(ndm_cached running 10 "show running-config")"
     # Smart DNS rows in Keenetic and in AdGuard Home ([/domain/]https://...).
     SD_DOMAINS="$({ printf '%s\n' "$DIAG_RC" | awk '
         /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
@@ -1618,7 +1643,7 @@ if [ "$ACTION" = tunnel-probe ]; then
     "${VWARD_PING:-ping}" -I "$DEV" -c 4 -W 2 "$PING_TARGET" > "$PROBE_DIR/ping" 2>&1 &
     PING_PID=$!
     "$CURL" --interface "$DEV" --silent --max-time 5 https://ipinfo.io/json > "$PROBE_DIR/exit" 2>/dev/null || :
-    PEER="$("${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r' |
+    PEER="$(ndm_cached running 10 "show running-config" |
         awk -v n="interface $NAME" '$0 == n {on = 1; next} on && /^!/ {exit} on {sub(/^ +/, ""); print}')"
     wait "$PING_PID" 2>/dev/null
     ENDPOINT="$(printf '%s\n' "$PEER" | awk '$1 == "endpoint" {print $2; exit}')"
@@ -1819,7 +1844,7 @@ fi
 if [ "$ACTION" = lists-data ]; then
     header_json
     [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
-    RUNNING="$("${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r')"
+    RUNNING="$(ndm_cached running 10 "show running-config")"
     [ -n "$RUNNING" ] || { echo '{"ok":false,"error":"router_config_unavailable"}'; exit 0; }
     LISTS_CONF=${VWARD_DOMAIN_LISTS_CONF:-$CONFIG_ETC/route-engine/domain-lists.conf}
     LISTS_STATE=$CONFIG_ETC/route-engine/domain-lists
@@ -1832,7 +1857,7 @@ if [ "$ACTION" = lists-data ]; then
     [ -n "$AUTO" ] || AUTO='{}'
     # Addresses Keenetic learned for each group from DNS answers: 0 on a used list
     # means its domains' queries do not pass the router's DNS.
-    ADDRS="$("${VWARD_NDMC:-ndmc}" -c "show object-group fqdn" 2>/dev/null | tr -d '\r' |
+    ADDRS="$(ndm_cached fqdn-groups 60 "show object-group fqdn" |
         awk '$1 == "group-name:" {g = $2} $1 == "ipv4-addresses-count:" && g != "" {print g "\t" $2; g = ""}' |
         "$JQ" -Rn '[inputs | split("\t") | {(.[0]): (.[1] | tonumber? // null)}] | add // {}' 2>/dev/null)"
     [ -n "$ADDRS" ] || ADDRS='{}'
