@@ -95,26 +95,30 @@ ndm_cached()
     printf '%s\n' "$nc_out"
 }
 
-# ndm_cached_bg NAME TTL COMMAND [FILTER]: like ndm_cached, but an answer up to
-# ten TTLs old is shown at once while a fresh one is fetched in the background,
-# for slow answers whose exact value may lag (learned address counts).
+# ndm_cached_bg NAME TTL COMMAND [FILTER]: for slow answers whose exact value may
+# lag (learned address counts).  An answer up to ten TTLs old is shown at once
+# while a fresh one is fetched in the background; with none at all, nothing is
+# shown now (the caller shows "unknown") and the next request has it.
 ndm_cached_bg()
 {
     nb_file="$NDM_CACHE_DIR/$1" nb_ttl=${VWARD_CONSOLE_CACHE_TTL:-$2}
     [ -z "${VWARD_NDMC:-}" ] || nb_ttl=${VWARD_CONSOLE_CACHE_TTL:-0}
-    if [ "$nb_ttl" -gt 0 ] 2>/dev/null && [ -r "$nb_file" ]; then
+    [ "$nb_ttl" -gt 0 ] 2>/dev/null || { ndm_cached "$@"; return; }
+    nb_age=-1
+    if [ -r "$nb_file" ]; then
         nb_at=0; read -r nb_at < "$nb_file" || nb_at=0
         case "$nb_at" in ''|*[!0-9]*) nb_at=0 ;; esac
         nb_age=$(( $(date +%s) - nb_at ))
-        if [ "$nb_age" -ge 0 ] && [ "$nb_age" -lt $(( nb_ttl * 10 )) ]; then
-            if [ "$nb_age" -ge "$nb_ttl" ] && mkdir "$nb_file.lock" 2>/dev/null; then
-                ( VWARD_CONSOLE_CACHE_TTL=1; ndm_cached "$@"; rmdir "$nb_file.lock" ) </dev/null >/dev/null 2>&1 &
-            fi
-            sed 1d "$nb_file"; return 0
-        fi
+        [ "$nb_age" -lt $(( nb_ttl * 10 )) ] || nb_age=-1
     fi
-    rmdir "$nb_file.lock" 2>/dev/null
-    ndm_cached "$@"
+    # A lock left by a refresh that died goes after a minute.
+    [ -z "$(find "$nb_file.lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] || rmdir "$nb_file.lock" 2>/dev/null
+    if { [ "$nb_age" -lt 0 ] || [ "$nb_age" -ge "$nb_ttl" ]; } && (umask 077; mkdir -p "$NDM_CACHE_DIR") 2>/dev/null &&
+       mkdir "$nb_file.lock" 2>/dev/null; then
+        ( VWARD_CONSOLE_CACHE_TTL=1; ndm_cached "$@"; rmdir "$nb_file.lock" ) </dev/null >/dev/null 2>&1 &
+    fi
+    [ "$nb_age" -ge 0 ] || return 1
+    sed 1d "$nb_file"
 }
 
 # kv_file FILE KEY=VAR...: sets each VAR to the last value of KEY in a

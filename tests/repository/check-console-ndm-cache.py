@@ -45,6 +45,17 @@ with tempfile.TemporaryDirectory() as tmp:
     def count(cmd):
         return calls.read_text().splitlines().count(cmd) if calls.exists() else 0
 
+    def settle():
+        for _ in range(50):
+            if not (cache / "fqdn-counts.lock").exists() and (cache / "fqdn-counts").exists():
+                return
+            time.sleep(0.1)
+
+    # No counts yet: the page does not wait for the slow answer, it comes in the background.
+    first = get("lists-data")
+    if first["lists"][0]["addresses"] is not None:
+        fail(f"the first page must not wait for the address counts: {first}")
+    settle()
     a = get("lists-data")
     b = get("lists-data")
     if a != b or a["lists"][0]["addresses"] != 3:
@@ -64,6 +75,7 @@ with tempfile.TemporaryDirectory() as tmp:
         if not (cache / "fqdn-counts.lock").exists() and "\t5" in (cache / "fqdn-counts").read_text():
             break
         time.sleep(0.1)
+    settle()
     if get("lists-data")["lists"][0]["addresses"] != 5 or count("show object-group fqdn") != 2:
         fail(f"the background refresh must bring the new count: {calls.read_text()}")
     mode = stat.S_IMODE((cache / "running").stat().st_mode)
