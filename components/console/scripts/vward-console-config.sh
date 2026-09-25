@@ -1085,6 +1085,78 @@ op_tunnel_subnet() {
     done_ok "tunnel-subnet $1 $2 $ts_net/$ts_bits" changed
 }
 
+# ---------- Backups of VWARD's own settings ----------
+#
+# A snapshot holds /opt/etc/vward (settings, domain lists state, Smart DNS and
+# tunnel configurations, AdGuard Home login) without the nightly catalogs, the
+# AdaptiveAuto domains, and the router's running configuration as a reference
+# copy.  Snapshots are root-only; the newest seven are kept.  A restore puts the
+# VWARD files back (after a snapshot of the current state); the router
+# configuration is never applied automatically.
+
+SNAPSHOT_DIR=${VWARD_SNAPSHOT_DIR:-/opt/var/backups/vward/snapshots}
+SNAPSHOT_KEEP=7
+
+snapshot_name_ok() { printf '%s\n' "$1" | grep -Eq '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$'; }
+
+op_backup_create() {
+    # backup-create manual|auto|prerestore: auto only when the newest is a day old.
+    case "$1" in manual|auto|prerestore) ;; *) die invalid_value 64 ;; esac
+    (umask 077; mkdir -p "$SNAPSHOT_DIR") || die write_failed
+    if [ "$1" = auto ]; then
+        bc_last=$(ls -1 "$SNAPSHOT_DIR" 2>/dev/null | grep -E '^vward-[0-9]{8}-[0-9]{6}' | sort | tail -n 1)
+        if [ -n "$bc_last" ]; then
+            bc_age=$(( $(date +%s) - $(date -r "$SNAPSHOT_DIR/$bc_last" +%s 2>/dev/null || echo 0) ))
+            [ "$bc_age" -ge 82800 ] || done_ok "backup-create auto" unchanged
+        fi
+    fi
+    bc_stage=$(mktemp -d /tmp/vward-backup.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    TMPFILE=$bc_stage.tar.gz
+    mkdir -p "$bc_stage/etc" "$bc_stage/state" || die write_failed
+    ( cd "$ETC" && tar -cf - . ) | ( cd "$bc_stage/etc" && tar -xf - ) || { rm -rf "${bc_stage:?}"; die backup_failed; }
+    # Regenerated every night, and large.
+    rm -f "$bc_stage/etc/route-engine/hints-catalog.tsv" "$bc_stage/etc/route-engine/hints-includes.tsv"
+    [ ! -f "$PERSIST" ] || cp "$PERSIST" "$bc_stage/state/adaptive-persist.txt"
+    "$NDMC" -c "show running-config" > "$bc_stage/router-running-config.txt" 2>/dev/null || rm -f "$bc_stage/router-running-config.txt"
+    { echo "created=$(date '+%Y-%m-%dT%H:%M:%S%z')"; echo "kind=$1"
+      echo "version=$(sed -n 1p "${VWARD_VERSION_FILE:-/opt/share/vward/VERSION}" 2>/dev/null)"; } > "$bc_stage/backup.meta"
+    bc_name="vward-$(date '+%Y%m%d-%H%M%S')"
+    [ "$1" = manual ] || bc_name="$bc_name-$1"
+    ( umask 077; cd "$bc_stage" && tar -czf "$TMPFILE" . ) || { rm -rf "${bc_stage:?}"; die backup_failed; }
+    rm -rf "${bc_stage:?}"
+    tar -tzf "$TMPFILE" >/dev/null 2>&1 || die backup_failed
+    chmod 0600 "$TMPFILE" && mv -f "$TMPFILE" "$SNAPSHOT_DIR/$bc_name.tar.gz" || die write_failed
+    TMPFILE=
+    ls -1 "$SNAPSHOT_DIR" 2>/dev/null | grep -E '^vward-[0-9]{8}-[0-9]{6}.*\.tar\.gz$' | sort -r | awk -v k="$SNAPSHOT_KEEP" 'NR > k' |
+        while IFS= read -r old; do rm -f "$SNAPSHOT_DIR/$old"; done
+    printf 'info.name=%s.tar.gz\n' "$bc_name"
+    done_ok "backup-create $1 $bc_name" changed
+}
+
+op_backup_restore() {
+    # backup-restore NAME: VWARD files back as they were in the snapshot.
+    snapshot_name_ok "$1" || die invalid_backup 64
+    br_file="$SNAPSHOT_DIR/$1"
+    [ -f "$br_file" ] && [ ! -L "$br_file" ] || die unknown_backup 64
+    br_stage=$(mktemp -d /tmp/vward-restore.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    tar -xzf "$br_file" -C "$br_stage" 2>/dev/null || { rm -rf "${br_stage:?}"; die backup_damaged; }
+    [ -d "$br_stage/etc" ] && [ -f "$br_stage/backup.meta" ] || { rm -rf "${br_stage:?}"; die backup_damaged; }
+    # Nothing outside the snapshot's etc/ and state/ is taken; no links.
+    if find "$br_stage" -type l | grep -q .; then rm -rf "${br_stage:?}"; die backup_damaged; fi
+    # The current state first, so the restore itself can be undone.
+    ( op_backup_create prerestore ) >/dev/null || { rm -rf "${br_stage:?}"; die backup_failed; }
+    # The update key stays the installed one: a snapshot must not change who signs updates.
+    rm -f "$br_stage/etc/update-public.pem"
+    ( cd "$br_stage/etc" && tar -cf - . ) | ( cd "$ETC" && tar -xf - ) || { rm -rf "${br_stage:?}"; die restore_failed; }
+    if [ -f "$br_stage/state/adaptive-persist.txt" ]; then
+        mkdir -p "$ROUTE_STATE" && cp "$br_stage/state/adaptive-persist.txt" "$PERSIST" || { rm -rf "${br_stage:?}"; die restore_failed; }
+    fi
+    rm -rf "${br_stage:?}"
+    rm -f "$VWARD_DEVICE_MAP_CACHE"
+    mkdir -p "$ROUTE_STATE" 2>/dev/null && echo 0 > "$REFRESH_TS" 2>/dev/null
+    done_ok "backup-restore $1" changed
+}
+
 # smartdns-guard 0|1: 0 lets AdaptiveAuto take Smart DNS domains again.
 op_smartdns_guard() {
     case "$1" in 0|1) ;; *) die invalid_value 64 ;; esac
@@ -1154,14 +1226,14 @@ op_component() {
 [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|smartdns-guard) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|smartdns-guard|backup-create|backup-restore) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     tunnel-subnet) [ "$#" -eq 3 ] || die usage 64 ;;
     *) [ "$#" -eq 2 ] || die usage 64 ;;
 esac
 ARG1=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
 ARG2=${2:-}
-case "$OP" in wifi|update|wan-param|tunnel|domain-list|domain-list-watch|tunnel-conf|tunnel-delete|tunnel-subnet) ARG1=$1 ;; esac
+case "$OP" in wifi|update|wan-param|tunnel|domain-list|domain-list-watch|tunnel-conf|tunnel-delete|tunnel-subnet|backup-restore) ARG1=$1 ;; esac
 ARG3=${3:-}
 case "$OP" in route-domain|force-vpn|adaptive) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 
@@ -1195,6 +1267,8 @@ case "$OP" in
     update) op_update "$ARG1" "$ARG2" ;;
     wan-param) op_wan_param "$ARG1" "$ARG2" ;;
     tunnel-conf) op_tunnel_conf "$ARG1" "$ARG2" "$ARG3" ;;
+    backup-create) op_backup_create "$ARG1" ;;
+    backup-restore) op_backup_restore "$ARG1" ;;
     tunnel-delete) op_tunnel_delete "$ARG1" "$ARG2" ;;
     tunnel-subnet) op_tunnel_subnet "$ARG1" "$ARG2" "$ARG3" ;;
     *) die invalid_operation 64 ;;

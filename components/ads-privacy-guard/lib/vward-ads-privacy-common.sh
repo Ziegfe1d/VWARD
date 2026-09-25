@@ -122,6 +122,71 @@ ads_secure_file_ok() (
     case "$ads_sf_meta" in "0 -rw-------"|"0 -r--------") return 0 ;; *) return 1 ;; esac
 )
 
+# The defaults of config/ads-privacy-guard/ads-privacy-guard.conf.example, written
+# once when Ads starts working (AdGuard Home connected) and no config exists yet.
+ads_write_default_config()
+{
+    [ ! -e "$ADS_CONFIG" ] || return 0
+    mkdir -p "$ADS_ETC" || return 1
+    ads_dc_tmp="$ADS_CONFIG.new.$$"
+    ( umask 077; cat > "$ads_dc_tmp" <<'ADS_DEFAULT_CONFIG'
+# VWARD Ads & Privacy Guard local configuration (created with the defaults).
+ENABLED=1
+RUN_MODE=scheduled
+SCHEDULE_INTERVAL_MIN=10
+DYNAMIC_MIN_INTERVAL_SEC=120
+DYNAMIC_MAX_LOAD_PER_CPU_X100=80
+DYNAMIC_MIN_MEM_AVAILABLE_KB=16384
+DYNAMIC_MIN_OPT_FREE_KB=32768
+DYNAMIC_SCAN_TAIL_LINES=5000
+DYNAMIC_MAX_CANDIDATES_PER_RUN=100
+AUTO_SOURCE_UPDATE=1
+SOURCE_UPDATE_INTERVAL_HOURS=24
+QUERY_SOURCE=auto
+SCAN_TAIL_LINES=20000
+MAX_CANDIDATES_PER_RUN=500
+BLOCK_SCORE=150
+REVIEW_SCORE=60
+MIN_INDEPENDENT_GROUPS=2
+MIN_SOURCE_INDEXES=3
+ALLOW_TTL_DAYS=30
+TRUST_TTL_DAYS=180
+SUSPECT_TTL_HOURS=24
+BLOCK_RECHECK_DAYS=30
+HEURISTIC_REVIEW_SCORE=20
+SOURCE_CONNECT_TIMEOUT=10
+SOURCE_MAX_TIME=120
+MIN_HEALTHY_SOURCES=3
+PUBLISH_MODE=staged
+AUTO_RULE_SCOPE=exact
+AGH_API_BASE=
+AGH_API_CONNECT_TIMEOUT=3
+AGH_API_MAX_TIME=15
+AUTO_PUBLISH=0
+EXTERNAL_VERIFIER_COMMAND=
+CATEGORY_ADS=1
+CATEGORY_POPUP_REDIRECT=1
+CATEGORY_TRACKING=1
+CATEGORY_ANALYTICS=1
+CATEGORY_TELEMETRY=0
+CATEGORY_AFFILIATE=1
+CATEGORY_MAIL_TRACKING=1
+CATEGORY_SOCIAL_TRACKING=1
+CATEGORY_RESOURCE_ABUSE=1
+FEATURE_PRIVACY_MONITOR=0
+FEATURE_CLIENT_PROFILES=0
+FEATURE_ANTI_BYPASS_MONITOR=0
+FEATURE_BREAKAGE_ASSISTANT=0
+FEATURE_CNAME_TRACKING=0
+FEATURE_TEMPORARY_EXCEPTIONS=0
+SOURCE_OVERRIDES_FILE=/opt/etc/vward/ads-privacy-guard/source-overrides.tsv
+CLIENT_PROFILES_FILE=/opt/etc/vward/ads-privacy-guard/client-profiles.json
+ADS_DEFAULT_CONFIG
+    ) || { rm -f "$ads_dc_tmp"; return 1; }
+    chmod 0600 "$ads_dc_tmp" && mv -f "$ads_dc_tmp" "$ADS_CONFIG" || { rm -f "$ads_dc_tmp"; return 1; }
+    ads_log "CONFIG|created_with_defaults"
+}
+
 ads_load_config()
 {
     [ -r "$ADS_CONFIG" ] || ads_die "config not readable: $ADS_CONFIG"

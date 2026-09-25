@@ -102,7 +102,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf) ;;
+    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -127,7 +127,7 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             ;;
     esac
     case "$ACTION" in
-        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf) ;;
+        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control) ;;
         *)
             echo 'Status: 405 Method Not Allowed'
             header_json
@@ -637,6 +637,51 @@ if [ "$ACTION" = tunnel-conf ]; then
         *) echo '{"ok":false,"error":"helper_failed"}' ;;
       esac ;;
     *) echo '{"ok":false,"error":"invalid_operation"}' ;;
+  esac
+  exit 0
+fi
+
+# Backups of VWARD's settings: list, create, restore, download.
+SNAPSHOT_DIR=${VWARD_SNAPSHOT_DIR:-/opt/var/backups/vward/snapshots}
+if [ "$ACTION" = backup-data ]; then
+  header_json; [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+  ls -ln "$SNAPSHOT_DIR" 2>/dev/null | awk '$9 ~ /^vward-[0-9]+-[0-9]+(-[a-z]+)?[.]tar[.]gz$/ {print $9 "\t" $5}' | sort -r |
+    "$JQ" -Rn '[inputs | split("\t") | {name: .[0], size: (.[1] | tonumber? // 0),
+      kind: (.[0] | ltrimstr("vward-") | rtrimstr(".tar.gz") | split("-") | if length > 2 then .[2] else "manual" end),
+      created: (.[0] | ltrimstr("vward-") | .[0:4] + "-" + .[4:6] + "-" + .[6:8] + "T" + .[9:11] + ":" + .[11:13] + ":" + .[13:15])}] | {ok: true, backups: .}'
+  exit 0
+fi
+if [ "$ACTION" = backup-download ]; then
+  BN="$(qget name)"
+  printf '%s\n' "$BN" | grep -Eq '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$' && [ -f "$SNAPSHOT_DIR/$BN" ] && [ ! -L "$SNAPSHOT_DIR/$BN" ] || { header_json; echo '{"ok":false,"error":"unknown_backup"}'; exit 0; }
+  echo 'Content-Type: application/gzip'
+  echo "Content-Disposition: attachment; filename=\"$BN\""
+  echo 'Cache-Control: no-store'
+  echo 'X-Content-Type-Options: nosniff'
+  echo "Content-Length: $(wc -c < "$SNAPSHOT_DIR/$BN" | tr -d ' ')"
+  echo
+  cat "$SNAPSHOT_DIR/$BN"
+  exit 0
+fi
+if [ "$ACTION" = backup-control ]; then
+  header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+  ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+  [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+  LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ] && [ "$LEN" -le 512 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }
+  BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
+  val(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
+  case "$(val op)" in
+    create) set -- backup-create manual ;;
+    restore) [ "$(val confirm)" = BACKUP_RESTORE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+      BN="$(val name)"; printf '%s\n' "$BN" | grep -Eq '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$' || { echo '{"ok":false,"error":"invalid_backup"}'; exit 0; }
+      set -- backup-restore "$BN" ;;
+    *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
+  esac
+  BOUT="$("$CONFIG_HELPER" "$@" 2>/dev/null)"; BLAST="$(printf '%s\n' "$BOUT" | tail -n 1)"
+  case "$BLAST" in
+    result=changed|result=unchanged) "$JQ" -cn --arg n "$(printf '%s\n' "$BOUT" | sed -n 's/^info\.name=//p')" '{ok: true, name: $n}' ;;
+    error=*) E="${BLAST#error=}"; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac; printf '{"ok":false,"error":"%s"}\n' "$E" ;;
+    *) echo '{"ok":false,"error":"helper_failed"}' ;;
   esac
   exit 0
 fi
@@ -1777,6 +1822,8 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
     }
 
     START="$(date '+%Y-%m-%dT%H:%M:%S%z')"
+    # A confirmed «Установить» or «Повторить» from VWARD installs now, not at the scheduled time.
+    case "$LABEL" in update-apply|update-retry) VWARD_UPDATE_MANUAL=1; export VWARD_UPDATE_MANUAL ;; esac
     [ "$ACTION" = update-control ] && run_detached "$UPDATE_RUN_DIR" updater_busy
     case "$LABEL" in
         refresh-hints|route-reconcile|policy-refresh|policy-reconcile|housekeeping) run_detached "$CONTROL_RUN_DIR" control_busy ;;

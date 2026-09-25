@@ -20,7 +20,10 @@ trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
 # Cron runs this every minute; until Ads is set up there is nothing to schedule.
-[ -e "$ADS_CONFIG" ] || { echo "SCHEDULER=NOT_CONFIGURED"; exit 0; }
+# Once AdGuard Home is connected from VWARD, Ads starts with the default settings.
+if [ ! -e "$ADS_CONFIG" ]; then
+    [ -s "$ADS_AGH_AUTH_FILE" ] && ads_write_default_config || { echo "SCHEDULER=NOT_CONFIGURED"; exit 0; }
+fi
 
 ads_mkdirs || ads_die "cannot create component directories"
 ads_load_config

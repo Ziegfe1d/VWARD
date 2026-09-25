@@ -716,6 +716,8 @@ vu_now_epoch() { printf '%s\n' "${VWARD_TEST_NOW_EPOCH:-$(date +%s)}"; }
 vu_schedule_ready() {
     priority=$1
     first_seen=$2
+    # The owner pressed «Установить» in VWARD (confirmed there): no waiting for the window.
+    [ "${VWARD_UPDATE_MANUAL:-0}" != 1 ] || return 0
     now=$(vu_now_epoch)
     waited=$((now - first_seen))
     [ "$waited" -ge 0 ] || waited=0

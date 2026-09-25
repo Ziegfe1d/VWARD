@@ -313,6 +313,13 @@ keep_newest_files \
     5 ||
 RETENTION_ERRORS=$((RETENTION_ERRORS + 1))
 
+# Daily snapshot of VWARD's settings (the helper skips it when one is younger than a day).
+BACKUP_HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
+if [ -x "$BACKUP_HELPER" ]; then
+    BACKUP_RESULT="$("$BACKUP_HELPER" backup-create auto 2>/dev/null | tail -n 1)"
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|snapshot=${BACKUP_RESULT:-none}" >> "$HOUSE_LOG"
+fi
+
 echo "$(date '+%Y-%m-%d %H:%M:%S')|retention_errors=$RETENTION_ERRORS" \
     >> "$HOUSE_LOG"
 

@@ -111,20 +111,20 @@ const API_ERRORS = {
   profile_verification_failed: 'профиль устройства не принял новый туннель, изменения отменены',
   rollback_incomplete: 'откат не завершён: проверьте маршруты групп в веб-интерфейсе Keenetic',
   temporary_file_unavailable: 'нет места для временного файла', component_disabled: 'компонент выключен: включите его в «Система → Компоненты»',
-  core_component: 'базовый компонент нельзя выключить', wrong_credentials: 'неверный логин или пароль', adguard_rejected: 'AdGuard Home не принял изменение', unknown_filter: 'такого списка нет в AdGuard Home', invalid_service: 'неизвестный сервис', invalid_setting: 'неизвестная настройка', invalid_name: 'недопустимое название', invalid_password: 'пароль: только латиница, цифры и обычные знаки, до 128 символов', too_many_attempts: 'слишком много попыток - подождите 5 минут',
+  core_component: 'базовый компонент нельзя выключить', wrong_credentials: 'неверный логин или пароль', invalid_backup: 'неверное имя копии', unknown_backup: 'копия не найдена', backup_damaged: 'копия повреждена', backup_failed: 'не удалось создать копию', restore_failed: 'не удалось восстановить', adguard_rejected: 'AdGuard Home не принял изменение', unknown_filter: 'такого списка нет в AdGuard Home', invalid_service: 'неизвестный сервис', invalid_setting: 'неизвестная настройка', invalid_name: 'недопустимое название', invalid_password: 'пароль: только латиница, цифры и обычные знаки, до 128 символов', too_many_attempts: 'слишком много попыток - подождите 5 минут',
   router_auth_unavailable: 'роутер не ответил на проверку пароля', invalid_login: 'недопустимый логин', auth_required: 'нужно войти', invalid_url: 'неверный адрес: нужен https без пробелов и логина', invalid_format: 'неизвестный формат списка',
   adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен'
 };
 const errText = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.error || '') ? 'роутер не принял настройку ' + x.error.slice(14).replace(/_/g, ' ') + ' - туннель не изменён' : '') || (x && x.error) || ('код ' + (x && x.rc));
 
 /* ---------- Данные ---------- */
-const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
+const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
 const ADSV = { filter: 'all', search: '', blockedSearch: '' };
 const LOADERS = {
   status: () => apiGet('status'), route: () => apiGet('route-data'), update: () => apiGet('update-data'), lists: () => apiGet('lists-data'),
   security: () => apiGet('security-data'), diag: () => apiGet('diagnostics'), wifi: () => apiGet('wifi-data'),
   ads: () => apiGet('ads-data'), https: () => apiGet('ads-https-data'), config: () => apiGet('config-data'),
-  adsstats: () => apiGet('ads-view', { view: 'stats' }), agh: () => apiGet('ads-view', { view: 'agh' }), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
+  adsstats: () => apiGet('ads-view', { view: 'stats' }), agh: () => apiGet('ads-view', { view: 'agh' }), backups: () => apiGet('backup-data'), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
   qlog: () => apiGet('ads-view', { view: 'querylog', filter: ADSV.filter, search: ADSV.search }),
   review: () => apiGet('ads-view', { view: 'list', kind: 'review' }),
   cron: () => apiGet('cron-data'), auth: () => apiGet('auth'),
@@ -160,7 +160,7 @@ const PAGES = [
   { id: 'wifi', title: 'Wi-Fi клиенты', icon: 'wifi', group: 'Сеть', data: ['wifi', 'security', 'config'] },
   { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adsstats', 'adspub', 'agh'] },
   { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config'] },
-  { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth', 'status', 'update', 'config'] }
+  { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth', 'status', 'update', 'config', 'backups'] }
 ];
 const SHORT = { overview: 'Обзор', logs: 'Журналы', wan: 'Интернет', vpn: 'VPN', lists: 'Списки', routes: 'Маршруты', wifi: 'Wi-Fi', ads: 'Реклама', system: 'Система', updates: 'Обновл.', settings: 'Настройки' };
 const COMPONENTS = [
@@ -275,11 +275,13 @@ const btn = (act, icon, label, cls, extra) => '<button class="btn' + (cls ? ' ' 
 const empty = t => '<div class="empty">' + esc(t) + '</div>';
 function confirmBox(id, text, yesLabel, danger) {
   if (!confirm || confirm.id !== id) return '';
-  return '<div class="confirm"><span>' + esc(text) + '</span><button class="btn small ' + (danger ? 'danger' : 'primary') + '" type="button" data-act="confirm-yes">' + esc(yesLabel) + '</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>';
+  return '<div class="confirm' + (danger ? ' danger' : '') + '"><span>' + esc(text) + '</span><button class="btn small ' + (danger ? 'danger' : 'primary') + '" type="button" data-act="confirm-yes">' + esc(yesLabel) + '</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>';
 }
 function resultBox(id) {
   if (!actionResult || actionResult.id !== id) return '';
-  return '<pre class="logbox result">' + esc(actionResult.text) + '</pre>';
+  // One short line: the details are in «Журналы».
+  const t = String(actionResult.text || '').split('\n')[0].slice(0, 160);
+  return t ? '<p class="result-note">' + esc(t) + '</p>' : '';
 }
 function loadError(keys) {
   const errs = keys.map(k => S.errors[k]).filter(Boolean);
@@ -302,7 +304,7 @@ function notifications() {
   const total = num(stg.total_kb), free = num(stg.free_kb);
   if (total && free != null && free / total < 0.1) n.push({ sev: 'warn', title: 'Мало места в хранилище', text: 'свободно ' + fmtKB(free), to: 'system' });
   if (['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase)) n.push({ sev: 'crit', title: 'Обновление требует внимания', text: phaseText(p.phase), to: 'updates' });
-  if (S.update && S.update.pending && S.update.pending.present) n.push({ sev: 'warn', title: 'Доступно обновление', text: S.update.pending.version || '', to: 'updates' });
+  if (S.update && S.update.pending && S.update.pending.present) n.push({ sev: 'news', icon: 'save', title: 'Вышла новая версия VWARD', text: (S.update.pending.version || '') + ' - нажмите, чтобы посмотреть и установить', to: 'updates' });
   const wc = ((S.wifi && S.wifi.clients) || []).filter(c => c.health === 'WARNING').length;
   if (wc) n.push({ sev: 'warn', title: 'Wi-Fi: ' + wc + ' ' + plural(wc, 'клиент требует', 'клиента требуют', 'клиентов требуют') + ' внимания', text: 'частые переходы между 2.4 и 5 ГГц', to: 'wifi' });
   const offComps = ((S.config && S.config.components) || []).filter(x => x.enabled === false);
@@ -518,7 +520,7 @@ const RENDER = {
 
   updates() {
     const p = plat(), u = S.update || {}, al = u.allowed || {}, pend = u.pending || {};
-    const uc = cfg().update || {}, mode = !isTrue(p.auto_apply) ? 'manual' : uc.apply_window === 'any' ? 'auto' : 'schedule', feed = uc.feed;
+    const uc = cfg().update || {}, mode = updModeShown || (!isTrue(p.auto_apply) ? 'manual' : uc.apply_window === 'any' ? 'auto' : 'schedule'), feed = uc.feed;
     const winStart = uc.safe_window_start || String(p.safe_window || '').split(/\s*[-–]\s*/)[0];
     const interval = uc.check_interval_seconds || p.check_interval_seconds;
     const acts = [];
@@ -535,7 +537,7 @@ const RENDER = {
       panel('Состояние', kv([
         ['Состояние', phaseText(u.phase || p.phase), (u.phase || p.phase) === 'FAILED' ? 'crit' : 'ok'],
         ['Версия', (p.version || '—') + ' · № ' + (p.last_sequence || 0)],
-        pend.present ? ['Доступно', (pend.version || '') + (pend.priority ? ' · ' + pend.priority : ''), 'info'] : null,
+        pend.present ? ['Доступно', (pend.version || '') + (pend.priority ? ' · ' + ({ ROUTINE: 'обычное', IMPORTANT: 'важное', CRITICAL: 'критическое' }[pend.priority] || pend.priority) : ''), 'info'] : null,
         ['Последняя проверка', fmtStamp(p.last_health_check) || '—', '', 'logs', ' data-log-go="updater"'],
         ['Откат', u.rollback_available ? 'Доступен' : 'Недоступен', u.rollback_available ? 'info' : '']
       ]) + (conf || (acts.length ? '<div class="panel-actions even">' + acts.join('') + '</div>' : '')) + resultBox('updates')) +
@@ -543,9 +545,9 @@ const RENDER = {
         ctrlRow('Установка обновлений', sel('data-upd="mode"', 'Установка обновлений', [['auto', 'Автоматическая'], ['schedule', 'По расписанию'], ['manual', 'Ручная']], mode), ({ auto: 'сразу после проверки подписи', schedule: 'в ' + (winStart || '03:00') + ', критические исправления - сразу', manual: 'только проверка и уведомление' })[mode]) +
         (mode === 'schedule' ? ctrlRow('Время установки', sel('data-cfg-upd="install_time"', 'Время установки', withCur(HOURS, winStart, ''), winStart), 'обновление ставится при первой проверке после этого времени') : '') +
         ctrlRow('Интервал проверки', sel('data-cfg-upd="check_interval_seconds"', 'Интервал проверки', withCur([[900, '15 минут'], [1800, '30 минут'], [3600, '1 час'], [10800, '3 часа'], [21600, '6 часов'], [43200, '12 часов'], [86400, '24 часа']], interval, ' с'), interval)) +
-        (feed === 'beta' || feed === 'dev' ? ctrlRow('Канал', sel('data-upd-feed', 'Канал обновлений', [['stable', 'Стабильный (рекомендуется)', true], ['beta', 'Бета'], ['dev', 'Девелоперский']], feed), feed === 'dev' ? 'сборки в разработке, возможны ошибки' : 'проверенные сборки; стабильный канал откроется с первым выпуском') : '') +
+        (feed === 'beta' || feed === 'dev' ? ctrlRow('Канал', sel('data-upd-feed', 'Канал обновлений', [['stable', 'Stable (рекомендуется)', true], ['beta', 'Beta'], ['dev', 'Dev']], feed), feed === 'dev' ? 'сборки в разработке, возможны ошибки' : 'проверенные сборки; Stable откроется с первым выпуском') : '') +
         '</dl>' + (feed === 'custom' ? kv([['Канал', 'свой адрес манифеста', '', null, '', 'задан в update.conf на роутере']]) : '') +
-        confirmBox('feed-dev', 'Перейти на девелоперский канал? Это сборки в разработке: в них возможны ошибки. Вернуться на бету можно в любой момент - обновления с беты придут, когда она догонит установленную версию.', 'Перейти', true),
+        confirmBox('feed-dev', 'Перейти на канал Dev? Это сборки в разработке: в них возможны ошибки. Вернуться на бету можно в любой момент - обновления с беты придут, когда она догонит установленную версию.', 'Перейти', true),
       { desc: 'Изменения сохраняются сразу. Подпись и защита от отката версии проверяются на любом канале.' });
   },
 
@@ -553,10 +555,13 @@ const RENDER = {
     const sec = S.security || {}, l = sec.listener || {}, api = sec.api || {}, au = S.auth || {};
     const p = plat(), u = S.update || {}, updMode = !isTrue(p.auto_apply) ? 'ручная' : (cfg().update || {}).apply_window === 'any' ? 'автоматическая' : 'по расписанию';
     return loadError(['security']) +
-      panel('Программа VWARD', kv([
-        ['Версия и обновления', (p.version || '—') + (u.pending && u.pending.present ? ' · доступно ' + (u.pending.version || '') : ' · установка ' + updMode), u.pending && u.pending.present ? 'info' : '', 'updates']
-      ]) + '<dl class="kv">' + ctrlRow('Тема', sel('data-theme-pick', 'Тема оформления', Object.keys(THEMES).map(k => [k, THEMES[k].charAt(0).toUpperCase() + THEMES[k].slice(1)]), theme), theme === 'time' ? 'светлая с 07:00 до 20:00, тёмная ночью' : '') + '</dl>',
-        { desc: 'Версия, обновления и оформление. Тема хранится в этом браузере.' }) +
+      panel('Обновления', kv([
+        ['Версия', p.version || '—', '', 'updates'],
+        u.pending && u.pending.present ? ['Доступно', u.pending.version || 'новая версия', 'info', 'updates'] : null,
+        ['Установка', updMode, '', 'updates']
+      ]), { desc: 'Версия VWARD и как ставятся обновления. Нажмите, чтобы открыть подробности и настройки.' }) +
+      panel('Оформление', '<dl class="kv">' + ctrlRow('Тема', sel('data-theme-pick', 'Тема оформления', Object.keys(THEMES).map(k => [k, THEMES[k].charAt(0).toUpperCase() + THEMES[k].slice(1)]), theme), theme === 'time' ? 'светлая с 07:00 до 20:00, тёмная ночью' : '') + '</dl>',
+        { desc: 'Тема хранится в этом браузере.' }) +
       panel('Доступ к VWARD', '<dl class="kv">' + ctrlRow('Вход по учётной записи Keenetic', sw('data-auth', !!(au.enabled || authForm), 'Вход по учётной записи Keenetic', !S.auth),
           au.enabled ? (au.logged_in ? 'вы вошли как ' + au.login + ' · сессия ' + au.session_hours + ' ч' : 'нужен вход') : 'пароль проверяет роутер, VWARD его не хранит') + '</dl>' +
         (authForm && !au.enabled ? '<form class="inline-form" data-form="auth-enable"><input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Включить вход</button></form><p class="panel-desc">Введите логин и пароль от веб-интерфейса роутера: вход включится, только если роутер их примет.</p>' : '') +
@@ -567,6 +572,7 @@ const RENDER = {
           ['Доступ с других сайтов', api.cors ? 'Разрешён' : 'Запрещён', api.cors ? 'crit' : 'ok']
         ]) + (au.enabled ? (au.logged_in ? '<div class="panel-actions">' + btn('logout', 'undo', 'Выйти') + '</div>' : '') : '<p class="field-warn">Пока вход выключен, VWARD открыт любому устройству в домашней сети.</p>'),
       { desc: 'Сессия действует ' + (au.session_hours || 12) + ' ч. После 5 неверных попыток вход блокируется на 5 минут.' }) +
+      backupPanel() +
       panel('Нижняя панель на телефоне', '<div class="tabbar preview" data-key="Разделы на панели">' + tabsHtml() + '</div><dl class="kv">' + PAGES.map(p => {
         const on = tabIds.includes(p.id), i = tabIds.indexOf(p.id);
         return ctrlRow(p.title, (on ? '<span class="order-btns"><button class="icon-btn" type="button" data-move="' + p.id + ':up" aria-label="Выше"' + (i === 0 ? ' disabled' : '') + '>' + ico('up') + '</button><button class="icon-btn" type="button" data-move="' + p.id + ':down" aria-label="Ниже"' + (i === tabIds.length - 1 ? ' disabled' : '') + '>' + ico('down') + '</button></span>' : '') + sw('data-tabpick="' + p.id + '"', on, 'Показывать «' + p.title + '» на панели'));
@@ -692,16 +698,18 @@ const RENDER = {
         { desc: 'Только https. Новый источник начинает в режиме «Проверка»; размер и формат проверяются при загрузке - список больше 8 МБ или меньше 10 записей не принимается. До 10 своих источников.' });
   },
   'd-jobs'() {
+    const JOB_TEXT = { scan: 'проверка новых доменов', 'sources-update': 'обновление источников', 'rules-rebuild': 'пересборка правил', publish: 'публикация', probe: 'проверка домена' };
+    const JOB_STATE = { DONE: 'выполнено', PASS: 'выполнено', FAILED: 'ошибка', RUNNING: 'идёт', QUEUED: 'в очереди' };
     const j = (S.ads && S.ads.jobs) || {}, cur = j.current || {}, last = j.last || {};
-    return panel('Задания', kv([['Сейчас', cur.state && cur.state !== 'IDLE' ? (cur.type || cur.state) : 'нет активных', cur.state && cur.state !== 'IDLE' ? 'info' : ''], ['В очереди', fmtInt(j.queued || 0)], ['Последнее', (last.type || '—') + (last.state ? ' · ' + last.state : '')]]) +
+    return panel('Задания', kv([['Сейчас', cur.state && cur.state !== 'IDLE' ? (cur.type || cur.state) : 'нет активных', cur.state && cur.state !== 'IDLE' ? 'info' : ''], ['В очереди', fmtInt(j.queued || 0)], ['Последнее', !last.type || last.state === 'NONE' ? 'ещё не было' : (JOB_TEXT[last.type] || last.type) + ' · ' + (JOB_STATE[last.state] || last.state), last.state === 'FAILED' ? 'crit' : '']]) +
       '<div class="panel-actions even">' + btn('ads-job', 'search', 'Проверить новые домены', '', ' data-job="scan"') + btn('ads-job', 'refresh', 'Обновить источники', '', ' data-job="sources-update"') + btn('ads-job', 'check', 'Пересобрать правила', '', ' data-job="rules-rebuild"') + '</div>' +
-      (last.output ? '<pre class="logbox">' + esc(last.output) + '</pre>' : '') + resultBox('ads-job'));
+      resultBox('ads-job'), { desc: 'Задания выполняются по одному, когда роутер не загружен. Подробности - в «Журналах» → «Реклама».' });
   },
   'd-aghfilters'() {
     const g = S.agh, fl = (g && g.filtering && g.filtering.filters) || [];
     const rm = confirm && confirm.id === 'agh-filter-remove' ? confirm.url : '';
     return panel('Фильтры AdGuard Home', !g ? empty('Загрузка…') : !g.ok ? empty(errText(g)) : (fl.length ? '<ul class="rows">' + fl.map(f => '<li class="row"><div class="row-main"><b>' + esc(f.name || f.url) + '</b><small>' + fmtInt(f.rules) + ' ' + plural(f.rules, 'правило', 'правила', 'правил') + (f.updated ? ' · обновлён ' + esc(fmtTime(f.updated)) : '') + '</small>' +
-        (rm === f.url ? '<div class="confirm"><span>Удалить список из AdGuard Home?</span><button class="btn small danger" type="button" data-act="confirm-yes">Удалить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '') + '</div>' +
+        (rm === f.url ? '<div class="confirm danger"><span>Удалить список из AdGuard Home?</span><button class="btn small danger" type="button" data-act="confirm-yes">Удалить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '') + '</div>' +
         '<span class="row-acts">' + sw('data-agh-filter="' + esc(f.url) + '"', f.enabled, 'Список ' + (f.name || f.url)) + '<button class="icon-btn" type="button" data-agh-filter-rm="' + esc(f.url) + '" aria-label="Удалить ' + esc(f.name || f.url) + '" title="Удалить">' + ico('close') + '</button></span></li>').join('') + '</ul>' : empty('Списков нет')) +
       '<form class="inline-form" data-form="agh-filter-add"><input class="input" name="url" placeholder="https://… адрес списка" aria-label="Адрес списка" autocomplete="off"><input class="input" name="name" placeholder="Название" aria-label="Название списка" maxlength="64"><button class="btn" type="submit">Добавить</button></form>' +
       '<div class="panel-actions">' + btn('agh-filters-refresh', 'refresh', 'Обновить списки сейчас') + '</div>' + resultBox('agh'),
@@ -846,12 +854,23 @@ function tunnelTrafficPanel(name) {
 function tunnelManagePanel(name, managed) {
   const others = ((st().wg && st().wg.interfaces) || []).filter(t => t.name !== name);
   const del = managed ? '<p class="panel-desc">Этот туннель используется VWARD для маршрутов, его нельзя удалить. Сначала переключите маршруты на другой туннель.</p>' :
-    (confirm && confirm.id === 'tunnel-delete' ? '<div class="confirm"><span>Удалить ' + esc(name) + '? Его списки и подсети перейдут: ' + esc(confirm.to === 'bypass' ? 'на провайдера' : confirm.to === 'vpn' ? 'в туннель VWARD' : confirm.to) + '. Ключи туннеля удалятся.</span><button class="btn small danger" type="button" data-act="confirm-yes">Удалить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' :
+    (confirm && confirm.id === 'tunnel-delete' ? '<div class="confirm danger"><span>Удалить ' + esc(name) + '? Его списки и подсети перейдут: ' + esc(confirm.to === 'bypass' ? 'на провайдера' : confirm.to === 'vpn' ? 'в туннель VWARD' : confirm.to) + '. Ключи туннеля удалятся.</span><button class="btn small danger" type="button" data-act="confirm-yes">Удалить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' :
       '<dl class="kv">' + ctrlRow('Куда передать списки и подсети', sel('data-tunnel-del-to', 'Куда передать', [['vpn', 'Туннель VWARD'], ['bypass', 'Провайдер']].concat(others.filter(t => t.name !== prof().tunnel_interface).map(t => [t.name, tunLabel(t.name)])), 'vpn')) + '</dl>' +
       '<div class="panel-actions">' + btn('tunnel-delete', 'close', 'Удалить туннель', 'danger', cfgOk() ? '' : ' disabled') + '</div>');
   return [panel('Конфигурация', '<div class="panel-actions even">' + btn('tunnel-replace', 'refresh', 'Заменить конфигурацию', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnel-conf'),
       { desc: 'Новый файл .conf от провайдера VPN записывается в этот же туннель: имя, маршруты и списки не меняются.' }),
     panel('Удаление', del, { desc: 'Перед удалением VWARD переносит списки и подсети туннеля, чтобы ничего не потерялось.' })];
+}
+// Snapshots of VWARD's settings: one a day automatically, or by the button.
+function backupPanel() {
+  const b = S.backups, list = (b && b.backups) || [], kinds = { manual: 'вручную', auto: 'автоматически', prerestore: 'перед восстановлением' };
+  const rows = list.map(x => '<li class="row"><div class="row-main"><b>' + esc(fmtTime(x.created)) + '</b><small>' + esc(kinds[x.kind] || x.kind) + ' · ' + esc(fmtBytes(x.size)) + '</small>' +
+    (confirm && confirm.id === 'backup-restore' && confirm.name === x.name ? '<div class="confirm danger"><span>Восстановить настройки VWARD на это время? Текущие сохранятся отдельной копией.</span><button class="btn small danger" type="button" data-act="confirm-yes">Восстановить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '') + '</div>' +
+    '<span class="row-acts"><a class="icon-btn" href="/cgi-bin/api.cgi?action=backup-download&amp;name=' + encodeURIComponent(x.name) + '" download aria-label="Скачать" title="Скачать">' + ico('save') + '</a>' +
+    '<button class="icon-btn" type="button" data-backup-restore="' + esc(x.name) + '" aria-label="Восстановить" title="Восстановить"' + (cfgOk() ? '' : ' disabled') + '>' + ico('undo') + '</button></span></li>').join('');
+  return panel('Резервные копии', (!b ? empty('Загрузка…') : !b.ok ? empty(errText(b)) : list.length ? '<ul class="rows">' + rows + '</ul>' : empty('Копий пока нет')) +
+    '<div class="panel-actions">' + btn('backup-create', 'archive', 'Создать копию сейчас', '', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('backup'),
+    { desc: 'Настройки VWARD, доменные списки, Smart DNS, туннели и вход AdGuard Home. Копия делается раз в сутки сама, хранятся последние 7. В копии есть ключи туннелей - храните скачанный файл как пароль.' });
 }
 // AdGuard Home's own ad settings, changed through its API (the rest stays in its web UI).
 function aghSettingsPanel(a) {
@@ -949,7 +968,9 @@ function renderNav() {
   $('tabbar').querySelectorAll('[data-tab]').forEach(t => { if (warnPages.has(t.dataset.tab) && t.dataset.tab !== cur) t.insertAdjacentHTML('beforeend', '<span class="dot" aria-label="Есть уведомление"></span>'); });
   document.documentElement.style.setProperty('--tabs', WIDE.matches ? barIds().length : tabIds.length + 1);
   const n = notifications().length;
-  $('bellBtn').innerHTML = ico('bell') + (n ? '<span class="badge">' + n + '</span>' : '');
+  // Good news only (a new version): a calm accent badge instead of the red one.
+  const onlyNews = n && notifications().every(x => x.sev === 'news');
+  $('bellBtn').innerHTML = ico('bell') + (n ? '<span class="badge' + (onlyNews ? ' news' : '') + '">' + n + '</span>' : '');
   $('bellBtn').setAttribute('aria-label', n ? 'Уведомления: ' + n : 'Уведомления');
 }
 // Only the blocks whose markup changed are replaced: the rest keep their scroll, focus and open details.
@@ -1033,7 +1054,7 @@ function showLogin() {
 }
 function openNotes() {
   const n = notifications();
-  openSheet('Уведомления', '<div class="sheet-body">' + (n.length ? n.map(x => '<button class="note-item" type="button" data-go="' + x.to + '"><span class="sev ' + x.sev + '">' + ico('alert') + '</span><span><b>' + esc(x.title) + '</b><small>' + esc(x.text) + '</small></span></button>').join('') : empty('Всё работает штатно')) + '</div>', '', 'bellBtn');
+  openSheet('Уведомления', '<div class="sheet-body">' + (n.length ? n.map(x => '<button class="note-item" type="button" data-go="' + x.to + '"><span class="sev ' + x.sev + '">' + ico(x.icon || 'alert') + '</span><span><b>' + esc(x.title) + '</b><small>' + esc(x.text) + '</small></span></button>').join('') : empty('Всё работает штатно')) + '</div>', '', 'bellBtn');
 }
 const SEARCH_INDEX = [
   ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Свободно'],
@@ -1044,7 +1065,7 @@ const SEARCH_INDEX = [
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
   ['ads', 'AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
   ['updates', 'Установка обновлений'], ['updates', 'Время установки'], ['updates', 'Интервал проверки'], ['updates', 'Канал'],
-  ['settings', 'Адрес VWARD'], ['settings', 'Тема'], ['settings', 'Версия и обновления'], ['d-diag', 'Задания по расписанию'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
+  ['settings', 'Адрес VWARD'], ['settings', 'Тема'], ['settings', 'Версия'], ['settings', 'Установка'], ['d-diag', 'Задания по расписанию'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
 ];
 function openSearch() {
   openSheet('', '<div class="search-box">' + ico('search') + '<input id="searchInput" placeholder="Раздел, параметр или компонент" aria-label="Поиск по VWARD" autocomplete="off"><button class="icon-btn" type="button" data-act="close" aria-label="Закрыть">' + ico('close') + '</button></div><div class="sheet-body" id="searchResults"></div>', 'search', 'searchBtn');
@@ -1070,7 +1091,7 @@ async function runAction(resultId, action, fields, okMsg) {
   actionResult = { id: resultId, text: 'Выполняется…' }; render();
   try {
     const x = await apiPost(action, fields);
-    actionResult = { id: resultId, text: (x.output || x.result || '').trim() || (x.ok ? 'Готово' : 'Ошибка: ' + errText(x)) };
+    actionResult = x.ok ? null : { id: resultId, text: 'Не выполнено: ' + errText(x) };
     toast(x.ok ? okMsg : 'Не выполнено: ' + errText(x));
     return x;
   } catch (e) { actionResult = { id: resultId, text: 'Ошибка: ' + e.message }; toast('Ошибка: ' + e.message); return null; }
@@ -1086,6 +1107,7 @@ const CONFIRMED = {
   'ads-publish': () => runAction('ads', 'ads-control', { op: 'enqueue', job: 'publish', confirm: 'ADS_PUBLISH' }, 'Публикация поставлена в очередь').then(() => load('ads', true)).then(render),
   'https-start': () => runAction('https', 'ads-https-control', { op: 'start', confirm: 'HTTPS_START' }, 'HTTPS-фильтр запущен').then(() => load('https', true)).then(render),
   'https-ca': () => runAction('https', 'ads-https-control', { op: 'ca-init', confirm: 'HTTPS_CA_INIT' }, 'Сертификат создан').then(() => load('https', true)).then(render),
+  'backup-restore': c => apiPost('backup-control', { op: 'restore', name: c.name, confirm: 'BACKUP_RESTORE' }).then(x => { toast(x.ok ? 'Настройки восстановлены' : 'Не восстановлено: ' + errText(x)); return Promise.all(['backups', 'config', 'security', 'status'].map(k => load(k, true))); }, e => toast('Ошибка: ' + e.message)).then(render),
   'agh-protection-off': () => aghSet({ setting: 'protection', value: '0', confirm: 'AGH_PROTECTION_OFF' }, 'Защита AdGuard Home выключена'),
   'agh-filter-remove': c => aghSet({ setting: 'filter-remove', url: c.url, confirm: 'AGH_FILTER_REMOVE' }, 'Список удалён'),
   'agh-off': () => apiPost('agh-auth', { op: 'disconnect', confirm: 'AGH_DISCONNECT' }).then(x => { toast(x.ok ? 'AdGuard Home отключён' : 'Не отключено: ' + errText(x)); return load('ads', true); }).then(render, () => render()),
@@ -1128,24 +1150,58 @@ async function wanOp(op, token, okMsg) {
   await load('status', true); render();
 }
 /* «Автоматически» и «По расписанию» различаются окном установки (apply_window). */
+let updModeShown = null;
 async function updateMode(mode) {
   const p = plat(), on = mode === 'manual' ? '0' : '1';
+  // Shown at once; saved in the background and put back if the router refuses.
+  updModeShown = mode; render();
   if (mode !== 'manual') {
     const x = await apiPost('config', { op: 'update', target: 'apply_window', value: mode === 'auto' ? 'any' : 'window' }).catch(e => ({ ok: false, error: e.message }));
-    if (!x.ok) { toast('Не сохранено: ' + errText(x)); await load('config', true); render(); return; }
+    if (!x.ok) { toast('Не сохранено: ' + errText(x)); updModeShown = null; await load('config', true); render(); return; }
   }
   await runAction('updates', 'settings', { auto_apply: on, auto_critical: isTrue(p.auto_critical) ? '1' : '0', auto_important: isTrue(p.auto_important) ? '1' : '0', auto_routine: isTrue(p.auto_routine) ? '1' : '0' }, 'Настройки обновлений сохранены');
-  await Promise.all([load('status', true), load('config', true)]); render();
+  await Promise.all([load('status', true), load('config', true)]); updModeShown = null; render();
 }
 /* Long operations run in the background on the router: they outlast the 10-second request.
    The Console polls dataAction and shows the output until the run finishes. */
+/* ---------- Окно установки обновления ---------- */
+// Like Keenetic: a window over the page while an update installs or rolls back,
+// by the button or on schedule; it follows the updater's phases.
+const UPD_STEPS = [['CHECKING', 'Проверка обновления'], ['VERIFIED', 'Проверка подписи'], ['BACKING_UP', 'Резервная копия'], ['INSTALLING', 'Установка файлов'], ['VERIFYING', 'Проверка работы'], ['COMMITTED', 'Готово']];
+const UPD_BUSY = ['BACKING_UP', 'INSTALLING', 'VERIFYING', 'COMMIT_PREPARED', 'ROLLING_BACK'];
+let updOverlay = null;
+function updOverlayShow(o) {
+  updOverlay = Object.assign(updOverlay || { op: 'apply', phase: 'CHECKING', from: plat().version || '' }, o);
+  let el = $('updOverlay');
+  if (!el) { el = document.createElement('div'); el.id = 'updOverlay'; document.body.appendChild(el); }
+  const u = updOverlay, rb = u.op === 'rollback' || u.phase === 'ROLLING_BACK';
+  const at = u.phase === 'COMMIT_PREPARED' ? 4 : Math.max(0, UPD_STEPS.findIndex(x => x[0] === u.phase));
+  const pct = u.done ? 100 : Math.round(100 * (at + 0.5) / UPD_STEPS.length);
+  const head = u.done ? (u.ok ? (rb ? 'Откат выполнен' : 'Обновление установлено') : 'Обновление не установлено') : (rb ? 'Откат обновления' : 'Установка обновления');
+  const text = u.done ? (u.ok ? 'VWARD ' + esc(u.version || '') + ' работает. Обновите страницу, чтобы открыть новую версию.' : esc(u.error || 'Установщик вернул прежнюю версию, всё работает как раньше. Подробности - в «Журналах» → «Обновления».'))
+    : 'Не закрывайте страницу. Роутер и интернет продолжают работать, компоненты VWARD перезапустятся на несколько секунд.';
+  el.innerHTML = '<div class="upd-scrim"></div><div class="upd-box" role="dialog" aria-live="polite" aria-label="' + esc(head) + '">' +
+    '<div class="upd-ico' + (u.done ? (u.ok ? ' ok' : ' crit') : '') + '">' + ico(u.done ? (u.ok ? 'check' : 'alert') : 'refresh') + '</div>' +
+    '<h2>' + esc(head) + '</h2>' + (u.version && !u.done ? '<p class="upd-ver">' + esc((u.from ? u.from + ' → ' : '') + u.version) + '</p>' : '') +
+    '<div class="meter upd-meter"><i class="upd-bar"></i></div>' +
+    (rb ? '' : '<ol class="upd-steps">' + UPD_STEPS.map((x, i) => '<li class="' + (u.done && u.ok || i < at ? 'done' : i === at && !u.done ? 'now' : '') + '">' + esc(x[1]) + '</li>').join('') + '</ol>') +
+    '<p class="upd-text">' + text + '</p>' +
+    (u.done ? '<div class="panel-actions">' + (u.ok ? '<button class="btn primary" type="button" data-act="upd-reload">Обновить страницу</button>' : '<button class="btn" type="button" data-act="upd-close">Закрыть</button>') + '</div>' : '') + '</div>';
+  el.querySelector('.upd-bar').style.width = pct + '%';
+}
+function updOverlayClose() { updOverlay = null; const el = $('updOverlay'); if (el) el.remove(); }
+// Updater exit codes that are answers, not failures.
+const UPDATE_RC = { 10: 'Новых обновлений нет', 11: 'Обновление отложено: версия в карантине', 20: 'Обновление найдено, установится в назначенное время', 34: 'Нет связи с сервером обновлений' };
+const UPDATE_RC_OK = { 10: 1, 20: 1 };
 async function runLong(resultId, action, fields, dataAction, okMsg) {
   const show = text => { actionResult = { id: resultId, text: text }; render(); };
+  const installing = dataAction === 'update-data' && fields && fields.op !== 'check';
+  if (installing) updOverlayShow({ manual: true, op: fields.op, phase: 'CHECKING', version: (S.update && S.update.pending && S.update.pending.version) || '', done: false });
   show('Запускаем…');
   let x;
   try { x = await apiPost(action, fields); }
-  catch (e) { toast('Ошибка: ' + e.message); show('Ошибка: ' + e.message); return; }
-  if (!x.ok) { toast('Не выполнено: ' + errText(x)); show('Ошибка: ' + errText(x)); return; }
+  catch (e) { if (installing) updOverlayClose(); toast('Ошибка: ' + e.message); show('Ошибка: ' + e.message); return; }
+  if (!x.ok) { if (installing) updOverlayClose(); toast('Не выполнено: ' + errText(x)); show('Ошибка: ' + errText(x)); return; }
   let run = {};
   const deadline = Date.now() + 15 * 60 * 1000;
   while (Date.now() < deadline) {
@@ -1153,14 +1209,31 @@ async function runLong(resultId, action, fields, dataAction, okMsg) {
     let u;
     try { u = await apiGet(dataAction); } catch (e) { continue; }
     run = u.run || {};
-    show((run.output || '').trim() || (u.phase ? 'Этап: ' + u.phase : 'Выполняется…'));
+    show(u.phase && dataAction === 'update-data' ? 'Выполняется: ' + phaseText(u.phase) : 'Выполняется…');
+    if (installing && u.phase) updOverlayShow({ phase: u.phase });
     if (run.finished) break;
   }
-  toast(!run.finished ? 'Ещё выполняется, проверьте позже' : run.rc === 0 ? okMsg : 'Не выполнено: код ' + run.rc);
+  const done = !run.finished ? 'Ещё выполняется, проверьте позже' : run.rc === 0 ? okMsg : dataAction === 'update-data' && UPDATE_RC[run.rc] ? UPDATE_RC[run.rc] : 'Не выполнено (код ' + run.rc + ') - подробности в «Журналах»';
+  const answered = run.finished && (run.rc === 0 || (dataAction === 'update-data' && UPDATE_RC_OK[run.rc]));
+  if (installing) {
+    if (run.finished && run.rc === 0) { await load('status', true); updOverlayShow({ done: true, ok: true, version: plat().version || updOverlay.version }); return run; }
+    if (run.finished && run.rc === 20) updOverlayClose();
+    else updOverlayShow({ done: true, ok: false, error: run.finished ? (UPDATE_RC[run.rc] || '') : 'Установка ещё идёт. Проверьте раздел «Обновления» через минуту.' });
+  }
+  // An empty okMsg: the caller reports the outcome itself.
+  if (okMsg || !answered) toast(done);
+  actionResult = run.finished && !answered ? { id: resultId, text: done } : null;
+  render();
+  return run;
 }
+const UPDATE_OK = { check: 'Проверка завершена', apply: 'Обновление установлено', retry: 'Обновление установлено', rollback: 'Откат выполнен', recover: 'Обновление восстановлено' };
 function updateOp(op, token) {
-  return runLong('updates', 'update-control', token ? { op: op, confirm: token } : { op: op }, 'update-data', 'Операция обновления выполнена')
-    .then(() => Promise.all([load('update', true), load('status', true)])).then(render);
+  return runLong('updates', 'update-control', token ? { op: op, confirm: token } : { op: op }, 'update-data', op === 'check' ? '' : UPDATE_OK[op] || 'Готово')
+    .then(() => Promise.all([load('update', true), load('status', true)])).then(() => {
+      // After a check, say what it found.
+      if (op === 'check') { const pd = S.update && S.update.pending; toast(pd && pd.present ? 'Найдено обновление ' + (pd.version || '') : 'Новых обновлений нет'); }
+      render();
+    });
 }
 async function adsControl(fields, okMsg, resultId) {
   const x = await runAction(resultId || 'ads', 'ads-control', fields, okMsg);
@@ -1190,7 +1263,7 @@ function copyText(text) {
 }
 
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-go],[data-act],[data-tab],[data-card-toggle],[data-log],[data-move],[data-card-move],[data-view],[data-ads-remove],[data-wifi-bind],[data-log-go],[data-cfg-op],[data-ads-rule],[data-qfilter],[data-ads-srcdel],[data-agh-filter-rm]');
+  const t = e.target.closest('[data-go],[data-act],[data-tab],[data-card-toggle],[data-log],[data-move],[data-card-move],[data-view],[data-ads-remove],[data-wifi-bind],[data-log-go],[data-cfg-op],[data-ads-rule],[data-qfilter],[data-ads-srcdel],[data-agh-filter-rm],[data-backup-restore]');
   if (!t || t.disabled) return;
   if (t.dataset.cardToggle) { const id = t.dataset.cardToggle; hiddenCards = hiddenCards.includes(id) ? hiddenCards.filter(x => x !== id) : hiddenCards.concat(id); store.set('vward-card-hidden', hiddenCards); render(); return; }
   if (t.dataset.cardMove) { const [id, dir] = t.dataset.cardMove.split(':'), i = cardOrder.indexOf(id), j = i + (dir === 'up' ? -1 : 1); if (j >= 0 && j < cardOrder.length) { [cardOrder[i], cardOrder[j]] = [cardOrder[j], cardOrder[i]]; store.set('vward-card-order', cardOrder); render(); } return; }
@@ -1204,6 +1277,7 @@ document.addEventListener('click', e => {
   if (t.dataset.qfilter && !t.dataset.go) { ADSV.filter = t.dataset.qfilter; S.qlog = null; render(); load('qlog', true).then(render); return; }
   if (t.dataset.adsRule) { const d = t.dataset.domain; t.disabled = true; adsControl({ op: t.dataset.adsRule, domain: d, scope: 'exact' }, (t.dataset.adsRule === 'allow' ? d + ' разрешён' : d + ' заблокирован'), 'ads-rule').then(adsViews); return; }
   if (t.dataset.adsSrcdel) { t.disabled = true; adsControl({ op: 'source-delete', source: t.dataset.adsSrcdel }, 'Источник удалён', 'ads-src'); return; }
+  if (t.dataset.backupRestore) { confirm = { id: 'backup-restore', name: t.dataset.backupRestore }; render(); return; }
   if (t.dataset.aghFilterRm) { confirm = { id: 'agh-filter-remove', url: t.dataset.aghFilterRm }; render(); return; }
   if (t.dataset.cfgOp === 'tsubnet') { t.disabled = true; tunnelSubnet(current.slice(2), 'remove', t.dataset.cfgTarget); return; }
   if (t.dataset.cfgOp) { const d = t.dataset.cfgTarget, msg = { 'route-domain': d + ' убран из VPN', 'force-vpn': d + ' убран из списка', adaptive: t.dataset.cfgAction === 'pin' ? d + ' закреплён в моих доменах' : d + ' идёт напрямую' }[t.dataset.cfgOp]; t.disabled = true; cfgSet({ op: t.dataset.cfgOp, action: t.dataset.cfgAction, target: d }, msg, ['route']); return; }
@@ -1228,6 +1302,9 @@ document.addEventListener('click', e => {
     apiGet('tunnel-probe', { name: n }).then(r => r, e => ({ ok: false, error: e.message }))
       .then(r => { S.tprobe[n] = Object.assign(r, { at: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) }); render(); });
   }
+  else if (a === 'backup-create') { actionResult = { id: 'backup', text: 'Создаём копию…' }; render(); apiPost('backup-control', { op: 'create' }).then(x => { toast(x.ok ? 'Копия создана' : 'Не выполнено: ' + errText(x)); actionResult = null; return load('backups', true); }, e => { toast('Ошибка: ' + e.message); actionResult = null; }).then(render); }
+  else if (a === 'upd-reload') location.reload();
+  else if (a === 'upd-close') updOverlayClose();
   else if (a === 'agh-filters-refresh') aghSet({ setting: 'filters-refresh' }, 'Списки обновляются');
   else if (a === 'tunnel-create') tunnelConfSheet('create');
   else if (a === 'tunnel-replace') tunnelConfSheet('replace', current.slice(2));
@@ -1448,6 +1525,10 @@ let timer = null;
 // A hidden tab does not poll the router; it catches up as soon as it is shown.
 function tick() {
   if (document.hidden) return;
+  const ph = plat().phase;
+  if (UPD_BUSY.includes(ph)) updOverlayShow({ op: ph === 'ROLLING_BACK' ? 'rollback' : 'apply', phase: ph, done: false });
+  else if (updOverlay && !updOverlay.done && !updOverlay.manual && ph === 'IDLE' && updOverlay.seenBusy) updOverlayShow({ done: true, ok: true, version: plat().version });
+  if (updOverlay && UPD_BUSY.includes(ph)) updOverlay.seenBusy = true;
   if (theme === 'time') applyTheme();
   if (current !== 'logs') refreshPage();
   load('status', true).then(renderNav);
