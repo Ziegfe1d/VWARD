@@ -314,10 +314,18 @@ keep_newest_files \
 RETENTION_ERRORS=$((RETENTION_ERRORS + 1))
 
 # Daily snapshot of VWARD's settings (the helper skips it when one is younger than a day).
+# The day already handled is kept in RAM, so the other 23 hourly runs start nothing.
 BACKUP_HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
+BACKUP_DAY_FILE=${VWARD_BACKUP_DAY_FILE:-/tmp/vward-backup-day}
 if [ -x "$BACKUP_HELPER" ]; then
-    BACKUP_RESULT="$("$BACKUP_HELPER" backup-create auto 2>/dev/null | tail -n 1)"
-    echo "$(date '+%Y-%m-%d %H:%M:%S')|snapshot=${BACKUP_RESULT:-none}" >> "$HOUSE_LOG"
+    BACKUP_NOW="$(date '+%Y-%m-%d %H:%M:%S')"
+    BACKUP_DAY=""
+    [ ! -r "$BACKUP_DAY_FILE" ] || read -r BACKUP_DAY < "$BACKUP_DAY_FILE" || :
+    if [ "$BACKUP_DAY" != "${BACKUP_NOW%% *}" ]; then
+        BACKUP_RESULT="$("$BACKUP_HELPER" backup-create auto 2>/dev/null | tail -n 1)"
+        echo "$BACKUP_NOW|snapshot=${BACKUP_RESULT:-none}" >> "$HOUSE_LOG"
+        case "$BACKUP_RESULT" in result=*) echo "${BACKUP_NOW%% *}" > "$BACKUP_DAY_FILE" 2>/dev/null || : ;; esac
+    fi
 fi
 
 echo "$(date '+%Y-%m-%d %H:%M:%S')|retention_errors=$RETENTION_ERRORS" \
