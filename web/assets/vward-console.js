@@ -104,7 +104,8 @@ const API_ERRORS = {
   config_save_failed: 'роутер не сохранил конфигурацию', router_config_unavailable: 'не удалось прочитать конфигурацию роутера',
   route_change_busy: 'маршруты сейчас меняет другая задача, повторите', profile_unavailable: 'профиль устройства не определён',
   policy_group_unavailable: 'группа маршрутизации не найдена', list_full: 'список заполнен', backup_failed: 'не удалось сделать резервную копию',
-  write_failed: 'не удалось записать файл', custom_manifest_url: 'адрес манифеста задан вручную - канал меняется в update.conf', invalid_tunnel: 'недопустимое имя туннеля', tunnel_device_missing: 'туннель не поднят на роутере', unknown_tunnel: 'туннель не найден или это не WireGuard',
+  write_failed: 'не удалось записать файл', custom_manifest_url: 'адрес манифеста задан вручную - канал меняется в update.conf', invalid_tunnel: 'недопустимое имя туннеля', tunnel_no_handshake: 'сервер не ответил на рукопожатие за 30 секунд - туннель не изменён', main_tunnel: 'этот туннель используется VWARD для маршрутов', invalid_subnet: 'нужна подсеть IPv4, например 149.154.160.0/20 (не шире /8)', invalid_description: 'название: до 64 символов, без кавычек', no_free_tunnel: 'на роутере нет свободного номера туннеля',
+  conf_empty: 'файл пустой', conf_syntax: 'это не файл WireGuard', conf_peer_count: 'в файле должен быть ровно один [Peer]', conf_private_key: 'неверный PrivateKey', conf_public_key: 'неверный PublicKey', conf_preshared_key: 'неверный PresharedKey', conf_address: 'нет адреса IPv4 в Address', conf_endpoint: 'неверный Endpoint (нужно сервер:порт)', conf_mtu: 'MTU вне 1280-1500', conf_keepalive: 'неверный PersistentKeepalive', conf_allowed_ips: 'неверный AllowedIPs', conf_awg: 'неверные параметры AmneziaWG', tunnel_device_missing: 'туннель не поднят на роутере', unknown_tunnel: 'туннель не найден или это не WireGuard',
   failopen_active: 'включён fail-open: дождитесь восстановления туннеля', policy_sync_busy: 'идёт обновление IP-категорий, повторите позже',
   unsupported_route: 'правило маршрута группы задано нестандартно: переключите туннель в веб-интерфейсе Keenetic',
   profile_verification_failed: 'профиль устройства не принял новый туннель, изменения отменены',
@@ -114,7 +115,7 @@ const API_ERRORS = {
   router_auth_unavailable: 'роутер не ответил на проверку пароля', invalid_login: 'недопустимый логин', auth_required: 'нужно войти', invalid_url: 'неверный адрес: нужен https без пробелов и логина', invalid_format: 'неизвестный формат списка',
   adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен'
 };
-const errText = x => API_ERRORS[x && x.error] || (x && x.error) || ('код ' + (x && x.rc));
+const errText = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.error || '') ? 'роутер не принял настройку ' + x.error.slice(14).replace(/_/g, ' ') + ' - туннель не изменён' : '') || (x && x.error) || ('код ' + (x && x.rc));
 
 /* ---------- Данные ---------- */
 const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
@@ -391,7 +392,9 @@ const RENDER = {
     const wg = st().wg || {}, list = wg.interfaces || [], managed = prof().tunnel_interface || '';
     const row = t => { const up = isTrue(t.connected); return '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.name) + (t.description ? ' · ' + esc(t.description) : '') + '</b><small>' + (t.name === managed ? '<span class="st ok">для маршрутов</span> · ' : '') + esc(t.handshake != null ? 'рукопожатие ' + agoText(num(t.handshake)) : (t.state || '')) + '</small></div><span class="pill ' + (up ? 'ok' : 'warn') + '">' + (up ? 'В сети' : 'Не в сети') + '</span>' + ico('chevron', 'chev') + '</li>'; };
     return loadError(['status']) +
-      panel('Туннели', list.length ? '<ul class="rows">' + list.map(row).join('') + '</ul>' : empty('Туннели WireGuard не найдены'), { desc: 'Туннели WireGuard найдены автоматически. Нажмите на туннель, чтобы открыть подробности.' }) +
+      panel('Туннели', (list.length ? '<ul class="rows">' + list.map(row).join('') + '</ul>' : empty('Туннели WireGuard не найдены')) +
+        '<div class="panel-actions">' + btn('tunnel-create', 'route', 'Создать туннель из файла .conf', '', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnels'),
+        { desc: 'Туннели WireGuard найдены автоматически. Нажмите на туннель, чтобы открыть подробности, заменить его конфигурацию или направить через него списки и подсети.' }) +
       panel('Защита VPN', '<dl class="kv">' + ctrlRow('Автоматическая защита', sw('data-cfg-tg', !S.config || cfg().tunnel_guard.enabled !== false, 'Автоматическая защита VPN', !cfgOk())) + '</dl>' +
         confirmBox('tg-off', 'Выключить защиту VPN? Если туннель упадёт, сайты из списков VPN станут недоступны, пока он не восстановится.', 'Выключить', true) + kv([
         ['fail-open', isTrue(wg.failopen_active) ? 'Включён' : 'Не активен', isTrue(wg.failopen_active) ? 'warn' : ''],
@@ -621,14 +624,14 @@ const RENDER = {
   },
   lists() {
     if (!S.lists) return loadError(['lists']) + panel('Доменные списки', empty('Загрузка…'));
-    const L = S.lists, items = L.lists || [], ok = cfgOk();
-    const path = l => viaIs(l, 'vpn') ? 'через VPN' : viaIs(l, 'bypass') ? 'в обход VPN' + (l.doh.length ? ', Smart DNS: ' + l.doh.join(', ') : '') : viaIs(l, 'none') ? 'без маршрута' : 'через ' + l.route;
+    const L = S.lists, items = L.lists || [], ok = cfgOk(), tuns = (st().wg && st().wg.interfaces) || [];
+    const path = l => tuns.length > 1 && l.route && tuns.some(t => t.name === l.route) ? 'через ' + tunLabel(l.route) : viaIs(l, 'vpn') ? 'через VPN' : viaIs(l, 'bypass') ? 'в обход VPN' + (l.doh.length ? ', Smart DNS: ' + l.doh.join(', ') : '') : viaIs(l, 'none') ? 'без маршрута' : 'через ' + l.route;
     const row = l => {
       const can = ok && (viaIs(l, 'vpn') || viaIs(l, 'bypass')), title = l.description || l.name;
       return '<li class="row"><div class="row-main"><b>' + esc(title) + '</b><small>' + fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + ' · ' + esc(path(l)) + '</small>' +
         (l.smartdns_conflict ? '<small class="field-warn">В списке есть домены Smart DNS: их общий адрес уйдёт в VPN, и Smart DNS перестанет работать для всех сервисов. Переведите список в обход VPN или уберите эти домены.</small>' : '') +
         (l.auto && viaIs(l, 'vpn') ? '<small class="field-warn">Переведён на VPN автоматически ' + esc(l.auto.at) + ': не открылся ' + esc(l.auto.host) + '</small>' : '') + '</div>' +
-        '<span class="row-acts"><label class="row-switch">В обход VPN' + sw('data-list-bypass="' + esc(l.name) + '"', viaIs(l, 'bypass'), 'В обход VPN: ' + title, !can) + '</label>' +
+        '<span class="row-acts">' + (tuns.length > 1 ? listViaSel(l, tuns, ok) : '<label class="row-switch">В обход VPN' + sw('data-list-bypass="' + esc(l.name) + '"', viaIs(l, 'bypass'), 'В обход VPN: ' + title, !can) + '</label>') +
         '<label class="row-switch">Следить' + sw('data-list-watch="' + esc(l.name) + '"', l.watch, 'Следить: ' + title, !ok) + '</label></span></li>';
     };
     return cfgNote() + panel('Доменные списки', items.length ? '<ul class="rows">' + items.map(row).join('') + '</ul>' : empty('В Keenetic нет доменных списков'),
@@ -756,9 +759,81 @@ function tunnelPage(name) {
     ['Время работы', t.uptime != null ? fmtUptime(t.uptime) : '—'],
     ['Используется для маршрутов', managed ? 'Да' : 'Нет', managed ? 'info' : '']
   ]) + use + cfgNote(), { desc: managed ? 'Через этот туннель идут все домены и сети из «Маршрутизации».' : 'Переключение переносит маршруты групп в Keenetic, сохраняет выбор в device.conf и отменяется целиком при любой ошибке.' }) +
-    tunnelProbePanel(name);
+    tunnelManagePanel(name, managed)[0] + tunnelProbePanel(name) + tunnelTrafficPanel(name) + tunnelManagePanel(name, managed)[1];
 }
 // Filled only by «Проверить сейчас»: the router does not do this in the background.
+const tunLabel = n => { const t = ((st().wg && st().wg.interfaces) || []).find(x => x.name === n); return n + (t && t.description ? ' · ' + t.description : ''); };
+// With several tunnels a list chooses its way: the provider or any tunnel.
+function listViaSel(l, tuns, ok) {
+  const cur = viaIs(l, 'bypass') ? 'bypass' : tuns.some(t => t.name === l.route) ? l.route : '';
+  const opts = [['bypass', 'Провайдер (в обход VPN)']].concat(tuns.map(t => [t.name, tunLabel(t.name)]));
+  if (!cur) opts.unshift(['', l.route ? 'через ' + l.route : 'без маршрута', true]);
+  return sel('data-list-via="' + esc(l.name) + '"' + (ok && (cur || !l.route) ? '' : ' disabled'), 'Куда идёт «' + (l.description || l.name) + '»', opts, cur);
+}
+document.addEventListener('input', e => { const f = e.target.closest && e.target.closest('[data-form="tunnel-conf"]'); if (f && e.target.name === 'conf' && f.dataset.checked === '1') { f.dataset.checked = ''; $('tcPreview').innerHTML = ''; f.querySelector('[type=submit]').textContent = 'Проверить файл'; } });
+async function tunnelSubnet(name, op, subnet) {
+  let x;
+  try { x = await apiPost('tunnel-conf', { op: 'subnet-' + op, name: name, subnet: subnet }); }
+  catch (e) { toast('Ошибка: ' + e.message); return; }
+  toast(x.ok ? (x.result === 'unchanged' ? 'Уже так' : op === 'add' ? subnet + ' идёт через ' + name : subnet + ' убрана из ' + name) : 'Не сохранено: ' + errText(x));
+  await load('lists', true); render();
+}
+// Long tunnel jobs report "info.key=value" lines and a last "result=" or "error=" line.
+function tunnelJobText(out) {
+  const lines = String(out || '').trim().split('\n'), last = lines[lines.length - 1] || '';
+  const info = {}; lines.forEach(l => { const m = /^info\.([a-z]+)=(.*)$/.exec(l); if (m) info[m[1]] = m[2]; });
+  if (/^result=/.test(last)) return 'Готово' + (info.name ? ': создан ' + info.name : '') + (info.endpoint ? ' · сервер ' + info.endpoint : '') + (info.address ? ' · адрес ' + info.address : '');
+  if (/^error=/.test(last)) return 'Не выполнено: ' + errText({ error: last.slice(6) });
+  return 'Проверяем новый сервер… до минуты';
+}
+async function tunnelJob(resultId, fields) {
+  const show = text => { actionResult = { id: resultId, text: text }; render(); };
+  show('Запускаем…');
+  let x;
+  try { x = await apiPost('tunnel-conf', fields); } catch (e) { show('Ошибка: ' + e.message); return; }
+  if (!x.ok) { show('Не выполнено: ' + errText(x)); return; }
+  const deadline = Date.now() + 5 * 60 * 1000;
+  let run = {};
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 3000));
+    try { run = (await apiGet('control-data')).run || {}; } catch (e) { continue; }
+    show(tunnelJobText(run.output));
+    if (run.finished) break;
+  }
+  toast(run.finished && run.rc === 0 ? 'Готово' : run.finished ? 'Не выполнено' : 'Ещё выполняется, проверьте позже');
+  await Promise.all([load('status', true), load('lists', true)]); render();
+}
+function tunnelConfSheet(mode, name) {
+  openSheet(mode === 'create' ? 'Новый туннель' : 'Заменить конфигурацию · ' + name,
+    '<div class="sheet-body"><form class="stack-form" data-form="tunnel-conf" data-mode="' + mode + '" data-name="' + esc(name || '') + '">' +
+    (mode === 'create' ? '<input class="input" name="description" maxlength="64" placeholder="Название, например Германия-2" aria-label="Название туннеля">' : '') +
+    '<label class="file-pick">' + ico('save') + '<span>Выбрать файл .conf</span><input type="file" name="file" accept=".conf,text/plain" data-conf-file></label>' +
+    '<textarea class="input mono" name="conf" rows="7" spellcheck="false" autocomplete="off" aria-label="Текст конфигурации" placeholder="или вставьте текст: [Interface] PrivateKey = …"></textarea>' +
+    '<div id="tcPreview"></div>' +
+    '<p class="panel-desc">' + (mode === 'create' ? 'VWARD создаст туннель и дождётся ответа сервера. Если сервер не ответит, туннель удалится.' :
+      'Сначала конфигурация проверяется на временном туннеле. Только если сервер ответил, она записывается в ' + esc(name) + ': маршруты и списки остаются на месте.') + ' Ключи не показываются и не пишутся в журналы.</p>' +
+    '<button class="btn primary" type="submit">Проверить файл</button></form></div>');
+}
+function tunnelTrafficPanel(name) {
+  const L = S.lists || {}, lists = (L.lists || []).filter(l => l.route === name), nets = (L.subnets || {})[name] || [];
+  const listRows = lists.map(l => '<li class="row link" role="button" tabindex="0" data-go="lists"><div class="row-main"><b>' + esc(l.description || l.name) + '</b><small>' + fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + '</small></div>' + ico('chevron', 'chev') + '</li>').join('');
+  const netRows = nets.map(n => '<li class="row"><div class="row-main"><b class="mono">' + esc(n) + '</b></div><span class="row-acts">' + rowBtn('tsubnet', 'remove', n, 'close', 'Убрать ' + n + ' из туннеля') + '</span></li>').join('');
+  return panel('Что идёт через туннель', (!S.lists ? empty('Загрузка…') :
+      '<p class="panel-desc">Доменные списки: ' + (lists.length ? '' : 'нет. Направить список сюда можно в разделе «Доменные списки».') + '</p>' + (lists.length ? '<ul class="rows">' + listRows + '</ul>' : '') +
+      '<p class="panel-desc">Подсети: ' + (nets.length ? fmtInt(nets.length) : 'нет') + '</p>' + (nets.length ? '<ul class="rows">' + netRows + '</ul>' : '') +
+      '<form class="inline-form" data-form="tunnel-subnet" data-name="' + esc(name) + '"><input class="input mono" name="subnet" placeholder="149.154.160.0/20" aria-label="Подсеть" autocomplete="off"><button class="btn" type="submit"' + (cfgOk() ? '' : ' disabled') + '>Добавить подсеть</button></form>') + resultBox('tunnel-traffic'),
+    { desc: 'Списки доменов и подсети IPv4, которые Keenetic отправляет через этот туннель.' });
+}
+function tunnelManagePanel(name, managed) {
+  const others = ((st().wg && st().wg.interfaces) || []).filter(t => t.name !== name);
+  const del = managed ? '<p class="panel-desc">Этот туннель используется VWARD для маршрутов, его нельзя удалить. Сначала переключите маршруты на другой туннель.</p>' :
+    (confirm && confirm.id === 'tunnel-delete' ? '<div class="confirm"><span>Удалить ' + esc(name) + '? Его списки и подсети перейдут: ' + esc(confirm.to === 'bypass' ? 'на провайдера' : confirm.to === 'vpn' ? 'в туннель VWARD' : confirm.to) + '. Ключи туннеля удалятся.</span><button class="btn small danger" type="button" data-act="confirm-yes">Удалить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' :
+      '<dl class="kv">' + ctrlRow('Куда передать списки и подсети', sel('data-tunnel-del-to', 'Куда передать', [['vpn', 'Туннель VWARD'], ['bypass', 'Провайдер']].concat(others.filter(t => t.name !== prof().tunnel_interface).map(t => [t.name, tunLabel(t.name)])), 'vpn')) + '</dl>' +
+      '<div class="panel-actions">' + btn('tunnel-delete', 'close', 'Удалить туннель', 'danger', cfgOk() ? '' : ' disabled') + '</div>');
+  return [panel('Конфигурация', '<div class="panel-actions even">' + btn('tunnel-replace', 'refresh', 'Заменить конфигурацию', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnel-conf'),
+      { desc: 'Новый файл .conf от провайдера VPN записывается в этот же туннель: имя, маршруты и списки не меняются.' }),
+    panel('Удаление', del, { desc: 'Перед удалением VWARD переносит списки и подсети туннеля, чтобы ничего не потерялось.' })];
+}
 // AdGuard Home asks for a login: VWARD keeps it (root-only file) after AdGuard accepts it.
 function aghConnectPanel(a) {
   if (!S.ads) return '';
@@ -872,7 +947,7 @@ function go(id, key, mode) {
 async function refreshPage() {
   const id = current, keys = DATA_FOR(id).slice();
   if (id === 'logs') { loadLog(logTab); return; }
-  if (id.startsWith('t-')) keys.push('status');
+  if (id.startsWith('t-')) keys.push('status', 'lists');
   if (id.startsWith('w-')) keys.push('wifi');
   if (id === 'd-https' || id === 'ads') keys.push('https');
   if (id === 'd-querylog') keys.push('qlog');
@@ -970,6 +1045,7 @@ const CONFIRMED = {
   'feed-dev': () => cfgSet({ op: 'update-feed', target: 'dev', confirm: 'UPDATE_FEED_DEV' }, 'Канал: Dev'),
   'comp-off': () => { const id = current.slice(2); return cfgSet({ op: 'component', target: id, value: '0', confirm: 'COMPONENT_DISABLE' }, '«' + comp(id).name + '» выключен', ['status']); },
   'comp-on': () => { const id = current.slice(2); return cfgSet({ op: 'component', target: id, value: '1' }, '«' + comp(id).name + '» включён', ['status']); },
+  'tunnel-delete': c => { const name = current.slice(2); return apiPost('tunnel-conf', { op: 'delete', name: name, target: c.to, confirm: 'TUNNEL_DELETE' }).then(x => { toast(x.ok ? name + ' удалён' : 'Не удалено: ' + errText(x)); return Promise.all([load('status', true), load('lists', true)]).then(() => { if (x.ok) go('vpn', null, 'replace'); else render(); }); }, e => { toast('Ошибка: ' + e.message); render(); }); },
   'tunnel-use': () => { const name = current.slice(2); toast('Переключаем маршруты на ' + name + '…'); return cfgSet({ op: 'tunnel', target: name, confirm: 'TUNNEL_SWITCH' }, 'Маршруты VWARD идут через ' + name, ['status', 'security', 'route']); },
   'wg-off': () => cfgSet({ op: 'wan-guard', value: '0', confirm: 'WAN_GUARD_DISABLE' }, 'Защита интернета выключена'),
   'wan-renew': () => wanOp('wan-renew', 'WAN_RENEW', 'Адрес запрошен заново'),
@@ -1079,6 +1155,7 @@ document.addEventListener('click', e => {
   if (t.dataset.qfilter && !t.dataset.go) { ADSV.filter = t.dataset.qfilter; S.qlog = null; render(); load('qlog', true).then(render); return; }
   if (t.dataset.adsRule) { const d = t.dataset.domain; t.disabled = true; adsControl({ op: t.dataset.adsRule, domain: d, scope: 'exact' }, (t.dataset.adsRule === 'allow' ? d + ' разрешён' : d + ' заблокирован'), 'ads-rule').then(adsViews); return; }
   if (t.dataset.adsSrcdel) { t.disabled = true; adsControl({ op: 'source-delete', source: t.dataset.adsSrcdel }, 'Источник удалён', 'ads-src'); return; }
+  if (t.dataset.cfgOp === 'tsubnet') { t.disabled = true; tunnelSubnet(current.slice(2), 'remove', t.dataset.cfgTarget); return; }
   if (t.dataset.cfgOp) { const d = t.dataset.cfgTarget, msg = { 'route-domain': d + ' убран из VPN', 'force-vpn': d + ' убран из списка', adaptive: t.dataset.cfgAction === 'pin' ? d + ' закреплён в моих доменах' : d + ' идёт напрямую' }[t.dataset.cfgOp]; t.disabled = true; cfgSet({ op: t.dataset.cfgOp, action: t.dataset.cfgAction, target: d }, msg, ['route']); return; }
   if (t.dataset.wifiBind) { confirm = { id: 'wifi-bind', op: t.dataset.wifiBind }; render(); return; }
   if (t.dataset.tab) {
@@ -1101,6 +1178,9 @@ document.addEventListener('click', e => {
     apiGet('tunnel-probe', { name: n }).then(r => r, e => ({ ok: false, error: e.message }))
       .then(r => { S.tprobe[n] = Object.assign(r, { at: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) }); render(); });
   }
+  else if (a === 'tunnel-create') tunnelConfSheet('create');
+  else if (a === 'tunnel-replace') tunnelConfSheet('replace', current.slice(2));
+  else if (a === 'tunnel-delete') { const s2 = document.querySelector('[data-tunnel-del-to]'); confirm = { id: 'tunnel-delete', to: s2 ? s2.value : 'vpn' }; render(); }
   else if (a === 'tunnel-health') runAction('tunnel-health', 'control', { op: 'tunnel-health' }, 'Проверка туннеля выполнена').then(() => load('status', true)).then(render);
   else if (a === 'logout') apiPost('auth', { op: 'logout' }).then(() => { toast('Вы вышли'); S.auth = null; showLogin(); });
   else if (a === 'housekeeping') runLong('storage', 'control', { op: 'housekeeping' }, 'control-data', 'Журналы проверены').then(() => load('status', true)).then(render);
@@ -1167,6 +1247,16 @@ document.addEventListener('change', e => {
   if (t.dataset.cfgRt) { cfgSet({ op: t.dataset.cfgRt, value: t.checked ? '1' : '0' }, 'Сохранено'); return; }
   if (t.dataset.ipcat) { cfgSet({ op: 'ip-category', target: t.dataset.ipcat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена - применится при следующей сверке'); return; }
   if (t.dataset.cfgCat) { cfgSet({ op: 'domain-category', target: t.dataset.cfgCat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена'); return; }
+  if (t.hasAttribute('data-conf-file')) {
+    const file = t.files && t.files[0], form = t.closest('form');
+    if (!file) return;
+    if (file.size > 16384) { toast('Файл больше 16 КБ - это не .conf'); return; }
+    const r = new FileReader();
+    r.onload = () => { form.querySelector('[name=conf]').value = String(r.result || ''); form.dataset.checked = ''; $('tcPreview').innerHTML = ''; form.querySelector('[type=submit]').textContent = 'Проверить файл'; };
+    r.readAsText(file);
+    return;
+  }
+  if (t.dataset.listVia) { const v = t.value; t.disabled = true; cfgSet({ op: 'domain-list', target: t.dataset.listVia, value: v }, v === 'bypass' ? 'Список идёт через провайдера' : 'Список идёт через ' + v, ['lists']); return; }
   if (t.hasAttribute('data-theme-pick')) { setTheme(t.value); return; }
   if (t.hasAttribute('data-smartdns-guard')) { cfgSet({ op: 'smartdns-guard', value: t.checked ? '1' : '0' }, t.checked ? 'Защита Smart DNS включена' : 'Защита Smart DNS выключена', ['lists']); return; }
   if (t.dataset.cfgWanp) { cfgSet({ op: 'wan-param', target: t.dataset.cfgWanp, value: t.value }, 'Сохранено', ['config']); return; }
@@ -1203,6 +1293,30 @@ document.addEventListener('submit', async e => {
     if (!DOMAIN.test(v)) { toast('Введите домен, например example.com'); return; }
     const x = await cfgSet({ op: e.target.dataset.op, action: 'add', target: v }, v + ' добавлен', ['route']);
     if (x && x.ok) { const again = document.querySelector('form[data-form="cfg-add"] input'); if (again) again.value = ''; }
+  }
+  if (f === 'tunnel-subnet') {
+    const v = e.target.querySelector('[name=subnet]').value.trim();
+    if (!/^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(v)) { toast('Введите подсеть, например 149.154.160.0/20'); return; }
+    await tunnelSubnet(e.target.dataset.name, 'add', v); return;
+  }
+  if (f === 'tunnel-conf') {
+    const form = e.target, mode = form.dataset.mode, name = form.dataset.name, text = form.querySelector('[name=conf]').value;
+    const descEl = form.querySelector('[name=description]'), desc = descEl ? descEl.value.trim() : '';
+    if (!/\[Interface\]/i.test(text) || !/\[Peer\]/i.test(text)) { toast('Выберите файл .conf или вставьте его текст'); return; }
+    if (mode === 'create' && !desc) { toast('Введите название туннеля'); return; }
+    if (form.dataset.checked !== '1') {
+      let x;
+      try { x = await apiPost('tunnel-conf', { op: 'check', conf: text }); } catch (err) { toast('Ошибка: ' + err.message); return; }
+      if (!x.ok) { toast('Файл не подходит: ' + errText(x)); return; }
+      $('tcPreview').innerHTML = kv([['Сервер', x.endpoint || '—'], ['Адрес в туннеле', x.address || '—'], ['MTU', x.mtu || 'как на роутере'],
+        ['Обфускация AmneziaWG', x.awg === '1' ? 'Включена' : 'Выключена'], ['Keepalive', x.keepalive ? x.keepalive + ' с' : '25 с'], ['Разрешённые адреса', x.allowed || '—']]);
+      form.dataset.checked = '1';
+      form.querySelector('[type=submit]').textContent = mode === 'create' ? 'Создать туннель' : 'Заменить конфигурацию ' + name;
+      return;
+    }
+    closeLayer();
+    await tunnelJob(mode === 'create' ? 'tunnels' : 'tunnel-conf', mode === 'create' ? { op: 'create', conf: text, description: desc } : { op: 'replace', name: name, conf: text, confirm: 'TUNNEL_REPLACE' });
+    return;
   }
   if (f === 'agh-connect') {
     const login = e.target.querySelector('[name=login]').value.trim(), password = e.target.querySelector('[name=password]').value;

@@ -197,6 +197,10 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .field label{color:var(--muted);font-size:var(--fs-sm)}
 .input{width:100%;min-height:42px;padding:8px 12px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--surface);color:var(--text)}
 .inline-form{display:flex;flex-wrap:wrap;gap:8px;padding:4px 16px 16px}
+.stack-form{display:flex;flex-direction:column;gap:10px;padding:4px 16px 16px}
+.stack-form textarea{min-height:140px;resize:vertical;font-size:12px}
+.file-pick{display:flex;align-items:center;gap:8px;min-height:42px;padding:8px 12px;border:1px dashed var(--line-strong);border-radius:var(--r-md);color:var(--accent);font-weight:600;cursor:pointer}
+.file-pick input{position:absolute;width:1px;height:1px;opacity:0}
 .inline-form .input{flex:1 1 220px;width:auto}
 .switch{position:relative;display:inline-block;width:42px;height:24px;flex:none}
 .switch input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}

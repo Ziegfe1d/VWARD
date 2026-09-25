@@ -53,6 +53,8 @@ JOURNAL=
 DEVCONF_ORIG=
 DEVCONF_EXISTED=
 TXN=0
+# An uploaded .conf holds the private key: it goes away with the helper.
+CONF_FILE=
 
 die() { printf 'error=%s\n' "$1"; exit "${2:-1}"; }
 
@@ -62,6 +64,8 @@ cleanup() {
         tunnel_undo || { audit "tunnel rollback incomplete"; printf 'error=rollback_incomplete\n'; }
     fi
     [ -z "$TMPFILE" ] || rm -f "$TMPFILE"
+    [ -z "$CONF_FILE" ] || rm -f "$CONF_FILE" "$CONF_FILE.raw"
+    [ -z "$TMPFILE" ] || rm -f "$TMPFILE.raw"
     [ -z "$RUNCFG" ] || rm -f "$RUNCFG"
     [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.doh"
     [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
@@ -611,11 +615,16 @@ wan_route_target() {
 }
 
 op_domain_list() {
+    # domain-list GROUP vpn|bypass|TUNNEL: vpn is the VWARD tunnel.
     valid_group "$1" || die invalid_group 64
-    case "$2" in vpn|bypass) ;; *) die invalid_value 64 ;; esac
+    case "$2" in ''|*[!A-Za-z0-9_.-]*) die invalid_value 64 ;; esac
     load_profile_base
     G=$1 TUN=$VWARD_TUNNEL_INTERFACE
     vward_valid_ndm_name "$TUN" || die tunnel_unavailable
+    case "$2" in
+        vpn|bypass) ;;
+        *) is_tunnel "$2" || die unknown_tunnel 64; TUN=$2 ;;
+    esac
     change_lock
     JOURNAL=$(mktemp /tmp/vward-console-lists.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     TXN=1
@@ -627,8 +636,22 @@ op_domain_list() {
     [ -n "$cur" ] || cur_o=-
     saved="$LISTS_STATE/$G"
 
-    if [ "$2" = vpn ]; then
-        [ "$cur_t" != "$TUN" ] || { TXN=0; done_ok "domain-list $G vpn" unchanged; }
+    if [ "$2" != bypass ] && [ "$cur_t" != "$TUN" ] && [ -n "$cur_t" ] && is_tunnel "$cur_t"; then
+        # From one tunnel to another: only the route moves, Smart DNS lines are already out.
+        ndm "dns-proxy route object-group $G $TUN auto" || die router_rejected
+        echo "dns-proxy no route object-group $G $TUN" >> "$JOURNAL"
+        ndm "dns-proxy no route object-group $G $cur_t" || die router_rejected
+        o=; [ "$cur_o" = - ] || o=" $cur_o"
+        echo "dns-proxy route object-group $G $cur_t$o" >> "$JOURNAL"
+        snapshot
+        route_present "$G" "$TUN" && ! route_present "$G" "$cur_t" || die verification_failed
+        save_router || die config_save_failed
+        TXN=0
+        done_ok "domain-list $G $2 route=$cur_t->$TUN" changed
+    fi
+
+    if [ "$2" != bypass ]; then
+        [ "$cur_t" != "$TUN" ] || { TXN=0; done_ok "domain-list $G $2" unchanged; }
         group_doh_lines "$G" > "$JOURNAL.doh"
         # 1. The tunnel route first, so the list never loses its route.
         ndm "dns-proxy route object-group $G $TUN auto" || die router_rejected
@@ -657,7 +680,8 @@ op_domain_list() {
     else
         rt=$(sed -n 's/^route=//p' "$saved" 2>/dev/null)
         if [ -n "$rt" ]; then new_t=${rt%%"$tab"*} new_o=${rt#*"$tab"}; else new_t=$(wan_route_target) new_o=auto; fi
-        [ "$cur_t" = "$TUN" ] || { TXN=0; done_ok "domain-list $G bypass" unchanged; }
+        { [ -n "$cur_t" ] && is_tunnel "$cur_t"; } || { TXN=0; done_ok "domain-list $G bypass" unchanged; }
+        TUN=$cur_t
         sed -n 's/^doh=//p' "$saved" 2>/dev/null > "$JOURNAL.doh"
         if [ "$new_t" != - ]; then
             o=; [ "$new_o" = - ] || o=" $new_o"
@@ -683,7 +707,7 @@ op_domain_list() {
 
     save_router || die config_save_failed
     TXN=0
-    [ "$2" = vpn ] || rm -f "$saved"
+    [ "$2" != bypass ] || rm -f "$saved"
     done_ok "domain-list $G $2 $detail" changed
 }
 
@@ -694,6 +718,371 @@ op_domain_list_watch() {
     # The route engine rebuilds its watch map on the next group refresh.
     mkdir -p "$ROUTE_STATE" 2>/dev/null && echo 0 > "$REFRESH_TS" 2>/dev/null
     done_ok "domain-list-watch $1 $2" changed
+}
+
+# ---------- Tunnels: replace a configuration, create, delete, subnets ----------
+#
+# A WireGuard/AmneziaWG .conf is parsed into a plan of Keenetic commands.  A
+# new configuration is always proven first on a temporary interface: only
+# after its server answers a handshake is it written into the target tunnel,
+# so a bad file never touches a working tunnel.  Keenetic hides the private
+# key in its configuration, so VWARD keeps each applied .conf (root-only, the
+# last three) to be able to go back.  The running configuration is saved only
+# after the tunnel answers; until then a router reboot also restores it.
+
+TUNNEL_STORE="$ETC/tunnels"
+TEST_ADDRESS="192.0.2.254 255.255.255.255"
+HANDSHAKE_WAIT=${VWARD_TUNNEL_HANDSHAKE_WAIT:-30}
+
+wg_key() { printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$'; }
+
+prefix_mask() {
+    awk -v p="$1" 'BEGIN { if (p !~ /^[0-9]+$/ || p > 32) exit 1
+        for (i = 0; i < 4; i++) { b = (p >= 8) ? 8 : (p > 0 ? p : 0); p -= b; m = m (i ? "." : "") (256 - 2 ^ (8 - b)) % 256 }
+        print m }'
+}
+
+conf_get() { sed -n "s/^$1=//p" "$2" | head -n 1; }
+
+conf_parse() {
+    # conf_parse FILE PLAN: validated plan lines (key=value) or error=conf_<what>.
+    [ -s "$1" ] && [ "$(wc -c < "$1")" -le 16384 ] || die conf_empty 64
+    cp_raw="$2.raw"
+    awk '
+        { sub(/\r$/, ""); line = $0; sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line) }
+        line == "" || substr(line, 1, 1) == "#" || substr(line, 1, 1) == ";" { next }
+        line ~ /^\[/ { sec = tolower(line); if (sec == "[peer]") peers++; next }
+        { i = index(line, "="); if (!i) { print "error=conf_syntax"; exit }
+          k = tolower(substr(line, 1, i - 1)); v = substr(line, i + 1)
+          sub(/[ \t]+$/, "", k); sub(/^[ \t]+/, "", v)
+          if (sec == "[interface]") print "if." k "=" v
+          else if (sec == "[peer]" && peers == 1) print "peer." k "=" v
+          else if (sec != "[peer]") { print "error=conf_syntax"; exit } }
+        END { if (peers != 1) print "error=conf_peer_count" }' "$1" > "$cp_raw" || die conf_syntax 64
+    err=$(sed -n 's/^error=//p' "$cp_raw" | head -n 1)
+    [ -z "$err" ] || { rm -f "$cp_raw"; die "$err" 64; }
+
+    priv=$(conf_get if.privatekey "$cp_raw"); wg_key "$priv" || die conf_private_key 64
+    pub=$(conf_get peer.publickey "$cp_raw"); wg_key "$pub" || die conf_public_key 64
+    psk=$(conf_get peer.presharedkey "$cp_raw"); [ -z "$psk" ] || wg_key "$psk" || die conf_preshared_key 64
+
+    addr=$(conf_get if.address "$cp_raw" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$' | head -n 1)
+    [ -n "$addr" ] || die conf_address 64
+    ip=${addr%/*}; bits=32; [ "$ip" = "$addr" ] || bits=${addr#*/}
+    printf '%s\n' "$ip" | awk -F. '{for (i = 1; i <= 4; i++) if ($i > 255) exit 1}' || die conf_address 64
+    mask=$(prefix_mask "$bits") || die conf_address 64
+
+    ep=$(conf_get peer.endpoint "$cp_raw")
+    host=${ep%:*} port=${ep##*:}
+    case "$host" in ''|*[!A-Za-z0-9.-]*) die conf_endpoint 64 ;; esac
+    case "$port" in ''|*[!0-9]*) die conf_endpoint 64 ;; esac
+    [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || die conf_endpoint 64
+
+    mtu=$(conf_get if.mtu "$cp_raw")
+    [ -z "$mtu" ] || valid_int_range "$mtu" 1280 1500 || die conf_mtu 64
+    ka=$(conf_get peer.persistentkeepalive "$cp_raw")
+    [ -z "$ka" ] || valid_int_range "$ka" 0 65535 || die conf_keepalive 64
+    allowed=$(conf_get peer.allowedips "$cp_raw"); [ -n "$allowed" ] || allowed=0.0.0.0/0
+
+    {
+        echo "private=$priv"; echo "peer=$pub"; [ -z "$psk" ] || echo "psk=$psk"
+        echo "address=$ip $mask"; echo "endpoint=$host:$port"
+        [ -z "$mtu" ] || echo "mtu=$mtu"
+        [ -z "$ka" ] || [ "$ka" = 0 ] || echo "keepalive=$ka"
+    } > "$2" || die write_failed
+    printf '%s\n' "$allowed" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | while IFS= read -r a; do
+        case "$a" in
+            ::/0) echo "allow=:: 0" ;;
+            *:*|'') ;;
+            */*) m=$(prefix_mask "${a#*/}") || exit 1; echo "allow=${a%/*} $m" ;;
+            *) echo "allow=$a 255.255.255.255" ;;
+        esac
+    done >> "$2" || die conf_allowed_ips 64
+
+    # AmneziaWG, in Keenetic's order: jc jmin jmax s1 s2 h1 h2 h3 h4 [s3 s4 [i1..i5]].
+    if [ -n "$(conf_get if.jc "$cp_raw")" ]; then
+        asc=""
+        for k in jc jmin jmax s1 s2; do
+            v=$(conf_get "if.$k" "$cp_raw"); [ -n "$v" ] || v=0
+            case "$v" in *[!0-9]*) die conf_awg 64 ;; esac
+            asc="$asc $v"
+        done
+        n=1
+        for k in h1 h2 h3 h4; do
+            v=$(conf_get "if.$k" "$cp_raw"); [ -n "$v" ] || v=$n
+            n=$((n + 1))
+            printf '%s\n' "$v" | grep -Eq '^[0-9]+(-[0-9]+)?$' || die conf_awg 64
+            asc="$asc $v"
+        done
+        s3=$(conf_get if.s3 "$cp_raw") s4=$(conf_get if.s4 "$cp_raw") ilast=0
+        for n in 1 2 3 4 5; do [ -z "$(conf_get "if.i$n" "$cp_raw")" ] || ilast=$n; done
+        if [ -n "$s3$s4" ] || [ "$ilast" != 0 ]; then
+            for v in "${s3:-0}" "${s4:-0}"; do
+                case "$v" in *[!0-9]*) die conf_awg 64 ;; esac
+                asc="$asc $v"
+            done
+            n=1
+            while [ "$n" -le "$ilast" ]; do
+                v=$(conf_get "if.i$n" "$cp_raw")
+                case "$v" in *'"'*|*"$(printf '\134')"*) die conf_awg 64 ;; esac
+                [ "${#v}" -le 4096 ] || die conf_awg 64
+                asc="$asc \"$v\""
+                n=$((n + 1))
+            done
+        fi
+        echo "asc=${asc# }" >> "$2"
+    fi
+    rm -f "$cp_raw"
+}
+
+tunnel_block() {
+    # tunnel_block NAME: the interface block of the running configuration.
+    awk -v n="interface $1" '$0 == n {on = 1; next} on && /^!/ {exit} on {print}' "$RUNCFG"
+}
+
+tunnel_names() {
+    { printf '%s\n' "${VWARD_TUNNEL_INTERFACE:-}"
+      vward_map_tunnels "$(vward_device_map 2>/dev/null)" | awk '{print $1}'; } | awk 'NF && !s[$0]++'
+}
+is_tunnel() { tunnel_names | grep -qxF -- "$1"; }
+
+free_tunnel_name() {
+    n=0
+    while [ "$n" -lt 32 ]; do
+        grep -qx "interface Wireguard$n" "$RUNCFG" || { printf 'Wireguard%s\n' "$n"; return 0; }
+        n=$((n + 1))
+    done
+    return 1
+}
+
+apply_plan() {
+    # apply_plan IFACE PLAN ADDRESS: interface settings and its one peer.
+    ndm "interface $1 wireguard private-key $(conf_get private "$2")" || die conf_rejected_private_key
+    ndm "interface $1 ip address $3" || die conf_rejected_address
+    m=$(conf_get mtu "$2"); [ -z "$m" ] || ndm "interface $1 ip mtu $m" || die conf_rejected_mtu
+    a=$(conf_get asc "$2")
+    if [ -n "$a" ]; then ndm "interface $1 wireguard asc $a" || die conf_rejected_awg
+    else ndm "no interface $1 wireguard asc" || :; fi
+    p=$(conf_get peer "$2")
+    ndm "interface $1 wireguard peer $p" || die conf_rejected_peer
+    ndm "interface $1 wireguard peer $p endpoint $(conf_get endpoint "$2")" || die conf_rejected_endpoint
+    k=$(conf_get keepalive "$2")
+    ndm "interface $1 wireguard peer $p keepalive-interval ${k:-25}" || die conf_rejected_keepalive
+    s=$(conf_get psk "$2"); [ -z "$s" ] || ndm "interface $1 wireguard peer $p preshared-key $s" || die conf_rejected_preshared_key
+    sed -n 's/^allow=//p' "$2" | while IFS= read -r al; do
+        ndm "interface $1 wireguard peer $p allow-ips $al" || exit 1
+    done || die conf_rejected_allowed_ips
+    ndm "interface $1 wireguard peer $p connect" || die conf_rejected_connect
+    ndm "interface $1 up" || die conf_rejected_up
+}
+
+handshake_ok() {
+    # handshake_ok IFACE: the server answered within the wait.
+    hs_curl=${VWARD_CURL_BIN:-curl} hs_w=0
+    while [ "$hs_w" -le "$HANDSHAKE_WAIT" ]; do
+        "$hs_curl" -s --max-time 3 "${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/show/interface?name=$1" 2>/dev/null |
+            "$JQ" -e '[.wireguard.peer[]? | select(.online == true and ((.["last-handshake"] // 999999) | tonumber) < 120)] | length > 0' >/dev/null 2>&1 && return 0
+        sleep 2
+        hs_w=$((hs_w + 2))
+    done
+    return 1
+}
+
+tunnel_test() {
+    # tunnel_test PLAN: prove the configuration on a temporary interface, then remove it.
+    TMP_IF=$(free_tunnel_name) || die no_free_tunnel
+    ndm "interface $TMP_IF" || die router_rejected
+    echo "no interface $TMP_IF" >> "$JOURNAL"
+    ndm "interface $TMP_IF description \"VWARD test\"" || :
+    apply_plan "$TMP_IF" "$1" "$TEST_ADDRESS"
+    handshake_ok "$TMP_IF" || die tunnel_no_handshake
+    ndm "no interface $TMP_IF" || die router_rejected
+    grep -vx "no interface $TMP_IF" "$JOURNAL" > "$JOURNAL.t"; mv -f "$JOURNAL.t" "$JOURNAL"
+    snapshot
+}
+
+store_conf() {
+    # store_conf IFACE FILE: keep the applied .conf, the last three, root-only.
+    sc_dir="$TUNNEL_STORE/$1"
+    (umask 077; mkdir -p "$sc_dir") || return 1
+    if [ -f "$sc_dir/current.conf" ]; then
+        [ ! -f "$sc_dir/prev1.conf" ] || mv -f "$sc_dir/prev1.conf" "$sc_dir/prev2.conf"
+        mv -f "$sc_dir/current.conf" "$sc_dir/prev1.conf"
+    fi
+    cp "$2" "$sc_dir/current.conf" && chmod 0600 "$sc_dir/current.conf"
+}
+
+tunnel_summary() {
+    # Plain facts about a plan for the Console, never the keys.
+    printf 'info.endpoint=%s\n' "$(conf_get endpoint "$1")"
+    printf 'info.address=%s\n' "$(conf_get address "$1" | awk '{print $1}')"
+    printf 'info.mtu=%s\n' "$(conf_get mtu "$1")"
+    printf 'info.keepalive=%s\n' "$(conf_get keepalive "$1")"
+    printf 'info.awg=%s\n' "$([ -n "$(conf_get asc "$1")" ] && echo 1 || echo 0)"
+    printf 'info.allowed=%s\n' "$(sed -n 's/^allow=//p' "$1" | tr '\n' ',' | sed 's/,$//')"
+}
+
+op_tunnel_conf() {
+    # tunnel-conf check|replace|create FILE [NAME | DESCRIPTION]
+    tc_mode=$1 tc_file=$2 tc_arg=${3:-}
+    case "$tc_file" in /*) ;; *) die invalid_value 64 ;; esac
+    [ -f "$tc_file" ] && [ ! -L "$tc_file" ] || die conf_empty 64
+    PLAN=$(mktemp /tmp/vward-console-plan.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    TMPFILE=$PLAN
+    CONF_FILE=$tc_file
+    conf_parse "$tc_file" "$PLAN"
+    load_profile_base
+    case "$tc_mode" in
+        check)
+            tunnel_summary "$PLAN"
+            done_ok "tunnel-conf check" checked ;;
+        replace)
+            vward_valid_ndm_name "$tc_arg" && is_tunnel "$tc_arg" || die unknown_tunnel 64
+            change_lock
+            JOURNAL=$(mktemp /tmp/vward-console-tunnel.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+            TXN=1
+            snapshot
+            tunnel_test "$PLAN"
+            new_peer=$(conf_get peer "$PLAN")
+            # Undo, replayed newest first: the new peer out, then the old lines back.
+            tunnel_block "$tc_arg" | awk -v i="$tc_arg" '
+                $1 == "wireguard" && $2 == "peer" {peer = $3; print "interface " i " wireguard peer " peer; next}
+                peer != "" && /^        [a-z]/ {sub(/^ +/, ""); print "interface " i " wireguard peer " peer " " $0; next}
+                /^    !/ {peer = ""; next}
+                $1 == "wireguard" && $2 == "asc" {sub(/^ +/, ""); print "interface " i " " $0; next}
+                $1 == "ip" && ($2 == "address" || $2 == "mtu") {sub(/^ +/, ""); print "interface " i " " $0}' > "$JOURNAL.old"
+            old_peers=$(tunnel_block "$tc_arg" | awk '$1 == "wireguard" && $2 == "peer" {print $3}')
+            prev="$TUNNEL_STORE/$tc_arg/current.conf"
+            if [ -f "$prev" ]; then
+                PREVPLAN=$(mktemp /tmp/vward-console-plan.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+                if ( conf_parse "$prev" "$PREVPLAN" ) >/dev/null 2>&1; then
+                    echo "interface $tc_arg wireguard private-key $(conf_get private "$PREVPLAN")" >> "$JOURNAL"
+                fi
+                rm -f "$PREVPLAN"
+            fi
+            cat "$JOURNAL.old" >> "$JOURNAL"
+            echo "no interface $tc_arg wireguard peer $new_peer" >> "$JOURNAL"
+            for op in $old_peers; do
+                [ "$op" = "$new_peer" ] || ndm "no interface $tc_arg wireguard peer $op" || die router_rejected
+            done
+            apply_plan "$tc_arg" "$PLAN" "$(conf_get address "$PLAN")"
+            handshake_ok "$tc_arg" || die tunnel_no_handshake
+            save_router || die config_save_failed
+            TXN=0
+            store_conf "$tc_arg" "$tc_file" || audit "tunnel $tc_arg conf not stored"
+            rm -f "$JOURNAL.old" "$TUNNEL_HEALTH_STATE"
+            tunnel_summary "$PLAN"
+            done_ok "tunnel-conf replace $tc_arg endpoint=$(conf_get endpoint "$PLAN")" changed ;;
+        create)
+            case "$tc_arg" in @/*) tc_desc_file=${tc_arg#@}; tc_arg=$(cat "$tc_desc_file" 2>/dev/null); rm -f "$tc_desc_file" ;; esac
+            case "$tc_arg" in *'"'*|*"$(printf '\134')"*) die invalid_description 64 ;; esac
+            [ -n "$tc_arg" ] && [ "${#tc_arg}" -le 64 ] || die invalid_description 64
+            change_lock
+            JOURNAL=$(mktemp /tmp/vward-console-tunnel.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+            TXN=1
+            snapshot
+            NEW_IF=$(free_tunnel_name) || die no_free_tunnel
+            ndm "interface $NEW_IF" || die router_rejected
+            echo "no interface $NEW_IF" >> "$JOURNAL"
+            ndm "interface $NEW_IF description \"$tc_arg\"" || die invalid_description
+            ndm "interface $NEW_IF security-level public" || die router_rejected
+            ndm "interface $NEW_IF ip tcp adjust-mss pmtu" || :
+            apply_plan "$NEW_IF" "$PLAN" "$(conf_get address "$PLAN")"
+            handshake_ok "$NEW_IF" || die tunnel_no_handshake
+            save_router || die config_save_failed
+            TXN=0
+            store_conf "$NEW_IF" "$tc_file" || audit "tunnel $NEW_IF conf not stored"
+            rm -f "$VWARD_DEVICE_MAP_CACHE"
+            printf 'info.name=%s\n' "$NEW_IF"
+            tunnel_summary "$PLAN"
+            done_ok "tunnel-conf create $NEW_IF endpoint=$(conf_get endpoint "$PLAN")" changed ;;
+        *) die invalid_operation 64 ;;
+    esac
+}
+
+op_tunnel_delete() {
+    # tunnel-delete NAME TARGET: move its lists and subnets to TARGET (bypass, vpn
+    # or another tunnel), then remove the interface.  The VWARD tunnel stays.
+    load_profile_base
+    vward_valid_ndm_name "$1" && is_tunnel "$1" || die unknown_tunnel 64
+    [ "$1" != "$VWARD_TUNNEL_INTERFACE" ] || die main_tunnel 64
+    case "$2" in
+        bypass) td_to=- ;;
+        vpn) td_to=$VWARD_TUNNEL_INTERFACE ;;
+        *) vward_valid_ndm_name "$2" && is_tunnel "$2" && [ "$2" != "$1" ] || die unknown_tunnel 64
+           td_to=$2 ;;
+    esac
+    change_lock
+    JOURNAL=$(mktemp /tmp/vward-console-tunnel.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    TXN=1
+    snapshot
+    td_wan=$(wan_route_target)
+    # dns-proxy lists: the new route first, then the old one out.
+    awk -v i="$1" '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
+        ctx && $1 == "route" && $2 == "object-group" && $4 == i {print $3}' "$RUNCFG" > "$JOURNAL.lists"
+    while IFS= read -r g; do
+        [ -n "$g" ] || continue
+        nt=$td_to; [ "$nt" != - ] || nt=$td_wan
+        ndm "dns-proxy route object-group $g $nt auto" || die router_rejected
+        echo "dns-proxy no route object-group $g $nt" >> "$JOURNAL"
+        ndm "dns-proxy no route object-group $g $1" || die router_rejected
+        echo "dns-proxy route object-group $g $1 auto" >> "$JOURNAL"
+    done < "$JOURNAL.lists"
+    # Static subnets: to another tunnel, or simply out (the default route is the provider).
+    awk -v i="$1" '$1 == "ip" && $2 == "route" && $5 == i {print $3 " " $4}' "$RUNCFG" > "$JOURNAL.nets"
+    while IFS= read -r net; do
+        [ -n "$net" ] || continue
+        if [ "$td_to" != - ]; then
+            ndm "ip route $net $td_to auto" || die router_rejected
+            echo "no ip route $net $td_to" >> "$JOURNAL"
+        fi
+        ndm "no ip route $net $1" || die router_rejected
+        echo "ip route $net $1 auto" >> "$JOURNAL"
+    done < "$JOURNAL.nets"
+    snapshot
+    while IFS= read -r g; do [ -z "$g" ] || ! route_present "$g" "$1" || die verification_failed; done < "$JOURNAL.lists"
+    ! awk -v i="$1" '$1 == "ip" && $2 == "route" && $5 == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG" || die verification_failed
+    # Last step: nothing depends on the interface any more.
+    ndm "no interface $1" || die router_rejected
+    snapshot
+    ! grep -qx "interface $1" "$RUNCFG" || die verification_failed
+    save_router || die config_save_failed
+    TXN=0
+    td_lists=$(grep -c . "$JOURNAL.lists") td_nets=$(grep -c . "$JOURNAL.nets")
+    rm -f "${TUNNEL_STORE:?}/$1/"*.conf "$VWARD_DEVICE_MAP_CACHE" "$JOURNAL.lists" "$JOURNAL.nets"
+    rmdir "${TUNNEL_STORE:?}/$1" 2>/dev/null
+    done_ok "tunnel-delete $1 lists=$td_lists subnets=$td_nets to=$2" changed
+}
+
+subnet_present() {
+    awk -v n="$1" -v m="$2" -v i="$3" '$1 == "ip" && $2 == "route" && $3 == n && $4 == m && $5 == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG"
+}
+
+op_tunnel_subnet() {
+    # tunnel-subnet NAME add|remove CIDR (IPv4, /8 or narrower).
+    load_profile_base
+    vward_valid_ndm_name "$1" && is_tunnel "$1" || die unknown_tunnel 64
+    ts_net=${3%/*} ts_bits=32
+    [ "$ts_net" = "$3" ] || ts_bits=${3#*/}
+    printf '%s\n' "$ts_net" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || die invalid_subnet 64
+    printf '%s\n' "$ts_net" | awk -F. '{for (i = 1; i <= 4; i++) if ($i > 255) exit 1}' || die invalid_subnet 64
+    ts_mask=$(prefix_mask "$ts_bits") || die invalid_subnet 64
+    [ "$ts_bits" -ge 8 ] || die invalid_subnet 64
+    change_lock
+    snapshot
+    ts_have=0; subnet_present "$ts_net" "$ts_mask" "$1" && ts_have=1
+    case "$2" in
+        add) [ "$ts_have" = 0 ] || done_ok "tunnel-subnet $1 add $3" unchanged
+             ndm "ip route $ts_net $ts_mask $1 auto" || die router_rejected ;;
+        remove) [ "$ts_have" = 1 ] || done_ok "tunnel-subnet $1 remove $3" unchanged
+             ndm "no ip route $ts_net $ts_mask $1" || die router_rejected ;;
+        *) die invalid_value 64 ;;
+    esac
+    snapshot
+    ts_now=0; subnet_present "$ts_net" "$ts_mask" "$1" && ts_now=1
+    [ "$ts_now" != "$ts_have" ] || die verification_failed
+    save_router || die config_save_failed
+    done_ok "tunnel-subnet $1 $2 $ts_net/$ts_bits" changed
 }
 
 # smartdns-guard 0|1: 0 lets AdaptiveAuto take Smart DNS domains again.
@@ -762,12 +1151,18 @@ op_component() {
 
 # ---------- Entry ----------
 
-[ "$#" -ge 2 ] && [ "$#" -le 3 ] || die usage 64
+[ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64
 OP=$1; shift
-case "$OP" in tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|smartdns-guard) [ "$#" -eq 1 ] || die usage 64 ;; *) [ "$#" -eq 2 ] || die usage 64 ;; esac
+case "$OP" in
+    tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|smartdns-guard) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-conf) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
+    tunnel-subnet) [ "$#" -eq 3 ] || die usage 64 ;;
+    *) [ "$#" -eq 2 ] || die usage 64 ;;
+esac
 ARG1=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
 ARG2=${2:-}
-case "$OP" in wifi|update|wan-param|tunnel|domain-list|domain-list-watch) ARG1=$1 ;; esac
+case "$OP" in wifi|update|wan-param|tunnel|domain-list|domain-list-watch|tunnel-conf|tunnel-delete|tunnel-subnet) ARG1=$1 ;; esac
+ARG3=${3:-}
 case "$OP" in route-domain|force-vpn|adaptive) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 
 ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
@@ -799,5 +1194,8 @@ case "$OP" in
     wifi) op_wifi "$ARG1" "$ARG2" ;;
     update) op_update "$ARG1" "$ARG2" ;;
     wan-param) op_wan_param "$ARG1" "$ARG2" ;;
+    tunnel-conf) op_tunnel_conf "$ARG1" "$ARG2" "$ARG3" ;;
+    tunnel-delete) op_tunnel_delete "$ARG1" "$ARG2" ;;
+    tunnel-subnet) op_tunnel_subnet "$ARG1" "$ARG2" "$ARG3" ;;
     *) die invalid_operation 64 ;;
 esac

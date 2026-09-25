@@ -71,6 +71,7 @@ python3 tests/repository/check-wan-guard-params.py || fail "Internet guard limit
 python3 tests/repository/check-console-tunnel-probe.py || fail "Console tunnel check"
 python3 tests/repository/check-console-agh-auth.py || fail "Console AdGuard Home login"
 python3 tests/repository/check-console-smartdns.py || fail "Smart DNS guard"
+python3 tests/repository/check-console-tunnels.py || fail "Console tunnels"
 python3 tests/repository/check-console-tunnel.py || fail "Console tunnel switch"
 python3 tests/repository/check-component-graph.py || fail "Component dependency graph"
 python3 tests/repository/check-component-resilience.py || fail "Component disable resilience"

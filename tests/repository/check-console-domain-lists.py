@@ -160,7 +160,8 @@ with tempfile.TemporaryDirectory() as tmp:
     # Input and preconditions never touch the router.
     run("domain-list", "a;reboot", "vpn", "error=invalid_group", 64)
     run("domain-list", "AdaptiveAuto", "vpn", "error=invalid_group", 64)
-    run("domain-list", "domain-list4", "tunnel", "error=invalid_value", 64)
+    run("domain-list", "domain-list4", "tunnel", "error=unknown_tunnel", 64)
+    run("domain-list", "domain-list4", "a;b", "error=invalid_value", 64)
     run("domain-list", "domain-list9", "vpn", "error=unknown_group", 64)
     run("domain-list", "domain-list0", "vpn", "result=unchanged", 0)
     run("domain-list", "domain-list4", "bypass", "result=unchanged", 0)

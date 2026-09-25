@@ -102,7 +102,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth) ;;
+    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -127,7 +127,7 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             ;;
     esac
     case "$ACTION" in
-        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth) ;;
+        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf) ;;
         *)
             echo 'Status: 405 Method Not Allowed'
             header_json
@@ -166,7 +166,7 @@ run_detached(){
   fi
   printf 'label=%s\nstarted=%s\n' "$LABEL" "$START" > "$rd_dir/run.meta"
   (
-    if [ -n "$ARG" ]; then "$CMD" "$ARG"; else "$CMD"; fi > "$rd_dir/run.log" 2>&1
+    if [ -n "$ARGS" ]; then set -f; "$CMD" $ARGS; elif [ -n "$ARG" ]; then "$CMD" "$ARG"; else "$CMD"; fi > "$rd_dir/run.log" 2>&1
     rd_rc=$?
     printf 'rc=%s\n' "$rd_rc" >> "$rd_dir/run.meta"
     printf '%s|CONSOLE_ACTION|action=%s rc=%s\n' "$START" "$LABEL" "$rd_rc" >> /opt/var/log/vward/console-audit.log
@@ -560,6 +560,83 @@ if [ "$ACTION" = ads-https-control ]; then
   case "$OP" in ca-init) "$HTTPSCTL" ca-init --confirm >"$OUT" 2>&1||RC=$? ;; start) "$HTTPSCTL" start --confirm >"$OUT" 2>&1||RC=$? ;; restart) "$HTTPSCTL" restart --confirm >"$OUT" 2>&1||RC=$? ;; *) "$HTTPSCTL" "$OP" >"$OUT" 2>&1||RC=$? ;; esac
   RES="$(head -c 12000 "$OUT" 2>/dev/null)"; rm -f "$OUT"; printf '%s|ADS_HTTPS|op=%s rc=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$OP" "$RC" >>/opt/var/log/vward/console-audit.log
   "$JQ" -n --argjson ok "$([ "$RC" -eq 0 ]&&echo true||echo false)" --argjson rc "$RC" --arg output "$RES" '{ok:$ok,rc:$rc,output:$output}'
+  exit 0
+fi
+
+# tunnel-conf: a WireGuard/AmneziaWG .conf from the browser.  check parses it;
+# replace and create prove it on the router and run in the background
+# (control-data reports them); delete and subnet-add/-remove are quick.
+if [ "$ACTION" = tunnel-conf ]; then
+  header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+  ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+  [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+  LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac
+  [ "$LEN" -gt 0 ] && [ "$LEN" -le 49152 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }
+  BODY=$(dd bs=4096 count=$(( (LEN + 4095) / 4096 )) 2>/dev/null | head -c "$LEN")
+  val(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
+  TOP="$(val op)"; TNAME="$(val name)"; TCONF="$(val confirm)"
+  case "$TNAME" in *[!A-Za-z0-9_.-]*) echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0 ;; esac
+  # A decoded value: printable text, tabs and line breaks only.
+  tdecode(){ printf '%s\n' "$BODY" | tr '&' '\n' | LC_ALL=C awk -F= -v k="$1" '
+      BEGIN {h = "0123456789abcdef"}
+      $1 == k {
+        v = substr($0, index($0, "=") + 1); gsub(/\+/, " ", v); o = ""
+        while (match(tolower(v), /%[0-9a-f][0-9a-f]/)) {
+          c = (index(h, tolower(substr(v, RSTART + 1, 1))) - 1) * 16 + index(h, tolower(substr(v, RSTART + 2, 1))) - 1
+          if (c < 32 && c != 9 && c != 10 && c != 13 || c > 126) exit 1
+          o = o substr(v, 1, RSTART - 1) sprintf("%c", c); v = substr(v, RSTART + 3)
+        }
+        printf "%s", o v; exit
+      }'; }
+  case "$TOP" in
+    check|replace|create)
+      TUNNEL_TMP=${VWARD_CONSOLE_TUNNEL_TMP:-/opt/var/run/vward/console-tunnel}
+      (umask 077; mkdir -p "$TUNNEL_TMP") || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
+      TFILE="$(umask 077; mktemp "$TUNNEL_TMP/upload.XXXXXX" 2>/dev/null)" || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
+      tdecode conf > "$TFILE" || { rm -f "$TFILE"; echo '{"ok":false,"error":"conf_syntax"}'; exit 0; }
+      [ -s "$TFILE" ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"conf_empty"}'; exit 0; }
+      if [ "$TOP" = check ]; then
+        TOUT="$("$CONFIG_HELPER" tunnel-conf check "$TFILE" 2>/dev/null)"; rm -f "$TFILE"
+        case "$(printf '%s\n' "$TOUT" | tail -n 1)" in
+          result=checked) printf '%s\n' "$TOUT" | sed -n 's/^info\.//p' | "$JQ" -Rn '[inputs | split("=") | {(.[0]): (.[1:] | join("="))}] | add + {ok: true}' ;;
+          error=*) E="$(printf '%s\n' "$TOUT" | tail -n 1)"; E=${E#error=}; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac; printf '{"ok":false,"error":"%s"}\n' "$E" ;;
+          *) echo '{"ok":false,"error":"helper_failed"}' ;;
+        esac
+        exit 0
+      fi
+      if [ "$TOP" = replace ]; then
+        [ -n "$TNAME" ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0; }
+        [ "$TCONF" = TUNNEL_REPLACE ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+        ARGS="tunnel-conf replace $TFILE $TNAME"
+      else
+        TDESC="$(tdecode description | tr -d '\t\r\n')" || TDESC=""
+        case "$TDESC" in ''|*'"'*|*"$(printf '\134')"*) rm -f "$TFILE"; echo '{"ok":false,"error":"invalid_description"}'; exit 0 ;; esac
+        [ "${#TDESC}" -le 64 ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"invalid_description"}'; exit 0; }
+        # The description may hold spaces: it goes through a file, not the argument list.
+        printf '%s' "$TDESC" > "$TFILE.desc"
+        ARGS="tunnel-conf create $TFILE @$TFILE.desc"
+      fi
+      CMD="$CONFIG_HELPER" LABEL="tunnel-$TOP" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
+      run_detached "$CONTROL_RUN_DIR" control_busy ;;
+    delete|subnet-add|subnet-remove)
+      console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; trap console_mutation_leave EXIT
+      if [ "$TOP" = delete ]; then
+        [ "$TCONF" = TUNNEL_DELETE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+        TTO="$(val target)"; case "$TTO" in ''|*[!A-Za-z0-9_.-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+        set -- tunnel-delete "$TNAME" "$TTO"
+      else
+        TNET="$(tdecode subnet)" || TNET=""
+        case "$TNET" in ''|*[!0-9./]*) echo '{"ok":false,"error":"invalid_subnet"}'; exit 0 ;; esac
+        set -- tunnel-subnet "$TNAME" "${TOP#subnet-}" "$TNET"
+      fi
+      TOUT="$("$CONFIG_HELPER" "$@" 2>/dev/null | tail -n 1)"
+      case "$TOUT" in
+        result=changed|result=unchanged) "$JQ" -cn --arg r "${TOUT#result=}" '{ok:true,result:$r}' ;;
+        error=*) E="${TOUT#error=}"; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac; printf '{"ok":false,"error":"%s"}\n' "$E" ;;
+        *) echo '{"ok":false,"error":"helper_failed"}' ;;
+      esac ;;
+    *) echo '{"ok":false,"error":"invalid_operation"}' ;;
+  esac
   exit 0
 fi
 
@@ -1447,18 +1524,22 @@ if [ "$ACTION" = lists-data ]; then
         cur != "" && $1 == "include" {print "I\t" cur "\t" tolower($2)}
         ctx && $1 == "route" && $2 == "object-group" {print "R\t" $3 "\t" $4}
         ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print "D\t" tolower($NF)}
+        /^ip route [0-9]/ && NF >= 5 {print "S\t" $5 "\t" $3 "\t" $4}
     ' | "$JQ" -Rn --arg tun "${VWARD_TUNNEL_INTERFACE:-}" --arg dev "${VWARD_TUNNEL_DEVICE:-}" --arg wan "${VWARD_WAN_INTERFACE:-}" \
         --argjson guard "$([ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" = 0 ] && echo false || echo true)" \
         --argjson watched "$WATCHED" --argjson returns "$RETURNS" --argjson auto "$AUTO" '
-        reduce (inputs | split("\t")) as $r ({g: {}, order: [], r: {}, doh: []};
+        def bits: {"255":8,"254":7,"252":6,"248":5,"240":4,"224":3,"192":2,"128":1,"0":0}[.] // 0;
+        reduce (inputs | split("\t")) as $r ({g: {}, order: [], r: {}, doh: [], s: {}};
             if $r[0] == "G" then (if .g[$r[1]] then . else .g[$r[1]] = {description: "", domains: []} | .order += [$r[1]] end)
             elif $r[0] == "N" then .g[$r[1]].description = $r[2]
             elif $r[0] == "I" then .g[$r[1]].domains += [$r[2]]
             elif $r[0] == "R" then .r[$r[1]] = (.r[$r[1]] // $r[2])
             elif $r[0] == "D" then .doh += [$r[1]]
+            elif $r[0] == "S" then .s[$r[1]] += [$r[2] + "/" + ($r[3] | split(".") | map(bits) | add | tostring)]
             else . end)
         | . as $s
         | {ok: true, tunnel: $tun, doh_used: ($s.doh | length), doh_limit: 8, smartdns_domains: $s.doh, smartdns_guard: $guard,
+           subnets: ($s.s | with_entries(.value |= .[:300])), subnet_counts: ($s.s | with_entries(.value |= length)),
            lists: [$s.order[] | select(. != "AdaptiveAuto") | . as $n | $s.g[$n] as $l | ($s.r[$n] // "") as $t |
              {name: $n, description: $l.description, count: ($l.domains | length), domains: $l.domains[:200], route: $t,
               via: (if $t == "" then "none" elif $t == $tun or $t == $dev then "vpn" elif $t == "ISP" or $t == $wan then "bypass" else "other" end),
