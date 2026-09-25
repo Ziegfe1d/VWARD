@@ -13,6 +13,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -26,9 +27,10 @@ with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     running = tmp / "running"; running.write_text("object-group fqdn domain-list0\n    include t.me\n!\n")
     calls = tmp / "calls"
+    addrs = tmp / "addrs"; addrs.write_text("3")
     ndmc = tmp / "ndmc"
     ndmc.write_text(f'#!/bin/sh\necho "$2" >> "{calls}"\n[ "$2" = "show running-config" ] && cat "{running}"\n'
-                    f'[ "$2" = "show object-group fqdn" ] && printf "group-name: domain-list0\\nipv4-addresses-count: 3\\n"\nexit 0\n')
+                    f'[ "$2" = "show object-group fqdn" ] && printf "group-name: domain-list0\\nipv4-addresses-count: %s\\n    address: 1.2.3.4\\n" "$(cat {addrs})"\nexit 0\n')
     ndmc.chmod(0o755)
     cache = tmp / "cache"
     env = os.environ | {"JQ": shutil.which("jq"), "CURL": "/bin/false", "VWARD_PROFILE_LIB": "/nonexistent", "VWARD_NDMC": str(ndmc),
@@ -49,6 +51,21 @@ with tempfile.TemporaryDirectory() as tmp:
         fail(f"cached answer differs: {a} {b}")
     if count("show running-config") != 1 or count("show object-group fqdn") != 1:
         fail(f"the second refresh asked the router again: {calls.read_text()}")
+    if "address" in (cache / "fqdn-counts").read_text():
+        fail("only the per-list counts are kept, not every learned address")
+
+    # Counts older than the TTL are shown at once and refreshed in the background.
+    addrs.write_text("5")
+    kept = (cache / "fqdn-counts").read_text().split("\n", 1)[1]
+    (cache / "fqdn-counts").write_text(f"{int(time.time()) - 40}\n{kept}")
+    if get("lists-data")["lists"][0]["addresses"] != 3:
+        fail("stale counts must be answered without waiting for the router")
+    for _ in range(50):
+        if not (cache / "fqdn-counts.lock").exists() and "\t5" in (cache / "fqdn-counts").read_text():
+            break
+        time.sleep(0.1)
+    if get("lists-data")["lists"][0]["addresses"] != 5 or count("show object-group fqdn") != 2:
+        fail(f"the background refresh must bring the new count: {calls.read_text()}")
     mode = stat.S_IMODE((cache / "running").stat().st_mode)
     if mode & 0o077 or stat.S_IMODE(cache.stat().st_mode) & 0o077:
         fail(f"the cached configuration must be root-only: {oct(mode)}")

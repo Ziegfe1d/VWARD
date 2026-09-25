@@ -84,14 +84,19 @@ custom_op() {
 OP="${1:-list}"
 case "$OP" in
   list)
-    "$ADS_JQ" -r '.sources[].id' "$ADS_SOURCE_REGISTRY" | while IFS= read -r sid; do
-      [ -n "$sid" ] || continue
-      name="$($ADS_JQ -r --arg id "$sid" '.sources[]|select(.id==$id)|.name' "$ADS_SOURCE_REGISTRY")"
-      purpose="$($ADS_JQ -r --arg id "$sid" '.sources[]|select(.id==$id)|.purpose' "$ADS_SOURCE_REGISTRY")"
-      cached=0; [ -s "$ADS_STATE/sources/$sid.domains" ] && cached=1
-      custom=0; case "$sid" in custom-*) custom=1 ;; esac
-      printf '%s|%s|%s|%s|%s|%s\n' "$sid" "$(ads_source_mode "$sid")" "$name" "$cached" "$purpose" "$custom"
-    done
+    # One jq and one awk for the whole registry (the mode as ads_source_mode
+    # gives it): the console reads this list on every Ads refresh.
+    ov="$ADS_SOURCE_OVERRIDES"; [ -r "$ov" ] || ov=/dev/null
+    "$ADS_JQ" -r '.sources[] | [.id, (.name // "" | tostring), (.purpose // "" | tostring),
+        (.default_mode // (if .enabled == true then "active" else "off" end) | tostring)] | map(split("|") | join(" ") | split("\t") | join(" ") | split("\n") | join(" ")) | join("|")' "$ADS_SOURCE_REGISTRY" |
+      awk -F'|' -v ov="$ov" 'BEGIN {while ((getline l < ov) > 0) {split(l, o, "|"); if (!(o[1] in m)) m[o[1]] = tolower(o[2])}}
+        $1 != "" {md = ($1 in m) ? m[$1] : ""; if (md !~ /^(active|check|off)$/) md = $4; if (md !~ /^(active|check|off)$/) md = "off"
+          print $1 "|" md "|" $2 "|" $3}' |
+      while IFS='|' read -r sid mode name purpose; do
+        cached=0; [ -s "$ADS_STATE/sources/$sid.domains" ] && cached=1
+        custom=0; case "$sid" in custom-*) custom=1 ;; esac
+        printf '%s|%s|%s|%s|%s|%s\n' "$sid" "$mode" "$name" "$cached" "$purpose" "$custom"
+      done
     exit 0
     ;;
   set) ;;

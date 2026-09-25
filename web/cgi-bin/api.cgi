@@ -70,7 +70,8 @@ fetch_json()
     printf '%s\n' "$FETCH_OUT"
 }
 
-# ndm_cached NAME TTL COMMAND: a Keenetic "show" answer kept TTL seconds in RAM
+# ndm_cached NAME TTL COMMAND [FILTER]: a Keenetic "show" answer (passed through
+# the FILTER function, when given, so only the small result is kept) held TTL seconds in RAM
 # (root-only), so a console refreshing every few seconds does not make the
 # router serialize its whole configuration each time.  Any POST drops the
 # cache first, so a change is never followed by the old state.  With ndmc
@@ -86,12 +87,34 @@ ndm_cached()
         case "$nc_at" in ''|*[!0-9]*) nc_at=0 ;; esac
         if [ $(( $(date +%s) - nc_at )) -lt "$nc_ttl" ]; then sed 1d "$nc_file"; return 0; fi
     fi
-    nc_out="$("${VWARD_NDMC:-ndmc}" -c "$3" 2>/dev/null | tr -d '\r')"
+    nc_out="$("${VWARD_NDMC:-ndmc}" -c "$3" 2>/dev/null | tr -d '\r' | ${4:-cat})"
     [ -n "$nc_out" ] || return 1
     if [ "$nc_ttl" -gt 0 ] 2>/dev/null; then
         (umask 077; mkdir -p "$NDM_CACHE_DIR" && { date +%s; printf '%s\n' "$nc_out"; } > "$nc_file.$$" && mv -f "$nc_file.$$" "$nc_file") 2>/dev/null
     fi
     printf '%s\n' "$nc_out"
+}
+
+# ndm_cached_bg NAME TTL COMMAND [FILTER]: like ndm_cached, but an answer up to
+# ten TTLs old is shown at once while a fresh one is fetched in the background,
+# for slow answers whose exact value may lag (learned address counts).
+ndm_cached_bg()
+{
+    nb_file="$NDM_CACHE_DIR/$1" nb_ttl=${VWARD_CONSOLE_CACHE_TTL:-$2}
+    [ -z "${VWARD_NDMC:-}" ] || nb_ttl=${VWARD_CONSOLE_CACHE_TTL:-0}
+    if [ "$nb_ttl" -gt 0 ] 2>/dev/null && [ -r "$nb_file" ]; then
+        nb_at=0; read -r nb_at < "$nb_file" || nb_at=0
+        case "$nb_at" in ''|*[!0-9]*) nb_at=0 ;; esac
+        nb_age=$(( $(date +%s) - nb_at ))
+        if [ "$nb_age" -ge 0 ] && [ "$nb_age" -lt $(( nb_ttl * 10 )) ]; then
+            if [ "$nb_age" -ge "$nb_ttl" ] && mkdir "$nb_file.lock" 2>/dev/null; then
+                ( VWARD_CONSOLE_CACHE_TTL=1; ndm_cached "$@"; rmdir "$nb_file.lock" ) </dev/null >/dev/null 2>&1 &
+            fi
+            sed 1d "$nb_file"; return 0
+        fi
+    fi
+    rmdir "$nb_file.lock" 2>/dev/null
+    ndm_cached "$@"
 }
 
 # kv_file FILE KEY=VAR...: sets each VAR to the last value of KEY in a
@@ -611,7 +634,16 @@ if [ "$ACTION" = ads-data ]; then
   SETTINGS=/opt/bin/vward-ads-privacy-settings.sh; SRCCTL=/opt/bin/vward-ads-privacy-source-control.sh; JOB=/opt/bin/vward-ads-privacy-job.sh
   SETJSON="$([ -x "$SETTINGS" ] && "$SETTINGS" show 2>/dev/null | awk -F= '$1!="PAUSED"&&NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}')"
   PAUSED="$([ -r "$AST/control.state" ] && awk -F= '$1=="paused"{print $2;exit}' "$AST/control.state")"; [ "$PAUSED" = 1 ] || PAUSED=0
-  BLOCKED="$(awk -F'|' '$3=="BLOCK"{n++}END{print n+0}' "$AST/verdicts.tsv" 2>/dev/null)"; REVIEW="$(awk -F'|' '$2=="SUSPECT"{n++}END{print n+0}' "$AST/verdicts.tsv" 2>/dev/null)"; ALLOW="$(awk -F'|' '$2=="ALLOW"{n++}END{print n+0}' "$AST/verdicts.tsv" 2>/dev/null)"; TRUST="$(awk -F'|' '$2=="TRUST"{n++}END{print n+0}' "$AST/verdicts.tsv" 2>/dev/null)"
+  # One pass over the verdicts: the ten newest judged (not trusted) domains, then
+  # the four counts on the last line.  Memory stays small on a long file.
+  VPASS="$(awk -F'|' '$3=="BLOCK"{b++} $2=="SUSPECT"{r++} $2=="ALLOW"{a++} $2=="TRUST"{t++}
+    NF>=8&&$2!="TRUST"{row=$5 "\t" $1 "\t" $2 "\t" $3 "\t" $8; if(n<10){k[++n]=row; next}
+      m=1; for(i=2;i<=n;i++) if(k[i]<k[m]) m=i; if(row>k[m]) k[m]=row}
+    END{for(i=1;i<=n;i++) print k[i]; print "#", b+0, r+0, a+0, t+0}' "$AST/verdicts.tsv" 2>/dev/null)"
+  read -r _ BLOCKED REVIEW ALLOW TRUST <<EOF_COUNTS
+${VPASS##*
+}
+EOF_COUNTS
   MANUAL="$({ awk -F'|' 'NF>=2&&$1!~/^[[:space:]]*#/{print "allow|"$1"|"$2"|"$3}' "$AETC/allowlist.tsv" 2>/dev/null; awk -F'|' 'NF>=2&&$1!~/^[[:space:]]*#/{print "block|"$1"|"$2"|"$3}' "$AETC/denylist.tsv" 2>/dev/null; } | head -n 300 | "$JQ" -Rn '[inputs|split("|")|{type:.[0],domain:.[1],scope:.[2],note:(.[3:]|join("|"))}]')"
   SOURCES="$([ -x "$SRCCTL" ] && "$SRCCTL" list 2>/dev/null | "$JQ" -Rn --arg state "$AST/sources" '[inputs|split("|")|{id:.[0],mode:.[1],name:.[2],cached:(.[3]=="1"),purpose:.[4],custom:(.[5]=="1")}]' || echo '[]')"
   JOBS="$([ -x "$JOB" ] && "$JOB" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}')"
@@ -620,7 +652,7 @@ if [ "$ACTION" = ads-data ]; then
   AGH_ON=false; [ -s "${VWARD_ADS_AGH_AUTH_FILE:-$AETC/agh-api.auth}" ] && AGH_ON=true
   # The last scan and the newest domains it judged (the built-in trusted ones are left out).
   SCAN="$([ -r "$AST/last-run.status" ] && awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' "$AST/last-run.status" | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' 2>/dev/null)"; [ -n "$SCAN" ] || SCAN='{}'
-  RECENT="$(awk -F'|' 'NF>=8 && $2!="TRUST" {print $5 "\t" $1 "\t" $2 "\t" $3 "\t" $8}' "$AST/verdicts.tsv" 2>/dev/null | sort -r | head -n 10 | "$JQ" -Rn '[inputs|split("\t")|{first_seen:.[0],domain:.[1],verdict:.[2],action:.[3],reason:.[4]}]' 2>/dev/null)"; [ -n "$RECENT" ] || RECENT='[]'
+  RECENT="$(printf '%s\n' "$VPASS" | sed '$d' | sort -r | "$JQ" -Rn '[inputs|split("\t")|{first_seen:.[0],domain:.[1],verdict:.[2],action:.[3],reason:.[4]}]' 2>/dev/null)"; [ -n "$RECENT" ] || RECENT='[]'
   "$JQ" -n --argjson scan "$SCAN" --argjson recent "$RECENT" --argjson agh "$AGH_ON" --argjson paused "$([ "$PAUSED" = 1 ]&&echo true||echo false)" --argjson settings "$SETJSON" --argjson sources "$SOURCES" --argjson manual "$MANUAL" --argjson jobsraw "$JOBS" --arg job_output "$LAST_OUTPUT" --argjson b "${BLOCKED:-0}" --argjson r "${REVIEW:-0}" --argjson a "${ALLOW:-0}" --argjson t "${TRUST:-0}" '{ok:true,component:"ads-privacy-guard",agh_connected:$agh,scan:$scan,recent:$recent,paused:$paused,settings:$settings,sources:$sources,manual_rules:$manual,counts:{blocked:$b,review:$r,allow:$a,trust:$t},categories:($sources | group_by(.purpose) | map({id:.[0].purpose, total:length, active:(map(select(.mode != "off")) | length)})),jobs:{queued:($jobsraw.JOB_QUEUE//"0"|(tonumber? // 0)),current:{state:($jobsraw.CURRENT_state//"IDLE"),type:($jobsraw.CURRENT_type//"")},last:{id:($jobsraw.LAST_id//""),state:($jobsraw.LAST_state//"NONE"),type:($jobsraw.LAST_type//""),arg:($jobsraw.LAST_arg//""),output:$job_output}}}'
   exit 0
 fi
@@ -1383,7 +1415,11 @@ if [ "$ACTION" = "route-data" ]; then
     DOMAIN_ITDOG=0
     DOMAIN_V2FLY=0
 
-    if [ -r "$HINT_CATALOG" ]; then
+    # The catalog holds tens of thousands of rows: its counts are kept until it changes.
+    HSTATS_CACHE="$NDM_CACHE_DIR/hint-stats"
+    if [ -r "$HINT_CATALOG" ] && [ -s "$HSTATS_CACHE" ] && [ ! "$HINT_CATALOG" -nt "$HSTATS_CACHE" ]; then
+        IFS='|' read -r DOMAIN_ROWS DOMAIN_UNIQUE DOMAIN_CATEGORIES DOMAIN_ITDOG DOMAIN_V2FLY < "$HSTATS_CACHE"
+    elif [ -r "$HINT_CATALOG" ]; then
         HSTATS="$(awk -F'|' '
             NF>=3 {
                 rows++
@@ -1398,12 +1434,17 @@ if [ "$ACTION" = "route-data" ]; then
                 printf "%d|%d|%d|%d|%d", rows+0,dc+0,cc+0,sources["itdog"]+0,sources["v2fly"]+0
             }
         ' "$HINT_CATALOG" 2>/dev/null)"
-        DOMAIN_ROWS="$(printf '%s' "$HSTATS" | cut -d'|' -f1)"
-        DOMAIN_UNIQUE="$(printf '%s' "$HSTATS" | cut -d'|' -f2)"
-        DOMAIN_CATEGORIES="$(printf '%s' "$HSTATS" | cut -d'|' -f3)"
-        DOMAIN_ITDOG="$(printf '%s' "$HSTATS" | cut -d'|' -f4)"
-        DOMAIN_V2FLY="$(printf '%s' "$HSTATS" | cut -d'|' -f5)"
+        IFS='|' read -r DOMAIN_ROWS DOMAIN_UNIQUE DOMAIN_CATEGORIES DOMAIN_ITDOG DOMAIN_V2FLY <<EOF_HSTATS
+$HSTATS
+EOF_HSTATS
+        [ -z "$HSTATS" ] || (umask 077; mkdir -p "$NDM_CACHE_DIR" && printf '%s\n' "$HSTATS" > "$HSTATS_CACHE.$$" && mv -f "$HSTATS_CACHE.$$" "$HSTATS_CACHE") 2>/dev/null
     fi
+    case "$DOMAIN_ROWS$DOMAIN_UNIQUE$DOMAIN_CATEGORIES$DOMAIN_ITDOG$DOMAIN_V2FLY" in
+        *[!0-9]*|'') DOMAIN_ROWS=0 DOMAIN_UNIQUE=0 DOMAIN_CATEGORIES=0 DOMAIN_ITDOG=0 DOMAIN_V2FLY=0 ;;
+    esac
+    for v in "$DOMAIN_ROWS" "$DOMAIN_UNIQUE" "$DOMAIN_CATEGORIES" "$DOMAIN_ITDOG" "$DOMAIN_V2FLY"; do
+        [ -n "$v" ] || { DOMAIN_ROWS=0 DOMAIN_UNIQUE=0 DOMAIN_CATEGORIES=0 DOMAIN_ITDOG=0 DOMAIN_V2FLY=0; break; }
+    done
 
     ADAPTIVE_COUNT="$(wc -l < "$ADAPTIVE_PERSIST" 2>/dev/null)"
     [ -n "$ADAPTIVE_COUNT" ] || ADAPTIVE_COUNT=0
@@ -1420,8 +1461,11 @@ if [ "$ACTION" = "route-data" ]; then
     IP_CIDR_TOTAL=0
     if [ -r "$IP_INDEX" ]; then
         ISTATS="$(awk -F'|' 'NF>=2 {c++; n+=$2} END {printf "%d|%d",c+0,n+0}' "$IP_INDEX" 2>/dev/null)"
-        IP_CATEGORIES="$(printf '%s' "$ISTATS" | cut -d'|' -f1)"
-        IP_CIDR_TOTAL="$(printf '%s' "$ISTATS" | cut -d'|' -f2)"
+        IFS='|' read -r IP_CATEGORIES IP_CIDR_TOTAL <<EOF_ISTATS
+$ISTATS
+EOF_ISTATS
+        [ -n "$IP_CATEGORIES" ] || IP_CATEGORIES=0
+        [ -n "$IP_CIDR_TOTAL" ] || IP_CIDR_TOTAL=0
     fi
 
     ACTIVE_COUNT="$(wc -l < "$IP_ACTIVE" 2>/dev/null)"
@@ -1442,7 +1486,7 @@ if [ "$ACTION" = "route-data" ]; then
     [ -n "$IP_INDEX_JSON" ] || IP_INDEX_JSON='[]'
     SERVICES_JSON="$(awk -F'|' 'NF>=3 && $1 !~ /^[[:space:]]*#/ && $2 ~ /^[A-Za-z0-9.-]+$/ {print $1 "\t" $2}' /opt/etc/vward/route-engine/services.conf 2>/dev/null | head -n 50 |
         while IFS="$(printf '\t')" read -r SNAME SHOST; do
-            SF="$(awk -F= '$1=="FAILS"{print $2}' "/opt/var/lib/vward/route-tools/$SHOST.state" 2>/dev/null)"; SO="$(awk -F= '$1=="OKS"{print $2}' "/opt/var/lib/vward/route-tools/$SHOST.state" 2>/dev/null)"
+            kv_file "/opt/var/lib/vward/route-tools/$SHOST.state" FAILS=SF OKS=SO
             printf '%s\t%s\t%s\t%s\n' "$SNAME" "$SHOST" "${SF:-}" "${SO:-}"
         done | "$JQ" -Rn '[inputs | split("\t") | {name: .[0], host: .[1], fails: (.[2] | tonumber? // null), oks: (.[3] | tonumber? // null)}]')"
     [ -n "$SERVICES_JSON" ] || SERVICES_JSON='[]'
@@ -1884,8 +1928,10 @@ if [ "$ACTION" = lists-data ]; then
     [ -n "$AUTO" ] || AUTO='{}'
     # Addresses Keenetic learned for each group from DNS answers: 0 on a used list
     # means its domains' queries do not pass the router's DNS.
-    ADDRS="$(ndm_cached fqdn-groups 60 "show object-group fqdn" |
-        awk '$1 == "group-name:" {g = $2} $1 == "ipv4-addresses-count:" && g != "" {print g "\t" $2; g = ""}' |
+    # The answer lists every learned address (hundreds of KB on a busy router):
+    # only the per-group counts are kept.
+    fqdn_counts() { awk '$1 == "group-name:" {g = $2} $1 == "ipv4-addresses-count:" && g != "" {print g "\t" $2; g = ""}'; }
+    ADDRS="$(ndm_cached_bg fqdn-counts 120 "show object-group fqdn" fqdn_counts |
         "$JQ" -Rn '[inputs | split("\t") | {(.[0]): (.[1] | tonumber? // null)}] | add // {}' 2>/dev/null)"
     [ -n "$ADDRS" ] || ADDRS='{}'
     # G name / N name description / I name domain / R name target / D domain (Smart DNS)
