@@ -76,6 +76,7 @@ python3 tests/repository/check-ads-agh-settings.py || fail "AdGuard Home ad sett
 python3 tests/repository/check-ads-default-config.py || fail "Ads default settings"
 python3 tests/repository/check-console-backups.py || fail "Settings backups"
 python3 tests/repository/check-update-manual-install.py || fail "Manual install from VWARD"
+python3 tests/repository/check-wifi-hosts.py || fail "Wi-Fi device names and access"
 python3 tests/repository/check-console-tunnel.py || fail "Console tunnel switch"
 python3 tests/repository/check-component-graph.py || fail "Component dependency graph"
 python3 tests/repository/check-component-resilience.py || fail "Component disable resilience"

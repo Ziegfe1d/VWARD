@@ -111,7 +111,7 @@ const API_ERRORS = {
   profile_verification_failed: 'профиль устройства не принял новый туннель, изменения отменены',
   rollback_incomplete: 'откат не завершён: проверьте маршруты групп в веб-интерфейсе Keenetic',
   temporary_file_unavailable: 'нет места для временного файла', component_disabled: 'компонент выключен: включите его в «Система → Компоненты»',
-  core_component: 'базовый компонент нельзя выключить', wrong_credentials: 'неверный логин или пароль', invalid_backup: 'неверное имя копии', unknown_backup: 'копия не найдена', backup_damaged: 'копия повреждена', backup_failed: 'не удалось создать копию', restore_failed: 'не удалось восстановить', adguard_rejected: 'AdGuard Home не принял изменение', unknown_filter: 'такого списка нет в AdGuard Home', invalid_service: 'неизвестный сервис', invalid_setting: 'неизвестная настройка', invalid_name: 'недопустимое название', invalid_password: 'пароль: только латиница, цифры и обычные знаки, до 128 символов', too_many_attempts: 'слишком много попыток - подождите 5 минут',
+  core_component: 'базовый компонент нельзя выключить', wrong_credentials: 'неверный логин или пароль', invalid_mac: 'неверный MAC-адрес', invalid_backup: 'неверное имя копии', unknown_backup: 'копия не найдена', backup_damaged: 'копия повреждена', backup_failed: 'не удалось создать копию', restore_failed: 'не удалось восстановить', adguard_rejected: 'AdGuard Home не принял изменение', unknown_filter: 'такого списка нет в AdGuard Home', invalid_service: 'неизвестный сервис', invalid_setting: 'неизвестная настройка', invalid_name: 'недопустимое название', invalid_password: 'пароль: только латиница, цифры и обычные знаки, до 128 символов', too_many_attempts: 'слишком много попыток - подождите 5 минут',
   router_auth_unavailable: 'роутер не ответил на проверку пароля', invalid_login: 'недопустимый логин', auth_required: 'нужно войти', invalid_url: 'неверный адрес: нужен https без пробелов и логина', invalid_format: 'неизвестный формат списка',
   adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен'
 };
@@ -130,12 +130,30 @@ const LOADERS = {
   cron: () => apiGet('cron-data'), auth: () => apiGet('auth'),
   blocked: () => apiGet('ads-view', { view: 'list', kind: 'blocked', search: ADSV.blockedSearch })
 };
+// The last answers are kept in the browser: a reopened console shows them at once
+// and refreshes from the router in the background.  Nothing secret is in them;
+// a login prompt or «Выйти» drops them.
+const CACHE_KEYS = ['status', 'route', 'lists', 'update', 'security', 'wifi', 'ads', 'config', 'adsstats', 'agh', 'backups', 'cron'];
+const CACHE_TTL = 86400000, CACHE_MAX = 400000;
+S.cached = {};
+function cacheRead() {
+  CACHE_KEYS.forEach(k => {
+    const c = store.get('vward-cache-' + k, null);
+    if (c && c.d && Date.now() - c.t < CACHE_TTL) { S[k] = c.d; S.cached[k] = c.t; }
+  });
+}
+function cacheWrite(k) {
+  if (!CACHE_KEYS.includes(k)) return;
+  const v = JSON.stringify({ t: Date.now(), d: S[k] });
+  if (v.length < CACHE_MAX) { try { localStorage.setItem('vward-cache-' + k, v); } catch (e) { /* хранилище браузера недоступно */ } }
+}
+function cacheDrop() { CACHE_KEYS.forEach(k => store.del('vward-cache-' + k)); S.cached = {}; }
 const inflight = {};
 async function load(key, force) {
   if (inflight[key]) return inflight[key];
   if (!force && S[key] && Date.now() - (S.loadedAt[key] || 0) < 5000) return S[key];
   inflight[key] = (async () => {
-    try { S[key] = await LOADERS[key](); S.errors[key] = null; }
+    try { S[key] = await LOADERS[key](); S.errors[key] = null; delete S.cached[key]; cacheWrite(key); }
     catch (e) { S.errors[key] = e.message; }
     finally { S.loadedAt[key] = Date.now(); delete inflight[key]; }
     return S[key];
@@ -229,7 +247,7 @@ function page(id) {
   if (p) return p;
   if (DETAILS[id]) return Object.assign({ id: id }, DETAILS[id]);
   if (id.startsWith('t-')) return { id: id, title: id.slice(2), parent: 'vpn' };
-  if (id.startsWith('w-')) return { id: id, title: id.slice(2), parent: 'wifi' };
+  if (id.startsWith('w-')) return { id: id, title: typeof wifiName === 'function' ? wifiName(id.slice(2)) : id.slice(2), parent: 'wifi' };
   return null;
 }
 const parentOf = id => { const p = page(id); return p && p.parent; };
@@ -346,8 +364,8 @@ function cardData(id) {
 const RENDER = {
   overview() {
     const list = cardOrder.filter(id => editing || !hiddenCards.includes(id));
-    const ts = S.loadedAt.status ? new Date(S.loadedAt.status).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '—';
-    let html = '<div class="overview-bar"><span>Обновлено ' + ts + '</span><button class="icon-btn" type="button" data-act="reload" aria-label="Обновить данные">' + ico('refresh') + '</button><span class="spacer"></span>' +
+    const at = S.cached.status || S.loadedAt.status, ts = at ? new Date(at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '—';
+    let html = '<div class="overview-bar"><span>' + (S.cached.status ? 'Данные на ' + ts + ' · обновляются…' : 'Обновлено ' + ts) + '</span><button class="icon-btn" type="button" data-act="reload" aria-label="Обновить данные">' + ico('refresh') + '</button><span class="spacer"></span>' +
       (editing ? btn('edit', 'check', 'Готово', 'small primary') : btn('edit', 'edit', 'Настроить', 'small')) + '</div>';
     if (editing) html += '<div class="edit-bar"><span>Вид</span><div class="segmented" role="group" aria-label="Вид карточек"><button type="button" data-view="grid" aria-pressed="' + (cardView === 'grid') + '">' + ico('platform') + 'Плитки</button><button type="button" data-view="list" aria-pressed="' + (cardView === 'list') + '">' + ico('logs') + 'Список</button></div><button class="link-btn" type="button" data-act="cards-reset">Сбросить</button></div>';
     html += '<div class="cards' + (editing ? ' editing' : '') + '" data-view="' + cardView + '">' + list.map((id, n) => {
@@ -455,7 +473,7 @@ const RENDER = {
         ['Домашний сегмент', prof().lan_interface || '—'],
         ['Последний сбор', sc.last ? fmtStamp(sc.last) + (num(sc.rc) === 0 ? ' · успешно' : ' · код ' + sc.rc) : '—', '', 'logs', ' data-log-go="wifi"']
       ])) +
-      panel('Клиенты', clients.length ? '<ul class="rows">' + clients.map(c => '<li class="row link" role="button" tabindex="0" data-go="w-' + esc(c.mac) + '"><div class="row-main"><b class="mono">' + esc(c.mac) + ' · ' + esc(bandText(c.band)) + '</b><small>' + fmtInt(c.switches) + ' ' + plural(num(c.switches) || 0, 'переход', 'перехода', 'переходов') + (num(c.weak_5g) ? ' · слабый 5 ГГц ' + c.weak_5g + ' раз' : '') + (c.min_5g_rssi && c.min_5g_rssi !== '-' ? ' · мин. ' + esc(c.min_5g_rssi) + ' дБм' : '') + '</small></div><span class="pill ' + (c.health === 'WARNING' ? 'warn' : 'ok') + '">' + esc(recText(c)) + '</span>' + ico('chevron', 'chev') + '</li>').join('') + '</ul>' : empty(w.enabled ? 'Клиентов пока нет' : 'Сбор данных выключен'), { desc: 'Рекомендации не применяются автоматически.' }) +
+      panel('Клиенты', clients.length ? '<ul class="rows">' + clients.map(c => '<li class="row link" role="button" tabindex="0" data-go="w-' + esc(c.mac) + '"><div class="row-main"><b' + (c.host && (c.host.name || c.host.hostname) ? '' : ' class="mono"') + '>' + esc(wifiName(c.mac)) + '</b><small>' + esc(bandText(c.band)) + (c.host && c.host.ip ? ' · ' + esc(c.host.ip) : '') + (c.host && c.host.access === 'deny' ? ' · интернет запрещён' : '') + ' · ' + fmtInt(c.switches) + ' ' + plural(num(c.switches) || 0, 'переход', 'перехода', 'переходов') + (num(c.weak_5g) ? ' · слабый 5 ГГц ' + c.weak_5g + ' раз' : '') + (c.min_5g_rssi && c.min_5g_rssi !== '-' ? ' · мин. ' + esc(c.min_5g_rssi) + ' дБм' : '') + '</small></div><span class="pill ' + (c.health === 'WARNING' ? 'warn' : 'ok') + '">' + esc(recText(c)) + '</span>' + ico('chevron', 'chev') + '</li>').join('') + '</ul>' : empty(w.enabled ? 'Клиентов пока нет' : 'Сбор данных выключен'), { desc: 'Рекомендации не применяются автоматически.' }) +
       panel('Когда предупреждать', '<dl class="kv">' +
         ctrlRow('Окно анализа', sel('data-cfg-wifi="WINDOW_SEC"', 'Окно анализа', withCur([[21600, '6 часов'], [43200, '12 часов'], [86400, '24 часа'], [172800, '2 суток'], [604800, '7 суток']], wc.WINDOW_SEC, ' с'), wc.WINDOW_SEC), 'за какой период считать переходы') +
         ctrlRow('Переходов между диапазонами', sel('data-cfg-wifi="BAND_SWITCH_WARN"', 'Переходов между диапазонами', withCur([[5, 'от 5'], [10, 'от 10'], [20, 'от 20'], [30, 'от 30'], [50, 'от 50']], wc.BAND_SWITCH_WARN, ''), wc.BAND_SWITCH_WARN)) +
@@ -798,6 +816,12 @@ function listViaSel(l, tuns, ok) {
   return sel('data-list-via="' + esc(l.name) + '"' + (ok && (cur || !l.route) ? '' : ' disabled'), 'Куда идёт «' + (l.description || l.name) + '»', opts, cur);
 }
 document.addEventListener('input', e => { const f = e.target.closest && e.target.closest('[data-form="tunnel-conf"]'); if (f && e.target.name === 'conf' && f.dataset.checked === '1') { f.dataset.checked = ''; $('tcPreview').innerHTML = ''; f.querySelector('[type=submit]').textContent = 'Проверить файл'; } });
+async function wifiHostSet(fields, okMsg) {
+  let x;
+  try { x = await apiPost('wifi-host', fields); } catch (e) { toast('Ошибка: ' + e.message); return; }
+  toast(x.ok ? (x.result === 'unchanged' ? 'Уже так' : okMsg) : 'Не сохранено: ' + errText(x));
+  await load('wifi', true); render();
+}
 async function tunnelSubnet(name, op, subnet) {
   let x;
   try { x = await apiPost('tunnel-conf', { op: 'subnet-' + op, name: name, subnet: subnet }); }
@@ -924,11 +948,22 @@ function tunnelProbePanel(name) {
   return panel('Проверка туннеля', body + '<div class="panel-actions">' + btn('tunnel-probe', 'check', 'Проверить сейчас', 'primary', ' data-name="' + esc(name) + '"' + (r && r.busy ? ' disabled' : '')) + '</div>',
     { desc: 'Внешний адрес и страна выхода, пинг и потери внутри туннеля, настройки сервера. Запускается только по кнопке.' });
 }
+const wifiHost = mac => { const c = ((S.wifi && S.wifi.clients) || []).find(x => x.mac === mac); return (c && c.host) || null; };
+const wifiName = mac => { const h = wifiHost(mac); return (h && (h.name || h.hostname)) || mac; };
 function wifiClientPage(mac) {
   const c = ((S.wifi && S.wifi.clients) || []).find(x => x.mac === mac) || { mac: mac };
   const ctl = S.config && S.config.wifi ? S.config.wifi.CONTROL_ENABLED : S.wifi && S.wifi.control_enabled;
   const ops = [['auto', 'Авто', 'WIFI_BAND_AUTO'], ['bind-2g', 'Только 2.4 ГГц', 'WIFI_BIND_2G'], ['bind-5g', 'Только 5 ГГц', 'WIFI_BIND_5G']];
-  return panel(mac, kv([['Сейчас', bandText(c.band)], ['Состояние', recText(c), c.health === 'WARNING' ? 'warn' : 'ok'], ['Переходов за окно', fmtInt(c.switches)], ['Слабый 5 ГГц', fmtInt(c.weak_5g) + ' раз'], ['Мин. сигнал 5 ГГц', c.min_5g_rssi && c.min_5g_rssi !== '-' ? c.min_5g_rssi + ' дБм' : '—'], ['Причина', c.reason || '—']])) +
+  const h = c.host || {}, deny = h.access === 'deny';
+  const device = panel('Устройство', '<form class="inline-form" data-form="wifi-name" data-mac="' + esc(mac) + '"><input class="input" name="name" maxlength="64" value="' + esc(h.name || '') + '" placeholder="' + esc(h.hostname || 'Имя устройства') + '" aria-label="Имя устройства"><button class="btn" type="submit"' + (cfgOk() ? '' : ' disabled') + '>' + (h.registered ? 'Переименовать' : 'Сохранить имя') + '</button></form>' +
+      '<dl class="kv">' + ctrlRow('Доступ в интернет', sw('data-wifi-access="' + esc(mac) + '"', !deny, 'Доступ в интернет для ' + wifiName(mac), !cfgOk()), deny ? 'запрещён: устройство видит только домашнюю сеть' : 'разрешён') + '</dl>' +
+      confirmBox('wifi-deny', 'Запретить устройству «' + wifiName(mac) + '» выход в интернет? Домашняя сеть останется доступной.', 'Запретить', true) +
+      kv([['MAC', mac], ['IP-адрес', h.ip || '—'], ['Имя в сети', h.hostname || '—'], ['Зарегистрировано в Keenetic', h.registered ? 'Да' : 'Нет'],
+        h.ssid ? ['Сеть Wi-Fi', h.ssid] : null, h.rssi != null ? ['Сигнал', h.rssi + ' дБм', num(h.rssi) < -75 ? 'warn' : ''] : null,
+        h.txrate != null ? ['Скорость', h.txrate + ' Мбит/с'] : null, h.uptime != null ? ['В сети', fmtUptime(h.uptime)] : null,
+        h.rx != null || h.tx != null ? ['Трафик', '↓ ' + fmtBytes(h.rx) + ' · ↑ ' + fmtBytes(h.tx)] : null]) + cfgNote(),
+    { desc: 'Имя сохраняется в Keenetic и регистрирует устройство. Запрет интернета действует на всё устройство.' });
+  return device + panel('Диапазоны Wi-Fi', kv([['Сейчас', bandText(c.band)], ['Состояние', recText(c), c.health === 'WARNING' ? 'warn' : 'ok'], ['Переходов за окно', fmtInt(c.switches)], ['Слабый 5 ГГц', fmtInt(c.weak_5g) + ' раз'], ['Мин. сигнал 5 ГГц', c.min_5g_rssi && c.min_5g_rssi !== '-' ? c.min_5g_rssi + ' дБм' : '—'], ['Причина', c.reason || '—']])) +
     panel('Диапазон для устройства', '<div class="segmented" role="group" aria-label="Диапазон">' + ops.map(o => '<button type="button" data-wifi-bind="' + o[0] + '" aria-pressed="false"' + (ctl ? '' : ' disabled') + '>' + o[1] + '</button>').join('') + '</div>' +
       (ctl ? '' : '<p class="panel-desc">Закрепление выключено: включите «Ручное управление» в разделе «Wi-Fi клиенты».</p>') +
       (confirm && confirm.id === 'wifi-bind' ? '<div class="confirm"><span>Применить «' + esc(ops.find(o => o[0] === confirm.op)[1]) + '» для ' + esc(mac) + '? Перед изменением сохранится резервная копия настроек, при ошибке изменение откатится.</span><button class="btn small primary" type="button" data-act="confirm-yes">Применить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '') + resultBox('wifi'),
@@ -946,10 +981,12 @@ function compPage(c) {
   return panel(c.name, '<dl class="kv">' + ctrlRow('Компонент включён', sw1, core ? 'базовый компонент: без него VWARD не работает' : on ? '' : 'файлы установлены, но компонент не запускается') + '</dl>' +
       (confirmBox('comp-off', 'Выключить «' + c.name + '»?' + (off.length ? ' Вместе с ним остановятся: ' + compNames(off) + '.' : '') + (stale.length ? ' На устаревших данных продолжат работать: ' + compNames(stale) + '.' : '') + ' Файлы и настройки останутся, включить можно в любой момент.', 'Выключить', true) ||
        confirmBox('comp-on', 'Включить «' + c.name + '»? Вместе с ним включатся: ' + compNames(onWith) + '.', 'Включить')) +
-      kv([['Состояние', !on ? 'Выключен' : x.health === 'PASS' ? 'Норма' : 'Нет данных', !on ? 'warn' : x.health === 'PASS' ? 'ok' : ''], ['Запуск', c.when], ['Версия', x.release || plat().version || '—'], ['Установлен', x.installed_at || '—'], ['Обновление', x.update_id || '—']]) +
+      kv([['Состояние', !on ? 'Выключен' : x.health === 'PASS' ? 'Норма' : 'Нет данных', !on ? 'warn' : x.health === 'PASS' ? 'ok' : ''], ['Запуск', c.when], ['Версия', x.release || plat().version || '—'], ['Установлен', fmtStamp(x.installed_at) || '—'], ['Обновление', x.update_id || '—']]) +
       '<div class="panel-actions even">' + (c.page ? '<button class="btn" type="button" data-go="' + c.page + '">Открыть раздел</button>' : '') + btn('open-log', 'logs', 'Журнал', '', ' data-log-tab="' + c.log + '"') + '</div>' + cfgNote(), { desc: c.desc }) +
-    panel('Зависит от', !g ? empty('Загрузка…') : deps.length ? '<ul class="rows">' + deps.map(id => link(id, needs.includes(id) ? 'нужен работающим' : 'использует его файлы')).join('') + '</ul>' : '<p class="panel-desc">Ни от чего не зависит.</p>') +
-    panel('От него зависят', !g ? empty('Загрузка…') : users.length ? '<ul class="rows">' + users.map(d => link(d.id, d.requires_running.includes(c.id) ? 'остановится вместе с ним' : d.depends_on.includes(c.id) ? 'использует его файлы' : 'использует его данные')).join('') + '</ul>' : '<p class="panel-desc">Никто не зависит.</p>');
+    panel('Зависимости', !g ? empty('Загрузка…') :
+      '<p class="panel-desc">Нужны ему</p>' + (deps.length ? '<ul class="rows">' + deps.map(id => link(id, needs.includes(id) ? 'должен работать' : 'нужны его файлы')).join('') + '</ul>' : '<p class="panel-desc">нет</p>') +
+      '<p class="panel-desc">Используют его</p>' + (users.length ? '<ul class="rows">' + users.map(d => link(d.id, d.requires_running.includes(c.id) ? 'остановится вместе с ним' : d.depends_on.includes(c.id) ? 'берёт его файлы' : 'берёт его данные')).join('') + '</ul>' : '<p class="panel-desc">нет</p>'),
+      { desc: 'Что нужно этому компоненту и кто пользуется им самим. Выключение учитывает эти связи.' });
 }
 
 /* ---------- Навигация ---------- */
@@ -1048,6 +1085,7 @@ function openSheet(title, body, cls, btnId) {
   if (btnId) $(btnId).setAttribute('aria-expanded', 'true');
 }
 function showLogin() {
+  cacheDrop();
   if (loginOpen) return;
   openSheet('Вход в VWARD', '<div class="sheet-body"><form class="inline-form" data-form="login"><input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Войти</button></form><p class="panel-desc">Логин и пароль от веб-интерфейса роутера.</p></div>');
   loginOpen = true;
@@ -1107,6 +1145,7 @@ const CONFIRMED = {
   'ads-publish': () => runAction('ads', 'ads-control', { op: 'enqueue', job: 'publish', confirm: 'ADS_PUBLISH' }, 'Публикация поставлена в очередь').then(() => load('ads', true)).then(render),
   'https-start': () => runAction('https', 'ads-https-control', { op: 'start', confirm: 'HTTPS_START' }, 'HTTPS-фильтр запущен').then(() => load('https', true)).then(render),
   'https-ca': () => runAction('https', 'ads-https-control', { op: 'ca-init', confirm: 'HTTPS_CA_INIT' }, 'Сертификат создан').then(() => load('https', true)).then(render),
+  'wifi-deny': c => wifiHostSet({ op: 'access', mac: c.mac, value: 'deny', confirm: 'WIFI_ACCESS_DENY' }, 'Интернет для устройства запрещён'),
   'backup-restore': c => apiPost('backup-control', { op: 'restore', name: c.name, confirm: 'BACKUP_RESTORE' }).then(x => { toast(x.ok ? 'Настройки восстановлены' : 'Не восстановлено: ' + errText(x)); return Promise.all(['backups', 'config', 'security', 'status'].map(k => load(k, true))); }, e => toast('Ошибка: ' + e.message)).then(render),
   'agh-protection-off': () => aghSet({ setting: 'protection', value: '0', confirm: 'AGH_PROTECTION_OFF' }, 'Защита AdGuard Home выключена'),
   'agh-filter-remove': c => aghSet({ setting: 'filter-remove', url: c.url, confirm: 'AGH_FILTER_REMOVE' }, 'Список удалён'),
@@ -1375,6 +1414,10 @@ document.addEventListener('change', e => {
   if (t.dataset.cfgRt) { cfgSet({ op: t.dataset.cfgRt, value: t.checked ? '1' : '0' }, 'Сохранено'); return; }
   if (t.dataset.ipcat) { cfgSet({ op: 'ip-category', target: t.dataset.ipcat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена - применится при следующей сверке'); return; }
   if (t.dataset.cfgCat) { cfgSet({ op: 'domain-category', target: t.dataset.cfgCat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена'); return; }
+  if (t.dataset.wifiAccess) {
+    if (!t.checked) { t.checked = true; confirm = { id: 'wifi-deny', mac: t.dataset.wifiAccess }; render(); return; }
+    t.disabled = true; wifiHostSet({ op: 'access', mac: t.dataset.wifiAccess, value: 'permit' }, 'Интернет разрешён'); return;
+  }
   if (t.dataset.agh) {
     const k = t.dataset.agh, v = t.checked ? '1' : '0';
     if (k === 'protection' && v === '0') { t.checked = true; confirm = { id: 'agh-protection-off' }; render(); return; }
@@ -1430,6 +1473,11 @@ document.addEventListener('submit', async e => {
     if (!DOMAIN.test(v)) { toast('Введите домен, например example.com'); return; }
     const x = await cfgSet({ op: e.target.dataset.op, action: 'add', target: v }, v + ' добавлен', ['route']);
     if (x && x.ok) { const again = document.querySelector('form[data-form="cfg-add"] input'); if (again) again.value = ''; }
+  }
+  if (f === 'wifi-name') {
+    const v = e.target.querySelector('[name=name]').value.trim();
+    if (!v || v.length > 32 || /["\\]/.test(v)) { toast('Имя: до 32 символов, без кавычек'); return; }
+    await wifiHostSet({ op: 'name', mac: e.target.dataset.mac, name: v }, 'Имя сохранено в Keenetic'); return;
   }
   if (f === 'agh-filter-add') {
     const url = e.target.querySelector('[name=url]').value.trim(), name = e.target.querySelector('[name=name]').value.trim();
@@ -1557,6 +1605,7 @@ $('bellBtn').addEventListener('click', openNotes);
 $('themeBtn').addEventListener('click', () => { setTheme(({ system: 'time', time: 'light', light: 'dark', dark: 'system' })[theme] || 'system'); toast('Тема: ' + THEMES[theme]); });
 applyTheme();
 { const h = decodeURIComponent(location.hash.slice(1)); if (page(h)) current = h; }
+cacheRead();
 history.replaceState({ p: current, d: 0 }, '', '#' + current);
 render();
 Promise.all(['status', 'security', 'update'].map(k => load(k))).then(() => { render(); refreshPage(); });

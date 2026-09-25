@@ -1157,6 +1157,41 @@ op_backup_restore() {
     done_ok "backup-restore $1" changed
 }
 
+# ---------- Wi-Fi clients: name and internet access ----------
+#
+# wifi-host MAC name @FILE      the device's name in Keenetic ("known host"),
+#                               which also registers it; the name comes from a
+#                               file so it may hold spaces and Cyrillic.
+# wifi-host MAC access permit|deny   internet access of the device.
+op_wifi_host() {
+    wh_mac=$(printf '%s' "$1" | tr 'A-F' 'a-f')
+    printf '%s\n' "$wh_mac" | grep -Eq '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || die invalid_mac 64
+    change_lock
+    snapshot
+    case "$2" in
+        name)
+            case "$3" in @/*) wh_name=$(cat "${3#@}" 2>/dev/null); rm -f "${3#@}" ;; *) die invalid_value 64 ;; esac
+            case "$wh_name" in ''|*'"'*|*"$(printf '\134')"*) die invalid_name 64 ;; esac
+            [ "${#wh_name}" -le 64 ] || die invalid_name 64
+            if awk -v m="$wh_mac" -v n="$wh_name" '$1 == "known" && $2 == "host" && tolower($NF) == m {l = $0; sub(/^known host "?/, "", l); sub(/"? [^ ]+$/, "", l); if (l == n) f = 1} END {exit f ? 0 : 1}' "$RUNCFG"; then
+                done_ok "wifi-host $wh_mac name" unchanged
+            fi
+            ndm "known host \"$wh_name\" $wh_mac" || die router_rejected
+            snapshot
+            awk -v m="$wh_mac" '$1 == "known" && $2 == "host" && tolower($NF) == m {f = 1} END {exit f ? 0 : 1}' "$RUNCFG" || die verification_failed ;;
+        access)
+            case "$3" in permit|deny) ;; *) die invalid_value 64 ;; esac
+            wh_now=$(awk -v m="$wh_mac" '$1 == "host" && tolower($2) == m && ($3 == "permit" || $3 == "deny") {print $3}' "$RUNCFG" | tail -n 1)
+            [ "$wh_now" != "$3" ] || done_ok "wifi-host $wh_mac access $3" unchanged
+            ndm "ip hotspot host $wh_mac $3" || die router_rejected
+            snapshot
+            [ "$(awk -v m="$wh_mac" '$1 == "host" && tolower($2) == m && ($3 == "permit" || $3 == "deny") {print $3}' "$RUNCFG" | tail -n 1)" = "$3" ] || die verification_failed ;;
+        *) die invalid_setting 64 ;;
+    esac
+    save_router || die config_save_failed
+    done_ok "wifi-host $wh_mac $2" changed
+}
+
 # smartdns-guard 0|1: 0 lets AdaptiveAuto take Smart DNS domains again.
 op_smartdns_guard() {
     case "$1" in 0|1) ;; *) die invalid_value 64 ;; esac
@@ -1229,11 +1264,12 @@ case "$OP" in
     tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|smartdns-guard|backup-create|backup-restore) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     tunnel-subnet) [ "$#" -eq 3 ] || die usage 64 ;;
+    wifi-host) [ "$#" -eq 3 ] || die usage 64 ;;
     *) [ "$#" -eq 2 ] || die usage 64 ;;
 esac
 ARG1=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
 ARG2=${2:-}
-case "$OP" in wifi|update|wan-param|tunnel|domain-list|domain-list-watch|tunnel-conf|tunnel-delete|tunnel-subnet|backup-restore) ARG1=$1 ;; esac
+case "$OP" in wifi|update|wan-param|tunnel|domain-list|domain-list-watch|tunnel-conf|tunnel-delete|tunnel-subnet|backup-restore|wifi-host) ARG1=$1 ;; esac
 ARG3=${3:-}
 case "$OP" in route-domain|force-vpn|adaptive) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 
@@ -1268,6 +1304,7 @@ case "$OP" in
     wan-param) op_wan_param "$ARG1" "$ARG2" ;;
     tunnel-conf) op_tunnel_conf "$ARG1" "$ARG2" "$ARG3" ;;
     backup-create) op_backup_create "$ARG1" ;;
+    wifi-host) op_wifi_host "$ARG1" "$ARG2" "$ARG3" ;;
     backup-restore) op_backup_restore "$ARG1" ;;
     tunnel-delete) op_tunnel_delete "$ARG1" "$ARG2" ;;
     tunnel-subnet) op_tunnel_subnet "$ARG1" "$ARG2" "$ARG3" ;;

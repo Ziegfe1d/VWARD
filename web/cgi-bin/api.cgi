@@ -102,7 +102,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download) ;;
+    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -127,7 +127,7 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             ;;
     esac
     case "$ACTION" in
-        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control) ;;
+        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control|wifi-host) ;;
         *)
             echo 'Status: 405 Method Not Allowed'
             header_json
@@ -340,6 +340,13 @@ if [ "$ACTION" = wifi-data ]; then
     RC="$(cat /tmp/vward-wifi-client-guard.cron.rc 2>/dev/null)"; case "$RC" in ''|*[!0-9]*) RC=-1;; esac
     LAST="$(cat /tmp/vward-wifi-client-guard.cron.last 2>/dev/null | tr '\n' ' ' | cut -c1-80)"
     COUNT="$(printf '%s' "$CLIENTS" | "$JQ" 'length' 2>/dev/null)"; case "$COUNT" in ''|*[!0-9]*) COUNT=0;; esac
+    # Names, addresses and access from the router's host list, by MAC.
+    HOSTS="$(fetch_json "$VWARD_RCI_BASE/show/ip/hotspot" | "$JQ" -c '(.host // .hosts // []) | (if type == "object" then [.[]] else . end)
+        | map(select(type == "object" and (.mac // "") != "") | {key: (.mac | ascii_downcase), value: {name: (.name // ""), hostname: (.hostname // ""), ip: (.ip // ""),
+            registered: (.registered == true), access: (.access // ""), active: (.active == true), uptime: (.uptime // null),
+            rx: (.rxbytes // null), tx: (.txbytes // null), rssi: (.rssi // null), txrate: (.txrate // null), ssid: (.ssid // "")}}) | from_entries' 2>/dev/null)"
+    [ -n "$HOSTS" ] || HOSTS='{}'
+    CLIENTS="$(printf '%s' "$CLIENTS" | "$JQ" -c --argjson h "$HOSTS" 'map(. + {host: ($h[.mac | ascii_downcase] // null)})')"
     "$JQ" -n --argjson enabled "$([ "$ENABLED" = 1 ] && echo true || echo false)" --argjson control_enabled "$([ "$CONTROL_ENABLED" = 1 ] && echo true || echo false)" --argjson auto_apply "$([ "$AUTO_APPLY" = 1 ] && echo true || echo false)" --argjson clients "$CLIENTS" --arg last "$LAST" --argjson rc "$RC" --argjson count "$COUNT" '{ok:true,component:"wifi-client-guard",enabled:$enabled,control_enabled:$control_enabled,auto_apply:$auto_apply,clients:$clients,count:$count,scheduler:{last:$last,rc:$rc}}'
     exit 0
 fi
@@ -637,6 +644,50 @@ if [ "$ACTION" = tunnel-conf ]; then
         *) echo '{"ok":false,"error":"helper_failed"}' ;;
       esac ;;
     *) echo '{"ok":false,"error":"invalid_operation"}' ;;
+  esac
+  exit 0
+fi
+
+# wifi-host: a Wi-Fi client's name in Keenetic and its internet access.
+if [ "$ACTION" = wifi-host ]; then
+  header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+  ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+  [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+  LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ] && [ "$LEN" -le 1024 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }
+  BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
+  val(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
+  WMAC="$(val mac | sed 's/%3[Aa]/:/g')"
+  printf '%s\n' "$WMAC" | grep -Eq '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$' || { echo '{"ok":false,"error":"invalid_mac"}'; exit 0; }
+  case "$(val op)" in
+    name)
+      # The name as UTF-8 text: no control characters, quotes or backslashes.
+      WNAME="$(printf '%s\n' "$BODY" | tr '&' '\n' | LC_ALL=C awk -F= '
+        BEGIN {h = "0123456789abcdef"}
+        $1 == "name" {
+          v = substr($0, index($0, "=") + 1); gsub(/\+/, " ", v); o = ""
+          while (match(tolower(v), /%[0-9a-f][0-9a-f]/)) {
+            c = (index(h, tolower(substr(v, RSTART + 1, 1))) - 1) * 16 + index(h, tolower(substr(v, RSTART + 2, 1))) - 1
+            if (c < 32 || c == 34 || c == 92 || c == 127) exit 1
+            o = o substr(v, 1, RSTART - 1) sprintf("%c", c); v = substr(v, RSTART + 3)
+          }
+          printf "%s", o v; exit
+        }')" || { echo '{"ok":false,"error":"invalid_name"}'; exit 0; }
+      [ -n "$WNAME" ] && [ "${#WNAME}" -le 64 ] || { echo '{"ok":false,"error":"invalid_name"}'; exit 0; }
+      WFILE="$(umask 077; mktemp /tmp/vward-console-name.XXXXXX 2>/dev/null)" || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
+      printf '%s' "$WNAME" > "$WFILE"
+      set -- wifi-host "$WMAC" name "@$WFILE" ;;
+    access)
+      WV="$(val value)"; case "$WV" in permit|deny) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+      [ "$WV" = permit ] || [ "$(val confirm)" = WIFI_ACCESS_DENY ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+      set -- wifi-host "$WMAC" access "$WV" ;;
+    *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
+  esac
+  WOUT="$("$CONFIG_HELPER" "$@" 2>/dev/null | tail -n 1)"
+  [ -z "${WFILE:-}" ] || rm -f "$WFILE"
+  case "$WOUT" in
+    result=changed|result=unchanged) "$JQ" -cn --arg r "${WOUT#result=}" '{ok:true,result:$r}' ;;
+    error=*) E="${WOUT#error=}"; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac; printf '{"ok":false,"error":"%s"}\n' "$E" ;;
+    *) echo '{"ok":false,"error":"helper_failed"}' ;;
   esac
   exit 0
 fi
@@ -1902,23 +1953,33 @@ if [ "$ACTION" = "log" ]; then
     exit 0
 fi
 
-VER="$(
-    fetch_json \
-    "$VWARD_RCI_BASE/show/version"
-)"
-
-ISP='{}'
-[ -z "${VWARD_WAN_INTERFACE:-}" ] || ISP="$(fetch_json "$VWARD_RCI_BASE/show/interface?name=$VWARD_WAN_INTERFACE")"
-
-INET="$(
-    fetch_json \
-    "$VWARD_RCI_BASE/show/internet/status"
-)"
-
-IFACES="$(
-    fetch_json \
-    "$VWARD_RCI_BASE/show/interface"
-)"
+# The four router queries run side by side: one after another they were most of
+# the time the overview waited for.
+ISP_URL=""
+[ -z "${VWARD_WAN_INTERFACE:-}" ] || ISP_URL="$VWARD_RCI_BASE/show/interface?name=$VWARD_WAN_INTERFACE"
+FETCH_DIR="$(umask 077; mktemp -d /tmp/vward-console-status.XXXXXX 2>/dev/null)" || FETCH_DIR=""
+if [ -n "$FETCH_DIR" ]; then
+    trap 'rm -rf "${FETCH_DIR:?}"' EXIT
+    fetch_json "$VWARD_RCI_BASE/show/version" > "$FETCH_DIR/ver" &
+    [ -z "$ISP_URL" ] || fetch_json "$ISP_URL" > "$FETCH_DIR/isp" &
+    fetch_json "$VWARD_RCI_BASE/show/internet/status" > "$FETCH_DIR/inet" &
+    fetch_json "$VWARD_RCI_BASE/show/interface" > "$FETCH_DIR/ifaces" &
+    wait
+    VER="$(cat "$FETCH_DIR/ver" 2>/dev/null)"
+    ISP="$(cat "$FETCH_DIR/isp" 2>/dev/null)"
+    INET="$(cat "$FETCH_DIR/inet" 2>/dev/null)"
+    IFACES="$(cat "$FETCH_DIR/ifaces" 2>/dev/null)"
+else
+    VER="$(fetch_json "$VWARD_RCI_BASE/show/version")"
+    ISP=""
+    [ -z "$ISP_URL" ] || ISP="$(fetch_json "$ISP_URL")"
+    INET="$(fetch_json "$VWARD_RCI_BASE/show/internet/status")"
+    IFACES="$(fetch_json "$VWARD_RCI_BASE/show/interface")"
+fi
+[ -n "$VER" ] || VER='{}'
+[ -n "$ISP" ] || ISP='{}'
+[ -n "$INET" ] || INET='{}'
+[ -n "$IFACES" ] || IFACES='{}'
 
 WG_INTERFACES="$(
     printf '%s\n' "$IFACES" |
