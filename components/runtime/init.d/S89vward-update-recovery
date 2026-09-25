@@ -172,8 +172,17 @@ recover()
     return "$rc"
 }
 
+# Before anything of VWARD starts: locks a power cut left on the USB drive would
+# otherwise hold back the updater (recovery included) and the jobs that own them.
+sweep_locks()
+{
+    lock_lib=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+    [ -r "$lock_lib" ] || return 0
+    ( . "$lock_lib" && vward_locks_sweep ) 2>/dev/null
+}
+
 case "${1:-}" in
-    start|restart) recover ;;
+    start|restart) sweep_locks; recover ;;
     stop) exit 0 ;;
     status)
         if [ -r "$FAILED" ]; then

@@ -70,6 +70,11 @@ with tempfile.TemporaryDirectory() as tmp:
     up = r / "opt/var/run/vward/console-tunnel"; up.mkdir(parents=True)
     (up / "upload.AbC123").write_text("PrivateKey = SECRET\n")
 
+    # A lock a power cut left on the USB drive (its process is gone).
+    dead = subprocess.Popen(["true"]); dead.wait()
+    stale = r / "opt/var/lib/vward/policy-sync/lock"; stale.mkdir(parents=True)
+    (stale / "pid").write_text(f"{dead.pid}\n")
+
     helper = tmp / "helper"; helper.write_text("#!/bin/sh\necho result=unchanged\n"); helper.chmod(0o755)
     env = os.environ | {"PATH": f"{bb}:{os.environ['PATH']}", "VWARD_ROOT_PREFIX": str(r),
                         "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
@@ -105,6 +110,8 @@ with tempfile.TemporaryDirectory() as tmp:
 
     if up.exists():
         fail("a tunnel .conf left on the USB drive must go")
+    if stale.exists() or "STALE_LOCK_REMOVED|" not in res.stdout:
+        fail("a lock whose owner is gone must go")
     if "rotated=2|errors=0" not in (log / "vward-housekeeping.log").read_text():
         fail("the run is logged")
 

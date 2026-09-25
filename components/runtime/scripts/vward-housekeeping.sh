@@ -252,6 +252,9 @@ done
 rm -f "$R/opt/var/run/vward/console-tunnel/upload."* 2>/dev/null
 rmdir "$R/opt/var/run/vward/console-tunnel" 2>/dev/null
 
+# Locks whose owner is gone (killed, power cut) would hold back the updater.
+vward_locks_sweep
+
 # Daily snapshot of VWARD's settings (the helper skips it when one is younger than a day).
 # The day already handled is kept in RAM, so the other 23 hourly runs start nothing.
 BACKUP_HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}

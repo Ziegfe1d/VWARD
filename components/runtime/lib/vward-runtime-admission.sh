@@ -83,3 +83,65 @@ vward_admission_enter() {
     fi
     return 0
 }
+
+# ---------- Lock folders ----------
+# Every lock a VWARD job or the updater waits for.  The updater starts nothing
+# while one of them exists, and a lock kept on the USB drive outlives a power
+# cut: vward_locks_sweep (at boot and hourly) removes those whose owner is gone.
+VWARD_LOCKS="/tmp/vward-route-reconciler-maint.lock /tmp/vward-route-engine.lock /tmp/vward-policy-sync.lock
+/tmp/vward-policy-reconcile.lock /tmp/vward-tunnel-health-watch.lock /tmp/vward-tunnel-guard-guard.lock
+/tmp/vward-wan-guard.lock /tmp/vward-wan-guard.lock.d /tmp/vward-route.lock /tmp/vward-route-discovery.lock
+/tmp/vward-cron-supervisor.lock /tmp/vward-route-change.lock /opt/var/lib/vward/policy-sync/lock
+/opt/var/lib/vward/route-engine/classifier.lock /opt/var/lib/vward/ads-privacy-guard/scan.lock
+/opt/var/lib/vward/ads-privacy-guard/sources-update.lock /opt/var/lib/vward/ads-privacy-guard/publish.lock
+/opt/var/lib/vward/ads-privacy-guard/jobs/worker.lock"
+
+# vward_lock_stale DIR: the lock's owner is gone - its process is dead or the
+# id now belongs to another process (pid_start differs), or the lock has had no
+# owner id for an hour.
+# Shell builtins only: the hourly sweep looks at every lock.
+vward_lock_stale() {
+    vl_dir=$1
+    [ -d "$vl_dir" ] && [ ! -L "$vl_dir" ] || return 1
+    vl_pid=; [ ! -r "$vl_dir/pid" ] || read -r vl_pid < "$vl_dir/pid"
+    case "$vl_pid" in
+        ''|*[!0-9]*) [ -n "$(find "$vl_dir" -maxdepth 0 -mmin +60 2>/dev/null)" ]; return ;;
+    esac
+    kill -0 "$vl_pid" 2>/dev/null || return 0
+    vl_saved=; [ ! -r "$vl_dir/pid_start" ] || read -r vl_saved < "$vl_dir/pid_start"
+    case "$vl_saved" in ''|unknown) return 1 ;; esac
+    # Field 22 of /proc/PID/stat, counted after the command name in brackets.
+    vl_stat=; read -r vl_stat < "/proc/$vl_pid/stat" 2>/dev/null || return 1
+    set -f; set -- ${vl_stat##*) }; set +f
+    [ "$vl_saved" != "${20:-}" ]
+}
+
+# vward_lock_drop DIR: remove a stale lock; a rename first, so a lock a new
+# owner has just taken is never removed.
+vward_lock_drop() {
+    vl_old=$1.stale.$$
+    [ ! -e "$vl_old" ] && [ ! -L "$vl_old" ] || return 1
+    mv "$1" "$vl_old" 2>/dev/null || return 1
+    rm -rf "${vl_old:?}"
+}
+
+# vward_lock_take DIR: take the lock folder DIR for this shell ($$); a lock whose
+# owner is gone is taken over.  Fails while a live owner holds it.
+vward_lock_take() {
+    if ! mkdir "$1" 2>/dev/null; then
+        vward_lock_stale "$1" && vward_lock_drop "$1" || return 1
+        mkdir "$1" 2>/dev/null || return 1
+    fi
+    printf '%s\n' "$$" > "$1/pid" || return 1
+    vward_admission_pid_start $$ > "$1/pid_start" 2>/dev/null || :
+}
+
+# vward_locks_sweep: remove every stale lock of VWARD_LOCKS.
+vward_locks_sweep() {
+    for vl_lock in $VWARD_LOCKS; do
+        vl_lock=${VWARD_ROOT_PREFIX:-}$vl_lock
+        vward_lock_stale "$vl_lock" || continue
+        vward_lock_drop "$vl_lock" && echo "STALE_LOCK_REMOVED|$vl_lock"
+    done
+    return 0
+}

@@ -462,7 +462,7 @@ op_tunnel() {
     vward_valid_ifname "$NEW_DEV" || die unknown_tunnel 64
 
     change_lock
-    mkdir -p "$POLICY_STATE" && mkdir "$POLICY_STATE/lock" 2>/dev/null || die policy_sync_busy 75
+    mkdir -p "$POLICY_STATE" && vward_lock_take "$POLICY_STATE/lock" || die policy_sync_busy 75
     POLICY_LOCKED=1
     JOURNAL=$(mktemp /tmp/vward-console-tunnel.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     DEVCONF_ORIG=$(mktemp /tmp/vward-console-devconf.XXXXXX 2>/dev/null) || die temporary_file_unavailable

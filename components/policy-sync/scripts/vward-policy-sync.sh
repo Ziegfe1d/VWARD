@@ -50,7 +50,8 @@ MAX_SOURCE_ARCHIVE_ENTRIES=${MAX_SOURCE_ARCHIVE_ENTRIES:-20000}
 
 mkdir -p "$STATE" "$SOURCE_ROOT"
 
-if ! mkdir "$LOCK" 2>/dev/null; then
+# The lock lives on the USB drive: one a power cut left behind is taken over.
+if ! vward_lock_take "$LOCK"; then
     echo "SUBNET_SYNC=ALREADY_RUNNING"
     exit 0
 fi
@@ -59,7 +60,7 @@ mkdir -p "$WORK"
 
 cleanup()
 {
-    rm -rf "$WORK" "$LOCK"
+    rm -rf "${WORK:?}" "${LOCK:?}"
     vward_admission_leave 2>/dev/null || true
 }
 trap cleanup EXIT
