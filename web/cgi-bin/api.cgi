@@ -2100,8 +2100,21 @@ if [ "$ACTION" = "update-data" ]; then
         esac
     fi
 
+    # Engine 1.x has no version line; the last apply is written by engine 2.
+    ENGINE_VERSION="$(sed -n 's/^VU_ENGINE_VERSION=//p' /opt/share/vward/updater/current/vward-update-common-base.sh 2>/dev/null | head -n 1)"
+    case "$ENGINE_VERSION" in [0-9]*.[0-9]*.[0-9]*) ;; *) ENGINE_VERSION=1 ;; esac
+    kv_file "$STATE/last-apply.state" version=LA_VERSION changed_files=LA_CHANGED \
+        fetched_bytes=LA_BYTES applied_at=LA_AT
+    case "$LA_CHANGED" in ''|*[!0-9]*) LA_CHANGED=-1 ;; esac
+    case "$LA_BYTES" in ''|*[!0-9]*) LA_BYTES=-1 ;; esac
+
     "$JQ" -n \
       --arg phase "$PHASE" \
+      --arg engine "$ENGINE_VERSION" \
+      --arg la_version "$LA_VERSION" \
+      --arg la_at "$LA_AT" \
+      --argjson la_changed "$LA_CHANGED" \
+      --argjson la_bytes "$LA_BYTES" \
       --arg version "$PENDING_VERSION" \
       --arg priority "$PENDING_PRIORITY" \
       --arg sequence "$PENDING_SEQUENCE" \
@@ -2115,7 +2128,8 @@ if [ "$ACTION" = "update-data" ]; then
       --argjson recover_allowed "$RECOVER_ALLOWED" \
       --argjson run "$RUN_JSON" \
       '{ok:true,phase:$phase,busy:$busy,pending:{present:$pending,version:$version,priority:$priority,sequence:$sequence},rollback_available:$rollback,allowed:{check:$check_allowed,apply:$apply_allowed,retry:$retry_allowed,rollback:$rollback_allowed,recover:$recover_allowed},
-        run:$run}'
+        run:$run,engine:{version:$engine},
+        last_apply:(if $la_changed < 0 then null else {version:$la_version,changed_files:$la_changed,fetched_bytes:$la_bytes,applied_at:$la_at} end)}'
     exit 0
 fi
 

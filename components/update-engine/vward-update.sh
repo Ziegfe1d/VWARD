@@ -7,6 +7,7 @@ SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 usage() {
     printf '%s\n' 'Usage: vward-update.sh --status|--status-components|--check|--dry-run|--apply|--apply-pending|--rollback|--recover'
+    printf '%s\n' '       vward-update.sh --self-test MANIFEST | --engine-adopt DIR MANIFEST | --engine-revert'
 }
 
 cleanup() {
@@ -41,7 +42,7 @@ fetch_and_verify_manifest() {
     fi
     manifest_bytes=$(wc -c < "$manifest" | tr -d ' ')
     [ "$manifest_bytes" -le "$max_manifest_size" ] || return "$VU_VERIFY_ERROR"
-    vu_manifest_validate "$manifest" || return "$VU_VERIFY_ERROR"
+    vu_manifest_validate_any "$manifest" || return "$VU_VERIFY_ERROR"
     vu_manifest_verify_signature "$manifest" || return "$VU_VERIFY_ERROR"
     persist_trust_now=${persist_trust:-1}
     vu_manifest_check_policy "$manifest" "$persist_trust_now"
@@ -51,7 +52,10 @@ fetch_and_verify_manifest() {
         "$VU_NO_UPDATE"|"$VU_QUARANTINED") VU_MANIFEST=$manifest; return "$policy_rc" ;;
         *) return "$policy_rc" ;;
     esac
-    vu_manifest_space_preflight "$manifest" || return "$VU_SAFETY_ERROR"
+    # A per-file (v2) update checks its space once it knows which files change.
+    if [ "$(vu_manifest_schema "$manifest")" = 1 ]; then
+        vu_manifest_space_preflight "$manifest" || return "$VU_SAFETY_ERROR"
+    fi
     if [ "${persist_pending:-1}" = 1 ]; then
         vu_pending_store "$manifest" || return "$VU_INSTALL_ERROR"
     fi
@@ -135,6 +139,8 @@ print_plan() {
     printf 'Version: %s\n' "$(jq -r '.signed.version' "$manifest")"
     printf 'Priority: %s\n' "$(jq -r '.signed.priority' "$manifest")"
     printf 'Sequence: %s\n' "$(jq -r '.signed.sequence' "$manifest")"
+    [ -z "${VU_FULL_DIR:-}" ] || printf 'Changed files: %s of %s, %s bytes to fetch\n' "$VU_CHANGED_FILES" \
+        "$(jq '.files | length' "$VU_FULL_DIR/package-manifest.json")" "$VU_FETCHED_BYTES"
     printf '%s\n' 'Files:'
     jq -r '.files[] | "  [\(.component)] \(.target) mode=\(.mode)"' "$package_dir/package-manifest.json"
 }
@@ -299,7 +305,8 @@ apply_update() {
     sequence=$(jq -r '.signed.sequence' "$manifest")
     version=$(jq -r '.signed.version' "$manifest")
     health_time=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-    vu_component_state_write "$manifest" "$package_dir" "$health_time" || vu_die "$VU_INSTALL_ERROR" "Cannot commit component state"
+    # A per-file update records every signed file, changed or not.
+    vu_component_state_write "$manifest" "${VU_FULL_DIR:-$package_dir}" "$health_time" || vu_die "$VU_INSTALL_ERROR" "Cannot commit component state"
     vu_journal_set candidate_version "$version" || vu_die "$VU_INSTALL_ERROR" "Cannot journal candidate version"
     vu_journal_set candidate_update_id "$update_id" || vu_die "$VU_INSTALL_ERROR" "Cannot journal candidate update id"
     vu_journal_set candidate_sequence "$sequence" || vu_die "$VU_INSTALL_ERROR" "Cannot journal candidate sequence"
@@ -312,6 +319,11 @@ apply_update() {
     if [ -n "$VU_ROOT_PREFIX" ] && [ "${VWARD_TEST_CRASH_COMMIT:-}" = after_snapshot ]; then exit 99; fi
     vu_pending_clear
     vu_transition COMMITTED
+    if [ -n "${VU_FULL_DIR:-}" ]; then
+        vu_last_apply_write "$version" 2 "$VU_CHANGED_FILES" "$VU_FETCHED_BYTES" || :
+    else
+        vu_last_apply_write "$version" 1 "$(jq '.files | length' "$package_dir/package-manifest.json")" "$(jq -r '.signed.package.size' "$manifest")" || :
+    fi
     vu_log INFO "Update $version committed"
 }
 
@@ -335,10 +347,51 @@ use_pending_manifest=0
 [ "$command" = --apply-pending ] && use_pending_manifest=1
 
 vu_load_config
-vu_require_commands awk cmp cp curl date df find grep jq kill mkdir mv openssl sed sha256sum sleep sort stat tar tr wc
+vu_require_commands awk cmp cp curl date df find grep jq kill ls mkdir mv openssl sed sha256sum sleep sort stat tar tr wc xargs
 
 case "$command" in
+    --self-test)
+        # A new engine, before it becomes current: config, tools and the signed
+        # manifest that brought it must all work with its own code.
+        [ -r "${2:-}" ] || vu_die "$VU_CONFIG_ERROR" "Self-test needs the manifest"
+        vu_manifest_validate_any "$2" || vu_die "$VU_VERIFY_ERROR" "Self-test: manifest does not validate"
+        vu_manifest_verify_signature "$2" || vu_die "$VU_VERIFY_ERROR" "Self-test: signature does not verify"
+        printf 'engine_version=%s\n' "$VU_ENGINE_VERSION"
+        exit "$VU_OK" ;;
+    --engine-adopt)
+        # The move from an older engine: this engine, unpacked in DIR by the
+        # older installation, checks the signed manifest and installs itself.
+        adopt_dir=${2:-} adopt_manifest=${3:-}
+        [ -d "$adopt_dir" ] && [ -r "$adopt_manifest" ] || vu_die "$VU_CONFIG_ERROR" "Usage: --engine-adopt DIR MANIFEST"
+        vu_lock_acquire || vu_die "$VU_DEFERRED" "Another updater process is active"
+        trap 'vu_lock_release || :' EXIT
+        trap 'exit 1' HUP INT TERM
+        [ "$(vu_manifest_schema "$adopt_manifest")" = 2 ] && vu_manifest_validate_v2 "$adopt_manifest" ||
+            vu_die "$VU_VERIFY_ERROR" "Adopt: manifest does not validate"
+        vu_manifest_verify_signature "$adopt_manifest" || vu_die "$VU_VERIFY_ERROR" "Adopt: signature does not verify"
+        [ "$(jq -r '.signed.channel' "$adopt_manifest")" = "$channel" ] || vu_die "$VU_COMPAT_ERROR" "Adopt: other channel"
+        [ "$(jq -r '.signed.engine.version' "$adopt_manifest")" = "$VU_ENGINE_VERSION" ] || vu_die "$VU_VERIFY_ERROR" "Adopt: engine version differs"
+        # Never from a manifest older than the newest one this router has trusted.
+        highest=$(vu_trust_get highest_seen_sequence 2>/dev/null || vu_committed_get last_sequence 2>/dev/null || printf '0')
+        [ "$(jq -r '.signed.sequence' "$adopt_manifest")" -ge "$highest" ] || vu_die "$VU_COMPAT_ERROR" "Adopt: manifest older than trusted"
+        vu_engine_check_dir "$adopt_dir" "$adopt_manifest" || vu_die "$VU_VERIFY_ERROR" "Adopt: engine files differ from the signed list"
+        vu_engine_install_from "$adopt_dir" "$adopt_manifest" || vu_die "$VU_INSTALL_ERROR" "Adopt: engine install failed"
+        printf 'ENGINE_ADOPTED=%s\n' "$VU_ENGINE_VERSION"
+        exit "$VU_OK" ;;
+    --engine-revert)
+        vu_lock_acquire || vu_die "$VU_DEFERRED" "Another updater process is active"
+        trap 'vu_lock_release || :' EXIT
+        trap 'exit 1' HUP INT TERM
+        vu_engine_slots || vu_die "$VU_CONFIG_ERROR" "The engine does not run from a slot"
+        previous=$(vu_state_get engine_previous_slot "$VU_JOURNAL_FILE" 2>/dev/null || :)
+        [ "$previous" = "$VU_NEXT_SLOT" ] && [ -r "$previous/vward-update.sh" ] && sh -n "$previous/vward-update.sh" ||
+            vu_die "$VU_CONFIG_ERROR" "No previous engine to return to"
+        ln -sfn "$previous" "$(vu_updater_root)/current" || vu_die "$VU_INSTALL_ERROR" "Cannot switch the engine slot"
+        vu_journal_set engine_previous_slot "$VU_ACTIVE_SLOT" || :
+        vu_log WARN "Update engine returned to slot ${previous##*/}"
+        exit "$VU_OK" ;;
     --status)
+        printf 'engine_version=%s\n' "$VU_ENGINE_VERSION"
         printf 'enabled=%s\nauto_apply=%s\nbarrier_integration_ready=%s\nphase=%s\nlast_sequence=%s\nhighest_seen_sequence=%s\n' \
             "$update_enabled" "$auto_apply" "$barrier_integration_ready" \
             "$(vu_state_get phase "$VU_JOURNAL_FILE" 2>/dev/null || printf IDLE)" \
@@ -415,8 +468,26 @@ if [ "$command" != --dry-run ] && ! vu_schedule_ready "$priority" "$first_seen";
     vu_die "$VU_DEFERRED" "Pending update is waiting for its scheduling policy"
 fi
 
-download_and_unpack "$manifest"
-package_dir=$VU_PACKAGE_DIR
+schema=$(vu_manifest_schema "$manifest")
+# A newer signed engine is installed first; the rest of this run is done by it.
+if [ "$schema" = 2 ] && [ "$command" != --dry-run ] && [ "${VWARD_ENGINE_SWITCHED:-0}" != 1 ] && vu_engine_newer "$manifest"; then
+    if vu_engine_update "$manifest"; then
+        trap - EXIT
+        trap - HUP INT TERM
+        cleanup
+        VWARD_ENGINE_SWITCHED=1
+        export VWARD_ENGINE_SWITCHED
+        exec "$(vu_updater_root)/current/vward-update.sh" "$command"
+    fi
+    vu_log WARN "New update engine not installed; this one continues"
+fi
+if [ "$schema" = 2 ]; then
+    vu_v2_stage "$manifest" || vu_die "$VU_VERIFY_ERROR" "Per-file update: plan, download or check failed"
+    package_dir=$VU_PACKAGE_DIR
+else
+    download_and_unpack "$manifest"
+    package_dir=$VU_PACKAGE_DIR
+fi
 print_plan "$manifest" "$package_dir"
 
 case "$command" in

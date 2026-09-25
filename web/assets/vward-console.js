@@ -13,6 +13,7 @@ const store = {
 const num = v => (v == null || v === '' || isNaN(Number(v))) ? null : Number(v);
 const fmtInt = v => num(v) == null ? '—' : Number(v).toLocaleString('ru-RU');
 const fmtKB = kb => { const n = num(kb); if (n == null) return '—'; if (n >= 1048576) return (n / 1048576).toFixed(1).replace('.', ',') + ' ГБ'; if (n >= 1024) return Math.round(n / 1024) + ' МБ'; return n + ' КБ'; };
+const lastApplyNote = la => { if (!la) return ''; const n = la.changed_files, kb = Math.ceil((la.fetched_bytes || 0) / 1024); return 'последнее обновление: ' + (n ? 'заменено ' + n + ' ' + plural(n, 'файл', 'файла', 'файлов') + ', скачано ' + fmtKB(kb) : 'файлы не менялись'); };
 const fmtUptime = s => { const n = num(s); if (n == null) return '—'; const d = Math.floor(n / 86400), h = Math.floor(n % 86400 / 3600), m = Math.floor(n % 3600 / 60); return d ? d + ' д ' + h + ' ч' : h ? h + ' ч ' + m + ' мин' : m + ' мин'; };
 const fmtSpeed = v => { const n = num(v); return n == null ? '' : n >= 1000 ? (n / 1000).toString().replace('.', ',') + ' Гбит/с' : n + ' Мбит/с'; };
 const isTrue = v => v === true || v === 'true' || v === '1' || v === 1 || v === 'yes' || v === 'up';
@@ -597,7 +598,8 @@ const RENDER = {
         ['Версия', p.version || '—', '', 'd-notes', '', 'сборка № ' + (p.last_sequence || 0) + ' · что нового'],
         pend.present ? ['Доступно', (pend.version || '') + (pend.priority ? ' · ' + ({ ROUTINE: 'обычное', IMPORTANT: 'важное', CRITICAL: 'критическое' }[String(pend.priority).toUpperCase()] || pend.priority) : ''), 'info', 'd-notes'] : null,
         ['Последняя проверка', fmtStamp(p.last_health_check) || '—', '', 'logs', ' data-log-go="updater"'],
-        ['Откат', u.rollback_available ? 'Доступен' : 'Недоступен', u.rollback_available ? 'info' : '']
+        ['Откат', u.rollback_available ? 'Доступен' : 'Недоступен', u.rollback_available ? 'info' : ''],
+        u.engine ? ['Движок обновлений', u.engine.version === '1' ? '1.x' : u.engine.version, '', null, '', lastApplyNote(u.last_apply)] : null
       ]) + (conf || (acts.length ? '<div class="panel-actions even">' + acts.join('') + '</div>' : '')) + resultBox('updates'),
       { right: headPill((u.phase || p.phase) === 'FAILED' ? 'crit' : pend.present ? 'info' : 'ok', phaseText(u.phase || p.phase)) }) +
       panel('Настройки обновлений', '<dl class="kv">' +

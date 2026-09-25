@@ -48,7 +48,11 @@ check_interval_seconds=900
 request_timeout_seconds=120
 important_max_delay_seconds=7200
 routine_max_delay_seconds=86400
-minimum_updater_version=1.2.0
+# This engine's own version: a manifest may ask for a newer one (min_updater_version),
+# and a signed manifest carrying a newer engine makes it update itself.
+VU_ENGINE_VERSION=2.0.0
+minimum_updater_version=$VU_ENGINE_VERSION
+manifest_v2_url=
 
 VU_REQUEST_MARKER=${VU_ROOT_PREFIX}/tmp/vward-update-requested
 VU_BARRIER_LOCK=${VU_ROOT_PREFIX}/tmp/vward-update.lock
@@ -679,6 +683,7 @@ vu_pending_store() {
     else
         first_seen=$(vu_now_epoch)
         rm -f "$VU_PENDING_DIR/package.tar.gz"
+        rm -rf "${VU_PENDING_DIR:?}/files"
     fi
     pending_state=$VU_PENDING_DIR/pending.new.$$
     {
@@ -696,6 +701,7 @@ vu_pending_store() {
 }
 
 vu_pending_clear() {
+    rm -rf "${VU_PENDING_DIR:?}/files"
     for pending_file in manifest.json package.tar.gz pending.state; do
         rm -f "$VU_PENDING_DIR/$pending_file"
     done

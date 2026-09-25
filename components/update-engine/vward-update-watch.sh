@@ -36,7 +36,13 @@ run_once() {
     local_manifest=$VU_STAGING_DIR/watcher-manifest.json
     headers=$VU_STAGING_DIR/watcher-headers.$$
     body=$local_manifest.part.$$
-    etag=$(vu_state_get manifest_etag "$VU_STATE_DIR/watcher.state" 2>/dev/null || :)
+    # The per-file (v2) feed first; the full-package feed when a channel has none.
+    feed_url=$(vu_v2_url 2>/dev/null || :)
+    [ -n "$feed_url" ] || feed_url=$manifest_url
+    etag=
+    if [ "$(vu_state_get manifest_etag_url "$VU_STATE_DIR/watcher.state" 2>/dev/null || :)" = "$feed_url" ]; then
+        etag=$(vu_state_get manifest_etag "$VU_STATE_DIR/watcher.state" 2>/dev/null || :)
+    fi
 
     if [ -n "$VU_ROOT_PREFIX" ] && [ -n "${VWARD_TEST_HTTP_STATUS:-}" ]; then
         status=$VWARD_TEST_HTTP_STATUS
@@ -52,9 +58,13 @@ run_once() {
     else
         curl_args="--silent --show-error --location --proto =https --tlsv1.2 --connect-timeout 15 --max-time 60 --max-filesize $max_manifest_size"
         if [ -n "$etag" ]; then
-            status=$(curl $curl_args --dump-header "$headers" --output "$body" --write-out '%{http_code}' --header "If-None-Match: $etag" "$manifest_url") || return "$VU_NETWORK_ERROR"
+            status=$(curl $curl_args --dump-header "$headers" --output "$body" --write-out '%{http_code}' --header "If-None-Match: $etag" "$feed_url") || return "$VU_NETWORK_ERROR"
         else
-            status=$(curl $curl_args --dump-header "$headers" --output "$body" --write-out '%{http_code}' "$manifest_url") || return "$VU_NETWORK_ERROR"
+            status=$(curl $curl_args --dump-header "$headers" --output "$body" --write-out '%{http_code}' "$feed_url") || return "$VU_NETWORK_ERROR"
+        fi
+        if [ "$status" = 404 ] && [ "$feed_url" != "$manifest_url" ]; then
+            feed_url=$manifest_url
+            status=$(curl $curl_args --dump-header "$headers" --output "$body" --write-out '%{http_code}' "$feed_url") || return "$VU_NETWORK_ERROR"
         fi
     fi
 
@@ -88,17 +98,17 @@ run_once() {
     check_rc=$?
     case "$check_rc" in
         "$VU_OK")
-            [ -z "$new_etag" ] || vu_state_set manifest_etag "$new_etag" "$VU_STATE_DIR/watcher.state" || return "$VU_INSTALL_ERROR"
+            [ -z "$new_etag" ] || { vu_state_set manifest_etag "$new_etag" "$VU_STATE_DIR/watcher.state" && vu_state_set manifest_etag_url "$feed_url" "$VU_STATE_DIR/watcher.state"; } || return "$VU_INSTALL_ERROR"
             rm -f "$local_manifest"
             process_pending
             return $? ;;
         "$VU_NO_UPDATE")
-            [ -z "$new_etag" ] || vu_state_set manifest_etag "$new_etag" "$VU_STATE_DIR/watcher.state" || return "$VU_INSTALL_ERROR"
+            [ -z "$new_etag" ] || { vu_state_set manifest_etag "$new_etag" "$VU_STATE_DIR/watcher.state" && vu_state_set manifest_etag_url "$feed_url" "$VU_STATE_DIR/watcher.state"; } || return "$VU_INSTALL_ERROR"
             rm -f "$local_manifest"
             vu_log INFO "Feed matches already installed update"
             return "$VU_OK" ;;
         "$VU_QUARANTINED")
-            [ -z "$new_etag" ] || vu_state_set manifest_etag "$new_etag" "$VU_STATE_DIR/watcher.state" || return "$VU_INSTALL_ERROR"
+            [ -z "$new_etag" ] || { vu_state_set manifest_etag "$new_etag" "$VU_STATE_DIR/watcher.state" && vu_state_set manifest_etag_url "$feed_url" "$VU_STATE_DIR/watcher.state"; } || return "$VU_INSTALL_ERROR"
             rm -f "$local_manifest"
             return "$VU_QUARANTINED" ;;
         *) rm -f "$local_manifest"; return "$check_rc" ;;

@@ -30,6 +30,7 @@ UPDATER_FILES='
 vward-update-bootstrap.sh
 vward-update-common-base.sh
 vward-update-common.sh
+vward-update-delta.sh
 vward-update-hardening.sh
 vward-update-health.sh
 vward-update-rollback.sh

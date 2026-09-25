@@ -133,6 +133,8 @@ with tempfile.TemporaryDirectory() as td:
         assert call_api("action=update-control", "op=check", "POST")["error"] == "updater_busy"
         data = call_api("action=update-data")
         assert data["busy"] is True and data["run"]["running"] is True and data["run"]["label"] == "update-check", data
+        # No engine 2 installed here: version 1, no per-file apply yet.
+        assert data["engine"] == {"version": "1"} and data["last_apply"] is None, data
         for _ in range(60):
             run = call_api("action=update-data")["run"]
             if run["finished"]:

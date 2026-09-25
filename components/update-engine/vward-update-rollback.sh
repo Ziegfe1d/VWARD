@@ -154,7 +154,7 @@ fi
 # Recovery of a ROLLING_BACK journal therefore cannot reopen an auto-retry loop.
 rollback_failure_class=$(vu_state_get rollback_failure_class "$VU_JOURNAL_FILE" 2>/dev/null || :)
 if [ -n "$rollback_failure_class" ] && [ -r "$VU_PENDING_DIR/manifest.json" ]; then
-    vu_manifest_validate "$VU_PENDING_DIR/manifest.json" ||
+    vu_manifest_validate_any "$VU_PENDING_DIR/manifest.json" ||
         rollback_fail "Pending manifest is invalid while completing quarantine"
     vu_manifest_verify_signature "$VU_PENDING_DIR/manifest.json" ||
         rollback_fail "Pending manifest signature failed while completing quarantine"

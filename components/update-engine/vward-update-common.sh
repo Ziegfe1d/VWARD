@@ -25,3 +25,4 @@ fi
 
 . "$VU_COMMON_DIR/vward-update-common-base.sh"
 . "$VU_COMMON_DIR/vward-update-hardening.sh"
+. "$VU_COMMON_DIR/vward-update-delta.sh"

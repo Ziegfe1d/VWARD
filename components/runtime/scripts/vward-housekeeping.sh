@@ -255,6 +255,59 @@ rmdir "$R/opt/var/run/vward/console-tunnel" 2>/dev/null
 # Locks whose owner is gone (killed, power cut) would hold back the updater.
 vward_locks_sweep
 
+# ---------- One-time move to Update Engine 2 ----------
+# Engine 1 cannot read the per-file feed and cannot replace itself.  This hourly
+# job moves it over once, without a command: the signed v2 manifest is checked
+# with the router's own update key, each engine file against its signed sha256,
+# and the new engine then installs itself into the other slot (--engine-adopt:
+# updater lock, trusted sequence, self-test, atomic switch; slot A/B kept).
+engine_move()
+{
+    EM_ROOT=$R/opt/share/vward/updater
+    [ -r "$EM_ROOT/current/vward-update-common-base.sh" ] || return 0
+    ! grep -q '^VU_ENGINE_VERSION=' "$EM_ROOT/current/vward-update-common-base.sh" || return 0
+    EM_CONF=${VWARD_UPDATE_CONFIG:-$R/opt/etc/vward/update.conf}
+    em_get() { sed -n "s/^$1=//p" "$EM_CONF" 2>/dev/null | tail -n 1 | tr -d '"'; }
+    [ "$(em_get update_enabled)" = 1 ] || return 0
+    EM_KEY=$(em_get public_key_file); [ -n "$EM_KEY" ] || EM_KEY=$R/opt/etc/vward/update-public.pem
+    EM_CHANNEL=$(em_get channel); [ -n "$EM_CHANNEL" ] || EM_CHANNEL=dev
+    EM_URL=$(em_get manifest_url)
+    case "$EM_URL" in https://*/update-manifest.json) EM_URL=${EM_URL%/update-manifest.json}/v2/manifest.json ;; *) return 0 ;; esac
+    EM_T=$(mktemp -d /tmp/vward-engine-move.XXXXXX) || return 0
+    (
+        em_fetch() {
+            # em_fetch URL|NAME OUTPUT MAX_BYTES
+            if [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ]; then cp "$VWARD_ENGINE_MOVE_SOURCE/$1" "$2"; return; fi
+            curl -fsS --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 120 --max-filesize "$3" -o "$2" "$1" 2>/dev/null
+        }
+        if [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ]; then src=manifest.json; else src=$EM_URL; fi
+        em_fetch "$src" "$EM_T/manifest.json" 262144 || exit 3
+        jq -cS '.signed' "$EM_T/manifest.json" > "$EM_T/signed" &&
+            jq -r '.signature' "$EM_T/manifest.json" | openssl base64 -d -A > "$EM_T/sig" &&
+            openssl pkeyutl -verify -pubin -inkey "$EM_KEY" -rawin -in "$EM_T/signed" -sigfile "$EM_T/sig" >/dev/null 2>&1 || exit 4
+        jq -e --arg ch "$EM_CHANNEL" '.signed.schema == 2 and .signed.channel == $ch' "$EM_T/manifest.json" >/dev/null || exit 4
+        base=$(jq -r '.signed.files_base' "$EM_T/manifest.json")
+        case "$base" in https://*/) ;; *) exit 4 ;; esac
+        jq -r '.signed.engine.files[] | [.name, .sha256, (.size | tostring)] | @tsv' "$EM_T/manifest.json" |
+        while IFS="$(printf '\t')" read -r name sha size; do
+            case "$name" in ''|*[!A-Za-z0-9._-]*) exit 4 ;; esac
+            if [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ]; then src=files/$sha; else src=$base$sha; fi
+            em_fetch "$src" "$EM_T/$name" "$((size + 1))" || exit 3
+            [ "$(wc -c < "$EM_T/$name" | tr -d ' ')" = "$size" ] && [ "$(sha256sum "$EM_T/$name" | awk '{print $1}')" = "$sha" ] || exit 4
+        done || exit $?
+        sh "$EM_T/vward-update.sh" --engine-adopt "$EM_T" "$EM_T/manifest.json" >/dev/null 2>&1 || exit 5
+    )
+    EM_RC=$?
+    rm -rf "${EM_T:?}"
+    case "$EM_RC" in
+        0) echo "ENGINE_MOVED|v2"; echo "$(date '+%Y-%m-%d %H:%M:%S')|engine_move=done" >> "$HOUSE_LOG" ;;
+        3) : ;;
+        *) echo "$(date '+%Y-%m-%d %H:%M:%S')|engine_move=failed rc=$EM_RC" >> "$HOUSE_LOG" ;;
+    esac
+    return 0
+}
+engine_move
+
 # Daily snapshot of VWARD's settings (the helper skips it when one is younger than a day).
 # The day already handled is kept in RAM, so the other 23 hourly runs start nothing.
 BACKUP_HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
