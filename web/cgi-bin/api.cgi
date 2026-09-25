@@ -145,6 +145,87 @@ read_first()
     eval "$2=\$rf_line"
 }
 
+# ---------- Request body (POST, application/x-www-form-urlencoded) ----------
+
+# read_body MAX [header]: the request body into BODY; a missing or longer one
+# is refused (with the JSON header first when asked: it is not out yet).
+read_body()
+{
+    rb_len=${CONTENT_LENGTH:-0}
+    case "$rb_len" in ''|*[!0-9]*) rb_len=0 ;; esac
+    if [ "$rb_len" -le 0 ] || [ "$rb_len" -gt "$1" ]; then
+        [ "${2:-}" != header ] || header_json
+        echo '{"ok":false,"error":"invalid_body"}'
+        exit 0
+    fi
+    BODY=$(head -c "$rb_len")
+}
+
+# form_value KEY: the raw (still encoded) value of KEY, the first one when repeated.
+form_value()
+{
+    fv_rest="&$BODY"
+    case "$fv_rest" in *"&$1="*) ;; *) return 0 ;; esac
+    fv_rest=${fv_rest#*"&$1="}
+    fv_rest=${fv_rest%%&*}
+    printf '%s\n' "${fv_rest%%"$NL"*}"
+}
+NL='
+'
+
+# form_only KEY...: fails when the body holds a parameter not listed.
+form_only()
+{
+    fo_rest=$BODY
+    while [ -n "$fo_rest" ]; do
+        fo_key=${fo_rest%%&*}; fo_key=${fo_key%%=*}
+        case "$fo_rest" in *\&*) fo_rest=${fo_rest#*&} ;; *) fo_rest= ;; esac
+        [ -n "$fo_key" ] || continue
+        fo_ok=1
+        for fo_k; do [ "$fo_key" = "$fo_k" ] && { fo_ok=0; break; }; done
+        [ "$fo_ok" = 0 ] || return 1
+    done
+    return 0
+}
+
+# form_decode KEY MODE: the percent-decoded value of KEY, without a newline.
+#   text   printable ASCII, tabs and line breaks (a tunnel .conf)
+#   name   UTF-8 text without control characters, quotes or backslashes
+#   ascii  printable ASCII (a password VWARD keeps)
+#   url    printable ASCII without spaces; "+" stays "+"
+#   raw    any byte (a password that is only hashed)
+# Fails when the value holds a character its mode refuses.  Values travel on a
+# pipe, never in a process's arguments.
+form_decode()
+{
+    form_value "$1" | LC_ALL=C awk -v mode="$2" '
+        BEGIN {h = "0123456789abcdef"}
+        {
+            v = $0; o = ""
+            if (mode != "url") gsub(/\+/, " ", v)
+            while (match(tolower(v), /%[0-9a-f][0-9a-f]/)) {
+                c = (index(h, tolower(substr(v, RSTART + 1, 1))) - 1) * 16 + index(h, tolower(substr(v, RSTART + 2, 1))) - 1
+                if (mode == "text" && (c < 32 && c != 9 && c != 10 && c != 13 || c > 126)) exit 1
+                if (mode == "name" && (c < 32 || c == 34 || c == 92 || c == 127)) exit 1
+                if (mode == "ascii" && (c < 32 || c > 126)) exit 1
+                if (mode == "url" && (c < 33 || c > 126)) exit 1
+                o = o substr(v, 1, RSTART - 1) sprintf("%c", c); v = substr(v, RSTART + 3)
+            }
+            printf "%s", o v; exit
+        }'
+}
+
+# secret_path PATH: a secret by place or name, PATH relative to a VWARD folder:
+# the tunnel store, the HTTPS filter's CA, keys, logins, sessions.
+secret_path()
+{
+    case "/$1" in
+        /tunnels|/tunnels/*|*/https/ca|*/https/ca/*) return 0 ;;
+        *.key|*.auth|*private*|*secret*|*password*|*token*|*session*) return 0 ;;
+    esac
+    return 1
+}
+
 ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
@@ -157,8 +238,54 @@ case "$ACTION" in
         ;;
 esac
 
+# Console access settings.  One pass over the file, no process: this runs on
+# every request.
+AUTH_CONF=${VWARD_CONSOLE_AUTH_CONF:-/opt/etc/vward/console/auth.conf}
+kv_file "$AUTH_CONF" AUTH_ENABLED=AUTH_ENABLED SESSION_HOURS=AUTH_HOURS DEVICES_ONLY=DEVICES_ONLY \
+    ALLOWED_HOSTS=ALLOWED_HOSTS HOST_CHECK=HOST_CHECK
+[ "$AUTH_ENABLED" = 1 ] || AUTH_ENABLED=0
+[ "$DEVICES_ONLY" = 1 ] || DEVICES_ONLY=0
+case "$AUTH_HOURS" in ''|*[!0-9]*) AUTH_HOURS=12 ;; esac
+[ "$AUTH_HOURS" -ge 1 ] && [ "$AUTH_HOURS" -le 168 ] || AUTH_HOURS=12
+
+# ---------- Only the names the router answers to ----------
+# DNS rebinding: a web page on a foreign name that the attacker points at the
+# router would otherwise be "the same site" as VWARD to the browser and could
+# drive every action.  IP addresses, localhost, one-word and local names pass;
+# more names go into auth.conf as ALLOWED_HOSTS="name1 name2", and HOST_CHECK=0
+# turns the check off.
+host_allowed()
+{
+    [ "$HOST_CHECK" != 0 ] || return 0
+    ha_host=${HTTP_HOST:-}
+    case "$ha_host" in ''|\[*) return 0 ;; esac
+    ha_host=${ha_host%%:*}
+    case "$ha_host" in *[!0-9.]*) ;; *) return 0 ;; esac
+    case "$ha_host" in *[A-Z]*) ha_host=$(printf '%s' "$ha_host" | tr 'A-Z' 'a-z') ;; esac
+    ha_host=${ha_host%.}
+    case "$ha_host" in
+        *[!a-z0-9.-]*) return 1 ;;
+        localhost|*.localhost|*.local|*.lan|*.home|*.home.arpa|*.internal|*.localdomain) return 0 ;;
+        my.keenetic.net|*.keenetic.pro|*.keenetic.link|*.keenetic.name|*.keenetic.io|*.netcraze.pro|*.netcraze.link|*.netcraze.io) return 0 ;;
+        *.*) ;;
+        *) return 0 ;;
+    esac
+    ha_list=${ALLOWED_HOSTS#\"}; ha_list=${ha_list%\"}
+    set -f
+    for ha_name in $ha_list; do
+        [ "$ha_host" = "$ha_name" ] && { set +f; return 0; }
+    done
+    set +f
+    return 1
+}
+if ! host_allowed; then
+    echo 'Status: 403 Forbidden'
+    header_json
+    echo '{"ok":false,"error":"host_not_allowed"}'
+    exit 0
+fi
+
 if [ "${REQUEST_METHOD:-GET}" = POST ]; then
-    rm -rf "${NDM_CACHE_DIR:?}"
     [ "${HTTP_X_VWARD_REQUEST:-}" = console ] || {
         echo 'Status: 403 Forbidden'
         header_json
@@ -188,8 +315,6 @@ fi
 ads_kv_json(){ [ -r "$1" ] && awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' "$1" | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}'; }
 ads_valid_domain(){ printf '%s\n' "$1" | awk 'length($0)>0&&length($0)<=253&&index($0,".")>0&&$0!~/\.\./ {n=split($0,a,".");for(i=1;i<=n;i++)if(length(a[i])<1||length(a[i])>63||a[i]!~/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/)exit 1;exit 0}{exit 1}'; }
 ads_valid_source_id(){ printf '%s\n' "$1" | awk 'length($0)>=1&&length($0)<=64&&$0~/^[a-z0-9][a-z0-9._-]*$/{exit 0}{exit 1}'; }
-# Strict form decoding for URLs: printable ASCII only, anything else is refused.
-form_url_decode(){ printf '%s' "$1" | awk 'BEGIN{h="0123456789abcdef"} {s=tolower($0); o=""; while (match(s, /%[0-9a-f][0-9a-f]/)) { c=(index(h,substr(s,RSTART+1,1))-1)*16+index(h,substr(s,RSTART+2,1))-1; if (c<33||c>126) exit 1; o=o substr($0,1,RSTART-1) sprintf("%c",c); $0=substr($0,RSTART+3); s=substr(s,RSTART+3)} print o $0}'; }
 ads_console_tmp(){ umask 077; mktemp "/tmp/vward-console-${1}.XXXXXX"; }
 updater_mutation_busy(){ [ -e /opt/var/run/vward/updater.lock ] || [ -L /opt/var/run/vward/updater.lock ] || [ -e /tmp/vward-update-requested ] || [ -L /tmp/vward-update-requested ] || [ -e /tmp/vward-update.lock ] || [ -L /tmp/vward-update.lock ]; }
 console_mutation_enter(){
@@ -205,12 +330,18 @@ UPDATE_RUN_DIR=${VWARD_CONSOLE_UPDATE_RUN:-/opt/var/run/vward/console-update}
 CONTROL_RUN_DIR=${VWARD_CONSOLE_CONTROL_RUN:-/opt/var/run/vward/console-control}
 # Long operations outlast the browser's 10-second request, so they run
 # detached; update-data and control-data report the output and exit code.
+# detached_running DIR: a run started from DIR is still going.
+detached_running(){
+  rd_pid="$(sed -n 's/^pid=//p' "$1/run.meta" 2>/dev/null)"
+  ! grep -q '^rc=' "$1/run.meta" 2>/dev/null && [ -n "$rd_pid" ] && kill -0 "$rd_pid" 2>/dev/null
+}
+# run_detached DIR BUSY_ERROR [FILE...]: start $CMD; the FILEs go when it cannot start.
 run_detached(){
-  rd_dir=$1
-  mkdir -p "$rd_dir" || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
-  rd_pid="$(sed -n 's/^pid=//p' "$rd_dir/run.meta" 2>/dev/null)"
-  if ! grep -q '^rc=' "$rd_dir/run.meta" 2>/dev/null && [ -n "$rd_pid" ] && kill -0 "$rd_pid" 2>/dev/null; then
-    printf '{"ok":false,"error":"%s"}\n' "$2"; exit 0
+  rd_dir=$1 rd_busy=$2; shift 2
+  mkdir -p "$rd_dir" || { rm -f "$@"; echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+  if detached_running "$rd_dir"; then
+    rm -f "$@"
+    printf '{"ok":false,"error":"%s"}\n' "$rd_busy"; exit 0
   fi
   printf 'label=%s\nstarted=%s\n' "$LABEL" "$START" > "$rd_dir/run.meta"
   (
@@ -243,15 +374,8 @@ CONFIG_HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
 # ---------- Console login with the Keenetic account ----------
 # Off by default.  The router checks the password (challenge-response on its
 # own /auth); VWARD keeps only a hash of the session token with an expiry.
-AUTH_CONF=${VWARD_CONSOLE_AUTH_CONF:-/opt/etc/vward/console/auth.conf}
 AUTH_SESSIONS=${VWARD_CONSOLE_SESSIONS:-/tmp/vward-console-sessions}
 AUTH_URL=${VWARD_KEENETIC_AUTH_URL:-http://${VWARD_LAN_ADDRESS:-127.0.0.1}/auth}
-# One pass over the file, no process: this runs on every request.
-kv_file "$AUTH_CONF" AUTH_ENABLED=AUTH_ENABLED SESSION_HOURS=AUTH_HOURS DEVICES_ONLY=DEVICES_ONLY
-[ "$AUTH_ENABLED" = 1 ] || AUTH_ENABLED=0
-[ "$DEVICES_ONLY" = 1 ] || DEVICES_ONLY=0
-case "$AUTH_HOURS" in ''|*[!0-9]*) AUTH_HOURS=12 ;; esac
-[ "$AUTH_HOURS" -ge 1 ] && [ "$AUTH_HOURS" -le 168 ] || AUTH_HOURS=12
 AUTH_LOGIN=""
 
 auth_cookie_token(){ printf '%s\n' "${HTTP_COOKIE:-}" | tr ';' '\n' | sed 's/^ *//' | awk -F= '$1=="vward_session"{print $2; exit}'; }
@@ -312,6 +436,10 @@ if [ "$AUTH_ENABLED" = 1 ] && [ "$ACTION" != auth ] && [ "$ACTION" != ping ] && 
     exit 0
 fi
 
+# A change from the Console: saved router answers go, the next page shows the
+# router as it is now.
+[ "${REQUEST_METHOD:-GET}" != POST ] || rm -rf "${NDM_CACHE_DIR:?}"
+
 if [ "$ACTION" = auth ]; then
     if [ "${REQUEST_METHOD:-GET}" = GET ]; then
         header_json
@@ -321,26 +449,12 @@ if [ "$ACTION" = auth ]; then
             '{ok:true,enabled:$enabled,logged_in:$logged,login:$login,session_hours:$hours,devices_only:$devices_only,device:{ip:$ip,state:$state}}'
         exit 0
     fi
-    LENGTH=${CONTENT_LENGTH:-0}; case "$LENGTH" in ''|*[!0-9]*) LENGTH=0;; esac
-    [ "$LENGTH" -gt 0 ] && [ "$LENGTH" -le 1024 ] || { header_json; echo '{"ok":false,"error":"invalid_body"}'; exit 0; }
-    BODY=$(dd bs=1 count="$LENGTH" 2>/dev/null)
-    aval(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
-    AOP="$(aval op)"
+    read_body 1024 header
+    AOP="$(form_value op)"
     umask 077
     mkdir -p "$AUTH_SESSIONS" 2>/dev/null; chmod 0700 "$AUTH_SESSIONS" 2>/dev/null
     FAILS="$AUTH_SESSIONS/.failures"
 
-    # Password field decoded to raw bytes from stdin, so it never appears in argv.
-    auth_password_bytes(){ printf '%s\n' "$BODY" | tr '&' '\n' | LC_ALL=C awk -F= '
-        BEGIN {h = "0123456789abcdef"}
-        $1 == "password" {
-            v = substr($0, index($0, "=") + 1); gsub(/\+/, " ", v); o = ""
-            while (match(tolower(v), /%[0-9a-f][0-9a-f]/)) {
-                c = (index(h, tolower(substr(v, RSTART + 1, 1))) - 1) * 16 + index(h, tolower(substr(v, RSTART + 2, 1))) - 1
-                o = o substr(v, 1, RSTART - 1) sprintf("%c", c); v = substr(v, RSTART + 3)
-            }
-            printf "%s", o v; exit
-        }'; }
 
     # Challenge-response against the router: never sends or stores the password.
     auth_keenetic(){
@@ -350,7 +464,8 @@ if [ "$ACTION" = auth ]; then
         ak_realm="$(tr -d '\r' < "$ak_hdr" | awk -F': ' 'tolower($1)=="x-ndm-realm"{print $2; exit}')"
         ak_chal="$(tr -d '\r' < "$ak_hdr" | awk -F': ' 'tolower($1)=="x-ndm-challenge"{print $2; exit}')"
         case "$ak_realm$ak_chal" in *[!A-Za-z0-9._\ -]*|'') rm -f "$ak_jar" "$ak_hdr" "$ak_body"; return 2 ;; esac
-        ak_md5="$({ printf '%s:%s:' "$ak_login" "$ak_realm"; auth_password_bytes; } | md5sum | cut -c1-32)"
+        # The password is decoded on a pipe into the hash, never into argv.
+        ak_md5="$({ printf '%s:%s:' "$ak_login" "$ak_realm"; form_decode password raw; } | md5sum | cut -c1-32)"
         ak_sha="$(printf '%s%s' "$ak_chal" "$ak_md5" | sha256sum | cut -c1-64)"
         printf '{"login":"%s","password":"%s"}' "$ak_login" "$ak_sha" > "$ak_body"
         ak_code="$("$CURL" -s -o /dev/null -b "$ak_jar" -c "$ak_jar" -H 'Content-Type: application/json' --data-binary "@$ak_body" --connect-timeout 3 --max-time 6 -w '%{http_code}' "$AUTH_URL" 2>/dev/null)"
@@ -372,7 +487,7 @@ if [ "$ACTION" = auth ]; then
         now="$(date +%s)"
         recent="$(awk -v n="$now" '$1+0 > n-300 {c++} END{print c+0}' "$FAILS" 2>/dev/null)"
         [ "${recent:-0}" -lt 5 ] || { header_json; echo '{"ok":false,"error":"too_many_attempts"}'; exit 0; }
-        ALOGIN="$(aval login)"
+        ALOGIN="$(form_value login)"
         printf '%s\n' "$ALOGIN" | grep -Eq '^[A-Za-z0-9._@-]{1,64}$' || { header_json; echo '{"ok":false,"error":"invalid_login"}'; exit 0; }
         auth_keenetic "$ALOGIN"; arc=$?
         if [ "$arc" = 2 ]; then header_json; echo '{"ok":false,"error":"router_auth_unavailable"}'; exit 0; fi
@@ -403,7 +518,7 @@ if [ "$ACTION" = auth ]; then
         disable)
             header_json
             [ "$AUTH_ENABLED" = 0 ] || auth_session_valid || { echo '{"ok":false,"error":"auth_required"}'; exit 0; }
-            [ "$(aval confirm)" = CONSOLE_AUTH_DISABLE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+            [ "$(form_value confirm)" = CONSOLE_AUTH_DISABLE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
             [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
             AOUT="$("$CONFIG_HELPER" console-auth 0 2>/dev/null | tail -n 1)"
             case "$AOUT" in result=*) echo '{"ok":true}' ;; *) "$JQ" -cn --arg e "${AOUT#error=}" '{ok:false,error:$e}' ;; esac
@@ -411,7 +526,7 @@ if [ "$ACTION" = auth ]; then
         devices)
             header_json
             [ "$AUTH_ENABLED" = 0 ] || auth_session_valid || { echo '{"ok":false,"error":"auth_required"}'; exit 0; }
-            DV="$(aval value)"; case "$DV" in 0|1) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+            DV="$(form_value value)"; case "$DV" in 0|1) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
             # Turning it on from a device that would be shut out is refused.
             if [ "$DV" = 1 ]; then
                 case "$(device_state)" in registered) ;; unknown) echo '{"ok":false,"error":"devices_unavailable"}'; exit 0 ;; *) echo '{"ok":false,"error":"this_device_not_registered"}'; exit 0 ;; esac
@@ -457,13 +572,9 @@ if [ "$ACTION" = wifi-control ]; then
     ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
     console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
     trap console_mutation_leave EXIT
-    LENGTH=${CONTENT_LENGTH:-0}; case "$LENGTH" in ''|*[!0-9]*) LENGTH=0;; esac
-    [ "$LENGTH" -gt 0 ] && [ "$LENGTH" -le 256 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }
-    BODY=$(dd bs=1 count="$LENGTH" 2>/dev/null)
-    wvalue(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
-    UNKNOWN="$(printf '%s\n' "$BODY" | tr '&' '\n' | cut -d= -f1 | awk '$0!="op" && $0!="mac" && $0!="confirm" {print;exit}')"
-    [ -z "$UNKNOWN" ] || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
-    OP="$(wvalue op)"; MAC="$(wvalue mac | tr 'A-F' 'a-f')"; CONFIRM="$(wvalue confirm)"
+    read_body 256
+    form_only op mac confirm || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
+    OP="$(form_value op)"; MAC="$(form_value mac | tr 'A-F' 'a-f')"; CONFIRM="$(form_value confirm)"
     case "$OP" in bind-2g) REQUIRED=WIFI_BIND_2G;; bind-5g) REQUIRED=WIFI_BIND_5G;; auto) REQUIRED=WIFI_BAND_AUTO;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
     printf '%s\n' "$MAC" | grep -Eiq '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || { echo '{"ok":false,"error":"invalid_mac"}'; exit 0; }
     [ "$CONFIRM" = "$REQUIRED" ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
@@ -546,13 +657,10 @@ if [ "$ACTION" = config ]; then
     ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
     console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
     trap console_mutation_leave EXIT
-    LENGTH=${CONTENT_LENGTH:-0}; case "$LENGTH" in ''|*[!0-9]*) LENGTH=0;; esac
-    [ "$LENGTH" -gt 0 ] && [ "$LENGTH" -le 512 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }
-    BODY=$(dd bs=1 count="$LENGTH" 2>/dev/null)
-    UNKNOWN="$(printf '%s\n' "$BODY" | tr '&' '\n' | cut -d= -f1 | awk '$0!="op"&&$0!="action"&&$0!="target"&&$0!="value"&&$0!="confirm"{print;exit}')"
-    [ -z "$UNKNOWN" ] || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
+    read_body 512
+    form_only op action target value confirm || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
     # Only the characters the helper accepts; ':' and '-' may arrive percent-encoded.
-    fval(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}' | sed 's/%3[Aa]/:/g;s/%2[Dd]/-/g'; }
+    fval(){ form_value "$1" | sed 's/%3[Aa]/:/g;s/%2[Dd]/-/g'; }
     OP="$(fval op)"; ACT="$(fval action)"; TARGET="$(fval target)"; VALUE="$(fval value)"; CONFIRM="$(fval confirm)"
     for F in "$OP" "$ACT" "$TARGET" "$VALUE" "$CONFIRM"; do
         case "$F" in *[!A-Za-z0-9._:-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
@@ -672,9 +780,8 @@ fi
 if [ "$ACTION" = ads-https-control ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }; ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; trap console_mutation_leave EXIT
   ! component_disabled ads-privacy-guard || { echo '{"ok":false,"error":"component_disabled"}'; exit 0; }
-  LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ]&&[ "$LEN" -le 512 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }; BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
-  val(){ printf '%s\n' "$BODY"|tr '&' '\n'|awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
-  OP="$(val op)"; CONFIRM="$(val confirm)"; case "$OP" in validate|render|pac|stop) ;; ca-init) [ "$CONFIRM" = HTTPS_CA_INIT ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;; start|restart) [ "$CONFIRM" = HTTPS_START ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
+  read_body 512
+  OP="$(form_value op)"; CONFIRM="$(form_value confirm)"; case "$OP" in validate|render|pac|stop) ;; ca-init) [ "$CONFIRM" = HTTPS_CA_INIT ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;; start|restart) [ "$CONFIRM" = HTTPS_START ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
   HTTPSCTL=/opt/bin/vward-ads-privacy-https.sh; [ -x "$HTTPSCTL" ] || { echo '{"ok":false,"error":"https_backend_missing"}'; exit 0; }
   OUT="$(ads_console_tmp ads-https-control)" || { echo '{"ok":false,"error":"temporary_file_failed"}'; exit 0; }; RC=0
   case "$OP" in ca-init) "$HTTPSCTL" ca-init --confirm >"$OUT" 2>&1||RC=$? ;; start) "$HTTPSCTL" start --confirm >"$OUT" 2>&1||RC=$? ;; restart) "$HTTPSCTL" restart --confirm >"$OUT" 2>&1||RC=$? ;; *) "$HTTPSCTL" "$OP" >"$OUT" 2>&1||RC=$? ;; esac
@@ -690,30 +797,19 @@ if [ "$ACTION" = tunnel-conf ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
   ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
   [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
-  LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac
-  [ "$LEN" -gt 0 ] && [ "$LEN" -le 49152 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }
-  BODY=$(dd bs=4096 count=$(( (LEN + 4095) / 4096 )) 2>/dev/null | head -c "$LEN")
-  val(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
-  TOP="$(val op)"; TNAME="$(val name)"; TCONF="$(val confirm)"
+  read_body 49152
+  TOP="$(form_value op)"; TNAME="$(form_value name)"; TCONF="$(form_value confirm)"
   case "$TNAME" in *[!A-Za-z0-9_.-]*) echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0 ;; esac
-  # A decoded value: printable text, tabs and line breaks only.
-  tdecode(){ printf '%s\n' "$BODY" | tr '&' '\n' | LC_ALL=C awk -F= -v k="$1" '
-      BEGIN {h = "0123456789abcdef"}
-      $1 == k {
-        v = substr($0, index($0, "=") + 1); gsub(/\+/, " ", v); o = ""
-        while (match(tolower(v), /%[0-9a-f][0-9a-f]/)) {
-          c = (index(h, tolower(substr(v, RSTART + 1, 1))) - 1) * 16 + index(h, tolower(substr(v, RSTART + 2, 1))) - 1
-          if (c < 32 && c != 9 && c != 10 && c != 13 || c > 126) exit 1
-          o = o substr(v, 1, RSTART - 1) sprintf("%c", c); v = substr(v, RSTART + 3)
-        }
-        printf "%s", o v; exit
-      }'; }
   case "$TOP" in
     check|replace|create)
-      TUNNEL_TMP=${VWARD_CONSOLE_TUNNEL_TMP:-/opt/var/run/vward/console-tunnel}
+      # The upload holds the tunnel's private key: in RAM, root-only, and gone
+      # with the helper whatever happens (uploads a crash left behind go too).
+      TUNNEL_TMP=${VWARD_CONSOLE_TUNNEL_TMP:-/tmp/vward-console-tunnel}
       (umask 077; mkdir -p "$TUNNEL_TMP") || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
+      find "$TUNNEL_TMP" -type f -mmin +30 -exec rm -f {} \; 2>/dev/null
+      [ "$TOP" = check ] || ! detached_running "$CONTROL_RUN_DIR" || { echo '{"ok":false,"error":"control_busy"}'; exit 0; }
       TFILE="$(umask 077; mktemp "$TUNNEL_TMP/upload.XXXXXX" 2>/dev/null)" || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
-      tdecode conf > "$TFILE" || { rm -f "$TFILE"; echo '{"ok":false,"error":"conf_syntax"}'; exit 0; }
+      form_decode conf text > "$TFILE" || { rm -f "$TFILE"; echo '{"ok":false,"error":"conf_syntax"}'; exit 0; }
       [ -s "$TFILE" ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"conf_empty"}'; exit 0; }
       if [ "$TOP" = check ]; then
         TOUT="$("$CONFIG_HELPER" tunnel-conf check "$TFILE" 2>/dev/null)"; rm -f "$TFILE"
@@ -729,7 +825,7 @@ if [ "$ACTION" = tunnel-conf ]; then
         [ "$TCONF" = TUNNEL_REPLACE ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
         ARGS="tunnel-conf replace $TFILE $TNAME"
       else
-        TDESC="$(tdecode description | tr -d '\t\r\n')" || TDESC=""
+        TDESC="$(form_decode description text | tr -d '\t\r\n')" || TDESC=""
         case "$TDESC" in ''|*'"'*|*"$(printf '\134')"*) rm -f "$TFILE"; echo '{"ok":false,"error":"invalid_description"}'; exit 0 ;; esac
         [ "${#TDESC}" -le 64 ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"invalid_description"}'; exit 0; }
         # The description may hold spaces: it goes through a file, not the argument list.
@@ -737,15 +833,15 @@ if [ "$ACTION" = tunnel-conf ]; then
         ARGS="tunnel-conf create $TFILE @$TFILE.desc"
       fi
       CMD="$CONFIG_HELPER" LABEL="tunnel-$TOP" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
-      run_detached "$CONTROL_RUN_DIR" control_busy ;;
+      run_detached "$CONTROL_RUN_DIR" control_busy "$TFILE" "$TFILE.desc" ;;
     delete|subnet-add|subnet-remove)
       console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; trap console_mutation_leave EXIT
       if [ "$TOP" = delete ]; then
         [ "$TCONF" = TUNNEL_DELETE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
-        TTO="$(val target)"; case "$TTO" in ''|*[!A-Za-z0-9_.-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+        TTO="$(form_value target)"; case "$TTO" in ''|*[!A-Za-z0-9_.-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
         set -- tunnel-delete "$TNAME" "$TTO"
       else
-        TNET="$(tdecode subnet)" || TNET=""
+        TNET="$(form_decode subnet text)" || TNET=""
         case "$TNET" in ''|*[!0-9./]*) echo '{"ok":false,"error":"invalid_subnet"}'; exit 0 ;; esac
         set -- tunnel-subnet "$TNAME" "${TOP#subnet-}" "$TNET"
       fi
@@ -765,32 +861,20 @@ if [ "$ACTION" = wifi-host ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
   ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
   [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
-  LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ] && [ "$LEN" -le 1024 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }
-  BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
-  val(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
-  WMAC="$(val mac | sed 's/%3[Aa]/:/g')"
+  read_body 1024
+  WMAC="$(form_value mac | sed 's/%3[Aa]/:/g')"
   printf '%s\n' "$WMAC" | grep -Eq '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$' || { echo '{"ok":false,"error":"invalid_mac"}'; exit 0; }
-  case "$(val op)" in
+  case "$(form_value op)" in
     name)
       # The name as UTF-8 text: no control characters, quotes or backslashes.
-      WNAME="$(printf '%s\n' "$BODY" | tr '&' '\n' | LC_ALL=C awk -F= '
-        BEGIN {h = "0123456789abcdef"}
-        $1 == "name" {
-          v = substr($0, index($0, "=") + 1); gsub(/\+/, " ", v); o = ""
-          while (match(tolower(v), /%[0-9a-f][0-9a-f]/)) {
-            c = (index(h, tolower(substr(v, RSTART + 1, 1))) - 1) * 16 + index(h, tolower(substr(v, RSTART + 2, 1))) - 1
-            if (c < 32 || c == 34 || c == 92 || c == 127) exit 1
-            o = o substr(v, 1, RSTART - 1) sprintf("%c", c); v = substr(v, RSTART + 3)
-          }
-          printf "%s", o v; exit
-        }')" || { echo '{"ok":false,"error":"invalid_name"}'; exit 0; }
+      WNAME="$(form_decode name name)" || { echo '{"ok":false,"error":"invalid_name"}'; exit 0; }
       [ -n "$WNAME" ] && [ "${#WNAME}" -le 64 ] || { echo '{"ok":false,"error":"invalid_name"}'; exit 0; }
       WFILE="$(umask 077; mktemp /tmp/vward-console-name.XXXXXX 2>/dev/null)" || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
       printf '%s' "$WNAME" > "$WFILE"
       set -- wifi-host "$WMAC" name "@$WFILE" ;;
     access)
-      WV="$(val value)"; case "$WV" in permit|deny) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
-      [ "$WV" = permit ] || [ "$(val confirm)" = WIFI_ACCESS_DENY ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+      WV="$(form_value value)"; case "$WV" in permit|deny) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+      [ "$WV" = permit ] || [ "$(form_value confirm)" = WIFI_ACCESS_DENY ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
       set -- wifi-host "$WMAC" access "$WV" ;;
     *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
   esac
@@ -814,16 +898,29 @@ if [ "$ACTION" = backup-data ]; then
       created: (.[0] | ltrimstr("vward-") | .[0:4] + "-" + .[4:6] + "-" + .[6:8] + "T" + .[9:11] + ":" + .[11:13] + ":" + .[13:15])}] | {ok: true, backups: .}'
   exit 0
 fi
+# The copy that leaves the router holds no secrets: tunnel keys, the AdGuard Home
+# login, the HTTPS filter's CA and the router's own configuration stay in the
+# snapshot on the router, which a restore uses.
 if [ "$ACTION" = backup-download ]; then
   BN="$(qget name)"
   printf '%s\n' "$BN" | grep -Eq '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$' && [ -f "$SNAPSHOT_DIR/$BN" ] && [ ! -L "$SNAPSHOT_DIR/$BN" ] || { header_json; echo '{"ok":false,"error":"unknown_backup"}'; exit 0; }
+  BD="$(umask 077; mktemp -d /tmp/vward-console-backup.XXXXXX 2>/dev/null)" || { header_json; echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
+  trap 'rm -rf "${BD:?}"' EXIT
+  mkdir "$BD/copy" && tar -xzf "$SNAPSHOT_DIR/$BN" -C "$BD/copy" 2>/dev/null || { header_json; echo '{"ok":false,"error":"backup_damaged"}'; exit 0; }
+  rm -rf "$BD/copy/router-running-config.txt" "$BD/copy/etc/tunnels"
+  ( cd "$BD/copy" && find . -type f -o -type l ) | while IFS= read -r BF; do
+    BF=${BF#./}
+    if [ -L "$BD/copy/$BF" ] || secret_path "${BF#etc/}"; then rm -f "$BD/copy/$BF"; fi
+  done
+  echo "secrets_removed=1" >> "$BD/copy/backup.meta"
+  ( cd "$BD/copy" && tar -czf "$BD/out.tar.gz" . ) 2>/dev/null || { header_json; echo '{"ok":false,"error":"backup_failed"}'; exit 0; }
   echo 'Content-Type: application/gzip'
   echo "Content-Disposition: attachment; filename=\"$BN\""
   echo 'Cache-Control: no-store'
   echo 'X-Content-Type-Options: nosniff'
-  echo "Content-Length: $(wc -c < "$SNAPSHOT_DIR/$BN" | tr -d ' ')"
+  echo "Content-Length: $(wc -c < "$BD/out.tar.gz" | tr -d ' ')"
   echo
-  cat "$SNAPSHOT_DIR/$BN"
+  cat "$BD/out.tar.gz"
   exit 0
 fi
 # release-notes VERSION: what is new in a version, from the CHANGELOG next to the
@@ -871,13 +968,7 @@ if [ "$ACTION" = files ]; then
   FFULL="$FBASE${FPATH:+/$FPATH}"
   [ -d "$FBASE" ] || fdie folder_missing
   # A closed path: secrets by place or name.
-  file_closed() {
-    case "/$1" in
-      /tunnels|/tunnels/*|*/https/ca|*/https/ca/*) return 0 ;;
-      *.key|*.auth|*private*|*secret*|*password*|*token*|*session*) return 0 ;;
-    esac
-    return 1
-  }
+  file_closed() { secret_path "$1"; }
   # Every part of the path must be a real folder or file, not a link.
   FCHK="$FBASE"; FREST="$FPATH"
   while [ -n "$FREST" ]; do
@@ -947,13 +1038,11 @@ if [ "$ACTION" = backup-control ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
   ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
   [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
-  LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ] && [ "$LEN" -le 512 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }
-  BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
-  val(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
-  case "$(val op)" in
+  read_body 512
+  case "$(form_value op)" in
     create) set -- backup-create manual ;;
-    restore) [ "$(val confirm)" = BACKUP_RESTORE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
-      BN="$(val name)"; printf '%s\n' "$BN" | grep -Eq '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$' || { echo '{"ok":false,"error":"invalid_backup"}'; exit 0; }
+    restore) [ "$(form_value confirm)" = BACKUP_RESTORE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+      BN="$(form_value name)"; printf '%s\n' "$BN" | grep -Eq '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$' || { echo '{"ok":false,"error":"invalid_backup"}'; exit 0; }
       set -- backup-restore "$BN" ;;
     *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
   esac
@@ -972,27 +1061,15 @@ if [ "$ACTION" = agh-auth ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
   ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
   console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; trap console_mutation_leave EXIT
-  LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ] && [ "$LEN" -le 1024 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }
-  BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
-  val(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
+  read_body 1024
   AGH_AUTH=${VWARD_ADS_AGH_AUTH_FILE:-/opt/etc/vward/ads-privacy-guard/agh-api.auth}
   AGH_BASE="http://${VWARD_ADGUARD_ADDRESS:-127.0.0.1}:${VWARD_ADGUARD_PORT:-3000}/control"
-  case "$(val op)" in
+  case "$(form_value op)" in
     connect)
-      ALOGIN="$(val login)"
+      ALOGIN="$(form_value login)"
       printf '%s\n' "$ALOGIN" | grep -Eq '^[A-Za-z0-9._@-]{1,64}$' || { echo '{"ok":false,"error":"invalid_login"}'; exit 0; }
       # Decoded password, printable ASCII only; kept in a variable, never in argv.
-      APASS="$(printf '%s\n' "$BODY" | tr '&' '\n' | LC_ALL=C awk -F= '
-        BEGIN {h = "0123456789abcdef"}
-        $1 == "password" {
-          v = substr($0, index($0, "=") + 1); gsub(/\+/, " ", v); o = ""
-          while (match(tolower(v), /%[0-9a-f][0-9a-f]/)) {
-            c = (index(h, tolower(substr(v, RSTART + 1, 1))) - 1) * 16 + index(h, tolower(substr(v, RSTART + 2, 1))) - 1
-            if (c < 32 || c > 126) exit 1
-            o = o substr(v, 1, RSTART - 1) sprintf("%c", c); v = substr(v, RSTART + 3)
-          }
-          printf "%s", o v; exit
-        }')" || { echo '{"ok":false,"error":"invalid_password"}'; exit 0; }
+      APASS="$(form_decode password ascii)" || { echo '{"ok":false,"error":"invalid_password"}'; exit 0; }
       [ -n "$APASS" ] && [ "${#APASS}" -le 128 ] || { echo '{"ok":false,"error":"invalid_password"}'; exit 0; }
       # curl reads the credentials from a config on stdin: "user" with \ and " escaped.
       AESC="$(printf '%s:%s' "$ALOGIN" "$APASS" | awk 'BEGIN {b = sprintf("%c", 92); q = sprintf("%c", 34)}
@@ -1009,7 +1086,7 @@ if [ "$ACTION" = agh-auth ]; then
       printf '%s|CONSOLE_ACTION|action=agh-connect login=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$ALOGIN" >> /opt/var/log/vward/console-audit.log 2>/dev/null
       echo '{"ok":true,"connected":true}' ;;
     disconnect)
-      [ "$(val confirm)" = AGH_DISCONNECT ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+      [ "$(form_value confirm)" = AGH_DISCONNECT ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
       rm -f "$AGH_AUTH" || { echo '{"ok":false,"error":"write_failed"}'; exit 0; }
       printf '%s|CONSOLE_ACTION|action=agh-disconnect\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >> /opt/var/log/vward/console-audit.log 2>/dev/null
       echo '{"ok":true,"connected":false}' ;;
@@ -1020,11 +1097,11 @@ fi
 
 if [ "$ACTION" = ads-settings ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }; ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; trap console_mutation_leave EXIT
-  LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ]&&[ "$LEN" -le 3072 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }; BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
-  val(){ printf '%s\n' "$BODY"|tr '&' '\n'|awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
-  UNKNOWN="$(printf '%s\n' "$BODY"|tr '&' '\n'|cut -d= -f1|awk '$0!="ENABLED"&&$0!="RUN_MODE"&&$0!="SCHEDULE_INTERVAL_MIN"&&$0!="DYNAMIC_MIN_INTERVAL_SEC"&&$0!="DYNAMIC_MAX_LOAD_PER_CPU_X100"&&$0!="DYNAMIC_MIN_MEM_AVAILABLE_KB"&&$0!="DYNAMIC_MIN_OPT_FREE_KB"&&$0!="DYNAMIC_MAX_CANDIDATES_PER_RUN"&&$0!="AUTO_SOURCE_UPDATE"&&$0!="SOURCE_UPDATE_INTERVAL_HOURS"&&$0!="QUERY_SOURCE"&&$0!="AUTO_RULE_SCOPE"&&$0!="PUBLISH_MODE"&&$0!="AUTO_PUBLISH"&&$0!="confirm"{print;exit}')"; [ -z "$UNKNOWN" ] || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
-  set -- set; for K in ENABLED RUN_MODE SCHEDULE_INTERVAL_MIN DYNAMIC_MIN_INTERVAL_SEC DYNAMIC_MAX_LOAD_PER_CPU_X100 DYNAMIC_MIN_MEM_AVAILABLE_KB DYNAMIC_MIN_OPT_FREE_KB DYNAMIC_MAX_CANDIDATES_PER_RUN AUTO_SOURCE_UPDATE SOURCE_UPDATE_INTERVAL_HOURS QUERY_SOURCE AUTO_RULE_SCOPE PUBLISH_MODE AUTO_PUBLISH; do V="$(val "$K")"; [ -n "$V" ]&&set -- "$@" "$K" "$V"; done
-  [ "$(val AUTO_PUBLISH)" != 1 ] || [ "$(val confirm)" = ADS_AUTO_PUBLISH ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+  read_body 3072
+  ADS_KEYS="ENABLED RUN_MODE SCHEDULE_INTERVAL_MIN DYNAMIC_MIN_INTERVAL_SEC DYNAMIC_MAX_LOAD_PER_CPU_X100 DYNAMIC_MIN_MEM_AVAILABLE_KB DYNAMIC_MIN_OPT_FREE_KB DYNAMIC_MAX_CANDIDATES_PER_RUN AUTO_SOURCE_UPDATE SOURCE_UPDATE_INTERVAL_HOURS QUERY_SOURCE AUTO_RULE_SCOPE PUBLISH_MODE AUTO_PUBLISH"
+  form_only $ADS_KEYS confirm || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
+  set -- set; for K in $ADS_KEYS; do V="$(form_value "$K")"; [ -z "$V" ] || set -- "$@" "$K" "$V"; done
+  [ "$(form_value AUTO_PUBLISH)" != 1 ] || [ "$(form_value confirm)" = ADS_AUTO_PUBLISH ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
   SETTINGSCTL=/opt/bin/vward-ads-privacy-settings.sh; [ -x "$SETTINGSCTL" ] || { echo '{"ok":false,"error":"settings_backend_missing"}'; exit 0; }
   OUT="$(ads_console_tmp ads-settings)" || { echo '{"ok":false,"error":"temporary_file_failed"}'; exit 0; }; "$SETTINGSCTL" "$@" >"$OUT" 2>&1; RC=$?; RES="$(head -c 12000 "$OUT")"; rm -f "$OUT"; "$JQ" -n --argjson ok "$([ "$RC" -eq 0 ]&&echo true||echo false)" --argjson rc "$RC" --arg output "$RES" '{ok:$ok,rc:$rc,output:$output}'; exit 0
 fi
@@ -1032,14 +1109,14 @@ fi
 if [ "$ACTION" = ads-control ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }; ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; trap console_mutation_leave EXIT
   ! component_disabled ads-privacy-guard || { echo '{"ok":false,"error":"component_disabled"}'; exit 0; }
-  LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ]&&[ "$LEN" -le 1024 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }; BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
-  val(){ printf '%s\n' "$BODY"|tr '&' '\n'|awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
+  read_body 1024
+  val(){ form_value "$1"; }
   OP="$(val op)"; DOMAIN="$(val domain|tr '[:upper:]' '[:lower:]')"; SCOPE="$(val scope)"; [ -n "$SCOPE" ]||SCOPE=exact
   case "$OP" in pause|resume|allow|block|remove-override|source-mode|source-add|source-delete|source-category|enqueue|agh) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
   case "$OP" in
     allow|block|remove-override) ads_valid_domain "$DOMAIN" || { echo '{"ok":false,"error":"invalid_domain"}'; exit 0; }; case "$SCOPE" in exact|suffix) ;; *) echo '{"ok":false,"error":"invalid_scope"}'; exit 0 ;; esac ;;
     source-mode) SID="$(val source)"; MODE="$(val mode)"; ads_valid_source_id "$SID" || { echo '{"ok":false,"error":"invalid_source"}'; exit 0; }; case "$MODE" in off|check|active) ;; *) echo '{"ok":false,"error":"invalid_source_mode"}'; exit 0 ;; esac ;;
-    source-add) SURL="$(form_url_decode "$(val url)")" || { echo '{"ok":false,"error":"invalid_url"}'; exit 0; }; SFMT="$(val format)"
+    source-add) SURL="$(form_decode url url)" || { echo '{"ok":false,"error":"invalid_url"}'; exit 0; }; SFMT="$(val format)"
       printf '%s\n' "$SURL" | grep -Eq '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._~/%+=&?-]*$' && [ "${#SURL}" -le 300 ] || { echo '{"ok":false,"error":"invalid_url"}'; exit 0; }
       case "$SFMT" in adblock|hosts|domains) ;; *) echo '{"ok":false,"error":"invalid_format"}'; exit 0 ;; esac ;;
     source-delete) SID="$(val source)"; case "$SID" in custom-*) ads_valid_source_id "$SID" || { echo '{"ok":false,"error":"invalid_source"}'; exit 0; } ;; *) echo '{"ok":false,"error":"invalid_source"}'; exit 0 ;; esac ;;
@@ -1052,7 +1129,7 @@ if [ "$ACTION" = ads-control ]; then
         interval) case "$AGV" in 0|1|12|24|72|168) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac; set -- interval "$AGV" ;;
         filters-refresh) set -- filters-refresh ;;
         filter-enable|filter-add|filter-remove)
-          AGU="$(form_url_decode "$(val url)")" || { echo '{"ok":false,"error":"invalid_url"}'; exit 0; }
+          AGU="$(form_decode url url)" || { echo '{"ok":false,"error":"invalid_url"}'; exit 0; }
           printf '%s\n' "$AGU" | grep -Eq '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._~/%+=&?-]*$' && [ "${#AGU}" -le 300 ] || { echo '{"ok":false,"error":"invalid_url"}'; exit 0; }
           case "$AGS" in
             filter-enable) case "$AGV" in 0|1) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac; set -- filter-enable "$AGU" "$AGV" ;;
@@ -1075,7 +1152,7 @@ if [ "$ACTION" = ads-control ]; then
     source-add) /opt/bin/vward-ads-privacy-source-control.sh add "$SURL" "$SFMT" >"$OUT" 2>&1||RC=$? ;;
     source-delete) /opt/bin/vward-ads-privacy-source-control.sh delete "$SID" >"$OUT" 2>&1||RC=$? ;;
     source-category) /opt/bin/vward-ads-privacy-source-control.sh category "$SPUR" "$SST" >"$OUT" 2>&1||RC=$? ;;
-    enqueue) /opt/bin/vward-ads-privacy-job.sh enqueue "$JOB" "$DOMAIN" >"$OUT" 2>&1||RC=$? ;;
+    enqueue) [ "$JOB" = probe ] || DOMAIN=""; /opt/bin/vward-ads-privacy-job.sh enqueue "$JOB" "$DOMAIN" >"$OUT" 2>&1||RC=$? ;;
     agh) "${VWARD_ADS_CONTROL_BIN:-/opt/bin/vward-ads-privacy-control.sh}" agh "$@" >"$OUT" 2>&1||RC=$? ;;
   esac
   RES="$(head -c 12000 "$OUT" 2>/dev/null)"; rm -f "$OUT"; printf '%s|ADS_CONTROL|op=%s rc=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$OP" "$RC" >>/opt/var/log/vward/console-audit.log; "$JQ" -n --argjson ok "$([ "$RC" -eq 0 ]&&echo true||echo false)" --argjson rc "$RC" --arg result "$RES" '{ok:$ok,rc:$rc,result:$result}'; exit 0
@@ -1323,30 +1400,16 @@ if [ "$ACTION" = "settings" ]; then
     }
     trap console_mutation_leave EXIT
 
-    LENGTH=${CONTENT_LENGTH:-0}
-    case "$LENGTH" in ''|*[!0-9]*) LENGTH=0 ;; esac
-    [ "$LENGTH" -gt 0 ] && [ "$LENGTH" -le 256 ] || {
-        echo '{"ok":false,"error":"invalid_body"}'
-        exit 0
-    }
-    BODY=$(dd bs=1 count="$LENGTH" 2>/dev/null)
-
-    UNKNOWN_KEYS="$(printf '%s\n' "$BODY" | tr '&' '\n' | cut -d= -f1 | awk '$0!="auto_apply" && $0!="auto_critical" && $0!="auto_important" && $0!="auto_routine" {print; exit}')"
-    [ -z "$UNKNOWN_KEYS" ] || {
+    read_body 256
+    form_only auto_apply auto_critical auto_important auto_routine || {
         echo '{"ok":false,"error":"unknown_parameter"}'
         exit 0
     }
 
-    value()
-    {
-        printf '%s\n' "$BODY" | tr '&' '\n' |
-        awk -F= -v k="$1" '$1==k {print $2; exit}'
-    }
-
-    AUTO_APPLY=$(value auto_apply)
-    AUTO_CRITICAL=$(value auto_critical)
-    AUTO_IMPORTANT=$(value auto_important)
-    AUTO_ROUTINE=$(value auto_routine)
+    AUTO_APPLY=$(form_value auto_apply)
+    AUTO_CRITICAL=$(form_value auto_critical)
+    AUTO_IMPORTANT=$(form_value auto_important)
+    AUTO_ROUTINE=$(form_value auto_routine)
     for FLAG in "$AUTO_APPLY" "$AUTO_CRITICAL" "$AUTO_IMPORTANT" "$AUTO_ROUTINE"; do
         case "$FLAG" in 0|1) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
     done
@@ -2085,28 +2148,31 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
         exit 0
     }
 
-    LENGTH=${CONTENT_LENGTH:-0}
-    case "$LENGTH" in ''|*[!0-9]*) LENGTH=0 ;; esac
-    [ "$LENGTH" -gt 0 ] && [ "$LENGTH" -le 256 ] || {
-        echo '{"ok":false,"error":"invalid_body"}'
-        exit 0
-    }
-    BODY=$(dd bs=1 count="$LENGTH" 2>/dev/null)
-    UNKNOWN_KEYS="$(printf '%s\n' "$BODY" | tr '&' '\n' | cut -d= -f1 | awk '$0!="op" && $0!="confirm" {print; exit}')"
-    [ -z "$UNKNOWN_KEYS" ] || {
+    read_body 256
+    form_only op confirm || {
         echo '{"ok":false,"error":"unknown_parameter"}'
         exit 0
     }
-    cvalue(){ printf '%s\n' "$BODY" | tr '&' '\n' | awk -F= -v k="$1" '$1==k{print $2;exit}'; }
-    OP="$(cvalue op)"
-    CONFIRM="$(cvalue confirm)"
+    OP="$(form_value op)"
+    CONFIRM="$(form_value confirm)"
 
-    LOCK=/tmp/vward-console-control.lock
+    # One control action at a time; a lock whose owner is gone (killed with the
+    # request) is taken over instead of blocking every later action.
+    LOCK=${VWARD_CONSOLE_CONTROL_LOCK:-/tmp/vward-console-control.lock}
     if ! mkdir "$LOCK" 2>/dev/null; then
-        echo '{"ok":false,"error":"control_busy"}'
-        exit 0
+        read_first "$LOCK/pid" LOCK_PID
+        LOCK_LIVE=1
+        case "$LOCK_PID" in
+            ''|*[!0-9]*) [ -n "$(find "$LOCK" -maxdepth 0 -mmin +2 2>/dev/null)" ] && LOCK_LIVE=0 ;;
+            *) kill -0 "$LOCK_PID" 2>/dev/null || LOCK_LIVE=0 ;;
+        esac
+        if [ "$LOCK_LIVE" = 1 ] || ! { rm -rf "${LOCK:?}" && mkdir "$LOCK" 2>/dev/null; }; then
+            echo '{"ok":false,"error":"control_busy"}'
+            exit 0
+        fi
     fi
-    trap 'rm -rf "$LOCK"; console_mutation_leave' EXIT
+    echo $$ > "$LOCK/pid"
+    trap 'rm -rf "${LOCK:?}"; console_mutation_leave' EXIT
     trap 'exit 1' HUP INT TERM
 
     if [ "$ACTION" = control ] && updater_mutation_busy; then

@@ -55,6 +55,8 @@ DEVCONF_EXISTED=
 TXN=0
 # An uploaded .conf holds the private key: it goes away with the helper.
 CONF_FILE=
+# The request body of ndm_secret while it is sent.
+NS_FILE=
 
 die() { printf 'error=%s\n' "$1"; exit "${2:-1}"; }
 
@@ -65,6 +67,7 @@ cleanup() {
     fi
     [ -z "$TMPFILE" ] || rm -f "$TMPFILE"
     [ -z "$CONF_FILE" ] || rm -f "$CONF_FILE" "$CONF_FILE.raw"
+    [ -z "$NS_FILE" ] || rm -f "$NS_FILE"
     [ -z "$TMPFILE" ] || rm -f "$TMPFILE.raw"
     [ -z "$RUNCFG" ] || rm -f "$RUNCFG"
     [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.doh" "$JOURNAL.agh" "$JOURNAL.agh.inc" "$JOURNAL.agh.undo"
@@ -166,6 +169,22 @@ ndm() {
     [ "$rc" -eq 0 ] || return 1
     printf '%s\n' "$out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found|no such entry)' && return 1
     return 0
+}
+
+# ndm_secret COMMAND: a command that holds a key (WireGuard private or
+# preshared).  It reaches the router in the body of an RCI request, read from a
+# root-only file, never in a process's arguments, which any process list shows.
+ndm_secret() {
+    case "$1" in *'"'*|*"$(printf '\134')"*) return 1 ;; esac
+    NS_FILE=$(umask 077; mktemp /tmp/vward-console-rci.XXXXXX 2>/dev/null) || { NS_FILE=; return 1; }
+    printf '[{"parse":"%s"}]\n' "$1" > "$NS_FILE" || return 1
+    ns_out=$("${VWARD_CURL_BIN:-curl}" -fsS --max-time 15 -H 'Content-Type: application/json' \
+        --data-binary "@$NS_FILE" "${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/" 2>/dev/null)
+    ns_rc=$?
+    rm -f "$NS_FILE"; NS_FILE=
+    [ "$ns_rc" -eq 0 ] || return 1
+    # Keenetic answers 200 either way: a refused command carries status "error".
+    printf '%s\n' "$ns_out" | "$JQ" -e 'type == "array" and length > 0 and ([.. | objects | select(.status? == "error")] | length == 0)' >/dev/null 2>&1
 }
 
 load_profile_base() {
@@ -411,6 +430,7 @@ tunnel_undo() {
                     "DOH-REMOVE "*) doh_remove "${undo#DOH-REMOVE }" || bad=1 ;;
                     "AGH-PUT "*) agh_control smartdns-put "${undo#AGH-PUT }" >/dev/null || bad=1 ;;
                     "AGH-TAKE "*) f=${undo#AGH-TAKE }; cut -f1 "$f" > "$f.inc" && agh_control smartdns-take "$f.inc" "$f.undo" >/dev/null || bad=1 ;;
+                    *" private-key "*|*" preshared-key "*) ndm_secret "$undo" || bad=1 ;;
                     *) ndm "$undo" || bad=1 ;;
                 esac
               done; exit "$bad"; } || undo_rc=1
@@ -891,7 +911,7 @@ free_tunnel_name() {
 
 apply_plan() {
     # apply_plan IFACE PLAN ADDRESS: interface settings and its one peer.
-    ndm "interface $1 wireguard private-key $(conf_get private "$2")" || die conf_rejected_key
+    ndm_secret "interface $1 wireguard private-key $(conf_get private "$2")" || die conf_rejected_key
     ndm "interface $1 ip address $3" || die conf_rejected_address
     m=$(conf_get mtu "$2"); [ -z "$m" ] || ndm "interface $1 ip mtu $m" || die conf_rejected_mtu
     a=$(conf_get asc "$2")
@@ -902,7 +922,7 @@ apply_plan() {
     ndm "interface $1 wireguard peer $p endpoint $(conf_get endpoint "$2")" || die conf_rejected_endpoint
     k=$(conf_get keepalive "$2")
     ndm "interface $1 wireguard peer $p keepalive-interval ${k:-25}" || die conf_rejected_keepalive
-    s=$(conf_get psk "$2"); [ -z "$s" ] || ndm "interface $1 wireguard peer $p preshared-key $s" || die conf_rejected_preshared_key
+    s=$(conf_get psk "$2"); [ -z "$s" ] || ndm_secret "interface $1 wireguard peer $p preshared-key $s" || die conf_rejected_preshared_key
     sed -n 's/^allow=//p' "$2" | while IFS= read -r al; do
         ndm "interface $1 wireguard peer $p allow-ips $al" || exit 1
     done || die conf_rejected_allowed_ips
@@ -1292,6 +1312,11 @@ op_component() {
 
 # ---------- Entry ----------
 
+# An uploaded .conf goes away with the helper whatever happens next, a refused
+# or failed call included: it holds the tunnel's private key.
+if [ "${1:-}" = tunnel-conf ]; then
+    case "${3:-}" in /*) [ ! -f "$3" ] || [ -L "$3" ] || CONF_FILE=$3 ;; esac
+fi
 [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64
 OP=$1; shift
 case "$OP" in

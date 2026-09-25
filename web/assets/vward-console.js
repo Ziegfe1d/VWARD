@@ -99,7 +99,7 @@ async function apiPost(action, fields) {
 const API_ERRORS = {
   notes_unavailable: 'описание версии не найдено', invalid_version: 'неверная версия',
   smartdns_agh_failed: 'AdGuard Home не принял изменение строк Smart DNS', smartdns_agh_unavailable: 'модуль AdGuard Home не установлен', upstream_file_unsupported: 'upstream AdGuard Home заданы файлом - строки Smart DNS меняйте в нём вручную',
-  this_device_not_registered: 'это устройство не зарегистрировано в Keenetic - вы потеряли бы доступ', devices_unavailable: 'список устройств Keenetic сейчас недоступен', device_not_registered: 'устройство не зарегистрировано в Keenetic',
+  this_device_not_registered: 'это устройство не зарегистрировано в Keenetic - вы потеряли бы доступ', devices_unavailable: 'список устройств Keenetic сейчас недоступен', device_not_registered: 'устройство не зарегистрировано в Keenetic', host_not_allowed: 'VWARD открыт по чужому имени - откройте его по IP-адресу роутера или добавьте имя в ALLOWED_HOSTS файла /opt/etc/vward/console/auth.conf',
   file_closed: 'файл закрыт: в нём ключи или пароли', not_found: 'не найдено', invalid_path: 'недопустимый путь', folder_missing: 'папки нет на роутере',
   not_a_file: 'это не файл', not_a_folder: 'это не папка', invalid_root: 'неизвестная папка',
   updater_busy: 'идёт обновление, повторите позже', confirmation_required: 'требуется подтверждение',
@@ -1047,7 +1047,7 @@ function backupPanel() {
     '<button class="icon-btn" type="button" data-backup-restore="' + esc(x.name) + '" aria-label="Восстановить" title="Восстановить"' + (cfgOk() ? '' : ' disabled') + '>' + ico('undo') + '</button></span></li>').join('');
   return panel('Резервные копии', (!b ? empty('Загрузка…') : !b.ok ? empty(errText(b)) : list.length ? '<ul class="rows">' + rows + '</ul>' : empty('Копий пока нет')) +
     '<div class="panel-actions">' + btn('backup-create', 'archive', 'Создать копию сейчас', '', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('backup'),
-    { desc: 'Настройки VWARD, доменные списки, Smart DNS, туннели и вход AdGuard Home. Копия делается раз в сутки сама, хранятся последние 7. В копии есть ключи туннелей - храните скачанный файл как пароль.' });
+    { desc: 'Настройки VWARD, доменные списки, Smart DNS, туннели и вход AdGuard Home. Копия делается раз в сутки сама, хранятся последние 7. Скачанный файл - без ключей туннелей, паролей и конфигурации роутера: они остаются в копии на роутере и возвращаются при восстановлении.' });
 }
 // AdGuard Home's own ad settings, changed through its API (the rest stays in its web UI).
 function aghSettingsPanel(a) {

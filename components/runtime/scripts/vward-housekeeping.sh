@@ -11,7 +11,9 @@ cleanup() { vward_admission_leave 2>/dev/null || true; }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
-HOUSE_LOG="/opt/var/log/vward-housekeeping.log"
+# The root of every path below; tests point it at a scratch tree.
+R=${VWARD_ROOT_PREFIX:-}
+HOUSE_LOG="$R/opt/var/log/vward-housekeeping.log"
 
 # Формат:
 # файл|максимальный_размер_байт
@@ -31,30 +33,25 @@ POLICY="
 /opt/var/log/vward-route-hints.log|262144
 /opt/var/log/vward-route.log|262144
 /opt/var/log/vward-cron-supervisor.log|262144
+/opt/var/log/vward-route-discovery.log|262144
+/opt/var/log/vward-ads-privacy-guard.log|524288
+/opt/var/log/vward-wifi-client-guard.log|262144
+/opt/var/log/vward-console-lighttpd.log|131072
+/opt/var/log/vward/console-audit.log|262144
+/opt/var/log/vward/updater-watch.log|262144
+/opt/var/log/vward/updater-recovery.log|131072
 "
 
-KEEP=2
+ROTATE_KEEP=2
 
 rotate_file()
 {
     F="$1"
-    LIMIT="$2"
+    SIZE="$2"
 
-    [ -f "$F" ] || return 0
+    rm -f "$F.$ROTATE_KEEP.gz"
 
-    SIZE="$(wc -c < "$F" 2>/dev/null)"
-
-    case "$SIZE" in
-        ''|*[!0-9]*)
-            return 1
-            ;;
-    esac
-
-    [ "$SIZE" -lt "$LIMIT" ] && return 0
-
-    rm -f "$F.$KEEP.gz"
-
-    I=$((KEEP - 1))
+    I=$((ROTATE_KEEP - 1))
 
     while [ "$I" -ge 1 ]; do
         J=$((I + 1))
@@ -86,39 +83,46 @@ rotate_file()
     # copytruncate: процессы могут держать активный logfile открытым.
     : > "$F" || return 1
 
-    echo "ROTATED|$F|bytes=$SIZE|limit=$LIMIT"
+    echo "ROTATED|$F|bytes=$SIZE"
     return 0
 }
 
 ROTATED=0
 ERRORS=0
 
+# One listing per log folder gives every size: no process per log file.
+# Prints "file|size" for each policy file over its limit.
+OVER="$(for LD in "$R/opt/var/log" "$R/opt/var/log/vward"; do
+        [ -d "$LD" ] && { echo "$LD:"; ls -ln "$LD" 2>/dev/null; }
+    done |
+    POLICY="$POLICY" R="$R" awk '
+        BEGIN {
+            n = split(ENVIRON["POLICY"], rows, "\n")
+            for (i = 1; i <= n; i++) if (split(rows[i], f, "|") == 2) limit[ENVIRON["R"] f[1]] = f[2] + 0
+        }
+        /:$/ { dir = substr($0, 1, length($0) - 1); next }
+        /^-/ {
+            name = $0
+            for (i = 1; i <= 8; i++) sub(/^[^ ]+ +/, "", name)
+            path = dir "/" name
+            if ((path in limit) && $5 + 0 >= limit[path]) print path "|" $5
+        }')"
+
 OLDIFS="$IFS"
 IFS='
 '
-
-for ROW in $POLICY; do
-
+for ROW in $OVER; do
     [ -n "$ROW" ] || continue
-
     F="${ROW%%|*}"
-    LIMIT="${ROW##*|}"
-
-    RES="$(rotate_file "$F" "$LIMIT")"
-    RC=$?
-
-    if [ "$RC" -ne 0 ]; then
+    RES="$(rotate_file "$F" "${ROW##*|}")"
+    if [ "$?" -ne 0 ]; then
         echo "ERROR|$F"
         ERRORS=$((ERRORS + 1))
         continue
     fi
-
-    if [ -n "$RES" ]; then
-        echo "$RES"
-        ROTATED=$((ROTATED + 1))
-    fi
+    echo "$RES"
+    ROTATED=$((ROTATED + 1))
 done
-
 IFS="$OLDIFS"
 
 # Сам housekeeping не должен бесконечно логировать сам себя.
@@ -139,179 +143,114 @@ echo "$(date '+%Y-%m-%d %H:%M:%S')|rotated=$ROTATED|errors=$ERRORS" >> "$HOUSE_L
 
 echo "Rotated=$ROTATED Errors=$ERRORS"
 
-[ "$ERRORS" -eq 0 ]
-
 # ============================================================
 # VWARD STORAGE RETENTION
 # ============================================================
+# BusyBox find has no -printf: ages come from "ls -t" (newest first).
+
+# newest_first DIR f|d [PATTERN]: names of files (f) or folders (d) in DIR that
+# match PATTERN, newest first; links are never listed.
+newest_first()
+{
+    ls -1t "$1" 2>/dev/null | while IFS= read -r nf_name; do
+        case "$nf_name" in ${3:-*}) ;; *) continue ;; esac
+        [ ! -L "$1/$nf_name" ] || continue
+        case "$2" in
+            f) [ -f "$1/$nf_name" ] || continue ;;
+            d) [ -d "$1/$nf_name" ] || continue ;;
+        esac
+        printf '%s\n' "$nf_name"
+    done
+}
 
 dir_kb()
 {
-    D="$1"
-
-    [ -d "$D" ] || {
+    [ -d "$1" ] || {
         echo 0
         return
     }
 
-    du -sk "$D" 2>/dev/null | awk '{print $1}'
+    du -sk "$1" 2>/dev/null | awk '{print $1}'
 }
 
-
-cap_files_dir()
+# cap_dir DIR f|d LIMIT_KB: the oldest files or folders go while DIR is over
+# LIMIT_KB; the newest one always stays.
+cap_dir()
 {
-    D="$1"
-    LIMIT="$2"
-
-    [ -d "$D" ] || return 0
+    [ -d "$1" ] || return 0
 
     while :; do
-
-        SIZE="$(dir_kb "$D")"
+        SIZE="$(dir_kb "$1")"
 
         case "$SIZE" in
             ''|*[!0-9]*) return 1 ;;
         esac
 
-        [ "$SIZE" -le "$LIMIT" ] && break
+        [ "$SIZE" -le "$3" ] && break
 
-        COUNT="$(
-            find "$D" -maxdepth 1 -type f 2>/dev/null |
-            wc -l
-        )"
-
-        # Всегда сохраняем хотя бы один, самый новый файл.
-        [ "$COUNT" -le 1 ] && break
-
-        OLD="$(
-            find "$D" -maxdepth 1 -type f \
-                -printf '%T@|%p\n' 2>/dev/null |
-            sort -n |
-            head -1 |
-            cut -d'|' -f2-
-        )"
-
-        [ -n "$OLD" ] || break
-
-        echo "RETENTION_DELETE|$OLD"
-        rm -f "$OLD" || return 1
-    done
-
-    return 0
-}
-
-
-cap_incident_dirs()
-{
-    D="$1"
-    LIMIT="$2"
-
-    [ -d "$D" ] || return 0
-
-    while :; do
-
-        SIZE="$(dir_kb "$D")"
-
-        case "$SIZE" in
-            ''|*[!0-9]*) return 1 ;;
-        esac
-
-        [ "$SIZE" -le "$LIMIT" ] && break
-
-        COUNT="$(
-            find "$D" -mindepth 1 -maxdepth 1 -type d 2>/dev/null |
-            wc -l
-        )"
-
-        # Последний / самый новый инцидент автоматически не удаляем.
-        [ "$COUNT" -le 1 ] && {
-            echo "RETENTION_FORENSIC_LIMIT_EXCEEDED|size_kb=$SIZE|kept_latest=1"
+        LIST="$(newest_first "$1" "$2")"
+        [ "$(printf '%s\n' "$LIST" | grep -c .)" -gt 1 ] || {
+            [ "$2" != d ] || echo "RETENTION_FORENSIC_LIMIT_EXCEEDED|size_kb=$SIZE|kept_latest=1"
             break
         }
 
-        OLD="$(
-            find "$D" -mindepth 1 -maxdepth 1 -type d \
-                -printf '%T@|%p\n' 2>/dev/null |
-            sort -n |
-            head -1 |
-            cut -d'|' -f2-
-        )"
-
+        OLD="$(printf '%s\n' "$LIST" | tail -n 1)"
         [ -n "$OLD" ] || break
 
-        echo "RETENTION_DELETE_INCIDENT|$OLD"
-        rm -rf "$OLD" || return 1
+        echo "RETENTION_DELETE|$1/$OLD"
+        rm -rf "${1:?}/${OLD:?}" || return 1
     done
 
     return 0
 }
 
-
-keep_newest_files()
+# keep_newest DIR f|d KEEP [PATTERN]: only the newest KEEP matching entries stay.
+keep_newest()
 {
-    D="$1"
-    KEEP="$2"
+    [ -d "$1" ] || return 0
 
-    [ -d "$D" ] || return 0
-
-    TMP="/tmp/vward-retention.$$"
-
-    find "$D" -maxdepth 1 -type f \
-        -printf '%T@|%p\n' 2>/dev/null |
-    sort -nr > "$TMP"
-
-    N=0
-
-    while IFS='|' read -r MT F; do
-
-        [ -n "$F" ] || continue
-
-        N=$((N + 1))
-
-        if [ "$N" -gt "$KEEP" ]; then
-            echo "RETENTION_DELETE_BACKUP|$F"
-            rm -f "$F"
-        fi
-
-    done < "$TMP"
-
-    rm -f "$TMP"
+    newest_first "$1" "$2" "${4:-*}" | tail -n +$(($3 + 1)) | while IFS= read -r KN_OLD; do
+        echo "RETENTION_DELETE|$1/$KN_OLD"
+        rm -rf "${1:?}/${KN_OLD:?}"
+    done
 
     return 0
 }
 
 
 RETENTION_ERRORS=0
+B="$R/opt/var/backups/vward"
 
 # Диагностические отчёты: максимум 2 МБ.
-cap_files_dir \
-    /opt/var/log/vward/diagnostics \
-    2048 ||
+cap_dir "$R/opt/var/log/vward/diagnostics" f 2048 ||
 RETENTION_ERRORS=$((RETENTION_ERRORS + 1))
 
 # Forensic-инциденты: максимум 12 МБ суммарно.
 # Самый новый инцидент всегда сохраняется.
-cap_incident_dirs \
-    /opt/var/backups/vward/forensics \
-    12288 ||
+cap_dir "$B/forensics" d 12288 ||
 RETENTION_ERRORS=$((RETENTION_ERRORS + 1))
 
 # Старые пакеты исходников: максимум 4 МБ.
-cap_incident_dirs \
-    /opt/var/backups/vward/legacy-scripts \
-    4096 ||
+cap_dir "$B/legacy-scripts" d 4096 ||
 RETENTION_ERRORS=$((RETENTION_ERRORS + 1))
 
 # Конфигурационные rollback-копии.
-keep_newest_files \
-    /opt/var/backups/vward/log-policy \
-    5 ||
-RETENTION_ERRORS=$((RETENTION_ERRORS + 1))
+keep_newest "$B/log-policy" f 5
+keep_newest "$B/housekeeping" f 5
 
-keep_newest_files \
-    /opt/var/backups/vward/housekeeping \
-    5 ||
-RETENTION_ERRORS=$((RETENTION_ERRORS + 1))
+# A copy of update.conf before every save of the Updates settings.
+keep_newest "$B" f 10 'update.conf.console-*'
+
+# Ad filter copies before each manual rule, setting, source change and publish.
+keep_newest "$B/ads-privacy-guard" d 10 'publish-*'
+for KD in manual settings source-settings; do
+    keep_newest "$B/ads-privacy-guard/$KD" d 20
+done
+
+# A tunnel .conf holds its private key: uploads now live in RAM only, and
+# those an older version kept on the USB drive go.
+rm -f "$R/opt/var/run/vward/console-tunnel/upload."* 2>/dev/null
+rmdir "$R/opt/var/run/vward/console-tunnel" 2>/dev/null
 
 # Daily snapshot of VWARD's settings (the helper skips it when one is younger than a day).
 # The day already handled is kept in RAM, so the other 23 hourly runs start nothing.
@@ -331,4 +270,4 @@ fi
 echo "$(date '+%Y-%m-%d %H:%M:%S')|retention_errors=$RETENTION_ERRORS" \
     >> "$HOUSE_LOG"
 
-[ "$RETENTION_ERRORS" -eq 0 ]
+[ "$ERRORS" -eq 0 ] && [ "$RETENTION_ERRORS" -eq 0 ]

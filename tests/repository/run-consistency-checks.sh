@@ -85,6 +85,8 @@ python3 tests/repository/check-route-engine-watchdog.py || fail "Watchdog counts
 python3 tests/repository/check-console-diagnostics-dns.py || fail "Diagnostics: DNS chain, files as installed"
 python3 tests/repository/check-console-ndm-cache.py || fail "Console caches Keenetic answers briefly"
 python3 tests/repository/check-release-notes.py || fail "What is new in a version"
+python3 tests/repository/check-console-request.py || fail "Console request guards and form parsing"
+python3 tests/repository/check-housekeeping.py || fail "Housekeeping rotates logs and keeps copies to their newest few"
 python3 tests/repository/check-console-tunnel.py || fail "Console tunnel switch"
 python3 tests/repository/check-component-graph.py || fail "Component dependency graph"
 python3 tests/repository/check-component-resilience.py || fail "Component disable resilience"

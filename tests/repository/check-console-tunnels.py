@@ -23,13 +23,14 @@ PEER_NEW = "Q" * 42 + "A="
 PSK = "S" * 42 + "A="
 
 FAKE_NDMC = r'''#!/usr/bin/env python3
-import json, shlex, sys
+import json, os, shlex, sys
 from pathlib import Path
 st = Path("@STATE@")
 s = json.loads(st.read_text())
 cmd = sys.argv[2]
+# Commands sent in an RCI body are logged apart from those in ndmc's arguments.
 with open(str(st) + ".log", "a") as f:
-    f.write(cmd + "\n")
+    f.write(("RCI: " if os.environ.get("FAKE_VIA_RCI") else "") + cmd + "\n")
 def out(t): print(t); st.write_text(json.dumps(s)); sys.exit(0)
 if cmd == "show running-config":
     lines = []
@@ -107,10 +108,17 @@ out("Command::Base error: syntax")
 '''
 
 FAKE_CURL = r'''#!/usr/bin/env python3
-import json, sys
+import json, os, subprocess, sys
 from pathlib import Path
 st = json.loads(Path("@STATE@").read_text())
 url = [a for a in sys.argv if a.startswith("http")][-1]
+if "--data-binary" in sys.argv:
+    # RCI "parse": the command comes from the request body file, as on Keenetic.
+    body = json.loads(Path(sys.argv[sys.argv.index("--data-binary") + 1][1:]).read_text())
+    r = subprocess.run(["@NDMC@", "-c", body[0]["parse"]], env=os.environ | {"FAKE_VIA_RCI": "1"}, capture_output=True, text=True)
+    bad = "error" in r.stdout.lower()
+    print(json.dumps([{"parse": {"status": [{"status": "error" if bad else "message", "message": r.stdout.strip()}]}}]))
+    sys.exit(0)
 if "show/interface?name=" in url:
     name = url.split("name=", 1)[1]
     i = st["ifs"].get(name)
@@ -173,7 +181,7 @@ with tempfile.TemporaryDirectory() as tmp:
     state.write_text(json.dumps(base))
     tools = tmp / "tools"; tools.mkdir()
     (tools / "ndmc").write_text(FAKE_NDMC.replace("@STATE@", str(state)))
-    (tools / "curl").write_text(FAKE_CURL.replace("@STATE@", str(state)))
+    (tools / "curl").write_text(FAKE_CURL.replace("@STATE@", str(state)).replace("@NDMC@", str(tools / "ndmc")))
     for f in ("ndmc", "curl"):
         (tools / f).chmod(0o755)
     devconf = tmp / "device.conf"
@@ -247,6 +255,12 @@ with tempfile.TemporaryDirectory() as tmp:
     log = (Path(str(state) + ".log")).read_text()
     if "interface Wireguard1 ip address 192.0.2.254 255.255.255.255" not in log:
         fail("the test interface must use the test address")
+    # Keys reach the router only in an RCI body, never in a process's arguments.
+    for line in log.splitlines():
+        if not line.startswith("RCI: ") and any(k in line for k in (NEW_KEY, OLD_KEY, PSK)):
+            fail(f"a key went through ndmc arguments: {line[:60]}")
+    if f"RCI: interface Wireguard0 wireguard private-key {NEW_KEY}" not in log:
+        fail("the private key must be set through RCI")
     stored = etc / "tunnels/Wireguard0/current.conf"
     if not stored.exists() or oct(stored.stat().st_mode & 0o777) != "0o600":
         fail("the applied .conf must be kept root-only")
@@ -326,5 +340,12 @@ with tempfile.TemporaryDirectory() as tmp:
                                   "JQ": shutil.which("jq"), "VWARD_CONSOLE_CONFIG_BIN": str(HELPER), "VWARD_CONSOLE_TUNNEL_TMP": str(up)})
     if json.loads(r.stdout.split("\n\n", 1)[1]).get("error") != "confirmation_required" or any(up.iterdir()):
         fail("replace needs its confirmation and leaves no file behind")
+
+    # Across every run, rollbacks included, no key went through ndmc's arguments.
+    for line in Path(str(state) + ".log").read_text().splitlines():
+        if not line.startswith("RCI: ") and any(k in line for k in (NEW_KEY, OLD_KEY, BAD_KEY, PSK)):
+            fail(f"a key went through ndmc arguments: {line[:60]}")
+    if not any(l.startswith("RCI: ") and OLD_KEY in l for l in Path(str(state) + ".log").read_text().splitlines()):
+        fail("the rollback must put the old key back through RCI")
 
 print("CONSOLE_TUNNELS=PASS")

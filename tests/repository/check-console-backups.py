@@ -25,11 +25,14 @@ with tempfile.TemporaryDirectory() as tmp:
     (etc / "device.conf").write_text("VWARD_WAN_INTERFACE=GigabitEthernet1\n")
     (etc / "route-engine/domain-lists.conf").write_text("watch.domain-list4=1\n")
     (etc / "route-engine/hints-catalog.tsv").write_text("x\n" * 1000)
-    (etc / "tunnels/Wireguard0/current.conf").write_text("[Interface]\n")
+    (etc / "tunnels/Wireguard0/current.conf").write_text("[Interface]\nPrivateKey = SECRET-TUNNEL-KEY\n")
+    (etc / "ads-privacy-guard").mkdir()
+    (etc / "ads-privacy-guard/agh-api.auth").write_text("admin:SECRET-AGH-PASSWORD\n")
+    (etc / "ads-privacy-guard/allowlist.tsv").write_text("good.example|exact|manual\n")
     (etc / "update-public.pem").write_text("KEY-OLD\n")
     state = tmp / "route"; state.mkdir()
     (state / "adaptive-persist.txt").write_text("slow.example\n")
-    ndmc = tmp / "ndmc"; ndmc.write_text('#!/bin/sh\necho "interface Wireguard0"\n'); ndmc.chmod(0o755)
+    ndmc = tmp / "ndmc"; ndmc.write_text('#!/bin/sh\necho "interface Wireguard0"\necho "    wireguard private-key SECRET-ROUTER-KEY"\n'); ndmc.chmod(0o755)
     snaps = tmp / "snaps"
     (tmp / "root/tmp").mkdir(parents=True)
     env = os.environ | {"VWARD_CONSOLE_ETC": str(etc), "VWARD_ROUTE_STATE": str(state), "VWARD_NDMC": str(ndmc),
@@ -92,5 +95,32 @@ with tempfile.TemporaryDirectory() as tmp:
     data = json.loads(r.stdout.split("\n\n", 1)[1])
     if not data["ok"] or len(data["backups"]) != 7 or data["backups"][0]["kind"] != "manual" or not data["backups"][0]["created"].startswith("20"):
         fail(f"backup-data: {data}")
+
+    # Download: the settings leave the router, the secrets do not.
+    newest = data["backups"][0]["name"]
+    r = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], capture_output=True,
+                       env=env | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=backup-download&name=" + newest,
+                                  "JQ": shutil.which("jq"), "VWARD_PROFILE_LIB": "/nonexistent"})
+    head, _, body = r.stdout.partition(b"\n\n")
+    if b"application/gzip" not in head or f'filename="{newest}"'.encode() not in head:
+        fail(f"download headers: {head!r} {r.stderr[-300:]!r}")
+    got = tmp / "download.tar.gz"; got.write_bytes(body)
+    with tarfile.open(got) as t:
+        names = t.getnames()
+        blob = b"".join(t.extractfile(m).read() for m in t.getmembers() if m.isfile())
+    for secret in (b"SECRET-TUNNEL-KEY", b"SECRET-AGH-PASSWORD", b"SECRET-ROUTER-KEY"):
+        if secret in blob:
+            fail(f"{secret!r} left the router in a downloaded backup")
+    for want in ("./etc/device.conf", "./etc/ads-privacy-guard/allowlist.tsv", "./state/adaptive-persist.txt"):
+        if want not in names:
+            fail(f"{want} missing from the downloaded copy: {names}")
+    if b"secrets_removed=1" not in blob:
+        fail("the downloaded copy must say its secrets were removed")
+    if list((tmp / "root/tmp").glob("vward-console-backup.*")) or list(Path("/tmp").glob("vward-console-backup.*")):
+        fail("the download work folder must go")
+    # The snapshot on the router keeps everything for a restore.
+    with tarfile.open(snaps / newest) as t:
+        if "./etc/tunnels/Wireguard0/current.conf" not in t.getnames():
+            fail("the snapshot on the router must keep the tunnel store")
 
 print("CONSOLE_BACKUPS=PASS")
