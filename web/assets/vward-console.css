@@ -277,29 +277,29 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* Окно установки обновления */
-#updOverlay{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:16px}
-.upd-scrim{position:absolute;inset:0;background:var(--overlay)}
-.upd-box{position:relative;width:min(440px,100%);max-height:100%;overflow:auto;padding:24px 20px 20px;border-radius:var(--r-lg);background:var(--surface);box-shadow:0 16px 48px rgba(0,0,0,.25);text-align:center}
-.upd-box h2{margin:12px 0 4px;font-size:var(--fs-lg)}
-.upd-ver{margin:0 0 12px;color:var(--muted);font-size:var(--fs-sm)}
-.upd-ico{display:inline-grid;place-items:center;width:56px;height:56px;border-radius:50%;background:var(--accent-soft);color:var(--accent)}
-.upd-ico .icon{width:28px;height:28px}
-.upd-ico:not(.ok):not(.crit) .icon{animation:upd-spin 1.4s linear infinite}
-.upd-ico.ok{background:var(--ok-soft);color:var(--ok)}
-.upd-ico.crit{background:var(--crit-soft);color:var(--crit)}
-@keyframes upd-spin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.upd-ico .icon{animation:none!important}}
-.upd-meter{margin:8px 0 14px}
-.upd-bar{transition:width .6s ease}
-.upd-steps{margin:0 0 12px;padding:0;list-style:none;text-align:left;font-size:var(--fs-sm);color:var(--faint)}
-.upd-steps li{display:flex;align-items:center;gap:8px;padding:4px 0}
-.upd-steps li::before{content:"";flex:none;width:8px;height:8px;border-radius:50%;background:var(--line-strong)}
-.upd-steps li.done{color:var(--muted)}
-.upd-steps li.done::before{background:var(--ok)}
-.upd-steps li.now{color:var(--text);font-weight:650}
-.upd-steps li.now::before{background:var(--accent)}
-.upd-text{margin:0;color:var(--muted);font-size:var(--fs-sm)}
-.upd-box .panel-actions{justify-content:center;padding:16px 0 0}
+#updOverlay{position:fixed;inset:0;z-index:60;overflow:auto;background:var(--bg)}
+.upd-page{max-width:520px;margin:0 auto;padding:40px 24px 32px}
+.upd-page h2{margin:0 0 6px;font-size:var(--fs-xl,24px);line-height:1.25}
+.upd-ver{margin:0 0 10px;color:var(--muted);font-size:var(--fs-sm)}
+.upd-text{margin:0 0 36px;color:var(--muted);line-height:1.5}
+.upd-ring{position:relative;width:min(220px,62vw);aspect-ratio:1;margin:0 auto}
+.upd-ring svg{width:100%;height:100%;display:block}
+.upd-track{fill:none;stroke:var(--line-strong);stroke-width:16}
+.upd-arc{fill:none;stroke:var(--accent);stroke-width:16;stroke-linecap:round;transition:stroke-dashoffset .8s ease}
+.upd-dot{fill:var(--accent);stroke:var(--bg);stroke-width:3}
+.upd-page.ok .upd-arc{stroke:var(--ok)}
+.upd-page.crit .upd-arc{stroke:var(--crit)}
+.upd-pct{position:absolute;inset:0;display:grid;place-items:center;font-size:44px;font-weight:300;font-variant-numeric:tabular-nums}
+.upd-pct .icon{width:56px;height:56px}
+.upd-page.ok .upd-pct{color:var(--ok)}
+.upd-page.crit .upd-pct{color:var(--crit)}
+.upd-stage{margin:18px 0 24px;text-align:center;color:var(--text);font-size:var(--fs-md)}
+.upd-page .panel-actions{justify-content:center}
+@media (prefers-reduced-motion:reduce){.upd-arc{transition:none}}
+/* «Что нового» */
+.notes{margin:4px 16px 12px;padding-left:18px;line-height:1.5}
+.notes li{margin:4px 0}
+.notes-sub{margin:12px 16px 2px;font-weight:650}
 
 /* Device not registered: VWARD stays closed on this device. */
 .blocked-screen{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;background:var(--bg)}
@@ -309,3 +309,4 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .blocked-card p{margin:0 0 8px;color:var(--muted);line-height:1.5}
 .blocked-card .panel-actions{justify-content:center;flex-wrap:wrap}
 .blocked-card a.btn{text-decoration:none}
+.block-head .head-pill{margin-left:auto;flex:none}

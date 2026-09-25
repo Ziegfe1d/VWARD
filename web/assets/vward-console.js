@@ -97,6 +97,7 @@ async function apiPost(action, fields) {
   return r.json();
 }
 const API_ERRORS = {
+  notes_unavailable: 'описание версии не найдено', invalid_version: 'неверная версия',
   smartdns_agh_failed: 'AdGuard Home не принял изменение строк Smart DNS', smartdns_agh_unavailable: 'модуль AdGuard Home не установлен', upstream_file_unsupported: 'upstream AdGuard Home заданы файлом - строки Smart DNS меняйте в нём вручную',
   this_device_not_registered: 'это устройство не зарегистрировано в Keenetic - вы потеряли бы доступ', devices_unavailable: 'список устройств Keenetic сейчас недоступен', device_not_registered: 'устройство не зарегистрировано в Keenetic',
   file_closed: 'файл закрыт: в нём ключи или пароли', not_found: 'не найдено', invalid_path: 'недопустимый путь', folder_missing: 'папки нет на роутере',
@@ -234,6 +235,7 @@ const DETAILS = {
   'd-files': { title: 'Файлы VWARD', parent: 'system', data: ['files'] },
   'd-cron': { title: 'Задания по расписанию', parent: 'd-diag' },
   updates: { title: 'Обновления', parent: 'settings', data: ['status', 'update', 'config'] },
+  'd-notes': { title: 'Что нового', parent: 'updates', data: ['status', 'update'] },
   'd-mydomains': { title: 'Мои домены', parent: 'routes' },
   'd-force': { title: 'Всегда через VPN', parent: 'routes' },
   'd-dcats': { title: 'Категории доменов', parent: 'routes' },
@@ -282,6 +284,8 @@ let current = 'overview', editing = false, confirm = null, logTab = 'wan', logWr
 
 /* ---------- Построение блоков ---------- */
 // The heading and its description sit above the card; the card holds only the content.
+// A block's own status sits in its heading instead of a first row repeating the title.
+const headPill = (cls, text) => '<span class="pill ' + (cls || '') + ' head-pill">' + esc(text) + '</span>';
 function panel(title, body, opts) {
   opts = opts || {};
   const p = page(current), same = p && p.title === title, extra = opts.readonly || opts.right;
@@ -397,13 +401,12 @@ const RENDER = {
     const counts = n => Array.from({ length: n }, (x, i) => [i + 1, String(i + 1)]);
     return loadError(['status']) +
       panel('Подключение', kv([
-        ['Состояние', w.internet ? 'В сети' : 'Нет связи', w.internet ? 'ok' : 'crit'],
         ['Интерфейс', (pr.wan_interface || '—') + (pr.wan_device ? ' (' + pr.wan_device + ')' : '')],
         ['Кабель', isTrue(w.carrier) ? 'подключён' + (w.speed ? ' · ' + fmtSpeed(w.speed) : '') : 'нет сигнала'],
         ['IPv4', w.address || '—'],
         ['Шлюз', (w.gateway || '—') + (w.gateway ? (w.gateway_accessible ? ' · доступен' : ' · недоступен') : '')],
         ['DNS', w.dns_accessible ? 'отвечает' : 'не отвечает']
-      ]) + '<div class="panel-actions even">' + btn('reload', 'check', 'Проверить') + btn('open-log', 'logs', 'Журнал', '', ' data-log-tab="wan"') + '</div>', { desc: 'Интерфейс определён автоматически.' }) +
+      ]) + '<div class="panel-actions even">' + btn('reload', 'check', 'Проверить') + btn('open-log', 'logs', 'Журнал', '', ' data-log-tab="wan"') + '</div>', { desc: 'Интерфейс определён автоматически.', right: headPill(w.internet ? 'ok' : 'crit', w.internet ? 'В сети' : 'Нет связи') }) +
       panel('Вручную', (confirmBox('wan-renew', 'Запросить у провайдера адрес заново? Связь может прерваться на несколько секунд.', 'Обновить') ||
         confirmBox('wan-bounce', 'Переподключить ' + (pr.wan_interface || 'интерфейс') + '? Интернет пропадёт примерно на 10 секунд, домашняя сеть продолжит работать.', 'Переподключить', true) ||
         '<div class="panel-actions even">' + btn('ask', 'refresh', 'Обновить адрес', '', ' data-confirm="wan-renew"') + btn('ask', 'undo', 'Переподключить', '', ' data-confirm="wan-bounce"') + '</div>') + resultBox('wan'),
@@ -580,7 +583,7 @@ const RENDER = {
     const interval = uc.check_interval_seconds || p.check_interval_seconds;
     const acts = [];
     if (al.check) acts.push(btn('update-op', 'refresh', 'Проверить', 'primary', ' data-op="check"'));
-    if (al.apply) acts.push(btn('ask', 'save', 'Установить ' + (pend.version || ''), 'primary', ' data-confirm="update-apply"'));
+    if (al.apply) acts.push(btn('ask', 'save', 'Установить', 'primary', ' data-confirm="update-apply"'));
     if (al.retry) acts.push(btn('ask', 'refresh', 'Повторить', '', ' data-confirm="update-retry"'));
     if (al.rollback) acts.push(btn('ask', 'undo', 'Откатить', 'danger', ' data-confirm="update-rollback"'));
     if (al.recover) acts.push(btn('ask', 'alert', 'Восстановить', 'danger', ' data-confirm="update-recover"'));
@@ -590,12 +593,12 @@ const RENDER = {
       confirmBox('update-recover', 'Восстановить прерванное обновление?', 'Восстановить', true);
     return loadError(['update', 'status']) +
       panel('Состояние', kv([
-        ['Состояние', phaseText(u.phase || p.phase), (u.phase || p.phase) === 'FAILED' ? 'crit' : 'ok'],
-        ['Версия', (p.version || '—') + ' · № ' + (p.last_sequence || 0)],
-        pend.present ? ['Доступно', (pend.version || '') + (pend.priority ? ' · ' + ({ ROUTINE: 'обычное', IMPORTANT: 'важное', CRITICAL: 'критическое' }[pend.priority] || pend.priority) : ''), 'info'] : null,
+        ['Версия', p.version || '—', '', 'd-notes', '', 'сборка № ' + (p.last_sequence || 0) + ' · что нового'],
+        pend.present ? ['Доступно', (pend.version || '') + (pend.priority ? ' · ' + ({ ROUTINE: 'обычное', IMPORTANT: 'важное', CRITICAL: 'критическое' }[String(pend.priority).toUpperCase()] || pend.priority) : ''), 'info', 'd-notes'] : null,
         ['Последняя проверка', fmtStamp(p.last_health_check) || '—', '', 'logs', ' data-log-go="updater"'],
         ['Откат', u.rollback_available ? 'Доступен' : 'Недоступен', u.rollback_available ? 'info' : '']
-      ]) + (conf || (acts.length ? '<div class="panel-actions even">' + acts.join('') + '</div>' : '')) + resultBox('updates')) +
+      ]) + (conf || (acts.length ? '<div class="panel-actions even">' + acts.join('') + '</div>' : '')) + resultBox('updates'),
+      { right: headPill((u.phase || p.phase) === 'FAILED' ? 'crit' : pend.present ? 'info' : 'ok', phaseText(u.phase || p.phase)) }) +
       panel('Настройки обновлений', '<dl class="kv">' +
         ctrlRow('Установка обновлений', sel('data-upd="mode"', 'Установка обновлений', [['auto', 'Автоматическая'], ['schedule', 'По расписанию'], ['manual', 'Ручная']], mode), ({ auto: 'сразу после проверки подписи', schedule: 'в ' + (winStart || '03:00') + ', критические исправления - сразу', manual: 'только проверка и уведомление' })[mode]) +
         (mode === 'schedule' ? ctrlRow('Время установки', sel('data-cfg-upd="install_time"', 'Время установки', withCur(HOURS, winStart, ''), winStart), 'обновление ставится при первой проверке после этого времени') : '') +
@@ -767,6 +770,11 @@ const RENDER = {
         (e.closed ? '<span class="pill">закрыт</span>' : ico(dir ? 'chevron' : 'eye', 'chev')) + '</li>';
     }).join('') + '</ul>' + (here.entries.length ? '' : empty('Папка пуста')));
   },
+  'd-notes'() {
+    const p = plat(), pend = (S.update && S.update.pending) || {};
+    return (pend.present && pend.version ? panel('Доступно: ' + pend.version, notesHtml(pend.version)) : '') +
+      panel('Установлено: ' + (p.version || '—'), notesHtml(p.version));
+  },
   'd-jobs'() {
     const JOB_TEXT = { scan: 'проверка новых доменов', 'sources-update': 'обновление источников', 'rules-rebuild': 'пересборка правил', publish: 'публикация', probe: 'проверка домена' };
     const JOB_STATE = { DONE: 'выполнено', PASS: 'выполнено', FAILED: 'ошибка', RUNNING: 'идёт', QUEUED: 'в очереди' };
@@ -887,6 +895,33 @@ function smartdnsWhere(L) {
   const src = L.smartdns_sources || {}, k = (src.keenetic || []).length, a = (src.adguard || []).length;
   return k && a ? 'Keenetic и AdGuard Home' : a ? 'AdGuard Home' : k ? 'Keenetic' : 'не найден';
 }
+// «Что нового»: a version's section of the CHANGELOG, from the router (installed)
+// or from the update feed (an update on offer).
+const NOTES = {};
+function notesVersions() { const p = plat(), pend = (S.update && S.update.pending) || {}; return [pend.present && pend.version, p.version].filter(Boolean); }
+async function loadNotes(v) {
+  if (NOTES[v] && NOTES[v].ok) return;
+  try { NOTES[v] = await apiGet('release-notes', { version: v }); } catch (e) { NOTES[v] = { ok: false, error: e.message }; }
+  if (current === 'd-notes') render();
+}
+function notesHtml(v) {
+  if (!v) return empty('Версия неизвестна');
+  const n = NOTES[v];
+  if (!n) return empty('Загрузка…');
+  if (!n.ok) return empty(n.error === 'notes_unavailable' ? 'Описание этой версии не найдено' : errText(n));
+  const fmt = t => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>');
+  let html = '', items = [], title = '';
+  const flush = () => { if (items.length) { html += '<ul class="notes">' + items.map(i => '<li>' + fmt(i) + '</li>').join('') + '</ul>'; items = []; } };
+  n.text.split('\n').forEach(l => {
+    if (l.startsWith('#title ')) { title = l.slice(7); return; }
+    if (!l.trim()) return;
+    if (/^- /.test(l)) items.push(l.slice(2));
+    else if (/^\s+\S/.test(l) && items.length) items[items.length - 1] += ' ' + l.trim();
+    else { flush(); html += '<p class="notes-sub">' + fmt(l.trim()) + '</p>'; }
+  });
+  flush();
+  return (title ? '<p class="panel-desc">' + esc(title) + '</p>' : '') + (html || empty('Без описания'));
+}
 const ADS_VERDICT = { BLOCK: ['crit', 'Заблокирован'], SUSPECT: ['warn', 'На проверке'], ALLOW: ['ok', 'Разрешён'], TRUST: ['ok', 'Доверенный'] };
 const ADS_REASON = { manual_denylist: 'ваше правило', manual_allowlist: 'ваше правило', trusted_registry: 'доверенный сервис', dedicated_block_feed: 'есть в специальном списке рекламы', multi_source_consensus: 'найден в нескольких источниках', external_verifier: 'внешняя проверка', source_catalog_degraded: 'источники недоступны, решение отложено', block_evidence_disappeared_review: 'пропал из источников, перепроверяется', no_block_evidence: 'признаков рекламы нет' };
 function adsRuleBtn(d, type) { return '<button class="icon-btn" type="button" data-ads-rule="' + type + '" data-domain="' + esc(d) + '" aria-label="' + (type === 'allow' ? 'Разрешить ' : 'Заблокировать ') + esc(d) + '" title="' + (type === 'allow' ? 'Разрешить' : 'Заблокировать') + '">' + ico(type === 'allow' ? 'check' : 'block') + '</button>'; }
@@ -914,13 +949,13 @@ function tunnelPage(name) {
     confirmBox('tunnel-use', 'Перевести маршруты VWARD' + (cur ? ' с ' + cur : '') + ' на ' + name + '? Мои домены, AdaptiveAuto и IP-категории пойдут через ' + name + '.' + (up ? '' : ' Туннель сейчас не в сети: сайты из списков VPN будут недоступны, пока он не подключится.'), 'Переключить', !up) ||
     '<div class="panel-actions">' + btn('ask', 'route', 'Использовать для маршрутов', up ? 'primary' : '', ' data-confirm="tunnel-use"' + (cfgOk() ? '' : ' disabled')) + '</div>';
   return panel(name + (t.description ? ' · ' + t.description : ''), kv([
-    ['Состояние', up ? 'В сети' : 'Не в сети', up ? 'ok' : 'warn'], ['Канал связи', t.link || '—'], ['Статус интерфейса', t.state || '—'],
+    ['Канал связи', t.link || '—'], ['Статус интерфейса', t.state || '—'],
     ['Сервер', t.endpoint || '—'], ['Адрес в туннеле', t.address || '—'], ['MTU', t.mtu != null ? String(t.mtu) : '—'],
     ['Последнее рукопожатие', t.handshake != null ? agoText(num(t.handshake)) : '—', t.handshake != null && num(t.handshake) > 180 ? 'warn' : ''],
     ['Трафик', t.rx != null || t.tx != null ? '↓ ' + fmtBytes(t.rx) + ' · ↑ ' + fmtBytes(t.tx) : '—'],
     ['Время работы', t.uptime != null ? fmtUptime(t.uptime) : '—'],
     ['Используется для маршрутов', managed ? 'Да' : 'Нет', managed ? 'info' : '']
-  ]) + use + cfgNote(), { desc: managed ? 'Через этот туннель идут все домены и сети из «Маршрутизации».' : 'Переключение переносит маршруты групп в Keenetic, сохраняет выбор в device.conf и отменяется целиком при любой ошибке.' }) +
+  ]) + use + cfgNote(), { desc: managed ? 'Через этот туннель идут все домены и сети из «Маршрутизации».' : 'Переключение переносит маршруты групп в Keenetic, сохраняет выбор в device.conf и отменяется целиком при любой ошибке.', right: headPill(up ? 'ok' : 'warn', up ? 'В сети' : 'Не в сети') }) +
     tunnelManagePanel(name, managed)[0] + tunnelProbePanel(name) + tunnelTrafficPanel(name) + tunnelManagePanel(name, managed)[1];
 }
 // Filled only by «Проверить сейчас»: the router does not do this in the background.
@@ -1097,9 +1132,10 @@ function compPage(c) {
   return panel(c.name, '<dl class="kv">' + ctrlRow('Компонент включён', sw1, core ? 'базовый компонент: без него VWARD не работает' : on ? '' : 'файлы установлены, но компонент не запускается') + '</dl>' +
       (confirmBox('comp-off', 'Выключить «' + c.name + '»?' + (off.length ? ' Вместе с ним остановятся: ' + compNames(off) + '.' : '') + (stale.length ? ' На устаревших данных продолжат работать: ' + compNames(stale) + '.' : '') + ' Файлы и настройки останутся, включить можно в любой момент.', 'Выключить', true) ||
        confirmBox('comp-on', 'Включить «' + c.name + '»? Вместе с ним включатся: ' + compNames(onWith) + '.', 'Включить')) +
-      kv([['Состояние', !on ? 'Выключен' : x.health === 'PASS' ? 'Норма' : 'Нет данных', !on ? 'warn' : x.health === 'PASS' ? 'ok' : ''], ['Запуск', c.when], ['Версия', x.release || plat().version || '—'], ['Установлен', fmtStamp(x.installed_at) || '—'], ['Обновление', x.update_id || '—'],
+      kv([['Запуск', c.when], ['Версия', x.release || plat().version || '—'], ['Установлен', fmtStamp(x.installed_at) || '—'], ['Обновление', x.update_id || '—'],
         g ? ['Зависимости', (deps.length ? 'нужны ' + deps.length : 'не нужны другие') + ' · ' + (users.length ? 'используют ' + users.length : 'никто не использует'), '', 'deps-' + c.id] : null]) +
-      '<div class="panel-actions even">' + (c.page ? '<button class="btn" type="button" data-go="' + c.page + '">Открыть раздел</button>' : '') + btn('open-log', 'logs', 'Журнал', '', ' data-log-tab="' + c.log + '"') + '</div>' + cfgNote(), { desc: c.desc });
+      '<div class="panel-actions even">' + (c.page ? '<button class="btn" type="button" data-go="' + c.page + '">Открыть раздел</button>' : '') + btn('open-log', 'logs', 'Журнал', '', ' data-log-tab="' + c.log + '"') + '</div>' + cfgNote(),
+    { desc: c.desc, right: headPill(!on ? 'warn' : x.health === 'PASS' ? 'ok' : '', !on ? 'Выключен' : x.health === 'PASS' ? 'Норма' : 'Нет данных') });
 }
 function depsPage(c) {
   const g = graphOf(c.id), all = cfg().components || [];
@@ -1177,6 +1213,7 @@ async function refreshPage() {
   if (id.startsWith('t-')) keys.push('status', 'lists');
   if (id.startsWith('w-')) keys.push('wifi');
   if (id === 'd-https' || id === 'ads') keys.push('https');
+  if (id === 'd-notes') notesVersions().forEach(v => loadNotes(v));
   if (id === 'd-querylog') keys.push('qlog');
   if (id === 'd-cron') keys.push('cron');
   if (id === 'd-review') keys.push('review');
@@ -1337,27 +1374,34 @@ async function updateMode(mode) {
 /* ---------- Окно установки обновления ---------- */
 // Like Keenetic: a window over the page while an update installs or rolls back,
 // by the button or on schedule; it follows the updater's phases.
-const UPD_STEPS = [['CHECKING', 'Проверка обновления'], ['VERIFIED', 'Проверка подписи'], ['BACKING_UP', 'Резервная копия'], ['INSTALLING', 'Установка файлов'], ['VERIFYING', 'Проверка работы'], ['COMMITTED', 'Готово']];
+const UPD_STEPS = [['CHECKING', 'Подготовка к установке', 5], ['VERIFIED', 'Проверка подписи', 15], ['BACKING_UP', 'Резервная копия', 30], ['INSTALLING', 'Установка файлов', 55], ['VERIFYING', 'Проверка работы', 80], ['COMMIT_PREPARED', 'Завершение', 92], ['COMMITTED', 'Готово', 100]];
 const UPD_BUSY = ['BACKING_UP', 'INSTALLING', 'VERIFYING', 'COMMIT_PREPARED', 'ROLLING_BACK'];
 let updOverlay = null;
+// A full-screen window like Keenetic's own: a ring with the percentage and the stage under it.
+// Each stage has its share; inside a stage the ring creeps on so it never looks frozen.
 function updOverlayShow(o) {
-  updOverlay = Object.assign(updOverlay || { op: 'apply', phase: 'CHECKING', from: plat().version || '' }, o);
+  updOverlay = Object.assign(updOverlay || { op: 'apply', phase: 'CHECKING', from: plat().version || '', pct: 0 }, o);
   let el = $('updOverlay');
   if (!el) { el = document.createElement('div'); el.id = 'updOverlay'; document.body.appendChild(el); }
   const u = updOverlay, rb = u.op === 'rollback' || u.phase === 'ROLLING_BACK';
-  const at = u.phase === 'COMMIT_PREPARED' ? 4 : Math.max(0, UPD_STEPS.findIndex(x => x[0] === u.phase));
-  const pct = u.done ? 100 : Math.round(100 * (at + 0.5) / UPD_STEPS.length);
-  const head = u.done ? (u.ok ? (rb ? 'Откат выполнен' : 'Обновление установлено') : 'Обновление не установлено') : (rb ? 'Откат обновления' : 'Установка обновления');
-  const text = u.done ? (u.ok ? 'VWARD ' + esc(u.version || '') + ' работает. Обновите страницу, чтобы открыть новую версию.' : esc(u.error || 'Установщик вернул прежнюю версию, всё работает как раньше. Подробности - в «Журналах» → «Обновления».'))
-    : 'Не закрывайте страницу. Роутер и интернет продолжают работать, компоненты VWARD перезапустятся на несколько секунд.';
-  el.innerHTML = '<div class="upd-scrim"></div><div class="upd-box" role="dialog" aria-live="polite" aria-label="' + esc(head) + '">' +
-    '<div class="upd-ico' + (u.done ? (u.ok ? ' ok' : ' crit') : '') + '">' + ico(u.done ? (u.ok ? 'check' : 'alert') : 'refresh') + '</div>' +
+  const i = Math.max(0, UPD_STEPS.findIndex(x => x[0] === u.phase)), step = UPD_STEPS[i], next = UPD_STEPS[i + 1];
+  const base = rb ? 50 : step[2], cap = rb ? 95 : next ? next[2] - 3 : 100;
+  u.pct = u.done ? 100 : Math.min(cap, Math.max(u.pct || 0, base) + (u.pct >= base ? 1 : 0));
+  const head = u.done ? (u.ok ? (rb ? 'Откат выполнен' : 'Обновление установлено') : 'Обновление не установлено') : (rb ? 'Откат обновления VWARD' : 'Обновление VWARD');
+  const stage = u.done ? (u.ok ? 'VWARD ' + (u.version || '') + ' работает' : 'Прежняя версия работает') : rb ? 'Возврат прежней версии' : step[1];
+  const text = u.done ? (u.ok ? 'Обновите страницу, чтобы открыть новую версию.' : (u.error || 'Установщик вернул прежнюю версию, всё работает как раньше. Подробности - в «Журналах» → «Обновления».'))
+    : 'Не закрывайте страницу, пока не завершится обновление. Роутер и интернет продолжают работать.';
+  const R = 76, C = 2 * Math.PI * R, a = (u.pct / 100) * 2 * Math.PI - Math.PI / 2;
+  const state = u.done ? (u.ok ? ' ok' : ' crit') : '';
+  el.innerHTML = '<div class="upd-page' + state + '" role="dialog" aria-live="polite" aria-label="' + esc(head) + '">' +
     '<h2>' + esc(head) + '</h2>' + (u.version && !u.done ? '<p class="upd-ver">' + esc((u.from ? u.from + ' → ' : '') + u.version) + '</p>' : '') +
-    '<div class="meter upd-meter"><i class="upd-bar"></i></div>' +
-    (rb ? '' : '<ol class="upd-steps">' + UPD_STEPS.map((x, i) => '<li class="' + (u.done && u.ok || i < at ? 'done' : i === at && !u.done ? 'now' : '') + '">' + esc(x[1]) + '</li>').join('') + '</ol>') +
-    '<p class="upd-text">' + text + '</p>' +
+    '<p class="upd-text">' + esc(text) + '</p>' +
+    '<div class="upd-ring"><svg viewBox="0 0 180 180" aria-hidden="true"><circle class="upd-track" cx="90" cy="90" r="' + R + '"/>' +
+    '<circle class="upd-arc" cx="90" cy="90" r="' + R + '" stroke-dasharray="' + C.toFixed(1) + '" stroke-dashoffset="' + (C * (1 - u.pct / 100)).toFixed(1) + '" transform="rotate(-90 90 90)"/>' +
+    (u.done ? '' : '<circle class="upd-dot" cx="' + (90 + R * Math.cos(a)).toFixed(1) + '" cy="' + (90 + R * Math.sin(a)).toFixed(1) + '" r="11"/>') + '</svg>' +
+    '<span class="upd-pct">' + (u.done ? ico(u.ok ? 'check' : 'alert') : u.pct + '%') + '</span></div>' +
+    '<p class="upd-stage">' + esc(stage) + '</p>' +
     (u.done ? '<div class="panel-actions">' + (u.ok ? '<button class="btn primary" type="button" data-act="upd-reload">Обновить страницу</button>' : '<button class="btn" type="button" data-act="upd-close">Закрыть</button>') + '</div>' : '') + '</div>';
-  el.querySelector('.upd-bar').style.width = pct + '%';
 }
 function updOverlayClose() { updOverlay = null; const el = $('updOverlay'); if (el) el.remove(); }
 // Updater exit codes that are answers, not failures.
@@ -1386,7 +1430,7 @@ async function runLong(resultId, action, fields, dataAction, okMsg) {
   const done = !run.finished ? 'Ещё выполняется, проверьте позже' : run.rc === 0 ? okMsg : dataAction === 'update-data' && UPDATE_RC[run.rc] ? UPDATE_RC[run.rc] : 'Не выполнено (код ' + run.rc + ') - подробности в «Журналах»';
   const answered = run.finished && (run.rc === 0 || (dataAction === 'update-data' && UPDATE_RC_OK[run.rc]));
   if (installing) {
-    if (run.finished && run.rc === 0) { await load('status', true); updOverlayShow({ done: true, ok: true, version: plat().version || updOverlay.version }); return run; }
+    if (run.finished && run.rc === 0) { await load('status', true); updOverlayShow({ done: true, ok: true, version: (updOverlay && updOverlay.version) || plat().version }); return run; }
     if (run.finished && run.rc === 20) updOverlayClose();
     else updOverlayShow({ done: true, ok: false, error: run.finished ? (UPDATE_RC[run.rc] || '') : 'Установка ещё идёт. Проверьте раздел «Обновления» через минуту.' });
   }

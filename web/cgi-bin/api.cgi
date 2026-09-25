@@ -126,7 +126,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files) ;;
+    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -794,6 +794,33 @@ if [ "$ACTION" = backup-download ]; then
   cat "$SNAPSHOT_DIR/$BN"
   exit 0
 fi
+# release-notes VERSION: what is new in a version, from the CHANGELOG next to the
+# update feed (the branch the update itself comes from; it holds every version),
+# kept an hour in RAM.  A CHANGELOG on the router is read first when present.
+if [ "$ACTION" = release-notes ]; then
+  header_json
+  RV="$(qget version)"
+  case "$RV" in ''|*[!0-9A-Za-z.+-]*) echo '{"ok":false,"error":"invalid_version"}'; exit 0 ;; esac
+  [ "${#RV}" -le 40 ] || { echo '{"ok":false,"error":"invalid_version"}'; exit 0; }
+  notes_of() { awk -v v="## $RV" 'f && /^## / {exit} f {print; next} $0 == v || index($0, v ":") == 1 {sub(/^## [^:]*:? */, ""); print "#title " $0; f = 1}' "$1" 2>/dev/null | head -n 120; }
+  RN_SRC=installed RN_TEXT="$(notes_of "${VWARD_ROOT_PREFIX:-}/opt/share/vward/CHANGELOG.md")"
+  if [ -z "$RN_TEXT" ]; then
+    RN_SRC=feed
+    RN_URL="$(awk -F= '$1 == "manifest_url" {print substr($0, index($0, "=") + 1); exit}' "${VWARD_ROOT_PREFIX:-}/opt/etc/vward/update.conf" 2>/dev/null |
+      sed -n -E 's#^(https://raw[.]githubusercontent[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/updates/[a-z0-9-]+/update-manifest[.]json$#\1/CHANGELOG.md#p')"
+    [ -n "$RN_URL" ] || { echo '{"ok":false,"error":"notes_unavailable"}'; exit 0; }
+    RN_FILE="$NDM_CACHE_DIR/changelog"
+    if [ ! -s "$RN_FILE" ] || [ -n "$(find "$RN_FILE" -mmin +60 2>/dev/null)" ]; then
+      (umask 077; mkdir -p "$NDM_CACHE_DIR") 2>/dev/null
+      "$CURL" -fsS --connect-timeout 5 --max-time 12 --max-filesize 400000 "$RN_URL" -o "$RN_FILE.$$" 2>/dev/null && mv -f "$RN_FILE.$$" "$RN_FILE" || rm -f "$RN_FILE.$$"
+    fi
+    RN_TEXT="$(notes_of "$RN_FILE")"
+  fi
+  [ -n "$RN_TEXT" ] || { echo '{"ok":false,"error":"notes_unavailable"}'; exit 0; }
+  printf '%s\n' "$RN_TEXT" | "$JQ" -Rs --arg v "$RV" --arg src "$RN_SRC" '{ok: true, version: $v, source: $src, text: .}'
+  exit 0
+fi
+
 # Files: VWARD's own folders, read only.  Secrets never leave the router: the
 # tunnel store, keys, logins and every file only root may read are listed as
 # closed and are neither shown nor downloaded.  Links are not followed.
