@@ -97,6 +97,7 @@ async function apiPost(action, fields) {
   return r.json();
 }
 const API_ERRORS = {
+  smartdns_agh_failed: 'AdGuard Home не принял изменение строк Smart DNS', smartdns_agh_unavailable: 'модуль AdGuard Home не установлен', upstream_file_unsupported: 'upstream AdGuard Home заданы файлом - строки Smart DNS меняйте в нём вручную',
   this_device_not_registered: 'это устройство не зарегистрировано в Keenetic - вы потеряли бы доступ', devices_unavailable: 'список устройств Keenetic сейчас недоступен', device_not_registered: 'устройство не зарегистрировано в Keenetic',
   file_closed: 'файл закрыт: в нём ключи или пароли', not_found: 'не найдено', invalid_path: 'недопустимый путь', folder_missing: 'папки нет на роутере',
   not_a_file: 'это не файл', not_a_folder: 'это не папка', invalid_root: 'неизвестная папка',
@@ -698,7 +699,7 @@ const RENDER = {
         '<label class="row-switch">Следить' + sw('data-list-watch="' + esc(l.name) + '"', l.watch, 'Следить: ' + title, !ok) + '</label></span></li>';
     };
     return cfgNote() + panel('Доменные списки', items.length ? '<ul class="rows">' + items.map(row).join('') + '</ul>' : empty('В Keenetic нет доменных списков'),
-      { desc: '«В обход VPN» выключен — список идёт через ' + (L.tunnel ? 'туннель ' + L.tunnel : 'VPN') + ((L.smartdns_sources || {}).keenetic && L.smartdns_sources.keenetic.length ? ', строки Smart DNS его доменов в Keenetic на это время убираются' : '') + '. «Следить» — если сервис из списка, идущего в обход VPN, перестанет открываться, VWARD сам переведёт список на VPN.' }) +
+      { desc: '«В обход VPN» выключен — список идёт через ' + (L.tunnel ? 'туннель ' + L.tunnel : 'VPN') + ((L.smartdns_domains || []).length ? ', строки Smart DNS его доменов (в ' + smartdnsWhere(L) + ') на это время убираются' : '') + '. «Следить» — если сервис из списка, идущего в обход VPN, перестанет открываться, VWARD сам переведёт список на VPN.' }) +
       panel('Smart DNS', '<dl class="kv">' + ctrlRow('Защита Smart DNS', sw('data-smartdns-guard', L.smartdns_guard !== false, 'Защита Smart DNS', !ok), 'AdaptiveAuto не отправляет домены Smart DNS в VPN') + '</dl>' +
         kv([['Где настроен', smartdnsWhere(L)],
           L.doh_limit && L.doh_used ? ['Строк в Keenetic', fmtInt(L.doh_used) + ' из ' + fmtInt(L.doh_limit), L.doh_used >= L.doh_limit ? 'warn' : ''] : null,

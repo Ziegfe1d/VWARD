@@ -73,6 +73,7 @@ python3 tests/repository/check-console-agh-auth.py || fail "Console AdGuard Home
 python3 tests/repository/check-console-smartdns.py || fail "Smart DNS guard"
 python3 tests/repository/check-console-tunnels.py || fail "Console tunnels"
 python3 tests/repository/check-ads-agh-settings.py || fail "AdGuard Home ad settings"
+python3 tests/repository/check-ads-agh-smartdns.py || fail "AdGuard Home Smart DNS rows for tunnel lists"
 python3 tests/repository/check-ads-default-config.py || fail "Ads default settings"
 python3 tests/repository/check-console-backups.py || fail "Settings backups"
 python3 tests/repository/check-update-manual-install.py || fail "Manual install from VWARD"

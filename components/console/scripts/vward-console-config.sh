@@ -67,7 +67,7 @@ cleanup() {
     [ -z "$CONF_FILE" ] || rm -f "$CONF_FILE" "$CONF_FILE.raw"
     [ -z "$TMPFILE" ] || rm -f "$TMPFILE.raw"
     [ -z "$RUNCFG" ] || rm -f "$RUNCFG"
-    [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.doh"
+    [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.doh" "$JOURNAL.agh" "$JOURNAL.agh.inc" "$JOURNAL.agh.undo"
     [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
     [ "$LOCKED" != 1 ] || rm -rf "$CHANGE_LOCK"
@@ -409,6 +409,8 @@ tunnel_undo() {
             { bad=0; while IFS= read -r undo; do
                 case "$undo" in
                     "DOH-REMOVE "*) doh_remove "${undo#DOH-REMOVE }" || bad=1 ;;
+                    "AGH-PUT "*) agh_control smartdns-put "${undo#AGH-PUT }" >/dev/null || bad=1 ;;
+                    "AGH-TAKE "*) f=${undo#AGH-TAKE }; cut -f1 "$f" > "$f.inc" && agh_control smartdns-take "$f.inc" "$f.undo" >/dev/null || bad=1 ;;
                     *) ndm "$undo" || bad=1 ;;
                 esac
               done; exit "$bad"; } || undo_rc=1
@@ -606,6 +608,30 @@ doh_remove() {
     return "$dr_rc"
 }
 
+# Smart DNS kept in AdGuard Home ([/domain/]https://...): the rows of a list sent
+# into a tunnel go out there as they do in Keenetic, through the Ads component,
+# which holds the AdGuard Home login and reads every change back.
+ADS_CONTROL=${VWARD_ADS_CONTROL_BIN:-/opt/bin/vward-ads-privacy-control.sh}
+agh_control() {
+    [ -x "$ADS_CONTROL" ] || { AGH_ERR=smartdns_agh_unavailable; return 1; }
+    ac_out=$("$ADS_CONTROL" agh "$@" 2>&1) && printf '%s\n' "$ac_out" | grep -qx 'CONTROL=PASS' && return 0
+    AGH_ERR=$(printf '%s\n' "$ac_out" | sed -n 's/^ERROR=//p' | head -n 1)
+    case "$AGH_ERR" in adguard_auth_required|adguard_unavailable|upstream_file_unsupported) ;; *) AGH_ERR=smartdns_agh_failed ;; esac
+    return 1
+}
+
+agh_take() {
+    # agh_take GROUP OUT: take the AdGuard Home Smart DNS rows of GROUP; pairs to OUT.
+    : > "$2"
+    awk -v g="$1" '/^object-group fqdn / {cur = $3; next} /^!/ {cur = ""} cur == g && $1 == "include" {print tolower($2)}' "$RUNCFG" > "$2.inc"
+    command -v vward_agh_smartdns_domains >/dev/null 2>&1 || return 0
+    # Nothing of the list in AdGuard Home: AdGuard Home is not asked at all.
+    vward_agh_smartdns_domains | awk 'NR == FNR {inc[$1] = 1; next}
+        {d = $1; while (d != "") {if (d in inc) {f = 1; exit} i = index(d, "."); d = i ? substr(d, i + 1) : ""}}
+        END {exit f ? 0 : 1}' "$2.inc" - || return 0
+    agh_control smartdns-take "$2.inc" "$2"
+}
+
 wan_route_target() {
     # Where a list goes around the tunnel when nothing was recorded: the target
     # other lists already use for the ISP, else the WAN interface.
@@ -668,15 +694,18 @@ op_domain_list() {
             [ "$rc" = 0 ] || { [ "$rc" = 2 ] && die doh_remove_unsafe; die doh_remove_failed; }
             echo "dns-proxy $L" >> "$JOURNAL"
         done < "$JOURNAL.doh"
+        # 2b. The same rows kept in AdGuard Home.
+        agh_take "$G" "$JOURNAL.agh" || die "$AGH_ERR"
+        [ ! -s "$JOURNAL.agh" ] || echo "AGH-PUT $JOURNAL.agh" >> "$JOURNAL"
         # 3. Verify, then remember how to come back.
         snapshot
         route_present "$G" "$TUN" || die verification_failed
         [ -z "$cur_t" ] || ! route_present "$G" "$cur_t" || die verification_failed
         while IFS= read -r L; do [ -z "$L" ] || ! doh_present "$L" || die verification_failed; done < "$JOURNAL.doh"
         new_tmp "$saved" || die write_failed
-        { printf 'route=%s\t%s\n' "${cur_t:--}" "$cur_o"; sed -n 's/^./doh=&/p' "$JOURNAL.doh"; } > "$TMPFILE" || die write_failed
+        { printf 'route=%s\t%s\n' "${cur_t:--}" "$cur_o"; sed -n 's/^./doh=&/p' "$JOURNAL.doh"; sed -n 's/^./agh=&/p' "$JOURNAL.agh"; } > "$TMPFILE" || die write_failed
         install_tmp "$saved" 0600 || die write_failed
-        detail="route=${cur_t:--}->$TUN doh=$(grep -c . "$JOURNAL.doh")"
+        detail="route=${cur_t:--}->$TUN doh=$(grep -c . "$JOURNAL.doh") agh=$(grep -c . "$JOURNAL.agh")"
     else
         rt=$(sed -n 's/^route=//p' "$saved" 2>/dev/null)
         if [ -n "$rt" ]; then new_t=${rt%%"$tab"*} new_o=${rt#*"$tab"}; else new_t=$(wan_route_target) new_o=auto; fi
@@ -698,11 +727,16 @@ op_domain_list() {
             printf '%s\n' "$out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found)' && die router_rejected
             echo "DOH-REMOVE $L" >> "$JOURNAL"
         done < "$JOURNAL.doh"
+        sed -n 's/^agh=//p' "$saved" 2>/dev/null > "$JOURNAL.agh"
+        if [ -s "$JOURNAL.agh" ]; then
+            agh_control smartdns-put "$JOURNAL.agh" || die "$AGH_ERR"
+            echo "AGH-TAKE $JOURNAL.agh" >> "$JOURNAL"
+        fi
         snapshot
         [ "$new_t" = - ] || route_present "$G" "$new_t" || die verification_failed
         ! route_present "$G" "$TUN" || die verification_failed
         while IFS= read -r L; do [ -z "$L" ] || doh_present "$L" || die verification_failed; done < "$JOURNAL.doh"
-        detail="route=$TUN->$new_t doh=$(grep -c . "$JOURNAL.doh")"
+        detail="route=$TUN->$new_t doh=$(grep -c . "$JOURNAL.doh") agh=$(grep -c . "$JOURNAL.agh")"
     fi
 
     save_router || die config_save_failed

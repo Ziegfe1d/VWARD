@@ -93,6 +93,60 @@ if [ "$OP" = agh ]; then
         jpost blocked_services/set "$NEW" || agfail adguard_rejected
         aget blocked_services/list sl.json && "$ADS_JQ" -e --arg s "$A1" --argjson b "$B" '((. // []) | index($s) != null) == $b' "$W/sl.json" >/dev/null || agfail verification_failed
       else agfail adguard_unavailable; fi ;;
+    # Smart DNS rows ([/domain/]https://...) for the domain lists sent into a tunnel:
+    #   smartdns-take DOMAINS_FILE PAIRS_OUT  domains of the list and below leave their rows
+    #                                          (other domains of a row stay); taken pairs
+    #                                          "domain<TAB>upstream" go to PAIRS_OUT
+    #   smartdns-put PAIRS_FILE                those pairs come back
+    # The whole upstream list is read back; on a mismatch the previous one is put back.
+    smartdns-take|smartdns-put)
+      [ -r "$A1" ] || agfail invalid_value
+      aget dns_info dns.json || agfail adguard_unavailable
+      "$ADS_JQ" -e '.upstream_dns | type == "array"' "$W/dns.json" >/dev/null 2>&1 || agfail adguard_unavailable
+      [ -z "$("$ADS_JQ" -r '.upstream_dns_file // ""' "$W/dns.json")" ] || agfail upstream_file_unsupported
+      SD_LIB='def row: if type == "string" and startswith("[/") and ((index("/]") // -1) > 1)
+                  then {d: (.[2:index("/]")] | split("/")), u: .[(index("/]") + 2):]} else null end;
+              def enc: .u | (startswith("https://") or startswith("tls://") or startswith("quic://") or startswith("sdns://") or startswith("h3://"));'
+      if [ "$AG_SET" = smartdns-take ]; then
+        case "$A2" in ''|*[!A-Za-z0-9._/-]*) agfail invalid_value ;; esac
+        "$ADS_JQ" -Rn '[inputs | ascii_downcase | select(length > 0)]' "$A1" > "$W/inc.json" || agfail invalid_value
+        "$ADS_JQ" -c --slurpfile inc "$W/inc.json" "$SD_LIB"'
+          def under($d): any($inc[0][]; . as $i | $d == $i or ($d | endswith("." + $i)));
+          [.upstream_dns[] | . as $raw | row as $r
+            | if $r == null or ($r | enc | not) then {keep: $raw, took: []}
+              else ([$r.d[] | select(. as $x | under($x | ascii_downcase))]) as $t
+                | ([$r.d[] | select(. as $x | ($t | index([$x])) == null)]) as $rest
+                | {keep: (if ($t | length) == 0 then $raw elif ($rest | length) == 0 then null else "[/" + ($rest | join("/")) + "/]" + $r.u end),
+                   took: [$t[] | {d: ascii_downcase, u: $r.u}]}
+              end]
+          | {upstream_dns: [.[].keep | select(. != null)], took: [.[].took[]]}' "$W/dns.json" > "$W/plan.json" || agfail invalid_value
+        "$ADS_JQ" -r '.took[] | .d + "\t" + .u' "$W/plan.json" > "$A2" || agfail write_failed
+        chmod 0600 "$A2" 2>/dev/null
+        TAKEN=$(grep -c . "$A2")
+        if [ "$TAKEN" -gt 0 ]; then
+          "$ADS_JQ" -c '{upstream_dns: .upstream_dns}' "$W/plan.json" > "$W/body.json" || agfail invalid_value
+          ads_agh_api_post dns_config "$W/body.json" "$W/out" >/dev/null 2>&1 || agfail adguard_rejected
+          aget dns_info dns2.json && "$ADS_JQ" -e --slurpfile p "$W/plan.json" '.upstream_dns == $p[0].upstream_dns' "$W/dns2.json" >/dev/null 2>&1 || {
+            "$ADS_JQ" -c '{upstream_dns: .upstream_dns}' "$W/dns.json" > "$W/back.json"
+            ads_agh_api_post dns_config "$W/back.json" "$W/out" >/dev/null 2>&1
+            : > "$A2"; agfail verification_failed; }
+        fi
+        echo "TAKEN=$TAKEN"
+      else
+        "$ADS_JQ" -Rn '[inputs | split("\t") | select(length == 2 and (.[0] | length) > 0 and (.[1] | length) > 0) | {d: .[0], u: .[1]}]' "$A1" > "$W/pairs.json" || agfail invalid_value
+        "$ADS_JQ" -c --slurpfile p "$W/pairs.json" "$SD_LIB"'
+          ([.upstream_dns[] | row | select(. != null and enc) | .d[] | ascii_downcase]) as $have
+          | [$p[0][] | select(.d as $d | ($have | index([$d])) == null)] as $add
+          | {upstream_dns: (.upstream_dns + [$add | group_by(.u)[] | "[/" + (map(.d) | join("/")) + "/]" + .[0].u])}' "$W/dns.json" > "$W/plan.json" || agfail invalid_value
+        if ! "$ADS_JQ" -e --slurpfile o "$W/dns.json" '.upstream_dns == $o[0].upstream_dns' "$W/plan.json" >/dev/null 2>&1; then
+          ads_agh_api_post dns_config "$W/plan.json" "$W/out" >/dev/null 2>&1 || agfail adguard_rejected
+          aget dns_info dns2.json && "$ADS_JQ" -e --slurpfile p "$W/plan.json" '.upstream_dns == $p[0].upstream_dns' "$W/dns2.json" >/dev/null 2>&1 || {
+            "$ADS_JQ" -c '{upstream_dns: .upstream_dns}' "$W/dns.json" > "$W/back.json"
+            ads_agh_api_post dns_config "$W/back.json" "$W/out" >/dev/null 2>&1
+            agfail verification_failed; }
+        fi
+        echo "PUT=$(grep -c . "$A1")"
+      fi ;;
     *) agfail invalid_setting ;;
   esac
   ads_log "CONTROL|agh|$AG_SET|$A1|$A2|ok"

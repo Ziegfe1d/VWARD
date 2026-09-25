@@ -104,6 +104,33 @@ VWARD_TUNNEL_DEVICE=nwg0
 """
 
 
+# Stand-in for the Ads component's AdGuard Home Smart DNS operations: keeps the
+# upstream rows in a JSON state and mirrors them into AdGuardHome.yaml.
+FAKE_ADS = r'''#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+st = Path("@ST@"); s = json.loads(st.read_text()); args = sys.argv[1:]
+with open(str(st) + ".log", "a") as f: f.write(args[1] + "\n")
+if s.get("fail"): print("CONTROL=FAIL"); print("ERROR=" + s["fail"]); sys.exit(1)
+if args[1] == "smartdns-take":
+    inc = [l.strip() for l in open(args[2]) if l.strip()]; took = []; new = []
+    for u in s["up"]:
+        if u.startswith("[/"):
+            e = u.index("/]"); ds = u[2:e].split("/"); url = u[e + 2:]
+            t = [d for d in ds if any(d == i or d.endswith("." + i) for i in inc)]
+            took += [(d, url) for d in t]; rest = [d for d in ds if d not in t]
+            if rest: new.append("[/%s/]%s" % ("/".join(rest), url))
+        else: new.append(u)
+    s["up"] = new; Path(args[3]).write_text("".join("%s\t%s\n" % p for p in took)); print("TAKEN=%d" % len(took))
+elif args[1] == "smartdns-put":
+    for l in open(args[2]):
+        d, url = l.rstrip("\n").split("\t"); s["up"].append("[/%s/]%s" % (d, url))
+st.write_text(json.dumps(s))
+Path("@YAML@").write_text("dns:\n  upstream_dns:\n" + "".join("    - '%s'\n" % u for u in s["up"]))
+print("CONTROL=PASS")
+'''
+
+
 def fail(message: str) -> None:
     raise SystemExit(f"FAIL: {message}")
 
@@ -132,6 +159,7 @@ with tempfile.TemporaryDirectory() as tmp:
         "VWARD_ROOT_PREFIX": str(tmp / "root"), "VWARD_ROUTE_CHANGE_LOCK": str(tmp / "change.lock"),
         "VWARD_ROUTE_STATE": str(tmp / "route"), "VWARD_CONSOLE_ETC": str(etc),
         "VWARD_CONSOLE_BACKUP_DIR": str(tmp / "backup"), "VWARD_CONSOLE_AUDIT_LOG": str(tmp / "audit.log"),
+        "VWARD_ADGUARD_CONFIG": str(tmp / "no-adguard.yaml"), "VWARD_ADS_CONTROL_BIN": str(tmp / "no-ads-control"),
     }
     state = etc / "route-engine/domain-lists/domain-list4"
     original = dns_block(cfg)
@@ -221,6 +249,45 @@ with tempfile.TemporaryDirectory() as tmp:
     if dns_block(cfg) != original:
         fail("rejected route: router changed")
     Path(str(cfg) + ".mode-reject-route").unlink()
+
+    # 7. Smart DNS kept only in AdGuard Home: its rows of the list go out and come back.
+    cfg.write_text("\n".join(l for l in RUNNING.splitlines() if "https upstream" not in l) + "\n")
+    if state.exists(): state.unlink()
+    agh_state = tmp / "agh.json"; yaml = tmp / "AdGuardHome.yaml"
+    UP = [f"[/anthropic.com/chatgpt.com/]{AET}", f"[/claude.ai/]{AET}", "https://dns.nextdns.io/abc"]
+    agh_state.write_text(__import__("json").dumps({"up": UP}))
+    yaml.write_text("dns:\n  upstream_dns:\n" + "".join(f"    - '{u}'\n" for u in UP))
+    ads = tmp / "ads-control"; ads.write_text(FAKE_ADS.replace("@ST@", str(agh_state)).replace("@YAML@", str(yaml))); ads.chmod(0o755)
+    env |= {"VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_ADS_CONTROL_BIN": str(ads)}
+    agh = lambda: __import__("json").loads(agh_state.read_text())["up"]
+    keenetic_before = dns_block(cfg)
+
+    run("domain-list", "domain-list4", "vpn", "result=changed", 0)
+    if agh() != [f"[/chatgpt.com/]{AET}", "https://dns.nextdns.io/abc"]:
+        fail(f"AdGuard Home rows of the list stayed or others went: {agh()}")
+    saved = state.read_text().splitlines()
+    if sorted(saved[1:]) != sorted([f"agh=anthropic.com\t{AET}", f"agh=claude.ai\t{AET}"]):
+        fail(f"AdGuard Home pairs not remembered: {saved}")
+    run("domain-list", "domain-list4", "bypass", "result=changed", 0)
+    if sorted(agh()) != sorted([f"[/chatgpt.com/]{AET}", "https://dns.nextdns.io/abc", f"[/anthropic.com/]{AET}", f"[/claude.ai/]{AET}"]):
+        fail(f"AdGuard Home rows not back: {agh()}")
+    if dns_block(cfg) != keenetic_before or state.exists():
+        fail("bypass after AdGuard Home did not restore the router")
+
+    # A list without Smart DNS domains does not touch AdGuard Home.
+    calls = (tmp / "agh.json.log").read_text()
+    run("domain-list", "domain-list0", "bypass", "result=changed", 0)
+    run("domain-list", "domain-list0", "vpn", "result=changed", 0)
+    if (tmp / "agh.json.log").read_text() != calls:
+        fail("a list without Smart DNS domains asked AdGuard Home")
+
+    # AdGuard Home refuses (no login): the list stays where it was.
+    st = __import__("json").loads(agh_state.read_text()); st["fail"] = "adguard_auth_required"; agh_state.write_text(__import__("json").dumps(st))
+    before = dns_block(cfg)
+    run("domain-list", "domain-list4", "vpn", "error=adguard_auth_required")
+    if dns_block(cfg) != before or state.exists():
+        fail(f"AdGuard Home refusal left the router changed: {dns_block(cfg)}")
+    cfg.write_text(RUNNING)
 
     # 6. Watch switch.
     run("domain-list-watch", "domain-list4", "1", "result=changed", 0)
