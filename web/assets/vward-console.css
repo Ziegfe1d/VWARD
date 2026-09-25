@@ -310,3 +310,24 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .blocked-card .panel-actions{justify-content:center;flex-wrap:wrap}
 .blocked-card a.btn{text-decoration:none}
 .block-head .head-pill{margin-left:auto;flex:none}
+/* Выпадающие списки: the native select stays as the value holder, hidden. */
+.dd-native{display:none!important}
+.dd-btn{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;cursor:pointer;font:inherit;font-weight:650}
+.dd-btn .dd-val{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dd-btn .dd-chev{flex:none;width:16px;height:16px;transform:rotate(90deg);color:var(--muted);transition:transform .15s}
+.dd-btn[aria-expanded="true"]{border-color:var(--accent)}
+.dd-btn[aria-expanded="true"] .dd-chev{transform:rotate(-90deg)}
+.dd-btn:disabled{opacity:.55;cursor:default}
+.kv dd .dd-btn{max-width:210px}
+#ddMenu{position:fixed;z-index:70;overflow-y:auto;padding:6px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface);box-shadow:0 10px 30px rgba(0,0,0,.18)}
+.dd-opt{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:8px 10px;border:0;border-radius:calc(var(--r-md) - 4px);background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.dd-opt .dd-mark{flex:none;width:18px;height:18px;color:var(--accent);visibility:hidden}
+.dd-opt[aria-selected="true"]{font-weight:650}
+.dd-opt[aria-selected="true"] .dd-mark{visibility:visible}
+.dd-opt:hover,.dd-opt:focus-visible{background:var(--surface-2);outline:none}
+.dd-opt:disabled{color:var(--faint);cursor:default}
+.overview-bar .ob-time{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.overview-bar .btn{flex:none}
+.icon-btn.spinning .icon{animation:upd-spin 1.2s linear infinite}
+@keyframes upd-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.icon-btn.spinning .icon{animation:none}}

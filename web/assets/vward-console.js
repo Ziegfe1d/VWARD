@@ -381,7 +381,8 @@ const RENDER = {
   overview() {
     const list = cardOrder.filter(id => editing || !hiddenCards.includes(id));
     const at = S.cached.status || S.loadedAt.status, ts = at ? new Date(at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '—';
-    let html = '<div class="overview-bar"><span>' + (S.cached.status ? 'Данные на ' + ts + ' · обновляются…' : 'Обновлено ' + ts) + '</span><button class="icon-btn" type="button" data-act="reload" aria-label="Обновить данные">' + ico('refresh') + '</button><span class="spacer"></span>' +
+    // While cached data is shown the refresh icon spins; the text stays short so the bar never overflows.
+    let html = '<div class="overview-bar"><span class="ob-time">' + (S.cached.status ? 'Данные на ' + ts + (S.errors.status ? ' · нет ответа роутера' : '') : 'Обновлено ' + ts) + '</span><button class="icon-btn' + (S.cached.status && !S.errors.status ? ' spinning' : '') + '" type="button" data-act="reload" aria-label="' + (S.cached.status ? 'Данные обновляются' : 'Обновить данные') + '">' + ico('refresh') + '</button><span class="spacer"></span>' +
       (editing ? btn('edit', 'check', 'Готово', 'small primary') : btn('edit', 'edit', 'Настроить', 'small')) + '</div>';
     if (editing) html += '<div class="edit-bar"><span>Вид</span><div class="segmented" role="group" aria-label="Вид карточек"><button type="button" data-view="grid" aria-pressed="' + (cardView === 'grid') + '">' + ico('platform') + 'Плитки</button><button type="button" data-view="list" aria-pressed="' + (cardView === 'list') + '">' + ico('logs') + 'Список</button></div><button class="link-btn" type="button" data-act="cards-reset">Сбросить</button></div>';
     html += '<div class="cards' + (editing ? ' editing' : '') + '" data-view="' + cardView + '">' + list.map((id, n) => {
@@ -1173,11 +1174,86 @@ let rendered = null;
 function patchContent(html, whole) {
   const box = $('content'), t = document.createElement('template');
   t.innerHTML = html;
+  ddEnhance(t.content);
   t.content.querySelectorAll('.meter i[data-width]').forEach(i => { i.style.width = Math.max(0, Math.min(100, Number(i.dataset.width))) + '%'; });
   const fresh = [...t.content.children], old = [...box.children];
   if (whole || fresh.length !== old.length) { box.replaceChildren(t.content); return; }
   fresh.forEach((n, i) => { if (!old[i].isEqualNode(n)) old[i].replaceWith(n); });
 }
+/* ---------- Выпадающие списки ----------
+   A native <select> opens a full-screen picker on phones.  Each one gets a
+   button and a menu right under it; the select stays (hidden) as the value
+   holder, so forms and the change handlers work as before. */
+function ddLabel(sel) { const o = sel.options[sel.selectedIndex]; return o ? o.textContent : ''; }
+function ddEnhance(root) {
+  root.querySelectorAll('select.input:not([data-dd])').forEach(sel => {
+    sel.setAttribute('data-dd', '1'); sel.classList.add('dd-native'); sel.tabIndex = -1;
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = sel.className.replace('dd-native', '').trim() + ' dd-btn';
+    b.setAttribute('aria-haspopup', 'listbox'); b.setAttribute('aria-expanded', 'false');
+    if (sel.getAttribute('aria-label')) b.setAttribute('aria-label', sel.getAttribute('aria-label'));
+    if (sel.disabled) b.disabled = true;
+    b.innerHTML = '<span class="dd-val"></span>' + ico('chevron', 'dd-chev');
+    b.firstChild.textContent = ddLabel(sel);
+    sel.after(b);
+  });
+}
+let ddOpen = null;
+function ddClose(focus) {
+  const m = $('ddMenu'); if (m) m.remove();
+  if (ddOpen) { ddOpen.btn.setAttribute('aria-expanded', 'false'); if (focus) ddOpen.btn.focus(); }
+  ddOpen = null;
+}
+function ddShow(btn) {
+  const sel = btn.previousElementSibling;
+  if (!sel || sel.tagName !== 'SELECT') return;
+  ddClose();
+  const m = document.createElement('div');
+  m.id = 'ddMenu'; m.setAttribute('role', 'listbox');
+  m.innerHTML = [...sel.options].map((o, i) => '<button type="button" role="option" class="dd-opt" data-dd-i="' + i + '" aria-selected="' + (i === sel.selectedIndex) + '"' + (o.disabled ? ' disabled' : '') + '>' + ico('check', 'dd-mark') + '<span>' + esc(o.textContent) + '</span></button>').join('');
+  document.body.appendChild(m);
+  const r = btn.getBoundingClientRect(), vw = document.documentElement.clientWidth, vh = window.innerHeight;
+  const w = Math.min(Math.max(r.width, 200), vw - 16);
+  m.style.width = w + 'px';
+  m.style.left = Math.max(8, Math.min(r.left + r.width - w, vw - w - 8)) + 'px';
+  const h = m.offsetHeight, below = vh - r.bottom - 8, above = r.top - 8;
+  m.style.top = (h <= below || below >= above ? r.bottom + 4 : Math.max(8, r.top - Math.min(h, above) - 4)) + 'px';
+  m.style.maxHeight = Math.max(160, h <= below || below >= above ? below : above) + 'px';
+  ddOpen = { btn: btn, sel: sel };
+  btn.setAttribute('aria-expanded', 'true');
+  const cur = m.querySelector('[aria-selected="true"]') || m.querySelector('.dd-opt:not([disabled])');
+  if (cur) { cur.focus({ preventScroll: true }); cur.scrollIntoView({ block: 'nearest' }); }
+}
+function ddPick(i) {
+  if (!ddOpen) return;
+  const { btn, sel } = ddOpen;
+  ddClose(true);
+  if (sel.selectedIndex === i) return;
+  sel.selectedIndex = i;
+  btn.firstChild.textContent = ddLabel(sel);
+  sel.dispatchEvent(new Event('change', { bubbles: true }));
+}
+document.addEventListener('click', e => {
+  const opt = e.target.closest('.dd-opt');
+  if (opt) { e.stopPropagation(); ddPick(Number(opt.dataset.ddI)); return; }
+  const b = e.target.closest('.dd-btn');
+  if (b) { e.stopPropagation(); if (ddOpen && ddOpen.btn === b) ddClose(); else ddShow(b); return; }
+  if (ddOpen && !e.target.closest('#ddMenu')) ddClose();
+}, true);
+document.addEventListener('keydown', e => {
+  if (!ddOpen) {
+    const b = e.target.closest && e.target.closest('.dd-btn');
+    if (b && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); ddShow(b); }
+    return;
+  }
+  const opts = [...document.querySelectorAll('#ddMenu .dd-opt:not([disabled])')], at = opts.indexOf(document.activeElement);
+  if (e.key === 'Escape') { e.preventDefault(); ddClose(true); }
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = opts[(at + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % opts.length]; if (n) n.focus(); }
+  else if (e.key === 'Tab') ddClose();
+});
+window.addEventListener('resize', () => ddClose());
+window.addEventListener('scroll', e => { if (ddOpen && !(e.target && e.target.closest && e.target.closest('#ddMenu'))) ddClose(); }, true);
+
 function render() {
   const p = page(current);
   $('pageTitle').textContent = p.title;
@@ -1241,6 +1317,7 @@ function openSheet(title, body, cls, btnId) {
   closeLayer(true);
   if (!(history.state && history.state.sheet)) history.pushState({ p: current, d: histDepth() + 1, sheet: 1 }, '', '#' + current);
   $('layer').innerHTML = '<div class="scrim" data-act="close"></div><div class="sheet ' + (cls || '') + '" role="dialog" aria-label="' + esc(title || 'Поиск') + '">' + (title ? '<div class="sheet-head"><h2>' + esc(title) + '</h2><button class="icon-btn" type="button" data-act="close" aria-label="Закрыть">' + ico('close') + '</button></div>' : '') + body + '</div>';
+  ddEnhance($('layer'));
   if (btnId) $(btnId).setAttribute('aria-expanded', 'true');
 }
 // Only registered devices may open VWARD, and this one is not.
