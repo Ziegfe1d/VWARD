@@ -71,7 +71,8 @@ if grep -q '"login":"{LOGIN}","password":"{expected}"' "$data"; then printf 200;
         return line.split(": ", 1)[1].split(";", 1)[0] if line else ""
 
     # Off by default: everything open, nothing stored.
-    if call("action=auth")[1] != {"ok": True, "enabled": False, "logged_in": False, "login": "", "session_hours": 12}:
+    if call("action=auth")[1] != {"ok": True, "enabled": False, "logged_in": False, "login": "", "session_hours": 12,
+                                  "devices_only": False, "device": {"ip": "", "state": "unregistered"}}:
         fail("login must be off by default")
     if call("action=status")[1].get("ok") is not True:
         fail("API must stay open while login is off")
@@ -96,7 +97,8 @@ if grep -q '"login":"{LOGIN}","password":"{expected}"' "$data"; then printf 200;
         fail("ping must stay open")
     if call("action=status", cookie=cookie)[1].get("ok") is not True:
         fail("a valid session must open the API")
-    if call("action=auth", cookie=cookie)[1] != {"ok": True, "enabled": True, "logged_in": True, "login": LOGIN, "session_hours": 12}:
+    if call("action=auth", cookie=cookie)[1] != {"ok": True, "enabled": True, "logged_in": True, "login": LOGIN, "session_hours": 12,
+                                                  "devices_only": False, "device": {"ip": "", "state": "unregistered"}}:
         fail("auth state with a session")
     for bad in ("vward_session=" + "0" * 64, "vward_session=../../etc", "vward_session=" + cookie.split("=")[1].upper()):
         if call("action=status", cookie=bad)[1].get("error") != "auth_required":

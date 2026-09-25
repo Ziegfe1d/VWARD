@@ -1261,7 +1261,7 @@ op_component() {
 [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|smartdns-guard|backup-create|backup-restore) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     tunnel-subnet) [ "$#" -eq 3 ] || die usage 64 ;;
     wifi-host) [ "$#" -eq 3 ] || die usage 64 ;;
@@ -1294,6 +1294,11 @@ case "$OP" in
     console-auth) case "$ARG1" in 0|1) ;; *) die invalid_value 64 ;; esac
         set_kv "$AUTH_CONF" AUTH_ENABLED "$ARG1" 0600 || done_ok "console-auth enabled=$ARG1" unchanged
         done_ok "console-auth enabled=$ARG1" changed ;;
+    # Only devices registered in Keenetic may open VWARD.  Recovery over SSH:
+    # vward-console-config.sh console-devices 0
+    console-devices) case "$ARG1" in 0|1) ;; *) die invalid_value 64 ;; esac
+        set_kv "$AUTH_CONF" DEVICES_ONLY "$ARG1" 0600 || done_ok "console-devices only_registered=$ARG1" unchanged
+        done_ok "console-devices only_registered=$ARG1" changed ;;
     update-feed) op_update_feed "$ARG1" ;;
     tunnel) op_tunnel "$ARG1" ;;
     domain-list) op_domain_list "$ARG1" "$ARG2" ;;

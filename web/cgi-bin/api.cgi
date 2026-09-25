@@ -198,9 +198,10 @@ CONFIG_HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
 AUTH_CONF=${VWARD_CONSOLE_AUTH_CONF:-/opt/etc/vward/console/auth.conf}
 AUTH_SESSIONS=${VWARD_CONSOLE_SESSIONS:-/tmp/vward-console-sessions}
 AUTH_URL=${VWARD_KEENETIC_AUTH_URL:-http://${VWARD_LAN_ADDRESS:-127.0.0.1}/auth}
-AUTH_ENABLED=0
-[ "$(awk -F= '$1=="AUTH_ENABLED"{print $2; exit}' "$AUTH_CONF" 2>/dev/null)" = 1 ] && AUTH_ENABLED=1
-AUTH_HOURS="$(awk -F= '$1=="SESSION_HOURS"{print $2; exit}' "$AUTH_CONF" 2>/dev/null)"
+# One pass over the file, no process: this runs on every request.
+kv_file "$AUTH_CONF" AUTH_ENABLED=AUTH_ENABLED SESSION_HOURS=AUTH_HOURS DEVICES_ONLY=DEVICES_ONLY
+[ "$AUTH_ENABLED" = 1 ] || AUTH_ENABLED=0
+[ "$DEVICES_ONLY" = 1 ] || DEVICES_ONLY=0
 case "$AUTH_HOURS" in ''|*[!0-9]*) AUTH_HOURS=12 ;; esac
 [ "$AUTH_HOURS" -ge 1 ] && [ "$AUTH_HOURS" -le 168 ] || AUTH_HOURS=12
 AUTH_LOGIN=""
@@ -219,6 +220,43 @@ auth_session_valid(){
     AUTH_LOGIN="$(awk -F= '$1=="login"{print $2; exit}' "$af")"
 }
 
+# ---------- Only devices registered in Keenetic ----------
+# Off by default.  The caller's address must belong to a registered host in the
+# router's host list (kept 30 s in RAM, re-read at once for an unknown address).
+# The router itself always passes; when the host list cannot be read at all the
+# request passes too, so a router hiccup never locks the owner out.
+DEVICES_CACHE=${VWARD_CONSOLE_DEVICES_CACHE:-/tmp/vward-console-devices}
+CLIENT_IP=${REMOTE_ADDR:-}; CLIENT_IP=${CLIENT_IP#::ffff:}
+devices_refresh(){
+    dr_tmp="$DEVICES_CACHE.$$"
+    fetch_json "$VWARD_RCI_BASE/show/ip/hotspot" | "$JQ" -r '(.host // .hosts // []) | (if type == "object" then [.[]] else . end)
+        | if length == 0 then error("empty") else . end
+        | .[] | select(type == "object" and .registered == true and (.ip // "") != "" and .ip != "0.0.0.0") | .ip' > "$dr_tmp" 2>/dev/null ||
+        { rm -f "$dr_tmp"; return 1; }
+    { date +%s; cat "$dr_tmp"; } > "$dr_tmp.c" && mv -f "$dr_tmp.c" "$DEVICES_CACHE"; rm -f "$dr_tmp"
+}
+# device_state: registered | unregistered | unknown
+device_state(){
+    case "$CLIENT_IP" in 127.0.0.1|::1) echo registered; return ;; '') echo unregistered; return ;; esac
+    ds_now="$(date +%s)"; ds_at=0
+    [ ! -r "$DEVICES_CACHE" ] || read -r ds_at < "$DEVICES_CACHE"
+    case "$ds_at" in ''|*[!0-9]*) ds_at=0 ;; esac
+    if [ $((ds_now - ds_at)) -ge 30 ]; then devices_refresh || { echo unknown; return; }; ds_at=$ds_now; fi
+    if grep -qxF "$CLIENT_IP" "$DEVICES_CACHE" 2>/dev/null; then echo registered; return; fi
+    # A device registered a moment ago: one fresh look before saying no.
+    if [ $((ds_now - ds_at)) -ge 5 ]; then
+        devices_refresh || { echo unknown; return; }
+        grep -qxF "$CLIENT_IP" "$DEVICES_CACHE" 2>/dev/null && { echo registered; return; }
+    fi
+    echo unregistered
+}
+if [ "$DEVICES_ONLY" = 1 ] && [ "$ACTION" != ping ] && [ "$(device_state)" = unregistered ]; then
+    echo 'Status: 403 Forbidden'
+    header_json
+    echo '{"ok":false,"error":"device_not_registered"}'
+    exit 0
+fi
+
 if [ "$AUTH_ENABLED" = 1 ] && [ "$ACTION" != auth ] && [ "$ACTION" != ping ] && ! auth_session_valid; then
     echo 'Status: 401 Unauthorized'
     header_json
@@ -231,7 +269,8 @@ if [ "$ACTION" = auth ]; then
         header_json
         LOGGED=false; auth_session_valid && LOGGED=true
         "$JQ" -cn --argjson enabled "$([ "$AUTH_ENABLED" = 1 ] && echo true || echo false)" --argjson logged "$LOGGED" --arg login "$AUTH_LOGIN" --argjson hours "$AUTH_HOURS" \
-            '{ok:true,enabled:$enabled,logged_in:$logged,login:$login,session_hours:$hours}'
+            --argjson devices_only "$([ "$DEVICES_ONLY" = 1 ] && echo true || echo false)" --arg ip "$CLIENT_IP" --arg state "$(device_state)" \
+            '{ok:true,enabled:$enabled,logged_in:$logged,login:$login,session_hours:$hours,devices_only:$devices_only,device:{ip:$ip,state:$state}}'
         exit 0
     fi
     LENGTH=${CONTENT_LENGTH:-0}; case "$LENGTH" in ''|*[!0-9]*) LENGTH=0;; esac
@@ -319,6 +358,19 @@ if [ "$ACTION" = auth ]; then
             [ "$(aval confirm)" = CONSOLE_AUTH_DISABLE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
             [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
             AOUT="$("$CONFIG_HELPER" console-auth 0 2>/dev/null | tail -n 1)"
+            case "$AOUT" in result=*) echo '{"ok":true}' ;; *) "$JQ" -cn --arg e "${AOUT#error=}" '{ok:false,error:$e}' ;; esac
+            ;;
+        devices)
+            header_json
+            [ "$AUTH_ENABLED" = 0 ] || auth_session_valid || { echo '{"ok":false,"error":"auth_required"}'; exit 0; }
+            DV="$(aval value)"; case "$DV" in 0|1) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+            # Turning it on from a device that would be shut out is refused.
+            if [ "$DV" = 1 ]; then
+                case "$(device_state)" in registered) ;; unknown) echo '{"ok":false,"error":"devices_unavailable"}'; exit 0 ;; *) echo '{"ok":false,"error":"this_device_not_registered"}'; exit 0 ;; esac
+            fi
+            [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+            AOUT="$("$CONFIG_HELPER" console-devices "$DV" 2>/dev/null | tail -n 1)"
+            printf '%s|CONSOLE_DEVICES|only_registered=%s ip=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$DV" "$CLIENT_IP" >> /opt/var/log/vward/console-audit.log 2>/dev/null
             case "$AOUT" in result=*) echo '{"ok":true}' ;; *) "$JQ" -cn --arg e "${AOUT#error=}" '{ok:false,error:$e}' ;; esac
             ;;
         *) header_json; echo '{"ok":false,"error":"invalid_operation"}' ;;

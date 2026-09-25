@@ -72,6 +72,10 @@ async function apiFetch(url, options) {
   catch (e) { throw new Error(e.name === 'AbortError' ? 'роутер не ответил за 10 секунд' : 'нет связи с роутером'); }
   finally { clearTimeout(timer); }
   if (r.status === 401) { showLogin(); throw new Error('нужно войти'); }
+  if (r.status === 403 && r.headers.get('Content-Type') && r.headers.get('Content-Type').includes('json')) {
+    const x = await r.clone().json().catch(() => ({}));
+    if (x.error === 'device_not_registered') { showDeviceBlocked(); throw new Error('устройство не зарегистрировано'); }
+  }
   return r;
 }
 async function apiGet(action, params) {
@@ -93,6 +97,7 @@ async function apiPost(action, fields) {
   return r.json();
 }
 const API_ERRORS = {
+  this_device_not_registered: 'это устройство не зарегистрировано в Keenetic - вы потеряли бы доступ', devices_unavailable: 'список устройств Keenetic сейчас недоступен', device_not_registered: 'устройство не зарегистрировано в Keenetic',
   file_closed: 'файл закрыт: в нём ключи или пароли', not_found: 'не найдено', invalid_path: 'недопустимый путь', folder_missing: 'папки нет на роутере',
   not_a_file: 'это не файл', not_a_folder: 'это не папка', invalid_root: 'неизвестная папка',
   updater_busy: 'идёт обновление, повторите позже', confirmation_required: 'требуется подтверждение',
@@ -612,7 +617,8 @@ const RENDER = {
       panel('Оформление', '<dl class="kv">' + ctrlRow('Тема', sel('data-theme-pick', 'Тема оформления', Object.keys(THEMES).map(k => [k, THEMES[k].charAt(0).toUpperCase() + THEMES[k].slice(1)]), theme), theme === 'time' ? 'светлая с 07:00 до 20:00, тёмная ночью' : '') + '</dl>',
         { desc: 'Тема хранится в этом браузере.' }) +
       panel('Доступ к VWARD', '<dl class="kv">' + ctrlRow('Вход по учётной записи Keenetic', sw('data-auth', !!(au.enabled || authForm), 'Вход по учётной записи Keenetic', !S.auth),
-          au.enabled ? (au.logged_in ? 'вы вошли как ' + au.login + ' · сессия ' + au.session_hours + ' ч' : 'нужен вход') : 'пароль проверяет роутер, VWARD его не хранит') + '</dl>' +
+          au.enabled ? (au.logged_in ? 'вы вошли как ' + au.login + ' · сессия ' + au.session_hours + ' ч' : 'нужен вход') : 'пароль проверяет роутер, VWARD его не хранит') +
+        (S.auth && au.devices_only != null ? ctrlRow('Только зарегистрированные устройства', sw('data-auth-devices', !!au.devices_only, 'Только зарегистрированные устройства', !au.devices_only && (au.device || {}).state !== 'registered'), devicesHint(au)) : '') + '</dl>' +
         (authForm && !au.enabled ? '<form class="inline-form" data-form="auth-enable"><input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Включить вход</button></form><p class="panel-desc">Введите логин и пароль от веб-интерфейса роутера: вход включится, только если роутер их примет.</p>' : '') +
         confirmBox('auth-off', 'Выключить вход? VWARD снова будет открыт любому устройству в домашней сети.', 'Выключить', true) +
         kv([
@@ -620,7 +626,7 @@ const RENDER = {
           ['Защита запросов', api.mutation_guard ? 'Включена' : 'Выключена', api.mutation_guard ? 'ok' : 'crit'],
           ['Доступ с других сайтов', api.cors ? 'Разрешён' : 'Запрещён', api.cors ? 'crit' : 'ok']
         ]) + (au.enabled ? (au.logged_in ? '<div class="panel-actions">' + btn('logout', 'undo', 'Выйти') + '</div>' : '') : '<p class="field-warn">Пока вход выключен, VWARD открыт любому устройству в домашней сети.</p>'),
-      { desc: 'Сессия действует ' + (au.session_hours || 12) + ' ч. После 5 неверных попыток вход блокируется на 5 минут.' }) +
+      { desc: 'Сессия действует ' + (au.session_hours || 12) + ' ч. После 5 неверных попыток вход блокируется на 5 минут.' + (au.devices_only ? ' Если доступ потерян: по SSH выполните /opt/bin/vward-console-config.sh console-devices 0.' : '') }) +
       backupPanel() +
       panel('Нижняя панель на телефоне', '<div class="tabbar preview" data-key="Разделы на панели">' + tabsHtml() + '</div><dl class="kv">' + PAGES.map(p => {
         const on = tabIds.includes(p.id), i = tabIds.indexOf(p.id);
@@ -866,6 +872,12 @@ function probeResult() {
     ['Найден в источниках', names.length ? fmtInt(names.length) + ' ' + plural(names.length, 'источник', 'источника', 'источников') : 'нет', '', null, '', names.slice(0, 3).join(', ')],
     ['Запросов в журнале', q != null ? fmtInt(q) : '—']
   ]) + '<div class="panel-actions">' + adsRuleBtn(p.domain, 'allow') + adsRuleBtn(p.domain, 'block') + btn('probe-report', 'logs', 'Полный отчёт', 'small') + '</div>';
+}
+function devicesHint(au) {
+  const d = au.device || {}, where = d.ip ? ' (' + d.ip + ')' : '';
+  if (d.state === 'registered') return 'это устройство зарегистрировано' + where;
+  if (d.state === 'unknown') return 'список устройств Keenetic сейчас недоступен';
+  return 'это устройство не зарегистрировано' + where + ' - сначала зарегистрируйте его в Keenetic';
 }
 const ADS_VERDICT = { BLOCK: ['crit', 'Заблокирован'], SUSPECT: ['warn', 'На проверке'], ALLOW: ['ok', 'Разрешён'], TRUST: ['ok', 'Доверенный'] };
 const ADS_REASON = { manual_denylist: 'ваше правило', manual_allowlist: 'ваше правило', trusted_registry: 'доверенный сервис', dedicated_block_feed: 'есть в специальном списке рекламы', multi_source_consensus: 'найден в нескольких источниках', external_verifier: 'внешняя проверка', source_catalog_degraded: 'источники недоступны, решение отложено', block_evidence_disappeared_review: 'пропал из источников, перепроверяется', no_block_evidence: 'признаков рекламы нет' };
@@ -1186,6 +1198,15 @@ function openSheet(title, body, cls, btnId) {
   $('layer').innerHTML = '<div class="scrim" data-act="close"></div><div class="sheet ' + (cls || '') + '" role="dialog" aria-label="' + esc(title || 'Поиск') + '">' + (title ? '<div class="sheet-head"><h2>' + esc(title) + '</h2><button class="icon-btn" type="button" data-act="close" aria-label="Закрыть">' + ico('close') + '</button></div>' : '') + body + '</div>';
   if (btnId) $(btnId).setAttribute('aria-expanded', 'true');
 }
+// Only registered devices may open VWARD, and this one is not.
+function showDeviceBlocked() {
+  cacheDrop();
+  if (document.getElementById('deviceBlocked')) return;
+  document.body.insertAdjacentHTML('beforeend', '<div id="deviceBlocked" class="blocked-screen" role="alertdialog" aria-label="Устройство не зарегистрировано"><div class="blocked-card">' + ico('lock') +
+    '<h2>Устройство не зарегистрировано</h2><p>VWARD открывается только с устройств, зарегистрированных в Keenetic.</p>' +
+    '<p>Зарегистрируйте это устройство в веб-интерфейсе роутера: «Список устройств» → устройство → «Зарегистрировать», затем обновите страницу.</p>' +
+    '<div class="panel-actions"><a class="btn" href="http://' + esc(location.hostname) + '/" target="_blank" rel="noopener">' + ico('external') + 'Открыть Keenetic</a><button class="btn primary" type="button" data-act="page-reload">' + ico('refresh') + 'Обновить</button></div></div></div>');
+}
 function showLogin() {
   cacheDrop();
   if (loginOpen) return;
@@ -1199,7 +1220,7 @@ function openNotes() {
 const SEARCH_INDEX = [
   ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Файлы'], ['system', 'Свободно'],
   ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Автоматическое восстановление'], ['wan', 'История восстановлений'],
-  ['vpn', 'Автоматическая защита'], ['vpn', 'Трафик списков'], ['vpn', 'Проверка туннеля'],
+  ['settings', 'Только зарегистрированные устройства'], ['vpn', 'Автоматическая защита'], ['vpn', 'Трафик списков'], ['vpn', 'Проверка туннеля'],
   ['lists', 'Использовано строк'],
   ['routes', 'Туннель для маршрутов'], ['routes', 'AdaptiveAuto'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
@@ -1457,6 +1478,7 @@ document.addEventListener('click', e => {
   else if (a === 'tunnel-replace') tunnelConfSheet('replace', current.slice(2));
   else if (a === 'tunnel-delete') { const s2 = document.querySelector('[data-tunnel-del-to]'); confirm = { id: 'tunnel-delete', to: s2 ? s2.value : 'vpn' }; render(); }
   else if (a === 'tunnel-health') runAction('tunnel-health', 'control', { op: 'tunnel-health' }, 'Проверка туннеля выполнена').then(() => load('status', true)).then(render);
+  else if (a === 'page-reload') location.reload();
   else if (a === 'probe-report' && PROBE) openSheet('Проверка ' + PROBE.domain, '<div class="sheet-body"><pre class="logbox">' + esc(PROBE.out || '') + '</pre></div>', 'wide');
   else if (a === 'logout') apiPost('auth', { op: 'logout' }).then(() => { toast('Вы вышли'); S.auth = null; showLogin(); });
   else if (a === 'housekeeping') runLong('storage', 'control', { op: 'housekeeping' }, 'control-data', 'Журналы проверены').then(() => load('status', true)).then(render);
@@ -1552,6 +1574,11 @@ document.addEventListener('change', e => {
   if (t.dataset.cfgUpd) { cfgSet({ op: 'update', target: t.dataset.cfgUpd, value: t.value }, 'Сохранено', ['status']); return; }
   if (t.hasAttribute('data-ads-pause')) { adsControl({ op: t.checked ? 'resume' : 'pause' }, t.checked ? 'Блокировка включена' : 'Блокировка на паузе'); return; }
   if (t.dataset.adsSet) { adsSetting(t.dataset.adsSet, t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value); return; }
+  if (t.hasAttribute('data-auth-devices')) {
+    const on = t.checked;
+    apiPost('auth', { op: 'devices', value: on ? '1' : '0' }).then(x => { toast(x.ok ? (on ? 'VWARD открыт только зарегистрированным устройствам' : 'VWARD открыт всем устройствам домашней сети') : 'Не сохранено: ' + errText(x)); return load('auth', true); }, e => toast('Ошибка: ' + e.message)).then(render);
+    return;
+  }
   if (t.hasAttribute('data-auth')) {
     const au = S.auth || {};
     if (t.checked && !au.enabled) { authForm = true; render(); }
