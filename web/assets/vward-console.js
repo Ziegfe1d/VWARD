@@ -520,7 +520,7 @@ const RENDER = {
         '<dl class="kv">' + ctrlRow('Публиковать автоматически', sw('data-ads-autopub', isTrue(s.AUTO_PUBLISH), 'Публиковать автоматически', !S.ads), 'новые правила уходят в AdGuard Home без подтверждения') + '</dl>' +
         (confirmBox('ads-autopub', 'Публиковать правила автоматически? Новые правила будут применяться в AdGuard Home без вашего подтверждения.', 'Включить') ||
          confirmBox('ads-publish', 'Отправить правила в AdGuard Home? Они применятся сразу.', 'Опубликовать') || '<div class="panel-actions">' + btn('ask', 'check', 'Опубликовать правила', 'primary', ' data-confirm="ads-publish"') + '</div>')) +
-      panel('Проверить домен', '<form class="inline-form" data-form="ads-probe"><input class="input" id="adsProbe" placeholder="например, mc.yandex.ru" aria-label="Домен" autocomplete="off"><button class="btn primary" type="submit">' + ico('search') + 'Проверить</button></form>', { desc: 'Проверка ставится в очередь заданий; результат появится в «Задания».' }) +
+      panel('Проверить домен', '<form class="inline-form" data-form="ads-probe"><input class="input" id="adsProbe" placeholder="например, mc.yandex.ru" aria-label="Домен" autocomplete="off"' + (PROBE ? ' value="' + esc(PROBE.domain) + '"' : '') + '><button class="btn primary" type="submit"' + (PROBE && !PROBE.done ? ' disabled' : '') + '>' + ico('search') + 'Проверить</button></form>' + probeResult(), { desc: 'Что VWARD знает о домене: решение, источники, запросы в журнале AdGuard Home.' }) +
       panel('Списки и правила', kv([
         ['Журнал запросов', 'последние 100', '', 'd-querylog'],
         ['Категории блокировки', (a.categories || []).filter(x => x.active).length + ' из ' + (a.categories || []).length + ' включены', '', 'd-adcats'],
@@ -830,6 +830,42 @@ async function fileOpen(name) {
   sh.querySelector('.sheet-body').outerHTML = body;
   // A log is read from its end: show the newest lines first.
   if (FILES.root === 'logs') { const b = sh.querySelector('.sheet-body'); b.scrollTop = b.scrollHeight; }
+}
+// Domain check: queued as a job; the page waits for its report and sums it up.
+let PROBE = null;
+async function adsProbe(domain) {
+  PROBE = { domain: domain, text: 'в очереди…' }; render();
+  let x;
+  try { x = await apiPost('ads-control', { op: 'enqueue', job: 'probe', domain: domain }); } catch (e) { x = { ok: false, error: e.message }; }
+  const id = x.ok && (/JOB_ID=(\S+)/.exec(x.result || '') || [])[1];
+  if (!id) { PROBE = { domain: domain, done: true, error: errText(x) }; render(); return; }
+  for (let i = 0; i < 60 && PROBE && PROBE.domain === domain; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    await load('ads', true);
+    const j = (S.ads && S.ads.jobs) || {}, l = j.last || {};
+    if (l.id === id) { PROBE = { domain: domain, done: true, failed: l.state === 'FAILED', out: l.output || '' }; render(); return; }
+    PROBE.text = j.current && j.current.type === 'probe' ? 'проверяется…' : 'в очереди…'; render();
+  }
+  if (PROBE && PROBE.domain === domain && !PROBE.done) { PROBE = { domain: domain, done: true, error: 'проверка ещё в очереди - результат появится в «Задания»' }; render(); }
+}
+function probeResult() {
+  const p = PROBE;
+  if (!p) return '';
+  if (!p.done) return '<p class="result-note">' + esc(p.domain) + ': ' + esc(p.text) + '</p>';
+  if (p.error || p.failed) return '<p class="result-note">' + esc(p.domain) + ': ' + esc(p.error || 'проверка не удалась, подробности в «Журналах»') + '</p>';
+  const o = p.out, has = k => new RegExp('^' + k + '=MATCH$', 'm').test(o);
+  const sec2 = (o.split('=== 2.')[1] || '').split('\n').map(x => x.trim()).filter(Boolean)[1] || '';
+  const vr = sec2.split('|'), known = vr.length >= 8 && vr[0] === p.domain;
+  const v = known ? (ADS_VERDICT[vr[1]] || ['', vr[1]]) : null;
+  const names = (o.match(/^[^|\n]+\|mode=[a-z]+\|match=[^\n]*$/gm) || []).map(l => (/\|name=(.*)$/.exec(l) || [])[1]).filter(Boolean);
+  const q = num((/^QUERY_COUNT=(\d+)/m.exec(o) || [])[1]);
+  return kv([
+    ['Решение VWARD', v ? v[1] : 'ещё не проверялся', v ? v[0] : '', null, '', known ? ADS_REASON[vr[7]] || vr[7] : ''],
+    has('ALLOWLIST') ? ['Ваше правило', 'Разрешить', 'ok'] : has('DENYLIST') ? ['Ваше правило', 'Блокировать', 'crit'] : null,
+    has('TRUST') ? ['Доверенный сервис', 'Да', 'ok'] : null,
+    ['Найден в источниках', names.length ? fmtInt(names.length) + ' ' + plural(names.length, 'источник', 'источника', 'источников') : 'нет', '', null, '', names.slice(0, 3).join(', ')],
+    ['Запросов в журнале', q != null ? fmtInt(q) : '—']
+  ]) + '<div class="panel-actions">' + adsRuleBtn(p.domain, 'allow') + adsRuleBtn(p.domain, 'block') + btn('probe-report', 'logs', 'Полный отчёт', 'small') + '</div>';
 }
 const ADS_VERDICT = { BLOCK: ['crit', 'Заблокирован'], SUSPECT: ['warn', 'На проверке'], ALLOW: ['ok', 'Разрешён'], TRUST: ['ok', 'Доверенный'] };
 const ADS_REASON = { manual_denylist: 'ваше правило', manual_allowlist: 'ваше правило', trusted_registry: 'доверенный сервис', dedicated_block_feed: 'есть в специальном списке рекламы', multi_source_consensus: 'найден в нескольких источниках', external_verifier: 'внешняя проверка', source_catalog_degraded: 'источники недоступны, решение отложено', block_evidence_disappeared_review: 'пропал из источников, перепроверяется', no_block_evidence: 'признаков рекламы нет' };
@@ -1421,6 +1457,7 @@ document.addEventListener('click', e => {
   else if (a === 'tunnel-replace') tunnelConfSheet('replace', current.slice(2));
   else if (a === 'tunnel-delete') { const s2 = document.querySelector('[data-tunnel-del-to]'); confirm = { id: 'tunnel-delete', to: s2 ? s2.value : 'vpn' }; render(); }
   else if (a === 'tunnel-health') runAction('tunnel-health', 'control', { op: 'tunnel-health' }, 'Проверка туннеля выполнена').then(() => load('status', true)).then(render);
+  else if (a === 'probe-report' && PROBE) openSheet('Проверка ' + PROBE.domain, '<div class="sheet-body"><pre class="logbox">' + esc(PROBE.out || '') + '</pre></div>', 'wide');
   else if (a === 'logout') apiPost('auth', { op: 'logout' }).then(() => { toast('Вы вышли'); S.auth = null; showLogin(); });
   else if (a === 'housekeeping') runLong('storage', 'control', { op: 'housekeeping' }, 'control-data', 'Журналы проверены').then(() => load('status', true)).then(render);
   else if (a === 'refresh-hints') runLong('routes', 'control', { op: 'refresh-hints' }, 'control-data', 'Подсказки обновлены').then(() => load('route', true)).then(render);
@@ -1621,7 +1658,7 @@ document.addEventListener('submit', async e => {
   if (f === 'ads-probe') {
     const v = $('adsProbe').value.trim().toLowerCase();
     if (!DOMAIN.test(v)) { toast('Введите домен, например example.com'); return; }
-    await adsControl({ op: 'enqueue', job: 'probe', domain: v }, 'Проверка поставлена в очередь - см. «Задания»');
+    adsProbe(v);
   }
   if (f === 'ads-rule') {
     const v = $('adsRuleDomain').value.trim().toLowerCase();
