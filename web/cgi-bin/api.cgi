@@ -1492,9 +1492,12 @@ if [ "$ACTION" = "diagnostics" ]; then
     # Smart DNS: each domain bound to a DNS-over-HTTPS server must resolve to an
     # address that leaves through the provider, never through a tunnel.
     SMARTDNS_STATUS=PASS SMARTDNS_DETAIL="Smart DNS не используется"
-    SD_DOMAINS="$("${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r' | awk '
+    DIAG_RC="$("${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r')"
+    # Smart DNS rows in Keenetic and in AdGuard Home ([/domain/]https://...).
+    SD_DOMAINS="$({ printf '%s\n' "$DIAG_RC" | awk '
         /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
-        ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print tolower($NF)}' | sort -u | head -n 16)"
+        ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print tolower($NF)}'
+        command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains; } | sort -u | head -n 16)"
     if [ -n "$SD_DOMAINS" ]; then
         SD_BAD=""; SD_N=0
         for SD in $SD_DOMAINS; do
@@ -1514,6 +1517,50 @@ if [ "$ACTION" = "diagnostics" ]; then
         fi
     fi
 
+    # DNS chain: Keenetic hands queries to AdGuard Home, and AdGuard Home must not
+    # hand them back to the router (a loop Keenetic answers by dropping requests).
+    DNS_STATUS=PASS DNS_DETAIL=""
+    AGH_Y="${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}"
+    if [ -r "$AGH_Y" ]; then
+        AGH_DNS_PORT="$(awk '/^[^ #]/ {d = ($1 == "dns:")} d && $1 == "port:" {print $2; exit}' "$AGH_Y" 2>/dev/null)"
+        AGH_MAIN_UP="$(awk '/^[^ #]/ {d = ($1 == "dns:"); u = 0; next} /^  [a-z_]+:/ {u = d && ($1 == "upstream_dns:"); next}
+            u && $1 == "-" {sub(/^[ \t]*-[ \t]*/, ""); gsub(/["\047]/, ""); if ($0 !~ /^\[/) print}' "$AGH_Y" 2>/dev/null)"
+        KN_TO_AGH="$(printf '%s\n' "$DIAG_RC" | awk -v p=":${AGH_DNS_PORT:-x}" '$1 == "ip" && $2 == "name-server" && index($3, p) {print $3; exit}')"
+        LAN_IP="${VWARD_LAN_ADDRESS:-192.168.1.1}"
+        if printf '%s\n' "$AGH_MAIN_UP" | grep -Eq "^(udp://|tcp://)?($LAN_IP|127\.0\.0\.1|localhost)(:53)?$"; then
+            DNS_STATUS=FAIL DNS_DETAIL="AdGuard Home отправляет запросы обратно роутеру ($LAN_IP) - петля: Keenetic будет отбрасывать запросы. Укажите в AdGuard Home внешние серверы."
+        elif [ -n "$KN_TO_AGH" ]; then
+            DNS_DETAIL="Keenetic → AdGuard Home ($KN_TO_AGH) → $(printf '%s\n' "$AGH_MAIN_UP" | head -n 2 | tr '\n' ' ')"
+        elif [ "${AGH_DNS_PORT:-}" = 53 ]; then
+            DNS_STATUS=WARN DNS_DETAIL="AdGuard Home сам отвечает на порту 53: Keenetic не видит DNS-ответов, маршрутизация по доменам может не узнавать адреса"
+        else
+            DNS_STATUS=WARN DNS_DETAIL="Keenetic не передаёт запросы AdGuard Home (нет ip name-server на порт ${AGH_DNS_PORT:-?})"
+        fi
+    else
+        DNS_DETAIL="AdGuard Home не найден: DNS обслуживает Keenetic"
+    fi
+
+    # Files as installed: every file the updater recorded, one sha256sum pass.
+    FILES_STATUS=PASS FILES_DETAIL=""
+    COMP_JSON="${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/updater/components.json"
+    if [ -r "$COMP_JSON" ]; then
+        FILES_LIST="$("$JQ" -r '[.components[].files // {} | to_entries[]] | .[] | .value + "  " + .key' "$COMP_JSON" 2>/dev/null)"
+        FILES_TOTAL="$(printf '%s\n' "$FILES_LIST" | grep -c .)"
+        FILES_BAD="$(printf '%s\n' "$FILES_LIST" | awk 'NF == 2 {print $2 "\t" $1}' | while IFS="$(printf '\t')" read -r F H; do
+            [ -f "${VWARD_ROOT_PREFIX:-}$F" ] || { echo "нет:$F"; continue; }
+            A="$(sha256sum "${VWARD_ROOT_PREFIX:-}$F" | cut -d' ' -f1)"; [ "$A" = "$H" ] || echo "изменён:$F"
+          done)"
+        if [ -n "$FILES_BAD" ]; then
+            FILES_STATUS=WARN
+            printf '%s\n' "$FILES_BAD" | grep -q '^нет:' && FILES_STATUS=FAIL
+            FILES_DETAIL="$(printf '%s\n' "$FILES_BAD" | grep -c .) из $FILES_TOTAL отличаются от установленных: $(printf '%s\n' "$FILES_BAD" | head -n 5 | sed 's#:.*/#: #' | tr '\n' ' ')- обновление VWARD заменит ручные правки"
+        else
+            FILES_DETAIL="Все $FILES_TOTAL файлов как при установке"
+        fi
+    else
+        FILES_STATUS=WARN FILES_DETAIL="Нет сведений об установленных файлах"
+    fi
+
     OPT_FREE="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $4+0}')"
     [ -n "$OPT_FREE" ] || OPT_FREE=0
     LAST_WAN_RC="$(cat /tmp/vward-wan-guard.cron.rc 2>/dev/null)"
@@ -1528,6 +1575,7 @@ if [ "$ACTION" = "diagnostics" ]; then
       --arg updater "$UPDATE_STATUS" --arg config "$CONFIG_STATUS" --arg cgi "$CGI_STATUS" \
       --arg wan "$WAN_STATUS" --arg wg "$WG_STATUS" \
       --arg smartdns "$SMARTDNS_STATUS" --arg smartdns_detail "$SMARTDNS_DETAIL" \
+      --arg dns "$DNS_STATUS" --arg dns_detail "$DNS_DETAIL" --arg files "$FILES_STATUS" --arg files_detail "$FILES_DETAIL" \
       --arg wan_rc "$LAST_WAN_RC" --arg wg_rc "$LAST_WG_RC" --arg route_rc "$LAST_ROUTE_RC" \
       --argjson wg_count "$WG_COUNT" --argjson opt_free "$OPT_FREE" \
       '{ok:true,checks:[
@@ -1544,6 +1592,8 @@ if [ "$ACTION" = "diagnostics" ]; then
         {id:"wan",component:"wan-guard",label:"WAN",status:$wan,detail:"Read-only RCI probe"},
         {id:"wg",component:"tunnel-guard",label:"WireGuard",status:$wg,detail:("Найдено туннелей: "+($wg_count|tostring)+"; cron RC: "+$wg_rc)},
         {id:"smartdns",component:"route-engine",label:"Smart DNS мимо VPN",status:$smartdns,detail:$smartdns_detail},
+        {id:"dns-chain",component:"route-engine",label:"Цепочка DNS",status:$dns,detail:$dns_detail},
+        {id:"files",component:"update-engine",label:"Файлы VWARD",status:$files,detail:$files_detail},
         {id:"updater",component:"update-engine",label:"VWARD Update Engine",status:$updater,detail:"Активный updater slot"},
         {id:"update-config",component:"update-engine",label:"Update config",status:$config,detail:"Конфигурация доступна для чтения"}
       ]}'
@@ -1779,6 +1829,12 @@ if [ "$ACTION" = lists-data ]; then
     [ -n "$WATCHED" ] || WATCHED='[]'
     [ -n "$RETURNS" ] || RETURNS='[]'
     [ -n "$AUTO" ] || AUTO='{}'
+    # Addresses Keenetic learned for each group from DNS answers: 0 on a used list
+    # means its domains' queries do not pass the router's DNS.
+    ADDRS="$("${VWARD_NDMC:-ndmc}" -c "show object-group fqdn" 2>/dev/null | tr -d '\r' |
+        awk '$1 == "group-name:" {g = $2} $1 == "ipv4-addresses-count:" && g != "" {print g "\t" $2; g = ""}' |
+        "$JQ" -Rn '[inputs | split("\t") | {(.[0]): (.[1] | tonumber? // null)}] | add // {}' 2>/dev/null)"
+    [ -n "$ADDRS" ] || ADDRS='{}'
     # G name / N name description / I name domain / R name target / D domain (Smart DNS)
     printf '%s\n' "$RUNNING" | awk '
         /^object-group fqdn / {cur = $3; print "G\t" cur "\t"; next}
@@ -1791,7 +1847,7 @@ if [ "$ACTION" = lists-data ]; then
         /^ip route [0-9]/ && NF >= 5 {print "S\t" $5 "\t" $3 "\t" $4}
     ' | { cat; command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains | sed 's/^/A\t/'; } | "$JQ" -Rn --arg tun "${VWARD_TUNNEL_INTERFACE:-}" --arg dev "${VWARD_TUNNEL_DEVICE:-}" --arg wan "${VWARD_WAN_INTERFACE:-}" \
         --argjson guard "$([ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" = 0 ] && echo false || echo true)" \
-        --argjson watched "$WATCHED" --argjson returns "$RETURNS" --argjson auto "$AUTO" '
+        --argjson watched "$WATCHED" --argjson returns "$RETURNS" --argjson auto "$AUTO" --argjson addrs "$ADDRS" '
         def bits: {"255":8,"254":7,"252":6,"248":5,"240":4,"224":3,"192":2,"128":1,"0":0}[.] // 0;
         reduce (inputs | split("\t")) as $r ({g: {}, order: [], r: {}, doh: [], agh: [], s: {}};
             if $r[0] == "G" then (if .g[$r[1]] then . else .g[$r[1]] = {description: "", domains: []} | .order += [$r[1]] end)
@@ -1817,7 +1873,7 @@ if [ "$ACTION" = lists-data ]; then
               smartdns_conflict: ((($t == $tun or $t == $dev) and $t != "") and
                 any($s.doh[] as $d | $l.domains[] as $i | $d == $i or ($d | endswith("." + $i)) or ($i | endswith("." + $d)); .)),
               watch: ($watched | index([$n]) != null), returnable: ($returns | index([$n]) != null),
-              auto: ($auto[$n] // null)}]}'
+              auto: ($auto[$n] // null), addresses: ($addrs[$n] // null)}]}'
     exit 0
 fi
 

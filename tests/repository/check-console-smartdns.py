@@ -43,7 +43,8 @@ def fail(message: str) -> None:
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     ndmc = tmp / "ndmc"
-    ndmc.write_text(f'#!/bin/sh\n[ "$2" = "show running-config" ] && cat "{tmp}/running"\n')
+    ndmc.write_text(f'#!/bin/sh\n[ "$2" = "show running-config" ] && cat "{tmp}/running"\n'
+                    f'[ "$2" = "show object-group fqdn" ] && printf "            group: \\n               group-name: domain-list9\\n                  enabled: yes\\n     ipv4-addresses-count: 7\\n\\n            group: \\n               group-name: domain-list4\\n     ipv4-addresses-count: 0\\n"\nexit 0\n')
     ndmc.chmod(0o755)
     (tmp / "running").write_text(RUNNING)
     lists_conf = tmp / "etc/route-engine/domain-lists.conf"
@@ -57,6 +58,9 @@ with tempfile.TemporaryDirectory() as tmp:
         return json.loads(r.stdout.split("\n\n", 1)[1])
 
     data = lists()
+    addrs = {l["name"]: l["addresses"] for l in data["lists"]}
+    if addrs != {"domain-list4": 0, "domain-list9": 7, "domain-list7": None, "domain-list5": None}:
+        fail(f"learned addresses per list: {addrs}")
     got = {l["name"]: l["smartdns_conflict"] for l in data["lists"]}
     # google.com in a tunnel list takes gemini.google.com; api.anthropic.com sits under anthropic.com.
     if got != {"domain-list4": False, "domain-list9": True, "domain-list7": False, "domain-list5": True}:

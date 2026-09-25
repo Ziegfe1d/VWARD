@@ -692,7 +692,7 @@ const RENDER = {
     const path = l => tuns.length > 1 && l.route && tuns.some(t => t.name === l.route) ? 'через ' + tunLabel(l.route) : viaIs(l, 'vpn') ? 'через VPN' : viaIs(l, 'bypass') ? 'в обход VPN' + (l.doh.length ? ', Smart DNS: ' + l.doh.join(', ') : '') : viaIs(l, 'none') ? 'без маршрута' : 'через ' + l.route;
     const row = l => {
       const can = ok && (viaIs(l, 'vpn') || viaIs(l, 'bypass')), title = l.description || l.name;
-      return '<li class="row"><div class="row-main"><b>' + esc(title) + '</b><small>' + fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + ' · ' + esc(path(l)) + '</small>' +
+      return '<li class="row"><div class="row-main"><b>' + esc(title) + '</b><small>' + fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + ' · ' + esc(path(l)) + (l.addresses != null && l.route ? ' · адресов узнано: ' + fmtInt(l.addresses) : '') + '</small>' +
         (l.smartdns_conflict ? '<small class="field-warn">В списке есть домены Smart DNS: их общий адрес уйдёт в VPN, и Smart DNS перестанет работать для всех сервисов. Переведите список в обход VPN или уберите эти домены.</small>' : '') +
         (l.auto && viaIs(l, 'vpn') ? '<small class="field-warn">Переведён на VPN автоматически ' + esc(l.auto.at) + ': не открылся ' + esc(l.auto.host) + '</small>' : '') + '</div>' +
         '<span class="row-acts">' + (tuns.length > 1 ? listViaSel(l, tuns, ok) : '<label class="row-switch">В обход VPN' + sw('data-list-bypass="' + esc(l.name) + '"', viaIs(l, 'bypass'), 'В обход VPN: ' + title, !can) + '</label>') +
