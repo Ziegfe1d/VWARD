@@ -229,8 +229,9 @@ cdad0e92dc8a779d91050b6a448cc4985e41f1573fc56f21696658e34b804e38  updates/dev/pa
 f4b2fd8399a208839b98dc412f76337d9481442ba82754c570836c8c7a7f1ef0  updates/dev/packages/vward-0.2.0-rc.1.fix.4.tar.gz
 92d800bea009044b79951cc1ebf97095bcd7d88e6b121aee1dbf22b506c6f164  updates/dev/packages/vward-0.2.0-rc.1.fix.5.tar.gz
 3490d4906ff6d8e0c3f445ad839a2568006e337dd20bbb6a0b86370192123413  updates/dev/packages/vward-0.2.0-rc.1.fix.6.tar.gz
+7f8faf20d53e968e9a32ba25c3d3d8ff9fbdd49d49a64b6707aa5b6aae2fc571  updates/dev/packages/vward-0.2.0-rc.1.fix.7.tar.gz
 8df89b7d83e945de5b6607ca52afeb4b7804b7744617a701d189700ee4034d21  updates/dev/packages/vward-0.2.0-rc.1.tar.gz
-b778938220dc003f9af158d2d1e88a70cdfbe20ad072fcf9f1807a1f099af53a  updates/dev/update-manifest.json
+a87f28a0b7bc3645916ba35abd8fbb6138920480dd6f1f30d9d101fada35007b  updates/dev/update-manifest.json
 f61ac83d38607873af642c25b64de4cfbfb7d60f3ba4b43df030e6a2949af8ad  web/assets/vward-console.css
 b924b4db216cd970c6ad675e3271477b3cf7f022e64f5d3aad6d42401491741d  web/assets/vward-console.js
 dc2b8ae31e4ba775d5dfacb43981afb11cc7b55457fba5f84eeb09d8dfa7006e  web/cgi-bin/api.cgi
