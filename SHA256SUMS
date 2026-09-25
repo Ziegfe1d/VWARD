@@ -194,6 +194,7 @@ fa2bf528cfcdcd043f15b428736f0b1b5a7f376d4f430144685c53d44faf3a07  tests/reposito
 912158422ece969f252c1bf9dc04cc7913c772633a7bd48ea82734c08cd75d84  tests/repository/check-full-health-profile.sh
 7f8ba32caac0b1da54ad022b1c097bf77c5220f9ab8e5156b0f166d90536d5f8  tests/repository/check-list-watch.py
 dedb8981c8c13c33401df7e9bdeea81cc2b8369d6182d511e1ff0a6d100bb2bd  tests/repository/check-package-map.py
+bd95076085083aeee041c9445048446182288120cd1ea72d971a72d1eb1211d1  tests/repository/check-policy-groups.py
 2bacc396467e8813a5a0f6131fce1bc4567885e1f887d87bead8f40780c7685b  tests/repository/check-policy-sync-safety.py
 2053ce62e57d2fd06b414cd44bef2a758fb31e67a0ca00e10ffd7ad784734d13  tests/repository/check-runtime-pid-safety.sh
 c9a657bd1593f471d9500f94e9ec4139cf4ee486542ddbe669557d85c5a434cf  tests/repository/check-runtime-update-admission.sh
@@ -230,8 +231,9 @@ f4b2fd8399a208839b98dc412f76337d9481442ba82754c570836c8c7a7f1ef0  updates/dev/pa
 92d800bea009044b79951cc1ebf97095bcd7d88e6b121aee1dbf22b506c6f164  updates/dev/packages/vward-0.2.0-rc.1.fix.5.tar.gz
 3490d4906ff6d8e0c3f445ad839a2568006e337dd20bbb6a0b86370192123413  updates/dev/packages/vward-0.2.0-rc.1.fix.6.tar.gz
 7f8faf20d53e968e9a32ba25c3d3d8ff9fbdd49d49a64b6707aa5b6aae2fc571  updates/dev/packages/vward-0.2.0-rc.1.fix.7.tar.gz
+81369206dee1fec9899ff82fe96313443e0c1890e8882661a18c9158ddd15a46  updates/dev/packages/vward-0.2.0-rc.1.fix.8.tar.gz
 8df89b7d83e945de5b6607ca52afeb4b7804b7744617a701d189700ee4034d21  updates/dev/packages/vward-0.2.0-rc.1.tar.gz
-a87f28a0b7bc3645916ba35abd8fbb6138920480dd6f1f30d9d101fada35007b  updates/dev/update-manifest.json
+40905b5d28b4e76026e39750673559d78e907cb77a1d553136b4ddd8a19d2b26  updates/dev/update-manifest.json
 f61ac83d38607873af642c25b64de4cfbfb7d60f3ba4b43df030e6a2949af8ad  web/assets/vward-console.css
 b924b4db216cd970c6ad675e3271477b3cf7f022e64f5d3aad6d42401491741d  web/assets/vward-console.js
 dc2b8ae31e4ba775d5dfacb43981afb11cc7b55457fba5f84eeb09d8dfa7006e  web/cgi-bin/api.cgi
