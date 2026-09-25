@@ -178,8 +178,8 @@ esac
             fail(f"device.conf missing {line!r}: {conf!r}")
     if conf.count("VWARD_TUNNEL_INTERFACE=") != 1 or stat.S_IMODE(devconf.stat().st_mode) != 0o600:
         fail("device.conf must keep one value per key and mode 0600")
-    if guard.exists() or (policy / "owned.interface").read_text().strip() != "nwg3":
-        fail("guard state must reset and owned IP routes must stay attributed to the old device")
+    if guard.exists() or (policy / "owned.interface").read_text().strip() != "Wireguard3":
+        fail("guard state must reset and owned IP routes must stay attributed to the old tunnel")
     if (tmp / "engine").read_text().split() != ["restart"]:
         fail("route engine must restart with the new tunnel")
     for _ in range(50):
@@ -197,7 +197,8 @@ esac
     run("Wireguard8", "result=unchanged", 0)
 
 
-# policy-sync: owned IP routes move to the new device.
+# policy-sync: owned IP routes move to the new tunnel (Keenetic takes interface names).
+
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     harness = tmp / "fn.sh"
@@ -211,19 +212,19 @@ with tempfile.TemporaryDirectory() as tmp:
     tools = tmp / "tools"; tools.mkdir()
     (tools / "ndmc").write_text(f"""#!/bin/sh
 echo "$2" >> "{tmp}/calls"
-case "$2" in *" nwg3"|*" nwg3 "*) [ -e "{tmp}/stuck" ] && echo "error[5]: no such entry" ;; esac
+case "$2" in *" Wireguard3"|*" Wireguard3 "*) [ -e "{tmp}/stuck" ] && echo "error[5]: no such entry" ;; esac
 exit 0
 """)
     (tools / "ndmc").chmod(0o755)
     state = tmp / "state"; (state / "catalog").mkdir(parents=True)
     (state / "catalog/video.cidr").write_text("203.0.113.0/24\n198.51.100.0/24\n")
     (state / "owned.dynamic.routes").write_text("203.0.113.0/24\n")
-    (state / "owned.interface").write_text("nwg3\n")
+    (state / "owned.interface").write_text("Wireguard3\n")
     (tmp / "cats").write_text("video\n")
-    (tmp / "run").write_text("ip route 203.0.113.0 255.255.255.0 nwg3 auto\n")
+    (tmp / "run").write_text("ip route 203.0.113.0 255.255.255.0 Wireguard3 auto\n")
     work = tmp / "work"; work.mkdir()
     script = f'''. "{harness}"; STATE="{state}"; WORK="{work}"; OWNED="{state}/owned.dynamic.routes"
-OWNED_DEVICE="{state}/owned.interface"; ACTIVE="{state}/active.categories"; CATALOG="{state}/catalog"; LOG="{tmp}/log"; WG=nwg8
+OWNED_DEVICE="{state}/owned.interface"; ACTIVE="{state}/active.categories"; CATALOG="{state}/catalog"; LOG="{tmp}/log"; WG=nwg8; RT=Wireguard8
 reconcile_routes "{tmp}/run" "{tmp}/cats"'''
     penv = os.environ | {"PATH": f"{tools}{os.pathsep}{os.environ['PATH']}"}
 
@@ -231,17 +232,17 @@ reconcile_routes "{tmp}/run" "{tmp}/cats"'''
     r = subprocess.run(["sh", "-c", script], env=penv, text=True, capture_output=True)
     if r.returncode == 0 or "MOVE_PENDING=1" not in r.stdout:
         fail(f"a route that cannot be withdrawn must keep the move pending: {r.stdout}")
-    if (state / "owned.interface").read_text().strip() != "nwg3" or any("nwg8" in c for c in (tmp / "calls").read_text().splitlines()):
+    if (state / "owned.interface").read_text().strip() != "Wireguard3" or any("Wireguard8" in c for c in (tmp / "calls").read_text().splitlines()):
         fail("nothing may be added through the new device while the old routes remain")
     (tmp / "stuck").unlink(); (tmp / "calls").unlink()
 
     r = subprocess.run(["sh", "-c", script], env=penv, text=True, capture_output=True)
     calls = (tmp / "calls").read_text().splitlines()
-    if r.returncode != 0 or calls[0] != "no ip route 203.0.113.0 255.255.255.0 nwg3":
+    if r.returncode != 0 or calls[0] != "no ip route 203.0.113.0 255.255.255.0 Wireguard3":
         fail(f"old route must be withdrawn first: {calls} {r.stdout}")
-    if sorted(c for c in calls if c.startswith("ip route")) != ["ip route 198.51.100.0 255.255.255.0 nwg8 auto", "ip route 203.0.113.0 255.255.255.0 nwg8 auto"]:
+    if sorted(c for c in calls if c.startswith("ip route")) != ["ip route 198.51.100.0 255.255.255.0 Wireguard8 auto", "ip route 203.0.113.0 255.255.255.0 Wireguard8 auto"]:
         fail(f"routes must be re-added through the new device: {calls}")
-    if (state / "owned.interface").read_text().strip() != "nwg8" or sorted((state / "owned.dynamic.routes").read_text().split()) != ["198.51.100.0/24", "203.0.113.0/24"]:
+    if (state / "owned.interface").read_text().strip() != "Wireguard8" or sorted((state / "owned.dynamic.routes").read_text().split()) != ["198.51.100.0/24", "203.0.113.0/24"]:
         fail("owned routes must now belong to the new device")
     if "MOVED=1" not in r.stdout or calls[-1] != "system configuration save":
         fail(f"move must be reported and saved: {r.stdout}")

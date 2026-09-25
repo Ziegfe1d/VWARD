@@ -16,6 +16,8 @@ vward_admission_enter policy-sync || exit $?
 
 VERSION="2.0"
 WG="$VWARD_TUNNEL_DEVICE"
+# Keenetic takes the interface name in "ip route", not the kernel device.
+RT="${VWARD_TUNNEL_INTERFACE:-$WG}"
 MODE="${1:-sync}"
 
 STATE="/opt/var/lib/vward/policy-sync"
@@ -317,8 +319,7 @@ update_loyal_catalog()
     fi
 
     tr -d '\r\n' < "$LOYAL_JSON" |
-    sed 's/},[[:space:]]*{/}\\
-{/g' |
+    awk '{gsub(/[}],[ \t]*[{]/, "}\n{"); print}' |
     sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\.txt\)".*"download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1|\2/p' |
     sort -u > "$LIST"
 
@@ -568,7 +569,7 @@ route_line()
     PREFIX="${CIDR#*/}"
     MASK="$(prefix_mask "$PREFIX")" || return 1
 
-    echo "ip route $NET $MASK $WG auto"
+    echo "ip route $NET $MASK $RT auto"
 }
 
 reconcile_routes()
@@ -602,7 +603,7 @@ reconcile_routes()
     # withdrawn stay owned by the previous device and are retried next run.
     PREV_WG="$(cat "$OWNED_DEVICE" 2>/dev/null)"
     case "$PREV_WG" in *[!A-Za-z0-9_.:-]*) PREV_WG="" ;; esac
-    if [ -n "$PREV_WG" ] && [ "$PREV_WG" != "$WG" ]; then
+    if [ -n "$PREV_WG" ] && [ "$PREV_WG" != "$RT" ] && [ "$PREV_WG" != "$WG" ]; then
         LEFT="$WORK/left-owned"
         : > "$LEFT"
         while IFS= read -r CIDR; do
@@ -626,7 +627,7 @@ reconcile_routes()
         fi
         log "MOVE from=$PREV_WG to=$WG withdrawn=$MOVED"
     fi
-    echo "$WG" > "$OWNED_DEVICE"
+    echo "$RT" > "$OWNED_DEVICE"
 
     while IFS= read -r CIDR; do
         [ -n "$CIDR" ] || continue
@@ -646,7 +647,7 @@ reconcile_routes()
         PREFIX="${CIDR#*/}"
         MASK="$(prefix_mask "$PREFIX")" || continue
 
-        if ndm "ip route $NET $MASK $WG auto"; then
+        if ndm "ip route $NET $MASK $RT auto"; then
             echo "$CIDR" >> "$NEXT_OWNED"
             ADDED=$((ADDED + 1))
         else
@@ -663,7 +664,7 @@ reconcile_routes()
         PREFIX="${CIDR#*/}"
         MASK="$(prefix_mask "$PREFIX")" || continue
 
-        if ndm "no ip route $NET $MASK $WG"; then
+        if ndm "no ip route $NET $MASK $RT"; then
             REMOVED=$((REMOVED + 1))
         else
             echo "$CIDR" >> "$NEXT_OWNED"
@@ -707,7 +708,7 @@ echo "SUBNET_SYNC_VERSION=$VERSION"
 echo "MODE=$MODE"
 echo "SOURCES=itdoginfo/allow-domains+Loyalsoldier/geoip"
 echo "SELECTION=DYNAMIC_FROM_ROUTED_DOMAINS"
-echo "INTERFACE=$WG"
+echo "INTERFACE=$RT"
 
 case "$MODE" in
     sync|--sync)

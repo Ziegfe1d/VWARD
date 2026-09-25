@@ -517,7 +517,7 @@ op_tunnel() {
 
     # 6. Runtime state belonged to the previous tunnel.
     if [ -s "$POLICY_STATE/owned.dynamic.routes" ] && [ ! -s "$POLICY_STATE/owned.interface" ]; then
-        echo "$OLD_DEV" > "$POLICY_STATE/owned.interface"
+        echo "$OLD_IF" > "$POLICY_STATE/owned.interface"
     fi
     rm -f "$TUNNEL_GUARD_STATE" "$TUNNEL_HEALTH_STATE"
     rm -rf "$POLICY_STATE/lock"; POLICY_LOCKED=0
