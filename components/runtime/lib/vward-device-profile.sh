@@ -224,6 +224,31 @@ vward_discover_lan_interface()
     vward_map_ndm_for_kernel "$_vp_devmap" "$1"
 }
 
+# Smart DNS domains kept in AdGuard Home: per-domain upstreams of the form
+# [/a.com/b.com/]https://... (or tls://, quic://, sdns://), from upstream_dns
+# and from upstream_dns_file.  Plain addresses and "#" (the default upstream)
+# are local rules, not Smart DNS.  One lower-case domain per line.
+vward_agh_smartdns_domains()
+{
+    [ -r "$VWARD_ADGUARD_CONFIG" ] || return 0
+    _vp_uf=$(awk '/^[^ #]/ {dns = ($1 == "dns:")} dns && $1 == "upstream_dns_file:" {print $2; exit}' "$VWARD_ADGUARD_CONFIG" 2>/dev/null | tr -d '"\047')
+    {
+        awk '
+            /^[^ #]/ {dns = ($1 == "dns:"); u = 0; next}
+            /^  [a-z_]+:/ {u = dns && ($1 == "upstream_dns:"); next}
+            u && $1 == "-" {sub(/^[ \t]*-[ \t]*/, ""); print}
+        ' "$VWARD_ADGUARD_CONFIG" 2>/dev/null
+        case "$_vp_uf" in /*) [ -r "$_vp_uf" ] && cat "$_vp_uf" 2>/dev/null ;; esac
+    } | tr -d '"\047' | awk '
+        /^\[\// {
+            e = index($0, "/]"); if (e < 3) next
+            up = substr($0, e + 2)
+            if (up !~ /^(https|tls|quic|sdns|h3):\/\//) next
+            n = split(substr($0, 3, e - 3), a, "/")
+            for (i = 1; i <= n; i++) if (a[i] ~ /^[A-Za-z0-9._-]+$/ && index(a[i], ".")) print tolower(a[i])
+        }'
+}
+
 vward_profile_load()
 {
     VWARD_RCI_BASE=${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}

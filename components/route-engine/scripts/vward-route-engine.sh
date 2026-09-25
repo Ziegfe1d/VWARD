@@ -184,10 +184,14 @@ refresh_sets()
     if [ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" = 0 ]; then
         : > "$SMARTDNS"
     else
-        awk '
-            /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
-            ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print tolower($NF)}
-        ' "$CFG" | sort -u > "$SMARTDNS"
+        # Smart DNS lives in Keenetic (DoH rows) or in AdGuard Home ([/domain/]https://...).
+        {
+            awk '
+                /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
+                ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print tolower($NF)}
+            ' "$CFG"
+            vward_agh_smartdns_domains
+        } | sort -u > "$SMARTDNS"
     fi
 
     # Unchanged lists are not rewritten on USB.

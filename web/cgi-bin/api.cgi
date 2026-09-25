@@ -1789,20 +1789,24 @@ if [ "$ACTION" = lists-data ]; then
         ctx && $1 == "route" && $2 == "object-group" {print "R\t" $3 "\t" $4}
         ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print "D\t" tolower($NF)}
         /^ip route [0-9]/ && NF >= 5 {print "S\t" $5 "\t" $3 "\t" $4}
-    ' | "$JQ" -Rn --arg tun "${VWARD_TUNNEL_INTERFACE:-}" --arg dev "${VWARD_TUNNEL_DEVICE:-}" --arg wan "${VWARD_WAN_INTERFACE:-}" \
+    ' | { cat; command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains | sed 's/^/A\t/'; } | "$JQ" -Rn --arg tun "${VWARD_TUNNEL_INTERFACE:-}" --arg dev "${VWARD_TUNNEL_DEVICE:-}" --arg wan "${VWARD_WAN_INTERFACE:-}" \
         --argjson guard "$([ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" = 0 ] && echo false || echo true)" \
         --argjson watched "$WATCHED" --argjson returns "$RETURNS" --argjson auto "$AUTO" '
         def bits: {"255":8,"254":7,"252":6,"248":5,"240":4,"224":3,"192":2,"128":1,"0":0}[.] // 0;
-        reduce (inputs | split("\t")) as $r ({g: {}, order: [], r: {}, doh: [], s: {}};
+        reduce (inputs | split("\t")) as $r ({g: {}, order: [], r: {}, doh: [], agh: [], s: {}};
             if $r[0] == "G" then (if .g[$r[1]] then . else .g[$r[1]] = {description: "", domains: []} | .order += [$r[1]] end)
             elif $r[0] == "N" then .g[$r[1]].description = $r[2]
             elif $r[0] == "I" then .g[$r[1]].domains += [$r[2]]
             elif $r[0] == "R" then .r[$r[1]] = (.r[$r[1]] // $r[2])
             elif $r[0] == "D" then .doh += [$r[1]]
+            elif $r[0] == "A" then .agh += [$r[1]]
             elif $r[0] == "S" then .s[$r[1]] += [$r[2] + "/" + ($r[3] | split(".") | map(bits) | add | tostring)]
             else . end)
+        # Keenetic keeps at most 8 DoH rows; AdGuard Home has no such limit.
+        | .keenetic = .doh | .doh = (reduce (.doh + .agh)[] as $d ([]; if index([$d]) then . else . + [$d] end))
         | . as $s
-        | {ok: true, tunnel: $tun, doh_used: ($s.doh | length), doh_limit: 8, smartdns_domains: $s.doh, smartdns_guard: $guard,
+        | {ok: true, tunnel: $tun, doh_used: ($s.keenetic | length), doh_limit: 8, smartdns_domains: $s.doh, smartdns_guard: $guard,
+           smartdns_sources: {keenetic: $s.keenetic, adguard: ($s.agh | unique)},
            subnets: ($s.s | with_entries(.value |= .[:300])), subnet_counts: ($s.s | with_entries(.value |= length)),
            lists: [$s.order[] | select(. != "AdaptiveAuto") | . as $n | $s.g[$n] as $l | ($s.r[$n] // "") as $t |
              {name: $n, description: $l.description, count: ($l.domains | length), domains: $l.domains[:200], route: $t,

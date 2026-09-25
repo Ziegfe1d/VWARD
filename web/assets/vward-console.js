@@ -698,9 +698,11 @@ const RENDER = {
         '<label class="row-switch">Следить' + sw('data-list-watch="' + esc(l.name) + '"', l.watch, 'Следить: ' + title, !ok) + '</label></span></li>';
     };
     return cfgNote() + panel('Доменные списки', items.length ? '<ul class="rows">' + items.map(row).join('') + '</ul>' : empty('В Keenetic нет доменных списков'),
-      { desc: '«В обход VPN» выключен — список идёт через ' + (L.tunnel ? 'туннель ' + L.tunnel : 'VPN') + ', строки Smart DNS его доменов на это время убираются. «Следить» — если сервис из списка, идущего в обход VPN, перестанет открываться, VWARD сам переведёт список на VPN.' }) +
+      { desc: '«В обход VPN» выключен — список идёт через ' + (L.tunnel ? 'туннель ' + L.tunnel : 'VPN') + ((L.smartdns_sources || {}).keenetic && L.smartdns_sources.keenetic.length ? ', строки Smart DNS его доменов в Keenetic на это время убираются' : '') + '. «Следить» — если сервис из списка, идущего в обход VPN, перестанет открываться, VWARD сам переведёт список на VPN.' }) +
       panel('Smart DNS', '<dl class="kv">' + ctrlRow('Защита Smart DNS', sw('data-smartdns-guard', L.smartdns_guard !== false, 'Защита Smart DNS', !ok), 'AdaptiveAuto не отправляет домены Smart DNS в VPN') + '</dl>' +
-        kv([L.doh_limit ? ['Использовано строк', fmtInt(L.doh_used) + ' из ' + fmtInt(L.doh_limit), L.doh_used >= L.doh_limit ? 'warn' : ''] : null, ['Домены', (L.smartdns_domains || []).join(', ') || 'нет']]),
+        kv([['Где настроен', smartdnsWhere(L)],
+          L.doh_limit && L.doh_used ? ['Строк в Keenetic', fmtInt(L.doh_used) + ' из ' + fmtInt(L.doh_limit), L.doh_used >= L.doh_limit ? 'warn' : ''] : null,
+          ['Домены', (L.smartdns_domains || []).join(', ') || 'нет']]),
         { desc: 'Smart DNS отвечает на все свои домены одним адресом прокси. Если этот адрес уйдёт в VPN, перестанут работать все сервисы Smart DNS сразу.' + (L.doh_limit ? ' Keenetic хранит не больше ' + L.doh_limit + ' строк DNS-over-HTTPS.' : '') });
   },
   'd-adaptive'() {
@@ -878,6 +880,11 @@ function devicesHint(au) {
   if (d.state === 'registered') return 'это устройство зарегистрировано' + where;
   if (d.state === 'unknown') return 'список устройств Keenetic сейчас недоступен';
   return 'это устройство не зарегистрировано' + where + ' - сначала зарегистрируйте его в Keenetic';
+}
+// Smart DNS rows may sit in Keenetic, in AdGuard Home, or in both.
+function smartdnsWhere(L) {
+  const src = L.smartdns_sources || {}, k = (src.keenetic || []).length, a = (src.adguard || []).length;
+  return k && a ? 'Keenetic и AdGuard Home' : a ? 'AdGuard Home' : k ? 'Keenetic' : 'не найден';
 }
 const ADS_VERDICT = { BLOCK: ['crit', 'Заблокирован'], SUSPECT: ['warn', 'На проверке'], ALLOW: ['ok', 'Разрешён'], TRUST: ['ok', 'Доверенный'] };
 const ADS_REASON = { manual_denylist: 'ваше правило', manual_allowlist: 'ваше правило', trusted_registry: 'доверенный сервис', dedicated_block_feed: 'есть в специальном списке рекламы', multi_source_consensus: 'найден в нескольких источниках', external_verifier: 'внешняя проверка', source_catalog_degraded: 'источники недоступны, решение отложено', block_evidence_disappeared_review: 'пропал из источников, перепроверяется', no_block_evidence: 'признаков рекламы нет' };
@@ -1221,7 +1228,7 @@ const SEARCH_INDEX = [
   ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Файлы'], ['system', 'Свободно'],
   ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Автоматическое восстановление'], ['wan', 'История восстановлений'],
   ['settings', 'Только зарегистрированные устройства'], ['vpn', 'Автоматическая защита'], ['vpn', 'Трафик списков'], ['vpn', 'Проверка туннеля'],
-  ['lists', 'Использовано строк'],
+  ['lists', 'Где настроен'],
   ['routes', 'Туннель для маршрутов'], ['routes', 'AdaptiveAuto'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
   ['ads', 'Настройки AdGuard Home'], ['ads', 'Последняя проверка'], ['ads', 'Правила уходят'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],

@@ -66,12 +66,41 @@ with tempfile.TemporaryDirectory() as tmp:
     lists_conf.write_text("smartdns_guard=0\n")
     if lists()["smartdns_guard"] is not False:
         fail("the switch state is not reported")
+    lists_conf.write_text("")
+
+    # Smart DNS kept in AdGuard Home only (the Keenetic DoH rows removed): the
+    # domains still count, the Keenetic row limit counts Keenetic rows only.
+    (tmp / "running").write_text("\n".join(l for l in RUNNING.splitlines() if "https upstream" not in l) + "\n")
+    agh = tmp / "AdGuardHome.yaml"
+    agh.write_text("""http:
+  address: 192.168.1.1:3001
+dns:
+  upstream_dns:
+    - '[/anthropic.com/claude.ai/]https://tr.example:8443/dns-query/x'
+    - "[/Gemini.Google.com/]tls://dns.example"
+    - '[/lan/]192.168.1.1'
+    - https://dns.nextdns.io/abc
+filtering:
+  upstream_dns:
+    - '[/not-dns.example/]https://x'
+""")
+    env |= {"VWARD_PROFILE_LIB": str(ROOT / "components/runtime/lib/vward-device-profile.sh"), "VWARD_ADGUARD_CONFIG": str(agh)}
+    data = lists()
+    if data["smartdns_domains"] != ["anthropic.com", "claude.ai", "gemini.google.com"] or data["doh_used"] != 0:
+        fail(f"Smart DNS from AdGuard Home: {data['smartdns_domains']} used={data['doh_used']}")
+    if data["smartdns_sources"] != {"keenetic": [], "adguard": ["anthropic.com", "claude.ai", "gemini.google.com"]}:
+        fail(f"sources: {data['smartdns_sources']}")
+    got = {l["name"]: l["smartdns_conflict"] for l in data["lists"]}
+    if got != {"domain-list4": False, "domain-list9": True, "domain-list7": False, "domain-list5": True}:
+        fail(f"conflicts from AdGuard Home domains: {got}")
 
 # The engine keeps a list of Smart DNS domains and checks it before AdaptiveAuto.
 host = ENGINE[ENGINE.index("handle_host()\n"):]
+if "vward_agh_smartdns_domains\n        } | sort -u > \"$SMARTDNS\"" not in ENGINE:
+    fail("the engine must add Smart DNS domains kept in AdGuard Home")
 if host.index('parent_list_match "$HOST" "$SMARTDNS"') > host.index('if is_adaptive "$HOST"'):
     fail("Smart DNS domains must be skipped before AdaptiveAuto handles a host")
-awk = ENGINE[ENGINE.index("            /^[^ \\t!]/ {ctx"):ENGINE.index("' \"$CFG\" | sort -u > \"$SMARTDNS\"")]
+awk = ENGINE[ENGINE.index("                /^[^ \\t!]/ {ctx"):ENGINE.index("' \"$CFG\"\n            vward_agh_smartdns_domains")]
 r = subprocess.run(["awk", "\n".join(awk.splitlines())], input=RUNNING, text=True, capture_output=True)
 if sorted(r.stdout.split()) != ["anthropic.com", "gemini.google.com"]:
     fail(f"engine Smart DNS extraction: {r.stdout!r}")
