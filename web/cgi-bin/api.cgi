@@ -102,7 +102,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host) ;;
+    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -716,6 +716,96 @@ if [ "$ACTION" = backup-download ]; then
   echo
   cat "$SNAPSHOT_DIR/$BN"
   exit 0
+fi
+# Files: VWARD's own folders, read only.  Secrets never leave the router: the
+# tunnel store, keys, logins and every file only root may read are listed as
+# closed and are neither shown nor downloaded.  Links are not followed.
+if [ "$ACTION" = files ]; then
+  FOP="$(qget op)"; FROOT="$(qget root)"; FPATH="$(qget path | sed 's/%2[Ff]/\//g; s/%40/@/g; s/%2[Bb]/+/g')"
+  fdie() { header_json; printf '{"ok":false,"error":"%s"}\n' "$1"; exit 0; }
+  case "$FROOT" in
+    etc) FBASE=/opt/etc/vward ;; state) FBASE=/opt/var/lib/vward ;; logs) FBASE=/opt/var/log/vward ;; share) FBASE=/opt/share/vward ;;
+    *) fdie invalid_root ;;
+  esac
+  FBASE="${VWARD_ROOT_PREFIX:-}$FBASE"
+  [ "${#FPATH}" -le 300 ] || fdie invalid_path
+  case "/$FPATH/" in */../*|*/./*|//*) [ -z "$FPATH" ] || fdie invalid_path ;; esac
+  printf '%s' "$FPATH" | grep -q '[^A-Za-z0-9._@+/-]' && fdie invalid_path
+  FPATH="${FPATH%/}"
+  FFULL="$FBASE${FPATH:+/$FPATH}"
+  [ -d "$FBASE" ] || fdie folder_missing
+  # A closed path: secrets by place or name.
+  file_closed() {
+    case "/$1" in
+      /tunnels|/tunnels/*|*/https/ca|*/https/ca/*) return 0 ;;
+      *.key|*.auth|*private*|*secret*|*password*|*token*|*session*) return 0 ;;
+    esac
+    return 1
+  }
+  # Every part of the path must be a real folder or file, not a link.
+  FCHK="$FBASE"; FREST="$FPATH"
+  while [ -n "$FREST" ]; do
+    FPART="${FREST%%/*}"; FCHK="$FCHK/$FPART"
+    [ "$FREST" = "$FPART" ] && FREST="" || FREST="${FREST#*/}"
+    [ ! -L "$FCHK" ] || fdie not_found
+  done
+  [ -e "$FFULL" ] || fdie not_found
+  case "$FOP" in
+    list)
+      [ -d "$FFULL" ] || fdie not_a_folder
+      [ -z "$FPATH" ] || ! file_closed "$FPATH" || fdie file_closed
+      header_json
+      ls -lnA "$FFULL" 2>/dev/null | awk -v pre="$FPATH" '
+        NR == 1 && /^total/ { next }
+        {
+          mode = $1; size = $5; line = $0
+          for (i = 1; i <= 8; i++) sub(/^[^ ]+ +/, "", line)
+          t = substr(mode, 1, 1)
+          if (t == "l") next
+          kind = t == "d" ? "dir" : t == "-" ? "file" : "other"
+          # Private: others may not read it.
+          priv = substr(mode, 8, 1) != "r" ? 1 : 0
+          print kind "\t" size "\t" priv "\t" $6 " " $7 " " $8 "\t" line
+          if (++n >= 500) exit
+        }' | while IFS='	' read -r FK FS FP FT FN; do
+          FREL="${FPATH:+$FPATH/}$FN"; FC=0
+          if [ "$FP" = 1 ] && [ "$FK" = file ]; then FC=1; fi
+          file_closed "$FREL" && FC=1
+          printf '%s\t%s\t%s\t%s\t%s\n' "$FK" "$FS" "$FC" "$FT" "$FN"
+        done | "$JQ" -Rn --arg root "$FROOT" --arg path "$FPATH" '[inputs | split("\t") | {kind: .[0], size: (.[1] | tonumber? // null), closed: (.[2] == "1"), time: .[3], name: .[4]}]
+          | {ok: true, root: $root, path: $path, entries: (sort_by(.kind != "dir", .name))}'
+      exit 0 ;;
+    read|download)
+      [ -f "$FFULL" ] || fdie not_a_file
+      file_closed "$FPATH" && fdie file_closed
+      [ "$(ls -ln "$FFULL" 2>/dev/null | cut -c8)" = r ] || fdie file_closed
+      FSIZE="$(wc -c < "$FFULL" | tr -d ' ')"
+      if [ "$FOP" = download ]; then
+        FNAME="$(basename "$FFULL")"
+        echo 'Content-Type: application/octet-stream'
+        echo "Content-Disposition: attachment; filename=\"$FNAME\""
+        echo 'Cache-Control: no-store'
+        echo 'X-Content-Type-Options: nosniff'
+        echo "Content-Length: $FSIZE"
+        echo
+        cat "$FFULL"
+        exit 0
+      fi
+      FLIM=65536
+      # Logs are read from the end: the newest lines matter.
+      if [ "$FROOT" = logs ] && [ "$FSIZE" -gt "$FLIM" ]; then FCUT=tail; else FCUT=head; fi
+      FBIN="$($FCUT -c 4096 "$FFULL" | tr -d '\000' | wc -c | tr -d ' ')"
+      FHEAD="$($FCUT -c 4096 "$FFULL" | wc -c | tr -d ' ')"
+      header_json
+      if [ "$FBIN" != "$FHEAD" ] || case "$FFULL" in *.gz|*.tar|*.tgz|*.bin) true ;; *) false ;; esac; then
+        "$JQ" -n --argjson size "$FSIZE" --arg path "$FPATH" '{ok: true, path: $path, size: $size, binary: true}'
+      else
+        $FCUT -c "$FLIM" "$FFULL" | "$JQ" -Rs --argjson size "$FSIZE" --argjson lim "$FLIM" --arg path "$FPATH" --arg cut "$FCUT" \
+          '{ok: true, path: $path, size: $size, binary: false, truncated: ($size > $lim), from_end: ($cut == "tail" and $size > $lim), text: .}'
+      fi
+      exit 0 ;;
+    *) fdie invalid_operation ;;
+  esac
 fi
 if [ "$ACTION" = backup-control ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }

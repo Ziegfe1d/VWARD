@@ -93,6 +93,8 @@ async function apiPost(action, fields) {
   return r.json();
 }
 const API_ERRORS = {
+  file_closed: 'файл закрыт: в нём ключи или пароли', not_found: 'не найдено', invalid_path: 'недопустимый путь', folder_missing: 'папки нет на роутере',
+  not_a_file: 'это не файл', not_a_folder: 'это не папка', invalid_root: 'неизвестная папка',
   updater_busy: 'идёт обновление, повторите позже', confirmation_required: 'требуется подтверждение',
   action_unavailable: 'действие недоступно на этом роутере', invalid_domain: 'неверный домен',
   invalid_ipv4: 'неверный IPv4-адрес', control_busy: 'другое действие ещё выполняется',
@@ -120,11 +122,13 @@ const errText = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.
 /* ---------- Данные ---------- */
 const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
 const ADSV = { filter: 'all', search: '', blockedSearch: '' };
+// Files page: the open folder.
+const FILES = { root: '', path: '' };
 const LOADERS = {
   status: () => apiGet('status'), route: () => apiGet('route-data'), update: () => apiGet('update-data'), lists: () => apiGet('lists-data'),
   security: () => apiGet('security-data'), diag: () => apiGet('diagnostics'), wifi: () => apiGet('wifi-data'),
   ads: () => apiGet('ads-data'), https: () => apiGet('ads-https-data'), config: () => apiGet('config-data'),
-  adsstats: () => apiGet('ads-view', { view: 'stats' }), agh: () => apiGet('ads-view', { view: 'agh' }), backups: () => apiGet('backup-data'), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
+  adsstats: () => apiGet('ads-view', { view: 'stats' }), agh: () => apiGet('ads-view', { view: 'agh' }), backups: () => apiGet('backup-data'), files: () => FILES.root ? apiGet('files', { op: 'list', root: FILES.root, path: FILES.path }) : Promise.resolve(null), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
   qlog: () => apiGet('ads-view', { view: 'querylog', filter: ADSV.filter, search: ADSV.search }),
   review: () => apiGet('ads-view', { view: 'list', kind: 'review' }),
   cron: () => apiGet('cron-data'), auth: () => apiGet('auth'),
@@ -221,6 +225,7 @@ const logLabel = id => (LOG_TABS.find(t => t.id === id) || {}).label || id;
 const DETAILS = {
   'd-components': { title: 'Компоненты', parent: 'system' },
   'd-diag': { title: 'Диагностика', parent: 'system' },
+  'd-files': { title: 'Файлы VWARD', parent: 'system', data: ['files'] },
   'd-cron': { title: 'Задания по расписанию', parent: 'd-diag' },
   updates: { title: 'Обновления', parent: 'settings', data: ['status', 'update', 'config'] },
   'd-mydomains': { title: 'Мои домены', parent: 'routes' },
@@ -554,7 +559,8 @@ const RENDER = {
       ])) +
       panel('Состояние', kv([
         ['Компоненты', COMPONENTS.length + ' ' + plural(COMPONENTS.length, 'компонент', 'компонента', 'компонентов'), '', 'd-components'],
-        ['Диагностика', dg.length ? (dg.length - bad) + ' из ' + dg.length + ' в норме' : 'не запускалась', bad ? 'warn' : '', 'd-diag']
+        ['Диагностика', dg.length ? (dg.length - bad) + ' из ' + dg.length + ' в норме' : 'не запускалась', bad ? 'warn' : '', 'd-diag'],
+        ['Файлы', 'настройки, состояние, журналы', '', 'd-files']
       ])) +
       panel('Хранилище', kv([['Свободно', fmtKB(g.free_kb) + ' из ' + fmtKB(g.total_kb)], ['Файловая система', g.filesystem || '—'], ['Сжатие журналов', 'каждый час', '', 'd-cron']]) +
         '<div class="panel-actions">' + btn('housekeeping', 'archive', 'Сжать журналы сейчас') + '</div>' + resultBox('storage'),
@@ -740,6 +746,18 @@ const RENDER = {
       panel('Добавить свой источник', '<form class="inline-form" data-form="ads-srcadd"><input class="input" name="url" placeholder="https://example.org/list.txt" aria-label="Адрес списка" autocomplete="off" inputmode="url"><select class="input compact" name="format" aria-label="Формат"><option value="adblock">Adblock</option><option value="hosts">hosts</option><option value="domains">Список доменов</option></select><button class="btn primary" type="submit">Добавить</button></form>' + resultBox('ads-src'),
         { desc: 'Только https. Новый источник начинает в режиме «Проверка»; размер и формат проверяются при загрузке - список больше 8 МБ или меньше 10 записей не принимается. До 10 своих источников.' });
   },
+  'd-files'() {
+    if (!FILES.root) return panel('Папки VWARD', '<ul class="rows">' + FILE_ROOTS.map(r => '<li class="row link" role="button" tabindex="0" data-files-root="' + r[0] + '"><div class="row-main"><b>' + esc(r[1]) + '</b><small>' + esc(r[2]) + '</small></div>' + ico('chevron', 'chev') + '</li>').join('') + '</ul>',
+      { desc: 'Только просмотр и скачивание. Ключи туннелей, пароли и служебные файлы закрыты.' });
+    const x = S.files, here = x && x.ok && x.root === FILES.root && x.path === FILES.path ? x : null;
+    const title = [FILE_ROOTS.find(r => r[0] === FILES.root)[1]].concat(FILES.path ? FILES.path.split('/') : []).join(' / ');
+    const up = '<li class="row link" role="button" tabindex="0" data-files-up="1"><div class="row-main"><b>..</b><small>' + (FILES.path ? 'на уровень выше' : 'к списку папок') + '</small></div>' + ico('up', 'chev') + '</li>';
+    return panel(title, !here ? (x && !x.ok && !S.errors.files ? '<ul class="rows">' + up + '</ul>' + empty(errText(x)) : empty('Загрузка…')) : '<ul class="rows">' + up + here.entries.map(e => {
+      const dir = e.kind === 'dir', open = !e.closed && (dir || e.kind === 'file');
+      return '<li class="row' + (open ? ' link" role="button" tabindex="0" data-files-' + (dir ? 'dir' : 'open') + '="' + esc(e.name) + '"' : '"') + '><div class="row-main"><b>' + esc(e.name) + (dir ? '/' : '') + '</b><small>' + (dir ? 'папка' : fmtBytes(e.size)) + (e.time ? ' · ' + esc(e.time) : '') + '</small></div>' +
+        (e.closed ? '<span class="pill">закрыт</span>' : ico(dir ? 'chevron' : 'eye', 'chev')) + '</li>';
+    }).join('') + '</ul>' + (here.entries.length ? '' : empty('Папка пуста')));
+  },
   'd-jobs'() {
     const JOB_TEXT = { scan: 'проверка новых доменов', 'sources-update': 'обновление источников', 'rules-rebuild': 'пересборка правил', publish: 'публикация', probe: 'проверка домена' };
     const JOB_STATE = { DONE: 'выполнено', PASS: 'выполнено', FAILED: 'ошибка', RUNNING: 'идёт', QUEUED: 'в очереди' };
@@ -797,6 +815,22 @@ function fmtStamp(t) {
   return fmtTime(s);
 }
 function fmtTime(t) { const d = new Date(t); return isNaN(d) ? (t || '') : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+const FILE_ROOTS = [['etc', 'Настройки', '/opt/etc/vward'], ['state', 'Состояние', '/opt/var/lib/vward'], ['logs', 'Журналы', '/opt/var/log/vward'], ['share', 'Программа', '/opt/share/vward']];
+const filePath = name => (FILES.path ? FILES.path + '/' : '') + name;
+function filesGo(root, path) { FILES.root = root; FILES.path = path; S.files = null; render(); load('files', true).then(render); }
+async function fileOpen(name) {
+  const path = filePath(name), dl = '/cgi-bin/api.cgi?action=files&op=download&root=' + encodeURIComponent(FILES.root) + '&path=' + encodeURIComponent(path);
+  openSheet(name, '<div class="sheet-body">' + empty('Загрузка…') + '</div>', 'wide');
+  let x; try { x = await apiGet('files', { op: 'read', root: FILES.root, path: path }); } catch (e) { x = { ok: false, error: e.message }; }
+  const note = !x.ok ? errText(x) : x.binary ? 'Двоичный или сжатый файл: можно только скачать.' : x.truncated ? (x.from_end ? 'Показан конец файла - последние 64 КБ.' : 'Показано начало файла - первые 64 КБ.') : '';
+  const body = '<div class="sheet-body"><p class="panel-desc">' + esc(fmtBytes(x.size)) + (note ? ' · ' + esc(note) : '') + '</p>' +
+    (x.ok ? '<div class="panel-actions"><a class="btn" href="' + esc(dl) + '" download>' + ico('save') + 'Скачать</a></div>' : '') + (x.ok && !x.binary ? '<pre class="logbox">' + esc(x.text) + '</pre>' : '') + '</div>';
+  const sh = document.querySelector('#layer .sheet');
+  if (!sh || sh.getAttribute('aria-label') !== name) return;
+  sh.querySelector('.sheet-body').outerHTML = body;
+  // A log is read from its end: show the newest lines first.
+  if (FILES.root === 'logs') { const b = sh.querySelector('.sheet-body'); b.scrollTop = b.scrollHeight; }
+}
 const ADS_VERDICT = { BLOCK: ['crit', 'Заблокирован'], SUSPECT: ['warn', 'На проверке'], ALLOW: ['ok', 'Разрешён'], TRUST: ['ok', 'Доверенный'] };
 const ADS_REASON = { manual_denylist: 'ваше правило', manual_allowlist: 'ваше правило', trusted_registry: 'доверенный сервис', dedicated_block_feed: 'есть в специальном списке рекламы', multi_source_consensus: 'найден в нескольких источниках', external_verifier: 'внешняя проверка', source_catalog_degraded: 'источники недоступны, решение отложено', block_evidence_disappeared_review: 'пропал из источников, перепроверяется', no_block_evidence: 'признаков рекламы нет' };
 function adsRuleBtn(d, type) { return '<button class="icon-btn" type="button" data-ads-rule="' + type + '" data-domain="' + esc(d) + '" aria-label="' + (type === 'allow' ? 'Разрешить ' : 'Заблокировать ') + esc(d) + '" title="' + (type === 'allow' ? 'Разрешить' : 'Заблокировать') + '">' + ico(type === 'allow' ? 'check' : 'block') + '</button>'; }
@@ -1127,7 +1161,7 @@ function openNotes() {
   openSheet('Уведомления', '<div class="sheet-body">' + (n.length ? n.map(x => '<button class="note-item" type="button" data-go="' + x.to + '"><span class="sev ' + x.sev + '">' + ico(x.icon || 'alert') + '</span><span><b>' + esc(x.title) + '</b><small>' + esc(x.text) + '</small></span></button>').join('') : empty('Всё работает штатно')) + '</div>', '', 'bellBtn');
 }
 const SEARCH_INDEX = [
-  ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Свободно'],
+  ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Файлы'], ['system', 'Свободно'],
   ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Автоматическое восстановление'], ['wan', 'История восстановлений'],
   ['vpn', 'Автоматическая защита'], ['vpn', 'fail-open'], ['vpn', 'Проверка туннеля'],
   ['lists', 'Использовано строк'],
@@ -1334,7 +1368,7 @@ function copyText(text) {
 }
 
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-go],[data-act],[data-tab],[data-card-toggle],[data-log],[data-move],[data-card-move],[data-view],[data-ads-remove],[data-wifi-bind],[data-log-go],[data-cfg-op],[data-ads-rule],[data-qfilter],[data-ads-srcdel],[data-agh-filter-rm],[data-backup-restore]');
+  const t = e.target.closest('[data-go],[data-act],[data-tab],[data-card-toggle],[data-log],[data-move],[data-card-move],[data-view],[data-ads-remove],[data-wifi-bind],[data-log-go],[data-cfg-op],[data-ads-rule],[data-qfilter],[data-ads-srcdel],[data-agh-filter-rm],[data-backup-restore],[data-files-root],[data-files-dir],[data-files-open],[data-files-up]');
   if (!t || t.disabled) return;
   if (t.dataset.cardToggle) { const id = t.dataset.cardToggle; hiddenCards = hiddenCards.includes(id) ? hiddenCards.filter(x => x !== id) : hiddenCards.concat(id); store.set('vward-card-hidden', hiddenCards); render(); return; }
   if (t.dataset.cardMove) { const [id, dir] = t.dataset.cardMove.split(':'), i = cardOrder.indexOf(id), j = i + (dir === 'up' ? -1 : 1); if (j >= 0 && j < cardOrder.length) { [cardOrder[i], cardOrder[j]] = [cardOrder[j], cardOrder[i]]; store.set('vward-card-order', cardOrder); render(); } return; }
@@ -1348,6 +1382,10 @@ document.addEventListener('click', e => {
   if (t.dataset.qfilter && !t.dataset.go) { ADSV.filter = t.dataset.qfilter; S.qlog = null; render(); load('qlog', true).then(render); return; }
   if (t.dataset.adsRule) { const d = t.dataset.domain; t.disabled = true; adsControl({ op: t.dataset.adsRule, domain: d, scope: 'exact' }, (t.dataset.adsRule === 'allow' ? d + ' разрешён' : d + ' заблокирован'), 'ads-rule').then(adsViews); return; }
   if (t.dataset.adsSrcdel) { t.disabled = true; adsControl({ op: 'source-delete', source: t.dataset.adsSrcdel }, 'Источник удалён', 'ads-src'); return; }
+  if (t.dataset.filesRoot) { filesGo(t.dataset.filesRoot, ''); return; }
+  if (t.dataset.filesDir) { filesGo(FILES.root, filePath(t.dataset.filesDir)); return; }
+  if (t.dataset.filesOpen) { fileOpen(t.dataset.filesOpen); return; }
+  if (t.dataset.filesUp) { if (FILES.path) filesGo(FILES.root, FILES.path.split('/').slice(0, -1).join('/')); else filesGo('', ''); return; }
   if (t.dataset.backupRestore) { confirm = { id: 'backup-restore', name: t.dataset.backupRestore }; render(); return; }
   if (t.dataset.aghFilterRm) { confirm = { id: 'agh-filter-remove', url: t.dataset.aghFilterRm }; render(); return; }
   if (t.dataset.cfgOp === 'tsubnet') { t.disabled = true; tunnelSubnet(current.slice(2), 'remove', t.dataset.cfgTarget); return; }
