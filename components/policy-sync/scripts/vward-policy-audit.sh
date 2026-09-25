@@ -94,9 +94,9 @@ fi
 
 WG_GROUPS=$(
     sed -n '/^dns-proxy/,/^!/p' "$RUNCFG" |
-    awk -v wg="$WG" '$1=="route" &&
+    awk -v wg="$WG" -v wgi="${VWARD_TUNNEL_INTERFACE:-}" '$1=="route" &&
          $2=="object-group" &&
-         $4==wg {print $3}'
+         ($4==wg || ($4==wgi && wgi!="")) {print $3}'
 )
 
 : > "$TARGETS"

@@ -351,10 +351,10 @@ fi
 # ============================================================
 
 WG_GROUPS=$(
-    awk -v wg="$WG" '
+    awk -v wg="$WG" -v wgi="${VWARD_TUNNEL_INTERFACE:-}" '
     $1=="route" &&
     $2=="object-group" &&
-    $4==wg &&
+    ($4==wg || ($4==wgi && wgi!="")) &&
     $3!="AdaptiveAuto" {
         print $3
     }

@@ -430,10 +430,12 @@ collect_vpn_domains()
     GROUPS="$WORK/vpn-groups"
     DOMAINS="$WORK/policy-domains"
 
-    awk -v wg="$WG" '
+    # Keenetic writes the interface name in DNS routes; older setups used
+    # the kernel device: both count.
+    awk -v wg="$WG" -v wgi="${VWARD_TUNNEL_INTERFACE:-}" '
         $1=="route" &&
         $2=="object-group" &&
-        $4==wg {
+        ($4==wg || ($4==wgi && wgi!="")) {
             print $3
         }
     ' "$RUN" | sort -u > "$GROUPS"
