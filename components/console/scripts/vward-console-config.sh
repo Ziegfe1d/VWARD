@@ -762,7 +762,7 @@ conf_parse() {
     err=$(sed -n 's/^error=//p' "$cp_raw" | head -n 1)
     [ -z "$err" ] || { rm -f "$cp_raw"; die "$err" 64; }
 
-    priv=$(conf_get if.privatekey "$cp_raw"); wg_key "$priv" || die conf_private_key 64
+    priv=$(conf_get if.privatekey "$cp_raw"); wg_key "$priv" || die conf_key_private 64
     pub=$(conf_get peer.publickey "$cp_raw"); wg_key "$pub" || die conf_public_key 64
     psk=$(conf_get peer.presharedkey "$cp_raw"); [ -z "$psk" ] || wg_key "$psk" || die conf_preshared_key 64
 
@@ -857,7 +857,7 @@ free_tunnel_name() {
 
 apply_plan() {
     # apply_plan IFACE PLAN ADDRESS: interface settings and its one peer.
-    ndm "interface $1 wireguard private-key $(conf_get private "$2")" || die conf_rejected_private_key
+    ndm "interface $1 wireguard private-key $(conf_get private "$2")" || die conf_rejected_key
     ndm "interface $1 ip address $3" || die conf_rejected_address
     m=$(conf_get mtu "$2"); [ -z "$m" ] || ndm "interface $1 ip mtu $m" || die conf_rejected_mtu
     a=$(conf_get asc "$2")

@@ -222,7 +222,7 @@ with tempfile.TemporaryDirectory() as tmp:
         fail(f"check summary: {out}")
     if (tmp / "upload.conf").exists():
         fail("the uploaded .conf with the private key must be removed")
-    for bad, err in ((conf("short=", PEER_NEW), "error=conf_private_key"),
+    for bad, err in ((conf("short=", PEER_NEW), "error=conf_key_private"),
                      (conf(NEW_KEY, PEER_NEW, endpoint="x;reboot:1"), "error=conf_endpoint"),
                      ("[Interface]\nPrivateKey = " + NEW_KEY + "\n", "error=conf_peer_count"),
                      (conf(NEW_KEY, PEER_NEW).replace("I1 = <b 0x5245474953544552>", 'I1 = <b "x">'), "error=conf_awg")):
