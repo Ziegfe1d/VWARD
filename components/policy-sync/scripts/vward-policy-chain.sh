@@ -84,7 +84,7 @@ while [ "$WAITED" -le "$MAX_WAIT" ]; do
 
         if [ -n "$TARGETS" ] &&
            [ -n "$CHECKED" ] &&
-           [ "$TARGETS" -gt 0 ] 2>/dev/null &&
+           [ "$TARGETS" -ge 0 ] 2>/dev/null &&
            [ "$CHECKED" -eq "$TARGETS" ] 2>/dev/null
         then
             COMPLETE=1

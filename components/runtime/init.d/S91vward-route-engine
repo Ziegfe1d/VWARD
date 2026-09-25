@@ -19,6 +19,8 @@ fi
 PIDFILE="/opt/var/run/vward/route-engine.pid"
 SCRIPT="/opt/bin/vward-route-engine.sh"
 LOG="/opt/var/log/vward-route-engine.log"
+EVENT_LOG="/opt/var/log/vward-route-engine-events.log"
+UNHEALTHY=""
 
 LIVE_LOCK="/tmp/vward-route-engine.lock"
 CONTROL_LOCK="/tmp/S91vward-route-engine.control.lock"
@@ -71,6 +73,22 @@ adaptive_live_pids()
             print $1
         }
     '
+}
+
+
+# The engine's own subshells (a probe inside $(...), a pipeline) carry the same
+# command line; only processes whose parent is not the engine are cores.
+adaptive_core_count()
+{
+    # shellcheck disable=SC2046
+    ACC_LIVE=" $(echo $(adaptive_live_pids)) "
+    ACC_N=0
+    for ACC_P in $ACC_LIVE; do
+        # /proc/PID/stat: pid (comm) state ppid ...; read is a builtin.
+        read -r _ _ _ ACC_PP _ < "/proc/$ACC_P/stat" 2>/dev/null || continue
+        case "$ACC_LIVE" in *" $ACC_PP "*) ;; *) ACC_N=$((ACC_N + 1)) ;; esac
+    done
+    echo "$ACC_N"
 }
 
 
@@ -146,15 +164,20 @@ service_healthy()
     PID=$(cat "$PIDFILE" 2>/dev/null)
     LOCKPID=$(cat "$LIVE_LOCK/pid" 2>/dev/null)
 
+    UNHEALTHY=no_pidfile
     [ -n "$PID" ] || return 1
+    UNHEALTHY=lock_mismatch
     [ "$PID" = "$LOCKPID" ] || return 1
 
+    UNHEALTHY=core_dead
     kill -0 "$PID" 2>/dev/null || return 1
 
-    LCNT=$(adaptive_live_pids | wc -l)
+    LCNT=$(adaptive_core_count)
 
+    UNHEALTHY=cores=$LCNT
     [ "$LCNT" -eq 1 ] || return 1
 
+    UNHEALTHY=""
     return 0
 }
 
@@ -202,8 +225,13 @@ start_service()
             fi
 
             echo "Adaptive Live tcpdump unhealthy for 3 consecutive watchdog checks - restarting"
+            UNHEALTHY=tcpdump=$TCNT
         fi
     fi
+
+    # Why the engine is (re)started, for the event log.
+    [ -z "$UNHEALTHY" ] || [ "$UNHEALTHY" = no_pidfile ] ||
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|WATCHDOG_RESTART|reason=$UNHEALTHY" >> "$EVENT_LOG" 2>/dev/null
 
     # Only core failure, duplicate core process, or persistent child
     # failure reaches this point.
@@ -223,7 +251,7 @@ start_service()
         kill -0 "$PID" 2>/dev/null || break
 
         LOCKPID=$(cat "$LIVE_LOCK/pid" 2>/dev/null)
-        LCNT=$(adaptive_live_pids | wc -l)
+        LCNT=$(adaptive_core_count)
         TCNT=$(adaptive_tcpdump_pids | wc -l)
 
         if [ "$LOCKPID" = "$PID" ] &&
@@ -258,7 +286,7 @@ status_service()
     PID=$(cat "$PIDFILE" 2>/dev/null)
     LOCKPID=$(cat "$LIVE_LOCK/pid" 2>/dev/null)
 
-    LCNT=$(adaptive_live_pids | wc -l)
+    LCNT=$(adaptive_core_count)
     TCNT=$(adaptive_tcpdump_pids | wc -l)
 
     if service_healthy; then
