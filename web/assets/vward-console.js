@@ -111,20 +111,20 @@ const API_ERRORS = {
   profile_verification_failed: 'профиль устройства не принял новый туннель, изменения отменены',
   rollback_incomplete: 'откат не завершён: проверьте маршруты групп в веб-интерфейсе Keenetic',
   temporary_file_unavailable: 'нет места для временного файла', component_disabled: 'компонент выключен: включите его в «Система → Компоненты»',
-  core_component: 'базовый компонент нельзя выключить', wrong_credentials: 'неверный логин или пароль', invalid_password: 'пароль: только латиница, цифры и обычные знаки, до 128 символов', too_many_attempts: 'слишком много попыток - подождите 5 минут',
+  core_component: 'базовый компонент нельзя выключить', wrong_credentials: 'неверный логин или пароль', adguard_rejected: 'AdGuard Home не принял изменение', unknown_filter: 'такого списка нет в AdGuard Home', invalid_service: 'неизвестный сервис', invalid_setting: 'неизвестная настройка', invalid_name: 'недопустимое название', invalid_password: 'пароль: только латиница, цифры и обычные знаки, до 128 символов', too_many_attempts: 'слишком много попыток - подождите 5 минут',
   router_auth_unavailable: 'роутер не ответил на проверку пароля', invalid_login: 'недопустимый логин', auth_required: 'нужно войти', invalid_url: 'неверный адрес: нужен https без пробелов и логина', invalid_format: 'неизвестный формат списка',
   adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен'
 };
 const errText = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.error || '') ? 'роутер не принял настройку ' + x.error.slice(14).replace(/_/g, ' ') + ' - туннель не изменён' : '') || (x && x.error) || ('код ' + (x && x.rc));
 
 /* ---------- Данные ---------- */
-const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
+const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
 const ADSV = { filter: 'all', search: '', blockedSearch: '' };
 const LOADERS = {
   status: () => apiGet('status'), route: () => apiGet('route-data'), update: () => apiGet('update-data'), lists: () => apiGet('lists-data'),
   security: () => apiGet('security-data'), diag: () => apiGet('diagnostics'), wifi: () => apiGet('wifi-data'),
   ads: () => apiGet('ads-data'), https: () => apiGet('ads-https-data'), config: () => apiGet('config-data'),
-  adsstats: () => apiGet('ads-view', { view: 'stats' }), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
+  adsstats: () => apiGet('ads-view', { view: 'stats' }), agh: () => apiGet('ads-view', { view: 'agh' }), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
   qlog: () => apiGet('ads-view', { view: 'querylog', filter: ADSV.filter, search: ADSV.search }),
   review: () => apiGet('ads-view', { view: 'list', kind: 'review' }),
   cron: () => apiGet('cron-data'), auth: () => apiGet('auth'),
@@ -158,7 +158,7 @@ const PAGES = [
   { id: 'lists', title: 'Доменные списки', icon: 'list', group: 'Сеть', data: ['lists', 'config'] },
   { id: 'routes', title: 'Маршрутизация', icon: 'route', group: 'Сеть', data: ['route', 'security', 'status', 'config'] },
   { id: 'wifi', title: 'Wi-Fi клиенты', icon: 'wifi', group: 'Сеть', data: ['wifi', 'security', 'config'] },
-  { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adsstats', 'adspub'] },
+  { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adsstats', 'adspub', 'agh'] },
   { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config'] },
   { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth', 'status', 'update', 'config'] }
 ];
@@ -218,7 +218,9 @@ const DETAILS = {
   'd-rules': { title: 'Мои правила', parent: 'ads' },
   'd-sources': { title: 'Источники списков', parent: 'ads' },
   'd-jobs': { title: 'Задания', parent: 'ads' },
-  'd-https': { title: 'HTTPS-фильтр', parent: 'ads' }
+  'd-https': { title: 'HTTPS-фильтр', parent: 'ads' },
+  'd-aghfilters': { title: 'Фильтры AdGuard Home', parent: 'ads', data: ['agh', 'ads'] },
+  'd-aghservices': { title: 'Блокировка сервисов', parent: 'ads', data: ['agh', 'ads'] }
 };
 COMPONENTS.forEach(c => { DETAILS['c-' + c.id] = { title: c.name, parent: 'd-components' }; });
 function page(id) {
@@ -471,7 +473,7 @@ const RENDER = {
           S.ads ? ['Подключение VWARD', a.agh_connected ? 'Подключено' : 'Не подключено', a.agh_connected ? 'ok' : 'warn'] : null,
           st1 && st1.ok ? ['Запросов за сутки', fmtInt(st1.queries), '', 'd-querylog'] : ['Запросов за сутки', st1 ? errText(st1) : 'загрузка…', st1 ? 'warn' : '', 'd-querylog'],
           st1 && st1.ok ? ['Заблокировано за сутки', fmtInt(st1.blocked) + (st1.queries ? ' · ' + Math.round(100 * st1.blocked / st1.queries) + '%' : ''), '', 'd-querylog', ' data-qfilter="blocked"'] : null])) +
-      aghConnectPanel(a) +
+      aghConnectPanel(a) + aghSettingsPanel(a) +
       panel('Списки и правила', kv([
         ['Журнал запросов', 'последние 100', '', 'd-querylog'],
         ['Заблокировано доменов', fmtInt(c.blocked), '', 'd-blocked'],
@@ -695,6 +697,23 @@ const RENDER = {
       '<div class="panel-actions even">' + btn('ads-job', 'search', 'Проверить новые домены', '', ' data-job="scan"') + btn('ads-job', 'refresh', 'Обновить источники', '', ' data-job="sources-update"') + btn('ads-job', 'check', 'Пересобрать правила', '', ' data-job="rules-rebuild"') + '</div>' +
       (last.output ? '<pre class="logbox">' + esc(last.output) + '</pre>' : '') + resultBox('ads-job'));
   },
+  'd-aghfilters'() {
+    const g = S.agh, fl = (g && g.filtering && g.filtering.filters) || [];
+    const rm = confirm && confirm.id === 'agh-filter-remove' ? confirm.url : '';
+    return panel('Фильтры AdGuard Home', !g ? empty('Загрузка…') : !g.ok ? empty(errText(g)) : (fl.length ? '<ul class="rows">' + fl.map(f => '<li class="row"><div class="row-main"><b>' + esc(f.name || f.url) + '</b><small>' + fmtInt(f.rules) + ' ' + plural(f.rules, 'правило', 'правила', 'правил') + (f.updated ? ' · обновлён ' + esc(fmtTime(f.updated)) : '') + '</small>' +
+        (rm === f.url ? '<div class="confirm"><span>Удалить список из AdGuard Home?</span><button class="btn small danger" type="button" data-act="confirm-yes">Удалить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '') + '</div>' +
+        '<span class="row-acts">' + sw('data-agh-filter="' + esc(f.url) + '"', f.enabled, 'Список ' + (f.name || f.url)) + '<button class="icon-btn" type="button" data-agh-filter-rm="' + esc(f.url) + '" aria-label="Удалить ' + esc(f.name || f.url) + '" title="Удалить">' + ico('close') + '</button></span></li>').join('') + '</ul>' : empty('Списков нет')) +
+      '<form class="inline-form" data-form="agh-filter-add"><input class="input" name="url" placeholder="https://… адрес списка" aria-label="Адрес списка" autocomplete="off"><input class="input" name="name" placeholder="Название" aria-label="Название списка" maxlength="64"><button class="btn" type="submit">Добавить</button></form>' +
+      '<div class="panel-actions">' + btn('agh-filters-refresh', 'refresh', 'Обновить списки сейчас') + '</div>' + resultBox('agh'),
+      { desc: 'Списки блокировки самого AdGuard Home. Выключенный список остаётся, но не применяется.' });
+  },
+  'd-aghservices'() {
+    const g = S.agh, sv = g && g.services, bl = (sv && sv.blocked) || [];
+    const list = sv ? sv.available.slice().sort((a, b) => (bl.includes(b.id) - bl.includes(a.id)) || a.name.localeCompare(b.name)) : [];
+    return panel('Блокировка сервисов', !g ? empty('Загрузка…') : !g.ok ? empty(errText(g)) : !sv ? empty('Эта версия AdGuard Home не отдаёт список сервисов') :
+      '<dl class="kv">' + list.map(x => ctrlRow(x.name, sw('data-agh-service="' + esc(x.id) + '"', bl.includes(x.id), 'Блокировать ' + x.name))).join('') + '</dl>',
+      { desc: 'Сервис блокируется целиком для всех устройств: включите, чтобы закрыть его, выключите, чтобы открыть.' });
+  },
   'd-https'() {
     const h = S.https;
     if (!h || !h.ok) return panel('HTTPS-фильтр', empty(h && h.error === 'https_backend_missing' ? 'HTTPS-фильтр не установлен на этом роутере' : 'Состояние недоступно'));
@@ -833,6 +852,34 @@ function tunnelManagePanel(name, managed) {
   return [panel('Конфигурация', '<div class="panel-actions even">' + btn('tunnel-replace', 'refresh', 'Заменить конфигурацию', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnel-conf'),
       { desc: 'Новый файл .conf от провайдера VPN записывается в этот же туннель: имя, маршруты и списки не меняются.' }),
     panel('Удаление', del, { desc: 'Перед удалением VWARD переносит списки и подсети туннеля, чтобы ничего не потерялось.' })];
+}
+// AdGuard Home's own ad settings, changed through its API (the rest stays in its web UI).
+function aghSettingsPanel(a) {
+  if (!S.ads || !a.agh_connected) return '';
+  const g = S.agh;
+  if (!g) return panel('AdGuard Home', empty('Загрузка…'));
+  if (!g.ok) return panel('AdGuard Home', empty(errText(g)));
+  const f = g.filtering || {}, fl = f.filters || [], sv = g.services, on = cfgOk() || true;
+  const row = (key, label, val, hint, extra) => val == null ? '' : ctrlRow(label, sw('data-agh="' + key + '"', val, label), hint);
+  return panel('AdGuard Home', '<dl class="kv">' +
+      row('protection', 'Защита AdGuard Home', g.protection, g.protection ? 'блокирует по всем фильтрам и правилам' : 'выключена - реклама не блокируется') +
+      confirmBox('agh-protection-off', 'Выключить защиту AdGuard Home? Реклама и трекеры перестанут блокироваться на всех устройствах.', 'Выключить', true) +
+      (f.enabled == null ? '' : row('filtering', 'Фильтрация по спискам', f.enabled, fmtInt(fl.filter(x => x.enabled).length) + ' из ' + fmtInt(fl.length) + ' списков включены')) +
+      (f.interval == null ? '' : ctrlRow('Обновлять списки', sel('data-agh-interval', 'Обновлять списки', [[0, 'не обновлять'], [1, 'каждый час'], [12, 'каждые 12 ч'], [24, 'раз в сутки'], [72, 'раз в 3 дня'], [168, 'раз в неделю']], f.interval))) +
+      row('safebrowsing', 'Безопасная навигация', g.safebrowsing, 'блокирует фишинг и вредоносные сайты') +
+      row('parental', 'Родительский контроль', g.parental, 'блокирует сайты для взрослых') +
+      row('safesearch', 'Безопасный поиск', g.safesearch, 'строгий режим в поисковиках и YouTube') + '</dl>' +
+      kv([f.filters ? ['Фильтры', fmtInt(fl.filter(x => x.enabled).length) + ' из ' + fmtInt(fl.length) + ' · ' + fmtInt(fl.reduce((n, x) => n + (x.enabled ? x.rules : 0), 0)) + ' правил', '', 'd-aghfilters'] : null,
+        sv ? ['Блокировка сервисов', sv.blocked.length ? fmtInt(sv.blocked.length) + ' заблокировано' : 'нет', '', 'd-aghservices'] : null]) + resultBox('agh'),
+    { desc: 'Настройки блокировки самого AdGuard Home' + (g.version ? ' ' + g.version : '') + '. Меняются сразу; остальное (DNS-серверы, клиенты, журнал) - в его веб-интерфейсе.' });
+}
+async function aghSet(fields, okMsg) {
+  let x;
+  try { x = await apiPost('ads-control', Object.assign({ op: 'agh' }, fields)); }
+  catch (e) { toast('Ошибка: ' + e.message); return; }
+  const err = /ERROR=([a-z_]+)/.exec(x.result || '');
+  toast(x.ok ? okMsg : 'Не выполнено: ' + (err ? errText({ error: err[1] }) : errText(x)));
+  await load('agh', true); render();
 }
 // AdGuard Home asks for a login: VWARD keeps it (root-only file) after AdGuard accepts it.
 function aghConnectPanel(a) {
@@ -1039,6 +1086,8 @@ const CONFIRMED = {
   'ads-publish': () => runAction('ads', 'ads-control', { op: 'enqueue', job: 'publish', confirm: 'ADS_PUBLISH' }, 'Публикация поставлена в очередь').then(() => load('ads', true)).then(render),
   'https-start': () => runAction('https', 'ads-https-control', { op: 'start', confirm: 'HTTPS_START' }, 'HTTPS-фильтр запущен').then(() => load('https', true)).then(render),
   'https-ca': () => runAction('https', 'ads-https-control', { op: 'ca-init', confirm: 'HTTPS_CA_INIT' }, 'Сертификат создан').then(() => load('https', true)).then(render),
+  'agh-protection-off': () => aghSet({ setting: 'protection', value: '0', confirm: 'AGH_PROTECTION_OFF' }, 'Защита AdGuard Home выключена'),
+  'agh-filter-remove': c => aghSet({ setting: 'filter-remove', url: c.url, confirm: 'AGH_FILTER_REMOVE' }, 'Список удалён'),
   'agh-off': () => apiPost('agh-auth', { op: 'disconnect', confirm: 'AGH_DISCONNECT' }).then(x => { toast(x.ok ? 'AdGuard Home отключён' : 'Не отключено: ' + errText(x)); return load('ads', true); }).then(render, () => render()),
   'auth-off': () => apiPost('auth', { op: 'disable', confirm: 'CONSOLE_AUTH_DISABLE' }).then(x => { toast(x.ok ? 'Вход выключен' : 'Не выключено: ' + errText(x)); return Promise.all([load('auth', true), load('security', true)]); }).then(render, () => render()),
   'ads-autopub': () => adsSetting('AUTO_PUBLISH', '1').then(() => load('adspub', true)).then(render),
@@ -1141,7 +1190,7 @@ function copyText(text) {
 }
 
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-go],[data-act],[data-tab],[data-card-toggle],[data-log],[data-move],[data-card-move],[data-view],[data-ads-remove],[data-wifi-bind],[data-log-go],[data-cfg-op],[data-ads-rule],[data-qfilter],[data-ads-srcdel]');
+  const t = e.target.closest('[data-go],[data-act],[data-tab],[data-card-toggle],[data-log],[data-move],[data-card-move],[data-view],[data-ads-remove],[data-wifi-bind],[data-log-go],[data-cfg-op],[data-ads-rule],[data-qfilter],[data-ads-srcdel],[data-agh-filter-rm]');
   if (!t || t.disabled) return;
   if (t.dataset.cardToggle) { const id = t.dataset.cardToggle; hiddenCards = hiddenCards.includes(id) ? hiddenCards.filter(x => x !== id) : hiddenCards.concat(id); store.set('vward-card-hidden', hiddenCards); render(); return; }
   if (t.dataset.cardMove) { const [id, dir] = t.dataset.cardMove.split(':'), i = cardOrder.indexOf(id), j = i + (dir === 'up' ? -1 : 1); if (j >= 0 && j < cardOrder.length) { [cardOrder[i], cardOrder[j]] = [cardOrder[j], cardOrder[i]]; store.set('vward-card-order', cardOrder); render(); } return; }
@@ -1155,6 +1204,7 @@ document.addEventListener('click', e => {
   if (t.dataset.qfilter && !t.dataset.go) { ADSV.filter = t.dataset.qfilter; S.qlog = null; render(); load('qlog', true).then(render); return; }
   if (t.dataset.adsRule) { const d = t.dataset.domain; t.disabled = true; adsControl({ op: t.dataset.adsRule, domain: d, scope: 'exact' }, (t.dataset.adsRule === 'allow' ? d + ' разрешён' : d + ' заблокирован'), 'ads-rule').then(adsViews); return; }
   if (t.dataset.adsSrcdel) { t.disabled = true; adsControl({ op: 'source-delete', source: t.dataset.adsSrcdel }, 'Источник удалён', 'ads-src'); return; }
+  if (t.dataset.aghFilterRm) { confirm = { id: 'agh-filter-remove', url: t.dataset.aghFilterRm }; render(); return; }
   if (t.dataset.cfgOp === 'tsubnet') { t.disabled = true; tunnelSubnet(current.slice(2), 'remove', t.dataset.cfgTarget); return; }
   if (t.dataset.cfgOp) { const d = t.dataset.cfgTarget, msg = { 'route-domain': d + ' убран из VPN', 'force-vpn': d + ' убран из списка', adaptive: t.dataset.cfgAction === 'pin' ? d + ' закреплён в моих доменах' : d + ' идёт напрямую' }[t.dataset.cfgOp]; t.disabled = true; cfgSet({ op: t.dataset.cfgOp, action: t.dataset.cfgAction, target: d }, msg, ['route']); return; }
   if (t.dataset.wifiBind) { confirm = { id: 'wifi-bind', op: t.dataset.wifiBind }; render(); return; }
@@ -1178,6 +1228,7 @@ document.addEventListener('click', e => {
     apiGet('tunnel-probe', { name: n }).then(r => r, e => ({ ok: false, error: e.message }))
       .then(r => { S.tprobe[n] = Object.assign(r, { at: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) }); render(); });
   }
+  else if (a === 'agh-filters-refresh') aghSet({ setting: 'filters-refresh' }, 'Списки обновляются');
   else if (a === 'tunnel-create') tunnelConfSheet('create');
   else if (a === 'tunnel-replace') tunnelConfSheet('replace', current.slice(2));
   else if (a === 'tunnel-delete') { const s2 = document.querySelector('[data-tunnel-del-to]'); confirm = { id: 'tunnel-delete', to: s2 ? s2.value : 'vpn' }; render(); }
@@ -1247,6 +1298,15 @@ document.addEventListener('change', e => {
   if (t.dataset.cfgRt) { cfgSet({ op: t.dataset.cfgRt, value: t.checked ? '1' : '0' }, 'Сохранено'); return; }
   if (t.dataset.ipcat) { cfgSet({ op: 'ip-category', target: t.dataset.ipcat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена - применится при следующей сверке'); return; }
   if (t.dataset.cfgCat) { cfgSet({ op: 'domain-category', target: t.dataset.cfgCat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена'); return; }
+  if (t.dataset.agh) {
+    const k = t.dataset.agh, v = t.checked ? '1' : '0';
+    if (k === 'protection' && v === '0') { t.checked = true; confirm = { id: 'agh-protection-off' }; render(); return; }
+    t.disabled = true;
+    aghSet({ setting: k, value: v }, 'Сохранено в AdGuard Home'); return;
+  }
+  if (t.hasAttribute('data-agh-interval')) { aghSet({ setting: 'interval', value: t.value }, 'Сохранено в AdGuard Home'); return; }
+  if (t.dataset.aghFilter) { t.disabled = true; aghSet({ setting: 'filter-enable', url: t.dataset.aghFilter, value: t.checked ? '1' : '0' }, t.checked ? 'Список включён' : 'Список выключен'); return; }
+  if (t.dataset.aghService) { t.disabled = true; aghSet({ setting: 'service', service: t.dataset.aghService, value: t.checked ? '1' : '0' }, t.checked ? 'Сервис заблокирован' : 'Сервис открыт'); return; }
   if (t.hasAttribute('data-conf-file')) {
     const file = t.files && t.files[0], form = t.closest('form');
     if (!file) return;
@@ -1293,6 +1353,12 @@ document.addEventListener('submit', async e => {
     if (!DOMAIN.test(v)) { toast('Введите домен, например example.com'); return; }
     const x = await cfgSet({ op: e.target.dataset.op, action: 'add', target: v }, v + ' добавлен', ['route']);
     if (x && x.ok) { const again = document.querySelector('form[data-form="cfg-add"] input'); if (again) again.value = ''; }
+  }
+  if (f === 'agh-filter-add') {
+    const url = e.target.querySelector('[name=url]').value.trim(), name = e.target.querySelector('[name=name]').value.trim();
+    if (!/^https:\/\/[A-Za-z0-9.-]+(:\d{1,5})?\/\S*$/.test(url)) { toast('Нужен адрес https://…'); return; }
+    if (!/^[A-Za-z0-9 ._-]{1,64}$/.test(name)) { toast('Название: латиница, цифры, пробел, точка, дефис'); return; }
+    await aghSet({ setting: 'filter-add', url: url, name: name }, 'Список добавлен'); return;
   }
   if (f === 'tunnel-subnet') {
     const v = e.target.querySelector('[name=subnet]').value.trim();

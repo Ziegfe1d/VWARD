@@ -101,6 +101,38 @@ case "${1:-}" in
             "$([ -r "$PUBLISHED" ] && echo true || echo false)" "$ADDED" "$REMOVED" \
             "$(printf '%s' "${PUBLISH_MODE:-staged}" | tr -cd 'a-z_')" "$(ads_bool "${AUTO_PUBLISH:-0}" && echo true || echo false)"
         ;;
+    agh)
+        # Everything AdGuard Home does about ads, for the Ads page. Optional parts
+        # (older or newer API) are null when the endpoint does not exist.
+        D=$(mktemp -d "${TMPDIR:-/tmp}/vward-ads-agh.XXXXXX" 2>/dev/null) || fail temporary_file_unavailable
+        TMP=$D/x
+        get() { ads_agh_api_get "$1" "$D/$2" >/dev/null 2>&1 || { rm -f "$D/$2"; return 1; }; }
+        get status status.json; rc=$?
+        [ "$rc" = 0 ] || { ads_agh_api_get status "$D/x" >/dev/null 2>&1; r=$?; rm -rf "$D"; agh_fail "$r"; }
+        get filtering/status filtering.json
+        get blocked_services/all services-all.json || get blocked_services/services services-old.json
+        get blocked_services/get services-get.json || get blocked_services/list services-list.json
+        get safebrowsing/status safebrowsing.json
+        get parental/status parental.json
+        get safesearch/status safesearch.json
+        j() { if [ -s "$D/$1" ]; then cat "$D/$1"; else echo null; fi; }
+        "$ADS_JQ" -cn --argjson st "$(j status.json)" --argjson fl "$(j filtering.json)" \
+            --argjson sall "$(j services-all.json)" --argjson sold "$(j services-old.json)" \
+            --argjson sget "$(j services-get.json)" --argjson slist "$(j services-list.json)" \
+            --argjson sb "$(j safebrowsing.json)" --argjson pc "$(j parental.json)" --argjson ss "$(j safesearch.json)" '
+            def filters($f): [($f // [])[] | {id, name: (.name // ""), url: (.url // ""), enabled: (.enabled == true),
+                rules: (.rules_count // 0), updated: (.last_updated // "")}];
+            {ok: true, version: ($st.version // ""), protection: ($st.protection_enabled == true),
+             filtering: (if $fl == null then null else {enabled: ($fl.enabled == true), interval: ($fl.interval // 24),
+                 filters: filters($fl.filters), allow_filters: filters($fl.whitelist_filters), user_rules: (($fl.user_rules // []) | length)} end),
+             services: (if $sall == null and $sold == null then null else
+                 {available: [(($sall.blocked_services // $sold // [])[]) | {id, name: (.name // .id)}] | sort_by(.name | ascii_downcase),
+                  blocked: (if $sget != null then ($sget.ids // []) else ($slist // []) end)} end),
+             safebrowsing: (if $sb == null then null else ($sb.enabled == true) end),
+             parental: (if $pc == null then null else ($pc.enabled == true) end),
+             safesearch: (if $ss == null then null else ($ss.enabled == true) end)}' 2>/dev/null || { rm -rf "$D"; fail adguard_unavailable; }
+        rm -rf "$D"
+        ;;
     *)
         fail invalid_view
         ;;

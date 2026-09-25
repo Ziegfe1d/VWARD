@@ -507,13 +507,14 @@ if [ "$ACTION" = ads-view ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
   V="$(qget view)"; F="$(qget filter)"; Q="$(qget search | tr '[:upper:]' '[:lower:]')"; K="$(qget kind)"
   for X in "$V" "$F" "$Q" "$K"; do case "$X" in *[!a-z0-9.-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac; done
-  case "$V" in querylog|stats|list|publish-status) ;; *) echo '{"ok":false,"error":"invalid_view"}'; exit 0 ;; esac
+  case "$V" in querylog|stats|list|publish-status|agh) ;; *) echo '{"ok":false,"error":"invalid_view"}'; exit 0 ;; esac
   VIEW_BIN=${VWARD_ADS_VIEW_BIN:-/opt/bin/vward-ads-privacy-view.sh}; [ -x "$VIEW_BIN" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
   case "$V" in
     querylog) OUTV="$("$VIEW_BIN" querylog "${F:-all}" "$Q" 2>/dev/null)" ;;
     stats) OUTV="$("$VIEW_BIN" stats 2>/dev/null)" ;;
     list) OUTV="$("$VIEW_BIN" list "$K" "$Q" 2>/dev/null)" ;;
     publish-status) OUTV="$("$VIEW_BIN" publish-status 2>/dev/null)" ;;
+    agh) OUTV="$("$VIEW_BIN" agh 2>/dev/null)" ;;
     *) echo '{"ok":false,"error":"invalid_view"}'; exit 0 ;;
   esac
   printf '%s\n' "$OUTV" | "$JQ" -ce 'if type == "object" then . else error end' 2>/dev/null || echo '{"ok":false,"error":"view_failed"}'
@@ -709,7 +710,7 @@ if [ "$ACTION" = ads-control ]; then
   LEN=${CONTENT_LENGTH:-0}; case "$LEN" in ''|*[!0-9]*) LEN=0;; esac; [ "$LEN" -gt 0 ]&&[ "$LEN" -le 1024 ] || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }; BODY=$(dd bs=1 count="$LEN" 2>/dev/null)
   val(){ printf '%s\n' "$BODY"|tr '&' '\n'|awk -F= -v k="$1" '$1==k{print substr($0,index($0,"=")+1);exit}'; }
   OP="$(val op)"; DOMAIN="$(val domain|tr '[:upper:]' '[:lower:]')"; SCOPE="$(val scope)"; [ -n "$SCOPE" ]||SCOPE=exact
-  case "$OP" in pause|resume|allow|block|remove-override|source-mode|source-add|source-delete|source-category|enqueue) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
+  case "$OP" in pause|resume|allow|block|remove-override|source-mode|source-add|source-delete|source-category|enqueue|agh) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
   case "$OP" in
     allow|block|remove-override) ads_valid_domain "$DOMAIN" || { echo '{"ok":false,"error":"invalid_domain"}'; exit 0; }; case "$SCOPE" in exact|suffix) ;; *) echo '{"ok":false,"error":"invalid_scope"}'; exit 0 ;; esac ;;
     source-mode) SID="$(val source)"; MODE="$(val mode)"; ads_valid_source_id "$SID" || { echo '{"ok":false,"error":"invalid_source"}'; exit 0; }; case "$MODE" in off|check|active) ;; *) echo '{"ok":false,"error":"invalid_source_mode"}'; exit 0 ;; esac ;;
@@ -718,6 +719,27 @@ if [ "$ACTION" = ads-control ]; then
       case "$SFMT" in adblock|hosts|domains) ;; *) echo '{"ok":false,"error":"invalid_format"}'; exit 0 ;; esac ;;
     source-delete) SID="$(val source)"; case "$SID" in custom-*) ads_valid_source_id "$SID" || { echo '{"ok":false,"error":"invalid_source"}'; exit 0; } ;; *) echo '{"ok":false,"error":"invalid_source"}'; exit 0 ;; esac ;;
     source-category) SPUR="$(val category)"; SST="$(val state)"; case "$SPUR" in ''|*[!a-z-]*) echo '{"ok":false,"error":"invalid_category"}'; exit 0 ;; esac; case "$SST" in on|off) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac ;;
+    agh) AGS="$(val setting)"; AGV="$(val value)"
+      case "$AGS" in
+        protection|filtering|safebrowsing|parental|safesearch) case "$AGV" in 0|1) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+          [ "$AGS:$AGV" != protection:0 ] || [ "$(val confirm)" = AGH_PROTECTION_OFF ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+          set -- "$AGS" "$AGV" ;;
+        interval) case "$AGV" in 0|1|12|24|72|168) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac; set -- interval "$AGV" ;;
+        filters-refresh) set -- filters-refresh ;;
+        filter-enable|filter-add|filter-remove)
+          AGU="$(form_url_decode "$(val url)")" || { echo '{"ok":false,"error":"invalid_url"}'; exit 0; }
+          printf '%s\n' "$AGU" | grep -Eq '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._~/%+=&?-]*$' && [ "${#AGU}" -le 300 ] || { echo '{"ok":false,"error":"invalid_url"}'; exit 0; }
+          case "$AGS" in
+            filter-enable) case "$AGV" in 0|1) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac; set -- filter-enable "$AGU" "$AGV" ;;
+            filter-add) AGN="$(val name | sed 's/+/ /g; s/%20/ /g')"
+              case "$AGN" in ''|*[!A-Za-z0-9\ ._-]*) echo '{"ok":false,"error":"invalid_name"}'; exit 0 ;; esac
+              set -- filter-add "$AGU" "$AGN" ;;
+            filter-remove) [ "$(val confirm)" = AGH_FILTER_REMOVE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }; set -- filter-remove "$AGU" ;;
+          esac ;;
+        service) AGI="$(val service)"; case "$AGI" in ''|*[!a-z0-9_]*) echo '{"ok":false,"error":"invalid_service"}'; exit 0 ;; esac
+          case "$AGV" in 0|1) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac; set -- service "$AGI" "$AGV" ;;
+        *) echo '{"ok":false,"error":"invalid_setting"}'; exit 0 ;;
+      esac ;;
     enqueue) JOB="$(val job)"; case "$JOB" in scan|sources-update|rules-rebuild) ;; publish) [ "$(val confirm)" = ADS_PUBLISH ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;; probe) ads_valid_domain "$DOMAIN" || { echo '{"ok":false,"error":"invalid_domain"}'; exit 0; } ;; *) echo '{"ok":false,"error":"invalid_job"}'; exit 0 ;; esac ;;
   esac
   RC=0; OUT="$(ads_console_tmp ads-control)" || { echo '{"ok":false,"error":"temporary_file_failed"}'; exit 0; }
@@ -729,6 +751,7 @@ if [ "$ACTION" = ads-control ]; then
     source-delete) /opt/bin/vward-ads-privacy-source-control.sh delete "$SID" >"$OUT" 2>&1||RC=$? ;;
     source-category) /opt/bin/vward-ads-privacy-source-control.sh category "$SPUR" "$SST" >"$OUT" 2>&1||RC=$? ;;
     enqueue) /opt/bin/vward-ads-privacy-job.sh enqueue "$JOB" "$DOMAIN" >"$OUT" 2>&1||RC=$? ;;
+    agh) "${VWARD_ADS_CONTROL_BIN:-/opt/bin/vward-ads-privacy-control.sh}" agh "$@" >"$OUT" 2>&1||RC=$? ;;
   esac
   RES="$(head -c 12000 "$OUT" 2>/dev/null)"; rm -f "$OUT"; printf '%s|ADS_CONTROL|op=%s rc=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$OP" "$RC" >>/opt/var/log/vward/console-audit.log; "$JQ" -n --argjson ok "$([ "$RC" -eq 0 ]&&echo true||echo false)" --argjson rc "$RC" --arg result "$RES" '{ok:$ok,rc:$rc,result:$result}'; exit 0
 fi

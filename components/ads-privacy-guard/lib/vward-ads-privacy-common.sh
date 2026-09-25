@@ -347,24 +347,29 @@ ads_agh_curl_auth_args() (
     fi
 )
 
-ads_agh_api_get() (
-    ads_ag_path="$1"; ads_ag_out="$2"
-    ads_ag_base="$(ads_agh_api_base)" || return 2
-    ads_ag_auth="$(ads_agh_curl_auth_args 2>/dev/null || true)"
-    if [ -n "$ads_ag_auth" ]; then
-        "$ADS_CURL" -f -sS --connect-timeout "${AGH_API_CONNECT_TIMEOUT:-3}" --max-time "${AGH_API_MAX_TIME:-15}" -u "$ads_ag_auth" "$ads_ag_base/$ads_ag_path" -o "$ads_ag_out"
+# curl config on stdin: the AdGuard Home login never reaches argv.  "user"
+# with backslash and double quote escaped; nothing when no login is kept.
+ads_agh_curl_conf() (
+    ads_cc_auth="$(ads_agh_curl_auth_args 2>/dev/null || true)"
+    [ -n "$ads_cc_auth" ] || exit 0
+    printf '%s' "$ads_cc_auth" | awk 'BEGIN {b = sprintf("%c", 92); q = sprintf("%c", 34); printf "user = %s", q}
+        {for (i = 1; i <= length($0); i++) {c = substr($0, i, 1); printf "%s", ((c == b || c == q) ? b : "") c}}
+        END {printf "%s\n", q}'
+)
+
+# ads_agh_api METHOD PATH OUT [JSON_FILE]
+ads_agh_api() (
+    ads_aa_method="$1"; ads_aa_path="$2"; ads_aa_out="$3"; ads_aa_json="${4:-}"
+    ads_aa_base="$(ads_agh_api_base)" || return 2
+    if [ -n "$ads_aa_json" ]; then
+        ads_agh_curl_conf | "$ADS_CURL" -K - -f -sS -X "$ads_aa_method" --connect-timeout "${AGH_API_CONNECT_TIMEOUT:-3}" --max-time "${AGH_API_MAX_TIME:-15}" \
+            -H 'Content-Type: application/json' --data-binary "@$ads_aa_json" "$ads_aa_base/$ads_aa_path" -o "$ads_aa_out"
     else
-        "$ADS_CURL" -f -sS --connect-timeout "${AGH_API_CONNECT_TIMEOUT:-3}" --max-time "${AGH_API_MAX_TIME:-15}" "$ads_ag_base/$ads_ag_path" -o "$ads_ag_out"
+        ads_agh_curl_conf | "$ADS_CURL" -K - -f -sS -X "$ads_aa_method" --connect-timeout "${AGH_API_CONNECT_TIMEOUT:-3}" --max-time "${AGH_API_MAX_TIME:-15}" \
+            "$ads_aa_base/$ads_aa_path" -o "$ads_aa_out"
     fi
 )
 
-ads_agh_api_post() (
-    ads_ap_path="$1"; ads_ap_json="$2"; ads_ap_out="$3"
-    ads_ap_base="$(ads_agh_api_base)" || return 2
-    ads_ap_auth="$(ads_agh_curl_auth_args 2>/dev/null || true)"
-    if [ -n "$ads_ap_auth" ]; then
-        "$ADS_CURL" -f -sS --connect-timeout "${AGH_API_CONNECT_TIMEOUT:-3}" --max-time "${AGH_API_MAX_TIME:-15}" -u "$ads_ap_auth" -H 'Content-Type: application/json' --data-binary "@$ads_ap_json" "$ads_ap_base/$ads_ap_path" -o "$ads_ap_out"
-    else
-        "$ADS_CURL" -f -sS --connect-timeout "${AGH_API_CONNECT_TIMEOUT:-3}" --max-time "${AGH_API_MAX_TIME:-15}" -H 'Content-Type: application/json' --data-binary "@$ads_ap_json" "$ads_ap_base/$ads_ap_path" -o "$ads_ap_out"
-    fi
-)
+ads_agh_api_get() { ads_agh_api GET "$1" "$2"; }
+ads_agh_api_post() { ads_agh_api POST "$1" "$3" "$2"; }
+ads_agh_api_put() { ads_agh_api PUT "$1" "$3" "$2"; }
