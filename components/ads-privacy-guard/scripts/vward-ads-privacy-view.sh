@@ -18,7 +18,7 @@ VERDICTS="$ADS_STATE/verdicts.tsv"
 RULES="$ADS_STATE/generated/vward-ads-privacy-guard.rules"
 PUBLISHED="$ADS_STATE/published.rules"
 TMP=""
-cleanup() { [ -z "$TMP" ] || rm -f "$TMP"; }
+cleanup() { [ -z "$TMP" ] || rm -f "$TMP" "$TMP.v"; }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
@@ -58,7 +58,11 @@ case "${1:-}" in
         [ -z "$SEARCH" ] || QUERY="$QUERY&search=$SEARCH"
         ads_agh_api_get "$QUERY" "$TMP" >/dev/null 2>&1 || agh_fail $?
         "$ADS_JQ" -e '.data | type == "array"' "$TMP" >/dev/null 2>&1 || fail adguard_unavailable
-        "$ADS_JQ" -c --argjson v "$(verdict_json)" --arg filter "$FILTER" '
+        # The verdicts go as a file: with a few thousand domains they pass the
+        # 128 KB a single argument may hold, and jq would not start at all.
+        verdict_json > "$TMP.v" || fail temporary_file_unavailable
+        "$ADS_JQ" -c --slurpfile vs "$TMP.v" --arg filter "$FILTER" '
+            $vs[0] as $v |
             [.data[]? | {
                 time: (.time // ""), client: (.client // ""),
                 domain: ((.question.name // "") | ascii_downcase | rtrimstr(".")),
@@ -115,11 +119,17 @@ case "${1:-}" in
         get safebrowsing/status safebrowsing.json
         get parental/status parental.json
         get safesearch/status safesearch.json
-        j() { if [ -s "$D/$1" ]; then cat "$D/$1"; else echo null; fi; }
-        "$ADS_JQ" -cn --argjson st "$(j status.json)" --argjson fl "$(j filtering.json)" \
-            --argjson sall "$(j services-all.json)" --argjson sold "$(j services-old.json)" \
-            --argjson sget "$(j services-get.json)" --argjson slist "$(j services-list.json)" \
-            --argjson sb "$(j safebrowsing.json)" --argjson pc "$(j parental.json)" --argjson ss "$(j safesearch.json)" '
+        # Answers go to jq as files: the service list carries icons and the
+        # filter status the user rules, far beyond the 128 KB one argument may hold.
+        for f in status filtering services-all services-old services-get services-list safebrowsing parental safesearch; do
+            [ -s "$D/$f.json" ] || echo null > "$D/$f.json"
+        done
+        "$ADS_JQ" -cn --slurpfile st "$D/status.json" --slurpfile fl "$D/filtering.json" \
+            --slurpfile sall "$D/services-all.json" --slurpfile sold "$D/services-old.json" \
+            --slurpfile sget "$D/services-get.json" --slurpfile slist "$D/services-list.json" \
+            --slurpfile sb "$D/safebrowsing.json" --slurpfile pc "$D/parental.json" --slurpfile ss "$D/safesearch.json" '
+            $st[0] as $st | $fl[0] as $fl | $sall[0] as $sall | $sold[0] as $sold | $sget[0] as $sget |
+            $slist[0] as $slist | $sb[0] as $sb | $pc[0] as $pc | $ss[0] as $ss |
             def filters($f): [($f // [])[] | {id, name: (.name // ""), url: (.url // ""), enabled: (.enabled == true),
                 rules: (.rules_count // 0), updated: (.last_updated // "")}];
             {ok: true, version: ($st.version // ""), protection: ($st.protection_enabled == true),

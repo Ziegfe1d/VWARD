@@ -84,6 +84,15 @@ esac
         fail(f"querylog entry: {q['entries'][0]}")
     if [e["domain"] for e in view("querylog", "review")["entries"]] != ["maybe.example.net"]:
         fail("review filter must keep only domains under review")
+    # A router's verdicts pass 128 KB: they must reach jq as a file, not as one argument.
+    saved = (state / "verdicts.tsv").read_text()
+    with (state / "verdicts.tsv").open("a") as f:
+        for i in range(5000):
+            f.write(f"filler{i:05d}.example.org|ALLOW|NONE|HIGH|0|0|0|reason|evidence\n")
+    big = view("querylog", "review")
+    if big.get("ok") is not True or [e["domain"] for e in big["entries"]] != ["maybe.example.net"]:
+        fail(f"querylog with thousands of verdicts: {big}")
+    (state / "verdicts.tsv").write_text(saved)
     view("querylog", "blocked", "ads.example")
     urls = (tmp / "urls").read_text()
     if "response_status=blocked&search=ads.example" not in urls or "response_status=all" not in urls:

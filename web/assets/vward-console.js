@@ -571,18 +571,18 @@ const RENDER = {
     const now = !S.ads ? ['', 'загрузка…'] : a.paused ? ['warn', 'На паузе'] : !a.agh_connected ? ['warn', 'Нет подключения к AdGuard Home', 'd-agh'] :
       busy ? ['info', cur.type === 'scan' ? 'Проверяет новые домены' : 'Выполняет задание', 'd-jobs'] : num(j.queued) ? ['info', fmtInt(j.queued) + ' в очереди', 'd-jobs'] :
       ['ok', ({ scheduled: 'Ждёт следующей проверки', dynamic: 'Проверяет новые домены сразу', manual: 'Проверка только по кнопке' })[runMode] || 'Работает'];
-    const where = !pub.ok ? '—' : pub.mode === 'staged' ? 'собираются, в AdGuard Home не отправляются' : isTrue(s.AUTO_PUBLISH) ? 'в AdGuard Home автоматически' : 'в AdGuard Home после подтверждения';
+    const where = !pub.ok ? '—' : pub.mode === 'staged' ? 'не отправляются' : isTrue(s.AUTO_PUBLISH) ? 'автоматически' : 'после подтверждения';
     const recent = a.recent || [];
     return loadError(['ads']) +
       panel('Проверка VWARD', '<dl class="kv">' + ctrlRow('Проверка рекламы и трекеров', sw('data-ads-pause', !a.paused, 'Проверка рекламы и трекеров', !S.ads), a.paused ? 'на паузе - новые домены не проверяются' : '') + '</dl>' +
         kv([['Сейчас', now[1], now[0], now[2]],
           ['Последняя проверка', sc.last_run ? fmtStamp(String(sc.last_run).replace(' ', 'T')) : 'ещё не было', '', 'd-jobs'],
-          sc.last_run ? ['Просмотрено', fmtInt(sc.allowed_records) + ' ' + plural(num(sc.allowed_records) || 0, 'запрос', 'запроса', 'запросов') + ' · ' + fmtInt(sc.unique_allowed) + ' ' + plural(num(sc.unique_allowed) || 0, 'домен', 'домена', 'доменов'), '', 'd-querylog'] : null,
+          sc.last_run ? ['Просмотрено', fmtInt(sc.unique_allowed) + ' ' + plural(num(sc.unique_allowed) || 0, 'домен', 'домена', 'доменов'), '', 'd-querylog', '', 'из ' + fmtInt(sc.allowed_records) + ' ' + plural(num(sc.allowed_records) || 0, 'запроса', 'запросов', 'запросов')] : null,
           sc.last_run ? ['Новых на проверку', fmtInt(sc.candidates)] : null,
           ['Заблокировано', fmtInt(c.blocked), '', 'd-blocked'],
           ['На проверке', fmtInt(c.review), num(c.review) ? 'warn' : '', 'd-review'],
           ['Разрешено', fmtInt(num(c.allow) != null ? num(c.allow) + (num(c.trust) || 0) : null)],
-          ['Правила уходят', where]]) +
+          ['Правила в AdGuard Home', where, '', null, '', pub.ok && pub.mode === 'staged' ? 'VWARD их собирает, но пока не применяет' : '']]) +
         '<div class="panel-actions">' + btn('ads-job', 'search', 'Проверить сейчас', 'primary', ' data-job="scan"') + '</div>' + resultBox('ads-job'),
         { desc: 'VWARD берёт домены, которые AdGuard Home пропустил, сверяет их с источниками и блокирует найденную рекламу и трекеры.' }) +
       panel('Последние решения', !S.ads ? empty('Загрузка…') : recent.length ? '<ul class="rows">' + recent.map(r => {
@@ -1489,7 +1489,7 @@ const SEARCH_INDEX = [
   ['d-smartdns', 'Защита Smart DNS'],
   ['routes', 'Туннель для маршрутов'], ['routes', 'AdaptiveAuto'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
-  ['ads', 'Настройки AdGuard Home'], ['ads', 'Последняя проверка'], ['ads', 'Правила уходят'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
+  ['ads', 'Настройки AdGuard Home'], ['ads', 'Последняя проверка'], ['ads', 'Правила в AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
   ['u-vward', 'Установка обновлений'], ['u-vward', 'Время установки'], ['u-vward', 'Интервал проверки'], ['u-vward', 'Канал'],
   ['settings', 'Адрес VWARD'], ['settings', 'Тема'], ['u-vward', 'Версия'], ['d-diag', 'Задания по расписанию'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
 ];
