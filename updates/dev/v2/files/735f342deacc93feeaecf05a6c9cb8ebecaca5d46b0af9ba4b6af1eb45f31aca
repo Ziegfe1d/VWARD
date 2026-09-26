@@ -1,0 +1,274 @@
+{
+  "schema": 1,
+  "platform": "VWARD Platform",
+  "platform_version": "0.2.0-rc.1.fix.13",
+  "component_version_policy": "platform-release",
+  "components": [
+    {
+      "id": "platform-core",
+      "name": "VWARD Platform Core",
+      "name_ru": "Ядро платформы VWARD",
+      "legacy_ids": [],
+      "update_method": "signed-package",
+      "health_profile": "default",
+      "core": true,
+      "depends_on": [],
+      "requires_running": [],
+      "uses": [],
+      "runtime_targets": [
+        "/opt/share/vward/VERSION",
+        "/opt/share/vward/package-map.tsv"
+      ]
+    },
+    {
+      "id": "route-engine",
+      "name": "VWARD Route Engine",
+      "name_ru": "Движок адаптивной маршрутизации VWARD",
+      "legacy_ids": [],
+      "update_method": "signed-package",
+      "health_profile": "route-engine",
+      "core": false,
+      "depends_on": [
+        "runtime",
+        "route-tools"
+      ],
+      "requires_running": [],
+      "uses": [
+        "route-tools",
+        "console"
+      ],
+      "runtime_targets": [
+        "/opt/bin/vward-route-engine.sh",
+        "/opt/bin/vward-domain-classifier.sh",
+        "/opt/bin/vward-domain-migrate-dry-run.sh",
+        "/opt/lib/vward/vward-domain-classifier-lib.sh",
+        "/opt/share/vward/route-engine/catalogs/4pda.domains",
+        "/opt/share/vward/route-engine/catalogs/adult.domains",
+        "/opt/share/vward/route-engine/catalogs/epic-games.domains",
+        "/opt/share/vward/route-engine/catalogs/steam.domains",
+        "/opt/share/vward/route-engine/catalogs/x-twitter.domains"
+      ]
+    },
+    {
+      "id": "route-reconciler",
+      "name": "VWARD Route Reconciler",
+      "name_ru": "Сверка адаптивных маршрутов VWARD",
+      "legacy_ids": [],
+      "update_method": "signed-package",
+      "health_profile": "route-engine",
+      "core": false,
+      "depends_on": [
+        "runtime",
+        "route-engine",
+        "route-tools"
+      ],
+      "requires_running": [
+        "route-engine"
+      ],
+      "uses": [],
+      "runtime_targets": [
+        "/opt/bin/vward-route-reconciler.sh"
+      ]
+    },
+    {
+      "id": "route-tools",
+      "name": "VWARD Route Tools",
+      "name_ru": "Инструменты маршрутизации VWARD",
+      "legacy_ids": [],
+      "update_method": "signed-package",
+      "health_profile": "route-tools",
+      "core": false,
+      "depends_on": [
+        "runtime"
+      ],
+      "requires_running": [],
+      "uses": [],
+      "runtime_targets": [
+        "/opt/bin/vward-route-test.sh",
+        "/opt/bin/vward-route-hints-update.sh",
+        "/opt/bin/vward-route-resolve4.sh",
+        "/opt/bin/vward-route.sh",
+        "/opt/bin/vward-route-discovery.sh"
+      ]
+    },
+    {
+      "id": "tunnel-guard",
+      "name": "VWARD Tunnel Guard",
+      "name_ru": "Защита VPN-туннеля VWARD",
+      "legacy_ids": [],
+      "update_method": "signed-package",
+      "health_profile": "tunnel-guard",
+      "core": false,
+      "depends_on": [
+        "runtime"
+      ],
+      "requires_running": [],
+      "uses": [],
+      "runtime_targets": [
+        "/opt/bin/vward-tunnel-health.sh",
+        "/opt/bin/vward-tunnel-guard.sh"
+      ]
+    },
+    {
+      "id": "wan-guard",
+      "name": "VWARD WAN Guard",
+      "name_ru": "Защита WAN VWARD",
+      "legacy_ids": [],
+      "update_method": "signed-package",
+      "health_profile": "wan-guard",
+      "core": false,
+      "depends_on": [
+        "runtime"
+      ],
+      "requires_running": [],
+      "uses": [],
+      "runtime_targets": [
+        "/opt/bin/vward-wan-guard.sh",
+        "/opt/bin/vward-wan-recovery.sh"
+      ]
+    },
+    {
+      "id": "wifi-client-guard",
+      "name": "VWARD Wi-Fi Client Guard",
+      "name_ru": "Контроль Wi-Fi клиентов VWARD",
+      "legacy_ids": [],
+      "update_method": "signed-package",
+      "health_profile": "wifi-client-guard",
+      "core": false,
+      "depends_on": [
+        "runtime"
+      ],
+      "requires_running": [],
+      "uses": [],
+      "runtime_targets": [
+        "/opt/bin/vward-wifi-client-monitor.sh",
+        "/opt/bin/vward-wifi-client-analyze.sh",
+        "/opt/bin/vward-wifi-client-control.sh",
+        "/opt/bin/vward-wifi-client-scheduler.sh"
+      ]
+    },
+    {
+      "id": "policy-sync",
+      "name": "VWARD Policy Sync",
+      "name_ru": "Синхронизация сетевых политик VWARD",
+      "legacy_ids": [],
+      "update_method": "signed-package",
+      "health_profile": "policy-sync",
+      "core": false,
+      "depends_on": [
+        "runtime",
+        "route-tools"
+      ],
+      "requires_running": [],
+      "uses": [
+        "route-tools",
+        "route-engine"
+      ],
+      "runtime_targets": [
+        "/opt/bin/vward-policy-chain.sh",
+        "/opt/bin/vward-policy-audit.sh",
+        "/opt/bin/vward-policy-reconcile.sh",
+        "/opt/bin/vward-policy-sync.sh"
+      ]
+    },
+    {
+      "id": "runtime",
+      "name": "VWARD Runtime",
+      "name_ru": "Среда выполнения VWARD",
+      "legacy_ids": [],
+      "update_method": "signed-package",
+      "health_profile": "runtime",
+      "core": true,
+      "depends_on": [],
+      "requires_running": [],
+      "uses": [],
+      "runtime_targets": [
+        "/opt/etc/init.d/S89vward-update-recovery",
+        "/opt/bin/vward-housekeeping.sh",
+        "/opt/bin/vward-cron-supervisor.sh",
+        "/opt/lib/vward/vward-device-profile.sh",
+        "/opt/lib/vward/vward-runtime-admission.sh",
+        "/opt/etc/init.d/S90crond",
+        "/opt/etc/init.d/S91vward-route-engine",
+        "/opt/etc/init.d/S92vward-runtime",
+        "/opt/etc/init.d/S93vward-console"
+      ]
+    },
+    {
+      "id": "console",
+      "name": "VWARD Console",
+      "name_ru": "Панель управления VWARD",
+      "legacy_ids": [],
+      "update_method": "signed-package",
+      "health_profile": "console",
+      "core": true,
+      "depends_on": [
+        "runtime",
+        "platform-core"
+      ],
+      "requires_running": [],
+      "uses": [],
+      "runtime_targets": [
+        "/opt/share/vward/console/lighttpd.conf",
+        "/opt/share/vward/console/www/index.html",
+        "/opt/share/vward/console/www/assets/vward-console.css",
+        "/opt/share/vward/console/www/assets/vward-console.js",
+        "/opt/share/vward/console/www/cgi-bin/api.cgi",
+        "/opt/bin/vward-console-config.sh",
+        "/opt/share/vward/settings-registry.json"
+      ]
+    },
+    {
+      "id": "update-engine",
+      "name": "VWARD Update Engine",
+      "name_ru": "Движок обновлений VWARD",
+      "legacy_ids": [],
+      "update_method": "slot-installer",
+      "health_profile": "updater",
+      "core": true,
+      "depends_on": [
+        "platform-core"
+      ],
+      "requires_running": [],
+      "uses": [],
+      "runtime_targets": [
+        "/opt/share/vward/updater/current"
+      ]
+    },
+    {
+      "id": "ads-privacy-guard",
+      "name": "VWARD Ads & Privacy Guard",
+      "name_ru": "Защита от рекламы и трекинга VWARD",
+      "legacy_ids": [],
+      "update_method": "signed-package",
+      "health_profile": "ads-privacy-guard",
+      "core": false,
+      "depends_on": [
+        "runtime"
+      ],
+      "requires_running": [],
+      "uses": [],
+      "runtime_targets": [
+        "/opt/bin/vward-ads-privacy-guard.sh",
+        "/opt/bin/vward-ads-privacy-sources-update.sh",
+        "/opt/bin/vward-ads-privacy-publish.sh",
+        "/opt/bin/vward-ads-privacy-probe.sh",
+        "/opt/bin/vward-ads-privacy-control.sh",
+        "/opt/bin/vward-ads-privacy-scheduler.sh",
+        "/opt/bin/vward-ads-privacy-settings.sh",
+        "/opt/bin/vward-ads-privacy-source-control.sh",
+        "/opt/bin/vward-ads-privacy-query-read.sh",
+        "/opt/bin/vward-ads-privacy-view.sh",
+        "/opt/bin/vward-ads-privacy-rules-rebuild.sh",
+        "/opt/bin/vward-ads-privacy-job.sh",
+        "/opt/bin/vward-ads-privacy-health.sh",
+        "/opt/share/vward/ads-privacy-guard/vward-ads-privacy-common.sh",
+        "/opt/share/vward/ads-privacy-guard/source-registry.json",
+        "/opt/share/vward/ads-privacy-guard/trust-core.tsv",
+        "/opt/bin/vward-ads-privacy-https.sh",
+        "/opt/share/vward/ads-privacy-guard/https/vward-ads-privacy-https-common.sh",
+        "/opt/share/vward/ads-privacy-guard/https/providers/3proxy.sh"
+      ]
+    }
+  ]
+}

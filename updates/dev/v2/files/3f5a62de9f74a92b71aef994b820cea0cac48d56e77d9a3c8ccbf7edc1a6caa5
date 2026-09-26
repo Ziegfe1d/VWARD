@@ -1,0 +1,151 @@
+#!/opt/bin/sh
+
+LIGHTTPD="/opt/sbin/lighttpd"
+TEMPLATE="/opt/share/vward/console/lighttpd.conf"
+CONF="/opt/var/run/vward/console-lighttpd.conf"
+PIDFILE="/opt/var/run/vward-console-lighttpd.pid"
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+PROC_ROOT=${PROC_ROOT:-/proc}
+
+_vward_pid_valid()
+{
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$1" -gt 1 ] 2>/dev/null
+}
+
+_vward_pid_start()
+{
+    _vward_pid_valid "$1" || return 1
+    STAT_LINE="$(cat "$PROC_ROOT/$1/stat" 2>/dev/null)"
+    STAT_REST=${STAT_LINE##*) }
+    [ "$STAT_REST" != "$STAT_LINE" ] || return 1
+    printf '%s\n' "$STAT_REST" | awk '{print $20}'
+}
+
+_vward_pid_same_start()
+{
+    [ -n "$2" ] || return 1
+    [ "$(_vward_pid_start "$1")" = "$2" ]
+}
+
+_console_identity()
+{
+    PID="$1"
+    _vward_pid_valid "$PID" || return 1
+    [ -r "$PROC_ROOT/$PID/cmdline" ] || return 1
+
+    tr '\000' '\n' < "$PROC_ROOT/$PID/cmdline" |
+    awk -v binary="$LIGHTTPD" -v conf="$CONF" '
+        NR==1 { executable=($0==binary) }
+        previous=="-f" && $0==conf { configuration=1 }
+        { previous=$0 }
+        END { exit (NR==3 && executable && configuration) ? 0 : 1 }
+    '
+}
+
+_console_signal_same()
+{
+    PID="$1"
+    START="$2"
+    SIGNAL="$3"
+
+    _console_identity "$PID" || return 1
+    _vward_pid_same_start "$PID" "$START" || return 1
+
+    case "$SIGNAL" in
+        TERM) kill "$PID" 2>/dev/null ;;
+        KILL) kill -9 "$PID" 2>/dev/null ;;
+        *) return 1 ;;
+    esac
+}
+
+_vward_pidfile_clear_same()
+{
+    FILE="$1"
+    PID="$2"
+    START="$3"
+
+    [ "$(cat "$FILE" 2>/dev/null)" = "$PID" ] || return 0
+    CURRENT_START="$(_vward_pid_start "$PID")"
+    [ -z "$CURRENT_START" ] || [ "$CURRENT_START" = "$START" ] || return 0
+    rm -f "$FILE"
+}
+
+_console_stop()
+{
+    PID="$(cat "$PIDFILE" 2>/dev/null)"
+    PIDFILE_START="$(_vward_pid_start "$PID")"
+
+    if _console_identity "$PID"; then
+        START="$PIDFILE_START"
+        [ -n "$START" ] || return 1
+
+        _console_signal_same "$PID" "$START" TERM || true
+        N=0
+        while _console_identity "$PID" &&
+              _vward_pid_same_start "$PID" "$START" &&
+              [ "$N" -lt 5 ]; do
+            sleep 1
+            N=$((N + 1))
+        done
+
+        _console_signal_same "$PID" "$START" KILL || true
+    fi
+
+    _vward_pidfile_clear_same "$PIDFILE" "$PID" "$PIDFILE_START"
+}
+
+prepare_config()
+{
+    [ -r "$VWARD_PROFILE_LIB" ] && [ -r "$TEMPLATE" ] || return 1
+    . "$VWARD_PROFILE_LIB"
+    vward_profile_load || return 1
+    mkdir -p /opt/var/run/vward || return 1
+    TMP="$CONF.new.$$"
+    sed -e "s/@VWARD_CONSOLE_BIND@/$VWARD_LAN_ADDRESS/g" \
+        -e "s/@VWARD_CONSOLE_PORT@/$VWARD_CONSOLE_PORT/g" \
+        "$TEMPLATE" > "$TMP" || return 1
+    chmod 0600 "$TMP" || return 1
+    "$LIGHTTPD" -tt -f "$TMP" >/dev/null 2>&1 || { rm -f "$TMP"; return 1; }
+    mv "$TMP" "$CONF"
+}
+
+case "$1" in
+
+start)
+
+    if [ -r "$PIDFILE" ]; then
+
+        PID="$(cat "$PIDFILE")"
+
+        if _console_identity "$PID"; then
+            exit 0
+        fi
+
+        rm -f "$PIDFILE"
+    fi
+
+    prepare_config || exit 1
+    "$LIGHTTPD" -f "$CONF"
+    ;;
+
+stop)
+    _console_stop
+    ;;
+
+restart)
+
+    "$0" stop
+    sleep 1
+    "$0" start
+    ;;
+
+*)
+
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+    ;;
+
+esac

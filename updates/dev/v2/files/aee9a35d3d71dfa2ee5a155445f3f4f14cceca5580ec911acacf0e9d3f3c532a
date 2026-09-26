@@ -1,0 +1,204 @@
+#!/bin/sh
+
+PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+SUP_DAEMON="/opt/bin/vward-cron-supervisor.sh"
+SUP_PIDFILE="/opt/var/run/vward/cron-supervisor.pid"
+SUP_LOCK="/tmp/vward-cron-supervisor.lock"
+SUP_LOG="/opt/var/log/vward-cron-supervisor.log"
+
+SUP_WAIT=6
+PROC_ROOT=${PROC_ROOT:-/proc}
+
+_vward_pid_valid()
+{
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$1" -gt 1 ] 2>/dev/null
+}
+
+_vward_pid_start()
+{
+    _vward_pid_valid "$1" || return 1
+    STAT_LINE="$(cat "$PROC_ROOT/$1/stat" 2>/dev/null)"
+    STAT_REST=${STAT_LINE##*) }
+    [ "$STAT_REST" != "$STAT_LINE" ] || return 1
+    printf '%s\n' "$STAT_REST" | awk '{print $20}'
+}
+
+_vward_pid_same_start()
+{
+    [ -n "$2" ] || return 1
+    [ "$(_vward_pid_start "$1")" = "$2" ]
+}
+
+_sup_identity()
+{
+    P="$1"
+    _vward_pid_valid "$P" || return 1
+    [ -r "$PROC_ROOT/$P/cmdline" ] || return 1
+
+    tr '\000' '\n' < "$PROC_ROOT/$P/cmdline" |
+    awk -v daemon="$SUP_DAEMON" '
+        NR==1 { shell=($0=="/opt/bin/sh" || $0=="/bin/sh") }
+        NR==2 { script=($0==daemon) }
+        END { exit (NR==2 && shell && script) ? 0 : 1 }
+    '
+}
+
+_sup_signal_same()
+{
+    P="$1"
+    START="$2"
+    SIGNAL="$3"
+
+    _sup_identity "$P" || return 1
+    _vward_pid_same_start "$P" "$START" || return 1
+
+    case "$SIGNAL" in
+        TERM) kill "$P" 2>/dev/null ;;
+        KILL) kill -9 "$P" 2>/dev/null ;;
+        *) return 1 ;;
+    esac
+}
+
+_vward_pidfile_clear_same()
+{
+    FILE="$1"
+    P="$2"
+    START="$3"
+
+    [ "$(cat "$FILE" 2>/dev/null)" = "$P" ] || return 0
+    CURRENT_START="$(_vward_pid_start "$P")"
+    [ -z "$CURRENT_START" ] || [ "$CURRENT_START" = "$START" ] || return 0
+    rm -f "$FILE"
+}
+
+_sup_alive()
+{
+    P=$(cat "$SUP_PIDFILE" 2>/dev/null)
+
+    _sup_identity "$P"
+}
+
+
+_sup_start()
+{
+    if _sup_alive; then
+        P=$(cat "$SUP_PIDFILE")
+        echo "crond supervisor already running PID=$P"
+        return 0
+    fi
+
+    rm -f "$SUP_PIDFILE"
+    rm -rf "${SUP_LOCK:?}"
+
+    if command -v setsid >/dev/null 2>&1; then
+        setsid "$SUP_DAEMON" >> "$SUP_LOG" 2>&1 &
+    else
+        "$SUP_DAEMON" >> "$SUP_LOG" 2>&1 &
+    fi
+
+    P=$!
+
+    N=0
+
+    while [ "$N" -lt "$SUP_WAIT" ]; do
+
+        sleep 1
+
+        if _sup_alive; then
+            P=$(cat "$SUP_PIDFILE")
+            echo "crond supervisor started PID=$P"
+            return 0
+        fi
+
+        N=$((N + 1))
+    done
+
+    echo "crond supervisor failed to start"
+    return 1
+}
+
+
+_sup_stop()
+{
+    P=$(cat "$SUP_PIDFILE" 2>/dev/null)
+    PIDFILE_START="$(_vward_pid_start "$P")"
+
+    if _sup_identity "$P"; then
+        START="$PIDFILE_START"
+        [ -n "$START" ] || return 1
+
+        _sup_signal_same "$P" "$START" TERM || true
+
+        N=0
+
+        while _sup_identity "$P" &&
+              _vward_pid_same_start "$P" "$START" &&
+              [ "$N" -lt 5 ]; do
+            sleep 1
+            N=$((N + 1))
+        done
+
+        _sup_signal_same "$P" "$START" KILL || true
+    fi
+
+    _vward_pidfile_clear_same "$SUP_PIDFILE" "$P" "$PIDFILE_START"
+
+    echo "crond supervisor stopped"
+    return 0
+}
+
+
+_sup_status()
+{
+    if _sup_alive; then
+        P=$(cat "$SUP_PIDFILE")
+
+        echo "crond supervisor RUNNING PID=$P"
+
+        echo -n "Heartbeat: "
+        cat /tmp/vward-cron-supervisor.last 2>/dev/null ||
+            echo "NONE"
+
+        return 0
+    fi
+
+    echo "crond supervisor STOPPED"
+    return 1
+}
+
+
+case "$1" in
+    start)
+        _sup_start
+        _SUP_RC=$?
+        ;;
+
+    stop)
+        _sup_stop
+        _SUP_RC=$?
+        ;;
+
+    restart)
+        _sup_stop
+        sleep 1
+        _sup_start
+        _SUP_RC=$?
+        ;;
+
+    status)
+        _sup_status
+        _SUP_RC=$?
+        ;;
+
+    *)
+        echo "Usage: S92vward-runtime {start|stop|restart|status}"
+        _SUP_RC=1
+        ;;
+esac
+
+return "$_SUP_RC" 2>/dev/null || exit "$_SUP_RC"

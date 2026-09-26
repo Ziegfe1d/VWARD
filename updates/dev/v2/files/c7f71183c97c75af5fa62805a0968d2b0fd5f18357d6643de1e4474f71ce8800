@@ -1,0 +1,671 @@
+#!/opt/bin/sh
+
+PATH="/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+[ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
+. "$VWARD_ADMISSION_LIB"
+vward_admission_enter wan-guard || exit $?
+
+VERSION="0.3-recovery"
+MODE="recovery"
+
+ETH="$VWARD_WAN_DEVICE"
+[ -n "${VWARD_WAN_INTERFACE:-}" ] || {
+    echo "VWARD logical WAN interface is not configured" >&2
+    exit 1
+}
+BOOT_GRACE=180
+
+RCI_ISP="$VWARD_RCI_BASE/show/interface?name=$VWARD_WAN_INTERFACE"
+RCI_NET="$VWARD_RCI_BASE/show/internet/status"
+
+LOG="/opt/var/log/vward-wan-guard.log"
+STATE="/tmp/vward-wan-guard.state"
+LOCKDIR="/tmp/vward-wan-guard.lock.d"
+
+CURL="/opt/bin/curl"
+JQ="/opt/bin/jq"
+PING="/opt/bin/ping"
+NDMC=${NDMC:-/bin/ndmc}
+# Present = automatic recovery off; the connection is still checked and logged.
+WAN_GUARD_DISABLE_FILE=${VWARD_WAN_GUARD_DISABLE_FILE:-/opt/etc/vward/wan-guard.disabled}
+
+LOCK_OWNED=0
+WAN_BOUNCE_PHASE=IDLE
+WAN_CANCEL_REQUESTED=0
+
+now()
+{
+    date '+%Y-%m-%d %H:%M:%S%z'
+}
+
+lock_is_live()
+{
+    LPID="$(cat "$LOCKDIR/pid" 2>/dev/null)"
+
+    case "$LPID" in
+        ''|*[!0-9]*)
+            return 1
+            ;;
+    esac
+
+    [ -d "/proc/$LPID" ] || return 1
+
+    # The manual recovery tool shares this lock.
+    grep -Eq "vward-wan-(guard|recovery)[.]sh" "/proc/$LPID/cmdline" 2>/dev/null
+}
+
+cleanup()
+{
+    if [ "$LOCK_OWNED" = "1" ]
+    then
+        OWNER="$(cat "$LOCKDIR/pid" 2>/dev/null)"
+
+        if [ "$OWNER" = "$$" ]
+        then
+            rm -rf "${LOCKDIR:?}" 2>/dev/null || true
+        fi
+    fi
+    vward_admission_leave 2>/dev/null || true
+}
+
+acquire_lock()
+{
+    if mkdir "$LOCKDIR" 2>/dev/null
+    then
+        printf '%s\n' "$$" > "$LOCKDIR/pid"
+        LOCK_OWNED=1
+        return 0
+    fi
+
+    if lock_is_live
+    then
+        echo "CLASS=LOCKED"
+        echo "ACTION=${ACTION:-NONE}"
+        return 1
+    fi
+
+    sleep 1
+
+    if lock_is_live
+    then
+        echo "CLASS=LOCKED"
+        echo "ACTION=${ACTION:-NONE}"
+        return 1
+    fi
+
+    rm -rf "${LOCKDIR:?}" 2>/dev/null || {
+        echo "CLASS=LOCK_ERROR"
+        echo "ACTION=${ACTION:-NONE}"
+        return 1
+    }
+
+    if mkdir "$LOCKDIR" 2>/dev/null
+    then
+        printf '%s\n' "$$" > "$LOCKDIR/pid"
+        LOCK_OWNED=1
+        echo "STALE_LOCK_RECOVERED=YES"
+        return 0
+    fi
+
+    echo "CLASS=LOCKED"
+    echo "ACTION=${ACTION:-NONE}"
+    return 1
+}
+
+emit_state()
+{
+    CLASS="$1"
+    DETAIL="$2"
+    wan_recover "$CLASS"
+
+    PREV=""
+
+    if [ -f "$STATE" ]
+    then
+        PREV="$(cat "$STATE" 2>/dev/null)"
+    fi
+
+    echo "VERSION=$VERSION"
+    echo "MODE=$MODE"
+    echo "CLASS=$CLASS"
+    echo "$DETAIL"
+    echo "ACTION=${ACTION:-NONE}"
+
+    if [ "$PREV" != "$CLASS" ]
+    then
+        printf '%s class=%s previous=%s %s\n' \
+            "$(now)" \
+            "$CLASS" \
+            "${PREV:-NONE}" \
+            "$DETAIL" >> "$LOG"
+
+        printf '%s\n' "$CLASS" > "$STATE"
+    fi
+}
+
+# WAN_GUARDIAN_RECOVERY_V03
+
+REC_DIR="/tmp/vward-wan-guard-recovery"
+REC_LOG="/opt/var/log/vward-wan-guard-recovery.log"
+WAN_BOUNCE_MARKER="$REC_DIR/owned-down"
+
+CONFIRM_FAILURES=3
+
+RENEW_COOLDOWN=600
+BOUNCE_COOLDOWN=1800
+
+MAX_RENEW_HOUR=3
+MAX_BOUNCE_HOUR=2
+MAX_BOUNCE_DAY=6
+
+# Values set in VWARD (wan-guard.conf) replace the defaults above when they are in range.
+WAN_GUARD_CONF=${VWARD_WAN_GUARD_CONF:-/opt/etc/vward/wan-guard.conf}
+wg_conf_apply()
+{
+    [ -r "$WAN_GUARD_CONF" ] || return 0
+    while IFS='=' read -r WC_KEY WC_VALUE; do
+        case "$WC_VALUE" in ''|*[!0-9]*) continue ;; esac
+        case "$WC_KEY" in
+            CONFIRM_FAILURES) [ "$WC_VALUE" -ge 1 ] && [ "$WC_VALUE" -le 10 ] && CONFIRM_FAILURES=$WC_VALUE ;;
+            RENEW_COOLDOWN) [ "$WC_VALUE" -ge 60 ] && [ "$WC_VALUE" -le 7200 ] && RENEW_COOLDOWN=$WC_VALUE ;;
+            BOUNCE_COOLDOWN) [ "$WC_VALUE" -ge 300 ] && [ "$WC_VALUE" -le 21600 ] && BOUNCE_COOLDOWN=$WC_VALUE ;;
+            MAX_RENEW_HOUR) [ "$WC_VALUE" -ge 1 ] && [ "$WC_VALUE" -le 10 ] && MAX_RENEW_HOUR=$WC_VALUE ;;
+            MAX_BOUNCE_HOUR) [ "$WC_VALUE" -ge 1 ] && [ "$WC_VALUE" -le 6 ] && MAX_BOUNCE_HOUR=$WC_VALUE ;;
+            MAX_BOUNCE_DAY) [ "$WC_VALUE" -ge 1 ] && [ "$WC_VALUE" -le 24 ] && MAX_BOUNCE_DAY=$WC_VALUE ;;
+        esac
+    done < "$WAN_GUARD_CONF"
+    return 0
+}
+wg_conf_apply
+
+wg_num()
+{
+    WR_VALUE="$(cat "$1" 2>/dev/null)"
+
+    case "$WR_VALUE" in
+        ''|*[!0-9]*)
+            echo "$2"
+            ;;
+        *)
+            echo "$WR_VALUE"
+            ;;
+    esac
+}
+
+wg_reset_fail()
+{
+    rm -f "$REC_DIR/fail_class"
+    echo 0 > "$REC_DIR/fail_count"
+}
+
+wg_reset_all()
+{
+    wg_reset_fail
+    echo 0 > "$REC_DIR/stage"
+}
+
+wg_bucket_count()
+{
+    WR_PREFIX="$1"
+    WR_KEY="$2"
+
+    WR_OLDKEY="$(cat "$REC_DIR/${WR_PREFIX}_key" 2>/dev/null)"
+    WR_COUNT="$(wg_num "$REC_DIR/${WR_PREFIX}_count" 0)"
+
+    if [ "$WR_OLDKEY" != "$WR_KEY" ]; then
+        WR_COUNT=0
+    fi
+
+    echo "$WR_COUNT"
+}
+
+wg_bucket_inc()
+{
+    WR_PREFIX="$1"
+    WR_KEY="$2"
+
+    WR_OLDKEY="$(cat "$REC_DIR/${WR_PREFIX}_key" 2>/dev/null)"
+    WR_COUNT="$(wg_num "$REC_DIR/${WR_PREFIX}_count" 0)"
+
+    if [ "$WR_OLDKEY" != "$WR_KEY" ]; then
+        WR_COUNT=0
+    fi
+
+    WR_COUNT=$((WR_COUNT + 1))
+
+    echo "$WR_KEY" > "$REC_DIR/${WR_PREFIX}_key"
+    echo "$WR_COUNT" > "$REC_DIR/${WR_PREFIX}_count"
+}
+
+wan_run_up()
+{
+    WR_UP_RC=1
+    WR_UP_TRIES=0
+
+    while [ "$WR_UP_TRIES" -lt 3 ]
+    do
+        WR_UP_TRIES=$((WR_UP_TRIES + 1))
+
+        LD_LIBRARY_PATH= "$NDMC" -c "interface $VWARD_WAN_INTERFACE up" \
+            >/tmp/vward-wan-guard.ndmc.up 2>&1
+        WR_UP_RC=$?
+
+        [ "$WR_UP_RC" -eq 0 ] && return 0
+        [ "$WR_UP_TRIES" -ge 3 ] || sleep 2
+    done
+
+    return 1
+}
+
+wan_restore_incomplete_bounce()
+{
+    [ -f "$WAN_BOUNCE_MARKER" ] || return 0
+
+    WR_MARKER_INTERFACE="$(cat "$WAN_BOUNCE_MARKER" 2>/dev/null)"
+    if [ "$WR_MARKER_INTERFACE" != "$VWARD_WAN_INTERFACE" ]; then
+        mv "$WAN_BOUNCE_MARKER" "$WAN_BOUNCE_MARKER.invalid.$$" 2>/dev/null ||
+            rm -f "$WAN_BOUNCE_MARKER"
+        printf '%s action=WAN_BOUNCE_MARKER_REJECTED expected=%s actual=%s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S%z')" \
+            "$VWARD_WAN_INTERFACE" \
+            "$WR_MARKER_INTERFACE" >> "$REC_LOG"
+        return 0
+    fi
+
+    if wan_run_up; then
+        rm -f "$WAN_BOUNCE_MARKER"
+        printf '%s action=WAN_BOUNCE_RECOVERY interface=%s up_rc=0 up_tries=%s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S%z')" \
+            "$VWARD_WAN_INTERFACE" \
+            "$WR_UP_TRIES" >> "$REC_LOG"
+        return 0
+    fi
+
+    printf '%s action=WAN_BOUNCE_RECOVERY_FAILED interface=%s up_rc=%s up_tries=%s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S%z')" \
+        "$VWARD_WAN_INTERFACE" \
+        "$WR_UP_RC" \
+        "$WR_UP_TRIES" >> "$REC_LOG"
+    return 1
+}
+
+wan_signal_exit()
+{
+    if [ "$WAN_BOUNCE_PHASE" = DOWN_COMMAND ]; then
+        WAN_CANCEL_REQUESTED=1
+        return
+    fi
+
+    trap '' 1 2 15
+    if [ "$WAN_BOUNCE_PHASE" = OWNED_DOWN ]; then
+        if wan_run_up >/dev/null 2>&1; then
+            rm -f "$WAN_BOUNCE_MARKER"
+            WAN_BOUNCE_PHASE=IDLE
+        fi
+    else
+        wan_restore_incomplete_bounce >/dev/null 2>&1 || true
+    fi
+    exit 1
+}
+
+wan_recover()
+{
+    ACTION="NONE"
+
+    WR_CLASS="$1"
+
+    mkdir -p "$REC_DIR"
+
+    if [ -n "${WAN_GUARD_DISABLE_FILE:-}" ] && [ -e "$WAN_GUARD_DISABLE_FILE" ]; then
+        wg_reset_all
+        ACTION="DISABLED_BY_USER"
+        DETAIL="$DETAIL recovery_count=0 recovery_stage=0 automation=disabled"
+        return
+    fi
+
+    WR_FAIL_COUNT="$(wg_num "$REC_DIR/fail_count" 0)"
+    WR_STAGE="$(wg_num "$REC_DIR/stage" 0)"
+    WR_PREV_CLASS="$(cat "$REC_DIR/fail_class" 2>/dev/null)"
+
+    case "$WR_CLASS" in
+
+        HEALTHY|BOOT_GRACE|UTILITY_DEGRADED|DNS_ONLY_FAILURE|VPN_ONLY_FAILURE|UNKNOWN)
+            wg_reset_all
+            WR_FAIL_COUNT=0
+            WR_STAGE=0
+
+            DETAIL="$DETAIL recovery_count=0 recovery_stage=0"
+            return
+            ;;
+
+        PHY_DOWN|DHCP_FAILURE|GATEWAY_FAILURE|INTERNET_FAILURE)
+            ;;
+
+        *)
+            wg_reset_all
+            WR_FAIL_COUNT=0
+            WR_STAGE=0
+
+            DETAIL="$DETAIL recovery_count=0 recovery_stage=0"
+            return
+            ;;
+    esac
+
+    if [ "$WR_PREV_CLASS" = "$WR_CLASS" ]; then
+        WR_FAIL_COUNT=$((WR_FAIL_COUNT + 1))
+    else
+        WR_FAIL_COUNT=1
+        echo "$WR_CLASS" > "$REC_DIR/fail_class"
+    fi
+
+    echo "$WR_FAIL_COUNT" > "$REC_DIR/fail_count"
+
+    if [ "$WR_FAIL_COUNT" -lt "$CONFIRM_FAILURES" ]; then
+        ACTION="WAIT_CONFIRM_${WR_FAIL_COUNT}_OF_${CONFIRM_FAILURES}"
+
+        DETAIL="$DETAIL recovery_count=$WR_FAIL_COUNT recovery_stage=$WR_STAGE"
+        return
+    fi
+
+    WR_NOW="$(date '+%s')"
+
+    if [ "$WR_CLASS" = "PHY_DOWN" ] || [ "$WR_STAGE" -ge 1 ]; then
+
+        WR_LAST_BOUNCE="$(wg_num "$REC_DIR/last_bounce" 0)"
+
+        if [ "$WR_LAST_BOUNCE" -gt 0 ]; then
+            WR_AGE=$((WR_NOW - WR_LAST_BOUNCE))
+
+            if [ "$WR_AGE" -ge 0 ] && [ "$WR_AGE" -lt "$BOUNCE_COOLDOWN" ]; then
+                ACTION="BOUNCE_COOLDOWN"
+
+                DETAIL="$DETAIL recovery_count=$WR_FAIL_COUNT recovery_stage=$WR_STAGE"
+                return
+            fi
+        fi
+
+        WR_HOUR="$(date '+%Y%m%d%H')"
+        WR_DAY="$(date '+%Y%m%d')"
+
+        WR_BOUNCE_HOUR="$(wg_bucket_count bounce_hour "$WR_HOUR")"
+        WR_BOUNCE_DAY="$(wg_bucket_count bounce_day "$WR_DAY")"
+
+        if [ "$WR_BOUNCE_HOUR" -ge "$MAX_BOUNCE_HOUR" ] || \
+           [ "$WR_BOUNCE_DAY" -ge "$MAX_BOUNCE_DAY" ]; then
+
+            ACTION="BOUNCE_RATE_LIMIT"
+
+            DETAIL="$DETAIL recovery_count=$WR_FAIL_COUNT recovery_stage=$WR_STAGE"
+            return
+        fi
+
+        ACTION="WAN_BOUNCE"
+
+        umask 077
+        WAN_BOUNCE_PHASE=DOWN_COMMAND
+        LD_LIBRARY_PATH= "$NDMC" -c "interface $VWARD_WAN_INTERFACE down" \
+            >/tmp/vward-wan-guard.ndmc.down 2>&1
+        WR_DOWN_RC=$?
+
+        if [ "$WR_DOWN_RC" -ne 0 ]; then
+            WAN_BOUNCE_PHASE=IDLE
+            ACTION="WAN_BOUNCE_DOWN_FAILED"
+            DETAIL="$DETAIL recovery_count=$WR_FAIL_COUNT recovery_stage=$WR_STAGE down_rc=$WR_DOWN_RC"
+            [ "$WAN_CANCEL_REQUESTED" = 0 ] || exit 1
+            return
+        fi
+
+        WAN_BOUNCE_PHASE=OWNED_DOWN
+        if ! printf '%s\n' "$VWARD_WAN_INTERFACE" > "$WAN_BOUNCE_MARKER"; then
+            ACTION="WAN_BOUNCE_MARKER_FAILED"
+            wan_run_up >/dev/null 2>&1 || true
+            [ "$WR_UP_RC" -ne 0 ] || WAN_BOUNCE_PHASE=IDLE
+            DETAIL="$DETAIL recovery_count=$WR_FAIL_COUNT recovery_stage=$WR_STAGE down_rc=$WR_DOWN_RC up_rc=$WR_UP_RC"
+            return
+        fi
+
+        [ "$WAN_CANCEL_REQUESTED" = 0 ] || wan_signal_exit
+
+        sleep 5
+
+        if wan_run_up; then
+            rm -f "$WAN_BOUNCE_MARKER"
+            WAN_BOUNCE_PHASE=IDLE
+        fi
+
+        echo "$WR_NOW" > "$REC_DIR/last_bounce"
+
+        wg_bucket_inc bounce_hour "$WR_HOUR"
+        wg_bucket_inc bounce_day "$WR_DAY"
+
+        echo 2 > "$REC_DIR/stage"
+
+        WR_STAGE=2
+        WR_FAIL_COUNT=0
+
+        wg_reset_fail
+
+        printf '%s action=WAN_BOUNCE class=%s down_rc=%s up_rc=%s up_tries=%s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S%z')" \
+            "$WR_CLASS" \
+            "$WR_DOWN_RC" \
+            "$WR_UP_RC" \
+            "$WR_UP_TRIES" >> "$REC_LOG"
+
+        if [ "$WR_UP_RC" -ne 0 ]; then
+            ACTION="WAN_BOUNCE_UP_FAILED"
+        fi
+
+        DETAIL="$DETAIL recovery_count=0 recovery_stage=2 down_rc=$WR_DOWN_RC up_rc=$WR_UP_RC"
+        return
+    fi
+
+    WR_LAST_RENEW="$(wg_num "$REC_DIR/last_renew" 0)"
+
+    if [ "$WR_LAST_RENEW" -gt 0 ]; then
+        WR_AGE=$((WR_NOW - WR_LAST_RENEW))
+
+        if [ "$WR_AGE" -ge 0 ] && [ "$WR_AGE" -lt "$RENEW_COOLDOWN" ]; then
+            ACTION="RENEW_COOLDOWN"
+
+            DETAIL="$DETAIL recovery_count=$WR_FAIL_COUNT recovery_stage=$WR_STAGE"
+            return
+        fi
+    fi
+
+    WR_HOUR="$(date '+%Y%m%d%H')"
+    WR_RENEW_HOUR="$(wg_bucket_count renew_hour "$WR_HOUR")"
+
+    if [ "$WR_RENEW_HOUR" -ge "$MAX_RENEW_HOUR" ]; then
+        ACTION="RENEW_RATE_LIMIT"
+
+        DETAIL="$DETAIL recovery_count=$WR_FAIL_COUNT recovery_stage=$WR_STAGE"
+        return
+    fi
+
+    ACTION="DHCP_RENEW"
+
+    LD_LIBRARY_PATH= "$NDMC" -c "interface $VWARD_WAN_INTERFACE ip dhcp client renew" \
+        >/tmp/vward-wan-guard.ndmc.renew 2>&1
+    WR_RENEW_RC=$?
+
+    echo "$WR_NOW" > "$REC_DIR/last_renew"
+
+    wg_bucket_inc renew_hour "$WR_HOUR"
+
+    echo 1 > "$REC_DIR/stage"
+
+    WR_STAGE=1
+    WR_FAIL_COUNT=0
+
+    wg_reset_fail
+
+    printf '%s action=DHCP_RENEW class=%s rc=%s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S%z')" \
+        "$WR_CLASS" \
+        "$WR_RENEW_RC" >> "$REC_LOG"
+
+    DETAIL="$DETAIL recovery_count=0 recovery_stage=1 renew_rc=$WR_RENEW_RC"
+}
+
+if ! acquire_lock
+then
+    exit 0
+fi
+
+trap cleanup 0
+trap wan_signal_exit 1 2 15
+
+if ! wan_restore_incomplete_bounce; then
+    echo "CLASS=WAN_RECOVERY_FAILED"
+    echo "ACTION=WAN_BOUNCE_UP_FAILED"
+    exit 1
+fi
+
+# Disabled: an interrupted bounce above was still finished; nothing else runs.
+vward_component_gate wan-guard
+
+UPTIME="$(awk '{print int($1)}' /proc/uptime 2>/dev/null)"
+
+case "$UPTIME" in
+    ''|*[!0-9]*)
+        emit_state \
+            "UTILITY_DEGRADED" \
+            "reason=uptime_unavailable"
+        exit 0
+        ;;
+esac
+
+if [ "$UPTIME" -lt "$BOOT_GRACE" ]
+then
+    emit_state \
+        "BOOT_GRACE" \
+        "uptime=${UPTIME}s grace=${BOOT_GRACE}s"
+    exit 0
+fi
+
+ISP_JSON="$(
+    "$CURL" -fsS \
+        --connect-timeout 2 \
+        --max-time 3 \
+        "$RCI_ISP" 2>/dev/null
+)"
+
+NET_JSON="$(
+    "$CURL" -fsS \
+        --connect-timeout 2 \
+        --max-time 3 \
+        "$RCI_NET" 2>/dev/null
+)"
+
+# One jq per answer instead of one per field: this runs every minute.
+US=$(printf '\037')
+
+ISP_FIELDS="$(printf '%s' "$ISP_JSON" | "$JQ" -r '
+    select(type == "object") |
+    [.link // "unknown", .port.link // "unknown", .connected // "unknown",
+     .state // "unknown", .address // "", .defaultgw // false,
+     .summary.layer.ipv4 // "unknown"] | map(tostring) | join("\u001f")' 2>/dev/null)"
+
+if [ -z "$ISP_JSON" ] || [ -z "$ISP_FIELDS" ]; then
+    emit_state \
+        "UTILITY_DEGRADED" \
+        "reason=isp_rci_unavailable"
+    exit 0
+fi
+
+NET_FIELDS="$(printf '%s' "$NET_JSON" | "$JQ" -r '
+    select(type == "object") |
+    [.gateway.address // "", ."gateway-accessible" // false,
+     ."dns-accessible" // false, .internet // false, .reliable // false] |
+    map(tostring) | join("\u001f")' 2>/dev/null)"
+
+if [ -z "$NET_JSON" ] || [ -z "$NET_FIELDS" ]; then
+    emit_state \
+        "UTILITY_DEGRADED" \
+        "reason=internet_rci_unavailable"
+    exit 0
+fi
+
+IFS="$US" read -r LINK PORT_LINK CONNECTED STATE_RCI ADDRESS DEFAULTGW LAYER_IPV4 <<FIELDS
+$ISP_FIELDS
+FIELDS
+
+IFS="$US" read -r GW GW_ACCESSIBLE DNS_ACCESSIBLE INTERNET RELIABLE <<FIELDS
+$NET_FIELDS
+FIELDS
+
+read -r CARRIER < "/sys/class/net/$ETH/carrier" 2>/dev/null || CARRIER=unknown
+read -r OPERSTATE < "/sys/class/net/$ETH/operstate" 2>/dev/null || OPERSTATE=unknown
+[ -n "$CARRIER" ] || CARRIER=unknown
+[ -n "$OPERSTATE" ] || OPERSTATE=unknown
+
+PING_GW=1
+PING_CF=1
+PING_YA=1
+
+if [ -n "$GW" ] && [ "$GW" != "null" ]
+then
+    "$PING" -c 1 -W 2 -I "$ETH" "$GW" >/dev/null 2>&1
+    PING_GW=$?
+fi
+
+"$PING" -c 1 -W 2 -I "$ETH" 1.0.0.1 >/dev/null 2>&1
+PING_CF=$?
+
+"$PING" -c 1 -W 2 -I "$ETH" 77.88.8.1 >/dev/null 2>&1
+PING_YA=$?
+
+CLASS="UNKNOWN"
+
+if [ "$CARRIER" != "1" ] || \
+   [ "$LINK" != "up" ] || \
+   [ "$PORT_LINK" != "up" ]
+then
+    CLASS="PHY_DOWN"
+
+elif [ -z "$ADDRESS" ] || \
+     [ "$ADDRESS" = "null" ] || \
+     [ "$DEFAULTGW" != "true" ] || \
+     [ "$LAYER_IPV4" != "running" ]
+then
+    CLASS="DHCP_FAILURE"
+
+elif { [ "$PING_CF" -eq 0 ] || [ "$PING_YA" -eq 0 ]; } && \
+     [ "$DNS_ACCESSIBLE" != "true" ]
+then
+    CLASS="DNS_ONLY_FAILURE"
+
+elif [ "$INTERNET" = "true" ] && \
+     { [ "$PING_CF" -eq 0 ] || \
+       [ "$PING_YA" -eq 0 ] || \
+       [ "$GW_ACCESSIBLE" = "true" ]; }
+then
+    CLASS="HEALTHY"
+
+elif [ "$PING_GW" -ne 0 ] && \
+     [ "$GW_ACCESSIBLE" != "true" ] && \
+     [ "$PING_CF" -ne 0 ] && \
+     [ "$PING_YA" -ne 0 ]
+then
+    CLASS="GATEWAY_FAILURE"
+
+elif [ "$PING_CF" -ne 0 ] && \
+     [ "$PING_YA" -ne 0 ] && \
+     [ "$INTERNET" != "true" ]
+then
+    CLASS="INTERNET_FAILURE"
+fi
+
+DETAIL="carrier=$CARRIER operstate=$OPERSTATE link=$LINK port_link=$PORT_LINK connected=$CONNECTED state=$STATE_RCI address=${ADDRESS:-none} defaultgw=$DEFAULTGW gateway=${GW:-none} gateway_accessible=$GW_ACCESSIBLE dns_accessible=$DNS_ACCESSIBLE internet=$INTERNET reliable=$RELIABLE ping_gw=$PING_GW ping_cf=$PING_CF ping_ya=$PING_YA"
+
+emit_state "$CLASS" "$DETAIL"
+
+exit 0

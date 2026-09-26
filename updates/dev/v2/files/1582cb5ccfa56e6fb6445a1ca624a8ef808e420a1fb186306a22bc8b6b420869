@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-store">
+<title>VWARD</title>
+<link rel="stylesheet" href="/assets/vward-console.css">
+</head>
+<body>
+<div class="app">
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn back-btn" id="backBtn" type="button" aria-label="Назад"></button>
+      <div class="topbar-title"><h1 id="pageTitle">Обзор</h1></div>
+      <button class="icon-btn" id="searchBtn" type="button" aria-label="Поиск" aria-expanded="false"></button>
+      <button class="icon-btn" id="bellBtn" type="button" aria-label="Уведомления" aria-expanded="false"></button>
+      <button class="icon-btn" id="themeBtn" type="button" aria-label="Тема оформления"></button>
+    </header>
+    <main class="content" id="content" aria-live="polite"></main>
+  </div>
+  <nav class="tabbar" id="tabbar" aria-label="Основная навигация"></nav>
+</div>
+<div id="layer"></div>
+<div id="toasts" role="status" aria-live="polite"></div>
+<script src="/assets/vward-console.js" defer></script>
+</body>
+</html>

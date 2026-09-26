@@ -1,0 +1,312 @@
+#!/bin/sh
+
+PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+[ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
+. "$VWARD_ADMISSION_LIB"
+vward_component_gate route-tools
+vward_admission_enter route-hints-update || exit $?
+
+VERSION="3.0"
+
+DIR="/opt/etc/vward/route-engine"
+STATE="/opt/var/lib/vward/route-hints"
+CACHE="$STATE/sources"
+DEST="$DIR/hints.conf"
+CATALOG="$DIR/hints-catalog.tsv"
+INCLUDES="$DIR/hints-includes.tsv"
+LOG="/opt/var/log/vward-route-hints.log"
+MAX_SOURCE_ARCHIVE_BYTES=${MAX_SOURCE_ARCHIVE_BYTES:-33554432}
+MAX_SOURCE_UNPACKED_BYTES=${MAX_SOURCE_UNPACKED_BYTES:-67108864}
+MAX_SOURCE_ARCHIVE_ENTRIES=${MAX_SOURCE_ARCHIVE_ENTRIES:-20000}
+
+WORK="/tmp/vward-route-hints.$$"
+ITDOG_ARCH="$WORK/itdog.tar.gz"
+V2_ARCH="$WORK/v2fly.tar.gz"
+
+mkdir -p "$DIR" "$CACHE" "$WORK"
+
+cleanup()
+{
+    rm -rf "${WORK:?}"
+    vward_admission_leave 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+fetch()
+{
+    URL="$1"
+    OUT="$2"
+    LIMIT_BLOCKS=$(( (MAX_SOURCE_ARCHIVE_BYTES + 511) / 512 ))
+
+    (
+      ulimit -f "$LIMIT_BLOCKS" || exit 1
+      curl -4 -f -L \
+        --connect-timeout 10 \
+        --max-time 90 \
+        --max-filesize "$MAX_SOURCE_ARCHIVE_BYTES" \
+        -sS "$URL" -o "$OUT"
+    ) || return 1
+    SIZE="$(wc -c < "$OUT" 2>/dev/null | tr -d ' ')"
+    case "$SIZE" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$SIZE" -le "$MAX_SOURCE_ARCHIVE_BYTES" ]
+}
+
+archive_validate()
+{
+    ARCH="$1"
+    OUTDIR="$2"
+    LIST="$OUTDIR/.vward-archive-list.$$"
+    VERBOSE="$OUTDIR/.vward-archive-verbose.$$"
+
+    tar -tzf "$ARCH" > "$LIST" 2>/dev/null || { rm -f "$LIST" "$VERBOSE"; return 1; }
+    tar -tvzf "$ARCH" > "$VERBOSE" 2>/dev/null || { rm -f "$LIST" "$VERBOSE"; return 1; }
+    awk -v max_entries="${MAX_SOURCE_ARCHIVE_ENTRIES:-20000}" '
+      $0=="" || $0==".." || $0 ~ /^\// || $0 ~ /^\.\.\// || $0 ~ /\/\.\.\// || $0 ~ /\/\.\.$/ {exit 1}
+      {n++} END {if (n>max_entries) exit 1}
+    ' "$LIST" || { rm -f "$LIST" "$VERBOSE"; return 1; }
+    awk -v max_bytes="${MAX_SOURCE_UNPACKED_BYTES:-67108864}" '
+      substr($0,1,1)!="-" && substr($0,1,1)!="d" {exit 1}
+      $3 !~ /^[0-9]+$/ {exit 1}
+      {sum += $3} END {if (sum>max_bytes) exit 1}
+    ' "$VERBOSE" || { rm -f "$LIST" "$VERBOSE"; return 1; }
+    rm -f "$LIST" "$VERBOSE"
+}
+
+extract_archive()
+{
+    ARCH="$1"
+    OUTDIR="$2"
+
+    mkdir -p "$OUTDIR" || return 1
+    archive_validate "$ARCH" "$OUTDIR" || return 1
+    tar -xzf "$ARCH" -C "$OUTDIR" >/dev/null 2>&1
+}
+
+category_name()
+{
+    basename "$1" |
+    sed 's/\.[^.]*$//' |
+    tr '[:upper:]' '[:lower:]'
+}
+
+normalize_domains()
+{
+    awk '
+    {
+        gsub(/\r/,"")
+        gsub(/^[ \t]+|[ \t]+$/,"")
+
+        if ($0=="" || substr($0,1,1)=="#")
+            next
+
+        split($0,a,/[ \t]+/)
+        d=tolower(a[1])
+
+        if (d ~ /^include:/ ||
+            d ~ /^keyword:/ ||
+            d ~ /^regexp:/)
+            next
+
+        sub(/^domain:/,"",d)
+        sub(/^full:/,"",d)
+        sub(/^\*\./,"",d)
+        sub(/^\./,"",d)
+        sub(/\.$/,"",d)
+
+        if (d ~ /^[a-z0-9_-]+(\.[a-z0-9_-]+)*$/)
+            print d
+    }'
+}
+
+update_itdog()
+{
+    TMP="$WORK/itdog.tsv"
+
+    if ! fetch \
+      "https://codeload.github.com/itdoginfo/allow-domains/tar.gz/refs/heads/main" \
+      "$ITDOG_ARCH"; then
+        echo "SOURCE_ITDOG=UNAVAILABLE"
+        return 1
+    fi
+
+    if ! extract_archive "$ITDOG_ARCH" "$WORK/itdog"; then
+        echo "SOURCE_ITDOG=EXTRACT_FAILED"
+        return 1
+    fi
+
+    : > "$TMP"
+    COUNT_FILES=0
+
+    find "$WORK/itdog" -type f -name '*.lst' 2>/dev/null |
+    while IFS= read -r FILE; do
+        case "$FILE" in
+            */Subnets/*) continue ;;
+        esac
+
+        CAT="$(category_name "$FILE")"
+        [ -n "$CAT" ] || continue
+
+        normalize_domains < "$FILE" |
+        awk -v s="itdog" -v c="$CAT" '
+            NF { print $0 "|" s "|" c }
+        ' >> "$TMP"
+    done
+
+    sort -u "$TMP" > "$TMP.sorted"
+    mv "$TMP.sorted" "$TMP"
+    COUNT="$(wc -l < "$TMP" 2>/dev/null)"
+    [ -n "$COUNT" ] || COUNT=0
+
+    if [ "$COUNT" -lt 100 ]; then
+        echo "SOURCE_ITDOG=BAD_COUNT:$COUNT"
+        return 1
+    fi
+
+    cp "$TMP" "$CACHE/itdog.tsv.new" || return 1
+    mv "$CACHE/itdog.tsv.new" "$CACHE/itdog.tsv" || return 1
+
+    echo "SOURCE_ITDOG=OK:$COUNT"
+    return 0
+}
+
+update_v2fly()
+{
+    TMP="$WORK/v2fly.tsv"
+    INC="$WORK/v2fly-includes.tsv"
+
+    if ! fetch \
+      "https://codeload.github.com/v2fly/domain-list-community/tar.gz/refs/heads/master" \
+      "$V2_ARCH"; then
+        echo "SOURCE_V2FLY=UNAVAILABLE"
+        return 1
+    fi
+
+    if ! extract_archive "$V2_ARCH" "$WORK/v2fly"; then
+        echo "SOURCE_V2FLY=EXTRACT_FAILED"
+        return 1
+    fi
+
+    DATA=""
+    for ROOT in "$WORK"/v2fly/*; do
+        [ -d "$ROOT/data" ] || continue
+        DATA="$ROOT/data"
+        break
+    done
+
+    [ -n "$DATA" ] || {
+        echo "SOURCE_V2FLY=NO_DATA"
+        return 1
+    }
+
+    : > "$TMP"
+    : > "$INC"
+
+    for FILE in "$DATA"/*; do
+        [ -f "$FILE" ] || continue
+
+        CAT="$(category_name "$FILE")"
+        [ -n "$CAT" ] || continue
+
+        normalize_domains < "$FILE" |
+        awk -v s="v2fly" -v c="$CAT" '
+            NF { print $0 "|" s "|" c }
+        ' >> "$TMP"
+
+        awk -v p="$CAT" '
+        {
+            gsub(/\r/,"")
+            gsub(/^[ \t]+|[ \t]+$/,"")
+
+            if (tolower($0) ~ /^include:/) {
+                x=tolower($0)
+                sub(/^include:/,"",x)
+                split(x,a,/[ \t]+/)
+                if (a[1] ~ /^[a-z0-9_.-]+$/)
+                    print "v2fly|" p "|" a[1]
+            }
+        }' "$FILE" >> "$INC"
+    done
+
+    sort -u "$TMP" > "$TMP.sorted"
+    mv "$TMP.sorted" "$TMP"
+    sort -u "$INC" > "$INC.sorted"
+    mv "$INC.sorted" "$INC"
+
+    COUNT="$(wc -l < "$TMP" 2>/dev/null)"
+    CATS="$(awk -F'|' '{print $3}' "$TMP" | sort -u | wc -l)"
+    [ -n "$COUNT" ] || COUNT=0
+    [ -n "$CATS" ] || CATS=0
+
+    if [ "$COUNT" -lt 1000 ] || [ "$CATS" -lt 100 ]; then
+        echo "SOURCE_V2FLY=BAD_COUNT:domains=$COUNT categories=$CATS"
+        return 1
+    fi
+
+    cp "$TMP" "$CACHE/v2fly.tsv.new" || return 1
+    mv "$CACHE/v2fly.tsv.new" "$CACHE/v2fly.tsv" || return 1
+
+    cp "$INC" "$CACHE/v2fly-includes.tsv.new" || return 1
+    mv "$CACHE/v2fly-includes.tsv.new" "$CACHE/v2fly-includes.tsv" || return 1
+
+    echo "SOURCE_V2FLY=OK:domains=$COUNT categories=$CATS"
+    return 0
+}
+
+update_itdog || true
+update_v2fly || true
+
+MERGED="$WORK/merged.tsv"
+INC_MERGED="$WORK/includes.tsv"
+
+: > "$MERGED"
+: > "$INC_MERGED"
+
+for FILE in "$CACHE/itdog.tsv" "$CACHE/v2fly.tsv"; do
+    [ -s "$FILE" ] || continue
+    cat "$FILE" >> "$MERGED"
+done
+
+[ -s "$CACHE/v2fly-includes.tsv" ] &&
+    cat "$CACHE/v2fly-includes.tsv" >> "$INC_MERGED"
+
+sort -u "$MERGED" > "$MERGED.sorted"
+mv "$MERGED.sorted" "$MERGED"
+
+sort -u "$INC_MERGED" > "$INC_MERGED.sorted"
+mv "$INC_MERGED.sorted" "$INC_MERGED"
+
+TOTAL_ROWS="$(wc -l < "$MERGED" 2>/dev/null)"
+TOTAL_DOMAINS="$(cut -d'|' -f1 "$MERGED" | sort -u | wc -l)"
+TOTAL_CATS="$(cut -d'|' -f3 "$MERGED" | sort -u | wc -l)"
+[ -n "$TOTAL_ROWS" ] || TOTAL_ROWS=0
+[ -n "$TOTAL_DOMAINS" ] || TOTAL_DOMAINS=0
+[ -n "$TOTAL_CATS" ] || TOTAL_CATS=0
+
+if [ "$TOTAL_DOMAINS" -lt 1000 ]; then
+    echo "ERROR=NO_HEALTHY_DOMAIN_CATALOG"
+    exit 4
+fi
+
+cut -d'|' -f1 "$MERGED" | sort -u > "$WORK/hints.conf"
+
+cp "$MERGED" "$CATALOG.new" || exit 5
+mv "$CATALOG.new" "$CATALOG" || exit 6
+
+cp "$INC_MERGED" "$INCLUDES.new" || exit 7
+mv "$INCLUDES.new" "$INCLUDES" || exit 8
+
+cp "$WORK/hints.conf" "$DEST.new" || exit 9
+mv "$DEST.new" "$DEST" || exit 10
+
+echo "$(date '+%Y-%m-%d %H:%M:%S')|OK|version=$VERSION|rows=$TOTAL_ROWS|domains=$TOTAL_DOMAINS|categories=$TOTAL_CATS" \
+>> "$LOG"
+
+echo "HINTS_UPDATE_VERSION=$VERSION"
+echo "DOMAIN_ROWS=$TOTAL_ROWS"
+echo "UNIQUE_DOMAINS=$TOTAL_DOMAINS"
+echo "CATEGORIES=$TOTAL_CATS"
+echo "MODE=DYNAMIC_ALL_LISTS"

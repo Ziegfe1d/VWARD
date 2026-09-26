@@ -1,0 +1,360 @@
+#!/bin/sh
+
+PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || exit 1
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
+# Component switch: when route-engine is disabled, start/restart stop it instead.
+VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+COMPONENT_ENABLED=1
+if [ -r "$VWARD_ADMISSION_LIB" ]; then
+    . "$VWARD_ADMISSION_LIB"
+    vward_component_enabled route-engine || COMPONENT_ENABLED=0
+fi
+
+PIDFILE="/opt/var/run/vward/route-engine.pid"
+SCRIPT="/opt/bin/vward-route-engine.sh"
+LOG="/opt/var/log/vward-route-engine.log"
+EVENT_LOG="/opt/var/log/vward-route-engine-events.log"
+UNHEALTHY=""
+
+LIVE_LOCK="/tmp/vward-route-engine.lock"
+CONTROL_LOCK="/tmp/S91vward-route-engine.control.lock"
+CHILD_STATE="/tmp/S91vward-route-engine.tcpdump-missing"
+START_WAIT=12
+STOP_WAIT=6
+CONTROL_WAIT=20
+
+
+control_lock()
+{
+    N=0
+
+    while ! mkdir "$CONTROL_LOCK" 2>/dev/null; do
+
+        OLD=$(cat "$CONTROL_LOCK/pid" 2>/dev/null)
+
+        if [ -n "$OLD" ] &&
+           ! kill -0 "$OLD" 2>/dev/null; then
+
+            rm -rf "${CONTROL_LOCK:?}"
+            continue
+        fi
+
+        sleep 1
+        N=$((N + 1))
+
+        [ "$N" -ge "$CONTROL_WAIT" ] && return 1
+    done
+
+    echo $$ > "$CONTROL_LOCK/pid"
+    return 0
+}
+
+
+control_unlock()
+{
+    rm -rf "${CONTROL_LOCK:?}"
+}
+
+
+# BusyBox "ps w" prints "PID USER VSZ STAT /bin/sh SCRIPT"; some builds add
+# "{comm}" before the command, so the script may be one field later.
+adaptive_live_pids()
+{
+    ps w |
+    awk '
+        $6=="/opt/bin/vward-route-engine.sh" ||
+        ($5 ~ /^[{]/ && $7=="/opt/bin/vward-route-engine.sh") {
+            print $1
+        }
+    '
+}
+
+
+# The engine's own subshells (a probe inside $(...), a pipeline) carry the same
+# command line; only processes whose parent is not the engine are cores.
+adaptive_core_count()
+{
+    # shellcheck disable=SC2046
+    ACC_LIVE=" $(echo $(adaptive_live_pids)) "
+    ACC_N=0
+    for ACC_P in $ACC_LIVE; do
+        # /proc/PID/stat: pid (comm) state ppid ...; read is a builtin.
+        read -r _ _ _ ACC_PP _ < "/proc/$ACC_P/stat" 2>/dev/null || continue
+        case "$ACC_LIVE" in *" $ACC_PP "*) ;; *) ACC_N=$((ACC_N + 1)) ;; esac
+    done
+    echo "$ACC_N"
+}
+
+
+adaptive_tcpdump_pids()
+{
+    ps w |
+    awk -v subnet="$VWARD_LAN_SUBNET" -v address="$VWARD_LAN_ADDRESS" '
+        $5=="tcpdump" &&
+        index($0,"src net " subnet) &&
+        index($0,"dst host " address) {
+            print $1
+        }
+    '
+}
+
+
+kill_all_live()
+{
+    for P in $(adaptive_live_pids); do
+        kill "$P" 2>/dev/null
+    done
+
+    N=0
+
+    while [ "$N" -lt "$STOP_WAIT" ]; do
+
+        CNT=$(adaptive_live_pids | wc -l)
+
+        [ "$CNT" -eq 0 ] && return 0
+
+        sleep 1
+        N=$((N + 1))
+    done
+
+    for P in $(adaptive_live_pids); do
+        kill -9 "$P" 2>/dev/null
+    done
+
+    sleep 1
+}
+
+
+kill_adaptive_tcpdump()
+{
+    for P in $(adaptive_tcpdump_pids); do
+        kill "$P" 2>/dev/null
+    done
+
+    sleep 1
+
+    for P in $(adaptive_tcpdump_pids); do
+        kill -9 "$P" 2>/dev/null
+    done
+}
+
+
+
+clean_service()
+{
+    kill_all_live
+    kill_adaptive_tcpdump
+
+    rm -f "$PIDFILE"
+    rm -f "$CHILD_STATE"
+    rm -rf "${LIVE_LOCK:?}"
+}
+
+
+# Core health belongs to the main Live process.
+# tcpdump is a self-healing child owned by vward-route-engine.sh.
+service_healthy()
+{
+    PID=$(cat "$PIDFILE" 2>/dev/null)
+    LOCKPID=$(cat "$LIVE_LOCK/pid" 2>/dev/null)
+
+    UNHEALTHY=no_pidfile
+    [ -n "$PID" ] || return 1
+    UNHEALTHY=lock_mismatch
+    [ "$PID" = "$LOCKPID" ] || return 1
+
+    UNHEALTHY=core_dead
+    kill -0 "$PID" 2>/dev/null || return 1
+
+    LCNT=$(adaptive_core_count)
+
+    UNHEALTHY=cores=$LCNT
+    [ "$LCNT" -eq 1 ] || return 1
+
+    UNHEALTHY=""
+    return 0
+}
+
+
+start_service()
+{
+    if service_healthy; then
+
+        PID=$(cat "$PIDFILE")
+        TCNT=$(adaptive_tcpdump_pids | wc -l)
+
+        if [ "$TCNT" -eq 1 ]; then
+            rm -f "$CHILD_STATE"
+            echo "Adaptive Live already running PID=$PID tcpdump=1"
+            return 0
+        fi
+
+        # tcpdump can legitimately disappear briefly while Live
+        # performs its own 2-second self-healing cycle.
+        sleep 3
+
+        if ! service_healthy; then
+            echo "Adaptive Live core became unhealthy during child grace"
+        else
+            TCNT=$(adaptive_tcpdump_pids | wc -l)
+
+            if [ "$TCNT" -eq 1 ]; then
+                rm -f "$CHILD_STATE"
+                echo "Adaptive Live child recovered PID=$PID tcpdump=1"
+                return 0
+            fi
+
+            MISS=$(cat "$CHILD_STATE" 2>/dev/null)
+
+            case "$MISS" in
+                ''|*[!0-9]*) MISS=0 ;;
+            esac
+
+            MISS=$((MISS + 1))
+            echo "$MISS" > "$CHILD_STATE"
+
+            if [ "$MISS" -lt 3 ]; then
+                echo "Adaptive Live core healthy PID=$PID tcpdump=$TCNT child_grace=$MISS/3"
+                return 0
+            fi
+
+            echo "Adaptive Live tcpdump unhealthy for 3 consecutive watchdog checks - restarting"
+            UNHEALTHY=tcpdump=$TCNT
+        fi
+    fi
+
+    # Why the engine is (re)started, for the event log.
+    [ -z "$UNHEALTHY" ] || [ "$UNHEALTHY" = no_pidfile ] ||
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|WATCHDOG_RESTART|reason=$UNHEALTHY" >> "$EVENT_LOG" 2>/dev/null
+
+    # Only core failure, duplicate core process, or persistent child
+    # failure reaches this point.
+    clean_service
+
+    mkdir -p "${PIDFILE%/*}" || return 1
+
+    "$SCRIPT" >> "$LOG" 2>&1 &
+    PID=$!
+
+    echo "$PID" > "$PIDFILE"
+
+    N=0
+
+    while [ "$N" -lt "$START_WAIT" ]; do
+
+        kill -0 "$PID" 2>/dev/null || break
+
+        LOCKPID=$(cat "$LIVE_LOCK/pid" 2>/dev/null)
+        LCNT=$(adaptive_core_count)
+        TCNT=$(adaptive_tcpdump_pids | wc -l)
+
+        if [ "$LOCKPID" = "$PID" ] &&
+           [ "$LCNT" -eq 1 ] &&
+           [ "$TCNT" -eq 1 ]; then
+
+            rm -f "$CHILD_STATE"
+
+            echo "Adaptive Live started PID=$PID tcpdump=1 wait=${N}s"
+            return 0
+        fi
+
+        sleep 1
+        N=$((N + 1))
+    done
+
+    echo "Adaptive Live failed startup health check after ${START_WAIT}s"
+
+    clean_service
+    return 1
+}
+stop_service()
+{
+    clean_service
+    echo "Adaptive Live stopped"
+}
+
+
+
+status_service()
+{
+    PID=$(cat "$PIDFILE" 2>/dev/null)
+    LOCKPID=$(cat "$LIVE_LOCK/pid" 2>/dev/null)
+
+    LCNT=$(adaptive_core_count)
+    TCNT=$(adaptive_tcpdump_pids | wc -l)
+
+    if service_healthy; then
+
+        if [ "$TCNT" -eq 1 ]; then
+            echo "Adaptive Live RUNNING PID=$PID"
+            echo "Adaptive process count=1"
+            echo "Adaptive tcpdump count=1"
+            return 0
+        fi
+
+        MISS=$(cat "$CHILD_STATE" 2>/dev/null)
+        [ -n "$MISS" ] || MISS=0
+
+        echo "Adaptive Live RUNNING/DEGRADED PID=$PID"
+        echo "Adaptive process count=1"
+        echo "Adaptive tcpdump count=$TCNT"
+        echo "Adaptive tcpdump missing streak=$MISS/3"
+        return 1
+    fi
+
+    echo "Adaptive Live UNHEALTHY/STOPPED"
+    echo "PIDFILE=${PID:-none}"
+    echo "LOCKPID=${LOCKPID:-none}"
+    echo "Adaptive process count=$LCNT"
+    echo "Adaptive tcpdump count=$TCNT"
+
+    return 1
+}
+case "$1" in
+
+    status)
+        status_service
+        ;;
+
+    start|stop|restart)
+
+        if ! control_lock; then
+            echo "Adaptive control busy"
+            exit 1
+        fi
+
+        trap 'control_unlock' EXIT
+        trap 'exit 1' INT TERM
+
+        if [ "$COMPONENT_ENABLED" = 0 ] && [ "$1" != stop ]; then
+            stop_service >/dev/null 2>&1
+            echo "COMPONENT_DISABLED=route-engine"
+            exit 0
+        fi
+
+        case "$1" in
+            start)
+                start_service
+                ;;
+            stop)
+                stop_service
+                ;;
+            restart)
+                stop_service
+                sleep 1
+                start_service
+                ;;
+        esac
+        ;;
+
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
