@@ -208,4 +208,27 @@ with tempfile.TemporaryDirectory() as tmp:
         assert result.returncode == 0 and result.stdout == want, (reply, result.stdout)
         assert (tmp / "ndmc.ran").exists() == via_ndmc, (reply, "ndmc use")
 
+# Interface state: RCI first, ndmc only when RCI does not answer.
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    env = keenetic(tmp, "!\n")
+    ndmc = tmp / "tools" / "ndmc"
+    write_exec(ndmc, f'#!/bin/sh\necho x >> "{tmp}/ndmc.ran"\nprintf "%s\\n" "  state: up" "   link: pending" "  peer:" "   online: no" "   last-handshake: 42"\n')
+    curl = tmp / "tools" / "curl"
+    wg = ('{"id":"Wireguard0","state":"up","link":"up","connected":"yes","wireguard":{"peer":'
+          '[{"public-key":"k","online":true,"last-handshake":7}]}}')
+    for reply, want, via_ndmc in (
+        (wg, "up\nup\nyes\n7\n", False),
+        ('{"id":"Wireguard0","state":"down","link":"down"}', "down\ndown\n", False),
+        ('{"status":[{"status":"error"}]}', "up\npending\nno\n42\n", True),
+        (None, "up\npending\nno\n42\n", True),
+    ):
+        (tmp / "ndmc.ran").unlink(missing_ok=True)
+        body = f"printf '%s' '{reply}'" if reply is not None else "exit 7"
+        write_exec(curl, f'#!/bin/sh\nfor URL do :; done\ncase "$URL" in */show/interface?name=Wireguard0) {body} ;; *) exit 22 ;; esac\n')
+        result = run("vward_interface_state Wireguard0", env)
+        assert result.returncode == 0 and result.stdout == want, (reply, result.stdout, result.stderr)
+        assert (tmp / "ndmc.ran").exists() == via_ndmc, (reply, "ndmc use")
+    assert run("vward_interface_state 'bad name'", env).returncode != 0, "invalid names must be refused"
+
 print("DEVICE_PROFILE=PASS")

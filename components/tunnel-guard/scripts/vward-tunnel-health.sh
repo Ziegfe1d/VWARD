@@ -200,32 +200,15 @@ RCI_OK=0
 
 if [ "$NEED_RCI" -eq 1 ]; then
 
-    INFO=$(ndmc -c "show interface $VWARD_TUNNEL_INTERFACE" 2>/dev/null)
+    # RCI first: ndmc would add a session line to the router's log every time.
+    INFO=$(vward_interface_state "$VWARD_TUNNEL_INTERFACE" 2>/dev/null)
 
     if [ -n "$INFO" ]; then
 
-        CONFIG_STATE=$(
-            echo "$INFO" |
-            awk '/^[[:space:]]*state:/ {print $2; exit}'
-        )
-
-        LINK_STATE=$(
-            echo "$INFO" |
-            awk '/^[[:space:]]*link:/ {print $2; exit}'
-        )
-
-        ONLINE_STATE=$(
-            echo "$INFO" |
-            awk '/^[[:space:]]*online:/ {print $2; exit}'
-        )
-
-        HS=$(
-            echo "$INFO" |
-            awk '/last-handshake:/ {
-                print $2
-                exit
-            }'
-        )
+        CONFIG_STATE=$(printf '%s\n' "$INFO" | sed -n 1p)
+        LINK_STATE=$(printf '%s\n' "$INFO" | sed -n 2p)
+        ONLINE_STATE=$(printf '%s\n' "$INFO" | sed -n 3p)
+        HS=$(printf '%s\n' "$INFO" | sed -n 4p)
 
         [ -n "$CONFIG_STATE" ] || CONFIG_STATE="unknown"
         [ -n "$LINK_STATE" ] || LINK_STATE="unknown"

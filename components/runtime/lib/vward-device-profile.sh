@@ -68,6 +68,37 @@ vward_running_config()
     ndmc -c 'show running-config' 2>/dev/null
 }
 
+# State of one Keenetic interface as four lines: state, link, online (yes/no),
+# seconds since the last handshake (empty when unknown).  RCI first, ndmc
+# only when RCI does not answer, as in vward_running_config.
+vward_interface_state()
+{
+    vward_valid_ndm_name "$1" || return 1
+    _vis_curl=${VWARD_CURL_BIN:-$(vward_tool curl)}
+    _vis_jq=${VWARD_JQ_BIN:-$(vward_tool jq)}
+    if [ -n "$_vis_curl" ] && [ -n "$_vis_jq" ] &&
+       _vis_out=$("$_vis_curl" --fail --silent --connect-timeout 2 --max-time 5 \
+           "${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/show/interface?name=$1" 2>/dev/null |
+           "$_vis_jq" -er '
+               select(type == "object" and has("state")) |
+               ([.. | objects | select(has("online")) | .online][0]) as $on |
+               ([.. | objects | select(has("last-handshake")) | .["last-handshake"]][0]) as $hs |
+               (.state | tostring), ((.link // "") | tostring),
+               (if $on == true or $on == "yes" then "yes" elif $on == null then "" else "no" end),
+               (($hs // "") | tostring)' 2>/dev/null) &&
+       [ -n "$_vis_out" ]; then
+        printf '%s\n' "$_vis_out"
+        return 0
+    fi
+    command -v ndmc >/dev/null 2>&1 || return 1
+    ndmc -c "show interface $1" 2>/dev/null | awk '
+        /^[[:space:]]*state:/ && s == "" {s = $2}
+        /^[[:space:]]*link:/ && l == "" {l = $2}
+        /^[[:space:]]*online:/ && o == "" {o = $2}
+        /last-handshake:/ && h == "" {h = $2}
+        END {if (s == "") exit 1; print s; print l; print o; print h}'
+}
+
 # Device map records (tab separated), built from Keenetic RCI and running-config:
 #   I <ndm-name> <type> <kernel-name> <security-level>
 #   R <object-group> <route-target>
