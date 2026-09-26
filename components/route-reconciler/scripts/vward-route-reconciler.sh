@@ -60,7 +60,7 @@ trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
 
-ndmc -c "show running-config" 2>/dev/null |
+vward_running_config |
 sed -n '/^object-group fqdn AdaptiveAuto/,/^!/p' |
 awk '$1=="include"{print $2}' |
 sort -u > "$TARGETS"
@@ -270,7 +270,7 @@ remove_adaptive()
     echo $$ > "$CHANGE/pid"
     # FINAL_GUARD_V3_MAINT
 
-    if ! ndmc -c "show running-config" 2>/dev/null |
+    if ! vward_running_config |
          sed -n '/^object-group fqdn AdaptiveAuto/,/^!/p' |
          awk '$1=="include"{print $2}' |
          grep -Fxq "$H"; then

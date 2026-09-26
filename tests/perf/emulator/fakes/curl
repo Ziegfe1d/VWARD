@@ -26,6 +26,7 @@ body() {
         */rci/show/interface/system-name\?name=*) n=${url##*name=}; jq -n --arg n "$n" '$n' | sed 's/Bridge0/br0/;s/Wireguard1/nwg1/;s/ISP/eth2.2/' ;;
         */rci/show/interface\?name=*) cat /emu/rci-isp.json ;;
         */rci/show/internet/status) cat /emu/rci-internet.json ;;
+        */rci/show/running-config) jq -Rn '{message: [inputs]}' < /emu/running-config ;;
         */rci/*) echo '{}' ;;
         */control/status) echo '{"running":true,"protection_enabled":true,"version":"v0.107.0"}' ;;
         */control/stats*|*/control/querylog*) echo '{"data":[],"num_dns_queries":0}' ;;

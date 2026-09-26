@@ -163,7 +163,7 @@ membership_state()
     H=$(printf '%s\n' "$2" | tr 'A-Z' 'a-z')
     VCFG="/tmp/vpn-reconcile-verify.$$"
 
-    if ! ndmc -c "show running-config" > "$VCFG" 2>/dev/null ||
+    if ! vward_running_config > "$VCFG" ||
        [ ! -s "$VCFG" ]; then
         rm -f "$VCFG"
         return 2
@@ -335,7 +335,7 @@ fi
 # RUNNING CONFIG
 # ============================================================
 
-if ! ndmc -c "show running-config" > "$CFG" 2>/dev/null ||
+if ! vward_running_config > "$CFG" ||
    [ ! -s "$CFG" ]; then
 
     echo "ERROR: cannot read running-config"

@@ -148,7 +148,12 @@ with tempfile.TemporaryDirectory() as td:
     )
     fake_ndmc.chmod(0o755)
 
-    functions = group_members + "\n" + membership_state
+    # Running configuration comes through the shared profile helper (RCI, then ndmc).
+    profile_source = (ROOT / "components/runtime/lib/vward-device-profile.sh").read_text(encoding="utf-8")
+    env["VWARD_CURL_BIN"] = "/nonexistent/curl"
+    functions = "\n".join((extract_function(profile_source, "vward_tool"),
+                           extract_function(profile_source, "vward_running_config"),
+                           group_members, membership_state))
 
     result = run_shell(functions + '\nmembership_state domain-list1 clashmini.com\n', [], env)
     if result.returncode != 1:

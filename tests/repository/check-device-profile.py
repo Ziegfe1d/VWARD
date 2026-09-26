@@ -186,4 +186,26 @@ with tempfile.TemporaryDirectory() as tmp:
     result = run("vward_discover_lan_interface", env)
     assert result.returncode == 0 and result.stdout.strip() == "Bridge2", result.stdout + result.stderr
 
+# Running configuration: RCI first (no session lines in the router's log), ndmc
+# only when RCI does not answer or answers something else.
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    env = keenetic(tmp, "from-ndmc\n")
+    ndmc = tmp / "tools" / "ndmc"
+    write_exec(ndmc, f'#!/bin/sh\necho x >> "{tmp}/ndmc.ran"\n[ "$2" = "show running-config" ] && cat "{tmp}/running-config"\n')
+    curl = tmp / "tools" / "curl"
+    for reply, want, via_ndmc in (
+        ('{"message":["system","    hostname R1","!"]}', "system\n    hostname R1\n!\n", False),
+        ('{"message":[]}', "from-ndmc\n", True),
+        ('{"status":[{"status":"error"}]}', "from-ndmc\n", True),
+        ('{"message":["cut', "from-ndmc\n", True),
+        (None, "from-ndmc\n", True),
+    ):
+        (tmp / "ndmc.ran").unlink(missing_ok=True)
+        body = f"printf '%s' '{reply}'" if reply is not None else "exit 7"
+        write_exec(curl, f'#!/bin/sh\nfor URL do :; done\ncase "$URL" in */show/running-config) {body} ;; *) exit 22 ;; esac\n')
+        result = run("vward_running_config", env)
+        assert result.returncode == 0 and result.stdout == want, (reply, result.stdout)
+        assert (tmp / "ndmc.ran").exists() == via_ndmc, (reply, "ndmc use")
+
 print("DEVICE_PROFILE=PASS")

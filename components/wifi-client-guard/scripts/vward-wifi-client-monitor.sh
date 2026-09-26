@@ -65,6 +65,53 @@ discover_ap_bands()
     ' 2>/dev/null | awk -F '\t' 'NF==2 && $1 ~ /^[A-Za-z0-9_.\/:-]+$/'
 }
 
+# Associated stations as mac, ap, txrate, uptime, rssi (tab separated).  RCI
+# first: unlike ndmc it leaves no session lines in the router's log.
+stations_rci()
+{
+    curl_bin=${VWARD_CURL_BIN:-$(tool curl)}
+    jq_bin=${VWARD_JQ_BIN:-$(tool jq)}
+    [ -n "$curl_bin" ] && [ -n "$jq_bin" ] || return 1
+    reply=$("$curl_bin" --fail --silent --connect-timeout 2 --max-time 10 "$RCI_BASE/show/associations" 2>/dev/null) &&
+        [ -n "$reply" ] || return 1
+    # No stations is a valid answer; anything but an object is not.
+    printf '%s\n' "$reply" | "$jq_bin" -r '
+        if type != "object" then error("reply") else . end |
+        (.station // []) | if type == "array" then . elif type == "object" then [.] else error("station") end |
+        .[] | select(type == "object") |
+        [((.mac // "") | tostring | ascii_downcase)] +
+            [.ap, .txrate, .uptime, .rssi | if . == null then "" else tostring end] | @tsv
+    ' 2>/dev/null
+}
+
+stations_ndmc()
+{
+    command -v ndmc >/dev/null 2>&1 || return 1
+    ndmc -c 'show associations' > "$RAW" 2>&1 || return 1
+    awk '
+function trim(s){gsub(/^[[:space:]]+|[[:space:]]+$/,"",s);return s}
+function emit(){if(mac!="") print tolower(mac) "\t" ap "\t" txrate "\t" uptime "\t" rssi;mac="";ap="";txrate="";uptime="";rssi=""}
+{
+    # Keenetic pads block headers ("station: "), so trim both ends.
+    line=trim($0)
+    if(line=="station:"||line=="station"){emit();next}
+    key=line
+    sub(/:.*/,"",key)
+    key=trim(key)
+    val=line
+    sub(/^[^:]*:[[:space:]]*/,"",val)
+    val=trim(val)
+    # Every station starts with its mac: a second mac closes the previous one.
+    if(key=="mac"){emit();mac=val}
+    else if(key=="ap") ap=val
+    else if(key=="txrate") txrate=val
+    else if(key=="uptime") uptime=val
+    else if(key=="rssi") rssi=val
+}
+END{emit()}
+' "$RAW"
+}
+
 band_for_ap()
 {
     ap=$1
@@ -80,6 +127,7 @@ band_for_ap()
 
 case "${1:---once}" in
     --health)
+        stations_rci >/dev/null && exit 0
         command -v ndmc >/dev/null 2>&1 || exit 1
         ndmc -c 'show associations' >/dev/null 2>&1 || exit 1
         exit 0
@@ -120,30 +168,7 @@ else
     log WARN "AP band discovery unavailable; using last known map"
 fi
 
-ndmc -c 'show associations' > "$RAW" 2>&1 || { log ERROR "show associations failed"; exit 1; }
-
-awk '
-function trim(s){gsub(/^[[:space:]]+|[[:space:]]+$/,"",s);return s}
-function emit(){if(mac!="") print tolower(mac) "\t" ap "\t" txrate "\t" uptime "\t" rssi;mac="";ap="";txrate="";uptime="";rssi=""}
-{
-    # Keenetic pads block headers ("station: "), so trim both ends.
-    line=trim($0)
-    if(line=="station:"||line=="station"){emit();next}
-    key=line
-    sub(/:.*/,"",key)
-    key=trim(key)
-    val=line
-    sub(/^[^:]*:[[:space:]]*/,"",val)
-    val=trim(val)
-    # Every station starts with its mac: a second mac closes the previous one.
-    if(key=="mac"){emit();mac=val}
-    else if(key=="ap") ap=val
-    else if(key=="txrate") txrate=val
-    else if(key=="uptime") uptime=val
-    else if(key=="rssi") rssi=val
-}
-END{emit()}
-' "$RAW" > "$PARSED" || exit 1
+stations_rci > "$PARSED" || stations_ndmc > "$PARSED" || { log ERROR "show associations failed"; exit 1; }
 
 : > "$CURRENT_NEW"
 while IFS="$TAB" read -r mac ap txrate uptime rssi

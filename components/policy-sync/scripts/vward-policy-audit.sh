@@ -86,7 +86,7 @@ group_members()
 START_EPOCH=$(date +%s)
 START_TEXT=$(date '+%Y-%m-%d %H:%M:%S')
 
-if ! ndmc -c "show running-config" > "$RUNCFG" 2>/dev/null ||
+if ! vward_running_config > "$RUNCFG" ||
    [ ! -s "$RUNCFG" ]; then
     echo "ERROR: cannot read running-config"
     exit 1

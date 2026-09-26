@@ -109,6 +109,34 @@ EOF
     expected_bands={"aa:aa:aa:aa:aa:01":"5","aa:aa:aa:aa:aa:02":"2.4","aa:aa:aa:aa:aa:03":"unknown"}
     if bands != expected_bands:
         raise SystemExit(f"FAIL: AP band discovery {bands} != {expected_bands}")
+    # RCI answers first (no session lines in the router's log); ndmc is only the fallback.
+    (tools/"curl").write_text(f"""#!/bin/sh
+for URL do :; done
+case "$URL" in
+  */show/interface) cat "{tmp}/interface.json" ;;
+  */show/associations) printf '%s' '{{"station":[{{"mac":"AA:AA:AA:AA:AA:01","ap":"WifiMaster3/AccessPoint1","rssi":-61,"txrate":866,"uptime":120}},{{"mac":"AA:AA:AA:AA:AA:02","ap":"HomeSlow","rssi":-48}},{{"mac":"AA:AA:AA:AA:AA:03","ap":"WifiMaster9/AccessPoint0","rssi":-50}}]}}' ;;
+  *) exit 22 ;;
+esac
+""")
+    (tools/"ndmc").write_text('#!/bin/sh\necho ndmc >> "$0.ran"\nexit 1\n')
+    result=subprocess.run(["sh",str(root/"components/wifi-client-guard/scripts/vward-wifi-client-monitor.sh"),"--once"],env=env,text=True,capture_output=True)
+    if result.returncode != 0:
+        raise SystemExit(f"FAIL: monitor via RCI rc={result.returncode}: {result.stderr}")
+    rows=[line.split("\t") for line in (tmp/"state/current.tsv").read_text().splitlines()]
+    if {r[1]:r[3] for r in rows} != expected_bands or {r[1]:r[4] for r in rows}["aa:aa:aa:aa:aa:01"] != "-61":
+        raise SystemExit(f"FAIL: RCI associations parsed wrong: {rows}")
+    if [r for r in rows if r[1]=="aa:aa:aa:aa:aa:01"][0][5:7] != ["866","120"]:
+        raise SystemExit(f"FAIL: RCI txrate/uptime lost: {rows}")
+    if (tools/"ndmc.ran").exists():
+        raise SystemExit("FAIL: monitor called ndmc although RCI answered")
+    # An empty station list is an answer, not a failure.
+    (tools/"curl").write_text(f"""#!/bin/sh
+for URL do :; done
+case "$URL" in */show/interface) cat "{tmp}/interface.json" ;; */show/associations) echo '{{}}' ;; *) exit 22 ;; esac
+""")
+    result=subprocess.run(["sh",str(root/"components/wifi-client-guard/scripts/vward-wifi-client-monitor.sh"),"--once"],env=env,text=True,capture_output=True)
+    if result.returncode != 0 or (tmp/"state/current.tsv").read_text() != "" or (tools/"ndmc.ran").exists():
+        raise SystemExit(f"FAIL: empty RCI station list: rc={result.returncode}")
 
 if "vward_admission_enter wifi-client-control" not in control:
     raise SystemExit("FAIL: Wi-Fi control must not mutate the router during an update")

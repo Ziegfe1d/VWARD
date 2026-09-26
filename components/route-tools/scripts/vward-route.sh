@@ -42,7 +42,7 @@ log()
 }
 
 # Один снимок конфигурации на весь цикл.
-ndmc -c "show running-config" > "$RUNCFG" 2>/dev/null
+vward_running_config > "$RUNCFG"
 
 is_in_vpn()
 {

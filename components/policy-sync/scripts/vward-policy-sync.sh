@@ -740,7 +740,7 @@ fi
 RUN_RAW="$WORK/running.raw"
 RUN="$WORK/running"
 
-ndmc -c "show running-config" > "$RUN_RAW" 2>/dev/null || {
+vward_running_config > "$RUN_RAW" || {
     echo "ERROR=CANNOT_READ_RUNNING_CONFIG"
     exit 1
 }

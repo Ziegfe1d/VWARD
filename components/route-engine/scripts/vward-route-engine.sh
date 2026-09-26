@@ -142,7 +142,7 @@ refresh_sets()
     CFG="/tmp/vward-route-engine-running.$$"
     ALL="/tmp/vward-route-engine-all.$$"
 
-    if ! ndmc -c "show running-config" > "$CFG" 2>/dev/null ||
+    if ! vward_running_config > "$CFG" ||
        [ ! -s "$CFG" ]; then
         rm -f "$CFG" "$ALL"
         return 1
@@ -557,7 +557,7 @@ restore_adaptive_from_persist()
     CUR="/tmp/vward-route-restore-cur.$$"
     WANT="/tmp/vward-route-restore-want.$$"
 
-    if ! ndmc -c "show running-config" > "$CFG" 2>/dev/null ||
+    if ! vward_running_config > "$CFG" ||
        [ ! -s "$CFG" ]; then
 
         rm -f "$CFG" "$CUR" "$WANT"

@@ -84,7 +84,7 @@ fi
 
 NOW=$(date +%s)
 
-ndmc -c "show running-config" > "$RUNCFG" 2>/dev/null
+vward_running_config > "$RUNCFG"
 
 # Все уже вручную организованные FQDN-группы считаем неприкосновенными.
 : > "$KNOWN"

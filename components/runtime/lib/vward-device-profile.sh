@@ -47,6 +47,27 @@ vward_is_wireguard_sysfs()
     grep -qx 'DEVTYPE=wireguard' "$VWARD_SYSFS_NET/$1/uevent" 2>/dev/null
 }
 
+# Keenetic's running configuration, one line per line.  RCI first: unlike ndmc
+# it leaves no session lines in the router's log (checked on a real router).
+# ndmc when RCI does not answer.  Nothing is printed until the whole reply parsed.
+vward_running_config()
+{
+    _vrc_curl=${VWARD_CURL_BIN:-$(vward_tool curl)}
+    _vrc_jq=${VWARD_JQ_BIN:-$(vward_tool jq)}
+    if [ -n "$_vrc_curl" ] && [ -n "$_vrc_jq" ] &&
+       _vrc_cfg=$("$_vrc_curl" --fail --silent --connect-timeout 2 --max-time 30 \
+           "${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/show/running-config" 2>/dev/null |
+           "$_vrc_jq" -er '.message | if type == "array" and length > 0 then .[] else error("empty") end' 2>/dev/null) &&
+       [ -n "$_vrc_cfg" ]; then
+        printf '%s\n' "$_vrc_cfg"
+        _vrc_cfg=
+        return 0
+    fi
+    _vrc_cfg=
+    command -v ndmc >/dev/null 2>&1 || return 1
+    ndmc -c 'show running-config' 2>/dev/null
+}
+
 # Device map records (tab separated), built from Keenetic RCI and running-config:
 #   I <ndm-name> <type> <kernel-name> <security-level>
 #   R <object-group> <route-target>
@@ -85,8 +106,7 @@ vward_build_device_map()
         printf 'I\t%s\t%s\t%s\t%s\n' "$_vp_ndm" "$_vp_type" "$_vp_sys" "$_vp_level"
     done
 
-    command -v ndmc >/dev/null 2>&1 || return 0
-    ndmc -c 'show running-config' 2>/dev/null | awk '
+    vward_running_config | awk '
         $1=="route" && $2=="object-group" && NF>=4 {print "R\t" $3 "\t" $4}
         $1=="ip" && $2=="route" && NF>=5 {print "S\t" $5}
     '
