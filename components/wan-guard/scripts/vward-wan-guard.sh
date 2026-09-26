@@ -157,6 +157,9 @@ REC_LOG="/opt/var/log/vward-wan-guard-recovery.log"
 WAN_BOUNCE_MARKER="$REC_DIR/owned-down"
 
 CONFIRM_FAILURES=3
+# Minutes between checks (cron starts this every minute); a failure being
+# confirmed or recovered is followed every minute whatever this says.
+CHECK_INTERVAL_MIN=1
 
 RENEW_COOLDOWN=600
 BOUNCE_COOLDOWN=1800
@@ -174,6 +177,7 @@ wg_conf_apply()
         case "$WC_VALUE" in ''|*[!0-9]*) continue ;; esac
         case "$WC_KEY" in
             CONFIRM_FAILURES) [ "$WC_VALUE" -ge 1 ] && [ "$WC_VALUE" -le 10 ] && CONFIRM_FAILURES=$WC_VALUE ;;
+            CHECK_INTERVAL_MIN) [ "$WC_VALUE" -ge 1 ] && [ "$WC_VALUE" -le 60 ] && CHECK_INTERVAL_MIN=$WC_VALUE ;;
             RENEW_COOLDOWN) [ "$WC_VALUE" -ge 60 ] && [ "$WC_VALUE" -le 7200 ] && RENEW_COOLDOWN=$WC_VALUE ;;
             BOUNCE_COOLDOWN) [ "$WC_VALUE" -ge 300 ] && [ "$WC_VALUE" -le 21600 ] && BOUNCE_COOLDOWN=$WC_VALUE ;;
             MAX_RENEW_HOUR) [ "$WC_VALUE" -ge 1 ] && [ "$WC_VALUE" -le 10 ] && MAX_RENEW_HOUR=$WC_VALUE ;;
@@ -550,6 +554,15 @@ then
         "uptime=${UPTIME}s grace=${BOOT_GRACE}s"
     exit 0
 fi
+
+# Not due yet: the uptime clock needs no extra process on the other minutes.
+if [ "$CHECK_INTERVAL_MIN" -gt 1 ] && [ "$(wg_num "$REC_DIR/fail_count" 0)" -eq 0 ]; then
+    WG_LAST="$(wg_num "$REC_DIR/last_check" 0)"
+    if [ "$WG_LAST" -le "$UPTIME" ] && [ $((UPTIME - WG_LAST)) -lt $((CHECK_INTERVAL_MIN * 60 - 30)) ]; then
+        exit 0
+    fi
+fi
+mkdir -p "$REC_DIR" 2>/dev/null && echo "$UPTIME" > "$REC_DIR/last_check" 2>/dev/null
 
 ISP_JSON="$(
     "$CURL" -fsS \

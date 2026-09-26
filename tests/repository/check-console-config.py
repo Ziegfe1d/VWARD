@@ -220,7 +220,12 @@ with tempfile.TemporaryDirectory() as tmp:
     run("wan-param", "RENEW_COOLDOWN", "30", expect="error=invalid_value")
     run("wan-param", "MAX_BOUNCE_DAY", "12", expect="result=changed")
     run("wan-param", "BOOT_GRACE", "10", expect="error=invalid_setting")
-    if wanp.read_text() != "CONFIRM_FAILURES=5\nMAX_BOUNCE_DAY=12\n":
+    run("wan-param", "CHECK_INTERVAL_MIN", "5", expect="result=changed")
+    run("wan-param", "CHECK_INTERVAL_MIN", "3", expect="error=invalid_value")
+    guard = (ROOT / "components/wan-guard/scripts/vward-wan-guard.sh").read_text()
+    if 'CHECK_INTERVAL_MIN) [ "$WC_VALUE" -ge 1 ]' not in guard or '"$REC_DIR/last_check"' not in guard:
+        fail("wan-guard must honour the check interval")
+    if wanp.read_text() != "CONFIRM_FAILURES=5\nMAX_BOUNCE_DAY=12\nCHECK_INTERVAL_MIN=5\n":
         fail(f"wan-guard.conf written incorrectly: {wanp.read_text()!r}")
 
     # Feed: only the branch of a standard URL changes; custom URLs are left alone.
@@ -292,7 +297,7 @@ with tempfile.TemporaryDirectory() as tmp:
         fail(f"config-data wifi: {data['wifi']}")
     if data["update"] != {"safe_window_start": "04:00", "safe_window_end": "05:00", "check_interval_seconds": 3600, "apply_window": "any", "feed": "dev"}:
         fail(f"config-data update: {data['update']}")
-    if data["wan_guard"]["params"] != {"CONFIRM_FAILURES": 5, "RENEW_COOLDOWN": 600, "BOUNCE_COOLDOWN": 1800, "MAX_RENEW_HOUR": 3, "MAX_BOUNCE_HOUR": 2, "MAX_BOUNCE_DAY": 12}:
+    if data["wan_guard"]["params"] != {"CHECK_INTERVAL_MIN": 5, "CONFIRM_FAILURES": 5, "RENEW_COOLDOWN": 600, "BOUNCE_COOLDOWN": 1800, "MAX_RENEW_HOUR": 3, "MAX_BOUNCE_HOUR": 2, "MAX_BOUNCE_DAY": 12}:
         fail(f"config-data wan-guard params: {data['wan_guard']}")
 
     post = lambda body: api("action=config", body, "POST")

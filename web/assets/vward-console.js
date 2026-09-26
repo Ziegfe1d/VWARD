@@ -476,7 +476,8 @@ const RENDER = {
       ]), { right: st().wan && !w.internet ? headPill('crit', 'Нет связи') : '' }) +
       // One place: the automatic recovery switch and one button for «right now».
       panel('Восстановление интернета', '<dl class="kv">' +
-        ctrlRow('Восстанавливать автоматически', sw('data-cfg-wg', guardOn, 'Восстанавливать интернет автоматически', !cfgOk()), guardOn ? 'проверка раз в минуту' : 'выключено: при сбое нажмите кнопку ниже') + '</dl>' +
+        ctrlRow('Восстанавливать автоматически', sw('data-cfg-wg', guardOn, 'Восстанавливать интернет автоматически', !cfgOk()), guardOn ? '' : 'выключено: при сбое нажмите кнопку ниже') +
+        (guardOn ? ctrlRow('Проверять', sel('data-cfg-wanp="CHECK_INTERVAL_MIN"' + (cfgOk() ? '' : ' disabled'), 'Как часто проверять интернет', [[1, 'раз в минуту'], [2, 'раз в 2 минуты'], [5, 'раз в 5 минут'], [10, 'раз в 10 минут'], [15, 'раз в 15 минут'], [30, 'раз в 30 минут']], ((cfg().wan_guard || {}).params || {}).CHECK_INTERVAL_MIN || 1), 'при сбое - каждую минуту, пока связь не вернётся') : '') + '</dl>' +
         confirmBox('wg-off', 'Выключить автоматическое восстановление? При сбое интернет придётся восстанавливать кнопкой.', 'Выключить', true) +
         (guardOn && stage ? '<p class="field-warn">Сейчас: ' + esc(STAGE[stage] || 'идёт восстановление') + '</p>' : '') +
         (confirmBox('wan-bounce', 'Переподключить интернет? Он пропадёт примерно на 10 секунд, домашняя сеть продолжит работать.', 'Переподключить') ||
@@ -1066,6 +1067,7 @@ function cronText(c) {
   return c;
 }
 function bandText(b) { return b === '5' ? '5 ГГц' : b === '2.4' ? '2.4 ГГц' : 'диапазон неизвестен'; }
+const WIFI_REASONS = { stable: 'переходы редкие, сигнал в норме', frequent_band_switches: 'часто переходит между 2.4 и 5 ГГц', frequent_switches_and_weak_5g: 'часто переходит и слабый сигнал 5 ГГц' };
 function recText(c) { return c.recommendation === 'bind_2g' ? 'Закрепить за 2.4' : c.recommendation === 'review' ? 'Проверить' : c.health === 'WARNING' ? 'Внимание' : 'Норма'; }
 
 function tunnelPage(name) {
@@ -1229,10 +1231,22 @@ function tunnelProbePanel(name) {
 }
 const wifiHost = mac => { const c = ((S.wifi && S.wifi.clients) || []).find(x => x.mac === mac); return (c && c.host) || null; };
 const wifiName = mac => { const h = wifiHost(mac); return (h && (h.name || h.hostname)) || mac; };
+const segPrev = {};
+// Auto / 2.4 / 5 GHz as one slider: the thumb sits on the band Keenetic has
+// pinned (or on the one being confirmed) and glides to a new choice.
+function segSlider(mac, ops, on) {
+  const b = ((S.wifi && S.wifi.binds) || {})[String(mac).toLowerCase()];
+  const cur = b === '2g' ? 'bind-2g' : b === '5g' ? 'bind-5g' : 'auto';
+  const shown = confirm && confirm.id === 'wifi-bind' ? confirm.op : cur;
+  const to = Math.max(0, ops.findIndex(o => o[0] === shown)), from = segPrev[mac] != null ? segPrev[mac] : to;
+  segPrev[mac] = to;
+  return '<div class="seg-slider' + (on ? '' : ' off') + '" role="radiogroup" aria-label="Диапазон" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
+    ops.map(o => '<button type="button" role="radio" data-wifi-bind="' + o[0] + '" aria-checked="' + (o[0] === shown) + '"' + (on ? '' : ' disabled') + '>' + o[1] + '</button>').join('') + '</div>';
+}
 function wifiClientPage(mac) {
   const c = ((S.wifi && S.wifi.clients) || []).find(x => x.mac === mac) || { mac: mac };
   const ctl = S.config && S.config.wifi ? S.config.wifi.CONTROL_ENABLED : S.wifi && S.wifi.control_enabled;
-  const ops = [['auto', 'Авто', 'WIFI_BAND_AUTO'], ['bind-2g', 'Только 2.4 ГГц', 'WIFI_BIND_2G'], ['bind-5g', 'Только 5 ГГц', 'WIFI_BIND_5G']];
+  const ops = [['auto', 'Авто', 'WIFI_BAND_AUTO', 'Авто'], ['bind-2g', '2.4 ГГц', 'WIFI_BIND_2G', 'Только 2.4 ГГц'], ['bind-5g', '5 ГГц', 'WIFI_BIND_5G', 'Только 5 ГГц']];
   const h = c.host || {}, deny = h.access === 'deny';
   const device = panel('Устройство', '<form class="inline-form" data-form="wifi-name" data-mac="' + esc(mac) + '"><input class="input" name="name" maxlength="64" value="' + esc(h.name || '') + '" placeholder="' + esc(h.hostname || 'Имя устройства') + '" aria-label="Имя устройства"><button class="btn" type="submit"' + (cfgOk() ? '' : ' disabled') + '>' + (h.registered ? 'Переименовать' : 'Сохранить имя') + '</button></form>' +
       '<dl class="kv">' + ctrlRow('Доступ в интернет', sw('data-wifi-access="' + esc(mac) + '"', !deny, 'Доступ в интернет для ' + wifiName(mac), !cfgOk()), deny ? 'запрещён: устройство видит только домашнюю сеть' : 'разрешён') + '</dl>' +
@@ -1242,10 +1256,10 @@ function wifiClientPage(mac) {
         h.txrate != null ? ['Скорость', h.txrate + ' Мбит/с'] : null, h.uptime != null ? ['В сети', fmtUptime(h.uptime)] : null,
         h.rx != null || h.tx != null ? ['Трафик', '↓ ' + fmtBytes(h.rx) + ' · ↑ ' + fmtBytes(h.tx)] : null]) + cfgNote(),
     { desc: 'Имя сохраняется в Keenetic и регистрирует устройство. Запрет интернета действует на всё устройство.' });
-  return device + panel('Диапазоны Wi-Fi', kv([['Сейчас', bandText(c.band)], ['Состояние', recText(c), c.health === 'WARNING' ? 'warn' : 'ok'], ['Переходов за окно', fmtInt(c.switches)], ['Слабый 5 ГГц', fmtInt(c.weak_5g) + ' раз'], ['Мин. сигнал 5 ГГц', c.min_5g_rssi && c.min_5g_rssi !== '-' ? c.min_5g_rssi + ' дБм' : '—'], ['Причина', c.reason || '—']])) +
-    panel('Диапазон для устройства', '<div class="segmented" role="group" aria-label="Диапазон">' + ops.map(o => '<button type="button" data-wifi-bind="' + o[0] + '" aria-pressed="false"' + (ctl ? '' : ' disabled') + '>' + o[1] + '</button>').join('') + '</div>' +
+  return device + panel('Диапазоны Wi-Fi', kv([['Сейчас', bandText(c.band)], ['Состояние', recText(c) === 'Норма' ? 'без замечаний' : recText(c), c.health === 'WARNING' ? 'warn' : '', null, '', WIFI_REASONS[c.reason] || ''], ['Переходов за окно', fmtInt(c.switches)], ['Слабый 5 ГГц', fmtInt(c.weak_5g) + ' раз'], ['Мин. сигнал 5 ГГц', c.min_5g_rssi && c.min_5g_rssi !== '-' ? c.min_5g_rssi + ' дБм' : '—']])) +
+    panel('Диапазон для устройства', segSlider(mac, ops, ctl) +
       (ctl ? '' : '<p class="panel-desc">Закрепление выключено: включите «Ручное управление» в разделе «Wi-Fi клиенты».</p>') +
-      (confirm && confirm.id === 'wifi-bind' ? '<div class="confirm"><span>Применить «' + esc(ops.find(o => o[0] === confirm.op)[1]) + '» для ' + esc(mac) + '? Перед изменением сохранится резервная копия настроек, при ошибке изменение откатится.</span><button class="btn small primary" type="button" data-act="confirm-yes">Применить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '') + resultBox('wifi'),
+      (confirm && confirm.id === 'wifi-bind' ? '<div class="confirm"><span>Применить «' + esc(ops.find(o => o[0] === confirm.op)[3]) + '» для ' + esc(mac) + '? Перед изменением сохранится резервная копия настроек, при ошибке изменение откатится.</span><button class="btn small primary" type="button" data-act="confirm-yes">Применить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '') + resultBox('wifi'),
     { desc: 'Закрепление через штатную настройку Keenetic для зарегистрированных устройств.' });
 }
 function compPage(c) {
@@ -1303,8 +1317,10 @@ function patchContent(html, whole) {
   ddEnhance(t.content);
   t.content.querySelectorAll('.meter i[data-width]').forEach(i => { i.style.width = Math.max(0, Math.min(100, Number(i.dataset.width))) + '%'; });
   const fresh = [...t.content.children], old = [...box.children];
-  if (whole || fresh.length !== old.length) { box.replaceChildren(t.content); return; }
-  fresh.forEach((n, i) => { if (!old[i].isEqualNode(n)) old[i].replaceWith(n); });
+  if (whole || fresh.length !== old.length) box.replaceChildren(t.content);
+  else fresh.forEach((n, i) => { if (!old[i].isEqualNode(n)) old[i].replaceWith(n); });
+  // A three-way slider is drawn where it was and then moved, so the thumb glides.
+  requestAnimationFrame(() => box.querySelectorAll('.seg-slider[data-to]').forEach(el => { if (el.dataset.i !== el.dataset.to) el.dataset.i = el.dataset.to; }));
 }
 /* ---------- Выпадающие списки ----------
    A native <select> opens a full-screen picker on phones.  Each one gets a
@@ -1468,7 +1484,7 @@ function openNotes() {
 }
 const SEARCH_INDEX = [
   ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Файлы'], ['system', 'Свободно'],
-  ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Восстанавливать автоматически'],
+  ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Восстанавливать автоматически'], ['wan', 'Проверять'],
   ['settings', 'Только зарегистрированные устройства'], ['vpn', 'Автоматическая защита'], ['vpn', 'Трафик списков'], ['vpn', 'Проверка туннеля'],
   ['d-smartdns', 'Защита Smart DNS'],
   ['routes', 'Туннель для маршрутов'], ['routes', 'AdaptiveAuto'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
@@ -1501,10 +1517,9 @@ async function runAction(resultId, action, fields, okMsg) {
   actionResult = null; render();
   try {
     const x = await apiPost(action, fields);
-    actionResult = x.ok ? null : { id: resultId, text: 'Не выполнено: ' + errText(x) };
     toast(x.ok ? okMsg : 'Не выполнено: ' + errText(x));
     return x;
-  } catch (e) { actionResult = { id: resultId, text: 'Ошибка: ' + e.message }; toast('Ошибка: ' + e.message); return null; }
+  } catch (e) { toast('Ошибка: ' + e.message); return null; }
   finally { render(); }
 }
 const CONFIRMED = {
@@ -1714,7 +1729,7 @@ document.addEventListener('click', e => {
   if (t.dataset.listDom) { const v = t.dataset.dom, how = t.dataset.listDom; t.disabled = true; cfgSet({ op: 'list-domain', action: how, target: current.slice(2), value: v }, how === 'remove' ? v + ' убран из списка' : 'Исключение ' + v + ' убрано', ['listd', 'lists']); return; }
   if (t.dataset.cfgOp === 'tsubnet') { t.disabled = true; tunnelSubnet(current.slice(2), 'remove', t.dataset.cfgTarget); return; }
   if (t.dataset.cfgOp) { const d = t.dataset.cfgTarget, msg = { 'route-domain': d + ' убран из VPN', 'force-vpn': d + ' убран из списка', adaptive: t.dataset.cfgAction === 'pin' ? d + ' закреплён в моих доменах' : d + ' идёт напрямую' }[t.dataset.cfgOp]; t.disabled = true; cfgSet({ op: t.dataset.cfgOp, action: t.dataset.cfgAction, target: d }, msg, ['route']); return; }
-  if (t.dataset.wifiBind) { confirm = { id: 'wifi-bind', op: t.dataset.wifiBind }; render(); return; }
+  if (t.dataset.wifiBind) { if (t.getAttribute('aria-checked') === 'true') return; confirm = { id: 'wifi-bind', op: t.dataset.wifiBind }; render(); return; }
   if (t.dataset.tab) {
     if (t.closest('.preview')) return;
     if (t.dataset.tab === 'more') { const cur = navId(current); openSheet('Ещё', '<div class="sheet-body">' + PAGES.filter(p => !tabIds.includes(p.id)).map(p => '<button class="menu-item" type="button" data-go="' + p.id + '"' + (p.id === cur ? ' aria-current="page"' : '') + '>' + ico(p.icon) + '<span>' + esc(p.title) + '</span>' + ico('chevron', 'chev') + '</button>').join('') + '</div>'); }
@@ -1850,6 +1865,7 @@ document.addEventListener('change', e => {
     if (v !== 'stable') { t.value = ((S.ext || {}).firmware || {}).channel || 'stable'; confirm = { id: 'fw-channel', value: v }; render(); return; }
     t.disabled = true; cfgSet({ op: 'firmware', target: 'channel', value: v }, 'Канал прошивки: ' + fwChannel(v), ['ext']); return;
   }
+  if (t.dataset.cfgWanp) { cfgSet({ op: 'wan-param', target: t.dataset.cfgWanp, value: t.value }, 'Сохранено', ['config']); return; }
   if (t.dataset.cfgUpd) { cfgSet({ op: 'update', target: t.dataset.cfgUpd, value: t.value }, 'Сохранено', ['status']); return; }
   if (t.hasAttribute('data-ads-pause')) { adsControl({ op: t.checked ? 'resume' : 'pause' }, t.checked ? 'Блокировка включена' : 'Блокировка на паузе'); return; }
   if (t.dataset.adsSet) { adsSetting(t.dataset.adsSet, t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value); return; }

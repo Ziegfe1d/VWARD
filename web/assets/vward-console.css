@@ -341,3 +341,14 @@ small.st .icon{width:14px;height:14px}
 .icon-btn.spinning .icon{animation:upd-spin 1.2s linear infinite}
 @keyframes upd-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.icon-btn.spinning .icon{animation:none}}
+
+/* Three-way slider (Wi-Fi band): the thumb glides under the chosen option. */
+.seg-slider{position:relative;display:grid;grid-template-columns:repeat(3,1fr);margin:0 16px 12px;padding:4px;background:var(--surface-2);border-radius:999px}
+.seg-slider button{position:relative;z-index:1;min-width:0;padding:9px 4px;border:0;border-radius:999px;background:transparent;color:var(--muted);font-size:var(--fs-sm);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .25s}
+.seg-slider button[aria-checked="true"]{color:var(--accent-text)}
+.seg-slider button:disabled{cursor:default}
+.seg-thumb{position:absolute;top:4px;bottom:4px;left:4px;width:calc((100% - 8px) / 3);border-radius:999px;background:var(--accent);box-shadow:var(--shadow);transition:transform .28s cubic-bezier(.3,.7,.2,1)}
+.seg-slider[data-i="1"] .seg-thumb{transform:translateX(100%)}
+.seg-slider[data-i="2"] .seg-thumb{transform:translateX(200%)}
+.seg-slider.off .seg-thumb{background:var(--faint)}
+@media (prefers-reduced-motion:reduce){.seg-thumb,.seg-slider button{transition:none}}

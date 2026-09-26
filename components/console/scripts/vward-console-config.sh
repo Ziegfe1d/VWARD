@@ -386,6 +386,7 @@ op_wifi() {
 op_wan_param() {
     case "$1" in
         CONFIRM_FAILURES|MAX_RENEW_HOUR) valid_int_range "$2" 1 10 || die invalid_value 64 ;;
+        CHECK_INTERVAL_MIN) case "$2" in 1|2|5|10|15|30) ;; *) die invalid_value 64 ;; esac ;;
         RENEW_COOLDOWN) valid_int_range "$2" 60 7200 || die invalid_value 64 ;;
         BOUNCE_COOLDOWN) valid_int_range "$2" 300 21600 || die invalid_value 64 ;;
         MAX_BOUNCE_HOUR) valid_int_range "$2" 1 6 || die invalid_value 64 ;;

@@ -567,7 +567,11 @@ if [ "$ACTION" = wifi-data ]; then
             rx: (.rxbytes // null), tx: (.txbytes // null), rssi: (.rssi // null), txrate: (.txrate // null), ssid: (.ssid // "")}}) | from_entries' 2>/dev/null)"
     [ -n "$HOSTS" ] || HOSTS='{}'
     CLIENTS="$(printf '%s' "$CLIENTS" | "$JQ" -c --argjson h "$HOSTS" 'map(. + {host: ($h[.mac | ascii_downcase] // null)})')"
-    "$JQ" -n --argjson enabled "$([ "$ENABLED" = 1 ] && echo true || echo false)" --argjson control_enabled "$([ "$CONTROL_ENABLED" = 1 ] && echo true || echo false)" --argjson auto_apply "$([ "$AUTO_APPLY" = 1 ] && echo true || echo false)" --argjson clients "$CLIENTS" --arg last "$LAST" --argjson rc "$RC" --argjson count "$COUNT" '{ok:true,component:"wifi-client-guard",enabled:$enabled,control_enabled:$control_enabled,auto_apply:$auto_apply,clients:$clients,count:$count,scheduler:{last:$last,rc:$rc}}'
+    # Band pinned in Keenetic ("interface <bridge> mac band <mac> 0|1"): 0 is 2.4 GHz, 1 is 5 GHz.
+    BINDS="$(ndm_cached running 10 "show running-config" | awk '$1 == "mac" && $2 == "band" && ($4 == "0" || $4 == "1") && $3 ~ /^([0-9a-fA-F][0-9a-fA-F]:){5}[0-9a-fA-F][0-9a-fA-F]$/ {print tolower($3) "\t" ($4 == "0" ? "2g" : "5g")}' |
+        "$JQ" -Rn '[inputs | split("\t") | {key: .[0], value: .[1]}] | from_entries' 2>/dev/null)"
+    [ -n "$BINDS" ] || BINDS='{}'
+    "$JQ" -n --argjson binds "$BINDS" --argjson enabled "$([ "$ENABLED" = 1 ] && echo true || echo false)" --argjson control_enabled "$([ "$CONTROL_ENABLED" = 1 ] && echo true || echo false)" --argjson auto_apply "$([ "$AUTO_APPLY" = 1 ] && echo true || echo false)" --argjson clients "$CLIENTS" --arg last "$LAST" --argjson rc "$RC" --argjson count "$COUNT" '{ok:true,component:"wifi-client-guard",enabled:$enabled,control_enabled:$control_enabled,auto_apply:$auto_apply,clients:$clients,count:$count,binds:$binds,scheduler:{last:$last,rc:$rc}}'
     exit 0
 fi
 
@@ -622,11 +626,11 @@ if [ "$ACTION" = config-data ]; then
     WCONF=${VWARD_WIFI_CLIENT_GUARD_CONF:-$CONFIG_ETC/wifi-client-guard.conf}
     UCONF=${VWARD_UPDATE_CONFIG:-$CONFIG_ETC/update.conf}
     GCONF=${VWARD_WAN_GUARD_CONF:-$CONFIG_ETC/wan-guard.conf}
-    kv_file "$GCONF" CONFIRM_FAILURES=G_CF RENEW_COOLDOWN=G_RC BOUNCE_COOLDOWN=G_BC MAX_RENEW_HOUR=G_MRH MAX_BOUNCE_HOUR=G_MBH MAX_BOUNCE_DAY=G_MBD
+    kv_file "$GCONF" CHECK_INTERVAL_MIN=G_CI CONFIRM_FAILURES=G_CF RENEW_COOLDOWN=G_RC BOUNCE_COOLDOWN=G_BC MAX_RENEW_HOUR=G_MRH MAX_BOUNCE_HOUR=G_MBH MAX_BOUNCE_DAY=G_MBD
     gnum(){ case "$1" in ''|*[!0-9]*) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
     WAN_PARAMS="$("$JQ" -cn --arg a "$(gnum "$G_CF" 3)" --arg b "$(gnum "$G_RC" 600)" --arg c "$(gnum "$G_BC" 1800)" \
         --arg d "$(gnum "$G_MRH" 3)" --arg e "$(gnum "$G_MBH" 2)" --arg f "$(gnum "$G_MBD" 6)" \
-        '{CONFIRM_FAILURES:($a|tonumber),RENEW_COOLDOWN:($b|tonumber),BOUNCE_COOLDOWN:($c|tonumber),MAX_RENEW_HOUR:($d|tonumber),MAX_BOUNCE_HOUR:($e|tonumber),MAX_BOUNCE_DAY:($f|tonumber)}')"
+        --arg ci "$(gnum "$G_CI" 1)" '{CHECK_INTERVAL_MIN:($ci|tonumber),CONFIRM_FAILURES:($a|tonumber),RENEW_COOLDOWN:($b|tonumber),BOUNCE_COOLDOWN:($c|tonumber),MAX_RENEW_HOUR:($d|tonumber),MAX_BOUNCE_HOUR:($e|tonumber),MAX_BOUNCE_DAY:($f|tonumber)}')"
     [ -n "$WAN_PARAMS" ] || WAN_PARAMS='{}'
     kv_file "$WCONF" ENABLED=W_EN CONTROL_ENABLED=W_CTL WINDOW_SEC=W_WIN BAND_SWITCH_WARN=W_SW WEAK_5G_SAMPLE_WARN=W_WEAK WEAK_5G_RSSI=W_RSSI
     wnum(){ case "$1" in ''|*[!0-9-]*) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
