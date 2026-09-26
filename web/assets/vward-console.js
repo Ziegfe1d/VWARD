@@ -513,13 +513,18 @@ const RENDER = {
 
   routes() {
     const r = S.route || {}, d = r.domains || {}, ip = r.ip || {}, ad = r.adaptive || {}, pr = prof();
+    const tuns = (st().wg && st().wg.interfaces) || [], curT = pr.tunnel_interface || '';
+    // One tunnel: the choice is shown but greyed out - there is nothing to switch to.
+    const tunOpts = tuns.map(t => [t.name, tunLabel(t.name)]);
+    if (curT && !tuns.some(t => t.name === curT)) tunOpts.unshift([curT, curT]);
     return loadError(['route']) +
-      panel('Сводка', kv([
-        ['Туннель для маршрутов', pr.tunnel_interface || '—', '', 'vpn'],
+      panel('Сводка', '<dl class="kv">' + ctrlRow('Туннель для маршрутов', sel('data-route-tunnel' + (tunOpts.length > 1 && cfgOk() ? '' : ' disabled'), 'Туннель для маршрутов', tunOpts.length ? tunOpts : [['', '—']], curT), tunOpts.length > 1 ? '' : 'другого туннеля нет') + '</dl>' +
+        confirmBox('route-tunnel', 'Перевести маршруты VWARD' + (curT ? ' с ' + curT : '') + ' на ' + ((confirm && confirm.to) || '') + '? Мои домены, AdaptiveAuto и IP-категории пойдут через новый туннель.', 'Перевести') +
+        kv([
         ['Доменов в каталоге', fmtInt(d.unique)],
         ['Категорий в каталоге', fmtInt(d.categories)],
         ['Маршрутов VWARD', fmtInt(ip.managed_routes), '', 'd-ipcats'],
-        ['Группа маршрутизации', pr.policy_group || '—']
+        ['Группа маршрутизации', pr.policy_group || cfgRoute().group || '—']
       ])) +
       panel('Что идёт через VPN', kv([
         ['Мои домены', S.config ? (cfgRoute().router_available ? countText((cfgRoute().domains || []).length) : 'нет данных') : '—', '', 'd-mydomains'],
@@ -1536,6 +1541,7 @@ const CONFIRMED = {
   'comp-off': () => { const id = current.slice(2); return cfgSet({ op: 'component', target: id, value: '0', confirm: 'COMPONENT_DISABLE' }, '«' + comp(id).name + '» выключен', ['status']); },
   'comp-on': () => { const id = current.slice(2); return cfgSet({ op: 'component', target: id, value: '1' }, '«' + comp(id).name + '» включён', ['status']); },
   'tunnel-delete': c => { const name = current.slice(2); return apiPost('tunnel-conf', { op: 'delete', name: name, target: c.to, confirm: 'TUNNEL_DELETE' }).then(x => { toast(x.ok ? name + ' удалён' : 'Не удалено: ' + errText(x)); return Promise.all([load('status', true), load('lists', true)]).then(() => { if (x.ok) go('vpn', null, 'replace'); else render(); }); }, e => { toast('Ошибка: ' + e.message); render(); }); },
+  'route-tunnel': c => { toast('Переключаем маршруты на ' + c.to + '…'); return cfgSet({ op: 'tunnel', target: c.to, confirm: 'TUNNEL_SWITCH' }, 'Маршруты VWARD идут через ' + c.to, ['status', 'security', 'route']); },
   'tunnel-use': () => { const name = current.slice(2); toast('Переключаем маршруты на ' + name + '…'); return cfgSet({ op: 'tunnel', target: name, confirm: 'TUNNEL_SWITCH' }, 'Маршруты VWARD идут через ' + name, ['status', 'security', 'route']); },
   'wg-off': () => cfgSet({ op: 'wan-guard', value: '0', confirm: 'WAN_GUARD_DISABLE' }, 'Защита интернета выключена'),
   'wan-renew': () => wanOp('wan-renew', 'WAN_RENEW', 'Адрес запрошен заново'),
@@ -1850,6 +1856,7 @@ document.addEventListener('change', e => {
   if (t.hasAttribute('data-smartdns-guard')) { cfgSet({ op: 'smartdns-guard', value: t.checked ? '1' : '0' }, t.checked ? 'Защита Smart DNS включена' : 'Защита Smart DNS выключена', ['lists']); return; }
   if (t.dataset.cfgWanp) { cfgSet({ op: 'wan-param', target: t.dataset.cfgWanp, value: t.value }, 'Сохранено', ['config']); return; }
   if (t.dataset.extAuto) { cfgSet({ op: 'ext-auto', target: t.dataset.extAuto, value: t.checked ? '1' : '0' }, t.checked ? 'Будет обновляться автоматически' : 'Обновление только вручную', ['ext']); return; }
+  if (t.hasAttribute('data-route-tunnel')) { const to = t.value; t.value = prof().tunnel_interface || ''; if (to && to !== t.value) { confirm = { id: 'route-tunnel', to: to }; render(); } return; }
   if (t.hasAttribute('data-fw-auto')) { t.disabled = true; cfgSet({ op: 'firmware', target: 'auto', value: t.checked ? '1' : '0' }, t.checked ? 'Keenetic будет обновляться автоматически' : 'Прошивка обновляется только вручную', ['ext']); return; }
   if (t.hasAttribute('data-fw-channel')) {
     const v = t.value;
