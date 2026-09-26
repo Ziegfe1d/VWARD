@@ -258,6 +258,41 @@ rmdir "$R/opt/var/run/vward/console-tunnel" 2>/dev/null
 # Locks whose owner is gone (killed, power cut) would hold back the updater.
 vward_locks_sweep
 
+# ---------- Crontab folder ----------
+# BusyBox crond takes every file in its folder for a user's crontab and skips
+# the ones without a user: hand-made copies (root.bak-*, root.before-*) are
+# only clutter there.  They move to the backups, once.
+CRON_DIR=${VWARD_CRON_DIR:-$R/opt/var/spool/cron/crontabs}
+CRON_OLD="$B/cron-old"
+for CRON_F in "$CRON_DIR"/root.*; do
+    [ -f "$CRON_F" ] && [ ! -L "$CRON_F" ] || continue
+    mkdir -p "$CRON_OLD" && mv -f "$CRON_F" "$CRON_OLD/" &&
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|cron_copy_moved=${CRON_F##*/}" >> "$HOUSE_LOG"
+done
+
+# The old agh-keenetic-clients-sync.sh rewrote AdGuardHome.yaml and restarted
+# AdGuard Home whenever a device came or went.  VWARD names the devices through
+# AdGuard Home's API (vward-ads-privacy-clients.sh), which waits while the old
+# line is in cron.  Once AdGuard Home is connected to VWARD the line is
+# commented out; the crontab before the change stays in cron-old.
+OLD_SYNC=agh-keenetic-clients-sync.sh
+CRON_ROOT="$CRON_DIR/root"
+ADS_ETC_DIR=${VWARD_ADS_ETC:-$R/opt/etc/vward/ads-privacy-guard}
+if [ -s "$ADS_ETC_DIR/agh-api.auth" ] && [ ! -e "$ADS_ETC_DIR/clients-sync.disabled" ] &&
+   [ -x "${VWARD_ADS_CLIENTS_SYNC:-$R/opt/bin/vward-ads-privacy-clients.sh}" ] &&
+   grep -v '^[[:space:]]*#' "$CRON_ROOT" 2>/dev/null | grep -Fq "$OLD_SYNC"; then
+    CRON_NEW="$R/tmp/vward-housekeeping-crontab.$$"
+    if mkdir -p "$CRON_OLD" && cp -p "$CRON_ROOT" "$CRON_OLD/root.before-clients-sync" &&
+       awk -v s="$OLD_SYNC" '!/^[[:space:]]*#/ && index($0, s) {print "# off: VWARD names devices through the AdGuard Home API # " $0; next} {print}' \
+           "$CRON_ROOT" > "$CRON_NEW" &&
+       "${VWARD_CRONTAB:-crontab}" -c "$CRON_DIR" "$CRON_NEW" >/dev/null 2>&1; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|old_clients_sync=off" >> "$HOUSE_LOG"
+    else
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|old_clients_sync=kept" >> "$HOUSE_LOG"
+    fi
+    rm -f "$CRON_NEW"
+fi
+
 # ---------- One-time move to Update Engine 2 ----------
 # Engine 1 cannot read the per-file feed and cannot replace itself.  This hourly
 # job moves it over once, without a command: the signed v2 manifest is checked

@@ -234,7 +234,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data) ;;
+    status|ping|log|settings|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -316,7 +316,6 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
     esac
 fi
 
-ads_kv_json(){ [ -r "$1" ] && awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' "$1" | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}'; }
 ads_valid_domain(){ printf '%s\n' "$1" | awk 'length($0)>0&&length($0)<=253&&index($0,".")>0&&$0!~/\.\./ {n=split($0,a,".");for(i=1;i<=n;i++)if(length(a[i])<1||length(a[i])>63||a[i]!~/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/)exit 1;exit 0}{exit 1}'; }
 ads_valid_source_id(){ printf '%s\n' "$1" | awk 'length($0)>=1&&length($0)<=64&&$0~/^[a-z0-9][a-z0-9._-]*$/{exit 0}{exit 1}'; }
 ads_console_tmp(){ umask 077; mktemp "/tmp/vward-console-${1}.XXXXXX"; }
@@ -1174,142 +1173,6 @@ if [ "$ACTION" = ads-control ]; then
     clients) "${VWARD_ADS_CLIENTS_BIN:-/opt/bin/vward-ads-privacy-clients.sh}" "$CLV" >"$OUT" 2>&1||RC=$? ;;
   esac
   RES="$(head -c 12000 "$OUT" 2>/dev/null)"; rm -f "$OUT"; printf '%s|ADS_CONTROL|op=%s rc=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$OP" "$RC" >>/opt/var/log/vward/console-audit.log; "$JQ" -n --argjson ok "$([ "$RC" -eq 0 ]&&echo true||echo false)" --argjson rc "$RC" --arg result "$RES" '{ok:$ok,rc:$rc,result:$result}'; exit 0
-fi
-
-if [ "$ACTION" = "settings-data" ]; then
-    header_json
-    [ "${REQUEST_METHOD:-GET}" = GET ] || {
-        echo '{"ok":false,"error":"method_not_allowed"}'
-        exit 0
-    }
-    SETTINGS_REGISTRY=${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}
-    UPDATE_CONFIG=${VWARD_UPDATE_CONFIG:-/opt/etc/vward/update.conf}
-    ADS_CONFIG=${VWARD_ADS_CONFIG:-/opt/etc/vward/ads-privacy-guard/ads-privacy-guard.conf}
-    [ -r "$SETTINGS_REGISTRY" ] || {
-        echo '{"ok":false,"error":"settings_registry_unavailable"}'
-        exit 0
-    }
-    # One pass over each file, no process per key.
-    kv_file "$UPDATE_CONFIG" auto_apply=SETTINGS_AUTO_APPLY auto_critical=SETTINGS_AUTO_CRITICAL \
-        auto_important=SETTINGS_AUTO_IMPORTANT auto_routine=SETTINGS_AUTO_ROUTINE update_enabled=SETTINGS_UPDATE_ENABLED \
-        channel=SETTINGS_CHANNEL check_interval_seconds=SETTINGS_CHECK_INTERVAL safe_window_start=SETTINGS_SAFE_WINDOW_START \
-        safe_window_end=SETTINGS_SAFE_WINDOW_END important_max_delay_seconds=SETTINGS_IMPORTANT_DELAY \
-        routine_max_delay_seconds=SETTINGS_ROUTINE_DELAY minimum_free_kb=SETTINGS_MINIMUM_FREE \
-        max_manifest_size=SETTINGS_MAX_MANIFEST max_package_size=SETTINGS_MAX_PACKAGE max_unpacked_size=SETTINGS_MAX_UNPACKED \
-        backup_keep=SETTINGS_BACKUP_KEEP health_timeout_seconds=SETTINGS_HEALTH_TIMEOUT \
-        request_timeout_seconds=SETTINGS_REQUEST_TIMEOUT barrier_integration_ready=SETTINGS_BARRIER_READY
-    kv_file "$ADS_CONFIG" ENABLED=SETTINGS_ADS_ENABLED RUN_MODE=SETTINGS_ADS_RUN_MODE \
-        SCHEDULE_INTERVAL_MIN=SETTINGS_ADS_SCHEDULE_INTERVAL DYNAMIC_MIN_INTERVAL_SEC=SETTINGS_ADS_DYNAMIC_INTERVAL \
-        DYNAMIC_MAX_LOAD_PER_CPU_X100=SETTINGS_ADS_DYNAMIC_LOAD DYNAMIC_MIN_MEM_AVAILABLE_KB=SETTINGS_ADS_DYNAMIC_MEM \
-        DYNAMIC_MIN_OPT_FREE_KB=SETTINGS_ADS_DYNAMIC_OPT DYNAMIC_MAX_CANDIDATES_PER_RUN=SETTINGS_ADS_DYNAMIC_CANDIDATES \
-        AUTO_SOURCE_UPDATE=SETTINGS_ADS_AUTO_SOURCES SOURCE_UPDATE_INTERVAL_HOURS=SETTINGS_ADS_SOURCE_INTERVAL \
-        QUERY_SOURCE=SETTINGS_ADS_QUERY_SOURCE AUTO_RULE_SCOPE=SETTINGS_ADS_RULE_SCOPE \
-        PUBLISH_MODE=SETTINGS_ADS_PUBLISH_MODE AUTO_PUBLISH=SETTINGS_ADS_AUTO_PUBLISH
-    "$JQ" -c \
-      --argjson profile_ready "$PROFILE_READY" \
-      --arg lan_address "${VWARD_LAN_ADDRESS:-}" \
-      --arg lan_subnet "${VWARD_LAN_SUBNET:-}" \
-      --arg dns_server "${VWARD_DNS_SERVER:-}" \
-      --arg probe_dns "${VWARD_PROBE_DNS:-}" \
-      --arg adguard_address "${VWARD_ADGUARD_ADDRESS:-}" \
-      --arg adguard_port "${VWARD_ADGUARD_PORT:-}" \
-      --arg wan_device "${VWARD_WAN_DEVICE:-}" \
-      --arg wan_interface "${VWARD_WAN_INTERFACE:-}" \
-      --arg lan_interface "${VWARD_LAN_INTERFACE:-}" \
-      --arg tunnel_device "${VWARD_TUNNEL_DEVICE:-}" \
-      --arg tunnel_interface "${VWARD_TUNNEL_INTERFACE:-}" \
-      --arg policy_group "${VWARD_POLICY_GROUP:-}" \
-      --arg console_port "${VWARD_CONSOLE_PORT:-}" \
-      --arg rci_base "${VWARD_RCI_BASE:-}" \
-      --arg auto_apply "$SETTINGS_AUTO_APPLY" \
-      --arg auto_critical "$SETTINGS_AUTO_CRITICAL" \
-      --arg auto_important "$SETTINGS_AUTO_IMPORTANT" \
-      --arg auto_routine "$SETTINGS_AUTO_ROUTINE" \
-      --arg update_enabled "$SETTINGS_UPDATE_ENABLED" \
-      --arg channel "$SETTINGS_CHANNEL" \
-      --arg check_interval_seconds "$SETTINGS_CHECK_INTERVAL" \
-      --arg safe_window_start "$SETTINGS_SAFE_WINDOW_START" \
-      --arg safe_window_end "$SETTINGS_SAFE_WINDOW_END" \
-      --arg important_max_delay_seconds "$SETTINGS_IMPORTANT_DELAY" \
-      --arg routine_max_delay_seconds "$SETTINGS_ROUTINE_DELAY" \
-      --arg minimum_free_kb "$SETTINGS_MINIMUM_FREE" \
-      --arg max_manifest_size "$SETTINGS_MAX_MANIFEST" \
-      --arg max_package_size "$SETTINGS_MAX_PACKAGE" \
-      --arg max_unpacked_size "$SETTINGS_MAX_UNPACKED" \
-      --arg backup_keep "$SETTINGS_BACKUP_KEEP" \
-      --arg health_timeout_seconds "$SETTINGS_HEALTH_TIMEOUT" \
-      --arg request_timeout_seconds "$SETTINGS_REQUEST_TIMEOUT" \
-      --arg barrier_integration_ready "$SETTINGS_BARRIER_READY" \
-      --arg ads_enabled "$SETTINGS_ADS_ENABLED" \
-      --arg ads_run_mode "$SETTINGS_ADS_RUN_MODE" \
-      --arg ads_schedule_interval "$SETTINGS_ADS_SCHEDULE_INTERVAL" \
-      --arg ads_dynamic_interval "$SETTINGS_ADS_DYNAMIC_INTERVAL" \
-      --arg ads_dynamic_load "$SETTINGS_ADS_DYNAMIC_LOAD" \
-      --arg ads_dynamic_mem "$SETTINGS_ADS_DYNAMIC_MEM" \
-      --arg ads_dynamic_opt "$SETTINGS_ADS_DYNAMIC_OPT" \
-      --arg ads_dynamic_candidates "$SETTINGS_ADS_DYNAMIC_CANDIDATES" \
-      --arg ads_auto_sources "$SETTINGS_ADS_AUTO_SOURCES" \
-      --arg ads_source_interval "$SETTINGS_ADS_SOURCE_INTERVAL" \
-      --arg ads_query_source "$SETTINGS_ADS_QUERY_SOURCE" \
-      --arg ads_rule_scope "$SETTINGS_ADS_RULE_SCOPE" \
-      --arg ads_publish_mode "$SETTINGS_ADS_PUBLISH_MODE" \
-      --arg ads_auto_publish "$SETTINGS_ADS_AUTO_PUBLISH" '
-        def raw_value:
-          if .key=="VWARD_LAN_ADDRESS" then $lan_address
-          elif .key=="VWARD_LAN_SUBNET" then $lan_subnet
-          elif .key=="VWARD_DNS_SERVER" then $dns_server
-          elif .key=="VWARD_PROBE_DNS" then $probe_dns
-          elif .key=="VWARD_ADGUARD_ADDRESS" then $adguard_address
-          elif .key=="VWARD_ADGUARD_PORT" then $adguard_port
-          elif .key=="VWARD_WAN_DEVICE" then $wan_device
-          elif .key=="VWARD_WAN_INTERFACE" then $wan_interface
-          elif .key=="VWARD_LAN_INTERFACE" then $lan_interface
-          elif .key=="VWARD_TUNNEL_DEVICE" then $tunnel_device
-          elif .key=="VWARD_TUNNEL_INTERFACE" then $tunnel_interface
-          elif .key=="VWARD_POLICY_GROUP" then $policy_group
-          elif .key=="VWARD_CONSOLE_PORT" then $console_port
-          elif .key=="VWARD_RCI_BASE" then $rci_base
-          elif .key=="auto_apply" then $auto_apply
-          elif .key=="auto_critical" then $auto_critical
-          elif .key=="auto_important" then $auto_important
-          elif .key=="auto_routine" then $auto_routine
-          elif .key=="update_enabled" then $update_enabled
-          elif .key=="channel" then $channel
-          elif .key=="check_interval_seconds" then $check_interval_seconds
-          elif .key=="safe_window_start" then $safe_window_start
-          elif .key=="safe_window_end" then $safe_window_end
-          elif .key=="important_max_delay_seconds" then $important_max_delay_seconds
-          elif .key=="routine_max_delay_seconds" then $routine_max_delay_seconds
-          elif .key=="minimum_free_kb" then $minimum_free_kb
-          elif .key=="max_manifest_size" then $max_manifest_size
-          elif .key=="max_package_size" then $max_package_size
-          elif .key=="max_unpacked_size" then $max_unpacked_size
-          elif .key=="backup_keep" then $backup_keep
-          elif .key=="health_timeout_seconds" then $health_timeout_seconds
-          elif .key=="request_timeout_seconds" then $request_timeout_seconds
-          elif .key=="barrier_integration_ready" then $barrier_integration_ready
-          elif .key=="ENABLED" then $ads_enabled
-          elif .key=="RUN_MODE" then $ads_run_mode
-          elif .key=="SCHEDULE_INTERVAL_MIN" then $ads_schedule_interval
-          elif .key=="DYNAMIC_MIN_INTERVAL_SEC" then $ads_dynamic_interval
-          elif .key=="DYNAMIC_MAX_LOAD_PER_CPU_X100" then $ads_dynamic_load
-          elif .key=="DYNAMIC_MIN_MEM_AVAILABLE_KB" then $ads_dynamic_mem
-          elif .key=="DYNAMIC_MIN_OPT_FREE_KB" then $ads_dynamic_opt
-          elif .key=="DYNAMIC_MAX_CANDIDATES_PER_RUN" then $ads_dynamic_candidates
-          elif .key=="AUTO_SOURCE_UPDATE" then $ads_auto_sources
-          elif .key=="SOURCE_UPDATE_INTERVAL_HOURS" then $ads_source_interval
-          elif .key=="QUERY_SOURCE" then $ads_query_source
-          elif .key=="AUTO_RULE_SCOPE" then $ads_rule_scope
-          elif .key=="PUBLISH_MODE" then $ads_publish_mode
-          elif .key=="AUTO_PUBLISH" then $ads_auto_publish
-          else "" end;
-        def typed($v): if .type=="boolean" then ($v=="1") elif .type=="integer" and ($v | length > 0 and all(explode[]; . >= 48 and . <= 57)) then ($v|tonumber) else $v end;
-        {ok:true,schema:.schema,profile_ready:$profile_ready,authentication_required_for_device_write:true,
-         settings:[.settings[] | select(.secret==false) | . as $item | (raw_value) as $raw |
-           . + {current:typed($raw),effective:typed($raw),discovered:null,
-                validation:(if $raw=="" then "unknown" elif .source=="device.conf" and ($profile_ready|not) then "unverified" else "valid" end)}]}
-      ' "$SETTINGS_REGISTRY" 2>/dev/null || echo '{"ok":false,"error":"settings_registry_invalid"}'
-    exit 0
 fi
 
 if [ "$ACTION" = "security-data" ]; then

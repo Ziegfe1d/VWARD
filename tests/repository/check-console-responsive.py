@@ -51,7 +51,7 @@ for marker in (
     "color-scheme:dark", "body{height:100%;margin:0;background:var(--bg)",
     "@media (min-width:900px)", "@media (max-width:379px)",
     ".tabbar{position:fixed", "border-radius:28px", "env(safe-area-inset-bottom,0px)",
-    "user-select:none", ".kv-row.stack", ".cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))",
+    "user-select:none", ".cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))",
     "@media (hover:hover)", "@media (prefers-reduced-motion:reduce)", ":focus-visible",
 ):
     if marker not in css:

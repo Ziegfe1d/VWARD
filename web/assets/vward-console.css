@@ -98,21 +98,11 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .row.link{cursor:pointer}
 .row.link .chev{width:18px;height:18px;color:var(--faint)}
 @media (hover:hover){.row.link:hover b{color:var(--accent)}}
-.steps{margin:0;padding:4px 16px 8px 36px;color:var(--muted);font-size:var(--fs-sm)}
-.steps li{padding-block:4px}
-.steps li.now{color:var(--text);font-weight:600}
-.list-count{padding:0 16px 8px;color:var(--faint);font-size:var(--fs-xs)}
 @keyframes flash{0%,40%{background:var(--accent-soft)}100%{background:transparent}}
 .tabbar.flash{animation:flash 1.6s ease}
 .panel-actions{display:flex;flex-wrap:wrap;gap:8px;padding:8px 16px 16px}
 .panel-actions.even>.btn{flex:1 1 140px}
 .input.compact{width:auto;min-height:36px;padding:6px 10px}
-.time-range{display:flex;align-items:center;gap:6px}
-.time-range .input{flex:1 1 0;min-width:0}
-.kv-row.stack{flex-wrap:wrap}
-.kv-row.stack dt{flex:1 1 100%}
-.kv-row.stack dd{flex:1 1 100%;justify-content:flex-start}
-.kv-row.stack .time-range{width:100%}
 @media (max-width:359px){.topbar{gap:2px;padding-inline:8px}.icon-btn{width:36px;height:36px}}
 /* A phone bar: five labels of up to nine letters fit whole. */
 @media (max-width:439px){.tabbar{left:6px;right:6px;padding:5px;column-gap:0}.tab{letter-spacing:-.15px}}
@@ -200,15 +190,12 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 small.st{display:inline-flex;align-items:center;gap:4px;margin-top:2px}
 small.st .icon{width:14px;height:14px}
 .row-acts{display:flex;align-items:center;gap:4px;margin-left:auto}
-.row-switch{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
 .icon-btn.allow{color:var(--ok)}
 .icon-btn.deny{color:var(--crit)}
 .row-main b{display:block;font-size:var(--fs-sm);font-weight:600;overflow-wrap:break-word}
 .row-main small{display:block;color:var(--muted);font-size:var(--fs-xs)}
 
 /* Формы */
-.field{display:flex;flex-direction:column;gap:6px}
-.field label{color:var(--muted);font-size:var(--fs-sm)}
 .input{width:100%;min-height:42px;padding:8px 12px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--surface);color:var(--text)}
 .inline-form{display:flex;flex-wrap:wrap;gap:8px;padding:4px 16px 16px}
 .result-note{margin:0;padding:4px 16px 12px;color:var(--muted);font-size:var(--fs-sm)}
@@ -271,10 +258,6 @@ small.st .icon{width:14px;height:14px}
 
 /* Экран входа */
 .login{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:16px;background:var(--bg)}
-.login-card{width:100%;max-width:380px;display:flex;flex-direction:column;gap:14px;padding:24px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow)}
-.login-card h2{margin:0;font-size:var(--fs-xl)}
-.login-card p{margin:0;color:var(--muted);font-size:var(--fs-sm)}
-.form-error{color:var(--crit);font-size:var(--fs-sm)}
 
 /* Уведомление о действии */
 .toast{position:fixed;z-index:70;left:50%;bottom:calc(var(--tabbar-space) + 12px);transform:translateX(-50%);max-width:calc(100% - 32px);padding:10px 16px;border-radius:var(--r-md);background:var(--text);color:var(--bg);font-size:var(--fs-sm);box-shadow:var(--shadow)}

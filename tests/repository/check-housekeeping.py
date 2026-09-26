@@ -75,10 +75,22 @@ with tempfile.TemporaryDirectory() as tmp:
     stale = r / "opt/var/lib/vward/policy-sync/lock"; stale.mkdir(parents=True)
     (stale / "pid").write_text(f"{dead.pid}\n")
 
+    # The crontab folder: hand-made copies and the old AdGuard Home name sync.
+    cron = r / "opt/var/spool/cron/crontabs"; cron.mkdir(parents=True)
+    old_line = "*/10 * * * * /opt/bin/agh-keenetic-clients-sync.sh >/dev/null 2>&1"
+    (cron / "root").write_text(old_line + "\n17 * * * * /opt/bin/vward-housekeeping.sh\n")
+    for name in ("root.bak-20260904-171211", "root.before-daily"):
+        (cron / name).write_text("* * * * * /opt/bin/old.sh\n")
+    ads_etc = r / "opt/etc/vward/ads-privacy-guard"; ads_etc.mkdir(parents=True)
+    (ads_etc / "agh-api.auth").write_text("admin:pw\n")
+    sync = r / "opt/bin/vward-ads-privacy-clients.sh"; sync.parent.mkdir(parents=True); sync.write_text("#!/bin/sh\n"); sync.chmod(0o755)
+    crontab = tmp / "crontab"; crontab.write_text('#!/bin/sh\n[ "$1" = -c ] && cp "$3" "$2/root"\n'); crontab.chmod(0o755)
+
     helper = tmp / "helper"; helper.write_text("#!/bin/sh\necho result=unchanged\n"); helper.chmod(0o755)
     env = os.environ | {"PATH": f"{bb}:{os.environ['PATH']}", "VWARD_ROOT_PREFIX": str(r),
                         "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
-                        "VWARD_CONSOLE_CONFIG_BIN": str(helper), "VWARD_BACKUP_DAY_FILE": str(tmp / "backup-day")}
+                        "VWARD_CONSOLE_CONFIG_BIN": str(helper), "VWARD_BACKUP_DAY_FILE": str(tmp / "backup-day"),
+                        "VWARD_CRONTAB": str(crontab)}
     res = subprocess.run([busybox, "sh", str(SCRIPT)], env=env, capture_output=True, text=True)
     if res.returncode != 0:
         fail(f"housekeeping failed: {res.stdout[-600:]} {res.stderr[-600:]}")
@@ -115,9 +127,42 @@ with tempfile.TemporaryDirectory() as tmp:
     if "rotated=2|errors=0" not in (log / "vward-housekeeping.log").read_text():
         fail("the run is logged")
 
+    if sorted(p.name for p in cron.iterdir()) != ["root"]:
+        fail(f"crontab copies must leave the cron folder: {sorted(p.name for p in cron.iterdir())}")
+    if sorted(p.name for p in (b / "cron-old").iterdir()) != ["root.bak-20260904-171211", "root.before-clients-sync", "root.before-daily"]:
+        fail(f"crontab copies are kept in backups: {sorted(p.name for p in (b / 'cron-old').iterdir())}")
+    lines = (cron / "root").read_text().splitlines()
+    if not lines[0].startswith("# off:") or not lines[0].endswith(old_line) or lines[1] != "17 * * * * /opt/bin/vward-housekeeping.sh":
+        fail(f"the old name sync must be commented out, the rest kept: {lines}")
+    if (b / "cron-old/root.before-clients-sync").read_text().splitlines()[0] != old_line:
+        fail("the crontab before the change is kept")
+
     # A second run changes nothing more.
     res = subprocess.run([busybox, "sh", str(SCRIPT)], env=env, capture_output=True, text=True)
     if res.returncode != 0 or "RETENTION_DELETE" in res.stdout or "ROTATED" in res.stdout:
         fail(f"a second run has nothing to do: {res.stdout}")
+    if (log / "vward-housekeeping.log").read_text().count("old_clients_sync=") != 1:
+        fail("the old name sync is switched off once")
+
+# Not connected to AdGuard Home: the old name sync keeps running.
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    bb = tmp / "bb"; bb.mkdir()
+    for applet in ("awk", "ls", "du", "tail", "head", "grep", "gzip", "cp", "mv", "rm", "rmdir", "date", "wc", "cat", "mkdir", "sed", "tr", "id", "find"):
+        (bb / applet).symlink_to(busybox)
+    r = tmp / "root"
+    for d in ("opt/var/log/vward", "opt/var/backups/vward", "tmp", "opt/var/spool/cron/crontabs"):
+        (r / d).mkdir(parents=True)
+    root_cron = r / "opt/var/spool/cron/crontabs/root"
+    root_cron.write_text("*/10 * * * * /opt/bin/agh-keenetic-clients-sync.sh\n")
+    crontab = tmp / "crontab"; crontab.write_text("#!/bin/sh\nexit 1\n"); crontab.chmod(0o755)
+    helper = tmp / "helper"; helper.write_text("#!/bin/sh\necho result=unchanged\n"); helper.chmod(0o755)
+    env = os.environ | {"PATH": f"{bb}:{os.environ['PATH']}", "VWARD_ROOT_PREFIX": str(r),
+                        "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
+                        "VWARD_CONSOLE_CONFIG_BIN": str(helper), "VWARD_BACKUP_DAY_FILE": str(tmp / "backup-day"),
+                        "VWARD_CRONTAB": str(crontab)}
+    res = subprocess.run([busybox, "sh", str(SCRIPT)], env=env, capture_output=True, text=True)
+    if res.returncode != 0 or root_cron.read_text() != "*/10 * * * * /opt/bin/agh-keenetic-clients-sync.sh\n":
+        fail(f"without AdGuard Home connected the old name sync stays: {res.stdout[-300:]}")
 
 print("HOUSEKEEPING=PASS")
