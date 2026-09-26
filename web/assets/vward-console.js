@@ -631,7 +631,7 @@ const RENDER = {
           g && g.ok && g.protection != null ? ['Защита', g.protection ? 'Включена' : 'Выключена', g.protection ? 'ok' : 'warn', 'd-agh'] : null,
           st1 && st1.ok ? ['Запросов за сутки', fmtInt(st1.queries), '', 'd-querylog'] : null,
           st1 && st1.ok ? ['Заблокировано за сутки', fmtInt(st1.blocked) + (st1.queries ? ' · ' + Math.round(100 * st1.blocked / st1.queries) + '%' : ''), '', 'd-querylog', ' data-qfilter="blocked"'] : null,
-          ['Настройки AdGuard Home', 'фильтры, сервисы, защита', '', 'd-agh']]),
+          ['Настройки AdGuard Home', 'фильтры, сервисы, защита', '', 'd-agh']]) + aghClientsRows(a),
         { desc: 'Первая линия: блокирует по своим фильтрам. VWARD проверяет то, что он пропустил.' });
   },
   'd-agh'() {
@@ -1525,7 +1525,7 @@ const SEARCH_INDEX = [
   ['d-smartdns', 'Защита Smart DNS'],
   ['routes', 'Туннель для маршрутов'], ['routes', 'Автоподбор доменов'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
-  ['ads', 'Настройки AdGuard Home'], ['ads', 'Последняя проверка'], ['ads', 'Правила в AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
+  ['ads', 'Настройки AdGuard Home'], ['ads', 'Имена устройств из Keenetic'], ['ads', 'Последняя проверка'], ['ads', 'Правила в AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
   ['u-vward', 'Установка обновлений'], ['u-vward', 'Время установки'], ['u-vward', 'Интервал проверки'], ['u-vward', 'Канал'],
   ['settings', 'Адрес VWARD'], ['settings', 'Тема'], ['u-vward', 'Версия'], ['d-diag', 'Задания по расписанию'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
 ];
@@ -1713,6 +1713,29 @@ function updateOp(op, token) {
       render();
     });
 }
+// Device names from Keenetic in AdGuard Home (vward-ads-privacy-clients.sh).
+function aghClientsRows(a) {
+  if (!a.agh_connected) return '';
+  const c = a.clients || {}, on = c.enabled !== '0', busy = runningId === 'agh-clients', n = num(c.devices) || 0;
+  const hints = {
+    ok: fmtInt(n) + ' ' + plural(n, 'устройство', 'устройства', 'устройств') + (c.changed_ts ? ' · изменено ' + fmtStamp(c.changed_ts) : ''),
+    partial: 'часть имён не записалась, повтор через минуту',
+    old_script: '',
+    agh_unavailable: 'AdGuard Home не ответил, повтор через минуту',
+    router_unavailable: 'Keenetic не ответил, повтор через минуту'
+  }, hint = !on ? 'выключено' : c.result in hints ? hints[c.result] : 'имена появятся в течение минуты';
+  return '<dl class="kv">' + ctrlRow('Имена устройств из Keenetic', sw('data-ads-clients', on, 'Имена устройств из Keenetic', !S.ads), hint) + '</dl>' +
+    (on && c.result === 'old_script' ? '<p class="field-warn">' + ico('alert') + 'Имена сейчас записывает старый скрипт agh-keenetic-clients-sync.sh: он перезапускает AdGuard Home. Уберите его из cron - VWARD продолжит без перезапусков.</p>' : '') +
+    (on && c.result !== 'old_script' ? '<div class="panel-actions">' + btn('agh-clients', 'refresh', busy ? 'Обновляем…' : 'Обновить имена', '', busy ? ' disabled' : '') + '</div>' : '');
+}
+async function aghClientsOp(value) {
+  if (value === 'sync') { runningId = 'agh-clients'; render(); }
+  let x;
+  try { x = await apiPost('ads-control', { op: 'clients', value: value }); } catch (e) { x = { ok: false, error: e.message }; }
+  if (runningId === 'agh-clients') runningId = '';
+  toast(x.ok ? ({ on: 'Имена устройств включены', off: 'Имена устройств выключены', sync: 'Имена обновлены' })[value] : 'Не выполнено: ' + errText(x));
+  await load('ads', true); render();
+}
 async function adsControl(fields, okMsg, resultId) {
   const x = await runAction(resultId || 'ads', 'ads-control', fields, okMsg);
   await load('ads', true); render(); return x;
@@ -1803,6 +1826,7 @@ document.addEventListener('click', e => {
   else if (a === 'refresh-hints') runLong('routes', 'control', { op: 'refresh-hints' }, 'control-data', 'Подсказки обновлены').then(() => load('route', true)).then(render);
   else if (a === 'update-op') updateOp(t.dataset.op);
   else if (a === 'diag-run') { load('diag', true).then(() => { render(); toast('Диагностика выполнена'); }); }
+  else if (a === 'agh-clients') aghClientsOp('sync');
   else if (a === 'ads-job') adsControl({ op: 'enqueue', job: t.dataset.job }, 'Задание поставлено в очередь', 'ads-job');
   else if (a === 'https-op') runAction('https', 'ads-https-control', { op: t.dataset.op }, 'Готово').then(() => load('https', true)).then(render);
   else if (a === 'log-reload') loadLog(logTab, true);
@@ -1904,6 +1928,7 @@ document.addEventListener('change', e => {
   }
   if (t.dataset.cfgWanp) { cfgSet({ op: 'wan-param', target: t.dataset.cfgWanp, value: t.value }, 'Сохранено', ['config']); return; }
   if (t.dataset.cfgUpd) { cfgSet({ op: 'update', target: t.dataset.cfgUpd, value: t.value }, 'Сохранено', ['status']); return; }
+  if (t.hasAttribute('data-ads-clients')) { aghClientsOp(t.checked ? 'on' : 'off'); return; }
   if (t.hasAttribute('data-ads-pause')) { adsControl({ op: t.checked ? 'resume' : 'pause' }, t.checked ? 'Блокировка включена' : 'Блокировка на паузе'); return; }
   if (t.dataset.adsSet) { adsSetting(t.dataset.adsSet, t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value); return; }
   if (t.hasAttribute('data-auth-devices')) {

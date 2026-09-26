@@ -52,6 +52,8 @@ JOB="${VWARD_ADS_JOB_WORKER:-/opt/bin/vward-ads-privacy-job.sh}"
 [ -x "$JOB" ] || JOB="$SELF_DIR/vward-ads-privacy-job.sh"
 QUERY_READER="${VWARD_ADS_QUERY_READER:-/opt/bin/vward-ads-privacy-query-read.sh}"
 [ -x "$QUERY_READER" ] || QUERY_READER="$SELF_DIR/vward-ads-privacy-query-read.sh"
+CLIENTS_SYNC="${VWARD_ADS_CLIENTS_SYNC:-/opt/bin/vward-ads-privacy-clients.sh}"
+[ -x "$CLIENTS_SYNC" ] || CLIENTS_SYNC="$SELF_DIR/vward-ads-privacy-clients.sh"
 
 # Loads the persisted scheduler state into ST_SCAN, ST_SOURCE and ST_SIG.
 state_load()
@@ -143,6 +145,10 @@ state_load
 LAST_SCAN="$(ads_num "$ST_SCAN" 0)"
 LAST_SOURCE="$(ads_num "$ST_SOURCE" 0)"
 OLD_SIG=$ST_SIG
+
+# Device names in AdGuard Home do not depend on ad blocking being on or paused.
+# A tick with the same devices makes no AdGuard Home call.
+[ ! -x "$CLIENTS_SYNC" ] || "$CLIENTS_SYNC" tick >/dev/null 2>&1 || true
 
 if ! ads_bool "$ENABLED"; then
     status_write disabled component_disabled 0

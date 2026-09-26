@@ -73,6 +73,20 @@ The active VWARD cron calls only the scheduler once per minute. In dynamic mode 
 runs only when the persisted AGH query log changed and resource gates pass. This is
 intentional to keep CPU/I/O low on router-class hardware.
 
+### Device names in AdGuard Home
+
+`vward-ads-privacy-clients.sh` names in AdGuard Home the devices Keenetic has
+registered and sees online (RCI `show/ip/hotspot`), through the clients API
+(`/control/clients/add|update`): no restart, no DNS gap. A client is matched
+by MAC, else by an IP-only entry; its name and address follow Keenetic, its
+other ids and settings stay. An address that moved to another device is taken
+from the old client first. Nothing is deleted. The scheduler calls it every
+minute; with the same devices it makes no AdGuard Home call (a full pass once
+an hour). It stays idle while `agh-keenetic-clients-sync.sh` (the old script
+that rewrites AdGuardHome.yaml with a restart) is in root's crontab. Switch:
+`clients-sync.disabled` in the config directory; status in
+`/tmp/vward-ads-clients.status`.
+
 
 ## Optional HTTPS Content Guard
 

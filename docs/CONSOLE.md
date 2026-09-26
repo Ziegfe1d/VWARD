@@ -88,6 +88,11 @@ policy-sync оно:
   домена; `stats` - счётчики AdGuard Home за сутки; `list review|blocked` - домены на проверке и
   заблокированные VWARD (из `verdicts.tsv`); `publish-status` - правила, отличающиеся от
   опубликованных (публикация сохраняет `published.rules`).
+- Имена устройств: в блоке AdGuard Home переключатель «Имена устройств из Keenetic» и кнопка
+  «Обновить имена» (`ads-control` `op=clients value=on|off|sync`, состояние - `clients` в
+  `ads-data`). VWARD записывает имена зарегистрированных устройств в клиенты AdGuard Home через
+  его API, без перезапуска. Пока в cron стоит старый `agh-keenetic-clients-sync.sh`, VWARD ждёт
+  и показывает предупреждение.
 - `ads-control`: кроме правил и режимов источников - `source-add` (свой список по https: адрес
   без логина и пробелов, формат `adblock`/`hosts`/`domains`, до 10 списков, старт в режиме
   «Проверка»; размер до 8 МБ и не меньше 10 записей проверяются при загрузке),

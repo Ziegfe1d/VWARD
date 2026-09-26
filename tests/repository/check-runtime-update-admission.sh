@@ -132,6 +132,7 @@ done
 
 
 for ads_leaf in \
+    vward-ads-privacy-clients.sh \
     vward-ads-privacy-control.sh \
     vward-ads-privacy-guard.sh \
     vward-ads-privacy-https.sh \
