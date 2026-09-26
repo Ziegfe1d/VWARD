@@ -323,6 +323,65 @@ grep -Eq '^SCHEDULER=(NO_CHANGE|BACKOFF)$' "$TMP/sc3.out" || { cat "$TMP/sc3.out
 [ "$(wc -l < "$TMP/sc-runs")" -eq 1 ] || fail scheduler_reran
 pass "dynamic low-load scheduler gating"
 
+# 14b scan window: AdGuard Home is asked only for queries newer than the last scan
+WQ="$TMP/wq"; mkdir -p "$WQ"
+cat > "$WQ/log.py" <<'EOF2'
+import json, sys
+# log.json holds entries newest first; mode "new N" prepends N, "reset N" replaces.
+path = sys.argv[1]; mode = sys.argv[2]; n = int(sys.argv[3])
+try: log = json.load(open(path))
+except Exception: log = []
+base = len(log) + (0 if mode == "new" else 100000)
+reasons = ["NotFilteredNotFound", "NotFilteredNotFound", "FilteredBlackList"]
+fresh = [{"time": "2026-09-26T%05d.000+03:00" % (base + i), "client": "192.0.2.%d" % (i % 5 + 1),
+          "question": {"name": "d%d.example" % (base + i)}, "reason": reasons[(base + i) % 3]} for i in range(n)]
+fresh.reverse()
+log = fresh + (log if mode == "new" else [])
+json.dump(log, open(path, "w"))
+EOF2
+cat > "$WQ/agh.py" <<'EOF2'
+import json, sys, urllib.parse
+url = sys.argv[1]; out = sys.argv[2]; log = json.load(open(sys.argv[3]))
+open(sys.argv[4], "a").write(url + "\n")
+q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+limit = int(q["limit"][0]); older = q.get("older_than", [None])[0]
+rows = [e for e in log if older is None or e["time"] < older][:limit]
+json.dump({"data": rows, "oldest": rows[-1]["time"] if rows else ""}, open(out, "w"))
+EOF2
+cat > "$TMP/bin/fakecurl-window" <<EOF2
+#!/bin/sh
+OUT=""; URL=""; while [ \$# -gt 0 ]; do case "\$1" in -o) OUT="\$2"; shift 2;; http*) URL="\$1"; shift;; *) shift;; esac; done
+[ ! -e "$WQ/down" ] || exit 7
+exec python3 "$WQ/agh.py" "\$URL" "\$OUT" "$WQ/log.json" "$WQ/calls"
+EOF2
+chmod +x "$TMP/bin/fakecurl-window"
+WENV="VWARD_ADS_LIB=$LIB VWARD_ADS_ETC=$QETC VWARD_ADS_STATE=$QST VWARD_ADS_LOG_DIR=$TMP/log VWARD_ADS_BACKUP_ROOT=$TMP/backups VWARD_ADS_SHARE=$QSH VWARD_ADS_CONFIG=$QETC/ads-privacy-guard.conf VWARD_ADS_JQ=$JQ VWARD_ADS_CURL=$TMP/bin/fakecurl-window VWARD_ADS_QUERY_WINDOW_DIR=$WQ/win VWARD_ADS_QUERY_PAGE=300"
+wcheck() {
+    : > "$WQ/calls"
+    env $WENV busybox sh "$S/vward-ads-privacy-query-read.sh" 1000 window | sort > "$WQ/win.out" || fail "window_read_$1"
+    WCALLS=$(wc -l < "$WQ/calls")
+    env $WENV busybox sh "$S/vward-ads-privacy-query-read.sh" 1000 | sort > "$WQ/full.out" || fail "full_read_$1"
+    cmp -s "$WQ/win.out" "$WQ/full.out" || { diff "$WQ/win.out" "$WQ/full.out" | head; fail "window_differs_$1"; }
+    [ "$WCALLS" -eq "$2" ] || { cat "$WQ/calls"; fail "window_calls_$1: $WCALLS"; }
+}
+python3 "$WQ/log.py" "$WQ/log.json" new 1200
+wcheck first 4
+[ "$(wc -l < "$WQ/win.out")" -gt 600 ] || fail window_size
+grep -q 'older_than=[^&]*%2B03' "$WQ/calls" || fail window_older_than_encoding
+python3 "$WQ/log.py" "$WQ/log.json" new 50
+wcheck new_only 1
+wcheck unchanged 1
+python3 "$WQ/log.py" "$WQ/log.json" new 700
+wcheck new_across_pages 3
+python3 "$WQ/log.py" "$WQ/log.json" reset 40
+wcheck log_cleared 2
+cp "$WQ/win/window.tsv" "$WQ/window.before"; touch "$WQ/down"
+if env $WENV busybox sh "$S/vward-ads-privacy-query-read.sh" 1000 window > /dev/null 2>&1; then fail window_api_down; fi
+rm -f "$WQ/down"
+cmp -s "$WQ/win/window.tsv" "$WQ/window.before" || fail window_kept_on_failure
+[ "$(stat -c %a "$WQ/win")" = 700 ] || fail window_dir_private
+pass "scan reads only new AdGuard Home queries"
+
 # 15 dev.8 authoritative settings-registry contract
 python3 "$ROOT/tests/repository/check-ads-privacy-settings-registry.py" | grep -q PASS || fail settings_registry_integration
 pass "dev.8 settings registry integration contract"

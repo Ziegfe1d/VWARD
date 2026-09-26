@@ -109,7 +109,7 @@ NEW_REVIEW="$WORK/review.tsv"
 QUERY_READER="${VWARD_ADS_QUERY_READER:-/opt/bin/vward-ads-privacy-query-read.sh}"
 [ -x "$QUERY_READER" ] || QUERY_READER="$SELF_DIR/vward-ads-privacy-query-read.sh"
 [ -x "$QUERY_READER" ] || ads_die "query reader missing"
-QUERY_SOURCE="$QUERY_SOURCE" "$QUERY_READER" "$SCAN_TAIL_LINES" > "$RAW" || ads_die "cannot read allowed AdGuard Home queries"
+QUERY_SOURCE="$QUERY_SOURCE" "$QUERY_READER" "$SCAN_TAIL_LINES" window > "$RAW" || ads_die "cannot read allowed AdGuard Home queries"
 
 # Normalize and reject reverse/local/invalid names before aggregation.
 awk -F'\t' '

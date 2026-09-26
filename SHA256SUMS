@@ -16,13 +16,13 @@ b58cdb3f2af2cc8d5607747ccf0c9a8f78c6b56aab1d38cc19ffa50cf6188412  components/ads
 653f45ba93a310a31a82f1998c6ebc459154a82256c1628cbc8e6a84bd7ddd39  components/ads-privacy-guard/https/vward-ads-privacy-https-common.sh
 6b2650fa699cd52e4f5a211129b00e923502f9f4f8412a6b0a5e3e47409bd338  components/ads-privacy-guard/lib/vward-ads-privacy-common.sh
 6f7082cc4f3c1e69a53d7e9ab8b2305765ceaaab680af0dec02cbe5b7259f302  components/ads-privacy-guard/scripts/vward-ads-privacy-control.sh
-57412b41df1dd5e9a73127cc25666d434cd4ec8dfa484c21091cfe30978374ad  components/ads-privacy-guard/scripts/vward-ads-privacy-guard.sh
+4de57d272cadc83cb378a34310d3a83cba63511b91cd07c35110c06ee9f44894  components/ads-privacy-guard/scripts/vward-ads-privacy-guard.sh
 0ab9f50a015e1cc5f201ca170ccd32c4326e2c125d54726cb9822fcad6f2f6a6  components/ads-privacy-guard/scripts/vward-ads-privacy-health.sh
 2f2ae26a4208c09cb9074287699f3f869e0bd3e2a600d00bbb84826ea001145b  components/ads-privacy-guard/scripts/vward-ads-privacy-https.sh
 9bebbcfa8670ba97cc5812669e93b89451533006dac2b8a2f67aa23a82888f66  components/ads-privacy-guard/scripts/vward-ads-privacy-job.sh
 9c103ebb59c3eab03bf4e7e64625fb6d0b61f312a0ad4246e62619ebbb835698  components/ads-privacy-guard/scripts/vward-ads-privacy-probe.sh
 0bdddaa38a815708abd1723639de32d7ca158a7ec7391d63416c10dd7f5c0786  components/ads-privacy-guard/scripts/vward-ads-privacy-publish.sh
-4cd7801737b6731b8d9268a1df4359fcc7ac8d1185761d102656e09d1ba42fbb  components/ads-privacy-guard/scripts/vward-ads-privacy-query-read.sh
+645fc5c0d9b4c4ab4243178f6bafad32fc92002517538f7d660e6c43891e03cb  components/ads-privacy-guard/scripts/vward-ads-privacy-query-read.sh
 9d5cb9ecaedf9aa52e76a864b394d8340bed4dccd4acff8a1352f931bb812395  components/ads-privacy-guard/scripts/vward-ads-privacy-rules-rebuild.sh
 bb4faec16caf6832c786b2c63e8b73e2e5e85908511c327384ebfc5b95b9ca00  components/ads-privacy-guard/scripts/vward-ads-privacy-scheduler.sh
 45ccc345951a6c5fafd6bb36ae8b7cb3d106b8244dd6577d2a25e9f97a1df8c3  components/ads-privacy-guard/scripts/vward-ads-privacy-settings.sh
@@ -155,7 +155,7 @@ f3f6a14e6e5e6361c516375499557e9e6bd7ecb53691791c965f737d9e43bfd4  scripts/prepar
 23394d5e19d1bd47844eea2237816fc5dfa5ba7dd6b66dd11c1fabedae59f9a2  tests/ads-privacy-guard/fixtures/source-normalize.txt
 e8427749414f3cd8a89c370a164afa6ab432b9f6b2fb743294c7b6ff7498fb9d  tests/ads-privacy-guard/fixtures/source-registry.json
 14affbecceb160e950b4e5e4d956ed8d8b7f880f764eb162d31b3cbd2ebb73f1  tests/ads-privacy-guard/run-https-simulations.sh
-71ee3ce97925eabfac2602bd631d4b32c2eee1e81819f11f1f825c3b74578cb9  tests/ads-privacy-guard/run-simulations.sh
+6ded5628f2ada42049b4e9f1dd1e2c03290e05b4ec7963b885ac6a8d96218a64  tests/ads-privacy-guard/run-simulations.sh
 c5bf924d2cee12aad1bf5b6c74faabc3572430eae73a2b43d7951c02721c0dca  tests/perf/check-cutover-emulated.py
 a0dc4a8f65928cbf5f72d468ad2fd95131cf200a85fcbafb0d789f2363cca9dd  tests/perf/check-route-engine-emulated.py
 3dc05b423fe463ce9934816886df1861f6b4234b33a0a37f0c05457f4c7750bc  tests/perf/emulator/build-rootfs-beta.sh
