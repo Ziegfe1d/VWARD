@@ -25,18 +25,23 @@ esac
 [ -e "@CFG@.lie" ] && { echo "ok"; exit 0; }
 set -- $cmd
 if [ "$1" = no ]; then shift; mode=del; else mode=add; fi
-[ "$1 $2" = "object-group fqdn" ] && [ "$4" = include ] || { echo "error: unknown command"; exit 1; }
-g=$3 d=$5
-awk -v g="$g" -v d="$d" -v m="$mode" '
-  /^object-group fqdn / {if (cur==g && m=="add" && !done) {print "    include " d; done=1} cur=$3; print; next}
-  /^!/ {if (cur==g && m=="add" && !done) {print "    include " d; done=1} cur=""; print; next}
-  cur==g && $1=="include" && $2==d && m=="del" {next}
+[ "$1 $2" = "object-group fqdn" ] && { [ "$4" = include ] || [ "$4" = exclude ]; } || { echo "error: unknown command"; exit 1; }
+g=$3 k=$4 d=$5
+awk -v g="$g" -v k="$k" -v d="$d" -v m="$mode" '
+  /^object-group fqdn / {if (cur==g && m=="add" && !done) {print "    " k " " d; done=1} cur=$3; print; next}
+  /^!/ {if (cur==g && m=="add" && !done) {print "    " k " " d; done=1} cur=""; print; next}
+  cur==g && $1==k && $2==d && m=="del" {next}
   {print}
   END {if (!seen && m=="add" && !done) {}}' "$CFG" > "$CFG.new" && mv "$CFG.new" "$CFG"
 echo ok
 """
 
 RUNNING = """interface Wireguard0
+!
+object-group fqdn domain-list1
+    description "Youtube"
+    include youtube.com
+    exclude music.youtube.com
 !
 object-group fqdn MyVPN
     include old.example
@@ -335,5 +340,40 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("config-data must be GET only")
     if api("action=config", "op=wifi&target=ENABLED&value=0", "POST", tmp / "missing").get("error") != "action_unavailable":
         fail("missing helper must be reported")
+
+    # Keenetic domain lists: domains and exclusions edited, verified, saved;
+    # AdaptiveAuto, VWARD's group and missing lists are not touched here.
+    def kind(name, k):
+        cur, out = None, []
+        for line in cfg.read_text().splitlines():
+            if line.startswith("object-group fqdn "):
+                cur = line.split()[2]
+            elif line.startswith("!"):
+                cur = None
+            elif cur == name and line.split()[:1] == [k]:
+                out.append(line.split()[1])
+        return out
+    run("list-domain", "add", "domain-list1", "YTimg.com", expect="result=changed", rc=0)
+    if kind("domain-list1", "include") != ["youtube.com", "ytimg.com"]:
+        fail(f"list add: {kind('domain-list1', 'include')}")
+    run("list-domain", "add", "domain-list1", "ytimg.com", expect="result=unchanged", rc=0)
+    run("list-domain", "remove", "domain-list1", "youtube.com", expect="result=changed")
+    run("list-domain", "exclude", "domain-list1", "kids.youtube.com", expect="result=changed")
+    run("list-domain", "unexclude", "domain-list1", "music.youtube.com", expect="result=changed")
+    if kind("domain-list1", "include") != ["ytimg.com"] or kind("domain-list1", "exclude") != ["kids.youtube.com"]:
+        fail(f"list edits: {cfg.read_text()}")
+    if "system configuration save" not in (Path(str(cfg) + ".log")).read_text().splitlines()[-1]:
+        fail("a list change must be saved in Keenetic")
+    for group_name in ("AdaptiveAuto", "MyVPN", "domain-list1;x"):
+        run("list-domain", "add", group_name, "a.example", expect="error=invalid_group", rc=64)
+    run("list-domain", "add", "domain-list9", "a.example", expect="error=list_not_found")
+    run("list-domain", "add", "domain-list1", "bad domain", expect="error=invalid_domain", rc=64)
+    if post("op=list-domain&action=add&target=domain-list1&value=api.example")["result"] != "changed" or "api.example" not in kind("domain-list1", "include"):
+        fail("list-domain through the API")
+    ld = api("action=list-data&name=domain-list1")
+    if ld.get("description") != "Youtube" or "api.example" not in ld.get("include", []) or ld.get("exclude") != ["kids.youtube.com"]:
+        fail(f"list-data: {ld}")
+    if api("action=list-data&name=AdaptiveAuto").get("error") != "invalid_group" or api("action=list-data&name=domain-list9").get("error") != "list_not_found":
+        fail("list-data must refuse other groups and missing lists")
 
 print("CONSOLE_CONFIG=PASS")

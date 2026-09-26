@@ -234,7 +234,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control) ;;
+    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -685,6 +685,7 @@ if [ "$ACTION" = config ]; then
         domain-list|domain-list-watch) set -- "$OP" "$TARGET" "$VALUE" ;;
         update-feed) set -- "$OP" "$TARGET"; [ "$TARGET" != dev ] || REQUIRED=UPDATE_FEED_DEV ;;
         ext-auto) set -- "$OP" "$TARGET" "$VALUE" ;;
+        list-domain) set -- "$OP" "$ACT" "$TARGET" "$VALUE" ;;
         firmware) set -- "$OP" "$TARGET" "$VALUE"
             [ "$TARGET:$VALUE" = channel:preview ] || [ "$TARGET:$VALUE" = channel:draft ] && REQUIRED=FIRMWARE_CHANNEL_TEST ;;
         *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
@@ -2134,6 +2135,28 @@ if [ "$ACTION" = "update-data" ]; then
       '{ok:true,phase:$phase,busy:$busy,pending:{present:$pending,version:$version,priority:$priority,sequence:$sequence},rollback_available:$rollback,allowed:{check:$check_allowed,apply:$apply_allowed,retry:$retry_allowed,rollback:$rollback_allowed,recover:$recover_allowed},
         run:$run,engine:{version:$engine},
         last_apply:(if $la_changed < 0 then null else {version:$la_version,changed_files:$la_changed,fetched_bytes:$la_bytes,applied_at:$la_at} end)}'
+    exit 0
+fi
+
+# ---------- One Keenetic domain list: its domains and exclusions ----------
+if [ "$ACTION" = list-data ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    NAME="$(qget name)"
+    printf '%s\n' "$NAME" | grep -Eq '^domain-list[0-9]{1,3}$' || { echo '{"ok":false,"error":"invalid_group"}'; exit 0; }
+    RUNNING="$(ndm_cached running 10 "show running-config")"
+    [ -n "$RUNNING" ] || { echo '{"ok":false,"error":"router_config_unavailable"}'; exit 0; }
+    printf '%s\n' "$RUNNING" | awk -v g="$NAME" '
+        /^object-group fqdn / {cur=$3; if (cur == g) print "F\t"; next}
+        /^!/ {cur=""; next}
+        cur != g {next}
+        $1 == "description" {sub(/^[ \t]*description[ \t]+/, ""); gsub(/"/, ""); print "D\t" $0; next}
+        $1 == "include" {print "I\t" tolower($2); next}
+        $1 == "exclude" {print "E\t" tolower($2)}' |
+    "$JQ" -Rn --arg name "$NAME" '[inputs | split("\t")] as $r |
+        if ($r | map(select(.[0] == "F")) | length) == 0 then {ok:false, error:"list_not_found"}
+        else {ok:true, name:$name, description:([$r[] | select(.[0] == "D") | .[1]][0] // ""),
+              include:[$r[] | select(.[0] == "I") | .[1]], exclude:[$r[] | select(.[0] == "E") | .[1]]} end'
     exit 0
 fi
 

@@ -195,6 +195,8 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .st.ok{color:var(--ok)}
 .st.crit{color:var(--crit)}
 .st.warn{color:var(--warn)}
+small.st{display:inline-flex;align-items:center;gap:4px;margin-top:2px}
+small.st .icon{width:14px;height:14px}
 .row-acts{display:flex;align-items:center;gap:4px;margin-left:auto}
 .row-switch{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
 .icon-btn.allow{color:var(--ok)}
@@ -280,6 +282,8 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .confirm span{flex:1 1 200px}
 /* A confirmation for one row opens under it, across the whole row. */
 .row>.confirm{flex:1 1 100%;margin:4px 0 0}
+.row[hidden]{display:none}
+.list-filter{display:block;width:calc(100% - 32px);margin:0 16px 8px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* Окно установки обновления */

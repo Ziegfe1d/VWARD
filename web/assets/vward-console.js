@@ -129,7 +129,7 @@ const API_ERRORS = {
 const errText = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.error || '') ? 'роутер не принял настройку ' + x.error.slice(14).replace(/_/g, ' ') + ' - туннель не изменён' : '') || (x && x.error) || ('код ' + (x && x.rc));
 
 /* ---------- Данные ---------- */
-const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, ext: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
+const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, ext: null, listd: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
 const ADSV = { filter: 'all', search: '', blockedSearch: '' };
 // Files page: the open folder.
 const FILES = { root: '', path: '' };
@@ -137,7 +137,8 @@ const LOADERS = {
   status: () => apiGet('status'), route: () => apiGet('route-data'), update: () => apiGet('update-data'), lists: () => apiGet('lists-data'),
   security: () => apiGet('security-data'), diag: () => apiGet('diagnostics'), wifi: () => apiGet('wifi-data'),
   ads: () => apiGet('ads-data'), https: () => apiGet('ads-https-data'), config: () => apiGet('config-data'),
-  adsstats: () => apiGet('ads-view', { view: 'stats' }), agh: () => apiGet('ads-view', { view: 'agh' }), backups: () => apiGet('backup-data'), ext: () => apiGet('ext-update-data'), files: () => FILES.root ? apiGet('files', { op: 'list', root: FILES.root, path: FILES.path }) : Promise.resolve(null), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
+  adsstats: () => apiGet('ads-view', { view: 'stats' }), agh: () => apiGet('ads-view', { view: 'agh' }), backups: () => apiGet('backup-data'), ext: () => apiGet('ext-update-data'),
+  listd: () => current.startsWith('l-') ? apiGet('list-data', { name: current.slice(2) }) : Promise.resolve(null), files: () => FILES.root ? apiGet('files', { op: 'list', root: FILES.root, path: FILES.path }) : Promise.resolve(null), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
   qlog: () => apiGet('ads-view', { view: 'querylog', filter: ADSV.filter, search: ADSV.search }),
   review: () => apiGet('ads-view', { view: 'list', kind: 'review' }),
   cron: () => apiGet('cron-data'), auth: () => apiGet('auth'),
@@ -246,6 +247,7 @@ const DETAILS = {
   'd-force': { title: 'Всегда через VPN', parent: 'routes' },
   'd-dcats': { title: 'Категории доменов', parent: 'routes' },
   'd-adaptive': { title: 'AdaptiveAuto', parent: 'routes' },
+  'd-smartdns': { title: 'Smart DNS', parent: 'lists', data: ['lists', 'config'] },
   'd-services': { title: 'Проверяемые сервисы', parent: 'routes' },
   'd-ipcats': { title: 'Активные IP-категории', parent: 'routes' },
   'd-querylog': { title: 'Журнал запросов', parent: 'ads' },
@@ -267,6 +269,7 @@ function page(id) {
   if (p) return p;
   if (DETAILS[id]) return Object.assign({ id: id }, DETAILS[id]);
   if (id.startsWith('t-')) return { id: id, title: id.slice(2), parent: 'vpn' };
+  if (id.startsWith('l-')) { const l = ((S.lists && S.lists.lists) || []).find(x => x.name === id.slice(2)); return { id: id, title: l ? l.description || l.name : 'Список', parent: 'lists' }; }
   if (id.startsWith('w-')) return { id: id, title: typeof wifiName === 'function' ? wifiName(id.slice(2)) : id.slice(2), parent: 'wifi' };
   return null;
 }
@@ -404,6 +407,38 @@ function cardData(id) {
     case 'storage': { const t = num(g.total_kb), f = num(g.free_kb), used = t ? Math.round((t - f) / t * 100) : null; return { icon: 'storage', title: 'Хранилище', to: 'system', value: fmtKB(f), sub: 'свободно' + (t ? ' из ' + fmtKB(t) : '') + (g.filesystem ? ' · ' + g.filesystem : ''), pill: used == null ? ['', '—'] : used > 90 ? ['warn', used + ' %'] : ['ok', used + ' %'], meter: used }; }
   }
   return null;
+}
+
+// How a Keenetic domain list goes: through which tunnel, around VPN or nowhere.
+function listPath(l) {
+  const tuns = (st().wg && st().wg.interfaces) || [];
+  return tuns.length > 1 && l.route && tuns.some(t => t.name === l.route) ? 'через ' + tunLabel(l.route) : viaIs(l, 'vpn') ? 'через VPN' : viaIs(l, 'bypass') ? 'в обход VPN' + (l.doh.length ? ', Smart DNS: ' + l.doh.join(', ') : '') : viaIs(l, 'none') ? 'без маршрута' : 'через ' + l.route;
+}
+let listWant = '';
+// One Keenetic domain list: where it goes, its domains and exclusions, all editable here.
+function listPage(name) {
+  const l = ((S.lists && S.lists.lists) || []).find(x => x.name === name), d = S.listd, ok = cfgOk();
+  const tuns = (st().wg && st().wg.interfaces) || [];
+  if (!l) return loadError(['lists']) + panel('Список', empty(S.lists ? 'Такого списка нет в Keenetic' : 'Загрузка…'));
+  if ((!d || d.name !== name) && listWant !== name) { listWant = name; load('listd', true).then(render); }
+  const fresh = d && d.name === name, title = l.description || l.name, can = ok && (viaIs(l, 'vpn') || viaIs(l, 'bypass'));
+  const rm = (act, v, label) => '<button class="icon-btn" type="button" data-list-dom="' + act + '" data-dom="' + esc(v) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (ok ? '' : ' disabled') + '>' + ico('close') + '</button>';
+  const addF = (kind, ph) => '<form class="inline-form" data-form="list-add" data-kind="' + kind + '"><input class="input" name="domain" placeholder="' + esc(ph) + '" aria-label="Домен" autocomplete="off"' + (ok ? '' : ' disabled') + '><button class="btn" type="submit"' + (ok ? '' : ' disabled') + '>Добавить</button></form>';
+  const inc = fresh ? d.include : [], exc = fresh ? d.exclude : [];
+  return cfgNote() + (fresh || !d || !d.error ? '' : '<p class="field-warn">' + esc(errText(d)) + '</p>') +
+    panel(title, '<dl class="kv">' +
+      (tuns.length > 1 ? ctrlRow('Куда идёт', listViaSel(l, tuns, ok)) : ctrlRow('В обход VPN', sw('data-list-bypass="' + esc(l.name) + '"', viaIs(l, 'bypass'), 'В обход VPN: ' + title, !can), viaIs(l, 'bypass') ? 'сейчас идёт через провайдера' : 'сейчас идёт через VPN')) +
+      ctrlRow('Следить', sw('data-list-watch="' + esc(l.name) + '"', l.watch, 'Следить: ' + title, !ok), 'если в обход VPN сервис перестанет открываться, VWARD сам переведёт список на VPN') + '</dl>' +
+      kv([['Адресов узнано', l.addresses != null ? fmtInt(l.addresses) : '—', '', null, '', 'IP-адреса, которые Keenetic получил для доменов списка']]) +
+      (l.smartdns_conflict ? '<p class="field-warn">В списке есть домены Smart DNS: их общий адрес уйдёт в VPN, и Smart DNS перестанет работать для всех сервисов. Переведите список в обход VPN или уберите эти домены.</p>' : '') +
+      (l.auto && viaIs(l, 'vpn') ? '<p class="field-warn">Переведён на VPN автоматически ' + esc(l.auto.at) + ': не открылся ' + esc(l.auto.host) + '</p>' : '')) +
+    panel('Домены', addF('add', 'например, example.com') +
+      (inc.length > 8 ? '<input class="input list-filter" data-list-filter placeholder="Найти в списке" aria-label="Найти домен в списке" autocomplete="off">' : '') +
+      (!fresh ? empty('Загрузка…') : inc.length ? '<ul class="rows" data-list-rows>' + inc.map(v => '<li class="row" data-d="' + esc(v) + '"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('remove', v, 'Убрать ' + v + ' из списка') + '</span></li>').join('') + '</ul>' : empty('В списке нет доменов')),
+      { desc: fmtInt(inc.length || l.count) + ' ' + plural(inc.length || l.count, 'домен', 'домена', 'доменов') + '. Домен действует вместе с поддоменами. Изменения сразу сохраняются в Keenetic.' }) +
+    panel('Исключения', addF('exclude', 'поддомен, который не входит в список') +
+      (!fresh ? '' : exc.length ? '<ul class="rows">' + exc.map(v => '<li class="row"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('unexclude', v, 'Убрать исключение ' + v) + '</span></li>').join('') + '</ul>' : empty('Исключений нет')),
+      { desc: 'Поддомены, которые идут мимо этого списка, хотя их домен в нём есть.' });
 }
 
 // A card is marked only when something needs attention: «Норма» on every card said nothing.
@@ -781,23 +816,29 @@ const RENDER = {
   },
   lists() {
     if (!S.lists) return loadError(['lists']) + panel('Доменные списки', empty('Загрузка…'));
-    const L = S.lists, items = L.lists || [], ok = cfgOk(), tuns = (st().wg && st().wg.interfaces) || [];
-    const path = l => tuns.length > 1 && l.route && tuns.some(t => t.name === l.route) ? 'через ' + tunLabel(l.route) : viaIs(l, 'vpn') ? 'через VPN' : viaIs(l, 'bypass') ? 'в обход VPN' + (l.doh.length ? ', Smart DNS: ' + l.doh.join(', ') : '') : viaIs(l, 'none') ? 'без маршрута' : 'через ' + l.route;
-    const row = l => {
-      const can = ok && (viaIs(l, 'vpn') || viaIs(l, 'bypass')), title = l.description || l.name;
-      return '<li class="row"><div class="row-main"><b>' + esc(title) + '</b><small>' + fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + ' · ' + esc(path(l)) + (l.addresses != null && l.route ? ' · адресов узнано: ' + fmtInt(l.addresses) : '') + '</small>' +
-        (l.smartdns_conflict ? '<small class="field-warn">В списке есть домены Smart DNS: их общий адрес уйдёт в VPN, и Smart DNS перестанет работать для всех сервисов. Переведите список в обход VPN или уберите эти домены.</small>' : '') +
-        (l.auto && viaIs(l, 'vpn') ? '<small class="field-warn">Переведён на VPN автоматически ' + esc(l.auto.at) + ': не открылся ' + esc(l.auto.host) + '</small>' : '') + '</div>' +
-        '<span class="row-acts">' + (tuns.length > 1 ? listViaSel(l, tuns, ok) : '<label class="row-switch">В обход VPN' + sw('data-list-bypass="' + esc(l.name) + '"', viaIs(l, 'bypass'), 'В обход VPN: ' + title, !can) + '</label>') +
-        '<label class="row-switch">Следить' + sw('data-list-watch="' + esc(l.name) + '"', l.watch, 'Следить: ' + title, !ok) + '</label></span></li>';
-    };
+    const L = S.lists, items = L.lists || [], ok = cfgOk(), path = listPath;
+    // A row opens its list: switches, domains and exclusions live there.
+    const row = l => '<li class="row link" role="button" tabindex="0" data-go="l-' + esc(l.name) + '"><div class="row-main"><b>' + esc(l.description || l.name) + '</b><small>' + fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + ' · ' + esc(path(l)) + '</small>' +
+      (l.smartdns_conflict || (l.auto && viaIs(l, 'vpn')) ? '<small class="st warn">' + ico('alert') + (l.smartdns_conflict ? 'конфликт со Smart DNS' : 'переведён на VPN автоматически') + '</small>' : '') + '</div>' + ico('chevron', 'chev') + '</li>';
+    const sd = L.smartdns_domains || [];
     return cfgNote() + panel('Доменные списки', items.length ? '<ul class="rows">' + items.map(row).join('') + '</ul>' : empty('В Keenetic нет доменных списков'),
-      { desc: '«В обход VPN» выключен — список идёт через ' + (L.tunnel ? 'туннель ' + L.tunnel : 'VPN') + ((L.smartdns_domains || []).length ? ', строки Smart DNS его доменов (в ' + smartdnsWhere(L) + ') на это время убираются' : '') + '. «Следить» — если сервис из списка, идущего в обход VPN, перестанет открываться, VWARD сам переведёт список на VPN.' }) +
-      panel('Smart DNS', '<dl class="kv">' + ctrlRow('Защита Smart DNS', sw('data-smartdns-guard', L.smartdns_guard !== false, 'Защита Smart DNS', !ok), 'AdaptiveAuto не отправляет домены Smart DNS в VPN') + '</dl>' +
-        kv([['Где настроен', smartdnsWhere(L)],
-          L.doh_limit && L.doh_used ? ['Строк в Keenetic', fmtInt(L.doh_used) + ' из ' + fmtInt(L.doh_limit), L.doh_used >= L.doh_limit ? 'warn' : ''] : null,
-          ['Домены', (L.smartdns_domains || []).join(', ') || 'нет']]),
-        { desc: 'Smart DNS отвечает на все свои домены одним адресом прокси. Если этот адрес уйдёт в VPN, перестанут работать все сервисы Smart DNS сразу.' + (L.doh_limit ? ' Keenetic хранит не больше ' + L.doh_limit + ' строк DNS-over-HTTPS.' : '') });
+        { desc: 'Нажмите на список, чтобы изменить его домены и куда он идёт.' }) +
+      panel('Smart DNS', kv([
+        ['Защита Smart DNS', L.smartdns_guard !== false ? 'включена' : 'выключена', L.smartdns_guard !== false ? '' : 'warn', 'd-smartdns'],
+        ['Домены', sd.length ? sd.length + ' ' + plural(sd.length, 'домен', 'домена', 'доменов') + ' · ' + smartdnsWhere(L) : 'нет', '', 'd-smartdns']
+      ]));
+  },
+  'd-smartdns'() {
+    const L = S.lists;
+    if (!L) return loadError(['lists']) + panel('Smart DNS', empty('Загрузка…'));
+    const sd = L.smartdns_domains || [], src = L.smartdns_sources || {}, ok = cfgOk();
+    const from = d => ((src.adguard || []).includes(d) ? 'AdGuard Home' : '') + ((src.keenetic || []).includes(d) ? ((src.adguard || []).includes(d) ? ' и ' : '') + 'Keenetic' : '');
+    return cfgNote() +
+      panel('Защита', '<dl class="kv">' + ctrlRow('Защита Smart DNS', sw('data-smartdns-guard', L.smartdns_guard !== false, 'Защита Smart DNS', !ok), 'AdaptiveAuto не отправляет эти домены в VPN') + '</dl>' +
+        (L.doh_limit ? kv([['Строк DNS-over-HTTPS в Keenetic', fmtInt(L.doh_used || 0) + ' из ' + fmtInt(L.doh_limit), L.doh_used >= L.doh_limit ? 'warn' : '']]) : ''),
+        { desc: 'Smart DNS отвечает на все свои домены одним адресом прокси. Если этот адрес уйдёт в VPN, перестанут работать все сервисы Smart DNS сразу.' }) +
+      panel('Домены Smart DNS', sd.length ? '<ul class="rows">' + sd.map(d => '<li class="row"><div class="row-main"><b>' + dom(d) + '</b><small>' + esc(from(d) || smartdnsWhere(L)) + '</small></div></li>').join('') + '</ul>' : empty('Smart DNS не настроен'),
+        { desc: (src.adguard || []).length ? 'Эти домены заданы в AdGuard Home: «Настройки» → «Настройки DNS» → «Upstream DNS-серверы», строки вида [/домен/]адрес. VWARD их читает, но не меняет: Smart DNS - ваша настройка.' : 'Эти домены заданы в Keenetic: «Интернет-фильтры» → DNS-over-HTTPS. VWARD их читает, но не меняет.' });
   },
   'd-adaptive'() {
     const list = S.config ? cfgRoute().adaptive || [] : (S.route && S.route.adaptive && S.route.adaptive.recent) || [];
@@ -1353,7 +1394,7 @@ function render() {
   back.classList.toggle('detail', !!p.parent);
   back.hidden = current === 'overview';
   back.setAttribute('aria-label', p.parent ? 'Назад: ' + page(p.parent).title : 'Назад к обзору');
-  const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('deps-') ? depsPage(comp(current.slice(5))) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
+  const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('deps-') ? depsPage(comp(current.slice(5))) : current.startsWith('l-') ? listPage(current.slice(2)) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
   patchContent(html, rendered !== current);
   rendered = current;
   document.querySelectorAll('.tabbar.preview').forEach(t => t.style.setProperty('--tabs', tabIds.length + 1));
@@ -1378,6 +1419,7 @@ async function refreshPage() {
   const id = current, keys = DATA_FOR(id).slice();
   if (id === 'logs') { loadLog(logTab); return; }
   if (id.startsWith('t-')) keys.push('status', 'lists');
+  if (id.startsWith('l-')) keys.push('listd');
   if (id.startsWith('w-')) keys.push('wifi');
   if (id === 'd-https' || id === 'ads') keys.push('https');
   if (id === 'd-notes') notesVersions().forEach(v => loadNotes(v));
@@ -1434,7 +1476,7 @@ const SEARCH_INDEX = [
   ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Файлы'], ['system', 'Свободно'],
   ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Автоматическое восстановление'], ['wan', 'История восстановлений'],
   ['settings', 'Только зарегистрированные устройства'], ['vpn', 'Автоматическая защита'], ['vpn', 'Трафик списков'], ['vpn', 'Проверка туннеля'],
-  ['lists', 'Где настроен'],
+  ['d-smartdns', 'Защита Smart DNS'],
   ['routes', 'Туннель для маршрутов'], ['routes', 'AdaptiveAuto'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
   ['ads', 'Настройки AdGuard Home'], ['ads', 'Последняя проверка'], ['ads', 'Правила уходят'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
@@ -1675,6 +1717,7 @@ document.addEventListener('click', e => {
   if (t.dataset.filesUp) { if (FILES.path) filesGo(FILES.root, FILES.path.split('/').slice(0, -1).join('/')); else filesGo('', ''); return; }
   if (t.dataset.backupRestore) { confirm = { id: 'backup-restore', name: t.dataset.backupRestore }; render(); return; }
   if (t.dataset.aghFilterRm) { confirm = { id: 'agh-filter-remove', url: t.dataset.aghFilterRm }; render(); return; }
+  if (t.dataset.listDom) { const v = t.dataset.dom, how = t.dataset.listDom; t.disabled = true; cfgSet({ op: 'list-domain', action: how, target: current.slice(2), value: v }, how === 'remove' ? v + ' убран из списка' : 'Исключение ' + v + ' убрано', ['listd', 'lists']); return; }
   if (t.dataset.cfgOp === 'tsubnet') { t.disabled = true; tunnelSubnet(current.slice(2), 'remove', t.dataset.cfgTarget); return; }
   if (t.dataset.cfgOp) { const d = t.dataset.cfgTarget, msg = { 'route-domain': d + ' убран из VPN', 'force-vpn': d + ' убран из списка', adaptive: t.dataset.cfgAction === 'pin' ? d + ' закреплён в моих доменах' : d + ' идёт напрямую' }[t.dataset.cfgOp]; t.disabled = true; cfgSet({ op: t.dataset.cfgOp, action: t.dataset.cfgAction, target: d }, msg, ['route']); return; }
   if (t.dataset.wifiBind) { confirm = { id: 'wifi-bind', op: t.dataset.wifiBind }; render(); return; }
@@ -1735,6 +1778,12 @@ document.addEventListener('keydown', e => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.getAttribute && e.target.getAttribute('role') === 'button') { e.preventDefault(); e.target.click(); }
 });
 document.addEventListener('input', e => { if (e.target.id === 'searchInput') renderResults(e.target.value); });
+// Filters a long list in place: no re-render per key press.
+document.addEventListener('input', e => {
+  if (!e.target.hasAttribute('data-list-filter')) return;
+  const q = e.target.value.trim().toLowerCase();
+  document.querySelectorAll('[data-list-rows] > li').forEach(li => { li.hidden = !!q && !li.dataset.d.includes(q); });
+});
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.dataset.tabpick) {
@@ -1839,6 +1888,13 @@ document.addEventListener('submit', async e => {
       box.innerHTML = x.type === 'ip' ? kv([['Адрес', x.value], ['Категории', (x.policy_matches || []).map(m => m.category).join(', ') || 'нет'], ['Маршрут VWARD', x.configured_route ? 'через ' + x.interface : 'нет', x.configured_route ? 'info' : '']])
         : kv([['Домен', x.value], ['IPv4', ((x.dns && x.dns.ipv4) || []).join(', ') || 'не найден'], ['Группы', (x.groups || []).join(', ') || 'нет'], ['Маршрут', (x.routes || []).map(r => r.group + ' → ' + r.interface).join(', ') || 'напрямую', (x.routes || []).length ? 'info' : ''], ['AdaptiveAuto', x.adaptive_auto ? 'Да' : 'Нет']]);
     } catch (err) { box.innerHTML = '<p class="field-warn">Ошибка: ' + esc(err.message) + '</p>'; }
+  }
+  if (f === 'list-add') {
+    const input = e.target.querySelector('input'), v = input.value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/:].*$/, '').replace(/^\*\./, '');
+    if (!DOMAIN.test(v)) { toast('Введите домен, например example.com'); return; }
+    const kind = e.target.dataset.kind;
+    const x = await cfgSet({ op: 'list-domain', action: kind, target: current.slice(2), value: v }, kind === 'add' ? v + ' добавлен в список' : v + ' добавлен в исключения', ['listd', 'lists']);
+    if (x && x.ok) { const again = document.querySelector('form[data-form="list-add"][data-kind="' + kind + '"] input'); if (again) again.value = ''; }
   }
   if (f === 'cfg-add') {
     const input = e.target.querySelector('input'), v = input.value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/:].*$/, '').replace(/^\*\./, '');

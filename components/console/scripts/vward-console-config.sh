@@ -254,6 +254,43 @@ route_group_change() {
 
 # ---------- Operations ----------
 
+# op_list_domain add|remove|exclude|unexclude GROUP DOMAIN: edit a Keenetic
+# domain list (domain-listN).  Verified from the router's configuration and
+# undone when it does not match; AdaptiveAuto and VWARD's own group are not
+# edited here.
+op_list_domain() {
+    case "$1" in
+        add) ld_kind=include; ld_want=1 ;;
+        remove) ld_kind=include; ld_want=0 ;;
+        exclude) ld_kind=exclude; ld_want=1 ;;
+        unexclude) ld_kind=exclude; ld_want=0 ;;
+        *) die invalid_operation 64 ;;
+    esac
+    printf '%s\n' "$2" | grep -Eq '^domain-list[0-9]{1,3}$' || die invalid_group 64
+    valid_domain "$3" || die invalid_domain 64
+    load_profile_base
+    change_lock
+    snapshot
+    grep -q "^object-group fqdn $2\$" "$RUNCFG" || die list_not_found
+    ld_has() {
+        awk -v g="$2" -v d="$3" -v k="$ld_kind" '
+            /^object-group fqdn / {cur=$3; next}
+            /^!/ {cur=""; next}
+            cur==g && $1==k && tolower($2)==d {found=1}
+            END {exit found ? 0 : 1}' "$RUNCFG"
+    }
+    ld_have=0; ld_has "$@" && ld_have=1
+    [ "$ld_want" != "$ld_have" ] || done_ok "list-domain $1 $2 $3" unchanged
+    if [ "$ld_want" = 1 ]; then ld_cmd="object-group fqdn $2 $ld_kind $3"; ld_undo="no $ld_cmd"
+    else ld_cmd="no object-group fqdn $2 $ld_kind $3"; ld_undo="object-group fqdn $2 $ld_kind $3"; fi
+    ndm "$ld_cmd" || die router_rejected
+    snapshot
+    ld_have=0; ld_has "$@" && ld_have=1
+    [ "$ld_want" = "$ld_have" ] || { ndm "$ld_undo"; die verification_failed; }
+    save_router || die config_save_failed
+    done_ok "list-domain $1 $2 $3" changed
+}
+
 op_route_domain() {
     case "$1" in add|remove) ;; *) die invalid_operation 64 ;; esac
     valid_domain "$2" || die invalid_domain 64
@@ -1564,7 +1601,7 @@ OP=$1; shift
 case "$OP" in
     tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
-    tunnel-subnet) [ "$#" -eq 3 ] || die usage 64 ;;
+    tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
     wifi-host) [ "$#" -eq 3 ] || die usage 64 ;;
     *) [ "$#" -eq 2 ] || die usage 64 ;;
 esac
@@ -1574,6 +1611,7 @@ case "$OP" in wifi|update|wan-param|tunnel|domain-list|domain-list-watch|tunnel-
 case "$OP" in ext-upgrade|ext-auto|firmware) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 ARG3=${3:-}
 case "$OP" in route-domain|force-vpn|adaptive) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
+case "$OP" in list-domain) ARG3=$(printf '%s' "$ARG3" | tr 'A-Z' 'a-z') ;; esac
 
 ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$ADMISSION_LIB" ] || die admission_unavailable
@@ -1615,6 +1653,7 @@ case "$OP" in
     backup-restore) op_backup_restore "$ARG1" ;;
     tunnel-delete) op_tunnel_delete "$ARG1" "$ARG2" ;;
     tunnel-subnet) op_tunnel_subnet "$ARG1" "$ARG2" "$ARG3" ;;
+    list-domain) op_list_domain "$ARG1" "$ARG2" "$ARG3" ;;
     ext-check) op_ext_check ;;
     ext-daily) op_ext_daily ;;
     ext-upgrade) op_ext_upgrade "$ARG1" "$ARG2" ;;
