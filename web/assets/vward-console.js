@@ -785,7 +785,8 @@ const RENDER = {
       '<button class="icon-btn" type="button" data-act="log-wrap" aria-pressed="' + logWrap + '" aria-label="Перенос строк" title="Перенос строк">' + ico('wrap') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-reload" aria-label="Обновить журнал" title="Обновить журнал">' + ico('refresh') + '</button></div></div><div class="panel">' +
       '<div class="segmented" role="group" aria-label="Журнал">' + LOG_TABS.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
-      '<pre class="logbox' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + esc(text == null ? 'Загрузка…' : text) + '</pre></div></section>';
+      '<pre class="logbox' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + esc(text == null ? 'Загрузка…' : text) + '</pre>' +
+      '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p></div></section>';
   },
 
   'd-components'() {
@@ -1476,11 +1477,21 @@ async function refreshPage() {
   const draw = () => { if (current === id && !editing && !document.activeElement.matches('input,select,textarea')) render(); };
   await Promise.all(keys.map(k => load(k).then(draw, draw)));
 }
+// The open journal follows the router: on opening, every REFRESH_SEC while shown,
+// on coming back to the tab, and right before it is saved.
 async function loadLog(tab, force) {
   if (!force && S.logs[tab] != null) { render(); }
-  try { S.logs[tab] = await apiText('log', { name: tab, count: 200 }); }
+  try { S.logs[tab] = await apiText('log', { name: tab, count: 200 }); S.loadedAt['log:' + tab] = Date.now(); }
   catch (e) { S.logs[tab] = 'Журнал недоступен: ' + e.message; }
-  if (current === 'logs' && logTab === tab) { const b = $('logBox'); if (b) b.textContent = S.logs[tab]; else render(); }
+  if (current === 'logs' && logTab === tab) {
+    const b = $('logBox'), at = $('logAt');
+    if (b && at) { if (b.textContent !== S.logs[tab]) b.textContent = S.logs[tab]; at.textContent = logStamp(tab); } else render();
+  }
+  return S.logs[tab];
+}
+function logStamp(tab) {
+  const t = S.loadedAt['log:' + tab];
+  return t ? 'Обновлено в ' + new Date(t).toLocaleTimeString('ru-RU') + ' · обновляется само' : '';
 }
 
 /* ---------- Всплывающие панели ---------- */
@@ -1839,7 +1850,7 @@ document.addEventListener('click', e => {
     if (navigator.share) navigator.share({ title: 'Журнал VWARD: ' + logLabel(logTab), text: text }).catch(err => { if (err && err.name !== 'AbortError') toast('Поделиться не удалось - используйте «Сохранить»'); });
     else toast('«Поделиться» недоступно в этом браузере - используйте «Копировать» или «Сохранить»');
   }
-  else if (a === 'log-save') download('vward-' + logTab + '-' + today() + '.txt', S.logs[logTab] || '');
+  else if (a === 'log-save') { const tab = logTab; loadLog(tab, true).then(text => download('vward-' + tab + '-' + today() + '.txt', text || '')); }
   else if (a === 'log-save-all') {
     Promise.all(LOG_TABS.map(tb => apiText('log', { name: tb.id, count: 200 }).then(x => '===== ' + tb.label + ' =====\n' + x, e => '===== ' + tb.label + ' =====\nнедоступен: ' + e.message)))
       .then(parts => download('vward-logs-' + today() + '.txt', parts.join('\n\n')));
@@ -2080,7 +2091,7 @@ function tick() {
   else if (updOverlay && !updOverlay.done && !updOverlay.manual && ph === 'IDLE' && updOverlay.seenBusy) updOverlayShow({ done: true, ok: true, version: plat().version });
   if (updOverlay && UPD_BUSY.includes(ph)) updOverlay.seenBusy = true;
   if (theme === 'time') applyTheme();
-  if (current !== 'logs') refreshPage();
+  if (current !== 'logs') refreshPage(); else loadLog(logTab, true);
   load('status', true).then(renderNav);
 }
 function restartTimer() {
@@ -2088,7 +2099,10 @@ function restartTimer() {
   timer = setInterval(tick, REFRESH_SEC * 1000);
 }
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && Date.now() - (S.loadedAt.status || 0) >= REFRESH_SEC * 1000) tick();
+  if (document.hidden) return;
+  // tick() reloads the open journal too; otherwise the journal alone.
+  if (Date.now() - (S.loadedAt.status || 0) >= REFRESH_SEC * 1000) tick();
+  else if (current === 'logs') loadLog(logTab, true);
 });
 
 $('backBtn').innerHTML = ico('back');

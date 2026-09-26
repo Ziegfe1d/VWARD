@@ -337,3 +337,4 @@ small.st .icon{width:14px;height:14px}
 .seg-slider[data-i="2"] .seg-thumb{transform:translateX(200%)}
 .seg-slider.off .seg-thumb{background:var(--faint)}
 @media (prefers-reduced-motion:reduce){.seg-thumb,.seg-slider button{transition:none}}
+.log-at{margin:6px 2px 0;color:var(--faint);font-size:var(--fs-xs)}
