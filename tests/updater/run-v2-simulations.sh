@@ -284,5 +284,34 @@ run --check; rc=$?
 check 'the installed release in another manifest is not a replay' sh -c '[ "$1" -eq 10 ] && ! grep -q "replay" "$2"' sh "$rc" "$WORK/last.out"
 check 'the installed files stay' [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = route-installed ]
 
+# 16. «Проверить» from the Console: the per-file feed, as the watch reads it,
+# even though update.conf names the full-package one; the same release seen
+# first in the v1 feed (another hash, same sequence and id) is no replay.
+new_root feeds
+printf '%s\n' 'manifest_url=https://example.invalid/updates/dev/update-manifest.json' >> "$CONFIG"
+make_manifest feeds 0.2.0-rc.2 10 "$CUR_ENGINE"
+cp "$MANIFEST" "$WORK/feed-v2.json"
+jq '.signed.schema = 1 | .signed.files_base = "x"' "$WORK/feed-v2.json" > "$WORK/feed-v1.signed"
+jq '.signed' "$WORK/feed-v1.signed" | jq -cS . > "$WORK/feed-v1.c"
+openssl pkeyutl -sign -inkey "$WORK/private.pem" -rawin -in "$WORK/feed-v1.c" -out "$WORK/feed-v1.sig"
+jq --arg sig "$(openssl base64 -A -in "$WORK/feed-v1.sig")" '.signature = $sig' "$WORK/feed-v1.signed" > "$WORK/feed-v1.json"
+mkdir -p "$WORK/bin-feeds"
+cat > "$WORK/bin-feeds/curl" <<CURL
+#!/bin/sh
+out=""; url=""; code=0
+while [ \$# -gt 0 ]; do case "\$1" in --output) out=\$2; shift ;; --write-out) code=1; shift ;; -*) ;; *) url=\$1 ;; esac; shift; done
+case "\$url" in */v2/manifest.json) cp "$WORK/feed-v2.json" "\$out" ;; */update-manifest.json) cp "$WORK/feed-v1.json" "\$out" ;; *) exit 22 ;; esac
+[ "\$code" = 0 ] || printf 200
+CURL
+chmod +x "$WORK/bin-feeds/curl"
+printf 'highest_seen_sequence=10\nhighest_seen_update_id=test-v2-10\nhighest_seen_manifest_hash=from-the-v1-feed\n' > "$ROOT/opt/var/lib/vward/updater/trust.state"
+PATH=$WORK/bin-feeds:$PATH VWARD_ROOT_PREFIX=$ROOT VWARD_UPDATE_CONFIG=$CONFIG VWARD_TEST_FILES_DIR=$FILES \
+    VWARD_UPDATER_ROOT=$SLOTS "$SLOTS/current/vward-update.sh" --check > "$WORK/last.out" 2>&1; rc=$?
+check 'a check takes the per-file feed and the v1-seen release is no replay' sh -c '[ "$1" -eq 0 ] && jq -e ".signed.schema == 2" "$2" >/dev/null' sh "$rc" "$ROOT/opt/var/lib/vward/updater/pending/manifest.json"
+printf 'highest_seen_sequence=10\nhighest_seen_update_id=someone-else\nhighest_seen_manifest_hash=x\n' > "$ROOT/opt/var/lib/vward/updater/trust.state"
+PATH=$WORK/bin-feeds:$PATH VWARD_ROOT_PREFIX=$ROOT VWARD_UPDATE_CONFIG=$CONFIG VWARD_TEST_FILES_DIR=$FILES \
+    VWARD_UPDATER_ROOT=$SLOTS "$SLOTS/current/vward-update.sh" --check > "$WORK/last.out" 2>&1; rc=$?
+check 'the same sequence with another update id is still a replay' [ "$rc" -eq 32 ]
+
 printf 'v2 simulations: %s passed, %s failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]

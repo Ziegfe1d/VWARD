@@ -38,7 +38,17 @@ fetch_and_verify_manifest() {
         cp "$VWARD_TEST_MANIFEST" "$manifest" || return "$VU_VERIFY_ERROR"
     else
         [ -n "$manifest_url" ] || return "$VU_CONFIG_ERROR"
-        vu_fetch_bounded "$manifest_url" "$manifest" "$max_manifest_size" || return "$VU_NETWORK_ERROR"
+        # The per-file (v2) feed first, as the hourly watch reads it: a check
+        # from the Console must not put the full-package manifest in its place.
+        # The v1 feed only for a channel without a v2 one.
+        feed_v2=$(vu_v2_url 2>/dev/null || :)
+        feed_rc=44
+        [ -z "$feed_v2" ] || { vu_fetch_feed "$feed_v2" "$manifest" "$max_manifest_size"; feed_rc=$?; }
+        case "$feed_rc" in
+            0) ;;
+            44) vu_fetch_bounded "$manifest_url" "$manifest" "$max_manifest_size" || return "$VU_NETWORK_ERROR" ;;
+            *) return "$VU_NETWORK_ERROR" ;;
+        esac
     fi
     manifest_bytes=$(wc -c < "$manifest" | tr -d ' ')
     [ "$manifest_bytes" -le "$max_manifest_size" ] || return "$VU_VERIFY_ERROR"

@@ -50,7 +50,7 @@ important_max_delay_seconds=7200
 routine_max_delay_seconds=86400
 # This engine's own version: a manifest may ask for a newer one (min_updater_version),
 # and a signed manifest carrying a newer engine makes it update itself.
-VU_ENGINE_VERSION=2.0.1
+VU_ENGINE_VERSION=2.0.2
 minimum_updater_version=$VU_ENGINE_VERSION
 manifest_v2_url=
 
@@ -585,12 +585,14 @@ vu_trust_check_and_maybe_advance() {
     signed_hash=$(vu_signed_hash "$manifest") || return "$VU_VERIFY_ERROR"
     highest=$(vu_trust_get highest_seen_sequence 2>/dev/null || vu_committed_get last_sequence 2>/dev/null || printf '0')
     highest_id=$(vu_trust_get highest_seen_update_id 2>/dev/null || vu_committed_get installed_update_id 2>/dev/null || :)
-    highest_hash=$(vu_trust_get highest_seen_manifest_hash 2>/dev/null || vu_committed_get manifest_hash 2>/dev/null || :)
     if [ "$sequence" -lt "$highest" ]; then
         return "$VU_COMPAT_ERROR"
     fi
     if [ "$sequence" -eq "$highest" ]; then
-        [ "$update_id" = "$highest_id" ] && [ "$signed_hash" = "$highest_hash" ] || return "$VU_COMPAT_ERROR"
+        # One release is signed twice, for the full-package (v1) and the
+        # per-file (v2) feed: the same sequence and update_id with another
+        # hash is that release, not a replay.  Another update_id still is.
+        [ "$update_id" = "$highest_id" ] || return "$VU_COMPAT_ERROR"
         return "$VU_OK"
     fi
     [ "$persist" = 1 ] || return "$VU_OK"
@@ -789,6 +791,25 @@ vu_manifest_space_preflight() {
     mkdir -p "$VU_STAGING_DIR" || return 1
     staging_free=$(vu_free_kb staging "$VU_STAGING_DIR")
     [ -n "$staging_free" ] && [ "$staging_free" -ge "$required_kb" ]
+}
+
+# vu_fetch_feed URL OUTPUT MAX: 0 fetched, 44 no such feed (404), 1 failed.
+vu_fetch_feed() {
+    url=$1 output=$2 max_bytes=$3
+    case "$url" in https://*) ;; *) return 1 ;; esac
+    tmp=$output.part.$$
+    rm -f "$tmp"
+    code=$(curl --silent --show-error --location --proto '=https' --tlsv1.2 \
+        --connect-timeout 15 --max-time 180 --retry 3 \
+        --max-filesize "$max_bytes" --output "$tmp" --write-out '%{http_code}' "$url") || { rm -f "$tmp"; return 1; }
+    case "$code" in
+        200) ;;
+        404) rm -f "$tmp"; return 44 ;;
+        *) rm -f "$tmp"; return 1 ;;
+    esac
+    size=$(wc -c < "$tmp" | tr -d ' ')
+    [ "$size" -le "$max_bytes" ] || { rm -f "$tmp"; return 1; }
+    mv -f "$tmp" "$output"
 }
 
 vu_fetch_bounded() {
