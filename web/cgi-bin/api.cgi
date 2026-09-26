@@ -2235,7 +2235,8 @@ if [ "$ACTION" = "log" ]; then
             FILE=/opt/var/log/vward-route-engine-events.log
             ;;
         updater)
-            FILE=/opt/var/log/vward/updater-watch.log
+            # Every engine run, from the hourly watch and from the Console alike.
+            FILE=/opt/var/log/vward/updater.log
             ;;
         tunnel)
             FILE=/opt/var/log/vward-tunnel-guard.log
