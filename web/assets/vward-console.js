@@ -98,6 +98,7 @@ async function apiPost(action, fields) {
   return r.json();
 }
 const API_ERRORS = {
+  not_upgradable: 'обновление уже не нужно - проверьте ещё раз', ext_update_busy: 'уже идёт проверка или установка',
   notes_unavailable: 'описание версии не найдено', invalid_version: 'неверная версия',
   smartdns_agh_failed: 'AdGuard Home не принял изменение строк Smart DNS', smartdns_agh_unavailable: 'модуль AdGuard Home не установлен', upstream_file_unsupported: 'upstream AdGuard Home заданы файлом - строки Smart DNS меняйте в нём вручную',
   this_device_not_registered: 'это устройство не зарегистрировано в Keenetic - вы потеряли бы доступ', devices_unavailable: 'список устройств Keenetic сейчас недоступен', device_not_registered: 'устройство не зарегистрировано в Keenetic', host_not_allowed: 'VWARD открыт по чужому имени - откройте его по IP-адресу роутера или добавьте имя в ALLOWED_HOSTS файла /opt/etc/vward/console/auth.conf',
@@ -646,7 +647,7 @@ const RENDER = {
     return loadError(['ext']) +
       panel('Прошивка Keenetic', kv([
         ['Установлена', (f.title || '') + (f.release ? ' (' + f.release + ')' : '')],
-        ['Доступна', f.update_available ? (cur.version || 'новая версия') : 'новее нет', f.update_available ? 'info' : ''],
+        ['Доступна', f.update_available == null ? 'роутер пока не сообщил' : f.update_available ? (cur.version || 'новая версия') : 'новее нет', f.update_available ? 'info' : ''],
         ['Проверена роутером', fwStamp(f.checked)]
       ]), { desc: f.update_available ? 'Прошивку устанавливает сам Keenetic: в его веб-интерфейсе или автоматически. Во время установки роутер перезагрузится.' : '' }) +
       panel('Настройки', '<dl class="kv">' +
@@ -1589,8 +1590,8 @@ async function runLongBody(resultId, action, fields, dataAction, okMsg, show) {
   render();
   let x;
   try { x = await apiPost(action, fields); }
-  catch (e) { if (installing) updOverlayClose(); toast('Ошибка: ' + e.message); show('Ошибка: ' + e.message); return; }
-  if (!x.ok) { if (installing) updOverlayClose(); toast('Не выполнено: ' + errText(x)); show('Ошибка: ' + errText(x)); return; }
+  catch (e) { if (installing) updOverlayClose(); toast('Ошибка: ' + e.message); return; }
+  if (!x.ok) { if (installing) updOverlayClose(); toast('Не выполнено: ' + errText(x)); return; }
   let run = {};
   const deadline = Date.now() + 15 * 60 * 1000;
   while (Date.now() < deadline) {
@@ -1610,7 +1611,8 @@ async function runLongBody(resultId, action, fields, dataAction, okMsg, show) {
   }
   // An empty okMsg: the caller reports the outcome itself.
   if (okMsg || !answered) toast(done);
-  actionResult = run.finished && !answered ? { id: resultId, text: done } : null;
+  // The outcome is a toast only: no leftover line under the buttons.
+  actionResult = null;
   render();
   return run;
 }

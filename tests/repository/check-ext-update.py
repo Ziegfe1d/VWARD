@@ -185,6 +185,55 @@ case "$a" in */rci/) cat "{tmp}/fw.json" ;; --version) echo curl ;; *) exit 7 ;;
     if out[-1:] != ["error=invalid_value"]:
         fail(f"only stable, preview and draft: {out}")
 
+    # Keenetic answers the first check-update with empty fields while it checks:
+    # asked again; if it never answers, the installed version from show version.
+    env["VWARD_FW_TRY_DELAY"] = "0"
+    (tmp / "fw-empty.json").write_text(json.dumps([{"parse": {"sandbox": "", "release": "", "sandboxes": []}}]))
+    write_exec(bindir / "curl", f"""#!/bin/sh
+for a do :; done
+n=$(cat "{tmp}/fw-calls" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > "{tmp}/fw-calls"
+case "$a" in
+  */rci/) if [ "$n" -ge "$(cat {tmp}/fw-good-from)" ]; then cat "{tmp}/fw.json"; else cat "{tmp}/fw-empty.json"; fi ;;
+  */rci/show/version) echo '{{"release":"5.01.C.6.0-1","title":"5.1.6","sandbox":"stable"}}' ;;
+  --version) echo curl ;;
+  *) exit 7 ;;
+esac
+""")
+    (state / "firmware.json").unlink()
+    (tmp / "fw-good-from").write_text("3")
+    run("ext-check", "now")
+    fw = json.loads((state / "firmware.json").read_text())
+    if fw["title"] != "5.1.6" or fw["update_available"] is not False or int((tmp / "fw-calls").read_text()) != 3:
+        fail(f"firmware after retries: {fw}")
+    (state / "firmware.json").unlink(); (tmp / "fw-calls").write_text("0")
+    (tmp / "fw-good-from").write_text("99")
+    run("ext-check", "now")
+    fw = json.loads((state / "firmware.json").read_text())
+    if fw["release"] != "5.01.C.6.0-1" or fw["update_available"] is not None or fw["channel"] != "stable":
+        fail(f"firmware fallback to show version: {fw}")
+
+    # The Console reaches the check through a POST the API accepts.
+    helper = tmp / "helper"
+    write_exec(helper, f'#!/bin/sh\necho "$@" > "{tmp}/helper-args"\n')
+    api_env = os.environ | {"REQUEST_METHOD": "POST", "QUERY_STRING": "action=ext-update-control",
+                            "CONTENT_TYPE": "application/x-www-form-urlencoded", "CONTENT_LENGTH": "8",
+                            "HTTP_X_VWARD_REQUEST": "console", "VWARD_PROFILE_LIB": "/nonexistent",
+                            "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
+                            "VWARD_CONSOLE_CONFIG_BIN": str(helper), "VWARD_CONSOLE_EXT_RUN": str(tmp / "extrun"),
+                            "VWARD_EXT_UPDATE_STATE": str(state)}
+    r = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], input="op=check", env=api_env, text=True, capture_output=True)
+    body = json.loads(r.stdout.split("\n\n", 1)[1])
+    if body.get("ok") is not True or body.get("started") is not True:
+        fail(f"POST ext-update-control: {body}")
+    import time
+    for _ in range(50):
+        meta = tmp / "extrun/run.meta"
+        if meta.exists() and "rc=" in meta.read_text():
+            break
+        time.sleep(0.1)
+    if (tmp / "helper-args").read_text().split() != ["ext-check", "now"]:
+        fail("the API must start the helper's check")
+
 # The console: the list comes from the last check, a test firmware channel and a
 # system package need a confirmation, the daily run starts from housekeeping.
 for marker in ('ACTION" = ext-update-data', 'ACTION" = ext-update-control', 'REQUIRED=FIRMWARE_CHANNEL_TEST',

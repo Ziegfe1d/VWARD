@@ -55,6 +55,13 @@ form_handlers = set(re.findall(r"f === '([a-z-]+)'", js))
 if forms - form_handlers:
     fail("формы без обработчика: " + ", ".join(sorted(forms - form_handlers)))
 
+# Every action the Console sends by POST is one the API accepts by POST.
+api_src = api
+post_ok = set(re.search(r'case "\$ACTION" in\n\s+(settings\|control[^)]*)\) ;;', api_src).group(1).split("|"))
+posted = set(re.findall(r"apiPost\('([a-z-]+)'", js)) | set(re.findall(r"runLong\('[a-z-]+', '([a-z-]+)'", js)) | set(re.findall(r"runAction\('[a-z-]+', '([a-z-]+)'", js))
+if posted - post_ok:
+    fail("POST-действия, которые API отклонит: " + ", ".join(sorted(posted - post_ok)))
+
 # Navigation: every page and detail page has a renderer, every static link resolves.
 pages = set(re.findall(r"\{ id: '([a-z]+)', title: '[^']+', icon: '[a-z]+', group:", js))
 if len(pages) != 11:

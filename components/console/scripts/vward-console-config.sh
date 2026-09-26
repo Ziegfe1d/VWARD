@@ -1343,17 +1343,34 @@ ext_critical() { case "$EXT_CRITICAL" in *" $1 "*) return 0 ;; esac; return 1; }
 valid_pkg() { printf '%s\n' "$1" | grep -Eq '^[a-z0-9][a-z0-9+._-]{0,63}$'; }
 
 # ext_firmware_refresh: the firmware's version, channel and update state.
+# Keenetic may answer the first check-update with empty fields while it checks
+# in the background: asked again a few times, then the installed version alone
+# (show version) rather than nothing.
 ext_firmware_refresh() {
     mkdir -p "$EXT_STATE" || return 1
-    "${VWARD_CURL_BIN:-curl}" --fail --silent --connect-timeout 3 --max-time 30 -X POST \
-        -H 'Content-Type: application/json' -d '[{"parse":"components check-update"}]' \
-        "${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/" 2>/dev/null |
-    "$JQ" -e '.[0].parse | select(type == "object" and (.release | type) == "string" and .release != "") |
-        {release, title, channel: (.sandbox // ""), update_available: (.["update-available"] == true),
-         auto_update: (.["auto-update-enabled"] == true), checked: (.timestamp // ""),
-         channels: [.sandboxes[]? | select(type == "object") | {name, version}]}' \
-        > "$EXT_STATE/firmware.json.tmp" 2>/dev/null &&
+    fr_rci=${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}
+    fr_try=0
+    while :; do
+        "${VWARD_CURL_BIN:-curl}" --fail --silent --connect-timeout 3 --max-time 30 -X POST \
+            -H 'Content-Type: application/json' -d '[{"parse":"components check-update"}]' \
+            "$fr_rci/" > "$EXT_STATE/firmware.raw" 2>/dev/null
+        "$JQ" -e '.[0].parse | (.release | type) == "string" and .release != ""' "$EXT_STATE/firmware.raw" >/dev/null 2>&1 && break
+        fr_try=$((fr_try + 1))
+        [ "$fr_try" -lt "${VWARD_FW_TRIES:-6}" ] || break
+        sleep "${VWARD_FW_TRY_DELAY:-5}"
+    done
+    if "$JQ" -e '.[0].parse | (.release | type) == "string" and .release != ""' "$EXT_STATE/firmware.raw" >/dev/null 2>&1; then
+        "$JQ" '.[0].parse |
+            {release, title, channel: (.sandbox // ""), update_available: (.["update-available"] == true),
+             auto_update: (.["auto-update-enabled"] == true), checked: (.timestamp // ""),
+             channels: [.sandboxes[]? | select(type == "object") | {name, version}]}' "$EXT_STATE/firmware.raw"
+    else
+        "${VWARD_CURL_BIN:-curl}" --fail --silent --connect-timeout 3 --max-time 15 "$fr_rci/show/version" 2>/dev/null |
+        "$JQ" -e 'select((.release | type) == "string" and .release != "") |
+            {release, title, channel: (.sandbox // ""), update_available: null, auto_update: null, checked: "", channels: []}'
+    fi > "$EXT_STATE/firmware.json.tmp" 2>/dev/null && [ -s "$EXT_STATE/firmware.json.tmp" ] &&
     mv -f "$EXT_STATE/firmware.json.tmp" "$EXT_STATE/firmware.json" || { rm -f "$EXT_STATE/firmware.json.tmp"; return 1; }
+    rm -f "$EXT_STATE/firmware.raw"
 }
 
 # ext_upgradable: refresh the list of packages with a newer version (name, installed, new).

@@ -306,7 +306,7 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             ;;
     esac
     case "$ACTION" in
-        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control|wifi-host) ;;
+        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control|wifi-host|ext-update-control) ;;
         *)
             echo 'Status: 405 Method Not Allowed'
             header_json
