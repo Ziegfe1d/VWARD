@@ -49,6 +49,8 @@ SMARTDNS="$VOLATILE_DIR/smartdns-domains.txt"
 # through the Console writer, the same way as the manual switch.
 LISTS_CONF="${VWARD_DOMAIN_LISTS_CONF:-/opt/etc/vward/route-engine/domain-lists.conf}"
 LIST_WATCH_MAP="$VOLATILE_DIR/list-watch.map"
+SKIP_DOMAINS="/opt/etc/vward/route-engine/skip-domains.conf"
+HINTS="/opt/etc/vward/route-engine/hints.conf"
 LIST_WATCH_COOLDOWN=60
 LIST_WATCH_FAILS=2
 CONSOLE_CONFIG_BIN="${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}"
@@ -968,6 +970,58 @@ parent_list_match()
     ' "$FILE"
 }
 
+# classify_host HOST: one pass over every list a DNS name is checked against.
+# A process per list per name was the engine's main CPU cost on the router.
+# Prints "W <group>" for a watched list and one tag per list holding the name
+# or a parent: M my domains, S Smart DNS, K skip list, H hints.  A "*.name"
+# entry covers subdomains only.
+classify_host()
+{
+    CH_FILES=""
+    for CH_F in "$LIST_WATCH_MAP" "$MANUAL" "$SMARTDNS" "$SKIP_DOMAINS" "$HINTS"; do
+        [ -s "$CH_F" ] && CH_FILES="$CH_FILES $CH_F"
+    done
+    [ -n "$CH_FILES" ] || return 0
+
+    # shellcheck disable=SC2086 # paths are VWARD's own, without spaces
+    awk -v h="$1" -v w="$LIST_WATCH_MAP" -v m="$MANUAL" -v s="$SMARTDNS" -v k="$SKIP_DOMAINS" '
+        FNR == 1 {
+            tag = FILENAME == w ? "W" : FILENAME == m ? "M" : FILENAME == s ? "S" : FILENAME == k ? "K" : "H"
+        }
+
+        tag in hit { next }
+
+        tag == "W" {
+            n = length($1)
+            if (h == $1 || (length(h) > n && substr(h, length(h) - n) == "." $1)) {
+                hit[tag] = 1
+                print "W " $2
+            }
+            next
+        }
+
+        {
+            d = tolower($0)
+            gsub(/^[ \t]+|[ \t]+$/, "", d)
+
+            if (d == "" || substr(d, 1, 1) == "#")
+                next
+
+            sub_only = 0
+            if (substr(d, 1, 2) == "*.") {
+                d = substr(d, 3)
+                sub_only = 1
+            }
+
+            if ((!sub_only && h == d) ||
+                (length(h) > length(d) && substr(h, length(h) - length(d)) == "." d)) {
+                hit[tag] = 1
+                print tag
+            }
+        }
+    ' $CH_FILES
+}
+
 # ------------------------------------------------------------
 # HINT / PRELOAD V5
 # ------------------------------------------------------------
@@ -1181,12 +1235,16 @@ list_watch_check()
     # router's DNS answer (Smart DNS included) through the ISP.  Failure is a
     # dead connection, 451, or a redirect to a region/blocked page; 403 is not,
     # Cloudflare answers it to any script.
-    [ -s "$LIST_WATCH_MAP" ] || return 0
-
-    LW_G=$(awk -v h="$1" '{
-        n = length($1)
-        if (h == $1 || (length(h) > n && substr(h, length(h) - n) == "." $1)) {print $2; exit}
-    }' "$LIST_WATCH_MAP")
+    # The group comes from classify_host on the live path.
+    if [ "$#" -ge 2 ]; then
+        LW_G=$2
+    else
+        [ -s "$LIST_WATCH_MAP" ] || return 0
+        LW_G=$(awk -v h="$1" '{
+            n = length($1)
+            if (h == $1 || (length(h) > n && substr(h, length(h) - n) == "." $1)) {print $2; exit}
+        }' "$LIST_WATCH_MAP")
+    fi
     [ -n "$LW_G" ] || return 0
 
     LW_ST="$VOLATILE_DIR/list-watch.$LW_G"
@@ -1273,19 +1331,17 @@ handle_host()
 
     refresh_sets
 
-    list_watch_check "$HOST"
+    HOST_LISTS=$(classify_host "$HOST")
+    HOST_TAGS=$(printf '%s\n' "$HOST_LISTS" | grep -v '^W ' | tr -d '\n')
+
+    list_watch_check "$HOST" "$(printf '%s\n' "$HOST_LISTS" | sed -n 's/^W //p')"
 
 
     # Все ручные Keenetic FQDN-группы live-контур не меняет.
-    if is_manual_known "$HOST" || parent_list_match "$HOST" "$MANUAL"; then
-        return
-    fi
-
-
     # Smart DNS: адрес прокси общий для всех его доменов, в VPN его не отправляем.
-    if parent_list_match "$HOST" "$SMARTDNS"; then
-        return
-    fi
+    case "$HOST_TAGS" in
+        *M*|*S*) return ;;
+    esac
 
     # AdaptiveAuto обслуживается двусторонне.
     if is_adaptive "$HOST"; then
@@ -1293,19 +1349,18 @@ handle_host()
         return
     fi
 
-
     # Aeternia / специальные исключения.
-    if is_special "$HOST" || parent_list_match "$HOST" "/opt/etc/vward/route-engine/skip-domains.conf"; then
-        return
-    fi
-
-
+    case "$HOST_TAGS" in
+        *K*) return ;;
+    esac
 
     # Hint / Preload V5
-    if parent_list_match "$HOST" "/opt/etc/vward/route-engine/hints.conf"; then
-        handle_hint "$HOST"
-        return
-    fi
+    case "$HOST_TAGS" in
+        *H*)
+            handle_hint "$HOST"
+            return
+            ;;
+    esac
 
     handle_new "$HOST"
 }

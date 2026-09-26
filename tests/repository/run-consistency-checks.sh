@@ -81,6 +81,7 @@ python3 tests/repository/check-wifi-hosts.py || fail "Wi-Fi device names and acc
 python3 tests/repository/check-console-files.py || fail "Files page: read only, secrets closed"
 python3 tests/repository/check-console-devices.py || fail "Only registered devices open VWARD"
 python3 tests/repository/check-route-engine-names.py || fail "Route engine sends only valid names"
+python3 tests/repository/check-route-engine-classify.py || fail "Route engine checks a name against all lists in one pass"
 python3 tests/repository/check-route-engine-watchdog.py || fail "Watchdog counts engine cores, not subshells"
 python3 tests/repository/check-console-diagnostics-dns.py || fail "Diagnostics: DNS chain, files as installed"
 python3 tests/repository/check-console-ndm-cache.py || fail "Console caches Keenetic answers briefly"

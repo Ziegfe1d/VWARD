@@ -102,7 +102,7 @@ filtering:
 host = ENGINE[ENGINE.index("handle_host()\n"):]
 if "vward_agh_smartdns_domains\n        } | sort -u > \"$SMARTDNS\"" not in ENGINE:
     fail("the engine must add Smart DNS domains kept in AdGuard Home")
-if host.index('parent_list_match "$HOST" "$SMARTDNS"') > host.index('if is_adaptive "$HOST"'):
+if host.index("*M*|*S*) return") > host.index('if is_adaptive "$HOST"'):
     fail("Smart DNS domains must be skipped before AdaptiveAuto handles a host")
 awk = ENGINE[ENGINE.index("                /^[^ \\t!]/ {ctx"):ENGINE.index("' \"$CFG\"\n            vward_agh_smartdns_domains")]
 r = subprocess.run(["awk", "\n".join(awk.splitlines())], input=RUNNING, text=True, capture_output=True)
