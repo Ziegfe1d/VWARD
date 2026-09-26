@@ -2,11 +2,11 @@
   "signed": {
     "schema": 2,
     "update_id": "vward-0.2.0-rc.1.fix.14",
-    "sequence": 2026092602,
+    "sequence": 2026092603,
     "version": "0.2.0-rc.1.fix.14",
     "channel": "dev",
     "priority": "ROUTINE",
-    "published_at": "2026-09-26T21:26:53Z",
+    "published_at": "2026-09-26T21:47:23Z",
     "min_updater_version": "2.0.0",
     "files_base": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/v2/files/",
     "files": [
@@ -467,7 +467,7 @@
       }
     ],
     "engine": {
-      "version": "2.0.0",
+      "version": "2.0.1",
       "files": [
         {
           "name": "vward-update-bootstrap.sh",
@@ -477,8 +477,8 @@
         },
         {
           "name": "vward-update-common-base.sh",
-          "sha256": "9652610a33c4c9ae01e2b35c36b8d21881dce3eb04e0fd92dbd1bd2bf179443c",
-          "size": 44310,
+          "sha256": "d42273dba742f718141905c92f82a7d7b11a5ec7dc8d500dee9ee085b9b05cb4",
+          "size": 44458,
           "mode": "0755"
         },
         {
@@ -489,8 +489,8 @@
         },
         {
           "name": "vward-update-delta.sh",
-          "sha256": "023c413754168c91a863653443c5feb5d3a18644ab413895d625b298f872d5ed",
-          "size": 15427,
+          "sha256": "8c94fea3210eda7020e82103a0723ac2af9e43fc5977983986e5aa8646e6a363",
+          "size": 15916,
           "mode": "0755"
         },
         {
@@ -519,8 +519,8 @@
         },
         {
           "name": "vward-update.sh",
-          "sha256": "e4550ffc8ff36bcc07227eeb5a3b633b111270964cd886c34a06a95b754788e8",
-          "size": 26412,
+          "sha256": "4f1c816f8cdafd271ab145c9187ad29640d63582ede0d167e31bd4b16c9da945",
+          "size": 26457,
           "mode": "0755"
         },
         {
@@ -557,5 +557,5 @@
       "key_id": "vward-prod-2026-01"
     }
   },
-  "signature": "ZwaM0CIXgmlg/2lMB+tGRqfh2i9cT7SXqgWr9oi04q4jmjSJTclpcnY3IgQ6IGrebWkCqA1+S/uU7hXl8V8hDw=="
+  "signature": "va3nP1yx1CZhgAH3SoAAHLAZB6xoCV6iCy5TbhZffs4TqtzRJFcstvNmloLCfUk3nYVctCt200WUb2a6G1kkCA=="
 }
