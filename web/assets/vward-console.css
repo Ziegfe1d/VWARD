@@ -149,6 +149,10 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 @media (hover:hover){.card:hover{border-color:var(--line-strong);box-shadow:var(--shadow)}}
 .card-icon{grid-area:icon;display:grid;place-items:center;width:36px;height:36px;border-radius:var(--r-md);background:var(--accent-soft);color:var(--accent)}
 .card>.pill{grid-area:pill;justify-self:end;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.pill.card-alert{gap:4px}
+.pill.card-alert::before{display:none}
+.pill.card-alert .icon{width:16px;height:16px;flex:none}
+.pill.card-alert.warn{color:var(--warn)}
 .card-title{grid-area:title;margin-top:10px;font-size:var(--fs-sm);font-weight:600;color:var(--muted);overflow-wrap:break-word}
 .card-value{grid-area:value;font-size:var(--fs-lg);font-weight:700;line-height:1.25;overflow-wrap:break-word}
 .card-sub{grid-area:sub;color:var(--muted);font-size:var(--fs-xs);overflow-wrap:break-word}
@@ -274,6 +278,8 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .confirm{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 16px 16px;padding:12px;border:1px solid var(--accent);border-radius:var(--r-md);background:var(--accent-soft);font-size:var(--fs-sm)}
 .confirm.danger{border-color:var(--crit);background:var(--crit-soft)}
 .confirm span{flex:1 1 200px}
+/* A confirmation for one row opens under it, across the whole row. */
+.row>.confirm{flex:1 1 100%;margin:4px 0 0}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* Окно установки обновления */

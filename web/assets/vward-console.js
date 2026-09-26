@@ -389,7 +389,7 @@ function cardData(id) {
   const warnWifi = (wf.clients || []).filter(c => c.health === 'WARNING').length;
   switch (id) {
     case 'system': return { icon: 'platform', title: 'Система', to: 'system', value: p.version || '—', sub: comps ? comps + ' ' + plural(comps, 'компонент', 'компонента', 'компонентов') : 'версия VWARD', pill: p.version ? ['ok', 'Норма'] : ['', '—'] };
-    case 'updates': return { icon: 'refresh', title: 'Обновления', to: 'updates', value: phaseText(p.phase), sub: '№ ' + (p.last_sequence || 0) + (p.active_slot ? ' · слот ' + p.active_slot : ''), pill: ['info', isTrue(p.auto_apply) ? 'График' : 'Вручную'] };
+    case 'updates': return { icon: 'refresh', title: 'Обновления', to: 'updates', value: ['IDLE', 'COMMITTED', undefined, ''].includes(p.phase) ? 'Новых нет' : phaseText(p.phase), sub: '№ ' + (p.last_sequence || 0) + (p.active_slot ? ' · слот ' + p.active_slot : ''), pill: ['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase) ? ['crit', 'Ошибка'] : ['', ''] };
     case 'wan': return { icon: 'globe', title: 'Интернет', to: 'wan', value: w.internet ? 'В сети' : s.wan ? 'Нет связи' : '—', sub: (w.address || 'адрес не получен') + (w.speed ? ' · ' + fmtSpeed(w.speed) : ''), pill: w.internet ? ['ok', 'Норма'] : s.wan ? ['crit', 'Сбой'] : ['', '—'] };
     case 'vpn': return { icon: 'shield', title: 'VPN', to: 'vpn', value: up + ' из ' + tunnels.length, sub: isTrue(wg.failopen_active) ? 'трафик идёт напрямую' : 'трафик идёт через VPN', pill: !tunnels.length ? ['', 'Нет туннелей'] : up === tunnels.length ? ['ok', 'Норма'] : ['warn', 'Внимание'] };
     case 'lists': {
@@ -405,6 +405,9 @@ function cardData(id) {
   return null;
 }
 
+// A card is marked only when something needs attention: «Норма» on every card said nothing.
+const cardAlert = p => p && (p[0] === 'warn' || p[0] === 'crit') ? '<span class="pill card-alert ' + p[0] + '">' + ico('alert') + esc(p[1]) + '</span>' : '';
+
 /* ---------- Разделы ---------- */
 const RENDER = {
   overview() {
@@ -416,7 +419,7 @@ const RENDER = {
     if (editing) html += '<div class="edit-bar"><span>Вид</span><div class="segmented" role="group" aria-label="Вид карточек"><button type="button" data-view="grid" aria-pressed="' + (cardView === 'grid') + '">' + ico('platform') + 'Плитки</button><button type="button" data-view="list" aria-pressed="' + (cardView === 'list') + '">' + ico('logs') + 'Список</button></div><button class="link-btn" type="button" data-act="cards-reset">Сбросить</button></div>';
     html += '<div class="cards' + (editing ? ' editing' : '') + '" data-view="' + cardView + '">' + list.map((id, n) => {
       const c = cardData(id), h = hiddenCards.includes(id);
-      return '<div class="card' + (h ? ' is-hidden' : '') + '"' + (editing ? '' : ' role="button" tabindex="0" data-go="' + c.to + '"') + '><div class="card-icon">' + ico(c.icon) + '</div><span class="pill ' + c.pill[0] + '">' + esc(c.pill[1]) + '</span><div class="card-title">' + esc(c.title) + '</div><div class="card-value num">' + esc(c.value) + '</div><div class="card-sub">' + esc(c.sub) + '</div>' +
+      return '<div class="card' + (h ? ' is-hidden' : '') + '"' + (editing ? '' : ' role="button" tabindex="0" data-go="' + c.to + '"') + '><div class="card-icon">' + ico(c.icon) + '</div>' + cardAlert(c.pill) + '<div class="card-title">' + esc(c.title) + '</div><div class="card-value num">' + esc(c.value) + '</div><div class="card-sub">' + esc(c.sub) + '</div>' +
         (c.meter != null ? '<div class="meter"><i data-width="' + c.meter + '"></i></div>' : '') +
         (editing ? '<div class="card-edit"><button class="icon-btn" type="button" data-card-move="' + id + ':up" aria-label="Выше"' + (n === 0 ? ' disabled' : '') + '>' + ico('up') + '</button><button class="icon-btn" type="button" data-card-move="' + id + ':down" aria-label="Ниже"' + (n === list.length - 1 ? ' disabled' : '') + '>' + ico('down') + '</button><button class="icon-btn" type="button" data-card-toggle="' + id + '" aria-label="' + (h ? 'Показать' : 'Скрыть') + ' карточку">' + ico(h ? 'eyeOff' : 'eye') + '</button></div>' : '') + '</div>';
     }).join('') + '</div>';
@@ -873,8 +876,9 @@ const RENDER = {
     const g = S.agh, fl = (g && g.filtering && g.filtering.filters) || [];
     const rm = confirm && confirm.id === 'agh-filter-remove' ? confirm.url : '';
     return panel('Фильтры AdGuard Home', !g ? empty('Загрузка…') : !g.ok ? empty(errText(g)) : (fl.length ? '<ul class="rows">' + fl.map(f => '<li class="row"><div class="row-main"><b>' + esc(f.name || f.url) + '</b><small>' + fmtInt(f.rules) + ' ' + plural(f.rules, 'правило', 'правила', 'правил') + (f.updated ? ' · обновлён ' + esc(fmtTime(f.updated)) : '') + '</small>' +
-        (rm === f.url ? '<div class="confirm danger"><span>Удалить список из AdGuard Home?</span><button class="btn small danger" type="button" data-act="confirm-yes">Удалить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '') + '</div>' +
-        '<span class="row-acts">' + sw('data-agh-filter="' + esc(f.url) + '"', f.enabled, 'Список ' + (f.name || f.url)) + '<button class="icon-btn" type="button" data-agh-filter-rm="' + esc(f.url) + '" aria-label="Удалить ' + esc(f.name || f.url) + '" title="Удалить">' + ico('close') + '</button></span></li>').join('') + '</ul>' : empty('Списков нет')) +
+        '</div>' +
+        '<span class="row-acts">' + sw('data-agh-filter="' + esc(f.url) + '"', f.enabled, 'Список ' + (f.name || f.url)) + '<button class="icon-btn" type="button" data-agh-filter-rm="' + esc(f.url) + '" aria-label="Удалить ' + esc(f.name || f.url) + '" title="Удалить">' + ico('close') + '</button></span>' +
+        (rm === f.url ? '<div class="confirm danger"><span>Удалить список из AdGuard Home?</span><button class="btn small danger" type="button" data-act="confirm-yes">Удалить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '') + '</li>').join('') + '</ul>' : empty('Списков нет')) +
       '<form class="inline-form" data-form="agh-filter-add"><input class="input" name="url" placeholder="https://… адрес списка" aria-label="Адрес списка" autocomplete="off"><input class="input" name="name" placeholder="Название" aria-label="Название списка" maxlength="64"><button class="btn" type="submit">Добавить</button></form>' +
       '<div class="panel-actions">' + btn('agh-filters-refresh', 'refresh', 'Обновить списки сейчас') + '</div>' + resultBox('agh'),
       { desc: 'Списки блокировки самого AdGuard Home. Выключенный список остаётся, но не применяется.' });
@@ -1127,9 +1131,10 @@ function tunnelManagePanel(name, managed) {
 function backupPanel() {
   const b = S.backups, list = (b && b.backups) || [], kinds = { manual: 'вручную', auto: 'автоматически', prerestore: 'перед восстановлением' };
   const rows = list.map(x => '<li class="row"><div class="row-main"><b>' + esc(fmtTime(x.created)) + '</b><small>' + esc(kinds[x.kind] || x.kind) + ' · ' + esc(fmtBytes(x.size)) + '</small>' +
-    (confirm && confirm.id === 'backup-restore' && confirm.name === x.name ? '<div class="confirm danger"><span>Восстановить настройки VWARD на это время? Текущие сохранятся отдельной копией.</span><button class="btn small danger" type="button" data-act="confirm-yes">Восстановить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '') + '</div>' +
+    '</div>' +
     '<span class="row-acts"><a class="icon-btn" href="/cgi-bin/api.cgi?action=backup-download&amp;name=' + encodeURIComponent(x.name) + '" download aria-label="Скачать" title="Скачать">' + ico('save') + '</a>' +
-    '<button class="icon-btn" type="button" data-backup-restore="' + esc(x.name) + '" aria-label="Восстановить" title="Восстановить"' + (cfgOk() ? '' : ' disabled') + '>' + ico('undo') + '</button></span></li>').join('');
+    '<button class="icon-btn" type="button" data-backup-restore="' + esc(x.name) + '" aria-label="Восстановить" title="Восстановить"' + (cfgOk() ? '' : ' disabled') + '>' + ico('undo') + '</button></span>' +
+    (confirm && confirm.id === 'backup-restore' && confirm.name === x.name ? '<div class="confirm danger"><span>Восстановить настройки VWARD на это время? Текущие сохранятся отдельной копией.</span><button class="btn small danger" type="button" data-act="confirm-yes">Восстановить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '') + '</li>').join('');
   return panel('Резервные копии', (!b ? empty('Загрузка…') : !b.ok ? empty(errText(b)) : list.length ? '<ul class="rows">' + rows + '</ul>' : empty('Копий пока нет')) +
     '<div class="panel-actions">' + btn('backup-create', 'archive', 'Создать копию сейчас', '', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('backup'),
     { desc: 'Настройки VWARD, доменные списки, Smart DNS, туннели и вход AdGuard Home. Копия делается раз в сутки сама, хранятся последние 7. Скачанный файл - без ключей туннелей, паролей и конфигурации роутера: они остаются в копии на роутере и возвращаются при восстановлении.' });
