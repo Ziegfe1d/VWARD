@@ -129,7 +129,7 @@ const API_ERRORS = {
 const errText = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.error || '') ? 'роутер не принял настройку ' + x.error.slice(14).replace(/_/g, ' ') + ' - туннель не изменён' : '') || (x && x.error) || ('код ' + (x && x.rc));
 
 /* ---------- Данные ---------- */
-const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, ext: null, listd: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
+const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, ext: null, listd: null, wanhist: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
 const ADSV = { filter: 'all', search: '', blockedSearch: '' };
 // Files page: the open folder.
 const FILES = { root: '', path: '' };
@@ -138,6 +138,7 @@ const LOADERS = {
   security: () => apiGet('security-data'), diag: () => apiGet('diagnostics'), wifi: () => apiGet('wifi-data'),
   ads: () => apiGet('ads-data'), https: () => apiGet('ads-https-data'), config: () => apiGet('config-data'),
   adsstats: () => apiGet('ads-view', { view: 'stats' }), agh: () => apiGet('ads-view', { view: 'agh' }), backups: () => apiGet('backup-data'), ext: () => apiGet('ext-update-data'),
+  wanhist: () => apiText('log', { name: 'recovery', count: 100 }).then(t => ({ ok: true, text: t })),
   listd: () => current.startsWith('l-') ? apiGet('list-data', { name: current.slice(2) }) : Promise.resolve(null), files: () => FILES.root ? apiGet('files', { op: 'list', root: FILES.root, path: FILES.path }) : Promise.resolve(null), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
   qlog: () => apiGet('ads-view', { view: 'querylog', filter: ADSV.filter, search: ADSV.search }),
   review: () => apiGet('ads-view', { view: 'list', kind: 'review' }),
@@ -248,6 +249,7 @@ const DETAILS = {
   'd-dcats': { title: 'Категории доменов', parent: 'routes' },
   'd-adaptive': { title: 'AdaptiveAuto', parent: 'routes' },
   'd-smartdns': { title: 'Smart DNS', parent: 'lists', data: ['lists', 'config'] },
+  'd-wanrec': { title: 'Восстановление: дополнительно', parent: 'wan', data: ['status', 'config', 'wanhist'] },
   'd-services': { title: 'Проверяемые сервисы', parent: 'routes' },
   'd-ipcats': { title: 'Активные IP-категории', parent: 'routes' },
   'd-querylog': { title: 'Журнал запросов', parent: 'ads' },
@@ -409,6 +411,18 @@ function cardData(id) {
   return null;
 }
 
+// The recovery log in words: newest first.
+const WAN_ACTIONS = { DHCP_RENEW: 'Новый адрес у провайдера', MANUAL_DHCP_RENEW: 'Новый адрес у провайдера, по кнопке', WAN_BOUNCE: 'Переподключение', MANUAL_WAN_BOUNCE: 'Переподключение, по кнопке',
+  WAN_BOUNCE_RECOVERY: 'Интернет включён после прерванного переподключения', MANUAL_BOUNCE_RECOVERY: 'Интернет включён после прерванного переподключения', WAN_BOUNCE_RECOVERY_FAILED: 'Не удалось включить интернет после прерывания', MANUAL_WAN_BOUNCE_INTERRUPTED: 'Переподключение прервано, интернет включён' };
+function wanHistory(text) {
+  return String(text).split('\n').map(l => {
+    const m = /^(\d{4}-\d\d-\d\d) (\d\d:\d\d)\S* action=([A-Z_]+)(.*)$/.exec(l.trim());
+    if (!m || !WAN_ACTIONS[m[3]]) return null;
+    const rcs = (m[4].match(/\b(?:rc|up_rc|down_rc)=(\d+)/g) || []).map(x => x.split('=')[1]);
+    return { when: m[1].slice(8, 10) + '.' + m[1].slice(5, 7) + ' ' + m[2], what: WAN_ACTIONS[m[3]], ok: !/FAILED$/.test(m[3]) && rcs.every(x => x === '0') };
+  }).filter(Boolean).reverse().slice(0, 30);
+}
+
 // How a Keenetic domain list goes: through which tunnel, around VPN or nowhere.
 function listPath(l) {
   const tuns = (st().wg && st().wg.interfaces) || [];
@@ -465,7 +479,7 @@ const RENDER = {
   wan() {
     const w = st().wan || {}, pr = prof(), stage = num(w.recovery_stage) || 0, guardOn = !S.config || !cfg().wan_guard || cfg().wan_guard.enabled !== false;
     const STAGE = { 1: 'сбой замечен, проверяем ещё раз', 2: 'запрошен новый адрес у провайдера', 3: 'интернет переподключается' };
-    const busy = runningId === 'wan';
+    const busy = String(runningId || '').startsWith('wan-') ? runningId : '';
     return loadError(['status']) +
       panel('Подключение', kv([
         ['Интерфейс', (pr.wan_interface || '—') + (pr.wan_device ? ' (' + pr.wan_device + ')' : '')],
@@ -474,15 +488,18 @@ const RENDER = {
         ['Шлюз', (w.gateway || '—') + (w.gateway ? (w.gateway_accessible ? ' · доступен' : ' · недоступен') : '')],
         ['DNS', w.dns_accessible ? 'отвечает' : 'не отвечает']
       ]), { right: st().wan && !w.internet ? headPill('crit', 'Нет связи') : '' }) +
-      // One place: the automatic recovery switch and one button for «right now».
       panel('Восстановление интернета', '<dl class="kv">' +
-        ctrlRow('Восстанавливать автоматически', sw('data-cfg-wg', guardOn, 'Восстанавливать интернет автоматически', !cfgOk()), guardOn ? '' : 'выключено: при сбое нажмите кнопку ниже') +
+        ctrlRow('Восстанавливать автоматически', sw('data-cfg-wg', guardOn, 'Восстанавливать интернет автоматически', !cfgOk()), guardOn ? '' : 'выключено: при сбое воспользуйтесь кнопками ниже') +
         (guardOn ? ctrlRow('Проверять', sel('data-cfg-wanp="CHECK_INTERVAL_MIN"' + (cfgOk() ? '' : ' disabled'), 'Как часто проверять интернет', [[1, 'раз в минуту'], [2, 'раз в 2 минуты'], [5, 'раз в 5 минут'], [10, 'раз в 10 минут'], [15, 'раз в 15 минут'], [30, 'раз в 30 минут']], ((cfg().wan_guard || {}).params || {}).CHECK_INTERVAL_MIN || 1), 'при сбое - каждую минуту, пока связь не вернётся') : '') + '</dl>' +
-        confirmBox('wg-off', 'Выключить автоматическое восстановление? При сбое интернет придётся восстанавливать кнопкой.', 'Выключить', true) +
+        confirmBox('wg-off', 'Выключить автоматическое восстановление? При сбое интернет придётся восстанавливать кнопками.', 'Выключить', true) +
         (guardOn && stage ? '<p class="field-warn">Сейчас: ' + esc(STAGE[stage] || 'идёт восстановление') + '</p>' : '') +
-        (confirmBox('wan-bounce', 'Переподключить интернет? Он пропадёт примерно на 10 секунд, домашняя сеть продолжит работать.', 'Переподключить') ||
-          '<div class="panel-actions">' + btn('ask', 'refresh', busy ? 'Переподключаем…' : 'Переподключить интернет', '', ' data-confirm="wan-bounce"' + (busy ? ' disabled' : '')) + '</div>'),
-        { desc: 'Если интернет от провайдера пропал, VWARD сам запросит новый адрес, а если не поможет - переподключит интернет. Кнопка переподключает сразу.' });
+        kv([['Дополнительно', '', '', 'd-wanrec', '', 'когда начинать, как часто переподключать, история']]),
+        { desc: 'Если интернет от провайдера пропал, VWARD сам переподключит его.' }) +
+      panel('Интернет пропал прямо сейчас?', '<dl class="kv">' +
+        ctrlRow('Обновить адрес', btn('ask', 'refresh', busy === 'wan-renew' ? 'Обновляем…' : 'Обновить', 'small', ' data-confirm="wan-renew"' + (busy ? ' disabled' : '')), 'мягко: попросить у провайдера новый адрес, связь почти не прерывается') +
+        ctrlRow('Переподключить', btn('ask', 'undo', busy === 'wan-bounce' ? 'Переподключаем…' : 'Переподключить', 'small', ' data-confirm="wan-bounce"' + (busy ? ' disabled' : '')), 'интернет пропадёт примерно на 10 секунд') + '</dl>' +
+        (confirmBox('wan-renew', 'Попросить у провайдера новый адрес? Связь может прерваться на несколько секунд.', 'Обновить') ||
+         confirmBox('wan-bounce', 'Переподключить интернет? Он пропадёт примерно на 10 секунд, домашняя сеть продолжит работать.', 'Переподключить')));
   },
 
   vpn() {
@@ -823,6 +840,25 @@ const RENDER = {
         ['Защита Smart DNS', L.smartdns_guard !== false ? 'включена' : 'выключена', L.smartdns_guard !== false ? '' : 'warn', 'd-smartdns'],
         ['Домены', sd.length ? sd.length + ' ' + plural(sd.length, 'домен', 'домена', 'доменов') + ' · ' + smartdnsWhere(L) : 'нет', '', 'd-smartdns']
       ]));
+  },
+  'd-wanrec'() {
+    const gp = Object.assign({ CONFIRM_FAILURES: 3, RENEW_COOLDOWN: 600, BOUNCE_COOLDOWN: 1800, MAX_RENEW_HOUR: 3, MAX_BOUNCE_HOUR: 2, MAX_BOUNCE_DAY: 6 }, (cfg().wan_guard || {}).params);
+    const gsel = (key, label, opts, unit) => sel('data-cfg-wanp="' + key + '"' + (cfgOk() ? '' : ' disabled'), label, withCur(opts, gp[key], unit || ''), gp[key]);
+    const counts = n => Array.from({ length: n }, (x, i) => [i + 1, String(i + 1)]);
+    const hist = wanHistory((S.wanhist && S.wanhist.text) || '');
+    return cfgNote() +
+      panel('Когда начинать', '<dl class="kv">' + ctrlRow('Неудачных проверок подряд', gsel('CONFIRM_FAILURES', 'Неудачных проверок подряд', counts(10)), 'столько раз подряд интернет не отвечает, прежде чем VWARD вмешается') + '</dl>') +
+      panel('Новый адрес у провайдера', '<dl class="kv">' +
+        ctrlRow('Не чаще раза в', gsel('RENEW_COOLDOWN', 'Пауза между запросами адреса', [[60, '1 минуту'], [300, '5 минут'], [600, '10 минут'], [1800, '30 минут'], [3600, 'час']], ' с')) +
+        ctrlRow('Не больше в час', gsel('MAX_RENEW_HOUR', 'Запросов адреса в час', counts(10))) + '</dl>',
+        { desc: 'Первый шаг: мягкий, связь почти не прерывается.' }) +
+      panel('Переподключение', '<dl class="kv">' +
+        ctrlRow('Не чаще раза в', gsel('BOUNCE_COOLDOWN', 'Пауза между переподключениями', [[300, '5 минут'], [900, '15 минут'], [1800, '30 минут'], [3600, 'час'], [7200, '2 часа']], ' с')) +
+        ctrlRow('Не больше в час', gsel('MAX_BOUNCE_HOUR', 'Переподключений в час', counts(6))) +
+        ctrlRow('Не больше в сутки', gsel('MAX_BOUNCE_DAY', 'Переподключений в сутки', counts(24))) + '</dl>',
+        { desc: 'Второй шаг, если новый адрес не помог: интернет пропадает примерно на 10 секунд. Ограничения не дают переподключать без остановки, пока у провайдера авария.' }) +
+      panel('История', !S.wanhist ? empty('Загрузка…') : hist.length ? '<ul class="rows">' + hist.map(h => '<li class="row"><div class="row-main"><b>' + esc(h.what) + '</b><small>' + esc(h.when) + '</small></div><span class="st ' + (h.ok ? 'ok' : 'crit') + '">' + (h.ok ? 'выполнено' : 'не удалось') + '</span></li>').join('') + '</ul>' : empty('Восстановлений ещё не было'),
+        { desc: 'Последние действия - и автоматические, и по кнопкам.' });
   },
   'd-smartdns'() {
     const L = S.lists;
@@ -1484,7 +1520,7 @@ function openNotes() {
 }
 const SEARCH_INDEX = [
   ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Файлы'], ['system', 'Свободно'],
-  ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Восстанавливать автоматически'], ['wan', 'Проверять'],
+  ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Восстанавливать автоматически'], ['wan', 'Проверять'], ['wan', 'Обновить адрес'], ['wan', 'Переподключить'], ['d-wanrec', 'Неудачных проверок подряд'],
   ['settings', 'Только зарегистрированные устройства'], ['vpn', 'Автоматическая защита'], ['vpn', 'Трафик списков'], ['vpn', 'Проверка туннеля'],
   ['d-smartdns', 'Защита Smart DNS'],
   ['routes', 'Туннель для маршрутов'], ['routes', 'AdaptiveAuto'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
@@ -1548,6 +1584,7 @@ const CONFIRMED = {
   'route-tunnel': c => { toast('Переключаем маршруты на ' + c.to + '…'); return cfgSet({ op: 'tunnel', target: c.to, confirm: 'TUNNEL_SWITCH' }, 'Маршруты VWARD идут через ' + c.to, ['status', 'security', 'route']); },
   'tunnel-use': () => { const name = current.slice(2); toast('Переключаем маршруты на ' + name + '…'); return cfgSet({ op: 'tunnel', target: name, confirm: 'TUNNEL_SWITCH' }, 'Маршруты VWARD идут через ' + name, ['status', 'security', 'route']); },
   'wg-off': () => cfgSet({ op: 'wan-guard', value: '0', confirm: 'WAN_GUARD_DISABLE' }, 'Восстановление интернета выключено'),
+  'wan-renew': () => wanOp('wan-renew', 'WAN_RENEW', 'Адрес запрошен заново'),
   'wan-bounce': () => wanOp('wan-bounce', 'WAN_BOUNCE', 'Интернет переподключён'),
   'tg-off': () => cfgSet({ op: 'tunnel-guard', value: '0', confirm: 'TUNNEL_GUARD_DISABLE' }, 'Защита VPN выключена', ['status']),
   'wifi-ctl-on': () => cfgSet({ op: 'wifi', target: 'CONTROL_ENABLED', value: '1', confirm: 'WIFI_CONTROL_ENABLE' }, 'Ручное управление включено', ['wifi']),
@@ -1568,7 +1605,7 @@ const WAN_ERRORS = {
   PROFILE_UNAVAILABLE: 'интерфейс интернета не определён', INTERRUPTED: 'действие прервано, интерфейс включён обратно'
 };
 async function wanOp(op, token, okMsg) {
-  runningId = 'wan'; render();
+  runningId = op; render();
   let text;
   try {
     const x = await apiPost('control', { op: op, confirm: token }), code = ((x.output || '').match(/ERROR=([A-Z_]+)/) || [])[1];
