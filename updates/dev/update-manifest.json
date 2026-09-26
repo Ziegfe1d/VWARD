@@ -2,11 +2,11 @@
   "signed": {
     "schema": 1,
     "update_id": "vward-0.2.0-rc.1.fix.15",
-    "sequence": 2026092604,
+    "sequence": 2026092605,
     "version": "0.2.0-rc.1.fix.15",
     "channel": "dev",
     "priority": "ROUTINE",
-    "published_at": "2026-09-26T22:21:12Z",
+    "published_at": "2026-09-26T22:37:26Z",
     "min_updater_version": "1.2.0",
     "package": {
       "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/packages/vward-0.2.0-rc.1.fix.15.tar.gz",
@@ -40,5 +40,5 @@
       "key_id": "vward-prod-2026-01"
     }
   },
-  "signature": "mwKo11qC0n+VjJgb1S178bd4YjZRCHmMCPDlhJG/pgWrRwDeDahQ9gq4nO5gY+kmKMFtyF/00OTW4/2ozWpFAg=="
+  "signature": "76iYQtF1JilMvVBc27jiY0/zM5/sGUsSflVytN8Pkhgb0sPm6aEciFbG6+bO3/s13TvXgEsf/BLRJJy4dgwqDQ=="
 }

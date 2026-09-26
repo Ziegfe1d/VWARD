@@ -2,11 +2,11 @@
   "signed": {
     "schema": 2,
     "update_id": "vward-0.2.0-rc.1.fix.15",
-    "sequence": 2026092604,
+    "sequence": 2026092605,
     "version": "0.2.0-rc.1.fix.15",
     "channel": "dev",
     "priority": "ROUTINE",
-    "published_at": "2026-09-26T22:21:12Z",
+    "published_at": "2026-09-26T22:37:26Z",
     "min_updater_version": "2.0.0",
     "files_base": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/v2/files/",
     "files": [
@@ -467,7 +467,7 @@
       }
     ],
     "engine": {
-      "version": "2.0.1",
+      "version": "2.0.2",
       "files": [
         {
           "name": "vward-update-bootstrap.sh",
@@ -477,8 +477,8 @@
         },
         {
           "name": "vward-update-common-base.sh",
-          "sha256": "d42273dba742f718141905c92f82a7d7b11a5ec7dc8d500dee9ee085b9b05cb4",
-          "size": 44458,
+          "sha256": "bb0306ab2e7d8cafa182f57fd71528bceda51e759e49e9a194dfb43a111e8c39",
+          "size": 45247,
           "mode": "0755"
         },
         {
@@ -519,8 +519,8 @@
         },
         {
           "name": "vward-update.sh",
-          "sha256": "4f1c816f8cdafd271ab145c9187ad29640d63582ede0d167e31bd4b16c9da945",
-          "size": 26457,
+          "sha256": "2403f0ab88cc13bf5e564ab03a261b2376183dd604683d0565f5c2c8cca84b20",
+          "size": 26957,
           "mode": "0755"
         },
         {
@@ -557,5 +557,5 @@
       "key_id": "vward-prod-2026-01"
     }
   },
-  "signature": "OH98wUDvjftulmf1QaWtIYT2wktatzBs+4wot0ssCvtOVi5I5L5HwN41DeH3QNNW01DQJtRf9o0as8AvCiY4Bw=="
+  "signature": "MYn1lmLaKvwIbxNIr6UjhCS8jKcg3at386CRqtsdh7rzKyLPijwSFM/7spfKl36pQIae9tcQ/vTAKpsIcZbrAg=="
 }
