@@ -191,7 +191,7 @@ const PAGES = [
   { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adsstats', 'adspub', 'agh'] },
   { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config'] },
   { id: 'updates', title: 'Обновления', icon: 'refresh', group: 'VWARD', data: ['status', 'update', 'ext', 'config'] },
-  { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth', 'status', 'update', 'config', 'backups'] }
+  { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth', 'status', 'config', 'backups'] }
 ];
 const SHORT = { overview: 'Обзор', logs: 'Журналы', wan: 'Интернет', vpn: 'VPN', lists: 'Списки', routes: 'Маршруты', wifi: 'Wi-Fi', ads: 'Реклама', system: 'Система', updates: 'Обновл.', settings: 'Настройки' };
 const COMPONENTS = [
@@ -339,10 +339,12 @@ function extHistory(hist, keep) {
   return h.length ? panel('Последние установки', kv(h.map(r => [r.name + ' ' + extVer(r.to), EXT_RESULT[r.result] || r.result, r.result === 'ok' ? 'ok' : 'crit', null, '', fmtStamp(r.at) + ' · было ' + extVer(r.from)]))) : '';
 }
 function extRunNote(run, pkg) {
-  if (!run || !run.running) return '';
+  if (!run || !run.running || runningId === 'ext') return '';
   if (pkg && run.label !== 'ext-upgrade-' + pkg) return '';
   return '<p class="result-note">Выполняется: ' + esc(run.label === 'ext-check' ? 'проверка' : 'установка') + '…</p>';
 }
+// While a check runs, its button says so: no separate progress line.
+const extCheckBtn = label => btn('ext-check', 'refresh', runningId === 'ext' ? 'Проверяем…' : label, '', runningId === 'ext' ? ' disabled' : '');
 const EXT_OK = { check: 'Проверка завершена', upgrade: 'Обновление установлено' };
 function extOp(op, pkg, token) {
   return runLong('ext', 'ext-update-control', pkg ? { op: op, pkg: pkg, confirm: token } : { op: op }, 'ext-update-data', EXT_OK[op])
@@ -616,7 +618,7 @@ const RENDER = {
         ['AdGuard Home', aghVal, agh.available ? 'info' : '', 'u-agh', '', agh.available ? 'установлена ' + extVer(agh.installed) : autoText(x.auto && x.auto.agh)],
         ['Прошивка Keenetic', fwVal, fw.update_available ? 'info' : '', 'u-fw', '', fw.channel ? 'канал ' + fwChannel(fw.channel) + ' · ' + autoText(fw.auto_update) : ''],
         ['Пакеты Entware', pk.length ? pk.length + ' ' + plural(pk.length, 'обновление', 'обновления', 'обновлений') : S.ext && !x.checked_at ? 'не проверялись' : 'актуальны', pk.length ? 'info' : '', 'u-opkg', '', x.installed_count ? 'установлено ' + x.installed_count + ' · ' + autoText(x.auto && x.auto.entware) : '']
-      ]) + '<div class="panel-actions">' + btn('ext-check', 'refresh', 'Проверить всё') + '</div>' + resultBox('ext'),
+      ]) + '<div class="panel-actions">' + extCheckBtn('Проверить всё') + '</div>' + resultBox('ext'),
       { desc: checked ? 'Последняя проверка: ' + checked + '. Проверка идёт сама раз в сутки, во время установки обновлений VWARD.' : 'Проверка идёт сама раз в сутки, во время установки обновлений VWARD.' });
   },
 
@@ -660,7 +662,7 @@ const RENDER = {
       panel('Пакеты Entware', pk.length ? '<dl class="kv">' + rows + '</dl>' +
         (c ? confirmBox('ext-upgrade', (c.critical ? 'Системный пакет: если он сломается, может пропасть SSH или командная строка. ' : '') + 'Обновить ' + c.name + ' до ' + extVer(c.available) + '? Перед установкой сохранится копия, при сбое вернётся прежняя версия.', 'Обновить', c.critical) : '') +
         extRunNote(run) + resultBox('ext') :
-        empty(x.checked_at ? (x.feed_ok === false ? 'Список пакетов Entware не скачался. Повторите проверку позже.' : 'Все пакеты актуальны.') : 'Пакеты ещё не проверялись.') + '<div class="panel-actions">' + btn('ext-check', 'refresh', 'Проверить') + '</div>' + resultBox('ext'),
+        empty(x.checked_at ? (x.feed_ok === false ? 'Список пакетов Entware не скачался. Повторите проверку позже.' : 'Все пакеты актуальны.') : 'Пакеты ещё не проверялись.') + '<div class="panel-actions">' + extCheckBtn('Проверить') + '</div>' + resultBox('ext'),
         { desc: 'Программы Entware, на которых работают VWARD и AdGuard Home: cron, curl, jq, веб-сервер, SSH и другие.' }) +
       panel('Настройки', '<dl class="kv">' + ctrlRow('Обновлять автоматически', sw('data-ext-auto="entware"', x.auto && x.auto.entware, 'Обновлять пакеты Entware автоматически'), 'кроме системных пакетов: их - только вручную') + '</dl>') +
       extHistory(x.history, h => h.name !== 'adguardhome-go');
@@ -672,7 +674,7 @@ const RENDER = {
     const winStart = uc.safe_window_start || String(p.safe_window || '').split(/\s*[-–]\s*/)[0];
     const interval = uc.check_interval_seconds || p.check_interval_seconds;
     const acts = [];
-    if (al.check) acts.push(btn('update-op', 'refresh', 'Проверить', 'primary', ' data-op="check"'));
+    if (al.check || runningId === 'updates') acts.push(btn('update-op', 'refresh', runningId === 'updates' ? 'Проверяем…' : 'Проверить', 'primary', ' data-op="check"' + (runningId === 'updates' ? ' disabled' : '')));
     if (al.apply) acts.push(btn('ask', 'save', 'Установить', 'primary', ' data-confirm="update-apply"'));
     if (al.retry) acts.push(btn('ask', 'refresh', 'Повторить', '', ' data-confirm="update-retry"'));
     if (al.rollback) acts.push(btn('ask', 'undo', 'Откатить', 'danger', ' data-confirm="update-rollback"'));
@@ -686,10 +688,9 @@ const RENDER = {
         ['Версия', p.version || '—', '', 'd-notes', '', 'сборка № ' + (p.last_sequence || 0) + ' · что нового'],
         pend.present ? ['Доступно', (pend.version || '') + (pend.priority ? ' · ' + ({ ROUTINE: 'обычное', IMPORTANT: 'важное', CRITICAL: 'критическое' }[String(pend.priority).toUpperCase()] || pend.priority) : ''), 'info', 'd-notes'] : null,
         ['Последняя проверка', fmtStamp(p.last_health_check) || '—', '', 'logs', ' data-log-go="updater"'],
-        ['Откат', u.rollback_available ? 'Доступен' : 'Недоступен', u.rollback_available ? 'info' : ''],
         u.engine ? ['Движок обновлений', u.engine.version === '1' ? '1.x' : u.engine.version, '', null, '', lastApplyNote(u.last_apply)] : null
       ]) + (conf || (acts.length ? '<div class="panel-actions even">' + acts.join('') + '</div>' : '')) + resultBox('updates'),
-      { right: headPill((u.phase || p.phase) === 'FAILED' ? 'crit' : pend.present ? 'info' : 'ok', phaseText(u.phase || p.phase)) }) +
+      { right: ['FAILED', 'RECOVERY_REQUIRED'].includes(u.phase || p.phase) ? headPill('crit', phaseText(u.phase || p.phase)) : '' }) +
       panel('Настройки обновлений', '<dl class="kv">' +
         ctrlRow('Установка обновлений', sel('data-upd="mode"', 'Установка обновлений', [['auto', 'Автоматическая'], ['schedule', 'По расписанию'], ['manual', 'Ручная']], mode), ({ auto: 'сразу после проверки подписи', schedule: 'в ' + (winStart || '03:00') + ', критические исправления - сразу', manual: 'только проверка и уведомление' })[mode]) +
         (mode === 'schedule' ? ctrlRow('Время установки', sel('data-cfg-upd="install_time"', 'Время установки', withCur(HOURS, winStart, ''), winStart), 'обновление ставится при первой проверке после этого времени') : '') +
@@ -702,13 +703,7 @@ const RENDER = {
 
   settings() {
     const sec = S.security || {}, l = sec.listener || {}, api = sec.api || {}, au = S.auth || {};
-    const p = plat(), u = S.update || {}, updMode = !isTrue(p.auto_apply) ? 'ручная' : (cfg().update || {}).apply_window === 'any' ? 'автоматическая' : 'по расписанию';
     return loadError(['security']) +
-      panel('Обновления', kv([
-        ['Версия', p.version || '—', '', 'u-vward'],
-        u.pending && u.pending.present ? ['Доступно', u.pending.version || 'новая версия', 'info', 'u-vward'] : null,
-        ['Установка', updMode, '', 'u-vward']
-      ]), { desc: 'Версия VWARD и как ставятся обновления. Нажмите, чтобы открыть подробности и настройки.' }) +
       panel('Оформление', '<dl class="kv">' + ctrlRow('Тема', sel('data-theme-pick', 'Тема оформления', Object.keys(THEMES).map(k => [k, THEMES[k].charAt(0).toUpperCase() + THEMES[k].slice(1)]), theme), theme === 'time' ? 'светлая с 07:00 до 20:00, тёмная ночью' : '') + '</dl>',
         { desc: 'Тема хранится в этом браузере.' }) +
       panel('Доступ к VWARD', '<dl class="kv">' + ctrlRow('Вход по учётной записи Keenetic', sw('data-auth', !!(au.enabled || authForm), 'Вход по учётной записи Keenetic', !S.auth),
@@ -1082,7 +1077,7 @@ function tunnelJobText(out) {
 }
 async function tunnelJob(resultId, fields) {
   const show = text => { actionResult = { id: resultId, text: text }; render(); };
-  show('Запускаем…');
+  render();
   let x;
   try { x = await apiPost('tunnel-conf', fields); } catch (e) { show('Ошибка: ' + e.message); return; }
   if (!x.ok) { show('Не выполнено: ' + errText(x)); return; }
@@ -1438,7 +1433,7 @@ const SEARCH_INDEX = [
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
   ['ads', 'Настройки AdGuard Home'], ['ads', 'Последняя проверка'], ['ads', 'Правила уходят'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
   ['u-vward', 'Установка обновлений'], ['u-vward', 'Время установки'], ['u-vward', 'Интервал проверки'], ['u-vward', 'Канал'],
-  ['settings', 'Адрес VWARD'], ['settings', 'Тема'], ['settings', 'Версия'], ['settings', 'Установка'], ['d-diag', 'Задания по расписанию'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
+  ['settings', 'Адрес VWARD'], ['settings', 'Тема'], ['u-vward', 'Версия'], ['d-diag', 'Задания по расписанию'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
 ];
 function openSearch() {
   openSheet('', '<div class="search-box">' + ico('search') + '<input id="searchInput" placeholder="Раздел, параметр или компонент" aria-label="Поиск по VWARD" autocomplete="off"><button class="icon-btn" type="button" data-act="close" aria-label="Закрыть">' + ico('close') + '</button></div><div class="sheet-body" id="searchResults"></div>', 'search', 'searchBtn');
@@ -1461,7 +1456,7 @@ function toast(msg) {
 
 /* ---------- Действия ---------- */
 async function runAction(resultId, action, fields, okMsg) {
-  actionResult = { id: resultId, text: 'Выполняется…' }; render();
+  actionResult = null; render();
   try {
     const x = await apiPost(action, fields);
     actionResult = x.ok ? null : { id: resultId, text: 'Не выполнено: ' + errText(x) };
@@ -1576,11 +1571,17 @@ function updOverlayClose() { updOverlay = null; const el = $('updOverlay'); if (
 // Updater exit codes that are answers, not failures.
 const UPDATE_RC = { 10: 'Новых обновлений нет', 11: 'Обновление отложено: версия в карантине', 20: 'Обновление найдено, установится в назначенное время', 34: 'Нет связи с сервером обновлений' };
 const UPDATE_RC_OK = { 10: 1, 20: 1 };
+// The id of the block whose long action is running: its button shows the progress.
+let runningId = null;
 async function runLong(resultId, action, fields, dataAction, okMsg) {
   const show = text => { actionResult = { id: resultId, text: text }; render(); };
+  runningId = resultId; actionResult = null;
+  try { return await runLongBody(resultId, action, fields, dataAction, okMsg, show); } finally { runningId = null; render(); }
+}
+async function runLongBody(resultId, action, fields, dataAction, okMsg, show) {
   const installing = dataAction === 'update-data' && fields && fields.op !== 'check';
   if (installing) updOverlayShow({ manual: true, op: fields.op, phase: 'CHECKING', version: (S.update && S.update.pending && S.update.pending.version) || '', done: false });
-  show('Запускаем…');
+  render();
   let x;
   try { x = await apiPost(action, fields); }
   catch (e) { if (installing) updOverlayClose(); toast('Ошибка: ' + e.message); show('Ошибка: ' + e.message); return; }
@@ -1592,7 +1593,6 @@ async function runLong(resultId, action, fields, dataAction, okMsg) {
     let u;
     try { u = await apiGet(dataAction); } catch (e) { continue; }
     run = u.run || {};
-    show(u.phase && dataAction === 'update-data' ? 'Выполняется: ' + phaseText(u.phase) : 'Выполняется…');
     if (installing && u.phase) updOverlayShow({ phase: u.phase });
     if (run.finished) break;
   }
