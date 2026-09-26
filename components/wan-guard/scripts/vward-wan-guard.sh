@@ -203,6 +203,17 @@ wg_num()
     esac
 }
 
+# wg_rci_get URL: Keenetic's answer, or nothing.  When several cron jobs start
+# on the same minute the router can take longer than 3 s; one more try after
+# 2 s tells a busy router from a missing answer (a failure costs 2 s + 5 s).
+wg_rci_get()
+{
+    # Kept whole: a reply cut by the timeout is never glued to the retry.
+    WG_RCI=$("$CURL" -fsS --connect-timeout 2 --max-time 3 "$1" 2>/dev/null) ||
+        { sleep 2; WG_RCI=$("$CURL" -fsS --connect-timeout 2 --max-time 5 "$1" 2>/dev/null); } || WG_RCI=""
+    printf '%s' "$WG_RCI"
+}
+
 wg_reset_fail()
 {
     rm -f "$REC_DIR/fail_class"
@@ -564,19 +575,8 @@ if [ "$CHECK_INTERVAL_MIN" -gt 1 ] && [ "$(wg_num "$REC_DIR/fail_count" 0)" -eq 
 fi
 mkdir -p "$REC_DIR" 2>/dev/null && echo "$UPTIME" > "$REC_DIR/last_check" 2>/dev/null
 
-ISP_JSON="$(
-    "$CURL" -fsS \
-        --connect-timeout 2 \
-        --max-time 3 \
-        "$RCI_ISP" 2>/dev/null
-)"
-
-NET_JSON="$(
-    "$CURL" -fsS \
-        --connect-timeout 2 \
-        --max-time 3 \
-        "$RCI_NET" 2>/dev/null
-)"
+ISP_JSON="$(wg_rci_get "$RCI_ISP")"
+NET_JSON="$(wg_rci_get "$RCI_NET")"
 
 # One jq per answer instead of one per field: this runs every minute.
 US=$(printf '\037')

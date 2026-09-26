@@ -214,4 +214,31 @@ rm -f "$WAN_GUARD_DISABLE_FILE"
 wan_recover PHY_DOWN
 grep -Fq 'interface ISP down' "$WAN_TEST_LOG" || fail "re-enabled guard does not act"
 
+# A busy router: one more try for RCI, and never two replies glued together.
+sed -n '/^wg_rci_get()/,/^}/p' "$SOURCE" > "$WORK/rci.sh"
+grep -q '^wg_rci_get()' "$WORK/rci.sh" || fail "missing wg_rci_get helper"
+cat > "$WORK/curl" <<'SH'
+#!/bin/sh
+n=$(($(cat "$WAN_TEST_CALLS" 2>/dev/null || echo 0) + 1)); echo "$n" > "$WAN_TEST_CALLS"
+case "$WAN_TEST_RCI:$n" in
+    slow:1) exit 28 ;;
+    slow:2) printf '{"ok":1}' ;;
+    cut:1) printf '{"par'; exit 28 ;;
+    cut:2) printf '{"ok":2}' ;;
+    down:*) exit 7 ;;
+    fast:*) printf '{"ok":0}' ;;
+esac
+SH
+chmod +x "$WORK/curl"
+WAN_TEST_CALLS="$WORK/calls"; export WAN_TEST_CALLS
+for c in 'fast|{"ok":0}|1' 'slow|{"ok":1}|2' 'cut|{"ok":2}|2' 'down||2'; do
+    IFS='|' read -r mode want calls <<CASE
+$c
+CASE
+    rm -f "$WAN_TEST_CALLS"
+    got=$(WAN_TEST_RCI=$mode CURL="$WORK/curl" sh -c '. "$1"; sleep(){ :; }; wg_rci_get http://rci/x' sh "$WORK/rci.sh")
+    [ "$got" = "$want" ] && [ "$(cat "$WAN_TEST_CALLS")" = "$calls" ] ||
+        fail "wg_rci_get $mode: got '$got' after $(cat "$WAN_TEST_CALLS") calls"
+done
+
 echo WAN_GUARD_RECOVERY=PASS

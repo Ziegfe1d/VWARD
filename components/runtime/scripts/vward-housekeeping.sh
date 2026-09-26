@@ -39,6 +39,7 @@ POLICY="
 /opt/var/log/vward-console-lighttpd.log|131072
 /opt/var/log/vward/console-audit.log|262144
 /opt/var/log/vward/updater-watch.log|262144
+/opt/var/log/vward/updater.log|262144
 /opt/var/log/vward/updater-recovery.log|131072
 "
 
