@@ -1662,7 +1662,10 @@ function updOverlayShow(o) {
 }
 function updOverlayClose() { updOverlay = null; const el = $('updOverlay'); if (el) el.remove(); }
 // Updater exit codes that are answers, not failures.
-const UPDATE_RC = { 10: 'Новых обновлений нет', 11: 'Обновление отложено: версия в карантине', 20: 'Обновление найдено, установится в назначенное время', 34: 'Нет связи с сервером обновлений' };
+const UPDATE_RC = { 10: 'Новых обновлений нет', 11: 'Обновление отложено: версия в карантине', 20: 'Обновление найдено, установится в назначенное время',
+  30: 'Настройки обновлений не прочитаны. Файлы VWARD не менялись.', 31: 'Проверка обновления не прошла. Файлы VWARD не менялись: нажмите «Проверить» и повторите.',
+  32: 'Обновление не подходит к этой версии. Файлы VWARD не менялись.', 33: 'Не хватает места или условий для установки. Файлы VWARD не менялись.',
+  34: 'Нет связи с сервером обновлений' };
 const UPDATE_RC_OK = { 10: 1, 20: 1 };
 // The id of the block whose long action is running: its button shows the progress.
 let runningId = null;
