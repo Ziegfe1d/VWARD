@@ -74,6 +74,7 @@ cleanup() {
     [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
     [ "$LOCKED" != 1 ] || rm -rf "${CHANGE_LOCK:?}"
+    [ "$EXT_LOCKED" != 1 ] || rm -rf "${EXT_STATE:?}/lock"
     command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null
     return 0
 }
@@ -1310,6 +1311,230 @@ op_component() {
     done_ok "component $1 enabled=$2 affected=$(echo $changed | tr ' ' ',')" changed
 }
 
+# ---------- Updates of other software ----------
+# Entware packages (AdGuard Home among them) and the Keenetic firmware.  A
+# package is installed only from the list the last check found, after a copy
+# of its files and of the opkg database; if a check that passed before fails
+# after, the copy goes back.  The firmware is only switched between automatic
+# and manual and between channels: installing it reboots the router.
+
+EXT_CONF=${VWARD_EXT_UPDATE_CONF:-$ETC/ext-update.conf}
+EXT_STATE=${VWARD_EXT_UPDATE_STATE:-/opt/var/lib/vward/ext-update}
+EXT_BACKUP=${VWARD_EXT_UPDATE_BACKUP:-/opt/var/backups/vward/ext-update}
+OPKG=${VWARD_OPKG:-opkg}
+# Package files are named as opkg lists them (/opt/...); EXT_R is where that tree lives.
+EXT_R=${VWARD_EXT_ROOT:-}
+# Their failure takes the shell, the package manager or SSH with them: never
+# automatic, by hand only with a second confirmation.
+EXT_CRITICAL=" libc libgcc libpthread librt libssp libstdcpp busybox opkg entware-opt entware-release entware-upgrade dropbear "
+EXT_MIN_FREE_KB=20480
+OPKG_STATUS=/opt/lib/opkg/status
+OPKG_INFO=/opt/lib/opkg/info
+
+EXT_LOCKED=0
+# One package operation at a time, whoever started it (the console or the daily run).
+ext_lock() {
+    [ "$EXT_LOCKED" = 1 ] && return 0
+    mkdir -p "$EXT_STATE" && vward_lock_take "$EXT_STATE/lock" || die ext_update_busy 75
+    EXT_LOCKED=1
+}
+
+ext_critical() { case "$EXT_CRITICAL" in *" $1 "*) return 0 ;; esac; return 1; }
+valid_pkg() { printf '%s\n' "$1" | grep -Eq '^[a-z0-9][a-z0-9+._-]{0,63}$'; }
+
+# ext_firmware_refresh: the firmware's version, channel and update state.
+ext_firmware_refresh() {
+    mkdir -p "$EXT_STATE" || return 1
+    "${VWARD_CURL_BIN:-curl}" --fail --silent --connect-timeout 3 --max-time 30 -X POST \
+        -H 'Content-Type: application/json' -d '[{"parse":"components check-update"}]' \
+        "${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/" 2>/dev/null |
+    "$JQ" -e '.[0].parse | select(type == "object" and (.release | type) == "string" and .release != "") |
+        {release, title, channel: (.sandbox // ""), update_available: (.["update-available"] == true),
+         auto_update: (.["auto-update-enabled"] == true), checked: (.timestamp // ""),
+         channels: [.sandboxes[]? | select(type == "object") | {name, version}]}' \
+        > "$EXT_STATE/firmware.json.tmp" 2>/dev/null &&
+    mv -f "$EXT_STATE/firmware.json.tmp" "$EXT_STATE/firmware.json" || { rm -f "$EXT_STATE/firmware.json.tmp"; return 1; }
+}
+
+# ext_upgradable: refresh the list of packages with a newer version (name, installed, new).
+ext_upgradable() {
+    "$OPKG" list-upgradable 2>/dev/null |
+        awk -F' - ' 'NF >= 3 && $1 ~ /^[a-z0-9][a-z0-9+._-]*$/ {print $1 "\t" $2 "\t" $3}' > "$EXT_STATE/upgradable.tsv.tmp" &&
+        mv -f "$EXT_STATE/upgradable.tsv.tmp" "$EXT_STATE/upgradable.tsv"
+}
+
+op_ext_check() {
+    ext_lock
+    echo "Проверка пакетов Entware..."
+    orc=0
+    "$OPKG" update > "$EXT_STATE/opkg-update.log" 2>&1 || orc=$?
+    ext_upgradable || die write_failed
+    n=$(wc -l < "$EXT_STATE/upgradable.tsv" | tr -d ' ')
+    if [ "$orc" -eq 0 ]; then echo "Пакеты: обновлений $n"; else echo "Пакеты: список скачан не полностью (opkg $orc), обновлений $n"; fi
+    echo "Проверка прошивки Keenetic..."
+    frc=0
+    ext_firmware_refresh || frc=1
+    if [ "$frc" -eq 0 ]; then
+        "$JQ" -r '"Прошивка: " + .title + (if .update_available then ", есть обновление" else ", обновлений нет" end)' "$EXT_STATE/firmware.json"
+    else
+        echo "Прошивка: роутер не ответил"
+    fi
+    printf 'checked_at=%s\nopkg_rc=%s\nfirmware_ok=%s\n' "$(date +%s)" "$orc" "$((1 - frc))" > "$EXT_STATE/check.state"
+    [ "$orc" -eq 0 ] || die feed_unavailable
+    done_ok "ext-check upgradable=$n" changed
+}
+
+# ext_health: one line per check that passes now.
+ext_health() {
+    "$JQ" -n 1 >/dev/null 2>&1 && echo jq
+    "${VWARD_CURL_BIN:-curl}" --version >/dev/null 2>&1 && echo curl
+    [ -n "${VWARD_DNS_SERVER:-}" ] && "${VWARD_NSLOOKUP_BIN:-nslookup}" "${VWARD_HEALTH_HOST:-keenetic.com}" "$VWARD_DNS_SERVER" >/dev/null 2>&1 && echo dns
+    [ -n "${VWARD_CONSOLE_PORT:-}" ] && "${VWARD_CURL_BIN:-curl}" --fail --silent --max-time 5 \
+        "http://127.0.0.1:$VWARD_CONSOLE_PORT/cgi-bin/api.cgi?action=ping" 2>/dev/null | grep -q '"ok":true' && echo console
+    return 0
+}
+
+# ext_restart PLAN_FILE: restart the enabled services of the packages in the plan.
+ext_restart() {
+    while IFS="$(printf '\t')" read -r rp_pkg rp_rest; do
+        "$OPKG" files "$rp_pkg" 2>/dev/null
+    done < "$1" | awk 'index($0, "/opt/etc/init.d/S") == 1 && substr($0, 17) ~ /^S[0-9][0-9]/' | sort -u |
+    while IFS= read -r rp_init; do
+        [ -x "$EXT_R$rp_init" ] && grep -q '^ENABLED=yes' "$EXT_R$rp_init" 2>/dev/null || continue
+        echo "Перезапуск $(basename "$rp_init")"
+        "$EXT_R$rp_init" restart </dev/null >/dev/null 2>&1 || true
+    done
+}
+
+# ext_restore DIR: put the copied files back.  Copied beside the target first
+# and renamed into place, so a running program (busybox itself) is never rewritten.
+ext_restore() {
+    rs_fail=0
+    while IFS= read -r rs_f; do
+        [ -e "$1/files/$rs_f" ] || [ -L "$1/files/$rs_f" ] || continue
+        rs_tmp="$EXT_R/$rs_f.vward-restore.$$"
+        mkdir -p "$(dirname "$EXT_R/$rs_f")" && cp -a "$1/files/$rs_f" "$rs_tmp" && mv -f "$rs_tmp" "$EXT_R/$rs_f" ||
+            { rm -f "$rs_tmp"; rs_fail=1; }
+    done < "$1/files.list"
+    return "$rs_fail"
+}
+
+ext_record() {
+    printf '%s\t%s\t%s\t%s\t%s\n' "$(date +%s)" "$1" "$2" "$3" "$4" >> "$EXT_STATE/history.tsv"
+    tail -n 50 "$EXT_STATE/history.tsv" > "$EXT_STATE/history.tsv.tmp" && mv -f "$EXT_STATE/history.tsv.tmp" "$EXT_STATE/history.tsv"
+}
+
+# op_ext_upgrade PACKAGE CONFIRM
+op_ext_upgrade() {
+    valid_pkg "$1" || die invalid_value 64
+    ext_lock
+    line=$(awk -F'\t' -v p="$1" '$1 == p {print; exit}' "$EXT_STATE/upgradable.tsv" 2>/dev/null)
+    [ -n "$line" ] || die not_upgradable
+    from=$(printf '%s\n' "$line" | cut -f2); to=$(printf '%s\n' "$line" | cut -f3)
+    ! ext_critical "$1" || [ "$2" = critical ] || die confirmation_required
+    free=$(df -k "$EXT_R/opt" 2>/dev/null | awk 'NR == 2 {print $4}')
+    case "$free" in ''|*[!0-9]*) free=0 ;; esac
+    [ "$free" -ge "$EXT_MIN_FREE_KB" ] || die no_space
+    load_profile_base
+
+    dir="$EXT_BACKUP/$(date '+%Y%m%d-%H%M%S')-$1"
+    mkdir -p "$dir" || die backup_failed
+    # What opkg would change: the package and the dependencies it pulls up.
+    "$OPKG" upgrade --noaction "$1" 2>/dev/null |
+        awk '$1 == "Upgrading" && $3 == "on" {print $2 "\t" $6 "\t" $8}
+             $1 == "Installing" {n = $2; v = $3; gsub(/[()]/, "", v); print n "\tnew\t" v}' |
+        sed 's/\.\.\.$//' > "$dir/plan.tsv"
+    awk -F'\t' -v p="$1" '$1 == p {f = 1} END {exit !f}' "$dir/plan.tsv" || printf '%s\t%s\t%s\n' "$1" "$from" "$to" >> "$dir/plan.tsv"
+    echo "Будет обновлено:"; awk -F'\t' '{print "  " $1 ": " $2 " -> " $3}' "$dir/plan.tsv"
+    while IFS="$(printf '\t')" read -r bp_pkg bp_rest; do
+        valid_pkg "$bp_pkg" || continue
+        "$OPKG" files "$bp_pkg" 2>/dev/null | grep '^/'
+        for bp_info in "$EXT_R$OPKG_INFO/$bp_pkg".*; do [ -e "$bp_info" ] && echo "${bp_info#"$EXT_R"}"; done
+    done < "$dir/plan.tsv" > "$dir/files.all"
+    echo "$OPKG_STATUS" >> "$dir/files.all"
+    while IFS= read -r bp_f; do [ -f "$EXT_R$bp_f" ] || [ -L "$EXT_R$bp_f" ] && printf '%s\n' "${bp_f#/}"; done < "$dir/files.all" | sort -u > "$dir/files.list"
+    # A plain copy: BusyBox tar may be built without -T.
+    while IFS= read -r bp_f; do
+        mkdir -p "$dir/files/$(dirname "$bp_f")" && cp -a "$EXT_R/$bp_f" "$dir/files/$bp_f" || { rm -rf "${dir:?}"; die backup_failed; }
+    done < "$dir/files.list"
+    echo "Копия файлов: $(wc -l < "$dir/files.list" | tr -d ' ') шт."
+    ext_health > "$dir/health.before"
+    audit "ext-upgrade $1 $from -> $to backup=$dir"
+
+    urc=0
+    "$OPKG" upgrade "$1" > "$dir/opkg.log" 2>&1 || urc=$?
+    tail -n 5 "$dir/opkg.log"
+    ext_restart "$dir/plan.tsv"
+    # Services need a moment after a restart.
+    hw=0; while :; do
+        ext_health > "$dir/health.after"
+        missing=$(grep -vxF -f "$dir/health.after" "$dir/health.before" | tr '\n' ' ')
+        [ -n "$missing" ] && [ "$hw" -lt "${VWARD_EXT_HEALTH_WAIT:-30}" ] || break
+        sleep 5; hw=$((hw + 5))
+    done
+    if [ "$urc" -eq 0 ] && [ -z "$missing" ]; then
+        ext_upgradable || true
+        ext_record "$1" "$from" "$to" ok
+        echo "Установлено: $1 $to"
+        done_ok "ext-upgrade $1 $from -> $to" changed
+    fi
+
+    echo "Проверка не прошла (${missing:-opkg $urc}), возвращаю прежнюю версию"
+    ext_restore "$dir" || { ext_record "$1" "$from" "$to" rollback_failed; die rollback_failed; }
+    ext_restart "$dir/plan.tsv"
+    ext_upgradable || true
+    ext_record "$1" "$from" "$to" rolled_back
+    die upgrade_rolled_back
+}
+
+# op_ext_auto agh|entware 0|1: install found updates automatically.
+op_ext_auto() {
+    case "$1" in agh) k=AGH_AUTO ;; entware) k=ENTWARE_AUTO ;; *) die invalid_value 64 ;; esac
+    case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
+    set_kv "$EXT_CONF" "$k" "$2" 0600 || done_ok "ext-auto $1=$2" unchanged
+    done_ok "ext-auto $1=$2" changed
+}
+
+# op_firmware auto 0|1 | channel stable|preview|draft: Keenetic's own settings.
+op_firmware() {
+    ext_firmware_refresh || die router_unavailable
+    case "$1" in
+        auto)
+            case "$2" in 0) cmd=disable; want=false ;; 1) cmd=enable; want=true ;; *) die invalid_value 64 ;; esac
+            [ "$("$JQ" -r .auto_update "$EXT_STATE/firmware.json")" != "$want" ] || done_ok "firmware auto=$2" unchanged
+            ndm "components auto-update $cmd" || die router_rejected ;;
+        channel)
+            case "$2" in stable|preview|draft) ;; *) die invalid_value 64 ;; esac
+            [ "$("$JQ" -r .channel "$EXT_STATE/firmware.json")" != "$2" ] || done_ok "firmware channel=$2" unchanged
+            ndm "components auto-update channel $2" || die router_rejected ;;
+        *) die invalid_value 64 ;;
+    esac
+    save_router || die router_save_failed
+    ext_firmware_refresh || true
+    done_ok "firmware $1=$2" changed
+}
+
+# op_ext_daily: the daily check, then the updates the user left to VWARD.
+op_ext_daily() {
+    ext_lock
+    ( trap - EXIT; op_ext_check ) || true
+    cp -f "$EXT_STATE/upgradable.tsv" "$EXT_STATE/upgradable.tsv.daily" 2>/dev/null || : > "$EXT_STATE/upgradable.tsv.daily"
+    kv_agh=0; kv_ent=0
+    [ -r "$EXT_CONF" ] && {
+        kv_agh=$(sed -n 's/^AGH_AUTO=//p' "$EXT_CONF" | tail -n 1)
+        kv_ent=$(sed -n 's/^ENTWARE_AUTO=//p' "$EXT_CONF" | tail -n 1)
+    }
+    n=0
+    while IFS="$(printf '\t')" read -r dp_pkg dp_from dp_to; do
+        ext_critical "$dp_pkg" && continue
+        case "$dp_pkg" in adguardhome-go) [ "$kv_agh" = 1 ] || continue ;; *) [ "$kv_ent" = 1 ] || continue ;; esac
+        echo "Автоматически: $dp_pkg"
+        ( trap - EXIT; op_ext_upgrade "$dp_pkg" auto ) || true
+        n=$((n + 1))
+    done < "$EXT_STATE/upgradable.tsv.daily" 2>/dev/null
+    done_ok "ext-daily automatic=$n" changed
+}
+
 # ---------- Entry ----------
 
 # An uploaded .conf goes away with the helper whatever happens next, a refused
@@ -1320,7 +1545,7 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     tunnel-subnet) [ "$#" -eq 3 ] || die usage 64 ;;
     wifi-host) [ "$#" -eq 3 ] || die usage 64 ;;
@@ -1329,6 +1554,7 @@ esac
 ARG1=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
 ARG2=${2:-}
 case "$OP" in wifi|update|wan-param|tunnel|domain-list|domain-list-watch|tunnel-conf|tunnel-delete|tunnel-subnet|backup-restore|wifi-host) ARG1=$1 ;; esac
+case "$OP" in ext-upgrade|ext-auto|firmware) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 ARG3=${3:-}
 case "$OP" in route-domain|force-vpn|adaptive) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 
@@ -1372,5 +1598,10 @@ case "$OP" in
     backup-restore) op_backup_restore "$ARG1" ;;
     tunnel-delete) op_tunnel_delete "$ARG1" "$ARG2" ;;
     tunnel-subnet) op_tunnel_subnet "$ARG1" "$ARG2" "$ARG3" ;;
+    ext-check) op_ext_check ;;
+    ext-daily) op_ext_daily ;;
+    ext-upgrade) op_ext_upgrade "$ARG1" "$ARG2" ;;
+    ext-auto) op_ext_auto "$ARG1" "$ARG2" ;;
+    firmware) op_firmware "$ARG1" "$ARG2" ;;
     *) die invalid_operation 64 ;;
 esac

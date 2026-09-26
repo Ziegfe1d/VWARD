@@ -234,7 +234,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes) ;;
+    status|ping|log|settings|settings-data|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -331,6 +331,7 @@ COMPONENT_STATE=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
 component_disabled(){ [ -e "$COMPONENT_STATE/$1.disabled" ]; }
 console_mutation_leave(){ command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null || true; }
 UPDATE_RUN_DIR=${VWARD_CONSOLE_UPDATE_RUN:-/opt/var/run/vward/console-update}
+EXT_RUN_DIR=${VWARD_CONSOLE_EXT_RUN:-/opt/var/run/vward/console-ext-update}
 CONTROL_RUN_DIR=${VWARD_CONSOLE_CONTROL_RUN:-/opt/var/run/vward/console-control}
 # Long operations outlast the browser's 10-second request, so they run
 # detached; update-data and control-data report the output and exit code.
@@ -683,6 +684,9 @@ if [ "$ACTION" = config ]; then
         tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
         domain-list|domain-list-watch) set -- "$OP" "$TARGET" "$VALUE" ;;
         update-feed) set -- "$OP" "$TARGET"; [ "$TARGET" != dev ] || REQUIRED=UPDATE_FEED_DEV ;;
+        ext-auto) set -- "$OP" "$TARGET" "$VALUE" ;;
+        firmware) set -- "$OP" "$TARGET" "$VALUE"
+            [ "$TARGET:$VALUE" = channel:preview ] || [ "$TARGET:$VALUE" = channel:draft ] && REQUIRED=FIRMWARE_CHANNEL_TEST ;;
         *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
     esac
     [ "$OP:$TARGET:$VALUE" != wifi:CONTROL_ENABLED:1 ] || REQUIRED=WIFI_CONTROL_ENABLE
@@ -2131,6 +2135,65 @@ if [ "$ACTION" = "update-data" ]; then
         run:$run,engine:{version:$engine},
         last_apply:(if $la_changed < 0 then null else {version:$la_version,changed_files:$la_changed,fetched_bytes:$la_bytes,applied_at:$la_at} end)}'
     exit 0
+fi
+
+# ---------- Updates of other software: Entware packages, Keenetic firmware ----------
+EXT_STATE=${VWARD_EXT_UPDATE_STATE:-/opt/var/lib/vward/ext-update}
+
+if [ "$ACTION" = ext-update-data ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    kv_file "$EXT_STATE/check.state" checked_at=X_AT opkg_rc=X_ORC
+    kv_file "${VWARD_EXT_UPDATE_CONF:-$CONFIG_ETC/ext-update.conf}" AGH_AUTO=X_AGH ENTWARE_AUTO=X_ENT
+    case "$X_AT" in ''|*[!0-9]*) X_AT=0 ;; esac
+    case "$X_ORC" in ''|*[!0-9]*) X_ORC=-1 ;; esac
+    [ "$X_AGH" = 1 ] || X_AGH=0
+    [ "$X_ENT" = 1 ] || X_ENT=0
+    # Installed versions straight from the opkg database: one pass, no opkg process.
+    X_INST="$(awk '/^Package: /{p=$2} /^Version: /{if (p != "") print p "\t" $2; p=""}' "${VWARD_OPKG_STATUS:-/opt/lib/opkg/status}" 2>/dev/null |
+        "$JQ" -Rn '[inputs | split("\t") | select(length == 2) | {key: .[0], value: .[1]}] | from_entries' 2>/dev/null)"
+    [ -n "$X_INST" ] || X_INST='{}'
+    X_UP="$("$JQ" -Rn '[inputs | split("\t") | select(length == 3) | {name: .[0], installed: .[1], available: .[2]}]' "$EXT_STATE/upgradable.tsv" 2>/dev/null)"
+    [ -n "$X_UP" ] || X_UP='[]'
+    X_FW="$("$JQ" -c . "$EXT_STATE/firmware.json" 2>/dev/null)"
+    [ -n "$X_FW" ] || X_FW=null
+    X_HIST="$(tail -n 10 "$EXT_STATE/history.tsv" 2>/dev/null |
+        "$JQ" -Rn '[inputs | split("\t") | select(length == 5) | {at: (.[0] | tonumber? // 0), name: .[1], from: .[2], to: .[3], result: .[4]}] | reverse' 2>/dev/null)"
+    [ -n "$X_HIST" ] || X_HIST='[]'
+    "$JQ" -n --argjson at "$X_AT" --argjson orc "$X_ORC" --argjson inst "$X_INST" --argjson up "$X_UP" \
+        --argjson fw "$X_FW" --argjson hist "$X_HIST" --argjson run "$(run_json "$EXT_RUN_DIR")" \
+        --argjson agh_auto "$X_AGH" --argjson ent_auto "$X_ENT" \
+        --arg critical " libc libgcc libpthread librt libssp libstdcpp busybox opkg entware-opt entware-release entware-upgrade dropbear " \
+        '{ok: true, checked_at: $at, feed_ok: ($orc == 0), installed_count: ($inst | length),
+          auto: {agh: ($agh_auto == 1), entware: ($ent_auto == 1)},
+          agh: {installed: ($inst["adguardhome-go"] // null), available: ([$up[] | select(.name == "adguardhome-go") | .available][0] // null)},
+          packages: [$up[] | select(.name != "adguardhome-go") | . + {critical: ($critical | contains(" " + .name + " "))}],
+          firmware: $fw, history: $hist, run: $run}'
+    exit 0
+fi
+
+if [ "$ACTION" = ext-update-control ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+    read_body 256
+    form_only op pkg confirm || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
+    OP="$(form_value op)"; PKG="$(form_value pkg)"; CONFIRM="$(form_value confirm)"
+    [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+    CMD="$CONFIG_HELPER" ARG="" START="$(date '+%Y-%m-%dT%H:%M:%S%z')"
+    case "$OP" in
+        check) ARGS="ext-check now" LABEL=ext-check ;;
+        upgrade)
+            case "$PKG" in ''|*[!a-z0-9+._-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+            [ "${#PKG}" -le 64 ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }
+            awk -F'\t' -v p="$PKG" '$1 == p {f = 1} END {exit !f}' "$EXT_STATE/upgradable.tsv" 2>/dev/null ||
+                { echo '{"ok":false,"error":"not_upgradable"}'; exit 0; }
+            [ "$CONFIRM" = EXT_UPGRADE ] || [ "$CONFIRM" = EXT_UPGRADE_CRITICAL ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+            MODE=manual; [ "$CONFIRM" = EXT_UPGRADE_CRITICAL ] && MODE=critical
+            ARGS="ext-upgrade $PKG $MODE" LABEL="ext-upgrade-$PKG" ;;
+        *) echo '{"ok":false,"error":"unknown_action"}'; exit 0 ;;
+    esac
+    run_detached "$EXT_RUN_DIR" ext_update_busy
 fi
 
 if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then

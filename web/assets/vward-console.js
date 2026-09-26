@@ -128,7 +128,7 @@ const API_ERRORS = {
 const errText = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.error || '') ? 'роутер не принял настройку ' + x.error.slice(14).replace(/_/g, ' ') + ' - туннель не изменён' : '') || (x && x.error) || ('код ' + (x && x.rc));
 
 /* ---------- Данные ---------- */
-const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
+const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, ext: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
 const ADSV = { filter: 'all', search: '', blockedSearch: '' };
 // Files page: the open folder.
 const FILES = { root: '', path: '' };
@@ -136,7 +136,7 @@ const LOADERS = {
   status: () => apiGet('status'), route: () => apiGet('route-data'), update: () => apiGet('update-data'), lists: () => apiGet('lists-data'),
   security: () => apiGet('security-data'), diag: () => apiGet('diagnostics'), wifi: () => apiGet('wifi-data'),
   ads: () => apiGet('ads-data'), https: () => apiGet('ads-https-data'), config: () => apiGet('config-data'),
-  adsstats: () => apiGet('ads-view', { view: 'stats' }), agh: () => apiGet('ads-view', { view: 'agh' }), backups: () => apiGet('backup-data'), files: () => FILES.root ? apiGet('files', { op: 'list', root: FILES.root, path: FILES.path }) : Promise.resolve(null), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
+  adsstats: () => apiGet('ads-view', { view: 'stats' }), agh: () => apiGet('ads-view', { view: 'agh' }), backups: () => apiGet('backup-data'), ext: () => apiGet('ext-update-data'), files: () => FILES.root ? apiGet('files', { op: 'list', root: FILES.root, path: FILES.path }) : Promise.resolve(null), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
   qlog: () => apiGet('ads-view', { view: 'querylog', filter: ADSV.filter, search: ADSV.search }),
   review: () => apiGet('ads-view', { view: 'list', kind: 'review' }),
   cron: () => apiGet('cron-data'), auth: () => apiGet('auth'),
@@ -190,6 +190,7 @@ const PAGES = [
   { id: 'wifi', title: 'Wi-Fi клиенты', icon: 'wifi', group: 'Сеть', data: ['wifi', 'security', 'config'] },
   { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adsstats', 'adspub', 'agh'] },
   { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config'] },
+  { id: 'updates', title: 'Обновления', icon: 'refresh', group: 'VWARD', data: ['status', 'update', 'ext', 'config'] },
   { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth', 'status', 'update', 'config', 'backups'] }
 ];
 const SHORT = { overview: 'Обзор', logs: 'Журналы', wan: 'Интернет', vpn: 'VPN', lists: 'Списки', routes: 'Маршруты', wifi: 'Wi-Fi', ads: 'Реклама', system: 'Система', updates: 'Обновл.', settings: 'Настройки' };
@@ -204,7 +205,7 @@ const COMPONENTS = [
   { id: 'ads-privacy-guard', name: 'Блокировка рекламы', desc: 'Управляет правилами AdGuard Home и источниками списков.', when: 'каждую минуту', page: 'ads', log: 'ads' },
   { id: 'runtime', name: 'Среда выполнения', desc: 'cron, supervisor и служебная очистка. На ней работают почти все компоненты.', when: 'постоянно', page: 'system', log: 'cron' },
   { id: 'console', name: 'Веб-интерфейс VWARD', desc: 'Эта страница управления и её API.', when: 'постоянно', page: 'settings', log: 'console' },
-  { id: 'update-engine', name: 'Установщик обновлений', desc: 'Проверяет, устанавливает и откатывает подписанные обновления.', when: 'по настройкам обновлений', page: 'updates', log: 'updater' },
+  { id: 'update-engine', name: 'Установщик обновлений', desc: 'Проверяет, устанавливает и откатывает подписанные обновления.', when: 'по настройкам обновлений', page: 'u-vward', log: 'updater' },
   { id: 'platform-core', name: 'Ядро платформы', desc: 'Версия, реестр компонентов и карта установки.', when: 'не запускается - это файлы версии и карты установки', page: 'system', log: 'console' }
 ];
 const comp = id => COMPONENTS.find(c => c.id === id);
@@ -235,8 +236,11 @@ const DETAILS = {
   'd-diag': { title: 'Диагностика', parent: 'system' },
   'd-files': { title: 'Файлы VWARD', parent: 'system', data: ['files'] },
   'd-cron': { title: 'Задания по расписанию', parent: 'd-diag' },
-  updates: { title: 'Обновления', parent: 'settings', data: ['status', 'update', 'config'] },
-  'd-notes': { title: 'Что нового', parent: 'updates', data: ['status', 'update'] },
+  'u-vward': { title: 'VWARD', parent: 'updates', data: ['status', 'update', 'config'] },
+  'u-agh': { title: 'AdGuard Home', parent: 'updates', data: ['ext'] },
+  'u-fw': { title: 'Прошивка Keenetic', parent: 'updates', data: ['ext'] },
+  'u-opkg': { title: 'Пакеты Entware', parent: 'updates', data: ['ext'] },
+  'd-notes': { title: 'Что нового', parent: 'u-vward', data: ['status', 'update'] },
   'd-mydomains': { title: 'Мои домены', parent: 'routes' },
   'd-force': { title: 'Всегда через VPN', parent: 'routes' },
   'd-dcats': { title: 'Категории доменов', parent: 'routes' },
@@ -323,6 +327,28 @@ function loadError(keys) {
   return errs.length ? '<p class="field-warn">Часть данных не получена: ' + esc(errs[0]) + '. Повторим автоматически.</p>' : '';
 }
 
+/* ---------- Обновления других программ ---------- */
+const extVer = v => String(v || '—').replace(/^v(?=\d)/, '');
+const autoText = on => on ? 'автоматически' : 'вручную';
+// Keenetic's check stamp: "Sep 26 18:07:08", no year.
+const fwStamp = t => { const m = /^([A-Z][a-z]{2}) +(\d{1,2}) (\d\d:\d\d)/.exec(String(t || '')); return m && MON[m[1]] ? ('0' + m[2]).slice(-2) + '.' + ('0' + MON[m[1]]).slice(-2) + ' ' + m[3] : (t || '—'); };
+const fwChannel = c => ({ stable: 'Основной', preview: 'Предварительный', draft: 'Тестовый' })[c] || c;
+const EXT_RESULT = { ok: 'установлено', rolled_back: 'не прошло проверку, возвращена прежняя версия', rollback_failed: 'ошибка возврата' };
+function extHistory(hist, keep) {
+  const h = (hist || []).filter(keep).slice(0, 5);
+  return h.length ? panel('Последние установки', kv(h.map(r => [r.name + ' ' + extVer(r.to), EXT_RESULT[r.result] || r.result, r.result === 'ok' ? 'ok' : 'crit', null, '', fmtStamp(r.at) + ' · было ' + extVer(r.from)]))) : '';
+}
+function extRunNote(run, pkg) {
+  if (!run || !run.running) return '';
+  if (pkg && run.label !== 'ext-upgrade-' + pkg) return '';
+  return '<p class="result-note">Выполняется: ' + esc(run.label === 'ext-check' ? 'проверка' : 'установка') + '…</p>';
+}
+const EXT_OK = { check: 'Проверка завершена', upgrade: 'Обновление установлено' };
+function extOp(op, pkg, token) {
+  return runLong('ext', 'ext-update-control', pkg ? { op: op, pkg: pkg, confirm: token } : { op: op }, 'ext-update-data', EXT_OK[op])
+    .then(() => load('ext', true)).then(render);
+}
+
 /* ---------- Уведомления ---------- */
 function notifications() {
   const n = [], s = S.status;
@@ -338,8 +364,8 @@ function notifications() {
   if (sv.crond === false || sv.supervisor === false) n.push({ sev: 'crit', title: 'Задания по расписанию остановлены', text: 'cron или supervisor не запущен', to: 'd-cron' });
   const total = num(stg.total_kb), free = num(stg.free_kb);
   if (total && free != null && free / total < 0.1) n.push({ sev: 'warn', title: 'Мало места в хранилище', text: 'свободно ' + fmtKB(free), to: 'system' });
-  if (['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase)) n.push({ sev: 'crit', title: 'Обновление требует внимания', text: phaseText(p.phase), to: 'updates' });
-  if (S.update && S.update.pending && S.update.pending.present) n.push({ sev: 'news', icon: 'save', title: 'Вышла новая версия VWARD', text: (S.update.pending.version || '') + ' - нажмите, чтобы посмотреть и установить', to: 'updates' });
+  if (['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase)) n.push({ sev: 'crit', title: 'Обновление требует внимания', text: phaseText(p.phase), to: 'u-vward' });
+  if (S.update && S.update.pending && S.update.pending.present) n.push({ sev: 'news', icon: 'save', title: 'Вышла новая версия VWARD', text: (S.update.pending.version || '') + ' - нажмите, чтобы посмотреть и установить', to: 'u-vward' });
   const wc = ((S.wifi && S.wifi.clients) || []).filter(c => c.health === 'WARNING').length;
   if (wc) n.push({ sev: 'warn', title: 'Wi-Fi: ' + wc + ' ' + plural(wc, 'клиент требует', 'клиента требуют', 'клиентов требуют') + ' внимания', text: 'частые переходы между 2.4 и 5 ГГц', to: 'wifi' });
   const offComps = ((S.config && S.config.components) || []).filter(x => x.enabled === false);
@@ -566,7 +592,7 @@ const RENDER = {
       panel('Устройство', kv([
         ['Модель', r.model || '—'], ['KeeneticOS', r.version || '—'],
         ['Веб-интерфейс Keenetic', prof().lan_address || location.hostname, '', 'http://' + (prof().lan_address || location.hostname) + '/'],
-        ['Версия VWARD', p.version || '—', '', 'updates'], ['Время работы', fmtUptime(r.uptime_sec)]
+        ['Версия VWARD', p.version || '—', '', 'u-vward'], ['Время работы', fmtUptime(r.uptime_sec)]
       ])) +
       panel('Состояние', kv([
         ['Компоненты', COMPONENTS.length + ' ' + plural(COMPONENTS.length, 'компонент', 'компонента', 'компонентов'), '', 'd-components'],
@@ -579,6 +605,68 @@ const RENDER = {
   },
 
   updates() {
+    const p = plat(), u = S.update || {}, pend = u.pending || {}, x = S.ext || {}, fw = x.firmware || {}, agh = x.agh || {};
+    const pk = x.packages || [], checked = x.checked_at ? fmtStamp(x.checked_at) : '';
+    const vwardVal = pend.present ? 'доступна ' + (pend.version || 'новая версия') : (p.version || '—');
+    const aghVal = agh.available ? 'доступна ' + extVer(agh.available) : agh.installed ? extVer(agh.installed) : S.ext ? 'не установлен' : '—';
+    const fwVal = !x.firmware ? (S.ext ? 'нет данных' : '—') : fw.update_available ? 'доступна новая' : fw.title || fw.release;
+    return loadError(['update', 'ext']) +
+      panel('Обновления', kv([
+        ['VWARD', vwardVal, pend.present ? 'info' : '', 'u-vward', '', pend.present ? 'установлена ' + (p.version || '—') : autoText(isTrue(p.auto_apply))],
+        ['AdGuard Home', aghVal, agh.available ? 'info' : '', 'u-agh', '', agh.available ? 'установлена ' + extVer(agh.installed) : autoText(x.auto && x.auto.agh)],
+        ['Прошивка Keenetic', fwVal, fw.update_available ? 'info' : '', 'u-fw', '', fw.channel ? 'канал ' + fwChannel(fw.channel) + ' · ' + autoText(fw.auto_update) : ''],
+        ['Пакеты Entware', pk.length ? pk.length + ' ' + plural(pk.length, 'обновление', 'обновления', 'обновлений') : S.ext && !x.checked_at ? 'не проверялись' : 'актуальны', pk.length ? 'info' : '', 'u-opkg', '', x.installed_count ? 'установлено ' + x.installed_count + ' · ' + autoText(x.auto && x.auto.entware) : '']
+      ]) + '<div class="panel-actions">' + btn('ext-check', 'refresh', 'Проверить всё') + '</div>' + resultBox('ext'),
+      { desc: checked ? 'Последняя проверка: ' + checked + '. Проверка идёт сама раз в сутки, во время установки обновлений VWARD.' : 'Проверка идёт сама раз в сутки, во время установки обновлений VWARD.' });
+  },
+
+  'u-agh'() {
+    const x = S.ext || {}, a = x.agh || {}, run = x.run || {};
+    const conf = confirmBox('ext-upgrade', 'Обновить AdGuard Home до ' + extVer(a.available) + '? DNS прервётся на несколько секунд. Перед установкой сохранится копия, при сбое вернётся прежняя версия.', 'Обновить');
+    return loadError(['ext']) +
+      panel('AdGuard Home', kv([
+        ['Установлена', a.installed ? extVer(a.installed) : 'не установлен'],
+        ['Доступна', a.available ? extVer(a.available) : 'новее нет', a.available ? 'info' : ''],
+        ['Обновляется через', 'opkg']
+      ]) + (conf || (a.available ? '<div class="panel-actions">' + btn('ask', 'save', 'Обновить', 'primary', ' data-confirm="ext-upgrade" data-pkg="adguardhome-go"') + '</div>' : '')) + extRunNote(run, 'adguardhome-go') + resultBox('ext'), { desc: 'AdGuard Home установлен пакетом Entware adguardhome-go, поэтому его обновляет opkg, а не он сам.' }) +
+      panel('Настройки', '<dl class="kv">' + ctrlRow('Обновлять автоматически', sw('data-ext-auto="agh"', x.auto && x.auto.agh, 'Обновлять AdGuard Home автоматически'), 'раз в сутки, во время установки обновлений VWARD') + '</dl>') +
+      extHistory(x.history, h => h.name === 'adguardhome-go');
+  },
+
+  'u-fw'() {
+    const x = S.ext || {}, f = x.firmware;
+    if (!f) return loadError(['ext']) + panel('Прошивка Keenetic', empty(S.ext ? 'Роутер не сообщил данные о прошивке. Нажмите «Проверить всё» в разделе «Обновления».' : 'Загрузка…'));
+    const chans = (f.channels || []).filter(c => ['stable', 'preview', 'draft'].includes(c.name));
+    const cur = (f.channels || []).find(c => c.name === f.channel) || {};
+    return loadError(['ext']) +
+      panel('Прошивка Keenetic', kv([
+        ['Установлена', (f.title || '') + (f.release ? ' (' + f.release + ')' : '')],
+        ['Доступна', f.update_available ? (cur.version || 'новая версия') : 'новее нет', f.update_available ? 'info' : ''],
+        ['Проверена роутером', fwStamp(f.checked)]
+      ]), { desc: f.update_available ? 'Прошивку устанавливает сам Keenetic: в его веб-интерфейсе или автоматически. Во время установки роутер перезагрузится.' : '' }) +
+      panel('Настройки', '<dl class="kv">' +
+        ctrlRow('Обновлять автоматически', sw('data-fw-auto', f.auto_update, 'Обновлять прошивку автоматически'), 'Keenetic сам установит новую версию канала, роутер перезагрузится') +
+        ctrlRow('Канал обновлений', sel('data-fw-channel', 'Канал обновлений', chans.map(c => [c.name, fwChannel(c.name)]), f.channel), (f.channel === 'stable' ? 'проверенные версии' : 'тестовые версии, возможны ошибки') + (cur.version ? ' · ' + cur.version : '')) +
+        '</dl>' + confirmBox('fw-channel', 'Перейти на тестовый канал? Тестовые прошивки могут работать с ошибками.', 'Перейти', true),
+        { desc: 'Это те же настройки, что в веб-интерфейсе Keenetic.' });
+  },
+
+  'u-opkg'() {
+    const x = S.ext || {}, pk = x.packages || [], run = x.run || {};
+    const c = confirm && confirm.id === 'ext-upgrade' ? pk.find(p => p.name === confirm.pkg) : null;
+    const rows = pk.map(p => '<div class="kv-row" data-key="' + esc(p.name) + '"><dt>' + esc(p.name) + '<span class="hint">' + esc(extVer(p.installed) + ' → ' + extVer(p.available)) + (p.critical ? ' · системный пакет' : '') + '</span></dt><dd>' +
+      btn('ask', 'save', 'Обновить', 'small', ' data-confirm="ext-upgrade" data-pkg="' + esc(p.name) + '"') + '</dd></div>').join('');
+    return loadError(['ext']) +
+      panel('Пакеты Entware', pk.length ? '<dl class="kv">' + rows + '</dl>' +
+        (c ? confirmBox('ext-upgrade', (c.critical ? 'Системный пакет: если он сломается, может пропасть SSH или командная строка. ' : '') + 'Обновить ' + c.name + ' до ' + extVer(c.available) + '? Перед установкой сохранится копия, при сбое вернётся прежняя версия.', 'Обновить', c.critical) : '') +
+        extRunNote(run) + resultBox('ext') :
+        empty(x.checked_at ? (x.feed_ok === false ? 'Список пакетов Entware не скачался. Повторите проверку позже.' : 'Все пакеты актуальны.') : 'Пакеты ещё не проверялись.') + '<div class="panel-actions">' + btn('ext-check', 'refresh', 'Проверить') + '</div>' + resultBox('ext'),
+        { desc: 'Программы Entware, на которых работают VWARD и AdGuard Home: cron, curl, jq, веб-сервер, SSH и другие.' }) +
+      panel('Настройки', '<dl class="kv">' + ctrlRow('Обновлять автоматически', sw('data-ext-auto="entware"', x.auto && x.auto.entware, 'Обновлять пакеты Entware автоматически'), 'кроме системных пакетов: их - только вручную') + '</dl>') +
+      extHistory(x.history, h => h.name !== 'adguardhome-go');
+  },
+
+  'u-vward'() {
     const p = plat(), u = S.update || {}, al = u.allowed || {}, pend = u.pending || {};
     const uc = cfg().update || {}, mode = updModeShown || (!isTrue(p.auto_apply) ? 'manual' : uc.apply_window === 'any' ? 'auto' : 'schedule'), feed = uc.feed;
     const winStart = uc.safe_window_start || String(p.safe_window || '').split(/\s*[-–]\s*/)[0];
@@ -617,9 +705,9 @@ const RENDER = {
     const p = plat(), u = S.update || {}, updMode = !isTrue(p.auto_apply) ? 'ручная' : (cfg().update || {}).apply_window === 'any' ? 'автоматическая' : 'по расписанию';
     return loadError(['security']) +
       panel('Обновления', kv([
-        ['Версия', p.version || '—', '', 'updates'],
-        u.pending && u.pending.present ? ['Доступно', u.pending.version || 'новая версия', 'info', 'updates'] : null,
-        ['Установка', updMode, '', 'updates']
+        ['Версия', p.version || '—', '', 'u-vward'],
+        u.pending && u.pending.present ? ['Доступно', u.pending.version || 'новая версия', 'info', 'u-vward'] : null,
+        ['Установка', updMode, '', 'u-vward']
       ]), { desc: 'Версия VWARD и как ставятся обновления. Нажмите, чтобы открыть подробности и настройки.' }) +
       panel('Оформление', '<dl class="kv">' + ctrlRow('Тема', sel('data-theme-pick', 'Тема оформления', Object.keys(THEMES).map(k => [k, THEMES[k].charAt(0).toUpperCase() + THEMES[k].slice(1)]), theme), theme === 'time' ? 'светлая с 07:00 до 20:00, тёмная ночью' : '') + '</dl>',
         { desc: 'Тема хранится в этом браузере.' }) +
@@ -659,7 +747,7 @@ const RENDER = {
     return panel('Компоненты', '<ul class="rows">' + COMPONENTS.map(c => { const x = pc[c.id] || {}; return '<li class="row link" role="button" tabindex="0" data-go="c-' + c.id + '"><div class="row-main"><b>' + esc(c.name) + '</b><small>' + esc(x.release || plat().version || '—') + (x.installed_at ? ' · установлен ' + esc(x.installed_at) : '') + '</small></div>' + (compOn(c.id) ? '<span class="pill ' + (x.health === 'PASS' ? 'ok' : '') + '">' + (x.health === 'PASS' ? 'Норма' : 'Нет данных') + '</span>' : '<span class="pill warn">Выключен</span>') + ico('chevron', 'chev') + '</li>'; }).join('') + '</ul>');
   },
   'd-diag'() {
-    const d = S.diag, map = { 'console-api': 'settings', opt: 'system', lighttpd: 'c-console', crond: 'd-cron', supervisor: 'd-cron', adguard: 'ads', adaptive: 'c-route-engine', updater: 'updates', config: 'updates', wan: 'wan', wg: 'vpn', smartdns: 'lists' };
+    const d = S.diag, map = { 'console-api': 'settings', opt: 'system', lighttpd: 'c-console', crond: 'd-cron', supervisor: 'd-cron', adguard: 'ads', adaptive: 'c-route-engine', updater: 'u-vward', config: 'u-vward', wan: 'wan', wg: 'vpn', smartdns: 'lists' };
     const sv = st().services || {};
     return panel('Задания по расписанию', kv([['Задания по расписанию', sv.crond && sv.supervisor ? 'Работают' : sv.crond ? 'Supervisor остановлен' : 'cron остановлен', sv.crond && sv.supervisor ? 'ok' : 'crit', 'd-cron']]),
         { desc: 'Здесь - сводка. Нажмите, чтобы открыть список заданий и их последние запуски.' }) +
@@ -1349,7 +1437,7 @@ const SEARCH_INDEX = [
   ['routes', 'Туннель для маршрутов'], ['routes', 'AdaptiveAuto'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
   ['ads', 'Настройки AdGuard Home'], ['ads', 'Последняя проверка'], ['ads', 'Правила уходят'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
-  ['updates', 'Установка обновлений'], ['updates', 'Время установки'], ['updates', 'Интервал проверки'], ['updates', 'Канал'],
+  ['u-vward', 'Установка обновлений'], ['u-vward', 'Время установки'], ['u-vward', 'Интервал проверки'], ['u-vward', 'Канал'],
   ['settings', 'Адрес VWARD'], ['settings', 'Тема'], ['settings', 'Версия'], ['settings', 'Установка'], ['d-diag', 'Задания по расписанию'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
 ];
 function openSearch() {
@@ -1383,6 +1471,8 @@ async function runAction(resultId, action, fields, okMsg) {
   finally { render(); }
 }
 const CONFIRMED = {
+  'ext-upgrade': c => { const p = ((S.ext && S.ext.packages) || []).find(x => x.name === c.pkg); extOp('upgrade', c.pkg, p && p.critical ? 'EXT_UPGRADE_CRITICAL' : 'EXT_UPGRADE'); },
+  'fw-channel': c => cfgSet({ op: 'firmware', target: 'channel', value: c.value, confirm: 'FIRMWARE_CHANNEL_TEST' }, 'Канал прошивки: ' + fwChannel(c.value), ['ext']),
   'route-reconcile': () => runLong('routes', 'control', { op: 'route-reconcile', confirm: 'ROUTE_RECONCILE' }, 'control-data', 'Маршруты сверены').then(() => load('route', true)).then(render),
   'policy-refresh': () => runLong('routes', 'control', { op: 'policy-refresh', confirm: 'POLICY_REFRESH' }, 'control-data', 'IP-категории обновлены').then(() => load('route', true)).then(render),
   'update-apply': () => updateOp('apply', 'APPLY_UPDATE'),
@@ -1592,7 +1682,8 @@ document.addEventListener('click', e => {
   else if (a === 'reload') { Promise.all(DATA_FOR(current).map(k => load(k, true))).then(() => { render(); toast('Данные обновлены'); }); }
   else if (a === 'edit') { editing = !editing; render(); }
   else if (a === 'cards-reset') { cardOrder = CARD_IDS.slice(); hiddenCards = []; cardView = 'grid'; ['vward-card-order', 'vward-card-hidden', 'vward-card-view'].forEach(k => store.del(k)); render(); toast('Карточки сброшены'); }
-  else if (a === 'ask') { confirm = { id: t.dataset.confirm }; render(); }
+  else if (a === 'ask') { confirm = { id: t.dataset.confirm, pkg: t.dataset.pkg }; render(); }
+  else if (a === 'ext-check') extOp('check');
   else if (a === 'confirm-no') { confirm = null; render(); }
   else if (a === 'confirm-yes') { const c = confirm; confirm = null; if (c && CONFIRMED[c.id]) CONFIRMED[c.id](c); else render(); }
   else if (a === 'open-log') { logTab = t.dataset.logTab; go('logs'); }
@@ -1702,6 +1793,13 @@ document.addEventListener('change', e => {
   if (t.hasAttribute('data-theme-pick')) { setTheme(t.value); return; }
   if (t.hasAttribute('data-smartdns-guard')) { cfgSet({ op: 'smartdns-guard', value: t.checked ? '1' : '0' }, t.checked ? 'Защита Smart DNS включена' : 'Защита Smart DNS выключена', ['lists']); return; }
   if (t.dataset.cfgWanp) { cfgSet({ op: 'wan-param', target: t.dataset.cfgWanp, value: t.value }, 'Сохранено', ['config']); return; }
+  if (t.dataset.extAuto) { cfgSet({ op: 'ext-auto', target: t.dataset.extAuto, value: t.checked ? '1' : '0' }, t.checked ? 'Будет обновляться автоматически' : 'Обновление только вручную', ['ext']); return; }
+  if (t.hasAttribute('data-fw-auto')) { t.disabled = true; cfgSet({ op: 'firmware', target: 'auto', value: t.checked ? '1' : '0' }, t.checked ? 'Keenetic будет обновляться автоматически' : 'Прошивка обновляется только вручную', ['ext']); return; }
+  if (t.hasAttribute('data-fw-channel')) {
+    const v = t.value;
+    if (v !== 'stable') { t.value = ((S.ext || {}).firmware || {}).channel || 'stable'; confirm = { id: 'fw-channel', value: v }; render(); return; }
+    t.disabled = true; cfgSet({ op: 'firmware', target: 'channel', value: v }, 'Канал прошивки: ' + fwChannel(v), ['ext']); return;
+  }
   if (t.dataset.cfgUpd) { cfgSet({ op: 'update', target: t.dataset.cfgUpd, value: t.value }, 'Сохранено', ['status']); return; }
   if (t.hasAttribute('data-ads-pause')) { adsControl({ op: t.checked ? 'resume' : 'pause' }, t.checked ? 'Блокировка включена' : 'Блокировка на паузе'); return; }
   if (t.dataset.adsSet) { adsSetting(t.dataset.adsSet, t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value); return; }

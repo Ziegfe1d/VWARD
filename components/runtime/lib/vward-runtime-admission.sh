@@ -94,7 +94,7 @@ VWARD_LOCKS="/tmp/vward-route-reconciler-maint.lock /tmp/vward-route-engine.lock
 /tmp/vward-cron-supervisor.lock /tmp/vward-route-change.lock /opt/var/lib/vward/policy-sync/lock
 /opt/var/lib/vward/route-engine/classifier.lock /opt/var/lib/vward/ads-privacy-guard/scan.lock
 /opt/var/lib/vward/ads-privacy-guard/sources-update.lock /opt/var/lib/vward/ads-privacy-guard/publish.lock
-/opt/var/lib/vward/ads-privacy-guard/jobs/worker.lock"
+/opt/var/lib/vward/ads-privacy-guard/jobs/worker.lock /opt/var/lib/vward/ext-update/lock"
 
 # vward_lock_stale DIR: the lock's owner is gone - its process is dead or the
 # id now belongs to another process (pid_start differs), or the lock has had no

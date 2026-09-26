@@ -87,6 +87,7 @@ python3 tests/repository/check-console-ndm-cache.py || fail "Console caches Keen
 python3 tests/repository/check-release-notes.py || fail "What is new in a version"
 python3 tests/repository/check-console-request.py || fail "Console request guards and form parsing"
 python3 tests/repository/check-housekeeping.py || fail "Housekeeping rotates logs and keeps copies to their newest few"
+python3 tests/repository/check-ext-update.py || fail "Updates of other software"
 python3 tests/repository/check-stale-locks.py || fail "Locks whose owner is gone are removed at boot and hourly"
 python3 tests/repository/check-console-tunnel.py || fail "Console tunnel switch"
 python3 tests/repository/check-component-graph.py || fail "Component dependency graph"

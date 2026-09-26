@@ -247,6 +247,9 @@ for KD in manual settings source-settings; do
     keep_newest "$B/ads-privacy-guard/$KD" d 20
 done
 
+# Copies of packages before an update from «Обновления» (AdGuard Home is ~30 MB).
+keep_newest "$B/ext-update" d 3
+
 # A tunnel .conf holds its private key: uploads now live in RAM only, and
 # those an older version kept on the USB drive go.
 rm -f "$R/opt/var/run/vward/console-tunnel/upload."* 2>/dev/null
@@ -320,6 +323,31 @@ if [ -x "$BACKUP_HELPER" ]; then
         BACKUP_RESULT="$("$BACKUP_HELPER" backup-create auto 2>/dev/null | tail -n 1)"
         echo "$BACKUP_NOW|snapshot=${BACKUP_RESULT:-none}" >> "$HOUSE_LOG"
         case "$BACKUP_RESULT" in result=*) echo "${BACKUP_NOW%% *}" > "$BACKUP_DAY_FILE" 2>/dev/null || : ;; esac
+    fi
+fi
+
+# Updates of other software (Entware packages, AdGuard Home, Keenetic firmware):
+# once a day, in the hour VWARD installs its own updates; the first check at
+# once.  Detached: opkg may take minutes.  Builtins only until it is due.
+EXT_DAY_FILE=${VWARD_EXT_DAY_FILE:-/tmp/vward-ext-update-day}
+if [ -x "$BACKUP_HELPER" ]; then
+    EXT_TODAY=${BACKUP_NOW%% *}; EXT_NOW_HOUR=${BACKUP_NOW#* }; EXT_NOW_HOUR=${EXT_NOW_HOUR%%:*}
+    EXT_DAY=""
+    [ ! -r "$EXT_DAY_FILE" ] || read -r EXT_DAY < "$EXT_DAY_FILE" || :
+    EXT_HOUR=03
+    if [ -r "${VWARD_UPDATE_CONFIG:-$R/opt/etc/vward/update.conf}" ]; then
+        while IFS='=' read -r EXT_K EXT_V; do
+            [ "$EXT_K" = safe_window_start ] && EXT_HOUR=${EXT_V%%:*}
+        done < "${VWARD_UPDATE_CONFIG:-$R/opt/etc/vward/update.conf}"
+    fi
+    EXT_OP=
+    if [ ! -e "${VWARD_EXT_UPDATE_STATE:-$R/opt/var/lib/vward/ext-update}/check.state" ]; then EXT_OP=ext-check
+    elif [ "$EXT_DAY" != "$EXT_TODAY" ] && [ "$EXT_NOW_HOUR" = "$EXT_HOUR" ]; then EXT_OP=ext-daily
+    fi
+    if [ -n "$EXT_OP" ] && [ "$EXT_DAY" != "$EXT_TODAY" ]; then
+        echo "$EXT_TODAY" > "$EXT_DAY_FILE" 2>/dev/null || :
+        "$BACKUP_HELPER" "$EXT_OP" now </dev/null >/dev/null 2>&1 &
+        echo "$BACKUP_NOW|ext_update=$EXT_OP" >> "$HOUSE_LOG"
     fi
 fi
 

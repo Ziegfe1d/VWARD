@@ -57,13 +57,13 @@ if forms - form_handlers:
 
 # Navigation: every page and detail page has a renderer, every static link resolves.
 pages = set(re.findall(r"\{ id: '([a-z]+)', title: '[^']+', icon: '[a-z]+', group:", js))
-if len(pages) != 10:
-    fail(f"ожидалось 10 разделов, найдено {len(pages)}")
+if len(pages) != 11:
+    fail(f"ожидалось 11 разделов, найдено {len(pages)}")
 details = set(re.findall(r"^  '?([a-z][a-z-]*)'?: \{ title:", js, re.MULTILINE))
-renderers = set(re.findall(r"^  ([a-z]+)\(\) \{", js, re.MULTILINE)) | set(re.findall(r"^  '(d-[a-z-]+)'\(\) \{", js, re.MULTILINE))
+renderers = set(re.findall(r"^  ([a-z]+)\(\) \{", js, re.MULTILINE)) | set(re.findall(r"^  '([du]-[a-z-]+)'\(\) \{", js, re.MULTILINE))
 if (pages | details) - renderers:
     fail("разделы без отрисовки: " + ", ".join(sorted((pages | details) - renderers)))
-targets = set(re.findall(r"data-go=\"([a-z][a-z-]*)\"", js)) | set(re.findall(r"'(d-[a-z-]+|c-[a-z-]+)'\]", js))
+targets = set(re.findall(r"data-go=\"([a-z][a-z-]*)\"", js)) | set(re.findall(r"'(d-[a-z-]+|u-[a-z-]+|c-[a-z-]+)'\]", js))
 targets |= {m for m in re.findall(r"\['[^']+', [^\]]*?'([a-z][a-z-]+)'(?:, '[^']*')?\]", js) if m in pages or m in details}
 components = set(re.findall(r"\{ id: '([a-z-]+)', name: '", js))
 unknown = {t for t in targets if t not in pages and t not in details and not (t.startswith("c-") and t[2:] in components)}
