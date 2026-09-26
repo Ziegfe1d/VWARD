@@ -198,7 +198,7 @@ const PAGES = [
 ];
 const SHORT = { overview: 'Обзор', logs: 'Журналы', wan: 'Интернет', vpn: 'VPN', lists: 'Списки', routes: 'Маршруты', wifi: 'Wi-Fi', ads: 'Реклама', system: 'Система', updates: 'Обновл.', settings: 'Настройки' };
 const COMPONENTS = [
-  { id: 'route-engine', name: 'Движок маршрутизации', desc: 'Отправляет выбранные домены через VPN и ведёт AdaptiveAuto.', when: 'постоянно, как служба', page: 'routes', log: 'adaptive' },
+  { id: 'route-engine', name: 'Движок маршрутизации', desc: 'Отправляет выбранные домены через VPN и ведёт автоподбор доменов.', when: 'постоянно, как служба', page: 'routes', log: 'adaptive' },
   { id: 'route-reconciler', name: 'Сверка маршрутов', desc: 'Каждые 5 минут сверяет маршруты роутера с каталогом и исправляет расхождения.', when: 'каждые 5 минут', page: 'routes', log: 'routing' },
   { id: 'route-tools', name: 'Инструменты маршрутов', desc: 'Проверка адресов и обновление подсказок каталога.', when: 'подсказки - раз в сутки', page: 'routes', log: 'routing' },
   { id: 'policy-sync', name: 'IP-категории', desc: 'Раз в сутки обновляет IP-категории и маршруты по ним.', when: 'раз в сутки, в 00:10', page: 'routes', log: 'policy' },
@@ -230,7 +230,7 @@ function compCascade(id, off) {
 const compNames = ids => ids.map(x => '«' + ((comp(x) || {}).name || x) + '»').join(', ');
 const LOG_TABS = [
   { id: 'wan', label: 'Интернет' }, { id: 'recovery', label: 'Восстановление' }, { id: 'tunnel', label: 'VPN' },
-  { id: 'adaptive', label: 'AdaptiveAuto' }, { id: 'routing', label: 'Сверка маршрутов' }, { id: 'policy', label: 'IP-категории' }, { id: 'wifi', label: 'Wi-Fi' },
+  { id: 'adaptive', label: 'Автоподбор доменов' }, { id: 'routing', label: 'Сверка маршрутов' }, { id: 'policy', label: 'IP-категории' }, { id: 'wifi', label: 'Wi-Fi' },
   { id: 'ads', label: 'Реклама' }, { id: 'updater', label: 'Обновления' }, { id: 'cron', label: 'Расписание' }, { id: 'console', label: 'Веб-интерфейс' }
 ];
 const logLabel = id => (LOG_TABS.find(t => t.id === id) || {}).label || id;
@@ -247,7 +247,7 @@ const DETAILS = {
   'd-mydomains': { title: 'Мои домены', parent: 'routes' },
   'd-force': { title: 'Всегда через VPN', parent: 'routes' },
   'd-dcats': { title: 'Категории доменов', parent: 'routes' },
-  'd-adaptive': { title: 'AdaptiveAuto', parent: 'routes' },
+  'd-adaptive': { title: 'Автоподбор доменов', parent: 'routes' },
   'd-smartdns': { title: 'Smart DNS', parent: 'lists', data: ['lists', 'config'] },
   'd-wanrec': { title: 'Восстановление: дополнительно', parent: 'wan', data: ['status', 'config', 'wanhist'] },
   'd-services': { title: 'Проверяемые сервисы', parent: 'routes' },
@@ -527,7 +527,7 @@ const RENDER = {
     if (curT && !tuns.some(t => t.name === curT)) tunOpts.unshift([curT, curT]);
     return loadError(['route']) +
       panel('Сводка', '<dl class="kv">' + ctrlRow('Туннель для маршрутов', sel('data-route-tunnel' + (tunOpts.length > 1 && cfgOk() ? '' : ' disabled'), 'Туннель для маршрутов', tunOpts.length ? tunOpts : [['', '—']], curT), tunOpts.length > 1 ? '' : 'другого туннеля нет') + '</dl>' +
-        confirmBox('route-tunnel', 'Перевести маршруты VWARD' + (curT ? ' с ' + curT : '') + ' на ' + ((confirm && confirm.to) || '') + '? Мои домены, AdaptiveAuto и IP-категории пойдут через новый туннель.', 'Перевести') +
+        confirmBox('route-tunnel', 'Перевести маршруты VWARD' + (curT ? ' с ' + curT : '') + ' на ' + ((confirm && confirm.to) || '') + '? Мои домены, автоподбор доменов и IP-категории пойдут через новый туннель.', 'Перевести') +
         kv([
         ['Доменов в каталоге', fmtInt(d.unique)],
         ['Категорий в каталоге', fmtInt(d.categories)],
@@ -538,18 +538,18 @@ const RENDER = {
         ['Мои домены', S.config ? (cfgRoute().router_available ? countText((cfgRoute().domains || []).length) : 'нет данных') : '—', '', 'd-mydomains'],
         ['Всегда через VPN', S.config ? countText((cfgRoute().force_vpn || []).length) : '—', '', 'd-force'],
         ['Категории доменов', S.config ? (cfgRoute().categories || []).filter(c => c.enabled).length + ' из ' + (cfgRoute().categories || []).length + ' включены' : '—', '', 'd-dcats'],
-        ['AdaptiveAuto', S.config ? countText((cfgRoute().adaptive || []).length) : fmtInt(ad.count) + ' ' + plural(num(ad.count) || 0, 'домен', 'домена', 'доменов'), '', 'd-adaptive'],
+        ['Автоподбор доменов', S.config ? countText((cfgRoute().adaptive || []).length) : fmtInt(ad.count) + ' ' + plural(num(ad.count) || 0, 'домен', 'домена', 'доменов'), '', 'd-adaptive'],
         ['IP-категории', fmtInt(ip.active_count) + ' активны из ' + fmtInt(ip.categories), '', 'd-ipcats'],
         ['Проверяемые сервисы', fmtInt((r.services || []).length), '', 'd-services'],
         ['Источники каталога', 'itdog ' + fmtInt(d.sources && d.sources.itdog) + ' · v2fly ' + fmtInt(d.sources && d.sources.v2fly)]
       ])) +
       panel('Настройки маршрутизации', '<dl class="kv">' +
-        ctrlRow('AdaptiveAuto', sw('data-cfg-rt="adaptive-mode"', cfgRoute().adaptive_enabled !== false, 'AdaptiveAuto', !cfgOk()), 'отправлять через VPN домены, недоступные напрямую') +
+        ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', cfgRoute().adaptive_enabled !== false, 'Автоподбор доменов', !cfgOk()), 'отправлять через VPN домены, недоступные напрямую') +
         ctrlRow('Автоопределение категории', sw('data-cfg-rt="classifier"', cfgRoute().classifier_enabled !== false, 'Автоопределение категории новых доменов', !cfgOk()), 'новые домены попадают в подходящую категорию') +
-        '</dl>', { desc: 'Выключение AdaptiveAuto не убирает уже добавленные домены - только перестаёт добавлять новые.' }) +
+        '</dl>', { desc: 'Выключение автоподбора не убирает уже добавленные домены - только перестаёт добавлять новые.' }) +
       panel('Проверить адрес', '<form class="inline-form" data-form="probe"><input class="input" id="probeInput" placeholder="домен или IPv4, например claude.ai" aria-label="Домен или IPv4" autocomplete="off"><button class="btn primary" type="submit">' + ico('search') + 'Проверить</button></form><div id="probeResult"></div>', { desc: 'Покажет, через какой интерфейс пойдёт трафик.' }) +
       panel('Обслуживание', kv([
-        ['Решения AdaptiveAuto', 'журнал проверок доменов', '', 'logs', ' data-log-go="adaptive"'],
+        ['Решения автоподбора', 'журнал проверок доменов', '', 'logs', ' data-log-go="adaptive"'],
         ['Сверка маршрутов', 'каждые 5 минут', '', 'logs', ' data-log-go="routing"'],
         ['Каталог обновлён', d.last_update || '—'],
         ['IP-категории обновлены', ip.last_sync || '—', '', 'logs', ' data-log-go="policy"']
@@ -866,7 +866,7 @@ const RENDER = {
     const sd = L.smartdns_domains || [], src = L.smartdns_sources || {}, ok = cfgOk();
     const from = d => ((src.adguard || []).includes(d) ? 'AdGuard Home' : '') + ((src.keenetic || []).includes(d) ? ((src.adguard || []).includes(d) ? ' и ' : '') + 'Keenetic' : '');
     return cfgNote() +
-      panel('Защита', '<dl class="kv">' + ctrlRow('Защита Smart DNS', sw('data-smartdns-guard', L.smartdns_guard !== false, 'Защита Smart DNS', !ok), 'AdaptiveAuto не отправляет эти домены в VPN') + '</dl>' +
+      panel('Защита', '<dl class="kv">' + ctrlRow('Защита Smart DNS', sw('data-smartdns-guard', L.smartdns_guard !== false, 'Защита Smart DNS', !ok), 'Автоподбор не отправляет эти домены в VPN') + '</dl>' +
         (L.doh_limit ? kv([['Строк DNS-over-HTTPS в Keenetic', fmtInt(L.doh_used || 0) + ' из ' + fmtInt(L.doh_limit), L.doh_used >= L.doh_limit ? 'warn' : '']]) : ''),
         { desc: 'Smart DNS отвечает на все свои домены одним адресом прокси. Если этот адрес уйдёт в VPN, перестанут работать все сервисы Smart DNS сразу.' }) +
       panel('Домены Smart DNS', sd.length ? '<ul class="rows">' + sd.map(d => '<li class="row"><div class="row-main"><b>' + dom(d) + '</b><small>' + esc(from(d) || smartdnsWhere(L)) + '</small></div></li>').join('') + '</ul>' : empty('Smart DNS не настроен'),
@@ -874,7 +874,7 @@ const RENDER = {
   },
   'd-adaptive'() {
     const list = S.config ? cfgRoute().adaptive || [] : (S.route && S.route.adaptive && S.route.adaptive.recent) || [];
-    return cfgNote() + panel('AdaptiveAuto', domainRows(list.map(d => typeof d === 'string' ? d : d.domain || ''), d => rowBtn('adaptive', 'pin', d, 'lock', 'Закрепить ' + d + ' в моих доменах') + rowBtn('adaptive', 'remove', d, 'close', 'Вернуть ' + d + ' на прямой маршрут'), 'недоступен напрямую - идёт через VPN') || empty('Пока пусто'),
+    return cfgNote() + panel('Автоподбор доменов', domainRows(list.map(d => typeof d === 'string' ? d : d.domain || ''), d => rowBtn('adaptive', 'pin', d, 'lock', 'Закрепить ' + d + ' в моих доменах') + rowBtn('adaptive', 'remove', d, 'close', 'Вернуть ' + d + ' на прямой маршрут'), 'недоступен напрямую - идёт через VPN') || empty('Пока пусто'),
       { desc: 'Домены, которые VWARD сам отправил через VPN после неудачной прямой проверки. «Закрепить» переносит домен в мои домены, «убрать» - возвращает на прямой маршрут.' });
   },
   'd-ipcats'() {
@@ -1110,7 +1110,7 @@ function tunnelPage(name) {
   const wg = st().wg || {}, t = (wg.interfaces || []).find(x => x.name === name) || { name: name };
   const up = isTrue(t.connected), cur = prof().tunnel_interface, managed = cur === name, failopen = isTrue(wg.failopen_active);
   const use = managed ? '' : failopen ? '<p class="field-warn">Сейчас VPN недоступен и трафик идёт напрямую: переключение станет доступно, когда ' + esc(cur || 'текущий туннель') + ' восстановится.</p>' :
-    confirmBox('tunnel-use', 'Перевести маршруты VWARD' + (cur ? ' с ' + cur : '') + ' на ' + name + '? Мои домены, AdaptiveAuto и IP-категории пойдут через ' + name + '.' + (up ? '' : ' Туннель сейчас не в сети: сайты из списков VPN будут недоступны, пока он не подключится.'), 'Переключить', !up) ||
+    confirmBox('tunnel-use', 'Перевести маршруты VWARD' + (cur ? ' с ' + cur : '') + ' на ' + name + '? Мои домены, автоподбор доменов и IP-категории пойдут через ' + name + '.' + (up ? '' : ' Туннель сейчас не в сети: сайты из списков VPN будут недоступны, пока он не подключится.'), 'Переключить', !up) ||
     '<div class="panel-actions">' + btn('ask', 'route', 'Использовать для маршрутов', up ? 'primary' : '', ' data-confirm="tunnel-use"' + (cfgOk() ? '' : ' disabled')) + '</div>';
   return panel(name + (t.description ? ' · ' + t.description : ''), kv([
     ['Канал связи', t.link || '—'], ['Статус интерфейса', t.state || '—'],
@@ -1523,7 +1523,7 @@ const SEARCH_INDEX = [
   ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Восстанавливать автоматически'], ['wan', 'Проверять'], ['wan', 'Обновить адрес'], ['wan', 'Переподключить'], ['d-wanrec', 'Неудачных проверок подряд'],
   ['settings', 'Только зарегистрированные устройства'], ['vpn', 'Автоматическая защита'], ['vpn', 'Трафик списков'], ['vpn', 'Проверка туннеля'],
   ['d-smartdns', 'Защита Smart DNS'],
-  ['routes', 'Туннель для маршрутов'], ['routes', 'AdaptiveAuto'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
+  ['routes', 'Туннель для маршрутов'], ['routes', 'Автоподбор доменов'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
   ['ads', 'Настройки AdGuard Home'], ['ads', 'Последняя проверка'], ['ads', 'Правила в AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
   ['u-vward', 'Установка обновлений'], ['u-vward', 'Время установки'], ['u-vward', 'Интервал проверки'], ['u-vward', 'Канал'],
@@ -1933,7 +1933,7 @@ document.addEventListener('submit', async e => {
       const x = await apiGet('route-probe', { type: IPV4.test(v) ? 'ip' : 'domain', value: v });
       if (!x.ok) { box.innerHTML = '<p class="field-warn">' + esc(errText(x)) + '</p>'; return; }
       box.innerHTML = x.type === 'ip' ? kv([['Адрес', x.value], ['Категории', (x.policy_matches || []).map(m => m.category).join(', ') || 'нет'], ['Маршрут VWARD', x.configured_route ? 'через ' + x.interface : 'нет', x.configured_route ? 'info' : '']])
-        : kv([['Домен', x.value], ['IPv4', ((x.dns && x.dns.ipv4) || []).join(', ') || 'не найден'], ['Группы', (x.groups || []).join(', ') || 'нет'], ['Маршрут', (x.routes || []).map(r => r.group + ' → ' + r.interface).join(', ') || 'напрямую', (x.routes || []).length ? 'info' : ''], ['AdaptiveAuto', x.adaptive_auto ? 'Да' : 'Нет']]);
+        : kv([['Домен', x.value], ['IPv4', ((x.dns && x.dns.ipv4) || []).join(', ') || 'не найден'], ['Группы', (x.groups || []).join(', ') || 'нет'], ['Маршрут', (x.routes || []).map(r => r.group + ' → ' + r.interface).join(', ') || 'напрямую', (x.routes || []).length ? 'info' : ''], ['Автоподбор доменов', x.adaptive_auto ? 'Да' : 'Нет']]);
     } catch (err) { box.innerHTML = '<p class="field-warn">Ошибка: ' + esc(err.message) + '</p>'; }
   }
   if (f === 'list-add') {

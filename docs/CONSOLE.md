@@ -9,7 +9,7 @@ Console работает в локальной сети и использует 
 - «Платформа»: все зарегистрированные компоненты с machine ID, release и health;
 - «Обновления»: VWARD, AdGuard Home, прошивка Keenetic и пакеты Entware, у каждого своя страница (см. ниже);
 - «Защита WAN», «Защита VPN», «Маршрутизация», «Среда выполнения»: read-only данные;
-- «Маршрутизация» дополнительно показывает сводку доменного каталога, AdaptiveAuto, IP/CIDR-каталога и активных категорий Policy Sync;
+- «Маршрутизация» дополнительно показывает сводку доменного каталога, «Автоподбор доменов» (группа `AdaptiveAuto`), IP/CIDR-каталога и активных категорий Policy Sync;
 - «Хранилище»: использование `/opt`;
 - «Настройки»: общий read-only обзор устройства, сети, обновлений и диагностики;
 - «Журналы»: рабочее представление нескольких разрешённых источников с поиском, копированием, сохранением, системной отправкой и автообновлением.
@@ -41,7 +41,7 @@ API принимает POST только с заголовком `X-VWARD-Reques
 | `component ID 0/1` | компонент включён (выключение - токен `COMPONENT_DISABLE`) | `/opt/etc/vward/components/<id>.disabled` |
 | `update apply_window window/any` | «По расписанию» / «Автоматически» (вместе с `auto_apply` через `settings`) | `/opt/etc/vward/update.conf` |
 | `update-feed beta/dev` | канал: ветка подписанного feed (Dev - токен `UPDATE_FEED_DEV`) | `manifest_url` в `update.conf` |
-| `adaptive-mode 0/1` | AdaptiveAuto добавляет новые домены | `/opt/etc/vward/route-engine/adaptive.disabled` |
+| `adaptive-mode 0/1` | «Автоподбор доменов» добавляет новые домены | `/opt/etc/vward/route-engine/adaptive.disabled` |
 | `classifier 0/1` | автоопределение категории новых доменов | `CLASSIFIER_ENABLED` в `domain-classifier.conf` |
 | `ip-category NAME 0/1` | IP-категория может получать маршруты | `/opt/etc/vward/policy-sync/excluded.categories` |
 | `console-auth 0/1` | вход по учётной записи Keenetic (только через `auth`) | `/opt/etc/vward/console/auth.conf` |
@@ -241,7 +241,7 @@ WAN Guard) и допускает не больше одного ручного �
 ## Диагностика
 
 `diagnostics` выполняет только фиксированный набор read-only проверок: `/opt`, основные
-зависимости, `crond`, supervisor, AdGuard Home, Adaptive Live, WAN, WireGuard, lighttpd,
+зависимости, `crond`, supervisor, AdGuard Home, «Автоподбор доменов», WAN, WireGuard, lighttpd,
 активный Update Engine slot и update config. Ответ возвращает `PASS/WARN/FAIL/UNKNOWN`
 с короткой причиной. Произвольные команды и произвольные файлы недоступны.
 
@@ -283,7 +283,7 @@ Route Engine добавляет локальный фильтр/сортиров
 `route-probe` поддерживает домен/DNS, IPv4 и точную FQDN-группу. Групповой probe
 возвращает не более 100 участников и назначенные интерфейсы маршрутов.
 
-Текущий Adaptive Live не сохраняет отдельный структурированный lifecycle для очереди
+Текущий автоподбор доменов не сохраняет отдельный структурированный lifecycle для очереди
 `discovered/pending/processing/excluded/error`; Console намеренно не синтезирует такие
 счётчики из логов. Они появятся только после добавления authoritative runtime state.
 Также нет отдельного безопасного «обновить один компонент»: VWARD Update Engine
