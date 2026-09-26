@@ -1151,13 +1151,13 @@ function tunnelConfSheet(mode, name) {
 }
 function tunnelTrafficPanel(name) {
   const L = S.lists || {}, lists = (L.lists || []).filter(l => l.route === name), nets = (L.subnets || {})[name] || [];
-  const listRows = lists.map(l => '<li class="row link" role="button" tabindex="0" data-go="lists"><div class="row-main"><b>' + esc(l.description || l.name) + '</b><small>' + fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + '</small></div>' + ico('chevron', 'chev') + '</li>').join('');
   const netRows = nets.map(n => '<li class="row"><div class="row-main"><b class="mono">' + esc(n) + '</b></div><span class="row-acts">' + rowBtn('tsubnet', 'remove', n, 'close', 'Убрать ' + n + ' из туннеля') + '</span></li>').join('');
   return panel('Что идёт через туннель', (!S.lists ? empty('Загрузка…') :
-      '<p class="panel-desc">Доменные списки: ' + (lists.length ? '' : 'нет. Направить список сюда можно в разделе «Доменные списки».') + '</p>' + (lists.length ? '<ul class="rows">' + listRows + '</ul>' : '') +
+      // Lists are changed in one place, «Доменные списки»: here only how many go this way.
+      kv([['Доменные списки', lists.length ? String(lists.length) : 'нет', '', 'lists']]) +
       '<p class="panel-desc">Подсети: ' + (nets.length ? fmtInt(nets.length) : 'нет') + '</p>' + (nets.length ? '<ul class="rows">' + netRows + '</ul>' : '') +
       '<form class="inline-form" data-form="tunnel-subnet" data-name="' + esc(name) + '"><input class="input mono" name="subnet" placeholder="149.154.160.0/20" aria-label="Подсеть" autocomplete="off"><button class="btn" type="submit"' + (cfgOk() ? '' : ' disabled') + '>Добавить подсеть</button></form>') + resultBox('tunnel-traffic'),
-    { desc: 'Списки доменов и подсети IPv4, которые Keenetic отправляет через этот туннель.' });
+    { desc: 'Списки доменов и подсети IPv4, которые Keenetic отправляет через этот туннель. Списки меняются в разделе «Доменные списки», подсети - здесь.' });
 }
 function tunnelManagePanel(name, managed) {
   const others = ((st().wg && st().wg.interfaces) || []).filter(t => t.name !== name);
