@@ -50,7 +50,7 @@ important_max_delay_seconds=7200
 routine_max_delay_seconds=86400
 # This engine's own version: a manifest may ask for a newer one (min_updater_version),
 # and a signed manifest carrying a newer engine makes it update itself.
-VU_ENGINE_VERSION=2.0.0
+VU_ENGINE_VERSION=2.0.1
 minimum_updater_version=$VU_ENGINE_VERSION
 manifest_v2_url=
 
@@ -649,10 +649,11 @@ vu_manifest_check_policy() {
     committed_seq=$(vu_committed_get last_sequence 2>/dev/null || printf '0')
     committed_id=$(vu_committed_get installed_update_id 2>/dev/null || :)
 
+    # The release already installed: nothing to do.  Its per-file (v2) manifest
+    # is signed apart from the v1 one the release may have come in with, so its
+    # hash differs from the one kept at commit; that is not a replay, and nothing
+    # is applied from it either way.
     if [ "$sequence" -eq "$committed_seq" ] && [ "$update_id" = "$committed_id" ] && [ "$version" = "$current_version" ]; then
-        vu_trust_check_and_maybe_advance "$manifest" "$persist_trust"
-        rc=$?
-        [ "$rc" -eq "$VU_OK" ] || return "$rc"
         return "$VU_NO_UPDATE"
     fi
 

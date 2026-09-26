@@ -84,13 +84,21 @@ make_manifest() {
         printf '%s\t%s\t%s\t%s\n' "$f" "$1" "$2" "$m" >> "$WORK/engine-$label.tsv"
     done
     [ -n "$ever" ] || ever=$(sed -n 's/^VU_ENGINE_VERSION=//p' "$edir/vward-update-common-base.sh")
+    # EXTRA_TARGET: one more route-tools file, new in this release.
+    xs=""; xz=0
+    if [ -n "${EXTRA_TARGET:-}" ]; then
+        printf '%s\n' "extra-$label" > "$WORK/extra-$label"
+        set -- $(blob "$WORK/extra-$label"); xs=$1 xz=$2
+    fi
     signed=$WORK/signed-$label.json
     jq -n --arg version "$version" --argjson sequence "$sequence" --arg rs "$route_sha" --argjson rz "$route_size" \
-        --arg ws "$wan_sha" --argjson wz "$wan_size" --arg ever "$ever" --rawfile e "$WORK/engine-$label.tsv" '
+        --arg ws "$wan_sha" --argjson wz "$wan_size" --arg ever "$ever" --rawfile e "$WORK/engine-$label.tsv" \
+        --arg xt "${EXTRA_TARGET:-}" --arg xs "$xs" --argjson xz "$xz" '
         {schema:2,update_id:("test-v2-"+($sequence|tostring)),sequence:$sequence,version:$version,channel:"dev",priority:"ROUTINE",
          published_at:"2026-09-25T00:00:00Z",min_updater_version:"2.0.0",files_base:"https://example.invalid/files/",
-         files:[{target:"/opt/bin/vward-route.sh",sha256:$rs,size:$rz,mode:"0755",component:"route-tools"},
-                {target:"/opt/bin/vward-wan-guard.sh",sha256:$ws,size:$wz,mode:"0755",component:"wan-guard"}],
+         files:([{target:"/opt/bin/vward-route.sh",sha256:$rs,size:$rz,mode:"0755",component:"route-tools"},
+                {target:"/opt/bin/vward-wan-guard.sh",sha256:$ws,size:$wz,mode:"0755",component:"wan-guard"}]
+               + (if $xt == "" then [] else [{target:$xt,sha256:$xs,size:$xz,mode:"0755",component:"route-tools"}] end)),
          engine:{version:$ever,files:($e | split("\n") | map(select(length > 0) | split("\t") | {name:.[0],sha256:.[1],size:(.[2]|tonumber),mode:.[3]}))},
          compatibility:{min_vward:"0.1.0-dev",max_vward:$version},affected_components:["route-tools","wan-guard"],affected_services:[],
          health_profile:"default",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"test-key"}}' > "$signed"
@@ -251,6 +259,30 @@ housekeeping
 check 'housekeeping moves engine 1 to engine 2' sh -c 'grep -q ENGINE_MOVED "$1" && [ "$2" = "$3" ] && grep -q "^VU_ENGINE_VERSION=2" "$3/vward-update-common-base.sh"' sh "$WORK/last.out" "$(slot)" "$SLOTS/slots/B"
 housekeeping
 check 'the move happens once' sh -c '! grep -q ENGINE_MOVED "$1" && [ "$2" = "$3" ]' sh "$WORK/last.out" "$(slot)" "$SLOTS/slots/B"
+
+# 14. A release adds a program file while the engine version stays: the registry
+# that names its owner travels with the engine, so the engine refreshes itself
+# (same version, other slot) and the new engine installs the file.
+new_root newfile
+reg=$(engine_dir reg 2.0.0)
+jq '(.components[] | select(.id == "route-tools") | .runtime_targets) += ["/opt/bin/vward-route-extra.sh"]' \
+    "$reg/component-registry.json" > "$reg/r.json" && mv "$reg/r.json" "$reg/component-registry.json"
+EXTRA_TARGET=/opt/bin/vward-route-extra.sh make_manifest newfile 0.2.0-rc.2 10 "$reg"
+run --apply; rc=$?
+check 'a new file with a same-version engine applies' sh -c '[ "$1" -eq 0 ] && [ "$(cat "$2")" = extra-newfile ]' sh "$rc" "$ROOT/opt/bin/vward-route-extra.sh"
+check 'the engine took the new registry into the other slot' sh -c '[ "$1" = "$2" ] && grep -q vward-route-extra.sh "$2/component-registry.json"' sh "$(slot)" "$SLOTS/slots/B"
+run --check; rc=$?
+check 'the refreshed engine is not refreshed again' sh -c '[ "$1" -eq 10 ] && [ "$2" = "$3" ]' sh "$rc" "$(slot)" "$SLOTS/slots/B"
+
+# 15. The release already installed, from a manifest signed apart (the v1 one):
+# no update and no replay error.
+new_root installed
+make_manifest installed 0.2.0-rc.2 10 "$CUR_ENGINE"
+run --apply
+make_manifest installed-v2 0.2.0-rc.2 10 "$CUR_ENGINE"
+run --check; rc=$?
+check 'the installed release in another manifest is not a replay' sh -c '[ "$1" -eq 10 ] && ! grep -q "replay" "$2"' sh "$rc" "$WORK/last.out"
+check 'the installed files stay' [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = route-installed ]
 
 printf 'v2 simulations: %s passed, %s failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]

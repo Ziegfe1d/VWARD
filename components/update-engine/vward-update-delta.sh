@@ -250,6 +250,16 @@ vu_engine_newer() {
     [ -n "$manifest_engine" ] && vu_version_lt "$VU_ENGINE_VERSION" "$manifest_engine"
 }
 
+# vu_engine_outdated MANIFEST: a newer signed engine, or the same version with
+# other files - the component registry travels with the engine and names the
+# owner of every program file, so a release that adds a file changes it.
+vu_engine_outdated() {
+    vu_engine_newer "$1" && return 0
+    manifest_engine=$(jq -r '.signed.engine.version // empty' "$1" 2>/dev/null)
+    [ "$manifest_engine" = "$VU_ENGINE_VERSION" ] || return 1
+    ! vu_engine_check_dir "$SELF_DIR" "$1" 2>/dev/null
+}
+
 # vu_engine_install_from DIR MANIFEST: DIR holds the engine files of MANIFEST,
 # already checked.  Syntax, a self-test of the new engine against the same signed
 # manifest, then the inactive slot and an atomic switch of "current".

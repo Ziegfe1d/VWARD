@@ -469,8 +469,9 @@ if [ "$command" != --dry-run ] && ! vu_schedule_ready "$priority" "$first_seen";
 fi
 
 schema=$(vu_manifest_schema "$manifest")
-# A newer signed engine is installed first; the rest of this run is done by it.
-if [ "$schema" = 2 ] && [ "$command" != --dry-run ] && [ "${VWARD_ENGINE_SWITCHED:-0}" != 1 ] && vu_engine_newer "$manifest"; then
+# A newer signed engine, or the same one with a newer registry, is installed
+# first; the rest of this run is done by it.
+if [ "$schema" = 2 ] && [ "$command" != --dry-run ] && [ "${VWARD_ENGINE_SWITCHED:-0}" != 1 ] && vu_engine_outdated "$manifest"; then
     if vu_engine_update "$manifest"; then
         trap - EXIT
         trap - HUP INT TERM
