@@ -254,6 +254,7 @@ const DETAILS = {
   'd-smartdns': { title: 'Smart DNS', parent: 'lists', data: ['lists', 'config'] },
   'd-wanrec': { title: 'Восстановление: дополнительно', parent: 'wan', data: ['status', 'config', 'wanhist'] },
   'd-services': { title: 'Проверяемые сервисы', parent: 'routes' },
+  'd-rsources': { title: 'Источники', parent: 'routes' },
   'd-ipcats': { title: 'Активные IP-категории', parent: 'routes' },
   'd-querylog': { title: 'Журнал запросов', parent: 'ads' },
   'd-review': { title: 'На проверке', parent: 'ads' },
@@ -440,6 +441,20 @@ function listPath(l) {
 }
 let listWant = '';
 // One Keenetic domain list: where it goes, its domains and exclusions, all editable here.
+// Where routing data comes from (vward-route-hints-update.sh, vward-policy-sync.sh).
+const ROUTE_SOURCES = [
+  { id: 'itdog', title: 'itdog - списки доменов', url: 'https://github.com/itdoginfo/allow-domains', unit: 'доменов', what: 'Заблокированные в России домены по сервисам и категориям', why: 'Подсказки автоподбору: такой домен при сбое напрямую сразу уходит в VPN' },
+  { id: 'v2fly', title: 'v2fly domain-list-community', url: 'https://github.com/v2fly/domain-list-community', unit: 'доменов', what: 'Справочник «домен - сервис»', why: 'Подсказки автоподбору и выбор IP-категорий' },
+  { id: 'refilter', title: 'Re:filter community', url: 'https://github.com/1andrevich/Re-filter-lists', unit: 'доменов', what: 'Сервисы, которые сами не пускают пользователей из России', why: 'Подсказки автоподбору' },
+  { id: 'antifilter', title: 'antifilter community', url: 'https://community.antifilter.download/', unit: 'доменов', what: 'Заблокированные домены, собранные сообществом antifilter', why: 'Подсказки автоподбору' },
+  { id: 'itdog-ip', title: 'itdog - подсети', url: 'https://github.com/itdoginfo/allow-domains/tree/main/Subnets', unit: 'подсетей', what: 'Подсети сервисов', why: 'Маршруты IP-категорий' },
+  { id: 'loyalsoldier', title: 'Loyalsoldier geoip', url: 'https://github.com/Loyalsoldier/geoip', unit: 'подсетей', what: 'Диапазоны адресов сервисов', why: 'Маршруты IP-категорий' },
+  { id: 'official', title: 'Официальные подсети сервисов', url: 'https://core.telegram.org/resources/cidr.txt', unit: 'подсетей', what: 'Подсети, которые публикует сам сервис (Telegram)', why: 'Маршруты IP-категорий - точнее любых сборок' }
+];
+function routeSourcesRow(r) {
+  const got = r.sources || [], bad = got.filter(x => !x.ok).length;
+  return ['Источники', !got.length ? ROUTE_SOURCES.length + ' · обновятся ночью' : bad ? bad + ' ' + plural(bad, 'не скачался', 'не скачались', 'не скачались') + ' из ' + ROUTE_SOURCES.length : ROUTE_SOURCES.length + ' · все обновлены', bad ? 'warn' : '', 'd-rsources'];
+}
 function listPage(name) {
   const l = ((S.lists && S.lists.lists) || []).find(x => x.name === name), d = S.listd, ok = cfgOk();
   const tuns = (st().wg && st().wg.interfaces) || [];
@@ -539,7 +554,7 @@ const RENDER = {
         ['Автоподбор доменов', S.config ? countText((cfgRoute().adaptive || []).length) : fmtInt(ad.count) + ' ' + plural(num(ad.count) || 0, 'домен', 'домена', 'доменов'), '', 'd-adaptive'],
         ['IP-категории', fmtInt(ip.active_count) + ' активны из ' + fmtInt(ip.categories), '', 'd-ipcats'],
         ['Проверяемые сервисы', (r.services || []).length ? fmtInt(r.services.length) : 'не настроены', '', 'd-services'],
-        ['Источники каталога', 'itdog ' + fmtInt(d.sources && d.sources.itdog) + ' · v2fly ' + fmtInt(d.sources && d.sources.v2fly)]
+        routeSourcesRow(r)
       ])) +
       panel('Настройки маршрутизации', '<dl class="kv">' +
         ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', cfgRoute().adaptive_enabled !== false, 'Автоподбор доменов', !cfgOk()), 'отправлять через VPN домены, недоступные напрямую') +
@@ -880,6 +895,18 @@ const RENDER = {
         { desc: 'Smart DNS отвечает на все свои домены одним адресом прокси. Если этот адрес уйдёт в VPN, перестанут работать все сервисы Smart DNS сразу.' }) +
       panel('Домены Smart DNS', sd.length ? '<ul class="rows">' + sd.map(d => '<li class="row"><div class="row-main"><b>' + dom(d) + '</b><small>' + esc(from(d) || smartdnsWhere(L)) + '</small></div></li>').join('') + '</ul>' : empty('Smart DNS не настроен'),
         { desc: (src.adguard || []).length ? 'Эти домены заданы в AdGuard Home: «Настройки» → «Настройки DNS» → «Upstream DNS-серверы», строки вида [/домен/]адрес. VWARD их читает, но не меняет: Smart DNS - ваша настройка.' : 'Эти домены заданы в Keenetic: «Интернет-фильтры» → DNS-over-HTTPS. VWARD их читает, но не меняет.' });
+  },
+  'd-rsources'() {
+    const got = ((S.route && S.route.sources) || []).reduce((m, x) => (m[x.id] = x, m), {});
+    const row = x => {
+      const g = got[x.id], state = !g ? 'ещё не обновлялся' : g.ok ? 'обновлён ' + fmtStamp(g.ts) + ' · ' + fmtInt(g.count) + ' ' + x.unit
+        : 'не скачался ' + fmtStamp(g.ts) + (g.count ? ' · работает прошлая копия: ' + fmtInt(g.count) + ' ' + x.unit : '');
+      return '<li class="row"><div class="row-main"><b>' + esc(x.title) + '</b><small>' + esc(x.what) + '</small><small>' + esc(x.why) + '</small>' +
+        '<small class="st' + (g && !g.ok ? ' warn' : '') + '">' + (g && !g.ok ? ico('alert') : '') + esc(state) + '</small></div>' +
+        '<span class="row-acts"><a class="icon-btn" href="' + esc(x.url) + '" target="_blank" rel="noopener" aria-label="Открыть источник ' + esc(x.title) + '" title="Открыть источник">' + ico('external') + '</a></span></li>';
+    };
+    return loadError(['route']) + panel('Источники', '<ul class="rows">' + ROUTE_SOURCES.map(row).join('') + '</ul>',
+      { desc: 'Источники только подсказывают. Решение VWARD принимает сам: проверяет каждый домен на вашем провайдере - открылся ли напрямую, открылся ли через VPN. Источники обновляются каждую ночь; если источник не скачался, работает его прошлая копия.' });
   },
   'd-adaptive'() {
     const list = S.config ? cfgRoute().adaptive || [] : (S.route && S.route.adaptive && S.route.adaptive.recent) || [];

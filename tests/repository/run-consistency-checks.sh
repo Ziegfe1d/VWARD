@@ -77,6 +77,7 @@ python3 tests/repository/check-ads-agh-settings.py || fail "AdGuard Home ad sett
 python3 tests/repository/check-ads-agh-clients.py || fail "Device names reach AdGuard Home without a restart"
 python3 tests/repository/check-ads-dns-guard.py || fail "DNS of every device goes through AdGuard Home"
 python3 tests/repository/check-ads-route-dns.py || fail "routed domains go through Keenetic DNS"
+python3 tests/repository/check-route-sources.py || fail "routing sources keep their last good copy"
 python3 tests/repository/check-ads-agh-smartdns.py || fail "AdGuard Home Smart DNS rows for tunnel lists"
 python3 tests/repository/check-ads-default-config.py || fail "Ads default settings"
 python3 tests/repository/check-console-backups.py || fail "Settings backups"

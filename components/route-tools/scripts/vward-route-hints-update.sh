@@ -18,6 +18,8 @@ DEST="$DIR/hints.conf"
 CATALOG="$DIR/hints-catalog.tsv"
 INCLUDES="$DIR/hints-includes.tsv"
 LOG="/opt/var/log/vward-route-hints.log"
+# Each source's last result for the Console: id|epoch|ok or fail|entries kept.
+SOURCES_STATUS="${VWARD_ROUTE_SOURCES_STATUS:-/opt/var/lib/vward/route-sources.status}"
 MAX_SOURCE_ARCHIVE_BYTES=${MAX_SOURCE_ARCHIVE_BYTES:-33554432}
 MAX_SOURCE_UNPACKED_BYTES=${MAX_SOURCE_UNPACKED_BYTES:-67108864}
 MAX_SOURCE_ARCHIVE_ENTRIES=${MAX_SOURCE_ARCHIVE_ENTRIES:-20000}
@@ -256,8 +258,46 @@ update_v2fly()
     return 0
 }
 
-update_itdog || true
-update_v2fly || true
+# update_text_list ID URL CATEGORY MIN: a plain list of domains, one per line.
+update_text_list()
+{
+    TMP="$WORK/$1.tsv"
+    if ! fetch "$2" "$WORK/$1.raw"; then
+        echo "SOURCE_$1=UNAVAILABLE"
+        return 1
+    fi
+    normalize_domains < "$WORK/$1.raw" |
+        awk -v s="$1" -v c="$3" 'index($0, ".") { print $0 "|" s "|" c }' | sort -u > "$TMP"
+    COUNT="$(wc -l < "$TMP" 2>/dev/null)"
+    [ -n "$COUNT" ] || COUNT=0
+    if [ "$COUNT" -lt "$4" ]; then
+        echo "SOURCE_$1=BAD_COUNT:$COUNT"
+        return 1
+    fi
+    cp "$TMP" "$CACHE/$1.tsv.new" && mv "$CACHE/$1.tsv.new" "$CACHE/$1.tsv" || return 1
+    echo "SOURCE_$1=OK:$COUNT"
+}
+
+# source_status ID ok|fail: the result, with what the cache keeps (a failed
+# source goes on with its last good copy).
+source_status()
+{
+    ss_n=0
+    [ ! -s "$CACHE/$1.tsv" ] || ss_n="$(wc -l < "$CACHE/$1.tsv" | tr -d ' ')"
+    mkdir -p "$(dirname "$SOURCES_STATUS")" 2>/dev/null
+    { [ ! -r "$SOURCES_STATUS" ] || awk -F'|' -v id="$1" '$1 != id' "$SOURCES_STATUS"
+      echo "$1|$(date +%s)|$2|$ss_n"; } > "$SOURCES_STATUS.tmp.$$" && mv -f "$SOURCES_STATUS.tmp.$$" "$SOURCES_STATUS"
+}
+
+if update_itdog; then source_status itdog ok; else source_status itdog fail; fi
+if update_v2fly; then source_status v2fly ok; else source_status v2fly fail; fi
+# Services that refuse Russian addresses themselves (Re:filter community) and the
+# community list of blocked domains (antifilter): small lists, hints only - the
+# engine still checks every domain on this provider before any route.
+if update_text_list refilter "https://raw.githubusercontent.com/1andrevich/Re-filter-lists/main/community.lst" refilter-community 100; then
+    source_status refilter ok; else source_status refilter fail; fi
+if update_text_list antifilter "https://community.antifilter.download/list/domains.lst" antifilter-community 50; then
+    source_status antifilter ok; else source_status antifilter fail; fi
 
 MERGED="$WORK/merged.tsv"
 INC_MERGED="$WORK/includes.tsv"
@@ -265,7 +305,7 @@ INC_MERGED="$WORK/includes.tsv"
 : > "$MERGED"
 : > "$INC_MERGED"
 
-for FILE in "$CACHE/itdog.tsv" "$CACHE/v2fly.tsv"; do
+for FILE in "$CACHE/itdog.tsv" "$CACHE/v2fly.tsv" "$CACHE/refilter.tsv" "$CACHE/antifilter.tsv"; do
     [ -s "$FILE" ] || continue
     cat "$FILE" >> "$MERGED"
 done

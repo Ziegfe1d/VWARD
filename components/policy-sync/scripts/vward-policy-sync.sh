@@ -24,6 +24,9 @@ STATE="/opt/var/lib/vward/policy-sync"
 SOURCE_ROOT="$STATE/source-catalog"
 ITDOG_SRC="$SOURCE_ROOT/itdog"
 LOYAL_SRC="$SOURCE_ROOT/loyalsoldier"
+# Subnets a service publishes itself: exact where the collections guess.
+OFFICIAL_SRC="$SOURCE_ROOT/official"
+SOURCES_STATUS="${VWARD_ROUTE_SOURCES_STATUS:-/opt/var/lib/vward/route-sources.status}"
 CATALOG="$STATE/catalog"
 INDEX="$STATE/catalog.index"
 OWNED="$STATE/owned.dynamic.routes"
@@ -368,6 +371,35 @@ update_loyal_catalog()
     return 0
 }
 
+update_official_catalog()
+{
+    NEW="$WORK/official-source"
+    mkdir -p "$NEW"
+    if ! download "https://core.telegram.org/resources/cidr.txt" "$WORK/telegram-official.raw"; then
+        echo "SOURCE_OFFICIAL=UNAVAILABLE"
+        return 1
+    fi
+    normalize_ipv4 < "$WORK/telegram-official.raw" > "$NEW/telegram.cidr"
+    COUNT="$(wc -l < "$NEW/telegram.cidr" 2>/dev/null)"
+    [ -n "$COUNT" ] || COUNT=0
+    if [ "$COUNT" -lt 3 ]; then
+        echo "SOURCE_OFFICIAL=BAD_COUNT:$COUNT"
+        return 1
+    fi
+    replace_source_dir "$NEW" "$OFFICIAL_SRC" || return 1
+    echo "SOURCE_OFFICIAL=OK:telegram=$COUNT"
+    return 0
+}
+
+# source_status ID ok|fail DIR: the result and the subnets the source keeps.
+source_status()
+{
+    ss_n="$(cat "$3"/*.cidr 2>/dev/null | wc -l | tr -d ' ')"
+    mkdir -p "$(dirname "$SOURCES_STATUS")" 2>/dev/null
+    { [ ! -r "$SOURCES_STATUS" ] || awk -F'|' -v id="$1" '$1 != id' "$SOURCES_STATUS"
+      echo "$1|$(date +%s)|$2|${ss_n:-0}"; } > "$SOURCES_STATUS.tmp.$$" && mv -f "$SOURCES_STATUS.tmp.$$" "$SOURCES_STATUS"
+}
+
 build_catalog()
 {
     NEW="$WORK/catalog-new"
@@ -376,7 +408,7 @@ build_catalog()
     mkdir -p "$NEW"
     : > "$IDX"
 
-    for FILE in "$ITDOG_SRC"/*.cidr "$LOYAL_SRC"/*.cidr; do
+    for FILE in "$ITDOG_SRC"/*.cidr "$LOYAL_SRC"/*.cidr "$OFFICIAL_SRC"/*.cidr; do
         [ -f "$FILE" ] || continue
 
         CAT="$(category_name "$FILE")"
@@ -707,14 +739,15 @@ reconcile_routes()
 
 echo "SUBNET_SYNC_VERSION=$VERSION"
 echo "MODE=$MODE"
-echo "SOURCES=itdoginfo/allow-domains+Loyalsoldier/geoip"
+echo "SOURCES=itdoginfo/allow-domains+Loyalsoldier/geoip+official"
 echo "SELECTION=DYNAMIC_FROM_ROUTED_DOMAINS"
 echo "INTERFACE=$RT"
 
 case "$MODE" in
     sync|--sync)
-        update_itdog_catalog || true
-        update_loyal_catalog || true
+        if update_itdog_catalog; then source_status itdog-ip ok "$ITDOG_SRC"; else source_status itdog-ip fail "$ITDOG_SRC"; fi
+        if update_loyal_catalog; then source_status loyalsoldier ok "$LOYAL_SRC"; else source_status loyalsoldier fail "$LOYAL_SRC"; fi
+        if update_official_catalog; then source_status official ok "$OFFICIAL_SRC"; else source_status official fail "$OFFICIAL_SRC"; fi
         build_catalog || {
             echo "SUBNET_SYNC=CATALOG_FAILED"
             exit 1

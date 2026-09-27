@@ -1460,6 +1460,8 @@ EOF_ISTATS
       --argjson itdog_ip_categories "$ITDOG_IP_CATEGORIES" \
       --argjson loyal_ip_categories "$LOYAL_IP_CATEGORIES" \
       --argjson ip_index "$IP_INDEX_JSON" --argjson services "$SERVICES_JSON" \
+      --argjson route_sources "$(awk -F'|' 'NF >= 4 && $1 ~ /^[a-z0-9-]+$/ {print $1 "\t" $2 "\t" $3 "\t" $4}' "${VWARD_ROUTE_SOURCES_STATUS:-/opt/var/lib/vward/route-sources.status}" 2>/dev/null |
+          "$JQ" -Rn '[inputs | split("\t") | {id: .[0], ts: (.[1] | tonumber? // 0), ok: (.[2] == "ok"), count: (.[3] | tonumber? // 0)}]' 2>/dev/null || echo '[]')" \
       '{
         ok:true,
         ts:$ts,
@@ -1481,7 +1483,8 @@ EOF_ISTATS
             index:$ip_index,
             last_sync:$ip_last
         },
-        services:$services
+        services:$services,
+        sources:$route_sources
       }'
     exit 0
 fi
