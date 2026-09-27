@@ -348,3 +348,6 @@ small.st .icon{width:14px;height:14px}
 .ev-text{flex:1;min-width:0;overflow-wrap:anywhere}
 .ev-n{color:var(--muted);font-size:var(--fs-sm)}
 .ev-at{flex:none;color:var(--muted);font-size:var(--fs-sm);font-variant-numeric:tabular-nums}
+.ev.link{cursor:pointer}
+.ev-acts{flex:none;display:flex;align-items:center;gap:4px;margin:-6px 0}
+.ev-state{color:var(--muted);font-size:var(--fs-sm)}

@@ -84,6 +84,7 @@ const S = { logs: @LOGS@, loadedAt: {} };
 @BLOCK@
 const out = {};
 Object.keys(ACTIVITY).forEach(k => { out[k] = activityEvents(k).map(e => e.text + (e.n > 1 ? ' x' + e.n : '')); });
+out._links = {}; Object.keys(ACTIVITY).forEach(k => { out._links[k] = activityEvents(k).map(e => [e.host || '', e.go || '']); });
 console.log(JSON.stringify(out));
 """.replace("@LOGS@", json.dumps(LOGS)).replace("@BLOCK@", block)
 
@@ -98,6 +99,14 @@ for key, want in EXPECT.items():
         fail(f"{key}: {texts}")
 if got["updater"][1] != "Проверка: обновлений нет x2":
     fail(f"the same event in a row must be shown once with a count: {got['updater']}")
+links = got.pop("_links")
+# A domain event carries its domain (its controls), other events open their place.
+if links["adaptive"] != [["bad.example", ""], ["night.example", ""], ["old.example", ""], ["chatgpt.com", ""]] or any(h for h, _ in links["policy"]):
+    fail(f"domain events must carry the domain: {links['adaptive']}")
+if links["wifi"] != [["", "w-aa:bb:cc:dd:ee:01"]]:
+    fail(f"a Wi-Fi event opens its device: {links['wifi']}")
+if links["ads"] != [["", "d-agh"], ["", "d-sources"]]:
+    fail(f"an Ads event opens where it is managed: {links['ads']}")
 for key, texts in got.items():
     for t in texts:
         if "=" in t or "|" in t or any(w.isupper() and "_" in w for w in t.split()):
