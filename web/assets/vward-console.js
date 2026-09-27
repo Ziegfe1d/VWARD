@@ -515,8 +515,8 @@ const RENDER = {
       panel('Защита VPN', '<dl class="kv">' + ctrlRow('Автоматическая защита', sw('data-cfg-tg', !S.config || cfg().tunnel_guard.enabled !== false, 'Автоматическая защита VPN', !cfgOk())) + '</dl>' +
         confirmBox('tg-off', 'Выключить защиту VPN? Если туннель упадёт, сайты из списков VPN станут недоступны, пока он не восстановится.', 'Выключить', true) + kv([
         ['Трафик списков', isTrue(wg.failopen_active) ? 'Напрямую, пока VPN недоступен' : 'Через VPN', isTrue(wg.failopen_active) ? 'warn' : 'ok'],
-        ['Проверка туннеля', 'каждую минуту', '', 'logs', ' data-log-go="tunnel"'],
-        ['Попытка восстановления', 'каждые 5 минут', '', null, '', 'пока трафик идёт напрямую'],
+        ['Проверки туннеля', 'журнал проверок туннеля', '', 'logs', ' data-log-go="tunnel"'],
+        ['Возврат в VPN', 'автоматически', '', null, '', 'пока трафик идёт напрямую, VPN проверяется сам'],
         ['Потерь подряд', String(num(wg.down_streak) || 0)]
       ]) + '<div class="panel-actions even">' + btn('tunnel-health', 'check', 'Проверить') + btn('open-log', 'logs', 'Журнал', '', ' data-log-tab="tunnel"') + '</div>' + resultBox('tunnel-health'),
       { desc: 'Если туннель упал, трафик из списков VPN временно идёт напрямую, пока VPN не восстановится.' });
@@ -553,7 +553,7 @@ const RENDER = {
       panel('Проверить адрес', '<form class="inline-form" data-form="probe"><input class="input" id="probeInput" placeholder="домен или IPv4, например claude.ai" aria-label="Домен или IPv4" autocomplete="off"><button class="btn primary" type="submit">' + ico('search') + 'Проверить</button></form><div id="probeResult"></div>', { desc: 'Покажет, через какой интерфейс пойдёт трафик.' }) +
       panel('Обслуживание', kv([
         ['Решения автоподбора', 'журнал проверок доменов', '', 'logs', ' data-log-go="adaptive"'],
-        ['Сверка маршрутов', 'каждые 5 минут', '', 'logs', ' data-log-go="routing"'],
+        ['Сверка маршрутов', 'журнал сверок маршрутов', '', 'logs', ' data-log-go="routing"'],
         ['Каталог обновлён', catalogStamp(d.last_update)],
         ['IP-категории обновлены', ipSyncStamp(ip.last_sync), '', 'logs', ' data-log-go="policy"']
       ]) +
@@ -1564,7 +1564,7 @@ function openNotes() {
 const SEARCH_INDEX = [
   ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Файлы'], ['system', 'Свободно'],
   ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Восстанавливать автоматически'], ['wan', 'Проверять'], ['wan', 'Обновить адрес'], ['wan', 'Переподключить'], ['d-wanrec', 'Неудачных проверок подряд'],
-  ['settings', 'Только зарегистрированные устройства'], ['vpn', 'Автоматическая защита'], ['vpn', 'Трафик списков'], ['vpn', 'Проверка туннеля'],
+  ['settings', 'Только зарегистрированные устройства'], ['vpn', 'Автоматическая защита'], ['vpn', 'Трафик списков'], ['vpn', 'Проверки туннеля'],
   ['d-smartdns', 'Защита Smart DNS'],
   ['routes', 'Туннель для маршрутов'], ['routes', 'Автоподбор доменов'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
@@ -1809,10 +1809,10 @@ function routeDnsRows(a) {
     not_via_agh: 'не нужно: DNS Keenetic не спрашивает AdGuard Home',
     no_domains: 'в маршрутах Keenetic нет доменов',
     client_conflict: 'адрес роутера занят другим клиентом AdGuard Home',
-    chain_failed: 'DNS Keenetic не ответил, отменено; повтор через 5 минут',
-    agh_unavailable: 'AdGuard Home не ответил, повтор через 5 минут',
-    router_unavailable: 'Keenetic не ответил, повтор через 5 минут'
-  }, hint = !on ? 'выключено' : r.result in hints ? hints[r.result] : 'включится в течение 5 минут';
+    chain_failed: 'DNS Keenetic не ответил, отменено; VWARD повторит сам',
+    agh_unavailable: 'AdGuard Home не ответил, VWARD повторит сам',
+    router_unavailable: 'Keenetic не ответил, VWARD повторит сам'
+  }, hint = !on ? 'выключено' : r.result in hints ? hints[r.result] : 'включится автоматически';
   return '<dl class="kv">' + ctrlRow('Домены маршрутов через DNS Keenetic', sw('data-route-dns', on, 'Домены маршрутов через DNS Keenetic', !S.ads), hint) + '</dl>';
 }
 async function routeDnsOp(value) {
