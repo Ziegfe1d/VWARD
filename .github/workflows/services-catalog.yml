@@ -1,0 +1,50 @@
+name: Services catalog (iplist)
+
+# Once a day: rebuild the services catalog from iplist (github.com/rekryt/iplist, MIT)
+# and publish it on the services-catalog branch, where routers fetch it.  The same
+# catalog ships inside each VWARD release as the fallback.
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vward-services-catalog
+  cancel-in-progress: false
+
+jobs:
+  catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          path: vward
+      - name: Fetch iplist (config only)
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/rekryt/iplist iplist
+          git -C iplist sparse-checkout set config
+      - name: Build catalog
+        run: python3 vward/tools/build-services-catalog.py iplist out/services-catalog.json
+      - name: Validate catalog
+        run: python3 vward/tests/repository/check-services-catalog.py out/services-catalog.json
+      - name: Publish to the services-catalog branch
+        run: |
+          cd vward
+          git config user.name "vward-bot"
+          git config user.email "vward-bot@users.noreply.github.com"
+          if git fetch --depth 1 origin services-catalog 2>/dev/null; then
+            git checkout -q -B services-catalog FETCH_HEAD
+          else
+            git checkout -q --orphan services-catalog
+            git rm -rfq . >/dev/null 2>&1 || true
+          fi
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp ../out/services-catalog.json services-catalog.json
+          git add services-catalog.json
+          if git diff --cached --quiet; then echo "catalog unchanged"; exit 0; fi
+          git commit -qm "services catalog from iplist $(python3 -c 'import json;print(json.load(open("services-catalog.json"))["revision"][:12])')"
+          git push -q origin services-catalog

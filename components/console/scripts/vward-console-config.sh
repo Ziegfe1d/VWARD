@@ -837,6 +837,201 @@ op_domain_list_watch() {
     done_ok "domain-list-watch $1 $2" changed
 }
 
+# ---------- Services (catalog from iplist) ----------
+# A service switched on is a Keenetic domain list VWARD makes itself (domain-listN,
+# described with the service's name), routed like any other list, so it shows in
+# Keenetic's own web interface too.  enabled.tsv: ID<TAB>GROUP<TAB>auto|TUNNEL.
+SERVICES_ETC="$ETC/services"
+SERVICES_STATE="$SERVICES_ETC/enabled.tsv"
+SERVICES_BUNDLED=${VWARD_SERVICES_BUNDLED:-/opt/share/vward/console/services-catalog.json}
+SERVICES_FETCHED=${VWARD_SERVICES_FETCHED:-/opt/var/lib/vward/services/catalog.json}
+SERVICES_URL=${VWARD_SERVICES_URL:-https://raw.githubusercontent.com/Ziegfe1d/VWARD/services-catalog/services-catalog.json}
+SERVICE_LIMIT=300
+
+# services_valid FILE: the catalog shape the Panel relies on; names and domains
+# that go into Keenetic commands are checked again where they are used.
+services_valid() {
+    [ -s "$1" ] && [ "$(wc -c < "$1")" -le 524288 ] || return 1
+    "$JQ" -e '.schema == 1 and (.services | type) == "array" and (.services | length) > 0 and
+        all(.services[]; (.id | type) == "string" and (.title | type) == "string" and (.title | length) <= 64 and
+            (.category | type) == "string" and (.domains | type) == "array" and (.domains | length) > 0)' "$1" >/dev/null 2>&1 || return 1
+    # Entware jq has no regex functions: names are checked here.
+    ! "$JQ" -r '.services[].id' "$1" | grep -Evq '^[a-z0-9][a-z0-9.@_-]{0,62}$' || return 1
+    ! "$JQ" -r '.services[].title' "$1" | grep -Eq '["\\[:cntrl:]]|^$'
+}
+
+services_catalog() {
+    if services_valid "$SERVICES_FETCHED"; then echo "$SERVICES_FETCHED"
+    elif services_valid "$SERVICES_BUNDLED"; then echo "$SERVICES_BUNDLED"
+    else return 1; fi
+}
+
+service_row() { [ -f "$SERVICES_STATE" ] && awk -F'\t' -v i="$1" '$1 == i {print; exit}' "$SERVICES_STATE"; }
+
+# service_state_set ID [GROUP PIN]: replace or drop the service's row.
+service_state_set() {
+    mkdir -p "$SERVICES_ETC" || die write_failed
+    new_tmp "$SERVICES_STATE" || die write_failed
+    { [ -f "$SERVICES_STATE" ] && awk -F'\t' -v i="$1" '$1 != i' "$SERVICES_STATE"
+      [ -z "${2:-}" ] || printf '%s\t%s\t%s\n' "$1" "$2" "$3"; } > "$TMPFILE" || die write_failed
+    install_tmp "$SERVICES_STATE" 0644 || die write_failed
+}
+
+free_list_name() {
+    n=0
+    while [ "$n" -lt 100 ]; do
+        grep -qx "object-group fqdn domain-list$n" "$RUNCFG" || { echo "domain-list$n"; return 0; }
+        n=$((n + 1))
+    done
+    return 1
+}
+
+group_domains() {
+    awk -v g="$1" '/^object-group fqdn / {cur = $3; next} /^!/ {cur = ""} cur == g && $1 == "include" {print tolower($2)}' "$RUNCFG" | sort -u
+}
+
+# service_domains ID OUT: the catalog's domains of a service, each one checked.
+service_domains() {
+    "$JQ" -r --arg i "$1" '.services[] | select(.id == $i) | .domains[]' "$SV_CAT" > "$2" 2>/dev/null || return 1
+    [ -s "$2" ] || return 1
+    while IFS= read -r d; do valid_domain "$d" || return 1; done < "$2"
+    sort -u "$2" -o "$2"
+}
+
+# The route a list gets: "vpn" is VWARD's tunnel, as in domain-list.
+service_target() { if [ "$1" = auto ]; then echo vpn; else echo "$1"; fi; }
+
+# Route the list through a second helper run: domain-list takes care of Smart DNS
+# lines and AdGuard Home rows the same way as for Keenetic's own lists.
+service_route() {
+    sr_out=$(sh "$0" domain-list "$1" "$2" 2>/dev/null | tail -n 1)
+    case "$sr_out" in result=*) return 0 ;; esac
+    SR_ERR=${sr_out#error=}
+    case "$SR_ERR" in ''|*[!a-z0-9_]*) SR_ERR=router_rejected ;; esac
+    return 1
+}
+
+release_lock() {
+    [ "$LOCKED" = 1 ] || return 0
+    rm -rf "${CHANGE_LOCK:?}"
+    LOCKED=0
+}
+
+op_service() {
+    # service on ID auto|TUNNEL | tunnel ID auto|TUNNEL | off ID
+    sv_op=$1 sv_id=$2 sv_to=${3:-}
+    printf '%s\n' "$sv_id" | grep -Eq '^[a-z0-9][a-z0-9.@_-]{0,62}$' || die invalid_service 64
+    case "$sv_op" in
+        on|tunnel)
+            case "$sv_to" in auto) ;; ''|*[!A-Za-z0-9_.-]*) die invalid_value 64 ;; esac ;;
+        off) [ -z "$sv_to" ] || die usage 64 ;;
+        *) die invalid_operation 64 ;;
+    esac
+    SV_CAT=$(services_catalog) || die services_unavailable
+    load_profile_base
+    [ "$sv_to" = auto ] || [ "$sv_op" = off ] || is_tunnel "$sv_to" || die unknown_tunnel 64
+    row=$(service_row "$sv_id")
+    G=$(printf '%s' "$row" | cut -f2)
+
+    if [ "$sv_op" = tunnel ]; then
+        [ -n "$row" ] || die service_not_enabled 64
+        service_state_set "$sv_id" "$G" "$sv_to"
+        service_route "$G" "$(service_target "$sv_to")" || die "$SR_ERR"
+        done_ok "service tunnel $sv_id $G $sv_to" changed
+    fi
+
+    if [ "$sv_op" = off ]; then
+        [ -n "$row" ] || done_ok "service off $sv_id" unchanged
+        snapshot
+        if grep -qx "object-group fqdn $G" "$RUNCFG"; then
+            # The route off first (Smart DNS lines come back), then the list goes.
+            service_route "$G" bypass || die "$SR_ERR"
+            change_lock
+            snapshot
+            t=$(group_route "$G"); t=${t%%"$(printf '\t')"*}
+            [ -z "$t" ] || ndm "dns-proxy no route object-group $G $t" || die router_rejected
+            ndm "no object-group fqdn $G" || die router_rejected
+            snapshot
+            ! grep -qx "object-group fqdn $G" "$RUNCFG" || die verification_failed
+            save_router || die config_save_failed
+            rm -f "${LISTS_STATE:?}/${G:?}"
+        fi
+        service_state_set "$sv_id"
+        done_ok "service off $sv_id $G" changed
+    fi
+
+    # on: already on means a new tunnel.
+    if [ -n "$row" ]; then
+        service_state_set "$sv_id" "$G" "$sv_to"
+        service_route "$G" "$(service_target "$sv_to")" || die "$SR_ERR"
+        done_ok "service on $sv_id $G $sv_to" changed
+    fi
+    "$JQ" -e --arg i "$sv_id" 'any(.services[]; .id == $i)' "$SV_CAT" >/dev/null 2>&1 || die unknown_service 64
+    title=$("$JQ" -r --arg i "$sv_id" '.services[] | select(.id == $i) | .title' "$SV_CAT")
+    case "$title" in ''|*'"'*|*"$(printf '\134')"*) die unknown_service 64 ;; esac
+    change_lock
+    JOURNAL=$(mktemp /tmp/vward-console-service.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    service_domains "$sv_id" "$JOURNAL.doh" || die unknown_service 64
+    n=$(grep -c . "$JOURNAL.doh")
+    [ "$n" -le "$SERVICE_LIMIT" ] || die service_too_big 64
+    snapshot
+    G=$(free_list_name) || die no_free_list
+    TXN=1
+    ndm "object-group fqdn $G" || die router_rejected
+    echo "no object-group fqdn $G" >> "$JOURNAL"
+    ndm "object-group fqdn $G description \"$title\"" || die router_rejected
+    while IFS= read -r d; do
+        ndm "object-group fqdn $G include $d" || die list_limit
+    done < "$JOURNAL.doh"
+    snapshot
+    group_domains "$G" | cmp -s - "$JOURNAL.doh" || die verification_failed
+    save_router || die config_save_failed
+    TXN=0
+    service_state_set "$sv_id" "$G" "$sv_to"
+    release_lock
+    if ! service_route "$G" "$(service_target "$sv_to")"; then
+        # Without its route the list is of no use: it goes, and the service stays off.
+        change_lock
+        ndm "no object-group fqdn $G" && save_router
+        service_state_set "$sv_id"
+        die "$SR_ERR"
+    fi
+    done_ok "service on $sv_id $G $sv_to domains=$n" changed
+}
+
+# services-refresh: the catalog of the day (iplist, built by VWARD's workflow),
+# kept only when it is valid; the lists of services switched on follow it.
+op_services_refresh() {
+    mkdir -p "$(dirname "$SERVICES_FETCHED")" || die write_failed
+    new_tmp "$SERVICES_FETCHED" || die write_failed
+    "${VWARD_CURL_BIN:-curl}" -fsS --connect-timeout 10 --max-time 60 --max-filesize 524288 \
+        -o "$TMPFILE" "$SERVICES_URL" 2>/dev/null || die download_failed
+    services_valid "$TMPFILE" || die catalog_invalid
+    if [ -f "$SERVICES_FETCHED" ] && cmp -s "$TMPFILE" "$SERVICES_FETCHED"; then
+        rm -f "${TMPFILE:?}"; TMPFILE=; fetched=unchanged
+    else
+        install_tmp "$SERVICES_FETCHED" 0644 || die write_failed; fetched=changed
+    fi
+    [ -s "$SERVICES_STATE" ] || done_ok "services-refresh catalog=$fetched" "$fetched"
+    SV_CAT=$SERVICES_FETCHED
+    change_lock
+    JOURNAL=$(mktemp /tmp/vward-console-service.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    snapshot
+    moved=0
+    while IFS="$(printf '\t')" read -r id grp pin; do
+        grep -qx "object-group fqdn $grp" "$RUNCFG" || continue
+        service_domains "$id" "$JOURNAL.doh" || continue
+        [ "$(grep -c . "$JOURNAL.doh")" -le "$SERVICE_LIMIT" ] || continue
+        group_domains "$grp" > "$JOURNAL.moves"
+        comm -13 "$JOURNAL.moves" "$JOURNAL.doh" | while IFS= read -r d; do ndm "object-group fqdn $grp include $d" || exit 1; done || die list_limit
+        comm -23 "$JOURNAL.moves" "$JOURNAL.doh" | while IFS= read -r d; do ndm "no object-group fqdn $grp include $d" || exit 1; done || die router_rejected
+        cmp -s "$JOURNAL.moves" "$JOURNAL.doh" || moved=$((moved + 1))
+    done < "$SERVICES_STATE"
+    [ "$moved" = 0 ] || save_router || die config_save_failed
+    [ "$moved" = 0 ] && [ "$fetched" = unchanged ] && done_ok "services-refresh" unchanged
+    done_ok "services-refresh catalog=$fetched lists=$moved" changed
+}
+
 # ---------- Tunnels: replace a configuration, create, delete, subnets ----------
 #
 # A WireGuard/AmneziaWG .conf is parsed into a plan of Keenetic commands.  A
@@ -1638,9 +1833,10 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|policy-group) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|policy-group|services-refresh) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
+    service) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     wifi-host) [ "$#" -eq 3 ] || die usage 64 ;;
     *) [ "$#" -eq 2 ] || die usage 64 ;;
 esac
@@ -1694,6 +1890,8 @@ case "$OP" in
     tunnel-delete) op_tunnel_delete "$ARG1" "$ARG2" ;;
     tunnel-subnet) op_tunnel_subnet "$ARG1" "$ARG2" "$ARG3" ;;
     list-domain) op_list_domain "$ARG1" "$ARG2" "$ARG3" ;;
+    service) op_service "$ARG1" "$ARG2" "$ARG3" ;;
+    services-refresh) op_services_refresh ;;
     ext-check) op_ext_check ;;
     ext-daily) op_ext_daily ;;
     ext-upgrade) op_ext_upgrade "$ARG1" "$ARG2" ;;

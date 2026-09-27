@@ -234,7 +234,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data) ;;
+    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -306,7 +306,7 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             ;;
     esac
     case "$ACTION" in
-        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control|wifi-host|ext-update-control) ;;
+        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control|wifi-host|ext-update-control|services) ;;
         *)
             echo 'Status: 405 Method Not Allowed'
             header_json
@@ -1931,6 +1931,54 @@ if [ "$ACTION" = lists-data ]; then
               watch: ($watched | index([$n]) != null), returnable: ($returns | index([$n]) != null),
               auto: ($auto[$n] // null), addresses: ($addrs[$n] // null)}]}'
     exit 0
+fi
+
+# services-data: the services catalog (iplist) without its domains - one service's
+# domains with ?id= - and the services switched on.
+if [ "$ACTION" = services-data ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    SV_FETCHED=${VWARD_SERVICES_FETCHED:-/opt/var/lib/vward/services/catalog.json}
+    SV_BUNDLED=${VWARD_SERVICES_BUNDLED:-/opt/share/vward/console/services-catalog.json}
+    SV_FROM=daily SV_CAT=$SV_FETCHED
+    "$JQ" -e '.schema == 1 and (.services | length) > 0' "$SV_CAT" >/dev/null 2>&1 || { SV_FROM=bundled SV_CAT=$SV_BUNDLED; }
+    "$JQ" -e '.schema == 1' "$SV_CAT" >/dev/null 2>&1 || { echo '{"ok":false,"error":"services_unavailable"}'; exit 0; }
+    SV_ID="$(qget id)"
+    if [ -n "$SV_ID" ]; then
+        printf '%s\n' "$SV_ID" | grep -Eq '^[a-z0-9][a-z0-9.@_-]{0,62}$' || { echo '{"ok":false,"error":"invalid_service"}'; exit 0; }
+        "$JQ" -c --arg i "$SV_ID" '[.services[] | select(.id == $i)][0] as $s | if $s then {ok: true, id: $s.id, title: $s.title, domains: $s.domains} else {ok: false, error: "unknown_service"} end' "$SV_CAT"
+        exit 0
+    fi
+    SV_ON="$(awk -F'\t' 'NF >= 3 {print $1 "\t" $2 "\t" $3}' "$CONFIG_ETC/services/enabled.tsv" 2>/dev/null |
+        "$JQ" -Rn '[inputs | split("\t") | {id: .[0], group: .[1], tunnel: .[2]}]')"
+    [ -n "$SV_ON" ] || SV_ON='[]'
+    SV_CHECKED="$(date -r "$SV_FETCHED" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null)"
+    "$JQ" -c --arg from "$SV_FROM" --arg checked "$SV_CHECKED" --argjson on "$SV_ON" '
+        {ok: true, from: $from, checked: $checked, source: .source, source_url: .source_url, license: .license,
+         revision: .revision, updated: .updated, limit: .limit, categories: .categories,
+         services: [.services[] | {id, title, category, count: (.domains | length), too_big: (.too_big // false)}],
+         enabled: $on}' "$SV_CAT"
+    exit 0
+fi
+
+# services: switch a service on (auto or a tunnel), move it to a tunnel, or off.
+# Switching on writes up to 300 domains into Keenetic: it runs in the background
+# like the tunnel jobs (control-data reports it).
+if [ "$ACTION" = services ]; then
+    header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+    [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+    read_body 1024
+    SOP="$(form_value op)"; SID="$(form_value id)"; STO="$(form_value tunnel)"
+    printf '%s\n' "$SID" | grep -Eq '^[a-z0-9][a-z0-9.@_-]{0,62}$' || { echo '{"ok":false,"error":"invalid_service"}'; exit 0; }
+    case "$STO" in *[!A-Za-z0-9_.-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+    case "$SOP" in
+        on|tunnel) [ -n "$STO" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }; ARGS="service $SOP $SID $STO" ;;
+        off) ARGS="service off $SID" ;;
+        *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
+    esac
+    CMD="$CONFIG_HELPER" LABEL="service-$SOP" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
+    run_detached "$CONTROL_RUN_DIR" control_busy
 fi
 
 if [ "$ACTION" = "control-data" ]; then

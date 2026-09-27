@@ -387,6 +387,20 @@ if [ -x "$BACKUP_HELPER" ]; then
     fi
 fi
 
+# Services catalog (iplist, rebuilt by VWARD's workflow every night): once a day
+# from 06:00; the lists of services switched on follow it.  Detached.
+SERVICES_DAY_FILE=${VWARD_SERVICES_DAY_FILE:-/tmp/vward-services-day}
+if [ -x "$BACKUP_HELPER" ]; then
+    SV_TODAY=${BACKUP_NOW%% *}; SV_HOUR=${BACKUP_NOW#* }; SV_HOUR=${SV_HOUR%%:*}
+    SV_DAY=""
+    [ ! -r "$SERVICES_DAY_FILE" ] || read -r SV_DAY < "$SERVICES_DAY_FILE" || :
+    if [ "$SV_DAY" != "$SV_TODAY" ] && [ "$SV_HOUR" -ge 6 ] 2>/dev/null; then
+        echo "$SV_TODAY" > "$SERVICES_DAY_FILE" 2>/dev/null || :
+        "$BACKUP_HELPER" services-refresh now </dev/null >/dev/null 2>&1 &
+        echo "$BACKUP_NOW|services=refresh" >> "$HOUSE_LOG"
+    fi
+fi
+
 # The Panel's web server picks up settings an update brought (S93 checks, cheap when nothing changed).
 [ -n "$R" ] || [ ! -x /opt/etc/init.d/S93vward-console ] || /opt/etc/init.d/S93vward-console start </dev/null >/dev/null 2>&1 || :
 

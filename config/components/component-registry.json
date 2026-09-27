@@ -215,7 +215,8 @@
         "/opt/share/vward/console/www/assets/vward-console.js",
         "/opt/share/vward/console/www/cgi-bin/api.cgi",
         "/opt/bin/vward-console-config.sh",
-        "/opt/share/vward/settings-registry.json"
+        "/opt/share/vward/settings-registry.json",
+        "/opt/share/vward/console/services-catalog.json"
       ]
     },
     {

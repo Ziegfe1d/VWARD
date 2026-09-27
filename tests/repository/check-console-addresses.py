@@ -39,7 +39,7 @@ ACT.forEach(([k, p]) => { DETAILS['a-' + k] = { title: k, parent: p }; });
 const ids = PAGES.map(x => x.id).concat(Object.keys(DETAILS)), seen = {}, bad = [];
 ids.forEach(id => { const p = pathOf(id); if (seen[p]) bad.push('same address ' + p + ': ' + seen[p] + ', ' + id); seen[p] = id;
   if (idOf(p) !== id) bad.push(id + ' -> ' + p + ' -> ' + idOf(p)); if (!/^\\/[a-z0-9\\/:._-]*$/.test(p)) bad.push('address ' + p); });
-['t-Wireguard0', 't-OpenVPN0', 'l-domain-list5', 'ip-domain-list5', 'w-aa:bb:cc:dd:ee:ff'].forEach(id => { const p = pathOf(id); if (idOf(p) !== id) bad.push(id + ' -> ' + p + ' -> ' + idOf(p)); });
+['t-Wireguard0', 't-OpenVPN0', 'l-domain-list5', 'ip-domain-list5', 'w-aa:bb:cc:dd:ee:ff', 's-youtube.com', 's-jetbrains@cdn'].forEach(id => { const p = pathOf(id); if (idOf(p) !== id) bad.push(id + ' -> ' + p + ' -> ' + idOf(p)); });
 if (idOf('/') !== 'overview' || idOf('/nothing/here') !== null) bad.push('root or unknown address');
 console.log(JSON.stringify({ n: ids.length, bad, vpn: pathOf('t-Wireguard0'), ip: pathOf('ip-domain-list5'), wifi: pathOf('w-aa:bb:cc:dd:ee:ff') }));
 """.replace("ACT.forEach", "const ACT = " + json.dumps(act) + "; ACT.forEach", 1)

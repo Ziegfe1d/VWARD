@@ -119,6 +119,7 @@ const API_ERRORS = {
   config_save_failed: 'роутер не сохранил конфигурацию', router_config_unavailable: 'не удалось прочитать конфигурацию роутера',
   route_change_busy: 'маршруты сейчас меняет другая задача, повторите', profile_unavailable: 'профиль устройства не определён',
   policy_group_unavailable: 'группа маршрутизации не найдена', list_full: 'список заполнен', backup_failed: 'не удалось сделать резервную копию',
+  services_unavailable: 'каталог сервисов недоступен', invalid_service: 'неверное имя сервиса', unknown_service: 'такого сервиса нет в каталоге', service_too_big: 'у сервиса больше 300 доменов - Keenetic столько не примет в один список', service_not_enabled: 'сервис не включён', list_limit: 'Keenetic не принял домены: достигнут предел списка', no_free_list: 'в Keenetic нет свободного номера доменного списка', catalog_invalid: 'каталог скачался повреждённым - работает прежний',
   write_failed: 'не удалось записать файл', custom_manifest_url: 'адрес манифеста задан вручную - канал меняется в update.conf', invalid_tunnel: 'недопустимое имя туннеля', tunnel_no_handshake: 'сервер не ответил на рукопожатие за 30 секунд - туннель не изменён', main_tunnel: 'этот туннель используется VWARD для маршрутов', invalid_subnet: 'нужна подсеть IPv4, например 149.154.160.0/20 (не шире /8)', invalid_description: 'название: до 64 символов, без кавычек', no_free_tunnel: 'на роутере нет свободного номера туннеля',
   conf_empty: 'файл пустой', conf_syntax: 'это не файл WireGuard', conf_peer_count: 'в файле должен быть ровно один [Peer]', conf_key_private: 'неверный PrivateKey', conf_public_key: 'неверный PublicKey', conf_preshared_key: 'неверный PresharedKey', conf_address: 'нет адреса IPv4 в Address', conf_endpoint: 'неверный Endpoint (нужно сервер:порт)', conf_mtu: 'MTU вне 1280-1500', conf_keepalive: 'неверный PersistentKeepalive', conf_allowed_ips: 'неверный AllowedIPs', conf_awg: 'неверные параметры AmneziaWG', tunnel_device_missing: 'туннель не поднят на роутере', unknown_tunnel: 'туннель не найден',
   failopen_active: 'VPN недоступен и трафик идёт напрямую: дождитесь восстановления туннеля', policy_sync_busy: 'идёт обновление IP-категорий, повторите позже',
@@ -133,7 +134,7 @@ const API_ERRORS = {
 const errText = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.error || '') ? 'роутер не принял настройку ' + x.error.slice(14).replace(/_/g, ' ') + ' - туннель не изменён' : '') || (x && x.error) || ('код ' + (x && x.rc));
 
 /* ---------- Данные ---------- */
-const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, ext: null, listd: null, laddr: null, wanhist: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
+const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, ext: null, listd: null, laddr: null, services: null, svcd: null, wanhist: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
 // The last address check stays on the page until the next one (the page redraws itself).
 let RPROBE = null;
 // Where the check says traffic goes, in words: through which tunnel, or past the VPN.
@@ -170,6 +171,7 @@ const LOADERS = {
   ads: () => apiGet('ads-data'), https: () => apiGet('ads-https-data'), config: () => apiGet('config-data'),
   adsstats: () => apiGet('ads-view', { view: 'stats' }), agh: () => apiGet('ads-view', { view: 'agh' }), backups: () => apiGet('backup-data'), ext: () => apiGet('ext-update-data'),
   wanhist: () => apiText('log', { name: 'recovery', count: 100 }).then(t => ({ ok: true, text: t })),
+  services: () => apiGet('services-data'), svcd: () => current.startsWith('s-') ? apiGet('services-data', { id: current.slice(2) }) : Promise.resolve(null),
   listd: () => current.startsWith('l-') ? apiGet('list-data', { name: current.slice(2) }) : Promise.resolve(null),
   laddr: () => current.startsWith('ip-') ? apiGet('list-addrs', { name: current.slice(3) }) : Promise.resolve(null), files: () => FILES.root ? apiGet('files', { op: 'list', root: FILES.root, path: FILES.path }) : Promise.resolve(null), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
   qlog: () => apiGet('ads-view', { view: 'querylog', filter: ADSV.filter, search: ADSV.search }),
@@ -219,7 +221,7 @@ const PAGES = [
   { id: 'overview', title: 'Обзор', icon: 'home', group: 'Главное', data: ['status', 'route', 'wifi', 'ads', 'lists'] },
   { id: 'wan', title: 'Сеть', icon: 'globe', group: 'Сеть', data: ['status', 'security', 'config', 'wifi'] },
   { id: 'vpn', title: 'VPN', icon: 'shield', group: 'Сеть', data: ['status', 'security', 'config', 'route'] },
-  { id: 'routes', title: 'Домены', icon: 'list', group: 'Сеть', data: ['route', 'security', 'status', 'config', 'lists'] },
+  { id: 'routes', title: 'Домены', icon: 'list', group: 'Сеть', data: ['route', 'security', 'status', 'config', 'lists', 'services'] },
   { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adsstats', 'adspub', 'agh'] },
   // Programs VWARD works with (AdGuard Home, later its own tunnel engine): each has its page here.
   { id: 'utils', title: 'Утилиты', icon: 'tools', group: 'VWARD', data: ['ads', 'agh', 'security', 'ext'] },
@@ -282,9 +284,10 @@ const DETAILS = {
   'd-adaptive': { title: 'Автоподбор доменов', parent: 'routes' },
   'd-smartdns': { title: 'Smart DNS', parent: 'lists', data: ['lists', 'config'] },
   'd-wanrec': { title: 'Восстановление: дополнительно', parent: 'wan', data: ['status', 'config', 'wanhist'] },
-  'd-rsources': { title: 'Источники', parent: 'routes' },
+  'd-rsources': { title: 'Источники', parent: 'routes', data: ['route', 'services'] },
+  'd-services': { title: 'Сервисы', parent: 'routes', data: ['services', 'lists', 'status', 'config'] },
   'd-ipcats': { title: 'IP-категории', parent: 'vpn', data: ['route', 'config', 'status'] },
-  lists: { title: 'Доменные списки', parent: 'routes', data: ['lists', 'config', 'status'] },
+  lists: { title: 'Доменные списки', parent: 'routes', data: ['lists', 'config', 'status', 'services'] },
   wifi: { title: 'Wi-Fi клиенты', parent: 'wan', data: ['wifi', 'security', 'config'] },
   'd-querylog': { title: 'Журнал запросов', parent: 'ads' },
   'd-review': { title: 'На проверке', parent: 'ads' },
@@ -308,6 +311,7 @@ function page(id) {
   if (id.startsWith('t-')) return { id: id, title: tunLabel(id.slice(2)), parent: 'vpn' };
   if (id.startsWith('l-')) { const l = ((S.lists && S.lists.lists) || []).find(x => x.name === id.slice(2)); return { id: id, title: l ? l.description || l.name : 'Список', parent: 'lists' }; }
   if (id.startsWith('ip-')) return { id: id, title: 'IP-адреса', parent: 'l-' + id.slice(3) };
+  if (id.startsWith('s-')) { const x = ((S.services && S.services.services) || []).find(v => v.id === id.slice(2)); return { id: id, title: x ? x.title : id.slice(2), parent: 'd-services' }; }
   if (id.startsWith('w-')) return { id: id, title: typeof wifiName === 'function' ? wifiName(id.slice(2)) : id.slice(2), parent: 'wifi' };
   return null;
 }
@@ -315,11 +319,11 @@ const parentOf = id => { const p = page(id); return p && p.parent; };
 // Every page has its own address, built from the way to it: /network, /vpn/tunnel/<name>,
 // /domains/lists/<list>/ip, /system/components/<id>/deps.  Old #addresses still open.
 const SLUG = { overview: '', wan: 'network', vpn: 'vpn', routes: 'domains', lists: 'lists', wifi: 'wifi', ads: 'ads', system: 'system', updates: 'updates', settings: 'settings', logs: 'logs', utils: 'utilities', 'd-agh': 'adguard-home',
-  'd-mydomains': 'my', 'd-force': 'always-vpn', 'd-adaptive': 'autopick', 'd-rsources': 'sources', 'd-ipcats': 'ip-categories', 'd-wanrec': 'recovery',
+  'd-mydomains': 'my', 'd-force': 'always-vpn', 'd-adaptive': 'autopick', 'd-rsources': 'sources', 'd-services': 'services', 'd-ipcats': 'ip-categories', 'd-wanrec': 'recovery',
   'u-fw': 'firmware', 'u-opkg': 'entware', 'd-dnsex': 'exceptions', 'd-aghfilters': 'filters', 'd-aghservices': 'services', 'd-adcats': 'categories' };
 function slugOf(id) {
   if (Object.prototype.hasOwnProperty.call(SLUG, id)) return SLUG[id];
-  const m = /^(deps|ip|[duactlw])-(.+)$/.exec(id);
+  const m = /^(deps|ip|[duactlsw])-(.+)$/.exec(id);
   const enc = v => encodeURIComponent(v).replace(/%3A/gi, ':');
   if (!m) return enc(id);
   const k = m[1], v = m[2];
@@ -343,6 +347,8 @@ function idOf(path) {
   if (r && r.length === 2 && r[1] === 'ip') return 'ip-' + r[0];
   r = under(pathOf('wifi'));
   if (r && r.length === 1) return 'w-' + r[0];
+  r = under(pathOf('d-services'));
+  if (r && r.length === 1) return 's-' + r[0];
   return null;
 }
 const navId = id => { let x = id; while (parentOf(x)) x = parentOf(x); return x; };
@@ -622,7 +628,8 @@ const RENDER = {
         ['Мои домены', !S.config ? '—' : !cfgRoute().router_available ? 'нет данных' : !cfgRoute().group ? 'выберите группу' : countText((cfgRoute().domains || []).length), S.config && cfgRoute().router_available && !cfgRoute().group ? 'warn' : '', 'd-mydomains'],
         ['Всегда через VPN', S.config ? countText((cfgRoute().force_vpn || []).length) : '—', '', 'd-force'],
         ['Автоподбор доменов', S.config ? countText((cfgRoute().adaptive || []).length) : fmtInt(ad.count) + ' ' + plural(num(ad.count) || 0, 'домен', 'домена', 'доменов'), '', 'd-adaptive'],
-        ['Доменные списки', L ? fmtInt((L.lists || []).length) : '—', '', 'lists'],
+        ['Сервисы', S.services && S.services.ok ? ((S.services.enabled || []).length ? fmtInt(S.services.enabled.length) + ' включено' : 'выбрать') : '—', '', 'd-services', '', 'YouTube, ChatGPT, Instagram… через VPN'],
+        ['Доменные списки', L ? fmtInt((L.lists || []).filter(l => !svcOf(l.name)).length) : '—', '', 'lists'],
         routeSourcesRow(r)
       ]) + (policyGroupRow() ? '<dl class="kv">' + policyGroupRow() + '</dl>' : '')) +
       panel('Автоподбор', '<dl class="kv">' +
@@ -920,7 +927,7 @@ const RENDER = {
   },
   lists() {
     if (!S.lists) return loadError(['lists']) + panel('Доменные списки', empty('Загрузка…'));
-    const L = S.lists, items = L.lists || [], ok = cfgOk(), path = listPath;
+    const L = S.lists, items = (L.lists || []).filter(l => !svcOf(l.name)), ok = cfgOk(), path = listPath;
     // A row opens its list: switches, domains and exclusions live there.
     const row = l => '<li class="row link" role="button" tabindex="0" data-go="l-' + esc(l.name) + '"><div class="row-main"><b>' + esc(l.description || l.name) + '</b><small>' + fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + ' · ' + esc(path(l)) + '</small>' +
       (l.smartdns_conflict || (l.auto && viaIs(l, 'vpn')) ? '<small class="st warn">' + ico('alert') + (l.smartdns_conflict ? 'конфликт со Smart DNS' : 'переведён на VPN автоматически') + '</small>' : '') + '</div>' + ico('chevron', 'chev') + '</li>';
@@ -963,6 +970,24 @@ const RENDER = {
       panel('Домены Smart DNS', sd.length ? '<ul class="rows">' + sd.map(d => '<li class="row"><div class="row-main"><b>' + dom(d) + '</b><small>' + esc(from(d) || smartdnsWhere(L)) + '</small></div></li>').join('') + '</ul>' : empty('Smart DNS не настроен'),
         { desc: (src.adguard || []).length ? 'Заданы в AdGuard Home (Upstream DNS), VWARD их не меняет.' : 'Заданы в Keenetic (DNS-over-HTTPS), VWARD их не меняет.' });
   },
+  'd-services'() {
+    const V = S.services;
+    if (!V) return loadError(['services']) + panel('Сервисы', empty('Загрузка…'));
+    if (!V.ok) return panel('Сервисы', empty(errText(V)));
+    const on = V.enabled || [], cats = V.categories || [], all = V.services || [], ok = cfgOk() && !SVC.busy;
+    const shown = all.filter(x => SVC.cat === 'on' ? on.some(e => e.id === x.id) : !SVC.cat || x.category === SVC.cat);
+    const chips = [['on', 'Включённые']].concat(cats.map(c => [c.id, c.title]));
+    const row = x => {
+      const e = on.find(v => v.id === x.id), n = x.count + ' ' + plural(x.count, 'домен', 'домена', 'доменов');
+      return '<li class="row"><div class="row-main"><b>' + esc(x.title) + '</b><small>' + (e ? esc(svcVia(e)) + ' · ' : '') + esc(x.too_big ? 'слишком много доменов для Keenetic' : n) + '</small></div>' +
+        '<span class="row-acts">' + sw('data-svc="' + esc(x.id) + '"', !!e, (e ? 'Выключить ' : 'Включить ') + x.title, !ok || x.too_big) +
+        (e ? '<button class="icon-btn" type="button" data-go="s-' + esc(x.id) + '" aria-label="Настройки ' + esc(x.title) + '" title="Настройки">' + ico('chevron') + '</button>' : '') + '</span></li>';
+    };
+    return cfgNote() + panel('Сервисы', '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти сервис" aria-label="Найти сервис" autocomplete="off"></label>' +
+      '<div class="chips" role="group" aria-label="Категория">' + chips.map(c => '<button type="button" data-act="svc-cat" data-cat="' + esc(c[0]) + '" aria-pressed="' + (SVC.cat === c[0]) + '">' + esc(c[1]) + '</button>').join('') + '</div>' +
+      resultBox('svc') + (shown.length ? '<ul class="rows" data-list-rows>' + shown.map(row).join('') + '</ul>' : empty(SVC.cat === 'on' ? 'Пока ничего не включено' : 'Нет сервисов')),
+      { desc: 'Включённый сервис идёт через VPN. В Keenetic он появится доменным списком со своим названием.' });
+  },
   'd-rsources'() {
     const got = ((S.route && S.route.sources) || []).reduce((m, x) => (m[x.id] = x, m), {});
     const row = x => {
@@ -972,7 +997,10 @@ const RENDER = {
         '<small class="st' + (g && !g.ok ? ' warn' : '') + '">' + (g && !g.ok ? ico('alert') : '') + esc(state) + '</small></div>' +
         '<span class="row-acts"><a class="icon-btn" href="' + esc(x.url) + '" target="_blank" rel="noopener" aria-label="Открыть источник ' + esc(x.title) + '" title="Открыть источник">' + ico('external') + '</a></span></li>';
     };
-    return loadError(['route']) + panel('Источники', '<ul class="rows">' + ROUTE_SOURCES.map(row).join('') + '</ul>' +
+    const V = S.services, svcRow = V && V.ok ? '<li class="row"><div class="row-main"><b>Каталог сервисов iplist</b><small>Домены сервисов для страницы «Сервисы», по категориям.</small>' +
+        '<small class="st">' + esc((V.from === 'daily' ? 'обновлён ' + fmtStamp(V.checked) : 'копия из обновления VWARD') + ' · ' + fmtInt((V.services || []).length) + ' сервисов') + '</small></div>' +
+        '<span class="row-acts"><a class="icon-btn" href="' + esc(V.source_url || 'https://github.com/rekryt/iplist') + '" target="_blank" rel="noopener" aria-label="Открыть источник iplist" title="Открыть источник">' + ico('external') + '</a></span></li>' : '';
+    return loadError(['route']) + panel('Источники', '<ul class="rows">' + ROUTE_SOURCES.map(row).join('') + svcRow + '</ul>' +
       kv([['Каталог обновлён', catalogStamp(((S.route && S.route.domains) || {}).last_update)]]) +
       '<div class="panel-actions">' + btn('refresh-hints', 'refresh', 'Обновить сейчас') + '</div>' + resultBox('routes'),
       { desc: 'Подсказки для VWARD, обновляются ночью. Решает VWARD сам.' });
@@ -1482,6 +1510,46 @@ function tunnelPage(name) {
 // Filled only by «Проверить сейчас»: the router does not do this in the background.
 // A tunnel is shown by the name its owner gave it; the system name only on its own page.
 const tunLabel = n => { const t = ((st() && st().wg && st().wg.interfaces) || []).find(x => x.name === n); return t && t.description ? t.description : n; };
+// Services: a service switched on is a Keenetic list VWARD made (enabled[].group).
+const SVC = { cat: 'on', busy: false };
+const svcOf = group => ((S.services && S.services.enabled) || []).find(e => e.group === group);
+function svcVia(e) {
+  const l = ((S.lists && S.lists.lists) || []).find(x => x.name === e.group);
+  return !S.lists ? '' : !l ? 'список удалён в Keenetic' : !l.route ? 'без маршрута' : (e.tunnel === 'auto' ? 'автоматически · ' : '') + 'через ' + tunLabel(l.route);
+}
+function servicePage(id) {
+  const V = S.services, x = V && (V.services || []).find(v => v.id === id), e = V && (V.enabled || []).find(v => v.id === id), d = S.svcd;
+  if (!x) return loadError(['services']) + panel('Сервис', empty(V ? 'Такого сервиса нет в каталоге' : 'Загрузка…'));
+  const tuns = (st().wg && st().wg.interfaces) || [], ok = cfgOk() && !SVC.busy;
+  const l = e && ((S.lists && S.lists.lists) || []).find(v => v.name === e.group);
+  const doms = d && d.ok && d.id === id ? d.domains : null;
+  return cfgNote() + panel(x.title, '<dl class="kv">' +
+      ctrlRow('Через VPN', sw('data-svc="' + esc(id) + '"', !!e, (e ? 'Выключить ' : 'Включить ') + x.title, !ok || x.too_big), e ? svcVia(e) : 'выключен - идёт напрямую') +
+      (e ? ctrlRow('Туннель', sel('data-svc-tun="' + esc(id) + '"' + (ok ? '' : ' disabled'), 'Туннель для ' + x.title, [['auto', 'Автоматически']].concat(tuns.map(t => [t.name, tunLabel(t.name)])), e.tunnel), e.tunnel === 'auto' ? 'VWARD выбирает сам' : 'закреплён') : '') + '</dl>' +
+      (l ? kv([['IP-адреса', l.addresses != null ? fmtInt(l.addresses) : '—', '', 'ip-' + l.name, '', 'адреса, которые Keenetic узнал для доменов сервиса']]) : '') + resultBox('svc'),
+      { desc: (l ? 'В Keenetic - доменный список «' + (l.description || l.name) + '». ' : '') + 'Домены из каталога iplist, обновляются сами раз в сутки.' }) +
+    panel('Домены', !doms ? empty('Загрузка…') : '<ul class="rows">' + doms.map(v => '<li class="row"><div class="row-main"><b>' + dom(v) + '</b></div></li>').join('') + '</ul>',
+      { desc: fmtInt(x.count) + ' ' + plural(x.count, 'домен', 'домена', 'доменов') + ', каждый вместе с поддоменами.' });
+}
+// Switching on writes up to 300 domains into Keenetic: a background job, as for tunnels.
+async function serviceJob(fields, okMsg) {
+  const show = text => { actionResult = { id: 'svc', text: text }; render(); };
+  SVC.busy = true; show(fields.op === 'off' ? 'Выключаем…' : fields.op === 'on' ? 'Записываем домены в Keenetic…' : 'Переводим…');
+  let x, run = {};
+  try { x = await apiPost('services', fields); } catch (err) { x = { ok: false, error: err.message }; }
+  if (x.ok) {
+    const deadline = Date.now() + 3 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 2000));
+      try { run = (await apiGet('control-data')).run || {}; } catch (err) { continue; }
+      if (run.finished) break;
+    }
+  }
+  const last = String(run.output || '').trim().split('\n').pop() || '';
+  SVC.busy = false;
+  show(!x.ok ? 'Не выполнено: ' + errText(x) : !run.finished ? 'Ещё выполняется, проверьте позже' : run.rc === 0 ? okMsg : 'Не выполнено: ' + errText({ error: last.replace(/^error=/, '') }));
+  await Promise.all([load('services', true), load('lists', true)]); render();
+}
 // With several tunnels a list chooses its way: the provider or any tunnel.
 function listViaSel(l, tuns, ok) {
   const cur = viaIs(l, 'bypass') ? 'bypass' : tuns.some(t => t.name === l.route) ? l.route : '';
@@ -1860,7 +1928,7 @@ function render() {
   back.classList.toggle('detail', !!p.parent);
   back.hidden = current === 'overview';
   back.setAttribute('aria-label', p.parent ? 'Назад: ' + page(p.parent).title : 'Назад к обзору');
-  const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('deps-') ? depsPage(comp(current.slice(5))) : current.startsWith('l-') ? listPage(current.slice(2)) : current.startsWith('ip-') ? addrPage(current.slice(3)) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
+  const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('deps-') ? depsPage(comp(current.slice(5))) : current.startsWith('l-') ? listPage(current.slice(2)) : current.startsWith('ip-') ? addrPage(current.slice(3)) : current.startsWith('s-') ? servicePage(current.slice(2)) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
   patchContent(html, rendered !== current);
   rendered = current;
   // A chosen chip scrolled out of its row is brought back into view (the row only, not the page).
@@ -1894,6 +1962,7 @@ async function refreshPage() {
   if (id.startsWith('t-')) keys.push('status', 'lists');
   if (id.startsWith('l-')) keys.push('listd');
   if (id.startsWith('ip-')) keys.push('laddr');
+  if (id.startsWith('s-')) keys.push('services', 'svcd', 'lists', 'status', 'config');
   if (id.startsWith('w-')) keys.push('wifi');
   if (id === 'd-https' || id === 'ads') keys.push('https');
   if (id === 'd-notes') notesVersions().forEach(v => loadNotes(v));
@@ -2293,6 +2362,7 @@ document.addEventListener('click', e => {
     f.querySelectorAll('[data-act="tc-mode"]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.m === m)));
     f.dataset.checked = ''; $('tcPreview').innerHTML = ''; f.querySelector('[type=submit]').textContent = 'Проверить';
   }
+  else if (a === 'svc-cat') { SVC.cat = SVC.cat === t.dataset.cat ? '' : t.dataset.cat; render(); }
   else if (a === 'qfilters') { ADSV.filtersOpen = !(ADSV.filtersOpen || ADSV.filter !== 'all'); if (!ADSV.filtersOpen && ADSV.filter !== 'all') { ADSV.filter = 'all'; S.qlog = null; load('qlog', true).then(render); } render(); }
   else if (a === 'cards-reset') { cardOrder = CARD_IDS.slice(); hiddenCards = []; cardView = 'grid'; ['vward-card-order', 'vward-card-hidden', 'vward-card-view'].forEach(k => store.del(k)); render(); toast('Карточки сброшены'); }
   else if (a === 'ask') { confirm = { id: t.dataset.confirm, pkg: t.dataset.pkg }; render(); }
@@ -2408,6 +2478,9 @@ document.addEventListener('change', e => {
     r.readAsText(file);
     return;
   }
+  if (t.dataset.svc) { const id = t.dataset.svc, x = ((S.services && S.services.services) || []).find(v => v.id === id), title = x ? x.title : id; t.disabled = true;
+    serviceJob(t.checked ? { op: 'on', id: id, tunnel: 'auto' } : { op: 'off', id: id }, t.checked ? title + ' идёт через VPN' : title + ' идёт напрямую'); return; }
+  if (t.dataset.svcTun) { const id = t.dataset.svcTun, v = t.value; t.disabled = true; serviceJob({ op: 'tunnel', id: id, tunnel: v }, v === 'auto' ? 'Туннель выбирается автоматически' : 'Закреплён за ' + tunLabel(v)); return; }
   if (t.dataset.listVia) { const v = t.value; t.disabled = true; cfgSet({ op: 'domain-list', target: t.dataset.listVia, value: v }, v === 'bypass' ? 'Список идёт через провайдера' : 'Список идёт через ' + v, ['lists']); return; }
   if (t.hasAttribute('data-theme-pick')) { setTheme(t.value); return; }
   if (t.hasAttribute('data-smartdns-guard')) { cfgSet({ op: 'smartdns-guard', value: t.checked ? '1' : '0' }, t.checked ? 'Защита Smart DNS включена' : 'Защита Smart DNS выключена', ['lists']); return; }
