@@ -58,6 +58,7 @@ ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-rules-r
 ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-job.sh	/opt/bin/vward-ads-privacy-job.sh	0755
 ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-clients.sh	/opt/bin/vward-ads-privacy-clients.sh	0755
 ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-dns-guard.sh	/opt/bin/vward-ads-privacy-dns-guard.sh	0755
+ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-route-dns.sh	/opt/bin/vward-ads-privacy-route-dns.sh	0755
 ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-health.sh	/opt/bin/vward-ads-privacy-health.sh	0755
 ads-privacy-guard	components/ads-privacy-guard/lib/vward-ads-privacy-common.sh	/opt/share/vward/ads-privacy-guard/vward-ads-privacy-common.sh	0644
 ads-privacy-guard	components/ads-privacy-guard/data/source-registry.json	/opt/share/vward/ads-privacy-guard/source-registry.json	0644

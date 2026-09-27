@@ -98,6 +98,7 @@ async function apiPost(action, fields) {
 }
 const API_ERRORS = {
   upstream_not_encrypted: 'сначала зашифруйте выход AdGuard Home (https://... в «Upstream DNS-серверы»)', invalid_mac: 'неверный MAC-адрес',
+  chain_failed: 'DNS Keenetic не ответил через AdGuard Home', client_conflict: 'адрес роутера занят другим клиентом AdGuard Home',
   router_unavailable: 'Keenetic не ответил, повторите через минуту', nat_failed: 'роутер не принял правило перенаправления', filter_failed: 'роутер не принял правило блокировки',
   not_upgradable: 'обновление уже не нужно - проверьте ещё раз', ext_update_busy: 'уже идёт проверка или установка',
   notes_unavailable: 'описание версии не найдено', invalid_version: 'неверная версия',
@@ -634,7 +635,7 @@ const RENDER = {
           g && g.ok && g.protection != null ? ['Защита', g.protection ? 'Включена' : 'Выключена', g.protection ? 'ok' : 'warn', 'd-agh'] : null,
           st1 && st1.ok ? ['Запросов за сутки', fmtInt(st1.queries), '', 'd-querylog'] : null,
           st1 && st1.ok ? ['Заблокировано за сутки', fmtInt(st1.blocked) + (st1.queries ? ' · ' + Math.round(100 * st1.blocked / st1.queries) + '%' : ''), '', 'd-querylog', ' data-qfilter="blocked"'] : null,
-          ['Настройки AdGuard Home', 'фильтры, сервисы, защита', '', 'd-agh']]) + aghClientsRows(a),
+          ['Настройки AdGuard Home', 'фильтры, сервисы, защита', '', 'd-agh']]) + aghClientsRows(a) + routeDnsRows(a),
         { desc: 'Первая линия: блокирует по своим фильтрам. VWARD проверяет то, что он пропустил.' });
   },
   'd-agh'() {
@@ -1776,6 +1777,29 @@ function aghClientsRows(a) {
     (on && c.result === 'old_script' ? '<p class="field-warn">' + ico('alert') + 'Имена сейчас записывает старый скрипт agh-keenetic-clients-sync.sh: он перезапускает AdGuard Home. Уберите его из cron - VWARD продолжит без перезапусков.</p>' : '') +
     (on && c.result !== 'old_script' ? '<div class="panel-actions">' + btn('agh-clients', 'refresh', busy ? 'Обновляем…' : 'Обновить имена', '', busy ? ' disabled' : '') + '</div>' : '');
 }
+// Routed domains through Keenetic's DNS (vward-ads-privacy-route-dns.sh), so the
+// VPN routes learn every address a device gets for them.
+function routeDnsRows(a) {
+  if (!a.agh_connected) return '';
+  const r = a.route_dns || {}, on = r.enabled !== '0', n = num(r.domains) || 0, sk = num(r.skipped) || 0;
+  const hints = {
+    ok: fmtInt(n) + ' ' + plural(n, 'домен', 'домена', 'доменов') + ' · маршруты сразу знают адреса устройств' + (sk ? ' · ' + fmtInt(sk) + ' через Smart DNS' : ''),
+    not_via_agh: 'не нужно: DNS Keenetic не спрашивает AdGuard Home',
+    no_domains: 'в маршрутах Keenetic нет доменов',
+    client_conflict: 'адрес роутера занят другим клиентом AdGuard Home',
+    chain_failed: 'DNS Keenetic не ответил, отменено; повтор через 5 минут',
+    agh_unavailable: 'AdGuard Home не ответил, повтор через 5 минут',
+    router_unavailable: 'Keenetic не ответил, повтор через 5 минут'
+  }, hint = !on ? 'выключено' : r.result in hints ? hints[r.result] : 'включится в течение 5 минут';
+  return '<dl class="kv">' + ctrlRow('Домены маршрутов через DNS Keenetic', sw('data-route-dns', on, 'Домены маршрутов через DNS Keenetic', !S.ads), hint) + '</dl>';
+}
+async function routeDnsOp(value) {
+  let x;
+  try { x = await apiPost('ads-control', { op: 'route-dns', value: value }); } catch (e) { x = { ok: false, error: e.message }; }
+  const err = /ERROR=([a-z_]+)/.exec(x.result || '');
+  toast(x.ok ? (value === 'on' ? 'Маршруты по доменам видят адреса устройств' : 'Домены маршрутов снова идут напрямую') : 'Не выполнено: ' + (err ? errText({ error: err[1] }) : errText(x)));
+  await load('ads', true); render();
+}
 async function aghClientsOp(value) {
   if (value === 'sync') { runningId = 'agh-clients'; render(); }
   let x;
@@ -1984,6 +2008,7 @@ document.addEventListener('change', e => {
     dnsGuardSet('exclude', cur.length ? cur.join(',') : '-', t.checked ? 'Устройство исключено' : 'Устройство снова под защитой'); return;
   }
   if (t.hasAttribute('data-ads-clients')) { aghClientsOp(t.checked ? 'on' : 'off'); return; }
+  if (t.hasAttribute('data-route-dns')) { routeDnsOp(t.checked ? 'on' : 'off'); return; }
   if (t.hasAttribute('data-ads-pause')) { adsControl({ op: t.checked ? 'resume' : 'pause' }, t.checked ? 'Блокировка включена' : 'Блокировка на паузе'); return; }
   if (t.dataset.adsSet) { adsSetting(t.dataset.adsSet, t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value); return; }
   if (t.hasAttribute('data-auth-devices')) {

@@ -263,6 +263,7 @@
         "/opt/bin/vward-ads-privacy-job.sh",
         "/opt/bin/vward-ads-privacy-clients.sh",
         "/opt/bin/vward-ads-privacy-dns-guard.sh",
+        "/opt/bin/vward-ads-privacy-route-dns.sh",
         "/opt/bin/vward-ads-privacy-health.sh",
         "/opt/share/vward/ads-privacy-guard/vward-ads-privacy-common.sh",
         "/opt/share/vward/ads-privacy-guard/source-registry.json",

@@ -91,6 +91,27 @@ intentional to keep CPU/I/O low on router-class hardware.
   Keenetic rebuilds its firewall; the scheduler reconciles every minute (no process
   when the guard is off).
 
+### Routed domains through Keenetic's DNS
+
+Keenetic routes a domain (`object-group fqdn` with a `route`) by the addresses it
+learns from DNS answers passing through its own DNS. Devices that ask AdGuard Home
+directly (the redirect of LAN port 53 to AdGuard Home, or the DNS guard) bypass it,
+so Keenetic misses subdomains and rotating CDN addresses and such traffic leaves
+outside the route. `vward-ads-privacy-route-dns.sh` (on by default, switch on the
+Ads page) closes that gap:
+- AdGuard Home gets one row `[/a.com/b.com/]LAN:53` with the domains of every routed
+  Keenetic group: those queries go on to Keenetic's DNS, which learns the addresses
+  before the device connects; devices keep their names and filtering in AdGuard Home;
+- Keenetic's DNS asks AdGuard Home back as the client `Keenetic DNS (VWARD)`
+  (ids: LAN address, 127.0.0.1) with AdGuard Home's servers minus that row, so there
+  is no loop. The client is written first and the chain is tested
+  (`test_upstream_dns`) before the row; on the way out the row goes first;
+- only while Keenetic's DNS asks AdGuard Home (`ip name-server LAN:port`);
+- a domain with its own row in AdGuard Home (Smart DNS) is left to that row;
+- another client holding the router's address: nothing is written;
+- the scheduler checks every 5 minutes (nothing while off and cleaned up). Switch:
+  `route-dns.disabled` in the config directory; status in `/tmp/vward-route-dns.status`.
+
 ### Device names in AdGuard Home
 
 `vward-ads-privacy-clients.sh` names in AdGuard Home the devices Keenetic has

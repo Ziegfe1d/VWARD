@@ -56,6 +56,8 @@ CLIENTS_SYNC="${VWARD_ADS_CLIENTS_SYNC:-/opt/bin/vward-ads-privacy-clients.sh}"
 [ -x "$CLIENTS_SYNC" ] || CLIENTS_SYNC="$SELF_DIR/vward-ads-privacy-clients.sh"
 DNS_GUARD="${VWARD_ADS_DNS_GUARD:-/opt/bin/vward-ads-privacy-dns-guard.sh}"
 [ -x "$DNS_GUARD" ] || DNS_GUARD="$SELF_DIR/vward-ads-privacy-dns-guard.sh"
+ROUTE_DNS="${VWARD_ADS_ROUTE_DNS:-/opt/bin/vward-ads-privacy-route-dns.sh}"
+[ -x "$ROUTE_DNS" ] || ROUTE_DNS="$SELF_DIR/vward-ads-privacy-route-dns.sh"
 
 # Loads the persisted scheduler state into ST_SCAN, ST_SOURCE and ST_SIG.
 state_load()
@@ -154,6 +156,9 @@ OLD_SIG=$ST_SIG
 # DNS of every device through AdGuard Home: rules back after a firewall rebuild,
 # redirect off while AdGuard Home's DNS is down.  No process when it is off.
 [ ! -x "$DNS_GUARD" ] || "$DNS_GUARD" tick >/dev/null 2>&1 || true
+# Domains Keenetic routes by name go through Keenetic's DNS, so its routes learn
+# every address a device gets.  A check every 5 minutes; nothing while it is off.
+[ ! -x "$ROUTE_DNS" ] || "$ROUTE_DNS" tick >/dev/null 2>&1 || true
 
 if ! ads_bool "$ENABLED"; then
     status_write disabled component_disabled 0
