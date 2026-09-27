@@ -61,8 +61,8 @@ LAN-адрес. Если сегмент не определяется одноз
 - `CONTROL_ENABLED=0`;
 - `AUTO_APPLY=0`;
 - планировщик добавлен, но при `ENABLED=0` не вызывает collector и не меняет состояние;
-- read-only API/экран Console доступны для просмотра локального состояния;
-- изменяющий Console API требует `CONTROL_ENABLED=1` и exact confirmation token;
+- read-only API/экран Панели VWARD доступны для просмотра локального состояния;
+- изменяющий API Панели VWARD требует `CONTROL_ENABLED=1` и exact confirmation token;
 - beta-ветка и beta-feed не меняются.
 
 ## Следующие ворота
@@ -71,8 +71,8 @@ LAN-адрес. Если сегмент не определяется одноз
    read-only `show associations` и проверить фактические AP names, RSSI, автоматически
    определённые диапазоны точек доступа и поведение parser на реальных клиентах.
 2. Включить collector вручную без control и сравнить статистику с журналами Keenetic.
-3. Проверить read-only API/экран Console на данных реального collector.
+3. Проверить read-only API/экран Панели VWARD на данных реального collector.
 4. Прогнать отдельный manual control acceptance с backup и rollback.
-5. Только после этого локально включать `CONTROL_ENABLED=1` и разрешать кнопку `2.4 / 5 / Auto` в Console.
+5. Только после этого локально включать `CONTROL_ENABLED=1` и разрешать кнопку `2.4 / 5 / Auto` в Панели VWARD.
 6. Автоматическое исправление оставить opt-in на уровне конкретного MAC и внедрять
    отдельным этапом.

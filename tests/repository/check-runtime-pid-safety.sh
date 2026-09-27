@@ -68,11 +68,11 @@ printf '/opt/bin/sh\0/opt/bin/vward-cron-supervisor.sh\0' > "$PROC_ROOT/321/cmdl
 LIGHTTPD=/opt/sbin/lighttpd
 CONF=/opt/var/run/vward/console-lighttpd.conf
 . "$WORK/s93-identity.sh"
-_console_identity 654 || fail "Console identity rejected its expected cmdline"
-_console_identity 321 && fail "Console identity accepted supervisor"
-[ "$(_vward_pid_start 654)" = 87654 ] || fail "Console start identity is wrong"
+_console_identity 654 || fail "Panel identity rejected its expected cmdline"
+_console_identity 321 && fail "Panel identity accepted supervisor"
+[ "$(_vward_pid_start 654)" = 87654 ] || fail "Panel start identity is wrong"
 printf '/opt/sbin/lighttpd\0-D\0-f\0/opt/var/run/vward/console-lighttpd.conf\0' > "$PROC_ROOT/654/cmdline"
-_console_identity 654 && fail "Console identity accepted extra argv"
+_console_identity 654 && fail "Panel identity accepted extra argv"
 printf '/opt/sbin/lighttpd\0-f\0/opt/var/run/vward/console-lighttpd.conf\0' > "$PROC_ROOT/654/cmdline"
 
 # Stop paths must gate every signal, including escalation, on identity and the

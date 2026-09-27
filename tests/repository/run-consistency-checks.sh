@@ -16,7 +16,7 @@ REGISTRY_VERSION=$(sed -n 's/.*"platform_version": "\([^"]*\)".*/\1/p' config/co
 grep -Fq "**$VERSION**" README.md || fail "README version differs"
 python3 tests/repository/check-version-synchronization.py || fail "Version synchronization"
 
-for DOC in docs/INSTALL.md docs/INSTALLATION_MAP.md docs/DEPENDENCIES.md docs/CONSOLE.md \
+for DOC in docs/INSTALL.md docs/INSTALLATION_MAP.md docs/DEPENDENCIES.md docs/PANEL.md \
     docs/NAMING_MIGRATION.md docs/UPDATER_ARCHITECTURE.md \
     docs/UPDATE_POLICY.md docs/UPDATE_RECOVERY.md docs/UPDATE_SECURITY.md \
     docs/SECURITY_HARDENING.md
@@ -25,7 +25,7 @@ do
 done
 
 grep -E 'Smart Updater|>Update</button>|192\.168\.1\.1' web/index.html web/assets/vward-console.js >/dev/null &&
-    fail "Console contains legacy naming or universal device hardcode"
+    fail "Panel contains legacy naming or universal device hardcode"
 # Keenetic's BusyBox stat has no -c; the CI host's BusyBox does, so only this catches it.
 grep -rnE '(^|[^A-Za-z_])stat +(-c|--format|--printf)' components web scripts >/dev/null &&
     fail "router code uses stat -c, which Keenetic BusyBox lacks"
@@ -35,7 +35,7 @@ grep -rnE --include='*.sh' --include='*.cgi' '(^|[^a-z_])(test|capture|scan|spli
     components web scripts >/dev/null &&
     fail "router jq uses a regex function, which Entware jq lacks"
 grep -E '\?\.|\?\?|scrollTo\(\{' web/assets/vward-console.js >/dev/null &&
-    fail "Console contains incompatible mobile JavaScript"
+    fail "Panel contains incompatible mobile JavaScript"
 
 grep -Fq 'function iconSvg' web/assets/vward-console.js || fail "canonical SVG icon system missing"
 grep -Fq "{ id: 'settings', title: 'Настройки'" web/assets/vward-console.js || fail "settings section missing"
@@ -48,31 +48,31 @@ for ID in platform-core route-engine route-reconciler route-tools tunnel-guard \
 do
     grep -Fq "\"id\": \"$ID\"" config/components/component-registry.json ||
         fail "registry component missing: $ID"
-    grep -Fq "{ id: '$ID', name: '" web/assets/vward-console.js || fail "Console component mapping missing: $ID"
+    grep -Fq "{ id: '$ID', name: '" web/assets/vward-console.js || fail "Panel component mapping missing: $ID"
 done
 
 for LOG_NAME in wan recovery cron routing updater tunnel policy console wifi ads
 do
     grep -Fq "{ id: '$LOG_NAME', label: '" web/assets/vward-console.js ||
-        fail "Console log tab missing: $LOG_NAME"
+        fail "Panel log tab missing: $LOG_NAME"
     grep -Eq "^[[:space:]]*$LOG_NAME\)" web/cgi-bin/api.cgi ||
-        fail "Console log allowlist missing: $LOG_NAME"
+        fail "Panel log allowlist missing: $LOG_NAME"
 done
 
-sh -n web/cgi-bin/api.cgi || fail "Console API syntax"
-python3 tests/repository/check-console-bindings.py || fail "Console bindings"
+sh -n web/cgi-bin/api.cgi || fail "Panel API syntax"
+python3 tests/repository/check-console-bindings.py || fail "Panel bindings"
 python3 tests/repository/check-console-activity.py || fail "sections show their events in plain words"
-python3 tests/repository/check-console-responsive.py || fail "Console responsive layout"
-python3 tests/repository/check-console-icon-system.py || fail "Console icon and typography system"
-python3 tests/repository/check-console-security.py || fail "Console security"
-python3 tests/repository/check-console-config.py || fail "Console configuration writer"
-python3 tests/repository/check-console-domain-lists.py || fail "Console domain lists"
+python3 tests/repository/check-console-responsive.py || fail "Panel responsive layout"
+python3 tests/repository/check-console-icon-system.py || fail "Panel icon and typography system"
+python3 tests/repository/check-console-security.py || fail "Panel security"
+python3 tests/repository/check-console-config.py || fail "Panel configuration writer"
+python3 tests/repository/check-console-domain-lists.py || fail "Panel domain lists"
 python3 tests/repository/check-list-watch.py || fail "Route engine list watch"
 python3 tests/repository/check-wan-guard-params.py || fail "Internet guard limits"
-python3 tests/repository/check-console-tunnel-probe.py || fail "Console tunnel check"
-python3 tests/repository/check-console-agh-auth.py || fail "Console AdGuard Home login"
+python3 tests/repository/check-console-tunnel-probe.py || fail "Panel tunnel check"
+python3 tests/repository/check-console-agh-auth.py || fail "Panel AdGuard Home login"
 python3 tests/repository/check-console-smartdns.py || fail "Smart DNS guard"
-python3 tests/repository/check-console-tunnels.py || fail "Console tunnels"
+python3 tests/repository/check-console-tunnels.py || fail "Panel tunnels"
 python3 tests/repository/check-ads-agh-settings.py || fail "AdGuard Home ad settings"
 python3 tests/repository/check-ads-agh-clients.py || fail "Device names reach AdGuard Home without a restart"
 python3 tests/repository/check-ads-dns-guard.py || fail "DNS of every device goes through AdGuard Home"
@@ -89,17 +89,17 @@ python3 tests/repository/check-route-engine-names.py || fail "Route engine sends
 python3 tests/repository/check-route-engine-classify.py || fail "Route engine checks a name against all lists in one pass"
 python3 tests/repository/check-route-engine-watchdog.py || fail "Watchdog counts engine cores, not subshells"
 python3 tests/repository/check-console-diagnostics-dns.py || fail "Diagnostics: DNS chain, files as installed"
-python3 tests/repository/check-console-ndm-cache.py || fail "Console caches Keenetic answers briefly"
+python3 tests/repository/check-console-ndm-cache.py || fail "Panel caches Keenetic answers briefly"
 python3 tests/repository/check-release-notes.py || fail "What is new in a version"
-python3 tests/repository/check-console-request.py || fail "Console request guards and form parsing"
+python3 tests/repository/check-console-request.py || fail "Panel request guards and form parsing"
 python3 tests/repository/check-housekeeping.py || fail "Housekeeping rotates logs and keeps copies to their newest few"
 python3 tests/repository/check-ext-update.py || fail "Updates of other software"
 python3 tests/repository/check-stale-locks.py || fail "Locks whose owner is gone are removed at boot and hourly"
-python3 tests/repository/check-console-tunnel.py || fail "Console tunnel switch"
+python3 tests/repository/check-console-tunnel.py || fail "Panel tunnel switch"
 python3 tests/repository/check-component-graph.py || fail "Component dependency graph"
 python3 tests/repository/check-component-resilience.py || fail "Component disable resilience"
-python3 tests/repository/check-ads-console.py || fail "Ads Console functions"
-python3 tests/repository/check-console-auth.py || fail "Console login"
+python3 tests/repository/check-ads-console.py || fail "Ads Panel functions"
+python3 tests/repository/check-console-auth.py || fail "Panel login"
 python3 tests/repository/check-device-profile.py || fail "Device profile"
 python3 tests/repository/check-settings-registry.py || fail "Settings registry"
 python3 tests/repository/check-update-schema-registry.py || fail "Updater schema registry"

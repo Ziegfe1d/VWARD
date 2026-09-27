@@ -28,7 +28,7 @@
 
 ### RC1 — feature complete (`0.2.0-rc.1`)
 
-Новых функций после RC1 не добавлять. Сделано в коде: Console с записью настроек,
+Новых функций после RC1 не добавлять. Сделано в коде: Панель VWARD с записью настроек,
 выбор туннеля, защита интернета, компоненты с проверкой зависимостей, Ads, cron,
 вход по учётной записи Keenetic; release rehearsal
 (`tests/updater/run-release-rehearsal.sh`): настоящий candidate подписывается штатным
@@ -38,7 +38,7 @@
 Gate RC1:
 
 - repository/security/updater/package tests и rehearsal: PASS в CI;
-- clean install, upgrade, rollback, reboot recovery, Console critical actions,
+- clean install, upgrade, rollback, reboot recovery, Panel critical actions,
   data-plane probes и 24–48 часов наблюдения на целевом роутере;
 - решение владельца: GO на подпись и публикацию RC1.
 
@@ -64,7 +64,7 @@ runbook и 7 суток unattended soak. Critical/High: 0.
 
 Только после явного GO владельца: тот же код, что RP2, кроме VERSION/metadata;
 signed release package, отдельная verify подписи, release notes, staged router rollout
-и post-install проверка DNS, WAN, VPN, routes, Console, cron, logs и recovery.
+и post-install проверка DNS, WAN, VPN, routes, Панель VWARD, cron, logs и recovery.
 
 ## Доказательства для каждого gate
 
@@ -72,6 +72,6 @@ signed release package, отдельная verify подписи, release notes,
 - VERSION, package SHA-256, manifest SHA-256, sequence и результат verify подписи;
 - install, upgrade, rollback и reboot-recovery logs;
 - full health, DNS/WAN/VPN/route probes;
-- Console/API acceptance;
+- Panel/API acceptance;
 - CPU/RAM/storage baseline и soak interval;
 - список известных рисков и итоговое PASS/FAIL.

@@ -251,7 +251,7 @@ No direct `AdGuardHome.yaml` rewrite and no AGH restart are part of candidate v5
 Default remains `staged` until live Dev staging confirms API compatibility on the
 target AdGuard Home build.
 
-## 11. Runtime modes and Console control
+## 11. Runtime modes and Panel control
 
 Candidate v5 adds an explicit runtime-control layer. Automatic work is owned by
 `vward-ads-privacy-scheduler.sh`, not by multiple unrelated cron entries.

@@ -39,7 +39,7 @@ assert 'CONSOLE_RUNTIME_CONFIG' in API and 'socket_state' in API and 'config_tes
 assert ':3000/' not in UI + JS
 
 # Root CGI scratch files must not use predictable PID-derived names.  A local
-# user could pre-create those paths as symlinks and make the Console disclose
+# user could pre-create those paths as symlinks and make the Panel disclose
 # or overwrite arbitrary files when it captures the running configuration.
 route_probe = API.split('if [ "$ACTION" = "route-probe" ]; then', 1)[1].split(
     'if [ "$ACTION" = "update-data" ]; then', 1

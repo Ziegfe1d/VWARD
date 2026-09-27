@@ -217,7 +217,7 @@ with tempfile.TemporaryDirectory() as tmp:
         if "agh filter-add https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/doh.txt HaGeZi Encrypted DNS Bypass" not in (tmp / "control.log").read_text():
             fail(f"{shell[0]} the DoH list must be added to AdGuard Home")
 
-        # Counters for the Console.
+        # Counters for the Panel.
         t = tables(); t["nat"]["VWARD_DNS"][-1]["pkts"] = 42; t["filter"]["VWARD_DNS_FWD"][1]["pkts"] = 7; fw.write_text(json.dumps(t))
         st = status()
         if (st.get("redirected"), st.get("refused"), st["redirect_active"], st["bypass_active"], st["upstream"]) != ("42", "7", "1", "1", "encrypted"):

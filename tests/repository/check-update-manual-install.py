@@ -22,5 +22,5 @@ if ready(0):
 if not ready(1):
     raise SystemExit("FAIL: a manual install from VWARD must not wait for the window")
 if "case \"$LABEL\" in update-apply|update-retry) VWARD_UPDATE_MANUAL=1" not in API:
-    raise SystemExit("FAIL: the Console must mark its installs as manual")
+    raise SystemExit("FAIL: the Panel must mark its installs as manual")
 print("UPDATE_MANUAL_INSTALL=PASS")

@@ -242,7 +242,7 @@ case "$ACTION" in
         ;;
 esac
 
-# Console access settings.  One pass over the file, no process: this runs on
+# Panel access settings.  One pass over the file, no process: this runs on
 # every request.
 AUTH_CONF=${VWARD_CONSOLE_AUTH_CONF:-/opt/etc/vward/console/auth.conf}
 kv_file "$AUTH_CONF" AUTH_ENABLED=AUTH_ENABLED SESSION_HOURS=AUTH_HOURS DEVICES_ONLY=DEVICES_ONLY \
@@ -375,7 +375,7 @@ CONFIG_ETC=${VWARD_CONSOLE_ETC:-/opt/etc/vward}
 CONFIG_ROUTE_STATE=${VWARD_ROUTE_STATE:-/opt/var/lib/vward/route-engine}
 CONFIG_HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
 
-# ---------- Console login with the Keenetic account ----------
+# ---------- Panel login with the Keenetic account ----------
 # Off by default.  The router checks the password (challenge-response on its
 # own /auth); VWARD keeps only a hash of the session token with an expiry.
 AUTH_SESSIONS=${VWARD_CONSOLE_SESSIONS:-/tmp/vward-console-sessions}
@@ -440,7 +440,7 @@ if [ "$AUTH_ENABLED" = 1 ] && [ "$ACTION" != auth ] && [ "$ACTION" != ping ] && 
     exit 0
 fi
 
-# A change from the Console: saved router answers go, the next page shows the
+# A change from the Panel: saved router answers go, the next page shows the
 # router as it is now.
 [ "${REQUEST_METHOD:-GET}" != POST ] || rm -rf "${NDM_CACHE_DIR:?}"
 
@@ -1624,7 +1624,7 @@ if [ "$ACTION" = "diagnostics" ]; then
       --arg wan_rc "$LAST_WAN_RC" --arg wg_rc "$LAST_WG_RC" --arg route_rc "$LAST_ROUTE_RC" \
       --argjson wg_count "$WG_COUNT" --argjson opt_free "$OPT_FREE" \
       '{ok:true,checks:[
-        {id:"console-api",component:"console",label:"Веб-интерфейс VWARD",status:$cgi,detail:"API отвечает"},
+        {id:"console-api",component:"console",label:"Панель VWARD",status:$cgi,detail:"API отвечает"},
         {id:"opt",component:"runtime",label:"Хранилище /opt",status:$opt,detail:("Свободно КБ: "+($opt_free|tostring))},
         {id:"jq",component:"runtime",label:"jq",status:$jq,detail:"JSON обработчик"},
         {id:"curl",component:"runtime",label:"curl",status:$curl,detail:"HTTP клиент"},
@@ -2266,7 +2266,7 @@ if [ "$ACTION" = "log" ]; then
             FILE=/opt/var/log/vward-route-engine-events.log
             ;;
         updater)
-            # Every engine run, from the hourly watch and from the Console alike.
+            # Every engine run, from the hourly watch and from the Panel alike.
             FILE=/opt/var/log/vward/updater.log
             ;;
         tunnel)

@@ -447,9 +447,9 @@ vward_profile_load()
     [ -z "${VWARD_LAN_INTERFACE:-}" ] || vward_valid_ndm_name "$VWARD_LAN_INTERFACE" ||
         { vward_profile_error "invalid LAN interface"; return 1; }
 
-    case "$VWARD_CONSOLE_PORT" in ''|*[!0-9]*) vward_profile_error "invalid Console port"; return 1 ;; esac
+    case "$VWARD_CONSOLE_PORT" in ''|*[!0-9]*) vward_profile_error "invalid Panel port"; return 1 ;; esac
     [ "$VWARD_CONSOLE_PORT" -ge 1024 ] && [ "$VWARD_CONSOLE_PORT" -le 65535 ] ||
-        { vward_profile_error "Console port must be 1024..65535"; return 1; }
+        { vward_profile_error "Panel port must be 1024..65535"; return 1; }
 
     case "${VWARD_POLICY_GROUP:-}" in *[!A-Za-z0-9_.:-]*) vward_profile_error "invalid policy group"; return 1 ;; esac
 

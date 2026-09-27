@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Console CSS contract: one layer of rules, both themes, phone layout."""
+"""Panel CSS contract: one layer of rules, both themes, phone layout."""
 
 import re
 from pathlib import Path

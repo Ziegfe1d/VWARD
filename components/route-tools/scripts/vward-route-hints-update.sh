@@ -18,7 +18,7 @@ DEST="$DIR/hints.conf"
 CATALOG="$DIR/hints-catalog.tsv"
 INCLUDES="$DIR/hints-includes.tsv"
 LOG="/opt/var/log/vward-route-hints.log"
-# Each source's last result for the Console: id|epoch|ok or fail|entries kept.
+# Each source's last result for the Panel: id|epoch|ok or fail|entries kept.
 SOURCES_STATUS="${VWARD_ROUTE_SOURCES_STATUS:-/opt/var/lib/vward/route-sources.status}"
 MAX_SOURCE_ARCHIVE_BYTES=${MAX_SOURCE_ARCHIVE_BYTES:-33554432}
 MAX_SOURCE_UNPACKED_BYTES=${MAX_SOURCE_UNPACKED_BYTES:-67108864}

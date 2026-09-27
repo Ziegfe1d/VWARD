@@ -15,7 +15,7 @@ state и API. Пользовательское имя берётся из compon
 | `wifi-client-guard` | VWARD Wi-Fi Client Guard | Анализ стабильности Wi-Fi клиентов и безопасное управление диапазоном |
 | `policy-sync` | VWARD Policy Sync | Аудит и синхронизация VPN-политик |
 | `runtime` | VWARD Runtime | Init, cron supervision и housekeeping |
-| `console` | VWARD Console | Web UI, CGI API и lighttpd |
+| `console` | Панель VWARD | Web UI, CGI API и lighttpd |
 | `update-engine` | VWARD Update Engine | Подписанные транзакции и rollback |
 
 Authoritative mapping: `config/components/component-registry.json`.

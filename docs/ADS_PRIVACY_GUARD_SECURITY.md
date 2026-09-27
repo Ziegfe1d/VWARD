@@ -76,9 +76,9 @@ timeouts, data minimization и rate limits.
 
 Query log содержит client IP и историю доменов. VWARD хранит агрегированный verdict
 state; публикация source candidate не должна содержать пользовательский query log.
-Console должна отдавать только нужные агрегаты и ограниченный review list.
+Панель VWARD должна отдавать только нужные агрегаты и ограниченный review list.
 
-### 12. Console settings are not arbitrary shell input
+### 12. Panel settings are not arbitrary shell input
 
 The web UI must never write raw text into `ads-privacy-guard.conf`. Only a fixed set of
 keys and strict enum/integer ranges are accepted by `vward-ads-privacy-settings.sh`. Every
@@ -107,7 +107,7 @@ of the public lock path is forbidden.
 
 HTTPS Content Guard is disabled by default and uses explicit-proxy mode only. It does not
 own iptables/NAT state. CA private keys are root-only local files and are never returned by
-Console/API output. Only the public CA certificate may be exported. Upstream TLS
+Panel/API output. Only the public CA certificate may be exported. Upstream TLS
 verification is mandatory; failure to find a trusted CA bundle prevents startup.
 
 PAC bypass rules are evaluated before intercept rules. Arbitrary PCRE is not accepted from

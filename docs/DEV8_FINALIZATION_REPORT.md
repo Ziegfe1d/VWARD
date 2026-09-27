@@ -6,12 +6,12 @@ Base commit: `938c0f8c47a51f55f1344aa25e05abc9b3e1f1a3`
 
 ## Completed
 
-- Integrated Ads & Privacy Guard into the authoritative component and settings registries, Console, guarded CGI API and root cron schedule.
+- Integrated Ads & Privacy Guard into the authoritative component and settings registries, Panel, guarded CGI API and root cron schedule.
 - Integrated domain classifier runtime targets and catalog files into Route Engine ownership.
 - Removed obsolete candidate fragments and the standalone mockup after moving their behavior into active files.
 - Added strict domain, source, mode and request-guard validation before mutating Ads operations.
 - Added dirty-state, native field validation, guarded confirmations and busy states to Ads controls.
-- Polished the existing Console without adding top-level navigation: typography, spacing, grid, responsive cards, action bar, focus states, shadows, reduced motion and SVG action icons.
+- Polished the existing Panel without adding top-level navigation: typography, spacing, grid, responsive cards, action bar, focus states, shadows, reduced motion and SVG action icons.
 - Extended updater safe-target, mode and health-profile ownership for the integrated runtime.
 - Extended CI and repository checks for active API/UI bindings, duplicate identifiers, unique runtime targets, a single scheduler entry, responsive contracts and negative API cases.
 - Updated installation and integration documentation and regenerated `SHA256SUMS`.
@@ -19,7 +19,7 @@ Base commit: `938c0f8c47a51f55f1344aa25e05abc9b3e1f1a3`
 ## Verification
 
 - Repository consistency: PASS
-- Console bindings, responsive contracts and security checks: PASS
+- Panel bindings, responsive contracts and security checks: PASS
 - Settings registry and authoritative Ads integration: PASS
 - Ads & Privacy Guard simulations: PASS
 - HTTPS Content Guard simulations: PASS
@@ -47,7 +47,7 @@ Second pass completed on 2026-09-14:
 - Fixed SVG action icons being removed after the first busy-state cycle.
 - Fixed the Ads save button becoming enabled again after a successful save with no remaining changes.
 - Removed the non-functional future-roadmap panel from the active settings flow.
-- Replaced decorative Ads glyphs with the same stroke-based SVG language used by Console controls.
+- Replaced decorative Ads glyphs with the same stroke-based SVG language used by Panel controls.
 - Clarified Russian UI copy for sources, manual rules and writable settings.
 - Removed the obsolete `candidate` suffix from the integrated domain classifier runtime version and validation message.
 - Added regression assertions for these cases.

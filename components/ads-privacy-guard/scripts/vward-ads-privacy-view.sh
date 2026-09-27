@@ -1,5 +1,5 @@
 #!/bin/sh
-# Read-only views of VWARD Ads & Privacy Guard for the Console. Prints JSON.
+# Read-only views of VWARD Ads & Privacy Guard for the Panel. Prints JSON.
 #   querylog all|blocked|allowed|review [SEARCH] [LIMIT]  AdGuard Home query log
 #   stats                                                  AdGuard Home counters for the day
 #   list review|blocked [SEARCH]                           domains from the verdict state

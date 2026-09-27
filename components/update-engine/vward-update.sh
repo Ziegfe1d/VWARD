@@ -39,7 +39,7 @@ fetch_and_verify_manifest() {
     else
         [ -n "$manifest_url" ] || return "$VU_CONFIG_ERROR"
         # The per-file (v2) feed first, as the hourly watch reads it: a check
-        # from the Console must not put the full-package manifest in its place.
+        # from the Panel must not put the full-package manifest in its place.
         # The v1 feed only for a channel without a v2 one.
         # A first install takes the whole package (v1): there is nothing to compare files with.
         feed_v2=
@@ -240,7 +240,7 @@ run_health_bounded() {
     wait "$health_pid"
 }
 
-# Nothing starts the Console before boot on a first install (beta cutover),
+# Nothing starts the Panel before boot on a first install (beta cutover),
 # so the health check would always find it stopped. Returns 0 when started here.
 console_start_for_health() {
     case "$1" in console|full) ;; *) return 1 ;; esac
@@ -250,7 +250,7 @@ console_start_for_health() {
         return 1
     fi
     /opt/etc/init.d/S93vward-console start >/dev/null 2>&1 ||
-        vu_log WARN "VWARD Console did not start before the health check"
+        vu_log WARN "VWARD Panel did not start before the health check"
     return 0
 }
 

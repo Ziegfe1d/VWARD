@@ -33,7 +33,7 @@ ADS_DEVICE_CONFIG="${VWARD_ADS_DEVICE_CONFIG:-/opt/etc/vward/device.conf}"
 ADS_AGH_AUTH_FILE="${VWARD_ADS_AGH_AUTH_FILE:-$ADS_ETC/agh-api.auth}"
 ADS_CUSTOM_SOURCES="${VWARD_ADS_CUSTOM_SOURCES:-$ADS_ETC/custom-sources.json}"
 
-# User sources added from the Console are merged into the built-in registry.
+# User sources added from the Panel are merged into the built-in registry.
 # Every field is rebuilt from a strictly validated subset, so a hand-edited
 # file cannot add options, weights or URLs outside the allowed form.
 ads_source_registry_merge()

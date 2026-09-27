@@ -128,7 +128,7 @@ schedule_check() {
 }
 assert 'IMPORTANT deadline and ROUTINE lazy escalation' schedule_check
 
-# apply_window=any ("Автоматически" in the Console): no waiting for the window.
+# apply_window=any ("Автоматически" in the Панель VWARD): no waiting for the window.
 any_window_check() {
     printf '%s\n' 'apply_window=any' >> "$CONFIG"
     VWARD_TEST_NOW_HM=12:00 VWARD_TEST_NOW_EPOCH=10000 VWARD_ROOT_PREFIX=$ROOT VWARD_UPDATE_CONFIG=$CONFIG sh -c '. "$1"; vu_load_config; vu_schedule_ready IMPORTANT 9999 && vu_schedule_ready ROUTINE 9999' sh "$UPDATER/vward-update-common.sh" || return 1

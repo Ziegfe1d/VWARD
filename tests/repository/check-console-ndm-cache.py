@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Console API: Keenetic "show" answers are cached briefly, and dropped by any change.
+"""Panel API: Keenetic "show" answers are cached briefly, and dropped by any change.
 
 A console page refreshes every 15 seconds; without a cache every refresh made
 the router serialize its whole configuration (and every domain group with its

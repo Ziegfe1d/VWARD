@@ -29,7 +29,7 @@ else. Bypass rules win over intercept rules.
 
 This means a bank, identity provider or any other sensitive service is not decrypted
 unless it is deliberately placed into the intercept set. VWARD should keep that invariant
-when a future Console editor is added.
+when a future Panel editor is added.
 
 ## Router backend
 
@@ -69,7 +69,7 @@ Missing capabilities make the HTTPS subcomponent refuse to start; they do not af
   cert-cache/
 ```
 
-Private keys are root-only and are never returned through the Console API.
+Private keys are root-only and are never returned through the Panel API.
 
 ## Rule format
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Console contract: every control is wired, every link resolves, every API call is allowed."""
+"""Panel contract: every control is wired, every link resolves, every API call is allowed."""
 
 import json
 import re
@@ -22,7 +22,7 @@ def fail(message: str) -> None:
 # Shell markup: stable anchors only, no inline code or styles (CSP: script-src/style-src 'self').
 for marker in ("pageTitle", "content", "tabbar", "layer", "toasts", "backBtn", "searchBtn", "bellBtn", "themeBtn"):
     if f'id="{marker}"' not in html:
-        fail(f"нет элемента каркаса Console: {marker}")
+        fail(f"нет элемента каркаса Панель VWARD: {marker}")
 html_ids = re.findall(r'\bid="([^"]+)"', html)
 if len(html_ids) != len(set(html_ids)):
     fail("повторяющиеся id в index.html")
@@ -55,7 +55,7 @@ form_handlers = set(re.findall(r"f === '([a-z-]+)'", js))
 if forms - form_handlers:
     fail("формы без обработчика: " + ", ".join(sorted(forms - form_handlers)))
 
-# Every action the Console sends by POST is one the API accepts by POST.
+# Every action the Panel sends by POST is one the API accepts by POST.
 api_src = api
 post_ok = set(re.search(r'case "\$ACTION" in\n\s+(settings\|control[^)]*)\) ;;', api_src).group(1).split("|"))
 posted = set(re.findall(r"apiPost\('([a-z-]+)'", js)) | set(re.findall(r"runLong\('[a-z-]+', '([a-z-]+)'", js)) | set(re.findall(r"runAction\('[a-z-]+', '([a-z-]+)'", js))
@@ -83,10 +83,10 @@ unknown = {t for t in targets if t not in pages and t not in details and not (t.
 if unknown:
     fail("переходы на несуществующие страницы: " + ", ".join(sorted(unknown)))
 
-# Components: the Console lists exactly the registry.
+# Components: the Panel lists exactly the registry.
 registry_ids = {c["id"] for c in registry["components"]}
 if components != registry_ids:
-    fail("компоненты Console не совпадают с реестром: " + ", ".join(sorted(components ^ registry_ids)))
+    fail("компоненты Панель VWARD не совпадают с реестром: " + ", ".join(sorted(components ^ registry_ids)))
 
 # Search index points at rows that exist.
 row_keys = set(re.findall(r"\[\s*'([^']+)',", js)) | set(re.findall(r"ctrlRow\('([^']+)'", js)) | set(re.findall(r'data-key="([^"]+)"', js))
@@ -115,7 +115,7 @@ api_logs = set(re.findall(r"^\s{8}([a-z]+)\)\s*$", api, re.MULTILINE))
 if log_tabs - api_logs:
     fail("вкладки журналов вне allowlist API: " + ", ".join(sorted(log_tabs - api_logs)))
 
-# Server-side guarantees that the Console relies on.
+# Server-side guarantees that the Panel relies on.
 if "action=exec" in api or "action=file" in api or "action=ndmc" in api:
     fail("обнаружен запрещённый generic control API")
 for token in ("ROUTE_RECONCILE", "POLICY_REFRESH", "POLICY_RECONCILE", "APPLY_UPDATE", "ROLLBACK_UPDATE", "RECOVER_UPDATE", "ADS_PUBLISH", "HTTPS_START"):
@@ -125,7 +125,7 @@ if "state_action_not_allowed" not in api or "rollback_unavailable" not in api or
     fail("Update Engine server-side state preconditions are incomplete")
 tcpdump_counter = re.search(r"^TCPDUMP_COUNT=.*$", api, re.MULTILINE)
 if not tcpdump_counter or "udp dst port 53" in tcpdump_counter.group(0):
-    fail("Console API tcpdump counter is missing or depends on the truncated ps command tail")
+    fail("Panel API tcpdump counter is missing or depends on the truncated ps command tail")
 
 # Sections show their own events: nothing jumps to the raw journals, and timing is
 # not shown as a setting nobody can change.
@@ -134,6 +134,6 @@ if "data-log-go" in js or "'open-log'" in js:
 for row in ("['Решения автоподбора', 'что решил VWARD', '', 'a-adaptive']", "['Сверка маршрутов', 'что исправлено', '', 'a-routing']",
             "['События VPN', 'что делала защита', '', 'a-tunnel']", "['Возврат в VPN', 'автоматически'"):
     if row not in js:
-        fail(f"Console row changed: {row}")
+        fail(f"Panel row changed: {row}")
 
 print("CONSOLE_BINDINGS=PASS")

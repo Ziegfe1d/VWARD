@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Disable every optional component in turn: nothing else may break.
 
-For each component the real Console writer disables it (with its cascade);
+For each component the real Panel writer disables it (with its cascade);
 then every entry point of the disabled components must stop at its gate
 without touching anything, every other entry point must be gated only by its
-own component, the Console API must keep answering, manual actions of the
+own component, the Panel API must keep answering, manual actions of the
 disabled components must be refused, and the updater health profiles must
 still pass because the files stay installed.
 """
@@ -33,7 +33,7 @@ def fail(message: str) -> None:
     raise SystemExit(f"FAIL: {message}")
 
 
-# Entry points that run on a schedule, from the supervisor or from the Console,
+# Entry points that run on a schedule, from the supervisor or from the Panel,
 # with the arguments they need to reach their gate.
 ENTRY = {
     "components/route-engine/scripts/vward-route-engine.sh": ("route-engine", []),
@@ -54,7 +54,7 @@ ENTRY = {
     "components/ads-privacy-guard/scripts/vward-ads-privacy-scheduler.sh": ("ads-privacy-guard", []),
     "components/ads-privacy-guard/scripts/vward-ads-privacy-job.sh": ("ads-privacy-guard", []),
 }
-# Console manual actions and the component that owns them.
+# Panel manual actions and the component that owns them.
 CONTROL = {
     "refresh-hints": ("route-tools", ""), "route-reconcile": ("route-reconciler", "ROUTE_RECONCILE"),
     "policy-refresh": ("policy-sync", "POLICY_REFRESH"), "tunnel-health": ("tunnel-guard", ""),
@@ -142,7 +142,7 @@ vward_discover_lan_interface(){ echo Bridge9; }
         if list((tmp / "root/tmp").glob("vward-runtime-active/*")):
             fail(f"a disabled entry point left an admission slot ({cid})")
 
-        # 3. The Console keeps answering and refuses actions of disabled components.
+        # 3. The Panel keeps answering and refuses actions of disabled components.
         def api(query, body="", method="GET"):
             env = base | {"REQUEST_METHOD": method, "QUERY_STRING": query, "CONTENT_TYPE": "application/x-www-form-urlencoded",
                           "CONTENT_LENGTH": str(len(body)), "HTTP_X_VWARD_REQUEST": "console", "VWARD_PROFILE_LIB": "/nonexistent",

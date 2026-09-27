@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Console icons: one registry, one grid, one stroke width, no emoji or one-off SVG."""
+"""Panel icons: one registry, one grid, one stroke width, no emoji or one-off SVG."""
 
 import re
 from pathlib import Path

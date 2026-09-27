@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tunnel for routes: switch through the Console writer, rollback, and policy-sync route move."""
+"""Tunnel for routes: switch through the Panel writer, rollback, and policy-sync route move."""
 
 import os
 import stat

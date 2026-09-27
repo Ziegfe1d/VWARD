@@ -6,7 +6,7 @@
 ## Публикуемый source
 
 - рабочие shell-скрипты и init scripts;
-- VWARD Console и CGI API;
+- Панель VWARD и CGI API;
 - очищенные примеры `force-vpn.conf` и `services.conf`;
 - восемь production cron entries в `config/cron/root.crontab`;
 - schemas, public verification key и документация.

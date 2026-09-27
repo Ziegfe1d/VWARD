@@ -33,7 +33,7 @@ OWNED="$STATE/owned.dynamic.routes"
 # Device the owned routes point to; differs from $WG after the tunnel for routes changed.
 OWNED_DEVICE="$STATE/owned.interface"
 ACTIVE="$STATE/active.categories"
-# Categories switched off in the Console never get routes, even if their domains are routed.
+# Categories switched off in the Panel never get routes, even if their domains are routed.
 EXCLUDED="${VWARD_POLICY_EXCLUDED:-/opt/etc/vward/policy-sync/excluded.categories}"
 LOCK="$STATE/lock"
 

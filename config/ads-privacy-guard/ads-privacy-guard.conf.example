@@ -2,7 +2,7 @@
 # Copy to /opt/etc/vward/ads-privacy-guard/ads-privacy-guard.conf.
 # Local configuration is preserved across signed VWARD updates.
 #
-# Console-safe settings are intentionally a subset of this file and are changed
+# Panel-safe settings are intentionally a subset of this file and are changed
 # only through a validated settings path with backup/rollback.
 
 # Master switch. 0 disables automatic work and scanner execution.
@@ -93,7 +93,7 @@ EXTERNAL_VERIFIER_COMMAND=
 # The initial core uses feed evidence as a whole. These switches are reserved for
 # category-aware classification/publishing and are shown in the UI template.
 # Until category-aware matching is implemented, changing them must not be exposed
-# as an active Console action.
+# as an active Panel action.
 CATEGORY_ADS=1
 CATEGORY_POPUP_REDIRECT=1
 CATEGORY_TRACKING=1

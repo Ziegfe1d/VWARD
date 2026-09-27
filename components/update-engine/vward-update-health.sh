@@ -99,7 +99,7 @@ if [ -z "$VU_ROOT_PREFIX" ]; then
             vu_die "$VU_HEALTH_ERROR" "VWARD Update Engine status check failed"
     fi
 
-    # A component disabled from the Console keeps its files but does not run.
+    # A component disabled from the Panel keeps its files but does not run.
     if { [ "$profile" = ads-privacy-guard ] ||
          { [ "$profile" = full ] && [ -r /opt/etc/vward/ads-privacy-guard/ads-privacy-guard.conf ]; }; } &&
        [ ! -e "${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}/ads-privacy-guard.disabled" ]; then
@@ -114,14 +114,14 @@ if [ -z "$VU_ROOT_PREFIX" ]; then
         vward_profile_load || vu_die "$VU_HEALTH_ERROR" "device profile is incomplete"
         console_pid=$(cat /opt/var/run/vward-console-lighttpd.pid 2>/dev/null || true)
         [ -n "$console_pid" ] && kill -0 "$console_pid" 2>/dev/null ||
-            vu_die "$VU_HEALTH_ERROR" "VWARD Console service is unavailable"
+            vu_die "$VU_HEALTH_ERROR" "VWARD Panel service is unavailable"
 
         console_ping=$(/opt/bin/curl --fail --silent --show-error \
             --connect-timeout 2 --max-time 5 \
             "http://$VWARD_LAN_ADDRESS:$VWARD_CONSOLE_PORT/cgi-bin/api.cgi?action=ping" 2>/dev/null || true)
         printf '%s\n' "$console_ping" | /opt/bin/jq -e \
             '.ok == true and .service == "vward-console"' >/dev/null 2>&1 ||
-            vu_die "$VU_HEALTH_ERROR" "VWARD Console API health check failed"
+            vu_die "$VU_HEALTH_ERROR" "VWARD Panel API health check failed"
     fi
 fi
 

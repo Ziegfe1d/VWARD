@@ -30,7 +30,7 @@
 - использовать только канонические source/runtime names новой линии;
 - не поддерживать чтение старых Dev manifests и state.
 
-## 5. VWARD Console
+## 5. VWARD Panel
 
 - завершить обработчики, действия и корректные disabled states;
 - подключить discovery/profile и фактические каталоги маршрутизации;
@@ -43,8 +43,8 @@
 - [x] заложить read-only мониторинг `show associations`, bounded history и анализ переключений;
 - [x] заложить отдельный allowlisted control с backup, acceptance и rollback;
 - [ ] провести read-only acceptance на целевом роутере без изменения Wi-Fi конфигурации;
-- [x] добавить read-only карточку и список клиентов в Console;
-- [x] подключить guarded ручное `2.4 / 5 / Auto` через Console; локальный control
+- [x] добавить read-only карточку и список клиентов в Панели VWARD;
+- [x] подключить guarded ручное `2.4 / 5 / Auto` через Панель VWARD; локальный control
   остаётся выключенным до hardware acceptance;
 - [ ] автоматическое исправление оставить opt-in для конкретных устройств и включать
   только после отдельного регрессионного цикла.

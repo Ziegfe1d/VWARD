@@ -177,7 +177,7 @@ if [ "$PAUSED" -eq 1 ]; then
     exit 0
 fi
 
-# Console requests enqueue long operations. Process at most one queued job per
+# Panel requests enqueue long operations. Process at most one queued job per
 # scheduler tick, and only when the same low-load gate permits it.
 if [ -x "$JOB" ] && [ -s "$ADS_STATE/jobs/queue" ]; then
     JOB_GATE="$(resource_gate)"

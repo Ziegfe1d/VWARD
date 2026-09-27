@@ -66,7 +66,7 @@ domain|verdict|action|confidence|first_seen|last_seen|next_check_epoch|reason|ev
 Additional scripts:
 
 - `vward-ads-privacy-scheduler.sh` - single lightweight owner for manual/scheduled/dynamic timing and source refresh;
-- `vward-ads-privacy-settings.sh` - validated Console-safe settings transaction;
+- `vward-ads-privacy-settings.sh` - validated Panel-safe settings transaction;
 - `vward-ads-privacy-control.sh pause|resume|status` - persistent pause and runtime visibility.
 
 The active VWARD cron calls only the scheduler once per minute. In dynamic mode the classifier

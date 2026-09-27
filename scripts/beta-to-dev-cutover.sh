@@ -311,7 +311,7 @@ cmd_apply() {
     info "Next steps (not done by this script):"
     info "  1. Point /opt/etc/vward/update.conf at the dev feed and switch the channel."
     info "  2. Let or trigger the signed 0.2 package apply: vward-update.sh --apply."
-    info "  3. Verify: ps w | grep vward-route-engine; Console reachable; DNS/WAN/VPN working."
+    info "  3. Verify: ps w | grep vward-route-engine; Panel reachable; DNS/WAN/VPN working."
     info "  4. Only if something is wrong: $0 --rollback $stamp"
 }
 

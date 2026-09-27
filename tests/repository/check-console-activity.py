@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Each section shows its component's events in plain words.
 
-The journal readers of the Console run in node over sample lines written the way
+The journal readers of the Panel run in node over sample lines written the way
 the components write them: every known event becomes a sentence with no
 technical text (no EVENT_NAMES, key=value or pipes), routine checks are left out.
 """

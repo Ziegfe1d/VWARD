@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Console login with the Keenetic account: challenge-response, sessions, lockout."""
+"""Panel login with the Keenetic account: challenge-response, sessions, lockout."""
 
 import hashlib
 import json

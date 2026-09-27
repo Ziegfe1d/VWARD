@@ -157,10 +157,10 @@ QUIESCE_LINE=$(printf '%s\n' "$APPLY_BODY" | grep -n 'vu_runtime_quiesce' | head
 [ -n "$REQUEST_LINE" ] && [ -n "$QUIESCE_LINE" ] && [ "$REQUEST_LINE" -lt "$QUIESCE_LINE" ] ||
     fail "update request is not published before runtime quiesce"
 
-grep -Fq 'updater_mutation_busy(){' "$ROOT/web/cgi-bin/api.cgi" || fail "Console mutation barrier is missing"
-grep -Fq 'console_mutation_enter(){' "$ROOT/web/cgi-bin/api.cgi" || fail "Console mutation admission is missing"
+grep -Fq 'updater_mutation_busy(){' "$ROOT/web/cgi-bin/api.cgi" || fail "Panel mutation barrier is missing"
+grep -Fq 'console_mutation_enter(){' "$ROOT/web/cgi-bin/api.cgi" || fail "Panel mutation admission is missing"
 for marker in /opt/var/run/vward/updater.lock /tmp/vward-update-requested /tmp/vward-update.lock; do
-    grep -Fq "$marker" "$ROOT/web/cgi-bin/api.cgi" || fail "Console mutation barrier misses $marker"
+    grep -Fq "$marker" "$ROOT/web/cgi-bin/api.cgi" || fail "Panel mutation barrier misses $marker"
 done
 
 echo "Runtime update admission checks passed."

@@ -185,7 +185,7 @@ with tempfile.TemporaryDirectory() as tmp:
         fail(f"old script: {r.stdout}")
     crontab.write_text("")
 
-    # Switched off from the Console.
+    # Switched off from the Panel.
     (etc / "clients-sync.disabled").write_text("")
     r = run("sync")
     if "CLIENTS=DISABLED" not in r.stdout or "enabled=0" not in run("status").stdout:

@@ -9,7 +9,7 @@ Update Engine использует подписанный production feed и с�
 /opt/share/vward/package-map.tsv является машинным перечнем runtime targets.
 Профиль проверяет наличие и executable mode, POSIX shell syntax всех скриптов
 и init hooks, JSON-синтаксис реестров, состояние Update Engine и фактический
-ping Console. Ads & Privacy Guard запускает собственный functional health,
+ping Панели VWARD. Ads & Privacy Guard запускает собственный functional health,
 если его локальная конфигурация уже создана.
 
 Проверки не выполняют WAN recovery, изменение маршрутов, публикацию правил

@@ -43,7 +43,7 @@ lighttpd/CGI-панели для KeeneticOS с Entware.
 `vward-wan-guard.sh` выполняет ступенчатую диагностику и восстановление подключения
 WAN-интерфейса из профиля устройства; флаг `/opt/etc/vward/wan-guard.disabled` оставляет
 только проверку. `vward-wan-recovery.sh` - ручные «Обновить адрес» и «Переподключить» из
-Console с той же блокировкой и маркером владения, что у WAN Guard.
+Панель VWARD с той же блокировкой и маркером владения, что у WAN Guard.
 
 ### VWARD Wi-Fi Client Guard
 
@@ -53,7 +53,7 @@ Console с той же блокировкой и маркером владени
 формирует рекомендацию без изменения конфигурации. `vward-wifi-client-control.sh`
 принимает только allowlisted действия `bind-2g`, `bind-5g` и `auto`, валидирует MAC и
 Bridge, создаёт backup, сохраняет Keenetic configuration и проверяет результат. По
-умолчанию автоматическое применение и управление из Console для этого компонента выключены
+умолчанию автоматическое применение и управление из Панели VWARD для этого компонента выключены
 до live read-only acceptance на целевом Keenetic.
 
 ### VWARD Runtime
@@ -61,7 +61,7 @@ Bridge, создаёт backup, сохраняет Keenetic configuration и пр
 Init-скрипты управляют crond, Adaptive Live, supervisor и веб-службой. Cron запускает
 периодические задания и пишет временные результаты в `/tmp`.
 
-### VWARD Console
+### VWARD Panel
 
 lighttpd отдаёт `web/index.html`; `web/cgi-bin/api.cgi` собирает локальные статусы
 через `jq`, RCI и runtime-файлы. API работает по allowlist и не выдаёт ключи VPN.

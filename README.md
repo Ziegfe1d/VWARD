@@ -26,7 +26,7 @@ WAN. Перенос на другой роутер требует проверк
 | VWARD Wi-Fi Client Guard | Анализ стабильности Wi-Fi клиентов и безопасные рекомендации по диапазону |
 | VWARD Policy Sync | Сверка доменных и сетевых политик VPN |
 | VWARD Runtime | Cron, init-скрипты и фоновые процессы |
-| VWARD Console | Локальная веб-панель, журналы и безопасные настройки |
+| Панель VWARD | Локальная веб-панель, журналы и безопасные настройки |
 | VWARD Update Engine | Подписанные компонентные обновления и rollback |
 | VWARD Ads & Privacy Guard | Защита от рекламы и трекинга |
 
@@ -41,7 +41,7 @@ Runtime-файлы, init-скрипты и управляемые пути ис�
 - KeeneticOS с `ndmc` и локальным RCI;
 - Entware на USB-накопителе, смонтированном как `/opt`;
 - POSIX `sh`/BusyBox и [зависимости VWARD](docs/DEPENDENCIES.md);
-- локальный доступ к VWARD Console через LAN.
+- локальный доступ к Панели VWARD через LAN.
 
 Production-профиль проверен на Keenetic автора; установка на чистый роутер проверена
 на эмуляторе.
@@ -62,7 +62,7 @@ sh /tmp/vward-install.sh
 
 ## Параметры конкретного роутера
 
-Параметры LAN, DNS, WAN, VPN, policy group и порта Console сведены в единый
+Параметры LAN, DNS, WAN, VPN, policy group и порта Панели VWARD сведены в единый
 `/opt/etc/vward/device.conf`. Пустые сетевые значения безопасно обнаруживаются;
 при нескольких кандидатах VWARD останавливается и требует явной настройки. Перед
 установкой проверьте профиль по [`docs/INSTALLATION_MAP.md`](docs/INSTALLATION_MAP.md).
@@ -93,7 +93,7 @@ apply/rollback/service-resume acceptance на целевом устройств�
 
 - `components/` - исходники компонентов;
 - `config/` - схемы, примеры конфигурации и управляемый cron;
-- `web/` - VWARD Console, CGI API и lighttpd;
+- `web/` - Панель VWARD, CGI API и lighttpd;
 - `updates/` - подписанные каналы обновлений и опубликованные пакеты;
 - `tests/` - симуляции VWARD Update Engine;
 - `docs/` - установка, архитектура, эксплуатация и recovery.
@@ -106,7 +106,7 @@ apply/rollback/service-resume acceptance на целевом устройств�
 - [Карта установки](docs/INSTALLATION_MAP.md)
 - [Зависимости](docs/DEPENDENCIES.md)
 - [Миграция названий](docs/NAMING_MIGRATION.md)
-- [VWARD Console и безопасные настройки](docs/CONSOLE.md)
+- [Панель VWARD и безопасные настройки](docs/PANEL.md)
 - [Политика обновлений](docs/UPDATE_POLICY.md)
 - [Безопасность обновлений](docs/UPDATE_SECURITY.md)
 - [Идентификация и восстановление ключа подписи](docs/SIGNING_KEY_RECOVERY.md)

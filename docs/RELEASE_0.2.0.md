@@ -89,7 +89,7 @@ init-скрипты и программы побайтно, демоны beta з
 4. Роутеры, у которых `manifest_url` указывает на feed ветки `dev`, получат обновление.
    При `auto_apply=1` оно установится в safe window или сразу, если выбрано
    `apply_window=any`. Роутеры на beta читают feed ветки `main` и сами на `dev` не
-   переходят. На установленной 0.2 канал выбирается в Console («Обновления → Канал»,
+   переходят. На установленной 0.2 канал выбирается в Панели VWARD («Обновления → Канал»,
    подтверждение `UPDATE_FEED_DEV`).
 
 Проверка подписи без роутера:
@@ -117,10 +117,10 @@ tar -czf /opt/var/backups/vward/rc-preflight/opt-vward.tar.gz /opt/etc/vward /op
 
 - `sed -n 1p /opt/share/vward/VERSION` показывает версию этапа;
 - `vward-update.sh --status`: `phase=COMMITTED`;
-- Console открывается из LAN, `api.cgi?action=ping` отвечает `ok:true`;
+- Панель VWARD открывается из LAN, `api.cgi?action=ping` отвечает `ok:true`;
 - DNS, обычный интернет, VPN-маршруты и прямые исключения работают;
 - `crontab -l` содержит только ожидаемые задания, нет двойного запуска старых и новых;
-- после перезагрузки службы и Console вернулись;
+- после перезагрузки службы и Панель VWARD вернулись;
 - журналы updater, route engine, WAN Guard и Tunnel Guard без новых ошибок;
 - наблюдение: RC1 — 24–48 часов, RC2 — 3–7 суток, RP1 — 7 суток.
 

@@ -31,7 +31,7 @@ EVENT_LOG="/opt/var/log/vward-route-engine-events.log"
 
 LOCK="/tmp/vward-route-engine.lock"
 CHANGE_LOCK="/tmp/vward-route-change.lock"
-# Present: AdaptiveAuto adds nothing new; domains already in it stay (Console switch).
+# Present: AdaptiveAuto adds nothing new; domains already in it stay (Panel switch).
 ADAPTIVE_DISABLED="${VWARD_ADAPTIVE_DISABLED_FLAG:-/opt/etc/vward/route-engine/adaptive.disabled}"
 
 RAW="/tmp/vward-route-engine-dns.$$"
@@ -44,9 +44,9 @@ VOLATILE_DIR="${VWARD_ROUTE_VOLATILE_STATE:-/tmp/vward-route-engine-state}"
 # must stay on the provider: AdaptiveAuto never takes those domains.
 SMARTDNS="$VOLATILE_DIR/smartdns-domains.txt"
 
-# Domain lists routed around the tunnel whose watch switch is on (Console):
+# Domain lists routed around the tunnel whose watch switch is on (Panel):
 # when their service fails on that path, the list is moved into the tunnel
-# through the Console writer, the same way as the manual switch.
+# through the Panel writer, the same way as the manual switch.
 LISTS_CONF="${VWARD_DOMAIN_LISTS_CONF:-/opt/etc/vward/route-engine/domain-lists.conf}"
 LIST_WATCH_MAP="$VOLATILE_DIR/list-watch.map"
 SKIP_DOMAINS="/opt/etc/vward/route-engine/skip-domains.conf"

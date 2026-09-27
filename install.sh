@@ -386,10 +386,10 @@ start_all() {
     t=0
     until pong=$(curl --fail --silent --max-time 5 "http://$LAN_ADDR:$CONSOLE_PORT/cgi-bin/api.cgi?action=ping" 2>/dev/null) &&
           printf '%s\n' "$pong" | jq -e '.ok == true' >/dev/null 2>&1; do
-        t=$((t + 1)); [ "$t" -lt 10 ] || fail "панель VWARD не отвечает"
+        t=$((t + 1)); [ "$t" -lt 10 ] || fail "Панель VWARD не отвечает"
         sleep 1
     done
-    ok "панель VWARD отвечает"
+    ok "Панель VWARD отвечает"
     t=0
     until [ -r /opt/var/run/vward/route-engine.pid ] && kill -0 "$(sed -n 1p /opt/var/run/vward/route-engine.pid)" 2>/dev/null; do
         t=$((t + 1)); [ "$t" -lt 10 ] || { warn "автоподбор ещё не запустился - cron поднимет его в течение минуты"; break; }
@@ -447,7 +447,7 @@ cmd_install() {
     trap - INT TERM HUP
     line ""
     pass "VWARD установлен"
-    line "Панель: http://$LAN_ADDR:$CONSOLE_PORT"
+    line "Панель VWARD: http://$LAN_ADDR:$CONSOLE_PORT"
     line "Сайты, которые не открываются напрямую, VWARD сам отправит через $TUNNEL."
     line "Обновления приходят сами. Удаление:"
     line "  curl -fsSL $BASE_URL/install.sh -o /tmp/vward-install.sh && sh /tmp/vward-install.sh --uninstall"

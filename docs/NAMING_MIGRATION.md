@@ -15,7 +15,7 @@
 | `components/policy-sync/` | `policy-sync` | VWARD Policy Sync |
 | `components/runtime/` | `runtime` | VWARD Runtime |
 | `components/update-engine/` | `update-engine` | VWARD Update Engine |
-| `web/` | `console` | VWARD Console |
+| `web/` | `console` | VWARD Panel |
 
 Каталог прежней адаптивной маршрутизации разделён между Route Engine, Route
 Reconciler, Route Tools и Runtime по фактическому владельцу каждого файла.
@@ -26,3 +26,9 @@ Runtime filenames, init names, cron entries, state paths и config keys буду
 переименованы непосредственно в каноническую схему. Dev не обязан читать старые
 Beta state или manifests. Рабочий роутер остаётся на Beta до отдельного завершённого
 и протестированного выпуска новой линии.
+
+## Название веб-интерфейса
+
+С 2026-09-27 веб-интерфейс называется «Панель VWARD» (по-английски «VWARD Panel») во всех
+текстах: интерфейс, установщик, документация, журналы. Внутренние имена (`vward-console.*`,
+`S93vward-console`, компонент `console`, `VWARD_CONSOLE_PORT`) не меняются - см. `CLAUDE.md`.

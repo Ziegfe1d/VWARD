@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ads & Privacy Guard Console functions: views, custom sources, categories."""
+"""Ads & Privacy Guard Panel functions: views, custom sources, categories."""
 
 import json
 import os

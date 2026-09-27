@@ -210,7 +210,7 @@ const COMPONENTS = [
   { id: 'wifi-client-guard', name: 'Контроль Wi-Fi клиентов', desc: 'Наблюдает за переходами клиентов между 2.4 и 5 ГГц.', when: 'каждые 5 минут', page: 'wifi', log: 'wifi' },
   { id: 'ads-privacy-guard', name: 'Блокировка рекламы', desc: 'Управляет правилами AdGuard Home и источниками списков.', when: 'каждую минуту', page: 'ads', log: 'ads' },
   { id: 'runtime', name: 'Среда выполнения', desc: 'cron, supervisor и служебная очистка. На ней работают почти все компоненты.', when: 'постоянно', page: 'system', log: 'cron' },
-  { id: 'console', name: 'Веб-интерфейс VWARD', desc: 'Эта страница управления и её API.', when: 'постоянно', page: 'settings', log: 'console' },
+  { id: 'console', name: 'Панель VWARD', desc: 'Эта страница и её API.', when: 'постоянно', page: 'settings', log: 'console' },
   { id: 'update-engine', name: 'Установщик обновлений', desc: 'Проверяет, устанавливает и откатывает подписанные обновления.', when: 'по настройкам обновлений', page: 'u-vward', log: 'updater' },
   { id: 'platform-core', name: 'Ядро платформы', desc: 'Версия, реестр компонентов и карта установки.', when: 'не запускается - это файлы версии и карты установки', page: 'system', log: 'console' }
 ];
@@ -234,7 +234,7 @@ const compNames = ids => ids.map(x => '«' + ((comp(x) || {}).name || x) + '»')
 const LOG_TABS = [
   { id: 'wan', label: 'Интернет' }, { id: 'recovery', label: 'Восстановление' }, { id: 'tunnel', label: 'VPN' },
   { id: 'adaptive', label: 'Автоподбор доменов' }, { id: 'routing', label: 'Сверка маршрутов' }, { id: 'policy', label: 'IP-категории' }, { id: 'wifi', label: 'Wi-Fi' },
-  { id: 'ads', label: 'Реклама' }, { id: 'updater', label: 'Обновления' }, { id: 'cron', label: 'Расписание' }, { id: 'console', label: 'Веб-интерфейс' }
+  { id: 'ads', label: 'Реклама' }, { id: 'updater', label: 'Обновления' }, { id: 'cron', label: 'Расписание' }, { id: 'console', label: 'Панель VWARD' }
 ];
 const logLabel = id => (LOG_TABS.find(t => t.id === id) || {}).label || id;
 const DETAILS = {
@@ -1812,7 +1812,7 @@ function showDeviceBlocked() {
 function showLogin() {
   cacheDrop();
   if (loginOpen) return;
-  openSheet('Вход в VWARD', '<div class="sheet-body"><form class="inline-form" data-form="login"><input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Войти</button></form><p class="panel-desc">Логин и пароль от веб-интерфейса роутера.</p></div>');
+  openSheet('Вход в Панель VWARD', '<div class="sheet-body"><form class="inline-form" data-form="login"><input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Войти</button></form><p class="panel-desc">Логин и пароль от веб-интерфейса роутера.</p></div>');
   loginOpen = true;
 }
 function openNotes() {
@@ -1930,7 +1930,7 @@ async function updateMode(mode) {
   await Promise.all([load('status', true), load('config', true)]); updModeShown = null; render();
 }
 /* Long operations run in the background on the router: they outlast the 10-second request.
-   The Console polls dataAction and shows the output until the run finishes. */
+   The Panel polls dataAction and shows the output until the run finishes. */
 /* ---------- Окно установки обновления ---------- */
 // Like Keenetic: a window over the page while an update installs or rolls back,
 // by the button or on schedule; it follows the updater's phases.

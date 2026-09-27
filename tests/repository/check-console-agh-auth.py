@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Console: AdGuard Home login is checked against AdGuard Home before it is kept,
+"""Panel: AdGuard Home login is checked against AdGuard Home before it is kept,
 stored root-only, never passed in argv, and removed only with a confirmation."""
 
 import json

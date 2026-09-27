@@ -48,6 +48,6 @@ is root-owned and mode `0600` or `0400`. The candidate rejects live migration mo
 - integration into `adaptive-auto-maint.sh`;
 - transactional live migration and rollback;
 - night reconcile integration;
-- read-only Console view.
+- read-only Panel view.
 
 Live migration must be implemented only after a router snapshot confirms the current production command grammar, AdaptiveAuto state format, lock owner and save/rollback path.

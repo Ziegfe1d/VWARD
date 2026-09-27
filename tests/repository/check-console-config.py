@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Simulate the Console configuration writer against a fake Keenetic CLI."""
+"""Simulate the Panel configuration writer against a fake Keenetic CLI."""
 
 import os
 import stat
@@ -272,7 +272,7 @@ with tempfile.TemporaryDirectory() as tmp:
     run("wifi", "ENABLED", "0", expect="error=updater_busy", rc=75)
     (tmp / "root/tmp/vward-update-requested").unlink()
 
-    # ---- Through the Console API ----
+    # ---- Through the Panel API ----
     import json
     import shutil
 

@@ -14,7 +14,7 @@
 - `curl` - HTTP/RCI probes и загрузки;
 - `jq` - JSON в CGI и updater;
 - `tcpdump` - наблюдение DNS;
-- `lighttpd`, `lighttpd-mod-cgi` - VWARD Console;
+- `lighttpd`, `lighttpd-mod-cgi` - VWARD Panel;
 - `ca-bundle` - проверка HTTPS;
 - `openssl-util` - проверка Ed25519-подписей;
 - `tar` с gzip - распаковка update packages.

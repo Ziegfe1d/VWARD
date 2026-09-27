@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Domain lists: move a list into the tunnel and back through the Console writer.
+"""Domain lists: move a list into the tunnel and back through the Panel writer.
 
 Moving a list into the tunnel also takes out the Smart DNS (DNS-over-HTTPS
 upstream) lines of its domains and puts them back on return.  Keenetic's delete

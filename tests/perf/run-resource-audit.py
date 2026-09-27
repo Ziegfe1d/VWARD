@@ -7,7 +7,7 @@ operation: the page cache merges them).
 
 Builds the router emulator (tests/perf/emulator/build-rootfs.sh), starts the
 daemons, and measures under strace every periodic job, the route engine per DNS
-query, the cron supervisor and the Console API:
+query, the cron supervisor and the Panel API:
   * processes started (execve), without the internals of the fake router tools;
   * bytes written and write operations on /opt (USB flash) and /tmp (RAM);
   * CPU time and peak RSS (separate runs without strace);
@@ -50,7 +50,7 @@ JOBS = [
     ("ads scan (empty query log)", "/opt/bin/vward-ads-privacy-guard.sh scan", 144),
 ]
 
-# Console API calls a page makes; overview is polled while the page is open.
+# Panel API calls a page makes; overview is polled while the page is open.
 API = [
     ("api status", "action=status"),
     ("api config-data", "action=config-data"),
@@ -322,10 +322,10 @@ def to_markdown(r):
     out += ["", "| Демон | за, с | процессов | запись /opt, байт | операций /opt | RSS, КБ |", "|---|---:|---:|---:|---:|---:|"]
     for name, d in r["daemons"].items():
         out.append(f"| {name} | {d['seconds']} | {d['execs']} | {d['opt_bytes']} | {d['opt_ops']} | {d.get('rss_kb', 0)} |")
-    out += ["", "| Console API | процессов | CPU, мс | время, мс |", "|---|---:|---:|---:|"]
+    out += ["", "| API Панели VWARD | процессов | CPU, мс | время, мс |", "|---|---:|---:|---:|"]
     for name, j in r["api"].items():
         out.append(f"| {name} | {j['execs']} | {j['cpu_ms']} | {j['wall_ms']} |")
-    out += ["", "| Файл Console | байт | gzip |", "|---|---:|---:|"]
+    out += ["", "| Файл Панель VWARD | байт | gzip |", "|---|---:|---:|"]
     for name, c in r["console"].items():
         out.append(f"| {name} | {c['bytes']} | {c['gzip']} |")
     d = r["daily"]

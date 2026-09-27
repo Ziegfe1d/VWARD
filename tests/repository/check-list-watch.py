@@ -2,7 +2,7 @@
 """Route engine: watched domain lists are moved into the tunnel when their path fails.
 
 The two functions are taken from vward-route-engine.sh as they are and run with
-stand-ins for curl, the tunnel probe, DNS and the Console writer.
+stand-ins for curl, the tunnel probe, DNS and the Panel writer.
 """
 
 import os

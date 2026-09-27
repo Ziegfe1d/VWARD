@@ -8,7 +8,7 @@
 #   vward-ads-privacy-clients.sh [tick]   cron path: sync when the devices changed
 #   vward-ads-privacy-clients.sh sync     sync now
 #   vward-ads-privacy-clients.sh status   last result, key=value
-#   vward-ads-privacy-clients.sh on|off   switch the sync (Console)
+#   vward-ads-privacy-clients.sh on|off   switch the sync (Panel)
 
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH

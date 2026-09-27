@@ -20,7 +20,7 @@ shift 2>/dev/null || true
 
 show_settings()
 {
-    # Output only the Console-safe settings contract. Do not expose arbitrary
+    # Output only the Panel-safe settings contract. Do not expose arbitrary
     # shell config or secrets through the web API.
     awk -F= '
         $1 ~ /^(ENABLED|RUN_MODE|SCHEDULE_INTERVAL_MIN|DYNAMIC_MIN_INTERVAL_SEC|DYNAMIC_MAX_LOAD_PER_CPU_X100|DYNAMIC_MIN_MEM_AVAILABLE_KB|DYNAMIC_MIN_OPT_FREE_KB|DYNAMIC_MAX_CANDIDATES_PER_RUN|AUTO_SOURCE_UPDATE|SOURCE_UPDATE_INTERVAL_HOURS|AUTO_PUBLISH|PUBLISH_MODE|QUERY_SOURCE|AUTO_RULE_SCOPE|SCAN_TAIL_LINES|MAX_CANDIDATES_PER_RUN)$/ {
@@ -131,7 +131,7 @@ if ! mv "$TMP" "$ADS_CONFIG"; then
     ads_die "config install failed; rollback attempted"
 fi
 
-# Re-read and verify only Console-safe values are syntactically usable.
+# Re-read and verify only Panel-safe values are syntactically usable.
 if ! /bin/sh -n "$ADS_CONFIG" >/dev/null 2>&1; then
     cp -p "$BACKUP_DIR/ads-privacy-guard.conf.before" "$ADS_CONFIG" 2>/dev/null || true
     ads_die "installed config failed validation; rollback attempted"

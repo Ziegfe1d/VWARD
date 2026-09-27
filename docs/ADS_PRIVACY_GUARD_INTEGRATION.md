@@ -36,7 +36,7 @@ PAUSED, RUN_MODE, query-log change, elapsed interval, load average per CPU, MemA
 Режимы: `manual`, `scheduled`, `dynamic`. Подробный контракт:
 `docs/ADS_PRIVACY_GUARD_SETTINGS_AND_RUNTIME.md`.
 
-## 4. Console API
+## 4. Panel API
 
 GET `ads-data` возвращает health/status, counts, last run/source update, review queue,
 runtime current domain/progress, scheduler phase/reason/next due, manual override counts.
@@ -57,7 +57,7 @@ POST `ads-control` использует существующий `X-VWARD-Reques
 
 Активный API: `web/cgi-bin/api.cgi`.
 
-## 5. Console UI
+## 5. Panel UI
 
 Не создавать новый верхнеуровневый раздел. Карточка «Реклама и трекинг» остаётся в
 едином центре управления, detail показывает состояние/очередь/быстрые действия.
@@ -139,7 +139,7 @@ Keep HTTPS filtering under the existing `ads-privacy-guard` component id. Instal
 HTTPS control script and provider libraries as package-owned files, but seed local HTTPS
 config/TSV files only on first install. Never overwrite CA/private keys during update.
 
-Console adds read-only status plus guarded `validate`, `ca-init`, `start`, `stop`
+Panel adds read-only status plus guarded `validate`, `ca-init`, `start`, `stop`
 actions. CA creation/start require explicit confirmation. A future editor for intercept,
 bypass and request-path rules must use validated transactions; raw proxy config must never
 be accepted from the browser.

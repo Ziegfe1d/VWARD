@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Smart DNS guard: lists-data flags tunnel lists that hold Smart DNS domains,
-the switch is written by the Console helper, and AdaptiveAuto skips those domains."""
+the switch is written by the Panel helper, and AdaptiveAuto skips those domains."""
 
 import json
 import os

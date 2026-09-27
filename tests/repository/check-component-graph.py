@@ -72,9 +72,9 @@ for comp, source, _target, _mode in rows:
         if other != comp and path in text and other not in declared:
             fail(f"{source} uses {path} of {other}, but {comp} does not declare it")
 
-# The Console takes the graph from the API; a second hardcoded copy would drift.
+# The Panel takes the graph from the API; a second hardcoded copy would drift.
 js = (ROOT / "web/assets/vward-console.js").read_text(encoding="utf-8")
 if re.search(r"\{ id: '[a-z-]+', name: '[^']+', desc: '[^']*', deps:", js):
-    fail("Console must not keep its own copy of component dependencies")
+    fail("Panel must not keep its own copy of component dependencies")
 
 print("COMPONENT_GRAPH=PASS")

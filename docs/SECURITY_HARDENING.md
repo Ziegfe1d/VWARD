@@ -1,9 +1,9 @@
 # Security hardening
 
-The `dev` branch generates a LAN-only Console listener from the validated Device
+The `dev` branch generates a LAN-only Panel listener from the validated Device
 Profile. Wildcard listeners are rejected by repository tests.
 
-Console mutations accept only `POST` requests with the expected form content
+Panel mutations accept only `POST` requests with the expected form content
 type and the `X-VWARD-Request: console` request guard. The API does not expose
 CORS or an `OPTIONS` preflight path. Static and CGI responses add restrictive
 browser security headers, directory listing is disabled, and common backup or
@@ -16,19 +16,19 @@ firewall rules. Before any `dev` deployment, verify them on the target:
 ss -lntup 2>/dev/null || netstat -lntup
 ```
 
-Expected VWARD-owned listener: TCP on the configured LAN address and Console port
+Expected VWARD-owned listener: TCP on the configured LAN address and Panel port
 only. Any WAN exposure,
 wildcard bind, or unexpected listener blocks deployment until investigated.
 
 The custom request header is a CSRF barrier, not user authentication. Until an
-authentication design is implemented, Console access must remain limited to a
+authentication design is implemented, Panel access must remain limited to a
 trusted management LAN by the router firewall.
 
 ## Deep audit 2026-09-25
 
 - The API answers only the router's own names (IP literals, localhost, local and
   one-word names, Keenetic names, `ALLOWED_HOSTS`): DNS rebinding cannot reach
-  it, with or without the Console login.
+  it, with or without the Panel login.
 - Downloaded backups carry no secrets; the snapshot on the router keeps them for
   a restore.
 - WireGuard private and preshared keys reach Keenetic in an RCI request body

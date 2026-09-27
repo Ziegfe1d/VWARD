@@ -4,7 +4,7 @@
 VWARD_ADMISSION_OWNED=${VWARD_ADMISSION_OWNED:-0}
 VWARD_ADMISSION_SLOT=${VWARD_ADMISSION_SLOT:-}
 # Component switch: a disabled component keeps its files, but its entry points
-# do nothing while <id>.disabled exists here (written by the Console).
+# do nothing while <id>.disabled exists here (written by the Panel).
 VWARD_COMPONENT_STATE=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
 
 vward_component_enabled() {

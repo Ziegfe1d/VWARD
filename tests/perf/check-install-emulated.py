@@ -7,7 +7,7 @@ this repository with a release signed by a one-time key.
 
   1. install --yes: missing packages come from opkg, the signed package is
      installed by the Update Engine, AdaptiveAuto is created and routed to the
-     VPN, cron has VWARD's jobs, the Console answers; "Реклама" is off without
+     VPN, cron has VWARD's jobs, the Panel answers; "Реклама" is off without
      AdGuard Home.  A second run says VWARD is already installed.  --uninstall
      removes the program and its cron lines, keeps the settings in a backup
      and takes AdaptiveAuto out of Keenetic again.
@@ -132,7 +132,7 @@ def part1_install_uninstall(work, release):
         if r.returncode != 0 or "[ PASS ] VWARD установлен" not in out:
             fail(f"install failed:\n{out}")
         for text in ("KeeneticOS 4.3.2", "VPN: Wireguard1", "AdGuard Home не найден", "подпись и все файлы проверены",
-                     "список AdaptiveAuto идёт через Wireguard1", "панель VWARD отвечает", "Панель: http://192.0.2.1:8088"):
+                     "список AdaptiveAuto идёт через Wireguard1", "Панель VWARD отвечает", "Панель VWARD: http://192.0.2.1:8088"):
             if text not in out:
                 fail(f"install output lacks {text!r}:\n{out}")
         installed = read(root / "emu/opkg-installed.log").split()
@@ -160,7 +160,7 @@ def part1_install_uninstall(work, release):
             if marker not in cron:
                 fail(f"cron lacks {marker}:\n{cron}")
         if not re.search(r"^\d+$", read(root / "opt/var/run/vward-console-lighttpd.pid").strip()):
-            fail("the Console is not running")
+            fail("the Panel is not running")
 
         again = sh(root, "sh /emu/repo/install.sh --yes")
         if again.returncode != 0 or "VWARD уже установлен" not in again.stdout:

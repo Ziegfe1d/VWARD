@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Console: the on-demand tunnel check reads the peer from the router config,
+"""Panel: the on-demand tunnel check reads the peer from the router config,
 binds curl and ping to the tunnel device and never accepts a foreign name."""
 
 import json

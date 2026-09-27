@@ -198,7 +198,7 @@ if grep -Fq 'interface ISP up' "$WAN_TEST_LOG"; then
     fail "rejected down was incorrectly compensated after TERM"
 fi
 
-# Automatic recovery switched off from the Console: classify, but never act,
+# Automatic recovery switched off from the Panel: classify, but never act,
 # and do not accumulate failures that would fire right after re-enabling.
 : > "$WAN_TEST_LOG"
 rm -rf "$REC_DIR"; mkdir -p "$REC_DIR"

@@ -1,7 +1,7 @@
 #!/bin/sh
-# VWARD Console configuration writer.
+# VWARD Panel configuration writer.
 #
-# The only path through which the Console changes persistent settings.  Every
+# The only path through which the Panel changes persistent settings.  Every
 # operation validates its input against a fixed allowlist, backs the target up,
 # writes atomically, verifies the result and records one audit line.  Router
 # configuration (FQDN groups) is changed under the shared route change lock and
@@ -364,7 +364,7 @@ op_guard_flag() {
         1) [ -e "$2" ] || done_ok "$1 enabled" unchanged
            rm -f "$2" || die write_failed ;;
         0) [ ! -e "$2" ] || done_ok "$1 disabled" unchanged
-           mkdir -p "$(dirname "$2")" && printf 'disabled from VWARD Console %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$2" || die write_failed ;;
+           mkdir -p "$(dirname "$2")" && printf 'disabled from VWARD Panel %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$2" || die write_failed ;;
         *) die invalid_value 64 ;;
     esac
     done_ok "$1 enabled=$3" changed
@@ -1030,7 +1030,7 @@ store_conf() {
 }
 
 tunnel_summary() {
-    # Plain facts about a plan for the Console, never the keys.
+    # Plain facts about a plan for the Panel, never the keys.
     printf 'info.endpoint=%s\n' "$(conf_get endpoint "$1")"
     printf 'info.address=%s\n' "$(conf_get address "$1" | awk '{print $1}')"
     printf 'info.mtu=%s\n' "$(conf_get mtu "$1")"
@@ -1355,7 +1355,7 @@ op_component() {
     for c in $set_ids; do
         flag="$COMPONENT_STATE/$c.disabled"
         if [ "$2" = 0 ] && [ ! -e "$flag" ]; then
-            printf 'disabled from VWARD Console %s (with %s)\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$1" > "$flag" || die write_failed
+            printf 'disabled from VWARD Panel %s (with %s)\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$1" > "$flag" || die write_failed
             changed="$changed $c"
         elif [ "$2" = 1 ] && [ -e "$flag" ]; then
             rm -f "$flag" || die write_failed

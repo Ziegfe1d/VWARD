@@ -38,7 +38,7 @@ if "mac band" in monitor or "system configuration save" in monitor:
     raise SystemExit("FAIL: monitor must remain read-only")
 
 doc=(root/"docs/WIFI_CLIENT_GUARD.md").read_text(encoding="utf-8")
-for marker in ("AUTO_APPLY=0","read-only API/экран Console","планировщик"):
+for marker in ("AUTO_APPLY=0","read-only API/экран Панели VWARD","планировщик"):
     if marker not in doc:
         raise SystemExit(f"FAIL: staged rollout contract missing: {marker}")
 
@@ -54,12 +54,12 @@ if "/opt/bin/vward-wifi-client-scheduler.sh" not in cron:
 api=(root/"web/cgi-bin/api.cgi").read_text(encoding="utf-8")
 for marker in ("wifi-data", 'component:\"wifi-client-guard\"', "wifi-control", "WIFI_BIND_2G"):
     if marker not in api:
-        raise SystemExit(f"FAIL: Console Wi-Fi API marker missing: {marker}")
+        raise SystemExit(f"FAIL: Panel Wi-Fi API marker missing: {marker}")
 
 ui=(root/"web/assets/vward-console.js").read_text(encoding="utf-8")
 for marker in ("apiGet('wifi-data')", "'wifi-control'", "function wifiClientPage", "WIFI_BIND_2G"):
     if marker not in ui:
-        raise SystemExit(f"FAIL: Console Wi-Fi UI marker missing: {marker}")
+        raise SystemExit(f"FAIL: Panel Wi-Fi UI marker missing: {marker}")
 
 for marker in ("HOME_BRIDGE=\n", "AP_2G_PATTERN=\n", "AP_5G_PATTERN=\n"):
     if marker not in cfg:

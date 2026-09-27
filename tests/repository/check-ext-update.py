@@ -212,7 +212,7 @@ esac
     if fw["release"] != "5.01.C.6.0-1" or fw["update_available"] is not None or fw["channel"] != "stable":
         fail(f"firmware fallback to show version: {fw}")
 
-    # The Console reaches the check through a POST the API accepts.
+    # The Panel reaches the check through a POST the API accepts.
     helper = tmp / "helper"
     write_exec(helper, f'#!/bin/sh\necho "$@" > "{tmp}/helper-args"\n')
     api_env = os.environ | {"REQUEST_METHOD": "POST", "QUERY_STRING": "action=ext-update-control",

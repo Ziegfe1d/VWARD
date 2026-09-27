@@ -284,7 +284,7 @@ run --check; rc=$?
 check 'the installed release in another manifest is not a replay' sh -c '[ "$1" -eq 10 ] && ! grep -q "replay" "$2"' sh "$rc" "$WORK/last.out"
 check 'the installed files stay' [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = route-installed ]
 
-# 16. «Проверить» from the Console: the per-file feed, as the watch reads it,
+# 16. «Проверить» from the Панель VWARD: the per-file feed, as the watch reads it,
 # even though update.conf names the full-package one; the same release seen
 # first in the v1 feed (another hash, same sequence and id) is no replay.
 new_root feeds

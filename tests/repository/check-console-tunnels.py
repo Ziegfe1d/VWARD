@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tunnels from the Console: replace a configuration in place, create, delete, subnets.
+"""Tunnels from the Panel: replace a configuration in place, create, delete, subnets.
 
 A small Keenetic stand-in keeps interfaces, DNS routes and static routes in a
 JSON state, prints them as running-config (the private key hidden, as on the

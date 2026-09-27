@@ -53,7 +53,7 @@ Implemented candidate foundation: explicit proxy lifecycle, local CA, PAC select
 interception, bypass precedence and narrow request-path blocking. Remaining work:
 
 - live Keenetic/Entware acceptance of 3proxy plugins and resource usage;
-- Console config editor with explicit confirmations;
+- Panel config editor with explicit confirmations;
 - QUIC behavior study;
 - optional client/agent backend;
 - structural JSON/HTML filtering only after a safe parser/backend exists;
