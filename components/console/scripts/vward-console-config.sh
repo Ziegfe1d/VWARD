@@ -902,7 +902,8 @@ conf_parse() {
     ka=$(conf_get peer.persistentkeepalive "$cp_raw")
     case "$ka" in *-*) ka_hi=${ka#*-} ka=${ka%%-*}; valid_int_range "$ka_hi" 0 65535 || die conf_keepalive 64 ;; esac
     [ -z "$ka" ] || valid_int_range "$ka" 0 65535 || die conf_keepalive 64
-    # Settings VWARD does not carry over yet (newer AmneziaWG): names only, for a warning.
+    # Newer AmneziaWG settings KeeneticOS 5.1 has no command for (its own import drops them
+    # too, seen on a real router): names only, for a warning.
     unsup=$(sed -n 's/^name\.//p' "$cp_raw" | while IFS='=' read -r k o; do
         case "$k" in
             privatekey|address|dns|mtu|listenport|jc|jmin|jmax|s[1-4]|h[1-4]|i[1-5]) ;;
