@@ -870,8 +870,9 @@ conf_parse() {
         line == "" || substr(line, 1, 1) == "#" || substr(line, 1, 1) == ";" { next }
         line ~ /^\[/ { sec = tolower(line); if (sec == "[peer]") peers++; next }
         { i = index(line, "="); if (!i) { print "error=conf_syntax"; exit }
-          k = tolower(substr(line, 1, i - 1)); v = substr(line, i + 1)
-          sub(/[ \t]+$/, "", k); sub(/^[ \t]+/, "", v)
+          ko = substr(line, 1, i - 1); v = substr(line, i + 1)
+          sub(/[ \t]+$/, "", ko); sub(/^[ \t]+/, "", v); k = tolower(ko)
+          if (ko ~ /^[A-Za-z0-9_]+$/) print "name." k "=" ko
           if (sec == "[interface]") print "if." k "=" v
           else if (sec == "[peer]" && peers == 1) print "peer." k "=" v
           else if (sec != "[peer]") { print "error=conf_syntax"; exit } }
@@ -897,8 +898,18 @@ conf_parse() {
 
     mtu=$(conf_get if.mtu "$cp_raw")
     [ -z "$mtu" ] || valid_int_range "$mtu" 1280 1500 || die conf_mtu 64
+    # Newer AmneziaWG gives a range (25-35); Keenetic takes one value, the lower one.
     ka=$(conf_get peer.persistentkeepalive "$cp_raw")
+    case "$ka" in *-*) ka_hi=${ka#*-} ka=${ka%%-*}; valid_int_range "$ka_hi" 0 65535 || die conf_keepalive 64 ;; esac
     [ -z "$ka" ] || valid_int_range "$ka" 0 65535 || die conf_keepalive 64
+    # Settings Keenetic has no place for (newer AmneziaWG): names only, for a warning.
+    unsup=$(sed -n 's/^name\.//p' "$cp_raw" | while IFS='=' read -r k o; do
+        case "$k" in
+            privatekey|address|dns|mtu|listenport|jc|jmin|jmax|s[1-4]|h[1-4]|i[1-5]) ;;
+            publickey|presharedkey|allowedips|endpoint|persistentkeepalive) ;;
+            *) printf '%s\n' "$o" ;;
+        esac
+    done | awk '!s[$0]++' | head -n 20 | tr '\n' ',' | sed 's/,$//')
     allowed=$(conf_get peer.allowedips "$cp_raw"); [ -n "$allowed" ] || allowed=0.0.0.0/0
 
     {
@@ -906,6 +917,7 @@ conf_parse() {
         echo "address=$ip $mask"; echo "endpoint=$host:$port"
         [ -z "$mtu" ] || echo "mtu=$mtu"
         [ -z "$ka" ] || [ "$ka" = 0 ] || echo "keepalive=$ka"
+        [ -z "$unsup" ] || echo "unsupported=$unsup"
     } > "$2" || die write_failed
     printf '%s\n' "$allowed" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | while IFS= read -r a; do
         case "$a" in
@@ -1037,6 +1049,7 @@ tunnel_summary() {
     printf 'info.keepalive=%s\n' "$(conf_get keepalive "$1")"
     printf 'info.awg=%s\n' "$([ -n "$(conf_get asc "$1")" ] && echo 1 || echo 0)"
     printf 'info.allowed=%s\n' "$(sed -n 's/^allow=//p' "$1" | tr '\n' ',' | sed 's/,$//')"
+    printf 'info.unsupported=%s\n' "$(conf_get unsupported "$1")"
 }
 
 op_tunnel_conf() {

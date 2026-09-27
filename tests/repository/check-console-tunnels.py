@@ -236,6 +236,17 @@ with tempfile.TemporaryDirectory() as tmp:
                      (conf(NEW_KEY, PEER_NEW).replace("I1 = <b 0x5245474953544552>", 'I1 = <b "x">'), "error=conf_awg")):
         run("tunnel-conf", "check", upload(bad), expect=err)
 
+    # Newer AmneziaWG (Amnezia Premium): a keepalive range and settings Keenetic has no place
+    # for; the range gives its lower value, the extra names are listed without their values.
+    awg2 = conf(NEW_KEY, PEER_NEW).replace("S4 = 15\n", "S4 = 15\nHeaderProtectionKey = " + PSK + "\nRekeyAfterTime = 100-120\nContentPaddingAddition = 10-100\n")
+    awg2 = awg2.replace("PersistentKeepalive = 25", "PersistentKeepalive = 25-35") if "PersistentKeepalive = 25" in awg2 else awg2.replace("[Peer]\n", "[Peer]\nPersistentKeepalive = 25-35\n")
+    out = run("tunnel-conf", "check", upload(awg2), expect="result=checked")
+    if "info.keepalive=25" not in out or "info.unsupported=HeaderProtectionKey,RekeyAfterTime,ContentPaddingAddition" not in out or PSK in out or NEW_KEY in out:
+        fail(f"newer AmneziaWG: {out}")
+    if "info.unsupported=\n" not in run("tunnel-conf", "check", upload(conf(NEW_KEY, PEER_NEW)), expect="result=checked"):
+        fail("a plain .conf must have no unsupported settings")
+    run("tunnel-conf", "check", upload(awg2.replace("25-35", "25-x")), expect="error=conf_keepalive")
+
     # Typed in by hand (the Panel's «Вручную»): the Panel builds a .conf of the same
     # form from the fields, and the router's check takes it like a file.
     js = (Path(__file__).resolve().parents[2] / "web/assets/vward-console.js").read_text()
