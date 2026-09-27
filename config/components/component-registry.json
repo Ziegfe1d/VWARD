@@ -106,7 +106,8 @@
       "uses": [],
       "runtime_targets": [
         "/opt/bin/vward-tunnel-health.sh",
-        "/opt/bin/vward-tunnel-guard.sh"
+        "/opt/bin/vward-tunnel-guard.sh",
+        "/opt/bin/vward-awg-engine.sh"
       ]
     },
     {

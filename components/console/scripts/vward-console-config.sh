@@ -41,6 +41,9 @@ POLICY_SYNC_BIN=${VWARD_POLICY_SYNC_BIN:-/opt/bin/vward-policy-sync.sh}
 COMPONENT_REGISTRY=${VWARD_COMPONENT_REGISTRY:-/opt/share/vward/updater/current/component-registry.json}
 COMPONENT_STATE=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
 JQ=${JQ:-jq}
+# VWARD's own tunnel engine (AmneziaWG 3.x the firmware cannot): tunnels it holds.
+AWG_ENGINE=${VWARD_AWG_ENGINE_BIN:-/opt/bin/vward-awg-engine.sh}
+AWG_TUNNELS=${VWARD_AWG_ETC:-/opt/etc/vward/awg-engine}/tunnels.tsv
 PERSIST="$ROUTE_STATE/adaptive-persist.txt"
 ADAPTIVE="$ROUTE_STATE/adaptive-domains.txt"
 REFRESH_TS="$ROUTE_STATE/groups-refresh"
@@ -1114,6 +1117,12 @@ conf_parse() {
         [ -z "$mtu" ] || echo "mtu=$mtu"
         [ -z "$ka" ] || [ "$ka" = 0 ] || echo "keepalive=$ka"
         [ -z "$unsup" ] || echo "unsupported=$unsup"
+        # AmneziaWG 3.x (header protection, time ranges): KeeneticOS 5.1 has no
+        # command for it, VWARD's engine holds such a tunnel.
+        if sed -n 's/^name\.//p' "$cp_raw" | cut -d= -f1 |
+            grep -qxE 'headerprotectionkey|rekeyaftertime|rekeytimeout|rejectaftertime|keepalivetimeout|maxhandshakeattempts|contentpaddingaddition|randomtrailers|disablecookies'; then
+            echo "engine=1"
+        fi
     } > "$2" || die write_failed
     printf '%s\n' "$allowed" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | while IFS= read -r a; do
         case "$a" in
@@ -1170,6 +1179,7 @@ tunnel_names() {
       vward_map_tunnels "$(vward_device_map 2>/dev/null)" | awk '{print $1}'; } | awk 'NF && !s[$0]++'
 }
 is_tunnel() { tunnel_names | grep -qxF -- "$1"; }
+engine_tunnel() { [ -f "$AWG_TUNNELS" ] && awk -F'\t' -v p="$1" '$2 == p {f = 1} END {exit f ? 0 : 1}' "$AWG_TUNNELS"; }
 
 free_tunnel_name() {
     n=0
@@ -1246,6 +1256,7 @@ tunnel_summary() {
     printf 'info.awg=%s\n' "$([ -n "$(conf_get asc "$1")" ] && echo 1 || echo 0)"
     printf 'info.allowed=%s\n' "$(sed -n 's/^allow=//p' "$1" | tr '\n' ',' | sed 's/,$//')"
     printf 'info.unsupported=%s\n' "$(conf_get unsupported "$1")"
+    printf 'info.engine=%s\n' "$(conf_get engine "$1")"
 }
 
 op_tunnel_conf() {
@@ -1264,6 +1275,9 @@ op_tunnel_conf() {
             done_ok "tunnel-conf check" checked ;;
         replace)
             vward_valid_ndm_name "$tc_arg" && is_tunnel "$tc_arg" || die unknown_tunnel 64
+            # The engine's tunnels and files that need it: a new tunnel instead.
+            ! engine_tunnel "$tc_arg" || die engine_replace_unsupported 64
+            [ "$(conf_get engine "$PLAN")" != 1 ] || die engine_replace_unsupported 64
             change_lock
             JOURNAL=$(mktemp /tmp/vward-console-tunnel.XXXXXX 2>/dev/null) || die temporary_file_unavailable
             TXN=1
@@ -1303,6 +1317,23 @@ op_tunnel_conf() {
             case "$tc_arg" in @/*) tc_desc_file=${tc_arg#@}; tc_arg=$(cat "$tc_desc_file" 2>/dev/null); rm -f "$tc_desc_file" ;; esac
             case "$tc_arg" in *'"'*|*"$(printf '\134')"*) die invalid_description 64 ;; esac
             [ -n "$tc_arg" ] && [ "${#tc_arg}" -le 64 ] || die invalid_description 64
+            if [ "$(conf_get engine "$PLAN")" = 1 ]; then
+                # The firmware cannot run this format: VWARD's engine holds the tunnel
+                # and Keenetic gets a «Прокси» connection to it.
+                [ -x "$AWG_ENGINE" ] || die engine_unavailable
+                en_out=$("$AWG_ENGINE" add "$tc_arg" "$tc_file" 2>/dev/null)
+                case "$(printf '%s\n' "$en_out" | tail -n 1)" in
+                    result=changed) ;;
+                    error=*) en_err=$(printf '%s\n' "$en_out" | sed -n 's/^error=//p' | tail -n 1)
+                             case "$en_err" in ''|*[!a-z0-9_]*) en_err=engine_failed ;; esac
+                             die "$en_err" ;;
+                    *) die engine_failed ;;
+                esac
+                rm -f "$VWARD_DEVICE_MAP_CACHE"
+                printf '%s\n' "$en_out" | grep '^info\.name=' | head -n 1
+                tunnel_summary "$PLAN"
+                done_ok "tunnel-conf create engine $(printf '%s\n' "$en_out" | sed -n 's/^info\.name=//p') endpoint=$(conf_get endpoint "$PLAN")" changed
+            fi
             change_lock
             JOURNAL=$(mktemp /tmp/vward-console-tunnel.XXXXXX 2>/dev/null) || die temporary_file_unavailable
             TXN=1
@@ -1369,7 +1400,11 @@ op_tunnel_delete() {
     while IFS= read -r g; do [ -z "$g" ] || ! route_present "$g" "$1" || die verification_failed; done < "$JOURNAL.lists"
     ! awk -v i="$1" '$1 == "ip" && $2 == "route" && $5 == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG" || die verification_failed
     # Last step: nothing depends on the interface any more.
-    ndm "no interface $1" || die router_rejected
+    if engine_tunnel "$1"; then
+        "$AWG_ENGINE" remove "$1" 2>/dev/null | tail -n 1 | grep -q '^result=' || die router_rejected
+    else
+        ndm "no interface $1" || die router_rejected
+    fi
     snapshot
     ! grep -qx "interface $1" "$RUNCFG" || die verification_failed
     save_router || die config_save_failed

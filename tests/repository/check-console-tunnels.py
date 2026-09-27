@@ -246,6 +246,30 @@ with tempfile.TemporaryDirectory() as tmp:
     if "info.unsupported=\n" not in run("tunnel-conf", "check", upload(conf(NEW_KEY, PEER_NEW)), expect="result=checked"):
         fail("a plain .conf must have no unsupported settings")
     run("tunnel-conf", "check", upload(awg2.replace("25-35", "25-x")), expect="error=conf_keepalive")
+    if "info.engine=1" not in out or "info.engine=\n" not in run("tunnel-conf", "check", upload(conf(NEW_KEY, PEER_NEW)), expect="result=checked"):
+        fail("AmneziaWG 3.x must go to VWARD's engine, a plain .conf must not")
+
+    # AmneziaWG 3.x: the engine holds the tunnel; Keenetic's own interfaces stay as they are.
+    engine_log = tmp / "engine.log"
+    fake_engine = tmp / "fake-engine"
+    fake_engine.write_text("#!/bin/sh\n"
+                           f"echo \"$1 $2 $(head -c 20 \"$3\" 2>/dev/null)\" >> {engine_log}\n"
+                           "[ -f \"$3\" ] && grep -q HeaderProtectionKey \"$3\" || { echo error=conf_syntax; exit 1; }\n"
+                           "echo info.name=Proxy40; echo result=changed\n")
+    fake_engine.chmod(0o755)
+    env["VWARD_AWG_ENGINE_BIN"] = str(fake_engine)
+    env["VWARD_AWG_ETC"] = str(tmp / "awg-etc")
+    before = S()
+    desc = tmp / "desc"; desc.write_text("Finland")
+    out = run("tunnel-conf", "create", upload(awg2), "@" + str(desc), expect="result=changed")
+    if "info.name=Proxy40" not in out or engine_log.read_text().split()[:2] != ["add", "Finland"]:
+        fail(f"create through the engine: {out} {engine_log.read_text()}")
+    if S()["ifs"] != before["ifs"]:
+        fail("an engine tunnel must not touch Keenetic's WireGuard interfaces")
+    if NEW_KEY in out or PSK in out:
+        fail("create printed a key")
+    run("tunnel-conf", "replace", upload(awg2), "Wireguard0", expect="error=engine_replace_unsupported")
+    del env["VWARD_AWG_ENGINE_BIN"]
 
     # Typed in by hand (the Panel's «Вручную»): the Panel builds a .conf of the same
     # form from the fields, and the router's check takes it like a file.

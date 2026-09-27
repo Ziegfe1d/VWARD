@@ -18,6 +18,7 @@ route-tools	components/route-tools/scripts/vward-route.sh	/opt/bin/vward-route.s
 route-tools	components/route-tools/scripts/vward-route-discovery.sh	/opt/bin/vward-route-discovery.sh	0755
 tunnel-guard	components/tunnel-guard/scripts/vward-tunnel-health.sh	/opt/bin/vward-tunnel-health.sh	0755
 tunnel-guard	components/tunnel-guard/scripts/vward-tunnel-guard.sh	/opt/bin/vward-tunnel-guard.sh	0755
+tunnel-guard	components/tunnel-guard/scripts/vward-awg-engine.sh	/opt/bin/vward-awg-engine.sh	0755
 wan-guard	components/wan-guard/scripts/vward-wan-guard.sh	/opt/bin/vward-wan-guard.sh	0755
 wan-guard	components/wan-guard/scripts/vward-wan-recovery.sh	/opt/bin/vward-wan-recovery.sh	0755
 wifi-client-guard	components/wifi-client-guard/scripts/vward-wifi-client-monitor.sh	/opt/bin/vward-wifi-client-monitor.sh	0755

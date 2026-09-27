@@ -72,6 +72,7 @@ python3 tests/repository/check-console-addresses.py || fail "Panel page addresse
 python3 tests/repository/check-console-route-probe.py || fail "Panel address check"
 python3 tests/repository/check-services-catalog.py || fail "Services catalog"
 python3 tests/repository/check-console-services.py || fail "Panel services"
+python3 tests/repository/check-awg-engine.py || fail "Tunnel engine (AmneziaWG)"
 python3 tests/repository/check-list-watch.py || fail "Route engine list watch"
 python3 tests/repository/check-wan-guard-params.py || fail "Internet guard limits"
 python3 tests/repository/check-console-tunnel-probe.py || fail "Panel tunnel check"

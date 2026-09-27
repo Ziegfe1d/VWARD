@@ -234,7 +234,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services) ;;
+    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -1979,6 +1979,24 @@ if [ "$ACTION" = services ]; then
     esac
     CMD="$CONFIG_HELPER" LABEL="service-$SOP" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
     run_detached "$CONTROL_RUN_DIR" control_busy
+fi
+
+# awg-data: VWARD's tunnel engine (AmneziaWG the firmware cannot) - facts, no keys.
+if [ "$ACTION" = awg-data ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    AWG_BIN=${VWARD_AWG_ENGINE_BIN:-/opt/bin/vward-awg-engine.sh}
+    [ -x "$AWG_BIN" ] || { echo '{"ok":true,"available":false,"installed":false,"tunnels":[]}'; exit 0; }
+    "$AWG_BIN" status 2>/dev/null | "$JQ" -Rn '
+        reduce (inputs) as $l ({ok: true, available: true, installed: false, version: "", arch: "", tunnels: []};
+            if ($l | startswith("info.installed=")) then .installed = ($l | endswith("=1"))
+            elif ($l | startswith("info.version=")) then .version = ($l | ltrimstr("info.version="))
+            elif ($l | startswith("info.arch=")) then .arch = ($l | ltrimstr("info.arch="))
+            elif ($l | startswith("tunnel=")) then ($l | ltrimstr("tunnel=") | split("\t")) as $t |
+                .tunnels += [{name: $t[0], running: ($t[1] == "1"), handshake: ($t[2] | tonumber? // null),
+                              rss_kb: ($t[3] | tonumber? // null), endpoint: $t[4], description: $t[5]}]
+            else . end)'
+    exit 0
 fi
 
 if [ "$ACTION" = "control-data" ]; then

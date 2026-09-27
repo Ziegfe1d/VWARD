@@ -14,6 +14,11 @@ VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admissio
 vward_component_gate tunnel-guard
 vward_admission_enter tunnel-health || exit $?
 
+# Tunnels of VWARD's own engine (AmneziaWG the firmware cannot): a stopped one
+# starts again.  Without such tunnels this is one file test, no process.
+[ ! -s "${VWARD_AWG_ETC:-/opt/etc/vward/awg-engine}/tunnels.tsv" ] || [ ! -x /opt/bin/vward-awg-engine.sh ] ||
+    /opt/bin/vward-awg-engine.sh supervise >/dev/null 2>&1 || :
+
 # The health snapshot is rebuilt every minute, so it lives in RAM, not on USB.
 DIR="${VWARD_TUNNEL_HEALTH_DIR:-/tmp/vward-tunnel-health}"
 STATE="$DIR/state"
