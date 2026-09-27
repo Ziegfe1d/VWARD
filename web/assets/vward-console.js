@@ -1535,6 +1535,34 @@ function tcConf(form) {
   p.push('AllowedIPs = ' + (v('allowed') || '0.0.0.0/0'), 'Endpoint = ' + v('endpoint'), 'PersistentKeepalive = ' + (v('keepalive') || '25'));
   return i.concat([''], p).join('\n') + '\n';
 }
+// An Amnezia key (vpn://): base64url of JSON, usually zlib with a 4-byte length in front.
+// A key to one's own server carries the WireGuard/AmneziaWG .conf; a Premium key carries only
+// an access key to Amnezia's servers. Decoded here in the browser; nothing of it is shown.
+async function amneziaKey(text) {
+  let b;
+  try { b = Uint8Array.from(atob(text.trim().slice(6).replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '')), c => c.charCodeAt(0)); }
+  catch (e) { return { error: 'ключ vpn:// повреждён - скопируйте его заново' }; }
+  let json;
+  try {
+    if (b[0] === 123) json = new TextDecoder().decode(b);
+    else {
+      if (typeof DecompressionStream !== 'function') return { error: 'браузер не умеет распаковывать ключ vpn:// - обновите браузер или возьмите файл .conf' };
+      json = await new Response(new Blob([b.slice(4)]).stream().pipeThrough(new DecompressionStream('deflate'))).text();
+    }
+    json = JSON.parse(json);
+  } catch (e) { return { error: 'ключ vpn:// повреждён - скопируйте его заново' }; }
+  if (json.api_config || json.auth_data) return { error: 'это ключ подписки Amnezia Premium: в нём нет сервера и ключей туннеля, только доступ к серверам Amnezia. Нужен файл .conf AmneziaWG - в приложении AmneziaVPN или у поддержки Amnezia' };
+  const cs = (json.containers || []).slice().sort((a, b) => (b.container === json.defaultContainer) - (a.container === json.defaultContainer));
+  for (const c of cs) for (const k of Object.keys(c)) {
+    let lc = c[k] && c[k].last_config;
+    if (!lc) continue;
+    try { lc = typeof lc === 'string' ? JSON.parse(lc) : lc; } catch (e) { continue; }
+    const conf = lc && typeof lc.config === 'string' ? lc.config : '';
+    if (/\[Interface\]/i.test(conf) && /\[Peer\]/i.test(conf))
+      return { conf: conf.replace(/\$PRIMARY_DNS/g, json.dns1 || '1.1.1.1').replace(/\$SECONDARY_DNS/g, json.dns2 || '1.0.0.1') };
+  }
+  return { error: 'в ключе нет настройки WireGuard или AmneziaWG (' + (cs.map(c => c.container).join(', ') || 'пусто') + ') - VWARD умеет только эти два' };
+}
 function tunnelConfSheet(mode, name) {
   openSheet(mode === 'create' ? 'Добавить туннель' : 'Заменить конфигурацию · ' + name,
     '<div class="sheet-body"><form class="stack-form" data-form="tunnel-conf" data-mode="' + mode + '" data-name="' + esc(name || '') + '">' +
@@ -1542,8 +1570,8 @@ function tunnelConfSheet(mode, name) {
     // Like Keenetic: from a file, or the same values typed in by hand.
     '<div class="segmented" role="group" aria-label="Как ввести"><button type="button" data-act="tc-mode" data-m="file" aria-pressed="true">Из файла</button><button type="button" data-act="tc-mode" data-m="manual" aria-pressed="false">Вручную</button></div>' +
     '<div class="stack-form tc-file">' +
-    '<label class="file-pick">' + ico('save') + '<span>Выбрать файл .conf</span><input type="file" name="file" accept=".conf,text/plain" data-conf-file></label>' +
-    '<textarea class="input mono" name="conf" rows="7" spellcheck="false" autocomplete="off" aria-label="Текст конфигурации" placeholder="или вставьте текст: [Interface] PrivateKey = …"></textarea></div>' +
+    '<label class="file-pick">' + ico('save') + '<span>Выбрать файл .conf или .vpn</span><input type="file" name="file" accept=".conf,.vpn,text/plain" data-conf-file></label>' +
+    '<textarea class="input mono" name="conf" rows="7" spellcheck="false" autocomplete="off" aria-label="Текст конфигурации" placeholder="или вставьте текст [Interface] PrivateKey = … или ключ Amnezia vpn://…"></textarea></div>' +
     '<div class="stack-form tc-manual" hidden>' +
     TC_FIELDS.map(f => '<label class="field"><span class="form-label">' + esc(f[1]) + '</span>' + (f[0] === 'awg' ?
       '<textarea class="input mono" name="tc-awg" rows="3" spellcheck="false" autocomplete="off" placeholder="Jc = 4&#10;Jmin = 40&#10;…"></textarea>' :
@@ -2448,9 +2476,10 @@ document.addEventListener('submit', async e => {
   if (f === 'tunnel-conf') {
     const form = e.target, mode = form.dataset.mode, name = form.dataset.name, manual = !form.querySelector('.tc-manual').hidden;
     if (manual && TC_FIELDS.slice(0, 4).some(f => !form.querySelector('[name="tc-' + f[0] + '"]').value.trim())) { toast('Заполните ключ, адрес, ключ сервера и сервер'); return; }
-    const text = manual ? tcConf(form) : form.querySelector('[name=conf]').value;
+    let text = manual ? tcConf(form) : form.querySelector('[name=conf]').value;
+    if (!manual && /^\s*vpn:\/\//i.test(text)) { const k = await amneziaKey(text); if (k.error) { toast(k.error); return; } text = k.conf; }
     const descEl = form.querySelector('[name=description]'), desc = descEl ? descEl.value.trim() : '';
-    if (!manual && (!/\[Interface\]/i.test(text) || !/\[Peer\]/i.test(text))) { toast('Выберите файл .conf или вставьте его текст'); return; }
+    if (!manual && (!/\[Interface\]/i.test(text) || !/\[Peer\]/i.test(text))) { toast('Выберите файл .conf или вставьте его текст или ключ vpn://'); return; }
     if (mode === 'create' && !desc) { toast('Введите название туннеля'); return; }
     if (form.dataset.checked !== '1') {
       let x;

@@ -255,6 +255,37 @@ with tempfile.TemporaryDirectory() as tmp:
     if "info.endpoint=de.example.net:44486" not in out or "info.awg=1" not in out:
         fail(f"a tunnel typed in by hand: {out}")
 
+    # An Amnezia key (vpn://): a key to one's own server gives the same .conf (zlib or plain);
+    # a Premium key (only an access key) and a non-WireGuard key are refused with a reason.
+    import base64, zlib
+    own = {"containers": [{"container": "amnezia-openvpn", "openvpn": {}},
+                          {"container": "amnezia-awg", "awg": {"last_config": json.dumps(
+                              {"config": conf(NEW_KEY, PEER_NEW).replace("[Interface]\n", "[Interface]\nDNS = $PRIMARY_DNS, $SECONDARY_DNS\n", 1)})}}],
+           "defaultContainer": "amnezia-awg", "dns1": "9.9.9.9"}
+    def vpn_key(obj, packed=True):
+        raw = json.dumps(obj).encode()
+        raw = len(raw).to_bytes(4, "big") + zlib.compress(raw) if packed else raw
+        return "vpn://" + base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    keys = {"packed": vpn_key(own), "plain": vpn_key(own, False),
+            "premium": vpn_key({"name": "Amnezia Premium", "api_config": {"service_type": "amnezia-premium", "service_protocol": "awg"}, "auth_data": {"api_key": "test"}}),
+            "xray": vpn_key({"containers": [{"container": "amnezia-xray", "xray": {"last_config": "{}"}}]}),
+            "broken": "vpn://AAAA@@"}
+    block_k = js[js.index("const TC_FIELDS = ["):js.index("function tunnelConfSheet(")]
+    node = subprocess.run(["node" if manual_ok else "true", "-e", block_k + "\nconst K = " + json.dumps(keys) + ";\n"
+                           "(async () => { const r = {}; for (const k in K) r[k] = await amneziaKey(K[k]); process.stdout.write(JSON.stringify(r)); })();"],
+                          text=True, capture_output=True)
+    if node.returncode != 0:
+        fail(f"amnezia key: {node.stderr}")
+    if manual_ok:
+        r = json.loads(node.stdout)
+        if r["packed"] != r["plain"] or "conf" not in r["packed"] or "DNS = 9.9.9.9, 1.0.0.1" not in r["packed"]["conf"]:
+            fail(f"amnezia own-server key: {sorted(r['packed'])}")
+        if "Premium" not in r["premium"].get("error", "") or "amnezia-xray" not in r["xray"].get("error", "") or "повреждён" not in r["broken"].get("error", ""):
+            fail(f"amnezia refusals: {[r[k].get('error') for k in ('premium', 'xray', 'broken')]}")
+        out = run("tunnel-conf", "check", upload(r["packed"]["conf"]), expect="result=checked")
+        if "info.endpoint=de.example.net:44486" not in out or "info.awg=1" not in out:
+            fail(f"a tunnel from an Amnezia key: {out}")
+
     # Replace: proven on a temporary interface, then written into Wireguard0 in place.
     before = S()
     run("tunnel-conf", "replace", upload(conf(NEW_KEY, PEER_NEW)), "Wireguard0", expect="result=changed")
