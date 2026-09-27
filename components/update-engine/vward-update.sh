@@ -341,6 +341,12 @@ apply_update() {
         vu_last_apply_write "$version" 1 "$(jq '.files | length' "$package_dir/package-manifest.json")" "$(jq -r '.signed.package.size' "$manifest")" || :
     fi
     vu_log INFO "Update $version committed"
+    # The Panel's web server takes the settings the update brought (new page
+    # addresses need them) now, not at the next hourly housekeeping: S93 start
+    # restarts it only when its template is newer than the running configuration.
+    if [ -z "$VU_ROOT_PREFIX" ] && [ -x /opt/etc/init.d/S93vward-console ]; then
+        /opt/etc/init.d/S93vward-console start >/dev/null 2>&1 || vu_log WARN "VWARD Panel did not take its new settings"
+    fi
 }
 
 command=${1:-}
