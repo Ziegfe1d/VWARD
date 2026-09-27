@@ -1721,7 +1721,7 @@ if [ "$ACTION" = "route-probe" ]; then
     trap route_probe_cleanup EXIT
     trap 'exit 1' HUP INT TERM
 
-    ndmc -c "show running-config" 2>/dev/null | tr -d '\r' > "$RUNCFG"
+    "${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r' > "$RUNCFG"
 
     valid_ipv4()
     {
@@ -1767,23 +1767,32 @@ if [ "$ACTION" = "route-probe" ]; then
             ADAPTIVE=false
             [ -r "$ADAPTIVE_PERSIST" ] && grep -Fxiq "$VALUE" "$ADAPTIVE_PERSIST" && ADAPTIVE=true
 
+            # A list takes a domain with its subdomains, unless an exclude takes it out.
             GROUPS="$(awk -v h="$VALUE" '
+                function under(d) {d = tolower(d); return h == d || (length(h) > length(d) && substr(h, length(h) - length(d)) == "." d)}
                 /^object-group fqdn /{g=$3;next}
                 /^!/{g="";next}
-                g!="" && $1=="include" && tolower($2)==h {print g}
+                g!="" && $1=="include" && under($2) {inc[g]=1}
+                g!="" && $1=="exclude" && under($2) {exc[g]=1}
+                END {for (g in inc) if (!(g in exc)) print g}
             ' "$RUNCFG" | sort -u)"
             GROUPS_JSON="$(printf '%s\n' "$GROUPS" | "$JQ" -Rsc 'split("\n")|map(select(length>0))')"
             ROUTES_JSON="$(
                 printf '%s\n' "$GROUPS" | while IFS= read -r G; do
                     [ -n "$G" ] || continue
                     awk -v g="$G" '$1=="route" && $2=="object-group" && $3==g {print g "|" $4}' "$RUNCFG"
-                done | sort -u | "$JQ" -Rsc 'split("\n")|map(select(length>0)|split("|")|{group:.[0],interface:.[1]})'
+                    awk -v g="$G" '$1=="object-group" && $2=="fqdn" && $3==g {on=1; next} /^!/ {on=0} on && $1=="description" {sub(/^[ \t]*description[ \t]*/, ""); gsub(/"/, ""); print "#" g "|" $0; exit}' "$RUNCFG"
+                done | sort -u > "$RUNCFG.routes"
+                grep -v '^#' "$RUNCFG.routes" | "$JQ" -Rsc 'split("\n")|map(select(length>0)|split("|")|{group:.[0],interface:.[1]})'
             )"
+            NAMES_JSON="$(sed -n 's/^#//p' "$RUNCFG.routes" 2>/dev/null | "$JQ" -Rsc 'split("\n")|map(select(length>0)|split("|")|{(.[0]):.[1]})|add // {}')"
+            rm -f "$RUNCFG.routes"
+            [ -n "$NAMES_JSON" ] || NAMES_JSON='{}'
 
             "$JQ" -n --arg type domain --arg value "$VALUE" \
               --argjson ips "$IPS_JSON" --argjson hints "$HINTS_JSON" \
-              --argjson adaptive "$ADAPTIVE" --argjson groups "$GROUPS_JSON" --argjson routes "$ROUTES_JSON" \
-              '{ok:true,type:$type,value:$value,dns:{ipv4:$ips},hints:$hints,adaptive_auto:$adaptive,groups:$groups,routes:$routes}'
+              --argjson adaptive "$ADAPTIVE" --argjson groups "$GROUPS_JSON" --argjson routes "$ROUTES_JSON" --argjson names "$NAMES_JSON" \
+              '{ok:true,type:$type,value:$value,dns:{ipv4:$ips},hints:$hints,adaptive_auto:$adaptive,groups:$groups,routes:$routes,names:$names}'
             ;;
         ip)
             valid_ipv4 "$VALUE" || {

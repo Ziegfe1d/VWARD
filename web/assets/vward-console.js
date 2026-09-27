@@ -133,6 +133,33 @@ const errText = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.
 
 /* ---------- Данные ---------- */
 const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, ext: null, listd: null, laddr: null, wanhist: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
+// The last address check stays on the page until the next one (the page redraws itself).
+let RPROBE = null;
+// Where the check says traffic goes, in words: through which tunnel, or past the VPN.
+function probeText(r) {
+  if (!r) return '';
+  if (r.busy) return '<p class="panel-desc">Проверяем ' + esc(r.value) + '…</p>';
+  if (r.error) return '<p class="field-warn">' + esc(r.error) + '</p>';
+  const x = r.x || {};
+  if (!x.ok) return '<p class="field-warn">' + esc(errText(x)) + '</p>';
+  const tuns = ((st().wg && st().wg.interfaces) || []).map(t => t.name);
+  const via = t => tuns.includes(t) || t === prof().tunnel_interface ? 'через VPN «' + tunLabel(t) + '»' : t === prof().wan_interface || t === 'ISP' ? 'в обход VPN, через провайдера' : 'через ' + t;
+  if (x.type === 'ip') {
+    const cats = (x.policy_matches || []).map(m => m.category);
+    return '<p class="probe-verdict ' + (x.configured_route ? 'vpn' : '') + '">' + esc(x.value) + ' идёт ' + (x.configured_route ? 'через VPN' : 'напрямую, через провайдера') + '</p>' +
+      kv([['Почему', x.configured_route ? 'подсеть ' + x.owned_cidr + ' из IP-категорий' : 'адрес не входит в подсети VPN'], ['IP-категории', cats.length ? cats.join(', ') : 'нет']]);
+  }
+  const routes = x.routes || [], name = g => g === 'AdaptiveAuto' ? 'Автоподбор' : (x.names && x.names[g]) || g;
+  const head = routes.length ? esc(x.value) + ' идёт ' + esc(via(routes[0].interface)) : esc(x.value) + ' идёт напрямую, через провайдера';
+  const why = routes.length ? routes.map(t => (t.group === 'AdaptiveAuto' ? 'добавлен автоподбором' : 'в списке «' + name(t.group) + '»') + (routes.length > 1 ? ' - ' + via(t.interface) : '')).join('; ')
+    : (x.groups || []).length ? 'в списке «' + name(x.groups[0]) + '», но у списка нет маршрута' : 'ни в одном списке нет';
+  const hints = [...new Set((x.hints || []).map(h => h.category))];
+  return '<p class="probe-verdict ' + (routes.length ? 'vpn' : '') + '">' + head + '</p>' + kv([
+    ['Почему', why],
+    ['Адреса', ((x.dns && x.dns.ipv4) || []).join(', ') || 'не удалось узнать'],
+    hints.length ? ['В каталоге сервисов', hints.slice(0, 3).join(', ')] : null
+  ]);
+}
 const ADSV = { filter: 'all', search: '', blockedSearch: '', filtersOpen: false };
 // Files page: the open folder.
 const FILES = { root: '', path: '' };
@@ -516,7 +543,7 @@ function listPage(name) {
     panel(title, '<dl class="kv">' +
       (tuns.length > 1 ? ctrlRow('Куда идёт', listViaSel(l, tuns, ok)) : ctrlRow('В обход VPN', sw('data-list-bypass="' + esc(l.name) + '"', viaIs(l, 'bypass'), 'В обход VPN: ' + title, !can), viaIs(l, 'bypass') ? 'сейчас идёт через провайдера' : 'сейчас идёт через VPN')) +
       ctrlRow('Следить', sw('data-list-watch="' + esc(l.name) + '"', l.watch, 'Следить: ' + title, !ok), 'если в обход VPN сервис перестанет открываться, VWARD сам переведёт список на VPN') + '</dl>' +
-      kv([['IP-адреса', l.addresses != null ? fmtInt(l.addresses) : '—', '', 'ip-' + l.name, '', 'что Keenetic узнал для доменов списка']]) +
+      kv([['IP-адреса', l.addresses != null ? fmtInt(l.addresses) : '—', '', 'ip-' + l.name, '', 'адреса, которые Keenetic узнал для доменов списка']]) +
       (l.smartdns_conflict ? '<p class="field-warn">В списке есть домены Smart DNS: их общий адрес уйдёт в VPN, и Smart DNS перестанет работать для всех сервисов. Переведите список в обход VPN или уберите эти домены.</p>' : '') +
       (l.auto && viaIs(l, 'vpn') ? '<p class="field-warn">Переведён на VPN автоматически ' + esc(l.auto.at) + ': не открылся ' + esc(l.auto.host) + '</p>' : '')) +
     panel('Домены', addF('add', 'example.com', 'Добавить домен в список') +
@@ -566,7 +593,7 @@ const RENDER = {
         (guardOn ? ctrlRow('Проверять', sel('data-cfg-wanp="CHECK_INTERVAL_MIN"' + (cfgOk() ? '' : ' disabled'), 'Как часто проверять интернет', [[1, 'раз в минуту'], [2, 'раз в 2 минуты'], [5, 'раз в 5 минут'], [10, 'раз в 10 минут'], [15, 'раз в 15 минут'], [30, 'раз в 30 минут']], ((cfg().wan_guard || {}).params || {}).CHECK_INTERVAL_MIN || 1), 'при сбое - каждую минуту, пока связь не вернётся') : '') + '</dl>' +
         confirmBox('wg-off', 'Выключить автоматическое восстановление? При сбое интернет придётся восстанавливать кнопками.', 'Выключить', true) +
         (guardOn && stage ? '<p class="field-warn">Сейчас: ' + esc(STAGE[stage] || 'идёт восстановление') + '</p>' : '') +
-        kv([['События интернета', 'что происходило', '', 'a-wan'], ['Дополнительно', '', '', 'd-wanrec', '', 'когда начинать, как часто переподключать, история']]),
+        kv([['История подключения', '', '', 'a-wan'], ['Дополнительно', '', '', 'd-wanrec', '', 'когда начинать, как часто переподключать, история']]),
         { desc: 'Пропал интернет - VWARD переподключит.' }) +
       wanNowPanel();
   },
@@ -597,8 +624,8 @@ const RENDER = {
       ]) + (policyGroupRow() ? '<dl class="kv">' + policyGroupRow() + '</dl>' : '')) +
       panel('Автоподбор', '<dl class="kv">' +
         ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', cfgRoute().adaptive_enabled !== false, 'Автоподбор доменов', !cfgOk()), 'отправлять через VPN домены, недоступные напрямую') + '</dl>' +
-        kv([['Решения автоподбора', 'что решил VWARD', '', 'a-adaptive'], ['Сверка маршрутов', 'что вернулось напрямую', '', 'a-routing']])) +
-      panel('Проверить адрес', '<form class="inline-form" data-form="probe">' + formLabel('Домен или IP-адрес') + '<input class="input" id="probeInput" placeholder="домен или IPv4, например claude.ai" aria-label="Домен или IPv4" autocomplete="off"><button class="btn primary" type="submit">' + ico('search') + 'Проверить</button></form><div id="probeResult"></div>', { desc: 'Покажет, через какой интерфейс пойдёт трафик.' });
+        kv([['История автоподбора', '', '', 'a-adaptive'], ['История сверки маршрутов', '', '', 'a-routing']])) +
+      panel('Проверить адрес', '<form class="inline-form" data-form="probe">' + formLabel('Домен или IP-адрес') + '<input class="input" id="probeInput" placeholder="youtube.com или 1.2.3.4" aria-label="Домен или IPv4" autocomplete="off"><button class="btn primary" type="submit">' + ico('search') + 'Проверить</button></form><div id="probeResult">' + probeText(RPROBE) + '</div>', { desc: 'Куда пойдёт сайт: через VPN или напрямую, и почему.' });
   },
 
 
@@ -635,7 +662,7 @@ const RENDER = {
     const recent = a.recent || [];
     return loadError(['ads']) +
       panel('Проверка VWARD', '<dl class="kv">' + ctrlRow('Проверка рекламы и трекеров', sw('data-ads-pause', !a.paused, 'Проверка рекламы и трекеров', !S.ads), a.paused ? 'на паузе - новые домены не проверяются' : '') + '</dl>' +
-        kv([['Сейчас', now[1], now[0], now[2]], ['События', 'что делал VWARD', '', 'a-ads'],
+        kv([['Сейчас', now[1], now[0], now[2]], ['История блокировки рекламы', '', '', 'a-ads'],
           ['Последняя проверка', sc.last_run ? fmtStamp(String(sc.last_run).replace(' ', 'T')) : 'ещё не было', '', 'd-jobs'],
           sc.last_run ? ['Просмотрено', fmtInt(sc.unique_allowed) + ' ' + plural(num(sc.unique_allowed) || 0, 'домен', 'домена', 'доменов'), '', 'd-querylog', '', 'из ' + fmtInt(sc.allowed_records) + ' ' + plural(num(sc.allowed_records) || 0, 'запроса', 'запросов', 'запросов')] : null,
           sc.last_run ? ['Новых на проверку', fmtInt(sc.candidates)] : null,
@@ -701,7 +728,7 @@ const RENDER = {
       panel('Состояние', kv([
         ['Компоненты', COMPONENTS.length + ' ' + plural(COMPONENTS.length, 'компонент', 'компонента', 'компонентов'), '', 'd-components'],
         ['Диагностика', dg.length ? (dg.length - bad) + ' из ' + dg.length + ' в норме' : 'не запускалась', bad ? 'warn' : '', 'd-diag'],
-        ['Файлы', 'просмотр', '', 'd-files']
+        ['Файлы VWARD', '', '', 'd-files']
       ])) +
       panel('Хранилище', kv([['Свободно', fmtKB(g.free_kb) + ' из ' + fmtKB(g.total_kb)], ['Файловая система', g.filesystem || '—'], ['Сжатие журналов', 'каждый час', '', 'd-cron']]) +
         '<div class="panel-actions">' + btn('housekeeping', 'archive', 'Сжать журналы сейчас') + '</div>' + resultBox('storage'),
@@ -1095,7 +1122,7 @@ function vpnGuardPanel() {
   return panel('Защита VPN', '<dl class="kv">' + ctrlRow('Автоматическая защита', sw('data-cfg-tg', !S.config || (cfg().tunnel_guard || {}).enabled !== false, 'Автоматическая защита VPN', !cfgOk())) + '</dl>' +
     confirmBox('tg-off', 'Выключить защиту VPN? Если туннель упадёт, сайты из списков VPN станут недоступны, пока он не восстановится.', 'Выключить', true) + kv([
     ['Трафик списков', isTrue(wg.failopen_active) ? 'Напрямую, пока VPN недоступен' : 'Через VPN', isTrue(wg.failopen_active) ? 'warn' : 'ok'],
-    current === 'a-tunnel' ? null : ['События VPN', 'что делала защита', '', 'a-tunnel'],
+    current === 'a-tunnel' ? null : ['История защиты VPN', '', '', 'a-tunnel'],
     ['Возврат в VPN', 'автоматически', '', null, '', 'пока трафик идёт напрямую, VPN проверяется сам'],
     ['Потерь подряд', String(num(wg.down_streak) || 0)]
   ]) + '<div class="panel-actions even">' + btn('tunnel-health', 'check', 'Проверить') + '</div>' + resultBox('tunnel-health'),
@@ -1228,21 +1255,21 @@ function adsEvent(rest) {
   return m ? { tone: m[0], text: m[1], go: m[2] } : null;
 }
 const ACTIVITY = {
-  adaptive: { title: 'Решения автоподбора', parent: 'routes', logs: ['adaptive'], read: l => routeEvent(l, ROUTE_ADAPTIVE), desc: 'Что автоподбор отправил в VPN или вернул.', data: ['config', 'route'],
+  adaptive: { title: 'История автоподбора', parent: 'routes', logs: ['adaptive'], read: l => routeEvent(l, ROUTE_ADAPTIVE), desc: 'Что автоподбор отправил в VPN или вернул.', data: ['config', 'route'],
     top: () => cfgNote() + kv([['Автоподбор доменов', S.config ? countText((cfgRoute().adaptive || []).length) : '—', '', 'd-adaptive'], ['Всегда через VPN', S.config ? countText((cfgRoute().force_vpn || []).length) : '—', '', 'd-force']]) },
-  routing: { title: 'Сверка маршрутов', parent: 'routes', logs: ['adaptive', 'routing'], read: (l, n) => n === 'adaptive' ? routeEvent(l, ROUTE_MAINT) : null, desc: 'Проверка, какие домены можно вернуть напрямую.', data: ['config', 'route'],
+  routing: { title: 'История сверки маршрутов', parent: 'routes', logs: ['adaptive', 'routing'], read: (l, n) => n === 'adaptive' ? routeEvent(l, ROUTE_MAINT) : null, desc: 'Проверка, какие домены можно вернуть напрямую.', data: ['config', 'route'],
     top: () => cfgNote() + (confirmBox('route-reconcile', 'Сверить маршруты роутера с каталогом сейчас?', 'Выполнить') || '<div class="panel-actions">' + btn('ask', 'check', 'Сверить сейчас', '', ' data-confirm="route-reconcile"') + '</div>') + resultBox('routes') },
-  policy: { title: 'IP-категории', parent: 'vpn', logs: ['policysync', 'policy'], read: policyEvent, desc: 'Обновление подсетей сервисов.', data: ['config', 'route'],
+  policy: { title: 'История IP-категорий', parent: 'vpn', logs: ['policysync', 'policy'], read: policyEvent, desc: 'Обновление подсетей сервисов.', data: ['config', 'route'],
     top: () => kv([['Активные IP-категории', num(((S.route && S.route.ip) || {}).active_count) == null ? '—' : fmtInt(S.route.ip.active_count) + ' включены', '', 'd-ipcats', '', 'включить или выключить категорию']]) +
       (confirmBox('policy-refresh', 'Скачать IP-категории заново и пересобрать маршруты? Это займёт 1-2 минуты.', 'Выполнить') || '<div class="panel-actions">' + btn('ask', 'refresh', 'Обновить сейчас', '', ' data-confirm="policy-refresh"') + '</div>') + resultBox('routes') },
-  tunnel: { title: 'События VPN', parent: 'vpn', logs: ['tunnel'], read: l => { const p = l.split('|'), m = TUNNEL_EV[p[0]]; return m ? { tone: m[0], text: m[1] } : null; }, desc: 'Что делала защита VPN.', data: ['status', 'config'],
+  tunnel: { title: 'История защиты VPN', parent: 'vpn', logs: ['tunnel'], read: l => { const p = l.split('|'), m = TUNNEL_EV[p[0]]; return m ? { tone: m[0], text: m[1] } : null; }, desc: 'Что делала защита VPN.', data: ['status', 'config'],
     top: () => vpnGuardPanel(), topOwn: true },
-  wan: { title: 'События интернета', parent: 'wan', logs: ['wan', 'recovery'], read: wanEvent, desc: 'Когда пропадал интернет и что сделал VWARD.', data: ['status', 'config'],
+  wan: { title: 'История подключения', parent: 'wan', logs: ['wan', 'recovery'], read: wanEvent, desc: 'Когда пропадал интернет и что сделал VWARD.', data: ['status', 'config'],
     top: () => wanNowPanel(), topOwn: true },
-  wifi: { title: 'События Wi-Fi', parent: 'wifi', logs: ['wifi'], read: wifiEvent, desc: 'Переходы устройств между 2.4 и 5 ГГц.', data: ['wifi'] },
-  updater: { title: 'Проверки обновлений', parent: 'u-vward', logs: ['updater'], read: updaterEvent, desc: 'Когда VWARD проверял и ставил обновления.', data: ['status', 'update', 'config'],
+  wifi: { title: 'История Wi-Fi', parent: 'wifi', logs: ['wifi'], read: wifiEvent, desc: 'Переходы устройств между 2.4 и 5 ГГц.', data: ['wifi'] },
+  updater: { title: 'История обновлений', parent: 'u-vward', logs: ['updater'], read: updaterEvent, desc: 'Когда VWARD проверял и ставил обновления.', data: ['status', 'update', 'config'],
     top: () => kv([['Установка и откат', 'VWARD', '', 'u-vward']]) + '<div class="panel-actions">' + btn('update-op', 'refresh', runningId === 'updates' ? 'Проверяем…' : 'Проверить сейчас', '', ' data-op="check"' + (runningId === 'updates' ? ' disabled' : '')) + '</div>' },
-  ads: { title: 'События блокировки', parent: 'ads', logs: ['ads'], read: adsEvent, desc: 'Что VWARD делал с рекламой.', data: ['ads'] }
+  ads: { title: 'История блокировки рекламы', parent: 'ads', logs: ['ads'], read: adsEvent, desc: 'Что VWARD делал с рекламой.', data: ['ads'] }
 };
 // What can be done with a domain from its event, by where it is now.
 function domainActs(h) {
@@ -1882,9 +1909,9 @@ function openNotes() {
   openSheet('Уведомления', '<div class="sheet-body">' + (n.length ? n.map(x => '<button class="note-item" type="button" data-go="' + x.to + '"><span class="sev ' + x.sev + '">' + ico(x.icon || 'alert') + '</span><span><b>' + esc(x.title) + '</b><small>' + esc(x.text) + '</small></span></button>').join('') : empty('Всё работает штатно')) + '</div>', '', 'bellBtn');
 }
 const SEARCH_INDEX = [
-  ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Файлы'], ['system', 'Свободно'],
+  ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Файлы VWARD'], ['system', 'Свободно'],
   ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Восстанавливать автоматически'], ['wan', 'Проверять'], ['wan', 'Обновить адрес'], ['wan', 'Переподключить'], ['d-wanrec', 'Неудачных проверок подряд'],
-  ['settings', 'Только зарегистрированные устройства'], ['vpn', 'Автоматическая защита'], ['vpn', 'Трафик списков'], ['vpn', 'События VPN'],
+  ['settings', 'Только зарегистрированные устройства'], ['vpn', 'Автоматическая защита'], ['vpn', 'Трафик списков'], ['vpn', 'История защиты VPN'],
   ['d-smartdns', 'Защита Smart DNS'],
   ['routes', 'Автоподбор доменов'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Доменные списки'], ['routes', 'Источники'], ['vpn', 'IP-категории'], ['wan', 'Wi-Fi клиенты'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
@@ -2377,15 +2404,12 @@ document.addEventListener('submit', async e => {
   e.preventDefault();
   const f = e.target.dataset.form;
   if (f === 'probe') {
-    const v = $('probeInput').value.trim().toLowerCase(), box = $('probeResult');
-    if (!IPV4.test(v) && !DOMAIN.test(v)) { box.innerHTML = '<p class="panel-desc">Введите домен или IPv4-адрес.</p>'; return; }
-    box.innerHTML = '<p class="panel-desc">Проверяем…</p>';
-    try {
-      const x = await apiGet('route-probe', { type: IPV4.test(v) ? 'ip' : 'domain', value: v });
-      if (!x.ok) { box.innerHTML = '<p class="field-warn">' + esc(errText(x)) + '</p>'; return; }
-      box.innerHTML = x.type === 'ip' ? kv([['Адрес', x.value], ['Категории', (x.policy_matches || []).map(m => m.category).join(', ') || 'нет'], ['Маршрут VWARD', x.configured_route ? 'через ' + x.interface : 'нет', x.configured_route ? 'info' : '']])
-        : kv([['Домен', x.value], ['IPv4', ((x.dns && x.dns.ipv4) || []).join(', ') || 'не найден'], ['Группы', (x.groups || []).join(', ') || 'нет'], ['Маршрут', (x.routes || []).map(r => r.group + ' → ' + r.interface).join(', ') || 'напрямую', (x.routes || []).length ? 'info' : ''], ['Автоподбор доменов', x.adaptive_auto ? 'Да' : 'Нет']]);
-    } catch (err) { box.innerHTML = '<p class="field-warn">Ошибка: ' + esc(err.message) + '</p>'; }
+    const v = $('probeInput').value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/:].*$/, '');
+    if (!IPV4.test(v) && !DOMAIN.test(v)) { RPROBE = { error: 'Введите домен (например, youtube.com) или IPv4-адрес.' }; render(); return; }
+    RPROBE = { value: v, busy: true }; render();
+    try { RPROBE = { value: v, x: await apiGet('route-probe', { type: IPV4.test(v) ? 'ip' : 'domain', value: v }) }; }
+    catch (err) { RPROBE = { value: v, error: 'Ошибка: ' + err.message }; }
+    render();
   }
   if (f === 'list-add') {
     const input = e.target.querySelector('input'), v = input.value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/:].*$/, '').replace(/^\*\./, '');

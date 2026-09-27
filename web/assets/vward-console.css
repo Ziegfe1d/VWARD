@@ -201,6 +201,8 @@ small.st .icon{width:14px;height:14px}
 .inline-form{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:14px 16px 16px}
 .inline-form .form-label{flex:1 0 100%;font-size:var(--fs-sm);font-weight:600;color:var(--text)}
 .inline-form .btn{flex:none;min-height:42px}
+.probe-verdict{margin:0;padding:0 16px 8px;font-weight:700;font-size:var(--fs-md, 16px)}
+.probe-verdict.vpn{color:var(--accent)}
 .result-note{margin:0;padding:4px 16px 12px;color:var(--muted);font-size:var(--fs-sm)}
 .stack-form{display:flex;flex-direction:column;gap:10px;padding:4px 16px 16px}
 .stack-form textarea{min-height:140px;resize:vertical;font-size:12px}

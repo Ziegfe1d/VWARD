@@ -69,6 +69,7 @@ python3 tests/repository/check-console-config.py || fail "Panel configuration wr
 python3 tests/repository/check-console-domain-lists.py || fail "Panel domain lists"
 python3 tests/repository/check-console-list-addrs.py || fail "Panel learned addresses of a list"
 python3 tests/repository/check-console-addresses.py || fail "Panel page addresses"
+python3 tests/repository/check-console-route-probe.py || fail "Panel address check"
 python3 tests/repository/check-list-watch.py || fail "Route engine list watch"
 python3 tests/repository/check-wan-guard-params.py || fail "Internet guard limits"
 python3 tests/repository/check-console-tunnel-probe.py || fail "Panel tunnel check"
