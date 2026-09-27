@@ -22,6 +22,7 @@ const DOMAIN = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,6
 
 /* ---------- Иконки: одна сетка 24×24, одна толщина линии ---------- */
 const ICON_PATHS = {
+  tools: '<path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L4 17v3h3l5.4-5.4a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.6-.4-.4-2.6z"/>',
   home: '<path d="M4 10.5 12 4l8 6.5"/><path d="M6 9v11h4.5v-5.5h3V20H18V9"/>',
   platform: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>',
   refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5V9H15"/>',
@@ -220,13 +221,15 @@ const PAGES = [
   { id: 'vpn', title: 'VPN', icon: 'shield', group: 'Сеть', data: ['status', 'security', 'config', 'route'] },
   { id: 'routes', title: 'Домены', icon: 'list', group: 'Сеть', data: ['route', 'security', 'status', 'config', 'lists'] },
   { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adsstats', 'adspub', 'agh'] },
+  // Programs VWARD works with (AdGuard Home, later its own tunnel engine): each has its page here.
+  { id: 'utils', title: 'Утилиты', icon: 'tools', group: 'VWARD', data: ['ads', 'agh', 'security', 'ext'] },
   { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config'] },
   { id: 'updates', title: 'Обновления', icon: 'refresh', group: 'VWARD', data: ['status', 'update', 'ext', 'config'] },
   { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth', 'status', 'config', 'backups'] },
   // The raw journals: diagnostics to save or send; each section shows its own events itself.
   { id: 'logs', title: 'Технические журналы', icon: 'logs', group: 'VWARD', data: [] }
 ];
-const SHORT = { overview: 'Обзор', logs: 'Журналы', wan: 'Сеть', vpn: 'VPN', routes: 'Домены', ads: 'Реклама', system: 'Система', updates: 'Обновл.', settings: 'Настройки' };
+const SHORT = { overview: 'Обзор', logs: 'Журналы', wan: 'Сеть', vpn: 'VPN', routes: 'Домены', ads: 'Реклама', utils: 'Утилиты', system: 'Система', updates: 'Обновл.', settings: 'Настройки' };
 const COMPONENTS = [
   { id: 'route-engine', name: 'Движок маршрутизации', desc: 'Сайты через VPN и автоподбор.', when: 'постоянно, как служба', page: 'routes', log: 'adaptive' },
   { id: 'route-reconciler', name: 'Сверка маршрутов', desc: 'Возвращает напрямую то, что снова открывается.', when: 'каждые 5 минут', page: 'routes', log: 'routing' },
@@ -291,8 +294,8 @@ const DETAILS = {
   'd-sources': { title: 'Источники списков', parent: 'ads' },
   'd-jobs': { title: 'Задания', parent: 'ads' },
   'd-https': { title: 'HTTPS-фильтр', parent: 'ads' },
-  'd-agh': { title: 'AdGuard Home', parent: 'ads', data: ['ads', 'agh'] },
-  'd-dnsex': { title: 'Исключения защиты', parent: 'ads', data: ['ads'] },
+  'd-agh': { title: 'AdGuard Home', parent: 'utils', data: ['ads', 'agh', 'security', 'ext', 'adsstats'] },
+  'd-dnsex': { title: 'Исключения защиты', parent: 'd-agh', data: ['ads'] },
   'd-aghfilters': { title: 'Фильтры AdGuard Home', parent: 'd-agh', data: ['agh', 'ads'] },
   'd-aghservices': { title: 'Блокировка сервисов', parent: 'd-agh', data: ['agh', 'ads'] }
 };
@@ -311,7 +314,7 @@ function page(id) {
 const parentOf = id => { const p = page(id); return p && p.parent; };
 // Every page has its own address, built from the way to it: /network, /vpn/tunnel/<name>,
 // /domains/lists/<list>/ip, /system/components/<id>/deps.  Old #addresses still open.
-const SLUG = { overview: '', wan: 'network', vpn: 'vpn', routes: 'domains', lists: 'lists', wifi: 'wifi', ads: 'ads', system: 'system', updates: 'updates', settings: 'settings', logs: 'logs',
+const SLUG = { overview: '', wan: 'network', vpn: 'vpn', routes: 'domains', lists: 'lists', wifi: 'wifi', ads: 'ads', system: 'system', updates: 'updates', settings: 'settings', logs: 'logs', utils: 'utilities', 'd-agh': 'adguard-home',
   'd-mydomains': 'my', 'd-force': 'always-vpn', 'd-adaptive': 'autopick', 'd-rsources': 'sources', 'd-ipcats': 'ip-categories', 'd-wanrec': 'recovery',
   'u-fw': 'firmware', 'u-opkg': 'entware', 'd-dnsex': 'exceptions', 'd-aghfilters': 'filters', 'd-aghservices': 'services', 'd-adcats': 'categories' };
 function slugOf(id) {
@@ -383,7 +386,7 @@ function kv(rows) {
     const val = r[2] ? '<span class="pill ' + r[2] + '">' + esc(r[1]) + '</span>' : '<span class="num">' + esc(r[1]) + '</span>';
     const link = r[3] && !ext;
     return '<div class="kv-row' + (link ? ' link" role="button" tabindex="0" data-go="' + esc(r[3]) + '"' + (r[4] || '') : '"') + ' data-key="' + esc(r[0]) + '"><dt>' + esc(r[0]) + (r[5] ? '<span class="hint">' + esc(r[5]) + '</span>' : '') + '</dt><dd>' +
-      (ext ? '<a class="kv-ext" href="' + esc(r[3]) + '" target="_blank" rel="noopener">' + val + ico('external', 'chev') + '</a>' : val + (link ? ico('chevron', 'chev') : '')) + '</dd></div>';
+      (ext ? '<a class="kv-ext" href="' + esc(r[3]) + '" target="_blank" rel="noopener">' + val + ico('external', 'chev') + '</a>' : val + (link ? ico(r[6] ? 'external' : 'chevron', 'chev') : '')) + '</dd></div>';
   }).join('') + '</dl>';
 }
 function ctrlRow(key, control, hint, cls) { return '<div class="kv-row' + (cls ? ' ' + cls : '') + '" data-key="' + esc(key) + '"><dt>' + esc(key) + (hint ? '<span class="hint">' + esc(hint) + '</span>' : '') + '</dt><dd>' + control + '</dd></div>'; }
@@ -696,18 +699,30 @@ const RENDER = {
         ctrlRow('Обновлять источники автоматически', sw('data-ads-set="AUTO_SOURCE_UPDATE"', isTrue(s.AUTO_SOURCE_UPDATE), 'Обновлять источники автоматически', !S.ads), 'раз в ' + (s.SOURCE_UPDATE_INTERVAL_HOURS || 24) + ' ч') +
         ctrlRow('Новые правила применять к', sel('data-ads-set="AUTO_RULE_SCOPE"', 'Новые правила', [['exact', 'Только домену'], ['suffix', 'Домену и поддоменам']], s.AUTO_RULE_SCOPE || 'exact')) +
         '</dl>' + resultBox('ads')) +
-      dnsGuardPanel(a) +
-      panel('AdGuard Home', kv([aghUrl ? ['Адрес', aghHost + ':' + ag.port, '', aghUrl] : ['Адрес', 'не настроен'],
-          S.ads ? ['Подключение VWARD', a.agh_connected ? 'Подключено' : 'Не подключено', a.agh_connected ? 'ok' : 'warn', 'd-agh'] : null,
-          g && g.ok && g.protection != null ? ['Защита', g.protection ? 'Включена' : 'Выключена', g.protection ? 'ok' : 'warn', 'd-agh'] : null,
-          st1 && st1.ok ? ['Запросов за сутки', fmtInt(st1.queries), '', 'd-querylog'] : null,
-          st1 && st1.ok ? ['Заблокировано за сутки', fmtInt(st1.blocked) + (st1.queries ? ' · ' + Math.round(100 * st1.blocked / st1.queries) + '%' : ''), '', 'd-querylog', ' data-qfilter="blocked"'] : null,
-          ['Настройки AdGuard Home', 'фильтры, сервисы, защита', '', 'd-agh']]) + aghClientsRows(a) + routeDnsRows(a),
-        { desc: 'Блокирует по своим фильтрам, VWARD проверяет остальное.' });
+      // AdGuard Home is a program of its own: its page lives in «Утилиты».
+      panel('Дополнительно', kv([['AdGuard Home', 'Утилиты', '', 'd-agh', '', 'фильтры, защита всех устройств, подключение', 'out']]));
+  },
+  utils() {
+    const a = S.ads || {}, g = S.agh, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
+    const agh = !S.ads ? ['', '—'] : !ag.port ? ['warn', 'Не найден'] : !a.agh_connected ? ['warn', 'Не подключён'] :
+      g && g.ok && g.protection === false ? ['warn', 'Защита выключена'] : ['ok', 'Работает'];
+    return loadError(['ads']) + panel('Утилиты', kv([['AdGuard Home', agh[1], agh[0], 'd-agh', '', 'блокировка рекламы для всех устройств']]),
+      { desc: 'Программы, с которыми работает VWARD.' });
   },
   'd-agh'() {
-    const a = S.ads || {};
-    return loadError(['ads']) + aghConnectPanel(a) + aghSettingsPanel(a);
+    const a = S.ads || {}, g = S.agh, st1 = S.adsstats, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
+    const aghHost = ag.address || location.hostname, aghUrl = ag.port ? 'http://' + aghHost + ':' + ag.port + '/' : '';
+    const e = (S.ext && S.ext.agh) || {};
+    return loadError(['ads']) +
+      panel('AdGuard Home', kv([aghUrl ? ['Веб-интерфейс', aghHost + ':' + ag.port, '', aghUrl] : ['Веб-интерфейс', 'не найден'],
+          S.ads ? ['Подключение VWARD', a.agh_connected ? 'Подключено' : 'Не подключено', a.agh_connected ? 'ok' : 'warn'] : null,
+          g && g.ok && g.protection != null ? ['Защита', g.protection ? 'Включена' : 'Выключена', g.protection ? 'ok' : 'warn'] : null,
+          st1 && st1.ok ? ['Запросов за сутки', fmtInt(st1.queries), '', 'd-querylog'] : null,
+          st1 && st1.ok ? ['Заблокировано за сутки', fmtInt(st1.blocked) + (st1.queries ? ' · ' + Math.round(100 * st1.blocked / st1.queries) + '%' : ''), '', 'd-querylog', ' data-qfilter="blocked"'] : null,
+          ['Версия', e.available ? 'доступна ' + extVer(e.available) : e.installed ? extVer(e.installed) : 'Обновления', e.available ? 'info' : '', 'u-agh', '', 'обновляется в «Обновлениях»', 'out']]),
+        { desc: 'Блокирует рекламу по своим фильтрам; VWARD дочищает пропущенное.' }) +
+      aghConnectPanel(a) + aghSettingsPanel(a) + dnsGuardPanel(a) +
+      (a.agh_connected ? panel('Связь с Keenetic', aghClientsRows(a) + routeDnsRows(a)) : '');
   },
   'd-dnsex'() {
     const g = (S.ads && S.ads.dns_guard) || {}, ex = (g.exclude || '').split(',').filter(Boolean), hosts = g.hosts || [];
@@ -1948,7 +1963,7 @@ const SEARCH_INDEX = [
   ['d-smartdns', 'Защита Smart DNS'],
   ['routes', 'Автоподбор доменов'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Доменные списки'], ['routes', 'Источники'], ['vpn', 'IP-категории'], ['wan', 'Wi-Fi клиенты'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
-  ['ads', 'Настройки AdGuard Home'], ['ads', 'Имена устройств из Keenetic'], ['ads', 'Все устройства через AdGuard Home'], ['ads', 'Не давать обходить защиту'], ['ads', 'Последняя проверка'], ['ads', 'Правила в AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
+  ['utils', 'AdGuard Home'], ['d-agh', 'Имена устройств из Keenetic'], ['d-agh', 'Все устройства через AdGuard Home'], ['d-agh', 'Не давать обходить защиту'], ['ads', 'Последняя проверка'], ['ads', 'Правила в AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
   ['u-vward', 'Установка обновлений'], ['u-vward', 'Время установки'], ['u-vward', 'Интервал проверки'], ['u-vward', 'Канал'],
   ['settings', 'Адрес VWARD'], ['settings', 'Тема'], ['u-vward', 'Версия'], ['d-diag', 'Задания по расписанию'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
 ];

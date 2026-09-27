@@ -64,8 +64,8 @@ if posted - post_ok:
 
 # Navigation: every page and detail page has a renderer, every static link resolves.
 pages = set(re.findall(r"\{ id: '([a-z]+)', title: '[^']+', icon: '[a-z]+', group:", js))
-if len(pages) != 9:
-    fail(f"ожидалось 9 разделов, найдено {len(pages)}")
+if len(pages) != 10:
+    fail(f"ожидалось 10 разделов, найдено {len(pages)}")
 details = set(re.findall(r"^  '?([a-z][a-z-]*)'?: \{ title:", js.replace(js.split("const ACTIVITY = {", 1)[1].split("\n};", 1)[0], ""), re.MULTILINE))
 renderers = set(re.findall(r"^  ([a-z]+)\(\) \{", js, re.MULTILINE)) | set(re.findall(r"^  '([du]-[a-z-]+)'\(\) \{", js, re.MULTILINE))
 # Section event pages (a-<key>) come from ACTIVITY and share one renderer.
