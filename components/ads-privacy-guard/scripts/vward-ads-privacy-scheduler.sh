@@ -54,6 +54,8 @@ QUERY_READER="${VWARD_ADS_QUERY_READER:-/opt/bin/vward-ads-privacy-query-read.sh
 [ -x "$QUERY_READER" ] || QUERY_READER="$SELF_DIR/vward-ads-privacy-query-read.sh"
 CLIENTS_SYNC="${VWARD_ADS_CLIENTS_SYNC:-/opt/bin/vward-ads-privacy-clients.sh}"
 [ -x "$CLIENTS_SYNC" ] || CLIENTS_SYNC="$SELF_DIR/vward-ads-privacy-clients.sh"
+DNS_GUARD="${VWARD_ADS_DNS_GUARD:-/opt/bin/vward-ads-privacy-dns-guard.sh}"
+[ -x "$DNS_GUARD" ] || DNS_GUARD="$SELF_DIR/vward-ads-privacy-dns-guard.sh"
 
 # Loads the persisted scheduler state into ST_SCAN, ST_SOURCE and ST_SIG.
 state_load()
@@ -149,6 +151,9 @@ OLD_SIG=$ST_SIG
 # Device names in AdGuard Home do not depend on ad blocking being on or paused.
 # A tick with the same devices makes no AdGuard Home call.
 [ ! -x "$CLIENTS_SYNC" ] || "$CLIENTS_SYNC" tick >/dev/null 2>&1 || true
+# DNS of every device through AdGuard Home: rules back after a firewall rebuild,
+# redirect off while AdGuard Home's DNS is down.  No process when it is off.
+[ ! -x "$DNS_GUARD" ] || "$DNS_GUARD" tick >/dev/null 2>&1 || true
 
 if ! ads_bool "$ENABLED"; then
     status_write disabled component_disabled 0

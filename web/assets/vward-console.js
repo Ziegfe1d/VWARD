@@ -97,6 +97,8 @@ async function apiPost(action, fields) {
   return r.json();
 }
 const API_ERRORS = {
+  upstream_not_encrypted: 'сначала зашифруйте выход AdGuard Home (https://... в «Upstream DNS-серверы»)', invalid_mac: 'неверный MAC-адрес',
+  router_unavailable: 'Keenetic не ответил, повторите через минуту', nat_failed: 'роутер не принял правило перенаправления', filter_failed: 'роутер не принял правило блокировки',
   not_upgradable: 'обновление уже не нужно - проверьте ещё раз', ext_update_busy: 'уже идёт проверка или установка',
   notes_unavailable: 'описание версии не найдено', invalid_version: 'неверная версия',
   smartdns_agh_failed: 'AdGuard Home не принял изменение строк Smart DNS', smartdns_agh_unavailable: 'модуль AdGuard Home не установлен', upstream_file_unsupported: 'upstream AdGuard Home заданы файлом - строки Smart DNS меняйте в нём вручную',
@@ -260,6 +262,7 @@ const DETAILS = {
   'd-jobs': { title: 'Задания', parent: 'ads' },
   'd-https': { title: 'HTTPS-фильтр', parent: 'ads' },
   'd-agh': { title: 'AdGuard Home', parent: 'ads', data: ['ads', 'agh'] },
+  'd-dnsex': { title: 'Исключения защиты', parent: 'ads', data: ['ads'] },
   'd-aghfilters': { title: 'Фильтры AdGuard Home', parent: 'd-agh', data: ['agh', 'ads'] },
   'd-aghservices': { title: 'Блокировка сервисов', parent: 'd-agh', data: ['agh', 'ads'] }
 };
@@ -625,6 +628,7 @@ const RENDER = {
         ctrlRow('Обновлять источники автоматически', sw('data-ads-set="AUTO_SOURCE_UPDATE"', isTrue(s.AUTO_SOURCE_UPDATE), 'Обновлять источники автоматически', !S.ads), 'раз в ' + (s.SOURCE_UPDATE_INTERVAL_HOURS || 24) + ' ч') +
         ctrlRow('Новые правила применять к', sel('data-ads-set="AUTO_RULE_SCOPE"', 'Новые правила', [['exact', 'Только домену'], ['suffix', 'Домену и поддоменам']], s.AUTO_RULE_SCOPE || 'exact')) +
         '</dl>' + resultBox('ads')) +
+      dnsGuardPanel(a) +
       panel('AdGuard Home', kv([aghUrl ? ['Адрес', aghHost + ':' + ag.port, '', aghUrl] : ['Адрес', 'не настроен'],
           S.ads ? ['Подключение VWARD', a.agh_connected ? 'Подключено' : 'Не подключено', a.agh_connected ? 'ok' : 'warn', 'd-agh'] : null,
           g && g.ok && g.protection != null ? ['Защита', g.protection ? 'Включена' : 'Выключена', g.protection ? 'ok' : 'warn', 'd-agh'] : null,
@@ -636,6 +640,12 @@ const RENDER = {
   'd-agh'() {
     const a = S.ads || {};
     return loadError(['ads']) + aghConnectPanel(a) + aghSettingsPanel(a);
+  },
+  'd-dnsex'() {
+    const g = (S.ads && S.ads.dns_guard) || {}, ex = (g.exclude || '').split(',').filter(Boolean), hosts = g.hosts || [];
+    return loadError(['ads']) + panel('Устройства', !S.ads ? empty('Загрузка…') : hosts.length ? '<dl class="kv">' + hosts.map(h =>
+      ctrlRow(h.name || h.mac, sw('data-dnsex="' + esc(h.mac) + '"', ex.includes(h.mac), 'Исключить ' + (h.name || h.mac)), h.mac + (h.online ? '' : ' · не в сети'))).join('') + '</dl>' : empty('Keenetic не вернул список устройств'),
+      { desc: 'Включённое устройство защита не трогает: оно спрашивает DNS как само настроено. Например, рабочий ноутбук со своим VPN.' });
   },
 
   system() {
@@ -1535,7 +1545,7 @@ const SEARCH_INDEX = [
   ['d-smartdns', 'Защита Smart DNS'],
   ['routes', 'Туннель для маршрутов'], ['routes', 'Автоподбор доменов'], ['routes', 'Автоопределение категории'], ['routes', 'Проверяемые сервисы'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Категории доменов'], ['routes', 'IP-категории'], ['routes', 'Группа маршрутизации'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
-  ['ads', 'Настройки AdGuard Home'], ['ads', 'Имена устройств из Keenetic'], ['ads', 'Последняя проверка'], ['ads', 'Правила в AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
+  ['ads', 'Настройки AdGuard Home'], ['ads', 'Имена устройств из Keenetic'], ['ads', 'Все устройства через AdGuard Home'], ['ads', 'Не давать обходить защиту'], ['ads', 'Последняя проверка'], ['ads', 'Правила в AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
   ['u-vward', 'Установка обновлений'], ['u-vward', 'Время установки'], ['u-vward', 'Интервал проверки'], ['u-vward', 'Канал'],
   ['settings', 'Адрес VWARD'], ['settings', 'Тема'], ['u-vward', 'Версия'], ['d-diag', 'Задания по расписанию'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
 ];
@@ -1586,6 +1596,7 @@ const CONFIRMED = {
   'agh-filter-remove': c => aghSet({ setting: 'filter-remove', url: c.url, confirm: 'AGH_FILTER_REMOVE' }, 'Список удалён'),
   'agh-off': () => apiPost('agh-auth', { op: 'disconnect', confirm: 'AGH_DISCONNECT' }).then(x => { toast(x.ok ? 'AdGuard Home отключён' : 'Не отключено: ' + errText(x)); return load('ads', true); }).then(render, () => render()),
   'auth-off': () => apiPost('auth', { op: 'disable', confirm: 'CONSOLE_AUTH_DISABLE' }).then(x => { toast(x.ok ? 'Вход выключен' : 'Не выключено: ' + errText(x)); return Promise.all([load('auth', true), load('security', true)]); }).then(render, () => render()),
+  'dnsg-bypass': () => dnsGuardSet('bypass', '1', 'Обход защиты закрыт'),
   'ads-autopub': () => adsSetting('AUTO_PUBLISH', '1').then(() => load('adspub', true)).then(render),
   'feed-dev': () => cfgSet({ op: 'update-feed', target: 'dev', confirm: 'UPDATE_FEED_DEV' }, 'Канал: Dev'),
   'comp-off': () => { const id = current.slice(2); return cfgSet({ op: 'component', target: id, value: '0', confirm: 'COMPONENT_DISABLE' }, '«' + comp(id).name + '» выключен', ['status']); },
@@ -1725,6 +1736,30 @@ function updateOp(op, token) {
       if (op === 'check') { const pd = S.update && S.update.pending; toast(pd && pd.present ? 'Найдено обновление ' + (pd.version || '') : 'Новых обновлений нет'); }
       render();
     });
+}
+// DNS of every device through AdGuard Home (vward-ads-privacy-dns-guard.sh).
+// Nothing can be switched on while AdGuard Home's own way out is not encrypted.
+function dnsGuardPanel(a) {
+  if (!a.agh_connected) return '';
+  const g = a.dns_guard || {}, enc = g.upstream === 'encrypted', on = g.enforce === '1', by = g.bypass === '1';
+  const ex = (g.exclude || '').split(',').filter(Boolean).length;
+  const onHint = !on ? 'телефоны и телевизоры не смогут спросить DNS в обход' : g.agh_up === '0' ? 'AdGuard Home не отвечает - заворот временно снят' :
+    num(g.redirected) ? fmtInt(g.redirected) + ' ' + plural(num(g.redirected), 'запрос завёрнут', 'запроса завёрнуто', 'запросов завёрнуто') : 'все устройства спрашивают AdGuard Home';
+  const byHint = !by ? 'закрывает зашифрованный DNS в обход (DoT, DoH)' : num(g.refused) ? fmtInt(g.refused) + ' ' + plural(num(g.refused), 'попытка обхода закрыта', 'попытки обхода закрыто', 'попыток обхода закрыто') : 'обходов не было';
+  return panel('Защита для всех устройств', '<dl class="kv">' +
+      ctrlRow('Все устройства через AdGuard Home', sw('data-dnsg="enforce"', on, 'Все устройства через AdGuard Home', !S.ads || (!enc && !on)), onHint) +
+      ctrlRow('Не давать обходить защиту', sw('data-dnsg="bypass"', by, 'Не давать обходить защиту', !S.ads || (!enc && !by)), byHint) + '</dl>' +
+      confirmBox('dnsg-bypass', 'Закрыть обход? Телефоны Android с «Частным DNS» в режиме «Имя хоста» останутся без интернета, пока этот режим не выключить. В режиме «Автоматически» всё продолжит работать.', 'Закрыть обход') +
+      (enc || g.upstream == null ? '' : '<p class="field-warn">' + ico('alert') + 'Выход AdGuard Home в интернет не зашифрован: провайдер видит DNS-запросы. Сначала в AdGuard Home → «Настройки DNS» → «Upstream DNS-серверы» поставьте зашифрованные адреса (https://...), затем включайте защиту.</p>') +
+      kv([['Исключения', ex ? fmtInt(ex) + ' ' + plural(ex, 'устройство', 'устройства', 'устройств') : 'нет', '', 'd-dnsex']]),
+    { desc: 'Реклама, трекеры и вредные сайты блокируются на всех устройствах дома, без настроек и сертификатов на них.' });
+}
+async function dnsGuardSet(setting, value, okMsg) {
+  let x;
+  try { x = await apiPost('ads-control', { op: 'dns-guard', setting: setting, value: value }); } catch (e) { x = { ok: false, error: e.message }; }
+  const err = /ERROR=([a-z_]+)/.exec(x.result || '');
+  toast(x.ok ? okMsg : 'Не выполнено: ' + (err ? errText({ error: err[1] }) : errText(x)));
+  await load('ads', true); render();
 }
 // Device names from Keenetic in AdGuard Home (vward-ads-privacy-clients.sh).
 function aghClientsRows(a) {
@@ -1941,6 +1976,13 @@ document.addEventListener('change', e => {
   }
   if (t.dataset.cfgWanp) { cfgSet({ op: 'wan-param', target: t.dataset.cfgWanp, value: t.value }, 'Сохранено', ['config']); return; }
   if (t.dataset.cfgUpd) { cfgSet({ op: 'update', target: t.dataset.cfgUpd, value: t.value }, 'Сохранено', ['status']); return; }
+  if (t.dataset.dnsg === 'enforce') { dnsGuardSet('enforce', t.checked ? '1' : '0', t.checked ? 'Все устройства теперь через AdGuard Home' : 'Защита для всех устройств выключена'); return; }
+  if (t.dataset.dnsg === 'bypass') { if (t.checked) { t.checked = false; confirm = { id: 'dnsg-bypass' }; render(); } else dnsGuardSet('bypass', '0', 'Обход защиты снова разрешён'); return; }
+  if (t.dataset.dnsex) {
+    const g = (S.ads && S.ads.dns_guard) || {}, cur = (g.exclude || '').split(',').filter(Boolean).filter(m => m !== t.dataset.dnsex);
+    if (t.checked) cur.push(t.dataset.dnsex);
+    dnsGuardSet('exclude', cur.length ? cur.join(',') : '-', t.checked ? 'Устройство исключено' : 'Устройство снова под защитой'); return;
+  }
   if (t.hasAttribute('data-ads-clients')) { aghClientsOp(t.checked ? 'on' : 'off'); return; }
   if (t.hasAttribute('data-ads-pause')) { adsControl({ op: t.checked ? 'resume' : 'pause' }, t.checked ? 'Блокировка включена' : 'Блокировка на паузе'); return; }
   if (t.dataset.adsSet) { adsSetting(t.dataset.adsSet, t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value); return; }

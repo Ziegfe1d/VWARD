@@ -73,6 +73,24 @@ The active VWARD cron calls only the scheduler once per minute. In dynamic mode 
 runs only when the persisted AGH query log changed and resource gates pass. This is
 intentional to keep CPU/I/O low on router-class hardware.
 
+### DNS of every device through AdGuard Home
+
+`vward-ads-privacy-dns-guard.sh` (off by default, switches on the Ads page):
+- `enforce`: every DNS query from the LAN subnet on port 53, to any server, is
+  DNAT-ed to AdGuard Home's DNS address (`dns.port` of AdGuardHome.yaml); queries to
+  the router itself go on to the rules already there. Chain `VWARD_DNS` (nat).
+- `bypass`: DoT/DoQ (853) refused from the LAN, 443 refused to well-known DoH
+  addresses, HaGeZi's Encrypted DNS list added to (or switched off in) AdGuard Home.
+  Chain `VWARD_DNS_FWD` (filter, FORWARD). REJECT, DROP where the kernel has no REJECT.
+- exclusions by MAC, mapped to current addresses through RCI; when Keenetic does not
+  answer the rules are left as they are, so an excluded device is never redirected.
+- nothing can be switched on while an upstream of AdGuard Home is plain DNS
+  (Smart DNS rows `[/domain/]...` aside): every device would then be read by the ISP.
+- fail-safe: while AdGuard Home's DNS port is closed the redirect is taken off.
+- `/opt/etc/ndm/netfilter.d/060-vward-dns-guard.sh` puts the rules back when
+  Keenetic rebuilds its firewall; the scheduler reconciles every minute (no process
+  when the guard is off).
+
 ### Device names in AdGuard Home
 
 `vward-ads-privacy-clients.sh` names in AdGuard Home the devices Keenetic has

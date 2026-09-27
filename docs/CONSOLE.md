@@ -92,6 +92,11 @@ policy-sync оно:
   домена; `stats` - счётчики AdGuard Home за сутки; `list review|blocked` - домены на проверке и
   заблокированные VWARD (из `verdicts.tsv`); `publish-status` - правила, отличающиеся от
   опубликованных (публикация сохраняет `published.rules`).
+- «Защита для всех устройств»: «Все устройства через AdGuard Home» (любой DNS-запрос из
+  домашней сети отвечает AdGuard Home) и «Не давать обходить защиту» (закрыты DoT/DoQ,
+  известные адреса DoH и имена DoH через список HaGeZi), «Исключения» по устройствам
+  (`ads-control` `op=dns-guard setting=enforce|bypass|exclude`, состояние - `dns_guard` в
+  `ads-data`). Пока выход AdGuard Home в интернет не зашифрован, включить нельзя.
 - Имена устройств: в блоке AdGuard Home переключатель «Имена устройств из Keenetic» и кнопка
   «Обновить имена» (`ads-control` `op=clients value=on|off|sync`, состояние - `clients` в
   `ads-data`). VWARD записывает имена зарегистрированных устройств в клиенты AdGuard Home через

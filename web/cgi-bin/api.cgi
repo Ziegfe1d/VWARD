@@ -772,11 +772,15 @@ EOF_COUNTS
   case "$LAST_OUTPUT_PATH" in "$AST/jobs/"*.out) [ -r "$LAST_OUTPUT_PATH" ] && LAST_OUTPUT="$(head -c 20000 "$LAST_OUTPUT_PATH" 2>/dev/null)" ;; esac
   AGH_ON=false; [ -s "${VWARD_ADS_AGH_AUTH_FILE:-$AETC/agh-api.auth}" ] && AGH_ON=true
   CLIENTS_BIN=${VWARD_ADS_CLIENTS_BIN:-/opt/bin/vward-ads-privacy-clients.sh}
+  GUARD_BIN=${VWARD_ADS_DNS_GUARD_BIN:-/opt/bin/vward-ads-privacy-dns-guard.sh}
+  GUARD="$([ -x "$GUARD_BIN" ] && "$GUARD_BIN" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' 2>/dev/null)"; [ -n "$GUARD" ] || GUARD='{}'
+  # Devices Keenetic knows, for the exclusion list: name and MAC only.
+  GHOSTS="$(curl -fsS --connect-timeout 2 --max-time 5 "${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/show/ip/hotspot" 2>/dev/null | "$JQ" -c '[(.host // [])[] | select((.mac // "") != "") | {name: (.name // .hostname // ""), mac: (.mac | ascii_downcase), online: (.active == true)}] | sort_by(.name == "", .name)' 2>/dev/null)"; [ -n "$GHOSTS" ] || GHOSTS='[]'
   CLIENTS="$([ -x "$CLIENTS_BIN" ] && "$CLIENTS_BIN" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' 2>/dev/null)"; [ -n "$CLIENTS" ] || CLIENTS='{}'
   # The last scan and the newest domains it judged (the built-in trusted ones are left out).
   SCAN="$([ -r "$AST/last-run.status" ] && awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' "$AST/last-run.status" | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' 2>/dev/null)"; [ -n "$SCAN" ] || SCAN='{}'
   RECENT="$(printf '%s\n' "$VPASS" | sed '$d' | sort -r | "$JQ" -Rn '[inputs|split("\t")|{first_seen:.[0],domain:.[1],verdict:.[2],action:.[3],reason:.[4]}]' 2>/dev/null)"; [ -n "$RECENT" ] || RECENT='[]'
-  "$JQ" -n --argjson scan "$SCAN" --argjson recent "$RECENT" --argjson agh "$AGH_ON" --argjson paused "$([ "$PAUSED" = 1 ]&&echo true||echo false)" --argjson settings "$SETJSON" --argjson sources "$SOURCES" --argjson manual "$MANUAL" --argjson jobsraw "$JOBS" --arg job_output "$LAST_OUTPUT" --argjson b "${BLOCKED:-0}" --argjson r "${REVIEW:-0}" --argjson a "${ALLOW:-0}" --argjson t "${TRUST:-0}" --argjson clients "$CLIENTS" '{ok:true,component:"ads-privacy-guard",agh_connected:$agh,clients:$clients,scan:$scan,recent:$recent,paused:$paused,settings:$settings,sources:$sources,manual_rules:$manual,counts:{blocked:$b,review:$r,allow:$a,trust:$t},categories:($sources | group_by(.purpose) | map({id:.[0].purpose, total:length, active:(map(select(.mode != "off")) | length)})),jobs:{queued:($jobsraw.JOB_QUEUE//"0"|(tonumber? // 0)),current:{state:($jobsraw.CURRENT_state//"IDLE"),type:($jobsraw.CURRENT_type//"")},last:{id:($jobsraw.LAST_id//""),state:($jobsraw.LAST_state//"NONE"),type:($jobsraw.LAST_type//""),arg:($jobsraw.LAST_arg//""),output:$job_output}}}'
+  "$JQ" -n --argjson scan "$SCAN" --argjson recent "$RECENT" --argjson agh "$AGH_ON" --argjson paused "$([ "$PAUSED" = 1 ]&&echo true||echo false)" --argjson settings "$SETJSON" --argjson sources "$SOURCES" --argjson manual "$MANUAL" --argjson jobsraw "$JOBS" --arg job_output "$LAST_OUTPUT" --argjson b "${BLOCKED:-0}" --argjson r "${REVIEW:-0}" --argjson a "${ALLOW:-0}" --argjson t "${TRUST:-0}" --argjson clients "$CLIENTS" --argjson guard "$GUARD" --argjson ghosts "$GHOSTS" '{ok:true,component:"ads-privacy-guard",agh_connected:$agh,clients:$clients,dns_guard:($guard + {hosts:$ghosts}),scan:$scan,recent:$recent,paused:$paused,settings:$settings,sources:$sources,manual_rules:$manual,counts:{blocked:$b,review:$r,allow:$a,trust:$t},categories:($sources | group_by(.purpose) | map({id:.[0].purpose, total:length, active:(map(select(.mode != "off")) | length)})),jobs:{queued:($jobsraw.JOB_QUEUE//"0"|(tonumber? // 0)),current:{state:($jobsraw.CURRENT_state//"IDLE"),type:($jobsraw.CURRENT_type//"")},last:{id:($jobsraw.LAST_id//""),state:($jobsraw.LAST_state//"NONE"),type:($jobsraw.LAST_type//""),arg:($jobsraw.LAST_arg//""),output:$job_output}}}'
   exit 0
 fi
 
@@ -1127,7 +1131,7 @@ if [ "$ACTION" = ads-control ]; then
   read_body 1024
   val(){ form_value "$1"; }
   OP="$(val op)"; DOMAIN="$(val domain|tr '[:upper:]' '[:lower:]')"; SCOPE="$(val scope)"; [ -n "$SCOPE" ]||SCOPE=exact
-  case "$OP" in pause|resume|allow|block|remove-override|source-mode|source-add|source-delete|source-category|enqueue|agh|clients) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
+  case "$OP" in pause|resume|allow|block|remove-override|source-mode|source-add|source-delete|source-category|enqueue|agh|clients|dns-guard) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
   case "$OP" in
     allow|block|remove-override) ads_valid_domain "$DOMAIN" || { echo '{"ok":false,"error":"invalid_domain"}'; exit 0; }; case "$SCOPE" in exact|suffix) ;; *) echo '{"ok":false,"error":"invalid_scope"}'; exit 0 ;; esac ;;
     source-mode) SID="$(val source)"; MODE="$(val mode)"; ads_valid_source_id "$SID" || { echo '{"ok":false,"error":"invalid_source"}'; exit 0; }; case "$MODE" in off|check|active) ;; *) echo '{"ok":false,"error":"invalid_source_mode"}'; exit 0 ;; esac ;;
@@ -1158,6 +1162,13 @@ if [ "$ACTION" = ads-control ]; then
         *) echo '{"ok":false,"error":"invalid_setting"}'; exit 0 ;;
       esac ;;
     clients) CLV="$(val value)"; case "$CLV" in on|off|sync) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac ;;
+    dns-guard) DGS="$(val setting)"; DGV="$(form_decode value url | tr 'A-F' 'a-f')"
+      case "$DGS" in
+        enforce|bypass) case "$DGV" in 0|1) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac ;;
+        exclude) case "$DGV" in -|[0-9a-f]*) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+          case "$DGV" in *[!0-9a-f:,-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac ;;
+        *) echo '{"ok":false,"error":"invalid_setting"}'; exit 0 ;;
+      esac ;;
     enqueue) JOB="$(val job)"; case "$JOB" in scan|sources-update|rules-rebuild) ;; publish) [ "$(val confirm)" = ADS_PUBLISH ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;; probe) ads_valid_domain "$DOMAIN" || { echo '{"ok":false,"error":"invalid_domain"}'; exit 0; } ;; *) echo '{"ok":false,"error":"invalid_job"}'; exit 0 ;; esac ;;
   esac
   RC=0; OUT="$(ads_console_tmp ads-control)" || { echo '{"ok":false,"error":"temporary_file_failed"}'; exit 0; }
@@ -1171,6 +1182,7 @@ if [ "$ACTION" = ads-control ]; then
     enqueue) [ "$JOB" = probe ] || DOMAIN=""; /opt/bin/vward-ads-privacy-job.sh enqueue "$JOB" "$DOMAIN" >"$OUT" 2>&1||RC=$? ;;
     agh) "${VWARD_ADS_CONTROL_BIN:-/opt/bin/vward-ads-privacy-control.sh}" agh "$@" >"$OUT" 2>&1||RC=$? ;;
     clients) "${VWARD_ADS_CLIENTS_BIN:-/opt/bin/vward-ads-privacy-clients.sh}" "$CLV" >"$OUT" 2>&1||RC=$? ;;
+    dns-guard) "${VWARD_ADS_DNS_GUARD_BIN:-/opt/bin/vward-ads-privacy-dns-guard.sh}" set "$DGS" "$DGV" >"$OUT" 2>&1||RC=$? ;;
   esac
   RES="$(head -c 12000 "$OUT" 2>/dev/null)"; rm -f "$OUT"; printf '%s|ADS_CONTROL|op=%s rc=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$OP" "$RC" >>/opt/var/log/vward/console-audit.log; "$JQ" -n --argjson ok "$([ "$RC" -eq 0 ]&&echo true||echo false)" --argjson rc "$RC" --arg result "$RES" '{ok:$ok,rc:$rc,result:$result}'; exit 0
 fi
