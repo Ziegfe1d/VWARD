@@ -104,6 +104,13 @@ rci() {
     printf '%s\n' "$r_out" | "$JQ" -e '[.. | objects | select(.status? == "error")] | length == 0' >/dev/null 2>&1
 }
 
+# Keenetic's own words for the last refused request (no keys go to RCI here).
+rci_why() {
+    w=$(printf '%s\n' "$r_out" | "$JQ" -r '[.. | objects | select(.status? == "error") | .message? // empty] | first // empty' 2>/dev/null |
+        tr -cs 'A-Za-z0-9 ._:,()/-' ' ' | cut -c1-200)
+    echo "${w:-no answer}"
+}
+
 # pid_of SLOT: the tunnel's program while it runs (a zombie left by a kill is not running).
 pid_of() {
     p=$(cat "$ENGINE_RUN/t$1.pid" 2>/dev/null)
@@ -165,6 +172,7 @@ op_add() {
     # Keenetic's «Прокси» connection to the local port; UDP goes through as well.
     rci "[{\"interface\":{\"name\":\"$proxy\",\"description\":\"$desc\",\"proxy\":{\"protocol\":{\"proto\":\"socks5\"},\"upstream\":{\"host\":\"127.0.0.1\",\"port\":\"$port\"},\"socks5-udp\":true}}}]" &&
         rci "[{\"interface\":{\"name\":\"$proxy\",\"up\":true}},{\"system\":{\"configuration\":{\"save\":true}}}]" || {
+        log "router_rejected $proxy: $(rci_why)"
         rci "[{\"interface\":{\"name\":\"$proxy\",\"no\":true}}]"
         stop_one "$n"; rm -f "$ENGINE_ETC/t$n.conf" "$ENGINE_ETC/t$n.wp"; die router_rejected; }
     printf '%s\t%s\t%s\t%s\n' "$n" "$proxy" "$port" "$desc" >> "$TUNNELS"

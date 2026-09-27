@@ -113,6 +113,8 @@ with tempfile.TemporaryDirectory() as t:
     (st / "handshake").write_text("1")
     (st / "rci-reject").write_text("1")
     run("add", "Finland", str(conf), expect="error=router_rejected")
+    if "router_rejected Proxy40: rejected" not in (t / "engine.log").read_text():
+        fail("the log must keep Keenetic's reason for a refused connection")
     if list((t / "etc").glob("t[0-9]*")) or list((t / "run").glob("*.pid")):
         fail("a refused tunnel left files behind")
     (st / "rci-reject").unlink()
