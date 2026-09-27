@@ -48,7 +48,9 @@ LOGS = {
         "2026-09-27 11:01:00|FAILOPEN_DOWN|health=DOWN|config=OK|age=30|down_streak=2|active=1",
         "2026-09-27 11:10:00|FAILOPEN_RESTORED|health=UP|config=OK|age=5|down_streak=0|active=0",
     ]),
-    "wan": "2026-09-27 10:00:00+0300 class=PHY_DOWN previous=HEALTHY carrier=0\n2026-09-27 10:02:00+0300 class=HEALTHY previous=PHY_DOWN ok\n",
+    "wan": "2026-09-27 08:00:00+0300 class=BOOT_GRACE previous=NONE uptime=60s\n2026-09-27 08:03:00+0300 class=HEALTHY previous=BOOT_GRACE\n"
+           "2026-09-27 09:00:00+0300 class=UTILITY_DEGRADED previous=HEALTHY reason=isp_rci_unavailable\n2026-09-27 09:01:00+0300 class=HEALTHY previous=UTILITY_DEGRADED\n"
+           "2026-09-27 10:00:00+0300 class=PHY_DOWN previous=HEALTHY carrier=0\n2026-09-27 10:02:00+0300 class=HEALTHY previous=PHY_DOWN ok\n",
     "recovery": "2026-09-27 10:01:00+0300 action=DHCP_RENEW interface=ISP rc=0\n2026-09-27 10:01:30+0300 action=MANUAL_WAN_BOUNCE interface=ISP down_rc=0 up_rc=1\n",
     "wifi": "2026-09-27T09:00:00+0300 INFO snapshot clients=5\n2026-09-27T09:01:00+0300 INFO band switch mac=aa:bb:cc:dd:ee:01 from=2.4 to=5 ap=ap1 rssi=-50\n",
     "updater": "\n".join([
@@ -69,7 +71,7 @@ EXPECT = {
     "tunnel": ["VPN снова работает - трафик списков вернулся в VPN", "VPN не работает - трафик списков пущен напрямую",
                "VPN не отвечает - проверяем ещё раз"],
     "wan": ["Интернет снова работает", "Вы переподключили интернет - не получилось", "Запросили у провайдера новый адрес",
-            "Нет сигнала в кабеле провайдера"],
+            "Нет сигнала в кабеле провайдера", "Роутер перезагрузился"],
     "wifi": ["Ноутбук: перешло с 2.4 ГГц на 5 ГГц"],
     "updater": ["Установлено обновление 0.2.0-rc.1.fix.16", "Проверка: обновлений нет"],
     "ads": ["Домены маршрутов идут через DNS Keenetic: 42", "Источники списков обновлены"],

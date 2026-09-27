@@ -226,6 +226,7 @@ small.st .icon{width:14px;height:14px}
 .filter-btn.on{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
 .chips{display:flex;gap:6px;padding:0 16px 12px;overflow-x:auto;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
+.chips:first-child{padding-top:12px}
 .chips button{flex:none;min-height:34px;padding:0 14px;border:1px solid var(--line-strong);border-radius:17px;background:var(--surface);color:var(--text);font-size:var(--fs-sm);font-weight:600;white-space:nowrap}
 .chips button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
 .inline-form.multi .input.compact{flex:1 1 40%}

@@ -862,7 +862,7 @@ const RENDER = {
       '<button class="icon-btn" type="button" data-act="log-save-all" aria-label="Сохранить все журналы" title="Сохранить все журналы">' + ico('archive') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-wrap" aria-pressed="' + logWrap + '" aria-label="Перенос строк" title="Перенос строк">' + ico('wrap') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-reload" aria-label="Обновить журнал" title="Обновить журнал">' + ico('refresh') + '</button></div></div><div class="panel">' +
-      '<div class="segmented" role="group" aria-label="Журнал">' + LOG_TABS.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
+      '<div class="chips" role="group" aria-label="Журнал">' + LOG_TABS.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
       '<pre class="logbox' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + esc(text == null ? 'Загрузка…' : text) + '</pre>' +
       '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p></div></section>';
   },
@@ -1183,7 +1183,7 @@ const TUNNEL_EV = {
 };
 const WAN_CLASS = {
   PHY_DOWN: ['bad', 'Нет сигнала в кабеле провайдера'], DHCP_FAILURE: ['bad', 'Провайдер не выдал адрес'], GATEWAY_FAILURE: ['bad', 'Шлюз провайдера не отвечает'],
-  DNS_ONLY_FAILURE: ['warn', 'Не отвечает DNS провайдера'], INTERNET_FAILURE: ['bad', 'Пропал интернет'], UNKNOWN: ['warn', 'Состояние интернета не удалось определить'],
+  DNS_ONLY_FAILURE: ['warn', 'Не работает DNS: сайты не открываются по именам'], INTERNET_FAILURE: ['bad', 'Пропал интернет'], UNKNOWN: ['warn', 'Состояние интернета не удалось определить'],
   WAN_RECOVERY_FAILED: ['bad', 'Восстановить подключение не удалось']
 };
 const WAN_ACTION = {
@@ -1199,7 +1199,11 @@ function wanEvent(rest, log) {
     const bad = /FAILED|INTERRUPTED/.test(f.action) || ['rc', 'up_rc', 'down_rc'].some(k => f[k] != null && f[k] !== '0');
     return { tone: bad ? 'bad' : 'info', text: t + (bad && !/FAILED|INTERRUPTED/.test(f.action) ? ' - не получилось' : '') };
   }
-  if (f.class === 'HEALTHY') return { tone: 'ok', text: f.previous && f.previous !== 'NONE' ? 'Интернет снова работает' : 'Интернет работает' };
+  // Only what happened to the internet: a slow answer of the router to VWARD's own
+  // check (UTILITY_DEGRADED) and the first check after a start are not events.
+  if (f.class === 'UTILITY_DEGRADED') return null;
+  if (f.class === 'BOOT_GRACE') return { tone: 'info', text: 'Роутер перезагрузился' };
+  if (f.class === 'HEALTHY') return !f.previous || ['NONE', 'UTILITY_DEGRADED', 'BOOT_GRACE'].includes(f.previous) ? null : { tone: 'ok', text: 'Интернет снова работает' };
   const m = WAN_CLASS[f.class];
   return m ? { tone: m[0], text: m[1] } : null;
 }
@@ -1816,6 +1820,12 @@ function render() {
   const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('deps-') ? depsPage(comp(current.slice(5))) : current.startsWith('l-') ? listPage(current.slice(2)) : current.startsWith('ip-') ? addrPage(current.slice(3)) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
   patchContent(html, rendered !== current);
   rendered = current;
+  // A chosen chip scrolled out of its row is brought back into view (the row only, not the page).
+  document.querySelectorAll('.chips').forEach(row => {
+    const on = row.querySelector('[aria-pressed="true"]'); if (!on) return;
+    const x = on.getBoundingClientRect().left - row.getBoundingClientRect().left + row.scrollLeft;
+    if (x < row.scrollLeft || x + on.offsetWidth > row.scrollLeft + row.clientWidth) row.scrollLeft = x - 16;
+  });
   document.querySelectorAll('.tabbar.preview').forEach(t => t.style.setProperty('--tabs', tabIds.length + 1));
   renderNav();
 }
