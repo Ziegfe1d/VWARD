@@ -82,13 +82,10 @@
         "runtime"
       ],
       "requires_running": [],
-      "uses": [
-        "route-engine"
-      ],
+      "uses": [],
       "runtime_targets": [
         "/opt/bin/vward-route-test.sh",
         "/opt/bin/vward-route-hints-update.sh",
-        "/opt/bin/vward-list-fill.sh",
         "/opt/bin/vward-route-resolve4.sh",
         "/opt/bin/vward-route.sh",
         "/opt/bin/vward-route-discovery.sh"

@@ -440,33 +440,6 @@ function listPath(l) {
 }
 let listWant = '';
 // One Keenetic domain list: where it goes, its domains and exclusions, all editable here.
-// The list grows from the domain catalog (vward-list-fill.sh): the switch, the
-// categories it follows, what the last night did, run now and take it back.
-function listFillPanel(name, f, ok) {
-  const on = f.mode !== 'off', cats = f.categories || '', manual = f.mode && f.mode !== 'auto' && f.mode !== 'off';
-  const last = f.ts ? fmtStamp(f.ts) + ' · добавлено ' + fmtInt(f.added || 0) + ', убрано ' + fmtInt(f.removed || 0) : 'ещё не было';
-  const busy = runningId === 'list-fill';
-  return panel('Пополнение из каталога', '<dl class="kv">' +
-      ctrlRow('Пополнять из каталога', sw('data-fill-on="' + esc(name) + '"', on, 'Пополнять список из каталога', !ok), on ? 'каждую ночь, после обновления каталога' : 'выключено: список меняете только вы') + '</dl>' +
-      (on ? kv([['Категории каталога', cats ? cats.split(',').join(', ') : (f.ts ? 'не найдены' : 'определятся ночью'), cats ? '' : 'warn', null, '', manual ? 'заданы вручную' : 'по доменам списка или его названию'],
-        ['Добавил VWARD', fmtInt(num(f.vward) || 0) + ' ' + plural(num(f.vward) || 0, 'домен', 'домена', 'доменов')],
-        ['Последнее пополнение', last, '', 'a-listfill']]) +
-        (num(f.pending) ? '<p class="field-warn">' + (f.full === '1' ? 'Не поместилось ' + fmtInt(f.pending) + ': в списке Keenetic не больше 300 доменов.' : 'Ещё ' + fmtInt(f.pending) + ' добавятся в следующий раз.') + '</p>' : '') +
-        '<form class="inline-form" data-form="list-fill-cats"><input class="input" name="cats" value="' + esc(manual ? cats.split(',').join(', ') : '') + '" placeholder="свои категории, например youtube; пусто - автоматически" aria-label="Категории каталога" autocomplete="off"' + (ok ? '' : ' disabled') + '><button class="btn" type="submit"' + (ok ? '' : ' disabled') + '>Сохранить</button></form>' +
-        (confirmBox('list-fill-undo', 'Откатить последнее пополнение? Добавленные тогда домены уйдут из списка и больше не вернутся, убранные - вернутся.', 'Откатить') ||
-          '<div class="panel-actions even">' + btn('list-fill-run', 'refresh', busy ? 'Пополняем…' : 'Пополнить сейчас', '', ok && !busy ? '' : ' disabled') +
-          (f.undo === '1' ? btn('ask', 'undo', 'Откатить последнее', '', ' data-confirm="list-fill-undo"' + (ok ? '' : ' disabled')) : '') + '</div>') : ''),
-    { desc: 'VWARD добавляет в список домены той же категории из каталога itdog и v2fly, если они отвечают. Убирает только то, что добавил сам: пропавшее из каталога или молчащее три ночи. Удалённое вами больше не вернётся.' });
-}
-async function listFillOp(action, value, okMsg) {
-  const name = current.slice(2);
-  if (action === 'run') { runningId = 'list-fill'; render(); }
-  let x;
-  try { x = await apiPost('config', Object.assign({ op: 'list-fill', action: action, target: name }, value ? { value: value } : {})); } catch (e) { x = { ok: false, error: e.message }; }
-  if (runningId === 'list-fill') runningId = '';
-  toast(x.ok ? (x.result === 'unchanged' ? (action === 'run' ? 'Добавлять пока нечего' : 'Уже сохранено') : okMsg) : 'Не выполнено: ' + errText(x));
-  await Promise.all([load('listd', true), load('lists', true)]); render();
-}
 function listPage(name) {
   const l = ((S.lists && S.lists.lists) || []).find(x => x.name === name), d = S.listd, ok = cfgOk();
   const tuns = (st().wg && st().wg.interfaces) || [];
@@ -475,7 +448,7 @@ function listPage(name) {
   const fresh = d && d.name === name, title = l.description || l.name, can = ok && (viaIs(l, 'vpn') || viaIs(l, 'bypass'));
   const rm = (act, v, label) => '<button class="icon-btn" type="button" data-list-dom="' + act + '" data-dom="' + esc(v) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (ok ? '' : ' disabled') + '>' + ico('close') + '</button>';
   const addF = (kind, ph) => '<form class="inline-form" data-form="list-add" data-kind="' + kind + '"><input class="input" name="domain" placeholder="' + esc(ph) + '" aria-label="Домен" autocomplete="off"' + (ok ? '' : ' disabled') + '><button class="btn" type="submit"' + (ok ? '' : ' disabled') + '>Добавить</button></form>';
-  const inc = fresh ? d.include : [], exc = fresh ? d.exclude : [], byVward = new Set(fresh && d.fill ? d.fill.vward_added || [] : []);
+  const inc = fresh ? d.include : [], exc = fresh ? d.exclude : [];
   return cfgNote() + (fresh || !d || !d.error ? '' : '<p class="field-warn">' + esc(errText(d)) + '</p>') +
     panel(title, '<dl class="kv">' +
       (tuns.length > 1 ? ctrlRow('Куда идёт', listViaSel(l, tuns, ok)) : ctrlRow('В обход VPN', sw('data-list-bypass="' + esc(l.name) + '"', viaIs(l, 'bypass'), 'В обход VPN: ' + title, !can), viaIs(l, 'bypass') ? 'сейчас идёт через провайдера' : 'сейчас идёт через VPN')) +
@@ -483,10 +456,9 @@ function listPage(name) {
       kv([['Адресов узнано', l.addresses != null ? fmtInt(l.addresses) : '—', '', null, '', 'IP-адреса, которые Keenetic получил для доменов списка']]) +
       (l.smartdns_conflict ? '<p class="field-warn">В списке есть домены Smart DNS: их общий адрес уйдёт в VPN, и Smart DNS перестанет работать для всех сервисов. Переведите список в обход VPN или уберите эти домены.</p>' : '') +
       (l.auto && viaIs(l, 'vpn') ? '<p class="field-warn">Переведён на VPN автоматически ' + esc(l.auto.at) + ': не открылся ' + esc(l.auto.host) + '</p>' : '')) +
-    (fresh ? listFillPanel(name, d.fill || {}, ok) : '') +
     panel('Домены', addF('add', 'например, example.com') +
       (inc.length > 8 ? '<input class="input list-filter" data-list-filter placeholder="Найти в списке" aria-label="Найти домен в списке" autocomplete="off">' : '') +
-      (!fresh ? empty('Загрузка…') : inc.length ? '<ul class="rows" data-list-rows>' + inc.map(v => '<li class="row" data-d="' + esc(v) + '"><div class="row-main"><b>' + dom(v) + '</b>' + (byVward.has(v) ? '<small>добавил VWARD из каталога</small>' : '') + '</div><span class="row-acts">' + rm('remove', v, 'Убрать ' + v + ' из списка') + '</span></li>').join('') + '</ul>' : empty('В списке нет доменов')),
+      (!fresh ? empty('Загрузка…') : inc.length ? '<ul class="rows" data-list-rows>' + inc.map(v => '<li class="row" data-d="' + esc(v) + '"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('remove', v, 'Убрать ' + v + ' из списка') + '</span></li>').join('') + '</ul>' : empty('В списке нет доменов')),
       { desc: fmtInt(inc.length || l.count) + ' ' + plural(inc.length || l.count, 'домен', 'домена', 'доменов') + '. Домен действует вместе с поддоменами. Изменения сразу сохраняются в Keenetic.' }) +
     panel('Исключения', addF('exclude', 'поддомен, который не входит в список') +
       (!fresh ? '' : exc.length ? '<ul class="rows">' + exc.map(v => '<li class="row"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('unexclude', v, 'Убрать исключение ' + v) + '</span></li>').join('') + '</ul>' : empty('Исключений нет')),
@@ -871,9 +843,8 @@ const RENDER = {
     const row = l => '<li class="row link" role="button" tabindex="0" data-go="l-' + esc(l.name) + '"><div class="row-main"><b>' + esc(l.description || l.name) + '</b><small>' + fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + ' · ' + esc(path(l)) + '</small>' +
       (l.smartdns_conflict || (l.auto && viaIs(l, 'vpn')) ? '<small class="st warn">' + ico('alert') + (l.smartdns_conflict ? 'конфликт со Smart DNS' : 'переведён на VPN автоматически') + '</small>' : '') + '</div>' + ico('chevron', 'chev') + '</li>';
     const sd = L.smartdns_domains || [];
-    return cfgNote() + panel('Доменные списки', (items.length ? '<ul class="rows">' + items.map(row).join('') + '</ul>' : empty('В Keenetic нет доменных списков')) +
-        kv([['Пополнение из каталога', 'что добавлено и убрано', '', 'a-listfill', '', 'каждую ночь списки дополняются из itdog и v2fly']]),
-        { desc: 'Нажмите на список, чтобы изменить его домены, куда он идёт и как пополняется.' }) +
+    return cfgNote() + panel('Доменные списки', items.length ? '<ul class="rows">' + items.map(row).join('') + '</ul>' : empty('В Keenetic нет доменных списков'),
+        { desc: 'Нажмите на список, чтобы изменить его домены и куда он идёт.' }) +
       panel('Smart DNS', kv([
         ['Защита Smart DNS', L.smartdns_guard !== false ? 'включена' : 'выключена', L.smartdns_guard !== false ? '' : 'warn', 'd-smartdns'],
         ['Домены', sd.length ? sd.length + ' ' + plural(sd.length, 'домен', 'домена', 'доменов') + ' · ' + smartdnsWhere(L) : 'нет', '', 'd-smartdns']
@@ -1200,16 +1171,6 @@ function adsEvent(rest) {
   const m = ADS_EV[p[0]];
   return m ? { tone: m[0], text: m[1], go: m[2] } : null;
 }
-// Lists grown from the catalog (vward-list-fill.sh): one line per domain added or removed.
-function listFillEvent(rest) {
-  const p = rest.split('|'), g = p[1] || '', l = ((S.lists && S.lists.lists) || []).find(x => x.name === g), name = '«' + ((l && l.description) || g) + '»', go = 'l-' + g;
-  if (p[0] === 'LIST_ADD') return { tone: 'ok', text: (p[2] || '') + ' добавлен в ' + name, go: go };
-  if (p[0] === 'LIST_REMOVE') return { tone: 'info', text: (p[2] || '') + ' убран из ' + name, go: go };
-  if (p[0] === 'LIST_FILL_UNDO') return { tone: 'warn', text: 'Пополнение ' + name + ' откачено', go: go };
-  if (p[0] === 'LIST_FILL_SET') return { tone: 'info', text: 'Пополнение ' + name + ': ' + (p[2] === 'off' ? 'выключено' : p[2] === 'auto' ? 'категории автоматически' : 'категории ' + String(p[2] || '').split(',').join(', ')), go: go };
-  if (p[0] === 'LIST_FILL') { const f = evFields(p); return f.full === '1' ? { tone: 'warn', text: 'В ' + name + ' не поместилось ' + fmtInt(f.pending) + ': больше 300 доменов Keenetic не держит', go: go } : null; }
-  return null;
-}
 const ACTIVITY = {
   adaptive: { title: 'Решения автоподбора', parent: 'routes', logs: ['adaptive'], read: l => routeEvent(l, ROUTE_ADAPTIVE), desc: 'Какие домены VWARD сам отправил через VPN или вернул напрямую. У каждого домена - что с ним сделать.', data: ['config', 'route'],
     top: () => cfgNote() + kv([['Автоподбор доменов', S.config ? countText((cfgRoute().adaptive || []).length) : '—', '', 'd-adaptive'], ['Всегда через VPN', S.config ? countText((cfgRoute().force_vpn || []).length) : '—', '', 'd-force']]) },
@@ -1225,7 +1186,6 @@ const ACTIVITY = {
   wifi: { title: 'События Wi-Fi', parent: 'wifi', logs: ['wifi'], read: wifiEvent, desc: 'Переходы устройств между диапазонами и применённые настройки. Нажмите на событие, чтобы открыть устройство.', data: ['wifi'] },
   updater: { title: 'Проверки обновлений', parent: 'u-vward', logs: ['updater'], read: updaterEvent, desc: 'Когда VWARD проверял и ставил обновления.', data: ['status', 'update', 'config'],
     top: () => kv([['Установка и откат', 'VWARD', '', 'u-vward']]) + '<div class="panel-actions">' + btn('update-op', 'refresh', runningId === 'updates' ? 'Проверяем…' : 'Проверить сейчас', '', ' data-op="check"' + (runningId === 'updates' ? ' disabled' : '')) + '</div>' },
-  listfill: { title: 'Пополнение списков', parent: 'lists', logs: ['listfill'], read: listFillEvent, desc: 'Что VWARD добавил в списки из каталога itdog и v2fly и что убрал. Нажмите на событие, чтобы открыть список.', data: ['lists'] },
   ads: { title: 'События блокировки', parent: 'ads', logs: ['ads'], read: adsEvent, desc: 'Что VWARD делал с источниками, правилами и AdGuard Home. Нажмите на событие, чтобы открыть, где это настраивается.', data: ['ads'] }
 };
 // What can be done with a domain from its event, by where it is now.
@@ -1869,7 +1829,6 @@ async function runAction(resultId, action, fields, okMsg) {
   finally { render(); }
 }
 const CONFIRMED = {
-  'list-fill-undo': () => listFillOp('undo', '', 'Последнее пополнение откачено'),
   'ext-upgrade': c => { const p = ((S.ext && S.ext.packages) || []).find(x => x.name === c.pkg); extOp('upgrade', c.pkg, p && p.critical ? 'EXT_UPGRADE_CRITICAL' : 'EXT_UPGRADE'); },
   'fw-channel': c => cfgSet({ op: 'firmware', target: 'channel', value: c.value, confirm: 'FIRMWARE_CHANNEL_TEST' }, 'Канал прошивки: ' + fwChannel(c.value), ['ext']),
   'route-reconcile': () => runLong('routes', 'control', { op: 'route-reconcile', confirm: 'ROUTE_RECONCILE' }, 'control-data', 'Маршруты сверены').then(() => load('route', true)).then(render),
@@ -2165,7 +2124,6 @@ document.addEventListener('click', e => {
   else if (a === 'ask') { confirm = { id: t.dataset.confirm, pkg: t.dataset.pkg }; render(); }
   else if (a === 'ext-check') extOp('check');
   else if (a === 'confirm-no') { confirm = null; render(); }
-  else if (a === 'list-fill-run') listFillOp('run', '', 'Список пополнен');
   else if (a === 'confirm-yes') { const c = confirm; confirm = null; if (c && CONFIRMED[c.id]) CONFIRMED[c.id](c); else render(); }
   else if (a === 'tunnel-probe') {
     const n = t.dataset.name; S.tprobe[n] = { busy: true }; render();
@@ -2280,7 +2238,6 @@ document.addEventListener('change', e => {
   if (t.hasAttribute('data-theme-pick')) { setTheme(t.value); return; }
   if (t.hasAttribute('data-smartdns-guard')) { cfgSet({ op: 'smartdns-guard', value: t.checked ? '1' : '0' }, t.checked ? 'Защита Smart DNS включена' : 'Защита Smart DNS выключена', ['lists']); return; }
   if (t.dataset.extAuto) { cfgSet({ op: 'ext-auto', target: t.dataset.extAuto, value: t.checked ? '1' : '0' }, t.checked ? 'Будет обновляться автоматически' : 'Обновление только вручную', ['ext']); return; }
-  if (t.dataset.fillOn) { listFillOp('set', t.checked ? 'auto' : 'off', t.checked ? 'Список пополняется из каталога' : 'Пополнение выключено'); return; }
   if (t.hasAttribute('data-policy-group')) { if (t.value) cfgSet({ op: 'policy-group', target: t.value }, 'Мои домены теперь добавляются в ' + t.value, ['route', 'security']); return; }
   if (t.hasAttribute('data-route-tunnel')) { const to = t.value; t.value = prof().tunnel_interface || ''; if (to && to !== t.value) { confirm = { id: 'route-tunnel', to: to }; render(); } return; }
   if (t.hasAttribute('data-fw-auto')) { t.disabled = true; cfgSet({ op: 'firmware', target: 'auto', value: t.checked ? '1' : '0' }, t.checked ? 'Keenetic будет обновляться автоматически' : 'Прошивка обновляется только вручную', ['ext']); return; }
@@ -2331,11 +2288,6 @@ document.addEventListener('submit', async e => {
       box.innerHTML = x.type === 'ip' ? kv([['Адрес', x.value], ['Категории', (x.policy_matches || []).map(m => m.category).join(', ') || 'нет'], ['Маршрут VWARD', x.configured_route ? 'через ' + x.interface : 'нет', x.configured_route ? 'info' : '']])
         : kv([['Домен', x.value], ['IPv4', ((x.dns && x.dns.ipv4) || []).join(', ') || 'не найден'], ['Группы', (x.groups || []).join(', ') || 'нет'], ['Маршрут', (x.routes || []).map(r => r.group + ' → ' + r.interface).join(', ') || 'напрямую', (x.routes || []).length ? 'info' : ''], ['Автоподбор доменов', x.adaptive_auto ? 'Да' : 'Нет']]);
     } catch (err) { box.innerHTML = '<p class="field-warn">Ошибка: ' + esc(err.message) + '</p>'; }
-  }
-  if (f === 'list-fill-cats') {
-    const raw = e.target.querySelector('input').value.trim().toLowerCase(), parts = raw.split(/[\s,;:]+/).filter(Boolean);
-    if (parts.some(c => !/^[a-z0-9_.-]{1,40}$/.test(c)) || parts.length > 5) { toast('Категории - латиницей через запятую, до пяти'); return; }
-    listFillOp('set', parts.length ? parts.join(':') : 'auto', parts.length ? 'Категории сохранены' : 'Категории - автоматически');
   }
   if (f === 'list-add') {
     const input = e.target.querySelector('input'), v = input.value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/:].*$/, '').replace(/^\*\./, '');

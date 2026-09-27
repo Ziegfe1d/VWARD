@@ -116,7 +116,6 @@ for participant in \
     components/route-tools/scripts/vward-route.sh \
     components/route-tools/scripts/vward-route-discovery.sh \
     components/route-tools/scripts/vward-route-hints-update.sh \
-    components/route-tools/scripts/vward-list-fill.sh \
     components/tunnel-guard/scripts/vward-tunnel-health.sh \
     components/tunnel-guard/scripts/vward-tunnel-guard.sh \
     components/wan-guard/scripts/vward-wan-guard.sh \

@@ -699,7 +699,6 @@ if [ "$ACTION" = config ]; then
         update-feed) set -- "$OP" "$TARGET"; [ "$TARGET" != dev ] || REQUIRED=UPDATE_FEED_DEV ;;
         ext-auto) set -- "$OP" "$TARGET" "$VALUE" ;;
         list-domain) set -- "$OP" "$ACT" "$TARGET" "$VALUE" ;;
-        list-fill) if [ -n "$VALUE" ]; then set -- "$OP" "$ACT" "$TARGET" "$VALUE"; else set -- "$OP" "$ACT" "$TARGET"; fi ;;
         firmware) set -- "$OP" "$TARGET" "$VALUE"
             [ "$TARGET:$VALUE" = channel:preview ] || [ "$TARGET:$VALUE" = channel:draft ] && REQUIRED=FIRMWARE_CHANNEL_TEST ;;
         *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
@@ -2044,24 +2043,17 @@ if [ "$ACTION" = list-data ]; then
     printf '%s\n' "$NAME" | grep -Eq '^domain-list[0-9]{1,3}$' || { echo '{"ok":false,"error":"invalid_group"}'; exit 0; }
     RUNNING="$(ndm_cached running 10 "show running-config")"
     [ -n "$RUNNING" ] || { echo '{"ok":false,"error":"router_config_unavailable"}'; exit 0; }
-    LD_TMP="$(ads_console_tmp list-data)" || { echo '{"ok":false,"error":"temporary_file_failed"}'; exit 0; }
     printf '%s\n' "$RUNNING" | awk -v g="$NAME" '
         /^object-group fqdn / {cur=$3; if (cur == g) print "F\t"; next}
         /^!/ {cur=""; next}
         cur != g {next}
         $1 == "description" {sub(/^[ \t]*description[ \t]+/, ""); gsub(/"/, ""); print "D\t" $0; next}
         $1 == "include" {print "I\t" tolower($2); next}
-        $1 == "exclude" {print "E\t" tolower($2)}' > "$LD_TMP"
-    # Growing from the catalog (vward-list-fill.sh), with the entries VWARD added itself.
-    FILL_BIN=${VWARD_LIST_FILL_BIN:-/opt/bin/vward-list-fill.sh}
-    FILL="$([ -x "$FILL_BIN" ] && "$FILL_BIN" status "$NAME" 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' 2>/dev/null)"; [ -n "$FILL" ] || FILL='{}'
-    FILL_ADDED="$(awk 'NF{print tolower($1)}' "${VWARD_LIST_FILL_STATE:-/opt/var/lib/vward/list-fill}/$NAME.added" 2>/dev/null | head -n 400 | "$JQ" -Rn '[inputs|select(length>0)]')"; [ -n "$FILL_ADDED" ] || FILL_ADDED='[]'
-    "$JQ" -Rn --arg name "$NAME" --argjson fill "$FILL" --argjson added "$FILL_ADDED" '[inputs | split("\t")] as $r |
+        $1 == "exclude" {print "E\t" tolower($2)}' |
+    "$JQ" -Rn --arg name "$NAME" '[inputs | split("\t")] as $r |
         if ($r | map(select(.[0] == "F")) | length) == 0 then {ok:false, error:"list_not_found"}
         else {ok:true, name:$name, description:([$r[] | select(.[0] == "D") | .[1]][0] // ""),
-              include:[$r[] | select(.[0] == "I") | .[1]], exclude:[$r[] | select(.[0] == "E") | .[1]],
-              fill:($fill + {vward_added:$added})} end' < "$LD_TMP"
-    rm -f "$LD_TMP"
+              include:[$r[] | select(.[0] == "I") | .[1]], exclude:[$r[] | select(.[0] == "E") | .[1]]} end'
     exit 0
 fi
 
@@ -2289,9 +2281,6 @@ if [ "$ACTION" = "log" ]; then
             ;;
         ads)
             FILE=/opt/var/log/vward-ads-privacy-guard.log
-            ;;
-        listfill)
-            FILE=/opt/var/log/vward-list-fill.log
             ;;
         *)
             FILE=
