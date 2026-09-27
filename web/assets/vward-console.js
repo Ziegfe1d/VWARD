@@ -133,7 +133,7 @@ const errText = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.
 
 /* ---------- Данные ---------- */
 const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, ext: null, listd: null, wanhist: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
-const ADSV = { filter: 'all', search: '', blockedSearch: '' };
+const ADSV = { filter: 'all', search: '', blockedSearch: '', filtersOpen: false };
 // Files page: the open folder.
 const FILES = { root: '', path: '' };
 const LOADERS = {
@@ -473,7 +473,7 @@ function listPage(name) {
       (l.smartdns_conflict ? '<p class="field-warn">В списке есть домены Smart DNS: их общий адрес уйдёт в VPN, и Smart DNS перестанет работать для всех сервисов. Переведите список в обход VPN или уберите эти домены.</p>' : '') +
       (l.auto && viaIs(l, 'vpn') ? '<p class="field-warn">Переведён на VPN автоматически ' + esc(l.auto.at) + ': не открылся ' + esc(l.auto.host) + '</p>' : '')) +
     panel('Домены', addF('add', 'example.com', 'Добавить домен в список') +
-      (inc.length > 8 ? '<input class="input list-filter" data-list-filter placeholder="Найти в списке" aria-label="Найти домен в списке" autocomplete="off">' : '') +
+      (inc.length > 8 ? '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти в списке" aria-label="Найти домен в списке" autocomplete="off"></label>' : '') +
       (!fresh ? empty('Загрузка…') : inc.length ? '<ul class="rows" data-list-rows>' + inc.map(v => '<li class="row" data-d="' + esc(v) + '"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('remove', v, 'Убрать ' + v + ' из списка') + '</span></li>').join('') + '</ul>' : empty('В списке нет доменов')),
       { desc: fmtInt(inc.length || l.count) + ' ' + plural(inc.length || l.count, 'домен', 'домена', 'доменов') + '. Домен действует вместе с поддоменами. Изменения сразу сохраняются в Keenetic.' }) +
     panel('Исключения', addF('exclude', 'music.example.com', 'Добавить исключение') +
@@ -926,8 +926,10 @@ const RENDER = {
   },
   'd-querylog'() {
     const q = S.qlog, f = [['all', 'Все'], ['blocked', 'Заблокированные'], ['allowed', 'Разрешённые'], ['review', 'На проверке']];
-    return panel('Журнал запросов', '<div class="segmented" role="group" aria-label="Фильтр">' + f.map(x => '<button type="button" data-qfilter="' + x[0] + '" aria-pressed="' + (ADSV.filter === x[0]) + '">' + x[1] + '</button>').join('') + '</div>' +
-      '<form class="inline-form" data-form="ads-qsearch">' + formLabel('Найти домен') + '<input class="input" name="q" value="' + esc(ADSV.search) + '" placeholder="часть домена, например yandex" aria-label="Поиск по домену" autocomplete="off"><button class="btn" type="submit">' + ico('search') + 'Найти</button></form>' +
+    const set = ADSV.filter !== 'all', open = ADSV.filtersOpen || set;
+    const fbtn = '<button class="icon-btn filter-btn' + (set ? ' on' : '') + '" type="button" data-act="qfilters" aria-expanded="' + open + '" aria-label="Фильтр" title="Фильтр">' + ico('sliders') + '</button>';
+    return panel('Журнал запросов', searchBar('ads-qsearch', ADSV.search, 'Найти домен', fbtn) +
+      (open ? '<div class="chips" role="group" aria-label="Фильтр">' + f.map(x => '<button type="button" data-qfilter="' + x[0] + '" aria-pressed="' + (ADSV.filter === x[0]) + '">' + x[1] + '</button>').join('') + '</div>' : '') +
       (!q ? empty('Загрузка…') : !q.ok ? empty(errText(q)) : q.entries.length ? '<ul class="rows">' + q.entries.map(e => '<li class="row"><div class="row-main"><b>' + dom(e.domain) + '</b><small><span class="st ' + (e.blocked ? 'crit' : 'ok') + '">' + (e.blocked ? 'заблокирован' : 'разрешён') + '</span>' + (e.verdict === 'SUSPECT' ? ' · на проверке' : '') + ' · ' + esc(fmtTime(e.time)) + ' · ' + esc(e.client) + '</small></div><span class="row-acts">' + adsRuleBtn(e.domain, e.blocked ? 'allow' : 'block') + '</span></li>').join('') + '</ul>' : empty('Запросов не найдено')),
       { desc: 'Последние запросы устройств.' });
   },
@@ -938,7 +940,7 @@ const RENDER = {
   },
   'd-blocked'() {
     const r = S.blocked;
-    return panel('Заблокировано', '<form class="inline-form" data-form="ads-bsearch">' + formLabel('Найти домен') + '<input class="input" name="q" value="' + esc(ADSV.blockedSearch) + '" placeholder="часть домена" aria-label="Поиск по домену" autocomplete="off"><button class="btn" type="submit">' + ico('search') + 'Найти</button></form>' +
+    return panel('Заблокировано', searchBar('ads-bsearch', ADSV.blockedSearch, 'Найти домен') +
       (!r ? empty('Загрузка…') : !r.ok ? empty(errText(r)) : r.entries.length ? '<ul class="rows">' + r.entries.map(e => '<li class="row"><div class="row-main"><b>' + dom(e.domain) + '</b><small>' + esc(reasonText(e.reason)) + '</small></div><span class="row-acts">' + adsRuleBtn(e.domain, 'allow') + '</span></li>').join('') + '</ul>' + (r.total > r.entries.length ? '<p class="panel-desc">Показаны ' + r.entries.length + ' из ' + fmtInt(r.total) + ' - уточните поиск.</p>' : '') : empty('Ничего не найдено')),
       { desc: 'Домены, которые VWARD заблокировал автоматически.' });
   },
@@ -1015,6 +1017,10 @@ const HOURS = Array.from({ length: 24 }, (x, i) => { const h = (i < 10 ? '0' : '
 function withCur(opts, v, unit) { return v == null || v === '' || opts.some(o => String(o[0]) === String(v)) ? opts : opts.concat([[v, v + unit]]); }
 function countText(n) { return n + ' ' + plural(n, 'домен', 'домена', 'доменов'); }
 function cfgNote() { return !S.config ? '' : !S.config.writable ? '<p class="field-warn">Изменение настроек из VWARD недоступно: на роутере нет vward-console-config.sh. Установите обновление VWARD.</p>' : ''; }
+// A search: one field with a magnifier inside, Enter searches; an optional button beside it.
+function searchBar(form, value, placeholder, extra) {
+  return '<form class="search-bar" data-form="' + form + '"><label class="search-field">' + ico('search') + '<input class="input" type="search" name="q" value="' + esc(value) + '" placeholder="' + esc(placeholder) + '" aria-label="' + esc(placeholder) + '" autocomplete="off" enterkeyhint="search"></label>' + (extra || '') + '</form>';
+}
 function formLabel(text) { return '<span class="form-label">' + esc(text) + '</span>'; }
 function addForm(op, placeholder, label) { return '<form class="inline-form" data-form="cfg-add" data-op="' + op + '">' + formLabel(label || 'Новый домен') + '<input class="input" name="domain" placeholder="' + esc(placeholder) + '" aria-label="Домен" autocomplete="off"' + (cfgOk() ? '' : ' disabled') + '><button class="btn primary" type="submit"' + (cfgOk() ? '' : ' disabled') + '>' + ico('plus') + 'Добавить</button></form>'; }
 function rowBtn(op, action, d, icon, label) { return '<button class="icon-btn" type="button" data-cfg-op="' + op + '" data-cfg-action="' + action + '" data-cfg-target="' + esc(d) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (cfgOk() ? '' : ' disabled') + '>' + ico(icon) + '</button>'; }
@@ -2155,6 +2161,7 @@ document.addEventListener('click', e => {
   if (a === 'close') closeLayer();
   else if (a === 'reload') { Promise.all(DATA_FOR(current).map(k => load(k, true))).then(() => { render(); toast('Данные обновлены'); }); }
   else if (a === 'edit') { editing = !editing; render(); }
+  else if (a === 'qfilters') { ADSV.filtersOpen = !(ADSV.filtersOpen || ADSV.filter !== 'all'); if (!ADSV.filtersOpen && ADSV.filter !== 'all') { ADSV.filter = 'all'; S.qlog = null; load('qlog', true).then(render); } render(); }
   else if (a === 'cards-reset') { cardOrder = CARD_IDS.slice(); hiddenCards = []; cardView = 'grid'; ['vward-card-order', 'vward-card-hidden', 'vward-card-view'].forEach(k => store.del(k)); render(); toast('Карточки сброшены'); }
   else if (a === 'ask') { confirm = { id: t.dataset.confirm, pkg: t.dataset.pkg }; render(); }
   else if (a === 'ext-check') extOp('check');

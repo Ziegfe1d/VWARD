@@ -208,6 +208,18 @@ small.st .icon{width:14px;height:14px}
 .file-pick input{position:absolute;width:1px;height:1px;opacity:0}
 .inline-form .input{flex:1 1 0;min-width:0;width:auto}
 .inline-form.multi .input{flex:1 1 100%}
+/* Поиск: одно поле с лупой внутри, рядом кнопка фильтра; фильтры - одна строка, листается вбок. */
+.search-bar{display:flex;align-items:center;gap:8px;padding:12px 16px}
+.search-field{position:relative;flex:1 1 0;min-width:0}
+.search-field .icon{position:absolute;left:12px;top:50%;width:18px;height:18px;transform:translateY(-50%);color:var(--muted);pointer-events:none}
+.search-field .input{padding-left:38px}
+.search-field .input::-webkit-search-cancel-button{cursor:pointer}
+.filter-btn{flex:none;width:42px;height:42px;border:1px solid var(--line-strong);border-radius:var(--r-md)}
+.filter-btn.on{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
+.chips{display:flex;gap:6px;padding:0 16px 12px;overflow-x:auto;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chips button{flex:none;min-height:34px;padding:0 14px;border:1px solid var(--line-strong);border-radius:17px;background:var(--surface);color:var(--text);font-size:var(--fs-sm);font-weight:600;white-space:nowrap}
+.chips button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
 .inline-form.multi .input.compact{flex:1 1 40%}
 .switch{position:relative;display:inline-block;width:42px;height:24px;flex:none}
 .switch input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
@@ -273,7 +285,7 @@ small.st .icon{width:14px;height:14px}
 /* A confirmation for one row opens under it, across the whole row. */
 .row>.confirm{flex:1 1 100%;margin:4px 0 0}
 .row[hidden]{display:none}
-.list-filter{display:block;width:calc(100% - 32px);margin:0 16px 8px}
+.list-filter{display:block;margin:0 16px 8px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* Окно установки обновления */
