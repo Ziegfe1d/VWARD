@@ -554,8 +554,8 @@ const RENDER = {
       panel('Обслуживание', kv([
         ['Решения автоподбора', 'журнал проверок доменов', '', 'logs', ' data-log-go="adaptive"'],
         ['Сверка маршрутов', 'каждые 5 минут', '', 'logs', ' data-log-go="routing"'],
-        ['Каталог обновлён', d.last_update || '—'],
-        ['IP-категории обновлены', ip.last_sync || '—', '', 'logs', ' data-log-go="policy"']
+        ['Каталог обновлён', catalogStamp(d.last_update)],
+        ['IP-категории обновлены', ipSyncStamp(ip.last_sync), '', 'logs', ' data-log-go="policy"']
       ]) +
         (confirmBox('route-reconcile', 'Сверить маршруты роутера с каталогом сейчас?', 'Выполнить') || confirmBox('policy-refresh', 'Скачать IP-категории заново и пересобрать маршруты? Это займёт 1-2 минуты.', 'Выполнить') ||
           '<div class="panel-actions even">' + btn('ask', 'check', 'Сверить маршруты', '', ' data-confirm="route-reconcile"') + btn('ask', 'refresh', 'Обновить IP-категории', '', ' data-confirm="policy-refresh"') + btn('refresh-hints', 'refresh', 'Обновить подсказки') + '</div>') +
@@ -1004,6 +1004,28 @@ function fmtStamp(t) {
   if (m && MON[m[1]]) return ('0' + m[2]).slice(-2) + '.' + ('0' + MON[m[1]]).slice(-2) + ' ' + m[3];
   if (/^\d{9,10}$/.test(s)) return fmtTime(Number(s) * 1000);
   return fmtTime(s);
+}
+// A log line "2026-09-27 04:26:52|OK|rows=1|..." or "... SYNC added=3 ...": its time,
+// its first bare word (OK, SYNC, FAIL...) and its key=value fields.
+function logLine(t) {
+  const s = String(t || '').trim(), m = /^(\d{4}-\d\d-\d\d)[ T](\d\d:\d\d(?::\d\d)?)/.exec(s), f = {};
+  const rest = m ? s.slice(m[0].length) : s, words = rest.split(/[|\s]+/).filter(Boolean);
+  words.forEach(w => { const i = w.indexOf('='); if (i > 0) f[w.slice(0, i)] = w.slice(i + 1); });
+  return { at: m ? fmtTime(m[1] + 'T' + m[2]) : '', word: (words.find(w => !w.includes('=')) || '').toUpperCase(), f: f };
+}
+function catalogStamp(t) {
+  if (!t) return '—';
+  const l = logLine(t), n = num(l.f.domains), c = num(l.f.categories);
+  if (!l.at && !Object.keys(l.f).length) return 'нет данных';
+  if (l.word && l.word !== 'OK') return (l.at ? l.at + ' · ' : '') + 'ошибка обновления';
+  return [l.at, n != null ? fmtInt(n) + ' ' + plural(n, 'домен', 'домена', 'доменов') : '', c != null ? fmtInt(c) + ' ' + plural(c, 'категория', 'категории', 'категорий') : ''].filter(Boolean).join(' · ') || '—';
+}
+function ipSyncStamp(t) {
+  if (!t) return '—';
+  const l = logLine(t), add = num(l.f.added) || 0, del = num(l.f.removed) || 0, err = num(l.f.errors) || 0;
+  if (!l.at && !Object.keys(l.f).length) return 'нет данных';
+  const what = /FAIL|ERROR/.test(l.word) ? 'ошибка обновления' : err ? fmtInt(err) + ' ' + plural(err, 'ошибка', 'ошибки', 'ошибок') : add || del ? 'добавлено ' + fmtInt(add) + ', убрано ' + fmtInt(del) : 'без изменений';
+  return (l.at ? l.at + ' · ' : '') + what;
 }
 function fmtTime(t) { const d = new Date(t); return isNaN(d) ? (t || '') : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
 const FILE_ROOTS = [['etc', 'Настройки', '/opt/etc/vward'], ['state', 'Состояние', '/opt/var/lib/vward'], ['logs', 'Журналы', '/opt/var/log/vward'], ['share', 'Программа', '/opt/share/vward']];
