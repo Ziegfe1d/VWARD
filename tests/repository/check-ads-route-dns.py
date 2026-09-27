@@ -27,6 +27,8 @@ st = json.loads(p.read_text())
 args = sys.argv[1:]
 if "-K" in args: sys.stdin.read()
 url = [a for a in args if a.startswith("http")][-1]
+if "/rci/show/internet/status" in url:
+    print(json.dumps({"internet": st.get("keenetic_dns", True), "dns-accessible": st.get("keenetic_dns", True)})); sys.exit(0)
 out = args[args.index("-o") + 1]
 method = args[args.index("-X") + 1] if "-X" in args else "GET"
 body = json.loads(Path(args[args.index("--data-binary") + 1][1:]).read_text()) if "--data-binary" in args else {}
@@ -160,8 +162,15 @@ with tempfile.TemporaryDirectory() as tmp:
     for shell in shells:
         tag = shell[0]
         status.unlink(missing_ok=True)
-        (etc / "route-dns.disabled").unlink(missing_ok=True)
+        (etc / "route-dns.enabled").unlink(missing_ok=True)
         rc.write_text(RC_VIA_AGH + RC_REST)
+        # Off by default: rows left by an earlier version go at the first tick.
+        agh.write_text(json.dumps({"upstream_dns": BASE[:2] + ["[/ggpht.com/]192.168.1.1:53"] + BASE[2:],
+                                   "clients": [{"name": CLIENT, "ids": ["127.0.0.1", "192.168.1.1"], "upstreams": BASE}]}))
+        r = run("tick", shell)
+        if ours() or client() or st()["result"] != "off" or "enabled=0" not in run("status", shell).stdout:
+            fail(f"{tag} default must be off and clean up: {r.stdout} {S()['upstream_dns']}")
+        (etc / "route-dns.enabled").write_text("")
         # The router as left by the manual test: one row and the client already there.
         agh.write_text(json.dumps({
             "upstream_dns": BASE[:2] + ["[/ggpht.com/]192.168.1.1:53"] + BASE[2:],
@@ -251,6 +260,17 @@ with tempfile.TemporaryDirectory() as tmp:
         r = run("on", shell)
         if ours() != [WANT_ROW] or not client():
             fail(f"{tag} on: {r.stdout}")
+
+        # Keenetic's own DNS stops answering while the chain is on: it goes at once and the switch turns off.
+        s = S(); s["keenetic_dns"] = False; agh.write_text(json.dumps(s))
+        status.write_text(status.read_text().replace("ts=", "old_ts=", 1))
+        r = run("tick", shell)
+        if ours() or client() or st()["result"] != "dns_lost" or (etc / "route-dns.enabled").exists():
+            fail(f"{tag} Keenetic DNS lost: {r.stdout} {ours()} {client()}")
+        calls = len(S()["calls"])
+        run("tick", shell)
+        if len(S()["calls"]) != calls:
+            fail(f"{tag} after the automatic off a tick must do nothing")
 
         if S().get("violations"):
             fail(f"{tag} a row existed without the router's client: {S()['violations']}")

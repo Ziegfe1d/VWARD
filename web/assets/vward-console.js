@@ -2154,7 +2154,7 @@ function aghClientsRows(a) {
 // VPN routes learn every address a device gets for them.
 function routeDnsRows(a) {
   if (!a.agh_connected) return '';
-  const r = a.route_dns || {}, on = r.enabled !== '0', n = num(r.domains) || 0, sk = num(r.skipped) || 0;
+  const r = a.route_dns || {}, on = r.enabled === '1', n = num(r.domains) || 0, sk = num(r.skipped) || 0;
   const hints = {
     ok: fmtInt(n) + ' ' + plural(n, 'домен', 'домена', 'доменов') + ' · маршруты сразу знают адреса устройств' + (sk ? ' · ' + fmtInt(sk) + ' через Smart DNS' : ''),
     not_via_agh: 'не нужно: DNS Keenetic не спрашивает AdGuard Home',
@@ -2163,7 +2163,7 @@ function routeDnsRows(a) {
     chain_failed: 'DNS Keenetic не ответил, отменено; VWARD повторит сам',
     agh_unavailable: 'AdGuard Home не ответил, VWARD повторит сам',
     router_unavailable: 'Keenetic не ответил, VWARD повторит сам'
-  }, hint = !on ? 'выключено' : r.result in hints ? hints[r.result] : 'включится автоматически';
+  }, hint = r.result === 'dns_lost' ? 'выключено само: DNS Keenetic перестал отвечать' : !on ? 'экспериментально, выключено' : r.result in hints ? hints[r.result] : 'включается…';
   return '<dl class="kv">' + ctrlRow('Домены маршрутов через DNS Keenetic', sw('data-route-dns', on, 'Домены маршрутов через DNS Keenetic', !S.ads), hint) + '</dl>';
 }
 async function routeDnsOp(value) {

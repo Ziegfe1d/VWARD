@@ -29,7 +29,13 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 . "$LIB"
 
 STATUS="${VWARD_ROUTE_DNS_STATUS:-/tmp/vward-route-dns.status}"
+# Off unless switched on: on the owner's router Keenetic's DNS took the chain for a
+# loop ("proxy loop detected" between two services on the router's address), dropped AdGuard Home
+# as its server and lost its own DNS (2026-09-27).  The old "disabled" flag of
+# 0.2.0-rc.1.fix.16 is gone with the default.
+ENABLED_FLAG="${VWARD_ROUTE_DNS_ENABLED:-$ADS_ETC/route-dns.enabled}"
 DISABLED_FLAG="${VWARD_ROUTE_DNS_DISABLED:-$ADS_ETC/route-dns.disabled}"
+RCI_BASE="${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}"
 LOCK="${VWARD_ROUTE_DNS_LOCK:-/tmp/vward-route-dns.lock}"
 NDMC="${VWARD_NDMC:-ndmc}"
 EVERY="${VWARD_ROUTE_DNS_EVERY_SEC:-300}"
@@ -53,19 +59,19 @@ status_write()
 
 case "$OP" in
     status)
-        if [ -e "$DISABLED_FLAG" ]; then echo "enabled=0"; else echo "enabled=1"; fi
+        if [ -e "$ENABLED_FLAG" ]; then echo "enabled=1"; else echo "enabled=0"; fi
         [ -r "$STATUS" ] && grep -E '^(ts|result|domains|skipped|changed_ts)=' "$STATUS"
         exit 0 ;;
-    on) rm -f "$DISABLED_FLAG" || exit 1 ;;
-    off) mkdir -p "$(dirname "$DISABLED_FLAG")" && : > "$DISABLED_FLAG" || exit 1 ;;
+    on) mkdir -p "$(dirname "$ENABLED_FLAG")" && : > "$ENABLED_FLAG" || exit 1; rm -f "$DISABLED_FLAG" ;;
+    off) rm -f "$ENABLED_FLAG" || exit 1 ;;
     apply|tick) ;;
     *) echo "usage: $0 status|on|off|apply|tick" >&2; exit 64 ;;
 esac
 
-ENABLED=1; [ ! -e "$DISABLED_FLAG" ] || ENABLED=0
+ENABLED=0; [ ! -e "$ENABLED_FLAG" ] || ENABLED=1
 if [ "$OP" = tick ]; then
     # Off and nothing left in AdGuard Home: no work at all.
-    [ "$ENABLED" = 1 ] || [ "$(status_value result)" != off ] || exit 0
+    case "$(status_value result)" in off|dns_lost) [ "$ENABLED" = 1 ] || exit 0 ;; esac
     LAST=$(ads_num "$(status_value ts)" 0)
     [ $(($(ads_epoch) - LAST)) -ge "$EVERY" ] || exit 0
 fi
@@ -102,7 +108,7 @@ finish()
     fi_result=$1; shift
     status_write "$fi_result" "$@"
     echo "ROUTE_DNS=$(printf '%s' "$fi_result" | tr 'a-z' 'A-Z')"
-    case "$fi_result" in ok|off|not_via_agh|no_domains) exit 0 ;; esac
+    case "$fi_result" in ok|off|dns_lost|not_via_agh|no_domains) exit 0 ;; esac
     echo "ERROR=$fi_result"
     exit 1
 }
@@ -111,11 +117,24 @@ ads_agh_api_get dns_info "$WORK/info.json" >/dev/null 2>&1 || finish agh_unavail
 ads_agh_api_get clients "$WORK/clients.json" >/dev/null 2>&1 || finish agh_unavailable
 CHANGED_TS=$(status_value changed_ts)
 
+# Keenetic's own DNS stopped answering while the chain is on: the chain goes at
+# once and the switch is turned off (Keenetic takes AdGuard Home back by itself).
+if [ "$ENABLED" = 1 ] && [ "$(status_value result)" = ok ]; then
+    DNS_OK=$("$ADS_CURL" -s --max-time 5 "$RCI_BASE/show/internet/status" 2>/dev/null | "$ADS_JQ" -r '.["dns-accessible"] | tostring' 2>/dev/null)
+    if [ "$DNS_OK" = false ]; then
+        rm -f "$ENABLED_FLAG"
+        ENABLED=0
+        ads_log "ROUTE_DNS|auto_off|keenetic_dns_lost"
+        AUTO_OFF=1
+    fi
+fi
+
 # Wanted: the domains of every Keenetic group that has a route.
 WANT=1
 REASON=ok
 if [ "$ENABLED" = 0 ]; then
     WANT=0 REASON=off
+    [ "${AUTO_OFF:-0}" = 0 ] || REASON=dns_lost
     : > "$WORK/domains.txt"
 else
     "$NDMC" -c "show running-config" > "$WORK/rc.txt" 2>/dev/null && [ -s "$WORK/rc.txt" ] || finish router_unavailable
