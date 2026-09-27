@@ -61,6 +61,13 @@ HeaderProtectionKey, Rekey*, KeepaliveTimeout, MaxHandshakeAttempts, ContentPadd
 настроек в прошивке нет (проверено 2026-09-27 на KN-1913: импорт Keenetic их выбросил, рукопожатия
 нет ни на роутере, ни в приложении на телефоне; VLESS в приложении работает). VWARD так же пропускает
 их и предупреждает. Это AmneziaWG 3.1: он открытый (amneziawg-go), но в KeeneticOS его пока нет.
+Нашлось (awg-manager, MIT, 2026-09-26): KeeneticOS 5.2 Alpha 11 (5.02.A.11) принимает AmneziaWG
+3.0/3.1 сама - в RCI `wireguard asc` добавлены `header-protection-key`, пары `*-start/*-end` для
+`content-padding-addition`, `rekey-after-time`, `rekey-timeout`, `reject-after-time`,
+`keepalive-timeout`, `max-handshake-attempts`, а также `random-trailers`, `disable-cookies`; набор
+принимается только целиком. План: VWARD узнаёт такую прошивку и передаёт эти настройки через RCI;
+на 5.1 - предупреждение как сейчас. Свои модули ядра (как awg_proxy у awg-manager) не ставим:
+у них были перезагрузки по кругу на MIPS.
 
 Туннель через программу на флешке (пожелание владельца 2026-09-27: VLESS и AmneziaWG 3.1):
 одна схема для обоих - программа в Entware открывает SOCKS5 на 127.0.0.1, VWARD создаёт через RCI
