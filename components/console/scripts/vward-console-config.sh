@@ -521,7 +521,7 @@ op_tunnel() {
 
     rm -f "$VWARD_DEVICE_MAP_CACHE"
     map=$(vward_device_map 2>/dev/null) || die router_config_unavailable
-    NEW_DEV=$(vward_map_tunnels "$map" | awk -v n="$NEW_IF" '$1==n {print $2; exit}')
+    NEW_DEV=$(vward_map_vpns "$map" "${VWARD_WAN_DEVICE:-}" | awk -v n="$NEW_IF" '$1==n {print $2; exit}')
     vward_valid_ifname "$NEW_DEV" || die unknown_tunnel 64
 
     change_lock

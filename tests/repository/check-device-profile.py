@@ -186,6 +186,46 @@ with tempfile.TemporaryDirectory() as tmp:
     result = run("vward_discover_lan_interface", env)
     assert result.returncode == 0 and result.stdout.strip() == "Bridge2", result.stdout + result.stderr
 
+# Other routers: a VPN set as the router's default connection, two providers,
+# a VPN that is not WireGuard, a provider reached over L2TP.
+with tempfile.TemporaryDirectory() as tmp:
+    env = keenetic(Path(tmp), "route object-group streaming Wireguard8 auto\n!\n",
+                   wan_routes=("default dev nwg3 scope link metric 0", "default via 100.64.0.1 dev eth2.4 metric 10"))
+    result = run(SHOW, env)
+    assert result.returncode == 0 and result.stdout.startswith("eth2.4|GigabitEthernet0/Vlan4|"), \
+        "a VPN as the default connection must not become the WAN: " + result.stdout + result.stderr
+with tempfile.TemporaryDirectory() as tmp:
+    env = keenetic(Path(tmp), "!\n", wan_routes=("default via 1.1.1.1 dev wan1 metric 100", "default via 2.2.2.2 dev wan0 metric 5"))
+    result = run("vward_discover_wan_device", env)
+    assert result.stdout.strip() == "wan0", "with two providers the main one (lowest metric) is the WAN: " + result.stdout
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    env = keenetic(tmp, "route object-group streaming OpenVPN0 auto\n!\n")
+    ifs = {k: v for k, v in INTERFACES.items() if v.get("type") != "Wireguard"}
+    ifs["OpenVPN0"] = {"type": "OpenVPN", "security-level": "public"}
+    (tmp / "interface.json").write_text(json.dumps(ifs))
+    curl = tmp / "tools" / "curl"
+    curl.write_text(curl.read_text().replace('*"name=Bridge2")', '*"name=OpenVPN0") printf \'"%s"\' "ovpn_br0" ;;\n    *"name=Bridge2")'))
+    (tmp / "sys" / "ovpn_br0").mkdir()
+    (tmp / "sys" / "ovpn_br0" / "tun_flags").write_text("0x1002\n")
+    for d in ("nwg3", "nwg8"):
+        (tmp / "sys" / d / "uevent").write_text("")
+    result = run(SHOW, env)
+    assert result.returncode == 0 and "|OpenVPN0|ovpn_br0|streaming|" in result.stdout, \
+        "an OpenVPN tunnel must serve the routes: " + result.stdout + result.stderr
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    env = keenetic(tmp, "!\n", wan_routes=("default dev ppp0 scope link",))
+    ifs = dict(INTERFACES)
+    del ifs["Wireguard3"]
+    ifs["L2TP0"] = {"type": "L2TP", "security-level": "public"}
+    (tmp / "interface.json").write_text(json.dumps(ifs))
+    curl = tmp / "tools" / "curl"
+    curl.write_text(curl.read_text().replace('*"name=Bridge2")', '*"name=L2TP0") printf \'"%s"\' "ppp0" ;;\n    *"name=Bridge2")'))
+    result = run(SHOW, env)
+    assert result.returncode == 0 and result.stdout.startswith("ppp0|L2TP0|") and "|Wireguard8|nwg8|" in result.stdout, \
+        "the provider's L2TP is the WAN, never the VPN: " + result.stdout + result.stderr
+
 # Running configuration: RCI first (no session lines in the router's log), ndmc
 # only when RCI does not answer or answers something else.
 with tempfile.TemporaryDirectory() as tmp:

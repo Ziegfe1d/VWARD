@@ -187,10 +187,39 @@ vward_map_tunnels()
     printf '%s\n' "$1" | awk -F '\t' '$1=="I" && tolower($3)=="wireguard" && $4!="-" {print $2 " " $4}'
 }
 
+# Keenetic interface types a route can send traffic through as a VPN: WireGuard
+# (AmneziaWG included), OpenVPN, SSTP, PPTP, L2TP, IPsec/IKE and Proxy clients.
+VWARD_VPN_TYPES=${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy}
+
+# vward_map_vpns MAP [WAN-DEVICE]: every VPN client as "<ndm-name> <kernel-name>".
+# The connection to the provider itself (PPTP or L2TP at some ISPs) is not a VPN.
+vward_map_vpns()
+{
+    printf '%s\n' "$1" | awk -F '\t' -v types="$VWARD_VPN_TYPES" -v wan="${2:-}" '
+        BEGIN {n = split(types, t, " "); for (i = 1; i <= n; i++) vpn[t[i]] = 1}
+        $1=="I" && (tolower($3) in vpn) && $4!="-" && $4!=wan {print $2 " " $4}'
+}
+
+vward_is_tunnel_sysfs()
+{
+    vward_is_wireguard_sysfs "$1" || [ -e "$VWARD_SYSFS_NET/$1/tun_flags" ]
+}
+
+# The provider's device: the default route that is not a tunnel (a VPN set as
+# the router's default connection must not become the WAN).  With several
+# providers the one with the lowest metric, the one the router uses; a tie
+# stays ambiguous.
 vward_discover_wan_device()
 {
     ip -4 route show default 2>/dev/null |
-        awk '$1=="default" {for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' |
+        awk '$1=="default" {d = ""; m = 0
+            for (i = 1; i <= NF; i++) {if ($i == "dev") d = $(i+1); if ($i == "metric") m = $(i+1) + 0}
+            if (d != "") print m, d}' |
+        while read -r _vp_m _vp_d; do
+            vward_is_tunnel_sysfs "$_vp_d" || printf '%s %s\n' "$_vp_m" "$_vp_d"
+        done |
+        awk 'NR == 1 || $1 < min {min = $1} {m[NR] = $1; d[NR] = $2}
+            END {for (i = 1; i <= NR; i++) if (m[i] == min) print d[i]}' |
         vward_unique
 }
 
@@ -202,13 +231,13 @@ vward_discover_tunnel_device()
     done | vward_unique
 }
 
-# Picks the managed WireGuard tunnel among any number of tunnels without relying
+# Picks the managed VPN tunnel among any number of tunnels without relying
 # on interface names: explicit config, the only tunnel, or the only tunnel that
 # existing routes point to. Prints "<ndm-name> <kernel-name>".
 vward_select_tunnel()
 {
     _vp_map=$1
-    _vp_cands=$(vward_map_tunnels "$_vp_map")
+    _vp_cands=$(vward_map_vpns "$_vp_map" "${VWARD_WAN_DEVICE:-}")
     [ -n "$_vp_cands" ] || return 1
 
     if [ -n "${VWARD_TUNNEL_INTERFACE:-}" ] || [ -n "${VWARD_TUNNEL_DEVICE:-}" ]; then
@@ -246,12 +275,9 @@ vward_discover_lan_record()
     _vp_recs=$(ip -o -4 addr show scope global 2>/dev/null |
         awk -v wan="$_vp_wan" '$2!=wan {split($4,a,"/"); print $2, a[1]}' |
         while read -r _vp_dev _vp_addr; do
-            vward_is_wireguard_sysfs "$_vp_dev" && continue
-            [ -e "$VWARD_SYSFS_NET/$_vp_dev/tun_flags" ] && continue
+            vward_is_tunnel_sysfs "$_vp_dev" && continue
             [ -n "$_vp_map" ] && [ "$(vward_map_level "$_vp_map" "$_vp_dev")" = public ] && continue
-            printf '%s\n' "$_vp_map" | awk -F '\t' -v k="$_vp_dev" '
-                $1=="I" && $4==k && tolower($3)=="wireguard" {found=1} END{exit !found}
-            ' && continue
+            vward_map_vpns "$_vp_map" | awk -v k="$_vp_dev" '$2==k {found=1} END{exit !found}' && continue
             printf '%s %s\n' "$_vp_dev" "$_vp_addr"
         done)
 
@@ -397,8 +423,8 @@ vward_profile_load()
             [ -n "${VWARD_TUNNEL_DEVICE:-}" ] || VWARD_TUNNEL_DEVICE=$(vward_discover_tunnel_device)
             [ -n "${VWARD_TUNNEL_INTERFACE:-}" ] || VWARD_TUNNEL_INTERFACE=${VWARD_TUNNEL_DEVICE:-}
         else
-            _vp_cands=$(vward_map_tunnels "$_vp_devmap" | awk '{printf "%s%s(%s)", sep, $1, $2; sep=", "}')
-            vward_profile_error "tunnel device is missing or ambiguous; WireGuard candidates: ${_vp_cands:-none}; set VWARD_TUNNEL_INTERFACE in device.conf"
+            _vp_cands=$(vward_map_vpns "$_vp_devmap" "$VWARD_WAN_DEVICE" | awk '{printf "%s%s(%s)", sep, $1, $2; sep=", "}')
+            vward_profile_error "tunnel device is missing or ambiguous; VPN candidates: ${_vp_cands:-none}; set VWARD_TUNNEL_INTERFACE in device.conf"
             return 1
         fi
     fi

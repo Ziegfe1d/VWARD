@@ -57,7 +57,7 @@ with tempfile.TemporaryDirectory() as tmp:
     (tmp / "profile.sh").write_text(
         "vward_profile_load(){ return 0; }\nvward_valid_ifname(){ case \"$1\" in ''|*[!A-Za-z0-9_.:-]*) return 1;; esac; }\n"
         "vward_device_map(){ printf 'I\\tWireguard0\\twireguard\\tnwg0\\nI\\tWireguard1\\twireguard\\tnwg1\\nI\\tWireguard2\\twireguard\\tnwg2\\nI\\tISP\\tethernet\\teth3\\n'; }\n"
-        "vward_map_tunnels(){ printf '%s\\n' \"$1\" | awk -F '\\t' '$1==\"I\" && tolower($3)==\"wireguard\" {print $2 \" \" $4}'; }\n")
+        "vward_map_vpns(){ printf '%s\\n' \"$1\" | awk -F '\\t' '$1==\"I\" && tolower($3)==\"wireguard\" {print $2 \" \" $4}'; }\n")
     (tmp / "curl.out").write_text('{"ip":"198.51.100.7","city":"Frankfurt am Main","region":"Hesse","country":"DE","org":"AS3320 Example"}')
 
     env = os.environ | {"REQUEST_METHOD": "GET", "JQ": shutil.which("jq"), "CURL": str(tools / "curl"),

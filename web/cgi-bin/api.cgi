@@ -1527,7 +1527,9 @@ if [ "$ACTION" = "diagnostics" ]; then
     case "$WAN_STATUS" in PASS|WARN) ;; *) WAN_STATUS=UNKNOWN ;; esac
 
     IF_JSON="$(fetch_json "$VWARD_RCI_BASE/show/interface")"
-    WG_COUNT="$(printf '%s\n' "$IF_JSON" | "$JQ" -r '[to_entries[] | select((.value | type) == "object" and ((.value.type // "") | tostring | ascii_downcase == "wireguard"))] | length' 2>/dev/null)"
+    WG_COUNT="$(printf '%s\n' "$IF_JSON" | "$JQ" -r --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy}" --arg wan "${VWARD_WAN_INTERFACE:-}" '
+        ($types | split(" ")) as $vpn |
+        [to_entries[] | select((.value | type) == "object" and .key != $wan and (((.value.type // "") | tostring | ascii_downcase) as $t | $vpn | index($t)))] | length' 2>/dev/null)"
     case "$WG_COUNT" in ''|*[!0-9]*) WG_COUNT=0 ;; esac
     [ "$WG_COUNT" -gt 0 ] && WG_STATUS=PASS || WG_STATUS=WARN
 
@@ -1633,7 +1635,7 @@ if [ "$ACTION" = "diagnostics" ]; then
         {id:"adguard",component:"route-engine",label:"AdGuard Home",status:$adguard,detail:"DNS service"},
         {id:"adaptive",component:"route-engine",label:"Автоподбор доменов",status:$adaptive,detail:("Последний route RC: "+$route_rc)},
         {id:"wan",component:"wan-guard",label:"WAN",status:$wan,detail:"Read-only RCI probe"},
-        {id:"wg",component:"tunnel-guard",label:"WireGuard",status:$wg,detail:("Найдено туннелей: "+($wg_count|tostring)+"; cron RC: "+$wg_rc)},
+        {id:"wg",component:"tunnel-guard",label:"VPN-туннели",status:$wg,detail:("Найдено туннелей: "+($wg_count|tostring)+"; cron RC: "+$wg_rc)},
         {id:"smartdns",component:"route-engine",label:"Smart DNS мимо VPN",status:$smartdns,detail:$smartdns_detail},
         {id:"dns-chain",component:"route-engine",label:"Цепочка DNS",status:$dns,detail:$dns_detail},
         {id:"files",component:"update-engine",label:"Файлы VWARD",status:$files,detail:$files_detail},
@@ -1650,9 +1652,9 @@ if [ "$ACTION" = tunnel-probe ]; then
     [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
     NAME="$(qget name)"
     case "$NAME" in ''|*[!A-Za-z0-9]*) echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0 ;; esac
-    # Only a WireGuard interface the device map knows; its kernel device comes from the map too.
-    command -v vward_map_tunnels >/dev/null 2>&1 || { echo '{"ok":false,"error":"profile_unavailable"}'; exit 0; }
-    DEV="$(vward_map_tunnels "$(vward_device_map 2>/dev/null)" | awk -v n="$NAME" '$1 == n {print $2; exit}')"
+    # Only a VPN interface the device map knows; its kernel device comes from the map too.
+    command -v vward_map_vpns >/dev/null 2>&1 || { echo '{"ok":false,"error":"profile_unavailable"}'; exit 0; }
+    DEV="$(vward_map_vpns "$(vward_device_map 2>/dev/null)" "${VWARD_WAN_DEVICE:-}" | awk -v n="$NAME" '$1 == n {print $2; exit}')"
     [ -n "$DEV" ] && vward_valid_ifname "$DEV" && [ -e "${VWARD_SYSFS_NET:-/sys/class/net}/$DEV" ] || { echo '{"ok":false,"error":"tunnel_device_missing"}'; exit 0; }
     PROBE_DIR="$(mktemp -d /tmp/vward-console-tunnel.XXXXXX 2>/dev/null)" || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
     trap 'rm -rf "${PROBE_DIR:?}"' EXIT
@@ -2336,13 +2338,16 @@ fi
 
 WG_INTERFACES="$(
     printf '%s\n' "$IFACES" |
-    "$JQ" -c '[
+    "$JQ" -c --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy}" --arg wan "${VWARD_WAN_INTERFACE:-}" '
+        ($types | split(" ")) as $vpn | [
         to_entries[] |
-        select((.value | type) == "object" and ((.value.type // "") | tostring | ascii_downcase == "wireguard")) |
+        select((.value | type) == "object" and .key != $wan and
+            (((.value.type // "") | tostring | ascii_downcase) as $t | $vpn | index($t))) |
         .key as $n | .value |
         ((.wireguard.peer // .peer // []) | if type == "array" then (.[0] // {}) elif type == "object" then . else {} end) as $p |
         {
             name:$n,
+            type:((.type // "") | tostring | ascii_downcase),
             description:(.description // ""),
             link:(.link // ""),
             connected:(.connected // ""),

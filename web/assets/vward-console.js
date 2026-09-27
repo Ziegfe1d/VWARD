@@ -118,7 +118,7 @@ const API_ERRORS = {
   route_change_busy: 'маршруты сейчас меняет другая задача, повторите', profile_unavailable: 'профиль устройства не определён',
   policy_group_unavailable: 'группа маршрутизации не найдена', list_full: 'список заполнен', backup_failed: 'не удалось сделать резервную копию',
   write_failed: 'не удалось записать файл', custom_manifest_url: 'адрес манифеста задан вручную - канал меняется в update.conf', invalid_tunnel: 'недопустимое имя туннеля', tunnel_no_handshake: 'сервер не ответил на рукопожатие за 30 секунд - туннель не изменён', main_tunnel: 'этот туннель используется VWARD для маршрутов', invalid_subnet: 'нужна подсеть IPv4, например 149.154.160.0/20 (не шире /8)', invalid_description: 'название: до 64 символов, без кавычек', no_free_tunnel: 'на роутере нет свободного номера туннеля',
-  conf_empty: 'файл пустой', conf_syntax: 'это не файл WireGuard', conf_peer_count: 'в файле должен быть ровно один [Peer]', conf_key_private: 'неверный PrivateKey', conf_public_key: 'неверный PublicKey', conf_preshared_key: 'неверный PresharedKey', conf_address: 'нет адреса IPv4 в Address', conf_endpoint: 'неверный Endpoint (нужно сервер:порт)', conf_mtu: 'MTU вне 1280-1500', conf_keepalive: 'неверный PersistentKeepalive', conf_allowed_ips: 'неверный AllowedIPs', conf_awg: 'неверные параметры AmneziaWG', tunnel_device_missing: 'туннель не поднят на роутере', unknown_tunnel: 'туннель не найден или это не WireGuard',
+  conf_empty: 'файл пустой', conf_syntax: 'это не файл WireGuard', conf_peer_count: 'в файле должен быть ровно один [Peer]', conf_key_private: 'неверный PrivateKey', conf_public_key: 'неверный PublicKey', conf_preshared_key: 'неверный PresharedKey', conf_address: 'нет адреса IPv4 в Address', conf_endpoint: 'неверный Endpoint (нужно сервер:порт)', conf_mtu: 'MTU вне 1280-1500', conf_keepalive: 'неверный PersistentKeepalive', conf_allowed_ips: 'неверный AllowedIPs', conf_awg: 'неверные параметры AmneziaWG', tunnel_device_missing: 'туннель не поднят на роутере', unknown_tunnel: 'туннель не найден',
   failopen_active: 'VPN недоступен и трафик идёт напрямую: дождитесь восстановления туннеля', policy_sync_busy: 'идёт обновление IP-категорий, повторите позже',
   unsupported_route: 'правило маршрута группы задано нестандартно: переключите туннель в веб-интерфейсе Keenetic',
   profile_verification_failed: 'профиль устройства не принял новый туннель, изменения отменены',
@@ -205,7 +205,7 @@ const COMPONENTS = [
   { id: 'route-reconciler', name: 'Сверка маршрутов', desc: 'Каждые 5 минут сверяет маршруты роутера с каталогом и исправляет расхождения.', when: 'каждые 5 минут', page: 'routes', log: 'routing' },
   { id: 'route-tools', name: 'Инструменты маршрутов', desc: 'Проверка адресов и обновление подсказок каталога.', when: 'подсказки - раз в сутки', page: 'routes', log: 'routing' },
   { id: 'policy-sync', name: 'IP-категории', desc: 'Раз в сутки обновляет IP-категории и маршруты по ним.', when: 'раз в сутки, в 00:10', page: 'routes', log: 'policy' },
-  { id: 'tunnel-guard', name: 'Защита VPN', desc: 'Следит за туннелем WireGuard и, если VPN упал, временно пускает трафик списков напрямую.', when: 'каждую минуту', page: 'vpn', log: 'tunnel' },
+  { id: 'tunnel-guard', name: 'Защита VPN', desc: 'Следит за туннелем VPN и, если он упал, временно пускает трафик списков напрямую.', when: 'каждую минуту', page: 'vpn', log: 'tunnel' },
   { id: 'wan-guard', name: 'Восстановление интернета', desc: 'Проверяет интернет и поэтапно восстанавливает подключение.', when: 'каждую минуту', page: 'wan', log: 'wan' },
   { id: 'wifi-client-guard', name: 'Контроль Wi-Fi клиентов', desc: 'Наблюдает за переходами клиентов между 2.4 и 5 ГГц.', when: 'каждые 5 минут', page: 'wifi', log: 'wifi' },
   { id: 'ads-privacy-guard', name: 'Блокировка рекламы', desc: 'Управляет правилами AdGuard Home и источниками списков.', when: 'каждую минуту', page: 'ads', log: 'ads' },
@@ -1478,6 +1478,10 @@ function tunnelTrafficPanel(name) {
     { desc: 'Списки доменов и подсети IPv4, которые Keenetic отправляет через этот туннель. Списки меняются в разделе «Доменные списки», подсети - здесь.' });
 }
 function tunnelManagePanel(name, managed) {
+  // Only a WireGuard (AmneziaWG) tunnel takes a .conf; the others are set up in Keenetic.
+  const own = ((st().wg && st().wg.interfaces) || []).find(t => t.name === name);
+  if (own && own.type && own.type !== 'wireguard')
+    return [panel('Конфигурация', '<p class="panel-desc">Туннель ' + esc(name) + ' настраивается и удаляется в веб-интерфейсе Keenetic. VWARD может отправлять через него маршруты.</p>')];
   const others = ((st().wg && st().wg.interfaces) || []).filter(t => t.name !== name);
   const del = managed ? '<p class="panel-desc">Этот туннель используется VWARD для маршрутов, его нельзя удалить. Сначала переключите маршруты на другой туннель.</p>' :
     (confirm && confirm.id === 'tunnel-delete' ? '<div class="confirm danger"><span>Удалить ' + esc(name) + '? Его списки и подсети перейдут: ' + esc(confirm.to === 'bypass' ? 'на провайдера' : confirm.to === 'vpn' ? 'в туннель VWARD' : confirm.to) + '. Ключи туннеля удалятся.</span><button class="btn small danger" type="button" data-act="confirm-yes">Удалить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' :
