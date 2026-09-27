@@ -2487,7 +2487,7 @@ document.addEventListener('submit', async e => {
       if (!x.ok) { toast('Файл не подходит: ' + errText(x)); return; }
       $('tcPreview').innerHTML = kv([['Сервер', x.endpoint || '—'], ['Адрес в туннеле', x.address || '—'], ['MTU', x.mtu || 'как на роутере'],
         ['Обфускация AmneziaWG', x.awg === '1' ? 'Включена' : 'Выключена'], ['Keepalive', x.keepalive ? x.keepalive + ' с' : '25 с'], ['Разрешённые адреса', x.allowed || '—']]) +
-        (x.unsupported ? '<p class="field-warn">Этих настроек у Keenetic нет, они будут пропущены: ' + esc(x.unsupported.split(',').join(', ')) + '. Если сервер без них не работает, туннель не подключится - VWARD проверит это и ничего не оставит.</p>' : '');
+        (x.unsupported ? '<p class="field-warn">Эти настройки VWARD пока не переносит: ' + esc(x.unsupported.split(',').join(', ')) + '. Надёжнее загрузить этот файл в веб-интерфейсе Keenetic («Другие подключения → WireGuard → Загрузить из файла»). Если сервер без них не работает, туннель не подключится - VWARD проверит это и ничего не оставит.</p>' : '');
       form.dataset.checked = '1';
       form.querySelector('[type=submit]').textContent = mode === 'create' ? 'Создать туннель' : 'Заменить конфигурацию ' + tunLabel(name);
       return;
