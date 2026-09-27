@@ -1255,20 +1255,15 @@ function adsEvent(rest) {
   return m ? { tone: m[0], text: m[1], go: m[2] } : null;
 }
 const ACTIVITY = {
-  adaptive: { title: 'История автоподбора', parent: 'routes', logs: ['adaptive'], read: l => routeEvent(l, ROUTE_ADAPTIVE), desc: 'Что автоподбор отправил в VPN или вернул.', data: ['config', 'route'],
-    top: () => cfgNote() + kv([['Автоподбор доменов', S.config ? countText((cfgRoute().adaptive || []).length) : '—', '', 'd-adaptive'], ['Всегда через VPN', S.config ? countText((cfgRoute().force_vpn || []).length) : '—', '', 'd-force']]) },
+  adaptive: { title: 'История автоподбора', parent: 'routes', logs: ['adaptive'], read: l => routeEvent(l, ROUTE_ADAPTIVE), desc: 'Что автоподбор отправил в VPN или вернул.', data: ['config', 'route'] },
   routing: { title: 'История сверки маршрутов', parent: 'routes', logs: ['adaptive', 'routing'], read: (l, n) => n === 'adaptive' ? routeEvent(l, ROUTE_MAINT) : null, desc: 'Проверка, какие домены можно вернуть напрямую.', data: ['config', 'route'],
     top: () => cfgNote() + (confirmBox('route-reconcile', 'Сверить маршруты роутера с каталогом сейчас?', 'Выполнить') || '<div class="panel-actions">' + btn('ask', 'check', 'Сверить сейчас', '', ' data-confirm="route-reconcile"') + '</div>') + resultBox('routes') },
   policy: { title: 'История IP-категорий', parent: 'vpn', logs: ['policysync', 'policy'], read: policyEvent, desc: 'Обновление подсетей сервисов.', data: ['config', 'route'],
-    top: () => kv([['Активные IP-категории', num(((S.route && S.route.ip) || {}).active_count) == null ? '—' : fmtInt(S.route.ip.active_count) + ' включены', '', 'd-ipcats', '', 'включить или выключить категорию']]) +
-      (confirmBox('policy-refresh', 'Скачать IP-категории заново и пересобрать маршруты? Это займёт 1-2 минуты.', 'Выполнить') || '<div class="panel-actions">' + btn('ask', 'refresh', 'Обновить сейчас', '', ' data-confirm="policy-refresh"') + '</div>') + resultBox('routes') },
-  tunnel: { title: 'История защиты VPN', parent: 'vpn', logs: ['tunnel'], read: l => { const p = l.split('|'), m = TUNNEL_EV[p[0]]; return m ? { tone: m[0], text: m[1] } : null; }, desc: 'Что делала защита VPN.', data: ['status', 'config'],
-    top: () => vpnGuardPanel(), topOwn: true },
-  wan: { title: 'История подключения', parent: 'wan', logs: ['wan', 'recovery'], read: wanEvent, desc: 'Когда пропадал интернет и что сделал VWARD.', data: ['status', 'config'],
-    top: () => wanNowPanel(), topOwn: true },
+    top: () => (confirmBox('policy-refresh', 'Скачать IP-категории заново и пересобрать маршруты? Это займёт 1-2 минуты.', 'Выполнить') || '<div class="panel-actions">' + btn('ask', 'refresh', 'Обновить сейчас', '', ' data-confirm="policy-refresh"') + '</div>') + resultBox('routes') },
+  tunnel: { title: 'История защиты VPN', parent: 'vpn', logs: ['tunnel'], read: l => { const p = l.split('|'), m = TUNNEL_EV[p[0]]; return m ? { tone: m[0], text: m[1] } : null; }, desc: 'Что делала защита VPN.', data: ['status', 'config'] },
+  wan: { title: 'История подключения', parent: 'wan', logs: ['wan', 'recovery'], read: wanEvent, desc: 'Когда пропадал интернет и что сделал VWARD.', data: ['status', 'config'] },
   wifi: { title: 'История Wi-Fi', parent: 'wifi', logs: ['wifi'], read: wifiEvent, desc: 'Переходы устройств между 2.4 и 5 ГГц.', data: ['wifi'] },
-  updater: { title: 'История обновлений', parent: 'u-vward', logs: ['updater'], read: updaterEvent, desc: 'Когда VWARD проверял и ставил обновления.', data: ['status', 'update', 'config'],
-    top: () => kv([['Установка и откат', 'VWARD', '', 'u-vward']]) + '<div class="panel-actions">' + btn('update-op', 'refresh', runningId === 'updates' ? 'Проверяем…' : 'Проверить сейчас', '', ' data-op="check"' + (runningId === 'updates' ? ' disabled' : '')) + '</div>' },
+  updater: { title: 'История обновлений', parent: 'u-vward', logs: ['updater'], read: updaterEvent, desc: 'Когда VWARD проверял и ставил обновления.', data: ['status', 'update', 'config'] },
   ads: { title: 'История блокировки рекламы', parent: 'ads', logs: ['ads'], read: adsEvent, desc: 'Что VWARD делал с рекламой.', data: ['ads'] }
 };
 // What can be done with a domain from its event, by where it is now.

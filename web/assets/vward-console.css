@@ -364,13 +364,13 @@ small.st .icon{width:14px;height:14px}
 @media (prefers-reduced-motion:reduce){.seg-thumb,.seg-slider button{transition:none}}
 .log-at{margin:6px 2px 0;color:var(--faint);font-size:var(--fs-xs)}
 .events{list-style:none;margin:0;padding:0}
-.ev{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line)}
+.ev{display:flex;gap:10px;align-items:flex-start;padding:12px 16px;border-top:1px solid var(--line)}
 .ev:first-child{border-top:0}
 .ev-dot{flex:none;width:8px;height:8px;margin-top:6px;border-radius:50%;background:var(--faint)}
 .ev.ok .ev-dot{background:var(--ok)}
 .ev.warn .ev-dot{background:var(--warn)}
 .ev.bad .ev-dot{background:var(--crit)}
-.ev-text{flex:1;min-width:0;overflow-wrap:anywhere}
+.ev-text{flex:1;min-width:0;overflow-wrap:anywhere;font-size:var(--fs-sm)}
 .ev-n{color:var(--muted);font-size:var(--fs-sm)}
 .ev-at{flex:none;color:var(--muted);font-size:var(--fs-sm);font-variant-numeric:tabular-nums}
 .ev.link{cursor:pointer}
