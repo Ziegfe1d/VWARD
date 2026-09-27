@@ -601,15 +601,24 @@ if [ "$ACTION" = config-data ]; then
     header_json
     [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
     list_json(){ "$JQ" -Rn '[inputs|select(length>0)]'; }
-    ROUTER=false; ROUTE_DOMAINS='[]'
+    ROUTER=false; ROUTE_DOMAINS='[]'; TGROUPS='[]'
     if [ "$PROFILE_READY" = true ]; then
         RUNNING="$(ndm_cached running 10 "show running-config")"
         if [ -n "$RUNNING" ]; then
             ROUTER=true
-            ROUTE_DOMAINS="$(printf '%s\n' "$RUNNING" | awk -v g="$VWARD_POLICY_GROUP" '
+            # No group chosen: no domains (an empty name would match lines outside any group).
+            [ -z "${VWARD_POLICY_GROUP:-}" ] || ROUTE_DOMAINS="$(printf '%s\n' "$RUNNING" | awk -v g="$VWARD_POLICY_GROUP" '
                 /^object-group fqdn / {cur=$3; next}
                 /^!/ {cur=""; next}
                 cur==g && $1=="include" {print tolower($2)}' | head -n 500 | list_json)"
+            # Groups routed to the tunnel, for choosing where "my domains" go.
+            TGROUPS="$(printf '%s\n' "$RUNNING" | awk -v i="${VWARD_TUNNEL_INTERFACE:-}" -v d="${VWARD_TUNNEL_DEVICE:-}" -v a="${VWARD_OWNED_GROUPS:-AdaptiveAuto}" '
+                /^object-group fqdn / {cur=$3; next}
+                /^!/ {cur=""; next}
+                cur != "" && $1=="description" {sub(/^[ \t]*description[ \t]+/, ""); gsub(/"/, ""); desc[cur]=$0; next}
+                $1=="route" && $2=="object-group" && ($4==i || $4==d) && index(" " a " ", " " $3 " ")==0 && !s[$3]++ {order[++n]=$3}
+                END {for (k=1; k<=n; k++) print order[k] "\t" desc[order[k]]}' | head -n 50 |
+                "$JQ" -Rn '[inputs|split("\t")|{name:.[0],description:(.[1] // "")}]')"
         fi
     fi
     FORCE="$(sed 's/#.*//' "$CONFIG_ETC/route-engine/force-vpn.conf" 2>/dev/null | awk 'NF{print tolower($1)}' | head -n 500 | list_json)"
@@ -641,7 +650,7 @@ if [ "$ACTION" = config-data ]; then
     [ "$W_EN" = 1 ] || W_EN=0
     [ "$W_CTL" = 1 ] || W_CTL=0
     "$JQ" -n \
-      --arg group "${VWARD_POLICY_GROUP:-}" --argjson router "$ROUTER" \
+      --arg group "${VWARD_POLICY_GROUP:-}" --argjson groups "${TGROUPS:-[]}" --argjson router "$ROUTER" \
       --argjson route_domains "${ROUTE_DOMAINS:-[]}" --argjson force "${FORCE:-[]}" --argjson adaptive "${ADAPT:-[]}" \
       --argjson categories "${CATS:-[]}" --argjson tunnel_guard "$TG" --argjson wan_guard "$WG_ON" --argjson components "$COMPONENTS" \
       --argjson adaptive_on "$AD_ON" --argjson classifier_on "$CL_ON" --argjson ip_excluded "${IPX:-[]}" \
@@ -653,7 +662,7 @@ if [ "$ACTION" = config-data ]; then
       --arg u_feed "$(printf '%s\n' "$U_URL" | sed -n -E 's#^https://raw[.]githubusercontent[.]com/[^/]+/[^/]+/(beta|dev)/updates/[a-z0-9-]+/update-manifest[.]json$#\1#p')" \
       --argjson writable "$([ -x "$CONFIG_HELPER" ] && echo true || echo false)" \
       '{ok:true,writable:$writable,
-        route:{group:$group,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
+        route:{group:$group,groups:$groups,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
         tunnel_guard:{enabled:$tunnel_guard},wan_guard:{enabled:$wan_guard,params:$wan_params},components:$components,
         wifi:{ENABLED:($w_en==1),CONTROL_ENABLED:($w_ctl==1),WINDOW_SEC:($w_window|(tonumber? // null)),BAND_SWITCH_WARN:($w_switch|(tonumber? // null)),WEAK_5G_SAMPLE_WARN:($w_weak|(tonumber? // null)),WEAK_5G_RSSI:($w_rssi|(tonumber? // null))},
         update:{safe_window_start:$u_start,safe_window_end:$u_end,check_interval_seconds:($u_interval|(tonumber? // null)),apply_window:(if $u_window == "any" then "any" else "window" end),feed:(if $u_feed == "" then "custom" else $u_feed end)}}'
@@ -685,6 +694,7 @@ if [ "$ACTION" = config ]; then
         adaptive-mode|classifier|smartdns-guard) set -- "$OP" "$VALUE" ;;
         ip-category) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
+        policy-group) set -- "$OP" "$TARGET" ;;
         domain-list|domain-list-watch) set -- "$OP" "$TARGET" "$VALUE" ;;
         update-feed) set -- "$OP" "$TARGET"; [ "$TARGET" != dev ] || REQUIRED=UPDATE_FEED_DEV ;;
         ext-auto) set -- "$OP" "$TARGET" "$VALUE" ;;

@@ -530,15 +530,15 @@ const RENDER = {
         ['Доменов в каталоге', fmtInt(d.unique)],
         ['Категорий в каталоге', fmtInt(d.categories)],
         ['Маршрутов VWARD', fmtInt(ip.managed_routes), '', 'd-ipcats'],
-        ['Группа маршрутизации', pr.policy_group || cfgRoute().group || '—']
-      ])) +
+        policyGroupRow() ? null : ['Группа маршрутизации', pr.policy_group || cfgRoute().group || '—']
+      ]) + (policyGroupRow() ? '<dl class="kv">' + policyGroupRow() + '</dl>' : '')) +
       panel('Что идёт через VPN', kv([
-        ['Мои домены', S.config ? (cfgRoute().router_available ? countText((cfgRoute().domains || []).length) : 'нет данных') : '—', '', 'd-mydomains'],
+        ['Мои домены', !S.config ? '—' : !cfgRoute().router_available ? 'нет данных' : !cfgRoute().group ? 'выберите группу' : countText((cfgRoute().domains || []).length), S.config && cfgRoute().router_available && !cfgRoute().group ? 'warn' : '', 'd-mydomains'],
         ['Всегда через VPN', S.config ? countText((cfgRoute().force_vpn || []).length) : '—', '', 'd-force'],
-        ['Категории доменов', S.config ? (cfgRoute().categories || []).filter(c => c.enabled).length + ' из ' + (cfgRoute().categories || []).length + ' включены' : '—', '', 'd-dcats'],
+        ['Категории доменов', !S.config ? '—' : (cfgRoute().categories || []).length ? (cfgRoute().categories || []).filter(c => c.enabled).length + ' из ' + (cfgRoute().categories || []).length + ' включены' : 'не настроены', '', 'd-dcats'],
         ['Автоподбор доменов', S.config ? countText((cfgRoute().adaptive || []).length) : fmtInt(ad.count) + ' ' + plural(num(ad.count) || 0, 'домен', 'домена', 'доменов'), '', 'd-adaptive'],
         ['IP-категории', fmtInt(ip.active_count) + ' активны из ' + fmtInt(ip.categories), '', 'd-ipcats'],
-        ['Проверяемые сервисы', fmtInt((r.services || []).length), '', 'd-services'],
+        ['Проверяемые сервисы', (r.services || []).length ? fmtInt(r.services.length) : 'не настроены', '', 'd-services'],
         ['Источники каталога', 'itdog ' + fmtInt(d.sources && d.sources.itdog) + ' · v2fly ' + fmtInt(d.sources && d.sources.v2fly)]
       ])) +
       panel('Настройки маршрутизации', '<dl class="kv">' +
@@ -820,6 +820,8 @@ const RENDER = {
   },
   'd-mydomains'() {
     const r = cfgRoute(), list = r.domains || [];
+    if (S.config && r.router_available && !r.group) return cfgNote() + panel('Куда добавлять мои домены', policyGroupRow() ? '<dl class="kv">' + policyGroupRow() + '</dl>' : empty('Через туннель не идёт ни одна группа Keenetic'),
+      { desc: 'Через VPN идёт несколько списков Keenetic. Выберите, в какой из них VWARD будет добавлять ваши домены.' });
     return cfgNote() + panel('Добавить домен', addForm('route-domain', 'например, claude.ai'), { desc: 'Домен и все его поддомены пойдут через ' + (prof().tunnel_interface || 'VPN') + '. Изменение сохраняется в конфигурации роутера.' }) +
       panel('Мои домены', S.config && !r.router_available ? empty('Не удалось прочитать конфигурацию роутера') : domainRows(list, d => rowBtn('route-domain', 'remove', d, 'close', 'Убрать ' + d + ' из VPN')) || empty('Список пуст'),
         { desc: 'Группа ' + (r.group || prof().policy_group || '—') + ' в Keenetic.' });
@@ -831,7 +833,7 @@ const RENDER = {
   },
   'd-dcats'() {
     const cats = cfgRoute().categories || [];
-    return cfgNote() + panel('Категории доменов', cats.length ? '<dl class="kv">' + cats.map(c => ctrlRow(c.title || c.id, sw('data-cfg-cat="' + esc(c.id) + '"', c.enabled, 'Категория ' + (c.title || c.id), !cfgOk()))).join('') + '</dl>' : empty('Категории не найдены'),
+    return cfgNote() + panel('Категории доменов', cats.length ? '<dl class="kv">' + cats.map(c => ctrlRow(c.title || c.id, sw('data-cfg-cat="' + esc(c.id) + '"', c.enabled, 'Категория ' + (c.title || c.id), !cfgOk()))).join('') + '</dl>' : empty('Категории не настроены: на роутере нет файла /opt/etc/vward/route-engine/categories.tsv'),
       { desc: 'Новые домены из включённых категорий автоматически попадают в VPN.' });
   },
   lists() {
@@ -1022,6 +1024,14 @@ function ipSyncStamp(t) {
   if (!l.at && !Object.keys(l.f).length) return 'нет данных';
   const what = /FAIL|ERROR/.test(l.word) ? 'ошибка обновления' : err ? fmtInt(err) + ' ' + plural(err, 'ошибка', 'ошибки', 'ошибок') : add || del ? 'добавлено ' + fmtInt(add) + ', убрано ' + fmtInt(del) : 'без изменений';
   return (l.at ? l.at + ' · ' : '') + what;
+}
+// Where "my domains" go: one of the Keenetic groups routed to the tunnel. Shown as a
+// choice while none is chosen or there are several to choose from.
+function policyGroupRow() {
+  const r = cfgRoute(), gs = r.groups || [], cur = r.group || '';
+  if (!S.config || !r.router_available || !gs.length || (cur && gs.length < 2)) return '';
+  const opts = (cur ? [] : [['', 'выберите группу', true]]).concat(gs.map(g => [g.name, g.description ? g.description + ' (' + g.name + ')' : g.name]));
+  return ctrlRow('Мои домены добавляются в', sel('data-policy-group' + (cfgOk() ? '' : ' disabled'), 'Куда добавлять мои домены', opts, cur), cur ? 'группа Keenetic, идущая через VPN' : 'через VPN идёт несколько списков - выберите один');
 }
 // Shared by the VPN page and its events page.
 function vpnGuardPanel() {
@@ -2228,6 +2238,7 @@ document.addEventListener('change', e => {
   if (t.hasAttribute('data-theme-pick')) { setTheme(t.value); return; }
   if (t.hasAttribute('data-smartdns-guard')) { cfgSet({ op: 'smartdns-guard', value: t.checked ? '1' : '0' }, t.checked ? 'Защита Smart DNS включена' : 'Защита Smart DNS выключена', ['lists']); return; }
   if (t.dataset.extAuto) { cfgSet({ op: 'ext-auto', target: t.dataset.extAuto, value: t.checked ? '1' : '0' }, t.checked ? 'Будет обновляться автоматически' : 'Обновление только вручную', ['ext']); return; }
+  if (t.hasAttribute('data-policy-group')) { if (t.value) cfgSet({ op: 'policy-group', target: t.value }, 'Мои домены теперь добавляются в ' + t.value, ['route', 'security']); return; }
   if (t.hasAttribute('data-route-tunnel')) { const to = t.value; t.value = prof().tunnel_interface || ''; if (to && to !== t.value) { confirm = { id: 'route-tunnel', to: to }; render(); } return; }
   if (t.hasAttribute('data-fw-auto')) { t.disabled = true; cfgSet({ op: 'firmware', target: 'auto', value: t.checked ? '1' : '0' }, t.checked ? 'Keenetic будет обновляться автоматически' : 'Прошивка обновляется только вручную', ['ext']); return; }
   if (t.hasAttribute('data-fw-channel')) {

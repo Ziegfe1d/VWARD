@@ -381,4 +381,32 @@ with tempfile.TemporaryDirectory() as tmp:
     if api("action=list-data&name=AdaptiveAuto").get("error") != "invalid_group" or api("action=list-data&name=domain-list9").get("error") != "list_not_found":
         fail("list-data must refuse other groups and missing lists")
 
+    # Where "my domains" go: chosen among the groups routed to the tunnel, pinned in device.conf.
+    devconf = tmp / "device.conf"
+    devconf.write_text("VWARD_TUNNEL_INTERFACE=Wireguard0\n")
+    devconf.chmod(0o600)
+    gprofile = tmp / "profile-groups.sh"
+    gprofile.write_text(
+        "VWARD_DEVICE_CONFIG=${VWARD_DEVICE_CONFIG:-" + str(devconf) + "}\nVWARD_DEVICE_MAP_CACHE=" + str(tmp / "map.cache") + "\n"
+        "vward_profile_load(){ VWARD_TUNNEL_INTERFACE=Wireguard0; VWARD_TUNNEL_DEVICE=nwg0;"
+        " [ -n \"${VWARD_POLICY_GROUP:-}\" ] || VWARD_POLICY_GROUP=$(awk -F= '$1==\"VWARD_POLICY_GROUP\"{print $2}' \"$VWARD_DEVICE_CONFIG\"); }\n")
+    cfg.write_text(cfg.read_text() + "dns-proxy\n    route object-group domain-list1 Wireguard0 auto\n    route object-group MyVPN nwg0 auto\n"
+                   "    route object-group AdaptiveAuto Wireguard0 auto\n    route object-group Other ISP auto\n!\n")
+    genv = env | {"VWARD_PROFILE_LIB": str(gprofile), "VWARD_DEVICE_CONFIG": str(devconf)}
+    def grun(*args):
+        r = subprocess.run(["sh", str(HELPER), *args], env=genv, text=True, capture_output=True)
+        return r.returncode, (r.stdout.strip().splitlines() or [""])[-1]
+    for bad, want in (("Other", (1, "error=group_not_routed")), ("AdaptiveAuto", (64, "error=invalid_value")),
+                      ("x;y", (64, "error=invalid_value")), ("missing", (1, "error=group_not_routed"))):
+        if grun("policy-group", bad) != want:
+            fail(f"policy-group {bad}: {grun('policy-group', bad)}")
+    if "VWARD_POLICY_GROUP" in devconf.read_text():
+        fail("a refused group must not reach device.conf")
+    if grun("policy-group", "domain-list1") != (0, "result=changed") or grun("policy-group", "domain-list1") != (0, "result=unchanged"):
+        fail("policy-group domain-list1")
+    if devconf.read_text() != "VWARD_TUNNEL_INTERFACE=Wireguard0\nVWARD_POLICY_GROUP=domain-list1\n" or stat.S_IMODE(devconf.stat().st_mode) != 0o600:
+        fail(f"device.conf: {devconf.read_text()!r}")
+    if grun("policy-group", "MyVPN") != (0, "result=changed") or "VWARD_POLICY_GROUP=MyVPN" not in devconf.read_text():
+        fail("a group routed by the tunnel device is a choice too")
+
 print("CONSOLE_CONFIG=PASS")

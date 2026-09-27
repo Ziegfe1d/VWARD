@@ -487,6 +487,30 @@ route_present() {
     awk -v g="$1" -v t="$2" '$1=="route" && $2=="object-group" && $3==g && $4==t {f=1} END{exit f ? 0 : 1}' "$RUNCFG"
 }
 
+# The Keenetic group "Мои домены" adds to.  Discovery picks it alone only while one
+# group routes to the tunnel; with several (lists of Telegram, YouTube...) the owner
+# chooses one of them, and the choice is pinned in device.conf.
+policy_group_candidates() {
+    awk -v i="$VWARD_TUNNEL_INTERFACE" -v d="$VWARD_TUNNEL_DEVICE" -v a="$ADAPTIVE_GROUP" '
+        $1=="route" && $2=="object-group" && ($4==i || $4==d) && $3!=a && !s[$3]++ {print $3}' "$RUNCFG"
+}
+
+op_policy_group() {
+    case "$1" in ''|*[!A-Za-z0-9_.-]*) die invalid_value 64 ;; esac
+    [ "$1" != "$ADAPTIVE_GROUP" ] || die invalid_value 64
+    load_profile_base
+    snapshot
+    policy_group_candidates | grep -qxF "$1" || die group_not_routed
+    change_lock
+    set_kv "$VWARD_DEVICE_CONFIG" VWARD_POLICY_GROUP "$1" 0600 || done_ok "policy-group $1" unchanged
+    rm -f "$VWARD_DEVICE_MAP_CACHE"
+    (
+        unset VWARD_POLICY_GROUP
+        vward_profile_load >/dev/null 2>&1 && [ "$VWARD_POLICY_GROUP" = "$1" ]
+    ) || die profile_verification_failed
+    done_ok "policy-group $1" changed
+}
+
 op_tunnel() {
     case "$1" in ''|*[!A-Za-z0-9_./:-]*) die invalid_tunnel 64 ;; esac
     [ "${#1}" -le 64 ] || die invalid_tunnel 64
@@ -1600,7 +1624,7 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|policy-group) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
     wifi-host) [ "$#" -eq 3 ] || die usage 64 ;;
@@ -1608,7 +1632,7 @@ case "$OP" in
 esac
 ARG1=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
 ARG2=${2:-}
-case "$OP" in wifi|update|wan-param|tunnel|domain-list|domain-list-watch|tunnel-conf|tunnel-delete|tunnel-subnet|backup-restore|wifi-host) ARG1=$1 ;; esac
+case "$OP" in wifi|update|wan-param|tunnel|policy-group|domain-list|domain-list-watch|tunnel-conf|tunnel-delete|tunnel-subnet|backup-restore|wifi-host) ARG1=$1 ;; esac
 case "$OP" in ext-upgrade|ext-auto|firmware) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 ARG3=${3:-}
 case "$OP" in route-domain|force-vpn|adaptive) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
@@ -1642,6 +1666,7 @@ case "$OP" in
         done_ok "console-devices only_registered=$ARG1" changed ;;
     update-feed) op_update_feed "$ARG1" ;;
     tunnel) op_tunnel "$ARG1" ;;
+    policy-group) op_policy_group "$ARG1" ;;
     domain-list) op_domain_list "$ARG1" "$ARG2" ;;
     domain-list-watch) op_domain_list_watch "$ARG1" "$ARG2" ;;
     smartdns-guard) op_smartdns_guard "$ARG1" ;;
