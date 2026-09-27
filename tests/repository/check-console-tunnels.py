@@ -269,6 +269,20 @@ with tempfile.TemporaryDirectory() as tmp:
     if NEW_KEY in out or PSK in out:
         fail("create printed a key")
     run("tunnel-conf", "replace", upload(awg2), "Wireguard0", expect="error=engine_replace_unsupported")
+
+    # Adopt: a tunnel Keenetic took from a 3.x file - only its own file, only a 3.x one.
+    run("tunnel-conf", "adopt", upload(awg2), "Wireguard7", expect="error=unknown_tunnel")
+    run("tunnel-conf", "adopt", upload(conf(NEW_KEY, PEER_NEW)), "Wireguard0", expect="error=conf_not_awg3")
+    run("tunnel-conf", "adopt", upload(awg2), "Wireguard0", expect="error=conf_other_tunnel")
+    st = json.loads(state.read_text()); st["ifs"]["Wireguard0"]["peers"][PEER_NEW] = {"endpoint": "de.example.net:44486"}
+    st["ifs"]["Wireguard0"]["description"] = "fi"; state.write_text(json.dumps(st))
+    engine_log.write_text("")
+    # The engine takes it under the same name; moving the lists needs a real Keenetic
+    # (its device map), so here it stops at that step and says so.
+    out = run("tunnel-conf", "adopt", upload(awg2), "Wireguard0", expect="error=adopt_move_failed")
+    if engine_log.read_text().split()[:2] != ["add", "fi"] or "info.name=Proxy40" not in out:
+        fail(f"adopt: {out} {engine_log.read_text()}")
+    st["ifs"]["Wireguard0"]["peers"].pop(PEER_NEW); st["ifs"]["Wireguard0"].pop("description"); state.write_text(json.dumps(st))
     del env["VWARD_AWG_ENGINE_BIN"]
 
     # Typed in by hand (the Panel's «Вручную»): the Panel builds a .conf of the same

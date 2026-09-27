@@ -144,6 +144,20 @@ with tempfile.TemporaryDirectory() as t:
                          env=env | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=awg-data", "JQ": shutil.which("jq"),
                                     "VWARD_AWG_ENGINE_BIN": str(ENGINE)})
     j = json.loads(api.stdout[api.stdout.index("{"):])
+    # Keenetic's own tunnels from AmneziaWG 3.x files (H1-H4 = 1 2 3 4, S3/S4 kept, header
+    # protection dropped) are found; an AmneziaWG 2.0 tunnel with its own H values is not.
+    ndmc = tools / "ndmc"
+    ndmc.write_text("#!/bin/sh\ncat <<'EOF'\n"
+                    "interface Wireguard0\n    description AWG2_DE\n    wireguard asc 5 10 50 43 30 179064566-1646449610 1687083366-1702146341 1888033499-1927208669 2059508124-2092293846 47 15 \"<b 0x52>\"\n    wireguard peer PeLt=\n        endpoint de.example:1\n    !\n    up\n!\n"
+                    "interface Wireguard2\n    description fi\n    wireguard asc 7 10 80 649 170 1 2 3 4 815 12 \"<b 0x52><rd 9>\"\n    wireguard peer zOuN=\n        endpoint 66.234.150.186:3954\n    !\n    down\n!\n"
+                    "interface Wireguard4\n    description \"us-east.conf (1)\"\n    wireguard asc 6 10 80 381 865 1 2 3 4 209 12 \"<b 0x52>\"\n    wireguard peer jcct=\n    !\n!\nEOF\n")
+    ndmc.chmod(0o755)
+    api2 = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], text=True, capture_output=True,
+                          env=env | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=awg-data", "JQ": shutil.which("jq"),
+                                     "VWARD_AWG_ENGINE_BIN": str(ENGINE), "VWARD_NDMC": str(ndmc)})
+    lost = json.loads(api2.stdout[api2.stdout.index("{"):])["lost"]
+    if lost != [{"name": "Wireguard2", "description": "fi", "peer": "zOuN="}, {"name": "Wireguard4", "description": "us-east.conf (1)", "peer": "jcct="}]:
+        fail(f"lost tunnels: {lost}")
     t0 = j["tunnels"][0] if j.get("tunnels") else {}
     if not j.get("installed") or t0.get("name") != "Proxy40" or not t0.get("running") or t0.get("description") != "Finland" or t0.get("endpoint") != "66.234.150.186:3954":
         fail(f"awg-data: {j}")

@@ -119,6 +119,7 @@ const API_ERRORS = {
   config_save_failed: 'роутер не сохранил конфигурацию', router_config_unavailable: 'не удалось прочитать конфигурацию роутера',
   route_change_busy: 'маршруты сейчас меняет другая задача, повторите', profile_unavailable: 'профиль устройства не определён',
   policy_group_unavailable: 'группа маршрутизации не найдена', list_full: 'список заполнен', backup_failed: 'не удалось сделать резервную копию',
+  conf_not_awg3: 'в файле нет настроек AmneziaWG 3.x - это другой файл', conf_other_tunnel: 'файл от другого туннеля: ключ сервера не совпадает', adopt_move_failed: 'туннель поднят в контуре, но списки не перенеслись - перенесите их на странице туннеля', engine_replace_unsupported: 'туннель контура не заменяется - добавьте новый и удалите этот', engine_full: 'в контуре уже 5 туннелей', checksum_mismatch: 'скачанная программа не совпала с контрольной суммой', arch_unsupported: 'процессор роутера не поддерживается контуром',
   services_unavailable: 'каталог сервисов недоступен', invalid_service: 'неверное имя сервиса', unknown_service: 'такого сервиса нет в каталоге', service_too_big: 'у сервиса больше 300 доменов - Keenetic столько не примет в один список', service_not_enabled: 'сервис не включён', list_limit: 'Keenetic не принял домены: достигнут предел списка', no_free_list: 'в Keenetic нет свободного номера доменного списка', catalog_invalid: 'каталог скачался повреждённым - работает прежний',
   write_failed: 'не удалось записать файл', custom_manifest_url: 'адрес манифеста задан вручную - канал меняется в update.conf', invalid_tunnel: 'недопустимое имя туннеля', tunnel_no_handshake: 'сервер не ответил на рукопожатие за 30 секунд - туннель не изменён', main_tunnel: 'этот туннель используется VWARD для маршрутов', invalid_subnet: 'нужна подсеть IPv4, например 149.154.160.0/20 (не шире /8)', invalid_description: 'название: до 64 символов, без кавычек', no_free_tunnel: 'на роутере нет свободного номера туннеля',
   conf_empty: 'файл пустой', conf_syntax: 'это не файл WireGuard', conf_peer_count: 'в файле должен быть ровно один [Peer]', conf_key_private: 'неверный PrivateKey', conf_public_key: 'неверный PublicKey', conf_preshared_key: 'неверный PresharedKey', conf_address: 'нет адреса IPv4 в Address', conf_endpoint: 'неверный Endpoint (нужно сервер:порт)', conf_mtu: 'MTU вне 1280-1500', conf_keepalive: 'неверный PersistentKeepalive', conf_allowed_ips: 'неверный AllowedIPs', conf_awg: 'неверные параметры AmneziaWG', tunnel_device_missing: 'туннель не поднят на роутере', unknown_tunnel: 'туннель не найден',
@@ -218,7 +219,7 @@ const cfgRoute = () => cfg().route || {};
 
 /* ---------- Структура разделов ---------- */
 const PAGES = [
-  { id: 'overview', title: 'Обзор', icon: 'home', group: 'Главное', data: ['status', 'route', 'wifi', 'ads', 'lists'] },
+  { id: 'overview', title: 'Обзор', icon: 'home', group: 'Главное', data: ['status', 'route', 'wifi', 'ads', 'lists', 'awg'] },
   { id: 'wan', title: 'Сеть', icon: 'globe', group: 'Сеть', data: ['status', 'security', 'config', 'wifi'] },
   { id: 'vpn', title: 'VPN', icon: 'shield', group: 'Сеть', data: ['status', 'security', 'config', 'route', 'awg'] },
   { id: 'routes', title: 'Домены', icon: 'list', group: 'Сеть', data: ['route', 'security', 'status', 'config', 'lists', 'services'] },
@@ -464,6 +465,7 @@ function notifications() {
   if (S.config && S.config.wan_guard && S.config.wan_guard.enabled === false) n.push({ sev: 'warn', title: 'Восстановление интернета выключено', text: 'при сбое интернет не восстановится автоматически', to: 'wan' });
   if (S.config && S.config.tunnel_guard && S.config.tunnel_guard.enabled === false) n.push({ sev: 'warn', title: 'Защита VPN выключена', text: 'при падении туннеля сайты из списков VPN будут недоступны', to: 'vpn' });
   if (S.ads && S.ads.paused) n.push({ sev: 'warn', title: 'Блокировка рекламы на паузе', text: 'реклама не блокируется', to: 'ads' });
+  if (awgLost().length) n.push({ sev: 'warn', title: 'Туннели не подключатся', text: awgLost().map(x => x.description || x.name).join(', ') + ': загрузите их файлы - VWARD поднимет их в контуре', to: 'vpn' });
   return n;
 }
 function plural(n, one, few, many) { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; }
@@ -611,7 +613,7 @@ const RENDER = {
   vpn() {
     const wg = st().wg || {}, list = wg.interfaces || [], managed = prof().tunnel_interface || '';
     const row = t => { const up = isTrue(t.connected); return '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.description || t.name) + '</b><small>' + (t.name === managed ? '<span class="st ok">для маршрутов</span> · ' : '') + esc(hsSec(t) != null ? 'рукопожатие ' + agoText(hsSec(t)) : t.handshake != null ? 'рукопожатия не было' : (t.state || '')) + '</small></div><span class="pill ' + (up ? 'ok' : 'warn') + '">' + (up ? 'В сети' : 'Не в сети') + '</span>' + ico('chevron', 'chev') + '</li>'; };
-    return loadError(['status']) +
+    return loadError(['status']) + awgLostPanel() +
       panel('Туннели', (list.length ? '<ul class="rows">' + list.map(row).join('') + '</ul>' : empty('Туннели WireGuard не найдены')) +
         '<div class="panel-actions">' + btn('tunnel-create', 'plus', 'Добавить туннель', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnels'),
         { desc: 'Нажмите на туннель, чтобы открыть его.' }) +
@@ -716,7 +718,7 @@ const RENDER = {
     const agh = !S.ads ? ['', '—'] : !ag.port ? ['warn', 'Не найден'] : !a.agh_connected ? ['warn', 'Не подключён'] :
       g && g.ok && g.protection === false ? ['warn', 'Защита выключена'] : ['ok', 'Работает'];
     const w = S.awg || {}, wn = (w.tunnels || []).length;
-    const awg = !S.awg ? ['', '—'] : !w.installed ? ['', 'Не используется'] : wn ? [(w.tunnels || []).every(t => t.running) ? 'ok' : 'warn', fmtInt(wn) + ' ' + plural(wn, 'туннель', 'туннеля', 'туннелей')] : ['', 'Установлен'];
+    const awg = !S.awg ? ['', '—'] : awgLost().length ? ['warn', 'Ждёт файлы: ' + awgLost().length] : !w.installed ? ['', 'Не используется'] : wn ? [(w.tunnels || []).every(t => t.running) ? 'ok' : 'warn', fmtInt(wn) + ' ' + plural(wn, 'туннель', 'туннеля', 'туннелей')] : ['', 'Установлен'];
     return loadError(['ads']) + panel('Утилиты', kv([['AdGuard Home', agh[1], agh[0], 'd-agh', '', 'блокировка рекламы для всех устройств'],
         ['Контур AmneziaWG', awg[1], awg[0], 'd-awg', '', w.installed ? 'туннели, которые прошивка не умеет' : 'включится сам, когда вы добавите туннель AmneziaWG 3.x в «VPN»']]),
       { desc: 'Программы, с которыми работает VWARD.' });
@@ -728,7 +730,7 @@ const RENDER = {
     const row = t => '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.description || t.name) + '</b><small>' +
       esc([t.endpoint, t.handshake != null ? 'рукопожатие ' + agoText(t.handshake) : 'рукопожатия нет', t.rss_kb ? 'память ' + Math.round(t.rss_kb / 1024) + ' МБ' : ''].filter(Boolean).join(' · ')) +
       '</small></div><span class="pill ' + (t.running && t.handshake != null ? 'ok' : 'warn') + '">' + (t.running ? (t.handshake != null ? 'Работает' : 'Нет связи') : 'Остановлен') + '</span>' + ico('chevron', 'chev') + '</li>';
-    return panel('Контур AmneziaWG', kv([
+    return awgLostPanel() + panel('Контур AmneziaWG', kv([
         ['Программа', w.installed ? 'wireproxy-awg ' + (w.version || '') : 'не установлена', '', 'https://github.com/artem-russkikh/wireproxy-awg', '', w.installed ? 'процессор ' + (w.arch || '—') : 'скачается сама, когда понадобится'],
         ['Туннели', fmtInt(tl.length)]]) + (tl.length ? '<ul class="rows">' + tl.map(row).join('') + '</ul>' : ''),
       { desc: 'Держит туннели AmneziaWG 3.x, которые прошивка Keenetic не умеет. В Keenetic такой туннель - подключение «Прокси». Скорость ниже встроенного WireGuard.' });
@@ -1523,9 +1525,49 @@ function tunnelPage(name) {
     ['Трафик', t.rx != null || t.tx != null ? '↓ ' + fmtBytes(t.rx) + ' · ↑ ' + fmtBytes(t.tx) : '—'],
     ['Время работы', t.uptime != null ? fmtUptime(t.uptime) : '—'],
     ['Используется для маршрутов', managed ? 'Да' : 'Нет', managed ? 'info' : '']
-  ]) + (t.type === 'wireguard' && t.handshake != null && hsSec(t) == null ? '<p class="field-warn">Сервер ни разу не ответил. Если это файл Amnezia Premium (AmneziaWG 3.x), загруженный прямо в Keenetic, - Keenetic выбросил часть его настроек. Удалите этот туннель и добавьте тот же файл через «Добавить туннель»: его поднимет контур AmneziaWG.</p>' : '') +
+  ]) + (awgLost().some(x => x.name === name) ? '' : t.type === 'wireguard' && t.handshake != null && hsSec(t) == null ? '<p class="field-warn">Сервер ни разу не ответил. Если это файл Amnezia Premium (AmneziaWG 3.x), загруженный прямо в Keenetic, - Keenetic выбросил часть его настроек. Удалите этот туннель и добавьте тот же файл через «Добавить туннель»: его поднимет контур AmneziaWG.</p>' : '') +
     use + cfgNote(), { desc: managed ? 'Через него идут маршруты VWARD.' : 'Можно перевести маршруты VWARD на этот туннель.', right: headPill(up ? 'ok' : 'warn', up ? 'В сети' : 'Не в сети') }) +
-    tunnelManagePanel(name, managed)[0] + tunnelProbePanel(name) + tunnelTrafficPanel(name) + (tunnelManagePanel(name, managed)[1] || '');
+    awgLostPanel(name) + tunnelManagePanel(name, managed)[0] + tunnelProbePanel(name) + tunnelTrafficPanel(name) + (tunnelManagePanel(name, managed)[1] || '');
+}
+// Tunnels Keenetic took from AmneziaWG 3.x files without their header protection
+// (awg-data lost[]): the same files move them to the engine, matched by server key.
+const awgLost = () => (S.awg && S.awg.lost) || [];
+function awgLostPanel(only) {
+  const L = awgLost().filter(x => !only || x.name === only);
+  if (!L.length) return '';
+  const names = L.map(x => '«' + (x.description || x.name) + '»').join(', ');
+  return panel(L.length > 1 ? 'Эти туннели не подключатся' : 'Туннель не подключится',
+    '<p class="field-warn">' + esc(names) + (L.length > 1 ? ' загружены' : ' загружен') + ' в Keenetic из файлов AmneziaWG 3.x, и Keenetic выбросил их защиту заголовков - без неё сервер не отвечает. Выберите те же файлы: VWARD поднимет туннели в контуре под теми же названиями и перенесёт на них списки и подсети.</p>' +
+    '<label class="file-pick">' + ico('save') + '<span>' + (L.length > 1 ? 'Выбрать их файлы .conf' : 'Выбрать файл .conf') + '</span><input type="file" accept=".conf,.vpn,text/plain" multiple data-awg-adopt' + (cfgOk() ? '' : ' disabled') + '></label>' +
+    resultBox('awg-adopt'), { desc: 'Файлы проверяются по ключу сервера: чужой файл не подойдёт.' });
+}
+async function awgAdopt(files) {
+  const show = text => { actionResult = { id: 'awg-adopt', text: text }; render(); };
+  const read = f => new Promise(res => { if (f.size > 16384) return res(''); const r = new FileReader(); r.onload = () => res(String(r.result || '')); r.onerror = () => res(''); r.readAsText(f); });
+  const done = [], bad = [];
+  for (const f of files) {
+    let text = await read(f);
+    if (/^\s*vpn:\/\//i.test(text)) { const k = await amneziaKey(text); text = k.conf || ''; }
+    const m = /\[Peer\][\s\S]*?PublicKey\s*=\s*(\S+)/i.exec(text), t = m && awgLost().find(x => x.peer === m[1]);
+    if (!t) { bad.push(f.name); continue; }
+    show('Переносим «' + (t.description || t.name) + '» в контур… до минуты');
+    let x, run = {};
+    try { x = await apiPost('tunnel-conf', { op: 'adopt', name: t.name, conf: text }); } catch (e) { x = { ok: false, error: e.message }; }
+    if (x.ok) {
+      const deadline = Date.now() + 4 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 3000));
+        try { run = (await apiGet('control-data')).run || {}; } catch (e) { continue; }
+        if (run.finished) break;
+      }
+    }
+    const last = String(run.output || '').trim().split('\n').pop() || '';
+    if (x.ok && run.finished && run.rc === 0) done.push(t.description || t.name);
+    else { show('«' + (t.description || t.name) + '» не перенесён: ' + (x.ok ? errText({ error: last.replace(/^error=/, '') || 'engine_failed' }) : errText(x))); await Promise.all([load('status', true), load('awg', true)]); return; }
+    await load('awg', true);
+  }
+  show((done.length ? 'В контуре: ' + done.join(', ') + '. ' : '') + (bad.length ? 'Не подошли ни к одному туннелю: ' + bad.join(', ') + ' - добавьте их через «Добавить туннель».' : ''));
+  await Promise.all([load('status', true), load('awg', true), load('lists', true)]); render();
 }
 // Filled only by «Проверить сейчас»: the router does not do this in the background.
 // A tunnel is shown by the name its owner gave it; the system name only on its own page.
@@ -2492,6 +2534,7 @@ document.addEventListener('change', e => {
   if (t.hasAttribute('data-agh-interval')) { aghSet({ setting: 'interval', value: t.value }, 'Сохранено в AdGuard Home'); return; }
   if (t.dataset.aghFilter) { t.disabled = true; aghSet({ setting: 'filter-enable', url: t.dataset.aghFilter, value: t.checked ? '1' : '0' }, t.checked ? 'Список включён' : 'Список выключен'); return; }
   if (t.dataset.aghService) { t.disabled = true; aghSet({ setting: 'service', service: t.dataset.aghService, value: t.checked ? '1' : '0' }, t.checked ? 'Сервис заблокирован' : 'Сервис открыт'); return; }
+  if (t.hasAttribute('data-awg-adopt')) { const fs = [...(t.files || [])]; if (fs.length) awgAdopt(fs); return; }
   if (t.hasAttribute('data-conf-file')) {
     const file = t.files && t.files[0], form = t.closest('form');
     if (!file) return;

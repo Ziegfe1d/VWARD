@@ -1353,6 +1353,39 @@ op_tunnel_conf() {
             printf 'info.name=%s\n' "$NEW_IF"
             tunnel_summary "$PLAN"
             done_ok "tunnel-conf create $NEW_IF endpoint=$(conf_get endpoint "$PLAN")" changed ;;
+        adopt)
+            # A tunnel Keenetic took from an AmneziaWG 3.x file without its header
+            # protection: the same file (its server key matches) goes to VWARD's engine
+            # under the same name, the lists and subnets move over, the dead one goes.
+            vward_valid_ndm_name "$tc_arg" || die unknown_tunnel 64
+            snapshot
+            grep -qx "interface $tc_arg" "$RUNCFG" || die unknown_tunnel 64
+            [ "$(conf_get engine "$PLAN")" = 1 ] || die conf_not_awg3 64
+            tunnel_block "$tc_arg" | awk -v p="$(conf_get peer "$PLAN")" '$1 == "wireguard" && $2 == "peer" && $3 == p {f = 1} END {exit f ? 0 : 1}' ||
+                die conf_other_tunnel 64
+            ad_desc=$(tunnel_block "$tc_arg" | sed -n 's/^ *description *//p' | head -n 1 | tr -d '"\\')
+            [ -n "$ad_desc" ] || ad_desc=$tc_arg
+            [ -x "$AWG_ENGINE" ] || die engine_unavailable
+            en_out=$("$AWG_ENGINE" add "$ad_desc" "$tc_file" 2>/dev/null)
+            case "$(printf '%s\n' "$en_out" | tail -n 1)" in
+                result=changed) ;;
+                error=*) en_err=$(printf '%s\n' "$en_out" | sed -n 's/^error=//p' | tail -n 1)
+                         case "$en_err" in ''|*[!a-z0-9_]*) en_err=engine_failed ;; esac
+                         die "$en_err" ;;
+                *) die engine_failed ;;
+            esac
+            ad_new=$(printf '%s\n' "$en_out" | sed -n 's/^info\.name=//p' | head -n 1)
+            rm -f "$VWARD_DEVICE_MAP_CACHE"
+            printf 'info.name=%s\n' "$ad_new"
+            # The VWARD tunnel itself moves first; then lists and subnets, and the old one goes.
+            if [ "$tc_arg" = "$VWARD_TUNNEL_INTERFACE" ]; then
+                ad_r=$(sh "$0" tunnel "$ad_new" 2>/dev/null | tail -n 1)
+                case "$ad_r" in result=*) ;; *) die adopt_move_failed ;; esac
+            fi
+            ad_r=$(sh "$0" tunnel-delete "$tc_arg" "$ad_new" 2>/dev/null | tail -n 1)
+            case "$ad_r" in result=*) ;; *) die adopt_move_failed ;; esac
+            tunnel_summary "$PLAN"
+            done_ok "tunnel-conf adopt $tc_arg -> $ad_new" changed ;;
         *) die invalid_operation 64 ;;
     esac
 }

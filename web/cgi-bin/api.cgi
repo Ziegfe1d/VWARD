@@ -832,7 +832,7 @@ if [ "$ACTION" = tunnel-conf ]; then
   TOP="$(form_value op)"; TNAME="$(form_value name)"; TCONF="$(form_value confirm)"
   case "$TNAME" in *[!A-Za-z0-9_.-]*) echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0 ;; esac
   case "$TOP" in
-    check|replace|create)
+    check|replace|create|adopt)
       # The upload holds the tunnel's private key: in RAM, root-only, and gone
       # with the helper whatever happens (uploads a crash left behind go too).
       TUNNEL_TMP=${VWARD_CONSOLE_TUNNEL_TMP:-/tmp/vward-console-tunnel}
@@ -851,7 +851,10 @@ if [ "$ACTION" = tunnel-conf ]; then
         esac
         exit 0
       fi
-      if [ "$TOP" = replace ]; then
+      if [ "$TOP" = adopt ]; then
+        [ -n "$TNAME" ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0; }
+        ARGS="tunnel-conf adopt $TFILE $TNAME"
+      elif [ "$TOP" = replace ]; then
         [ -n "$TNAME" ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0; }
         [ "$TCONF" = TUNNEL_REPLACE ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
         ARGS="tunnel-conf replace $TFILE $TNAME"
@@ -1986,9 +1989,24 @@ if [ "$ACTION" = awg-data ]; then
     header_json
     [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
     AWG_BIN=${VWARD_AWG_ENGINE_BIN:-/opt/bin/vward-awg-engine.sh}
-    [ -x "$AWG_BIN" ] || { echo '{"ok":true,"available":false,"installed":false,"tunnels":[]}'; exit 0; }
-    "$AWG_BIN" status 2>/dev/null | "$JQ" -Rn '
-        reduce (inputs) as $l ({ok: true, available: true, installed: false, version: "", arch: "", tunnels: []};
+    # Keenetic's own WireGuard tunnels that came from an AmneziaWG 3.x file: its import
+    # keeps H1-H4 = 1 2 3 4 with S3/S4 but drops the header protection key, so they
+    # never connect.  The engine can take them over once it has the file.
+    AWG_LOST="$(ndm_cached running 10 "show running-config" | awk '
+        /^interface [^ ]+$/ {cur = $2; desc = ""; asc = ""; peer = ""; next}
+        cur != "" && $1 == "description" {d = $0; sub(/^[ \t]*description[ \t]*/, "", d); gsub(/"/, "", d); desc = d}
+        cur != "" && $1 == "wireguard" && $2 == "asc" {asc = $0}
+        cur != "" && $1 == "wireguard" && $2 == "peer" && peer == "" {peer = $3}
+        $0 == "!" && cur != "" {
+            n = split(asc, a, /[ \t]+/)
+            # "    wireguard asc jc jmin jmax s1 s2 h1 h2 h3 h4 s3 s4 [i1...]": a[1] is empty.
+            if (n >= 14 && a[9] == "1" && a[10] == "2" && a[11] == "3" && a[12] == "4") print cur "\t" desc "\t" peer
+            cur = ""
+        }' | "$JQ" -Rn '[inputs | split("\t") | {name: .[0], description: .[1], peer: .[2]}]' 2>/dev/null)"
+    [ -n "$AWG_LOST" ] || AWG_LOST='[]'
+    [ -x "$AWG_BIN" ] || { printf '{"ok":true,"available":false,"installed":false,"tunnels":[],"lost":%s}\n' "$AWG_LOST"; exit 0; }
+    "$AWG_BIN" status 2>/dev/null | "$JQ" -Rn --argjson lost "$AWG_LOST" '
+        reduce (inputs) as $l ({ok: true, available: true, installed: false, version: "", arch: "", tunnels: [], lost: $lost};
             if ($l | startswith("info.installed=")) then .installed = ($l | endswith("=1"))
             elif ($l | startswith("info.version=")) then .version = ($l | ltrimstr("info.version="))
             elif ($l | startswith("info.arch=")) then .arch = ($l | ltrimstr("info.arch="))
