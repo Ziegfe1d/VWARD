@@ -44,6 +44,7 @@ const ICON_PATHS = {
   back: '<path d="M19 12H5.5"/><path d="m11 6-6 6 6 6"/>',
   chevron: '<path d="m9.5 6 6 6-6 6"/>',
   close: '<path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/>',
+  plus: '<path d="M12 5.5v13M5.5 12h13"/>',
   alert: '<path d="M12 4.5 3.5 19h17z"/><path d="M12 10v4"/><path d="M12 16.8h.01"/>',
   check: '<path d="m5.5 12.5 4 4 9-9"/>',
   edit: '<path d="M5 19h3.5L18.2 9.3a2 2 0 0 0-2.8-2.8L5.7 16.2z"/><path d="m14 8 2.8 2.8"/>',
@@ -462,7 +463,7 @@ function listPage(name) {
   if ((!d || d.name !== name) && listWant !== name) { listWant = name; load('listd', true).then(render); }
   const fresh = d && d.name === name, title = l.description || l.name, can = ok && (viaIs(l, 'vpn') || viaIs(l, 'bypass'));
   const rm = (act, v, label) => '<button class="icon-btn" type="button" data-list-dom="' + act + '" data-dom="' + esc(v) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (ok ? '' : ' disabled') + '>' + ico('close') + '</button>';
-  const addF = (kind, ph) => '<form class="inline-form" data-form="list-add" data-kind="' + kind + '"><input class="input" name="domain" placeholder="' + esc(ph) + '" aria-label="Домен" autocomplete="off"' + (ok ? '' : ' disabled') + '><button class="btn" type="submit"' + (ok ? '' : ' disabled') + '>Добавить</button></form>';
+  const addF = (kind, ph, label) => '<form class="inline-form" data-form="list-add" data-kind="' + kind + '">' + formLabel(label) + '<input class="input" name="domain" placeholder="' + esc(ph) + '" aria-label="Домен" autocomplete="off"' + (ok ? '' : ' disabled') + '><button class="btn primary" type="submit"' + (ok ? '' : ' disabled') + '>' + ico('plus') + 'Добавить</button></form>';
   const inc = fresh ? d.include : [], exc = fresh ? d.exclude : [];
   return cfgNote() + (fresh || !d || !d.error ? '' : '<p class="field-warn">' + esc(errText(d)) + '</p>') +
     panel(title, '<dl class="kv">' +
@@ -471,11 +472,11 @@ function listPage(name) {
       kv([['Адресов узнано', l.addresses != null ? fmtInt(l.addresses) : '—', '', null, '', 'IP-адреса, которые Keenetic получил для доменов списка']]) +
       (l.smartdns_conflict ? '<p class="field-warn">В списке есть домены Smart DNS: их общий адрес уйдёт в VPN, и Smart DNS перестанет работать для всех сервисов. Переведите список в обход VPN или уберите эти домены.</p>' : '') +
       (l.auto && viaIs(l, 'vpn') ? '<p class="field-warn">Переведён на VPN автоматически ' + esc(l.auto.at) + ': не открылся ' + esc(l.auto.host) + '</p>' : '')) +
-    panel('Домены', addF('add', 'например, example.com') +
+    panel('Домены', addF('add', 'example.com', 'Добавить домен в список') +
       (inc.length > 8 ? '<input class="input list-filter" data-list-filter placeholder="Найти в списке" aria-label="Найти домен в списке" autocomplete="off">' : '') +
       (!fresh ? empty('Загрузка…') : inc.length ? '<ul class="rows" data-list-rows>' + inc.map(v => '<li class="row" data-d="' + esc(v) + '"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('remove', v, 'Убрать ' + v + ' из списка') + '</span></li>').join('') + '</ul>' : empty('В списке нет доменов')),
       { desc: fmtInt(inc.length || l.count) + ' ' + plural(inc.length || l.count, 'домен', 'домена', 'доменов') + '. Домен действует вместе с поддоменами. Изменения сразу сохраняются в Keenetic.' }) +
-    panel('Исключения', addF('exclude', 'поддомен, который не входит в список') +
+    panel('Исключения', addF('exclude', 'music.example.com', 'Добавить исключение') +
       (!fresh ? '' : exc.length ? '<ul class="rows">' + exc.map(v => '<li class="row"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('unexclude', v, 'Убрать исключение ' + v) + '</span></li>').join('') + '</ul>' : empty('Исключений нет')),
       { desc: 'Поддомены, которые идут мимо этого списка, хотя их домен в нём есть.' });
 }
@@ -560,7 +561,7 @@ const RENDER = {
         ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', cfgRoute().adaptive_enabled !== false, 'Автоподбор доменов', !cfgOk()), 'отправлять через VPN домены, недоступные напрямую') +
         ctrlRow('Автоопределение категории', sw('data-cfg-rt="classifier"', cfgRoute().classifier_enabled !== false, 'Автоопределение категории новых доменов', !cfgOk()), 'новые домены попадают в подходящую категорию') +
         '</dl>', { desc: 'Выключение автоподбора не убирает уже добавленные домены - только перестаёт добавлять новые.' }) +
-      panel('Проверить адрес', '<form class="inline-form" data-form="probe"><input class="input" id="probeInput" placeholder="домен или IPv4, например claude.ai" aria-label="Домен или IPv4" autocomplete="off"><button class="btn primary" type="submit">' + ico('search') + 'Проверить</button></form><div id="probeResult"></div>', { desc: 'Покажет, через какой интерфейс пойдёт трафик.' }) +
+      panel('Проверить адрес', '<form class="inline-form" data-form="probe">' + formLabel('Домен или IP-адрес') + '<input class="input" id="probeInput" placeholder="домен или IPv4, например claude.ai" aria-label="Домен или IPv4" autocomplete="off"><button class="btn primary" type="submit">' + ico('search') + 'Проверить</button></form><div id="probeResult"></div>', { desc: 'Покажет, через какой интерфейс пойдёт трафик.' }) +
       panel('Обслуживание', kv([
         ['Решения автоподбора', 'что решил VWARD', '', 'a-adaptive'],
         ['Сверка маршрутов', 'что исправлено', '', 'a-routing'],
@@ -624,7 +625,7 @@ const RENDER = {
         '<dl class="kv">' + ctrlRow('Публиковать автоматически', sw('data-ads-autopub', isTrue(s.AUTO_PUBLISH), 'Публиковать автоматически', !S.ads), 'новые правила уходят в AdGuard Home без подтверждения') + '</dl>' +
         (confirmBox('ads-autopub', 'Публиковать правила автоматически? Новые правила будут применяться в AdGuard Home без вашего подтверждения.', 'Включить') ||
          confirmBox('ads-publish', 'Отправить правила в AdGuard Home? Они применятся сразу.', 'Опубликовать') || '<div class="panel-actions">' + btn('ask', 'check', 'Опубликовать правила', 'primary', ' data-confirm="ads-publish"') + '</div>')) +
-      panel('Проверить домен', '<form class="inline-form" data-form="ads-probe"><input class="input" id="adsProbe" placeholder="например, mc.yandex.ru" aria-label="Домен" autocomplete="off"' + (PROBE ? ' value="' + esc(PROBE.domain) + '"' : '') + '><button class="btn primary" type="submit"' + (PROBE && !PROBE.done ? ' disabled' : '') + '>' + ico('search') + 'Проверить</button></form>' + probeResult(), { desc: 'Что VWARD знает о домене: решение, источники, запросы в журнале AdGuard Home.' }) +
+      panel('Проверить домен', '<form class="inline-form" data-form="ads-probe">' + formLabel('Домен') + '<input class="input" id="adsProbe" placeholder="например, mc.yandex.ru" aria-label="Домен" autocomplete="off"' + (PROBE ? ' value="' + esc(PROBE.domain) + '"' : '') + '><button class="btn primary" type="submit"' + (PROBE && !PROBE.done ? ' disabled' : '') + '>' + ico('search') + 'Проверить</button></form>' + probeResult(), { desc: 'Что VWARD знает о домене: решение, источники, запросы в журнале AdGuard Home.' }) +
       panel('Списки и правила', kv([
         ['Журнал запросов', 'последние 100', '', 'd-querylog'],
         ['Категории блокировки', (a.categories || []).filter(x => x.active).length + ' из ' + (a.categories || []).length + ' включены', '', 'd-adcats'],
@@ -781,7 +782,7 @@ const RENDER = {
       panel('Доступ к VWARD', '<dl class="kv">' + ctrlRow('Вход по учётной записи Keenetic', sw('data-auth', !!(au.enabled || authForm), 'Вход по учётной записи Keenetic', !S.auth),
           au.enabled ? (au.logged_in ? 'вы вошли как ' + au.login + ' · сессия ' + au.session_hours + ' ч' : 'нужен вход') : 'пароль проверяет роутер, VWARD его не хранит') +
         (S.auth && au.devices_only != null ? ctrlRow('Только зарегистрированные устройства', sw('data-auth-devices', !!au.devices_only, 'Только зарегистрированные устройства', !au.devices_only && (au.device || {}).state !== 'registered'), devicesHint(au)) : '') + '</dl>' +
-        (authForm && !au.enabled ? '<form class="inline-form" data-form="auth-enable"><input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Включить вход</button></form><p class="panel-desc">Введите логин и пароль от веб-интерфейса роутера: вход включится, только если роутер их примет.</p>' : '') +
+        (authForm && !au.enabled ? '<form class="inline-form multi" data-form="auth-enable">' + formLabel('Логин и пароль от Keenetic') + '<input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Включить вход</button></form><p class="panel-desc">Введите логин и пароль от веб-интерфейса роутера: вход включится, только если роутер их примет.</p>' : '') +
         confirmBox('auth-off', 'Выключить вход? VWARD снова будет открыт любому устройству в домашней сети.', 'Выключить', true) +
         kv([
           ['Адрес VWARD', (l.address || location.hostname) + ':' + (l.port || location.port || '80')],
@@ -926,7 +927,7 @@ const RENDER = {
   'd-querylog'() {
     const q = S.qlog, f = [['all', 'Все'], ['blocked', 'Заблокированные'], ['allowed', 'Разрешённые'], ['review', 'На проверке']];
     return panel('Журнал запросов', '<div class="segmented" role="group" aria-label="Фильтр">' + f.map(x => '<button type="button" data-qfilter="' + x[0] + '" aria-pressed="' + (ADSV.filter === x[0]) + '">' + x[1] + '</button>').join('') + '</div>' +
-      '<form class="inline-form" data-form="ads-qsearch"><input class="input" name="q" value="' + esc(ADSV.search) + '" placeholder="часть домена, например yandex" aria-label="Поиск по домену" autocomplete="off"><button class="btn" type="submit">' + ico('search') + 'Найти</button></form>' +
+      '<form class="inline-form" data-form="ads-qsearch">' + formLabel('Найти домен') + '<input class="input" name="q" value="' + esc(ADSV.search) + '" placeholder="часть домена, например yandex" aria-label="Поиск по домену" autocomplete="off"><button class="btn" type="submit">' + ico('search') + 'Найти</button></form>' +
       (!q ? empty('Загрузка…') : !q.ok ? empty(errText(q)) : q.entries.length ? '<ul class="rows">' + q.entries.map(e => '<li class="row"><div class="row-main"><b>' + dom(e.domain) + '</b><small><span class="st ' + (e.blocked ? 'crit' : 'ok') + '">' + (e.blocked ? 'заблокирован' : 'разрешён') + '</span>' + (e.verdict === 'SUSPECT' ? ' · на проверке' : '') + ' · ' + esc(fmtTime(e.time)) + ' · ' + esc(e.client) + '</small></div><span class="row-acts">' + adsRuleBtn(e.domain, e.blocked ? 'allow' : 'block') + '</span></li>').join('') + '</ul>' : empty('Запросов не найдено')),
       { desc: 'Последние запросы из AdGuard Home. Кнопка у строки добавляет правило для этого домена.' });
   },
@@ -937,7 +938,7 @@ const RENDER = {
   },
   'd-blocked'() {
     const r = S.blocked;
-    return panel('Заблокировано', '<form class="inline-form" data-form="ads-bsearch"><input class="input" name="q" value="' + esc(ADSV.blockedSearch) + '" placeholder="часть домена" aria-label="Поиск по домену" autocomplete="off"><button class="btn" type="submit">' + ico('search') + 'Найти</button></form>' +
+    return panel('Заблокировано', '<form class="inline-form" data-form="ads-bsearch">' + formLabel('Найти домен') + '<input class="input" name="q" value="' + esc(ADSV.blockedSearch) + '" placeholder="часть домена" aria-label="Поиск по домену" autocomplete="off"><button class="btn" type="submit">' + ico('search') + 'Найти</button></form>' +
       (!r ? empty('Загрузка…') : !r.ok ? empty(errText(r)) : r.entries.length ? '<ul class="rows">' + r.entries.map(e => '<li class="row"><div class="row-main"><b>' + dom(e.domain) + '</b><small>' + esc(reasonText(e.reason)) + '</small></div><span class="row-acts">' + adsRuleBtn(e.domain, 'allow') + '</span></li>').join('') + '</ul>' + (r.total > r.entries.length ? '<p class="panel-desc">Показаны ' + r.entries.length + ' из ' + fmtInt(r.total) + ' - уточните поиск.</p>' : '') : empty('Ничего не найдено')),
       { desc: 'Домены, которые VWARD заблокировал автоматически.' });
   },
@@ -948,13 +949,13 @@ const RENDER = {
   },
   'd-rules'() {
     const rules = (S.ads && S.ads.manual_rules) || [];
-    return panel('Добавить правило', '<form class="inline-form" data-form="ads-rule"><input class="input" id="adsRuleDomain" placeholder="домен, например example.com" aria-label="Домен" autocomplete="off"><select class="input compact" id="adsRuleType" aria-label="Действие"><option value="block">Блокировать</option><option value="allow">Разрешить</option></select><select class="input compact" id="adsRuleScope" aria-label="Область"><option value="exact">Только домен</option><option value="suffix">С поддоменами</option></select><button class="btn primary" type="submit">Добавить</button></form>' + resultBox('ads-rule')) +
+    return panel('Добавить правило', '<form class="inline-form multi" data-form="ads-rule">' + formLabel('Домен и что с ним делать') + '<input class="input" id="adsRuleDomain" placeholder="домен, например example.com" aria-label="Домен" autocomplete="off"><select class="input compact" id="adsRuleType" aria-label="Действие"><option value="block">Блокировать</option><option value="allow">Разрешить</option></select><select class="input compact" id="adsRuleScope" aria-label="Область"><option value="exact">Только домен</option><option value="suffix">С поддоменами</option></select><button class="btn primary" type="submit">' + ico('plus') + 'Добавить</button></form>' + resultBox('ads-rule')) +
       panel('Мои правила', rules.length ? '<ul class="rows">' + rules.map(r => '<li class="row"><div class="row-main"><b>' + dom(r.domain) + '</b><small><span class="st ' + (r.type === 'allow' ? 'ok' : 'crit') + '">' + (r.type === 'allow' ? 'разрешён' : 'заблокирован') + '</span> · ' + (r.scope === 'suffix' ? 'домен и поддомены' : 'только домен') + '</small></div><button class="icon-btn" type="button" title="Удалить правило" data-ads-remove="' + esc(r.domain) + '" data-scope="' + esc(r.scope || 'exact') + '" aria-label="Удалить правило ' + esc(r.domain) + '">' + ico('close') + '</button></li>').join('') + '</ul>' : empty('Правил пока нет'), { desc: 'Ручные правила важнее списков и автоматических решений.' });
   },
   'd-sources'() {
     const src = (S.ads && S.ads.sources) || [];
     return panel('Источники списков', src.length ? '<ul class="rows">' + src.map(x => '<li class="row"><div class="row-main"><b>' + esc(x.name || x.id) + '</b><small>' + esc(catText(x.purpose)) + (x.cached ? ' · загружен' : ' · ещё не загружен') + '</small></div>' + sel('data-ads-source="' + esc(x.id) + '"', 'Режим ' + (x.name || x.id), [['off', 'Выключен'], ['check', 'Проверка'], ['active', 'Активен']], x.mode) + (x.custom ? '<button class="icon-btn" type="button" data-ads-srcdel="' + esc(x.id) + '" aria-label="Удалить источник" title="Удалить источник">' + ico('close') + '</button>' : '') + '</li>').join('') + '</ul>' : empty('Источники не найдены'), { desc: '«Проверка» - источник учитывается при оценке, но сам ничего не блокирует. «Активен» - блокирует.' }) +
-      panel('Добавить свой источник', '<form class="inline-form" data-form="ads-srcadd"><input class="input" name="url" placeholder="https://example.org/list.txt" aria-label="Адрес списка" autocomplete="off" inputmode="url"><select class="input compact" name="format" aria-label="Формат"><option value="adblock">Adblock</option><option value="hosts">hosts</option><option value="domains">Список доменов</option></select><button class="btn primary" type="submit">Добавить</button></form>' + resultBox('ads-src'),
+      panel('Добавить свой источник', '<form class="inline-form multi" data-form="ads-srcadd">' + formLabel('Адрес списка и его формат') + '<input class="input" name="url" placeholder="https://example.org/list.txt" aria-label="Адрес списка" autocomplete="off" inputmode="url"><select class="input compact" name="format" aria-label="Формат"><option value="adblock">Adblock</option><option value="hosts">hosts</option><option value="domains">Список доменов</option></select><button class="btn primary" type="submit">' + ico('plus') + 'Добавить</button></form>' + resultBox('ads-src'),
         { desc: 'Только https. Новый источник начинает в режиме «Проверка»; размер и формат проверяются при загрузке - список больше 8 МБ или меньше 10 записей не принимается. До 10 своих источников.' });
   },
   'd-files'() {
@@ -989,7 +990,7 @@ const RENDER = {
         '</div>' +
         '<span class="row-acts">' + sw('data-agh-filter="' + esc(f.url) + '"', f.enabled, 'Список ' + (f.name || f.url)) + '<button class="icon-btn" type="button" data-agh-filter-rm="' + esc(f.url) + '" aria-label="Удалить ' + esc(f.name || f.url) + '" title="Удалить">' + ico('close') + '</button></span>' +
         (rm === f.url ? '<div class="confirm danger"><span>Удалить список из AdGuard Home?</span><button class="btn small danger" type="button" data-act="confirm-yes">Удалить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '') + '</li>').join('') + '</ul>' : empty('Списков нет')) +
-      '<form class="inline-form" data-form="agh-filter-add"><input class="input" name="url" placeholder="https://… адрес списка" aria-label="Адрес списка" autocomplete="off"><input class="input" name="name" placeholder="Название" aria-label="Название списка" maxlength="64"><button class="btn" type="submit">Добавить</button></form>' +
+      '<form class="inline-form multi" data-form="agh-filter-add">' + formLabel('Адрес и название списка') + '<input class="input" name="url" placeholder="https://… адрес списка" aria-label="Адрес списка" autocomplete="off"><input class="input" name="name" placeholder="Название" aria-label="Название списка" maxlength="64"><button class="btn primary" type="submit">' + ico('plus') + 'Добавить</button></form>' +
       '<div class="panel-actions">' + btn('agh-filters-refresh', 'refresh', 'Обновить списки сейчас') + '</div>' + resultBox('agh'),
       { desc: 'Списки блокировки самого AdGuard Home. Выключенный список остаётся, но не применяется.' });
   },
@@ -1014,7 +1015,8 @@ const HOURS = Array.from({ length: 24 }, (x, i) => { const h = (i < 10 ? '0' : '
 function withCur(opts, v, unit) { return v == null || v === '' || opts.some(o => String(o[0]) === String(v)) ? opts : opts.concat([[v, v + unit]]); }
 function countText(n) { return n + ' ' + plural(n, 'домен', 'домена', 'доменов'); }
 function cfgNote() { return !S.config ? '' : !S.config.writable ? '<p class="field-warn">Изменение настроек из VWARD недоступно: на роутере нет vward-console-config.sh. Установите обновление VWARD.</p>' : ''; }
-function addForm(op, placeholder) { return '<form class="inline-form" data-form="cfg-add" data-op="' + op + '"><input class="input" name="domain" placeholder="' + esc(placeholder) + '" aria-label="Домен" autocomplete="off"' + (cfgOk() ? '' : ' disabled') + '><button class="btn primary" type="submit"' + (cfgOk() ? '' : ' disabled') + '>Добавить</button></form>'; }
+function formLabel(text) { return '<span class="form-label">' + esc(text) + '</span>'; }
+function addForm(op, placeholder, label) { return '<form class="inline-form" data-form="cfg-add" data-op="' + op + '">' + formLabel(label || 'Новый домен') + '<input class="input" name="domain" placeholder="' + esc(placeholder) + '" aria-label="Домен" autocomplete="off"' + (cfgOk() ? '' : ' disabled') + '><button class="btn primary" type="submit"' + (cfgOk() ? '' : ' disabled') + '>' + ico('plus') + 'Добавить</button></form>'; }
 function rowBtn(op, action, d, icon, label) { return '<button class="icon-btn" type="button" data-cfg-op="' + op + '" data-cfg-action="' + action + '" data-cfg-target="' + esc(d) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (cfgOk() ? '' : ' disabled') + '>' + ico(icon) + '</button>'; }
 function domainRows(list, acts, sub) { return list.length ? '<ul class="rows">' + list.map(d => '<li class="row"><div class="row-main"><b>' + dom(d) + '</b>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div><span class="row-acts">' + acts(d) + '</span></li>').join('') + '</ul>' : ''; }
 const CAT_NAMES = { 'ads-tracking-security': 'Реклама, трекеры и угрозы', 'ads-tracking-security-aggressive': 'Усиленная защита', 'popup-ads': 'Всплывающая реклама', 'ads-tracking': 'Реклама и трекеры', ads: 'Реклама', tracking: 'Трекеры', 'ads-malware': 'Реклама и вредоносные сайты', 'mobile-ads': 'Реклама в приложениях', custom: 'Свои источники' };
@@ -1474,7 +1476,7 @@ function tunnelTrafficPanel(name) {
       // Lists are changed in one place, «Доменные списки»: here only how many go this way.
       kv([['Доменные списки', lists.length ? String(lists.length) : 'нет', '', 'lists']]) +
       '<p class="panel-desc">Подсети: ' + (nets.length ? fmtInt(nets.length) : 'нет') + '</p>' + (nets.length ? '<ul class="rows">' + netRows + '</ul>' : '') +
-      '<form class="inline-form" data-form="tunnel-subnet" data-name="' + esc(name) + '"><input class="input mono" name="subnet" placeholder="149.154.160.0/20" aria-label="Подсеть" autocomplete="off"><button class="btn" type="submit"' + (cfgOk() ? '' : ' disabled') + '>Добавить подсеть</button></form>') + resultBox('tunnel-traffic'),
+      '<form class="inline-form" data-form="tunnel-subnet" data-name="' + esc(name) + '">' + formLabel('Добавить подсеть') + '<input class="input mono" name="subnet" placeholder="149.154.160.0/20" aria-label="Подсеть" autocomplete="off"><button class="btn primary" type="submit"' + (cfgOk() ? '' : ' disabled') + '>' + ico('plus') + 'Добавить</button></form>') + resultBox('tunnel-traffic'),
     { desc: 'Списки доменов и подсети IPv4, которые Keenetic отправляет через этот туннель. Списки меняются в разделе «Доменные списки», подсети - здесь.' });
 }
 function tunnelManagePanel(name, managed) {
@@ -1536,7 +1538,7 @@ function aghConnectPanel(a) {
   if (!S.ads) return '';
   if (a.agh_connected) return panel('Подключение к AdGuard Home', (confirmBox('agh-off', 'Отключить VWARD от AdGuard Home? Статистика и журнал запросов перестанут показываться.', 'Отключить', true) ||
     '<div class="panel-actions">' + btn('ask', 'undo', 'Отключить', '', ' data-confirm="agh-off"') + '</div>'), { desc: 'VWARD читает статистику и журнал запросов AdGuard Home под сохранённым логином.' });
-  return panel('Подключение к AdGuard Home', '<form class="inline-form" data-form="agh-connect"><input class="input" name="login" placeholder="логин AdGuard Home" aria-label="Логин AdGuard Home" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль AdGuard Home" autocomplete="current-password"><button class="btn primary" type="submit">Подключить</button></form>',
+  return panel('Подключение к AdGuard Home', '<form class="inline-form multi" data-form="agh-connect">' + formLabel('Логин и пароль от AdGuard Home') + '<input class="input" name="login" placeholder="логин AdGuard Home" aria-label="Логин AdGuard Home" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль AdGuard Home" autocomplete="current-password"><button class="btn primary" type="submit">Подключить</button></form>',
     { desc: 'Логин и пароль от веб-интерфейса AdGuard Home. VWARD сначала проверит их у AdGuard Home, потом сохранит в защищённый файл на роутере.' });
 }
 function tunnelProbePanel(name) {
@@ -1574,7 +1576,7 @@ function wifiClientPage(mac) {
   const ctl = S.config && S.config.wifi ? S.config.wifi.CONTROL_ENABLED : S.wifi && S.wifi.control_enabled;
   const ops = [['auto', 'Авто', 'WIFI_BAND_AUTO', 'Авто'], ['bind-2g', '2.4 ГГц', 'WIFI_BIND_2G', 'Только 2.4 ГГц'], ['bind-5g', '5 ГГц', 'WIFI_BIND_5G', 'Только 5 ГГц']];
   const h = c.host || {}, deny = h.access === 'deny';
-  const device = panel('Устройство', '<form class="inline-form" data-form="wifi-name" data-mac="' + esc(mac) + '"><input class="input" name="name" maxlength="64" value="' + esc(h.name || '') + '" placeholder="' + esc(h.hostname || 'Имя устройства') + '" aria-label="Имя устройства"><button class="btn" type="submit"' + (cfgOk() ? '' : ' disabled') + '>' + (h.registered ? 'Переименовать' : 'Сохранить имя') + '</button></form>' +
+  const device = panel('Устройство', '<form class="inline-form" data-form="wifi-name" data-mac="' + esc(mac) + '">' + formLabel('Имя устройства') + '<input class="input" name="name" maxlength="64" value="' + esc(h.name || '') + '" placeholder="' + esc(h.hostname || 'Имя устройства') + '" aria-label="Имя устройства"><button class="btn" type="submit"' + (cfgOk() ? '' : ' disabled') + '>' + (h.registered ? 'Переименовать' : 'Сохранить имя') + '</button></form>' +
       '<dl class="kv">' + ctrlRow('Доступ в интернет', sw('data-wifi-access="' + esc(mac) + '"', !deny, 'Доступ в интернет для ' + wifiName(mac), !cfgOk()), deny ? 'запрещён: устройство видит только домашнюю сеть' : 'разрешён') + '</dl>' +
       confirmBox('wifi-deny', 'Запретить устройству «' + wifiName(mac) + '» выход в интернет? Домашняя сеть останется доступной.', 'Запретить', true) +
       kv([['MAC', mac], ['IP-адрес', h.ip || '—'], ['Имя в сети', h.hostname || '—'], ['Зарегистрировано в Keenetic', h.registered ? 'Да' : 'Нет'],
@@ -1812,7 +1814,7 @@ function showDeviceBlocked() {
 function showLogin() {
   cacheDrop();
   if (loginOpen) return;
-  openSheet('Вход в Панель VWARD', '<div class="sheet-body"><form class="inline-form" data-form="login"><input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Войти</button></form><p class="panel-desc">Логин и пароль от веб-интерфейса роутера.</p></div>');
+  openSheet('Вход в Панель VWARD', '<div class="sheet-body"><form class="inline-form multi" data-form="login">' + formLabel('Логин и пароль от Keenetic') + '<input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Войти</button></form><p class="panel-desc">Логин и пароль от веб-интерфейса роутера.</p></div>');
   loginOpen = true;
 }
 function openNotes() {
