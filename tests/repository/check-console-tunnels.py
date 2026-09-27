@@ -447,4 +447,12 @@ with tempfile.TemporaryDirectory() as tmp:
     if not any(l.startswith("RCI: ") and OLD_KEY in l for l in Path(str(state) + ".log").read_text().splitlines()):
         fail("the rollback must put the old key back through RCI")
 
+# Moving several tunnels to the engine: one server that does not answer does not
+# stop the others (the Panel used to return on the first failure).
+js = (ROOT / "web/assets/vward-console.js").read_text()
+adopt = js[js.index("async function awgAdopt("):]
+adopt = adopt[:adopt.index("\n}\n")]
+if "return;" in adopt or "failed.push(" not in adopt:
+    fail("awgAdopt must try every file and list the ones that failed")
+
 print("CONSOLE_TUNNELS=PASS")

@@ -1544,7 +1544,7 @@ function awgLostPanel(only) {
 async function awgAdopt(files) {
   const show = text => { actionResult = { id: 'awg-adopt', text: text }; render(); };
   const read = f => new Promise(res => { if (f.size > 16384) return res(''); const r = new FileReader(); r.onload = () => res(String(r.result || '')); r.onerror = () => res(''); r.readAsText(f); });
-  const done = [], bad = [];
+  const done = [], bad = [], failed = [];
   for (const f of files) {
     let text = await read(f);
     if (/^\s*vpn:\/\//i.test(text)) { const k = await amneziaKey(text); text = k.conf || ''; }
@@ -1563,10 +1563,11 @@ async function awgAdopt(files) {
     }
     const last = String(run.output || '').trim().split('\n').pop() || '';
     if (x.ok && run.finished && run.rc === 0) done.push(t.description || t.name);
-    else { show('«' + (t.description || t.name) + '» не перенесён: ' + (x.ok ? errText({ error: last.replace(/^error=/, '') || 'engine_failed' }) : errText(x))); await Promise.all([load('status', true), load('awg', true)]); return; }
+    // One server that does not answer does not stop the others.
+    else failed.push('«' + (t.description || t.name) + '» - ' + (x.ok ? errText({ error: last.replace(/^error=/, '') || 'engine_failed' }) : errText(x)));
     await load('awg', true);
   }
-  show((done.length ? 'В контуре: ' + done.join(', ') + '. ' : '') + (bad.length ? 'Не подошли ни к одному туннелю: ' + bad.join(', ') + ' - добавьте их через «Добавить туннель».' : ''));
+  show((done.length ? 'В контуре: ' + done.join(', ') + '. ' : '') + (failed.length ? 'Не перенесены: ' + failed.join('; ') + '. ' : '') + (bad.length ? 'Не подошли ни к одному туннелю: ' + bad.join(', ') + ' - добавьте их через «Добавить туннель».' : ''));
   await Promise.all([load('status', true), load('awg', true), load('lists', true)]); render();
 }
 // Filled only by «Проверить сейчас»: the router does not do this in the background.
