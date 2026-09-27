@@ -234,7 +234,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|security-data|route-data|lists-data|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data) ;;
+    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -2059,6 +2059,28 @@ if [ "$ACTION" = list-data ]; then
         if ($r | map(select(.[0] == "F")) | length) == 0 then {ok:false, error:"list_not_found"}
         else {ok:true, name:$name, description:([$r[] | select(.[0] == "D") | .[1]][0] // ""),
               include:[$r[] | select(.[0] == "I") | .[1]], exclude:[$r[] | select(.[0] == "E") | .[1]]} end'
+    exit 0
+fi
+
+# list-addrs NAME: the addresses Keenetic learned for one domain list, by domain.
+# Only on demand (the page «IP-адреса»): the router's answer covers every list.
+if [ "$ACTION" = list-addrs ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    NAME="$(qget name)"
+    printf '%s\n' "$NAME" | grep -Eq '^(domain-list[0-9]{1,3}|AdaptiveAuto)$' || { echo '{"ok":false,"error":"invalid_group"}'; exit 0; }
+    # One element comes as an object, several as an array: both read as a list.
+    OUT="$("$CURL" --fail --silent --connect-timeout 2 --max-time 10 "$VWARD_RCI_BASE/show/object-group/fqdn" 2>/dev/null |
+        "$JQ" -c --arg g "$NAME" '
+            def many: if . == null then [] elif type == "array" then . else [.] end;
+            [(.group | many)[] | select(.["group-name"] == $g)][0] as $x |
+            if $x == null then {ok: false, error: "list_not_found"} else
+            {ok: true, name: $g, v4: ($x["ipv4-addresses-count"] // null), v6: ($x["ipv6-addresses-count"] // null),
+             entries: [($x.entry | many)[] | {fqdn: (.fqdn // ""),
+                 v4: [(.ipv4 | many)[] | .address? // empty][:100],
+                 v6: [(.ipv6 | many)[] | .address? // empty][:50]}]} end' 2>/dev/null)"
+    [ -n "$OUT" ] || OUT='{"ok":false,"error":"router_unavailable"}'
+    printf '%s\n' "$OUT"
     exit 0
 fi
 

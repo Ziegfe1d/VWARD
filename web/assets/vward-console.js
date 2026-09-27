@@ -132,7 +132,7 @@ const API_ERRORS = {
 const errText = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.error || '') ? 'роутер не принял настройку ' + x.error.slice(14).replace(/_/g, ' ') + ' - туннель не изменён' : '') || (x && x.error) || ('код ' + (x && x.rc));
 
 /* ---------- Данные ---------- */
-const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, ext: null, listd: null, wanhist: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
+const S = { auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, ext: null, listd: null, laddr: null, wanhist: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
 const ADSV = { filter: 'all', search: '', blockedSearch: '', filtersOpen: false };
 // Files page: the open folder.
 const FILES = { root: '', path: '' };
@@ -142,7 +142,8 @@ const LOADERS = {
   ads: () => apiGet('ads-data'), https: () => apiGet('ads-https-data'), config: () => apiGet('config-data'),
   adsstats: () => apiGet('ads-view', { view: 'stats' }), agh: () => apiGet('ads-view', { view: 'agh' }), backups: () => apiGet('backup-data'), ext: () => apiGet('ext-update-data'),
   wanhist: () => apiText('log', { name: 'recovery', count: 100 }).then(t => ({ ok: true, text: t })),
-  listd: () => current.startsWith('l-') ? apiGet('list-data', { name: current.slice(2) }) : Promise.resolve(null), files: () => FILES.root ? apiGet('files', { op: 'list', root: FILES.root, path: FILES.path }) : Promise.resolve(null), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
+  listd: () => current.startsWith('l-') ? apiGet('list-data', { name: current.slice(2) }) : Promise.resolve(null),
+  laddr: () => current.startsWith('ip-') ? apiGet('list-addrs', { name: current.slice(3) }) : Promise.resolve(null), files: () => FILES.root ? apiGet('files', { op: 'list', root: FILES.root, path: FILES.path }) : Promise.resolve(null), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
   qlog: () => apiGet('ads-view', { view: 'querylog', filter: ADSV.filter, search: ADSV.search }),
   review: () => apiGet('ads-view', { view: 'list', kind: 'review' }),
   cron: () => apiGet('cron-data'), auth: () => apiGet('auth'),
@@ -278,6 +279,7 @@ function page(id) {
   if (DETAILS[id]) return Object.assign({ id: id }, DETAILS[id]);
   if (id.startsWith('t-')) return { id: id, title: tunLabel(id.slice(2)), parent: 'vpn' };
   if (id.startsWith('l-')) { const l = ((S.lists && S.lists.lists) || []).find(x => x.name === id.slice(2)); return { id: id, title: l ? l.description || l.name : 'Список', parent: 'lists' }; }
+  if (id.startsWith('ip-')) return { id: id, title: 'IP-адреса', parent: 'l-' + id.slice(3) };
   if (id.startsWith('w-')) return { id: id, title: typeof wifiName === 'function' ? wifiName(id.slice(2)) : id.slice(2), parent: 'wifi' };
   return null;
 }
@@ -456,6 +458,19 @@ function routeSourcesRow(r) {
   const got = r.sources || [], bad = got.filter(x => !x.ok).length;
   return ['Источники', !got.length ? ROUTE_SOURCES.length + ' · обновятся ночью' : bad ? bad + ' ' + plural(bad, 'не скачался', 'не скачались', 'не скачались') + ' из ' + ROUTE_SOURCES.length : ROUTE_SOURCES.length + ' · все обновлены', bad ? 'warn' : '', 'd-rsources'];
 }
+// Addresses Keenetic learned for one list, by domain (list-addrs).
+function addrPage(name) {
+  const a = S.laddr, fresh = a && a.name === name, l = ((S.lists && S.lists.lists) || []).find(x => x.name === name);
+  if (!fresh && !(a && a.error)) return panel(l ? l.description || l.name : 'Список', empty('Загрузка…'));
+  if (!a.ok) return panel(l ? l.description || l.name : 'Список', empty(errText(a)));
+  const got = a.entries.filter(e => e.v4.length || e.v6.length), none = a.entries.length - got.length;
+  const rows = got.map(e => '<li class="row" data-d="' + esc(e.fqdn) + '"><div class="row-main"><b>' + dom(e.fqdn) + '</b><small class="mono">' +
+    esc(e.v4.concat(e.v6).join(', ')) + '</small></div></li>').join('');
+  return panel(l ? l.description || l.name : name, kv([['IPv4', fmtInt(a.v4)], ['IPv6', fmtInt(a.v6)]])) +
+    panel('По доменам', (got.length > 8 ? '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти домен или адрес" aria-label="Найти домен или адрес" autocomplete="off"></label>' : '') +
+      (got.length ? '<ul class="rows" data-list-rows>' + rows + '</ul>' : empty('Адресов пока нет: устройства ещё не открывали эти домены')),
+      { desc: none ? 'Доменов без адресов: ' + none + ' - их ещё не открывали.' : 'Адреса обновляются, когда устройства открывают домены.' });
+}
 function listPage(name) {
   const l = ((S.lists && S.lists.lists) || []).find(x => x.name === name), d = S.listd, ok = cfgOk();
   const tuns = (st().wg && st().wg.interfaces) || [];
@@ -469,7 +484,7 @@ function listPage(name) {
     panel(title, '<dl class="kv">' +
       (tuns.length > 1 ? ctrlRow('Куда идёт', listViaSel(l, tuns, ok)) : ctrlRow('В обход VPN', sw('data-list-bypass="' + esc(l.name) + '"', viaIs(l, 'bypass'), 'В обход VPN: ' + title, !can), viaIs(l, 'bypass') ? 'сейчас идёт через провайдера' : 'сейчас идёт через VPN')) +
       ctrlRow('Следить', sw('data-list-watch="' + esc(l.name) + '"', l.watch, 'Следить: ' + title, !ok), 'если в обход VPN сервис перестанет открываться, VWARD сам переведёт список на VPN') + '</dl>' +
-      kv([['Адресов узнано', l.addresses != null ? fmtInt(l.addresses) : '—', '', null, '', 'IP-адреса, которые Keenetic получил для доменов списка']]) +
+      kv([['IP-адреса', l.addresses != null ? fmtInt(l.addresses) : '—', '', 'ip-' + l.name, '', 'что Keenetic узнал для доменов списка']]) +
       (l.smartdns_conflict ? '<p class="field-warn">В списке есть домены Smart DNS: их общий адрес уйдёт в VPN, и Smart DNS перестанет работать для всех сервисов. Переведите список в обход VPN или уберите эти домены.</p>' : '') +
       (l.auto && viaIs(l, 'vpn') ? '<p class="field-warn">Переведён на VPN автоматически ' + esc(l.auto.at) + ': не открылся ' + esc(l.auto.host) + '</p>' : '')) +
     panel('Домены', addF('add', 'example.com', 'Добавить домен в список') +
@@ -1740,7 +1755,7 @@ function render() {
   back.classList.toggle('detail', !!p.parent);
   back.hidden = current === 'overview';
   back.setAttribute('aria-label', p.parent ? 'Назад: ' + page(p.parent).title : 'Назад к обзору');
-  const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('deps-') ? depsPage(comp(current.slice(5))) : current.startsWith('l-') ? listPage(current.slice(2)) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
+  const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('deps-') ? depsPage(comp(current.slice(5))) : current.startsWith('l-') ? listPage(current.slice(2)) : current.startsWith('ip-') ? addrPage(current.slice(3)) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
   patchContent(html, rendered !== current);
   rendered = current;
   document.querySelectorAll('.tabbar.preview').forEach(t => t.style.setProperty('--tabs', tabIds.length + 1));
@@ -1767,6 +1782,7 @@ async function refreshPage() {
   if (id.startsWith('a-')) loadActivity(id.slice(2));
   if (id.startsWith('t-')) keys.push('status', 'lists');
   if (id.startsWith('l-')) keys.push('listd');
+  if (id.startsWith('ip-')) keys.push('laddr');
   if (id.startsWith('w-')) keys.push('wifi');
   if (id === 'd-https' || id === 'ads') keys.push('https');
   if (id === 'd-notes') notesVersions().forEach(v => loadNotes(v));
@@ -2213,7 +2229,7 @@ document.addEventListener('input', e => { if (e.target.id === 'searchInput') ren
 document.addEventListener('input', e => {
   if (!e.target.hasAttribute('data-list-filter')) return;
   const q = e.target.value.trim().toLowerCase();
-  document.querySelectorAll('[data-list-rows] > li').forEach(li => { li.hidden = !!q && !li.dataset.d.includes(q); });
+  document.querySelectorAll('[data-list-rows] > li').forEach(li => { li.hidden = !!q && !li.textContent.toLowerCase().includes(q); });
 });
 document.addEventListener('change', e => {
   const t = e.target;
