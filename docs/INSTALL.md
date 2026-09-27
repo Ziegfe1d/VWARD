@@ -1,157 +1,126 @@
 # Установка VWARD
 
-> **Статус 0.2.0-rc.1.fix.16:** безопасного универсального установщика всей платформы пока
-> нет. Репозиторий содержит проверенный source/runtime map и production bootstrap
-> Update Engine, но dev-feed не является цепочкой первичной установки на пустой
-> роутер. Не запускайте отдельные production-скрипты до адаптации параметров.
+> **Статус 0.2.0-rc.1.fix.16:** установщик `install.sh` проверен на эмуляторе чистого
+> роутера (`tests/perf/check-install-emulated.py`). На реальном роутере «с нуля» он ещё
+> не запускался.
 
-Эта инструкция отделяет действия, которые можно выполнить сейчас, от действий,
-которые требуют будущего first-install installer или ручного контролируемого окна.
+Исходное положение: роутер Keenetic включён и настроен, флешка вставлена, в Keenetic
+настроено VPN-подключение (WireGuard, AmneziaWG, OpenVPN, SSTP, L2TP, PPTP, IPsec или
+Proxy). Больше ничего не нужно: списков доменов, AdGuard Home и своих настроек VWARD не
+требует.
 
-## 1. Перед началом
+## 1. Подготовка роутера (один раз)
 
-Нужны:
+VWARD работает в Entware, поэтому сначала роутеру нужна Entware на флешке. Без неё на
+роутере нет обычной командной строки, и сделать эти шаги за вас установщик не может.
 
-- Keenetic с поддержкой Entware и USB-накопителем;
-- резервная копия startup-config Keenetic;
-- локальный доступ к веб-интерфейсу и SSH;
-- возможность вернуть исходный cron и файлы `/opt`;
-- понимание, какой VPN-туннель можно использовать для политики VWARD.
+1. **Компоненты.** Веб-интерфейс Keenetic → «Общие настройки» → «Изменить набор
+   компонентов»: отметьте «Поддержка открытых пакетов» и «Файловая система Ext».
+   Роутер обновится и перезагрузится.
+2. **Флешка в ext4.** Keenetic не форматирует флешки сам. Отформатируйте её в ext4 на
+   компьютере: в Linux `mkfs.ext4 -L OPKG /dev/sdX1`, в Windows - программой для
+   разделов (например, AOMEI Partition Assistant или Paragon Partition Manager). Все
+   данные на флешке будут стёрты.
+3. **Entware.** Вставьте флешку в роутер. Откройте в браузере командную строку роутера:
+   `http://192.168.1.1/a` (или адрес вашего роутера с `/a`). Узнайте архитектуру
+   командой `show version` (строка `arch`) и выполните одну команду, подставив имя
+   флешки из «Приложения → Диски и принтеры» (например, `OPKG`):
 
-VWARD может менять маршруты, состояние WireGuard и WAN. Первый запуск выполняйте,
-находясь в той же локальной сети, а не через единственный удалённый канал.
+   | arch | Команда |
+   |---|---|
+   | mipsel (большинство моделей) | `opkg disk OPKG:/ https://bin.entware.net/mipselsf-k3.4/installer/mipsel-installer.tar.gz` |
+   | mips | `opkg disk OPKG:/ https://bin.entware.net/mipssf-k3.4/installer/mips-installer.tar.gz` |
+   | aarch64 | `opkg disk OPKG:/ https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz` |
 
-## 2. Подготовка USB и Entware
+   Затем `system configuration save`. Через 3-5 минут Entware готова (ход установки
+   виден в «Диагностика → Системный журнал»).
+4. **Вход в Entware.** Подключитесь по SSH к роутеру: порт 222, если в Keenetic стоит
+   компонент «Сервер SSH», иначе 22. Логин `root`, пароль `keenetic`; сразу смените
+   его командой `passwd`.
 
-1. Подключите исправный USB-накопитель к Keenetic.
-2. Установите компонент KeeneticOS «Поддержка открытых пакетов».
-3. Назначьте накопитель для Entware в интерфейсе Keenetic.
-4. Убедитесь, что `/opt` доступен и сохраняется после перезагрузки.
+## 2. Установка VWARD
 
-Безопасные проверки по SSH:
-
-```sh
-mount | grep ' /opt '
-df -h /opt
-test -w /opt && echo OPT_WRITABLE
-```
-
-Если `OPT_WRITABLE` не появился, VWARD устанавливать нельзя.
-
-## 3. Установка зависимостей
-
-После успешной установки Entware:
-
-```sh
-opkg update
-opkg install busybox curl jq tcpdump lighttpd lighttpd-mod-cgi ca-bundle openssl-util tar
-```
-
-AdGuard Home нужен только для DNS query-driven discovery. Пакет и конфигурация
-AdGuard Home не входят в VWARD. Проверка команд:
+В SSH-сессии Entware:
 
 ```sh
-for c in sh awk sed grep curl jq tcpdump lighttpd openssl tar sha256sum ndmc; do
-  command -v "$c" >/dev/null 2>&1 || echo "MISSING: $c"
-done
+opkg update && opkg install curl
+curl -fsSL https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/install.sh -o /tmp/vward-install.sh
+sh /tmp/vward-install.sh
 ```
 
-## 4. Обязательное discovery устройства
+Сначала можно только проверить роутер: `sh /tmp/vward-install.sh --check` - ничего не
+меняется. Установщик задаёт вопросы на экране, поэтому его запускают файлом, а не через
+`curl | sh`. Для установки без вопросов: `--yes` (если VPN-подключений несколько,
+установщик всё равно попросит выбрать).
 
-Установите `vward-device-profile.sh`, затем при необходимости скопируйте
-`config/device.conf.example` в `/opt/etc/vward/device.conf`. Модель роутера и имена
-интерфейсов не зашиты: Device Profile строит карту интерфейсов через Keenetic RCI
-(`show interface`, `show interface system-name`) и running-config и кэширует её в
-`/tmp/vward-device-map.tsv` на 5 минут. Пустыми можно оставить значения, для которых
-discovery возвращает ровно одного кандидата; при неоднозначности загрузка профиля
-завершается ошибкой со списком кандидатов.
+## 3. Что делает установщик
+
+1. **Проверка роутера** (ничего не меняет): KeeneticOS 4.0 или новее, Entware на `/opt`,
+   не меньше 20 МБ свободно, VWARD ещё не стоит, есть ли AdGuard Home.
+2. **Пакеты Entware:** ставит недостающие `curl jq tcpdump openssl-util ca-bundle
+   lighttpd lighttpd-mod-cgi lighttpd-mod-setenv cron` - только после вашего «да».
+3. **Сеть и VPN:** находит провайдера, домашнюю сеть и VPN-подключения по типам, а не
+   по именам. Если VPN несколько - показывает список и спрашивает, через какое пускать
+   сайты; если домашних сетей несколько - спрашивает, какая домашняя. Выбор
+   записывается в `/opt/etc/vward/device.conf`, остальное VWARD находит сам при каждом
+   запуске.
+4. **Программа:** скачивает движок обновлений (файлы сверяются с `SHA256SUMS`), и тот
+   ставит подписанную сборку тем же путём, что и обновления: подпись Ed25519, SHA-256
+   архива и каждого файла, копия до установки, проверка после; при сбое файлы
+   возвращаются назад (`vward-update.sh --install`, только на роутере без VWARD).
+5. **Настройка:** создаёт в Keenetic список `AdaptiveAuto` и маршрут этого списка через
+   выбранный VPN - сюда автоподбор добавляет сайты, которые не открываются напрямую;
+   добавляет задания cron (свои строки владельца остаются); без AdGuard Home выключает
+   раздел «Реклама» (включается в «VWARD → Компоненты»).
+6. **Запуск и проверка:** cron, автоподбор, панель VWARD; в конце - адрес панели.
+
+Если любой шаг не прошёл, установщик возвращает всё, что успел изменить (файлы,
+cron, настройки Keenetic), и пишет причину. Журнал: `/opt/var/log/vward/install.log`.
+
+## 4. Удаление
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/install.sh -o /tmp/vward-install.sh
+sh /tmp/vward-install.sh --uninstall
+```
+
+Останавливает службы VWARD, выключает то, что VWARD включал в AdGuard Home и в
+фаерволе, удаляет программу и её строки cron. Настройки сохраняются в
+`/opt/var/backups/vward/uninstall-<дата>`. Список `AdaptiveAuto` убирается из Keenetic
+по вашему согласию, если его создал установщик. Пакеты Entware и VPN-подключения
+остаются.
+
+## 5. Роутер с бетой VWARD
+
+На роутере с бетой (`0.1.9-beta`) установщик не работает: для неё есть переход
+`scripts/beta-to-dev-cutover.sh`, после которого новая версия приходит обычным
+обновлением.
+
+## 6. Параметры устройства
+
+Модель роутера и имена интерфейсов не зашиты: Device Profile строит карту интерфейсов
+через Keenetic RCI (`show interface`, `show interface system-name`) и running-config и
+кэширует её в `/tmp/vward-device-map.tsv` на 5 минут. Пустыми можно оставить значения,
+для которых discovery возвращает ровно одного кандидата.
 
 Правила discovery:
 
 - VPN-туннели ищутся по типу интерфейса, а не по имени: WireGuard (и AmneziaWG),
   OpenVPN, SSTP, PPTP, L2TP, IPsec/IKE и Proxy. Подключение к провайдеру (PPTP/L2TP у
-  некоторых провайдеров) туннелем не считается. Если туннель один, он выбирается сразу; если их несколько,
-  выбирается единственный, на который уже ссылаются `route object-group` или
-  `ip route`; иначе нужно задать `VWARD_TUNNEL_INTERFACE` (или выбрать туннель в Console:
-  «VPN» → туннель → «Использовать для маршрутов» - Console перенесёт маршруты и запишет
-  `device.conf`);
+  некоторых провайдеров) туннелем не считается. Если туннель один, он выбирается сразу;
+  если их несколько, выбирается единственный, на который уже ссылаются `route
+  object-group` или `ip route`; иначе нужен `VWARD_TUNNEL_INTERFACE` (его записывает
+  установщик или Console: «VPN» → туннель → «Использовать для маршрутов»);
 - `VWARD_WAN_INTERFACE` - интерфейс Keenetic, чьё системное имя совпадает с
   устройством маршрута по умолчанию; VPN, назначенный основным подключением, не
   считается провайдером, а при двух провайдерах берётся основной (меньшая метрика);
 - LAN - единственный глобальный IPv4-адрес вне WAN/туннелей; при гостевых сегментах
-  выбирается сегмент с `security-level: private`. `VWARD_LAN_INTERFACE` - его имя
-  в Keenetic CLI;
-- `VWARD_POLICY_GROUP` - единственная FQDN-группа, маршрутизируемая в выбранный туннель,
-  кроме собственной группы VWARD `AdaptiveAuto`.
+  выбирается сегмент с `security-level: private`;
+- `VWARD_POLICY_GROUP` - FQDN-группа, маршрутизируемая в выбранный туннель, кроме
+  собственной группы VWARD `AdaptiveAuto`. На чистом роутере её нет - «Мои домены»
+  появятся, когда в Keenetic будет список через VPN.
 
-| Что | Параметр | Требуемое действие |
-|---|---|---|
-| LAN/router address | `VWARD_LAN_ADDRESS` | обнаружить или задать LAN-адрес |
-| LAN subnet | `VWARD_LAN_SUBNET` | обнаружить или задать подсеть |
-| home segment | `VWARD_LAN_INTERFACE` | обнаружить или задать логическое имя Keenetic |
-| WAN connection | `VWARD_WAN_INTERFACE` | обнаружить или задать логическое имя Keenetic |
-| physical WAN | `VWARD_WAN_DEVICE` | обнаружить или задать сетевое устройство |
-| VPN device | `VWARD_TUNNEL_DEVICE` | обнаружить или выбрать устройство туннеля |
-| VPN interface | `VWARD_TUNNEL_INTERFACE` | обнаружить или выбрать туннель при нескольких |
-| policy group | `VWARD_POLICY_GROUP` | обнаружить или выбрать локальную FQDN-группу |
-| Console | `VWARD_CONSOLE_PORT` | оставить непривилегированный порт или задать свой |
-
-Используйте read-only команды и интерфейс Keenetic:
-
-```sh
-ndmc -c 'show version'
-ndmc -c 'show interface'
-ip -4 address show
-ip -4 route show
-```
-
-Не публикуйте вывод: в нём могут быть локальные адреса и сведения конфигурации.
-Все места использования значений перечислены в
-[INSTALLATION_MAP.md](INSTALLATION_MAP.md).
-
-## 5. Почему нельзя просто скопировать репозиторий
-
-- каталоги source не совпадают с runtime destination;
-- `/opt/etc` содержит локальные настройки и не должен заменяться обновлением;
-- cron необходимо объединить, а не перезаписать;
-- часть скриптов сразу выполняет сетевые действия;
-- signed package предназначен только для явно указанной в manifest совместимой
-  установленной версии, а не для пустой системы;
-- release package должен быть подписан и проверен Update Engine.
-
-До появления first-install installer ручная установка всей VWARD считается
-**неподдерживаемой**. Таблица в `INSTALLATION_MAP.md` предназначена для аудита и
-разработки установщика, а не как команда массового копирования.
-
-## 6. Bootstrap VWARD Update Engine
-
-`components/update-engine/install-vward-update-engine.sh` - production bootstrap только движка
-обновлений. Он проверяет зависимости и control plane, скачивает файлы по HTTPS,
-сверяет `SHA256SUMS`, устанавливает pinned Ed25519 public key, создаёт backup,
-активирует slot и добавляет одну помеченную cron-строку.
-
-Важно: bootstrap сам изменяет `/opt`, updater cron и локальные updater-файлы. Его
-следует запускать только на уже подготовленной совместимой VWARD-установке и после
-проверки текущего feed. Он не заменяет универсальный first installer.
-
-Перед запуском сохраните:
-
-```sh
-mkdir -p /opt/var/backups/vward/manual-preflight
-crontab -l > /opt/var/backups/vward/manual-preflight/root.crontab.before
-cp -p /opt/etc/vward/update.conf /opt/var/backups/vward/manual-preflight/update.conf.before 2>/dev/null || true
-```
-
-После контролируемого запуска проверяются:
-
-```sh
-/opt/share/vward/updater/current/vward-update.sh --status
-crontab -l | grep VWARD_SMART_UPDATER
-test -r /opt/etc/vward/update-public.pem && echo PUBLIC_KEY_PRESENT
-```
-
-Не передавайте и не заменяйте `update-public.pem` случайным ключом. Приватный signing
-key на роутере находиться не должен.
+Все места использования значений перечислены в [INSTALLATION_MAP.md](INSTALLATION_MAP.md).
 
 ## 7. Проверка работающей установки
 
@@ -226,25 +195,19 @@ safe window и rollback описано в [UPDATE_POLICY.md](UPDATE_POLICY.md) �
 
 ## 12. Отключение и удаление
 
-Полного автоматического uninstaller пока нет. Безопасное удаление должно выполняться
-по ownership map и начинаться с отключения VWARD cron/init, затем остановки служб,
-backup local config/state и удаления только VWARD-owned targets.
+Удаление - `install.sh --uninstall` (раздел 4). Отдельные части выключаются в
+«VWARD → Компоненты» без удаления.
 
 Нельзя:
 
 - удалять весь `/opt`;
 - перезаписывать root crontab пустым файлом;
-- удалять общие Entware-пакеты без проверки других consumers;
-- удалять WireGuard/Keenetic-подключения как часть uninstall VWARD;
-- удалять backup до проверки восстановленного интернета.
-
-До появления uninstaller используйте `INSTALLATION_MAP.md` как ownership checklist и
-выполняйте удаление только в контролируемом окне.
+- удалять VPN-подключения Keenetic как часть удаления VWARD.
 
 ## 13. Известные ограничения
 
-- нет поддерживаемой установки всей системы «с нуля»;
-- автоматический Device Profile ещё не прошёл live acceptance на реальном роутере;
+- установка «с нуля» проверена на эмуляторе, на реальном чистом роутере ещё нет;
+- подготовку роутера (компоненты, ext4, Entware) установщик сделать не может;
 - текущие runtime-имена сохранены для совместимости;
 - live acceptance относится к целевому устройству, а не ко всем Keenetic;
 - версия `0.x-dev` может менять внутренние схемы при документированной миграции.

@@ -6,7 +6,7 @@ SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$SELF_DIR/vward-update-common.sh"
 
 usage() {
-    printf '%s\n' 'Usage: vward-update.sh --status|--status-components|--check|--dry-run|--apply|--apply-pending|--rollback|--recover'
+    printf '%s\n' 'Usage: vward-update.sh --status|--status-components|--check|--dry-run|--apply|--apply-pending|--install|--rollback|--recover'
     printf '%s\n' '       vward-update.sh --self-test MANIFEST | --engine-adopt DIR MANIFEST | --engine-revert'
 }
 
@@ -41,7 +41,9 @@ fetch_and_verify_manifest() {
         # The per-file (v2) feed first, as the hourly watch reads it: a check
         # from the Console must not put the full-package manifest in its place.
         # The v1 feed only for a channel without a v2 one.
-        feed_v2=$(vu_v2_url 2>/dev/null || :)
+        # A first install takes the whole package (v1): there is nothing to compare files with.
+        feed_v2=
+        [ "${VU_FIRST_INSTALL:-0}" = 1 ] || feed_v2=$(vu_v2_url 2>/dev/null || :)
         feed_rc=44
         [ -z "$feed_v2" ] || { vu_fetch_feed "$feed_v2" "$manifest" "$max_manifest_size"; feed_rc=$?; }
         case "$feed_rc" in
@@ -270,7 +272,11 @@ apply_update() {
 
     manifest_hash=$(vu_signed_hash "$manifest")
     update_id=$(jq -r '.signed.update_id' "$manifest")
-    previous_version=$(vu_installed_version) || vu_die "$VU_COMPAT_ERROR" "Installed version is unknown"
+    if [ "${VU_FIRST_INSTALL:-0}" = 1 ]; then
+        previous_version=none
+    else
+        previous_version=$(vu_installed_version) || vu_die "$VU_COMPAT_ERROR" "Installed version is unknown"
+    fi
     vu_journal_set pending_update "$update_id" || vu_die "$VU_INSTALL_ERROR" "Cannot persist pending update"
     vu_journal_set manifest_hash "$manifest_hash" || vu_die "$VU_INSTALL_ERROR" "Cannot persist manifest hash"
     vu_journal_set previous_version "$previous_version" || vu_die "$VU_INSTALL_ERROR" "Cannot persist previous version"
@@ -439,6 +445,14 @@ case "$command" in
             *) vu_log INFO "No interrupted transaction requires recovery"; exit "$VU_OK" ;;
         esac ;;
     --check|--dry-run|--apply|--apply-pending) ;;
+    --install)
+        # First install on a router without VWARD (install.sh): the same signed
+        # package, checks and rollback as an update, with no installed version
+        # to compare with.  Never over an existing installation.
+        [ ! -e "$VU_COMMITTED_FILE" ] && [ ! -e "$VU_ROOT_PREFIX/opt/etc/init.d/S91vward-route-engine" ] &&
+            [ ! -e "$current_version_file" ] ||
+            vu_die "$VU_COMPAT_ERROR" "VWARD is already installed; updates come by themselves"
+        VU_FIRST_INSTALL=1 ;;
     *) usage >&2; exit "$VU_CONFIG_ERROR" ;;
 esac
 
@@ -473,7 +487,7 @@ fi
 
 priority=$(jq -r '.signed.priority' "$manifest")
 first_seen=$(vu_pending_get first_seen_at 2>/dev/null || vu_now_epoch)
-if [ "$command" != --dry-run ] && ! vu_schedule_ready "$priority" "$first_seen"; then
+if [ "$command" != --dry-run ] && [ "$command" != --install ] && ! vu_schedule_ready "$priority" "$first_seen"; then
     vu_transition WAITING_WINDOW
     vu_die "$VU_DEFERRED" "Pending update is waiting for its scheduling policy"
 fi
@@ -505,5 +519,5 @@ case "$command" in
     --dry-run)
         if vu_hard_safety_check "$package_dir"; then printf '%s\n' 'Safety: ready'; else printf '%s\n' 'Safety: blocked'; fi
         exit "$VU_OK" ;;
-    --apply|--apply-pending) apply_update "$manifest" "$package_dir" ;;
+    --apply|--apply-pending|--install) apply_update "$manifest" "$package_dir" ;;
 esac

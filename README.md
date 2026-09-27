@@ -43,17 +43,19 @@ Runtime-файлы, init-скрипты и управляемые пути ис�
 - POSIX `sh`/BusyBox и [зависимости VWARD](docs/DEPENDENCIES.md);
 - локальный доступ к VWARD Console через LAN.
 
-Production-профиль проверен на текущем Keenetic/Entware-устройстве автора.
-Автоматическая переносимость на любые модели Keenetic пока не заявлена.
+Production-профиль проверен на Keenetic автора; установка на чистый роутер проверена
+на эмуляторе.
 
 ## Установка
 
-1. Подготовьте USB и Entware.
-2. Определите параметры своего роутера; не используйте значения примера вслепую.
-3. Установите зависимости.
-4. Выполните первичную установку.
-5. Проверьте процессы, cron, Console и сетевое поведение.
-6. Только после этого разрешайте автоматическое применение обновлений.
+Нужны: Keenetic с KeeneticOS 4.0+, флешка с Entware и VPN-подключение в Keenetic.
+Подготовка роутера и Entware - в [`docs/INSTALL.md`](docs/INSTALL.md). Затем по SSH:
+
+```sh
+opkg update && opkg install curl
+curl -fsSL https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/install.sh -o /tmp/vward-install.sh
+sh /tmp/vward-install.sh
+```
 
 Полный путь, команды проверки, recovery и удаление: [`docs/INSTALL.md`](docs/INSTALL.md).
 Карта source → runtime: [`docs/INSTALLATION_MAP.md`](docs/INSTALLATION_MAP.md).

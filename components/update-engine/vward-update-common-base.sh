@@ -562,9 +562,12 @@ vu_manifest_static_policy() {
     manifest=$1
     version=$(jq -r '.signed.version' "$manifest")
     manifest_channel=$(jq -r '.signed.channel' "$manifest")
-    current_version=$(vu_installed_version) || return "$VU_COMPAT_ERROR"
     vu_semver_valid "$version" || return "$VU_COMPAT_ERROR"
-    vu_semver_valid "$current_version" || return "$VU_COMPAT_ERROR"
+    # A first install (vward-update.sh --install) has no version yet.
+    if [ "${VU_FIRST_INSTALL:-0}" != 1 ]; then
+        current_version=$(vu_installed_version) || return "$VU_COMPAT_ERROR"
+        vu_semver_valid "$current_version" || return "$VU_COMPAT_ERROR"
+    fi
     [ "$manifest_channel" = "$channel" ] || return "$VU_COMPAT_ERROR"
     [ "$(jq -r '.signed.requires_reboot' "$manifest")" = false ] || return "$VU_COMPAT_ERROR"
     [ "$(jq -r '.signed.affected_services | length' "$manifest")" -eq 0 ] || return "$VU_COMPAT_ERROR"
@@ -647,9 +650,17 @@ vu_manifest_check_policy() {
     sequence=$(jq -r '.signed.sequence' "$manifest")
     version=$(jq -r '.signed.version' "$manifest")
     update_id=$(jq -r '.signed.update_id' "$manifest")
-    current_version=$(vu_installed_version) || return "$VU_COMPAT_ERROR"
     committed_seq=$(vu_committed_get last_sequence 2>/dev/null || printf '0')
     committed_id=$(vu_committed_get installed_update_id 2>/dev/null || :)
+    if [ "${VU_FIRST_INSTALL:-0}" = 1 ]; then
+        # Nothing installed to compare with: signature, sequence and trust only.
+        vu_trust_check_and_maybe_advance "$manifest" "$persist_trust"
+        rc=$?
+        [ "$rc" -eq "$VU_OK" ] || return "$rc"
+        vu_quarantine_matches "$manifest" && return "$VU_QUARANTINED"
+        return "$VU_OK"
+    fi
+    current_version=$(vu_installed_version) || return "$VU_COMPAT_ERROR"
 
     # The release already installed: nothing to do.  Its per-file (v2) manifest
     # is signed apart from the v1 one the release may have come in with, so its

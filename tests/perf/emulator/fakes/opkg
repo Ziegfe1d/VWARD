@@ -1,0 +1,13 @@
+#!/bin/sh
+# Fake Entware opkg: "install" unpacks /emu/pkgstore/<name> over /, "update" succeeds.
+case "$1" in
+    update) exit 0 ;;
+    install)
+        shift
+        for p do
+            [ -d "/emu/pkgstore/$p" ] || { echo "Unknown package '$p'."; exit 255; }
+            cp -a "/emu/pkgstore/$p/." / || exit 1
+            echo "$p" >> /emu/opkg-installed.log
+        done ;;
+    *) exit 0 ;;
+esac
