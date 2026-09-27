@@ -13,6 +13,7 @@ route-engine	components/route-engine/data/catalogs/x-twitter.domains	/opt/share/
 route-reconciler	components/route-reconciler/scripts/vward-route-reconciler.sh	/opt/bin/vward-route-reconciler.sh	0755
 route-tools	components/route-tools/scripts/vward-route-test.sh	/opt/bin/vward-route-test.sh	0755
 route-tools	components/route-tools/scripts/vward-route-hints-update.sh	/opt/bin/vward-route-hints-update.sh	0755
+route-tools	components/route-tools/scripts/vward-list-fill.sh	/opt/bin/vward-list-fill.sh	0755
 route-tools	components/route-tools/scripts/vward-route-resolve4.sh	/opt/bin/vward-route-resolve4.sh	0755
 route-tools	components/route-tools/scripts/vward-route.sh	/opt/bin/vward-route.sh	0755
 route-tools	components/route-tools/scripts/vward-route-discovery.sh	/opt/bin/vward-route-discovery.sh	0755

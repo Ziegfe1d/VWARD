@@ -310,3 +310,7 @@ echo "DOMAIN_ROWS=$TOTAL_ROWS"
 echo "UNIQUE_DOMAINS=$TOTAL_DOMAINS"
 echo "CATEGORIES=$TOTAL_CATS"
 echo "MODE=DYNAMIC_ALL_LISTS"
+
+# Domain lists grow from the fresh catalog (per-list switch in the Console).
+LIST_FILL=${VWARD_LIST_FILL_BIN:-/opt/bin/vward-list-fill.sh}
+[ ! -x "$LIST_FILL" ] || "$LIST_FILL" run > /tmp/vward-list-fill.cron.out 2>&1 || true

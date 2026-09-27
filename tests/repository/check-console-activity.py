@@ -58,6 +58,11 @@ LOGS = {
         "2026-09-27T04:00:00Z [INFO] Update 0.2.0-rc.1.fix.16 committed",
     ]),
     "ads": "2026-09-27 08:00:00|SOURCES_UPDATE_OK|healthy=5\n2026-09-27 08:05:00|ROUTE_DNS|rows_set|domains=42|skipped=1\n2026-09-27 08:06:00|JOB_DONE|id=7\n",
+    "listfill": "\n".join([
+        "2026-09-27 04:41:00|LIST_ADD|domain-list1|googlevideo.com", "2026-09-27 04:41:01|LIST_REMOVE|domain-list1|youtu.be",
+        "2026-09-27 04:41:02|LIST_FILL|domain-list1|added=1|removed=1|pending=0|full=0|categories=youtube",
+        "2026-09-27 04:41:03|LIST_FILL|domain-list9|added=0|removed=0|pending=5|full=1|categories=telegram",
+        "2026-09-27 12:00:00|LIST_FILL_SET|domain-list9|off"]),
 }
 
 EXPECT = {
@@ -73,6 +78,8 @@ EXPECT = {
     "wifi": ["Ноутбук: перешло с 2.4 ГГц на 5 ГГц"],
     "updater": ["Установлено обновление 0.2.0-rc.1.fix.16", "Проверка: обновлений нет"],
     "ads": ["Домены маршрутов идут через DNS Keenetic: 42", "Источники списков обновлены"],
+    "listfill": ["Пополнение «domain-list9»: выключено", "В «domain-list9» не поместилось 5: больше 300 доменов Keenetic не держит",
+                 "youtu.be убран из «YouTube»", "googlevideo.com добавлен в «YouTube»"],
 }
 
 harness = """
@@ -80,7 +87,7 @@ const num = v => (v == null || v === '' || isNaN(Number(v))) ? null : Number(v);
 const fmtInt = v => num(v) == null ? '—' : String(Number(v));
 function plural(n, one, few, many) { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; }
 const wifiName = mac => mac === 'aa:bb:cc:dd:ee:01' ? 'Ноутбук' : mac;
-const S = { logs: @LOGS@, loadedAt: {} };
+const S = { logs: @LOGS@, loadedAt: {}, lists: { lists: [{ name: "domain-list1", description: "YouTube" }] } };
 @BLOCK@
 const out = {};
 Object.keys(ACTIVITY).forEach(k => { out[k] = activityEvents(k).map(e => e.text + (e.n > 1 ? ' x' + e.n : '')); });

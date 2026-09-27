@@ -511,6 +511,25 @@ op_policy_group() {
     done_ok "policy-group $1" changed
 }
 
+# Domain lists grown from the catalog: the job itself is vward-list-fill.sh (route-tools).
+op_list_fill() {
+    case "$1" in
+        run|undo) [ -z "$3" ] || die usage 64 ;;
+        set) [ -n "$3" ] || die usage 64 ;;
+        *) die invalid_operation 64 ;;
+    esac
+    printf '%s\n' "$2" | grep -Eq '^domain-list[0-9]{1,3}$' || die invalid_group 64
+    lf_bin=${VWARD_LIST_FILL_BIN:-/opt/bin/vward-list-fill.sh}
+    [ -x "$lf_bin" ] || die action_unavailable
+    # From the Console a run is short: what does not fit in time waits for the night.
+    lf_out=$(VWARD_LIST_FILL_TIME_LIMIT=${VWARD_LIST_FILL_TIME_LIMIT:-40} "$lf_bin" "$1" "$2" ${3:+"$3"} 2>/dev/null | tail -n 1)
+    case "$lf_out" in
+        result=changed|result=unchanged) done_ok "list-fill $1 $2 $3" "${lf_out#result=}" ;;
+        error=*) die "${lf_out#error=}" ;;
+        *) die action_failed ;;
+    esac
+}
+
 op_tunnel() {
     case "$1" in ''|*[!A-Za-z0-9_./:-]*) die invalid_tunnel 64 ;; esac
     [ "${#1}" -le 64 ] || die invalid_tunnel 64
@@ -1627,6 +1646,7 @@ case "$OP" in
     tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|policy-group) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
+    list-fill) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     wifi-host) [ "$#" -eq 3 ] || die usage 64 ;;
     *) [ "$#" -eq 2 ] || die usage 64 ;;
 esac
@@ -1680,6 +1700,7 @@ case "$OP" in
     tunnel-delete) op_tunnel_delete "$ARG1" "$ARG2" ;;
     tunnel-subnet) op_tunnel_subnet "$ARG1" "$ARG2" "$ARG3" ;;
     list-domain) op_list_domain "$ARG1" "$ARG2" "$ARG3" ;;
+    list-fill) op_list_fill "$ARG1" "$ARG2" "$ARG3" ;;
     ext-check) op_ext_check ;;
     ext-daily) op_ext_daily ;;
     ext-upgrade) op_ext_upgrade "$ARG1" "$ARG2" ;;
