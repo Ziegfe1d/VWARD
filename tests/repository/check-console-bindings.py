@@ -68,6 +68,12 @@ if len(pages) != 11:
     fail(f"ожидалось 11 разделов, найдено {len(pages)}")
 details = set(re.findall(r"^  '?([a-z][a-z-]*)'?: \{ title:", js, re.MULTILINE))
 renderers = set(re.findall(r"^  ([a-z]+)\(\) \{", js, re.MULTILINE)) | set(re.findall(r"^  '([du]-[a-z-]+)'\(\) \{", js, re.MULTILINE))
+# Section event pages (a-<key>) come from ACTIVITY and share one renderer.
+activity_block = js.split("const ACTIVITY = {", 1)[1].split("\n};", 1)[0]
+activity = set(re.findall(r"^  ([a-z]+): \{ title:", activity_block, re.MULTILINE))
+if not activity or "RENDER['a-' + k] = () => activityPage(k);" not in js:
+    fail("section event pages are not registered")
+details -= activity
 if (pages | details) - renderers:
     fail("разделы без отрисовки: " + ", ".join(sorted((pages | details) - renderers)))
 targets = set(re.findall(r"data-go=\"([a-z][a-z-]*)\"", js)) | set(re.findall(r"'(d-[a-z-]+|u-[a-z-]+|c-[a-z-]+)'\]", js))
@@ -121,9 +127,12 @@ tcpdump_counter = re.search(r"^TCPDUMP_COUNT=.*$", api, re.MULTILINE)
 if not tcpdump_counter or "udp dst port 53" in tcpdump_counter.group(0):
     fail("Console API tcpdump counter is missing or depends on the truncated ps command tail")
 
-# Rows that open a log say so; timing is not shown as a setting nobody can change.
-for row in ("['Проверки туннеля', 'журнал проверок туннеля', '', 'logs'", "['Сверка маршрутов', 'журнал сверок маршрутов', '', 'logs'",
-            "['Возврат в VPN', 'автоматически'"):
+# Sections show their own events: nothing jumps to the raw journals, and timing is
+# not shown as a setting nobody can change.
+if "data-log-go" in js or "'open-log'" in js:
+    fail("a section still sends the user to the raw journals")
+for row in ("['Решения автоподбора', 'что решил VWARD', '', 'a-adaptive']", "['Сверка маршрутов', 'что исправлено', '', 'a-routing']",
+            "['События VPN', 'что делала защита', '', 'a-tunnel']", "['Возврат в VPN', 'автоматически'"):
     if row not in js:
         fail(f"Console row changed: {row}")
 

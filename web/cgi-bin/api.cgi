@@ -2260,6 +2260,9 @@ if [ "$ACTION" = "log" ]; then
         policy)
             FILE=/opt/var/log/vward-policy-audit-summary.log
             ;;
+        policysync)
+            FILE=/opt/var/log/vward-policy-sync-sync.log
+            ;;
         console)
             FILE=/opt/var/log/vward/console-audit.log
             ;;
@@ -2276,7 +2279,8 @@ if [ "$ACTION" = "log" ]; then
 
     COUNT="$(qget count)"
     case "$COUNT" in ''|*[!0-9]*) COUNT=200 ;; esac
-    [ "$COUNT" -ge 20 ] 2>/dev/null && [ "$COUNT" -le 200 ] 2>/dev/null || COUNT=200
+    # Up to 1000 lines: a section's own page keeps the few events worth showing.
+    [ "$COUNT" -ge 20 ] 2>/dev/null && [ "$COUNT" -le 1000 ] 2>/dev/null || COUNT=200
 
     header_text
 

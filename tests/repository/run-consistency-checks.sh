@@ -61,6 +61,7 @@ done
 
 sh -n web/cgi-bin/api.cgi || fail "Console API syntax"
 python3 tests/repository/check-console-bindings.py || fail "Console bindings"
+python3 tests/repository/check-console-activity.py || fail "sections show their events in plain words"
 python3 tests/repository/check-console-responsive.py || fail "Console responsive layout"
 python3 tests/repository/check-console-icon-system.py || fail "Console icon and typography system"
 python3 tests/repository/check-console-security.py || fail "Console security"
