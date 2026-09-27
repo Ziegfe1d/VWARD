@@ -610,7 +610,7 @@ const RENDER = {
 
   vpn() {
     const wg = st().wg || {}, list = wg.interfaces || [], managed = prof().tunnel_interface || '';
-    const row = t => { const up = isTrue(t.connected); return '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.description || t.name) + '</b><small>' + (t.name === managed ? '<span class="st ok">для маршрутов</span> · ' : '') + esc(t.handshake != null ? 'рукопожатие ' + agoText(num(t.handshake)) : (t.state || '')) + '</small></div><span class="pill ' + (up ? 'ok' : 'warn') + '">' + (up ? 'В сети' : 'Не в сети') + '</span>' + ico('chevron', 'chev') + '</li>'; };
+    const row = t => { const up = isTrue(t.connected); return '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.description || t.name) + '</b><small>' + (t.name === managed ? '<span class="st ok">для маршрутов</span> · ' : '') + esc(hsSec(t) != null ? 'рукопожатие ' + agoText(hsSec(t)) : t.handshake != null ? 'рукопожатия не было' : (t.state || '')) + '</small></div><span class="pill ' + (up ? 'ok' : 'warn') + '">' + (up ? 'В сети' : 'Не в сети') + '</span>' + ico('chevron', 'chev') + '</li>'; };
     return loadError(['status']) +
       panel('Туннели', (list.length ? '<ul class="rows">' + list.map(row).join('') + '</ul>' : empty('Туннели WireGuard не найдены')) +
         '<div class="panel-actions">' + btn('tunnel-create', 'plus', 'Добавить туннель', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnels'),
@@ -716,9 +716,9 @@ const RENDER = {
     const agh = !S.ads ? ['', '—'] : !ag.port ? ['warn', 'Не найден'] : !a.agh_connected ? ['warn', 'Не подключён'] :
       g && g.ok && g.protection === false ? ['warn', 'Защита выключена'] : ['ok', 'Работает'];
     const w = S.awg || {}, wn = (w.tunnels || []).length;
-    const awg = !S.awg ? ['', '—'] : !w.installed ? ['', 'Не нужен'] : wn ? [(w.tunnels || []).every(t => t.running) ? 'ok' : 'warn', fmtInt(wn) + ' ' + plural(wn, 'туннель', 'туннеля', 'туннелей')] : ['', 'Установлен'];
+    const awg = !S.awg ? ['', '—'] : !w.installed ? ['', 'Не используется'] : wn ? [(w.tunnels || []).every(t => t.running) ? 'ok' : 'warn', fmtInt(wn) + ' ' + plural(wn, 'туннель', 'туннеля', 'туннелей')] : ['', 'Установлен'];
     return loadError(['ads']) + panel('Утилиты', kv([['AdGuard Home', agh[1], agh[0], 'd-agh', '', 'блокировка рекламы для всех устройств'],
-        ['Контур AmneziaWG', awg[1], awg[0], 'd-awg', '', 'туннели, которые прошивка не умеет']]),
+        ['Контур AmneziaWG', awg[1], awg[0], 'd-awg', '', w.installed ? 'туннели, которые прошивка не умеет' : 'включится сам, когда вы добавите туннель AmneziaWG 3.x в «VPN»']]),
       { desc: 'Программы, с которыми работает VWARD.' });
   },
   'd-awg'() {
@@ -1491,6 +1491,8 @@ const ADS_REASON = { manual_denylist: 'ваше правило', manual_allowlis
 function adsRuleBtn(d, type) { return '<button class="icon-btn" type="button" data-ads-rule="' + type + '" data-domain="' + esc(d) + '" aria-label="' + (type === 'allow' ? 'Разрешить ' : 'Заблокировать ') + esc(d) + '" title="' + (type === 'allow' ? 'Разрешить' : 'Заблокировать') + '">' + ico(type === 'allow' ? 'check' : 'block') + '</button>'; }
 async function adsViews() { await Promise.all(['ads', 'adspub', 'qlog', 'review', 'blocked'].map(k => S[k] || k === 'ads' || k === 'adspub' ? load(k, true) : null)); render(); }
 function fmtBytes(b) { b = num(b); if (b == null) return '—'; const u = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ']; let i = 0; while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; } return (i ? b.toFixed(1) : String(b)) + ' ' + u[i]; }
+// Keenetic gives a tunnel that never had a handshake a huge age (2^31 s, "24855 д").
+const hsSec = t => { const h = t && t.handshake != null ? num(t.handshake) : null; return h == null || isNaN(h) || h >= 315360000 ? null : h; };
 function agoText(sec) { if (sec == null || isNaN(sec)) return '—'; if (sec < 60) return sec + ' с назад'; if (sec < 3600) return Math.round(sec / 60) + ' мин назад'; if (sec < 86400) return Math.round(sec / 3600) + ' ч назад'; return Math.round(sec / 86400) + ' д назад'; }
 const JOB_NAMES = { 'vward-route-reconciler.sh': 'Сверка маршрутов', 'S91vward-route-engine': 'Сторож движка маршрутизации', 'vward-policy-chain.sh': 'Обновление IP-категорий', 'vward-route-hints-update.sh': 'Подсказки каталога', 'vward-tunnel-health.sh': 'Защита VPN', 'S92vward-runtime': 'Сторож supervisor', 'vward-wan-guard.sh': 'Восстановление интернета', 'vward-housekeeping.sh': 'Сжатие журналов', 'vward-ads-privacy-scheduler.sh': 'Блокировка рекламы', 'vward-wifi-client-scheduler.sh': 'Контроль Wi-Fi клиентов' };
 const JOB_COMPONENT = { 'S91vward-route-engine': 'route-engine' };
@@ -1517,11 +1519,12 @@ function tunnelPage(name) {
     ['Системное имя', name + (t.type ? ' · ' + ({ wireguard: 'WireGuard', openvpn: 'OpenVPN', sstp: 'SSTP', pptp: 'PPTP', l2tp: 'L2TP', ike: 'IPsec', ipsec: 'IPsec', proxy: 'Proxy' }[t.type] || t.type) : '')],
     ['Канал связи', t.link || '—'], ['Статус интерфейса', t.state || '—'],
     ['Сервер', t.endpoint || '—'], ['Адрес в туннеле', t.address || '—'], ['MTU', t.mtu != null ? String(t.mtu) : '—'],
-    ['Последнее рукопожатие', t.handshake != null ? agoText(num(t.handshake)) : '—', t.handshake != null && num(t.handshake) > 180 ? 'warn' : ''],
+    ['Последнее рукопожатие', hsSec(t) != null ? agoText(hsSec(t)) : t.handshake != null ? 'не было' : '—', t.handshake != null && (hsSec(t) == null || hsSec(t) > 180) ? 'warn' : ''],
     ['Трафик', t.rx != null || t.tx != null ? '↓ ' + fmtBytes(t.rx) + ' · ↑ ' + fmtBytes(t.tx) : '—'],
     ['Время работы', t.uptime != null ? fmtUptime(t.uptime) : '—'],
     ['Используется для маршрутов', managed ? 'Да' : 'Нет', managed ? 'info' : '']
-  ]) + use + cfgNote(), { desc: managed ? 'Через него идут маршруты VWARD.' : 'Можно перевести маршруты VWARD на этот туннель.', right: headPill(up ? 'ok' : 'warn', up ? 'В сети' : 'Не в сети') }) +
+  ]) + (t.type === 'wireguard' && t.handshake != null && hsSec(t) == null ? '<p class="field-warn">Сервер ни разу не ответил. Если это файл Amnezia Premium (AmneziaWG 3.x), загруженный прямо в Keenetic, - Keenetic выбросил часть его настроек. Удалите этот туннель и добавьте тот же файл через «Добавить туннель»: его поднимет контур AmneziaWG.</p>' : '') +
+    use + cfgNote(), { desc: managed ? 'Через него идут маршруты VWARD.' : 'Можно перевести маршруты VWARD на этот туннель.', right: headPill(up ? 'ok' : 'warn', up ? 'В сети' : 'Не в сети') }) +
     tunnelManagePanel(name, managed)[0] + tunnelProbePanel(name) + tunnelTrafficPanel(name) + (tunnelManagePanel(name, managed)[1] || '');
 }
 // Filled only by «Проверить сейчас»: the router does not do this in the background.
