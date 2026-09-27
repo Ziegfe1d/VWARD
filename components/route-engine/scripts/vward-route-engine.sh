@@ -124,7 +124,7 @@ trap 'exit 1' HUP INT TERM
 
 refresh_sets()
 {
-    NOW=$(date +%s)
+    NOW=${QNOW:-$(date +%s)}
     LAST=0
 
     [ -f "$REFRESH_TS" ] &&
@@ -367,7 +367,7 @@ regular_cooldown()
         ''|*[!0-9]*) return 1 ;;
     esac
 
-    NOW=$(date +%s)
+    NOW=${QNOW:-$(date +%s)}
     AGE=$((NOW - LAST))
 
     case "$STATUS" in
@@ -399,7 +399,7 @@ adaptive_due()
         ''|*[!0-9]*) return 0 ;;
     esac
 
-    NOW=$(date +%s)
+    NOW=${QNOW:-$(date +%s)}
     AGE=$((NOW - LAST))
 
     [ "$AGE" -ge "$ADAPTIVE_RECHECK" ]
@@ -1040,7 +1040,7 @@ hint_direct_fresh()
         ''|*[!0-9]*) return 1 ;;
     esac
 
-    AGE=$(($(date +%s) - HL))
+    AGE=$((${QNOW:-$(date +%s)} - HL))
 
     [ "$AGE" -lt 21600 ]
 }
@@ -1248,7 +1248,7 @@ list_watch_check()
     [ -n "$LW_G" ] || return 0
 
     LW_ST="$VOLATILE_DIR/list-watch.$LW_G"
-    LW_NOW=$(date +%s)
+    LW_NOW=${QNOW:-$(date +%s)}
     LW_LAST=0
     LW_FAILS=0
     [ -f "$LW_ST" ] && read -r LW_LAST LW_FAILS < "$LW_ST" 2>/dev/null
@@ -1332,9 +1332,20 @@ handle_host()
     refresh_sets
 
     HOST_LISTS=$(classify_host "$HOST")
-    HOST_TAGS=$(printf '%s\n' "$HOST_LISTS" | grep -v '^W ' | tr -d '\n')
+    # Tags (M, S, K, H...) and watched lists ("W group") apart, in the shell:
+    # three processes less per query.
+    HOST_TAGS= HOST_WATCH=
+    while IFS= read -r HL_LINE; do
+        case "$HL_LINE" in
+            "W "*) HOST_WATCH="$HOST_WATCH${HOST_WATCH:+
+}${HL_LINE#W }" ;;
+            *) HOST_TAGS="$HOST_TAGS$HL_LINE" ;;
+        esac
+    done <<EOF_LISTS
+$HOST_LISTS
+EOF_LISTS
 
-    list_watch_check "$HOST" "$(printf '%s\n' "$HOST_LISTS" | sed -n 's/^W //p')"
+    list_watch_check "$HOST" "$HOST_WATCH"
 
 
     # Все ручные Keenetic FQDN-группы live-контур не меняет.
@@ -1394,7 +1405,8 @@ while :; do
 
     # One awk for the whole capture: takes the query name from each line and
     # drops names already handled within DEDUP_WINDOW seconds, so a DNS query
-    # costs no process of its own.
+    # costs no process of its own.  The query's time comes along (QNOW): the
+    # checks of the query use it instead of starting date each.
     awk -v window="$DEDUP_WINDOW" '
         {
             now=systime()
@@ -1410,7 +1422,7 @@ while :; do
 
                     if (h!="" && (!(h in seen) || now-seen[h]>=window)) {
                         seen[h]=now
-                        print h
+                        print h, now
                         fflush()
                     }
 
@@ -1428,8 +1440,9 @@ while :; do
     AWK_PID=$!
 
 
-    while IFS= read -r HOST; do
+    while IFS=' ' read -r HOST QNOW; do
 
+        case "$QNOW" in ''|*[!0-9]*) QNOW= ;; esac
         [ -n "$HOST" ] &&
             handle_host "$HOST"
 
