@@ -64,16 +64,15 @@ if posted - post_ok:
 
 # Navigation: every page and detail page has a renderer, every static link resolves.
 pages = set(re.findall(r"\{ id: '([a-z]+)', title: '[^']+', icon: '[a-z]+', group:", js))
-if len(pages) != 11:
-    fail(f"ожидалось 11 разделов, найдено {len(pages)}")
-details = set(re.findall(r"^  '?([a-z][a-z-]*)'?: \{ title:", js, re.MULTILINE))
+if len(pages) != 9:
+    fail(f"ожидалось 9 разделов, найдено {len(pages)}")
+details = set(re.findall(r"^  '?([a-z][a-z-]*)'?: \{ title:", js.replace(js.split("const ACTIVITY = {", 1)[1].split("\n};", 1)[0], ""), re.MULTILINE))
 renderers = set(re.findall(r"^  ([a-z]+)\(\) \{", js, re.MULTILINE)) | set(re.findall(r"^  '([du]-[a-z-]+)'\(\) \{", js, re.MULTILINE))
 # Section event pages (a-<key>) come from ACTIVITY and share one renderer.
 activity_block = js.split("const ACTIVITY = {", 1)[1].split("\n};", 1)[0]
 activity = set(re.findall(r"^  ([a-z]+): \{ title:", activity_block, re.MULTILINE))
 if not activity or "RENDER['a-' + k] = () => activityPage(k);" not in js:
     fail("section event pages are not registered")
-details -= activity
 if (pages | details) - renderers:
     fail("разделы без отрисовки: " + ", ".join(sorted((pages | details) - renderers)))
 targets = set(re.findall(r"data-go=\"([a-z][a-z-]*)\"", js)) | set(re.findall(r"'(d-[a-z-]+|u-[a-z-]+|c-[a-z-]+)'\]", js))
@@ -131,7 +130,7 @@ if not tcpdump_counter or "udp dst port 53" in tcpdump_counter.group(0):
 # not shown as a setting nobody can change.
 if "data-log-go" in js or "'open-log'" in js:
     fail("a section still sends the user to the raw journals")
-for row in ("['Решения автоподбора', 'что решил VWARD', '', 'a-adaptive']", "['Сверка маршрутов', 'что исправлено', '', 'a-routing']",
+for row in ("['Решения автоподбора', 'что решил VWARD', '', 'a-adaptive']", "['Сверка маршрутов', 'что вернулось напрямую', '', 'a-routing']",
             "['События VPN', 'что делала защита', '', 'a-tunnel']", "['Возврат в VPN', 'автоматически'"):
     if row not in js:
         fail(f"Panel row changed: {row}")

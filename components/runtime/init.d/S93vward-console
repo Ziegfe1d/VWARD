@@ -121,6 +121,11 @@ start)
         PID="$(cat "$PIDFILE")"
 
         if _console_identity "$PID"; then
+            # An update brought new web server settings: take them without a reboot.
+            if [ "$TEMPLATE" -nt "$CONF" ] && prepare_config; then
+                _console_stop
+                exec "$LIGHTTPD" -f "$CONF"
+            fi
             exit 0
         fi
 
