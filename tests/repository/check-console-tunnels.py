@@ -236,6 +236,25 @@ with tempfile.TemporaryDirectory() as tmp:
                      (conf(NEW_KEY, PEER_NEW).replace("I1 = <b 0x5245474953544552>", 'I1 = <b "x">'), "error=conf_awg")):
         run("tunnel-conf", "check", upload(bad), expect=err)
 
+    # Typed in by hand (the Panel's «Вручную»): the Panel builds a .conf of the same
+    # form from the fields, and the router's check takes it like a file.
+    js = (Path(__file__).resolve().parents[2] / "web/assets/vward-console.js").read_text()
+    manual_ok = __import__("shutil").which("node") is not None
+    block = js[js.index("const TC_FIELDS = ["):js.index("function tunnelConfSheet(")]
+    fields = {"key": NEW_KEY, "address": "10.8.25.7/32", "peer": PEER_NEW, "endpoint": "de.example.net:44486",
+              "allowed": "", "psk": "", "keepalive": "", "mtu": "1324", "awg": "Jc = 5\nnot a setting\nJmin = 10\nJmax = 50\nS1 = 43\nS2 = 30\nH1 = 1\nH2 = 2\nH3 = 3\nH4 = 4"}
+    node = subprocess.run(["node" if manual_ok else "true", "-e", block + "\nconst F = " + json.dumps(fields) + ";\n"
+                           "process.stdout.write(tcConf({ querySelector: q => ({ value: F[q.match(/tc-(\\w+)/)[1]] }) }));"],
+                          text=True, capture_output=True)
+    if node.returncode != 0:
+        fail(f"manual form: {node.stderr}")
+    typed = node.stdout
+    if manual_ok and ("not a setting" in typed or "AllowedIPs = 0.0.0.0/0" not in typed or "PersistentKeepalive = 25" not in typed):
+        fail(f"manual form text: {typed}")
+    out = run("tunnel-conf", "check", upload(typed), expect="result=checked") if manual_ok else "info.endpoint=de.example.net:44486 info.awg=1"
+    if "info.endpoint=de.example.net:44486" not in out or "info.awg=1" not in out:
+        fail(f"a tunnel typed in by hand: {out}")
+
     # Replace: proven on a temporary interface, then written into Wireguard0 in place.
     before = S()
     run("tunnel-conf", "replace", upload(conf(NEW_KEY, PEER_NEW)), "Wireguard0", expect="result=changed")

@@ -543,7 +543,7 @@ const RENDER = {
     const row = t => { const up = isTrue(t.connected); return '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.description || t.name) + '</b><small>' + (t.name === managed ? '<span class="st ok">для маршрутов</span> · ' : '') + esc(t.handshake != null ? 'рукопожатие ' + agoText(num(t.handshake)) : (t.state || '')) + '</small></div><span class="pill ' + (up ? 'ok' : 'warn') + '">' + (up ? 'В сети' : 'Не в сети') + '</span>' + ico('chevron', 'chev') + '</li>'; };
     return loadError(['status']) +
       panel('Туннели', (list.length ? '<ul class="rows">' + list.map(row).join('') + '</ul>' : empty('Туннели WireGuard не найдены')) +
-        '<div class="panel-actions">' + btn('tunnel-create', 'route', 'Создать туннель из файла .conf', '', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnels'),
+        '<div class="panel-actions">' + btn('tunnel-create', 'plus', 'Добавить туннель', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnels'),
         { desc: 'Нажмите на туннель, чтобы открыть его.' }) +
       vpnGuardPanel();
   },
@@ -1442,7 +1442,7 @@ function listViaSel(l, tuns, ok) {
   if (!cur) opts.unshift(['', l.route ? 'через ' + l.route : 'без маршрута', true]);
   return sel('data-list-via="' + esc(l.name) + '"' + (ok && (cur || !l.route) ? '' : ' disabled'), 'Куда идёт «' + (l.description || l.name) + '»', opts, cur);
 }
-document.addEventListener('input', e => { const f = e.target.closest && e.target.closest('[data-form="tunnel-conf"]'); if (f && e.target.name === 'conf' && f.dataset.checked === '1') { f.dataset.checked = ''; $('tcPreview').innerHTML = ''; f.querySelector('[type=submit]').textContent = 'Проверить файл'; } });
+document.addEventListener('input', e => { const f = e.target.closest && e.target.closest('[data-form="tunnel-conf"]'); if (f && (e.target.name === 'conf' || /^tc-/.test(e.target.name)) && f.dataset.checked === '1') { f.dataset.checked = ''; $('tcPreview').innerHTML = ''; f.querySelector('[type=submit]').textContent = 'Проверить'; } });
 async function wifiHostSet(fields, okMsg) {
   let x;
   try { x = await apiPost('wifi-host', fields); } catch (e) { toast('Ошибка: ' + e.message); return; }
@@ -1481,16 +1481,46 @@ async function tunnelJob(resultId, fields) {
   toast(run.finished && run.rc === 0 ? 'Готово' : run.finished ? 'Не выполнено' : 'Ещё выполняется, проверьте позже');
   await Promise.all([load('status', true), load('lists', true)]); render();
 }
+// Manual tunnel fields: [id, caption, placeholder, secret, mono]; empty optional ones are left out.
+const TC_FIELDS = [
+  ['key', 'Закрытый ключ (PrivateKey)', 'из настроек VPN-провайдера', true, true],
+  ['address', 'Адрес в туннеле', '10.8.0.2/32', false, true],
+  ['peer', 'Открытый ключ сервера (PublicKey)', 'ключ сервера', false, true],
+  ['endpoint', 'Сервер', 'vpn.example.com:51820', false, true],
+  ['allowed', 'Разрешённые адреса', '0.0.0.0/0', false, true],
+  ['psk', 'Общий ключ (PresharedKey), если есть', 'необязательно', true, true],
+  ['keepalive', 'Keepalive, секунд', '25', false, false],
+  ['mtu', 'MTU', 'необязательно', false, false],
+  ['awg', 'Параметры AmneziaWG, если есть', '', false, true]
+];
+function tcConf(form) {
+  const v = k => { const el = form.querySelector('[name="tc-' + k + '"]'); return el ? el.value.trim() : ''; };
+  const i = ['[Interface]', 'PrivateKey = ' + v('key'), 'Address = ' + v('address')];
+  if (v('mtu')) i.push('MTU = ' + v('mtu'));
+  v('awg').split(/\n+/).map(x => x.trim()).filter(x => /^[A-Za-z0-9]+\s*=\s*\S/.test(x)).forEach(x => i.push(x));
+  const p = ['[Peer]', 'PublicKey = ' + v('peer')];
+  if (v('psk')) p.push('PresharedKey = ' + v('psk'));
+  p.push('AllowedIPs = ' + (v('allowed') || '0.0.0.0/0'), 'Endpoint = ' + v('endpoint'), 'PersistentKeepalive = ' + (v('keepalive') || '25'));
+  return i.concat([''], p).join('\n') + '\n';
+}
 function tunnelConfSheet(mode, name) {
-  openSheet(mode === 'create' ? 'Новый туннель' : 'Заменить конфигурацию · ' + name,
+  openSheet(mode === 'create' ? 'Добавить туннель' : 'Заменить конфигурацию · ' + name,
     '<div class="sheet-body"><form class="stack-form" data-form="tunnel-conf" data-mode="' + mode + '" data-name="' + esc(name || '') + '">' +
     (mode === 'create' ? '<input class="input" name="description" maxlength="64" placeholder="Название, например Германия-2" aria-label="Название туннеля">' : '') +
+    // Like Keenetic: from a file, or the same values typed in by hand.
+    '<div class="segmented" role="group" aria-label="Как ввести"><button type="button" data-act="tc-mode" data-m="file" aria-pressed="true">Из файла</button><button type="button" data-act="tc-mode" data-m="manual" aria-pressed="false">Вручную</button></div>' +
+    '<div class="stack-form tc-file">' +
     '<label class="file-pick">' + ico('save') + '<span>Выбрать файл .conf</span><input type="file" name="file" accept=".conf,text/plain" data-conf-file></label>' +
-    '<textarea class="input mono" name="conf" rows="7" spellcheck="false" autocomplete="off" aria-label="Текст конфигурации" placeholder="или вставьте текст: [Interface] PrivateKey = …"></textarea>' +
+    '<textarea class="input mono" name="conf" rows="7" spellcheck="false" autocomplete="off" aria-label="Текст конфигурации" placeholder="или вставьте текст: [Interface] PrivateKey = …"></textarea></div>' +
+    '<div class="stack-form tc-manual" hidden>' +
+    TC_FIELDS.map(f => '<label class="field"><span class="form-label">' + esc(f[1]) + '</span>' + (f[0] === 'awg' ?
+      '<textarea class="input mono" name="tc-awg" rows="3" spellcheck="false" autocomplete="off" placeholder="Jc = 4&#10;Jmin = 40&#10;…"></textarea>' :
+      '<input class="input' + (f[4] ? ' mono' : '') + '" name="tc-' + f[0] + '"' + (f[3] ? ' type="password"' : '') + ' placeholder="' + esc(f[2]) + '" autocomplete="off" spellcheck="false">') + '</label>').join('') +
+    '</div>' +
     '<div id="tcPreview"></div>' +
     '<p class="panel-desc">' + (mode === 'create' ? 'VWARD создаст туннель и дождётся ответа сервера. Если сервер не ответит, туннель удалится.' :
       'Сначала конфигурация проверяется на временном туннеле. Только если сервер ответил, она записывается в ' + esc(name) + ': маршруты и списки остаются на месте.') + ' Ключи не показываются и не пишутся в журналы.</p>' +
-    '<button class="btn primary" type="submit">Проверить файл</button></form></div>');
+    '<button class="btn primary" type="submit">Проверить</button></form></div>');
 }
 function tunnelTrafficPanel(name) {
   const L = S.lists || {}, lists = (L.lists || []).filter(l => l.route === name), nets = (L.subnets || {})[name] || [];
@@ -2177,6 +2207,12 @@ document.addEventListener('click', e => {
   if (a === 'close') closeLayer();
   else if (a === 'reload') { Promise.all(DATA_FOR(current).map(k => load(k, true))).then(() => { render(); toast('Данные обновлены'); }); }
   else if (a === 'edit') { editing = !editing; render(); }
+  else if (a === 'tc-mode') {
+    const f = t.closest('form'), m = t.dataset.m;
+    f.querySelector('.tc-file').hidden = m !== 'file'; f.querySelector('.tc-manual').hidden = m !== 'manual';
+    f.querySelectorAll('[data-act="tc-mode"]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.m === m)));
+    f.dataset.checked = ''; $('tcPreview').innerHTML = ''; f.querySelector('[type=submit]').textContent = 'Проверить';
+  }
   else if (a === 'qfilters') { ADSV.filtersOpen = !(ADSV.filtersOpen || ADSV.filter !== 'all'); if (!ADSV.filtersOpen && ADSV.filter !== 'all') { ADSV.filter = 'all'; S.qlog = null; load('qlog', true).then(render); } render(); }
   else if (a === 'cards-reset') { cardOrder = CARD_IDS.slice(); hiddenCards = []; cardView = 'grid'; ['vward-card-order', 'vward-card-hidden', 'vward-card-view'].forEach(k => store.del(k)); render(); toast('Карточки сброшены'); }
   else if (a === 'ask') { confirm = { id: t.dataset.confirm, pkg: t.dataset.pkg }; render(); }
@@ -2288,7 +2324,7 @@ document.addEventListener('change', e => {
     if (!file) return;
     if (file.size > 16384) { toast('Файл больше 16 КБ - это не .conf'); return; }
     const r = new FileReader();
-    r.onload = () => { form.querySelector('[name=conf]').value = String(r.result || ''); form.dataset.checked = ''; $('tcPreview').innerHTML = ''; form.querySelector('[type=submit]').textContent = 'Проверить файл'; };
+    r.onload = () => { form.querySelector('[name=conf]').value = String(r.result || ''); form.dataset.checked = ''; $('tcPreview').innerHTML = ''; form.querySelector('[type=submit]').textContent = 'Проверить'; };
     r.readAsText(file);
     return;
   }
@@ -2377,9 +2413,11 @@ document.addEventListener('submit', async e => {
     await tunnelSubnet(e.target.dataset.name, 'add', v); return;
   }
   if (f === 'tunnel-conf') {
-    const form = e.target, mode = form.dataset.mode, name = form.dataset.name, text = form.querySelector('[name=conf]').value;
+    const form = e.target, mode = form.dataset.mode, name = form.dataset.name, manual = !form.querySelector('.tc-manual').hidden;
+    if (manual && TC_FIELDS.slice(0, 4).some(f => !form.querySelector('[name="tc-' + f[0] + '"]').value.trim())) { toast('Заполните ключ, адрес, ключ сервера и сервер'); return; }
+    const text = manual ? tcConf(form) : form.querySelector('[name=conf]').value;
     const descEl = form.querySelector('[name=description]'), desc = descEl ? descEl.value.trim() : '';
-    if (!/\[Interface\]/i.test(text) || !/\[Peer\]/i.test(text)) { toast('Выберите файл .conf или вставьте его текст'); return; }
+    if (!manual && (!/\[Interface\]/i.test(text) || !/\[Peer\]/i.test(text))) { toast('Выберите файл .conf или вставьте его текст'); return; }
     if (mode === 'create' && !desc) { toast('Введите название туннеля'); return; }
     if (form.dataset.checked !== '1') {
       let x;
@@ -2388,7 +2426,7 @@ document.addEventListener('submit', async e => {
       $('tcPreview').innerHTML = kv([['Сервер', x.endpoint || '—'], ['Адрес в туннеле', x.address || '—'], ['MTU', x.mtu || 'как на роутере'],
         ['Обфускация AmneziaWG', x.awg === '1' ? 'Включена' : 'Выключена'], ['Keepalive', x.keepalive ? x.keepalive + ' с' : '25 с'], ['Разрешённые адреса', x.allowed || '—']]);
       form.dataset.checked = '1';
-      form.querySelector('[type=submit]').textContent = mode === 'create' ? 'Создать туннель' : 'Заменить конфигурацию ' + name;
+      form.querySelector('[type=submit]').textContent = mode === 'create' ? 'Создать туннель' : 'Заменить конфигурацию ' + tunLabel(name);
       return;
     }
     closeLayer();

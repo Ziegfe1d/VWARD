@@ -204,6 +204,12 @@ small.st .icon{width:14px;height:14px}
 .result-note{margin:0;padding:4px 16px 12px;color:var(--muted);font-size:var(--fs-sm)}
 .stack-form{display:flex;flex-direction:column;gap:10px;padding:4px 16px 16px}
 .stack-form textarea{min-height:140px;resize:vertical;font-size:12px}
+.stack-form .stack-form{padding:0}
+.stack-form[hidden]{display:none}
+.stack-form .segmented{margin:0}
+.stack-form textarea[name="tc-awg"]{min-height:72px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field .form-label{font-size:var(--fs-sm);font-weight:600;color:var(--text)}
 .file-pick{display:flex;align-items:center;gap:8px;min-height:42px;padding:8px 12px;border:1px dashed var(--line-strong);border-radius:var(--r-md);color:var(--accent);font-weight:600;cursor:pointer}
 .file-pick input{position:absolute;width:1px;height:1px;opacity:0}
 .inline-form .input{flex:1 1 0;min-width:0;width:auto}
