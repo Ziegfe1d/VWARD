@@ -110,8 +110,13 @@ ads_admission_leave()
 
 ads_mkdirs()
 {
-    mkdir -p "$ADS_ETC" "$ADS_STATE" "$ADS_STATE/sources" "$ADS_STATE/generated" \
-        "$ADS_STATE/work" "$ADS_STATE/jobs" "$ADS_BACKUP_ROOT" "$ADS_LOG_DIR"
+    # Every minute from the scheduler: mkdir only when a folder is missing.
+    for ads_md in "$ADS_ETC" "$ADS_STATE" "$ADS_STATE/sources" "$ADS_STATE/generated" \
+        "$ADS_STATE/work" "$ADS_STATE/jobs" "$ADS_BACKUP_ROOT" "$ADS_LOG_DIR"; do
+        [ -d "$ads_md" ] || { mkdir -p "$ADS_ETC" "$ADS_STATE" "$ADS_STATE/sources" "$ADS_STATE/generated" \
+            "$ADS_STATE/work" "$ADS_STATE/jobs" "$ADS_BACKUP_ROOT" "$ADS_LOG_DIR"; return; }
+    done
+    return 0
 }
 
 ads_secure_file_ok() (

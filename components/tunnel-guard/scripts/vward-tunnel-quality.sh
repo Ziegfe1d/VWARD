@@ -181,16 +181,22 @@ EOF_ROW
 }
 
 # services_due: two tunnels or more, a service on «Автоматически», 30 minutes since the last check.
+# Optional work: it waits while the router is busy (vward_defer, at most 2 hours).
+VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+[ ! -r "$VWARD_ADMISSION_LIB" ] || . "$VWARD_ADMISSION_LIB"
+command -v vward_defer >/dev/null 2>&1 || vward_defer() { return 1; }
+
 services_due() {
     [ "$1" -ge 2 ] && [ -x "$HELPER" ] && awk -F '\t' '$3 == "auto" {f = 1} END {exit f ? 0 : 1}' "$SERVICES_ETC/enabled.tsv" 2>/dev/null || return 1
     last=$(cat "$SERVICES_DIR/at" 2>/dev/null)
     case "$last" in ''|*[!0-9]*) last=0 ;; esac
-    [ $(($2 - last)) -ge "$SERVICES_EVERY" ]
+    [ $(($2 - last)) -ge "$SERVICES_EVERY" ] && ! vward_defer tunnel-services
 }
 
 # speed_due: two tunnels or more, and the time has come.
 speed_due() {
     [ "$1" -ge 2 ] || return 1
+    ! vward_defer tunnel-speed || return 1
     last=$(awk -F '\t' 'NR == 1 {print $3}' "$SPEED_FILE" 2>/dev/null)
     case "$last" in ''|*[!0-9]*) last=0 ;; esac
     case "$(conf_get SPEED night)" in

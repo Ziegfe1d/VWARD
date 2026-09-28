@@ -3,7 +3,8 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-SELF_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)"
+# The script's own folder, by the shell (no process: some of these run every minute).
+case "$0" in */*) SELF_DIR=${0%/*} ;; *) SELF_DIR=. ;; esac
 LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-common.sh}"
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo "FAIL: common library not found" >&2; exit 1; }
@@ -94,7 +95,7 @@ status_write()
     PHASE="$1" REASON="$2" NEXT="$3"
     TMP="/tmp/vward-ads-scheduler.status.$$"
     {
-        echo "ts=$(ads_now)"
+        echo "ts=$NOW_TEXT"
         echo "phase=$PHASE"
         echo "mode=$RUN_MODE"
         echo "reason=$REASON"
@@ -144,7 +145,11 @@ resource_gate()
     return 0
 }
 
-NOW="$(ads_epoch)"
+# One clock read for the run: the epoch and the text of the status line.
+# shellcheck disable=SC2046
+set -- $(date '+%s %Y-%m-%d %H:%M:%S')
+NOW=$1
+NOW_TEXT="$2 $3"
 state_load
 LAST_SCAN="$(ads_num "$ST_SCAN" 0)"
 LAST_SOURCE="$(ads_num "$ST_SOURCE" 0)"
@@ -168,7 +173,9 @@ fi
 
 PAUSED=0
 if [ -r "$ADS_CONTROL_STATE" ]; then
-    PAUSED="$(awk -F= '$1=="paused" {print $2; exit}' "$ADS_CONTROL_STATE")"
+    while IFS='=' read -r K V; do
+        [ "$K" != paused ] || { PAUSED=$V; break; }
+    done < "$ADS_CONTROL_STATE"
 fi
 case "$PAUSED" in 1) ;; *) PAUSED=0 ;; esac
 if [ "$PAUSED" -eq 1 ]; then

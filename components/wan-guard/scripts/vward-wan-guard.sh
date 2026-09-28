@@ -47,7 +47,7 @@ now()
 
 lock_is_live()
 {
-    LPID="$(cat "$LOCKDIR/pid" 2>/dev/null)"
+    LPID=; [ ! -r "$LOCKDIR/pid" ] || read -r LPID < "$LOCKDIR/pid" || :
 
     case "$LPID" in
         ''|*[!0-9]*)
@@ -65,7 +65,7 @@ cleanup()
 {
     if [ "$LOCK_OWNED" = "1" ]
     then
-        OWNER="$(cat "$LOCKDIR/pid" 2>/dev/null)"
+        OWNER=; [ ! -r "$LOCKDIR/pid" ] || read -r OWNER < "$LOCKDIR/pid" || :
 
         if [ "$OWNER" = "$$" ]
         then
@@ -191,7 +191,7 @@ wg_conf_apply
 
 wg_num()
 {
-    WR_VALUE="$(cat "$1" 2>/dev/null)"
+    WR_VALUE=; [ ! -r "$1" ] || read -r WR_VALUE < "$1" || :
 
     case "$WR_VALUE" in
         ''|*[!0-9]*)
@@ -231,7 +231,7 @@ wg_bucket_count()
     WR_PREFIX="$1"
     WR_KEY="$2"
 
-    WR_OLDKEY="$(cat "$REC_DIR/${WR_PREFIX}_key" 2>/dev/null)"
+    WR_OLDKEY=; [ ! -r "$REC_DIR/${WR_PREFIX}_key" ] || read -r WR_OLDKEY < "$REC_DIR/${WR_PREFIX}_key" || :
     WR_COUNT="$(wg_num "$REC_DIR/${WR_PREFIX}_count" 0)"
 
     if [ "$WR_OLDKEY" != "$WR_KEY" ]; then
@@ -246,7 +246,7 @@ wg_bucket_inc()
     WR_PREFIX="$1"
     WR_KEY="$2"
 
-    WR_OLDKEY="$(cat "$REC_DIR/${WR_PREFIX}_key" 2>/dev/null)"
+    WR_OLDKEY=; [ ! -r "$REC_DIR/${WR_PREFIX}_key" ] || read -r WR_OLDKEY < "$REC_DIR/${WR_PREFIX}_key" || :
     WR_COUNT="$(wg_num "$REC_DIR/${WR_PREFIX}_count" 0)"
 
     if [ "$WR_OLDKEY" != "$WR_KEY" ]; then
@@ -283,7 +283,7 @@ wan_restore_incomplete_bounce()
 {
     [ -f "$WAN_BOUNCE_MARKER" ] || return 0
 
-    WR_MARKER_INTERFACE="$(cat "$WAN_BOUNCE_MARKER" 2>/dev/null)"
+    WR_MARKER_INTERFACE=; [ ! -r "$WAN_BOUNCE_MARKER" ] || read -r WR_MARKER_INTERFACE < "$WAN_BOUNCE_MARKER" || :
     if [ "$WR_MARKER_INTERFACE" != "$VWARD_WAN_INTERFACE" ]; then
         mv "$WAN_BOUNCE_MARKER" "$WAN_BOUNCE_MARKER.invalid.$$" 2>/dev/null ||
             rm -f "$WAN_BOUNCE_MARKER"
@@ -347,7 +347,7 @@ wan_recover()
 
     WR_FAIL_COUNT="$(wg_num "$REC_DIR/fail_count" 0)"
     WR_STAGE="$(wg_num "$REC_DIR/stage" 0)"
-    WR_PREV_CLASS="$(cat "$REC_DIR/fail_class" 2>/dev/null)"
+    WR_PREV_CLASS=; [ ! -r "$REC_DIR/fail_class" ] || read -r WR_PREV_CLASS < "$REC_DIR/fail_class" || :
 
     case "$WR_CLASS" in
 
@@ -573,7 +573,7 @@ if [ "$CHECK_INTERVAL_MIN" -gt 1 ] && [ "$(wg_num "$REC_DIR/fail_count" 0)" -eq 
         exit 0
     fi
 fi
-mkdir -p "$REC_DIR" 2>/dev/null && echo "$UPTIME" > "$REC_DIR/last_check" 2>/dev/null
+{ [ -d "$REC_DIR" ] || mkdir -p "$REC_DIR" 2>/dev/null; } && echo "$UPTIME" > "$REC_DIR/last_check" 2>/dev/null
 
 ISP_JSON="$(wg_rci_get "$RCI_ISP")"
 NET_JSON="$(wg_rci_get "$RCI_NET")"

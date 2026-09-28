@@ -125,16 +125,22 @@ if [ -d "/sys/class/net/$WG_IF" ]; then
     CARRIER=unknown
     [ ! -r "/sys/class/net/$WG_IF/carrier" ] || read -r CARRIER < "/sys/class/net/$WG_IF/carrier" 2>/dev/null || CARRIER=unknown
 
-    ADDR=$(
-        ip -4 addr show dev "$WG_IF" 2>/dev/null |
-        awk '/inet / {print $2; exit}'
-    )
+    # One process a minute instead of five: the address taken apart by the shell, the UP
+    # flag read from sysfs (IFF_UP = 1), `ip link` only where sysfs has no flags.
+    ADDR=$(ip -4 addr show dev "$WG_IF" 2>/dev/null)
+    case "$ADDR" in
+        *" inet "*) ADDR=${ADDR#* inet }; ADDR=${ADDR%% *} ;;
+        *) ADDR= ;;
+    esac
 
-    FLAGS=$(ip link show "$WG_IF" 2>/dev/null | head -1)
+    UP_FLAG=0
+    if [ -r "/sys/class/net/$WG_IF/flags" ] && read -r FLAGS < "/sys/class/net/$WG_IF/flags" 2>/dev/null; then
+        case "$FLAGS" in 0x*) [ $((FLAGS & 1)) -eq 0 ] || UP_FLAG=1 ;; esac
+    else
+        case "$(ip link show "$WG_IF" 2>/dev/null)" in *UP*) UP_FLAG=1 ;; esac
+    fi
 
-    if [ "$CARRIER" = "1" ] &&
-       [ -n "$ADDR" ] &&
-       echo "$FLAGS" | grep -q 'UP'; then
+    if [ "$CARRIER" = "1" ] && [ -n "$ADDR" ] && [ "$UP_FLAG" = 1 ]; then
         LOCAL_IF_OK=1
     fi
 fi
@@ -224,10 +230,11 @@ if [ "$NEED_RCI" -eq 1 ]; then
 
     if [ -n "$INFO" ]; then
 
-        CONFIG_STATE=$(printf '%s\n' "$INFO" | sed -n 1p)
-        LINK_STATE=$(printf '%s\n' "$INFO" | sed -n 2p)
-        ONLINE_STATE=$(printf '%s\n' "$INFO" | sed -n 3p)
-        HS=$(printf '%s\n' "$INFO" | sed -n 4p)
+        # Four lines, read by the shell.
+        CONFIG_STATE= LINK_STATE= ONLINE_STATE= HS=
+        { read -r CONFIG_STATE; read -r LINK_STATE; read -r ONLINE_STATE; read -r HS; } <<EOF_INFO
+$INFO
+EOF_INFO
 
         [ -n "$CONFIG_STATE" ] || CONFIG_STATE="unknown"
         [ -n "$LINK_STATE" ] || LINK_STATE="unknown"

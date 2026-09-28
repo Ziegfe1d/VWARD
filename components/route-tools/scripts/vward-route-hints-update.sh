@@ -7,6 +7,10 @@ VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admissio
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
 . "$VWARD_ADMISSION_LIB"
 vward_component_gate route-tools
+# Daily work gives way to a busy router: it waits (a minute at a time, at most 2 hours)
+# before it takes its admission slot, so an update is never held up by the wait.
+command -v vward_defer >/dev/null 2>&1 || vward_defer() { return 1; }
+while vward_defer route-hints-update; do sleep 60; done
 vward_admission_enter route-hints-update || exit $?
 
 VERSION="3.0"

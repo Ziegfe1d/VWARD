@@ -6,6 +6,7 @@ export PATH
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
 . "$VWARD_ADMISSION_LIB"
+command -v vward_defer >/dev/null 2>&1 || vward_defer() { return 1; }
 vward_admission_enter housekeeping || exit $?
 cleanup() { vward_admission_leave 2>/dev/null || true; }
 trap cleanup EXIT
@@ -394,7 +395,8 @@ if [ -x "$BACKUP_HELPER" ]; then
     SV_TODAY=${BACKUP_NOW%% *}; SV_HOUR=${BACKUP_NOW#* }; SV_HOUR=${SV_HOUR%%:*}
     SV_DAY=""
     [ ! -r "$SERVICES_DAY_FILE" ] || read -r SV_DAY < "$SERVICES_DAY_FILE" || :
-    if [ "$SV_DAY" != "$SV_TODAY" ] && [ "$SV_HOUR" -ge 6 ] 2>/dev/null; then
+    # A busy router: the next hour (at most 2 hours late).
+    if [ "$SV_DAY" != "$SV_TODAY" ] && [ "$SV_HOUR" -ge 6 ] 2>/dev/null && ! vward_defer services-refresh; then
         echo "$SV_TODAY" > "$SERVICES_DAY_FILE" 2>/dev/null || :
         "$BACKUP_HELPER" services-refresh now </dev/null >/dev/null 2>&1 &
         echo "$BACKUP_NOW|services=refresh" >> "$HOUSE_LOG"

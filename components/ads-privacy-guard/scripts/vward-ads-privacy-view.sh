@@ -6,7 +6,8 @@
 #   publish-status                                         rules not yet published
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
-SELF_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)"
+# The script's own folder, by the shell (no process: some of these run every minute).
+case "$0" in */*) SELF_DIR=${0%/*} ;; *) SELF_DIR=. ;; esac
 LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-common.sh}"
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo '{"ok":false,"error":"ads_library_unavailable"}'; exit 1; }

@@ -75,12 +75,88 @@ UPTIME_FILE=${VWARD_UPTIME_FILE:-/proc/uptime}
 WATCH_EVERY=6
 PANEL_DOWN=0
 
+# The supervisor is background work: the lowest CPU priority. What it starts for the owner
+# (cron, the Panel, AdGuard Home) gets the normal priority back.
+UNNICE=
+if renice -n 19 -p $$ >/dev/null 2>&1; then
+    UNNICE="nice -n -19"
+fi
+
+# Memory. VWARD's long-running programs are stopped when they stay above their limit three
+# minutes in a row (a leak); their own starters bring them back within a minute (S91 cron
+# watchdog, this supervisor, the tunnel health check). Low memory of the whole router is
+# logged once. All read by the shell from /proc.
+PROC=${VWARD_PROC:-/proc}
+RUN_DIR=${VWARD_RUN_DIR:-/opt/var/run/vward}
+MEM_LOW_KB=${VWARD_MEM_LOW_KB:-16384}
+MEM_LOW=0
+
+rss_kb()
+{
+    RSS=
+    [ -r "$PROC/$1/status" ] || return 1
+    while read -r K V _; do
+        [ "$K" != VmRSS: ] || { RSS=$V; return 0; }
+    done < "$PROC/$1/status"
+    return 1
+}
+
+# check_leak ID PIDFILE LIMIT_KB
+check_leak()
+{
+    L_PID=
+    [ -r "$2" ] && read -r L_PID < "$2" 2>/dev/null || :
+    case "$L_PID" in ''|*[!0-9]*) eval "OVER_$1=0"; return 0 ;; esac
+    rss_kb "$L_PID" || { eval "OVER_$1=0"; return 0; }
+    if [ "$RSS" -le "$3" ]; then
+        eval "OVER_$1=0"
+        return 0
+    fi
+    eval "N=\${OVER_$1:-0}"
+    N=$((N + 1))
+    eval "OVER_$1=$N"
+    [ "$N" -ge 3 ] || return 0
+    kill "$L_PID" 2>/dev/null
+    log_event "MEM_RESTART|$1|rss_kb=$RSS|limit_kb=$3"
+    eval "OVER_$1=0"
+}
+
+watch_memory()
+{
+    check_leak routeengine "$RUN_DIR/route-engine.pid" "${VWARD_MEM_ROUTE_ENGINE_KB:-16384}"
+    check_leak panel "$CONSOLE_PIDFILE" "${VWARD_MEM_PANEL_KB:-24576}"
+    for F in "$RUN_DIR"/awg-engine/t*.pid "$RUN_DIR"/vless-engine/v*.pid; do
+        [ -e "$F" ] || continue
+        ID=${F##*/}
+        ID=${ID%.pid}
+        case "$F" in
+            */awg-engine/*) check_leak "awg$ID" "$F" "${VWARD_MEM_AWG_KB:-65536}" ;;
+            *) check_leak "vless$ID" "$F" "${VWARD_MEM_XRAY_KB:-98304}" ;;
+        esac
+    done
+
+    AVAIL=
+    if [ -r "$PROC/meminfo" ]; then
+        while read -r K V _; do
+            [ "$K" != MemAvailable: ] || { AVAIL=$V; break; }
+        done < "$PROC/meminfo"
+    fi
+    case "$AVAIL" in ''|*[!0-9]*) return 0 ;; esac
+    if [ "$AVAIL" -lt "$MEM_LOW_KB" ]; then
+        [ "$MEM_LOW" = 1 ] || log_event "MEM_LOW|available_kb=$AVAIL"
+        MEM_LOW=1
+    elif [ "$MEM_LOW" = 1 ]; then
+        log_event "MEM_OK|available_kb=$AVAIL"
+        MEM_LOW=0
+    fi
+}
+
 watch_services()
 {
     P=
     [ ! -r "$CONSOLE_PIDFILE" ] || read -r P < "$CONSOLE_PIDFILE" || :
     if [ -x "$CONSOLE_INIT" ] && { [ -z "$P" ] || ! kill -0 "$P" 2>/dev/null; }; then
-        if "$CONSOLE_INIT" start </dev/null >/dev/null 2>&1; then
+        if $UNNICE "$CONSOLE_INIT" start </dev/null >/dev/null 2>&1; then
             log_event "PANEL_STARTED"
             PANEL_DOWN=0
         else
@@ -95,9 +171,11 @@ watch_services()
     case "$UP" in ''|*[!0-9]*) return 0 ;; esac
     if [ "$UP" -ge 90 ] && [ "$UP" -lt 600 ] && [ -x "$AGH_INIT" ] &&
        ! pidof AdGuardHome >/dev/null 2>&1; then
-        "$AGH_INIT" start </dev/null >/dev/null 2>&1
+        $UNNICE "$AGH_INIT" start </dev/null >/dev/null 2>&1
         log_event "AGH_STARTED|uptime=$UP"
     fi
+
+    watch_memory
 }
 
 
@@ -116,7 +194,7 @@ while :; do
 
         log_event "CROND_DOWN"
 
-        /opt/etc/init.d/S90crond start \
+        $UNNICE /opt/etc/init.d/S90crond start \
             >/dev/null 2>&1
 
         sleep 2

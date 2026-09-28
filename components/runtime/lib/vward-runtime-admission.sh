@@ -20,21 +20,146 @@ vward_component_gate() {
     exit "${2:-0}"
 }
 
-vward_admission_pid_start() {
+# ---- Resources: VWARD gives way to the router -------------------------------------------
+VWARD_PROC=${VWARD_PROC:-/proc}
+VWARD_BUSY_MEM_KB=${VWARD_BUSY_MEM_KB:-24576}
+VWARD_DEFER_DIR=${VWARD_DEFER_DIR:-${VWARD_ROOT_PREFIX:-}/tmp/vward-defer}
+
+# vward_background: the lowest CPU priority for this job and everything it starts, once
+# per job tree (one process). The tunnels' own programs take the normal priority back
+# (their engines check VWARD_BACKGROUND): user traffic must not wait. The Panel's
+# requests set VWARD_FOREGROUND and keep theirs.
+vward_background() {
+    [ "${VWARD_FOREGROUND:-0}" != 1 ] && [ "${VWARD_BACKGROUND:-0}" != 1 ] || return 0
+    VWARD_BACKGROUND=1
+    export VWARD_BACKGROUND
+    renice -n 19 -p $$ >/dev/null 2>&1 || :
+}
+
+# vward_busy: the router is busy - the load of the last minute at its number of CPU
+# threads or above, or less than 24 MiB of memory available. Read by the shell.
+vward_busy() {
+    vb_cpus=0
+    if [ -r "$VWARD_PROC/cpuinfo" ]; then
+        while read -r vb_k _; do [ "$vb_k" != processor ] || vb_cpus=$((vb_cpus + 1)); done < "$VWARD_PROC/cpuinfo"
+    fi
+    [ "$vb_cpus" -gt 0 ] || vb_cpus=1
+    vb_l=
+    [ ! -r "$VWARD_PROC/loadavg" ] || read -r vb_l _ < "$VWARD_PROC/loadavg" || :
+    vb_l=${vb_l%%.*}
+    case "$vb_l" in ''|*[!0-9]*) ;; *) [ "$vb_l" -lt "$vb_cpus" ] || return 0 ;; esac
+    vb_mem=
+    if [ -r "$VWARD_PROC/meminfo" ]; then
+        while read -r vb_k vb_v _; do
+            [ "$vb_k" != MemAvailable: ] || { vb_mem=$vb_v; break; }
+        done < "$VWARD_PROC/meminfo"
+    fi
+    case "$vb_mem" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$vb_mem" -lt "$VWARD_BUSY_MEM_KB" ]
+}
+
+# vward_defer NAME [MAX]: optional work (scans, speed, catalogs) waits while the router is
+# busy, but at most MAX seconds in a row (2 hours): then it runs anyway. Returns 0 when
+# NAME should wait now. Guards and repairs never call this.
+vward_defer() {
+    vd_f="$VWARD_DEFER_DIR/$1"
+    if ! vward_busy; then
+        [ ! -e "$vd_f" ] || rm -f "$vd_f"
+        return 1
+    fi
+    vd_up=
+    [ ! -r "$VWARD_PROC/uptime" ] || read -r vd_up _ < "$VWARD_PROC/uptime" || :
+    vd_up=${vd_up%%.*}
+    case "$vd_up" in ''|*[!0-9]*) return 1 ;; esac
+    vd_first=
+    [ ! -r "$vd_f" ] || read -r vd_first < "$vd_f" || :
+    case "$vd_first" in
+        ''|*[!0-9]*)
+            [ -d "$VWARD_DEFER_DIR" ] || mkdir -p "$VWARD_DEFER_DIR" 2>/dev/null || return 1
+            echo "$vd_up" > "$vd_f" 2>/dev/null || return 1
+            vd_first=$vd_up
+            ;;
+    esac
+    [ $((vd_up - vd_first)) -lt "${2:-7200}" ] && return 0
+    rm -f "$vd_f"
+    return 1
+}
+
+# vward_cpu_account COMPONENT: the CPU this job and everything it started used, added to
+# /tmp/vward-cpu/COMPONENT as "runs centiseconds" (RAM, since boot). The shell's own
+# `times`, no process: what VWARD costs the router, per component, measured on it.
+VWARD_CPU_DIR=${VWARD_CPU_DIR:-${VWARD_ROOT_PREFIX:-}/tmp/vward-cpu}
+
+vward_cs() {
+    # 1m2.345678s -> centiseconds in VC_CS (no subshell)
+    vc_v=${1%s}
+    vc_m=${vc_v%%m*}
+    vc_s=${vc_v#*m}
+    vc_i=${vc_s%%.*}
+    vc_f=${vc_s#*.}
+    [ "$vc_f" != "$vc_s" ] || vc_f=0
+    vc_f="${vc_f}00"
+    vc_f=${vc_f%"${vc_f#??}"}
+    for vc_x in vc_m vc_i vc_f; do
+        eval "vc_y=\$$vc_x"
+        while :; do case "$vc_y" in 0?*) vc_y=${vc_y#0} ;; *) break ;; esac; done
+        case "$vc_y" in ''|*[!0-9]*) vc_y=0 ;; esac
+        eval "$vc_x=\$vc_y"
+    done
+    VC_CS=$((vc_m * 6000 + vc_i * 100 + vc_f))
+}
+
+vward_cpu_account() {
+    case "${1:-}" in ''|*[!A-Za-z0-9_.-]*) return 0 ;; esac
+    [ -d "$VWARD_CPU_DIR" ] || mkdir -p "$VWARD_CPU_DIR" 2>/dev/null || return 0
+    vc_tmp="$VWARD_CPU_DIR/.times.$1"
+    times > "$vc_tmp" 2>/dev/null || return 0
+    vc_a= vc_b= vc_c= vc_d=
+    { read -r vc_a vc_b; read -r vc_c vc_d; } < "$vc_tmp" 2>/dev/null || :
+    vc_total=0
+    for vc_t in $vc_a $vc_b $vc_c $vc_d; do
+        vward_cs "$vc_t"
+        vc_total=$((vc_total + VC_CS))
+    done
+    vc_runs=0 vc_sum=0
+    [ ! -r "$VWARD_CPU_DIR/$1" ] || read -r vc_runs vc_sum < "$VWARD_CPU_DIR/$1" || :
+    case "$vc_runs$vc_sum" in *[!0-9]*|'') vc_runs=0 vc_sum=0 ;; esac
+    echo "$((vc_runs + 1)) $((vc_sum + vc_total))" > "$VWARD_CPU_DIR/$1" 2>/dev/null || :
+}
+
+# vward_pid_start_var PID: the process's start time (field 22 of /proc/PID/stat) in
+# VA_PS, read by the shell: every job enters and leaves through here.
+vward_pid_start_var() {
+    VA_PS=
     va_pid=${1:-$$}
     case "$va_pid" in ''|*[!0-9]*) return 1 ;; esac
     [ -r "/proc/$va_pid/stat" ] || return 1
-    sed 's/^.*) //' "/proc/$va_pid/stat" 2>/dev/null | awk 'NF>=20 {print $20; exit}'
+    va_line=
+    read -r va_line < "/proc/$va_pid/stat" 2>/dev/null || [ -n "$va_line" ] || return 1
+    va_rest=${va_line##*) }
+    [ "$va_rest" != "$va_line" ] || return 1
+    # shellcheck disable=SC2086
+    set -- $va_rest
+    [ "$#" -ge 20 ] || return 1
+    eval "VA_PS=\${20}"
+    case "$VA_PS" in ''|*[!0-9]*) VA_PS=; return 1 ;; esac
+}
+
+vward_admission_pid_start() {
+    vward_pid_start_var "${1:-$$}" || return 1
+    printf '%s\n' "$VA_PS"
 }
 
 vward_admission_leave() {
     [ "${VWARD_ADMISSION_OWNED:-0}" = 1 ] || return 0
+    vward_cpu_account "${VWARD_ADMISSION_COMPONENT:-}"
     va_slot=${VWARD_ADMISSION_SLOT:-}
     [ -n "$va_slot" ] && [ -d "$va_slot" ] && [ ! -L "$va_slot" ] || return 1
-    va_owner=$(cat "$va_slot/pid" 2>/dev/null) || return 1
-    va_saved_start=$(cat "$va_slot/pid_start" 2>/dev/null) || return 1
-    va_own_start=$(vward_admission_pid_start $$ 2>/dev/null) || return 1
-    [ "$va_owner" = "$$" ] && [ "$va_saved_start" = "$va_own_start" ] || return 1
+    va_owner= va_saved_start=
+    [ -r "$va_slot/pid" ] && read -r va_owner < "$va_slot/pid" || return 1
+    [ -r "$va_slot/pid_start" ] && read -r va_saved_start < "$va_slot/pid_start" || return 1
+    vward_pid_start_var $$ || return 1
+    [ "$va_owner" = "$$" ] && [ "$va_saved_start" = "$VA_PS" ] || return 1
     rm -f "$va_slot/pid" "$va_slot/pid_start" "$va_slot/component" 2>/dev/null || return 1
     rmdir "$va_slot" 2>/dev/null || return 1
     VWARD_ADMISSION_OWNED=0
@@ -43,6 +168,8 @@ vward_admission_leave() {
 
 vward_admission_enter() {
     va_component=${1:-runtime}
+    VWARD_ADMISSION_COMPONENT=$va_component
+    vward_background
     case "$va_component" in ''|*[!A-Za-z0-9_.-]*) return 64 ;; esac
     va_prefix=${VWARD_ROOT_PREFIX:-}
     va_request="$va_prefix/tmp/vward-update-requested"
@@ -55,25 +182,30 @@ vward_admission_enter() {
         (umask 077; mkdir "$va_active") 2>/dev/null || return 1
     fi
     [ -d "$va_active" ] || return 1
-    # Keenetic's BusyBox stat has no -c, so owner and mode come from ls.
-    va_active_meta=$(ls -ldn "$va_active" 2>/dev/null | awk '{sub(/[.+]$/, "", $1); print $3, $1}')
-    va_owner_uid=${VWARD_ADMISSION_OWNER_UID:-$(id -u)}
-    [ "$va_active_meta" = "$va_owner_uid drwx------" ] || return 1
-    va_start=$(vward_admission_pid_start $$ 2>/dev/null) || return 1
+    # Keenetic's BusyBox stat has no -c: the mode comes from ls (one process), the owner
+    # from the shell's own test (or the uid a test sets).
+    va_active_meta=$(ls -ldn "$va_active" 2>/dev/null)
+    case "$va_active_meta" in "drwx------"[\ .+]*) ;; *) return 1 ;; esac
+    if [ -n "${VWARD_ADMISSION_OWNER_UID:-}" ]; then
+        # shellcheck disable=SC2086
+        set -- $va_active_meta
+        [ "${3:-}" = "$VWARD_ADMISSION_OWNER_UID" ] || return 1
+    else
+        [ -O "$va_active" ] || return 1
+    fi
+    vward_pid_start_var $$ || return 1
+    va_start=$VA_PS
     va_slot="$va_active/$va_component.$$.$va_start"
     (umask 077; mkdir "$va_slot") 2>/dev/null || return 1
-    if ! printf '%s\n' "$$" > "$va_slot/pid" ||
-       ! printf '%s\n' "$va_start" > "$va_slot/pid_start" ||
-       ! printf '%s\n' "$va_component" > "$va_slot/component"; then
+    # Written under umask 077: the files are 0600 without a chmod.
+    if ! (umask 077
+          printf '%s\n' "$$" > "$va_slot/pid" &&
+          printf '%s\n' "$va_start" > "$va_slot/pid_start" &&
+          printf '%s\n' "$va_component" > "$va_slot/component") 2>/dev/null; then
         rm -f "$va_slot/pid" "$va_slot/pid_start" "$va_slot/component" 2>/dev/null
         rmdir "$va_slot" 2>/dev/null
         return 1
     fi
-    chmod 0600 "$va_slot/pid" "$va_slot/pid_start" "$va_slot/component" 2>/dev/null || {
-        rm -f "$va_slot/pid" "$va_slot/pid_start" "$va_slot/component" 2>/dev/null
-        rmdir "$va_slot" 2>/dev/null
-        return 1
-    }
     VWARD_ADMISSION_SLOT=$va_slot
     VWARD_ADMISSION_OWNED=1
     [ "${VWARD_ADMISSION_TEST_REQUEST_AFTER_REGISTER:-0}" != 1 ] || printf 'test-request\n' > "$va_request"

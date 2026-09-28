@@ -250,7 +250,11 @@ start_one() {
         # Two threads, as the tunnel engine: the router keeps the rest.
         GOMAXPROCS=${VWARD_VLESS_THREADS:-2} GOGC=50 GODEBUG=madvdontneed=1
         export GOMAXPROCS GOGC GODEBUG
-        exec "$BIN" run -c "$ENGINE_ETC/v$1.json" </dev/null >/dev/null 2>"$ENGINE_RUN/v$1.err" 3>&-
+        # Started from a background job (lowest priority): the tunnel carries the owner's
+        # traffic and takes the normal priority back.
+        VWARD_TUNNEL_NICE=
+        [ "${VWARD_BACKGROUND:-0}" != 1 ] || VWARD_TUNNEL_NICE="nice -n -19"
+        exec $VWARD_TUNNEL_NICE "$BIN" run -c "$ENGINE_ETC/v$1.json" </dev/null >/dev/null 2>"$ENGINE_RUN/v$1.err" 3>&-
     ) &
     echo $! > "$ENGINE_RUN/v$1.pid"
 }

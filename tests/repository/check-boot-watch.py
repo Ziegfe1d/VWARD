@@ -67,6 +67,34 @@ for i in $(seq "$1"); do watch_services; done
         fail("a running AdGuard Home is left alone")
     subprocess.run(["sh", "-c", f'kill $(cat "{tmp}/console.pid") 2>/dev/null'])
 
+# Memory: a program above its limit three minutes in a row is stopped (its starter brings it
+# back); one below is left alone; low memory of the router is logged once, and its end.
+MEM = SRC[SRC.index("PROC=${VWARD_PROC"):SRC.index("watch_services()")]
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    for pid, rss in ((4242, 20000), (4343, 9000)):
+        (tmp / f"proc/{pid}").mkdir(parents=True)
+        (tmp / f"proc/{pid}/status").write_text(f"Name:\tsh\nVmRSS:\t   {rss} kB\n")
+    (tmp / "run/awg-engine").mkdir(parents=True)
+    (tmp / "run/route-engine.pid").write_text("4242\n")
+    (tmp / "run/awg-engine/t0.pid").write_text("4343\n")
+    meminfo = tmp / "proc/meminfo"
+    harness = tmp / "m.sh"
+    harness.write_text(f"""VWARD_PROC="{tmp}/proc" VWARD_RUN_DIR="{tmp}/run" CONSOLE_PIDFILE="{tmp}/none"
+log_event() {{ echo "$*"; }}
+kill() {{ echo "KILL $*"; }}
+{MEM}
+for i in 1 2 3; do watch_memory; done
+sed -i 's/12000/90000/' "{meminfo}"
+watch_memory
+""")
+    meminfo.write_text("MemTotal: 250000 kB\nMemAvailable:   12000 kB\n")
+    out = subprocess.run(["sh", str(harness)], text=True, capture_output=True, timeout=30).stdout.split("\n")[:-1]
+    if out != ["MEM_LOW|available_kb=12000", "KILL 4242", "MEM_RESTART|routeengine|rss_kb=20000|limit_kb=16384", "MEM_OK|available_kb=90000"]:
+        fail(f"memory watch: {out}")
+if "watch_memory" not in SRC[SRC.index("watch_services()"):] or "$UNNICE" not in SRC:
+    fail("the memory watch runs every minute; what the supervisor starts gets the normal priority")
+
 if "watch_services" not in SRC.split("while :; do", 1)[1]:
     fail("the supervisor loop does not call watch_services")
 print("BOOT_WATCH=PASS")

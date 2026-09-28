@@ -345,7 +345,7 @@ save_state()
     {
         echo "HOST=$H"
         echo "STATUS=$STATUS"
-        echo "LAST_CHECK=$(date +%s)"
+        echo "LAST_CHECK=${QNOW:-$(date +%s)}"
     } > "$TMP"
 
     mv "$TMP" "$STATE"

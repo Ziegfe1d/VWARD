@@ -161,8 +161,12 @@ start_one() {
     (
         GOMAXPROCS=${VWARD_AWG_THREADS:-2} GOGC=100 GODEBUG=madvdontneed=1
         export GOMAXPROCS GOGC GODEBUG
+        # Started from a background job (lowest priority): the tunnel carries the owner's
+        # traffic and takes the normal priority back.
+        VWARD_TUNNEL_NICE=
+        [ "${VWARD_BACKGROUND:-0}" != 1 ] || VWARD_TUNNEL_NICE="nice -n -19"
         # fd 3 (an add's step channel) is not the tunnel's to keep open.
-        exec "$BIN" -i "$(adapter_of "$2")" -c "$ENGINE_ETC/t$1.conf" -s "$ENGINE_RUN/t$1.state" </dev/null >/dev/null 2>"$ENGINE_RUN/t$1.err" 3>&-
+        exec $VWARD_TUNNEL_NICE "$BIN" -i "$(adapter_of "$2")" -c "$ENGINE_ETC/t$1.conf" -s "$ENGINE_RUN/t$1.state" </dev/null >/dev/null 2>"$ENGINE_RUN/t$1.err" 3>&-
     ) &
     echo $! > "$ENGINE_RUN/t$1.pid"
 }

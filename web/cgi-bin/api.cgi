@@ -2,6 +2,10 @@
 PATH="/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
+# The owner is waiting for these: they keep the normal priority (vward_background).
+VWARD_FOREGROUND=1
+export VWARD_FOREGROUND
+
 JQ=${JQ:-/opt/bin/jq}
 CURL=${CURL:-/opt/bin/curl}
 
