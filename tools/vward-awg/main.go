@@ -4,6 +4,7 @@
 //
 //	vward-awg -v                       version
 //	vward-awg -n -c FILE               check the file, start nothing
+//	vward-awg -bench                   encryption speed of this CPU (1 and all threads)
 //	vward-awg -i NAME -c FILE -s STATE run the tunnel on adapter NAME
 //
 // STATE gets the last handshake time and traffic every few seconds, never a key.
@@ -17,8 +18,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -26,9 +29,10 @@ import (
 	"github.com/amnezia-vpn/amneziawg-go/v3/device"
 	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
 	"github.com/amnezia-vpn/amneziawg-go/v3/tun/tuntest"
+	"golang.org/x/crypto/chacha20poly1305"
 )
 
-const version = "1.0.0"
+const version = "1.1.0"
 
 func fail(code int, format string, a ...any) {
 	fmt.Fprintf(os.Stderr, "error: "+format+"\n", a...)
@@ -83,17 +87,56 @@ func writeState(path string, d *device.Device) {
 	}
 }
 
+// bench: how fast this CPU seals and opens tunnel-sized packets, the work every
+// packet needs; the tunnel's speed cannot be above it.
+func bench(threads int, d time.Duration) float64 {
+	var wg sync.WaitGroup
+	total := make([]int64, threads)
+	stop := time.Now().Add(d)
+	for i := 0; i < threads; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			aead, _ := chacha20poly1305.New(make([]byte, chacha20poly1305.KeySize))
+			nonce := make([]byte, chacha20poly1305.NonceSize)
+			buf := make([]byte, 1420, 1420+aead.Overhead())
+			for time.Now().Before(stop) {
+				for j := 0; j < 16; j++ {
+					sealed := aead.Seal(buf[:0], nonce, buf[:1420], nil)
+					if _, err := aead.Open(sealed[:0], nonce, sealed, nil); err != nil {
+						panic("bench: open failed")
+					}
+					total[i] += 1420
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+	var sum int64
+	for _, t := range total {
+		sum += t
+	}
+	return float64(sum) * 8 / d.Seconds() / 1e6
+}
+
 func main() {
 	showVersion := flag.Bool("v", false, "print the version")
 	check := flag.Bool("n", false, "check the tunnel file and exit")
 	name := flag.String("i", "", "TUN adapter name")
 	confPath := flag.String("c", "", "tunnel .conf file")
 	statePath := flag.String("s", "", "state file")
+	doBench := flag.Bool("bench", false, "measure the encryption speed of this CPU")
 	every := flag.Duration("t", 5*time.Second, "how often the state file is written")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println("vward-awg " + version)
+		return
+	}
+	if *doBench {
+		// Sealing and opening one packet each: a tunnel's traffic in one direction.
+		fmt.Printf("encryption, 1 thread: %.1f Mbit/s\n", bench(1, 3*time.Second))
+		fmt.Printf("encryption, %d threads: %.1f Mbit/s\n", runtime.NumCPU(), bench(runtime.NumCPU(), 3*time.Second))
 		return
 	}
 	if *confPath == "" {

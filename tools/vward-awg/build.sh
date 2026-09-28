@@ -9,9 +9,11 @@ GO_VERSION=go1.25.1
 export GOTOOLCHAIN=$GO_VERSION CGO_ENABLED=0 GOOS=linux GOFLAGS=-mod=readonly
 mkdir -p "$OUT"
 cd "$HERE"
+# golang.org/x/crypto with the MIPS ChaCha20 and Poly1305 of mips/ (see mips/prepare.sh).
+sh mips/prepare.sh
 for arch in mipsle mips arm64 arm; do
     case "$arch" in mips*) extra="GOMIPS=softfloat" ;; arm) extra="GOARM=7" ;; *) extra= ;; esac
-    env GOARCH="$arch" $extra go build -trimpath -buildvcs=false -ldflags "-s -w -buildid=" -o "$OUT/vward-awg-linux-$arch" .
+    env GOARCH="$arch" $extra go build -modfile=.build/go.mod -trimpath -buildvcs=false -ldflags "-s -w -buildid=" -o "$OUT/vward-awg-linux-$arch" .
 done
 cd "$OUT"
 sha256sum vward-awg-linux-mipsle vward-awg-linux-mips vward-awg-linux-arm64 vward-awg-linux-arm > SHA256SUMS

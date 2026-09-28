@@ -29,6 +29,10 @@ jobs:
           cache: false
       - name: Test
         run: cd vward/tools/vward-awg && GOTOOLCHAIN=go1.25.1 go test ./...
+      - name: Test the MIPS ChaCha20 and Poly1305 under qemu
+        run: |
+          sudo apt-get update -q >/dev/null && sudo apt-get install -y -q qemu-user-static >/dev/null
+          cd vward/tools/vward-awg && GOTOOLCHAIN=go1.25.1 sh mips/test.sh
       - name: Build and compare with the pinned sums
         run: sh vward/tools/vward-awg/build.sh "$PWD/out" --check
       - name: Publish to the awg-engine branch
