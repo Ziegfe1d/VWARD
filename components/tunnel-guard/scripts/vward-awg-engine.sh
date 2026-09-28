@@ -1,15 +1,19 @@
 #!/bin/sh
 # VWARD tunnel engine («Контур AmneziaWG»): holds tunnels whose format the
-# firmware cannot (AmneziaWG 3.x on KeeneticOS 5.1).  Each tunnel runs
-# wireproxy-awg (amneziawg-go, userspace, no kernel modules) with a SOCKS5
-# port on 127.0.0.1, and Keenetic gets a «Прокси» connection (ProxyN) to it,
-# so lists and subnets are routed to it like to any Keenetic tunnel.
+# firmware cannot (AmneziaWG 3.x on KeeneticOS 5.1).  Keenetic makes an
+# «OpkgTun» connection with its own TUN adapter (opkgtunN), and vward-awg
+# (tools/vward-awg: amneziawg-go as a library, userspace, no kernel modules)
+# attaches to that adapter and carries its packets to the server.  Keenetic
+# keeps the address and routes, so lists and subnets go to it like to any
+# Keenetic tunnel.  (A «Прокси» connection needed Keenetic's proxy client
+# component, which some models do not have.)
 #
-# The program is downloaded only when the first such tunnel is added, from
-# the release pinned below, and checked against its SHA-256.  Tunnel files
-# hold private keys: root-only, never printed, never in a process's arguments.
+# The program is downloaded only when the first such tunnel is added, from the
+# awg-engine branch, and checked against the SHA-256 pinned below.  Tunnel
+# files hold private keys: root-only, never printed, never in a process's
+# arguments.
 #
-# vward-awg-engine.sh install | add DESCRIPTION FILE | remove PROXY |
+# vward-awg-engine.sh install | add DESCRIPTION FILE | remove NAME |
 #                     supervise | stop | status
 # Output: "result=..." / "info.key=value" lines, or "error=<code>".
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -20,24 +24,23 @@ ENGINE_SHARE=${VWARD_AWG_SHARE:-/opt/share/vward/awg-engine}
 ENGINE_RUN=${VWARD_AWG_RUN:-/opt/var/run/vward/awg-engine}
 ENGINE_LOG=${VWARD_AWG_LOG:-/opt/var/log/vward-awg-engine.log}
 TUNNELS="$ENGINE_ETC/tunnels.tsv"
-BIN="$ENGINE_SHARE/wireproxy"
-RCI=${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}
+BIN="$ENGINE_SHARE/vward-awg"
 CURL=${VWARD_CURL_BIN:-curl}
-JQ=${JQ:-jq}
+NDMC=${VWARD_NDMC:-ndmc}
 HANDSHAKE_WAIT=${VWARD_AWG_HANDSHAKE_WAIT:-30}
 MAX_TUNNELS=5
-PORT_BASE=25400
-PROXY_BASE=40
+# Keenetic numbers OpkgTun connections 0-9; other programs may hold some.
+OPKGTUN_MAX=9
 
-WP_VERSION=v1.0.18
-WP_URL=${VWARD_AWG_URL:-https://github.com/artem-russkikh/wireproxy-awg/releases/download/$WP_VERSION}
-# SHA-256 of wireproxy_linux_<arch>.tar.gz of that release.
-wp_sum() {
+AWG_VERSION=1.0.0
+AWG_URL=${VWARD_AWG_URL:-https://raw.githubusercontent.com/Ziegfe1d/VWARD/awg-engine}
+# SHA-256 of the unpacked program (tools/vward-awg/SHA256SUMS, a reproducible build).
+awg_sum() {
     case "$1" in
-        mipsle) echo c6578570d2926d2743a15b6dbde3121423ba13adc99a6c34f60f7d1fa094f5bd ;;
-        mips) echo 34d8c23a7d9f297fc5466a52923d90059013f1c03b1d17ea079a526dc5fb4d01 ;;
-        arm64) echo ee05ae8426b78947832c95c39596d5e778f4d485e8208683264c08064f82e7a3 ;;
-        arm) echo 1830acaddd9dc0f82327444e43149d9c5c1942f3bad086255e36d54431817635 ;;
+        mipsle) echo 557e4e46c0c526ffdd7fc1988fff9331030cece287afcad3c04984e9826d485d ;;
+        mips) echo 7ffa242fd1a101070c0bf91bf1ef27ee52c40f7783d29ce26e7e4816cf864b5f ;;
+        arm64) echo 9b64ee50ce80f9d215278b39bdd4c4eedc8fedadbb4815d4ed2a5a94a81bf050 ;;
+        arm) echo 22f6384184c6c1edaccf8eb0cb1e8374e8adc352f61b10bf51a9ddaaf955afea ;;
         *) return 1 ;;
     esac
 }
@@ -70,20 +73,22 @@ sha256_of() {
 }
 
 op_install() {
-    [ ! -x "$BIN" ] || [ "$(cat "$ENGINE_SHARE/version" 2>/dev/null)" != "$WP_VERSION" ] || { echo "result=unchanged"; return 0; }
+    [ ! -x "$BIN" ] || [ "$(cat "$ENGINE_SHARE/version" 2>/dev/null)" != "$AWG_VERSION" ] || { echo "result=unchanged"; return 0; }
     a=$(engine_arch) || die arch_unsupported
-    want=$(wp_sum "$a") || die arch_unsupported
+    want=$(awg_sum "$a") || die arch_unsupported
     mkdir -p "$ENGINE_SHARE" || die write_failed
     TMPD=$(mktemp -d "$ENGINE_SHARE/.install.XXXXXX" 2>/dev/null) || die write_failed
-    "$CURL" -fsSL --connect-timeout 15 --max-time 300 --max-filesize 16777216 \
-        -o "$TMPD/wp.tgz" "$WP_URL/wireproxy_linux_$a.tar.gz" 2>/dev/null || die download_failed
-    [ "$(sha256_of "$TMPD/wp.tgz")" = "$want" ] || die checksum_mismatch
-    tar xzf "$TMPD/wp.tgz" -C "$TMPD" wireproxy 2>/dev/null && [ -s "$TMPD/wireproxy" ] || die package_damaged
-    chmod 0755 "$TMPD/wireproxy" || die write_failed
-    "$TMPD/wireproxy" -v >/dev/null 2>&1 || die binary_not_runnable
-    mv -f "$TMPD/wireproxy" "$BIN" || die write_failed
-    echo "$WP_VERSION" > "$ENGINE_SHARE/version"
-    log "installed $WP_VERSION arch=$a"
+    "$CURL" -fsSL --connect-timeout 15 --max-time 300 --max-filesize 8388608 \
+        -o "$TMPD/p.gz" "$AWG_URL/vward-awg-linux-$a.gz" 2>/dev/null || die download_failed
+    gunzip -c "$TMPD/p.gz" > "$TMPD/vward-awg" 2>/dev/null || die package_damaged
+    [ "$(sha256_of "$TMPD/vward-awg")" = "$want" ] || die checksum_mismatch
+    chmod 0755 "$TMPD/vward-awg" || die write_failed
+    "$TMPD/vward-awg" -v >/dev/null 2>&1 || die binary_not_runnable
+    mv -f "$TMPD/vward-awg" "$BIN" || die write_failed
+    echo "$AWG_VERSION" > "$ENGINE_SHARE/version"
+    # The SOCKS program of earlier builds is no longer used.
+    rm -f "$ENGINE_SHARE/wireproxy"
+    log "installed vward-awg $AWG_VERSION arch=$a"
     echo "result=changed"
 }
 
@@ -98,28 +103,43 @@ free_slot() {
     return 1
 }
 
-rci() {
-    # rci JSON: one RCI request; Keenetic answers 200 either way, errors say "error".
-    r_out=$("$CURL" -fsS --max-time 15 -H 'Content-Type: application/json' -d "$1" "$RCI/" 2>/dev/null) || return 1
-    printf '%s\n' "$r_out" | "$JQ" -e '[.. | objects | select(.status? == "error")] | length == 0' >/dev/null 2>&1
-}
-
-# Keenetic's own words for the last refused request (no keys go to RCI here).
-rci_why() {
-    w=$(printf '%s\n' "$r_out" | "$JQ" -r '[.. | objects | select(.status? == "error") | .message? // empty] | first // empty' 2>/dev/null |
-        tr -cs 'A-Za-z0-9 ._:,()/-' ' ' | cut -c1-200)
-    echo "${w:-no answer}"
-}
-
-# proxy_support: 0 - Keenetic has its «Клиент прокси» component (the engine's tunnels are
-# «Прокси» connections), 1 - it has not, 2 - unknown (RCI did not answer).
-proxy_support() {
-    v=$("$CURL" -fs --max-time 5 "$RCI/show/version" 2>/dev/null |
-        "$JQ" -r '.components // empty | if type == "array" then join(",") else tostring end' 2>/dev/null)
-    [ -n "$v" ] || return 2
-    case "$v" in *proxy*) return 0 ;; esac
+ndm() {
+    # ndm COMMAND: one Keenetic command (never a key); its own words go to the log on refusal.
+    ndm_out=$("$NDMC" -c "$1" 2>&1) || { log "refused: $1: $(ndm_why)"; return 1; }
+    printf '%s\n' "$ndm_out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found|no such)' || return 0
+    log "refused: $1: $(ndm_why)"
     return 1
 }
+ndm_why() { printf '%s' "$ndm_out" | tr -cs 'A-Za-z0-9 ._:,()"/[]-' ' ' | cut -c1-200; }
+
+# free_opkgtun: the first OpkgTun number no connection in Keenetic uses.
+free_opkgtun() {
+    rc=$("$NDMC" -c "show running-config" 2>/dev/null) || return 1
+    k=0
+    while [ "$k" -le "$OPKGTUN_MAX" ]; do
+        printf '%s\n' "$rc" | grep -qx "interface OpkgTun$k" || { echo "$k"; return 0; }
+        k=$((k + 1))
+    done
+    return 1
+}
+
+# conf_address FILE: the tunnel's IPv4 address as "ADDRESS MASK" for Keenetic.
+conf_address() {
+    tr -d '\r' < "$1" | awk -F'=' 'tolower($1) ~ /^[ \t]*address[ \t]*$/ {
+        n = split($2, a, ",")
+        for (i = 1; i <= n; i++) {
+            v = a[i]; gsub(/[ \t]/, "", v)
+            if (v !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/) continue
+            p = 32; if (split(v, b, "/") == 2) {v = b[1]; p = b[2] + 0}
+            if (p < 1 || p > 32) continue
+            m = ""; for (j = 0; j < 4; j++) {bits = p - 8 * j; if (bits > 8) bits = 8; if (bits < 0) bits = 0
+                m = m (j ? "." : "") (256 - 2 ^ (8 - bits)) % 256}
+            print v " " m; exit
+        }
+    }'
+}
+
+adapter_of() { printf 'opkgtun%s\n' "${1#OpkgTun}"; }
 
 # pid_of SLOT: the tunnel's program while it runs (a zombie left by a kill is not running).
 pid_of() {
@@ -132,13 +152,13 @@ pid_of() {
 }
 
 start_one() {
-    # start_one SLOT: the tunnel's wireproxy in the background, memory kept small.
+    # start_one SLOT NAME: the tunnel's program in the background on Keenetic's adapter.
     mkdir -p "$ENGINE_RUN" || return 1
     [ -z "$(pid_of "$1")" ] || return 0
     (
         GOMAXPROCS=2 GOMEMLIMIT=24MiB GOGC=50 GODEBUG=madvdontneed=1
         export GOMAXPROCS GOMEMLIMIT GOGC GODEBUG
-        exec "$BIN" -s -c "$ENGINE_ETC/t$1.wp" -i "127.0.0.1:$((PORT_BASE + 100 + $1))" </dev/null >/dev/null 2>&1
+        exec "$BIN" -i "$(adapter_of "$2")" -c "$ENGINE_ETC/t$1.conf" -s "$ENGINE_RUN/t$1.state" </dev/null >/dev/null 2>"$ENGINE_RUN/t$1.err"
     ) &
     echo $! > "$ENGINE_RUN/t$1.pid"
 }
@@ -146,13 +166,12 @@ start_one() {
 stop_one() {
     p=$(pid_of "$1") || :
     [ -z "$p" ] || { kill "$p" 2>/dev/null; sleep 1; kill -9 "$p" 2>/dev/null; }
-    rm -f "$ENGINE_RUN/t$1.pid"
+    rm -f "$ENGINE_RUN/t$1.pid" "$ENGINE_RUN/t$1.state"
 }
 
-# The health page also carries the private key: only the handshake time is read.
+# The program writes the last handshake time to its state file (never a key).
 handshake_age() {
-    h=$("$CURL" -fs --max-time 4 "http://127.0.0.1:$((PORT_BASE + 100 + $1))/metrics" 2>/dev/null |
-        sed -n 's/^last_handshake_time_sec=//p' | sort -n | tail -n 1)
+    h=$(sed -n 's/^handshake=//p' "$ENGINE_RUN/t$1.state" 2>/dev/null)
     case "$h" in ''|*[!0-9]*|0) return 1 ;; esac
     echo $(( $(date +%s) - h ))
 }
@@ -162,36 +181,32 @@ op_add() {
     case "$desc" in ''|*'"'*|*"$(printf '\134')"*) die invalid_description 64 ;; esac
     [ "${#desc}" -le 64 ] || die invalid_description 64
     [ -f "$conf" ] && [ ! -L "$conf" ] && grep -qi '^\[Interface\]' "$conf" && grep -qi '^\[Peer\]' "$conf" || die conf_syntax 64
-    # Without the component Keenetic refuses the connection: say so before any download or wait.
-    if proxy_support; then :; elif [ "$?" = 1 ]; then die proxy_component_missing; fi
-    [ -x "$BIN" ] || ( trap cleanup EXIT; op_install ) >/dev/null || die engine_install_failed
+    addr=$(conf_address "$conf"); [ -n "$addr" ] || die conf_no_address 64
+    [ -x "$BIN" ] && [ "$(cat "$ENGINE_SHARE/version" 2>/dev/null)" = "$AWG_VERSION" ] ||
+        ( trap cleanup EXIT; op_install ) >/dev/null || die engine_install_failed
     mkdir -p "$ENGINE_ETC" && chmod 0700 "$ENGINE_ETC" || die write_failed
     n=$(free_slot) || die engine_full
-    proxy="Proxy$((PROXY_BASE + n))" port=$((PORT_BASE + n))
-    (umask 077
-     # The tunnel's own .conf without any proxy sections it may carry, then ours.
-     tr -d '\r' < "$conf" | awk 'tolower($0) ~ /^\[(socks5|http|tcpclienttunnel|tcpservertunnel|stdiotunnel)\]/ {skip=1; next}
-        skip && /^\[/ {skip=0} !skip' > "$ENGINE_ETC/t$n.conf" &&
-     printf 'WGConfig = %s\n\n[Socks5]\nBindAddress = 127.0.0.1:%s\n' "$ENGINE_ETC/t$n.conf" "$port" > "$ENGINE_ETC/t$n.wp") || die write_failed
-    "$BIN" -n -c "$ENGINE_ETC/t$n.wp" >/dev/null 2>&1 || { rm -f "$ENGINE_ETC/t$n.conf" "$ENGINE_ETC/t$n.wp"; die conf_rejected; }
-    start_one "$n" || die engine_start_failed
+    k=$(free_opkgtun) || die no_free_tunnel
+    name="OpkgTun$k"
+    (umask 077; tr -d '\r' < "$conf" > "$ENGINE_ETC/t$n.conf") || die write_failed
+    "$BIN" -n -c "$ENGINE_ETC/t$n.conf" >/dev/null 2>&1 || { rm -f "$ENGINE_ETC/t$n.conf"; die conf_rejected; }
+    # Keenetic makes the connection and its adapter first; the program attaches to it.
+    undo() { stop_one "$n"; ndm "no interface $name" >/dev/null 2>&1; rm -f "$ENGINE_ETC/t$n.conf" "$ENGINE_RUN/t$n.err"; }
+    for c in "interface $name" "interface $name description \"$desc\"" "interface $name ip address $addr" \
+             "interface $name security-level public" "interface $name ip tcp adjust-mss pmtu" "interface $name up"; do
+        ndm "$c" || { undo; die router_rejected; }
+    done
+    start_one "$n" "$name" || { undo; die engine_start_failed; }
     w=0
     until handshake_age "$n" >/dev/null; do
         w=$((w + 2))
-        [ "$w" -le "$HANDSHAKE_WAIT" ] || { stop_one "$n"; rm -f "$ENGINE_ETC/t$n.conf" "$ENGINE_ETC/t$n.wp"; die tunnel_no_handshake; }
+        [ "$w" -le "$HANDSHAKE_WAIT" ] || { undo; die tunnel_no_handshake; }
         sleep 2
     done
-    # Keenetic's «Прокси» connection to the local port; UDP goes through as well.
-    rci "[{\"interface\":{\"name\":\"$proxy\",\"description\":\"$desc\",\"proxy\":{\"protocol\":{\"proto\":\"socks5\"},\"upstream\":{\"host\":\"127.0.0.1\",\"port\":\"$port\"},\"socks5-udp\":true}}}]" &&
-        rci "[{\"interface\":{\"name\":\"$proxy\",\"up\":true}},{\"system\":{\"configuration\":{\"save\":true}}}]" || {
-        why=$(rci_why); log "router_rejected $proxy: $why"
-        rci "[{\"interface\":{\"name\":\"$proxy\",\"no\":true}}]"
-        stop_one "$n"; rm -f "$ENGINE_ETC/t$n.conf" "$ENGINE_ETC/t$n.wp"
-        case "$why" in *'unsupported interface type'*) die proxy_component_missing ;; esac
-        die router_rejected; }
-    printf '%s\t%s\t%s\t%s\n' "$n" "$proxy" "$port" "$desc" >> "$TUNNELS"
-    log "added $proxy slot=$n"
-    printf 'info.name=%s\n' "$proxy"
+    ndm "system configuration save" || { undo; die config_save_failed; }
+    printf '%s\t%s\t-\t%s\n' "$n" "$name" "$desc" >> "$TUNNELS"
+    log "added $name slot=$n"
+    printf 'info.name=%s\n' "$name"
     echo "result=changed"
 }
 
@@ -199,9 +214,9 @@ op_remove() {
     row=$(row_of "$1")
     [ -n "$row" ] || die unknown_tunnel 64
     n=$(printf '%s' "$row" | cut -f1)
-    rci "[{\"interface\":{\"name\":\"$1\",\"no\":true}},{\"system\":{\"configuration\":{\"save\":true}}}]" || die router_rejected
     stop_one "$n"
-    rm -f "$ENGINE_ETC/t$n.conf" "$ENGINE_ETC/t$n.wp"
+    ndm "no interface $1" && ndm "system configuration save" || die router_rejected
+    rm -f "$ENGINE_ETC/t$n.conf" "$ENGINE_ETC/t$n.wp" "$ENGINE_RUN/t$n.err"
     awk -F'\t' -v p="$1" '$2 != p' "$TUNNELS" > "$TUNNELS.new" && mv -f "$TUNNELS.new" "$TUNNELS"
     log "removed $1"
     echo "result=changed"
@@ -212,16 +227,17 @@ op_remove() {
 op_supervise() {
     [ -s "$TUNNELS" ] && [ -x "$BIN" ] || { echo "result=unchanged"; return 0; }
     started=0
-    while IFS="$(printf '\t')" read -r n proxy port desc; do
+    while IFS="$(printf '\t')" read -r n name port desc; do
+        case "$name" in OpkgTun[0-9]) ;; *) continue ;; esac
         [ -n "$(pid_of "$n")" ] && continue
-        start_one "$n" && started=$((started + 1)) && log "restarted $proxy"
+        start_one "$n" "$name" && started=$((started + 1)) && log "restarted $name"
     done < "$TUNNELS"
     [ "$started" = 0 ] && echo "result=unchanged" || echo "result=changed"
 }
 
 op_stop() {
     [ -f "$TUNNELS" ] || { echo "result=unchanged"; return 0; }
-    while IFS="$(printf '\t')" read -r n proxy port desc; do stop_one "$n"; done < "$TUNNELS"
+    while IFS="$(printf '\t')" read -r n name port desc; do stop_one "$n"; done < "$TUNNELS"
     echo "result=changed"
 }
 
@@ -230,13 +246,12 @@ op_status() {
     printf 'info.installed=%s\n' "$([ -x "$BIN" ] && echo 1 || echo 0)"
     printf 'info.version=%s\n' "$(cat "$ENGINE_SHARE/version" 2>/dev/null)"
     printf 'info.arch=%s\n' "$(engine_arch 2>/dev/null)"
-    proxy_support; case $? in 0) echo "info.proxy=1" ;; 1) echo "info.proxy=0" ;; esac
-    [ -f "$TUNNELS" ] && while IFS="$(printf '\t')" read -r n proxy port desc; do
+    [ -f "$TUNNELS" ] && while IFS="$(printf '\t')" read -r n name port desc; do
         p=$(pid_of "$n") || :
         age=$(handshake_age "$n" 2>/dev/null) || age=
         rss=; [ -z "$p" ] || rss=$(awk '/^VmRSS:/ {print $2}' "/proc/$p/status" 2>/dev/null)
         ep=$(sed -n 's/^[Ee]ndpoint *= *//p' "$ENGINE_ETC/t$n.conf" 2>/dev/null | head -n 1)
-        printf 'tunnel=%s\t%s\t%s\t%s\t%s\t%s\n' "$proxy" "$([ -n "$p" ] && echo 1 || echo 0)" "$age" "$rss" "$ep" "$desc"
+        printf 'tunnel=%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$([ -n "$p" ] && echo 1 || echo 0)" "$age" "$rss" "$ep" "$desc"
     done < "$TUNNELS"
     echo "result=status"
 }

@@ -1176,7 +1176,9 @@ tunnel_block() {
 
 tunnel_names() {
     { printf '%s\n' "${VWARD_TUNNEL_INTERFACE:-}"
-      vward_map_tunnels "$(vward_device_map 2>/dev/null)" | awk '{print $1}'; } | awk 'NF && !s[$0]++'
+      vward_map_tunnels "$(vward_device_map 2>/dev/null)" | awk '{print $1}'
+      # The engine's tunnels (Keenetic «OpkgTun» connections) take lists like any tunnel.
+      [ ! -f "$AWG_TUNNELS" ] || awk -F'\t' '{print $2}' "$AWG_TUNNELS"; } | awk 'NF && !s[$0]++'
 }
 is_tunnel() { tunnel_names | grep -qxF -- "$1"; }
 engine_tunnel() { [ -f "$AWG_TUNNELS" ] && awk -F'\t' -v p="$1" '$2 == p {f = 1} END {exit f ? 0 : 1}' "$AWG_TUNNELS"; }
@@ -1319,7 +1321,7 @@ op_tunnel_conf() {
             [ -n "$tc_arg" ] && [ "${#tc_arg}" -le 64 ] || die invalid_description 64
             if [ "$(conf_get engine "$PLAN")" = 1 ]; then
                 # The firmware cannot run this format: VWARD's engine holds the tunnel
-                # and Keenetic gets a «Прокси» connection to it.
+                # on a Keenetic «OpkgTun» connection.
                 [ -x "$AWG_ENGINE" ] || die engine_unavailable
                 en_out=$("$AWG_ENGINE" add "$tc_arg" "$tc_file" 2>/dev/null)
                 case "$(printf '%s\n' "$en_out" | tail -n 1)" in

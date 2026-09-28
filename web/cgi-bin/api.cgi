@@ -1530,7 +1530,7 @@ if [ "$ACTION" = "diagnostics" ]; then
     case "$WAN_STATUS" in PASS|WARN) ;; *) WAN_STATUS=UNKNOWN ;; esac
 
     IF_JSON="$(fetch_json "$VWARD_RCI_BASE/show/interface")"
-    WG_COUNT="$(printf '%s\n' "$IF_JSON" | "$JQ" -r --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy}" --arg wan "${VWARD_WAN_INTERFACE:-}" '
+    WG_COUNT="$(printf '%s\n' "$IF_JSON" | "$JQ" -r --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy opkgtun}" --arg wan "${VWARD_WAN_INTERFACE:-}" '
         ($types | split(" ")) as $vpn |
         [to_entries[] | select((.value | type) == "object" and .key != $wan and (((.value.type // "") | tostring | ascii_downcase) as $t | $vpn | index($t)))] | length' 2>/dev/null)"
     case "$WG_COUNT" in ''|*[!0-9]*) WG_COUNT=0 ;; esac
@@ -2006,11 +2006,10 @@ if [ "$ACTION" = awg-data ]; then
     [ -n "$AWG_LOST" ] || AWG_LOST='[]'
     [ -x "$AWG_BIN" ] || { printf '{"ok":true,"available":false,"installed":false,"tunnels":[],"lost":%s}\n' "$AWG_LOST"; exit 0; }
     "$AWG_BIN" status 2>/dev/null | "$JQ" -Rn --argjson lost "$AWG_LOST" '
-        reduce (inputs) as $l ({ok: true, available: true, installed: false, version: "", arch: "", proxy: null, tunnels: [], lost: $lost};
+        reduce (inputs) as $l ({ok: true, available: true, installed: false, version: "", arch: "", tunnels: [], lost: $lost};
             if ($l | startswith("info.installed=")) then .installed = ($l | endswith("=1"))
             elif ($l | startswith("info.version=")) then .version = ($l | ltrimstr("info.version="))
             elif ($l | startswith("info.arch=")) then .arch = ($l | ltrimstr("info.arch="))
-            elif ($l | startswith("info.proxy=")) then .proxy = ($l | endswith("=1"))
             elif ($l | startswith("tunnel=")) then ($l | ltrimstr("tunnel=") | split("\t")) as $t |
                 .tunnels += [{name: $t[0], running: ($t[1] == "1"), handshake: ($t[2] | tonumber? // null),
                               rss_kb: ($t[3] | tonumber? // null), endpoint: $t[4], description: $t[5]}]
@@ -2454,7 +2453,7 @@ fi
 
 WG_INTERFACES="$(
     printf '%s\n' "$IFACES" |
-    "$JQ" -c --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy}" --arg wan "${VWARD_WAN_INTERFACE:-}" '
+    "$JQ" -c --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy opkgtun}" --arg wan "${VWARD_WAN_INTERFACE:-}" '
         ($types | split(" ")) as $vpn | [
         to_entries[] |
         select((.value | type) == "object" and .key != $wan and

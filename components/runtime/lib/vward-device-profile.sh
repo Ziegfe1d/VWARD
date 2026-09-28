@@ -188,8 +188,9 @@ vward_map_tunnels()
 }
 
 # Keenetic interface types a route can send traffic through as a VPN: WireGuard
-# (AmneziaWG included), OpenVPN, SSTP, PPTP, L2TP, IPsec/IKE and Proxy clients.
-VWARD_VPN_TYPES=${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy}
+# (AmneziaWG included), OpenVPN, SSTP, PPTP, L2TP, IPsec/IKE, Proxy clients and
+# OpkgTun (a TUN adapter an Entware program runs, as VWARD's AmneziaWG engine does).
+VWARD_VPN_TYPES=${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy opkgtun}
 
 # vward_map_vpns MAP [WAN-DEVICE]: every VPN client as "<ndm-name> <kernel-name>".
 # The connection to the provider itself (PPTP or L2TP at some ISPs) is not a VPN.
