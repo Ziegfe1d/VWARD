@@ -1538,21 +1538,26 @@ const tunSub = t => {
   if (e) return 'контур AmneziaWG · ' + (e.handshake != null ? 'рукопожатие ' + agoText(e.handshake) : e.running ? 'рукопожатия нет' : 'программа остановлена');
   return hsSec(t) != null ? 'рукопожатие ' + agoText(hsSec(t)) : t.handshake != null ? 'рукопожатия не было' : (t.state || '');
 };
-// KeeneticOS 5.2 carries AmneziaWG 3.x itself: once the stable channel offers 5.2 or newer
-// while the router runs older, the engine's tunnels come with the advice to update.
+// KeeneticOS 5.2 carries AmneziaWG 3.x itself: once Keenetic offers 5.2 or newer while the
+// router runs older, the engine's tunnels say so. The versions are what the router's own
+// update check got from Keenetic's servers. The stable channel comes first; a test build is
+// shown as one, with a warning - the owner decides whether to install it.
 const fwNum = v => { const m = /^(\d+)\.(\d+)/.exec(v || ''); return m ? +m[1] * 100 + +m[2] : 0; };
 const fwShort = v => fwNum(v) ? Math.floor(fwNum(v) / 100) + '.' + fwNum(v) % 100 + (/^\d+\.\d+$/.test(v) ? '' : ' (' + v + ')') : v;
 const fwNative = () => {
   const f = (S.ext && S.ext.firmware) || null;
   if (!f || !fwNum(f.title || f.release) || fwNum(f.title || f.release) >= 502) return null;
-  // Only the stable channel: a preview or alpha build is not something to advise.
-  return (f.channels || []).find(c => c.name === 'stable' && fwNum(c.version) >= 502) || null;
+  const ok = (f.channels || []).filter(c => fwNum(c.version) >= 502);
+  return ok.find(c => c.name === 'stable') || ok.find(c => c.name === 'preview') || ok.find(c => c.name === 'draft') || ok[0] || null;
 };
 const nativePanel = () => {
   const c = fwNative();
   if (!c || !((S.awg && S.awg.tunnels) || []).length) return '';
-  return panel('Обновите прошивку Keenetic', '<p class="panel-desc">Для роутера вышла KeeneticOS ' + esc(fwShort(c.version)) +
+  const test = c.name !== 'stable';
+  return panel(test ? 'Есть тестовая прошивка Keenetic' : 'Обновите прошивку Keenetic', '<p class="panel-desc">' +
+    (test ? 'На канале «' + esc(fwChannel(c.name)) + '» Keenetic выпустил KeeneticOS ' : 'Для роутера вышла KeeneticOS ') + esc(fwShort(c.version)) +
     '. В ней AmneziaWG 3.x встроена в прошивку: туннели будут заметно быстрее и не будут занимать процессор и память программой на флешке. Прошивку ставит Keenetic, роутер перезагрузится.</p>' +
+    (test ? '<p class="field-warn">Внимание: это тестовая версия, в ней возможны ошибки и сбои в работе роутера. Ставить её или дождаться стабильной - решать вам; канал обновлений меняется на странице «Прошивка Keenetic».</p>' : '') +
     kv([['Прошивка Keenetic', 'Обновления', 'info', 'u-fw', '', 'установлена ' + esc(((S.ext || {}).firmware || {}).title || ''), 'out']]));
 };
 function awgLostPanel(only) {
@@ -2703,7 +2708,8 @@ document.addEventListener('submit', async e => {
       if (!x.ok) { toast('Файл не подходит: ' + errText(x)); return; }
       $('tcPreview').innerHTML = kv([['Сервер', x.endpoint || '—'], ['Адрес в туннеле', x.address || '—'], ['MTU', x.mtu || 'как на роутере'],
         ['Обфускация AmneziaWG', x.awg === '1' ? 'Включена' : 'Выключена'], ['Keepalive', x.keepalive ? x.keepalive + ' с' : '25 с'], ['Разрешённые адреса', x.allowed || '—']]) +
-        (x.engine === '1' ? '<p class="field-warn">Это AmneziaWG 3.x: прошивка Keenetic его не умеет. Туннель поднимет контур VWARD - программа на флешке, около 13 МБ памяти, скорость ниже встроенного WireGuard. В Keenetic он будет подключением OpkgTun.' + (fwNative() ? ' Для роутера уже есть KeeneticOS ' + esc(fwShort(fwNative().version)) + ' со встроенной AmneziaWG 3.x - лучше сначала обновить прошивку.' : '') + '</p>' :
+        (x.engine === '1' ? '<p class="field-warn">Это AmneziaWG 3.x: прошивка Keenetic его не умеет. Туннель поднимет контур VWARD - программа на флешке, около 13 МБ памяти, скорость ниже встроенного WireGuard. В Keenetic он будет подключением OpkgTun.' + (fwNative() ? (fwNative().name === 'stable' ? ' Для роутера уже есть KeeneticOS ' + esc(fwShort(fwNative().version)) + ' со встроенной AmneziaWG 3.x - лучше сначала обновить прошивку.' :
+          ' На канале «' + esc(fwChannel(fwNative().name)) + '» есть тестовая KeeneticOS ' + esc(fwShort(fwNative().version)) + ' со встроенной AmneziaWG 3.x (возможны ошибки).') : '') + '</p>' :
          x.unsupported ? '<p class="field-warn">Этих настроек нет в прошивке Keenetic, её импорт тоже их пропускает: ' + esc(x.unsupported.split(',').join(', ')) + '. Если сервер без них не работает, туннель не подключится - VWARD проверит это и ничего не оставит.</p>' : '');
       form.dataset.checked = '1';
       form.querySelector('[type=submit]').textContent = mode === 'create' ? 'Создать туннель' : 'Заменить конфигурацию ' + tunLabel(name);
