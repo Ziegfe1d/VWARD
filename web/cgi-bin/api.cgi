@@ -745,7 +745,7 @@ if [ "$ACTION" = ads-view ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
   V="$(qget view)"; F="$(qget filter)"; Q="$(qget search | tr '[:upper:]' '[:lower:]')"; K="$(qget kind)"
   for X in "$V" "$F" "$Q" "$K"; do case "$X" in *[!a-z0-9.-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac; done
-  case "$V" in querylog|stats|list|publish-status|agh) ;; *) echo '{"ok":false,"error":"invalid_view"}'; exit 0 ;; esac
+  case "$V" in querylog|stats|list|publish-status|agh|check) ;; *) echo '{"ok":false,"error":"invalid_view"}'; exit 0 ;; esac
   VIEW_BIN=${VWARD_ADS_VIEW_BIN:-/opt/bin/vward-ads-privacy-view.sh}; [ -x "$VIEW_BIN" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
   case "$V" in
     querylog) OUTV="$("$VIEW_BIN" querylog "${F:-all}" "$Q" 2>/dev/null)" ;;
@@ -753,6 +753,7 @@ if [ "$ACTION" = ads-view ]; then
     list) OUTV="$("$VIEW_BIN" list "$K" "$Q" 2>/dev/null)" ;;
     publish-status) OUTV="$("$VIEW_BIN" publish-status 2>/dev/null)" ;;
     agh) OUTV="$("$VIEW_BIN" agh 2>/dev/null)" ;;
+    check) OUTV="$("$VIEW_BIN" check "$Q" 2>/dev/null)" ;;
     *) echo '{"ok":false,"error":"invalid_view"}'; exit 0 ;;
   esac
   printf '%s\n' "$OUTV" | "$JQ" -ce 'if type == "object" then . else error end' 2>/dev/null || echo '{"ok":false,"error":"view_failed"}'
@@ -1169,6 +1170,10 @@ if [ "$ACTION" = ads-control ]; then
           set -- "$AGS" "$AGV" ;;
         interval) case "$AGV" in 0|1|12|24|72|168) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac; set -- interval "$AGV" ;;
         filters-refresh) set -- filters-refresh ;;
+        user-rule) case "$AGV" in add|remove) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+          AGD="$(val domain | tr 'A-Z' 'a-z')"; ads_valid_domain "$AGD" || { echo '{"ok":false,"error":"invalid_domain"}'; exit 0; }
+          case "$(val kind)" in block) AGR="||$AGD^" ;; allow) AGR="@@||$AGD^" ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+          set -- user-rule "$AGV" "$AGR" ;;
         filter-enable|filter-add|filter-remove)
           AGU="$(form_decode url url)" || { echo '{"ok":false,"error":"invalid_url"}'; exit 0; }
           printf '%s\n' "$AGU" | grep -Eq '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._~/%+=&?-]*$' && [ "${#AGU}" -le 300 ] || { echo '{"ok":false,"error":"invalid_url"}'; exit 0; }

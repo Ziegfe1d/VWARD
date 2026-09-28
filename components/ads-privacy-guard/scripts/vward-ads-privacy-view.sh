@@ -143,6 +143,29 @@ case "${1:-}" in
              safesearch: (if $ss == null then null else ($ss.enabled == true) end)}' 2>/dev/null || { rm -rf "${D:?}"; fail adguard_unavailable; }
         rm -rf "${D:?}"
         ;;
+    check)
+        # check DOMAIN: AdGuard Home's own answer (filtering/check_host) with the name of
+        # the list whose rule decided; user rules are list 0.
+        C_DOM=$(printf '%s' "${2:-}" | tr 'A-Z' 'a-z')
+        ads_valid_domain "$C_DOM" || fail invalid_domain
+        D=$(mktemp -d "${TMPDIR:-/tmp}/vward-ads-check.XXXXXX" 2>/dev/null) || fail temporary_file_unavailable
+        ads_agh_api_get "filtering/check_host?name=$C_DOM" "$D/c.json" >/dev/null 2>&1; r=$?
+        [ "$r" = 0 ] || { rm -rf "${D:?}"; agh_fail "$r"; }
+        ads_agh_api_get filtering/status "$D/f.json" >/dev/null 2>&1 || echo null > "$D/f.json"
+        "$ADS_JQ" -cn --arg d "$C_DOM" --slurpfile c "$D/c.json" --slurpfile f "$D/f.json" '
+            $c[0] as $c | $f[0] as $f |
+            ([($f.filters // [])[], ($f.whitelist_filters // [])[]] | map({key: (.id | tostring), value: (.name // .url // "")}) | from_entries) as $names |
+            ([($c.rules // [])[] | {text: (.text // ""), list: (if (.filter_list_id // 0) == 0 then "Мои правила AdGuard Home" else ($names[(.filter_list_id | tostring)] // ("список " + (.filter_list_id | tostring))) end)}]
+             + (if ($c.rule // "") != "" and ($c.rules // []) == [] then [{text: $c.rule, list: (if ($c.filter_id // 0) == 0 then "Мои правила AdGuard Home" else ($names[($c.filter_id | tostring)] // "") end)}] else [] end)) as $rules |
+            ($c.reason // "") as $why |
+            {ok: true, domain: $d, reason: $why,
+             blocked: ($why | test("^Filtered(BlackList|SafeBrowsing|Parental|BlockedService|SafeSearch)")),
+             allowed: ($why == "NotFilteredAllowList"),
+             service: ($c.service_name // ""), rules: $rules,
+             user_block: (($f.user_rules // []) | index("||" + $d + "^") != null),
+             user_allow: (($f.user_rules // []) | index("@@||" + $d + "^") != null)}' 2>/dev/null || { rm -rf "${D:?}"; fail adguard_unavailable; }
+        rm -rf "${D:?}"
+        ;;
     *)
         fail invalid_view
         ;;

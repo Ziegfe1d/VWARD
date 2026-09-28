@@ -66,6 +66,20 @@ if [ "$OP" = agh ]; then
       aget safesearch/status ss.json && "$ADS_JQ" -e --argjson b "$B" '.enabled == $b' "$W/ss.json" >/dev/null || agfail verification_failed ;;
     filters-refresh)
       jpost filtering/refresh '{"whitelist":false}' || agfail adguard_rejected ;;
+    # user-rule add|remove DOMAIN: the owner's own rule from «Проверить или заблокировать» -
+    # ||domain^ blocks, @@||domain^ lets through - among AdGuard Home's user rules, outside
+    # VWARD's marker block (the publisher keeps every rule outside it). Every other rule stays.
+    user-rule)
+      case "$A2" in ''|*[!a-z0-9.@\|^-]*) agfail invalid_value ;; esac
+      printf '%s\n' "$A2" | grep -Eq '^(@@)?\|\|[a-z0-9.-]+\^$' || agfail invalid_value
+      aget filtering/status filtering.json || agfail adguard_unavailable
+      case "$A1" in
+        add) NEW=$("$ADS_JQ" -c --arg r "$A2" '{rules: (((.user_rules // []) - [$r]) + [$r])}' "$W/filtering.json") ;;
+        remove) NEW=$("$ADS_JQ" -c --arg r "$A2" '{rules: ((.user_rules // []) - [$r])}' "$W/filtering.json") ;;
+        *) agfail invalid_value ;;
+      esac
+      jpost filtering/set_rules "$NEW" || agfail adguard_rejected
+      aget filtering/status filtering.json && "$ADS_JQ" -e --arg r "$A2" --arg op "$A1" '((.user_rules // []) | index($r) != null) == ($op == "add")' "$W/filtering.json" >/dev/null || agfail verification_failed ;;
     filter-enable)
       valid_url "$A1" || agfail invalid_url; B=$(bool "$A2")
       aget filtering/status filtering.json || agfail adguard_unavailable

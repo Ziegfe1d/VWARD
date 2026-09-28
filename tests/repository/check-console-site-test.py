@@ -67,7 +67,8 @@ case "$dev" in eth3) printf '000 6.001 '; exit 28 ;; nwg0) printf '451 0.210 ' ;
 
 js = (ROOT / "web/assets/vward-console.js").read_text()
 for need in ("return loadError(['route']) + sitePanel()", "return loadError(['status']) + sitePanel()", "apiGet('site-test'",
-             "btn('site-fix'", "function siteFix(", "op: 'restart', name: tun", "btn('tunnel-up'", "btn('tunnel-restart'"):
+             "btn('site-fix'", "function siteFix(", "op: 'restart', name: tun", "btn('tunnel-up'", "btn('tunnel-restart'",
+             "return loadError(['ads']) + adsCheckPanel()", "view: 'check'", "setting: 'user-rule'"):
     if need not in js:
         fail(f"the Panel lacks {need}")
 helper = (ROOT / "components/console/scripts/vward-console-config.sh").read_text()

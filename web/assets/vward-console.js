@@ -139,6 +139,51 @@ const S = { auth: null, cron: null, status: null, route: null, lists: null, upda
 // The last address check stays on the page until the next one (the page redraws itself).
 let RPROBE = null;
 // Where the check says traffic goes, in words: through which tunnel, or past the VPN.
+/* ---------- Реклама: проверить или заблокировать адрес ---------- */
+// A banner's address (a link is fine) → what AdGuard Home does with it and which list or rule
+// decides (ads-view check); «Заблокировать» / «Разблокировать» change the owner's own rules
+// in AdGuard Home and show the check again.
+let ADSCHK = null;
+const baseDomain = d => d.split('.').slice(-2).join('.');
+function adsCheckPanel() {
+  const a = S.ads || {}, r = ADSCHK;
+  let out = '';
+  if (r && r.error) out = '<p class="field-warn">' + esc(r.error) + '</p>';
+  else if (r && r.x && !r.x.ok) out = '<p class="field-warn">' + esc(r.x.error === 'adguard_unavailable' || r.x.error === 'adguard_auth_required' ? 'AdGuard Home не отвечает или не подключён - см. «Утилиты → AdGuard Home».' : errText(r.x)) + '</p>';
+  else if (r && r.x) {
+    const x = r.x, d = x.domain, rules = (x.rules || []).map(y => [y.list || 'правило', y.text]);
+    const acts = [];
+    if (x.blocked) {
+      if (x.user_block) acts.push(btn('ads-urule', 'close', 'Разблокировать', 'primary', ' data-op="remove" data-kind="block" data-dom="' + esc(d) + '"'));
+      else acts.push(btn('ads-urule', 'check', 'Разрешить этот адрес', '', ' data-op="add" data-kind="allow" data-dom="' + esc(d) + '"'));
+    } else if (x.allowed) {
+      if (x.user_allow) acts.push(btn('ads-urule', 'close', 'Убрать разрешение', '', ' data-op="remove" data-kind="allow" data-dom="' + esc(d) + '"'));
+    } else {
+      acts.push(btn('ads-urule', 'block', 'Заблокировать ' + d, 'primary', ' data-op="add" data-kind="block" data-dom="' + esc(d) + '"'));
+      if (baseDomain(d) !== d) acts.push(btn('ads-urule', 'block', 'Весь ' + baseDomain(d), '', ' data-op="add" data-kind="block" data-dom="' + esc(baseDomain(d)) + '"'));
+    }
+    out = '<p class="probe-verdict' + (x.blocked ? ' vpn' : '') + '">' + esc(d) + (x.blocked ? ' блокируется' : x.allowed ? ' разрешён правилом' : ' не блокируется') + '</p>' +
+      (rules.length ? kv(rules) : '') + (x.service ? kv([['Сервис', x.service]]) : '') +
+      (acts.length ? '<div class="panel-actions">' + acts.join('') + '</div>' : '') +
+      (x.blocked || x.allowed ? '' : '<p class="result-note">Правило добавится в пользовательские правила AdGuard Home и сразу начнёт работать для всех устройств.</p>');
+  }
+  return panel('Проверить или заблокировать адрес', inputBar({ form: 'ads-check', label: 'Адрес баннера, ссылка или домен', id: 'adsCheck', value: r && r.value, placeholder: 'например, ads.example.com',
+    aria: 'Адрес баннера, ссылка или домен', busy: r && r.busy, off: S.ads && !a.agh_connected, icon: 'search', btn: 'Проверить' }) + out,
+    { desc: S.ads && !a.agh_connected ? 'Нужно подключение к AdGuard Home: «Утилиты → AdGuard Home».' : 'Блокируется ли адрес, каким списком или правилом; заблокировать или разблокировать.' });
+}
+async function adsCheck(v) {
+  ADSCHK = { value: v, busy: true }; render();
+  try { ADSCHK = { value: v, x: await apiGet('ads-view', { view: 'check', search: v }) }; }
+  catch (e) { ADSCHK = { value: v, error: 'Ошибка: ' + e.message }; }
+  render();
+}
+async function adsUserRule(op, kind, d) {
+  let x;
+  try { x = await apiPost('ads-control', { op: 'agh', setting: 'user-rule', value: op, kind: kind, domain: d }); } catch (e) { x = { ok: false, error: e.message }; }
+  toast(x.ok ? (op === 'add' ? (kind === 'block' ? d + ' заблокирован' : d + ' разрешён') : 'Правило для ' + d + ' убрано') : 'Не выполнено: ' + errText(x));
+  await adsCheck(ADSCHK && ADSCHK.value || d);
+}
+
 /* ---------- Проверить сайт ---------- */
 // Where the site is set up (route-probe) and whether it opens right now directly and through
 // every tunnel (site-test), asked side by side; «Сайт не открывается» then repairs what it can.
@@ -368,6 +413,10 @@ const DETAILS = {
   lists: { title: 'Доменные списки', parent: 'routes', data: ['lists', 'config', 'status', 'services'] },
   wifi: { title: 'Wi-Fi клиенты', parent: 'wan', data: ['wifi', 'security', 'config'] },
   'd-querylog': { title: 'Журнал запросов', parent: 'ads' },
+  'd-adrecent': { title: 'Последние решения', parent: 'ads' },
+  'd-adspub': { title: 'Правила в AdGuard Home', parent: 'ads' },
+  'd-adprobe': { title: 'Разбор домена VWARD', parent: 'ads' },
+  'd-adsettings': { title: 'Настройки проверки', parent: 'ads' },
   'd-review': { title: 'На проверке', parent: 'ads' },
   'd-blocked': { title: 'Заблокировано', parent: 'ads' },
   'd-adcats': { title: 'Категории блокировки', parent: 'ads' },
@@ -399,7 +448,8 @@ const parentOf = id => { const p = page(id); return p && p.parent; };
 // /domains/lists/<list>/ip, /system/components/<id>/deps.  Old #addresses still open.
 const SLUG = { overview: '', wan: 'network', vpn: 'vpn', routes: 'domains', lists: 'lists', wifi: 'wifi', ads: 'ads', system: 'system', updates: 'updates', settings: 'settings', logs: 'logs', utils: 'utilities', 'd-agh': 'adguard-home', 'd-awg': 'amneziawg',
   'd-mydomains': 'my', 'd-force': 'always-vpn', 'd-adaptive': 'autopick', 'd-rsources': 'sources', 'd-services': 'services', 'd-ipcats': 'ip-categories', 'd-wanrec': 'recovery',
-  'u-fw': 'firmware', 'u-opkg': 'entware', 'd-dnsex': 'exceptions', 'd-aghfilters': 'filters', 'd-aghservices': 'services', 'd-adcats': 'categories' };
+  'u-fw': 'firmware', 'u-opkg': 'entware', 'd-dnsex': 'exceptions', 'd-aghfilters': 'filters', 'd-aghservices': 'services', 'd-adcats': 'categories',
+  'd-adrecent': 'recent', 'd-adspub': 'publish', 'd-adprobe': 'probe', 'd-adsettings': 'settings' };
 function slugOf(id) {
   if (Object.prototype.hasOwnProperty.call(SLUG, id)) return SLUG[id];
   const m = /^(deps|ip|[duactlsw])-(.+)$/.exec(id);
@@ -756,44 +806,85 @@ const RENDER = {
       ['ok', ({ scheduled: 'Ждёт следующей проверки', dynamic: 'Проверяет новые домены сразу', manual: 'Проверка только по кнопке' })[runMode] || 'Работает'];
     const where = !pub.ok ? '—' : pub.mode === 'staged' ? 'не отправляются' : isTrue(s.AUTO_PUBLISH) ? 'автоматически' : 'после подтверждения';
     const recent = a.recent || [];
-    return loadError(['ads']) +
-      panel('Проверка VWARD', '<dl class="kv">' + ctrlRow('Проверка рекламы и трекеров', sw('data-ads-pause', !a.paused, 'Проверка рекламы и трекеров', !S.ads), a.paused ? 'на паузе - новые домены не проверяются' : '') + '</dl>' +
-        kv([['Сейчас', now[1], now[0], now[2]], ['История блокировки рекламы', '', '', 'a-ads'],
+    return loadError(['ads']) + adsCheckPanel() +
+      panel('Блокировка рекламы', '<dl class="kv">' + ctrlRow('Проверка рекламы и трекеров', sw('data-ads-pause', !a.paused, 'Проверка рекламы и трекеров', !S.ads), a.paused ? 'на паузе - новые домены не проверяются' : 'VWARD дочищает рекламу, которую пропустил AdGuard Home') + '</dl>' +
+        kv([['Сейчас', now[1], now[0], now[2]],
           ['Последняя проверка', sc.last_run ? fmtStamp(String(sc.last_run).replace(' ', 'T')) : 'ещё не было', '', 'd-jobs'],
-          sc.last_run ? ['Просмотрено', fmtInt(sc.unique_allowed) + ' ' + plural(num(sc.unique_allowed) || 0, 'домен', 'домена', 'доменов'), '', 'd-querylog', '', 'из ' + fmtInt(sc.allowed_records) + ' ' + plural(num(sc.allowed_records) || 0, 'запроса', 'запросов', 'запросов')] : null,
-          sc.last_run ? ['Новых на проверку', fmtInt(sc.candidates)] : null,
           ['Заблокировано', fmtInt(c.blocked), '', 'd-blocked'],
           ['На проверке', fmtInt(c.review), num(c.review) ? 'warn' : '', 'd-review'],
-          ['Разрешено', fmtInt(num(c.allow) != null ? num(c.allow) + (num(c.trust) || 0) : null)],
-          ['Правила в AdGuard Home', where, '', null, '', pub.ok && pub.mode === 'staged' ? 'VWARD их собирает, но пока не применяет' : '']]) +
-        '<div class="panel-actions">' + btn('ads-job', 'search', 'Проверить сейчас', 'primary', ' data-job="scan"') + '</div>' + resultBox('ads-job'),
-        { desc: 'VWARD дочищает рекламу, которую пропустил AdGuard Home.' }) +
-      panel('Последние решения', !S.ads ? empty('Загрузка…') : recent.length ? '<ul class="rows">' + recent.map(r => {
-        const v = ADS_VERDICT[r.verdict] || ['', r.verdict];
-        return '<li class="row"><div class="row-main"><b>' + esc(r.domain) + '</b><small>' + esc(ADS_REASON[r.reason] || r.reason || '') + (r.first_seen ? ' · замечен ' + esc(fmtTime(r.first_seen)) : '') + '</small></div><span class="pill ' + v[0] + '">' + esc(v[1]) + '</span>' +
-          adsRuleBtn(r.domain, r.action === 'BLOCK' ? 'allow' : 'block') + '</li>';
-      }).join('') + '</ul>' : empty('Проверок ещё не было'), { desc: 'Новые домены и что VWARD с ними сделал.' }) +
-      panel('Публикация в AdGuard Home', kv([['Не опубликовано', !pub.ok ? '—' : pending ? pending + ' ' + plural(pending, 'изменение', 'изменения', 'изменений') : 'всё опубликовано', pending ? 'warn' : 'ok', null, '', pub.ok && pub.mode === 'staged' ? 'режим подготовки: правила собираются, но не отправляются' : '']]) +
-        '<dl class="kv">' + ctrlRow('Публиковать автоматически', sw('data-ads-autopub', isTrue(s.AUTO_PUBLISH), 'Публиковать автоматически', !S.ads), 'новые правила уходят в AdGuard Home без подтверждения') + '</dl>' +
-        (confirmBox('ads-autopub', 'Публиковать правила автоматически? Новые правила будут применяться в AdGuard Home без вашего подтверждения.', 'Включить') ||
-         confirmBox('ads-publish', 'Отправить правила в AdGuard Home? Они применятся сразу.', 'Опубликовать') || '<div class="panel-actions">' + btn('ask', 'check', 'Опубликовать правила', 'primary', ' data-confirm="ads-publish"') + '</div>')) +
-      panel('Проверить домен', inputBar({ form: 'ads-probe', label: 'Домен', id: 'adsProbe', value: PROBE ? PROBE.domain : '', placeholder: 'например, mc.yandex.ru', aria: 'Домен', busy: PROBE && !PROBE.done, icon: 'search', btn: 'Проверить' }) + probeResult(), { desc: 'Решение VWARD, источники и запросы по домену.' }) +
+          ['Правила в AdGuard Home', where, pending ? 'warn' : '', 'd-adspub', '', pending ? 'не опубликовано: ' + pending : '']]) +
+        '<div class="panel-actions">' + btn('ads-job', 'search', 'Проверить сейчас', 'primary', ' data-job="scan"') + '</div>' + resultBox('ads-job')) +
       panel('Списки и правила', kv([
+        ['Последние решения', recent.length ? fmtInt(recent.length) : 'нет', '', 'd-adrecent'],
         ['Журнал запросов', 'последние 100', '', 'd-querylog'],
         ['Категории блокировки', (a.categories || []).filter(x => x.active).length + ' из ' + (a.categories || []).length + ' включены', '', 'd-adcats'],
         ['Мои правила', fmtInt((a.manual_rules || []).length), '', 'd-rules'],
         ['Источники', (a.sources || []).filter(x => x.mode === 'active').length + ' из ' + (a.sources || []).length + ' активны', '', 'd-sources'],
         ['Задания', busy ? 'выполняется' : (num(j.queued) ? j.queued + ' в очереди' : 'нет активных'), '', 'd-jobs'],
-        ['HTTPS-фильтр', S.https && S.https.ok ? (S.https.status && isTrue(S.https.status.ENABLED) ? 'Включён' : 'Выключен') : 'недоступен', '', 'd-https']
+        ['HTTPS-фильтр', S.https && S.https.ok ? (S.https.status && isTrue(S.https.status.ENABLED) ? 'Включён' : 'Выключен') : 'недоступен', '', 'd-https'],
+        ['История блокировки рекламы', '', '', 'a-ads'],
+        ['Разбор домена VWARD', '', '', 'd-adprobe', '', 'решение VWARD, источники и запросы по домену'],
+        ['Настройки проверки', ({ scheduled: 'по расписанию', dynamic: 'по запросам', manual: 'вручную' })[runMode] || '', '', 'd-adsettings']
       ])) +
+      // AdGuard Home is a program of its own: its page lives in «Утилиты».
+      panel('Дополнительно', kv([['AdGuard Home', 'Утилиты', '', 'd-agh', '', 'фильтры, защита всех устройств, подключение', 'out']]));
+  },
+  'd-adrecent'() {
+    const a = S.ads || {}, c = a.counts || {}, s = a.settings || {}, j = a.jobs || {}, sc = a.scan || {}, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
+    const aghHost = ag.address || location.hostname, aghUrl = ag.port ? 'http://' + aghHost + ':' + ag.port + '/' : '';
+    const runMode = s.RUN_MODE || 'scheduled', st1 = S.adsstats, pub = S.adspub || {}, g = S.agh;
+    const pending = (num(pub.added) || 0) + (num(pub.removed) || 0);
+    const cur = j.current || {}, busy = cur.state && cur.state !== 'IDLE';
+    const now = !S.ads ? ['', 'загрузка…'] : a.paused ? ['warn', 'На паузе'] : !a.agh_connected ? ['warn', 'Нет подключения к AdGuard Home', 'd-agh'] :
+      busy ? ['info', cur.type === 'scan' ? 'Проверяет новые домены' : 'Выполняет задание', 'd-jobs'] : num(j.queued) ? ['info', fmtInt(j.queued) + ' в очереди', 'd-jobs'] :
+      ['ok', ({ scheduled: 'Ждёт следующей проверки', dynamic: 'Проверяет новые домены сразу', manual: 'Проверка только по кнопке' })[runMode] || 'Работает'];
+    const where = !pub.ok ? '—' : pub.mode === 'staged' ? 'не отправляются' : isTrue(s.AUTO_PUBLISH) ? 'автоматически' : 'после подтверждения';
+    const recent = a.recent || [];
+    return loadError(['ads']) +
+      panel('Последние решения', !S.ads ? empty('Загрузка…') : recent.length ? '<ul class="rows">' + recent.map(r => {
+        const v = ADS_VERDICT[r.verdict] || ['', r.verdict];
+        return '<li class="row"><div class="row-main"><b>' + esc(r.domain) + '</b><small>' + esc(ADS_REASON[r.reason] || r.reason || '') + (r.first_seen ? ' · замечен ' + esc(fmtTime(r.first_seen)) : '') + '</small></div><span class="pill ' + v[0] + '">' + esc(v[1]) + '</span>' +
+          adsRuleBtn(r.domain, r.action === 'BLOCK' ? 'allow' : 'block') + '</li>';
+      }).join('') + '</ul>' : empty('Проверок ещё не было'), { desc: 'Новые домены и что VWARD с ними сделал.' });
+  },
+  'd-adspub'() {
+    const a = S.ads || {}, c = a.counts || {}, s = a.settings || {}, j = a.jobs || {}, sc = a.scan || {}, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
+    const aghHost = ag.address || location.hostname, aghUrl = ag.port ? 'http://' + aghHost + ':' + ag.port + '/' : '';
+    const runMode = s.RUN_MODE || 'scheduled', st1 = S.adsstats, pub = S.adspub || {}, g = S.agh;
+    const pending = (num(pub.added) || 0) + (num(pub.removed) || 0);
+    const cur = j.current || {}, busy = cur.state && cur.state !== 'IDLE';
+    const now = !S.ads ? ['', 'загрузка…'] : a.paused ? ['warn', 'На паузе'] : !a.agh_connected ? ['warn', 'Нет подключения к AdGuard Home', 'd-agh'] :
+      busy ? ['info', cur.type === 'scan' ? 'Проверяет новые домены' : 'Выполняет задание', 'd-jobs'] : num(j.queued) ? ['info', fmtInt(j.queued) + ' в очереди', 'd-jobs'] :
+      ['ok', ({ scheduled: 'Ждёт следующей проверки', dynamic: 'Проверяет новые домены сразу', manual: 'Проверка только по кнопке' })[runMode] || 'Работает'];
+    const where = !pub.ok ? '—' : pub.mode === 'staged' ? 'не отправляются' : isTrue(s.AUTO_PUBLISH) ? 'автоматически' : 'после подтверждения';
+    const recent = a.recent || [];
+    return loadError(['ads']) +
+      panel('Публикация в AdGuard Home', kv([['Не опубликовано', !pub.ok ? '—' : pending ? pending + ' ' + plural(pending, 'изменение', 'изменения', 'изменений') : 'всё опубликовано', pending ? 'warn' : 'ok', null, '', pub.ok && pub.mode === 'staged' ? 'режим подготовки: правила собираются, но не отправляются' : '']]) +
+        '<dl class="kv">' + ctrlRow('Публиковать автоматически', sw('data-ads-autopub', isTrue(s.AUTO_PUBLISH), 'Публиковать автоматически', !S.ads), 'новые правила уходят в AdGuard Home без подтверждения') + '</dl>' +
+        (confirmBox('ads-autopub', 'Публиковать правила автоматически? Новые правила будут применяться в AdGuard Home без вашего подтверждения.', 'Включить') ||
+         confirmBox('ads-publish', 'Отправить правила в AdGuard Home? Они применятся сразу.', 'Опубликовать') || '<div class="panel-actions">' + btn('ask', 'check', 'Опубликовать правила', 'primary', ' data-confirm="ads-publish"') + '</div>'));
+  },
+  'd-adprobe'() {
+    return panel('Проверить домен', inputBar({ form: 'ads-probe', label: 'Домен', id: 'adsProbe', value: PROBE ? PROBE.domain : '', placeholder: 'например, mc.yandex.ru', aria: 'Домен', busy: PROBE && !PROBE.done, icon: 'search', btn: 'Проверить' }) + probeResult(), { desc: 'Решение VWARD, источники и запросы по домену.' });
+  },
+  'd-adsettings'() {
+    const a = S.ads || {}, c = a.counts || {}, s = a.settings || {}, j = a.jobs || {}, sc = a.scan || {}, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
+    const aghHost = ag.address || location.hostname, aghUrl = ag.port ? 'http://' + aghHost + ':' + ag.port + '/' : '';
+    const runMode = s.RUN_MODE || 'scheduled', st1 = S.adsstats, pub = S.adspub || {}, g = S.agh;
+    const pending = (num(pub.added) || 0) + (num(pub.removed) || 0);
+    const cur = j.current || {}, busy = cur.state && cur.state !== 'IDLE';
+    const now = !S.ads ? ['', 'загрузка…'] : a.paused ? ['warn', 'На паузе'] : !a.agh_connected ? ['warn', 'Нет подключения к AdGuard Home', 'd-agh'] :
+      busy ? ['info', cur.type === 'scan' ? 'Проверяет новые домены' : 'Выполняет задание', 'd-jobs'] : num(j.queued) ? ['info', fmtInt(j.queued) + ' в очереди', 'd-jobs'] :
+      ['ok', ({ scheduled: 'Ждёт следующей проверки', dynamic: 'Проверяет новые домены сразу', manual: 'Проверка только по кнопке' })[runMode] || 'Работает'];
+    const where = !pub.ok ? '—' : pub.mode === 'staged' ? 'не отправляются' : isTrue(s.AUTO_PUBLISH) ? 'автоматически' : 'после подтверждения';
+    const recent = a.recent || [];
+    return loadError(['ads']) +
       panel('Настройки проверки', '<dl class="kv">' +
         ctrlRow('Режим работы', sel('data-ads-set="RUN_MODE"', 'Режим работы', [['scheduled', 'По расписанию'], ['dynamic', 'По запросам'], ['manual', 'Вручную']], runMode), ({ scheduled: 'новые домены проверяются пачкой раз в интервал', dynamic: 'каждый новый домен проверяется сразу', manual: 'проверка только по кнопке' })[runMode]) +
         (runMode === 'scheduled' ? ctrlRow('Интервал', sel('data-ads-set="SCHEDULE_INTERVAL_MIN"', 'Интервал', [['5', '5 минут'], ['10', '10 минут'], ['30', '30 минут'], ['60', '1 час']], s.SCHEDULE_INTERVAL_MIN || '10')) : '') +
         ctrlRow('Обновлять источники автоматически', sw('data-ads-set="AUTO_SOURCE_UPDATE"', isTrue(s.AUTO_SOURCE_UPDATE), 'Обновлять источники автоматически', !S.ads), 'раз в ' + (s.SOURCE_UPDATE_INTERVAL_HOURS || 24) + ' ч') +
         ctrlRow('Новые правила применять к', sel('data-ads-set="AUTO_RULE_SCOPE"', 'Новые правила', [['exact', 'Только домену'], ['suffix', 'Домену и поддоменам']], s.AUTO_RULE_SCOPE || 'exact')) +
-        '</dl>' + resultBox('ads')) +
-      // AdGuard Home is a program of its own: its page lives in «Утилиты».
-      panel('Дополнительно', kv([['AdGuard Home', 'Утилиты', '', 'd-agh', '', 'фильтры, защита всех устройств, подключение', 'out']]));
+        '</dl>' + resultBox('ads'));
   },
   utils() {
     const a = S.ads || {}, g = S.agh, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
@@ -2606,6 +2697,7 @@ document.addEventListener('click', e => {
   else if (a === 'ext-check') extOp('check');
   else if (a === 'confirm-no') { confirm = null; render(); }
   else if (a === 'confirm-yes') { const c = confirm; confirm = null; if (c && CONFIRMED[c.id]) CONFIRMED[c.id](c); else render(); }
+  else if (a === 'ads-urule') { t.disabled = true; adsUserRule(t.dataset.op, t.dataset.kind, t.dataset.dom); }
   else if (a === 'site-fix') siteFix(t.dataset.dom);
   else if (a === 'site-add') { const d = t.dataset.dom; t.disabled = true; cfgSet({ op: 'route-domain', action: 'add', target: d }, d + ' идёт через VPN', ['route']).then(() => siteCheck(d)); }
   else if (a === 'site-move') { const m = RPROBE && RPROBE.move; t.disabled = true; cfgSet({ op: 'domain-list', target: t.dataset.list, value: t.dataset.to }, 'Список идёт через ' + tunLabel(t.dataset.to), ['lists']).then(x => { if (RPROBE) RPROBE.move = null; if (x && x.ok && m) siteCheck(RPROBE.value); }); }
@@ -2875,6 +2967,11 @@ async function onSubmit(e, f) {
     if (!/^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?\/[A-Za-z0-9._~\/%+=&?-]*$/.test(url) || url.length > 300) { toast('Нужен адрес https://…, без пробелов и логина'); return; }
     const x = await adsControl({ op: 'source-add', url: url, format: e.target.querySelector('[name=format]').value }, 'Источник добавлен в режиме «Проверка»', 'ads-src');
     if (x && x.ok) adsControl({ op: 'enqueue', job: 'sources-update' }, 'Источник добавлен, загрузка поставлена в очередь', 'ads-src');
+  }
+  if (f === 'ads-check') {
+    const v = hostOf($('adsCheck').value);
+    if (!DOMAIN.test(v)) { ADSCHK = { value: v, error: 'Введите адрес: домен (ads.example.com) или ссылку на баннер.' }; render(); return; }
+    await adsCheck(v); return;
   }
   if (f === 'ads-probe') {
     const v = $('adsProbe').value.trim().toLowerCase();

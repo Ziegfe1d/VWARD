@@ -40,7 +40,15 @@ path = url.split("/control/", 1)[1]
 res = None
 if path == "status": res = {"version": "v0.107.52", "protection_enabled": st["protection"]}
 elif path == "protection" and method == "POST": st["protection"] = body["enabled"]; res = {}
-elif path == "filtering/status": res = {"enabled": st["filtering"], "interval": st["interval"], "filters": st["filters"], "whitelist_filters": [], "user_rules": ["||x^"]}
+elif path == "filtering/status": res = {"enabled": st["filtering"], "interval": st["interval"], "filters": st["filters"], "whitelist_filters": [], "user_rules": st.get("user_rules", ["||x^"])}
+elif path == "filtering/set_rules" and method == "POST": st["user_rules"] = body["rules"]; res = {}
+elif path.startswith("filtering/check_host?name="):
+    d = path.split("=", 1)[1]
+    ur = st.get("user_rules", ["||x^"])
+    if "@@||%s^" % d in ur: res = {"reason": "NotFilteredAllowList", "rules": [{"text": "@@||%s^" % d, "filter_list_id": 0}]}
+    elif "||%s^" % d in ur: res = {"reason": "FilteredBlackList", "rules": [{"text": "||%s^" % d, "filter_list_id": 0}]}
+    elif d == "tracker.example": res = {"reason": "FilteredBlackList", "rules": [{"text": "||tracker.example^", "filter_list_id": 1}]}
+    else: res = {"reason": "NotFilteredNotFound", "rules": []}
 elif path == "filtering/config": st["filtering"] = body["enabled"]; st["interval"] = body["interval"]; res = {}
 elif path == "filtering/set_url":
     for f in st["filters"]:
@@ -124,6 +132,26 @@ with tempfile.TemporaryDirectory() as tmp:
         fail(f"settings not applied: {s}")
     if s["filters"][0]["enabled"] is not False or len(s["filters"]) != 1:
         fail(f"filters: {s['filters']}")
+
+    # The owner's own rules: added and removed among the other user rules, which stay.
+    def check(d):
+        r = subprocess.run(["sh", str(VIEW), "check", d], env=env, text=True, capture_output=True)
+        return json.loads(r.stdout)
+    c = check("tracker.example")
+    if not c["blocked"] or c["rules"] != [{"text": "||tracker.example^", "list": "AdGuard DNS filter"}] or c["user_block"]:
+        fail(f"check of a listed domain: {c}")
+    if check("ads.example")["blocked"] or check("ads.example")["reason"] != "NotFilteredNotFound":
+        fail("an unlisted domain is not blocked")
+    ctl("user-rule", "add", "||ads.example^")
+    c = check("ads.example")
+    if not c["blocked"] or not c["user_block"] or c["rules"][0]["list"] != "Мои правила AdGuard Home" or S()["user_rules"] != ["||x^", "||ads.example^"]:
+        fail(f"a blocked domain: {c} {S().get('user_rules')}")
+    ctl("user-rule", "remove", "||ads.example^"); ctl("user-rule", "add", "@@||tracker.example^")
+    if S()["user_rules"] != ["||x^", "@@||tracker.example^"] or not check("tracker.example")["allowed"]:
+        fail(f"remove and allow: {S().get('user_rules')}")
+    ctl("user-rule", "add", "||a.example^ $important", ok=False); ctl("user-rule", "add", "/x/", ok=False); ctl("user-rule", "drop", "||a.example^", ok=False)
+    if check("a;b").get("error") != "invalid_domain":
+        fail("a bad name must be refused")
 
     ctl("interval", "5", ok=False); ctl("service", "a;b", "1", ok=False); ctl("filter-add", "http://x/y", "n", ok=False)
     ctl("filter-enable", "https://nowhere.example/z.txt", "1", ok=False)
