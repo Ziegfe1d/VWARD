@@ -219,4 +219,23 @@ with tempfile.TemporaryDirectory() as tmp:
     if cfg.read_text() != RUNNING:
         fail("off after refresh did not restore the router")
 
+    # A category pinned to a tunnel: its services on «Автоматически» go there.
+    cats = etc / "services/categories.tsv"
+    run("service", "on", "claude.ai", "auto", expect="result=changed", rc=0)
+    run("service-category", "a;b", "Wireguard0", expect="error=invalid_category", rc=64)
+    run("service-category", "games", "Wireguard0", expect="error=invalid_category", rc=64)
+    run("service-category", "ai", "Wireguard9", expect="error=unknown_tunnel", rc=64)
+    run("service-category", "ai", "x;y", expect="error=invalid_value", rc=64)
+    run("service-category", "ai", "auto", expect="result=unchanged", rc=0)
+    run("service-category", "ai", "Wireguard0", expect="result=changed", rc=0)
+    if cats.read_text() != "ai\tWireguard0\n" or "moved=1" not in (tmp / "audit.log").read_text():
+        fail(f"category pin: {cats.read_text()!r}")
+    run("service-category", "ai", "Wireguard0", expect="result=unchanged", rc=0)
+    if cfg.read_text().count("route object-group domain-list1 Wireguard0") != 1:
+        fail("the pinned category's service must stay routed once")
+    run("service-category", "ai", "auto", expect="result=changed", rc=0)
+    if cats.read_text() != "":
+        fail(f"back to auto: {cats.read_text()!r}")
+    run("service", "off", "claude.ai", expect="result=changed", rc=0)
+
 print("CONSOLE_SERVICES=PASS")

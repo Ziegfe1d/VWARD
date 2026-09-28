@@ -926,8 +926,17 @@ service_domains() {
     sort -u "$2" -o "$2"
 }
 
-# The route a list gets: "vpn" is VWARD's tunnel, as in domain-list.
-service_target() { if [ "$1" = auto ]; then echo vpn; else echo "$1"; fi; }
+# Categories pinned to a tunnel: CATEGORY<TAB>TUNNEL. A service on «Автоматически» of such a
+# category goes through that tunnel; a service pinned itself keeps its own.
+SERVICES_CATS="$SERVICES_ETC/categories.tsv"
+
+# service_target PIN ID: the route a list gets. "vpn" is VWARD's tunnel, as in domain-list.
+service_target() {
+    [ "$1" = auto ] || { echo "$1"; return 0; }
+    st_c=$("$JQ" -r --arg i "$2" '.services[] | select(.id == $i) | .category' "$SV_CAT" 2>/dev/null | head -n 1)
+    st_t=$(awk -F'\t' -v c="$st_c" '$1 == c {print $2; exit}' "$SERVICES_CATS" 2>/dev/null)
+    if [ -n "$st_c" ] && [ -n "$st_t" ] && is_tunnel "$st_t"; then echo "$st_t"; else echo vpn; fi
+}
 
 # Route the list through a second helper run: domain-list takes care of Smart DNS
 # lines and AdGuard Home rows the same way as for Keenetic's own lists.
@@ -943,6 +952,37 @@ release_lock() {
     [ "$LOCKED" = 1 ] || return 0
     rm -rf "${CHANGE_LOCK:?}"
     LOCKED=0
+}
+
+# service-category CATEGORY auto|TUNNEL: pin a catalog category to a tunnel; its services on
+# «Автоматически» move there now (auto: back to VWARD's tunnel, the check by tunnels then
+# chooses again).
+op_service_category() {
+    printf '%s\n' "$1" | grep -Eq '^[a-z0-9][a-z0-9_-]{0,31}$' || die invalid_category 64
+    case "$2" in auto) ;; ''|*[!A-Za-z0-9_.-]*) die invalid_value 64 ;; esac
+    SV_CAT=$(services_catalog) || die services_unavailable
+    "$JQ" -e --arg c "$1" 'any(.categories[]?; .id == $c)' "$SV_CAT" >/dev/null 2>&1 || die invalid_category 64
+    load_profile_base
+    [ "$2" = auto ] || is_tunnel "$2" || die unknown_tunnel 64
+    sc_cur=$(awk -F'\t' -v c="$1" '$1 == c {print $2; exit}' "$SERVICES_CATS" 2>/dev/null)
+    [ "${sc_cur:-auto}" != "$2" ] || done_ok "service-category $1 $2" unchanged
+    mkdir -p "$SERVICES_ETC" || die write_failed
+    new_tmp "$SERVICES_CATS" || die write_failed
+    { [ ! -f "$SERVICES_CATS" ] || awk -F'\t' -v c="$1" '$1 != c' "$SERVICES_CATS"
+      [ "$2" = auto ] || printf '%s\t%s\n' "$1" "$2"; } > "$TMPFILE" || die write_failed
+    install_tmp "$SERVICES_CATS" 0644 || die write_failed
+    sc_ids=$(mktemp /tmp/vward-console-category.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    "$JQ" -r --arg c "$1" '.services[] | select(.category == $c) | .id' "$SV_CAT" > "$sc_ids" 2>/dev/null
+    sc_n=0
+    : > "$sc_ids.on"
+    [ ! -f "$SERVICES_STATE" ] || [ ! -s "$sc_ids" ] || awk -F'\t' 'NR == FNR {c[$1] = 1; next} ($1 in c) && $3 == "auto" {print $1 "\t" $2}' "$sc_ids" "$SERVICES_STATE" > "$sc_ids.on"
+    while IFS="$(printf '\t')" read -r sv_id G; do
+        [ -n "$G" ] || continue
+        service_route "$G" "$(service_target auto "$sv_id")" || { rm -f "$sc_ids" "$sc_ids.on"; die "$SR_ERR"; }
+        sc_n=$((sc_n + 1))
+    done < "$sc_ids.on"
+    rm -f "$sc_ids" "$sc_ids.on"
+    done_ok "service-category $1 $2 moved=$sc_n" changed
 }
 
 op_service() {
@@ -964,7 +1004,7 @@ op_service() {
     if [ "$sv_op" = tunnel ]; then
         [ -n "$row" ] || die service_not_enabled 64
         service_state_set "$sv_id" "$G" "$sv_to"
-        service_route "$G" "$(service_target "$sv_to")" || die "$SR_ERR"
+        service_route "$G" "$(service_target "$sv_to" "$sv_id")" || die "$SR_ERR"
         done_ok "service tunnel $sv_id $G $sv_to" changed
     fi
 
@@ -991,7 +1031,7 @@ op_service() {
     # on: already on means a new tunnel.
     if [ -n "$row" ]; then
         service_state_set "$sv_id" "$G" "$sv_to"
-        service_route "$G" "$(service_target "$sv_to")" || die "$SR_ERR"
+        service_route "$G" "$(service_target "$sv_to" "$sv_id")" || die "$SR_ERR"
         done_ok "service on $sv_id $G $sv_to" changed
     fi
     "$JQ" -e --arg i "$sv_id" 'any(.services[]; .id == $i)' "$SV_CAT" >/dev/null 2>&1 || die unknown_service 64
@@ -1017,7 +1057,7 @@ op_service() {
     TXN=0
     service_state_set "$sv_id" "$G" "$sv_to"
     release_lock
-    if ! service_route "$G" "$(service_target "$sv_to")"; then
+    if ! service_route "$G" "$(service_target "$sv_to" "$sv_id")"; then
         # Without its route the list is of no use: it goes, and the service stays off.
         change_lock
         ndm "no object-group fqdn $G" && save_router
@@ -2047,6 +2087,7 @@ case "$OP" in
     tunnel-subnet) op_tunnel_subnet "$ARG1" "$ARG2" "$ARG3" ;;
     list-domain) op_list_domain "$ARG1" "$ARG2" "$ARG3" ;;
     service) op_service "$ARG1" "$ARG2" "$ARG3" ;;
+    service-category) op_service_category "$ARG1" "$ARG2" ;;
     services-refresh) op_services_refresh ;;
     ext-check) op_ext_check ;;
     ext-daily) op_ext_daily ;;

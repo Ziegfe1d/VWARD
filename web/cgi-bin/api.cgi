@@ -2057,11 +2057,18 @@ if [ "$ACTION" = services-data ]; then
         "$JQ" -Rn '[inputs | split("\t") | {id: .[0], group: .[1], tunnel: .[2]}]')"
     [ -n "$SV_ON" ] || SV_ON='[]'
     SV_CHECKED="$(date -r "$SV_FETCHED" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null)"
-    "$JQ" -c --arg from "$SV_FROM" --arg checked "$SV_CHECKED" --argjson on "$SV_ON" '
+    # Categories pinned to a tunnel, and the last check of the services on «Автоматически».
+    SV_PINS="$(cat "$CONFIG_ETC/services/categories.tsv" 2>/dev/null)"
+    SV_PROBE="$(cat "${VWARD_TUNNEL_SERVICES_DIR:-/tmp/vward-tunnel-services}/state.tsv" 2>/dev/null)"
+    "$JQ" -c --arg from "$SV_FROM" --arg checked "$SV_CHECKED" --argjson on "$SV_ON" --arg pins "$SV_PINS" --arg probe "$SV_PROBE" '
         {ok: true, from: $from, checked: $checked, source: .source, source_url: .source_url, license: .license,
          revision: .revision, updated: .updated, limit: .limit, categories: .categories,
          services: [.services[] | {id, title, category, count: (.domains | length), too_big: (.too_big // false)}],
-         enabled: $on}' "$SV_CAT"
+         enabled: $on,
+         category_tunnels: [$pins | split("\n")[] | split("\t") | select(length == 2 and (.[1] | length) > 0) | {category: .[0], tunnel: .[1]}],
+         probe: [$probe | split("\n")[] | split("\t") | select(length == 6) |
+           {id: .[0], group: .[1], tunnel: .[2], at: (.[4] | tonumber? // null), action: .[5],
+            results: [.[3] | split(",")[] | split(":") | select(length == 3) | {via: .[0], verdict: .[1], ms: (.[2] | tonumber? // null)}]}]}' "$SV_CAT"
     exit 0
 fi
 
@@ -2078,6 +2085,7 @@ if [ "$ACTION" = services ]; then
     case "$STO" in *[!A-Za-z0-9_.-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
     case "$SOP" in
         on|tunnel) [ -n "$STO" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }; ARGS="service $SOP $SID $STO" ;;
+        category) [ -n "$STO" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }; ARGS="service-category $SID $STO" ;;
         off) ARGS="service off $SID" ;;
         *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
     esac

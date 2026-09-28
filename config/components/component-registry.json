@@ -104,7 +104,8 @@
       ],
       "requires_running": [],
       "uses": [
-        "console"
+        "console",
+        "route-tools"
       ],
       "runtime_targets": [
         "/opt/bin/vward-tunnel-health.sh",

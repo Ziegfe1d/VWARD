@@ -1181,7 +1181,12 @@ const RENDER = {
         '<span class="row-acts">' + sw('data-svc="' + esc(x.id) + '"', !!e, (e ? 'Выключить ' : 'Включить ') + x.title, !ok || x.too_big) +
         (e ? '<button class="icon-btn" type="button" data-go="s-' + esc(x.id) + '" aria-label="Настройки ' + esc(x.title) + '" title="Настройки">' + ico('chevron') + '</button>' : '') + '</span></li>';
     };
-    return cfgNote() + panel('Сервисы', '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти сервис" aria-label="Найти сервис" autocomplete="off"></label>' +
+    const tuns = (st().wg && st().wg.interfaces) || [], catObj = cats.find(c => c.id === SVC.cat);
+    const catPin = catObj && tuns.length >= 2 ? panel('Туннель категории', '<dl class="kv">' + ctrlRow(catObj.title, sel('data-svc-cat="' + esc(catObj.id) + '"' + (ok ? '' : ' disabled'), 'Туннель категории ' + catObj.title,
+      [['auto', 'Автоматически']].concat(tuns.map(t => [t.name, tunLabel(t.name)])), svcCatTunnel(catObj.id) || 'auto'),
+      svcCatTunnel(catObj.id) ? 'сервисы категории на «Автоматически» идут через этот туннель' : 'VWARD проверяет каждый сервис через туннели сам') + '</dl>',
+      { desc: 'Сервис с закреплённым туннелем остаётся на своём.' }) : '';
+    return cfgNote() + catPin + panel('Сервисы', '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти сервис" aria-label="Найти сервис" autocomplete="off"></label>' +
       '<div class="chips" role="group" aria-label="Категория">' + chips.map(c => '<button type="button" data-act="svc-cat" data-cat="' + esc(c[0]) + '" aria-pressed="' + (SVC.cat === c[0]) + '">' + esc(c[1]) + '</button>').join('') + '</div>' +
       resultBox('svc') + (shown.length ? '<ul class="rows" data-list-rows>' + shown.map(row).join('') + '</ul>' : empty(SVC.cat === 'on' ? 'Пока ничего не включено' : 'Нет сервисов')),
       { desc: 'Включённый сервис идёт через VPN. В Keenetic он появится доменным списком со своим названием.' });
@@ -1838,9 +1843,13 @@ const tunLabel = n => { const t = ((st() && st().wg && st().wg.interfaces) || []
 // Services: a service switched on is a Keenetic list VWARD made (enabled[].group).
 const SVC = { cat: 'on', busy: false };
 const svcOf = group => ((S.services && S.services.enabled) || []).find(e => e.group === group);
+const svcCatTunnel = cat => (((S.services && S.services.category_tunnels) || []).find(c => c.category === cat) || {}).tunnel || '';
+const svcProbe = id => ((S.services && S.services.probe) || []).find(p => p.id === id);
+const SVC_VERDICT = { open: 'открывается', blocked: 'заблокирован', none: 'нет ответа' };
 function svcVia(e) {
   const l = ((S.lists && S.lists.lists) || []).find(x => x.name === e.group);
-  return !S.lists ? '' : !l ? 'список удалён в Keenetic' : !l.route ? 'без маршрута' : (e.tunnel === 'auto' ? 'автоматически · ' : '') + 'через ' + tunLabel(l.route);
+  const x = ((S.services && S.services.services) || []).find(v => v.id === e.id), pin = e.tunnel === 'auto' && x && svcCatTunnel(x.category);
+  return !S.lists ? '' : !l ? 'список удалён в Keenetic' : !l.route ? 'без маршрута' : (e.tunnel !== 'auto' ? '' : pin ? 'по категории · ' : 'автоматически · ') + 'через ' + tunLabel(l.route);
 }
 function servicePage(id) {
   const V = S.services, x = V && (V.services || []).find(v => v.id === id), e = V && (V.enabled || []).find(v => v.id === id), d = S.svcd;
@@ -1853,8 +1862,20 @@ function servicePage(id) {
       (e ? ctrlRow('Туннель', sel('data-svc-tun="' + esc(id) + '"' + (ok ? '' : ' disabled'), 'Туннель для ' + x.title, [['auto', 'Автоматически']].concat(tuns.map(t => [t.name, tunLabel(t.name)])), e.tunnel), e.tunnel === 'auto' ? 'VWARD выбирает сам' : 'закреплён') : '') + '</dl>' +
       (l ? kv([['IP-адреса', l.addresses != null ? fmtInt(l.addresses) : '—', '', 'ip-' + l.name, '', 'адреса, которые Keenetic узнал для доменов сервиса']]) : '') + resultBox('svc'),
       { desc: (l ? 'В Keenetic - доменный список «' + (l.description || l.name) + '». ' : '') + 'Домены из каталога iplist, обновляются сами раз в сутки.' }) +
+    (e && e.tunnel === 'auto' && tuns.length >= 2 ? svcProbePanel(id) : '') +
     panel('Домены', !doms ? empty('Загрузка…') : '<ul class="rows">' + doms.map(v => '<li class="row"><div class="row-main"><b>' + dom(v) + '</b></div></li>').join('') + '</ul>',
       { desc: fmtInt(x.count) + ' ' + plural(x.count, 'домен', 'домена', 'доменов') + ', каждый вместе с поддоменами.' });
+}
+// The last check of a service on «Автоматически» through every answering tunnel.
+function svcProbePanel(id) {
+  const p = svcProbe(id), x = ((S.services && S.services.services) || []).find(v => v.id === id), pin = x && svcCatTunnel(x.category);
+  const to = tunLabel(p ? p.tunnel : '');
+  const act = { kept: ['оставлен', 'открывается через свой туннель «' + to + '»'], moved: ['переведён', 'через свой туннель не открывался, теперь через «' + to + '»'],
+    none: ['не открывается', 'ни через один туннель; остаётся на «' + to + '»'], failed: ['не переведён', 'Keenetic не принял перевод'], category: ['по категории', 'через туннель категории «' + to + '»'] };
+  return panel('Проверка через туннели', pin ? empty('Категория закреплена за «' + tunLabel(pin) + '»: сервис идёт через него без проверки.') : !p ? empty('Ещё не проверялся: проверка раз в 30 минут.') :
+    kv((p.results || []).map(r => [tunLabel(r.via), SVC_VERDICT[r.verdict] || r.verdict, r.verdict === 'open' ? 'ok' : 'warn', null, '', r.verdict === 'open' && r.ms != null ? r.ms + ' мс' : ''])
+      .concat([['Итог', (act[p.action] || [p.action])[0], p.action === 'none' || p.action === 'failed' ? 'warn' : '', null, '', ((act[p.action] || [])[1] || '') + (p.at ? '; проверен ' + fmtTime(p.at * 1000) : '')]])),
+    { desc: 'Раз в 30 минут VWARD открывает сервис через каждый туннель. Не открылся через свой - переходит на самый быстрый, через который открылся.' });
 }
 // Switching on writes up to 300 domains into Keenetic: a background job, as for tunnels.
 async function serviceJob(fields, okMsg) {
@@ -2860,6 +2881,8 @@ document.addEventListener('change', e => {
   }
   if (t.dataset.svc) { const id = t.dataset.svc, x = ((S.services && S.services.services) || []).find(v => v.id === id), title = x ? x.title : id; t.disabled = true;
     serviceJob(t.checked ? { op: 'on', id: id, tunnel: 'auto' } : { op: 'off', id: id }, t.checked ? title + ' идёт через VPN' : title + ' идёт напрямую'); return; }
+  if (t.dataset.svcCat) { const c = t.dataset.svcCat, v = t.value, ct = ((S.services && S.services.categories) || []).find(x => x.id === c); t.disabled = true;
+    serviceJob({ op: 'category', id: c, tunnel: v }, (ct ? ct.title : c) + (v === 'auto' ? ': туннель выбирается автоматически' : ': через ' + tunLabel(v))); return; }
   if (t.dataset.svcTun) { const id = t.dataset.svcTun, v = t.value; t.disabled = true; serviceJob({ op: 'tunnel', id: id, tunnel: v }, v === 'auto' ? 'Туннель выбирается автоматически' : 'Закреплён за ' + tunLabel(v)); return; }
   if (t.dataset.cfgTa) { const k = t.dataset.cfgTa, v = t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value; t.disabled = true;
     cfgSet({ op: 'tunnel-auto', target: k, value: v }, k === 'enabled' ? (v === '1' ? 'Выбор лучшего туннеля включён' : 'Выбор лучшего туннеля выключен') :
