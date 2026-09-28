@@ -155,11 +155,12 @@ start_one() {
     # start_one SLOT NAME: the tunnel's program in the background on Keenetic's adapter.
     mkdir -p "$ENGINE_RUN" || return 1
     [ -z "$(pid_of "$1")" ] || return 0
-    # Measured on Viva (MT7621, 4 threads): all threads and the default GC give 15 Mbit/s at
-    # 13 MB; two threads with a 24 MiB limit and GOGC=50 gave 3 Mbit/s.
+    # Measured on Viva (MT7621, 4 threads): two threads move as much as four (13-22 Mbit/s
+    # either way, the channel varies more) at 27% of the CPU instead of 37-48%, and leave the
+    # other two to the router. A memory limit (24 MiB, GOGC=50) cut the speed to 3 Mbit/s.
     (
-        GOGC=100 GODEBUG=madvdontneed=1
-        export GOGC GODEBUG
+        GOMAXPROCS=${VWARD_AWG_THREADS:-2} GOGC=100 GODEBUG=madvdontneed=1
+        export GOMAXPROCS GOGC GODEBUG
         exec "$BIN" -i "$(adapter_of "$2")" -c "$ENGINE_ETC/t$1.conf" -s "$ENGINE_RUN/t$1.state" </dev/null >/dev/null 2>"$ENGINE_RUN/t$1.err"
     ) &
     echo $! > "$ENGINE_RUN/t$1.pid"

@@ -39,6 +39,7 @@ case "$1" in -v) echo "vward-awg 1.2.1"; exit 0 ;; esac
 for a in "$@"; do [ "$a" = -n ] && { grep -q BADCONF "$3" && exit 1; exit 0; }; done
 while getopts i:c:s:t: o; do case $o in i) I=$OPTARG ;; c) C=$OPTARG ;; s) S=$OPTARG ;; esac; done
 echo "$I" > "$ST/adapter"
+echo "$GOMAXPROCS" > "$ST/threads"
 while :; do
     h=0; [ -f "$ST/handshake" ] && h=$(date +%s)
     printf 'handshake=%s\\nrx=1\\ntx=1\\n' "$h" > "$S.tmp" && mv -f "$S.tmp" "$S"
@@ -168,6 +169,8 @@ with tempfile.TemporaryDirectory() as t:
         fail(f"Keenetic commands: {cmds}")
     if (st / "adapter").read_text().strip() != "opkgtun1":
         fail("the program must attach to Keenetic's adapter opkgtun1")
+    if (st / "threads").read_text().strip() != "2":
+        fail("the program must run on two threads")
     tconf = (t / "etc/t0.conf").read_text()
     if KEY not in tconf or "\r" in tconf:
         fail("the tunnel file lost its key")
