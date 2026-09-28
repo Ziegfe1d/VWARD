@@ -1,0 +1,52 @@
+name: AmneziaWG engine program (vward-awg)
+
+# Builds tools/vward-awg for the routers' processors and publishes it on the
+# awg-engine branch, where routers download it.  The build is reproducible: it
+# must match tools/vward-awg/SHA256SUMS, the sums the engine script pins.
+on:
+  push:
+    branches: [dev]
+    paths: ["tools/vward-awg/**", ".github/workflows/awg-engine.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vward-awg-engine
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: vward
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.1"
+          cache: false
+      - name: Test
+        run: cd vward/tools/vward-awg && GOTOOLCHAIN=go1.25.1 go test ./...
+      - name: Build and compare with the pinned sums
+        run: sh vward/tools/vward-awg/build.sh "$PWD/out" --check
+      - name: Publish to the awg-engine branch
+        run: |
+          cd vward
+          VER=$(sed -n 's/^const version = "\(.*\)"/\1/p' tools/vward-awg/main.go)
+          git config user.name "vward-bot"
+          git config user.email "vward-bot@users.noreply.github.com"
+          if git fetch --depth 1 origin awg-engine 2>/dev/null; then
+            git checkout -q -B awg-engine FETCH_HEAD
+          else
+            git checkout -q --orphan awg-engine
+            git rm -rfq . >/dev/null 2>&1 || true
+          fi
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp ../out/*.gz ../out/SHA256SUMS .
+          printf 'vward-awg: tools/vward-awg in the VWARD repository.\nIt includes amneziawg-go (MIT, github.com/amnezia-vpn/amneziawg-go).\n' > README
+          git add -A
+          if git diff --cached --quiet; then echo "program unchanged"; exit 0; fi
+          git commit -qm "vward-awg $VER from ${GITHUB_SHA::12}"
+          git push -q origin awg-engine
