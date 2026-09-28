@@ -14,6 +14,14 @@ VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admissio
 vward_component_gate tunnel-guard
 vward_admission_enter tunnel-health || exit $?
 
+# One clock read for the whole run, the quality check and the device map included.
+# shellcheck disable=SC2046
+set -- $(date '+%s %Y-%m-%d %H:%M:%S')
+NOW_EPOCH=$1
+NOW_TEXT="$2 $3"
+VWARD_NOW=$NOW_EPOCH
+export VWARD_NOW
+
 # Tunnels of VWARD's own engine (AmneziaWG the firmware cannot): a stopped one
 # starts again.  Without such tunnels this is one file test, no process.
 [ ! -s "${VWARD_AWG_ETC:-/opt/etc/vward/awg-engine}/tunnels.tsv" ] || [ ! -x /opt/bin/vward-awg-engine.sh ] ||
@@ -38,7 +46,7 @@ WG_IF="$VWARD_TUNNEL_DEVICE"
 # Any anomaly forces an immediate refresh.
 RCI_REFRESH_INTERVAL=900
 
-mkdir -p "$DIR"
+[ -d "$DIR" ] || mkdir -p "$DIR"
 
 if ! mkdir "$LOCK" 2>/dev/null; then
     OLD=$(cat "$LOCK/pid" 2>/dev/null)
@@ -100,7 +108,6 @@ probe()
 }
 
 
-NOW_EPOCH=$(date +%s)
 
 
 # ------------------------------------------------------------
@@ -115,7 +122,8 @@ LOCAL_IF_OK=0
 
 if [ -d "/sys/class/net/$WG_IF" ]; then
     IF_EXISTS=1
-    CARRIER=$(cat "/sys/class/net/$WG_IF/carrier" 2>/dev/null || echo unknown)
+    CARRIER=unknown
+    [ ! -r "/sys/class/net/$WG_IF/carrier" ] || read -r CARRIER < "/sys/class/net/$WG_IF/carrier" 2>/dev/null || CARRIER=unknown
 
     ADDR=$(
         ip -4 addr show dev "$WG_IF" 2>/dev/null |
@@ -297,7 +305,6 @@ else
 fi
 
 
-NOW_TEXT=$(date '+%Y-%m-%d %H:%M:%S')
 TMP_STATE="$STATE.tmp.$$"
 
 {

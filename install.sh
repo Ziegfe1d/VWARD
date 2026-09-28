@@ -280,6 +280,9 @@ undo() {
 
 install_engine() {
     step "4. Установка VWARD (подписанная сборка)"
+    # Discovery ran without a device.conf; from here on the programs read the one written
+    # below (with two VPNs, the chosen one is only there).
+    unset VWARD_DEVICE_CONFIG VWARD_DEVICE_MAP_CACHE
     mkdir -p "$WORK/engine" "$ETC" /opt/var/log/vward || fail "не создать каталоги VWARD"
     for f in $UPDATER_FILES; do
         repo_get "components/update-engine/$f" "$WORK/engine/$f"
@@ -416,7 +419,8 @@ remove_program() {
     fi
     map=$SHARE/package-map.tsv
     if [ -r "$map" ]; then
-        awk -F '\t' '!/^#/ && NF >= 3 && $3 ~ /^\/opt\// && $3 !~ /\.\./ {print $3}' "$map" > /tmp/vward-uninstall.$$
+        # S90crond stays: cron is shared and still runs (other jobs, the next install).
+        awk -F '\t' '!/^#/ && NF >= 3 && $3 ~ /^\/opt\// && $3 !~ /\.\./ && $3 != "/opt/etc/init.d/S90crond" {print $3}' "$map" > /tmp/vward-uninstall.$$
         while IFS= read -r t; do rm -f "$t"; done < /tmp/vward-uninstall.$$
         rm -f /tmp/vward-uninstall.$$
     fi

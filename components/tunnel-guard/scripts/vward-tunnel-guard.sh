@@ -136,6 +136,13 @@ lists_move()
 lists_fallback()
 {
     [ "$MODE" = AUTO ] && [ -x "$QUALITY" ] && [ -x "$HELPER" ] || return 0
+    # One tunnel and nothing moved before: nowhere to move a list, and no process spent
+    # finding it out (the quality check writes the tunnels it pinged, one per line).
+    if [ -r "$QUALITY_MAP" ] && [ ! -s "$LISTS_FALLBACK" ]; then
+        lf_n=0
+        while read -r _; do lf_n=$((lf_n + 1)); done < "$QUALITY_MAP"
+        [ "$lf_n" -ge 2 ] || return 0
+    fi
     LW=$(mktemp -d /tmp/vward-guard-lists.XXXXXX 2>/dev/null) || { LW=""; return 0; }
     "$QUALITY" summary > "$LW/q" 2>/dev/null
     # Nothing moved and no tunnel failing: the router's configuration is not read at all.
@@ -192,6 +199,7 @@ lists_fallback()
 
 LISTS_MOVED=0
 LISTS_BACK=0
+QUALITY_MAP="${VWARD_TUNNEL_QUALITY_DIR:-/tmp/vward-tunnel-quality}/map"
 
 # «Выбирать лучший туннель» (off by default: a switch breaks open connections): VWARD's routes
 # go to a tunnel clearly better by the criterion (30%), after it stays better 15 minutes,

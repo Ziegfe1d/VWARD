@@ -6,6 +6,7 @@ fails after puts the copy back.  System packages need a second confirmation and
 are never automatic.  Firmware: only automatic updates and channel."""
 
 import json
+import shutil
 import os
 import subprocess
 import tempfile
@@ -220,7 +221,7 @@ esac
                             "HTTP_X_VWARD_REQUEST": "console", "VWARD_PROFILE_LIB": "/nonexistent",
                             "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
                             "VWARD_CONSOLE_CONFIG_BIN": str(helper), "VWARD_CONSOLE_EXT_RUN": str(tmp / "extrun"),
-                            "VWARD_EXT_UPDATE_STATE": str(state)}
+                            "VWARD_EXT_UPDATE_STATE": str(state), "JQ": shutil.which("jq")}
     r = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], input="op=check", env=api_env, text=True, capture_output=True)
     body = json.loads(r.stdout.split("\n\n", 1)[1])
     if body.get("ok") is not True or body.get("started") is not True:

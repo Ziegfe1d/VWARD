@@ -204,7 +204,7 @@
     {
       "id": "console",
       "name": "VWARD Panel",
-      "name_ru": "Панель управления VWARD",
+      "name_ru": "Панель VWARD",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "console",

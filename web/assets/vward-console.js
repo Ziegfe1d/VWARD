@@ -68,10 +68,10 @@ const ico = iconSvg;
 /* ---------- API ---------- */
 const API = '/cgi-bin/api.cgi';
 async function apiFetch(url, options) {
-  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 10000);
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
   let r;
   try { r = await fetch(url, Object.assign({ cache: 'no-store', credentials: 'same-origin' }, options || {}, { signal: controller.signal })); }
-  catch (e) { throw new Error(e.name === 'AbortError' ? 'роутер не ответил за 10 секунд' : 'нет связи с роутером'); }
+  catch (e) { throw new Error(e.name === 'AbortError' ? 'роутер не ответил за 20 секунд' : 'нет связи с роутером'); }
   finally { clearTimeout(timer); }
   if (r.status === 401) { showLogin(); throw new Error('нужно войти'); }
   if (r.status === 403 && r.headers.get('Content-Type') && r.headers.get('Content-Type').includes('json')) {
@@ -80,10 +80,17 @@ async function apiFetch(url, options) {
   }
   return r;
 }
+async function apiJson(r) {
+  const t = await r.text();
+  if (!t.trim()) throw new Error('роутер вернул пустой ответ');
+  let x;
+  try { x = JSON.parse(t); } catch (e) { throw new Error('роутер вернул неполный ответ'); }
+  if (x && x.error === 'jq_broken') throw new Error(API_ERRORS.jq_broken);
+  return x;
+}
 async function apiGet(action, params) {
   const q = new URLSearchParams(Object.assign({ action: action }, params || {}));
-  const r = await apiFetch(API + '?' + q.toString());
-  return r.json();
+  return apiJson(await apiFetch(API + '?' + q.toString()));
 }
 async function apiText(action, params) {
   const q = new URLSearchParams(Object.assign({ action: action }, params || {}));
@@ -96,9 +103,10 @@ async function apiPost(action, fields) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-VWARD-Request': 'console' },
     body: new URLSearchParams(fields).toString()
   });
-  return r.json();
+  return apiJson(r);
 }
 const API_ERRORS = {
+  jq_broken: 'на роутере не работает программа jq - переустановите её: opkg install --force-reinstall jq',
   upstream_not_encrypted: 'сначала зашифруйте выход AdGuard Home (https://... в «Upstream DNS-серверы»)', invalid_mac: 'неверный MAC-адрес',
   chain_failed: 'DNS Keenetic не ответил через AdGuard Home', client_conflict: 'адрес роутера занят другим клиентом AdGuard Home',
   router_unavailable: 'Keenetic не ответил, повторите через минуту', nat_failed: 'роутер не принял правило перенаправления', filter_failed: 'роутер не принял правило блокировки',
@@ -571,7 +579,7 @@ function extOp(op, pkg, token) {
 /* ---------- Уведомления ---------- */
 function notifications() {
   const n = [], s = S.status;
-  if (S.errors.status) n.push({ sev: 'crit', title: 'Нет связи с роутером', text: S.errors.status, to: 'system' });
+  if (S.errors.status) n.push({ sev: 'crit', title: /^(нет связи|роутер не ответил)/.test(S.errors.status) ? 'Нет связи с роутером' : 'Роутер отвечает с ошибкой', text: S.errors.status, to: 'system' });
   const sdc = ((S.lists && S.lists.lists) || []).filter(l => l.smartdns_conflict);
   if (sdc.length) n.push({ sev: 'warn', title: 'Smart DNS уйдёт в VPN', text: 'Домены Smart DNS есть в списках через VPN: ' + sdc.map(l => l.description || l.name).join(', '), to: 'lists' });
   if (!s) return n;

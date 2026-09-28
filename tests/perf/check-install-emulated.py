@@ -15,6 +15,10 @@ this repository with a release signed by a one-time key.
   3. two VPN connections and --yes: the installer asks for a choice and
      changes nothing.
   4. --check changes nothing.
+  5. KeeneticOS 4 is refused.
+  6. KeeneticOS 5.0, AdGuard Home present, two VPN connections: the owner picks the
+     second on a terminal; VWARD routes through it and «Реклама» stays on. After
+     --uninstall the same router installs again.
 
 Needs root (chroot, mknod, mount) and busybox, jq, openssl, cc.
 """
@@ -257,6 +261,62 @@ def part5_old_firmware(work, release):
         teardown(root)
 
 
+def on_terminal(root, command, answers, timeout=600):
+    """COMMAND in the chroot with a real terminal (/dev/tty) that types ANSWERS."""
+    tty = root / "dev/tty"
+    if not tty.exists():
+        subprocess.run(["mknod", "-m", "666", str(tty), "c", "5", "0"], check=True)
+    inner = f"env -i PATH={PATH_ENV} HOME=/root chroot {root} /bin/sh -c '{command}'"
+    return subprocess.run(["script", "-qec", inner, "/dev/null"], input=answers, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True, timeout=timeout)
+
+
+def part6_choice_agh_reinstall(work, release):
+    root = build(work, "clean6", release)
+    try:
+        (root / "emu/version").write_text("5.0.8\n")
+        ifs = json.loads(read(root / "emu/rci-interface.json"))
+        ifs["OpenVPN0"] = {"type": "OpenVPN", "security-level": "public", "description": "Work", "connected": "yes"}
+        (root / "emu/rci-interface.json").write_text(json.dumps(ifs))
+        curl = root / "opt/bin/curl"
+        curl.write_text(read(curl).replace("s/Wireguard1/nwg1/", "s/Wireguard1/nwg1/;s/OpenVPN0/ovpn_br0/"))
+        (root / "sys/class/net/ovpn_br0").mkdir()
+        (root / "sys/class/net/ovpn_br0/tun_flags").write_text("0x1002\n")
+        (root / "opt/etc/AdGuardHome").mkdir(parents=True)
+        (root / "opt/etc/AdGuardHome/AdGuardHome.yaml").write_text("http:\n  address: 127.0.0.1:3000\n")
+        # Enter: the packages; 2: the second VPN; Enter: install.
+        r = on_terminal(root, "sh /emu/repo/install.sh", "\n2\n\n")
+        out = r.stdout.replace("\r", "")
+        m = re.search(r"^  2\) (\S+)", out, re.M)
+        if r.returncode != 0 or "[ PASS ] VWARD установлен" not in out or not m:
+            fail(f"install with a choice on the terminal failed:\n{out}")
+        chosen = m.group(1)
+        for text in ("KeeneticOS 5.0.8", "AdGuard Home найден", f"VPN: {chosen}", f"список AdaptiveAuto идёт через {chosen}"):
+            if text not in out:
+                fail(f"install output lacks {text!r}:\n{out}")
+        if read(root / "opt/etc/vward/device.conf").strip() != f"VWARD_TUNNEL_INTERFACE={chosen}":
+            fail(f"device.conf: {read(root / 'opt/etc/vward/device.conf')!r}")
+        if f"dns-proxy route object-group AdaptiveAuto {chosen} auto" not in read(root / "emu/ndmc-changes.log"):
+            fail(f"AdaptiveAuto must go through the chosen VPN:\n{read(root / 'emu/ndmc-changes.log')}")
+        if (root / "opt/etc/vward/components/ads-privacy-guard.disabled").exists():
+            fail("with AdGuard Home «Реклама» stays on")
+        un = sh(root, "sh /emu/repo/install.sh --uninstall --yes")
+        if un.returncode != 0 or "[ PASS ] VWARD удалён" not in un.stdout:
+            fail(f"uninstall failed:\n{un.stdout}")
+        if not (root / "opt/etc/init.d/S90crond").exists():
+            fail("uninstall must keep S90crond: cron is shared and still running")
+        # Packages are there now: 2 and Enter.
+        again = on_terminal(root, "sh /emu/repo/install.sh", "2\n\n")
+        out = again.stdout.replace("\r", "")
+        if again.returncode != 0 or "[ PASS ] VWARD установлен" not in out or read(root / "opt/share/vward/VERSION").strip() != VERSION:
+            fail(f"a reinstall after uninstall failed:\n{out}")
+        if not re.search(r"^\d+$", read(root / "opt/var/run/vward-console-lighttpd.pid").strip()):
+            fail("the Panel is not running after the reinstall")
+        print("ok - KeeneticOS 5.0, AdGuard Home, VPN chosen on a terminal; uninstall and install again")
+    finally:
+        teardown(root)
+
+
 def main():
     if os.geteuid() != 0:
         sys.exit("check-install-emulated: needs root (chroot, mknod, mount)")
@@ -271,6 +331,7 @@ def main():
         part3_two_vpns(work, release)
         part4_check(work, release)
         part5_old_firmware(work, release)
+        part6_choice_agh_reinstall(work, release)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print("INSTALL_EMULATED=PASS")

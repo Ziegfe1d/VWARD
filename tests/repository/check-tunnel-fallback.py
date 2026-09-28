@@ -128,6 +128,14 @@ echo result=changed
     def route(g):
         return next(l.split()[3] for l in (tmp / "routes").read_text().splitlines() if l.split()[2] == g)
 
+    # The quality check pinged one tunnel: nowhere to move a list, the guard spends nothing.
+    qd = tmp / "qmap"; qd.mkdir()
+    env["VWARD_TUNNEL_QUALITY_DIR"] = str(qd)
+    (qd / "map").write_text(f"{qd}/p.1\tWireguard1\tnwg1\n")
+    run("UP", q((30, 0), (0, 2), (30, 0)))
+    if route("Games") != "Wireguard1" or lists.exists():
+        fail("with one tunnel pinged no list is moved")
+    (qd / "map").write_text("".join(f"{qd}/p.{n + 1}\tWireguard{n}\tnwg{n}\n" for n in range(3)))
     if run("UP", q((30, 0), (0, 1), (30, 0))) != "ACTION=KEEP_UP" or route("Games") != "Wireguard1" or lists.exists():
         fail("one failed sample is not enough to move a list")
     run("UP", q((30, 0), (0, 2), (30, 0)))

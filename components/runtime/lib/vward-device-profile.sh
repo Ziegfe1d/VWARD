@@ -154,9 +154,11 @@ vward_map_filter()
 
 vward_device_map()
 {
-    if [ -f "$VWARD_DEVICE_MAP_CACHE" ] && [ ! -L "$VWARD_DEVICE_MAP_CACHE" ] &&
-        [ "$(ls -ln "$VWARD_DEVICE_MAP_CACHE" 2>/dev/null | awk '{print $3}')" = "$(id -u)" ]; then
-        _vp_age=$(( $(date +%s) - $(date -r "$VWARD_DEVICE_MAP_CACHE" +%s 2>/dev/null || echo 0) ))
+    # Owned by us (a shell test: this runs every minute).
+    if [ -f "$VWARD_DEVICE_MAP_CACHE" ] && [ ! -L "$VWARD_DEVICE_MAP_CACHE" ] && [ -O "$VWARD_DEVICE_MAP_CACHE" ]; then
+        _vp_now=${VWARD_NOW:-}
+        case "$_vp_now" in ''|*[!0-9]*) _vp_now=$(date +%s) ;; esac
+        _vp_age=$(( _vp_now - $(date -r "$VWARD_DEVICE_MAP_CACHE" +%s 2>/dev/null || echo 0) ))
         if [ "$_vp_age" -ge 0 ] && [ "$_vp_age" -lt "$VWARD_DEVICE_MAP_TTL" ]; then
             vward_map_filter < "$VWARD_DEVICE_MAP_CACHE"
             return 0

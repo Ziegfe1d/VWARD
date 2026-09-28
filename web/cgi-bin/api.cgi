@@ -49,6 +49,14 @@ case "${REQUEST_METHOD:-GET}" in
         ;;
 esac
 
+# Every answer is built with jq. A broken jq (it happened: Segmentation fault on any
+# input) gave empty answers and the Panel said «нет связи»; say what is wrong instead.
+if ! "$JQ" -n 1 >/dev/null 2>&1; then
+    header_json
+    echo '{"ok":false,"error":"jq_broken"}'
+    exit 0
+fi
+
 qget()
 {
     echo "$QUERY_STRING" |

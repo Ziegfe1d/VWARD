@@ -318,12 +318,6 @@ ads_normalize_domain()
       sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^\.//;s/\.$//'
 }
 
-ads_is_reverse_or_local_name()
-{
-    case "$1" in *.in-addr.arpa|*.ip6.arpa|localhost|*.localhost|*.local|*.lan|*.home.arpa|retracker.local) return 0 ;; esac
-    return 1
-}
-
 ads_source_domain_normalize()
 {
     awk '

@@ -942,6 +942,32 @@ vu_activity_clear() {
     return 0
 }
 
+# cron is shared with Entware: its own S10cron may run it and VWARD's S90crond may be absent
+# (not installed yet, or removed with an older VWARD).
+vu_crond_stop() {
+    if [ -x /opt/etc/init.d/S90crond ]; then
+        /opt/etc/init.d/S90crond stop >/dev/null 2>&1
+    else
+        killall crond 2>/dev/null
+    fi
+    n=0
+    while pidof crond >/dev/null 2>&1 && [ "$n" -lt 5 ]; do sleep 1; n=$((n + 1)); done
+    ! pidof crond >/dev/null 2>&1
+}
+
+vu_crond_start() {
+    pidof crond >/dev/null 2>&1 && return 0
+    for s in /opt/etc/init.d/S90crond /opt/etc/init.d/S*cron*; do
+        [ -x "$s" ] || continue
+        "$s" start >/dev/null 2>&1
+        break
+    done
+    pidof crond >/dev/null 2>&1 && return 0
+    mkdir -p /opt/var/spool/cron/crontabs /opt/var/log
+    /opt/sbin/crond -b -l 8 -L /opt/var/log/crond.log -c /opt/var/spool/cron/crontabs >/dev/null 2>&1
+    pidof crond >/dev/null 2>&1
+}
+
 vu_runtime_quiesce() {
     [ "$VU_RUNTIME_QUIESCED" = 0 ] || return 0
 
@@ -962,7 +988,7 @@ vu_runtime_quiesce() {
         /opt/etc/init.d/S92vward-runtime stop >/dev/null 2>&1 || return 1
     fi
     if [ "$VU_RESTART_CROND" = 1 ]; then
-        /opt/etc/init.d/S90crond stop >/dev/null 2>&1 || return 1
+        vu_crond_stop || return 1
     fi
     if [ "$VU_RESTART_LIVE" = 1 ]; then
         /opt/etc/init.d/S91vward-route-engine stop >/dev/null 2>&1 || return 1
@@ -987,7 +1013,7 @@ vu_runtime_resume() {
     if [ -z "$VU_ROOT_PREFIX" ]; then
         resume_rc=0
         if [ "$VU_RESTART_CROND" = 1 ]; then
-            /opt/etc/init.d/S90crond start >/dev/null 2>&1 || resume_rc=1
+            vu_crond_start || resume_rc=1
         fi
         if [ "$VU_RESTART_LIVE" = 1 ]; then
             /opt/etc/init.d/S91vward-route-engine start >/dev/null 2>&1 || resume_rc=1

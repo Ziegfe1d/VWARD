@@ -208,30 +208,40 @@ case "${1:-}" in
 esac
 
 vward_profile_load || exit 1
-mkdir -p "$DIR" || exit 1
-W=$(mktemp -d "$DIR/run.XXXXXX" 2>/dev/null) || exit 1
-trap 'rm -rf "${W:?}"' EXIT
-vward_map_vpns "$(vward_device_map 2>/dev/null)" "${VWARD_WAN_DEVICE:-}" > "$W/targets"
+# Once a minute: as few processes as can be. The ping results are overwritten each
+# time (RAM), one awk reads them all.
+[ -d "$DIR" ] || mkdir -p "$DIR" || exit 1
 k=0
+: > "$DIR/map"
 while read -r name dev; do
     vward_valid_ifname "$dev" 2>/dev/null && [ -e "$SYSFS/$dev" ] || continue
     k=$((k + 1))
-    printf '%s\t%s\n' "$name" "$dev" > "$W/t.$k"
-    "$PING" -I "$dev" -c 3 -W 2 "$TARGET" > "$W/p.$k" 2>&1 &
-done < "$W/targets"
+    printf '%s\t%s\t%s\n' "$DIR/p.$k" "$name" "$dev" >> "$DIR/map"
+    "$PING" -I "$dev" -c 3 -W 2 "$TARGET" > "$DIR/p.$k" 2>&1 &
+done <<TARGETS
+$(vward_map_vpns "$(vward_device_map 2>/dev/null)" "${VWARD_WAN_DEVICE:-}")
+TARGETS
 wait
-now=$(date +%s)
+now=${VWARD_NOW:-$(date +%s)}
+case "$now" in ''|*[!0-9]*) now=$(date +%s) ;; esac
+FILES=
 i=0
-while [ "$i" -lt "$k" ]; do
-    i=$((i + 1))
-    IFS="$(printf '\t')" read -r name dev < "$W/t.$i"
-    awk -v now="$now" -v n="$name" -v d="$dev" '
-        /packet loss/ {for (j = 1; j <= NF; j++) if ($j ~ /%$/) {loss = $j; sub(/%/, "", loss)}}
-        /min\/avg\/max/ {split($0, a, "= "); split(a[2], b, "/"); avg = b[2]}
-        END {if (loss == "") loss = 100; printf "%s\t%s\t%s\t%d\t%s\n", now, n, d, loss, (avg == "" ? "-" : sprintf("%d", avg + 0.5))}' "$W/p.$i" >> "$SAMPLES"
-done
-# The last hour only.
-awk -F '\t' -v cut="$((now - KEEP))" '$1 >= cut' "$SAMPLES" > "$W/keep" 2>/dev/null && mv -f "$W/keep" "$SAMPLES"
+while [ "$i" -lt "$k" ]; do i=$((i + 1)); FILES="$FILES $DIR/p.$i"; done
+# shellcheck disable=SC2086
+[ "$k" -eq 0 ] || awk -v now="$now" '
+    function emit() {if (f != "") printf "%s\t%s\t%s\t%d\t%s\n", now, n[f], d[f], (loss == "" ? 100 : loss), (avg == "" ? "-" : sprintf("%d", avg + 0.5))}
+    NR == FNR {split($0, m, "\t"); n[m[1]] = m[2]; d[m[1]] = m[3]; next}
+    FNR == 1 {emit(); f = FILENAME; loss = ""; avg = ""}
+    /packet loss/ {for (j = 1; j <= NF; j++) if ($j ~ /%$/) {loss = $j; sub(/%/, "", loss)}}
+    /min\/avg\/max/ {split($0, a, "= "); split(a[2], b, "/"); avg = b[2]}
+    END {emit()}' "$DIR/map" $FILES >> "$SAMPLES"
+# The last hour only: trimmed when the oldest row is 10 minutes past it (read by the shell).
+first=
+[ ! -s "$SAMPLES" ] || read -r first _ < "$SAMPLES" || :
+case "$first" in ''|*[!0-9]*) first=$now ;; esac
+if [ "$first" -lt $((now - KEEP - 600)) ]; then
+    awk -F '\t' -v cut="$((now - KEEP))" '$1 >= cut' "$SAMPLES" > "$DIR/keep" 2>/dev/null && mv -f "$DIR/keep" "$SAMPLES"
+fi
 # The speed, when due: in the background, the next sample does not wait for it.
 if speed_due "$k" "$now"; then
     sh "$0" speed </dev/null >/dev/null 2>&1 &

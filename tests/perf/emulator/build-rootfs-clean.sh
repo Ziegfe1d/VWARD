@@ -60,12 +60,13 @@ pkg ca-bundle /opt/etc/ssl/certs/x; : > "$store/ca-bundle/opt/etc/ssl/certs/ca-c
 # A fresh Entware already has curl (to fetch the installer) and cron.
 cp -a "$store/curl/." "$ROOT/"
 cp -a "$store/cron/." "$ROOT/"
-cat > "$ROOT/opt/etc/init.d/S90crond" <<'CROND'
+# Entware's own cron start script is S10cron; VWARD brings S90crond.
+cat > "$ROOT/opt/etc/init.d/S10cron" <<'CROND'
 #!/bin/sh
 case "$1" in start) pidof crond >/dev/null 2>&1 || /opt/sbin/crond -b -c /opt/var/spool/cron/crontabs ;; stop) killall crond 2>/dev/null ;; esac
 exit 0
 CROND
-chmod 755 "$ROOT/opt/etc/init.d/S90crond"
+chmod 755 "$ROOT/opt/etc/init.d/S10cron"
 
 # The repository as GitHub serves it.
 mkdir -p "$ROOT/emu/repo"
