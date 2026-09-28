@@ -549,7 +549,7 @@ function listPage(name) {
   if ((!d || d.name !== name) && listWant !== name) { listWant = name; load('listd', true).then(render); }
   const fresh = d && d.name === name, title = l.description || l.name, can = ok && (viaIs(l, 'vpn') || viaIs(l, 'bypass'));
   const rm = (act, v, label) => '<button class="icon-btn" type="button" data-list-dom="' + act + '" data-dom="' + esc(v) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (ok ? '' : ' disabled') + '>' + ico('close') + '</button>';
-  const addF = (kind, ph, label) => '<form class="inline-form" data-form="list-add" data-kind="' + kind + '">' + formLabel(label) + '<input class="input" name="domain" placeholder="' + esc(ph) + '" aria-label="Домен" autocomplete="off"' + (ok ? '' : ' disabled') + '><button class="btn primary" type="submit"' + (ok ? '' : ' disabled') + '>' + ico('plus') + 'Добавить</button></form>';
+  const addF = (kind, ph, label) => inputBar({ form: 'list-add', attrs: ' data-kind="' + kind + '"', label: label, name: 'domain', placeholder: ph, aria: 'Домен', off: !ok, icon: 'plus', btn: 'Добавить' });
   const inc = fresh ? d.include : [], exc = fresh ? d.exclude : [];
   return cfgNote() + (fresh || !d || !d.error ? '' : '<p class="field-warn">' + esc(errText(d)) + '</p>') +
     panel(title, '<dl class="kv">' +
@@ -639,7 +639,7 @@ const RENDER = {
       panel('Автоподбор', '<dl class="kv">' +
         ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', cfgRoute().adaptive_enabled !== false, 'Автоподбор доменов', !cfgOk()), 'отправлять через VPN домены, недоступные напрямую') + '</dl>' +
         kv([['История автоподбора', '', '', 'a-adaptive'], ['История сверки маршрутов', '', '', 'a-routing']])) +
-      panel('Проверить адрес', '<form class="inline-form" data-form="probe">' + formLabel('Домен или IP-адрес') + '<input class="input" id="probeInput" placeholder="youtube.com или 1.2.3.4" aria-label="Домен или IPv4" autocomplete="off"><button class="btn primary" type="submit">' + ico('search') + 'Проверить</button></form><div id="probeResult">' + probeText(RPROBE) + '</div>', { desc: 'Куда пойдёт сайт: через VPN или напрямую, и почему.' });
+      panel('Проверить адрес', inputBar({ form: 'probe', label: 'Домен или IP-адрес', id: 'probeInput', placeholder: 'youtube.com или 1.2.3.4', aria: 'Домен или IPv4', icon: 'search', btn: 'Проверить' }) + '<div id="probeResult">' + probeText(RPROBE) + '</div>', { desc: 'Куда пойдёт сайт: через VPN или напрямую, и почему.' });
   },
 
 
@@ -695,7 +695,7 @@ const RENDER = {
         '<dl class="kv">' + ctrlRow('Публиковать автоматически', sw('data-ads-autopub', isTrue(s.AUTO_PUBLISH), 'Публиковать автоматически', !S.ads), 'новые правила уходят в AdGuard Home без подтверждения') + '</dl>' +
         (confirmBox('ads-autopub', 'Публиковать правила автоматически? Новые правила будут применяться в AdGuard Home без вашего подтверждения.', 'Включить') ||
          confirmBox('ads-publish', 'Отправить правила в AdGuard Home? Они применятся сразу.', 'Опубликовать') || '<div class="panel-actions">' + btn('ask', 'check', 'Опубликовать правила', 'primary', ' data-confirm="ads-publish"') + '</div>')) +
-      panel('Проверить домен', '<form class="inline-form" data-form="ads-probe">' + formLabel('Домен') + '<input class="input" id="adsProbe" placeholder="например, mc.yandex.ru" aria-label="Домен" autocomplete="off"' + (PROBE ? ' value="' + esc(PROBE.domain) + '"' : '') + '><button class="btn primary" type="submit"' + (PROBE && !PROBE.done ? ' disabled' : '') + '>' + ico('search') + 'Проверить</button></form>' + probeResult(), { desc: 'Решение VWARD, источники и запросы по домену.' }) +
+      panel('Проверить домен', inputBar({ form: 'ads-probe', label: 'Домен', id: 'adsProbe', value: PROBE ? PROBE.domain : '', placeholder: 'например, mc.yandex.ru', aria: 'Домен', busy: PROBE && !PROBE.done, icon: 'search', btn: 'Проверить' }) + probeResult(), { desc: 'Решение VWARD, источники и запросы по домену.' }) +
       panel('Списки и правила', kv([
         ['Журнал запросов', 'последние 100', '', 'd-querylog'],
         ['Категории блокировки', (a.categories || []).filter(x => x.active).length + ' из ' + (a.categories || []).length + ' включены', '', 'd-adcats'],
@@ -1132,7 +1132,17 @@ function searchBar(form, value, placeholder, extra) {
   return '<form class="search-bar" data-form="' + form + '"><label class="search-field">' + ico('search') + '<input class="input" type="search" name="q" value="' + esc(value) + '" placeholder="' + esc(placeholder) + '" aria-label="' + esc(placeholder) + '" autocomplete="off" enterkeyhint="search"></label>' + (extra || '') + '</form>';
 }
 function formLabel(text) { return '<span class="form-label">' + esc(text) + '</span>'; }
-function addForm(op, placeholder, label) { return '<form class="inline-form" data-form="cfg-add" data-op="' + op + '">' + formLabel(label || 'Новый домен') + '<input class="input" name="domain" placeholder="' + esc(placeholder) + '" aria-label="Домен" autocomplete="off"' + (cfgOk() ? '' : ' disabled') + '><button class="btn primary" type="submit"' + (cfgOk() ? '' : ' disabled') + '>' + ico('plus') + 'Добавить</button></form>'; }
+// One field with its button inside the field's right edge: every form that takes one value.
+// o: form, attrs (more form attributes), label, name/id, value, placeholder, aria, mono,
+//    maxlength, off (disabled), busy, icon, btn (the button's word; a phone shows only the icon).
+function inputBar(o) {
+  return '<form class="input-bar" data-form="' + o.form + '"' + (o.attrs || '') + '>' + (o.label ? formLabel(o.label) : '') +
+    '<div class="input-bar-box"><input class="input' + (o.mono ? ' mono' : '') + '"' + (o.name ? ' name="' + o.name + '"' : '') + (o.id ? ' id="' + o.id + '"' : '') +
+    (o.value != null && o.value !== '' ? ' value="' + esc(o.value) + '"' : '') + ' placeholder="' + esc(o.placeholder || '') + '" aria-label="' + esc(o.aria || o.label || o.placeholder || '') + '"' +
+    (o.maxlength ? ' maxlength="' + o.maxlength + '"' : '') + ' autocomplete="off" spellcheck="false" enterkeyhint="go"' + (o.off ? ' disabled' : '') + '>' +
+    '<button class="input-bar-btn' + (o.busy ? ' busy' : '') + '" type="submit" aria-label="' + esc(o.btn) + '"' + (o.off || o.busy ? ' disabled' : '') + '>' + ico(o.busy ? 'refresh' : o.icon || 'search') + '<span>' + esc(o.btn) + '</span></button></div></form>';
+}
+function addForm(op, placeholder, label) { return inputBar({ form: 'cfg-add', attrs: ' data-op="' + op + '"', label: label || 'Новый домен', name: 'domain', placeholder: placeholder, aria: 'Домен', off: !cfgOk(), icon: 'plus', btn: 'Добавить' }); }
 function rowBtn(op, action, d, icon, label) { return '<button class="icon-btn" type="button" data-cfg-op="' + op + '" data-cfg-action="' + action + '" data-cfg-target="' + esc(d) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (cfgOk() ? '' : ' disabled') + '>' + ico(icon) + '</button>'; }
 function domainRows(list, acts, sub) { return list.length ? '<ul class="rows">' + list.map(d => '<li class="row"><div class="row-main"><b>' + dom(d) + '</b>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div><span class="row-acts">' + acts(d) + '</span></li>').join('') + '</ul>' : ''; }
 const CAT_NAMES = { 'ads-tracking-security': 'Реклама, трекеры и угрозы', 'ads-tracking-security-aggressive': 'Усиленная защита', 'popup-ads': 'Всплывающая реклама', 'ads-tracking': 'Реклама и трекеры', ads: 'Реклама', tracking: 'Трекеры', 'ads-malware': 'Реклама и вредоносные сайты', 'mobile-ads': 'Реклама в приложениях', custom: 'Свои источники' };
@@ -1791,7 +1801,7 @@ function tunnelTrafficPanel(name) {
       // Lists are changed in one place, «Доменные списки»: here only how many go this way.
       kv([['Доменные списки', lists.length ? String(lists.length) : 'нет', '', 'lists']]) +
       '<p class="panel-desc">Подсети: ' + (nets.length ? fmtInt(nets.length) : 'нет') + '</p>' + (nets.length ? '<ul class="rows">' + netRows + '</ul>' : '') +
-      '<form class="inline-form" data-form="tunnel-subnet" data-name="' + esc(name) + '">' + formLabel('Добавить подсеть') + '<input class="input mono" name="subnet" placeholder="149.154.160.0/20" aria-label="Подсеть" autocomplete="off"><button class="btn primary" type="submit"' + (cfgOk() ? '' : ' disabled') + '>' + ico('plus') + 'Добавить</button></form>') + resultBox('tunnel-traffic'),
+      inputBar({ form: 'tunnel-subnet', attrs: ' data-name="' + esc(name) + '"', label: 'Добавить подсеть', name: 'subnet', mono: true, placeholder: '149.154.160.0/20', aria: 'Подсеть', off: !cfgOk(), icon: 'plus', btn: 'Добавить' })) + resultBox('tunnel-traffic'),
     { desc: 'Что идёт через этот туннель.' });
 }
 function tunnelManagePanel(name, managed) {
@@ -1894,7 +1904,7 @@ function wifiClientPage(mac) {
   const ctl = S.config && S.config.wifi ? S.config.wifi.CONTROL_ENABLED : S.wifi && S.wifi.control_enabled;
   const ops = [['auto', 'Авто', 'WIFI_BAND_AUTO', 'Авто'], ['bind-2g', '2.4 ГГц', 'WIFI_BIND_2G', 'Только 2.4 ГГц'], ['bind-5g', '5 ГГц', 'WIFI_BIND_5G', 'Только 5 ГГц']];
   const h = c.host || {}, deny = h.access === 'deny';
-  const device = panel('Устройство', '<form class="inline-form" data-form="wifi-name" data-mac="' + esc(mac) + '">' + formLabel('Имя устройства') + '<input class="input" name="name" maxlength="64" value="' + esc(h.name || '') + '" placeholder="' + esc(h.hostname || 'Имя устройства') + '" aria-label="Имя устройства"><button class="btn" type="submit"' + (cfgOk() ? '' : ' disabled') + '>' + (h.registered ? 'Переименовать' : 'Сохранить имя') + '</button></form>' +
+  const device = panel('Устройство', inputBar({ form: 'wifi-name', attrs: ' data-mac="' + esc(mac) + '"', label: 'Имя устройства', name: 'name', maxlength: 64, value: h.name || '', placeholder: h.hostname || 'Имя устройства', off: !cfgOk(), icon: 'check', btn: h.registered ? 'Переименовать' : 'Сохранить' }) +
       '<dl class="kv">' + ctrlRow('Доступ в интернет', sw('data-wifi-access="' + esc(mac) + '"', !deny, 'Доступ в интернет для ' + wifiName(mac), !cfgOk()), deny ? 'запрещён: устройство видит только домашнюю сеть' : 'разрешён') + '</dl>' +
       confirmBox('wifi-deny', 'Запретить устройству «' + wifiName(mac) + '» выход в интернет? Домашняя сеть останется доступной.', 'Запретить', true) +
       kv([['MAC', mac], ['IP-адрес', h.ip || '—'], ['Имя в сети', h.hostname || '—'], ['Зарегистрировано в Keenetic', h.registered ? 'Да' : 'Нет'],
@@ -2653,9 +2663,16 @@ document.addEventListener('change', e => {
   if (t.dataset.adsCat) { adsControl({ op: 'source-category', category: t.dataset.adsCat, state: t.checked ? 'on' : 'off' }, t.checked ? 'Категория включена' : 'Категория выключена', 'ads-rule'); return; }
   if (t.dataset.adsSource) { adsControl({ op: 'source-mode', source: t.dataset.adsSource, mode: t.value }, 'Режим источника изменён', 'ads-rule'); return; }
 });
+// A field with its button inside shows the button busy until the form's work is done.
 document.addEventListener('submit', async e => {
   e.preventDefault();
-  const f = e.target.dataset.form;
+  const b = e.target.classList.contains('input-bar') ? e.target.querySelector('.input-bar-btn') : null;
+  if (b && b.disabled) return;
+  if (b) { b.classList.add('busy'); b.disabled = true; }
+  try { await onSubmit(e, e.target.dataset.form); }
+  finally { if (b && b.isConnected) { b.classList.remove('busy'); b.disabled = false; } }
+});
+async function onSubmit(e, f) {
   if (f === 'probe') {
     const v = $('probeInput').value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/:].*$/, '');
     if (!IPV4.test(v) && !DOMAIN.test(v)) { RPROBE = { error: 'Введите домен (например, youtube.com) или IPv4-адрес.' }; render(); return; }
@@ -2766,7 +2783,7 @@ document.addEventListener('submit', async e => {
     if (!DOMAIN.test(v)) { toast('Введите домен, например example.com'); return; }
     await adsControl({ op: $('adsRuleType').value, domain: v, scope: $('adsRuleScope').value }, 'Правило добавлено', 'ads-rule');
   }
-});
+}
 
 /* ---------- Тема и обновление данных ---------- */
 // «По времени суток»: светлая с 07:00 до 20:00, тёмная ночью.

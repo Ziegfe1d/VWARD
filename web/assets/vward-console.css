@@ -230,6 +230,21 @@ small.st .icon{width:14px;height:14px}
 .chips button{flex:none;min-height:34px;padding:0 14px;border:1px solid var(--line-strong);border-radius:17px;background:var(--surface);color:var(--text);font-size:var(--fs-sm);font-weight:600;white-space:nowrap}
 .chips button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
 .inline-form.multi .input.compact{flex:1 1 40%}
+/* Поле с кнопкой внутри (inputBar): одна высота, скругления и отступы во всех формах; на телефоне
+   у кнопки только значок, шире 600px - значок и слово. Поле не меняет размер во время проверки. */
+.input-bar{display:grid;gap:8px;padding:14px 16px 16px}
+.input-bar .form-label{font-size:var(--fs-sm);font-weight:600;color:var(--text)}
+.input-bar-box{display:flex;align-items:center;gap:4px;min-height:46px;padding:3px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--surface)}
+.input-bar-box:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.input-bar-box .input{flex:1 1 auto;min-width:0;min-height:38px;padding:6px 9px;border:0;background:transparent;box-shadow:none;outline:0}
+.input-bar-btn{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:38px;min-height:38px;padding:0 10px;border:0;border-radius:calc(var(--r-md) - 3px);background:var(--accent);color:var(--accent-text);font-size:var(--fs-sm);font-weight:600;cursor:pointer}
+.input-bar-btn .icon{width:18px;height:18px}
+.input-bar-btn span{display:none;white-space:nowrap}
+.input-bar-btn:disabled{opacity:.5;cursor:default}
+.input-bar-btn.busy{opacity:1}
+.input-bar-btn.busy .icon{animation:upd-spin 1.2s linear infinite}
+@media (min-width:600px){.input-bar-btn span{display:inline}.input-bar-btn{padding:0 14px}}
+@media (prefers-reduced-motion:reduce){.input-bar-btn.busy .icon{animation:none}}
 .switch{position:relative;display:inline-block;width:42px;height:24px;flex:none}
 .switch input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
 .switch i{position:absolute;inset:0;border-radius:12px;background:var(--line-strong);transition:background .15s}
