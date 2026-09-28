@@ -35,7 +35,8 @@
       "requires_running": [],
       "uses": [
         "route-tools",
-        "console"
+        "console",
+        "tunnel-guard"
       ],
       "runtime_targets": [
         "/opt/bin/vward-route-engine.sh",

@@ -28,6 +28,7 @@ PERSIST="$STATE_DIR/adaptive-persist.txt"
 REFRESH_TS="$STATE_DIR/groups-refresh"
 
 EVENT_LOG="/opt/var/log/vward-route-engine-events.log"
+QUALITY=${VWARD_TUNNEL_QUALITY_BIN:-/opt/bin/vward-tunnel-quality.sh}
 
 LOCK="/tmp/vward-route-engine.lock"
 CHANGE_LOCK="/tmp/vward-route-change.lock"
@@ -377,7 +378,7 @@ regular_cooldown()
                 return 0
             ;;
 
-        AGH_BLOCKED|NO_IPV4|ISP_FAIL_WG_FAIL|ISP_FAIL_WG_UNSTABLE)
+        AGH_BLOCKED|NO_IPV4|ISP_FAIL_WG_FAIL|ISP_FAIL_WG_UNSTABLE|ISP_FAIL_ALT_OK)
             [ "$AGE" -lt "$FAIL_COOLDOWN" ] &&
                 return 0
             ;;
@@ -469,6 +470,25 @@ probe()
     [ "$P_RC" -eq 0 ] &&
     [ "$P_CODE" != "000" ] &&
     [ "$P_CODE" != "451" ]
+}
+
+
+# alt_tunnel HOST IP: another tunnel of the router that answers (the tunnel quality samples)
+# and opens HOST twice; its name. Several tunnels: a site blocked through VWARD's tunnel may
+# open through another one - the Panel says which (a list of that tunnel takes it).
+alt_tunnel()
+{
+    [ -x "$QUALITY" ] || return 1
+    for AT in $("$QUALITY" summary 2>/dev/null | awk -F '\t' -v w="$WG" '$2 != w && $5 >= 2 && $3 < 100 {print $1 ":" $2}'); do
+        AT_NAME=${AT%%:*} AT_DEV=${AT#*:}
+        vward_valid_ifname "$AT_DEV" 2>/dev/null || continue
+        probe "$1" "$AT_DEV" "$2" || continue
+        sleep 1
+        probe "$1" "$AT_DEV" "$2" || continue
+        echo "$AT_NAME"
+        return 0
+    done
+    return 1
 }
 
 
@@ -908,6 +928,12 @@ handle_new()
 
     # ISP FAIL x2. Проверяем WG.
     if ! probe "$HOST" "$WG" "$IP"; then
+
+        if ALT=$(alt_tunnel "$HOST" "$IP"); then
+            save_state "$HOST" "ISP_FAIL_ALT_OK"
+            event_result ISP_FAIL_ALT_OK "ISP_FAIL_ALT_OK|$HOST|tunnel=$ALT"
+            return
+        fi
 
         save_state "$HOST" "ISP_FAIL_WG_FAIL"
 

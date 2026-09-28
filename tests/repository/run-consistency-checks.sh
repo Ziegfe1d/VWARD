@@ -80,6 +80,7 @@ python3 tests/repository/check-console-tunnel-probe.py || fail "Panel tunnel che
 python3 tests/repository/check-console-site-test.py || fail "site check, tunnel restart and switch-on"
 python3 tests/repository/check-tunnel-fallback.py || fail "fallback tunnel and tunnel quality"
 python3 tests/repository/check-tunnel-services.py || fail "services checked through every tunnel"
+python3 tests/repository/check-route-engine-alt-tunnel.py || fail "route engine tries the other tunnels"
 python3 tests/repository/check-console-agh-auth.py || fail "Panel AdGuard Home login"
 python3 tests/repository/check-console-smartdns.py || fail "Smart DNS guard"
 python3 tests/repository/check-console-tunnels.py || fail "Panel tunnels"

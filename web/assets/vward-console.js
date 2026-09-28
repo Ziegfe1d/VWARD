@@ -1440,6 +1440,7 @@ const ROUTE_ADAPTIVE = {
   HINT_AGH_BLOCKED: ['info', '{h} заблокирован AdGuard Home - VPN не нужен'], AGH_BLOCKED: ['info', '{h} заблокирован AdGuard Home - VPN не нужен'],
   ADD_ABORT_DIRECT_RECOVERED: ['info', '{h} снова открылся напрямую - VPN не понадобился'],
   BROKEN_ISP_AND_VPN: ['warn', '{h} не открывается ни напрямую, ни через VPN'], ISP_FAIL_WG_FAIL: ['warn', '{h} не открывается ни напрямую, ни через VPN'],
+  ISP_FAIL_ALT_OK: ['warn', '{h} не открывается ни напрямую, ни через туннель VWARD, но открывается через «{tunnel}» - добавьте его в список этого туннеля'],
   ISP_FAIL_WG_UNSTABLE: ['warn', '{h} напрямую не открывается, VPN работает с перебоями'], DIRECT_UNSTABLE: ['warn', '{h} напрямую открывается с перебоями'],
   START: ['info', 'Автоподбор запущен'], WATCHDOG_RESTART: ['warn', 'Автоподбор перезапущен после сбоя'],
   PERSIST_RESTORE_OK: ['ok', 'После перезапуска домены автоподбора восстановлены'], PERSIST_RESTORE_PARTIAL: ['warn', 'После перезапуска восстановлены не все домены автоподбора'],
