@@ -113,14 +113,32 @@ case "${1:-}" in
         get() { ads_agh_api_get "$1" "$D/$2" >/dev/null 2>&1 || { rm -f "$D/$2"; return 1; }; }
         get status status.json; rc=$?
         [ "$rc" = 0 ] || { ads_agh_api_get status "$D/x" >/dev/null 2>&1; r=$?; rm -rf "${D:?}"; agh_fail "$r"; }
-        get filtering/status filtering.json
-        get blocked_services/all services-all.json || get blocked_services/services services-old.json
-        get blocked_services/get services-get.json || get blocked_services/list services-list.json
-        get safebrowsing/status safebrowsing.json
-        get parental/status parental.json
-        get safesearch/status safesearch.json
+        # The other answers side by side: one after another they took most of the 10 seconds
+        # the Panel waits on a router with a busy AdGuard Home.
+        get filtering/status filtering.json &
+        # The service catalogue (a few hundred services with their icons) changes with AdGuard
+        # Home's version only: kept a day as names alone, it is not fetched and parsed each time.
+        SVC_CACHE="$ADS_STATE/agh-services.json"
+        if [ -s "$SVC_CACHE" ] && [ -n "$(find "$SVC_CACHE" -mmin -1440 2>/dev/null)" ]; then
+            cp "$SVC_CACHE" "$D/services-all.json"
+        else
+            { get blocked_services/all services-all.json || get blocked_services/services services-old.json; } &
+        fi
+        { get blocked_services/get services-get.json || get blocked_services/list services-list.json; } &
+        get safebrowsing/status safebrowsing.json &
+        get parental/status parental.json &
+        get safesearch/status safesearch.json &
+        wait
         # Answers go to jq as files: the service list carries icons and the
         # filter status the user rules, far beyond the 128 KB one argument may hold.
+        if [ ! -s "$SVC_CACHE" ] || [ -z "$(find "$SVC_CACHE" -mmin -1440 2>/dev/null)" ]; then
+            "$ADS_JQ" -c '{blocked_services: [((.blocked_services // .) // [])[]? | {id, name: (.name // .id)}]}' "$D/services-all.json" 2>/dev/null > "$D/svc.min" ||
+                "$ADS_JQ" -c '{blocked_services: [(. // [])[]? | {id, name: (.name // .id)}]}' "$D/services-old.json" 2>/dev/null > "$D/svc.min"
+            if "$ADS_JQ" -e '.blocked_services | length > 0' "$D/svc.min" >/dev/null 2>&1; then
+                mkdir -p "$ADS_STATE" && cp "$D/svc.min" "$SVC_CACHE.tmp" && mv -f "$SVC_CACHE.tmp" "$SVC_CACHE"
+                cp "$D/svc.min" "$D/services-all.json"; rm -f "$D/services-old.json"
+            fi
+        fi
         for f in status filtering services-all services-old services-get services-list safebrowsing parental safesearch; do
             [ -s "$D/$f.json" ] || echo null > "$D/$f.json"
         done

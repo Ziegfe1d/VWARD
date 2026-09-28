@@ -305,7 +305,7 @@ const LOADERS = {
 // The last answers are kept in the browser: a reopened console shows them at once
 // and refreshes from the router in the background.  Nothing secret is in them;
 // a login prompt or «Выйти» drops them.
-const CACHE_KEYS = ['status', 'route', 'lists', 'update', 'security', 'wifi', 'ads', 'config', 'adsstats', 'agh', 'backups', 'cron'];
+const CACHE_KEYS = ['status', 'route', 'lists', 'update', 'security', 'wifi', 'ads', 'config', 'adsstats', 'agh', 'backups', 'cron', 'awg', 'ext', 'diag', 'adspub', 'services'];
 const CACHE_TTL = 86400000, CACHE_MAX = 400000;
 S.cached = {};
 function cacheRead() {

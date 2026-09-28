@@ -90,7 +90,12 @@ audit() {
     return 0
 }
 
-done_ok() { audit "$1 result=$2"; printf 'result=%s\n' "$2"; exit 0; }
+# A change done (a background job finishes after its request) drops the Panel's short cache
+# of the router's answers, so the next page shows the router as it is now.
+done_ok() {
+    [ "$2" != changed ] || rm -rf "${VWARD_CONSOLE_CACHE_DIR:-/tmp/vward-console-cache}" 2>/dev/null
+    audit "$1 result=$2"; printf 'result=%s\n' "$2"; exit 0
+}
 
 valid_domain() {
     printf '%s\n' "$1" | awk 'length($0)<4||length($0)>253||index($0,".")==0{exit 1}

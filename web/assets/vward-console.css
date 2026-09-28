@@ -29,7 +29,7 @@
   --shadow:0 1px 2px rgba(0,0,0,.4);--overlay:rgba(0,0,0,.55);
 }
 *{box-sizing:border-box}
-html{height:100%}
+html{height:100%;scrollbar-gutter:stable}
 body{height:100%;margin:0;background:var(--bg);color:var(--text);font:400 var(--fs-md)/1.45 var(--font);-webkit-font-smoothing:antialiased;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
 button{font:inherit;color:inherit;cursor:pointer}
 input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
@@ -84,7 +84,7 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .kv-row:first-child{border-top:0}
 .kv+.kv .kv-row:first-child{border-top:1px solid var(--line)}
 .kv dt{flex:1;min-width:0;color:var(--muted);font-size:var(--fs-sm)}
-.kv dd{margin:0;display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;max-width:62%;text-align:right;font-weight:550;overflow-wrap:anywhere}
+.kv dd{margin:0;font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;max-width:62%;text-align:right;font-weight:550;overflow-wrap:anywhere}
 /* The label keeps at least its longest word: a long value wraps instead of covering it. */
 .kv-row>dt{flex:1 1 38%;min-width:min(38%,8em);overflow-wrap:break-word}
 .kv-row.flash{animation:flash 1.6s ease}
@@ -146,7 +146,7 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .pill.card-alert .icon{width:16px;height:16px;flex:none}
 .pill.card-alert.warn{color:var(--warn)}
 .card-title{grid-area:title;margin-top:10px;font-size:var(--fs-sm);font-weight:600;color:var(--muted);overflow-wrap:break-word}
-.card-value{grid-area:value;font-size:var(--fs-lg);font-weight:700;line-height:1.25;overflow-wrap:break-word}
+.card-value{grid-area:value;font-variant-numeric:tabular-nums;font-size:var(--fs-lg);font-weight:700;line-height:1.25;overflow-wrap:break-word}
 .card-sub{grid-area:sub;color:var(--muted);font-size:var(--fs-xs);overflow-wrap:break-word}
 .meter{grid-area:meter;height:6px;margin-top:8px;border-radius:3px;background:var(--surface-2);overflow:hidden}
 .meter i{display:block;height:100%;background:var(--accent);border-radius:3px}
