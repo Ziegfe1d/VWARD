@@ -89,7 +89,7 @@ HeaderProtectionKey, Rekey*, KeepaliveTimeout, MaxHandshakeAttempts, ContentPadd
   потом программа; если адаптер уже создан программой, Keenetic отвечает «system failed».
   Номера OpkgTun 0-9 (49 - «index too large»).
 - Проверено на роутере владельца 2026-09-28 (Viva, 5.1.6, fi.conf, vward-awg 1.0.0): рукопожатие
-  за 2 с, OpkgTun0 connected, выход 66.234.150.186 (FI). Скорость (20 МБ с Cloudflare): напрямую
+  за 2 с, OpkgTun0 connected, выход в Финляндии. Скорость (20 МБ с Cloudflare): напрямую
   43.7 Мбит/с; контур без ограничений Go 15.3 Мбит/с, 13 МБ, процессор 92% (выбрано); GOMAXPROCS=2 +
   GOMEMLIMIT 24 МБ + GOGC=50 - 3.1; MTU 1280 - 11.5; один поток - 9.9 при 56%. wireproxy давал 10.1.
 - Ускорение шифрования на MIPS (vward-awg 1.1.0, `tools/vward-awg/_mips`): в x/crypto на mips
@@ -132,7 +132,7 @@ HeaderProtectionKey, Rekey*, KeepaliveTimeout, MaxHandshakeAttempts, ContentPadd
   возвращаются на прежний туннель (как защита VPN). Цена: скорость ниже встроенного
   WireGuard, память (у Viva KN-1913 256 МБ, MT7621 4 потока; на роутере владельца ещё swap 255 МБ на USB) - программа контура 13 МБ.
 - Проверено на роутере владельца 2026-09-27 (Viva, 5.1.6, Premium fi.conf, wireproxy-awg 1.0.18,
-  SOCKS5): AmneziaWG 3.1 работает - рукопожатие за 5 с, выход 66.234.150.186 (FI). Скорость
+  SOCKS5): AmneziaWG 3.1 работает - рукопожатие за 5 с, выход в Финляндии. Скорость
   10.1 Мбит/с против 42 напрямую, программа 33 МБ, свободно памяти 83 -> 57 МБ. Узкое место -
   процессор и сетевой стек внутри программы. Дальше: тот же замер для amneziawg-go с
   интерфейсом tun (сетевой стек ядра) и для встроенного Wireguard0 (база для сравнения).

@@ -19,15 +19,15 @@ KEY = "K" * 42 + "A="
 HPK = "H" * 42 + "A="
 CONF = f"""[Interface]
 PrivateKey = {KEY}
-Address = 100.101.72.25/32, fd00::25/128
-DNS = 100.64.0.1
+Address = 10.66.0.25/32, fd00::25/128
+DNS = 10.66.0.1
 Jc = 7
-S3 = 815
+S3 = 800
 S4 = 12
 HeaderProtectionKey = {HPK}
 [Peer]
 PublicKey = {"P" * 42}A=
-Endpoint = 66.234.150.186:3954
+Endpoint = 203.0.113.10:3954
 PersistentKeepalive = 25-35
 """
 
@@ -136,7 +136,7 @@ with tempfile.TemporaryDirectory() as t:
     (share / "version").write_text("1.2.1\n")
     run("install", expect="result=unchanged")
     run("add", 'Bad"name', str(conf), expect="error=invalid_description")
-    noaddr = t / "noaddr.conf"; noaddr.write_text(CONF.replace("Address = 100.101.72.25/32, fd00::25/128\n", ""))
+    noaddr = t / "noaddr.conf"; noaddr.write_text(CONF.replace("Address = 10.66.0.25/32, fd00::25/128\n", ""))
     run("add", "Finland", str(noaddr), expect="error=conf_no_address")
     bad = t / "bad.conf"; bad.write_text(CONF + "# BADCONF\n")
     run("add", "Finland", str(bad), expect="error=conf_rejected")
@@ -171,7 +171,7 @@ with tempfile.TemporaryDirectory() as t:
     if "info.name=OpkgTun1" not in out or ifaces().get("OpkgTun1") != "Finland":
         fail(f"add: {out} {ifaces()}")
     cmds = (st / "ndmc.log").read_text().splitlines()
-    want = ["interface OpkgTun1", 'interface OpkgTun1 description "Finland"', "interface OpkgTun1 ip address 100.101.72.25 255.255.255.255",
+    want = ["interface OpkgTun1", 'interface OpkgTun1 description "Finland"', "interface OpkgTun1 ip address 10.66.0.25 255.255.255.255",
             "interface OpkgTun1 security-level public", "interface OpkgTun1 ip tcp adjust-mss pmtu", "interface OpkgTun1 up"]
     if [c for c in cmds if c.startswith("interface OpkgTun1")] != want or cmds[-1] != "system configuration save":
         fail(f"Keenetic commands: {cmds}")
@@ -187,7 +187,7 @@ with tempfile.TemporaryDirectory() as t:
 
     # Status: facts only.
     st_out = run("status", expect="result=status")
-    if "tunnel=OpkgTun1\t1\t" not in st_out or "Finland" not in st_out or "66.234.150.186:3954" not in st_out:
+    if "tunnel=OpkgTun1\t1\t" not in st_out or "Finland" not in st_out or "203.0.113.10:3954" not in st_out:
         fail(f"status: {st_out}")
 
     # The Panel's API reads the same facts (Entware jq: no regex functions).
@@ -196,20 +196,20 @@ with tempfile.TemporaryDirectory() as t:
                                     "VWARD_AWG_ENGINE_BIN": str(ENGINE)})
     j = json.loads(api.stdout[api.stdout.index("{"):])
     t0 = j["tunnels"][0] if j.get("tunnels") else {}
-    if not j.get("installed") or t0.get("name") != "OpkgTun1" or not t0.get("running") or t0.get("description") != "Finland" or t0.get("endpoint") != "66.234.150.186:3954":
+    if not j.get("installed") or t0.get("name") != "OpkgTun1" or not t0.get("running") or t0.get("description") != "Finland" or t0.get("endpoint") != "203.0.113.10:3954":
         fail(f"awg-data: {j}")
     outs.append(api.stdout)
     # Keenetic's own tunnels from AmneziaWG 3.x files (H1-H4 = 1 2 3 4, S3/S4 kept, header
     # protection dropped) are found; an AmneziaWG 2.0 tunnel with its own H values is not.
     rc = tool(tools / "ndmc-rc", "#!/bin/sh\ncat <<'EOF'\n"
-              "interface Wireguard0\n    description AWG2_DE\n    wireguard asc 5 10 50 43 30 179064566-1646449610 1687083366-1702146341 1888033499-1927208669 2059508124-2092293846 47 15 \"<b 0x52>\"\n    wireguard peer PeLt=\n        endpoint de.example:1\n    !\n    up\n!\n"
-              "interface Wireguard2\n    description fi\n    wireguard asc 7 10 80 649 170 1 2 3 4 815 12 \"<b 0x52><rd 9>\"\n    wireguard peer zOuN=\n        endpoint 66.234.150.186:3954\n    !\n    down\n!\n"
-              "interface Wireguard4\n    description \"us-east.conf (1)\"\n    wireguard asc 6 10 80 381 865 1 2 3 4 209 12 \"<b 0x52>\"\n    wireguard peer jcct=\n    !\n!\nEOF\n")
+              "interface Wireguard0\n    description de\n    wireguard asc 5 10 50 40 30 100000000-200000000 300000000-400000000 500000000-600000000 700000000-800000000 47 15 \"<b 0x52>\"\n    wireguard peer PDeA=\n        endpoint de.example:1\n    !\n    up\n!\n"
+              "interface Wireguard2\n    description fi\n    wireguard asc 7 10 80 600 150 1 2 3 4 800 12 \"<b 0x52><rd 9>\"\n    wireguard peer PFiA=\n        endpoint 203.0.113.10:3954\n    !\n    down\n!\n"
+              "interface Wireguard4\n    description \"us-east.conf (1)\"\n    wireguard asc 6 10 80 300 800 1 2 3 4 200 12 \"<b 0x52>\"\n    wireguard peer PUsA=\n    !\n!\nEOF\n")
     api2 = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], text=True, capture_output=True,
                           env=env | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=awg-data", "JQ": shutil.which("jq"),
                                      "VWARD_AWG_ENGINE_BIN": str(ENGINE), "VWARD_NDMC": str(rc)})
     lost = json.loads(api2.stdout[api2.stdout.index("{"):])["lost"]
-    if lost != [{"name": "Wireguard2", "description": "fi", "peer": "zOuN="}, {"name": "Wireguard4", "description": "us-east.conf (1)", "peer": "jcct="}]:
+    if lost != [{"name": "Wireguard2", "description": "fi", "peer": "PFiA="}, {"name": "Wireguard4", "description": "us-east.conf (1)", "peer": "PUsA="}]:
         fail(f"lost tunnels: {lost}")
 
     # A stopped program is started again by supervise, on the same adapter.

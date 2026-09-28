@@ -15,6 +15,7 @@ REGISTRY_VERSION=$(sed -n 's/.*"platform_version": "\([^"]*\)".*/\1/p' config/co
 [ "$VERSION" = "$REGISTRY_VERSION" ] || fail "VERSION and registry differ"
 grep -Fq "**$VERSION**" README.md || fail "README version differs"
 python3 tests/repository/check-version-synchronization.py || fail "Version synchronization"
+python3 tests/repository/check-no-personal-data.py || fail "no data of the owner's router in the repository"
 
 for DOC in docs/INSTALL.md docs/INSTALLATION_MAP.md docs/DEPENDENCIES.md docs/PANEL.md \
     docs/NAMING_MIGRATION.md docs/UPDATER_ARCHITECTURE.md \
