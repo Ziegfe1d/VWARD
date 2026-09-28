@@ -5,7 +5,7 @@
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 cd "$HERE/.."
-[ -f .build/go.mod ] || sh mips/prepare.sh
+[ -f .build/go.mod ] || sh _mips/prepare.sh
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 for arch in mipsle mips; do

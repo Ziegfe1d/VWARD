@@ -12,8 +12,8 @@ rm -rf "${ROOT:?}/.build"
 mkdir -p .build
 cp -R "$XC" .build/xcrypto
 chmod -R u+w .build/xcrypto
-cp mips/chacha_noasm.go mips/chacha_mipsx.go .build/xcrypto/chacha20/
-cp mips/mac_noasm.go mips/sum_mipsx.go mips/sum_mipsx_test.go .build/xcrypto/internal/poly1305/
+cp _mips/chacha_noasm.go _mips/chacha_mipsx.go .build/xcrypto/chacha20/
+cp _mips/mac_noasm.go _mips/sum_mipsx.go _mips/sum_mipsx_test.go .build/xcrypto/internal/poly1305/
 cp go.mod .build/go.mod
 cp go.sum .build/go.sum
 echo 'replace golang.org/x/crypto => ./.build/xcrypto' >> .build/go.mod
