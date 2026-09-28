@@ -11,7 +11,7 @@ mkdir -p "$OUT"
 cd "$HERE"
 for arch in mipsle mips arm64 arm; do
     case "$arch" in mips*) extra="GOMIPS=softfloat" ;; arm) extra="GOARM=7" ;; *) extra= ;; esac
-    env GOARCH="$arch" $extra go build -trimpath -ldflags "-s -w -buildid=" -o "$OUT/vward-awg-linux-$arch" .
+    env GOARCH="$arch" $extra go build -trimpath -buildvcs=false -ldflags "-s -w -buildid=" -o "$OUT/vward-awg-linux-$arch" .
 done
 cd "$OUT"
 sha256sum vward-awg-linux-mipsle vward-awg-linux-mips vward-awg-linux-arm64 vward-awg-linux-arm > SHA256SUMS
