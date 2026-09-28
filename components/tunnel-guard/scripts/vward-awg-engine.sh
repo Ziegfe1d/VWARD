@@ -161,7 +161,8 @@ start_one() {
     (
         GOMAXPROCS=${VWARD_AWG_THREADS:-2} GOGC=100 GODEBUG=madvdontneed=1
         export GOMAXPROCS GOGC GODEBUG
-        exec "$BIN" -i "$(adapter_of "$2")" -c "$ENGINE_ETC/t$1.conf" -s "$ENGINE_RUN/t$1.state" </dev/null >/dev/null 2>"$ENGINE_RUN/t$1.err"
+        # fd 3 (an add's step channel) is not the tunnel's to keep open.
+        exec "$BIN" -i "$(adapter_of "$2")" -c "$ENGINE_ETC/t$1.conf" -s "$ENGINE_RUN/t$1.state" </dev/null >/dev/null 2>"$ENGINE_RUN/t$1.err" 3>&-
     ) &
     echo $! > "$ENGINE_RUN/t$1.pid"
 }
@@ -179,6 +180,10 @@ handshake_age() {
     echo $(( $(date +%s) - h ))
 }
 
+# step NAME: where an add stands, for the Panel's progress window (fd 3 when the caller
+# opened it; nothing otherwise).
+step() { { printf 'step=%s\n' "$1" >&3; } 2>/dev/null || :; }
+
 op_add() {
     desc=$1 conf=$2
     case "$desc" in ''|*'"'*|*"$(printf '\134')"*) die invalid_description 64 ;; esac
@@ -186,7 +191,7 @@ op_add() {
     [ -f "$conf" ] && [ ! -L "$conf" ] && grep -qi '^\[Interface\]' "$conf" && grep -qi '^\[Peer\]' "$conf" || die conf_syntax 64
     addr=$(conf_address "$conf"); [ -n "$addr" ] || die conf_no_address 64
     [ -x "$BIN" ] && [ "$(cat "$ENGINE_SHARE/version" 2>/dev/null)" = "$AWG_VERSION" ] ||
-        ( trap cleanup EXIT; op_install ) >/dev/null || die engine_install_failed
+        { step download; ( trap cleanup EXIT; op_install ) >/dev/null; } || die engine_install_failed
     mkdir -p "$ENGINE_ETC" && chmod 0700 "$ENGINE_ETC" || die write_failed
     n=$(free_slot) || die engine_full
     k=$(free_opkgtun) || die no_free_tunnel
@@ -195,17 +200,21 @@ op_add() {
     "$BIN" -n -c "$ENGINE_ETC/t$n.conf" >/dev/null 2>&1 || { rm -f "$ENGINE_ETC/t$n.conf"; die conf_rejected; }
     # Keenetic makes the connection and its adapter first; the program attaches to it.
     undo() { stop_one "$n"; ndm "no interface $name" >/dev/null 2>&1; rm -f "$ENGINE_ETC/t$n.conf" "$ENGINE_RUN/t$n.err"; }
+    step router
     for c in "interface $name" "interface $name description \"$desc\"" "interface $name ip address $addr" \
              "interface $name security-level public" "interface $name ip tcp adjust-mss pmtu" "interface $name up"; do
         ndm "$c" || { undo; die router_rejected; }
     done
+    step program
     start_one "$n" "$name" || { undo; die engine_start_failed; }
+    step handshake
     w=0
     until handshake_age "$n" >/dev/null; do
         w=$((w + 2))
         [ "$w" -le "$HANDSHAKE_WAIT" ] || { undo; die tunnel_no_handshake; }
         sleep 2
     done
+    step save
     ndm "system configuration save" || { undo; die config_save_failed; }
     printf '%s\t%s\t-\t%s\n' "$n" "$name" "$desc" >> "$TUNNELS"
     log "added $name slot=$n"

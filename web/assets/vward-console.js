@@ -612,7 +612,7 @@ const RENDER = {
 
   vpn() {
     const wg = st().wg || {}, list = wg.interfaces || [], managed = prof().tunnel_interface || '';
-    const row = t => { const up = isTrue(t.connected); return '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.description || t.name) + '</b><small>' + (t.name === managed ? '<span class="st ok">для маршрутов</span> · ' : '') + esc(hsSec(t) != null ? 'рукопожатие ' + agoText(hsSec(t)) : t.handshake != null ? 'рукопожатия не было' : (t.state || '')) + '</small></div><span class="pill ' + (up ? 'ok' : 'warn') + '">' + (up ? 'В сети' : 'Не в сети') + '</span>' + ico('chevron', 'chev') + '</li>'; };
+    const row = t => { const up = isTrue(t.connected); return '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.description || t.name) + '</b><small>' + (t.name === managed ? '<span class="st ok">для маршрутов</span> · ' : '') + esc(tunSub(t)) + '</small></div><span class="pill ' + (up ? 'ok' : 'warn') + '">' + (up ? 'В сети' : 'Не в сети') + '</span>' + ico('chevron', 'chev') + '</li>'; };
     return loadError(['status']) + awgLostPanel() + nativePanel() +
       panel('Туннели', (list.length ? '<ul class="rows">' + list.map(row).join('') + '</ul>' : empty('Туннели WireGuard не найдены')) +
         '<div class="panel-actions">' + btn('tunnel-create', 'plus', 'Добавить туннель', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnels'),
@@ -1532,21 +1532,26 @@ function tunnelPage(name) {
 // Tunnels Keenetic took from AmneziaWG 3.x files without their header protection
 // (awg-data lost[]): the same files move them to the engine, matched by server key.
 const awgLost = () => (S.awg && S.awg.lost) || [];
-// KeeneticOS 5.2 carries AmneziaWG 3.x itself: once the router is offered 5.2 or newer
-// while it runs older, the engine's tunnels come with the advice to update.
+// A tunnel's line in the list: the handshake; for the engine's tunnels it comes from the engine.
+const tunSub = t => {
+  const e = ((S.awg && S.awg.tunnels) || []).find(x => x.name === t.name);
+  if (e) return 'контур AmneziaWG · ' + (e.handshake != null ? 'рукопожатие ' + agoText(e.handshake) : e.running ? 'рукопожатия нет' : 'программа остановлена');
+  return hsSec(t) != null ? 'рукопожатие ' + agoText(hsSec(t)) : t.handshake != null ? 'рукопожатия не было' : (t.state || '');
+};
+// KeeneticOS 5.2 carries AmneziaWG 3.x itself: once the stable channel offers 5.2 or newer
+// while the router runs older, the engine's tunnels come with the advice to update.
 const fwNum = v => { const m = /^(\d+)\.(\d+)/.exec(v || ''); return m ? +m[1] * 100 + +m[2] : 0; };
 const fwShort = v => fwNum(v) ? Math.floor(fwNum(v) / 100) + '.' + fwNum(v) % 100 + (/^\d+\.\d+$/.test(v) ? '' : ' (' + v + ')') : v;
 const fwNative = () => {
   const f = (S.ext && S.ext.firmware) || null;
   if (!f || !fwNum(f.title || f.release) || fwNum(f.title || f.release) >= 502) return null;
-  const ok = (f.channels || []).filter(c => fwNum(c.version) >= 502);
-  return ok.find(c => c.name === 'stable') || ok.find(c => c.name === f.channel) || ok[0] || null;
+  // Only the stable channel: a preview or alpha build is not something to advise.
+  return (f.channels || []).find(c => c.name === 'stable' && fwNum(c.version) >= 502) || null;
 };
 const nativePanel = () => {
   const c = fwNative();
   if (!c || !((S.awg && S.awg.tunnels) || []).length) return '';
   return panel('Обновите прошивку Keenetic', '<p class="panel-desc">Для роутера вышла KeeneticOS ' + esc(fwShort(c.version)) +
-    (c.name !== 'stable' ? ' (тестовый канал «' + esc(fwChannel(c.name)) + '»)' : '') +
     '. В ней AmneziaWG 3.x встроена в прошивку: туннели будут заметно быстрее и не будут занимать процессор и память программой на флешке. Прошивку ставит Keenetic, роутер перезагрузится.</p>' +
     kv([['Прошивка Keenetic', 'Обновления', 'info', 'u-fw', '', 'установлена ' + esc(((S.ext || {}).firmware || {}).title || ''), 'out']]));
 };
@@ -1557,35 +1562,28 @@ function awgLostPanel(only) {
   return panel(L.length > 1 ? 'Эти туннели не подключатся' : 'Туннель не подключится',
     '<p class="field-warn">' + esc(names) + (L.length > 1 ? ' загружены' : ' загружен') + ' в Keenetic из файлов AmneziaWG 3.x, и Keenetic выбросил их защиту заголовков - без неё сервер не отвечает. Выберите те же файлы: VWARD поднимет туннели в контуре под теми же названиями и перенесёт на них списки и подсети.</p>' +
     '<label class="file-pick">' + ico('save') + '<span>' + (L.length > 1 ? 'Выбрать их файлы .conf' : 'Выбрать файл .conf') + '</span><input type="file" accept=".conf,.vpn,text/plain" multiple data-awg-adopt' + (cfgOk() ? '' : ' disabled') + '></label>' +
-    resultBox('awg-adopt'), { desc: 'Файлы проверяются по ключу сервера: чужой файл не подойдёт.' });
+    '', { desc: 'Файлы проверяются по ключу сервера: чужой файл не подойдёт.' });
 }
 async function awgAdopt(files) {
-  const show = text => { actionResult = { id: 'awg-adopt', text: text }; render(); };
   const read = f => new Promise(res => { if (f.size > 16384) return res(''); const r = new FileReader(); r.onload = () => res(String(r.result || '')); r.onerror = () => res(''); r.readAsText(f); });
   const done = [], bad = [], failed = [];
-  for (const f of files) {
+  tunOverlay = null;
+  tunOverlayShow({ head: 'Перенос туннелей в контур', okHead: 'Туннели перенесены', failHead: 'Перенесено не всё', step: 'prepare' });
+  for (const [k, f] of files.entries()) {
     let text = await read(f);
-    if (/^\s*vpn:\/\//i.test(text)) { const k = await amneziaKey(text); text = k.conf || ''; }
+    if (/^\s*vpn:\/\//i.test(text)) { const key = await amneziaKey(text); text = key.conf || ''; }
     const m = /\[Peer\][\s\S]*?PublicKey\s*=\s*(\S+)/i.exec(text), t = m && awgLost().find(x => x.peer === m[1]);
     if (!t) { bad.push(f.name); continue; }
-    show('Переносим «' + (t.description || t.name) + '» в контур… до минуты');
-    let x, run = {};
-    try { x = await apiPost('tunnel-conf', { op: 'adopt', name: t.name, conf: text }); } catch (e) { x = { ok: false, error: e.message }; }
-    if (x.ok) {
-      const deadline = Date.now() + 4 * 60 * 1000;
-      while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 3000));
-        try { run = (await apiGet('control-data')).run || {}; } catch (e) { continue; }
-        if (run.finished) break;
-      }
-    }
-    const last = String(run.output || '').trim().split('\n').pop() || '';
-    if (x.ok && run.finished && run.rc === 0) done.push(t.description || t.name);
+    const label = t.description || t.name;
+    tunOverlayShow({ sub: (files.length > 1 ? 'Файл ' + (k + 1) + ' из ' + files.length + ': ' : '') + '«' + label + '»', step: 'prepare', pct: 0 });
     // One server that does not answer does not stop the others.
-    else failed.push('«' + (t.description || t.name) + '» - ' + (x.ok ? errText({ error: last.replace(/^error=/, '') || 'engine_failed' }) : errText(x)));
+    const r = await runJob({ op: 'adopt', name: t.name, conf: text }, 4);
+    if (r.ok) done.push(label); else failed.push('«' + label + '» - ' + r.text.replace(/\. Роутер оставлен как был\.$/, ''));
     await load('awg', true);
   }
-  show((done.length ? 'В контуре: ' + done.join(', ') + '. ' : '') + (failed.length ? 'Не перенесены: ' + failed.join('; ') + '. ' : '') + (bad.length ? 'Не подошли ни к одному туннелю: ' + bad.join(', ') + ' - добавьте их через «Добавить туннель».' : ''));
+  tunOverlayShow({ done: true, ok: done.length > 0 && !failed.length && !bad.length, sub: '', stage: done.length ? 'В контуре: ' + done.join(', ') : '',
+    text: [failed.length ? 'Не перенесены: ' + failed.join('; ') + '.' : '', bad.length ? 'Не подошли ни к одному туннелю: ' + bad.join(', ') + ' - добавьте их через «Добавить туннель».' : '',
+      !failed.length && !bad.length ? 'Списки и подсети теперь идут через туннели контура.' : ''].filter(Boolean).join(' ') });
   await Promise.all([load('status', true), load('awg', true), load('lists', true)]); render();
 }
 // Filled only by «Проверить сейчас»: the router does not do this in the background.
@@ -1652,30 +1650,62 @@ async function tunnelSubnet(name, op, subnet) {
   toast(x.ok ? (x.result === 'unchanged' ? 'Уже так' : op === 'add' ? subnet + ' идёт через ' + name : subnet + ' убрана из ' + name) : 'Не сохранено: ' + errText(x));
   await load('lists', true); render();
 }
-// Long tunnel jobs report "info.key=value" lines and a last "result=" or "error=" line.
-function tunnelJobText(out) {
-  const lines = String(out || '').trim().split('\n'), last = lines[lines.length - 1] || '';
-  const info = {}; lines.forEach(l => { const m = /^info\.([a-z]+)=(.*)$/.exec(l); if (m) info[m[1]] = m[2]; });
-  if (/^result=/.test(last)) return 'Готово' + (info.name ? ': создан ' + info.name : '') + (info.endpoint ? ' · сервер ' + info.endpoint : '') + (info.address ? ' · адрес ' + info.address : '');
-  if (/^error=/.test(last)) return 'Не выполнено: ' + errText({ error: last.slice(6) });
-  return 'Проверяем новый сервер… до минуты';
+/* ---------- Окно создания туннеля ---------- */
+// Like the update window: the tunnel jobs report "step=" lines as they go (the router's
+// and the engine's), then "info.key=value" and a last "result=" or "error=" line.
+const TUN_STEPS = [['prepare', 'Подготовка', 5], ['download', 'Скачивание программы контура', 12], ['test', 'Проверка сервера на временном туннеле', 20],
+  ['router', 'Создание подключения в Keenetic', 35], ['program', 'Запуск программы контура', 48], ['handshake', 'Ожидание ответа сервера', 58],
+  ['save', 'Сохранение настроек роутера', 88], ['move', 'Перенос списков и подсетей', 92]];
+let tunOverlay = null;
+function tunOverlayShow(o) {
+  tunOverlay = Object.assign(tunOverlay || { step: 'prepare', pct: 0 }, o);
+  let el = $('tunOverlay');
+  if (!el) { el = document.createElement('div'); el.id = 'tunOverlay'; document.body.appendChild(el); }
+  const u = tunOverlay, i = Math.max(0, TUN_STEPS.findIndex(x => x[0] === u.step)), step = TUN_STEPS[i], next = TUN_STEPS[i + 1];
+  const cap = next ? next[2] - 3 : 97;
+  // Inside a step the ring creeps on, so a minute of waiting for the server never looks frozen.
+  u.pct = u.done ? 100 : Math.min(cap, Math.max(u.pct || 0, step[2]) + (u.pct >= step[2] ? 1 : 0));
+  const head = u.done ? (u.ok ? u.okHead : u.failHead) : u.head;
+  const text = u.done ? u.text : 'Не закрывайте страницу. Роутер и интернет продолжают работать.';
+  el.innerHTML = '<div class="upd-page' + (u.done ? (u.ok ? ' ok' : ' crit') : '') + '" role="dialog" aria-live="polite" aria-label="' + esc(head) + '">' +
+    '<h2>' + esc(head) + '</h2>' + (u.sub ? '<p class="upd-ver">' + esc(u.sub) + '</p>' : '') +
+    '<p class="upd-text">' + esc(text) + '</p>' + ringHtml(u.pct, u.done, u.ok) +
+    '<p class="upd-stage">' + esc(u.done ? (u.stage || '') : step[1]) + '</p>' +
+    (u.done ? '<div class="panel-actions">' + (u.ok && u.open ? '<button class="btn primary" type="button" data-act="tun-open" data-name="' + esc(u.open) + '">Открыть туннель</button>' : '') +
+      '<button class="btn' + (u.ok && u.open ? '' : ' primary') + '" type="button" data-act="tun-close">' + (u.ok ? 'Готово' : 'Закрыть') + '</button></div>' : '') + '</div>';
 }
-async function tunnelJob(resultId, fields) {
-  const show = text => { actionResult = { id: resultId, text: text }; render(); };
-  render();
+function tunOverlayClose() { tunOverlay = null; const el = $('tunOverlay'); if (el) el.remove(); }
+const jobInfo = out => { const info = {}; String(out || '').split('\n').forEach(l => { const m = /^(info\.([a-z]+)|step)=(.*)$/.exec(l); if (m) info[m[2] || 'step'] = m[3]; }); return info; };
+const jobLast = out => { const l = String(out || '').trim().split('\n'); return l[l.length - 1] || ''; };
+// runJob FIELDS: starts a tunnel job and follows it in the window; the finished run, or null.
+async function runJob(fields, minutes) {
   let x;
-  try { x = await apiPost('tunnel-conf', fields); } catch (e) { show('Ошибка: ' + e.message); return; }
-  if (!x.ok) { show('Не выполнено: ' + errText(x)); return; }
-  const deadline = Date.now() + 5 * 60 * 1000;
+  try { x = await apiPost('tunnel-conf', fields); } catch (e) { return { ok: false, text: 'Ошибка: ' + e.message }; }
+  if (!x.ok) return { ok: false, text: errText(x) };
+  const deadline = Date.now() + minutes * 60 * 1000;
   let run = {};
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 3000));
-    try { run = (await apiGet('control-data')).run || {}; } catch (e) { continue; }
-    show(tunnelJobText(run.output));
+    try { run = (await apiGet('control-data')).run || {}; } catch (e) { tunOverlayShow({}); continue; }
+    const info = jobInfo(run.output);
+    tunOverlayShow(info.step ? { step: info.step } : {});
     if (run.finished) break;
   }
-  toast(run.finished && run.rc === 0 ? 'Готово' : run.finished ? 'Не выполнено' : 'Ещё выполняется, проверьте позже');
-  await Promise.all([load('status', true), load('lists', true)]); render();
+  const info = jobInfo(run.output), last = jobLast(run.output);
+  if (!run.finished) return { ok: false, text: 'Роутер ещё работает над туннелем. Проверьте страницу «VPN» через пару минут.' };
+  if (run.rc === 0 && /^result=/.test(last)) return { ok: true, info: info };
+  return { ok: false, text: errText({ error: last.replace(/^error=/, '') || 'engine_failed' }) + '. Роутер оставлен как был.' };
+}
+async function tunnelJob(mode, fields, label) {
+  tunOverlay = null;
+  const heads = { create: ['Новый туннель', 'Туннель создан', 'Туннель не создан'], replace: ['Замена конфигурации', 'Конфигурация заменена', 'Конфигурация не заменена'] }[mode];
+  tunOverlayShow({ head: heads[0], okHead: heads[1], failHead: heads[2], sub: label ? '«' + label + '»' : '', step: 'prepare' });
+  const r = await runJob(fields, 5);
+  const i = r.info || {};
+  tunOverlayShow({ done: true, ok: r.ok, open: r.ok ? (mode === 'create' ? i.name : fields.name) : '',
+    stage: r.ok ? [label, i.endpoint ? 'сервер ' + i.endpoint : ''].filter(Boolean).join(' · ') : '',
+    text: r.ok ? 'Сервер ответил, туннель работает. Направьте на него списки и сервисы на странице туннеля.' : r.text });
+  await Promise.all([load('status', true), load('lists', true), load('awg', true)]); render();
 }
 // Manual tunnel fields: [id, caption, placeholder, secret, mono]; empty optional ones are left out.
 const TC_FIELDS = [
@@ -1702,6 +1732,9 @@ function tcConf(form) {
 // An Amnezia key (vpn://): base64url of JSON, usually zlib with a 4-byte length in front.
 // A key to one's own server carries the WireGuard/AmneziaWG .conf; a Premium key carries only
 // an access key to Amnezia's servers. Decoded here in the browser; nothing of it is shown.
+// A tunnel's name from its file: «fi.conf», «us-east.conf (1)» → «fi», «us-east».
+const confName = n => String(n || '').replace(/\s*\(\d+\)\s*$/, '').replace(/\.(conf|vpn|txt)$/i, '').replace(/\s*\(\d+\)\s*$/, '')
+  .replace(/["\\]/g, '').replace(/[_]+/g, ' ').trim().slice(0, 64);
 async function amneziaKey(text) {
   let b;
   try { b = Uint8Array.from(atob(text.trim().slice(6).replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '')), c => c.charCodeAt(0)); }
@@ -1723,7 +1756,7 @@ async function amneziaKey(text) {
     try { lc = typeof lc === 'string' ? JSON.parse(lc) : lc; } catch (e) { continue; }
     const conf = lc && typeof lc.config === 'string' ? lc.config : '';
     if (/\[Interface\]/i.test(conf) && /\[Peer\]/i.test(conf))
-      return { conf: conf.replace(/\$PRIMARY_DNS/g, json.dns1 || '1.1.1.1').replace(/\$SECONDARY_DNS/g, json.dns2 || '1.0.0.1') };
+      return { conf: conf.replace(/\$PRIMARY_DNS/g, json.dns1 || '1.1.1.1').replace(/\$SECONDARY_DNS/g, json.dns2 || '1.0.0.1'), name: confName(json.description || json.name || '') };
   }
   return { error: 'в ключе нет настройки WireGuard или AmneziaWG (' + (cs.map(c => c.container).join(', ') || 'пусто') + ') - VWARD умеет только эти два' };
 }
@@ -2240,17 +2273,20 @@ function updOverlayShow(o) {
   const stage = u.done ? (u.ok ? 'VWARD ' + (u.version || '') + ' работает' : 'Прежняя версия работает') : rb ? 'Возврат прежней версии' : step[1];
   const text = u.done ? (u.ok ? 'Обновите страницу, чтобы открыть новую версию.' : (u.error || 'Установщик вернул прежнюю версию, всё работает как раньше. Подробности - в «Журналах» → «Обновления».'))
     : 'Не закрывайте страницу, пока не завершится обновление. Роутер и интернет продолжают работать.';
-  const R = 76, C = 2 * Math.PI * R, a = (u.pct / 100) * 2 * Math.PI - Math.PI / 2;
   const state = u.done ? (u.ok ? ' ok' : ' crit') : '';
   el.innerHTML = '<div class="upd-page' + state + '" role="dialog" aria-live="polite" aria-label="' + esc(head) + '">' +
     '<h2>' + esc(head) + '</h2>' + (u.version && !u.done ? '<p class="upd-ver">' + esc((u.from ? u.from + ' → ' : '') + u.version) + '</p>' : '') +
-    '<p class="upd-text">' + esc(text) + '</p>' +
-    '<div class="upd-ring"><svg viewBox="0 0 180 180" aria-hidden="true"><circle class="upd-track" cx="90" cy="90" r="' + R + '"/>' +
-    '<circle class="upd-arc" cx="90" cy="90" r="' + R + '" stroke-dasharray="' + C.toFixed(1) + '" stroke-dashoffset="' + (C * (1 - u.pct / 100)).toFixed(1) + '" transform="rotate(-90 90 90)"/>' +
-    (u.done ? '' : '<circle class="upd-dot" cx="' + (90 + R * Math.cos(a)).toFixed(1) + '" cy="' + (90 + R * Math.sin(a)).toFixed(1) + '" r="11"/>') + '</svg>' +
-    '<span class="upd-pct">' + (u.done ? ico(u.ok ? 'check' : 'alert') : u.pct + '%') + '</span></div>' +
+    '<p class="upd-text">' + esc(text) + '</p>' + ringHtml(u.pct, u.done, u.ok) +
     '<p class="upd-stage">' + esc(stage) + '</p>' +
     (u.done ? '<div class="panel-actions">' + (u.ok ? '<button class="btn primary" type="button" data-act="upd-reload">Обновить страницу</button>' : '<button class="btn" type="button" data-act="upd-close">Закрыть</button>') + '</div>' : '') + '</div>';
+}
+// The ring with the percentage (a check or a cross when done), for the update and tunnel windows.
+function ringHtml(pct, done, ok) {
+  const R = 76, C = 2 * Math.PI * R, a = (pct / 100) * 2 * Math.PI - Math.PI / 2;
+  return '<div class="upd-ring"><svg viewBox="0 0 180 180" aria-hidden="true"><circle class="upd-track" cx="90" cy="90" r="' + R + '"/>' +
+    '<circle class="upd-arc" cx="90" cy="90" r="' + R + '" stroke-dasharray="' + C.toFixed(1) + '" stroke-dashoffset="' + (C * (1 - pct / 100)).toFixed(1) + '" transform="rotate(-90 90 90)"/>' +
+    (done ? '' : '<circle class="upd-dot" cx="' + (90 + R * Math.cos(a)).toFixed(1) + '" cy="' + (90 + R * Math.sin(a)).toFixed(1) + '" r="11"/>') + '</svg>' +
+    '<span class="upd-pct">' + (done ? ico(ok ? 'check' : 'alert') : pct + '%') + '</span></div>';
 }
 function updOverlayClose() { updOverlay = null; const el = $('updOverlay'); if (el) el.remove(); }
 // Updater exit codes that are answers, not failures.
@@ -2461,6 +2497,8 @@ document.addEventListener('click', e => {
   else if (a === 'backup-create') { actionResult = { id: 'backup', text: 'Создаём копию…' }; render(); apiPost('backup-control', { op: 'create' }).then(x => { toast(x.ok ? 'Копия создана' : 'Не выполнено: ' + errText(x)); actionResult = null; return load('backups', true); }, e => { toast('Ошибка: ' + e.message); actionResult = null; }).then(render); }
   else if (a === 'upd-reload') location.reload();
   else if (a === 'upd-close') updOverlayClose();
+  else if (a === 'tun-close') tunOverlayClose();
+  else if (a === 'tun-open') { const n = t.dataset.name; tunOverlayClose(); go('t-' + n); }
   else if (a === 'agh-filters-refresh') aghSet({ setting: 'filters-refresh' }, 'Списки обновляются');
   else if (a === 'tunnel-create') tunnelConfSheet('create');
   else if (a === 'tunnel-replace') tunnelConfSheet('replace', current.slice(2));
@@ -2559,7 +2597,11 @@ document.addEventListener('change', e => {
     if (!file) return;
     if (file.size > 16384) { toast('Файл больше 16 КБ - это не .conf'); return; }
     const r = new FileReader();
-    r.onload = () => { form.querySelector('[name=conf]').value = String(r.result || ''); form.dataset.checked = ''; $('tcPreview').innerHTML = ''; form.querySelector('[type=submit]').textContent = 'Проверить'; };
+    r.onload = () => {
+      form.querySelector('[name=conf]').value = String(r.result || ''); form.dataset.checked = ''; $('tcPreview').innerHTML = ''; form.querySelector('[type=submit]').textContent = 'Проверить';
+      const d = form.querySelector('[name=description]');
+      if (d && !d.value.trim()) d.value = confName(file.name);
+    };
     r.readAsText(file);
     return;
   }
@@ -2650,8 +2692,9 @@ document.addEventListener('submit', async e => {
     const form = e.target, mode = form.dataset.mode, name = form.dataset.name, manual = !form.querySelector('.tc-manual').hidden;
     if (manual && TC_FIELDS.slice(0, 4).some(f => !form.querySelector('[name="tc-' + f[0] + '"]').value.trim())) { toast('Заполните ключ, адрес, ключ сервера и сервер'); return; }
     let text = manual ? tcConf(form) : form.querySelector('[name=conf]').value;
-    if (!manual && /^\s*vpn:\/\//i.test(text)) { const k = await amneziaKey(text); if (k.error) { toast(k.error); return; } text = k.conf; }
-    const descEl = form.querySelector('[name=description]'), desc = descEl ? descEl.value.trim() : '';
+    const descEl = form.querySelector('[name=description]');
+    if (!manual && /^\s*vpn:\/\//i.test(text)) { const k = await amneziaKey(text); if (k.error) { toast(k.error); return; } text = k.conf; if (descEl && !descEl.value.trim() && k.name) descEl.value = k.name; }
+    const desc = descEl ? descEl.value.trim() : '';
     if (!manual && (!/\[Interface\]/i.test(text) || !/\[Peer\]/i.test(text))) { toast('Выберите файл .conf или вставьте его текст или ключ vpn://'); return; }
     if (mode === 'create' && !desc) { toast('Введите название туннеля'); return; }
     if (form.dataset.checked !== '1') {
@@ -2667,7 +2710,7 @@ document.addEventListener('submit', async e => {
       return;
     }
     closeLayer();
-    await tunnelJob(mode === 'create' ? 'tunnels' : 'tunnel-conf', mode === 'create' ? { op: 'create', conf: text, description: desc } : { op: 'replace', name: name, conf: text, confirm: 'TUNNEL_REPLACE' });
+    await tunnelJob(mode, mode === 'create' ? { op: 'create', conf: text, description: desc } : { op: 'replace', name: name, conf: text, confirm: 'TUNNEL_REPLACE' }, mode === 'create' ? desc : tunLabel(name));
     return;
   }
   if (f === 'agh-connect') {

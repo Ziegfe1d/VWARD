@@ -1249,6 +1249,16 @@ store_conf() {
     cp "$2" "$sc_dir/current.conf" && chmod 0600 "$sc_dir/current.conf"
 }
 
+# step NAME: where a tunnel job stands; the Panel's progress window reads these lines.
+step() { printf 'step=%s\n' "$1"; }
+
+# engine_add DESCRIPTION FILE: the engine's add; its steps reach the job's output on fd 3.
+engine_add() {
+    exec 3>&1
+    en_out=$("$AWG_ENGINE" add "$1" "$2" 2>/dev/null)
+    exec 3>&-
+}
+
 tunnel_summary() {
     # Plain facts about a plan for the Panel, never the keys.
     printf 'info.endpoint=%s\n' "$(conf_get endpoint "$1")"
@@ -1284,6 +1294,7 @@ op_tunnel_conf() {
             JOURNAL=$(mktemp /tmp/vward-console-tunnel.XXXXXX 2>/dev/null) || die temporary_file_unavailable
             TXN=1
             snapshot
+            step test
             tunnel_test "$PLAN"
             new_peer=$(conf_get peer "$PLAN")
             # Undo, replayed newest first: the new peer out, then the old lines back.
@@ -1304,11 +1315,14 @@ op_tunnel_conf() {
             fi
             cat "$JOURNAL.old" >> "$JOURNAL"
             echo "no interface $tc_arg wireguard peer $new_peer" >> "$JOURNAL"
+            step router
             for op in $old_peers; do
                 [ "$op" = "$new_peer" ] || ndm "no interface $tc_arg wireguard peer $op" || die router_rejected
             done
             apply_plan "$tc_arg" "$PLAN" "$(conf_get address "$PLAN")"
+            step handshake
             handshake_ok "$tc_arg" || die tunnel_no_handshake
+            step save
             save_router || die config_save_failed
             TXN=0
             store_conf "$tc_arg" "$tc_file" || audit "tunnel $tc_arg conf not stored"
@@ -1323,7 +1337,7 @@ op_tunnel_conf() {
                 # The firmware cannot run this format: VWARD's engine holds the tunnel
                 # on a Keenetic «OpkgTun» connection.
                 [ -x "$AWG_ENGINE" ] || die engine_unavailable
-                en_out=$("$AWG_ENGINE" add "$tc_arg" "$tc_file" 2>/dev/null)
+                engine_add "$tc_arg" "$tc_file"
                 case "$(printf '%s\n' "$en_out" | tail -n 1)" in
                     result=changed) ;;
                     error=*) en_err=$(printf '%s\n' "$en_out" | sed -n 's/^error=//p' | tail -n 1)
@@ -1341,13 +1355,16 @@ op_tunnel_conf() {
             TXN=1
             snapshot
             NEW_IF=$(free_tunnel_name) || die no_free_tunnel
+            step router
             ndm "interface $NEW_IF" || die router_rejected
             echo "no interface $NEW_IF" >> "$JOURNAL"
             ndm "interface $NEW_IF description \"$tc_arg\"" || die invalid_description
             ndm "interface $NEW_IF security-level public" || die router_rejected
             ndm "interface $NEW_IF ip tcp adjust-mss pmtu" || :
             apply_plan "$NEW_IF" "$PLAN" "$(conf_get address "$PLAN")"
+            step handshake
             handshake_ok "$NEW_IF" || die tunnel_no_handshake
+            step save
             save_router || die config_save_failed
             TXN=0
             store_conf "$NEW_IF" "$tc_file" || audit "tunnel $NEW_IF conf not stored"
@@ -1368,7 +1385,7 @@ op_tunnel_conf() {
             ad_desc=$(tunnel_block "$tc_arg" | sed -n 's/^ *description *//p' | head -n 1 | tr -d '"\\')
             [ -n "$ad_desc" ] || ad_desc=$tc_arg
             [ -x "$AWG_ENGINE" ] || die engine_unavailable
-            en_out=$("$AWG_ENGINE" add "$ad_desc" "$tc_file" 2>/dev/null)
+            engine_add "$ad_desc" "$tc_file"
             case "$(printf '%s\n' "$en_out" | tail -n 1)" in
                 result=changed) ;;
                 error=*) en_err=$(printf '%s\n' "$en_out" | sed -n 's/^error=//p' | tail -n 1)
@@ -1380,6 +1397,7 @@ op_tunnel_conf() {
             rm -f "$VWARD_DEVICE_MAP_CACHE"
             printf 'info.name=%s\n' "$ad_new"
             # The VWARD tunnel itself moves first; then lists and subnets, and the old one goes.
+            step move
             if [ "$tc_arg" = "$VWARD_TUNNEL_INTERFACE" ]; then
                 ad_r=$(sh "$0" tunnel "$ad_new" 2>/dev/null | tail -n 1)
                 case "$ad_r" in result=*) ;; *) die adopt_move_failed ;; esac

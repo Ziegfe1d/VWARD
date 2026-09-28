@@ -298,7 +298,7 @@ small.st .icon{width:14px;height:14px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* Окно установки обновления */
-#updOverlay{position:fixed;inset:0;z-index:60;overflow:auto;background:var(--bg)}
+#updOverlay,#tunOverlay{position:fixed;inset:0;z-index:60;overflow:auto;background:var(--bg)}
 .upd-page{max-width:520px;margin:0 auto;padding:40px 24px 32px}
 .upd-page h2{margin:0 0 6px;font-size:var(--fs-xl,24px);line-height:1.25}
 .upd-ver{margin:0 0 10px;color:var(--muted);font-size:var(--fs-sm)}

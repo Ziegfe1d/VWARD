@@ -159,7 +159,15 @@ with tempfile.TemporaryDirectory() as t:
     # A good tunnel: the first free OpkgTun (OpkgTun0 belongs to another program),
     # made before the program starts, the address from the file, saved.
     (st / "ndmc.log").write_text("")
-    out = run("add", "Finland", str(conf), expect="result=changed")
+    # With fd 3 open (as the Panel's job opens it) the add reports its steps there.
+    r = subprocess.run(["sh", "-c", 'sh "$0" add Finland "$1" 3>&1', str(ENGINE), str(conf)], env=env, text=True, capture_output=True, timeout=60)
+    out = r.stdout
+    outs.append(r.stdout + r.stderr)
+    if out.strip().splitlines()[-1:] != ["result=changed"]:
+        fail(f"add: {out} {r.stderr[-300:]}")
+    steps = [l[5:] for l in out.splitlines() if l.startswith("step=")]
+    if steps != ["router", "program", "handshake", "save"]:
+        fail(f"add steps: {steps}")
     if "info.name=OpkgTun1" not in out or ifaces().get("OpkgTun1") != "Finland":
         fail(f"add: {out} {ifaces()}")
     cmds = (st / "ndmc.log").read_text().splitlines()
