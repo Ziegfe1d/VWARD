@@ -35,7 +35,7 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
-const version = "1.1.1"
+const version = "1.2.0"
 
 func fail(code int, format string, a ...any) {
 	fmt.Fprintf(os.Stderr, "error: "+format+"\n", a...)

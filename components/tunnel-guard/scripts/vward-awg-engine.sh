@@ -32,15 +32,15 @@ MAX_TUNNELS=5
 # Keenetic numbers OpkgTun connections 0-9; other programs may hold some.
 OPKGTUN_MAX=9
 
-AWG_VERSION=1.1.1
+AWG_VERSION=1.2.0
 AWG_URL=${VWARD_AWG_URL:-https://raw.githubusercontent.com/Ziegfe1d/VWARD/awg-engine}
 # SHA-256 of the unpacked program (tools/vward-awg/SHA256SUMS, a reproducible build).
 awg_sum() {
     case "$1" in
-        mipsle) echo e359d6a144f1737d43f3f4d43d789851160dd27ac00d4ff066ac0e8142c83ff1 ;;
-        mips) echo 559925a6defd09a31184c061718f247c8301e72db2150d1afa03819c865da61f ;;
-        arm64) echo b9a3e335cd7a368cda63014b9658d8d41fa4159f2866fed952790727eee834cb ;;
-        arm) echo db7e51c52dc6bfebbe2cd3c2c14600ea0a6377c2a1f83eba1b83bb0cd84d952c ;;
+        mipsle) echo 01b684534a467db2f2315692ad29a178c3aa1070e256fa7c7c7d1072b9f331bd ;;
+        mips) echo a0bd8d683ee2045cf5d5bccdb87acc44a035c7ded4c3490a03cb5810222f38aa ;;
+        arm64) echo bdb5ade5be0c85d552c10b833711c5d76c585eaef97602c85eb3266115160885 ;;
+        arm) echo 9bb89fddd2d8dd21f2f9caf18e4ea97630ae80518237cc9baed1e155a6f2cdfa ;;
         *) return 1 ;;
     esac
 }
