@@ -111,6 +111,16 @@ rci_why() {
     echo "${w:-no answer}"
 }
 
+# proxy_support: 0 - Keenetic has its «Клиент прокси» component (the engine's tunnels are
+# «Прокси» connections), 1 - it has not, 2 - unknown (RCI did not answer).
+proxy_support() {
+    v=$("$CURL" -fs --max-time 5 "$RCI/show/version" 2>/dev/null |
+        "$JQ" -r '.components // empty | if type == "array" then join(",") else tostring end' 2>/dev/null)
+    [ -n "$v" ] || return 2
+    case "$v" in *proxy*) return 0 ;; esac
+    return 1
+}
+
 # pid_of SLOT: the tunnel's program while it runs (a zombie left by a kill is not running).
 pid_of() {
     p=$(cat "$ENGINE_RUN/t$1.pid" 2>/dev/null)
@@ -152,6 +162,8 @@ op_add() {
     case "$desc" in ''|*'"'*|*"$(printf '\134')"*) die invalid_description 64 ;; esac
     [ "${#desc}" -le 64 ] || die invalid_description 64
     [ -f "$conf" ] && [ ! -L "$conf" ] && grep -qi '^\[Interface\]' "$conf" && grep -qi '^\[Peer\]' "$conf" || die conf_syntax 64
+    # Without the component Keenetic refuses the connection: say so before any download or wait.
+    if proxy_support; then :; elif [ "$?" = 1 ]; then die proxy_component_missing; fi
     [ -x "$BIN" ] || ( trap cleanup EXIT; op_install ) >/dev/null || die engine_install_failed
     mkdir -p "$ENGINE_ETC" && chmod 0700 "$ENGINE_ETC" || die write_failed
     n=$(free_slot) || die engine_full
@@ -172,9 +184,11 @@ op_add() {
     # Keenetic's «Прокси» connection to the local port; UDP goes through as well.
     rci "[{\"interface\":{\"name\":\"$proxy\",\"description\":\"$desc\",\"proxy\":{\"protocol\":{\"proto\":\"socks5\"},\"upstream\":{\"host\":\"127.0.0.1\",\"port\":\"$port\"},\"socks5-udp\":true}}}]" &&
         rci "[{\"interface\":{\"name\":\"$proxy\",\"up\":true}},{\"system\":{\"configuration\":{\"save\":true}}}]" || {
-        log "router_rejected $proxy: $(rci_why)"
+        why=$(rci_why); log "router_rejected $proxy: $why"
         rci "[{\"interface\":{\"name\":\"$proxy\",\"no\":true}}]"
-        stop_one "$n"; rm -f "$ENGINE_ETC/t$n.conf" "$ENGINE_ETC/t$n.wp"; die router_rejected; }
+        stop_one "$n"; rm -f "$ENGINE_ETC/t$n.conf" "$ENGINE_ETC/t$n.wp"
+        case "$why" in *'unsupported interface type'*) die proxy_component_missing ;; esac
+        die router_rejected; }
     printf '%s\t%s\t%s\t%s\n' "$n" "$proxy" "$port" "$desc" >> "$TUNNELS"
     log "added $proxy slot=$n"
     printf 'info.name=%s\n' "$proxy"
@@ -216,6 +230,7 @@ op_status() {
     printf 'info.installed=%s\n' "$([ -x "$BIN" ] && echo 1 || echo 0)"
     printf 'info.version=%s\n' "$(cat "$ENGINE_SHARE/version" 2>/dev/null)"
     printf 'info.arch=%s\n' "$(engine_arch 2>/dev/null)"
+    proxy_support; case $? in 0) echo "info.proxy=1" ;; 1) echo "info.proxy=0" ;; esac
     [ -f "$TUNNELS" ] && while IFS="$(printf '\t')" read -r n proxy port desc; do
         p=$(pid_of "$n") || :
         age=$(handshake_age "$n" 2>/dev/null) || age=

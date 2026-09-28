@@ -121,7 +121,7 @@ const API_ERRORS = {
   policy_group_unavailable: 'группа маршрутизации не найдена', list_full: 'список заполнен', backup_failed: 'не удалось сделать резервную копию',
   conf_not_awg3: 'в файле нет настроек AmneziaWG 3.x - это другой файл', conf_other_tunnel: 'файл от другого туннеля: ключ сервера не совпадает', adopt_move_failed: 'туннель поднят в контуре, но списки не перенеслись - перенесите их на странице туннеля', engine_replace_unsupported: 'туннель контура не заменяется - добавьте новый и удалите этот', engine_full: 'в контуре уже 5 туннелей', checksum_mismatch: 'скачанная программа не совпала с контрольной суммой', arch_unsupported: 'процессор роутера не поддерживается контуром',
   services_unavailable: 'каталог сервисов недоступен', invalid_service: 'неверное имя сервиса', unknown_service: 'такого сервиса нет в каталоге', service_too_big: 'у сервиса больше 300 доменов - Keenetic столько не примет в один список', service_not_enabled: 'сервис не включён', list_limit: 'Keenetic не принял домены: достигнут предел списка', no_free_list: 'в Keenetic нет свободного номера доменного списка', catalog_invalid: 'каталог скачался повреждённым - работает прежний',
-  write_failed: 'не удалось записать файл', custom_manifest_url: 'адрес манифеста задан вручную - канал меняется в update.conf', invalid_tunnel: 'недопустимое имя туннеля', tunnel_no_handshake: 'сервер не ответил на рукопожатие за 30 секунд - туннель не изменён', main_tunnel: 'этот туннель используется VWARD для маршрутов', invalid_subnet: 'нужна подсеть IPv4, например 149.154.160.0/20 (не шире /8)', invalid_description: 'название: до 64 символов, без кавычек', no_free_tunnel: 'на роутере нет свободного номера туннеля',
+  write_failed: 'не удалось записать файл', custom_manifest_url: 'адрес манифеста задан вручную - канал меняется в update.conf', invalid_tunnel: 'недопустимое имя туннеля', tunnel_no_handshake: 'сервер не ответил на рукопожатие за 30 секунд - туннель не изменён', proxy_component_missing: 'в Keenetic не установлен компонент «Клиент прокси» - без него туннели контура не подключить', main_tunnel: 'этот туннель используется VWARD для маршрутов', invalid_subnet: 'нужна подсеть IPv4, например 149.154.160.0/20 (не шире /8)', invalid_description: 'название: до 64 символов, без кавычек', no_free_tunnel: 'на роутере нет свободного номера туннеля',
   conf_empty: 'файл пустой', conf_syntax: 'это не файл WireGuard', conf_peer_count: 'в файле должен быть ровно один [Peer]', conf_key_private: 'неверный PrivateKey', conf_public_key: 'неверный PublicKey', conf_preshared_key: 'неверный PresharedKey', conf_address: 'нет адреса IPv4 в Address', conf_endpoint: 'неверный Endpoint (нужно сервер:порт)', conf_mtu: 'MTU вне 1280-1500', conf_keepalive: 'неверный PersistentKeepalive', conf_allowed_ips: 'неверный AllowedIPs', conf_awg: 'неверные параметры AmneziaWG', tunnel_device_missing: 'туннель не поднят на роутере', unknown_tunnel: 'туннель не найден',
   failopen_active: 'VPN недоступен и трафик идёт напрямую: дождитесь восстановления туннеля', policy_sync_busy: 'идёт обновление IP-категорий, повторите позже',
   unsupported_route: 'правило маршрута группы задано нестандартно: переключите туннель в веб-интерфейсе Keenetic',
@@ -732,7 +732,8 @@ const RENDER = {
       '</small></div><span class="pill ' + (t.running && t.handshake != null ? 'ok' : 'warn') + '">' + (t.running ? (t.handshake != null ? 'Работает' : 'Нет связи') : 'Остановлен') + '</span>' + ico('chevron', 'chev') + '</li>';
     return awgLostPanel() + panel('Контур AmneziaWG', kv([
         ['Программа', w.installed ? 'wireproxy-awg ' + (w.version || '') : 'не установлена', '', 'https://github.com/artem-russkikh/wireproxy-awg', '', w.installed ? 'процессор ' + (w.arch || '—') : 'скачается сама, когда понадобится'],
-        ['Туннели', fmtInt(tl.length)]]) + (tl.length ? '<ul class="rows">' + tl.map(row).join('') + '</ul>' : ''),
+        S.awg.proxy != null ? ['Клиент прокси Keenetic', w.proxy ? 'Установлен' : 'Не установлен', w.proxy ? 'ok' : 'warn', '', '', w.proxy ? '' : 'нужен для туннелей контура'] : null,
+        ['Туннели', fmtInt(tl.length)]]) + (awgNoProxy() && !awgLost().length ? PROXY_NOTE : '') + (tl.length ? '<ul class="rows">' + tl.map(row).join('') + '</ul>' : ''),
       { desc: 'Держит туннели AmneziaWG 3.x, которые прошивка Keenetic не умеет. В Keenetic такой туннель - подключение «Прокси». Скорость ниже встроенного WireGuard.' });
   },
   'd-agh'() {
@@ -1532,13 +1533,17 @@ function tunnelPage(name) {
 // Tunnels Keenetic took from AmneziaWG 3.x files without their header protection
 // (awg-data lost[]): the same files move them to the engine, matched by server key.
 const awgLost = () => (S.awg && S.awg.lost) || [];
+// The engine's tunnels are Keenetic «Прокси» connections: without the component there are none.
+const PROXY_NOTE = '<p class="field-warn">Сначала установите в Keenetic компонент «Клиент прокси»: Управление → Параметры системы → Изменить набор компонентов, найдите «прокси», отметьте и установите. Роутер перезагрузится, после этого повторите.</p>';
+const awgNoProxy = () => !!(S.awg && S.awg.proxy === false);
 function awgLostPanel(only) {
   const L = awgLost().filter(x => !only || x.name === only);
   if (!L.length) return '';
   const names = L.map(x => '«' + (x.description || x.name) + '»').join(', ');
   return panel(L.length > 1 ? 'Эти туннели не подключатся' : 'Туннель не подключится',
     '<p class="field-warn">' + esc(names) + (L.length > 1 ? ' загружены' : ' загружен') + ' в Keenetic из файлов AmneziaWG 3.x, и Keenetic выбросил их защиту заголовков - без неё сервер не отвечает. Выберите те же файлы: VWARD поднимет туннели в контуре под теми же названиями и перенесёт на них списки и подсети.</p>' +
-    '<label class="file-pick">' + ico('save') + '<span>' + (L.length > 1 ? 'Выбрать их файлы .conf' : 'Выбрать файл .conf') + '</span><input type="file" accept=".conf,.vpn,text/plain" multiple data-awg-adopt' + (cfgOk() ? '' : ' disabled') + '></label>' +
+    (awgNoProxy() ? PROXY_NOTE : '') +
+    '<label class="file-pick">' + ico('save') + '<span>' + (L.length > 1 ? 'Выбрать их файлы .conf' : 'Выбрать файл .conf') + '</span><input type="file" accept=".conf,.vpn,text/plain" multiple data-awg-adopt' + (cfgOk() && !awgNoProxy() ? '' : ' disabled') + '></label>' +
     resultBox('awg-adopt'), { desc: 'Файлы проверяются по ключу сервера: чужой файл не подойдёт.' });
 }
 async function awgAdopt(files) {
@@ -2642,7 +2647,7 @@ document.addEventListener('submit', async e => {
       if (!x.ok) { toast('Файл не подходит: ' + errText(x)); return; }
       $('tcPreview').innerHTML = kv([['Сервер', x.endpoint || '—'], ['Адрес в туннеле', x.address || '—'], ['MTU', x.mtu || 'как на роутере'],
         ['Обфускация AmneziaWG', x.awg === '1' ? 'Включена' : 'Выключена'], ['Keepalive', x.keepalive ? x.keepalive + ' с' : '25 с'], ['Разрешённые адреса', x.allowed || '—']]) +
-        (x.engine === '1' ? '<p class="field-warn">Это AmneziaWG 3.x: прошивка Keenetic его не умеет. Туннель поднимет контур VWARD - программа на флешке, около 30 МБ памяти, скорость ниже встроенного WireGuard. В Keenetic он будет подключением «Прокси».</p>' :
+        (x.engine === '1' ? '<p class="field-warn">Это AmneziaWG 3.x: прошивка Keenetic его не умеет. Туннель поднимет контур VWARD - программа на флешке, около 30 МБ памяти, скорость ниже встроенного WireGuard. В Keenetic он будет подключением «Прокси».</p>' + (awgNoProxy() ? PROXY_NOTE : '') :
          x.unsupported ? '<p class="field-warn">Этих настроек нет в прошивке Keenetic, её импорт тоже их пропускает: ' + esc(x.unsupported.split(',').join(', ')) + '. Если сервер без них не работает, туннель не подключится - VWARD проверит это и ничего не оставит.</p>' : '');
       form.dataset.checked = '1';
       form.querySelector('[type=submit]').textContent = mode === 'create' ? 'Создать туннель' : 'Заменить конфигурацию ' + tunLabel(name);

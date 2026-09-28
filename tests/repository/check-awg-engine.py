@@ -52,6 +52,10 @@ if "/metrics" in url:
         print("last_handshake_time_sec=%d" % (int(time.time()) - 5))
         sys.exit(0)
     print("last_handshake_time_sec=0"); sys.exit(0)
+if url.endswith("/show/version"):
+    if (st / "no-proxy").exists(): print(json.dumps({"components": "base,wireguard,ssh"})); sys.exit(0)
+    if (st / "proxy").exists(): print(json.dumps({"components": "base,wireguard,proxy"})); sys.exit(0)
+    sys.exit(22)
 if "releases/download" in url:
     out = a[a.index("-o") + 1]
     Path(out).write_bytes(b"not the pinned release"); sys.exit(0)
@@ -59,7 +63,8 @@ if "-d" in a:
     body = a[a.index("-d") + 1]
     with open(st / "rci.log", "a") as f: f.write(body + "\n")
     if (st / "rci-reject").exists() and '"proxy"' in body:
-        print(json.dumps([{"interface": {"status": [{"status": "error", "message": "rejected"}]}}])); sys.exit(0)
+        msg = (st / "rci-reject").read_text().strip() or "rejected"
+        print(json.dumps([{"interface": {"status": [{"status": "error", "message": msg}]}}])); sys.exit(0)
     print("[]"); sys.exit(0)
 sys.exit(22)
 """
@@ -91,6 +96,16 @@ with tempfile.TemporaryDirectory() as t:
             fail(f"{args[:2]}: {last!r} != {expect!r} {r.stderr[-300:]}")
         return r.stdout
 
+    # Keenetic without its «Клиент прокси» component: refused at once, before any
+    # download or handshake wait, and the Panel is told.
+    (st / "no-proxy").write_text("1")
+    run("add", "Finland", str(conf), expect="error=proxy_component_missing")
+    if share.exists():
+        fail("the program was downloaded for a router that cannot use it")
+    if "info.proxy=0" not in run("status", expect="result=status"):
+        fail("status must say the component is missing")
+    (st / "no-proxy").unlink()
+
     # The download is refused when it is not the pinned release.
     run("install", expect="error=checksum_mismatch")
     if (share / "wireproxy").exists():
@@ -111,13 +126,19 @@ with tempfile.TemporaryDirectory() as t:
 
     # Keenetic refuses the proxy connection: the program stops, files go.
     (st / "handshake").write_text("1")
-    (st / "rci-reject").write_text("1")
+    (st / "rci-reject").write_text("")
     run("add", "Finland", str(conf), expect="error=router_rejected")
     if "router_rejected Proxy40: rejected" not in (t / "engine.log").read_text():
         fail("the log must keep Keenetic's reason for a refused connection")
     if list((t / "etc").glob("t[0-9]*")) or list((t / "run").glob("*.pid")):
         fail("a refused tunnel left files behind")
+    # The component list was not readable, and Keenetic says it has no such connection type.
+    (st / "rci-reject").write_text('unsupported interface type: "Proxy".')
+    run("add", "Finland", str(conf), expect="error=proxy_component_missing")
+    if list((t / "etc").glob("t[0-9]*")) or list((t / "run").glob("*.pid")):
+        fail("a refused tunnel left files behind")
     (st / "rci-reject").unlink()
+    (st / "proxy").write_text("1")
 
     # A good tunnel: Proxy40 on 127.0.0.1:25400, UDP through, config saved.
     out = run("add", "Finland", str(conf), expect="result=changed")
@@ -161,6 +182,8 @@ with tempfile.TemporaryDirectory() as t:
     if lost != [{"name": "Wireguard2", "description": "fi", "peer": "zOuN="}, {"name": "Wireguard4", "description": "us-east.conf (1)", "peer": "jcct="}]:
         fail(f"lost tunnels: {lost}")
     t0 = j["tunnels"][0] if j.get("tunnels") else {}
+    if j.get("proxy") is not True:
+        fail(f"awg-data must say the component is there: {j.get('proxy')}")
     if not j.get("installed") or t0.get("name") != "Proxy40" or not t0.get("running") or t0.get("description") != "Finland" or t0.get("endpoint") != "66.234.150.186:3954":
         fail(f"awg-data: {j}")
     outs.append(api.stdout)

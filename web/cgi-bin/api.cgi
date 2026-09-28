@@ -2006,10 +2006,11 @@ if [ "$ACTION" = awg-data ]; then
     [ -n "$AWG_LOST" ] || AWG_LOST='[]'
     [ -x "$AWG_BIN" ] || { printf '{"ok":true,"available":false,"installed":false,"tunnels":[],"lost":%s}\n' "$AWG_LOST"; exit 0; }
     "$AWG_BIN" status 2>/dev/null | "$JQ" -Rn --argjson lost "$AWG_LOST" '
-        reduce (inputs) as $l ({ok: true, available: true, installed: false, version: "", arch: "", tunnels: [], lost: $lost};
+        reduce (inputs) as $l ({ok: true, available: true, installed: false, version: "", arch: "", proxy: null, tunnels: [], lost: $lost};
             if ($l | startswith("info.installed=")) then .installed = ($l | endswith("=1"))
             elif ($l | startswith("info.version=")) then .version = ($l | ltrimstr("info.version="))
             elif ($l | startswith("info.arch=")) then .arch = ($l | ltrimstr("info.arch="))
+            elif ($l | startswith("info.proxy=")) then .proxy = ($l | endswith("=1"))
             elif ($l | startswith("tunnel=")) then ($l | ltrimstr("tunnel=") | split("\t")) as $t |
                 .tunnels += [{name: $t[0], running: ($t[1] == "1"), handshake: ($t[2] | tonumber? // null),
                               rss_kb: ($t[3] | tonumber? // null), endpoint: $t[4], description: $t[5]}]
