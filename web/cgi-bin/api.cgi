@@ -2113,9 +2113,20 @@ if [ "$ACTION" = awg-data ]; then
             cur = ""
         }' | "$JQ" -Rn '[inputs | split("\t") | {name: .[0], description: .[1], peer: .[2]}]' 2>/dev/null)"
     [ -n "$AWG_LOST" ] || AWG_LOST='[]'
-    [ -x "$AWG_BIN" ] || { printf '{"ok":true,"available":false,"installed":false,"tunnels":[],"lost":%s}\n' "$AWG_LOST"; exit 0; }
-    "$AWG_BIN" status 2>/dev/null | "$JQ" -Rn --argjson lost "$AWG_LOST" '
-        reduce (inputs) as $l ({ok: true, available: true, installed: false, version: "", arch: "", tunnels: [], lost: $lost};
+    # VLESS servers held by Xray on OpkgTun connections (the VLESS engine), never the ids.
+    VLESS_BIN=${VWARD_VLESS_ENGINE_BIN:-/opt/bin/vward-vless-engine.sh}
+    AWG_VLESS='{"installed":false,"version":"","tunnels":[]}'
+    [ ! -x "$VLESS_BIN" ] || AWG_VLESS="$("$VLESS_BIN" status 2>/dev/null | "$JQ" -Rn '
+        reduce (inputs) as $l ({installed: false, version: "", tunnels: []};
+            if ($l | startswith("info.installed=")) then .installed = ($l | endswith("=1"))
+            elif ($l | startswith("info.version=")) then .version = ($l | ltrimstr("info.version="))
+            elif ($l | startswith("tunnel=")) then ($l | ltrimstr("tunnel=") | split("\t")) as $t |
+                .tunnels += [{name: $t[0], running: ($t[1] == "1"), rss_kb: ($t[2] | tonumber? // null), server: $t[3], description: $t[4]}]
+            else . end)' 2>/dev/null)"
+    [ -n "$AWG_VLESS" ] || AWG_VLESS='{"installed":false,"version":"","tunnels":[]}'
+    [ -x "$AWG_BIN" ] || { printf '{"ok":true,"available":false,"installed":false,"tunnels":[],"lost":%s,"vless":%s}\n' "$AWG_LOST" "$AWG_VLESS"; exit 0; }
+    "$AWG_BIN" status 2>/dev/null | "$JQ" -Rn --argjson lost "$AWG_LOST" --argjson vless "$AWG_VLESS" '
+        reduce (inputs) as $l ({ok: true, available: true, installed: false, version: "", arch: "", tunnels: [], lost: $lost, vless: $vless};
             if ($l | startswith("info.installed=")) then .installed = ($l | endswith("=1"))
             elif ($l | startswith("info.version=")) then .version = ($l | ltrimstr("info.version="))
             elif ($l | startswith("info.arch=")) then .arch = ($l | ltrimstr("info.arch="))

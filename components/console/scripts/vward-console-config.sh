@@ -47,6 +47,9 @@ JQ=${JQ:-jq}
 # VWARD's own tunnel engine (AmneziaWG 3.x the firmware cannot): tunnels it holds.
 AWG_ENGINE=${VWARD_AWG_ENGINE_BIN:-/opt/bin/vward-awg-engine.sh}
 AWG_TUNNELS=${VWARD_AWG_ETC:-/opt/etc/vward/awg-engine}/tunnels.tsv
+# VLESS servers (Xray on a Keenetic «OpkgTun» connection, like the AmneziaWG engine).
+VLESS_ENGINE=${VWARD_VLESS_ENGINE_BIN:-/opt/bin/vward-vless-engine.sh}
+VLESS_TUNNELS=${VWARD_VLESS_ETC:-/opt/etc/vward/vless-engine}/tunnels.tsv
 PERSIST="$ROUTE_STATE/adaptive-persist.txt"
 ADAPTIVE="$ROUTE_STATE/adaptive-domains.txt"
 REFRESH_TS="$ROUTE_STATE/groups-refresh"
@@ -1243,10 +1246,17 @@ tunnel_names() {
     { printf '%s\n' "${VWARD_TUNNEL_INTERFACE:-}"
       vward_map_tunnels "$(vward_device_map 2>/dev/null)" | awk '{print $1}'
       # The engine's tunnels (Keenetic «OpkgTun» connections) take lists like any tunnel.
-      [ ! -f "$AWG_TUNNELS" ] || awk -F'\t' '{print $2}' "$AWG_TUNNELS"; } | awk 'NF && !s[$0]++'
+      [ ! -f "$AWG_TUNNELS" ] || awk -F'\t' '{print $2}' "$AWG_TUNNELS"
+      [ ! -f "$VLESS_TUNNELS" ] || awk -F'\t' '{print $2}' "$VLESS_TUNNELS"; } | awk 'NF && !s[$0]++'
 }
 is_tunnel() { tunnel_names | grep -qxF -- "$1"; }
-engine_tunnel() { [ -f "$AWG_TUNNELS" ] && awk -F'\t' -v p="$1" '$2 == p {f = 1} END {exit f ? 0 : 1}' "$AWG_TUNNELS"; }
+# engine_tunnel NAME: the tunnel is one of VWARD's engines; ENG is that engine.
+engine_tunnel() {
+    for et in "$AWG_TUNNELS:$AWG_ENGINE" "$VLESS_TUNNELS:$VLESS_ENGINE"; do
+        [ -f "${et%%:*}" ] && awk -F'\t' -v p="$1" '$2 == p {f = 1} END {exit f ? 0 : 1}' "${et%%:*}" && { ENG=${et#*:}; return 0; }
+    done
+    return 1
+}
 
 free_tunnel_name() {
     n=0
@@ -1336,11 +1346,47 @@ tunnel_summary() {
     printf 'info.engine=%s\n' "$(conf_get engine "$1")"
 }
 
+# op_tunnel_vless check|create FILE [DESCRIPTION]: the servers of the links or subscription
+# (never the ids), or a new tunnel of the chosen one («#server=N» in FILE).
+op_tunnel_vless() {
+    [ -x "$VLESS_ENGINE" ] || die engine_unavailable
+    case "$1" in
+        check)
+            vl_out=$("$VLESS_ENGINE" servers "$2" 2>/dev/null) ;;
+        create)
+            vl_desc=$3
+            case "$vl_desc" in @/*) vl_f=${vl_desc#@}; vl_desc=$(cat "$vl_f" 2>/dev/null); rm -f "$vl_f" ;; esac
+            case "$vl_desc" in *'"'*|*"$(printf '\134')"*) die invalid_description 64 ;; esac
+            [ "${#vl_desc}" -le 64 ] || die invalid_description 64
+            load_profile_base
+            exec 3>&1
+            vl_out=$("$VLESS_ENGINE" add "$vl_desc" "$2" 2>/dev/null)
+            exec 3>&- ;;
+        *) die vless_replace_unsupported 64 ;;
+    esac
+    case "$(printf '%s\n' "$vl_out" | tail -n 1)" in
+        result=checked) printf '%s\n' "$vl_out" | grep '^info\.'; done_ok "tunnel-conf check vless" checked ;;
+        result=changed)
+            rm -f "$VWARD_DEVICE_MAP_CACHE"
+            printf '%s\n' "$vl_out" | grep '^info\.name=' | head -n 1
+            done_ok "tunnel-conf create vless $(printf '%s\n' "$vl_out" | sed -n 's/^info\.name=//p')" changed ;;
+        error=*) vl_err=$(printf '%s\n' "$vl_out" | sed -n 's/^error=//p' | tail -n 1)
+                 case "$vl_err" in ''|*[!a-z0-9_]*) vl_err=engine_failed ;; esac
+                 die "$vl_err" ;;
+        *) die engine_failed ;;
+    esac
+}
+
 op_tunnel_conf() {
     # tunnel-conf check|replace|create FILE [NAME | DESCRIPTION]
     tc_mode=$1 tc_file=$2 tc_arg=${3:-}
     case "$tc_file" in /*) ;; *) die invalid_value 64 ;; esac
     [ -f "$tc_file" ] && [ ! -L "$tc_file" ] || die conf_empty 64
+    CONF_FILE=$tc_file
+    # vless:// links or a subscription's address: VWARD's VLESS engine.
+    if tr -d '\r' < "$tc_file" | grep -v '^#' | awk 'NF {print $1; exit}' | grep -Eq '^(vless|https?)://'; then
+        op_tunnel_vless "$tc_mode" "$tc_file" "$tc_arg"
+    fi
     PLAN=$(mktemp /tmp/vward-console-plan.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     TMPFILE=$PLAN
     CONF_FILE=$tc_file
@@ -1483,11 +1529,11 @@ op_tunnel_state() {
     vward_valid_ndm_name "$2" && is_tunnel "$2" || die unknown_tunnel 64
     case "$1" in restart|up) ;; *) die invalid_operation 64 ;; esac
     if engine_tunnel "$2"; then
-        [ -x "$AWG_ENGINE" ] || die engine_unavailable
+        [ -x "$ENG" ] || die engine_unavailable
         [ "$1" = restart ] || { ndm "interface $2 up" || die router_rejected; }
         engine_step_out=
         exec 3>&1
-        engine_step_out=$("$AWG_ENGINE" restart "$2" 2>/dev/null)
+        engine_step_out=$("$ENG" restart "$2" 2>/dev/null)
         exec 3>&-
         case "$(printf '%s\n' "$engine_step_out" | tail -n 1)" in
             result=changed) ;;
@@ -1558,7 +1604,7 @@ op_tunnel_delete() {
     ! awk -v i="$1" '$1 == "ip" && $2 == "route" && $5 == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG" || die verification_failed
     # Last step: nothing depends on the interface any more.
     if engine_tunnel "$1"; then
-        "$AWG_ENGINE" remove "$1" 2>/dev/null | tail -n 1 | grep -q '^result=' || die router_rejected
+        "$ENG" remove "$1" 2>/dev/null | tail -n 1 | grep -q '^result=' || die router_rejected
     else
         ndm "no interface $1" || die router_rejected
     fi

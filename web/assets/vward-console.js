@@ -1764,7 +1764,10 @@ function tunnelPage(name) {
 // (awg-data lost[]): the same files move them to the engine, matched by server key.
 const awgLost = () => (S.awg && S.awg.lost) || [];
 // A tunnel's line in the list: the handshake; for the engine's tunnels it comes from the engine.
+const vlessOf = name => ((S.awg && S.awg.vless && S.awg.vless.tunnels) || []).find(x => x.name === name);
 const tunSub = t => {
+  const v = vlessOf(t.name);
+  if (v) return 'VLESS · ' + (v.running ? (tq(t.name) && tq(t.name).last_loss < 100 ? 'сервер отвечает' : 'Xray запущен') : 'программа остановлена');
   const e = ((S.awg && S.awg.tunnels) || []).find(x => x.name === t.name);
   if (e) return 'контур AmneziaWG · ' + (e.handshake != null ? 'рукопожатие ' + agoText(e.handshake) : e.running ? 'рукопожатия нет' : 'программа остановлена');
   if (tunGuardOff(t)) return 'выключен защитой VPN: не отвечал, списки идут напрямую';
@@ -2036,7 +2039,7 @@ function tunnelConfSheet(mode, name) {
     '<div class="segmented" role="group" aria-label="Как ввести"><button type="button" data-act="tc-mode" data-m="file" aria-pressed="true">Из файла</button><button type="button" data-act="tc-mode" data-m="manual" aria-pressed="false">Вручную</button></div>' +
     '<div class="stack-form tc-file">' +
     '<label class="file-pick">' + ico('save') + '<span>Выбрать файл .conf или .vpn</span><input type="file" name="file" accept=".conf,.vpn,text/plain" data-conf-file></label>' +
-    '<textarea class="input mono" name="conf" rows="7" spellcheck="false" autocomplete="off" aria-label="Текст конфигурации" placeholder="или вставьте текст [Interface] PrivateKey = … или ключ Amnezia vpn://…"></textarea></div>' +
+    '<textarea class="input mono" name="conf" rows="7" spellcheck="false" autocomplete="off" aria-label="Текст конфигурации" placeholder="или вставьте текст [Interface] PrivateKey = …, ключ Amnezia vpn://…' + (mode === 'create' ? ', ссылку vless://… или адрес подписки https://…' : '') + '"></textarea></div>' +
     '<div class="stack-form tc-manual" hidden>' +
     TC_FIELDS.map(f => '<label class="field"><span class="form-label">' + esc(f[1]) + '</span>' + (f[0] === 'awg' ?
       '<textarea class="input mono" name="tc-awg" rows="3" spellcheck="false" autocomplete="off" placeholder="Jc = 4&#10;Jmin = 40&#10;…"></textarea>' :
@@ -2059,14 +2062,21 @@ function tunnelTrafficPanel(name) {
 }
 function tunnelManagePanel(name, managed) {
   // Only a WireGuard (AmneziaWG) tunnel takes a .conf; the others are set up in Keenetic.
+  // VWARD's engines (AmneziaWG, VLESS) are Keenetic «OpkgTun» connections: checked first.
   const own = ((st().wg && st().wg.interfaces) || []).find(t => t.name === name);
-  if (own && own.type && own.type !== 'wireguard')
+  const engine = vlessOf(name) || ((S.awg && S.awg.tunnels) || []).some(t => t.name === name);
+  if (!engine && own && own.type && own.type !== 'wireguard')
     return [panel('Конфигурация', '<p class="panel-desc">Туннель настраивается в Keenetic, VWARD только направляет через него маршруты.</p>')];
   const others = ((st().wg && st().wg.interfaces) || []).filter(t => t.name !== name);
   const del = managed ? '<p class="panel-desc">Этот туннель используется VWARD для маршрутов, его нельзя удалить. Сначала переключите маршруты на другой туннель.</p>' :
     (confirm && confirm.id === 'tunnel-delete' ? '<div class="confirm danger"><span>Удалить ' + esc(tunLabel(name)) + '? Его списки и подсети перейдут: ' + esc(confirm.to === 'bypass' ? 'на провайдера' : confirm.to === 'vpn' ? 'в туннель VWARD' : confirm.to) + '. Ключи туннеля удалятся.</span><button class="btn small danger" type="button" data-act="confirm-yes">Удалить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' :
       '<dl class="kv">' + ctrlRow('Куда передать списки и подсети', sel('data-tunnel-del-to', 'Куда передать', [['vpn', 'Туннель VWARD'], ['bypass', 'Провайдер']].concat(others.filter(t => t.name !== prof().tunnel_interface).map(t => [t.name, tunLabel(t.name)])), 'vpn')) + '</dl>' +
       '<div class="panel-actions">' + btn('tunnel-delete', 'close', 'Удалить туннель', 'danger', cfgOk() ? '' : ' disabled') + '</div>');
+  const vl = vlessOf(name);
+  if (vl)
+    return [panel('Конфигурация', '<p class="panel-desc">Туннель VLESS держит Xray на флешке. Чтобы сменить сервер, добавьте новый туннель и удалите этот.</p>' +
+        kv([['Сервер', vl.server || '—'], ['Xray', vl.running ? 'запущен' : 'остановлен', vl.running ? 'ok' : 'warn'], ['Память', vl.rss_kb != null ? fmtKB(vl.rss_kb) : '—']])),
+      panel('Удаление', del, { desc: 'Списки и подсети туннеля перейдут, куда выберете.' })];
   if (((S.awg && S.awg.tunnels) || []).some(t => t.name === name))
     return [nativePanel(), panel('Конфигурация', '<p class="panel-desc">Туннель держит контур AmneziaWG VWARD. Чтобы сменить сервер, добавьте новый туннель и удалите этот.</p>' + kv([['Контур AmneziaWG', 'Утилиты', '', 'd-awg', '', '', 'out']])),
       panel('Удаление', del, { desc: 'Списки и подсети туннеля перейдут, куда выберете.' })];
@@ -2885,6 +2895,8 @@ document.addEventListener('change', e => {
   if (t.dataset.svcCat) { const c = t.dataset.svcCat, v = t.value, ct = ((S.services && S.services.categories) || []).find(x => x.id === c); t.disabled = true;
     serviceJob({ op: 'category', id: c, tunnel: v }, (ct ? ct.title : c) + (v === 'auto' ? ': туннель выбирается автоматически' : ': через ' + tunLabel(v))); return; }
   if (t.dataset.svcTun) { const id = t.dataset.svcTun, v = t.value; t.disabled = true; serviceJob({ op: 'tunnel', id: id, tunnel: v }, v === 'auto' ? 'Туннель выбирается автоматически' : 'Закреплён за ' + tunLabel(v)); return; }
+  if (t.name === 'vless-server') { const f = t.closest('form'), d = f && f.querySelector('[name=description]'), names = [...f.querySelectorAll('[name=vless-server]')].map(r => r.dataset.vname);
+    if (d && (!d.value.trim() || names.includes(d.value.trim()))) d.value = String(t.dataset.vname || '').slice(0, 64); return; }
   if (t.dataset.cfgTa) { const k = t.dataset.cfgTa, v = t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value; t.disabled = true;
     cfgSet({ op: 'tunnel-auto', target: k, value: v }, k === 'enabled' ? (v === '1' ? 'Выбор лучшего туннеля включён' : 'Выбор лучшего туннеля выключен') :
       k === 'criterion' ? 'Выбирать туннель по: ' + (TQ_CRITERIA.find(o => o[0] === v) || [, v])[1] : 'Замер скорости: ' + (TQ_SPEED.find(o => o[0] === v) || [, v])[1], ['tq']); return; }
@@ -2979,6 +2991,30 @@ async function onSubmit(e, f) {
     let text = manual ? tcConf(form) : form.querySelector('[name=conf]').value;
     const descEl = form.querySelector('[name=description]');
     if (!manual && /^\s*vpn:\/\//i.test(text)) { const k = await amneziaKey(text); if (k.error) { toast(k.error); return; } text = k.conf; if (descEl && !descEl.value.trim() && k.name) descEl.value = k.name; }
+    // VLESS: links or a subscription; the server is chosen from the list the router reads.
+    if (!manual && /^\s*(vless|https?):\/\//i.test(text)) {
+      if (mode !== 'create') { toast('VLESS-туннель не заменяется: добавьте новый и удалите старый'); return; }
+      if (form.dataset.checked !== '1') {
+        let x;
+        try { x = await apiPost('tunnel-conf', { op: 'check', conf: text.trim() }); } catch (err) { toast('Ошибка: ' + err.message); return; }
+        if (!x.ok) { toast('Не подходит: ' + errText(x)); return; }
+        const n = +x.servers || 0, rows = [];
+        for (let i = 1; i <= n; i++) { const p = String(x['server.' + i] || '').split('|'); rows.push({ i: i, name: p[0] || 'Сервер ' + i, host: p[1] || '', port: p[2] || '', sec: p[3] || 'none', net: p[4] || 'tcp' }); }
+        if (!rows.length) { toast('В ссылке или подписке нет серверов VLESS'); return; }
+        $('tcPreview').innerHTML = '<div class="rows vless-pick" role="radiogroup" aria-label="Сервер">' + rows.map(r => '<label class="row"><input type="radio" name="vless-server" value="' + r.i + '"' + (r.i === 1 ? ' checked' : '') + ' data-vname="' + esc(r.name) + '">' +
+          '<div class="row-main"><b>' + esc(r.name) + '</b><small>' + esc(r.host + ':' + r.port + ' · ' + (r.sec === 'none' ? 'без шифрования' : r.sec.toUpperCase()) + ' · ' + r.net) + '</small></div></label>').join('') + '</div>' +
+          '<p class="field-warn">Туннель поднимет Xray - программа около 36 МБ на флешке, скачивается один раз с GitHub (XTLS/Xray-core), 30-60 МБ памяти. В Keenetic он будет подключением OpkgTun.</p>';
+        if (descEl && !descEl.value.trim()) descEl.value = rows[0].name.slice(0, 64);
+        form.dataset.checked = '1';
+        form.querySelector('[type=submit]').textContent = 'Создать туннель';
+        return;
+      }
+      const pick = form.querySelector('[name=vless-server]:checked'), num = pick ? pick.value : '1';
+      const vdesc = (descEl && descEl.value.trim()) || (pick && pick.dataset.vname) || 'VLESS';
+      closeLayer();
+      await tunnelJob('create', { op: 'create', conf: '#server=' + num + '\n' + text.trim(), description: vdesc.slice(0, 64) }, vdesc);
+      return;
+    }
     const desc = descEl ? descEl.value.trim() : '';
     if (!manual && (!/\[Interface\]/i.test(text) || !/\[Peer\]/i.test(text))) { toast('Выберите файл .conf или вставьте его текст или ключ vpn://'); return; }
     if (mode === 'create' && !desc) { toast('Введите название туннеля'); return; }

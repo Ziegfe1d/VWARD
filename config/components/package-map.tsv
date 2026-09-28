@@ -20,6 +20,7 @@ tunnel-guard	components/tunnel-guard/scripts/vward-tunnel-health.sh	/opt/bin/vwa
 tunnel-guard	components/tunnel-guard/scripts/vward-tunnel-guard.sh	/opt/bin/vward-tunnel-guard.sh	0755
 tunnel-guard	components/tunnel-guard/scripts/vward-awg-engine.sh	/opt/bin/vward-awg-engine.sh	0755
 tunnel-guard	components/tunnel-guard/scripts/vward-tunnel-quality.sh	/opt/bin/vward-tunnel-quality.sh	0755
+tunnel-guard	components/tunnel-guard/scripts/vward-vless-engine.sh	/opt/bin/vward-vless-engine.sh	0755
 wan-guard	components/wan-guard/scripts/vward-wan-guard.sh	/opt/bin/vward-wan-guard.sh	0755
 wan-guard	components/wan-guard/scripts/vward-wan-recovery.sh	/opt/bin/vward-wan-recovery.sh	0755
 wifi-client-guard	components/wifi-client-guard/scripts/vward-wifi-client-monitor.sh	/opt/bin/vward-wifi-client-monitor.sh	0755

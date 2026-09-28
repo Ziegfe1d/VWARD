@@ -18,6 +18,8 @@ vward_admission_enter tunnel-health || exit $?
 # starts again.  Without such tunnels this is one file test, no process.
 [ ! -s "${VWARD_AWG_ETC:-/opt/etc/vward/awg-engine}/tunnels.tsv" ] || [ ! -x /opt/bin/vward-awg-engine.sh ] ||
     /opt/bin/vward-awg-engine.sh supervise >/dev/null 2>&1 || :
+[ ! -s "${VWARD_VLESS_ETC:-/opt/etc/vward/vless-engine}/tunnels.tsv" ] || [ ! -x /opt/bin/vward-vless-engine.sh ] ||
+    /opt/bin/vward-vless-engine.sh supervise >/dev/null 2>&1 || :
 
 # Every VPN connection pinged through its own device: the quality table of the Panel and
 # the guard's choice of a fallback tunnel. In RAM; a few seconds, all tunnels at once.
