@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""The real-time watcher in VWARD's runtime.
+
+vward-sentinel.sh: pins the four router builds (tools/vward-sentinel/SHA256SUMS), refuses
+a download with another checksum, starts the program with what to watch (VWARD's programs
+with their memory limits, the provider's and the tunnels' interfaces, the router's DNS),
+stops it, reports its status.
+vward-sentinel-act.sh: a provider interface event runs the WAN guard, a tunnel's the tunnel
+checks; a program gone is started; a leak is stopped and started; DNS without answers
+starts AdGuard Home when it is not running.
+The cron supervisor keeps the watcher running and leaves leaks to it; vward_busy takes the
+watcher's busy flag while it runs; the tunnel engines tell it their tunnels changed."""
+
+import gzip
+import os
+import shutil
+import subprocess
+import tempfile
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+CTL = ROOT / "components/runtime/scripts/vward-sentinel.sh"
+ACT = ROOT / "components/runtime/scripts/vward-sentinel-act.sh"
+
+
+def fail(message: str) -> None:
+    raise SystemExit(f"SENTINEL_RUNTIME=FAIL: {message}")
+
+
+ctl = CTL.read_text()
+for line in (ROOT / "tools/vward-sentinel/SHA256SUMS").read_text().splitlines():
+    digest, name = line.split()
+    arch = name.rsplit("-", 1)[1]
+    if f"        {arch}) echo {digest} ;;" not in ctl:
+        fail(f"vward-sentinel.sh must pin {name} as in SHA256SUMS")
+
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    bin_ = tmp / "bin"; bin_.mkdir()
+    share, run, state = tmp / "share", tmp / "run", tmp / "state"
+    (run / "awg-engine").mkdir(parents=True)
+    (run / "awg-engine/t0.pid").write_text("1\n")
+    (tmp / "profile.sh").write_text(
+        "vward_profile_load(){ VWARD_WAN_DEVICE=eth3; }\n"
+        "vward_device_map(){ :; }\nvward_map_vpns(){ printf 'Wireguard0 nwg0\\nOpkgTun0 opkgtun0\\n'; }\n")
+    (bin_ / "curl").write_text(f'#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && {{ cp "{tmp}/served.gz" "$2"; exit 0; }}; shift; done\nexit 22\n')
+    (bin_ / "curl").chmod(0o755)
+    env = os.environ | {"PATH": f"{bin_}:{os.environ['PATH']}", "VWARD_SENTINEL_SHARE": str(share), "VWARD_SENTINEL_STATE": str(state),
+                        "VWARD_SENTINEL_PIDFILE": str(run / "sentinel.pid"), "VWARD_RUN_DIR": str(run),
+                        "VWARD_SENTINEL_LOG": str(tmp / "sentinel.log"), "VWARD_CURL_BIN": str(bin_ / "curl"),
+                        "VWARD_PROFILE_LIB": str(tmp / "profile.sh"), "VWARD_SENTINEL_ARCH": "mipsle",
+                        "VWARD_SENTINEL_HOURS": str(tmp / "hours.tsv"), "VWARD_SENTINEL_ACT": str(tmp / "act.sh")}
+
+    def sh(*args, e=None):
+        r = subprocess.run(["sh", str(CTL), *args], env=e or env, text=True, capture_output=True, timeout=60)
+        return r.stdout.strip()
+
+    # A download with another checksum is refused, nothing installed.
+    (tmp / "served.gz").write_bytes(gzip.compress(b"#!/bin/sh\necho x\n"))
+    if sh("install") != "error=checksum_mismatch" or (share / "vward-sentinel").exists():
+        fail("a program with another checksum must be refused")
+    if sh("status") != "status=not_installed" or sh("start") != "result=not_installed":
+        fail("without the program nothing starts")
+
+    # The program itself (built here) in place of the router's build.
+    share.mkdir(exist_ok=True)
+    cc = shutil.which("cc") or shutil.which("gcc")
+    subprocess.run([cc, "-O2", "-o", str(share / "vward-sentinel"), str(ROOT / "tools/vward-sentinel/sentinel.c")], check=True)
+    if sh("start") != "result=changed" or not sh("status").startswith("status=running"):
+        fail(f"start: {sh('status')}")
+    conf = (state / "sentinel.conf").read_text()
+    for need in (f"WATCH=route-engine:{run}/route-engine.pid:16384", "WATCH=panel:/opt/var/run/vward-console-lighttpd.pid:24576",
+                 f"WATCH=awg-t0:{run}/awg-engine/t0.pid:65536", "IFACE=eth3", "IFACE=nwg0", "IFACE=opkgtun0", "DNS=127.0.0.1:53"):
+        if need not in conf:
+            fail(f"configuration lacks {need!r}:\n{conf}")
+    if sh("start") != "result=unchanged":
+        fail("started once")
+    time.sleep(0.5)
+    if not (state / "state").exists() or "START|" not in (state / "events.log").read_text():
+        fail("the program runs and writes its state")
+    if sh("stop") != "result=changed" or sh("status") != "status=stopped":
+        fail("stop")
+
+    # Actions.
+    initd, obin = tmp / "init.d", tmp / "obin"
+    initd.mkdir(); obin.mkdir()
+    for f in ("S91vward-route-engine", "S93vward-console", "S99adguardhome"):
+        (initd / f).write_text(f'#!/bin/sh\necho "{f} $1" >> "{tmp}/done"\n')
+    for f in ("vward-wan-guard.sh", "vward-tunnel-health.sh", "vward-tunnel-guard.sh"):
+        (obin / f).write_text(f'#!/bin/sh\necho "{f}" >> "{tmp}/done"\n')
+    for f in list(initd.iterdir()) + list(obin.iterdir()):
+        f.chmod(0o755)
+    (bin_ / "pidof").write_text("#!/bin/sh\nexit 1\n"); (bin_ / "pidof").chmod(0o755)
+    aenv = env | {"VWARD_INITD": str(initd), "VWARD_BIN_DIR": str(obin), "VWARD_CONSOLE_PIDFILE": str(run / "panel.pid")}
+
+    def act(*args):
+        (tmp / "done").unlink(missing_ok=True)
+        r = subprocess.run(["sh", str(ACT), *args], env=aenv, text=True, capture_output=True, timeout=60)
+        return r.returncode, ((tmp / "done").read_text().splitlines() if (tmp / "done").exists() else [])
+
+    if act("link", "eth3", "down") != (0, ["vward-wan-guard.sh"]):
+        fail(f"the provider's interface: the WAN guard at once: {act('link', 'eth3', 'down')}")
+    if act("link", "nwg0", "down") != (0, ["vward-tunnel-health.sh", "vward-tunnel-guard.sh"]):
+        fail("a tunnel's interface: the tunnel checks at once")
+    if act("addr", "opkgtun0", "lost")[1] != ["vward-tunnel-health.sh", "vward-tunnel-guard.sh"]:
+        fail("a tunnel that lost its address: the tunnel checks")
+    if act("down", "route-engine") != (0, ["S91vward-route-engine start"]):
+        fail("a program gone: its starter")
+    victim = subprocess.Popen(["sleep", "60"])
+    (run / "panel.pid").write_text(f"{victim.pid}\n")
+    rc, done = act("leak", "panel", "30000")
+    victim.wait(timeout=10)
+    if rc != 0 or done != ["S93vward-console start"] or victim.returncode is None:
+        fail(f"a leak: stopped and started: {rc} {done}")
+    if act("dns-fail") != (0, ["S99adguardhome start"]):
+        fail("DNS without answers: AdGuard Home started when it is not running")
+    if act("link", "eth3;reboot", "down")[0] != 64 or act("leak", "unknown", "1")[0] != 64:
+        fail("odd names are refused")
+    if "|ACT|leak|panel|rss_kb=30000|restart" not in (tmp / "sentinel.log").read_text():
+        fail("actions are logged")
+
+sup = (ROOT / "components/runtime/scripts/vward-cron-supervisor.sh").read_text()
+watch = sup[sup.index("watch_services()"):sup.index("log_event \"SUPERVISOR_START")]
+if "if sentinel_alive; then" not in watch or "watch_memory" not in watch.split("if sentinel_alive; then", 1)[1] or '"$SENTINEL_CTL" start' not in watch:
+    fail("the supervisor keeps the watcher running and leaves leaks to it")
+lib = (ROOT / "components/runtime/lib/vward-runtime-admission.sh").read_text()
+if '[ -e "$VWARD_SENTINEL_STATE/busy" ]' not in lib:
+    fail("vward_busy takes the watcher's flag")
+for engine in ("vward-awg-engine.sh", "vward-vless-engine.sh"):
+    src = (ROOT / "components/tunnel-guard/scripts" / engine).read_text()
+    if 'op_add "$2" "$3"; sentinel_reload' not in src or 'op_remove "$2"; sentinel_reload' not in src:
+        fail(f"{engine} tells the watcher its tunnels changed")
+if '"$SENTINEL_CTL" install && "$SENTINEL_CTL" reload' not in (ROOT / "components/runtime/scripts/vward-housekeeping.sh").read_text():
+    fail("housekeeping installs the watcher's program")
+print("SENTINEL_RUNTIME=PASS")

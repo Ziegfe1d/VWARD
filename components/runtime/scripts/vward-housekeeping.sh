@@ -388,6 +388,13 @@ if [ -x "$BACKUP_HELPER" ]; then
     fi
 fi
 
+# The real-time watcher: its program for this processor (pinned SHA-256), and what it
+# watches (tunnels come and go). Without it everything works as before.
+SENTINEL_CTL=${VWARD_SENTINEL_CTL:-/opt/bin/vward-sentinel.sh}
+if [ -x "$SENTINEL_CTL" ]; then
+    { "$SENTINEL_CTL" install && "$SENTINEL_CTL" reload; } </dev/null >/dev/null 2>&1 &
+fi
+
 # Services catalog (iplist, rebuilt by VWARD's workflow every night): once a day
 # from 06:00; the lists of services switched on follow it.  Detached.
 SERVICES_DAY_FILE=${VWARD_SERVICES_DAY_FILE:-/tmp/vward-services-day}

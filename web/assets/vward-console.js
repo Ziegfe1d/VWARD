@@ -105,6 +105,61 @@ async function apiPost(action, fields) {
   });
   return apiJson(r);
 }
+/* ---------- Стабильность ---------- */
+// Index of the hours given (the watcher's hourly lines: at, dns_ok, dns_fail, events,
+// repairs_ok, repairs_failed, mem_min_kb, load_max_x100, programs_gone, leaks):
+// 40% DNS answered, 20% VWARD's programs kept running, 20% repairs that helped,
+// 20% hours with enough memory.
+function stabScore(rows) {
+  if (!rows || !rows.length) return null;
+  const sum = i => rows.reduce((a, r) => a + (Number(r[i]) || 0), 0);
+  const dnsOk = sum(1), dnsFail = sum(2), ok = sum(4), bad = sum(5), downs = sum(8), leaks = sum(9);
+  const low = rows.filter(r => r[6] >= 0 && r[6] < 16384).length;
+  const dns = dnsOk + dnsFail ? dnsOk / (dnsOk + dnsFail) : 1;
+  const progs = Math.max(0, 1 - 0.1 * downs - 0.2 * leaks);
+  const rep = ok + bad ? ok / (ok + bad) : 1;
+  const res = 1 - low / rows.length;
+  return { index: Math.round(100 * (0.4 * dns + 0.2 * progs + 0.2 * rep + 0.2 * res)), dns, dnsOk, dnsFail, ok, bad, downs, leaks, low, hours: rows.length };
+}
+// The hours of the last SPAN seconds; the running hour from the watcher's own totals
+// while no hourly line is written yet.
+function stabRows(d, span) {
+  const st = d && d.state || {}, now = st.now || Date.now() / 1000;
+  const rows = (d && d.hours || []).filter(r => r[0] >= now - span);
+  if (!rows.length && st.samples) rows.push([st.started || now, st.dns_ok, st.dns_fail, st.events, st.actions_ok, st.actions_fail, st.mem_min_kb, st.load_max_x100, 0, 0]);
+  return rows;
+}
+const STAB_WATCH = n => n === 'route-engine' ? 'Движок маршрутов' : n === 'panel' ? 'Панель VWARD' :
+  /^awg-t\d+$/.test(n) ? 'AmneziaWG, туннель ' + n.slice(5) : /^xray-v\d+$/.test(n) ? 'Xray (VLESS), туннель ' + n.slice(6) : n;
+function stabEvent(w) {
+  const f = String(w || '').split('|');
+  const name = STAB_WATCH(f[2] || '');
+  switch (f[0] === 'ACT' ? f[1] : f[0]) {
+    case 'down': return name + ': пропал, запущен снова';
+    case 'leak': return name + ': утечка памяти (' + fmtKB(parseInt(String(f[3]).replace('rss_kb=', ''), 10)) + '), перезапущен';
+    case 'grow': return name + ': память растёт выше обычной';
+    case 'link': return 'Интерфейс ' + f[2] + (f[3] === 'up' ? ' поднялся' : ' упал') + ': проверка сразу';
+    case 'addr': return 'Интерфейс ' + f[2] + ' потерял адрес: проверка сразу';
+    case 'mem-low': return 'Мало памяти на роутере';
+    case 'dns-fail': return f[2] === 'adguardhome-start' ? 'DNS не отвечал: AdGuard Home запущен' : 'DNS не отвечал';
+    case 'MEM_RESTART': return STAB_WATCH(f[1]) + ': утечка памяти, перезапущен';
+    case 'MEM_LOW': return 'Мало памяти на роутере';
+    case 'MEM_OK': return 'Память снова в норме';
+    case 'PANEL_STARTED': return 'Панель VWARD запущена снова';
+    case 'PANEL_START_FAILED': return 'Панель VWARD не запустилась, повтор позже';
+    case 'AGH_STARTED': return 'AdGuard Home запущен после загрузки';
+    case 'CROND_RESTARTED': return 'Планировщик заданий запущен снова';
+    case 'SENTINEL_STARTED': return 'Страж реального времени запущен';
+    case 'SENTINEL_START_FAILED': return 'Страж реального времени не запустился';
+    default: return w;
+  }
+}
+const STAB_JOB = { 'tunnel-health': 'Проверка туннелей', 'tunnel-guard': 'Страж туннелей', 'wan-guard': 'Сторож интернета', 'wan-recovery': 'Восстановление интернета',
+  'ads-scheduler': 'Планировщик рекламы', 'ads-guard': 'Скан рекламы', 'route-reconciler': 'Сверка маршрутов', 'route-engine': 'Движок маршрутов',
+  'route-hints-update': 'Подсказки маршрутов', 'policy-chain': 'IP-категории', 'housekeeping': 'Обслуживание', 'wifi-client-guard': 'Wi-Fi клиенты',
+  'console-config': 'Действия Панели VWARD', 'console-mutation': 'Изменения из Панели VWARD' };
+const stabCls = i => i == null ? '' : i >= 95 ? 'ok' : i >= 80 ? 'warn' : 'crit';
+const pct = x => x == null ? '—' : (Math.round(x * 1000) / 10).toString().replace('.', ',') + '%';
 const API_ERRORS = {
   jq_broken: 'на роутере не работает программа jq - переустановите её: opkg install --force-reinstall jq',
   upstream_not_encrypted: 'сначала зашифруйте выход AdGuard Home (https://... в «Upstream DNS-серверы»)', invalid_mac: 'неверный MAC-адрес',
@@ -302,7 +357,7 @@ const LOADERS = {
   ads: () => apiGet('ads-data'), https: () => apiGet('ads-https-data'), config: () => apiGet('config-data'),
   adsstats: () => apiGet('ads-view', { view: 'stats' }), agh: () => apiGet('ads-view', { view: 'agh' }), backups: () => apiGet('backup-data'), ext: () => apiGet('ext-update-data'),
   wanhist: () => apiText('log', { name: 'recovery', count: 100 }).then(t => ({ ok: true, text: t })),
-  awg: () => apiGet('awg-data'), tq: () => apiGet('tunnel-quality'), services: () => apiGet('services-data'), svcd: () => current.startsWith('s-') ? apiGet('services-data', { id: current.slice(2) }) : Promise.resolve(null),
+  awg: () => apiGet('awg-data'), tq: () => apiGet('tunnel-quality'), stab: () => apiGet('stability'), services: () => apiGet('services-data'), svcd: () => current.startsWith('s-') ? apiGet('services-data', { id: current.slice(2) }) : Promise.resolve(null),
   listd: () => current.startsWith('l-') ? apiGet('list-data', { name: current.slice(2) }) : Promise.resolve(null),
   laddr: () => current.startsWith('ip-') ? apiGet('list-addrs', { name: current.slice(3) }) : Promise.resolve(null), files: () => FILES.root ? apiGet('files', { op: 'list', root: FILES.root, path: FILES.path }) : Promise.resolve(null), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
   qlog: () => apiGet('ads-view', { view: 'querylog', filter: ADSV.filter, search: ADSV.search }),
@@ -356,7 +411,7 @@ const PAGES = [
   { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adsstats', 'adspub', 'agh'] },
   // Programs VWARD works with (AdGuard Home, later its own tunnel engine): each has its page here.
   { id: 'utils', title: 'Утилиты', icon: 'tools', group: 'VWARD', data: ['ads', 'agh', 'security', 'ext', 'awg'] },
-  { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config'] },
+  { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config', 'stab'] },
   { id: 'updates', title: 'Обновления', icon: 'refresh', group: 'VWARD', data: ['status', 'update', 'ext', 'config'] },
   { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth', 'status', 'config', 'backups'] },
   // The raw journals: diagnostics to save or send; each section shows its own events itself.
@@ -403,6 +458,7 @@ const logLabel = id => (LOG_TABS.find(t => t.id === id) || {}).label || id;
 const DETAILS = {
   'd-components': { title: 'Компоненты', parent: 'system' },
   'd-diag': { title: 'Диагностика', parent: 'system' },
+  'd-stability': { title: 'Стабильность', parent: 'system', data: ['stab'] },
   'd-files': { title: 'Файлы VWARD', parent: 'system', data: ['files'] },
   'd-cron': { title: 'Задания по расписанию', parent: 'd-diag' },
   'u-vward': { title: 'VWARD', parent: 'updates', data: ['status', 'update', 'config'] },
@@ -955,6 +1011,7 @@ const RENDER = {
       panel('Состояние', kv([
         ['Компоненты', COMPONENTS.length + ' ' + plural(COMPONENTS.length, 'компонент', 'компонента', 'компонентов'), '', 'd-components'],
         ['Диагностика', dg.length ? (dg.length - bad) + ' из ' + dg.length + ' в норме' : 'не запускалась', bad ? 'warn' : '', 'd-diag'],
+        (() => { const sc = stabScore(stabRows(S.stab, 86400)); return ['Стабильность', sc ? sc.index + '% за сутки' : S.stab ? 'нет данных' : '…', stabCls(sc && sc.index), 'd-stability']; })(),
         ['Файлы VWARD', '', '', 'd-files']
       ])) +
       panel('Хранилище', kv([['Свободно', fmtKB(g.free_kb) + ' из ' + fmtKB(g.total_kb)], ['Файловая система', g.filesystem || '—'], ['Сжатие журналов', 'каждый час', '', 'd-cron']]) +
@@ -1106,6 +1163,39 @@ const RENDER = {
       panel('Диагностика', (d && d.checks ? '<ul class="rows">' + d.checks.map(x => { const to = map[x.id]; return '<li class="row' + (to ? ' link" role="button" tabindex="0" data-go="' + to + '"' : '"') + '><div class="row-main"><b>' + esc(x.label) + '</b><small>' + esc(x.detail || '') + '</small></div><span class="pill ' + (x.status === 'PASS' ? 'ok' : x.status === 'FAIL' ? 'crit' : 'warn') + '">' + (x.status === 'PASS' ? 'Норма' : x.status === 'FAIL' ? 'Сбой' : 'Внимание') + '</span>' + (to ? ico('chevron', 'chev') : '') + '</li>'; }).join('') + '</ul>' : empty(S.errors.diag ? 'Диагностика не выполнена: ' + S.errors.diag : 'Загрузка…')) +
       '<div class="panel-actions">' + btn('diag-run', 'check', 'Запустить проверку', 'primary') + '</div>') +
       panel('Технические журналы', kv([['Технические журналы', 'для сохранения и отправки', '', 'logs']]), { desc: 'Журналы как есть, для диагностики.' });
+  },
+  'd-stability'() {
+    const d = S.stab;
+    if (!d) return loadError(['stab']) + panel('Стабильность', empty('Загрузка…'));
+    if (!d.ok) return panel('Стабильность', empty(errText(d)));
+    const st = d.state || {}, day = stabScore(stabRows(d, 86400)), week = stabScore(stabRows(d, 7 * 86400));
+    const sen = d.sentinel || {};
+    const senText = sen.running ? 'работает' : sen.installed ? 'остановлен' : 'ещё не установлен';
+    const idx = sc => sc ? sc.index + '%' : 'нет данных';
+    const times = (n, one, few, many) => n + ' ' + plural(n, one, few, many);
+    const watch = (st.watch || []).map(w => [STAB_WATCH(w.name), w.pid ? fmtKB(w.rss_kb) : 'не запущен',
+      w.pid ? (w.limit_kb && w.rss_kb > w.limit_kb ? 'crit' : 'ok') : '', '', '',
+      [w.pid && w.base_kb > 0 ? 'обычно ' + fmtKB(w.base_kb) : '', w.pid ? 'процессор ' + (w.cpu_x100 / 100).toFixed(1).replace('.', ',') + '%' : '',
+       'предел ' + fmtKB(w.limit_kb), w.downs ? 'пропадал ' + times(w.downs, 'раз', 'раза', 'раз') : '', w.leaks ? times(w.leaks, 'утечка', 'утечки', 'утечек') : ''].filter(Boolean).join(' · ')]);
+    const cpu = (d.cpu || []).slice().sort((a, b) => b.cs - a.cs).map(c => [STAB_JOB[c.component] || c.component, (c.cs / 100).toFixed(1).replace('.', ',') + ' с', '', '', '',
+      times(c.runs, 'запуск', 'запуска', 'запусков') + ' с загрузки роутера']);
+    const ev = (d.events || []).map(e => '<li class="row"><div class="row-main"><b>' + esc(stabEvent(e.what)) + '</b><small>' + esc(e.at) + '</small></div></li>').join('');
+    return panel('Итог', kv([
+      ['За сутки', idx(day), stabCls(day && day.index)], ['За неделю', idx(week), stabCls(week && week.index)],
+      ['DNS отвечал', day ? pct(day.dns) : '—', day && day.dns < 0.99 ? 'warn' : '', '', '', day ? (day.dnsOk + day.dnsFail) + ' проверок' + (st.dns_ms_avg >= 0 ? ' · в среднем ' + st.dns_ms_avg + ' мс' : '') : ''],
+      ['Починки', day ? (day.ok + day.bad ? day.ok + ' из ' + (day.ok + day.bad) + ' помогли' : 'не понадобились') : '—', day && day.bad ? 'warn' : ''],
+      ['Сбои программ VWARD', day ? (day.downs + day.leaks ? [day.downs ? times(day.downs, 'пропадание', 'пропадания', 'пропаданий') : '', day.leaks ? times(day.leaks, 'утечка', 'утечки', 'утечек') : ''].filter(Boolean).join(', ') : 'не было') : '—', day && (day.downs || day.leaks) ? 'warn' : ''],
+      ['Часов с нехваткой памяти', day ? String(day.low) : '—', day && day.low ? 'warn' : '']
+    ]), { desc: 'Индекс: 40% — DNS отвечал, 20% — программы VWARD не падали, 20% — починки помогли, 20% — памяти хватало. 95% и выше — норма.' }) +
+      panel('Страж реального времени', kv([
+        ['Состояние', senText, sen.running ? 'ok' : 'warn'],
+        ['Память роутера', st.mem_kb >= 0 ? 'свободно ' + fmtKB(st.mem_kb) : '—', st.mem_low ? 'crit' : '', '', '', st.mem_min_kb >= 0 ? 'меньше всего было ' + fmtKB(st.mem_min_kb) : ''],
+        ['Нагрузка', st.load_x100 != null ? (st.load_x100 / 100).toFixed(2).replace('.', ',') : '—', st.busy ? 'warn' : '', '', '', st.busy ? 'роутер занят: необязательная работа VWARD ждёт' : st.load_max_x100 ? 'больше всего ' + (st.load_max_x100 / 100).toFixed(2).replace('.', ',') : ''],
+        ['Событий обработано', String(st.events || 0), '', '', '', (st.link_events || 0) + ' от интерфейсов']
+      ]), { desc: sen.running ? 'Следит за памятью и нагрузкой каждые 2 секунды, за интерфейсами — мгновенно, за DNS — каждые 30 секунд.' : 'Страж ставится сам в течение часа; пока его нет, проверки идут раз в минуту.' }) +
+      (watch.length ? panel('Программы VWARD', kv(watch)) : '') +
+      (cpu.length ? panel('Процессор по компонентам', kv(cpu), { desc: 'Сколько процессора потратило каждое задание VWARD со всем, что оно запускало.' }) : '') +
+      panel('Последние события', ev ? '<ul class="rows">' + ev + '</ul>' : empty('Событий пока нет'));
   },
   'd-cron'() {
     const sv = st().services || {}, cr = S.cron;

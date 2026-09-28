@@ -93,6 +93,20 @@ RUN_DIR=${VWARD_RUN_DIR:-/opt/var/run/vward}
 MEM_LOW_KB=${VWARD_MEM_LOW_KB:-16384}
 MEM_LOW=0
 
+SENTINEL_BIN=${VWARD_SENTINEL_BIN:-/opt/share/vward/sentinel/vward-sentinel}
+SENTINEL_CTL=${VWARD_SENTINEL_CTL:-/opt/bin/vward-sentinel.sh}
+SENTINEL_PIDFILE=${VWARD_SENTINEL_PIDFILE:-/opt/var/run/vward/sentinel.pid}
+SENTINEL_WAIT=1
+SENTINEL_SKIP=0
+
+sentinel_alive()
+{
+    S_PID=
+    [ -r "$SENTINEL_PIDFILE" ] && read -r S_PID < "$SENTINEL_PIDFILE" 2>/dev/null || :
+    case "$S_PID" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$S_PID" 2>/dev/null
+}
+
 rss_kb()
 {
     RSS=
@@ -185,7 +199,26 @@ watch_services()
         log_event "AGH_STARTED|uptime=$UP"
     fi
 
-    watch_memory
+    # The real-time watcher (vward-sentinel) sees leaks within seconds; without it this
+    # minute's check does.
+    if sentinel_alive; then
+        :
+    else
+        watch_memory
+        if [ -x "$SENTINEL_BIN" ] && [ -x "$SENTINEL_CTL" ]; then
+            if [ "$SENTINEL_SKIP" -gt 0 ]; then
+                SENTINEL_SKIP=$((SENTINEL_SKIP - 1))
+            elif $UNNICE "$SENTINEL_CTL" start </dev/null >/dev/null 2>&1 && sentinel_alive; then
+                log_event "SENTINEL_STARTED"
+                SENTINEL_WAIT=1
+            else
+                log_event "SENTINEL_START_FAILED"
+                SENTINEL_SKIP=$SENTINEL_WAIT
+                SENTINEL_WAIT=$((SENTINEL_WAIT * 2))
+                [ "$SENTINEL_WAIT" -le 60 ] || SENTINEL_WAIT=60
+            fi
+        fi
+    fi
 }
 
 

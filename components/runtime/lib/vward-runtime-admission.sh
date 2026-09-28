@@ -24,6 +24,8 @@ vward_component_gate() {
 VWARD_PROC=${VWARD_PROC:-/proc}
 VWARD_BUSY_MEM_KB=${VWARD_BUSY_MEM_KB:-24576}
 VWARD_DEFER_DIR=${VWARD_DEFER_DIR:-${VWARD_ROOT_PREFIX:-}/tmp/vward-defer}
+VWARD_SENTINEL_PIDFILE=${VWARD_SENTINEL_PIDFILE:-${VWARD_ROOT_PREFIX:-}/opt/var/run/vward/sentinel.pid}
+VWARD_SENTINEL_STATE=${VWARD_SENTINEL_STATE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-sentinel}
 
 # vward_background: the lowest CPU priority for this job and everything it starts, once
 # per job tree (one process). The tunnels' own programs take the normal priority back
@@ -39,6 +41,13 @@ vward_background() {
 # vward_busy: the router is busy - the load of the last minute at its number of CPU
 # threads or above, or less than 24 MiB of memory available. Read by the shell.
 vward_busy() {
+    # The real-time watcher keeps a busy flag: no /proc reading here while it runs.
+    vb_pid=
+    [ ! -r "$VWARD_SENTINEL_PIDFILE" ] || read -r vb_pid < "$VWARD_SENTINEL_PIDFILE" 2>/dev/null || :
+    case "$vb_pid" in
+        ''|*[!0-9]*) ;;
+        *) if kill -0 "$vb_pid" 2>/dev/null; then [ -e "$VWARD_SENTINEL_STATE/busy" ]; return; fi ;;
+    esac
     vb_cpus=0
     if [ -r "$VWARD_PROC/cpuinfo" ]; then
         while read -r vb_k _; do [ "$vb_k" != processor ] || vb_cpus=$((vb_cpus + 1)); done < "$VWARD_PROC/cpuinfo"

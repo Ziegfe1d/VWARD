@@ -193,6 +193,8 @@
         "/opt/etc/init.d/S89vward-update-recovery",
         "/opt/bin/vward-housekeeping.sh",
         "/opt/bin/vward-cron-supervisor.sh",
+        "/opt/bin/vward-sentinel.sh",
+        "/opt/bin/vward-sentinel-act.sh",
         "/opt/lib/vward/vward-device-profile.sh",
         "/opt/lib/vward/vward-runtime-admission.sh",
         "/opt/etc/init.d/S90crond",

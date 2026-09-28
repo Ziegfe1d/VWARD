@@ -377,11 +377,14 @@ op_status() {
     echo "result=status"
 }
 
+# The real-time watcher learns the tunnels' programs and interfaces.
+sentinel_reload() { [ ! -x /opt/bin/vward-sentinel.sh ] || /opt/bin/vward-sentinel.sh reload </dev/null >/dev/null 2>&1 || :; }
+
 case "${1:-}" in
     install) op_install ;;
     servers) [ "$#" -eq 2 ] || die usage 64; op_servers "$2" ;;
-    add) [ "$#" -eq 3 ] || die usage 64; op_add "$2" "$3" ;;
-    remove) [ "$#" -eq 2 ] || die usage 64; op_remove "$2" ;;
+    add) [ "$#" -eq 3 ] || die usage 64; op_add "$2" "$3"; sentinel_reload ;;
+    remove) [ "$#" -eq 2 ] || die usage 64; op_remove "$2"; sentinel_reload ;;
     restart) [ "$#" -eq 2 ] || die usage 64; op_restart "$2" ;;
     supervise) op_supervise ;;
     stop) op_stop ;;

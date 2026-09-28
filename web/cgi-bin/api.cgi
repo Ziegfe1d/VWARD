@@ -246,7 +246,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data|site-test|tunnel-quality) ;;
+    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data|site-test|tunnel-quality|stability) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -2487,6 +2487,65 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
     OUT_JSON="$(printf '%s' "$SAFE_OUT" | "$JQ" -Rs .)"
     if [ "$RC" -eq 0 ]; then OK=true; else OK=false; fi
     printf '{"ok":%s,"action":"%s","rc":%s,"output":%s}\n' "$OK" "$LABEL" "$RC" "$OUT_JSON"
+    exit 0
+fi
+
+# «Система → Стабильность»: what the real-time watcher (vward-sentinel) saw - its state now,
+# an hourly line for 7 days, the CPU of each component since boot, the latest events of
+# the watcher's actions and of the cron supervisor. The Panel computes the index.
+if [ "$ACTION" = stability ]; then
+    header_json
+    SN_STATE=${VWARD_SENTINEL_STATE:-/tmp/vward-sentinel}
+    SN_PID=${VWARD_SENTINEL_PIDFILE:-/opt/var/run/vward/sentinel.pid}
+    SN_HOURS=${VWARD_SENTINEL_HOURS:-/opt/var/lib/vward/sentinel/hours.tsv}
+    SN_BIN=${VWARD_SENTINEL_BIN:-/opt/share/vward/sentinel/vward-sentinel}
+    SN_LOG=${VWARD_SENTINEL_LOG:-/opt/var/log/vward-sentinel.log}
+    SUP_LOG=${VWARD_SUPERVISOR_LOG:-/opt/var/log/vward-cron-supervisor.log}
+    CPU_DIR=${VWARD_CPU_DIR:-/tmp/vward-cpu}
+    RUNNING=false
+    SP=
+    [ -r "$SN_PID" ] && read -r SP < "$SN_PID"
+    case "$SP" in ''|*[!0-9]*) ;; *) ! kill -0 "$SP" 2>/dev/null || RUNNING=true ;; esac
+    INSTALLED=false
+    [ ! -x "$SN_BIN" ] || INSTALLED=true
+    SD=$(umask 077; mktemp -d /tmp/vward-stability.XXXXXX 2>/dev/null) || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
+    trap 'rm -rf "${SD:?}"' EXIT
+    {
+        # State: numbers as numbers; watch=name|pid|rss|base|max|limit|cpu_x100|downs|leaks.
+        awk -F= 'BEGIN {printf "{"}
+            $1 == "watch" {split($2, w, "|"); if (w[1] !~ /^[A-Za-z0-9_.-]+$/) next; ws = ws (ws ? "," : "") sprintf("{\"name\":\"%s\",\"pid\":%d,\"rss_kb\":%d,\"base_kb\":%d,\"max_kb\":%d,\"limit_kb\":%d,\"cpu_x100\":%d,\"downs\":%d,\"leaks\":%d}", w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9]); next}
+            $1 ~ /^[a-z_0-9]+$/ && $2 ~ /^-?[0-9]+$/ {printf "%s\"%s\":%s", (n++ ? "," : ""), $1, $2 + 0}
+            END {printf "%s\"watch\":[%s]}", (n ? "," : ""), ws}' "$SN_STATE/state" 2>/dev/null || printf '{}'
+    } > "$SD/state"
+    {
+        awk -F'\t' 'BEGIN {printf "["} NF >= 10 && $1 ~ /^[0-9]+$/ {printf "%s[%d,%d,%d,%d,%d,%d,%d,%d,%d,%d]", (n++ ? "," : ""), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10} END {printf "]"}' "$SN_HOURS" 2>/dev/null || printf '[]'
+    } > "$SD/hours"
+    {
+        printf '['
+        n=0
+        for f in "$CPU_DIR"/*; do
+            [ -f "$f" ] || continue
+            c=${f##*/}
+            case "$c" in ''|.*|*[!A-Za-z0-9_.-]*) continue ;; esac
+            r= cs=
+            read -r r cs < "$f" 2>/dev/null
+            case "$r$cs" in ''|*[!0-9]*) continue ;; esac
+            [ "$n" = 0 ] || printf ','
+            printf '{"component":"%s","runs":%s,"cs":%s}' "$c" "$r" "$cs"
+            n=1
+        done
+        printf ']'
+    } > "$SD/cpu"
+    # The latest events: the watcher's actions and the supervisor's restarts, newest first.
+    { tail -n 40 "$SN_LOG" 2>/dev/null
+      tail -n 200 "$SUP_LOG" 2>/dev/null | grep -E '\|(MEM_|PANEL_|AGH_|CROND_|SENTINEL_)'; } |
+        awk -F'|' 'NF >= 2 && $1 ~ /^[0-9-]+ [0-9:]+$/ {print}' | sort -r | head -n 30 |
+        "$JQ" -R -s -c 'split("\n") | map(select(length > 0) | split("|") | {at: .[0], what: (.[1:] | join("|"))})' > "$SD/events" 2>/dev/null || echo '[]' > "$SD/events"
+    "$JQ" -n -c --argjson running "$RUNNING" --argjson installed "$INSTALLED" \
+        --slurpfile state "$SD/state" --slurpfile hours "$SD/hours" \
+        --slurpfile cpu "$SD/cpu" --slurpfile events "$SD/events" \
+        '{ok: true, sentinel: {running: $running, installed: $installed}, state: $state[0], hours: $hours[0], cpu: $cpu[0], events: $events[0]}' 2>/dev/null ||
+        echo '{"ok":false,"error":"stability_unavailable"}'
     exit 0
 fi
 

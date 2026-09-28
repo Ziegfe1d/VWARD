@@ -1,0 +1,58 @@
+name: Real-time watcher program (vward-sentinel)
+
+# Builds tools/vward-sentinel (C, musl, static) for the routers' processors with a pinned
+# zig, runs its tests on the MIPS and ARM builds under qemu, and publishes it on the
+# sentinel branch, where routers download it.  The build is reproducible: it must match
+# tools/vward-sentinel/SHA256SUMS, the sums vward-sentinel.sh pins.
+on:
+  push:
+    branches: [dev]
+    paths: ["tools/vward-sentinel/**", "tests/repository/check-sentinel.py", ".github/workflows/sentinel.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vward-sentinel
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: vward
+      - name: Build and compare with the pinned sums
+        run: sh vward/tools/vward-sentinel/build.sh "$PWD/out" --check
+      - name: The watcher's tests on this machine and on the router builds under qemu
+        run: |
+          sudo apt-get update -q >/dev/null && sudo apt-get install -y -q qemu-user-static iproute2 >/dev/null
+          cd vward
+          sudo python3 tests/repository/check-sentinel.py
+          for pair in mipsle:mipsel mips:mips arm64:aarch64 arm:arm; do
+            echo "== ${pair%%:*}"
+            sudo SENTINEL_RUN="qemu-${pair#*:}-static $GITHUB_WORKSPACE/out/vward-sentinel-linux-${pair%%:*}" \
+              python3 tests/repository/check-sentinel.py
+          done
+      - name: Publish to the sentinel branch
+        run: |
+          cd out
+          for f in vward-sentinel-linux-*; do gzip -n -9 -c "$f" > "$f.gz"; done
+          cd ../vward
+          git config user.name "vward-bot"
+          git config user.email "vward-bot@users.noreply.github.com"
+          if git fetch --depth 1 origin sentinel 2>/dev/null; then
+            git checkout -q -B sentinel FETCH_HEAD
+          else
+            git checkout -q --orphan sentinel
+            git rm -rfq . >/dev/null 2>&1 || true
+          fi
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp ../out/*.gz ../out/SHA256SUMS .
+          printf 'vward-sentinel: tools/vward-sentinel in the VWARD repository (C, musl, static).\n' > README
+          git add -A
+          if git diff --cached --quiet; then echo "program unchanged"; exit 0; fi
+          git commit -qm "vward-sentinel from ${GITHUB_SHA::12}"
+          git push -q origin sentinel
