@@ -35,7 +35,7 @@ PersistentKeepalive = 25-35
 # with a handshake only while the "server" answers.
 FAKE_AWG = """#!/bin/sh
 ST=@ST@
-case "$1" in -v) echo "vward-awg 1.2.0"; exit 0 ;; esac
+case "$1" in -v) echo "vward-awg 1.2.1"; exit 0 ;; esac
 for a in "$@"; do [ "$a" = -n ] && { grep -q BADCONF "$3" && exit 1; exit 0; }; done
 while getopts i:c:s:t: o; do case $o in i) I=$OPTARG ;; c) C=$OPTARG ;; s) S=$OPTARG ;; esac; done
 echo "$I" > "$ST/adapter"
@@ -132,7 +132,7 @@ with tempfile.TemporaryDirectory() as t:
     # With the program in place (as if installed).
     share.mkdir(exist_ok=True)
     tool(share / "vward-awg", FAKE_AWG.replace("@ST@", str(st)))
-    (share / "version").write_text("1.2.0\n")
+    (share / "version").write_text("1.2.1\n")
     run("install", expect="result=unchanged")
     run("add", 'Bad"name', str(conf), expect="error=invalid_description")
     noaddr = t / "noaddr.conf"; noaddr.write_text(CONF.replace("Address = 100.101.72.25/32, fd00::25/128\n", ""))
