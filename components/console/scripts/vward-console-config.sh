@@ -269,9 +269,11 @@ op_list_domain() {
         unexclude) ld_kind=exclude; ld_want=0 ;;
         *) die invalid_operation 64 ;;
     esac
-    printf '%s\n' "$2" | grep -Eq '^domain-list[0-9]{1,3}$' || die invalid_group 64
+    printf '%s\n' "$2" | grep -Eq '^[A-Za-z0-9._-]{1,64}$' || die invalid_group 64
     valid_domain "$3" || die invalid_domain 64
     load_profile_base
+    # AdaptiveAuto is the route engine's; VWARD's own group is edited in «Мои домены».
+    [ "$2" != "$ADAPTIVE_GROUP" ] && [ "$2" != "${VWARD_POLICY_GROUP:-}" ] || die invalid_group 64
     change_lock
     snapshot
     grep -q "^object-group fqdn $2\$" "$RUNCFG" || die list_not_found
@@ -1410,6 +1412,45 @@ op_tunnel_conf() {
     esac
 }
 
+op_tunnel_state() {
+    # tunnel-state restart|up NAME: «Перезапустить» turns the tunnel off and on and waits for
+    # its server (nothing saved: the router's settings stay as they were); «Включить» turns on
+    # a tunnel switched off in Keenetic and saves that.
+    load_profile_base
+    vward_valid_ndm_name "$2" && is_tunnel "$2" || die unknown_tunnel 64
+    case "$1" in restart|up) ;; *) die invalid_operation 64 ;; esac
+    if engine_tunnel "$2"; then
+        [ -x "$AWG_ENGINE" ] || die engine_unavailable
+        [ "$1" = restart ] || { ndm "interface $2 up" || die router_rejected; }
+        engine_step_out=
+        exec 3>&1
+        engine_step_out=$("$AWG_ENGINE" restart "$2" 2>/dev/null)
+        exec 3>&-
+        case "$(printf '%s\n' "$engine_step_out" | tail -n 1)" in
+            result=changed) ;;
+            error=*) es_err=$(printf '%s\n' "$engine_step_out" | sed -n 's/^error=//p' | tail -n 1)
+                     case "$es_err" in ''|*[!a-z0-9_]*) es_err=engine_failed ;; esac
+                     die "$es_err" ;;
+            *) die engine_failed ;;
+        esac
+    else
+        step router
+        if [ "$1" = restart ]; then
+            ndm "interface $2 down" || die router_rejected
+            sleep 2
+        fi
+        ndm "interface $2 up" || die router_rejected
+        step handshake
+        handshake_ok "$2" || die tunnel_no_handshake
+    fi
+    if [ "$1" = up ]; then
+        step save
+        save_router || die config_save_failed
+    fi
+    rm -f "$VWARD_DEVICE_MAP_CACHE" "$TUNNEL_HEALTH_STATE"
+    done_ok "tunnel-state $1 $2" changed
+}
+
 op_tunnel_delete() {
     # tunnel-delete NAME TARGET: move its lists and subnets to TARGET (bypass, vpn
     # or another tunnel), then remove the interface.  The VWARD tunnel stays.
@@ -1976,6 +2017,7 @@ case "$OP" in
     wifi-host) op_wifi_host "$ARG1" "$ARG2" "$ARG3" ;;
     backup-restore) op_backup_restore "$ARG1" ;;
     tunnel-delete) op_tunnel_delete "$ARG1" "$ARG2" ;;
+    tunnel-state) op_tunnel_state "$ARG1" "$ARG2" ;;
     tunnel-subnet) op_tunnel_subnet "$ARG1" "$ARG2" "$ARG3" ;;
     list-domain) op_list_domain "$ARG1" "$ARG2" "$ARG3" ;;
     service) op_service "$ARG1" "$ARG2" "$ARG3" ;;

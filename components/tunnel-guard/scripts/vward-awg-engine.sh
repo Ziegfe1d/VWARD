@@ -247,6 +247,25 @@ op_supervise() {
     [ "$started" = 0 ] && echo "result=unchanged" || echo "result=changed"
 }
 
+# restart NAME: the tunnel's program again (the Panel's «Перезапустить»), then its handshake.
+op_restart() {
+    row=$(row_of "$1")
+    [ -n "$row" ] || die unknown_tunnel 64
+    n=$(printf '%s' "$row" | cut -f1)
+    stop_one "$n"
+    step program
+    start_one "$n" "$1" || die engine_start_failed
+    step handshake
+    w=0
+    until handshake_age "$n" >/dev/null; do
+        w=$((w + 2))
+        [ "$w" -le "$HANDSHAKE_WAIT" ] || die tunnel_no_handshake
+        sleep 2
+    done
+    log "restarted $1 by request"
+    echo "result=changed"
+}
+
 op_stop() {
     [ -f "$TUNNELS" ] || { echo "result=unchanged"; return 0; }
     while IFS="$(printf '\t')" read -r n name port desc; do stop_one "$n"; done < "$TUNNELS"
@@ -272,6 +291,7 @@ case "${1:-}" in
     install) op_install ;;
     add) [ "$#" -eq 3 ] || die usage 64; op_add "$2" "$3" ;;
     remove) [ "$#" -eq 2 ] || die usage 64; op_remove "$2" ;;
+    restart) [ "$#" -eq 2 ] || die usage 64; op_restart "$2" ;;
     supervise) op_supervise ;;
     stop) op_stop ;;
     status) op_status ;;

@@ -52,9 +52,12 @@ with tempfile.TemporaryDirectory() as tmp:
         fail(f"one entry and one address come as objects: {got}")
     if get("domain-list9").get("error") != "list_not_found":
         fail("an unknown list")
-    for bad in ("x;reboot", "../x", "", "ISP"):
+    for bad in ("x;reboot", "../x", ""):
         if get(bad).get("error") != "invalid_group":
             fail(f"{bad!r} must be refused")
+    # A list made in Keenetic's command line may have any plain name: a missing one is not found.
+    if get("ISP").get("error") != "list_not_found":
+        fail("a plain name that is not a list")
 
 js = (ROOT / "web/assets/vward-console.js").read_text()
 for need in ("apiGet('list-addrs'", "'ip-' + l.name", "function addrPage("):

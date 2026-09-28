@@ -234,7 +234,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data) ;;
+    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data|site-test) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -868,6 +868,13 @@ if [ "$ACTION" = tunnel-conf ]; then
       fi
       CMD="$CONFIG_HELPER" LABEL="tunnel-$TOP" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
       run_detached "$CONTROL_RUN_DIR" control_busy "$TFILE" "$TFILE.desc" ;;
+    restart|up)
+      # Waiting for the server outlasts a request: in the background, like a new tunnel.
+      [ -n "$TNAME" ] || { echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0; }
+      ! detached_running "$CONTROL_RUN_DIR" || { echo '{"ok":false,"error":"control_busy"}'; exit 0; }
+      ARGS="tunnel-state $TOP $TNAME"
+      CMD="$CONFIG_HELPER" LABEL="tunnel-$TOP" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
+      run_detached "$CONTROL_RUN_DIR" control_busy ;;
     delete|subnet-add|subnet-remove)
       console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; trap console_mutation_leave EXIT
       if [ "$TOP" = delete ]; then
@@ -1627,23 +1634,23 @@ if [ "$ACTION" = "diagnostics" ]; then
       --arg wan_rc "$LAST_WAN_RC" --arg wg_rc "$LAST_WG_RC" --arg route_rc "$LAST_ROUTE_RC" \
       --argjson wg_count "$WG_COUNT" --argjson opt_free "$OPT_FREE" \
       '{ok:true,checks:[
-        {id:"console-api",component:"console",label:"Панель VWARD",status:$cgi,detail:"API отвечает"},
-        {id:"opt",component:"runtime",label:"Хранилище /opt",status:$opt,detail:("Свободно КБ: "+($opt_free|tostring))},
-        {id:"jq",component:"runtime",label:"jq",status:$jq,detail:"JSON обработчик"},
-        {id:"curl",component:"runtime",label:"curl",status:$curl,detail:"HTTP клиент"},
-        {id:"tcpdump",component:"route-engine",label:"tcpdump",status:$tcpdump,detail:"Наблюдение DNS"},
-        {id:"lighttpd",component:"console",label:"lighttpd",status:$lighttpd,detail:"Локальный web server"},
-        {id:"crond",component:"runtime",label:"crond",status:$crond,detail:("Последний WAN RC: "+$wan_rc)},
-        {id:"supervisor",component:"runtime",label:"VWARD Runtime supervisor",status:$supervisor,detail:"Контроль crond"},
-        {id:"adguard",component:"route-engine",label:"AdGuard Home",status:$adguard,detail:"DNS service"},
-        {id:"adaptive",component:"route-engine",label:"Автоподбор доменов",status:$adaptive,detail:("Последний route RC: "+$route_rc)},
-        {id:"wan",component:"wan-guard",label:"WAN",status:$wan,detail:"Read-only RCI probe"},
-        {id:"wg",component:"tunnel-guard",label:"VPN-туннели",status:$wg,detail:("Найдено туннелей: "+($wg_count|tostring)+"; cron RC: "+$wg_rc)},
+        {id:"console-api",component:"console",label:"Панель VWARD",status:$cgi,detail:"интерфейс данных (api.cgi) отвечает"},
+        {id:"opt",component:"runtime",label:"Флешка Entware (/opt)",status:$opt,detail:("свободно "+(if $opt_free >= 1024 then (($opt_free/1024|floor)|tostring)+" МБ" else ($opt_free|tostring)+" КБ" end))},
+        {id:"jq",component:"runtime",label:"Разбор данных (jq)",status:$jq,detail:"нужен всем разделам Панели"},
+        {id:"curl",component:"runtime",label:"Сетевые запросы (curl)",status:$curl,detail:"проверки сайтов, обновления, AdGuard Home"},
+        {id:"tcpdump",component:"route-engine",label:"Наблюдение DNS (tcpdump)",status:$tcpdump,detail:"автоподбор узнаёт новые домены"},
+        {id:"lighttpd",component:"console",label:"Веб-сервер Панели (lighttpd)",status:$lighttpd,detail:"отдаёт страницы Панели VWARD"},
+        {id:"crond",component:"runtime",label:"Планировщик заданий (crond)",status:$crond,detail:(if $wan_rc == "" then "задания ещё не запускались" else "код последнего задания интернета: "+$wan_rc end)},
+        {id:"supervisor",component:"runtime",label:"Сторож служб VWARD (supervisor)",status:$supervisor,detail:"перезапускает планировщик, если он остановился"},
+        {id:"adguard",component:"route-engine",label:"AdGuard Home",status:$adguard,detail:"DNS-сервер с блокировкой рекламы"},
+        {id:"adaptive",component:"route-engine",label:"Автоподбор доменов",status:$adaptive,detail:(if $route_rc == "" then "сверка маршрутов ещё не запускалась" else "код последней сверки маршрутов: "+$route_rc end)},
+        {id:"wan",component:"wan-guard",label:"Интернет",status:$wan,detail:"состояние подключения провайдера в Keenetic"},
+        {id:"wg",component:"tunnel-guard",label:"VPN-туннели",status:$wg,detail:("туннелей: "+($wg_count|tostring)+(if $wg_rc == "" then "" else "; код последней проверки: "+$wg_rc end))},
         {id:"smartdns",component:"route-engine",label:"Smart DNS мимо VPN",status:$smartdns,detail:$smartdns_detail},
         {id:"dns-chain",component:"route-engine",label:"Цепочка DNS",status:$dns,detail:$dns_detail},
         {id:"files",component:"update-engine",label:"Файлы VWARD",status:$files,detail:$files_detail},
-        {id:"updater",component:"update-engine",label:"VWARD Update Engine",status:$updater,detail:"Активный updater slot"},
-        {id:"update-config",component:"update-engine",label:"Update config",status:$config,detail:"Конфигурация доступна для чтения"}
+        {id:"updater",component:"update-engine",label:"Движок обновлений",status:$updater,detail:"рабочая копия движка на месте"},
+        {id:"update-config",component:"update-engine",label:"Настройки обновлений",status:$config,detail:"файл настроек читается"}
       ]}'
     exit 0
 fi
@@ -1685,6 +1692,48 @@ if [ "$ACTION" = tunnel-probe ]; then
                    keepalive: ($keepalive | tonumber? // null), awg: $awg},
           exit: $exit,
           ping: {target: $target, loss: ($loss | tonumber? // null), avg_ms: ($avg | tonumber? // null)}}'
+    exit 0
+fi
+
+# site-test DOMAIN: https://DOMAIN/ opened at once through the provider and through every
+# VPN connection, all to the same address; each answer: opens (with the time), blocked (451
+# or a redirect to an «unavailable/region» page), or no answer.  Nothing is changed.
+if [ "$ACTION" = site-test ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    SD="$(qget domain | tr 'A-Z' 'a-z')"
+    case "$SD" in ''|*[!a-z0-9.-]*|.*|*.|*..*|-*) echo '{"ok":false,"error":"invalid_domain"}'; exit 0 ;; esac
+    [ "${#SD}" -le 253 ] || { echo '{"ok":false,"error":"invalid_domain"}'; exit 0; }
+    command -v vward_map_vpns >/dev/null 2>&1 || { echo '{"ok":false,"error":"profile_unavailable"}'; exit 0; }
+    SIP="$("${VWARD_RESOLVE4_BIN:-/opt/bin/vward-route-resolve4.sh}" "$SD" 2>/dev/null |
+        awk '/^Address [0-9]+:/ && $3 ~ /^[0-9]+\./ {ip = $3} END {print ip}')"
+    vward_valid_ipv4 "$SIP" 2>/dev/null || { printf '{"ok":false,"error":"domain_not_resolved","domain":"%s"}\n' "$SD"; exit 0; }
+    ST_DIR="$(mktemp -d /tmp/vward-console-site.XXXXXX 2>/dev/null)" || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
+    trap 'rm -rf "${ST_DIR:?}"' EXIT
+    { printf 'direct %s\n' "${VWARD_WAN_DEVICE:-}"
+      vward_map_vpns "$(vward_device_map 2>/dev/null)" "${VWARD_WAN_DEVICE:-}"; } > "$ST_DIR/targets"
+    sn=0
+    while read -r sname sdev; do
+        vward_valid_ifname "$sdev" 2>/dev/null && [ -e "${VWARD_SYSFS_NET:-/sys/class/net}/$sdev" ] || continue
+        sn=$((sn + 1))
+        printf '%s\t%s\n' "$sname" "$sdev" > "$ST_DIR/t.$sn"
+        "$CURL" -4 --noproxy '*' --interface "$sdev" --resolve "$SD:443:$SIP" --connect-timeout 3 --max-time 6 \
+            -A "Mozilla/5.0" -s -o /dev/null -w '%{http_code} %{time_total} %{redirect_url}' "https://$SD/" > "$ST_DIR/r.$sn" 2>/dev/null &
+    done < "$ST_DIR/targets"
+    wait
+    k=0
+    while [ "$k" -lt "$sn" ]; do
+        k=$((k + 1))
+        IFS="$(printf '\t')" read -r sname sdev < "$ST_DIR/t.$k"
+        read -r scode stime sloc < "$ST_DIR/r.$k" 2>/dev/null || :
+        case "${scode:-000}:$(printf '%s' "$sloc" | tr 'A-Z' 'a-z')" in
+            000:*) sv=none ;;
+            451:*|*unavailable*|*region*|*restricted*|*not-available*|*blocked*) sv=blocked ;;
+            *) sv=open ;;
+        esac
+        printf '%s\t%s\t%s\t%s\t%s\n' "$sname" "$sdev" "${scode:-000}" "$(awk -v t="${stime:-0}" 'BEGIN {printf "%d", t * 1000}')" "$sv"
+    done | "$JQ" -Rn --arg domain "$SD" --arg ip "$SIP" \
+        '{ok: true, domain: $domain, ip: $ip, results: [inputs | split("\t") | {via: .[0], device: .[1], code: (.[2] | tonumber? // 0), ms: (.[3] | tonumber? // null), verdict: .[4]}]}'
     exit 0
 fi
 
@@ -2138,7 +2187,11 @@ if [ "$ACTION" = list-data ]; then
     header_json
     [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
     NAME="$(qget name)"
-    printf '%s\n' "$NAME" | grep -Eq '^domain-list[0-9]{1,3}$' || { echo '{"ok":false,"error":"invalid_group"}'; exit 0; }
+    # Keenetic's web interface names its lists domain-listN; lists made in its command line
+    # (and VWARD's own group) may have any name of these characters.
+    printf '%s\n' "$NAME" | grep -Eq '^[A-Za-z0-9._-]{1,64}$' || { echo '{"ok":false,"error":"invalid_group"}'; exit 0; }
+    # The route engine's list has its own page («Автоподбор доменов»).
+    [ "$NAME" != AdaptiveAuto ] || { echo '{"ok":false,"error":"invalid_group"}'; exit 0; }
     RUNNING="$(ndm_cached running 10 "show running-config")"
     [ -n "$RUNNING" ] || { echo '{"ok":false,"error":"router_config_unavailable"}'; exit 0; }
     printf '%s\n' "$RUNNING" | awk -v g="$NAME" '
@@ -2161,7 +2214,7 @@ if [ "$ACTION" = list-addrs ]; then
     header_json
     [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
     NAME="$(qget name)"
-    printf '%s\n' "$NAME" | grep -Eq '^(domain-list[0-9]{1,3}|AdaptiveAuto)$' || { echo '{"ok":false,"error":"invalid_group"}'; exit 0; }
+    printf '%s\n' "$NAME" | grep -Eq '^[A-Za-z0-9._-]{1,64}$' || { echo '{"ok":false,"error":"invalid_group"}'; exit 0; }
     # One element comes as an object, several as an array: both read as a list.
     OUT="$("$CURL" --fail --silent --connect-timeout 2 --max-time 10 "$VWARD_RCI_BASE/show/object-group/fqdn" 2>/dev/null |
         "$JQ" -c --arg g "$NAME" '
