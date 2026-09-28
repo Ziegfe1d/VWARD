@@ -5,6 +5,8 @@
 //	vward-awg -v                       version
 //	vward-awg -n -c FILE               check the file, start nothing
 //	vward-awg -bench                   encryption speed of this CPU (1 and all threads)
+//	... -cpuprofile FILE -profile-after D -profile-for D
+//	                                   a CPU profile of the running tunnel (diagnostics)
 //	vward-awg -i NAME -c FILE -s STATE run the tunnel on adapter NAME
 //
 // STATE gets the last handshake time and traffic every few seconds, never a key.
@@ -19,6 +21,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,7 +35,7 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
-const version = "1.1.0"
+const version = "1.1.1"
 
 func fail(code int, format string, a ...any) {
 	fmt.Fprintf(os.Stderr, "error: "+format+"\n", a...)
@@ -119,6 +122,22 @@ func bench(threads int, d time.Duration) float64 {
 	return float64(sum) * 8 / d.Seconds() / 1e6
 }
 
+// profile: a CPU profile of a window of the tunnel's work (function names only,
+// no packet contents or keys), written once and closed.
+func profile(path string, after, length time.Duration) {
+	time.Sleep(after)
+	f, err := os.Create(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	if pprof.StartCPUProfile(f) != nil {
+		return
+	}
+	time.Sleep(length)
+	pprof.StopCPUProfile()
+}
+
 func main() {
 	showVersion := flag.Bool("v", false, "print the version")
 	check := flag.Bool("n", false, "check the tunnel file and exit")
@@ -127,6 +146,9 @@ func main() {
 	statePath := flag.String("s", "", "state file")
 	doBench := flag.Bool("bench", false, "measure the encryption speed of this CPU")
 	every := flag.Duration("t", 5*time.Second, "how often the state file is written")
+	cpuProfile := flag.String("cpuprofile", "", "write a CPU profile of the running tunnel to this file")
+	profAfter := flag.Duration("profile-after", 0, "start the CPU profile this long after the tunnel is up")
+	profFor := flag.Duration("profile-for", 15*time.Second, "how long the CPU profile runs")
 	flag.Parse()
 
 	if *showVersion {
@@ -178,6 +200,9 @@ func main() {
 	}
 	os.MkdirAll(filepath.Dir(*statePath), 0o755)
 	writeState(*statePath, d)
+	if *cpuProfile != "" {
+		go profile(*cpuProfile, *profAfter, *profFor)
+	}
 
 	term := make(chan os.Signal, 1)
 	signal.Notify(term, syscall.SIGTERM, os.Interrupt, syscall.SIGHUP)
