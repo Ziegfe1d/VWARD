@@ -177,7 +177,7 @@ case "${1:-}" in
              + (if ($c.rule // "") != "" and ($c.rules // []) == [] then [{text: $c.rule, list: (if ($c.filter_id // 0) == 0 then "Мои правила AdGuard Home" else ($names[($c.filter_id | tostring)] // "") end)}] else [] end)) as $rules |
             ($c.reason // "") as $why |
             {ok: true, domain: $d, reason: $why,
-             blocked: ($why | test("^Filtered(BlackList|SafeBrowsing|Parental|BlockedService|SafeSearch)")),
+             blocked: (["FilteredBlackList", "FilteredSafeBrowsing", "FilteredParental", "FilteredBlockedService", "FilteredSafeSearch"] | any(.[]; . == $why)),
              allowed: ($why == "NotFilteredAllowList"),
              service: ($c.service_name // ""), rules: $rules,
              user_block: (($f.user_rules // []) | index("||" + $d + "^") != null),

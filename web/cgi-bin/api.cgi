@@ -234,7 +234,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data|site-test) ;;
+    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data|site-test|tunnel-quality) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -691,7 +691,7 @@ if [ "$ACTION" = config ]; then
         tunnel-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=TUNNEL_GUARD_DISABLE ;;
         wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;
         component) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=COMPONENT_DISABLE ;;
-        adaptive-mode|classifier|smartdns-guard) set -- "$OP" "$VALUE" ;;
+        adaptive-mode|classifier|smartdns-guard|tunnel-fallback|tunnel-return) set -- "$OP" "$VALUE" ;;
         ip-category) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
         policy-group) set -- "$OP" "$TARGET" ;;
@@ -1697,6 +1697,27 @@ if [ "$ACTION" = tunnel-probe ]; then
                    keepalive: ($keepalive | tonumber? // null), awg: $awg},
           exit: $exit,
           ping: {target: $target, loss: ($loss | tonumber? // null), avg_ms: ($avg | tonumber? // null)}}'
+    exit 0
+fi
+
+# tunnel-quality: every tunnel over the last 30 minutes (one ping sample a minute from the
+# tunnel health check), and what the guard did with them.  Read only.
+if [ "$ACTION" = tunnel-quality ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    QBIN=${VWARD_TUNNEL_QUALITY_BIN:-/opt/bin/vward-tunnel-quality.sh}
+    [ -x "$QBIN" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+    kv_file "${VWARD_TUNNEL_FALLBACK_STATE:-/opt/var/lib/vward/tunnel-guard/fallback}" FROM=Q_FROM AT=Q_AT
+    case "$Q_FROM" in *[!A-Za-z0-9_.-]*) Q_FROM= ;; esac
+    case "$Q_AT" in ''|*[!0-9]*) Q_AT=0 ;; esac
+    "$QBIN" summary 2>/dev/null | "$JQ" -Rn --arg from "$Q_FROM" --argjson at "$Q_AT" --arg fb "$([ -e "$CONFIG_ETC/tunnel-fallback.disabled" ] && echo 0 || echo 1)" \
+        --arg ret "$([ -e "$CONFIG_ETC/tunnel-return.disabled" ] && echo 0 || echo 1)" '
+        def n: tonumber? // null;
+        {ok: true, window_min: 30, fallback: ($fb == "1"), return_home: ($ret == "1"),
+         fallback_from: (if $from == "" then null else $from end), fallback_at: (if $at > 0 then $at else null end),
+         tunnels: [inputs | split("\t") | select(length == 10) |
+           {name: .[0], device: .[1], last_loss: (.[2] | n), last_ms: (.[3] | n), ok_streak: (.[4] | n), samples: (.[5] | n),
+            loss_pct: (.[6] | n), avg_ms: (.[7] | n), jitter_ms: (.[8] | n), up_pct: (.[9] | n)}]}'
     exit 0
 fi
 

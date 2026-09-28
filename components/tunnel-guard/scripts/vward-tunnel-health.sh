@@ -19,6 +19,10 @@ vward_admission_enter tunnel-health || exit $?
 [ ! -s "${VWARD_AWG_ETC:-/opt/etc/vward/awg-engine}/tunnels.tsv" ] || [ ! -x /opt/bin/vward-awg-engine.sh ] ||
     /opt/bin/vward-awg-engine.sh supervise >/dev/null 2>&1 || :
 
+# Every VPN connection pinged through its own device: the quality table of the Panel and
+# the guard's choice of a fallback tunnel. In RAM; a few seconds, all tunnels at once.
+[ ! -x /opt/bin/vward-tunnel-quality.sh ] || /opt/bin/vward-tunnel-quality.sh >/dev/null 2>&1 || :
+
 # The health snapshot is rebuilt every minute, so it lives in RAM, not on USB.
 DIR="${VWARD_TUNNEL_HEALTH_DIR:-/tmp/vward-tunnel-health}"
 STATE="$DIR/state"

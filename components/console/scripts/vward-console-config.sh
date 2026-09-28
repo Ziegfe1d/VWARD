@@ -23,6 +23,8 @@ ADAPTIVE_GROUP=AdaptiveAuto
 FORCE_FILE="$ETC/route-engine/force-vpn.conf"
 CATEGORY_FILE="$ETC/route-engine/categories.tsv"
 TUNNEL_GUARD_FLAG="$ETC/tunnel-guard.disabled"
+TUNNEL_FALLBACK_FLAG="$ETC/tunnel-fallback.disabled"
+TUNNEL_RETURN_FLAG="$ETC/tunnel-return.disabled"
 LISTS_CONF="$ETC/route-engine/domain-lists.conf"
 LISTS_STATE="$ETC/route-engine/domain-lists"
 WAN_GUARD_FLAG="$ETC/wan-guard.disabled"
@@ -620,6 +622,8 @@ op_tunnel() {
     [ ! -x "$ROUTE_ENGINE_INIT" ] || "$ROUTE_ENGINE_INIT" restart </dev/null >/dev/null 2>&1 || true
     # IP routes follow in the background (policy-sync withdraws them from the old device).
     [ ! -x "$POLICY_SYNC_BIN" ] || (trap '' HUP; exec "$POLICY_SYNC_BIN" --reconcile) </dev/null >/dev/null 2>&1 &
+    # The owner chose this tunnel: the guard does not take the routes back anywhere else.
+    [ "${VWARD_TUNNEL_BY_GUARD:-}" = 1 ] || rm -f "${VWARD_TUNNEL_FALLBACK_STATE:-/opt/var/lib/vward/tunnel-guard/fallback}"
     done_ok "tunnel $OLD_IF($OLD_DEV) -> $NEW_IF($NEW_DEV) group=$GROUP routes=$moved" changed
 }
 
@@ -1993,6 +1997,8 @@ case "$OP" in
     adaptive) op_adaptive "$ARG1" "$ARG2" ;;
     domain-category) op_domain_category "$ARG1" "$ARG2" ;;
     tunnel-guard) op_guard_flag tunnel-guard "$TUNNEL_GUARD_FLAG" "$ARG1" ;;
+    tunnel-fallback) op_guard_flag tunnel-fallback "$TUNNEL_FALLBACK_FLAG" "$ARG1" ;;
+    tunnel-return) op_guard_flag tunnel-return "$TUNNEL_RETURN_FLAG" "$ARG1" ;;
     wan-guard) op_guard_flag wan-guard "$WAN_GUARD_FLAG" "$ARG1" ;;
     component) op_component "$ARG1" "$ARG2" ;;
     adaptive-mode) op_guard_flag adaptive "$ADAPTIVE_FLAG" "$ARG1" ;;

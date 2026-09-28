@@ -18,10 +18,10 @@ MODE="AUTO"
 
 HEALTH="${VWARD_TUNNEL_HEALTH_STATE:-/tmp/vward-tunnel-health/state}"
 
-DIR="/opt/var/lib/vward/tunnel-guard"
+DIR="${VWARD_TUNNEL_GUARD_DIR:-/opt/var/lib/vward/tunnel-guard}"
 STATE="$DIR/state"
-LOG="/opt/var/log/vward-tunnel-guard.log"
-LOCK="/tmp/vward-tunnel-guard-guard.lock"
+LOG="${VWARD_TUNNEL_GUARD_LOG:-/opt/var/log/vward-tunnel-guard.log}"
+LOCK="${VWARD_TUNNEL_GUARD_LOCK:-/tmp/vward-tunnel-guard-guard.lock}"
 
 WAN_IF="$VWARD_WAN_DEVICE"
 WG_IF="$VWARD_TUNNEL_DEVICE"
@@ -29,7 +29,16 @@ WG_IF="$VWARD_TUNNEL_DEVICE"
 MAX_HEALTH_AGE=180
 DOWN_CONFIRM=1
 RECOVERY_INTERVAL=300
-DISABLE_FILE="/opt/etc/vward/tunnel-guard.disabled"
+DISABLE_FILE="${VWARD_ETC:-/opt/etc/vward}/tunnel-guard.disabled"
+# Several tunnels: when the one VWARD routes through dies, its routes go to the best other
+# tunnel that answers (the quality samples); only with none alive do the lists go direct.
+# When the first one answers again for three minutes, the routes come back to it.
+FALLBACK_OFF="${VWARD_ETC:-/opt/etc/vward}/tunnel-fallback.disabled"
+RETURN_OFF="${VWARD_ETC:-/opt/etc/vward}/tunnel-return.disabled"
+FALLBACK="$DIR/fallback"
+QUALITY=${VWARD_TUNNEL_QUALITY_BIN:-/opt/bin/vward-tunnel-quality.sh}
+HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
+RETURN_STREAK=3
 
 mkdir -p "$DIR"
 
@@ -60,7 +69,7 @@ probe_iface()
     IFACE="$1"
     URL="$2"
 
-    curl -4 -k \
+    "${VWARD_CURL_BIN:-curl}" -4 -k \
       --noproxy '*' \
       --interface "$IFACE" \
       --connect-timeout 1 \
@@ -85,6 +94,34 @@ wg_ok()
     return 1
 }
 
+
+# fallback_pick: another tunnel answering in its last two samples, least loss, then fastest.
+fallback_pick()
+{
+    [ ! -e "$FALLBACK_OFF" ] && [ -x "$QUALITY" ] && [ -x "$HELPER" ] || return 1
+    "$QUALITY" summary 2>/dev/null |
+        awk -F '\t' -v cur="$VWARD_TUNNEL_INTERFACE" '$1 != cur && $5 >= 2 && $3 < 100 {print $7 "\t" ($8 == "-" ? 99999 : $8) "\t" $1}' |
+        sort -n -k1,1 -k2,2 | head -n 1 | cut -f3
+}
+
+# switch_to TUNNEL: VWARD's routes to TUNNEL, the Panel's own «Использовать для маршрутов».
+switch_to()
+{
+    VWARD_TUNNEL_BY_GUARD=1 "$HELPER" tunnel "$1" 2>/dev/null | tail -n 1 | grep -q '^result=changed'
+}
+
+FALLBACK_FROM=""
+FALLBACK_AT=0
+FALLBACK_TO=""
+if [ -f "$FALLBACK" ]; then
+    while IFS='=' read -r K V; do
+        case "$K" in
+            FROM) FALLBACK_FROM=$V ;;
+            AT) FALLBACK_AT=$V ;;
+        esac
+    done < "$FALLBACK"
+fi
+case "$FALLBACK_FROM" in *[!A-Za-z0-9_.-]*) FALLBACK_FROM="" ;; esac
 
 DOWN_STREAK=0
 FAILOPEN_ACTIVE=0
@@ -133,7 +170,7 @@ if [ -f "$DISABLE_FILE" ]; then
     # Если WG был выключен именно Fail-Open автоматом,
     # при аварийном запрете автоматики сначала возвращаем его UP.
     if [ "$FAILOPEN_ACTIVE" -eq 1 ]; then
-        if ndmc -c "interface $VWARD_TUNNEL_INTERFACE up" >/dev/null 2>&1; then
+        if "${VWARD_NDMC:-ndmc}" -c "interface $VWARD_TUNNEL_INTERFACE up" >/dev/null 2>&1; then
             RESTORED=1
             sleep 4
         fi
@@ -218,6 +255,17 @@ else
                     fi
 
                     FAILOPEN_ACTIVE=0
+                elif [ -n "$FALLBACK_FROM" ] && [ "$FALLBACK_FROM" != "$VWARD_TUNNEL_INTERFACE" ] &&
+                     [ "$MODE" = "AUTO" ] && [ ! -e "$RETURN_OFF" ] && [ -x "$QUALITY" ] &&
+                     [ "$("$QUALITY" summary 2>/dev/null | awk -F '\t' -v n="$FALLBACK_FROM" '$1 == n {print $5}')" -ge "$RETURN_STREAK" ] 2>/dev/null; then
+                    # The first tunnel answers again: the routes go back to it.
+                    if switch_to "$FALLBACK_FROM"; then
+                        ACTION="FALLBACK_RETURN"
+                        FALLBACK_TO=$FALLBACK_FROM
+                        FALLBACK_FROM=""
+                    else
+                        ACTION="FALLBACK_RETURN_ERROR"
+                    fi
                 else
                     ACTION="KEEP_UP"
                 fi
@@ -270,9 +318,16 @@ else
                                 DOWN_STREAK=0
                                 ACTION="ABORT_WG_RECOVERED"
 
+                            elif [ "$MODE" = "AUTO" ] && ALT=$(fallback_pick) && [ -n "$ALT" ] && switch_to "$ALT"; then
+                                # Another tunnel answers: VWARD's routes go there, nothing goes direct.
+                                [ -n "$FALLBACK_FROM" ] || FALLBACK_FROM=$VWARD_TUNNEL_INTERFACE
+                                FALLBACK_AT=$NOW
+                                FALLBACK_TO=$ALT
+                                DOWN_STREAK=0
+                                ACTION="FALLBACK_SWITCH"
                             elif [ "$MODE" = "AUTO" ]; then
 
-                                if ndmc -c "interface $VWARD_TUNNEL_INTERFACE down" \
+                                if "${VWARD_NDMC:-ndmc}" -c "interface $VWARD_TUNNEL_INTERFACE down" \
                                    >/dev/null 2>&1; then
 
                                     FAILOPEN_ACTIVE=1
@@ -319,7 +374,7 @@ else
 
                         LAST_RECOVERY_TEST=$NOW
 
-                        if ndmc -c "interface $VWARD_TUNNEL_INTERFACE up" \
+                        if "${VWARD_NDMC:-ndmc}" -c "interface $VWARD_TUNNEL_INTERFACE up" \
                            >/dev/null 2>&1; then
 
                             sleep 4
@@ -335,7 +390,7 @@ else
 
                             else
 
-                                ndmc -c "interface $VWARD_TUNNEL_INTERFACE down" \
+                                "${VWARD_NDMC:-ndmc}" -c "interface $VWARD_TUNNEL_INTERFACE down" \
                                     >/dev/null 2>&1
 
                                 ACTION="RECOVERY_FAILED"
@@ -379,11 +434,21 @@ if [ "$MODE|$DOWN_STREAK|$FAILOPEN_ACTIVE|$LAST_RECOVERY_TEST|$ACTION" != \
 fi
 
 
+# Where the routes went when the first tunnel died, until they come back.
+if [ -n "$FALLBACK_FROM" ]; then
+    # Written only when it changes: the state directory is on the USB stick.
+    if [ "$(cat "$FALLBACK" 2>/dev/null)" != "$(printf 'FROM=%s\nAT=%s' "$FALLBACK_FROM" "$FALLBACK_AT")" ]; then
+        { echo "FROM=$FALLBACK_FROM"; echo "AT=$FALLBACK_AT"; } > "$FALLBACK.tmp.$$" && mv -f "$FALLBACK.tmp.$$" "$FALLBACK"
+    fi
+else
+    rm -f "$FALLBACK"
+fi
+
 case "$ACTION" in
     KEEP_UP|STAY_DOWN|WOULD_STAY_DOWN)
         ;;
     *)
-        echo "$NOW_TEXT|$ACTION|health=$WG_STATUS|config=$CONFIG_STATE|age=$AGE|down_streak=$DOWN_STREAK|active=$FAILOPEN_ACTIVE" \
+        echo "$NOW_TEXT|$ACTION|health=$WG_STATUS|config=$CONFIG_STATE|age=$AGE|down_streak=$DOWN_STREAK|active=$FAILOPEN_ACTIVE${FALLBACK_TO:+|to=$FALLBACK_TO}${FALLBACK_FROM:+|from=$FALLBACK_FROM}" \
             >> "$LOG"
         ;;
 esac
