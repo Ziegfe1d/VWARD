@@ -5,7 +5,7 @@
 #   vward-tunnel-quality.sh           take one sample of every tunnel
 #   vward-tunnel-quality.sh summary   per tunnel for the last 30 minutes (for the Panel
 #                                     and the tunnel guard):
-#       name<TAB>device<TAB>last_loss<TAB>last_ms<TAB>ok_streak<TAB>samples<TAB>loss_pct<TAB>avg_ms<TAB>jitter_ms<TAB>up_pct
+#       name<TAB>device<TAB>last_loss<TAB>last_ms<TAB>ok_streak<TAB>samples<TAB>loss_pct<TAB>avg_ms<TAB>jitter_ms<TAB>up_pct<TAB>fail_streak
 
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
@@ -28,14 +28,14 @@ summary() {
         $1 >= now - win {
             n = $2; if (!(n in cnt)) order[++k] = n
             dev[n] = $3; cnt[n]++; lloss[n] = $4; lms[n] = $5
-            if ($4 < 100) { up[n]++; streak[n]++; if ($5 != "-") { sum[n] += $5; num[n]++; if (prev[n] != "") { d = $5 - prev[n]; jit[n] += (d < 0 ? -d : d); jn[n]++ } prev[n] = $5 } }
-            else streak[n] = 0
+            if ($4 < 100) { up[n]++; streak[n]++; fails[n] = 0; if ($5 != "-") { sum[n] += $5; num[n]++; if (prev[n] != "") { d = $5 - prev[n]; jit[n] += (d < 0 ? -d : d); jn[n]++ } prev[n] = $5 } }
+            else { streak[n] = 0; fails[n]++ }
             loss[n] += $4
         }
         END {
             for (i = 1; i <= k; i++) { n = order[i]
-                printf "%s\t%s\t%d\t%s\t%d\t%d\t%d\t%s\t%s\t%d\n", n, dev[n], lloss[n], lms[n], streak[n], cnt[n],
-                    loss[n] / cnt[n], (num[n] ? sprintf("%d", sum[n] / num[n]) : "-"), (jn[n] ? sprintf("%d", jit[n] / jn[n]) : "-"), 100 * up[n] / cnt[n] }
+                printf "%s\t%s\t%d\t%s\t%d\t%d\t%d\t%s\t%s\t%d\t%d\n", n, dev[n], lloss[n], lms[n], streak[n], cnt[n],
+                    loss[n] / cnt[n], (num[n] ? sprintf("%d", sum[n] / num[n]) : "-"), (jn[n] ? sprintf("%d", jit[n] / jn[n]) : "-"), 100 * up[n] / cnt[n], fails[n] }
         }' "$SAMPLES"
 }
 

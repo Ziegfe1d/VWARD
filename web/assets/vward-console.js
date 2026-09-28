@@ -580,6 +580,8 @@ function notifications() {
   const tunnels = wg.interfaces || [], down = tunnels.filter(t => !isTrue(t.connected));
   if (down.length) n.push({ sev: 'warn', title: down.length === tunnels.length ? 'VPN не в сети' : 'Не все туннели в сети', text: down.map(t => t.description || t.name).join(', '), to: 'vpn' });
   if (S.tq && S.tq.fallback_from) n.push({ sev: 'warn', title: '«' + tunLabel(S.tq.fallback_from) + '» не отвечает', text: 'маршруты VWARD переведены на «' + tunLabel(prof().tunnel_interface) + '»', to: 'vpn' });
+  const lm = (S.tq && S.tq.lists_moved) || [];
+  if (lm.length) n.push({ sev: 'warn', title: lm.length === 1 ? 'Список переведён на другой туннель' : 'Списки переведены на другие туннели', text: lm.map(m => listLabel(m.name) + ': «' + tunLabel(m.from) + '» → «' + tunLabel(m.to) + '»').join(', '), to: 'vpn' });
   if (isTrue(wg.failopen_active)) n.push({ sev: 'warn', title: 'VPN недоступен', text: 'Трафик списков VPN временно идёт напрямую', to: 'vpn' });
   if (sv.crond === false || sv.supervisor === false) n.push({ sev: 'crit', title: 'Задания по расписанию остановлены', text: 'cron или supervisor не запущен', to: 'd-cron' });
   const total = num(stg.total_kb), free = num(stg.free_kb);
@@ -1367,6 +1369,7 @@ function policyGroupRow() {
 // Quality over the last 30 minutes (a ping sample a minute through every tunnel) and what the
 // guard does with several tunnels.
 const tq = name => ((S.tq && S.tq.tunnels) || []).find(x => x.name === name);
+const listLabel = name => { const l = ((S.lists && S.lists.lists) || []).find(x => x.name === name); return (l && l.description) || name; };
 const tqText = q => !q ? 'замеров ещё нет' : q.last_loss >= 100 ? 'не отвечает' + (q.up_pct != null ? ' · доступен ' + q.up_pct + '% за 30 мин' : '') :
   'пинг ' + (q.avg_ms != null ? q.avg_ms + ' мс' : '—') + ' · потери ' + (q.loss_pct != null ? q.loss_pct : '—') + '%' + (q.jitter_ms != null ? ' · разброс ' + q.jitter_ms + ' мс' : '');
 function tunnelsQualityPanel() {
@@ -1375,9 +1378,9 @@ function tunnelsQualityPanel() {
   const cur = prof().tunnel_interface;
   const rows = tuns.map(t => { const q = tq(t.name); return [tunLabel(t.name) + (t.name === cur ? ' · для маршрутов' : ''), tqText(q), !q ? '' : q.last_loss >= 100 ? 'crit' : q.loss_pct >= 20 ? 'warn' : 'ok', 't-' + t.name]; });
   return panel('Несколько туннелей', (x.fallback_from ? '<p class="field-warn">«' + esc(tunLabel(x.fallback_from)) + '» не отвечал' + (x.fallback_at ? ' с ' + esc(fmtTime(x.fallback_at * 1000)) : '') + ': маршруты VWARD переведены на «' + esc(tunLabel(cur)) + '».' + (x.return_home ? ' Вернутся, когда он будет отвечать 3 минуты подряд.' : '') + '</p>' : '') +
-    kv(rows) + '<dl class="kv">' +
-    ctrlRow('Запасной туннель', sw('data-cfg-tq="tunnel-fallback"', x.fallback !== false, 'Запасной туннель', !cfgOk()), 'туннель маршрутов перестал отвечать - маршруты VWARD на лучший из отвечающих; нет таких - напрямую') +
-    ctrlRow('Возвращать на основной', sw('data-cfg-tq="tunnel-return"', x.return_home !== false, 'Возвращать на основной', !cfgOk()), 'основной отвечает 3 минуты подряд - маршруты возвращаются на него') + '</dl>',
+    kv(rows) + ((x.lists_moved || []).length ? '<p class="field-warn">Списки со своим туннелем на запасном' + (x.return_home ? ': вернутся, когда их туннель будет отвечать 3 минуты подряд' : '') + '.</p>' + kv(x.lists_moved.map(m => [listLabel(m.name), '«' + tunLabel(m.from) + '» → «' + tunLabel(m.to) + '»' + (m.at ? ' с ' + fmtTime(m.at * 1000) : ''), 'warn', 'l-' + m.name])) : '') + '<dl class="kv">' +
+    ctrlRow('Запасной туннель', sw('data-cfg-tq="tunnel-fallback"', x.fallback !== false, 'Запасной туннель', !cfgOk()), 'туннель перестал отвечать - маршруты VWARD и списки со своим туннелем на лучший из отвечающих; нет таких - напрямую') +
+    ctrlRow('Возвращать на основной', sw('data-cfg-tq="tunnel-return"', x.return_home !== false, 'Возвращать на основной', !cfgOk()), 'туннель отвечает 3 минуты подряд - маршруты и списки возвращаются на него') + '</dl>',
     { desc: 'Качество за 30 минут: раз в минуту пинг через каждый туннель.' });
 }
 function vpnGuardPanel() {

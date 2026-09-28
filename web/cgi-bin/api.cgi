@@ -1710,14 +1710,18 @@ if [ "$ACTION" = tunnel-quality ]; then
     kv_file "${VWARD_TUNNEL_FALLBACK_STATE:-/opt/var/lib/vward/tunnel-guard/fallback}" FROM=Q_FROM AT=Q_AT
     case "$Q_FROM" in *[!A-Za-z0-9_.-]*) Q_FROM= ;; esac
     case "$Q_AT" in ''|*[!0-9]*) Q_AT=0 ;; esac
-    "$QBIN" summary 2>/dev/null | "$JQ" -Rn --arg from "$Q_FROM" --argjson at "$Q_AT" --arg fb "$([ -e "$CONFIG_ETC/tunnel-fallback.disabled" ] && echo 0 || echo 1)" \
+    # Keenetic's lists the guard moved: list, first tunnel, now on, since.
+    Q_LISTS="$(cat "${VWARD_TUNNEL_LISTS_FALLBACK_STATE:-/opt/var/lib/vward/tunnel-guard/lists-fallback}" 2>/dev/null)"
+    "$QBIN" summary 2>/dev/null | "$JQ" -Rn --arg from "$Q_FROM" --argjson at "$Q_AT" --arg lists "$Q_LISTS" --arg fb "$([ -e "$CONFIG_ETC/tunnel-fallback.disabled" ] && echo 0 || echo 1)" \
         --arg ret "$([ -e "$CONFIG_ETC/tunnel-return.disabled" ] && echo 0 || echo 1)" '
         def n: tonumber? // null;
         {ok: true, window_min: 30, fallback: ($fb == "1"), return_home: ($ret == "1"),
          fallback_from: (if $from == "" then null else $from end), fallback_at: (if $at > 0 then $at else null end),
-         tunnels: [inputs | split("\t") | select(length == 10) |
+         lists_moved: [$lists | split("\n")[] | split("\t") | select(length == 4 and all(.[0:3][]; length > 0 and (explode | all(.[]; (. >= 48 and . <= 57) or (. >= 65 and . <= 90) or (. >= 97 and . <= 122) or . == 45 or . == 46 or . == 95)))) |
+           {name: .[0], from: .[1], to: .[2], at: (.[3] | n)}],
+         tunnels: [inputs | split("\t") | select(length >= 10) |
            {name: .[0], device: .[1], last_loss: (.[2] | n), last_ms: (.[3] | n), ok_streak: (.[4] | n), samples: (.[5] | n),
-            loss_pct: (.[6] | n), avg_ms: (.[7] | n), jitter_ms: (.[8] | n), up_pct: (.[9] | n)}]}'
+            loss_pct: (.[6] | n), avg_ms: (.[7] | n), jitter_ms: (.[8] | n), up_pct: (.[9] | n), fail_streak: (.[10] // "0" | n)}]}'
     exit 0
 fi
 

@@ -39,6 +39,11 @@ FALLBACK="$DIR/fallback"
 QUALITY=${VWARD_TUNNEL_QUALITY_BIN:-/opt/bin/vward-tunnel-quality.sh}
 HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
 RETURN_STREAK=3
+# Keenetic's own lists with their own tunnel (and services) move the same way, one by one:
+# GROUP<TAB>FIRST TUNNEL<TAB>NOW ON<TAB>SINCE per list moved.
+LISTS_FALLBACK="$DIR/lists-fallback"
+ADAPTIVE_GROUP=AdaptiveAuto
+LW=""
 
 mkdir -p "$DIR"
 
@@ -57,6 +62,7 @@ echo $$ > "$LOCK/pid"
 
 cleanup()
 {
+    [ -z "${LW:-}" ] || rm -rf "${LW:?}"
     rm -rf "${LOCK:?}"
     vward_admission_leave 2>/dev/null || true
 }
@@ -109,6 +115,83 @@ switch_to()
 {
     VWARD_TUNNEL_BY_GUARD=1 "$HELPER" tunnel "$1" 2>/dev/null | tail -n 1 | grep -q '^result=changed'
 }
+
+# lists_best EXCLUDE: the best tunnel answering in its last two samples, EXCLUDE aside.
+lists_best()
+{
+    awk -F '\t' -v x="$1" '$1 != x && $5 >= 2 && $3 < 100 {print $7 "\t" ($8 == "-" ? 99999 : $8) "\t" $1}' "$LW/q" |
+        sort -n -k1,1 -k2,2 | head -n 1 | cut -f3
+}
+
+# lists_move GROUP TUNNEL: the Panel's own «Маршрут списка», verified by the helper.
+lists_move()
+{
+    VWARD_TUNNEL_BY_GUARD=1 "$HELPER" domain-list "$1" "$2" </dev/null 2>/dev/null | tail -n 1 | grep -q '^result=changed'
+}
+
+# A list routed to a tunnel that failed its last two samples goes to the best tunnel that
+# answers; back when its tunnel answers three minutes in a row. VWARD's own group and
+# AdaptiveAuto follow VWARD's tunnel (switch_to); with no tunnel answering the list stays
+# (Keenetic's «auto» route takes it past the dead tunnel).
+lists_fallback()
+{
+    [ "$MODE" = AUTO ] && [ -x "$QUALITY" ] && [ -x "$HELPER" ] || return 0
+    LW=$(mktemp -d /tmp/vward-guard-lists.XXXXXX 2>/dev/null) || { LW=""; return 0; }
+    "$QUALITY" summary > "$LW/q" 2>/dev/null
+    # Nothing moved and no tunnel failing: the router's configuration is not read at all.
+    if [ ! -s "$LISTS_FALLBACK" ]; then
+        [ ! -e "$FALLBACK_OFF" ] && awk -F '\t' '$11 >= 2 {f = 1} END {exit f ? 0 : 1}' "$LW/q" || return 0
+    fi
+    "${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r' > "$LW/rc"
+    grep -q '^dns-proxy' "$LW/rc" || return 0
+    awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
+        ctx && $1 == "route" && $2 == "object-group" {print $3 "\t" $4}' "$LW/rc" > "$LW/routes"
+    lf_tab=$(printf '\t')
+    : > "$LW/keep"
+    # 1. Lists moved before: back to their tunnel when it answers; forgotten when someone
+    #    routed them elsewhere since.
+    if [ -s "$LISTS_FALLBACK" ]; then
+        while IFS="$lf_tab" read -r g from to at; do
+            [ -n "$g" ] && [ -n "$from" ] && [ -n "$to" ] || continue
+            case "$g$from$to$at" in *[!A-Za-z0-9_.-]*) continue ;; esac
+            grep -Fqx "$g$lf_tab$to" "$LW/routes" || continue
+            ok=$(awk -F '\t' -v n="$from" '$1 == n {print $5}' "$LW/q")
+            if [ ! -e "$RETURN_OFF" ] && [ "${ok:-0}" -ge "$RETURN_STREAK" ] 2>/dev/null && lists_move "$g" "$from"; then
+                LISTS_BACK=$((LISTS_BACK + 1))
+                echo "$NOW_TEXT|LIST_RETURN|list=$g|to=$from|from=$to" >> "$LOG"
+                continue
+            fi
+            printf '%s\t%s\t%s\t%s\n' "$g" "$from" "$to" "$at" >> "$LW/keep"
+        done < "$LISTS_FALLBACK"
+    fi
+    # 2. Lists on a tunnel that stopped answering.
+    if [ ! -e "$FALLBACK_OFF" ]; then
+        while IFS="$lf_tab" read -r g t; do
+            case "$g" in ''|"$ADAPTIVE_GROUP"|*[!A-Za-z0-9_.-]*) continue ;; esac
+            [ "$g" != "${VWARD_POLICY_GROUP:-}" ] || continue
+            fails=$(awk -F '\t' -v n="$t" '$1 == n {print $11}' "$LW/q")
+            [ "${fails:-0}" -ge 2 ] 2>/dev/null || continue
+            alt=$(lists_best "$t")
+            [ -n "$alt" ] && lists_move "$g" "$alt" || continue
+            LISTS_MOVED=$((LISTS_MOVED + 1))
+            echo "$NOW_TEXT|LIST_FALLBACK|list=$g|to=$alt|from=$t" >> "$LOG"
+            # A list moved on again keeps its first tunnel; one back on it is forgotten.
+            from=$(awk -F '\t' -v g="$g" '$1 == g {print $2; exit}' "$LW/keep")
+            awk -F '\t' -v g="$g" '$1 != g' "$LW/keep" > "$LW/k2" && mv -f "$LW/k2" "$LW/keep"
+            [ "${from:-$t}" = "$alt" ] || printf '%s\t%s\t%s\t%s\n' "$g" "${from:-$t}" "$alt" "$NOW" >> "$LW/keep"
+        done < "$LW/routes"
+    fi
+    # Written only when it changes: the state directory is on the USB stick.
+    if [ ! -s "$LW/keep" ]; then
+        rm -f "$LISTS_FALLBACK"
+    elif [ "$(cat "$LW/keep")" != "$(cat "$LISTS_FALLBACK" 2>/dev/null)" ]; then
+        cp "$LW/keep" "$LISTS_FALLBACK.tmp.$$" && mv -f "$LISTS_FALLBACK.tmp.$$" "$LISTS_FALLBACK"
+    fi
+    return 0
+}
+
+LISTS_MOVED=0
+LISTS_BACK=0
 
 FALLBACK_FROM=""
 FALLBACK_AT=0
@@ -434,6 +517,8 @@ if [ "$MODE|$DOWN_STREAK|$FAILOPEN_ACTIVE|$LAST_RECOVERY_TEST|$ACTION" != \
 fi
 
 
+lists_fallback
+
 # Where the routes went when the first tunnel died, until they come back.
 if [ -n "$FALLBACK_FROM" ]; then
     # Written only when it changes: the state directory is on the USB stick.
@@ -458,5 +543,6 @@ echo "ACTION=$ACTION"
 echo "Health=$WG_STATUS ConfigState=$CONFIG_STATE Age=${AGE}s"
 echo "DownStreak=$DOWN_STREAK FailOpenActive=$FAILOPEN_ACTIVE"
 echo "Mode=$MODE"
+echo "ListsMoved=$LISTS_MOVED ListsBack=$LISTS_BACK"
 
 exit 0
