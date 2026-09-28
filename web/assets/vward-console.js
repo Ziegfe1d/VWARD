@@ -221,7 +221,7 @@ const cfgRoute = () => cfg().route || {};
 const PAGES = [
   { id: 'overview', title: 'Обзор', icon: 'home', group: 'Главное', data: ['status', 'route', 'wifi', 'ads', 'lists', 'awg'] },
   { id: 'wan', title: 'Сеть', icon: 'globe', group: 'Сеть', data: ['status', 'security', 'config', 'wifi'] },
-  { id: 'vpn', title: 'VPN', icon: 'shield', group: 'Сеть', data: ['status', 'security', 'config', 'route', 'awg'] },
+  { id: 'vpn', title: 'VPN', icon: 'shield', group: 'Сеть', data: ['status', 'security', 'config', 'route', 'awg', 'ext'] },
   { id: 'routes', title: 'Домены', icon: 'list', group: 'Сеть', data: ['route', 'security', 'status', 'config', 'lists', 'services'] },
   { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adsstats', 'adspub', 'agh'] },
   // Programs VWARD works with (AdGuard Home, later its own tunnel engine): each has its page here.
@@ -300,7 +300,7 @@ const DETAILS = {
   'd-https': { title: 'HTTPS-фильтр', parent: 'ads' },
   'd-agh': { title: 'AdGuard Home', parent: 'utils', data: ['ads', 'agh', 'security', 'ext', 'adsstats'] },
   'd-dnsex': { title: 'Исключения защиты', parent: 'd-agh', data: ['ads'] },
-  'd-awg': { title: 'Контур AmneziaWG', parent: 'utils', data: ['awg', 'status'] },
+  'd-awg': { title: 'Контур AmneziaWG', parent: 'utils', data: ['awg', 'status', 'ext'] },
   'd-aghfilters': { title: 'Фильтры AdGuard Home', parent: 'd-agh', data: ['agh', 'ads'] },
   'd-aghservices': { title: 'Блокировка сервисов', parent: 'd-agh', data: ['agh', 'ads'] }
 };
@@ -613,7 +613,7 @@ const RENDER = {
   vpn() {
     const wg = st().wg || {}, list = wg.interfaces || [], managed = prof().tunnel_interface || '';
     const row = t => { const up = isTrue(t.connected); return '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.description || t.name) + '</b><small>' + (t.name === managed ? '<span class="st ok">для маршрутов</span> · ' : '') + esc(hsSec(t) != null ? 'рукопожатие ' + agoText(hsSec(t)) : t.handshake != null ? 'рукопожатия не было' : (t.state || '')) + '</small></div><span class="pill ' + (up ? 'ok' : 'warn') + '">' + (up ? 'В сети' : 'Не в сети') + '</span>' + ico('chevron', 'chev') + '</li>'; };
-    return loadError(['status']) + awgLostPanel() +
+    return loadError(['status']) + awgLostPanel() + nativePanel() +
       panel('Туннели', (list.length ? '<ul class="rows">' + list.map(row).join('') + '</ul>' : empty('Туннели WireGuard не найдены')) +
         '<div class="panel-actions">' + btn('tunnel-create', 'plus', 'Добавить туннель', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnels'),
         { desc: 'Нажмите на туннель, чтобы открыть его.' }) +
@@ -730,10 +730,10 @@ const RENDER = {
     const row = t => '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.description || t.name) + '</b><small>' +
       esc([t.endpoint, t.handshake != null ? 'рукопожатие ' + agoText(t.handshake) : 'рукопожатия нет', t.rss_kb ? 'память ' + Math.round(t.rss_kb / 1024) + ' МБ' : ''].filter(Boolean).join(' · ')) +
       '</small></div><span class="pill ' + (t.running && t.handshake != null ? 'ok' : 'warn') + '">' + (t.running ? (t.handshake != null ? 'Работает' : 'Нет связи') : 'Остановлен') + '</span>' + ico('chevron', 'chev') + '</li>';
-    return awgLostPanel() + panel('Контур AmneziaWG', kv([
+    return awgLostPanel() + nativePanel() + panel('Контур AmneziaWG', kv([
         ['Программа', w.installed ? 'vward-awg ' + (w.version || '') : 'не установлена', '', 'https://github.com/Ziegfe1d/VWARD/tree/dev/tools/vward-awg', '', w.installed ? 'процессор ' + (w.arch || '—') : 'скачается сама, когда понадобится'],
         ['Туннели', fmtInt(tl.length)]]) + (tl.length ? '<ul class="rows">' + tl.map(row).join('') + '</ul>' : ''),
-      { desc: 'Держит туннели AmneziaWG 3.x, которые прошивка Keenetic не умеет. В Keenetic такой туннель - подключение OpkgTun. Скорость ниже встроенного WireGuard.' });
+      { desc: 'Держит туннели AmneziaWG 3.x, пока прошивка Keenetic их не умеет (до KeeneticOS 5.2). В Keenetic такой туннель - подключение OpkgTun. Скорость ниже встроенного WireGuard.' });
   },
   'd-agh'() {
     const a = S.ads || {}, g = S.agh, st1 = S.adsstats, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
@@ -1532,6 +1532,24 @@ function tunnelPage(name) {
 // Tunnels Keenetic took from AmneziaWG 3.x files without their header protection
 // (awg-data lost[]): the same files move them to the engine, matched by server key.
 const awgLost = () => (S.awg && S.awg.lost) || [];
+// KeeneticOS 5.2 carries AmneziaWG 3.x itself: once the router is offered 5.2 or newer
+// while it runs older, the engine's tunnels come with the advice to update.
+const fwNum = v => { const m = /^(\d+)\.(\d+)/.exec(v || ''); return m ? +m[1] * 100 + +m[2] : 0; };
+const fwShort = v => fwNum(v) ? Math.floor(fwNum(v) / 100) + '.' + fwNum(v) % 100 + (/^\d+\.\d+$/.test(v) ? '' : ' (' + v + ')') : v;
+const fwNative = () => {
+  const f = (S.ext && S.ext.firmware) || null;
+  if (!f || !fwNum(f.title || f.release) || fwNum(f.title || f.release) >= 502) return null;
+  const ok = (f.channels || []).filter(c => fwNum(c.version) >= 502);
+  return ok.find(c => c.name === 'stable') || ok.find(c => c.name === f.channel) || ok[0] || null;
+};
+const nativePanel = () => {
+  const c = fwNative();
+  if (!c || !((S.awg && S.awg.tunnels) || []).length) return '';
+  return panel('Обновите прошивку Keenetic', '<p class="panel-desc">Для роутера вышла KeeneticOS ' + esc(fwShort(c.version)) +
+    (c.name !== 'stable' ? ' (тестовый канал «' + esc(fwChannel(c.name)) + '»)' : '') +
+    '. В ней AmneziaWG 3.x встроена в прошивку: туннели будут заметно быстрее и не будут занимать процессор и память программой на флешке. Прошивку ставит Keenetic, роутер перезагрузится.</p>' +
+    kv([['Прошивка Keenetic', 'Обновления', 'info', 'u-fw', '', 'установлена ' + esc(((S.ext || {}).firmware || {}).title || ''), 'out']]));
+};
 function awgLostPanel(only) {
   const L = awgLost().filter(x => !only || x.name === only);
   if (!L.length) return '';
@@ -1749,7 +1767,7 @@ function tunnelManagePanel(name, managed) {
       '<dl class="kv">' + ctrlRow('Куда передать списки и подсети', sel('data-tunnel-del-to', 'Куда передать', [['vpn', 'Туннель VWARD'], ['bypass', 'Провайдер']].concat(others.filter(t => t.name !== prof().tunnel_interface).map(t => [t.name, tunLabel(t.name)])), 'vpn')) + '</dl>' +
       '<div class="panel-actions">' + btn('tunnel-delete', 'close', 'Удалить туннель', 'danger', cfgOk() ? '' : ' disabled') + '</div>');
   if (((S.awg && S.awg.tunnels) || []).some(t => t.name === name))
-    return [panel('Конфигурация', '<p class="panel-desc">Туннель держит контур AmneziaWG VWARD. Чтобы сменить сервер, добавьте новый туннель и удалите этот.</p>' + kv([['Контур AmneziaWG', 'Утилиты', '', 'd-awg', '', '', 'out']])),
+    return [nativePanel(), panel('Конфигурация', '<p class="panel-desc">Туннель держит контур AmneziaWG VWARD. Чтобы сменить сервер, добавьте новый туннель и удалите этот.</p>' + kv([['Контур AmneziaWG', 'Утилиты', '', 'd-awg', '', '', 'out']])),
       panel('Удаление', del, { desc: 'Списки и подсети туннеля перейдут, куда выберете.' })];
   return [panel('Конфигурация', '<div class="panel-actions even">' + btn('tunnel-replace', 'refresh', 'Заменить конфигурацию', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnel-conf'),
       { desc: 'Новый .conf в этот же туннель, маршруты останутся.' }),
@@ -2025,7 +2043,7 @@ async function refreshPage() {
   const id = current, keys = DATA_FOR(id).slice();
   if (id === 'logs') { loadLog(logTab); return; }
   if (id.startsWith('a-')) loadActivity(id.slice(2));
-  if (id.startsWith('t-')) keys.push('status', 'lists', 'awg');
+  if (id.startsWith('t-')) keys.push('status', 'lists', 'awg', 'ext');
   if (id.startsWith('l-')) keys.push('listd');
   if (id.startsWith('ip-')) keys.push('laddr');
   if (id.startsWith('s-')) keys.push('services', 'svcd', 'lists', 'status', 'config');
@@ -2642,7 +2660,7 @@ document.addEventListener('submit', async e => {
       if (!x.ok) { toast('Файл не подходит: ' + errText(x)); return; }
       $('tcPreview').innerHTML = kv([['Сервер', x.endpoint || '—'], ['Адрес в туннеле', x.address || '—'], ['MTU', x.mtu || 'как на роутере'],
         ['Обфускация AmneziaWG', x.awg === '1' ? 'Включена' : 'Выключена'], ['Keepalive', x.keepalive ? x.keepalive + ' с' : '25 с'], ['Разрешённые адреса', x.allowed || '—']]) +
-        (x.engine === '1' ? '<p class="field-warn">Это AmneziaWG 3.x: прошивка Keenetic его не умеет. Туннель поднимет контур VWARD - программа на флешке, около 5 МБ памяти, скорость ниже встроенного WireGuard. В Keenetic он будет подключением OpkgTun.</p>' :
+        (x.engine === '1' ? '<p class="field-warn">Это AmneziaWG 3.x: прошивка Keenetic его не умеет. Туннель поднимет контур VWARD - программа на флешке, около 13 МБ памяти, скорость ниже встроенного WireGuard. В Keenetic он будет подключением OpkgTun.' + (fwNative() ? ' Для роутера уже есть KeeneticOS ' + esc(fwShort(fwNative().version)) + ' со встроенной AmneziaWG 3.x - лучше сначала обновить прошивку.' : '') + '</p>' :
          x.unsupported ? '<p class="field-warn">Этих настроек нет в прошивке Keenetic, её импорт тоже их пропускает: ' + esc(x.unsupported.split(',').join(', ')) + '. Если сервер без них не работает, туннель не подключится - VWARD проверит это и ничего не оставит.</p>' : '');
       form.dataset.checked = '1';
       form.querySelector('[type=submit]').textContent = mode === 'create' ? 'Создать туннель' : 'Заменить конфигурацию ' + tunLabel(name);

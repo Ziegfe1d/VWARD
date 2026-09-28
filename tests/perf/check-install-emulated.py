@@ -131,7 +131,7 @@ def part1_install_uninstall(work, release):
         out = r.stdout
         if r.returncode != 0 or "[ PASS ] VWARD установлен" not in out:
             fail(f"install failed:\n{out}")
-        for text in ("KeeneticOS 4.3.2", "VPN: Wireguard1", "AdGuard Home не найден", "подпись и все файлы проверены",
+        for text in ("KeeneticOS 5.1.6", "VPN: Wireguard1", "AdGuard Home не найден", "подпись и все файлы проверены",
                      "список AdaptiveAuto идёт через Wireguard1", "Панель VWARD отвечает", "Панель VWARD: http://192.0.2.1:8088"):
             if text not in out:
                 fail(f"install output lacks {text!r}:\n{out}")
@@ -244,6 +244,19 @@ def part4_check(work, release):
         teardown(root)
 
 
+def part5_old_firmware(work, release):
+    root = build(work, "clean5", release)
+    try:
+        (root / "emu/version").write_text("4.3.2\n")
+        r = sh(root, "sh /emu/repo/install.sh --check")
+        if r.returncode == 0 or "KeeneticOS 4.3.2: VWARD работает с KeeneticOS 5.0" not in r.stdout:
+            fail(f"KeeneticOS 4 must be refused:\n{r.stdout}")
+        untouched(root, "old firmware")
+        print("ok - KeeneticOS 4 is refused and nothing changes")
+    finally:
+        teardown(root)
+
+
 def main():
     if os.geteuid() != 0:
         sys.exit("check-install-emulated: needs root (chroot, mknod, mount)")
@@ -257,6 +270,7 @@ def main():
         part2_bad_package(work, release)
         part3_two_vpns(work, release)
         part4_check(work, release)
+        part5_old_firmware(work, release)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print("INSTALL_EMULATED=PASS")

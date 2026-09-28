@@ -55,8 +55,9 @@ sh /tmp/vward-install.sh
 
 ## 3. Что делает установщик
 
-1. **Проверка роутера** (ничего не меняет): KeeneticOS 4.0 или новее, Entware на `/opt`,
-   не меньше 20 МБ свободно, VWARD ещё не стоит, есть ли AdGuard Home.
+1. **Проверка роутера** (ничего не меняет): KeeneticOS 5.0 или новее (на 3.x и 4.x
+   установщик отказывает), Entware на `/opt`, не меньше 20 МБ свободно, VWARD ещё не
+   стоит, есть ли AdGuard Home.
 2. **Пакеты Entware:** ставит недостающие `curl jq tcpdump openssl-util ca-bundle
    lighttpd lighttpd-mod-cgi lighttpd-mod-setenv cron` - только после вашего «да».
 3. **Сеть и VPN:** находит провайдера, домашнюю сеть и VPN-подключения по типам, а не

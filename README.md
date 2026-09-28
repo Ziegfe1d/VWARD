@@ -48,7 +48,7 @@ Production-профиль проверен на Keenetic автора; уста�
 
 ## Установка
 
-Нужны: Keenetic с KeeneticOS 4.0+, флешка с Entware и VPN-подключение в Keenetic.
+Нужны: Keenetic с KeeneticOS 5.0 или новее (на 3.x и 4.x VWARD не ставится), флешка с Entware и VPN-подключение в Keenetic.
 Подготовка роутера и Entware - в [`docs/INSTALL.md`](docs/INSTALL.md). Затем по SSH:
 
 ```sh

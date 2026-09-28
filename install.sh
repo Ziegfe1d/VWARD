@@ -138,8 +138,10 @@ preflight() {
     major=$(printf '%s' "$rel" | sed -n 's/^\([0-9][0-9]*\).*/\1/p')
     if [ -z "$major" ]; then
         warn "версию KeeneticOS прочитать не удалось - продолжаю"
-    elif [ "$major" -lt 4 ]; then
-        fail "KeeneticOS $rel: нужна 4.0 или новее (маршруты по доменам). Обновите роутер"
+    elif [ "$major" -lt 5 ]; then
+        # 5.0 is where Keenetic takes programs' tunnels (OpkgTun) as its own connections;
+        # older releases would need workarounds past the firmware, which VWARD does not do.
+        fail "KeeneticOS $rel: VWARD работает с KeeneticOS 5.0 и новее. Если для роутера есть 5.x - обновите его (Настройки - Общие - Обновления)"
     else
         ok "KeeneticOS $rel"
     fi
