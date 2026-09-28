@@ -581,6 +581,8 @@ function notifications() {
   if (down.length) n.push({ sev: 'warn', title: down.length === tunnels.length ? 'VPN не в сети' : 'Не все туннели в сети', text: down.map(t => t.description || t.name).join(', '), to: 'vpn' });
   if (S.tq && S.tq.fallback_from) n.push({ sev: 'warn', title: '«' + tunLabel(S.tq.fallback_from) + '» не отвечает', text: 'маршруты VWARD переведены на «' + tunLabel(prof().tunnel_interface) + '»', to: 'vpn' });
   const lm = (S.tq && S.tq.lists_moved) || [];
+  const qa = (S.tq && S.tq.auto) || {};
+  if (qa.last_at && qa.last_to && Date.now() / 1000 - qa.last_at < 3600) n.push({ sev: 'news', icon: 'route', title: 'Туннель выбран по качеству', text: 'маршруты VWARD: «' + tunLabel(qa.last_from || '') + '» → «' + tunLabel(qa.last_to) + '», ' + fmtTime(qa.last_at * 1000), to: 'vpn' });
   if (lm.length) n.push({ sev: 'warn', title: lm.length === 1 ? 'Список переведён на другой туннель' : 'Списки переведены на другие туннели', text: lm.map(m => listLabel(m.name) + ': «' + tunLabel(m.from) + '» → «' + tunLabel(m.to) + '»').join(', '), to: 'vpn' });
   if (isTrue(wg.failopen_active)) n.push({ sev: 'warn', title: 'VPN недоступен', text: 'Трафик списков VPN временно идёт напрямую', to: 'vpn' });
   if (sv.crond === false || sv.supervisor === false) n.push({ sev: 'crit', title: 'Задания по расписанию остановлены', text: 'cron или supervisor не запущен', to: 'd-cron' });
@@ -1370,17 +1372,30 @@ function policyGroupRow() {
 // guard does with several tunnels.
 const tq = name => ((S.tq && S.tq.tunnels) || []).find(x => x.name === name);
 const listLabel = name => { const l = ((S.lists && S.lists.lists) || []).find(x => x.name === name); return (l && l.description) || name; };
+const tqSpeed = q => q && q.speed_mbps != null ? ' · скорость ' + (q.speed_mbps > 0 ? String(q.speed_mbps).replace('.', ',') + ' Мбит/с' : 'не измерена') : '';
 const tqText = q => !q ? 'замеров ещё нет' : q.last_loss >= 100 ? 'не отвечает' + (q.up_pct != null ? ' · доступен ' + q.up_pct + '% за 30 мин' : '') :
-  'пинг ' + (q.avg_ms != null ? q.avg_ms + ' мс' : '—') + ' · потери ' + (q.loss_pct != null ? q.loss_pct : '—') + '%' + (q.jitter_ms != null ? ' · разброс ' + q.jitter_ms + ' мс' : '');
+  'пинг ' + (q.avg_ms != null ? q.avg_ms + ' мс' : '—') + ' · потери ' + (q.loss_pct != null ? q.loss_pct : '—') + '%' + (q.jitter_ms != null ? ' · разброс ' + q.jitter_ms + ' мс' : '') + tqSpeed(q);
+const TQ_CRITERIA = [['balanced', 'сбалансированно'], ['speed', 'скорости'], ['ping', 'отклику (пингу)']];
+const TQ_SPEED = [['night', 'ночью'], ['6h', 'раз в 6 часов'], ['off', 'выключен']];
 function tunnelsQualityPanel() {
   const tuns = (st().wg && st().wg.interfaces) || [], x = S.tq || {};
   if (tuns.length < 2) return '';
-  const cur = prof().tunnel_interface;
-  const rows = tuns.map(t => { const q = tq(t.name); return [tunLabel(t.name) + (t.name === cur ? ' · для маршрутов' : ''), tqText(q), !q ? '' : q.last_loss >= 100 ? 'crit' : q.loss_pct >= 20 ? 'warn' : 'ok', 't-' + t.name]; });
+  const cur = prof().tunnel_interface, a = x.auto || {};
+  const rows = tuns.map(t => { const q = tq(t.name);
+    return [tunLabel(t.name) + (t.name === cur ? ' · для маршрутов' : ''), !q ? 'нет замеров' : q.last_loss >= 100 ? 'не отвечает' : q.avg_ms != null ? q.avg_ms + ' мс' : 'отвечает',
+      !q ? '' : q.last_loss >= 100 ? 'crit' : q.loss_pct >= 20 ? 'warn' : 'ok', 't-' + t.name, '', q ? tqText(q) : '']; });
   return panel('Несколько туннелей', (x.fallback_from ? '<p class="field-warn">«' + esc(tunLabel(x.fallback_from)) + '» не отвечал' + (x.fallback_at ? ' с ' + esc(fmtTime(x.fallback_at * 1000)) : '') + ': маршруты VWARD переведены на «' + esc(tunLabel(cur)) + '».' + (x.return_home ? ' Вернутся, когда он будет отвечать 3 минуты подряд.' : '') + '</p>' : '') +
-    kv(rows) + ((x.lists_moved || []).length ? '<p class="field-warn">Списки со своим туннелем на запасном' + (x.return_home ? ': вернутся, когда их туннель будет отвечать 3 минуты подряд' : '') + '.</p>' + kv(x.lists_moved.map(m => [listLabel(m.name), '«' + tunLabel(m.from) + '» → «' + tunLabel(m.to) + '»' + (m.at ? ' с ' + fmtTime(m.at * 1000) : ''), 'warn', 'l-' + m.name])) : '') + '<dl class="kv">' +
+    kv(rows) + ((x.lists_moved || []).length ? '<p class="field-warn">Списки со своим туннелем на запасном' + (x.return_home ? ': вернутся, когда их туннель будет отвечать 3 минуты подряд' : '') + '.</p>' + kv(x.lists_moved.map(m => [listLabel(m.name), tunLabel(m.to), 'warn', 'l-' + m.name, '', 'свой туннель «' + tunLabel(m.from) + '»' + (m.at ? ', переведён ' + fmtTime(m.at * 1000) : '')])) : '') + '<dl class="kv">' +
     ctrlRow('Запасной туннель', sw('data-cfg-tq="tunnel-fallback"', x.fallback !== false, 'Запасной туннель', !cfgOk()), 'туннель перестал отвечать - маршруты VWARD и списки со своим туннелем на лучший из отвечающих; нет таких - напрямую') +
-    ctrlRow('Возвращать на основной', sw('data-cfg-tq="tunnel-return"', x.return_home !== false, 'Возвращать на основной', !cfgOk()), 'туннель отвечает 3 минуты подряд - маршруты и списки возвращаются на него') + '</dl>',
+    ctrlRow('Возвращать на основной', sw('data-cfg-tq="tunnel-return"', x.return_home !== false, 'Возвращать на основной', !cfgOk()), 'туннель отвечает 3 минуты подряд - маршруты и списки возвращаются на него') +
+    ctrlRow('Выбирать лучший туннель', sw('data-cfg-ta="enabled"', a.enabled === true, 'Выбирать лучший туннель', !cfgOk()), 'маршруты VWARD переходят на туннель, который лучше на 30% 15 минут подряд; не чаще раза в 30 минут - переключение рвёт открытые соединения') +
+    (a.enabled ? ctrlRow('Выбирать туннель по', sel('data-cfg-ta="criterion"' + (cfgOk() ? '' : ' disabled'), 'Выбирать туннель по', TQ_CRITERIA, a.criterion || 'balanced'),
+      a.criterion === 'speed' ? 'по замеру скорости, потери учитываются' : a.criterion === 'ping' ? 'пинг и разброс - для игр и звонков' : 'потери и пинг, скорость - добавкой') : '') +
+    ctrlRow('Замер скорости', sel('data-cfg-ta="speed"' + (cfgOk() ? '' : ' disabled'), 'Замер скорости', TQ_SPEED, a.speed || 'night'), (a.speed === 'off' ? '' : a.speed === '6h' ? '' : 'между 03:00 и 05:00; ') + '10 МБ через каждый туннель по очереди') + '</dl>' +
+    (a.enabled ? kv([
+      ['Лучше текущего', a.better ? tunLabel(a.better) : 'нет', '', null, '', a.better ? (a.better_since ? 'с ' + fmtTime(a.better_since * 1000) + '; ' : '') + 'переход, если так будет 15 минут подряд' : ''],
+      ['Последнее переключение', a.last_at && a.last_to ? tunLabel(a.last_to) : 'не было', '', null, '', a.last_at && a.last_to ? 'с «' + tunLabel(a.last_from || '') + '», ' + fmtTime(a.last_at * 1000) : '']]) : '') +
+    '<div class="panel-actions even">' + btn('tunnel-speed', a.speed_running ? 'refresh' : 'runtime', a.speed_running ? 'Идёт замер скорости…' : 'Проверить скорость сейчас', '', a.speed_running || !cfgOk() ? ' disabled' : '') + '</div>',
     { desc: 'Качество за 30 минут: раз в минуту пинг через каждый туннель.' });
 }
 function vpnGuardPanel() {
@@ -2740,6 +2755,7 @@ document.addEventListener('click', e => {
   else if (a === 'tunnel-create') tunnelConfSheet('create');
   else if (a === 'tunnel-replace') tunnelConfSheet('replace', current.slice(2));
   else if (a === 'tunnel-delete') { const s2 = document.querySelector('[data-tunnel-del-to]'); confirm = { id: 'tunnel-delete', to: s2 ? s2.value : 'vpn' }; render(); }
+  else if (a === 'tunnel-speed') runAction('tunnel-speed', 'tunnel-quality', { op: 'speed' }, 'Замер скорости начат: 10 МБ через каждый туннель по очереди').then(() => load('tq', true)).then(render);
   else if (a === 'tunnel-health') runAction('tunnel-health', 'control', { op: 'tunnel-health' }, 'Проверка туннеля выполнена').then(() => load('status', true)).then(render);
   else if (a === 'page-reload') location.reload();
   else if (a === 'probe-report' && PROBE) openSheet('Проверка ' + PROBE.domain, '<div class="sheet-body"><pre class="logbox">' + esc(PROBE.out || '') + '</pre></div>', 'wide');
@@ -2845,6 +2861,9 @@ document.addEventListener('change', e => {
   if (t.dataset.svc) { const id = t.dataset.svc, x = ((S.services && S.services.services) || []).find(v => v.id === id), title = x ? x.title : id; t.disabled = true;
     serviceJob(t.checked ? { op: 'on', id: id, tunnel: 'auto' } : { op: 'off', id: id }, t.checked ? title + ' идёт через VPN' : title + ' идёт напрямую'); return; }
   if (t.dataset.svcTun) { const id = t.dataset.svcTun, v = t.value; t.disabled = true; serviceJob({ op: 'tunnel', id: id, tunnel: v }, v === 'auto' ? 'Туннель выбирается автоматически' : 'Закреплён за ' + tunLabel(v)); return; }
+  if (t.dataset.cfgTa) { const k = t.dataset.cfgTa, v = t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value; t.disabled = true;
+    cfgSet({ op: 'tunnel-auto', target: k, value: v }, k === 'enabled' ? (v === '1' ? 'Выбор лучшего туннеля включён' : 'Выбор лучшего туннеля выключен') :
+      k === 'criterion' ? 'Выбирать туннель по: ' + (TQ_CRITERIA.find(o => o[0] === v) || [, v])[1] : 'Замер скорости: ' + (TQ_SPEED.find(o => o[0] === v) || [, v])[1], ['tq']); return; }
   if (t.dataset.cfgTq) { const on = t.checked; t.disabled = true; cfgSet({ op: t.dataset.cfgTq, value: on ? '1' : '0' }, t.dataset.cfgTq === 'tunnel-fallback' ? (on ? 'Запасной туннель включён' : 'Запасной туннель выключен') : (on ? 'Возврат на основной включён' : 'Возврат на основной выключен'), ['tq']); return; }
   if (t.dataset.listVia) { const v = t.value; t.disabled = true; cfgSet({ op: 'domain-list', target: t.dataset.listVia, value: v }, v === 'bypass' ? 'Список идёт через провайдера' : 'Список идёт через ' + v, ['lists']); return; }
   if (t.hasAttribute('data-theme-pick')) { setTheme(t.value); return; }

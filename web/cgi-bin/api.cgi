@@ -306,7 +306,7 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             ;;
     esac
     case "$ACTION" in
-        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control|wifi-host|ext-update-control|services) ;;
+        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control|wifi-host|ext-update-control|services|tunnel-quality) ;;
         *)
             echo 'Status: 405 Method Not Allowed'
             header_json
@@ -687,7 +687,7 @@ if [ "$ACTION" = config ]; then
     REQUIRED=
     case "$OP" in
         route-domain|force-vpn|adaptive) set -- "$OP" "$ACT" "$TARGET" ;;
-        domain-category|wifi|update|wan-param) set -- "$OP" "$TARGET" "$VALUE" ;;
+        domain-category|wifi|update|wan-param|tunnel-auto) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=TUNNEL_GUARD_DISABLE ;;
         wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;
         component) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=COMPONENT_DISABLE ;;
@@ -1702,26 +1702,48 @@ fi
 
 # tunnel-quality: every tunnel over the last 30 minutes (one ping sample a minute from the
 # tunnel health check), and what the guard did with them.  Read only.
+# POST op=speed: the speed through every tunnel now (10 MB each, one after another, in the
+# background; speed_running says it is still going).
 if [ "$ACTION" = tunnel-quality ]; then
     header_json
-    [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
     QBIN=${VWARD_TUNNEL_QUALITY_BIN:-/opt/bin/vward-tunnel-quality.sh}
     [ -x "$QBIN" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+    Q_LOCK=${VWARD_TUNNEL_SPEED_LOCK:-/tmp/vward-tunnel-speed.lock}
+    if [ "${REQUEST_METHOD:-GET}" = POST ]; then
+        read_body 64
+        [ "$(form_value op)" = speed ] || { echo '{"ok":false,"error":"invalid_operation"}'; exit 0; }
+        [ ! -d "$Q_LOCK" ] || { echo '{"ok":false,"error":"speed_busy"}'; exit 0; }
+        sh "$QBIN" speed </dev/null >/dev/null 2>&1 &
+        echo '{"ok":true,"started":true}'
+        exit 0
+    fi
+    [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    kv_file "${VWARD_TUNNEL_AUTO_STATE:-/tmp/vward-tunnel-auto}" BETTER=QA_BETTER SINCE=QA_SINCE LAST=QA_LAST FROM=QA_FROM TO=QA_TO
+    kv_file "$CONFIG_ETC/tunnel-auto.conf" ENABLED=QA_ON CRITERION=QA_CRIT SPEED=QA_SPEED
     kv_file "${VWARD_TUNNEL_FALLBACK_STATE:-/opt/var/lib/vward/tunnel-guard/fallback}" FROM=Q_FROM AT=Q_AT
     case "$Q_FROM" in *[!A-Za-z0-9_.-]*) Q_FROM= ;; esac
     case "$Q_AT" in ''|*[!0-9]*) Q_AT=0 ;; esac
     # Keenetic's lists the guard moved: list, first tunnel, now on, since.
     Q_LISTS="$(cat "${VWARD_TUNNEL_LISTS_FALLBACK_STATE:-/opt/var/lib/vward/tunnel-guard/lists-fallback}" 2>/dev/null)"
-    "$QBIN" summary 2>/dev/null | "$JQ" -Rn --arg from "$Q_FROM" --argjson at "$Q_AT" --arg lists "$Q_LISTS" --arg fb "$([ -e "$CONFIG_ETC/tunnel-fallback.disabled" ] && echo 0 || echo 1)" \
+    "$QBIN" summary 2>/dev/null | "$JQ" -Rn --arg from "$Q_FROM" --argjson at "$Q_AT" --arg lists "$Q_LISTS" \
+        --arg qon "$QA_ON" --arg qcrit "$QA_CRIT" --arg qspeed "$QA_SPEED" --arg qbetter "$QA_BETTER" --arg qsince "$QA_SINCE" \
+        --arg qlast "$QA_LAST" --arg qfrom "$QA_FROM" --arg qto "$QA_TO" --arg srun "$([ -d "$Q_LOCK" ] && echo 1 || echo 0)" --arg fb "$([ -e "$CONFIG_ETC/tunnel-fallback.disabled" ] && echo 0 || echo 1)" \
         --arg ret "$([ -e "$CONFIG_ETC/tunnel-return.disabled" ] && echo 0 || echo 1)" '
         def n: tonumber? // null;
+        def okname: length > 0 and length <= 64 and (explode | all(.[]; (. >= 48 and . <= 57) or (. >= 65 and . <= 90) or (. >= 97 and . <= 122) or . == 45 or . == 46 or . == 95));
+        def nm: if okname then . else null end;
+        def t0: n | if . == 0 then null else . end;
         {ok: true, window_min: 30, fallback: ($fb == "1"), return_home: ($ret == "1"),
+         auto: {enabled: ($qon == "1"), criterion: (if $qcrit == "speed" or $qcrit == "ping" then $qcrit else "balanced" end),
+                speed: (if $qspeed == "off" or $qspeed == "6h" then $qspeed else "night" end), speed_running: ($srun == "1"),
+                better: ($qbetter | nm), better_since: ($qsince | t0), last_at: ($qlast | t0), last_from: ($qfrom | nm), last_to: ($qto | nm)},
          fallback_from: (if $from == "" then null else $from end), fallback_at: (if $at > 0 then $at else null end),
-         lists_moved: [$lists | split("\n")[] | split("\t") | select(length == 4 and all(.[0:3][]; length > 0 and (explode | all(.[]; (. >= 48 and . <= 57) or (. >= 65 and . <= 90) or (. >= 97 and . <= 122) or . == 45 or . == 46 or . == 95)))) |
+         lists_moved: [$lists | split("\n")[] | split("\t") | select(length == 4 and all(.[0:3][]; okname)) |
            {name: .[0], from: .[1], to: .[2], at: (.[3] | n)}],
          tunnels: [inputs | split("\t") | select(length >= 10) |
            {name: .[0], device: .[1], last_loss: (.[2] | n), last_ms: (.[3] | n), ok_streak: (.[4] | n), samples: (.[5] | n),
-            loss_pct: (.[6] | n), avg_ms: (.[7] | n), jitter_ms: (.[8] | n), up_pct: (.[9] | n), fail_streak: (.[10] // "0" | n)}]}'
+            loss_pct: (.[6] | n), avg_ms: (.[7] | n), jitter_ms: (.[8] | n), up_pct: (.[9] | n), fail_streak: (.[10] // "0" | n),
+            speed_mbps: (.[11] // "-" | n), speed_at: (.[12] // "-" | n)}]}'
     exit 0
 fi
 

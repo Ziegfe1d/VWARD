@@ -251,6 +251,15 @@ with tempfile.TemporaryDirectory() as tmp:
             stat.S_IMODE((etc / "route-engine/domain-classifier.conf").stat().st_mode) != 0o600:
         fail("classifier switch must write a 0600 config")
     run("classifier", "2", expect="error=invalid_value")
+    # The tunnel guard's choice by quality and the speed measurement.
+    run("tunnel-auto", "enabled", "1", expect="result=changed")
+    run("tunnel-auto", "criterion", "ping", expect="result=changed")
+    run("tunnel-auto", "speed", "6h", expect="result=changed")
+    run("tunnel-auto", "speed", "6h", expect="result=unchanged")
+    run("tunnel-auto", "criterion", "fastest", expect="error=invalid_value")
+    run("tunnel-auto", "interval", "1", expect="error=invalid_setting")
+    if (etc / "tunnel-auto.conf").read_text() != "ENABLED=1\nCRITERION=ping\nSPEED=6h\n":
+        fail(f"tunnel-auto.conf: {(etc / 'tunnel-auto.conf').read_text()!r}")
     excluded = etc / "policy-sync/excluded.categories"
     run("ip-category", "youtube", "0", expect="result=changed")
     run("ip-category", "telegram", "0", expect="result=changed")

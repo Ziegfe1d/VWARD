@@ -193,6 +193,74 @@ lists_fallback()
 LISTS_MOVED=0
 LISTS_BACK=0
 
+# «Выбирать лучший туннель» (off by default: a switch breaks open connections): VWARD's routes
+# go to a tunnel clearly better by the criterion (30%), after it stays better 15 minutes,
+# at most once in 30 minutes. The state is in RAM: after a reboot it starts over.
+AUTO_CONF="${VWARD_ETC:-/opt/etc/vward}/tunnel-auto.conf"
+QSTATE=${VWARD_TUNNEL_AUTO_STATE:-/tmp/vward-tunnel-auto}
+AUTO_BETTER=30
+AUTO_HOLD=900
+AUTO_GAP=1800
+QUALITY_FROM=""
+
+auto_conf()
+{
+    v=$(awk -F= -v k="$1" '$1 == k {print substr($0, index($0, "=") + 1); exit}' "$AUTO_CONF" 2>/dev/null)
+    printf '%s\n' "${v:-$2}"
+}
+
+# quality_pick CRITERION: the tunnel clearly better than the current one, or nothing. Only
+# tunnels with 15 samples and answering now. Score, lower is better:
+#   ping      average + 2 × jitter + 20 × loss%
+#   speed     10000 / Mbit/s + 20 × loss% (only tunnels with a measured speed)
+#   balanced  (average + jitter + 20 × loss%) / (1 + Mbit/s / 50), the speed where measured
+quality_pick()
+{
+    "$QUALITY" summary 2>/dev/null | awk -F '\t' -v cur="$VWARD_TUNNEL_INTERFACE" -v c="$1" -v pct="$AUTO_BETTER" '
+        $6 >= 15 && $5 >= 2 && $3 < 100 && $8 != "-" {
+            j = ($9 == "-" ? 0 : $9); sp = ($12 == "" || $12 == "-" ? 0 : $12 + 0)
+            if (c == "ping") s = $8 + 2 * j + 20 * $7
+            else if (c == "speed") { if (sp <= 0) next; s = 10000 / sp + 20 * $7 }
+            else { s = $8 + j + 20 * $7; if (sp > 0) s = s / (1 + sp / 50) }
+            if ($1 == cur) { cs = s; have = 1 }
+            else if (best == "" || s < bs) { best = $1; bs = s }
+        }
+        END { if (best != "" && have && bs <= cs * (100 - pct) / 100) print best }'
+}
+
+quality_step()
+{
+    if [ "$MODE" != AUTO ] || [ "$(auto_conf ENABLED 0)" != 1 ] || [ ! -x "$QUALITY" ] || [ ! -x "$HELPER" ]; then
+        rm -f "$QSTATE"
+        return 0
+    fi
+    Q_BETTER="" Q_SINCE=0 Q_LAST=0 Q_FROM="" Q_TO=""
+    if [ -f "$QSTATE" ]; then
+        while IFS='=' read -r K V; do
+            case "$K" in BETTER) Q_BETTER=$V ;; SINCE) Q_SINCE=$V ;; LAST) Q_LAST=$V ;; FROM) Q_FROM=$V ;; TO) Q_TO=$V ;; esac
+        done < "$QSTATE"
+    fi
+    case "$Q_SINCE" in ''|*[!0-9]*) Q_SINCE=0 ;; esac
+    case "$Q_LAST" in ''|*[!0-9]*) Q_LAST=0 ;; esac
+    b=$(quality_pick "$(auto_conf CRITERION balanced)")
+    if [ -z "$b" ]; then
+        Q_BETTER="" Q_SINCE=0
+    elif [ "$b" != "$Q_BETTER" ]; then
+        Q_BETTER=$b Q_SINCE=$NOW
+    elif [ $((NOW - Q_SINCE)) -ge "$AUTO_HOLD" ] && [ $((NOW - Q_LAST)) -ge "$AUTO_GAP" ]; then
+        if switch_to "$b"; then
+            ACTION="QUALITY_SWITCH"
+            FALLBACK_TO=$b QUALITY_FROM=$VWARD_TUNNEL_INTERFACE
+            Q_FROM=$VWARD_TUNNEL_INTERFACE Q_TO=$b Q_LAST=$NOW Q_BETTER="" Q_SINCE=0
+        else
+            ACTION="QUALITY_SWITCH_ERROR"
+        fi
+    fi
+    # In RAM: rewritten every minute is fine.
+    printf 'BETTER=%s\nSINCE=%s\nLAST=%s\nFROM=%s\nTO=%s\n' "$Q_BETTER" "$Q_SINCE" "$Q_LAST" "$Q_FROM" "$Q_TO" > "$QSTATE.tmp.$$" &&
+        mv -f "$QSTATE.tmp.$$" "$QSTATE"
+}
+
 FALLBACK_FROM=""
 FALLBACK_AT=0
 FALLBACK_TO=""
@@ -351,6 +419,7 @@ else
                     fi
                 else
                     ACTION="KEEP_UP"
+                    [ -n "$FALLBACK_FROM" ] || quality_step
                 fi
                 ;;
 
@@ -533,7 +602,7 @@ case "$ACTION" in
     KEEP_UP|STAY_DOWN|WOULD_STAY_DOWN)
         ;;
     *)
-        echo "$NOW_TEXT|$ACTION|health=$WG_STATUS|config=$CONFIG_STATE|age=$AGE|down_streak=$DOWN_STREAK|active=$FAILOPEN_ACTIVE${FALLBACK_TO:+|to=$FALLBACK_TO}${FALLBACK_FROM:+|from=$FALLBACK_FROM}" \
+        echo "$NOW_TEXT|$ACTION|health=$WG_STATUS|config=$CONFIG_STATE|age=$AGE|down_streak=$DOWN_STREAK|active=$FAILOPEN_ACTIVE${FALLBACK_TO:+|to=$FALLBACK_TO}${FALLBACK_FROM:+|from=$FALLBACK_FROM}${QUALITY_FROM:+|from=$QUALITY_FROM}" \
             >> "$LOG"
         ;;
 esac

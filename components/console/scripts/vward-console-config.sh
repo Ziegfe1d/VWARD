@@ -25,6 +25,7 @@ CATEGORY_FILE="$ETC/route-engine/categories.tsv"
 TUNNEL_GUARD_FLAG="$ETC/tunnel-guard.disabled"
 TUNNEL_FALLBACK_FLAG="$ETC/tunnel-fallback.disabled"
 TUNNEL_RETURN_FLAG="$ETC/tunnel-return.disabled"
+TUNNEL_AUTO_CONF="$ETC/tunnel-auto.conf"
 LISTS_CONF="$ETC/route-engine/domain-lists.conf"
 LISTS_STATE="$ETC/route-engine/domain-lists"
 WAN_GUARD_FLAG="$ETC/wan-guard.disabled"
@@ -380,6 +381,19 @@ op_guard_flag() {
         *) die invalid_value 64 ;;
     esac
     done_ok "$1 enabled=$3" changed
+}
+
+# tunnel-auto enabled 0|1 | criterion balanced|speed|ping | speed off|night|6h: the tunnel
+# guard's choice by quality and the quality script's speed measurement.
+op_tunnel_auto() {
+    case "$1:$2" in
+        enabled:0|enabled:1|criterion:balanced|criterion:speed|criterion:ping|speed:off|speed:night|speed:6h) ;;
+        enabled:*|criterion:*|speed:*) die invalid_value 64 ;;
+        *) die invalid_setting 64 ;;
+    esac
+    ta_key=$(printf '%s' "$1" | tr 'a-z' 'A-Z')
+    set_kv "$TUNNEL_AUTO_CONF" "$ta_key" "$2" 0644 || done_ok "tunnel-auto $1=$2" unchanged
+    done_ok "tunnel-auto $1=$2" changed
 }
 
 op_wifi() {
@@ -1999,6 +2013,7 @@ case "$OP" in
     tunnel-guard) op_guard_flag tunnel-guard "$TUNNEL_GUARD_FLAG" "$ARG1" ;;
     tunnel-fallback) op_guard_flag tunnel-fallback "$TUNNEL_FALLBACK_FLAG" "$ARG1" ;;
     tunnel-return) op_guard_flag tunnel-return "$TUNNEL_RETURN_FLAG" "$ARG1" ;;
+    tunnel-auto) op_tunnel_auto "$ARG1" "$ARG2" ;;
     wan-guard) op_guard_flag wan-guard "$WAN_GUARD_FLAG" "$ARG1" ;;
     component) op_component "$ARG1" "$ARG2" ;;
     adaptive-mode) op_guard_flag adaptive "$ADAPTIVE_FLAG" "$ARG1" ;;

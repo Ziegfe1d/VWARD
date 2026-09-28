@@ -169,6 +169,61 @@ echo result=changed
     run("UP", q((30, 0), (0, 2), (30, 0)))
     if route("Games") != "Wireguard1" or lists.exists():
         fail("with the fallback off the list stays")
+    (etc / "tunnel-fallback.disabled").unlink()
+
+    # «Выбирать лучший туннель»: a tunnel 30% better for 15 minutes takes VWARD's routes, at
+    # most once in 30 minutes; off by default.
+    qstate = tmp / "qstate"
+    env["VWARD_TUNNEL_AUTO_STATE"] = str(qstate)
+    (tmp / "routes").write_text("")
+    (tmp / "iface").write_text("Wireguard0 nwg0")
+
+    def qq(ms0, ms2, sp0="-", sp2="-", n=20):
+        return (f"Wireguard0\tnwg0\t0\t{ms0}\t{n}\t{n}\t0\t{ms0}\t5\t100\t0\t{sp0}\t-\n"
+                f"Wireguard2\tnwg2\t0\t{ms2}\t{n}\t{n}\t0\t{ms2}\t5\t100\t0\t{sp2}\t-\n")
+
+    def qget(k):
+        return dict(l.split("=", 1) for l in qstate.read_text().splitlines()).get(k, "")
+
+    if run("UP", qq(100, 50)) != "ACTION=KEEP_UP" or qstate.exists():
+        fail("the choice by quality is off by default")
+    (etc / "tunnel-auto.conf").write_text("ENABLED=1\n")
+    run("UP", qq(100, 50, n=10))
+    if qget("BETTER"):
+        fail("15 samples are needed before a tunnel counts as better")
+    run("UP", qq(100, 80))
+    if qget("BETTER"):
+        fail("20% better is not enough")
+    run("UP", qq(100, 50))
+    if qget("BETTER") != "Wireguard2" or (tmp / "iface").read_text().split()[0] != "Wireguard0":
+        fail("a better tunnel is noted first, nothing switched")
+    qstate.write_text(qstate.read_text().replace(f"SINCE={qget('SINCE')}", f"SINCE={int(time.time()) - 1000}"))
+    if run("UP", qq(100, 50)) != "ACTION=QUALITY_SWITCH" or (tmp / "iface").read_text().split()[0] != "Wireguard2":
+        fail(f"better for 15 minutes: the routes go there {qstate.read_text()}")
+    if qget("FROM") != "Wireguard0" or qget("TO") != "Wireguard2" or "|QUALITY_SWITCH|" not in (tmp / "guard.log").read_text():
+        fail("the switch is remembered for the Panel and logged")
+    # Wireguard0 is better now, for long enough, but the last switch was just now.
+    run("UP", qq(40, 100))
+    qstate.write_text(qstate.read_text().replace(f"SINCE={qget('SINCE')}", f"SINCE={int(time.time()) - 1000}"))
+    if run("UP", qq(40, 100)) != "ACTION=KEEP_UP" or (tmp / "iface").read_text().split()[0] != "Wireguard2":
+        fail("at most one switch in 30 minutes")
+    # By speed: only tunnels with a measured speed; by ping the jitter counts double.
+    (tmp / "iface").write_text("Wireguard0 nwg0"); qstate.unlink()
+    (etc / "tunnel-auto.conf").write_text("ENABLED=1\nCRITERION=speed\n")
+    run("UP", qq(100, 50))
+    if qget("BETTER"):
+        fail("by speed nothing is chosen without a measured speed")
+    run("UP", qq(40, 100, "20.0", "50.0"))
+    if qget("BETTER") != "Wireguard2":
+        fail("by speed the faster tunnel wins, whatever its ping")
+    (etc / "tunnel-auto.conf").write_text("ENABLED=1\nCRITERION=ping\n")
+    run("UP", qq(40, 100, "20.0", "50.0"))
+    if qget("BETTER"):
+        fail("by ping the faster download does not count")
+    (etc / "tunnel-auto.conf").write_text("ENABLED=0\n")
+    run("UP", qq(100, 50))
+    if qstate.exists():
+        fail("switched off: nothing is kept")
 
     # The quality script: the samples of all tunnels at once, summed for 30 minutes.
     qdir = tmp / "q"
@@ -187,8 +242,41 @@ echo result=changed
     if len(lines) != 4 or any(l.startswith(str(old)) for l in lines):
         fail(f"an hour of samples, both tunnels, a missing device skipped: {lines}")
     summ = subprocess.run(["sh", str(QUALITY), "summary"], env=qenv, text=True, capture_output=True, check=True).stdout.splitlines()
-    if summ != ["Wireguard0\tnwg0\t0\t42\t2\t2\t0\t42\t0\t100\t0", "Wireguard1\tnwg1\t100\t-\t0\t2\t100\t-\t-\t0\t2"]:
+    if summ != ["Wireguard0\tnwg0\t0\t42\t2\t2\t0\t42\t0\t100\t0\t-\t-", "Wireguard1\tnwg1\t100\t-\t0\t2\t100\t-\t-\t0\t2\t-\t-"]:
         fail(f"summary: {summ}")
+    # The speed: 10 MB through every tunnel one after another; less than 1 MB counts as 0.
+    speed = tmp / "speed.tsv"
+    (bin_ / "scurl").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/scurl.log"\ncase "$*" in *nwg0*) printf "10000000 2500000" ;; *) printf "500 100"; exit 28 ;; esac\n')
+    (bin_ / "scurl").chmod(0o755)
+    qenv |= {"VWARD_TUNNEL_SPEED_FILE": str(speed), "VWARD_CURL_BIN": str(bin_ / "scurl"), "VWARD_TUNNEL_SPEED_LOCK": str(tmp / "slock")}
+    subprocess.run(["sh", str(QUALITY), "speed"], env=qenv, check=True, timeout=60)
+    rows = [l.split("\t") for l in speed.read_text().splitlines()]
+    if [(r[0], r[3]) for r in rows] != [("Wireguard0", "20.0"), ("Wireguard1", "0")] or (tmp / "slock").exists():
+        fail(f"speed: {rows}")
+    summ = subprocess.run(["sh", str(QUALITY), "summary"], env=qenv, text=True, capture_output=True, check=True).stdout.splitlines()
+    if [l.split("\t")[11] for l in summ] != ["20.0", "0"] or summ[0].split("\t")[12] != rows[0][2]:
+        fail(f"the summary carries the speed: {summ}")
+    # Measured by itself: every 6 hours here (the default is at night), in the background.
+    (etc / "tunnel-auto.conf").write_text("SPEED=6h\n")
+    speed.write_text(f"Wireguard0\tnwg0\t{int(time.time()) - 3600}\t20.0\n")
+    subprocess.run(["sh", str(QUALITY)], env=qenv, check=True, timeout=60)
+    time.sleep(1)
+    if speed.read_text().count("\n") != 1:
+        fail("measured an hour ago: not again")
+    speed.write_text(f"Wireguard0\tnwg0\t{int(time.time()) - 30000}\t20.0\n")
+    subprocess.run(["sh", str(QUALITY)], env=qenv, check=True, timeout=60)
+    for _ in range(50):
+        if speed.read_text().count("\n") == 2:
+            break
+        time.sleep(0.2)
+    else:
+        fail(f"measured 8 hours ago: again {speed.read_text()}")
+    (etc / "tunnel-auto.conf").write_text("SPEED=off\n")
+    speed.write_text(f"Wireguard0\tnwg0\t1\t20.0\n")
+    subprocess.run(["sh", str(QUALITY)], env=qenv, check=True, timeout=60)
+    time.sleep(1)
+    if speed.read_text().count("\n") != 1:
+        fail("switched off: never measured")
 
     # The Panel's tunnel-quality: the tunnels, where VWARD's routes went and the lists moved.
     (tmp / "summary").write_text("Wireguard0\tnwg0\t0\t42\t2\t2\t0\t42\t0\t100\t0\nWireguard1\tnwg1\t100\t-\t0\t2\t100\t-\t-\t0\t2\n")
@@ -203,4 +291,14 @@ echo result=changed
         fail(f"tunnel-quality: {got}")
     if [t["fail_streak"] for t in got.get("tunnels", [])] != [0, 2]:
         fail(f"tunnel-quality fail_streak: {got}")
+    qstate.write_text("BETTER=Wireguard2\nSINCE=1759000200\nLAST=1759000300\nFROM=Wireguard0\nTO=bad;x\n")
+    (etc / "tunnel-auto.conf").write_text("ENABLED=1\nCRITERION=ping\n")
+    r = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], text=True, capture_output=True, timeout=60,
+                       env=env | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=tunnel-quality", "JQ": shutil.which("jq"),
+                                  "VWARD_ROOT_PREFIX": str(tmp / "root"), "VWARD_CONSOLE_ETC": str(etc),
+                                  "VWARD_TUNNEL_FALLBACK_STATE": str(gdir / "fallback"), "VWARD_TUNNEL_LISTS_FALLBACK_STATE": str(lists)})
+    got = json.loads(r.stdout.split("\n\n", 1)[1])
+    if got.get("auto") != {"enabled": True, "criterion": "ping", "speed": "night", "speed_running": False, "better": "Wireguard2",
+                           "better_since": 1759000200, "last_at": 1759000300, "last_from": "Wireguard0", "last_to": None}:
+        fail(f"tunnel-quality auto: {got.get('auto')}")
 print("TUNNEL_FALLBACK=PASS")
