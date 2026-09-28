@@ -66,7 +66,11 @@ elif path in ("safebrowsing/enable", "safebrowsing/disable", "parental/enable", 
 elif path == "safesearch/status": res = {"enabled": st["safesearch"], "bing": True, "google": True}
 elif path == "safesearch/settings" and method == "PUT": st["safesearch"] = body["enabled"]; res = {}
 if res is None: sys.exit(22)
-st_path.write_text(json.dumps(st))
+# The view asks side by side: the state is replaced whole, never read half-written.
+import os
+tmp_st = "%s.%d" % (st_path, os.getpid())
+Path(tmp_st).write_text(json.dumps(st))
+os.replace(tmp_st, st_path)
 Path(out).write_text(json.dumps(res))
 '''
 

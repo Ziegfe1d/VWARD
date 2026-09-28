@@ -130,6 +130,10 @@ case "${1:-}" in
         get parental/status parental.json &
         get safesearch/status safesearch.json &
         wait
+        # A busy AdGuard Home may drop one of the parallel requests: asked once more, alone.
+        for f in filtering/status:filtering safebrowsing/status:safebrowsing parental/status:parental safesearch/status:safesearch; do
+            [ -s "$D/${f#*:}.json" ] || get "${f%%:*}" "${f#*:}.json"
+        done
         # Answers go to jq as files: the service list carries icons and the
         # filter status the user rules, far beyond the 128 KB one argument may hold.
         if [ ! -s "$SVC_CACHE" ] || [ -z "$(find "$SVC_CACHE" -mmin -1440 2>/dev/null)" ]; then

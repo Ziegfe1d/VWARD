@@ -74,6 +74,8 @@ AGH_INIT=${VWARD_AGH_INIT:-/opt/etc/init.d/S99adguardhome}
 UPTIME_FILE=${VWARD_UPTIME_FILE:-/proc/uptime}
 WATCH_EVERY=6
 PANEL_DOWN=0
+PANEL_WAIT=1
+PANEL_SKIP=0
 
 # The supervisor is background work: the lowest CPU priority. What it starts for the owner
 # (cron, the Panel, AdGuard Home) gets the normal priority back.
@@ -156,13 +158,21 @@ watch_services()
     P=
     [ ! -r "$CONSOLE_PIDFILE" ] || read -r P < "$CONSOLE_PIDFILE" || :
     if [ -x "$CONSOLE_INIT" ] && { [ -z "$P" ] || ! kill -0 "$P" 2>/dev/null; }; then
-        if $UNNICE "$CONSOLE_INIT" start </dev/null >/dev/null 2>&1; then
+        # A start that fails is tried again after 1, 2, 4, 8, then every 15 minutes.
+        if [ "$PANEL_SKIP" -gt 0 ]; then
+            PANEL_SKIP=$((PANEL_SKIP - 1))
+        elif $UNNICE "$CONSOLE_INIT" start </dev/null >/dev/null 2>&1; then
             log_event "PANEL_STARTED"
-            PANEL_DOWN=0
+            PANEL_DOWN=0 PANEL_WAIT=1
         else
             [ "$PANEL_DOWN" = 1 ] || log_event "PANEL_START_FAILED"
             PANEL_DOWN=1
+            PANEL_SKIP=$PANEL_WAIT
+            PANEL_WAIT=$((PANEL_WAIT * 2))
+            [ "$PANEL_WAIT" -le 15 ] || PANEL_WAIT=15
         fi
+    else
+        PANEL_DOWN=0 PANEL_WAIT=1 PANEL_SKIP=0
     fi
 
     UP=

@@ -45,10 +45,10 @@ for i in $(seq "$1"); do watch_services; done
         read = lambda n: (tmp / n).read_text().split("\n")[:-1] if (tmp / n).exists() else []
         return read("calls"), read("log")
 
-    # No home network yet: the Panel cannot start; tried each time, logged once.
-    calls, log = run(30, 3)
+    # No home network yet: the Panel cannot start; tried after 1, 2, 4... minutes, logged once.
+    calls, log = run(30, 8)
     if calls != ["console start"] * 3 or log != ["PANEL_START_FAILED"]:
-        fail(f"no network: {calls} {log}")
+        fail(f"no network: tries at minutes 1, 3 and 6 of 8: {calls} {log}")
     # The network is up: started once, then left alone while it runs.
     (tmp / "lan").write_text("")
     calls, log = run(40, 2)
