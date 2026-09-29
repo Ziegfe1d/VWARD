@@ -44,7 +44,9 @@ Gate RC1:
 
 ### RC2 — reliability (`0.2.0-rc.2`)
 
-Только исправления дефектов RC1 с regression-тестами. Обязательны: RC1→RC2 update,
+Только исправления дефектов RC1 с regression-тестами. Исключение владельца (2026-09-28): в RC2 вошли стабильность и ресурсы
+(сторож `vward-sentinel`, индекс стабильности, уступка ресурсов) и доработки Панели VWARD по
+замечаниям с роутера - см. `docs/RC2_PLAN.md`. Обязательны: RC1→RC2 update,
 rollback, interrupted update, WAN/DNS/GitHub recovery, storage/CPU/RAM контроль и
 3–7 суток soak.
 
