@@ -65,12 +65,22 @@ with tempfile.TemporaryDirectory() as tmp:
     if "JOB_QUEUE=0" not in st or "LAST_state=DONE" not in st:
         fail(f"after drain: {st}")
 
+    # «Разрешено»: the domains VWARD judged safe, searchable, like «Заблокировано».
+    (tmp / "state/verdicts.tsv").write_text("ok.example|ALLOW|ALLOW|10|1|2026-09-29 10:00:00|x|clean\nads.example|BLOCK|BLOCK|90|1|2026-09-29 10:00:00|x|source\n"
+                                            "cdn.ok.example|ALLOW|ALLOW|10|1|2026-09-29 11:00:00|x|clean\nodd.example|SUSPECT|ALLOW|50|1|2026-09-29 10:00:00|x|heur\n")
+    VIEW = SCRIPTS / "vward-ads-privacy-view.sh"
+    r = subprocess.run(["sh", str(VIEW), "list", "allowed", "ok"], env=env | {"VWARD_ADS_JQ": shutil.which("jq")}, text=True, capture_output=True)
+    lst = json.loads(r.stdout)
+    if lst.get("total") != 2 or [e["domain"] for e in lst["entries"]] != ["cdn.ok.example", "ok.example"]:
+        fail(f"allowed list: {r.stdout} {r.stderr[-200:]}")
+
 for need in ("job-run|job-cancel|agh", 'drain </dev/null >/dev/null 2>&1 & )', 'cancel "$JID"',
              'queue:[$jobsraw | to_entries[] | select(.key | startswith("QUEUED_"))'):
     if need not in API:
         fail(f"the API lacks {need}")
 for need in ("panel('Очередь'", "data-act=\"ads-job-cancel\"", "btn('ads-job-run', 'refresh', 'Выполнить очередь сейчас'", "a === 'ads-job-run'",
-             "a === 'ads-job-cancel'", "ctrlRow('Обработка заданий', sw('data-ads-pause'"):
+             "a === 'ads-job-cancel'", "ctrlRow('Обработка заданий', sw('data-ads-pause'", "'d-allowed'() {", "['Разрешено', fmtInt(c.allow), '', 'd-allowed'",
+             "panel('Проверка VWARD'", "['Состояние', now[1], now[0], now[2]", "kind: 'allowed', search: ADSV.allowedSearch"):
     if need not in JS:
         fail(f"the Panel lacks {need}")
 print("ADS_JOBS=PASS")

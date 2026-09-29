@@ -2,7 +2,7 @@
 # Read-only views of VWARD Ads & Privacy Guard for the Panel. Prints JSON.
 #   querylog all|blocked|allowed|review [SEARCH] [LIMIT]  AdGuard Home query log
 #   stats                                                  AdGuard Home counters for the day
-#   list review|blocked [SEARCH]                           domains from the verdict state
+#   list review|blocked|allowed [SEARCH]                   domains from the verdict state
 #   publish-status                                         rules not yet published
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
@@ -85,11 +85,11 @@ case "${1:-}" in
         ;;
     list)
         KIND=${2:-}; SEARCH=$(printf '%s' "${3:-}" | tr 'A-Z' 'a-z')
-        case "$KIND" in review|blocked) ;; *) fail invalid_list ;; esac
+        case "$KIND" in review|blocked|allowed) ;; *) fail invalid_list ;; esac
         search_ok "$SEARCH" || fail invalid_search
         [ -r "$VERDICTS" ] || { printf '{"ok":true,"kind":"%s","total":0,"entries":[]}\n' "$KIND"; exit 0; }
         awk -F'|' -v k="$KIND" -v s="$SEARCH" '
-            (k == "review" && $2 == "SUSPECT") || (k == "blocked" && $3 == "BLOCK") {
+            (k == "review" && $2 == "SUSPECT") || (k == "blocked" && $3 == "BLOCK") || (k == "allowed" && $2 == "ALLOW") {
                 if (s != "" && index($1, s) == 0) next
                 print $1 "\t" $2 "\t" $3 "\t" $4 "\t" $6 "\t" $8
             }' "$VERDICTS" |

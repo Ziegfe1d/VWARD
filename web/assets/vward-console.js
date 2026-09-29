@@ -476,7 +476,7 @@ function probeText(r) {
     hints.length ? ['В каталоге сервисов', hints.slice(0, 3).join(', ')] : null
   ]);
 }
-const ADSV = { filter: 'all', search: '', blockedSearch: '', filtersOpen: false };
+const ADSV = { filter: 'all', search: '', blockedSearch: '', allowedSearch: '', filtersOpen: false };
 // Files page: the open folder.
 const FILES = { root: '', path: '' };
 const LOADERS = {
@@ -491,7 +491,8 @@ const LOADERS = {
   qlog: () => apiGet('ads-view', { view: 'querylog', filter: ADSV.filter, search: ADSV.search }),
   review: () => apiGet('ads-view', { view: 'list', kind: 'review' }),
   cron: () => apiGet('cron-data'), auth: () => apiGet('auth'),
-  blocked: () => apiGet('ads-view', { view: 'list', kind: 'blocked', search: ADSV.blockedSearch })
+  blocked: () => apiGet('ads-view', { view: 'list', kind: 'blocked', search: ADSV.blockedSearch }),
+  allowed: () => apiGet('ads-view', { view: 'list', kind: 'allowed', search: ADSV.allowedSearch })
 };
 // The last answers are kept in the browser: a reopened console shows them at once
 // and refreshes from the router in the background.  Nothing secret is in them;
@@ -616,6 +617,7 @@ const DETAILS = {
   'd-adsettings': { title: 'Настройки проверки', parent: 'ads' },
   'd-review': { title: 'На проверке', parent: 'ads' },
   'd-blocked': { title: 'Заблокировано', parent: 'ads' },
+  'd-allowed': { title: 'Разрешено', parent: 'ads' },
   'd-adcats': { title: 'Категории блокировки', parent: 'ads' },
   'd-rules': { title: 'Мои правила', parent: 'ads' },
   'd-sources': { title: 'Источники списков', parent: 'ads' },
@@ -1017,16 +1019,19 @@ const RENDER = {
     const pending = (num(pub.added) || 0) + (num(pub.removed) || 0);
     const cur = j.current || {}, busy = cur.state && cur.state !== 'IDLE';
     const now = !S.ads ? ['', 'загрузка…'] : a.paused ? ['warn', 'На паузе'] : !a.agh_connected ? ['warn', 'Нет подключения к AdGuard Home', 'd-agh'] :
-      busy ? ['info', cur.type === 'scan' ? 'Проверяет новые домены' : 'Выполняет задание', 'd-jobs'] : num(j.queued) ? ['info', fmtInt(j.queued) + ' в очереди', 'd-jobs'] :
-      ['ok', ({ scheduled: 'Ждёт следующей проверки', dynamic: 'Проверяет новые домены сразу', manual: 'Проверка только по кнопке' })[runMode] || 'Работает'];
+      busy ? ['info', 'выполняется: ' + jobText(cur).toLowerCase() + (num(j.queued) ? ' · ещё ' + fmtInt(j.queued) + ' в очереди' : ''), 'd-jobs'] :
+      num(j.queued) ? ['info', fmtInt(j.queued) + ' ' + plural(num(j.queued), 'задание', 'задания', 'заданий') + ' в очереди', 'd-jobs'] :
+      ['ok', ({ scheduled: 'ожидает следующей проверки', dynamic: 'проверяет новые домены сразу', manual: 'проверка только по кнопке' })[runMode] || 'работает', 'd-jobs'];
     const where = !pub.ok ? '—' : pub.mode === 'staged' ? 'не отправляются' : isTrue(s.AUTO_PUBLISH) ? 'автоматически' : 'после подтверждения';
     const recent = a.recent || [];
     return loadError(['ads']) + adsCheckPanel() +
-      panel('Блокировка рекламы', '<dl class="kv">' + ctrlRow('Проверка рекламы и трекеров', sw('data-ads-pause', !a.paused, 'Проверка рекламы и трекеров', !S.ads), a.paused ? 'на паузе - новые домены не проверяются' : 'VWARD дочищает рекламу, которую пропустил AdGuard Home') + '</dl>' +
-        kv([['Сейчас', now[1], now[0], now[2]],
-          ['Последняя проверка', sc.last_run ? fmtStamp(String(sc.last_run).replace(' ', 'T')) : 'ещё не было', '', 'd-jobs'],
-          ['Заблокировано', fmtInt(c.blocked), '', 'd-blocked'],
-          ['На проверке', fmtInt(c.review), num(c.review) ? 'warn' : '', 'd-review'],
+      panel('Проверка VWARD', '<dl class="kv">' + ctrlRow('Проверка рекламы и трекеров', sw('data-ads-pause', !a.paused, 'Проверка рекламы и трекеров', !S.ads), a.paused ? 'на паузе: новые домены не проверяются, задания ждут' : 'домены, пропущенные AdGuard Home, проверяются по источникам и признакам рекламы') + '</dl>' +
+        kv([['Состояние', now[1], now[0], now[2]],
+          ['Последняя проверка', sc.last_run ? fmtStamp(String(sc.last_run).replace(' ', 'T')) : 'ещё не было', '', 'a-ads', '',
+            sc.last_run && sc.unique_allowed != null ? fmtInt(sc.unique_allowed) + ' ' + plural(num(sc.unique_allowed) || 0, 'домен', 'домена', 'доменов') + ' из ' + fmtInt(sc.allowed_records) + ' ' + plural(num(sc.allowed_records) || 0, 'запроса', 'запросов', 'запросов') + ', новых ' + fmtInt(sc.candidates) : ''],
+          ['Заблокировано', fmtInt(c.blocked), '', 'd-blocked', '', 'признаны рекламой или трекерами'],
+          ['На проверке', fmtInt(c.review), num(c.review) ? 'warn' : '', 'd-review', '', 'спорные: решение за вами'],
+          ['Разрешено', fmtInt(c.allow), '', 'd-allowed', '', 'признаны безопасными'],
           ['Правила в AdGuard Home', where, pending ? 'warn' : '', 'd-adspub', '', pending ? 'не опубликовано: ' + pending : '']]) +
         '<div class="panel-actions">' + btn('ads-job', 'search', 'Проверить сейчас', 'primary', ' data-job="scan"') + '</div>' + resultBox('ads-job')) +
       panel('Списки и правила', kv([
@@ -1035,9 +1040,7 @@ const RENDER = {
         ['Категории блокировки', (a.categories || []).filter(x => x.active).length + ' из ' + (a.categories || []).length + ' включены', '', 'd-adcats'],
         ['Мои правила', fmtInt((a.manual_rules || []).length), '', 'd-rules'],
         ['Источники', (a.sources || []).filter(x => x.mode === 'active').length + ' из ' + (a.sources || []).length + ' активны', '', 'd-sources'],
-        ['Задания', busy ? 'выполняется' : (num(j.queued) ? j.queued + ' в очереди' : 'нет активных'), '', 'd-jobs'],
         ['HTTPS-фильтр', S.https && S.https.ok ? (S.https.status && isTrue(S.https.status.ENABLED) ? 'Включён' : 'Выключен') : 'недоступен', '', 'd-https'],
-        ['История блокировки рекламы', '', '', 'a-ads'],
         ['Настройки проверки', ({ scheduled: 'по расписанию', dynamic: 'по запросам', manual: 'вручную' })[runMode] || '', '', 'd-adsettings']
       ])) +
       // AdGuard Home is a program of its own: its page lives in «Утилиты».
@@ -1481,6 +1484,12 @@ const RENDER = {
     return panel('Заблокировано', searchBar('ads-bsearch', ADSV.blockedSearch, 'Найти домен') +
       (!r ? empty('Загрузка…') : !r.ok ? empty(errText(r)) : r.entries.length ? '<ul class="rows">' + r.entries.map(e => '<li class="row"><div class="row-main"><b>' + dom(e.domain) + '</b><small>' + esc(reasonText(e.reason)) + '</small></div><span class="row-acts">' + adsRuleBtn(e.domain, 'allow') + '</span></li>').join('') + '</ul>' + (r.total > r.entries.length ? '<p class="panel-desc">Показаны ' + r.entries.length + ' из ' + fmtInt(r.total) + ' - уточните поиск.</p>' : '') : empty('Ничего не найдено')),
       { desc: 'Домены, которые VWARD заблокировал автоматически.' });
+  },
+  'd-allowed'() {
+    const r = S.allowed;
+    return panel('Разрешено', searchBar('ads-asearch', ADSV.allowedSearch, 'Найти домен') +
+      (!r ? empty('Загрузка…') : !r.ok ? empty(errText(r)) : r.entries.length ? '<ul class="rows">' + r.entries.map(e => '<li class="row"><div class="row-main"><b>' + dom(e.domain) + '</b><small>' + esc(reasonText(e.reason)) + '</small></div><span class="row-acts">' + adsRuleBtn(e.domain, 'block') + '</span></li>').join('') + '</ul>' + (r.total > r.entries.length ? '<p class="panel-desc">Показаны ' + r.entries.length + ' из ' + fmtInt(r.total) + ': уточните поиск.</p>' : '') : empty('Ничего не найдено')),
+      { desc: 'Домены, которые VWARD проверил и признал безопасными. Любой можно заблокировать вручную.' });
   },
   'd-adcats'() {
     const cats = (S.ads && S.ads.categories) || [];
@@ -2639,6 +2648,7 @@ async function refreshPage() {
   if (id === 'd-cron') keys.push('cron');
   if (id === 'd-review') keys.push('review');
   if (id === 'd-blocked') keys.push('blocked');
+  if (id === 'd-allowed') keys.push('allowed');
   // Each answer is drawn as soon as it arrives: a slow source does not hold the others back.
   const draw = () => { if (current === id && !editing && !document.activeElement.matches('input,select,textarea')) render(); };
   await Promise.all(keys.map(k => load(k).then(draw, draw)));
@@ -3338,10 +3348,11 @@ async function onSubmit(e, f) {
     await Promise.all(['auth', 'security', 'status'].map(k => load(k, true)));
     refreshPage();
   }
-  if (f === 'ads-qsearch' || f === 'ads-bsearch') {
+  if (f === 'ads-qsearch' || f === 'ads-bsearch' || f === 'ads-asearch') {
     const v = e.target.querySelector('input').value.trim().toLowerCase();
     if (v && !/^[a-z0-9.-]{1,100}$/.test(v)) { toast('Только буквы, цифры, точки и дефисы'); return; }
     if (f === 'ads-qsearch') { ADSV.search = v; S.qlog = null; render(); await load('qlog', true); }
+    else if (f === 'ads-asearch') { ADSV.allowedSearch = v; S.allowed = null; render(); await load('allowed', true); }
     else { ADSV.blockedSearch = v; S.blocked = null; render(); await load('blocked', true); }
     render();
   }
