@@ -421,6 +421,24 @@ ads_agh_curl_conf() (
         END {printf "%s\n", q}'
 )
 
+# ads_agh_base_export: AdGuard Home's API address resolved once for this process and kept
+# ten minutes in RAM for the next ones.  Resolving it loads the whole device profile; the
+# Panel's pages asked it before every single AdGuard Home request.
+ads_agh_base_export() {
+    [ -z "${AGH_API_BASE:-}" ] || return 0
+    ads_bx_cache=${ADS_AGH_BASE_CACHE:-/tmp/vward-ads-agh-base}
+    if [ -f "$ads_bx_cache" ] && [ -O "$ads_bx_cache" ] && [ -n "$(find "$ads_bx_cache" -mmin -10 2>/dev/null)" ]; then
+        read -r AGH_API_BASE < "$ads_bx_cache" || AGH_API_BASE=
+        case "$AGH_API_BASE" in http://*/control) ;; *) AGH_API_BASE= ;; esac
+    fi
+    if [ -z "$AGH_API_BASE" ]; then
+        AGH_API_BASE=$(ads_agh_api_base 2>/dev/null) || AGH_API_BASE=
+        [ -z "$AGH_API_BASE" ] || (umask 077; printf '%s\n' "$AGH_API_BASE" > "$ads_bx_cache.$$" && mv -f "$ads_bx_cache.$$" "$ads_bx_cache") 2>/dev/null
+    fi
+    if [ -n "$AGH_API_BASE" ]; then export AGH_API_BASE; else unset AGH_API_BASE; fi
+    return 0
+}
+
 # ads_agh_api METHOD PATH OUT [JSON_FILE]
 ads_agh_api() (
     ads_aa_method="$1"; ads_aa_path="$2"; ads_aa_out="$3"; ads_aa_json="${4:-}"

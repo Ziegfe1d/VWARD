@@ -14,6 +14,7 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 . "$LIB"
 [ -x "$ADS_JQ" ] || { echo '{"ok":false,"error":"jq_unavailable"}'; exit 1; }
 [ -r "$ADS_CONFIG" ] && ads_load_config
+case "${1:-}" in stats|querylog|agh|check) ads_agh_base_export ;; esac
 
 VERDICTS="$ADS_STATE/verdicts.tsv"
 RULES="$ADS_STATE/generated/vward-ads-privacy-guard.rules"

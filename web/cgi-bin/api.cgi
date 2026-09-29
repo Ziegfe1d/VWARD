@@ -776,7 +776,28 @@ if [ "$ACTION" = ads-data ]; then
   header_json; [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
   AETC=/opt/etc/vward/ads-privacy-guard; AST=/opt/var/lib/vward/ads-privacy-guard
   SETTINGS=/opt/bin/vward-ads-privacy-settings.sh; SRCCTL=/opt/bin/vward-ads-privacy-source-control.sh; JOB=/opt/bin/vward-ads-privacy-job.sh
-  SETJSON="$([ -x "$SETTINGS" ] && "$SETTINGS" show 2>/dev/null | awk -F= '$1!="PAUSED"&&NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}')"
+  CLIENTS_BIN=${VWARD_ADS_CLIENTS_BIN:-/opt/bin/vward-ads-privacy-clients.sh}
+  GUARD_BIN=${VWARD_ADS_DNS_GUARD_BIN:-/opt/bin/vward-ads-privacy-dns-guard.sh}
+  ROUTE_DNS_BIN=${VWARD_ADS_ROUTE_DNS_BIN:-/opt/bin/vward-ads-privacy-route-dns.sh}
+  # The component's own answers side by side: one after another they took most of the
+  # time the Panel waits for this page on the router (seven programs, each loading its library).
+  PD="$(mktemp -d /tmp/vward-ads-data.XXXXXX 2>/dev/null)" || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
+  trap 'rm -rf "${PD:?}"' EXIT
+  ( [ -x "$SETTINGS" ] && "$SETTINGS" show 2>/dev/null | awk -F= '$1!="PAUSED"&&NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}' ) > "$PD/SETJSON" &
+  ( [ -x "$SRCCTL" ] && "$SRCCTL" list 2>/dev/null | "$JQ" -Rn --arg state "$AST/sources" '[inputs|split("|")|{id:.[0],mode:.[1],name:.[2],cached:(.[3]=="1"),purpose:.[4],custom:(.[5]=="1")}]' || echo '[]' ) > "$PD/SOURCES" &
+  ( [ -x "$JOB" ] && "$JOB" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}' ) > "$PD/JOBS" &
+  ( [ -x "$GUARD_BIN" ] && "$GUARD_BIN" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' 2>/dev/null ) > "$PD/GUARD" &
+  ( curl -fsS --connect-timeout 2 --max-time 5 "${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/show/ip/hotspot" 2>/dev/null | "$JQ" -c '[(.host // [])[] | select((.mac // "") != "") | {name: (.name // .hostname // ""), mac: (.mac | ascii_downcase), online: (.active == true)}] | sort_by(.name == "", .name)' 2>/dev/null ) > "$PD/GHOSTS" &
+  ( [ -x "$CLIENTS_BIN" ] && "$CLIENTS_BIN" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' 2>/dev/null ) > "$PD/CLIENTS" &
+  ( [ -x "$ROUTE_DNS_BIN" ] && "$ROUTE_DNS_BIN" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' 2>/dev/null ) > "$PD/ROUTEDNS" &
+  wait
+  SETJSON="$(cat "$PD/SETJSON")"; [ -n "$SETJSON" ] || SETJSON='{}'
+  SOURCES="$(cat "$PD/SOURCES")"; [ -n "$SOURCES" ] || SOURCES='[]'
+  JOBS="$(cat "$PD/JOBS")"; [ -n "$JOBS" ] || JOBS='{}'
+  GUARD="$(cat "$PD/GUARD")"; [ -n "$GUARD" ] || GUARD='{}'
+  GHOSTS="$(cat "$PD/GHOSTS")"; [ -n "$GHOSTS" ] || GHOSTS='[]'
+  CLIENTS="$(cat "$PD/CLIENTS")"; [ -n "$CLIENTS" ] || CLIENTS='{}'
+  ROUTEDNS="$(cat "$PD/ROUTEDNS")"; [ -n "$ROUTEDNS" ] || ROUTEDNS='{}'
   PAUSED="$([ -r "$AST/control.state" ] && awk -F= '$1=="paused"{print $2;exit}' "$AST/control.state")"; [ "$PAUSED" = 1 ] || PAUSED=0
   # One pass over the verdicts: the ten newest judged (not trusted) domains, then
   # the four counts on the last line.  Memory stays small on a long file.
@@ -789,19 +810,10 @@ ${VPASS##*
 }
 EOF_COUNTS
   MANUAL="$({ awk -F'|' 'NF>=2&&$1!~/^[[:space:]]*#/{print "allow|"$1"|"$2"|"$3}' "$AETC/allowlist.tsv" 2>/dev/null; awk -F'|' 'NF>=2&&$1!~/^[[:space:]]*#/{print "block|"$1"|"$2"|"$3}' "$AETC/denylist.tsv" 2>/dev/null; } | head -n 300 | "$JQ" -Rn '[inputs|split("|")|{type:.[0],domain:.[1],scope:.[2],note:(.[3:]|join("|"))}]')"
-  SOURCES="$([ -x "$SRCCTL" ] && "$SRCCTL" list 2>/dev/null | "$JQ" -Rn --arg state "$AST/sources" '[inputs|split("|")|{id:.[0],mode:.[1],name:.[2],cached:(.[3]=="1"),purpose:.[4],custom:(.[5]=="1")}]' || echo '[]')"
-  JOBS="$([ -x "$JOB" ] && "$JOB" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}')"
   LAST_OUTPUT_PATH="$(printf '%s' "$JOBS" | "$JQ" -r '.LAST_output // ""' 2>/dev/null)"; LAST_OUTPUT=""
   case "$LAST_OUTPUT_PATH" in "$AST/jobs/"*.out) [ -r "$LAST_OUTPUT_PATH" ] && LAST_OUTPUT="$(head -c 20000 "$LAST_OUTPUT_PATH" 2>/dev/null)" ;; esac
   AGH_ON=false; [ -s "${VWARD_ADS_AGH_AUTH_FILE:-$AETC/agh-api.auth}" ] && AGH_ON=true
-  CLIENTS_BIN=${VWARD_ADS_CLIENTS_BIN:-/opt/bin/vward-ads-privacy-clients.sh}
-  GUARD_BIN=${VWARD_ADS_DNS_GUARD_BIN:-/opt/bin/vward-ads-privacy-dns-guard.sh}
-  GUARD="$([ -x "$GUARD_BIN" ] && "$GUARD_BIN" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' 2>/dev/null)"; [ -n "$GUARD" ] || GUARD='{}'
   # Devices Keenetic knows, for the exclusion list: name and MAC only.
-  GHOSTS="$(curl -fsS --connect-timeout 2 --max-time 5 "${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/show/ip/hotspot" 2>/dev/null | "$JQ" -c '[(.host // [])[] | select((.mac // "") != "") | {name: (.name // .hostname // ""), mac: (.mac | ascii_downcase), online: (.active == true)}] | sort_by(.name == "", .name)' 2>/dev/null)"; [ -n "$GHOSTS" ] || GHOSTS='[]'
-  CLIENTS="$([ -x "$CLIENTS_BIN" ] && "$CLIENTS_BIN" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' 2>/dev/null)"; [ -n "$CLIENTS" ] || CLIENTS='{}'
-  ROUTE_DNS_BIN=${VWARD_ADS_ROUTE_DNS_BIN:-/opt/bin/vward-ads-privacy-route-dns.sh}
-  ROUTEDNS="$([ -x "$ROUTE_DNS_BIN" ] && "$ROUTE_DNS_BIN" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' 2>/dev/null)"; [ -n "$ROUTEDNS" ] || ROUTEDNS='{}'
   # The last scan and the newest domains it judged (the built-in trusted ones are left out).
   SCAN="$([ -r "$AST/last-run.status" ] && awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' "$AST/last-run.status" | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' 2>/dev/null)"; [ -n "$SCAN" ] || SCAN='{}'
   RECENT="$(printf '%s\n' "$VPASS" | sed '$d' | sort -r | "$JQ" -Rn '[inputs|split("\t")|{first_seen:.[0],domain:.[1],verdict:.[2],action:.[3],reason:.[4]}]' 2>/dev/null)"; [ -n "$RECENT" ] || RECENT='[]'

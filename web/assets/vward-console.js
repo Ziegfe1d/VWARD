@@ -536,7 +536,7 @@ const PAGES = [
   { id: 'wan', title: 'Сеть', icon: 'globe', group: 'Сеть', data: ['status', 'security', 'config', 'wifi'] },
   { id: 'vpn', title: 'VPN', icon: 'shield', group: 'Сеть', data: ['status', 'security', 'config', 'route', 'awg', 'ext', 'tq'] },
   { id: 'routes', title: 'Домены', icon: 'list', group: 'Сеть', data: ['route', 'security', 'status', 'config', 'lists', 'services'] },
-  { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adsstats', 'adspub', 'agh'] },
+  { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adspub'] },
   // Programs VWARD works with (AdGuard Home, later its own tunnel engine): each has its page here.
   { id: 'utils', title: 'Утилиты', icon: 'tools', group: 'VWARD', data: ['ads', 'agh', 'security', 'ext', 'awg'] },
   { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config', 'stab'] },
@@ -995,7 +995,7 @@ const RENDER = {
   ads() {
     const a = S.ads || {}, c = a.counts || {}, s = a.settings || {}, j = a.jobs || {}, sc = a.scan || {}, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
     const aghHost = ag.address || location.hostname, aghUrl = ag.port ? 'http://' + aghHost + ':' + ag.port + '/' : '';
-    const runMode = s.RUN_MODE || 'scheduled', st1 = S.adsstats, pub = S.adspub || {}, g = S.agh;
+    const runMode = s.RUN_MODE || 'scheduled', pub = S.adspub || {};
     const pending = (num(pub.added) || 0) + (num(pub.removed) || 0);
     const cur = j.current || {}, busy = cur.state && cur.state !== 'IDLE';
     const now = !S.ads ? ['', 'загрузка…'] : a.paused ? ['warn', 'На паузе'] : !a.agh_connected ? ['warn', 'Нет подключения к AdGuard Home', 'd-agh'] :
