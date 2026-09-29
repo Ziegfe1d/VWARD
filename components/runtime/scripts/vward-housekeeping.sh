@@ -410,6 +410,26 @@ if [ -x "$BACKUP_HELPER" ]; then
     fi
 fi
 
+# IP categories: cron updates them at 00:10. A router that was off or rebooting then waited
+# a whole day: when the last update is over 26 hours old, once a day, in the background.
+POLICY_SYNC_LOG="$R/opt/var/log/vward-policy-sync-sync.log"
+POLICY_CATCHUP_FILE=${VWARD_POLICY_CATCHUP_FILE:-/tmp/vward-policy-catchup-day}
+POLICY_CHAIN=${VWARD_POLICY_CHAIN_BIN:-/opt/bin/vward-policy-chain.sh}
+POLICY_RECONCILE=${VWARD_POLICY_RECONCILE_BIN:-/opt/bin/vward-policy-reconcile.sh}
+if [ -x "$POLICY_CHAIN" ] && [ -f "$POLICY_SYNC_LOG" ]; then
+    PC_NOW=${BACKUP_NOW:-$(date '+%Y-%m-%d %H:%M:%S')}
+    PC_TODAY=${PC_NOW%% *}; PC_HOUR=${PC_NOW#* }; PC_HOUR=${PC_HOUR%%:*}
+    PC_DAY=""
+    [ ! -r "$POLICY_CATCHUP_FILE" ] || read -r PC_DAY < "$POLICY_CATCHUP_FILE" || :
+    # Not in the hour of the scheduled run; a busy router: the next hour.
+    if [ "$PC_DAY" != "$PC_TODAY" ] && [ "$PC_HOUR" != 00 ] && [ -n "$(find "$POLICY_SYNC_LOG" -mmin +1560 2>/dev/null)" ] &&
+        ! vward_defer policy-catchup; then
+        echo "$PC_TODAY" > "$POLICY_CATCHUP_FILE" 2>/dev/null || :
+        { "$POLICY_CHAIN" && "$POLICY_RECONCILE"; } </dev/null >/dev/null 2>&1 &
+        echo "$PC_NOW|policy=catchup" >> "$HOUSE_LOG"
+    fi
+fi
+
 # The Panel's web server picks up settings an update brought: S93 only when the
 # template is newer than the running configuration (a shell test, no process).
 [ -n "$R" ] || [ ! -x /opt/etc/init.d/S93vward-console ] ||

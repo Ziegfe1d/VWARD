@@ -75,8 +75,9 @@ helper = (ROOT / "components/console/scripts/vward-console-config.sh").read_text
 for need in ("tunnel-state) op_tunnel_state", 'ndm "interface $2 down"', "save_router || die config_save_failed"):
     if need not in helper:
         fail(f"the helper lacks {need}")
-# «Перезапустить» saves nothing: the save is only on «Включить».
+# «Перезапустить» saves nothing: the save is only on «Включить» and «Выключить».
 body = helper[helper.index("op_tunnel_state() {"):helper.index("op_tunnel_delete() {")]
-if body.count("save_router") != 1 or 'if [ "$1" = up ]; then' not in body:
+down = body[body.index('if [ "$1" = down ]; then'):body.index('done_ok "tunnel-state down $2" changed')]
+if body.count("save_router") != 2 or down.count("save_router") != 1 or 'if [ "$1" = up ]; then' not in body:
     fail("a restart must not save the router's settings")
 print("CONSOLE_SITE_TEST=PASS")

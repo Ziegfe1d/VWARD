@@ -14,7 +14,7 @@
 # arguments.
 #
 # vward-awg-engine.sh install | add DESCRIPTION FILE | remove NAME |
-#                     supervise | stop | status
+#                     restart NAME | disable NAME | enable NAME | supervise | stop | status
 # Output: "result=..." / "info.key=value" lines, or "error=<code>".
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
@@ -232,7 +232,7 @@ op_remove() {
     n=$(printf '%s' "$row" | cut -f1)
     stop_one "$n"
     ndm "no interface $1" && ndm "system configuration save" || die router_rejected
-    rm -f "$ENGINE_ETC/t$n.conf" "$ENGINE_ETC/t$n.wp" "$ENGINE_RUN/t$n.err"
+    rm -f "$ENGINE_ETC/t$n.conf" "$ENGINE_ETC/t$n.wp" "$ENGINE_ETC/t$n.off" "$ENGINE_RUN/t$n.err"
     awk -F'\t' -v p="$1" '$2 != p' "$TUNNELS" > "$TUNNELS.new" && mv -f "$TUNNELS.new" "$TUNNELS"
     log "removed $1"
     echo "result=changed"
@@ -245,6 +245,7 @@ op_supervise() {
     started=0
     while IFS="$(printf '\t')" read -r n name port desc; do
         case "$name" in OpkgTun[0-9]) ;; *) continue ;; esac
+        [ ! -e "$ENGINE_ETC/t$n.off" ] || continue
         [ -n "$(pid_of "$n")" ] && continue
         start_one "$n" "$name" && started=$((started + 1)) && log "restarted $name"
     done < "$TUNNELS"
@@ -286,9 +287,34 @@ op_status() {
         age=$(handshake_age "$n" 2>/dev/null) || age=
         rss=; [ -z "$p" ] || rss=$(awk '/^VmRSS:/ {print $2}' "/proc/$p/status" 2>/dev/null)
         ep=$(sed -n 's/^[Ee]ndpoint *= *//p' "$ENGINE_ETC/t$n.conf" 2>/dev/null | head -n 1)
-        printf 'tunnel=%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$([ -n "$p" ] && echo 1 || echo 0)" "$age" "$rss" "$ep" "$desc"
+        # Traffic from the program's own state (Keenetic does not see the peer of an OpkgTun).
+        rx=; tx=; [ -z "$p" ] || { rx=$(sed -n 's/^rx=//p' "$ENGINE_RUN/t$n.state" 2>/dev/null); tx=$(sed -n 's/^tx=//p' "$ENGINE_RUN/t$n.state" 2>/dev/null); }
+        printf 'tunnel=%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$([ -n "$p" ] && echo 1 || echo 0)" "$age" "$rss" "$ep" "$desc" "$rx" "$tx" "$([ -e "$ENGINE_ETC/t$n.off" ] && echo 1 || echo 0)"
     done < "$TUNNELS"
     echo "result=status"
+}
+
+# disable NAME / enable NAME: the owner switched the tunnel off in the Panel. Its program
+# stops and supervise leaves it alone until it is switched on again (a flag file, so the
+# choice outlives a reboot).
+op_disable() {
+    row=$(row_of "$1")
+    [ -n "$row" ] || die unknown_tunnel 64
+    n=$(printf '%s' "$row" | cut -f1)
+    stop_one "$n"
+    : > "$ENGINE_ETC/t$n.off" || die write_failed
+    log "disabled $1"
+    echo "result=changed"
+}
+
+op_enable() {
+    row=$(row_of "$1")
+    [ -n "$row" ] || die unknown_tunnel 64
+    n=$(printf '%s' "$row" | cut -f1)
+    [ -e "$ENGINE_ETC/t$n.off" ] || { echo "result=unchanged"; return 0; }
+    rm -f "$ENGINE_ETC/t$n.off" || die write_failed
+    log "enabled $1"
+    echo "result=changed"
 }
 
 # The real-time watcher learns the tunnels' programs and interfaces.
@@ -299,6 +325,8 @@ case "${1:-}" in
     add) [ "$#" -eq 3 ] || die usage 64; op_add "$2" "$3"; sentinel_reload ;;
     remove) [ "$#" -eq 2 ] || die usage 64; op_remove "$2"; sentinel_reload ;;
     restart) [ "$#" -eq 2 ] || die usage 64; op_restart "$2" ;;
+    disable) [ "$#" -eq 2 ] || die usage 64; op_disable "$2" ;;
+    enable) [ "$#" -eq 2 ] || die usage 64; op_enable "$2" ;;
     supervise) op_supervise ;;
     stop) op_stop ;;
     status) op_status ;;

@@ -138,7 +138,7 @@ esac
     if UUID in everything:
         fail("the id leaked into a command, a log or the output")
     st = engine("status")
-    if not any(l.startswith("tunnel=OpkgTun1\t1\t") and l.endswith("\t203.0.113.5:443\tГермания") for l in st):
+    if not any(l.startswith("tunnel=OpkgTun1\t1\t") and l.endswith("\t203.0.113.5:443\tГермания\t0") for l in st):
         fail(f"status: {st}")
     # A server that never answers: nothing stays.
     (tmp / "rc").write_text("interface OpkgTun0\n!\ninterface OpkgTun1\n!\n")

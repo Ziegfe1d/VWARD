@@ -87,6 +87,7 @@ python3 tests/repository/check-console-tunnel-probe.py || fail "Panel tunnel che
 python3 tests/repository/check-console-site-test.py || fail "site check, tunnel restart and switch-on"
 python3 tests/repository/check-console-site-do.py || fail "check an address: VPN, Smart DNS, directly or blocked"
 python3 tests/repository/check-ads-page-speed.py || fail "Ads page: only what it shows, programs side by side, AdGuard Home address cached"
+python3 tests/repository/check-console-tunnels.py || fail "VPN list and tunnel page: default tunnel, engine data, switching off"
 python3 tests/repository/check-tunnel-fallback.py || fail "fallback tunnel and tunnel quality"
 python3 tests/repository/check-tunnel-services.py || fail "services checked through every tunnel"
 python3 tests/repository/check-route-engine-alt-tunnel.py || fail "route engine tries the other tunnels"

@@ -1522,15 +1522,28 @@ op_tunnel_conf() {
 }
 
 op_tunnel_state() {
-    # tunnel-state restart|up NAME: «Перезапустить» turns the tunnel off and on and waits for
-    # its server (nothing saved: the router's settings stay as they were); «Включить» turns on
-    # a tunnel switched off in Keenetic and saves that.
+    # tunnel-state restart|up|down NAME: «Перезапустить» turns the tunnel off and on and waits
+    # for its server (nothing saved: the router's settings stay as they were); «Включить» turns
+    # on a tunnel switched off and saves that; «Выключить» switches it off and saves that (the
+    # engine's program stops too). The default tunnel is not switched off.
     load_profile_base
     vward_valid_ndm_name "$2" && is_tunnel "$2" || die unknown_tunnel 64
-    case "$1" in restart|up) ;; *) die invalid_operation 64 ;; esac
+    case "$1" in restart|up|down) ;; *) die invalid_operation 64 ;; esac
+    if [ "$1" = down ]; then
+        [ "$2" != "$VWARD_TUNNEL_INTERFACE" ] || die main_tunnel 64
+        change_lock
+        if engine_tunnel "$2"; then
+            [ -x "$ENG" ] || die engine_unavailable
+            "$ENG" disable "$2" 2>/dev/null | tail -n 1 | grep -q '^result=' || die engine_failed
+        fi
+        ndm "interface $2 down" || die router_rejected
+        save_router || die config_save_failed
+        rm -f "$VWARD_DEVICE_MAP_CACHE" "$TUNNEL_HEALTH_STATE"
+        done_ok "tunnel-state down $2" changed
+    fi
     if engine_tunnel "$2"; then
         [ -x "$ENG" ] || die engine_unavailable
-        [ "$1" = restart ] || { ndm "interface $2 up" || die router_rejected; }
+        [ "$1" = restart ] || { "$ENG" enable "$2" >/dev/null 2>&1; ndm "interface $2 up" || die router_rejected; }
         engine_step_out=
         exec 3>&1
         engine_step_out=$("$ENG" restart "$2" 2>/dev/null)

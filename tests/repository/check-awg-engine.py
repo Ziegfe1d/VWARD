@@ -224,6 +224,31 @@ with tempfile.TemporaryDirectory() as t:
         fail("the restarted program is on another adapter")
     run("supervise", expect="result=unchanged")
 
+    # Traffic comes from the program's own state; «Выключить» in the Panel: the program stops,
+    # supervise leaves it alone (the flag outlives a reboot), status says so; «Включить» back.
+    (t / "run/t0.state").write_text(f"handshake={int(time.time()) - 5}\nrx=123456\ntx=7890\npid=1\nupdated=1\n")
+    line = [l for l in run("status", expect="result=status").splitlines() if l.startswith("tunnel=")][0].split("\t")
+    if line[6:] != ["123456", "7890", "0"]:
+        fail(f"status traffic and off flag: {line}")
+    api3 = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], text=True, capture_output=True,
+                          env=env | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=awg-data", "JQ": shutil.which("jq"), "VWARD_AWG_ENGINE_BIN": str(ENGINE)})
+    t3 = json.loads(api3.stdout[api3.stdout.index("{"):])["tunnels"][0]
+    if t3.get("rx") != 123456 or t3.get("tx") != 7890 or t3.get("off") is not False:
+        fail(f"awg-data traffic: {t3}")
+    run("disable", "OpkgTun7", expect="error=unknown_tunnel")
+    pid = int((t / "run/t0.pid").read_text())
+    run("disable", "OpkgTun1", expect="result=changed")
+    time.sleep(0.3)
+    if not (t / "etc/t0.off").exists() or os.path.exists(f"/proc/{pid}") and "zombie" not in open(f"/proc/{pid}/status").read().lower() and (t / "run/t0.pid").exists() and int((t / "run/t0.pid").read_text()) == pid:
+        fail("disable must stop the program and keep the flag")
+    run("supervise", expect="result=unchanged")
+    if not run("status", expect="result=status").rstrip().split("\n")[-2].endswith("\t1"):
+        fail("status must say the tunnel is off")
+    run("enable", "OpkgTun1", expect="result=changed")
+    run("enable", "OpkgTun1", expect="result=unchanged")
+    run("supervise", expect="result=changed")
+    time.sleep(0.3)
+
     # Remove: program stopped, Keenetic connection gone and saved, files deleted.
     run("remove", "OpkgTun7", expect="error=unknown_tunnel")
     (st / "saved").unlink()

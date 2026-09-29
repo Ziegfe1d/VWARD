@@ -165,4 +165,54 @@ with tempfile.TemporaryDirectory() as tmp:
     if res.returncode != 0 or root_cron.read_text() != "*/10 * * * * /opt/bin/agh-keenetic-clients-sync.sh\n":
         fail(f"without AdGuard Home connected the old name sync stays: {res.stdout[-300:]}")
 
+# IP categories: a missed 00:10 update (the router was off) runs once, in the background,
+# when the last one is over 26 hours old; not again the same day; not when it is fresh.
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    bb = tmp / "bb"; bb.mkdir()
+    for applet in ("awk", "ls", "du", "tail", "head", "grep", "gzip", "cp", "mv", "rm", "rmdir", "date", "wc", "cat", "mkdir", "sed", "tr", "id", "find", "touch"):
+        (bb / applet).symlink_to(busybox)
+    r = tmp / "root"
+    for d in ("opt/var/log/vward", "opt/var/backups/vward", "tmp", "opt/var/spool/cron/crontabs"):
+        (r / d).mkdir(parents=True)
+    synclog = r / "opt/var/log/vward-policy-sync-sync.log"; synclog.write_text("2026-09-28 00:32:00|SYNC_OK|added=5|removed=0\n")
+    marker = tmp / "ran"
+    chain = tmp / "chain"; chain.write_text(f"#!/bin/sh\necho chain >> {marker}\n"); chain.chmod(0o755)
+    reconcile = tmp / "reconcile"; reconcile.write_text(f"#!/bin/sh\necho reconcile >> {marker}\n"); reconcile.chmod(0o755)
+    stub = tmp / "admission.sh"
+    stub.write_text("vward_admission_enter() { :; }\nvward_admission_leave() { :; }\nvward_defer() { return 1; }\n")
+    env = os.environ | {"PATH": f"{bb}:{os.environ['PATH']}", "VWARD_ROOT_PREFIX": str(r), "VWARD_ADMISSION_LIB": str(stub),
+                        "VWARD_CONSOLE_CONFIG_BIN": str(tmp / "none"), "VWARD_POLICY_CHAIN_BIN": str(chain),
+                        "VWARD_POLICY_RECONCILE_BIN": str(reconcile), "VWARD_POLICY_CATCHUP_FILE": str(tmp / "catchup-day"),
+                        "VWARD_CRONTAB": str(tmp / "none")}
+
+    def run_hk():
+        res = subprocess.run([busybox, "sh", str(SCRIPT)], env=env, capture_output=True, text=True)
+        if res.returncode != 0:
+            fail(f"housekeeping failed: {res.stdout[-300:]} {res.stderr[-300:]}")
+        for _ in range(50):
+            if marker.exists() and marker.read_text().count("reconcile") >= 1:
+                break
+            __import__("time").sleep(0.1)
+
+    old_t = __import__("time").time() - 30 * 3600
+    os.utime(synclog, (old_t, old_t))
+    hour = __import__("time").localtime().tm_hour
+    run_hk()
+    if hour == 0:
+        if marker.exists():
+            fail("not in the hour of the scheduled run")
+    else:
+        if not marker.exists() or marker.read_text() != "chain\nreconcile\n":
+            fail(f"a missed IP category update runs chain then reconcile: {marker.read_text() if marker.exists() else 'nothing'}")
+        marker.unlink()
+        run_hk()
+        if marker.exists():
+            fail("the catch-up runs once a day")
+        (tmp / "catchup-day").unlink()
+        synclog.touch()
+        run_hk()
+        if marker.exists():
+            fail("a fresh update needs no catch-up")
+
 print("HOUSEKEEPING=PASS")

@@ -893,7 +893,7 @@ if [ "$ACTION" = tunnel-conf ]; then
       fi
       CMD="$CONFIG_HELPER" LABEL="tunnel-$TOP" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
       run_detached "$CONTROL_RUN_DIR" control_busy "$TFILE" "$TFILE.desc" ;;
-    restart|up)
+    restart|up|down)
       # Waiting for the server outlasts a request: in the background, like a new tunnel.
       [ -n "$TNAME" ] || { echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0; }
       ! detached_running "$CONTROL_RUN_DIR" || { echo '{"ok":false,"error":"control_busy"}'; exit 0; }
@@ -2145,7 +2145,7 @@ if [ "$ACTION" = awg-data ]; then
             if ($l | startswith("info.installed=")) then .installed = ($l | endswith("=1"))
             elif ($l | startswith("info.version=")) then .version = ($l | ltrimstr("info.version="))
             elif ($l | startswith("tunnel=")) then ($l | ltrimstr("tunnel=") | split("\t")) as $t |
-                .tunnels += [{name: $t[0], running: ($t[1] == "1"), rss_kb: ($t[2] | tonumber? // null), server: $t[3], description: $t[4]}]
+                .tunnels += [{name: $t[0], running: ($t[1] == "1"), rss_kb: ($t[2] | tonumber? // null), server: $t[3], description: $t[4], off: ($t[5] == "1")}]
             else . end)' 2>/dev/null)"
     [ -n "$AWG_VLESS" ] || AWG_VLESS='{"installed":false,"version":"","tunnels":[]}'
     [ -x "$AWG_BIN" ] || { printf '{"ok":true,"available":false,"installed":false,"tunnels":[],"lost":%s,"vless":%s}\n' "$AWG_LOST" "$AWG_VLESS"; exit 0; }
@@ -2156,7 +2156,8 @@ if [ "$ACTION" = awg-data ]; then
             elif ($l | startswith("info.arch=")) then .arch = ($l | ltrimstr("info.arch="))
             elif ($l | startswith("tunnel=")) then ($l | ltrimstr("tunnel=") | split("\t")) as $t |
                 .tunnels += [{name: $t[0], running: ($t[1] == "1"), handshake: ($t[2] | tonumber? // null),
-                              rss_kb: ($t[3] | tonumber? // null), endpoint: $t[4], description: $t[5]}]
+                              rss_kb: ($t[3] | tonumber? // null), endpoint: $t[4], description: $t[5],
+                              rx: ($t[6] // "" | tonumber? // null), tx: ($t[7] // "" | tonumber? // null), off: ($t[8] == "1")}]
             else . end)'
     exit 0
 fi
