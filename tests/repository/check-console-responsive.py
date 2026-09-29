@@ -48,7 +48,7 @@ if duplicates:
 
 for marker in (
     ":root{", '@media (prefers-color-scheme:dark){:root:not([data-theme="light"])', ':root[data-theme="dark"]',
-    "color-scheme:dark", "body{height:100%;margin:0;background:var(--bg)",
+    "color-scheme:dark", "body{min-height:100vh;min-height:100dvh;margin:0;background:var(--bg)", "html{min-height:100%;", "will-change:transform;backface-visibility:hidden;",
     "@media (min-width:900px)", "@media (max-width:379px)",
     ".tabbar{position:fixed", "border-radius:28px", "env(safe-area-inset-bottom,0px)",
     "user-select:none", ".cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))",
