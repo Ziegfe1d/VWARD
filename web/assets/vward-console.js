@@ -2515,10 +2515,16 @@ function patchContent(html, whole) {
   ddEnhance(t.content);
   t.content.querySelectorAll('.meter i[data-width]').forEach(i => { i.style.width = Math.max(0, Math.min(100, Number(i.dataset.width))) + '%'; });
   const fresh = [...t.content.children], old = [...box.children];
+  // A refresh of the same page keeps its height while the blocks are swapped: a page that
+  // shrank for a moment brought the phone's address bar back and moved the bottom bar.
+  if (!whole) box.style.minHeight = box.offsetHeight + 'px';
   if (whole || fresh.length !== old.length) box.replaceChildren(t.content);
   else fresh.forEach((n, i) => { if (!old[i].isEqualNode(n)) old[i].replaceWith(n); });
   // A three-way slider is drawn where it was and then moved, so the thumb glides.
-  requestAnimationFrame(() => box.querySelectorAll('.seg-slider[data-to]').forEach(el => { if (el.dataset.i !== el.dataset.to) el.dataset.i = el.dataset.to; }));
+  requestAnimationFrame(() => {
+    box.querySelectorAll('.seg-slider[data-to]').forEach(el => { if (el.dataset.i !== el.dataset.to) el.dataset.i = el.dataset.to; });
+    box.style.minHeight = '';
+  });
 }
 /* ---------- Выпадающие списки ----------
    A native <select> opens a full-screen picker on phones.  Each one gets a
