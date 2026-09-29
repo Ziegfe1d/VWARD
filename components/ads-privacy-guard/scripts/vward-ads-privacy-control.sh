@@ -112,7 +112,9 @@ if [ "$OP" = agh ]; then
     #   smartdns-take DOMAINS_FILE PAIRS_OUT  domains of the list and below leave their rows
     #                                          (other domains of a row stay); taken pairs
     #                                          "domain<TAB>upstream" go to PAIRS_OUT
-    #   smartdns-put PAIRS_FILE                those pairs come back
+    #   smartdns-put PAIRS_FILE                those pairs come back; the upstream "auto"
+    #                                          is the one already serving most Smart DNS
+    #                                          domains (a domain added from the Panel)
     # The whole upstream list is read back; on a mismatch the previous one is put back.
     smartdns-take|smartdns-put)
       [ -r "$A1" ] || agfail invalid_value
@@ -121,7 +123,10 @@ if [ "$OP" = agh ]; then
       [ -z "$("$ADS_JQ" -r '.upstream_dns_file // ""' "$W/dns.json")" ] || agfail upstream_file_unsupported
       SD_LIB='def row: if type == "string" and startswith("[/") and ((index("/]") // -1) > 1)
                   then {d: (.[2:index("/]")] | split("/")), u: .[(index("/]") + 2):]} else null end;
-              def enc: .u | (startswith("https://") or startswith("tls://") or startswith("quic://") or startswith("sdns://") or startswith("h3://"));'
+              def enc: .u | (startswith("https://") or startswith("tls://") or startswith("quic://") or startswith("sdns://") or startswith("h3://")
+                  or ((if startswith("udp://") or startswith("tcp://") then .[6:] else . end) as $h
+                      | ($h | startswith("127.") or startswith("[::1]:")) and ($h | endswith(":53") | not)
+                        and ((try ($h | split(":") | last | tonumber) catch null) != null)));'
       if [ "$AG_SET" = smartdns-take ]; then
         case "$A2" in ''|*[!A-Za-z0-9._/-]*) agfail invalid_value ;; esac
         "$ADS_JQ" -Rn '[inputs | ascii_downcase | select(length > 0)]' "$A1" > "$W/inc.json" || agfail invalid_value
@@ -149,9 +154,13 @@ if [ "$OP" = agh ]; then
         echo "TAKEN=$TAKEN"
       else
         "$ADS_JQ" -Rn '[inputs | split("\t") | select(length == 2 and (.[0] | length) > 0 and (.[1] | length) > 0) | {d: .[0], u: .[1]}]' "$A1" > "$W/pairs.json" || agfail invalid_value
+        "$ADS_JQ" -e --slurpfile p "$W/pairs.json" "$SD_LIB"'
+          ($p[0] | map(select(.u == "auto")) | length) == 0 or ([.upstream_dns[] | row | select(. != null and enc)] | length) > 0' "$W/dns.json" >/dev/null 2>&1 || agfail smartdns_not_configured
         "$ADS_JQ" -c --slurpfile p "$W/pairs.json" "$SD_LIB"'
-          ([.upstream_dns[] | row | select(. != null and enc) | .d[] | ascii_downcase]) as $have
-          | [$p[0][] | select(.d as $d | ($have | index([$d])) == null)] as $add
+          ([.upstream_dns[] | row | select(. != null and enc)]) as $rows
+          | ([$rows[] | .d[] | ascii_downcase]) as $have
+          | ($rows | map({u, n: (.d | length)}) | group_by(.u) | map({u: .[0].u, n: (map(.n) | add)}) | max_by(.n) | .u) as $auto
+          | [$p[0][] | (if .u == "auto" then .u = $auto else . end) | select(.d as $d | ($have | index([$d])) == null)] as $add
           | {upstream_dns: (.upstream_dns + [$add | group_by(.u)[] | "[/" + (map(.d) | join("/")) + "/]" + .[0].u])}' "$W/dns.json" > "$W/plan.json" || agfail invalid_value
         if ! "$ADS_JQ" -e --slurpfile o "$W/dns.json" '.upstream_dns == $o[0].upstream_dns' "$W/plan.json" >/dev/null 2>&1; then
           ads_agh_api_post dns_config "$W/plan.json" "$W/out" >/dev/null 2>&1 || agfail adguard_rejected

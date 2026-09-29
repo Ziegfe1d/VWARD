@@ -306,8 +306,10 @@ vward_discover_lan_interface()
 
 # Smart DNS domains kept in AdGuard Home: per-domain upstreams of the form
 # [/a.com/b.com/]https://... (or tls://, quic://, sdns://), from upstream_dns
-# and from upstream_dns_file.  Plain addresses and "#" (the default upstream)
-# are local rules, not Smart DNS.  One lower-case domain per line.
+# and from upstream_dns_file; also a local DoH client on this router
+# ([/a.com/]127.0.0.1:5453, https-dns-proxy): it encrypts the same way.  Plain
+# addresses, port 53 and "#" (the default upstream) are local rules, not Smart
+# DNS.  One lower-case domain per line.
 vward_agh_smartdns_domains()
 {
     [ -r "$VWARD_ADGUARD_CONFIG" ] || return 0
@@ -323,7 +325,7 @@ vward_agh_smartdns_domains()
         /^\[\// {
             e = index($0, "/]"); if (e < 3) next
             up = substr($0, e + 2)
-            if (up !~ /^(https|tls|quic|sdns|h3):\/\//) next
+            if (up !~ /^(https|tls|quic|sdns|h3):\/\// && (up !~ /^((udp|tcp):\/\/)?(127\.[0-9]+\.[0-9]+\.[0-9]+|\[::1\]):[0-9]+$/ || up ~ /:53$/)) next
             n = split(substr($0, 3, e - 3), a, "/")
             for (i = 1; i <= n; i++) if (a[i] ~ /^[A-Za-z0-9._-]+$/ && index(a[i], ".")) print tolower(a[i])
         }'

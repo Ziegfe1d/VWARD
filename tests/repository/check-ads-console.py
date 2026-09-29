@@ -164,7 +164,7 @@ esac
         fail(f"category on must restore default modes: {modes}")
     src("category", "no-such-thing", "off", ok=False)
 
-# «Проверить или заблокировать адрес»: a link into a site itself (yandex.ru/an/count/...) is
+# «Проверить адрес» on the Ads page: a link into a site itself (yandex.ru/an/count/...) is
 # not offered as an easy block - DNS would close the whole site; an ad host still is.
 js = (ROOT / "web/assets/vward-console.js").read_text()
 parts = [js[js.index("const esc ="):js.index("\n", js.index("const esc ="))],
@@ -176,7 +176,8 @@ let S = { ads: { agh_connected: true } };
 const x = d => ({ ok: true, domain: d, blocked: false, allowed: false, rules: [] });
 const out = {};
 for (const [k, link] of [['site', 'https://yandex.ru/an/count/XieejI_zOoVX2Lc3?x=1'], ['www', 'www.yandex.ru/an/x'],
-                         ['host', 'https://an.yandex.ru/count/X'], ['bare', 'yandex.ru']]) {
+                         ['host', 'https://an.yandex.ru/count/X'], ['bare', 'yandex.ru'],
+                         ['casino', 'https://fon.bet/authProcess/registration/?utm_source=x&partner_id=54']]) {
   const d = link.replace(/^https?:\\/\\//, '').split(/[/?#]/)[0];
   ADSCHK = { value: d, path: linkPathOf(link), x: x(d) };
   out[k] = adsCheckPanel();
@@ -189,6 +190,8 @@ if r.returncode:
 html = json.loads(r.stdout)
 if "btn danger" not in html["site"] or "btn primary" in html["site"] or "||yandex.ru/an/" not in html["site"]:
     fail(f"a link into yandex.ru: a warning, the browser rule, no easy block: {html['site']}")
+if "Заблокировать весь fon.bet" not in html["casino"] or "||fon.bet/authProcess/" not in html["casino"] or "казино" not in html["casino"]:
+    fail(f"a casino link: the whole site blocked with one button: {html['casino']}")
 if "btn danger" not in html["www"]:
     fail("www.site is the site too")
 for k in ("host", "bare"):

@@ -730,7 +730,7 @@ agh_control() {
     [ -x "$ADS_CONTROL" ] || { AGH_ERR=smartdns_agh_unavailable; return 1; }
     ac_out=$("$ADS_CONTROL" agh "$@" 2>&1) && printf '%s\n' "$ac_out" | grep -qx 'CONTROL=PASS' && return 0
     AGH_ERR=$(printf '%s\n' "$ac_out" | sed -n 's/^ERROR=//p' | head -n 1)
-    case "$AGH_ERR" in adguard_auth_required|adguard_unavailable|upstream_file_unsupported) ;; *) AGH_ERR=smartdns_agh_failed ;; esac
+    case "$AGH_ERR" in adguard_auth_required|adguard_unavailable|upstream_file_unsupported|smartdns_not_configured) ;; *) AGH_ERR=smartdns_agh_failed ;; esac
     return 1
 }
 
@@ -1756,6 +1756,24 @@ op_wifi_host() {
     done_ok "wifi-host $wh_mac $2" changed
 }
 
+# smartdns-domain add|remove DOMAIN: the domain resolved by Smart DNS in AdGuard Home,
+# through the upstream already serving most Smart DNS domains (Aeternia and the like);
+# remove takes it and its subdomains out.  Keenetic's own Smart DNS rows are not touched.
+op_smartdns_domain() {
+    case "$1" in add|remove) ;; *) die invalid_operation 64 ;; esac
+    valid_domain "$2" || die invalid_domain 64
+    JOURNAL=$(umask 077; mktemp /tmp/vward-console-smartdns.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    if [ "$1" = add ]; then
+        printf '%s\tauto\n' "$2" > "$JOURNAL.agh" || die write_failed
+        agh_control smartdns-put "$JOURNAL.agh" || die "$AGH_ERR"
+    else
+        printf '%s\n' "$2" > "$JOURNAL.agh.inc" || die write_failed
+        agh_control smartdns-take "$JOURNAL.agh.inc" "$JOURNAL.agh" || die "$AGH_ERR"
+        [ -s "$JOURNAL.agh" ] || done_ok "smartdns-domain remove $2" unchanged
+    fi
+    done_ok "smartdns-domain $1 $2" changed
+}
+
 # smartdns-guard 0|1: 0 lets AdaptiveAuto take Smart DNS domains again.
 op_smartdns_guard() {
     case "$1" in 0|1) ;; *) die invalid_value 64 ;; esac
@@ -2083,7 +2101,7 @@ ARG2=${2:-}
 case "$OP" in wifi|update|wan-param|tunnel|policy-group|domain-list|domain-list-watch|tunnel-conf|tunnel-delete|tunnel-subnet|backup-restore|wifi-host) ARG1=$1 ;; esac
 case "$OP" in ext-upgrade|ext-auto|firmware) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 ARG3=${3:-}
-case "$OP" in route-domain|force-vpn|adaptive) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
+case "$OP" in route-domain|force-vpn|adaptive|smartdns-domain) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 case "$OP" in list-domain) ARG3=$(printf '%s' "$ARG3" | tr 'A-Z' 'a-z') ;; esac
 
 ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
@@ -2121,6 +2139,7 @@ case "$OP" in
     domain-list) op_domain_list "$ARG1" "$ARG2" ;;
     domain-list-watch) op_domain_list_watch "$ARG1" "$ARG2" ;;
     smartdns-guard) op_smartdns_guard "$ARG1" ;;
+    smartdns-domain) op_smartdns_domain "$ARG1" "$ARG2" ;;
     wifi) op_wifi "$ARG1" "$ARG2" ;;
     update) op_update "$ARG1" "$ARG2" ;;
     wan-param) op_wan_param "$ARG1" "$ARG2" ;;

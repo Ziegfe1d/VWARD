@@ -220,7 +220,8 @@ upstream_state()
          f && /^ *- / {sub(/^ *- /, ""); gsub(/^'"'"'|'"'"'$|^"|"$/, ""); print}' "$AGH_YAML" |
     awk 'BEGIN {n = 0; p = 0}
          /^\[\// || /^#/ || NF == 0 {next}
-         {n++; if ($0 !~ /^(https|tls|quic|h3|sdns):\/\//) p++}
+         # A local DoH client (127.0.0.1:5453, https-dns-proxy) encrypts too; port 53 is Keenetic.
+         {n++; if ($0 !~ /^(https|tls|quic|h3|sdns):\/\// && ($0 !~ /^((udp|tcp):\/\/)?(127\.[0-9]+\.[0-9]+\.[0-9]+|\[::1\]):[0-9]+$/ || $0 ~ /:53$/)) p++}
          END {print (n == 0 ? "unknown" : (p == 0 ? "encrypted" : "plain"))}'
 }
 

@@ -698,7 +698,7 @@ if [ "$ACTION" = config ]; then
     done
     REQUIRED=
     case "$OP" in
-        route-domain|force-vpn|adaptive) set -- "$OP" "$ACT" "$TARGET" ;;
+        route-domain|force-vpn|adaptive|smartdns-domain) set -- "$OP" "$ACT" "$TARGET" ;;
         domain-category|wifi|update|wan-param|tunnel-auto) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=TUNNEL_GUARD_DISABLE ;;
         wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;

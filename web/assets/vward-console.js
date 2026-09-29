@@ -233,13 +233,13 @@ function adsCheckPanel() {
     }
     out = '<p class="probe-verdict' + (x.blocked ? ' vpn' : '') + '">' + esc(d) + (x.blocked ? ' блокируется' : x.allowed ? ' разрешён правилом' : ' не блокируется') + '</p>' +
       (rules.length ? kv(rules) : '') + (x.service ? kv([['Сервис', x.service]]) : '') +
-      (inSite && !x.blocked && !x.allowed ? '<p class="field-warn">Это адрес внутри самого сайта ' + esc(d) + ' (' + esc(r.path) + '), а не отдельный рекламный домен. AdGuard Home блокирует домены целиком: этот адрес не закрыть, не закрыв весь ' + esc(d) + ' на всех устройствах. Такие адреса убирает блокировщик в браузере (uBlock Origin, AdGuard) правилом ||' + esc(d + '/' + r.path.split('/')[1]) + '/</p>' : '') +
-      (acts.length ? '<div class="panel-actions">' + acts.join('') + '</div>' : '') +
+      (inSite && !x.blocked && !x.allowed ? '<p class="field-warn">Ссылка ведёт внутрь сайта ' + esc(d) + ' (' + esc(r.path) + '). AdGuard Home закрывает сайты целиком, отдельную страницу - нет. Сайт не нужен (казино, букмекер, мошенники) - заблокируйте весь ' + esc(d) + ' кнопкой ниже: он перестанет открываться на всех устройствах дома. Сайт нужен, а мешает только эта реклама - её убирает блокировщик в браузере (uBlock Origin, AdGuard) правилом ||' + esc(d + '/' + r.path.split('/')[1]) + '/</p>' : '') +
+      (d ? '<div class="panel-actions">' + acts.join('') + btn('ads-deep', 'search', 'Подробный разбор', '', ' data-dom="' + esc(d) + '"') + '</div>' : '') +
       (x.blocked || x.allowed ? '' : '<p class="result-note">Правило добавится в пользовательские правила AdGuard Home и сразу начнёт работать для всех устройств.</p>');
   }
-  return panel('Проверить или заблокировать адрес', inputBar({ form: 'ads-check', label: 'Адрес баннера, ссылка или домен', id: 'adsCheck', value: r && r.value, placeholder: 'например, ads.example.com',
-    aria: 'Адрес баннера, ссылка или домен', busy: r && r.busy, off: S.ads && !a.agh_connected, icon: 'search', btn: 'Проверить' }) + out,
-    { desc: S.ads && !a.agh_connected ? 'Нужно подключение к AdGuard Home: «Утилиты → AdGuard Home».' : 'Блокируется ли адрес, каким списком или правилом; заблокировать или разблокировать.' });
+  return panel('Проверить адрес', inputBar({ form: 'ads-check', label: 'Адрес сайта или ссылка на рекламу', id: 'adsCheck', value: r && r.value, placeholder: 'например, ads.example.com',
+    aria: 'Адрес сайта или ссылка на рекламу', busy: r && r.busy, off: S.ads && !a.agh_connected, icon: 'search', btn: 'Проверить' }) + out,
+    { desc: S.ads && !a.agh_connected ? 'Нужно подключение к AdGuard Home: «Утилиты → AdGuard Home».' : 'Вставьте ссылку на рекламу: блокируется ли она, каким списком или правилом, и заблокировать одной кнопкой.' });
 }
 // The path of a link (/an/count/...), empty for a bare domain or the site's front page.
 const linkPathOf = v => { const m = String(v || '').trim().match(/^(?:[a-z][a-z0-9+.-]*:\/\/)?[^/?#]+(\/[^?#]*)/i); return m && m[1] !== '/' ? m[1].slice(0, 80) : ''; };
@@ -262,9 +262,88 @@ async function adsUserRule(op, kind, d) {
 // every tunnel (site-test), asked side by side; «Сайт не открывается» then repairs what it can.
 const hostOf = v => String(v || '').trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/^[^@/]*@/, '').replace(/[/?#].*$/, '').replace(/:\d+$/, '').replace(/^\*\./, '').replace(/\.$/, '');
 function sitePanel() {
-  return panel('Проверить сайт', inputBar({ form: 'probe', label: 'Адрес сайта, ссылка или IP-адрес', id: 'probeInput', value: RPROBE && RPROBE.value, placeholder: 'например, youtube.com',
-    aria: 'Адрес сайта, ссылка или IP-адрес', busy: RPROBE && (RPROBE.busy || RPROBE.fixing), icon: 'search', btn: 'Проверить' }) + '<div id="probeResult">' + probeText(RPROBE) + siteTestText(RPROBE) + '</div>',
-    { desc: 'Где настроен сайт, куда он идёт и открывается ли сейчас - напрямую и через каждый туннель.' });
+  return panel('Проверить адрес', inputBar({ form: 'probe', label: 'Адрес сайта, ссылка или IP-адрес', id: 'probeInput', value: RPROBE && RPROBE.value, placeholder: 'например, youtube.com',
+    aria: 'Адрес сайта, ссылка или IP-адрес', busy: RPROBE && (RPROBE.busy || RPROBE.fixing || RPROBE.doing), icon: 'search', btn: 'Проверить' }) + '<div id="probeResult">' + probeText(RPROBE) + siteDoText(RPROBE) + siteTestText(RPROBE) + '</div>',
+    { desc: 'Куда идёт сайт, открывается ли он сейчас и как его пустить: через VPN, через Smart DNS, напрямую или заблокировать.' });
+}
+// What is set up for a checked domain: VWARD's lists, Smart DNS, a block in AdGuard Home.
+const hasDom = (l, x) => (l || []).some(d => (typeof d === 'string' ? d : d.domain) === x);
+const underAny = (d, l) => (l || []).some(x => d === x || d.endsWith('.' + x));
+function siteState(r) {
+  const x = (r && r.x) || {}, d = x.value || '', c = cfgRoute(), L = S.lists || {}, b = r && r.b && r.b.ok ? r.b : null;
+  const tuns = ((st().wg && st().wg.interfaces) || []).map(t => t.name).concat(prof().tunnel_interface || []);
+  const vpnRoutes = (x.routes || []).filter(t => tuns.includes(t.interface));
+  const sd = L.smartdns_domains || [];
+  return {
+    d: d, group: c.group || '', mine: hasDom(c.domains, d), force: hasDom(c.force_vpn, d), adaptive: !!x.adaptive_auto || hasDom(c.adaptive, d),
+    smart: underAny(d, sd), smartOwn: sd.includes(d), smartHere: ((L.smartdns_sources || {}).adguard || []).length > 0,
+    lists: vpnRoutes.filter(t => t.group !== c.group && t.group !== 'AdaptiveAuto').map(t => t.group),
+    vpn: vpnRoutes.length > 0, agh: !!b, blocked: !!(b && b.blocked), userBlock: !!(b && b.user_block)
+  };
+}
+const SITE_NOW = { vpn: 'через VPN', smart: 'через Smart DNS', direct: 'напрямую, через провайдера', block: 'заблокирован' };
+const siteNow = s => s.blocked ? 'block' : s.smart ? 'smart' : s.vpn || s.force ? 'vpn' : 'direct';
+// «Что сделать»: every way the domain can go; the current one is marked, blocking asks first.
+function siteDoText(r) {
+  if (!r || r.busy || !r.x || !r.x.ok || r.x.type !== 'domain') return '';
+  const s = siteState(r), now = siteNow(s), ok = cfgOk() && !r.doing;
+  const opt = (k, icon, label, cls, extra) => btn('site-do', now === k ? 'check' : icon, label + (now === k ? ' · сейчас' : ''), now === k ? '' : cls,
+    ' data-how="' + k + '" data-dom="' + esc(s.d) + '"' + (ok && now !== k ? '' : ' disabled') + (extra || ''));
+  const acts = [opt('vpn', 'shield', 'Через VPN', now === 'direct' ? 'primary' : '')];
+  if (s.smartHere) acts.push(opt('smart', 'globe', 'Через Smart DNS', ''));
+  acts.push(opt('direct', 'route', 'Напрямую', ''));
+  if (s.agh) acts.push(s.userBlock ? btn('site-do', 'close', 'Разблокировать', '', ' data-how="unblock" data-dom="' + esc(s.d) + '"' + (r.doing ? ' disabled' : ''))
+    : opt('block', 'block', 'Заблокировать', 'danger', ''));
+  const steps = r.did ? '<ul class="fix-steps">' + r.did.map(f => '<li class="' + (f.ok === false ? 'crit' : f.ok ? 'ok' : '') + '">' + esc(f.text) + '</li>').join('') + '</ul>' : '';
+  return '<p class="form-label site-head">Что сделать с ' + esc(s.d) + '</p>' +
+    (confirmBox('site-block', 'Заблокировать ' + s.d + '? Сайт перестанет открываться на всех устройствах дома.', 'Заблокировать', true) ||
+     '<div class="panel-actions">' + acts.join('') + '</div>') + steps +
+    (s.blocked && !s.userBlock ? '<p class="result-note">Блокирует список AdGuard Home: разрешить адрес можно в «Реклама → Проверить адрес».</p>' : '');
+}
+// One choice as the steps it takes; the check runs again at the end.
+async function siteDo(how, d) {
+  const r = RPROBE;
+  if (!r || !r.x || r.x.value !== d) return;
+  const s = siteState(r), did = [];
+  r.doing = true; r.did = did; render();
+  const step = async (fields, text, api) => {
+    let x;
+    try { x = await apiPost(api || 'config', fields); } catch (e) { x = { ok: false, error: e.message }; }
+    did.push({ text: x.ok ? text : text + ' - не выполнено: ' + errText(x), ok: !!x.ok }); render();
+    return x.ok;
+  };
+  const cfgStep = (op, action, text) => step({ op: op, action: action, target: d }, text);
+  try {
+    if (how === 'block') { await step({ op: 'agh', setting: 'user-rule', value: 'add', kind: 'block', domain: d }, d + ' заблокирован в AdGuard Home', 'ads-control'); return; }
+    if (how === 'unblock' || s.userBlock) {
+      if (!await step({ op: 'agh', setting: 'user-rule', value: 'remove', kind: 'block', domain: d }, 'Блокировка ' + d + ' снята', 'ads-control') || how === 'unblock') return;
+    }
+    // Smart DNS answers with the service's own proxy: through VPN it stops working, and back.
+    if (how !== 'smart' && s.smart) {
+      if (s.smartOwn) { if (!await cfgStep('smartdns-domain', 'remove', d + ' убран из Smart DNS')) return; }
+      else did.push({ text: 'Smart DNS задан для родительского домена - уберите его на странице «Smart DNS»', ok: false });
+    }
+    if (how === 'vpn') {
+      if (!s.vpn && !s.force) await (s.group ? cfgStep('route-domain', 'add', d + ' добавлен в «Мои домены» и идёт через VPN') : cfgStep('force-vpn', 'add', d + ' всегда идёт через VPN'));
+      return;
+    }
+    if (s.mine && !await cfgStep('route-domain', 'remove', d + ' убран из «Мои домены»')) return;
+    if (s.force && !await cfgStep('force-vpn', 'remove', d + ' убран из «Всегда через VPN»')) return;
+    if (s.adaptive && !await cfgStep('adaptive', 'remove', d + ' убран из автоподбора')) return;
+    for (const g of s.lists) {
+      const l = ((S.lists && S.lists.lists) || []).find(x => x.name === g), name = (r.x.names && r.x.names[g]) || (l && l.description) || g;
+      const own = l && (l.domains || []).includes(d);
+      if (!await step({ op: 'list-domain', action: own ? 'remove' : 'exclude', target: g, value: d }, d + (own ? ' убран из списка «' : ' исключён из списка «') + name + '»')) return;
+    }
+    if (how === 'smart') { await cfgStep('smartdns-domain', 'add', d + ' идёт через Smart DNS'); return; }
+    if (!did.length) did.push({ text: d + ' уже идёт напрямую', ok: true });
+  } finally {
+    r.doing = false;
+    await Promise.all(['config', 'route', 'lists'].map(k => load(k, true)));
+    const keep = did.slice();
+    await siteCheck(d);
+    if (RPROBE && RPROBE.value === d) { RPROBE.did = keep.concat({ text: 'Новые настройки действуют для новых запросов: откройте сайт заново, при необходимости - через минуту.', ok: null }); render(); }
+  }
 }
 const DIRECT = 'direct';
 const siteVia = v => v === DIRECT ? 'Напрямую, через провайдера' : 'Через ' + tunLabel(v);
@@ -278,10 +357,7 @@ function siteTestText(r) {
   const fix = r.fix ? '<ul class="fix-steps">' + r.fix.map(f => '<li class="' + (f.ok === false ? 'crit' : f.ok ? 'ok' : '') + '">' + esc(f.text) + '</li>').join('') + '</ul>' : '';
   const acts = [];
   if (x.ok && !r.fixing) {
-    const routes = (r.x && r.x.routes) || [], open = x.results.filter(y => y.verdict === 'open'), direct = x.results.find(y => y.via === DIRECT);
-    const mine = prof().tunnel_interface, mineOpen = open.some(y => y.via === mine);
-    if (!routes.length && direct && direct.verdict !== 'open' && mineOpen && cfgOk())
-      acts.push(btn('site-add', 'plus', 'Отправить через VPN', 'primary', ' data-dom="' + esc(x.domain) + '"'));
+    // Sending it through VPN is «Через VPN» above.
     acts.push(btn('site-fix', 'refresh', 'Сайт не открывается', '', ' data-dom="' + esc(x.domain) + '"' + (cfgOk() ? '' : ' disabled')));
   }
   return '<p class="form-label site-head">Открывается ли сейчас</p>' + rows + fix + mv + (acts.length ? '<div class="panel-actions">' + acts.join('') + '</div>' : '');
@@ -289,10 +365,11 @@ function siteTestText(r) {
 async function siteCheck(v) {
   const ip = IPV4.test(v);
   RPROBE = { value: v, busy: true }; render();
-  const [x, t] = await Promise.all([
+  const [x, t, b] = await Promise.all([
     apiGet('route-probe', { type: ip ? 'ip' : 'domain', value: v }).catch(e => ({ ok: false, error: e.message })),
-    ip ? Promise.resolve(null) : apiGet('site-test', { domain: v }).catch(e => ({ ok: false, error: e.message }))]);
-  RPROBE = { value: v, x: x, t: t }; render();
+    ip ? Promise.resolve(null) : apiGet('site-test', { domain: v }).catch(e => ({ ok: false, error: e.message })),
+    ip ? Promise.resolve(null) : apiGet('ads-view', { view: 'check', search: v }).catch(() => null)]);
+  RPROBE = { value: v, x: x, t: t, b: b }; render();
 }
 // «Сайт не открывается»: each step in the result, then one line of what was done.
 async function siteFix(d) {
@@ -352,8 +429,12 @@ function probeText(r) {
   const why = routes.length ? routes.map(t => (t.group === 'AdaptiveAuto' ? 'добавлен автоподбором' : 'в списке «' + name(t.group) + '»') + (routes.length > 1 ? ' - ' + via(t.interface) : '')).join('; ')
     : (x.groups || []).length ? 'в списке «' + name(x.groups[0]) + '», но у списка нет маршрута' : 'ни в одном списке нет';
   const hints = [...new Set((x.hints || []).map(h => h.category))];
-  return '<p class="probe-verdict ' + (routes.length ? 'vpn' : '') + '">' + head + '</p>' + kv([
+  const s = siteState(r);
+  const head2 = s.blocked ? esc(x.value) + ' заблокирован в AdGuard Home' : s.smart && !routes.length ? esc(x.value) + ' идёт через Smart DNS, в обход VPN' : head;
+  return '<p class="probe-verdict ' + (routes.length || s.blocked ? 'vpn' : '') + '">' + head2 + '</p>' + kv([
     ['Почему', why],
+    s.smart ? ['Smart DNS', s.smartOwn ? 'да' : 'да, по родительскому домену'] : null,
+    s.agh ? ['AdGuard Home', s.blocked ? (s.userBlock ? 'заблокирован вашим правилом' : 'заблокирован списком') : 'не блокирует'] : null,
     ['Адреса', ((x.dns && x.dns.ipv4) || []).join(', ') || 'не удалось узнать'],
     hints.length ? ['В каталоге сервисов', hints.slice(0, 3).join(', ')] : null
   ]);
@@ -489,7 +570,7 @@ const DETAILS = {
   'd-querylog': { title: 'Журнал запросов', parent: 'ads' },
   'd-adrecent': { title: 'Последние решения', parent: 'ads' },
   'd-adspub': { title: 'Правила в AdGuard Home', parent: 'ads' },
-  'd-adprobe': { title: 'Разбор домена VWARD', parent: 'ads' },
+  'd-adprobe': { title: 'Подробный разбор', parent: 'ads' },
   'd-adsettings': { title: 'Настройки проверки', parent: 'ads' },
   'd-review': { title: 'На проверке', parent: 'ads' },
   'd-blocked': { title: 'Заблокировано', parent: 'ads' },
@@ -846,7 +927,7 @@ const RENDER = {
         ['Сервисы', S.services && S.services.ok ? ((S.services.enabled || []).length ? fmtInt(S.services.enabled.length) + ' включено' : 'выбрать') : '—', '', 'd-services', '', 'YouTube, ChatGPT, Instagram… через VPN'],
         ['Доменные списки', L ? fmtInt((L.lists || []).filter(l => !svcOf(l.name)).length) : '—', '', 'lists'],
         routeSourcesRow(r)
-      ]) + (policyGroupRow() ? '<dl class="kv">' + policyGroupRow() + '</dl>' : '')) +
+      ])) +
       panel('Автоподбор', '<dl class="kv">' +
         ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', cfgRoute().adaptive_enabled !== false, 'Автоподбор доменов', !cfgOk()), 'отправлять через VPN домены, недоступные напрямую') + '</dl>' +
         kv([['История автоподбора', '', '', 'a-adaptive'], ['История сверки маршрутов', '', '', 'a-routing']])) +
@@ -902,7 +983,6 @@ const RENDER = {
         ['Задания', busy ? 'выполняется' : (num(j.queued) ? j.queued + ' в очереди' : 'нет активных'), '', 'd-jobs'],
         ['HTTPS-фильтр', S.https && S.https.ok ? (S.https.status && isTrue(S.https.status.ENABLED) ? 'Включён' : 'Выключен') : 'недоступен', '', 'd-https'],
         ['История блокировки рекламы', '', '', 'a-ads'],
-        ['Разбор домена VWARD', '', '', 'd-adprobe', '', 'решение VWARD, источники и запросы по домену'],
         ['Настройки проверки', ({ scheduled: 'по расписанию', dynamic: 'по запросам', manual: 'вручную' })[runMode] || '', '', 'd-adsettings']
       ])) +
       // AdGuard Home is a program of its own: its page lives in «Утилиты».
@@ -944,7 +1024,7 @@ const RENDER = {
          confirmBox('ads-publish', 'Отправить правила в AdGuard Home? Они применятся сразу.', 'Опубликовать') || '<div class="panel-actions">' + btn('ask', 'check', 'Опубликовать правила', 'primary', ' data-confirm="ads-publish"') + '</div>'));
   },
   'd-adprobe'() {
-    return panel('Проверить домен', inputBar({ form: 'ads-probe', label: 'Домен', id: 'adsProbe', value: PROBE ? PROBE.domain : '', placeholder: 'например, mc.yandex.ru', aria: 'Домен', busy: PROBE && !PROBE.done, icon: 'search', btn: 'Проверить' }) + probeResult(), { desc: 'Решение VWARD, источники и запросы по домену.' });
+    return panel('Подробный разбор адреса', inputBar({ form: 'ads-probe', label: 'Домен', id: 'adsProbe', value: PROBE ? PROBE.domain : '', placeholder: 'например, mc.yandex.ru', aria: 'Домен', busy: PROBE && !PROBE.done, icon: 'search', btn: 'Проверить' }) + probeResult(), { desc: 'Решение VWARD, источники и запросы по домену.' });
   },
   'd-adsettings'() {
     const a = S.ads || {}, c = a.counts || {}, s = a.settings || {}, j = a.jobs || {}, sc = a.scan || {}, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
@@ -1224,7 +1304,8 @@ const RENDER = {
       { desc: 'Список Keenetic, в который VWARD добавляет ваши домены.' });
     return cfgNote() + panel('Добавить домен', addForm('route-domain', 'например, claude.ai'), { desc: 'Домен и все его поддомены пойдут через ' + (prof().tunnel_interface ? tunLabel(prof().tunnel_interface) : 'VPN') + '. Изменение сохраняется в конфигурации роутера.' }) +
       panel('Мои домены', S.config && !r.router_available ? empty('Не удалось прочитать конфигурацию роутера') : domainRows(list, d => rowBtn('route-domain', 'remove', d, 'close', 'Убрать ' + d + ' из VPN')) || empty('Список пуст'),
-        { desc: 'Группа ' + (r.group || prof().policy_group || '—') + ' в Keenetic.' });
+        { desc: 'Группа ' + (r.group || prof().policy_group || '—') + ' в Keenetic.' }) +
+      (policyGroupRow() ? panel('Куда добавлять мои домены', '<dl class="kv">' + policyGroupRow() + '</dl>') : '');
   },
   'd-force'() {
     const list = cfgRoute().force_vpn || [];
@@ -2570,6 +2651,7 @@ async function runAction(resultId, action, fields, okMsg) {
   finally { render(); }
 }
 const CONFIRMED = {
+  'site-block': c => siteDo('block', c.dom),
   'ext-upgrade': c => { const p = ((S.ext && S.ext.packages) || []).find(x => x.name === c.pkg); extOp('upgrade', c.pkg, p && p.critical ? 'EXT_UPGRADE_CRITICAL' : 'EXT_UPGRADE'); },
   'fw-channel': c => cfgSet({ op: 'firmware', target: 'channel', value: c.value, confirm: 'FIRMWARE_CHANNEL_TEST' }, 'Канал прошивки: ' + fwChannel(c.value), ['ext']),
   'route-reconcile': () => runLong('routes', 'control', { op: 'route-reconcile', confirm: 'ROUTE_RECONCILE' }, 'control-data', 'Маршруты сверены').then(() => load('route', true)).then(render),
@@ -2878,7 +2960,8 @@ document.addEventListener('click', e => {
   else if (a === 'confirm-yes') { const c = confirm; confirm = null; if (c && CONFIRMED[c.id]) CONFIRMED[c.id](c); else render(); }
   else if (a === 'ads-urule') { t.disabled = true; adsUserRule(t.dataset.op, t.dataset.kind, t.dataset.dom); }
   else if (a === 'site-fix') siteFix(t.dataset.dom);
-  else if (a === 'site-add') { const d = t.dataset.dom; t.disabled = true; cfgSet({ op: 'route-domain', action: 'add', target: d }, d + ' идёт через VPN', ['route']).then(() => siteCheck(d)); }
+  else if (a === 'ads-deep') { go('d-adprobe'); adsProbe(t.dataset.dom); }
+  else if (a === 'site-do') { if (t.dataset.how === 'block') { confirm = { id: 'site-block', dom: t.dataset.dom }; render(); } else siteDo(t.dataset.how, t.dataset.dom); }
   else if (a === 'site-move') { const m = RPROBE && RPROBE.move; t.disabled = true; cfgSet({ op: 'domain-list', target: t.dataset.list, value: t.dataset.to }, 'Список идёт через ' + tunLabel(t.dataset.to), ['lists']).then(x => { if (RPROBE) RPROBE.move = null; if (x && x.ok && m) siteCheck(RPROBE.value); }); }
   else if (a === 'tunnel-up' || a === 'tunnel-restart') tunnelState(a === 'tunnel-up' ? 'up' : 'restart', t.dataset.name);
   else if (a === 'tunnel-probe') {

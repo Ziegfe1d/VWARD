@@ -121,6 +121,22 @@ with tempfile.TemporaryDirectory() as tmp:
     if S()["up"] != before or pairs.read_text() != "":
         fail("a change AdGuard Home did not keep must leave nothing taken")
 
+    # A domain added from the Panel: "auto" is the upstream serving most Smart DNS domains,
+    # a local DoH client (127.0.0.1:5453, https-dns-proxy) included; port 53 is not Smart DNS.
+    st = S(); st["ignore_posts"] = False
+    st["up"] = ["[/chatgpt.com/openai.com/]127.0.0.1:5453", f"[/claude.ai/]{D}", "[/lan/]127.0.0.1:53", "https://dns.nextdns.io/abc"]
+    state.write_text(json.dumps(st))
+    pairs.write_text("gemini.google.com\tauto\n")
+    ctl("smartdns-put", str(pairs))
+    if S()["up"][-1] != "[/gemini.google.com/]127.0.0.1:5453":
+        fail(f"auto takes the upstream of most Smart DNS domains: {S()['up']}")
+    inc.write_text("openai.com\n")
+    if "TAKEN=1" not in ctl("smartdns-take", str(inc), str(tmp / "t.txt")) or "[/chatgpt.com/]127.0.0.1:5453" not in S()["up"]:
+        fail(f"a local DoH row is Smart DNS for take too: {S()['up']}")
+    st = S(); st["up"] = ["[/lan/]127.0.0.1:53", "https://dns.nextdns.io/abc"]; state.write_text(json.dumps(st))
+    if "smartdns_not_configured" not in ctl("smartdns-put", str(pairs), ok=False):
+        fail("auto without any Smart DNS row must be refused")
+
     # Upstreams from a file are not edited.
     st = S(); st["ignore_posts"] = False; st["file"] = "/opt/etc/up.txt"; state.write_text(json.dumps(st))
     if "upstream_file_unsupported" not in ctl("smartdns-take", str(inc), str(pairs), ok=False):

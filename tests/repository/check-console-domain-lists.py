@@ -287,6 +287,22 @@ with tempfile.TemporaryDirectory() as tmp:
     run("domain-list", "domain-list4", "vpn", "error=adguard_auth_required")
     if dns_block(cfg) != before or state.exists():
         fail(f"AdGuard Home refusal left the router changed: {dns_block(cfg)}")
+
+    # One domain through Smart DNS from «Домены → Проверить адрес»: the upstream is chosen by
+    # AdGuard Home's side ("auto"); removing twice changes nothing the second time.
+    run("smartdns-domain", "add", "Gemini.Google.com", "error=adguard_auth_required")
+    st["fail"] = "smartdns_not_configured"; agh_state.write_text(__import__("json").dumps(st))
+    run("smartdns-domain", "add", "gemini.google.com", "error=smartdns_not_configured")
+    st.pop("fail"); agh_state.write_text(__import__("json").dumps(st))
+    run("smartdns-domain", "add", "Gemini.Google.com", "result=changed", 0)
+    if agh()[-1] != "[/gemini.google.com/]auto":
+        fail(f"smartdns-domain add: {agh()}")
+    run("smartdns-domain", "remove", "gemini.google.com", "result=changed", 0)
+    run("smartdns-domain", "remove", "gemini.google.com", "result=unchanged", 0)
+    if any("gemini" in u for u in agh()):
+        fail(f"smartdns-domain remove: {agh()}")
+    run("smartdns-domain", "add", "bad_domain", "error=invalid_domain", 64)
+    run("smartdns-domain", "move", "gemini.google.com", "error=invalid_operation", 64)
     cfg.write_text(RUNNING)
 
     # 6. Watch switch.
