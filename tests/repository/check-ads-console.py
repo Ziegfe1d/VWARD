@@ -164,4 +164,35 @@ esac
         fail(f"category on must restore default modes: {modes}")
     src("category", "no-such-thing", "off", ok=False)
 
+# «Проверить или заблокировать адрес»: a link into a site itself (yandex.ru/an/count/...) is
+# not offered as an easy block - DNS would close the whole site; an ad host still is.
+js = (ROOT / "web/assets/vward-console.js").read_text()
+parts = [js[js.index("const esc ="):js.index("\n", js.index("const esc ="))],
+         js[js.index("const btn ="):js.index("\n", js.index("const btn ="))],
+         js[js.index("const baseDomain"):js.index("async function adsCheck(")]]
+script = "\n".join(parts) + """
+const ico = () => '', kv = () => '', panel = (t, b) => b, inputBar = () => '', errText = () => '';
+let S = { ads: { agh_connected: true } };
+const x = d => ({ ok: true, domain: d, blocked: false, allowed: false, rules: [] });
+const out = {};
+for (const [k, link] of [['site', 'https://yandex.ru/an/count/XieejI_zOoVX2Lc3?x=1'], ['www', 'www.yandex.ru/an/x'],
+                         ['host', 'https://an.yandex.ru/count/X'], ['bare', 'yandex.ru']]) {
+  const d = link.replace(/^https?:\\/\\//, '').split(/[/?#]/)[0];
+  ADSCHK = { value: d, path: linkPathOf(link), x: x(d) };
+  out[k] = adsCheckPanel();
+}
+console.log(JSON.stringify(out));
+"""
+r = subprocess.run(["node", "-e", script], text=True, capture_output=True)
+if r.returncode:
+    fail(f"ads check panel: {r.stderr[-400:]}")
+html = json.loads(r.stdout)
+if "btn danger" not in html["site"] or "btn primary" in html["site"] or "||yandex.ru/an/" not in html["site"]:
+    fail(f"a link into yandex.ru: a warning, the browser rule, no easy block: {html['site']}")
+if "btn danger" not in html["www"]:
+    fail("www.site is the site too")
+for k in ("host", "bare"):
+    if "btn primary" not in html[k] or "field-warn" in html[k]:
+        fail(f"an ad host or a bare domain keeps the plain block: {k}: {html[k]}")
+
 print("ADS_CONSOLE=PASS")

@@ -215,18 +215,25 @@ function adsCheckPanel() {
   else if (r && r.x && !r.x.ok) out = '<p class="field-warn">' + esc(r.x.error === 'adguard_unavailable' || r.x.error === 'adguard_auth_required' ? 'AdGuard Home не отвечает или не подключён - см. «Утилиты → AdGuard Home».' : errText(r.x)) + '</p>';
   else if (r && r.x) {
     const x = r.x, d = x.domain, rules = (x.rules || []).map(y => [y.list || 'правило', y.text]);
+    // A link into a site itself (yandex.ru/an/count/...), not to an ad host (an.yandex.ru/...).
+    const inSite = !!r.path && (d === baseDomain(d) || d === 'www.' + baseDomain(d));
     const acts = [];
     if (x.blocked) {
       if (x.user_block) acts.push(btn('ads-urule', 'close', 'Разблокировать', 'primary', ' data-op="remove" data-kind="block" data-dom="' + esc(d) + '"'));
       else acts.push(btn('ads-urule', 'check', 'Разрешить этот адрес', '', ' data-op="add" data-kind="allow" data-dom="' + esc(d) + '"'));
     } else if (x.allowed) {
       if (x.user_allow) acts.push(btn('ads-urule', 'close', 'Убрать разрешение', '', ' data-op="remove" data-kind="allow" data-dom="' + esc(d) + '"'));
+    } else if (inSite) {
+      // AdGuard Home blocks names, not paths: blocking the name would close the whole site
+      // for every device.
+      acts.push(btn('ads-urule', 'block', 'Заблокировать весь ' + d + ' (сайт перестанет открываться)', 'danger', ' data-op="add" data-kind="block" data-dom="' + esc(d) + '"'));
     } else {
       acts.push(btn('ads-urule', 'block', 'Заблокировать ' + d, 'primary', ' data-op="add" data-kind="block" data-dom="' + esc(d) + '"'));
       if (baseDomain(d) !== d) acts.push(btn('ads-urule', 'block', 'Весь ' + baseDomain(d), '', ' data-op="add" data-kind="block" data-dom="' + esc(baseDomain(d)) + '"'));
     }
     out = '<p class="probe-verdict' + (x.blocked ? ' vpn' : '') + '">' + esc(d) + (x.blocked ? ' блокируется' : x.allowed ? ' разрешён правилом' : ' не блокируется') + '</p>' +
       (rules.length ? kv(rules) : '') + (x.service ? kv([['Сервис', x.service]]) : '') +
+      (inSite && !x.blocked && !x.allowed ? '<p class="field-warn">Это адрес внутри самого сайта ' + esc(d) + ' (' + esc(r.path) + '), а не отдельный рекламный домен. AdGuard Home блокирует домены целиком: этот адрес не закрыть, не закрыв весь ' + esc(d) + ' на всех устройствах. Такие адреса убирает блокировщик в браузере (uBlock Origin, AdGuard) правилом ||' + esc(d + '/' + r.path.split('/')[1]) + '/</p>' : '') +
       (acts.length ? '<div class="panel-actions">' + acts.join('') + '</div>' : '') +
       (x.blocked || x.allowed ? '' : '<p class="result-note">Правило добавится в пользовательские правила AdGuard Home и сразу начнёт работать для всех устройств.</p>');
   }
@@ -234,17 +241,20 @@ function adsCheckPanel() {
     aria: 'Адрес баннера, ссылка или домен', busy: r && r.busy, off: S.ads && !a.agh_connected, icon: 'search', btn: 'Проверить' }) + out,
     { desc: S.ads && !a.agh_connected ? 'Нужно подключение к AdGuard Home: «Утилиты → AdGuard Home».' : 'Блокируется ли адрес, каким списком или правилом; заблокировать или разблокировать.' });
 }
-async function adsCheck(v) {
-  ADSCHK = { value: v, busy: true }; render();
-  try { ADSCHK = { value: v, x: await apiGet('ads-view', { view: 'check', search: v }) }; }
-  catch (e) { ADSCHK = { value: v, error: 'Ошибка: ' + e.message }; }
+// The path of a link (/an/count/...), empty for a bare domain or the site's front page.
+const linkPathOf = v => { const m = String(v || '').trim().match(/^(?:[a-z][a-z0-9+.-]*:\/\/)?[^/?#]+(\/[^?#]*)/i); return m && m[1] !== '/' ? m[1].slice(0, 80) : ''; };
+async function adsCheck(v, path) {
+  path = path || '';
+  ADSCHK = { value: v, path: path, busy: true }; render();
+  try { ADSCHK = { value: v, path: path, x: await apiGet('ads-view', { view: 'check', search: v }) }; }
+  catch (e) { ADSCHK = { value: v, path: path, error: 'Ошибка: ' + e.message }; }
   render();
 }
 async function adsUserRule(op, kind, d) {
   let x;
   try { x = await apiPost('ads-control', { op: 'agh', setting: 'user-rule', value: op, kind: kind, domain: d }); } catch (e) { x = { ok: false, error: e.message }; }
   toast(x.ok ? (op === 'add' ? (kind === 'block' ? d + ' заблокирован' : d + ' разрешён') : 'Правило для ' + d + ' убрано') : 'Не выполнено: ' + errText(x));
-  await adsCheck(ADSCHK && ADSCHK.value || d);
+  await adsCheck(ADSCHK && ADSCHK.value || d, ADSCHK && ADSCHK.value === d ? ADSCHK.path : '');
 }
 
 /* ---------- Проверить сайт ---------- */
@@ -3171,9 +3181,9 @@ async function onSubmit(e, f) {
     if (x && x.ok) adsControl({ op: 'enqueue', job: 'sources-update' }, 'Источник добавлен, загрузка поставлена в очередь', 'ads-src');
   }
   if (f === 'ads-check') {
-    const v = hostOf($('adsCheck').value);
+    const raw = $('adsCheck').value, v = hostOf(raw);
     if (!DOMAIN.test(v)) { ADSCHK = { value: v, error: 'Введите адрес: домен (ads.example.com) или ссылку на баннер.' }; render(); return; }
-    await adsCheck(v); return;
+    await adsCheck(v, linkPathOf(raw)); return;
   }
   if (f === 'ads-probe') {
     const v = $('adsProbe').value.trim().toLowerCase();
