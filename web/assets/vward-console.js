@@ -244,7 +244,7 @@ function adsCheckPanel() {
   }
   return panel('Проверка адреса', inputBar({ form: 'ads-check', label: 'Домен или ссылка', id: 'adsCheck', value: r && (r.link || r.value), placeholder: 'например, ads.example.com',
     aria: 'Домен или ссылка', busy: r && r.busy, off: S.ads && !a.agh_connected, icon: 'search', btn: 'Проверить' }) + out,
-    { desc: S.ads && !a.agh_connected ? 'Требуется подключение к AdGuard Home: «Утилиты → AdGuard Home».' : 'Статус фильтрации домена, сработавшие списки и правила. Принимает домен или полную рекламную ссылку, включая цепочки переадресации.' });
+    { fixed: true, desc: S.ads && !a.agh_connected ? 'Требуется подключение к AdGuard Home: «Утилиты → AdGuard Home».' : 'Статус фильтрации домена, сработавшие списки и правила. Принимает домен или полную рекламную ссылку, включая цепочки переадресации.' });
 }
 // A link, taken apart: its path, the hosts it redirects through (addresses inside its
 // parameters - plain, URL-encoded or base64, as ad networks pack them), and whether it
@@ -302,7 +302,7 @@ const hostOf = v => String(v || '').trim().toLowerCase().replace(/^[a-z][a-z0-9+
 function sitePanel() {
   return panel('Проверка адреса', inputBar({ form: 'probe', label: 'Домен, ссылка или IPv4-адрес', id: 'probeInput', value: RPROBE && RPROBE.value, placeholder: 'например, youtube.com',
     aria: 'Домен, ссылка или IPv4-адрес', busy: RPROBE && (RPROBE.busy || RPROBE.fixing || RPROBE.doing), icon: 'search', btn: 'Проверить' }) + '<div id="probeResult">' + probeText(RPROBE) + siteDoText(RPROBE) + siteTestText(RPROBE) + '</div>',
-    { desc: 'Текущий маршрут домена и его основание, доступность через провайдера и каждый туннель, выбор политики маршрутизации.' });
+    { fixed: true, desc: 'Текущий маршрут домена и его основание, доступность через провайдера и каждый туннель, выбор политики маршрутизации.' });
 }
 // What is set up for a checked domain: VWARD's lists, Smart DNS, a block in AdGuard Home.
 const hasDom = (l, x) => (l || []).some(d => (typeof d === 'string' ? d : d.domain) === x);
@@ -700,11 +700,24 @@ let current = 'overview', editing = false, confirm = null, logTab = 'wan', logWr
 // The heading and its description sit above the card; the card holds only the content.
 // A block's own status sits in its heading instead of a first row repeating the title.
 const headPill = (cls, text) => '<span class="pill ' + (cls || '') + ' head-pill">' + esc(text) + '</span>';
+// Collapsed blocks, per page and title, kept in this browser (at most 300).
+const FOLDED = store.get('vward-folded', {});
+const foldKey = title => current + '|' + title;
+function foldToggle(key) {
+  if (FOLDED[key]) delete FOLDED[key]; else FOLDED[key] = 1;
+  const keys = Object.keys(FOLDED);
+  keys.slice(0, Math.max(0, keys.length - 300)).forEach(k => delete FOLDED[k]);
+  store.set('vward-folded', FOLDED);
+}
 function panel(title, body, opts) {
   opts = opts || {};
   const p = page(current), same = p && p.title === title, extra = opts.readonly || opts.right;
-  const head = same && !extra ? '' : '<div class="block-head">' + (same ? '' : '<h2>' + esc(title) + '</h2>') + (opts.readonly ? '<span class="note">' + ico('lock') + 'Только чтение</span>' : '') + (opts.right || '') + '</div>';
-  return '<section class="block"' + (same ? ' aria-label="' + esc(title) + '"' : '') + '>' + head + (opts.desc ? '<p class="block-desc">' + esc(opts.desc) + '</p>' : '') + (body ? '<div class="panel">' + body + '</div>' : '') + '</section>';
+  // A block under its own title folds to that title (the page's main block and the address
+  // check do not); the state on the right of the title stays visible.
+  const foldable = !same && !opts.fixed && !!title, key = foldable ? foldKey(title) : '', folded = foldable && !!FOLDED[key];
+  const toggle = foldable ? '<button class="block-toggle" type="button" data-fold="' + esc(key) + '" aria-expanded="' + !folded + '" aria-label="' + (folded ? 'Развернуть' : 'Свернуть') + ' «' + esc(title) + '»" title="' + (folded ? 'Развернуть' : 'Свернуть') + '">' + ico('chevron') + '</button>' : '';
+  const head = same && !extra ? '' : '<div class="block-head' + (foldable ? ' foldable' : '') + '"' + (foldable ? ' data-fold="' + esc(key) + '"' : '') + '>' + (same ? '' : '<h2>' + esc(title) + '</h2>') + (opts.readonly ? '<span class="note">' + ico('lock') + 'Только чтение</span>' : '') + (opts.right || '') + toggle + '</div>';
+  return '<section class="block' + (folded ? ' folded' : '') + '"' + (same ? ' aria-label="' + esc(title) + '"' : '') + '>' + head + (folded ? '' : (opts.desc ? '<p class="block-desc">' + esc(opts.desc) + '</p>' : '') + (body ? '<div class="panel">' + body + '</div>' : '')) + '</section>';
 }
 /* Строка: [название, значение, метка состояния, переход (страница или http-адрес), доп. атрибуты перехода, подсказка] */
 function kv(rows) {
@@ -2532,6 +2545,10 @@ function ddPick(i) {
   sel.dispatchEvent(new Event('change', { bubbles: true }));
 }
 document.addEventListener('click', e => {
+  const fold = e.target.closest('[data-fold]');
+  if (fold && (fold.classList.contains('block-toggle') || !e.target.closest('a, button, input, select, [data-go]'))) {
+    e.stopPropagation(); foldToggle(fold.dataset.fold); render(); return;
+  }
   const opt = e.target.closest('.dd-opt');
   if (opt) { e.stopPropagation(); ddPick(Number(opt.dataset.ddI)); return; }
   const b = e.target.closest('.dd-btn');
