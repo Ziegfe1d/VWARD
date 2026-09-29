@@ -52,6 +52,30 @@ with tempfile.TemporaryDirectory() as tmp:
             got = r.stdout.split("\n")[:-1] if r.stdout else []
             if r.returncode != 0 or got != want:
                 fail(f"{shell[0]}: {host}: {got} {r.stderr.strip()}, want {want}")
+    # The resident classifier (one awk holding the lists) answers the same, in one shell;
+    # a list that changes restarts it; a dead one leaves the name to the scan, then restarts.
+    script = fn + '''
+VOLATILE_DIR="$1"; shift
+for h in "$@"; do classifier_check; printf '%s=' "$h"; classify_host "$h" | tr '\\n' ','; echo; done
+echo "pid=$CLS_PID"
+echo "extra.example" >> "$MANUAL"; sleep 1; touch "$MANUAL"
+classifier_check; printf 'extra=%s\\n' "$(classify_host a.extra.example | tr '\\n' ',')"
+kill "$CLS_PID"; sleep 0.3
+printf 'dead=%s\\n' "$(classify_host x.wild.net | tr '\\n' ',')"
+classifier_check; printf 'again=%s ready=%s\\n' "$(classify_host r1.googlevideo.com | tr '\\n' ',')" "$CLS_READY"
+classifier_stop
+'''
+    for shell in shells:
+        (tmp / "MANUAL").write_text(files["MANUAL"])
+        vol = tmp / f"vol-{shell[0]}"
+        r = subprocess.run(shell + ["-c", script, "x", str(vol), *cases], env=env, text=True, capture_output=True, timeout=60)
+        lines = dict(l.split("=", 1) for l in r.stdout.splitlines() if "=" in l)
+        for host, want in cases.items():
+            if lines.get(host) != "".join(t + "," for t in want):
+                fail(f"{shell[0]} resident: {host}: {lines.get(host)!r} want {want} ({r.stderr.strip()[-300:]})")
+        if lines.get("extra") != "M," or lines.get("dead") != "M," or not lines.get("again", "").startswith("H, ready=1"):
+            fail(f"{shell[0]} resident: restart on a changed list, scan while dead, restart after: {lines}")
+    (tmp / "MANUAL").write_text(files["MANUAL"])
     # No lists at all: nothing printed, and awk must not wait on stdin.
     empty = {"PATH": "/usr/bin:/bin"}
     for name in files:

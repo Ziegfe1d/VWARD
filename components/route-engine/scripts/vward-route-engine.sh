@@ -107,6 +107,7 @@ cleanup()
     [ -n "$TCP_PID" ] && kill "$TCP_PID" 2>/dev/null
     [ -n "$TCP_PID" ] && wait "$TCP_PID" 2>/dev/null
     [ -n "$AWK_PID" ] && kill "$AWK_PID" 2>/dev/null
+    classifier_stop 2>/dev/null
 
     rm -f "$RAW" "$HOSTS"
     rm -rf "${LOCK:?}"
@@ -1003,6 +1004,23 @@ parent_list_match()
 # entry covers subdomains only.
 classify_host()
 {
+    # The resident classifier answers in a fraction of a millisecond; the scan below
+    # (every list read again for one name) only without it.
+    # (Alive first: writing to a FIFO nobody reads would end this shell with SIGPIPE.)
+    if [ "${CLS_READY:-0}" = 1 ] && kill -0 "$CLS_PID" 2>/dev/null && printf '%s\n' "$1" >&7 2>/dev/null; then
+        # shellcheck disable=SC2086
+        while IFS= read $CLS_T -r CLS_LINE <&8; do
+            [ "$CLS_LINE" != . ] || return 0
+            printf '%s\n' "$CLS_LINE"
+        done
+        # The classifier is gone: this name by the scan, the next ones after a restart.
+        : > "$CLS_DIR/dead" 2>/dev/null
+    fi
+    classify_scan "$1"
+}
+
+classify_scan()
+{
     CH_FILES=""
     for CH_F in "$LIST_WATCH_MAP" "$MANUAL" "$SMARTDNS" "$SKIP_DOMAINS" "$HINTS"; do
         [ -s "$CH_F" ] && CH_FILES="$CH_FILES $CH_F"
@@ -1046,6 +1064,109 @@ classify_host()
             }
         }
     ' $CH_FILES
+}
+
+# Resident classifier: one awk holds every list in memory (a hash per list) and answers
+# one name at a time over a FIFO: the tags, then ".". On the router a scan of the lists for
+# every new name took a quarter of a CPU core (the hints alone are thousands of lines).
+# It is started again when a list changes (a file newer than its stamp) or it died.
+CLS_READY=0
+CLS_PID=""
+# An awk that answers a line as soon as it has it: BusyBox's (the router's own); mawk
+# holds its input until a block is full unless it is told it is interactive.
+CLS_AWK=awk
+if busybox awk 'BEGIN {}' </dev/null >/dev/null 2>&1; then
+    CLS_AWK="busybox awk"
+elif awk -W interactive 'BEGIN {}' </dev/null >/dev/null 2>&1; then
+    CLS_AWK="awk -W interactive"
+fi
+# A classifier that does not answer within 5 s is treated as dead (read -t where the shell
+# has it: BusyBox's does), so the live path never waits on it.
+CLS_T=""
+(read -t 1 CLS_X < /dev/null) 2>/dev/null
+[ "$?" != 1 ] || CLS_T="-t 5"
+
+classifier_stop()
+{
+    [ "$CLS_READY" = 1 ] && exec 7>&- 8<&-
+    [ -z "$CLS_PID" ] || kill "$CLS_PID" 2>/dev/null
+    CLS_READY=0
+    CLS_PID=""
+}
+
+classifier_start()
+{
+    classifier_stop
+    CLS_DIR=${CLS_DIR:-$VOLATILE_DIR/classifier}
+    [ -d "$CLS_DIR" ] || mkdir -p "$CLS_DIR" || return 1
+    rm -f "$CLS_DIR/req" "$CLS_DIR/resp" "$CLS_DIR/dead"
+    mkfifo "$CLS_DIR/req" "$CLS_DIR/resp" || return 1
+    : > "$CLS_DIR/stamp"
+    # shellcheck disable=SC2086 # CLS_AWK is a command and its options
+    $CLS_AWK -v w="$LIST_WATCH_MAP" -v m="$MANUAL" -v s="$SMARTDNS" -v k="$SKIP_DOMAINS" -v hf="$HINTS" '
+        function load(f, tag,    line, d, n) {
+            n = 0
+            while ((getline line < f) > 0) {
+                n++
+                if (tag == "W") {
+                    split(line, x, " ")
+                    if (x[1] != "" && !(x[1] in wline)) { wline[x[1]] = n; wgroup[x[1]] = x[2] }
+                    continue
+                }
+                d = tolower(line)
+                gsub(/^[ \t]+|[ \t]+$/, "", d)
+                if (d == "" || substr(d, 1, 1) == "#") continue
+                if (substr(d, 1, 2) == "*.") sub_only[tag, substr(d, 3)] = 1
+                else exact[tag, d] = 1
+            }
+            close(f)
+            if (n) have[tag] = 1
+        }
+        BEGIN {
+            load(w, "W"); load(m, "M"); load(s, "S"); load(k, "K"); load(hf, "H")
+            print "ready"; fflush()
+        }
+        {
+            h = $1
+            # W: the first line (in the file) naming h or one of its parents.
+            best = 0; g = ""; t = h
+            while (1) {
+                if ((t in wline) && (best == 0 || wline[t] < best)) { best = wline[t]; g = wgroup[t] }
+                i = index(t, "."); if (!i) break; t = substr(t, i + 1)
+            }
+            if (best) print "W " g
+            split("M S K H", tags, " ")
+            for (j = 1; j <= 4; j++) {
+                tag = tags[j]
+                if (!(tag in have)) continue
+                hit = ((tag, h) in exact)
+                t = h
+                while (!hit && (i = index(t, "."))) {
+                    t = substr(t, i + 1)
+                    hit = ((tag, t) in exact) || ((tag, t) in sub_only)
+                }
+                if (hit) print tag
+            }
+            print "."; fflush()
+        }
+    ' < "$CLS_DIR/req" > "$CLS_DIR/resp" 2>/dev/null &
+    CLS_PID=$!
+    exec 7>"$CLS_DIR/req" 8<"$CLS_DIR/resp" || { kill "$CLS_PID" 2>/dev/null; CLS_PID=""; return 1; }
+    # shellcheck disable=SC2086
+    IFS= read $CLS_T -r CLS_LINE <&8 && [ "$CLS_LINE" = ready ] || { CLS_READY=1; classifier_stop; return 1; }
+    CLS_READY=1
+}
+
+# classifier_check: started when missing, dead, or older than one of its lists.
+classifier_check()
+{
+    if [ "$CLS_READY" = 1 ] && [ ! -e "$CLS_DIR/dead" ] && kill -0 "$CLS_PID" 2>/dev/null; then
+        for CLS_F in "$LIST_WATCH_MAP" "$MANUAL" "$SMARTDNS" "$SKIP_DOMAINS" "$HINTS"; do
+            [ ! "$CLS_F" -nt "$CLS_DIR/stamp" ] || { classifier_start; return; }
+        done
+        return 0
+    fi
+    classifier_start
 }
 
 # ------------------------------------------------------------
@@ -1357,6 +1478,7 @@ handle_host()
 
     refresh_sets
 
+    classifier_check
     HOST_LISTS=$(classify_host "$HOST")
     # Tags (M, S, K, H...) and watched lists ("W group") apart, in the shell:
     # three processes less per query.
