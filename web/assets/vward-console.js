@@ -512,9 +512,14 @@ function cacheWrite(k) {
 }
 function cacheDrop() { CACHE_KEYS.forEach(k => store.del('vward-cache-' + k)); S.cached = {}; }
 const inflight = {};
+// How long an answer stays fresh (seconds) before the page's refresh asks again. What changes
+// by the second (status, jobs) follows every tick; settings and catalogs rarely change, and
+// asking them every 15 seconds only loaded the router. An action reloads what it changed.
+const KEY_TTL = { status: 5, ads: 10, tq: 55, route: 55, awg: 25, wifi: 55, diag: 55, stab: 55, lists: 110, config: 110, adspub: 55, adsstats: 110, agh: 110,
+  https: 290, security: 290, services: 290, update: 110, ext: 590, backups: 290, cron: 110 };
 async function load(key, force) {
   if (inflight[key]) return inflight[key];
-  if (!force && S[key] && Date.now() - (S.loadedAt[key] || 0) < 5000) return S[key];
+  if (!force && S[key] && Date.now() - (S.loadedAt[key] || 0) < (KEY_TTL[key] || 5) * 1000) return S[key];
   inflight[key] = (async () => {
     try { S[key] = await LOADERS[key](); S.errors[key] = null; delete S.cached[key]; cacheWrite(key); }
     catch (e) { S.errors[key] = e.message; }
@@ -1511,12 +1516,24 @@ const RENDER = {
       panel('Установлено: ' + (p.version || '—'), notesHtml(p.version));
   },
   'd-jobs'() {
-    const JOB_TEXT = { scan: 'проверка новых доменов', 'sources-update': 'обновление источников', 'rules-rebuild': 'пересборка правил', publish: 'публикация', probe: 'проверка домена' };
-    const JOB_STATE = { DONE: 'выполнено', PASS: 'выполнено', FAILED: 'ошибка', RUNNING: 'идёт', QUEUED: 'в очереди' };
-    const j = (S.ads && S.ads.jobs) || {}, cur = j.current || {}, last = j.last || {};
-    return panel('Задания', kv([['Сейчас', cur.state && cur.state !== 'IDLE' ? (cur.type || cur.state) : 'нет активных', cur.state && cur.state !== 'IDLE' ? 'info' : ''], ['В очереди', fmtInt(j.queued || 0)], ['Последнее', !last.type || last.state === 'NONE' ? 'ещё не было' : (JOB_TEXT[last.type] || last.type) + ' · ' + (JOB_STATE[last.state] || last.state), last.state === 'FAILED' ? 'crit' : '']]) +
-      '<div class="panel-actions even">' + btn('ads-job', 'search', 'Проверить новые домены', '', ' data-job="scan"') + btn('ads-job', 'refresh', 'Обновить источники', '', ' data-job="sources-update"') + btn('ads-job', 'check', 'Пересобрать правила', '', ' data-job="rules-rebuild"') + '</div>' +
-      resultBox('ads-job'), { desc: 'Задания идут по одному, когда роутер свободен.' });
+    const a = S.ads || {}, j = a.jobs || {}, cur = j.current || {}, last = j.last || {}, queue = j.queue || [];
+    const busy = cur.state && cur.state !== 'IDLE', n = num(j.queued) || 0;
+    const since = t => t ? fmtTime(new Date(t * 1000).toISOString()) : '';
+    const status = !S.ads ? ['', 'загрузка…'] : a.paused ? ['warn', 'пауза'] : busy ? ['info', 'выполняется'] :
+      n ? ['warn', 'ожидает запуска'] : ['ok', 'очередь пуста'];
+    const rows = queue.map((q, i) => '<li class="row"><div class="row-main"><b>' + esc((i + 1) + '. ' + jobText(q)) + '</b><small>поставлено ' + esc(since(q.created) || '—') + '</small></div>' +
+      '<span class="row-acts"><button class="icon-btn" type="button" data-act="ads-job-cancel" data-id="' + esc(q.id) + '" aria-label="Отменить задание" title="Отменить"' + (S.ads ? '' : ' disabled') + '>' + ico('close') + '</button></span></li>').join('');
+    return panel('Состояние очереди', '<dl class="kv">' +
+        ctrlRow('Обработка заданий', sw('data-ads-pause', !a.paused, 'Обработка заданий', !S.ads), a.paused ? 'на паузе: задания ждут' : 'задания выполняются по одному при свободном процессоре') + '</dl>' +
+        kv([['Состояние', status[1], status[0]],
+          busy ? ['Текущее задание', jobText(cur) + (cur.since ? ' · с ' + since(cur.since) : '')] : null,
+          ['В очереди', fmtInt(n)],
+          ['Последнее выполненное', !last.type || last.state === 'NONE' ? 'нет данных' : jobText(last) + ' · ' + (JOB_STATE[last.state] || last.state) + (last.ts ? ' · ' + fmtTime(String(last.ts).replace(' ', 'T')) : ''), last.state === 'FAILED' ? 'crit' : '']]) +
+        (n && !a.paused ? '<div class="panel-actions">' + btn('ads-job-run', 'refresh', 'Выполнить очередь сейчас', 'primary', busy ? ' disabled' : '') + '</div>' : '') + resultBox('ads-job-run'),
+        { desc: 'Задания выполняются последовательно, при низкой нагрузке на роутер.' }) +
+      panel('Очередь', !S.ads ? empty('Загрузка…') : rows ? '<ul class="rows">' + rows + '</ul>' + (n > queue.length ? '<p class="panel-desc">Показаны первые ' + queue.length + ' из ' + fmtInt(n) + '.</p>' : '') : empty('Заданий в очереди нет')) +
+      panel('Новое задание', '<div class="panel-actions even">' + btn('ads-job', 'search', 'Проверить новые домены', '', ' data-job="scan"') + btn('ads-job', 'refresh', 'Обновить источники', '', ' data-job="sources-update"') + btn('ads-job', 'check', 'Пересобрать правила', '', ' data-job="rules-rebuild"') + '</div>' +
+        resultBox('ads-job'), { desc: 'Задание добавляется в конец очереди.' });
   },
   'd-aghfilters'() {
     const g = S.agh, fl = (g && g.filtering && g.filtering.filters) || [];
@@ -1879,6 +1896,9 @@ async function fileOpen(name) {
   if (FILES.root === 'logs') { const b = sh.querySelector('.sheet-body'); b.scrollTop = b.scrollHeight; }
 }
 // Domain check: queued as a job; the page waits for its report and sums it up.
+const JOB_TEXT = { scan: 'Проверка новых доменов', 'sources-update': 'Обновление источников', 'rules-rebuild': 'Пересборка правил', publish: 'Публикация правил в AdGuard Home', probe: 'Анализ домена' };
+const JOB_STATE = { DONE: 'выполнено', PASS: 'выполнено', FAILED: 'ошибка', RUNNING: 'выполняется', QUEUED: 'в очереди' };
+const jobText = q => (JOB_TEXT[q.type] || q.type || 'задание') + (q.arg ? ' ' + q.arg : '');
 let PROBE = null;
 async function adsProbe(domain) {
   PROBE = { domain: domain, text: 'в очереди…' }; render();
@@ -3055,6 +3075,8 @@ document.addEventListener('click', e => {
   else if (a === 'diag-run') { load('diag', true).then(() => { render(); toast('Диагностика выполнена'); }); }
   else if (a === 'agh-clients') aghClientsOp('sync');
   else if (a === 'ads-job') adsControl({ op: 'enqueue', job: t.dataset.job }, 'Задание поставлено в очередь', 'ads-job');
+  else if (a === 'ads-job-run') { t.disabled = true; adsControl({ op: 'job-run' }, 'Очередь запущена', 'ads-job-run'); }
+  else if (a === 'ads-job-cancel') { t.disabled = true; adsControl({ op: 'job-cancel', id: t.dataset.id }, 'Задание отменено', 'ads-job-run'); }
   else if (a === 'https-op') runAction('https', 'ads-https-control', { op: t.dataset.op }, 'Готово').then(() => load('https', true)).then(render);
   else if (a === 'log-reload') loadLog(logTab, true);
   else if (a === 'log-wrap') { logWrap = !logWrap; t.setAttribute('aria-pressed', logWrap); const b = $('logBox'); if (b) b.classList.toggle('nowrap', !logWrap); }

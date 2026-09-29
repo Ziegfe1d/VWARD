@@ -185,8 +185,16 @@ if [ "$PAUSED" -eq 1 ]; then
 fi
 
 # Panel requests enqueue long operations. Process at most one queued job per
-# scheduler tick, and only when the same low-load gate permits it.
-if [ -x "$JOB" ] && [ -s "$ADS_STATE/jobs/queue" ]; then
+# scheduler tick, and only when the same low-load gate permits it.  The queue is a
+# folder of job files (jobs/queued/*.job); the single file of older versions
+# (jobs/queue) is moved into it by the worker.  Looking at the old file alone left
+# every job the Panel queued waiting for ever.
+jobs_waiting()
+{
+    for JW in "$ADS_STATE/jobs/queued"/*.job; do [ -e "$JW" ] && return 0; done
+    [ -s "$ADS_STATE/jobs/queue" ]
+}
+if [ -x "$JOB" ] && jobs_waiting; then
     JOB_GATE="$(resource_gate)"
     if [ $? -eq 0 ]; then
         status_write job queued 0

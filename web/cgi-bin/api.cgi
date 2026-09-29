@@ -817,7 +817,7 @@ EOF_COUNTS
   # The last scan and the newest domains it judged (the built-in trusted ones are left out).
   SCAN="$([ -r "$AST/last-run.status" ] && awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' "$AST/last-run.status" | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' 2>/dev/null)"; [ -n "$SCAN" ] || SCAN='{}'
   RECENT="$(printf '%s\n' "$VPASS" | sed '$d' | sort -r | "$JQ" -Rn '[inputs|split("\t")|{first_seen:.[0],domain:.[1],verdict:.[2],action:.[3],reason:.[4]}]' 2>/dev/null)"; [ -n "$RECENT" ] || RECENT='[]'
-  "$JQ" -n --argjson scan "$SCAN" --argjson recent "$RECENT" --argjson agh "$AGH_ON" --argjson paused "$([ "$PAUSED" = 1 ]&&echo true||echo false)" --argjson settings "$SETJSON" --argjson sources "$SOURCES" --argjson manual "$MANUAL" --argjson jobsraw "$JOBS" --arg job_output "$LAST_OUTPUT" --argjson b "${BLOCKED:-0}" --argjson r "${REVIEW:-0}" --argjson a "${ALLOW:-0}" --argjson t "${TRUST:-0}" --argjson clients "$CLIENTS" --argjson routedns "$ROUTEDNS" --argjson guard "$GUARD" --argjson ghosts "$GHOSTS" '{ok:true,component:"ads-privacy-guard",agh_connected:$agh,clients:$clients,route_dns:$routedns,dns_guard:($guard + {hosts:$ghosts}),scan:$scan,recent:$recent,paused:$paused,settings:$settings,sources:$sources,manual_rules:$manual,counts:{blocked:$b,review:$r,allow:$a,trust:$t},categories:($sources | group_by(.purpose) | map({id:.[0].purpose, total:length, active:(map(select(.mode != "off")) | length)})),jobs:{queued:($jobsraw.JOB_QUEUE//"0"|(tonumber? // 0)),current:{state:($jobsraw.CURRENT_state//"IDLE"),type:($jobsraw.CURRENT_type//"")},last:{id:($jobsraw.LAST_id//""),state:($jobsraw.LAST_state//"NONE"),type:($jobsraw.LAST_type//""),arg:($jobsraw.LAST_arg//""),output:$job_output}}}'
+  "$JQ" -n --argjson scan "$SCAN" --argjson recent "$RECENT" --argjson agh "$AGH_ON" --argjson paused "$([ "$PAUSED" = 1 ]&&echo true||echo false)" --argjson settings "$SETJSON" --argjson sources "$SOURCES" --argjson manual "$MANUAL" --argjson jobsraw "$JOBS" --arg job_output "$LAST_OUTPUT" --argjson b "${BLOCKED:-0}" --argjson r "${REVIEW:-0}" --argjson a "${ALLOW:-0}" --argjson t "${TRUST:-0}" --argjson clients "$CLIENTS" --argjson routedns "$ROUTEDNS" --argjson guard "$GUARD" --argjson ghosts "$GHOSTS" '{ok:true,component:"ads-privacy-guard",agh_connected:$agh,clients:$clients,route_dns:$routedns,dns_guard:($guard + {hosts:$ghosts}),scan:$scan,recent:$recent,paused:$paused,settings:$settings,sources:$sources,manual_rules:$manual,counts:{blocked:$b,review:$r,allow:$a,trust:$t},categories:($sources | group_by(.purpose) | map({id:.[0].purpose, total:length, active:(map(select(.mode != "off")) | length)})),jobs:{queued:($jobsraw.JOB_QUEUE//"0"|(tonumber? // 0)),queue:[$jobsraw | to_entries[] | select(.key | startswith("QUEUED_")) | .value | split("|") | {id:.[0],type:.[1],arg:(.[2] // ""),created:(.[3] // "" | tonumber? // null)}],current:{state:($jobsraw.CURRENT_state//"IDLE"),type:($jobsraw.CURRENT_type//""),arg:($jobsraw.CURRENT_arg//""),since:($jobsraw.CURRENT_created_epoch//"" | tonumber? // null),ts:($jobsraw.CURRENT_ts//"")},last:{id:($jobsraw.LAST_id//""),state:($jobsraw.LAST_state//"NONE"),type:($jobsraw.LAST_type//""),arg:($jobsraw.LAST_arg//""),ts:($jobsraw.LAST_ts//""),output:$job_output}}}'
   exit 0
 fi
 
@@ -1178,7 +1178,7 @@ if [ "$ACTION" = ads-control ]; then
   read_body 1024
   val(){ form_value "$1"; }
   OP="$(val op)"; DOMAIN="$(val domain|tr '[:upper:]' '[:lower:]')"; SCOPE="$(val scope)"; [ -n "$SCOPE" ]||SCOPE=exact
-  case "$OP" in pause|resume|allow|block|remove-override|source-mode|source-add|source-delete|source-category|enqueue|agh|clients|dns-guard|route-dns) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
+  case "$OP" in pause|resume|allow|block|remove-override|source-mode|source-add|source-delete|source-category|enqueue|job-run|job-cancel|agh|clients|dns-guard|route-dns) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0;; esac
   case "$OP" in
     allow|block|remove-override) ads_valid_domain "$DOMAIN" || { echo '{"ok":false,"error":"invalid_domain"}'; exit 0; }; case "$SCOPE" in exact|suffix) ;; *) echo '{"ok":false,"error":"invalid_scope"}'; exit 0 ;; esac ;;
     source-mode) SID="$(val source)"; MODE="$(val mode)"; ads_valid_source_id "$SID" || { echo '{"ok":false,"error":"invalid_source"}'; exit 0; }; case "$MODE" in off|check|active) ;; *) echo '{"ok":false,"error":"invalid_source_mode"}'; exit 0 ;; esac ;;
@@ -1213,6 +1213,7 @@ if [ "$ACTION" = ads-control ]; then
         *) echo '{"ok":false,"error":"invalid_setting"}'; exit 0 ;;
       esac ;;
     clients) CLV="$(val value)"; case "$CLV" in on|off|sync) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac ;;
+    job-cancel) JID="$(val id)"; case "$JID" in ''|*[!0-9-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac; [ "${#JID}" -le 40 ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; } ;;
     route-dns) RDV="$(val value)"; case "$RDV" in on|off) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac ;;
     dns-guard) DGS="$(val setting)"; DGV="$(form_decode value url | tr 'A-F' 'a-f')"
       case "$DGS" in
@@ -1232,6 +1233,9 @@ if [ "$ACTION" = ads-control ]; then
     source-delete) /opt/bin/vward-ads-privacy-source-control.sh delete "$SID" >"$OUT" 2>&1||RC=$? ;;
     source-category) /opt/bin/vward-ads-privacy-source-control.sh category "$SPUR" "$SST" >"$OUT" 2>&1||RC=$? ;;
     enqueue) [ "$JOB" = probe ] || DOMAIN=""; /opt/bin/vward-ads-privacy-job.sh enqueue "$JOB" "$DOMAIN" >"$OUT" 2>&1||RC=$? ;;
+    # «Выполнить очередь»: the queue now, detached (a scan takes minutes); the page follows it.
+    job-run) ( "${VWARD_ADS_JOB_BIN:-/opt/bin/vward-ads-privacy-job.sh}" drain </dev/null >/dev/null 2>&1 & ) ; echo "JOB=DRAIN_STARTED" > "$OUT" ;;
+    job-cancel) "${VWARD_ADS_JOB_BIN:-/opt/bin/vward-ads-privacy-job.sh}" cancel "$JID" >"$OUT" 2>&1||RC=$? ;;
     agh) "${VWARD_ADS_CONTROL_BIN:-/opt/bin/vward-ads-privacy-control.sh}" agh "$@" >"$OUT" 2>&1||RC=$? ;;
     clients) "${VWARD_ADS_CLIENTS_BIN:-/opt/bin/vward-ads-privacy-clients.sh}" "$CLV" >"$OUT" 2>&1||RC=$? ;;
     route-dns) "${VWARD_ADS_ROUTE_DNS_BIN:-/opt/bin/vward-ads-privacy-route-dns.sh}" "$RDV" >"$OUT" 2>&1||RC=$? ;;

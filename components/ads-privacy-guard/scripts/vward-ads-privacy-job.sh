@@ -128,12 +128,47 @@ run_one()
     return "$jw_rc"
 }
 
+# cancel ID: a queued job leaves the queue (a running one finishes).
+cancel()
+{
+    case "$1" in ''|*[!0-9-]*) ads_die "invalid job id" ;; esac
+    jc_n=0
+    for jc_f in "$QUEUED/$1.job" "$QUEUED/$1"-*.job; do
+        [ -f "$jc_f" ] || continue
+        rm -f "$jc_f" && jc_n=$((jc_n + 1))
+    done
+    [ "$jc_n" -gt 0 ] || { echo "JOB=NOT_QUEUED"; return 0; }
+    ads_log "JOB_CANCEL|id=$1"
+    echo "JOB=CANCELLED"; echo "JOB_ID=$1"
+}
+
+# drain: the queue now, one job after another (the Panel's «Выполнить очередь»), at most
+# 20; another worker already running leaves it to that one.
+drain()
+{
+    jd_n=0
+    while [ "$jd_n" -lt 20 ]; do
+        jd_out=$("$0" worker 2>/dev/null)
+        case "$jd_out" in *JOB_WORKER=IDLE*|*JOB_WORKER=BUSY*|'') break ;; esac
+        jd_n=$((jd_n + 1))
+    done
+    echo "JOB_DRAINED=$jd_n"
+}
+
 case "${1:-status}" in
     enqueue) [ -n "${2:-}" ] || ads_die "job type required"; enqueue "$2" "${3:-}" ;;
     worker) run_one ;;
+    cancel) cancel "${2:-}" ;;
+    drain) drain ;;
     status)
         echo "JOB_QUEUE=$(find "$QUEUED" -type f -name '*.job' 2>/dev/null | wc -l | tr -d ' ')"
+        # The queue itself, oldest first: id|type|arg|queued epoch (at most 20).
+        jq_i=0
+        for jq_f in $(find "$QUEUED" -type f -name '*.job' 2>/dev/null | sort | head -n 20); do
+            jq_i=$((jq_i + 1)); IFS= read -r jq_l < "$jq_f" || continue
+            printf 'QUEUED_%02d=%s\n' "$jq_i" "$jq_l"
+        done
         [ -r "$CURRENT" ] && sed 's/^/CURRENT_/' "$CURRENT" || echo "CURRENT_state=IDLE"
         [ -r "$LAST" ] && sed 's/^/LAST_/' "$LAST" || echo "LAST_state=NONE" ;;
-    *) echo "Usage: $0 {enqueue TYPE [ARG]|worker|status}" >&2; exit 2 ;;
+    *) echo "Usage: $0 {enqueue TYPE [ARG]|worker|drain|cancel ID|status}" >&2; exit 2 ;;
 esac

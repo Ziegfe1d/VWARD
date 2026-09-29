@@ -69,4 +69,9 @@ AGH_API_BASE=http://set/control; ads_agh_base_export; echo "5=$AGH_API_BASE"
         if oct(cache.stat().st_mode & 0o777) != "0o600":
             fail(f"the cache is private: {oct(cache.stat().st_mode)}")
 
+# The page's refresh asks each answer again only when it is older than its own freshness:
+# settings and catalogs rarely change and were asked every 15 seconds.
+if "(KEY_TTL[key] || 5) * 1000" not in JS or "security: 290" not in JS or "ads: 10" not in JS or "status: 5" not in JS:
+    fail("per-answer freshness in load()")
+
 print("ADS_PAGE_SPEED=PASS")
