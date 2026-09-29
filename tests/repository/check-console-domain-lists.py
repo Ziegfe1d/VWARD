@@ -288,7 +288,7 @@ with tempfile.TemporaryDirectory() as tmp:
     if dns_block(cfg) != before or state.exists():
         fail(f"AdGuard Home refusal left the router changed: {dns_block(cfg)}")
 
-    # One domain through Smart DNS from «Домены → Проверить адрес»: the upstream is chosen by
+    # One domain through Smart DNS from «Домены → Проверка адреса»: the upstream is chosen by
     # AdGuard Home's side ("auto"); removing twice changes nothing the second time.
     run("smartdns-domain", "add", "Gemini.Google.com", "error=adguard_auth_required")
     st["fail"] = "smartdns_not_configured"; agh_state.write_text(__import__("json").dumps(st))

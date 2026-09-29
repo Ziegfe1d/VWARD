@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Panel «Проверить сайт»: site-test opens the site through the provider and every VPN
 connection to one address, says opens / blocked / no answer, refuses a bad name; the
-Panel shows it first on «Сеть» and «Домены» with «Сайт не открывается»; a tunnel can be
+Panel shows it first on «Сеть» and «Домены» with «Диагностика и восстановление»; a tunnel can be
 restarted (nothing saved) or switched on after Keenetic switched it off (saved)."""
 
 import json

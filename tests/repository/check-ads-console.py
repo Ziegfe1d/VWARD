@@ -164,38 +164,49 @@ esac
         fail(f"category on must restore default modes: {modes}")
     src("category", "no-such-thing", "off", ok=False)
 
-# «Проверить адрес» on the Ads page: a link into a site itself (yandex.ru/an/count/...) is
-# not offered as an easy block - DNS would close the whole site; an ad host still is.
+# «Проверка адреса» on the Ads page. A page inside a site's own domain (yandex.ru/an/count/...)
+# is not offered as an easy block - DNS closes the whole site; an ad link (partner markers,
+# a redirect chain packed into its parameters, plain or base64) is, with every host of the chain.
+POPUP = ("https://wapawet.com/news/prl/hotestfruit_sevenk/?a1=2&k=1&u=aHR0cHM6Ly93YXBhd2V0LmNvbS9zaG9wL3BsYXlmbG93ZXIvP3N1Yl9pZD0zODU"
+         "&u2=Ly9nb29kc3RhdG9yb25lLmNvbS9jbGljay9jbGljay5waHA/aWQ9MiZyb3RhdG9yPTE4OTAy&u3=https%3A%2F%2Ftrk.example.net%2Fc%3Fid%3D1")
 js = (ROOT / "web/assets/vward-console.js").read_text()
-parts = [js[js.index("const esc ="):js.index("\n", js.index("const esc ="))],
-         js[js.index("const btn ="):js.index("\n", js.index("const btn ="))],
+line = lambda k: js[js.index(k):js.index("\n", js.index(k))]
+parts = [line("const DOMAIN ="), line("const esc ="), line("const btn ="), line("const hostOf ="), line("function plural("),
          js[js.index("const baseDomain"):js.index("async function adsCheck(")]]
 script = "\n".join(parts) + """
-const ico = () => '', kv = () => '', panel = (t, b) => b, inputBar = () => '', errText = () => '';
-let S = { ads: { agh_connected: true } };
+const ico = () => '', panel = (t, b) => b, inputBar = () => '', errText = () => '';
+const kv = rows => rows.filter(Boolean).map(r => r[0] + '=' + r[1]).join(';');
+let S = { ads: { agh_connected: true } }, ADSCHK;
 const x = d => ({ ok: true, domain: d, blocked: false, allowed: false, rules: [] });
-const out = {};
+const out = { chain: linkInfo(%s) };
 for (const [k, link] of [['site', 'https://yandex.ru/an/count/XieejI_zOoVX2Lc3?x=1'], ['www', 'www.yandex.ru/an/x'],
                          ['host', 'https://an.yandex.ru/count/X'], ['bare', 'yandex.ru'],
-                         ['casino', 'https://fon.bet/authProcess/registration/?utm_source=x&partner_id=54']]) {
-  const d = link.replace(/^https?:\\/\\//, '').split(/[/?#]/)[0];
-  ADSCHK = { value: d, path: linkPathOf(link), x: x(d) };
+                         ['casino', 'https://fon.bet/authProcess/registration/?utm_source=x&partner_id=54'], ['popup', %s]]) {
+  const L = linkInfo(link), d = L.chain[0];
+  ADSCHK = { value: d, link: link, x: x(d), chain: L.chain.slice(1).map(h => ({ d: h, x: x(h) })) };
   out[k] = adsCheckPanel();
 }
 console.log(JSON.stringify(out));
-"""
+""" % (json.dumps(POPUP), json.dumps(POPUP))
 r = subprocess.run(["node", "-e", script], text=True, capture_output=True)
 if r.returncode:
-    fail(f"ads check panel: {r.stderr[-400:]}")
+    fail(f"ads check panel: {r.stderr[:600]}")
 html = json.loads(r.stdout)
+if html["chain"] != {"path": "/news/prl/hotestfruit_sevenk/", "chain": ["wapawet.com", "goodstatorone.com", "trk.example.net"], "ad": True}:
+    fail(f"the redirect chain of a popup link, base64 and URL-encoded: {html['chain']}")
 if "btn danger" not in html["site"] or "btn primary" in html["site"] or "||yandex.ru/an/" not in html["site"]:
-    fail(f"a link into yandex.ru: a warning, the browser rule, no easy block: {html['site']}")
-if "Заблокировать весь fon.bet" not in html["casino"] or "||fon.bet/authProcess/" not in html["casino"] or "казино" not in html["casino"]:
-    fail(f"a casino link: the whole site blocked with one button: {html['casino']}")
+    fail(f"a page inside yandex.ru: a warning, the browser rule, no easy block: {html['site']}")
 if "btn danger" not in html["www"]:
     fail("www.site is the site too")
+if "Заблокировать fon.bet" not in html["casino"] or "btn primary" not in html["casino"] or "рекламная" not in html["casino"] or "field-warn" in html["casino"]:
+    fail(f"a link with partner markers is an ad link, blocked with one button: {html['casino']}")
+p = html["popup"]
+if 'data-doms="wapawet.com goodstatorone.com trk.example.net"' not in p or "Заблокировать все домены цепочки (3)" not in p or "Цепочка переадресации" not in p:
+    fail(f"a popup link: every host of its chain, one button for all: {p}")
 for k in ("host", "bare"):
     if "btn primary" not in html[k] or "field-warn" in html[k]:
         fail(f"an ad host or a bare domain keeps the plain block: {k}: {html[k]}")
+if "a === 'ads-chain-block'" not in js:
+    fail("the chain button has no handler")
 
 print("ADS_CONSOLE=PASS")

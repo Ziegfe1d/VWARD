@@ -392,7 +392,7 @@ small.st .icon{width:14px;height:14px}
 .ev.link{cursor:pointer}
 .ev-acts{flex:none;display:flex;align-items:center;gap:4px;margin:-6px 0}
 .ev-state{color:var(--muted);font-size:var(--fs-sm)}
-/* «Проверить сайт»: подпись блока проверки открытия и шаги «Сайт не открывается». */
+/* «Проверка адреса»: подписи блоков результата и шаги «Диагностика и восстановление». */
 .site-head{display:block;margin:0;padding:6px 16px 0}
 .fix-steps{margin:0;padding:6px 16px 10px 34px;display:grid;gap:4px;font-size:var(--fs-sm);color:var(--text)}
 .fix-steps li.ok::marker{color:var(--ok)}

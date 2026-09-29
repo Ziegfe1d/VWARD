@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""«Проверить адрес»: a domain is found in a Keenetic list with its subdomains,
+"""«Проверка адреса»: a domain is found in a Keenetic list with its subdomains,
 an exclude takes it out, and the answer names the list and where it goes."""
 import json
 import os
@@ -51,7 +51,7 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("bad input must be refused")
 
 js = (ROOT / "web/assets/vward-console.js").read_text()
-for need in ("function probeText(", "probeText(RPROBE)", "идёт напрямую, через провайдера"):
+for need in ("function probeText(", "probeText(RPROBE)", "через провайдера (без VPN)"):
     if need not in js:
         fail(f"the Panel result is missing: {need}")
 print("CONSOLE_ROUTE_PROBE=PASS")
