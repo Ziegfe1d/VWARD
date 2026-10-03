@@ -62,4 +62,13 @@ for need in ('[ "$2" != "$VWARD_TUNNEL_INTERFACE" ] || die main_tunnel 64', '"$E
         fail(f"switching off lacks {need}")
 if '"$ENG" enable "$2"' not in body:
     fail("switching on starts the engine's program again")
+# Switched off in Keenetic's own settings while still the default: the Panel must not say the traffic
+# goes through the VPN, and must say the lists go direct (card, notification, tunnel page).
+for need in ("tunnels.some(t => t.name === prof().tunnel_interface && tunOff(t)) ? 'туннель по умолчанию выключен, списки идут напрямую'",
+             "'Туннель по умолчанию выключен в Keenetic'", "down = tunnels.filter(t => !isTrue(t.connected) && !tunOff(t))",
+             "он назначен по умолчанию, списки VPN идут напрямую"):
+    if need not in JS:
+        fail(f"a default tunnel switched off outside the Panel: lacks {need}")
+if 'INTERFACE_DISABLED_EXTERNAL' not in (ROOT / "components/tunnel-guard/scripts/vward-tunnel-guard.sh").read_text():
+    fail("the guard must leave a tunnel the owner switched off alone")
 print("CONSOLE_TUNNELS=PASS")
