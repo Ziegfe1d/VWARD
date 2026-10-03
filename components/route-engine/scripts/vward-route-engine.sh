@@ -79,6 +79,16 @@ ADAPTIVE_RECHECK=60
 TCP_PID=""
 AWK_PID=""
 
+# Where the DNS queries are caught.  The queries to the router come in on the LAN bridge;
+# «-i any» made tcpdump die with SIGSEGV in libpcap on the router (seen twice after
+# reboots and while tunnels came up: 73 and 151 restarts, and the engine's startup check
+# failed for want of a live tcpdump).  «any» stays as the second choice, used after
+# three quick deaths on the LAN device.
+CAP_LAN=${VWARD_LAN_DEVICE:-}
+vward_valid_ifname "$CAP_LAN" 2>/dev/null || CAP_LAN=any
+CAP_IF=$CAP_LAN
+CAP_FAILS=0
+
 mkdir -p "$STATE_DIR" "$VOLATILE_DIR"
 
 
@@ -1544,7 +1554,8 @@ while :; do
 
 
     CAPTURE_FILTER="src net $VWARD_LAN_SUBNET and not src host $VWARD_DNS_SERVER and dst host $VWARD_DNS_SERVER and (udp dst port 53 or tcp dst port 53)"
-    tcpdump -ni any -l -vv \
+    read -r CAP_UP _ < "${VWARD_UPTIME_FILE:-/proc/uptime}"; CAP_T0=${CAP_UP%.*}
+    tcpdump -ni "$CAP_IF" -l -vv \
         "$CAPTURE_FILTER" \
         > "$RAW" 2>/dev/null &
 
@@ -1604,9 +1615,25 @@ while :; do
 
     rm -f "$RAW" "$HOSTS"
 
-    echo "$(date '+%Y-%m-%d %H:%M:%S')|TCPDUMP_RESTART" \
+    # A capture that lived under 10 s is a quick death: the pause grows (2, 4, 8 ... 60 s)
+    # instead of a restart every 2 s, and the second interface is tried after three.
+    read -r CAP_UP _ < "${VWARD_UPTIME_FILE:-/proc/uptime}"
+    if [ $((${CAP_UP%.*} - CAP_T0)) -lt 10 ]; then
+        CAP_FAILS=$((CAP_FAILS + 1))
+        if [ "$CAP_FAILS" -ge 3 ] && [ "$CAP_LAN" != any ]; then
+            [ "$CAP_IF" = any ] && CAP_IF=$CAP_LAN || CAP_IF=any
+            CAP_FAILS=0
+        fi
+    else
+        CAP_FAILS=0
+    fi
+    CAP_PAUSE=2
+    [ "$CAP_FAILS" -gt 0 ] && CAP_PAUSE=$((2 << CAP_FAILS))
+    [ "$CAP_PAUSE" -le 60 ] || CAP_PAUSE=60
+
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|TCPDUMP_RESTART|if=$CAP_IF|quick=$CAP_FAILS" \
         >> "$EVENT_LOG"
 
-    sleep 2
+    sleep "$CAP_PAUSE"
 
 done
