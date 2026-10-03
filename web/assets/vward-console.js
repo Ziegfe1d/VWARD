@@ -2299,6 +2299,8 @@ function tcConf(form) {
 // A tunnel's name from its file: «fi.conf», «us-east.conf (1)» → «fi», «us-east».
 const confName = n => String(n || '').replace(/\s*\(\d+\)\s*$/, '').replace(/\.(conf|vpn|txt)$/i, '').replace(/\s*\(\d+\)\s*$/, '')
   .replace(/["\\]/g, '').replace(/[_]+/g, ' ').trim().slice(0, 64);
+// A tunnel's name goes to Keenetic: no emoji (flags of a subscription's server names), one line, 64 characters.
+const tunDesc = v => String(v || '').replace(/[\u{10000}-\u{10FFFF}\uFE0F\u200D]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 64);
 async function amneziaKey(text) {
   let b;
   try { b = Uint8Array.from(atob(text.trim().slice(6).replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '')), c => c.charCodeAt(0)); }
@@ -3245,8 +3247,8 @@ document.addEventListener('change', e => {
   if (t.dataset.svcCat) { const c = t.dataset.svcCat, v = t.value, ct = ((S.services && S.services.categories) || []).find(x => x.id === c); t.disabled = true;
     serviceJob({ op: 'category', id: c, tunnel: v }, (ct ? ct.title : c) + (v === 'auto' ? ': туннель выбирается автоматически' : ': через ' + tunLabel(v))); return; }
   if (t.dataset.svcTun) { const id = t.dataset.svcTun, v = t.value; t.disabled = true; serviceJob({ op: 'tunnel', id: id, tunnel: v }, v === 'auto' ? 'Туннель выбирается автоматически' : 'Закреплён за ' + tunLabel(v)); return; }
-  if (t.name === 'vless-server') { const f = t.closest('form'), d = f && f.querySelector('[name=description]'), names = [...f.querySelectorAll('[name=vless-server]')].map(r => r.dataset.vname);
-    if (d && (!d.value.trim() || names.includes(d.value.trim()))) d.value = String(t.dataset.vname || '').slice(0, 64); return; }
+  if (t.name === 'vless-server') { const f = t.closest('form'), d = f && f.querySelector('[name=description]'), names = [...f.querySelectorAll('[name=vless-server]')].map(r => tunDesc(r.dataset.vname));
+    if (d && (!d.value.trim() || names.includes(d.value.trim()))) d.value = tunDesc(t.dataset.vname); return; }
   if (t.dataset.cfgTa) { const k = t.dataset.cfgTa, v = t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value; t.disabled = true;
     cfgSet({ op: 'tunnel-auto', target: k, value: v }, k === 'enabled' ? (v === '1' ? 'Выбор лучшего туннеля включён' : 'Выбор лучшего туннеля выключен') :
       k === 'criterion' ? 'Выбирать туннель по: ' + (TQ_CRITERIA.find(o => o[0] === v) || [, v])[1] : 'Замер скорости: ' + (TQ_SPEED.find(o => o[0] === v) || [, v])[1], ['tq']); return; }
@@ -3355,18 +3357,18 @@ async function onSubmit(e, f) {
         $('tcPreview').innerHTML = '<div class="rows vless-pick" role="radiogroup" aria-label="Сервер">' + rows.map(r => '<label class="row"><input type="radio" name="vless-server" value="' + r.i + '"' + (r.i === 1 ? ' checked' : '') + ' data-vname="' + esc(r.name) + '">' +
           '<div class="row-main"><b>' + esc(r.name) + '</b><small>' + esc(r.host + ':' + r.port + ' · ' + (r.sec === 'none' ? 'без шифрования' : r.sec.toUpperCase()) + ' · ' + r.net) + '</small></div></label>').join('') + '</div>' +
           '<p class="field-warn">Туннель поднимет Xray - программа около 36 МБ на флешке, скачивается один раз с GitHub (XTLS/Xray-core), 30-60 МБ памяти. В Keenetic он будет подключением OpkgTun.</p>';
-        if (descEl && !descEl.value.trim()) descEl.value = rows[0].name.slice(0, 64);
+        if (descEl && !descEl.value.trim()) descEl.value = tunDesc(rows[0].name);
         form.dataset.checked = '1';
         form.querySelector('[type=submit]').textContent = 'Создать туннель';
         return;
       }
       const pick = form.querySelector('[name=vless-server]:checked'), num = pick ? pick.value : '1';
-      const vdesc = (descEl && descEl.value.trim()) || (pick && pick.dataset.vname) || 'VLESS';
+      const vdesc = tunDesc(descEl && descEl.value) || tunDesc(pick && pick.dataset.vname) || 'VLESS';
       closeLayer();
-      await tunnelJob('create', { op: 'create', conf: '#server=' + num + '\n' + text.trim(), description: vdesc.slice(0, 64) }, vdesc);
+      await tunnelJob('create', { op: 'create', conf: '#server=' + num + '\n' + text.trim(), description: vdesc }, vdesc);
       return;
     }
-    const desc = descEl ? descEl.value.trim() : '';
+    const desc = descEl ? tunDesc(descEl.value) : '';
     if (!manual && (!/\[Interface\]/i.test(text) || !/\[Peer\]/i.test(text))) { tcMsg('Выберите файл .conf или вставьте его текст или ключ vpn://'); return; }
     if (mode === 'create' && !desc) { tcMsg('Введите название туннеля'); return; }
     if (form.dataset.checked !== '1') {

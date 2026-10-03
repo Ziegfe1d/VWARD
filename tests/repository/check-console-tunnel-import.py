@@ -4,6 +4,7 @@ server gives its .conf, a Premium key (access key to Amnezia's servers only) is 
 imported; a file already on the router asks «replace / add new / cancel»; a silent server asks
 «add anyway»; every message stays in the form (a toast was gone in seconds).  Synthetic keys only."""
 
+import os
 import base64
 import json
 import shutil
@@ -70,6 +71,33 @@ if json.loads(r.stdout or "null") != [[{"addr": "10.8.16.6", "names": ["W0", "W1
     fail(f"tunnels with one address: {r.stdout!r} {r.stderr[-200:]}")
 if "tunDupAddresses(tunnels).forEach" not in JS or "'У двух туннелей один адрес'" not in JS:
     fail("the notification for two tunnels with one address")
+
+# A tunnel's name: Cyrillic and other UTF-8 pass the API, emoji (flags in server names of a
+# subscription) are stripped in the form before it reaches Keenetic.
+td0 = JS.index("const tunDesc = ")
+td1 = JS.index("\n", td0)
+td_js = JS[td0:td1] + "\nconsole.log(JSON.stringify([tunDesc('\\u{1F1E9}\\u{1F1EA} Germany-28s(xHTTP)'), tunDesc('  Германия   2 '), tunDesc(null), tunDesc('x'.repeat(80)).length]));"
+with tempfile.TemporaryDirectory() as t:
+    f = Path(t) / "td.js"; f.write_text(td_js)
+    r = subprocess.run([node, str(f)], text=True, capture_output=True, timeout=60)
+if json.loads(r.stdout or "null") != ["Germany-28s(xHTTP)", "Германия 2", "", 64]:
+    fail(f"a tunnel's name without emoji: {r.stdout!r} {r.stderr[-200:]}")
+API_SRC = (ROOT / "web/cgi-bin/api.cgi").read_text()
+if "form_decode description name" not in API_SRC or "form_decode description text" in API_SRC:
+    fail("the tunnel's name is decoded as a name (UTF-8 allowed), not as ASCII text")
+fd0 = API_SRC.index("form_decode()\n{")
+fd1 = API_SRC.index("\n}\n", fd0) + 3
+with tempfile.TemporaryDirectory() as t:
+    f = Path(t) / "fd.sh"
+    f.write_text("form_value() { printf '%s' \"$FV\"; }\n" + API_SRC[fd0:fd1] + "\nform_decode description name\n")
+    r = subprocess.run(["sh", str(f)], text=True, capture_output=True, timeout=30,
+                       env={"PATH": os.environ["PATH"], "FV": "%D0%93%D0%B5%D1%80%D0%BC%D0%B0%D0%BD%D0%B8%D1%8F-2+%28xHTTP%29"})
+    bad = subprocess.run(["sh", str(f)], text=True, capture_output=True, timeout=30,
+                         env={"PATH": os.environ["PATH"], "FV": "a%22b"})
+if r.returncode != 0 or r.stdout != "Германия-2 (xHTTP)":
+    fail(f"a Cyrillic tunnel name passes the API: {r.returncode} {r.stdout!r}")
+if bad.returncode == 0:
+    fail("a quote in a tunnel's name is still refused")
 
 # The form: messages stay in it, the questions exist.
 handler = JS[JS.index("  if (f === 'tunnel-conf') {"):JS.index("  if (f === 'blocked-login') {")]

@@ -897,7 +897,7 @@ if [ "$ACTION" = tunnel-conf ]; then
         [ "$TCONF" = TUNNEL_REPLACE ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
         ARGS="tunnel-conf replace $TFILE $TNAME$TKEEP"
       else
-        TDESC="$(form_decode description text | tr -d '\t\r\n')" || TDESC=""
+        TDESC="$(form_decode description name | tr -d '\t\r\n')" || TDESC=""
         case "$TDESC" in ''|*'"'*|*"$(printf '\134')"*) rm -f "$TFILE"; echo '{"ok":false,"error":"invalid_description"}'; exit 0 ;; esac
         [ "${#TDESC}" -le 64 ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"invalid_description"}'; exit 0; }
         # The description may hold spaces: it goes through a file, not the argument list.
