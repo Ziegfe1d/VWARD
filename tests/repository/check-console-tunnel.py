@@ -85,6 +85,7 @@ with tempfile.TemporaryDirectory() as tmp:
 for URL do :; done
 case "$URL" in
   */show/interface) cat "{tmp}/interface.json" ;;
+  */show/interface?name=Wireguard8) if [ -e "{tmp}/off8" ]; then echo '{{"id":"Wireguard8","state":"down","link":"down"}}'; else echo '"nwg8"'; fi ;;
   *name=Wireguard3) echo '"nwg3"' ;;
   *name=Wireguard8) echo '"nwg8"' ;;
   *name=Bridge2) echo '"br2"' ;;
@@ -135,6 +136,10 @@ esac
     guard.write_text("FAILOPEN_ACTIVE=1\n")
     run("Wireguard8", "error=failopen_active")
     guard.write_text("FAILOPEN_ACTIVE=0\nDOWN_STREAK=2\n")
+    # A tunnel switched off cannot become the default: the lists would lose their route.
+    (tmp / "off8").touch()
+    run("Wireguard8", "error=tunnel_off", 64)
+    (tmp / "off8").unlink()
     (policy / "lock").mkdir()
     run("Wireguard8", "error=policy_sync_busy", 75)
     (policy / "lock").rmdir()

@@ -123,6 +123,7 @@ python3 tests/repository/check-housekeeping.py || fail "Housekeeping rotates log
 python3 tests/repository/check-ext-update.py || fail "Updates of other software"
 python3 tests/repository/check-stale-locks.py || fail "Locks whose owner is gone are removed at boot and hourly"
 python3 tests/repository/check-console-tunnel.py || fail "Panel tunnel switch"
+python3 tests/repository/check-console-tunnel-add.py || fail "Panel tunnel add from .conf, switching off"
 python3 tests/repository/check-component-graph.py || fail "Component dependency graph"
 python3 tests/repository/check-component-resilience.py || fail "Component disable resilience"
 python3 tests/repository/check-ads-console.py || fail "Ads Panel functions"

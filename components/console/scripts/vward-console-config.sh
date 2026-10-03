@@ -552,6 +552,8 @@ op_tunnel() {
     map=$(vward_device_map 2>/dev/null) || die router_config_unavailable
     NEW_DEV=$(vward_map_vpns "$map" "${VWARD_WAN_DEVICE:-}" | awk -v n="$NEW_IF" '$1==n {print $2; exit}')
     vward_valid_ifname "$NEW_DEV" || die unknown_tunnel 64
+    # A tunnel switched off carries nothing: the lists would lose their route.
+    [ "$(vward_interface_state "$NEW_IF" 2>/dev/null | head -n 1)" != down ] || die tunnel_off 64
 
     change_lock
     mkdir -p "$POLICY_STATE" && vward_lock_take "$POLICY_STATE/lock" || die policy_sync_busy 75
@@ -1267,6 +1269,16 @@ free_tunnel_name() {
     return 1
 }
 
+# address_taken IFACE ADDRESS: another interface of the running configuration already has
+# this IPv4 address (Keenetic refuses two tunnels with one address, and a half-applied
+# create would only end in a rollback).
+address_taken() {
+    awk -v skip="$1" -v a="$2" '
+        /^[^ \t!]/ {cur = ($1 == "interface") ? $2 : ""}
+        cur != "" && cur != skip && $1 == "ip" && $2 == "address" {ip = $3; sub(/\/.*/, "", ip); if (ip == a) {print cur; f = 1; exit}}
+        END {exit f ? 0 : 1}' "$RUNCFG"
+}
+
 apply_plan() {
     # apply_plan IFACE PLAN ADDRESS: interface settings and its one peer.
     ndm_secret "interface $1 wireguard private-key $(conf_get private "$2")" || die conf_rejected_key
@@ -1405,6 +1417,7 @@ op_tunnel_conf() {
             JOURNAL=$(mktemp /tmp/vward-console-tunnel.XXXXXX 2>/dev/null) || die temporary_file_unavailable
             TXN=1
             snapshot
+            ! address_taken "$tc_arg" "$(conf_get address "$PLAN" | awk '{print $1}')" || die tunnel_address_taken 64
             step test
             tunnel_test "$PLAN"
             new_peer=$(conf_get peer "$PLAN")
@@ -1448,6 +1461,8 @@ op_tunnel_conf() {
                 # The firmware cannot run this format: VWARD's engine holds the tunnel
                 # on a Keenetic «OpkgTun» connection.
                 [ -x "$AWG_ENGINE" ] || die engine_unavailable
+                snapshot
+                ! address_taken - "$(conf_get address "$PLAN" | awk '{print $1}')" || die tunnel_address_taken 64
                 engine_add "$tc_arg" "$tc_file"
                 case "$(printf '%s\n' "$en_out" | tail -n 1)" in
                     result=changed) ;;
@@ -1465,6 +1480,7 @@ op_tunnel_conf() {
             JOURNAL=$(mktemp /tmp/vward-console-tunnel.XXXXXX 2>/dev/null) || die temporary_file_unavailable
             TXN=1
             snapshot
+            ! address_taken - "$(conf_get address "$PLAN" | awk '{print $1}')" || die tunnel_address_taken 64
             NEW_IF=$(free_tunnel_name) || die no_free_tunnel
             step router
             ndm "interface $NEW_IF" || die router_rejected
@@ -1536,7 +1552,7 @@ op_tunnel_state() {
             [ -x "$ENG" ] || die engine_unavailable
             "$ENG" disable "$2" 2>/dev/null | tail -n 1 | grep -q '^result=' || die engine_failed
         fi
-        ndm "interface $2 down" || die router_rejected
+        ndm "interface $2 down" || { ! engine_tunnel "$2" || "$ENG" enable "$2" >/dev/null 2>&1; die router_rejected; }
         save_router || die config_save_failed
         rm -f "$VWARD_DEVICE_MAP_CACHE" "$TUNNEL_HEALTH_STATE"
         done_ok "tunnel-state down $2" changed
