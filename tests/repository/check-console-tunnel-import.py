@@ -72,7 +72,7 @@ if "tunDupAddresses(tunnels).forEach" not in JS or "'У двух туннеле�
     fail("the notification for two tunnels with one address")
 
 # The form: messages stay in it, the questions exist.
-handler = JS[JS.index("  if (f === 'tunnel-conf') {"):JS.index("  if (f === 'agh-connect') {")]
+handler = JS[JS.index("  if (f === 'tunnel-conf') {"):JS.index("  if (f === 'blocked-login') {")]
 if "toast(" in handler:
     fail("the add form must keep its messages in the form, not in a toast")
 for need in ("tcDup(form, x, text, desc)", "x.same || x.sameaddr", "tcPreview(form, x, mode, name)"):

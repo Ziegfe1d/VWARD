@@ -54,8 +54,10 @@ with tempfile.TemporaryDirectory() as tmp:
                         "VWARD_ROUTE_CHANGE_LOCK": str(tmp / "lock"), "VWARD_ROUTE_STATE": str(tmp / "route"),
                         "VWARD_ROOT_PREFIX": str(tmp / "root"), "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh")}
 
-    def call(ip, action="security-data", post=None):
+    def call(ip, action="security-data", post=None, cookie=None):
         e = env | {"REMOTE_ADDR": ip, "QUERY_STRING": "action=" + action, "REQUEST_METHOD": "GET"}
+        if cookie:
+            e["HTTP_COOKIE"] = "vward_session=" + cookie
         body = ""
         if post is not None:
             body = urllib.parse.urlencode(post)
@@ -88,6 +90,38 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("unknown and empty addresses are refused")
     if call("192.168.1.20", "ping")[0]:
         fail("ping stays open")
+    # A phone on the router's own VPN is not in the host list by address: it signs in with the
+    # Keenetic account. Only the login, the state and the logout are open to it; it cannot even
+    # switch the restriction off, and a valid session opens everything.
+    if call("192.168.1.20")[1].get("login") is not True:
+        fail("the refusal must tell the Panel that a login is possible")
+    st = call("192.168.1.20", "auth")
+    if st[0] or st[1].get("device", {}).get("state") != "unregistered":
+        fail(f"the state of an unregistered device is open: {st}")
+    for op in ({"op": "devices", "value": "0"}, {"op": "disable", "confirm": "CONSOLE_AUTH_DISABLE"}, {"op": "enable", "login": "x", "password": "y"}):
+        shut, x = call("192.168.1.20", "auth", op)
+        if not shut or x.get("error") != "device_not_registered":
+            fail(f"an unregistered device without a session must not run auth op {op['op']}: {x}")
+    if "DEVICES_ONLY=1" not in auth_conf.read_text():
+        fail("the restriction must stay on")
+    shut, x = call("192.168.1.20", "auth", {"op": "login", "login": "owner", "password": "pw"})
+    if shut or x.get("error") != "router_auth_unavailable":
+        fail(f"the login reaches the router's check for an unregistered device: {shut} {x}")
+    import hashlib
+    token = "ab" * 32
+    sess = tmp / "sessions"; sess.mkdir(mode=0o700, exist_ok=True)
+    (sess / hashlib.sha256(token.encode()).hexdigest()).write_text(f"login=owner\nexpires={int(time.time()) + 3600}\n")
+    if call("192.168.1.20", cookie=token)[0]:
+        fail("an unregistered device with a valid session passes")
+    if not call("192.168.1.20", cookie="cd" * 32)[0] or not call("192.168.1.20", cookie="not-a-token")[0]:
+        fail("an unknown or malformed session does not pass")
+    (sess / hashlib.sha256(token.encode()).hexdigest()).write_text(f"login=owner\nexpires={int(time.time()) - 5}\n")
+    if not call("192.168.1.20", cookie=token)[0]:
+        fail("an expired session does not pass")
+    JS = (ROOT / "web/assets/vward-console.js").read_text()
+    for need in ("data-form=\"blocked-login\"", "if (f === 'blocked-login')", "location.reload();"):
+        if need not in JS:
+            fail(f"the blocked screen lacks {need}")
     a = call("192.168.1.10", "auth")[1]
     if a.get("devices_only") is not True or a.get("device") != {"ip": "192.168.1.10", "state": "registered"}:
         fail(f"auth shows the switch and this device: {a}")

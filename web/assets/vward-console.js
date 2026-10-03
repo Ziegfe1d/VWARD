@@ -1288,7 +1288,7 @@ const RENDER = {
           ['Защита запросов', api.mutation_guard ? 'Включена' : 'Выключена', api.mutation_guard ? 'ok' : 'crit'],
           ['Доступ с других сайтов', api.cors ? 'Разрешён' : 'Запрещён', api.cors ? 'crit' : 'ok']
         ]) + (au.enabled ? (au.logged_in ? '<div class="panel-actions">' + btn('logout', 'undo', 'Выйти') + '</div>' : '') : '<p class="field-warn">Пока вход выключен, VWARD открыт любому устройству в домашней сети.</p>'),
-      { desc: 'Сессия действует ' + (au.session_hours || 12) + ' ч. После 5 неверных попыток вход блокируется на 5 минут.' + (au.devices_only ? ' Если доступ потерян: по SSH выполните /opt/bin/vward-console-config.sh console-devices 0.' : '') }) +
+      { desc: 'Сессия действует ' + (au.session_hours || 12) + ' ч. После 5 неверных попыток вход блокируется на 5 минут.' + (au.devices_only ? ' Устройства вне списка Keenetic (например, телефон по VPN роутера) входят логином и паролем Keenetic. Если доступ потерян: по SSH выполните /opt/bin/vward-console-config.sh console-devices 0.' : '') }) +
       backupPanel() +
       panel('Нижняя панель на телефоне', '<div class="tabbar preview" data-key="Разделы на панели">' + tabsHtml() + '</div><dl class="kv">' + PAGES.map(p => {
         const on = tabIds.includes(p.id), i = tabIds.indexOf(p.id);
@@ -2742,8 +2742,9 @@ function showDeviceBlocked() {
   cacheDrop();
   if (document.getElementById('deviceBlocked')) return;
   document.body.insertAdjacentHTML('beforeend', '<div id="deviceBlocked" class="blocked-screen" role="alertdialog" aria-label="Устройство не зарегистрировано"><div class="blocked-card">' + ico('lock') +
-    '<h2>Устройство не зарегистрировано</h2><p>VWARD открывается только с устройств, зарегистрированных в Keenetic.</p>' +
-    '<p>Зарегистрируйте это устройство в веб-интерфейсе роутера: «Список устройств» → устройство → «Зарегистрировать», затем обновите страницу.</p>' +
+    '<h2>Устройство не зарегистрировано</h2><p>VWARD открывается с устройств, зарегистрированных в Keenetic. Телефон или компьютер, подключённый к роутеру по его VPN, получает адрес из пула VPN, и Keenetic не узнаёт его в списке.</p>' +
+    '<form class="inline-form multi" data-form="blocked-login">' + formLabel('Войти с логином и паролем Keenetic') + '<input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Войти</button></form>' +
+    '<p>Или зарегистрируйте устройство в веб-интерфейсе роутера: «Список устройств» → устройство → «Зарегистрировать», затем обновите страницу.</p>' +
     '<div class="panel-actions"><a class="btn" href="http://' + esc(location.hostname) + '/" target="_blank" rel="noopener">' + ico('external') + 'Открыть Keenetic</a><button class="btn primary" type="button" data-act="page-reload">' + ico('refresh') + 'Обновить</button></div></div></div>');
 }
 function showLogin() {
@@ -3378,6 +3379,17 @@ async function onSubmit(e, f) {
     }
     closeLayer();
     await tunnelJob(mode, mode === 'create' ? { op: 'create', conf: text, description: desc } : { op: 'replace', name: name, conf: text, confirm: 'TUNNEL_REPLACE' }, mode === 'create' ? desc : tunLabel(name));
+    return;
+  }
+  if (f === 'blocked-login') {
+    const login = e.target.querySelector('[name=login]').value.trim(), password = e.target.querySelector('[name=password]').value;
+    if (!/^[A-Za-z0-9._@-]{1,64}$/.test(login) || !password) { toast('Введите логин и пароль Keenetic'); return; }
+    let x;
+    try { x = await apiPost('auth', { op: 'login', login: login, password: password }); }
+    catch (err) { toast('Ошибка: ' + err.message); return; }
+    e.target.querySelector('[name=password]').value = '';
+    if (!x.ok) { toast(errText(x)); return; }
+    location.reload();
     return;
   }
   if (f === 'agh-connect') {

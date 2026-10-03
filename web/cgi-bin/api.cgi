@@ -438,11 +438,19 @@ device_state(){
     fi
     echo unregistered
 }
-if [ "$DEVICES_ONLY" = 1 ] && [ "$ACTION" != ping ] && [ "$(device_state)" = unregistered ]; then
-    echo 'Status: 403 Forbidden'
-    header_json
-    echo '{"ok":false,"error":"device_not_registered"}'
-    exit 0
+# A device Keenetic does not know by address (a phone on the router's own VPN gets an address from the
+# VPN pool, not its host entry) may sign in with the Keenetic account: only the login itself (and
+# the state, and the logout) is open to it, everything else needs the session the login gives.
+UNREG_AUTH=0
+if [ "$DEVICES_ONLY" = 1 ] && [ "$ACTION" != ping ] && [ "$(device_state)" = unregistered ] && ! auth_session_valid; then
+    if [ "$ACTION" = auth ]; then
+        UNREG_AUTH=1
+    else
+        echo 'Status: 403 Forbidden'
+        header_json
+        echo '{"ok":false,"error":"device_not_registered","login":true}'
+        exit 0
+    fi
 fi
 
 if [ "$AUTH_ENABLED" = 1 ] && [ "$ACTION" != auth ] && [ "$ACTION" != ping ] && ! auth_session_valid; then
@@ -467,6 +475,9 @@ if [ "$ACTION" = auth ]; then
     fi
     read_body 1024 header
     AOP="$(form_value op)"
+    if [ "$UNREG_AUTH" = 1 ]; then
+        case "$AOP" in login|logout) ;; *) echo 'Status: 403 Forbidden'; header_json; echo '{"ok":false,"error":"device_not_registered","login":true}'; exit 0 ;; esac
+    fi
     umask 077
     mkdir -p "$AUTH_SESSIONS" 2>/dev/null; chmod 0700 "$AUTH_SESSIONS" 2>/dev/null
     FAILS="$AUTH_SESSIONS/.failures"
@@ -509,7 +520,7 @@ if [ "$ACTION" = auth ]; then
         if [ "$arc" = 2 ]; then header_json; echo '{"ok":false,"error":"router_auth_unavailable"}'; exit 0; fi
         if [ "$arc" != 0 ]; then
             echo "$now" >> "$FAILS"; tail -n 20 "$FAILS" > "$FAILS.t" 2>/dev/null && mv "$FAILS.t" "$FAILS"
-            printf '%s|CONSOLE_AUTH|login_failed login=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$ALOGIN" >> /opt/var/log/vward/console-audit.log 2>/dev/null
+            printf '%s|CONSOLE_AUTH|login_failed login=%s ip=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$ALOGIN" "$CLIENT_IP" >> /opt/var/log/vward/console-audit.log 2>/dev/null
             header_json; echo '{"ok":false,"error":"wrong_credentials"}'; exit 0
         fi
         : > "$FAILS"
@@ -524,7 +535,7 @@ if [ "$ACTION" = auth ]; then
                 case "$AOUT" in result=*) ;; *) header_json; "$JQ" -cn --arg e "${AOUT#error=}" '{ok:false,error:$e}'; exit 0 ;; esac
             fi
             auth_new_session "$ALOGIN" || { header_json; echo '{"ok":false,"error":"session_failed"}'; exit 0; }
-            printf '%s|CONSOLE_AUTH|%s login=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$AOP" "$ALOGIN" >> /opt/var/log/vward/console-audit.log 2>/dev/null
+            printf '%s|CONSOLE_AUTH|%s login=%s ip=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$AOP" "$ALOGIN" "$CLIENT_IP" >> /opt/var/log/vward/console-audit.log 2>/dev/null
             echo "Set-Cookie: $AUTH_COOKIE"; header_json; echo '{"ok":true}'
             ;;
         logout)
