@@ -1339,11 +1339,42 @@ store_conf() {
 # step NAME: where a tunnel job stands; the Panel's progress window reads these lines.
 step() { printf 'step=%s\n' "$1"; }
 
-# engine_add DESCRIPTION FILE: the engine's add; its steps reach the job's output on fd 3.
+# engine_add DESCRIPTION FILE [keep]: the engine's add; its steps reach the job's output on fd 3.
+# «keep»: the owner chose to keep the tunnel although the server did not answer.
 engine_add() {
     exec 3>&1
-    en_out=$("$AWG_ENGINE" add "$1" "$2" 2>/dev/null)
+    en_out=$("$AWG_ENGINE" add "$1" "$2" ${3:+"$3"} 2>/dev/null)
     exec 3>&-
+}
+
+# tunnel_kind NAME: firmware | awg | vless - who holds the tunnel.
+tunnel_kind() {
+    if engine_tunnel "$1"; then
+        [ "$ENG" = "$VLESS_ENGINE" ] && [ "$VLESS_ENGINE" != "$AWG_ENGINE" ] && echo vless || echo awg
+    else echo firmware; fi
+}
+
+# tunnel_dups PLAN: «info.same» is the tunnel that already has this server key (the same
+# configuration), «info.sameaddr» the interface that already has this address in the tunnel.
+# The Panel asks before it replaces or adds; the keys themselves are never printed.
+tunnel_dups() {
+    td_peer=$(conf_get peer "$1"); td_addr=$(conf_get address "$1" | awk '{print $1}')
+    td_same=$(awk -v k="$td_peer" '/^[^ \t!]/ {cur = ($1 == "interface") ? $2 : ""}
+        cur != "" && $1 == "wireguard" && $2 == "peer" && $3 == k {print cur; exit}' "$RUNCFG")
+    if [ -z "$td_same" ] && [ -f "$AWG_TUNNELS" ]; then
+        td_same=$(while IFS="$(printf '\t')" read -r td_n td_name _; do
+            tr -d '\r' < "${AWG_TUNNELS%/*}/t$td_n.conf" 2>/dev/null |
+                awk -F= -v k="$td_peer" 'tolower($1) ~ /^[ \t]*publickey[ \t]*$/ {v = substr($0, index($0, "=") + 1); gsub(/[ \t]/, "", v); if (v == k) f = 1} END {exit f ? 0 : 1}' &&
+                { printf '%s\n' "$td_name"; break; }
+        done < "$AWG_TUNNELS")
+    fi
+    td_have=$(awk -v skip=- -v a="$td_addr" '/^[^ \t!]/ {cur = ($1 == "interface") ? $2 : ""}
+        cur != "" && $1 == "ip" && $2 == "address" {ip = $3; sub(/\/.*/, "", ip); if (ip == a) {print cur; exit}}' "$RUNCFG")
+    [ -z "$td_same" ] || { printf 'info.same=%s\n' "$td_same"; printf 'info.samekind=%s\n' "$(tunnel_kind "$td_same")"; }
+    [ -z "$td_have" ] || {
+        printf 'info.sameaddr=%s\n' "$td_have"
+        if is_tunnel "$td_have"; then printf 'info.sameaddrkind=%s\n' "$(tunnel_kind "$td_have")"; else printf 'info.sameaddrkind=other\n'; fi
+    }
 }
 
 tunnel_summary() {
@@ -1358,7 +1389,7 @@ tunnel_summary() {
     printf 'info.engine=%s\n' "$(conf_get engine "$1")"
 }
 
-# op_tunnel_vless check|create FILE [DESCRIPTION]: the servers of the links or subscription
+# op_tunnel_vless check|create FILE [DESCRIPTION] [keep]: the servers of the links or subscription
 # (never the ids), or a new tunnel of the chosen one («#server=N» in FILE).
 op_tunnel_vless() {
     [ -x "$VLESS_ENGINE" ] || die engine_unavailable
@@ -1372,7 +1403,7 @@ op_tunnel_vless() {
             [ "${#vl_desc}" -le 64 ] || die invalid_description 64
             load_profile_base
             exec 3>&1
-            vl_out=$("$VLESS_ENGINE" add "$vl_desc" "$2" 2>/dev/null)
+            vl_out=$("$VLESS_ENGINE" add "$vl_desc" "$2" ${4:+"$4"} 2>/dev/null)
             exec 3>&- ;;
         *) die vless_replace_unsupported 64 ;;
     esac
@@ -1380,7 +1411,7 @@ op_tunnel_vless() {
         result=checked) printf '%s\n' "$vl_out" | grep '^info\.'; done_ok "tunnel-conf check vless" checked ;;
         result=changed)
             rm -f "$VWARD_DEVICE_MAP_CACHE"
-            printf '%s\n' "$vl_out" | grep '^info\.name=' | head -n 1
+            printf '%s\n' "$vl_out" | grep -E '^info\.(name|handshake)=' | head -n 2
             done_ok "tunnel-conf create vless $(printf '%s\n' "$vl_out" | sed -n 's/^info\.name=//p')" changed ;;
         error=*) vl_err=$(printf '%s\n' "$vl_out" | sed -n 's/^error=//p' | tail -n 1)
                  case "$vl_err" in ''|*[!a-z0-9_]*) vl_err=engine_failed ;; esac
@@ -1391,13 +1422,14 @@ op_tunnel_vless() {
 
 op_tunnel_conf() {
     # tunnel-conf check|replace|create FILE [NAME | DESCRIPTION]
-    tc_mode=$1 tc_file=$2 tc_arg=${3:-}
+    tc_mode=$1 tc_file=$2 tc_arg=${3:-} tc_keep=${4:-}
+    case "$tc_keep" in ""|keep) ;; *) die invalid_value 64 ;; esac
     case "$tc_file" in /*) ;; *) die invalid_value 64 ;; esac
     [ -f "$tc_file" ] && [ ! -L "$tc_file" ] || die conf_empty 64
     CONF_FILE=$tc_file
     # vless:// links or a subscription's address: VWARD's VLESS engine.
     if tr -d '\r' < "$tc_file" | grep -v '^#' | awk 'NF {print $1; exit}' | grep -Eq '^(vless|https?)://'; then
-        op_tunnel_vless "$tc_mode" "$tc_file" "$tc_arg"
+        op_tunnel_vless "$tc_mode" "$tc_file" "$tc_arg" "$tc_keep"
     fi
     PLAN=$(mktemp /tmp/vward-console-plan.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     TMPFILE=$PLAN
@@ -1406,20 +1438,44 @@ op_tunnel_conf() {
     load_profile_base
     case "$tc_mode" in
         check)
+            snapshot
             tunnel_summary "$PLAN"
+            tunnel_dups "$PLAN"
             done_ok "tunnel-conf check" checked ;;
         replace)
             vward_valid_ndm_name "$tc_arg" && is_tunnel "$tc_arg" || die unknown_tunnel 64
-            # The engine's tunnels and files that need it: a new tunnel instead.
-            ! engine_tunnel "$tc_arg" || die engine_replace_unsupported 64
+            # A tunnel of VWARD's AmneziaWG engine: the engine swaps its file and restarts it
+            # (the old file comes back when the server does not answer). VLESS: a new tunnel.
+            if engine_tunnel "$tc_arg"; then
+                [ "$ENG" = "$AWG_ENGINE" ] && [ -x "$AWG_ENGINE" ] || die engine_replace_unsupported 64
+                snapshot
+                ! address_taken "$tc_arg" "$(conf_get address "$PLAN" | awk '{print $1}')" || die tunnel_address_taken 64
+                exec 3>&1
+                en_out=$("$AWG_ENGINE" replace "$tc_arg" "$tc_file" ${tc_keep:+"$tc_keep"} 2>/dev/null)
+                exec 3>&-
+                case "$(printf '%s\n' "$en_out" | tail -n 1)" in
+                    result=changed) ;;
+                    error=*) en_err=$(printf '%s\n' "$en_out" | sed -n 's/^error=//p' | tail -n 1)
+                             case "$en_err" in ''|*[!a-z0-9_]*) en_err=engine_failed ;; esac
+                             die "$en_err" ;;
+                    *) die engine_failed ;;
+                esac
+                rm -f "$VWARD_DEVICE_MAP_CACHE" "$TUNNEL_HEALTH_STATE"
+                printf '%s\n' "$en_out" | grep '^info\.handshake=' | head -n 1
+                tunnel_summary "$PLAN"
+                done_ok "tunnel-conf replace engine $tc_arg endpoint=$(conf_get endpoint "$PLAN")" changed
+            fi
             [ "$(conf_get engine "$PLAN")" != 1 ] || die engine_replace_unsupported 64
             change_lock
             JOURNAL=$(mktemp /tmp/vward-console-tunnel.XXXXXX 2>/dev/null) || die temporary_file_unavailable
             TXN=1
             snapshot
             ! address_taken "$tc_arg" "$(conf_get address "$PLAN" | awk '{print $1}')" || die tunnel_address_taken 64
-            step test
-            tunnel_test "$PLAN"
+            # «keep»: the owner chose to keep the configuration though the server may not answer.
+            if [ "$tc_keep" != keep ]; then
+                step test
+                tunnel_test "$PLAN"
+            fi
             new_peer=$(conf_get peer "$PLAN")
             # Undo, replayed newest first: the new peer out, then the old lines back.
             tunnel_block "$tc_arg" | awk -v i="$tc_arg" '
@@ -1445,7 +1501,11 @@ op_tunnel_conf() {
             done
             apply_plan "$tc_arg" "$PLAN" "$(conf_get address "$PLAN")"
             step handshake
-            handshake_ok "$tc_arg" || die tunnel_no_handshake
+            if [ "$tc_keep" = keep ]; then
+                handshake_ok "$tc_arg" || printf 'info.handshake=none\n'
+            else
+                handshake_ok "$tc_arg" || die tunnel_no_handshake
+            fi
             step save
             save_router || die config_save_failed
             TXN=0
@@ -1463,7 +1523,7 @@ op_tunnel_conf() {
                 [ -x "$AWG_ENGINE" ] || die engine_unavailable
                 snapshot
                 ! address_taken - "$(conf_get address "$PLAN" | awk '{print $1}')" || die tunnel_address_taken 64
-                engine_add "$tc_arg" "$tc_file"
+                engine_add "$tc_arg" "$tc_file" "$tc_keep"
                 case "$(printf '%s\n' "$en_out" | tail -n 1)" in
                     result=changed) ;;
                     error=*) en_err=$(printf '%s\n' "$en_out" | sed -n 's/^error=//p' | tail -n 1)
@@ -1472,7 +1532,7 @@ op_tunnel_conf() {
                     *) die engine_failed ;;
                 esac
                 rm -f "$VWARD_DEVICE_MAP_CACHE"
-                printf '%s\n' "$en_out" | grep '^info\.name=' | head -n 1
+                printf '%s\n' "$en_out" | grep -E '^info\.(name|handshake)=' | head -n 2
                 tunnel_summary "$PLAN"
                 done_ok "tunnel-conf create engine $(printf '%s\n' "$en_out" | sed -n 's/^info\.name=//p') endpoint=$(conf_get endpoint "$PLAN")" changed
             fi
@@ -1490,7 +1550,11 @@ op_tunnel_conf() {
             ndm "interface $NEW_IF ip tcp adjust-mss pmtu" || :
             apply_plan "$NEW_IF" "$PLAN" "$(conf_get address "$PLAN")"
             step handshake
-            handshake_ok "$NEW_IF" || die tunnel_no_handshake
+            if [ "$tc_keep" = keep ]; then
+                handshake_ok "$NEW_IF" || printf 'info.handshake=none\n'
+            else
+                handshake_ok "$NEW_IF" || die tunnel_no_handshake
+            fi
             step save
             save_router || die config_save_failed
             TXN=0
@@ -2115,11 +2179,11 @@ op_ext_daily() {
 if [ "${1:-}" = tunnel-conf ]; then
     case "${3:-}" in /*) [ ! -f "$3" ] || [ -L "$3" ] || CONF_FILE=$3 ;; esac
 fi
-[ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64
+[ "$#" -ge 2 ] && [ "$#" -le 5 ] || die usage 64
 OP=$1; shift
 case "$OP" in
     tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|policy-group|services-refresh) [ "$#" -eq 1 ] || die usage 64 ;;
-    tunnel-conf) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
+    tunnel-conf) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
     service) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     wifi-host) [ "$#" -eq 3 ] || die usage 64 ;;
@@ -2130,6 +2194,7 @@ ARG2=${2:-}
 case "$OP" in wifi|update|wan-param|tunnel|policy-group|domain-list|domain-list-watch|tunnel-conf|tunnel-delete|tunnel-subnet|backup-restore|wifi-host) ARG1=$1 ;; esac
 case "$OP" in ext-upgrade|ext-auto|firmware) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 ARG3=${3:-}
+ARG4=${4:-}
 case "$OP" in route-domain|force-vpn|adaptive|smartdns-domain) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 case "$OP" in list-domain) ARG3=$(printf '%s' "$ARG3" | tr 'A-Z' 'a-z') ;; esac
 
@@ -2172,7 +2237,7 @@ case "$OP" in
     wifi) op_wifi "$ARG1" "$ARG2" ;;
     update) op_update "$ARG1" "$ARG2" ;;
     wan-param) op_wan_param "$ARG1" "$ARG2" ;;
-    tunnel-conf) op_tunnel_conf "$ARG1" "$ARG2" "$ARG3" ;;
+    tunnel-conf) op_tunnel_conf "$ARG1" "$ARG2" "$ARG3" "$ARG4" ;;
     backup-create) op_backup_create "$ARG1" ;;
     wifi-host) op_wifi_host "$ARG1" "$ARG2" "$ARG3" ;;
     backup-restore) op_backup_restore "$ARG1" ;;

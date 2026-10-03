@@ -129,7 +129,7 @@ if '[ -e "$VWARD_SENTINEL_STATE/busy" ]' not in lib:
     fail("vward_busy takes the watcher's flag")
 for engine in ("vward-awg-engine.sh", "vward-vless-engine.sh"):
     src = (ROOT / "components/tunnel-guard/scripts" / engine).read_text()
-    if 'op_add "$2" "$3"; sentinel_reload' not in src or 'op_remove "$2"; sentinel_reload' not in src:
+    if 'op_add "$2" "$3" "${4:-}"; sentinel_reload' not in src or 'op_remove "$2"; sentinel_reload' not in src:
         fail(f"{engine} tells the watcher its tunnels changed")
 if '"$SENTINEL_CTL" install && "$SENTINEL_CTL" reload' not in (ROOT / "components/runtime/scripts/vward-housekeeping.sh").read_text():
     fail("housekeeping installs the watcher's program")

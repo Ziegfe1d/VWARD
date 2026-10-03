@@ -146,6 +146,14 @@ esac
     out = engine("add", "Финляндия", str(link))
     if out != ["error=tunnel_no_handshake"] or "no interface OpkgTun2" not in (tmp / "ndmc.log").read_text() or (etc / "v1.json").exists():
         fail(f"a silent server must be undone: {out}")
+    # «keep»: the owner chose to keep it though the server is silent - it stays, and says so.
+    (tmp / "ndmc.log").write_text("")
+    out = engine("add", "Финляндия", str(link), "keep")
+    if out[-3:] != ["info.name=OpkgTun2", "info.handshake=none", "result=changed"] or (etc / "v1.json").exists() is False or "no interface OpkgTun2" in (tmp / "ndmc.log").read_text():
+        fail(f"a kept tunnel: {out}")
+    out = engine("remove", "OpkgTun2")
+    if out != ["result=changed"] or (etc / "v1.json").exists():
+        fail(f"removing the kept tunnel: {out}")
     # Removal.
     out = engine("remove", "OpkgTun1")
     if out != ["result=changed"] or conf.exists() or (etc / "tunnels.tsv").read_text() != "" or "no interface OpkgTun1" not in (tmp / "ndmc.log").read_text():

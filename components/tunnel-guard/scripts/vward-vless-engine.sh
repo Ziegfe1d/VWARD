@@ -273,7 +273,7 @@ connected() {
 step() { { printf 'step=%s\n' "$1" >&3; } 2>/dev/null || :; }
 
 op_add() {
-    desc=$1 file=$2
+    desc=$1 file=$2 keep=${3:-}
     [ -f "$file" ] && [ ! -L "$file" ] || die vless_syntax 64
     TMPD=$(mktemp -d /tmp/vward-vless.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     links "$file" "$TMPD/links"; rc=$?
@@ -303,10 +303,16 @@ op_add() {
     step program
     start_one "$n" || { undo; die engine_start_failed; }
     step handshake
-    w=0
+    w=0 cw=$CONNECT_WAIT nohs=0
+    [ "$keep" != keep ] || [ "$cw" -le 10 ] || cw=10
     until connected "$name"; do
         w=$((w + 5))
-        [ -n "$(pid_of "$n")" ] && [ "$w" -le "$CONNECT_WAIT" ] || { undo; die tunnel_no_handshake; }
+        [ -n "$(pid_of "$n")" ] || { undo; die tunnel_no_handshake; }
+        if [ "$w" -gt "$cw" ]; then
+            # «keep»: the owner chose to keep the tunnel though the server stayed silent.
+            [ "$keep" = keep ] || { undo; die tunnel_no_handshake; }
+            nohs=1; break
+        fi
         sleep 2
     done
     step save
@@ -314,6 +320,7 @@ op_add() {
     printf '%s\t%s\t%s:%s\t%s\n' "$n" "$name" "$host" "$port" "$desc" >> "$TUNNELS"
     log "added $name slot=$n server=$host:$port"
     printf 'info.name=%s\n' "$name"
+    [ "$nohs" = 0 ] || printf 'info.handshake=none\n'
     echo "result=changed"
 }
 
@@ -407,7 +414,7 @@ sentinel_reload() { [ ! -x /opt/bin/vward-sentinel.sh ] || /opt/bin/vward-sentin
 case "${1:-}" in
     install) op_install ;;
     servers) [ "$#" -eq 2 ] || die usage 64; op_servers "$2" ;;
-    add) [ "$#" -eq 3 ] || die usage 64; op_add "$2" "$3"; sentinel_reload ;;
+    add) [ "$#" -eq 3 ] || [ "$#" -eq 4 ] || die usage 64; op_add "$2" "$3" "${4:-}"; sentinel_reload ;;
     remove) [ "$#" -eq 2 ] || die usage 64; op_remove "$2"; sentinel_reload ;;
     restart) [ "$#" -eq 2 ] || die usage 64; op_restart "$2" ;;
     disable) [ "$#" -eq 2 ] || die usage 64; op_disable "$2" ;;

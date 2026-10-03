@@ -856,6 +856,8 @@ if [ "$ACTION" = tunnel-conf ]; then
   read_body 49152
   TOP="$(form_value op)"; TNAME="$(form_value name)"; TCONF="$(form_value confirm)"
   case "$TNAME" in *[!A-Za-z0-9_.-]*) echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0 ;; esac
+  # keep=1: the owner answered «add anyway» after the server did not answer the first time.
+  TKEEP=""; [ "$(form_value keep)" != 1 ] || TKEEP=" keep"
   case "$TOP" in
     check|replace|create|adopt)
       # The upload holds the tunnel's private key: in RAM, root-only, and gone
@@ -882,14 +884,14 @@ if [ "$ACTION" = tunnel-conf ]; then
       elif [ "$TOP" = replace ]; then
         [ -n "$TNAME" ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0; }
         [ "$TCONF" = TUNNEL_REPLACE ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
-        ARGS="tunnel-conf replace $TFILE $TNAME"
+        ARGS="tunnel-conf replace $TFILE $TNAME$TKEEP"
       else
         TDESC="$(form_decode description text | tr -d '\t\r\n')" || TDESC=""
         case "$TDESC" in ''|*'"'*|*"$(printf '\134')"*) rm -f "$TFILE"; echo '{"ok":false,"error":"invalid_description"}'; exit 0 ;; esac
         [ "${#TDESC}" -le 64 ] || { rm -f "$TFILE"; echo '{"ok":false,"error":"invalid_description"}'; exit 0; }
         # The description may hold spaces: it goes through a file, not the argument list.
         printf '%s' "$TDESC" > "$TFILE.desc"
-        ARGS="tunnel-conf create $TFILE @$TFILE.desc"
+        ARGS="tunnel-conf create $TFILE @$TFILE.desc$TKEEP"
       fi
       CMD="$CONFIG_HELPER" LABEL="tunnel-$TOP" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
       run_detached "$CONTROL_RUN_DIR" control_busy "$TFILE" "$TFILE.desc" ;;

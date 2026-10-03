@@ -47,8 +47,9 @@ awk -v n="interface $i" -v l="    $*" '{print} $0 == n {print l}' "$CFG" > "$CFG
 echo ok
 """
 
-RUNNING = """interface Wireguard0
+RUNNING = f"""interface Wireguard0
     ip address 10.8.16.6 255.255.255.255
+    wireguard peer {PUB}
 !
 interface Wireguard1
     ip address 10.9.0.2 255.255.255.255
@@ -71,7 +72,7 @@ with tempfile.TemporaryDirectory() as tmp:
 for URL do :; done
 case "$URL" in
   */show/interface) cat "{tmp}/interface.json" ;;
-  */show/interface?name=*) echo '{{"id":"x","state":"up","link":"up","wireguard":{{"peer":[{{"online":true,"last-handshake":3}}]}}}}' ;;
+  */show/interface?name=*) if [ -e "{tmp}/nohs" ]; then echo '{{"id":"x","state":"up","link":"up","wireguard":{{"peer":[{{"online":false}}]}}}}'; else echo '{{"id":"x","state":"up","link":"up","wireguard":{{"peer":[{{"online":true,"last-handshake":3}}]}}}}'; fi ;;
   */show/interface/system-name?name=*) echo '"nwg0"' ;;
   */rci/) cat >/dev/null; echo '[{{"parse":{{"status":[{{"status":"message"}}]}}}}]' ;;
   *) exit 22 ;;
@@ -83,7 +84,9 @@ esac
                        "VWARD_WAN_DEVICE=eth2.4\nVWARD_WAN_INTERFACE=ISP\nVWARD_TUNNEL_INTERFACE=Wireguard1\nVWARD_POLICY_GROUP=streaming\n")
     devconf.chmod(0o600)
     engine = tools / "engine"
-    engine.write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/engine.log"\necho result=changed\n'); engine.chmod(0o755)
+    engine.write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/engine.log"\necho info.name=OpkgTun0\necho result=changed\n'); engine.chmod(0o755)
+    vless = tools / "vless"
+    vless.write_text(f'#!/bin/sh\necho "vless $*" >> "{tmp}/engine.log"\necho result=changed\n'); vless.chmod(0o755)
     (tmp / "etc/awg").mkdir(parents=True)
     env = os.environ | {
         "VWARD_NDMC": str(tools / "ndmc"), "VWARD_CURL_BIN": str(curl), "VWARD_DEVICE_CONFIG": str(devconf),
@@ -94,7 +97,7 @@ esac
         "VWARD_CONSOLE_ETC": str(tmp / "etc"), "VWARD_CONSOLE_BACKUP_DIR": str(tmp / "backup"),
         "VWARD_CONSOLE_AUDIT_LOG": str(tmp / "audit.log"), "VWARD_CONSOLE_CACHE_DIR": str(tmp / "cache"),
         "VWARD_TUNNEL_HANDSHAKE_WAIT": "0", "VWARD_AWG_ETC": str(tmp / "etc/awg"),
-        "VWARD_AWG_ENGINE_BIN": str(engine), "VWARD_VLESS_ENGINE_BIN": str(engine), "VWARD_VLESS_ETC": str(tmp / "etc/awg"),
+        "VWARD_AWG_ENGINE_BIN": str(engine), "VWARD_VLESS_ENGINE_BIN": str(vless), "VWARD_VLESS_ETC": str(tmp / "etc/vless"),
     }
 
     def run(*args):
@@ -105,6 +108,35 @@ esac
     conf = tmp / "t.conf"
     def put(text):
         conf.write_text(text); conf.chmod(0o600)
+
+    # check tells the Panel whether the file is already on the router: the same server key,
+    # or only the same address in the tunnel; the keys themselves are never printed.
+    def check(text):
+        put(text)
+        out, r = run("tunnel-conf", "check", str(conf))
+        info = dict(l[5:].split("=", 1) for l in r.stdout.splitlines() if l.startswith("info.") and "=" in l)
+        if out != "result=checked" or PRIV in r.stdout or PUB in r.stdout:
+            fail(f"check: {out!r} / keys must not be printed")
+        return info
+    i = check(CONF)
+    if i.get("same") != "Wireguard0" or i.get("samekind") != "firmware" or i.get("sameaddr") != "Wireguard0" or i.get("sameaddrkind") != "firmware":
+        fail(f"the same file: {i}")
+    i = check(CONF.replace(PUB, "C" * 42 + "A="))
+    if "same" in i or i.get("sameaddr") != "Wireguard0":
+        fail(f"another server, the same address: {i}")
+    i = check(CONF.replace("10.8.16.6", "10.8.99.9"))
+    if i.get("same") != "Wireguard0" or "sameaddr" in i:
+        fail(f"the same server, another address: {i}")
+    i = check(CONF.replace(PUB, "C" * 42 + "A=").replace("10.8.16.6", "10.8.99.9"))
+    if "same" in i or "sameaddr" in i:
+        fail(f"a new file must report nothing: {i}")
+    # A tunnel of the AmneziaWG engine is found by the file the engine keeps.
+    (tmp / "etc/awg/tunnels.tsv").write_text("0\tOpkgTun0\t-\tFinland\n")
+    (tmp / "etc/awg/t0.conf").write_text(CONF.replace(PUB, "D" * 42 + "A=").replace("10.8.16.6", "10.8.77.7"))
+    i = check(CONF.replace(PUB, "D" * 42 + "A=").replace("10.8.16.6", "10.8.99.9"))
+    if i.get("same") != "OpkgTun0" or i.get("samekind") != "awg":
+        fail(f"an engine's tunnel: {i}")
+    (tmp / "etc/awg/tunnels.tsv").unlink(); (tmp / "etc/awg/t0.conf").unlink()
 
     # The address is already on Wireguard0: refused before anything is written to the router.
     put(CONF)
@@ -148,9 +180,50 @@ esac
     if out != "error=conf_rejected_address" or cfg.read_text() != before:
         fail(f"a refused address must roll the new interface back: {out!r}")
 
+    # The server does not answer: the new tunnel is taken back; with «keep» (the owner said yes) it stays.
+    (tmp / "nohs").touch()
+    put(CONF.replace("10.8.16.6", "10.8.16.9"))
+    before = cfg.read_text()
+    out, r = run("tunnel-conf", "create", str(conf), "Norway")
+    if out != "error=tunnel_no_handshake" or cfg.read_text() != before:
+        fail(f"a silent server must undo the create: {out!r}")
+    put(CONF.replace("10.8.16.6", "10.8.16.9"))
+    out, r = run("tunnel-conf", "create", str(conf), "Norway", "keep")
+    if out != "result=changed" or "info.handshake=none" not in r.stdout or "ip address 10.8.16.9 255.255.255.255" not in cfg.read_text():
+        fail(f"keep: {out!r} {r.stdout!r}")
+    if "system configuration save" not in (tmp / "running.cfg.log").read_text().splitlines()[-1]:
+        fail("a kept tunnel is saved too")
+    out, r = run("tunnel-conf", "create", str(conf), "Norway", "force")
+    if out != "error=invalid_value":
+        fail(f"only «keep» is a mode: {out!r}")
+    (tmp / "nohs").unlink()
+
     # Keenetic now lists the new tunnel.
     (tmp / "interface.json").write_text('{"Wireguard0":{"type":"Wireguard","security-level":"public"},"Wireguard1":{"type":"Wireguard","security-level":"public"},"Wireguard2":{"type":"Wireguard","security-level":"public"}}')
     (tmp / "map.tsv").unlink(missing_ok=True)
+    # The AmneziaWG engine: add and replace go to it, «keep» as its last word; VLESS is not replaced in place.
+    ENGINE_CONF = CONF.replace("MTU = 1280", "MTU = 1280\nHeaderProtectionKey = " + "E" * 42 + "A=").replace(PUB, "F" * 42 + "A=").replace("10.8.16.6", "10.8.55.5")
+    put(ENGINE_CONF)
+    out, r = run("tunnel-conf", "create", str(conf), "Engine one", "keep")
+    log = (tmp / "engine.log").read_text().splitlines()
+    if out != "result=changed" or not log or not log[-1].startswith("add Engine one ") or not log[-1].endswith(" keep"):
+        fail(f"engine create: {out!r} {log}")
+    (tmp / "interface.json").write_text('{"Wireguard0":{"type":"Wireguard","security-level":"public"},"Wireguard1":{"type":"Wireguard","security-level":"public"},"Wireguard2":{"type":"Wireguard","security-level":"public"},"OpkgTun0":{"type":"OpkgTun","security-level":"public"},"OpkgTun1":{"type":"OpkgTun","security-level":"public"}}')
+    (tmp / "map.tsv").unlink(missing_ok=True)
+    (tmp / "etc/awg/tunnels.tsv").write_text("0\tOpkgTun0\t-\tEngine one\n")
+    (tmp / "etc/vless").mkdir(exist_ok=True)
+    (tmp / "etc/vless/tunnels.tsv").write_text("1\tOpkgTun1\t-\tVLESS\n")
+    put(ENGINE_CONF)
+    out, r = run("tunnel-conf", "replace", str(conf), "OpkgTun0", "keep")
+    log = (tmp / "engine.log").read_text().splitlines()
+    if out != "result=changed" or not log[-1].startswith("replace OpkgTun0 ") or not log[-1].endswith(" keep"):
+        fail(f"engine replace: {out!r} {log[-1:]}")
+    put(ENGINE_CONF)
+    out, r = run("tunnel-conf", "replace", str(conf), "OpkgTun1")
+    if out != "error=engine_replace_unsupported":
+        fail(f"a VLESS tunnel is not replaced in place: {out!r}")
+    (tmp / "etc/awg/tunnels.tsv").unlink(); (tmp / "etc/vless/tunnels.tsv").unlink()
+
     # Switching off: the default tunnel stays; an ordinary one goes down and is saved.
     out, _ = run("tunnel-state", "down", "Wireguard1")
     if out != "error=main_tunnel":

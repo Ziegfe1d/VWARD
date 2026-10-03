@@ -2184,7 +2184,7 @@ function listViaSel(l, tuns, ok) {
   if (!cur) opts.unshift(['', l.route ? 'через ' + l.route : 'без маршрута', true]);
   return sel('data-list-via="' + esc(l.name) + '"' + (ok && (cur || !l.route) ? '' : ' disabled'), 'Куда идёт «' + (l.description || l.name) + '»', opts, cur);
 }
-document.addEventListener('input', e => { const f = e.target.closest && e.target.closest('[data-form="tunnel-conf"]'); if (f && (e.target.name === 'conf' || /^tc-/.test(e.target.name)) && f.dataset.checked === '1') { f.dataset.checked = ''; $('tcPreview').innerHTML = ''; f.querySelector('[type=submit]').textContent = 'Проверить'; } });
+document.addEventListener('input', e => { const f = e.target.closest && e.target.closest('[data-form="tunnel-conf"]'); if (f && (e.target.name === 'conf' || /^tc-/.test(e.target.name)) && f.dataset.checked) { f.dataset.checked = ''; $('tcPreview').innerHTML = ''; f.querySelector('[type=submit]').hidden = false; f.querySelector('[type=submit]').textContent = 'Проверить'; } });
 async function wifiHostSet(fields, okMsg) {
   let x;
   try { x = await apiPost('wifi-host', fields); } catch (e) { toast('Ошибка: ' + e.message); return; }
@@ -2220,7 +2220,8 @@ function tunOverlayShow(o) {
     '<p class="upd-text">' + esc(text) + '</p>' + ringHtml(u.pct, u.done, u.ok) +
     '<p class="upd-stage">' + esc(u.done ? (u.stage || '') : step[1]) + '</p>' +
     (u.done ? '<div class="panel-actions">' + (u.ok && u.open ? '<button class="btn primary" type="button" data-act="tun-open" data-name="' + esc(u.open) + '">Открыть туннель</button>' : '') +
-      '<button class="btn' + (u.ok && u.open ? '' : ' primary') + '" type="button" data-act="tun-close">' + (u.ok ? 'Готово' : 'Закрыть') + '</button></div>' : '') + '</div>';
+      (u.keep ? '<button class="btn primary" type="button" data-act="tun-keep">' + (TUN_KEEP && TUN_KEEP.mode === 'replace' ? 'Заменить всё равно' : 'Добавить всё равно') + '</button>' : '') +
+      '<button class="btn' + (u.ok && u.open || u.keep ? '' : ' primary') + '" type="button" data-act="tun-close">' + (u.ok ? 'Готово' : u.keep ? 'Нет' : 'Закрыть') + '</button></div>' : '') + '</div>';
 }
 function tunOverlayClose() { tunOverlay = null; const el = $('tunOverlay'); if (el) el.remove(); }
 const jobInfo = out => { const info = {}; String(out || '').split('\n').forEach(l => { const m = /^(info\.([a-z]+)|step)=(.*)$/.exec(l); if (m) info[m[2] || 'step'] = m[3]; }); return info; };
@@ -2242,17 +2243,23 @@ async function runJob(fields, minutes) {
   const info = jobInfo(run.output), last = jobLast(run.output);
   if (!run.finished) return { ok: false, text: 'Роутер ещё работает над туннелем. Проверьте страницу «VPN» через пару минут.' };
   if (run.rc === 0 && /^result=/.test(last)) return { ok: true, info: info };
-  return { ok: false, text: errText({ error: last.replace(/^error=/, '') || 'engine_failed' }) + '. Роутер оставлен как был.' };
+  return { ok: false, code: /^error=/.test(last) ? last.slice(6) : '', text: errText({ error: last.replace(/^error=/, '') || 'engine_failed' }) + '. Роутер оставлен как был.' };
 }
+// The server stayed silent: the window asks whether to keep the tunnel anyway (a second run with keep=1).
+let TUN_KEEP = null;
 async function tunnelJob(mode, fields, label) {
-  tunOverlay = null;
+  tunOverlay = null; TUN_KEEP = null;
   const heads = { create: ['Новый туннель', 'Туннель создан', 'Туннель не создан'], replace: ['Замена конфигурации', 'Конфигурация заменена', 'Конфигурация не заменена'] }[mode];
   tunOverlayShow({ head: heads[0], okHead: heads[1], failHead: heads[2], sub: label ? '«' + label + '»' : '', step: 'prepare' });
   const r = await runJob(fields, 5);
-  const i = r.info || {};
-  tunOverlayShow({ done: true, ok: r.ok, open: r.ok ? (mode === 'create' ? i.name : fields.name) : '',
+  const i = r.info || {}, silent = !r.ok && r.code === 'tunnel_no_handshake' && !fields.keep;
+  if (silent) TUN_KEEP = { mode: mode, fields: fields, label: label };
+  tunOverlayShow({ done: true, ok: r.ok, keep: silent, open: r.ok ? (mode === 'create' ? i.name : fields.name) : '',
     stage: r.ok ? [label, i.endpoint ? 'сервер ' + i.endpoint : ''].filter(Boolean).join(' · ') : '',
-    text: r.ok ? 'Сервер ответил, туннель работает. Направьте на него списки и сервисы на странице туннеля.' : r.text });
+    text: r.ok ? (i.handshake === 'none' ? (mode === 'create' ? 'Туннель добавлен, но сервер пока не ответил. Он станет «В сети», когда сервер ответит; состояние видно на странице туннеля.' : 'Конфигурация заменена, но сервер пока не ответил. Туннель станет «В сети», когда сервер ответит.') :
+        'Сервер ответил, туннель работает. Направьте на него списки и сервисы на странице туннеля.') :
+      silent ? 'Сервер не ответил на рукопожатие за 30 секунд. ' + (mode === 'create' ? 'Туннель не добавлен, роутер оставлен как был. Добавить его всё равно? Он появится в списке со статусом «Не в сети» и подключится, когда сервер ответит.' :
+        'Конфигурация не заменена, роутер оставлен как был. Заменить всё равно? Туннель будет «Не в сети», пока сервер не ответит.') : r.text });
   await Promise.all([load('status', true), load('lists', true), load('awg', true)]); render();
 }
 // Manual tunnel fields: [id, caption, placeholder, secret, mono]; empty optional ones are left out.
@@ -2307,6 +2314,34 @@ async function amneziaKey(text) {
       return { conf: conf.replace(/\$PRIMARY_DNS/g, json.dns1 || '1.1.1.1').replace(/\$SECONDARY_DNS/g, json.dns2 || '1.0.0.1'), name: confName(json.description || json.name || '') };
   }
   return { error: 'в ключе нет настройки WireGuard или AmneziaWG (' + (cs.map(c => c.container).join(', ') || 'пусто') + ') - VWARD умеет только эти два' };
+}
+// A message in the add form itself: it stays until the next try (a toast was gone in seconds).
+const tcMsg = html => { const el = $('tcPreview'); if (el) el.innerHTML = '<p class="field-warn">' + esc(html) + '</p>'; };
+// What the file holds, and the button for the next step.
+function tcPreview(form, x, mode, name) {
+  $('tcPreview').innerHTML = kv([['Сервер', x.endpoint || '—'], ['Адрес в туннеле', x.address || '—'], ['MTU', x.mtu || 'как на роутере'],
+    ['Обфускация AmneziaWG', x.awg === '1' ? 'Включена' : 'Выключена'], ['Keepalive', x.keepalive ? x.keepalive + ' с' : '25 с'], ['Разрешённые адреса', x.allowed || '—']]) +
+    (x.engine === '1' ? '<p class="field-warn">Это AmneziaWG 3.x: прошивка Keenetic его не умеет. Туннель поднимет контур VWARD - программа на флешке, около 13 МБ памяти, скорость ниже встроенного WireGuard. В Keenetic он будет подключением OpkgTun.' + (fwNative() ? (fwNative().name === 'stable' ? ' Для роутера уже есть KeeneticOS ' + esc(fwShort(fwNative().version)) + ' со встроенной AmneziaWG 3.x - лучше сначала обновить прошивку.' :
+      ' На канале «' + esc(fwChannel(fwNative().name)) + '» есть тестовая KeeneticOS ' + esc(fwShort(fwNative().version)) + ' со встроенной AmneziaWG 3.x (возможны ошибки).') : '') + '</p>' :
+     x.unsupported ? '<p class="field-warn">Этих настроек нет в прошивке Keenetic, её импорт тоже их пропускает: ' + esc(x.unsupported.split(',').join(', ')) + '. Если сервер без них не работает, туннель не подключится - VWARD проверит это и ничего не оставит.</p>' : '');
+  form.dataset.checked = '1';
+  form.querySelector('[type=submit]').hidden = false;
+  form.querySelector('[type=submit]').textContent = mode === 'create' ? 'Создать туннель' : 'Заменить конфигурацию ' + tunLabel(name);
+}
+// The file is already on the router: the same server key, or an address another tunnel has.
+// Keenetic takes no two tunnels with one address; the owner chooses: replace it, add a new one, or stop.
+let TC_DUP = null;
+function tcDup(form, x, text, desc) {
+  const same = x.same, taken = x.sameaddr, target = same || taken, kind = same ? x.samekind : x.sameaddrkind;
+  TC_DUP = { text: text, desc: desc, name: target, x: x };
+  const canReplace = kind === 'firmware' || kind === 'awg', canNew = !taken;
+  const msg = same ? 'Такая конфигурация уже есть: туннель «' + tunLabel(same) + '» (тот же сервер и тот же ключ сервера).' + (canNew ? ' Можно заменить его этой конфигурацией или добавить отдельный туннель.' : '')
+    : 'Адрес в туннеле ' + (x.address || '') + ' уже занят: «' + tunLabel(taken) + '» (другой сервер). Keenetic не принимает два туннеля с одним адресом, поэтому добавить новый нельзя.' + (canReplace ? ' Заменить: сервер и ключи этого туннеля станут из файла, маршруты и списки останутся.' : '');
+  form.querySelector('[type=submit]').hidden = true; form.dataset.checked = 'dup';
+  $('tcPreview').innerHTML = '<p class="field-warn">' + esc(msg) + (canReplace ? '' : ' Заменить его из Панели нельзя: ' + (kind === 'vless' ? 'это туннель VLESS - удалите его и добавьте заново.' : 'это не туннель, а другое подключение Keenetic.')) + '</p>' +
+    '<div class="panel-actions">' + (canReplace ? '<button class="btn primary" type="button" data-act="tc-dup" data-choice="replace">Заменить «' + esc(tunLabel(target)) + '»</button>' : '') +
+    (canNew ? '<button class="btn" type="button" data-act="tc-dup" data-choice="new">Добавить как новый</button>' : '') +
+    '<button class="btn" type="button" data-act="tc-dup" data-choice="cancel">Отмена</button></div>';
 }
 function tunnelConfSheet(mode, name) {
   openSheet(mode === 'create' ? 'Добавить туннель' : 'Заменить конфигурацию · ' + name,
@@ -3052,7 +3087,7 @@ document.addEventListener('click', e => {
     const f = t.closest('form'), m = t.dataset.m;
     f.querySelector('.tc-file').hidden = m !== 'file'; f.querySelector('.tc-manual').hidden = m !== 'manual';
     f.querySelectorAll('[data-act="tc-mode"]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.m === m)));
-    f.dataset.checked = ''; $('tcPreview').innerHTML = ''; f.querySelector('[type=submit]').textContent = 'Проверить';
+    f.dataset.checked = ''; $('tcPreview').innerHTML = ''; f.querySelector('[type=submit]').hidden = false; f.querySelector('[type=submit]').textContent = 'Проверить';
   }
   else if (a === 'svc-cat') { SVC.cat = SVC.cat === t.dataset.cat ? '' : t.dataset.cat; render(); }
   else if (a === 'qfilters') { ADSV.filtersOpen = !(ADSV.filtersOpen || ADSV.filter !== 'all'); if (!ADSV.filtersOpen && ADSV.filter !== 'all') { ADSV.filter = 'all'; S.qlog = null; load('qlog', true).then(render); } render(); }
@@ -3077,6 +3112,14 @@ document.addEventListener('click', e => {
   else if (a === 'upd-reload') location.reload();
   else if (a === 'upd-close') updOverlayClose();
   else if (a === 'tun-close') tunOverlayClose();
+  else if (a === 'tun-keep') { const k = TUN_KEEP; if (!k) return; tunOverlayClose(); tunnelJob(k.mode, Object.assign({}, k.fields, { keep: '1' }), k.label); }
+  else if (a === 'tc-dup') {
+    const d = TC_DUP, ch = t.dataset.choice, f = t.closest('form');
+    if (!d) return;
+    if (ch === 'cancel') { closeLayer(); return; }
+    if (ch === 'replace') { closeLayer(); tunnelJob('replace', { op: 'replace', name: d.name, conf: d.text, confirm: 'TUNNEL_REPLACE' }, tunLabel(d.name)); return; }
+    tcPreview(f, d.x, 'create', '');
+  }
   else if (a === 'tun-open') { const n = t.dataset.name; tunOverlayClose(); go('t-' + n); }
   else if (a === 'agh-filters-refresh') aghSet({ setting: 'filters-refresh' }, 'Списки обновляются');
   else if (a === 'tunnel-create') tunnelConfSheet('create');
@@ -3180,7 +3223,7 @@ document.addEventListener('change', e => {
     if (file.size > 16384) { toast('Файл больше 16 КБ - это не .conf'); return; }
     const r = new FileReader();
     r.onload = () => {
-      form.querySelector('[name=conf]').value = String(r.result || ''); form.dataset.checked = ''; $('tcPreview').innerHTML = ''; form.querySelector('[type=submit]').textContent = 'Проверить';
+      form.querySelector('[name=conf]').value = String(r.result || ''); form.dataset.checked = ''; $('tcPreview').innerHTML = ''; form.querySelector('[type=submit]').hidden = false; form.querySelector('[type=submit]').textContent = 'Проверить';
       const d = form.querySelector('[name=description]');
       if (d && !d.value.trim()) d.value = confName(file.name);
     };
@@ -3284,20 +3327,21 @@ async function onSubmit(e, f) {
   }
   if (f === 'tunnel-conf') {
     const form = e.target, mode = form.dataset.mode, name = form.dataset.name, manual = !form.querySelector('.tc-manual').hidden;
-    if (manual && TC_FIELDS.slice(0, 4).some(f => !form.querySelector('[name="tc-' + f[0] + '"]').value.trim())) { toast('Заполните ключ, адрес, ключ сервера и сервер'); return; }
+    if (manual && TC_FIELDS.slice(0, 4).some(f => !form.querySelector('[name="tc-' + f[0] + '"]').value.trim())) { tcMsg('Заполните ключ, адрес, ключ сервера и сервер'); return; }
+    if (form.dataset.checked !== '1') $('tcPreview').innerHTML = '';
     let text = manual ? tcConf(form) : form.querySelector('[name=conf]').value;
     const descEl = form.querySelector('[name=description]');
-    if (!manual && /^\s*vpn:\/\//i.test(text)) { const k = await amneziaKey(text); if (k.error) { toast(k.error); return; } text = k.conf; if (descEl && !descEl.value.trim() && k.name) descEl.value = k.name; }
+    if (!manual && /^\s*vpn:\/\//i.test(text)) { const k = await amneziaKey(text); if (k.error) { tcMsg(k.error); return; } text = k.conf; if (descEl && !descEl.value.trim() && k.name) descEl.value = k.name; }
     // VLESS: links or a subscription; the server is chosen from the list the router reads.
     if (!manual && /^\s*(vless|https?):\/\//i.test(text)) {
-      if (mode !== 'create') { toast('VLESS-туннель не заменяется: добавьте новый и удалите старый'); return; }
+      if (mode !== 'create') { tcMsg('VLESS-туннель не заменяется: добавьте новый и удалите старый'); return; }
       if (form.dataset.checked !== '1') {
         let x;
-        try { x = await apiPost('tunnel-conf', { op: 'check', conf: text.trim() }); } catch (err) { toast('Ошибка: ' + err.message); return; }
-        if (!x.ok) { toast('Не подходит: ' + errText(x)); return; }
+        try { x = await apiPost('tunnel-conf', { op: 'check', conf: text.trim() }); } catch (err) { tcMsg('Ошибка: ' + err.message); return; }
+        if (!x.ok) { tcMsg('Не подходит: ' + errText(x)); return; }
         const n = +x.servers || 0, rows = [];
         for (let i = 1; i <= n; i++) { const p = String(x['server.' + i] || '').split('|'); rows.push({ i: i, name: p[0] || 'Сервер ' + i, host: p[1] || '', port: p[2] || '', sec: p[3] || 'none', net: p[4] || 'tcp' }); }
-        if (!rows.length) { toast('В ссылке или подписке нет серверов VLESS'); return; }
+        if (!rows.length) { tcMsg('В ссылке или подписке нет серверов VLESS'); return; }
         $('tcPreview').innerHTML = '<div class="rows vless-pick" role="radiogroup" aria-label="Сервер">' + rows.map(r => '<label class="row"><input type="radio" name="vless-server" value="' + r.i + '"' + (r.i === 1 ? ' checked' : '') + ' data-vname="' + esc(r.name) + '">' +
           '<div class="row-main"><b>' + esc(r.name) + '</b><small>' + esc(r.host + ':' + r.port + ' · ' + (r.sec === 'none' ? 'без шифрования' : r.sec.toUpperCase()) + ' · ' + r.net) + '</small></div></label>').join('') + '</div>' +
           '<p class="field-warn">Туннель поднимет Xray - программа около 36 МБ на флешке, скачивается один раз с GitHub (XTLS/Xray-core), 30-60 МБ памяти. В Keenetic он будет подключением OpkgTun.</p>';
@@ -3313,19 +3357,14 @@ async function onSubmit(e, f) {
       return;
     }
     const desc = descEl ? descEl.value.trim() : '';
-    if (!manual && (!/\[Interface\]/i.test(text) || !/\[Peer\]/i.test(text))) { toast('Выберите файл .conf или вставьте его текст или ключ vpn://'); return; }
-    if (mode === 'create' && !desc) { toast('Введите название туннеля'); return; }
+    if (!manual && (!/\[Interface\]/i.test(text) || !/\[Peer\]/i.test(text))) { tcMsg('Выберите файл .conf или вставьте его текст или ключ vpn://'); return; }
+    if (mode === 'create' && !desc) { tcMsg('Введите название туннеля'); return; }
     if (form.dataset.checked !== '1') {
       let x;
-      try { x = await apiPost('tunnel-conf', { op: 'check', conf: text }); } catch (err) { toast('Ошибка: ' + err.message); return; }
-      if (!x.ok) { toast('Файл не подходит: ' + errText(x)); return; }
-      $('tcPreview').innerHTML = kv([['Сервер', x.endpoint || '—'], ['Адрес в туннеле', x.address || '—'], ['MTU', x.mtu || 'как на роутере'],
-        ['Обфускация AmneziaWG', x.awg === '1' ? 'Включена' : 'Выключена'], ['Keepalive', x.keepalive ? x.keepalive + ' с' : '25 с'], ['Разрешённые адреса', x.allowed || '—']]) +
-        (x.engine === '1' ? '<p class="field-warn">Это AmneziaWG 3.x: прошивка Keenetic его не умеет. Туннель поднимет контур VWARD - программа на флешке, около 13 МБ памяти, скорость ниже встроенного WireGuard. В Keenetic он будет подключением OpkgTun.' + (fwNative() ? (fwNative().name === 'stable' ? ' Для роутера уже есть KeeneticOS ' + esc(fwShort(fwNative().version)) + ' со встроенной AmneziaWG 3.x - лучше сначала обновить прошивку.' :
-          ' На канале «' + esc(fwChannel(fwNative().name)) + '» есть тестовая KeeneticOS ' + esc(fwShort(fwNative().version)) + ' со встроенной AmneziaWG 3.x (возможны ошибки).') : '') + '</p>' :
-         x.unsupported ? '<p class="field-warn">Этих настроек нет в прошивке Keenetic, её импорт тоже их пропускает: ' + esc(x.unsupported.split(',').join(', ')) + '. Если сервер без них не работает, туннель не подключится - VWARD проверит это и ничего не оставит.</p>' : '');
-      form.dataset.checked = '1';
-      form.querySelector('[type=submit]').textContent = mode === 'create' ? 'Создать туннель' : 'Заменить конфигурацию ' + tunLabel(name);
+      try { x = await apiPost('tunnel-conf', { op: 'check', conf: text }); } catch (err) { tcMsg('Ошибка: ' + err.message); return; }
+      if (!x.ok) { tcMsg('Файл не подходит: ' + errText(x)); return; }
+      if (mode === 'create' && (x.same || x.sameaddr)) { tcDup(form, x, text, desc); return; }
+      tcPreview(form, x, mode, name);
       return;
     }
     closeLayer();

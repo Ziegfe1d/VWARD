@@ -146,6 +146,14 @@ with tempfile.TemporaryDirectory() as t:
     if list((t / "etc").glob("t[0-9]*")) or list((t / "run").glob("*.pid")) or set(ifaces()) != {"OpkgTun0"}:
         fail(f"a tunnel without a handshake left something: {ifaces()}")
 
+    # «keep»: the owner chose to keep it though the server is silent - the tunnel stays, said so.
+    out = run("add", "Finland", str(conf), "keep", expect="result=changed")
+    if "info.handshake=none" not in out or "info.name=OpkgTun1" not in out or ifaces().get("OpkgTun1") != "Finland" or not (t / "etc/t0.conf").exists():
+        fail(f"a kept tunnel: {out} {ifaces()}")
+    run("remove", "OpkgTun1", expect="result=changed")
+    if list((t / "etc").glob("t[0-9]*")) or set(ifaces()) != {"OpkgTun0"}:
+        fail("removing the kept tunnel left something")
+
     # Keenetic refuses the address: the connection goes, its words reach the log.
     (st / "handshake").write_text("1")
     (st / "reject").write_text("1")
@@ -189,6 +197,33 @@ with tempfile.TemporaryDirectory() as t:
     st_out = run("status", expect="result=status")
     if "tunnel=OpkgTun1\t1\t" not in st_out or "Finland" not in st_out or "203.0.113.10:3954" not in st_out:
         fail(f"status: {st_out}")
+
+    # replace: the file is swapped and the program restarts on it; anything wrong puts the old one back.
+    new = t / "new.conf"
+    new.write_text(CONF.replace("10.66.0.25", "10.66.0.77").replace("203.0.113.10:3954", "198.51.100.7:4000")); new.chmod(0o600)
+    old_text = (t / "etc/t0.conf").read_text()
+    (st / "ndmc.log").write_text("")
+    run("replace", "OpkgTun1", str(new), expect="result=changed")
+    if "198.51.100.7:4000" not in (t / "etc/t0.conf").read_text() or "interface OpkgTun1 ip address 10.66.0.77 255.255.255.255" not in (st / "ndmc.log").read_text():
+        fail("replace: the new file and the new address are not in place")
+    if (t / "etc/t0.conf").stat().st_mode & 0o077 or list((t / "etc").glob("t0.conf.*")):
+        fail("replace left a file behind or loosened a mode")
+    run("replace", "OpkgTun1", str(bad), expect="error=conf_rejected")
+    if "198.51.100.7:4000" not in (t / "etc/t0.conf").read_text():
+        fail("a rejected file must not replace the working one")
+    (st / "handshake").unlink()
+    (st / "ndmc.log").write_text("")
+    run("replace", "OpkgTun1", str(conf), expect="error=tunnel_no_handshake")
+    if "198.51.100.7:4000" not in (t / "etc/t0.conf").read_text() or "interface OpkgTun1 ip address 10.66.0.77 255.255.255.255" not in (st / "ndmc.log").read_text() or list((t / "etc").glob("t0.conf.*")):
+        fail("a silent server must put the old file and the old address back")
+    out = run("replace", "OpkgTun1", str(conf), "keep", expect="result=changed")
+    if "info.handshake=none" not in out or "203.0.113.10:3954" not in (t / "etc/t0.conf").read_text():
+        fail(f"replace with keep: {out}")
+    (st / "handshake").write_text("1")
+    run("replace", "OpkgTun1", str(conf), expect="result=changed")
+    if (t / "etc/t0.conf").read_text().replace("\r", "") != old_text:
+        fail("the original file is back after the last replace")
+    run("replace", "OpkgTun7", str(conf), expect="error=unknown_tunnel")
 
     # The Panel's API reads the same facts (Entware jq: no regex functions).
     api = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], text=True, capture_output=True,

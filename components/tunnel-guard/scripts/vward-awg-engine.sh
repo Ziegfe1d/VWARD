@@ -13,7 +13,7 @@
 # files hold private keys: root-only, never printed, never in a process's
 # arguments.
 #
-# vward-awg-engine.sh install | add DESCRIPTION FILE | remove NAME |
+# vward-awg-engine.sh install | add DESCRIPTION FILE [keep] | replace NAME FILE [keep] | remove NAME |
 #                     restart NAME | disable NAME | enable NAME | supervise | stop | status
 # Output: "result=..." / "info.key=value" lines, or "error=<code>".
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -188,8 +188,10 @@ handshake_age() {
 # opened it; nothing otherwise).
 step() { { printf 'step=%s\n' "$1" >&3; } 2>/dev/null || :; }
 
+# «keep» (add, replace): the owner chose to keep the tunnel although the server did not answer
+# the first time: the wait is short and a silent server no longer undoes the work.
 op_add() {
-    desc=$1 conf=$2
+    desc=$1 conf=$2 keep=${3:-}
     case "$desc" in ''|*'"'*|*"$(printf '\134')"*) die invalid_description 64 ;; esac
     [ "${#desc}" -le 64 ] || die invalid_description 64
     [ -f "$conf" ] && [ ! -L "$conf" ] && grep -qi '^\[Interface\]' "$conf" && grep -qi '^\[Peer\]' "$conf" || die conf_syntax 64
@@ -212,17 +214,74 @@ op_add() {
     step program
     start_one "$n" "$name" || { undo; die engine_start_failed; }
     step handshake
-    w=0
+    w=0 hw=$HANDSHAKE_WAIT nohs=0
+    [ "$keep" != keep ] || [ "$hw" -le 10 ] || hw=10
     until handshake_age "$n" >/dev/null; do
         w=$((w + 2))
-        [ "$w" -le "$HANDSHAKE_WAIT" ] || { undo; die tunnel_no_handshake; }
+        if [ "$w" -gt "$hw" ]; then
+            [ "$keep" = keep ] || { undo; die tunnel_no_handshake; }
+            nohs=1; break
+        fi
         sleep 2
     done
     step save
     ndm "system configuration save" || { undo; die config_save_failed; }
     printf '%s\t%s\t-\t%s\n' "$n" "$name" "$desc" >> "$TUNNELS"
-    log "added $name slot=$n"
+    log "added $name slot=$n$([ "$nohs" = 0 ] || echo ' handshake=none')"
     printf 'info.name=%s\n' "$name"
+    [ "$nohs" = 0 ] || printf 'info.handshake=none\n'
+    echo "result=changed"
+}
+
+# replace NAME FILE [keep]: the tunnel's file is swapped and its program restarts on it. A file
+# the program does not take, a refused address or a silent server (without «keep») put the old
+# file back, so the tunnel the lists point to stays as it was.
+op_replace() {
+    name=$1 conf=$2 keep=${3:-}
+    row=$(row_of "$name")
+    [ -n "$row" ] || die unknown_tunnel 64
+    n=$(printf '%s' "$row" | cut -f1)
+    [ -f "$conf" ] && [ ! -L "$conf" ] && grep -qi '^\[Interface\]' "$conf" && grep -qi '^\[Peer\]' "$conf" || die conf_syntax 64
+    addr=$(conf_address "$conf"); [ -n "$addr" ] || die conf_no_address 64
+    [ -x "$BIN" ] || die engine_unavailable
+    cur="$ENGINE_ETC/t$n.conf" new="$ENGINE_ETC/t$n.conf.new" old="$ENGINE_ETC/t$n.conf.old"
+    (umask 077; tr -d '\r' < "$conf" > "$new") || die write_failed
+    "$BIN" -n -c "$new" >/dev/null 2>&1 || { rm -f "$new"; die conf_rejected; }
+    oaddr=$(conf_address "$cur")
+    (umask 077; cp "$cur" "$old") || { rm -f "$new"; die write_failed; }
+    restore() {
+        mv -f "$old" "$cur"
+        [ "$oaddr" = "$addr" ] || ndm "interface $name ip address $oaddr" >/dev/null 2>&1
+        stop_one "$n"
+        [ -e "$ENGINE_ETC/t$n.off" ] || start_one "$n" "$name"
+    }
+    step router
+    if [ "$oaddr" != "$addr" ]; then
+        ndm "interface $name ip address $addr" || { rm -f "$new" "$old"; die router_rejected; }
+    fi
+    mv -f "$new" "$cur" || { rm -f "$old"; die write_failed; }
+    stop_one "$n"
+    nohs=0
+    if [ ! -e "$ENGINE_ETC/t$n.off" ]; then
+        step program
+        start_one "$n" "$name" || { restore; die engine_start_failed; }
+        step handshake
+        w=0 hw=$HANDSHAKE_WAIT
+        [ "$keep" != keep ] || [ "$hw" -le 10 ] || hw=10
+        until handshake_age "$n" >/dev/null; do
+            w=$((w + 2))
+            if [ "$w" -gt "$hw" ]; then
+                [ "$keep" = keep ] || { restore; die tunnel_no_handshake; }
+                nohs=1; break
+            fi
+            sleep 2
+        done
+    fi
+    step save
+    ndm "system configuration save" || { restore; die config_save_failed; }
+    rm -f "$old"
+    log "replaced $name slot=$n"
+    [ "$nohs" = 0 ] || printf 'info.handshake=none\n'
     echo "result=changed"
 }
 
@@ -322,7 +381,8 @@ sentinel_reload() { [ ! -x /opt/bin/vward-sentinel.sh ] || /opt/bin/vward-sentin
 
 case "${1:-}" in
     install) op_install ;;
-    add) [ "$#" -eq 3 ] || die usage 64; op_add "$2" "$3"; sentinel_reload ;;
+    add) [ "$#" -eq 3 ] || [ "$#" -eq 4 ] || die usage 64; op_add "$2" "$3" "${4:-}"; sentinel_reload ;;
+    replace) [ "$#" -eq 3 ] || [ "$#" -eq 4 ] || die usage 64; op_replace "$2" "$3" "${4:-}"; sentinel_reload ;;
     remove) [ "$#" -eq 2 ] || die usage 64; op_remove "$2"; sentinel_reload ;;
     restart) [ "$#" -eq 2 ] || die usage 64; op_restart "$2" ;;
     disable) [ "$#" -eq 2 ] || die usage 64; op_disable "$2" ;;
