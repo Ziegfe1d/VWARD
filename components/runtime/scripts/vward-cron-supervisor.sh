@@ -200,7 +200,10 @@ watch_services()
     case "$UP" in ''|*[!0-9]*) return 0 ;; esac
     if [ "$UP" -ge 90 ] && [ "$UP" -lt "$AGH_WATCH_SECONDS" ] && command -v vward_agh_ensure >/dev/null 2>&1; then
         VWARD_UNNICE=$UNNICE vward_agh_ensure "$AGH_INIT"
-        [ "$?" -ne 10 ] || log_event "AGH_STARTED|uptime=$UP"
+        case "$?" in
+            10) log_event "AGH_STARTED|uptime=$UP" ;;
+            13) [ "${AGH_BROKEN_LOGGED:-0}" = 1 ] || { AGH_BROKEN_LOGGED=1; log_event "AGH_BINARY_BROKEN|uptime=$UP"; } ;;
+        esac
     fi
 
     # The real-time watcher (vward-sentinel) sees leaks within seconds; without it this

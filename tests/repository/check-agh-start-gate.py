@@ -109,11 +109,41 @@ vward_agh_ensure; echo $?'''
     uptime.write_text("90.0 1.0\n")
     if ensure(90) != ["10"]:
         fail("after a reboot the old bookkeeping must not hold the start back")
+    # A program that dies on --version is not started again and again: the state «broken» tells the Panel.
+    shutil.rmtree(tmp / "state", ignore_errors=True)
+    (tmp / "calls").unlink(missing_ok=True)
+    (bin_ / "S99adguardhome").write_text(f'#!/bin/sh\necho start >> "{tmp}/calls"\n')
+    bad = tmp / "badbin"; bad.mkdir()
+    (bad / "AdGuardHome").write_text("#!/bin/sh\necho 'fatal error: missing stackmap' >&2\nexit 2\n"); (bad / "AdGuardHome").chmod(0o755)
+
+    def ensure_bin(up, dirs):
+        uptime.write_text(f"{up}.5 1.0\n")
+        script = f'''PATH="{bin_}:$PATH" VWARD_AGH_STATE="{tmp}/state" VWARD_AGH_PIDFILES="{tmp}/agh.pid" VWARD_PROC="{tmp}/proc" VWARD_UPTIME_FILE="{uptime}" VWARD_AGH_BIN_DIRS="{dirs}"
+VWARD_AGH_INIT="{bin_}/S99adguardhome" . "{LIB}"
+vward_agh_ensure; echo $?'''
+        return subprocess.run(["sh", "-c", script], text=True, capture_output=True, timeout=30).stdout.strip()
+
+    if ensure_bin(800, str(bad)) != "13" or calls() != 0:
+        fail("a program that dies on --version must not be started")
+    if (tmp / "state/broken").read_text().strip() != "800|2|" + str(bad / "AdGuardHome"):
+        fail(f"the broken state: {(tmp / 'state/broken').read_text()!r}")
+    good = tmp / "goodbin"; good.mkdir()
+    (good / "AdGuardHome").write_text("#!/bin/sh\necho 'AdGuard Home, version v0.107.73'\n"); (good / "AdGuardHome").chmod(0o755)
+    if ensure_bin(801, f"{good} {bad}") != "10" or calls() != 1 or (tmp / "state/broken").exists():
+        fail("the first program on the start script's path decides: a good one starts and clears «broken»")
     # No start script.
     if subprocess.run(["sh", "-c", f'VWARD_AGH_STATE="{tmp}/s2" VWARD_UPTIME_FILE="{uptime}" . "{LIB}"; vward_agh_ensure "{tmp}/none"; echo $?'],
                       text=True, capture_output=True, env={"PATH": f"{bin_}:/usr/bin:/bin"}).stdout.strip() != "12":
         fail("a missing start script is reported")
 
+# The Panel says it.
+api = (ROOT / "web/cgi-bin/api.cgi").read_text()
+js = (ROOT / "web/assets/vward-console.js").read_text()
+for need in ('adguard_broken:($agh_broken != "")', '"${VWARD_AGH_STATE:-/tmp/vward-agh-start}/broken"'):
+    if need not in api:
+        fail(f"the API lacks {need}")
+if "sv.adguard === false && sv.adguard_broken" not in js or "'Программа AdGuard Home повреждена'" not in js:
+    fail("the Panel must say the AdGuard Home program is broken")
 # Both starters go through the gate.
 for path, need in (("components/runtime/scripts/vward-cron-supervisor.sh", "vward_agh_ensure"), ("components/runtime/scripts/vward-sentinel-act.sh", "vward_agh_ensure")):
     if need not in (ROOT / path).read_text():

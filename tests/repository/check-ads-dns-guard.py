@@ -46,6 +46,9 @@ if op == "-I":
     pos = 1
     if rest and rest[0].isdigit(): pos, rest = int(rest[0]), rest[1:]
     t[chain].insert(pos - 1, {"spec": spec(rest), "pkts": 0}); save()
+if op == "-S":
+    for r in t[chain]: print("-A %s %s" % (chain, r["spec"]))
+    sys.exit(0)
 if op in ("-D", "-C"):
     for i, r in enumerate(t[chain]):
         if r["spec"] == spec(rest):
@@ -87,6 +90,11 @@ FAKE_NETSTAT = r'''#!/bin/sh
 echo "udp        0      0 192.168.1.1:65053       0.0.0.0:*                           1234/AdGuardHome"
 '''
 
+FAKE_NSLOOKUP = r'''#!/bin/sh
+if [ -f "$FAKE_AGH_ANSWER" ] && [ "$(cat "$FAKE_AGH_ANSWER")" != 1 ]; then echo ";; connection timed out; no servers could be reached"; exit 1; fi
+printf 'Server:\t\t%s\nAddress:\t%s\n\nName:\t%s\nAddress: 93.184.216.34\n' "${2%%:*}" "$2" "$1"
+'''
+
 FAKE_CONTROL = r'''#!/bin/sh
 echo "$*" >> "$FAKE_CONTROL_LOG"
 echo "CONTROL=PASS"
@@ -118,7 +126,7 @@ def fail(msg):
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     bindir = tmp / "bin"; bindir.mkdir()
-    for name, body in (("iptables", FAKE_IPTABLES), ("curl", FAKE_CURL), ("netstat", FAKE_NETSTAT), ("control", FAKE_CONTROL)):
+    for name, body in (("iptables", FAKE_IPTABLES), ("curl", FAKE_CURL), ("netstat", FAKE_NETSTAT), ("control", FAKE_CONTROL), ("nslookup", FAKE_NSLOOKUP)):
         f = bindir / name; f.write_text(body); f.chmod(0o755)
     (tmp / "profile.sh").write_text(FAKE_PROFILE)
     etc = tmp / "etc"; etc.mkdir()
@@ -142,6 +150,8 @@ with tempfile.TemporaryDirectory() as tmp:
         "VWARD_DNS_GUARD_STATE": str(tmp / "guard.state"), "VWARD_DNS_GUARD_LOCK": str(tmp / "guard.lock"),
         "VWARD_DNS_GUARD_BIN": "/opt/bin/vward-ads-privacy-dns-guard.sh",
         "VWARD_DOH_IPS": "1.1.1.1 8.8.8.8",
+        "VWARD_NSLOOKUP": str(bindir / "nslookup"), "VWARD_DNS_GUARD_PARK": str(tmp / "parked"),
+        "VWARD_DNS_GUARD_PROBE_FAILS": str(tmp / "probe-fails"), "FAKE_AGH_ANSWER": str(tmp / "agh-answer"),
         "FAKE_FW": str(fw), "FAKE_ROUTER": str(router), "FAKE_AGH_YAML": str(yaml), "FAKE_AGH_UP": str(up),
         "FAKE_CONTROL_LOG": str(tmp / "control.log"),
         "VWARD_ROOT_PREFIX": str(tmp / "root"), "TMPDIR": str(tmp),
@@ -266,11 +276,73 @@ with tempfile.TemporaryDirectory() as tmp:
         if "agh filter-enable https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/doh.txt 0" not in (tmp / "control.log").read_text():
             fail(f"{shell[0]} the DoH list must be switched off")
 
-        # Off, and nothing left behind: the minute tick starts no firewall process.
-        (tmp / "guard.state").unlink()
+        # Fail-open for the owner's own redirect (a netfilter.d hook outside VWARD): into a port nothing
+        # answers on, the DNS of the whole home is gone. The redirect comes off, and goes back when
+        # AdGuard Home answers again; a port that is open but silent counts as dead on the second tick.
+        OWN = ["-s 192.168.1.0/24 -d 192.168.1.1/32 -i br0 -p tcp -m tcp --dport 53 -j REDIRECT --to-ports 65053",
+               "-s 192.168.1.0/24 -d 192.168.1.1/32 -i br0 -p udp -m udp --dport 53 -j REDIRECT --to-ports 65053"]
+        park, answer = tmp / "parked", tmp / "agh-answer"
+
+        def own_rules():
+            for spec in OWN:
+                subprocess.run([str(bindir / "iptables"), "-t", "nat", "-I", "PREROUTING", "1", *spec.split()], env=env, check=True)
+
+        def guardlog():
+            return "".join(f.read_text() for f in sorted((tmp / "log").glob("*")))
+
+        def parked():
+            return park.read_text().splitlines() if park.exists() else []
+
+        for f in (park, tmp / "probe-fails"):
+            f.unlink(missing_ok=True)
+        fw.write_text(json.dumps({})); up.write_text("1"); answer.write_text("1")
+        own_rules()
+        run("tick", shell=shell)
+        if sorted(chain("nat", "PREROUTING")) != sorted(OWN) or parked():
+            fail(f"{shell[0]} AdGuard Home answers: its redirect must stay: {chain('nat', 'PREROUTING')}")
+        up.write_text("0")
+        run("tick", shell=shell)
+        if chain("nat", "PREROUTING") or len(parked()) != 2 or "DNS_FAILOPEN" not in guardlog():
+            fail(f"{shell[0]} AdGuard Home dead: the redirect must come off: {chain('nat', 'PREROUTING')} {parked()}")
+        up.write_text("1")
+        run("tick", shell=shell)
+        if sorted(chain("nat", "PREROUTING")) != sorted(OWN) or parked() or "DNS_RESTORED" not in guardlog():
+            fail(f"{shell[0]} AdGuard Home back: the redirect must return: {chain('nat', 'PREROUTING')} {parked()}")
+        answer.write_text("0")
+        run("tick", shell=shell)
+        if sorted(chain("nat", "PREROUTING")) != sorted(OWN):
+            fail(f"{shell[0]} one silent minute is not a death")
+        run("tick", shell=shell)
+        if chain("nat", "PREROUTING") or len(parked()) != 2:
+            fail(f"{shell[0]} open but silent twice: the redirect must come off: {chain('nat', 'PREROUTING')}")
+        answer.write_text("1")
+        run("tick", shell=shell)
+        if sorted(chain("nat", "PREROUTING")) != sorted(OWN) or parked():
+            fail(f"{shell[0]} answering again: the redirect must return")
+        # Keenetic rebuilds its firewall while AdGuard Home is down: the owner's hook puts the redirect
+        # back unasked; VWARD's hook, right after it, takes it off at once.
+        up.write_text("0"); fw.write_text(json.dumps({})); own_rules()
+        run("hook", "nat", shell=shell)
+        if chain("nat", "PREROUTING") or len(parked()) != 2:
+            fail(f"{shell[0]} firewall rebuild with AdGuard Home down: {chain('nat', 'PREROUTING')} {parked()}")
+        up.write_text("1")
+        run("tick", shell=shell)
+        if sorted(chain("nat", "PREROUTING")) != sorted(OWN) or parked():
+            fail(f"{shell[0]} back after the hook: the redirect must return")
+        # Switched off in the settings: the redirect is left alone.
+        (etc / "dns-guard.conf").write_text("ENFORCE=0\nBYPASS=0\nEXCLUDE=\nFAILOPEN=0\n")
+        up.write_text("0")
+        run("tick", shell=shell)
+        if sorted(chain("nat", "PREROUTING")) != sorted(OWN) or parked():
+            fail(f"{shell[0]} FAILOPEN=0 must leave the redirect")
+        (etc / "dns-guard.conf").unlink(); up.write_text("1")
+        fw.write_text(json.dumps({})); answer.unlink()
+
+        # Off, and nothing left behind: the minute tick changes no rule (it only reads the table).
+        (tmp / "guard.state").unlink(missing_ok=True)
         before = len((tmp / "fw.json.log").read_text().splitlines())
         run("tick", shell=shell)
-        if len((tmp / "fw.json.log").read_text().splitlines()) != before:
-            fail(f"{shell[0]} an idle tick must not call iptables")
+        if [l for l in (tmp / "fw.json.log").read_text().splitlines()[before:] if l != "-t nat -S PREROUTING"]:
+            fail(f"{shell[0]} an idle tick must only read iptables")
 
 print("ADS_DNS_GUARD=PASS")

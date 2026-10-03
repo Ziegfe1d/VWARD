@@ -11,6 +11,10 @@
 # Devices in the exclusion list (by MAC) are left alone.  When AdGuard Home's DNS
 # port is closed the redirect is taken off, so the home is never left without DNS.
 # Keenetic rebuilds its firewall now and then: a netfilter.d hook puts the rules back.
+# Fail-open for the owner's own redirect too (FAILOPEN=1, the default): a netfilter.d hook of the
+# owner's that sends port 53 of the router into AdGuard Home never asks whether AdGuard Home lives,
+# so when it dies every device of the home loses DNS. A redirect into a port nothing answers on is
+# taken off (parked in RAM) and put back when AdGuard Home answers again.
 #
 #   vward-ads-privacy-dns-guard.sh status
 #   vward-ads-privacy-dns-guard.sh set enforce|bypass 0|1
@@ -45,9 +49,14 @@ DOH_LIST_NAME="HaGeZi Encrypted DNS Bypass"
 # closes the apps that speak DoH to a fixed address without a DNS lookup.
 DOH_IPS="${VWARD_DOH_IPS:-1.1.1.1 1.0.0.1 1.1.1.2 1.0.0.2 1.1.1.3 1.0.0.3 8.8.8.8 8.8.4.4 9.9.9.9 149.112.112.112 9.9.9.10 149.112.112.10 9.9.9.11 149.112.112.11 94.140.14.14 94.140.15.15 94.140.14.140 94.140.14.141 208.67.222.222 208.67.220.220 77.88.8.8 77.88.8.1 77.88.8.88 77.88.8.2 45.90.28.0 45.90.30.0 185.228.168.9 185.228.169.9 76.76.2.0 76.76.10.0}"
 
+NSLOOKUP="${VWARD_NSLOOKUP:-nslookup}"
+PARK="${VWARD_DNS_GUARD_PARK:-/tmp/vward-dns-guard.parked}"
+PROBE_FAILS="${VWARD_DNS_GUARD_PROBE_FAILS:-/tmp/vward-dns-guard.probe-fails}"
+PROBE_HOST="${VWARD_DNS_GUARD_PROBE_HOST:-example.com}"
+
 OP="${1:-status}"
 
-ENFORCE=0 BYPASS=0 EXCLUDE=""
+ENFORCE=0 BYPASS=0 EXCLUDE="" FAILOPEN=1
 conf_load()
 {
     [ -r "$CONF" ] || return 0
@@ -56,6 +65,7 @@ conf_load()
             ENFORCE) case "$V" in 1) ENFORCE=1 ;; *) ENFORCE=0 ;; esac ;;
             BYPASS) case "$V" in 1) BYPASS=1 ;; *) BYPASS=0 ;; esac ;;
             EXCLUDE) EXCLUDE=$V ;;
+            FAILOPEN) case "$V" in 0) FAILOPEN=0 ;; *) FAILOPEN=1 ;; esac ;;
         esac
     done < "$CONF"
 }
@@ -63,7 +73,7 @@ conf_load()
 conf_write()
 {
     mkdir -p "$(dirname "$CONF")" || return 1
-    printf 'ENFORCE=%s\nBYPASS=%s\nEXCLUDE=%s\n' "$ENFORCE" "$BYPASS" "$EXCLUDE" > "$CONF.tmp.$$" &&
+    printf 'ENFORCE=%s\nBYPASS=%s\nEXCLUDE=%s\nFAILOPEN=%s\n' "$ENFORCE" "$BYPASS" "$EXCLUDE" "$FAILOPEN" > "$CONF.tmp.$$" &&
         chmod 0600 "$CONF.tmp.$$" && mv -f "$CONF.tmp.$$" "$CONF"
 }
 
@@ -99,6 +109,21 @@ agh_port()
 agh_up()
 {
     "$NETSTAT" -lnu 2>/dev/null | awk -v p=":$1" '$4 ~ p "$" {f = 1} END {exit !f}'
+}
+
+# AdGuard Home answers a DNS query on its port (BusyBox nslookup takes «address:port»); waits at most 5 s.
+agh_answers()
+{
+    aa_out="/tmp/vward-dns-guard.probe.$$"
+    "$NSLOOKUP" "$PROBE_HOST" "$LAN:$1" > "$aa_out" 2>&1 &
+    aa_pid=$!
+    aa_i=0
+    while kill -0 "$aa_pid" 2>/dev/null && [ "$aa_i" -lt 5 ]; do sleep 1; aa_i=$((aa_i + 1)); done
+    kill "$aa_pid" 2>/dev/null
+    awk '/^Name:/ {f = 1} f && /^Address/ {n++} END {exit !n}' "$aa_out"
+    aa_rc=$?
+    rm -f "$aa_out"
+    return "$aa_rc"
 }
 
 valid_mac() { case "$1" in [0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]) return 0 ;; esac; return 1; }
@@ -226,6 +251,63 @@ upstream_state()
 }
 
 # reconcile FULL: rules as the settings and AdGuard Home want them.
+# The nat PREROUTING rules that send port 53 into AdGuard Home's port, whoever put them there
+# (VWARD's own go through the VWARD_DNS chain and are handled by reconcile).
+foreign_rules() { ipt -t nat -S PREROUTING | grep -e '--dport 53 ' | grep -e "-j REDIRECT --to-ports $1\$" | grep -v '"'; }
+
+failopen_park()
+{
+    fp_rules=$(foreign_rules "$1")
+    [ -n "$fp_rules" ] || return 0
+    { [ ! -r "$PARK" ] || cat "$PARK"; printf '%s\n' "$fp_rules"; } | sort -u > "$PARK.new" && mv -f "$PARK.new" "$PARK"
+    printf '%s\n' "$fp_rules" | while IFS= read -r fp_r; do
+        # shellcheck disable=SC2046
+        ipt -t nat $(printf '%s' "$fp_r" | sed 's/^-A /-D /')
+    done
+    ads_log "DNS_FAILOPEN|port=$1|rules=$(printf '%s\n' "$fp_rules" | wc -l | tr -d ' ')|redirect taken off: nothing answers there"
+}
+
+failopen_restore()
+{
+    [ -s "$PARK" ] || return 0
+    fr_bad=0 fr_n=0
+    while IFS= read -r fr_r; do
+        [ -n "$fr_r" ] || continue
+        # shellcheck disable=SC2046
+        if ipt -t nat $(printf '%s' "$fr_r" | sed 's/^-A /-C /'); then :
+        elif ipt -t nat $(printf '%s' "$fr_r" | sed 's/^-A PREROUTING /-I PREROUTING 1 /'); then fr_n=$((fr_n + 1))
+        else fr_bad=1; fi
+    done < "$PARK"
+    [ "$fr_bad" = 1 ] || rm -f "$PARK"
+    ads_log "DNS_RESTORED|port=$1|rules=$fr_n|redirect put back: AdGuard Home answers again"
+}
+
+# MODE quick (the firewall hook: never waits): only whether the port is open.
+# MODE full (the minute tick): the port answers a query; open but silent twice in a row counts as dead.
+failopen_sync()
+{
+    [ "$FAILOPEN" = 1 ] || return 0
+    fo_port=$(agh_port)
+    case "$fo_port" in ''|*[!0-9]*) return 0 ;; esac
+    fo_open=0; agh_up "$fo_port" && fo_open=1
+    fo_ok=0
+    if [ "$fo_open" = 1 ]; then
+        if [ "$1" = quick ]; then fo_ok=1; elif agh_answers "$fo_port"; then fo_ok=1; fi
+    fi
+    if [ "$fo_ok" = 1 ]; then
+        rm -f "$PROBE_FAILS"
+        failopen_restore "$fo_port"
+        return 0
+    fi
+    if [ "$fo_open" = 1 ]; then
+        fo_n=0; [ ! -r "$PROBE_FAILS" ] || read -r fo_n < "$PROBE_FAILS"
+        case "$fo_n" in ''|*[!0-9]*) fo_n=0 ;; esac
+        fo_n=$((fo_n + 1)); echo "$fo_n" > "$PROBE_FAILS"
+        [ "$fo_n" -ge 2 ] || return 0
+    fi
+    failopen_park "$fo_port"
+}
+
 reconcile()
 {
     rc_full=$1
@@ -275,6 +357,8 @@ case "$OP" in
         echo "enforce=$ENFORCE"
         echo "bypass=$BYPASS"
         echo "exclude=$EXCLUDE"
+        echo "failopen=$FAILOPEN"
+        echo "parked=$([ -s "$PARK" ] && wc -l < "$PARK" | tr -d ' ' || echo 0)"
         if profile_load; then
             PORT=$(agh_port)
             UP=0; [ -n "$PORT" ] && agh_up "$PORT" && UP=1
@@ -289,6 +373,11 @@ case "$OP" in
         exit 0 ;;
     hook)
         # Called by Keenetic while it rebuilds the firewall: quick, and never blocking.
+        # The owner's own redirect (hook 050) was just put back, asked or not: off again if nothing listens.
+        if [ "$FAILOPEN" = 1 ] && [ "${2:-}" = nat ] && ads_lock_acquire "$LOCK" 60; then
+            profile_load && failopen_sync quick
+            ads_lock_release "$LOCK"
+        fi
         [ "$ENFORCE" = 1 ] || [ "$BYPASS" = 1 ] || exit 0
         ads_lock_acquire "$LOCK" 60 || exit 0
         trap 'ads_lock_release "$LOCK"' EXIT
@@ -303,6 +392,16 @@ case "$OP" in
     set|apply|tick) ;;
     *) echo "usage: $0 status|set enforce|bypass 0|1|set exclude MACS|apply|tick|hook nat|filter" >&2; exit 64 ;;
 esac
+
+# Fail-open for a redirect into a dead AdGuard Home (the owner's own hook included).
+if [ "$OP" = tick ] && [ "$FAILOPEN" = 1 ]; then
+    if [ -s "$PARK" ] || ipt -t nat -S PREROUTING | grep -q -e '--dport 53 .*REDIRECT --to-ports'; then
+        if ads_lock_acquire "$LOCK" 60; then
+            profile_load && failopen_sync full
+            ads_lock_release "$LOCK"
+        fi
+    fi
+fi
 
 # Nothing on and nothing left over: the minute tick costs no process.
 if [ "$OP" = tick ] && [ "$ENFORCE" = 0 ] && [ "$BYPASS" = 0 ] && [ ! -e "$HOOK" ] && [ ! -e "$STATE" ]; then

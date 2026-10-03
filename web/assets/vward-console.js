@@ -801,6 +801,7 @@ function notifications() {
   if (qa.last_at && qa.last_to && Date.now() / 1000 - qa.last_at < 3600) n.push({ sev: 'news', icon: 'route', title: 'Туннель выбран по качеству', text: 'маршруты VWARD: «' + tunLabel(qa.last_from || '') + '» → «' + tunLabel(qa.last_to) + '», ' + fmtTime(qa.last_at * 1000), to: 'vpn' });
   if (lm.length) n.push({ sev: 'warn', title: lm.length === 1 ? 'Список переведён на другой туннель' : 'Списки переведены на другие туннели', text: lm.map(m => listLabel(m.name) + ': «' + tunLabel(m.from) + '» → «' + tunLabel(m.to) + '»').join(', '), to: 'vpn' });
   if (isTrue(wg.failopen_active)) n.push({ sev: 'warn', title: 'VPN недоступен', text: 'Трафик списков VPN временно идёт напрямую', to: 'vpn' });
+  if (sv.adguard === false && sv.adguard_broken) n.push({ sev: 'crit', title: 'Программа AdGuard Home повреждена', text: 'Она не запускается даже с --version, поэтому VWARD её не перезапускает. Замените файл официальной сборкой AdGuard Home той же версии.', to: 'd-stability' });
   if (sv.crond === false || sv.supervisor === false) n.push({ sev: 'crit', title: 'Задания по расписанию остановлены', text: 'cron или supervisor не запущен', to: 'd-cron' });
   const total = num(stg.total_kb), free = num(stg.free_kb);
   if (total && free != null && free / total < 0.1) n.push({ sev: 'warn', title: 'Мало места в хранилище', text: 'свободно ' + fmtKB(free), to: 'system' });

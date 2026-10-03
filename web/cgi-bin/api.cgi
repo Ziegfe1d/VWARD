@@ -2735,6 +2735,9 @@ CROND_PID=${1:--}
 [ "$CROND_PID" != - ] || CROND_PID=""
 SUPERVISOR=${2:-0}
 ADGUARD=${3:-0}
+# The start gate found the program itself broken (it dies on --version): see vward_agh_ensure.
+AGH_BROKEN=""
+[ ! -r "${VWARD_AGH_STATE:-/tmp/vward-agh-start}/broken" ] || read -r AGH_BROKEN < "${VWARD_AGH_STATE:-/tmp/vward-agh-start}/broken" 2>/dev/null
 LIVE_COUNT=${4:-0}
 TCPDUMP_COUNT=${5:-0}
 CROND=0
@@ -2803,6 +2806,7 @@ header_json
   --arg crond_pid "$CROND_PID" \
   --arg supervisor "$SUPERVISOR" \
   --arg adguard "$ADGUARD" \
+  --arg agh_broken "$AGH_BROKEN" \
   --arg uptime "$UPTIME_SEC" \
   --arg grc "$GRC" \
   --arg glast "$GLAST" \
@@ -2938,6 +2942,7 @@ header_json
     crond_pid:$crond_pid,
     supervisor:($supervisor=="1"),
     adguard:($adguard=="1"),
+    adguard_broken:($agh_broken != ""),
     adaptive_live_pid:$live_pid,
     adaptive_live_count:($live_count|tonumber? // 0),
     tcpdump_count:($tcpdump_count|tonumber? // 0),

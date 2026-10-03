@@ -143,6 +143,8 @@ with tempfile.TemporaryDirectory() as tmp:
         dns_on.clear()
         if not wait_for(lambda: "dns-fail" in acts(), 15):
             fail(f"DNS without answers is reported: {acts()} {st()}")
+        # The action is written the moment the watcher decides; its state file a sample later.
+        wait_for(lambda: int(st().get("dns_fail", "0")) >= 1, 5)
         s = st()
         if not s.get("watch", "").startswith("engine|") or int(s["dns_fail"]) < 1 or s["busy"] != "0" or s["cpus"] != "4":
             fail(f"state: {s}")

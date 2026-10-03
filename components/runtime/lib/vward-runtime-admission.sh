@@ -297,12 +297,25 @@ vward_locks_sweep() {
 #   number of tries is not limited, one success resets it;
 # - a PID file that points to nothing, or to another program, is removed before a start (the
 #   start script takes such a file for «already running» and does nothing).
-# vward_agh_ensure [INIT]: 0 running, 10 started now, 11 waiting for the grace, 12 no start script.
+# A program that dies on «--version» (a broken file; seen on a router in October 2026) is not started
+# again and again: the state «broken» (uptime|exit code|path) tells the Panel, 13 is returned.
+# vward_agh_ensure [INIT]: 0 running, 10 started now, 11 waiting for the grace, 12 no start script,
+# 13 the program itself is broken.
 # Bookkeeping in VWARD_AGH_STATE (RAM): «last» (uptime seconds of the last start) and «fails».
 VWARD_AGH_INIT=${VWARD_AGH_INIT:-/opt/etc/init.d/S99adguardhome}
 VWARD_AGH_STATE=${VWARD_AGH_STATE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-agh-start}
 VWARD_AGH_PIDFILES=${VWARD_AGH_PIDFILES:-${VWARD_ROOT_PREFIX:-}/opt/var/run/AdGuardHome.pid ${VWARD_ROOT_PREFIX:-}/opt/var/run/adguardhome.pid}
 VWARD_AGH_GRACE=${VWARD_AGH_GRACE:-120}
+# Where the start script finds the program (its PATH order: /opt/sbin before /opt/bin).
+VWARD_AGH_BIN_DIRS=${VWARD_AGH_BIN_DIRS:-/opt/sbin /opt/bin /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin}
+
+vward_agh_binary()
+{
+    for vb_d in $VWARD_AGH_BIN_DIRS; do
+        [ -f "$vb_d/AdGuardHome" ] && [ -x "$vb_d/AdGuardHome" ] && { printf '%s\n' "$vb_d/AdGuardHome"; return 0; }
+    done
+    return 1
+}
 
 vward_agh_pidfiles_clean() {
     for va_f in $VWARD_AGH_PIDFILES; do
@@ -354,6 +367,15 @@ vward_agh_ensure() {
         fi
         # The previous start did not bring it up: the next pause is longer.
         va_fails=$((va_fails + 1))
+    fi
+    if va_bin=$(vward_agh_binary); then
+        "$va_bin" --version >/dev/null 2>&1; va_rc=$?
+        if [ "$va_rc" != 0 ]; then
+            printf '%s|%s|%s\n' "$va_now" "$va_rc" "$va_bin" > "$VWARD_AGH_STATE/broken"
+            vward_lock_drop "$VWARD_AGH_STATE/lock"
+            return 13
+        fi
+        rm -f "$VWARD_AGH_STATE/broken"
     fi
     vward_agh_pidfiles_clean
     printf '%s\n' "$va_now" > "$VWARD_AGH_STATE/last"

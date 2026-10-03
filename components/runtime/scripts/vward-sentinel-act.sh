@@ -97,6 +97,7 @@ case "$EVENT" in
                 vward_agh_ensure "$AGH_INIT"
                 case "$?" in
                     10) log "dns-fail|adguardhome-start" ;;
+                    13) log "dns-fail|adguardhome-binary-broken"; exit 1 ;;
                     *) log "dns-fail|adguardhome-waiting"; exit 1 ;;
                 esac
             else
