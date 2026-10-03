@@ -66,11 +66,16 @@ recover_critical()
 
 # Boot watch. At boot the home network may come up after the Panel's web server, which
 # then cannot bind its address; it is started again here, and after a crash too.
-# AdGuard Home only in the first 10 minutes after boot: its start script does not always
-# bring it up, and later a stopped AdGuard Home is the owner's choice.
+# AdGuard Home only in the first half hour after boot: its start script does not always
+# bring it up, and later a stopped AdGuard Home is the owner's choice. Every start goes
+# through one gate (vward_agh_ensure): a start is not repeated before 120 s have passed,
+# the pause grows after each failure, an orphaned PID file is removed first.
 CONSOLE_INIT=${VWARD_CONSOLE_INIT:-/opt/etc/init.d/S93vward-console}
 CONSOLE_PIDFILE=${VWARD_CONSOLE_PIDFILE:-/opt/var/run/vward-console-lighttpd.pid}
 AGH_INIT=${VWARD_AGH_INIT:-/opt/etc/init.d/S99adguardhome}
+AGH_WATCH_SECONDS=${VWARD_AGH_WATCH_SECONDS:-1800}
+VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+[ ! -r "$VWARD_ADMISSION_LIB" ] || . "$VWARD_ADMISSION_LIB"
 UPTIME_FILE=${VWARD_UPTIME_FILE:-/proc/uptime}
 WATCH_EVERY=6
 PANEL_DOWN=0
@@ -193,10 +198,9 @@ watch_services()
     [ ! -r "$UPTIME_FILE" ] || read -r UP _ < "$UPTIME_FILE" || :
     UP=${UP%%.*}
     case "$UP" in ''|*[!0-9]*) return 0 ;; esac
-    if [ "$UP" -ge 90 ] && [ "$UP" -lt 600 ] && [ -x "$AGH_INIT" ] &&
-       ! pidof AdGuardHome >/dev/null 2>&1; then
-        $UNNICE "$AGH_INIT" start </dev/null >/dev/null 2>&1
-        log_event "AGH_STARTED|uptime=$UP"
+    if [ "$UP" -ge 90 ] && [ "$UP" -lt "$AGH_WATCH_SECONDS" ] && command -v vward_agh_ensure >/dev/null 2>&1; then
+        VWARD_UNNICE=$UNNICE vward_agh_ensure "$AGH_INIT"
+        [ "$?" -ne 10 ] || log_event "AGH_STARTED|uptime=$UP"
     fi
 
     # The real-time watcher (vward-sentinel) sees leaks within seconds; without it this

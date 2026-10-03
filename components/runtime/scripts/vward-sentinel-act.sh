@@ -21,6 +21,7 @@ INITD=${VWARD_INITD:-/opt/etc/init.d}
 BIN_DIR=${VWARD_BIN_DIR:-/opt/bin}
 CONSOLE_PIDFILE=${VWARD_CONSOLE_PIDFILE:-/opt/var/run/vward-console-lighttpd.pid}
 AGH_INIT=${VWARD_AGH_INIT:-$INITD/S99adguardhome}
+VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 
 log() { mkdir -p "${LOG%/*}" 2>/dev/null; printf '%s|ACT|%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG" 2>/dev/null; }
@@ -91,8 +92,17 @@ case "$EVENT" in
         ;;
     dns-fail)
         if [ -x "$AGH_INIT" ] && ! pidof AdGuardHome >/dev/null 2>&1; then
-            log "dns-fail|adguardhome-start"
-            "$AGH_INIT" start </dev/null >/dev/null 2>&1
+            # One gate for every starter: not again within 120 s, growing pauses, no orphaned PID file.
+            if [ -r "$VWARD_ADMISSION_LIB" ] && . "$VWARD_ADMISSION_LIB" && command -v vward_agh_ensure >/dev/null 2>&1; then
+                vward_agh_ensure "$AGH_INIT"
+                case "$?" in
+                    10) log "dns-fail|adguardhome-start" ;;
+                    *) log "dns-fail|adguardhome-waiting"; exit 1 ;;
+                esac
+            else
+                log "dns-fail|adguardhome-start"
+                "$AGH_INIT" start </dev/null >/dev/null 2>&1
+            fi
         else
             log "dns-fail|nothing-to-start"
             exit 1

@@ -792,6 +792,8 @@ function notifications() {
   const tunnels = wg.interfaces || [], down = tunnels.filter(t => !isTrue(t.connected) && !tunOff(t)), swOff = tunnels.filter(tunOff), defOff = swOff.find(t => t.name === prof().tunnel_interface);
   // Switched off in Keenetic's own settings: not «no connection», and the lists on it go direct.
   if (defOff) n.push({ sev: 'warn', title: 'Туннель по умолчанию выключен в Keenetic', text: '«' + tunLabel(defOff.name) + '»: списки VPN идут напрямую. Включите его на странице туннеля.', to: 't-' + defOff.name });
+  // Keenetic takes no two tunnels with one address: the second one never connects.
+  tunDupAddresses(tunnels).forEach(d => n.push({ sev: 'warn', title: 'У двух туннелей один адрес', text: d.names.map(tunLabel).join(', ') + ': ' + d.addr + '. Keenetic не соединит второй туннель - замените конфигурацию одного из них.', to: 't-' + d.names[1] }));
   if (down.length) n.push({ sev: 'warn', title: down.length === tunnels.length ? 'VPN не в сети' : 'Не все туннели в сети', text: down.map(t => t.description || t.name).join(', '), to: 'vpn' });
   if (S.tq && S.tq.fallback_from) n.push({ sev: 'warn', title: '«' + tunLabel(S.tq.fallback_from) + '» не отвечает', text: 'маршруты VWARD переведены на «' + tunLabel(prof().tunnel_interface) + '»', to: 'vpn' });
   const lm = (S.tq && S.tq.lists_moved) || [];
@@ -813,6 +815,12 @@ function notifications() {
   if (S.ads && S.ads.paused) n.push({ sev: 'warn', title: 'Блокировка рекламы на паузе', text: 'реклама не блокируется', to: 'ads' });
   if (awgLost().length) n.push({ sev: 'warn', title: 'Туннели не подключатся', text: awgLost().map(x => x.description || x.name).join(', ') + ': загрузите их файлы - VWARD поднимет их в контуре', to: 'vpn' });
   return n;
+}
+// Tunnels that share one address inside the tunnel: [{ addr, names }].
+function tunDupAddresses(tunnels) {
+  const by = {};
+  (tunnels || []).forEach(t => { const a = String(t.address || '').split('/')[0].trim(); if (/^\d+\.\d+\.\d+\.\d+$/.test(a)) (by[a] = by[a] || []).push(t.name); });
+  return Object.keys(by).filter(a => by[a].length > 1).map(a => ({ addr: a, names: by[a] }));
 }
 function plural(n, one, few, many) { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; }
 function phaseText(p) { return ({ IDLE: 'Ожидание', CHECKING: 'Проверка', AVAILABLE: 'Доступно обновление', VERIFIED: 'Проверено', BACKING_UP: 'Резервная копия', INSTALLING: 'Установка', VERIFYING: 'Проверка установки', COMMIT_PREPARED: 'Завершение', COMMITTED: 'Установлено', ROLLING_BACK: 'Откат', FAILED: 'Ошибка', RECOVERY_REQUIRED: 'Нужно восстановление' })[p] || p || '—'; }

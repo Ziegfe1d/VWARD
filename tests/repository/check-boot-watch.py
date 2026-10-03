@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Boot watch in the cron supervisor: the Panel's web server is started again when it is
 not running (at boot the home network may come up after it) and a failed start is logged
-once; AdGuard Home is started only between 90 s and 10 minutes after boot and only when
-it is not running at all.
+once; AdGuard Home is started only between 90 s and half an hour after boot and only when
+it is not running at all (through the shared gate: tests/repository/check-agh-start-gate.py).
 
 watch_services is taken from vward-cron-supervisor.sh as it is and run with stand-ins."""
 
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -32,6 +33,8 @@ with tempfile.TemporaryDirectory() as tmp:
     harness.write_text(f"""PATH="{bin_}:$PATH"
 VWARD_CONSOLE_INIT="{bin_}/console" VWARD_CONSOLE_PIDFILE="{tmp}/console.pid"
 VWARD_AGH_INIT="{bin_}/agh" VWARD_UPTIME_FILE="{tmp}/uptime"
+VWARD_ADMISSION_LIB="{ROOT}/components/runtime/lib/vward-runtime-admission.sh" VWARD_AGH_STATE="{tmp}/aghstate" VWARD_AGH_PIDFILES="{tmp}/agh.pid"
+[ ! -r "$VWARD_ADMISSION_LIB" ] || . "$VWARD_ADMISSION_LIB"
 log_event() {{ echo "$*" >> "{tmp}/log"; }}
 {FUNC}
 for i in $(seq "$1"); do watch_services; done
@@ -40,6 +43,7 @@ for i in $(seq "$1"); do watch_services; done
     def run(uptime, times=1):
         for f in ("calls", "log"):
             (tmp / f).unlink(missing_ok=True)
+        shutil.rmtree(tmp / "aghstate", ignore_errors=True)
         (tmp / "uptime").write_text(f"{uptime}.42 100.0\n")
         subprocess.run(["sh", str(harness), str(times)], check=True, timeout=30)
         read = lambda n: (tmp / n).read_text().split("\n")[:-1] if (tmp / n).exists() else []
@@ -59,7 +63,7 @@ for i in $(seq "$1"); do watch_services; done
     if calls != ["agh start"] or log != ["AGH_STARTED|uptime=120"]:
         fail(f"AdGuard Home after boot: {calls} {log}")
     # Too early (its own script is still starting it), too late (owner's choice), running.
-    for up in (30, 900):
+    for up in (30, 2400):
         if run(up)[0]:
             fail(f"AdGuard Home must be left alone at uptime {up}")
     (tmp / "agh.running").write_text("")

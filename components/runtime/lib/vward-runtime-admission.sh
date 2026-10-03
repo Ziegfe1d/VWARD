@@ -286,3 +286,79 @@ vward_locks_sweep() {
     done
     return 0
 }
+
+# ---- AdGuard Home: one gate for every starter ---------------------------------------------
+# Several programs start AdGuard Home (the supervisor at boot, the real-time watcher when DNS
+# stops answering). It loads its lists for a minute or more, so a second starter that only
+# looked for the process restarted it again and again. Now every starter asks here:
+# - running: nothing to do;
+# - the last start is younger than the grace (120 s): wait;
+# - after each start that did not bring it up the pause doubles (120, 240, 480, 600 s), the
+#   number of tries is not limited, one success resets it;
+# - a PID file that points to nothing, or to another program, is removed before a start (the
+#   start script takes such a file for «already running» and does nothing).
+# vward_agh_ensure [INIT]: 0 running, 10 started now, 11 waiting for the grace, 12 no start script.
+# Bookkeeping in VWARD_AGH_STATE (RAM): «last» (uptime seconds of the last start) and «fails».
+VWARD_AGH_INIT=${VWARD_AGH_INIT:-/opt/etc/init.d/S99adguardhome}
+VWARD_AGH_STATE=${VWARD_AGH_STATE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-agh-start}
+VWARD_AGH_PIDFILES=${VWARD_AGH_PIDFILES:-${VWARD_ROOT_PREFIX:-}/opt/var/run/AdGuardHome.pid ${VWARD_ROOT_PREFIX:-}/opt/var/run/adguardhome.pid}
+VWARD_AGH_GRACE=${VWARD_AGH_GRACE:-120}
+
+vward_agh_pidfiles_clean() {
+    for va_f in $VWARD_AGH_PIDFILES; do
+        [ -f "$va_f" ] || continue
+        va_p=; { read -r va_p < "$va_f"; } 2>/dev/null || :
+        case "$va_p" in ''|*[!0-9]*) rm -f "$va_f"; continue ;; esac
+        va_c=; { read -r va_c < "${VWARD_PROC:-/proc}/$va_p/comm"; } 2>/dev/null || :
+        [ "$va_c" = AdGuardHome ] || rm -f "$va_f"
+    done
+}
+
+vward_agh_ensure() {
+    va_init=${1:-$VWARD_AGH_INIT}
+    va_now=; { read -r va_now _ < "${VWARD_UPTIME_FILE:-/proc/uptime}"; } 2>/dev/null || :
+    va_now=${va_now%%.*}
+    if pidof AdGuardHome >/dev/null 2>&1; then
+        # Running for a whole grace since the last start: that start worked, the books are clean.
+        # A program that dies a minute after every start keeps its growing pauses.
+        va_last=; [ ! -r "$VWARD_AGH_STATE/last" ] || read -r va_last < "$VWARD_AGH_STATE/last"
+        if [ -n "$va_last" ]; then
+            case "$va_last$va_now" in
+                *[!0-9]*|"$va_last") ;;
+                *) [ "$va_now" -lt "$va_last" ] || [ $((va_now - va_last)) -lt "$VWARD_AGH_GRACE" ] || rm -f "$VWARD_AGH_STATE/last" "$VWARD_AGH_STATE/fails" 2>/dev/null ;;
+            esac
+        fi
+        return 0
+    fi
+    [ -x "$va_init" ] || return 12
+    case "$va_now" in ''|*[!0-9]*) return 11 ;; esac
+    mkdir -p "$VWARD_AGH_STATE" 2>/dev/null || return 11
+    # One starter at a time: whoever holds the lock decides, the others wait.
+    vward_lock_take "$VWARD_AGH_STATE/lock" || return 11
+    va_last=; [ ! -r "$VWARD_AGH_STATE/last" ] || read -r va_last < "$VWARD_AGH_STATE/last"
+    va_fails=; [ ! -r "$VWARD_AGH_STATE/fails" ] || read -r va_fails < "$VWARD_AGH_STATE/fails"
+    case "$va_last" in ''|*[!0-9]*) va_last= ;; esac
+    case "$va_fails" in ''|*[!0-9]*) va_fails=0 ;; esac
+    va_pause=$VWARD_AGH_GRACE
+    if [ -n "$va_last" ]; then
+        # A reboot restarts the uptime: a «last» from the future is an old one.
+        [ "$va_last" -le "$va_now" ] || va_last=
+    fi
+    if [ -n "$va_last" ]; then
+        va_i=0
+        while [ "$va_i" -lt "$va_fails" ] && [ "$va_pause" -lt 600 ]; do va_pause=$((va_pause * 2)); va_i=$((va_i + 1)); done
+        [ "$va_pause" -le 600 ] || va_pause=600
+        if [ $((va_now - va_last)) -lt "$va_pause" ]; then
+            vward_lock_drop "$VWARD_AGH_STATE/lock"
+            return 11
+        fi
+        # The previous start did not bring it up: the next pause is longer.
+        va_fails=$((va_fails + 1))
+    fi
+    vward_agh_pidfiles_clean
+    printf '%s\n' "$va_now" > "$VWARD_AGH_STATE/last"
+    printf '%s\n' "$va_fails" > "$VWARD_AGH_STATE/fails"
+    vward_lock_drop "$VWARD_AGH_STATE/lock"
+    ${VWARD_UNNICE:-} "$va_init" start </dev/null >/dev/null 2>&1
+    return 10
+}

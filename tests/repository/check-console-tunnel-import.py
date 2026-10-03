@@ -59,6 +59,18 @@ if "amnezia-xray" not in res["other"].get("error", ""):
 if "повреждён" not in res["broken"].get("error", ""):
     fail(f"a broken key: {res['broken']}")
 
+# Two tunnels of one address: the notification names them (Keenetic connects only one).
+d0 = JS.index("function tunDupAddresses(tunnels) {")
+d1 = JS.index("function plural(n, one, few, many)")
+dup_js = JS[d0:d1] + "\nconsole.log(JSON.stringify([tunDupAddresses([{name:'W0',address:'10.8.16.6'},{name:'W1',address:'10.8.16.6/32'},{name:'W2',address:'10.9.0.2'},{name:'O1',address:''},{name:'V1'}]), tunDupAddresses([{name:'A',address:'10.1.1.1'},{name:'B',address:'10.1.1.2'}]), tunDupAddresses(null)]));"
+with tempfile.TemporaryDirectory() as t:
+    f = Path(t) / "d.js"; f.write_text(dup_js)
+    r = subprocess.run([node, str(f)], text=True, capture_output=True, timeout=60)
+if json.loads(r.stdout or "null") != [[{"addr": "10.8.16.6", "names": ["W0", "W1"]}], [], []]:
+    fail(f"tunnels with one address: {r.stdout!r} {r.stderr[-200:]}")
+if "tunDupAddresses(tunnels).forEach" not in JS or "'У двух туннелей один адрес'" not in JS:
+    fail("the notification for two tunnels with one address")
+
 # The form: messages stay in it, the questions exist.
 handler = JS[JS.index("  if (f === 'tunnel-conf') {"):JS.index("  if (f === 'agh-connect') {")]
 if "toast(" in handler:
