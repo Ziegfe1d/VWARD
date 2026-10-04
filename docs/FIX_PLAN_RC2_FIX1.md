@@ -126,3 +126,12 @@ Keenetic не принимает два туннеля с одним адрес�
 | 2 | Конфигурация AmneziaWG 2.0: «роутер не принял настройку awg» (KeeneticOS 5.01, `argument parse error`) | Недоделанный интерфейс убирается, тот же файл создаётся на программе AmneziaWG VWARD | `check-console-tunnel-add.py` |
 | 3 | Серверы Trojan подписки не видны | `trojan://` в движке Xray, в подписке и в Панели | `check-vless-engine.py` |
 | 4 | Журналы смотрятся по одному | «Все» - одна лента по времени | `check-console-logs-all.py` |
+
+## 9. Исправление 0.2.0-rc.2.fix.4 (критическое)
+
+Полная диагностика VLESS на роутере: REALITY (de30w:8443) - PASS во всех вариантах; xHTTP на
+том же сервере (de30w:443) - во всех 13 вариантах настроек одна ошибка Xray: `tls: failed to
+verify certificate: x509: certificate signed by unknown authority`. Xray (Go) ищет список
+удостоверяющих центров только в `/etc/ssl`, на Keenetic его нет; список Entware
+(`/opt/etc/ssl/certs/ca-certificates.crt`, пакет `ca-bundle` ставит установщик VWARD) теперь
+передаётся Xray через `SSL_CERT_FILE`. Тест: `check-vless-engine.py`.

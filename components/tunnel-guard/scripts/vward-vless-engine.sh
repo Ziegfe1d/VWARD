@@ -18,6 +18,15 @@
 # Output: "result=..." / "info.key=value" lines, or "error=<code>".
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+# Xray (Go) looks for the list of certificate authorities only in /etc/ssl, which KeeneticOS
+# does not have: every TLS server (xHTTP, gRPC, WebSocket, Trojan) failed with «certificate
+# signed by unknown authority» (Viva 2026-10-04; REALITY needs no list and worked). The list
+# is Entware's ca-bundle, which VWARD's installer puts in.
+if [ -z "${SSL_CERT_FILE:-}" ]; then
+    for ca in ${VWARD_CA_BUNDLE:-/opt/etc/ssl/certs/ca-certificates.crt /opt/etc/ssl/cert.pem}; do
+        [ -s "$ca" ] && { SSL_CERT_FILE=$ca; export SSL_CERT_FILE; break; }
+    done
+fi
 
 ENGINE_ETC=${VWARD_VLESS_ETC:-/opt/etc/vward/vless-engine}
 ENGINE_SHARE=${VWARD_VLESS_SHARE:-/opt/share/vward/vless-engine}

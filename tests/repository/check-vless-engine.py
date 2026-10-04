@@ -50,9 +50,10 @@ esac
 """)
     for f in bin_.iterdir():
         f.chmod(0o755)
-    env = os.environ | {"PATH": f"{bin_}:{os.environ['PATH']}", "VWARD_VLESS_ETC": str(etc), "VWARD_VLESS_SHARE": str(share),
+    (tmp / "ca.crt").write_text("-----BEGIN CERTIFICATE-----\n")
+    env = {k: v for k, v in os.environ.items() if k != "SSL_CERT_FILE"} | {"PATH": f"{bin_}:{os.environ['PATH']}", "VWARD_VLESS_ETC": str(etc), "VWARD_VLESS_SHARE": str(share),
                         "VWARD_VLESS_RUN": str(run_), "VWARD_VLESS_LOG": str(tmp / "engine.log"), "VWARD_NDMC": str(bin_ / "ndmc"),
-                        "VWARD_CURL_BIN": str(bin_ / "curl"), "JQ": shutil.which("jq"), "VWARD_VLESS_CONNECT_WAIT": "4", "VWARD_ENGINE_COOLDOWN": "0",
+                        "VWARD_CURL_BIN": str(bin_ / "curl"), "JQ": shutil.which("jq"), "VWARD_VLESS_CONNECT_WAIT": "4", "VWARD_ENGINE_COOLDOWN": "0", "VWARD_CA_BUNDLE": f"{tmp}/no-such.crt {tmp}/ca.crt",
                         "VWARD_XRAY_URL": "https://xray.example/d", "VWARD_VLESS_ARCH": "mipsle"}
 
     def engine(*args):
@@ -147,7 +148,7 @@ esac
 
     # Adding: a stand-in Xray that is already installed.
     share.mkdir(parents=True)
-    (share / "xray").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/xray.args"\n[ "$1 $2" = "run -test" ] && exit 0\nwhile :; do sleep 1; done\n')
+    (share / "xray").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/xray.args"\necho "${{SSL_CERT_FILE:-}}" > "{tmp}/xray.ca"\n[ "$1 $2" = "run -test" ] && exit 0\nwhile :; do sleep 1; done\n')
     (share / "xray").chmod(0o755)
     (share / "version").write_text(src.split("XRAY_VERSION=", 1)[1].split("\n", 1)[0] + "\n")
     link = tmp / "link.txt"
@@ -167,6 +168,9 @@ esac
     row = (etc / "tunnels.tsv").read_text()
     if row != "0\tOpkgTun1\t203.0.113.5:443\tГермания\n":
         fail(f"tunnels.tsv: {row!r}")
+    # Xray finds the certificate authorities (Entware's list; KeeneticOS has none in /etc/ssl).
+    if (tmp / "xray.ca").read_text().strip() != str(tmp / "ca.crt"):
+        fail(f"Xray must get the CA list: {(tmp / 'xray.ca').read_text()!r}")
     everything = cmds + row + (tmp / "engine.log").read_text() + (tmp / "xray.args").read_text() + "\n".join(out)
     if UUID in everything:
         fail("the id leaked into a command, a log or the output")
