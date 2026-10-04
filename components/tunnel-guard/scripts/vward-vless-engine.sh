@@ -156,6 +156,9 @@ config() {
         def q($k): $l["q." + $k] // "";
         (q("type") | if . == "" then "tcp" elif . == "raw" then "tcp" else . end) as $net |
         (q("security") | if . == "" then "none" else . end) as $sec |
+        # xHTTP «extra» (padding obfuscation, xmux, upload method...): the server expects
+        # its requests shaped so; without it the connection is cut (Viva 2026-10-04).
+        (q("extra") | if . == "" then null else (try fromjson catch null) end) as $extra |
         if (($l.port | tonumber? // 0) | . < 1 or . > 65535) or ($l.host == "") or
            ([$net] | inside(["tcp", "ws", "grpc", "xhttp", "httpupgrade"]) | not) or ([$sec] | inside(["none", "tls", "reality"]) | not)
         then error("unsupported") else . end |
@@ -172,8 +175,11 @@ config() {
                    + (if q("alpn") != "" then {alpn: (q("alpn") | split(","))} else {} end))}
                 else {} end)
              + (if $net == "ws" then {wsSettings: {path: (q("path") | if . == "" then "/" else . end), host: q("host")}}
-                elif $net == "grpc" then {grpcSettings: {serviceName: q("serviceName")}}
-                elif $net == "xhttp" then {xhttpSettings: {path: (q("path") | if . == "" then "/" else . end), host: q("host"), mode: (q("mode") | if . == "" then "auto" else . end)}}
+                elif $net == "grpc" then {grpcSettings: ({serviceName: q("serviceName")}
+                   + (if q("mode") == "multi" then {multiMode: true} else {} end)
+                   + (if q("authority") != "" then {authority: q("authority")} else {} end))}
+                elif $net == "xhttp" then {xhttpSettings: ({path: (q("path") | if . == "" then "/" else . end), host: q("host"), mode: (q("mode") | if . == "" then "auto" else . end)}
+                   + (if ($extra | type) == "object" then {extra: $extra} else {} end))}
                 elif $net == "httpupgrade" then {httpupgradeSettings: {path: (q("path") | if . == "" then "/" else . end), host: q("host")}}
                 elif q("headerType") == "http" then {tcpSettings: {header: {type: "http"}}}
                 else {} end))},

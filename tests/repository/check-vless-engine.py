@@ -108,6 +108,22 @@ esac
     g = config(GRPC)["outbounds"][0]
     if g["settings"]["vnext"][0]["address"] != "2001:db8::1" or g["streamSettings"]["grpcSettings"] != {"serviceName": "gun"}:
         fail(f"grpc on IPv6: {g}")
+    # xHTTP «extra» (the server's padding obfuscation, xmux) and gRPC multi mode / authority
+    # go into Xray's settings: without them the server cuts the connection (Viva 2026-10-04).
+    import urllib.parse
+    extra = {"xPaddingObfsMode": True, "xPaddingKey": "k", "uplinkHTTPMethod": "PUT", "xmux": {"maxConcurrency": "16-32"}}
+    xh = (f"vless://{UUID}@x.example:443?encryption=none&type=xhttp&path=%2F&host=x.example&mode=auto"
+          f"&extra={urllib.parse.quote(json.dumps(extra))}&security=tls&sni=x.example&fp=chrome&alpn=h2%2Chttp%2F1.1#X")
+    st = config(xh)["outbounds"][0]["streamSettings"]
+    if st["xhttpSettings"] != {"path": "/", "host": "x.example", "mode": "auto", "extra": extra}:
+        fail(f"xhttp extra: {st['xhttpSettings']}")
+    if st["tlsSettings"] != {"serverName": "x.example", "fingerprint": "chrome", "alpn": ["h2", "http/1.1"]}:
+        fail(f"xhttp tls: {st['tlsSettings']}")
+    if "extra" in config(xh.replace("&extra=", "&extra=not-json"))["outbounds"][0]["streamSettings"]["xhttpSettings"]:
+        fail("a broken extra is left out, not passed on")
+    gm = config(f"vless://{UUID}@g.example:443?type=grpc&serviceName=gun&mode=multi&authority=a.example&security=tls#G")
+    if gm["outbounds"][0]["streamSettings"]["grpcSettings"] != {"serviceName": "gun", "multiMode": True, "authority": "a.example"}:
+        fail(f"grpc multi / authority: {gm['outbounds'][0]['streamSettings']['grpcSettings']}")
     for bad in (KCP, f"vless://{UUID}@203.0.113.9:0?security=none#P", "vless://x y@203.0.113.9:443#I", f"vless://{UUID}@203.0.113.9:443?security=xtls#S"):
         if config(bad) is not None:
             fail(f"{bad} must be refused")
