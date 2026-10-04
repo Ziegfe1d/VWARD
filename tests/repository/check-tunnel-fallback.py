@@ -42,7 +42,8 @@ vward_map_vpns() {{ printf '%s\\n' "$1" | awk -F '\\t' '$1=="I" {{print $2 " " $
     # Keenetic's dns-proxy routes of the lists, from the routes file.
     (tmp / "routes").write_text("")
     (bin_ / "ndmc").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/ndmc.log"\n'
-                               f'[ "$2" = "show running-config" ] && {{ echo dns-proxy; sed "s/^/    /" "{tmp}/routes"; echo "!"; }}\nexit 0\n')
+                               f'[ "$2" = "show running-config" ] && {{ cat "{tmp}/ifaces"; echo dns-proxy; sed "s/^/    /" "{tmp}/routes"; echo "!"; }}\nexit 0\n')
+    (tmp / "ifaces").write_text("".join(f"interface {n}\n!\n" for n in ("Wireguard0", "Wireguard1", "Wireguard2", "OpkgTun2")))
     # The quality summary the guard reads: name dev last_loss last_ms ok_streak samples loss avg jitter up fail_streak
     (bin_ / "quality").write_text(f'#!/bin/sh\ncat "{tmp}/summary"\n')
     # The Panel's helper: «tunnel NAME» moves the routes and changes the profile;
@@ -332,4 +333,48 @@ echo result=changed
         fail(f"recovery of an engine tunnel: {r.stdout[:200]} {(tmp / 'guard.log').read_text()[-300:]}")
     if "interface OpkgTun2 up" not in (tmp / "ndmc.log").read_text() or (tmp / "vless.log").read_text() != "restart OpkgTun2\n":
         fail("after switching the interface on, the guard must start the engine's program afresh")
+
+    # An engine tunnel that stops carrying: the guard starts its program afresh and checks
+    # again before anything goes direct (Viva 2026-10-04: de-vless went direct at 10:50).
+    (bin_ / "vless").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/vless.log"\n: > "{tmp}/kicked"\necho result=changed\n')
+    (bin_ / "curl").write_text(f'#!/bin/sh\ncase "$*" in *"--interface eth3"*) exit 0 ;; *"--interface opkgtun2"*) [ -e "{tmp}/kicked" ] && exit 0 ;; esac\nexit 7\n')
+    (gdir / "state").write_text("MODE=AUTO\nDOWN_STREAK=0\nFAILOPEN_ACTIVE=0\nLAST_RECOVERY_TEST=0\nLAST_ACTION=KEEP_UP\n")
+    (tmp / "vless.log").write_text(""); (tmp / "ndmc.log").write_text("")
+    env["VWARD_GUARD_KICK_WAIT"] = "0"
+    health.write_text(f"STATUS=DOWN\nLAST_CHECK={int(time.time())}\nCONFIG_STATE=up\n")
+    r = subprocess.run(["sh", str(GUARD)], env=env, text=True, capture_output=True, timeout=60)
+    if r.stdout.split("\n", 1)[0] != "ACTION=ENGINE_RESTARTED":
+        fail(f"an engine tunnel is restarted before going direct: {r.stdout[:120]} {(tmp / 'guard.log').read_text()[-200:]}")
+    if "interface OpkgTun2 down" in (tmp / "ndmc.log").read_text() or (tmp / "vless.log").read_text() != "restart OpkgTun2\n":
+        fail("a restarted engine tunnel is not switched off")
+    # Still silent after the restart: then direct, as before.
+    (tmp / "kicked").unlink()
+    (bin_ / "vless").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/vless.log"\necho result=changed\n')
+    (gdir / "state").write_text("MODE=AUTO\nDOWN_STREAK=0\nFAILOPEN_ACTIVE=0\nLAST_RECOVERY_TEST=0\nLAST_ACTION=KEEP_UP\n")
+    r = subprocess.run(["sh", str(GUARD)], env=env, text=True, capture_output=True, timeout=60)
+    if r.stdout.split("\n", 1)[0] != "ACTION=FAILOPEN_DOWN":
+        fail(f"a tunnel silent after its restart goes direct: {r.stdout[:120]}")
+
+    # A deleted tunnel leaves nothing behind: a list moved off it and the guard's own move
+    # off it are forgotten (Viva 2026-10-04: «Списки переведены… Wireguard0 → de-vless» stayed
+    # after Wireguard0 was deleted).
+    (tmp / "routes").write_text("route object-group Games Wireguard2 auto\n")
+    (gdir / "lists-fallback").write_text("Games\tWireguard9\tWireguard2\t1\n")
+    (gdir / "fallback").write_text("FROM=Wireguard8\nAT=1\n")
+    (gdir / "state").write_text("MODE=AUTO\nDOWN_STREAK=0\nFAILOPEN_ACTIVE=0\nLAST_RECOVERY_TEST=0\nLAST_ACTION=KEEP_UP\n")
+    (bin_ / "curl").write_text('#!/bin/sh\nexit 0\n')
+    (tmp / "summary").write_text(q((30, 0), (30, 0), (30, 0)))
+    health.write_text(f"STATUS=UP\nLAST_CHECK={int(time.time())}\nCONFIG_STATE=up\n")
+    subprocess.run(["sh", str(GUARD)], env=env, text=True, capture_output=True, timeout=60)
+    log = (tmp / "guard.log").read_text()
+    if (gdir / "lists-fallback").exists() or "LIST_FALLBACK_FORGOTTEN|list=Games|on=Wireguard2|gone=Wireguard9" not in log:
+        fail(f"a list moved off a deleted tunnel must be forgotten: {log[-300:]}")
+    if (gdir / "fallback").exists() or "FALLBACK_FORGOTTEN|gone=Wireguard8" not in log:
+        fail("the guard's move off a deleted tunnel must be forgotten")
+_js = (ROOT / "web/assets/vward-console.js").read_text()
+_helper = (ROOT / "components/console/scripts/vward-console-config.sh").read_text()
+if "filter(m => tunExists(m.from))" not in _js or "tunExists(S.tq.fallback_from)" not in _js:
+    fail("the Panel must not report moves off a tunnel that no longer exists")
+if 'awk -F \'\\t\' -v t="$1" \'$2 != t\' "$td_gd/lists-fallback"' not in _helper:
+    fail("deleting a tunnel forgets the guard's moves off it")
 print("TUNNEL_FALLBACK=PASS")

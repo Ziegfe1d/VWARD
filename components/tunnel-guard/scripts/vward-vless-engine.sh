@@ -240,12 +240,29 @@ free_opkgtun() {
 
 adapter_of() { printf 'opkgtun%s\n' "${1#OpkgTun}"; }
 
+# procs_of SLOT: every running program started with the slot's configuration, whatever the
+# pid file says. A stale pid file left an old program holding the adapter while a «restart»
+# started a second one beside it (Viva 2026-10-04: the broken Xray lived on for hours).
+procs_of() {
+    grep -l -F -- "$ENGINE_ETC/v$1.json" "${VWARD_PROC:-/proc}"/[0-9]*/cmdline 2>/dev/null | while IFS= read -r f; do
+        d=${f%/cmdline}
+        [ "$(cat "$d/comm" 2>/dev/null)" = "${VWARD_ENGINE_COMM:-xray}" ] && echo "${d##*/}"
+    done
+}
+
+# pid_of SLOT: the tunnel's program while it runs (a zombie left by a kill is not running);
+# found by its configuration when the pid file is stale.
 pid_of() {
     p=$(cat "$ENGINE_RUN/v$1.pid" 2>/dev/null)
-    case "$p" in ''|*[!0-9]*) return 1 ;; esac
-    s=$(cat "/proc/$p/stat" 2>/dev/null) || return 1
-    s=${s##*) }
-    case "$s" in Z*|X*) return 1 ;; esac
+    case "$p" in ''|*[!0-9]*) p= ;; esac
+    if [ -n "$p" ]; then
+        s=$(cat "${VWARD_PROC:-/proc}/$p/stat" 2>/dev/null) || p=
+        s=${s##*) }
+        case "$s" in Z*|X*) p= ;; esac
+    fi
+    [ -n "$p" ] || p=$(procs_of "$1" | head -n 1)
+    [ -n "$p" ] || return 1
+    echo "$p" > "$ENGINE_RUN/v$1.pid" 2>/dev/null
     echo "$p"
 }
 
@@ -267,8 +284,13 @@ start_one() {
 }
 
 stop_one() {
-    p=$(pid_of "$1") || :
-    [ -z "$p" ] || { kill "$p" 2>/dev/null; sleep 1; kill -9 "$p" 2>/dev/null; }
+    # The pid file's program and any other copy on the same configuration.
+    pf=$(cat "$ENGINE_RUN/v$1.pid" 2>/dev/null)
+    case "$pf" in ''|*[!0-9]*) pf= ;; esac
+    # A pid from the file only when it still is the tunnel's program (pids are reused).
+    [ -z "$pf" ] || [ "$(cat "${VWARD_PROC:-/proc}/$pf/comm" 2>/dev/null)" = "${VWARD_ENGINE_COMM:-xray}" ] || pf=
+    ps_=$( { [ -z "$pf" ] || echo "$pf"; procs_of "$1"; } | sort -u | tr '\n' ' ')
+    [ -z "$ps_" ] || { kill $ps_ 2>/dev/null; sleep 1; kill -9 $ps_ 2>/dev/null; }
     rm -f "$ENGINE_RUN/v$1.pid"
 }
 
@@ -343,6 +365,20 @@ op_remove() {
     echo "result=changed"
 }
 
+# stop_orphans: a program whose slot no tunnel has any more (a removal that did not stop
+# it, seen on Viva 2026-10-04) holds an adapter and memory for nothing: it is stopped.
+stop_orphans() {
+    grep -l -F -- "$ENGINE_ETC/v" "${VWARD_PROC:-/proc}"/[0-9]*/cmdline 2>/dev/null | while IFS= read -r f; do
+        d=${f%/cmdline}
+        [ "$(cat "$d/comm" 2>/dev/null)" = "${VWARD_ENGINE_COMM:-xray}" ] || continue
+        c=$(tr '\000' '\n' < "$f" 2>/dev/null | grep -F -- "$ENGINE_ETC/v" | head -n 1)
+        k=${c##*/v}; k=${k%.json}
+        case "$k" in ''|*[!0-9]*) continue ;; esac
+        awk -F '\t' -v n="$k" '$1 == n {f = 1} END {exit !f}' "$TUNNELS" 2>/dev/null && continue
+        kill "${d##*/}" 2>/dev/null && log "stopped the program of a removed tunnel (slot $k)"
+    done
+}
+
 # link_up ADAPTER: 0 when the adapter is switched on, 1 when off, 2 when there is no such
 # adapter (nothing to say).
 link_up() {
@@ -356,6 +392,7 @@ link_up() {
 # anything (seen on Viva 2026-10-04: no page opened until Xray restarted): after an «off»
 # seen here, or when no page opens through a switched-on adapter, Xray starts afresh.
 op_supervise() {
+    stop_orphans
     [ -s "$TUNNELS" ] && [ -x "$BIN" ] || { echo "result=unchanged"; return 0; }
     started=0
     while IFS="$(printf '\t')" read -r n name server desc; do

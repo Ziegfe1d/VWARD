@@ -92,6 +92,20 @@ def fail(msg: str) -> None:
     raise SystemExit(f"FAIL: {msg}")
 
 
+
+def _safe_read(f):
+    try:
+        return f.read_text().strip()
+    except OSError:
+        return ""
+
+
+def _safe_cmd(d):
+    try:
+        return (d / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+    except OSError:
+        return ""
+
 def tool(path: Path, text: str) -> Path:
     path.write_text(text); path.chmod(0o755); return path
 
@@ -274,6 +288,26 @@ with tempfile.TemporaryDirectory() as t:
     time.sleep(0.5)
     run("supervise", expect="result=unchanged")
     del env["VWARD_SYSFS_NET"]
+
+    # The program of a tunnel that is gone (removed, but not stopped; Viva 2026-10-04) is stopped.
+    orphan = subprocess.Popen([str(share / "vward-awg"), "-i", "opkgtun7", "-c", str(t / "etc/t7.conf"), "-s", str(t / "run/t7.state")],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(0.5)
+    run("supervise", expect="result=unchanged")
+    time.sleep(0.5)
+    if orphan.poll() is None:
+        orphan.kill(); fail("the program of a removed tunnel must be stopped")
+    if "stopped the program of a removed tunnel (slot 7)" not in (t / "engine.log").read_text():
+        fail("the stopped orphan is logged")
+    # A stale pid file: restart leaves exactly one program on the slot's configuration.
+    (t / "run/t0.pid").write_text("999999\n")
+    (st / "handshake").write_text("1")
+    run("restart", "OpkgTun1", expect="result=changed")
+    time.sleep(0.5)
+    live = [d.name for d in Path("/proc").iterdir() if d.name.isdigit() and (d / "comm").exists()
+            and _safe_read(d / "comm") == "vward-awg" and str(t / "etc/t0.conf") in _safe_cmd(d)]
+    if len(live) != 1:
+        fail(f"after a restart with a stale pid file exactly one program runs: {live}")
 
     # Traffic comes from the program's own state; «Выключить» in the Panel: the program stops,
     # supervise leaves it alone (the flag outlives a reboot), status says so; «Включить» back.

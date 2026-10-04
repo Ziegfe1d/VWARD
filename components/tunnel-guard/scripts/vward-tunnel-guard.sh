@@ -48,14 +48,21 @@ LW=""
 # engine_kick NAME: a tunnel of VWARD's own engines (Xray, AmneziaWG) does not carry anything
 # after Keenetic switched its interface off and on (seen on Viva 2026-10-04 with Xray); its
 # program starts afresh on the adapter. Other tunnels: nothing.
-engine_kick()
+engine_of()
 {
     for ek in "${VWARD_VLESS_ETC:-/opt/etc/vward/vless-engine}|${VWARD_VLESS_ENGINE_BIN:-/opt/bin/vward-vless-engine.sh}" \
               "${VWARD_AWG_ETC:-/opt/etc/vward/awg-engine}|${VWARD_AWG_ENGINE_BIN:-/opt/bin/vward-awg-engine.sh}"; do
         ek_bin=${ek#*|}
         [ -x "$ek_bin" ] && awk -F '\t' -v n="$1" '$2 == n {f = 1} END {exit !f}' "${ek%%|*}/tunnels.tsv" 2>/dev/null || continue
-        "$ek_bin" restart "$1" </dev/null >/dev/null 2>&1 || :
+        echo "$ek_bin"; return 0
     done
+    return 1
+}
+
+engine_kick()
+{
+    ek_bin=$(engine_of "$1") || return 0
+    "$ek_bin" restart "$1" </dev/null >/dev/null 2>&1 || :
 }
 
 mkdir -p "$DIR"
@@ -175,6 +182,11 @@ lists_fallback()
             [ -n "$g" ] && [ -n "$from" ] && [ -n "$to" ] || continue
             case "$g$from$to$at" in *[!A-Za-z0-9_.-]*) continue ;; esac
             grep -Fqx "$g$lf_tab$to" "$LW/routes" || continue
+            # Its first tunnel was deleted: nowhere to come back to, the move is forgotten.
+            if [ -s "$LW/rc" ] && ! grep -qx "interface $from" "$LW/rc"; then
+                echo "$NOW_TEXT|LIST_FALLBACK_FORGOTTEN|list=$g|on=$to|gone=$from" >> "$LOG"
+                continue
+            fi
             ok=$(awk -F '\t' -v n="$from" '$1 == n {print $5}' "$LW/q")
             if [ ! -e "$RETURN_OFF" ] && [ "${ok:-0}" -ge "$RETURN_STREAK" ] 2>/dev/null && lists_move "$g" "$from"; then
                 LISTS_BACK=$((LISTS_BACK + 1))
@@ -294,6 +306,15 @@ if [ -f "$FALLBACK" ]; then
     done < "$FALLBACK"
 fi
 case "$FALLBACK_FROM" in *[!A-Za-z0-9_.-]*) FALLBACK_FROM="" ;; esac
+# The first tunnel was deleted since: nothing to come back to.
+# An empty answer (ndmc failed) proves nothing and keeps the memory.
+FB_RC=""
+[ -z "$FALLBACK_FROM" ] || FB_RC=$("${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r')
+if [ -n "$FALLBACK_FROM" ] && [ -n "$FB_RC" ] && ! printf '%s\n' "$FB_RC" | grep -qx "interface $FALLBACK_FROM"; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|FALLBACK_FORGOTTEN|gone=$FALLBACK_FROM" >> "$LOG"
+    FALLBACK_FROM="" FALLBACK_AT=0
+    rm -f "$FALLBACK"
+fi
 
 DOWN_STREAK=0
 FAILOPEN_ACTIVE=0
@@ -491,6 +512,14 @@ else
 
                                 DOWN_STREAK=0
                                 ACTION="ABORT_WG_RECOVERED"
+
+                            # A tunnel of VWARD's own engine: its program starts afresh first;
+                            # only a tunnel that stays silent after it goes direct.
+                            elif [ "$MODE" = "AUTO" ] && engine_of "$VWARD_TUNNEL_INTERFACE" >/dev/null &&
+                                 { engine_kick "$VWARD_TUNNEL_INTERFACE"; sleep "${VWARD_GUARD_KICK_WAIT:-4}"; wg_ok; }; then
+
+                                DOWN_STREAK=0
+                                ACTION="ENGINE_RESTARTED"
 
                             elif [ "$MODE" = "AUTO" ] && ALT=$(fallback_pick) && [ -n "$ALT" ] && switch_to "$ALT"; then
                                 # Another tunnel answers: VWARD's routes go there, nothing goes direct.

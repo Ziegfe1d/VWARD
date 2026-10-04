@@ -130,7 +130,7 @@ esac
 
     # Adding: a stand-in Xray that is already installed.
     share.mkdir(parents=True)
-    (share / "xray").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/xray.args"\n[ "$1 $2" = "run -test" ] && exit 0\nexec sleep 300\n')
+    (share / "xray").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/xray.args"\n[ "$1 $2" = "run -test" ] && exit 0\nwhile :; do sleep 1; done\n')
     (share / "xray").chmod(0o755)
     (share / "version").write_text(src.split("XRAY_VERSION=", 1)[1].split("\n", 1)[0] + "\n")
     link = tmp / "link.txt"
@@ -182,6 +182,43 @@ esac
     if "restarted OpkgTun1 on its adapter" not in (tmp / "engine.log").read_text():
         fail("the restart on the adapter must be logged")
     del env["VWARD_SYSFS_NET"]
+    # A stale pid file (Viva 2026-10-04): «restart» stopped nothing and the broken Xray lived on
+    # beside a new one. Now the program is found by its configuration: one copy afterwards.
+    def copies(conf):
+        n = []
+        for d in Path("/proc").iterdir():
+            if d.name.isdigit():
+                try:
+                    if str(conf) in (d / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace") and (d / "comm").read_text().strip() == "xray":
+                        n.append(d.name)
+                except OSError:
+                    pass
+        return n
+    import time as _t
+    old = copies(etc / "v0.json")
+    if len(old) != 1:
+        fail(f"one Xray before the restart: {old}")
+    (run_ / "v0.pid").write_text("999999\n")
+    if engine("restart", "OpkgTun1")[-1] != "result=changed":
+        fail("restart with a stale pid file")
+    _t.sleep(0.5)
+    now = copies(etc / "v0.json")
+    if len(now) != 1 or now == old:
+        fail(f"after a restart with a stale pid file exactly one new Xray runs: before {old}, after {now}")
+    # A program whose tunnel is gone (removed, but not stopped) is stopped by supervise.
+    fake = tmp / "fakebin"; fake.mkdir()
+    (fake / "xray").write_text("#!/bin/sh\nwhile :; do sleep 1; done\n"); (fake / "xray").chmod(0o755)
+    orphan = subprocess.Popen([str(fake / "xray"), "run", "-c", str(etc / "v7.json")])
+    _t.sleep(0.5)
+    if engine("supervise")[-1] not in ("result=unchanged", "result=changed"):
+        fail("supervise with an orphan")
+    _t.sleep(0.5)
+    if orphan.poll() is None:
+        orphan.kill(); fail("the program of a removed tunnel must be stopped")
+    if "stopped the program of a removed tunnel (slot 7)" not in (tmp / "engine.log").read_text():
+        fail("the stopped orphan is logged")
+    if not copies(etc / "v0.json"):
+        fail("the live tunnel's program must stay")
     # A server that never answers: nothing stays.
     (tmp / "rc").write_text("interface OpkgTun0\n!\ninterface OpkgTun1\n!\n")
     (tmp / "ndmc.log").write_text("")
@@ -224,6 +261,6 @@ for need in ("'#server=' + num", "vlessOf(", "name=\"vless-server\""):
 if "vward-vless-engine.sh supervise" not in (ROOT / "components/tunnel-guard/scripts/vward-tunnel-health.sh").read_text():
     fail("a stopped Xray is not started again")
 guard = (ROOT / "components/tunnel-guard/scripts/vward-tunnel-guard.sh").read_text()
-if guard.count('engine_kick "$VWARD_TUNNEL_INTERFACE"') != 2 or '"$ek_bin" restart "$1"' not in guard:
+if guard.count('engine_kick "$VWARD_TUNNEL_INTERFACE"') != 3 or '"$ek_bin" restart "$1"' not in guard:
     fail("the guard must start an engine tunnel's program afresh after it switched the interface on")
 print("VLESS_ENGINE=PASS")

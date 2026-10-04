@@ -67,7 +67,12 @@ CONF_FILE=
 # The request body of ndm_secret while it is sent.
 NS_FILE=
 
-die() { printf 'error=%s\n' "$1"; exit "${2:-1}"; }
+# A rejected router command leaves the router's own reply (one line, no quotes or
+# control characters) on a reason= line just before the error line.
+die() {
+    [ "$1" != router_rejected ] || [ -z "${NDM_REPLY:-}" ] || printf 'reason=%s\n' "$NDM_REPLY"
+    printf 'error=%s\n' "$1"; exit "${2:-1}"
+}
 
 cleanup() {
     if [ "$TXN" = 1 ]; then
@@ -181,8 +186,10 @@ change_lock() {
 ndm() {
     out=$("$NDMC" -c "$1" 2>&1)
     rc=$?
-    [ "$rc" -eq 0 ] || return 1
-    printf '%s\n' "$out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found|no such entry)' && return 1
+    if [ "$rc" -ne 0 ] || printf '%s\n' "$out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found|no such entry)'; then
+        NDM_REPLY=$(printf '%s\n' "$out" | tr -d '\r"\\' | tr -c '[:print:]\n' ' ' | sed '/^[[:space:]]*$/d' | tail -n 1 | cut -c1-160)
+        return 1
+    fi
     return 0
 }
 
@@ -1708,6 +1715,14 @@ op_tunnel_delete() {
     td_lists=$(grep -c . "$JOURNAL.lists") td_nets=$(grep -c . "$JOURNAL.nets")
     rm -f "${TUNNEL_STORE:?}/$1/"*.conf "$VWARD_DEVICE_MAP_CACHE" "$JOURNAL.lists" "$JOURNAL.nets"
     rmdir "${TUNNEL_STORE:?}/$1" 2>/dev/null
+    # The guard's memory of lists moved off this tunnel: nothing to come back to any more.
+    td_gd=${TUNNEL_GUARD_STATE%/*}
+    if [ -s "$td_gd/lists-fallback" ]; then
+        awk -F '\t' -v t="$1" '$2 != t' "$td_gd/lists-fallback" > "$td_gd/lists-fallback.tmp.$$" &&
+            mv -f "$td_gd/lists-fallback.tmp.$$" "$td_gd/lists-fallback"
+        [ -s "$td_gd/lists-fallback" ] || rm -f "$td_gd/lists-fallback"
+    fi
+    grep -qx "FROM=$1" "$td_gd/fallback" 2>/dev/null && rm -f "$td_gd/fallback"
     done_ok "tunnel-delete $1 lists=$td_lists subnets=$td_nets to=$2" changed
 }
 
