@@ -11,6 +11,8 @@
 #                                     work already waits: the watcher's busy flag)
 #   dns-fail                          the router's DNS did not answer twice: AdGuard Home
 #                                     started when it is not running
+#   chain-fail                        AdGuard Home in the DNS chain silent 3 times in a row:
+#                                     out of the chain when the provider's DNS answers
 
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
@@ -108,6 +110,12 @@ case "$EVENT" in
             log "dns-fail|nothing-to-start"
             exit 1
         fi
+        ;;
+    chain-fail)
+        log "chain-fail"
+        G=${VWARD_DNS_GUARD_BIN:-$BIN_DIR/vward-ads-privacy-dns-guard.sh}
+        [ -x "$G" ] || exit 1
+        "$G" chain-out </dev/null 2>/dev/null | grep -q '^chain_state=out$'
         ;;
     *) exit 64 ;;
 esac

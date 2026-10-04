@@ -1678,7 +1678,7 @@ if [ "$ACTION" = "diagnostics" ]; then
             case "$CH_OFF:$CH_REASON" in
                 0:*) DNS_DETAIL="AdGuard Home не в цепочке: возврат выключен в настройках. Реклама и Smart DNS не работают" ;;
                 *:loop) DNS_DETAIL="AdGuard Home выведен из цепочки$CH_AT: перезапускался по кругу. Реклама и Smart DNS не работают; вернётся сам, когда заработает" ;;
-                *:silent) DNS_DETAIL="AdGuard Home выведен из цепочки$CH_AT: не отвечал. Реклама и Smart DNS не работают; вернётся сам, когда заработает" ;;
+                *:silent|*:fast) DNS_DETAIL="AdGuard Home выведен из цепочки$CH_AT: не отвечал. Реклама и Smart DNS не работают; вернётся сам, когда заработает" ;;
                 *:loop_upstream) DNS_STATUS=FAIL DNS_DETAIL="AdGuard Home не возвращается в цепочку: он отправляет запросы обратно роутеру (петля). Укажите в AdGuard Home внешние серверы" ;;
                 *) DNS_DETAIL="AdGuard Home не в цепочке: VWARD вернёт его, когда он ответит 3 раза подряд (до 3 минут). Пока реклама и Smart DNS не работают" ;;
             esac

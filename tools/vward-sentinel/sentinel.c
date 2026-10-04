@@ -8,6 +8,9 @@
  *     CPU of VWARD's long-running programs (no process is started for that);
  *   - every DNS_EVERY seconds it sends one DNS query to the router's resolver itself and
  *     measures the answer;
+ *   - every CHAIN_EVERY seconds (5) it asks AdGuard Home in the DNS chain (CHAIN=addr:port);
+ *     CHAIN_MISS (3) misses in a row are the event «chain-fail» (again each minute while it
+ *     lasts): AdGuard Home is taken out of the chain in seconds, not minutes;
  *   - it learns what is normal for this router (a moving average of every value) and
  *     reports a program that grows well past its own normal or past its limit.
  * Whatever it notices becomes an event: ACT EVENT ARGS... is started (fork and exec only
@@ -18,6 +21,7 @@
  *   STATE_DIR=/tmp/vward-sentinel      ACT=/opt/bin/vward-sentinel-act.sh
  *   HOURS_FILE=/opt/var/lib/vward/sentinel/hours.tsv
  *   SAMPLE_MS=2000   STATE_MS=10000   DNS=127.0.0.1:53   DNS_NAME=vward-probe.invalid   DNS_EVERY=30
+ *   CHAIN=192.168.1.1:65053   CHAIN_EVERY=5   CHAIN_MISS=3
  *   MEM_LOW_KB=16384  BUSY_MEM_KB=24576
  *   WATCH=name:pidfile:limit_kb   (up to 16)
  *   IFACE=dev                     (up to 16; empty: every interface)
@@ -47,7 +51,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define VERSION "1"
+#define VERSION "2"
 #define MAXW 16
 #define MAXIF 16
 #define MAXEV 48
@@ -73,7 +77,8 @@ static char act[160] = "/opt/bin/vward-sentinel-act.sh";
 static char hours_file[200] = "/opt/var/lib/vward/sentinel/hours.tsv";
 static char proc_dir[160] = "/proc";
 static char dns_name[128] = "vward-probe.invalid";
-static struct sockaddr_in dns_addr;
+static struct sockaddr_in dns_addr, chain_addr;
+static long chain_every = 5, chain_miss_need = 3;
 static long sample_ms = 2000, state_ms = 10000, dns_every = 30, mem_low_kb = 16384, busy_mem_kb = 24576;
 static struct watch w[MAXW];
 static int nw;
@@ -155,11 +160,26 @@ static void log_line(const char *fmt, ...)
 
 /* ------------------------------------------------------------ configuration */
 
+/* "a.b.c.d[:port]" into A (family 0 when it is not an address). */
+static void parse_addr(const char *v, struct sockaddr_in *a)
+{
+    char host[64];
+    snprintf(host, sizeof host, "%s", v);
+    char *c = strchr(host, ':');
+    int port = 53;
+    if (c) { *c = 0; port = atoi(c + 1); }
+    memset(a, 0, sizeof *a);
+    a->sin_family = AF_INET;
+    a->sin_port = htons(port);
+    if (inet_pton(AF_INET, host, &a->sin_addr) != 1) a->sin_family = 0;
+}
+
 static void config_load(void)
 {
     char buf[8192];
     nw = 0;
     nif = 0;
+    chain_addr.sin_family = 0;
     if (read_file(conf_path, buf, sizeof buf) < 0) return;
     for (char *line = strtok(buf, "\n"); line; line = strtok(NULL, "\n")) {
         char *eq = strchr(line, '=');
@@ -176,17 +196,11 @@ static void config_load(void)
         else if (!strcmp(k, "DNS_EVERY")) dns_every = atol(v);
         else if (!strcmp(k, "MEM_LOW_KB")) mem_low_kb = atol(v);
         else if (!strcmp(k, "BUSY_MEM_KB")) busy_mem_kb = atol(v);
-        else if (!strcmp(k, "DNS")) {
-            char host[64];
-            snprintf(host, sizeof host, "%s", v);
-            char *c = strchr(host, ':');
-            int port = 53;
-            if (c) { *c = 0; port = atoi(c + 1); }
-            memset(&dns_addr, 0, sizeof dns_addr);
-            dns_addr.sin_family = AF_INET;
-            dns_addr.sin_port = htons(port);
-            if (inet_pton(AF_INET, host, &dns_addr.sin_addr) != 1) dns_addr.sin_family = 0;
-        } else if (!strcmp(k, "WATCH") && nw < MAXW) {
+        else if (!strcmp(k, "DNS")) parse_addr(v, &dns_addr);
+        else if (!strcmp(k, "CHAIN")) parse_addr(v, &chain_addr);
+        else if (!strcmp(k, "CHAIN_EVERY")) chain_every = atol(v) >= 1 ? atol(v) : 5;
+        else if (!strcmp(k, "CHAIN_MISS")) chain_miss_need = atol(v) >= 1 ? atol(v) : 3;
+        else if (!strcmp(k, "WATCH") && nw < MAXW) {
             char name[32], pf[160];
             long lim = 0;
             if (sscanf(v, "%31[^:]:%159[^:]:%ld", name, pf, &lim) == 3) {
@@ -472,13 +486,12 @@ static unsigned short dns_id;
 static long dns_sent_ms = -1, next_dns;
 static int dns_retry;
 
-static void dns_send(int fd)
+/* The query for DNS_NAME (type A) with ID into Q; its length. */
+static int build_query(unsigned char *q, unsigned short id)
 {
-    unsigned char q[300];
     int n = 12;
-    dns_id = (unsigned short)(mono_ms() ^ getpid());
     memset(q, 0, 12);
-    q[0] = dns_id >> 8; q[1] = dns_id & 255; q[2] = 1; /* RD */ q[5] = 1; /* QDCOUNT */
+    q[0] = id >> 8; q[1] = id & 255; q[2] = 1; /* RD */ q[5] = 1; /* QDCOUNT */
     const char *s = dns_name;
     while (*s && n < 280) {
         const char *dot = strchr(s, '.');
@@ -492,6 +505,14 @@ static void dns_send(int fd)
     q[n++] = 0;
     q[n++] = 0; q[n++] = 1; /* A */
     q[n++] = 0; q[n++] = 1; /* IN */
+    return n;
+}
+
+static void dns_send(int fd)
+{
+    unsigned char q[300];
+    dns_id = (unsigned short)(mono_ms() ^ getpid());
+    int n = build_query(q, dns_id);
     if (sendto(fd, q, n, 0, (struct sockaddr *)&dns_addr, sizeof dns_addr) == n) dns_sent_ms = mono_ms();
     else dns_sent_ms = mono_ms() - 5000; /* counts as no answer */
 }
@@ -528,6 +549,38 @@ static void dns_read(int fd)
     }
 }
 
+/* AdGuard Home in the chain: a query every CHAIN_EVERY s, 2 s to answer. */
+static unsigned short chain_id;
+static long chain_sent_ms = -1, next_chain, chain_miss, chain_ok, chain_fails;
+
+static void chain_send(int fd)
+{
+    unsigned char q[300];
+    chain_id = (unsigned short)((mono_ms() ^ getpid()) + 7919);
+    int n = build_query(q, chain_id);
+    if (sendto(fd, q, n, 0, (struct sockaddr *)&chain_addr, sizeof chain_addr) == n) chain_sent_ms = mono_ms();
+    else chain_sent_ms = mono_ms() - 5000;
+}
+
+static void chain_result(int ok)
+{
+    chain_sent_ms = -1;
+    next_chain = mono_ms() + chain_every * 1000;
+    if (ok) { chain_ok++; chain_miss = 0; return; }
+    chain_miss++;
+    /* CHAIN_MISS in a row, then once a minute while it lasts (the event's own rate). */
+    if (chain_miss >= chain_miss_need) { chain_fails++; event("chain", 60, "chain-fail", NULL, NULL); }
+}
+
+static void chain_read(int fd)
+{
+    unsigned char r[512];
+    ssize_t n;
+    while ((n = recv(fd, r, sizeof r, 0)) > 0)
+        if (n >= 12 && chain_sent_ms >= 0 && ((r[0] << 8) | r[1]) == chain_id && (r[2] & 0x80))
+            chain_result((r[3] & 15) == 0 || (r[3] & 15) == 3);
+}
+
 /* ------------------------------------------------------------ state */
 
 static void state_write(void)
@@ -540,6 +593,7 @@ static void state_write(void)
     P("mem_kb=%ld\nmem_min_kb=%ld\nmem_base_kb=%ld\nload_x100=%ld\nload_max_x100=%ld\nbusy=%d\nmem_low=%d\n",
       mem_kb, mem_min_kb, mem_base_x16 < 0 ? -1 : mem_base_x16 / 16, load_x100, load_max_x100, busy, mem_low);
     P("dns_ok=%ld\ndns_fail=%ld\ndns_ms=%ld\ndns_ms_avg=%ld\n", dns_ok, dns_fail, dns_ms_last, dns_ms_x16 < 0 ? -1 : dns_ms_x16 / 16);
+    if (chain_addr.sin_family) P("chain_ok=%ld\nchain_fail=%ld\nchain_miss=%ld\n", chain_ok, chain_fails, chain_miss);
     P("events=%ld\nlink_events=%ld\nactions_ok=%ld\nactions_fail=%ld\n", events, link_events, actions_ok, actions_fail);
     for (int i = 0; i < nw; i++)
         P("watch=%s|%ld|%ld|%ld|%ld|%ld|%ld|%ld|%ld\n", w[i].name, w[i].pid, w[i].rss_kb,
@@ -595,9 +649,11 @@ int main(int argc, char **argv)
     int nl = once ? -1 : nl_open();
     int dfd = -1;
     if (dns_addr.sin_family && dns_every > 0) dfd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+    int cfd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
 
     long next_sample = mono_ms(), next_state = 0;
     next_dns = mono_ms() + 1000;
+    next_chain = mono_ms() + 2000;
     long jiffies_prev = total_jiffies();
     log_line("START|%s|watch=%d|ifaces=%d|netlink=%s", VERSION, nw, nif, nl >= 0 ? "yes" : "no");
 
@@ -614,6 +670,12 @@ int main(int argc, char **argv)
             if (dns_sent_ms >= 0 && now - dns_sent_ms >= 2000) dns_result(0, 0);
             if (dns_sent_ms < 0 && now >= next_dns) dns_send(dfd);
         }
+        /* CHAIN can come and go with a reload (AdGuard Home switched on or off). */
+        int chain_on = cfd >= 0 && chain_addr.sin_family;
+        if (chain_on) {
+            if (chain_sent_ms >= 0 && now - chain_sent_ms >= 2000) chain_result(0);
+            if (chain_sent_ms < 0 && now >= next_chain) chain_send(cfd);
+        }
         reap();
         if (now >= next_state) {
             state_write();
@@ -623,18 +685,21 @@ int main(int argc, char **argv)
         }
         if (once) break;
 
-        struct pollfd pf[2];
+        struct pollfd pf[3];
         int np = 0;
         if (nl >= 0) { pf[np].fd = nl; pf[np].events = POLLIN; np++; }
         if (dfd >= 0) { pf[np].fd = dfd; pf[np].events = POLLIN; np++; }
+        if (chain_on) { pf[np].fd = cfd; pf[np].events = POLLIN; np++; }
         long t = mono_ms(), wait = next_sample - t;
         if (dfd >= 0 && dns_sent_ms >= 0 && dns_sent_ms + 2000 - t < wait) wait = dns_sent_ms + 2000 - t;
         if (dfd >= 0 && dns_sent_ms < 0 && next_dns - t < wait) wait = next_dns - t;
+        if (chain_on && chain_sent_ms >= 0 && chain_sent_ms + 2000 - t < wait) wait = chain_sent_ms + 2000 - t;
+        if (chain_on && chain_sent_ms < 0 && next_chain - t < wait) wait = next_chain - t;
         if (wait < 10) wait = 10;
         if (poll(pf, np, (int)wait) > 0) {
             for (int i = 0; i < np; i++) {
                 if (!(pf[i].revents & POLLIN)) continue;
-                if (pf[i].fd == nl) nl_read(nl); else dns_read(dfd);
+                if (pf[i].fd == nl) nl_read(nl); else if (pf[i].fd == dfd) dns_read(dfd); else chain_read(cfd);
             }
         }
     }

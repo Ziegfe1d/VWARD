@@ -27,6 +27,7 @@
 #   vward-ads-privacy-dns-guard.sh set enforce|bypass|chain 0|1
 #   vward-ads-privacy-dns-guard.sh set exclude MAC[,MAC...]   ("-" for none)
 #   vward-ads-privacy-dns-guard.sh apply|tick                 (tick: the scheduler, every minute)
+#   vward-ads-privacy-dns-guard.sh chain-out                  (the real-time watcher: AdGuard Home silent)
 #   vward-ads-privacy-dns-guard.sh hook nat|filter            (Keenetic netfilter.d)
 
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -348,6 +349,45 @@ agh_looping()
 
 count_up() { cu_n=0; [ ! -r "$1" ] || read -r cu_n < "$1"; case "$cu_n" in ''|*[!0-9]*) cu_n=0 ;; esac; echo $((cu_n + 1)) > "$1"; echo $((cu_n + 1)); }
 
+# chain_take_out NS REASON: Keenetic stops handing queries to AdGuard Home (the provider's DNS
+# answers alone); back in by chain_sync after 3 answers in a row.
+chain_take_out()
+{
+    ndm "no ip name-server $1" || return 1
+    ndm "system configuration save" || :
+    rm -f "$CHAIN_DIR/fails" "$CHAIN_DIR/oks"
+    echo out > "$CHAIN_DIR/state"; ads_epoch > "$CHAIN_DIR/since"; echo "$2" > "$CHAIN_DIR/reason"
+    ads_log "DNS_CHAIN_OUT|ns=$1|reason=$2|AdGuard Home taken out of the DNS chain: Keenetic uses the provider's DNS"
+}
+
+# provider_answers NS: one of Keenetic's other DNS servers answers (the internet is there, only
+# AdGuard Home is not). No other server known: yes (nothing to compare with).
+provider_answers()
+{
+    pa_list=$("$NDMC" -c "show ip name-server" 2>/dev/null | awk '$1 == "address:" {print $2}' |
+        grep -E '^[0-9]+(\.[0-9]+){3}$' | grep -vx "${1%:*}" | awk '!s[$0]++' | head -n 2)
+    [ -n "$pa_list" ] || return 0
+    for pa in $pa_list; do
+        "$NSLOOKUP" "$PROBE_HOST" "$pa" 2>/dev/null | awk '/^Name:/ {f = 1} f && /^Address/ {n++} END {exit !n}' && return 0
+    done
+    return 1
+}
+
+# chain_out: the real-time watcher saw AdGuard Home silent 3 times in a row (15 s): out at once,
+# when it still does not answer and the provider's DNS does.
+chain_out()
+{
+    [ "$CHAIN" = 1 ] && [ -n "$AGH_YAML" ] && [ -r "$AGH_YAML" ] || return 0
+    co_port=$(agh_port)
+    case "$co_port" in ''|*[!0-9]*|53) return 0 ;; esac
+    mkdir -p "$CHAIN_DIR" || return 0
+    co_ns="$(agh_dns_host):$co_port"
+    "$NDMC" -c "show running-config" 2>/dev/null | grep -Eq "^ip name-server $co_ns( |\$)" || return 0
+    agh_up "$co_port" && agh_answers "$co_port" && return 0
+    provider_answers "$co_ns" || { ads_log "DNS_CHAIN_KEEP|ns=$co_ns|the provider's DNS is silent too: AdGuard Home stays"; return 0; }
+    chain_take_out "$co_ns" fast
+}
+
 # chain_sync: AdGuard Home in Keenetic's DNS chain while it answers, out of it while it does not.
 chain_sync()
 {
@@ -375,13 +415,7 @@ chain_sync()
         echo in > "$CHAIN_DIR/state"
         [ "$cs_ok" = 0 ] || return 0
         [ "$(count_up "$CHAIN_DIR/fails")" -ge 3 ] || [ "$cs_loop" = 1 ] || return 0
-        if ndm "no ip name-server $cs_ns"; then
-            ndm "system configuration save" || :
-            rm -f "$CHAIN_DIR/fails" "$CHAIN_DIR/oks"
-            echo out > "$CHAIN_DIR/state"; ads_epoch > "$CHAIN_DIR/since"
-            echo "$([ "$cs_loop" = 1 ] && echo loop || echo silent)" > "$CHAIN_DIR/reason"
-            ads_log "DNS_CHAIN_OUT|ns=$cs_ns|reason=$(cat "$CHAIN_DIR/reason")|AdGuard Home taken out of the DNS chain: Keenetic uses the provider's DNS"
-        fi
+        chain_take_out "$cs_ns" "$([ "$cs_loop" = 1 ] && echo loop || echo silent)"
         return 0
     fi
     # Out of the chain: back after 3 answers in a row, unless AdGuard Home would send the
@@ -487,8 +521,14 @@ case "$OP" in
             filter) [ "$BYPASS" = 1 ] && fwd_apply ;;
         esac
         exit 0 ;;
+    chain-out)
+        ads_lock_acquire "$LOCK" 60 || exit 0
+        trap 'ads_lock_release "$LOCK"' EXIT
+        profile_load && chain_out
+        echo "chain_state=$(cat "$CHAIN_DIR/state" 2>/dev/null)"
+        exit 0 ;;
     set|apply|tick) ;;
-    *) echo "usage: $0 status|set enforce|bypass|chain 0|1|set exclude MACS|apply|tick|hook nat|filter" >&2; exit 64 ;;
+    *) echo "usage: $0 status|set enforce|bypass|chain 0|1|set exclude MACS|apply|tick|chain-out|hook nat|filter" >&2; exit 64 ;;
 esac
 
 # Fail-open for a redirect into a dead AdGuard Home (the owner's own hook included).

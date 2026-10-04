@@ -93,10 +93,27 @@ with tempfile.TemporaryDirectory() as tmp:
     stopping = threading.Event()
     threading.Thread(target=serve, daemon=True).start()
 
+    # AdGuard Home in the DNS chain (CHAIN=): its own stand-in, asked every second here.
+    chain = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    chain.bind(("127.0.0.1", 0))
+    chain_on = threading.Event(); chain_on.set()
+
+    def serve_chain():
+        chain.settimeout(0.2)
+        while not stopping.is_set():
+            try:
+                q, addr = chain.recvfrom(512)
+            except OSError:
+                continue
+            if chain_on.is_set():
+                chain.sendto(q[:2] + bytes([0x81, 0x80]) + q[4:], addr)
+    threading.Thread(target=serve_chain, daemon=True).start()
+
     state = tmp / "state"
     conf = tmp / "sentinel.conf"
     conf.write_text(f"STATE_DIR={state}\nACT={act}\nHOURS_FILE={tmp}/hours.tsv\nPROC={proc}\nSAMPLE_MS=200\nSTATE_MS=300\n"
                     f"DNS=127.0.0.1:{dns_port}\nDNS_EVERY=1\nDNS_NAME=vward-probe.invalid\nMEM_LOW_KB=16384\nBUSY_MEM_KB=24576\n"
+                    f"CHAIN=127.0.0.1:{chain.getsockname()[1]}\nCHAIN_EVERY=1\nCHAIN_MISS=3\n"
                     f"WATCH=engine:{run}/engine.pid:16384\nWATCH=panel:{run}/none.pid:24576\n")
     p = subprocess.Popen(binary.split() + [str(conf)])
 
@@ -117,6 +134,17 @@ with tempfile.TemporaryDirectory() as tmp:
             fail(f"no DNS answer counted: {st()}")
         if asked and b"\x0bvward-probe\x07invalid\x00\x00\x01\x00\x01" not in asked[0]:
             fail("the probe asks vward-probe.invalid, type A")
+        # The chain: answers counted; three misses in a row are «chain-fail» within seconds.
+        if not wait_for(lambda: st().get("chain_ok", "0") != "0", 6):
+            fail(f"no answer of AdGuard Home in the chain counted: {st()}")
+        chain_on.clear()
+        if not wait_for(lambda: "chain-fail" in acts(), 15):
+            fail(f"AdGuard Home silent in the chain is reported: {acts()} {st()}")
+        if acts().count("chain-fail") != 1:
+            fail(f"one event, not one a miss: {acts()}")
+        chain_on.set()
+        if not wait_for(lambda: st().get("chain_miss") == "0", 6):
+            fail(f"answering again clears the misses: {st()}")
         # A leak: over the limit 3 samples in a row.
         rss(4242, 20000)
         if not wait_for(lambda: "leak engine 20000" in acts(), 4):

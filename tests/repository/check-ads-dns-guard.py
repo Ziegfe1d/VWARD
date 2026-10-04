@@ -91,7 +91,8 @@ echo "udp        0      0 192.168.1.1:65053       0.0.0.0:*                     
 '''
 
 FAKE_NSLOOKUP = r'''#!/bin/sh
-if [ -f "$FAKE_AGH_ANSWER" ] && [ "$(cat "$FAKE_AGH_ANSWER")" != 1 ]; then echo ";; connection timed out; no servers could be reached"; exit 1; fi
+case "$2" in *:65053) A=$FAKE_AGH_ANSWER ;; *) A=$FAKE_ISP_ANSWER ;; esac
+if [ -f "$A" ] && [ "$(cat "$A")" != 1 ]; then echo ";; connection timed out; no servers could be reached"; exit 1; fi
 printf 'Server:\t\t%s\nAddress:\t%s\n\nName:\t%s\nAddress: 93.184.216.34\n' "${2%%:*}" "$2" "$1"
 '''
 
@@ -99,6 +100,7 @@ FAKE_NDMC = r'''#!/bin/sh
 echo "$2" >> "$FAKE_NDMC_LOG"
 case "$2" in
     "show running-config") cat "$FAKE_RC" ;;
+    "show ip name-server") printf '  address: 192.168.1.1\n     port: 65053\n  address: 89.207.216.1\n' ;;
     "no ip name-server "*) grep -vx "ip name-server ${2#no ip name-server }" "$FAKE_RC" > "$FAKE_RC.n"; mv "$FAKE_RC.n" "$FAKE_RC" ;;
     "ip name-server "*) echo "$2" >> "$FAKE_RC" ;;
 esac
@@ -170,7 +172,7 @@ with tempfile.TemporaryDirectory() as tmp:
         "FAKE_CONTROL_LOG": str(tmp / "control.log"),
         "VWARD_ROOT_PREFIX": str(tmp / "root"), "TMPDIR": str(tmp),
         "VWARD_NDMC": str(bindir / "ndmc"), "VWARD_PIDOF": str(bindir / "pidof"), "VWARD_DNS_CHAIN_STATE": str(tmp / "chain"),
-        "VWARD_DNS_CHAIN_PAUSE": "0", "FAKE_RC": str(tmp / "rc"), "FAKE_NDMC_LOG": str(tmp / "ndmc.log"), "FAKE_AGH_PID": str(tmp / "agh.pid"),
+        "VWARD_DNS_CHAIN_PAUSE": "0", "FAKE_RC": str(tmp / "rc"), "FAKE_ISP_ANSWER": str(tmp / "isp-answer"), "FAKE_NDMC_LOG": str(tmp / "ndmc.log"), "FAKE_AGH_PID": str(tmp / "agh.pid"),
         "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
     }
     shells = [["sh"]] + ([["busybox", "sh"]] if shutil.which("busybox") else [])
@@ -395,6 +397,24 @@ with tempfile.TemporaryDirectory() as tmp:
             run("tick", shell=shell)
         if not inchain():
             fail(f"{shell[0]} answering again: back into the chain")
+        # The real-time watcher saw it silent for 15 s: out at once - when the provider's DNS answers.
+        answer.write_text("0"); (tmp / "isp-answer").write_text("0")
+        run("chain-out", shell=shell)
+        if not inchain() or "DNS_CHAIN_KEEP" not in guardlog():
+            fail(f"{shell[0]} the provider silent too: AdGuard Home stays (the internet is down, not it)")
+        (tmp / "isp-answer").write_text("1")
+        out = run("chain-out", shell=shell).stdout
+        if inchain() or "chain_state=out" not in out or status().get("chain_reason") != "fast":
+            fail(f"{shell[0]} chain-out: out at once: {out!r} {status()}")
+        answer.write_text("1")
+        for _ in range(3):
+            run("tick", shell=shell)
+        if not inchain():
+            fail(f"{shell[0]} back after a fast take-out")
+        answer.write_text("1")
+        run("chain-out", shell=shell)
+        if not inchain():
+            fail(f"{shell[0]} chain-out while it answers changes nothing")
         # A restart loop (a new process every minute) takes it out though it answers.
         # One restart (a settings change, an update) is no loop.
         pid.write_text("1235\n"); run("tick", shell=shell)

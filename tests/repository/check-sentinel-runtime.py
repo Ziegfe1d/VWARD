@@ -49,8 +49,9 @@ with tempfile.TemporaryDirectory() as tmp:
     (run / "awg-engine").mkdir(parents=True)
     (run / "awg-engine/t0.pid").write_text("1\n")
     (tmp / "profile.sh").write_text(
-        "vward_profile_load(){ VWARD_WAN_DEVICE=eth3; }\n"
+        f"vward_profile_load(){{ VWARD_WAN_DEVICE=eth3; VWARD_LAN_ADDRESS=192.168.1.1; VWARD_ADGUARD_CONFIG={tmp}/agh.yaml; }}\n"
         "vward_device_map(){ :; }\nvward_map_vpns(){ printf 'Wireguard0 nwg0\\nOpkgTun0 opkgtun0\\n'; }\n")
+    (tmp / "agh.yaml").write_text("dns:\n  bind_hosts:\n    - 192.168.1.1\n  port: 65053\n")
     (bin_ / "curl").write_text(f'#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && {{ cp "{tmp}/served.gz" "$2"; exit 0; }}; shift; done\nexit 22\n')
     (bin_ / "curl").chmod(0o755)
     env = os.environ | {"PATH": f"{bin_}:{os.environ['PATH']}", "VWARD_SENTINEL_SHARE": str(share), "VWARD_SENTINEL_STATE": str(state),
@@ -83,7 +84,8 @@ with tempfile.TemporaryDirectory() as tmp:
         fail(f"start: {sh('status')}")
     conf = (state / "sentinel.conf").read_text()
     for need in (f"WATCH=route-engine:{run}/route-engine.pid:16384", "WATCH=panel:/opt/var/run/vward-console-lighttpd.pid:24576",
-                 f"WATCH=awg-t0:{run}/awg-engine/t0.pid:65536", "IFACE=eth3", "IFACE=nwg0", "IFACE=opkgtun0", "DNS=127.0.0.1:53"):
+                 f"WATCH=awg-t0:{run}/awg-engine/t0.pid:65536", "IFACE=eth3", "IFACE=nwg0", "IFACE=opkgtun0", "DNS=127.0.0.1:53",
+                 "CHAIN=192.168.1.1:65053", "CHAIN_EVERY=5", "CHAIN_MISS=3"):
         if need not in conf:
             fail(f"configuration lacks {need!r}:\n{conf}")
     if sh("start") != "result=unchanged":
@@ -127,6 +129,14 @@ with tempfile.TemporaryDirectory() as tmp:
         fail(f"a leak: stopped and started: {rc} {done}")
     if act("dns-fail") != (0, ["S99adguardhome start"]):
         fail("DNS without answers: AdGuard Home started when it is not running")
+    # AdGuard Home silent in the chain: the DNS guard takes it out (it checks again itself).
+    guardbin = obin / "vward-ads-privacy-dns-guard.sh"
+    guardbin.write_text(f'#!/bin/sh\necho "dns-guard $*" >> "{tmp}/done"\necho chain_state=out\n'); guardbin.chmod(0o755)
+    if act("chain-fail") != (0, ["dns-guard chain-out"]):
+        fail(f"chain-fail: the DNS guard takes AdGuard Home out: {act('chain-fail')}")
+    guardbin.write_text(f'#!/bin/sh\necho "dns-guard $*" >> "{tmp}/done"\necho chain_state=in\n')
+    if act("chain-fail")[0] == 0:
+        fail("chain-fail that changed nothing does not count as helped")
     if act("link", "eth3;reboot", "down")[0] != 64 or act("leak", "unknown", "1")[0] != 64:
         fail("odd names are refused")
     if "|ACT|leak|panel|rss_kb=30000|restart" not in (tmp / "sentinel.log").read_text():

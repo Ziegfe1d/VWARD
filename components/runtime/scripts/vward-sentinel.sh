@@ -21,7 +21,7 @@ ACT=${VWARD_SENTINEL_ACT:-/opt/bin/vward-sentinel-act.sh}
 LOG=${VWARD_SENTINEL_LOG:-/opt/var/log/vward-sentinel.log}
 CURL=${VWARD_CURL_BIN:-curl}
 URL=${VWARD_SENTINEL_URL:-https://raw.githubusercontent.com/Ziegfe1d/VWARD/sentinel}
-VERSION=1
+VERSION=2
 DNSCAP_SHARE=${VWARD_DNSCAP_SHARE:-/opt/share/vward/dnscap}
 DNSCAP_VERSION=1
 VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
@@ -29,10 +29,10 @@ VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 # SHA-256 of the program (tools/vward-sentinel/SHA256SUMS, a reproducible build).
 sentinel_sum() {
     case "$1" in
-        mipsle) echo 921759216a92678b199851839300fe8e06561634c60dfdd97378c5b40f81f06f ;;
-        mips) echo af9b91c0e167d14c30c22af902ae7db241c03a760f78c5abc0cdca90441a2e39 ;;
-        arm64) echo 6bcbe7cf4cc3c7f1a5d31c2462eaf1338d2521f176e9bf1079cf2237f1928433 ;;
-        arm) echo c1c0d77472e8c60296618a30b726f24a76f51f95b1db0381069b5ace7674d252 ;;
+        mipsle) echo 5eb1ef825f8711b1b8049cba350dd7a7c8c535a23f0ef3849883bfb45fbeb988 ;;
+        mips) echo 07ac16328fba1a6178c668e4e669955a0b46b3ddb4d8d9c3e4df0a391167959f ;;
+        arm64) echo 1c02a4df4f1c1ad25cff5132d7b86307012c3138058ea976d191c273ae3cf968 ;;
+        arm) echo 75298e42c2963c4e4abb93669814b0ad03e32edffce5f70129ecaec08a3acd1d ;;
         *) return 1 ;;
     esac
 }
@@ -141,6 +141,14 @@ op_config() {
         for f in "$RUN_DIR"/vless-engine/v*.pid; do [ -e "$f" ] && { n=${f##*/}; echo "WATCH=xray-${n%.pid}:$f:98304"; }; done
         if [ -r "$VWARD_PROFILE_LIB" ] && . "$VWARD_PROFILE_LIB" && vward_profile_load >/dev/null 2>&1; then
             [ -z "${VWARD_WAN_DEVICE:-}" ] || echo "IFACE=$VWARD_WAN_DEVICE"
+            # AdGuard Home in the DNS chain, asked every 5 s (unless the owner keeps the chain: CHAIN=0).
+            y=${VWARD_ADGUARD_CONFIG:-}
+            if [ -n "$y" ] && [ -r "$y" ] && [ "$(sed -n 's/^CHAIN=//p' "${VWARD_DNS_GUARD_CONF:-/opt/etc/vward/ads-privacy-guard/dns-guard.conf}" 2>/dev/null)" != 0 ]; then
+                cp=$(awk '/^[^ #]/ {d = ($1 == "dns:")} d && $1 == "port:" {print $2; exit}' "$y" 2>/dev/null)
+                ch=$(awk '/^[^ #]/ {d = ($1 == "dns:"); b = 0; next} d && /^  bind_hosts:/ {b = 1; next} d && /^  [a-z_]+:/ {b = 0}
+                    b && $1 == "-" {gsub(/["\047]/, "", $2); print $2}' "$y" 2>/dev/null | grep -E '^[0-9]+(\.[0-9]+){3}$' | grep -v '^0\.0\.0\.0$' | head -n 1)
+                case "$cp" in ''|*[!0-9]*|53) ;; *) echo "CHAIN=${ch:-${VWARD_LAN_ADDRESS:-127.0.0.1}}:$cp"; echo "CHAIN_EVERY=5"; echo "CHAIN_MISS=3" ;; esac
+            fi
             vward_map_vpns "$(vward_device_map 2>/dev/null)" "${VWARD_WAN_DEVICE:-}" 2>/dev/null |
                 while read -r _ dev; do [ -n "$dev" ] && echo "IFACE=$dev"; done
         fi
