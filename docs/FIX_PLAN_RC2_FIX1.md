@@ -160,3 +160,17 @@ install-dnscap` (ветка `sentinel`, отпечаток закреплён): 
 не стартует; из движка в фоне, если захват умирает; раз в час из housekeeping. Тесты:
 `check-dnscap.py` (разбор пакетов, живой захват на lo; в CI - сборки MIPS/ARM под qemu),
 `check-route-engine-capture.py`.
+
+## 12. Исправление 0.2.0-rc.2.fix.8
+
+Разбор всех конфигов владельца (11 файлов; значения не попадают в репозиторий): AmneziaWG 2.0
+(три файла: диапазоны H1-H4, S3/S4, I1 с `<r 2>`, пустые I2-I5), AmneziaWG 3.x (шесть файлов:
+HeaderProtectionKey, Rekey*/Reject*/Keepalive*-диапазоны, MaxHandshakeAttempts,
+ContentPaddingAddition, PersistentKeepalive 25-35, I1 с `<rd 9>` длиной около 1,5 КБ), ключ
+Amnezia Premium дважды (`.vpn` и он же без «vpn://» в `.conf`). `conf_parse` и `vward-awg -n`
+приняли все файлы туннелей; 3.x сразу уходит в контур, 2.0 - после отказа прошивки (fix.3).
+Не проходил только ключ без «vpn://» - теперь `vpnKey` в Панели. Выбор файла без фильтра по
+расширению (`de.conf_1`). Два файла `us-east` - один адрес и один сервер с разными ключами:
+действует только последний, Панель спросит «заменить / добавить новый». Тест:
+`check-console-tunnel-import.py`.
+

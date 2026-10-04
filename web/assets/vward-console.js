@@ -2136,7 +2136,7 @@ function awgLostPanel(only) {
   const names = L.map(x => '«' + (x.description || x.name) + '»').join(', ');
   return panel(L.length > 1 ? 'Эти туннели не подключатся' : 'Туннель не подключится',
     '<p class="field-warn">' + esc(names) + (L.length > 1 ? ' загружены' : ' загружен') + ' в Keenetic из файлов AmneziaWG 3.x, и Keenetic выбросил их защиту заголовков - без неё сервер не отвечает. Выберите те же файлы: VWARD поднимет туннели в контуре под теми же названиями и перенесёт на них списки и подсети.</p>' +
-    '<label class="file-pick">' + ico('save') + '<span>' + (L.length > 1 ? 'Выбрать их файлы .conf' : 'Выбрать файл .conf') + '</span><input type="file" accept=".conf,.vpn,text/plain" multiple data-awg-adopt' + (cfgOk() ? '' : ' disabled') + '></label>' +
+    '<label class="file-pick">' + ico('save') + '<span>' + (L.length > 1 ? 'Выбрать их файлы .conf' : 'Выбрать файл .conf') + '</span><input type="file" multiple data-awg-adopt' + (cfgOk() ? '' : ' disabled') + '></label>' +
     '', { desc: 'Файлы проверяются по ключу сервера: чужой файл не подойдёт.' });
 }
 async function awgAdopt(files) {
@@ -2146,7 +2146,7 @@ async function awgAdopt(files) {
   tunOverlayShow({ head: 'Перенос туннелей в контур', okHead: 'Туннели перенесены', failHead: 'Перенесено не всё', step: 'prepare' });
   for (const [k, f] of files.entries()) {
     let text = await read(f);
-    if (/^\s*vpn:\/\//i.test(text)) { const key = await amneziaKey(text); text = key.conf || ''; }
+    if (vpnKey(text)) { const key = await amneziaKey(vpnKey(text)); text = key.conf || ''; }
     const m = /\[Peer\][\s\S]*?PublicKey\s*=\s*(\S+)/i.exec(text), t = m && awgLost().find(x => x.peer === m[1]);
     if (!t) { bad.push(f.name); continue; }
     const label = t.description || t.name;
@@ -2330,11 +2330,14 @@ function tcConf(form) {
 // An Amnezia key (vpn://): base64url of JSON, usually zlib with a 4-byte length in front.
 // A key to one's own server carries the WireGuard/AmneziaWG .conf; a Premium key carries only
 // an access key to Amnezia's servers. Decoded here in the browser; nothing of it is shown.
-// A tunnel's name from its file: «fi.conf», «us-east.conf (1)» → «fi», «us-east».
-const confName = n => String(n || '').replace(/\s*\(\d+\)\s*$/, '').replace(/\.(conf|vpn|txt)$/i, '').replace(/\s*\(\d+\)\s*$/, '')
+// A tunnel's name from its file: «fi.conf», «us-east.conf (1)», «de.conf_1» → «fi», «us-east», «de».
+const confName = n => String(n || '').replace(/\s*\(\d+\)\s*$/, '').replace(/\.(conf|vpn|txt)(_\d+)?$/i, '').replace(/\s*\(\d+\)\s*$/, '')
   .replace(/["\\]/g, '').replace(/[_]+/g, ' ').trim().slice(0, 64);
 // A tunnel's name goes to Keenetic: no emoji (flags of a subscription's server names), one line, 64 characters.
 const tunDesc = v => String(v || '').replace(/[\u{10000}-\u{10FFFF}\uFE0F\u200D]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 64);
+// The key alone, without «vpn://» (AmneziaVPN saves it so in «amnezia_config.conf»): one
+// line of base64url, no [Interface]. '' when the text is not a key.
+const vpnKey = t => /^\s*vpn:\/\//i.test(t) ? t.trim() : /^\s*[A-Za-z0-9_-]{60,}={0,2}\s*$/.test(t) ? 'vpn://' + t.trim() : '';
 async function amneziaKey(text) {
   let b;
   try { b = Uint8Array.from(atob(text.trim().slice(6).replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '')), c => c.charCodeAt(0)); }
@@ -2395,7 +2398,7 @@ function tunnelConfSheet(mode, name) {
     // Like Keenetic: from a file, or the same values typed in by hand.
     '<div class="segmented" role="group" aria-label="Как ввести"><button type="button" data-act="tc-mode" data-m="file" aria-pressed="true">Из файла</button><button type="button" data-act="tc-mode" data-m="manual" aria-pressed="false">Вручную</button></div>' +
     '<div class="stack-form tc-file">' +
-    '<label class="file-pick">' + ico('save') + '<span>Выбрать файл .conf или .vpn</span><input type="file" name="file" accept=".conf,.vpn,text/plain" data-conf-file></label>' +
+    '<label class="file-pick">' + ico('save') + '<span>Выбрать файл .conf или .vpn</span><input type="file" name="file" data-conf-file></label>' +
     '<textarea class="input mono" name="conf" rows="7" spellcheck="false" autocomplete="off" aria-label="Текст конфигурации" placeholder="или вставьте текст [Interface] PrivateKey = …, ключ Amnezia vpn://…' + (mode === 'create' ? ', ссылку vless://… или trojan://…, или адрес подписки https://…' : '') + '"></textarea></div>' +
     '<div class="stack-form tc-manual" hidden>' +
     TC_FIELDS.map(f => '<label class="field"><span class="form-label">' + esc(f[1]) + '</span>' + (f[0] === 'awg' ?
@@ -3401,7 +3404,7 @@ async function onSubmit(e, f) {
     if (form.dataset.checked !== '1') $('tcPreview').innerHTML = '';
     let text = manual ? tcConf(form) : form.querySelector('[name=conf]').value;
     const descEl = form.querySelector('[name=description]');
-    if (!manual && /^\s*vpn:\/\//i.test(text)) { const k = await amneziaKey(text); if (k.error) { tcMsg(k.error); return; } text = k.conf; if (descEl && !descEl.value.trim() && k.name) descEl.value = k.name; }
+    if (!manual && vpnKey(text)) { const k = await amneziaKey(vpnKey(text)); if (k.error) { tcMsg(k.error); return; } text = k.conf; if (descEl && !descEl.value.trim() && k.name) descEl.value = k.name; }
     // VLESS: links or a subscription; the server is chosen from the list the router reads.
     if (!manual && /^\s*(vless|trojan|https?):\/\//i.test(text)) {
       if (mode !== 'create') { tcMsg('VLESS-туннель не заменяется: добавьте новый и удалите старый'); return; }

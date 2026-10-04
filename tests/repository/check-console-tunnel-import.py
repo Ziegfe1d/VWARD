@@ -60,6 +60,20 @@ if "amnezia-xray" not in res["other"].get("error", ""):
 if "повреждён" not in res["broken"].get("error", ""):
     fail(f"a broken key: {res['broken']}")
 
+# The key saved without «vpn://» (AmneziaVPN's «amnezia_config.conf»): still a key; a .conf
+# is not one.  A file the phone saved twice («de.conf_1») gives the name «de».
+bare = key(PREMIUM)[len("vpn://"):]
+v_js = code + "\nconsole.log(JSON.stringify([vpnKey(" + json.dumps(bare + "\n") + "), vpnKey(" + json.dumps(key(OWN)) + "), vpnKey(" + json.dumps(CONF) + "), vpnKey('abc'), " \
+    "confName('de.conf_1'), confName('us-east.conf (1)'), confName('fi.conf')]));"
+with tempfile.TemporaryDirectory() as t:
+    f = Path(t) / "v.js"; f.write_text(v_js)
+    r = subprocess.run([node, str(f)], text=True, capture_output=True, timeout=60)
+got = json.loads(r.stdout or "null")
+if got != ["vpn://" + bare, key(OWN), "", "", "de", "us-east", "fi"]:
+    fail(f"a key without vpn://, file names: {got} {r.stderr[-200:]}")
+if JS.count("vpnKey(text)") < 3 or 'accept=".conf' in JS:
+    fail("both file pickers take the key without vpn:// and show every file (no extension filter)")
+
 # Two tunnels of one address: the notification names them (Keenetic connects only one).
 d0 = JS.index("function tunDupAddresses(tunnels) {")
 d1 = JS.index("function plural(n, one, few, many)")
