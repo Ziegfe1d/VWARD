@@ -45,7 +45,8 @@ while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; --interface) dev=$2; sh
 case "$url" in
     https://sub.example/*) [ -f "{tmp}/sub" ] || exit 22; cp "{tmp}/sub" "$out" ;;
     https://xray.example/*) cp "{tmp}/x.zip" "$out" ;;
-    *) [ -n "$dev" ] && [ -e "{tmp}/up.$dev" ] && exit 0; exit 7 ;;
+    *) [ -n "$dev" ] && [ -e "{tmp}/up.$dev" ] && exit 0
+       [ -n "$dev" ] && [ -e "{tmp}/ok.$(cat "{tmp}/xray.addr" 2>/dev/null)" ] && exit 0; exit 7 ;;
 esac
 """)
     for f in bin_.iterdir():
@@ -148,7 +149,9 @@ esac
 
     # Adding: a stand-in Xray that is already installed.
     share.mkdir(parents=True)
-    (share / "xray").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/xray.args"\necho "${{SSL_CERT_FILE:-}}" > "{tmp}/xray.ca"\n[ "$1 $2" = "run -test" ] && exit 0\nwhile :; do sleep 1; done\n')
+    (share / "xray").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/xray.args"\necho "${{SSL_CERT_FILE:-}}" > "{tmp}/xray.ca"\n[ "$1 $2" = "run -test" ] && exit 0\n'
+                              f'[ "$1 $2" = "run -c" ] && {shutil.which("jq")} -r ".outbounds[0].settings | (.vnext // .servers)[0].address" "$3" > "{tmp}/xray.addr"\n'
+                              'while :; do sleep 1; done\n')
     (share / "xray").chmod(0o755)
     (share / "version").write_text(src.split("XRAY_VERSION=", 1)[1].split("\n", 1)[0] + "\n")
     link = tmp / "link.txt"
@@ -271,6 +274,69 @@ esac
     out = engine("remove", "OpkgTun1")
     if out != ["result=changed"] or conf.exists() or (etc / "tunnels.tsv").read_text() != "" or "no interface OpkgTun1" not in (tmp / "ndmc.log").read_text():
         fail(f"remove: {out}")
+    # Failover: the tunnel's server stops answering; another server of its subscription
+    # takes over on the same adapter, the same country (flag) first; none answers: the old
+    # one stays and the next try waits 30 minutes.
+    def vl(host, name):
+        return f"vless://{UUID}@{host}:443?security=reality&sni=s.example&pbk=k&type=tcp#{name}"
+    DE, US = "%F0%9F%87%A9%F0%9F%87%AA", "%F0%9F%87%BA%F0%9F%87%B8"
+    (tmp / "sub").write_text(base64.b64encode("\n".join([vl("203.0.113.11", DE + "%20DE-1"), vl("203.0.113.12", US + "%20US"),
+                                                          vl("203.0.113.13", DE + "%20DE-2")]).encode()).decode())
+    fo = tmp / "fo.txt"; fo.write_text("#server=1\nhttps://sub.example/s/secret-fo\n")
+    (tmp / "ok.203.0.113.11").write_text("")
+    out = engine("add", "de-vless", str(fo))
+    if out[-1] != "result=changed":
+        fail(f"add from a subscription: {out}")
+    slot_ = [l.split("\t") for l in (etc / "tunnels.tsv").read_text().splitlines() if l.split("\t")[3] == "de-vless"][0]
+    sn, tn = slot_[0], slot_[1]
+    srcf = etc / f"v{sn}.src"
+    if oct(srcf.stat().st_mode & 0o777) != "0o600" or "secret-fo" not in srcf.read_text() or (etc / f"v{sn}.idx").read_text().strip() != "1":
+        fail("the subscription is kept root-only with the server's number")
+    (tmp / "ok.203.0.113.11").unlink()
+    (tmp / "ok.203.0.113.12").write_text(""); (tmp / "ok.203.0.113.13").write_text("")
+    out = engine("failover", tn)
+    if out != ["info.server=3", "info.host=203.0.113.13:443", "result=changed"]:
+        fail(f"failover to the other German server: {out}")
+    if f"{tn}\t203.0.113.13:443\tde-vless" not in (etc / "tunnels.tsv").read_text() or (etc / f"v{sn}.idx").read_text().strip() != "3":
+        fail("the new server is recorded")
+    if (tmp / "xray.addr").read_text().strip() != "203.0.113.13" or "now server 3 203.0.113.13:443" not in (tmp / "engine.log").read_text():
+        fail("the new server runs and is logged")
+    for f_ in ("ok.203.0.113.12", "ok.203.0.113.13"):
+        (tmp / f_).unlink()
+    (tmp / "sub").unlink()     # the address does not answer: the kept copy of the servers
+    out = engine("failover", tn)
+    if out != ["info.failover=none", "result=unchanged"] or (tmp / "xray.addr").read_text().strip() != "203.0.113.13":
+        fail(f"nothing answers: the server stays: {out}")
+    if not (run_ / f"v{sn}.failover.at").exists() or (run_ / f"v{sn}.failover").exists():
+        fail("the pause is marked, the lock is gone")
+    out = engine("kick", tn)
+    if out != ["error=tunnel_no_handshake"]:
+        fail(f"within the pause the guard's kick does not try all servers again: {out}")
+    leak = (tmp / "engine.log").read_text() + "\n".join(out)
+    if "secret-fo" in leak or UUID in leak:
+        fail("the subscription's address or the id leaked")
+    (run_ / f"v{sn}.failover.at").write_text("0\n")
+    (tmp / "ok.203.0.113.12").write_text("")
+    out = engine("kick", tn)
+    if out != ["info.server=2", "info.host=203.0.113.12:443", "result=changed"]:
+        fail(f"the guard's kick moves to another server when a restart does not help: {out}")
+    # Supervise: two restarts that did not help start a failover (in the background).
+    (tmp / "ok.203.0.113.12").unlink()
+    (run_ / f"v{sn}.fails").write_text("2\n")
+    (run_ / f"v{sn}.miss").write_text("")
+    (run_ / f"v{sn}.failover.at").write_text("0\n")
+    (sysfs / f"opkgtun{tn[7:]}").mkdir(parents=True); (sysfs / f"opkgtun{tn[7:]}/flags").write_text("0x1091\n")
+    env["VWARD_SYSFS_NET"] = str(sysfs)
+    env["VWARD_VLESS_SELF"] = str(tmp / "self.sh")
+    (tmp / "self.sh").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/self.log"\n'); (tmp / "self.sh").chmod(0o755)
+    engine("supervise")
+    _t.sleep(0.5)
+    if (tmp / "self.log").read_text().split() != ["failover", tn] or (run_ / f"v{sn}.fails").exists():
+        fail("supervise starts a failover after two restarts that did not help")
+    del env["VWARD_VLESS_SELF"], env["VWARD_SYSFS_NET"]
+    out = engine("remove", tn)
+    if out != ["result=changed"] or srcf.exists() or (etc / f"v{sn}.links").exists() or (etc / f"v{sn}.idx").exists():
+        fail(f"removal takes the subscription away too: {out}")
     engine("stop")
 
     # The archive: a wrong checksum is refused, nothing installed.

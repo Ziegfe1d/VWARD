@@ -190,6 +190,24 @@ service_healthy()
 }
 
 
+# tcpdump_starts: tcpdump --version ends well, or is still running after 3 s (then it
+# started); a crash at start (Bus error) or no tcpdump at all: not.
+tcpdump_starts()
+{
+    command -v tcpdump >/dev/null 2>&1 || return 1
+    tcpdump --version >/dev/null 2>&1 </dev/null &
+    TP=$!
+    N=0
+    while kill -0 "$TP" 2>/dev/null && [ "$N" -lt 3 ]; do sleep 1; N=$((N + 1)); done
+    if kill -0 "$TP" 2>/dev/null; then
+        kill "$TP" 2>/dev/null
+        wait "$TP" 2>/dev/null
+        return 0
+    fi
+    wait "$TP"
+}
+
+
 start_service()
 {
     if service_healthy; then
@@ -248,9 +266,14 @@ start_service()
     mkdir -p "${PIDFILE%/*}" || return 1
 
     # tcpdump that dies at start (a broken libpcap) and no vward-dnscap yet: fetch it
-    # first, or the startup check below cannot pass.
-    if [ ! -x "$DNSCAP" ] && [ -x "$SENTINEL_CTL" ] && ! tcpdump --version >/dev/null 2>&1; then
-        "$SENTINEL_CTL" install-dnscap </dev/null >/dev/null 2>&1
+    # first, or the startup check below cannot pass. At most 20 s (a boot without the
+    # internet must not wait for the download); a fetch still going finishes on its own and
+    # the engine takes the program at its next capture start.
+    if [ ! -x "$DNSCAP" ] && [ -x "$SENTINEL_CTL" ] && ! tcpdump_starts; then
+        "$SENTINEL_CTL" install-dnscap </dev/null >/dev/null 2>&1 &
+        FP=$!
+        N=0
+        while kill -0 "$FP" 2>/dev/null && [ "$N" -lt 20 ]; do sleep 1; N=$((N + 1)); done
     fi
 
     "$SCRIPT" >> "$LOG" 2>&1 &

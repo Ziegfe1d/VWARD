@@ -580,7 +580,9 @@ else
                         if "${VWARD_NDMC:-ndmc}" -c "interface $VWARD_TUNNEL_INTERFACE up" \
                            >/dev/null 2>&1; then
 
-                            engine_kick "$VWARD_TUNNEL_INTERFACE"
+                            # An engine tunnel: a restart, and when its server still does not
+                            # answer, another server of its subscription (VLESS failover).
+                            engine_kick "$VWARD_TUNNEL_INTERFACE" kick
                             sleep 4
 
                             if wg_ok; then

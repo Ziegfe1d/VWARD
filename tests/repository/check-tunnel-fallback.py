@@ -331,8 +331,8 @@ echo result=changed
     r = subprocess.run(["sh", str(GUARD)], env=env, text=True, capture_output=True, timeout=60)
     if r.stdout.split("\n", 1)[0] != "ACTION=FAILOPEN_RECOVERED":
         fail(f"recovery of an engine tunnel: {r.stdout[:200]} {(tmp / 'guard.log').read_text()[-300:]}")
-    if "interface OpkgTun2 up" not in (tmp / "ndmc.log").read_text() or (tmp / "vless.log").read_text() != "restart OpkgTun2\n":
-        fail("after switching the interface on, the guard must start the engine's program afresh")
+    if "interface OpkgTun2 up" not in (tmp / "ndmc.log").read_text() or (tmp / "vless.log").read_text() != "kick OpkgTun2\n":
+        fail("after switching the interface on, the guard must start the engine's program afresh (kick: another server when it stays silent)")
 
     # An engine tunnel that stops carrying: the guard starts its program afresh and checks
     # again before anything goes direct (Viva 2026-10-04: de-vless went direct at 10:50).

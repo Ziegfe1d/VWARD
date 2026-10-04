@@ -12,7 +12,8 @@
 # is never printed, logged or put in a process's arguments.
 #
 # vward-vless-engine.sh servers FILE | add DESCRIPTION FILE | remove NAME | restart NAME |
-#                       disable NAME | enable NAME | supervise | stop | status | install
+#                       kick NAME | failover NAME | disable NAME | enable NAME | supervise |
+#                       stop | status | install
 # FILE: vless:// or trojan:// links, one a line, or the address of a subscription (https://...); a line
 # "#server=N" chooses the N-th server (1 by default).
 # Output: "result=..." / "info.key=value" lines, or "error=<code>".
@@ -336,6 +337,7 @@ op_add() {
     case "$rc" in 0) ;; 2) die vless_syntax 64 ;; 3) die subscription_unavailable ;; *) die vless_no_servers 64 ;; esac
     link=$(chosen "$file" "$TMPD/links")
     [ -n "$link" ] || die vless_no_servers 64
+    idx=$(tr -d '\r' < "$file" | sed -n 's/^#server=\([0-9][0-9]*\)$/\1/p' | head -n 1)
     if [ -z "$desc" ]; then desc=$(parse "$link" | awk -F '\t' '$1 == "name" {print substr($0, 6); exit}' | tr -d '"\\' | cut -c1-64); fi
     [ -n "$desc" ] || desc=VLESS
     case "$desc" in *'"'*|*"$(printf '\134')"*) die invalid_description 64 ;; esac
@@ -374,6 +376,10 @@ op_add() {
     step save
     ndm "system configuration save" || { undo; die config_save_failed; }
     printf '%s\t%s\t%s:%s\t%s\n' "$n" "$name" "$host" "$port" "$desc" >> "$TUNNELS"
+    # Where the server came from (the subscription's address or the links) and which one it
+    # is: when it stops answering, failover moves the tunnel to another server of it.
+    (umask 077; grep -v '^#server=' "$file" > "$ENGINE_ETC/v$n.src" && cp "$TMPD/links" "$ENGINE_ETC/v$n.links" &&
+        echo "${idx:-1}" > "$ENGINE_ETC/v$n.idx") 2>/dev/null || rm -f "$ENGINE_ETC/v$n.src"
     log "added $name slot=$n server=$host:$port"
     printf 'info.name=%s\n' "$name"
     [ "$nohs" = 0 ] || printf 'info.handshake=none\n'
@@ -386,7 +392,8 @@ op_remove() {
     n=$(printf '%s' "$row" | cut -f1)
     stop_one "$n"
     ndm "no interface $1" && ndm "system configuration save" || die router_rejected
-    rm -f "$ENGINE_ETC/v$n.json" "$ENGINE_ETC/v$n.off" "$ENGINE_RUN/v$n.err"
+    rm -f "$ENGINE_ETC/v$n.json" "$ENGINE_ETC/v$n.off" "$ENGINE_RUN/v$n.err" "$ENGINE_ETC/v$n.src" "$ENGINE_ETC/v$n.links" \
+        "$ENGINE_ETC/v$n.idx" "$ENGINE_RUN/v$n.fails" "$ENGINE_RUN/v$n.failover.at"
     awk -F'\t' -v p="$1" '$2 != p' "$TUNNELS" > "$TUNNELS.new" && mv -f "$TUNNELS.new" "$TUNNELS"
     log "removed $1"
     echo "result=changed"
@@ -425,6 +432,8 @@ op_supervise() {
     while IFS="$(printf '\t')" read -r n name server desc; do
         case "$name" in OpkgTun[0-9]) ;; *) continue ;; esac
         [ ! -e "$ENGINE_ETC/v$n.off" ] || continue
+        # A failover at work starts and stops the program itself.
+        ! failover_busy "$n" || continue
         if [ -z "$(pid_of "$n")" ]; then
             start_one "$n" && started=$((started + 1)) && log "restarted $name"
             continue
@@ -436,11 +445,21 @@ op_supervise() {
         esac
         if recent "$n"; then rm -f "$ENGINE_RUN/v$n.down" "$ENGINE_RUN/v$n.miss"; continue; fi
         if [ ! -e "$ENGINE_RUN/v$n.down" ]; then
-            connected "$name" </dev/null && { rm -f "$ENGINE_RUN/v$n.miss"; continue; }
+            connected "$name" </dev/null && { rm -f "$ENGINE_RUN/v$n.miss" "$ENGINE_RUN/v$n.fails"; continue; }
             # One silent minute may be the server or the line: Xray starts afresh on the second.
             [ -e "$ENGINE_RUN/v$n.miss" ] || { : > "$ENGINE_RUN/v$n.miss"; continue; }
         fi
         rm -f "$ENGINE_RUN/v$n.miss"
+        # Two restarts in a row did not bring the server back: another server of the same
+        # subscription, in the background (it tries them one by one).
+        fails=$(cat "$ENGINE_RUN/v$n.fails" 2>/dev/null); case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
+        if [ "$fails" -ge 2 ] && [ -s "$ENGINE_ETC/v$n.src" ] && failover_due "$n"; then
+            rm -f "$ENGINE_RUN/v$n.fails"
+            "${VWARD_VLESS_SELF:-$0}" failover "$name" </dev/null >/dev/null 2>&1 &
+            log "$name: no answer after two restarts, looking for another server"
+            continue
+        fi
+        echo $((fails + 1)) > "$ENGINE_RUN/v$n.fails"
         stop_one "$n"
         start_one "$n" && started=$((started + 1)) && log "restarted $name on its adapter"
     done < "$TUNNELS"
@@ -452,8 +471,92 @@ op_supervise() {
 op_kick() {
     row=$(row_of "$1")
     [ -n "$row" ] || die unknown_tunnel 64
-    ! recent "$(printf '%s' "$row" | cut -f1)" || { echo "result=unchanged"; return 0; }
-    op_restart "$1"
+    n=$(printf '%s' "$row" | cut -f1)
+    ! recent "$n" || { echo "result=unchanged"; return 0; }
+    ! failover_busy "$n" || { echo "result=unchanged"; return 0; }
+    ( op_restart "$1" ) 3>&- >/dev/null && { echo "result=changed"; return 0; }
+    [ -s "$ENGINE_ETC/v$n.src" ] && failover_due "$n" || die tunnel_no_handshake
+    op_failover "$1"
+}
+
+# failover_busy SLOT: a failover is moving the tunnel right now (its lock, with a live pid).
+failover_busy() {
+    fp=$(cat "$ENGINE_RUN/v$1.failover/pid" 2>/dev/null)
+    case "$fp" in ''|*[!0-9]*) [ -d "$ENGINE_RUN/v$1.failover" ] && rm -rf "${ENGINE_RUN:?}/v$1.failover"; return 1 ;; esac
+    kill -0 "$fp" 2>/dev/null && return 0
+    rm -rf "${ENGINE_RUN:?}/v$1.failover"
+    return 1
+}
+
+# failover_due SLOT: no failover found nothing within the last 30 minutes (every server
+# silent: the line, not the server; trying them all again each minute helps nobody).
+failover_due() {
+    fa=$(cat "$ENGINE_RUN/v$1.failover.at" 2>/dev/null)
+    case "$fa" in ''|*[!0-9]*) return 0 ;; esac
+    [ $(( $(date +%s) - fa )) -ge "${VWARD_VLESS_FAILOVER_PAUSE:-1800}" ]
+}
+
+# failover NAME: the tunnel's server does not answer; the other servers of its subscription
+# (read again, or the copy kept when the address does not answer) are tried on the tunnel's
+# own adapter, servers of the same country first (the flag at the start of the name), at
+# most 8. The first that opens a page stays; none: the old server goes back.
+op_failover() {
+    row=$(row_of "$1")
+    [ -n "$row" ] || die unknown_tunnel 64
+    n=$(printf '%s' "$row" | cut -f1)
+    [ -s "$ENGINE_ETC/v$n.src" ] || { echo "info.failover=no_source"; echo "result=unchanged"; return 0; }
+    mkdir -p "$ENGINE_RUN" || die write_failed
+    failover_busy "$n" && { echo "result=unchanged"; return 0; }
+    mkdir "$ENGINE_RUN/v$n.failover" 2>/dev/null || { echo "result=unchanged"; return 0; }
+    echo $$ > "$ENGINE_RUN/v$n.failover/pid"
+    TMPD=$(mktemp -d /tmp/vward-vless.XXXXXX 2>/dev/null) || { rm -rf "${ENGINE_RUN:?}/v$n.failover"; die temporary_file_unavailable; }
+    trap 'rm -rf "${ENGINE_RUN:?}/v$n.failover"; cleanup' EXIT
+    if links "$ENGINE_ETC/v$n.src" "$TMPD/links"; then (umask 077; cp "$TMPD/links" "$ENGINE_ETC/v$n.links")
+    else cp "$ENGINE_ETC/v$n.links" "$TMPD/links" 2>/dev/null || die subscription_unavailable; fi
+    cur=$(cat "$ENGINE_ETC/v$n.idx" 2>/dev/null); case "$cur" in ''|*[!0-9]*) cur=1 ;; esac
+    # The flag: two regional indicator symbols, 8 bytes of UTF-8 (F0 9F 87 ..).
+    nm() { parse "$1" 2>/dev/null | awk -F '\t' '$1 == "name" {print substr($0, 6); exit}'; }
+    flag=$(nm "$(sed -n "${cur}p" "$TMPD/links")" | LC_ALL=C cut -b1-8)
+    case "$flag" in "$(printf '\360\237\207')"*) ;; *) flag= ;; esac
+    i=0
+    while IFS= read -r l; do
+        i=$((i + 1))
+        [ "$i" != "$cur" ] || continue
+        if [ -n "$flag" ] && [ "$(nm "$l" | LC_ALL=C cut -b1-8)" = "$flag" ]; then echo "$i" >> "$TMPD/same"; else echo "$i" >> "$TMPD/other"; fi
+    done < "$TMPD/links"
+    cat "$TMPD/same" "$TMPD/other" 2>/dev/null | head -n "${VWARD_VLESS_FAILOVER_MAX:-8}" > "$TMPD/try"
+    cp "$ENGINE_ETC/v$n.json" "$TMPD/old.json" || die write_failed
+    while IFS= read -r i; do
+        l=$(sed -n "${i}p" "$TMPD/links")
+        config "$l" "$(adapter_of "$1")" "$TMPD/c.json" 2>/dev/null || continue
+        "$BIN" run -test -c "$TMPD/c.json" >/dev/null 2>&1 || continue
+        (umask 077; cp "$TMPD/c.json" "$ENGINE_ETC/v$n.json") || continue
+        stop_one "$n"
+        start_one "$n" || continue
+        w=0 ok=0
+        while [ "$w" -le "${VWARD_VLESS_FAILOVER_WAIT:-16}" ]; do
+            connected "$1" && { ok=1; break; }
+            sleep 2
+            w=$((w + 4))
+        done
+        [ "$ok" = 1 ] || continue
+        host=$(parse "$l" | awk -F '\t' '$1 == "host" {print $2; exit}')
+        port=$(parse "$l" | awk -F '\t' '$1 == "port" {print $2; exit}')
+        echo "$i" > "$ENGINE_ETC/v$n.idx"
+        awk -F '\t' -v OFS='\t' -v p="$1" -v s="$host:$port" '$2 == p {$3 = s} {print}' "$TUNNELS" > "$TUNNELS.new" && mv -f "$TUNNELS.new" "$TUNNELS"
+        rm -f "$ENGINE_RUN/v$n.fails" "$ENGINE_RUN/v$n.miss" "$ENGINE_RUN/v$n.failover.at"
+        log "failover $1: server $cur did not answer, now server $i $host:$port"
+        printf 'info.server=%s\ninfo.host=%s:%s\n' "$i" "$host" "$port"
+        echo "result=changed"
+        return 0
+    done < "$TMPD/try"
+    (umask 077; cp "$TMPD/old.json" "$ENGINE_ETC/v$n.json")
+    stop_one "$n"
+    start_one "$n"
+    date +%s > "$ENGINE_RUN/v$n.failover.at"
+    log "failover $1: no other server of the subscription answers, server $cur kept"
+    echo "info.failover=none"
+    echo "result=unchanged"
 }
 
 op_restart() {
@@ -526,6 +629,7 @@ case "${1:-}" in
     remove) [ "$#" -eq 2 ] || die usage 64; op_remove "$2"; sentinel_reload ;;
     restart) [ "$#" -eq 2 ] || die usage 64; op_restart "$2" ;;
     kick) [ "$#" -eq 2 ] || die usage 64; op_kick "$2" ;;
+    failover) [ "$#" -eq 2 ] || die usage 64; op_failover "$2" ;;
     disable) [ "$#" -eq 2 ] || die usage 64; op_disable "$2" ;;
     enable) [ "$#" -eq 2 ] || die usage 64; op_enable "$2" ;;
     supervise) op_supervise ;;

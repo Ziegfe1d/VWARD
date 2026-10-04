@@ -50,7 +50,7 @@ important_max_delay_seconds=7200
 routine_max_delay_seconds=86400
 # This engine's own version: a manifest may ask for a newer one (min_updater_version),
 # and a signed manifest carrying a newer engine makes it update itself.
-VU_ENGINE_VERSION=2.0.4
+VU_ENGINE_VERSION=2.0.5
 minimum_updater_version=$VU_ENGINE_VERSION
 manifest_v2_url=
 
@@ -574,6 +574,8 @@ vu_manifest_verify_signature() {
 # libraries, run through a wrapper. Kept once, never replaced by one that did not verify.
 vu_openssl_dir() { printf '%s\n' "$VU_STATE_DIR/openssl"; }
 vu_openssl_keep() {
+    # A dry run writes nothing outside its own temporary folder.
+    [ "${persist_trust:-1}" != 0 ] || return 0
     ok_dir=$(vu_openssl_dir)
     [ -x "$ok_dir/openssl" ] && return 0
     ok_bin=$(command -v openssl 2>/dev/null) || return 0
