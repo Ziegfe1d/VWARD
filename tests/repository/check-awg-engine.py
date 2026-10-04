@@ -121,7 +121,7 @@ with tempfile.TemporaryDirectory() as t:
     env = os.environ | {
         "VWARD_AWG_ETC": str(t / "etc"), "VWARD_AWG_SHARE": str(share), "VWARD_AWG_RUN": str(t / "run"),
         "VWARD_AWG_LOG": str(t / "engine.log"), "VWARD_CURL_BIN": str(curl), "VWARD_NDMC": str(ndmc),
-        "VWARD_AWG_ARCH": "mipsle", "VWARD_AWG_HANDSHAKE_WAIT": "4",
+        "VWARD_AWG_ARCH": "mipsle", "VWARD_AWG_HANDSHAKE_WAIT": "4", "VWARD_ENGINE_COOLDOWN": "0",
     }
     conf = t / "upload.conf"; conf.write_text(CONF); conf.chmod(0o600)
     outs = []

@@ -345,7 +345,7 @@ echo result=changed
     r = subprocess.run(["sh", str(GUARD)], env=env, text=True, capture_output=True, timeout=60)
     if r.stdout.split("\n", 1)[0] != "ACTION=ENGINE_RESTARTED":
         fail(f"an engine tunnel is restarted before going direct: {r.stdout[:120]} {(tmp / 'guard.log').read_text()[-200:]}")
-    if "interface OpkgTun2 down" in (tmp / "ndmc.log").read_text() or (tmp / "vless.log").read_text() != "restart OpkgTun2\n":
+    if "interface OpkgTun2 down" in (tmp / "ndmc.log").read_text() or (tmp / "vless.log").read_text() != "kick OpkgTun2\n":
         fail("a restarted engine tunnel is not switched off")
     # Still silent after the restart: then direct, as before.
     (tmp / "kicked").unlink()

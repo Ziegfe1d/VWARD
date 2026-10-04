@@ -52,7 +52,7 @@ esac
         f.chmod(0o755)
     env = os.environ | {"PATH": f"{bin_}:{os.environ['PATH']}", "VWARD_VLESS_ETC": str(etc), "VWARD_VLESS_SHARE": str(share),
                         "VWARD_VLESS_RUN": str(run_), "VWARD_VLESS_LOG": str(tmp / "engine.log"), "VWARD_NDMC": str(bin_ / "ndmc"),
-                        "VWARD_CURL_BIN": str(bin_ / "curl"), "JQ": shutil.which("jq"), "VWARD_VLESS_CONNECT_WAIT": "4",
+                        "VWARD_CURL_BIN": str(bin_ / "curl"), "JQ": shutil.which("jq"), "VWARD_VLESS_CONNECT_WAIT": "4", "VWARD_ENGINE_COOLDOWN": "0",
                         "VWARD_XRAY_URL": "https://xray.example/d", "VWARD_VLESS_ARCH": "mipsle"}
 
     def engine(*args):
@@ -189,8 +189,21 @@ esac
     if engine("supervise") != ["result=unchanged"] or (run_ / "v0.pid").read_text() != pid1:
         fail("a working tunnel must be left alone")
     (tmp / "up.opkgtun1").unlink()
+    # One silent minute is only marked; the second in a row restarts Xray.
+    if engine("supervise") != ["result=unchanged"] or (run_ / "v0.pid").read_text() != pid1 or not (run_ / "v0.miss").exists():
+        fail("one silent minute must not restart Xray")
     if engine("supervise") != ["result=changed"] or (run_ / "v0.pid").read_text() == pid1:
         fail("no page through a switched-on adapter: Xray must start afresh")
+    # Just restarted (the guard, the Panel): the minute check leaves it alone for 2 minutes.
+    pid2 = (run_ / "v0.pid").read_text()
+    cool = env | {"VWARD_ENGINE_COOLDOWN": "120"}
+    r = subprocess.run(["sh", str(ENGINE), "supervise"], env=cool, text=True, capture_output=True, timeout=60)
+    r = subprocess.run(["sh", str(ENGINE), "supervise"], env=cool, text=True, capture_output=True, timeout=60)
+    if r.stdout.split() != ["result=unchanged"] or (run_ / "v0.pid").read_text() != pid2:
+        fail("a program restarted within the cooldown is not restarted again")
+    r = subprocess.run(["sh", str(ENGINE), "kick", "OpkgTun1"], env=cool, text=True, capture_output=True, timeout=60)
+    if r.stdout.split() != ["result=unchanged"] or (run_ / "v0.pid").read_text() != pid2:
+        fail(f"the guard's kick within the cooldown changes nothing: {r.stdout!r}")
     (tmp / "up.opkgtun1").write_text("")
     shutil.rmtree(sysfs / "opkgtun1")
     pid2 = (run_ / "v0.pid").read_text()
@@ -278,6 +291,6 @@ for need in ("'#server=' + num", "vlessOf(", "name=\"vless-server\""):
 if "vward-vless-engine.sh supervise" not in (ROOT / "components/tunnel-guard/scripts/vward-tunnel-health.sh").read_text():
     fail("a stopped Xray is not started again")
 guard = (ROOT / "components/tunnel-guard/scripts/vward-tunnel-guard.sh").read_text()
-if guard.count('engine_kick "$VWARD_TUNNEL_INTERFACE"') != 3 or '"$ek_bin" restart "$1"' not in guard:
+if guard.count('engine_kick "$VWARD_TUNNEL_INTERFACE"') != 3 or '"$ek_bin" "${2:-restart}" "$1"' not in guard:
     fail("the guard must start an engine tunnel's program afresh after it switched the interface on")
 print("VLESS_ENGINE=PASS")

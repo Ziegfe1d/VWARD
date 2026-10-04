@@ -186,6 +186,16 @@ start_one() {
         exec $VWARD_TUNNEL_NICE "$BIN" -i "$(adapter_of "$2")" -c "$ENGINE_ETC/t$1.conf" -s "$ENGINE_RUN/t$1.state" </dev/null >/dev/null 2>"$ENGINE_RUN/t$1.err" 3>&-
     ) &
     echo $! > "$ENGINE_RUN/t$1.pid"
+    date +%s > "$ENGINE_RUN/t$1.started"
+}
+
+# recent SLOT: the program was (re)started within the cooldown (120 s). The guard, the
+# minute check and a restart from the Panel do not restart it again on top of each other
+# (Viva 2026-10-04: four restarts in a minute, the tunnel never settled).
+recent() {
+    rs=$(cat "$ENGINE_RUN/t$1.started" 2>/dev/null)
+    case "$rs" in ''|*[!0-9]*) return 1 ;; esac
+    [ $(( $(date +%s) - rs )) -lt "${VWARD_ENGINE_COOLDOWN:-120}" ]
 }
 
 stop_one() {
@@ -363,6 +373,7 @@ op_supervise() {
             2) continue ;;
         esac
         [ -e "$ENGINE_RUN/t$n.down" ] || continue
+        if recent "$n"; then rm -f "$ENGINE_RUN/t$n.down"; continue; fi
         stop_one "$n"
         start_one "$n" "$name" && started=$((started + 1)) && log "restarted $name on its adapter"
     done < "$TUNNELS"
@@ -370,6 +381,15 @@ op_supervise() {
 }
 
 # restart NAME: the tunnel's program again (the Panel's «Перезапустить»), then its handshake.
+# kick NAME: a restart unless the program has just been (re)started (the guard's own
+# attempt when the server stops answering).
+op_kick() {
+    row=$(row_of "$1")
+    [ -n "$row" ] || die unknown_tunnel 64
+    ! recent "$(printf '%s' "$row" | cut -f1)" || { echo "result=unchanged"; return 0; }
+    op_restart "$1"
+}
+
 op_restart() {
     row=$(row_of "$1")
     [ -n "$row" ] || die unknown_tunnel 64
@@ -443,6 +463,7 @@ case "${1:-}" in
     replace) [ "$#" -eq 3 ] || [ "$#" -eq 4 ] || die usage 64; op_replace "$2" "$3" "${4:-}"; sentinel_reload ;;
     remove) [ "$#" -eq 2 ] || die usage 64; op_remove "$2"; sentinel_reload ;;
     restart) [ "$#" -eq 2 ] || die usage 64; op_restart "$2" ;;
+    kick) [ "$#" -eq 2 ] || die usage 64; op_kick "$2" ;;
     disable) [ "$#" -eq 2 ] || die usage 64; op_disable "$2" ;;
     enable) [ "$#" -eq 2 ] || die usage 64; op_enable "$2" ;;
     supervise) op_supervise ;;

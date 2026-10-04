@@ -62,7 +62,7 @@ engine_of()
 engine_kick()
 {
     ek_bin=$(engine_of "$1") || return 0
-    "$ek_bin" restart "$1" </dev/null >/dev/null 2>&1 || :
+    "$ek_bin" "${2:-restart}" "$1" </dev/null >/dev/null 2>&1 || :
 }
 
 mkdir -p "$DIR"
@@ -516,7 +516,7 @@ else
                             # A tunnel of VWARD's own engine: its program starts afresh first;
                             # only a tunnel that stays silent after it goes direct.
                             elif [ "$MODE" = "AUTO" ] && engine_of "$VWARD_TUNNEL_INTERFACE" >/dev/null &&
-                                 { engine_kick "$VWARD_TUNNEL_INTERFACE"; sleep "${VWARD_GUARD_KICK_WAIT:-4}"; wg_ok; }; then
+                                 { engine_kick "$VWARD_TUNNEL_INTERFACE" kick; sleep "${VWARD_GUARD_KICK_WAIT:-4}"; wg_ok; }; then
 
                                 DOWN_STREAK=0
                                 ACTION="ENGINE_RESTARTED"
