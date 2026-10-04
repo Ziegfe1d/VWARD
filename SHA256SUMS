@@ -21,7 +21,7 @@ b58cdb3f2af2cc8d5607747ccf0c9a8f78c6b56aab1d38cc19ffa50cf6188412  components/ads
 e128e75b45ba173a3733489be7a27fcf1d3e49a0ff7024f1afe7d2defaf232d1  components/ads-privacy-guard/lib/vward-ads-privacy-common.sh
 bbda850eee5356b46ca21b36b627349e89062f0d8d659c85370edae8e2306b6e  components/ads-privacy-guard/scripts/vward-ads-privacy-clients.sh
 64aeae1b353a3fb2993f43e8a5eae051047839ce5aace78d7448b43f16715e51  components/ads-privacy-guard/scripts/vward-ads-privacy-control.sh
-01ca22beed90188098f96ff726d829f71dba548b1c464b856b5d30361f1e854a  components/ads-privacy-guard/scripts/vward-ads-privacy-dns-guard.sh
+b379ade38683f67760b9a6ed91f996b2531d5e012b1b93cd3cecfab1d28dc1c8  components/ads-privacy-guard/scripts/vward-ads-privacy-dns-guard.sh
 f011f0e06b1b48a7d60724180a156011d0edc037204f55b9bf8be7216a3207b8  components/ads-privacy-guard/scripts/vward-ads-privacy-guard.sh
 608c7adf67c0e481d8a0cb5fad11f851af213f3098fa28b68b0ee62e30022746  components/ads-privacy-guard/scripts/vward-ads-privacy-health.sh
 c655ea69bb0bd0db795b1472304b43d8e70fb22d499cc37a76277640904bb25d  components/ads-privacy-guard/scripts/vward-ads-privacy-https.sh
@@ -198,7 +198,7 @@ e1fb0084f07874caa495f2fa3de600014874a3ec18e9287cdafa3123169414a9  tests/perf/run
 7b0a2c0d448226e71e6b18c5886ee20eed4320cb40e04ea65afa7ba238cbaf09  tests/repository/check-ads-agh-smartdns.py
 d937b60e113387ae020b74db01530ebe1af12493720546158c2b85663866b463  tests/repository/check-ads-console.py
 149725a5e0fdf4cfe49f13e2cf838771b5ccead71aa91cc21d8afa4c03e24575  tests/repository/check-ads-default-config.py
-411393ecfe68e74d49f91dea54abc4d3934342e810b3c7882884f984de2400f4  tests/repository/check-ads-dns-guard.py
+10952bc110ce85adb822269db6d7e853405cc2d2aa6c5c4b63b79fe5fa5e307b  tests/repository/check-ads-dns-guard.py
 36326e34ad78f3a3c602698a7ad66017e00053e0bea79713b24bef4490939eed  tests/repository/check-ads-jobs.py
 673b643b107459d13b6818e29bc639bb426e83196c5157e16fdecaddcbc54fdd  tests/repository/check-ads-page-speed.py
 f9556a16ca8fd7f6c1c77e270bc89366cd6c60b0d6f49002a8bfc481fed9dc2c  tests/repository/check-ads-privacy-integration.py

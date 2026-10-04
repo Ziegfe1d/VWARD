@@ -170,7 +170,7 @@ with tempfile.TemporaryDirectory() as tmp:
         "FAKE_CONTROL_LOG": str(tmp / "control.log"),
         "VWARD_ROOT_PREFIX": str(tmp / "root"), "TMPDIR": str(tmp),
         "VWARD_NDMC": str(bindir / "ndmc"), "VWARD_PIDOF": str(bindir / "pidof"), "VWARD_DNS_CHAIN_STATE": str(tmp / "chain"),
-        "FAKE_RC": str(tmp / "rc"), "FAKE_NDMC_LOG": str(tmp / "ndmc.log"), "FAKE_AGH_PID": str(tmp / "agh.pid"),
+        "VWARD_DNS_CHAIN_PAUSE": "0", "FAKE_RC": str(tmp / "rc"), "FAKE_NDMC_LOG": str(tmp / "ndmc.log"), "FAKE_AGH_PID": str(tmp / "agh.pid"),
         "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
     }
     shells = [["sh"]] + ([["busybox", "sh"]] if shutil.which("busybox") else [])
@@ -380,12 +380,13 @@ with tempfile.TemporaryDirectory() as tmp:
         if status().get("chain_state") != "in":
             fail(f"{shell[0]} status: {status()}")
         answer.write_text("0")
-        run("tick", shell=shell)
-        if not inchain():
-            fail(f"{shell[0]} one silent minute is not a death")
+        for i in range(2):
+            run("tick", shell=shell)
+            if not inchain():
+                fail(f"{shell[0]} {i + 1} silent minute(s) is not a death (a filter reload, a quick restart)")
         run("tick", shell=shell)
         if inchain() or "ip name-server 1.1.1.1" not in rc.read_text() or "DNS_CHAIN_OUT" not in guardlog():
-            fail(f"{shell[0]} silent twice: out of the chain, the provider's DNS stays: {rc.read_text()!r}")
+            fail(f"{shell[0]} silent 3 minutes: out of the chain, the provider's DNS stays: {rc.read_text()!r}")
         st = status()
         if st.get("chain_state") != "out" or st.get("chain_reason") != "silent":
             fail(f"{shell[0]} status out: {st}")
@@ -395,7 +396,11 @@ with tempfile.TemporaryDirectory() as tmp:
         if not inchain():
             fail(f"{shell[0]} answering again: back into the chain")
         # A restart loop (a new process every minute) takes it out though it answers.
-        for n in range(1235, 1240):
+        # One restart (a settings change, an update) is no loop.
+        pid.write_text("1235\n"); run("tick", shell=shell)
+        if not inchain():
+            fail(f"{shell[0]} one restart is not a loop")
+        for n in range(1236, 1242):
             pid.write_text(f"{n}\n"); run("tick", shell=shell)
         if inchain() or status().get("chain_reason") != "loop":
             fail(f"{shell[0]} a restart loop: out of the chain: {status()}")

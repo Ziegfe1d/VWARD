@@ -16,8 +16,8 @@
 # so when it dies every device of the home loses DNS. A redirect into a port nothing answers on is
 # taken off (parked in RAM) and put back when AdGuard Home answers again.
 # The chain (CHAIN=1, the default): Keenetic hands the queries of the home to AdGuard Home
-# through «ip name-server ADDRESS:PORT». AdGuard Home that stops answering (twice in a row) or
-# restarts again and again (3 times in 10 minutes) is taken out of the chain - Keenetic goes
+# through «ip name-server ADDRESS:PORT». AdGuard Home that stops answering (3 minutes in a row,
+# each check three tries) or restarts again and again (4 times in 10 minutes) is taken out of the chain - Keenetic goes
 # to the provider's DNS and the home keeps its internet - and put back after 3 answers in a row
 # (Viva 2026-10-04: AdGuard Home restarted in a loop at night, the home lost DNS, the line was
 # removed by hand and stayed out: no ad filtering, no Smart DNS). CHAIN=0: VWARD leaves the
@@ -333,7 +333,7 @@ agh_dns_host()
 
 ndm() { nd_out=$("$NDMC" -c "$1" 2>&1) || return 1; ! printf '%s\n' "$nd_out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command)'; }
 
-# AdGuard Home restarted 3 times within 10 minutes (its process id changed): a loop.
+# AdGuard Home restarted 4 times within 10 minutes (its process id changed): a loop.
 agh_looping()
 {
     al_pid=$("$PIDOF" AdGuardHome 2>/dev/null | awk '{print $1}')
@@ -343,7 +343,7 @@ agh_looping()
     [ -s "$CHAIN_DIR/pids" ] || return 1
     awk -v t="$al_now" '$1 >= t - 600' "$CHAIN_DIR/pids" > "$CHAIN_DIR/pids.new" && mv -f "$CHAIN_DIR/pids.new" "$CHAIN_DIR/pids"
     # The first id seen is the running one, not a restart.
-    [ "$(wc -l < "$CHAIN_DIR/pids")" -gt 3 ]
+    [ "$(wc -l < "$CHAIN_DIR/pids")" -gt 4 ]
 }
 
 count_up() { cu_n=0; [ ! -r "$1" ] || read -r cu_n < "$1"; case "$cu_n" in ''|*[!0-9]*) cu_n=0 ;; esac; echo $((cu_n + 1)) > "$1"; echo $((cu_n + 1)); }
@@ -360,15 +360,21 @@ chain_sync()
     [ -n "$cs_rc" ] || return 0
     cs_in=0
     printf '%s\n' "$cs_rc" | grep -Eq "^ip name-server $cs_ns( |\$)" && cs_in=1
-    cs_ok=0
-    agh_up "$cs_port" && agh_answers "$cs_port" && cs_ok=1
+    # A short pause (a filter reload, a quick restart) is not a death: a check is three tries
+    # 5 s apart, and only three failed checks in a row (3 minutes) take AdGuard Home out.
+    cs_ok=0 cs_try=0
+    while [ "$cs_try" -lt "${VWARD_DNS_CHAIN_TRIES:-3}" ]; do
+        agh_up "$cs_port" && agh_answers "$cs_port" && { cs_ok=1; break; }
+        cs_try=$((cs_try + 1))
+        [ "$cs_try" -ge "${VWARD_DNS_CHAIN_TRIES:-3}" ] || sleep "${VWARD_DNS_CHAIN_PAUSE:-5}"
+    done
     cs_loop=0
     if agh_looping; then cs_ok=0 cs_loop=1; fi
     if [ "$cs_ok" = 1 ]; then rm -f "$CHAIN_DIR/fails"; else rm -f "$CHAIN_DIR/oks"; fi
     if [ "$cs_in" = 1 ]; then
         echo in > "$CHAIN_DIR/state"
         [ "$cs_ok" = 0 ] || return 0
-        [ "$(count_up "$CHAIN_DIR/fails")" -ge 2 ] || [ "$cs_loop" = 1 ] || return 0
+        [ "$(count_up "$CHAIN_DIR/fails")" -ge 3 ] || [ "$cs_loop" = 1 ] || return 0
         if ndm "no ip name-server $cs_ns"; then
             ndm "system configuration save" || :
             rm -f "$CHAIN_DIR/fails" "$CHAIN_DIR/oks"
