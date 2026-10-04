@@ -7,7 +7,7 @@ name: Real-time watcher program (vward-sentinel)
 on:
   push:
     branches: [dev]
-    paths: ["tools/vward-sentinel/**", "tests/repository/check-sentinel.py", ".github/workflows/sentinel.yml"]
+    paths: ["tools/vward-sentinel/**", "tools/vward-ed25519/**", "tests/repository/check-sentinel.py", ".github/workflows/sentinel.yml"]
   workflow_dispatch:
 
 permissions:
@@ -25,7 +25,9 @@ jobs:
         with:
           path: vward
       - name: Build and compare with the pinned sums
-        run: sh vward/tools/vward-sentinel/build.sh "$PWD/out" --check
+        run: |
+          sh vward/tools/vward-sentinel/build.sh "$PWD/out" --check
+          sh vward/tools/vward-ed25519/build.sh "$PWD/out" --check
       - name: The watcher's tests on this machine and on the router builds under qemu
         run: |
           sudo apt-get update -q >/dev/null && sudo apt-get install -y -q qemu-user-static iproute2 >/dev/null
@@ -36,10 +38,21 @@ jobs:
             sudo SENTINEL_RUN="qemu-${pair#*:}-static $GITHUB_WORKSPACE/out/vward-sentinel-linux-${pair%%:*}" \
               python3 tests/repository/check-sentinel.py
           done
+      - name: The Ed25519 check on the router builds under qemu (the real signed feed)
+        run: |
+          cd vward
+          jq -cS .signed updates/dev/v2/manifest.json > /tmp/s.json
+          jq -r .signature updates/dev/v2/manifest.json | base64 -d > /tmp/s.sig
+          cp /tmp/s.json /tmp/f.json; printf x >> /tmp/f.json
+          for pair in mipsle:mipsel mips:mips arm64:aarch64 arm:arm; do
+            b="qemu-${pair#*:}-static $GITHUB_WORKSPACE/out/vward-ed25519-linux-${pair%%:*}"
+            $b verify config/updater/update-public.pem /tmp/s.json /tmp/s.sig
+            if $b verify config/updater/update-public.pem /tmp/f.json /tmp/s.sig; then echo "a forged message passed"; exit 1; fi
+          done
       - name: Publish to the sentinel branch
         run: |
           cd out
-          for f in vward-sentinel-linux-*; do gzip -n -9 -c "$f" > "$f.gz"; done
+          for f in vward-sentinel-linux-* vward-ed25519-linux-*; do gzip -n -9 -c "$f" > "$f.gz"; done
           cd ../vward
           git config user.name "vward-bot"
           git config user.email "vward-bot@users.noreply.github.com"
@@ -50,8 +63,8 @@ jobs:
             git rm -rfq . >/dev/null 2>&1 || true
           fi
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp ../out/*.gz ../out/SHA256SUMS .
-          printf 'vward-sentinel: tools/vward-sentinel in the VWARD repository (C, musl, static).\n' > README
+          cp ../out/*.gz ../out/SHA256SUMS ../out/SHA256SUMS.ed25519 .
+          printf 'vward-sentinel: tools/vward-sentinel in the VWARD repository (C, musl, static).\nvward-ed25519: tools/vward-ed25519 (Zig, static), the signature check for routers whose openssl cannot.\n' > README
           git add -A
           if git diff --cached --quiet; then echo "program unchanged"; exit 0; fi
           git commit -qm "vward-sentinel from ${GITHUB_SHA::12}"
