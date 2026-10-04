@@ -13,6 +13,7 @@
 - S91's startup check and the Panel count a vward-dnscap capture like a tcpdump one."""
 
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -51,6 +52,16 @@ for t in $STEPS; do step "$t"; done
 '''
 
 
+# Only the utilities the code needs: a tcpdump installed on this machine must not count.
+def tools_dir(tmp):
+    d = Path(tmp) / "tools"
+    if not d.exists():
+        d.mkdir()
+        for name in ("date", "cat", "chmod", "printf", "rm"):
+            (d / name).symlink_to(shutil.which(name))
+    return str(d)
+
+
 def run(tmp, shell, lan, tools, steps, ctl=None):
     bin_dir = Path(tmp) / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -70,9 +81,10 @@ def run(tmp, shell, lan, tools, steps, ctl=None):
     if try_file.exists():
         try_file.unlink()
     env = {"VWARD_UPTIME_FILE": str(Path(tmp) / "uptime"), "VWARD_LAN_DEVICE": lan, "STEPS": " ".join(map(str, steps)),
-           "PATH": f"{bin_dir}:/usr/bin:/bin", "VWARD_DNSCAP_BIN": str(dnscap), "VWARD_DNSCAP_TRY": str(try_file),
+           "PATH": f"{bin_dir}:{tools_dir(tmp)}", "VWARD_DNSCAP_BIN": str(dnscap), "VWARD_DNSCAP_TRY": str(try_file),
            "VWARD_SENTINEL_CTL": ctl or str(Path(tmp) / "no-ctl")}
-    r = subprocess.run(shell + ["-c", script], env=env, text=True, capture_output=True)
+    sh_bin = shutil.which(shell[0])
+    r = subprocess.run([sh_bin] + shell[1:] + ["-c", script], env=env, text=True, capture_output=True)
     if r.returncode:
         fail(f"{shell[0]}: {r.stderr[-300:]}")
     return r.stdout.split()
@@ -128,8 +140,8 @@ echo "$CAP_N/$CAP_PAUSE"; cap_pick; echo "$CAP_TOOL:$CAP_IF"
 '''
 with tempfile.TemporaryDirectory() as tmp:
     b = Path(tmp) / "bin"; b.mkdir(); (b / "tcpdump").write_text("#!/bin/sh\n"); (b / "tcpdump").chmod(0o755)
-    r = subprocess.run(["sh", "-c", probe], text=True, capture_output=True,
-                       env={"PATH": f"{b}:/usr/bin:/bin", "VWARD_LAN_DEVICE": "br0", "VWARD_UPTIME_FILE": str(Path(tmp) / "up"),
+    r = subprocess.run([shutil.which("sh"), "-c", probe], text=True, capture_output=True,
+                       env={"PATH": f"{b}:{tools_dir(tmp)}", "VWARD_LAN_DEVICE": "br0", "VWARD_UPTIME_FILE": str(Path(tmp) / "up"),
                             "VWARD_DNSCAP_BIN": str(Path(tmp) / "dnscap"), "VWARD_DNSCAP_TRY": str(Path(tmp) / "try"),
                             "VWARD_SENTINEL_CTL": "/nonexistent"})
     if r.stdout.split() != ["tcpdump:any", "0/1", "dnscap:br0"]:
