@@ -135,3 +135,13 @@ verify certificate: x509: certificate signed by unknown authority`. Xray (Go) и
 удостоверяющих центров только в `/etc/ssl`, на Keenetic его нет; список Entware
 (`/opt/etc/ssl/certs/ca-certificates.crt`, пакет `ca-bundle` ставит установщик VWARD) теперь
 передаётся Xray через `SSL_CERT_FILE`. Тест: `check-vless-engine.py`.
+
+## 10. Исправление 0.2.0-rc.2.fix.6 (критическое)
+
+На роутере с 09:00 каждая проверка обновлений: «Manifest structure/signature verification
+failed». Диагностика по шагам: структура PASS, канонический вид совпадает с CI
+(sha 2d57fc9bda6d2f30), `openssl pkeyutl -verify -rawin` - **Segmentation fault** (OpenSSL
+3.5.5 из Entware). Движок 2.0.4 хранит копию openssl, проверившую подпись, в
+`/opt/var/lib/vward/updater/openssl` и проверяет ею, если системный openssl не смог; проверка
+здоровья обновлений Entware включает подпись Ed25519, так что сломавшее её обновление
+откатывается. Тесты: `check-updater-wan-fallback.py`, `check-ext-update.py`.

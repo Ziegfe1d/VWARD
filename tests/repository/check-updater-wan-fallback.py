@@ -3,7 +3,9 @@
 the feed host through), it is repeated once bound to the device of the main
 default route; a request that works is made once; the switch turns it off."""
 
+import json
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -103,3 +105,38 @@ with tempfile.TemporaryDirectory() as d:
     if row.get("health") != "PASS" or row.get("engine_version") != "2.0.3":
         fail(f"update engine row: {out}")
 print("PASS: the update engine has its own healthy row")
+
+# An openssl that crashes on the Ed25519 check (Entware 3.5.5 on MIPS): the engine keeps a
+# copy of the openssl that last verified and checks with it; a bad signature still fails.
+with tempfile.TemporaryDirectory() as d:
+    tmp = Path(d)
+    manifest = ROOT / "updates/dev/v2/manifest.json"
+    if manifest.exists():
+        pub = ROOT / "config/updater/update-public.pem"
+        upd = tmp / "updater"; upd.mkdir()
+        bad = tmp / "bad"; bad.mkdir()
+        real = shutil.which("openssl")
+        # Stage 1: a working openssl verifies and is kept.
+        base = (f'. "{ENGINE}/vward-update-common-base.sh"\nVU_LOG_DIR="{tmp}/log"\nVU_STAGING_DIR="{tmp}/st"\n'
+                f'public_key_file="{pub}"\nVU_STATE_DIR="{upd}"\n')
+        env = dict(os.environ, VWARD_NO_PERSIST_LOG="1", VWARD_UPDATER_ROOT=str(upd))
+        r = subprocess.run(["sh", "-c", base + f'vu_manifest_verify_signature "{manifest}"; echo "rc=$?"'], env=env, capture_output=True, text=True)
+        if "rc=0" not in r.stdout or not (upd / "openssl/openssl").exists():
+            fail(f"a working openssl verifies and is kept: {r.stdout}{r.stderr}")
+        # Stage 2: the system openssl crashes on pkeyutl; the kept copy verifies.
+        (bad / "openssl").write_text(f'#!/bin/sh\n[ "$1" = pkeyutl ] && kill -SEGV $$\nexec {real} "$@"\n')
+        (bad / "openssl").chmod(0o755)
+        env2 = env | {"PATH": f"{bad}:{os.environ['PATH']}"}
+        r = subprocess.run(["sh", "-c", base + f'vu_manifest_verify_signature "{manifest}"; echo "rc=$?"'], env=env2, capture_output=True, text=True)
+        if "rc=0" not in r.stdout or "kept copy verified" not in r.stderr:
+            fail(f"the kept openssl checks when the system one crashes: {r.stdout}{r.stderr}")
+        forged = tmp / "forged.json"
+        forged.write_text(json.dumps(json.loads(manifest.read_text()) | {"signature": "AAAA" + json.loads(manifest.read_text())["signature"][4:]}))
+        r = subprocess.run(["sh", "-c", base + f'vu_manifest_verify_signature "{forged}"; echo "rc=$?"'], env=env2, capture_output=True, text=True)
+        if "rc=1" not in r.stdout:
+            fail("a wrong signature is refused by the kept copy too")
+
+helper = (ROOT / "components/console/scripts/vward-console-config.sh").read_text()
+if 'pkeyutl -verify -inkey "$eh_t/k" -rawin' not in helper or "&& echo openssl" not in helper:
+    fail("an Entware upgrade that breaks openssl's Ed25519 check is rolled back")
+print("PASS: a crashing openssl does not stop signed updates")

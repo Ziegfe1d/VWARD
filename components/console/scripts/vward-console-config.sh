@@ -2055,6 +2055,15 @@ op_ext_check() {
 # ext_health: one line per check that passes now.
 ext_health() {
     "$JQ" -n 1 >/dev/null 2>&1 && echo jq
+    # The update engine checks VWARD's signatures with openssl (Ed25519): an Entware openssl
+    # that crashes on it (3.5.5 on MIPS, Viva 2026-10-04) is taken back like any other failure.
+    eh_t=$(mktemp -d /tmp/vward-ext-ossl.XXXXXX 2>/dev/null) && {
+        printf 'vward' > "$eh_t/m"
+        "${VWARD_OPENSSL_BIN:-openssl}" genpkey -algorithm ED25519 -out "$eh_t/k" >/dev/null 2>&1 &&
+            "${VWARD_OPENSSL_BIN:-openssl}" pkeyutl -sign -inkey "$eh_t/k" -rawin -in "$eh_t/m" -out "$eh_t/s" >/dev/null 2>&1 &&
+            "${VWARD_OPENSSL_BIN:-openssl}" pkeyutl -verify -inkey "$eh_t/k" -rawin -in "$eh_t/m" -sigfile "$eh_t/s" >/dev/null 2>&1 && echo openssl
+        rm -rf "${eh_t:?}"
+    }
     "${VWARD_CURL_BIN:-curl}" --version >/dev/null 2>&1 && echo curl
     [ -n "${VWARD_DNS_SERVER:-}" ] && "${VWARD_NSLOOKUP_BIN:-nslookup}" "${VWARD_HEALTH_HOST:-keenetic.com}" "$VWARD_DNS_SERVER" >/dev/null 2>&1 && echo dns
     [ -n "${VWARD_CONSOLE_PORT:-}" ] && "${VWARD_CURL_BIN:-curl}" --fail --silent --max-time 5 \

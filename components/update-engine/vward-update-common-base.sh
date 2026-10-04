@@ -50,7 +50,7 @@ important_max_delay_seconds=7200
 routine_max_delay_seconds=86400
 # This engine's own version: a manifest may ask for a newer one (min_updater_version),
 # and a signed manifest carrying a newer engine makes it update itself.
-VU_ENGINE_VERSION=2.0.3
+VU_ENGINE_VERSION=2.0.4
 minimum_updater_version=$VU_ENGINE_VERSION
 manifest_v2_url=
 
@@ -554,8 +554,41 @@ vu_manifest_verify_signature() {
     signature=$VU_STAGING_DIR/signature.bin
     mkdir -p "$VU_STAGING_DIR" || return 1
     jq -cS '.signed' "$manifest" > "$signed" || return 1
-    jq -r '.signature' "$manifest" | openssl base64 -d -A > "$signature" 2>/dev/null || return 1
-    openssl pkeyutl -verify -pubin -inkey "$public_key_file" -rawin -in "$signed" -sigfile "$signature" >/dev/null 2>&1
+    vu_sig=$(jq -r '.signature' "$manifest") || return 1
+    printf '%s' "$vu_sig" | openssl base64 -d -A > "$signature" 2>/dev/null && [ -s "$signature" ] ||
+        printf '%s' "$vu_sig" | base64 -d > "$signature" 2>/dev/null || return 1
+    if openssl pkeyutl -verify -pubin -inkey "$public_key_file" -rawin -in "$signed" -sigfile "$signature" >/dev/null 2>&1; then
+        vu_openssl_keep
+        return 0
+    fi
+    # Entware's openssl after an upgrade can crash on this check (3.5.5 on MIPS, Viva
+    # 2026-10-04: «Segmentation fault», every update refused as unsigned). The copy kept
+    # from the last openssl that verified checks instead; nothing else is ever accepted.
+    vu_ok=$(vu_openssl_dir)/openssl
+    [ -x "$vu_ok" ] || return 1
+    "$vu_ok" pkeyutl -verify -pubin -inkey "$public_key_file" -rawin -in "$signed" -sigfile "$signature" >/dev/null 2>&1 || return 1
+    vu_log WARN "System openssl failed the signature check; the kept copy verified it"
+}
+
+# The engine's own copy of an openssl that verified a signature: the program and its
+# libraries, run through a wrapper. Kept once, never replaced by one that did not verify.
+vu_openssl_dir() { printf '%s\n' "$VU_STATE_DIR/openssl"; }
+vu_openssl_keep() {
+    ok_dir=$(vu_openssl_dir)
+    [ -x "$ok_dir/openssl" ] && return 0
+    ok_bin=$(command -v openssl 2>/dev/null) || return 0
+    case "$ok_bin" in /*) ;; *) return 0 ;; esac
+    ok_lib=$(dirname "$(dirname "$ok_bin")")/lib
+    rm -rf "${ok_dir:?}.new.$$"
+    mkdir -p "$ok_dir.new.$$/lib" || return 0
+    cp -p "$ok_bin" "$ok_dir.new.$$/openssl.bin" 2>/dev/null || { rm -rf "${ok_dir:?}.new.$$"; return 0; }
+    for ok_f in "$ok_lib"/libcrypto.so* "$ok_lib"/libssl.so*; do
+        [ -e "$ok_f" ] && cp -pP "$ok_f" "$ok_dir.new.$$/lib/" 2>/dev/null
+    done
+    printf '#!/bin/sh\nLD_LIBRARY_PATH=%s/lib exec %s/openssl.bin "$@"\n' "$ok_dir" "$ok_dir" > "$ok_dir.new.$$/openssl" &&
+        chmod 755 "$ok_dir.new.$$/openssl" && rm -rf "${ok_dir:?}" && mv "$ok_dir.new.$$" "$ok_dir" ||
+        rm -rf "${ok_dir:?}.new.$$"
+    return 0
 }
 
 vu_manifest_static_policy() {
