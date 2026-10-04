@@ -109,7 +109,8 @@ if "'X-VWARD-Request': 'console'" not in js or "application/x-www-form-urlencode
     fail("POST-запросы без заголовка защиты от подделки")
 
 # Journals: every tab is in the server-side allowlist.
-log_tabs = set(re.findall(r"\{ id: '([a-z]+)', label: '", js))
+# «all» is built in the Panel from the others and never asked of the API.
+log_tabs = set(re.findall(r"\{ id: '([a-z]+)', label: '", js)) - {"all"}
 api_logs = set(re.findall(r"^\s{8}([a-z]+)\)\s*$", api, re.MULTILINE))
 if log_tabs - api_logs:
     fail("вкладки журналов вне allowlist API: " + ", ".join(sorted(log_tabs - api_logs)))

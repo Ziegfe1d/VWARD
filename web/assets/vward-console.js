@@ -589,7 +589,34 @@ const LOG_TABS = [
   { id: 'adaptive', label: 'Автоподбор доменов' }, { id: 'routing', label: 'Сверка маршрутов' }, { id: 'policy', label: 'IP-категории' }, { id: 'wifi', label: 'Wi-Fi' },
   { id: 'ads', label: 'Реклама' }, { id: 'updater', label: 'Обновления' }, { id: 'cron', label: 'Расписание' }, { id: 'console', label: 'Панель VWARD' }
 ];
-const logLabel = id => (LOG_TABS.find(t => t.id === id) || {}).label || id;
+// «Все»: every journal in one timeline (first, and open by default).
+const LOG_VIEW = [{ id: 'all', label: 'Все' }].concat(LOG_TABS);
+const logLabel = id => (LOG_VIEW.find(t => t.id === id) || {}).label || id;
+// logTime LINE: the time an entry starts with («2026-10-04 11:40:12», «…+0300», «…T…Z»), or null.
+function logTime(line) {
+  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?/.exec(line);
+  if (!m) return null;
+  const tz = !m[3] ? '' : m[3] === 'Z' ? 'Z' : m[3].replace(/^([+-]\d{2}):?(\d{2})$/, '$1:$2');
+  const t = Date.parse(m[1] + 'T' + m[2] + tz);
+  return isNaN(t) ? null : t;
+}
+// mergeLogs PARTS: [{label, text}] as one timeline, oldest first; a line without a time
+// belongs to the entry above it; each entry is marked with its journal.
+function mergeLogs(parts) {
+  const entries = [];
+  parts.forEach(p => {
+    let last = null;
+    String(p.text || '').split('\n').forEach(line => {
+      if (!line.trim()) return;
+      const t = logTime(line);
+      if (t == null && last) { last.lines.push('    ' + line); return; }
+      last = { t: t == null ? 0 : t, n: entries.length, lines: ['[' + p.label + '] ' + line] };
+      entries.push(last);
+    });
+  });
+  entries.sort((a, b) => a.t - b.t || a.n - b.n);
+  return entries.map(e => e.lines.join('\n')).join('\n');
+}
 const DETAILS = {
   'd-components': { title: 'Компоненты', parent: 'system' },
   'd-diag': { title: 'Диагностика', parent: 'system' },
@@ -702,7 +729,7 @@ CARD_IDS.forEach((id, i) => { if (!cardOrder.includes(id)) cardOrder.splice(Math
 let hiddenCards = store.get('vward-card-hidden', []).filter(id => CARD_IDS.includes(id));
 let cardView = store.get('vward-card-view', 'grid'); if (!['grid', 'list'].includes(cardView)) cardView = 'grid';
 let authForm = false, loginOpen = false;
-let current = 'overview', editing = false, confirm = null, logTab = 'wan', logWrap = true, actionResult = null;
+let current = 'overview', editing = false, confirm = null, logTab = 'all', logWrap = true, actionResult = null;
 
 /* ---------- Построение блоков ---------- */
 // The heading and its description sit above the card; the card holds only the content.
@@ -1310,7 +1337,7 @@ const RENDER = {
       '<button class="icon-btn" type="button" data-act="log-save-all" aria-label="Сохранить все журналы" title="Сохранить все журналы">' + ico('archive') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-wrap" aria-pressed="' + logWrap + '" aria-label="Перенос строк" title="Перенос строк">' + ico('wrap') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-reload" aria-label="Обновить журнал" title="Обновить журнал">' + ico('refresh') + '</button></div></div><div class="panel">' +
-      '<div class="chips" role="group" aria-label="Журнал">' + LOG_TABS.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
+      '<div class="chips" role="group" aria-label="Журнал">' + LOG_VIEW.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
       '<pre class="logbox' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + esc(text == null ? 'Загрузка…' : text) + '</pre>' +
       '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p></div></section>';
   },
@@ -2716,8 +2743,15 @@ async function refreshPage() {
 // on coming back to the tab, and right before it is saved.
 async function loadLog(tab, force) {
   if (!force && S.logs[tab] != null) { render(); }
-  try { S.logs[tab] = await apiText('log', { name: tab, count: 200 }); S.loadedAt['log:' + tab] = Date.now(); }
-  catch (e) { S.logs[tab] = 'Журнал недоступен: ' + e.message; }
+  if (tab === 'all') {
+    const parts = await Promise.all(LOG_TABS.map(tb => apiText('log', { name: tb.id, count: 200 })
+      .then(x => { S.logs[tb.id] = x; S.loadedAt['log:' + tb.id] = Date.now(); return { label: tb.label, text: x }; },
+            e => ({ label: tb.label, text: 'Журнал недоступен: ' + e.message }))));
+    S.logs.all = mergeLogs(parts) || 'Журналы пусты'; S.loadedAt['log:all'] = Date.now();
+  } else {
+    try { S.logs[tab] = await apiText('log', { name: tab, count: 200 }); S.loadedAt['log:' + tab] = Date.now(); }
+    catch (e) { S.logs[tab] = 'Журнал недоступен: ' + e.message; }
+  }
   if (current === 'logs' && logTab === tab) {
     const b = $('logBox'), at = $('logAt');
     if (b && at) { if (b.textContent !== S.logs[tab]) b.textContent = S.logs[tab]; at.textContent = logStamp(tab); } else render();

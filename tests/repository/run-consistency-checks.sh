@@ -66,6 +66,7 @@ python3 tests/repository/check-console-activity.py || fail "sections show their 
 python3 tests/repository/check-console-responsive.py || fail "Panel responsive layout"
 python3 tests/repository/check-console-kv-layout.py || fail "Panel rows: a long value never runs over the name"
 python3 tests/repository/check-updater-wan-fallback.py || fail "Updater: a dead tunnel does not stop update downloads"
+python3 tests/repository/check-console-logs-all.py || fail "Panel journals: «Все» in one timeline"
 python3 tests/repository/check-console-icon-system.py || fail "Panel icon and typography system"
 python3 tests/repository/check-console-security.py || fail "Panel security"
 python3 tests/repository/check-console-config.py || fail "Panel configuration writer"
