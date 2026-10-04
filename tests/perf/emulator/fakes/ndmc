@@ -2,6 +2,9 @@
 # Fake Keenetic ndmc: a healthy router. Changes are accepted and logged.
 cmd=
 while [ $# -gt 0 ]; do case "$1" in -c) cmd=$2; shift 2 ;; *) shift ;; esac; done
+# Faults of the chaos run: a slow router, a router that refuses changes.
+[ ! -e /emu/fault-ndmc-slow ] || sleep "$(cat /emu/fault-ndmc-slow)"
+case "$cmd" in show*) ;; *) [ ! -e /emu/fault-ndmc-refuse ] || { printf '%s\n' "$cmd" >> /emu/ndmc-refused.log; echo "Command::Base error[7405600]: refused"; exit 1; } ;; esac
 case "$cmd" in
     'show running-config') cat /emu/running-config ;;
     'show version') printf 'release: %s\nmodel: Emulated\n' "$(cat /emu/version 2>/dev/null || echo 5.1.6)" ;;

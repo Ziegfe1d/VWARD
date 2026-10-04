@@ -16,6 +16,14 @@ while [ $# -gt 0 ]; do
 done
 host=${url#*://}
 host=${host%%/*}
+# Faults of the chaos run (tests/perf/check-chaos-emulated.py): flags in /emu.
+case "$url" in
+    *127.0.0.1*|*localhost*|*/rci/*|*/control/*|*/cgi-bin/*) ;;
+    *) if [ -e /emu/fault-wan ] || { [ "$iface" = nwg1 ] && [ -e /emu/fault-tunnel ]; }; then
+           [ -z "$write" ] || printf '%s' "$write" | sed 's/%{http_code}/000/g;s/%{[a-z_]*}/0/g'
+           exit 28
+       fi ;;
+esac
 if [ "$iface" != nwg1 ] && [ -r /emu/blocked-direct ] && grep -qx "$host" /emu/blocked-direct; then
     [ -z "$write" ] || printf '%s' "$write" | sed 's/%{http_code}/000/g;s/%{[a-z_]*}/0/g'
     exit 28

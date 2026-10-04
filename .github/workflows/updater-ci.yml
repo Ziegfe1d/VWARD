@@ -57,6 +57,9 @@ jobs:
       - name: First install on a clean router emulator
         run: sudo python3 tests/perf/check-install-emulated.py
 
+      - name: Chaos run on the router emulator (faults minute by minute)
+        run: sudo python3 tests/perf/check-chaos-emulated.py
+
       - name: Resource budget on the router emulator
         run: |
           sudo python3 tests/perf/run-resource-audit.py --seconds 30 \

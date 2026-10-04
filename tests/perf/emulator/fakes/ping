@@ -1,3 +1,6 @@
 #!/bin/sh
+# Faults of the chaos run: no internet, or a silent tunnel (-I nwg1).
+case " $* " in *" nwg1 "*) [ ! -e /emu/fault-tunnel ] || { printf '1 packets transmitted, 0 packets received, 100%% packet loss\n'; exit 1; } ;; esac
+[ ! -e /emu/fault-wan ] || { printf '1 packets transmitted, 0 packets received, 100%% packet loss\n'; exit 1; }
 printf 'PING ok\n64 bytes: seq=0 ttl=57 time=12.3 ms\n\n1 packets transmitted, 1 packets received, 0%% packet loss\nround-trip min/avg/max = 12.3/12.3/12.3 ms\n'
 exit 0

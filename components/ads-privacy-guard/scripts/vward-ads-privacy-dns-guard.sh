@@ -334,7 +334,8 @@ agh_dns_host()
 
 ndm() { nd_out=$("$NDMC" -c "$1" 2>&1) || return 1; ! printf '%s\n' "$nd_out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command)'; }
 
-# AdGuard Home restarted 4 times within 10 minutes (its process id changed): a loop.
+# AdGuard Home restarted 4 times within 10 minutes (its process id changed), the last one
+# within 3 minutes: a loop.
 agh_looping()
 {
     al_pid=$("$PIDOF" AdGuardHome 2>/dev/null | awk '{print $1}')
@@ -343,8 +344,10 @@ agh_looping()
     [ -z "$al_pid" ] || [ "$al_pid" = "$al_last" ] || echo "$al_now $al_pid" >> "$CHAIN_DIR/pids"
     [ -s "$CHAIN_DIR/pids" ] || return 1
     awk -v t="$al_now" '$1 >= t - 600' "$CHAIN_DIR/pids" > "$CHAIN_DIR/pids.new" && mv -f "$CHAIN_DIR/pids.new" "$CHAIN_DIR/pids"
-    # The first id seen is the running one, not a restart.
-    [ "$(wc -l < "$CHAIN_DIR/pids")" -gt 4 ]
+    # The first id seen is the running one, not a restart; a loop that stopped 3 minutes ago
+    # is over (the answers decide again).
+    [ "$(wc -l < "$CHAIN_DIR/pids")" -gt 4 ] &&
+        [ $((al_now - $(tail -n 1 "$CHAIN_DIR/pids" | cut -d' ' -f1))) -lt 180 ]
 }
 
 count_up() { cu_n=0; [ ! -r "$1" ] || read -r cu_n < "$1"; case "$cu_n" in ''|*[!0-9]*) cu_n=0 ;; esac; echo $((cu_n + 1)) > "$1"; echo $((cu_n + 1)); }
@@ -415,6 +418,12 @@ chain_sync()
         echo in > "$CHAIN_DIR/state"
         [ "$cs_ok" = 0 ] || return 0
         [ "$(count_up "$CHAIN_DIR/fails")" -ge 3 ] || [ "$cs_loop" = 1 ] || return 0
+        # The whole internet down (the provider's DNS silent too): not AdGuard Home's fault,
+        # and taking it out would change nothing.
+        if [ "$cs_loop" = 0 ] && ! provider_answers "$cs_ns"; then
+            ads_log "DNS_CHAIN_KEEP|ns=$cs_ns|the provider's DNS is silent too: AdGuard Home stays"
+            return 0
+        fi
         chain_take_out "$cs_ns" "$([ "$cs_loop" = 1 ] && echo loop || echo silent)"
         return 0
     fi
