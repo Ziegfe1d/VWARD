@@ -25,10 +25,16 @@ vward_valid_ndm_name()
 
 vward_valid_ipv4()
 {
-    printf '%s\n' "$1" | awk -F. '
-        NF != 4 {exit 1}
-        {for (i=1;i<=4;i++) if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) exit 1}
-    '
+    # In the shell, without awk: every minute job checks several addresses.
+    case "$1" in ''|*[!0-9.]*|.*|*.|*..*) return 1 ;; esac
+    vvi_rest=$1 vvi_n=0
+    while [ -n "$vvi_rest" ]; do
+        vvi_o=${vvi_rest%%.*}
+        case "$vvi_rest" in *.*) vvi_rest=${vvi_rest#*.} ;; *) vvi_rest= ;; esac
+        vvi_n=$((vvi_n + 1))
+        [ "$vvi_n" -le 4 ] && [ "${#vvi_o}" -le 3 ] && [ "$vvi_o" -le 255 ] || return 1
+    done
+    [ "$vvi_n" -eq 4 ]
 }
 
 vward_tool()

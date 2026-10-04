@@ -325,11 +325,11 @@ failopen_sync()
 # router (not 0.0.0.0 / ::), else the LAN address.
 agh_dns_host()
 {
-    adh=$(awk '/^[^ #]/ {d = ($1 == "dns:"); b = 0; next}
+    awk -v lan="$LAN" '/^[^ #]/ {d = ($1 == "dns:"); b = 0; next}
         d && /^  bind_hosts:/ {b = 1; next} d && /^  [a-z_]+:/ {b = 0}
-        b && $1 == "-" {gsub(/["\047]/, "", $2); print $2}' "$AGH_YAML" 2>/dev/null |
-        grep -v -e '^0\.0\.0\.0$' -e '^::$' -e ':' | head -n 1)
-    valid_ip "$adh" && echo "$adh" || echo "$LAN"
+        b && $1 == "-" {gsub(/["\047]/, "", $2); n = split($2, o, ".")
+            if (n == 4 && $2 ~ /^[0-9.]+$/ && $2 != "0.0.0.0" && o[1] <= 255 && o[2] <= 255 && o[3] <= 255 && o[4] <= 255) {print $2; f = 1; exit}}
+        END {if (!f) print lan}' "$AGH_YAML" 2>/dev/null || echo "$LAN"
 }
 
 ndm() { nd_out=$("$NDMC" -c "$1" 2>&1) || return 1; ! printf '%s\n' "$nd_out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command)'; }
@@ -338,16 +338,27 @@ ndm() { nd_out=$("$NDMC" -c "$1" 2>&1) || return 1; ! printf '%s\n' "$nd_out" | 
 # within 3 minutes: a loop.
 agh_looping()
 {
-    al_pid=$("$PIDOF" AdGuardHome 2>/dev/null | awk '{print $1}')
+    al_pid=$("$PIDOF" AdGuardHome 2>/dev/null); al_pid=${al_pid%% *}
     al_now=$(ads_epoch)
-    al_last=$(tail -n 1 "$CHAIN_DIR/pids" 2>/dev/null | cut -d' ' -f2)
-    [ -z "$al_pid" ] || [ "$al_pid" = "$al_last" ] || echo "$al_now $al_pid" >> "$CHAIN_DIR/pids"
-    [ -s "$CHAIN_DIR/pids" ] || return 1
-    awk -v t="$al_now" '$1 >= t - 600' "$CHAIN_DIR/pids" > "$CHAIN_DIR/pids.new" && mv -f "$CHAIN_DIR/pids.new" "$CHAIN_DIR/pids"
+    # Read and pruned in the shell: this runs every minute, and a router counts its processes.
+    al_n=0 al_t=0 al_last= al_keep=
+    if [ -r "$CHAIN_DIR/pids" ]; then
+        while read -r al_et al_ep; do
+            case "$al_et" in ''|*[!0-9]*) continue ;; esac
+            al_last=$al_ep
+            [ $((al_now - al_et)) -le 600 ] || continue
+            al_n=$((al_n + 1)) al_t=$al_et al_keep="$al_keep$al_et $al_ep
+"
+        done < "$CHAIN_DIR/pids"
+    fi
+    if [ -n "$al_pid" ] && [ "$al_pid" != "$al_last" ]; then
+        al_n=$((al_n + 1)) al_t=$al_now al_keep="$al_keep$al_now $al_pid
+"
+    fi
+    printf '%s' "$al_keep" > "$CHAIN_DIR/pids"
     # The first id seen is the running one, not a restart; a loop that stopped 3 minutes ago
     # is over (the answers decide again).
-    [ "$(wc -l < "$CHAIN_DIR/pids")" -gt 4 ] &&
-        [ $((al_now - $(tail -n 1 "$CHAIN_DIR/pids" | cut -d' ' -f1))) -lt 180 ]
+    [ "$al_n" -gt 4 ] && [ $((al_now - al_t)) -lt 180 ]
 }
 
 count_up() { cu_n=0; [ ! -r "$1" ] || read -r cu_n < "$1"; case "$cu_n" in ''|*[!0-9]*) cu_n=0 ;; esac; echo $((cu_n + 1)) > "$1"; echo $((cu_n + 1)); }

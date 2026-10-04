@@ -202,18 +202,29 @@ ads_load_config()
     . "$ADS_CONFIG"
 }
 
+# The lock helpers run every minute (the DNS guard's tick): /proc and the lock files are
+# read with the shell's own read, the modes come from umask, not from extra programs.
 ads_pid_start() (
     ads_ps_pid="${1:-$$}"
     case "$ads_ps_pid" in ''|*[!0-9]*) return 1 ;; esac
-    [ -r "/proc/$ads_ps_pid/stat" ] || return 1
+    ads_ps_stat=
+    read -r ads_ps_stat 2>/dev/null < "/proc/$ads_ps_pid/stat" || [ -n "$ads_ps_stat" ] || return 1
     # starttime is field 22. Strip pid/comm first because comm may contain spaces.
-    sed 's/^.*) //' "/proc/$ads_ps_pid/stat" 2>/dev/null | awk 'NF>=20 {print $20; exit}'
+    ads_ps_stat=${ads_ps_stat##*) }
+    set -f
+    # shellcheck disable=SC2086
+    set -- $ads_ps_stat
+    [ "$#" -ge 20 ] || return 1
+    eval "printf '%s\\n' \"\${20}\""
 )
+
+# ads_read_line FILE: its first line, or nothing.
+ads_read_line() { ads_rl=; read -r ads_rl 2>/dev/null < "$1" || :; printf '%s\n' "$ads_rl"; }
 
 ads_lock_create() (
     ads_lc_dir="$1"
+    umask 077
     mkdir "$ads_lc_dir" 2>/dev/null || return 1
-    chmod 0700 "$ads_lc_dir" 2>/dev/null || { rmdir "$ads_lc_dir" 2>/dev/null; return 1; }
     ads_lc_started="$(ads_epoch)"
     ads_lc_pid_start="$(ads_pid_start $$ 2>/dev/null)" || ads_lc_pid_start=unknown
     if ! printf '%s\n' "$$" > "$ads_lc_dir/pid" ||
@@ -223,11 +234,6 @@ ads_lock_create() (
         rmdir "$ads_lc_dir" 2>/dev/null
         return 1
     fi
-    chmod 0600 "$ads_lc_dir/pid" "$ads_lc_dir/started" "$ads_lc_dir/pid_start" 2>/dev/null || {
-        rm -f "$ads_lc_dir/pid" "$ads_lc_dir/started" "$ads_lc_dir/pid_start" 2>/dev/null
-        rmdir "$ads_lc_dir" 2>/dev/null
-        return 1
-    }
 )
 
 ads_lock_acquire() (
@@ -238,11 +244,11 @@ ads_lock_acquire() (
     ads_lock_create "$ads_l_dir" && return 0
     [ -d "$ads_l_dir" ] && [ ! -L "$ads_l_dir" ] || return 1
 
-    ads_l_pid="$(cat "$ads_l_dir/pid" 2>/dev/null)"
+    ads_l_pid="$(ads_read_line "$ads_l_dir/pid")"
     case "$ads_l_pid" in ''|*[!0-9]*) ads_l_pid=0 ;; esac
     ads_l_alive=0
     if [ "$ads_l_pid" -gt 0 ] && kill -0 "$ads_l_pid" 2>/dev/null; then
-        ads_l_saved_start="$(cat "$ads_l_dir/pid_start" 2>/dev/null)"
+        ads_l_saved_start="$(ads_read_line "$ads_l_dir/pid_start")"
         ads_l_live_start="$(ads_pid_start "$ads_l_pid" 2>/dev/null)" || ads_l_live_start=unknown
         # Legacy locks have no pid_start and retain their former conservative
         # liveness behavior. New locks distinguish a reused PID.
@@ -252,7 +258,7 @@ ads_lock_acquire() (
     fi
     [ "$ads_l_alive" -eq 0 ] || return 1
 
-    ads_l_started="$(ads_num "$(cat "$ads_l_dir/started" 2>/dev/null)" 0)"
+    ads_l_started="$(ads_num "$(ads_read_line "$ads_l_dir/started")" 0)"
     ads_l_now="$(ads_epoch)"
     [ "$ads_l_started" -eq 0 ] || [ $((ads_l_now - ads_l_started)) -ge "$ads_l_stale" ] || return 1
 
@@ -269,9 +275,9 @@ ads_lock_acquire() (
 ads_lock_release() (
     ads_lr_dir="${1:-}"
     [ -n "$ads_lr_dir" ] && [ -d "$ads_lr_dir" ] && [ ! -L "$ads_lr_dir" ] || return 1
-    ads_lr_pid="$(cat "$ads_lr_dir/pid" 2>/dev/null)"
+    ads_lr_pid="$(ads_read_line "$ads_lr_dir/pid")"
     [ "$ads_lr_pid" = "$$" ] || return 1
-    ads_lr_saved_start="$(cat "$ads_lr_dir/pid_start" 2>/dev/null)"
+    ads_lr_saved_start="$(ads_read_line "$ads_lr_dir/pid_start")"
     ads_lr_own_start="$(ads_pid_start $$ 2>/dev/null)" || ads_lr_own_start=unknown
     [ -z "$ads_lr_saved_start" ] || [ "$ads_lr_saved_start" = unknown ] || [ "$ads_lr_saved_start" = "$ads_lr_own_start" ] || return 1
     rm -f "$ads_lr_dir/pid" "$ads_lr_dir/started" "$ads_lr_dir/pid_start" 2>/dev/null || return 1

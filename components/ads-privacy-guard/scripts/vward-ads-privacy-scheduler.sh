@@ -124,25 +124,37 @@ query_signature()
     done
 }
 
+# resource_gate: GATE is empty when the router is free for optional work, else why not
+# (load:, memory:, storage:); returns 1 then. Measured once a run, in the shell (this runs
+# every minute: no awk or grep for /proc).
+RG_DONE=0
 resource_gate()
 {
-    CPU_COUNT="$(grep -c '^processor[[:space:]]*:' /proc/cpuinfo 2>/dev/null)"
-    CPU_COUNT="$(ads_num "$CPU_COUNT" 1)"
-    [ "$CPU_COUNT" -gt 0 ] || CPU_COUNT=1
-    LOAD_X100="$(awk '{printf "%d", ($1+0)*100}' /proc/loadavg 2>/dev/null)"
-    LOAD_X100="$(ads_num "$LOAD_X100" 0)"
+    if [ "$RG_DONE" = 0 ]; then
+        RG_DONE=1
+        CPU_COUNT=0
+        if [ -r /proc/cpuinfo ]; then
+            while read -r RG_K _; do [ "$RG_K" != processor ] || CPU_COUNT=$((CPU_COUNT + 1)); done < /proc/cpuinfo
+        fi
+        [ "$CPU_COUNT" -gt 0 ] || CPU_COUNT=1
+        RG_L=; [ ! -r /proc/loadavg ] || read -r RG_L _ < /proc/loadavg || :
+        RG_I=$(ads_num "${RG_L%%.*}" 0)
+        RG_F=0; case "$RG_L" in *.*) RG_F=${RG_L#*.}00; RG_F=${RG_F%"${RG_F#??}"}; RG_F=${RG_F#0} ;; esac
+        LOAD_X100=$((RG_I * 100 + $(ads_num "$RG_F" 0)))
+        MEM=0
+        if [ -r /proc/meminfo ]; then
+            while read -r RG_K RG_V _; do [ "$RG_K" != MemAvailable: ] || { MEM=$(ads_num "$RG_V" 0); break; }; done < /proc/meminfo
+        fi
+        FREE="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $4+0}')"
+        FREE="$(ads_num "$FREE" 0)"
+    fi
     LIMIT=$((CPU_COUNT * DYNAMIC_MAX_LOAD_PER_CPU_X100))
-    [ "$LOAD_X100" -le "$LIMIT" ] || { echo "load:${LOAD_X100}/${LIMIT}"; return 1; }
-
-    MEM="$(awk '/^MemAvailable:/ {print $2+0; exit}' /proc/meminfo 2>/dev/null)"
-    MEM="$(ads_num "$MEM" 0)"
-    [ "$MEM" -ge "$DYNAMIC_MIN_MEM_AVAILABLE_KB" ] || { echo "memory:${MEM}"; return 1; }
-
-    FREE="$(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $4+0}')"
-    FREE="$(ads_num "$FREE" 0)"
-    [ "$FREE" -ge "$DYNAMIC_MIN_OPT_FREE_KB" ] || { echo "storage:${FREE}"; return 1; }
-
-    return 0
+    GATE=
+    if [ "$LOAD_X100" -gt "$LIMIT" ]; then GATE="load:${LOAD_X100}/${LIMIT}"
+    elif [ "$MEM" -lt "$DYNAMIC_MIN_MEM_AVAILABLE_KB" ]; then GATE="memory:${MEM}"
+    elif [ "$FREE" -lt "$DYNAMIC_MIN_OPT_FREE_KB" ]; then GATE="storage:${FREE}"
+    fi
+    [ -z "$GATE" ]
 }
 
 # One clock read for the run: the epoch and the text of the status line.
@@ -195,8 +207,7 @@ jobs_waiting()
     [ -s "$ADS_STATE/jobs/queue" ]
 }
 if [ -x "$JOB" ] && jobs_waiting; then
-    JOB_GATE="$(resource_gate)"
-    if [ $? -eq 0 ]; then
+    if resource_gate; then
         status_write job queued 0
         JOB_RC=0
         "$JOB" worker || JOB_RC=$?
@@ -211,9 +222,9 @@ if [ -x "$JOB" ] && jobs_waiting; then
         echo "JOB_RC=$JOB_RC"
         exit "$JOB_RC"
     fi
-    status_write deferred "job_$JOB_GATE" 0
+    status_write deferred "job_$GATE" 0
     echo "SCHEDULER=JOB_DEFERRED"
-    echo "REASON=$JOB_GATE"
+    echo "REASON=$GATE"
     exit 0
 fi
 
@@ -226,8 +237,7 @@ if ads_bool "$AUTO_SOURCE_UPDATE" && [ -x "$SOURCES" ]; then
     [ ! -r "$SOURCE_RETRY_FILE" ] || read -r LAST_TRY 2>/dev/null < "$SOURCE_RETRY_FILE"
     LAST_TRY="$(ads_num "$LAST_TRY" 0)"
     if [ "$NOW" -ge "$SOURCE_DUE" ] && [ "$NOW" -ge $((LAST_TRY + SOURCE_RETRY_SEC)) ]; then
-        GATE="$(resource_gate)"
-        if [ $? -eq 0 ]; then
+        if resource_gate; then
             status_write source-update due "$SOURCE_DUE"
             if "$SOURCES"; then
                 LAST_SOURCE="$NOW"
@@ -236,6 +246,7 @@ if ads_bool "$AUTO_SOURCE_UPDATE" && [ -x "$SOURCES" ]; then
                 echo "$NOW" > "$SOURCE_RETRY_FILE" 2>/dev/null || true
                 ads_log "SCHEDULER|source-update-failed|retry_after=${SOURCE_RETRY_SEC}s"
             fi
+            RG_DONE=0  # the update took time and disk: measure again before the scan
         else
             status_write deferred "source_$GATE" "$SOURCE_DUE"
         fi
@@ -289,8 +300,7 @@ case "$RUN_MODE" in
         ;;
 esac
 
-GATE="$(resource_gate)"
-if [ $? -ne 0 ]; then
+if ! resource_gate; then
     state_write "$LAST_SCAN" "$LAST_SOURCE" "$OLD_SIG" >/dev/null 2>&1 || true
     status_write deferred "$GATE" "$DUE"
     echo "SCHEDULER=DEFERRED"
