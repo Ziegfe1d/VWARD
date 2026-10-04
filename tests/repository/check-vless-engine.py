@@ -284,6 +284,9 @@ esac
                                                           vl("203.0.113.13", DE + "%20DE-2")]).encode()).decode())
     fo = tmp / "fo.txt"; fo.write_text("#server=1\nhttps://sub.example/s/secret-fo\n")
     (tmp / "ok.203.0.113.11").write_text("")
+    (tmp / "xray.addr").unlink(missing_ok=True)
+    # The stand-in Xray writes its server a moment after it starts: a slow machine needs time.
+    env["VWARD_VLESS_CONNECT_WAIT"] = "20"
     out = engine("add", "de-vless", str(fo))
     if out[-1] != "result=changed":
         fail(f"add from a subscription: {out}")
@@ -309,6 +312,7 @@ esac
         fail(f"nothing answers: the server stays: {out}")
     if not (run_ / f"v{sn}.failover.at").exists() or (run_ / f"v{sn}.failover").exists():
         fail("the pause is marked, the lock is gone")
+    env["VWARD_VLESS_CONNECT_WAIT"] = "4"
     out = engine("kick", tn)
     if out != ["error=tunnel_no_handshake"]:
         fail(f"within the pause the guard's kick does not try all servers again: {out}")
