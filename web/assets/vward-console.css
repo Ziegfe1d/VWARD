@@ -130,6 +130,8 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .pill.crit::before{background:var(--crit)}
 .pill.crit{color:var(--crit)}
 .pill.info::before{background:var(--accent)}
+/* In a row a long state wraps inside its column instead of running over the row's name. */
+.kv dd .pill{flex:0 1 auto;min-width:0;white-space:normal;overflow-wrap:anywhere;text-align:right}
 
 /* Кнопки */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding-inline:14px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--surface);color:var(--text);font-size:var(--fs-sm);font-weight:600}
