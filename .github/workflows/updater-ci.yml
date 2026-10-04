@@ -60,6 +60,17 @@ jobs:
       - name: Chaos run on the router emulator (faults minute by minute)
         run: sudo python3 tests/perf/check-chaos-emulated.py
 
+      - name: Panel API under hostile input on the router emulator
+        run: sudo python3 tests/perf/check-api-fuzz-emulated.py
+
+      - name: Every page of the Panel in Chromium on the router emulator
+        run: |
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 sudo -E npm install -g --silent playwright@1.56.1
+          for m in real fail empty garbage; do
+            sudo env "PATH=$PATH" VWARD_CHROMIUM="$(command -v google-chrome || command -v chromium)" \
+              python3 tests/perf/check-panel-crawl-emulated.py --api "$m" $([ "$m" = real ] || echo --limit 70)
+          done
+
       - name: Resource budget on the router emulator
         run: |
           sudo python3 tests/perf/run-resource-audit.py --seconds 30 \

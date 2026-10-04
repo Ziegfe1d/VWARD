@@ -57,9 +57,9 @@ for SID in $("$ADS_JQ" -r '.sources[].id' "$ADS_SOURCE_REGISTRY" 2>/dev/null); d
     if ! fetch_source "$SID" "$RAW" "$MAX_BYTES" "$@"; then
         SOURCE_FAILED=$((SOURCE_FAILED + 1)); echo "SOURCE_STATUS=UNAVAILABLE_LKG_KEPT"; ads_log "SOURCE_FAIL|id=$SID|mode=$MODE|reason=download"; echo; continue
     fi
-    BYTES="$(wc -c < "$RAW" 2>/dev/null | tr -d ' ')"; BYTES="$(ads_num "$BYTES" 0)"
+    BYTES="$(wc -c 2>/dev/null < "$RAW" | tr -d ' ')"; BYTES="$(ads_num "$BYTES" 0)"
     case "$FORMAT" in adblock|hosts|domains) ads_source_domain_normalize < "$RAW" > "$NORMAL"; ads_source_exception_normalize < "$RAW" > "$EXCEPT" ;; *) SOURCE_FAILED=$((SOURCE_FAILED+1)); echo "SOURCE_STATUS=UNSUPPORTED_FORMAT"; echo; continue ;; esac
-    COUNT="$(wc -l < "$NORMAL" 2>/dev/null | tr -d ' ')"; COUNT="$(ads_num "$COUNT" 0)"
+    COUNT="$(wc -l 2>/dev/null < "$NORMAL" | tr -d ' ')"; COUNT="$(ads_num "$COUNT" 0)"
     if [ "$COUNT" -lt "$MIN_ENTRIES" ]; then SOURCE_FAILED=$((SOURCE_FAILED+1)); echo "SOURCE_STATUS=REJECTED_COUNT_LKG_KEPT"; echo "ENTRIES=$COUNT"; ads_log "SOURCE_FAIL|id=$SID|reason=count|count=$COUNT|min=$MIN_ENTRIES"; echo; continue; fi
     DEST="$ADS_STATE/sources/$SID.domains"; EXDEST="$ADS_STATE/sources/$SID.exceptions"; META="$ADS_STATE/sources/$SID.meta"
     OLD_SHA="$(ads_file_sha256 "$DEST" 2>/dev/null)"; NEW_SHA="$(ads_file_sha256 "$NORMAL")"
@@ -77,7 +77,7 @@ for SID in $("$ADS_JQ" -r '.sources[].id' "$ADS_SOURCE_REGISTRY" 2>/dev/null); d
         [ "$HAD_EXDEST" -eq 1 ] && cp -p "$WORK/$SID.exceptions.before" "$EXDEST" 2>/dev/null || rm -f "$EXDEST"
         SOURCE_FAILED=$((SOURCE_FAILED+1)); echo "SOURCE_STATUS=PAIR_ROLLBACK"; ads_log "SOURCE_FAIL|id=$SID|reason=pair_install"; continue
     fi
-    EXCOUNT="$(wc -l < "$EXCEPT" 2>/dev/null | tr -d ' ')"; EXCOUNT="$(ads_num "$EXCOUNT" 0)"
+    EXCOUNT="$(wc -l 2>/dev/null < "$EXCEPT" | tr -d ' ')"; EXCOUNT="$(ads_num "$EXCOUNT" 0)"
     USED_URL="$(cat "$RAW.url" 2>/dev/null)"
     { echo "id=$SID"; echo "mode=$MODE"; echo "name=$NAME"; echo "vendor=$VENDOR"; echo "purpose=$PURPOSE"; echo "format=$FORMAT"; echo "entries=$COUNT"; echo "exceptions=$EXCOUNT"; echo "bytes=$BYTES"; echo "sha256=$NEW_SHA"; echo "fetched_at=$(ads_now)"; echo "url=$USED_URL"; } > "$WORK/$SID.meta"
     ads_atomic_copy "$WORK/$SID.meta" "$META" 0644 || true

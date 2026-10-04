@@ -191,7 +191,7 @@ refresh_sets()
     LAST=0
 
     [ -f "$REFRESH_TS" ] &&
-        read -r LAST < "$REFRESH_TS" 2>/dev/null
+        read -r LAST 2>/dev/null < "$REFRESH_TS"
 
     case "$LAST" in
         ''|*[!0-9]*) LAST=0 ;;
@@ -1459,7 +1459,7 @@ list_watch_check()
     LW_NOW=${QNOW:-$(date +%s)}
     LW_LAST=0
     LW_FAILS=0
-    [ -f "$LW_ST" ] && read -r LW_LAST LW_FAILS < "$LW_ST" 2>/dev/null
+    [ -f "$LW_ST" ] && read -r LW_LAST LW_FAILS 2>/dev/null < "$LW_ST"
     case "$LW_LAST" in ''|*[!0-9]*) LW_LAST=0 ;; esac
     case "$LW_FAILS" in ''|*[!0-9]*) LW_FAILS=0 ;; esac
     [ $((LW_NOW - LW_LAST)) -ge "$LIST_WATCH_COOLDOWN" ] || return 0

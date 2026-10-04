@@ -32,7 +32,7 @@ log() {
 
 # Ограничиваем размер журнала.
 if [ -f "$LOG" ]; then
-    SIZE="$(wc -c < "$LOG" 2>/dev/null)"
+    SIZE="$(wc -c 2>/dev/null < "$LOG")"
     [ -n "$SIZE" ] || SIZE=0
 
     if [ "$SIZE" -gt 524288 ]; then

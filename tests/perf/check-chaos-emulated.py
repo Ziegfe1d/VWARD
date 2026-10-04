@@ -21,7 +21,7 @@ What must hold, under each fault and after it:
   * no job hangs (60 s) or dies of a shell error (syntax, «not found», bad number);
   * no change to Keenetic repeats without end (the same command more than 6 times in a
     scenario is a loop);
-  * no lock is left behind by a job that is gone (the next round runs);
+  * a lock left by a job that is gone is taken over by the next round (the job runs on);
   * after the fault the guards come back: the tunnel guard is not in fail-open, the route
     engine runs.
 Needs root (chroot, mknod, mount).
@@ -167,7 +167,7 @@ def stale_locks(root):
             if d.is_dir() and pid_f.exists():
                 pid = pid_f.read_text().strip()
                 if pid.isdigit() and not Path(f"/proc/{pid}").exists():
-                    out.append(str(d.relative_to(root)))
+                    out.append(f"{d.relative_to(root)} pid {pid}")
     return out
 
 
@@ -250,14 +250,20 @@ def main():
             refused_f = root / "emu/ndmc-refused.log"
             refused_before = len(refused_f.read_text().splitlines()) if refused_f.exists() else 0
             t0 = time.time()
+            prev_stale = []
             for i in range(bad + after):
                 minute += 1
                 advance(root)
                 active = flags if i < bad else []
                 set_faults(root, active, minute)
                 run_round(root, minute, active, findings, name)
-                for lock in stale_locks(root):
-                    findings.append((name, minute, "-", "stale lock", lock))
+                # A job killed with SIGKILL leaves its lock (no trap runs); the next round must
+                # take it over: a lock of a gone process still there a round later is a finding.
+                now_stale = stale_locks(root)
+                for lock in now_stale:
+                    if lock in prev_stale:
+                        findings.append((name, minute, "-", "stale lock", lock))
+                prev_stale = now_stale
             changes = ndmc_changes(root)[before:]
             refused = (refused_f.read_text().splitlines() if refused_f.exists() else [])[refused_before:]
             counts = collections.Counter(c for c in changes + refused if c != "system configuration save")

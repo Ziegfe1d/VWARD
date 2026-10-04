@@ -129,7 +129,7 @@ IFS="$OLDIFS"
 
 # Сам housekeeping не должен бесконечно логировать сам себя.
 if [ -f "$HOUSE_LOG" ]; then
-    HS="$(wc -c < "$HOUSE_LOG" 2>/dev/null)"
+    HS="$(wc -c 2>/dev/null < "$HOUSE_LOG")"
 
     case "$HS" in
         ''|*[!0-9]*) HS=0 ;;

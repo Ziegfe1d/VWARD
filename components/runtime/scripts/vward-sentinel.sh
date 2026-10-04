@@ -72,7 +72,7 @@ sha256_of() {
 
 running() {
     P=
-    [ -r "$PIDFILE" ] && read -r P < "$PIDFILE" 2>/dev/null
+    [ -r "$PIDFILE" ] && read -r P 2>/dev/null < "$PIDFILE"
     case "$P" in ''|*[!0-9]*) return 1 ;; esac
     kill -0 "$P" 2>/dev/null || return 1
     # Our program, not a process that took its id after a reboot.

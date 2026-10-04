@@ -1456,7 +1456,7 @@ EOF_HSTATS
         [ -n "$v" ] || { DOMAIN_ROWS=0 DOMAIN_UNIQUE=0 DOMAIN_CATEGORIES=0 DOMAIN_ITDOG=0 DOMAIN_V2FLY=0; break; }
     done
 
-    ADAPTIVE_COUNT="$(wc -l < "$ADAPTIVE_PERSIST" 2>/dev/null)"
+    ADAPTIVE_COUNT="$(wc -l 2>/dev/null < "$ADAPTIVE_PERSIST")"
     [ -n "$ADAPTIVE_COUNT" ] || ADAPTIVE_COUNT=0
     ADAPTIVE_RECENT="$(
         if [ -r "$ADAPTIVE_PERSIST" ]; then
@@ -1478,8 +1478,8 @@ EOF_ISTATS
         [ -n "$IP_CIDR_TOTAL" ] || IP_CIDR_TOTAL=0
     fi
 
-    ACTIVE_COUNT="$(wc -l < "$IP_ACTIVE" 2>/dev/null)"
-    MANAGED_ROUTES="$(wc -l < "$IP_OWNED" 2>/dev/null)"
+    ACTIVE_COUNT="$(wc -l 2>/dev/null < "$IP_ACTIVE")"
+    MANAGED_ROUTES="$(wc -l 2>/dev/null < "$IP_OWNED")"
     [ -n "$ACTIVE_COUNT" ] || ACTIVE_COUNT=0
     [ -n "$MANAGED_ROUTES" ] || MANAGED_ROUTES=0
 
@@ -1573,7 +1573,21 @@ if [ "$ACTION" = "diagnostics" ]; then
     JQ_STATUS="$(diag_status command -v "$JQ")"
     CURL_STATUS="$(diag_status command -v "$CURL")"
     # The route engine's DNS capture: VWARD's own program, or a tcpdump that starts.
-    TCPDUMP_STATUS="$(diag_status sh -c '[ -x "${VWARD_DNSCAP_BIN:-/opt/share/vward/dnscap/vward-dnscap}" ] || tcpdump --version')"
+    # tcpdump --version is waited for 3 s at most (as the route engine's starter does): a
+    # tcpdump that hangs must not hold the whole answer; still running then = it started.
+    TCPDUMP_STATUS=FAIL
+    if [ -x "${VWARD_DNSCAP_BIN:-/opt/share/vward/dnscap/vward-dnscap}" ]; then
+        TCPDUMP_STATUS=PASS
+    elif command -v tcpdump >/dev/null 2>&1; then
+        tcpdump --version </dev/null >/dev/null 2>&1 &
+        TD_PID=$! TD_N=0
+        while kill -0 "$TD_PID" 2>/dev/null && [ "$TD_N" -lt 3 ]; do sleep 1; TD_N=$((TD_N + 1)); done
+        if kill -0 "$TD_PID" 2>/dev/null; then
+            kill "$TD_PID" 2>/dev/null; wait "$TD_PID" 2>/dev/null; TCPDUMP_STATUS=PASS
+        elif wait "$TD_PID"; then
+            TCPDUMP_STATUS=PASS
+        fi
+    fi
     LIGHTTPD_STATUS="$(diag_status command -v lighttpd)"
     CROND_STATUS=FAIL
     SUPERVISOR_STATUS=FAIL
@@ -2604,7 +2618,7 @@ if [ "$ACTION" = stability ]; then
             c=${f##*/}
             case "$c" in ''|.*|*[!A-Za-z0-9_.-]*) continue ;; esac
             r= cs=
-            read -r r cs < "$f" 2>/dev/null
+            read -r r cs 2>/dev/null < "$f"
             case "$r$cs" in ''|*[!0-9]*) continue ;; esac
             [ "$n" = 0 ] || printf ','
             printf '{"component":"%s","runs":%s,"cs":%s}' "$c" "$r" "$cs"

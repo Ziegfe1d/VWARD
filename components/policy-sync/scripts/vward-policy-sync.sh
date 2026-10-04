@@ -90,7 +90,7 @@ download()
         --max-filesize "$MAX_SOURCE_ARCHIVE_BYTES" \
         -sS "$URL" -o "$OUT"
     ) || return 1
-    SIZE="$(wc -c < "$OUT" 2>/dev/null | tr -d ' ')"
+    SIZE="$(wc -c 2>/dev/null < "$OUT" | tr -d ' ')"
     case "$SIZE" in ''|*[!0-9]*) return 1 ;; esac
     [ "$SIZE" -le "$MAX_SOURCE_ARCHIVE_BYTES" ]
 }
@@ -431,7 +431,7 @@ build_catalog()
         printf '%s|%s\n' "$CAT" "$COUNT" >> "$IDX"
     done
 
-    CATS="$(wc -l < "$IDX" 2>/dev/null)"
+    CATS="$(wc -l 2>/dev/null < "$IDX")"
     [ -n "$CATS" ] || CATS=0
 
     if [ "$CATS" -lt 1 ]; then
@@ -580,7 +580,7 @@ collect_categories()
         FILE="$CATALOG/$CAT.cidr"
         [ -s "$FILE" ] || continue
 
-        COUNT="$(wc -l < "$FILE" 2>/dev/null)"
+        COUNT="$(wc -l 2>/dev/null < "$FILE")"
         [ -n "$COUNT" ] || COUNT=0
 
         if [ "$COUNT" -gt "$MAX_CATEGORY_ROUTES" ]; then

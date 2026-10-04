@@ -196,7 +196,7 @@ const API_ERRORS = {
   adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен'
 };
 const errText = x => errBase(x) + (x && x.reason ? ' (ответ роутера: ' + x.reason + ')' : '');
-const errBase = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.error || '') ? 'роутер не принял настройку ' + x.error.slice(14).replace(/_/g, ' ') + ' - туннель не изменён' : '') || (x && x.error) || ('код ' + (x && x.rc));
+const errBase = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.error || '') ? 'роутер не принял настройку ' + x.error.slice(14).replace(/_/g, ' ') + ' - туннель не изменён' : '') || (x && x.error) || (x && x.rc != null ? 'код ' + x.rc : 'роутер ответил без данных');
 
 /* ---------- Данные ---------- */
 const S = { tq: null, auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, ext: null, listd: null, laddr: null, services: null, svcd: null, awg: null, wanhist: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
@@ -3005,7 +3005,7 @@ async function runLongBody(resultId, action, fields, dataAction, okMsg, show) {
     if (installing && u.phase) updOverlayShow({ phase: u.phase });
     if (run.finished) break;
   }
-  const done = !run.finished ? 'Ещё выполняется, проверьте позже' : run.rc === 0 ? okMsg : dataAction === 'update-data' && UPDATE_RC[run.rc] ? UPDATE_RC[run.rc] : 'Не выполнено (код ' + run.rc + ') - подробности в «Журналах»';
+  const done = !run.finished ? 'Ещё выполняется, проверьте позже' : run.rc === 0 ? okMsg : dataAction === 'update-data' && UPDATE_RC[run.rc] ? UPDATE_RC[run.rc] : 'Не выполнено' + (run.rc != null ? ' (код ' + run.rc + ')' : '') + ' - подробности в «Журналах»';
   const answered = run.finished && (run.rc === 0 || (dataAction === 'update-data' && UPDATE_RC_OK[run.rc]));
   if (installing) {
     if (run.finished && run.rc === 0) { await load('status', true); updOverlayShow({ done: true, ok: true, version: (updOverlay && updOverlay.version) || plat().version }); return run; }

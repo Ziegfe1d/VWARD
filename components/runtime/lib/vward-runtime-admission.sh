@@ -43,7 +43,7 @@ vward_background() {
 vward_busy() {
     # The real-time watcher keeps a busy flag: no /proc reading here while it runs.
     vb_pid=
-    [ ! -r "$VWARD_SENTINEL_PIDFILE" ] || read -r vb_pid < "$VWARD_SENTINEL_PIDFILE" 2>/dev/null || :
+    [ ! -r "$VWARD_SENTINEL_PIDFILE" ] || read -r vb_pid 2>/dev/null < "$VWARD_SENTINEL_PIDFILE" || :
     case "$vb_pid" in
         ''|*[!0-9]*) ;;
         *) if kill -0 "$vb_pid" 2>/dev/null; then [ -e "$VWARD_SENTINEL_STATE/busy" ]; return; fi ;;
@@ -124,7 +124,7 @@ vward_cpu_account() {
     vc_tmp="$VWARD_CPU_DIR/.times.$1"
     times > "$vc_tmp" 2>/dev/null || return 0
     vc_a= vc_b= vc_c= vc_d=
-    { read -r vc_a vc_b; read -r vc_c vc_d; } < "$vc_tmp" 2>/dev/null || :
+    { read -r vc_a vc_b; read -r vc_c vc_d; } 2>/dev/null < "$vc_tmp" || :
     vc_total=0
     for vc_t in $vc_a $vc_b $vc_c $vc_d; do
         vward_cs "$vc_t"

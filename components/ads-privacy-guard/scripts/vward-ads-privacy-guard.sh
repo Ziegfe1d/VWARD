@@ -150,7 +150,7 @@ fi
 # unknown domains. The cap is applied to the expensive PENDING queue later.
 cp "$STATS" "$LIMITED"
 TOTAL_ALLOWED="$(wc -l < "$WORK/query.normalized" 2>/dev/null | tr -d ' ')"
-UNIQUE_ALLOWED="$(wc -l < "$STATS" 2>/dev/null | tr -d ' ')"
+UNIQUE_ALLOWED="$(wc -l 2>/dev/null < "$STATS" | tr -d ' ')"
 TOTAL_ALLOWED="$(ads_num "$TOTAL_ALLOWED" 0)"
 UNIQUE_ALLOWED="$(ads_num "$UNIQUE_ALLOWED" 0)"
 TRUST_NEXT=$((NOW + TRUST_TTL_DAYS * 86400))
@@ -226,7 +226,7 @@ done < "$LIMITED"
 # Expensive evidence lookup is capped only after cheap trust/manual/cache paths.
 cp "$PENDING" "$WORK/pending.all"
 head -n "$MAX_CANDIDATES_PER_RUN" "$WORK/pending.all" > "$PENDING"
-CANDIDATE_COUNT="$(wc -l < "$PENDING" 2>/dev/null | tr -d ' ')"
+CANDIDATE_COUNT="$(wc -l 2>/dev/null < "$PENDING" | tr -d ' ')"
 CANDIDATE_COUNT="$(ads_num "$CANDIDATE_COUNT" 0)"
 PENDING_COUNT="$CANDIDATE_COUNT"
 runtime_status indexing "" 0 "$PENDING_COUNT"
@@ -483,7 +483,7 @@ if [ "$MODE" = "--dry-run" ]; then
     echo "CANDIDATES_CONSIDERED=$CANDIDATE_COUNT"
     echo "PENDING_RECHECK=$PENDING_COUNT"
     echo "SOURCE_INDEXES=$HEALTHY_INDEXES"
-    echo "DECISIONS=$(wc -l < "$DECISIONS" 2>/dev/null | tr -d ' ')"
+    echo "DECISIONS=$(wc -l 2>/dev/null < "$DECISIONS" | tr -d ' ')"
     echo "WOULD_BLOCK=$(awk -F'|' '$3=="BLOCK"{n++}END{print n+0}' "$NEW_STATE")"
     echo "WOULD_REVIEW=$(awk -F'|' '$2=="SUSPECT"{n++}END{print n+0}' "$NEW_STATE")"
     exit 0

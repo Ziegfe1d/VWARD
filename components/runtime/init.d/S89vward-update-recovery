@@ -48,9 +48,9 @@ read_reclaim_owner()
 {
     owner_file=$1
     [ -f "$owner_file" ] && [ ! -L "$owner_file" ] && [ -r "$owner_file" ] || return 1
-    [ "$(wc -l < "$owner_file" 2>/dev/null | tr -d ' ')" = 1 ] || return 1
+    [ "$(wc -l 2>/dev/null < "$owner_file" | tr -d ' ')" = 1 ] || return 1
     token=$(sed -n '1p' "$owner_file" 2>/dev/null || :)
-    token_bytes=$(wc -c < "$owner_file" 2>/dev/null | tr -d ' ')
+    token_bytes=$(wc -c 2>/dev/null < "$owner_file" | tr -d ' ')
     [ "$token_bytes" = "$((${#token} + 1))" ] || return 1
     printf '%s\n' "$token" | LC_ALL=C grep -Eq \
         '^[A-Za-z0-9][A-Za-z0-9._-]*:[1-9][0-9]*:[0-9]+:vward-update-reclaim$' || return 1

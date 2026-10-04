@@ -115,7 +115,7 @@ query_signature()
     fi
     for F in "$ADS_QUERYLOG_OLD" "$ADS_QUERYLOG"; do
         if [ -r "$F" ]; then
-            SIZE="$(wc -c < "$F" 2>/dev/null | tr -d ' ')"
+            SIZE="$(wc -c 2>/dev/null < "$F" | tr -d ' ')"
             TAIL="$(tail -c 512 "$F" 2>/dev/null | cksum 2>/dev/null | awk '{print $1 ":" $2}')"
             printf '%s:%s;' "${SIZE:-0}" "${TAIL:-0:0}"
         else
@@ -223,7 +223,7 @@ if ads_bool "$AUTO_SOURCE_UPDATE" && [ -x "$SOURCES" ]; then
     # A failed update is retried after SOURCE_RETRY_SEC, not on every tick:
     # without a network each attempt would download and rewrite files each minute.
     LAST_TRY=0
-    [ ! -r "$SOURCE_RETRY_FILE" ] || read -r LAST_TRY < "$SOURCE_RETRY_FILE" 2>/dev/null
+    [ ! -r "$SOURCE_RETRY_FILE" ] || read -r LAST_TRY 2>/dev/null < "$SOURCE_RETRY_FILE"
     LAST_TRY="$(ads_num "$LAST_TRY" 0)"
     if [ "$NOW" -ge "$SOURCE_DUE" ] && [ "$NOW" -ge $((LAST_TRY + SOURCE_RETRY_SEC)) ]; then
         GATE="$(resource_gate)"

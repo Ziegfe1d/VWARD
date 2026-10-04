@@ -405,7 +405,7 @@ stop_orphans() {
     grep -l -F -- "$ENGINE_ETC/v" "${VWARD_PROC:-/proc}"/[0-9]*/cmdline 2>/dev/null | while IFS= read -r f; do
         d=${f%/cmdline}
         [ "$(cat "$d/comm" 2>/dev/null)" = "${VWARD_ENGINE_COMM:-xray}" ] || continue
-        c=$(tr '\000' '\n' < "$f" 2>/dev/null | grep -F -- "$ENGINE_ETC/v" | head -n 1)
+        c=$(tr '\000' '\n' 2>/dev/null < "$f" | grep -F -- "$ENGINE_ETC/v" | head -n 1)
         k=${c##*/v}; k=${k%.json}
         case "$k" in ''|*[!0-9]*) continue ;; esac
         awk -F '\t' -v n="$k" '$1 == n {f = 1} END {exit !f}' "$TUNNELS" 2>/dev/null && continue

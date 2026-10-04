@@ -107,7 +107,7 @@ SENTINEL_SKIP=0
 sentinel_alive()
 {
     S_PID=
-    [ -r "$SENTINEL_PIDFILE" ] && read -r S_PID < "$SENTINEL_PIDFILE" 2>/dev/null || :
+    [ -r "$SENTINEL_PIDFILE" ] && read -r S_PID 2>/dev/null < "$SENTINEL_PIDFILE" || :
     case "$S_PID" in ''|*[!0-9]*) return 1 ;; esac
     kill -0 "$S_PID" 2>/dev/null
 }

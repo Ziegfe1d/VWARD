@@ -56,7 +56,7 @@ fetch()
         --max-filesize "$MAX_SOURCE_ARCHIVE_BYTES" \
         -sS "$URL" -o "$OUT"
     ) || return 1
-    SIZE="$(wc -c < "$OUT" 2>/dev/null | tr -d ' ')"
+    SIZE="$(wc -c 2>/dev/null < "$OUT" | tr -d ' ')"
     case "$SIZE" in ''|*[!0-9]*) return 1 ;; esac
     [ "$SIZE" -le "$MAX_SOURCE_ARCHIVE_BYTES" ]
 }
@@ -164,7 +164,7 @@ update_itdog()
 
     sort -u "$TMP" > "$TMP.sorted"
     mv "$TMP.sorted" "$TMP"
-    COUNT="$(wc -l < "$TMP" 2>/dev/null)"
+    COUNT="$(wc -l 2>/dev/null < "$TMP")"
     [ -n "$COUNT" ] || COUNT=0
 
     if [ "$COUNT" -lt 100 ]; then
@@ -242,7 +242,7 @@ update_v2fly()
     sort -u "$INC" > "$INC.sorted"
     mv "$INC.sorted" "$INC"
 
-    COUNT="$(wc -l < "$TMP" 2>/dev/null)"
+    COUNT="$(wc -l 2>/dev/null < "$TMP")"
     CATS="$(awk -F'|' '{print $3}' "$TMP" | sort -u | wc -l)"
     [ -n "$COUNT" ] || COUNT=0
     [ -n "$CATS" ] || CATS=0
@@ -272,7 +272,7 @@ update_text_list()
     fi
     normalize_domains < "$WORK/$1.raw" |
         awk -v s="$1" -v c="$3" 'index($0, ".") { print $0 "|" s "|" c }' | sort -u > "$TMP"
-    COUNT="$(wc -l < "$TMP" 2>/dev/null)"
+    COUNT="$(wc -l 2>/dev/null < "$TMP")"
     [ -n "$COUNT" ] || COUNT=0
     if [ "$COUNT" -lt "$4" ]; then
         echo "SOURCE_$1=BAD_COUNT:$COUNT"
@@ -323,7 +323,7 @@ mv "$MERGED.sorted" "$MERGED"
 sort -u "$INC_MERGED" > "$INC_MERGED.sorted"
 mv "$INC_MERGED.sorted" "$INC_MERGED"
 
-TOTAL_ROWS="$(wc -l < "$MERGED" 2>/dev/null)"
+TOTAL_ROWS="$(wc -l 2>/dev/null < "$MERGED")"
 TOTAL_DOMAINS="$(cut -d'|' -f1 "$MERGED" | sort -u | wc -l)"
 TOTAL_CATS="$(cut -d'|' -f3 "$MERGED" | sort -u | wc -l)"
 [ -n "$TOTAL_ROWS" ] || TOTAL_ROWS=0
