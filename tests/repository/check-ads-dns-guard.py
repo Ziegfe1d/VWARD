@@ -95,6 +95,20 @@ if [ -f "$FAKE_AGH_ANSWER" ] && [ "$(cat "$FAKE_AGH_ANSWER")" != 1 ]; then echo 
 printf 'Server:\t\t%s\nAddress:\t%s\n\nName:\t%s\nAddress: 93.184.216.34\n' "${2%%:*}" "$2" "$1"
 '''
 
+FAKE_NDMC = r'''#!/bin/sh
+echo "$2" >> "$FAKE_NDMC_LOG"
+case "$2" in
+    "show running-config") cat "$FAKE_RC" ;;
+    "no ip name-server "*) grep -vx "ip name-server ${2#no ip name-server }" "$FAKE_RC" > "$FAKE_RC.n"; mv "$FAKE_RC.n" "$FAKE_RC" ;;
+    "ip name-server "*) echo "$2" >> "$FAKE_RC" ;;
+esac
+exit 0
+'''
+
+FAKE_PIDOF = r'''#!/bin/sh
+[ -s "$FAKE_AGH_PID" ] && cat "$FAKE_AGH_PID" || exit 1
+'''
+
 FAKE_CONTROL = r'''#!/bin/sh
 echo "$*" >> "$FAKE_CONTROL_LOG"
 echo "CONTROL=PASS"
@@ -126,7 +140,7 @@ def fail(msg):
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     bindir = tmp / "bin"; bindir.mkdir()
-    for name, body in (("iptables", FAKE_IPTABLES), ("curl", FAKE_CURL), ("netstat", FAKE_NETSTAT), ("control", FAKE_CONTROL), ("nslookup", FAKE_NSLOOKUP)):
+    for name, body in (("iptables", FAKE_IPTABLES), ("curl", FAKE_CURL), ("netstat", FAKE_NETSTAT), ("control", FAKE_CONTROL), ("nslookup", FAKE_NSLOOKUP), ("ndmc", FAKE_NDMC), ("pidof", FAKE_PIDOF)):
         f = bindir / name; f.write_text(body); f.chmod(0o755)
     (tmp / "profile.sh").write_text(FAKE_PROFILE)
     etc = tmp / "etc"; etc.mkdir()
@@ -155,6 +169,8 @@ with tempfile.TemporaryDirectory() as tmp:
         "FAKE_FW": str(fw), "FAKE_ROUTER": str(router), "FAKE_AGH_YAML": str(yaml), "FAKE_AGH_UP": str(up),
         "FAKE_CONTROL_LOG": str(tmp / "control.log"),
         "VWARD_ROOT_PREFIX": str(tmp / "root"), "TMPDIR": str(tmp),
+        "VWARD_NDMC": str(bindir / "ndmc"), "VWARD_PIDOF": str(bindir / "pidof"), "VWARD_DNS_CHAIN_STATE": str(tmp / "chain"),
+        "FAKE_RC": str(tmp / "rc"), "FAKE_NDMC_LOG": str(tmp / "ndmc.log"), "FAKE_AGH_PID": str(tmp / "agh.pid"),
         "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
     }
     shells = [["sh"]] + ([["busybox", "sh"]] if shutil.which("busybox") else [])
@@ -344,5 +360,63 @@ with tempfile.TemporaryDirectory() as tmp:
         run("tick", shell=shell)
         if [l for l in (tmp / "fw.json.log").read_text().splitlines()[before:] if l != "-t nat -S PREROUTING"]:
             fail(f"{shell[0]} an idle tick must only read iptables")
+
+        # The chain: Keenetic hands the queries to AdGuard Home («ip name-server 192.168.1.1:65053»)
+        # while it answers; silent twice or restarting in a loop - out (the home keeps the
+        # provider's DNS), back after 3 answers in a row; never into a loop back to the router.
+        rc, chaindir, ndlog, pid = tmp / "rc", tmp / "chain", tmp / "ndmc.log", tmp / "agh.pid"
+        shutil.rmtree(chaindir, ignore_errors=True)
+        rc.write_text("ip name-server 1.1.1.1\n"); ndlog.write_text(""); pid.write_text("1234\n")
+        up.write_text("1"); answer.write_text("1")
+        NS = "ip name-server 192.168.1.1:65053"
+        inchain = lambda: NS in rc.read_text().splitlines()
+        for i in range(2):
+            run("tick", shell=shell)
+            if inchain():
+                fail(f"{shell[0]} back only after 3 answers in a row (tick {i + 1})")
+        run("tick", shell=shell)
+        if not inchain() or "system configuration save" not in ndlog.read_text() or "DNS_CHAIN_IN" not in guardlog():
+            fail(f"{shell[0]} AdGuard Home answers: it goes back into the chain: {rc.read_text()!r}")
+        if status().get("chain_state") != "in":
+            fail(f"{shell[0]} status: {status()}")
+        answer.write_text("0")
+        run("tick", shell=shell)
+        if not inchain():
+            fail(f"{shell[0]} one silent minute is not a death")
+        run("tick", shell=shell)
+        if inchain() or "ip name-server 1.1.1.1" not in rc.read_text() or "DNS_CHAIN_OUT" not in guardlog():
+            fail(f"{shell[0]} silent twice: out of the chain, the provider's DNS stays: {rc.read_text()!r}")
+        st = status()
+        if st.get("chain_state") != "out" or st.get("chain_reason") != "silent":
+            fail(f"{shell[0]} status out: {st}")
+        answer.write_text("1")
+        for _ in range(3):
+            run("tick", shell=shell)
+        if not inchain():
+            fail(f"{shell[0]} answering again: back into the chain")
+        # A restart loop (a new process every minute) takes it out though it answers.
+        for n in range(1235, 1240):
+            pid.write_text(f"{n}\n"); run("tick", shell=shell)
+        if inchain() or status().get("chain_reason") != "loop":
+            fail(f"{shell[0]} a restart loop: out of the chain: {status()}")
+        # AdGuard Home that would hand the queries back to the router never goes into the chain.
+        shutil.rmtree(chaindir, ignore_errors=True); pid.write_text("1300\n")
+        good_yaml = yaml.read_text()
+        yaml.write_text(good_yaml.replace("upstream_dns:", "upstream_dns:\n    - 192.168.1.1", 1))
+        for _ in range(4):
+            run("tick", shell=shell)
+        if inchain() or status().get("chain_reason") != "loop_upstream":
+            fail(f"{shell[0]} an upstream back to the router: never into the chain: {status()}")
+        yaml.write_text(good_yaml)
+        # CHAIN=0: the owner keeps the line as it is.
+        if "DNS_GUARD=PASS" not in run("set", "chain", "0", shell=shell).stdout:
+            fail(f"{shell[0]} set chain 0")
+        before = ndlog.read_text()
+        for _ in range(4):
+            run("tick", shell=shell)
+        if inchain() or ndlog.read_text() != before:
+            fail(f"{shell[0]} CHAIN=0: VWARD leaves the chain alone")
+        run("set", "chain", "1", shell=shell)
+        (etc / "dns-guard.conf").unlink(missing_ok=True)
 
 print("ADS_DNS_GUARD=PASS")

@@ -1599,7 +1599,23 @@ if [ "$ACTION" = "diagnostics" ]; then
         ($types | split(" ")) as $vpn |
         [to_entries[] | select((.value | type) == "object" and .key != $wan and (((.value.type // "") | tostring | ascii_downcase) as $t | $vpn | index($t)))] | length' 2>/dev/null)"
     case "$WG_COUNT" in ''|*[!0-9]*) WG_COUNT=0 ;; esac
-    [ "$WG_COUNT" -gt 0 ] && WG_STATUS=PASS || WG_STATUS=WARN
+    # Each tunnel on its own: switched on but not connected is named (a count alone said «Норма»
+    # with one of two tunnels dead).
+    WG_DOWN="$(printf '%s\n' "$IF_JSON" | "$JQ" -r --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy opkgtun}" --arg wan "${VWARD_WAN_INTERFACE:-}" '
+        ($types | split(" ")) as $vpn |
+        [to_entries[] | select((.value | type) == "object" and .key != $wan and (((.value.type // "") | tostring | ascii_downcase) as $t | $vpn | index($t))) |
+         select(((.value.state // "") | tostring) != "down") |
+         select(((.value.connected // "") | tostring | ascii_downcase) as $c | ["yes", "true", "1"] | index($c) | not) |
+         (.value.description // "" | if . == "" then null else . end) // .key] | join(", ")' 2>/dev/null)"
+    WG_OFF="$(printf '%s\n' "$IF_JSON" | "$JQ" -r --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy opkgtun}" --arg wan "${VWARD_WAN_INTERFACE:-}" '
+        ($types | split(" ")) as $vpn |
+        [to_entries[] | select((.value | type) == "object" and .key != $wan and (((.value.type // "") | tostring | ascii_downcase) as $t | $vpn | index($t))) |
+         select(((.value.state // "") | tostring) == "down")] | length' 2>/dev/null)"
+    case "$WG_OFF" in ''|*[!0-9]*) WG_OFF=0 ;; esac
+    if [ "$WG_COUNT" -eq 0 ]; then WG_STATUS=WARN WG_DETAIL="туннелей нет"
+    elif [ -n "$WG_DOWN" ]; then WG_STATUS=WARN WG_DETAIL="туннелей: $WG_COUNT; не на связи: $WG_DOWN"
+    else WG_STATUS=PASS WG_DETAIL="туннелей: $WG_COUNT; все включённые на связи"; fi
+    [ "$WG_OFF" -eq 0 ] || WG_DETAIL="$WG_DETAIL; выключено: $WG_OFF"
 
     # Smart DNS: each domain bound to a DNS-over-HTTPS server must resolve to an
     # address that leaves through the provider, never through a tunnel.
@@ -1622,7 +1638,13 @@ if [ "$ACTION" = "diagnostics" ]; then
                 SD_BAD="$SD_BAD $SD($SD_IP→$SD_DEV)"
             fi
         done
-        if [ -n "$SD_BAD" ]; then
+        # Smart DNS rows inside AdGuard Home do nothing while Keenetic does not hand it the queries.
+        SD_KN="$(printf '%s\n' "$DIAG_RC" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {n++} END {print n + 0}')"
+        SD_AGH_PORT="$(awk '/^[^ #]/ {d = ($1 == "dns:")} d && $1 == "port:" {print $2; exit}' "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" 2>/dev/null)"
+        if [ "$SD_KN" = 0 ] && [ -n "$SD_AGH_PORT" ] && [ "$SD_AGH_PORT" != 53 ] &&
+           ! printf '%s\n' "$DIAG_RC" | awk -v p=":$SD_AGH_PORT" '$1 == "ip" && $2 == "name-server" && index($3, p) {f = 1} END {exit !f}'; then
+            SMARTDNS_STATUS=WARN SMARTDNS_DETAIL="Не действует: Smart DNS настроен в AdGuard Home, а AdGuard Home сейчас не в цепочке DNS (см. «Цепочка DNS»)"
+        elif [ -n "$SD_BAD" ]; then
             SMARTDNS_STATUS=FAIL SMARTDNS_DETAIL="Уходит в туннель:$SD_BAD - Smart DNS не работает для всех своих доменов. Проверьте «Доменные списки»."
         else
             SMARTDNS_DETAIL="Доменов: $(printf '%s\n' "$SD_DOMAINS" | wc -l | tr -d ' '), проверено адресов: $SD_N, все идут через провайдера"
@@ -1647,7 +1669,19 @@ if [ "$ACTION" = "diagnostics" ]; then
         elif [ "${AGH_DNS_PORT:-}" = 53 ]; then
             DNS_STATUS=WARN DNS_DETAIL="AdGuard Home сам отвечает на порту 53: Keenetic не видит DNS-ответов, маршрутизация по доменам может не узнавать адреса"
         else
-            DNS_STATUS=WARN DNS_DETAIL="Keenetic не передаёт запросы AdGuard Home (нет ip name-server на порт ${AGH_DNS_PORT:-?})"
+            # Out of the chain: what the DNS guard knows (it takes AdGuard Home out and puts it back).
+            CH_DIR="${VWARD_DNS_CHAIN_STATE:-/tmp/vward-dns-chain}"
+            CH_REASON="$(cat "$CH_DIR/reason" 2>/dev/null)"; CH_SINCE="$(cat "$CH_DIR/since" 2>/dev/null)"
+            CH_AT=""; case "$CH_SINCE" in ''|*[!0-9]*) ;; *) CH_AT=" в $(date -d "@$CH_SINCE" '+%H:%M' 2>/dev/null)" ;; esac
+            CH_OFF="$(awk -F= '$1 == "CHAIN" {print $2}' "${VWARD_DNS_GUARD_CONF:-/opt/etc/vward/ads-privacy-guard/dns-guard.conf}" 2>/dev/null)"
+            DNS_STATUS=WARN
+            case "$CH_OFF:$CH_REASON" in
+                0:*) DNS_DETAIL="AdGuard Home не в цепочке: возврат выключен в настройках. Реклама и Smart DNS не работают" ;;
+                *:loop) DNS_DETAIL="AdGuard Home выведен из цепочки$CH_AT: перезапускался по кругу. Реклама и Smart DNS не работают; вернётся сам, когда заработает" ;;
+                *:silent) DNS_DETAIL="AdGuard Home выведен из цепочки$CH_AT: не отвечал. Реклама и Smart DNS не работают; вернётся сам, когда заработает" ;;
+                *:loop_upstream) DNS_STATUS=FAIL DNS_DETAIL="AdGuard Home не возвращается в цепочку: он отправляет запросы обратно роутеру (петля). Укажите в AdGuard Home внешние серверы" ;;
+                *) DNS_DETAIL="AdGuard Home не в цепочке: VWARD вернёт его, когда он ответит 3 раза подряд (до 3 минут). Пока реклама и Smart DNS не работают" ;;
+            esac
         fi
     else
         DNS_DETAIL="AdGuard Home не найден: DNS обслуживает Keenetic"
@@ -1686,7 +1720,7 @@ if [ "$ACTION" = "diagnostics" ]; then
       --arg crond "$CROND_STATUS" --arg supervisor "$SUPERVISOR_STATUS" \
       --arg adguard "$ADGUARD_STATUS" --arg adaptive "$ADAPTIVE_STATUS" \
       --arg updater "$UPDATE_STATUS" --arg config "$CONFIG_STATUS" --arg cgi "$CGI_STATUS" \
-      --arg wan "$WAN_STATUS" --arg wg "$WG_STATUS" \
+      --arg wan "$WAN_STATUS" --arg wg "$WG_STATUS" --arg wg_detail "$WG_DETAIL" \
       --arg smartdns "$SMARTDNS_STATUS" --arg smartdns_detail "$SMARTDNS_DETAIL" \
       --arg dns "$DNS_STATUS" --arg dns_detail "$DNS_DETAIL" --arg files "$FILES_STATUS" --arg files_detail "$FILES_DETAIL" \
       --arg wan_rc "$LAST_WAN_RC" --arg wg_rc "$LAST_WG_RC" --arg route_rc "$LAST_ROUTE_RC" \
@@ -1703,7 +1737,7 @@ if [ "$ACTION" = "diagnostics" ]; then
         {id:"adguard",component:"route-engine",label:"AdGuard Home",status:$adguard,detail:"DNS-сервер с блокировкой рекламы"},
         {id:"adaptive",component:"route-engine",label:"Автоподбор доменов",status:$adaptive,detail:(if $route_rc == "" then "сверка маршрутов ещё не запускалась" else "код последней сверки маршрутов: "+$route_rc end)},
         {id:"wan",component:"wan-guard",label:"Интернет",status:$wan,detail:"состояние подключения провайдера в Keenetic"},
-        {id:"wg",component:"tunnel-guard",label:"VPN-туннели",status:$wg,detail:("туннелей: "+($wg_count|tostring)+(if $wg_rc == "" then "" else "; код последней проверки: "+$wg_rc end))},
+        {id:"wg",component:"tunnel-guard",label:"VPN-туннели",status:$wg,detail:$wg_detail},
         {id:"smartdns",component:"route-engine",label:"Smart DNS мимо VPN",status:$smartdns,detail:$smartdns_detail},
         {id:"dns-chain",component:"route-engine",label:"Цепочка DNS",status:$dns,detail:$dns_detail},
         {id:"files",component:"update-engine",label:"Файлы VWARD",status:$files,detail:$files_detail},

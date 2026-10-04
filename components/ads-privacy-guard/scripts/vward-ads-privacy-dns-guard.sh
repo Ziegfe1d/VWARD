@@ -15,9 +15,16 @@
 # owner's that sends port 53 of the router into AdGuard Home never asks whether AdGuard Home lives,
 # so when it dies every device of the home loses DNS. A redirect into a port nothing answers on is
 # taken off (parked in RAM) and put back when AdGuard Home answers again.
+# The chain (CHAIN=1, the default): Keenetic hands the queries of the home to AdGuard Home
+# through «ip name-server ADDRESS:PORT». AdGuard Home that stops answering (twice in a row) or
+# restarts again and again (3 times in 10 minutes) is taken out of the chain - Keenetic goes
+# to the provider's DNS and the home keeps its internet - and put back after 3 answers in a row
+# (Viva 2026-10-04: AdGuard Home restarted in a loop at night, the home lost DNS, the line was
+# removed by hand and stayed out: no ad filtering, no Smart DNS). CHAIN=0: VWARD leaves the
+# line alone.
 #
 #   vward-ads-privacy-dns-guard.sh status
-#   vward-ads-privacy-dns-guard.sh set enforce|bypass 0|1
+#   vward-ads-privacy-dns-guard.sh set enforce|bypass|chain 0|1
 #   vward-ads-privacy-dns-guard.sh set exclude MAC[,MAC...]   ("-" for none)
 #   vward-ads-privacy-dns-guard.sh apply|tick                 (tick: the scheduler, every minute)
 #   vward-ads-privacy-dns-guard.sh hook nat|filter            (Keenetic netfilter.d)
@@ -53,10 +60,13 @@ NSLOOKUP="${VWARD_NSLOOKUP:-nslookup}"
 PARK="${VWARD_DNS_GUARD_PARK:-/tmp/vward-dns-guard.parked}"
 PROBE_FAILS="${VWARD_DNS_GUARD_PROBE_FAILS:-/tmp/vward-dns-guard.probe-fails}"
 PROBE_HOST="${VWARD_DNS_GUARD_PROBE_HOST:-example.com}"
+NDMC="${VWARD_NDMC:-ndmc}"
+PIDOF="${VWARD_PIDOF:-pidof}"
+CHAIN_DIR="${VWARD_DNS_CHAIN_STATE:-/tmp/vward-dns-chain}"
 
 OP="${1:-status}"
 
-ENFORCE=0 BYPASS=0 EXCLUDE="" FAILOPEN=1
+ENFORCE=0 BYPASS=0 EXCLUDE="" FAILOPEN=1 CHAIN=1
 conf_load()
 {
     [ -r "$CONF" ] || return 0
@@ -66,6 +76,7 @@ conf_load()
             BYPASS) case "$V" in 1) BYPASS=1 ;; *) BYPASS=0 ;; esac ;;
             EXCLUDE) EXCLUDE=$V ;;
             FAILOPEN) case "$V" in 0) FAILOPEN=0 ;; *) FAILOPEN=1 ;; esac ;;
+            CHAIN) case "$V" in 0) CHAIN=0 ;; *) CHAIN=1 ;; esac ;;
         esac
     done < "$CONF"
 }
@@ -73,7 +84,7 @@ conf_load()
 conf_write()
 {
     mkdir -p "$(dirname "$CONF")" || return 1
-    printf 'ENFORCE=%s\nBYPASS=%s\nEXCLUDE=%s\nFAILOPEN=%s\n' "$ENFORCE" "$BYPASS" "$EXCLUDE" "$FAILOPEN" > "$CONF.tmp.$$" &&
+    printf 'ENFORCE=%s\nBYPASS=%s\nEXCLUDE=%s\nFAILOPEN=%s\nCHAIN=%s\n' "$ENFORCE" "$BYPASS" "$EXCLUDE" "$FAILOPEN" "$CHAIN" > "$CONF.tmp.$$" &&
         chmod 0600 "$CONF.tmp.$$" && mv -f "$CONF.tmp.$$" "$CONF"
 }
 
@@ -308,6 +319,83 @@ failopen_sync()
     failopen_park "$fo_port"
 }
 
+# ------------------------------------------------------------ the chain
+# AdGuard Home's DNS address for Keenetic: its first bind host that is an address of the
+# router (not 0.0.0.0 / ::), else the LAN address.
+agh_dns_host()
+{
+    adh=$(awk '/^[^ #]/ {d = ($1 == "dns:"); b = 0; next}
+        d && /^  bind_hosts:/ {b = 1; next} d && /^  [a-z_]+:/ {b = 0}
+        b && $1 == "-" {gsub(/["\047]/, "", $2); print $2}' "$AGH_YAML" 2>/dev/null |
+        grep -v -e '^0\.0\.0\.0$' -e '^::$' -e ':' | head -n 1)
+    valid_ip "$adh" && echo "$adh" || echo "$LAN"
+}
+
+ndm() { nd_out=$("$NDMC" -c "$1" 2>&1) || return 1; ! printf '%s\n' "$nd_out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command)'; }
+
+# AdGuard Home restarted 3 times within 10 minutes (its process id changed): a loop.
+agh_looping()
+{
+    al_pid=$("$PIDOF" AdGuardHome 2>/dev/null | awk '{print $1}')
+    al_now=$(ads_epoch)
+    al_last=$(tail -n 1 "$CHAIN_DIR/pids" 2>/dev/null | cut -d' ' -f2)
+    [ -z "$al_pid" ] || [ "$al_pid" = "$al_last" ] || echo "$al_now $al_pid" >> "$CHAIN_DIR/pids"
+    [ -s "$CHAIN_DIR/pids" ] || return 1
+    awk -v t="$al_now" '$1 >= t - 600' "$CHAIN_DIR/pids" > "$CHAIN_DIR/pids.new" && mv -f "$CHAIN_DIR/pids.new" "$CHAIN_DIR/pids"
+    # The first id seen is the running one, not a restart.
+    [ "$(wc -l < "$CHAIN_DIR/pids")" -gt 3 ]
+}
+
+count_up() { cu_n=0; [ ! -r "$1" ] || read -r cu_n < "$1"; case "$cu_n" in ''|*[!0-9]*) cu_n=0 ;; esac; echo $((cu_n + 1)) > "$1"; echo $((cu_n + 1)); }
+
+# chain_sync: AdGuard Home in Keenetic's DNS chain while it answers, out of it while it does not.
+chain_sync()
+{
+    [ "$CHAIN" = 1 ] && [ -n "$AGH_YAML" ] && [ -r "$AGH_YAML" ] || return 0
+    cs_port=$(agh_port)
+    case "$cs_port" in ''|*[!0-9]*|53) return 0 ;; esac
+    mkdir -p "$CHAIN_DIR" || return 0
+    cs_ns="$(agh_dns_host):$cs_port"
+    cs_rc=$("$NDMC" -c "show running-config" 2>/dev/null) || return 0
+    [ -n "$cs_rc" ] || return 0
+    cs_in=0
+    printf '%s\n' "$cs_rc" | grep -Eq "^ip name-server $cs_ns( |\$)" && cs_in=1
+    cs_ok=0
+    agh_up "$cs_port" && agh_answers "$cs_port" && cs_ok=1
+    cs_loop=0
+    if agh_looping; then cs_ok=0 cs_loop=1; fi
+    if [ "$cs_ok" = 1 ]; then rm -f "$CHAIN_DIR/fails"; else rm -f "$CHAIN_DIR/oks"; fi
+    if [ "$cs_in" = 1 ]; then
+        echo in > "$CHAIN_DIR/state"
+        [ "$cs_ok" = 0 ] || return 0
+        [ "$(count_up "$CHAIN_DIR/fails")" -ge 2 ] || [ "$cs_loop" = 1 ] || return 0
+        if ndm "no ip name-server $cs_ns"; then
+            ndm "system configuration save" || :
+            rm -f "$CHAIN_DIR/fails" "$CHAIN_DIR/oks"
+            echo out > "$CHAIN_DIR/state"; ads_epoch > "$CHAIN_DIR/since"
+            echo "$([ "$cs_loop" = 1 ] && echo loop || echo silent)" > "$CHAIN_DIR/reason"
+            ads_log "DNS_CHAIN_OUT|ns=$cs_ns|reason=$(cat "$CHAIN_DIR/reason")|AdGuard Home taken out of the DNS chain: Keenetic uses the provider's DNS"
+        fi
+        return 0
+    fi
+    # Out of the chain: back after 3 answers in a row, unless AdGuard Home would send the
+    # queries back to the router (a loop Keenetic answers by dropping them).
+    [ "$cs_ok" = 1 ] || { echo out > "$CHAIN_DIR/state"; return 0; }
+    [ "$(count_up "$CHAIN_DIR/oks")" -ge 3 ] || { echo out > "$CHAIN_DIR/state"; return 0; }
+    if awk '/^[^ #]/ {d = ($1 == "dns:"); u = 0; next} /^  [a-z_]+:/ {u = d && ($1 == "upstream_dns:"); next}
+            u && $1 == "-" {gsub(/["\047]/, "", $2); print $2}' "$AGH_YAML" |
+        grep -Eq "^((udp|tcp)://)?($LAN|127\.0\.0\.1|localhost)(:53)?$"; then
+        echo loop_upstream > "$CHAIN_DIR/reason"; echo out > "$CHAIN_DIR/state"
+        return 0
+    fi
+    if ndm "ip name-server $cs_ns"; then
+        ndm "system configuration save" || :
+        rm -f "$CHAIN_DIR/fails" "$CHAIN_DIR/oks" "$CHAIN_DIR/reason"
+        echo in > "$CHAIN_DIR/state"; ads_epoch > "$CHAIN_DIR/since"
+        ads_log "DNS_CHAIN_IN|ns=$cs_ns|AdGuard Home back in the DNS chain"
+    fi
+}
+
 reconcile()
 {
     rc_full=$1
@@ -358,6 +446,10 @@ case "$OP" in
         echo "bypass=$BYPASS"
         echo "exclude=$EXCLUDE"
         echo "failopen=$FAILOPEN"
+        echo "chain=$CHAIN"
+        echo "chain_state=$(cat "$CHAIN_DIR/state" 2>/dev/null)"
+        echo "chain_reason=$(cat "$CHAIN_DIR/reason" 2>/dev/null)"
+        echo "chain_since=$(cat "$CHAIN_DIR/since" 2>/dev/null)"
         echo "parked=$([ -s "$PARK" ] && wc -l < "$PARK" | tr -d ' ' || echo 0)"
         if profile_load; then
             PORT=$(agh_port)
@@ -390,7 +482,7 @@ case "$OP" in
         esac
         exit 0 ;;
     set|apply|tick) ;;
-    *) echo "usage: $0 status|set enforce|bypass 0|1|set exclude MACS|apply|tick|hook nat|filter" >&2; exit 64 ;;
+    *) echo "usage: $0 status|set enforce|bypass|chain 0|1|set exclude MACS|apply|tick|hook nat|filter" >&2; exit 64 ;;
 esac
 
 # Fail-open for a redirect into a dead AdGuard Home (the owner's own hook included).
@@ -401,6 +493,12 @@ if [ "$OP" = tick ] && [ "$FAILOPEN" = 1 ]; then
             ads_lock_release "$LOCK"
         fi
     fi
+fi
+
+# AdGuard Home in Keenetic's DNS chain while it answers (CHAIN=1).
+if [ "$OP" = tick ] && [ "$CHAIN" = 1 ] && ads_lock_acquire "$LOCK" 60; then
+    profile_load && chain_sync
+    ads_lock_release "$LOCK"
 fi
 
 # Nothing on and nothing left over: the minute tick costs no process.
@@ -418,6 +516,7 @@ if [ "$OP" = set ]; then
     case "${2:-}:${3:-}" in
         enforce:0|enforce:1) ENFORCE=$3 ;;
         bypass:0|bypass:1) BYPASS=$3 ;;
+        chain:0|chain:1) CHAIN=$3 ;;
         exclude:-) EXCLUDE="" ;;
         exclude:*)
             NEW=""
@@ -429,7 +528,7 @@ if [ "$OP" = set ]; then
         *) echo "DNS_GUARD=FAIL"; echo "ERROR=invalid_setting"; exit 64 ;;
     esac
     # Switching a part on needs an encrypted way out of AdGuard Home (see upstream_state).
-    if [ "${3:-}" = 1 ]; then
+    if [ "${3:-}" = 1 ] && [ "${2:-}" != chain ]; then
         profile_load && [ "$(upstream_state)" = encrypted ] ||
             { echo "DNS_GUARD=FAIL"; echo "ERROR=upstream_not_encrypted"; exit 1; }
     fi
