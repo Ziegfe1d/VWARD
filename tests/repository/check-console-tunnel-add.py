@@ -24,7 +24,7 @@ PersistentKeepalive = 25
 """
 
 # A stateful fake Keenetic CLI: «interface X» opens a block, its settings land in it, «no interface X»
-# removes it.  Flags: .noaddr - the address command is refused; .down-refused - «interface X down» fails.
+# removes it.  Flags: .noaddr - the address command is refused; .noasc - «wireguard asc» is refused; .down-refused - «interface X down» fails.
 FAKE_NDMC = r"""#!/bin/sh
 CFG="@CFG@"
 [ "$1" = -c ] || exit 2
@@ -41,6 +41,7 @@ fi
 [ "$1" = interface ] || { echo ok; exit 0; }
 if [ $# -eq 2 ]; then printf 'interface %s\n!\n' "$2" >> "$CFG"; echo ok; exit 0; fi
 if [ "$3" = ip ] && [ "$4" = address ] && [ -e "$CFG.noaddr" ]; then echo "Network::Interface::Base: error[1]: address conflicts"; exit 0; fi
+if [ "$3" = wireguard ] && [ "$4" = asc ] && [ -e "$CFG.noasc" ]; then echo "Command::Base: error[1]: argument parse error"; exit 0; fi
 if [ "$3" = down ] && [ -e "$CFG.down-refused" ]; then echo "Network::Interface::Base: error[1]: refused"; exit 0; fi
 i=$2; shift 2
 awk -v n="interface $i" -v l="    $*" '{print} $0 == n {print l}' "$CFG" > "$CFG.new"; mv "$CFG.new" "$CFG"
@@ -223,6 +224,25 @@ esac
     if out != "error=engine_replace_unsupported":
         fail(f"a VLESS tunnel is not replaced in place: {out!r}")
     (tmp / "etc/awg/tunnels.tsv").unlink(); (tmp / "etc/vless/tunnels.tsv").unlink()
+
+    # AmneziaWG 2.0 (ranges, S3/S4, I1) the firmware refuses: the half-made interface goes,
+    # the same file goes to VWARD's engine and the tunnel is created there.
+    AWG2 = CONF.replace("MTU = 1280", "MTU = 1280\nJc = 5\nJmin = 10\nJmax = 50\nS1 = 82\nS2 = 43\nS3 = 10\nS4 = 4\n"
+                        "H1 = 100000-199999\nH2 = 200000-299999\nH3 = 300000-399999\nH4 = 400000-499999\n"
+                        "I1 = <r 4><b 0x0102>").replace(PUB, "G" * 42 + "A=").replace("10.8.16.6", "10.8.77.2")
+    put(AWG2)
+    (tmp / "running.cfg.noasc").touch()
+    before = cfg.read_text()
+    (tmp / "engine.log").write_text("")
+    out, r = run("tunnel-conf", "create", str(conf), "awg2-test")
+    (tmp / "running.cfg.noasc").unlink()
+    log = (tmp / "engine.log").read_text().splitlines()
+    if out != "result=changed" or not log or not log[-1].startswith("add awg2-test "):
+        fail(f"a refused AmneziaWG 2.0 file must go to the engine: {out!r} {r.stdout!r} {log}")
+    if cfg.read_text() != before or "info.engine=firmware_refused" not in r.stdout:
+        fail(f"the refused interface must be taken back: {cfg.read_text()!r}")
+    if not (tmp / "audit.log").read_text().count("engine instead"):
+        fail("the switch to the engine is in the audit log")
 
     # Switching off: the default tunnel stays; an ordinary one goes down and is saved.
     out, _ = run("tunnel-state", "down", "Wireguard1")

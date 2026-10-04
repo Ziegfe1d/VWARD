@@ -1,5 +1,6 @@
 #!/bin/sh
-# VWARD VLESS engine: a VLESS server (a vless:// link, or one server of a subscription)
+# VWARD VLESS engine: a VLESS or Trojan server (a vless:// or trojan:// link, or one server
+# of a subscription)
 # as a Keenetic tunnel. Keenetic makes an «OpkgTun» connection with its own TUN adapter
 # (opkgtunN), and Xray (its TUN inbound, since Xray 26.1.23) attaches to that adapter and
 # carries the packets to the server; Keenetic keeps the address and the routes, so lists
@@ -12,7 +13,7 @@
 #
 # vward-vless-engine.sh servers FILE | add DESCRIPTION FILE | remove NAME | restart NAME |
 #                       disable NAME | enable NAME | supervise | stop | status | install
-# FILE: vless:// links, one a line, or the address of a subscription (https://...); a line
+# FILE: vless:// or trojan:// links, one a line, or the address of a subscription (https://...); a line
 # "#server=N" chooses the N-th server (1 by default).
 # Output: "result=..." / "info.key=value" lines, or "error=<code>".
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -98,18 +99,19 @@ op_install() {
     echo "result=changed"
 }
 
-# links FILE OUT: the vless:// links of FILE, or of the subscription it names (base64 or plain).
+# links FILE OUT: the vless:// and trojan:// links of FILE, or of the subscription it names
+# (base64 or plain).
 links() {
     src=$(tr -d '\r' < "$1" | grep -v '^#' | awk 'NF {sub(/^[ \t]+/, ""); sub(/[ \t]+$/, ""); print; exit}')
     case "$src" in
-        vless://*) tr -d '\r' < "$1" | awk '/^vless:\/\// {print $1}' > "$2" ;;
+        vless://*|trojan://*) tr -d '\r' < "$1" | awk '/^(vless|trojan):\/\// {print $1}' > "$2" ;;
         https://*|http://*)
             printf '%s\n' "$src" | grep -Eq '^https?://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+$' || return 2
             "$CURL" -fsSL --connect-timeout 10 --max-time 30 --max-filesize 1048576 -A "VWARD" \
                 -o "$2.raw" "$src" 2>/dev/null || return 3
-            if grep -q 'vless://' "$2.raw"; then tr -d '\r' < "$2.raw"
+            if grep -Eq '(vless|trojan)://' "$2.raw"; then tr -d '\r' < "$2.raw"
             else tr -d '\r\n ' < "$2.raw" | { base64 -d 2>/dev/null || openssl base64 -d -A 2>/dev/null; } | tr -d '\r'; fi |
-                awk '/^vless:\/\// {print $1}' > "$2"
+                awk '/^(vless|trojan):\/\// {print $1}' > "$2"
             rm -f "$2.raw" ;;
         *) return 2 ;;
     esac
@@ -131,7 +133,8 @@ parse() {
             return o
         }
         {
-            s = substr($0, 9); frag = ""; q = ""
+            i = index($0, "://"); if (!i) exit 1
+            print "proto\t" substr($0, 1, i - 1); s = substr($0, i + 3); frag = ""; q = ""
             i = index(s, "#"); if (i) { frag = substr(s, i + 1); s = substr(s, 1, i - 1) }
             i = index(s, "?"); if (i) { q = substr(s, i + 1); s = substr(s, 1, i - 1) }
             sub(/\/$/, "", s)
@@ -148,14 +151,18 @@ parse() {
 # config LINK TUN OUT: the Xray configuration of the link on Keenetic's adapter TUN.
 config() {
     parse "$1" > "$3.kv" || return 2
-    # A UUID, or Xray's short form (up to 30 characters); Entware's jq has no regex.
-    awk -F '\t' '$1 == "id" {print substr($0, 4); exit}' "$3.kv" |
-        grep -Eq '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[A-Za-z0-9_-]{1,30})$' || { rm -f "$3.kv"; return 2; }
+    # VLESS: a UUID, or Xray's short form (up to 30 characters); Trojan: a password without
+    # spaces or control characters. Entware's jq has no regex.
+    if grep -qx 'proto	trojan' "$3.kv"; then cf_id='[^[:space:][:cntrl:]]{1,128}'
+    else cf_id='([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[A-Za-z0-9_-]{1,30})'; fi
+    awk -F '\t' '$1 == "id" {print substr($0, 4); exit}' "$3.kv" | grep -Eq "^$cf_id\$" || { rm -f "$3.kv"; return 2; }
     "$JQ" -Rn --arg tun "$2" '
         [inputs | split("\t") | {key: .[0], value: (.[1:] | join("\t"))}] | from_entries as $l |
         def q($k): $l["q." + $k] // "";
         (q("type") | if . == "" then "tcp" elif . == "raw" then "tcp" else . end) as $net |
-        (q("security") | if . == "" then "none" else . end) as $sec |
+        ($l.proto == "trojan") as $trojan |
+        # A Trojan link without «security» means TLS (its scheme has no plain mode).
+        (q("security") | if . == "" then (if $trojan then "tls" else "none" end) else . end) as $sec |
         # xHTTP «extra» (padding obfuscation, xmux, upload method...): the server expects
         # its requests shaped so; without it the connection is cut (Viva 2026-10-04).
         (q("extra") | if . == "" then null else (try fromjson catch null) end) as $extra |
@@ -164,9 +171,10 @@ config() {
         then error("unsupported") else . end |
         {log: {loglevel: "warning"},
          inbounds: [{tag: "tun", port: 0, protocol: "tun", settings: {name: $tun, mtu: 1400}}],
-         outbounds: [{tag: "vless", protocol: "vless",
-           settings: {vnext: [{address: $l.host, port: ($l.port | tonumber),
-             users: [{id: $l.id, encryption: (q("encryption") | if . == "" then "none" else . end)} + (if q("flow") != "" then {flow: q("flow")} else {} end)]}]},
+         outbounds: [{tag: "vless", protocol: (if $trojan then "trojan" else "vless" end),
+           settings: (if $trojan then {servers: [{address: $l.host, port: ($l.port | tonumber), password: $l.id}]}
+             else {vnext: [{address: $l.host, port: ($l.port | tonumber),
+               users: [{id: $l.id, encryption: (q("encryption") | if . == "" then "none" else . end)} + (if q("flow") != "" then {flow: q("flow")} else {} end)]}]} end),
            streamSettings: ({network: $net, security: $sec}
              + (if $sec == "reality" then {realitySettings: {serverName: q("sni"), fingerprint: (q("fp") | if . == "" then "chrome" else . end),
                    publicKey: q("pbk"), shortId: q("sid"), spiderX: q("spx")}}

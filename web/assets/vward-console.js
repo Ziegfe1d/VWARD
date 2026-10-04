@@ -2367,7 +2367,7 @@ function tunnelConfSheet(mode, name) {
     '<div class="segmented" role="group" aria-label="Как ввести"><button type="button" data-act="tc-mode" data-m="file" aria-pressed="true">Из файла</button><button type="button" data-act="tc-mode" data-m="manual" aria-pressed="false">Вручную</button></div>' +
     '<div class="stack-form tc-file">' +
     '<label class="file-pick">' + ico('save') + '<span>Выбрать файл .conf или .vpn</span><input type="file" name="file" accept=".conf,.vpn,text/plain" data-conf-file></label>' +
-    '<textarea class="input mono" name="conf" rows="7" spellcheck="false" autocomplete="off" aria-label="Текст конфигурации" placeholder="или вставьте текст [Interface] PrivateKey = …, ключ Amnezia vpn://…' + (mode === 'create' ? ', ссылку vless://… или адрес подписки https://…' : '') + '"></textarea></div>' +
+    '<textarea class="input mono" name="conf" rows="7" spellcheck="false" autocomplete="off" aria-label="Текст конфигурации" placeholder="или вставьте текст [Interface] PrivateKey = …, ключ Amnezia vpn://…' + (mode === 'create' ? ', ссылку vless://… или trojan://…, или адрес подписки https://…' : '') + '"></textarea></div>' +
     '<div class="stack-form tc-manual" hidden>' +
     TC_FIELDS.map(f => '<label class="field"><span class="form-label">' + esc(f[1]) + '</span>' + (f[0] === 'awg' ?
       '<textarea class="input mono" name="tc-awg" rows="3" spellcheck="false" autocomplete="off" placeholder="Jc = 4&#10;Jmin = 40&#10;…"></textarea>' :
@@ -3351,7 +3351,7 @@ async function onSubmit(e, f) {
     const descEl = form.querySelector('[name=description]');
     if (!manual && /^\s*vpn:\/\//i.test(text)) { const k = await amneziaKey(text); if (k.error) { tcMsg(k.error); return; } text = k.conf; if (descEl && !descEl.value.trim() && k.name) descEl.value = k.name; }
     // VLESS: links or a subscription; the server is chosen from the list the router reads.
-    if (!manual && /^\s*(vless|https?):\/\//i.test(text)) {
+    if (!manual && /^\s*(vless|trojan|https?):\/\//i.test(text)) {
       if (mode !== 'create') { tcMsg('VLESS-туннель не заменяется: добавьте новый и удалите старый'); return; }
       if (form.dataset.checked !== '1') {
         let x;

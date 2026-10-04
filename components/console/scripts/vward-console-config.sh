@@ -1292,7 +1292,9 @@ apply_plan() {
     ndm "interface $1 ip address $3" || die conf_rejected_address
     m=$(conf_get mtu "$2"); [ -z "$m" ] || ndm "interface $1 ip mtu $m" || die conf_rejected_mtu
     a=$(conf_get asc "$2")
-    if [ -n "$a" ]; then ndm "interface $1 wireguard asc $a" || die conf_rejected_awg
+    # AP_AWG_SOFT=1: a refused AmneziaWG line returns 3 (the caller hands the file to
+    # VWARD's engine) instead of ending the job.
+    if [ -n "$a" ]; then ndm "interface $1 wireguard asc $a" || { [ "${AP_AWG_SOFT:-0}" = 1 ] && return 3; die conf_rejected_awg; }
     else ndm "no interface $1 wireguard asc" || :; fi
     p=$(conf_get peer "$2")
     ndm "interface $1 wireguard peer $p" || die conf_rejected_peer
@@ -1345,6 +1347,26 @@ store_conf() {
 
 # step NAME: where a tunnel job stands; the Panel's progress window reads these lines.
 step() { printf 'step=%s\n' "$1"; }
+
+# create_on_engine: the new tunnel goes to VWARD's AmneziaWG engine on a Keenetic «OpkgTun»
+# connection (a format the firmware has no command for, or one it refused).
+create_on_engine() {
+    [ -x "$AWG_ENGINE" ] || die engine_unavailable
+    snapshot
+    ! address_taken - "$(conf_get address "$PLAN" | awk '{print $1}')" || die tunnel_address_taken 64
+    engine_add "$tc_arg" "$tc_file" "$tc_keep"
+    case "$(printf '%s\n' "$en_out" | tail -n 1)" in
+        result=changed) ;;
+        error=*) en_err=$(printf '%s\n' "$en_out" | sed -n 's/^error=//p' | tail -n 1)
+                 case "$en_err" in ''|*[!a-z0-9_]*) en_err=engine_failed ;; esac
+                 die "$en_err" ;;
+        *) die engine_failed ;;
+    esac
+    rm -f "$VWARD_DEVICE_MAP_CACHE"
+    printf '%s\n' "$en_out" | grep -E '^info\.(name|handshake)=' | head -n 2
+    tunnel_summary "$PLAN"
+    done_ok "tunnel-conf create engine $(printf '%s\n' "$en_out" | sed -n 's/^info\.name=//p') endpoint=$(conf_get endpoint "$PLAN")" changed
+}
 
 # engine_add DESCRIPTION FILE [keep]: the engine's add; its steps reach the job's output on fd 3.
 # «keep»: the owner chose to keep the tunnel although the server did not answer.
@@ -1434,8 +1456,8 @@ op_tunnel_conf() {
     case "$tc_file" in /*) ;; *) die invalid_value 64 ;; esac
     [ -f "$tc_file" ] && [ ! -L "$tc_file" ] || die conf_empty 64
     CONF_FILE=$tc_file
-    # vless:// links or a subscription's address: VWARD's VLESS engine.
-    if tr -d '\r' < "$tc_file" | grep -v '^#' | awk 'NF {print $1; exit}' | grep -Eq '^(vless|https?)://'; then
+    # vless:// or trojan:// links or a subscription's address: VWARD's VLESS engine.
+    if tr -d '\r' < "$tc_file" | grep -v '^#' | awk 'NF {print $1; exit}' | grep -Eq '^(vless|trojan|https?)://'; then
         op_tunnel_vless "$tc_mode" "$tc_file" "$tc_arg" "$tc_keep"
     fi
     PLAN=$(mktemp /tmp/vward-console-plan.XXXXXX 2>/dev/null) || die temporary_file_unavailable
@@ -1524,25 +1546,7 @@ op_tunnel_conf() {
             case "$tc_arg" in @/*) tc_desc_file=${tc_arg#@}; tc_arg=$(cat "$tc_desc_file" 2>/dev/null); rm -f "$tc_desc_file" ;; esac
             case "$tc_arg" in *'"'*|*"$(printf '\134')"*) die invalid_description 64 ;; esac
             [ -n "$tc_arg" ] && [ "${#tc_arg}" -le 64 ] || die invalid_description 64
-            if [ "$(conf_get engine "$PLAN")" = 1 ]; then
-                # The firmware cannot run this format: VWARD's engine holds the tunnel
-                # on a Keenetic «OpkgTun» connection.
-                [ -x "$AWG_ENGINE" ] || die engine_unavailable
-                snapshot
-                ! address_taken - "$(conf_get address "$PLAN" | awk '{print $1}')" || die tunnel_address_taken 64
-                engine_add "$tc_arg" "$tc_file" "$tc_keep"
-                case "$(printf '%s\n' "$en_out" | tail -n 1)" in
-                    result=changed) ;;
-                    error=*) en_err=$(printf '%s\n' "$en_out" | sed -n 's/^error=//p' | tail -n 1)
-                             case "$en_err" in ''|*[!a-z0-9_]*) en_err=engine_failed ;; esac
-                             die "$en_err" ;;
-                    *) die engine_failed ;;
-                esac
-                rm -f "$VWARD_DEVICE_MAP_CACHE"
-                printf '%s\n' "$en_out" | grep -E '^info\.(name|handshake)=' | head -n 2
-                tunnel_summary "$PLAN"
-                done_ok "tunnel-conf create engine $(printf '%s\n' "$en_out" | sed -n 's/^info\.name=//p') endpoint=$(conf_get endpoint "$PLAN")" changed
-            fi
+            [ "$(conf_get engine "$PLAN")" != 1 ] || create_on_engine
             change_lock
             JOURNAL=$(mktemp /tmp/vward-console-tunnel.XXXXXX 2>/dev/null) || die temporary_file_unavailable
             TXN=1
@@ -1555,7 +1559,19 @@ op_tunnel_conf() {
             ndm "interface $NEW_IF description \"$tc_arg\"" || die invalid_description
             ndm "interface $NEW_IF security-level public" || die router_rejected
             ndm "interface $NEW_IF ip tcp adjust-mss pmtu" || :
-            apply_plan "$NEW_IF" "$PLAN" "$(conf_get address "$PLAN")"
+            AP_AWG_SOFT=1
+            if ! apply_plan "$NEW_IF" "$PLAN" "$(conf_get address "$PLAN")"; then
+                # The firmware refused this AmneziaWG format (2.0 ranges, S3/S4, I1-I5 on an
+                # older KeeneticOS): its interface is taken back and VWARD's engine holds it.
+                TXN=0
+                tunnel_undo || die rollback_incomplete
+                [ -x "$AWG_ENGINE" ] || die conf_rejected_awg
+                audit "tunnel-conf create $NEW_IF: AmneziaWG refused by the firmware, engine instead"
+                printf 'info.engine=firmware_refused\n'
+                rm -rf "${CHANGE_LOCK:?}"; LOCKED=0
+                create_on_engine
+            fi
+            AP_AWG_SOFT=0
             step handshake
             if [ "$tc_keep" = keep ]; then
                 handshake_ok "$NEW_IF" || printf 'info.handshake=none\n'

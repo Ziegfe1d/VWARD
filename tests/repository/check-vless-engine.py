@@ -77,6 +77,13 @@ esac
     (tmp / "sub").unlink()
     if servers("https://sub.example/s/gone\n") != ["error=subscription_unavailable"]:
         fail("an unreachable subscription")
+    mixed = servers(REALITY + "\ntrojan://pw@t.example:8443?security=tls&type=tcp#Trojan\n")
+    if mixed[:2] != ["info.server.1=Германия|203.0.113.5|443|reality|tcp", "info.server.2=Trojan|t.example|8443|tls|tcp"]:
+        fail(f"trojan links are servers too: {mixed}")
+    (tmp / "sub").write_text(base64.b64encode(("trojan://pw@t.example:443?type=ws#T\n" + WS + "\n").encode()).decode())
+    if [x.split("|")[0] for x in servers("https://sub.example/s/mixed\n")[:2]] != ["info.server.1=T", "info.server.2=WS"]:
+        fail("a subscription with trojan and vless")
+    (tmp / "sub").unlink()
     for bad in ("hello\n", "vmess://abc\n", "https://sub example/x\n"):
         if servers(bad) != ["error=vless_syntax"]:
             fail(f"{bad!r} must be refused")
@@ -124,6 +131,16 @@ esac
     gm = config(f"vless://{UUID}@g.example:443?type=grpc&serviceName=gun&mode=multi&authority=a.example&security=tls#G")
     if gm["outbounds"][0]["streamSettings"]["grpcSettings"] != {"serviceName": "gun", "multiMode": True, "authority": "a.example"}:
         fail(f"grpc multi / authority: {gm['outbounds'][0]['streamSettings']['grpcSettings']}")
+    # Trojan (a subscription mixes it with VLESS): a password instead of the id, TLS by default.
+    tj = config("trojan://p%40ss-w0rd@t.example:443?type=ws&path=%2Fws&host=t.example&sni=t.example#France-1h")
+    if tj is None or tj["outbounds"][0]["protocol"] != "trojan" or \
+            tj["outbounds"][0]["settings"] != {"servers": [{"address": "t.example", "port": 443, "password": "p@ss-w0rd"}]}:
+        fail(f"trojan server: {tj and tj['outbounds'][0]}")
+    if tj["outbounds"][0]["streamSettings"] != {"network": "ws", "security": "tls", "tlsSettings": {"serverName": "t.example"},
+                                                "wsSettings": {"path": "/ws", "host": "t.example"}}:
+        fail(f"trojan ws + tls: {tj['outbounds'][0]['streamSettings']}")
+    if config("trojan://two%20words@t.example:443#T") is not None:
+        fail("a trojan password with a space is refused")
     for bad in (KCP, f"vless://{UUID}@203.0.113.9:0?security=none#P", "vless://x y@203.0.113.9:443#I", f"vless://{UUID}@203.0.113.9:443?security=xtls#S"):
         if config(bad) is not None:
             fail(f"{bad} must be refused")
