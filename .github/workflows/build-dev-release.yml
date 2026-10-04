@@ -12,6 +12,15 @@ on:
         required: false
         default: 0.1.9-beta
         type: string
+      priority:
+        description: How soon routers apply it on their own (CRITICAL at once)
+        required: false
+        default: ROUTINE
+        type: choice
+        options:
+          - ROUTINE
+          - IMPORTANT
+          - CRITICAL
   push:
     branches:
       - dev
@@ -78,6 +87,7 @@ jobs:
         env:
           INPUT_SEQUENCE: ${{ inputs.sequence }}
           INPUT_MIN_VWARD: ${{ inputs.min_vward }}
+          VWARD_PRIORITY: ${{ inputs.priority || 'ROUTINE' }}
         run: |
           set -euo pipefail
           [ -n "$INPUT_SEQUENCE" ] || { echo "::error::sequence is required for a signed candidate"; exit 2; }

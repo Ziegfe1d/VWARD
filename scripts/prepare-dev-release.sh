@@ -26,6 +26,9 @@ fi
 case "$SEQUENCE" in ''|*[!0-9]*) fail "sequence must be a positive integer" ;; esac
 [ "$SEQUENCE" -gt 0 ] || fail "sequence must be a positive integer"
 case "$MIN_VWARD" in ''|*[!0-9A-Za-z.-]*) fail "invalid MIN_VWARD" ;; esac
+# How soon routers apply it on their own: CRITICAL at once, the others in the safe window.
+PRIORITY=${VWARD_PRIORITY:-ROUTINE}
+case "$PRIORITY" in ROUTINE|IMPORTANT|CRITICAL) ;; *) fail "invalid priority: $PRIORITY" ;; esac
 [ -n "$KEY" ] && [ -r "$KEY" ] || fail "VWARD_SIGNING_KEY_FILE is required and must be readable"
 [ -r "$PUBKEY" ] || fail "trusted public key is missing"
 [ ! -e "$OUT" ] || fail "output path already exists: $OUT"
@@ -49,8 +52,8 @@ URL="https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/packages/v
 jq -n --arg version "$VERSION" --arg update_id "vward-$VERSION" --argjson sequence "$SEQUENCE" \
     --arg published_at "$PUBLISHED_AT" --arg url "$URL" --arg sha256 "$PACKAGE_SHA" \
     --argjson size "$PACKAGE_SIZE" --argjson unpacked_size "$UNPACKED_SIZE" \
-    --arg min_vward "$MIN_VWARD" --argjson components "$COMPONENTS" \
-    '{schema:1,update_id:$update_id,sequence:$sequence,version:$version,channel:"dev",priority:"ROUTINE",published_at:$published_at,min_updater_version:"1.2.0",package:{url:$url,sha256:$sha256,size:$size,unpacked_size:$unpacked_size},compatibility:{min_vward:$min_vward,max_vward:$version},affected_components:$components,affected_services:[],health_profile:"full",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$OUT/signed.json"
+    --arg min_vward "$MIN_VWARD" --argjson components "$COMPONENTS" --arg priority "$PRIORITY" \
+    '{schema:1,update_id:$update_id,sequence:$sequence,version:$version,channel:"dev",priority:$priority,published_at:$published_at,min_updater_version:"1.2.0",package:{url:$url,sha256:$sha256,size:$size,unpacked_size:$unpacked_size},compatibility:{min_vward:$min_vward,max_vward:$version},affected_components:$components,affected_services:[],health_profile:"full",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$OUT/signed.json"
 
 # sign_manifest SIGNED OUTPUT: the canonical signed part, signed and verified.
 sign_manifest() {
@@ -93,13 +96,13 @@ for source in components/update-engine/vward-update-bootstrap.sh components/upda
     printf '%s\t%s\n' "${source##*/}" "$(file_row "$source" "$mode")" >> "$V2/engine.tsv"
 done
 jq -n --arg version "$VERSION" --arg update_id "vward-$VERSION" --argjson sequence "$SEQUENCE" \
-    --arg published_at "$PUBLISHED_AT" --arg base "$V2_BASE" --arg min_vward "$MIN_VWARD" --arg engine "$ENGINE_VERSION" \
+    --arg published_at "$PUBLISHED_AT" --arg base "$V2_BASE" --arg min_vward "$MIN_VWARD" --arg engine "$ENGINE_VERSION" --arg priority "$PRIORITY" \
     --rawfile files "$V2/files.tsv" --rawfile engine_files "$V2/engine.tsv" \
     '($files | split("\n") | map(select(length > 0) | split("\t")
         | {target: .[0], sha256: .[1], size: (.[2] | tonumber), mode: .[3], component: .[4]})) as $f
      | ($engine_files | split("\n") | map(select(length > 0) | split("\t")
         | {name: .[0], sha256: .[1], size: (.[2] | tonumber), mode: .[3]})) as $e
-     | {schema:2,update_id:$update_id,sequence:$sequence,version:$version,channel:"dev",priority:"ROUTINE",
+     | {schema:2,update_id:$update_id,sequence:$sequence,version:$version,channel:"dev",priority:$priority,
         published_at:$published_at,min_updater_version:"2.0.0",files_base:$base,files:$f,
         engine:{version:$engine,files:$e},compatibility:{min_vward:$min_vward,max_vward:$version},
         affected_components:($f | map(.component) | unique),affected_services:[],health_profile:"full",
