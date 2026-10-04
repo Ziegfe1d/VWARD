@@ -1572,7 +1572,8 @@ if [ "$ACTION" = "diagnostics" ]; then
     OPT_STATUS="$(diag_status df -Pk /opt)"
     JQ_STATUS="$(diag_status command -v "$JQ")"
     CURL_STATUS="$(diag_status command -v "$CURL")"
-    TCPDUMP_STATUS="$(diag_status command -v tcpdump)"
+    # The route engine's DNS capture: VWARD's own program, or a tcpdump that starts.
+    TCPDUMP_STATUS="$(diag_status sh -c '[ -x "${VWARD_DNSCAP_BIN:-/opt/share/vward/dnscap/vward-dnscap}" ] || tcpdump --version')"
     LIGHTTPD_STATUS="$(diag_status command -v lighttpd)"
     CROND_STATUS=FAIL
     SUPERVISOR_STATUS=FAIL
@@ -1695,7 +1696,7 @@ if [ "$ACTION" = "diagnostics" ]; then
         {id:"opt",component:"runtime",label:"Флешка Entware (/opt)",status:$opt,detail:("свободно "+(if $opt_free >= 1024 then (($opt_free/1024|floor)|tostring)+" МБ" else ($opt_free|tostring)+" КБ" end))},
         {id:"jq",component:"runtime",label:"Разбор данных (jq)",status:$jq,detail:"нужен всем разделам Панели"},
         {id:"curl",component:"runtime",label:"Сетевые запросы (curl)",status:$curl,detail:"проверки сайтов, обновления, AdGuard Home"},
-        {id:"tcpdump",component:"route-engine",label:"Наблюдение DNS (tcpdump)",status:$tcpdump,detail:"автоподбор узнаёт новые домены"},
+        {id:"tcpdump",component:"route-engine",label:"Наблюдение DNS (vward-dnscap или tcpdump)",status:$tcpdump,detail:"автоподбор узнаёт новые домены"},
         {id:"lighttpd",component:"console",label:"Веб-сервер Панели (lighttpd)",status:$lighttpd,detail:"отдаёт страницы Панели VWARD"},
         {id:"crond",component:"runtime",label:"Планировщик заданий (crond)",status:$crond,detail:(if $wan_rc == "" then "задания ещё не запускались" else "код последнего задания интернета: "+$wan_rc end)},
         {id:"supervisor",component:"runtime",label:"Сторож служб VWARD (supervisor)",status:$supervisor,detail:"перезапускает планировщик, если он остановился"},
@@ -2752,6 +2753,7 @@ set -- $(ps w 2>/dev/null | awk -v subnet="$VWARD_LAN_SUBNET" -v address="$VWARD
     /[A]dGuardHome/ { agh = 1 }
     $6 == "/opt/bin/vward-route-engine.sh" || ($5 ~ /^[{]/ && $7 == "/opt/bin/vward-route-engine.sh") { live++ }
     $5 == "tcpdump" && index($0, "src net " subnet) && index($0, "dst host " address) { tcp++ }
+    ($5 ~ /\/vward-dnscap$/ || $6 ~ /\/vward-dnscap$/) && index($0, " " subnet " ") { tcp++ }
     END { print (crond == "" ? "-" : crond), sup + 0, agh + 0, live + 0, tcp + 0 }')
 CROND_PID=${1:--}
 [ "$CROND_PID" != - ] || CROND_PID=""

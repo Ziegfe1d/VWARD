@@ -83,6 +83,7 @@ python3 tests/repository/check-boot-watch.py || fail "boot watch: the Panel and 
 python3 tests/repository/check-agh-start-gate.py || fail "AdGuard Home start gate"
 python3 tests/repository/check-api-broken-jq.py || fail "API with a broken jq"
 python3 tests/repository/check-sentinel.py || fail "real-time watcher program"
+python3 tests/repository/check-dnscap.py || fail "DNS capture program (vward-dnscap)"
 python3 tests/repository/check-sentinel-runtime.py || fail "real-time watcher in the runtime"
 python3 tests/repository/check-stability-page.py || fail "Panel: Система, Стабильность"
 python3 tests/repository/check-resource-yield.py || fail "VWARD gives way to the router"

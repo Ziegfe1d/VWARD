@@ -89,6 +89,57 @@ vward_valid_ifname "$CAP_LAN" 2>/dev/null || CAP_LAN=any
 CAP_IF=$CAP_LAN
 CAP_FAILS=0
 
+# What catches them: vward-dnscap, VWARD's own static program (no libpcap: Entware's
+# libpcap 1.10.6 made tcpdump die at every start on MIPS), else tcpdump.  The choices are
+# tried in turn after three quick deaths: dnscap and tcpdump on the LAN device, then «any».
+DNSCAP=${VWARD_DNSCAP_BIN:-/opt/share/vward/dnscap/vward-dnscap}
+SENTINEL_CTL=${VWARD_SENTINEL_CTL:-/opt/bin/vward-sentinel.sh}
+DNSCAP_TRY=${VWARD_DNSCAP_TRY:-/tmp/vward-dnscap-install.try}
+CAP_N=0
+CAP_TOOL=
+CAP_LAST=
+CAP_HAD_DNSCAP=0
+
+cap_choices()
+{
+    for CC_IF in "$CAP_LAN" any; do
+        [ ! -x "$DNSCAP" ] || echo "dnscap:$CC_IF"
+        ! command -v tcpdump >/dev/null 2>&1 || echo "tcpdump:$CC_IF"
+        [ "$CAP_LAN" != any ] || break
+    done
+}
+
+# Sets CAP_TOOL and CAP_IF from choice CAP_N (wrapped); CAP_TOOL is empty with none.
+cap_pick()
+{
+    # shellcheck disable=SC2046
+    set -- $(cap_choices)
+    CAP_TOOL=
+    CAP_HAD_DNSCAP=0
+    [ ! -x "$DNSCAP" ] || CAP_HAD_DNSCAP=1
+    [ "$#" -gt 0 ] || return 1
+    CAP_N=$((CAP_N % $#))
+    shift "$CAP_N"
+    # Another program or device (vward-dnscap arrived): its own count of quick deaths.
+    [ -z "$CAP_LAST" ] || [ "$CAP_LAST" = "$1" ] || CAP_FAILS=0
+    CAP_LAST=$1
+    CAP_TOOL=${1%%:*}
+    CAP_IF=${1#*:}
+}
+
+# A capture that keeps dying without vward-dnscap: fetch it in the background (pinned
+# SHA-256, the sentinel branch), at most every 10 minutes.
+cap_fetch_dnscap()
+{
+    [ ! -x "$DNSCAP" ] && [ -x "$SENTINEL_CTL" ] || return 0
+    CF_NOW=$(date +%s)
+    CF_LAST=$(cat "$DNSCAP_TRY" 2>/dev/null)
+    case "$CF_LAST" in ''|*[!0-9]*) CF_LAST=0 ;; esac
+    [ $((CF_NOW - CF_LAST)) -ge 600 ] || return 0
+    echo "$CF_NOW" > "$DNSCAP_TRY" 2>/dev/null
+    "$SENTINEL_CTL" install-dnscap </dev/null >/dev/null 2>&1 &
+}
+
 mkdir -p "$STATE_DIR" "$VOLATILE_DIR"
 
 
@@ -1555,9 +1606,18 @@ while :; do
 
     CAPTURE_FILTER="src net $VWARD_LAN_SUBNET and not src host $VWARD_DNS_SERVER and dst host $VWARD_DNS_SERVER and (udp dst port 53 or tcp dst port 53)"
     read -r CAP_UP _ < "${VWARD_UPTIME_FILE:-/proc/uptime}"; CAP_T0=${CAP_UP%.*}
-    tcpdump -ni "$CAP_IF" -l -vv \
-        "$CAPTURE_FILTER" \
-        > "$RAW" 2>/dev/null &
+    cap_pick
+    case "$CAP_TOOL" in
+        dnscap)
+            "$DNSCAP" "$CAP_IF" "$VWARD_LAN_SUBNET" "$VWARD_DNS_SERVER" > "$RAW" 2>/dev/null & ;;
+        tcpdump)
+            tcpdump -ni "$CAP_IF" -l -vv \
+                "$CAPTURE_FILTER" \
+                > "$RAW" 2>/dev/null & ;;
+        *)
+            # Nothing to capture with: the reader still needs its writer to end.
+            : > "$RAW" & ;;
+    esac
 
     TCP_PID=$!
 
@@ -1620,8 +1680,9 @@ while :; do
     read -r CAP_UP _ < "${VWARD_UPTIME_FILE:-/proc/uptime}"
     if [ $((${CAP_UP%.*} - CAP_T0)) -lt 10 ]; then
         CAP_FAILS=$((CAP_FAILS + 1))
-        if [ "$CAP_FAILS" -ge 3 ] && [ "$CAP_LAN" != any ]; then
-            [ "$CAP_IF" = any ] && CAP_IF=$CAP_LAN || CAP_IF=any
+        cap_fetch_dnscap
+        if [ "$CAP_FAILS" -ge 3 ]; then
+            CAP_N=$((CAP_N + 1))
             CAP_FAILS=0
         fi
     else
@@ -1630,8 +1691,10 @@ while :; do
     CAP_PAUSE=2
     [ "$CAP_FAILS" -gt 0 ] && CAP_PAUSE=$((2 << CAP_FAILS))
     [ "$CAP_PAUSE" -le 60 ] || CAP_PAUSE=60
+    # vward-dnscap just arrived: it is the first choice, at once.
+    [ "$CAP_HAD_DNSCAP" = 1 ] || [ ! -x "$DNSCAP" ] || { CAP_N=0; CAP_FAILS=0; CAP_PAUSE=1; }
 
-    echo "$(date '+%Y-%m-%d %H:%M:%S')|TCPDUMP_RESTART|if=$CAP_IF|quick=$CAP_FAILS" \
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|TCPDUMP_RESTART|if=$CAP_IF|quick=$CAP_FAILS|tool=${CAP_TOOL:-none}" \
         >> "$EVENT_LOG"
 
     sleep "$CAP_PAUSE"

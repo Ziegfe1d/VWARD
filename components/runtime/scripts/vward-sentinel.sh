@@ -4,6 +4,8 @@
 #                               branch, checked against the SHA-256 pinned below
 #   vward-sentinel.sh start     configure (what to watch) and start it, when installed
 #   vward-sentinel.sh stop | status | config
+#   vward-sentinel.sh install-dnscap   only vward-dnscap (tools/vward-dnscap), the route
+#                               engine's DNS capture without libpcap; «install» does it too
 # Without the program everything works as before: the cron supervisor and the jobs.
 
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -20,6 +22,8 @@ LOG=${VWARD_SENTINEL_LOG:-/opt/var/log/vward-sentinel.log}
 CURL=${VWARD_CURL_BIN:-curl}
 URL=${VWARD_SENTINEL_URL:-https://raw.githubusercontent.com/Ziegfe1d/VWARD/sentinel}
 VERSION=1
+DNSCAP_SHARE=${VWARD_DNSCAP_SHARE:-/opt/share/vward/dnscap}
+DNSCAP_VERSION=1
 VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 
 # SHA-256 of the program (tools/vward-sentinel/SHA256SUMS, a reproducible build).
@@ -29,6 +33,17 @@ sentinel_sum() {
         mips) echo af9b91c0e167d14c30c22af902ae7db241c03a760f78c5abc0cdca90441a2e39 ;;
         arm64) echo 6bcbe7cf4cc3c7f1a5d31c2462eaf1338d2521f176e9bf1079cf2237f1928433 ;;
         arm) echo c1c0d77472e8c60296618a30b726f24a76f51f95b1db0381069b5ace7674d252 ;;
+        *) return 1 ;;
+    esac
+}
+
+# SHA-256 of vward-dnscap (tools/vward-dnscap/SHA256SUMS).
+dnscap_sum() {
+    case "$1" in
+        mipsle) echo a8265f331d0eca2821d78c9584cdab072969ce534f7a298ebc5902b75cbbc567 ;;
+        mips) echo f2e41e6c65477b740f5b6597468d3a98080d14f00ac5be56eb59fb05dfb190b4 ;;
+        arm64) echo 11f8a14d2bc24a37d836def8a46c3f6266cafb187e1ea93651797088dbc1073b ;;
+        arm) echo e3f15fe14961c57cee8fd21052728c1e876e40606581b5c4d46e39892c8e0ad1 ;;
         *) return 1 ;;
     esac
 }
@@ -85,6 +100,29 @@ op_install() {
     echo "result=changed"
 }
 
+# The route engine picks vward-dnscap up at its next capture start (tcpdump stays the
+# second choice).  A broken download never replaces a working program.
+op_install_dnscap() {
+    D="$DNSCAP_SHARE/vward-dnscap"
+    [ ! -x "$D" ] || [ "$(cat "$DNSCAP_SHARE/version" 2>/dev/null)" != "$DNSCAP_VERSION" ] || { echo "result=unchanged"; return 0; }
+    a=$(sentinel_arch) || die arch_unsupported
+    want=$(dnscap_sum "$a") || die arch_unsupported
+    mkdir -p "$DNSCAP_SHARE" || die write_failed
+    TMPC=$(mktemp -d "$DNSCAP_SHARE/.install.XXXXXX" 2>/dev/null) || die write_failed
+    trap 'rm -rf "${TMPC:?}"' EXIT
+    "$CURL" -fsSL --connect-timeout 15 --max-time 120 --max-filesize 1048576 \
+        -o "$TMPC/p.gz" "$URL/vward-dnscap-linux-$a.gz" 2>/dev/null || die download_failed
+    gunzip -c "$TMPC/p.gz" > "$TMPC/vward-dnscap" 2>/dev/null || die package_damaged
+    [ "$(sha256_of "$TMPC/vward-dnscap")" = "$want" ] || die checksum_mismatch
+    chmod 0755 "$TMPC/vward-dnscap" || die write_failed
+    "$TMPC/vward-dnscap" --version >/dev/null 2>&1 || die binary_not_runnable
+    mv -f "$TMPC/vward-dnscap" "$D" || die write_failed
+    echo "$DNSCAP_VERSION" > "$DNSCAP_SHARE/version"
+    rm -rf "${TMPC:?}"
+    log "dnscap installed $DNSCAP_VERSION arch=$a"
+    echo "result=changed"
+}
+
 # What to watch: VWARD's long-running programs with their memory limits, the provider's
 # and the tunnels' interfaces, the router's DNS.
 op_config() {
@@ -134,7 +172,9 @@ op_stop() {
 }
 
 case "${1:-}" in
-    install) op_install ;;
+    # The capture program first: the engine needs it more than the watcher.
+    install) ( op_install_dnscap ) >/dev/null 2>&1; op_install ;;
+    install-dnscap) op_install_dnscap ;;
     config) op_config ;;
     start) op_start ;;
     stop) op_stop ;;
@@ -143,5 +183,5 @@ case "${1:-}" in
     reload) op_config >/dev/null; running && kill -HUP "$P" 2>/dev/null; echo "result=changed" ;;
     status)
         if running; then echo "status=running"; echo "pid=$P"; elif [ -x "$BIN" ]; then echo "status=stopped"; else echo "status=not_installed"; fi ;;
-    *) echo "usage: vward-sentinel.sh install|start|stop|restart|reload|status|config" >&2; exit 64 ;;
+    *) echo "usage: vward-sentinel.sh install|install-dnscap|start|stop|restart|reload|status|config" >&2; exit 64 ;;
 esac

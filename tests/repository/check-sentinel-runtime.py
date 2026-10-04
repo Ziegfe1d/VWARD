@@ -35,6 +35,13 @@ for line in (ROOT / "tools/vward-sentinel/SHA256SUMS").read_text().splitlines():
     if f"        {arch}) echo {digest} ;;" not in ctl:
         fail(f"vward-sentinel.sh must pin {name} as in SHA256SUMS")
 
+# vward-dnscap, the route engine's DNS capture, is pinned the same way.
+for line in (ROOT / "tools/vward-dnscap/SHA256SUMS").read_text().splitlines():
+    digest, name = line.split()
+    arch = name.rsplit("-", 1)[1]
+    if f"        {arch}) echo {digest} ;;" not in ctl[ctl.index("dnscap_sum()"):]:
+        fail(f"vward-sentinel.sh must pin {name} as in SHA256SUMS")
+
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     bin_ = tmp / "bin"; bin_.mkdir()
@@ -60,6 +67,11 @@ with tempfile.TemporaryDirectory() as tmp:
     (tmp / "served.gz").write_bytes(gzip.compress(b"#!/bin/sh\necho x\n"))
     if sh("install") != "error=checksum_mismatch" or (share / "vward-sentinel").exists():
         fail("a program with another checksum must be refused")
+    env["VWARD_DNSCAP_SHARE"] = str(tmp / "dnscap")
+    if sh("install-dnscap") != "error=checksum_mismatch" or (tmp / "dnscap/vward-dnscap").exists():
+        fail("a capture program with another checksum must be refused")
+    if [p.name for p in (tmp / "dnscap").iterdir()]:
+        fail("a refused download leaves nothing behind")
     if sh("status") != "status=not_installed" or sh("start") != "result=not_installed":
         fail("without the program nothing starts")
 

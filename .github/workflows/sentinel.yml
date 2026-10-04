@@ -7,7 +7,7 @@ name: Real-time watcher program (vward-sentinel)
 on:
   push:
     branches: [dev]
-    paths: ["tools/vward-sentinel/**", "tools/vward-ed25519/**", "tests/repository/check-sentinel.py", ".github/workflows/sentinel.yml"]
+    paths: ["tools/vward-sentinel/**", "tools/vward-ed25519/**", "tools/vward-dnscap/**", "tests/repository/check-dnscap.py", "tests/repository/check-sentinel.py", ".github/workflows/sentinel.yml"]
   workflow_dispatch:
 
 permissions:
@@ -28,6 +28,10 @@ jobs:
         run: |
           sh vward/tools/vward-sentinel/build.sh "$PWD/out" --check
           sh vward/tools/vward-ed25519/build.sh "$PWD/out" --check
+          mv out/SHA256SUMS out/SHA256SUMS.sentinel.tmp
+          sh vward/tools/vward-dnscap/build.sh "$PWD/out" --check
+          mv out/SHA256SUMS out/SHA256SUMS.dnscap
+          mv out/SHA256SUMS.sentinel.tmp out/SHA256SUMS
       - name: The watcher's tests on this machine and on the router builds under qemu
         run: |
           sudo apt-get update -q >/dev/null && sudo apt-get install -y -q qemu-user-static iproute2 >/dev/null
@@ -37,6 +41,15 @@ jobs:
             echo "== ${pair%%:*}"
             sudo SENTINEL_RUN="qemu-${pair#*:}-static $GITHUB_WORKSPACE/out/vward-sentinel-linux-${pair%%:*}" \
               python3 tests/repository/check-sentinel.py
+          done
+      - name: The DNS capture on this machine and on the router builds under qemu (live on lo)
+        run: |
+          cd vward
+          sudo python3 tests/repository/check-dnscap.py
+          for pair in mipsle:mipsel mips:mips arm64:aarch64 arm:arm; do
+            echo "== ${pair%%:*}"
+            sudo DNSCAP_RUN="qemu-${pair#*:}-static $GITHUB_WORKSPACE/out/vward-dnscap-linux-${pair%%:*}" \
+              python3 tests/repository/check-dnscap.py
           done
       - name: The Ed25519 check on the router builds under qemu (the real signed feed)
         run: |
@@ -52,7 +65,7 @@ jobs:
       - name: Publish to the sentinel branch
         run: |
           cd out
-          for f in vward-sentinel-linux-* vward-ed25519-linux-*; do gzip -n -9 -c "$f" > "$f.gz"; done
+          for f in vward-sentinel-linux-* vward-ed25519-linux-* vward-dnscap-linux-*; do gzip -n -9 -c "$f" > "$f.gz"; done
           cd ../vward
           git config user.name "vward-bot"
           git config user.email "vward-bot@users.noreply.github.com"
@@ -63,8 +76,8 @@ jobs:
             git rm -rfq . >/dev/null 2>&1 || true
           fi
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp ../out/*.gz ../out/SHA256SUMS ../out/SHA256SUMS.ed25519 .
-          printf 'vward-sentinel: tools/vward-sentinel in the VWARD repository (C, musl, static).\nvward-ed25519: tools/vward-ed25519 (Zig, static), the signature check for routers whose openssl cannot.\n' > README
+          cp ../out/*.gz ../out/SHA256SUMS ../out/SHA256SUMS.ed25519 ../out/SHA256SUMS.dnscap .
+          printf 'vward-sentinel: tools/vward-sentinel in the VWARD repository (C, musl, static).\nvward-ed25519: tools/vward-ed25519 (Zig, static), the signature check for routers whose openssl cannot.\nvward-dnscap: tools/vward-dnscap (C, musl, static), the route engine'"'"'s DNS capture without libpcap.\n' > README
           git add -A
           if git diff --cached --quiet; then echo "program unchanged"; exit 0; fi
           git commit -qm "vward-sentinel from ${GITHUB_SHA::12}"

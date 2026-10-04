@@ -18,6 +18,8 @@ fi
 
 PIDFILE="/opt/var/run/vward/route-engine.pid"
 SCRIPT="/opt/bin/vward-route-engine.sh"
+DNSCAP=${VWARD_DNSCAP_BIN:-/opt/share/vward/dnscap/vward-dnscap}
+SENTINEL_CTL=${VWARD_SENTINEL_CTL:-/opt/bin/vward-sentinel.sh}
 LOG="/opt/var/log/vward-route-engine.log"
 EVENT_LOG="/opt/var/log/vward-route-engine-events.log"
 UNHEALTHY=""
@@ -99,6 +101,12 @@ adaptive_tcpdump_pids()
         $5=="tcpdump" &&
         index($0,"src net " subnet) &&
         index($0,"dst host " address) {
+            print $1
+            next
+        }
+        # vward-dnscap DEVICE SUBNET DNS, the engine'"'"'s own capture program.
+        ($5 ~ /\/vward-dnscap$/ || $6 ~ /\/vward-dnscap$/) &&
+        index($0," " subnet " ") {
             print $1
         }
     '
@@ -238,6 +246,12 @@ start_service()
     clean_service
 
     mkdir -p "${PIDFILE%/*}" || return 1
+
+    # tcpdump that dies at start (a broken libpcap) and no vward-dnscap yet: fetch it
+    # first, or the startup check below cannot pass.
+    if [ ! -x "$DNSCAP" ] && [ -x "$SENTINEL_CTL" ] && ! tcpdump --version >/dev/null 2>&1; then
+        "$SENTINEL_CTL" install-dnscap </dev/null >/dev/null 2>&1
+    fi
 
     "$SCRIPT" >> "$LOG" 2>&1 &
     PID=$!

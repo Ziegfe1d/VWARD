@@ -145,3 +145,18 @@ failed». Диагностика по шагам: структура PASS, ка�
 `/opt/var/lib/vward/updater/openssl` и проверяет ею, если системный openssl не смог; проверка
 здоровья обновлений Entware включает подпись Ed25519, так что сломавшее её обновление
 откатывается. Тесты: `check-updater-wan-fallback.py`, `check-ext-update.py`.
+
+## 11. Исправление 0.2.0-rc.2.fix.7 (критическое)
+
+После установки fix.6: «Runtime resume failed». `S91vward-route-engine start`: «Adaptive Live
+failed startup health check after 12s»; в журнале 616 `TCPDUMP_RESTART`. Диагностика:
+`tcpdump --version` - **Bus error** (код 138), в ядре SIGSEGV в `libpcap.so.1.10.6`, на любом
+интерфейсе и с любым фильтром. Захват DNS-запросов теперь делает `tools/vward-dnscap` (C,
+musl, статическая сборка zig, без libpcap): пакетный сокет на LAN-устройстве, фильтр BPF в ядре
+(IPv4, адрес DNS роутера, порт 53, UDP и TCP), вывод в виде строк tcpdump (`q A? имя.`), которые
+читает тот же awk движка. Порядок выбора: vward-dnscap и tcpdump на LAN-устройстве, затем на
+«any», следующий после трёх быстрых смертей. Программа ставится `vward-sentinel.sh
+install-dnscap` (ветка `sentinel`, отпечаток закреплён): из `S91` перед запуском, если tcpdump
+не стартует; из движка в фоне, если захват умирает; раз в час из housekeeping. Тесты:
+`check-dnscap.py` (разбор пакетов, живой захват на lo; в CI - сборки MIPS/ARM под qemu),
+`check-route-engine-capture.py`.
