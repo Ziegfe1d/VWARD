@@ -1006,11 +1006,16 @@ const RENDER = {
 
   vpn() {
     const wg = st().wg || {}, list = wg.interfaces || [], managed = prof().tunnel_interface || '';
-    const row = t => { const up = isTrue(t.connected); return '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.description || t.name) + '</b><small>' + (t.name === managed ? '<span class="st ok">по умолчанию</span>' + (tunSub(t) ? ' · ' : '') : '') + esc(tunSub(t)) + '</small></div><span class="pill ' + (up && !tunOff(t) ? 'ok' : 'warn') + '">' + (tunOff(t) ? 'Выключен' : up ? 'В сети' : 'Не в сети') + '</span>' + ico('chevron', 'chev') + '</li>'; };
+    // The switch: on and off right in the list (off asks first; the default tunnel is not
+    // switched off - its lists would go direct).
+    const tsw = t => '<span class="row-acts">' + sw('data-tunsw="' + esc(t.name) + '"', !tunOff(t), (tunOff(t) ? 'Включить ' : 'Выключить ') + (t.description || t.name),
+      t.name === managed || !cfgOk()) + '</span>';
+    const row = t => { const up = isTrue(t.connected); return '<li class="row link tun" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.description || t.name) + '</b><small>' + (t.name === managed ? '<span class="st ok">по умолчанию</span>' + (tunSub(t) ? ' · ' : '') : '') + esc(tunSub(t)) + '</small></div><span class="pill ' + (up && !tunOff(t) ? 'ok' : 'warn') + '">' + (tunOff(t) ? 'Выключен' : up ? 'В сети' : 'Не в сети') + '</span>' + tsw(t) + ico('chevron', 'chev') + '</li>'; };
     return loadError(['status']) + awgLostPanel() + nativePanel() +
       panel('Туннели', (list.length ? '<ul class="rows">' + list.map(row).join('') + '</ul>' : empty('Туннели WireGuard не найдены')) +
+        (confirm && confirm.id === 'tunsw-off' ? confirmBox('tunsw-off', 'Выключить ' + tunLabel(confirm.name) + '? Трафик через него остановится, списки и подсети этого туннеля будут недоступны, пока он выключен. Настройка сохранится.', 'Выключить', true) : '') +
         '<div class="panel-actions">' + btn('tunnel-create', 'plus', 'Добавить туннель', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnels'),
-        { desc: 'Нажмите на туннель, чтобы открыть его.' }) +
+        { desc: 'Нажмите на туннель, чтобы открыть его; переключатель включает и выключает его.' }) +
       panel('Подсети через VPN', kv([
         ['IP-категории', S.route && S.route.ip && S.route.ip.categories != null ? fmtInt(S.route.ip.active_count) + ' активны из ' + fmtInt(S.route.ip.categories) : '—', '', 'd-ipcats'],
         ['Обновление IP-категорий', ipSyncStamp(((S.route && S.route.ip) || {}).last_sync), '', 'a-policy']
@@ -2861,6 +2866,7 @@ async function runAction(resultId, action, fields, okMsg) {
 }
 const CONFIRMED = {
   'tunnel-down': () => tunnelState('down', current.slice(2)),
+  'tunsw-off': c => tunnelState('down', c.name),
   'site-block': c => siteDo('block', c.dom),
   'ext-upgrade': c => { const p = ((S.ext && S.ext.packages) || []).find(x => x.name === c.pkg); extOp('upgrade', c.pkg, p && p.critical ? 'EXT_UPGRADE_CRITICAL' : 'EXT_UPGRADE'); },
   'fw-channel': c => cfgSet({ op: 'firmware', target: 'channel', value: c.value, confirm: 'FIRMWARE_CHANNEL_TEST' }, 'Канал прошивки: ' + fwChannel(c.value), ['ext']),
@@ -3124,6 +3130,8 @@ function copyText(text) {
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-go],[data-act],[data-tab],[data-card-toggle],[data-log],[data-move],[data-card-move],[data-view],[data-ads-remove],[data-wifi-bind],[data-cfg-op],[data-ads-rule],[data-qfilter],[data-ads-srcdel],[data-agh-filter-rm],[data-backup-restore],[data-files-root],[data-files-dir],[data-files-open],[data-files-up]');
   if (!t || t.disabled) return;
+  // A switch inside a row that opens a page: it switches, the page stays.
+  if (t.dataset.go && e.target.closest('.switch')) return;
   if (t.dataset.cardToggle) { const id = t.dataset.cardToggle; hiddenCards = hiddenCards.includes(id) ? hiddenCards.filter(x => x !== id) : hiddenCards.concat(id); store.set('vward-card-hidden', hiddenCards); render(); return; }
   if (t.dataset.cardMove) { const [id, dir] = t.dataset.cardMove.split(':'), i = cardOrder.indexOf(id), j = i + (dir === 'up' ? -1 : 1); if (j >= 0 && j < cardOrder.length) { [cardOrder[i], cardOrder[j]] = [cardOrder[j], cardOrder[i]]; store.set('vward-card-order', cardOrder); render(); } return; }
   if (t.dataset.move) { const [id, dir] = t.dataset.move.split(':'), i = tabIds.indexOf(id), j = i + (dir === 'up' ? -1 : 1); if (j >= 0 && j < tabIds.length) { [tabIds[i], tabIds[j]] = [tabIds[j], tabIds[i]]; store.set('vward-tabs', tabIds); render(); } return; }
@@ -3266,6 +3274,12 @@ document.addEventListener('change', e => {
     return;
   }
   if (t.dataset.listWatch) { cfgSet({ op: 'domain-list-watch', target: t.dataset.listWatch, value: t.checked ? '1' : '0' }, t.checked ? 'Слежение включено' : 'Слежение выключено', ['lists']); return; }
+  if (t.dataset.tunsw) {
+    const n = t.dataset.tunsw;
+    if (!t.checked) { t.checked = true; confirm = { id: 'tunsw-off', name: n }; render(); }
+    else { t.disabled = true; tunnelState('up', n); }
+    return;
+  }
   if (t.hasAttribute('data-cfg-wg')) { if (!t.checked) { t.checked = true; confirm = { id: 'wg-off' }; render(); } else cfgSet({ op: 'wan-guard', value: '1' }, 'Восстановление интернета включено'); return; }
   if (t.hasAttribute('data-cfg-tg')) { if (!t.checked) { t.checked = true; confirm = { id: 'tg-off' }; render(); } else cfgSet({ op: 'tunnel-guard', value: '1' }, 'Защита VPN включена', ['status']); return; }
   if (t.dataset.cfgWifi) {

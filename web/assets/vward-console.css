@@ -106,6 +106,8 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .rows .row .btn{flex:none}
 .row.link{cursor:pointer}
 .row.link .chev{width:18px;height:18px;color:var(--faint)}
+/* A tunnel: name, state, switch and arrow stay on one line, the name gives way. */
+.row.tun{flex-wrap:nowrap}.row.tun .row-main{flex:1 1 0}.row.tun .row-acts{margin-left:0}
 @media (hover:hover){.row.link:hover b{color:var(--accent)}}
 @keyframes flash{0%,40%{background:var(--accent-soft)}100%{background:transparent}}
 .tabbar.flash{animation:flash 1.6s ease}
