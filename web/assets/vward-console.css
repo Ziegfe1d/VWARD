@@ -110,7 +110,7 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 @keyframes flash{0%,40%{background:var(--accent-soft)}100%{background:transparent}}
 .tabbar.flash{animation:flash 1.6s ease}
 .panel-actions{display:flex;flex-wrap:wrap;gap:8px;padding:8px 16px 16px}
-.panel-actions.even>.btn{flex:1 1 140px}
+.panel-actions.even>.btn{flex:1 1 120px;min-width:0;padding-inline:10px}
 .input.compact{width:auto;min-height:36px;padding:6px 10px}
 @media (max-width:359px){.topbar{gap:2px;padding-inline:8px}.icon-btn{width:36px;height:36px}}
 /* A phone bar: five labels of up to nine letters fit whole. */

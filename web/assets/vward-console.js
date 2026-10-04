@@ -664,6 +664,7 @@ function page(id) {
   if (p) return p;
   if (DETAILS[id]) return Object.assign({ id: id }, DETAILS[id]);
   if (id.startsWith('t-')) return { id: id, title: tunLabel(id.slice(2)), parent: 'vpn' };
+  if (id.startsWith('tn-')) return { id: id, title: 'Подсети', parent: 't-' + id.slice(3) };
   if (id.startsWith('l-')) { const l = ((S.lists && S.lists.lists) || []).find(x => x.name === id.slice(2)); return { id: id, title: l ? l.description || l.name : 'Список', parent: 'lists' }; }
   if (id.startsWith('ip-')) return { id: id, title: 'IP-адреса', parent: 'l-' + id.slice(3) };
   if (id.startsWith('s-')) { const x = ((S.services && S.services.services) || []).find(v => v.id === id.slice(2)); return { id: id, title: x ? x.title : id.slice(2), parent: 'd-services' }; }
@@ -679,11 +680,11 @@ const SLUG = { overview: '', wan: 'network', vpn: 'vpn', routes: 'domains', list
   'd-adrecent': 'recent', 'd-adspub': 'publish', 'd-adprobe': 'probe', 'd-adsettings': 'settings' };
 function slugOf(id) {
   if (Object.prototype.hasOwnProperty.call(SLUG, id)) return SLUG[id];
-  const m = /^(deps|ip|[duactlsw])-(.+)$/.exec(id);
+  const m = /^(deps|ip|tn|[duactlsw])-(.+)$/.exec(id);
   const enc = v => encodeURIComponent(v).replace(/%3A/gi, ':');
   if (!m) return enc(id);
   const k = m[1], v = m[2];
-  return k === 'a' ? 'events-' + v : k === 'deps' ? 'deps' : k === 'ip' ? 'ip' : k === 't' ? 'tunnel/' + enc(v) : enc(v);
+  return k === 'a' ? 'events-' + v : k === 'deps' ? 'deps' : k === 'ip' ? 'ip' : k === 'tn' ? 'subnets' : k === 't' ? 'tunnel/' + enc(v) : enc(v);
 }
 function pathOf(id) {
   const seg = []; let x = id, n = 0;
@@ -698,6 +699,7 @@ function idOf(path) {
   const under = (base, rest) => p.startsWith(base + '/') ? p.slice(base.length + 1).split('/').map(decodeURIComponent) : null;
   let r = under(pathOf('vpn'));
   if (r && r.length === 2 && r[0] === 'tunnel') return 't-' + r[1];
+  if (r && r.length === 3 && r[0] === 'tunnel' && r[2] === 'subnets') return 'tn-' + r[1];
   r = under(pathOf('lists'));
   if (r && r.length === 1) return 'l-' + r[0];
   if (r && r.length === 2 && r[1] === 'ip') return 'ip-' + r[0];
@@ -2407,14 +2409,29 @@ function tunnelConfSheet(mode, name) {
 }
 function tunnelTrafficPanel(name) {
   const L = S.lists || {}, lists = (L.lists || []).filter(l => l.route === name), nets = (L.subnets || {})[name] || [];
-  const netRows = nets.map(n => '<li class="row"><div class="row-main"><b class="mono">' + esc(n) + '</b></div><span class="row-acts">' + rowBtn('tsubnet', 'remove', n, 'close', 'Убрать ' + n + ' из туннеля') + '</span></li>').join('');
   return panel('Что идёт через туннель', (!S.lists ? empty('Загрузка…') :
-      // Lists are changed in one place, «Доменные списки»: here only how many go this way.
-      kv([['Доменные списки', lists.length ? String(lists.length) : 'нет', '', 'lists']]) +
-      '<p class="panel-desc">Подсети: ' + (nets.length ? fmtInt(nets.length) : 'нет') + '</p>' + (nets.length ? '<ul class="rows">' + netRows + '</ul>' : '') +
-      inputBar({ form: 'tunnel-subnet', attrs: ' data-name="' + esc(name) + '"', label: 'Добавить подсеть', name: 'subnet', mono: true, placeholder: '149.154.160.0/20', aria: 'Подсеть', off: !cfgOk(), icon: 'plus', btn: 'Добавить' })) + resultBox('tunnel-traffic'),
+      // Lists are changed in one place, «Доменные списки»; subnets on their own page, not a sheet here.
+      kv([['Доменные списки', lists.length ? String(lists.length) : 'нет', '', 'lists'],
+          ['Подсети', nets.length ? fmtInt(nets.length) : 'нет', '', 'tn-' + name]])) + resultBox('tunnel-traffic'),
     { desc: 'Что идёт через этот туннель.' });
 }
+// tunnelNetsPage NAME: the tunnel's subnets - adding, a search that hides the rows that do
+// not match (the page is not redrawn, the field keeps the cursor), removal.
+function tunnelNetsPage(name) {
+  const nets = ((S.lists || {}).subnets || {})[name] || [];
+  const rows = nets.map(n => '<li class="row" data-net="' + esc(n) + '"><div class="row-main"><b class="mono">' + esc(n) + '</b></div><span class="row-acts">' + rowBtn('tsubnet', 'remove', n, 'close', 'Убрать ' + n + ' из туннеля') + '</span></li>').join('');
+  return panel('Подсети', !S.lists ? empty('Загрузка…') :
+      inputBar({ form: 'tunnel-subnet', attrs: ' data-name="' + esc(name) + '"', label: 'Добавить подсеть', name: 'subnet', mono: true, placeholder: '149.154.160.0/20', aria: 'Подсеть', off: !cfgOk(), icon: 'plus', btn: 'Добавить' }) +
+      (nets.length > 10 ? '<div class="stack-form"><input class="input mono" type="search" data-net-filter="1" placeholder="Найти подсеть" aria-label="Найти подсеть" autocomplete="off"></div>' : '') +
+      (nets.length ? '<ul class="rows" id="netRows">' + rows + '</ul>' : empty('Подсетей нет')) +
+      resultBox('tunnel-traffic'),
+    { desc: fmtInt(nets.length) + ' подсетей идут через «' + tunLabel(name) + '».' });
+}
+document.addEventListener('input', e => {
+  if (!e.target.dataset || !e.target.dataset.netFilter) return;
+  const q = e.target.value.trim();
+  document.querySelectorAll('#netRows [data-net]').forEach(li => { li.hidden = !!q && !li.dataset.net.includes(q); });
+});
 function tunnelManagePanel(name, managed) {
   // Only a WireGuard (AmneziaWG) tunnel takes a .conf; the others are set up in Keenetic.
   // VWARD's engines (AmneziaWG, VLESS) are Keenetic «OpkgTun» connections: checked first.
@@ -2502,7 +2519,7 @@ function tunnelProbePanel(name) {
   ]) + '<p class="panel-desc">Проверено в ' + esc(r.at) + '</p>';
   const t = ((st().wg && st().wg.interfaces) || []).find(x => x.name === name) || {}, canOff = name !== prof().tunnel_interface && !tunOff(t);
   return panel('Проверка туннеля', body + (confirmBox('tunnel-down', 'Выключить ' + tunLabel(name) + '? Трафик через него остановится, списки и подсети этого туннеля будут недоступны, пока он выключен. Настройка сохранится.', 'Выключить', true) ||
-    '<div class="panel-actions">' + btn('tunnel-probe', 'check', 'Проверить сейчас', 'primary', ' data-name="' + esc(name) + '"' + (r && r.busy ? ' disabled' : '')) +
+    '<div class="panel-actions even">' + btn('tunnel-probe', 'check', 'Проверить', 'primary', ' data-name="' + esc(name) + '"' + (r && r.busy ? ' disabled' : '')) +
     btn('tunnel-restart', 'refresh', 'Перезапустить', '', ' data-name="' + esc(name) + '"' + (cfgOk() ? '' : ' disabled')) +
     (canOff ? btn('ask', 'close', 'Выключить', 'danger', ' data-confirm="tunnel-down"' + (cfgOk() ? '' : ' disabled')) : '') + '</div>'),
     { desc: 'Адрес и страна выхода, пинг. Только по кнопке.' });
@@ -2692,7 +2709,7 @@ function render() {
   back.classList.toggle('detail', !!p.parent);
   back.hidden = current === 'overview';
   back.setAttribute('aria-label', p.parent ? 'Назад: ' + page(p.parent).title : 'Назад к обзору');
-  const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('deps-') ? depsPage(comp(current.slice(5))) : current.startsWith('l-') ? listPage(current.slice(2)) : current.startsWith('ip-') ? addrPage(current.slice(3)) : current.startsWith('s-') ? servicePage(current.slice(2)) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
+  const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('deps-') ? depsPage(comp(current.slice(5))) : current.startsWith('l-') ? listPage(current.slice(2)) : current.startsWith('ip-') ? addrPage(current.slice(3)) : current.startsWith('s-') ? servicePage(current.slice(2)) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('tn-') ? tunnelNetsPage(current.slice(3)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
   patchContent(html, rendered !== current);
   rendered = current;
   // A chosen chip scrolled out of its row is brought back into view (the row only, not the page).
@@ -2724,6 +2741,7 @@ async function refreshPage() {
   if (id === 'logs') { loadLog(logTab); return; }
   if (id.startsWith('a-')) loadActivity(id.slice(2));
   if (id.startsWith('t-')) keys.push('status', 'lists', 'awg', 'ext', 'tq');
+  if (id.startsWith('tn-')) keys.push('status', 'lists');
   if (id.startsWith('l-')) keys.push('listd');
   if (id.startsWith('ip-')) keys.push('laddr');
   if (id.startsWith('s-')) keys.push('services', 'svcd', 'lists', 'status', 'config');
@@ -3121,7 +3139,7 @@ document.addEventListener('click', e => {
   if (t.dataset.backupRestore) { confirm = { id: 'backup-restore', name: t.dataset.backupRestore }; render(); return; }
   if (t.dataset.aghFilterRm) { confirm = { id: 'agh-filter-remove', url: t.dataset.aghFilterRm }; render(); return; }
   if (t.dataset.listDom) { const v = t.dataset.dom, how = t.dataset.listDom; t.disabled = true; cfgSet({ op: 'list-domain', action: how, target: current.slice(2), value: v }, how === 'remove' ? v + ' убран из списка' : 'Исключение ' + v + ' убрано', ['listd', 'lists']); return; }
-  if (t.dataset.cfgOp === 'tsubnet') { t.disabled = true; tunnelSubnet(current.slice(2), 'remove', t.dataset.cfgTarget); return; }
+  if (t.dataset.cfgOp === 'tsubnet') { t.disabled = true; tunnelSubnet(current.slice(current.startsWith('tn-') ? 3 : 2), 'remove', t.dataset.cfgTarget); return; }
   if (t.dataset.cfgOp) { const d = t.dataset.cfgTarget, msg = { 'route-domain': d + ' убран из VPN', 'force-vpn': t.dataset.cfgAction === 'add' ? d + ' всегда идёт через VPN' : d + ' убран из списка', adaptive: t.dataset.cfgAction === 'pin' ? d + ' закреплён в моих доменах' : d + ' идёт напрямую' }[t.dataset.cfgOp]; t.disabled = true; cfgSet({ op: t.dataset.cfgOp, action: t.dataset.cfgAction, target: d }, msg, ['route']); return; }
   if (t.dataset.wifiBind) { if (t.getAttribute('aria-checked') === 'true') return; confirm = { id: 'wifi-bind', op: t.dataset.wifiBind }; render(); return; }
   if (t.dataset.tab) {
