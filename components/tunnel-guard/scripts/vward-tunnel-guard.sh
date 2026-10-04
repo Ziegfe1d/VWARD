@@ -45,6 +45,19 @@ LISTS_FALLBACK="$DIR/lists-fallback"
 ADAPTIVE_GROUP=AdaptiveAuto
 LW=""
 
+# engine_kick NAME: a tunnel of VWARD's own engines (Xray, AmneziaWG) does not carry anything
+# after Keenetic switched its interface off and on (seen on Viva 2026-10-04 with Xray); its
+# program starts afresh on the adapter. Other tunnels: nothing.
+engine_kick()
+{
+    for ek in "${VWARD_VLESS_ETC:-/opt/etc/vward/vless-engine}|${VWARD_VLESS_ENGINE_BIN:-/opt/bin/vward-vless-engine.sh}" \
+              "${VWARD_AWG_ETC:-/opt/etc/vward/awg-engine}|${VWARD_AWG_ENGINE_BIN:-/opt/bin/vward-awg-engine.sh}"; do
+        ek_bin=${ek#*|}
+        [ -x "$ek_bin" ] && awk -F '\t' -v n="$1" '$2 == n {f = 1} END {exit !f}' "${ek%%|*}/tunnels.tsv" 2>/dev/null || continue
+        "$ek_bin" restart "$1" </dev/null >/dev/null 2>&1 || :
+    done
+}
+
 mkdir -p "$DIR"
 
 if ! mkdir "$LOCK" 2>/dev/null; then
@@ -331,6 +344,7 @@ if [ -f "$DISABLE_FILE" ]; then
     if [ "$FAILOPEN_ACTIVE" -eq 1 ]; then
         if "${VWARD_NDMC:-ndmc}" -c "interface $VWARD_TUNNEL_INTERFACE up" >/dev/null 2>&1; then
             RESTORED=1
+            engine_kick "$VWARD_TUNNEL_INTERFACE"
             sleep 4
         fi
     fi
@@ -537,6 +551,7 @@ else
                         if "${VWARD_NDMC:-ndmc}" -c "interface $VWARD_TUNNEL_INTERFACE up" \
                            >/dev/null 2>&1; then
 
+                            engine_kick "$VWARD_TUNNEL_INTERFACE"
                             sleep 4
 
                             if wg_ok; then

@@ -259,6 +259,22 @@ with tempfile.TemporaryDirectory() as t:
         fail("the restarted program is on another adapter")
     run("supervise", expect="result=unchanged")
 
+    # Keenetic switched the interface off and on (the guard does): the program starts afresh.
+    sysfs = t / "sys"; (sysfs / "opkgtun1").mkdir(parents=True)
+    env["VWARD_SYSFS_NET"] = str(sysfs)
+    pid = (t / "run/t0.pid").read_text()
+    (sysfs / "opkgtun1/flags").write_text("0x1090\n")
+    run("supervise", expect="result=unchanged")
+    if not (t / "run/t0.down").exists() or (t / "run/t0.pid").read_text() != pid:
+        fail("an adapter switched off: a mark, the program stays")
+    (sysfs / "opkgtun1/flags").write_text("0x1091\n")
+    run("supervise", expect="result=changed")
+    if (t / "run/t0.down").exists() or (t / "run/t0.pid").read_text() == pid:
+        fail("the adapter on again: the program must start afresh")
+    time.sleep(0.5)
+    run("supervise", expect="result=unchanged")
+    del env["VWARD_SYSFS_NET"]
+
     # Traffic comes from the program's own state; «Выключить» in the Panel: the program stops,
     # supervise leaves it alone (the flag outlives a reboot), status says so; «Включить» back.
     (t / "run/t0.state").write_text(f"handshake={int(time.time()) - 5}\nrx=123456\ntx=7890\npid=1\nupdated=1\n")

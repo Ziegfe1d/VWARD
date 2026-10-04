@@ -140,6 +140,32 @@ esac
     st = engine("status")
     if not any(l.startswith("tunnel=OpkgTun1\t1\t") and l.endswith("\t203.0.113.5:443\tГермания\t0") for l in st):
         fail(f"status: {st}")
+    # Keenetic switched the interface off and on (the guard does): Xray stays on an adapter
+    # that carries nothing, so supervise starts it afresh. Off seen -> a mark; on again ->
+    # a new Xray. A switched-on adapter through which no page opens -> a new Xray too.
+    sysfs = tmp / "sys"; (sysfs / "opkgtun1").mkdir(parents=True)
+    env["VWARD_SYSFS_NET"] = str(sysfs)
+    pid0 = (run_ / "v0.pid").read_text()
+    (sysfs / "opkgtun1/flags").write_text("0x1090\n")
+    if engine("supervise") != ["result=unchanged"] or not (run_ / "v0.down").exists() or (run_ / "v0.pid").read_text() != pid0:
+        fail("an adapter switched off: a mark, the program stays")
+    (sysfs / "opkgtun1/flags").write_text("0x1091\n")
+    if engine("supervise") != ["result=changed"] or (run_ / "v0.down").exists() or (run_ / "v0.pid").read_text() == pid0:
+        fail("the adapter on again: Xray must start afresh")
+    pid1 = (run_ / "v0.pid").read_text()
+    if engine("supervise") != ["result=unchanged"] or (run_ / "v0.pid").read_text() != pid1:
+        fail("a working tunnel must be left alone")
+    (tmp / "up.opkgtun1").unlink()
+    if engine("supervise") != ["result=changed"] or (run_ / "v0.pid").read_text() == pid1:
+        fail("no page through a switched-on adapter: Xray must start afresh")
+    (tmp / "up.opkgtun1").write_text("")
+    shutil.rmtree(sysfs / "opkgtun1")
+    pid2 = (run_ / "v0.pid").read_text()
+    if engine("supervise") != ["result=unchanged"] or (run_ / "v0.pid").read_text() != pid2:
+        fail("no adapter to look at: nothing to do")
+    if "restarted OpkgTun1 on its adapter" not in (tmp / "engine.log").read_text():
+        fail("the restart on the adapter must be logged")
+    del env["VWARD_SYSFS_NET"]
     # A server that never answers: nothing stays.
     (tmp / "rc").write_text("interface OpkgTun0\n!\ninterface OpkgTun1\n!\n")
     (tmp / "ndmc.log").write_text("")
@@ -181,4 +207,7 @@ for need in ("'#server=' + num", "vlessOf(", "name=\"vless-server\""):
         fail(f"the Panel lacks {need}")
 if "vward-vless-engine.sh supervise" not in (ROOT / "components/tunnel-guard/scripts/vward-tunnel-health.sh").read_text():
     fail("a stopped Xray is not started again")
+guard = (ROOT / "components/tunnel-guard/scripts/vward-tunnel-guard.sh").read_text()
+if guard.count('engine_kick "$VWARD_TUNNEL_INTERFACE"') != 2 or '"$ek_bin" restart "$1"' not in guard:
+    fail("the guard must start an engine tunnel's program afresh after it switched the interface on")
 print("VLESS_ENGINE=PASS")

@@ -246,6 +246,7 @@ pid_of() {
 start_one() {
     mkdir -p "$ENGINE_RUN" || return 1
     [ -z "$(pid_of "$1")" ] || return 0
+    rm -f "$ENGINE_RUN/v$1.down"
     (
         # Two threads, as the tunnel engine: the router keeps the rest.
         GOMAXPROCS=${VWARD_VLESS_THREADS:-2} GOGC=50 GODEBUG=madvdontneed=1
@@ -336,14 +337,36 @@ op_remove() {
     echo "result=changed"
 }
 
+# link_up ADAPTER: 0 when the adapter is switched on, 1 when off, 2 when there is no such
+# adapter (nothing to say).
+link_up() {
+    f=$(cat "${VWARD_SYSFS_NET:-/sys/class/net}/$1/flags" 2>/dev/null) || return 2
+    [ -n "$f" ] || return 2
+    [ $((f & 1)) = 1 ]
+}
+
+# A stopped program starts again. Keenetic switching the interface off and on again (the
+# guard does when the server is silent) leaves Xray on an adapter that no longer carries
+# anything (seen on Viva 2026-10-04: no page opened until Xray restarted): after an «off»
+# seen here, or when no page opens through a switched-on adapter, Xray starts afresh.
 op_supervise() {
     [ -s "$TUNNELS" ] && [ -x "$BIN" ] || { echo "result=unchanged"; return 0; }
     started=0
     while IFS="$(printf '\t')" read -r n name server desc; do
         case "$name" in OpkgTun[0-9]) ;; *) continue ;; esac
         [ ! -e "$ENGINE_ETC/v$n.off" ] || continue
-        [ -n "$(pid_of "$n")" ] && continue
-        start_one "$n" && started=$((started + 1)) && log "restarted $name"
+        if [ -z "$(pid_of "$n")" ]; then
+            start_one "$n" && started=$((started + 1)) && log "restarted $name"
+            continue
+        fi
+        link_up "$(adapter_of "$name")"
+        case $? in
+            1) : > "$ENGINE_RUN/v$n.down"; continue ;;
+            2) continue ;;
+        esac
+        [ -e "$ENGINE_RUN/v$n.down" ] || ! connected "$name" </dev/null || continue
+        stop_one "$n"
+        start_one "$n" && started=$((started + 1)) && log "restarted $name on its adapter"
     done < "$TUNNELS"
     [ "$started" = 0 ] && echo "result=unchanged" || echo "result=changed"
 }

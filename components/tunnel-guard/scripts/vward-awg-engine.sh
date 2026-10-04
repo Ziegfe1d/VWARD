@@ -155,6 +155,7 @@ start_one() {
     # start_one SLOT NAME: the tunnel's program in the background on Keenetic's adapter.
     mkdir -p "$ENGINE_RUN" || return 1
     [ -z "$(pid_of "$1")" ] || return 0
+    rm -f "$ENGINE_RUN/t$1.down"
     # Measured on Viva (MT7621, 4 threads): two threads move as much as four (13-22 Mbit/s
     # either way, the channel varies more) at 27% of the CPU instead of 37-48%, and leave the
     # other two to the router. A memory limit (24 MiB, GOGC=50) cut the speed to 3 Mbit/s.
@@ -299,14 +300,35 @@ op_remove() {
 
 # supervise: every minute (from the tunnel health check): a tunnel whose program
 # stopped is started again.  Nothing to do - nothing runs.
+# link_up ADAPTER: 0 when the adapter is switched on, 1 when off, 2 when there is no such
+# adapter (nothing to say).
+link_up() {
+    f=$(cat "${VWARD_SYSFS_NET:-/sys/class/net}/$1/flags" 2>/dev/null) || return 2
+    [ -n "$f" ] || return 2
+    [ $((f & 1)) = 1 ]
+}
+
+# A stopped program starts again; after Keenetic switched the interface off and on (the
+# guard does), the program starts afresh on the adapter (Xray stopped carrying anything
+# after it on Viva 2026-10-04; the same restart for this engine costs a handshake).
 op_supervise() {
     [ -s "$TUNNELS" ] && [ -x "$BIN" ] || { echo "result=unchanged"; return 0; }
     started=0
     while IFS="$(printf '\t')" read -r n name port desc; do
         case "$name" in OpkgTun[0-9]) ;; *) continue ;; esac
         [ ! -e "$ENGINE_ETC/t$n.off" ] || continue
-        [ -n "$(pid_of "$n")" ] && continue
-        start_one "$n" "$name" && started=$((started + 1)) && log "restarted $name"
+        if [ -z "$(pid_of "$n")" ]; then
+            start_one "$n" "$name" && started=$((started + 1)) && log "restarted $name"
+            continue
+        fi
+        link_up "$(adapter_of "$name")"
+        case $? in
+            1) : > "$ENGINE_RUN/t$n.down"; continue ;;
+            2) continue ;;
+        esac
+        [ -e "$ENGINE_RUN/t$n.down" ] || continue
+        stop_one "$n"
+        start_one "$n" "$name" && started=$((started + 1)) && log "restarted $name on its adapter"
     done < "$TUNNELS"
     [ "$started" = 0 ] && echo "result=unchanged" || echo "result=changed"
 }

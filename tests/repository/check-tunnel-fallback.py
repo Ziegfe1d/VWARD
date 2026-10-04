@@ -309,4 +309,27 @@ echo result=changed
     if got.get("auto") != {"enabled": True, "criterion": "ping", "speed": "night", "speed_running": False, "better": "Wireguard2",
                            "better_since": 1759000200, "last_at": 1759000300, "last_from": "Wireguard0", "last_to": None}:
         fail(f"tunnel-quality auto: {got.get('auto')}")
+
+    # A tunnel of VWARD's own engine (Xray): after the guard switches the interface on again
+    # (the recovery test), the engine starts the program afresh before the check - Xray does
+    # not carry anything on an adapter that was switched off (Viva 2026-10-04).
+    for f in ("fallback", "lists-fallback"):
+        (gdir / f).unlink(missing_ok=True)
+    (tmp / "iface").write_text("OpkgTun2 opkgtun2")
+    vetc = tmp / "vless-etc"; vetc.mkdir()
+    (vetc / "tunnels.tsv").write_text("0\tOpkgTun2\t203.0.113.5:443\tde\n")
+    (bin_ / "vless").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/vless.log"\necho result=changed\n')
+    (bin_ / "vless").chmod(0o755)
+    (bin_ / "curl").write_text('#!/bin/sh\ncase "$*" in *"--interface eth3"*|*"--interface opkgtun2"*) exit 0 ;; esac\nexit 7\n')
+    (gdir / "state").write_text("MODE=AUTO\nDOWN_STREAK=0\nFAILOPEN_ACTIVE=1\nLAST_RECOVERY_TEST=0\nLAST_ACTION=STAY_DOWN\n")
+    (tmp / "ndmc.log").write_text("")
+    env |= {"VWARD_VLESS_ETC": str(vetc), "VWARD_VLESS_ENGINE_BIN": str(bin_ / "vless"),
+            "VWARD_AWG_ETC": str(tmp / "no-awg"), "VWARD_AWG_ENGINE_BIN": str(bin_ / "no-awg")}
+    health.write_text(f"STATUS=DOWN\nLAST_CHECK={int(time.time())}\nCONFIG_STATE=down\n")
+    (tmp / "summary").write_text("")
+    r = subprocess.run(["sh", str(GUARD)], env=env, text=True, capture_output=True, timeout=60)
+    if r.stdout.split("\n", 1)[0] != "ACTION=FAILOPEN_RECOVERED":
+        fail(f"recovery of an engine tunnel: {r.stdout[:200]} {(tmp / 'guard.log').read_text()[-300:]}")
+    if "interface OpkgTun2 up" not in (tmp / "ndmc.log").read_text() or (tmp / "vless.log").read_text() != "restart OpkgTun2\n":
+        fail("after switching the interface on, the guard must start the engine's program afresh")
 print("TUNNEL_FALLBACK=PASS")
