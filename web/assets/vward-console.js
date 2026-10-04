@@ -773,6 +773,8 @@ function extRunNote(run, pkg) {
   return '<p class="result-note">Выполняется: ' + esc(run.label === 'ext-check' ? 'проверка' : 'установка') + '…</p>';
 }
 // While a check runs, its button says so: no separate progress line.
+// «Проверить всё» on «Обновления»: VWARD too, not only the packages and the firmware.
+const allCheckBtn = () => { const busy = runningId === 'ext' || runningId === 'updates'; return btn('all-check', 'refresh', busy ? 'Проверяем…' : 'Проверить всё', '', busy ? ' disabled' : ''); };
 const extCheckBtn = label => btn('ext-check', 'refresh', runningId === 'ext' ? 'Проверяем…' : label, '', runningId === 'ext' ? ' disabled' : '');
 const EXT_OK = { check: 'Проверка завершена', upgrade: 'Обновление установлено' };
 function extOp(op, pkg, token) {
@@ -1190,7 +1192,7 @@ const RENDER = {
         ['AdGuard Home', aghVal, agh.available ? 'info' : '', 'u-agh', '', agh.available ? 'установлена ' + extVer(agh.installed) : autoText(x.auto && x.auto.agh)],
         ['Прошивка Keenetic', fwVal, fw.update_available ? 'info' : '', 'u-fw', '', fw.channel ? 'канал ' + fwChannel(fw.channel) + ' · ' + autoText(fw.auto_update) : ''],
         ['Пакеты Entware', pk.length ? pk.length + ' ' + plural(pk.length, 'обновление', 'обновления', 'обновлений') : S.ext && !x.checked_at ? 'не проверялись' : 'актуальны', pk.length ? 'info' : '', 'u-opkg', '', x.installed_count ? 'установлено ' + x.installed_count + ' · ' + autoText(x.auto && x.auto.entware) : '']
-      ]) + '<div class="panel-actions">' + extCheckBtn('Проверить всё') + '</div>' + resultBox('ext'),
+      ]) + '<div class="panel-actions">' + allCheckBtn() + '</div>' + resultBox('ext'),
       { desc: checked ? 'Последняя проверка: ' + checked + '. Проверка идёт сама раз в сутки, во время установки обновлений VWARD.' : 'Проверка идёт сама раз в сутки, во время установки обновлений VWARD.' });
   },
 
@@ -3106,6 +3108,7 @@ document.addEventListener('click', e => {
   else if (a === 'cards-reset') { cardOrder = CARD_IDS.slice(); hiddenCards = []; cardView = 'grid'; ['vward-card-order', 'vward-card-hidden', 'vward-card-view'].forEach(k => store.del(k)); render(); toast('Карточки сброшены'); }
   else if (a === 'ask') { confirm = { id: t.dataset.confirm, pkg: t.dataset.pkg }; render(); }
   else if (a === 'ext-check') extOp('check');
+  else if (a === 'all-check') extOp('check').then(() => updateOp('check'));
   else if (a === 'confirm-no') { confirm = null; render(); }
   else if (a === 'confirm-yes') { const c = confirm; confirm = null; if (c && CONFIRMED[c.id]) CONFIRMED[c.id](c); else render(); }
   else if (a === 'ads-urule') { t.disabled = true; adsUserRule(t.dataset.op, t.dataset.kind, t.dataset.dom); }

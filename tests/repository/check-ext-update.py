@@ -244,4 +244,8 @@ for marker in ('ACTION" = ext-update-data', 'ACTION" = ext-update-control', 'REQ
 if '"$BACKUP_HELPER" "$EXT_OP" now' not in HOUSE:
     fail("housekeeping must start the daily check")
 
+# «Проверить всё» on «Обновления» checks VWARD too (it checked only Entware and the firmware).
+_js = (ROOT / "web/assets/vward-console.js").read_text()
+if "allCheckBtn()" not in _js or "a === 'all-check') extOp('check').then(() => updateOp('check'))" not in _js:
+    raise SystemExit("EXT_UPDATE=FAIL: «Проверить всё» must check VWARD as well")
 print("EXT_UPDATE=PASS")
