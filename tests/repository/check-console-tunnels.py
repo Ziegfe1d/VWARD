@@ -71,4 +71,21 @@ for need in ("tunnels.some(t => t.name === prof().tunnel_interface && tunOff(t))
         fail(f"a default tunnel switched off outside the Panel: lacks {need}")
 if 'INTERFACE_DISABLED_EXTERNAL' not in (ROOT / "components/tunnel-guard/scripts/vward-tunnel-guard.sh").read_text():
     fail("the guard must leave a tunnel the owner switched off alone")
+# A rejected router command: the router's own reply reaches the Panel next to the error,
+# one line, without quotes, backslashes or control characters.
+import tempfile
+fn = lambda name: HELPER[HELPER.index(name + "() {"):HELPER.index("\n}\n", HELPER.index(name + "() {")) + 3]
+with tempfile.TemporaryDirectory() as d:
+    nd = Path(d) / "ndmc"
+    nd.write_text('#!/bin/sh\nprintf \'Command::Interface: \\"x\\" in use\\r\\n(error) static route "1.2.3.4" uses Wireguard0\\n\'\nexit 0\n')
+    nd.chmod(0o755)
+    sh = fn("die") + fn("ndm") + 'NDMC=%s\nndm "no interface Wireguard0" || die router_rejected\n' % nd
+    r = subprocess.run(["sh", "-c", sh], text=True, capture_output=True)
+    if r.stdout != "reason=(error) static route 1.2.3.4 uses Wireguard0\nerror=router_rejected\n":
+        fail(f"the router's reply to a rejected command: {r.stdout!r}")
+for need in ("TWHY=\"$(printf '%s\\n' \"$TALL\" | sed -n 's/^reason=//p' | tail -n 1)\"", "{reason:$w}"):
+    if need not in API:
+        fail(f"the API passes the router's reply: lacks {need}")
+if "(x && x.reason ? ' (ответ роутера: ' + x.reason + ')' : '')" not in JS:
+    fail("the Panel shows the router's reply")
 print("CONSOLE_TUNNELS=PASS")

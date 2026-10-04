@@ -924,10 +924,14 @@ if [ "$ACTION" = tunnel-conf ]; then
         case "$TNET" in ''|*[!0-9./]*) echo '{"ok":false,"error":"invalid_subnet"}'; exit 0 ;; esac
         set -- tunnel-subnet "$TNAME" "${TOP#subnet-}" "$TNET"
       fi
-      TOUT="$("$CONFIG_HELPER" "$@" 2>/dev/null | tail -n 1)"
+      TALL="$("$CONFIG_HELPER" "$@" 2>/dev/null | tail -n 3)"
+      TOUT="$(printf '%s\n' "$TALL" | tail -n 1)"
+      # The router's own reply to a rejected command, shown next to the error.
+      TWHY="$(printf '%s\n' "$TALL" | sed -n 's/^reason=//p' | tail -n 1)"
       case "$TOUT" in
         result=changed|result=unchanged) "$JQ" -cn --arg r "${TOUT#result=}" '{ok:true,result:$r}' ;;
-        error=*) E="${TOUT#error=}"; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac; printf '{"ok":false,"error":"%s"}\n' "$E" ;;
+        error=*) E="${TOUT#error=}"; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac
+                 "$JQ" -cn --arg e "$E" --arg w "$TWHY" '{ok:false,error:$e} + (if $w == "" then {} else {reason:$w} end)' ;;
         *) echo '{"ok":false,"error":"helper_failed"}' ;;
       esac ;;
     *) echo '{"ok":false,"error":"invalid_operation"}' ;;
@@ -1020,7 +1024,14 @@ if [ "$ACTION" = release-notes ]; then
     RN_FILE="$NDM_CACHE_DIR/changelog"
     if [ ! -s "$RN_FILE" ] || [ -n "$(find "$RN_FILE" -mmin +60 2>/dev/null)" ]; then
       (umask 077; mkdir -p "$NDM_CACHE_DIR") 2>/dev/null
-      "$CURL" -fsS --connect-timeout 5 --max-time 12 --max-filesize 400000 "$RN_URL" -o "$RN_FILE.$$" 2>/dev/null && mv -f "$RN_FILE.$$" "$RN_FILE" || rm -f "$RN_FILE.$$"
+      # A dead VPN tunnel the feed host is routed through: once more straight through the provider.
+      if "$CURL" -fsS --connect-timeout 5 --max-time 12 --max-filesize 400000 "$RN_URL" -o "$RN_FILE.$$" 2>/dev/null ||
+         { RN_DEV="$("${VWARD_IP:-ip}" -4 route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }}')"
+           [ -n "$RN_DEV" ] && "$CURL" -fsS --interface "$RN_DEV" --connect-timeout 5 --max-time 12 --max-filesize 400000 "$RN_URL" -o "$RN_FILE.$$" 2>/dev/null; }; then
+        mv -f "$RN_FILE.$$" "$RN_FILE"
+      else
+        rm -f "$RN_FILE.$$"
+      fi
     fi
     RN_TEXT="$(notes_of "$RN_FILE")"
   fi
@@ -2771,6 +2782,15 @@ kv_file "$UPDATER_STATE/committed.state" installed_update_id=INSTALLED_UPDATE_ID
 kv_file "$UPDATER_STATE/journal.state" phase=UPDATE_PHASE
 kv_file "$UPDATER_STATE/trust.state" highest_seen_sequence=HIGHEST_SEQUENCE
 ACTIVE_SLOT="$(CDPATH= cd -- /opt/share/vward/updater/current 2>/dev/null && pwd -P)"
+# The update engine updates itself into a slot, not as package files, so it has no
+# row of its own there: it is healthy when the active slot holds a readable engine.
+case "$COMPONENTS" in
+  *'"update-engine"'*) ;;
+  *) ENGINE_VERSION="$(sed -n 's/^VU_ENGINE_VERSION=//p' "$ACTIVE_SLOT/vward-update-common-base.sh" 2>/dev/null | head -n 1)"
+     case "$ENGINE_VERSION" in
+       [0-9]*.[0-9]*.[0-9]*) COMPONENTS="$(printf '%s' "$COMPONENTS" | $JQ -c --arg r "$VWARD_VERSION" --arg e "$ENGINE_VERSION" '. + {"update-engine": {release: $r, engine_version: $e, health: "PASS"}}' 2>/dev/null || printf '%s' "$COMPONENTS")" ;;
+     esac ;;
+esac
 
 kv_file /opt/etc/vward/update.conf update_enabled=UPDATE_ENABLED auto_apply=AUTO_APPLY \
     auto_critical=AUTO_CRITICAL auto_important=AUTO_IMPORTANT auto_routine=AUTO_ROUTINE \

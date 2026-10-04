@@ -58,13 +58,15 @@ run_once() {
     else
         curl_args="--silent --show-error --location --proto =https --tlsv1.2 --connect-timeout 15 --max-time 60 --max-filesize $max_manifest_size"
         if [ -n "$etag" ]; then
-            status=$(curl $curl_args --dump-header "$headers" --output "$body" --write-out '%{http_code}' --header "If-None-Match: $etag" "$feed_url") || return "$VU_NETWORK_ERROR"
+            status=$(vu_curl $curl_args --dump-header "$headers" --output "$body" --write-out '%{http_code}' --header "If-None-Match: $etag" "$feed_url") || return "$VU_NETWORK_ERROR"
         else
-            status=$(curl $curl_args --dump-header "$headers" --output "$body" --write-out '%{http_code}' "$feed_url") || return "$VU_NETWORK_ERROR"
+            status=$(vu_curl $curl_args --dump-header "$headers" --output "$body" --write-out '%{http_code}' "$feed_url") || return "$VU_NETWORK_ERROR"
         fi
+        status=$(printf '%s' "$status" | tail -c 3)
         if [ "$status" = 404 ] && [ "$feed_url" != "$manifest_url" ]; then
             feed_url=$manifest_url
-            status=$(curl $curl_args --dump-header "$headers" --output "$body" --write-out '%{http_code}' "$feed_url") || return "$VU_NETWORK_ERROR"
+            status=$(vu_curl $curl_args --dump-header "$headers" --output "$body" --write-out '%{http_code}' "$feed_url") || return "$VU_NETWORK_ERROR"
+            status=$(printf '%s' "$status" | tail -c 3)
         fi
     fi
 

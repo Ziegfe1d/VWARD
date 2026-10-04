@@ -50,7 +50,7 @@ important_max_delay_seconds=7200
 routine_max_delay_seconds=86400
 # This engine's own version: a manifest may ask for a newer one (min_updater_version),
 # and a signed manifest carrying a newer engine makes it update itself.
-VU_ENGINE_VERSION=2.0.2
+VU_ENGINE_VERSION=2.0.3
 minimum_updater_version=$VU_ENGINE_VERSION
 manifest_v2_url=
 
@@ -804,15 +804,34 @@ vu_manifest_space_preflight() {
     [ -n "$staging_free" ] && [ "$staging_free" -ge "$required_kb" ]
 }
 
+# vu_curl ARGS: curl, and when it fails, the same request once more bound to the
+# device of the main default route (the provider): a dead VPN tunnel that the
+# router's policy sends the feed host through must not stop updates.
+vu_wan_dev() {
+    ip -4 route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }}'
+}
+
+vu_curl() {
+    curl "$@" && return 0
+    vu_curl_rc=$?
+    [ "${VU_DIRECT_FALLBACK:-1}" = 1 ] || return "$vu_curl_rc"
+    vu_curl_dev=$(vu_wan_dev | head -n 1)
+    [ -n "$vu_curl_dev" ] || return "$vu_curl_rc"
+    vu_log WARN "Download failed (curl $vu_curl_rc); retrying directly through $vu_curl_dev"
+    curl --interface "$vu_curl_dev" "$@"
+}
+
 # vu_fetch_feed URL OUTPUT MAX: 0 fetched, 44 no such feed (404), 1 failed.
 vu_fetch_feed() {
     url=$1 output=$2 max_bytes=$3
     case "$url" in https://*) ;; *) return 1 ;; esac
     tmp=$output.part.$$
     rm -f "$tmp"
-    code=$(curl --silent --show-error --location --proto '=https' --tlsv1.2 \
+    code=$(vu_curl --silent --show-error --location --proto '=https' --tlsv1.2 \
         --connect-timeout 15 --max-time 180 --retry 3 \
         --max-filesize "$max_bytes" --output "$tmp" --write-out '%{http_code}' "$url") || { rm -f "$tmp"; return 1; }
+    # A retried request printed two codes; the last one is the answer.
+    code=$(printf '%s' "$code" | tail -c 3)
     case "$code" in
         200) ;;
         404) rm -f "$tmp"; return 44 ;;
@@ -830,7 +849,7 @@ vu_fetch_bounded() {
     case "$url" in https://*) ;; *) return 1 ;; esac
     tmp=$output.part.$$
     rm -f "$tmp"
-    curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+    vu_curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
         --connect-timeout 15 --max-time 180 --retry 3 --retry-all-errors \
         --max-filesize "$max_bytes" --output "$tmp" "$url" || { rm -f "$tmp"; return 1; }
     size=$(wc -c < "$tmp" | tr -d ' ')

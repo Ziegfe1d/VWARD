@@ -76,6 +76,20 @@ with tempfile.TemporaryDirectory() as tmp:
             fail(f"bad version {bad!r} accepted")
     if notes("9.9.9").get("error") != "notes_unavailable":
         fail("an unknown version has no notes")
+    # A dead tunnel: the plain request fails, the one bound to the provider device works.
+    (tmp / "cache/changelog").unlink()
+    log.unlink()
+    curl.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\ncase " $* " in *" --interface "*) ;; *) exit 28 ;; esac\n'
+                    f'out=""; while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; esac; shift; done\ncp "{remote}" "$out"\n')
+    fbin = tmp / "fbin"; fbin.mkdir()
+    (fbin / "ip").write_text("#!/bin/sh\necho 'default via 100.84.0.1 dev eth3'\n"); (fbin / "ip").chmod(0o755)
+    env_saved = env
+    env = env | {"VWARD_IP": str(fbin / "ip")}
+    x = notes("0.2.0-rc.1.fix.12")
+    if x.get("source") != "feed" or "--interface eth3" not in log.read_text():
+        fail(f"notes come straight through the provider when the tunnel is dead: {x} {log.read_text()}")
+    env = env_saved
+    curl.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\nout=""; while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; esac; shift; done\ncp "{remote}" "$out"\n')
     (root / "opt/etc/vward/update.conf").write_text("manifest_url=https://evil.example/x/updates/dev/update-manifest.json\n")
     (tmp / "cache/changelog").unlink()
     if notes("0.2.0-rc.1.fix.12").get("error") != "notes_unavailable":

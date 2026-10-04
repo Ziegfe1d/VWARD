@@ -128,7 +128,7 @@ vu_v2_fetch() {
         fi
     done < "$list"
     if [ -s "$config" ]; then
-        curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+        vu_curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             --connect-timeout 15 --max-time 300 --retry 3 --retry-all-errors \
             --max-filesize "$max_package_size" --config "$config" || return 1
     fi
