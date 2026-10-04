@@ -1,1 +1,2 @@
 vward-sentinel: tools/vward-sentinel in the VWARD repository (C, musl, static).
+vward-ed25519: tools/vward-ed25519 (Zig, static), the signature check for routers whose openssl cannot.
