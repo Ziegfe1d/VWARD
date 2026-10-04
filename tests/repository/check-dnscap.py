@@ -103,11 +103,11 @@ with tempfile.TemporaryDirectory() as tmp:
     if os.geteuid() == 0:
         out = Path(tmp) / "live.out"
         with open(out, "wb") as fh:
-            p = subprocess.Popen(run + ["lo", "127.0.0.0/8", "127.0.0.53"], stdout=fh, stderr=subprocess.PIPE)
+            p = subprocess.Popen(run + ["lo", "127.0.0.0/8", "127.0.0.77"], stdout=fh, stderr=subprocess.PIPE)
             time.sleep(0.5)
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.sendto(query("live.example", 1), ("127.0.0.53", 53))
-            s.sendto(query("live-other.example", 1), ("127.0.0.53", 54))
+            s.sendto(query("live.example", 1), ("127.0.0.77", 53))
+            s.sendto(query("live-other.example", 1), ("127.0.0.77", 54))
             time.sleep(0.5)
             p.terminate()
             err = p.communicate(timeout=5)[1]
