@@ -73,6 +73,8 @@ jobs:
             sudo env "PATH=$PATH" VWARD_CHROMIUM="$(command -v google-chrome || command -v chromium)" \
               python3 tests/perf/check-panel-crawl-emulated.py --api "$m" $([ "$m" = real ] || echo --limit 70)
           done
+          sudo env "PATH=$PATH" VWARD_CHROMIUM="$(command -v google-chrome || command -v chromium)" \
+            python3 tests/perf/check-panel-toggles-emulated.py
 
       - name: Resource budget on the router emulator
         run: |

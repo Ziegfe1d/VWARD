@@ -668,7 +668,11 @@ if [ "$ACTION" = config-data ]; then
     kv_file "$UCONF" safe_window_start=U_START safe_window_end=U_END check_interval_seconds=U_INTERVAL apply_window=U_WINDOW manifest_url=U_URL
     COMPONENT_REGISTRY=${VWARD_COMPONENT_REGISTRY:-/opt/share/vward/updater/current/component-registry.json}
     DISABLED="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && basename "$F" .disabled; done | list_json)"
-    COMPONENTS="$("$JQ" -c --argjson off "${DISABLED:-[]}" '[.components[] | {id, core:(.core == true), depends_on:(.depends_on // []), requires_running:(.requires_running // []), uses:(.uses // []), enabled:((.id | IN($off[])) | not)}]' "$COMPONENT_REGISTRY" 2>/dev/null)"
+    # Which component a switched-off one went off with (its flag ends «(with ID)»): it comes back with it.
+    OFF_WITH="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && printf '%s\t%s\n' "$(basename "$F" .disabled)" "$(sed -n 's/.*(with \([a-z0-9-]*\))$/\1/p' "$F" | head -n 1)"; done |
+        "$JQ" -Rsc '[split("\n")[] | select(length > 0) | split("\t") | {(.[0]): (.[1] // "")}] | add // {}' 2>/dev/null)"
+    [ -n "$OFF_WITH" ] || OFF_WITH='{}'
+    COMPONENTS="$("$JQ" -c --argjson off "${DISABLED:-[]}" --argjson with "$OFF_WITH" '[.components[] | {id, core:(.core == true), depends_on:(.depends_on // []), requires_running:(.requires_running // []), uses:(.uses // []), enabled:((.id | IN($off[])) | not), off_with:($with[.id] // "")}]' "$COMPONENT_REGISTRY" 2>/dev/null)"
     [ -n "$COMPONENTS" ] || COMPONENTS='[]'
     [ "$W_EN" = 1 ] || W_EN=0
     [ "$W_CTL" = 1 ] || W_CTL=0

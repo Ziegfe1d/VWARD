@@ -574,7 +574,8 @@ const compOn = id => { const g = graphOf(id); return !g || g.enabled !== false; 
 /* Что включится или выключится вместе с компонентом - как в vward-console-config.sh. */
 function compCascade(id, off) {
   const g = cfg().components || [];
-  let set = [id], grow = true;
+  // Back on: what went off with it comes back too (vward-console-config.sh does the same).
+  let set = [id].concat(off ? [] : g.filter(x => x.off_with === id && x.id !== id && x.enabled === false).map(x => x.id)), grow = true;
   while (grow) {
     const add = off ? g.filter(x => x.requires_running.some(d => set.includes(d))).map(x => x.id)
       : g.filter(x => set.includes(x.id)).reduce((a, x) => a.concat(x.requires_running), []);
@@ -714,9 +715,12 @@ const DATA_FOR = id => { if (DETAILS[id] && DETAILS[id].data) return DETAILS[id]
 
 /* ---------- Состояние интерфейса ---------- */
 const TAB_MAX = 4, TAB_DEFAULT = ['overview', 'wan', 'vpn', 'routes'];
-let tabIds = store.get('vward-tabs', TAB_DEFAULT).filter(id => PAGES.some(p => p.id === id)).slice(0, TAB_MAX);
-// Sections that became pages inside others (lists, Wi-Fi) leave the bar; defaults fill the place.
-TAB_DEFAULT.forEach(id => { if (tabIds.length < TAB_MAX && !tabIds.includes(id)) tabIds.push(id); });
+const tabStored = store.get('vward-tabs', TAB_DEFAULT);
+let tabIds = (Array.isArray(tabStored) ? tabStored : TAB_DEFAULT).filter(id => PAGES.some(p => p.id === id)).slice(0, TAB_MAX);
+// Sections that became pages inside others (lists, Wi-Fi) leave the bar; defaults fill their
+// place. Only then: a section the owner took off the bar stays off after a reload.
+if (!tabIds.length || tabIds.length < Math.min(Array.isArray(tabStored) ? tabStored.length : 0, TAB_MAX))
+  TAB_DEFAULT.forEach(id => { if (tabIds.length < TAB_MAX && !tabIds.includes(id)) tabIds.push(id); });
 // Once: the journals left the panel (sections show their own events); the free place gets a default section.
 if (!store.get('vward-tabs-logs-moved', false)) {
   tabIds = tabIds.filter(id => id !== 'logs');

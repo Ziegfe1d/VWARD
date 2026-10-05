@@ -178,6 +178,14 @@ with tempfile.TemporaryDirectory() as tmp:
     if flag.exists():
         fail("tunnel guard disable flag must be removed")
     run("tunnel-guard", "1", "x", expect="error=usage")
+    # «Запасной туннель» and «Возвращать на основной»: one value, as the Panel sends them.
+    for op in ("tunnel-fallback", "tunnel-return"):
+        run(op, "0", expect="result=changed")
+        if not (etc / f"{op}.disabled").exists():
+            fail(f"{op} 0 wrote no flag")
+        run(op, "1", expect="result=changed")
+        if (etc / f"{op}.disabled").exists():
+            fail(f"{op} 1 left its flag")
 
     # Wi-Fi config: created on first write, strict values, no shell injection.
     wifi = etc / "wifi-client-guard.conf"

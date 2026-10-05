@@ -1953,6 +1953,18 @@ op_component() {
     [ -r "$COMPONENT_REGISTRY" ] || die registry_unavailable
     "$JQ" -e --arg id "$1" 'any(.components[]; .id == $id)' "$COMPONENT_REGISTRY" >/dev/null 2>&1 || die invalid_component 64
     set_ids=$(component_closure "$1" "$2") || die registry_unavailable
+    # Back on: the components that went off with it (their flag says «with ID») come back
+    # too, with what they need; one the owner switched off by itself stays off.
+    if [ "$2" = 1 ] && [ -d "$COMPONENT_STATE" ]; then
+        for f in "$COMPONENT_STATE"/*.disabled; do
+            [ -f "$f" ] || continue
+            c=${f##*/}; c=${c%.disabled}
+            [ "$c" != "$1" ] && grep -q "(with $1)\$" "$f" 2>/dev/null || continue
+            set_ids="$set_ids
+$(component_closure "$c" 1)" || die registry_unavailable
+        done
+        set_ids=$(printf '%s\n' "$set_ids" | awk 'NF && !seen[$0]++')
+    fi
     if [ "$2" = 0 ]; then
         for c in $set_ids; do
             "$JQ" -e --arg id "$c" 'any(.components[]; .id == $id and .core == true)' "$COMPONENT_REGISTRY" >/dev/null &&
@@ -2246,7 +2258,7 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|policy-group|services-refresh) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|policy-group|services-refresh) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
     service) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;

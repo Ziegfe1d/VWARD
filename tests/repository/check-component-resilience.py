@@ -176,11 +176,17 @@ vward_discover_lan_interface(){ echo Bridge9; }
             if r.returncode != 0:
                 fail(f"health profile {profile_name} failed with {sorted(off)} disabled: {r.stderr[-300:]}")
 
-        # 5. Enabling brings it back, with what it requires.
+        # 5. Enabling brings it back, with what it requires and what went off with it; a
+        # component the owner switched off by itself stays off.
+        alone = sorted(c for c in optional if c not in off and not any(set(comps[d]["requires_running"]) & {c} for d in comps))[:1]
+        for c in alone:
+            subprocess.run(["sh", str(HELPER), "component", c, "0"], env=base, text=True, capture_output=True)
         r = subprocess.run(["sh", str(HELPER), "component", cid, "1"], env=base, text=True, capture_output=True)
         left = {p.name[:-len(".disabled")] for p in state.glob("*.disabled")}
-        if cid in left or set(comps[cid]["requires_running"]) & left:
-            fail(f"enabling {cid} left {sorted(left)} disabled")
+        if left != set(alone):
+            fail(f"enabling {cid} left {sorted(left)} disabled, expected only {alone} (switched off by itself)")
+        for c in alone:
+            subprocess.run(["sh", str(HELPER), "component", c, "1"], env=base, text=True, capture_output=True)
 
     # Core components cannot be disabled, alone or through a cascade.
     for cid in (c for c in comps if comps[c]["core"]):
