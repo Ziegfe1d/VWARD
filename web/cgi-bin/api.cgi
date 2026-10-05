@@ -1824,7 +1824,7 @@ if [ "$ACTION" = "diagnostics" ]; then
         {id:"tcpdump",component:"route-engine",label:"Наблюдение DNS (vward-dnscap или tcpdump)",status:$tcpdump,detail:"автоподбор узнаёт новые домены"},
         {id:"lighttpd",component:"console",label:"Веб-сервер Панели (lighttpd)",status:$lighttpd,detail:"отдаёт страницы Панели VWARD"},
         {id:"crond",component:"runtime",label:"Планировщик заданий (crond)",status:$crond,detail:(if $wan_rc == "" then "задания ещё не запускались" else "код последнего задания интернета: "+$wan_rc end)},
-        {id:"supervisor",component:"runtime",label:"Сторож служб VWARD (supervisor)",status:$supervisor,detail:"перезапускает планировщик, если он остановился"},
+        {id:"supervisor",component:"runtime",label:"Агент компонентов",status:$supervisor,detail:"держит работающими программы VWARD и следит за другими агентами"},
         {id:"adguard",component:"route-engine",label:"AdGuard Home",status:$adguard,detail:"DNS-сервер с блокировкой рекламы"},
         {id:"adaptive",component:"route-engine",label:"Автоподбор доменов",status:$adaptive,detail:(if $route_rc == "" then "сверка маршрутов ещё не запускалась" else "код последней сверки маршрутов: "+$route_rc end)},
         {id:"wan",component:"wan-guard",label:"Интернет",status:$wan,detail:"состояние подключения провайдера в Keenetic"},
@@ -2901,6 +2901,8 @@ set -- $(ps w 2>/dev/null | awk -v subnet="$VWARD_LAN_SUBNET" -v address="$VWARD
 CROND_PID=${1:--}
 [ "$CROND_PID" != - ] || CROND_PID=""
 SUPERVISOR=${2:-0}
+# The other agents as the components agent sees them (ok, late, hung; off), a minute old at most.
+AGENTS="$(awk -F= '$1 ~ /^(network|updates|maintenance|state)$/ && $2 ~ /^(ok|late|hung|off)$/ {printf "%s%s=%s", (n++ ? "," : ""), $1, $2}' "${VWARD_AGENTS_STATE:-/tmp/vward-agents.state}" 2>/dev/null)"
 ADGUARD=${3:-0}
 # The start gate found the program itself broken (it dies on --version): see vward_agh_ensure.
 AGH_BROKEN=""
@@ -2981,6 +2983,7 @@ header_json
   --arg crond "$CROND" \
   --arg crond_pid "$CROND_PID" \
   --arg supervisor "$SUPERVISOR" \
+  --arg agents "$AGENTS" \
   --arg adguard "$ADGUARD" \
   --arg agh_broken "$AGH_BROKEN" \
   --arg uptime "$UPTIME_SEC" \
@@ -3117,6 +3120,7 @@ header_json
     crond:($crond=="1"),
     crond_pid:$crond_pid,
     supervisor:($supervisor=="1"),
+    agents:($agents | if . == "" then null else (split(",") | map(split("=") | {(.[0]): .[1]}) | add) end),
     adguard:($adguard=="1"),
     adguard_broken:($agh_broken != ""),
     adaptive_live_pid:$live_pid,

@@ -189,6 +189,7 @@ mkdir -p "$REQ_DIR" 2>/dev/null
 [ -p "$WAKE" ] || mkfifo -m 600 "$WAKE" 2>/dev/null || :
 # The wait between rounds: on the pipe when the shell can wait on it with a time limit.
 WAIT_PIPE=0
+# shellcheck disable=SC3045
 [ -p "$WAKE" ] && [ -z "$( (read -t 1 _x < /dev/null) 2>&1)" ] && WAIT_PIPE=1
 
 pidfile_of()
@@ -272,6 +273,99 @@ process_requests()
     done
 }
 
+# ---- Watching the other agents ---------------------------------------------------------------
+# The components agent also watches the network, updates and maintenance agents: each must have
+# run lately, none may hang, none may run twice at a time. A hung run is stopped (the next one
+# starts fresh); a late agent and two runs at once are reported. The state for the Panel in RAM.
+AGENTS_STATE=${VWARD_AGENTS_STATE:-/tmp/vward-agents.state}
+# script|agent|file its run touches|late after s (0: not checked)|hung after s (0: never stopped)
+AGENT_JOBS="
+vward-tunnel-health.sh|network|/tmp/vward-tunnel-health-chain.cron.last|300|240
+vward-tunnel-guard.sh|network||0|300
+vward-wan-guard.sh|network|/tmp/vward-wan-guard.cron.last|300|300
+vward-wan-recovery.sh|network||0|600
+vward-route-reconciler.sh|network|/tmp/vward-route-reconciler-maint.cron.last|900|600
+vward-housekeeping.sh|maintenance|/tmp/vward-housekeeping.cron.last|10800|1800
+vward-update-watch.sh|updates|/opt/var/log/vward/updater-watch.log|3600|0
+"
+AGENT_NOTED=" "
+
+# age_of PID: seconds the process has run (its start in /proc/PID/stat, 100 ticks a second).
+age_of()
+{
+    AS=
+    read -r AS 2>/dev/null < "$PROC/$1/stat" || return 1
+    AS=${AS##*) }
+    # shellcheck disable=SC2086
+    set -- $AS
+    [ "$#" -ge 20 ] || return 1
+    shift 19
+    AU=; read -r AU _ 2>/dev/null < "$UPTIME_FILE" || return 1
+    echo $(( ${AU%%.*} - $1 / 100 ))
+}
+
+# ppid_of PID
+ppid_of() { PS_=; read -r PS_ 2>/dev/null < "$PROC/$1/stat" || return 1; PS_=${PS_##*) }; set -- $PS_; echo "$2"; }
+
+watch_agents()
+{
+    WA_UP=; [ ! -r "$UPTIME_FILE" ] || read -r WA_UP _ < "$UPTIME_FILE" || :
+    WA_UP=${WA_UP%%.*}; case "$WA_UP" in ''|*[!0-9]*) WA_UP=0 ;; esac
+    WA_NOW=$(date +%s)
+    WA_NET=ok WA_UPD=ok WA_MNT=ok
+    # The runs going on now, once: «pid script» of every agent script.
+    WA_RUNS=$(ps w 2>/dev/null | awk -v jobs="$AGENT_JOBS" '
+        BEGIN {n = split(jobs, j, "\n"); for (i = 1; i <= n; i++) if (split(j[i], f, "|") >= 5) s[f[1]] = 1}
+        {for (k in s) if (index($0, "/" k) && $0 !~ /awk/) {print $1, k; break}}')
+    OLDIFS_A=$IFS
+    IFS='
+'
+    for WJ in $AGENT_JOBS; do
+        IFS=$OLDIFS_A
+        [ -n "$WJ" ] || { IFS='
+'; continue; }
+        OLDIFS_B=$IFS; IFS='|'
+        # shellcheck disable=SC2086
+        set -- $WJ
+        IFS=$OLDIFS_B
+        WS=$1 WG=$2 WF=$3 WL=$4 WH=$5
+        WST=ok
+        # Late: its last run is older than it should be (not in the first 15 minutes after boot).
+        if [ "$WL" -gt 0 ] && [ "$WA_UP" -ge 900 ] && [ -n "$WF" ]; then
+            WT=$(date -r "$WF" +%s 2>/dev/null || echo 0)
+            if [ $((WA_NOW - WT)) -gt "$WL" ]; then
+                WST=late
+                case "$AGENT_NOTED" in *" late:$WS "*) ;; *) log_event "AGENT_LATE|$WG|$WS|last=$WT"; AGENT_NOTED="$AGENT_NOTED late:$WS " ;; esac
+            else
+                AGENT_NOTED=$(printf '%s' "$AGENT_NOTED" | sed "s/ late:$WS //")
+            fi
+        fi
+        # Runs of this script that are not a part of another run of it (its own subshells are).
+        WN=0
+        for WP in $(printf '%s\n' "$WA_RUNS" | awk -v s="$WS" '$2 == s {print $1}'); do
+            WPP=$(ppid_of "$WP") || continue
+            printf '%s\n' "$WA_RUNS" | awk -v p="$WPP" -v s="$WS" '$1 == p && $2 == s {f = 1} END {exit !f}' && continue
+            WN=$((WN + 1))
+            WAGE=$(age_of "$WP") || continue
+            if [ "$WH" -gt 0 ] && [ "$WAGE" -gt "$WH" ]; then
+                kill "$WP" 2>/dev/null && log_event "AGENT_HUNG|$WG|$WS|pid=$WP|age=$WAGE|stopped"
+                WST=hung
+            fi
+        done
+        [ "$WN" -le 1 ] || log_event "AGENT_TWICE|$WG|$WS|runs=$WN"
+        case "$WG:$WST" in
+            network:late|network:hung) [ "$WA_NET" = hung ] || WA_NET=$WST ;;
+            updates:late|updates:hung) WA_UPD=$WST ;;
+            maintenance:late|maintenance:hung) WA_MNT=$WST ;;
+        esac
+        IFS='
+'
+    done
+    IFS=$OLDIFS_A
+    printf 'at=%s\nnetwork=%s\ncomponents=ok\nupdates=%s\nmaintenance=%s\n' "$WA_NOW" "$WA_NET" "$WA_UPD" "$WA_MNT" > "$AGENTS_STATE.tmp" &&
+        mv -f "$AGENTS_STATE.tmp" "$AGENTS_STATE"
+}
+
 # SSH stays: when memory runs out, the kernel stops some program to free it; never the SSH
 # server or its sessions (Keenetic's or Entware's dropbear, OpenSSH), the way in to fix things.
 # New sessions inherit it from the server; checked once a minute, written only when it differs.
@@ -313,11 +407,14 @@ watch_services()
     fi
 
     # VWARD switched off as a whole: cron and the Panel stay, nothing else of VWARD starts;
+    # the other agents are idle on purpose then, not watched.
     # DNS redirects into AdGuard Home that came back (Keenetic rebuilt its firewall) go again.
     if [ -e "$OFF_FLAG" ]; then
         [ ! -x "$OFF_BIN" ] || $UNNICE "$OFF_BIN" keep </dev/null >/dev/null 2>&1
+        printf 'at=%s\nstate=off\n' "$(date +%s)" > "$AGENTS_STATE" 2>/dev/null
         return 0
     fi
+    watch_agents
 
     # The tunnels' modules (AmneziaWG, VLESS): a stopped one starts again. Without such
     # tunnels this is one file test, no process.
@@ -409,6 +506,7 @@ while :; do
         RT=$INTERVAL
         while [ "$RT" -gt 0 ]; do
             T0=; [ ! -r "$UPTIME_FILE" ] || read -r T0 _ < "$UPTIME_FILE" || :
+            # shellcheck disable=SC3045
             read -t "$RT" _w <> "$WAKE" || break
             process_requests
             T1=; [ ! -r "$UPTIME_FILE" ] || read -r T1 _ < "$UPTIME_FILE" || :

@@ -1041,16 +1041,19 @@ function jobOk(names) {
   const jobs = ((S.cron && S.cron.jobs) || []).filter(j => names.includes(j.name));
   return jobs.length ? jobs.every(j => j.rc === 0) : null;
 }
+// The components agent watches the other three (late, hung) and says so; their own runs too.
+const AGENT_STATE = { late: ['crit', 'Не запускается'], hung: ['warn', 'Зависал, перезапущен'] };
 function agentsPanel() {
-  const s = st(), sv = s.services || {}, known = !!s.services;
+  const s = st(), sv = s.services || {}, known = !!s.services, ag = sv.agents || {};
+  const pill = (seen, ok) => seen && AGENT_STATE[seen] ? AGENT_STATE[seen] : ok == null ? ['', '—'] : ok ? ['ok', 'Работает'] : ['crit', 'Не работает'];
   const rows = [
-    ['Агент сети', 'интернет, VPN, DNS и маршруты', jobOk(['vward-tunnel-health.sh', 'vward-wan-guard.sh', 'vward-route-reconciler.sh']), 'wan'],
-    ['Агент компонентов', 'программы VWARD, модули туннелей, AdGuard Home', known ? !!sv.supervisor : null, 'd-components'],
-    ['Агент обновлений', 'VWARD, AdGuard Home, Entware, прошивка, списки', known ? !!sv.crond : null, 'updates'],
-    ['Агент обслуживания', 'журналы, копии настроек, место на флешке', jobOk(['vward-housekeeping.sh']), 'logs']
+    ['Агент сети', 'интернет, VPN, DNS и маршруты', pill(ag.network, jobOk(['vward-tunnel-health.sh', 'vward-wan-guard.sh', 'vward-route-reconciler.sh'])), 'wan'],
+    ['Агент компонентов', 'программы VWARD, модули туннелей, AdGuard Home и другие агенты', pill(null, known ? !!sv.supervisor : null), 'd-components'],
+    ['Агент обновлений', 'VWARD, AdGuard Home, Entware, прошивка, списки', pill(ag.updates, known ? !!sv.crond : null), 'updates'],
+    ['Агент обслуживания', 'журналы, копии настроек, место на флешке', pill(ag.maintenance, jobOk(['vward-housekeeping.sh'])), 'logs']
   ];
-  return panel('Агенты', kv(rows.map(r => [r[0], r[2] == null ? '—' : r[2] ? 'Работает' : 'Не работает', r[2] == null ? '' : r[2] ? 'ok' : 'crit', r[3], '', r[1]])),
-    { desc: 'Каждый агент сам следит за своей зоной и чинит её; одно действие делает только один агент.' });
+  return panel('Агенты', kv(rows.map(r => [r[0], r[2][1], r[2][0], r[3], '', r[1]])),
+    { desc: 'Каждый агент сам следит за своей зоной и чинит её; одно действие делает только один агент. Агент компонентов следит и за остальными: чтобы запускались вовремя, не зависали и не работали дважды.' });
 }
 
 function offPanel() {
