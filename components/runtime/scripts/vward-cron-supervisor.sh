@@ -279,13 +279,16 @@ process_requests()
 # starts fresh); a late agent and two runs at once are reported. The state for the Panel in RAM.
 AGENTS_STATE=${VWARD_AGENTS_STATE:-/tmp/vward-agents.state}
 # script|agent|file its run touches|late after s (0: not checked)|hung after s (0: never stopped)
+# A run is stopped only when it is certainly stuck: a slow router (a busy Keenetic answers ndmc
+# in seconds) makes a working run long, and stopping one halfway through a change is worse than
+# waiting.
 AGENT_JOBS="
-vward-tunnel-health.sh|network|/tmp/vward-tunnel-health-chain.cron.last|300|240
-vward-tunnel-guard.sh|network||0|300
-vward-wan-guard.sh|network|/tmp/vward-wan-guard.cron.last|300|300
-vward-wan-recovery.sh|network||0|600
-vward-route-reconciler.sh|network|/tmp/vward-route-reconciler-maint.cron.last|900|600
-vward-housekeeping.sh|maintenance|/tmp/vward-housekeeping.cron.last|10800|1800
+vward-tunnel-health.sh|network|/tmp/vward-tunnel-health-chain.cron.last|600|1800
+vward-tunnel-guard.sh|network||0|1800
+vward-wan-guard.sh|network|/tmp/vward-wan-guard.cron.last|600|1800
+vward-wan-recovery.sh|network||0|1800
+vward-route-reconciler.sh|network|/tmp/vward-route-reconciler-maint.cron.last|1800|1800
+vward-housekeeping.sh|maintenance|/tmp/vward-housekeeping.cron.last|10800|3600
 vward-update-watch.sh|updates|/opt/var/log/vward/updater-watch.log|3600|0
 "
 AGENT_NOTED=" "

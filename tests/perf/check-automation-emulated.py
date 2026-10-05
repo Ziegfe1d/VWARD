@@ -536,6 +536,10 @@ def main():
             print(f"    {s} {w}")
         if bad and name in results:
             print("    router changes:", [f"{m}:{c}" for m, c in results[name]["log"]][:30])
+        # On GitHub a failed check is also an annotation: readable without the job log.
+        if bad and os.environ.get("GITHUB_ACTIONS") == "true":
+            for w in bad[:5]:
+                print(f"::error title=automation {name}::" + str(w).replace("\n", " ")[:900])
     if args.report:
         Path(args.report).write_text(json.dumps(results, ensure_ascii=False, indent=1))
     print("AUTOMATION_EMULATED=" + ("FAIL" if failed else "PASS"))

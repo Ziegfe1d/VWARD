@@ -47,8 +47,8 @@ with tempfile.TemporaryDirectory() as tmp:
         (proc / str(pid)).mkdir(exist_ok=True)
         (proc / str(pid) / "stat").write_text(f"{pid} (sh) S {ppid} " + " ".join(["0"] * 17) + f" {started_s * 100} 0 0\n")
 
-    stat(hung.pid, 1, 5000 - 900)        # tunnel-guard, 15 minutes: hung (limit 300 s)
-    stat(young.pid, 1, 5000 - 20)        # wan-guard, 20 s
+    stat(hung.pid, 1, 5000 - 2400)       # tunnel-guard, 40 minutes: hung (limit 30 min)
+    stat(young.pid, 1, 5000 - 900)       # wan-guard, 15 minutes: slow, not stopped
     stat(70001, young.pid, 5000 - 19)    # its own subshell: not a second run
     stat(70002, 1, 5000 - 10)            # a second wan-guard run at the same time
     (t / "ps").write_text("#!/bin/sh\ncat <<'X'\n"

@@ -473,6 +473,10 @@ def main():
               info["soak"]["samples"][-3:])
     for f in findings:
         print("FINDING", f)
+    # On GitHub the findings are also annotations: readable through the API without the job log.
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        for f in findings[:10]:
+            print("::error title=stress::" + " | ".join(str(x) for x in f).replace("\n", " ")[:900])
     shutil.rmtree(tmp, ignore_errors=True)
     print("STRESS_EMULATED=" + ("FAIL" if findings else "PASS"))
     return 1 if findings else 0
