@@ -89,6 +89,7 @@ python3 tests/repository/check-stability-page.py || fail "Panel: Система,
 python3 tests/repository/check-vward-off.py || fail "Emergency switch: Отключить VWARD"
 python3 tests/repository/check-ssh-safety.py || fail "SSH always reachable"
 python3 tests/repository/check-agents.py || fail "Agents: the components agent watches the others"
+python3 tests/repository/check-policy-smartdns.py || fail "Smart DNS wins over IP categories"
 python3 tests/repository/check-resource-yield.py || fail "VWARD gives way to the router"
 python3 tests/repository/check-list-watch.py || fail "Route engine list watch"
 python3 tests/repository/check-wan-guard-params.py || fail "Internet guard limits"

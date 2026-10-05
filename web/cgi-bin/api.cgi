@@ -1569,6 +1569,10 @@ EOF_ISTATS
         fi
     )"
 
+    # Categories left off because they would take a Smart DNS domain into the tunnel.
+    SD_HELD_JSON="$(awk -F'|' 'NF == 2 && $1 ~ /^[a-z0-9][a-z0-9._-]*$/ && $2 ~ /^[a-z0-9.-]+$/ {print $1 "\t" $2}' "${IP_ACTIVE%/*}/smartdns.categories" 2>/dev/null | head -n 40 |
+        "$JQ" -Rn '[inputs | split("\t") | {category: .[0], domain: .[1]}]' 2>/dev/null)"
+    [ -n "$SD_HELD_JSON" ] || SD_HELD_JSON='[]'
     IP_INDEX_JSON="$(awk -F'|' 'NF>=2 && $1 ~ /^[a-z0-9][a-z0-9._-]*$/ {print $1 "\t" $2}' "$IP_INDEX" 2>/dev/null | head -n 300 | "$JQ" -Rn '[inputs | split("\t") | {name: .[0], cidr: (.[1] | tonumber? // 0)}]')"
     [ -n "$IP_INDEX_JSON" ] || IP_INDEX_JSON='[]'
     SERVICES_JSON="$(awk -F'|' 'NF>=3 && $1 !~ /^[[:space:]]*#/ && $2 ~ /^[A-Za-z0-9.-]+$/ {print $1 "\t" $2}' /opt/etc/vward/route-engine/services.conf 2>/dev/null | head -n 50 |
@@ -1603,7 +1607,7 @@ EOF_ISTATS
       --argjson active_categories "$ACTIVE_CATEGORIES" \
       --argjson itdog_ip_categories "$ITDOG_IP_CATEGORIES" \
       --argjson loyal_ip_categories "$LOYAL_IP_CATEGORIES" \
-      --argjson ip_index "$IP_INDEX_JSON" --argjson services "$SERVICES_JSON" \
+      --argjson ip_index "$IP_INDEX_JSON" --argjson smartdns_held "$SD_HELD_JSON" --argjson services "$SERVICES_JSON" \
       --argjson route_sources "$(awk -F'|' 'NF >= 4 && $1 ~ /^[a-z0-9-]+$/ {print $1 "\t" $2 "\t" $3 "\t" $4}' "${VWARD_ROUTE_SOURCES_STATUS:-/opt/var/lib/vward/route-sources.status}" 2>/dev/null |
           "$JQ" -Rn '[inputs | split("\t") | {id: .[0], ts: (.[1] | tonumber? // 0), ok: (.[2] == "ok"), count: (.[3] | tonumber? // 0)}]' 2>/dev/null || echo '[]')" \
       '{
@@ -1624,6 +1628,7 @@ EOF_ISTATS
             managed_routes:$managed_routes,
             source_categories:{itdog:$itdog_ip_categories,loyalsoldier:$loyal_ip_categories},
             active:$active_categories,
+            smartdns_held:$smartdns_held,
             index:$ip_index,
             last_sync:$ip_last
         },
@@ -1726,7 +1731,14 @@ if [ "$ACTION" = "diagnostics" ]; then
             SD_N=$((SD_N + 1))
             SD_DEV="$(ip route get "$SD_IP" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')"
             if [ -n "$SD_DEV" ] && { [ "$SD_DEV" = "${VWARD_TUNNEL_DEVICE:-}" ] || [ -d "/sys/class/net/$SD_DEV/wireguard" ] || [ "$(cat "/sys/class/net/$SD_DEV/type" 2>/dev/null)" = 65534 ]; }; then
-                SD_BAD="$SD_BAD $SD($SD_IP→$SD_DEV)"
+                # Which IP category takes the address, if one does.
+                SD_CAT=""
+                for SD_C in $(cat "${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}/active.categories" 2>/dev/null); do
+                    awk -F'[./]' -v ip="$SD_IP" 'BEGIN {split(ip, q, "."); a = ((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]}
+                        NF == 5 {z = 2 ^ (32 - $5); s = int(((($1 * 256 + $2) * 256 + $3) * 256 + $4) / z) * z; if (a >= s && a < s + z) {f = 1; exit}}
+                        END {exit !f}' "${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}/catalog/$SD_C.cidr" 2>/dev/null && { SD_CAT=$SD_C; break; }
+                done
+                SD_BAD="$SD_BAD${SD_BAD:+, }$SD${SD_CAT:+ (IP-категория $SD_CAT)}"
             fi
         done
         # Smart DNS rows inside AdGuard Home do nothing while Keenetic does not hand it the queries.
@@ -1736,7 +1748,7 @@ if [ "$ACTION" = "diagnostics" ]; then
            ! printf '%s\n' "$DIAG_RC" | awk -v p=":$SD_AGH_PORT" '$1 == "ip" && $2 == "name-server" && index($3, p) {f = 1} END {exit !f}'; then
             SMARTDNS_STATUS=WARN SMARTDNS_DETAIL="Не действует: Smart DNS настроен в AdGuard Home, а AdGuard Home сейчас не в цепочке DNS (см. «Цепочка DNS»)"
         elif [ -n "$SD_BAD" ]; then
-            SMARTDNS_STATUS=FAIL SMARTDNS_DETAIL="Уходит в туннель:$SD_BAD - Smart DNS не работает для всех своих доменов. Проверьте «Доменные списки»."
+            SMARTDNS_STATUS=FAIL SMARTDNS_DETAIL="Идут через VPN, Smart DNS для них не действует: $SD_BAD"
         else
             SMARTDNS_DETAIL="Доменов: $(printf '%s\n' "$SD_DOMAINS" | wc -l | tr -d ' '), проверено адресов: $SD_N, все идут через провайдера"
         fi

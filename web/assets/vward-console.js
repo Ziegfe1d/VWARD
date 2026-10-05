@@ -592,7 +592,7 @@ const LOG_TABS = [
   { id: 'adaptive', label: 'Автоподбор доменов' }, { id: 'routing', label: 'Сверка маршрутов' }, { id: 'policy', label: 'IP-категории' }, { id: 'wifi', label: 'Wi-Fi' },
   { id: 'ads', label: 'Реклама' }, { id: 'updater', label: 'Обновления' }, { id: 'cron', label: 'Расписание' }, { id: 'console', label: 'Панель VWARD' },
   { id: 'awg', label: 'AmneziaWG' }, { id: 'vless', label: 'VLESS' }, { id: 'sentinel', label: 'Реальное время' },
-  { id: 'supervisor', label: 'Агент расписания' }, { id: 'housekeeping', label: 'Обслуживание' }, { id: 'off', label: 'Отключение VWARD' }
+  { id: 'supervisor', label: 'Агент компонентов' }, { id: 'housekeeping', label: 'Обслуживание' }, { id: 'off', label: 'Отключение VWARD' }
 ];
 // «Все»: every journal in one timeline (first, and open by default).
 const LOG_VIEW = [{ id: 'all', label: 'Все' }].concat(LOG_TABS);
@@ -882,15 +882,15 @@ function cardData(id) {
       sub: (vm ? 'исправление ' + vm[2] + (comps ? ' · ' : '') : '') + (comps ? comps + ' ' + plural(comps, 'компонент', 'компонента', 'компонентов') : vm ? '' : 'версия VWARD'), pill: p.version ? ['ok', 'Работает'] : ['', '—'] }; }
     case 'updates': return { icon: 'refresh', title: 'Обновления', to: 'updates', value: ['IDLE', 'COMMITTED', undefined, ''].includes(p.phase) ? 'Новых нет' : phaseText(p.phase), sub: 'канал ' + (p.channel || '—') + (p.check_interval_seconds ? ' · проверка раз в ' + durText(p.check_interval_seconds) : ''), pill: ['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase) ? ['crit', 'Ошибка'] : ['', ''] };
     case 'wan': return { icon: 'globe', title: 'Интернет', to: 'wan', value: w.internet ? 'В сети' : s.wan ? 'Нет связи' : '—', sub: (w.address || 'адрес не получен') + (w.speed ? ' · ' + fmtSpeed(w.speed) : ''), pill: w.internet ? ['ok', 'Работает'] : s.wan ? ['crit', 'Не работает'] : ['', '—'] };
-    case 'vpn': return { icon: 'shield', title: 'VPN', to: 'vpn', value: up + ' из ' + tunnels.length, sub: isTrue(wg.failopen_active) ? 'трафик идёт напрямую' : tunnels.some(t => t.name === prof().tunnel_interface && tunOff(t)) ? 'туннель по умолчанию выключен, списки идут напрямую' : 'трафик идёт через VPN', pill: !tunnels.length ? ['', 'Нет туннелей'] : up === tunnels.length ? ['ok', 'Работает'] : ['warn', 'Внимание'] };
+    case 'vpn': return { icon: 'shield', title: 'VPN', to: 'vpn', value: up + ' из ' + tunnels.length, sub: isTrue(wg.failopen_active) ? 'трафик идёт напрямую' : up < tunnels.length ? 'не на связи: ' + tunnels.filter(t => !isTrue(t.connected)).map(t => tunLabel(t.name)).join(', ') : tunnels.some(t => t.name === prof().tunnel_interface && tunOff(t)) ? 'туннель по умолчанию выключен, списки идут напрямую' : 'трафик идёт через VPN', pill: !tunnels.length ? ['', 'Нет туннелей'] : up === tunnels.length ? ['ok', 'Работает'] : ['warn', 'Внимание'] };
     case 'lists': {
       const ls = (S.lists && S.lists.lists) || [], vpn = ls.filter(l => viaIs(l, 'vpn')).length, around = ls.filter(l => viaIs(l, 'bypass')).length, auto = ls.filter(l => l.auto && viaIs(l, 'vpn')).length;
       return { icon: 'route', title: 'Доменные списки', to: 'lists', value: S.lists ? vpn + ' через VPN' : '—', sub: S.lists ? around + ' в обход VPN' : 'списки Keenetic', pill: !S.lists ? ['', '—'] : auto ? ['warn', 'Переведено авто: ' + auto] : ['info', ls.length + ' ' + plural(ls.length, 'список', 'списка', 'списков')] };
     }
-    case 'routes': return { icon: 'route', title: 'Маршрутизация', to: 'routes', value: fmtInt(r.ip && r.ip.managed_routes) + ' ' + plural(num(r.ip && r.ip.managed_routes) || 0, 'маршрут', 'маршрута', 'маршрутов'), sub: fmtInt(r.domains && r.domains.unique) + ' доменов · ' + fmtInt(r.domains && r.domains.categories) + ' категорий', pill: S.route ? ['ok', 'Работает'] : ['', '—'] };
+    case 'routes': return { icon: 'route', title: 'Маршрутизация', to: 'routes', value: fmtInt(r.ip && r.ip.managed_routes) + ' ' + plural(num(r.ip && r.ip.managed_routes) || 0, 'подсеть', 'подсети', 'подсетей'), sub: 'через VPN · IP-категорий: ' + fmtInt(r.ip && r.ip.active_count), pill: S.route ? ['ok', 'Работает'] : ['', '—'] };
     case 'wifi': return { icon: 'wifi', title: 'Wi-Fi клиенты', to: 'wifi', value: fmtInt(wf.count) + ' ' + plural(num(wf.count) || 0, 'клиент', 'клиента', 'клиентов'), sub: wf.enabled ? (warnWifi ? warnWifi + ' требуют внимания' : 'без замечаний') : 'сбор данных выключен', pill: !S.wifi ? ['', '—'] : warnWifi ? ['warn', 'Внимание'] : wf.enabled ? ['ok', 'Работает'] : ['', 'Выключен'] };
     case 'ads': { const c = a.counts || {}; return { icon: 'block', title: 'Реклама', to: 'ads', value: fmtInt(c.blocked), sub: 'заблокировано доменов', pill: !S.ads ? ['', '—'] : a.paused ? ['warn', 'Пауза'] : ((a.dns_guard || {}).chain_state === 'out') ? ['warn', 'Не фильтруется'] : ['ok', 'Работает'] }; }
-    case 'runtime': return { icon: 'runtime', title: 'Среда выполнения', to: 'system', value: sv.crond && sv.supervisor ? 'Работает' : s.services ? 'Не работает' : '—', sub: !s.services ? 'планировщик и агент расписания' : sv.crond && sv.supervisor ? 'планировщик и агент расписания работают' : 'не работает: ' + [sv.crond ? '' : 'планировщик', sv.supervisor ? '' : 'агент расписания'].filter(Boolean).join(' и '), pill: sv.crond && sv.supervisor ? ['ok', 'Работает'] : s.services ? ['crit', 'Не работает'] : ['', '—'] };
+    case 'runtime': return { icon: 'runtime', title: 'Среда выполнения', to: 'system', value: sv.crond && sv.supervisor ? 'Работает' : s.services ? 'Не работает' : '—', sub: !s.services ? 'планировщик и агент компонентов' : sv.crond && sv.supervisor ? 'планировщик и агент компонентов работают' : 'не работает: ' + [sv.crond ? '' : 'планировщик', sv.supervisor ? '' : 'агент компонентов'].filter(Boolean).join(' и '), pill: sv.crond && sv.supervisor ? ['ok', 'Работает'] : s.services ? ['crit', 'Не работает'] : ['', '—'] };
     case 'storage': { const t = num(g.total_kb), f = num(g.free_kb), used = t ? Math.round((t - f) / t * 100) : null; return { icon: 'storage', title: 'Хранилище', to: 'system', value: fmtKB(f), sub: 'свободно' + (t ? ' из ' + fmtKB(t) : '') + (g.filesystem ? ' · ' + g.filesystem : ''), pill: used == null ? ['', '—'] : used > 90 ? ['warn', used + ' %'] : ['ok', used + ' %'], meter: used }; }
   }
   return null;
@@ -1137,7 +1137,7 @@ const RENDER = {
         routeSourcesRow(r)
       ])) +
       panel('Подсети через VPN', kv([
-        ['IP-категории', r.ip && r.ip.categories != null ? fmtInt(r.ip.active_count) + ' активны из ' + fmtInt(r.ip.categories) : '—', '', 'd-ipcats'],
+        ['IP-категории', r.ip && r.ip.categories != null ? fmtInt(r.ip.active_count) + ' из ' + fmtInt(r.ip.categories) + ' · ' + fmtInt(r.ip.managed_routes) + ' ' + plural(num(r.ip.managed_routes) || 0, 'подсеть', 'подсети', 'подсетей') : '—', '', 'd-ipcats'],
         ['Обновление IP-категорий', ipSyncStamp((r.ip || {}).last_sync), '', 'a-policy']
       ]), { desc: 'Подсети сервисов, которые идут через VPN.' }) +
       panel('Автоподбор', '<dl class="kv">' +
@@ -1470,9 +1470,9 @@ const RENDER = {
   'd-diag'() {
     const d = S.diag, map = { 'console-api': 'settings', opt: 'system', lighttpd: 'c-console', crond: 'd-cron', supervisor: 'd-cron', adguard: 'ads', adaptive: 'c-route-engine', updater: 'u-vward', config: 'u-vward', wan: 'wan', wg: 'vpn', smartdns: 'lists' };
     const sv = st().services || {};
-    return panel('Задания по расписанию', kv([['Задания по расписанию', sv.crond && sv.supervisor ? 'Работают' : sv.crond ? 'Supervisor остановлен' : 'расписание не работает', sv.crond && sv.supervisor ? 'ok' : 'crit', 'd-cron']]),
+    return panel('Задания по расписанию', kv([['Задания по расписанию', sv.crond && sv.supervisor ? 'Работают' : sv.crond ? 'Агент компонентов остановлен' : 'расписание не работает', sv.crond && sv.supervisor ? 'ok' : 'crit', 'd-cron']]),
         { desc: 'Нажмите, чтобы открыть задания.' }) +
-      panel('Диагностика', (d && d.checks ? '<ul class="rows">' + d.checks.map(x => { const to = map[x.id]; return '<li class="row' + (to ? ' link" role="button" tabindex="0" data-go="' + to + '"' : '"') + '><div class="row-main"><b>' + esc(x.label) + '</b><small>' + esc(x.detail || '') + '</small></div><span class="pill ' + (x.status === 'PASS' ? 'ok' : x.status === 'FAIL' ? 'crit' : 'warn') + '">' + (x.status === 'PASS' ? 'Работает' : x.status === 'FAIL' ? 'Не работает' : 'Внимание') + '</span>' + (to ? ico('chevron', 'chev') : '') + '</li>'; }).join('') + '</ul>' : empty(S.errors.diag ? 'Диагностика не выполнена: ' + S.errors.diag : 'Загрузка…')) +
+      panel('Диагностика', (d && d.checks ? '<ul class="rows">' + d.checks.map(x => { const to = x.id === 'smartdns' && /IP-категория/.test(x.detail || '') ? 'd-ipcats' : map[x.id]; return '<li class="row' + (to ? ' link" role="button" tabindex="0" data-go="' + to + '"' : '"') + '><div class="row-main"><b>' + esc(x.label) + '</b><small>' + esc(x.detail || '') + '</small></div><span class="pill ' + (x.status === 'PASS' ? 'ok' : x.status === 'FAIL' ? 'crit' : 'warn') + '">' + (x.status === 'PASS' ? 'Работает' : x.status === 'FAIL' ? 'Не работает' : 'Внимание') + '</span>' + (to ? ico('chevron', 'chev') : '') + '</li>'; }).join('') + '</ul>' : empty(S.errors.diag ? 'Диагностика не выполнена: ' + S.errors.diag : 'Загрузка…')) +
       '<div class="panel-actions">' + btn('diag-run', 'check', 'Запустить проверку', 'primary') + '</div>') +
       panel('Технические журналы', kv([['Технические журналы', 'для сохранения и отправки', '', 'logs']]), { desc: 'Журналы как есть, для диагностики.' });
   },
@@ -1516,7 +1516,7 @@ const RENDER = {
     const row = x => { const comp = JOB_COMPONENT[x.name] || x.component, on = !comp || compOn(comp), ok = x.rc === 0;
       return '<li class="row' + (comp ? ' link" role="button" tabindex="0" data-go="c-' + esc(comp) : '') + '"><div class="row-main"><b>' + esc(JOB_NAMES[x.name] || x.name) + '</b><small>' + esc(cronText(x.schedule)) + ' · ' + esc(fmtStamp(x.last) || 'ещё не запускалось') + '</small></div>' +
         '<span class="pill ' + (!on ? 'warn' : x.rc == null ? '' : ok ? 'ok' : 'crit') + '">' + (!on ? 'Выключен' : x.rc == null ? 'Нет данных' : ok ? 'Успешно' : 'Ошибка, код ' + x.rc) + '</span>' + (comp ? ico('chevron', 'chev') : '') + '</li>'; };
-    return panel('Служба расписания', kv([['Планировщик заданий', sv.crond ? 'Работает' : 'Не работает', sv.crond ? 'ok' : 'crit'], ['Агент расписания', sv.supervisor ? 'Работает' : 'Не работает', sv.supervisor ? 'ok' : 'crit']])) +
+    return panel('Служба расписания', kv([['Планировщик заданий', sv.crond ? 'Работает' : 'Не работает', sv.crond ? 'ok' : 'crit'], ['Агент компонентов', sv.supervisor ? 'Работает' : 'Не работает', sv.supervisor ? 'ok' : 'crit']])) +
       panel('Задания', !cr ? empty('Загрузка…') : !cr.ok ? empty(errText(cr)) : jobs.length ? '<ul class="rows">' + jobs.map(row).join('') + '</ul>' : empty('Задания не найдены'),
         { desc: 'Задания VWARD по расписанию.' });
   },
@@ -1625,8 +1625,9 @@ const RENDER = {
       { desc: 'Домены, которые не открылись напрямую и ушли в VPN.' });
   },
   'd-ipcats'() {
-    const ip = (S.route && S.route.ip) || {}, act = ip.active || [], idx = (ip.index || []).slice().sort((a, b) => (act.includes(b.name) - act.includes(a.name)) || a.name.localeCompare(b.name)), off = cfgRoute().ip_excluded || [];
-    return cfgNote() + panel('IP-категории', idx.length ? '<dl class="kv">' + idx.map(x => ctrlRow(x.name, sw('data-ipcat="' + esc(x.name) + '"', !off.includes(x.name), 'IP-категория ' + x.name, !cfgOk()), fmtInt(x.cidr) + ' ' + plural(x.cidr, 'сеть', 'сети', 'сетей') + (act.includes(x.name) ? ' · сейчас через VPN' : ''))).join('') + '</dl>' : empty('Каталог IP-категорий ещё не загружен'),
+    const ip = (S.route && S.route.ip) || {}, act = ip.active || [], idx = (ip.index || []).slice().sort((a, b) => (act.includes(b.name) - act.includes(a.name)) || a.name.localeCompare(b.name)), off = cfgRoute().ip_excluded || [], held = {};
+    (ip.smartdns_held || []).forEach(h => { held[h.category] = held[h.category] || h.domain; });
+    return cfgNote() + panel('IP-категории', idx.length ? '<dl class="kv">' + idx.map(x => ctrlRow(x.name, sw('data-ipcat="' + esc(x.name) + '"', !off.includes(x.name), 'IP-категория ' + x.name, !cfgOk()), fmtInt(x.cidr) + ' ' + plural(x.cidr, 'сеть', 'сети', 'сетей') + (act.includes(x.name) ? ' · сейчас через VPN' : held[x.name] ? ' · не включена: в ней адрес Smart DNS (' + esc(held[x.name]) + ')' : ''))).join('') + '</dl>' : empty('Каталог IP-категорий ещё не загружен'),
       { desc: 'Подсети сервисов, которые идут через VPN.' });
   },
   'd-querylog'() {
@@ -2155,7 +2156,7 @@ const hsSec = t => { const h = t && t.handshake != null ? num(t.handshake) : nul
 function agoText(sec) { if (sec == null || isNaN(sec)) return '—'; if (sec < 60) return sec + ' с назад'; if (sec < 3600) return Math.round(sec / 60) + ' мин назад'; if (sec < 86400) return Math.round(sec / 3600) + ' ч назад'; return Math.round(sec / 86400) + ' д назад'; }
 // An interval in plain units: 900 → «15 мин», 86400 → «24 ч».
 function durText(sec) { const n = num(sec); if (n == null) return '—'; if (n < 60) return n + ' с'; if (n < 3600) return Math.round(n / 60) + ' мин'; return Math.round(n / 3600) + ' ч'; }
-const JOB_NAMES = { 'vward-route-reconciler.sh': 'Сверка маршрутов', 'S91vward-route-engine': 'Перезапуск маршрутизации', 'vward-policy-chain.sh': 'Обновление IP-категорий', 'vward-route-hints-update.sh': 'Подсказки каталога', 'vward-tunnel-health.sh': 'Агент VPN', 'S92vward-runtime': 'Агент расписания', 'vward-wan-guard.sh': 'Восстановление интернета', 'vward-housekeeping.sh': 'Сжатие журналов', 'vward-ads-privacy-scheduler.sh': 'Блокировка рекламы', 'vward-wifi-client-scheduler.sh': 'Контроль Wi-Fi клиентов' };
+const JOB_NAMES = { 'vward-route-reconciler.sh': 'Сверка маршрутов', 'S91vward-route-engine': 'Перезапуск маршрутизации', 'vward-policy-chain.sh': 'Обновление IP-категорий', 'vward-route-hints-update.sh': 'Подсказки каталога', 'vward-tunnel-health.sh': 'Агент VPN', 'S92vward-runtime': 'Агент компонентов', 'vward-wan-guard.sh': 'Восстановление интернета', 'vward-housekeeping.sh': 'Сжатие журналов', 'vward-ads-privacy-scheduler.sh': 'Блокировка рекламы', 'vward-wifi-client-scheduler.sh': 'Контроль Wi-Fi клиентов' };
 const JOB_COMPONENT = { 'S91vward-route-engine': 'route-engine' };
 function cronText(c) {
   const f = String(c || '').split(' ');

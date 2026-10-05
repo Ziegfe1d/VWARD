@@ -36,6 +36,10 @@ ACTIVE="$STATE/active.categories"
 # Categories switched off in the Panel never get routes, even if their domains are routed.
 EXCLUDED="${VWARD_POLICY_EXCLUDED:-/opt/etc/vward/policy-sync/excluded.categories}"
 LOCK="$STATE/lock"
+# Categories left off because they would take a Smart DNS domain into the tunnel.
+SMARTDNS_HELD="$STATE/smartdns.categories"
+LISTS_CONF="${VWARD_DOMAIN_LISTS_CONF:-/opt/etc/vward/route-engine/domain-lists.conf}"
+NSLOOKUP="${VWARD_NSLOOKUP:-nslookup}"
 
 HINT_CATALOG="/opt/etc/vward/route-engine/hints-catalog.tsv"
 HINT_INCLUDES="/opt/etc/vward/route-engine/hints-includes.tsv"
@@ -609,6 +613,53 @@ collect_categories()
     mv "$OUT.sorted" "$OUT" || rm -f "$OUT.sorted"
 }
 
+# Smart DNS wins over an IP category: a category whose subnets hold the address a Smart DNS
+# domain resolves to would take that domain into the tunnel (Cloudflare carries openai.com),
+# so it gets no routes. "category|domain" for the Panel goes to $SMARTDNS_HELD.
+smartdns_hold()
+{
+    : > "$SMARTDNS_HELD.new"
+    if [ -s "$2" ] && [ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" != 0 ]; then
+        SD_ADDR="$WORK/smartdns-addresses"
+        {
+            awk '
+                /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
+                ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print tolower($NF)}
+            ' "$1"
+            command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains
+        } | sort -u | head -n 32 |
+        while IFS= read -r SD; do
+            case "$SD" in ''|*[!a-z0-9.-]*) continue ;; esac
+            "$NSLOOKUP" "$SD" "${VWARD_DNS_SERVER:-127.0.0.1}" 2>/dev/null |
+                awk -v d="$SD" '/^Name:/ {n = 1; next} n {for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) print d, $i}'
+        done > "$SD_ADDR"
+
+        if [ -s "$SD_ADDR" ]; then
+            while IFS= read -r CAT; do
+                [ -s "$CATALOG/$CAT.cidr" ] || continue
+                awk -F'[./]' -v c="$CAT" '
+                    NR == FNR {split($0, p, " "); split(p[2], q, "."); ip[FNR] = ((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]; dom[FNR] = p[1]; n = FNR; next}
+                    NF == 5 {
+                        z = 2 ^ (32 - $5); s = int(((($1 * 256 + $2) * 256 + $3) * 256 + $4) / z) * z
+                        for (i = 1; i <= n; i++) if (ip[i] >= s && ip[i] < s + z) {print c "|" dom[i]; exit}
+                    }' "$SD_ADDR" "$CATALOG/$CAT.cidr"
+            done < "$2" >> "$SMARTDNS_HELD.new"
+        fi
+    fi
+
+    if [ -s "$SMARTDNS_HELD.new" ]; then
+        cut -d'|' -f1 "$SMARTDNS_HELD.new" > "$WORK/smartdns-held"
+        grep -vxF -f "$WORK/smartdns-held" "$2" > "$2.kept" || true
+        mv "$2.kept" "$2"
+        log "SKIP smartdns $(tr '\n' ' ' < "$SMARTDNS_HELD.new")"
+    fi
+    if ! cmp -s "$SMARTDNS_HELD.new" "$SMARTDNS_HELD" 2>/dev/null; then
+        mv -f "$SMARTDNS_HELD.new" "$SMARTDNS_HELD"
+    else
+        rm -f "$SMARTDNS_HELD.new"
+    fi
+}
+
 route_line()
 {
     CIDR="$1"
@@ -808,6 +859,8 @@ if [ -s "$EXCLUDED" ]; then
     grep -vxF -f "$EXCLUDED" "$CATS" > "$CATS.kept" || true
     mv "$CATS.kept" "$CATS"
 fi
+
+smartdns_hold "$RUN" "$CATS"
 
 echo "VPN_DOMAINS=$(wc -l < "$DOMAINS")"
 echo "MATCHED_IP_CATEGORIES=$(wc -l < "$CATS")"
