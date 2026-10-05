@@ -7,7 +7,11 @@ VWARD_ADMISSION_SLOT=${VWARD_ADMISSION_SLOT:-}
 # do nothing while <id>.disabled exists here (written by the Panel).
 VWARD_COMPONENT_STATE=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
 
+# VWARD switched off as a whole (vward-off.sh, «Отключить VWARD»): every component is.
+vward_off() { [ -e "$VWARD_COMPONENT_STATE/vward.off" ]; }
+
 vward_component_enabled() {
+    ! vward_off || return 1
     case "${1:-}" in ''|*[!a-z0-9-]*) return 0 ;; esac
     [ ! -e "$VWARD_COMPONENT_STATE/$1.disabled" ]
 }

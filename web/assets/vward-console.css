@@ -29,8 +29,8 @@
   --shadow:0 1px 2px rgba(0,0,0,.4);--overlay:rgba(0,0,0,.55);
 }
 *{box-sizing:border-box}
-html{min-height:100%;scrollbar-gutter:stable}
-body{min-height:100vh;min-height:100dvh;margin:0;background:var(--bg);color:var(--text);font:400 var(--fs-md)/1.45 var(--font);-webkit-font-smoothing:antialiased;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+html{min-height:100%;scrollbar-gutter:stable;overscroll-behavior-y:contain}
+body{min-height:100vh;min-height:100dvh;margin:0;background:var(--bg);color:var(--text);font:400 var(--fs-md)/1.45 var(--font);overscroll-behavior-y:contain;-webkit-font-smoothing:antialiased;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
 button{font:inherit;color:inherit;cursor:pointer}
 input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -121,6 +121,21 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .kv dd select.input{max-width:190px}
 .kv-row .hint{display:block;margin-top:2px;color:var(--faint);font-size:var(--fs-xs)}
 .kv-row.sub dt{padding-left:14px}
+/* A slider with its value next to it (journal size). */
+.range-field{display:inline-flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap;justify-content:flex-end}
+.range{width:180px;max-width:100%;accent-color:var(--accent,currentColor);min-height:32px}
+.range-field output{font-size:var(--fs-sm);color:var(--muted);min-width:9ch;text-align:right}
+@media (max-width:420px){.range{width:140px}}
+/* VWARD switched off as a whole: on top of every page, with the way back. */
+.off-banner{display:flex;align-items:center;gap:12px;margin:0 16px 12px;padding:12px 14px;border-radius:var(--r-md);background:var(--warn-soft);color:var(--warn)}
+.off-banner>.icon{flex:none;width:22px;height:22px}
+.off-banner>div{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.off-banner b{font-weight:600}
+.off-banner span{font-size:var(--fs-sm)}
+.off-banner .btn{flex:none}
+.off-banner .spin{animation:upd-spin 1.2s linear infinite}
+@media (prefers-reduced-motion:reduce){.off-banner .spin{animation:none}}
+@media (max-width:480px){.off-banner{flex-wrap:wrap}.off-banner .btn{width:100%}}
 .field-warn{margin:0 16px 8px;padding:8px 12px;border-radius:var(--r-md);background:var(--warn-soft);color:var(--warn);font-size:var(--fs-sm)}
 
 /* Метки состояния */
@@ -379,6 +394,15 @@ small.st .icon{width:14px;height:14px}
 .overview-bar .btn{flex:none}
 .icon-btn.spinning .icon{animation:upd-spin 1.2s linear infinite}
 @keyframes upd-spin{to{transform:rotate(360deg)}}
+/* A new page slides in; pulling the page down from its top refreshes it. */
+@keyframes page-enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.content.page-enter{animation:page-enter .18s ease-out}
+.pull-hint{position:fixed;top:0;left:50%;z-index:60;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:var(--surface,#fff);color:var(--muted);box-shadow:0 2px 8px rgba(0,0,0,.18);transform:translate(-50%,-48px);transition:color .15s;pointer-events:none}
+.pull-hint .icon{width:20px;height:20px}
+.pull-hint.ready{color:var(--accent)}
+.pull-hint.spin{transform:translate(-50%,24px)!important;transition:transform .15s}
+.pull-hint.spin .icon{animation:upd-spin 1s linear infinite}
+@media (prefers-reduced-motion:reduce){.content.page-enter{animation:none}.pull-hint.spin .icon{animation:none}}
 @media (prefers-reduced-motion:reduce){.icon-btn.spinning .icon{animation:none}}
 
 /* Three-way slider (Wi-Fi band): the thumb glides under the chosen option. */

@@ -313,5 +313,25 @@ PATH=$WORK/bin-feeds:$PATH VWARD_ROOT_PREFIX=$ROOT VWARD_UPDATE_CONFIG=$CONFIG V
     VWARD_UPDATER_ROOT=$SLOTS "$SLOTS/current/vward-update.sh" --check > "$WORK/last.out" 2>&1; rc=$?
 check 'the same sequence with another update id is still a replay' [ "$rc" -eq 32 ]
 
+# 17. No room on the USB drive: the update is refused before a single file is touched.
+for kind in STAGING BACKUP TARGET; do
+    new_root "full-$kind"
+    make_manifest "full-$kind" 0.2.0-rc.2 10 "$CUR_ENGINE"
+    env "VWARD_TEST_FREE_${kind}_KB=1" sh -c 'VWARD_ROOT_PREFIX=$1 VWARD_UPDATE_CONFIG=$2 VWARD_TEST_MANIFEST=$3 VWARD_TEST_FILES_DIR=$4 VWARD_UPDATER_ROOT=$5 "$5/current/vward-update.sh" --apply' \
+        sh "$ROOT" "$CONFIG" "$MANIFEST" "$FILES" "$SLOTS" > "$WORK/last.out" 2>&1; rc=$?
+    check "no room ($kind): refused" [ "$rc" -ne 0 ]
+    check "no room ($kind): the program files stay as they were" [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = route-old ]
+    check "no room ($kind): the version stays" [ "$(cat "$ROOT/opt/share/vward/VERSION")" = 0.2.0-rc.1 ]
+done
+
+# 18. A file cut short on the way (a dropped connection): refused, nothing replaced.
+new_root cut
+make_manifest cut 0.2.0-rc.2 10 "$CUR_ENGINE"
+route_sha=$(jq -r '.signed.files[0].sha256' "$MANIFEST")
+head -c 3 "$FILES/$route_sha" > "$FILES/$route_sha.cut" && mv "$FILES/$route_sha.cut" "$FILES/$route_sha"
+run --apply; rc=$?
+check 'a file cut short is refused' [ "$rc" -eq 31 ]
+check 'nothing changes after a cut file' [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = route-old ]
+
 printf 'v2 simulations: %s passed, %s failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]

@@ -132,7 +132,7 @@ if not tcpdump_counter or "udp dst port 53" in tcpdump_counter.group(0):
 if "data-log-go" in js or "'open-log'" in js:
     fail("a section still sends the user to the raw journals")
 for row in ("['История автоподбора', '', '', 'a-adaptive']", "['История сверки маршрутов', '', '', 'a-routing']",
-            "['История защиты VPN', '', '', 'a-tunnel']", "['Возврат в VPN', 'автоматически'"):
+            "['История агента VPN', '', '', 'a-tunnel']", "['Возврат в VPN', 'автоматически'"):
     if row not in js:
         fail(f"Panel row changed: {row}")
 

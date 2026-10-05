@@ -102,7 +102,7 @@ def main():
                             json.loads(text)
                         except ValueError:
                             problems.append(f"{what}: not JSON: {text[:120]!r}")
-                    elif status < 500 and "download" not in action and action not in ("files", "log"):
+                    elif status < 500 and "download" not in action and action not in ("files", "log", "log-archive"):
                         problems.append(f"{what}: Content-Type {ctype!r}: {text[:80]!r}")
                     if SHELL_ERRORS.search(errt):
                         problems.append(f"{what}: shell said: {errt.strip()[-240:]}")

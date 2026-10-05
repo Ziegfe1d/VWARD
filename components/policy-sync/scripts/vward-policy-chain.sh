@@ -30,16 +30,7 @@ log() {
         "$*" >> "$LOG"
 }
 
-# Ограничиваем размер журнала.
-if [ -f "$LOG" ]; then
-    SIZE="$(wc -c 2>/dev/null < "$LOG")"
-    [ -n "$SIZE" ] || SIZE=0
-
-    if [ "$SIZE" -gt 524288 ]; then
-        tail -n 1500 "$LOG" > "$LOG.tmp" &&
-        mv "$LOG.tmp" "$LOG" || rm -f "$LOG.tmp"
-    fi
-fi
+# The journal's size: housekeeping moves it whole into the archive (nothing is cut here).
 
 BEFORE_SUMMARY="$(tail -n 1 "$SUMMARY" 2>/dev/null)"
 

@@ -6,6 +6,7 @@ programs kept running, 20% repairs that helped, 20% hours with enough memory."""
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -73,6 +74,6 @@ for need in ("'d-stability': { title: 'Стабильность', parent: 'syste
              "['Стабильность', sc ? sc.index + '% за сутки'", "'d-stability'() {"):
     if need not in js:
         fail(f"the Panel lacks {need!r}")
-if "stability) ;;" not in (ROOT / "web/cgi-bin/api.cgi").read_text():
+if not re.search(r"\|stability(\|[a-z-]+)*\) ;;", (ROOT / "web/cgi-bin/api.cgi").read_text()):
     fail("the API accepts action=stability")
 print("STABILITY_PAGE=PASS")

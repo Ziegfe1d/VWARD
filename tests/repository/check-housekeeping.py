@@ -2,8 +2,9 @@
 """Housekeeping on the router's own tools: logs rotate, old copies go.
 
 Runs vward-housekeeping.sh with BusyBox applets first in PATH (no GNU find, so
-no -printf) on a scratch tree: every log in the policy rotates at its limit,
-logs under it stay, size caps keep the newest entry, and copies made on every
+no -printf) on a scratch tree: every log in the policy goes whole into the
+journal archive at its limit (the copies an older version kept join it), logs
+under it stay, the archive keeps the owner's term and size (journal.conf), size caps keep the newest entry, and copies made on every
 settings save, ad rule and publish are kept to their newest few.  Tunnel .conf
 uploads an older version left on the USB drive are removed.
 """
@@ -48,6 +49,9 @@ with tempfile.TemporaryDirectory() as tmp:
     (log / "vward/console-audit.log").write_text("c" * 300000)
     (log / "vward-route.log").write_text("small\n")
     (log / "vward-unknown.log").write_text("u" * 900000)
+    # The two copies an older version kept next to a journal.
+    for n in (1, 2):
+        f = log / f"vward-tunnel-guard.log.{n}.gz"; f.write_bytes(gzip.compress(b"old%d" % n)); aged(f, 60 * n)
 
     # Copies kept to their newest few.
     for i in range(15):
@@ -95,13 +99,18 @@ with tempfile.TemporaryDirectory() as tmp:
     if res.returncode != 0:
         fail(f"housekeeping failed: {res.stdout[-600:]} {res.stderr[-600:]}")
 
+    arch = log / "vward/archive"
     for f in (log / "vward-wan-guard.log", log / "vward/console-audit.log"):
-        if f.stat().st_size != 0 or not Path(str(f) + ".1.gz").exists():
-            fail(f"{f.name} over its limit must rotate: {res.stdout}")
-        if gzip.decompress(Path(str(f) + ".1.gz").read_bytes())[:1] not in (b"w", b"c"):
-            fail(f"{f.name}.1.gz must hold the old log")
-    if (log / "vward-route.log").read_text() != "small\n" or Path(str(log / "vward-route.log") + ".1.gz").exists():
+        got = list(arch.glob(f.name + ".*.gz"))
+        if f.stat().st_size != 0 or len(got) != 1:
+            fail(f"{f.name} over its limit must go into the archive: {res.stdout}")
+        if gzip.decompress(got[0].read_bytes()) != (b"w" if "wan" in f.name else b"c") * 300000:
+            fail(f"{got[0].name} must hold the whole old journal")
+    if (log / "vward-route.log").read_text() != "small\n" or list(arch.glob("vward-route.log.*")):
         fail("a log under its limit stays as it is")
+    olds = sorted(gzip.decompress(p.read_bytes()) for p in arch.glob("vward-tunnel-guard.log.*.gz"))
+    if olds != [b"old1", b"old2"] or list(log.glob("vward-tunnel-guard.log.*.gz")):
+        fail("the copies an older version kept must join the archive")
     if (log / "vward-unknown.log").stat().st_size != 900000:
         fail("files outside the policy are not touched")
 
@@ -126,6 +135,31 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("a lock whose owner is gone must go")
     if "rotated=2|errors=0" not in (log / "vward-housekeeping.log").read_text():
         fail("the run is logged")
+
+    # The owner's term: archived journals older than it go, younger ones stay.
+    etc = r / "opt/etc/vward"
+    (etc / "journal.conf").write_text("KEEP_DAYS=3\nMAX_MB=0\n")
+    old = arch / "vward-wan-guard.log.20260901-000000.gz"; old.write_bytes(gzip.compress(b"x")); aged(old, 4 * 1440)
+    young = arch / "vward-wan-guard.log.20260904-000000.gz"; young.write_bytes(gzip.compress(b"y")); aged(young, 2 * 1440)
+    big = [arch / f"vward-route.log.2026090{i}-000000.gz" for i in range(5)]
+    for i, f in enumerate(big):
+        f.write_bytes(os.urandom(400 * 1024)); aged(f, 600 - i * 60)
+    res = subprocess.run([busybox, "sh", str(SCRIPT)], env=env, capture_output=True, text=True)
+    if res.returncode != 0 or old.exists() or not young.exists():
+        fail(f"the term: older than 3 days goes, younger stays: {res.stdout[-400:]}")
+    if not all(f.exists() for f in big):
+        fail("without a size limit nothing more goes")
+    # The size limit: the oldest archived journals go until the archive and the live ones fit.
+    (etc / "journal.conf").write_text("KEEP_DAYS=365\nMAX_MB=1\n")
+    res = subprocess.run([busybox, "sh", str(SCRIPT)], env=env, capture_output=True, text=True)
+    left = [f for f in big if f.exists()]
+    if res.returncode != 0 or not big[-1].exists() or big[0].exists() or len(left) > 2:
+        fail(f"1 MB: the oldest archived journals go, the newest stays: {[f.name for f in left]}")
+    # A limit nobody can set is ignored.
+    (etc / "journal.conf").write_text("KEEP_DAYS=0\nMAX_MB=-5\n")
+    res = subprocess.run([busybox, "sh", str(SCRIPT)], env=env, capture_output=True, text=True)
+    if res.returncode != 0 or not big[-1].exists():
+        fail("a broken journal.conf must fall back to the defaults")
 
     if sorted(p.name for p in cron.iterdir()) != ["root"]:
         fail(f"crontab copies must leave the cron folder: {sorted(p.name for p in cron.iterdir())}")

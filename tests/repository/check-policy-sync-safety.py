@@ -163,4 +163,15 @@ with tempfile.TemporaryDirectory() as td:
     if result.returncode != 0:
         fail(f"membership_state missed clashmini.com in domain-list11: rc={result.returncode}")
 
+# Only public subnets reach the tunnel: a home, provider or reserved range there would take the
+# router's own answers too (an SSH session from the internet). The filter of build_catalog, run.
+sync_source = (ROOT / "components/policy-sync/scripts/vward-policy-sync.sh").read_text(encoding="utf-8")
+m = re.search(r"awk -F'\[\./\]' '(.*?)' \"\$FILE\"", sync_source, re.S)
+if not m:
+    fail("build_catalog has no filter of reserved ranges")
+sample = "8.8.8.0/24\n10.0.0.0/8\n192.168.1.0/24\n100.64.0.0/10\n1.2.3.4/32\n0.0.0.0/0\n172.0.0.0/8\n172.20.0.0/16\nfoo\n224.0.0.0/4\n91.108.4.0/22\n1.0.0.0/7\n300.1.1.0/24\n"
+kept = subprocess.run(["awk", "-F[./]", m.group(1)], input=sample, text=True, capture_output=True).stdout.split()
+if kept != ["8.8.8.0/24", "1.2.3.4/32", "91.108.4.0/22"]:
+    fail(f"reserved, private or too wide subnets pass the filter: {kept}")
+
 print("POLICY_SYNC_SAFETY=PASS")

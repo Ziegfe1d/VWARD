@@ -12,7 +12,7 @@ did and when, from the router's own log of changes (ndmc), the guards' state and
   vpn-spare        two tunnels, the main one dies: VWARD's routes move to the second one
                    (nothing goes direct) and come back when the main one answers again
   vpn-spare-stay   the same with «Возвращать на основной» off: the routes stay on the second
-  guard-off        «Защита VPN» off: a dead VPN is left alone; on again: it acts
+  guard-off        «Агент VPN» off: a dead VPN is left alone; on again: it acts
   wan-down         no internet for 12 minutes: the internet guard renews and restarts the
                    provider's connection within its limits, the VPN guard does not touch the
                    tunnel (the VPN is not the culprit), all calm once the internet is back
@@ -33,6 +33,10 @@ did and when, from the router's own log of changes (ndmc), the guards' state and
   vpn-and-agh      VPN and AdGuard Home fail together: each guard does its part
   sentinel         the real-time watcher's actions: «chain-fail» takes a silent AdGuard Home
                    out at once, «dns-fail» starts a dead one, both through the same gates
+  vward-off        «Отключить VWARD»: routes into the tunnels and AdGuard Home's DNS line out of
+                   Keenetic, VWARD silent for minutes and after a reboot, the Panel's changes
+                   refused; «Включить»: everything back exactly, VWARD running again
+  vward-off-nodns  the same with no other DNS answering: AdGuard Home's line stays
 Needs root (chroot, mount).
   check-automation-emulated.py [--scenario NAME ...] [--report FILE]
 """
@@ -88,6 +92,10 @@ class Router:
             /^!/ {ctx = 0}
             ctx && $1 == "route" && $2 == "object-group" && $3 == g && $4 == t {next}
             {print}' /emu/running-config > /emu/rc.n && cat /emu/rc.n > /emu/running-config ;;
+    'ip route '*) printf '%s\n' "$cmd" >> /emu/ndmc-changes.log; grep -qxF "$cmd" /emu/running-config || echo "$cmd" >> /emu/running-config ;;
+    'no ip route '*) printf '%s\n' "$cmd" >> /emu/ndmc-changes.log; k=${cmd#no }
+        awk -v k="$k" 'index($0, k " ") != 1 && $0 != k' /emu/running-config > /emu/rc.n && cat /emu/rc.n > /emu/running-config ;;
+    'system configuration save') : ;;
     'interface '*' down') printf '%s\n' "$cmd" >> /emu/ndmc-changes.log; n=${cmd#interface }; n=${n% down}; echo "$n" >> /emu/iface-down
         d=$(echo "$n" | sed 's/^Wireguard/nwg/'); [ ! -d "/sys/class/net/$d" ] || { echo 0 > "/sys/class/net/$d/carrier"; echo down > "/sys/class/net/$d/operstate"; } ;;
     'interface '*' up') printf '%s\n' "$cmd" >> /emu/ndmc-changes.log; n=${cmd#interface }; n=${n% up}; grep -vx "$n" /emu/iface-down > /emu/iface-down.n; cat /emu/iface-down.n > /emu/iface-down
@@ -158,6 +166,12 @@ class Router:
             for line in out.read_text(errors="replace").splitlines():
                 if chaos.SHELL_ERRORS.search(line) and not chaos.SHELL_OK.search(line):
                     self.errors.append((self.minute, out.name, line.strip()[:160]))
+        changes = chaos.ndmc_changes(self.root)
+        self.log += [(self.minute, c) for c in changes[self._seen:]]
+        self._seen = len(changes)
+
+    def sync(self):
+        # Changes made outside cron (a command by hand) belong to this minute.
         changes = chaos.ndmc_changes(self.root)
         self.log += [(self.minute, c) for c in changes[self._seen:]]
         self._seen = len(changes)
@@ -239,7 +253,7 @@ def s_guard_off(r, out):
     flag = r.root / "opt/etc/vward/tunnel-guard.disabled"
     flag.write_text("off\n")
     r.run(2); r.run(8, ["tunnel"])
-    expect(not r.cmds("interface Wireguard1 down"), "«Защита VPN» off: a dead VPN is left alone", out)
+    expect(not r.cmds("interface Wireguard1 down"), "«Агент VPN» off: a dead VPN is left alone", out)
     flag.unlink()
     r.run(6, ["tunnel"])
     on = r.cmds("interface Wireguard1 down", 11)
@@ -417,6 +431,54 @@ def s_vpn_and_agh(r, out):
     expect(r.guard().get("FAILOPEN_ACTIVE") == "0" and r.chain_in(), "both back afterwards", out)
 
 
+def s_vward_off(r, out, nodns=False):
+    rc = r.root / "emu/running-config"
+    rc.write_text(rc.read_text() + "ip route 203.0.113.64 255.255.255.192 Wireguard1 auto\nip route 192.0.2.128 255.255.255.128 ISP auto\n")
+    r.run(2)
+    before = rc.read_text()
+    if nodns:
+        (r.root / "emu/fault-wan").write_text("")
+    _, o, _ = r.sh("VWARD_OFF_BY=test /opt/bin/vward-off.sh; echo rc=$?", timeout=120)
+    r.sync()
+    if nodns:
+        (r.root / "emu/fault-wan").unlink()
+    lines = rc.read_text().splitlines()
+    tun = [l for l in lines if "Wireguard1" in l and ("route" in l)]
+    expect("rc=0" in o and not tun, "off: no route into the tunnel is left in Keenetic", out)
+    expect("ip route 192.0.2.128 255.255.255.128 ISP auto" in lines, "a route to the provider is not VWARD's to take", out)
+    if nodns:
+        expect(r.chain_in() and "dns_kept=1" in o, "no other DNS answers: AdGuard Home's line stays", out)
+    else:
+        expect(not r.chain_in() and "dns=1" in o, "AdGuard Home's DNS line is out (the provider's DNS answers)", out)
+    expect((r.root / "opt/etc/vward/components/vward.off").exists(), "the switch is remembered on the USB drive", out)
+    _, o, _ = r.sh("/opt/bin/vward-console-config.sh tunnel-guard 0")
+    expect("error=vward_off" in o, "the Panel's changes are refused while off", out)
+    m0 = r.minute
+    r.run(5, ["tunnel"])
+    expect(not [c for m, c in r.log if m > m0], "off: VWARD changes nothing for 5 minutes, a dead VPN included", out)
+    _, alive, _ = r.sh("p=$(cat /opt/var/run/vward/route-engine.pid 2>/dev/null); [ -n \"$p\" ] && kill -0 $p 2>/dev/null && echo alive || echo gone")
+    expect("gone" in alive, "the route engine does not run while off", out)
+    # A reboot while off: still off afterwards.
+    r.close()
+    for p in (r.root / "tmp").iterdir():
+        shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
+    subprocess.run(["mount", "-t", "proc", "proc", str(r.root / "proc")], check=True)
+    subprocess.run(["mount", "--bind", str(r.root / "opt"), str(r.root / "opt")], check=True)
+    m0 = r.minute
+    r.run(3)
+    expect(not [c for m, c in r.log if m > m0] and not [l for l in rc.read_text().splitlines() if "Wireguard1" in l and "route" in l],
+           "after a reboot VWARD stays off and puts nothing back", out)
+    _, o, _ = r.sh("VWARD_OFF_BY=test /opt/bin/vward-off.sh on; echo rc=$?", timeout=120)
+    after = rc.read_text()
+    expect("rc=0" in o and sorted(after.splitlines()) == sorted(before.splitlines()), "on: Keenetic's configuration exactly as before", out)
+    expect(not (r.root / "opt/etc/vward/components/vward.off").exists(), "on: the switch is gone", out)
+    r.run(2)
+    _, o, _ = r.sh("p=$(cat /opt/var/run/vward/route-engine.pid 2>/dev/null); [ -n \"$p\" ] && kill -0 $p 2>/dev/null && echo alive || echo gone")
+    expect("alive" in o, "on: the route engine runs again", out)
+    _, o, _ = r.sh("/opt/bin/vward-off.sh status")
+    expect("state=on" in o, "status: on", out)
+
+
 SCENARIOS = {
     "vpn-blip": (s_vpn_blip, False), "vpn-down": (s_vpn_down, False), "vpn-spare": (s_vpn_spare, True),
     "vpn-spare-stay": (lambda r, o: s_vpn_spare(r, o, stay=True), True), "guard-off": (s_guard_off, False),
@@ -425,6 +487,7 @@ SCENARIOS = {
     "agh-starter": (s_agh_starter, False), "sentinel": (s_sentinel, False),
     "both-dead": (s_both_dead, True), "vpn-flap": (s_vpn_flap, False), "reboot-failopen": (s_reboot_failopen, False),
     "vpn-and-agh": (s_vpn_and_agh, False),
+    "vward-off": (s_vward_off, False), "vward-off-nodns": (lambda r, o: s_vward_off(r, o, nodns=True), False),
 }
 
 
@@ -444,6 +507,11 @@ def main():
         try:
             r = Router(tmp, spare=spare)
             fn(r, out)
+            # SSH to the router: no scenario touches the home network's interface, its addresses
+            # or the SSH server.
+            for m, c in r.log:
+                if "Bridge" in c or " 192.168." in c or " 10." in c or "dropbear" in c or "ssh" in c.lower():
+                    out.append(("FAIL", f"minute {m}: a change that could cut SSH: {c}"))
             for m, job, line in r.errors[:5]:
                 out.append(("FAIL", f"shell error at minute {m} in {job}: {line}"))
             for m, job in r.hangs[:3]:

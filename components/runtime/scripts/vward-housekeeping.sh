@@ -42,29 +42,38 @@ POLICY="
 /opt/var/log/vward/updater-watch.log|262144
 /opt/var/log/vward/updater.log|262144
 /opt/var/log/vward/updater-recovery.log|131072
+/opt/var/log/vward-sentinel.log|262144
+/opt/var/log/vward-off.log|131072
+/opt/var/log/vward-awg-engine.log|262144
+/opt/var/log/vward-vless-engine.log|262144
+/opt/var/log/vward-housekeeping.log|262144
 "
 
-ROTATE_KEEP=2
+# Technical journals: nothing is thrown away until the owner's limits say so («Технические
+# журналы → Хранение»). A journal over its size goes whole, compressed, into the archive under
+# the time it went there; the archive keeps KEEP_DAYS days and, with the live journals, at most
+# MAX_MB (0: no limit but the USB drive itself). A small limit makes the journals turn over sooner.
+ARCHIVE="$R/opt/var/log/vward/archive"
+JOURNAL_CONF=${VWARD_JOURNAL_CONF:-$R/opt/etc/vward/journal.conf}
+KEEP_DAYS=30
+MAX_MB=30
+if [ -r "$JOURNAL_CONF" ]; then
+    while IFS='=' read -r JK JV; do
+        case "$JK:$JV" in
+            KEEP_DAYS:1|KEEP_DAYS:3|KEEP_DAYS:7|KEEP_DAYS:30|KEEP_DAYS:180|KEEP_DAYS:365) KEEP_DAYS=$JV ;;
+            MAX_MB:0|MAX_MB:1|MAX_MB:5|MAX_MB:10|MAX_MB:30) MAX_MB=$JV ;;
+        esac
+    done < "$JOURNAL_CONF"
+fi
+PER_CAP=0
+[ "$MAX_MB" = 0 ] || PER_CAP=$((MAX_MB * 32768))
 
 rotate_file()
 {
     F="$1"
     SIZE="$2"
 
-    rm -f "$F.$ROTATE_KEEP.gz"
-
-    I=$((ROTATE_KEEP - 1))
-
-    while [ "$I" -ge 1 ]; do
-        J=$((I + 1))
-
-        if [ -f "$F.$I.gz" ]; then
-            mv "$F.$I.gz" "$F.$J.gz" || return 1
-        fi
-
-        I=$((I - 1))
-    done
-
+    mkdir -p "$ARCHIVE" || return 1
     TMP="$F.rotate.$$"
 
     cp "$F" "$TMP" || {
@@ -77,7 +86,7 @@ rotate_file()
         return 1
     }
 
-    mv "$TMP.gz" "$F.1.gz" || {
+    mv "$TMP.gz" "$ARCHIVE/${F##*/}.$(date '+%Y%m%d-%H%M%S').gz" || {
         rm -f "$TMP.gz"
         return 1
     }
@@ -97,10 +106,10 @@ ERRORS=0
 OVER="$(for LD in "$R/opt/var/log" "$R/opt/var/log/vward"; do
         [ -d "$LD" ] && { echo "$LD:"; ls -ln "$LD" 2>/dev/null; }
     done |
-    POLICY="$POLICY" R="$R" awk '
+    POLICY="$POLICY" R="$R" PER_CAP="$PER_CAP" awk '
         BEGIN {
-            n = split(ENVIRON["POLICY"], rows, "\n")
-            for (i = 1; i <= n; i++) if (split(rows[i], f, "|") == 2) limit[ENVIRON["R"] f[1]] = f[2] + 0
+            n = split(ENVIRON["POLICY"], rows, "\n"); cap = ENVIRON["PER_CAP"] + 0
+            for (i = 1; i <= n; i++) if (split(rows[i], f, "|") == 2) limit[ENVIRON["R"] f[1]] = (cap > 0 && cap < f[2] + 0) ? cap : f[2] + 0
         }
         /:$/ { dir = substr($0, 1, length($0) - 1); next }
         /^-/ {
@@ -127,19 +136,15 @@ for ROW in $OVER; do
 done
 IFS="$OLDIFS"
 
-# Сам housekeeping не должен бесконечно логировать сам себя.
-if [ -f "$HOUSE_LOG" ]; then
-    HS="$(wc -c 2>/dev/null < "$HOUSE_LOG")"
-
-    case "$HS" in
-        ''|*[!0-9]*) HS=0 ;;
-    esac
-
-    if [ "$HS" -ge 262144 ]; then
-        tail -n 300 "$HOUSE_LOG" > "$HOUSE_LOG.tmp.$$" &&
-        mv "$HOUSE_LOG.tmp.$$" "$HOUSE_LOG"
-    fi
-fi
+# The two copies an older VWARD kept next to each journal (name.1.gz, name.2.gz) join the
+# archive under the time they were made.
+for PF in $POLICY; do
+    PF="$R${PF%%|*}"
+    for PN in 1 2; do
+        [ -f "$PF.$PN.gz" ] || continue
+        mkdir -p "$ARCHIVE" && mv "$PF.$PN.gz" "$ARCHIVE/${PF##*/}.$(date -r "$PF.$PN.gz" '+%Y%m%d-%H%M%S' 2>/dev/null || echo 0)-$PN.gz"
+    done
+done
 
 echo "$(date '+%Y-%m-%d %H:%M:%S')|rotated=$ROTATED|errors=$ERRORS" >> "$HOUSE_LOG"
 
@@ -257,6 +262,24 @@ keep_newest "$B/ext-update" d 3
 rm -f "$R/opt/var/run/vward/console-tunnel/upload."* 2>/dev/null
 rmdir "$R/opt/var/run/vward/console-tunnel" 2>/dev/null
 
+# Technical journals: archived ones older than the owner's term go; then, while the archive and
+# the live journals together are over the size limit, the oldest archived one.
+if [ -d "$ARCHIVE" ]; then
+    find "$ARCHIVE" -type f -name '*.gz' -mtime +$((KEEP_DAYS - 1)) 2>/dev/null | while IFS= read -r JOLD; do
+        echo "RETENTION_DELETE|$JOLD"
+        rm -f "$JOLD"
+    done
+    if [ "$MAX_MB" -gt 0 ]; then
+        LIVE_KB=$(for LD in "$R/opt/var/log" "$R/opt/var/log/vward"; do [ -d "$LD" ] && { echo "$LD:"; ls -ln "$LD" 2>/dev/null; }; done |
+            POLICY="$POLICY" R="$R" awk '
+                BEGIN {n = split(ENVIRON["POLICY"], rows, "\n"); for (i = 1; i <= n; i++) if (split(rows[i], f, "|") == 2) p[ENVIRON["R"] f[1]] = 1}
+                /:$/ {dir = substr($0, 1, length($0) - 1); next}
+                /^-/ {name = $0; for (i = 1; i <= 8; i++) sub(/^[^ ]+ +/, "", name); if ((dir "/" name) in p) s += $5}
+                END {print int(s / 1024)}')
+        cap_dir "$ARCHIVE" f $((MAX_MB * 1024 - ${LIVE_KB:-0})) || RETENTION_ERRORS=$((RETENTION_ERRORS + 1))
+    fi
+fi
+
 # Locks whose owner is gone (killed, power cut) would hold back the updater.
 vward_locks_sweep
 
@@ -363,6 +386,10 @@ if [ -x "$BACKUP_HELPER" ]; then
     fi
 fi
 
+# VWARD switched off as a whole («Отключить VWARD»): logs, copies and VWARD's own updates go
+# on (a fix may arrive), nothing else VWARD does starts.
+if ! vward_off; then
+
 # Updates of other software (Entware packages, AdGuard Home, Keenetic firmware):
 # once a day, in the hour VWARD installs its own updates; the first check at
 # once.  Detached: opkg may take minutes.  Builtins only until it is due.
@@ -428,6 +455,8 @@ if [ -x "$POLICY_CHAIN" ] && [ -f "$POLICY_SYNC_LOG" ]; then
         { "$POLICY_CHAIN" && "$POLICY_RECONCILE"; } </dev/null >/dev/null 2>&1 &
         echo "$PC_NOW|policy=catchup" >> "$HOUSE_LOG"
     fi
+fi
+
 fi
 
 # The Panel's web server picks up settings an update brought: S93 only when the

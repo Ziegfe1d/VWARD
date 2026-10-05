@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tunnel engine («Контур AmneziaWG»): the program is refused when its checksum
+"""Tunnel engine («Модуль AmneziaWG»): the program is refused when its checksum
 differs; a tunnel is kept only after a handshake, as a Keenetic «OpkgTun»
 connection the program attaches to; a stopped program is started again; keys
 are never printed or passed in a command's arguments."""

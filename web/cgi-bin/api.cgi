@@ -246,7 +246,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data|site-test|tunnel-quality|stability) ;;
+    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data|site-test|tunnel-quality|stability|vward-off|journal-data|log-archive) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -318,7 +318,7 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             ;;
     esac
     case "$ACTION" in
-        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control|wifi-host|ext-update-control|services|tunnel-quality) ;;
+        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control|wifi-host|ext-update-control|services|tunnel-quality|vward-off) ;;
         *)
             echo 'Status: 405 Method Not Allowed'
             header_json
@@ -340,6 +340,36 @@ console_mutation_enter(){
 }
 COMPONENT_STATE=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
 component_disabled(){ [ -e "$COMPONENT_STATE/$1.disabled" ]; }
+# vward-off: the emergency switch («Отключить VWARD», vward-off.sh). GET: its state. POST
+# op=off (confirm=VWARD_OFF) or op=on: detached, thousands of routes take minutes; the Panel
+# asks again until state is no longer «working». Never held back: it is the way out.
+if [ "$ACTION" = vward-off ]; then
+  header_json
+  OFF_BIN=${VWARD_OFF_BIN:-/opt/bin/vward-off.sh}
+  [ -x "$OFF_BIN" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+  if [ "${REQUEST_METHOD:-GET}" = POST ]; then
+    read_body 256
+    VO_OP="$(form_value op)"
+    case "$VO_OP" in
+      off) [ "$(form_value confirm)" = VWARD_OFF ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;;
+      on) ;;
+      *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
+    esac
+    printf '%s|CONSOLE_ACTION|action=vward-%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$VO_OP" >> /opt/var/log/vward/console-audit.log 2>/dev/null
+    ( VWARD_OFF_BY=panel "$OFF_BIN" "$VO_OP" </dev/null >/dev/null 2>&1 & )
+    # The switch writes «working» at once; a moment for it, so the answer already says so.
+    vo_n=0; while [ "$vo_n" -lt 10 ] && ! grep -q '^state=working' "${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}/vward.off.status" 2>/dev/null; do
+      vo_n=$((vo_n + 1)); sleep 0.2 2>/dev/null || { sleep 1; vo_n=10; }; done
+  fi
+  "$OFF_BIN" status 2>/dev/null | "$JQ" -cRn '[inputs | select(index("=") != null) | {key: .[:index("=")], value: .[index("=") + 1:]}] | from_entries
+    | {ok: true, state: (.state // "on"), op: (.op // null), since: ((.since // "") | tonumber? // null),
+       lists: ((.lists // "0") | tonumber? // 0), subnets: ((.subnets // "0") | tonumber? // 0),
+       dns: ((.dns // "0") | tonumber? // 0), dns_kept: (.dns_kept == "1"),
+       refused: ((.refused // "0") | tonumber? // 0), saved: ((.saved // "0") | tonumber? // 0),
+       error: (.error // null)}'
+  exit 0
+fi
+
 console_mutation_leave(){ command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null || true; }
 UPDATE_RUN_DIR=${VWARD_CONSOLE_UPDATE_RUN:-/opt/var/run/vward/console-update}
 EXT_RUN_DIR=${VWARD_CONSOLE_EXT_RUN:-/opt/var/run/vward/console-ext-update}
@@ -719,6 +749,7 @@ if [ "$ACTION" = config ]; then
         wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;
         component) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=COMPONENT_DISABLE ;;
         adaptive-mode|classifier|smartdns-guard|tunnel-fallback|tunnel-return) set -- "$OP" "$VALUE" ;;
+        journal) set -- "$OP" "$TARGET" "$VALUE" ;;
         ip-category) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
         policy-group) set -- "$OP" "$TARGET" ;;
@@ -739,6 +770,48 @@ if [ "$ACTION" = config ]; then
         error=*) E="${OUT#error=}"; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac; "$JQ" -cn --arg op "$OP" --arg e "$E" '{ok:false,op:$op,error:$e}' ;;
         *) "$JQ" -cn --arg op "$OP" '{ok:false,op:$op,error:"helper_failed"}' ;;
     esac
+    exit 0
+fi
+
+# Technical journals: the live ones next to the programs, the older ones compressed in the
+# archive (housekeeping); how long and how much is kept (journal.conf).
+LOG_ROOT=${VWARD_LOG_ROOT:-/opt/var/log}
+journal_files() {
+    # Every journal file of VWARD, relative to LOG_ROOT: live ones and archived ones.
+    ( cd "$LOG_ROOT" 2>/dev/null && for F in crond.log vward*.log vward/*.log vward/archive/*.gz; do [ -f "$F" ] && [ ! -L "$F" ] && echo "$F"; done )
+}
+if [ "$ACTION" = journal-data ]; then
+    header_json
+    JC=${VWARD_JOURNAL_CONF:-/opt/etc/vward/journal.conf}
+    KEEP="$(sed -n 's/^KEEP_DAYS=//p' "$JC" 2>/dev/null | tail -n 1)"; case "$KEEP" in 1|3|7|30|180|365) ;; *) KEEP=30 ;; esac
+    MAXMB="$(sed -n 's/^MAX_MB=//p' "$JC" 2>/dev/null | tail -n 1)"; case "$MAXMB" in 0|1|5|10|30) ;; *) MAXMB=30 ;; esac
+    journal_files | ( cd "$LOG_ROOT" 2>/dev/null && while IFS= read -r F; do ls -ln "$F"; done ) | awk -v now="$(date +%s)" '
+        {name = $0; for (i = 1; i <= 8; i++) sub(/^[^ ]+ +/, "", name)
+         if (name ~ /^vward\/archive\//) {an++; ab += $5; s = name; sub(/.*\.log\./, "", s); sub(/(-[0-9]+)?\.gz$/, "", s)
+             if (s ~ /^[0-9]{8}-[0-9]{6}$/ && (old == "" || s < old)) old = s}
+         else {ln++; lb += $5}}
+        END {printf "%d %d %d %d %s\n", an, ab, ln, lb, old}' | {
+        read -r AN AB LN LB OLD
+        "$JQ" -cn --argjson keep "$KEEP" --argjson max "$MAXMB" --argjson an "${AN:-0}" --argjson ab "${AB:-0}" --argjson ln "${LN:-0}" --argjson lb "${LB:-0}" --arg old "${OLD:-}" \
+            '{ok: true, keep_days: $keep, max_mb: $max, archived: {files: $an, bytes: $ab, oldest: (if $old == "" then null else ($old[0:4] + "-" + $old[4:6] + "-" + $old[6:8] + "T" + $old[9:11] + ":" + $old[11:13] + ":" + $old[13:15]) end)}, live: {files: $ln, bytes: $lb}}'
+    }
+    exit 0
+fi
+# log-archive: every journal, the archived ones included, in one .tar.gz, streamed as it is
+# made (nothing is gathered in the router's memory first).
+if [ "$ACTION" = log-archive ]; then
+    [ "${REQUEST_METHOD:-GET}" = GET ] || { header_json; echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    LA_LIST="$(umask 077; mktemp /tmp/vward-console-journals.XXXXXX 2>/dev/null)" || { header_json; echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
+    trap 'rm -f "$LA_LIST"' EXIT
+    journal_files > "$LA_LIST"
+    [ -s "$LA_LIST" ] || { header_json; echo '{"ok":false,"error":"not_found"}'; exit 0; }
+    echo 'Content-Type: application/gzip'
+    echo "Content-Disposition: attachment; filename=\"vward-journals-$(date '+%Y%m%d-%H%M').tar.gz\""
+    echo 'Cache-Control: no-store'
+    echo 'X-Content-Type-Options: nosniff'
+    echo
+    # Names are VWARD's own (no spaces): as arguments, for every tar (BusyBox may lack -T).
+    ( cd "$LOG_ROOT" && renice -n 19 -p $$ >/dev/null 2>&1; set -f; tar -czf - $(cat "$LA_LIST") 2>/dev/null )
     exit 0
 fi
 
@@ -2690,6 +2763,24 @@ if [ "$ACTION" = "log" ]; then
             ;;
         ads)
             FILE=/opt/var/log/vward-ads-privacy-guard.log
+            ;;
+        awg)
+            FILE=/opt/var/log/vward-awg-engine.log
+            ;;
+        vless)
+            FILE=/opt/var/log/vward-vless-engine.log
+            ;;
+        sentinel)
+            FILE=/opt/var/log/vward-sentinel.log
+            ;;
+        supervisor)
+            FILE=/opt/var/log/vward-cron-supervisor.log
+            ;;
+        housekeeping)
+            FILE=/opt/var/log/vward-housekeeping.log
+            ;;
+        off)
+            FILE=/opt/var/log/vward-off.log
             ;;
         *)
             FILE=

@@ -550,6 +550,15 @@ reconcile()
 
 conf_load
 
+# VWARD switched off as a whole («Отключить VWARD»): nothing of this guard runs; when Keenetic
+# rebuilds its firewall, redirects into AdGuard Home go out again (vward-off.sh keep).
+if [ -e "${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}/vward.off" ] && [ "$OP" != status ]; then
+    OFF_BIN="${VWARD_OFF_BIN:-/opt/bin/vward-off.sh}"
+    [ "$OP" != hook ] || [ "${2:-}" != nat ] || [ ! -x "$OFF_BIN" ] || "$OFF_BIN" keep >/dev/null 2>&1
+    echo "DNS_GUARD=VWARD_OFF"
+    exit 0
+fi
+
 case "$OP" in
     status)
         echo "enforce=$ENFORCE"

@@ -51,8 +51,13 @@ log_event()
 }
 
 
+OFF_FLAG=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}/vward.off
+OFF_BIN=${VWARD_OFF_BIN:-/opt/bin/vward-off.sh}
+
 recover_critical()
 {
+    # VWARD switched off as a whole: cron and the Panel only.
+    [ ! -e "$OFF_FLAG" ] || return 0
     /opt/etc/init.d/S91vward-route-engine start \
         >/dev/null 2>&1
 
@@ -172,8 +177,21 @@ watch_memory()
     fi
 }
 
+# SSH stays: when memory runs out, the kernel stops some program to free it; never the SSH
+# server or its sessions (Keenetic's or Entware's dropbear, OpenSSH), the way in to fix things.
+# New sessions inherit it from the server; checked once a minute, written only when it differs.
+protect_ssh()
+{
+    for SP in $(pidof dropbear sshd 2>/dev/null); do
+        [ -w "$PROC/$SP/oom_score_adj" ] || continue
+        read -r SA 2>/dev/null < "$PROC/$SP/oom_score_adj" || continue
+        [ "$SA" = -1000 ] || echo -1000 > "$PROC/$SP/oom_score_adj" 2>/dev/null || :
+    done
+}
+
 watch_services()
 {
+    protect_ssh
     P=
     [ ! -r "$CONSOLE_PIDFILE" ] || read -r P < "$CONSOLE_PIDFILE" || :
     if [ -x "$CONSOLE_INIT" ] && { [ -z "$P" ] || ! kill -0 "$P" 2>/dev/null; }; then
@@ -192,6 +210,13 @@ watch_services()
         fi
     else
         PANEL_DOWN=0 PANEL_WAIT=1 PANEL_SKIP=0
+    fi
+
+    # VWARD switched off as a whole: cron and the Panel stay, nothing else of VWARD starts;
+    # DNS redirects into AdGuard Home that came back (Keenetic rebuilt its firewall) go again.
+    if [ -e "$OFF_FLAG" ]; then
+        [ ! -x "$OFF_BIN" ] || $UNNICE "$OFF_BIN" keep </dev/null >/dev/null 2>&1
+        return 0
     fi
 
     UP=

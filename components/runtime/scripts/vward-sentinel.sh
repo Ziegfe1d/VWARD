@@ -158,6 +158,8 @@ op_config() {
 
 op_start() {
     [ -x "$BIN" ] || { echo "result=not_installed"; return 0; }
+    # VWARD switched off as a whole («Отключить VWARD»).
+    [ ! -e "${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}/vward.off" ] || { echo "result=vward_off"; return 0; }
     running && { echo "result=unchanged"; return 0; }
     op_config >/dev/null
     mkdir -p "${PIDFILE%/*}" || die write_failed

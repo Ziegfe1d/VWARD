@@ -422,7 +422,21 @@ build_catalog()
 
         CAT="$(category_name "$FILE")"
 
-        sort -u "$FILE" > "$NEW/$CAT.cidr"
+        # Only public IPv4 subnets, /8 or narrower: a home, a provider's or a reserved range in
+        # the tunnel would take the router's own answers there too (an SSH session from the
+        # internet, the provider's DNS), so a source that lists one never gets it routed.
+        awk -F'[./]' '
+            BEGIN {
+                split("0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16 198.18.0.0/15 224.0.0.0/3", r, " ")
+                for (i in r) { split(r[i], q, "[./]"); rs[i] = ((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]; re[i] = rs[i] + 2 ^ (32 - q[5]) - 1 }
+            }
+            NF != 5 || $5 !~ /^[0-9]+$/ || $5 < 8 || $5 > 32 {next}
+            {
+                for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) next
+                s = ((($1 * 256 + $2) * 256 + $3) * 256 + $4); z = 2 ^ (32 - $5); s = int(s / z) * z; e = s + z - 1
+                for (i in r) if (s <= re[i] && e >= rs[i]) next
+                print
+            }' "$FILE" | sort -u > "$NEW/$CAT.cidr"
         rm -f "$FILE"
 
         COUNT="$(wc -l 2>/dev/null < "$NEW/$CAT.cidr")"

@@ -97,8 +97,8 @@ const fs = require('fs');
   const row = (n, sub, pill, cls, on) => '<li class="row link tun" data-go="t-x"><div class="row-main"><b>' + n + '</b><small>' + sub + '</small></div><span class="pill ' + cls + '">' + pill + '</span>' + sw(on) + chev + '</li>';
   const html = '<html><head><style>' + css + '</style></head><body><main><section class="block"><div class="panel"><ul class="rows">' +
     row('de-vless', '<span class="st ok">по умолчанию</span> · VLESS · de.example.net:8443', 'В сети', 'ok', true) +
-    row('awg2-fi', 'AmneziaWG 2.0 · контур VWARD', 'Не в сети', 'warn', true) +
-    row('us-east', 'AmneziaWG 3.x · контур VWARD', 'Выключен', 'warn', false) +
+    row('awg2-fi', 'AmneziaWG 2.0 · модуль VWARD', 'Не в сети', 'warn', true) +
+    row('us-east', 'AmneziaWG 3.x · модуль VWARD', 'Выключен', 'warn', false) +
     '</ul></div></section></main></body></html>';
   const opts = fs.existsSync(process.argv[3]) ? { executablePath: process.argv[3] } : {};
   const b = await chromium.launch(opts), out = {};

@@ -40,13 +40,13 @@ r = subprocess.run(["node", "-e", script], text=True, capture_output=True)
 if r.returncode:
     fail(r.stderr[-500:])
 got = json.loads(r.stdout)
-want = ["WireGuard", "контур AmneziaWG", "контур AmneziaWG · программа остановлена", "контур AmneziaWG", "VLESS", "Proxy"]
+want = ["WireGuard", "модуль AmneziaWG", "модуль AmneziaWG · программа остановлена", "модуль AmneziaWG", "VLESS", "Proxy"]
 if got != want:
     fail(f"list lines: {got} want {want}")
 if "рукопожатие" in piece("const tunSub = t => {", "\n};\n"):
     fail("the list shows no handshake")
 for need in ("'<span class=\"st ok\">по умолчанию</span>'", "'Сделать туннелем по умолчанию'", "['Туннель по умолчанию', managed ? 'Да' : 'Нет'",
-             "' · контур AmneziaWG (VWARD)'", "t.endpoint || (e && e.endpoint) || (v && v.server)", "['Память программы'",
+             "' · модуль AmneziaWG (VWARD)'", "t.endpoint || (e && e.endpoint) || (v && v.server)", "['Память программы'",
              "const rx = t.rx != null ? t.rx : e && e.rx", "btn('ask', 'close', 'Выключить', 'danger', ' data-confirm=\"tunnel-down\"'",
              "'tunnel-down': () => tunnelState('down', current.slice(2))", "canOff = name !== prof().tunnel_interface && !tunOff(t)", "mp[0] + tunnelProbePanel(name) + tunnelTrafficPanel(name) + mp.slice(1).join('')"):
     if need not in JS:

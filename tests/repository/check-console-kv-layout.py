@@ -32,7 +32,7 @@ if not (Path(groot) / "playwright").exists():
     print("CONSOLE_KV_LAYOUT=SKIPPED: no playwright")
     raise SystemExit(0)
 
-ROWS = [["Трафик списков", "Напрямую, пока VPN недоступен", "warn"], ["Автоматическая защита", "Через VPN", "ok"],
+ROWS = [["Трафик списков", "Напрямую, пока VPN недоступен", "warn"], ["Агент VPN", "Через VPN", "ok"],
         ["Обновление IP-категорий", "04.10, 02:19 · добавлено 212, убрано 0", "info"], ["Возврат в VPN", "автоматически", ""]]
 SCRIPT = """
 const { chromium } = require('playwright');

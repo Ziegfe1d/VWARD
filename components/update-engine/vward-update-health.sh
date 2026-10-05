@@ -102,7 +102,8 @@ if [ -z "$VU_ROOT_PREFIX" ]; then
     # A component disabled from the Panel keeps its files but does not run.
     if { [ "$profile" = ads-privacy-guard ] ||
          { [ "$profile" = full ] && [ -r /opt/etc/vward/ads-privacy-guard/ads-privacy-guard.conf ]; }; } &&
-       [ ! -e "${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}/ads-privacy-guard.disabled" ]; then
+       [ ! -e "${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}/ads-privacy-guard.disabled" ] &&
+       [ ! -e "${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}/vward.off" ]; then
         /opt/bin/vward-ads-privacy-health.sh >/dev/null 2>&1 ||
             vu_die "$VU_HEALTH_ERROR" "Ads & Privacy Guard functional health check failed"
     fi

@@ -36,6 +36,7 @@ runtime	components/runtime/init.d/S89vward-update-recovery	/opt/etc/init.d/S89vw
 runtime	components/runtime/scripts/vward-cron-supervisor.sh	/opt/bin/vward-cron-supervisor.sh	0755
 runtime	components/runtime/scripts/vward-sentinel.sh	/opt/bin/vward-sentinel.sh	0755
 runtime	components/runtime/scripts/vward-sentinel-act.sh	/opt/bin/vward-sentinel-act.sh	0755
+runtime	components/runtime/scripts/vward-off.sh	/opt/bin/vward-off.sh	0755
 runtime	components/runtime/lib/vward-device-profile.sh	/opt/lib/vward/vward-device-profile.sh	0755
 runtime	components/runtime/lib/vward-runtime-admission.sh	/opt/lib/vward/vward-runtime-admission.sh	0644
 runtime	components/runtime/init.d/S90crond	/opt/etc/init.d/S90crond	0755

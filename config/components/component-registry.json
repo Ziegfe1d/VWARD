@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "VWARD Platform",
-  "platform_version": "0.2.0-rc.2.fix.10",
+  "platform_version": "0.2.0-rc.2.fix.11",
   "component_version_policy": "platform-release",
   "components": [
     {
@@ -195,6 +195,7 @@
         "/opt/bin/vward-cron-supervisor.sh",
         "/opt/bin/vward-sentinel.sh",
         "/opt/bin/vward-sentinel-act.sh",
+        "/opt/bin/vward-off.sh",
         "/opt/lib/vward/vward-device-profile.sh",
         "/opt/lib/vward/vward-runtime-admission.sh",
         "/opt/etc/init.d/S90crond",

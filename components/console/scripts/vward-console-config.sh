@@ -27,6 +27,7 @@ TUNNEL_FALLBACK_FLAG="$ETC/tunnel-fallback.disabled"
 TUNNEL_RETURN_FLAG="$ETC/tunnel-return.disabled"
 TUNNEL_AUTO_CONF="$ETC/tunnel-auto.conf"
 LISTS_CONF="$ETC/route-engine/domain-lists.conf"
+JOURNAL_CONF=${VWARD_JOURNAL_CONF:-$ETC/journal.conf}
 LISTS_STATE="$ETC/route-engine/domain-lists"
 WAN_GUARD_FLAG="$ETC/wan-guard.disabled"
 ADAPTIVE_FLAG="$ETC/route-engine/adaptive.disabled"
@@ -1781,6 +1782,13 @@ op_tunnel_subnet() {
     printf '%s\n' "$ts_net" | awk -F. '{for (i = 1; i <= 4; i++) if ($i > 255) exit 1}' || die invalid_subnet 64
     ts_mask=$(prefix_mask "$ts_bits") || die invalid_subnet 64
     [ "$ts_bits" -ge 8 ] || die invalid_subnet 64
+    # The home, the provider's shared and reserved ranges never go into a tunnel: the router's
+    # own answers there (an SSH session, the Panel, DNS) would follow them.
+    [ "$2" = remove ] || ! printf '%s/%s\n' "$ts_net" "$ts_bits" | awk -F'[./]' '
+        BEGIN {split("0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16 198.18.0.0/15 224.0.0.0/3", r, " ")
+            for (i in r) {split(r[i], q, "[./]"); rs[i] = ((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]; re[i] = rs[i] + 2 ^ (32 - q[5]) - 1}}
+        {s = ((($1 * 256 + $2) * 256 + $3) * 256 + $4); z = 2 ^ (32 - $5); s = int(s / z) * z; e = s + z - 1
+         for (i in r) if (s <= re[i] && e >= rs[i]) exit 0; exit 1}' || die private_subnet 64
     change_lock
     snapshot
     ts_have=0; subnet_present "$ts_net" "$ts_mask" "$1" && ts_have=1
@@ -1929,6 +1937,18 @@ op_smartdns_guard() {
     set_kv "$LISTS_CONF" smartdns_guard "$1" 0644 || done_ok "smartdns-guard $1" unchanged
     mkdir -p "$ROUTE_STATE" 2>/dev/null && echo 0 > "$REFRESH_TS" 2>/dev/null
     done_ok "smartdns-guard $1" changed
+}
+
+# journal keep DAYS | size MB: how long and how much of the technical journals is kept
+# (housekeeping applies it every hour; MB 0: no limit but the USB drive).
+op_journal() {
+    case "$1:$2" in
+        keep:1|keep:3|keep:7|keep:30|keep:180|keep:365) jk=KEEP_DAYS ;;
+        size:0|size:1|size:5|size:10|size:30) jk=MAX_MB ;;
+        *) die invalid_value 64 ;;
+    esac
+    set_kv "$JOURNAL_CONF" "$jk" "$2" 0644 || done_ok "journal $1=$2" unchanged
+    done_ok "journal $1=$2" changed
 }
 
 # ---------- Components ----------
@@ -2283,6 +2303,10 @@ ARG4=${4:-}
 case "$OP" in route-domain|force-vpn|adaptive|smartdns-domain) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 case "$OP" in list-domain) ARG3=$(printf '%s' "$ARG3" | tr 'A-Z' 'a-z') ;; esac
 
+# VWARD switched off as a whole («Отключить VWARD»): nothing changes until it is on again
+# (a copy of the settings and a look for updates of other software are no change).
+case "$OP" in backup-create|ext-check|journal) ;; *) [ ! -e "$COMPONENT_STATE/vward.off" ] || die vward_off 75 ;; esac
+
 ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$ADMISSION_LIB" ] || die admission_unavailable
 . "$ADMISSION_LIB"
@@ -2291,7 +2315,7 @@ vward_admission_enter console-config || die updater_busy 75
 case "$OP" in
     force-vpn|domain-category|tunnel-guard|tunnel-fallback|tunnel-return|tunnel-auto|wan-guard|component|\
     adaptive-mode|classifier|ip-category|console-auth|console-devices|update-feed|domain-list-watch|\
-    smartdns-guard|smartdns-domain|wifi|update|wan-param|wifi-host|service|service-category|ext-auto|firmware)
+    smartdns-guard|smartdns-domain|wifi|update|wan-param|wifi-host|service|service-category|ext-auto|firmware|journal)
         edit_lock ;;
 esac
 
@@ -2344,6 +2368,7 @@ case "$OP" in
     ext-daily) op_ext_daily ;;
     ext-upgrade) op_ext_upgrade "$ARG1" "$ARG2" ;;
     ext-auto) op_ext_auto "$ARG1" "$ARG2" ;;
+    journal) op_journal "$ARG1" "$ARG2" ;;
     firmware) op_firmware "$ARG1" "$ARG2" ;;
     *) die invalid_operation 64 ;;
 esac
