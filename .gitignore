@@ -31,3 +31,6 @@ self-test*
 running-config*
 querylog.json*
 sessions*
+
+# Python bytecode the test runs leave
+__pycache__/
