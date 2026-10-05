@@ -884,7 +884,7 @@ function cardData(id) {
     }
     case 'routes': return { icon: 'route', title: 'Маршрутизация', to: 'routes', value: fmtInt(r.ip && r.ip.managed_routes) + ' ' + plural(num(r.ip && r.ip.managed_routes) || 0, 'маршрут', 'маршрута', 'маршрутов'), sub: fmtInt(r.domains && r.domains.unique) + ' доменов · ' + fmtInt(r.domains && r.domains.categories) + ' категорий', pill: S.route ? ['ok', 'Норма'] : ['', '—'] };
     case 'wifi': return { icon: 'wifi', title: 'Wi-Fi клиенты', to: 'wifi', value: fmtInt(wf.count) + ' ' + plural(num(wf.count) || 0, 'клиент', 'клиента', 'клиентов'), sub: wf.enabled ? (warnWifi ? warnWifi + ' требуют внимания' : 'без замечаний') : 'сбор данных выключен', pill: !S.wifi ? ['', '—'] : warnWifi ? ['warn', 'Внимание'] : wf.enabled ? ['ok', 'Норма'] : ['', 'Выключен'] };
-    case 'ads': { const c = a.counts || {}; return { icon: 'block', title: 'Реклама', to: 'ads', value: fmtInt(c.blocked), sub: 'заблокировано доменов', pill: !S.ads ? ['', '—'] : a.paused ? ['warn', 'Пауза'] : ['ok', 'Норма'] }; }
+    case 'ads': { const c = a.counts || {}; return { icon: 'block', title: 'Реклама', to: 'ads', value: fmtInt(c.blocked), sub: 'заблокировано доменов', pill: !S.ads ? ['', '—'] : a.paused ? ['warn', 'Пауза'] : ((a.dns_guard || {}).chain_state === 'out') ? ['warn', 'Не фильтруется'] : ['ok', 'Норма'] }; }
     case 'runtime': return { icon: 'runtime', title: 'Среда выполнения', to: 'system', value: sv.crond && sv.supervisor ? 'Работает' : s.services ? 'Сбой' : '—', sub: !s.services ? 'планировщик и сторож заданий' : sv.crond && sv.supervisor ? 'планировщик и сторож заданий работают' : 'не работает: ' + [sv.crond ? '' : 'планировщик', sv.supervisor ? '' : 'сторож заданий'].filter(Boolean).join(' и '), pill: sv.crond && sv.supervisor ? ['ok', 'Норма'] : s.services ? ['crit', 'Сбой'] : ['', '—'] };
     case 'storage': { const t = num(g.total_kb), f = num(g.free_kb), used = t ? Math.round((t - f) / t * 100) : null; return { icon: 'storage', title: 'Хранилище', to: 'system', value: fmtKB(f), sub: 'свободно' + (t ? ' из ' + fmtKB(t) : '') + (g.filesystem ? ' · ' + g.filesystem : ''), pill: used == null ? ['', '—'] : used > 90 ? ['warn', used + ' %'] : ['ok', used + ' %'], meter: used }; }
   }
@@ -969,6 +969,18 @@ function listPage(name) {
 const cardAlert = p => p && (p[0] === 'warn' || p[0] === 'crit') ? '<span class="pill card-alert ' + p[0] + '">' + ico('alert') + esc(p[1]) + '</span>' : '';
 
 /* ---------- Разделы ---------- */
+// AdGuard Home out of Keenetic's DNS chain: said on top, with why and what it means, so nobody
+// guesses why ads come back (the internet itself works through the provider's DNS).
+const CHAIN_WHY = { update: 'VWARD обновляет его', loop: 'он перезапускается по кругу', silent: 'он не отвечает', fast: 'он перестал отвечать',
+  loop_upstream: 'его серверы DNS указывают обратно на роутер (петля)' };
+function chainNotice() {
+  const g = (S.ads && S.ads.dns_guard) || {};
+  if (g.chain_state !== 'out') return '';
+  const since = num(g.chain_since), at = since ? ' с ' + new Date(since * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '';
+  return '<p class="field-warn" data-go="d-agh" role="button" tabindex="0">AdGuard Home временно вне цепочки DNS' + at + ': ' + esc(CHAIN_WHY[g.chain_reason] || 'он недоступен') +
+    '. Интернет работает через DNS провайдера, реклама сейчас не фильтруется. ' +
+    (g.chain_reason === 'loop_upstream' ? 'Исправьте серверы DNS в AdGuard Home.' : 'VWARD вернёт его сам, как только он заработает.') + '</p>';
+}
 const RENDER = {
   overview() {
     const list = cardOrder.filter(id => editing || !hiddenCards.includes(id));
@@ -983,7 +995,7 @@ const RENDER = {
         (c.meter != null ? '<div class="meter"><i data-width="' + c.meter + '"></i></div>' : '') +
         (editing ? '<div class="card-edit"><button class="icon-btn" type="button" data-card-move="' + id + ':up" aria-label="Выше"' + (n === 0 ? ' disabled' : '') + '>' + ico('up') + '</button><button class="icon-btn" type="button" data-card-move="' + id + ':down" aria-label="Ниже"' + (n === list.length - 1 ? ' disabled' : '') + '>' + ico('down') + '</button><button class="icon-btn" type="button" data-card-toggle="' + id + '" aria-label="' + (h ? 'Показать' : 'Скрыть') + ' карточку">' + ico(h ? 'eyeOff' : 'eye') + '</button></div>' : '') + '</div>';
     }).join('') + '</div>';
-    return loadError(['status']) + html;
+    return loadError(['status']) + chainNotice() + html;
   },
 
   wan() {
@@ -1078,7 +1090,7 @@ const RENDER = {
       ['ok', ({ scheduled: 'ожидает следующей проверки', dynamic: 'проверяет новые домены сразу', manual: 'проверка только по кнопке' })[runMode] || 'работает', 'd-jobs'];
     const where = !pub.ok ? '—' : pub.mode === 'staged' ? 'не отправляются' : isTrue(s.AUTO_PUBLISH) ? 'автоматически' : 'после подтверждения';
     const recent = a.recent || [];
-    return loadError(['ads']) + adsCheckPanel() +
+    return loadError(['ads']) + chainNotice() + adsCheckPanel() +
       panel('Проверка VWARD', '<dl class="kv">' + ctrlRow('Проверка рекламы и трекеров', sw('data-ads-pause', !a.paused, 'Проверка рекламы и трекеров', !S.ads), a.paused ? 'на паузе: новые домены не проверяются, задания ждут' : 'домены, пропущенные AdGuard Home, проверяются по источникам и признакам рекламы') + '</dl>' +
         kv([['Состояние', now[1], now[0], now[2]],
           ['Последняя проверка', sc.last_run ? fmtStamp(String(sc.last_run).replace(' ', 'T')) : 'ещё не было', '', 'a-ads', '',

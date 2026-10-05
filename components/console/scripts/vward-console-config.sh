@@ -90,6 +90,7 @@ cleanup() {
     [ "$LOCKED" != 1 ] || rm -rf "${CHANGE_LOCK:?}"
     [ "$EDIT_LOCKED" != 1 ] || rm -rf "${EDIT_LOCK:?}"
     [ "$EXT_LOCKED" != 1 ] || rm -rf "${EXT_STATE:?}/lock"
+    [ -z "${AGH_PLANNED:-}" ] || "$DNS_GUARD" planned-done >/dev/null 2>&1 || :
     command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null
     return 0
 }
@@ -2019,6 +2020,8 @@ OPKG_STATUS=/opt/lib/opkg/status
 OPKG_INFO=/opt/lib/opkg/info
 
 EXT_LOCKED=0
+DNS_GUARD=${VWARD_ADS_DNS_GUARD_BIN:-/opt/bin/vward-ads-privacy-dns-guard.sh}
+AGH_PLANNED=
 # One package operation at a time, whoever started it (the console or the daily run).
 ext_lock() {
     [ "$EXT_LOCKED" = 1 ] && return 0
@@ -2174,6 +2177,12 @@ op_ext_upgrade() {
     ext_health > "$dir/health.before"
     audit "ext-upgrade $1 $from -> $to backup=$dir"
 
+    # AdGuard Home is about to be replaced: out of the DNS chain first, back at once after
+    # (cleanup does it at any exit), nobody waits on a DNS being restarted.
+    if grep -q '^adguardhome' "$dir/plan.tsv"; then
+        AGH_PLANNED=1
+        "$DNS_GUARD" planned 600 >/dev/null 2>&1 || :
+    fi
     urc=0
     "$OPKG" upgrade "$1" > "$dir/opkg.log" 2>&1 || urc=$?
     tail -n 5 "$dir/opkg.log"

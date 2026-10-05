@@ -340,25 +340,35 @@ agh_looping()
 {
     al_pid=$("$PIDOF" AdGuardHome 2>/dev/null); al_pid=${al_pid%% *}
     al_now=$(ads_epoch)
+    # A restart VWARD made on purpose (an update: «planned») is not a crash.
+    al_plan=
+    [ ! -r "$CHAIN_DIR/planned" ] || read -r al_plan < "$CHAIN_DIR/planned" || :
+    case "$al_plan" in ''|*[!0-9]*) al_plan=0 ;; esac
     # Read and pruned in the shell: this runs every minute, and a router counts its processes.
-    al_n=0 al_t=0 al_last= al_keep=
+    # Lines: «time pid» for a crash, «time pid p» for a planned restart; the first id seen
+    # is the running one, not a restart.
+    al_n=0 al_t=0 al_last= al_keep= al_first=1
     if [ -r "$CHAIN_DIR/pids" ]; then
-        while read -r al_et al_ep; do
+        while read -r al_et al_ep al_ek; do
             case "$al_et" in ''|*[!0-9]*) continue ;; esac
             al_last=$al_ep
             [ $((al_now - al_et)) -le 600 ] || continue
-            al_n=$((al_n + 1)) al_t=$al_et al_keep="$al_keep$al_et $al_ep
+            al_keep="$al_keep$al_et $al_ep${al_ek:+ $al_ek}
 "
+            if [ "$al_first" = 1 ]; then al_first=0; continue; fi
+            [ -n "$al_ek" ] || { al_n=$((al_n + 1)); al_t=$al_et; }
         done < "$CHAIN_DIR/pids"
     fi
     if [ -n "$al_pid" ] && [ "$al_pid" != "$al_last" ]; then
-        al_n=$((al_n + 1)) al_t=$al_now al_keep="$al_keep$al_now $al_pid
+        al_k=; [ "$al_now" -gt "$al_plan" ] || al_k=p
+        al_keep="$al_keep$al_now $al_pid${al_k:+ $al_k}
 "
+        if [ "$al_first" = 0 ] && [ -z "$al_k" ]; then al_n=$((al_n + 1)); al_t=$al_now; fi
     fi
     printf '%s' "$al_keep" > "$CHAIN_DIR/pids"
-    # The first id seen is the running one, not a restart; a loop that stopped 3 minutes ago
-    # is over (the answers decide again).
-    [ "$al_n" -gt 4 ] && [ $((al_now - al_t)) -lt 180 ]
+    # Two crashes within 10 minutes, the last within 3 minutes: a loop (one crash is not:
+    # the minute check and the real-time watcher take a silent AdGuard Home out anyway).
+    [ "$al_n" -ge 2 ] && [ $((al_now - al_t)) -lt 180 ]
 }
 
 count_up() { cu_n=0; [ ! -r "$1" ] || read -r cu_n < "$1"; case "$cu_n" in ''|*[!0-9]*) cu_n=0 ;; esac; echo $((cu_n + 1)) > "$1"; echo $((cu_n + 1)); }
@@ -410,6 +420,9 @@ chain_sync()
     case "$cs_port" in ''|*[!0-9]*|53) return 0 ;; esac
     mkdir -p "$CHAIN_DIR" || return 0
     cs_ns="$(agh_dns_host):$cs_port"
+    # A planned restart (an update) in progress: chain_planned_done decides.
+    cs_plan=; [ ! -r "$CHAIN_DIR/planned" ] || read -r cs_plan < "$CHAIN_DIR/planned" || :
+    case "$cs_plan" in ''|*[!0-9]*) ;; *) [ "$(ads_epoch)" -gt "$cs_plan" ] || return 0 ;; esac
     cs_rc=$("$NDMC" -c "show running-config" 2>/dev/null) || return 0
     [ -n "$cs_rc" ] || return 0
     cs_in=0
@@ -448,12 +461,49 @@ chain_sync()
         echo loop_upstream > "$CHAIN_DIR/reason"; echo out > "$CHAIN_DIR/state"
         return 0
     fi
-    if ndm "ip name-server $cs_ns"; then
+    chain_put_in "$cs_ns"
+}
+
+# chain_put_in NS: Keenetic hands the queries to AdGuard Home again.
+chain_put_in()
+{
+    if ndm "ip name-server $1"; then
         ndm "system configuration save" || :
         rm -f "$CHAIN_DIR/fails" "$CHAIN_DIR/oks" "$CHAIN_DIR/reason"
         echo in > "$CHAIN_DIR/state"; ads_epoch > "$CHAIN_DIR/since"
-        ads_log "DNS_CHAIN_IN|ns=$cs_ns|AdGuard Home back in the DNS chain"
+        ads_log "DNS_CHAIN_IN|ns=$1|AdGuard Home back in the DNS chain"
     fi
+}
+
+# chain_planned SECONDS: VWARD is about to restart or update AdGuard Home on purpose: out of
+# the chain first, so nobody waits on a DNS that is being replaced (the provider's DNS
+# answers meanwhile); its process changes in that time are not crashes.
+chain_planned()
+{
+    [ "$CHAIN" = 1 ] && [ -n "$AGH_YAML" ] && [ -r "$AGH_YAML" ] || return 0
+    mkdir -p "$CHAIN_DIR" || return 0
+    echo $(( $(ads_epoch) + $1 )) > "$CHAIN_DIR/planned"
+    cp_port=$(agh_port)
+    case "$cp_port" in ''|*[!0-9]*|53) return 0 ;; esac
+    cp_ns="$(agh_dns_host):$cp_port"
+    "$NDMC" -c "show running-config" 2>/dev/null | grep -Eq "^ip name-server $cp_ns( |\$)" || return 0
+    provider_answers "$cp_ns" || return 0
+    chain_take_out "$cp_ns" update
+}
+
+# chain_planned_done: the planned restart is over: back in at once when AdGuard Home answers
+# (else the minute check brings it back after 3 answers, as after any silence).
+chain_planned_done()
+{
+    rm -f "$CHAIN_DIR/planned"
+    [ "$(cat "$CHAIN_DIR/state" 2>/dev/null)" = out ] && [ "$(cat "$CHAIN_DIR/reason" 2>/dev/null)" = update ] || return 0
+    pd_port=$(agh_port)
+    case "$pd_port" in ''|*[!0-9]*|53) return 0 ;; esac
+    pd_try=0
+    while [ "$pd_try" -lt "${VWARD_DNS_PLANNED_WAIT:-12}" ]; do
+        agh_up "$pd_port" && agh_answers "$pd_port" && { chain_put_in "$(agh_dns_host):$pd_port"; return 0; }
+        pd_try=$((pd_try + 1)); sleep 5
+    done
 }
 
 reconcile()
@@ -547,8 +597,21 @@ case "$OP" in
         profile_load && chain_out
         echo "chain_state=$(cat "$CHAIN_DIR/state" 2>/dev/null)"
         exit 0 ;;
+    planned|planned-done)
+        # The minute check may hold the lock for a few seconds: wait for it (an update waits on us).
+        pl_n=0; until ads_lock_acquire "$LOCK" 60; do pl_n=$((pl_n + 1)); [ "$pl_n" -lt 10 ] || exit 0; sleep 2; done
+        trap 'ads_lock_release "$LOCK"' EXIT
+        profile_load || exit 0
+        if [ "$OP" = planned ]; then
+            ps_s=${2:-300}; case "$ps_s" in ''|*[!0-9]*) ps_s=300 ;; esac; [ "$ps_s" -le 1800 ] || ps_s=1800
+            chain_planned "$ps_s"
+        else
+            chain_planned_done
+        fi
+        echo "chain_state=$(cat "$CHAIN_DIR/state" 2>/dev/null)"
+        exit 0 ;;
     set|apply|tick) ;;
-    *) echo "usage: $0 status|set enforce|bypass|chain 0|1|set exclude MACS|apply|tick|chain-out|hook nat|filter" >&2; exit 64 ;;
+    *) echo "usage: $0 status|set enforce|bypass|chain 0|1|set exclude MACS|apply|tick|chain-out|planned SECONDS|planned-done|hook nat|filter" >&2; exit 64 ;;
 esac
 
 # Fail-open for a redirect into a dead AdGuard Home (the owner's own hook included).

@@ -420,10 +420,10 @@ with tempfile.TemporaryDirectory() as tmp:
         pid.write_text("1235\n"); run("tick", shell=shell)
         if not inchain():
             fail(f"{shell[0]} one restart is not a loop")
-        for n in range(1236, 1242):
-            pid.write_text(f"{n}\n"); run("tick", shell=shell)
+        # A second crash within 10 minutes: a loop, out at once (not after five).
+        pid.write_text("1236\n"); run("tick", shell=shell)
         if inchain() or status().get("chain_reason") != "loop":
-            fail(f"{shell[0]} a restart loop: out of the chain: {status()}")
+            fail(f"{shell[0]} two crashes: a loop, out of the chain: {status()}")
         # AdGuard Home that would hand the queries back to the router never goes into the chain.
         shutil.rmtree(chaindir, ignore_errors=True); pid.write_text("1300\n")
         good_yaml = yaml.read_text()
@@ -443,5 +443,26 @@ with tempfile.TemporaryDirectory() as tmp:
             fail(f"{shell[0]} CHAIN=0: VWARD leaves the chain alone")
         run("set", "chain", "1", shell=shell)
         (etc / "dns-guard.conf").unlink(missing_ok=True)
+        # An update VWARD makes: out before it, its restarts are no crash, back at once after.
+        shutil.rmtree(chaindir, ignore_errors=True); answer.write_text("1")
+        for _ in range(3):
+            run("tick", shell=shell)
+        if not inchain():
+            fail(f"{shell[0]} back in before the update test")
+        (tmp / "isp-answer").write_text("1")
+        out = run("planned", "300", shell=shell).stdout
+        if inchain() or status().get("chain_reason") != "update":
+            fail(f"{shell[0]} planned: out before the update: {out!r} {status()}")
+        for n in (1400, 1401, 1402):
+            pid.write_text(f"{n}\n"); run("tick", shell=shell)
+        if inchain() or status().get("chain_reason") != "update":
+            fail(f"{shell[0]} restarts during an update are no loop: {status()}")
+        answer.write_text("1")
+        run("planned-done", shell=shell)
+        if not inchain():
+            fail(f"{shell[0]} planned-done: back at once when it answers: {status()}")
+        run("tick", shell=shell)
+        if not inchain():
+            fail(f"{shell[0]} after the update: stays in")
 
 print("ADS_DNS_GUARD=PASS")

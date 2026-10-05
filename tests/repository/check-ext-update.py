@@ -94,7 +94,11 @@ case "$a" in */rci/) cat "{tmp}/fw.json" ;; --version) echo curl ;; *) exit 7 ;;
         "VWARD_CURL_BIN": str(bindir / "curl"), "VWARD_EXT_ROOT": str(root),
         "VWARD_EXT_UPDATE_STATE": str(state), "VWARD_EXT_UPDATE_BACKUP": str(tmp / "backups"),
         "VWARD_ROUTE_STATE": str(tmp / "route"), "VWARD_NSLOOKUP_BIN": str(bindir / "nslookup"),
+        "VWARD_ADS_DNS_GUARD_BIN": str(tmp / "dnsguard"),
     }
+    # The DNS chain guard: told before AdGuard Home is replaced and after.
+    (tmp / "dnsguard").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/dnsguard.log"\n')
+    (tmp / "dnsguard").chmod(0o755)
 
     def run(*args):
         r = subprocess.run(["sh", str(HELPER), *args], env=env, text=True, capture_output=True)
@@ -125,6 +129,9 @@ case "$a" in */rci/) cat "{tmp}/fw.json" ;; --version) echo curl ;; *) exit 7 ;;
         fail(f"good upgrade: {out}")
     if "restart" not in (tmp / "restarts").read_text():
         fail("the AdGuard Home service must be restarted")
+    if (tmp / "dnsguard.log").read_text().split("\n")[:2] != ["planned 600", "planned-done"]:
+        fail(f"AdGuard Home out of the DNS chain before the update, back after: {(tmp / 'dnsguard.log').read_text()!r}")
+    (tmp / "dnsguard.log").write_text("")
     if "v0.107.74-1" not in (root / "opt/lib/opkg/status").read_text():
         fail("status must show the new version")
     hist = (state / "history.tsv").read_text().splitlines()
@@ -152,6 +159,8 @@ case "$a" in */rci/) cat "{tmp}/fw.json" ;; --version) echo curl ;; *) exit 7 ;;
         fail("the old opkg database must be back")
     if not (state / "history.tsv").read_text().splitlines()[-1].endswith("\trolled_back"):
         fail("a rollback must be recorded")
+    if (tmp / "dnsguard.log").read_text().split("\n")[:2] != ["planned 600", "planned-done"]:
+        fail(f"a rolled back update gives AdGuard Home back to the chain too: {(tmp / 'dnsguard.log').read_text()!r}")
 
     # Automatic: AdGuard Home only when switched on, system packages never.
     (tmp / "upgradable").write_text("adguardhome-go - v0.107.73-1 - v0.107.76-1\ncurl - 8.15.0-2 - 8.16.0-1\nbusybox - 1.37.0-6 - 1.37.0-7\n")

@@ -16,8 +16,10 @@ did and when, from the router's own log of changes (ndmc), the guards' state and
   wan-down         no internet for 12 minutes: the internet guard renews and restarts the
                    provider's connection within its limits, the VPN guard does not touch the
                    tunnel (the VPN is not the culprit), all calm once the internet is back
-  agh-loop         AdGuard Home restarting every minute: out of the DNS chain, back in once
-                   it runs steadily, no flapping
+  agh-loop         AdGuard Home restarting every minute: out of the DNS chain at the second
+                   crash, back in once it runs steadily, no flapping
+  agh-one-crash    one crash, then it answers: stays in the chain
+  agh-update       an update VWARD makes: out before it, its restarts are no crash, back at once
   agh-silent       AdGuard Home silent: out within 3 minutes, back after 3 answers
   agh-blip         AdGuard Home silent for one minute: stays in the chain
   agh-and-wan      AdGuard Home silent and no internet: the chain is left as it is
@@ -259,11 +261,35 @@ def s_wan_down(r, out):
 def s_agh_loop(r, out):
     r.run(2); r.run(12, ["agh-loop"])
     outs = r.cmds("no " + NS)
-    expect(bool(outs) and outs[0] <= 10, f"restarting in a loop: out of the DNS chain (at {outs[:1]}, from 3)", out)
+    expect(bool(outs) and outs[0] <= 4, f"restarting in a loop: out of the DNS chain at the second crash (at {outs[:1]}, from 3)", out)
     r.run(14)
     expect(r.chain_in(), "back in the chain once it runs steadily", out)
     back = [m for m in r.cmds(NS) if m > 14 and not any(c.startswith("no ") for mm, c in r.log if mm == m and NS in c)]
     expect(len(r.cmds("no " + NS)) <= 1, f"no flapping ({len(r.cmds('no ' + NS))} times out)", out)
+
+
+def s_agh_one_crash(r, out):
+    r.run(3)
+    (r.root / "emu/agh-pid").write_text("4999\n")
+    r.run(12)
+    expect(not r.cmds("no " + NS), "one crash (it answers again) is no loop: stays in the chain", out)
+
+
+def s_agh_update(r, out):
+    g = "/opt/bin/vward-ads-privacy-dns-guard.sh"
+    r.run(3)
+    r.sh(f"{g} planned 300")
+    expect(not r.chain_in(), "an update VWARD makes: out of the chain before it starts", out)
+    for pid in (4500, 4501):
+        (r.root / "emu/agh-pid").write_text(f"{pid}\n")
+        r.run(1)
+    expect(not r.chain_in(), "its restarts during the update change nothing", out)
+    r.sh(f"{g} planned-done")
+    expect(r.chain_in(), "the update is over and it answers: back at once (no 3-minute wait)", out)
+    done_at = r.minute
+    r.run(6)
+    expect(r.chain_in() and not r.cmds("no " + NS, done_at + 1),
+           "and stays: the update's restarts are not counted as crashes later", out)
 
 
 def s_agh_silent(r, out):
@@ -395,7 +421,7 @@ SCENARIOS = {
     "vpn-blip": (s_vpn_blip, False), "vpn-down": (s_vpn_down, False), "vpn-spare": (s_vpn_spare, True),
     "vpn-spare-stay": (lambda r, o: s_vpn_spare(r, o, stay=True), True), "guard-off": (s_guard_off, False),
     "wan-down": (s_wan_down, False), "agh-loop": (s_agh_loop, False), "agh-silent": (s_agh_silent, False),
-    "agh-blip": (s_agh_blip, False), "agh-and-wan": (s_agh_and_wan, False), "engine-kill": (s_engine_kill, False),
+    "agh-blip": (s_agh_blip, False), "agh-one-crash": (s_agh_one_crash, False), "agh-update": (s_agh_update, False), "agh-and-wan": (s_agh_and_wan, False), "engine-kill": (s_engine_kill, False),
     "agh-starter": (s_agh_starter, False), "sentinel": (s_sentinel, False),
     "both-dead": (s_both_dead, True), "vpn-flap": (s_vpn_flap, False), "reboot-failopen": (s_reboot_failopen, False),
     "vpn-and-agh": (s_vpn_and_agh, False),
