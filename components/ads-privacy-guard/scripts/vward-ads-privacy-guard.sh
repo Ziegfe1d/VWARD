@@ -142,14 +142,14 @@ NOW="$(ads_epoch)"
 # periodically revalidated without waiting for a new allowed query.
 if [ -r "$VERDICTS" ]; then
     awk -F'|' -v now="$NOW" '$3=="BLOCK" && ($7+0)<=now {print $1 "|0|0|" $5 "|" $6}' "$VERDICTS" >> "$STATS"
-    sort -t'|' -k1,1 -k2,2nr "$STATS" | awk -F'|' '!seen[$1]++' > "$WORK/stats.dedup"
-    mv "$WORK/stats.dedup" "$STATS"
+    sort -t'|' -k1,1 -k2,2nr "$STATS" | awk -F'|' '!seen[$1]++' > "$WORK/stats.dedup" &&
+    mv "$WORK/stats.dedup" "$STATS" || rm -f "$WORK/stats.dedup"
 fi
 
 # Do not limit before trust/cache checks: hot known domains must not starve new
 # unknown domains. The cap is applied to the expensive PENDING queue later.
 cp "$STATS" "$LIMITED"
-TOTAL_ALLOWED="$(wc -l < "$WORK/query.normalized" 2>/dev/null | tr -d ' ')"
+TOTAL_ALLOWED="$(wc -l 2>/dev/null < "$WORK/query.normalized" | tr -d ' ')"
 UNIQUE_ALLOWED="$(wc -l 2>/dev/null < "$STATS" | tr -d ' ')"
 TOTAL_ALLOWED="$(ads_num "$TOTAL_ALLOWED" 0)"
 UNIQUE_ALLOWED="$(ads_num "$UNIQUE_ALLOWED" 0)"
@@ -166,12 +166,6 @@ sanitize_field()
     printf '%s' "$1" | tr '|\t\r\n' '    ' | sed 's/[[:space:]][[:space:]]*/ /g'
 }
 
-state_line_for()
-{
-    D="$1"
-    awk -F'|' -v d="$D" '$1==d {print; exit}' "$VERDICTS" 2>/dev/null
-}
-
 write_decision()
 {
     D="$1" V="$2" A="$3" C="$4" FIRST="$5" LAST="$6" NEXT="$7" REASON="$8" EVIDENCE="$9"
@@ -181,47 +175,59 @@ write_decision()
         "$D" "$V" "$A" "$C" "$FIRST" "$LAST" "$NEXT" "$REASON" "$EVIDENCE" >> "$DECISIONS"
 }
 
-while IFS='|' read -r DOMAIN COUNT CLIENTS FIRST_SEEN LAST_SEEN; do
-    [ -n "$DOMAIN" ] || continue
-
-    if ads_denylist_match "$DOMAIN"; then
-        write_decision "$DOMAIN" BLOCK BLOCK VERY_HIGH "$FIRST_SEEN" "$LAST_SEEN" "$BLOCK_NEXT" \
-            "manual_denylist" "local denylist"
-        continue
-    fi
-
-    if ads_allowlist_match "$DOMAIN"; then
-        write_decision "$DOMAIN" ALLOW NONE VERY_HIGH "$FIRST_SEEN" "$LAST_SEEN" "$TRUST_NEXT" \
-            "manual_allowlist" "local allowlist; never auto block"
-        continue
-    fi
-
-    if ads_builtin_trust_match "$DOMAIN"; then
-        write_decision "$DOMAIN" TRUST NONE HIGH "$FIRST_SEEN" "$LAST_SEEN" "$TRUST_NEXT" \
-            "trusted_registry" "built-in exact/suffix trust registry"
-        continue
-    fi
-
-    OLD="$(state_line_for "$DOMAIN")"
-    if [ -n "$OLD" ] && [ "$MODE" != rebuild ]; then
-        OLD_NEXT="$(printf '%s\n' "$OLD" | cut -d'|' -f7)"
-        OLD_NEXT="$(ads_num "$OLD_NEXT" 0)"
-        if [ "$OLD_NEXT" -gt "$NOW" ]; then
-            # Keep the verdict but refresh last_seen. This avoids expensive rechecks.
-            OLD_V="$(printf '%s\n' "$OLD" | cut -d'|' -f2)"
-            OLD_A="$(printf '%s\n' "$OLD" | cut -d'|' -f3)"
-            OLD_C="$(printf '%s\n' "$OLD" | cut -d'|' -f4)"
-            OLD_FIRST="$(printf '%s\n' "$OLD" | cut -d'|' -f5)"
-            OLD_REASON="$(printf '%s\n' "$OLD" | cut -d'|' -f8)"
-            OLD_EVID="$(printf '%s\n' "$OLD" | cut -d'|' -f9-)"
-            [ -n "$OLD_FIRST" ] || OLD_FIRST="$FIRST_SEEN"
-            write_decision "$DOMAIN" "$OLD_V" "$OLD_A" "$OLD_C" "$OLD_FIRST" "$LAST_SEEN" "$OLD_NEXT" "$OLD_REASON" "$OLD_EVID"
-            continue
-        fi
-    fi
-
-    printf '%s|%s|%s|%s|%s\n' "$DOMAIN" "$COUNT" "$CLIENTS" "$FIRST_SEEN" "$LAST_SEEN" >> "$PENDING"
-done < "$LIMITED"
+# The cheap paths for every domain of the log in one awk pass (a home sees thousands of
+# domains a day; a shell loop started 4-10 programs for each, minutes on a router):
+# the local denylist, the allowlist, the built-in trust registry (exact or suffix, the
+# first two columns of each), then a cached verdict still valid; the rest is PENDING.
+awk -F'|' -v now="$NOW" -v mode="$MODE" -v dec="$DECISIONS" -v pend="$PENDING" \
+    -v bnext="$BLOCK_NEXT" -v tnext="$TRUST_NEXT" \
+    -v deny="$ADS_DENYLIST" -v allow="$ADS_ALLOWLIST" -v trust="$ADS_TRUST_BUILTIN" -v verdicts="$VERDICTS" '
+function load(f, kind,   line, n, a, p, s) {
+    while ((getline line < f) > 0) {
+        if (line ~ /^[[:space:]]*#/) continue
+        n = split(line, a, "|"); if (n < 2) continue
+        p = tolower(a[1]); s = tolower(a[2])
+        if (s == "exact") ex[kind, p] = 1
+        else if (s == "suffix") sx[kind, p] = 1
+    }
+    close(f)
+}
+function hit(kind, d,   c, i) {
+    if ((kind, d) in ex) return 1
+    c = d
+    while (1) {
+        if ((kind, c) in sx) return 1
+        i = index(c, "."); if (!i) return 0
+        c = substr(c, i + 1)
+    }
+}
+function clean(x) { gsub(/[|\t\r\n]/, " ", x); gsub(/[[:space:]]+/, " ", x); return x }
+function out(d, v, a, c, f, l, nx, r, e) {
+    printf "%s|%s|%s|%s|%s|%s|%s|%s|%s\n", d, v, a, c, f, l, nx, clean(r), clean(e) >> dec
+}
+BEGIN {
+    load(deny, "d"); load(allow, "a"); load(trust, "t")
+    while ((getline line < verdicts) > 0) { n = split(line, a, "|"); if (!(a[1] in old)) old[a[1]] = line }
+    close(verdicts)
+}
+{
+    d = $1; if (d == "") next
+    last = $5; for (i = 6; i <= NF; i++) last = last "|" $i
+    if (hit("d", d)) { out(d, "BLOCK", "BLOCK", "VERY_HIGH", $4, last, bnext, "manual_denylist", "local denylist"); next }
+    if (hit("a", d)) { out(d, "ALLOW", "NONE", "VERY_HIGH", $4, last, tnext, "manual_allowlist", "local allowlist; never auto block"); next }
+    if (hit("t", d)) { out(d, "TRUST", "NONE", "HIGH", $4, last, tnext, "trusted_registry", "built-in exact/suffix trust registry"); next }
+    if ((d in old) && mode != "rebuild") {
+        n = split(old[d], o, "|")
+        nx = o[7]; if (nx !~ /^[0-9]+$/) nx = 0
+        if (nx + 0 > now + 0) {
+            # Kept, last_seen refreshed: no expensive recheck.
+            ev = o[9]; for (i = 10; i <= n; i++) ev = ev "|" o[i]
+            out(d, o[2], o[3], o[4], (o[5] == "" ? $4 : o[5]), last, nx, o[8], ev)
+            next
+        }
+    }
+    print $1 "|" $2 "|" $3 "|" $4 "|" last >> pend
+}' "$LIMITED" || ads_die "candidate triage failed"
 
 # Expensive evidence lookup is capped only after cheap trust/manual/cache paths.
 cp "$PENDING" "$WORK/pending.all"
@@ -318,49 +324,43 @@ external_verdict()
     "$CMD" "$DOMAIN" 2>/dev/null | head -n 1
 }
 
+# Each candidate's evidence (score, independent groups, a dedicated block feed, sources,
+# purposes) and its previous verdict (action, first seen), for all of them in one pass:
+# appended to its line, so the loop below starts no program to look them up.
+awk -F'|' -v verdicts="$VERDICTS" '
+BEGIN {
+    while ((getline line < verdicts) > 0) {
+        n = split(line, a, "|")
+        if (!(a[1] in seen)) { seen[a[1]] = 1; oa[a[1]] = (n == 1 ? line : a[3]); of[a[1]] = (n == 1 ? line : a[5]) }
+    }
+    close(verdicts)
+}
+FILENAME == ARGV[1] {
+    d = $1; sid = $3; group = $4; weight = $5 + 0; single = $6; purpose = $7; smode = $8
+    if (smode == "active") {
+        if (!((d, group) in gmax)) { gmax[d, group] = weight; score[d] += weight }
+        else if (weight > gmax[d, group]) { score[d] += weight - gmax[d, group]; gmax[d, group] = weight }
+        if (!gseen[d, group]++) groups[d]++
+        if (single == "true") sb[d] = 1
+    }
+    if (!sseen[d, sid]++) src[d] = (src[d] == "" ? "" : src[d] ",") sid "(" smode ")"
+    if (!pseen[d, purpose]++) pur[d] = (pur[d] == "" ? "" : pur[d] ",") purpose
+    next
+}
+{
+    d = $1; last = $5; for (i = 6; i <= NF; i++) last = last "|" $i
+    printf "%s|%s|%s|%s|%s|%d|%d|%d|%s|%s|%s|%s\n", d, $2, $3, $4, last, score[d] + 0, groups[d] + 0, sb[d] + 0, src[d], pur[d], oa[d], of[d]
+}' "$MATCHES" "$PENDING" > "$WORK/pending.evidence" || ads_die "evidence summary failed"
+
 PROCESSED=0
 runtime_status analysing "" 0 "$PENDING_COUNT"
-while IFS='|' read -r DOMAIN COUNT CLIENTS FIRST_SEEN LAST_SEEN; do
+while IFS='|' read -r DOMAIN COUNT CLIENTS FIRST_SEEN LAST_SEEN SCORE GROUPS SINGLE_BLOCK SOURCES PURPOSES OLD_ACTION OLD_FIRST; do
     [ -n "$DOMAIN" ] || continue
     PROCESSED=$((PROCESSED + 1))
     runtime_status analysing "$DOMAIN" "$PROCESSED" "$PENDING_COUNT"
-
-    SUMMARY="$(awk -F'|' -v d="$DOMAIN" '
-        $1==d {
-            sid=$3; group=$4; weight=$5+0; single=$6; purpose=$7; smode=$8
-            if (smode=="active") {
-                if (!(group in gmax) || weight>gmax[group]) gmax[group]=weight
-                if (!gseen[group]++) groups++
-                if (single=="true") single_block=1
-            }
-            if (!sseen[sid]++) {
-                if (sources!="") sources=sources ","
-                sources=sources sid "(" smode ")"
-            }
-            if (!pseen[purpose]++) {
-                if (purposes!="") purposes=purposes ","
-                purposes=purposes purpose
-            }
-        }
-        END {
-            score=0
-            for (g in gmax) score+=gmax[g]
-            printf "%d|%d|%d|%s|%s", score+0,groups+0,single_block+0,sources,purposes
-        }
-    ' "$MATCHES")"
-
-    SCORE="$(printf '%s' "$SUMMARY" | cut -d'|' -f1)"
-    GROUPS="$(printf '%s' "$SUMMARY" | cut -d'|' -f2)"
-    SINGLE_BLOCK="$(printf '%s' "$SUMMARY" | cut -d'|' -f3)"
-    SOURCES="$(printf '%s' "$SUMMARY" | cut -d'|' -f4)"
-    PURPOSES="$(printf '%s' "$SUMMARY" | cut -d'|' -f5)"
     SCORE="$(ads_num "$SCORE" 0)"
     GROUPS="$(ads_num "$GROUPS" 0)"
     SINGLE_BLOCK="$(ads_num "$SINGLE_BLOCK" 0)"
-
-    OLD="$(state_line_for "$DOMAIN")"
-    OLD_ACTION="$(printf '%s\n' "$OLD" | cut -d'|' -f3)"
-    OLD_FIRST="$(printf '%s\n' "$OLD" | cut -d'|' -f5)"
     [ -n "$OLD_FIRST" ] || OLD_FIRST="$FIRST_SEEN"
 
     if [ "$SINGLE_BLOCK" -eq 1 ]; then
@@ -438,7 +438,7 @@ while IFS='|' read -r DOMAIN COUNT CLIENTS FIRST_SEEN LAST_SEEN; do
                 "no_block_evidence" "source_score=$SCORE groups=$GROUPS heuristic=$HEUR queries=$COUNT clients=$CLIENTS"
         fi
     fi
-done < "$PENDING"
+done < "$WORK/pending.evidence"
 
 runtime_status finalizing "" "$PENDING_COUNT" "$PENDING_COUNT"
 
@@ -454,6 +454,16 @@ awk -F'|' '
         for (i=1;i<=n;i++) if (!(order[i] in used)) print new[order[i]]
     }
 ' "$DECISIONS" "$VERDICTS" | sort -t'|' -k1,1 > "$NEW_STATE"
+
+# The verdicts are a cache and must not grow without end on the USB drive (a home meets
+# new domains every day): every BLOCK is kept (they make the rules), of the rest the
+# MAX_VERDICTS last seen; a domain dropped here is simply checked again if it comes back.
+MAX_VERDICTS="$(ads_num "${MAX_VERDICTS:-10000}" 10000)"
+if [ "$(wc -l 2>/dev/null < "$NEW_STATE")" -gt "$MAX_VERDICTS" ]; then
+    awk -F'|' -v keep="$MAX_VERDICTS" -v other="$WORK/state.other" '$3 == "BLOCK" {print; next} {print > other}' "$NEW_STATE" > "$WORK/state.block" &&
+    sort -t'|' -k6,6r "$WORK/state.other" | head -n "$MAX_VERDICTS" | cat "$WORK/state.block" - | sort -t'|' -k1,1 > "$WORK/state.cut" &&
+    mv "$WORK/state.cut" "$NEW_STATE" || rm -f "$WORK/state.cut"
+fi
 
 # Build managed block rules from action=BLOCK. User denylist is included as an
 # explicit override. The generated file is the authoritative VWARD output.

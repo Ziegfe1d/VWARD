@@ -87,7 +87,7 @@ adaptive_core_count()
     ACC_N=0
     for ACC_P in $ACC_LIVE; do
         # /proc/PID/stat: pid (comm) state ppid ...; read is a builtin.
-        read -r _ _ _ ACC_PP _ < "/proc/$ACC_P/stat" 2>/dev/null || continue
+        read -r _ _ _ ACC_PP _ 2>/dev/null < "/proc/$ACC_P/stat" || continue
         case "$ACC_LIVE" in *" $ACC_PP "*) ;; *) ACC_N=$((ACC_N + 1)) ;; esac
     done
     echo "$ACC_N"

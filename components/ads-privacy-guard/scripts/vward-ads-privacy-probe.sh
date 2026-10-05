@@ -103,7 +103,7 @@ if [ -x "$QUERY_READER" ]; then
     QUERY_SOURCE="${QUERY_SOURCE:-auto}" "$QUERY_READER" "${PROBE_TAIL_LINES:-20000}" 2>/dev/null |
       awk -F'\t' -v d="$DOMAIN" 'tolower($1)==d {print $3 "\t" $2 "\tALLOWED"}' >> "$WORK/history"
 fi
-HISTORY_COUNT="$(wc -l < "$WORK/history" 2>/dev/null | tr -d ' ')"; HISTORY_COUNT="$(ads_num "$HISTORY_COUNT" 0)"
+HISTORY_COUNT="$(wc -l 2>/dev/null < "$WORK/history" | tr -d ' ')"; HISTORY_COUNT="$(ads_num "$HISTORY_COUNT" 0)"
 echo "QUERY_COUNT=$HISTORY_COUNT"
 if [ "$HISTORY_COUNT" -gt 0 ]; then
     echo "UNIQUE_CLIENTS=$(cut -f2 "$WORK/history" | sort -u | wc -l | tr -d ' ')"

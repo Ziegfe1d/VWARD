@@ -63,6 +63,9 @@ jobs:
       - name: Panel API under hostile input on the router emulator
         run: sudo python3 tests/perf/check-api-fuzz-emulated.py
 
+      - name: Stress on the router emulator (races, load, full disk, big data, an hour of random faults)
+        run: sudo python3 tests/perf/check-stress-emulated.py --minutes 60
+
       - name: Every page of the Panel in Chromium on the router emulator
         run: |
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 sudo -E npm install -g --silent playwright@1.56.1

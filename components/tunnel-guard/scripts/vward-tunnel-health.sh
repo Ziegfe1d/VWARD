@@ -123,7 +123,7 @@ LOCAL_IF_OK=0
 if [ -d "/sys/class/net/$WG_IF" ]; then
     IF_EXISTS=1
     CARRIER=unknown
-    [ ! -r "/sys/class/net/$WG_IF/carrier" ] || read -r CARRIER < "/sys/class/net/$WG_IF/carrier" 2>/dev/null || CARRIER=unknown
+    [ ! -r "/sys/class/net/$WG_IF/carrier" ] || read -r CARRIER 2>/dev/null < "/sys/class/net/$WG_IF/carrier" || CARRIER=unknown
 
     # One process a minute instead of five: the address taken apart by the shell, the UP
     # flag read from sysfs (IFF_UP = 1), `ip link` only where sysfs has no flags.
@@ -134,7 +134,7 @@ if [ -d "/sys/class/net/$WG_IF" ]; then
     esac
 
     UP_FLAG=0
-    if [ -r "/sys/class/net/$WG_IF/flags" ] && read -r FLAGS < "/sys/class/net/$WG_IF/flags" 2>/dev/null; then
+    if [ -r "/sys/class/net/$WG_IF/flags" ] && read -r FLAGS 2>/dev/null < "/sys/class/net/$WG_IF/flags"; then
         case "$FLAGS" in 0x*) [ $((FLAGS & 1)) -eq 0 ] || UP_FLAG=1 ;; esac
     else
         case "$(ip link show "$WG_IF" 2>/dev/null)" in *UP*) UP_FLAG=1 ;; esac
@@ -341,9 +341,9 @@ TMP_STATE="$STATE.tmp.$$"
     echo "RCI_OK=$RCI_OK"
     echo "RCI_LAST=$LAST_RCI"
     echo "RCI_AGE=$RCI_AGE"
-} > "$TMP_STATE"
+} > "$TMP_STATE" &&
 
-mv "$TMP_STATE" "$STATE"
+mv "$TMP_STATE" "$STATE" || rm -f "$TMP_STATE"
 
 
 if [ "$STATUS" != "$OLD_STATUS" ]; then

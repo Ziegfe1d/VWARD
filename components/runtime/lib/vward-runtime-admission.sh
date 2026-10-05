@@ -144,7 +144,7 @@ vward_pid_start_var() {
     case "$va_pid" in ''|*[!0-9]*) return 1 ;; esac
     [ -r "/proc/$va_pid/stat" ] || return 1
     va_line=
-    read -r va_line < "/proc/$va_pid/stat" 2>/dev/null || [ -n "$va_line" ] || return 1
+    read -r va_line 2>/dev/null < "/proc/$va_pid/stat" || [ -n "$va_line" ] || return 1
     va_rest=${va_line##*) }
     [ "$va_rest" != "$va_line" ] || return 1
     # shellcheck disable=SC2086
@@ -188,7 +188,8 @@ vward_admission_enter() {
         [ ! -e "$va_barrier" ] && [ ! -L "$va_barrier" ] || return 75
     [ ! -L "$va_active" ] || return 1
     if [ ! -e "$va_active" ]; then
-        (umask 077; mkdir "$va_active") 2>/dev/null || return 1
+        # Jobs started at the same moment (cron, boot) may race here: one makes it.
+        (umask 077; mkdir "$va_active") 2>/dev/null || [ -d "$va_active" ] || return 1
     fi
     [ -d "$va_active" ] || return 1
     # Keenetic's BusyBox stat has no -c: the mode comes from ls (one process), the owner
@@ -235,7 +236,8 @@ VWARD_LOCKS="/tmp/vward-route-reconciler-maint.lock /tmp/vward-route-engine.lock
 /tmp/vward-cron-supervisor.lock /tmp/vward-route-change.lock /opt/var/lib/vward/policy-sync/lock
 /opt/var/lib/vward/route-engine/classifier.lock /opt/var/lib/vward/ads-privacy-guard/scan.lock
 /opt/var/lib/vward/ads-privacy-guard/sources-update.lock /opt/var/lib/vward/ads-privacy-guard/publish.lock
-/opt/var/lib/vward/ads-privacy-guard/jobs/worker.lock /opt/var/lib/vward/ext-update/lock"
+/opt/var/lib/vward/ads-privacy-guard/jobs/worker.lock /opt/var/lib/vward/ext-update/lock
+/tmp/vward-ads-control.lock /tmp/vward-console-edit.lock"
 
 # vward_lock_stale DIR: the lock's owner is gone - its process is dead or the
 # id now belongs to another process (pid_start differs), or the lock has had no
@@ -252,7 +254,7 @@ vward_lock_stale() {
     vl_saved=; [ ! -r "$vl_dir/pid_start" ] || read -r vl_saved < "$vl_dir/pid_start"
     case "$vl_saved" in ''|unknown) return 1 ;; esac
     # Field 22 of /proc/PID/stat, counted after the command name in brackets.
-    vl_stat=; read -r vl_stat < "/proc/$vl_pid/stat" 2>/dev/null || return 1
+    vl_stat=; read -r vl_stat 2>/dev/null < "/proc/$vl_pid/stat" || return 1
     set -f; set -- ${vl_stat##*) }; set +f
     [ "$vl_saved" != "${20:-}" ]
 }

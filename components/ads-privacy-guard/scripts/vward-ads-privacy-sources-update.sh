@@ -29,7 +29,7 @@ fetch_source() (
         if "$ADS_CURL" -4 -f -L --connect-timeout "${SOURCE_CONNECT_TIMEOUT:-10}" \
            --max-time "${SOURCE_MAX_TIME:-120}" --max-filesize "$fs_max" -sS \
            "$fs_url" -o "$fs_raw.tmp"; then
-            fs_bytes="$(wc -c < "$fs_raw.tmp" 2>/dev/null | tr -d ' ')"; fs_bytes="$(ads_num "$fs_bytes" 0)"
+            fs_bytes="$(wc -c 2>/dev/null < "$fs_raw.tmp" | tr -d ' ')"; fs_bytes="$(ads_num "$fs_bytes" 0)"
             [ "$fs_bytes" -le "$fs_max" ] || { rm -f "$fs_raw.tmp"; continue; }
             mv "$fs_raw.tmp" "$fs_raw" || return 1
             printf '%s\n' "$fs_url" > "$fs_raw.url"

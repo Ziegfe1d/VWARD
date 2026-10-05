@@ -245,6 +245,13 @@ ads_lock_acquire() (
     [ -d "$ads_l_dir" ] && [ ! -L "$ads_l_dir" ] || return 1
 
     ads_l_pid="$(ads_read_line "$ads_l_dir/pid")"
+    # No pid yet: its maker is between mkdir and writing it (a few ms). Look again a second
+    # later before calling it abandoned, or two processes would hold the lock at once.
+    if [ -z "$ads_l_pid" ]; then
+        sleep 1
+        [ -d "$ads_l_dir" ] || return 1
+        ads_l_pid="$(ads_read_line "$ads_l_dir/pid")"
+    fi
     case "$ads_l_pid" in ''|*[!0-9]*) ads_l_pid=0 ;; esac
     ads_l_alive=0
     if [ "$ads_l_pid" -gt 0 ] && kill -0 "$ads_l_pid" 2>/dev/null; then

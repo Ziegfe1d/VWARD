@@ -43,7 +43,7 @@ def cgi(root, method, query, body, cookie):
     env = {"PATH": chaos.PATH_ENV, "HOME": "/root", "GATEWAY_INTERFACE": "CGI/1.1", "REQUEST_METHOD": method,
            "QUERY_STRING": query, "REMOTE_ADDR": "192.0.2.10", "SERVER_PORT": "8088",
            "HTTP_X_VWARD_REQUEST": "console", "CONTENT_LENGTH": str(len(body)),
-           "CONTENT_TYPE": "application/json", "HTTP_COOKIE": cookie or ""}
+           "CONTENT_TYPE": "application/x-www-form-urlencoded", "HTTP_COOKIE": cookie or ""}
     cmd = ["env", "-i"] + [f"{k}={v}" for k, v in env.items()] + \
           ["chroot", str(root), "/bin/sh", "-c", f"cd {WWW}/cgi-bin && exec ./api.cgi"]
     try:

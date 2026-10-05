@@ -1878,7 +1878,7 @@ if [ "$ACTION" = site-test ]; then
     while [ "$k" -lt "$sn" ]; do
         k=$((k + 1))
         IFS="$(printf '\t')" read -r sname sdev < "$ST_DIR/t.$k"
-        read -r scode stime sloc < "$ST_DIR/r.$k" 2>/dev/null || :
+        read -r scode stime sloc 2>/dev/null < "$ST_DIR/r.$k" || :
         case "${scode:-000}:$(printf '%s' "$sloc" | tr 'A-Z' 'a-z')" in
             000:*) sv=none ;;
             451:*|*unavailable*|*region*|*restricted*|*not-available*|*blocked*) sv=blocked ;;
@@ -2809,7 +2809,7 @@ SUPERVISOR=${2:-0}
 ADGUARD=${3:-0}
 # The start gate found the program itself broken (it dies on --version): see vward_agh_ensure.
 AGH_BROKEN=""
-[ ! -r "${VWARD_AGH_STATE:-/tmp/vward-agh-start}/broken" ] || read -r AGH_BROKEN < "${VWARD_AGH_STATE:-/tmp/vward-agh-start}/broken" 2>/dev/null
+[ ! -r "${VWARD_AGH_STATE:-/tmp/vward-agh-start}/broken" ] || read -r AGH_BROKEN 2>/dev/null < "${VWARD_AGH_STATE:-/tmp/vward-agh-start}/broken"
 LIVE_COUNT=${4:-0}
 TCPDUMP_COUNT=${5:-0}
 CROND=0

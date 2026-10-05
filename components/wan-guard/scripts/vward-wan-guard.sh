@@ -615,8 +615,8 @@ IFS="$US" read -r GW GW_ACCESSIBLE DNS_ACCESSIBLE INTERNET RELIABLE <<FIELDS
 $NET_FIELDS
 FIELDS
 
-read -r CARRIER < "/sys/class/net/$ETH/carrier" 2>/dev/null || CARRIER=unknown
-read -r OPERSTATE < "/sys/class/net/$ETH/operstate" 2>/dev/null || OPERSTATE=unknown
+read -r CARRIER 2>/dev/null < "/sys/class/net/$ETH/carrier" || CARRIER=unknown
+read -r OPERSTATE 2>/dev/null < "/sys/class/net/$ETH/operstate" || OPERSTATE=unknown
 [ -n "$CARRIER" ] || CARRIER=unknown
 [ -n "$OPERSTATE" ] || OPERSTATE=unknown
 

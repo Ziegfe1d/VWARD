@@ -101,7 +101,7 @@ https_3proxy_pid_matches()
     kill -0 "$p" 2>/dev/null || return 1
     proc_root="${HTTPS_PROC_ROOT:-/proc}"
     [ -r "$proc_root/$p/cmdline" ] || return 1
-    cmd="$(tr '\000' ' ' < "$proc_root/$p/cmdline" 2>/dev/null)"; [ -n "$cmd" ] || return 1
+    cmd="$(tr '\000' ' ' 2>/dev/null < "$proc_root/$p/cmdline")"; [ -n "$cmd" ] || return 1
     bin="${HTTPS_3PROXY_BIN_RESOLVED:-$(https_3proxy_find_bin 2>/dev/null || true)}"; [ -n "$bin" ] || return 1
     process_name="${HTTPS_3PROXY_PROCESS_NAME:-$(basename "$bin")}"; case "$process_name" in ''|*[!A-Za-z0-9_.-]*) return 1;; esac
     case "$cmd" in *"$process_name"*) return 0;; *) return 1;; esac

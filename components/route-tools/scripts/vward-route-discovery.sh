@@ -206,9 +206,9 @@ write_state()
         echo "LAST_PROBE=$NOW"
         echo "LAST_CODE=$S_CODE"
         echo "LAST_TIME=$S_TIME"
-    } > "$TMP"
+    } > "$TMP" &&
 
-    mv "$TMP" "$STATE"
+    mv "$TMP" "$STATE" || rm -f "$TMP"
 }
 
 RECENT_COUNT=$(wc -l < "$RECENT")

@@ -287,7 +287,7 @@ update_itdog_catalog()
         [ -n "$CAT" ] || continue
 
         normalize_ipv4 < "$FILE" > "$NEW/$CAT.cidr"
-        COUNT="$(wc -l < "$NEW/$CAT.cidr" 2>/dev/null)"
+        COUNT="$(wc -l 2>/dev/null < "$NEW/$CAT.cidr")"
         [ -n "$COUNT" ] || COUNT=0
 
         if [ "$COUNT" -eq 0 ]; then
@@ -350,7 +350,7 @@ update_loyal_catalog()
         fi
 
         normalize_ipv4 < "$RAW" > "$NEW/$CAT.cidr"
-        COUNT="$(wc -l < "$NEW/$CAT.cidr" 2>/dev/null)"
+        COUNT="$(wc -l 2>/dev/null < "$NEW/$CAT.cidr")"
         [ -n "$COUNT" ] || COUNT=0
 
         if [ "$COUNT" -eq 0 ]; then
@@ -380,7 +380,7 @@ update_official_catalog()
         return 1
     fi
     normalize_ipv4 < "$WORK/telegram-official.raw" > "$NEW/telegram.cidr"
-    COUNT="$(wc -l < "$NEW/telegram.cidr" 2>/dev/null)"
+    COUNT="$(wc -l 2>/dev/null < "$NEW/telegram.cidr")"
     [ -n "$COUNT" ] || COUNT=0
     if [ "$COUNT" -lt 3 ]; then
         echo "SOURCE_OFFICIAL=BAD_COUNT:$COUNT"
@@ -425,7 +425,7 @@ build_catalog()
         sort -u "$FILE" > "$NEW/$CAT.cidr"
         rm -f "$FILE"
 
-        COUNT="$(wc -l < "$NEW/$CAT.cidr" 2>/dev/null)"
+        COUNT="$(wc -l 2>/dev/null < "$NEW/$CAT.cidr")"
         [ -n "$COUNT" ] || COUNT=0
 
         printf '%s|%s\n' "$CAT" "$COUNT" >> "$IDX"
@@ -555,8 +555,8 @@ collect_categories()
                 }
             ' "$EXPANDED" "$HINT_INCLUDES" >> "$EXPANDED"
 
-            sort -u "$EXPANDED" > "$NEXT"
-            mv "$NEXT" "$EXPANDED"
+            sort -u "$EXPANDED" > "$NEXT" &&
+            mv "$NEXT" "$EXPANDED" || rm -f "$NEXT"
 
             NEW_COUNT="$(wc -l < "$EXPANDED")"
             [ "$NEW_COUNT" -eq "$OLD_COUNT" ] && break
@@ -591,8 +591,8 @@ collect_categories()
         echo "$CAT" >> "$OUT"
     done
 
-    sort -u "$OUT" > "$OUT.sorted"
-    mv "$OUT.sorted" "$OUT"
+    sort -u "$OUT" > "$OUT.sorted" &&
+    mv "$OUT.sorted" "$OUT" || rm -f "$OUT.sorted"
 }
 
 route_line()
@@ -622,8 +622,8 @@ reconcile_routes()
         cat "$CATALOG/$CAT.cidr" >> "$WANTED"
     done < "$CATS"
 
-    sort -u "$WANTED" > "$WANTED.sorted"
-    mv "$WANTED.sorted" "$WANTED"
+    sort -u "$WANTED" > "$WANTED.sorted" &&
+    mv "$WANTED.sorted" "$WANTED" || rm -f "$WANTED.sorted"
 
     ADDED=0
     REMOVED=0
@@ -705,8 +705,8 @@ reconcile_routes()
         fi
     done < "$OWNED"
 
-    sort -u "$NEXT_OWNED" > "$OWNED.new"
-    mv "$OWNED.new" "$OWNED"
+    sort -u "$NEXT_OWNED" > "$OWNED.new" &&
+    mv "$OWNED.new" "$OWNED" || rm -f "$OWNED.new"
 
     cp "$CATS" "$ACTIVE.new"
     mv "$ACTIVE.new" "$ACTIVE"

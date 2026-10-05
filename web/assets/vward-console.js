@@ -173,7 +173,7 @@ const API_ERRORS = {
   not_a_file: 'это не файл', not_a_folder: 'это не папка', invalid_root: 'неизвестная папка',
   updater_busy: 'идёт обновление, повторите позже', confirmation_required: 'требуется подтверждение',
   action_unavailable: 'действие недоступно на этом роутере', invalid_domain: 'неверный домен',
-  invalid_ipv4: 'неверный IPv4-адрес', control_busy: 'другое действие ещё выполняется',
+  invalid_ipv4: 'неверный IPv4-адрес', control_busy: 'другое действие ещё выполняется', busy: 'другое изменение ещё выполняется, повторите через несколько секунд',
   no_pending_update: 'нет загруженного обновления', state_action_not_allowed: 'в текущем состоянии обновления это недоступно',
   rollback_unavailable: 'нет резервной копии для отката', recovery_not_required: 'восстановление не требуется',
   config_unavailable: 'файл настроек недоступен', invalid_mac: 'неверный MAC-адрес',

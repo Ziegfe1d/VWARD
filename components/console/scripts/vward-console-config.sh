@@ -88,6 +88,7 @@ cleanup() {
     [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
     [ "$LOCKED" != 1 ] || rm -rf "${CHANGE_LOCK:?}"
+    [ "$EDIT_LOCKED" != 1 ] || rm -rf "${EDIT_LOCK:?}"
     [ "$EXT_LOCKED" != 1 ] || rm -rf "${EXT_STATE:?}/lock"
     command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null
     return 0
@@ -167,20 +168,43 @@ set_kv() {
 
 # ---------- Router configuration ----------
 
-change_lock() {
-    n=0
-    while ! mkdir "$CHANGE_LOCK" 2>/dev/null; do
-        old=$(cat "$CHANGE_LOCK/pid" 2>/dev/null)
-        if [ -n "$old" ] && ! kill -0 "$old" 2>/dev/null; then
-            rm -rf "${CHANGE_LOCK:?}"
+# dir_lock DIR: the lock DIR for this process, waiting up to 10 s for another holder.
+# A holder that is gone (its pid dead), or a lock without a pid for 3 s (its holder was
+# killed between mkdir and writing the pid), is taken over.
+dir_lock() {
+    dl_n=0 dl_nopid=0
+    while ! mkdir "$1" 2>/dev/null; do
+        dl_old=
+        read -r dl_old 2>/dev/null < "$1/pid" || :
+        if [ -n "$dl_old" ] && ! kill -0 "$dl_old" 2>/dev/null; then
+            rm -rf "${1:?}"
             continue
         fi
-        n=$((n + 1))
-        [ "$n" -ge 10 ] && die route_change_busy 75
+        if [ -z "$dl_old" ]; then
+            dl_nopid=$((dl_nopid + 1))
+            [ "$dl_nopid" -lt 3 ] || { rm -rf "${1:?}"; dl_nopid=0; continue; }
+        else
+            dl_nopid=0
+        fi
+        dl_n=$((dl_n + 1))
+        [ "$dl_n" -lt 10 ] || return 1
         sleep 1
     done
+    echo $$ > "$1/pid"
+}
+
+change_lock() {
+    dir_lock "$CHANGE_LOCK" || die route_change_busy 75
     LOCKED=1
-    echo $$ > "$CHANGE_LOCK/pid"
+}
+
+# Quick edits of VWARD's own files (read, change, write back) go one at a time: two tabs
+# or quick clicks must not lose each other's change.
+EDIT_LOCK=${VWARD_CONSOLE_EDIT_LOCK:-/tmp/vward-console-edit.lock}
+EDIT_LOCKED=0
+edit_lock() {
+    dir_lock "$EDIT_LOCK" || die route_change_busy 75
+    EDIT_LOCKED=1
 }
 
 ndm() {
@@ -1392,7 +1416,7 @@ tunnel_dups() {
         cur != "" && $1 == "wireguard" && $2 == "peer" && $3 == k {print cur; exit}' "$RUNCFG")
     if [ -z "$td_same" ] && [ -f "$AWG_TUNNELS" ]; then
         td_same=$(while IFS="$(printf '\t')" read -r td_n td_name _; do
-            tr -d '\r' < "${AWG_TUNNELS%/*}/t$td_n.conf" 2>/dev/null |
+            tr -d '\r' 2>/dev/null < "${AWG_TUNNELS%/*}/t$td_n.conf" |
                 awk -F= -v k="$td_peer" 'tolower($1) ~ /^[ \t]*publickey[ \t]*$/ {v = substr($0, index($0, "=") + 1); gsub(/[ \t]/, "", v); if (v == k) f = 1} END {exit f ? 0 : 1}' &&
                 { printf '%s\n' "$td_name"; break; }
         done < "$AWG_TUNNELS")
@@ -2208,7 +2232,7 @@ op_ext_daily() {
         echo "Автоматически: $dp_pkg"
         ( trap - EXIT; op_ext_upgrade "$dp_pkg" auto ) || true
         n=$((n + 1))
-    done < "$EXT_STATE/upgradable.tsv.daily" 2>/dev/null
+    done 2>/dev/null < "$EXT_STATE/upgradable.tsv.daily"
     done_ok "ext-daily automatic=$n" changed
 }
 
@@ -2242,6 +2266,13 @@ ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$ADMISSION_LIB" ] || die admission_unavailable
 . "$ADMISSION_LIB"
 vward_admission_enter console-config || die updater_busy 75
+
+case "$OP" in
+    force-vpn|domain-category|tunnel-guard|tunnel-fallback|tunnel-return|tunnel-auto|wan-guard|component|\
+    adaptive-mode|classifier|ip-category|console-auth|console-devices|update-feed|domain-list-watch|\
+    smartdns-guard|smartdns-domain|wifi|update|wan-param|wifi-host|service|service-category|ext-auto|firmware)
+        edit_lock ;;
+esac
 
 case "$OP" in
     route-domain) op_route_domain "$ARG1" "$ARG2" ;;

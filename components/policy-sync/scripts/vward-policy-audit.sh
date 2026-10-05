@@ -319,9 +319,9 @@ while IFS='|' read GROUP HOST; do
         echo "LAST_VPN_CODE=$VPN_CODE"
         echo "LAST_TIME=$TIME"
         echo "LAST_CHECK=$(date +%s)"
-    } > "$TMP"
+    } > "$TMP" &&
 
-    mv "$TMP" "$STATE"
+    mv "$TMP" "$STATE" || rm -f "$TMP"
 
     echo "$HOST" >> "$CURRENT_TARGETS"
 

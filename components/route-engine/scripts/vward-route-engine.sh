@@ -408,9 +408,9 @@ save_state()
         echo "HOST=$H"
         echo "STATUS=$STATUS"
         echo "LAST_CHECK=${QNOW:-$(date +%s)}"
-    } > "$TMP"
+    } > "$TMP" &&
 
-    mv "$TMP" "$STATE"
+    mv "$TMP" "$STATE" || rm -f "$TMP"
 
     [ ! -e "$OTHER" ] || rm -f "$OTHER"
 }
@@ -561,16 +561,30 @@ alt_tunnel()
 change_lock()
 {
     N=0
+    NOPID=0
 
     while ! mkdir "$CHANGE_LOCK" 2>/dev/null; do
 
-        OLD=$(cat "$CHANGE_LOCK/pid" 2>/dev/null)
+        OLD=
+        read -r OLD 2>/dev/null < "$CHANGE_LOCK/pid" || :
 
         if [ -n "$OLD" ] &&
            ! kill -0 "$OLD" 2>/dev/null; then
 
             rm -rf "${CHANGE_LOCK:?}"
             continue
+        fi
+
+        # No pid for 3 s: its holder was killed between mkdir and writing the pid.
+        if [ -z "$OLD" ]; then
+            NOPID=$((NOPID + 1))
+            if [ "$NOPID" -ge 3 ]; then
+                rm -rf "${CHANGE_LOCK:?}"
+                NOPID=0
+                continue
+            fi
+        else
+            NOPID=0
         fi
 
         sleep 1
@@ -1430,9 +1444,9 @@ list_watch_map()
             next
         }
         {split($0, f, "|"); if (f[1] in around) print f[2], f[1]}
-    ' "$1" "$2" > "$LIST_WATCH_MAP.new"
+    ' "$1" "$2" > "$LIST_WATCH_MAP.new" &&
 
-    mv -f "$LIST_WATCH_MAP.new" "$LIST_WATCH_MAP"
+    mv -f "$LIST_WATCH_MAP.new" "$LIST_WATCH_MAP" || rm -f "$LIST_WATCH_MAP.new"
     rm -f "$LIST_WATCH_MAP.watch"
 }
 

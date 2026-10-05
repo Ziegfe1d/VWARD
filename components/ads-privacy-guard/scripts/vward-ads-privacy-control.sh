@@ -26,6 +26,24 @@ case "$OP" in
   *) echo "Usage: $0 {pause|resume|status|allow|block|remove|show|agh} [domain] [exact|suffix]" >&2; exit 2 ;;
 esac
 
+# Changes go one at a time (two tabs, quick clicks, the Panel's helper at once): each reads
+# the rules, adds its own and writes them back, and must not drop another's. A holder that
+# is gone frees the lock after 30 s.
+CONTROL_LOCK=${VWARD_ADS_CONTROL_LOCK:-/tmp/vward-ads-control.lock}
+CL_HELD=
+ads_control_leave() { [ -z "$CL_HELD" ] || ads_lock_release "$CONTROL_LOCK" 2>/dev/null; ads_admission_leave; }
+trap ads_control_leave EXIT
+case "$OP" in
+  status|show) ;;
+  *) cl_n=0
+     until ads_lock_acquire "$CONTROL_LOCK" 30; do
+       cl_n=$((cl_n + 1))
+       [ "$cl_n" -lt 15 ] || { echo "CONTROL=FAIL"; echo "ERROR=busy"; exit 75; }
+       sleep 1
+     done
+     CL_HELD=1 ;;
+esac
+
 # agh SETTING ARGS: AdGuard Home's own ad settings, each change read back.
 #   protection|filtering|safebrowsing|parental|safesearch 0|1
 #   interval HOURS (0 1 12 24 72 168)      filters-refresh
@@ -33,7 +51,7 @@ esac
 #   service ID 0|1
 if [ "$OP" = agh ]; then
   W="$(mktemp -d "${TMPDIR:-/tmp}/vward-ads-agh.XXXXXX" 2>/dev/null)" || ads_die "cannot create a work directory"
-  trap 'rm -rf "${W:?}"; ads_admission_leave' EXIT
+  trap 'rm -rf "${W:?}"; ads_control_leave' EXIT
   AG_SET="${2:-}" A1="${3:-}" A2="${4:-}"
   agfail() { echo "CONTROL=FAIL"; echo "ERROR=$1"; ads_log "CONTROL|agh|$AG_SET|error=$1"; exit 1; }
   bool() { case "$1" in 1) echo true ;; 0) echo false ;; *) agfail invalid_value ;; esac; }
@@ -190,7 +208,7 @@ chmod 0600 "$ADS_ALLOWLIST" "$ADS_DENYLIST" 2>/dev/null || ads_die "cannot prote
 STAMP="$(date '+%Y%m%d-%H%M%S')"; BACKUP_DIR="$ADS_BACKUP_ROOT/manual/$STAMP"; mkdir -p "$BACKUP_DIR" || ads_die "cannot create control backup"; chmod 0700 "$BACKUP_DIR"
 cp -p "$ADS_ALLOWLIST" "$BACKUP_DIR/allowlist.tsv.before" || ads_die "allowlist backup failed"; cp -p "$ADS_DENYLIST" "$BACKUP_DIR/denylist.tsv.before" || ads_die "denylist backup failed"
 ALLOW_TMP="${ADS_ALLOWLIST}.new.$$"; DENY_TMP="${ADS_DENYLIST}.new.$$"
-trap 'rm -f "$ALLOW_TMP" "$DENY_TMP" "$ALLOW_TMP.sorted" "$DENY_TMP.sorted"; ads_admission_leave' EXIT
+trap 'rm -f "$ALLOW_TMP" "$DENY_TMP" "$ALLOW_TMP.sorted" "$DENY_TMP.sorted"; ads_control_leave' EXIT
 trap 'exit 1' HUP INT TERM
 awk -F'|' -v d="$DOMAIN" '$1!=d {print}' "$ADS_ALLOWLIST" > "$ALLOW_TMP" || ads_die "allowlist build failed"; awk -F'|' -v d="$DOMAIN" '$1!=d {print}' "$ADS_DENYLIST" > "$DENY_TMP" || ads_die "denylist build failed"
 case "$OP" in allow) printf '%s|%s|manual allow; never auto block\n' "$DOMAIN" "$SCOPE" >> "$ALLOW_TMP" ;; block) printf '%s|%s|manual confirmed block\n' "$DOMAIN" "$SCOPE" >> "$DENY_TMP" ;; remove) ;; esac

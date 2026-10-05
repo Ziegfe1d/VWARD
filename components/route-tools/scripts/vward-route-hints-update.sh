@@ -162,8 +162,8 @@ update_itdog()
         ' >> "$TMP"
     done
 
-    sort -u "$TMP" > "$TMP.sorted"
-    mv "$TMP.sorted" "$TMP"
+    sort -u "$TMP" > "$TMP.sorted" &&
+    mv "$TMP.sorted" "$TMP" || rm -f "$TMP.sorted"
     COUNT="$(wc -l 2>/dev/null < "$TMP")"
     [ -n "$COUNT" ] || COUNT=0
 
@@ -237,10 +237,10 @@ update_v2fly()
         }' "$FILE" >> "$INC"
     done
 
-    sort -u "$TMP" > "$TMP.sorted"
-    mv "$TMP.sorted" "$TMP"
-    sort -u "$INC" > "$INC.sorted"
-    mv "$INC.sorted" "$INC"
+    sort -u "$TMP" > "$TMP.sorted" &&
+    mv "$TMP.sorted" "$TMP" || rm -f "$TMP.sorted"
+    sort -u "$INC" > "$INC.sorted" &&
+    mv "$INC.sorted" "$INC" || rm -f "$INC.sorted"
 
     COUNT="$(wc -l 2>/dev/null < "$TMP")"
     CATS="$(awk -F'|' '{print $3}' "$TMP" | sort -u | wc -l)"
@@ -317,11 +317,11 @@ done
 [ -s "$CACHE/v2fly-includes.tsv" ] &&
     cat "$CACHE/v2fly-includes.tsv" >> "$INC_MERGED"
 
-sort -u "$MERGED" > "$MERGED.sorted"
-mv "$MERGED.sorted" "$MERGED"
+sort -u "$MERGED" > "$MERGED.sorted" &&
+mv "$MERGED.sorted" "$MERGED" || rm -f "$MERGED.sorted"
 
-sort -u "$INC_MERGED" > "$INC_MERGED.sorted"
-mv "$INC_MERGED.sorted" "$INC_MERGED"
+sort -u "$INC_MERGED" > "$INC_MERGED.sorted" &&
+mv "$INC_MERGED.sorted" "$INC_MERGED" || rm -f "$INC_MERGED.sorted"
 
 TOTAL_ROWS="$(wc -l 2>/dev/null < "$MERGED")"
 TOTAL_DOMAINS="$(cut -d'|' -f1 "$MERGED" | sort -u | wc -l)"

@@ -716,9 +716,9 @@ if [ "$DIRTY" -eq 1 ]; then
                 echo "HOST=$PH"
                 echo "STATUS=DIRECT_OK"
                 echo "LAST_CHECK=$(date +%s)"
-            } > "$PLT"
+            } > "$PLT" &&
 
-            mv "$PLT" "$PLF"
+            mv "$PLT" "$PLF" || rm -f "$PLT"
 
             echo "AUTO_DIRECT: $PH | memberships=$PM"
 

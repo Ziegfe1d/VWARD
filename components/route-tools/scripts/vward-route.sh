@@ -64,9 +64,9 @@ save_state()
     {
         echo "FAILS=$FAILS"
         echo "OKS=$OKS"
-    } > "$TMP"
+    } > "$TMP" &&
 
-    mv "$TMP" "$STATE"
+    mv "$TMP" "$STATE" || rm -f "$TMP"
 }
 
 check_service()

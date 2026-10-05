@@ -76,7 +76,7 @@ running() {
     case "$P" in ''|*[!0-9]*) return 1 ;; esac
     kill -0 "$P" 2>/dev/null || return 1
     # Our program, not a process that took its id after a reboot.
-    [ -r "/proc/$P/cmdline" ] && case "$(tr '\000' ' ' < "/proc/$P/cmdline" 2>/dev/null)" in *vward-sentinel*) return 0 ;; esac
+    [ -r "/proc/$P/cmdline" ] && case "$(tr '\000' ' ' 2>/dev/null < "/proc/$P/cmdline")" in *vward-sentinel*) return 0 ;; esac
     return 1
 }
 

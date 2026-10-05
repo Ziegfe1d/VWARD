@@ -36,8 +36,8 @@ if [ -f "$LOG" ]; then
     [ -n "$SIZE" ] || SIZE=0
 
     if [ "$SIZE" -gt 524288 ]; then
-        tail -n 1500 "$LOG" > "$LOG.tmp"
-        mv "$LOG.tmp" "$LOG"
+        tail -n 1500 "$LOG" > "$LOG.tmp" &&
+        mv "$LOG.tmp" "$LOG" || rm -f "$LOG.tmp"
     fi
 fi
 

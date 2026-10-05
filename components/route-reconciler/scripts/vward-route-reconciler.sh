@@ -247,9 +247,9 @@ save_state()
         echo "HOST=$H"
         echo "STATUS=$STATUS"
         echo "LAST_CHECK=$(date +%s)"
-    } > "$T"
+    } > "$T" &&
 
-    mv "$T" "$F"
+    mv "$T" "$F" || rm -f "$T"
 }
 
 remove_adaptive()
@@ -259,7 +259,10 @@ remove_adaptive()
     if ! mkdir "$CHANGE" 2>/dev/null; then
         OLD=$(cat "$CHANGE/pid" 2>/dev/null)
 
-        if [ -n "$OLD" ] && ! kill -0 "$OLD" 2>/dev/null; then
+        # Its holder is gone, or it has had no pid for over a minute (killed between
+        # mkdir and writing the pid): taken over.
+        if { [ -n "$OLD" ] && ! kill -0 "$OLD" 2>/dev/null; } ||
+           { [ -z "$OLD" ] && [ -n "$(find "$CHANGE" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
             rm -rf "${CHANGE:?}"
             mkdir "$CHANGE" || return 1
         else
@@ -379,9 +382,9 @@ remove_adaptive()
         echo "HOST=$H"
         echo "DIRECT_OK_STREAK=$HSTREAK"
         echo "LAST_SUCCESS=$NOW_OK"
-    } > "$HTMP"
+    } > "$HTMP" &&
 
-    mv "$HTMP" "$HF"
+    mv "$HTMP" "$HF" || rm -f "$HTMP"
 
     if [ "$HSTREAK" -lt "$DIRECT_OK_THRESHOLD" ]; then
 

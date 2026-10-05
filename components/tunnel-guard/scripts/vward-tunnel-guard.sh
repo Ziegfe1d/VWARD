@@ -384,9 +384,9 @@ if [ -f "$DISABLE_FILE" ]; then
         echo "LAST_RECOVERY_TEST=0"
         echo "LAST_ACTION=DISABLED_BY_USER"
         echo "LAST_RUN=$NOW"
-    } > "$TMP"
+    } > "$TMP" &&
 
-    mv "$TMP" "$STATE"
+    mv "$TMP" "$STATE" || rm -f "$TMP"
 
     echo "$NOW_TEXT|DISABLED_BY_USER|restored=$RESTORED" >> "$LOG"
 
@@ -634,9 +634,9 @@ if [ "$MODE|$DOWN_STREAK|$FAILOPEN_ACTIVE|$LAST_RECOVERY_TEST|$ACTION" != \
         echo "LAST_RECOVERY_TEST=$LAST_RECOVERY_TEST"
         echo "LAST_ACTION=$ACTION"
         echo "LAST_RUN=$NOW"
-    } > "$TMP"
+    } > "$TMP" &&
 
-    mv "$TMP" "$STATE"
+    mv "$TMP" "$STATE" || rm -f "$TMP"
 fi
 
 

@@ -242,7 +242,11 @@ echo result=changed
     sysfs = tmp / "sys"
     for d in ("nwg0", "nwg1"):
         (sysfs / d).mkdir(parents=True)
-    qenv = env | {"VWARD_TUNNEL_QUALITY_DIR": str(qdir), "VWARD_PING": str(bin_ / "ping"), "VWARD_SYSFS_NET": str(sysfs)}
+    # The speed file and lock in the test's folder from the start, and no speed by itself:
+    # between 03:00 and 05:00 the night measurement would start in the background.
+    qenv = env | {"VWARD_TUNNEL_QUALITY_DIR": str(qdir), "VWARD_PING": str(bin_ / "ping"), "VWARD_SYSFS_NET": str(sysfs),
+                  "VWARD_TUNNEL_SPEED_FILE": str(tmp / "speed.tsv"), "VWARD_TUNNEL_SPEED_LOCK": str(tmp / "slock")}
+    (etc / "tunnel-auto.conf").write_text("SPEED=off\n")
     old = int(time.time()) - 7200
     qdir.mkdir(); (qdir / "samples.tsv").write_text(f"{old}\tWireguard0\tnwg0\t0\t10\n")
     for _ in range(2):

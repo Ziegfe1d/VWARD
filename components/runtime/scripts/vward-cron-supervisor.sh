@@ -126,7 +126,7 @@ rss_kb()
 check_leak()
 {
     L_PID=
-    [ -r "$2" ] && read -r L_PID < "$2" 2>/dev/null || :
+    [ -r "$2" ] && read -r L_PID 2>/dev/null < "$2" || :
     case "$L_PID" in ''|*[!0-9]*) eval "OVER_$1=0"; return 0 ;; esac
     rss_kb "$L_PID" || { eval "OVER_$1=0"; return 0; }
     if [ "$RSS" -le "$3" ]; then
