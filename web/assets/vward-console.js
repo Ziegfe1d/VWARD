@@ -845,7 +845,7 @@ function notifications() {
   if (lm.length) n.push({ sev: 'warn', title: lm.length === 1 ? 'Список переведён на другой туннель' : 'Списки переведены на другие туннели', text: lm.map(m => listLabel(m.name) + ': «' + tunLabel(m.from) + '» → «' + tunLabel(m.to) + '»').join(', '), to: 'vpn' });
   if (isTrue(wg.failopen_active)) n.push({ sev: 'warn', title: 'VPN недоступен', text: 'Трафик списков VPN временно идёт напрямую', to: 'vpn' });
   if (sv.adguard === false && sv.adguard_broken) n.push({ sev: 'crit', title: 'Программа AdGuard Home повреждена', text: 'Она не запускается даже с --version, поэтому VWARD её не перезапускает. Замените файл официальной сборкой AdGuard Home той же версии.', to: 'd-stability' });
-  if (sv.crond === false || sv.supervisor === false) n.push({ sev: 'crit', title: 'Задания по расписанию остановлены', text: 'cron или supervisor не запущен', to: 'd-cron' });
+  if (sv.crond === false || sv.supervisor === false) n.push({ sev: 'crit', title: 'Задания по расписанию остановлены', text: 'расписание заданий не работает', to: 'd-cron' });
   const total = num(stg.total_kb), free = num(stg.free_kb);
   if (total && free != null && free / total < 0.1) n.push({ sev: 'warn', title: 'Мало места в хранилище', text: 'свободно ' + fmtKB(free), to: 'system' });
   if (['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase)) n.push({ sev: 'crit', title: 'Обновление требует внимания', text: phaseText(p.phase), to: 'u-vward' });
@@ -1449,7 +1449,7 @@ const RENDER = {
   'd-diag'() {
     const d = S.diag, map = { 'console-api': 'settings', opt: 'system', lighttpd: 'c-console', crond: 'd-cron', supervisor: 'd-cron', adguard: 'ads', adaptive: 'c-route-engine', updater: 'u-vward', config: 'u-vward', wan: 'wan', wg: 'vpn', smartdns: 'lists' };
     const sv = st().services || {};
-    return panel('Задания по расписанию', kv([['Задания по расписанию', sv.crond && sv.supervisor ? 'Работают' : sv.crond ? 'Supervisor остановлен' : 'cron остановлен', sv.crond && sv.supervisor ? 'ok' : 'crit', 'd-cron']]),
+    return panel('Задания по расписанию', kv([['Задания по расписанию', sv.crond && sv.supervisor ? 'Работают' : sv.crond ? 'Supervisor остановлен' : 'расписание не работает', sv.crond && sv.supervisor ? 'ok' : 'crit', 'd-cron']]),
         { desc: 'Нажмите, чтобы открыть задания.' }) +
       panel('Диагностика', (d && d.checks ? '<ul class="rows">' + d.checks.map(x => { const to = map[x.id]; return '<li class="row' + (to ? ' link" role="button" tabindex="0" data-go="' + to + '"' : '"') + '><div class="row-main"><b>' + esc(x.label) + '</b><small>' + esc(x.detail || '') + '</small></div><span class="pill ' + (x.status === 'PASS' ? 'ok' : x.status === 'FAIL' ? 'crit' : 'warn') + '">' + (x.status === 'PASS' ? 'Работает' : x.status === 'FAIL' ? 'Не работает' : 'Внимание') + '</span>' + (to ? ico('chevron', 'chev') : '') + '</li>'; }).join('') + '</ul>' : empty(S.errors.diag ? 'Диагностика не выполнена: ' + S.errors.diag : 'Загрузка…')) +
       '<div class="panel-actions">' + btn('diag-run', 'check', 'Запустить проверку', 'primary') + '</div>') +
@@ -1495,7 +1495,7 @@ const RENDER = {
     const row = x => { const comp = JOB_COMPONENT[x.name] || x.component, on = !comp || compOn(comp), ok = x.rc === 0;
       return '<li class="row' + (comp ? ' link" role="button" tabindex="0" data-go="c-' + esc(comp) : '') + '"><div class="row-main"><b>' + esc(JOB_NAMES[x.name] || x.name) + '</b><small>' + esc(cronText(x.schedule)) + ' · ' + esc(fmtStamp(x.last) || 'ещё не запускалось') + '</small></div>' +
         '<span class="pill ' + (!on ? 'warn' : x.rc == null ? '' : ok ? 'ok' : 'crit') + '">' + (!on ? 'Выключен' : x.rc == null ? 'Нет данных' : ok ? 'Успешно' : 'Ошибка, код ' + x.rc) + '</span>' + (comp ? ico('chevron', 'chev') : '') + '</li>'; };
-    return panel('Служба расписания', kv([['Планировщик заданий (crond)', sv.crond ? 'Работает' : 'Не работает', sv.crond ? 'ok' : 'crit'], ['Агент расписания', sv.supervisor ? 'Работает' : 'Не работает', sv.supervisor ? 'ok' : 'crit']])) +
+    return panel('Служба расписания', kv([['Планировщик заданий', sv.crond ? 'Работает' : 'Не работает', sv.crond ? 'ok' : 'crit'], ['Агент расписания', sv.supervisor ? 'Работает' : 'Не работает', sv.supervisor ? 'ok' : 'crit']])) +
       panel('Задания', !cr ? empty('Загрузка…') : !cr.ok ? empty(errText(cr)) : jobs.length ? '<ul class="rows">' + jobs.map(row).join('') + '</ul>' : empty('Задания не найдены'),
         { desc: 'Задания VWARD по расписанию.' });
   },
@@ -1718,7 +1718,7 @@ const RENDER = {
 const HOURS = Array.from({ length: 24 }, (x, i) => { const h = (i < 10 ? '0' : '') + i + ':00'; return [h, h]; });
 function withCur(opts, v, unit) { return v == null || v === '' || opts.some(o => String(o[0]) === String(v)) ? opts : opts.concat([[v, v + unit]]); }
 function countText(n) { return n + ' ' + plural(n, 'домен', 'домена', 'доменов'); }
-function cfgNote() { return !S.config ? '' : !S.config.writable ? '<p class="field-warn">Изменение настроек из VWARD недоступно: на роутере нет vward-console-config.sh. Установите обновление VWARD.</p>' : ''; }
+function cfgNote() { return !S.config ? '' : !S.config.writable ? '<p class="field-warn">Изменение настроек из VWARD недоступно: на роутере нет программы настроек VWARD. Установите обновление VWARD.</p>' : ''; }
 // A search: one field with a magnifier inside, Enter searches; an optional button beside it.
 function searchBar(form, value, placeholder, extra) {
   return '<form class="search-bar" data-form="' + form + '"><label class="search-field">' + ico('search') + '<input class="input" type="search" name="q" value="' + esc(value) + '" placeholder="' + esc(placeholder) + '" aria-label="' + esc(placeholder) + '" autocomplete="off" enterkeyhint="search"></label>' + (extra || '') + '</form>';
@@ -2667,16 +2667,13 @@ function wifiClientPage(mac) {
 function compPage(c) {
   const x = (plat().components || {})[c.id] || {}, g = graphOf(c.id), on = compOn(c.id), core = !!(g && g.core);
   const all = cfg().components || [];
-  const deps = g ? g.depends_on : [], needs = g ? g.requires_running : [];
-  const users = all.filter(d => d.depends_on.includes(c.id) || d.uses.includes(c.id));
   const off = compCascade(c.id, true), onWith = compCascade(c.id, false);
   const stale = all.filter(d => d.uses.includes(c.id) && compOn(d.id) && !off.includes(d.id)).map(d => d.id);
   const sw1 = core ? '<span class="num">Всегда</span>' : sw('data-comp="' + c.id + '"', on, 'Компонент «' + c.name + '» включён', !cfgOk() || !g);
   return panel(c.name, '<dl class="kv">' + ctrlRow('Компонент включён', sw1, core ? 'базовый компонент: без него VWARD не работает' : on ? '' : 'файлы установлены, но компонент не запускается') + '</dl>' +
       (confirmBox('comp-off', 'Выключить «' + c.name + '»?' + (off.length ? ' Вместе с ним остановятся: ' + compNames(off) + '.' : '') + (stale.length ? ' На устаревших данных продолжат работать: ' + compNames(stale) + '.' : '') + ' Файлы и настройки останутся, включить можно в любой момент.', 'Выключить', true) ||
        confirmBox('comp-on', 'Включить «' + c.name + '»? Вместе с ним включатся: ' + compNames(onWith) + '.', 'Включить')) +
-      kv([['Запуск', c.when], ['Версия', x.release || plat().version || '—'], ['Установлен', fmtStamp(x.installed_at) || '—'], ['Обновление', x.update_id || '—'],
-        g ? ['Зависимости', (deps.length ? 'нужны ' + deps.length : 'не нужны другие') + ' · ' + (users.length ? 'используют ' + users.length : 'никто не использует'), '', 'deps-' + c.id] : null]) +
+      kv([['Запуск', c.when], ['Версия', x.release || plat().version || '—'], ['Установлен', fmtStamp(x.installed_at) || '—']]) +
       '<div class="panel-actions even">' + (c.page ? '<button class="btn" type="button" data-go="' + c.page + '">Открыть раздел</button>' : '') + (activityOf(c.log) ? '<button class="btn" type="button" data-go="a-' + activityOf(c.log) + '">События</button>' : '') + '</div>' + cfgNote(),
     { desc: c.desc, right: headPill(!on ? 'warn' : x.health === 'PASS' ? 'ok' : '', !on ? 'Выключен' : x.health === 'PASS' ? 'Работает' : 'Нет данных') });
 }
@@ -3193,7 +3190,7 @@ function aghClientsRows(a) {
     router_unavailable: 'Keenetic не ответил, повтор через минуту'
   }, hint = !on ? 'выключено' : c.result in hints ? hints[c.result] : 'имена появятся в течение минуты';
   return '<dl class="kv">' + ctrlRow('Имена устройств из Keenetic', sw('data-ads-clients', on, 'Имена устройств из Keenetic', !S.ads), hint) + '</dl>' +
-    (on && c.result === 'old_script' ? '<p class="field-warn">' + ico('alert') + 'Имена сейчас записывает старый скрипт agh-keenetic-clients-sync.sh: он перезапускает AdGuard Home. Уберите его из cron - VWARD продолжит без перезапусков.</p>' : '') +
+    (on && c.result === 'old_script' ? '<p class="field-warn">' + ico('alert') + 'Имена устройств сейчас записывает старая программа, которая перезапускает AdGuard Home. VWARD отключит её сам при подключении к AdGuard Home и продолжит без перезапусков.</p>' : '') +
     (on && c.result !== 'old_script' ? '<div class="panel-actions">' + btn('agh-clients', 'refresh', busy ? 'Обновляем…' : 'Обновить имена', '', busy ? ' disabled' : '') + '</div>' : '');
 }
 // Routed domains through Keenetic's DNS (vward-ads-privacy-route-dns.sh), so the
