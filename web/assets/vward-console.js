@@ -548,7 +548,7 @@ const PAGES = [
   { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adspub'] },
   // Programs VWARD works with (AdGuard Home, later its own tunnel engine): each has its page here.
   { id: 'utils', title: 'Утилиты', icon: 'tools', group: 'VWARD', data: ['ads', 'agh', 'security', 'ext', 'awg'] },
-  { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config', 'stab'] },
+  { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config', 'stab', 'cron'] },
   { id: 'updates', title: 'Обновления', icon: 'refresh', group: 'VWARD', data: ['status', 'update', 'ext', 'config'] },
   { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth', 'status', 'config', 'backups'] },
   // The raw journals: diagnostics to save or send; each section shows its own events itself.
@@ -1035,6 +1035,24 @@ function journalPanel() {
     { desc: 'Журналы не стираются: старые записи сжимаются в архив и хранятся весь срок. Если журналы займут больше заданного размера, первыми уходят самые старые. «Скачать все журналы» - полная история одним архивом.' });
 }
 
+/* ---------- Агенты ---------- */
+// Four agents, one zone each, so one thing is done by one agent; their state from their own runs.
+function jobOk(names) {
+  const jobs = ((S.cron && S.cron.jobs) || []).filter(j => names.includes(j.name));
+  return jobs.length ? jobs.every(j => j.rc === 0) : null;
+}
+function agentsPanel() {
+  const s = st(), sv = s.services || {}, known = !!s.services;
+  const rows = [
+    ['Агент сети', 'интернет, VPN, DNS и маршруты', jobOk(['vward-tunnel-health.sh', 'vward-wan-guard.sh', 'vward-route-reconciler.sh']), 'wan'],
+    ['Агент компонентов', 'программы VWARD, модули туннелей, AdGuard Home', known ? !!sv.supervisor : null, 'd-components'],
+    ['Агент обновлений', 'VWARD, AdGuard Home, Entware, прошивка, списки', known ? !!sv.crond : null, 'updates'],
+    ['Агент обслуживания', 'журналы, копии настроек, место на флешке', jobOk(['vward-housekeeping.sh']), 'logs']
+  ];
+  return panel('Агенты', kv(rows.map(r => [r[0], r[2] == null ? '—' : r[2] ? 'Работает' : 'Не работает', r[2] == null ? '' : r[2] ? 'ok' : 'crit', r[3], '', r[1]])),
+    { desc: 'Каждый агент сам следит за своей зоной и чинит её; одно действие делает только один агент.' });
+}
+
 function offPanel() {
   const off = offState() === 'off', busy = offState() === 'working';
   return panel('Аварийное отключение', confirmBox('vward-off', 'Отключить VWARD? Сайты из списков пойдут напрямую, без VPN, реклама не будет фильтроваться. Включить обратно можно здесь же.', 'Отключить', true) +
@@ -1303,10 +1321,10 @@ const RENDER = {
         ['Диагностика', dg.length ? (dg.length - bad) + ' из ' + dg.length + ' в норме' : 'не запускалась', bad ? 'warn' : '', 'd-diag'],
         (() => { const sc = stabScore(stabRows(S.stab, 86400)); return ['Стабильность', sc ? sc.index + '% за сутки' : S.stab ? 'нет данных' : '…', stabCls(sc && sc.index), 'd-stability']; })(),
         ['Файлы VWARD', '', '', 'd-files']
-      ])) +
+      ])) + agentsPanel() +
       panel('Хранилище', kv([['Свободно', fmtKB(g.free_kb) + ' из ' + fmtKB(g.total_kb)], ['Файловая система', g.filesystem || '—'], ['Сжатие журналов', 'каждый час', '', 'd-cron']]) +
         '<div class="panel-actions">' + btn('housekeeping', 'archive', 'Сжать журналы сейчас') + '</div>' + resultBox('storage'),
-        { desc: 'Большие журналы сжимаются, хранятся две копии.' });
+        { desc: 'Большие журналы сжимаются в архив и хранятся по настройке «Хранение журналов».' });
   },
 
   updates() {

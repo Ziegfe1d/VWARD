@@ -36,7 +36,10 @@ vward_valid_ifname() {{ case "$1" in ''|*[!A-Za-z0-9_.:-]*) return 1;; esac; }}
 vward_device_map() {{ printf 'I\\tWireguard0\\twireguard\\tnwg0\\nI\\tWireguard1\\twireguard\\tnwg1\\nI\\tWireguard2\\twireguard\\tnwg2\\n'; }}
 vward_map_vpns() {{ printf '%s\\n' "$1" | awk -F '\\t' '$1=="I" {{print $2 " " $4}}'; }}
 """)
-    (tmp / "admission.sh").write_text("vward_component_gate() { :; }\nvward_admission_enter() { :; }\nvward_admission_leave() { :; }\n")
+    # The components agent, asked to restart a tunnel's module, does it at once (here: the module
+    # program itself, as the real agent does; every request is written down).
+    (tmp / "admission.sh").write_text("vward_component_gate() { :; }\nvward_admission_enter() { :; }\nvward_admission_leave() { :; }\n"
+                                      f'vward_agent_ask() {{ echo "$1" >> "{tmp}/asked"; t=${{1#*:}}; o=${{1%%:*}}; o=${{o#engine-}}; "$VWARD_VLESS_ENGINE_BIN" "$o" "$t" >/dev/null; }}\n')
     # The provider answers; every tunnel device fails curl (the guard's own check of the dead one).
     (bin_ / "curl").write_text('#!/bin/sh\ncase "$*" in *"--interface eth3"*) exit 0 ;; esac\nexit 7\n')
     # Keenetic's dns-proxy routes of the lists, from the routes file.
@@ -346,7 +349,8 @@ echo result=changed
     r = subprocess.run(["sh", str(GUARD)], env=env, text=True, capture_output=True, timeout=60)
     if r.stdout.split("\n", 1)[0] != "ACTION=FAILOPEN_RECOVERED":
         fail(f"recovery of an engine tunnel: {r.stdout[:200]} {(tmp / 'guard.log').read_text()[-300:]}")
-    if "interface OpkgTun2 up" not in (tmp / "ndmc.log").read_text() or (tmp / "vless.log").read_text() != "kick OpkgTun2\n":
+    if "interface OpkgTun2 up" not in (tmp / "ndmc.log").read_text() or (tmp / "vless.log").read_text() != "kick OpkgTun2\n" or \
+            "engine-kick:OpkgTun2" not in (tmp / "asked").read_text():
         fail("after switching the interface on, the guard must start the engine's program afresh (kick: another server when it stays silent)")
 
     # An engine tunnel that stops carrying: the guard starts its program afresh and checks

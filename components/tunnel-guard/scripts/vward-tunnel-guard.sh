@@ -59,10 +59,12 @@ engine_of()
     return 1
 }
 
+# The network agent decides, the components agent restarts (it alone touches programs): the
+# request waits for it, at most 30 s.
 engine_kick()
 {
-    ek_bin=$(engine_of "$1") || return 0
-    "$ek_bin" "${2:-restart}" "$1" </dev/null >/dev/null 2>&1 || :
+    engine_of "$1" >/dev/null || return 0
+    vward_agent_ask "engine-${2:-restart}:$1" "${VWARD_AGENT_WAIT:-30}" || :
 }
 
 mkdir -p "$DIR"

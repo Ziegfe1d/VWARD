@@ -369,9 +369,9 @@ js = (ROOT / "web/assets/vward-console.js").read_text()
 for need in ("'#server=' + num", "vlessOf(", "name=\"vless-server\""):
     if need not in js:
         fail(f"the Panel lacks {need}")
-if "vward-vless-engine.sh supervise" not in (ROOT / "components/tunnel-guard/scripts/vward-tunnel-health.sh").read_text():
-    fail("a stopped Xray is not started again")
+if '"$BIN_DIR/vward-vless-engine.sh" supervise' not in (ROOT / "components/runtime/scripts/vward-cron-supervisor.sh").read_text():
+    fail("a stopped Xray is not started again (the components agent)")
 guard = (ROOT / "components/tunnel-guard/scripts/vward-tunnel-guard.sh").read_text()
-if guard.count('engine_kick "$VWARD_TUNNEL_INTERFACE"') != 3 or '"$ek_bin" "${2:-restart}" "$1"' not in guard:
+if guard.count('engine_kick "$VWARD_TUNNEL_INTERFACE"') != 3 or 'vward_agent_ask "engine-${2:-restart}:$1"' not in guard:
     fail("the guard must start an engine tunnel's program afresh after it switched the interface on")
 print("VLESS_ENGINE=PASS")

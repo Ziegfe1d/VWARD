@@ -6,13 +6,15 @@ a download with another checksum, starts the program with what to watch (VWARD's
 with their memory limits, the provider's and the tunnels' interfaces, the router's DNS),
 stops it, reports its status.
 vward-sentinel-act.sh: a provider interface event runs the WAN guard, a tunnel's the tunnel
-checks; a program gone is started; a leak is stopped and started; DNS without answers
-starts AdGuard Home when it is not running.
+checks (the network agent); a program gone, a leak and DNS without a running AdGuard Home go
+to the components agent as requests, which it alone carries out (start, restart, AdGuard Home
+through its one gate); the network agent's restart of a tunnel's module is asked too.
 The cron supervisor keeps the watcher running and leaves leaks to it; vward_busy takes the
 watcher's busy flag while it runs; the tunnel engines tell it their tunnels changed."""
 
 import gzip
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -106,12 +108,22 @@ with tempfile.TemporaryDirectory() as tmp:
     for f in list(initd.iterdir()) + list(obin.iterdir()):
         f.chmod(0o755)
     (bin_ / "pidof").write_text("#!/bin/sh\nexit 1\n"); (bin_ / "pidof").chmod(0o755)
-    aenv = env | {"VWARD_INITD": str(initd), "VWARD_BIN_DIR": str(obin), "VWARD_CONSOLE_PIDFILE": str(run / "panel.pid")}
+    req = tmp / "req"
+    agent_init = tmp / "agent-init"; agent_init.write_text(f'#!/bin/sh\necho "agent $1" >> "{tmp}/done"\n'); agent_init.chmod(0o755)
+    aenv = env | {"VWARD_INITD": str(initd), "VWARD_BIN_DIR": str(obin), "VWARD_CONSOLE_PIDFILE": str(run / "panel.pid"),
+                  "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
+                  "VWARD_AGENT_REQ": str(req), "VWARD_AGENT_INIT": str(agent_init), "VWARD_AGENT_PIDFILE": str(tmp / "none.pid")}
 
     def act(*args):
         (tmp / "done").unlink(missing_ok=True)
         r = subprocess.run(["sh", str(ACT), *args], env=aenv, text=True, capture_output=True, timeout=60)
         return r.returncode, ((tmp / "done").read_text().splitlines() if (tmp / "done").exists() else [])
+
+    def asked():
+        got = sorted(p.name for p in req.iterdir() if not p.name.startswith(".")) if req.exists() else []
+        for p in req.glob("*"):
+            p.unlink()
+        return got
 
     if act("link", "eth3", "down") != (0, ["vward-wan-guard.sh"]):
         fail(f"the provider's interface: the WAN guard at once: {act('link', 'eth3', 'down')}")
@@ -119,16 +131,47 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("a tunnel's interface: the tunnel checks at once")
     if act("addr", "opkgtun0", "lost")[1] != ["vward-tunnel-health.sh", "vward-tunnel-guard.sh"]:
         fail("a tunnel that lost its address: the tunnel checks")
-    if act("down", "route-engine") != (0, ["S91vward-route-engine start"]):
-        fail("a program gone: its starter")
+    # Programs: asked of the components agent (started first when it is not running), never done here.
+    rc, done = act("down", "route-engine")
+    if rc != 0 or done != ["agent start"] or asked() != ["start:route-engine"]:
+        fail(f"a program gone: the components agent is asked to start it: {rc} {done}")
+    rc, done = act("leak", "panel", "30000")
+    if rc != 0 or "S93vward-console start" in done or asked() != ["restart:panel"]:
+        fail(f"a leak: the components agent is asked to restart it: {rc} {done}")
+    rc, done = act("dns-fail")
+    if rc != 0 or "S99adguardhome start" in done or asked() != ["agh-start"]:
+        fail(f"DNS without answers: the components agent is asked to start AdGuard Home: {rc} {done}")
+
+    # The components agent carries the requests out: its functions, from the supervisor itself.
+    sup_src = (ROOT / "components/runtime/scripts/vward-cron-supervisor.sh").read_text()
+    funcs = "".join(re.search(rf"^{n}\(\)\n\{{\n.*?^\}}\n", sup_src, re.S | re.M).group(0)
+                    for n in ("pidfile_of", "start_of", "engine_of", "agent_do", "process_requests"))
     victim = subprocess.Popen(["sleep", "60"])
     (run / "panel.pid").write_text(f"{victim.pid}\n")
-    rc, done = act("leak", "panel", "30000")
+    req.mkdir(exist_ok=True)
+    for r_ in ("start:route-engine", "restart:panel", "agh-start", "bogus"):
+        (req / r_).write_text("")
+    (tmp / "done").unlink(missing_ok=True)
+    script = (f'RUN_DIR={run}; CONSOLE_PIDFILE={run}/panel.pid; CONSOLE_INIT={initd}/S93vward-console; INITD={initd}; BIN_DIR={obin}\n'
+              f'AGH_INIT={initd}/S99adguardhome; REQ_DIR={req}; OFF_FLAG={tmp}/no-off; UNNICE=\n'
+              f'log_event() {{ echo "$*" >> {tmp}/agent.log; }}\n'
+              'vward_agh_ensure() { "$1" start; return 10; }\n' + funcs + "process_requests\n")
+    r = subprocess.run(["sh", "-c", script], text=True, capture_output=True, timeout=60)
     victim.wait(timeout=10)
-    if rc != 0 or done != ["S93vward-console start"] or victim.returncode is None:
-        fail(f"a leak: stopped and started: {rc} {done}")
-    if act("dns-fail") != (0, ["S99adguardhome start"]):
-        fail("DNS without answers: AdGuard Home started when it is not running")
+    done = (tmp / "done").read_text().splitlines() if (tmp / "done").exists() else []
+    if r.returncode != 0 or sorted(done) != ["S91vward-route-engine start", "S93vward-console start", "S99adguardhome start"] or victim.returncode is None:
+        fail(f"the components agent: start, restart (stopped first), AdGuard Home: {r.returncode} {done} {r.stderr}")
+    if list(req.iterdir()):
+        fail("requests stay after the components agent took them")
+    log = (tmp / "agent.log").read_text()
+    if "STARTED|route-engine|asked" not in log or "RESTARTED|panel|asked" not in log or "AGH_STARTED|asked" not in log:
+        fail(f"the components agent logs what it did: {log}")
+    # While VWARD is switched off: nothing starts, the requests go.
+    (req / "start:route-engine").write_text(""); (tmp / "no-off").write_text("")
+    (tmp / "done").unlink(missing_ok=True)
+    subprocess.run(["sh", "-c", script], text=True, capture_output=True, timeout=60)
+    if (tmp / "done").exists() or list(req.iterdir()):
+        fail("VWARD switched off: requests are dropped, nothing starts")
     # AdGuard Home silent in the chain: the DNS guard takes it out (it checks again itself).
     guardbin = obin / "vward-ads-privacy-dns-guard.sh"
     guardbin.write_text(f'#!/bin/sh\necho "dns-guard $*" >> "{tmp}/done"\necho chain_state=out\n'); guardbin.chmod(0o755)
@@ -137,7 +180,7 @@ with tempfile.TemporaryDirectory() as tmp:
     guardbin.write_text(f'#!/bin/sh\necho "dns-guard $*" >> "{tmp}/done"\necho chain_state=in\n')
     if act("chain-fail")[0] == 0:
         fail("chain-fail that changed nothing does not count as helped")
-    if act("link", "eth3;reboot", "down")[0] != 64 or act("leak", "unknown", "1")[0] != 64:
+    if act("link", "eth3;reboot", "down")[0] != 64 or act("leak", "unknown", "1")[0] != 64 or act("down", "x;reboot")[0] != 64:
         fail("odd names are refused")
     if "|ACT|leak|panel|rss_kb=30000|restart" not in (tmp / "sentinel.log").read_text():
         fail("actions are logged")

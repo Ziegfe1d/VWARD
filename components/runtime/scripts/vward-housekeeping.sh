@@ -459,12 +459,6 @@ fi
 
 fi
 
-# The Panel's web server picks up settings an update brought: S93 only when the
-# template is newer than the running configuration (a shell test, no process).
-[ -n "$R" ] || [ ! -x /opt/etc/init.d/S93vward-console ] ||
-    [ ! /opt/share/vward/console/lighttpd.conf -nt /opt/var/run/vward/console-lighttpd.conf ] ||
-    /opt/etc/init.d/S93vward-console start </dev/null >/dev/null 2>&1 || :
-
 echo "$(date '+%Y-%m-%d %H:%M:%S')|retention_errors=$RETENTION_ERRORS" \
     >> "$HOUSE_LOG"
 

@@ -371,12 +371,18 @@ def s_sentinel(r, out):
     r.run(5)
     expect(r.chain_in(), "and back once it answers", out)
     (r.root / "emu/agh-pid").write_text("")
+    # The watcher asks; the components agent (the supervisor) starts it, at once.
     rc, o, _ = r.sh("/opt/bin/vward-sentinel-act.sh dns-fail; echo rc=$?")
-    starts = (r.root / "emu/agh-starts").read_text().splitlines() if (r.root / "emu/agh-starts").exists() else []
-    expect(len(starts) == 1, f"«dns-fail» with AdGuard Home dead: started ({len(starts)} starts)", out)
+    def agh_starts():
+        f = r.root / "emu/agh-starts"
+        return f.read_text().splitlines() if f.exists() else []
+    t0 = time.time()
+    while not agh_starts() and time.time() - t0 < 15:
+        time.sleep(0.5)
+    expect(len(agh_starts()) == 1 and time.time() - t0 < 12, f"«dns-fail» with AdGuard Home dead: the components agent starts it ({len(agh_starts())} starts, {time.time() - t0:.0f} s)", out)
     r.sh("/opt/bin/vward-sentinel-act.sh dns-fail")
-    starts = (r.root / "emu/agh-starts").read_text().splitlines()
-    expect(len(starts) == 1, "a second «dns-fail» while it runs: no second start", out)
+    time.sleep(3)
+    expect(len(agh_starts()) == 1, "a second «dns-fail» while it runs: no second start", out)
 
 
 def s_both_dead(r, out):

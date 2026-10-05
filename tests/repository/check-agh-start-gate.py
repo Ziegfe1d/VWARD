@@ -144,8 +144,10 @@ for need in ('adguard_broken:($agh_broken != "")', '"${VWARD_AGH_STATE:-/tmp/vwa
         fail(f"the API lacks {need}")
 if "sv.adguard === false && sv.adguard_broken" not in js or "'Программа AdGuard Home повреждена'" not in js:
     fail("the Panel must say the AdGuard Home program is broken")
-# Both starters go through the gate.
-for path, need in (("components/runtime/scripts/vward-cron-supervisor.sh", "vward_agh_ensure"), ("components/runtime/scripts/vward-sentinel-act.sh", "vward_agh_ensure")):
+# One starter, the components agent, through the gate; the real-time watcher asks it.
+for path, need in (("components/runtime/scripts/vward-cron-supervisor.sh", "vward_agh_ensure"), ("components/runtime/scripts/vward-sentinel-act.sh", "ask agh-start")):
     if need not in (ROOT / path).read_text():
-        fail(f"{path} must start AdGuard Home through the gate")
+        fail(f"{path} must start AdGuard Home through the components agent's gate")
+if '"$AGH_INIT" start' in (ROOT / "components/runtime/scripts/vward-sentinel-act.sh").read_text():
+    fail("the real-time watcher must not start AdGuard Home itself")
 print("AGH_START_GATE=PASS")

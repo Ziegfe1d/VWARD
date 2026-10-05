@@ -90,7 +90,7 @@ PANEL_SKIP=0
 # The supervisor is background work: the lowest CPU priority. What it starts for the owner
 # (cron, the Panel, AdGuard Home) gets the normal priority back.
 UNNICE=
-if renice -n 19 -p $$ >/dev/null 2>&1; then
+if renice -n 19 -p $$ >/dev/null 2>&1 && command -v nice >/dev/null 2>&1; then
     UNNICE="nice -n -19"
 fi
 
@@ -177,6 +177,101 @@ watch_memory()
     fi
 }
 
+# ---- The components agent ----------------------------------------------------------------
+# This supervisor is VWARD's components agent: it alone starts and restarts VWARD's programs,
+# the tunnels' modules and AdGuard Home. The others (the real-time watcher, the network agent)
+# ask it through vward_agent_ask; a byte in its pipe wakes it at once.
+REQ_DIR=${VWARD_AGENT_REQ:-/tmp/vward-agent-components}
+WAKE=$REQ_DIR/.wake
+INITD=${VWARD_INITD:-/opt/etc/init.d}
+BIN_DIR=${VWARD_BIN_DIR:-/opt/bin}
+mkdir -p "$REQ_DIR" 2>/dev/null
+[ -p "$WAKE" ] || mkfifo -m 600 "$WAKE" 2>/dev/null || :
+# The wait between rounds: on the pipe when the shell can wait on it with a time limit.
+WAIT_PIPE=0
+[ -p "$WAKE" ] && [ -z "$( (read -t 1 _x < /dev/null) 2>&1)" ] && WAIT_PIPE=1
+
+pidfile_of()
+{
+    case "$1" in
+        route-engine) echo "$RUN_DIR/route-engine.pid" ;;
+        panel) echo "$CONSOLE_PIDFILE" ;;
+        awg-t[0-9]*) echo "$RUN_DIR/awg-engine/${1#awg-}.pid" ;;
+        xray-v[0-9]*) echo "$RUN_DIR/vless-engine/${1#xray-}.pid" ;;
+        *) return 1 ;;
+    esac
+}
+
+# start_of NAME: the starter of a program of VWARD.
+start_of()
+{
+    case "$1" in
+        route-engine) $UNNICE "$INITD/S91vward-route-engine" start ;;
+        panel) $UNNICE "$CONSOLE_INIT" start ;;
+        awg-*) [ ! -x "$BIN_DIR/vward-awg-engine.sh" ] || "$BIN_DIR/vward-awg-engine.sh" supervise ;;
+        xray-*) [ ! -x "$BIN_DIR/vward-vless-engine.sh" ] || "$BIN_DIR/vward-vless-engine.sh" supervise ;;
+        *) return 1 ;;
+    esac </dev/null >/dev/null 2>&1
+}
+
+# engine_of TUNNEL: the module (AmneziaWG or VLESS) that runs this tunnel.
+engine_of()
+{
+    for EK in "${VWARD_VLESS_ETC:-/opt/etc/vward/vless-engine}|${VWARD_VLESS_ENGINE_BIN:-$BIN_DIR/vward-vless-engine.sh}" \
+              "${VWARD_AWG_ETC:-/opt/etc/vward/awg-engine}|${VWARD_AWG_ENGINE_BIN:-$BIN_DIR/vward-awg-engine.sh}"; do
+        EB=${EK#*|}
+        [ -x "$EB" ] && awk -F '\t' -v n="$1" '$2 == n {f = 1} END {exit !f}' "${EK%%|*}/tunnels.tsv" 2>/dev/null || continue
+        echo "$EB"; return 0
+    done
+    return 1
+}
+
+# agent_do REQUEST: what another agent asked for.
+agent_do()
+{
+    case "$1" in
+        agh-start)
+            command -v vward_agh_ensure >/dev/null 2>&1 || return 1
+            VWARD_UNNICE=$UNNICE vward_agh_ensure "$AGH_INIT"
+            case "$?" in
+                10) log_event "AGH_STARTED|asked" ;;
+                13) log_event "AGH_BINARY_BROKEN|asked" ;;
+            esac ;;
+        start:*)
+            start_of "${1#start:}" && log_event "STARTED|${1#start:}|asked" ;;
+        restart:*)
+            AN=${1#restart:}
+            AF=$(pidfile_of "$AN") || return 1
+            AP=
+            [ ! -r "$AF" ] || read -r AP < "$AF" || :
+            case "$AP" in ''|*[!0-9]*) ;; *)
+                kill "$AP" 2>/dev/null
+                AW=0
+                while kill -0 "$AP" 2>/dev/null && [ "$AW" -lt 5 ]; do sleep 1; AW=$((AW + 1)); done
+                kill -9 "$AP" 2>/dev/null ;;
+            esac
+            start_of "$AN"
+            log_event "RESTARTED|$AN|asked" ;;
+        engine-restart:*|engine-kick:*)
+            AT=${1#*:}
+            AB=$(engine_of "$AT") || return 0
+            AO=restart; case "$1" in engine-kick:*) AO=kick ;; esac
+            "$AB" "$AO" "$AT" </dev/null >/dev/null 2>&1
+            log_event "MODULE_$(echo "$AO" | tr 'a-z' 'A-Z')|$AT|asked" ;;
+        *) return 64 ;;
+    esac
+}
+
+# Requests in the order they came; while VWARD is switched off nothing starts (they go).
+process_requests()
+{
+    for RQ in "$REQ_DIR"/*; do
+        [ -f "$RQ" ] || continue
+        [ -e "$OFF_FLAG" ] || agent_do "${RQ##*/}"
+        rm -f "$RQ"
+    done
+}
+
 # SSH stays: when memory runs out, the kernel stops some program to free it; never the SSH
 # server or its sessions (Keenetic's or Entware's dropbear, OpenSSH), the way in to fix things.
 # New sessions inherit it from the server; checked once a minute, written only when it differs.
@@ -212,12 +307,24 @@ watch_services()
         PANEL_DOWN=0 PANEL_WAIT=1 PANEL_SKIP=0
     fi
 
+    # The Panel's web server picks up settings an update brought (a shell test, no process).
+    if [ -x "$CONSOLE_INIT" ] && [ /opt/share/vward/console/lighttpd.conf -nt /opt/var/run/vward/console-lighttpd.conf ]; then
+        $UNNICE "$CONSOLE_INIT" start </dev/null >/dev/null 2>&1 && log_event "PANEL_RECONFIGURED"
+    fi
+
     # VWARD switched off as a whole: cron and the Panel stay, nothing else of VWARD starts;
     # DNS redirects into AdGuard Home that came back (Keenetic rebuilt its firewall) go again.
     if [ -e "$OFF_FLAG" ]; then
         [ ! -x "$OFF_BIN" ] || $UNNICE "$OFF_BIN" keep </dev/null >/dev/null 2>&1
         return 0
     fi
+
+    # The tunnels' modules (AmneziaWG, VLESS): a stopped one starts again. Without such
+    # tunnels this is one file test, no process.
+    [ ! -f "${VWARD_AWG_ETC:-/opt/etc/vward/awg-engine}/tunnels.tsv" ] || [ ! -x "$BIN_DIR/vward-awg-engine.sh" ] ||
+        "$BIN_DIR/vward-awg-engine.sh" supervise </dev/null >/dev/null 2>&1 || :
+    [ ! -f "${VWARD_VLESS_ETC:-/opt/etc/vward/vless-engine}/tunnels.tsv" ] || [ ! -x "$BIN_DIR/vward-vless-engine.sh" ] ||
+        "$BIN_DIR/vward-vless-engine.sh" supervise </dev/null >/dev/null 2>&1 || :
 
     UP=
     [ ! -r "$UPTIME_FILE" ] || read -r UP _ < "$UPTIME_FILE" || :
@@ -297,5 +404,19 @@ while :; do
     # Once a minute, not on the first round: at boot S93 starts the Panel just after.
     [ $((TICK % WATCH_EVERY)) -ne 0 ] || watch_services
 
-    sleep "$INTERVAL"
+    # Until the next round; what another agent asks is done at once, the rounds keep their time.
+    if [ "$WAIT_PIPE" = 1 ]; then
+        RT=$INTERVAL
+        while [ "$RT" -gt 0 ]; do
+            T0=; [ ! -r "$UPTIME_FILE" ] || read -r T0 _ < "$UPTIME_FILE" || :
+            read -t "$RT" _w <> "$WAKE" || break
+            process_requests
+            T1=; [ ! -r "$UPTIME_FILE" ] || read -r T1 _ < "$UPTIME_FILE" || :
+            case "${T0%%.*}${T1%%.*}" in ''|*[!0-9]*) break ;; esac
+            RT=$((RT - ${T1%%.*} + ${T0%%.*}))
+        done
+    else
+        sleep "$INTERVAL"
+    fi
+    process_requests
 done

@@ -390,3 +390,33 @@ vward_agh_ensure() {
     ${VWARD_UNNICE:-} "$va_init" start </dev/null >/dev/null 2>&1
     return 10
 }
+
+# ---- Agents ---------------------------------------------------------------------------
+# Four agents, one zone each: network (internet, VPN, DNS, routes), components (VWARD's
+# programs, the tunnels' modules, AdGuard Home), updates, maintenance. Only the components
+# agent (the cron supervisor) starts, stops and restarts a program; the others ask it:
+#   agh-start | start:NAME | restart:NAME | engine-restart:TUNNEL | engine-kick:TUNNEL
+# A request is a file; a byte into the agent's pipe wakes it at once (a pipe opened for reading
+# and writing never blocks, and a byte nobody reads is simply dropped: the file stays).
+VWARD_AGENT_REQ=${VWARD_AGENT_REQ:-${VWARD_ROOT_PREFIX:-}/tmp/vward-agent-components}
+VWARD_AGENT_PIDFILE=${VWARD_AGENT_PIDFILE:-${VWARD_ROOT_PREFIX:-}/opt/var/run/vward/cron-supervisor.pid}
+
+# vward_agent_ask REQUEST [WAIT]: 0 = queued (no WAIT) or done within WAIT seconds. A components
+# agent that is not running is started first, so a request is never left alone.
+vward_agent_ask() {
+    case "$1" in ''|*[!a-z0-9:._-]*) return 64 ;; esac
+    mkdir -p "$VWARD_AGENT_REQ" 2>/dev/null || return 1
+    : > "$VWARD_AGENT_REQ/$1" 2>/dev/null || return 1
+    [ ! -p "$VWARD_AGENT_REQ/.wake" ] || printf 'x\n' 1<>"$VWARD_AGENT_REQ/.wake" 2>/dev/null || :
+    _va_p=
+    [ ! -r "$VWARD_AGENT_PIDFILE" ] || read -r _va_p 2>/dev/null < "$VWARD_AGENT_PIDFILE" || :
+    case "$_va_p" in ''|*[!0-9]*) _va_p=0 ;; esac
+    if [ "$_va_p" -le 1 ] || ! kill -0 "$_va_p" 2>/dev/null; then
+        "${VWARD_AGENT_INIT:-/opt/etc/init.d/S92vward-runtime}" start </dev/null >/dev/null 2>&1 || :
+    fi
+    _va_w=${2:-0}
+    case "$_va_w" in ''|*[!0-9]*) _va_w=0 ;; esac
+    _va_n=0
+    while [ -e "$VWARD_AGENT_REQ/$1" ] && [ "$_va_n" -lt "$_va_w" ]; do sleep 1; _va_n=$((_va_n + 1)); done
+    [ "$_va_w" = 0 ] || [ ! -e "$VWARD_AGENT_REQ/$1" ]
+}

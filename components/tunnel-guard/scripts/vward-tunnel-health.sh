@@ -22,12 +22,7 @@ NOW_TEXT="$2 $3"
 VWARD_NOW=$NOW_EPOCH
 export VWARD_NOW
 
-# Tunnels of VWARD's own engine (AmneziaWG the firmware cannot): a stopped one
-# starts again.  Without such tunnels this is one file test, no process.
-[ ! -f "${VWARD_AWG_ETC:-/opt/etc/vward/awg-engine}/tunnels.tsv" ] || [ ! -x /opt/bin/vward-awg-engine.sh ] ||
-    /opt/bin/vward-awg-engine.sh supervise >/dev/null 2>&1 || :
-[ ! -f "${VWARD_VLESS_ETC:-/opt/etc/vward/vless-engine}/tunnels.tsv" ] || [ ! -x /opt/bin/vward-vless-engine.sh ] ||
-    /opt/bin/vward-vless-engine.sh supervise >/dev/null 2>&1 || :
+# The tunnels' modules (AmneziaWG, VLESS) are kept running by the components agent.
 
 # Every VPN connection pinged through its own device: the quality table of the Panel and
 # the guard's choice of a fallback tunnel. In RAM; a few seconds, all tunnels at once.

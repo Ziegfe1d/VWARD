@@ -2,26 +2,26 @@
 # vward-sentinel-act.sh EVENT ARGS: what VWARD does the moment the real-time watcher
 # (vward-sentinel) notices something. The watcher starts it at most once per event within
 # its rate and never twice at a time; exit 0 = done, else = could not help (counted).
+# The watcher only sees; each event goes to the agent of its zone: interfaces and DNS chain to
+# the network agent, programs and AdGuard Home to the components agent (asked, never done here).
 #   link DEV up|down, addr DEV lost   the provider's or a tunnel's interface changed: the
-#                                     guard that owns it checks now, not within a minute
-#   down NAME                         a program of VWARD is gone: its starter, now
-#   leak NAME RSS                     above its memory limit: stopped and started again
+#                                     network agent checks it now, not within a minute
+#   down NAME                         a program of VWARD is gone: the components agent starts it
+#   leak NAME RSS                     above its memory limit: the components agent restarts it
 #   grow NAME RSS                     far above its own normal: logged
 #   mem-low                           the router is short of memory: logged (optional
 #                                     work already waits: the watcher's busy flag)
-#   dns-fail                          the router's DNS did not answer twice: AdGuard Home
-#                                     started when it is not running
+#   dns-fail                          the router's DNS did not answer twice: the components
+#                                     agent starts AdGuard Home when it is not running
 #   chain-fail                        AdGuard Home in the DNS chain silent 3 times in a row:
 #                                     out of the chain when the provider's DNS answers
 
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-RUN_DIR=${VWARD_RUN_DIR:-/opt/var/run/vward}
 LOG=${VWARD_SENTINEL_LOG:-/opt/var/log/vward-sentinel.log}
 INITD=${VWARD_INITD:-/opt/etc/init.d}
 BIN_DIR=${VWARD_BIN_DIR:-/opt/bin}
-CONSOLE_PIDFILE=${VWARD_CONSOLE_PIDFILE:-/opt/var/run/vward-console-lighttpd.pid}
 AGH_INIT=${VWARD_AGH_INIT:-$INITD/S99adguardhome}
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
@@ -30,24 +30,13 @@ log() { mkdir -p "${LOG%/*}" 2>/dev/null; printf '%s|ACT|%s\n' "$(date '+%Y-%m-%
 
 valid() { case "$1" in ''|*[!A-Za-z0-9_.:-]*) return 1 ;; esac; }
 
-pidfile_of() {
-    case "$1" in
-        route-engine) echo "$RUN_DIR/route-engine.pid" ;;
-        panel) echo "$CONSOLE_PIDFILE" ;;
-        awg-t[0-9]*) echo "$RUN_DIR/awg-engine/${1#awg-}.pid" ;;
-        xray-v[0-9]*) echo "$RUN_DIR/vless-engine/${1#xray-}.pid" ;;
-        *) return 1 ;;
-    esac
-}
+# The programs VWARD's components agent starts and restarts (it alone does; asked here).
+known() { case "$1" in route-engine|panel|awg-t[0-9]*|xray-v[0-9]*) return 0 ;; esac; return 1; }
 
-# start_of NAME: the starter of a program of VWARD.
-start_of() {
-    case "$1" in
-        route-engine) "$INITD/S91vward-route-engine" start ;;
-        panel) "$INITD/S93vward-console" start ;;
-        awg-*|xray-*) "$BIN_DIR/vward-tunnel-health.sh" ;;
-        *) return 1 ;;
-    esac </dev/null >/dev/null 2>&1
+# ask REQUEST: to the components agent (the cron supervisor); 0 = it has the request.
+ask() {
+    [ -r "$VWARD_ADMISSION_LIB" ] && . "$VWARD_ADMISSION_LIB" && command -v vward_agent_ask >/dev/null 2>&1 || return 1
+    vward_agent_ask "$1"
 }
 
 wan_device() {
@@ -68,22 +57,14 @@ case "$EVENT" in
         fi
         ;;
     down)
-        valid "${2:-}" || exit 64
+        valid "${2:-}" && known "$2" || exit 64
         log "down|$2"
-        start_of "$2"
+        ask "start:$2"
         ;;
     leak)
-        valid "${2:-}" || exit 64
-        F=$(pidfile_of "$2") || exit 64
-        P=
-        [ -r "$F" ] && read -r P < "$F"
-        case "$P" in ''|*[!0-9]*) exit 1 ;; esac
+        valid "${2:-}" && known "$2" || exit 64
         log "leak|$2|rss_kb=${3:-}|restart"
-        kill "$P" 2>/dev/null
-        n=0
-        while kill -0 "$P" 2>/dev/null && [ "$n" -lt 5 ]; do sleep 1; n=$((n + 1)); done
-        kill -9 "$P" 2>/dev/null
-        start_of "$2"
+        ask "restart:$2"
         ;;
     grow)
         valid "${2:-}" || exit 64
@@ -93,19 +74,11 @@ case "$EVENT" in
         log "mem-low"
         ;;
     dns-fail)
+        # AdGuard Home dead: the components agent starts it (through its one gate: not again
+        # within 120 s, growing pauses, no orphaned PID file).
         if [ -x "$AGH_INIT" ] && ! pidof AdGuardHome >/dev/null 2>&1; then
-            # One gate for every starter: not again within 120 s, growing pauses, no orphaned PID file.
-            if [ -r "$VWARD_ADMISSION_LIB" ] && . "$VWARD_ADMISSION_LIB" && command -v vward_agh_ensure >/dev/null 2>&1; then
-                vward_agh_ensure "$AGH_INIT"
-                case "$?" in
-                    10) log "dns-fail|adguardhome-start" ;;
-                    13) log "dns-fail|adguardhome-binary-broken"; exit 1 ;;
-                    *) log "dns-fail|adguardhome-waiting"; exit 1 ;;
-                esac
-            else
-                log "dns-fail|adguardhome-start"
-                "$AGH_INIT" start </dev/null >/dev/null 2>&1
-            fi
+            log "dns-fail|adguardhome-start"
+            ask agh-start
         else
             log "dns-fail|nothing-to-start"
             exit 1
