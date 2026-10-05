@@ -1318,7 +1318,7 @@ if [ "$ACTION" = ads-control ]; then
     route-dns) RDV="$(val value)"; case "$RDV" in on|off) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac ;;
     dns-guard) DGS="$(val setting)"; DGV="$(form_decode value url | tr 'A-F' 'a-f')"
       case "$DGS" in
-        enforce|bypass) case "$DGV" in 0|1) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac ;;
+        enforce|bypass|chain) case "$DGV" in 0|1) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac ;;
         exclude) case "$DGV" in -|[0-9a-f]*) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
           case "$DGV" in *[!0-9a-f:,-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac ;;
         *) echo '{"ok":false,"error":"invalid_setting"}'; exit 0 ;;

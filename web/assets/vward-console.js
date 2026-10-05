@@ -2977,7 +2977,7 @@ const SEARCH_INDEX = [
   ['d-smartdns', 'Агент Smart DNS'],
   ['routes', 'Автоподбор доменов'], ['routes', 'Мои домены'], ['routes', 'Всегда через VPN'], ['routes', 'Доменные списки'], ['routes', 'Источники'], ['vpn', 'IP-категории'], ['wan', 'Wi-Fi клиенты'],
   ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
-  ['utils', 'AdGuard Home'], ['d-agh', 'Имена устройств из Keenetic'], ['d-agh', 'Все устройства через AdGuard Home'], ['d-agh', 'Не давать обходить защиту'], ['ads', 'Последняя проверка'], ['ads', 'Правила в AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
+  ['utils', 'AdGuard Home'], ['d-agh', 'Имена устройств из Keenetic'], ['d-agh', 'Все устройства через AdGuard Home'], ['d-agh', 'Не давать обходить фильтрацию'], ['d-agh', 'Выводить AdGuard Home из DNS при сбое'], ['ads', 'Последняя проверка'], ['ads', 'Правила в AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
   ['u-vward', 'Установка обновлений'], ['u-vward', 'Время установки'], ['u-vward', 'Интервал проверки'], ['u-vward', 'Канал'],
   ['settings', 'Адрес VWARD'], ['settings', 'Тема'], ['u-vward', 'Версия'], ['d-diag', 'Задания по расписанию'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']
 ];
@@ -3186,7 +3186,9 @@ function dnsGuardPanel(a) {
   const byHint = !by ? 'закрывает зашифрованный DNS в обход (DoT, DoH)' : num(g.refused) ? fmtInt(g.refused) + ' ' + plural(num(g.refused), 'попытка обхода закрыта', 'попытки обхода закрыто', 'попыток обхода закрыто') : 'обходов не было';
   return panel('Фильтрация для всех устройств', '<dl class="kv">' +
       ctrlRow('Все устройства через AdGuard Home', sw('data-dnsg="enforce"', on, 'Все устройства через AdGuard Home', !S.ads || (!enc && !on)), onHint) +
-      ctrlRow('Не давать обходить защиту', sw('data-dnsg="bypass"', by, 'Не давать обходить защиту', !S.ads || (!enc && !by)), byHint) + '</dl>' +
+      ctrlRow('Не давать обходить фильтрацию', sw('data-dnsg="bypass"', by, 'Не давать обходить фильтрацию', !S.ads || (!enc && !by)), byHint) +
+      ctrlRow('Выводить AdGuard Home из DNS при сбое', sw('data-dnsg="chain"', g.chain !== '0', 'Выводить AdGuard Home из DNS при сбое', !S.ads),
+        g.chain === '0' ? 'выключено: если AdGuard Home не отвечает, дом остаётся без DNS' : 'если он не отвечает, интернет идёт через DNS провайдера, потом он возвращается сам') + '</dl>' +
       confirmBox('dnsg-bypass', 'Закрыть обход? Телефоны Android с «Частным DNS» в режиме «Имя хоста» останутся без интернета, пока этот режим не выключить. В режиме «Автоматически» всё продолжит работать.', 'Закрыть обход') +
       (enc || g.upstream == null ? '' : '<p class="field-warn">' + ico('alert') + 'Выход AdGuard Home в интернет не зашифрован: провайдер видит DNS-запросы. Сначала в AdGuard Home → «Настройки DNS» → «Upstream DNS-серверы» поставьте зашифрованные адреса (https://...), затем включайте защиту.</p>') +
       kv([['Исключения', ex ? fmtInt(ex) + ' ' + plural(ex, 'устройство', 'устройства', 'устройств') : 'нет', '', 'd-dnsex']]),
@@ -3490,7 +3492,8 @@ document.addEventListener('change', e => {
   if (t.dataset.cfgWanp) { cfgSet({ op: 'wan-param', target: t.dataset.cfgWanp, value: t.value }, 'Сохранено', ['config']); return; }
   if (t.dataset.cfgUpd) { cfgSet({ op: 'update', target: t.dataset.cfgUpd, value: t.value }, 'Сохранено', ['status']); return; }
   if (t.dataset.dnsg === 'enforce') { dnsGuardSet('enforce', t.checked ? '1' : '0', t.checked ? 'Все устройства теперь через AdGuard Home' : 'Фильтрация для всех устройств выключена'); return; }
-  if (t.dataset.dnsg === 'bypass') { if (t.checked) { t.checked = false; confirm = { id: 'dnsg-bypass' }; render(); } else dnsGuardSet('bypass', '0', 'Обход защиты снова разрешён'); return; }
+  if (t.dataset.dnsg === 'chain') { dnsGuardSet('chain', t.checked ? '1' : '0', t.checked ? 'AdGuard Home снова выводится из DNS при сбое' : 'AdGuard Home больше не выводится из DNS при сбое'); return; }
+  if (t.dataset.dnsg === 'bypass') { if (t.checked) { t.checked = false; confirm = { id: 'dnsg-bypass' }; render(); } else dnsGuardSet('bypass', '0', 'Обход фильтрации снова разрешён'); return; }
   if (t.dataset.dnsex) {
     const g = (S.ads && S.ads.dns_guard) || {}, cur = (g.exclude || '').split(',').filter(Boolean).filter(m => m !== t.dataset.dnsex);
     if (t.checked) cur.push(t.dataset.dnsex);

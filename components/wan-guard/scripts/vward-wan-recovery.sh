@@ -44,12 +44,20 @@ log_action()
     return 0
 }
 
+# wan_ndm COMMAND: Keenetic took it - the exit code and the answer (ndmc can end with 0 and
+# still print the router's refusal).
+wan_ndm()
+{
+    wn_out=$(LD_LIBRARY_PATH= "$NDMC" -c "$1" 2>&1) || return 1
+    ! printf '%s\n' "$wn_out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command)'
+}
+
 run_up()
 {
     tries=0
     while [ "$tries" -lt 3 ]; do
         tries=$((tries + 1))
-        LD_LIBRARY_PATH= "$NDMC" -c "interface $VWARD_WAN_INTERFACE up" >/dev/null 2>&1
+        wan_ndm "interface $VWARD_WAN_INTERFACE up"
         UP_RC=$?
         [ "$UP_RC" -eq 0 ] && return 0
         [ "$tries" -ge 3 ] || sleep 2
@@ -131,7 +139,7 @@ echo "REQUEST=$REQUEST"
 echo "INTERFACE=$VWARD_WAN_INTERFACE"
 
 if [ "$REQUEST" = dhcp-renew ]; then
-    LD_LIBRARY_PATH= "$NDMC" -c "interface $VWARD_WAN_INTERFACE ip dhcp client renew" >/dev/null 2>&1
+    wan_ndm "interface $VWARD_WAN_INTERFACE ip dhcp client renew"
     RC=$?
     log_action MANUAL_DHCP_RENEW "rc=$RC"
     [ "$RC" -eq 0 ] && { echo "RESULT=DONE"; exit 0; }
@@ -140,7 +148,7 @@ if [ "$REQUEST" = dhcp-renew ]; then
 fi
 
 PHASE=DOWN_COMMAND
-LD_LIBRARY_PATH= "$NDMC" -c "interface $VWARD_WAN_INTERFACE down" >/dev/null 2>&1
+wan_ndm "interface $VWARD_WAN_INTERFACE down"
 DOWN_RC=$?
 if [ "$DOWN_RC" -ne 0 ]; then
     PHASE=IDLE
