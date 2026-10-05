@@ -97,6 +97,17 @@ echo result=changed
         fail("three minutes bring the routes back")
     if (tmp / "iface").read_text().split()[0] != "Wireguard0" or fallback():
         fail("back on the first tunnel, nothing to remember")
+    # The guard had the tunnel down and it answers again, but Keenetic still has it switched
+    # off: the guard turns it on before it forgets (it must never stay off for good).
+    (gdir / "state").write_text("MODE=AUTO\nDOWN_STREAK=0\nFAILOPEN_ACTIVE=1\nLAST_RECOVERY_TEST=0\nLAST_ACTION=FAILOPEN_DOWN\n")
+    (tmp / "ndmc.log").write_text("")
+    health.write_text(f"STATUS=UP\nLAST_CHECK={int(time.time())}\nCONFIG_STATE=down\n")
+    (tmp / "summary").write_text("")
+    r = subprocess.run(["sh", str(GUARD)], env=env, text=True, capture_output=True, timeout=60)
+    if r.stdout.split("\n", 1)[0] != "ACTION=FAILOPEN_RESTORED" or "interface Wireguard0 up" not in (tmp / "ndmc.log").read_text():
+        fail(f"restored but left off in Keenetic: {r.stdout[:80]!r} {(tmp / 'ndmc.log').read_text()!r}")
+    if "FAILOPEN_ACTIVE=0" not in (gdir / "state").read_text():
+        fail("restored: the guard no longer holds the tunnel")
     # Return switched off: the routes stay where they are.
     (etc / "tunnel-return.disabled").write_text("x")
     run("DOWN", alive)

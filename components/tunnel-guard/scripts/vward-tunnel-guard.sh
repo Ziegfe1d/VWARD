@@ -444,11 +444,17 @@ else
                 if [ "$FAILOPEN_ACTIVE" -eq 1 ]; then
                     if [ "$MODE" = "AUTO" ]; then
                         ACTION="FAILOPEN_RESTORED"
+                        # The tunnel answers, but the guard took it down: it must not stay
+                        # switched off in Keenetic once the guard forgets it did that.
+                        if [ "$CONFIG_STATE" != "up" ] &&
+                           ! "${VWARD_NDMC:-ndmc}" -c "interface $VWARD_TUNNEL_INTERFACE up" >/dev/null 2>&1; then
+                            ACTION="FAILOPEN_RESTORE_UP_ERROR"
+                        fi
                     else
                         ACTION="WOULD_RESTORE"
                     fi
 
-                    FAILOPEN_ACTIVE=0
+                    [ "$ACTION" = "FAILOPEN_RESTORE_UP_ERROR" ] || FAILOPEN_ACTIVE=0
                 elif [ -n "$FALLBACK_FROM" ] && [ "$FALLBACK_FROM" != "$VWARD_TUNNEL_INTERFACE" ] &&
                      [ "$MODE" = "AUTO" ] && [ ! -e "$RETURN_OFF" ] && [ -x "$QUALITY" ] &&
                      [ "$("$QUALITY" summary 2>/dev/null | awk -F '\t' -v n="$FALLBACK_FROM" '$1 == n {print $5}')" -ge "$RETURN_STREAK" ] 2>/dev/null; then

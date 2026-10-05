@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -308,8 +309,14 @@ esac
         (tmp / f_).unlink()
     (tmp / "sub").unlink()     # the address does not answer: the kept copy of the servers
     out = engine("failover", tn)
+    # The program starts in the background (the fake writes its address once it runs): a
+    # loaded machine needs a moment.
+    for _ in range(50):
+        if (tmp / "xray.addr").exists() and (tmp / "xray.addr").read_text().strip() == "203.0.113.13":
+            break
+        time.sleep(0.1)
     if out != ["info.failover=none", "result=unchanged"] or (tmp / "xray.addr").read_text().strip() != "203.0.113.13":
-        fail(f"nothing answers: the server stays: {out}")
+        fail(f"nothing answers: the server stays: {out} (runs {(tmp / 'xray.addr').read_text().strip()})")
     if not (run_ / f"v{sn}.failover.at").exists() or (run_ / f"v{sn}.failover").exists():
         fail("the pause is marked, the lock is gone")
     env["VWARD_VLESS_CONNECT_WAIT"] = "4"

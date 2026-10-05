@@ -60,6 +60,9 @@ jobs:
       - name: Chaos run on the router emulator (faults minute by minute)
         run: sudo python3 tests/perf/check-chaos-emulated.py
 
+      - name: Automation scenarios on the router emulator (VPN, internet, AdGuard Home, route engine)
+        run: sudo python3 tests/perf/check-automation-emulated.py
+
       - name: Panel API under hostile input on the router emulator
         run: sudo python3 tests/perf/check-api-fuzz-emulated.py
 
