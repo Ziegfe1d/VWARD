@@ -1653,7 +1653,13 @@ if [ "$ACTION" = "diagnostics" ]; then
 
     OPT_STATUS="$(diag_status df -Pk /opt)"
     JQ_STATUS="$(diag_status command -v "$JQ")"
-    CURL_STATUS="$(diag_status command -v "$CURL")"
+    # Started, not only present: an Entware curl whose OpenSSL library crashes is there but dead.
+    CURL_STATUS="$(diag_status "$CURL" --version)"
+    # Entware starts at boot only through rc.unslung: a stub there leaves the router after the
+    # next reboot without VWARD, SSH and AdGuard Home (seen on a router).
+    BOOT_STATUS=FAIL
+    RC_UNSLUNG=${VWARD_RC_UNSLUNG:-/opt/etc/init.d/rc.unslung}
+    if grep -q '/opt/etc/init.d' "$RC_UNSLUNG" 2>/dev/null && ! grep -q 'STARTUP DISABLED' "$RC_UNSLUNG" 2>/dev/null; then BOOT_STATUS=PASS; fi
     # The route engine's DNS capture: VWARD's own program, or a tcpdump that starts.
     # tcpdump --version is waited for 3 s at most (as the route engine's starter does): a
     # tcpdump that hangs must not hold the whole answer; still running then = it started.
@@ -1818,7 +1824,7 @@ if [ "$ACTION" = "diagnostics" ]; then
     LAST_ROUTE_RC="$(cat /tmp/vward-route-reconciler-maint.cron.rc 2>/dev/null)"
 
     "$JQ" -n \
-      --arg opt "$OPT_STATUS" --arg jq "$JQ_STATUS" --arg curl "$CURL_STATUS" \
+      --arg opt "$OPT_STATUS" --arg jq "$JQ_STATUS" --arg curl "$CURL_STATUS" --arg boot "$BOOT_STATUS" \
       --arg tcpdump "$TCPDUMP_STATUS" --arg lighttpd "$LIGHTTPD_STATUS" \
       --arg crond "$CROND_STATUS" --arg supervisor "$SUPERVISOR_STATUS" \
       --arg adguard "$ADGUARD_STATUS" --arg adaptive "$ADAPTIVE_STATUS" \
@@ -1831,6 +1837,7 @@ if [ "$ACTION" = "diagnostics" ]; then
       '{ok:true,checks:[
         {id:"console-api",component:"console",label:"Панель VWARD",status:$cgi,detail:"интерфейс данных (api.cgi) отвечает"},
         {id:"opt",component:"runtime",label:"Флешка Entware (/opt)",status:$opt,detail:("свободно "+(if $opt_free >= 1024 then (($opt_free/1024|floor)|tostring)+" МБ" else ($opt_free|tostring)+" КБ" end))},
+        {id:"boot",component:"runtime",label:"Запуск после перезагрузки",status:$boot,detail:(if $boot == "PASS" then "программы Entware запустятся сами" else "запуск Entware отключён (rc.unslung): после перезагрузки VWARD, SSH и AdGuard Home не запустятся" end)},
         {id:"jq",component:"runtime",label:"Разбор данных (jq)",status:$jq,detail:"нужен всем разделам Панели"},
         {id:"curl",component:"runtime",label:"Сетевые запросы (curl)",status:$curl,detail:"проверки сайтов, обновления, AdGuard Home"},
         {id:"tcpdump",component:"route-engine",label:"Наблюдение DNS (vward-dnscap или tcpdump)",status:$tcpdump,detail:"автоподбор узнаёт новые домены"},

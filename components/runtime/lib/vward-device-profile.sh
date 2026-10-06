@@ -58,16 +58,38 @@ vward_is_wireguard_sysfs()
     grep -qx 'DEVTYPE=wireguard' "$VWARD_SYSFS_NET/$1/uevent" 2>/dev/null
 }
 
+# One answer of Keenetic's RCI (PATH under /rci, seconds): curl, then BusyBox wget.  Plain
+# HTTP to the router itself needs no TLS: when Entware's curl cannot start (a broken OpenSSL
+# library, seen on a router), VWARD still learns the router's interfaces and configuration.
+vward_rci_get()
+{
+    _vrg_url="${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/$1" _vrg_t=${2:-5}
+    _vrg_curl=${VWARD_CURL_BIN:-$(vward_tool curl)}
+    if [ -n "$_vrg_curl" ] &&
+       _vrg_out=$("$_vrg_curl" --fail --silent --connect-timeout 2 --max-time "$_vrg_t" "$_vrg_url" 2>/dev/null) &&
+       [ -n "$_vrg_out" ]; then
+        printf '%s\n' "$_vrg_out"; _vrg_out=; return 0
+    fi
+    for _vrg_w in ${VWARD_RCI_WGET:-/opt/bin/busybox:wget /bin/busybox:wget wget}; do
+        case "$_vrg_w" in
+            *:wget) [ -x "${_vrg_w%:wget}" ] || continue
+                    _vrg_out=$("${_vrg_w%:wget}" wget -q -T "$_vrg_t" -O - "$_vrg_url" 2>/dev/null) ;;
+            *) command -v "$_vrg_w" >/dev/null 2>&1 || continue
+               _vrg_out=$("$_vrg_w" -q -T "$_vrg_t" -O - "$_vrg_url" 2>/dev/null) ;;
+        esac && [ -n "$_vrg_out" ] && { printf '%s\n' "$_vrg_out"; _vrg_out=; return 0; }
+    done
+    _vrg_out=
+    return 1
+}
+
 # Keenetic's running configuration, one line per line.  RCI first: unlike ndmc
 # it leaves no session lines in the router's log (checked on a real router).
 # ndmc when RCI does not answer.  Nothing is printed until the whole reply parsed.
 vward_running_config()
 {
-    _vrc_curl=${VWARD_CURL_BIN:-$(vward_tool curl)}
     _vrc_jq=${VWARD_JQ_BIN:-$(vward_tool jq)}
-    if [ -n "$_vrc_curl" ] && [ -n "$_vrc_jq" ] &&
-       _vrc_cfg=$("$_vrc_curl" --fail --silent --connect-timeout 2 --max-time 30 \
-           "${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/show/running-config" 2>/dev/null |
+    if [ -n "$_vrc_jq" ] &&
+       _vrc_cfg=$(vward_rci_get show/running-config 30 |
            "$_vrc_jq" -er '.message | if type == "array" and length > 0 then .[] else error("empty") end' 2>/dev/null) &&
        [ -n "$_vrc_cfg" ]; then
         printf '%s\n' "$_vrc_cfg"
@@ -85,11 +107,9 @@ vward_running_config()
 vward_interface_state()
 {
     vward_valid_ndm_name "$1" || return 1
-    _vis_curl=${VWARD_CURL_BIN:-$(vward_tool curl)}
     _vis_jq=${VWARD_JQ_BIN:-$(vward_tool jq)}
-    if [ -n "$_vis_curl" ] && [ -n "$_vis_jq" ] &&
-       _vis_out=$("$_vis_curl" --fail --silent --connect-timeout 2 --max-time 5 \
-           "${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/show/interface?name=$1" 2>/dev/null |
+    if [ -n "$_vis_jq" ] &&
+       _vis_out=$(vward_rci_get "show/interface?name=$1" 5 |
            "$_vis_jq" -er '
                select(type == "object" and has("state")) |
                ([.. | objects | select(has("online")) | .online][0]) as $on |
@@ -116,12 +136,10 @@ vward_interface_state()
 #   S <static-route-target>
 vward_build_device_map()
 {
-    _vp_curl=${VWARD_CURL_BIN:-$(vward_tool curl)}
     _vp_jq=${VWARD_JQ_BIN:-$(vward_tool jq)}
-    [ -n "$_vp_curl" ] && [ -n "$_vp_jq" ] || return 1
+    [ -n "$_vp_jq" ] || return 1
 
-    _vp_ifaces=$("$_vp_curl" --fail --silent --connect-timeout 2 --max-time 4 \
-        "$VWARD_RCI_BASE/show/interface" 2>/dev/null) || return 1
+    _vp_ifaces=$(vward_rci_get show/interface 4) || return 1
     _vp_list=$(printf '%s\n' "$_vp_ifaces" | "$_vp_jq" -r '
         to_entries[] | select(.value | type == "object") |
         [.key, (.value.type // "-"), (.value["security-level"] // "-")] | @tsv
@@ -137,8 +155,7 @@ vward_build_device_map()
         [ "$_vp_type" = Port ] && continue
         vward_valid_ndm_name "$_vp_type" || _vp_type=-
         vward_valid_ndm_name "$_vp_level" || _vp_level=-
-        _vp_sys=$("$_vp_curl" --fail --silent --connect-timeout 2 --max-time 3 \
-            "$VWARD_RCI_BASE/show/interface/system-name?name=$_vp_ndm" 2>/dev/null |
+        _vp_sys=$(vward_rci_get "show/interface/system-name?name=$_vp_ndm" 3 |
             "$_vp_jq" -r '
                 if type == "string" then .
                 elif type == "object" then (.["system-name"] // .name // empty)
