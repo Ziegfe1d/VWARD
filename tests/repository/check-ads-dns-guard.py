@@ -33,6 +33,9 @@ op, chain, rest = a[0], a[1], a[2:]
 def save(): p.write_text(json.dumps(fw)); sys.exit(0)
 def spec(r): return " ".join(r)
 if "REJECT" in rest and os.environ.get("FAKE_NO_REJECT") == "1": sys.exit(1)
+# iptables 1.4 (Keenetic's Entware): a port in DNAT only with -p tcp/udp.
+if "DNAT" in rest and ":" in rest[-1] and "-p" not in rest:
+    print("iptables v1.4.21: Need TCP, UDP, SCTP or DCCP with port specification", file=sys.stderr); sys.exit(2)
 if op == "-N":
     if chain in t: sys.exit(1)
     t[chain] = []; save()
@@ -211,7 +214,7 @@ with tempfile.TemporaryDirectory() as tmp:
         pre = chain("nat", "PREROUTING")
         if pre[:2] != ["-s 192.168.1.0/24 -p tcp --dport 53 -j VWARD_DNS", "-s 192.168.1.0/24 -p udp --dport 53 -j VWARD_DNS"]:
             fail(f"{shell[0]} PREROUTING jumps: {pre}")
-        if chain("nat", "VWARD_DNS") != ["-d 192.168.1.1 -j RETURN", "-j DNAT --to-destination 192.168.1.1:65053"]:
+        if chain("nat", "VWARD_DNS") != ["-d 192.168.1.1 -j RETURN", "-p udp -j DNAT --to-destination 192.168.1.1:65053", "-p tcp -j DNAT --to-destination 192.168.1.1:65053"]:
             fail(f"{shell[0]} redirect chain: {chain('nat', 'VWARD_DNS')}")
         hook = (hooks / "060-vward-dns-guard.sh").read_text()
         if '"/opt/bin/vward-ads-privacy-dns-guard.sh" hook "$table"' not in hook or not os.access(hooks / "060-vward-dns-guard.sh", os.X_OK):
@@ -266,7 +269,7 @@ with tempfile.TemporaryDirectory() as tmp:
         # Keenetic rebuilds its firewall: the hook puts everything back.
         fw.write_text(json.dumps({}))
         run("hook", "nat", shell=shell); run("hook", "filter", shell=shell)
-        if chain("nat", "VWARD_DNS") != ["-s 192.168.1.50 -j RETURN", "-d 192.168.1.1 -j RETURN", "-j DNAT --to-destination 192.168.1.1:65053"] or chain("filter", "VWARD_DNS_FWD") != want:
+        if chain("nat", "VWARD_DNS") != ["-s 192.168.1.50 -j RETURN", "-d 192.168.1.1 -j RETURN", "-p udp -j DNAT --to-destination 192.168.1.1:65053", "-p tcp -j DNAT --to-destination 192.168.1.1:65053"] or chain("filter", "VWARD_DNS_FWD") != want:
             fail(f"{shell[0]} hook after rebuild: {tables()}")
 
         # Keenetic does not answer: an excluded device is never redirected by accident.

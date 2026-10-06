@@ -172,7 +172,11 @@ nat_apply()
     for ip in $EX_IPS; do ipt -t nat -A VWARD_DNS -s "$ip" -j RETURN || return 1; done
     # Queries to the router go on to the rules already there (AdGuard Home sees the device).
     ipt -t nat -A VWARD_DNS -d "$LAN" -j RETURN || return 1
-    ipt -t nat -A VWARD_DNS -j DNAT --to-destination "$LAN:$PORT" || return 1
+    # A port in DNAT needs the protocol: iptables 1.4 (Keenetic's Entware) refuses it
+    # without one («Need TCP, UDP...», the rule never went in on a router).
+    for p in udp tcp; do
+        ipt -t nat -A VWARD_DNS -p "$p" -j DNAT --to-destination "$LAN:$PORT" || return 1
+    done
     for p in udp tcp; do
         ipt -t nat -C PREROUTING -s "$SUB" -p "$p" --dport 53 -j VWARD_DNS ||
             ipt -t nat -I PREROUTING 1 -s "$SUB" -p "$p" --dport 53 -j VWARD_DNS || return 1
