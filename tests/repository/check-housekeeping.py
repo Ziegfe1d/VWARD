@@ -201,6 +201,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
 # IP categories: a missed 00:10 update (the router was off) runs once, in the background,
 # when the last one is over 26 hours old; not again the same day; not when it is fresh.
+# Every other hour the categories are matched again without downloading (Smart DNS, new domains).
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     bb = tmp / "bb"; bb.mkdir()
@@ -213,11 +214,12 @@ with tempfile.TemporaryDirectory() as tmp:
     marker = tmp / "ran"
     chain = tmp / "chain"; chain.write_text(f"#!/bin/sh\necho chain >> {marker}\n"); chain.chmod(0o755)
     reconcile = tmp / "reconcile"; reconcile.write_text(f"#!/bin/sh\necho reconcile >> {marker}\n"); reconcile.chmod(0o755)
+    psync = tmp / "psync"; psync.write_text(f"#!/bin/sh\necho \"sync $1\" >> {marker}\n"); psync.chmod(0o755)
     stub = tmp / "admission.sh"
     stub.write_text("vward_admission_enter() { :; }\nvward_admission_leave() { :; }\nvward_defer() { return 1; }\n")
     env = os.environ | {"PATH": f"{bb}:{os.environ['PATH']}", "VWARD_ROOT_PREFIX": str(r), "VWARD_ADMISSION_LIB": str(stub),
                         "VWARD_CONSOLE_CONFIG_BIN": str(tmp / "none"), "VWARD_POLICY_CHAIN_BIN": str(chain),
-                        "VWARD_POLICY_RECONCILE_BIN": str(reconcile), "VWARD_POLICY_CATCHUP_FILE": str(tmp / "catchup-day"),
+                        "VWARD_POLICY_RECONCILE_BIN": str(reconcile), "VWARD_POLICY_SYNC_BIN": str(psync), "VWARD_POLICY_CATCHUP_FILE": str(tmp / "catchup-day"),
                         "VWARD_CRONTAB": str(tmp / "none")}
 
     def run_hk():
@@ -225,7 +227,7 @@ with tempfile.TemporaryDirectory() as tmp:
         if res.returncode != 0:
             fail(f"housekeeping failed: {res.stdout[-300:]} {res.stderr[-300:]}")
         for _ in range(50):
-            if marker.exists() and marker.read_text().count("reconcile") >= 1:
+            if marker.exists() and "reconcile" in marker.read_text():
                 break
             __import__("time").sleep(0.1)
 
@@ -241,12 +243,13 @@ with tempfile.TemporaryDirectory() as tmp:
             fail(f"a missed IP category update runs chain then reconcile: {marker.read_text() if marker.exists() else 'nothing'}")
         marker.unlink()
         run_hk()
-        if marker.exists():
-            fail("the catch-up runs once a day")
+        if not marker.exists() or marker.read_text() != "sync --reconcile\n":
+            fail(f"the catch-up runs once a day, then the hourly matching: {marker.read_text() if marker.exists() else 'nothing'}")
+        marker.unlink()
         (tmp / "catchup-day").unlink()
         synclog.touch()
         run_hk()
-        if marker.exists():
-            fail("a fresh update needs no catch-up")
+        if not marker.exists() or marker.read_text() != "sync --reconcile\n":
+            fail(f"a fresh update needs no catch-up, only the hourly matching: {marker.read_text() if marker.exists() else 'nothing'}")
 
 print("HOUSEKEEPING=PASS")

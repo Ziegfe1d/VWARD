@@ -1,5 +1,10 @@
 #!/opt/bin/sh
 
+# Keenetic can start Entware's scripts with a library path of its own: an Entware program
+# (curl) then loads the firmware's libraries and crashes in the loader (seen on a router right
+# after boot). Entware's programs and the firmware's each find their own libraries without it.
+unset LD_LIBRARY_PATH
+
 VWARD_DEVICE_CONFIG=${VWARD_DEVICE_CONFIG:-/opt/etc/vward/device.conf}
 VWARD_DEVICE_MAP_CACHE=${VWARD_DEVICE_MAP_CACHE:-/tmp/vward-device-map.tsv}
 VWARD_DEVICE_MAP_TTL=${VWARD_DEVICE_MAP_TTL:-300}

@@ -90,6 +90,7 @@ python3 tests/repository/check-vward-off.py || fail "Emergency switch: Откл�
 python3 tests/repository/check-ssh-safety.py || fail "SSH always reachable"
 python3 tests/repository/check-agents.py || fail "Agents: the components agent watches the others"
 python3 tests/repository/check-policy-smartdns.py || fail "Smart DNS wins over IP categories"
+python3 tests/repository/check-boot-env.py || fail "Entware programs do not take the firmware's library path"
 python3 tests/repository/check-resource-yield.py || fail "VWARD gives way to the router"
 python3 tests/repository/check-list-watch.py || fail "Route engine list watch"
 python3 tests/repository/check-wan-guard-params.py || fail "Internet guard limits"

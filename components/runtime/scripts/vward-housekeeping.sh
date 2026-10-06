@@ -443,6 +443,7 @@ POLICY_SYNC_LOG="$R/opt/var/log/vward-policy-sync-sync.log"
 POLICY_CATCHUP_FILE=${VWARD_POLICY_CATCHUP_FILE:-/tmp/vward-policy-catchup-day}
 POLICY_CHAIN=${VWARD_POLICY_CHAIN_BIN:-/opt/bin/vward-policy-chain.sh}
 POLICY_RECONCILE=${VWARD_POLICY_RECONCILE_BIN:-/opt/bin/vward-policy-reconcile.sh}
+POLICY_SYNC=${VWARD_POLICY_SYNC_BIN:-/opt/bin/vward-policy-sync.sh}
 if [ -x "$POLICY_CHAIN" ] && [ -f "$POLICY_SYNC_LOG" ]; then
     PC_NOW=${BACKUP_NOW:-$(date '+%Y-%m-%d %H:%M:%S')}
     PC_TODAY=${PC_NOW%% *}; PC_HOUR=${PC_NOW#* }; PC_HOUR=${PC_HOUR%%:*}
@@ -454,6 +455,12 @@ if [ -x "$POLICY_CHAIN" ] && [ -f "$POLICY_SYNC_LOG" ]; then
         echo "$PC_TODAY" > "$POLICY_CATCHUP_FILE" 2>/dev/null || :
         { "$POLICY_CHAIN" && "$POLICY_RECONCILE"; } </dev/null >/dev/null 2>&1 &
         echo "$PC_NOW|policy=catchup" >> "$HOUSE_LOG"
+    # Otherwise, every hour, the IP categories are matched again to the routed domains and to
+    # Smart DNS without downloading anything: a category that now holds a Smart DNS address
+    # leaves the tunnel within the hour, not at the next night's update.
+    elif [ "$PC_HOUR" != 00 ] && [ -x "$POLICY_SYNC" ] && ! vward_defer policy-reconcile; then
+        "$POLICY_SYNC" --reconcile </dev/null >/dev/null 2>&1 &
+        echo "$PC_NOW|policy=reconcile" >> "$HOUSE_LOG"
     fi
 fi
 
