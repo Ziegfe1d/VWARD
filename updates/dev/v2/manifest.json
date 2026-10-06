@@ -1,18 +1,18 @@
 {
   "signed": {
     "schema": 2,
-    "update_id": "vward-0.2.0-rc.2.fix.16",
-    "sequence": 2026100602,
-    "version": "0.2.0-rc.2.fix.16",
+    "update_id": "vward-0.2.0-rc.2.fix.17",
+    "sequence": 2026100603,
+    "version": "0.2.0-rc.2.fix.17",
     "channel": "dev",
-    "priority": "CRITICAL",
-    "published_at": "2026-10-06T17:16:01Z",
+    "priority": "IMPORTANT",
+    "published_at": "2026-10-06T22:24:44Z",
     "min_updater_version": "2.0.0",
     "files_base": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/v2/files/",
     "files": [
       {
         "target": "/opt/share/vward/VERSION",
-        "sha256": "37987cca3aa112d80499b4b3f54eb7ab97ace3d94c659bce5729a7e44a57b33f",
+        "sha256": "b9d2412ccbe64d0e74cad32534085bd234f0cbe852fbc459ca66b132a7f2dea2",
         "size": 18,
         "mode": "0644",
         "component": "platform-core"
@@ -47,7 +47,7 @@
       },
       {
         "target": "/opt/lib/vward/vward-domain-classifier-lib.sh",
-        "sha256": "c2988c9d8c9025ff2a9c9249164ae43335444465b69f8fefebd0e473542b8867",
+        "sha256": "0583b75f158f81270a73a83b52f2d77a710715df046d86f31fb8a3ad62e9f94e",
         "size": 7118,
         "mode": "0644",
         "component": "route-engine"
@@ -467,8 +467,8 @@
       },
       {
         "target": "/opt/bin/vward-ads-privacy-dns-guard.sh",
-        "sha256": "dff10ce718bc1fc7eea5319bb16819e3381708432757a8fb764fadd16beeaf95",
-        "size": 31088,
+        "sha256": "1eeee9cc546893fcc947dbc828213ed8f4b54837669b466e05ebf06bf3ce770b",
+        "size": 31298,
         "mode": "0755",
         "component": "ads-privacy-guard"
       },
@@ -488,7 +488,7 @@
       },
       {
         "target": "/opt/share/vward/ads-privacy-guard/vward-ads-privacy-common.sh",
-        "sha256": "78ec1e0ff7eaa5437eb9435f92a53a7be5659905d109fb128834660aa80c0a49",
+        "sha256": "4dd0994c1ac762f600ed493a34fba826694e65334e7837891bf894f60cca3127",
         "size": 20356,
         "mode": "0644",
         "component": "ads-privacy-guard"
@@ -588,7 +588,7 @@
         },
         {
           "name": "component-registry.json",
-          "sha256": "db854c1aa436dcf0f659ee5dbc895f032873c144358f3d7d6c27db24a55e4c52",
+          "sha256": "2b624308ce7e336783f4be0fe11c60475a3d1353ec8c15f5234c5cccda9ee5df",
           "size": 8961,
           "mode": "0644"
         }
@@ -596,7 +596,7 @@
     },
     "compatibility": {
       "min_vward": "0.2.0-rc.1",
-      "max_vward": "0.2.0-rc.2.fix.16"
+      "max_vward": "0.2.0-rc.2.fix.17"
     },
     "affected_components": [
       "ads-privacy-guard",
@@ -620,5 +620,5 @@
       "key_id": "vward-prod-2026-01"
     }
   },
-  "signature": "vEBYzOH0p7gxCKoMNOa2aKIEXzRK/+rAyknb+TMWzF0f+73tTjvi8gq6v29btvdbwQKuqbsr4inFd1KIf9CQAQ=="
+  "signature": "AmaRwWp7Rt8k6GiONKZxwQiXjKmbTGzSaVw+FTKHuYuijyVLBcWsn/Aqavkq7YFAByMBHggps0X/+rnJXF1XDA=="
 }
