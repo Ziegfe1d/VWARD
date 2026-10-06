@@ -403,8 +403,15 @@ VWARD_AGENT_PIDFILE=${VWARD_AGENT_PIDFILE:-${VWARD_ROOT_PREFIX:-}/opt/var/run/vw
 
 # vward_agent_ask REQUEST [WAIT]: 0 = queued (no WAIT) or done within WAIT seconds. A components
 # agent that is not running is started first, so a request is never left alone.
+# An update is stopping or replacing VWARD's programs: nothing is started meanwhile.
+vward_update_pending() {
+    [ -e "${VWARD_ROOT_PREFIX:-}/tmp/vward-update-requested" ] || [ -e "${VWARD_ROOT_PREFIX:-}/tmp/vward-update.lock" ]
+}
+
 vward_agent_ask() {
     case "$1" in ''|*[!a-z0-9:._-]*) return 64 ;; esac
+    # During an update the components agent is stopped on purpose: asking would start it.
+    ! vward_update_pending || return 75
     mkdir -p "$VWARD_AGENT_REQ" 2>/dev/null || return 1
     : > "$VWARD_AGENT_REQ/$1" 2>/dev/null || return 1
     [ ! -p "$VWARD_AGENT_REQ/.wake" ] || printf 'x\n' 1<>"$VWARD_AGENT_REQ/.wake" 2>/dev/null || :

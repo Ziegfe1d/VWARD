@@ -50,7 +50,7 @@ important_max_delay_seconds=7200
 routine_max_delay_seconds=86400
 # This engine's own version: a manifest may ask for a newer one (min_updater_version),
 # and a signed manifest carrying a newer engine makes it update itself.
-VU_ENGINE_VERSION=2.0.5
+VU_ENGINE_VERSION=2.0.6
 minimum_updater_version=$VU_ENGINE_VERSION
 manifest_v2_url=
 
@@ -1038,6 +1038,10 @@ vu_runtime_quiesce() {
     [ -z "$live_pid" ] || ! kill -0 "$live_pid" 2>/dev/null || VU_RESTART_LIVE=1
     VU_RUNTIME_QUIESCED=1
 
+    # The real-time watcher would take the programs stopped here for fallen ones and ask the
+    # components agent to bring them back (it did, every 15 minutes, on a router: «Could not
+    # quiesce»). It rests during the update; the components agent starts it again on resume.
+    [ ! -x "${VU_SENTINEL_CTL:-/opt/bin/vward-sentinel.sh}" ] || "${VU_SENTINEL_CTL:-/opt/bin/vward-sentinel.sh}" stop >/dev/null 2>&1 || :
     if [ "$VU_RESTART_SUPERVISOR" = 1 ]; then
         /opt/etc/init.d/S92vward-runtime stop >/dev/null 2>&1 || return 1
     fi

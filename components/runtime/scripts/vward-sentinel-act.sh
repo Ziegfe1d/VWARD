@@ -44,6 +44,11 @@ wan_device() {
 }
 
 EVENT=${1:-}
+# An update stops VWARD's programs on purpose: nothing is brought back meanwhile.
+if [ -e "${VWARD_ROOT_PREFIX:-}/tmp/vward-update-requested" ] || [ -e "${VWARD_ROOT_PREFIX:-}/tmp/vward-update.lock" ]; then
+    log "$EVENT|${2:-}|update"
+    exit 0
+fi
 case "$EVENT" in
     link|addr)
         DEV=${2:-}
