@@ -67,4 +67,13 @@ esac
 api = (ROOT / "web/cgi-bin/api.cgi").read_text()
 if 'CURL_STATUS="$(diag_status "$CURL" --version)"' not in api or "STARTUP DISABLED" not in api or 'id:"boot"' not in api:
     fail("the diagnostics do not show a curl that cannot start or Entware startup switched off")
+# A curl that runs and hears an error from Keenetic is not replaced: wget is not even asked.
+with tempfile.TemporaryDirectory() as tmp:
+    t = Path(tmp)
+    (t / "curl").write_text("#!/bin/sh\nexit 22\n"); (t / "curl").chmod(0o755)
+    (t / "busybox").write_text(f"#!/bin/sh\necho asked >> {t}/wget.log\nexit 1\n"); (t / "busybox").chmod(0o755)
+    env = {"PATH": os.environ["PATH"], "VWARD_CURL_BIN": str(t / "curl"), "VWARD_RCI_WGET": f"{t}/busybox:wget"}
+    r = subprocess.run(["sh", "-c", f'. "{LIB}"; vward_rci_get show/interface/system-name?name=Bridge0 3'], env=env, text=True, capture_output=True, timeout=20)
+    if r.returncode == 0 or (t / "wget.log").exists():
+        fail("an error answer from a working curl went on to wget")
 print("BOOT_ENV=PASS")

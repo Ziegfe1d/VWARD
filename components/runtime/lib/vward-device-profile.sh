@@ -65,10 +65,15 @@ vward_rci_get()
 {
     _vrg_url="${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/$1" _vrg_t=${2:-5}
     _vrg_curl=${VWARD_CURL_BIN:-$(vward_tool curl)}
-    if [ -n "$_vrg_curl" ] &&
-       _vrg_out=$("$_vrg_curl" --fail --silent --connect-timeout 2 --max-time "$_vrg_t" "$_vrg_url" 2>/dev/null) &&
-       [ -n "$_vrg_out" ]; then
-        printf '%s\n' "$_vrg_out"; _vrg_out=; return 0
+    if [ -n "$_vrg_curl" ]; then
+        _vrg_out=$("$_vrg_curl" --fail --silent --connect-timeout 2 --max-time "$_vrg_t" "$_vrg_url" 2>/dev/null)
+        _vrg_rc=$?
+        [ "$_vrg_rc" = 0 ] && [ -n "$_vrg_out" ] && { printf '%s\n' "$_vrg_out"; _vrg_out=; return 0; }
+        # curl ran and Keenetic answered no (an error, a timeout): wget would hear the same.
+        # Only a curl that cannot start (126 and up: not runnable, killed) is replaced; Entware's
+        # BusyBox wget itself crashed 70 times in a router's log when asked every time.
+        _vrg_out=
+        [ "$_vrg_rc" -ge 126 ] || return 1
     fi
     for _vrg_w in ${VWARD_RCI_WGET:-/opt/bin/busybox:wget /bin/busybox:wget wget}; do
         case "$_vrg_w" in
