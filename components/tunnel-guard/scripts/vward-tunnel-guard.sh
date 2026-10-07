@@ -126,6 +126,20 @@ wg_ok()
 }
 
 
+# wg_wait SECONDS: the tunnel answers within that many seconds. A restarted engine (VLESS,
+# AmneziaWG) needs a while before pages open; one look 4 s after the restart failed every time,
+# so a tunnel switched off by the guard was never let back (up, 12 s, down again, on a router).
+wg_wait()
+{
+    ww_end=$(( $(date +%s) + ${1:-0} ))
+    while :; do
+        wg_ok && return 0
+        [ "$(date +%s)" -lt "$ww_end" ] || return 1
+        sleep 3
+    done
+}
+
+
 # fallback_pick: another tunnel answering in its last two samples, least loss, then fastest.
 fallback_pick()
 {
@@ -527,7 +541,7 @@ else
                             # A tunnel of VWARD's own engine: its program starts afresh first;
                             # only a tunnel that stays silent after it goes direct.
                             elif [ "$MODE" = "AUTO" ] && engine_of "$VWARD_TUNNEL_INTERFACE" >/dev/null &&
-                                 { engine_kick "$VWARD_TUNNEL_INTERFACE" kick; sleep "${VWARD_GUARD_KICK_WAIT:-10}"; wg_ok; }; then
+                                 { engine_kick "$VWARD_TUNNEL_INTERFACE" kick; wg_wait "${VWARD_GUARD_KICK_WAIT:-20}"; }; then
 
                                 DOWN_STREAK=0
                                 ACTION="ENGINE_RESTARTED"
@@ -594,9 +608,8 @@ else
                             # An engine tunnel: a restart, and when its server still does not
                             # answer, another server of its subscription (VLESS failover).
                             engine_kick "$VWARD_TUNNEL_INTERFACE" kick
-                            sleep 4
 
-                            if wg_ok; then
+                            if wg_wait "${VWARD_GUARD_KICK_WAIT:-20}"; then
 
                                 FAILOPEN_ACTIVE=0
                                 DOWN_STREAK=0

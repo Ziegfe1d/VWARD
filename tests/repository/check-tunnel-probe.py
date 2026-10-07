@@ -26,6 +26,6 @@ for path in ("components/tunnel-guard/scripts/vward-tunnel-guard.sh", "component
         fail(f"{path}: the probe through a tunnel is shorter than the engine's own check ({engine_max} s)")
 guard = (ROOT / "components/tunnel-guard/scripts/vward-tunnel-guard.sh").read_text()
 k = re.search(r'VWARD_GUARD_KICK_WAIT:-(\d+)', guard)
-if not k or int(k.group(1)) < 8:
-    fail("the VPN agent judges a restarted engine before it can come up")
+if not k or int(k.group(1)) < 15 or guard.count('wg_wait "${VWARD_GUARD_KICK_WAIT:-') != 2:
+    fail("the VPN agent judges a restarted engine before it can come up (both after a failure and on the way back)")
 print("TUNNEL_PROBE=PASS")
