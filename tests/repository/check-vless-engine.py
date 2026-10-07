@@ -42,8 +42,9 @@ with tempfile.TemporaryDirectory() as tmp:
     (bin_ / "curl").write_text(f"""#!/bin/sh
 echo "$*" >> "{tmp}/curl.log"
 out=; dev=; url=
-while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; --interface) dev=$2; shift ;; http*) url=$1 ;; esac; shift; done
+while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; --interface) dev=$2; shift ;; http*|telnet://*) url=$1 ;; esac; shift; done
 case "$url" in
+    telnet://*) h=${{url#telnet://}}; h=${{h%:*}}; [ -e "{tmp}/reach.$h" ] && printf 0.042; exit 28 ;;
     https://sub.example/*) [ -f "{tmp}/sub" ] || exit 22; cp "{tmp}/sub" "$out" ;;
     https://xray.example/*) cp "{tmp}/x.zip" "$out" ;;
     *) [ -n "$dev" ] && [ -e "{tmp}/up.$dev" ] && exit 0
@@ -305,6 +306,33 @@ esac
         fail("the new server is recorded")
     if (tmp / "xray.addr").read_text().strip() != "203.0.113.13" or "now server 3 203.0.113.13:443" not in (tmp / "engine.log").read_text():
         fail("the new server runs and is logged")
+    # The servers as the VPN apps show them: name with the flag, address, time to connect from the
+    # router (none: no answer), the one in use; never the id or the subscription's address.
+    (tmp / "reach.203.0.113.11").write_text(""); (tmp / "reach.203.0.113.13").write_text("")
+    out = engine("list", tn)
+    rows = {l.split("=", 1)[0]: l.split("=", 1)[1] for l in out if l.startswith("info.server.")}
+    if out[-1] != "result=checked" or len(rows) != 3 or not rows["info.server.1"].endswith("|203.0.113.11|443|42|0") or \
+       not rows["info.server.2"].endswith("|203.0.113.12|443||0") or not rows["info.server.3"].endswith("|203.0.113.13|443|42|1") or \
+       "DE-1" not in rows["info.server.1"] or "info.current=3" not in out:
+        fail(f"the list of servers: {out}")
+    if "secret-fo" in "\n".join(out) or UUID in "\n".join(out):
+        fail("the list shows the subscription's address or the id")
+    # Chosen in the Panel: the tunnel moves when the server answers, else it stays where it was.
+    out = engine("select", tn, "2")
+    if out != ["info.server=2", "info.host=203.0.113.12:443", "result=changed"] or (etc / f"v{sn}.idx").read_text().strip() != "2":
+        fail(f"select server 2: {out}")
+    out = engine("select", tn, "1")
+    for _ in range(50):
+        if (tmp / "xray.addr").exists() and (tmp / "xray.addr").read_text().strip() == "203.0.113.12":
+            break
+        time.sleep(0.1)
+    if out != ["error=server_unreachable"] or (etc / f"v{sn}.idx").read_text().strip() != "2" or (tmp / "xray.addr").read_text().strip() != "203.0.113.12":
+        fail(f"a silent server chosen: the tunnel stays on its own: {out}")
+    if engine("select", tn, "9") != ["error=invalid_value"] or engine("select", tn, "x") != ["error=invalid_value"]:
+        fail("a server that is not in the subscription")
+    out = engine("select", tn, "3")
+    if out[-1] != "result=changed":
+        fail(f"back to server 3: {out}")
     for f_ in ("ok.203.0.113.12", "ok.203.0.113.13"):
         (tmp / f_).unlink()
     (tmp / "sub").unlink()     # the address does not answer: the kept copy of the servers
@@ -362,11 +390,11 @@ esac
 
 # The Panel, the helper and the health check use it.
 helper = (ROOT / "components/console/scripts/vward-console-config.sh").read_text()
-for need in ("op_tunnel_vless()", '"$VLESS_ENGINE" servers', '"$VLESS_ENGINE" add', "VLESS_TUNNELS"):
+for need in ("op_tunnel_vless()", '"$VLESS_ENGINE" servers', '"$VLESS_ENGINE" add', "VLESS_TUNNELS", '"$VLESS_ENGINE" list', '"$VLESS_ENGINE" select'):
     if need not in helper:
         fail(f"the helper lacks {need}")
 js = (ROOT / "web/assets/vward-console.js").read_text()
-for need in ("'#server=' + num", "vlessOf(", "name=\"vless-server\""):
+for need in ("'#server=' + num", "vlessOf(", "name=\"vless-server\"", "function vlessServersPanel(", "op: 'server', name: name, server:", "data-vserver="):
     if need not in js:
         fail(f"the Panel lacks {need}")
 if '"$BIN_DIR/vward-vless-engine.sh" supervise' not in (ROOT / "components/runtime/scripts/vward-cron-supervisor.sh").read_text():

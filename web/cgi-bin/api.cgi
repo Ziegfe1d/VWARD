@@ -983,6 +983,25 @@ if [ "$ACTION" = tunnel-conf ]; then
       fi
       CMD="$CONFIG_HELPER" LABEL="tunnel-$TOP" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
       run_detached "$CONTROL_RUN_DIR" control_busy "$TFILE" "$TFILE.desc" ;;
+    servers)
+      # The servers of a VLESS tunnel's subscription with the time each takes to answer.
+      [ -n "$TNAME" ] || { echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0; }
+      TOUT="$("$CONFIG_HELPER" vless-server servers "$TNAME" 2>/dev/null)"
+      case "$(printf '%s\n' "$TOUT" | tail -n 1)" in
+        result=checked)
+          printf '%s\n' "$TOUT" | sed -n 's/^info\.server\.\([0-9]*\)=/\1|/p' | "$JQ" -Rn --argjson cur "$(printf '%s\n' "$TOUT" | sed -n 's/^info\.current=\([0-9]*\)$/\1/p' | head -n 1 | grep . || echo 0)" '
+            {ok: true, current: $cur, servers: [inputs | split("|") | {n: (.[0] | tonumber), name: .[1], host: .[2], port: (.[3] | tonumber? // null), ms: (.[4] | tonumber? // null), current: (.[5] == "1")}]}' ;;
+        error=*) E="$(printf '%s\n' "$TOUT" | tail -n 1)"; E=${E#error=}; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac; printf '{"ok":false,"error":"%s"}\n' "$E" ;;
+        *) echo '{"ok":false,"error":"helper_failed"}' ;;
+      esac ;;
+    server)
+      # Moving the tunnel to the chosen server waits for it to answer: in the background.
+      [ -n "$TNAME" ] || { echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0; }
+      TIDX="$(form_value server)"; case "$TIDX" in ''|*[!0-9]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+      ! detached_running "$CONTROL_RUN_DIR" || { echo '{"ok":false,"error":"control_busy"}'; exit 0; }
+      ARGS="vless-server select $TNAME $TIDX"
+      CMD="$CONFIG_HELPER" LABEL="tunnel-server" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
+      run_detached "$CONTROL_RUN_DIR" control_busy ;;
     restart|up|down)
       # Waiting for the server outlasts a request: in the background, like a new tunnel.
       [ -n "$TNAME" ] || { echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0; }

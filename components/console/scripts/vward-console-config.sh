@@ -1444,6 +1444,28 @@ tunnel_summary() {
     printf 'info.engine=%s\n' "$(conf_get engine "$1")"
 }
 
+# op_vless_server servers|select NAME [I]: the servers of a VLESS tunnel's subscription (name,
+# address, time to answer, which one now), or the move of the tunnel to server I.
+op_vless_server() {
+    [ -x "$VLESS_ENGINE" ] || die engine_unavailable
+    case "$2" in OpkgTun[0-9]) ;; *) die invalid_tunnel 64 ;; esac
+    case "$1" in
+        servers) vs_out=$("$VLESS_ENGINE" list "$2" 2>/dev/null) ;;
+        select) case "$3" in ''|*[!0-9]*) die invalid_value 64 ;; esac
+                load_profile_base
+                vs_out=$("$VLESS_ENGINE" select "$2" "$3" 2>/dev/null) ;;
+        *) die invalid_operation 64 ;;
+    esac
+    case "$(printf '%s\n' "$vs_out" | tail -n 1)" in
+        result=checked) printf '%s\n' "$vs_out" | grep '^info\.'; done_ok "vless-server servers $2" checked ;;
+        result=changed) printf '%s\n' "$vs_out" | grep '^info\.'; done_ok "vless-server select $2 $3" changed ;;
+        error=*) vs_err=$(printf '%s\n' "$vs_out" | sed -n 's/^error=//p' | tail -n 1)
+                 case "$vs_err" in ''|*[!a-z0-9_]*) vs_err=engine_failed ;; esac
+                 die "$vs_err" ;;
+        *) die engine_failed ;;
+    esac
+}
+
 # op_tunnel_vless check|create FILE [DESCRIPTION] [keep]: the servers of the links or subscription
 # (never the ids), or a new tunnel of the chosen one («#server=N» in FILE).
 op_tunnel_vless() {
@@ -2290,6 +2312,7 @@ case "$OP" in
     tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|policy-group|services-refresh) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
+    vless-server) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     service) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     wifi-host) [ "$#" -eq 3 ] || die usage 64 ;;
     *) [ "$#" -eq 2 ] || die usage 64 ;;
@@ -2354,6 +2377,7 @@ case "$OP" in
     update) op_update "$ARG1" "$ARG2" ;;
     wan-param) op_wan_param "$ARG1" "$ARG2" ;;
     tunnel-conf) op_tunnel_conf "$ARG1" "$ARG2" "$ARG3" "$ARG4" ;;
+    vless-server) op_vless_server "$ARG1" "$ARG2" "$ARG3" ;;
     backup-create) op_backup_create "$ARG1" ;;
     wifi-host) op_wifi_host "$ARG1" "$ARG2" "$ARG3" ;;
     backup-restore) op_backup_restore "$ARG1" ;;

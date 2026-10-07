@@ -500,6 +500,100 @@ failover_due() {
 # (read again, or the copy kept when the address does not answer) are tried on the tunnel's
 # own adapter, servers of the same country first (the flag at the start of the name), at
 # most 8. The first that opens a page stays; none: the old server goes back.
+# try_server SLOT NAME I: server I of $TMPD/links on the tunnel; 0 = a page opens through it
+# (it stays, the tunnel's row and server number follow), else the tunnel keeps its config file
+# as it was before the call only when the caller puts it back.
+try_server() {
+    ts_l=$(sed -n "${3}p" "$TMPD/links")
+    [ -n "$ts_l" ] || return 1
+    config "$ts_l" "$(adapter_of "$2")" "$TMPD/c.json" 2>/dev/null || return 1
+    "$BIN" run -test -c "$TMPD/c.json" >/dev/null 2>&1 || return 1
+    (umask 077; cp "$TMPD/c.json" "$ENGINE_ETC/v$1.json") || return 1
+    stop_one "$1"
+    start_one "$1" || return 1
+    ts_w=0 ts_ok=0
+    while [ "$ts_w" -le "${VWARD_VLESS_FAILOVER_WAIT:-16}" ]; do
+        connected "$2" && { ts_ok=1; break; }
+        sleep 2
+        ts_w=$((ts_w + 4))
+    done
+    [ "$ts_ok" = 1 ] || return 1
+    TS_HOST=$(parse "$ts_l" | awk -F '\t' '$1 == "host" {print $2; exit}')
+    TS_PORT=$(parse "$ts_l" | awk -F '\t' '$1 == "port" {print $2; exit}')
+    echo "$3" > "$ENGINE_ETC/v$1.idx"
+    awk -F '\t' -v OFS='\t' -v p="$2" -v s="$TS_HOST:$TS_PORT" '$2 == p {$3 = s} {print}' "$TUNNELS" > "$TUNNELS.new" && mv -f "$TUNNELS.new" "$TUNNELS"
+    rm -f "$ENGINE_RUN/v$1.fails" "$ENGINE_RUN/v$1.miss" "$ENGINE_RUN/v$1.failover.at"
+    return 0
+}
+
+# tunnel_links NAME: the tunnel's slot in $n and its subscription's servers in $TMPD/links (read
+# again when its address answers, else the copy kept from the last time).
+tunnel_links() {
+    row=$(row_of "$1")
+    [ -n "$row" ] || die unknown_tunnel 64
+    n=$(printf '%s' "$row" | cut -f1)
+    [ -s "$ENGINE_ETC/v$n.src" ] || [ -s "$ENGINE_ETC/v$n.links" ] || die no_source 64
+    TMPD=$(mktemp -d /tmp/vward-vless.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    if [ -s "$ENGINE_ETC/v$n.src" ] && links "$ENGINE_ETC/v$n.src" "$TMPD/links"; then (umask 077; cp "$TMPD/links" "$ENGINE_ETC/v$n.links")
+    else cp "$ENGINE_ETC/v$n.links" "$TMPD/links" 2>/dev/null || die subscription_unavailable; fi
+}
+
+# list NAME: the servers of the tunnel's subscription as the VPN apps show them: name (with the
+# country flag), address, the time a TCP connection to it takes from the router (empty: it does
+# not answer), and which one the tunnel uses now. Never the ids or the subscription's address.
+op_list() {
+    tunnel_links "$1"
+    cur=$(cat "$ENGINE_ETC/v$n.idx" 2>/dev/null); case "$cur" in ''|*[!0-9]*) cur=1 ;; esac
+    i=0
+    while IFS= read -r l; do
+        i=$((i + 1))
+        [ "$i" -le 50 ] || break
+        parse "$l" > "$TMPD/kv.$i" 2>/dev/null || continue
+        h=$(awk -F '\t' '$1 == "host" {print $2; exit}' "$TMPD/kv.$i")
+        pt=$(awk -F '\t' '$1 == "port" {print $2; exit}' "$TMPD/kv.$i")
+        case "$h:$pt" in *[!A-Za-z0-9.:_-]*|:*|*:) continue ;; esac
+        # Ten at a time: a TCP connection each, at most 2 s.
+        ( "$CURL" -s -o /dev/null --connect-timeout 2 --max-time 2 -w '%{time_connect}' "telnet://$h:$pt" </dev/null > "$TMPD/ms.$i" 2>/dev/null ) &
+        [ $((i % 10)) != 0 ] || wait
+    done < "$TMPD/links"
+    wait
+    j=0
+    while [ "$j" -lt "$i" ]; do
+        j=$((j + 1))
+        [ -s "$TMPD/kv.$j" ] || continue
+        v() { awk -F '\t' -v k="$1" '$1 == k {print substr($0, length(k) + 2); exit}' "$TMPD/kv.$j" | tr -d '|"\\' | cut -c1-64; }
+        ms=$(awk '{t = $1 * 1000; if (t > 0) printf "%d", t + 0.5}' "$TMPD/ms.$j" 2>/dev/null)
+        printf 'info.server.%s=%s|%s|%s|%s|%s\n' "$j" "$(v name)" "$(v host)" "$(v port)" "$ms" "$([ "$j" = "$cur" ] && echo 1 || echo 0)"
+    done
+    printf 'info.current=%s\ninfo.servers=%s\n' "$cur" "$i"
+    echo "result=checked"
+}
+
+# select NAME I: the tunnel moves to server I of its subscription when a page opens through it;
+# otherwise it stays on its server.
+op_select() {
+    case "$2" in ''|*[!0-9]*) die invalid_value 64 ;; esac
+    tunnel_links "$1"
+    [ "$2" -ge 1 ] && [ -n "$(sed -n "${2}p" "$TMPD/links")" ] || die invalid_value 64
+    cur=$(cat "$ENGINE_ETC/v$n.idx" 2>/dev/null); case "$cur" in ''|*[!0-9]*) cur=1 ;; esac
+    failover_busy "$n" && die engine_busy 75
+    mkdir -p "$ENGINE_RUN" && mkdir "$ENGINE_RUN/v$n.failover" 2>/dev/null || die engine_busy 75
+    echo $$ > "$ENGINE_RUN/v$n.failover/pid"
+    trap 'rm -rf "${ENGINE_RUN:?}/v$n.failover"; cleanup' EXIT
+    cp "$ENGINE_ETC/v$n.json" "$TMPD/old.json" || die write_failed
+    if try_server "$n" "$1" "$2"; then
+        log "server $1: server $cur -> server $2 $TS_HOST:$TS_PORT (chosen in the Panel)"
+        printf 'info.server=%s\ninfo.host=%s:%s\n' "$2" "$TS_HOST" "$TS_PORT"
+        echo "result=changed"
+        return 0
+    fi
+    (umask 077; cp "$TMPD/old.json" "$ENGINE_ETC/v$n.json")
+    stop_one "$n"
+    start_one "$n"
+    log "server $1: server $2 did not answer, server $cur kept"
+    die server_unreachable
+}
+
 op_failover() {
     row=$(row_of "$1")
     [ -n "$row" ] || die unknown_tunnel 64
@@ -527,26 +621,9 @@ op_failover() {
     cat "$TMPD/same" "$TMPD/other" 2>/dev/null | head -n "${VWARD_VLESS_FAILOVER_MAX:-8}" > "$TMPD/try"
     cp "$ENGINE_ETC/v$n.json" "$TMPD/old.json" || die write_failed
     while IFS= read -r i; do
-        l=$(sed -n "${i}p" "$TMPD/links")
-        config "$l" "$(adapter_of "$1")" "$TMPD/c.json" 2>/dev/null || continue
-        "$BIN" run -test -c "$TMPD/c.json" >/dev/null 2>&1 || continue
-        (umask 077; cp "$TMPD/c.json" "$ENGINE_ETC/v$n.json") || continue
-        stop_one "$n"
-        start_one "$n" || continue
-        w=0 ok=0
-        while [ "$w" -le "${VWARD_VLESS_FAILOVER_WAIT:-16}" ]; do
-            connected "$1" && { ok=1; break; }
-            sleep 2
-            w=$((w + 4))
-        done
-        [ "$ok" = 1 ] || continue
-        host=$(parse "$l" | awk -F '\t' '$1 == "host" {print $2; exit}')
-        port=$(parse "$l" | awk -F '\t' '$1 == "port" {print $2; exit}')
-        echo "$i" > "$ENGINE_ETC/v$n.idx"
-        awk -F '\t' -v OFS='\t' -v p="$1" -v s="$host:$port" '$2 == p {$3 = s} {print}' "$TUNNELS" > "$TUNNELS.new" && mv -f "$TUNNELS.new" "$TUNNELS"
-        rm -f "$ENGINE_RUN/v$n.fails" "$ENGINE_RUN/v$n.miss" "$ENGINE_RUN/v$n.failover.at"
-        log "failover $1: server $cur did not answer, now server $i $host:$port"
-        printf 'info.server=%s\ninfo.host=%s:%s\n' "$i" "$host" "$port"
+        try_server "$n" "$1" "$i" || continue
+        log "failover $1: server $cur did not answer, now server $i $TS_HOST:$TS_PORT"
+        printf 'info.server=%s\ninfo.host=%s:%s\n' "$i" "$TS_HOST" "$TS_PORT"
         echo "result=changed"
         return 0
     done < "$TMPD/try"
@@ -630,6 +707,8 @@ case "${1:-}" in
     restart) [ "$#" -eq 2 ] || die usage 64; op_restart "$2" ;;
     kick) [ "$#" -eq 2 ] || die usage 64; op_kick "$2" ;;
     failover) [ "$#" -eq 2 ] || die usage 64; op_failover "$2" ;;
+    list) [ "$#" -eq 2 ] || die usage 64; op_list "$2" ;;
+    select) [ "$#" -eq 3 ] || die usage 64; op_select "$2" "$3" ;;
     disable) [ "$#" -eq 2 ] || die usage 64; op_disable "$2" ;;
     enable) [ "$#" -eq 2 ] || die usage 64; op_enable "$2" ;;
     supervise) op_supervise ;;
