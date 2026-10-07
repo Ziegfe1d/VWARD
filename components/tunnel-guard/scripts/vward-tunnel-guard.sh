@@ -92,6 +92,9 @@ trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
 
+# A page through a tunnel: through VLESS or AmneziaWG's engine a TLS answer from 1.1.1.1 takes
+# seconds on this router; 2 s (as before) called a working tunnel dead and the guard switched it
+# off (a router, 2026-10-07). The engine's own check waits 8 s.
 probe_iface()
 {
     IFACE="$1"
@@ -100,8 +103,8 @@ probe_iface()
     "${VWARD_CURL_BIN:-curl}" -4 -k \
       --noproxy '*' \
       --interface "$IFACE" \
-      --connect-timeout 1 \
-      --max-time 2 \
+      --connect-timeout "${VWARD_PROBE_CONNECT:-4}" \
+      --max-time "${VWARD_PROBE_MAX:-8}" \
       -sS -o /dev/null \
       "$URL" >/dev/null 2>&1
 }
@@ -524,7 +527,7 @@ else
                             # A tunnel of VWARD's own engine: its program starts afresh first;
                             # only a tunnel that stays silent after it goes direct.
                             elif [ "$MODE" = "AUTO" ] && engine_of "$VWARD_TUNNEL_INTERFACE" >/dev/null &&
-                                 { engine_kick "$VWARD_TUNNEL_INTERFACE" kick; sleep "${VWARD_GUARD_KICK_WAIT:-4}"; wg_ok; }; then
+                                 { engine_kick "$VWARD_TUNNEL_INTERFACE" kick; sleep "${VWARD_GUARD_KICK_WAIT:-10}"; wg_ok; }; then
 
                                 DOWN_STREAK=0
                                 ACTION="ENGINE_RESTARTED"

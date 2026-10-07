@@ -96,8 +96,8 @@ probe()
     curl -4 -k \
       --noproxy '*' \
       --interface "$WG_IF" \
-      --connect-timeout 1 \
-      --max-time 2 \
+      --connect-timeout "${VWARD_PROBE_CONNECT:-4}" \
+      --max-time "${VWARD_PROBE_MAX:-8}" \
       -sS -o /dev/null \
       "$URL" >/dev/null 2>&1
 }
