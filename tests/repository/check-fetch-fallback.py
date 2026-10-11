@@ -143,8 +143,14 @@ http.server.HTTPServer((i["listen"], i["port"]), H).serve_forever()
         fail(f"Xray is not asked the same request: {got}")
     pid = int((t / "xray.pid").read_text())
     import time
+    def gone(p):
+        # The process may end between two looks at /proc: gone either way.
+        try:
+            return "Z" in Path(f"/proc/{p}/stat").read_text().split(")")[-1][:3]
+        except FileNotFoundError:
+            return True
     for _ in range(20):
-        if not Path(f"/proc/{pid}").exists() or "Z" in Path(f"/proc/{pid}/stat").read_text().split(")")[-1][:3]:
+        if gone(pid):
             break
         time.sleep(0.1)
     else:

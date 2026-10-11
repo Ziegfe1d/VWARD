@@ -324,7 +324,11 @@ with tempfile.TemporaryDirectory() as t:
     pid = int((t / "run/t0.pid").read_text())
     run("disable", "OpkgTun1", expect="result=changed")
     time.sleep(0.3)
-    if not (t / "etc/t0.off").exists() or os.path.exists(f"/proc/{pid}") and "zombie" not in open(f"/proc/{pid}/status").read().lower() and (t / "run/t0.pid").exists() and int((t / "run/t0.pid").read_text()) == pid:
+    try:  # the program may end between two looks at /proc: stopped either way
+        alive = "zombie" not in Path(f"/proc/{pid}/status").read_text().lower()
+    except FileNotFoundError:
+        alive = False
+    if not (t / "etc/t0.off").exists() or alive and (t / "run/t0.pid").exists() and int((t / "run/t0.pid").read_text()) == pid:
         fail("disable must stop the program and keep the flag")
     run("supervise", expect="result=unchanged")
     if not run("status", expect="result=status").rstrip().split("\n")[-2].endswith("\t1"):
