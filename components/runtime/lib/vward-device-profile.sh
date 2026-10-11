@@ -107,7 +107,9 @@ vward_fetch()
         [ "$_vf_rc" -lt 128 ] || : > "$_vf_flag" 2>/dev/null
     fi
     _vf_uc=${VWARD_UCLIENT_BIN:-$(vward_tool uclient-fetch)}
-    [ -n "$_vf_uc" ] || return "$_vf_rc"
+    # Keenetic's Entware has no uclient-fetch: the TLS of VWARD's Xray (Go, works on these
+    # processors) carries the request instead.
+    [ -n "$_vf_uc" ] || { vward_fetch_xray "$@"; return; }
     _vf_out=- _vf_wo= _vf_hdr= _vf_fail=0 _vf_max= _vf_retry=0 _vf_t= _vf_ct= _vf_ua= _vf_4=0 _vf_k=0 _vf_url=
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -169,6 +171,72 @@ vward_fetch()
     esac
     [ "$_vf_fail" = 0 ] || return 22
     return 0
+}
+
+# vward_fetch_xray CURL-ARGUMENTS: the same curl request in plain HTTP to a short-lived Xray of
+# the VLESS module on 127.0.0.1, which speaks TLS to the server and checks its certificate
+# (Entware's list of authorities). Every curl option keeps working; --interface and --resolve
+# go to Xray (the provider's interface, the server's address). A redirect to another host is
+# not followed (curl would crash on it): rc of curl.
+vward_fetch_xray()
+{
+    _vx_bin=${VWARD_XRAY_BIN:-/opt/share/vward/vless-engine/xray}
+    [ -x "$_vx_bin" ] && [ -n "$_vf_curl" ] || return "$_vf_rc"
+    _vx_url= _vx_if= _vx_res= _vx_prev=
+    for _vx_a in "$@"; do
+        case "$_vx_prev" in
+            --interface) _vx_if=$_vx_a ;;
+            --resolve) _vx_res=$_vx_a ;;
+        esac
+        case "$_vx_a" in https://*) _vx_url=$_vx_a ;; esac
+        _vx_prev=$_vx_a
+    done
+    _vx_rest=${_vx_url#https://}
+    _vx_host=${_vx_rest%%/*} _vx_path=/
+    case "$_vx_rest" in */*) _vx_path=/${_vx_rest#*/} ;; esac
+    _vx_port=443
+    case "$_vx_host" in *:*) _vx_port=${_vx_host##*:} _vx_host=${_vx_host%:*} ;; esac
+    case "$_vx_host" in ''|*[!A-Za-z0-9.-]*) return 3 ;; esac
+    case "$_vx_port" in ''|*[!0-9]*) return 3 ;; esac
+    [ -z "$_vx_if" ] || vward_valid_ifname "$_vx_if" || return 2
+    # --resolve HOST:PORT:ADDRESS: Xray connects to that address, the name stays the TLS name.
+    _vx_addr=$_vx_host
+    case "$_vx_res" in "$_vx_host:$_vx_port:"*) _vx_addr=${_vx_res##*:}; vward_valid_ipv4 "$_vx_addr" || return 2 ;; esac
+    _vx_lp=$(( 20000 + $$ % 20000 ))
+    _vx_conf="${TMPDIR:-/tmp}/vward-fetch.$$.json" _vx_so=
+    [ -z "$_vx_if" ] || _vx_so=",\"sockopt\":{\"interface\":\"$_vx_if\"}"
+    (umask 077; printf '{"log":{"loglevel":"none"},"inbounds":[{"listen":"127.0.0.1","port":%s,"protocol":"dokodemo-door","settings":{"address":"%s","port":%s,"network":"tcp"}}],"outbounds":[{"protocol":"freedom","streamSettings":{"security":"tls","tlsSettings":{"serverName":"%s","alpn":["http/1.1"]}%s}}]}\n' \
+        "$_vx_lp" "$_vx_addr" "$_vx_port" "$_vx_host" "$_vx_so" > "$_vx_conf") || return "$_vf_rc"
+    _vx_ca=
+    for _vx_c in ${VWARD_CA_BUNDLE:-/opt/etc/ssl/certs/ca-certificates.crt /opt/etc/ssl/cert.pem}; do
+        [ -r "$_vx_c" ] && { _vx_ca=$_vx_c; break; }
+    done
+    SSL_CERT_FILE=$_vx_ca "$_vx_bin" run -c "$_vx_conf" </dev/null >/dev/null 2>&1 &
+    _vx_pid=$!
+    # Listening within 5 s (the port in /proc/net/tcp, state 0A).
+    _vx_hex=$(printf '%04X' "$_vx_lp") _vx_w=0
+    until grep -q "^ *[0-9]*: 0100007F:$_vx_hex 00000000:0000 0A" /proc/net/tcp 2>/dev/null; do
+        _vx_w=$((_vx_w + 1))
+        [ "$_vx_w" -le 25 ] && kill -0 "$_vx_pid" 2>/dev/null || { kill "$_vx_pid" 2>/dev/null; rm -f "$_vx_conf"; return 7; }
+        sleep 0.2 2>/dev/null || sleep 1
+    done
+    # The same arguments: the address rewritten, --interface/--resolve/--proto left to Xray.
+    _vx_n=$# _vx_skip=0
+    while [ "$_vx_n" -gt 0 ]; do
+        _vx_a=$1; shift; _vx_n=$((_vx_n - 1))
+        if [ "$_vx_skip" = 1 ]; then _vx_skip=0; continue; fi
+        case "$_vx_a" in
+            --interface|--resolve|--proto) _vx_skip=1; continue ;;
+            "$_vx_url") _vx_a="http://127.0.0.1:$_vx_lp$_vx_path" ;;
+        esac
+        set -- "$@" "$_vx_a"
+    done
+    _vx_h=$_vx_host; [ "$_vx_port" = 443 ] || _vx_h=$_vx_host:$_vx_port
+    "$_vf_curl" --noproxy '*' -H "Host: $_vx_h" "$@"
+    _vx_rc=$?
+    kill "$_vx_pid" 2>/dev/null
+    rm -f "$_vx_conf"
+    return "$_vx_rc"
 }
 
 # vward_https_broken: curl crashed on HTTPS within the hour (vward_fetch noted it). Site checks

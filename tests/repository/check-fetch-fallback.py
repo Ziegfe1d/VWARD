@@ -103,4 +103,58 @@ esac
     if r.returncode != 0:
         fail("vward_https_broken after a crash")
 
+# No uclient-fetch (Keenetic's Entware has none): the VLESS module's Xray speaks TLS for curl.
+# A stand-in Xray: a plain HTTP server on the port of its configuration that answers with what
+# it was asked and how it was configured; curl crashes on https:// and is real for http://.
+real_curl = subprocess.run(["sh", "-c", "command -v curl"], capture_output=True, text=True).stdout.strip()
+with tempfile.TemporaryDirectory() as tmp:
+    t = Path(tmp)
+    (t / "curl").write_text(f'#!/bin/sh\nfor a in "$@"; do case "$a" in https://*) kill -SEGV $$ ;; esac; done\nexec {real_curl} "$@"\n')
+    (t / "xray").write_text(f"""#!/usr/bin/env python3
+import http.server, json, os, sys
+c = json.load(open(sys.argv[3]))
+i, o = c["inbounds"][0], c["outbounds"][0]["streamSettings"]
+seen = dict(address=i["settings"]["address"], port=i["settings"]["port"], sni=o["tlsSettings"]["serverName"],
+            alpn=o["tlsSettings"]["alpn"], sockopt=o.get("sockopt"), ca=os.environ.get("SSL_CERT_FILE"))
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        b = json.dumps(dict(seen, path=self.path, host=self.headers.get("Host"))).encode()
+        self.send_response(200); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+    def log_message(self, *a): pass
+open("{t}/xray.pid", "w").write(str(os.getpid()))
+http.server.HTTPServer((i["listen"], i["port"]), H).serve_forever()
+""")
+    for f in ("curl", "xray"):
+        (t / f).chmod(0o755)
+    (t / "ca.crt").write_text("x")
+    env = {"PATH": os.environ["PATH"], "VWARD_CURL_BIN": str(t / "curl"), "VWARD_UCLIENT_BIN": "", "VWARD_XRAY_BIN": str(t / "xray"),
+           "VWARD_TLS_BROKEN_FLAG": str(t / "flag"), "VWARD_CA_BUNDLE": str(t / "ca.crt"), "TMPDIR": tmp}
+    import json
+    r = subprocess.run(["sh", "-c", f'. "{LIB}"; vward_fetch --fail --silent --show-error --location --proto =https --tlsv1.2 '
+                       f'--interface eth3 --resolve feed.example.invalid:443:192.0.2.7 --output {t}/m.json --write-out "%{{http_code}}" '
+                       'https://feed.example.invalid/a/b/manifest.json?x=1'],
+                       env=env, text=True, capture_output=True, timeout=60)
+    if r.returncode != 0 or r.stdout != "200":
+        fail(f"through Xray: rc={r.returncode} out={r.stdout!r} err={r.stderr!r}")
+    got = json.loads((t / "m.json").read_text())
+    want = {"address": "192.0.2.7", "port": 443, "sni": "feed.example.invalid", "alpn": ["http/1.1"], "sockopt": {"interface": "eth3"},
+            "ca": str(t / "ca.crt"), "path": "/a/b/manifest.json?x=1", "host": "feed.example.invalid"}
+    if got != want:
+        fail(f"Xray is not asked the same request: {got}")
+    pid = int((t / "xray.pid").read_text())
+    import time
+    for _ in range(20):
+        if not Path(f"/proc/{pid}").exists() or "Z" in Path(f"/proc/{pid}/stat").read_text().split(")")[-1][:3]:
+            break
+        time.sleep(0.1)
+    else:
+        os.kill(pid, 9)
+        fail("the short-lived Xray is left running")
+    if list(t.glob("vward-fetch.*")):
+        fail("Xray's configuration is left behind")
+    # A host that is not a plain name never reaches the configuration.
+    r = subprocess.run(["sh", "-c", f'. "{LIB}"; vward_fetch -o {t}/x \'https://a"b.example/\''], env=env, capture_output=True, timeout=30)
+    if r.returncode != 3:
+        fail(f"a host with quotes: rc={r.returncode}")
+
 print("FETCH_FALLBACK=PASS")

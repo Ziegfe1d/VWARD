@@ -1681,12 +1681,14 @@ if [ "$ACTION" = "diagnostics" ]; then
         case "$CURL_RC" in
             0) CURL_STATUS=PASS CURL_DETAIL="HTTPS работает: проверки сайтов, обновления, подписки" ;;
             126|127|13[0-9])
-                # Noted for vward_fetch and housekeeping (it installs uclient-fetch).
+                # Noted for vward_fetch: it goes straight to its fallback.
                 [ "$CURL_RC" -lt 128 ] || : > /tmp/vward-curl-tls.broken 2>/dev/null
                 if command -v uclient-fetch >/dev/null 2>&1; then
-                    CURL_STATUS=WARN CURL_DETAIL="curl падает на HTTPS (код $CURL_RC): сломан OpenSSL из Entware. Загрузки идут через uclient-fetch (mbedTLS)"
+                    CURL_STATUS=WARN CURL_DETAIL="curl падает на HTTPS (код $CURL_RC): сломан OpenSSL из Entware. Загрузки идут через uclient-fetch"
+                elif [ -x /opt/share/vward/vless-engine/xray ]; then
+                    CURL_STATUS=WARN CURL_DETAIL="curl падает на HTTPS (код $CURL_RC): сломан OpenSSL из Entware. Загрузки идут через TLS модуля VLESS (Xray)"
                 else
-                    CURL_DETAIL="curl падает на HTTPS (код $CURL_RC): сломан OpenSSL из Entware. uclient-fetch не установлен: обслуживание поставит его в течение часа"
+                    CURL_DETAIL="curl падает на HTTPS (код $CURL_RC): сломан OpenSSL из Entware. Обновления и подписки не скачиваются"
                 fi ;;
             *) CURL_STATUS=WARN CURL_DETAIL="HTTPS не ответил (код $CURL_RC)" ;;
         esac
