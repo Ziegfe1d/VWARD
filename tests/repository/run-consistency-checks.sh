@@ -92,6 +92,7 @@ python3 tests/repository/check-agents.py || fail "Agents: the components agent w
 python3 tests/repository/check-policy-smartdns.py || fail "Smart DNS wins over IP categories"
 python3 tests/repository/check-boot-env.py || fail "Entware programs do not take the firmware's library path"
 python3 tests/repository/check-fetch-fallback.py || fail "downloads do not survive a curl that crashes on HTTPS"
+python3 tests/repository/check-program-repair.py || fail "a crashing Entware program is reinstalled"
 python3 tests/repository/check-update-quiet.py || fail "Nothing restarts VWARD during an update"
 python3 tests/repository/check-tunnel-probe.py || fail "A working tunnel is not called dead"
 python3 tests/repository/check-resource-yield.py || fail "VWARD gives way to the router"

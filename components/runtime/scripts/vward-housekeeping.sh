@@ -386,6 +386,45 @@ if [ -x "$BACKUP_HELPER" ]; then
     fi
 fi
 
+# Entware programs VWARD runs all the time: one that crashes (a signal) twice on a plain local
+# task gets its package reinstalled - a damaged copy (Viva 2026-10-11: curl crashed 10 times of
+# 10 on a plain HTTP request to the router while its file on the USB stick was sound; the
+# reinstall cured it, openssl too). At most once in 6 hours a program; one log line each.
+REPAIR_DIR=${VWARD_REPAIR_DIR:-$R/opt/var/lib/vward/repair}
+OPKG=${VWARD_OPKG_BIN:-opkg}
+repair_if_crashing()
+{
+    rp_name=$1 rp_pkgs=$2
+    shift 2
+    [ -x "$1" ] || return 0
+    rp_try=0
+    while [ "$rp_try" -lt 2 ]; do
+        "$@" </dev/null >/dev/null 2>&1
+        rp_rc=$?
+        [ "$rp_rc" -ge 128 ] || return 0
+        rp_try=$((rp_try + 1))
+    done
+    rp_now=$(date +%s) rp_last=0
+    [ ! -r "$REPAIR_DIR/$rp_name" ] || read -r rp_last < "$REPAIR_DIR/$rp_name" || :
+    case "$rp_last" in ''|*[!0-9]*) rp_last=0 ;; esac
+    if [ $((rp_now - rp_last)) -lt 21600 ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=$rp_name|crash=$rp_rc|next_try_later" >> "$HOUSE_LOG"
+        return 0
+    fi
+    mkdir -p "$REPAIR_DIR" && echo "$rp_now" > "$REPAIR_DIR/$rp_name"
+    # shellcheck disable=SC2086
+    "$OPKG" install --force-reinstall $rp_pkgs </dev/null >/dev/null 2>&1
+    rp_opkg=$?
+    "$@" </dev/null >/dev/null 2>&1
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=$rp_name|crash=$rp_rc|reinstalled=$(echo $rp_pkgs | tr ' ' ',')|opkg=$rp_opkg|after=$?" >> "$HOUSE_LOG"
+}
+REPAIR_CURL=${VWARD_REPAIR_CURL:-/opt/bin/curl}
+REPAIR_JQ=${VWARD_REPAIR_JQ:-/opt/bin/jq}
+REPAIR_OPENSSL=${VWARD_REPAIR_OPENSSL:-/opt/bin/openssl}
+repair_if_crashing curl curl "$REPAIR_CURL" -s -o /dev/null --noproxy '*' --connect-timeout 3 --max-time 5 http://127.0.0.1:79/rci/show/version
+repair_if_crashing jq jq "$REPAIR_JQ" -n 1
+repair_if_crashing openssl "libopenssl openssl-util" "$REPAIR_OPENSSL" version
+
 # VWARD switched off as a whole («Отключить VWARD»): logs, copies and VWARD's own updates go
 # on (a fix may arrive), nothing else VWARD does starts.
 if ! vward_off; then
