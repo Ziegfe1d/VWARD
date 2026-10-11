@@ -1738,6 +1738,19 @@ if [ "$ACTION" = "diagnostics" ]; then
     [ -r /opt/etc/vward/update.conf ] && CONFIG_STATUS=PASS
     CGI_STATUS=PASS
 
+    # DNS chain, asked for real: one query to AdGuard Home on its port and one to the router
+    # (port 53, what the devices ask). Started now, read after the slow Keenetic requests below.
+    DQ_DIR="$(umask 077; mktemp -d /tmp/vward-console-dnsq.XXXXXX 2>/dev/null)"
+    DQ_HOST="${VWARD_DNS_PROBE_HOST:-example.com}" DQ_LAN="${VWARD_LAN_ADDRESS:-127.0.0.1}" DQ_PIDS=""
+    DQ_AGH_PORT="$(awk '/^[^ #]/ {d = ($1 == "dns:")} d && $1 == "port:" {print $2; exit}' "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" 2>/dev/null)"
+    case "$DQ_AGH_PORT" in ''|*[!0-9]*|53) DQ_AGH_PORT="" ;; esac
+    if [ -n "$DQ_DIR" ]; then
+        "${VWARD_NSLOOKUP:-nslookup}" "$DQ_HOST" "$DQ_LAN" > "$DQ_DIR/router" 2>&1 </dev/null & DQ_PIDS="$!"
+        [ -z "$DQ_AGH_PORT" ] || { "${VWARD_NSLOOKUP:-nslookup}" "$DQ_HOST" "$DQ_LAN:$DQ_AGH_PORT" > "$DQ_DIR/agh" 2>&1 </dev/null & DQ_PIDS="$DQ_PIDS $!"; }
+    fi
+    # dq_answered NAME: that query got an address (BusyBox and glibc nslookup alike).
+    dq_answered() { [ -n "$DQ_DIR" ] && awk '/^Name:/ {f = 1} f && /^Address/ {n++} END {exit !n}' "$DQ_DIR/$1" 2>/dev/null; }
+
     # Keenetic answers slowly while busy: 3 s gave an empty answer, read as «туннелей нет» and
     # no internet (a Viva, 2026-10-11). An empty answer is said as such.
     WAN_JSON="$(fetch_json "$VWARD_RCI_BASE/show/internet/status" 8)"
@@ -1843,6 +1856,31 @@ if [ "$ACTION" = "diagnostics" ]; then
         fi
     else
         DNS_DETAIL="AdGuard Home не найден: DNS обслуживает Keenetic"
+    fi
+    # The queries: at most 3 s more (most of the time they finished during the Keenetic requests).
+    DQ_I=0
+    for DQ_P in $DQ_PIDS; do
+        while kill -0 "$DQ_P" 2>/dev/null && [ "$DQ_I" -lt 3 ]; do sleep 1; DQ_I=$((DQ_I + 1)); done
+        kill "$DQ_P" 2>/dev/null
+    done
+    if [ -n "$DQ_DIR" ]; then
+        DQ_RT=0; dq_answered router && DQ_RT=1
+        DQ_AG=-; [ -z "$DQ_AGH_PORT" ] || { DQ_AG=0; dq_answered agh && DQ_AG=1; }
+        DQ_WAN=""; [ "$WAN_STATUS" != WARN ] || DQ_WAN=" Интернет у провайдера сейчас не работает."
+        case "$DNS_STATUS:$DQ_RT:$DQ_AG:${KN_TO_AGH:+in}" in
+            FAIL:*) ;;
+            *:1:1:in) DNS_DETAIL="$DNS_DETAIL; запрос $DQ_HOST: ответили роутер и AdGuard Home" ;;
+            *:0:1:in) DNS_STATUS=FAIL DNS_DETAIL="Роутер не ответил на DNS-запрос ($DQ_HOST), а AdGuard Home ответил: Keenetic не получает от него ответы. $DNS_DETAIL" ;;
+            *:1:0:in) DNS_STATUS=FAIL DNS_DETAIL="AdGuard Home в цепочке, но не ответил на запрос $DQ_HOST за 3 с; роутер ответил (из кэша или через другой DNS). VWARD выведет AdGuard Home из цепочки, если он молчит 15 с.$DQ_WAN" ;;
+            *:0:0:in) DNS_STATUS=FAIL DNS_DETAIL="Ни роутер, ни AdGuard Home не ответили на запрос $DQ_HOST: сайты по именам не открываются.$DQ_WAN" ;;
+            *:1:1) DNS_DETAIL="$DNS_DETAIL; роутер ответил на запрос $DQ_HOST, AdGuard Home тоже отвечает" ;;
+            *:1:0) DNS_DETAIL="$DNS_DETAIL; роутер ответил на запрос $DQ_HOST, AdGuard Home молчит" ;;
+            *:1:*) DNS_DETAIL="$DNS_DETAIL; роутер ответил на запрос $DQ_HOST" ;;
+            *:0:*) DNS_STATUS=FAIL DNS_DETAIL="Роутер не ответил на DNS-запрос ($DQ_HOST): сайты по именам не открываются.$DQ_WAN $DNS_DETAIL" ;;
+        esac
+        rm -rf "${DQ_DIR:?}"
+    else
+        DNS_DETAIL="$DNS_DETAIL; проверочный запрос не сделан (нет места в /tmp)"
     fi
 
     # Files as installed: every file the updater recorded, one sha256sum pass.

@@ -29,7 +29,11 @@ with tempfile.TemporaryDirectory() as tmp:
     tools = tmp / "tools"; tools.mkdir()
     running = tmp / "running"
     ndmc = tools / "ndmc"; ndmc.write_text(f'#!/bin/sh\n[ "$2" = "show running-config" ] && cat "{running}"\n'); ndmc.chmod(0o755)
-    (tools / "nslookup").write_text("#!/bin/sh\nexit 1\n"); (tools / "nslookup").chmod(0o755)
+    # nslookup HOST SERVER: answers, unless SERVER is listed in the «silent» file (a DNS that does not answer).
+    silent = tmp / "silent"; silent.write_text("")
+    (tools / "nslookup").write_text(f'#!/bin/sh\ngrep -qx "$2" "{silent}" && {{ echo ";; connection timed out"; exit 1; }}\n'
+                                    'printf "Server: %s\\n\\nName: %s\\nAddress: 192.0.2.10\\n" "$2" "$1"\n')
+    (tools / "nslookup").chmod(0o755)
     yaml = tmp / "AdGuardHome.yaml"
     root = tmp / "root"
     files = {"/opt/bin/vward-a.sh": b"a\n", "/opt/bin/vward-b.sh": b"b\n"}
@@ -40,7 +44,7 @@ with tempfile.TemporaryDirectory() as tmp:
     comp.parent.mkdir(parents=True)
     comp.write_text(json.dumps({"components": {"x": {"files": {f: hashlib.sha256(b).hexdigest() for f, b in files.items()}}}}))
     env = os.environ | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=diagnostics", "JQ": shutil.which("jq"), "CURL": "/bin/false",
-                        "PATH": f"{tools}:{os.environ['PATH']}", "VWARD_NDMC": str(ndmc),
+                        "PATH": f"{tools}:{os.environ['PATH']}", "VWARD_NDMC": str(ndmc), "VWARD_NSLOOKUP": str(tools / "nslookup"),
                         "VWARD_PROFILE_LIB": str(ROOT / "components/runtime/lib/vward-device-profile.sh"),
                         "VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_ROOT_PREFIX": str(root), "VWARD_LAN_ADDRESS": "192.168.1.1"}
 
@@ -59,6 +63,23 @@ with tempfile.TemporaryDirectory() as tmp:
         fail(f"Smart DNS kept in AdGuard Home must be checked: {d['smartdns']}")
     if d["files"]["status"] != "PASS" or "Все 2 файлов" not in d["files"]["detail"]:
         fail(f"files as installed: {d['files']}")
+
+    if "ответили роутер и AdGuard Home" not in d["dns-chain"]["detail"]:
+        fail(f"the chain is asked for real, not only read from the settings: {d['dns-chain']}")
+    # A chain right in the settings, but AdGuard Home silent: FAIL, not «Норма».
+    silent.write_text("192.168.1.1:65053\n")
+    d = diag("ip name-server 192.168.1.1:65053\n!\n", ["9.9.9.10"], 65053)
+    if d["dns-chain"]["status"] != "FAIL" or "не ответил на запрос" not in d["dns-chain"]["detail"]:
+        fail(f"AdGuard Home in the chain but silent: {d['dns-chain']}")
+    silent.write_text("192.168.1.1\n")
+    d = diag("ip name-server 192.168.1.1:65053\n!\n", ["9.9.9.10"], 65053)
+    if d["dns-chain"]["status"] != "FAIL" or not d["dns-chain"]["detail"].startswith("Роутер не ответил"):
+        fail(f"the router silent, AdGuard Home answering: {d['dns-chain']}")
+    silent.write_text("192.168.1.1\n192.168.1.1:65053\n")
+    d = diag("ip name-server 192.168.1.1:65053\n!\n", ["9.9.9.10"], 65053)
+    if d["dns-chain"]["status"] != "FAIL" or "Ни роутер, ни AdGuard Home" not in d["dns-chain"]["detail"]:
+        fail(f"nobody answers: {d['dns-chain']}")
+    silent.write_text("")
 
     d = diag("ip name-server 192.168.1.1:65053\n!\n", ["192.168.1.1", AET], 65053)
     if d["dns-chain"]["status"] != "FAIL" or "петля" not in d["dns-chain"]["detail"]:
