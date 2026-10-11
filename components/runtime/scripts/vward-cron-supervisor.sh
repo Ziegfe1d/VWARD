@@ -89,6 +89,8 @@ WATCH_EVERY=6
 PANEL_DOWN=0
 PANEL_WAIT=1
 PANEL_SKIP=0
+SSH_INIT=${VWARD_SSH_INIT:-/opt/etc/init.d/S51dropbear}
+SSH_DOWN=0 SSH_WAIT=1 SSH_SKIP=0
 
 # The supervisor is background work: the lowest CPU priority. What it starts for the owner
 # (cron, the Panel, AdGuard Home) gets the normal priority back.
@@ -389,8 +391,49 @@ protect_ssh()
     done
 }
 
+# Entware's SSH server runs whenever its start script is there (and not ENABLED=no). After a
+# reboot (a Viva, 2026-10-12) the start script said «dropbear already running» with no server:
+# the pid file left from before the reboot named a number another program had now, and nobody
+# could log in until the next reboot. Not running: that pid file goes, the server starts; a
+# start that fails is tried again after 1, 2, 4, 8, then every 15 minutes.
+ssh_running()
+{
+    for SR in $(pidof dropbear sshd 2>/dev/null); do
+        case "$(readlink "$PROC/$SR/exe" 2>/dev/null)" in /opt/*) return 0 ;; esac
+    done
+    return 1
+}
+
+keep_ssh()
+{
+    [ -x "$SSH_INIT" ] && ! grep -q '^ENABLED=no' "$SSH_INIT" 2>/dev/null || return 0
+    if ssh_running; then
+        SSH_DOWN=0 SSH_WAIT=1 SSH_SKIP=0
+        return 0
+    fi
+    if [ "$SSH_SKIP" -gt 0 ]; then
+        SSH_SKIP=$((SSH_SKIP - 1))
+        return 0
+    fi
+    SSH_PF=$(sed -n "s/^PIDFILE=[\"']*\([^\"' ]*\).*/\1/p" "$SSH_INIT" | head -n 1)
+    rm -f "${SSH_PF:-/opt/var/run/dropbear.pid}"
+    $UNNICE "$SSH_INIT" start </dev/null >/dev/null 2>&1
+    sleep 1
+    if ssh_running; then
+        log_event "SSH_STARTED|the SSH server was not running"
+        SSH_DOWN=0 SSH_WAIT=1
+    else
+        [ "$SSH_DOWN" = 1 ] || log_event "SSH_START_FAILED|$SSH_INIT"
+        SSH_DOWN=1
+        SSH_SKIP=$SSH_WAIT
+        SSH_WAIT=$((SSH_WAIT * 2))
+        [ "$SSH_WAIT" -le 15 ] || SSH_WAIT=15
+    fi
+}
+
 watch_services()
 {
+    keep_ssh
     protect_ssh
     P=
     [ ! -r "$CONSOLE_PIDFILE" ] || read -r P < "$CONSOLE_PIDFILE" || :
