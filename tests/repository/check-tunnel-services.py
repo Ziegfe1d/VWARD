@@ -103,6 +103,21 @@ echo result=changed
     st = services()
     if (tmp / "helper.log").read_text() != helper_log or st["tube.example"][5] != "kept" or st["play.example"][5] != "category":
         fail("the second check moves nothing")
+    # A list the tunnel guard holds (moved off a dead tunnel, to be returned): its decision
+    # alone - the check does not move it, however it opens (no tug of war, 2026-10-11).
+    gdir = tmp / "guard"; gdir.mkdir()
+    env["VWARD_TUNNEL_GUARD_DIR"] = str(gdir)
+    (gdir / "lists-fallback").write_text(f"domain-list1\tWireguard1\tWireguard0\t{now}\n")
+    (tmp / "routes").write_text((tmp / "routes").read_text().replace("domain-list1 Wireguard2", "domain-list1 Wireguard0"))
+    helper_log = (tmp / "helper.log").read_text()
+    st = services()
+    if route("domain-list1") != "Wireguard0" or st["tube.example"][5] != "guard" or "domain-list1" in (tmp / "helper.log").read_text()[len(helper_log):]:
+        fail(f"a list the tunnel guard holds is not moved by the service check: {st.get('tube.example')}")
+    (gdir / "lists-fallback").unlink()
+    st = services()
+    if route("domain-list1") != "Wireguard2" or st["tube.example"][5] != "moved":
+        fail("once the guard lets go, the service check decides again")
+    del env["VWARD_TUNNEL_GUARD_DIR"]
     # A pinned category on a tunnel that does not answer: checked like the others, and left
     # where it is (the tunnel guard moves lists off a dead tunnel, and back).
     (qdir / "samples.tsv").write_text("".join(f"{now - 60 * i}\tWireguard{n}\tnwg{n}\t{100 if n == 1 else 0}\t40\n" for i in range(3, 0, -1) for n in range(3)))

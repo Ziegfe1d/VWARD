@@ -203,6 +203,33 @@ esac
         fail("one silent minute must not restart Xray")
     if engine("supervise") != ["result=changed"] or (run_ / "v0.pid").read_text() == pid1:
         fail("no page through a switched-on adapter: Xray must start afresh")
+    # One decision, one agent: VWARD's tunnel for routes under the tunnel guard, or no internet
+    # at the provider - the module does not restart Xray on its own, however long it is silent.
+    prof = tmp / "profile.sh"
+    def profile(tunnel: str) -> None:
+        prof.write_text(f'vward_profile_load() {{ VWARD_TUNNEL_INTERFACE={tunnel}; VWARD_WAN_DEVICE=eth3; }}\n'
+                        "vward_valid_ifname() { case \"$1\" in ''|*[!A-Za-z0-9_.:-]*) return 1 ;; esac; }\n")
+    env["VWARD_PROFILE_LIB"] = str(prof); env["VWARD_ETC"] = str(tmp / "vetc"); (tmp / "vetc").mkdir(exist_ok=True)
+    (tmp / "up.eth3").write_text("")
+    profile("OpkgTun1")
+    pidg = (run_ / "v0.pid").read_text()
+    for _ in range(3):
+        if engine("supervise") != ["result=unchanged"] or (run_ / "v0.pid").read_text() != pidg or (run_ / "v0.miss").exists():
+            fail("VWARD's tunnel for routes is the tunnel guard's: the module must not restart it")
+    # The guard switched off (the owner): the module decides again.
+    (tmp / "vetc/tunnel-guard.disabled").write_text("")
+    engine("supervise")
+    if engine("supervise") != ["result=changed"] or (run_ / "v0.pid").read_text() == pidg:
+        fail("with the tunnel guard off the module restarts its silent tunnel itself")
+    (tmp / "vetc/tunnel-guard.disabled").unlink()
+    # Another tunnel, but the provider is down: nothing to restart.
+    profile("OpkgTun9")
+    (tmp / "up.eth3").unlink()
+    pidg = (run_ / "v0.pid").read_text()
+    for _ in range(3):
+        if engine("supervise") != ["result=unchanged"] or (run_ / "v0.pid").read_text() != pidg:
+            fail("no internet at the provider: the module must not restart Xray")
+    del env["VWARD_PROFILE_LIB"], env["VWARD_ETC"]
     # Just restarted (the guard, the Panel): the minute check leaves it alone for 2 minutes.
     pid2 = (run_ / "v0.pid").read_text()
     cool = env | {"VWARD_ENGINE_COOLDOWN": "120"}

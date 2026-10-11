@@ -457,6 +457,11 @@ op_supervise() {
         if recent "$n"; then rm -f "$ENGINE_RUN/v$n.down" "$ENGINE_RUN/v$n.miss"; continue; fi
         if [ ! -e "$ENGINE_RUN/v$n.down" ]; then
             connected "$name" </dev/null && { rm -f "$ENGINE_RUN/v$n.miss" "$ENGINE_RUN/v$n.fails"; continue; }
+            # Not this module's decision (one decision, one agent): VWARD's tunnel for routes
+            # under the tunnel guard (it restarts, changes the server, takes the reserve
+            # channel), or no internet at the provider (a restart or another server would not
+            # help and could leave a working server).
+            if guard_owns "$name" || ! wan_alive; then rm -f "$ENGINE_RUN/v$n.miss" "$ENGINE_RUN/v$n.fails"; continue; fi
             # One silent minute may be the server or the line: Xray starts afresh on the second.
             [ -e "$ENGINE_RUN/v$n.miss" ] || { : > "$ENGINE_RUN/v$n.miss"; continue; }
         fi
@@ -475,6 +480,34 @@ op_supervise() {
         start_one "$n" && started=$((started + 1)) && log "restarted $name on its adapter"
     done < "$TUNNELS"
     [ "$started" = 0 ] && echo "result=unchanged" || echo "result=changed"
+}
+
+# profile: the device profile, once a run and only when a tunnel is silent (VWARD's tunnel for
+# routes, the provider's device). Without it the module decides as before.
+profile() {
+    [ -z "${PROFILED:-}" ] || return 0
+    PROFILED=1
+    pl=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+    { [ -r "$pl" ] && . "$pl" && vward_profile_load; } >/dev/null 2>&1 || :
+}
+
+# guard_owns NAME: NAME is VWARD's tunnel for routes and the tunnel guard (network agent) is on.
+guard_owns() {
+    profile
+    [ -n "${VWARD_TUNNEL_INTERFACE:-}" ] && [ "$1" = "$VWARD_TUNNEL_INTERFACE" ] || return 1
+    go_st=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
+    [ ! -e "$go_st/vward.off" ] && [ ! -e "$go_st/tunnel-guard.disabled" ] &&
+        [ ! -e "${VWARD_ETC:-/opt/etc/vward}/tunnel-guard.disabled" ]
+}
+
+# wan_alive: a page opens through the provider's device (unknown device: yes, as before).
+wan_alive() {
+    profile
+    vward_valid_ifname "${VWARD_WAN_DEVICE:-}" 2>/dev/null || return 0
+    for wu in "$CHECK_URL" http://1.0.0.1/cdn-cgi/trace; do
+        "$CURL" -4 -s -o /dev/null --noproxy '*' --interface "$VWARD_WAN_DEVICE" --connect-timeout 5 --max-time 8 "$wu" </dev/null 2>/dev/null && return 0
+    done
+    return 1
 }
 
 # kick NAME: a restart unless the program has just been (re)started (the guard's own

@@ -2318,7 +2318,8 @@ function svcProbePanel(id) {
   const p = svcProbe(id), x = ((S.services && S.services.services) || []).find(v => v.id === id), pin = x && svcCatTunnel(x.category);
   const to = tunLabel(p ? p.tunnel : '');
   const act = { kept: ['оставлен', 'открывается через свой туннель «' + to + '»'], moved: ['переведён', 'через свой туннель не открывался, теперь через «' + to + '»'],
-    none: ['не открывается', 'ни через один туннель; остаётся на «' + to + '»'], failed: ['не переведён', 'Keenetic не принял перевод'], category: ['по категории', 'через туннель категории «' + to + '»'] };
+    none: ['не открывается', 'ни через один туннель; остаётся на «' + to + '»'], failed: ['не переведён', 'Keenetic не принял перевод'], category: ['по категории', 'через туннель категории «' + to + '»'],
+    guard: ['резервный канал', 'агент VPN держит список на «' + to + '», пока основной туннель не ответит'] };
   return panel('Проверка через туннели', pin ? empty('Категория закреплена за «' + tunLabel(pin) + '»: сервис идёт через него без проверки.') : !p ? empty('Ещё не проверялся: проверка раз в 30 минут.') :
     kv((p.results || []).map(r => [tunLabel(r.via), SVC_VERDICT[r.verdict] || r.verdict, r.verdict === 'open' ? 'ok' : 'warn', null, '', r.verdict === 'open' && r.ms != null ? r.ms + ' мс' : ''])
       .concat([['Итог', (act[p.action] || [p.action])[0], p.action === 'none' || p.action === 'failed' ? 'warn' : '', null, '', ((act[p.action] || [])[1] || '') + (p.at ? '; проверен ' + fmtTime(p.at * 1000) : '')]])),

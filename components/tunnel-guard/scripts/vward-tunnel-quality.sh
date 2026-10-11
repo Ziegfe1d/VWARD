@@ -43,6 +43,7 @@ SERVICES_EVERY=1800
 HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
 RESOLVE=${VWARD_RESOLVE4_BIN:-/opt/bin/vward-route-resolve4.sh}
 NDMC=${VWARD_NDMC:-ndmc}
+GUARD_LISTS="${VWARD_TUNNEL_GUARD_DIR:-/opt/var/lib/vward/tunnel-guard}/lists-fallback"
 JQ=${JQ:-jq}
 
 summary() {
@@ -135,6 +136,12 @@ services() {
         case "$id$g" in *[!A-Za-z0-9.@_-]*) continue ;; esac
         cur=$(awk -F '\t' -v g="$g" '$1 == g {print $2; exit}' "$L/routes")
         [ -n "$cur" ] || continue
+        # The tunnel guard moved this list off a dead tunnel and returns it: until then the list
+        # is its decision alone (no tug of war between the two).
+        if awk -F '\t' -v g="$g" '$1 == g {f = 1} END {exit f ? 0 : 1}' "$GUARD_LISTS" 2>/dev/null; then
+            printf '%s\t%s\t%s\t\t%s\tguard\n' "$id" "$g" "$cur" "$now" >> "$L/state"
+            continue
+        fi
         IFS="$(printf '\t')" read -r _ scat probe <<EOF_ROW
 $(awk -F '\t' -v i="$id" '$1 == i {print; exit}' "$L/catalog")
 EOF_ROW
