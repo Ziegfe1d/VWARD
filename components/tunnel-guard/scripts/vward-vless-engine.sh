@@ -596,8 +596,11 @@ op_list() {
         h=$(awk -F '\t' '$1 == "host" {print $2; exit}' "$TMPD/kv.$i")
         pt=$(awk -F '\t' '$1 == "port" {print $2; exit}' "$TMPD/kv.$i")
         case "$h:$pt" in *[!A-Za-z0-9.:_-]*|:*|*:) continue ;; esac
-        # Ten at a time: a TCP connection each, at most 2 s.
-        ( "$CURL" -s -o /dev/null --connect-timeout 2 --max-time 2 -w '%{time_connect}' "telnet://$h:$pt" </dev/null > "$TMPD/ms.$i" 2>/dev/null ) &
+        # Ten at a time: a TCP connection each, at most 2 s. A plain HTTP request: Entware's curl
+        # has no telnet:// (every server was «not answering», Viva 2026-10-11); the connection
+        # time is written also when the server does not speak HTTP (0 = no connection).
+        case "$h" in *:*) hp="[$h]" ;; *) hp=$h ;; esac
+        ( "$CURL" -s -o /dev/null --noproxy '*' --connect-timeout 2 --max-time 2 -w '%{time_connect}' "http://$hp:$pt/" </dev/null > "$TMPD/ms.$i" 2>/dev/null ) &
         [ $((i % 10)) != 0 ] || wait
     done < "$TMPD/links"
     wait

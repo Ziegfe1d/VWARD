@@ -44,7 +44,8 @@ echo "$*" >> "{tmp}/curl.log"
 out=; dev=; url=
 while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; --interface) dev=$2; shift ;; http*|telnet://*) url=$1 ;; esac; shift; done
 case "$url" in
-    telnet://*) h=${{url#telnet://}}; h=${{h%:*}}; [ -e "{tmp}/reach.$h" ] && printf 0.042; exit 28 ;;
+    telnet://*) exit 1 ;;
+    http://*:[0-9]*/) h=${{url#http://}}; h=${{h%:*}}; if [ -e "{tmp}/reach.$h" ]; then printf 0.042; exit 52; fi; printf 0.000000; exit 28 ;;
     https://sub.example/*) [ -f "{tmp}/sub" ] || exit 22; cp "{tmp}/sub" "$out" ;;
     https://xray.example/*) cp "{tmp}/x.zip" "$out" ;;
     *) [ -n "$dev" ] && [ -e "{tmp}/up.$dev" ] && exit 0
