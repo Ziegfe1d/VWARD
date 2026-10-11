@@ -87,6 +87,97 @@ vward_rci_get()
     return 1
 }
 
+# vward_fetch CURL-ARGUMENTS: a download (HTTPS) that does not need Entware's OpenSSL. curl
+# first; when curl crashes (126 and up: Entware's OpenSSL 3.5.5 dies on the TLS handshake on
+# some MIPS routers, «Illegal instruction», a Viva 2026-10-11), the same request goes through
+# uclient-fetch with mbedTLS, and curl is not asked again for an hour. Of curl's options:
+# -o, -w (%{http_code}, %{time_total}, %{redirect_url}), -D (left empty), -f, --max-filesize,
+# --retry, -m, --connect-timeout, -A, -4, -k; TLS versions, headers, --interface and the
+# quiet/redirect options are uclient-fetch's defaults or skipped. --resolve and a request
+# body: 2, curl's «not supported» (the caller says it could not check).
+vward_fetch()
+{
+    _vf_curl=${VWARD_CURL_BIN:-$(vward_tool curl)} _vf_rc=127
+    _vf_flag=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
+    if [ -n "$_vf_curl" ] && [ -z "$(find "$_vf_flag" -mmin -60 2>/dev/null)" ]; then
+        "$_vf_curl" "$@"
+        _vf_rc=$?
+        [ "$_vf_rc" -ge 126 ] || return "$_vf_rc"
+        # Remembered only when it crashed (a signal), not when it is missing.
+        [ "$_vf_rc" -lt 128 ] || : > "$_vf_flag" 2>/dev/null
+    fi
+    _vf_uc=${VWARD_UCLIENT_BIN:-$(vward_tool uclient-fetch)}
+    [ -n "$_vf_uc" ] || return "$_vf_rc"
+    _vf_out=- _vf_wo= _vf_hdr= _vf_fail=0 _vf_max= _vf_retry=0 _vf_t= _vf_ct= _vf_ua= _vf_4=0 _vf_k=0 _vf_url=
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -o|--output) _vf_out=$2; shift ;;
+            -w|--write-out) _vf_wo=$2; shift ;;
+            -D|--dump-header) _vf_hdr=$2; shift ;;
+            --max-filesize) _vf_max=$2; shift ;;
+            --retry) _vf_retry=$2; shift ;;
+            -m|--max-time) _vf_t=$2; shift ;;
+            --connect-timeout) _vf_ct=$2; shift ;;
+            -A|--user-agent) _vf_ua=$2; shift ;;
+            -H|--header|--interface|--proto|--noproxy|--cacert|--retry-delay|--retry-max-time|--max-redirs|-e|--referer) shift ;;
+            -f|--fail) _vf_fail=1 ;;
+            -4|--ipv4) _vf_4=1 ;;
+            -k|--insecure) _vf_k=1 ;;
+            --silent|--show-error|--location|--tlsv1.2|--tlsv1.3|--retry-all-errors|--compressed|--globoff) ;;
+            -[fsSL4k]*)
+                case "$1" in -*[!fsSL4k]*) return 2 ;; esac
+                case "$1" in *f*) _vf_fail=1 ;; esac
+                case "$1" in *4*) _vf_4=1 ;; esac
+                case "$1" in *k*) _vf_k=1 ;; esac ;;
+            http://*|https://*) _vf_url=$1 ;;
+            *) return 2 ;;
+        esac
+        shift
+    done
+    [ -n "$_vf_url" ] || return 3
+    case "$_vf_retry" in ''|*[!0-9]*) _vf_retry=0 ;; esac
+    set -- -T "${_vf_t:-${_vf_ct:-30}}" -O "$_vf_out"
+    [ "$_vf_4" = 0 ] || set -- "$@" -4
+    [ -z "$_vf_ua" ] || set -- "$@" -U "$_vf_ua"
+    [ "$_vf_k" = 0 ] || set -- "$@" --no-check-certificate
+    for _vf_ca in ${VWARD_CA_BUNDLE:-/opt/etc/ssl/certs/ca-certificates.crt /opt/etc/ssl/cert.pem}; do
+        [ -r "$_vf_ca" ] && { set -- "$@" --ca-certificate "$_vf_ca"; break; }
+    done
+    set -- "$@" "$_vf_url"
+    _vf_err="${TMPDIR:-/tmp}/vward-fetch.$$.err" _vf_try=0
+    while :; do
+        # Not quiet: the server's status comes only in its message («HTTP error 404»).
+        "$_vf_uc" "$@" 2>"$_vf_err"
+        _vf_rc=$?
+        _vf_code=$(sed -n 's/^HTTP error \([0-9][0-9][0-9]\).*/\1/p' "$_vf_err" 2>/dev/null | tail -n 1)
+        [ "$_vf_rc" != 0 ] || _vf_code=200
+        [ -z "$_vf_code" ] || break
+        _vf_try=$((_vf_try + 1))
+        [ "$_vf_try" -le "$_vf_retry" ] || break
+        sleep 2
+    done
+    rm -f "$_vf_err"
+    [ -z "$_vf_hdr" ] || : > "$_vf_hdr"
+    _vf_code=${_vf_code:-000}
+    if [ "$_vf_code" = 200 ] && [ -n "$_vf_max" ] && [ "$_vf_out" != - ] && [ "$(wc -c < "$_vf_out")" -gt "$_vf_max" ]; then
+        rm -f "$_vf_out"; return 63
+    fi
+    [ -z "$_vf_wo" ] || printf '%b' "$(printf '%s' "$_vf_wo" | sed "s/%{http_code}/$_vf_code/g; s/%{time_total}/0/g; s/%{[a-z_]*}//g")"
+    case "$_vf_code" in
+        000) [ "$_vf_rc" = 5 ] && return 60; return 7 ;;
+        2??) return 0 ;;
+    esac
+    [ "$_vf_fail" = 0 ] || return 22
+    return 0
+}
+
+# vward_https_broken: curl crashed on HTTPS within the hour (vward_fetch noted it). Site checks
+# through curl say nothing then: «could not check», never «blocked».
+vward_https_broken()
+{
+    [ -n "$(find "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" -mmin -60 2>/dev/null)" ]
+}
+
 # Keenetic's running configuration, one line per line.  RCI first: unlike ndmc
 # it leaves no session lines in the router's log (checked on a real router).
 # ndmc when RCI does not answer.  Nothing is printed until the whole reply parsed.

@@ -50,6 +50,11 @@ with tempfile.TemporaryDirectory() as tmp:
     share, run, state = tmp / "share", tmp / "run", tmp / "state"
     (run / "awg-engine").mkdir(parents=True)
     (run / "awg-engine/t0.pid").write_text("1\n")
+    # A switched-off tunnel (t1) and a removed one (t2) left their pid files: not watched.
+    (run / "awg-engine/t1.pid").write_text("1\n"); (run / "awg-engine/t2.pid").write_text("1\n")
+    awg_etc = tmp / "awg-etc"; awg_etc.mkdir()
+    (awg_etc / "tunnels.tsv").write_text("0\tOpkgTun0\t0\tDE\n1\tOpkgTun1\t0\tFI\n")
+    (awg_etc / "t1.off").write_text("")
     (tmp / "profile.sh").write_text(
         f"vward_profile_load(){{ VWARD_WAN_DEVICE=eth3; VWARD_LAN_ADDRESS=192.168.1.1; VWARD_ADGUARD_CONFIG={tmp}/agh.yaml; }}\n"
         "vward_device_map(){ :; }\nvward_map_vpns(){ printf 'Wireguard0 nwg0\\nOpkgTun0 opkgtun0\\n'; }\n")
@@ -60,7 +65,8 @@ with tempfile.TemporaryDirectory() as tmp:
                         "VWARD_SENTINEL_PIDFILE": str(run / "sentinel.pid"), "VWARD_RUN_DIR": str(run),
                         "VWARD_SENTINEL_LOG": str(tmp / "sentinel.log"), "VWARD_CURL_BIN": str(bin_ / "curl"),
                         "VWARD_PROFILE_LIB": str(tmp / "profile.sh"), "VWARD_SENTINEL_ARCH": "mipsle",
-                        "VWARD_SENTINEL_HOURS": str(tmp / "hours.tsv"), "VWARD_SENTINEL_ACT": str(tmp / "act.sh")}
+                        "VWARD_SENTINEL_HOURS": str(tmp / "hours.tsv"), "VWARD_SENTINEL_ACT": str(tmp / "act.sh"),
+                        "VWARD_AWG_ETC": str(awg_etc), "VWARD_VLESS_ETC": str(tmp / "no-vless")}
 
     def sh(*args, e=None):
         r = subprocess.run(["sh", str(CTL), *args], env=e or env, text=True, capture_output=True, timeout=60)
@@ -90,6 +96,8 @@ with tempfile.TemporaryDirectory() as tmp:
                  "CHAIN=192.168.1.1:65053", "CHAIN_EVERY=5", "CHAIN_MISS=3"):
         if need not in conf:
             fail(f"configuration lacks {need!r}:\n{conf}")
+    if "awg-t1" in conf or "awg-t2" in conf:
+        fail(f"a switched-off or removed tunnel is watched (it was «started» every few minutes):\n{conf}")
     if sh("start") != "result=unchanged":
         fail("started once")
     time.sleep(0.5)
@@ -196,6 +204,11 @@ for engine in ("vward-awg-engine.sh", "vward-vless-engine.sh"):
     src = (ROOT / "components/tunnel-guard/scripts" / engine).read_text()
     if 'op_add "$2" "$3" "${4:-}"; sentinel_reload' not in src or 'op_remove "$2"; sentinel_reload' not in src:
         fail(f"{engine} tells the watcher its tunnels changed")
+    if 'op_disable "$2"; sentinel_reload' not in src or 'op_enable "$2"; sentinel_reload' not in src:
+        fail(f"{engine} tells the watcher a tunnel was switched off or on")
+sup = (ROOT / "components/runtime/scripts/vward-cron-supervisor.sh").read_text()
+if sup.count("supervise | grep -q '^result=changed$'") != 2:
+    fail("the components agent logs STARTED only when an engine started a tunnel")
 if '"$SENTINEL_CTL" install && "$SENTINEL_CTL" reload' not in (ROOT / "components/runtime/scripts/vward-housekeeping.sh").read_text():
     fail("housekeeping installs the watcher's program")
 print("SENTINEL_RUNTIME=PASS")

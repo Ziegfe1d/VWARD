@@ -209,8 +209,9 @@ start_of()
     case "$1" in
         route-engine) $UNNICE "$INITD/S91vward-route-engine" start ;;
         panel) $UNNICE "$CONSOLE_INIT" start ;;
-        awg-*) [ ! -x "$BIN_DIR/vward-awg-engine.sh" ] || "$BIN_DIR/vward-awg-engine.sh" supervise ;;
-        xray-*) [ ! -x "$BIN_DIR/vward-vless-engine.sh" ] || "$BIN_DIR/vward-vless-engine.sh" supervise ;;
+        # 0 only when the engine started something (a switched-off tunnel is left alone).
+        awg-*) [ -x "$BIN_DIR/vward-awg-engine.sh" ] && "$BIN_DIR/vward-awg-engine.sh" supervise | grep -q '^result=changed$' ;;
+        xray-*) [ -x "$BIN_DIR/vward-vless-engine.sh" ] && "$BIN_DIR/vward-vless-engine.sh" supervise | grep -q '^result=changed$' ;;
         *) return 1 ;;
     esac </dev/null >/dev/null 2>&1
 }

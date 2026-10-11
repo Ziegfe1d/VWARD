@@ -65,8 +65,11 @@ esac
 
 
 api = (ROOT / "web/cgi-bin/api.cgi").read_text()
-if 'CURL_STATUS="$(diag_status "$CURL" --version)"' not in api or "STARTUP DISABLED" not in api or 'id:"boot"' not in api:
+if '"$CURL" --version' not in api or "STARTUP DISABLED" not in api or 'id:"boot"' not in api:
     fail("the diagnostics do not show a curl that cannot start or Entware startup switched off")
+# curl --version runs even with a broken OpenSSL; only a real HTTPS request shows the crash.
+if "https://1.1.1.1/cdn-cgi/trace" not in api or "126|127|13[0-9])" not in api or "status:$curl,detail:$curl_detail" not in api:
+    fail("the diagnostics trust curl --version and miss curl crashing on HTTPS")
 # A curl that runs and hears an error from Keenetic is not replaced: wget is not even asked.
 with tempfile.TemporaryDirectory() as tmp:
     t = Path(tmp)

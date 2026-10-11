@@ -50,7 +50,12 @@ fetch()
 
     (
       ulimit -f "$LIMIT_BLOCKS" || exit 1
-      curl -4 -f -L \
+      # Through vward_fetch when the profile is here: curl crashes on HTTPS with Entware's
+      # OpenSSL 3.5.5 on some MIPS routers; uclient-fetch with mbedTLS downloads then.
+      command -v vward_fetch >/dev/null 2>&1 ||
+          { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+      G=curl; command -v vward_fetch >/dev/null 2>&1 && G=vward_fetch
+      $G -4 -f -L \
         --connect-timeout 10 \
         --max-time 90 \
         --max-filesize "$MAX_SOURCE_ARCHIVE_BYTES" \

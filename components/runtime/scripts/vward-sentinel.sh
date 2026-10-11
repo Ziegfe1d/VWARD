@@ -26,6 +26,14 @@ DNSCAP_SHARE=${VWARD_DNSCAP_SHARE:-/opt/share/vward/dnscap}
 DNSCAP_VERSION=1
 VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 
+# get CURL-ARGUMENTS: a download through vward_fetch of the device profile: when curl crashes on
+# HTTPS (Entware's OpenSSL 3.5.5 on some MIPS routers), uclient-fetch with mbedTLS downloads.
+get() {
+    command -v vward_fetch >/dev/null 2>&1 ||
+        { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+    if command -v vward_fetch >/dev/null 2>&1; then VWARD_CURL_BIN=$CURL; vward_fetch "$@"; else "$CURL" "$@"; fi
+}
+
 # SHA-256 of the program (tools/vward-sentinel/SHA256SUMS, a reproducible build).
 sentinel_sum() {
     case "$1" in
@@ -87,7 +95,7 @@ op_install() {
     mkdir -p "$SHARE" || die write_failed
     TMPD=$(mktemp -d "$SHARE/.install.XXXXXX" 2>/dev/null) || die write_failed
     trap 'rm -rf "${TMPD:?}"' EXIT
-    "$CURL" -fsSL --connect-timeout 15 --max-time 120 --max-filesize 2097152 \
+    get -fsSL --connect-timeout 15 --max-time 120 --max-filesize 2097152 \
         -o "$TMPD/p.gz" "$URL/vward-sentinel-linux-$a.gz" 2>/dev/null || die download_failed
     gunzip -c "$TMPD/p.gz" > "$TMPD/vward-sentinel" 2>/dev/null || die package_damaged
     [ "$(sha256_of "$TMPD/vward-sentinel")" = "$want" ] || die checksum_mismatch
@@ -110,7 +118,7 @@ op_install_dnscap() {
     mkdir -p "$DNSCAP_SHARE" || die write_failed
     TMPC=$(mktemp -d "$DNSCAP_SHARE/.install.XXXXXX" 2>/dev/null) || die write_failed
     trap 'rm -rf "${TMPC:?}"' EXIT
-    "$CURL" -fsSL --connect-timeout 15 --max-time 120 --max-filesize 1048576 \
+    get -fsSL --connect-timeout 15 --max-time 120 --max-filesize 1048576 \
         -o "$TMPC/p.gz" "$URL/vward-dnscap-linux-$a.gz" 2>/dev/null || die download_failed
     gunzip -c "$TMPC/p.gz" > "$TMPC/vward-dnscap" 2>/dev/null || die package_damaged
     [ "$(sha256_of "$TMPC/vward-dnscap")" = "$want" ] || die checksum_mismatch
@@ -121,6 +129,16 @@ op_install_dnscap() {
     rm -rf "${TMPC:?}"
     log "dnscap installed $DNSCAP_VERSION arch=$a"
     echo "result=changed"
+}
+
+# watch_slots ETC PREFIX NAME RUN RSS: a WATCH line for each tunnel of an engine that is not
+# switched off.
+watch_slots() {
+    [ -r "$1/tunnels.tsv" ] || return 0
+    while IFS="$(printf '\t')" read -r n _; do
+        case "$n" in ''|*[!0-9]*) continue ;; esac
+        [ -e "$1/$2$n.off" ] || echo "WATCH=$3-$2$n:$4/$2$n.pid:$5"
+    done < "$1/tunnels.tsv"
 }
 
 # What to watch: VWARD's long-running programs with their memory limits, the provider's
@@ -137,8 +155,10 @@ op_config() {
         echo "DNS_EVERY=30"
         echo "WATCH=route-engine:$RUN_DIR/route-engine.pid:16384"
         echo "WATCH=panel:/opt/var/run/vward-console-lighttpd.pid:24576"
-        for f in "$RUN_DIR"/awg-engine/t*.pid; do [ -e "$f" ] && { n=${f##*/}; echo "WATCH=awg-${n%.pid}:$f:65536"; }; done
-        for f in "$RUN_DIR"/vless-engine/v*.pid; do [ -e "$f" ] && { n=${f##*/}; echo "WATCH=xray-${n%.pid}:$f:98304"; }; done
+        # The engines' tunnels that are switched on (a removed or switched-off tunnel left its
+        # pid file behind: watched, it was «started» every few minutes, Viva 2026-10-11).
+        watch_slots "${VWARD_AWG_ETC:-/opt/etc/vward/awg-engine}" t awg "$RUN_DIR/awg-engine" 65536
+        watch_slots "${VWARD_VLESS_ETC:-/opt/etc/vward/vless-engine}" v xray "$RUN_DIR/vless-engine" 98304
         if [ -r "$VWARD_PROFILE_LIB" ] && . "$VWARD_PROFILE_LIB" && vward_profile_load >/dev/null 2>&1; then
             [ -z "${VWARD_WAN_DEVICE:-}" ] || echo "IFACE=$VWARD_WAN_DEVICE"
             # AdGuard Home in the DNS chain, asked every 5 s (unless the owner keeps the chain: CHAIN=0).

@@ -386,6 +386,23 @@ if [ -x "$BACKUP_HELPER" ]; then
     fi
 fi
 
+# Downloads without Entware's OpenSSL: once curl crashed on HTTPS (OpenSSL 3.5.5 on some MIPS
+# routers; vward_fetch and the site checks note it in RAM), uclient-fetch with mbedTLS and the
+# list of certificate authorities come from Entware, whose feed is plain HTTP. VWARD's updates
+# need it, so also when VWARD is switched off. At most once an hour, detached.
+TLS_HOUR_FILE=${VWARD_TLS_HOUR_FILE:-/tmp/vward-tls-fallback-hour}
+if [ -n "$(find "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" -mmin -60 2>/dev/null)" ] &&
+   ! command -v uclient-fetch >/dev/null 2>&1 && command -v opkg >/dev/null 2>&1; then
+    TLS_NOW="$(date '+%Y-%m-%d %H')"
+    TLS_HOUR=""
+    [ ! -r "$TLS_HOUR_FILE" ] || read -r TLS_HOUR < "$TLS_HOUR_FILE" || :
+    if [ "$TLS_HOUR" != "$TLS_NOW" ]; then
+        echo "$TLS_NOW" > "$TLS_HOUR_FILE" 2>/dev/null || :
+        { opkg update && opkg install uclient-fetch libustream-mbedtls ca-bundle; } </dev/null >/dev/null 2>&1 &
+        echo "$TLS_NOW|tls_fallback=install" >> "$HOUSE_LOG"
+    fi
+fi
+
 # VWARD switched off as a whole («Отключить VWARD»): logs, copies and VWARD's own updates go
 # on (a fix may arrive), nothing else VWARD does starts.
 if ! vward_off; then

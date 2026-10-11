@@ -500,11 +500,33 @@ resolve_ipv4()
 }
 
 
+# tls_broken: curl crashed on HTTPS within the hour. tls_crash RC: RC is such a crash (a signal),
+# noted for an hour (the device profile's vward_fetch reads the same note).
+tls_broken()
+{
+    [ -n "$(find "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" -mmin -60 2>/dev/null)" ]
+}
+
+tls_crash()
+{
+    [ "$1" -ge 128 ] 2>/dev/null || return 1
+    : > "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" 2>/dev/null
+    return 0
+}
+
+
 probe()
 {
     H="$1"
     IFACE="$2"
     IP="$3"
+
+    # curl crashed on HTTPS within the hour (Entware's OpenSSL 3.5.5 on some MIPS routers):
+    # «could not check», and no crash again. Every decision here needs a check that passed.
+    if tls_broken; then
+        P_RC=2 P_CODE=000 P_TIME=-
+        return 1
+    fi
 
     OUT=$(
         curl -4 \
@@ -523,6 +545,7 @@ probe()
     P_RC=$?
     P_CODE=${OUT%%|*}
     P_TIME=${OUT#*|}
+    tls_crash "$P_RC"
 
     [ -z "$P_CODE" ] && P_CODE="000"
     [ -z "$P_TIME" ] && P_TIME="-"
@@ -1285,7 +1308,7 @@ wg_quick_probe()
       --connect-timeout 1 \
       --max-time 2 \
       -sS -o /dev/null \
-      "https://1.1.1.1/cdn-cgi/trace" \
+      "http://1.1.1.1/cdn-cgi/trace" \
       >/dev/null 2>&1
 }
 
@@ -1480,6 +1503,8 @@ list_watch_check()
 
     LW_IP=$(resolve_ipv4 "$1")
     [ -n "$LW_IP" ] || return 0
+    # No HTTPS check possible: a list is never moved to the tunnel on a crash of curl.
+    ! tls_broken || return 0
 
     LW_OUT=$(
         curl -4 \
@@ -1494,6 +1519,7 @@ list_watch_check()
             -w '%{http_code} %{redirect_url}' \
             "https://$1/" 2>/dev/null
     )
+    ! tls_crash "$?" || return 0
     LW_CODE=${LW_OUT%% *}
     LW_LOC=${LW_OUT#* }
     [ -n "$LW_CODE" ] || LW_CODE=000

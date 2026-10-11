@@ -50,7 +50,7 @@ important_max_delay_seconds=7200
 routine_max_delay_seconds=86400
 # This engine's own version: a manifest may ask for a newer one (min_updater_version),
 # and a signed manifest carrying a newer engine makes it update itself.
-VU_ENGINE_VERSION=2.0.6
+VU_ENGINE_VERSION=2.0.7
 minimum_updater_version=$VU_ENGINE_VERSION
 manifest_v2_url=
 
@@ -846,14 +846,23 @@ vu_wan_dev() {
     ip -4 route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }}'
 }
 
+# vu_get ARGS: curl, through VWARD's vward_fetch when the device profile has it: when curl
+# crashes on HTTPS (Entware's OpenSSL 3.5.5 on some MIPS routers, a Viva 2026-10-11, every
+# update failed with curl 138) uclient-fetch with mbedTLS downloads instead.
+vu_get() {
+    command -v vward_fetch >/dev/null 2>&1 ||
+        { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+    if command -v vward_fetch >/dev/null 2>&1; then vward_fetch "$@"; else curl "$@"; fi
+}
+
 vu_curl() {
-    curl "$@" && return 0
+    vu_get "$@" && return 0
     vu_curl_rc=$?
     [ "${VU_DIRECT_FALLBACK:-1}" = 1 ] || return "$vu_curl_rc"
     vu_curl_dev=$(vu_wan_dev | head -n 1)
     [ -n "$vu_curl_dev" ] || return "$vu_curl_rc"
     vu_log WARN "Download failed (curl $vu_curl_rc); retrying directly through $vu_curl_dev"
-    curl --interface "$vu_curl_dev" "$@"
+    vu_get --interface "$vu_curl_dev" "$@"
 }
 
 # vu_fetch_feed URL OUTPUT MAX: 0 fetched, 44 no such feed (404), 1 failed.

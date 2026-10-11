@@ -732,7 +732,10 @@ reconcile_routes()
 
         ROUTE="$(route_line "$CIDR")" || continue
 
-        if grep -Fqx "$ROUTE" "$RUN"; then
+        # Keenetic shows a route to one address without its mask («ip route 192.0.2.1 OpkgTun2
+        # auto»): compared with the mask only, it was added and saved again every hour (Viva
+        # 2026-10-11).
+        if grep -Fqx "$ROUTE" "$RUN" || { [ "${CIDR#*/}" = 32 ] && grep -Fqx "ip route ${CIDR%/*} $RT auto" "$RUN"; }; then
             if grep -Fxq "$CIDR" "$OWNED"; then
                 echo "$CIDR" >> "$NEXT_OWNED"
             else

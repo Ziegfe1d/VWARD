@@ -34,6 +34,15 @@ OPKGTUN_MAX=9
 
 AWG_VERSION=1.2.1
 AWG_URL=${VWARD_AWG_URL:-https://raw.githubusercontent.com/Ziegfe1d/VWARD/awg-engine}
+
+# get CURL-ARGUMENTS: a download through vward_fetch of the device profile: when curl crashes on
+# HTTPS (Entware's OpenSSL 3.5.5 on some MIPS routers), uclient-fetch with mbedTLS downloads.
+get() {
+    command -v vward_fetch >/dev/null 2>&1 ||
+        { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+    if command -v vward_fetch >/dev/null 2>&1; then VWARD_CURL_BIN=$CURL; vward_fetch "$@"; else "$CURL" "$@"; fi
+}
+
 # SHA-256 of the unpacked program (tools/vward-awg/SHA256SUMS, a reproducible build).
 awg_sum() {
     case "$1" in
@@ -78,7 +87,7 @@ op_install() {
     want=$(awg_sum "$a") || die arch_unsupported
     mkdir -p "$ENGINE_SHARE" || die write_failed
     TMPD=$(mktemp -d "$ENGINE_SHARE/.install.XXXXXX" 2>/dev/null) || die write_failed
-    "$CURL" -fsSL --connect-timeout 15 --max-time 300 --max-filesize 8388608 \
+    get -fsSL --connect-timeout 15 --max-time 300 --max-filesize 8388608 \
         -o "$TMPD/p.gz" "$AWG_URL/vward-awg-linux-$a.gz" 2>/dev/null || die download_failed
     gunzip -c "$TMPD/p.gz" > "$TMPD/vward-awg" 2>/dev/null || die package_damaged
     [ "$(sha256_of "$TMPD/vward-awg")" = "$want" ] || die checksum_mismatch
@@ -464,8 +473,8 @@ case "${1:-}" in
     remove) [ "$#" -eq 2 ] || die usage 64; op_remove "$2"; sentinel_reload ;;
     restart) [ "$#" -eq 2 ] || die usage 64; op_restart "$2" ;;
     kick) [ "$#" -eq 2 ] || die usage 64; op_kick "$2" ;;
-    disable) [ "$#" -eq 2 ] || die usage 64; op_disable "$2" ;;
-    enable) [ "$#" -eq 2 ] || die usage 64; op_enable "$2" ;;
+    disable) [ "$#" -eq 2 ] || die usage 64; op_disable "$2"; sentinel_reload ;;
+    enable) [ "$#" -eq 2 ] || die usage 64; op_enable "$2"; sentinel_reload ;;
     supervise) op_supervise ;;
     stop) op_stop ;;
     status) op_status ;;

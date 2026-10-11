@@ -148,8 +148,10 @@ fi
 P1=0
 P2=0
 
-probe "https://1.1.1.1/cdn-cgi/trace" && P1=1
-probe "https://8.8.8.8/" && P2=1
+# Through HTTP: whether pages pass needs no TLS, and Entware's OpenSSL 3.5.5 crashes on some
+# routers («Illegal instruction», a Viva, 2026-10-11): every check through it said «dead».
+probe "http://1.1.1.1/cdn-cgi/trace" && P1=1
+probe "http://1.0.0.1/cdn-cgi/trace" && P2=1
 
 NET_OK=0
 

@@ -41,10 +41,21 @@ JQ=${JQ:-jq}
 CONNECT_WAIT=${VWARD_VLESS_CONNECT_WAIT:-30}
 MAX_TUNNELS=5
 OPKGTUN_MAX=9
-CHECK_URL=${VWARD_VLESS_CHECK_URL:-https://1.1.1.1/cdn-cgi/trace}
+# Through HTTP: whether pages pass needs no TLS, and Entware's OpenSSL 3.5.5 crashes on some
+# routers («Illegal instruction», a Viva, 2026-10-11): every check through it said «dead».
+CHECK_URL=${VWARD_VLESS_CHECK_URL:-http://1.1.1.1/cdn-cgi/trace}
 
 XRAY_VERSION=26.9.9
 XRAY_URL=${VWARD_XRAY_URL:-https://github.com/XTLS/Xray-core/releases/download/v$XRAY_VERSION}
+
+# get CURL-ARGUMENTS: a download through vward_fetch of the device profile: when curl crashes on
+# HTTPS (Entware's OpenSSL 3.5.5 on some MIPS routers), uclient-fetch with mbedTLS downloads.
+get() {
+    command -v vward_fetch >/dev/null 2>&1 ||
+        { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+    if command -v vward_fetch >/dev/null 2>&1; then VWARD_CURL_BIN=$CURL; vward_fetch "$@"; else "$CURL" "$@"; fi
+}
+
 # SHA-256 of the release archives (the .dgst files of the release).
 xray_zip() {
     case "$1" in
@@ -96,7 +107,7 @@ op_install() {
     [ "$#" -eq 3 ] || die arch_unsupported
     mkdir -p "$ENGINE_SHARE" || die write_failed
     TMPD=$(mktemp -d "$ENGINE_SHARE/.install.XXXXXX" 2>/dev/null) || die write_failed
-    "$CURL" -fsSL --connect-timeout 15 --max-time 600 --max-filesize 67108864 \
+    get -fsSL --connect-timeout 15 --max-time 600 --max-filesize 67108864 \
         -o "$TMPD/x.zip" "$XRAY_URL/$1" 2>/dev/null || die download_failed
     [ "$(sha256_of "$TMPD/x.zip")" = "$2" ] || die checksum_mismatch
     unzip_one "$TMPD/x.zip" "$3" "$TMPD/xray" || die package_damaged
@@ -117,7 +128,7 @@ links() {
         vless://*|trojan://*) tr -d '\r' < "$1" | awk '/^(vless|trojan):\/\// {print $1}' > "$2" ;;
         https://*|http://*)
             printf '%s\n' "$src" | grep -Eq '^https?://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+$' || return 2
-            "$CURL" -fsSL --connect-timeout 10 --max-time 30 --max-filesize 1048576 -A "VWARD" \
+            get -fsSL --connect-timeout 10 --max-time 30 --max-filesize 1048576 -A "VWARD" \
                 -o "$2.raw" "$src" 2>/dev/null || return 3
             if grep -Eq '(vless|trojan)://' "$2.raw"; then tr -d '\r' < "$2.raw"
             else tr -d '\r\n ' < "$2.raw" | { base64 -d 2>/dev/null || openssl base64 -d -A 2>/dev/null; } | tr -d '\r'; fi |
@@ -709,8 +720,8 @@ case "${1:-}" in
     failover) [ "$#" -eq 2 ] || die usage 64; op_failover "$2" ;;
     list) [ "$#" -eq 2 ] || die usage 64; op_list "$2" ;;
     select) [ "$#" -eq 3 ] || die usage 64; op_select "$2" "$3" ;;
-    disable) [ "$#" -eq 2 ] || die usage 64; op_disable "$2" ;;
-    enable) [ "$#" -eq 2 ] || die usage 64; op_enable "$2" ;;
+    disable) [ "$#" -eq 2 ] || die usage 64; op_disable "$2"; sentinel_reload ;;
+    enable) [ "$#" -eq 2 ] || die usage 64; op_enable "$2"; sentinel_reload ;;
     supervise) op_supervise ;;
     stop) op_stop ;;
     status) op_status ;;

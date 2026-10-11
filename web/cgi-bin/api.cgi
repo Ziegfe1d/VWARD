@@ -74,7 +74,7 @@ qget()
 fetch_json()
 {
     DATA="$("$CURL" --fail --silent --show-error \
-        --connect-timeout 2 --max-time 3 "$1" 2>/dev/null)"
+        --connect-timeout 2 --max-time "${2:-3}" "$1" 2>/dev/null)"
 
     FETCH_OUT="$(printf '%s\n' "$DATA" |
         "$JQ" -cs 'if length == 1 and (.[0] | type) == "object" then .[0] else {} end' 2>/dev/null)"
@@ -1672,8 +1672,25 @@ if [ "$ACTION" = "diagnostics" ]; then
 
     OPT_STATUS="$(diag_status df -Pk /opt)"
     JQ_STATUS="$(diag_status command -v "$JQ")"
-    # Started, not only present: an Entware curl whose OpenSSL library crashes is there but dead.
-    CURL_STATUS="$(diag_status "$CURL" --version)"
+    # A real HTTPS request, not only a start: Entware's OpenSSL 3.5.5 lets curl start and then
+    # crashes on the first TLS handshake on some routers («Illegal instruction», a Viva).
+    CURL_STATUS=FAIL CURL_DETAIL="curl не запускается"
+    if "$CURL" --version >/dev/null 2>&1; then
+        "$CURL" -s -o /dev/null --connect-timeout 4 --max-time 8 https://1.1.1.1/cdn-cgi/trace >/dev/null 2>&1
+        CURL_RC=$?
+        case "$CURL_RC" in
+            0) CURL_STATUS=PASS CURL_DETAIL="HTTPS работает: проверки сайтов, обновления, подписки" ;;
+            126|127|13[0-9])
+                # Noted for vward_fetch and housekeeping (it installs uclient-fetch).
+                [ "$CURL_RC" -lt 128 ] || : > /tmp/vward-curl-tls.broken 2>/dev/null
+                if command -v uclient-fetch >/dev/null 2>&1; then
+                    CURL_STATUS=WARN CURL_DETAIL="curl падает на HTTPS (код $CURL_RC): сломан OpenSSL из Entware. Загрузки идут через uclient-fetch (mbedTLS)"
+                else
+                    CURL_DETAIL="curl падает на HTTPS (код $CURL_RC): сломан OpenSSL из Entware. uclient-fetch не установлен: обслуживание поставит его в течение часа"
+                fi ;;
+            *) CURL_STATUS=WARN CURL_DETAIL="HTTPS не ответил (код $CURL_RC)" ;;
+        esac
+    fi
     # Entware starts at boot only through rc.unslung: a stub there leaves the router after the
     # next reboot without VWARD, SSH and AdGuard Home (seen on a router).
     BOOT_STATUS=FAIL
@@ -1700,10 +1717,14 @@ if [ "$ACTION" = "diagnostics" ]; then
     SUPERVISOR_STATUS=FAIL
     ADGUARD_STATUS=FAIL
     ADAPTIVE_STATUS=FAIL
-    ps 2>/dev/null | grep -q '[c]rond -b' && CROND_STATUS=PASS
-    ps 2>/dev/null | grep -q '[v]ward-cron-supervisor.sh' && SUPERVISOR_STATUS=PASS
-    ps 2>/dev/null | grep -q '[A]dGuardHome' && ADGUARD_STATUS=PASS
-    ps 2>/dev/null | grep -q '[v]ward-route-engine.sh' && ADAPTIVE_STATUS=PASS
+    # diag_running REGEX: a process whose command line matches (one grep over /proc; «[v]ward»
+    # does not match grep's own line). Not through ps: the Panel's ps did not show running VWARD
+    # scripts (a Viva, 2026-10-11: «Агент компонентов FAIL» with the agent running).
+    diag_running() { grep -qs -- "$1" /proc/[0-9]*/cmdline 2>/dev/null; }
+    diag_running '[c]rond' && CROND_STATUS=PASS
+    diag_running '[v]ward-cron-supervisor[.]sh' && SUPERVISOR_STATUS=PASS
+    diag_running '[A]dGuardHome' && ADGUARD_STATUS=PASS
+    diag_running '[v]ward-route-engine[.]sh' && ADAPTIVE_STATUS=PASS
 
     UPDATE_STATUS=FAIL
     [ -x /opt/share/vward/updater/current/vward-update.sh ] && UPDATE_STATUS=PASS
@@ -1711,11 +1732,13 @@ if [ "$ACTION" = "diagnostics" ]; then
     [ -r /opt/etc/vward/update.conf ] && CONFIG_STATUS=PASS
     CGI_STATUS=PASS
 
-    WAN_JSON="$(fetch_json "$VWARD_RCI_BASE/show/internet/status")"
-    WAN_STATUS="$(printf '%s\n' "$WAN_JSON" | "$JQ" -r 'if (.internet // .connected // false) == true then "PASS" else "WARN" end' 2>/dev/null)"
+    # Keenetic answers slowly while busy: 3 s gave an empty answer, read as «туннелей нет» and
+    # no internet (a Viva, 2026-10-11). An empty answer is said as such.
+    WAN_JSON="$(fetch_json "$VWARD_RCI_BASE/show/internet/status" 8)"
+    WAN_STATUS="$(printf '%s\n' "$WAN_JSON" | "$JQ" -r 'if . == {} then "UNKNOWN" elif (.internet // .connected // false) == true then "PASS" else "WARN" end' 2>/dev/null)"
     case "$WAN_STATUS" in PASS|WARN) ;; *) WAN_STATUS=UNKNOWN ;; esac
 
-    IF_JSON="$(fetch_json "$VWARD_RCI_BASE/show/interface")"
+    IF_JSON="$(fetch_json "$VWARD_RCI_BASE/show/interface" 8)"
     WG_COUNT="$(printf '%s\n' "$IF_JSON" | "$JQ" -r --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy opkgtun}" --arg wan "${VWARD_WAN_INTERFACE:-}" '
         ($types | split(" ")) as $vpn |
         [to_entries[] | select((.value | type) == "object" and .key != $wan and (((.value.type // "") | tostring | ascii_downcase) as $t | $vpn | index($t)))] | length' 2>/dev/null)"
@@ -1733,7 +1756,8 @@ if [ "$ACTION" = "diagnostics" ]; then
         [to_entries[] | select((.value | type) == "object" and .key != $wan and (((.value.type // "") | tostring | ascii_downcase) as $t | $vpn | index($t))) |
          select(((.value.state // "") | tostring) == "down")] | length' 2>/dev/null)"
     case "$WG_OFF" in ''|*[!0-9]*) WG_OFF=0 ;; esac
-    if [ "$WG_COUNT" -eq 0 ]; then WG_STATUS=WARN WG_DETAIL="туннелей нет"
+    if [ "$IF_JSON" = '{}' ]; then WG_STATUS=UNKNOWN WG_DETAIL="Keenetic не ответил за 8 с"
+    elif [ "$WG_COUNT" -eq 0 ]; then WG_STATUS=WARN WG_DETAIL="туннелей нет"
     elif [ -n "$WG_DOWN" ]; then WG_STATUS=WARN WG_DETAIL="туннелей: $WG_COUNT; не на связи: $WG_DOWN"
     else WG_STATUS=PASS WG_DETAIL="туннелей: $WG_COUNT; все включённые на связи"; fi
     [ "$WG_OFF" -eq 0 ] || WG_DETAIL="$WG_DETAIL; выключено: $WG_OFF"
@@ -1843,7 +1867,7 @@ if [ "$ACTION" = "diagnostics" ]; then
     LAST_ROUTE_RC="$(cat /tmp/vward-route-reconciler-maint.cron.rc 2>/dev/null)"
 
     "$JQ" -n \
-      --arg opt "$OPT_STATUS" --arg jq "$JQ_STATUS" --arg curl "$CURL_STATUS" --arg boot "$BOOT_STATUS" \
+      --arg opt "$OPT_STATUS" --arg jq "$JQ_STATUS" --arg curl "$CURL_STATUS" --arg curl_detail "$CURL_DETAIL" --arg boot "$BOOT_STATUS" \
       --arg tcpdump "$TCPDUMP_STATUS" --arg lighttpd "$LIGHTTPD_STATUS" \
       --arg crond "$CROND_STATUS" --arg supervisor "$SUPERVISOR_STATUS" \
       --arg adguard "$ADGUARD_STATUS" --arg adaptive "$ADAPTIVE_STATUS" \
@@ -1858,7 +1882,7 @@ if [ "$ACTION" = "diagnostics" ]; then
         {id:"opt",component:"runtime",label:"Флешка Entware (/opt)",status:$opt,detail:("свободно "+(if $opt_free >= 1024 then (($opt_free/1024|floor)|tostring)+" МБ" else ($opt_free|tostring)+" КБ" end))},
         {id:"boot",component:"runtime",label:"Запуск после перезагрузки",status:$boot,detail:(if $boot == "PASS" then "программы Entware запустятся сами" else "запуск Entware отключён (rc.unslung): после перезагрузки VWARD, SSH и AdGuard Home не запустятся" end)},
         {id:"jq",component:"runtime",label:"Разбор данных (jq)",status:$jq,detail:"нужен всем разделам Панели"},
-        {id:"curl",component:"runtime",label:"Сетевые запросы (curl)",status:$curl,detail:"проверки сайтов, обновления, AdGuard Home"},
+        {id:"curl",component:"runtime",label:"HTTPS-запросы (curl)",status:$curl,detail:$curl_detail},
         {id:"tcpdump",component:"route-engine",label:"Наблюдение DNS (vward-dnscap или tcpdump)",status:$tcpdump,detail:"автоподбор узнаёт новые домены"},
         {id:"lighttpd",component:"console",label:"Веб-сервер Панели (lighttpd)",status:$lighttpd,detail:"отдаёт страницы Панели VWARD"},
         {id:"crond",component:"runtime",label:"Планировщик заданий (crond)",status:$crond,detail:(if $wan_rc == "" then "задания ещё не запускались" else "код последнего задания интернета: "+$wan_rc end)},

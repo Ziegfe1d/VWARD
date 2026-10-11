@@ -110,18 +110,20 @@ probe_iface()
 }
 
 
+# Through HTTP: whether pages pass needs no TLS, and Entware's OpenSSL 3.5.5 crashes on some
+# routers («Illegal instruction», a Viva, 2026-10-11): every check through it said «dead».
 wan_ok()
 {
-    probe_iface "$WAN_IF" "https://1.1.1.1/cdn-cgi/trace" && return 0
-    probe_iface "$WAN_IF" "https://8.8.8.8/" && return 0
+    probe_iface "$WAN_IF" "http://1.1.1.1/cdn-cgi/trace" && return 0
+    probe_iface "$WAN_IF" "http://1.0.0.1/cdn-cgi/trace" && return 0
     return 1
 }
 
 
 wg_ok()
 {
-    probe_iface "$WG_IF" "https://1.1.1.1/cdn-cgi/trace" && return 0
-    probe_iface "$WG_IF" "https://8.8.8.8/" && return 0
+    probe_iface "$WG_IF" "http://1.1.1.1/cdn-cgi/trace" && return 0
+    probe_iface "$WG_IF" "http://1.0.0.1/cdn-cgi/trace" && return 0
     return 1
 }
 

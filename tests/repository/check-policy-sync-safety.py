@@ -174,4 +174,25 @@ kept = subprocess.run(["awk", "-F[./]", m.group(1)], input=sample, text=True, ca
 if kept != ["8.8.8.0/24", "1.2.3.4/32", "91.108.4.0/22"]:
     fail(f"reserved, private or too wide subnets pass the filter: {kept}")
 
+# A route to one address Keenetic already has (shown without its mask) is not added and saved
+# again every hour.
+with tempfile.TemporaryDirectory() as td:
+    t = Path(td)
+    (t / "catalog").mkdir(); (t / "work").mkdir()
+    (t / "catalog/google.cidr").write_text("74.125.247.128/32\n8.8.8.0/24\n")
+    (t / "cats").write_text("google\n")
+    (t / "running").write_text("ip route 74.125.247.128 OpkgTun2 auto\nip route 8.8.8.0 255.255.255.0 OpkgTun2 auto\n")
+    (t / "owned").write_text("74.125.247.128/32\n8.8.8.0/24\n")
+    script = "\n".join((extract_function(sync_source, "prefix_mask"), extract_function(sync_source, "route_line"),
+                        extract_function(sync_source, "reconcile_routes"))) + f"""
+log() {{ :; }}
+ndm() {{ echo "$*" >> "{t}/ndm.log"; }}
+WORK="{t}/work"; CATALOG="{t}/catalog"; OWNED="{t}/owned"; OWNED_DEVICE="{t}/owned-device"; ACTIVE="{t}/active"
+RT=OpkgTun2; WG=OpkgTun2
+reconcile_routes "{t}/running" "{t}/cats"
+"""
+    r = run_shell(script, [])
+    if r.returncode != 0 or (t / "ndm.log").exists() or "ADDED=0" not in r.stdout or "CONFIG_SAVE=NOT_NEEDED" not in r.stdout:
+        fail(f"a /32 route Keenetic shows without its mask is added and saved again: {r.stdout} {r.stderr}")
+
 print("POLICY_SYNC_SAFETY=PASS")
