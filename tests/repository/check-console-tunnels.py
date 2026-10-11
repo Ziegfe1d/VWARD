@@ -81,7 +81,7 @@ with tempfile.TemporaryDirectory() as d:
     nd.chmod(0o755)
     sh = fn("die") + fn("ndm") + 'NDMC=%s\nndm "no interface Wireguard0" || die router_rejected\n' % nd
     r = subprocess.run(["sh", "-c", sh], text=True, capture_output=True)
-    if r.stdout != "reason=(error) static route 1.2.3.4 uses Wireguard0\nerror=router_rejected\n":
+    if r.stdout != "reason=no interface Wireguard0: (error) static route 1.2.3.4 uses Wireguard0\nerror=router_rejected\n":
         fail(f"the router's reply to a rejected command: {r.stdout!r}")
 for need in ("TWHY=\"$(printf '%s\\n' \"$TALL\" | sed -n 's/^reason=//p' | tail -n 1)\"", "{reason:$w}"):
     if need not in API:

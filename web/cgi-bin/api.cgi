@@ -764,10 +764,14 @@ if [ "$ACTION" = config ]; then
     [ "$OP:$TARGET:$VALUE" != wifi:CONTROL_ENABLED:1 ] || REQUIRED=WIFI_CONTROL_ENABLE
     [ -z "$REQUIRED" ] || [ "$CONFIRM" = "$REQUIRED" ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
     [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
-    OUT="$("$CONFIG_HELPER" "$@" 2>/dev/null | tail -n 1)"
+    OALL="$("$CONFIG_HELPER" "$@" 2>/dev/null)"
+    OUT="$(printf '%s\n' "$OALL" | tail -n 1)"
+    # A refusal of Keenetic carries the command and its answer (reason=): shown in the Panel.
+    OWHY="$(printf '%s\n' "$OALL" | sed -n 's/^reason=//p' | tail -n 1)"
     case "$OUT" in
         result=changed|result=unchanged) "$JQ" -cn --arg op "$OP" --arg r "${OUT#result=}" '{ok:true,op:$op,result:$r}' ;;
-        error=*) E="${OUT#error=}"; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac; "$JQ" -cn --arg op "$OP" --arg e "$E" '{ok:false,op:$op,error:$e}' ;;
+        error=*) E="${OUT#error=}"; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac
+                 "$JQ" -cn --arg op "$OP" --arg e "$E" --arg w "$OWHY" '{ok:false,op:$op,error:$e} + (if $w == "" then {} else {reason:$w} end)' ;;
         *) "$JQ" -cn --arg op "$OP" '{ok:false,op:$op,error:"helper_failed"}' ;;
     esac
     exit 0

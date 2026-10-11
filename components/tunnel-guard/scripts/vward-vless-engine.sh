@@ -67,7 +67,7 @@ xray_zip() {
     esac
 }
 
-die() { printf 'error=%s\n' "$1"; exit "${2:-1}"; }
+die() { [ "$1" != router_rejected ] || [ -z "${NDM_REASON:-}" ] || printf 'reason=%s\n' "$NDM_REASON"; printf 'error=%s\n' "$1"; exit "${2:-1}"; }
 # Every line says who asked (VWARD_ACTOR: an agent, the Panel - the owner, or the shell).
 log() { mkdir -p "${ENGINE_LOG%/*}" 2>/dev/null; printf '%s|VLESS_ENGINE|%s|by=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" "${VWARD_ACTOR:-shell}" >> "$ENGINE_LOG" 2>/dev/null; }
 
@@ -252,10 +252,16 @@ free_slot() {
 }
 
 ndm() {
-    ndm_out=$("$NDMC" -c "$1" 2>&1) || { log "refused: $1"; return 1; }
+    # ndm COMMAND: one Keenetic command (never a key); on refusal the command and Keenetic's own
+    # words go to the log and to the caller (reason=).
+    ndm_out=$("$NDMC" -c "$1" 2>&1) || { ndm_refused "$1"; return 1; }
     printf '%s\n' "$ndm_out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found|no such)' || return 0
-    log "refused: $1"
+    ndm_refused "$1"
     return 1
+}
+ndm_refused() {
+    NDM_REASON="$(printf '%s' "$1" | tr -d '"\\' | cut -c1-120): $(printf '%s' "$ndm_out" | tr -cs 'A-Za-z0-9 ._:,()/[]-' ' ' | cut -c1-160)"
+    log "refused: $NDM_REASON"
 }
 
 free_opkgtun() {

@@ -123,6 +123,11 @@ with tempfile.TemporaryDirectory() as tmp:
     # Keenetic rejects the command: error, nothing saved.
     (tmp / "running.cfg.reject").touch()
     run("route-domain", "add", "rejected.example", expect="error=router_rejected", rc=1)
+    # The Panel learns which command Keenetic refused, and its answer.
+    r = subprocess.run(["sh", str(HELPER), "route-domain", "add", "rejected.example"], env=env, text=True, capture_output=True)
+    why = [l for l in r.stdout.splitlines() if l.startswith("reason=")]
+    if len(why) != 1 or "object-group fqdn" not in why[0] or "rejected.example" not in why[0]:
+        fail(f"a refusal names the command and Keenetic's answer: {r.stdout!r}")
     (tmp / "running.cfg.reject").unlink()
     # Keenetic claims success but the group did not change: verification fails.
     (tmp / "running.cfg.lie").touch()

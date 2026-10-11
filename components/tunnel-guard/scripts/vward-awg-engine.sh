@@ -54,7 +54,7 @@ awg_sum() {
     esac
 }
 
-die() { printf 'error=%s\n' "$1"; exit "${2:-1}"; }
+die() { [ "$1" != router_rejected ] || [ -z "${NDM_REASON:-}" ] || printf 'reason=%s\n' "$NDM_REASON"; printf 'error=%s\n' "$1"; exit "${2:-1}"; }
 # Every line says who asked (VWARD_ACTOR: an agent, the Panel - the owner, or the shell).
 log() { mkdir -p "${ENGINE_LOG%/*}" 2>/dev/null; printf '%s|AWG_ENGINE|%s|by=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" "${VWARD_ACTOR:-shell}" >> "$ENGINE_LOG" 2>/dev/null; }
 
@@ -115,9 +115,9 @@ free_slot() {
 
 ndm() {
     # ndm COMMAND: one Keenetic command (never a key); its own words go to the log on refusal.
-    ndm_out=$("$NDMC" -c "$1" 2>&1) || { log "refused: $1: $(ndm_why)"; return 1; }
+    ndm_out=$("$NDMC" -c "$1" 2>&1) || { NDM_REASON="$1: $(ndm_why)"; log "refused: $NDM_REASON"; return 1; }
     printf '%s\n' "$ndm_out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found|no such)' || return 0
-    log "refused: $1: $(ndm_why)"
+    NDM_REASON="$1: $(ndm_why)"; log "refused: $NDM_REASON"
     return 1
 }
 ndm_why() { printf '%s' "$ndm_out" | tr -cs 'A-Za-z0-9 ._:,()"/[]-' ' ' | cut -c1-200; }

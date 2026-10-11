@@ -71,10 +71,18 @@ CONF_FILE=
 # The request body of ndm_secret while it is sent.
 NS_FILE=
 
+# An engine's reason= line (the refused Keenetic command and its answer) goes on to the
+# Panel; it replaces any refusal of our own, so die does not add a second one.
+relay_reason() {
+    printf '%s\n' "$1" | grep '^reason=' | tail -n 1
+    NDM_CMD=
+}
+
 # A rejected router command leaves the router's own reply (one line, no quotes or
 # control characters) on a reason= line just before the error line.
 die() {
-    [ "$1" != router_rejected ] || [ -z "${NDM_REPLY:-}" ] || printf 'reason=%s\n' "$NDM_REPLY"
+    # The command Keenetic refused (never a key: those go through ndm_secret) and its answer.
+    [ "$1" != router_rejected ] || [ -z "${NDM_CMD:-}" ] || printf 'reason=%s: %s\n' "$(printf '%s' "$NDM_CMD" | cut -c1-120)" "${NDM_REPLY:-no answer}"
     printf 'error=%s\n' "$1"; exit "${2:-1}"
 }
 
@@ -216,6 +224,7 @@ ndm() {
     out=$("$NDMC" -c "$1" 2>&1)
     rc=$?
     if [ "$rc" -ne 0 ] || printf '%s\n' "$out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found|no such entry)'; then
+        NDM_CMD=$(printf '%s' "$1" | tr -d '\r\n"\\')
         NDM_REPLY=$(printf '%s\n' "$out" | tr -d '\r"\\' | tr -c '[:print:]\n' ' ' | sed '/^[[:space:]]*$/d' | tail -n 1 | cut -c1-160)
         return 1
     fi
@@ -1386,7 +1395,8 @@ create_on_engine() {
     engine_add "$tc_arg" "$tc_file" "$tc_keep"
     case "$(printf '%s\n' "$en_out" | tail -n 1)" in
         result=changed) ;;
-        error=*) en_err=$(printf '%s\n' "$en_out" | sed -n 's/^error=//p' | tail -n 1)
+        error=*) relay_reason "$en_out"
+                 en_err=$(printf '%s\n' "$en_out" | sed -n 's/^error=//p' | tail -n 1)
                  case "$en_err" in ''|*[!a-z0-9_]*) en_err=engine_failed ;; esac
                  die "$en_err" ;;
         *) die engine_failed ;;
@@ -1462,7 +1472,8 @@ op_vless_server() {
     case "$(printf '%s\n' "$vs_out" | tail -n 1)" in
         result=checked) printf '%s\n' "$vs_out" | grep '^info\.'; done_ok "vless-server servers $2" checked ;;
         result=changed) printf '%s\n' "$vs_out" | grep '^info\.'; done_ok "vless-server select $2 $3" changed ;;
-        error=*) vs_err=$(printf '%s\n' "$vs_out" | sed -n 's/^error=//p' | tail -n 1)
+        error=*) relay_reason "$vs_out"
+                 vs_err=$(printf '%s\n' "$vs_out" | sed -n 's/^error=//p' | tail -n 1)
                  case "$vs_err" in ''|*[!a-z0-9_]*) vs_err=engine_failed ;; esac
                  die "$vs_err" ;;
         *) die engine_failed ;;
@@ -1493,7 +1504,8 @@ op_tunnel_vless() {
             rm -f "$VWARD_DEVICE_MAP_CACHE"
             printf '%s\n' "$vl_out" | grep -E '^info\.(name|handshake)=' | head -n 2
             done_ok "tunnel-conf create vless $(printf '%s\n' "$vl_out" | sed -n 's/^info\.name=//p')" changed ;;
-        error=*) vl_err=$(printf '%s\n' "$vl_out" | sed -n 's/^error=//p' | tail -n 1)
+        error=*) relay_reason "$vl_out"
+                 vl_err=$(printf '%s\n' "$vl_out" | sed -n 's/^error=//p' | tail -n 1)
                  case "$vl_err" in ''|*[!a-z0-9_]*) vl_err=engine_failed ;; esac
                  die "$vl_err" ;;
         *) die engine_failed ;;
@@ -1535,7 +1547,8 @@ op_tunnel_conf() {
                 exec 3>&-
                 case "$(printf '%s\n' "$en_out" | tail -n 1)" in
                     result=changed) ;;
-                    error=*) en_err=$(printf '%s\n' "$en_out" | sed -n 's/^error=//p' | tail -n 1)
+                    error=*) relay_reason "$en_out"
+                             en_err=$(printf '%s\n' "$en_out" | sed -n 's/^error=//p' | tail -n 1)
                              case "$en_err" in ''|*[!a-z0-9_]*) en_err=engine_failed ;; esac
                              die "$en_err" ;;
                     *) die engine_failed ;;
@@ -1653,7 +1666,8 @@ op_tunnel_conf() {
             engine_add "$ad_desc" "$tc_file"
             case "$(printf '%s\n' "$en_out" | tail -n 1)" in
                 result=changed) ;;
-                error=*) en_err=$(printf '%s\n' "$en_out" | sed -n 's/^error=//p' | tail -n 1)
+                error=*) relay_reason "$en_out"
+                         en_err=$(printf '%s\n' "$en_out" | sed -n 's/^error=//p' | tail -n 1)
                          case "$en_err" in ''|*[!a-z0-9_]*) en_err=engine_failed ;; esac
                          die "$en_err" ;;
                 *) die engine_failed ;;
@@ -1771,7 +1785,9 @@ op_tunnel_delete() {
     ! awk -v i="$1" '$1 == "ip" && $2 == "route" && $5 == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG" || die verification_failed
     # Last step: nothing depends on the interface any more.
     if engine_tunnel "$1"; then
-        "$ENG" remove "$1" 2>/dev/null | tail -n 1 | grep -q '^result=' || die router_rejected
+        er_out=$("$ENG" remove "$1" 2>/dev/null)
+        # The engine's reason (the refused Keenetic command and its answer) goes to the Panel.
+        printf '%s\n' "$er_out" | tail -n 1 | grep -q '^result=' || { relay_reason "$er_out"; die router_rejected; }
     else
         ndm "no interface $1" || die router_rejected
     fi
