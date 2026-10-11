@@ -79,4 +79,15 @@ with tempfile.TemporaryDirectory() as tmp:
     r = subprocess.run(["sh", "-c", f'. "{LIB}"; vward_rci_get show/interface/system-name?name=Bridge0 3'], env=env, text=True, capture_output=True, timeout=20)
     if r.returncode == 0 or (t / "wget.log").exists():
         fail("an error answer from a working curl went on to wget")
+# A wget that crashes (BusyBox 1.37 of Entware, the same place every time) is asked once, not
+# on every request until the router restarts.
+with tempfile.TemporaryDirectory() as tmp:
+    t = Path(tmp)
+    (t / "busybox").write_text(f"#!/bin/sh\necho asked >> {t}/wget.log\nkill -SEGV $$\n"); (t / "busybox").chmod(0o755)
+    env = {"PATH": os.environ["PATH"], "VWARD_CURL_BIN": str(t / "no-curl"), "VWARD_RCI_WGET": f"{t}/busybox:wget",
+           "VWARD_WGET_BROKEN_DIR": str(t / "broken")}
+    for _ in range(3):
+        subprocess.run(["sh", "-c", f'. "{LIB}"; vward_rci_get show/version 3'], env=env, capture_output=True, timeout=20)
+    if (t / "wget.log").read_text().count("asked") != 1:
+        fail("a crashing wget is asked again and again")
 print("BOOT_ENV=PASS")

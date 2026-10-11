@@ -75,13 +75,22 @@ vward_rci_get()
         _vrg_out=
         [ "$_vrg_rc" -ge 126 ] || return 1
     fi
+    # A wget that crashed once is not asked again until the router restarts (BusyBox 1.37 of
+    # Entware crashes on every request at the same place: 680 crash lines in the router's log in
+    # 5 hours, Viva 2026-10-11).
+    _vrg_bad=${VWARD_WGET_BROKEN_DIR:-/tmp/vward-wget-broken}
     for _vrg_w in ${VWARD_RCI_WGET:-/opt/bin/busybox:wget /bin/busybox:wget wget}; do
+        _vrg_k=$(printf '%s' "$_vrg_w" | tr '/:' '__')
+        [ ! -e "$_vrg_bad/$_vrg_k" ] || continue
         case "$_vrg_w" in
             *:wget) [ -x "${_vrg_w%:wget}" ] || continue
                     _vrg_out=$("${_vrg_w%:wget}" wget -q -T "$_vrg_t" -O - "$_vrg_url" 2>/dev/null) ;;
             *) command -v "$_vrg_w" >/dev/null 2>&1 || continue
                _vrg_out=$("$_vrg_w" -q -T "$_vrg_t" -O - "$_vrg_url" 2>/dev/null) ;;
-        esac && [ -n "$_vrg_out" ] && { printf '%s\n' "$_vrg_out"; _vrg_out=; return 0; }
+        esac
+        _vrg_rc=$?
+        [ "$_vrg_rc" = 0 ] && [ -n "$_vrg_out" ] && { printf '%s\n' "$_vrg_out"; _vrg_out=; return 0; }
+        [ "$_vrg_rc" -lt 128 ] || { mkdir -p "$_vrg_bad" 2>/dev/null; : > "$_vrg_bad/$_vrg_k" 2>/dev/null; }
     done
     _vrg_out=
     return 1
