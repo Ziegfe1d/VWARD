@@ -2,6 +2,9 @@
 
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+# Who acts, for the journals of the programs it asks (one decision, one agent).
+VWARD_ACTOR=components-agent
+export VWARD_ACTOR
 
 PIDFILE="/opt/var/run/vward/cron-supervisor.pid"
 LOCK="/tmp/vward-cron-supervisor.lock"
@@ -236,11 +239,11 @@ agent_do()
             command -v vward_agh_ensure >/dev/null 2>&1 || return 1
             VWARD_UNNICE=$UNNICE vward_agh_ensure "$AGH_INIT"
             case "$?" in
-                10) log_event "AGH_STARTED|asked" ;;
-                13) log_event "AGH_BINARY_BROKEN|asked" ;;
+                10) log_event "AGH_STARTED|asked-by=$RQ_BY" ;;
+                13) log_event "AGH_BINARY_BROKEN|asked-by=$RQ_BY" ;;
             esac ;;
         start:*)
-            start_of "${1#start:}" && log_event "STARTED|${1#start:}|asked" ;;
+            start_of "${1#start:}" && log_event "STARTED|${1#start:}|asked-by=$RQ_BY" ;;
         restart:*)
             AN=${1#restart:}
             AF=$(pidfile_of "$AN") || return 1
@@ -253,13 +256,13 @@ agent_do()
                 kill -9 "$AP" 2>/dev/null ;;
             esac
             start_of "$AN"
-            log_event "RESTARTED|$AN|asked" ;;
+            log_event "RESTARTED|$AN|asked-by=$RQ_BY" ;;
         engine-restart:*|engine-kick:*)
             AT=${1#*:}
             AB=$(engine_of "$AT") || return 0
             AO=restart; case "$1" in engine-kick:*) AO=kick ;; esac
             "$AB" "$AO" "$AT" </dev/null >/dev/null 2>&1
-            log_event "MODULE_$(echo "$AO" | tr 'a-z' 'A-Z')|$AT|asked" ;;
+            log_event "MODULE_$(echo "$AO" | tr 'a-z' 'A-Z')|$AT|asked-by=$RQ_BY" ;;
         *) return 64 ;;
     esac
 }
@@ -269,7 +272,11 @@ process_requests()
 {
     for RQ in "$REQ_DIR"/*; do
         [ -f "$RQ" ] || continue
+        RQ_BY=; [ ! -s "$RQ" ] || read -r RQ_BY < "$RQ" || :
+        RQ_BY=${RQ_BY:-unknown}
+        VWARD_ACTOR="components-agent asked-by=$RQ_BY"
         [ -e "$OFF_FLAG" ] || agent_do "${RQ##*/}"
+        VWARD_ACTOR=components-agent
         rm -f "$RQ"
     done
 }

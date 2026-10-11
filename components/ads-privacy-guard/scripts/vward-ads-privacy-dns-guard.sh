@@ -32,6 +32,9 @@
 
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+# Who acts, for the journals of the programs it asks (one decision, one agent).
+VWARD_ACTOR=network-agent
+export VWARD_ACTOR
 
 # The script's own folder, by the shell (no process: some of these run every minute).
 case "$0" in */*) SELF_DIR=${0%/*} ;; *) SELF_DIR=. ;; esac

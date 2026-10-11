@@ -68,7 +68,8 @@ xray_zip() {
 }
 
 die() { printf 'error=%s\n' "$1"; exit "${2:-1}"; }
-log() { mkdir -p "${ENGINE_LOG%/*}" 2>/dev/null; printf '%s|VLESS_ENGINE|%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$ENGINE_LOG" 2>/dev/null; }
+# Every line says who asked (VWARD_ACTOR: an agent, the Panel - the owner, or the shell).
+log() { mkdir -p "${ENGINE_LOG%/*}" 2>/dev/null; printf '%s|VLESS_ENGINE|%s|by=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" "${VWARD_ACTOR:-shell}" >> "$ENGINE_LOG" 2>/dev/null; }
 
 TMPD=
 cleanup() { [ -z "$TMPD" ] || rm -rf "${TMPD:?}"; }

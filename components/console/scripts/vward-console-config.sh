@@ -10,6 +10,9 @@
 # Output: "result=changed|unchanged" on success, "error=<code>" on failure.
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+# Who acts: the owner through the Panel, unless an agent calling this helper said who it is.
+VWARD_ACTOR=${VWARD_ACTOR:-panel-owner}
+export VWARD_ACTOR
 
 ETC=${VWARD_CONSOLE_ETC:-/opt/etc/vward}
 ROUTE_STATE=${VWARD_ROUTE_STATE:-/opt/var/lib/vward/route-engine}

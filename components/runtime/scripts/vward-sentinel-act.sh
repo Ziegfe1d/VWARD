@@ -18,6 +18,9 @@
 
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+# Who acts, for the journals of the programs it asks (one decision, one agent).
+VWARD_ACTOR=realtime-agent
+export VWARD_ACTOR
 
 LOG=${VWARD_SENTINEL_LOG:-/opt/var/log/vward-sentinel.log}
 INITD=${VWARD_INITD:-/opt/etc/init.d}

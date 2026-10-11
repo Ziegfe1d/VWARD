@@ -159,6 +159,8 @@ with tempfile.TemporaryDirectory() as tmp:
     req.mkdir(exist_ok=True)
     for r_ in ("start:route-engine", "restart:panel", "agh-start", "bogus"):
         (req / r_).write_text("")
+    # The request names who asked (vward_agent_ask writes VWARD_ACTOR into it).
+    (req / "start:route-engine").write_text("realtime-agent\n")
     (tmp / "done").unlink(missing_ok=True)
     script = (f'RUN_DIR={run}; CONSOLE_PIDFILE={run}/panel.pid; CONSOLE_INIT={initd}/S93vward-console; INITD={initd}; BIN_DIR={obin}\n'
               f'AGH_INIT={initd}/S99adguardhome; REQ_DIR={req}; OFF_FLAG={tmp}/no-off; UNNICE=\n'
@@ -172,7 +174,7 @@ with tempfile.TemporaryDirectory() as tmp:
     if list(req.iterdir()):
         fail("requests stay after the components agent took them")
     log = (tmp / "agent.log").read_text()
-    if "STARTED|route-engine|asked" not in log or "RESTARTED|panel|asked" not in log or "AGH_STARTED|asked" not in log:
+    if "STARTED|route-engine|asked-by=realtime-agent" not in log or "RESTARTED|panel|asked-by=unknown" not in log or "AGH_STARTED|asked-by=unknown" not in log:
         fail(f"the components agent logs what it did: {log}")
     # While VWARD is switched off: nothing starts, the requests go.
     (req / "start:route-engine").write_text(""); (tmp / "no-off").write_text("")
@@ -211,4 +213,14 @@ if sup.count("supervise | grep -q '^result=changed$'") != 2:
     fail("the components agent logs STARTED only when an engine started a tunnel")
 if '"$SENTINEL_CTL" install && "$SENTINEL_CTL" reload' not in (ROOT / "components/runtime/scripts/vward-housekeeping.sh").read_text():
     fail("housekeeping installs the watcher's program")
+# vward_agent_ask puts who asks into the request (letters, digits and a few signs only).
+with tempfile.TemporaryDirectory() as tmp:
+    reqd = Path(tmp) / "req"
+    r = subprocess.run(["sh", "-c", f'. "{ROOT}/components/runtime/lib/vward-runtime-admission.sh"; vward_update_pending() {{ return 1; }}; '
+                        'vward_agent_ask engine-kick:OpkgTun2 0'],
+                       env=os.environ | {"VWARD_AGENT_REQ": str(reqd), "VWARD_AGENT_PIDFILE": f"{tmp}/none", "VWARD_AGENT_INIT": "true",
+                                         "VWARD_ACTOR": "network-agent;rm"},
+                       text=True, capture_output=True, timeout=30)
+    if (reqd / "engine-kick:OpkgTun2").read_text() != "network-agentrm\n":
+        fail(f"the request names who asks: {r.stderr} {(reqd / 'engine-kick:OpkgTun2').read_text() if (reqd / 'engine-kick:OpkgTun2').exists() else 'none'}")
 print("SENTINEL_RUNTIME=PASS")

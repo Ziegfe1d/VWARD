@@ -409,11 +409,14 @@ vward_update_pending() {
 }
 
 vward_agent_ask() {
-    case "$1" in ''|*[!a-z0-9:._-]*) return 64 ;; esac
+    # Capitals too: Keenetic names its tunnels with them (without them every
+    # «engine-kick:OpkgTun2» of the tunnel guard was refused before it was sent).
+    case "$1" in ''|*[!A-Za-z0-9:._-]*) return 64 ;; esac
     # During an update the components agent is stopped on purpose: asking would start it.
     ! vward_update_pending || return 75
     mkdir -p "$VWARD_AGENT_REQ" 2>/dev/null || return 1
-    : > "$VWARD_AGENT_REQ/$1" 2>/dev/null || return 1
+    # Who asks (VWARD_ACTOR), for the journals: «started by the components agent, asked by…».
+    printf '%s\n' "${VWARD_ACTOR:-}" | tr -cd 'A-Za-z0-9 ._:=\n-' > "$VWARD_AGENT_REQ/$1" 2>/dev/null || return 1
     [ ! -p "$VWARD_AGENT_REQ/.wake" ] || printf 'x\n' 1<>"$VWARD_AGENT_REQ/.wake" 2>/dev/null || :
     _va_p=
     [ ! -r "$VWARD_AGENT_PIDFILE" ] || read -r _va_p 2>/dev/null < "$VWARD_AGENT_PIDFILE" || :

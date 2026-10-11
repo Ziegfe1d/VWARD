@@ -20,6 +20,9 @@
 
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+# Who acts, for the journals of the programs it asks (one decision, one agent).
+VWARD_ACTOR=vward-off
+export VWARD_ACTOR
 umask 077
 
 STATE_DIR=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
