@@ -131,6 +131,30 @@ esac
     i = check(CONF.replace(PUB, "C" * 42 + "A=").replace("10.8.16.6", "10.8.99.9"))
     if "same" in i or "sameaddr" in i:
         fail(f"a new file must report nothing: {i}")
+    # No setting is dropped: AmneziaWG 3.x settings go to the engine, the computer's wg-quick
+    # settings are named, a setting nobody knows stops the check with its name.
+    NEW = CONF.replace(PUB, "C" * 42 + "A=").replace("10.8.16.6", "10.8.99.9")
+    i = check(NEW.replace("MTU = 1280", "MTU = 1280\nJc = 4\nJmin = 10\nJmax = 50\nS1 = 1\nS2 = 2\nH1 = 5\nH2 = 6\nH3 = 7\nH4 = 8"))
+    if i.get("engine") or i.get("hostonly"):
+        fail(f"AmneziaWG 1.x is the firmware's: {i}")
+    i = check(NEW.replace("MTU = 1280", "MTU = 1280\nRekeyAfterTime = 120\nTable = off\nPostUp = true"))
+    if i.get("engine") != "1" or i.get("hostonly") != "Table,PostUp":
+        fail(f"a 3.x setting goes to the engine, wg-quick's are named: {i}")
+    put(NEW.replace("MTU = 1280", "MTU = 1280\nI6 = <b 0x01>\nObfsMode = 3").replace("PersistentKeepalive = 25", "PersistentKeepalive = 25\nPeerMagic = 1"))
+    out, r = run("tunnel-conf", "check", str(conf))
+    if out != "error=conf_unknown_setting" or "reason=I6,ObfsMode,PeerMagic" not in r.stdout or r.returncode != 64:
+        fail(f"settings nobody knows must stop the check by name: {r.stdout!r}")
+    # The Panel's list and the engine's agree: every setting vward-awg reads is let through.
+    import re
+    go = (ROOT / "tools/vward-awg/conf.go").read_text()
+    helper = HELPER.read_text()
+    known = set(re.findall(r'\bif\.([a-z0-9]+)', helper))
+    known |= {f"{c}{n}" for c, hi in (("s", 4), ("h", 4), ("i", 5)) for n in range(1, hi + 1)}
+    for m in ("ifaceRange", "ifaceText", "ifaceBool", "ifaceHost"):
+        body = go[go.index(f"var {m} = "):]; body = body[:body.index("}")]
+        for k in re.findall(r'"([a-z0-9]+)":', body):
+            if k not in known:
+                fail(f"vward-awg reads {k}, the Panel would refuse a file with it")
     # A tunnel of the AmneziaWG engine is found by the file the engine keeps.
     (tmp / "etc/awg/tunnels.tsv").write_text("0\tOpkgTun0\t-\tFinland\n")
     (tmp / "etc/awg/t0.conf").write_text(CONF.replace(PUB, "D" * 42 + "A=").replace("10.8.16.6", "10.8.77.7"))

@@ -137,6 +137,7 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 @media (prefers-reduced-motion:reduce){.off-banner .spin{animation:none}}
 @media (max-width:480px){.off-banner{flex-wrap:wrap}.off-banner .btn{width:100%}}
 .field-warn{margin:0 16px 8px;padding:8px 12px;border-radius:var(--r-md);background:var(--warn-soft);color:var(--warn);font-size:var(--fs-sm)}
+.field-note{margin:0 16px 8px;padding:8px 12px;border-radius:var(--r-md);background:var(--surface-2);color:var(--muted);font-size:var(--fs-sm)}
 
 /* Метки состояния */
 /* Status: a coloured dot and plain text, no badge background. */

@@ -1215,15 +1215,29 @@ conf_parse() {
     ka=$(conf_get peer.persistentkeepalive "$cp_raw")
     case "$ka" in *-*) ka_hi=${ka#*-} ka=${ka%%-*}; valid_int_range "$ka_hi" 0 65535 || die conf_keepalive 64 ;; esac
     [ -z "$ka" ] || valid_int_range "$ka" 0 65535 || die conf_keepalive 64
-    # Newer AmneziaWG settings KeeneticOS 5.1 has no command for (its own import drops them
-    # too, seen on a real router): names only, for a warning.
-    unsup=$(sed -n 's/^name\.//p' "$cp_raw" | while IFS='=' read -r k o; do
+    # Every setting has a home, none is dropped: Keenetic's own commands, VWARD's AmneziaWG
+    # engine (vward-awg: AmneziaWG 3.x, KeeneticOS 5.1 has no command for it), or the
+    # computer's wg-quick (Table, PostUp...: the router does these itself; named in the Panel).
+    # A setting neither Keenetic nor the engine knows stops the import, by name: without it
+    # the tunnel would connect differently from the file, or not at all.
+    cp_where=$(awk -F= '/^(if|peer)\./ {print $1}' "$cp_raw" | awk '!s[$0]++' | while IFS= read -r k; do
         case "$k" in
-            privatekey|address|dns|mtu|listenport|jc|jmin|jmax|s[1-4]|h[1-4]|i[1-5]) ;;
-            publickey|presharedkey|allowedips|endpoint|persistentkeepalive) ;;
-            *) printf '%s\n' "$o" ;;
+            if.privatekey|if.address|if.dns|if.mtu|if.listenport|if.jc|if.jmin|if.jmax|if.s[1-4]|if.h[1-4]|if.i[1-5]) ;;
+            peer.publickey|peer.presharedkey|peer.allowedips|peer.endpoint|peer.persistentkeepalive) ;;
+            if.headerprotectionkey|if.contentpaddingaddition|if.rekeyaftertime|if.rekeytimeout|if.rejectaftertime|if.keepalivetimeout|if.maxhandshakeattempts|if.randomtrailers|if.disablecookies) echo engine ;;
+            if.table|if.preup|if.postup|if.predown|if.postdown|if.saveconfig|if.fwmark) echo "host $k" ;;
+            *) echo "unknown $k" ;;
         esac
-    done | awk '!s[$0]++' | head -n 20 | tr '\n' ',' | sed 's/,$//')
+    done)
+    # The file's own spelling of a setting (PostUp, not postup); a name awk could not keep, as is.
+    cp_names() {
+        printf '%s\n' "$cp_where" | sed -n "s/^$1 [a-z]*\.//p" | while IFS= read -r k; do
+            o=$(conf_get "name.$k" "$cp_raw"); printf '%s\n' "${o:-$k}"
+        done | tr -cd 'A-Za-z0-9_.\n-' | head -n 20 | tr '\n' ',' | sed 's/,$//'
+    }
+    unknown=$(cp_names unknown)
+    [ -z "$unknown" ] || { rm -f "$cp_raw"; printf 'reason=%s\n' "$unknown"; die conf_unknown_setting 64; }
+    hostonly=$(cp_names host)
     allowed=$(conf_get peer.allowedips "$cp_raw"); [ -n "$allowed" ] || allowed=0.0.0.0/0
 
     {
@@ -1231,13 +1245,8 @@ conf_parse() {
         echo "address=$ip $mask"; echo "endpoint=$host:$port"
         [ -z "$mtu" ] || echo "mtu=$mtu"
         [ -z "$ka" ] || [ "$ka" = 0 ] || echo "keepalive=$ka"
-        [ -z "$unsup" ] || echo "unsupported=$unsup"
-        # AmneziaWG 3.x (header protection, time ranges): KeeneticOS 5.1 has no
-        # command for it, VWARD's engine holds such a tunnel.
-        if sed -n 's/^name\.//p' "$cp_raw" | cut -d= -f1 |
-            grep -qxE 'headerprotectionkey|rekeyaftertime|rekeytimeout|rejectaftertime|keepalivetimeout|maxhandshakeattempts|contentpaddingaddition|randomtrailers|disablecookies'; then
-            echo "engine=1"
-        fi
+        [ -z "$hostonly" ] || echo "hostonly=$hostonly"
+        ! printf '%s\n' "$cp_where" | grep -qx engine || echo "engine=1"
     } > "$2" || die write_failed
     printf '%s\n' "$allowed" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | while IFS= read -r a; do
         case "$a" in
@@ -1453,7 +1462,7 @@ tunnel_summary() {
     printf 'info.keepalive=%s\n' "$(conf_get keepalive "$1")"
     printf 'info.awg=%s\n' "$([ -n "$(conf_get asc "$1")" ] && echo 1 || echo 0)"
     printf 'info.allowed=%s\n' "$(sed -n 's/^allow=//p' "$1" | tr '\n' ',' | sed 's/,$//')"
-    printf 'info.unsupported=%s\n' "$(conf_get unsupported "$1")"
+    printf 'info.hostonly=%s\n' "$(conf_get hostonly "$1")"
     printf 'info.engine=%s\n' "$(conf_get engine "$1")"
 }
 

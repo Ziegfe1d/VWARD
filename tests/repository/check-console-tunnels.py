@@ -86,6 +86,6 @@ with tempfile.TemporaryDirectory() as d:
 for need in ("TWHY=\"$(printf '%s\\n' \"$TALL\" | sed -n 's/^reason=//p' | tail -n 1)\"", "{reason:$w}"):
     if need not in API:
         fail(f"the API passes the router's reply: lacks {need}")
-if "(x && x.reason ? ' (ответ роутера: ' + x.reason + ')' : '')" not in JS:
+if "' (ответ роутера: ' + x.reason + ')'" not in JS or "x.error === 'conf_unknown_setting'" not in JS:
     fail("the Panel shows the router's reply")
 print("CONSOLE_TUNNELS=PASS")
