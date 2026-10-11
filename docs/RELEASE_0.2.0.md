@@ -1,7 +1,7 @@
 # Выпуск VWARD 0.2.0
 
 Этапы: **RC1 → RC2 → RP1 → RP2 → RETAIL**. Условия каждого этапа описаны в
-[`MASTER_PLAN_0.2_TO_FINAL.md`](MASTER_PLAN_0.2_TO_FINAL.md). Здесь описан порядок
+[`ROADMAP.md`](ROADMAP.md). Здесь описан порядок
 выпуска и приёмки на роутере.
 
 | Этап | VERSION | Что меняется |

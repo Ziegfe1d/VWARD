@@ -1,7 +1,7 @@
 # Чек-лист публичного релиза
 
 Используется на этапах RP2 и RETAIL (после RC1, RC2 и RP1). Полная последовательность и
-доказательства: [`MASTER_PLAN_0.2_TO_FINAL.md`](MASTER_PLAN_0.2_TO_FINAL.md).
+доказательства: [`ROADMAP.md`](ROADMAP.md).
 
 - [ ] нет PrivateKey/PresharedKey/API tokens;
 - [ ] нет домашних IP/hostname, кроме документированных fallback-примеров;
