@@ -273,6 +273,13 @@ esac
     now = copies(etc / "v0.json")
     if len(now) != 1 or now == old:
         fail(f"after a restart with a stale pid file exactly one new Xray runs: before {old}, after {now}")
+    # «Включить» in the Panel: Xray starts again at once, the server is not waited for.
+    t0 = _t.time()
+    if engine("start", "OpkgTun1")[-1] != "result=changed" or _t.time() - t0 > 5 or engine("start", "OpkgTun9") != ["error=unknown_tunnel"]:
+        fail("start must run Xray at once, without waiting for the server")
+    _t.sleep(0.5)
+    if len(copies(etc / "v0.json")) != 1:
+        fail("after start exactly one Xray runs")
     # A program whose tunnel is gone (removed, but not stopped) is stopped by supervise.
     fake = tmp / "fakebin"; fake.mkdir()
     (fake / "xray").write_text("#!/bin/sh\nwhile :; do sleep 1; done\n"); (fake / "xray").chmod(0o755)

@@ -340,6 +340,14 @@ with tempfile.TemporaryDirectory() as t:
     run("enable", "OpkgTun1", expect="result=unchanged")
     run("supervise", expect="result=changed")
     time.sleep(0.3)
+    # «Включить» in the Panel: the program starts at once, the server is not waited for.
+    (t / "run/t0.state").unlink(missing_ok=True)
+    t0 = time.time()
+    run("start", "OpkgTun1", expect="result=changed")
+    if time.time() - t0 > 5 or not (t / "run/t0.pid").exists():
+        fail("start must run the program at once, without waiting for the server")
+    run("start", "OpkgTun7", expect="error=unknown_tunnel")
+    time.sleep(0.3)
 
     # Remove: program stopped, Keenetic connection gone and saved, files deleted.
     run("remove", "OpkgTun7", expect="error=unknown_tunnel")

@@ -38,7 +38,7 @@ def line(start):
 
 
 code = "".join([
-    line("const isTrue = "), line("const FO_WHY = "), line("const foText = "), line("const tunPill = "), line("const tunGuardOff = "),
+    line("const isTrue = "), line("const FO_WHY = "), line("const foText = "), grab("const tunPill = ", "];\n"), line("const tunGuardOff = "),
     line("const tunOff = "), line("const viaIs = "), line("const vpnDirect = "),
     grab("function tunDupAddresses("), grab("function notifications() {"), grab("function cardData(id) {"),
 ])
@@ -46,6 +46,7 @@ harness = """
 let STATUS = null; const S = { errors: {}, lists: null };
 const st = () => STATUS || {}; const prof = () => ({ tunnel_interface: 'OpkgTun2' }); const plat = () => ({});
 const tunLabel = n => n; const fmtTime = t => 'T' + t; const num = v => v == null ? null : Number(v); const fmtKB = v => v; const fmtInt = v => v;
+const TUNBUSY = {}, TUNUP = {}; const TUN_BUSY = { up: 'Включение', down: 'Выключение', restart: 'Перезапуск' };
 const phaseText = v => v; const plural = (n, a) => a; const comp = () => null; const awgLost = () => []; const durText = v => v; const fmtSpeed = v => v;
 """ + code + """
 const T = (name, connected, state) => ({ name, description: name, connected: connected ? 'yes' : 'no', state });
@@ -56,6 +57,9 @@ const out = {
   silent: run({ interfaces: [T('OpkgTun0', false, 'down'), T('OpkgTun2', false, 'up')] }),
   agentOff: run({ interfaces: [T('OpkgTun0', false, 'down'), T('OpkgTun2', false, 'down')], failopen_active: true, failopen_at: 1791770000, failopen_reason: ['silent', 'restart_servers', 'no_fallback'] }),
 };
+// Switched in place: what is going on, then «Подключение» until the server answers.
+TUNBUSY.OpkgTun0 = 'down'; out.busy = run({ interfaces: [T('OpkgTun0', true, 'up')] }).pills; delete TUNBUSY.OpkgTun0;
+TUNUP.OpkgTun0 = 1; out.connecting = run({ interfaces: [T('OpkgTun0', false, 'up')] }).pills; delete TUNUP.OpkgTun0;
 console.log(JSON.stringify(out));
 """
 r = subprocess.run(["node", "-e", harness], capture_output=True, text=True, timeout=30)
@@ -63,6 +67,8 @@ if r.returncode != 0:
     fail(r.stderr[-1200:])
 o = json.loads(r.stdout)
 
+if o["busy"] != [":Выключение"] or o["connecting"] != [":Подключение"]:
+    fail(f"the status while switching: {o['busy']} {o['connecting']}")
 # Switched off by the owner: quiet; only switched-on tunnels counted.
 if o["ownerOff"]["notes"] or o["ownerOff"]["card"]["pill"] != ["ok", "Работает"] or o["ownerOff"]["card"]["value"] != "1 из 1" or "выключены: 2" not in o["ownerOff"]["card"]["sub"]:
     fail(f"tunnels the owner switched off are no fault: {o['ownerOff']}")

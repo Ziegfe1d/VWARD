@@ -66,8 +66,8 @@ case "$dev" in eth3) printf '000 6.001 '; exit 28 ;; nwg0) printf '451 0.210 ' ;
             fail(f"{bad!r} must be refused")
 
 js = (ROOT / "web/assets/vward-console.js").read_text()
-for need in ("return loadError(['route']) + sitePanel()", "return loadError(['status']) + sitePanel()", "apiGet('site-test'",
-             "btn('site-fix'", "function siteFix(", "op: 'restart', name: tun", "btn('tunnel-up'", "btn('tunnel-restart'",
+for need in ("return loadError(['route']) + sitePanel()", "apiGet('site-test'",
+             "btn('site-fix'", "function siteFix(", "await tunnelState('restart', tun)", "btn('tunnel-up'", "btn('tunnel-restart'",
              "return loadError(['ads']) + chainNotice() + adsCheckPanel()", "view: 'check'", "setting: 'user-rule'"):
     if need not in js:
         fail(f"the Panel lacks {need}")
@@ -78,6 +78,9 @@ for need in ("tunnel-state) op_tunnel_state", 'ndm "interface $2 down"', "save_r
 # «Перезапустить» saves nothing: the save is only on «Включить» and «Выключить».
 body = helper[helper.index("op_tunnel_state() {"):helper.index("op_tunnel_delete() {")]
 down = body[body.index('if [ "$1" = down ]; then'):body.index('done_ok "tunnel-state down $2" changed')]
-if body.count("save_router") != 2 or down.count("save_router") != 1 or 'if [ "$1" = up ]; then' not in body:
+if body.count("save_router") != 2 or down.count("save_router") != 1 or '[ "$1" != up ] || save_router' not in body:
     fail("a restart must not save the router's settings")
+# One address check: in «Маршрутизация» only; the Ads page's is «Проверка блокировки» (owner 2026-10-12).
+if js.count("sitePanel()") != 2 or "panel('Проверка блокировки', inputBar({ form: 'ads-check'" not in js:
+    fail("the address check stands once (routing), the ads check is named for what it does")
 print("CONSOLE_SITE_TEST=PASS")

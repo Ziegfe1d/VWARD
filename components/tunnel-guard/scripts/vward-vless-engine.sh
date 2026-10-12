@@ -11,7 +11,7 @@
 # SHA-256 pinned below. A link holds the user's id (a key): the files are root-only and it
 # is never printed, logged or put in a process's arguments.
 #
-# vward-vless-engine.sh servers FILE | add DESCRIPTION FILE | remove NAME | restart NAME |
+# vward-vless-engine.sh servers FILE | add DESCRIPTION FILE | remove NAME | restart NAME | start NAME |
 #                       kick NAME | failover NAME | disable NAME | enable NAME | supervise |
 #                       stop | status | install
 # FILE: vless:// or trojan:// links, one a line, or the address of a subscription (https://...); a line
@@ -711,6 +711,18 @@ op_restart() {
     echo "result=changed"
 }
 
+# start NAME: the program (re)started without waiting for the server - the Panel's switch
+# (Keenetic switches a tunnel at once; the answer of the server shows in the tunnel's status).
+op_start() {
+    row=$(row_of "$1")
+    [ -n "$row" ] || die unknown_tunnel 64
+    n=$(printf '%s' "$row" | cut -f1)
+    stop_one "$n"
+    start_one "$n" || die engine_start_failed
+    log "started $1 by request"
+    echo "result=changed"
+}
+
 op_stop() {
     [ -f "$TUNNELS" ] || { echo "result=unchanged"; return 0; }
     while IFS="$(printf '\t')" read -r n name server desc; do stop_one "$n"; done < "$TUNNELS"
@@ -767,6 +779,7 @@ case "${1:-}" in
     remove) [ "$#" -eq 2 ] || die usage 64; op_remove "$2"; sentinel_reload ;;
     restart) [ "$#" -eq 2 ] || die usage 64; op_restart "$2" ;;
     kick) [ "$#" -eq 2 ] || die usage 64; op_kick "$2" ;;
+    start) [ "$#" -eq 2 ] || die usage 64; op_start "$2" ;;
     failover) [ "$#" -eq 2 ] || die usage 64; op_failover "$2" ;;
     list) [ "$#" -eq 2 ] || die usage 64; op_list "$2" ;;
     select) [ "$#" -eq 3 ] || die usage 64; op_select "$2" "$3" ;;

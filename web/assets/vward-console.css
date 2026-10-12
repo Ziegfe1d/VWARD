@@ -119,7 +119,7 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 /* A phone bar: five labels of up to nine letters fit whole. */
 @media (max-width:439px){.tabbar{left:6px;right:6px;padding:5px;column-gap:0}.tab{letter-spacing:-.15px}}
 @media (max-width:339px){.tabbar{left:4px;right:4px;padding:4px}.tabbar .tab{padding:0;font-size:9.5px;letter-spacing:-.25px}}
-.kv dd select.input{max-width:190px}
+.kv dd select.input{max-width:190px;font-size:var(--fs-sm);font-weight:400}
 .kv-row .hint{display:block;margin-top:2px;color:var(--faint);font-size:var(--fs-xs)}
 .kv-row.sub dt{padding-left:14px}
 /* A slider with its value next to it (journal size). */
@@ -175,9 +175,10 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .pill.card-alert::before{display:none}
 .pill.card-alert .icon{width:16px;height:16px;flex:none}
 .pill.card-alert.warn{color:var(--warn)}
-.card-title{grid-area:title;margin-top:10px;font-size:var(--fs-sm);font-weight:600;color:var(--muted);overflow-wrap:break-word}
-.card-value{grid-area:value;font-variant-numeric:tabular-nums;font-size:var(--fs-lg);font-weight:700;line-height:1.25;overflow-wrap:break-word}
-.card-sub{grid-area:sub;color:var(--muted);font-size:var(--fs-xs);overflow-wrap:break-word}
+.card-title{grid-area:title;margin-top:10px;font-size:var(--fs-sm);font-weight:600;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Three lines a card on any screen (owner 2026-10-12): title, value, one line under it; longer text ends in «…». */
+.card-value{grid-area:value;font-variant-numeric:tabular-nums;font-size:var(--fs-lg);font-weight:700;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-sub{grid-area:sub;color:var(--muted);font-size:var(--fs-xs);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .meter{grid-area:meter;height:6px;margin-top:8px;border-radius:3px;background:var(--surface-2);overflow:hidden}
 .meter i{display:block;height:100%;background:var(--accent);border-radius:3px}
 .card-edit{grid-area:edit;display:none;justify-content:flex-end;gap:2px;margin-top:8px;padding-top:6px;border-top:1px solid var(--line)}

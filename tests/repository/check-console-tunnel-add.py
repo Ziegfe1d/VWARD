@@ -285,6 +285,20 @@ esac
     (tmp / "running.cfg.down-refused").unlink()
     if out != "error=router_rejected":
         fail(f"a refused down: {out!r}")
+    # On and restart at once, as Keenetic's own switch: the server is not waited for (it answers
+    # nothing here); on is saved, a restart is not.
+    import time as _t
+    before_log = (tmp / "running.cfg.log").read_text()
+    t0 = _t.time()
+    out, _ = run("tunnel-state", "up", "Wireguard2")
+    new_log = (tmp / "running.cfg.log").read_text()[len(before_log):].splitlines()
+    if out != "result=changed" or new_log[-2:] != ["interface Wireguard2 up", "system configuration save"] or _t.time() - t0 > 10:
+        fail(f"up must switch on and save at once, without the server: {out!r} {new_log}")
+    before_log = (tmp / "running.cfg.log").read_text()
+    out, _ = run("tunnel-state", "restart", "Wireguard2")
+    new_log = (tmp / "running.cfg.log").read_text()[len(before_log):].splitlines()
+    if out != "result=changed" or new_log != ["interface Wireguard2 down", "interface Wireguard2 up"]:
+        fail(f"restart: off and on, nothing saved: {out!r} {new_log}")
     if (tmp / "change.lock").exists():
         fail("lock left behind")
 

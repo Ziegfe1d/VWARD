@@ -23,7 +23,7 @@ def piece(start, end):
     return JS[a:JS.index(end, a)]
 
 
-script = "\n".join([piece("const TUN_TYPE =", "// Switched off in Keenetic"), piece("const tunOff =", "// Restart (off and on"),
+script = "\n".join([piece("const TUN_TYPE =", "// Switched off in Keenetic"), piece("const tunOff =", "async function tunnelOp("),
                     piece("const vlessOf =", "\n")]) + r"""
 const isTrue = v => v === true || v === 1 || v === '1' || v === 'true';
 let S = { awg: { tunnels: [{ name: 'OpkgTun0', running: true, handshake: 12 }, { name: 'OpkgTun2', running: false }], vless: { tunnels: [{ name: 'OpkgTun1', running: true }] } } };
@@ -53,7 +53,7 @@ for need in ("'<span class=\"st ok\">по умолчанию</span>'", "'Сде�
         fail(f"the Panel lacks {need}")
 if "для маршрутов" in JS:
     fail("the default tunnel is called «по умолчанию» everywhere")
-if "    restart|up|down)" not in API or "rx: ($t[6] // \"\" | tonumber? // null)" not in API or "off: ($t[5] == \"1\")" not in API:
+if "    restart|up|down|delete|subnet-add|subnet-remove)" not in API or 'set -- tunnel-state "$TOP" "$TNAME"' not in API or "rx: ($t[6] // \"\" | tonumber? // null)" not in API or "off: ($t[5] == \"1\")" not in API:
     fail("the API passes down and the engines' traffic and off flag")
 body = HELPER[HELPER.index("op_tunnel_state() {"):HELPER.index("op_tunnel_delete() {")]
 down = body[body.index('if [ "$1" = down ]; then'):body.index('done_ok "tunnel-state down $2" changed')]
@@ -66,7 +66,7 @@ if '"$ENG" enable "$2"' not in body:
 # goes through the VPN, and must say the lists go direct (card, notification, tunnel page).
 # Switched off by the owner (owner 2026-10-12): the Overview and the tunnel page say the lists
 # go direct, the bell stays quiet (check-console-tunnel-status.py runs it).
-for need in ("'туннель по умолчанию выключен, списки идут напрямую'",
+for need in ("!on.some(t => t.name === prof().tunnel_interface) ? 'списки идут напрямую'",
              "down = tunnels.filter(t => !isTrue(t.connected) && !tunOff(t) && !tunGuardOff(t))",
              "он назначен по умолчанию, списки VPN идут напрямую"):
     if need not in JS:
@@ -128,4 +128,48 @@ for need in ('"$ROUTE_AWK"\' $1 == "ip" && $2 == "route" && rdev() == i {print $
              '"$ROUTE_AWK"\' $1 == "ip" && $2 == "route" && rdev() == i {f = 1}'):
     if need not in HELPER:
         fail(f"tunnel delete lacks {need}")
+# «Резерв и выбор туннеля»: settings only, the tunnels are in «Туннели» (owner 2026-10-12); a
+# VLESS tunnel's quality is a page's answer, not ping; the speed carries its date and is not
+# shown while measuring is off.
+if "panel('Несколько туннелей'" in JS or "panel('Резерв и выбор туннеля'" not in JS or "раз в минуту пинг через каждый туннель" in JS:
+    fail("the reserve panel lists no tunnels and says nothing of ping")
+q = piece("const tqSpeed =", "const TQ_CRITERIA") + r"""
+const fmtTime = x => 'T' + x;
+let S = { tq: { auto: { speed: 'night' } }, awg: { vless: { tunnels: [{ name: 'OpkgTun1' }] } } };
+const vlessOf = n => S.awg.vless.tunnels.find(x => x.name === n);
+const a = tqText({ name: 'OpkgTun1', avg_ms: 120, loss_pct: 0, speed_mbps: 7.9, speed_at: 5 });
+const b = tqText({ name: 'Wireguard0', avg_ms: 40, loss_pct: 0 });
+S.tq.auto.speed = 'off';
+const c = tqText({ name: 'OpkgTun1', avg_ms: 120, loss_pct: 0, speed_mbps: 7.9, speed_at: 5 });
+console.log(JSON.stringify([a, b, c]));
+"""
+r = subprocess.run(["node", "-e", q], text=True, capture_output=True)
+if r.returncode:
+    fail(r.stderr[-400:])
+got = json.loads(r.stdout)
+if got != ["ответ страницы 120 мс · потери 0% · скорость 7,9 Мбит/с (T5000)", "пинг 40 мс · потери 0%", "ответ страницы 120 мс · потери 0%"]:
+    fail(f"quality lines: {got}")
+# The API switches a tunnel in the request (no background job): the helper's answer, and the
+# router's own words on a refusal.
+import shutil as _sh, tempfile as _tf
+with _tf.TemporaryDirectory() as tmp:
+    helper = os.path.join(tmp, "helper")
+    with open(helper, "w") as f:
+        f.write('#!/bin/sh\necho "$*" >> "$(dirname "$0")/calls"\n'
+                'case "$3" in Wireguard9) echo "reason=Command::Base error: not found"; echo "error=router_rejected" ;; *) echo "result=changed" ;; esac\n')
+    os.chmod(helper, 0o755)
+    os.makedirs(os.path.join(tmp, "tmp"))
+    def post(body):
+        e = {"PATH": os.environ["PATH"], "REQUEST_METHOD": "POST", "QUERY_STRING": "action=tunnel-conf", "JQ": _sh.which("jq"),
+             "VWARD_PROFILE_LIB": "/nonexistent", "VWARD_CONSOLE_CONFIG_BIN": helper, "CONTENT_TYPE": "application/x-www-form-urlencoded",
+             "CONTENT_LENGTH": str(len(body)), "HTTP_X_VWARD_REQUEST": "console", "VWARD_ROOT_PREFIX": tmp,
+             "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh")}
+        r = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=e, input=body, text=True, capture_output=True, timeout=30)
+        return json.loads(r.stdout.split("\n\n", 1)[1])
+    if post("op=up&name=Wireguard2") != {"ok": True, "result": "changed"} or post("op=down&name=Wireguard2") != {"ok": True, "result": "changed"}:
+        fail("the API switches a tunnel in the request")
+    if post("op=up&name=Wireguard9") != {"ok": False, "error": "router_rejected", "reason": "Command::Base error: not found"}:
+        fail("a refusal carries the router's reply")
+    if open(os.path.join(tmp, "calls")).read().splitlines() != ["tunnel-state up Wireguard2", "tunnel-state down Wireguard2", "tunnel-state up Wireguard9"]:
+        fail("the API asks the helper for tunnel-state")
 print("CONSOLE_TUNNELS=PASS")

@@ -18,10 +18,15 @@ def fail(message: str) -> None:
 
 
 _js = (ROOT / "web/assets/vward-console.js").read_text()
-for need in ("sw('data-tunsw=\"' + esc(t.name) + '\"', !tunOff(t)", "t.name === managed || !cfgOk()", "'tunsw-off': c => tunnelState('down', c.name)",
-             "confirm = { id: 'tunsw-off', name: n }", "tunnelState('up', n)", "if (t.dataset.go && e.target.closest('.switch')) return;", 'class="row link tun"'):
+# The switch works at once, as Keenetic's own (owner 2026-10-12): no confirmation, no window; it
+# shows the state it goes to and stays disabled until the router answered.
+for need in ("sw('data-tunsw=\"' + esc(t.name) + '\"', TUNBUSY[t.name] ? TUNBUSY[t.name] !== 'down' : !tunOff(t)", "t.name === managed || !cfgOk() || !!TUNBUSY[t.name]",
+             "t.disabled = true; tunnelState(t.checked ? 'up' : 'down', n);", "if (t.dataset.go && e.target.closest('.switch')) return;", 'class="row link tun"',
+             "(TUNERR[t.name] ? '<small class=\"st crit\">'"):
     if need not in _js:
         fail(f"the tunnel switch lacks {need!r}")
+if "tunsw-off" in _js:
+    fail("switching a tunnel off from the list asks nothing")
 
 
 for need in ("'<div class=\"panel-actions even\">' + btn('tunnel-probe', 'check', 'Проверить', 'primary'",

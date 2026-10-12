@@ -14,7 +14,7 @@
 # arguments.
 #
 # vward-awg-engine.sh install | add DESCRIPTION FILE [keep] | replace NAME FILE [keep] | remove NAME |
-#                     restart NAME | disable NAME | enable NAME | supervise | stop | status
+#                     restart NAME | start NAME | disable NAME | enable NAME | supervise | stop | status
 # Output: "result=..." / "info.key=value" lines, or "error=<code>".
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
@@ -425,6 +425,18 @@ op_restart() {
     echo "result=changed"
 }
 
+# start NAME: the program (re)started without waiting for the server - the Panel's switch
+# (Keenetic switches a tunnel at once; the answer of the server shows in the tunnel's status).
+op_start() {
+    row=$(row_of "$1")
+    [ -n "$row" ] || die unknown_tunnel 64
+    n=$(printf '%s' "$row" | cut -f1)
+    stop_one "$n"
+    start_one "$n" "$1" || die engine_start_failed
+    log "started $1 by request"
+    echo "result=changed"
+}
+
 op_stop() {
     [ -f "$TUNNELS" ] || { echo "result=unchanged"; return 0; }
     while IFS="$(printf '\t')" read -r n name port desc; do stop_one "$n"; done < "$TUNNELS"
@@ -481,6 +493,7 @@ case "${1:-}" in
     remove) [ "$#" -eq 2 ] || die usage 64; op_remove "$2"; sentinel_reload ;;
     restart) [ "$#" -eq 2 ] || die usage 64; op_restart "$2" ;;
     kick) [ "$#" -eq 2 ] || die usage 64; op_kick "$2" ;;
+    start) [ "$#" -eq 2 ] || die usage 64; op_start "$2" ;;
     disable) [ "$#" -eq 2 ] || die usage 64; op_disable "$2"; sentinel_reload ;;
     enable) [ "$#" -eq 2 ] || die usage 64; op_enable "$2"; sentinel_reload ;;
     supervise) op_supervise ;;

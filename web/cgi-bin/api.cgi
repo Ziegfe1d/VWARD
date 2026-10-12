@@ -1006,16 +1006,15 @@ if [ "$ACTION" = tunnel-conf ]; then
       ARGS="vless-server select $TNAME $TIDX"
       CMD="$CONFIG_HELPER" LABEL="tunnel-server" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
       run_detached "$CONTROL_RUN_DIR" control_busy ;;
-    restart|up|down)
-      # Waiting for the server outlasts a request: in the background, like a new tunnel.
+    restart|up|down|delete|subnet-add|subnet-remove)
+      # On, off and restart at once, as Keenetic's own switch (the server's answer shows in the
+      # tunnel's status): in the request, like a deletion. Not while a tunnel job runs.
       [ -n "$TNAME" ] || { echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0; }
       ! detached_running "$CONTROL_RUN_DIR" || { echo '{"ok":false,"error":"control_busy"}'; exit 0; }
-      ARGS="tunnel-state $TOP $TNAME"
-      CMD="$CONFIG_HELPER" LABEL="tunnel-$TOP" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
-      run_detached "$CONTROL_RUN_DIR" control_busy ;;
-    delete|subnet-add|subnet-remove)
       console_mutation_enter || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }; trap console_mutation_leave EXIT
-      if [ "$TOP" = delete ]; then
+      if [ "$TOP" = restart ] || [ "$TOP" = up ] || [ "$TOP" = down ]; then
+        set -- tunnel-state "$TOP" "$TNAME"
+      elif [ "$TOP" = delete ]; then
         [ "$TCONF" = TUNNEL_DELETE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
         TTO="$(form_value target)"; case "$TTO" in ''|*[!A-Za-z0-9_.-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
         set -- tunnel-delete "$TNAME" "$TTO"
