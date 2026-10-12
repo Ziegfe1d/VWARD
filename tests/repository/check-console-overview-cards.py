@@ -45,7 +45,7 @@ def line(start):
 
 
 code = "".join([line("const isTrue = "), grab("const tunPill = ", "];\n"), line("const tunGuardOff = "), line("const tunOff = "), line("const viaIs = "),
-                line("const vpnDirect = "), grab("function wifiWarnText("), grab("function cardData(id) {")])
+                line("const vpnDirect = "), line("const lowDisk = "), grab("function wifiWarnText("), grab("function cardData(id) {")])
 harness = """
 let STATUS = {}; const S = { lists: null, route: null, wifi: null, ads: null, adsstats: null };
 const st = () => STATUS; const prof = () => ({ tunnel_interface: 'OpkgTun2' }); const plat = () => ({});
@@ -63,12 +63,16 @@ S.wifi = { enabled: true, count: 6, clients: [{ mac: 'aa', health: 'WARNING', re
 S.ads = { counts: { blocked: 1 } }; S.adsstats = { ok: true, blocked: 12430 };
 const out = {};
 for (const id of ['wan', 'vpn', 'lists', 'routes', 'wifi', 'ads', 'storage']) { const c = cardData(id); out[id] = [c.title, c.value, c.sub]; }
+// «Мало места»: a tenth of a big drive is plenty (252 GB with 23.8 GB free is not a warning).
+out.low = [lowDisk(264241152, 24956108), lowDisk(8388608, 200000), lowDisk(8388608, 700000), lowDisk(33554432, 2097152)];
 console.log(JSON.stringify(out));
 """
 r = subprocess.run(["node", "-e", harness], capture_output=True, text=True, timeout=30)
 if r.returncode:
     fail(r.stderr[-1000:])
 o = json.loads(r.stdout)
+if o.pop("low") != [False, True, True, False]:
+    fail("«Мало места» by a share alone: a big drive with gigabytes free warns")
 want = {
     "wan": ["Интернет", "В сети", "порт 1 Гбит/с"],
     "vpn": ["VPN", "1 из 1", "выключены: 1"],

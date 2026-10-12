@@ -891,7 +891,7 @@ function notifications() {
   if (sv.adguard === false && sv.adguard_broken) n.push({ sev: 'crit', title: 'Программа AdGuard Home повреждена', text: 'Она не запускается даже с --version, поэтому VWARD её не перезапускает. Замените файл официальной сборкой AdGuard Home той же версии.', to: 'd-stability' });
   if (sv.crond === false || sv.supervisor === false) n.push({ sev: 'crit', title: 'Задания по расписанию остановлены', text: 'расписание заданий не работает', to: 'd-cron' });
   const total = num(stg.total_kb), free = num(stg.free_kb);
-  if (total && free != null && free / total < 0.1) n.push({ sev: 'warn', title: 'Мало места в хранилище', text: 'свободно ' + fmtKB(free), to: 'system' });
+  if (total && free != null && lowDisk(total, free)) n.push({ sev: 'warn', title: 'Мало места в хранилище', text: 'свободно ' + fmtKB(free), to: 'system' });
   if (['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase)) n.push({ sev: 'crit', title: 'Обновление требует внимания', text: phaseText(p.phase), to: 'u-vward' });
   if (S.update && S.update.pending && S.update.pending.present) n.push({ sev: 'news', icon: 'save', title: 'Вышла новая версия VWARD', text: (S.update.pending.version || '') + ' - нажмите, чтобы посмотреть и установить', to: 'u-vward' });
   const wc = ((S.wifi && S.wifi.clients) || []).filter(c => c.health === 'WARNING').length;
@@ -926,6 +926,8 @@ function wifiWarnText(wf) {
 }
 // Which router answer each card is drawn from.
 const CARD_KEY = { system: 'status', updates: 'status', wan: 'status', vpn: 'status', storage: 'status', lists: 'lists', routes: 'route', wifi: 'wifi', ads: 'ads' };
+// Little space: under 256 MB, or under a tenth and under 1 GB (a tenth of a big drive is plenty).
+const lowDisk = (total, free) => free < 262144 || (free / total < 0.1 && free < 1048576);
 function cardData(id) {
   const s = st(), p = plat(), w = s.wan || {}, wg = s.wg || {}, sv = s.services || {}, g = s.storage || {}, r = S.route || {}, wf = S.wifi || {}, a = S.ads || {};
   const tunnels = wg.interfaces || [], up = tunnels.filter(t => isTrue(t.connected)).length;
@@ -934,8 +936,9 @@ function cardData(id) {
   switch (id) {
     // «0.2.0-rc.1.fix.19»: the release on the card, its fix number under it.
     case 'system': { const vm = /^(.*?)\.fix\.(\d+)$/.exec(p.version || ''); return { icon: 'platform', title: 'Система', to: 'system', value: vm ? vm[1] : p.version || '—',
-      sub: (vm ? 'исправление ' + vm[2] + (comps ? ' · ' : '') : '') + (comps ? comps + ' ' + plural(comps, 'компонент', 'компонента', 'компонентов') : vm ? '' : 'версия VWARD'), pill: p.version ? ['ok', 'Работает'] : ['', '—'] }; }
-    case 'updates': return { icon: 'refresh', title: 'Обновления', to: 'updates', value: ['IDLE', 'COMMITTED', undefined, ''].includes(p.phase) ? 'Новых нет' : phaseText(p.phase), sub: 'канал ' + (p.channel || '—') + (p.check_interval_seconds ? ' · проверка раз в ' + durText(p.check_interval_seconds) : ''), pill: ['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase) ? ['crit', 'Ошибка'] : ['', ''] };
+      // One short line on a phone: the components are on the System page.
+      sub: vm ? 'исправление ' + vm[2] : comps ? comps + ' ' + plural(comps, 'компонент', 'компонента', 'компонентов') : 'версия VWARD', pill: p.version ? ['ok', 'Работает'] : ['', '—'] }; }
+    case 'updates': return { icon: 'refresh', title: 'Обновления', to: 'updates', value: ['IDLE', 'COMMITTED', undefined, ''].includes(p.phase) ? 'Новых нет' : phaseText(p.phase), sub: fmtStamp(p.last_health_check) ? 'проверено ' + fmtStamp(p.last_health_check) : 'канал ' + (p.channel || '—'), pill: ['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase) ? ['crit', 'Ошибка'] : ['', ''] };
     case 'wan': return { icon: 'globe', title: 'Интернет', to: 'wan', value: w.internet ? 'В сети' : s.wan ? 'Нет связи' : '—', sub: w.speed ? 'порт ' + fmtSpeed(w.speed) : w.address || 'адрес не получен', pill: w.internet ? ['ok', 'Работает'] : s.wan ? ['crit', 'Не работает'] : ['', '—'] };
     // Only switched-on tunnels count: one the owner switched off is not a fault (owner 2026-10-12).
     case 'vpn': {
@@ -958,7 +961,7 @@ function cardData(id) {
     // «almost nothing blocked»: they are on the Ads page).
     case 'ads': { const q = S.adsstats; return { icon: 'block', title: 'Реклама', to: 'ads', value: q && q.ok ? fmtInt(q.blocked) : '—',
       sub: q && q.ok ? 'заблокировано за сутки' : q ? 'нет статистики' : 'загрузка…', pill: !S.ads ? ['', '—'] : a.paused ? ['warn', 'Пауза'] : ((a.dns_guard || {}).chain_state === 'out') ? ['warn', 'Не фильтруется'] : ['ok', 'Работает'] }; }
-    case 'storage': { const t = num(g.total_kb), f = num(g.free_kb), used = t ? Math.round((t - f) / t * 100) : null; return { icon: 'storage', title: 'Хранилище', to: 'system', value: t ? fmtKB(t - f) : '—', sub: t ? 'занято из ' + fmtKB(t) : 'нет данных', pill: used == null ? ['', '—'] : used > 90 ? ['warn', used + ' %'] : ['ok', used + ' %'], meter: used }; }
+    case 'storage': { const t = num(g.total_kb), f = num(g.free_kb), used = t ? Math.round((t - f) / t * 100) : null; return { icon: 'storage', title: 'Хранилище', to: 'system', value: t ? fmtKB(t - f) : '—', sub: t ? 'занято из ' + fmtKB(t) : 'нет данных', pill: used == null ? ['', '—'] : lowDisk(t, f) ? ['warn', used + ' %'] : ['ok', used + ' %'], meter: used }; }
   }
   return null;
 }

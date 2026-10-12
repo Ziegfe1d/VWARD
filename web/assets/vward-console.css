@@ -413,7 +413,9 @@ small.st .icon{width:14px;height:14px}
 .dd-opt .dd-mark{flex:none;width:18px;height:18px;color:var(--accent);visibility:hidden}
 .dd-opt[aria-selected="true"]{font-weight:650}
 .dd-opt[aria-selected="true"] .dd-mark{visibility:visible}
-.dd-opt:hover,.dd-opt:focus-visible{background:var(--surface-2);outline:none}
+.dd-opt:hover{background:var(--surface-2)}
+/* Отдельно: Safari до 15.4 не знает :focus-visible и отбросил бы всё правило вместе с :hover. */
+.dd-opt:focus-visible{background:var(--surface-2);outline:none}
 .dd-opt:disabled{color:var(--faint);cursor:default}
 .overview-bar .ob-time{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .overview-bar .btn{flex:none}
