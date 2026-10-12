@@ -160,6 +160,12 @@ ip route 203.0.113.0 255.255.255.0 nwg8 auto
     result = run(SHOW, env)
     assert result.returncode == 0 and "Wireguard8|nwg8" in result.stdout, "fresh cache must be reused"
 
+# Keenetic writes a route to one address without its mask: the tunnel is still the one in use.
+with tempfile.TemporaryDirectory() as tmp:
+    env = keenetic(Path(tmp), "!\nip route 203.0.113.9 Wireguard3 auto\n")
+    result = run(SHOW, env)
+    assert result.returncode == 0 and "|Wireguard3|nwg3|" in result.stdout, (result.stdout, result.stderr)
+
 with tempfile.TemporaryDirectory() as tmp:
     env = keenetic(Path(tmp), "!\n")
     result = run(SHOW, env)
@@ -276,5 +282,20 @@ with tempfile.TemporaryDirectory() as tmp:
     result = run("vward_interface_state Wireguard0", env)
     assert result.stdout.splitlines()[:2] == ["down", "down"], ("ndmc: switched off in Keenetic", result.stdout)
     assert run("vward_interface_state 'bad name'", env).returncode != 0, "invalid names must be refused"
+
+# Keenetic did not answer in time (28) or at all (7): noted for «Стабильность»; an error
+# answer (22) is an answer. The note stays small.
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    note = tmp / "rci.log"
+    env = {"PATH": os.environ["PATH"], "VWARD_CURL_BIN": str(tmp / "curl"), "VWARD_RCI_WGET": "none", "VWARD_RCI_FAIL_LOG": str(note)}
+    for code in (28, 7, 22):
+        write_exec(tmp / "curl", f"#!/bin/sh\nexit {code}\n")
+        assert run("vward_rci_get show/version 1", env).returncode == 1
+    got = [l.split("\t")[1] for l in note.read_text().splitlines()]
+    assert got == ["28", "7"], got
+    write_exec(tmp / "curl", "#!/bin/sh\nexit 28\n")
+    run("i=0; while [ $i -lt 400 ]; do vward_rci_get x 1; i=$((i+1)); done", env)
+    assert note.stat().st_size < 4200 and len(note.read_text().splitlines()) >= 100, note.stat().st_size
 
 print("DEVICE_PROFILE=PASS")

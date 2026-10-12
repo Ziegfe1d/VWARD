@@ -121,7 +121,8 @@ collect() {
         /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
         /^!/ {ctx = 0}
         ctx && $1 == "route" && $2 == "object-group" && $4 ~ re {sub(/^[ \t]+/, ""); print "N dns-proxy " $0; next}
-        $1 == "ip" && $2 == "route" && ($3 ~ /\// ? $4 : $5) ~ re {print "I " $0; next}
+        # The tunnel: after «A.B.C.D/N», after a mask, or right after a one-address route (no mask).
+        $1 == "ip" && $2 == "route" && ($3 ~ /\// || $4 !~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/ ? $4 : $5) ~ re {print "I " $0; next}
         $1 == "ip" && $2 == "name-server" && $3 ~ /:[0-9]+$/ && $3 !~ /:53$/ {print "D " $0}' "$RC"
 }
 

@@ -25,8 +25,24 @@ process_pending() {
     "$SELF_DIR/vward-update.sh" --apply-pending
 }
 
+# feed_note: whether the feed answered, for «Стабильность» in the Panel (updates download).
+# The last answer kept when it fails: ok_at, then fail_at and the error.
+feed_note() {
+    [ "$feed_tried" = 1 ] || return 0
+    fn_file=$VU_STATE_DIR/feed.state
+    fn_ok=$(sed -n 's/^ok_at=\([0-9]*\)$/\1/p' "$fn_file" 2>/dev/null | tail -n 1)
+    mkdir -p "$VU_STATE_DIR" 2>/dev/null || return 0
+    if [ "$feed_reached" = 1 ]; then
+        (umask 077; printf 'ok_at=%s\n' "$(date +%s)" > "$fn_file.$$") || return 0
+    else
+        (umask 077; printf 'ok_at=%s\nfail_at=%s\nfail_rc=%s\n' "$fn_ok" "$(date +%s)" "$1" > "$fn_file.$$") || return 0
+    fi
+    mv -f "$fn_file.$$" "$fn_file" 2>/dev/null || rm -f "$fn_file.$$"
+}
+
 run_once() {
     [ -n "$manifest_url" ] || return "$VU_CONFIG_ERROR"
+    feed_tried=1
     if [ -n "$VU_ROOT_PREFIX" ] && [ -n "${VWARD_TEST_WATCH_ATTEMPT_FILE:-}" ]; then
         attempts=$(cat "$VWARD_TEST_WATCH_ATTEMPT_FILE" 2>/dev/null || printf '0')
         attempts=$((attempts + 1))
@@ -70,6 +86,7 @@ run_once() {
         fi
     fi
 
+    case "$status" in 200|304) feed_reached=1 ;; esac
     case "$status" in
         304)
             rm -f "$headers" "$body"
@@ -121,6 +138,7 @@ while :; do
     attempt=0
     delay=1
     result=$VU_OK
+    feed_tried=0 feed_reached=0
     while :; do
         run_once
         result=$?
@@ -130,6 +148,7 @@ while :; do
         sleep "$delay"
         delay=$((delay * 2))
     done
+    feed_note "$result"
     [ "$watch_once" = 1 ] && exit "$result"
     sleep "$check_interval_seconds"
 done

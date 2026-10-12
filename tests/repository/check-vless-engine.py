@@ -181,7 +181,8 @@ esac
     if UUID in everything:
         fail("the id leaked into a command, a log or the output")
     st = engine("status")
-    if not any(l.startswith("tunnel=OpkgTun1\t1\t") and l.endswith("\t203.0.113.5:443\tГермания\t0") for l in st):
+    # The current server's name from the subscription comes last (the Panel shows it with the address).
+    if not any(l.startswith("tunnel=OpkgTun1\t1\t") and l.endswith("\t203.0.113.5:443\tГермания\t0\tГермания") for l in st):
         fail(f"status: {st}")
     # Keenetic switched the interface off and on (the guard does): Xray stays on an adapter
     # that carries nothing, so supervise starts it afresh. Off seen -> a mark; on again ->
@@ -339,8 +340,9 @@ esac
     (tmp / "reach.203.0.113.11").write_text(""); (tmp / "reach.203.0.113.13").write_text("")
     out = engine("list", tn)
     rows = {l.split("=", 1)[0]: l.split("=", 1)[1] for l in out if l.startswith("info.server.")}
-    if out[-1] != "result=checked" or len(rows) != 3 or not rows["info.server.1"].endswith("|203.0.113.11|443|42|0") or \
-       not rows["info.server.2"].endswith("|203.0.113.12|443||0") or not rows["info.server.3"].endswith("|203.0.113.13|443|42|1") or \
+    # A server without an answer says why (curl 28: no answer in time).
+    if out[-1] != "result=checked" or len(rows) != 3 or not rows["info.server.1"].endswith("|203.0.113.11|443|42|0|") or \
+       not rows["info.server.2"].endswith("|203.0.113.12|443||0|timeout") or not rows["info.server.3"].endswith("|203.0.113.13|443|42|1|") or \
        "DE-1" not in rows["info.server.1"] or "info.current=3" not in out:
         fail(f"the list of servers: {out}")
     if "secret-fo" in "\n".join(out) or UUID in "\n".join(out):

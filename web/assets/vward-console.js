@@ -108,19 +108,41 @@ async function apiPost(action, fields) {
 }
 /* ---------- Стабильность ---------- */
 // Index of the hours given (the watcher's hourly lines: at, dns_ok, dns_fail, events,
-// repairs_ok, repairs_failed, mem_min_kb, load_max_x100, programs_gone, leaks):
-// 40% DNS answered, 20% VWARD's programs kept running, 20% repairs that helped,
-// 20% hours with enough memory.
-function stabScore(rows) {
+// repairs_ok, repairs_failed, mem_min_kb, load_max_x100, programs_gone, leaks) and of the
+// checks the watcher does not do (CHK, stabChecks): DNS answered 28, VWARD's programs kept
+// running 14, repairs that helped 14, enough memory 14, tunnel passed traffic 10, updates
+// downloaded 10, HTTPS 5, Keenetic answered in time 5. A part with nothing checked is left out,
+// not counted as 100%; less than half of the weight checked - no index («не проверено»).
+const STAB_W = { dns: 28, progs: 14, rep: 14, res: 14, tunnel: 10, feed: 10, https: 5, rci: 5 };
+function stabScore(rows, chk) {
   if (!rows || !rows.length) return null;
   const sum = i => rows.reduce((a, r) => a + (Number(r[i]) || 0), 0);
   const dnsOk = sum(1), dnsFail = sum(2), ok = sum(4), bad = sum(5), downs = sum(8), leaks = sum(9);
-  const low = rows.filter(r => r[6] >= 0 && r[6] < 16384).length;
-  const dns = dnsOk + dnsFail ? dnsOk / (dnsOk + dnsFail) : 1;
+  const known = rows.filter(r => r[6] >= 0), low = known.filter(r => r[6] < 16384).length;
+  const dns = dnsOk + dnsFail ? dnsOk / (dnsOk + dnsFail) : null;
   const progs = Math.max(0, 1 - 0.1 * downs - 0.2 * leaks);
   const rep = ok + bad ? ok / (ok + bad) : 1;
-  const res = 1 - low / rows.length;
-  return { index: Math.round(100 * (0.4 * dns + 0.2 * progs + 0.2 * rep + 0.2 * res)), dns, dnsOk, dnsFail, ok, bad, downs, leaks, low, hours: rows.length };
+  const res = known.length ? 1 - low / known.length : null;
+  const parts = Object.assign({ dns, progs, rep, res }, chk || {});
+  let w = 0, v = 0;
+  Object.keys(STAB_W).forEach(k => { if (parts[k] != null) { w += STAB_W[k]; v += STAB_W[k] * parts[k]; } });
+  const total = Object.keys(STAB_W).reduce((a, k) => a + STAB_W[k], 0);
+  return { index: w * 2 >= total ? Math.round(100 * v / w) : null, dns, dnsOk, dnsFail, ok, bad, downs, leaks, low, hours: rows.length };
+}
+// The checks the watcher does not do, each 0..1 or null (nothing checked): the routes tunnel
+// passed traffic in the last hour (switched off by the owner - not counted), the update feed
+// answered within two days, curl did not crash on HTTPS within the hour, Keenetic answered
+// every request in time today.
+function stabChecks(d) {
+  const c = d && d.checks || {}, now = c.now || Date.now() / 1000, name = prof().tunnel_interface;
+  const t = ((st().wg || {}).interfaces || []).find(x => x.name === name);
+  const q = (c.tunnels || []).find(x => x.name === name);
+  const tunnel = t && tunOff(t) ? null : q && q.n ? q.ok / q.n : null;
+  const fresh = x => x && now - x < 2 * 86400;
+  const feed = c.feed_fail_at > (c.feed_ok_at || 0) ? 0 : fresh(c.feed_ok_at) ? 1 : null;
+  const https = c.https_crash_at ? 0 : fresh(c.feed_ok_at) ? 1 : null;
+  const rci = c.rci_fails_day == null ? null : c.rci_fails_day > 10 ? 0 : 1 - c.rci_fails_day / 20;
+  return { tunnel, feed, https, rci, c, q, off: !!(t && tunOff(t)), name };
 }
 // The hours of the last SPAN seconds; the running hour from the watcher's own totals
 // while no hourly line is written yet.
@@ -159,6 +181,20 @@ const STAB_JOB = { 'tunnel-health': 'Проверка туннелей', 'tunnel
   'ads-scheduler': 'Планировщик рекламы', 'ads-guard': 'Скан рекламы', 'route-reconciler': 'Сверка маршрутов', 'route-engine': 'Маршрутизация',
   'route-hints-update': 'Подсказки маршрутов', 'policy-chain': 'IP-категории', 'housekeeping': 'Обслуживание', 'wifi-client-guard': 'Wi-Fi клиенты',
   'console-config': 'Действия Панели VWARD', 'console-mutation': 'Изменения из Панели VWARD' };
+// The rows of stabChecks: what is known, or «не проверено».
+function stabCheckRows(k) {
+  const c = k.c, ago = x => fmtStamp(x);
+  return [
+    ['Туннель передаёт трафик', k.off ? 'выключен владельцем' : k.tunnel == null ? 'не проверено' : pct(k.tunnel), k.tunnel == null ? '' : k.tunnel >= 0.95 ? 'ok' : k.tunnel >= 0.8 ? 'warn' : 'crit', '', '',
+      k.q && k.q.n && !k.off ? (k.name ? tunLabel(k.name) + ': ' : '') + k.q.ok + ' из ' + k.q.n + ' проверок за час' : k.name ? '' : 'туннель маршрутов не выбран'],
+    ['Обновления скачиваются', k.feed == null ? 'не проверено' : k.feed ? 'да' : 'нет', k.feed == null ? '' : k.feed ? 'ok' : 'crit', '', '',
+      [c.feed_ok_at ? 'последний раз ' + ago(c.feed_ok_at) : '', c.feed_fail_at > (c.feed_ok_at || 0) ? 'ошибка ' + ago(c.feed_fail_at) : ''].filter(Boolean).join(' · ')],
+    ['HTTPS работает', k.https == null ? 'не проверено' : k.https ? 'да' : 'curl падает', k.https == null ? '' : k.https ? 'ok' : 'warn', '', '',
+      c.https_crash_at ? 'загрузки идут запасным путём, с ' + ago(c.https_crash_at) : ''],
+    ['Keenetic отвечает вовремя', k.rci == null ? 'не проверено' : c.rci_fails_day ? 'не ответил ' + c.rci_fails_day + ' ' + plural(c.rci_fails_day, 'раз', 'раза', 'раз') + ' за сутки' : 'да',
+      k.rci == null ? '' : c.rci_fails_day ? 'warn' : 'ok', '', '', c.rci_fail_at ? 'последний раз ' + ago(c.rci_fail_at) : '']
+  ];
+}
 const stabCls = i => i == null ? '' : i >= 95 ? 'ok' : i >= 80 ? 'warn' : 'crit';
 const pct = x => x == null ? '—' : (Math.round(x * 1000) / 10).toString().replace('.', ',') + '%';
 const API_ERRORS = {
@@ -1334,7 +1370,7 @@ const RENDER = {
       panel('Состояние', kv([
         ['Компоненты', COMPONENTS.length + ' ' + plural(COMPONENTS.length, 'компонент', 'компонента', 'компонентов'), '', 'd-components'],
         ['Диагностика', dg.length ? (dg.length - bad) + ' из ' + dg.length + ' в норме' : 'не запускалась', bad ? 'warn' : '', 'd-diag'],
-        (() => { const sc = stabScore(stabRows(S.stab, 86400)); return ['Стабильность', sc ? sc.index + '% за сутки' : S.stab ? 'нет данных' : '…', stabCls(sc && sc.index), 'd-stability']; })(),
+        (() => { const sc = stabScore(stabRows(S.stab, 86400), stabChecks(S.stab)); return ['Стабильность', sc && sc.index != null ? sc.index + '% за сутки' : S.stab ? 'не проверено' : '…', stabCls(sc && sc.index), 'd-stability']; })(),
         ['Файлы VWARD', '', '', 'd-files']
       ])) + agentsPanel() +
       panel('Хранилище', kv([['Свободно', fmtKB(g.free_kb) + ' из ' + fmtKB(g.total_kb)], ['Файловая система', g.filesystem || '—'], ['Сжатие журналов', 'каждый час', '', 'd-cron']]) +
@@ -1495,10 +1531,10 @@ const RENDER = {
     const d = S.stab;
     if (!d) return loadError(['stab']) + panel('Стабильность', empty('Загрузка…'));
     if (!d.ok) return panel('Стабильность', empty(errText(d)));
-    const st = d.state || {}, day = stabScore(stabRows(d, 86400)), week = stabScore(stabRows(d, 7 * 86400));
+    const st = d.state || {}, chk = stabChecks(d), day = stabScore(stabRows(d, 86400), chk), week = stabScore(stabRows(d, 7 * 86400));
     const sen = d.sentinel || {};
     const senText = sen.running ? 'работает' : sen.installed ? 'остановлен' : 'ещё не установлен';
-    const idx = sc => sc ? sc.index + '%' : 'нет данных';
+    const idx = sc => sc && sc.index != null ? sc.index + '%' : 'не проверено';
     const times = (n, one, few, many) => n + ' ' + plural(n, one, few, many);
     const watch = (st.watch || []).map(w => [STAB_WATCH(w.name), w.pid ? fmtKB(w.rss_kb) : 'не запущен',
       w.pid ? (w.limit_kb && w.rss_kb > w.limit_kb ? 'crit' : 'ok') : '', '', '',
@@ -1509,11 +1545,12 @@ const RENDER = {
     const ev = (d.events || []).map(e => '<li class="row"><div class="row-main"><b>' + esc(stabEvent(e.what)) + '</b><small>' + esc(e.at) + '</small></div></li>').join('');
     return panel('Итог', kv([
       ['За сутки', idx(day), stabCls(day && day.index)], ['За неделю', idx(week), stabCls(week && week.index)],
-      ['DNS отвечал', day ? pct(day.dns) : '—', day && day.dns < 0.99 ? 'warn' : '', '', '', day ? (day.dnsOk + day.dnsFail) + ' проверок' + (st.dns_ms_avg >= 0 ? ' · в среднем ' + st.dns_ms_avg + ' мс' : '') : ''],
+      ['DNS отвечал', day && day.dns != null ? pct(day.dns) : 'не проверено', day && day.dns != null && day.dns < 0.99 ? 'warn' : '', '', '', day ? (day.dnsOk + day.dnsFail) + ' проверок' + (st.dns_ms_avg >= 0 ? ' · в среднем ' + st.dns_ms_avg + ' мс' : '') : ''],
       ['Починки', day ? (day.ok + day.bad ? day.ok + ' из ' + (day.ok + day.bad) + ' помогли' : 'не понадобились') : '—', day && day.bad ? 'warn' : ''],
       ['Сбои программ VWARD', day ? (day.downs + day.leaks ? [day.downs ? times(day.downs, 'пропадание', 'пропадания', 'пропаданий') : '', day.leaks ? times(day.leaks, 'утечка', 'утечки', 'утечек') : ''].filter(Boolean).join(', ') : 'не было') : '—', day && (day.downs || day.leaks) ? 'warn' : ''],
-      ['Часов с нехваткой памяти', day ? String(day.low) : '—', day && day.low ? 'warn' : '']
-    ]), { desc: 'Индекс: 40% — DNS отвечал, 20% — программы VWARD не падали, 20% — починки помогли, 20% — памяти хватало. 95% и выше — норма.' }) +
+      ['Часов с нехваткой памяти', day ? String(day.low) : '—', day && day.low ? 'warn' : ''],
+      ...stabCheckRows(chk)
+    ]), { desc: 'Индекс за сутки: DNS отвечал 28%, программы VWARD не падали 14%, починки помогли 14%, памяти хватало 14%, туннель передавал трафик 10%, обновления скачивались 10%, HTTPS работал 5%, Keenetic отвечал вовремя 5%. Что не проверено, в индекс не входит; проверено меньше половины - «не проверено». За неделю - только данные агента реального времени. 95% и выше — норма.' }) +
       panel('Агент реального времени', kv([
         ['Состояние', senText, sen.running ? 'ok' : 'warn'],
         ['Память роутера', st.mem_kb >= 0 ? 'свободно ' + fmtKB(st.mem_kb) : '—', st.mem_low ? 'crit' : '', '', '', st.mem_min_kb >= 0 ? 'меньше всего было ' + fmtKB(st.mem_min_kb) : ''],
@@ -2207,7 +2244,7 @@ function tunnelPage(name) {
     panel(tunLabel(name), kv([
     ['Системное имя', name + (e ? ' · модуль AmneziaWG (VWARD)' : v ? ' · VLESS (VWARD)' : t.type ? ' · ' + (t.type === 'wireguard' && t.awg ? 'AmneziaWG' : TUN_TYPE[t.type] || t.type) : '')],
     ['Канал связи', t.link === 'up' ? 'есть' : t.link === 'down' ? 'нет' : t.link || '—'], ['Состояние в Keenetic', off ? 'выключен' : gOff ? 'выключен агентом VPN' : t.state === 'up' ? 'включён' : t.state || '—', off || gOff ? 'warn' : ''],
-    ['Сервер', t.endpoint || (e && e.endpoint) || (v && v.server) || '—'], ['Адрес в туннеле', t.address || '—'], ['MTU', t.mtu != null ? String(t.mtu) : '—'],
+    ['Сервер', t.endpoint || (e && e.endpoint) || (v && (v.server_name ? v.server_name + ' · ' + v.server : v.server)) || '—'], ['Адрес в туннеле', t.address || '—'], ['MTU', t.mtu != null ? String(t.mtu) : '—'],
     e ? ['Последнее рукопожатие', e.off || off ? 'туннель выключен' : e.handshake != null ? agoText(e.handshake) : e.running ? 'не было' : 'программа остановлена', !off && !e.off && (e.handshake == null || e.handshake > 180) ? 'warn' : '']
       : v ? null : ['Последнее рукопожатие', hsSec(t) != null ? agoText(hsSec(t)) : t.handshake != null ? 'не было' : '—', t.handshake != null && (hsSec(t) == null || hsSec(t) > 180) ? 'warn' : ''],
     ['Трафик', rx != null || tx != null ? '↓ ' + fmtBytes(rx) + ' · ↑ ' + fmtBytes(tx) : '—'],
@@ -2623,15 +2660,19 @@ function tunnelManagePanel(name, managed) {
 // name, the time a connection from the router takes (or «нет ответа»), the server in use. A tap
 // moves the tunnel to that server; it stays on its own when the new one does not answer.
 const VSRV = {};
+// Why a server did not answer the connection test (curl's exit code from the engine).
+const VSRV_SHORT = { dns: 'Имя не найдено', refused: 'Отказ', timeout: 'Нет ответа' };
+const VSRV_WHY = { dns: 'имя сервера не находится в DNS', refused: 'сервер отказал в соединении: порт закрыт', timeout: 'сервер не ответил за 2 секунды' };
 function vlessServersPanel(name) {
   const v = VSRV[name];
   const head = '<div class="panel-actions">' + btn('vless-servers', 'refresh', v && v.data ? 'Обновить список' : 'Показать серверы', v && v.data ? '' : 'primary', ' data-name="' + esc(name) + '"' + (v && v.busy ? ' disabled' : '')) + '</div>';
   if (!v) return panel('Серверы', head, { desc: 'Серверы подписки: страна, отклик, выбор сервера.' });
   if (v.busy && !v.data) return panel('Серверы', empty('Проверка серверов…'), { desc: 'Серверы подписки: страна, отклик, выбор сервера.' });
   if (v.error) return panel('Серверы', '<p class="field-warn">' + esc(v.error) + '</p>' + head);
-  const list = v.data.servers || [];
+  // The server in use first: in a long subscription it was somewhere below (a Viva 2026-10-12).
+  const list = (v.data.servers || []).slice().sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0));
   const rows = list.map(s => '<li class="row' + (s.current ? '' : ' link') + '"' + (s.current ? '' : ' role="button" tabindex="0" data-vserver="' + s.n + '" data-name="' + esc(name) + '"') + '><div class="row-main"><b>' + esc(s.name || s.host) + '</b><small>' + esc(s.host) + '</small></div>' +
-    '<span class="pill ' + (s.current ? 'info' : s.ms != null ? 'ok' : 'crit') + '">' + (s.current ? 'Подключён' : s.ms != null ? s.ms + ' мс' : 'Нет ответа') + '</span></li>').join('');
+    '<span class="pill ' + (s.current ? 'info' : s.ms != null ? 'ok' : 'crit') + '"' + (s.current || s.ms != null ? '' : ' title="' + esc(VSRV_WHY[s.why] || VSRV_WHY.timeout) + '"') + '>' + (s.current ? 'Подключён' : s.ms != null ? s.ms + ' мс' : VSRV_SHORT[s.why] || 'Нет ответа') + '</span></li>').join('');
   return panel('Серверы', (list.length ? '<ul class="rows">' + rows + '</ul>' : empty('В подписке нет серверов')) + head,
     { desc: 'Отклик - время соединения с сервером от роутера. Нажмите на сервер, чтобы подключиться к нему.' });
 }
@@ -2709,7 +2750,7 @@ function tunnelProbePanel(name) {
     [/^http/.test(pg.target || '') ? 'Отклик страницы 1.1.1.1' : 'Пинг до ' + (pg.target || '1.1.1.1'), pg.avg_ms != null ? Math.round(pg.avg_ms) + ' мс' : 'нет ответа', pg.avg_ms != null ? '' : 'warn'],
     ['Потери', pg.loss != null ? pg.loss + '%' : '—', pg.loss ? (pg.loss >= 50 ? 'crit' : 'warn') : ''],
     // A VLESS tunnel: its server is the engine's, and the WireGuard rows do not apply.
-    ['Сервер', vlessOf(name) ? (vlessOf(name).server || '—') : (sv.host || '—') + (sv.port ? ':' + sv.port : '')],
+    ['Сервер', vlessOf(name) ? ([vlessOf(name).server_name, vlessOf(name).server].filter(Boolean).join(' · ') || '—') : (sv.host || '—') + (sv.port ? ':' + sv.port : '')],
     vlessOf(name) ? null : ['Обфускация AmneziaWG', sv.awg ? 'Включена' : 'Выключена'],
     vlessOf(name) ? null : ['Keepalive', sv.keepalive ? sv.keepalive + ' с' : 'выключен']
   ]) + '<p class="panel-desc">Проверено в ' + esc(r.at) + '</p>';

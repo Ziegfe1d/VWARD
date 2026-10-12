@@ -58,6 +58,14 @@ vward_is_wireguard_sysfs()
     grep -qx 'DEVTYPE=wireguard' "$VWARD_SYSFS_NET/$1/uevent" 2>/dev/null
 }
 
+vward_rci_note()
+{
+    _vrn=${VWARD_RCI_FAIL_LOG:-/tmp/vward-rci-fail.log}
+    printf '%s\t%s\n' "$(date +%s)" "$1" >> "$_vrn" 2>/dev/null || return 0
+    [ "$(wc -c < "$_vrn" 2>/dev/null || echo 0)" -lt 4096 ] ||
+        { tail -n 100 "$_vrn" > "$_vrn.$$" && mv -f "$_vrn.$$" "$_vrn"; } 2>/dev/null || rm -f "$_vrn.$$"
+}
+
 # One answer of Keenetic's RCI (PATH under /rci, seconds): curl, then BusyBox wget.  Plain
 # HTTP to the router itself needs no TLS: when Entware's curl cannot start (a broken OpenSSL
 # library, seen on a router), VWARD still learns the router's interfaces and configuration.
@@ -73,6 +81,9 @@ vward_rci_get()
         # Only a curl that cannot start (126 and up: not runnable, killed) is replaced; Entware's
         # BusyBox wget itself crashed 70 times in a router's log when asked every time.
         _vrg_out=
+        # No answer in time (28) or no connection (7): noted for «Стабильность» in the Panel
+        # (RAM, the last 100). An error answer is an answer.
+        case "$_vrg_rc" in 7|28) vward_rci_note "$_vrg_rc" ;; esac
         [ "$_vrg_rc" -ge 126 ] || return 1
     fi
     # A wget that crashed once is not asked again until the router restarts (BusyBox 1.37 of
@@ -185,67 +196,121 @@ vward_fetch()
 # vward_fetch_xray CURL-ARGUMENTS: the same curl request in plain HTTP to a short-lived Xray of
 # the VLESS module on 127.0.0.1, which speaks TLS to the server and checks its certificate
 # (Entware's list of authorities). Every curl option keeps working; --interface and --resolve
-# go to Xray (the provider's interface, the server's address). A redirect to another host is
-# not followed (curl would crash on it): rc of curl.
+# go to Xray (the provider's interface, the server's address). With --location a redirect is
+# followed here, a new Xray for each server (curl itself would crash on the https:// address):
+# GitHub sends every release file on to another server. Up to --max-redirs (5); only to
+# https:// or a path on the same server; --resolve is for the first server only.
 vward_fetch_xray()
 {
     _vx_bin=${VWARD_XRAY_BIN:-/opt/share/vward/vless-engine/xray}
     [ -x "$_vx_bin" ] && [ -n "$_vf_curl" ] || return "$_vf_rc"
-    _vx_url= _vx_if= _vx_res= _vx_prev=
+    _vx_url= _vx_if= _vx_res= _vx_prev= _vx_follow=0 _vx_max=5 _vx_dh=
     for _vx_a in "$@"; do
         case "$_vx_prev" in
             --interface) _vx_if=$_vx_a ;;
             --resolve) _vx_res=$_vx_a ;;
+            --max-redirs) _vx_max=$_vx_a ;;
+            -D|--dump-header) _vx_dh=$_vx_a ;;
         esac
-        case "$_vx_a" in https://*) _vx_url=$_vx_a ;; esac
+        case "$_vx_a" in
+            https://*) _vx_url=$_vx_a ;;
+            --location) _vx_follow=1 ;;
+            -[!-]*L*) _vx_follow=1 ;;
+        esac
         _vx_prev=$_vx_a
     done
-    _vx_rest=${_vx_url#https://}
-    _vx_host=${_vx_rest%%/*} _vx_path=/
-    case "$_vx_rest" in */*) _vx_path=/${_vx_rest#*/} ;; esac
-    _vx_port=443
-    case "$_vx_host" in *:*) _vx_port=${_vx_host##*:} _vx_host=${_vx_host%:*} ;; esac
-    case "$_vx_host" in ''|*[!A-Za-z0-9.-]*) return 3 ;; esac
-    case "$_vx_port" in ''|*[!0-9]*) return 3 ;; esac
+    [ -n "$_vx_url" ] || return 3
+    case "$_vx_max" in ''|*[!0-9]*) _vx_max=5 ;; esac
     [ -z "$_vx_if" ] || vward_valid_ifname "$_vx_if" || return 2
-    # --resolve HOST:PORT:ADDRESS: Xray connects to that address, the name stays the TLS name.
-    _vx_addr=$_vx_host
-    case "$_vx_res" in "$_vx_host:$_vx_port:"*) _vx_addr=${_vx_res##*:}; vward_valid_ipv4 "$_vx_addr" || return 2 ;; esac
-    _vx_lp=$(( 20000 + $$ % 20000 ))
-    _vx_conf="${TMPDIR:-/tmp}/vward-fetch.$$.json" _vx_so=
-    [ -z "$_vx_if" ] || _vx_so=",\"sockopt\":{\"interface\":\"$_vx_if\"}"
-    (umask 077; printf '{"log":{"loglevel":"none"},"inbounds":[{"listen":"127.0.0.1","port":%s,"protocol":"dokodemo-door","settings":{"address":"%s","port":%s,"network":"tcp"}}],"outbounds":[{"protocol":"freedom","streamSettings":{"security":"tls","tlsSettings":{"serverName":"%s","alpn":["http/1.1"]}%s}}]}\n' \
-        "$_vx_lp" "$_vx_addr" "$_vx_port" "$_vx_host" "$_vx_so" > "$_vx_conf") || return "$_vf_rc"
-    _vx_ca=
-    for _vx_c in ${VWARD_CA_BUNDLE:-/opt/etc/ssl/certs/ca-certificates.crt /opt/etc/ssl/cert.pem}; do
-        [ -r "$_vx_c" ] && { _vx_ca=$_vx_c; break; }
-    done
-    SSL_CERT_FILE=$_vx_ca "$_vx_bin" run -c "$_vx_conf" </dev/null >/dev/null 2>&1 &
-    _vx_pid=$!
-    # Listening within 5 s (the port in /proc/net/tcp, state 0A).
-    _vx_hex=$(printf '%04X' "$_vx_lp") _vx_w=0
-    until grep -q "^ *[0-9]*: 0100007F:$_vx_hex 00000000:0000 0A" /proc/net/tcp 2>/dev/null; do
-        _vx_w=$((_vx_w + 1))
-        [ "$_vx_w" -le 25 ] && kill -0 "$_vx_pid" 2>/dev/null || { kill "$_vx_pid" 2>/dev/null; rm -f "$_vx_conf"; return 7; }
-        sleep 0.2 2>/dev/null || sleep 1
-    done
-    # The same arguments: the address rewritten, --interface/--resolve/--proto left to Xray.
+    # The same arguments without the address (it goes last, one per server) and without what
+    # Xray does (--interface/--resolve/--proto); following, also without -L and -D (read here).
     _vx_n=$# _vx_skip=0
     while [ "$_vx_n" -gt 0 ]; do
         _vx_a=$1; shift; _vx_n=$((_vx_n - 1))
         if [ "$_vx_skip" = 1 ]; then _vx_skip=0; continue; fi
         case "$_vx_a" in
             --interface|--resolve|--proto) _vx_skip=1; continue ;;
-            "$_vx_url") _vx_a="http://127.0.0.1:$_vx_lp$_vx_path" ;;
+            "$_vx_url") continue ;;
         esac
+        if [ "$_vx_follow" = 1 ]; then
+            case "$_vx_a" in
+                -D|--dump-header) _vx_skip=1; continue ;;
+                --location) continue ;;
+                -[!-]*L*) _vx_a=$(printf '%s' "$_vx_a" | tr -d L); [ "$_vx_a" != - ] || continue ;;
+            esac
+        fi
         set -- "$@" "$_vx_a"
     done
-    _vx_h=$_vx_host; [ "$_vx_port" = 443 ] || _vx_h=$_vx_host:$_vx_port
-    "$_vf_curl" --noproxy '*' -H "Host: $_vx_h" "$@"
-    _vx_rc=$?
-    kill "$_vx_pid" 2>/dev/null
-    rm -f "$_vx_conf"
-    return "$_vx_rc"
+    _vx_tmp="${TMPDIR:-/tmp}/vward-fetch.$$" _vx_hop=0 _vx_rc=7
+    while :; do
+        _vx_rest=${_vx_url#https://}
+        _vx_host=${_vx_rest%%/*} _vx_path=/
+        case "$_vx_rest" in */*) _vx_path=/${_vx_rest#*/} ;; esac
+        _vx_port=443
+        case "$_vx_host" in *:*) _vx_port=${_vx_host##*:} _vx_host=${_vx_host%:*} ;; esac
+        case "$_vx_host" in ''|*[!A-Za-z0-9.-]*) return 3 ;; esac
+        case "$_vx_port" in ''|*[!0-9]*) return 3 ;; esac
+        # --resolve HOST:PORT:ADDRESS: Xray connects to that address, the name stays the TLS name.
+        _vx_addr=$_vx_host
+        if [ "$_vx_hop" = 0 ]; then
+            case "$_vx_res" in "$_vx_host:$_vx_port:"*) _vx_addr=${_vx_res##*:}; vward_valid_ipv4 "$_vx_addr" || return 2 ;; esac
+        fi
+        # A port of its own for each server: the previous Xray may still hold its port.
+        _vx_lp=$(( 20000 + ($$ + _vx_hop) % 20000 ))
+        _vx_conf="$_vx_tmp.json" _vx_so=
+        [ -z "$_vx_if" ] || _vx_so=",\"sockopt\":{\"interface\":\"$_vx_if\"}"
+        (umask 077; printf '{"log":{"loglevel":"none"},"inbounds":[{"listen":"127.0.0.1","port":%s,"protocol":"dokodemo-door","settings":{"address":"%s","port":%s,"network":"tcp"}}],"outbounds":[{"protocol":"freedom","streamSettings":{"security":"tls","tlsSettings":{"serverName":"%s","alpn":["http/1.1"]}%s}}]}\n' \
+            "$_vx_lp" "$_vx_addr" "$_vx_port" "$_vx_host" "$_vx_so" > "$_vx_conf") || return "$_vf_rc"
+        _vx_ca=
+        for _vx_c in ${VWARD_CA_BUNDLE:-/opt/etc/ssl/certs/ca-certificates.crt /opt/etc/ssl/cert.pem}; do
+            [ -r "$_vx_c" ] && { _vx_ca=$_vx_c; break; }
+        done
+        SSL_CERT_FILE=$_vx_ca "$_vx_bin" run -c "$_vx_conf" </dev/null >/dev/null 2>&1 &
+        _vx_pid=$!
+        # Listening within 5 s (the port in /proc/net/tcp, state 0A).
+        _vx_hex=$(printf '%04X' "$_vx_lp") _vx_w=0
+        until grep -q "^ *[0-9]*: 0100007F:$_vx_hex 00000000:0000 0A" /proc/net/tcp 2>/dev/null; do
+            _vx_w=$((_vx_w + 1))
+            [ "$_vx_w" -le 25 ] && kill -0 "$_vx_pid" 2>/dev/null || { kill "$_vx_pid" 2>/dev/null; rm -f "$_vx_conf" "$_vx_tmp.h" "$_vx_tmp.o"; return 7; }
+            sleep 0.2 2>/dev/null || sleep 1
+        done
+        _vx_h=$_vx_host; [ "$_vx_port" = 443 ] || _vx_h=$_vx_host:$_vx_port
+        _vx_local="http://127.0.0.1:$_vx_lp$_vx_path"
+        if [ "$_vx_follow" = 0 ]; then
+            "$_vf_curl" --noproxy '*' -H "Host: $_vx_h" "$@" "$_vx_local"
+            _vx_rc=$?
+            kill "$_vx_pid" 2>/dev/null
+            rm -f "$_vx_conf"
+            return "$_vx_rc"
+        fi
+        # Following: what curl prints waits until it is known whether this answer is the last.
+        (umask 077; : > "$_vx_tmp.h"; : > "$_vx_tmp.o")
+        "$_vf_curl" --noproxy '*' -H "Host: $_vx_h" -D "$_vx_tmp.h" "$@" "$_vx_local" > "$_vx_tmp.o"
+        _vx_rc=$?
+        kill "$_vx_pid" 2>/dev/null
+        rm -f "$_vx_conf"
+        _vx_next=
+        if [ "$_vx_rc" = 0 ] && [ "$_vx_hop" -lt "$_vx_max" ]; then
+            _vx_code=$(awk 'NR == 1 {print $2; exit}' "$_vx_tmp.h")
+            _vx_loc=$(tr -d '\r' < "$_vx_tmp.h" | sed -n 's/^[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]:[[:space:]]*//p' | tail -n 1)
+            case "$_vx_code" in
+                301|302|303|307|308)
+                    case "$_vx_loc" in
+                        https://*) _vx_next=$_vx_loc ;;
+                        //*|*://*|'') ;;
+                        /*) _vx_next="https://$_vx_h$_vx_loc" ;;
+                        *) _vx_next="https://$_vx_h${_vx_path%/*}/$_vx_loc" ;;
+                    esac ;;
+            esac
+        fi
+        if [ -z "$_vx_next" ]; then
+            case "$_vx_dh" in '') ;; -) cat "$_vx_tmp.h" ;; *) cat "$_vx_tmp.h" > "$_vx_dh" ;; esac
+            cat "$_vx_tmp.o"
+            rm -f "$_vx_tmp.h" "$_vx_tmp.o"
+            return "$_vx_rc"
+        fi
+        _vx_url=$_vx_next _vx_hop=$((_vx_hop + 1))
+    done
 }
 
 # vward_https_broken: curl crashed on HTTPS within the hour (vward_fetch noted it). Site checks
@@ -346,7 +411,8 @@ vward_build_device_map()
 
     vward_running_config | awk '
         $1=="route" && $2=="object-group" && NF>=4 {print "R\t" $3 "\t" $4}
-        $1=="ip" && $2=="route" && NF>=5 {print "S\t" $5}
+        # A route to one address has no mask («ip route 192.0.2.1 OpkgTun2 auto»).
+        $1=="ip" && $2=="route" && $3 ~ /^[0-9]/ && NF>=4 {print "S\t" ($4 ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/ ? $5 : $4)}
     '
 }
 

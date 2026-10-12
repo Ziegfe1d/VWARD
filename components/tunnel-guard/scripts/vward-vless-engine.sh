@@ -607,7 +607,9 @@ op_list() {
         # has no telnet:// (every server was «not answering», Viva 2026-10-11); the connection
         # time is written also when the server does not speak HTTP (0 = no connection).
         case "$h" in *:*) hp="[$h]" ;; *) hp=$h ;; esac
-        ( "$CURL" -s -o /dev/null --noproxy '*' --connect-timeout 2 --max-time 2 -w '%{time_connect}' "http://$hp:$pt/" </dev/null > "$TMPD/ms.$i" 2>/dev/null ) &
+        # Its exit code says why one did not answer: 6 name not found, 7 refused, 28 no answer in time.
+        ( "$CURL" -s -o /dev/null --noproxy '*' --connect-timeout 2 --max-time 2 -w '%{time_connect}' "http://$hp:$pt/" </dev/null > "$TMPD/ms.$i" 2>/dev/null
+          echo "$?" > "$TMPD/rc.$i" ) &
         [ $((i % 10)) != 0 ] || wait
     done < "$TMPD/links"
     wait
@@ -617,7 +619,8 @@ op_list() {
         [ -s "$TMPD/kv.$j" ] || continue
         v() { awk -F '\t' -v k="$1" '$1 == k {print substr($0, length(k) + 2); exit}' "$TMPD/kv.$j" | tr -d '|"\\' | cut -c1-64; }
         ms=$(awk '{t = $1 * 1000; if (t > 0) printf "%d", t + 0.5}' "$TMPD/ms.$j" 2>/dev/null)
-        printf 'info.server.%s=%s|%s|%s|%s|%s\n' "$j" "$(v name)" "$(v host)" "$(v port)" "$ms" "$([ "$j" = "$cur" ] && echo 1 || echo 0)"
+        why=; [ -n "$ms" ] || case "$(cat "$TMPD/rc.$j" 2>/dev/null)" in 6) why=dns ;; 7) why=refused ;; *) why=timeout ;; esac
+        printf 'info.server.%s=%s|%s|%s|%s|%s|%s\n' "$j" "$(v name)" "$(v host)" "$(v port)" "$ms" "$([ "$j" = "$cur" ] && echo 1 || echo 0)" "$why"
     done
     printf 'info.current=%s\ninfo.servers=%s\n' "$cur" "$i"
     echo "result=checked"
@@ -722,7 +725,11 @@ op_status() {
     [ -f "$TUNNELS" ] && while IFS="$(printf '\t')" read -r n name server desc; do
         p=$(pid_of "$n") || :
         rss=; [ -z "$p" ] || rss=$(awk '/^VmRSS:/ {print $2}' "/proc/$p/status" 2>/dev/null)
-        printf 'tunnel=%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$([ -n "$p" ] && echo 1 || echo 0)" "$rss" "$server" "$desc" "$([ -e "$ENGINE_ETC/v$n.off" ] && echo 1 || echo 0)"
+        # The current server's own name in the subscription («Norway-14s(ws)»), for the Panel.
+        ci=$(cat "$ENGINE_ETC/v$n.idx" 2>/dev/null); case "$ci" in ''|*[!0-9]*) ci=1 ;; esac
+        sname=$(sed -n "${ci}p" "$ENGINE_ETC/v$n.links" 2>/dev/null | head -n 1)
+        [ -z "$sname" ] || sname=$(parse "$sname" 2>/dev/null | awk -F '\t' '$1 == "name" {print substr($0, 6); exit}' | tr -d '\t|"\\' | cut -c1-64)
+        printf 'tunnel=%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$([ -n "$p" ] && echo 1 || echo 0)" "$rss" "$server" "$desc" "$([ -e "$ENGINE_ETC/v$n.off" ] && echo 1 || echo 0)" "$sname"
     done < "$TUNNELS"
     echo "result=status"
 }

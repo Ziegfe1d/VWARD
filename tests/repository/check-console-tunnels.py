@@ -46,7 +46,7 @@ if got != want:
 if "рукопожатие" in piece("const tunSub = t => {", "\n};\n"):
     fail("the list shows no handshake")
 for need in ("'<span class=\"st ok\">по умолчанию</span>'", "'Сделать туннелем по умолчанию'", "['Туннель по умолчанию', managed ? 'Да' : 'Нет'",
-             "' · модуль AmneziaWG (VWARD)'", "t.endpoint || (e && e.endpoint) || (v && v.server)", "['Память программы'",
+             "' · модуль AmneziaWG (VWARD)'", "t.endpoint || (e && e.endpoint) || (v && (v.server_name ? v.server_name + ' · ' + v.server : v.server))", "['Память программы'",
              "const rx = t.rx != null ? t.rx : e && e.rx", "btn('ask', 'close', 'Выключить', 'danger', ' data-confirm=\"tunnel-down\"'",
              "'tunnel-down': () => tunnelState('down', current.slice(2))", "canOff = name !== prof().tunnel_interface && !tunOff(t)", "mp[0] + tunnelProbePanel(name) + tunnelTrafficPanel(name) + mp.slice(1).join('')"):
     if need not in JS:
@@ -106,4 +106,26 @@ for need in ("TWHY=\"$(printf '%s\\n' \"$TALL\" | sed -n 's/^reason=//p' | tail 
         fail(f"the API passes the router's reply: lacks {need}")
 if "' (ответ роутера: ' + x.reason + ')'" not in JS or "x.error === 'conf_unknown_setting'" not in JS:
     fail("the Panel shows the router's reply")
+# Keenetic writes a route to one address without its mask («ip route 192.0.2.9 OpkgTun2 auto»):
+# the delete moves it, and an added /32 subnet is found (it was «199 of 200», Viva 2026-10-12).
+import os, tempfile
+route_awk = HELPER[HELPER.index("ROUTE_AWK='"):HELPER.index("'\n", HELPER.index("ROUTE_AWK='") + 11) + 2]
+present = HELPER[HELPER.index("subnet_present() {"):HELPER.index("\n}\n", HELPER.index("subnet_present() {")) + 3]
+with tempfile.TemporaryDirectory() as tmp:
+    rc = os.path.join(tmp, "rc")
+    with open(rc, "w") as f:
+        f.write("ip route 198.51.100.0 255.255.255.0 OpkgTun2 auto\nip route 192.0.2.9 OpkgTun2 auto\nip route 203.0.113.0 255.255.255.0 ISP auto\n")
+    sh = route_awk + present + f"""RUNCFG={rc}
+subnet_present 192.0.2.9 255.255.255.255 OpkgTun2 && echo one
+subnet_present 198.51.100.0 255.255.255.0 OpkgTun2 && echo net
+subnet_present 192.0.2.9 255.255.255.255 Wireguard0 || echo other
+awk -v i=OpkgTun2 "$ROUTE_AWK"' $1 == "ip" && $2 == "route" && rdev() == i {{print $3 " " rmask()}}' "$RUNCFG"
+"""
+    r = subprocess.run(["sh", "-c", sh], text=True, capture_output=True)
+    if r.stdout.split("\n") != ["one", "net", "other", "198.51.100.0 255.255.255.0", "192.0.2.9 255.255.255.255", ""]:
+        fail(f"a route to one address: {r.stdout!r} {r.stderr}")
+for need in ('"$ROUTE_AWK"\' $1 == "ip" && $2 == "route" && rdev() == i {print $3 " " rmask()}\'',
+             '"$ROUTE_AWK"\' $1 == "ip" && $2 == "route" && rdev() == i {f = 1}'):
+    if need not in HELPER:
+        fail(f"tunnel delete lacks {need}")
 print("CONSOLE_TUNNELS=PASS")

@@ -118,6 +118,11 @@ seen = dict(address=i["settings"]["address"], port=i["settings"]["port"], sni=o[
             alpn=o["tlsSettings"]["alpn"], sockopt=o.get("sockopt"), ca=os.environ.get("SSL_CERT_FILE"))
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        # GitHub sends a release file on to another server; a path on the same server too.
+        go = {{"/rel/f.tar.gz": "https://objects.example.invalid/f/1?s=2", "/rel/same": "/other/x", "/loop": "/loop"}}.get(self.path)
+        if go:
+            self.send_response(302); self.send_header("Location", go); self.send_header("Content-Length", "5"); self.end_headers()
+            self.wfile.write(b"moved"); return
         b = json.dumps(dict(seen, path=self.path, host=self.headers.get("Host"))).encode()
         self.send_response(200); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
     def log_message(self, *a): pass
@@ -158,6 +163,25 @@ http.server.HTTPServer((i["listen"], i["port"]), H).serve_forever()
         fail("the short-lived Xray is left running")
     if list(t.glob("vward-fetch.*")):
         fail("Xray's configuration is left behind")
+    # A redirect to another server: a new Xray for it, the provider's interface kept, --resolve
+    # only for the first server; what is printed and the headers are the last answer's.
+    def follow(url, extra=""):
+        return subprocess.run(["sh", "-c", f'. "{LIB}"; vward_fetch -fsSL --proto =https --interface eth3 --resolve feed.example.invalid:443:192.0.2.7 '
+                              f'{extra} -D {t}/h -o {t}/r.json -w "%{{http_code}}" {url}'], env=env, text=True, capture_output=True, timeout=60)
+    r = follow("https://feed.example.invalid/rel/f.tar.gz")
+    got = json.loads((t / "r.json").read_text()) if (t / "r.json").exists() else {}
+    if r.returncode != 0 or r.stdout != "200" or got.get("sni") != "objects.example.invalid" or got.get("address") != "objects.example.invalid" \
+            or got.get("path") != "/f/1?s=2" or got.get("sockopt") != {"interface": "eth3"} or not (t / "h").read_text().startswith("HTTP/1.0 200"):
+        fail(f"a redirect to another server: rc={r.returncode} out={r.stdout!r} {got} err={r.stderr!r}")
+    r = follow("https://feed.example.invalid/rel/same")
+    got = json.loads((t / "r.json").read_text())
+    if r.stdout != "200" or got.get("path") != "/other/x" or got.get("sni") != "feed.example.invalid":
+        fail(f"a redirect to a path on the same server: {r.stdout!r} {got}")
+    r = follow("https://feed.example.invalid/loop", "--max-redirs 2")
+    if r.returncode != 0 or r.stdout != "302":
+        fail(f"redirects without end must stop: rc={r.returncode} out={r.stdout!r}")
+    if list(t.glob("vward-fetch.*")):
+        fail("the files of a followed request are left behind")
     # A host that is not a plain name never reaches the configuration.
     r = subprocess.run(["sh", "-c", f'. "{LIB}"; vward_fetch -o {t}/x \'https://a"b.example/\''], env=env, capture_output=True, timeout=30)
     if r.returncode != 3:

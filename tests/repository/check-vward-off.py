@@ -36,6 +36,7 @@ interface Wireguard0
     description vpn
 !
 ip route 198.51.100.0 255.255.255.0 Wireguard0 auto
+ip route 198.51.100.77 Wireguard0 auto
 ip route 203.0.113.0 255.255.255.0 ISP auto
 ip name-server 192.0.2.1:65053
 ip name-server 192.0.2.53
@@ -94,9 +95,10 @@ with tempfile.TemporaryDirectory() as tmp:
 
     o = run()
     rc = (t / "rc").read_text()
-    if o.get("result") != "changed" or o.get("lists") != "2" or o.get("subnets") != "1" or o.get("dns") != "1":
+    # A one-address route (Keenetic writes it without a mask) is VWARD's too.
+    if o.get("result") != "changed" or o.get("lists") != "2" or o.get("subnets") != "2" or o.get("dns") != "1":
         fail(f"off counts: {o}")
-    for gone in ("vpn-sites Wireguard0", "AdaptiveAuto OpkgTun0", "198.51.100.0 255.255.255.0 Wireguard0", "192.0.2.1:65053"):
+    for gone in ("vpn-sites Wireguard0", "AdaptiveAuto OpkgTun0", "198.51.100.0 255.255.255.0 Wireguard0", "198.51.100.77 Wireguard0", "192.0.2.1:65053"):
         if gone in rc:
             fail(f"off left {gone!r} in Keenetic")
     for kept in ("route object-group direct-sites ISP auto", "ip route 203.0.113.0 255.255.255.0 ISP auto", "ip name-server 192.0.2.53", "interface Wireguard0"):
@@ -114,7 +116,7 @@ with tempfile.TemporaryDirectory() as tmp:
     if (t / "state/vward.off.removed").stat().st_mode & 0o077:
         fail("the list of what was taken out is readable by others")
     st = run("status")
-    if st.get("state") != "off" or st.get("saved") != "4":
+    if st.get("state") != "off" or st.get("saved") != "5":
         fail(f"status: {st}")
     # Keenetic rebuilt its firewall: the owner's hook put the redirect back.
     (t / "nat").write_text(natnow + owner + "\n")
@@ -123,10 +125,10 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("keep: the redirect put back by Keenetic stays")
     # A second «off» changes nothing and loses nothing.
     o2 = run("off")
-    if o2.get("result") != "unchanged" or len((t / "state/vward.off.removed").read_text().splitlines()) != 4:
+    if o2.get("result") != "unchanged" or len((t / "state/vward.off.removed").read_text().splitlines()) != 5:
         fail(f"a second off: {o2}")
     o = run("on")
-    if o.get("result") != "changed" or o.get("restored") != "4" or o.get("refused") != "0":
+    if o.get("result") != "changed" or o.get("restored") != "5" or o.get("refused") != "0":
         fail(f"on: {o}")
     if sorted((t / "rc").read_text().splitlines()) != sorted(RUNNING.splitlines()):
         fail("on: Keenetic's configuration is not as before:\n" + (t / "rc").read_text())

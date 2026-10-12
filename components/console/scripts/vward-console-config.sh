@@ -71,6 +71,11 @@ CONF_FILE=
 # The request body of ndm_secret while it is sent.
 NS_FILE=
 
+# The tunnel and mask of an «ip route» line: Keenetic writes a one-address route without its mask
+# («ip route 1.2.3.4 OpkgTun2 auto»); read with $5 it belonged to no tunnel (a Viva 2026-10-12).
+ROUTE_AWK='function rdev() {return $4 ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/ ? $5 : $4}
+function rmask() {return $4 ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/ ? $4 : "255.255.255.255"}'
+
 # An engine's reason= line (the refused Keenetic command and its answer) goes on to the
 # Panel; it replaces any refusal of our own, so die does not add a second one.
 relay_reason() {
@@ -1779,7 +1784,7 @@ op_tunnel_delete() {
         echo "dns-proxy route object-group $g $1 auto" >> "$JOURNAL"
     done < "$JOURNAL.lists"
     # Static subnets: to another tunnel, or simply out (the default route is the provider).
-    awk -v i="$1" '$1 == "ip" && $2 == "route" && $5 == i {print $3 " " $4}' "$RUNCFG" > "$JOURNAL.nets"
+    awk -v i="$1" "$ROUTE_AWK"' $1 == "ip" && $2 == "route" && rdev() == i {print $3 " " rmask()}' "$RUNCFG" > "$JOURNAL.nets"
     while IFS= read -r net; do
         [ -n "$net" ] || continue
         if [ "$td_to" != - ]; then
@@ -1791,7 +1796,7 @@ op_tunnel_delete() {
     done < "$JOURNAL.nets"
     snapshot
     while IFS= read -r g; do [ -z "$g" ] || ! route_present "$g" "$1" || die verification_failed; done < "$JOURNAL.lists"
-    ! awk -v i="$1" '$1 == "ip" && $2 == "route" && $5 == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG" || die verification_failed
+    ! awk -v i="$1" "$ROUTE_AWK"' $1 == "ip" && $2 == "route" && rdev() == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG" || die verification_failed
     # Last step: nothing depends on the interface any more.
     if engine_tunnel "$1"; then
         er_out=$("$ENG" remove "$1" 2>/dev/null)
@@ -1819,7 +1824,8 @@ op_tunnel_delete() {
 }
 
 subnet_present() {
-    awk -v n="$1" -v m="$2" -v i="$3" '$1 == "ip" && $2 == "route" && $3 == n && $4 == m && $5 == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG"
+    awk -v n="$1" -v m="$2" -v i="$3" "$ROUTE_AWK"'
+        $1 == "ip" && $2 == "route" && $3 == n && rmask() == m && rdev() == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG"
 }
 
 op_tunnel_subnet() {

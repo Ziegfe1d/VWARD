@@ -994,7 +994,7 @@ if [ "$ACTION" = tunnel-conf ]; then
       case "$(printf '%s\n' "$TOUT" | tail -n 1)" in
         result=checked)
           printf '%s\n' "$TOUT" | sed -n 's/^info\.server\.\([0-9]*\)=/\1|/p' | "$JQ" -Rn --argjson cur "$(printf '%s\n' "$TOUT" | sed -n 's/^info\.current=\([0-9]*\)$/\1/p' | head -n 1 | grep . || echo 0)" '
-            {ok: true, current: $cur, servers: [inputs | split("|") | {n: (.[0] | tonumber), name: .[1], host: .[2], port: (.[3] | tonumber? // null), ms: (.[4] | tonumber? // null), current: (.[5] == "1")}]}' ;;
+            {ok: true, current: $cur, servers: [inputs | split("|") | {n: (.[0] | tonumber), name: .[1], host: .[2], port: (.[3] | tonumber? // null), ms: (.[4] | tonumber? // null), current: (.[5] == "1"), why: (.[6] // "")}]}' ;;
         error=*) E="$(printf '%s\n' "$TOUT" | tail -n 1)"; E=${E#error=}; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac; printf '{"ok":false,"error":"%s"}\n' "$E" ;;
         *) echo '{"ok":false,"error":"helper_failed"}' ;;
       esac ;;
@@ -2299,7 +2299,10 @@ if [ "$ACTION" = lists-data ]; then
         cur != "" && $1 == "include" {print "I\t" cur "\t" tolower($2)}
         ctx && $1 == "route" && $2 == "object-group" {print "R\t" $3 "\t" $4}
         ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print "D\t" tolower($NF)}
-        /^ip route [0-9]/ && NF >= 5 {print "S\t" $5 "\t" $3 "\t" $4}
+        # A one-address route has no mask in Keenetic («ip route 1.2.3.4 OpkgTun2 auto»): it fell
+        # under «auto» and the tunnel page showed one subnet fewer than the Overview (199 / 200).
+        /^ip route [0-9]/ && $4 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && NF >= 5 {print "S\t" $5 "\t" $3 "\t" $4; next}
+        /^ip route [0-9]/ && NF >= 4 {print "S\t" $4 "\t" $3 "\t255.255.255.255"}
     ' | { cat; command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains | sed 's/^/A\t/'; } | "$JQ" -Rn --arg tun "${VWARD_TUNNEL_INTERFACE:-}" --arg dev "${VWARD_TUNNEL_DEVICE:-}" --arg wan "${VWARD_WAN_INTERFACE:-}" \
         --argjson guard "$([ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" = 0 ] && echo false || echo true)" \
         --argjson watched "$WATCHED" --argjson returns "$RETURNS" --argjson auto "$AUTO" --argjson addrs "$ADDRS" '
@@ -2416,7 +2419,7 @@ if [ "$ACTION" = awg-data ]; then
             if ($l | startswith("info.installed=")) then .installed = ($l | endswith("=1"))
             elif ($l | startswith("info.version=")) then .version = ($l | ltrimstr("info.version="))
             elif ($l | startswith("tunnel=")) then ($l | ltrimstr("tunnel=") | split("\t")) as $t |
-                .tunnels += [{name: $t[0], running: ($t[1] == "1"), rss_kb: ($t[2] | tonumber? // null), server: $t[3], description: $t[4], off: ($t[5] == "1")}]
+                .tunnels += [{name: $t[0], running: ($t[1] == "1"), rss_kb: ($t[2] | tonumber? // null), server: $t[3], description: $t[4], off: ($t[5] == "1"), server_name: ($t[6] // "")}]
             else . end)' 2>/dev/null)"
     [ -n "$AWG_VLESS" ] || AWG_VLESS='{"installed":false,"version":"","tunnels":[]}'
     [ -x "$AWG_BIN" ] || { printf '{"ok":true,"available":false,"installed":false,"tunnels":[],"lost":%s,"vless":%s}\n' "$AWG_LOST" "$AWG_VLESS"; exit 0; }
@@ -2825,10 +2828,30 @@ if [ "$ACTION" = stability ]; then
       tail -n 200 "$SUP_LOG" 2>/dev/null | grep -E '\|(MEM_|PANEL_|AGH_|CROND_|SENTINEL_)'; } |
         awk -F'|' 'NF >= 2 && $1 ~ /^[0-9-]+ [0-9:]+$/ {print}' | sort -r | head -n 30 |
         "$JQ" -R -s -c 'split("\n") | map(select(length > 0) | split("|") | {at: .[0], what: (.[1:] | join("|"))})' > "$SD/events" 2>/dev/null || echo '[]' > "$SD/events"
+    # What the watcher does not see (ROADMAP 4.5): the tunnels passed traffic (the quality
+    # agent's checks of the last hour), the update feed answered, curl did not crash on HTTPS,
+    # Keenetic answered in time. Nothing known - null, «не проверено» in the Panel.
+    NOW=$(date +%s)
+    {
+        awk -F'\t' -v cut="$((NOW - 3600))" 'BEGIN {printf "["}
+            $1 ~ /^[0-9]+$/ && $1 >= cut && $2 ~ /^[A-Za-z0-9_.-]+$/ && $4 ~ /^[0-9]+$/ {n[$2]++; if ($4 + 0 < 100) ok[$2]++}
+            END {for (k in n) printf "%s{\"name\":\"%s\",\"n\":%d,\"ok\":%d}", (c++ ? "," : ""), k, n[k], ok[k]; printf "]"}' \
+            "${VWARD_TUNNEL_QUALITY_DIR:-/tmp/vward-tunnel-quality}/samples.tsv" 2>/dev/null || printf '[]'
+    } > "$SD/tunnels"
+    FEED_OK= FEED_FAIL= FEED_RC=
+    kv_file "${VWARD_UPDATE_STATE_DIR:-/opt/var/lib/vward/updater}/feed.state" ok_at=FEED_OK fail_at=FEED_FAIL fail_rc=FEED_RC
+    TLS_AT=
+    TLS_FLAG=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
+    [ -z "$(find "$TLS_FLAG" -mmin -60 2>/dev/null)" ] || TLS_AT=$(date -r "$TLS_FLAG" +%s 2>/dev/null)
+    RCI_DAY=$(awk -F'\t' -v cut="$((NOW - 86400))" '$1 ~ /^[0-9]+$/ && $1 >= cut {n++; l = $1} END {printf "%d %d", n, l}' "${VWARD_RCI_FAIL_LOG:-/tmp/vward-rci-fail.log}" 2>/dev/null)
     "$JQ" -n -c --argjson running "$RUNNING" --argjson installed "$INSTALLED" \
         --slurpfile state "$SD/state" --slurpfile hours "$SD/hours" \
-        --slurpfile cpu "$SD/cpu" --slurpfile events "$SD/events" \
-        '{ok: true, sentinel: {running: $running, installed: $installed}, state: $state[0], hours: $hours[0], cpu: $cpu[0], events: $events[0]}' 2>/dev/null ||
+        --slurpfile cpu "$SD/cpu" --slurpfile events "$SD/events" --slurpfile tunnels "$SD/tunnels" \
+        --arg now "$NOW" --arg fok "$FEED_OK" --arg ffail "$FEED_FAIL" --arg frc "$FEED_RC" --arg tls "$TLS_AT" --arg rci "${RCI_DAY:-0 0}" \
+        'def num: tonumber? // null;
+         {ok: true, sentinel: {running: $running, installed: $installed}, state: $state[0], hours: $hours[0], cpu: $cpu[0], events: $events[0],
+          checks: {now: ($now | num), tunnels: $tunnels[0], feed_ok_at: ($fok | num), feed_fail_at: ($ffail | num), feed_fail_rc: ($frc | num),
+                   https_crash_at: ($tls | num), rci_fails_day: ($rci | split(" ")[0] | num), rci_fail_at: ($rci | split(" ")[1] | num | if . == 0 then null else . end)}}' 2>/dev/null ||
         echo '{"ok":false,"error":"stability_unavailable"}'
     exit 0
 fi

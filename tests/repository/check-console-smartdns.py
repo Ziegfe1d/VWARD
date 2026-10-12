@@ -33,6 +33,8 @@ object-group fqdn domain-list7
 object-group fqdn domain-list5
     include api.anthropic.com
 !
+ip route 203.0.113.0 255.255.255.0 Wireguard0 auto
+ip route 198.51.100.7 Wireguard0 auto
 """
 
 
@@ -58,6 +60,9 @@ with tempfile.TemporaryDirectory() as tmp:
         return json.loads(r.stdout.split("\n\n", 1)[1])
 
     data = lists()
+    # A one-address route has no mask in Keenetic: still the tunnel's (199 instead of 200 before).
+    if data.get("subnet_counts", {}).get("Wireguard0") != 2 or "auto" in data.get("subnet_counts", {}):
+        fail(f"routes of the tunnel, the one-address one included: {data.get('subnet_counts')} {data.get('subnets')}")
     addrs = {l["name"]: l["addresses"] for l in data["lists"]}
     if addrs != {"domain-list4": 0, "domain-list9": 7, "domain-list7": None, "domain-list5": None}:
         fail(f"learned addresses per list: {addrs}")
