@@ -68,14 +68,24 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # curl crashes only on HTTPS (libnghttp2, Viva 2026-10-12): the local check passes, vward_fetch
     # noted the crash; the HTTP/2 library and curl are reinstalled and the note goes when it works.
-    (t / "curl").write_text(f'#!/bin/sh\ncase "$*" in *https://*) [ -e "{t}/h2fixed" ] || kill -SEGV $$ ;; esac\nexit 0\n')
+    (t / "curl").write_text(f'#!/bin/sh\ncase "$*" in *https://*) echo run >> "{t}/curl.https"; [ -e "{t}/h2fixed" ] || kill -SEGV $$ ;; esac\nexit 0\n')
     (t / "opkg").write_text(f'#!/bin/sh\necho "$*" >> "{t}/opkg.log"\n: > "{t}/h2fixed"\n')
     (t / "tls.broken").write_text("")
     log = run()
     if (t / "opkg.log").read_text().splitlines()[-1] != "install --force-reinstall libnghttp2 libcurl curl":
         fail(f"curl crashing on HTTPS: its HTTP/2 library is not reinstalled: {(t / 'opkg.log').read_text()}")
-    if "repair=curl-https|crash=139|reinstalled=libnghttp2,libcurl,curl|opkg=0|after=0" not in log or (t / "tls.broken").exists():
+    if "repair=curl-https|reinstalled=libnghttp2,libcurl,curl|opkg=0|after=0" not in log or (t / "tls.broken").exists():
         fail(f"the HTTPS repair is not logged, or curl is not trusted again: {log[-300:]}")
+    # The crash is already seen: no test run before the reinstall, one HTTPS try after it.
+    if (t / "curl.https").exists() and len((t / "curl.https").read_text().splitlines()) != 1:
+        fail(f"curl is run on HTTPS more than once by the repair: {(t / 'curl.https').read_text()}")
+    # Crashes again within 6 hours: not reinstalled again, curl not run on HTTPS by the repair.
+    (t / "h2fixed").unlink(); (t / "tls.broken").write_text(""); (t / "curl.https").unlink()
+    n = len((t / "opkg.log").read_text().splitlines())
+    run()
+    if len((t / "opkg.log").read_text().splitlines()) != n or (t / "curl.https").exists():
+        fail("the HTTPS repair repeats within 6 hours")
+    (t / "tls.broken").unlink()
     # No note of an HTTPS crash: nothing is reinstalled for HTTPS.
     n = len((t / "opkg.log").read_text().splitlines())
     run()

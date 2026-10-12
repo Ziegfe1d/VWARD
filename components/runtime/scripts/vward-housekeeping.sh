@@ -427,14 +427,22 @@ REPAIR_OPENSSL=${VWARD_REPAIR_OPENSSL:-/opt/bin/openssl}
 repair_if_crashing curl curl "$REPAIR_CURL" -s -o /dev/null --noproxy '*' --connect-timeout 3 --max-time 5 http://127.0.0.1:79/rci/show/version
 # curl that crashed on HTTPS within the hour (vward_fetch noted it): the crash was in libnghttp2,
 # the HTTP/2 library (Viva 2026-10-12: 81 crashes in two hours), which the local check above never
-# loads. Its packages are reinstalled, then HTTPS (HTTP/2 as curl picks it) is tried again.
+# loads. The crash is already seen, so no test run first: its packages are reinstalled at once, at
+# most once in 6 hours, and HTTPS is tried once after; when it works, curl is trusted again.
 REPAIR_TLS_FLAG=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
-if [ -n "$(find "$REPAIR_TLS_FLAG" -mmin -60 2>/dev/null)" ]; then
-    repair_if_crashing curl-https "libnghttp2 libcurl curl" "$REPAIR_CURL" -s -o /dev/null --connect-timeout 5 --max-time 10 \
-        "${VWARD_REPAIR_HTTPS_URL:-https://raw.githubusercontent.com/}"
-    # Sound again: curl is asked first once more, not in an hour.
-    "$REPAIR_CURL" -s -o /dev/null --connect-timeout 5 --max-time 10 "${VWARD_REPAIR_HTTPS_URL:-https://raw.githubusercontent.com/}" </dev/null >/dev/null 2>&1
-    [ "$?" -ge 128 ] || rm -f "$REPAIR_TLS_FLAG"
+if [ -x "$REPAIR_CURL" ] && [ -n "$(find "$REPAIR_TLS_FLAG" -mmin -60 2>/dev/null)" ]; then
+    rh_now=$(date +%s) rh_last=0
+    [ ! -r "$REPAIR_DIR/curl-https" ] || read -r rh_last < "$REPAIR_DIR/curl-https" || :
+    case "$rh_last" in ''|*[!0-9]*) rh_last=0 ;; esac
+    if [ $((rh_now - rh_last)) -ge 21600 ]; then
+        mkdir -p "$REPAIR_DIR" && echo "$rh_now" > "$REPAIR_DIR/curl-https"
+        "$OPKG" install --force-reinstall libnghttp2 libcurl curl </dev/null >/dev/null 2>&1
+        rh_opkg=$?
+        "$REPAIR_CURL" -s -o /dev/null --connect-timeout 5 --max-time 10 "${VWARD_REPAIR_HTTPS_URL:-https://raw.githubusercontent.com/}" </dev/null >/dev/null 2>&1
+        rh_after=$?
+        [ "$rh_after" -ge 128 ] || rm -f "$REPAIR_TLS_FLAG"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=curl-https|reinstalled=libnghttp2,libcurl,curl|opkg=$rh_opkg|after=$rh_after" >> "$HOUSE_LOG"
+    fi
 fi
 repair_if_crashing jq jq "$REPAIR_JQ" -n 1
 repair_if_crashing openssl "libopenssl openssl-util" "$REPAIR_OPENSSL" version
