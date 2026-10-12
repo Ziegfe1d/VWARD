@@ -545,5 +545,6 @@ case "$command" in
     --dry-run)
         if vu_hard_safety_check "$package_dir"; then printf '%s\n' 'Safety: ready'; else printf '%s\n' 'Safety: blocked'; fi
         exit "$VU_OK" ;;
-    --apply|--apply-pending|--install) apply_update "$manifest" "$package_dir"; vu_method_note "$method_used" ;;
+    --apply|--apply-pending|--install) apply_update "$manifest" "$package_dir"; vu_method_note "$method_used"
+        vu_note ok "Установлено обновление $(jq -r '.signed.version' "$manifest")" "$([ "$method_used" = files ] && echo 'изменённые файлы' || echo 'целиком')" ;;
 esac

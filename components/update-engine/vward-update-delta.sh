@@ -244,6 +244,17 @@ vu_v2_stage() {
     VU_FULL_DIR=$full_dir
 }
 
+# vu_note SEV TITLE [TEXT]: the bell's history in the Panel (the line vward_note writes; the
+# engine keeps its own copy: it runs from its slot, without the runtime library).
+vu_note() {
+    vn_d=${VWARD_CONSOLE_NOTES:-$VU_ROOT_PREFIX/opt/var/lib/vward/console} vn_now=$(date +%s)
+    (umask 077; mkdir -p "$vn_d" && printf '%s-%s\t%s\t%s\t\tu-vward\t%s\t%s\n' "$vn_now" "$$" "$vn_now" "$1" \
+        "$(printf '%s' "$2" | tr '\000-\037\177' ' ')" "$(printf '%s' "${3:-}" | tr '\000-\037\177' ' ')" >> "$vn_d/notes.tsv") 2>/dev/null || return 0
+    [ "$(wc -l < "$vn_d/notes.tsv")" -le 220 ] ||
+        { tail -n 200 "$vn_d/notes.tsv" > "$vn_d/notes.tsv.$$" && mv -f "$vn_d/notes.tsv.$$" "$vn_d/notes.tsv"; } 2>/dev/null || rm -f "$vn_d/notes.tsv.$$"
+    return 0
+}
+
 vu_last_apply_write() {
     mkdir -p "$VU_STATE_DIR" || return 1
     {

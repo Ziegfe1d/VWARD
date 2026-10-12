@@ -106,6 +106,7 @@ python3 tests/repository/check-console-tunnels.py || fail "VPN list and tunnel p
 python3 tests/repository/check-console-tunnel-status.py || fail "Tunnel statuses: owner switch-off quiet, agent switch-off with time and reason"
 python3 tests/repository/check-console-overview-cards.py || fail "Overview cards: three lines, honest values"
 python3 tests/repository/check-console-update-method.py || fail "Updates: update method switch and last method"
+python3 tests/repository/check-console-notes.py || fail "Bell: pop-ups top right, history on the router, errors under fields"
 python3 tests/repository/check-console-fold.py || fail "Panel blocks fold to their title and stay folded"
 python3 tests/repository/check-ads-jobs.py || fail "Ads job queue: runs, lists, cancels, drains"
 python3 tests/repository/check-route-engine-capture.py || fail "route engine capture: LAN device, pause after quick deaths"

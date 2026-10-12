@@ -66,6 +66,20 @@ vward_rci_note()
         { tail -n 100 "$_vrn" > "$_vrn.$$" && mv -f "$_vrn.$$" "$_vrn"; } 2>/dev/null || rm -f "$_vrn.$$"
 }
 
+# vward_note SEV TITLE [TEXT] [TO]: an event for the bell's history in the Panel (fix.26), written
+# by the agent that did it, so it is there even when no Panel was open. SEV: ok, info, warn, err;
+# TO: the Panel page it is about («t-NAME»: «{t}» in TITLE becomes the tunnel's name there).
+# The same line as the Panel's action=notes writes; the last 200 kept.
+vward_note()
+{
+    _vn_d=${VWARD_CONSOLE_NOTES:-/opt/var/lib/vward/console} _vn_now=$(date +%s)
+    (umask 077; mkdir -p "$_vn_d" && printf '%s-%s\t%s\t%s\t\t%s\t%s\t%s\n' "$_vn_now" "$$" "$_vn_now" "$1" "${4:-}" \
+        "$(printf '%s' "$2" | tr '\000-\037\177' ' ')" "$(printf '%s' "${3:-}" | tr '\000-\037\177' ' ')" >> "$_vn_d/notes.tsv") 2>/dev/null || return 0
+    [ "$(wc -l < "$_vn_d/notes.tsv")" -le 220 ] ||
+        { tail -n 200 "$_vn_d/notes.tsv" > "$_vn_d/notes.tsv.$$" && mv -f "$_vn_d/notes.tsv.$$" "$_vn_d/notes.tsv"; } 2>/dev/null || rm -f "$_vn_d/notes.tsv.$$"
+    return 0
+}
+
 # One answer of Keenetic's RCI (PATH under /rci, seconds): curl, then BusyBox wget.  Plain
 # HTTP to the router itself needs no TLS: when Entware's curl cannot start (a broken OpenSSL
 # library, seen on a router), VWARD still learns the router's interfaces and configuration.

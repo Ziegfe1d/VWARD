@@ -588,6 +588,9 @@ else
                                     FAILOPEN_ACTIVE=1
                                     LAST_RECOVERY_TEST=$NOW
                                     ACTION="FAILOPEN_DOWN"
+                                    vward_note warn "«{t}» выключен агентом VPN" \
+                                        "Не отвечал, перезапуск не помог. Сайты из списков идут напрямую; агент проверяет туннель раз в 5 минут и включит его сам." \
+                                        "t-$VWARD_TUNNEL_INTERFACE"
                                 else
                                     ACTION="FAILOPEN_DOWN_ERROR"
                                 fi
@@ -641,6 +644,8 @@ else
                                 FAILOPEN_ACTIVE=0
                                 DOWN_STREAK=0
                                 ACTION="FAILOPEN_RECOVERED"
+                                vward_note ok "«{t}» снова включён агентом VPN" "Туннель ответил: сайты из списков снова идут через него." \
+                                    "t-$VWARD_TUNNEL_INTERFACE"
 
                                 /opt/bin/vward-tunnel-health.sh \
                                     >/dev/null 2>&1 || true

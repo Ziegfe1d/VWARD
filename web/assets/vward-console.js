@@ -537,14 +537,14 @@ const LOADERS = {
   laddr: () => current.startsWith('ip-') ? apiGet('list-addrs', { name: current.slice(3) }) : Promise.resolve(null), files: () => FILES.root ? apiGet('files', { op: 'list', root: FILES.root, path: FILES.path }) : Promise.resolve(null), adspub: () => apiGet('ads-view', { view: 'publish-status' }),
   qlog: () => apiGet('ads-view', { view: 'querylog', filter: ADSV.filter, search: ADSV.search }),
   review: () => apiGet('ads-view', { view: 'list', kind: 'review' }),
-  cron: () => apiGet('cron-data'), auth: () => apiGet('auth'), off: () => apiGet('vward-off'), journal: () => apiGet('journal-data'),
+  cron: () => apiGet('cron-data'), auth: () => apiGet('auth'), off: () => apiGet('vward-off'), notes: () => apiGet('notes'), journal: () => apiGet('journal-data'),
   blocked: () => apiGet('ads-view', { view: 'list', kind: 'blocked', search: ADSV.blockedSearch }),
   allowed: () => apiGet('ads-view', { view: 'list', kind: 'allowed', search: ADSV.allowedSearch })
 };
 // The last answers are kept in the browser: a reopened console shows them at once
 // and refreshes from the router in the background.  Nothing secret is in them;
 // a login prompt or «Выйти» drops them.
-const CACHE_KEYS = ['tq', 'status', 'route', 'lists', 'update', 'security', 'wifi', 'ads', 'config', 'adsstats', 'agh', 'backups', 'cron', 'awg', 'ext', 'diag', 'adspub', 'services'];
+const CACHE_KEYS = ['tq', 'status', 'route', 'lists', 'update', 'security', 'wifi', 'ads', 'config', 'adsstats', 'agh', 'backups', 'cron', 'awg', 'ext', 'diag', 'adspub', 'services', 'notes'];
 const CACHE_TTL = 86400000, CACHE_MAX = 400000;
 S.cached = {};
 function cacheRead() {
@@ -563,7 +563,7 @@ const inflight = {};
 // How long an answer stays fresh (seconds) before the page's refresh asks again. What changes
 // by the second (status, jobs) follows every tick; settings and catalogs rarely change, and
 // asking them every 15 seconds only loaded the router. An action reloads what it changed.
-const KEY_TTL = { off: 10, status: 5, ads: 10, tq: 55, route: 55, awg: 25, wifi: 55, diag: 55, stab: 55, lists: 110, config: 110, adspub: 55, adsstats: 110, agh: 110,
+const KEY_TTL = { off: 10, notes: 25, status: 5, ads: 10, tq: 55, route: 55, awg: 25, wifi: 55, diag: 55, stab: 55, lists: 110, config: 110, adspub: 55, adsstats: 110, agh: 110,
   https: 290, security: 290, services: 290, update: 110, ext: 590, backups: 290, cron: 110 };
 async function load(key, force) {
   if (inflight[key]) return inflight[key];
@@ -887,7 +887,7 @@ function notifications() {
   const qa = (S.tq && S.tq.auto) || {};
   if (qa.last_at && qa.last_to && Date.now() / 1000 - qa.last_at < 3600) n.push({ sev: 'news', icon: 'route', title: 'Туннель выбран по качеству', text: 'маршруты VWARD: «' + tunLabel(qa.last_from || '') + '» → «' + tunLabel(qa.last_to) + '», ' + fmtTime(qa.last_at * 1000), to: 'vpn' });
   if (lm.length) n.push({ sev: 'warn', title: lm.length === 1 ? 'Список переведён на другой туннель' : 'Списки переведены на другие туннели', text: lm.map(m => listLabel(m.name) + ': «' + tunLabel(m.from) + '» → «' + tunLabel(m.to) + '»').join(', '), to: 'vpn' });
-  if (isTrue(wg.failopen_active)) { const ti = prof().tunnel_interface; n.push({ sev: 'warn', title: '«' + tunLabel(ti) + '» выключен агентом VPN' + (wg.failopen_at ? ' ' + fmtTime(wg.failopen_at * 1000) : ''), text: (foText(wg) ? 'Причина: ' + foText(wg) + '. ' : '') + 'Сайты из списков идут напрямую. Агент проверяет туннель раз в 5 минут и включит его сам.', to: 't-' + ti }); }
+  if (isTrue(wg.failopen_active)) { const ti = prof().tunnel_interface; n.push({ sev: 'warn', own: true, title: '«' + tunLabel(ti) + '» выключен агентом VPN' + (wg.failopen_at ? ' ' + fmtTime(wg.failopen_at * 1000) : ''), text: (foText(wg) ? 'Причина: ' + foText(wg) + '. ' : '') + 'Сайты из списков идут напрямую. Агент проверяет туннель раз в 5 минут и включит его сам.', to: 't-' + ti }); }
   if (sv.adguard === false && sv.adguard_broken) n.push({ sev: 'crit', title: 'Программа AdGuard Home повреждена', text: 'Она не запускается даже с --version, поэтому VWARD её не перезапускает. Замените файл официальной сборкой AdGuard Home той же версии.', to: 'd-stability' });
   if (sv.crond === false || sv.supervisor === false) n.push({ sev: 'crit', title: 'Задания по расписанию остановлены', text: 'расписание заданий не работает', to: 'd-cron' });
   const total = num(stg.total_kb), free = num(stg.free_kb);
@@ -924,6 +924,8 @@ function wifiWarnText(wf) {
   const c = w[0];
   return wifiName(c.mac) + ': ' + (c.recommendation === 'bind_2g' ? 'лучше 2,4 ГГц' : 'проверить');
 }
+// Which router answer each card is drawn from.
+const CARD_KEY = { system: 'status', updates: 'status', wan: 'status', vpn: 'status', storage: 'status', lists: 'lists', routes: 'route', wifi: 'wifi', ads: 'ads' };
 function cardData(id) {
   const s = st(), p = plat(), w = s.wan || {}, wg = s.wg || {}, sv = s.services || {}, g = s.storage || {}, r = S.route || {}, wf = S.wifi || {}, a = S.ads || {};
   const tunnels = wg.interfaces || [], up = tunnels.filter(t => isTrue(t.connected)).length;
@@ -1138,14 +1140,18 @@ const wifiClientRow = c => '<li class="row link" role="button" tabindex="0" data
 const RENDER = {
   overview() {
     const list = cardOrder.filter(id => editing || !hiddenCards.includes(id));
-    const at = S.cached.status || S.loadedAt.status, ts = at ? new Date(at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '—';
-    // While cached data is shown the refresh icon spins; the text stays short so the bar never overflows.
-    let html = '<div class="overview-bar"><span class="ob-time">' + (S.cached.status ? 'Данные на ' + ts + (S.errors.status ? ' · нет ответа роутера' : '') : 'Обновлено ' + ts) + '</span><button class="icon-btn' + (S.cached.status && !S.errors.status ? ' spinning' : '') + '" type="button" data-act="reload" aria-label="' + (S.cached.status ? 'Данные обновляются' : 'Обновить данные') + '">' + ico('refresh') + '</button><span class="spacer"></span>' +
+    const at = S.cached.status || S.loadedAt.status, ts = at ? new Date(at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '—', busy = busyOn('overview');
+    // While the page loads the icon spins; the text stays short so the bar never overflows.
+    const line = busy ? (pageBusy.slow ? 'Роутер отвечает медленно…' : 'Обновление…') : S.errors.status ? (at ? 'Данные на ' + ts + ' · нет ответа роутера' : 'Нет ответа роутера') : 'Обновлено ' + ts;
+    let html = '<div class="overview-bar"><span class="ob-time' + (busy && pageBusy.slow ? ' slow' : '') + '">' + line + '</span><button class="icon-btn' + (busy ? ' spinning' : '') + '" type="button" data-act="reload" aria-label="' + (busy ? 'Данные обновляются' : 'Обновить данные') + '">' + ico('refresh') + '</button><span class="spacer"></span>' +
       (editing ? btn('edit', 'check', 'Готово', 'small primary') : btn('edit', 'edit', 'Настроить', 'small')) + '</div>';
     if (editing) html += '<div class="edit-bar"><span>Вид</span><div class="segmented" role="group" aria-label="Вид карточек"><button type="button" data-view="grid" aria-pressed="' + (cardView === 'grid') + '">' + ico('platform') + 'Плитки</button><button type="button" data-view="list" aria-pressed="' + (cardView === 'list') + '">' + ico('logs') + 'Список</button></div><button class="link-btn" type="button" data-act="cards-reset">Сбросить</button></div>';
     html += '<div class="cards' + (editing ? ' editing' : '') + '" data-view="' + cardView + '">' + list.map((id, n) => {
-      const c = cardData(id), h = hiddenCards.includes(id);
-      return '<div class="card' + (h ? ' is-hidden' : '') + '"' + (editing ? '' : ' role="button" tabindex="0" data-go="' + c.to + '"') + '><div class="card-icon">' + ico(c.icon) + '</div>' + cardAlert(c.pill) + '<div class="card-title">' + esc(c.title) + '</div><div class="card-value num" title="' + esc(c.value) + '">' + esc(c.value) + '</div><div class="card-sub" title="' + esc(c.sub) + '">' + esc(c.sub) + '</div>' +
+      const c = cardData(id), h = hiddenCards.includes(id), k = CARD_KEY[id];
+      // Nothing from the router yet: the card's frame with placeholders, filled in as the answer comes.
+      if (!editing && S[k] == null && !S.errors[k]) return '<div class="card skel" data-card="' + id + '" aria-busy="true"><div class="card-icon">' + ico(c.icon) + '</div><div class="card-title">' + esc(c.title) + '</div><div class="sk sk-value"></div><div class="sk sk-sub"></div></div>';
+      // The browser's copy from the last visit: shown at once, a little faded until the router answers.
+      return '<div class="card' + (h ? ' is-hidden' : '') + (S.cached[k] && busyOn('overview') ? ' stale' : '') + '" data-card="' + id + '"' + (editing ? '' : ' role="button" tabindex="0" data-go="' + c.to + '"') + '><div class="card-icon">' + ico(c.icon) + '</div>' + cardAlert(c.pill) + '<div class="card-title">' + esc(c.title) + '</div><div class="card-value num" title="' + esc(c.value) + '">' + esc(c.value) + '</div><div class="card-sub" title="' + esc(c.sub) + '">' + esc(c.sub) + '</div>' +
         (c.meter != null ? '<div class="meter"><i data-width="' + c.meter + '"></i></div>' : '') +
         (editing ? '<div class="card-edit"><button class="icon-btn" type="button" data-card-move="' + id + ':up" aria-label="Выше"' + (n === 0 ? ' disabled' : '') + '>' + ico('up') + '</button><button class="icon-btn" type="button" data-card-move="' + id + ':down" aria-label="Ниже"' + (n === list.length - 1 ? ' disabled' : '') + '>' + ico('down') + '</button><button class="icon-btn" type="button" data-card-toggle="' + id + '" aria-label="' + (h ? 'Показать' : 'Скрыть') + ' карточку">' + ico(h ? 'eyeOff' : 'eye') + '</button></div>' : '') + '</div>';
     }).join('') + '</div>';
@@ -2884,9 +2890,11 @@ function renderNav() {
   $('tabbar').innerHTML = tabsHtml();
   $('tabbar').querySelectorAll('[data-tab]').forEach(t => { if (warnPages.has(t.dataset.tab) && t.dataset.tab !== cur) t.insertAdjacentHTML('beforeend', '<span class="dot" aria-label="Есть уведомление"></span>'); });
   document.documentElement.style.setProperty('--tabs', WIDE.matches ? barIds().length : tabIds.length + 1);
-  const n = notifications().length;
-  // Good news only (a new version): a calm accent badge instead of the red one.
-  const onlyNews = n && notifications().every(x => x.sev === 'news');
+  const active = notifications();
+  notesWatch(active);
+  const unread = notesUnread(), n = unread.length;
+  // Nothing wrong among the unread (a new version, a saved setting): a calm accent badge, not the red one.
+  const onlyNews = n && !unread.some(x => ['warn', 'crit', 'err'].includes(x.sev));
   $('bellBtn').innerHTML = ico('bell') + (n ? '<span class="badge' + (onlyNews ? ' news' : '') + '">' + n + '</span>' : '');
   $('bellBtn').setAttribute('aria-label', n ? 'Уведомления: ' + n : 'Уведомления');
 }
@@ -2898,6 +2906,8 @@ function patchContent(html, whole) {
   ddEnhance(t.content);
   t.content.querySelectorAll('.meter i[data-width]').forEach(i => { i.style.width = Math.max(0, Math.min(100, Number(i.dataset.width))) + '%'; });
   const fresh = [...t.content.children], old = [...box.children];
+  // A card that was a placeholder or the browser's copy fades in with the router's answer.
+  const waited = new Set([...box.querySelectorAll('.card.skel[data-card], .card.stale[data-card]')].map(c => c.dataset.card));
   // A refresh of the same page keeps its height while the blocks are swapped: a page that
   // shrank for a moment brought the phone's address bar back and moved the bottom bar.
   if (!whole) box.style.minHeight = box.offsetHeight + 'px';
@@ -2905,6 +2915,8 @@ function patchContent(html, whole) {
   else fresh.forEach((n, i) => { if (!old[i].isEqualNode(n)) old[i].replaceWith(n); });
   // A new page slides in a little; a refresh of the same page never moves.
   if (whole) { box.classList.remove('page-enter'); void box.offsetWidth; box.classList.add('page-enter'); }
+  if (waited.size) box.querySelectorAll('.card[data-card]').forEach(c => { if (waited.has(c.dataset.card) && !c.matches('.skel, .stale')) { c.classList.add('fade-in'); c.addEventListener('animationend', () => c.classList.remove('fade-in'), { once: true }); } });
+  if (FERR) fieldErrShow(box.querySelector('form[data-form="' + FERR.form + '"]' + (FERR.kind ? '[data-kind="' + FERR.kind + '"]' : '')));
   // A three-way slider is drawn where it was and then moved, so the thumb glides.
   requestAnimationFrame(() => {
     box.querySelectorAll('.seg-slider[data-to]').forEach(el => { if (el.dataset.i !== el.dataset.to) el.dataset.i = el.dataset.to; });
@@ -3046,14 +3058,30 @@ function go(id, key, mode) {
     if (mode === 'replace' || sheet) history.replaceState({ p: id, d: histDepth() }, '', pathOf(id));
     else if (id !== current) history.pushState({ p: id, d: histDepth() + 1 }, '', pathOf(id));
   }
-  current = id; editing = false; confirm = null; actionResult = null;
+  current = id; editing = false; confirm = null; actionResult = null; FERR = null;
   closeLayer(true); render(); window.scrollTo(0, 0);
   if (key) { const row = [...document.querySelectorAll('[data-key]')].find(r => r.dataset.key === key); if (row) { row.scrollIntoView({ block: 'center' }); row.classList.add('flash'); } }
-  refreshPage();
+  refreshPage(true);
 }
-async function refreshPage() {
-  const id = current, keys = DATA_FOR(id).concat('off');
-  if (id === 'logs') { loadLog(logTab); load('journal').then(() => { if (current === 'logs') render(); }, () => {}); return; }
+/* ---------- Загрузка страницы ----------
+   A page opened or refreshed by the owner says so: a line under the top bar and «Обновление…»;
+   after 3 seconds «Роутер отвечает медленно…» (owner 2026-10-12). The background refresh every
+   few seconds stays quiet. */
+let pageBusy = null;
+function busyStart(id) {
+  // The same page still loading (the first answers, then the rest): the same 3 seconds.
+  if (pageBusy && pageBusy.id === id) return pageBusy;
+  const b = pageBusy = { id: id, slow: false };
+  document.body.classList.add('loading'); document.body.classList.remove('slow');
+  // «Обзор» says it in its own line under the title; other pages - under the top bar.
+  setTimeout(() => { if (pageBusy !== b) return; b.slow = true; document.body.classList.toggle('slow', id !== 'overview'); if (current === id) render(); }, 3000);
+  return b;
+}
+function busyEnd(b) { if (!b || pageBusy !== b) return; pageBusy = null; document.body.classList.remove('loading', 'slow'); }
+const busyOn = id => !!pageBusy && pageBusy.id === id;
+async function refreshPage(busy) {
+  const id = current, keys = DATA_FOR(id).concat('off', 'notes'), b = busy ? busyStart(id) : null;
+  if (id === 'logs') { busyEnd(b); loadLog(logTab); load('journal').then(() => { if (current === 'logs') render(); }, () => {}); return; }
   if (id.startsWith('a-')) loadActivity(id.slice(2));
   if (id.startsWith('t-')) keys.push('status', 'lists', 'awg', 'ext', 'tq');
   if (id.startsWith('tn-')) keys.push('status', 'lists');
@@ -3071,6 +3099,7 @@ async function refreshPage() {
   // Each answer is drawn as soon as it arrives: a slow source does not hold the others back.
   const draw = () => { if (current === id && !editing && !document.activeElement.matches('input,select,textarea')) render(); };
   await Promise.all(keys.map(k => load(k).then(draw, draw)));
+  if (b && pageBusy === b) { busyEnd(b); draw(); }
 }
 // The open journal follows the router: on opening, every REFRESH_SEC while shown,
 // on coming back to the tab, and right before it is saved.
@@ -3127,9 +3156,19 @@ function showLogin() {
   openSheet('Вход в Панель VWARD', '<div class="sheet-body"><form class="inline-form multi" data-form="login">' + formLabel('Логин и пароль от Keenetic') + '<input class="input" name="login" placeholder="логин Keenetic" aria-label="Логин" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль" autocomplete="current-password"><button class="btn primary" type="submit">Войти</button></form><p class="panel-desc">Логин и пароль от веб-интерфейса роутера.</p></div>');
   loginOpen = true;
 }
+const noteWhen = at => { const d = new Date(at * 1000), now = new Date(); return d.toDateString() === now.toDateString() ? d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : fmtTime(at * 1000); };
+// «{t}» in a note the router's agents wrote: the tunnel's name as the Panel shows it.
+const noteTun = (x, t) => x.to && /^t-/.test(x.to) ? String(t || '').replace(/\{t\}/g, tunLabel(x.to.slice(2))) : t;
+const noteItem = (x, cls, when) => '<' + (x.to ? 'button type="button" data-go="' + esc(x.to) + '"' : 'div') + ' class="note-item' + (cls ? ' ' + cls : '') + '"><span class="sev ' + esc(x.sev) + '">' + ico(x.icon || NOTE_ICON[x.sev] || 'alert') + '</span><span class="note-main"><b>' + esc(noteTun(x, x.title)) + '</b>' + (x.text ? '<small>' + esc(noteTun(x, x.text)) + '</small>' : '') + '</span>' + (when ? '<time>' + esc(when) + '</time>' : '') + '</' + (x.to ? 'button' : 'div') + '>';
+// «Требует внимания»: what is wrong at this moment, goes by itself. «История»: what popped up, newest first, unread marked.
 function openNotes() {
-  const n = notifications();
-  openSheet('Уведомления', '<div class="sheet-body">' + (n.length ? n.map(x => '<button class="note-item" type="button" data-go="' + x.to + '"><span class="sev ' + x.sev + '">' + ico(x.icon || 'alert') + '</span><span><b>' + esc(x.title) + '</b><small>' + esc(x.text) + '</small></span></button>').join('') : empty('Всё работает штатно')) + '</div>', '', 'bellBtn');
+  const n = notifications(), nt = S.notes || {}, hist = nt.items || [], unread = notesUnread().length;
+  const now = n.length ? '<div class="result-group">Требует внимания</div>' + n.map(x => noteItem(x)).join('') : '';
+  const head = '<div class="notes-bar"><span>' + (unread ? 'Непрочитанных: ' + unread : hist.length ? 'Всё прочитано' : '') + '</span>' + (unread ? '<button class="link-btn" type="button" data-act="notes-read">Прочитать все</button>' : '') + '</div>';
+  // A warning still shown above is not repeated below; it moves there when it goes.
+  const keys = new Set(n.map(noteKey)), shown = hist.filter(x => !x.key || !keys.has(x.key));
+  const past = shown.length ? '<div class="result-group">История</div>' + shown.map(x => noteItem(x, x.at > (nt.read_at || 0) ? 'unread' : '', noteWhen(x.at))).join('') : '';
+  openSheet('Уведомления', '<div class="sheet-body">' + (n.length || hist.length ? head + now + past : empty('Всё работает штатно')) + '</div>', 'notes', 'bellBtn');
 }
 const SEARCH_INDEX = [
   ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'Версия VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Файлы VWARD'], ['system', 'Свободно'],
@@ -3156,10 +3195,90 @@ function renderResults(q) {
   if (comps.length) out.push('<div class="result-group">Компоненты</div>' + comps.map(c => '<button class="result" type="button" data-go="c-' + c.id + '">' + ico('platform') + '<span>' + esc(c.name) + '<small>Система · Компоненты</small></span></button>').join(''));
   $('searchResults').innerHTML = out.join('') || empty('Ничего не найдено');
 }
-function toast(msg) {
-  const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg;
-  const box = $('toasts'); box.textContent = ''; box.appendChild(t); setTimeout(() => t.remove(), 3200);
+/* ---------- Всплывающие уведомления и история ----------
+   A pop-up comes out under the bell (top right), stays a few seconds and is kept in the bell's
+   history on the router (the last 200, «Прочитать все»; owner 2026-10-12). Nothing at the
+   bottom of the screen; a wrong input is said under its field (fieldErr). */
+// What only answers a click here and now is not kept in the history.
+const NOTE_QUIET = /^(Данные обновлены|Журнал скопирован|Текст выделен|Карточки сброшены|Архив журналов скачивается|На панели помещается|Оставьте хотя бы|«Поделиться»|Поделиться не удалось|Вы вышли|Тема: )/;
+const NOTE_ICON = { ok: 'check', err: 'alert', crit: 'alert', warn: 'alert', news: 'bell', info: 'bell' };
+const noteSev = msg => /^(Ошибка|Не |Нет |Файл больше)/.test(msg) ? 'err' : 'ok';
+// A short stable key of a warning: the same one is kept once, however many Panels are open.
+const noteKey = n => { let h = 5381; const t = n.sev + '|' + n.title + '|' + (n.to || ''); for (let i = 0; i < t.length; i++) h = (h * 33 ^ t.charCodeAt(i)) >>> 0; return 'n' + h.toString(36); };
+// One line and the time; goes by itself in 5 s, an error stays until closed (× or a swipe);
+// three at most, the newest on top. A tap opens the page it is about.
+function popup(n) {
+  const box = $('toasts'), el = document.createElement('div'), stay = n.sev === 'err' || n.sev === 'crit';
+  el.className = 'toast ' + n.sev; el.setAttribute('role', stay ? 'alert' : 'status');
+  el.innerHTML = '<span class="sev ' + n.sev + '">' + ico(n.icon || NOTE_ICON[n.sev] || 'bell') + '</span><span class="toast-text"' + (n.to ? ' role="button" tabindex="0" data-go="' + esc(n.to) + '"' : '') + ' title="' + esc(n.title + (n.text ? '. ' + n.text : '')) + '"><b>' + esc(n.title) + '</b>' + (n.text ? '<small>' + esc(n.text) + '</small>' : '') + '</span>' +
+    '<time>' + new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) + '</time><button class="toast-x" type="button" aria-label="Закрыть">' + ico('close') + '</button>';
+  box.prepend(el);
+  while (box.children.length > 3) box.lastChild.remove();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('in')));
+  const gone = () => { if (el.classList.contains('out')) return; el.classList.remove('in'); el.classList.add('out'); el.style.transform = ''; setTimeout(() => el.remove(), 260); };
+  if (!stay) setTimeout(gone, 5000);
+  el.querySelector('.toast-x').addEventListener('click', e => { e.stopPropagation(); gone(); });
+  if (n.to) el.querySelector('.toast-text').addEventListener('click', gone);
+  // A swipe to the right closes it.
+  let x0 = null, dx = 0;
+  el.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; dx = 0; el.style.transition = 'none'; }, { passive: true });
+  el.addEventListener('touchmove', e => { if (x0 == null) return; dx = Math.max(0, e.touches[0].clientX - x0); el.style.transform = 'translateX(' + dx + 'px)'; el.style.opacity = String(Math.max(0.2, 1 - dx / 200)); }, { passive: true });
+  el.addEventListener('touchend', () => { el.style.transition = ''; if (dx > 70) gone(); else { el.style.transform = ''; el.style.opacity = ''; } x0 = null; }, { passive: true });
 }
+// Kept on the router; the bell shows it at once, before the router answers.
+function noteKeep(n, quiet) {
+  const item = { id: 'p' + Date.now(), at: Math.floor(Date.now() / 1000), sev: n.sev, key: n.key || '', to: n.to || '', title: String(n.title).slice(0, 200), text: String(n.text || '').slice(0, 400) };
+  const items = (S.notes && S.notes.items) || [];
+  if (item.key && items.some(x => x.key === item.key && item.at - x.at < 21600)) return;
+  S.notes = Object.assign({ ok: true, read_at: 0 }, S.notes || {}, { items: [item].concat(items).slice(0, 200) });
+  apiPost('notes', { op: 'add', sev: item.sev, title: item.title, text: item.text, to: item.to, key: item.key }).catch(() => {});
+  if (!quiet) renderNav();
+}
+function toast(msg, sev) {
+  const n = { sev: sev || noteSev(String(msg)), title: String(msg) };
+  popup(n);
+  if (!NOTE_QUIET.test(n.title)) noteKeep(n);
+}
+// A warning that appeared since the last look pops up once and goes into the history; one that
+// went and came back pops up again. Only on the router's fresh answer, not on the browser's copy.
+let notesSeen = store.get('vward-notes-seen', null);
+function notesWatch(list) {
+  if (!S.status || S.cached.status || S.errors.status) return;
+  const keys = list.map(noteKey), seen = notesSeen, fresh = list.filter((n, i) => !(seen && seen.includes(keys[i])));
+  if (seen && keys.length === seen.length && !fresh.length) return;
+  notesSeen = keys; store.set('vward-notes-seen', keys);
+  // The very first look (a new browser) only remembers: what is wrong is already in the bell.
+  // The VPN agent writes its own switch-off to the history (own): the Panel only shows it.
+  fresh.forEach(n => { if (seen) popup(n); if (!n.own) noteKeep(Object.assign({}, n, { key: noteKey(n) }), true); });
+}
+// The history's unread: newer than «Прочитать все». The bell counts them (a warning is written
+// to the history when it appears, so it is counted too until read).
+function notesUnread() {
+  const nt = S.notes || {};
+  return (nt.items || []).filter(x => x.at > (nt.read_at || 0));
+}
+// An input error stays under its field until the field is changed (owner 2026-10-12).
+let FERR = null;
+function fieldErr(form, msg) {
+  FERR = { form: form.dataset.form || '', kind: form.dataset.kind || '', msg: msg };
+  fieldErrShow(form);
+  const i = form.querySelector('input:not([type=hidden]):not([type=radio]), textarea');
+  if (i) i.focus();
+}
+function fieldErrShow(form) {
+  if (!FERR || !form) return;
+  let p = form.nextElementSibling;
+  if (!p || !p.classList.contains('field-err')) { p = document.createElement('p'); p.className = 'field-err'; p.setAttribute('role', 'alert'); form.after(p); }
+  p.textContent = FERR.msg;
+  form.querySelectorAll('input:not([type=hidden]), textarea').forEach(i => i.setAttribute('aria-invalid', 'true'));
+}
+function fieldErrClear() {
+  if (!FERR) return;
+  FERR = null;
+  document.querySelectorAll('.field-err').forEach(p => p.remove());
+  document.querySelectorAll('[aria-invalid]').forEach(i => i.removeAttribute('aria-invalid'));
+}
+document.addEventListener('input', e => { if (FERR && e.target.closest && e.target.closest('form')) fieldErrClear(); });
 
 /* ---------- Действия ---------- */
 async function runAction(resultId, action, fields, okMsg) {
@@ -3471,7 +3590,12 @@ document.addEventListener('click', e => {
   }
   const a = t.dataset.act;
   if (a === 'close') closeLayer();
-  else if (a === 'reload') { Promise.all(DATA_FOR(current).map(k => load(k, true))).then(() => { render(); toast('Данные обновлены'); }); }
+  else if (a === 'notes-read') {
+    // Read at once here; the router keeps it for the other devices.
+    S.notes = Object.assign({}, S.notes || {}, { read_at: Math.floor(Date.now() / 1000) }); renderNav(); openNotes();
+    apiPost('notes', { op: 'read' }).then(x => { if (x && x.ok) { S.notes = x; cacheWrite('notes'); renderNav(); } }, () => {});
+  }
+  else if (a === 'reload') { const b = busyStart(current); render(); Promise.all(DATA_FOR(current).map(k => load(k, true))).then(() => { busyEnd(b); render(); }); }
   else if (a === 'edit') { editing = !editing; render(); }
   else if (a === 'tc-mode') {
     const f = t.closest('form'), m = t.dataset.m;
@@ -3703,31 +3827,31 @@ async function onSubmit(e, f) {
   }
   if (f === 'list-add') {
     const input = e.target.querySelector('input'), v = input.value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/:].*$/, '').replace(/^\*\./, '');
-    if (!DOMAIN.test(v)) { toast('Введите домен, например example.com'); return; }
+    if (!DOMAIN.test(v)) { fieldErr(e.target, 'Введите домен, например example.com'); return; }
     const kind = e.target.dataset.kind;
     const x = await cfgSet({ op: 'list-domain', action: kind, target: current.slice(2), value: v }, kind === 'add' ? v + ' добавлен в список' : v + ' добавлен в исключения', ['listd', 'lists']);
     if (x && x.ok) { const again = document.querySelector('form[data-form="list-add"][data-kind="' + kind + '"] input'); if (again) again.value = ''; }
   }
   if (f === 'cfg-add') {
     const input = e.target.querySelector('input'), v = input.value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/:].*$/, '').replace(/^\*\./, '');
-    if (!DOMAIN.test(v)) { toast('Введите домен, например example.com'); return; }
+    if (!DOMAIN.test(v)) { fieldErr(e.target, 'Введите домен, например example.com'); return; }
     const x = await cfgSet({ op: e.target.dataset.op, action: 'add', target: v }, v + ' добавлен', ['route']);
     if (x && x.ok) { const again = document.querySelector('form[data-form="cfg-add"] input'); if (again) again.value = ''; }
   }
   if (f === 'wifi-name') {
     const v = e.target.querySelector('[name=name]').value.trim();
-    if (!v || v.length > 32 || /["\\]/.test(v)) { toast('Имя: до 32 символов, без кавычек'); return; }
+    if (!v || v.length > 32 || /["\\]/.test(v)) { fieldErr(e.target, 'Имя: до 32 символов, без кавычек'); return; }
     await wifiHostSet({ op: 'name', mac: e.target.dataset.mac, name: v }, 'Имя сохранено в Keenetic'); return;
   }
   if (f === 'agh-filter-add') {
     const url = e.target.querySelector('[name=url]').value.trim(), name = e.target.querySelector('[name=name]').value.trim();
-    if (!/^https:\/\/[A-Za-z0-9.-]+(:\d{1,5})?\/\S*$/.test(url)) { toast('Нужен адрес https://…'); return; }
-    if (!/^[A-Za-z0-9 ._-]{1,64}$/.test(name)) { toast('Название: латиница, цифры, пробел, точка, дефис'); return; }
+    if (!/^https:\/\/[A-Za-z0-9.-]+(:\d{1,5})?\/\S*$/.test(url)) { fieldErr(e.target, 'Нужен адрес https://…'); return; }
+    if (!/^[A-Za-z0-9 ._-]{1,64}$/.test(name)) { fieldErr(e.target, 'Название: латиница, цифры, пробел, точка, дефис'); return; }
     await aghSet({ setting: 'filter-add', url: url, name: name }, 'Список добавлен'); return;
   }
   if (f === 'tunnel-subnet') {
     const v = e.target.querySelector('[name=subnet]').value.trim();
-    if (!/^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(v)) { toast('Введите подсеть, например 149.154.160.0/20'); return; }
+    if (!/^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(v)) { fieldErr(e.target, 'Введите подсеть, например 149.154.160.0/20'); return; }
     await tunnelSubnet(e.target.dataset.name, 'add', v); return;
   }
   if (f === 'tunnel-conf') {
@@ -3778,34 +3902,34 @@ async function onSubmit(e, f) {
   }
   if (f === 'blocked-login') {
     const login = e.target.querySelector('[name=login]').value.trim(), password = e.target.querySelector('[name=password]').value;
-    if (!/^[A-Za-z0-9._@-]{1,64}$/.test(login) || !password) { toast('Введите логин и пароль Keenetic'); return; }
+    if (!/^[A-Za-z0-9._@-]{1,64}$/.test(login) || !password) { fieldErr(e.target, 'Введите логин и пароль Keenetic'); return; }
     let x;
     try { x = await apiPost('auth', { op: 'login', login: login, password: password }); }
-    catch (err) { toast('Ошибка: ' + err.message); return; }
+    catch (err) { fieldErr(e.target, 'Ошибка: ' + err.message); return; }
     e.target.querySelector('[name=password]').value = '';
-    if (!x.ok) { toast(errText(x)); return; }
+    if (!x.ok) { fieldErr(e.target, errText(x)); return; }
     location.reload();
     return;
   }
   if (f === 'agh-connect') {
     const login = e.target.querySelector('[name=login]').value.trim(), password = e.target.querySelector('[name=password]').value;
-    if (!/^[A-Za-z0-9._@-]{1,64}$/.test(login) || !password) { toast('Введите логин и пароль AdGuard Home'); return; }
+    if (!/^[A-Za-z0-9._@-]{1,64}$/.test(login) || !password) { fieldErr(e.target, 'Введите логин и пароль AdGuard Home'); return; }
     let x;
     try { x = await apiPost('agh-auth', { op: 'connect', login: login, password: password }); }
-    catch (err) { toast('Ошибка: ' + err.message); return; }
+    catch (err) { fieldErr(e.target, 'Ошибка: ' + err.message); return; }
     e.target.querySelector('[name=password]').value = '';
-    if (!x.ok) { toast(errText(x)); return; }
+    if (!x.ok) { fieldErr(e.target, errText(x)); return; }
     toast('AdGuard Home подключён');
     await Promise.all([load('ads', true), load('adsstats', true)]); render(); return;
   }
   if (f === 'login' || f === 'auth-enable') {
     const login = e.target.querySelector('[name=login]').value.trim(), password = e.target.querySelector('[name=password]').value;
-    if (!/^[A-Za-z0-9._@-]{1,64}$/.test(login) || !password) { toast('Введите логин и пароль'); return; }
+    if (!/^[A-Za-z0-9._@-]{1,64}$/.test(login) || !password) { fieldErr(e.target, 'Введите логин и пароль'); return; }
     let x;
     try { x = await apiPost('auth', { op: f === 'login' ? 'login' : 'enable', login: login, password: password }); }
-    catch (err) { toast('Ошибка: ' + err.message); return; }
+    catch (err) { fieldErr(e.target, 'Ошибка: ' + err.message); return; }
     e.target.querySelector('[name=password]').value = '';
-    if (!x.ok) { toast(errText(x)); return; }
+    if (!x.ok) { fieldErr(e.target, errText(x)); return; }
     loginOpen = false; authForm = false; closeLayer();
     toast(f === 'login' ? 'Вы вошли' : 'Вход включён');
     await Promise.all(['auth', 'security', 'status'].map(k => load(k, true)));
@@ -3813,7 +3937,7 @@ async function onSubmit(e, f) {
   }
   if (f === 'ads-qsearch' || f === 'ads-bsearch' || f === 'ads-asearch') {
     const v = e.target.querySelector('input').value.trim().toLowerCase();
-    if (v && !/^[a-z0-9.-]{1,100}$/.test(v)) { toast('Только буквы, цифры, точки и дефисы'); return; }
+    if (v && !/^[a-z0-9.-]{1,100}$/.test(v)) { fieldErr(e.target, 'Только буквы, цифры, точки и дефисы'); return; }
     if (f === 'ads-qsearch') { ADSV.search = v; S.qlog = null; render(); await load('qlog', true); }
     else if (f === 'ads-asearch') { ADSV.allowedSearch = v; S.allowed = null; render(); await load('allowed', true); }
     else { ADSV.blockedSearch = v; S.blocked = null; render(); await load('blocked', true); }
@@ -3821,7 +3945,7 @@ async function onSubmit(e, f) {
   }
   if (f === 'ads-srcadd') {
     const url = e.target.querySelector('[name=url]').value.trim();
-    if (!/^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?\/[A-Za-z0-9._~\/%+=&?-]*$/.test(url) || url.length > 300) { toast('Нужен адрес https://…, без пробелов и логина'); return; }
+    if (!/^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?\/[A-Za-z0-9._~\/%+=&?-]*$/.test(url) || url.length > 300) { fieldErr(e.target, 'Нужен адрес https://…, без пробелов и логина'); return; }
     const x = await adsControl({ op: 'source-add', url: url, format: e.target.querySelector('[name=format]').value }, 'Источник добавлен в режиме «Проверка»', 'ads-src');
     if (x && x.ok) adsControl({ op: 'enqueue', job: 'sources-update' }, 'Источник добавлен, загрузка поставлена в очередь', 'ads-src');
   }
@@ -3832,12 +3956,12 @@ async function onSubmit(e, f) {
   }
   if (f === 'ads-probe') {
     const v = $('adsProbe').value.trim().toLowerCase();
-    if (!DOMAIN.test(v)) { toast('Введите домен, например example.com'); return; }
+    if (!DOMAIN.test(v)) { fieldErr(e.target, 'Введите домен, например example.com'); return; }
     adsProbe(v);
   }
   if (f === 'ads-rule') {
     const v = $('adsRuleDomain').value.trim().toLowerCase();
-    if (!DOMAIN.test(v)) { toast('Введите домен, например example.com'); return; }
+    if (!DOMAIN.test(v)) { fieldErr(e.target, 'Введите домен, например example.com'); return; }
     await adsControl({ op: $('adsRuleType').value, domain: v, scope: $('adsRuleScope').value }, 'Правило добавлено', 'ads-rule');
   }
 }
@@ -3894,7 +4018,8 @@ applyTheme();
 { const h = decodeURIComponent(location.hash.slice(1)), id = h && page(h) ? h : idOf(location.pathname); if (id && page(id)) current = id; }
 cacheRead();
 history.replaceState({ p: current, d: 0 }, '', pathOf(current));
+busyStart(current);
 render();
-Promise.all(['status', 'security', 'update'].map(k => load(k))).then(() => { render(); refreshPage(); });
+Promise.all(['status', 'security', 'update'].map(k => load(k))).then(() => { render(); refreshPage(true); });
 restartTimer();
 })();

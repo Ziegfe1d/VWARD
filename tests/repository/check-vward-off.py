@@ -7,7 +7,8 @@ off   the routes into tunnels (lists of domains and subnets) and AdGuard Home's 
       provider and Keenetic's other lines stay
 keep  a redirect Keenetic put back while off goes again
 on    everything back exactly as it was
-The Panel's API runs it detached, an «off» only with its confirmation, and says its state."""
+The Panel's API runs it detached, an «off» only with its confirmation and behind the Panel's
+login, and says its state."""
 
 import json
 import os
@@ -149,8 +150,8 @@ with tempfile.TemporaryDirectory() as tmp:
                     " *) echo \"$1 $VWARD_OFF_BY\" >> \"$T/ran\" ;; esac\n")
     fake.chmod(0o755)
 
-    def api(method, body=""):
-        e = {"PATH": os.environ["PATH"], "T": str(t), "REQUEST_METHOD": method, "QUERY_STRING": "action=vward-off", "JQ": shutil.which("jq"),
+    def api(method, body="", **extra):
+        e = {**extra, "PATH": os.environ["PATH"], "T": str(t), "REQUEST_METHOD": method, "QUERY_STRING": "action=vward-off", "JQ": shutil.which("jq"),
              "VWARD_PROFILE_LIB": "/nonexistent", "VWARD_OFF_BIN": str(fake), "VWARD_COMPONENT_STATE": str(t / "state"),
              "CONTENT_TYPE": "application/x-www-form-urlencoded", "CONTENT_LENGTH": str(len(body)), "HTTP_X_VWARD_REQUEST": "console"}
         r = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=e, input=body, text=True, capture_output=True, timeout=30)
@@ -160,6 +161,13 @@ with tempfile.TemporaryDirectory() as tmp:
     if d != {"ok": True, "state": "off", "op": None, "since": 1790640000, "lists": 2, "subnets": 4741, "dns": 1, "dns_kept": False,
              "refused": 0, "saved": 4744, "error": None}:
         fail(f"API state: {d}")
+    # Behind the Panel's login like every other action: no session, no switch.
+    (t / "auth.conf").write_text("AUTH_ENABLED=1\n")
+    for method, body in (("GET", ""), ("POST", "op=off&confirm=VWARD_OFF")):
+        if api(method, body, VWARD_CONSOLE_AUTH_CONF=str(t / "auth.conf")).get("error") != "auth_required":
+            fail(f"{method} vward-off without the login the Panel asks for")
+    if (t / "ran").exists():
+        fail("the switch ran without the login")
     if api("POST", "op=off").get("error") != "confirmation_required":
         fail("the API switches VWARD off without the confirmation")
     if api("POST", "op=sideways").get("error") != "invalid_operation":

@@ -246,7 +246,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data|site-test|tunnel-quality|stability|vward-off|journal-data|log-archive) ;;
+    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data|site-test|tunnel-quality|stability|vward-off|notes|journal-data|log-archive) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -318,7 +318,7 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             ;;
     esac
     case "$ACTION" in
-        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control|wifi-host|ext-update-control|services|tunnel-quality|vward-off) ;;
+        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control|wifi-host|ext-update-control|services|tunnel-quality|vward-off|notes) ;;
         *)
             echo 'Status: 405 Method Not Allowed'
             header_json
@@ -340,36 +340,6 @@ console_mutation_enter(){
 }
 COMPONENT_STATE=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
 component_disabled(){ [ -e "$COMPONENT_STATE/$1.disabled" ]; }
-# vward-off: the emergency switch («Отключить VWARD», vward-off.sh). GET: its state. POST
-# op=off (confirm=VWARD_OFF) or op=on: detached, thousands of routes take minutes; the Panel
-# asks again until state is no longer «working». Never held back: it is the way out.
-if [ "$ACTION" = vward-off ]; then
-  header_json
-  OFF_BIN=${VWARD_OFF_BIN:-/opt/bin/vward-off.sh}
-  [ -x "$OFF_BIN" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
-  if [ "${REQUEST_METHOD:-GET}" = POST ]; then
-    read_body 256
-    VO_OP="$(form_value op)"
-    case "$VO_OP" in
-      off) [ "$(form_value confirm)" = VWARD_OFF ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;;
-      on) ;;
-      *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
-    esac
-    printf '%s|CONSOLE_ACTION|action=vward-%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$VO_OP" >> /opt/var/log/vward/console-audit.log 2>/dev/null
-    ( VWARD_OFF_BY=panel "$OFF_BIN" "$VO_OP" </dev/null >/dev/null 2>&1 & )
-    # The switch writes «working» at once; a moment for it, so the answer already says so.
-    vo_n=0; while [ "$vo_n" -lt 10 ] && ! grep -q '^state=working' "${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}/vward.off.status" 2>/dev/null; do
-      vo_n=$((vo_n + 1)); sleep 0.2 2>/dev/null || { sleep 1; vo_n=10; }; done
-  fi
-  "$OFF_BIN" status 2>/dev/null | "$JQ" -cRn '[inputs | select(index("=") != null) | {key: .[:index("=")], value: .[index("=") + 1:]}] | from_entries
-    | {ok: true, state: (.state // "on"), op: (.op // null), since: ((.since // "") | tonumber? // null),
-       lists: ((.lists // "0") | tonumber? // 0), subnets: ((.subnets // "0") | tonumber? // 0),
-       dns: ((.dns // "0") | tonumber? // 0), dns_kept: (.dns_kept == "1"),
-       refused: ((.refused // "0") | tonumber? // 0), saved: ((.saved // "0") | tonumber? // 0),
-       error: (.error // null)}'
-  exit 0
-fi
-
 console_mutation_leave(){ command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null || true; }
 UPDATE_RUN_DIR=${VWARD_CONSOLE_UPDATE_RUN:-/opt/var/run/vward/console-update}
 EXT_RUN_DIR=${VWARD_CONSOLE_EXT_RUN:-/opt/var/run/vward/console-ext-update}
@@ -493,6 +463,83 @@ fi
 # A change from the Panel: saved router answers go, the next page shows the
 # router as it is now.
 [ "${REQUEST_METHOD:-GET}" != POST ] || rm -rf "${NDM_CACHE_DIR:?}"
+
+# vward-off: the emergency switch («Отключить VWARD», vward-off.sh). GET: its state. POST
+# op=off (confirm=VWARD_OFF) or op=on: detached, thousands of routes take minutes; the Panel
+# asks again until state is no longer «working». Never held back by a busy updater: it is the
+# way out. Behind the login like every other action (until fix.26 it was ahead of it).
+if [ "$ACTION" = vward-off ]; then
+  header_json
+  OFF_BIN=${VWARD_OFF_BIN:-/opt/bin/vward-off.sh}
+  [ -x "$OFF_BIN" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+  if [ "${REQUEST_METHOD:-GET}" = POST ]; then
+    read_body 256
+    VO_OP="$(form_value op)"
+    case "$VO_OP" in
+      off) [ "$(form_value confirm)" = VWARD_OFF ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;;
+      on) ;;
+      *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
+    esac
+    printf '%s|CONSOLE_ACTION|action=vward-%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$VO_OP" >> /opt/var/log/vward/console-audit.log 2>/dev/null
+    ( VWARD_OFF_BY=panel "$OFF_BIN" "$VO_OP" </dev/null >/dev/null 2>&1 & )
+    # The switch writes «working» at once; a moment for it, so the answer already says so.
+    vo_n=0; while [ "$vo_n" -lt 10 ] && ! grep -q '^state=working' "${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}/vward.off.status" 2>/dev/null; do
+      vo_n=$((vo_n + 1)); sleep 0.2 2>/dev/null || { sleep 1; vo_n=10; }; done
+  fi
+  "$OFF_BIN" status 2>/dev/null | "$JQ" -cRn '[inputs | select(index("=") != null) | {key: .[:index("=")], value: .[index("=") + 1:]}] | from_entries
+    | {ok: true, state: (.state // "on"), op: (.op // null), since: ((.since // "") | tonumber? // null),
+       lists: ((.lists // "0") | tonumber? // 0), subnets: ((.subnets // "0") | tonumber? // 0),
+       dns: ((.dns // "0") | tonumber? // 0), dns_kept: (.dns_kept == "1"),
+       refused: ((.refused // "0") | tonumber? // 0), saved: ((.saved // "0") | tonumber? // 0),
+       error: (.error // null)}'
+  exit 0
+fi
+
+# notes: the bell's history, kept on the router (fix.26): the last 200 pop-ups the Panel showed.
+# GET: newest first and when they were last read. POST op=add (sev, title, text, to, key: one
+# key is taken once in 6 hours, so several open Panels write a warning once) or op=read
+# («Прочитать все»). One line a note: id, time, sev, key, to, title, text, tab-separated.
+if [ "$ACTION" = notes ]; then
+  header_json
+  NOTES_DIR=${VWARD_CONSOLE_NOTES:-/opt/var/lib/vward/console}
+  NOTES=$NOTES_DIR/notes.tsv
+  if [ "${REQUEST_METHOD:-GET}" = POST ]; then
+    read_body 2048
+    form_only op sev title text to key || { echo '{"ok":false,"error":"invalid_body"}'; exit 0; }
+    (umask 077; mkdir -p "$NOTES_DIR") 2>/dev/null || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+    NO_NOW="$(date +%s)"
+    case "$(form_value op)" in
+      read)
+        printf '%s\n' "$NO_NOW" > "$NOTES_DIR/notes.read.$$" && mv -f "$NOTES_DIR/notes.read.$$" "$NOTES_DIR/notes.read" ;;
+      add)
+        NO_SEV="$(form_value sev)"; NO_TO="$(form_value to)"; NO_KEY="$(form_value key)"
+        case "$NO_SEV" in ok|err|info|warn|crit|news) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+        case "$NO_TO" in *[!a-z0-9-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+        case "$NO_KEY" in *[!A-Za-z0-9_-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+        [ "${#NO_TO}" -le 64 ] && [ "${#NO_KEY}" -le 64 ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }
+        # Tabs, line breaks and other control characters become spaces: one note is one line.
+        NO_TITLE="$(form_decode title raw | tr '\000-\037\177' ' ')"
+        NO_TEXT="$(form_decode text raw | tr '\000-\037\177' ' ')"
+        [ -n "$NO_TITLE" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }
+        if [ -n "$NO_KEY" ] && tail -n 40 "$NOTES" 2>/dev/null |
+            awk -F '\t' -v k="$NO_KEY" -v since=$((NO_NOW - 21600)) '$4 == k && $2 + 0 >= since {f = 1} END {exit !f}'; then
+          echo '{"ok":true,"result":"unchanged"}'; exit 0
+        fi
+        (umask 077; printf '%s-%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$NO_NOW" "$$" "$NO_NOW" "$NO_SEV" "$NO_KEY" "$NO_TO" "$NO_TITLE" "$NO_TEXT" >> "$NOTES") ||
+          { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+        if [ "$(wc -l < "$NOTES")" -gt 220 ]; then
+          tail -n 200 "$NOTES" > "$NOTES.$$" && mv -f "$NOTES.$$" "$NOTES"; rm -f "$NOTES.$$"
+        fi ;;
+      *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
+    esac
+  fi
+  read_first "$NOTES_DIR/notes.read" NO_READ
+  case "$NO_READ" in ''|*[!0-9]*) NO_READ=0 ;; esac
+  tail -n 200 "$NOTES" 2>/dev/null | "$JQ" -cRn --argjson read "$NO_READ" '{ok: true, read_at: $read,
+    items: ([inputs | split("\t") | select(length == 7)
+      | {id: .[0], at: (.[1] | tonumber? // 0), sev: .[2], key: .[3], to: .[4], title: .[5], text: .[6]}] | reverse)}'
+  exit 0
+fi
 
 if [ "$ACTION" = auth ]; then
     if [ "${REQUEST_METHOD:-GET}" = GET ]; then
