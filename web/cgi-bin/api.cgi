@@ -1958,7 +1958,18 @@ if [ "$ACTION" = tunnel-probe ]; then
     PROBE_DIR="$(mktemp -d /tmp/vward-console-tunnel.XXXXXX 2>/dev/null)" || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
     trap 'rm -rf "${PROBE_DIR:?}"' EXIT
     PING_TARGET=1.1.1.1
-    "${VWARD_PING:-ping}" -I "$DEV" -c 4 -W 2 "$PING_TARGET" > "$PROBE_DIR/ping" 2>&1 &
+    # An Xray tunnel (VLESS) answers ping inside its own adapter (2 ms «through Germany»): four page
+    # requests through it instead, the time to the first byte, written the way ping writes it.
+    if awk -F '\t' -v n="$NAME" '$2 == n {f = 1} END {exit !f}' "${VWARD_VLESS_ETC:-/opt/etc/vward/vless-engine}/tunnels.tsv" 2>/dev/null; then
+        PING_TARGET="http://1.1.1.1/cdn-cgi/trace"
+        ( PT=; for PI in 1 2 3 4; do PT="$PT $("$CURL" -4 -s -o /dev/null --noproxy '*' --interface "$DEV" --connect-timeout 2 --max-time 4 \
+              -w '%{http_code}:%{time_starttransfer}' "$PING_TARGET" 2>/dev/null)"; done
+          printf '%s\n' "$PT" | awk '{for (i = 1; i <= NF; i++) {split($i, a, ":"); if (a[1] + 0 > 0) {n++; s += a[2] * 1000}}
+              printf "4 packets transmitted, %d received, %d%% packet loss\n", n, (4 - n) * 25
+              if (n) printf "rtt min/avg/max/mdev = 0/%.1f/0/0 ms\n", s / n}' ) > "$PROBE_DIR/ping" 2>&1 &
+    else
+        "${VWARD_PING:-ping}" -I "$DEV" -c 4 -W 2 "$PING_TARGET" > "$PROBE_DIR/ping" 2>&1 &
+    fi
     PING_PID=$!
     "$CURL" --interface "$DEV" --silent --max-time 5 https://ipinfo.io/json > "$PROBE_DIR/exit" 2>/dev/null || :
     PEER="$(ndm_cached running 10 "show running-config" |
@@ -2936,10 +2947,24 @@ fi
 [ -n "$ISP" ] || ISP='{}'
 [ -n "$INET" ] || INET='{}'
 [ -n "$IFACES" ] || IFACES='{}'
+# Keenetic busy (right after a tunnel is created or removed) answers nothing within the time:
+# the last answer of the last 10 minutes stands in, with its age; none - «unknown», never
+# «no tunnels» (a Viva 2026-10-12: «Туннели WireGuard не найдены» with three tunnels).
+IFACES_CACHE="${VWARD_CONSOLE_IFACES_CACHE:-/tmp/vward-console-ifaces.json}" IFACES_AGE=0 IFACES_UNKNOWN=false
+if [ "$IFACES" != '{}' ]; then
+    printf '%s\n' "$IFACES" > "$IFACES_CACHE.$$" 2>/dev/null && mv -f "$IFACES_CACHE.$$" "$IFACES_CACHE" 2>/dev/null || rm -f "$IFACES_CACHE.$$"
+elif [ -s "$IFACES_CACHE" ]; then
+    IFACES_AGE=$(( $(date +%s) - $(date -r "$IFACES_CACHE" +%s 2>/dev/null || echo 0) ))
+    if [ "$IFACES_AGE" -ge 0 ] && [ "$IFACES_AGE" -lt 600 ]; then IFACES="$(cat "$IFACES_CACHE")"; else IFACES_AGE=0 IFACES_UNKNOWN=true; fi
+else
+    IFACES_UNKNOWN=true
+fi
 
+# WireGuard connections with obfuscation (`wireguard asc`) are AmneziaWG in Keenetic's firmware.
+AWG_NAMES="$(ndm_cached running 10 "show running-config" | awk '/^interface [^ ]+$/ {cur = $2; next} /^!/ {cur = ""} cur != "" && $1 == "wireguard" && $2 == "asc" {print cur}' | tr '\n' ' ')"
 WG_INTERFACES="$(
     printf '%s\n' "$IFACES" |
-    "$JQ" -c --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy opkgtun}" --arg wan "${VWARD_WAN_INTERFACE:-}" '
+    "$JQ" -c --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy opkgtun}" --arg wan "${VWARD_WAN_INTERFACE:-}" --arg awgn " $AWG_NAMES" '
         ($types | split(" ")) as $vpn | [
         to_entries[] |
         select((.value | type) == "object" and .key != $wan and
@@ -2949,6 +2974,7 @@ WG_INTERFACES="$(
         {
             name:$n,
             type:((.type // "") | tostring | ascii_downcase),
+            awg:($awgn | contains(" " + $n + " ")),
             description:(.description // ""),
             link:(.link // ""),
             connected:(.connected // ""),
@@ -3126,6 +3152,7 @@ header_json
   --arg tcpdump_count "$TCPDUMP_COUNT" \
   --arg down_streak "$DOWN_STREAK" \
   --arg failopen_active "$FAILOPEN_ACTIVE" --argjson failopen_at "$FAILOPEN_AT" --arg failopen_reason "$FAILOPEN_REASON" \
+  --argjson ifaces_age "$IFACES_AGE" --argjson ifaces_unknown "$IFACES_UNKNOWN" \
   --argjson components "$COMPONENTS" \
   --arg opt_total_kb "$OPT_TOTAL_KB" \
   --arg opt_used_kb "$OPT_USED_KB" \
@@ -3220,6 +3247,8 @@ header_json
 
   wg:{
     interfaces:$wg_interfaces,
+    interfaces_unknown:$ifaces_unknown,
+    interfaces_age:(if $ifaces_age > 0 then $ifaces_age else null end),
     managed_device:$managed_tunnel,
     total:($wg_interfaces|length),
     down_streak:($down_streak|tonumber? // 0),

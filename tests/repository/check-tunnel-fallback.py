@@ -423,4 +423,18 @@ for state, ok in (("up\nup\n", True), ("down\ndown\n", False), ("up\ndown\n", Fa
 health_src = (ROOT / "components/tunnel-guard/scripts/vward-tunnel-health.sh").read_text()
 if 'if [ "$CONFIG_STATE" = down ] || [ "$LINK_STATE" = down ]; then\n    GOOD=0' not in health_src:
     fail("the tunnel check must not call a tunnel Keenetic has off or without link working")
+# An Xray tunnel answers ping inside its own adapter: its quality is three page requests through
+# it, written like ping (two answered in 120 and 180 ms: 33 % loss, 150 ms).
+qsrc = QUALITY.read_text()
+hp = re.search(r"^http_probe\(\) \{\n.*?^\}\n", qsrc, re.S | re.M).group(0)
+with tempfile.TemporaryDirectory() as t2:
+    fc = Path(t2) / "curl"
+    fc.write_text(f'#!/bin/sh\nn=$(cat {t2}/n 2>/dev/null || echo 0); n=$((n + 1)); echo $n > {t2}/n\n'
+                  'case $n in 1) printf 200:0.120 ;; 2) printf 000:0 ; exit 28 ;; 3) printf 200:0.180 ;; esac\n')
+    fc.chmod(0o755)
+    out = subprocess.run(["sh", "-c", f'CURL={fc}\nHTTP_TARGET=http://1.1.1.1/\n' + hp + "http_probe opkgtun2"], text=True, capture_output=True).stdout
+    if "3 packets transmitted, 2 received, 33% packet loss" not in out or "= 120.0/150.0/180.0/" not in out:
+        fail(f"an Xray tunnel measured by pages, not ping: {out!r}")
+if 'grep -qx "$name"' not in qsrc or "http_probe \"$dev\"" not in qsrc:
+    fail("the quality check must measure the VLESS tunnels by pages")
 print("TUNNEL_FALLBACK=PASS")

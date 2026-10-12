@@ -155,8 +155,11 @@ with tempfile.TemporaryDirectory() as t:
     bad = t / "bad.conf"; bad.write_text(CONF + "# BADCONF\n")
     run("add", "Finland", str(bad), expect="error=conf_rejected")
 
-    # No handshake: nothing stays - no program, no files, no Keenetic connection.
-    run("add", "Finland", str(conf), expect="error=tunnel_no_handshake")
+    # No handshake: nothing stays - no program, no files, no Keenetic connection; the Panel is told
+    # what went to the server and what came back.
+    out = run("add", "Finland", str(conf), expect="error=tunnel_no_handshake")
+    if not any(l.startswith("reason=sent 1 bytes, received 1") for l in out.splitlines()):
+        fail(f"no handshake: what was sent and received is said: {out!r}")
     if list((t / "etc").glob("t[0-9]*")) or list((t / "run").glob("*.pid")) or set(ifaces()) != {"OpkgTun0"}:
         fail(f"a tunnel without a handshake left something: {ifaces()}")
 

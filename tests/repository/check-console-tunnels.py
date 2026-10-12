@@ -94,10 +94,13 @@ _wgi = _wgi[_wgi.index('--arg wan'):]
 _prog = _wgi[_wgi.index("'") + 1:_wgi.index("' 2>/dev/null")]
 _ifs = {"OpkgTun2": {"type": "OpkgTun", "state": "up", "link": "down", "summary": {"layer": {"conf": "disabled"}}},
         "Wireguard0": {"type": "Wireguard", "state": "up", "link": "up", "summary": {"layer": {"conf": "running"}}}}
-_r = subprocess.run(["jq", "-c", "--arg", "types", "wireguard opkgtun", "--arg", "wan", "", _prog], input=json.dumps(_ifs), text=True, capture_output=True)
-_st = {t["name"]: t["state"] for t in json.loads(_r.stdout or "[]")}
-if _st != {"OpkgTun2": "down", "Wireguard0": "up"}:
+_r = subprocess.run(["jq", "-c", "--arg", "types", "wireguard opkgtun", "--arg", "wan", "", "--arg", "awgn", " Wireguard0 ", _prog], input=json.dumps(_ifs), text=True, capture_output=True)
+_st = {t["name"]: (t["state"], t["awg"]) for t in json.loads(_r.stdout or "[]")}
+# And a WireGuard connection with obfuscation (`wireguard asc`) is AmneziaWG, not «WireGuard».
+if _st != {"OpkgTun2": ("down", False), "Wireguard0": ("up", True)}:
     fail(f"switched off in Keenetic must read as off: {_st} {_r.stderr}")
+if "t.type === 'wireguard' && t.awg ? 'AmneziaWG'" not in JS:
+    fail("an AmneziaWG connection of the firmware is named AmneziaWG")
 for need in ("TWHY=\"$(printf '%s\\n' \"$TALL\" | sed -n 's/^reason=//p' | tail -n 1)\"", "{reason:$w}"):
     if need not in API:
         fail(f"the API passes the router's reply: lacks {need}")

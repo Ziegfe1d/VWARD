@@ -49,6 +49,21 @@ NDMC=${VWARD_NDMC:-ndmc}
 GUARD_LISTS="${VWARD_TUNNEL_GUARD_DIR:-/opt/var/lib/vward/tunnel-guard}/lists-fallback"
 JQ=${JQ:-jq}
 
+# http_probe DEV: three page requests through DEV, written the way ping writes its result.
+# An Xray tunnel (VLESS) answers ping inside its own adapter (2 ms «through Germany», a Viva
+# 2026-10-12): only a page from the far end measures the path. The time to the first byte.
+HTTP_TARGET=${VWARD_QUALITY_HTTP_TARGET:-http://1.1.1.1/cdn-cgi/trace}
+http_probe() {
+    hp_t=
+    for hp_i in 1 2 3; do
+        hp_t="$hp_t $("$CURL" -4 -s -o /dev/null --noproxy '*' --interface "$1" --connect-timeout 2 --max-time 4 \
+            -w '%{http_code}:%{time_starttransfer}' "$HTTP_TARGET" 2>/dev/null)"
+    done
+    printf '%s\n' "$hp_t" | awk '{for (i = 1; i <= NF; i++) {split($i, a, ":"); if (a[1] + 0 > 0) {ms = a[2] * 1000; n++; s += ms; if (min == "" || ms < min) min = ms; if (ms > max) max = ms}}
+        printf "3 packets transmitted, %d received, %d%% packet loss\n", n, (3 - n) * 100 / 3
+        if (n) printf "rtt min/avg/max/mdev = %.1f/%.1f/%.1f/0.0 ms\n", min, s / n, max}'
+}
+
 summary() {
     [ -s "$SAMPLES" ] || return 0
     sp=/dev/null; [ ! -s "$SPEED_FILE" ] || sp=$SPEED_FILE
@@ -229,11 +244,16 @@ vward_profile_load || exit 1
 [ -d "$DIR" ] || mkdir -p "$DIR" || exit 1
 k=0
 : > "$DIR/map"
+XRAY_TUNNELS=$(awk -F '\t' '{print $2}' "${VWARD_VLESS_ETC:-/opt/etc/vward/vless-engine}/tunnels.tsv" 2>/dev/null)
 while read -r name dev; do
     vward_valid_ifname "$dev" 2>/dev/null && [ -e "$SYSFS/$dev" ] || continue
     k=$((k + 1))
     printf '%s\t%s\t%s\n' "$DIR/p.$k" "$name" "$dev" >> "$DIR/map"
-    "$PING" -I "$dev" -c 3 -W 2 "$TARGET" > "$DIR/p.$k" 2>&1 &
+    if printf '%s\n' "$XRAY_TUNNELS" | grep -qx "$name"; then
+        http_probe "$dev" > "$DIR/p.$k" 2>&1 &
+    else
+        "$PING" -I "$dev" -c 3 -W 2 "$TARGET" > "$DIR/p.$k" 2>&1 &
+    fi
 done <<TARGETS
 $(vward_map_vpns "$(vward_device_map 2>/dev/null)" "${VWARD_WAN_DEVICE:-}")
 TARGETS

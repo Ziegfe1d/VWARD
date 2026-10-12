@@ -94,8 +94,9 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .kv+.kv .kv-row:first-child{border-top:1px solid var(--line)}
 .kv dt{flex:1;min-width:0;color:var(--muted);font-size:var(--fs-sm)}
 .kv dd{margin:0;font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;max-width:62%;text-align:right;font-weight:550;overflow-wrap:anywhere}
-/* The label keeps at least its longest word: a long value wraps instead of covering it. */
-.kv-row>dt{flex:1 1 38%;min-width:min(38%,8em);overflow-wrap:break-word}
+/* The label keeps at least its longest word whole («Местоположени / е» on a phone): a long
+   value wraps instead of covering it or breaking the label inside a word. */
+.kv-row>dt{flex:1 1 38%;min-width:min-content;overflow-wrap:normal}
 .kv-row.flash{animation:flash 1.6s ease}
 .kv-row.link{cursor:pointer}
 .kv-ext{display:inline-flex;align-items:center;gap:8px;color:var(--accent);text-decoration:none}

@@ -101,6 +101,23 @@ env_rci_down = os.environ | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=st
                              "CURL": "/bin/false", "VWARD_PROFILE_LIB": "/nonexistent"}
 status = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=env_rci_down, text=True, capture_output=True)
 assert json.loads(status.stdout.split("\n\n", 1)[1]).get("ok") is True, "status must survive an unavailable RCI"
+# Keenetic busy answers nothing: the last list of tunnels stands in with its age; without one,
+# «unknown» - never «no tunnels» (a Viva 2026-10-12).
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    fcurl = td / "curl"
+    fcurl.write_text(f'#!/bin/sh\nfor u do :; done\n[ -e "{td}/silent" ] && exit 28\ncase "$u" in */show/interface) echo \'{{"Wireguard0":{{"type":"Wireguard","state":"up","connected":"yes"}}}}\' ;; *) echo {{}} ;; esac\n')
+    fcurl.chmod(0o755)
+    env_c = env_rci_down | {"CURL": str(fcurl), "VWARD_CONSOLE_IFACES_CACHE": str(td / "ifaces.json")}
+    st_ = lambda: json.loads(subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=env_c, text=True, capture_output=True).stdout.split("\n\n", 1)[1])["wg"]
+    w = st_()
+    assert [t["name"] for t in w["interfaces"]] == ["Wireguard0"] and w["interfaces_unknown"] is False, w
+    (td / "silent").touch()
+    w = st_()
+    assert [t["name"] for t in w["interfaces"]] == ["Wireguard0"] and w["interfaces_unknown"] is False, f"the last list stands in: {w}"
+    (td / "ifaces.json").unlink()
+    w = st_()
+    assert w["interfaces"] == [] and w["interfaces_unknown"] is True, f"no answer, no list: unknown: {w}"
 
 assert "?//" not in API, "jq 1.7 parses '?//' as the destructuring operator; write '(x? // y)'"
 assert call_api("action=ads-data").get("ok") is True, "ads-data must render without Ads Guard state"

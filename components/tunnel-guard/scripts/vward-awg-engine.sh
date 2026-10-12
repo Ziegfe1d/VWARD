@@ -219,6 +219,13 @@ stop_one() {
     rm -f "$ENGINE_RUN/t$1.pid" "$ENGINE_RUN/t$1.state"
 }
 
+# traffic_said N: what went to the server and what came back, for the Panel when no handshake
+# came (sent, nothing back: the server does not take the key or its answers do not arrive).
+traffic_said() {
+    printf 'reason=sent %s bytes, received %s\n' "$(sed -n 's/^tx=//p' "$ENGINE_RUN/t$1.state" 2>/dev/null | head -n 1)" \
+        "$(sed -n 's/^rx=//p' "$ENGINE_RUN/t$1.state" 2>/dev/null | head -n 1)"
+}
+
 # The program writes the last handshake time to its state file (never a key).
 handshake_age() {
     h=$(sed -n 's/^handshake=//p' "$ENGINE_RUN/t$1.state" 2>/dev/null)
@@ -261,7 +268,7 @@ op_add() {
     until handshake_age "$n" >/dev/null; do
         w=$((w + 2))
         if [ "$w" -gt "$hw" ]; then
-            [ "$keep" = keep ] || { undo; die tunnel_no_handshake; }
+            [ "$keep" = keep ] || { traffic_said "$n"; undo; die tunnel_no_handshake; }
             nohs=1; break
         fi
         sleep 2
@@ -313,7 +320,7 @@ op_replace() {
         until handshake_age "$n" >/dev/null; do
             w=$((w + 2))
             if [ "$w" -gt "$hw" ]; then
-                [ "$keep" = keep ] || { restore; die tunnel_no_handshake; }
+                [ "$keep" = keep ] || { traffic_said "$n"; restore; die tunnel_no_handshake; }
                 nohs=1; break
             fi
             sleep 2
