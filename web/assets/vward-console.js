@@ -3451,11 +3451,12 @@ async function runLongBody(resultId, action, fields, dataAction, okMsg, show) {
 const UPDATE_OK = { check: 'Проверка завершена', apply: 'Обновление установлено', retry: 'Обновление установлено', rollback: 'Откат выполнен', recover: 'Обновление восстановлено' };
 function updateOp(op, token) {
   return runLong('updates', 'update-control', token ? { op: op, confirm: token } : { op: op }, 'update-data', op === 'check' ? '' : UPDATE_OK[op] || 'Готово')
-    .then(() => Promise.all([load('update', true), load('status', true)])).then(() => {
-      // After a check, say what it found.
-      if (op === 'check') { const pd = S.update && S.update.pending; toast(pd && pd.present ? 'Найдено обновление ' + (pd.version || '') : 'Новых обновлений нет'); }
+    .then(run => Promise.all([load('update', true), load('status', true)]).then(() => {
+      // After a check that finished, say what it found. A check that failed or never started
+      // has already said so: no «Новых обновлений нет» from the last answer (Viva 2026-10-13).
+      if (op === 'check' && run && run.finished && (run.rc === 0 || UPDATE_RC_OK[run.rc])) { const pd = S.update && S.update.pending; toast(pd && pd.present ? 'Найдено обновление ' + (pd.version || '') : 'Новых обновлений нет'); }
       render();
-    });
+    }));
 }
 // DNS of every device through AdGuard Home (vward-ads-privacy-dns-guard.sh).
 // Nothing can be switched on while AdGuard Home's own way out is not encrypted.

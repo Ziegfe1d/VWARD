@@ -40,4 +40,17 @@ want = ["", "последнее обновление: заменено 3 фай�
         "последнее обновление: целиком", "последнее обновление: изменённые файлы, заменено 3 файла, скачано 4 КБ"]
 if out != want:
     fail(f"the engine row note: {out}")
+# «Проверить» that failed (the router did not answer in 20 s) says only the error: no «Новых
+# обновлений нет» from the last answer (Viva 2026-10-13).
+src = re.search(r"function updateOp\(op, token\) \{.*?\n\}", JS, re.S)
+if not src:
+    fail("updateOp not found")
+prog = ("const out = []; const toast = m => out.push(m); const render = () => {}; const load = () => Promise.resolve();"
+        "const S = {update: {pending: {present: false}}}; const UPDATE_OK = {}; const UPDATE_RC_OK = {10: 1, 20: 1};"
+        "let next; const runLong = () => Promise.resolve(next);" + src.group(0) +
+        "(async () => { for (const r of [undefined, {finished: false}, {finished: true, rc: 31}, {finished: true, rc: 10}, {finished: true, rc: 0}]) {"
+        " next = r; await updateOp('check'); out.push('|'); } console.log(JSON.stringify(out)); })();")
+out = json.loads(subprocess.run(["node", "-e", prog], capture_output=True, text=True, check=True).stdout)
+if out != ["|", "|", "|", "Новых обновлений нет", "|", "Новых обновлений нет", "|"]:
+    fail(f"a check result after a failed check: {out}")
 print("CONSOLE_UPDATE_METHOD=PASS")
