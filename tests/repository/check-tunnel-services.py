@@ -165,6 +165,12 @@ echo result=changed
         time.sleep(0.2)
     else:
         fail("checked 33 minutes ago: again, by itself")
+    # The check runs in the background: let it finish before the folder goes (it writes into its
+    # lock folder; removing the folder under it failed the build on a busy runner, 2026-10-12).
+    for _ in range(100):
+        if not (sdir / "lock").exists():
+            break
+        time.sleep(0.2)
 
 js = (ROOT / "web/assets/vward-console.js").read_text()
 for need in ("data-svc-cat=", "op: 'category'", "function svcProbePanel(", "Проверка через туннели"):
