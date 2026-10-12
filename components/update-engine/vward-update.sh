@@ -513,11 +513,31 @@ if [ "$schema" = 2 ] && [ "$command" != --dry-run ] && [ "${VWARD_ENGINE_SWITCHE
     vu_log WARN "New update engine not installed; this one continues"
 fi
 if [ "$schema" = 2 ]; then
-    vu_v2_stage "$manifest" || vu_die "$VU_VERIFY_ERROR" "Per-file update: plan, download or check failed"
-    package_dir=$VU_PACKAGE_DIR
+    # How (owner 2026-10-12): the whole package of the same release by default (its files all,
+    # settings kept), only the changed files when chosen; either way the other one when the
+    # first cannot be done - a per-file download that failed while curl crashed on HTTPS left
+    # fix.24 uninstalled on a Viva.
+    if [ "$update_method" = files ] && vu_v2_stage "$manifest"; then
+        package_dir=$VU_PACKAGE_DIR
+        method_used=files
+    elif vu_whole_manifest "$manifest"; then
+        [ "$update_method" = full ] || vu_log WARN "Per-file update failed; the whole package instead"
+        manifest=$VU_WHOLE_MANIFEST
+        download_and_unpack "$manifest"
+        package_dir=$VU_PACKAGE_DIR
+        method_used=full
+    elif [ "$update_method" = full ]; then
+        vu_log WARN "Whole package unavailable; the changed files instead"
+        vu_v2_stage "$manifest" || vu_die "$VU_VERIFY_ERROR" "Per-file update: plan, download or check failed"
+        package_dir=$VU_PACKAGE_DIR
+        method_used=files
+    else
+        vu_die "$VU_VERIFY_ERROR" "Per-file update: plan, download or check failed"
+    fi
 else
     download_and_unpack "$manifest"
     package_dir=$VU_PACKAGE_DIR
+    method_used=full
 fi
 print_plan "$manifest" "$package_dir"
 
@@ -525,5 +545,5 @@ case "$command" in
     --dry-run)
         if vu_hard_safety_check "$package_dir"; then printf '%s\n' 'Safety: ready'; else printf '%s\n' 'Safety: blocked'; fi
         exit "$VU_OK" ;;
-    --apply|--apply-pending|--install) apply_update "$manifest" "$package_dir" ;;
+    --apply|--apply-pending|--install) apply_update "$manifest" "$package_dir"; vu_method_note "$method_used" ;;
 esac

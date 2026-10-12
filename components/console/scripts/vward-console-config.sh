@@ -494,6 +494,7 @@ op_update() {
             [ "$(awk -F= -v k="$other" '$1==k{print $2;exit}' "$UPDATE_FILE")" != "$2" ] || die invalid_window 64 ;;
         check_interval_seconds) valid_int_range "$2" 300 86400 || die invalid_value 64 ;;
         apply_window) case "$2" in window|any) ;; *) die invalid_value 64 ;; esac ;;
+        update_method) case "$2" in full|files) ;; *) die invalid_value 64 ;; esac ;;
         *) die invalid_setting 64 ;;
     esac
     set_kv "$UPDATE_FILE" "$1" "$2" 0600 || done_ok "update $1=$2" unchanged

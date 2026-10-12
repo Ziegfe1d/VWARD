@@ -142,6 +142,32 @@ vu_v2_fetch() {
     done < "$list"
 }
 
+# vu_whole_manifest V2-MANIFEST: the full-package manifest of the same release (the v1 feed, signed
+# apart): VU_WHOLE_MANIFEST. Same update id and sequence, schema 1, a valid signature.
+vu_whole_manifest() {
+    whole_v2=$1
+    VU_WHOLE_MANIFEST=$VU_STAGING_DIR/whole-manifest.json
+    rm -f "$VU_WHOLE_MANIFEST"
+    if [ -n "$VU_ROOT_PREFIX" ] && [ -n "${VWARD_TEST_WHOLE_MANIFEST:-}" ]; then
+        [ -r "$VWARD_TEST_WHOLE_MANIFEST" ] || return 1
+        cp "$VWARD_TEST_WHOLE_MANIFEST" "$VU_WHOLE_MANIFEST" || return 1
+    else
+        case "$manifest_url" in https://*/update-manifest.json) ;; *) return 1 ;; esac
+        vu_fetch_feed "$manifest_url" "$VU_WHOLE_MANIFEST" "$max_manifest_size" || return 1
+    fi
+    vu_manifest_validate_any "$VU_WHOLE_MANIFEST" && vu_manifest_verify_signature "$VU_WHOLE_MANIFEST" || return 1
+    [ "$(vu_manifest_schema "$VU_WHOLE_MANIFEST")" = 1 ] || return 1
+    [ "$(jq -r '.signed.update_id' "$VU_WHOLE_MANIFEST")" = "$(jq -r '.signed.update_id' "$whole_v2")" ] &&
+        [ "$(jq -r '.signed.sequence' "$VU_WHOLE_MANIFEST")" = "$(jq -r '.signed.sequence' "$whole_v2")" ]
+}
+
+# vu_method_note METHOD: how the last update came (full or files), for the Panel.
+vu_method_note() {
+    mkdir -p "$VU_STATE_DIR" 2>/dev/null || return 0
+    (umask 077; printf 'last_method=%s\nlast_at=%s\n' "$1" "$(date +%s)" > "$VU_STATE_DIR/method.state.$$") &&
+        mv -f "$VU_STATE_DIR/method.state.$$" "$VU_STATE_DIR/method.state" 2>/dev/null || rm -f "$VU_STATE_DIR/method.state.$$"
+}
+
 # vu_v2_plan MANIFEST OUT: the signed file rows whose file on the router differs
 # (content or mode) or is missing, as "target sha size mode component".  One
 # sha256sum and one ls for all files.

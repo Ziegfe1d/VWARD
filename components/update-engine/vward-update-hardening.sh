@@ -181,6 +181,7 @@ vu_assign_config() {
         auto_routine) auto_routine=$value ;;
         manifest_url) manifest_url=$value ;;
         manifest_v2_url) manifest_v2_url=$value ;;
+        update_method) update_method=$value ;;
         public_key_file) public_key_file=$value ;;
         channel) channel=$value ;;
         safe_window_start) safe_window_start=$value ;;

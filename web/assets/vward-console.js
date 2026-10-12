@@ -13,7 +13,13 @@ const store = {
 const num = v => (v == null || v === '' || isNaN(Number(v))) ? null : Number(v);
 const fmtInt = v => num(v) == null ? '—' : Number(v).toLocaleString('ru-RU');
 const fmtKB = kb => { const n = num(kb); if (n == null) return '—'; if (n >= 1048576) return (n / 1048576).toFixed(1).replace('.', ',') + ' ГБ'; if (n >= 1024) return Math.round(n / 1024) + ' МБ'; return n + ' КБ'; };
-const lastApplyNote = la => { if (!la) return ''; const n = la.changed_files, kb = Math.ceil((la.fetched_bytes || 0) / 1024); return 'последнее обновление: ' + (n ? 'заменено ' + n + ' ' + plural(n, 'файл', 'файла', 'файлов') + ', скачано ' + fmtKB(kb) : 'файлы не менялись'); };
+/* Как пришло последнее обновление: method.state пишется при каждой установке, last-apply.state - только по файлам. */
+const lastApplyNote = (la, lm) => {
+  if (lm && lm.method === 'full') return 'последнее обновление: целиком';
+  if (!la) return '';
+  const n = la.changed_files, kb = Math.ceil((la.fetched_bytes || 0) / 1024);
+  return 'последнее обновление: ' + (lm ? 'изменённые файлы, ' : '') + (n ? 'заменено ' + n + ' ' + plural(n, 'файл', 'файла', 'файлов') + ', скачано ' + fmtKB(kb) : 'файлы не менялись');
+};
 const fmtUptime = s => { const n = num(s); if (n == null) return '—'; const d = Math.floor(n / 86400), h = Math.floor(n % 86400 / 3600), m = Math.floor(n % 3600 / 60); return d ? d + ' д ' + h + ' ч' : h ? h + ' ч ' + m + ' мин' : m + ' мин'; };
 const fmtSpeed = v => { const n = num(v); return n == null ? '' : n >= 1000 ? (n / 1000).toString().replace('.', ',') + ' Гбит/с' : n + ' Мбит/с'; };
 const isTrue = v => v === true || v === 'true' || v === '1' || v === 1 || v === 'yes' || v === 'up';
@@ -1474,13 +1480,15 @@ const RENDER = {
         ['Версия', p.version || '—', '', 'd-notes', '', 'сборка № ' + (p.last_sequence || 0) + ' · что нового'],
         pend.present ? ['Доступно', (pend.version || '') + (pend.priority ? ' · ' + ({ ROUTINE: 'обычное', IMPORTANT: 'важное', CRITICAL: 'критическое' }[String(pend.priority).toUpperCase()] || pend.priority) : ''), 'info', 'd-notes'] : null,
         ['Последняя проверка', fmtStamp(p.last_health_check) || '—', '', 'a-updater'],
-        u.engine ? ['Модуль обновлений', u.engine.version === '1' ? '1.x' : u.engine.version, '', null, '', lastApplyNote(u.last_apply)] : null
+        u.engine ? ['Модуль обновлений', u.engine.version === '1' ? '1.x' : u.engine.version, '', null, '', lastApplyNote(u.last_apply, u.last_method)] : null
       ]) + (conf || (acts.length ? '<div class="panel-actions even">' + acts.join('') + '</div>' : '')) + resultBox('updates'),
       { right: ['FAILED', 'RECOVERY_REQUIRED'].includes(u.phase || p.phase) ? headPill('crit', phaseText(u.phase || p.phase)) : '' }) +
       panel('Настройки обновлений', '<dl class="kv">' +
         ctrlRow('Установка обновлений', sel('data-upd="mode"', 'Установка обновлений', [['auto', 'Автоматическая'], ['schedule', 'По расписанию'], ['manual', 'Ручная']], mode), ({ auto: 'сразу после проверки подписи', schedule: 'в ' + (winStart || '03:00') + ', критические исправления - сразу', manual: 'только проверка и уведомление' })[mode]) +
         (mode === 'schedule' ? ctrlRow('Время установки', sel('data-cfg-upd="install_time"', 'Время установки', withCur(HOURS, winStart, ''), winStart), 'обновление ставится при первой проверке после этого времени') : '') +
         ctrlRow('Интервал проверки', sel('data-cfg-upd="check_interval_seconds"', 'Интервал проверки', withCur([[900, '15 минут'], [1800, '30 минут'], [3600, '1 час'], [10800, '3 часа'], [21600, '6 часов'], [43200, '12 часов'], [86400, '24 часа']], interval, ' с'), interval)) +
+        ctrlRow('Способ обновления', sel('data-cfg-upd="update_method"', 'Способ обновления', [['full', 'Целиком'], ['files', 'Только изменённые файлы']], uc.update_method === 'files' ? 'files' : 'full'),
+          uc.update_method === 'files' ? 'скачиваются только изменённые файлы; если не вышло - пакет целиком' : 'скачивается весь пакет; если не вышло - изменённые файлы') +
         (feed === 'beta' || feed === 'dev' ? ctrlRow('Канал', sel('data-upd-feed', 'Канал обновлений', [['stable', 'Stable (рекомендуется)', true], ['beta', 'Beta'], ['dev', 'Dev']], feed), feed === 'dev' ? 'сборки в разработке, возможны ошибки' : 'проверенные сборки; Stable откроется с первым выпуском') : '') +
         '</dl>' + (feed === 'custom' ? kv([['Канал', 'свой адрес манифеста', '', null, '', 'задан в update.conf на роутере']]) : '') +
         confirmBox('feed-dev', 'Перейти на канал Dev? Это сборки в разработке: в них возможны ошибки. Вернуться на бету можно в любой момент - обновления с беты придут, когда она догонит установленную версию.', 'Перейти', true),

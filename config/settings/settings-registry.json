@@ -364,6 +364,24 @@
       "risk": "medium"
     },
     {
+      "id": "update.update_method",
+      "component": "update-engine",
+      "section": "Update Engine · способ",
+      "label_ru": "Способ обновления",
+      "description_ru": "full - скачивается пакет целиком; files - только изменённые файлы. Если выбранный способ не прошёл, берётся другой",
+      "source": "update.conf",
+      "key": "update_method",
+      "type": "enum",
+      "allowed": [
+        "full",
+        "files"
+      ],
+      "editable": true,
+      "secret": false,
+      "restart_requirement": "none",
+      "risk": "low"
+    },
+    {
       "id": "update.important_delay",
       "component": "update-engine",
       "section": "Update Engine · расписание",

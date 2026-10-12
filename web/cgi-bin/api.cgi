@@ -695,7 +695,7 @@ if [ "$ACTION" = config-data ]; then
     [ -n "$WAN_PARAMS" ] || WAN_PARAMS='{}'
     kv_file "$WCONF" ENABLED=W_EN CONTROL_ENABLED=W_CTL WINDOW_SEC=W_WIN BAND_SWITCH_WARN=W_SW WEAK_5G_SAMPLE_WARN=W_WEAK WEAK_5G_RSSI=W_RSSI
     wnum(){ case "$1" in ''|*[!0-9-]*) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
-    kv_file "$UCONF" safe_window_start=U_START safe_window_end=U_END check_interval_seconds=U_INTERVAL apply_window=U_WINDOW manifest_url=U_URL
+    kv_file "$UCONF" safe_window_start=U_START safe_window_end=U_END check_interval_seconds=U_INTERVAL apply_window=U_WINDOW update_method=U_METHOD manifest_url=U_URL
     COMPONENT_REGISTRY=${VWARD_COMPONENT_REGISTRY:-/opt/share/vward/updater/current/component-registry.json}
     DISABLED="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && basename "$F" .disabled; done | list_json)"
     # Which component a switched-off one went off with (its flag ends «(with ID)»): it comes back with it.
@@ -715,14 +715,14 @@ if [ "$ACTION" = config-data ]; then
       --argjson wan_params "$WAN_PARAMS" \
       --arg w_window "$(wnum "$W_WIN" 86400)" --arg w_switch "$(wnum "$W_SW" 20)" \
       --arg w_weak "$(wnum "$W_WEAK" 5)" --arg w_rssi "$(wnum "$W_RSSI" -75)" \
-      --arg u_start "$U_START" --arg u_end "$U_END" --arg u_interval "$U_INTERVAL" --arg u_window "$U_WINDOW" \
+      --arg u_start "$U_START" --arg u_end "$U_END" --arg u_interval "$U_INTERVAL" --arg u_window "$U_WINDOW" --arg u_method "$U_METHOD" \
       --arg u_feed "$(printf '%s\n' "$U_URL" | sed -n -E 's#^https://raw[.]githubusercontent[.]com/[^/]+/[^/]+/(beta|dev)/updates/[a-z0-9-]+/update-manifest[.]json$#\1#p')" \
       --argjson writable "$([ -x "$CONFIG_HELPER" ] && echo true || echo false)" \
       '{ok:true,writable:$writable,
         route:{group:$group,groups:$groups,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
         tunnel_guard:{enabled:$tunnel_guard},wan_guard:{enabled:$wan_guard,params:$wan_params},components:$components,
         wifi:{ENABLED:($w_en==1),CONTROL_ENABLED:($w_ctl==1),WINDOW_SEC:($w_window|(tonumber? // null)),BAND_SWITCH_WARN:($w_switch|(tonumber? // null)),WEAK_5G_SAMPLE_WARN:($w_weak|(tonumber? // null)),WEAK_5G_RSSI:($w_rssi|(tonumber? // null))},
-        update:{safe_window_start:$u_start,safe_window_end:$u_end,check_interval_seconds:($u_interval|(tonumber? // null)),apply_window:(if $u_window == "any" then "any" else "window" end),feed:(if $u_feed == "" then "custom" else $u_feed end)}}'
+        update:{safe_window_start:$u_start,safe_window_end:$u_end,check_interval_seconds:($u_interval|(tonumber? // null)),apply_window:(if $u_window == "any" then "any" else "window" end),update_method:(if $u_method == "files" then "files" else "full" end),feed:(if $u_feed == "" then "custom" else $u_feed end)}}'
     exit 0
 fi
 
@@ -2525,6 +2525,10 @@ if [ "$ACTION" = "update-data" ]; then
         fetched_bytes=LA_BYTES applied_at=LA_AT
     case "$LA_CHANGED" in ''|*[!0-9]*) LA_CHANGED=-1 ;; esac
     case "$LA_BYTES" in ''|*[!0-9]*) LA_BYTES=-1 ;; esac
+    # How the last update came: whole package or changed files (engine 2.0.8+).
+    kv_file "$STATE/method.state" last_method=LM_METHOD last_at=LM_AT
+    case "$LM_METHOD" in full|files) ;; *) LM_METHOD= ;; esac
+    case "$LM_AT" in ''|*[!0-9]*) LM_AT=0 ;; esac
 
     "$JQ" -n \
       --arg phase "$PHASE" \
@@ -2533,6 +2537,8 @@ if [ "$ACTION" = "update-data" ]; then
       --arg la_at "$LA_AT" \
       --argjson la_changed "$LA_CHANGED" \
       --argjson la_bytes "$LA_BYTES" \
+      --arg lm_method "$LM_METHOD" \
+      --argjson lm_at "$LM_AT" \
       --arg version "$PENDING_VERSION" \
       --arg priority "$PENDING_PRIORITY" \
       --arg sequence "$PENDING_SEQUENCE" \
@@ -2547,7 +2553,8 @@ if [ "$ACTION" = "update-data" ]; then
       --argjson run "$RUN_JSON" \
       '{ok:true,phase:$phase,busy:$busy,pending:{present:$pending,version:$version,priority:$priority,sequence:$sequence},rollback_available:$rollback,allowed:{check:$check_allowed,apply:$apply_allowed,retry:$retry_allowed,rollback:$rollback_allowed,recover:$recover_allowed},
         run:$run,engine:{version:$engine},
-        last_apply:(if $la_changed < 0 then null else {version:$la_version,changed_files:$la_changed,fetched_bytes:$la_bytes,applied_at:$la_at} end)}'
+        last_apply:(if $la_changed < 0 then null else {version:$la_version,changed_files:$la_changed,fetched_bytes:$la_bytes,applied_at:$la_at} end),
+        last_method:(if $lm_method == "" then null else {method:$lm_method,at:$lm_at} end)}'
     exit 0
 fi
 

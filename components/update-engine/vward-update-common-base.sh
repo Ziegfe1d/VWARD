@@ -48,9 +48,12 @@ check_interval_seconds=900
 request_timeout_seconds=120
 important_max_delay_seconds=7200
 routine_max_delay_seconds=86400
+# full: the whole package of a release (its files all, settings kept); files: only the files that
+# changed. Either way the other one when the first cannot be done (owner 2026-10-12).
+update_method=full
 # This engine's own version: a manifest may ask for a newer one (min_updater_version),
 # and a signed manifest carrying a newer engine makes it update itself.
-VU_ENGINE_VERSION=2.0.7
+VU_ENGINE_VERSION=2.0.8
 minimum_updater_version=$VU_ENGINE_VERSION
 manifest_v2_url=
 
@@ -86,37 +89,8 @@ vu_die() {
     exit "$code"
 }
 
-vu_assign_config() {
-    key=$1
-    value=$2
-    case "$key" in
-        update_enabled) update_enabled=$value ;;
-        auto_apply) auto_apply=$value ;;
-        auto_critical) auto_critical=$value ;;
-        auto_important) auto_important=$value ;;
-        auto_routine) auto_routine=$value ;;
-        manifest_url) manifest_url=$value ;;
-        public_key_file) public_key_file=$value ;;
-        channel) channel=$value ;;
-        safe_window_start) safe_window_start=$value ;;
-        safe_window_end) safe_window_end=$value ;;
-        apply_window) apply_window=$value ;;
-        minimum_free_kb) minimum_free_kb=$value ;;
-        max_manifest_size) max_manifest_size=$value ;;
-        max_package_size) max_package_size=$value ;;
-        max_unpacked_size) max_unpacked_size=$value ;;
-        backup_keep) backup_keep=$value ;;
-        barrier_integration_ready) barrier_integration_ready=$value ;;
-        current_version_file) current_version_file=$value ;;
-        health_timeout_seconds) health_timeout_seconds=$value ;;
-        check_interval_seconds) check_interval_seconds=$value ;;
-        request_timeout_seconds) request_timeout_seconds=$value ;;
-        important_max_delay_seconds) important_max_delay_seconds=$value ;;
-        routine_max_delay_seconds) routine_max_delay_seconds=$value ;;
-        ''|'#'*) ;;
-        *) vu_log WARN "Ignoring unknown config key: $key" ;;
-    esac
-}
+# vu_assign_config KEY VALUE: in vward-update-hardening.sh (the one definition; a second copy
+# here was silently overridden, and a key added only here was ignored).
 
 vu_load_config() {
     [ -r "$VU_CONFIG" ] || return 0
@@ -148,6 +122,7 @@ VU_CONFIG_EOF
     done
     [ "$max_manifest_size" -gt 0 ] && [ "$max_package_size" -gt 0 ] && [ "$max_unpacked_size" -gt 0 ] || vu_die "$VU_CONFIG_ERROR" "Size limits must be greater than zero"
     case "$apply_window" in window|any) ;; *) vu_die "$VU_CONFIG_ERROR" "apply_window must be window or any" ;; esac
+    case "$update_method" in full|files) ;; *) update_method=full ;; esac
     for window_value in "$safe_window_start" "$safe_window_end"; do
         printf '%s\n' "$window_value" | grep -Eq '^([01][0-9]|2[0-3]):[0-5][0-9]$' || vu_die "$VU_CONFIG_ERROR" "Safe-window time is invalid"
     done

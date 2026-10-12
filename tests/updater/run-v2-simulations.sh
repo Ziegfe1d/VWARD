@@ -13,7 +13,7 @@ REPO=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 ENGINE_SRC=$REPO/components/update-engine
 . "$REPO/tests/updater/seed-runtime.sh"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/vward-updater-v2.XXXXXX")
-trap 'rm -rf "$WORK"' EXIT HUP INT TERM
+trap '[ -n "${KEEP:-}" ] || rm -rf "$WORK"' EXIT HUP INT TERM
 
 passed=0 failed=0 case_number=0
 pass() { passed=$((passed + 1)); case_number=$((case_number + 1)); printf 'ok %s - %s\n' "$case_number" "$1"; }
@@ -332,6 +332,56 @@ head -c 3 "$FILES/$route_sha" > "$FILES/$route_sha.cut" && mv "$FILES/$route_sha
 run --apply; rc=$?
 check 'a file cut short is refused' [ "$rc" -eq 31 ]
 check 'nothing changes after a cut file' [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = route-old ]
+
+# 19. How an update comes (owner 2026-10-12): the whole package of the same release by default,
+# only the changed files when chosen; the per-file way failing - the whole package instead.
+# whole_release LABEL: a v1 manifest and package for the v2 manifest made last (same id/sequence).
+whole_release() {
+    wdir=$WORK/whole-$1; mkdir -p "$wdir/files"
+    printf '%s\n' "route-whole-$1" > "$wdir/files/vward-route.sh"
+    printf '%s\n' wan-same > "$wdir/files/vward-wan-guard.sh"
+    one=$(sha256sum "$wdir/files/vward-route.sh" | awk '{print $1}'); two=$(sha256sum "$wdir/files/vward-wan-guard.sh" | awk '{print $1}')
+    jq -n --arg one "$one" --arg two "$two" '{schema:1,files:[{source:"files/vward-route.sh",target:"/opt/bin/vward-route.sh",sha256:$one,mode:"0755",component:"route-tools",restart_policy:"none",config_policy:"program-only"},{source:"files/vward-wan-guard.sh",target:"/opt/bin/vward-wan-guard.sh",sha256:$two,mode:"0755",component:"wan-guard",restart_policy:"none",config_policy:"program-only"}]}' > "$wdir/package-manifest.json"
+    PACKAGE=$WORK/whole-$1.tar.gz
+    tar -czf "$PACKAGE" -C "$wdir" files package-manifest.json
+    unpacked=$(find "$wdir" -type f -exec wc -c {} \; | awk '{s+=$1} END {print s+0}')
+    jq -n --slurpfile v "$MANIFEST" --arg sha "$(sha256sum "$PACKAGE" | awk '{print $1}')" --argjson size "$(wc -c < "$PACKAGE" | tr -d ' ')" --argjson unpacked "$unpacked" '
+        $v[0].signed | {schema:1,update_id,sequence,version,channel,priority,published_at,min_updater_version:"1.0.0",
+         package:{url:"https://example.invalid/whole.tar.gz",sha256:$sha,size:$size,unpacked_size:$unpacked},
+         compatibility,affected_components,affected_services,health_profile,requires_reboot,rollback_policy,signature}' > "$wdir/signed.json"
+    jq -cS . "$wdir/signed.json" > "$wdir/signed.c"
+    openssl pkeyutl -sign -inkey "$WORK/private.pem" -rawin -in "$wdir/signed.c" -out "$wdir/signed.sig"
+    WHOLE=$WORK/whole-$1.json
+    jq -n --slurpfile s "$wdir/signed.json" --arg sig "$(openssl base64 -A -in "$wdir/signed.sig")" '{signed:$s[0],signature:$sig}' > "$WHOLE"
+}
+runw() {
+    VWARD_ROOT_PREFIX=$ROOT VWARD_UPDATE_CONFIG=$CONFIG VWARD_TEST_MANIFEST=$MANIFEST VWARD_TEST_FILES_DIR=$FILES \
+        VWARD_TEST_WHOLE_MANIFEST=$WHOLE VWARD_TEST_PACKAGE=$PACKAGE VWARD_UPDATER_ROOT=$SLOTS "$SLOTS/current/vward-update.sh" "$@" > "$WORK/last.out" 2>&1
+}
+new_root whole
+make_manifest whole 0.2.0-rc.2 10 "$CUR_ENGINE"; whole_release whole
+runw --apply; rc=$?
+check 'by default the whole package of the release is installed' sh -c '[ "$1" -eq 0 ] && [ "$(cat "$2/opt/bin/vward-route.sh")" = route-whole-whole ]' sh "$rc" "$ROOT"
+check 'the way it came is noted (whole)' grep -qx 'last_method=full' "$ROOT/opt/var/lib/vward/updater/method.state"
+check 'the whole package is committed as the release' grep -qx 'installed_version=0.2.0-rc.2' "$ROOT/opt/var/lib/vward/updater/committed.state"
+new_root files
+printf '%s\n' update_method=files >> "$CONFIG"
+make_manifest files 0.2.0-rc.2 10 "$CUR_ENGINE"; whole_release files
+runw --apply; rc=$?
+check 'chosen per-file: only the changed files' sh -c '[ "$1" -eq 0 ] && [ "$(cat "$2/opt/bin/vward-route.sh")" = route-files ]' sh "$rc" "$ROOT"
+check 'the way it came is noted (files)' grep -qx 'last_method=files' "$ROOT/opt/var/lib/vward/updater/method.state"
+new_root fallback
+printf '%s\n' update_method=files >> "$CONFIG"
+make_manifest fallback 0.2.0-rc.2 10 "$CUR_ENGINE"; whole_release fallback
+rm -f "$FILES/$(jq -r '.signed.files[0].sha256' "$MANIFEST")"
+runw --apply; rc=$?
+check 'per-file failing: the whole package instead, no error' sh -c '[ "$1" -eq 0 ] && [ "$(cat "$2/opt/bin/vward-route.sh")" = route-whole-fallback ]' sh "$rc" "$ROOT"
+check 'the fallback is in the log' grep -q 'Per-file update failed; the whole package instead' "$WORK/last.out"
+new_root wrongid
+make_manifest wrongid 0.2.0-rc.2 10 "$CUR_ENGINE"; whole_release wrongid
+jq '.signed.sequence = 11' "$MANIFEST" > "$MANIFEST.x" && mv "$MANIFEST.x" "$MANIFEST"
+runw --apply; rc=$?
+check 'a whole package of another release is not taken' sh -c '[ "$(cat "$1/opt/bin/vward-route.sh")" != route-whole-wrongid ]' sh "$ROOT"
 
 printf 'v2 simulations: %s passed, %s failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]

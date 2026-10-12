@@ -250,6 +250,8 @@ with tempfile.TemporaryDirectory() as tmp:
     run("update-feed", "main", expect="error=invalid_value")
     run("update", "apply_window", "any", expect="result=changed")
     run("update", "apply_window", "never", expect="error=invalid_value")
+    run("update", "update_method", "files", expect="result=changed")
+    run("update", "update_method", "delta", expect="error=invalid_value")
     text = upd.read_text().replace("Owner/Repo/beta", "Owner/Repo/dev")
     upd.write_text(text.replace("https://raw.githubusercontent.com", "https://mirror.example"))
     run("update-feed", "beta", expect="error=custom_manifest_url")
@@ -317,7 +319,7 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("config-data tunnel guard")
     if data["wifi"] != {"ENABLED": True, "CONTROL_ENABLED": False, "WINDOW_SEC": 86400, "BAND_SWITCH_WARN": 20, "WEAK_5G_SAMPLE_WARN": 5, "WEAK_5G_RSSI": -70}:
         fail(f"config-data wifi: {data['wifi']}")
-    if data["update"] != {"safe_window_start": "04:00", "safe_window_end": "05:00", "check_interval_seconds": 3600, "apply_window": "any", "feed": "dev"}:
+    if data["update"] != {"safe_window_start": "04:00", "safe_window_end": "05:00", "check_interval_seconds": 3600, "apply_window": "any", "update_method": "files", "feed": "dev"}:
         fail(f"config-data update: {data['update']}")
     if data["wan_guard"]["params"] != {"CHECK_INTERVAL_MIN": 5, "CONFIRM_FAILURES": 5, "RENEW_COOLDOWN": 600, "BOUNCE_COOLDOWN": 1800, "MAX_RENEW_HOUR": 3, "MAX_BOUNCE_HOUR": 2, "MAX_BOUNCE_DAY": 12}:
         fail(f"config-data wan-guard params: {data['wan_guard']}")
