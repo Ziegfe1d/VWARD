@@ -349,6 +349,10 @@ fi
 DOWN_STREAK=0
 FAILOPEN_ACTIVE=0
 LAST_RECOVERY_TEST=0
+# When and why the guard switched the tunnel off: the Panel tells the owner (and the guard
+# turns it back on); kept across reboots like the rest of the state.
+FAILOPEN_AT=
+FAILOPEN_REASON=
 
 OLD_MODE=""
 OLD_ACTION=""
@@ -361,10 +365,14 @@ if [ -f "$STATE" ]; then
             FAILOPEN_ACTIVE) FAILOPEN_ACTIVE=$V ;;
             LAST_RECOVERY_TEST) LAST_RECOVERY_TEST=$V ;;
             LAST_ACTION) OLD_ACTION=$V ;;
+            FAILOPEN_AT) FAILOPEN_AT=$V ;;
+            FAILOPEN_REASON) FAILOPEN_REASON=$V ;;
         esac
     done < "$STATE"
 fi
-OLD_STREAK=$DOWN_STREAK OLD_ACTIVE=$FAILOPEN_ACTIVE OLD_RECOVERY=$LAST_RECOVERY_TEST
+OLD_STREAK=$DOWN_STREAK OLD_ACTIVE=$FAILOPEN_ACTIVE OLD_RECOVERY=$LAST_RECOVERY_TEST OLD_FO_AT=$FAILOPEN_AT
+case "$FAILOPEN_AT" in *[!0-9]*) FAILOPEN_AT= ;; esac
+case "$FAILOPEN_REASON" in *[!a-z_,]*) FAILOPEN_REASON= ;; esac
 
 case "$DOWN_STREAK" in
     ''|*[!0-9]*) DOWN_STREAK=0 ;;
@@ -566,9 +574,17 @@ else
                                 ACTION="FALLBACK_SWITCH"
                             elif [ "$MODE" = "AUTO" ]; then
 
+                                # Why, for the Panel: silent; what was tried; why not another tunnel.
+                                FO_REASON=silent
+                                case "$(engine_of "$VWARD_TUNNEL_INTERFACE")" in
+                                    *vless*) FO_REASON="$FO_REASON,restart_servers" ;;
+                                    ?*) FO_REASON="$FO_REASON,restart" ;;
+                                esac
+                                if [ -e "$FALLBACK_OFF" ]; then FO_REASON="$FO_REASON,fallback_off"; else FO_REASON="$FO_REASON,no_fallback"; fi
                                 if "${VWARD_NDMC:-ndmc}" -c "interface $VWARD_TUNNEL_INTERFACE down" \
                                    >/dev/null 2>&1; then
 
+                                    FAILOPEN_AT=$NOW FAILOPEN_REASON=$FO_REASON
                                     FAILOPEN_ACTIVE=1
                                     LAST_RECOVERY_TEST=$NOW
                                     ACTION="FAILOPEN_DOWN"
@@ -654,10 +670,13 @@ else
 fi
 
 
+# Not held by the guard any more: nothing to tell.
+[ "$FAILOPEN_ACTIVE" = 1 ] || FAILOPEN_AT= FAILOPEN_REASON=
+
 # The state survives reboots (fail-open must be undone), so it stays on USB,
 # but it is rewritten only when something in it changes.
-if [ "$MODE|$DOWN_STREAK|$FAILOPEN_ACTIVE|$LAST_RECOVERY_TEST|$ACTION" != \
-     "$OLD_MODE|$OLD_STREAK|$OLD_ACTIVE|$OLD_RECOVERY|$OLD_ACTION" ] ||
+if [ "$MODE|$DOWN_STREAK|$FAILOPEN_ACTIVE|$LAST_RECOVERY_TEST|$ACTION|$FAILOPEN_AT" != \
+     "$OLD_MODE|$OLD_STREAK|$OLD_ACTIVE|$OLD_RECOVERY|$OLD_ACTION|$OLD_FO_AT" ] ||
    [ ! -f "$STATE" ]; then
 
     TMP="$STATE.tmp.$$"
@@ -669,6 +688,8 @@ if [ "$MODE|$DOWN_STREAK|$FAILOPEN_ACTIVE|$LAST_RECOVERY_TEST|$ACTION" != \
         echo "LAST_RECOVERY_TEST=$LAST_RECOVERY_TEST"
         echo "LAST_ACTION=$ACTION"
         echo "LAST_RUN=$NOW"
+        [ -z "$FAILOPEN_AT" ] || echo "FAILOPEN_AT=$FAILOPEN_AT"
+        [ -z "$FAILOPEN_REASON" ] || echo "FAILOPEN_REASON=$FAILOPEN_REASON"
     } > "$TMP" &&
 
     mv "$TMP" "$STATE" || rm -f "$TMP"
@@ -691,7 +712,7 @@ case "$ACTION" in
     KEEP_UP|STAY_DOWN|WOULD_STAY_DOWN)
         ;;
     *)
-        echo "$NOW_TEXT|$ACTION|health=$WG_STATUS|config=$CONFIG_STATE|age=$AGE|down_streak=$DOWN_STREAK|active=$FAILOPEN_ACTIVE${FALLBACK_TO:+|to=$FALLBACK_TO}${FALLBACK_FROM:+|from=$FALLBACK_FROM}${QUALITY_FROM:+|from=$QUALITY_FROM}" \
+        echo "$NOW_TEXT|$ACTION|health=$WG_STATUS|config=$CONFIG_STATE|age=$AGE|down_streak=$DOWN_STREAK|active=$FAILOPEN_ACTIVE${FAILOPEN_REASON:+|reason=$FAILOPEN_REASON}${FALLBACK_TO:+|to=$FALLBACK_TO}${FALLBACK_FROM:+|from=$FALLBACK_FROM}${QUALITY_FROM:+|from=$QUALITY_FROM}" \
             >> "$LOG"
         ;;
 esac

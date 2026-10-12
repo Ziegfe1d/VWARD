@@ -64,11 +64,15 @@ if '"$ENG" enable "$2"' not in body:
     fail("switching on starts the engine's program again")
 # Switched off in Keenetic's own settings while still the default: the Panel must not say the traffic
 # goes through the VPN, and must say the lists go direct (card, notification, tunnel page).
-for need in ("tunnels.some(t => t.name === prof().tunnel_interface && tunOff(t)) ? 'туннель по умолчанию выключен, списки идут напрямую'",
-             "'Туннель по умолчанию выключен в Keenetic'", "down = tunnels.filter(t => !isTrue(t.connected) && !tunOff(t))",
+# Switched off by the owner (owner 2026-10-12): the Overview and the tunnel page say the lists
+# go direct, the bell stays quiet (check-console-tunnel-status.py runs it).
+for need in ("'туннель по умолчанию выключен, списки идут напрямую'",
+             "down = tunnels.filter(t => !isTrue(t.connected) && !tunOff(t) && !tunGuardOff(t))",
              "он назначен по умолчанию, списки VPN идут напрямую"):
     if need not in JS:
         fail(f"a default tunnel switched off outside the Panel: lacks {need}")
+if "'Туннель по умолчанию выключен в Keenetic'" in JS:
+    fail("a tunnel the owner switched off is no notification")
 if 'INTERFACE_DISABLED_EXTERNAL' not in (ROOT / "components/tunnel-guard/scripts/vward-tunnel-guard.sh").read_text():
     fail("the guard must leave a tunnel the owner switched off alone")
 # A rejected router command: the router's own reply reaches the Panel next to the error,

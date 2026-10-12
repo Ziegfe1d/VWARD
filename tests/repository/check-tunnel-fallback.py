@@ -121,10 +121,22 @@ echo result=changed
     # Nothing else answers, or the fallback is off: direct, as before (the tunnel is taken down).
     if run("DOWN", "Wireguard1\tnwg1\t100\t-\t0\t30\t100\t-\t-\t0\n") != "ACTION=FAILOPEN_DOWN":
         fail("with no tunnel alive the lists go direct")
+    # When and why, for the Panel's notification; kept across runs, gone once the tunnel is back.
+    gst = (gdir / "state").read_text()
+    if "FAILOPEN_REASON=silent,no_fallback\n" not in gst or "FAILOPEN_AT=" not in gst or "|reason=silent,no_fallback" not in (tmp / "guard.log").read_text():
+        fail(f"the guard must write when and why it switched the tunnel off: {gst!r}")
+    at = [l for l in gst.splitlines() if l.startswith("FAILOPEN_AT=")][0]
+    run("DOWN", "Wireguard1\tnwg1\t100\t-\t0\t30\t100\t-\t-\t0\n")
+    if at not in (gdir / "state").read_text():
+        fail("the time the tunnel went off must not move on the next runs")
+    if run("UP", "") != "ACTION=FAILOPEN_RESTORED" or "FAILOPEN_AT" in (gdir / "state").read_text() or "FAILOPEN_REASON" in (gdir / "state").read_text():
+        fail(f"back on: nothing left to tell {(gdir / 'state').read_text()!r}")
     (gdir / "state").unlink(); (tmp / "ndmc.log").unlink()
     (etc / "tunnel-fallback.disabled").write_text("x")
     if run("DOWN", alive) != "ACTION=FAILOPEN_DOWN" or "interface Wireguard0 down" not in (tmp / "ndmc.log").read_text():
         fail("with the fallback off the lists go direct")
+    if "FAILOPEN_REASON=silent,fallback_off\n" not in (gdir / "state").read_text():
+        fail("with the fallback off the reason says so")
 
     # Keenetic's lists with their own tunnel: Games on Wireguard1 moves when Wireguard1 fails
     # two samples in a row; VWARD's group and AdaptiveAuto follow VWARD's tunnel, not this.
@@ -373,6 +385,8 @@ echo result=changed
     r = subprocess.run(["sh", str(GUARD)], env=env, text=True, capture_output=True, timeout=60)
     if r.stdout.split("\n", 1)[0] != "ACTION=FAILOPEN_DOWN":
         fail(f"a tunnel silent after its restart goes direct: {r.stdout[:120]}")
+    if "FAILOPEN_REASON=silent,restart_servers,no_fallback\n" not in (gdir / "state").read_text():
+        fail(f"a VLESS tunnel's reason names the restart and the other servers: {(gdir / 'state').read_text()!r}")
 
     # A deleted tunnel leaves nothing behind: a list moved off it and the guard's own move
     # off it are forgotten (Viva 2026-10-04: «Списки переведены… Wireguard0 → de-vless» stayed

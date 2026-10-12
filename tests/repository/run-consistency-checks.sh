@@ -103,6 +103,7 @@ python3 tests/repository/check-console-site-test.py || fail "site check, tunnel 
 python3 tests/repository/check-console-site-do.py || fail "check an address: VPN, Smart DNS, directly or blocked"
 python3 tests/repository/check-ads-page-speed.py || fail "Ads page: only what it shows, programs side by side, AdGuard Home address cached"
 python3 tests/repository/check-console-tunnels.py || fail "VPN list and tunnel page: default tunnel, engine data, switching off"
+python3 tests/repository/check-console-tunnel-status.py || fail "Tunnel statuses: owner switch-off quiet, agent switch-off with time and reason"
 python3 tests/repository/check-console-fold.py || fail "Panel blocks fold to their title and stay folded"
 python3 tests/repository/check-ads-jobs.py || fail "Ads job queue: runs, lists, cancels, drains"
 python3 tests/repository/check-route-engine-capture.py || fail "route engine capture: LAN device, pause after quick deaths"

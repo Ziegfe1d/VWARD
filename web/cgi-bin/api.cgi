@@ -3053,7 +3053,10 @@ kv_file /opt/etc/vward/update.conf update_enabled=UPDATE_ENABLED auto_apply=AUTO
 
 read_first /opt/var/run/vward/route-engine.pid LIVE_PID
 read_first /opt/var/run/vward-console-lighttpd.pid CONSOLE_PID
-kv_file /opt/var/lib/vward/tunnel-guard/state DOWN_STREAK=DOWN_STREAK FAILOPEN_ACTIVE=FAILOPEN_ACTIVE
+kv_file "${VWARD_TUNNEL_GUARD_DIR:-/opt/var/lib/vward/tunnel-guard}/state" DOWN_STREAK=DOWN_STREAK FAILOPEN_ACTIVE=FAILOPEN_ACTIVE \
+    FAILOPEN_AT=FAILOPEN_AT FAILOPEN_REASON=FAILOPEN_REASON
+case "$FAILOPEN_AT" in ''|*[!0-9]*) FAILOPEN_AT=0 ;; esac
+case "$FAILOPEN_REASON" in *[!a-z_,]*) FAILOPEN_REASON= ;; esac
 [ -n "$DOWN_STREAK" ] || DOWN_STREAK=0
 [ -n "$FAILOPEN_ACTIVE" ] || FAILOPEN_ACTIVE=0
 
@@ -3122,7 +3125,7 @@ header_json
   --arg live_count "$LIVE_COUNT" \
   --arg tcpdump_count "$TCPDUMP_COUNT" \
   --arg down_streak "$DOWN_STREAK" \
-  --arg failopen_active "$FAILOPEN_ACTIVE" \
+  --arg failopen_active "$FAILOPEN_ACTIVE" --argjson failopen_at "$FAILOPEN_AT" --arg failopen_reason "$FAILOPEN_REASON" \
   --argjson components "$COMPONENTS" \
   --arg opt_total_kb "$OPT_TOTAL_KB" \
   --arg opt_used_kb "$OPT_USED_KB" \
@@ -3220,7 +3223,9 @@ header_json
     managed_device:$managed_tunnel,
     total:($wg_interfaces|length),
     down_streak:($down_streak|tonumber? // 0),
-    failopen_active:($failopen_active=="1")
+    failopen_active:($failopen_active=="1"),
+    failopen_at:(if $failopen_active == "1" and $failopen_at > 0 then $failopen_at else null end),
+    failopen_reason:(if $failopen_active == "1" and $failopen_reason != "" then ($failopen_reason | split(",")) else [] end)
   },
 
   services:{
