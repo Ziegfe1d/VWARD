@@ -126,6 +126,16 @@ vward_fetch()
         # Remembered only when it crashed (a signal), not when it is missing.
         [ "$_vf_rc" -lt 128 ] || : > "$_vf_flag" 2>/dev/null
     fi
+    # A list of downloads (--config FILE with «url = "..."» and «output = "..."» lines, as the
+    # updater's per-file fetch writes it): one by one through the fallback. Without this every
+    # per-file update failed while curl crashed on HTTPS («Проверка обновления не прошла», a
+    # Viva 2026-10-12: fix.24 could not be installed).
+    _vf_cfg= _vf_p=
+    for _vf_a in "$@"; do
+        case "$_vf_p" in --config|-K) _vf_cfg=$_vf_a ;; esac
+        _vf_p=$_vf_a
+    done
+    [ -z "$_vf_cfg" ] || { vward_fetch_list "$_vf_cfg" "$@"; return; }
     _vf_uc=${VWARD_UCLIENT_BIN:-$(vward_tool uclient-fetch)}
     # Keenetic's Entware has no uclient-fetch: the TLS of VWARD's Xray (Go, works on these
     # processors) carries the request instead.
@@ -191,6 +201,35 @@ vward_fetch()
     esac
     [ "$_vf_fail" = 0 ] || return 22
     return 0
+}
+
+# vward_fetch_list CONFIG CURL-ARGUMENTS: each «url»/«output» pair of a curl config file as a
+# request of its own (the other arguments kept, --config dropped); the first failure is the
+# answer. curl is not asked again: it crashed (noted) or is missing.
+vward_fetch_list()
+{
+    _vl_cfg=$1; shift
+    [ -r "$_vl_cfg" ] || return 26
+    _vl_n=$# _vl_skip=0
+    while [ "$_vl_n" -gt 0 ]; do
+        _vl_a=$1; shift; _vl_n=$((_vl_n - 1))
+        if [ "$_vl_skip" = 1 ]; then _vl_skip=0; continue; fi
+        case "$_vl_a" in --config|-K) _vl_skip=1; continue ;; esac
+        set -- "$@" "$_vl_a"
+    done
+    _vl_url=
+    while IFS= read -r _vl_line <&9 || [ -n "$_vl_line" ]; do
+        _vl_key=$(printf '%s' "$_vl_line" | sed -n 's/^[[:space:]]*\([a-z-]*\)[[:space:]]*[=:][[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p')
+        _vl_val=$(printf '%s' "$_vl_line" | sed -n 's/^[[:space:]]*\([a-z-]*\)[[:space:]]*[=:][[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\2/p')
+        case "$_vl_key" in
+            url) [ -z "$_vl_url" ] || { vward_fetch "$@" "$_vl_url" || return $?; }
+                 _vl_url=$_vl_val ;;
+            output) [ -n "$_vl_url" ] || continue
+                    vward_fetch "$@" -o "$_vl_val" "$_vl_url" || return $?
+                    _vl_url= ;;
+        esac
+    done 9< "$_vl_cfg"
+    [ -z "$_vl_url" ] || vward_fetch "$@" "$_vl_url"
 }
 
 # vward_fetch_xray CURL-ARGUMENTS: the same curl request in plain HTTP to a short-lived Xray of

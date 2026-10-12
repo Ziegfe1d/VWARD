@@ -89,6 +89,26 @@ esac
     if len(log("uc")) != n:
         fail("an unsupported request reached uclient-fetch")
 
+    # The updater's per-file fetch: a curl config with url/output pairs (a Viva 2026-10-12: with
+    # curl crashing, every per-file update failed «Проверка обновления не прошла»). Each pair
+    # goes through the fallback, the other options kept.
+    flag.unlink(missing_ok=True)
+    cfg = t / "list.curl"
+    cfg.write_text(f'url = "https://example.invalid/f/1"\noutput = "{t}/f1"\nurl = "https://example.invalid/f/2"\noutput = "{t}/sub dir/f2"\n')
+    (t / "sub dir").mkdir()
+    n0 = len(log("uc"))
+    rc, _ = fetch(f"--fail --silent --show-error --location --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 300 --retry 3 "
+                  f"--retry-all-errors --max-filesize 1000 --config {cfg}", UC_MODE="ok")
+    got = log("uc")[n0:]
+    if rc != 0 or (t / "f1").read_text() != "BODY" or (t / "sub dir/f2").read_text() != "BODY" or len(got) != 2:
+        fail(f"a config list through the fallback: rc={rc} {got}")
+    if not got[0].endswith("https://example.invalid/f/1") or "-T 300" not in got[1] or not flag.exists():
+        fail(f"each pair with the same options: {got}")
+    rc, _ = fetch(f"--fail --config {cfg}", UC_MODE="404")
+    if rc != 22:
+        fail(f"the first failure of a list is the answer: rc={rc}")
+    n = len(log("uc"))
+
     # A curl that works is used as it is: its error stays its error.
     flag.unlink()
     rc, _ = fetch(f"--fail {url}", CURL_RC="22", UC_MODE="ok")
