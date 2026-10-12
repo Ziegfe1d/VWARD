@@ -1,5 +1,7 @@
 #!/bin/sh
 # Fake Entware opkg: "install" unpacks /emu/pkgstore/<name> over /, "update" succeeds.
+# Broken environment (check-chaos-emulated.py): the package is not in Entware for Keenetic.
+[ ! -e /emu/fault-opkg-missing ] || [ "$1" != install ] || { echo "Unknown package '$2'."; exit 255; }
 case "$1" in
     update) exit 0 ;;
     install)

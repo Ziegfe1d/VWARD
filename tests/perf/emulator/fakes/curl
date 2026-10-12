@@ -2,20 +2,33 @@
 # Fake curl: Keenetic RCI and AdGuard Home answer from /emu; any other address
 # is a reachable site, except names in /emu/blocked-direct, which answer only
 # through the tunnel (nwg1). -w prints the HTTP code.
-url= out= write= hdr= iface=
+url= out= write= hdr= iface= maxt=
 while [ $# -gt 0 ]; do
     case "$1" in
         -o|--output) out=$2; shift 2 ;;
+        -m|--max-time) maxt=$2; shift 2 ;;
         -D|--dump-header) hdr=$2; shift 2 ;;
         -w|--write-out) write=$2; shift 2 ;;
         --interface) iface=$2; shift 2 ;;
-        --connect-timeout|--max-time|-m|--noproxy|-H|--header|-u|--user|-d|--data|--data-binary|--data-urlencode|-X|--request|-c|--cookie-jar|-b|--cookie|--cacert|--resolve|-e|--retry|--retry-delay|-A|--user-agent|--limit-rate|--max-filesize|-K|--config|--proto|--retry-max-time) shift 2 ;;
+        --connect-timeout|--noproxy|-H|--header|-u|--user|-d|--data|--data-binary|--data-urlencode|-X|--request|-c|--cookie-jar|-b|--cookie|--cacert|--resolve|-e|--retry|--retry-delay|-A|--user-agent|--limit-rate|--max-filesize|-K|--config|--proto|--retry-max-time) shift 2 ;;
         -*) shift ;;
         *) url=$1; shift ;;
     esac
 done
 host=${url#*://}
 host=${host%%/*}
+# Broken environment (check-chaos-emulated.py): Entware's OpenSSL dies on the TLS handshake
+# («Illegal instruction», a Viva 2026-10-11); Keenetic answers RCI in 8 s.
+case "$url" in
+    https://*) [ ! -e /emu/fault-curl-https-crash ] || { echo "curl $(tr "\\000" " " < /proc/$PPID/cmdline 2>/dev/null | cut -c1-120) $url" >> /emu/crash.log; kill -ILL $$; } ;;
+    */rci/*) if [ -e /emu/fault-rci-slow ]; then
+                 case "$maxt" in ''|*[!0-9]*) maxt=8 ;; esac
+                 if [ "$maxt" -lt 8 ]; then sleep "$maxt"; exit 28; fi
+                 sleep 8
+             fi ;;
+esac
+# The real jq: the one in /opt/bin may be the crashing stand-in of a chaos profile.
+JQ=/opt/bin/jq.real; [ -x "$JQ" ] || JQ=jq
 # Faults of the chaos run (tests/perf/check-chaos-emulated.py): flags in /emu.
 case "$url" in
     *127.0.0.1*|*localhost*|*/rci/*|*/control/*|*/cgi-bin/*) ;;
@@ -39,10 +52,10 @@ body() {
     case "$url" in
         */cgi-bin/api.cgi\?action=ping) echo '{"ok":true,"service":"vward-console"}' ;;
         */rci/show/interface) cat /emu/rci-interface.json ;;
-        */rci/show/interface/system-name\?name=*) n=${url##*name=}; jq -n --arg n "$n" '$n' | sed 's/Bridge0/br0/;s/Wireguard1/nwg1/;s/ISP/eth2.2/' ;;
+        */rci/show/interface/system-name\?name=*) n=${url##*name=}; "$JQ" -n --arg n "$n" '$n' | sed 's/Bridge0/br0/;s/Wireguard1/nwg1/;s/ISP/eth2.2/' ;;
         */rci/show/interface\?name=*) cat /emu/rci-isp.json ;;
         */rci/show/internet/status) cat /emu/rci-internet.json ;;
-        */rci/show/running-config) jq -Rn '{message: [inputs]}' < /emu/running-config ;;
+        */rci/show/running-config) "$JQ" -Rn '{message: [inputs]}' < /emu/running-config ;;
         */rci/*) echo '{}' ;;
         */control/status) echo '{"running":true,"protection_enabled":true,"version":"v0.107.0"}' ;;
         */control/stats*|*/control/querylog*) echo '{"data":[],"num_dns_queries":0}' ;;

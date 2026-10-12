@@ -6,8 +6,10 @@ a PID file that points to nothing, or to another program, is removed before the 
 at the same moment start it once; running for a whole grace clears the books; a start script that is
 missing is reported."""
 
+import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -127,6 +129,17 @@ vward_agh_ensure; echo $?'''
         fail("a program that dies on --version must not be started")
     if (tmp / "state/broken").read_text().strip() != "800|2|" + str(bad / "AdGuardHome"):
         fail(f"the broken state: {(tmp / 'state/broken').read_text()!r}")
+    # Asked again (the real-time watcher, every minute): the broken program is not run again
+    # within the hour; replaced (a newer file) - checked again.
+    (bad / "AdGuardHome").write_text(f"#!/bin/sh\necho ran >> '{tmp}/badruns'\nexit 2\n")
+    os.utime(bad / "AdGuardHome", (1, 1))
+    if ensure_bin(860, str(bad)) != "13" or (tmp / "badruns").exists():
+        fail("a program found broken within the hour must not be run again")
+    os.utime(bad / "AdGuardHome", None)
+    later = time.time() + 5
+    os.utime(bad / "AdGuardHome", (later, later))
+    if ensure_bin(870, str(bad)) != "13" or not (tmp / "badruns").exists():
+        fail("a replaced program must be checked again")
     good = tmp / "goodbin"; good.mkdir()
     (good / "AdGuardHome").write_text("#!/bin/sh\necho 'AdGuard Home, version v0.107.73'\n"); (good / "AdGuardHome").chmod(0o755)
     if ensure_bin(801, f"{good} {bad}") != "10" or calls() != 1 or (tmp / "state/broken").exists():

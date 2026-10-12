@@ -375,6 +375,14 @@ vward_agh_ensure() {
         va_fails=$((va_fails + 1))
     fi
     if va_bin=$(vward_agh_binary); then
+        # Found broken within the hour and the file not replaced since: not run again (every
+        # request of the real-time watcher crashed it once more, the router emulator, fix.24).
+        va_was=; [ ! -r "$VWARD_AGH_STATE/broken" ] || { IFS= read -r va_was < "$VWARD_AGH_STATE/broken"; } 2>/dev/null || :
+        if [ "${va_was#*|*|}" = "$va_bin" ] && [ -n "$(find "$VWARD_AGH_STATE/broken" -mmin -60 2>/dev/null)" ] &&
+           [ -z "$(find "$va_bin" -newer "$VWARD_AGH_STATE/broken" 2>/dev/null)" ]; then
+            vward_lock_drop "$VWARD_AGH_STATE/lock"
+            return 13
+        fi
         "$va_bin" --version >/dev/null 2>&1; va_rc=$?
         if [ "$va_rc" != 0 ]; then
             printf '%s|%s|%s\n' "$va_now" "$va_rc" "$va_bin" > "$VWARD_AGH_STATE/broken"

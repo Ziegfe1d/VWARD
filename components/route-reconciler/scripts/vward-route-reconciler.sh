@@ -109,6 +109,13 @@ probe_result()
     IFACE="$2"
     IP="$3"
 
+    # curl crashed on HTTPS within the hour (Entware's OpenSSL 3.5.5 on some MIPS routers):
+    # «could not check», and no crash again (the router emulator's broken environment, fix.24).
+    if vward_https_broken; then
+        echo "2|000|-"
+        return 0
+    fi
+
     OUT=$(
         curl -4 \
           --noproxy '*' \
@@ -124,6 +131,8 @@ probe_result()
     )
 
     RC=$?
+    # A crash (a signal) is noted for an hour, as vward_fetch does.
+    [ "$RC" -lt 128 ] || : > "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" 2>/dev/null
     CODE=${OUT%%|*}
     TIME=${OUT#*|}
 

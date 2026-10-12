@@ -17,6 +17,18 @@ reconciler, Wi-Fi scheduler). Faults are flags the fake router tools read:
   kill           a job killed with SIGKILL in the middle, every round
   twice          every job started twice at the same time
 
+Broken environment (ROADMAP 4.5: what broke on routers, not what the healthy emulator shows);
+these also run the updater and the hourly maintenance in their first and last fault minute:
+  curl-https-crash  curl dies on every https:// («Illegal instruction», Entware's OpenSSL)
+  jq-crash          jq dies on every call (SIGSEGV)
+  wget-crash        no curl at all, BusyBox wget of /opt/bin dies (SIGSEGV)
+  rci-slow          Keenetic answers RCI in 8 s
+  agh-broken        AdGuard Home is not running and its program dies on --version
+  opkg-missing      opkg has no package to install
+A crash is tolerated, a crash loop is not: curl on HTTPS at most twice a scenario (VWARD
+remembers it for an hour), wget once (remembered until a reboot), AdGuard Home's start
+script never while its program is broken.
+
 What must hold, under each fault and after it:
   * no job hangs (60 s) or dies of a shell error (syntax, «not found», bad number);
   * no change to Keenetic repeats without end (the same command more than 6 times in a
@@ -71,6 +83,18 @@ SCENARIOS = [
     ("agh-blip", 2, 4, ["agh"]),
     ("agh-loop", 6, 8, ["agh-loop"]),
     ("agh-down", 5, 5, ["agh", "agh-down"]),
+    ("curl-https-crash", 4, 3, ["curl-https-crash"]),
+    ("jq-crash", 4, 4, ["jq-crash"]),
+    ("wget-crash", 3, 3, ["wget-crash"]),
+    ("rci-slow", 3, 3, ["rci-slow"]),
+    ("agh-broken", 4, 3, ["agh-broken", "agh", "agh-down"]),
+    ("opkg-missing", 2, 2, ["opkg-missing"]),
+]
+BROKEN = {"curl-https-crash", "jq-crash", "wget-crash", "rci-slow", "agh-broken", "opkg-missing"}
+# The hourly work, run in the first and last minute of a broken-environment fault.
+BROKEN_JOBS = [
+    ("updater", "/opt/share/vward/updater/current/vward-update-watch.sh --once"),
+    ("housekeeping", "/opt/bin/vward-housekeeping.sh"),
 ]
 
 SHELL_ERRORS = re.compile(r"syntax error|unexpected|not found|bad number|integer expression|"
@@ -127,6 +151,17 @@ def build(tmp):
                   "    show*) : ;;\n"
                   "    'no ip name-server '*) printf '%s\\n' \"$cmd\" >> /emu/ndmc-changes.log; grep -vx \"ip name-server ${cmd#no ip name-server }\" /emu/running-config > /emu/rc.n; cat /emu/rc.n > /emu/running-config ;;\n"
                   "    'ip name-server '*) printf '%s\\n' \"$cmd\" >> /emu/ndmc-changes.log; { echo \"$cmd\"; cat /emu/running-config; } > /emu/rc.n; cat /emu/rc.n > /emu/running-config ;;", 1))
+    # Stand-ins a broken-environment profile switches to crashing (a flag in /emu): jq, BusyBox
+    # wget of /opt/bin, AdGuard Home's program; its start script only counts its starts.
+    (root / "opt/bin/jq").rename(root / "opt/bin/jq.real")
+    (root / "opt/bin/busybox").unlink()
+    for path, body in (
+        ("opt/bin/jq", '#!/bin/sh\n[ ! -e /emu/fault-jq-crash ] || { echo jq >> /emu/crash.log; kill -SEGV $$; }\nexec /opt/bin/jq.real "$@"\n'),
+        ("opt/bin/busybox", '#!/bin/sh\n[ "$1" != wget ] || [ ! -e /emu/fault-wget-crash ] || { echo wget >> /emu/crash.log; kill -SEGV $$; }\nexec /bin/busybox "$@"\n'),
+        ("opt/bin/AdGuardHome", '#!/bin/sh\n[ ! -e /emu/fault-agh-broken ] || { echo AdGuardHome >> /emu/crash.log; kill -ILL $$; }\necho "AdGuard Home, version v0.107.0"\n'),
+        ("opt/etc/init.d/S99adguardhome", '#!/bin/sh\necho "$1" >> /emu/agh-starts.log\n'),
+    ):
+        f = root / path; f.write_text(body); f.chmod(0o755)
     subprocess.run(["mount", "-t", "proc", "proc", str(root / "proc")], check=True)
     subprocess.run(["mount", "--bind", str(root / "opt"), str(root / "opt")], check=True)
     return root
@@ -134,13 +169,24 @@ def build(tmp):
 
 def set_faults(root, flags, minute):
     emu = root / "emu"
-    for f in ("wan", "tunnel", "dns", "ndmc-refuse", "ndmc-slow", "agh", "agh-down"):
+    for f in ("wan", "tunnel", "dns", "ndmc-refuse", "ndmc-slow", "agh", "agh-down", *BROKEN):
         (emu / f"fault-{f}").unlink(missing_ok=True)
     on = set(flags)
     if "wan-flap" in on and minute % 2 == 0:
         on.add("wan")
-    for f in on & {"wan", "tunnel", "dns", "ndmc-refuse", "agh", "agh-down"}:
+    for f in on & ({"wan", "tunnel", "dns", "ndmc-refuse", "agh", "agh-down"} | BROKEN):
         (emu / f"fault-{f}").write_text("1\n")
+    # No curl at all (fix.15: a boot without curl): Keenetic's RCI through BusyBox wget.
+    curl, hidden = root / "opt/bin/curl", root / "opt/bin/.curl.hidden"
+    if "wget-crash" in on and curl.exists():
+        curl.rename(hidden)
+    elif "wget-crash" not in on and hidden.exists():
+        hidden.rename(curl)
+    # AdGuard Home not running: no process for pidof.
+    if "agh-broken" in on:
+        (emu / "agh-pid").write_text("")
+    elif not (emu / "agh-pid").read_text().strip():
+        (emu / "agh-pid").write_text("4321\n")
     # AdGuard Home restarting in a loop: a new process every minute.
     if "agh-loop" in on:
         (emu / "agh-pid").write_text(f"{5000 + minute}\n")
@@ -176,8 +222,8 @@ def ndmc_changes(root):
     return f.read_text().splitlines() if f.exists() else []
 
 
-def run_round(root, minute, flags, findings, scenario):
-    jobs = list(MINUTE_JOBS) + (list(FIVE_JOBS) if minute % 5 == 0 else [])
+def run_round(root, minute, flags, findings, scenario, extra=()):
+    jobs = list(MINUTE_JOBS) + (list(FIVE_JOBS) if minute % 5 == 0 else []) + list(extra)
     for name, cmd in jobs:
         if "kill" in flags and name in ("tunnel guard", "WAN guard", "ads scheduler", "tunnel health", "route-engine watchdog"):
             p = sh(root, cmd, background=True)
@@ -205,8 +251,15 @@ def run_round(root, minute, flags, findings, scenario):
         check_output(out, scenario, minute, name, findings)
 
 
+# The shell telling that the crashing stand-in of a broken-environment profile died: the
+# profile itself, not an error of VWARD (crash loops are counted separately).
+CRASH_NOTE = re.compile(r"^(Segmentation fault|Illegal instruction)( \(core dumped\))?$")
+
+
 def check_output(out, scenario, minute, name, findings):
     for line in (out or "").splitlines():
+        if scenario in BROKEN and CRASH_NOTE.match(line.strip()):
+            continue
         if SHELL_ERRORS.search(line) and not SHELL_OK.search(line):
             findings.append((scenario, minute, name, "shell error", line.strip()[:200]))
 
@@ -249,6 +302,9 @@ def main():
             before = len(ndmc_changes(root))
             refused_f = root / "emu/ndmc-refused.log"
             refused_before = len(refused_f.read_text().splitlines()) if refused_f.exists() else 0
+            for log in ("crash.log", "agh-starts.log"):
+                (root / "emu" / log).unlink(missing_ok=True)
+            broken = bool(BROKEN & set(flags))
             t0 = time.time()
             prev_stale = []
             for i in range(bad + after):
@@ -256,7 +312,11 @@ def main():
                 advance(root)
                 active = flags if i < bad else []
                 set_faults(root, active, minute)
-                run_round(root, minute, active, findings, name)
+                extra = BROKEN_JOBS if broken and i in (0, bad - 1) else ()
+                # The real-time watcher: DNS did not answer, AdGuard Home is not running.
+                if "agh-broken" in active:
+                    extra = tuple(extra) + (("sentinel dns-fail", "/opt/bin/vward-sentinel-act.sh dns-fail; sleep 2"),)
+                run_round(root, minute, active, findings, name, extra)
                 # A job killed with SIGKILL leaves its lock (no trap runs); the next round must
                 # take it over: a lock of a gone process still there a round later is a finding.
                 now_stale = stale_locks(root)
@@ -277,6 +337,28 @@ def main():
                 findings.append((name, minute, "-", "too eager", "AdGuard Home taken out though it was not its fault (a short pause or the whole internet down)"))
             if name in ("agh-silent", "agh-loop", "agh-down") and not any(c.startswith("no ip name-server") for c in changes):
                 findings.append((name, minute, "-", "no fail-open", "AdGuard Home dead but still in the DNS chain"))
+            crashes = collections.Counter(l.split()[0] for l in (root / "emu/crash.log").read_text().splitlines() if l.strip()) if (root / "emu/crash.log").exists() else collections.Counter()
+            if name == "curl-https-crash":
+                if crashes["curl"] > 2:
+                    who = collections.Counter(" ".join(l.split()[1:]) for l in (root / "emu/crash.log").read_text().splitlines() if l.startswith("curl "))
+                    findings.append((name, minute, "-", "crash loop", f"curl crashed on HTTPS {crashes['curl']} times: {who.most_common()}"))
+                feed = root / "opt/var/lib/vward/updater/feed.state"
+                if not crashes["curl"] or not feed.exists() or "fail_at=" not in feed.read_text():
+                    findings.append((name, minute, "-", "not seen", f"the update feed's failure is not noted for «Стабильность» (curl crashes {crashes['curl']})"))
+            # The profile reached what it breaks (else it proves nothing).
+            for scen, tool in (("jq-crash", "jq"), ("wget-crash", "wget"), ("agh-broken", "AdGuardHome")):
+                if name == scen and not crashes[tool]:
+                    findings.append((name, minute, "-", "not reached", f"no job ran {tool} under the fault"))
+            if name == "wget-crash" and crashes["wget"] > 1:
+                findings.append((name, minute, "-", "crash loop", f"BusyBox wget crashed {crashes['wget']} times"))
+            if name == "agh-broken":
+                starts = (root / "emu/agh-starts.log").read_text().split() if (root / "emu/agh-starts.log").exists() else []
+                if starts.count("start"):
+                    findings.append((name, minute, "-", "start loop", f"AdGuard Home's start script ran {starts.count('start')} times with a broken program"))
+                if crashes["AdGuardHome"] > 1:
+                    findings.append((name, minute, "-", "crash loop", f"the broken AdGuard Home program was run {crashes['AdGuardHome']} times"))
+                if not (root / "tmp/vward-agh-start/broken").exists():
+                    findings.append((name, minute, "-", "not seen", "the broken AdGuard Home program is not noted for the Panel"))
             gs = guard_state(root)
             if gs.get("FAILOPEN_ACTIVE") == "1":
                 findings.append((name, minute, "-", "not recovered", "tunnel guard still in fail-open after the fault"))
@@ -284,7 +366,7 @@ def main():
                 findings.append((name, minute, "-", "not recovered", "route engine not running after the fault"))
             summary.append({"scenario": name, "minutes": bad + after, "seconds": round(time.time() - t0, 1),
                             "changes": len(changes), "refused": len(refused), "top": counts.most_common(3),
-                            "guard": gs.get("LAST_ACTION", "")})
+                            "guard": gs.get("LAST_ACTION", ""), "crashes": dict(crashes)})
     finally:
         sh(root, "/opt/etc/init.d/S91vward-route-engine stop", timeout=30)
         sh(root, "/opt/etc/init.d/S92vward-runtime stop", timeout=30)
@@ -294,7 +376,7 @@ def main():
     if args.report:
         Path(args.report).write_text(json.dumps(report, ensure_ascii=False, indent=1))
     for s in summary:
-        print(f"{s['scenario']:12} {s['minutes']:3} min {s['seconds']:6} s  changes {s['changes']:3}  refused {s['refused']:3}  guard {s['guard']}  top {s['top']}")
+        print(f"{s['scenario']:12} {s['minutes']:3} min {s['seconds']:6} s  changes {s['changes']:3}  refused {s['refused']:3}  guard {s['guard']}  top {s['top']}" + (f"  crashes {s['crashes']}" if s['crashes'] else ""))
     seen = set()
     for f in findings:
         key = (f[0], f[2], f[3], f[4])

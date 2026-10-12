@@ -21,12 +21,22 @@ trap 'exit 1' HUP INT TERM
 
 SOURCE_TOTAL=0; SOURCE_OK=0; SOURCE_FAILED=0; UPDATED=0; ACTIVE_OK=0; CHECK_OK=0; OFF_COUNT=0
 
+# get CURL-ARGUMENTS: through vward_fetch of the device profile. When curl crashes on HTTPS
+# (Entware's OpenSSL 3.5.5 on some MIPS routers) it is not asked again for an hour and the TLS
+# of uclient-fetch or of the VLESS module's Xray downloads: before, every source crashed curl
+# once more and no list was updated (the router emulator's broken-environment run, fix.24).
+get() {
+    command -v vward_fetch >/dev/null 2>&1 ||
+        { [ ! -r "$ADS_DEVICE_PROFILE_LIB" ] || . "$ADS_DEVICE_PROFILE_LIB"; } 2>/dev/null
+    if command -v vward_fetch >/dev/null 2>&1; then VWARD_CURL_BIN=$ADS_CURL; vward_fetch "$@"; else "$ADS_CURL" "$@"; fi
+}
+
 fetch_source() (
     fs_sid="$1"; fs_raw="$2"; fs_max="$3"; shift 3
     for fs_url in "$@"; do
         [ -n "$fs_url" ] || continue
         rm -f "$fs_raw.tmp"
-        if "$ADS_CURL" -4 -f -L --connect-timeout "${SOURCE_CONNECT_TIMEOUT:-10}" \
+        if get -4 -f -L --connect-timeout "${SOURCE_CONNECT_TIMEOUT:-10}" \
            --max-time "${SOURCE_MAX_TIME:-120}" --max-filesize "$fs_max" -sS \
            "$fs_url" -o "$fs_raw.tmp"; then
             fs_bytes="$(wc -c 2>/dev/null < "$fs_raw.tmp" | tr -d ' ')"; fs_bytes="$(ads_num "$fs_bytes" 0)"

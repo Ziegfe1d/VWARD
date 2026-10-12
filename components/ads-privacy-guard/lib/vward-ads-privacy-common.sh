@@ -455,6 +455,8 @@ ads_agh_base_export() {
 # ads_agh_api METHOD PATH OUT [JSON_FILE]
 ads_agh_api() (
     ads_aa_method="$1"; ads_aa_path="$2"; ads_aa_out="$3"; ads_aa_json="${4:-}"
+    # No curl (a router booted without it): no answer, and no «not found» in every minute's log.
+    [ -x "$ADS_CURL" ] || return 127
     ads_aa_base="$(ads_agh_api_base)" || return 2
     if [ -n "$ads_aa_json" ]; then
         ads_agh_curl_conf | "$ADS_CURL" -K - -f -sS -X "$ads_aa_method" --connect-timeout "${AGH_API_CONNECT_TIMEOUT:-3}" --max-time "${AGH_API_MAX_TIME:-15}" \

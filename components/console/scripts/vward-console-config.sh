@@ -1127,8 +1127,16 @@ op_service() {
 op_services_refresh() {
     mkdir -p "$(dirname "$SERVICES_FETCHED")" || die write_failed
     new_tmp "$SERVICES_FETCHED" || die write_failed
-    "${VWARD_CURL_BIN:-curl}" -fsS --connect-timeout 10 --max-time 60 --max-filesize 524288 \
-        -o "$TMPFILE" "$SERVICES_URL" 2>/dev/null || die download_failed
+    # Through vward_fetch of the device profile: when curl crashes on HTTPS, the TLS of
+    # uclient-fetch or of the VLESS module's Xray downloads (no crash on every refresh).
+    command -v vward_fetch >/dev/null 2>&1 ||
+        { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+    if command -v vward_fetch >/dev/null 2>&1; then
+        VWARD_CURL_BIN=${VWARD_CURL_BIN:-$(command -v curl)}
+        vward_fetch -fsS --connect-timeout 10 --max-time 60 --max-filesize 524288 -o "$TMPFILE" "$SERVICES_URL" 2>/dev/null
+    else
+        "${VWARD_CURL_BIN:-curl}" -fsS --connect-timeout 10 --max-time 60 --max-filesize 524288 -o "$TMPFILE" "$SERVICES_URL" 2>/dev/null
+    fi || die download_failed
     services_valid "$TMPFILE" || die catalog_invalid
     if [ -f "$SERVICES_FETCHED" ] && cmp -s "$TMPFILE" "$SERVICES_FETCHED"; then
         rm -f "${TMPFILE:?}"; TMPFILE=; fetched=unchanged
