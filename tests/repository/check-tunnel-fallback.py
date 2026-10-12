@@ -35,6 +35,7 @@ VWARD_POLICY_GROUP=VwardGroup
 vward_valid_ifname() {{ case "$1" in ''|*[!A-Za-z0-9_.:-]*) return 1;; esac; }}
 vward_device_map() {{ printf 'I\\tWireguard0\\twireguard\\tnwg0\\nI\\tWireguard1\\twireguard\\tnwg1\\nI\\tWireguard2\\twireguard\\tnwg2\\n'; }}
 vward_map_vpns() {{ printf '%s\\n' "$1" | awk -F '\\t' '$1=="I" {{print $2 " " $4}}'; }}
+vward_note() {{ printf '%s|%s|%s\\n' "$1" "$2" "$4" >> "{tmp}/notes"; }}
 """)
     # The components agent, asked to restart a tunnel's module, does it at once (here: the module
     # program itself, as the real agent does; every request is written down).
@@ -137,6 +138,8 @@ echo result=changed
         fail("with the fallback off the lists go direct")
     if "FAILOPEN_REASON=silent,fallback_off\n" not in (gdir / "state").read_text():
         fail("with the fallback off the reason says so")
+    if "warn|«{t}» выключен агентом VPN|t-Wireguard0" not in (tmp / "notes").read_text():
+        fail("the switch-off is not in the bell's history")
 
     # Keenetic's lists with their own tunnel: Games on Wireguard1 moves when Wireguard1 fails
     # two samples in a row; VWARD's group and AdaptiveAuto follow VWARD's tunnel, not this.
@@ -361,6 +364,8 @@ echo result=changed
     r = subprocess.run(["sh", str(GUARD)], env=env, text=True, capture_output=True, timeout=60)
     if r.stdout.split("\n", 1)[0] != "ACTION=FAILOPEN_RECOVERED":
         fail(f"recovery of an engine tunnel: {r.stdout[:200]} {(tmp / 'guard.log').read_text()[-300:]}")
+    if "ok|«{t}» снова включён агентом VPN|t-" not in (tmp / "notes").read_text():
+        fail("the switch-on is not in the bell's history")
     if "interface OpkgTun2 up" not in (tmp / "ndmc.log").read_text() or (tmp / "vless.log").read_text() != "kick OpkgTun2\n" or \
             "engine-kick:OpkgTun2" not in (tmp / "asked").read_text():
         fail("after switching the interface on, the guard must start the engine's program afresh (kick: another server when it stays silent)")

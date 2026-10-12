@@ -10,6 +10,8 @@ export VWARD_ACTOR
 VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 [ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
 . "$VWARD_PROFILE_LIB"
+# The bell's history (fix.26); a library from before it records nothing, the agent works the same.
+command -v vward_note >/dev/null 2>&1 || vward_note() { :; }
 vward_profile_load || exit 1
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
