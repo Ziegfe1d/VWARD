@@ -29,7 +29,7 @@ OK=0
 if [ "$FORCE_FAIL" = "1" ]; then
     echo "TEST MODE: ISP failure forced"
 else
-    OUT=$(curl -4 \
+    OUT=$(curl --http1.1 -4 \
         --interface "$WAN" \
         --resolve "$HOST:443:$IP" \
         --connect-timeout 5 \

@@ -105,7 +105,7 @@ probe_iface()
     IFACE="$1"
     URL="$2"
 
-    "${VWARD_CURL_BIN:-curl}" -4 -k \
+    "${VWARD_CURL_BIN:-curl}" --http1.1 -4 -k \
       --noproxy '*' \
       --interface "$IFACE" \
       --connect-timeout "${VWARD_PROBE_CONNECT:-4}" \

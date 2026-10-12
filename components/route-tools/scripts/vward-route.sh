@@ -107,7 +107,7 @@ check_service()
         RESULT="OK"
 
     elif [ -n "$IP" ]; then
-        OUT=$(curl -4 \
+        OUT=$(curl --http1.1 -4 \
             --interface "$WAN" \
             --resolve "$HOST:443:$IP" \
             --connect-timeout 5 \

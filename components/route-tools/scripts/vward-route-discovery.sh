@@ -166,7 +166,7 @@ probe()
     P_IP="$3"
 
     OUT=$(
-        curl -4 -k \
+        curl --http1.1 -4 -k \
           --noproxy '*' \
           --interface "$P_IFACE" \
           --resolve "$P_HOST:443:$P_IP" \

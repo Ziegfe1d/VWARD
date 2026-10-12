@@ -344,7 +344,7 @@ engine_move()
         em_fetch() {
             # em_fetch URL|NAME OUTPUT MAX_BYTES
             if [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ]; then cp "$VWARD_ENGINE_MOVE_SOURCE/$1" "$2"; return; fi
-            curl -fsS --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 120 --max-filesize "$3" -o "$2" "$1" 2>/dev/null
+            curl --http1.1 -fsS --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 120 --max-filesize "$3" -o "$2" "$1" 2>/dev/null
         }
         if [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ]; then src=manifest.json; else src=$EM_URL; fi
         em_fetch "$src" "$EM_T/manifest.json" 262144 || exit 3
@@ -425,6 +425,17 @@ REPAIR_CURL=${VWARD_REPAIR_CURL:-/opt/bin/curl}
 REPAIR_JQ=${VWARD_REPAIR_JQ:-/opt/bin/jq}
 REPAIR_OPENSSL=${VWARD_REPAIR_OPENSSL:-/opt/bin/openssl}
 repair_if_crashing curl curl "$REPAIR_CURL" -s -o /dev/null --noproxy '*' --connect-timeout 3 --max-time 5 http://127.0.0.1:79/rci/show/version
+# curl that crashed on HTTPS within the hour (vward_fetch noted it): the crash was in libnghttp2,
+# the HTTP/2 library (Viva 2026-10-12: 81 crashes in two hours), which the local check above never
+# loads. Its packages are reinstalled, then HTTPS (HTTP/2 as curl picks it) is tried again.
+REPAIR_TLS_FLAG=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
+if [ -n "$(find "$REPAIR_TLS_FLAG" -mmin -60 2>/dev/null)" ]; then
+    repair_if_crashing curl-https "libnghttp2 libcurl curl" "$REPAIR_CURL" -s -o /dev/null --connect-timeout 5 --max-time 10 \
+        "${VWARD_REPAIR_HTTPS_URL:-https://raw.githubusercontent.com/}"
+    # Sound again: curl is asked first once more, not in an hour.
+    "$REPAIR_CURL" -s -o /dev/null --connect-timeout 5 --max-time 10 "${VWARD_REPAIR_HTTPS_URL:-https://raw.githubusercontent.com/}" </dev/null >/dev/null 2>&1
+    [ "$?" -ge 128 ] || rm -f "$REPAIR_TLS_FLAG"
+fi
 repair_if_crashing jq jq "$REPAIR_JQ" -n 1
 repair_if_crashing openssl "libopenssl openssl-util" "$REPAIR_OPENSSL" version
 

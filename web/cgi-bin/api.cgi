@@ -1171,9 +1171,9 @@ if [ "$ACTION" = release-notes ]; then
     if [ ! -s "$RN_FILE" ] || [ -n "$(find "$RN_FILE" -mmin +60 2>/dev/null)" ]; then
       (umask 077; mkdir -p "$NDM_CACHE_DIR") 2>/dev/null
       # A dead VPN tunnel the feed host is routed through: once more straight through the provider.
-      if "$CURL" -fsS --connect-timeout 5 --max-time 12 --max-filesize 400000 "$RN_URL" -o "$RN_FILE.$$" 2>/dev/null ||
+      if "$CURL" --http1.1 -fsS --connect-timeout 5 --max-time 12 --max-filesize 400000 "$RN_URL" -o "$RN_FILE.$$" 2>/dev/null ||
          { RN_DEV="$("${VWARD_IP:-ip}" -4 route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }}')"
-           [ -n "$RN_DEV" ] && "$CURL" -fsS --interface "$RN_DEV" --connect-timeout 5 --max-time 12 --max-filesize 400000 "$RN_URL" -o "$RN_FILE.$$" 2>/dev/null; }; then
+           [ -n "$RN_DEV" ] && "$CURL" --http1.1 -fsS --interface "$RN_DEV" --connect-timeout 5 --max-time 12 --max-filesize 400000 "$RN_URL" -o "$RN_FILE.$$" 2>/dev/null; }; then
         mv -f "$RN_FILE.$$" "$RN_FILE"
       else
         rm -f "$RN_FILE.$$"
@@ -1726,7 +1726,7 @@ if [ "$ACTION" = "diagnostics" ]; then
     # crashes on the first TLS handshake on some routers («Illegal instruction», a Viva).
     CURL_STATUS=FAIL CURL_DETAIL="curl не запускается"
     if "$CURL" --version >/dev/null 2>&1; then
-        "$CURL" -s -o /dev/null --connect-timeout 4 --max-time 8 https://1.1.1.1/cdn-cgi/trace >/dev/null 2>&1
+        "$CURL" --http1.1 -s -o /dev/null --connect-timeout 4 --max-time 8 https://1.1.1.1/cdn-cgi/trace >/dev/null 2>&1
         CURL_RC=$?
         case "$CURL_RC" in
             0) CURL_STATUS=PASS CURL_DETAIL="HTTPS работает: проверки сайтов, обновления, подписки" ;;
@@ -2008,7 +2008,7 @@ if [ "$ACTION" = tunnel-probe ]; then
     # requests through it instead, the time to the first byte, written the way ping writes it.
     if awk -F '\t' -v n="$NAME" '$2 == n {f = 1} END {exit !f}' "${VWARD_VLESS_ETC:-/opt/etc/vward/vless-engine}/tunnels.tsv" 2>/dev/null; then
         PING_TARGET="http://1.1.1.1/cdn-cgi/trace"
-        ( PT=; for PI in 1 2 3 4; do PT="$PT $("$CURL" -4 -s -o /dev/null --noproxy '*' --interface "$DEV" --connect-timeout 2 --max-time 4 \
+        ( PT=; for PI in 1 2 3 4; do PT="$PT $("$CURL" --http1.1 -4 -s -o /dev/null --noproxy '*' --interface "$DEV" --connect-timeout 2 --max-time 4 \
               -w '%{http_code}:%{time_starttransfer}' "$PING_TARGET" 2>/dev/null)"; done
           printf '%s\n' "$PT" | awk '{for (i = 1; i <= NF; i++) {split($i, a, ":"); if (a[1] + 0 > 0) {n++; s += a[2] * 1000}}
               printf "4 packets transmitted, %d received, %d%% packet loss\n", n, (4 - n) * 25
@@ -2017,7 +2017,7 @@ if [ "$ACTION" = tunnel-probe ]; then
         "${VWARD_PING:-ping}" -I "$DEV" -c 4 -W 2 "$PING_TARGET" > "$PROBE_DIR/ping" 2>&1 &
     fi
     PING_PID=$!
-    "$CURL" --interface "$DEV" --silent --max-time 5 https://ipinfo.io/json > "$PROBE_DIR/exit" 2>/dev/null || :
+    "$CURL" --http1.1 --interface "$DEV" --silent --max-time 5 https://ipinfo.io/json > "$PROBE_DIR/exit" 2>/dev/null || :
     PEER="$(ndm_cached running 10 "show running-config" |
         awk -v n="interface $NAME" '$0 == n {on = 1; next} on && /^!/ {exit} on {sub(/^ +/, ""); print}')"
     wait "$PING_PID" 2>/dev/null
@@ -2110,7 +2110,7 @@ if [ "$ACTION" = site-test ]; then
         vward_valid_ifname "$sdev" 2>/dev/null && [ -e "${VWARD_SYSFS_NET:-/sys/class/net}/$sdev" ] || continue
         sn=$((sn + 1))
         printf '%s\t%s\n' "$sname" "$sdev" > "$ST_DIR/t.$sn"
-        "$CURL" -4 --noproxy '*' --interface "$sdev" --resolve "$SD:443:$SIP" --connect-timeout 3 --max-time 6 \
+        "$CURL" --http1.1 -4 --noproxy '*' --interface "$sdev" --resolve "$SD:443:$SIP" --connect-timeout 3 --max-time 6 \
             -A "Mozilla/5.0" -s -o /dev/null -w '%{http_code} %{time_total} %{redirect_url}' "https://$SD/" > "$ST_DIR/r.$sn" 2>/dev/null &
     done < "$ST_DIR/targets"
     wait

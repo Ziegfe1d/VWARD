@@ -171,7 +171,7 @@ while IFS='|' read GROUP HOST; do
     if [ -n "$IP" ]; then
 
         ISP_OUT=$(
-            curl -4 \
+            curl --http1.1 -4 \
                 --noproxy '*' \
                 --interface "$WAN" \
                 --resolve "$HOST:443:$IP" \
@@ -212,7 +212,7 @@ while IFS='|' read GROUP HOST; do
         if [ "$NEED_VPN" -eq 1 ]; then
 
             VPN_OUT=$(
-                curl -4 \
+                curl --http1.1 -4 \
                     --noproxy '*' \
                     --interface "$WG" \
                     --resolve "$HOST:443:$IP" \

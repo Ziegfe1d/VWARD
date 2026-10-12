@@ -1136,7 +1136,7 @@ op_services_refresh() {
         VWARD_CURL_BIN=${VWARD_CURL_BIN:-$(command -v curl)}
         vward_fetch -fsS --connect-timeout 10 --max-time 60 --max-filesize 524288 -o "$TMPFILE" "$SERVICES_URL" 2>/dev/null
     else
-        "${VWARD_CURL_BIN:-curl}" -fsS --connect-timeout 10 --max-time 60 --max-filesize 524288 -o "$TMPFILE" "$SERVICES_URL" 2>/dev/null
+        "${VWARD_CURL_BIN:-curl}" --http1.1 -fsS --connect-timeout 10 --max-time 60 --max-filesize 524288 -o "$TMPFILE" "$SERVICES_URL" 2>/dev/null
     fi || die download_failed
     services_valid "$TMPFILE" || die catalog_invalid
     if [ -f "$SERVICES_FETCHED" ] && cmp -s "$TMPFILE" "$SERVICES_FETCHED"; then

@@ -117,7 +117,7 @@ probe_result()
     fi
 
     OUT=$(
-        curl -4 \
+        curl --http1.1 -4 \
           --noproxy '*' \
           --interface "$IFACE" \
           --resolve "$H:443:$IP" \

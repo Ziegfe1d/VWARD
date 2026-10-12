@@ -88,7 +88,7 @@ download()
 
     (
       ulimit -f "$LIMIT_BLOCKS" || exit 1
-      curl -4 -f -L \
+      curl --http1.1 -4 -f -L \
         --connect-timeout 10 \
         --max-time 120 \
         --max-filesize "$MAX_SOURCE_ARCHIVE_BYTES" \

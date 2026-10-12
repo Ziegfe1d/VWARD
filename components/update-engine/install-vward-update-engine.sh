@@ -114,7 +114,7 @@ download()
     URL=$1
     DEST=$2
 
-    curl --fail --silent --show-error --location \
+    curl --http1.1 --fail --silent --show-error --location \
         --proto '=https' \
         --tlsv1.2 \
         --connect-timeout 15 \

@@ -207,4 +207,16 @@ http.server.HTTPServer((i["listen"], i["port"]), H).serve_forever()
     if r.returncode != 3:
         fail(f"a host with quotes: rc={r.returncode}")
 
+# HTTP/1.1 on every HTTPS request: Entware's curl crashed in libnghttp2 (HTTP/2), Viva 2026-10-12.
+# A crash in a tunnel probe read as «the tunnel does not answer».
+lib = LIB.read_text() if hasattr(LIB, "read_text") else open(LIB).read()
+if '"$_vf_curl" --http1.1 "$@"' not in lib:
+    fail("vward_fetch asks curl for HTTP/2")
+REPO = Path(__file__).resolve().parents[2]
+for path in ("components/tunnel-guard/scripts/vward-tunnel-guard.sh", "components/tunnel-guard/scripts/vward-tunnel-health.sh",
+             "components/tunnel-guard/scripts/vward-tunnel-quality.sh", "components/tunnel-guard/scripts/vward-vless-engine.sh",
+             "components/policy-sync/scripts/vward-policy-sync.sh", "components/runtime/scripts/vward-housekeeping.sh", "web/cgi-bin/api.cgi"):
+    if "--http1.1" not in (REPO / path).read_text():
+        fail(f"{path}: HTTPS probes without --http1.1")
+
 print("FETCH_FALLBACK=PASS")

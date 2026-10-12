@@ -529,7 +529,7 @@ probe()
     fi
 
     OUT=$(
-        curl -4 \
+        curl --http1.1 -4 \
             --noproxy '*' \
             --interface "$IFACE" \
             --resolve "$H:443:$IP" \
@@ -1302,7 +1302,7 @@ hint_direct_known()
 
 wg_quick_probe()
 {
-    curl -4 -k \
+    curl --http1.1 -4 -k \
       --noproxy '*' \
       --interface "$WG" \
       --connect-timeout 1 \
@@ -1507,7 +1507,7 @@ list_watch_check()
     ! tls_broken || return 0
 
     LW_OUT=$(
-        curl -4 \
+        curl --http1.1 -4 \
             --noproxy '*' \
             --interface "$WAN" \
             --resolve "$1:443:$LW_IP" \

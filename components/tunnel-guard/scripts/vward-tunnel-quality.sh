@@ -56,7 +56,7 @@ HTTP_TARGET=${VWARD_QUALITY_HTTP_TARGET:-http://1.1.1.1/cdn-cgi/trace}
 http_probe() {
     hp_t=
     for hp_i in 1 2 3; do
-        hp_t="$hp_t $("$CURL" -4 -s -o /dev/null --noproxy '*' --interface "$1" --connect-timeout 2 --max-time 4 \
+        hp_t="$hp_t $("$CURL" --http1.1 -4 -s -o /dev/null --noproxy '*' --interface "$1" --connect-timeout 2 --max-time 4 \
             -w '%{http_code}:%{time_starttransfer}' "$HTTP_TARGET" 2>/dev/null)"
     done
     printf '%s\n' "$hp_t" | awk '{for (i = 1; i <= NF; i++) {split($i, a, ":"); if (a[1] + 0 > 0) {ms = a[2] * 1000; n++; s += ms; if (min == "" || ms < min) min = ms; if (ms > max) max = ms}}
@@ -101,7 +101,7 @@ speed() {
     while read -r name dev; do
         vward_valid_ifname "$dev" 2>/dev/null && [ -e "$SYSFS/$dev" ] || continue
         # bytes and bytes a second; 30 s at most, what came by then counts (from 1 MB).
-        out=$("$CURL" -4 -s -o /dev/null --noproxy '*' --interface "$dev" --connect-timeout 5 --max-time 30 \
+        out=$("$CURL" --http1.1 -4 -s -o /dev/null --noproxy '*' --interface "$dev" --connect-timeout 5 --max-time 30 \
             -w '%{size_download} %{speed_download}' "$SPEED_URL" </dev/null 2>/dev/null)
         mbps=$(printf '%s\n' "$out" | awk '$1 >= 1000000 {printf "%.1f", $2 * 8 / 1000000}')
         [ -n "$mbps" ] || mbps=0
@@ -114,7 +114,7 @@ speed() {
 # svc_open DOMAIN IP DEV: "verdict ms" of https://DOMAIN/ at IP through DEV, the Panel's
 # «Проверить сайт»: no answer, blocked (451 or a redirect to an «unavailable» page) or open.
 svc_open() {
-    r=$("$CURL" -4 --noproxy '*' --interface "$3" --resolve "$1:443:$2" --connect-timeout 3 --max-time 6 \
+    r=$("$CURL" --http1.1 -4 --noproxy '*' --interface "$3" --resolve "$1:443:$2" --connect-timeout 3 --max-time 6 \
         -A "Mozilla/5.0" -s -o /dev/null -w '%{http_code} %{time_total} %{redirect_url}' "https://$1/" </dev/null 2>/dev/null)
     read -r code secs loc <<EOF_R
 $r

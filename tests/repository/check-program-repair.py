@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Housekeeping repairs an Entware program that crashes on a plain local task (a damaged copy,
 Viva 2026-10-11): it reinstalls the package, at most once in 6 hours, and logs it. A program that
-only fails (no crash) or does not exist is left alone."""
+only fails (no crash) or does not exist is left alone. curl that crashed on HTTPS (libnghttp2,
+Viva 2026-10-12) gets its HTTP/2 library reinstalled too."""
 from __future__ import annotations
 
 import os
@@ -36,7 +37,8 @@ with tempfile.TemporaryDirectory() as tmp:
     stub.write_text("vward_admission_enter() { :; }\nvward_admission_leave() { :; }\nvward_defer() { return 1; }\nvward_off() { return 0; }\n")
     env = os.environ | {"VWARD_ROOT_PREFIX": str(r), "VWARD_ADMISSION_LIB": str(stub), "VWARD_CONSOLE_CONFIG_BIN": str(t / "none"),
                         "VWARD_CRONTAB": str(t / "none"), "VWARD_OPKG_BIN": str(t / "opkg"), "VWARD_REPAIR_CURL": str(t / "curl"),
-                        "VWARD_REPAIR_JQ": str(t / "jq"), "VWARD_REPAIR_OPENSSL": str(t / "no-openssl"), "VWARD_SENTINEL_CTL": str(t / "none")}
+                        "VWARD_REPAIR_JQ": str(t / "jq"), "VWARD_REPAIR_OPENSSL": str(t / "no-openssl"), "VWARD_SENTINEL_CTL": str(t / "none"),
+                        "VWARD_TLS_BROKEN_FLAG": str(t / "tls.broken"), "VWARD_REPAIR_HTTPS_URL": "https://example.invalid/"}
 
     def run() -> str:
         res = subprocess.run([busybox, "sh", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=120)
@@ -63,5 +65,21 @@ with tempfile.TemporaryDirectory() as tmp:
     run()
     if len((t / "opkg.log").read_text().splitlines()) != 1 or len((t / "curl.runs").read_text().splitlines()) != runs + 1:
         fail("a working curl is run once and left alone")
+
+    # curl crashes only on HTTPS (libnghttp2, Viva 2026-10-12): the local check passes, vward_fetch
+    # noted the crash; the HTTP/2 library and curl are reinstalled and the note goes when it works.
+    (t / "curl").write_text(f'#!/bin/sh\ncase "$*" in *https://*) [ -e "{t}/h2fixed" ] || kill -SEGV $$ ;; esac\nexit 0\n')
+    (t / "opkg").write_text(f'#!/bin/sh\necho "$*" >> "{t}/opkg.log"\n: > "{t}/h2fixed"\n')
+    (t / "tls.broken").write_text("")
+    log = run()
+    if (t / "opkg.log").read_text().splitlines()[-1] != "install --force-reinstall libnghttp2 libcurl curl":
+        fail(f"curl crashing on HTTPS: its HTTP/2 library is not reinstalled: {(t / 'opkg.log').read_text()}")
+    if "repair=curl-https|crash=139|reinstalled=libnghttp2,libcurl,curl|opkg=0|after=0" not in log or (t / "tls.broken").exists():
+        fail(f"the HTTPS repair is not logged, or curl is not trusted again: {log[-300:]}")
+    # No note of an HTTPS crash: nothing is reinstalled for HTTPS.
+    n = len((t / "opkg.log").read_text().splitlines())
+    run()
+    if len((t / "opkg.log").read_text().splitlines()) != n:
+        fail("HTTPS repair without a crash noted")
 
 print("PROGRAM_REPAIR=PASS")

@@ -827,7 +827,7 @@ vu_wan_dev() {
 vu_get() {
     command -v vward_fetch >/dev/null 2>&1 ||
         { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
-    if command -v vward_fetch >/dev/null 2>&1; then vward_fetch "$@"; else curl "$@"; fi
+    if command -v vward_fetch >/dev/null 2>&1; then vward_fetch "$@"; else curl --http1.1 "$@"; fi
 }
 
 vu_curl() {

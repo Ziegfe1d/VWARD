@@ -342,7 +342,7 @@ stop_one() {
 
 # connected NAME: a page opened through the tunnel's adapter (VLESS has no handshake to read).
 connected() {
-    "$CURL" -4 -s -o /dev/null --noproxy '*' --interface "$(adapter_of "$1")" --connect-timeout 5 --max-time 8 "$CHECK_URL" </dev/null 2>/dev/null
+    "$CURL" --http1.1 -4 -s -o /dev/null --noproxy '*' --interface "$(adapter_of "$1")" --connect-timeout 5 --max-time 8 "$CHECK_URL" </dev/null 2>/dev/null
 }
 
 step() { { printf 'step=%s\n' "$1" >&3; } 2>/dev/null || :; }
@@ -512,7 +512,7 @@ wan_alive() {
     profile
     vward_valid_ifname "${VWARD_WAN_DEVICE:-}" 2>/dev/null || return 0
     for wu in "$CHECK_URL" http://1.0.0.1/cdn-cgi/trace; do
-        "$CURL" -4 -s -o /dev/null --noproxy '*' --interface "$VWARD_WAN_DEVICE" --connect-timeout 5 --max-time 8 "$wu" </dev/null 2>/dev/null && return 0
+        "$CURL" --http1.1 -4 -s -o /dev/null --noproxy '*' --interface "$VWARD_WAN_DEVICE" --connect-timeout 5 --max-time 8 "$wu" </dev/null 2>/dev/null && return 0
     done
     return 1
 }

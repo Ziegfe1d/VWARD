@@ -96,7 +96,7 @@ probe()
 {
     URL="$1"
 
-    curl -4 -k \
+    curl --http1.1 -4 -k \
       --noproxy '*' \
       --interface "$WG_IF" \
       --connect-timeout "${VWARD_PROBE_CONNECT:-4}" \

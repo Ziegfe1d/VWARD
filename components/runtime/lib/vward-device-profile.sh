@@ -134,7 +134,9 @@ vward_fetch()
     _vf_curl=${VWARD_CURL_BIN:-$(vward_tool curl)} _vf_rc=127
     _vf_flag=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
     if [ -n "$_vf_curl" ] && [ -z "$(find "$_vf_flag" -mmin -60 2>/dev/null)" ]; then
-        "$_vf_curl" "$@"
+        # HTTP/1.1: Entware's curl crashed in libnghttp2 (HTTP/2) on HTTPS, 81 times in two hours
+        # (Viva 2026-10-12, «SIGSEGV ... in libnghttp2.so»); small downloads gain nothing from HTTP/2.
+        "$_vf_curl" --http1.1 "$@"
         _vf_rc=$?
         [ "$_vf_rc" -ge 126 ] || return "$_vf_rc"
         # Remembered only when it crashed (a signal), not when it is missing.
