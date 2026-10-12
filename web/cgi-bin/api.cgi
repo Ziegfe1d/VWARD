@@ -461,8 +461,9 @@ if [ "$AUTH_ENABLED" = 1 ] && [ "$ACTION" != auth ] && [ "$ACTION" != ping ] && 
 fi
 
 # A change from the Panel: saved router answers go, the next page shows the
-# router as it is now.
-[ "${REQUEST_METHOD:-GET}" != POST ] || rm -rf "${NDM_CACHE_DIR:?}"
+# router as it is now. A note for the bell's history changes nothing on the router; two
+# changes at once may both remove the folder (quiet: the other one did it).
+[ "${REQUEST_METHOD:-GET}" != POST ] || [ "$ACTION" = notes ] || rm -rf "${NDM_CACHE_DIR:?}" 2>/dev/null
 
 # vward-off: the emergency switch («Отключить VWARD», vward-off.sh). GET: its state. POST
 # op=off (confirm=VWARD_OFF) or op=on: detached, thousands of routes take minutes; the Panel

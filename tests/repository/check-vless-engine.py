@@ -154,7 +154,10 @@ esac
     share.mkdir(parents=True)
     (share / "xray").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/xray.args"\necho "${{SSL_CERT_FILE:-}}" > "{tmp}/xray.ca"\n[ "$1 $2" = "run -test" ] && exit 0\n'
                               f'[ "$1 $2" = "run -c" ] && {shutil.which("jq")} -r ".outbounds[0].settings | (.vnext // .servers)[0].address" "$3" > "{tmp}/xray.addr"\n'
-                              'while :; do sleep 1; done\n')
+                              # Stopped: its server is gone with it (a check right after a switch must not see the
+                              # previous server through a file the old run left; CI 2026-10-12).
+                              f'trap \'rm -f "{tmp}/xray.addr"; exit 0\' TERM INT\n'
+                              'while :; do sleep 0.2; done\n')
     (share / "xray").chmod(0o755)
     (share / "version").write_text(src.split("XRAY_VERSION=", 1)[1].split("\n", 1)[0] + "\n")
     link = tmp / "link.txt"
