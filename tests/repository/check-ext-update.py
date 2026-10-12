@@ -213,7 +213,8 @@ esac
     (tmp / "fw-good-from").write_text("3")
     run("ext-check", "now")
     fw = json.loads((state / "firmware.json").read_text())
-    if fw["title"] != "5.1.6" or fw["update_available"] is not False or int((tmp / "fw-calls").read_text()) != 3:
+    # Three check-updates, then show version for the installed release.
+    if fw["title"] != "5.1.6" or fw["update_available"] is not False or int((tmp / "fw-calls").read_text()) != 4:
         fail(f"firmware after retries: {fw}")
     (state / "firmware.json").unlink(); (tmp / "fw-calls").write_text("0")
     (tmp / "fw-good-from").write_text("99")
@@ -221,6 +222,14 @@ esac
     fw = json.loads((state / "firmware.json").read_text())
     if fw["release"] != "5.01.C.6.0-1" or fw["update_available"] is not None or fw["channel"] != "stable":
         fail(f"firmware fallback to show version: {fw}")
+    # A newer release on offer: check-update names it, the installed one comes from show version
+    # (the Panel said «5.1.7 installed» on a 5.1.6 router, a Viva 2026-10-12).
+    (tmp / "fw.json").write_text(json.dumps([{"parse": FW | {"release": "5.01.C.7.0-4", "title": "5.1.7", "update-available": True}}]))
+    (state / "firmware.json").unlink(); (tmp / "fw-calls").write_text("0"); (tmp / "fw-good-from").write_text("1")
+    run("ext-check", "now")
+    fw = json.loads((state / "firmware.json").read_text())
+    if fw["release"] != "5.01.C.6.0-1" or fw["title"] != "5.1.6" or fw["available"] != {"release": "5.01.C.7.0-4", "title": "5.1.7"} or not fw["update_available"]:
+        fail(f"installed and available must not be mixed up: {fw}")
 
     # The Panel reaches the check through a POST the API accepts.
     helper = tmp / "helper"

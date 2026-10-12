@@ -260,6 +260,8 @@ with tempfile.TemporaryDirectory() as tmp:
     for reply, want, via_ndmc in (
         (wg, "up\nup\nyes\n7\n", False),
         ('{"id":"Wireguard0","state":"down","link":"down"}', "down\ndown\n", False),
+        # Switched off in Keenetic while the program keeps its adapter up (an OpkgTun of Xray).
+        ('{"id":"Wireguard0","state":"up","link":"down","summary":{"layer":{"conf":"disabled","link":"disabled"}}}', "down\ndown\n", False),
         ('{"status":[{"status":"error"}]}', "up\npending\nno\n42\n", True),
         (None, "up\npending\nno\n42\n", True),
     ):
@@ -269,6 +271,10 @@ with tempfile.TemporaryDirectory() as tmp:
         result = run("vward_interface_state Wireguard0", env)
         assert result.returncode == 0 and result.stdout == want, (reply, result.stdout, result.stderr)
         assert (tmp / "ndmc.ran").exists() == via_ndmc, (reply, "ndmc use")
+    write_exec(ndmc, '#!/bin/sh\nprintf "%s\\n" "  state: up" "   link: down" "  summary:" "    layer:" "     conf: disabled"\n')
+    write_exec(curl, "#!/bin/sh\nexit 7\n")
+    result = run("vward_interface_state Wireguard0", env)
+    assert result.stdout.splitlines()[:2] == ["down", "down"], ("ndmc: switched off in Keenetic", result.stdout)
     assert run("vward_interface_state 'bad name'", env).returncode != 0, "invalid names must be refused"
 
 print("DEVICE_PROFILE=PASS")

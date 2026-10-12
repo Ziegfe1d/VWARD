@@ -83,6 +83,17 @@ with tempfile.TemporaryDirectory() as d:
     r = subprocess.run(["sh", "-c", sh], text=True, capture_output=True)
     if r.stdout != "reason=no interface Wireguard0: (error) static route 1.2.3.4 uses Wireguard0\nerror=router_rejected\n":
         fail(f"the router's reply to a rejected command: {r.stdout!r}")
+# A tunnel Keenetic has switched off is «down» for the Panel even while its program keeps the
+# adapter up (an OpkgTun of Xray: `state: up`, conf layer disabled; a Viva 2026-10-12).
+_wgi = API[API.index('WG_INTERFACES="$('):]
+_wgi = _wgi[_wgi.index('--arg wan'):]
+_prog = _wgi[_wgi.index("'") + 1:_wgi.index("' 2>/dev/null")]
+_ifs = {"OpkgTun2": {"type": "OpkgTun", "state": "up", "link": "down", "summary": {"layer": {"conf": "disabled"}}},
+        "Wireguard0": {"type": "Wireguard", "state": "up", "link": "up", "summary": {"layer": {"conf": "running"}}}}
+_r = subprocess.run(["jq", "-c", "--arg", "types", "wireguard opkgtun", "--arg", "wan", "", _prog], input=json.dumps(_ifs), text=True, capture_output=True)
+_st = {t["name"]: t["state"] for t in json.loads(_r.stdout or "[]")}
+if _st != {"OpkgTun2": "down", "Wireguard0": "up"}:
+    fail(f"switched off in Keenetic must read as off: {_st} {_r.stderr}")
 for need in ("TWHY=\"$(printf '%s\\n' \"$TALL\" | sed -n 's/^reason=//p' | tail -n 1)\"", "{reason:$w}"):
     if need not in API:
         fail(f"the API passes the router's reply: lacks {need}")

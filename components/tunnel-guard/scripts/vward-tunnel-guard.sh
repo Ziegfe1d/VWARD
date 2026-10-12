@@ -123,11 +123,17 @@ wan_ok()
 }
 
 
+# The tunnel answers, and Keenetic carries it: the program of an OpkgTun (Xray) answers through
+# its adapter even while Keenetic has the tunnel switched off or without link, and then routes
+# nothing into it (VLESS, a Viva 2026-10-12: «working» for VWARD, every site direct).
 wg_ok()
 {
-    probe_iface "$WG_IF" "http://1.1.1.1/cdn-cgi/trace" && return 0
-    probe_iface "$WG_IF" "http://1.0.0.1/cdn-cgi/trace" && return 0
-    return 1
+    probe_iface "$WG_IF" "http://1.1.1.1/cdn-cgi/trace" || probe_iface "$WG_IF" "http://1.0.0.1/cdn-cgi/trace" || return 1
+    WO_CONF= WO_LINK=
+    { read -r WO_CONF; read -r WO_LINK; } <<WO_EOF
+$(vward_interface_state "$VWARD_TUNNEL_INTERFACE" 2>/dev/null)
+WO_EOF
+    [ "$WO_CONF" != down ] && [ "$WO_LINK" != down ]
 }
 
 

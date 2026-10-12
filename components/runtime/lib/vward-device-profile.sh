@@ -277,6 +277,10 @@ vward_running_config()
 # State of one Keenetic interface as four lines: state, link, online (yes/no),
 # seconds since the last handshake (empty when unknown).  RCI first, ndmc
 # only when RCI does not answer, as in vward_running_config.
+# vward_interface_state NAME: four lines - on/off in Keenetic, link, peer online, handshake age.
+# On/off is Keenetic's own switch (the «conf» layer, `down` in the settings), not `state`: an
+# OpkgTun's `state` is the adapter its program keeps up, «up» even while Keenetic has the
+# tunnel switched off and routes nothing into it (VLESS, a Viva 2026-10-12).
 vward_interface_state()
 {
     vward_valid_ndm_name "$1" || return 1
@@ -287,7 +291,8 @@ vward_interface_state()
                select(type == "object" and has("state")) |
                ([.. | objects | select(has("online")) | .online][0]) as $on |
                ([.. | objects | select(has("last-handshake")) | .["last-handshake"]][0]) as $hs |
-               (.state | tostring), ((.link // "") | tostring),
+               (if ((.summary.layer.conf // "") | tostring) == "disabled" then "down" else (.state | tostring) end),
+               ((.link // "") | tostring),
                (if $on == true or $on == "yes" then "yes" elif $on == null then "" else "no" end),
                (($hs // "") | tostring)' 2>/dev/null) &&
        [ -n "$_vis_out" ]; then
@@ -297,10 +302,11 @@ vward_interface_state()
     command -v ndmc >/dev/null 2>&1 || return 1
     ndmc -c "show interface $1" 2>/dev/null | awk '
         /^[[:space:]]*state:/ && s == "" {s = $2}
+        /^[[:space:]]*conf:/ && $2 == "disabled" {off = 1}
         /^[[:space:]]*link:/ && l == "" {l = $2}
         /^[[:space:]]*online:/ && o == "" {o = $2}
         /last-handshake:/ && h == "" {h = $2}
-        END {if (s == "") exit 1; print s; print l; print o; print h}'
+        END {if (s == "") exit 1; print (off ? "down" : s); print l; print o; print h}'
 }
 
 # Device map records (tab separated), built from Keenetic RCI and running-config:

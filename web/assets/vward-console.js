@@ -1367,8 +1367,8 @@ const RENDER = {
     const cur = (f.channels || []).find(c => c.name === f.channel) || {};
     return loadError(['ext']) +
       panel('Прошивка Keenetic', kv([
-        ['Установлена', (f.title || '') + (f.release ? ' (' + f.release + ')' : '')],
-        ['Доступна', f.update_available == null ? 'роутер пока не сообщил' : f.update_available ? (cur.version || 'новая версия') : 'новее нет', f.update_available ? 'info' : ''],
+        ['Установлена', f.release ? (f.title || '') + ' (' + f.release + ')' : 'роутер пока не сообщил'],
+        ['Доступна', f.update_available == null ? 'роутер пока не сообщил' : f.update_available ? (f.available && f.available.release ? (f.available.title || '') + ' (' + f.available.release + ')' : cur.version || 'новая версия') : 'установлена последняя', f.update_available ? 'info' : ''],
         ['Проверена роутером', fwStamp(f.checked)]
       ]), { desc: f.update_available ? 'Прошивку ставит Keenetic, роутер перезагрузится.' : '' }) +
       panel('Настройки', '<dl class="kv">' +

@@ -1767,13 +1767,13 @@ if [ "$ACTION" = "diagnostics" ]; then
     WG_DOWN="$(printf '%s\n' "$IF_JSON" | "$JQ" -r --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy opkgtun}" --arg wan "${VWARD_WAN_INTERFACE:-}" '
         ($types | split(" ")) as $vpn |
         [to_entries[] | select((.value | type) == "object" and .key != $wan and (((.value.type // "") | tostring | ascii_downcase) as $t | $vpn | index($t))) |
-         select(((.value.state // "") | tostring) != "down") |
+         select((if ((.value.summary.layer.conf // "") | tostring) == "disabled" then "down" else ((.value.state // "") | tostring) end) != "down") |
          select(((.value.connected // "") | tostring | ascii_downcase) as $c | ["yes", "true", "1"] | index($c) | not) |
          (.value.description // "" | if . == "" then null else . end) // .key] | join(", ")' 2>/dev/null)"
     WG_OFF="$(printf '%s\n' "$IF_JSON" | "$JQ" -r --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy opkgtun}" --arg wan "${VWARD_WAN_INTERFACE:-}" '
         ($types | split(" ")) as $vpn |
         [to_entries[] | select((.value | type) == "object" and .key != $wan and (((.value.type // "") | tostring | ascii_downcase) as $t | $vpn | index($t))) |
-         select(((.value.state // "") | tostring) == "down")] | length' 2>/dev/null)"
+         select((if ((.value.summary.layer.conf // "") | tostring) == "disabled" then "down" else ((.value.state // "") | tostring) end) == "down")] | length' 2>/dev/null)"
     case "$WG_OFF" in ''|*[!0-9]*) WG_OFF=0 ;; esac
     if [ "$IF_JSON" = '{}' ]; then WG_STATUS=UNKNOWN WG_DETAIL="Keenetic не ответил за 8 с"
     elif [ "$WG_COUNT" -eq 0 ]; then WG_STATUS=WARN WG_DETAIL="туннелей нет"
@@ -2952,7 +2952,8 @@ WG_INTERFACES="$(
             description:(.description // ""),
             link:(.link // ""),
             connected:(.connected // ""),
-            state:(.state // ""),
+            # On/off is the conf layer of Keenetic: the state of an OpkgTun is the adapter of its program, up while switched off.
+            state:(if ((.summary.layer.conf // "") | tostring) == "disabled" then "down" else (.state // "") end),
             address:((.address // "") | tostring),
             mtu:(.mtu // null),
             uptime:(.uptime // null),

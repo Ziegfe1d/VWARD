@@ -2120,8 +2120,15 @@ ext_firmware_refresh() {
         sleep "${VWARD_FW_TRY_DELAY:-5}"
     done
     if "$JQ" -e '.[0].parse | (.release | type) == "string" and .release != ""' "$EXT_STATE/firmware.raw" >/dev/null 2>&1; then
-        "$JQ" '.[0].parse |
-            {release, title, channel: (.sandbox // ""), update_available: (.["update-available"] == true),
+        # check-update names the release on offer, not the one installed (the Panel said «5.1.7
+        # installed» on a router with 5.1.6, a Viva 2026-10-12): installed from show version.
+        fr_ver=$("${VWARD_CURL_BIN:-curl}" --fail --silent --connect-timeout 3 --max-time 15 "$fr_rci/show/version" 2>/dev/null |
+            "$JQ" -c 'select((.release | type) == "string" and .release != "") | {release, title}' 2>/dev/null)
+        "$JQ" --argjson v "${fr_ver:-null}" '.[0].parse |
+            (.["update-available"] == true) as $up |
+            {release: ($v.release // (if $up then null else .release end)), title: ($v.title // (if $up then null else .title end)),
+             available: (if $up then {release, title} else null end),
+             channel: (.sandbox // ""), update_available: $up,
              auto_update: (.["auto-update-enabled"] == true), checked: (.timestamp // ""),
              channels: [.sandboxes[]? | select(type == "object") | {name, version}]}' "$EXT_STATE/firmware.raw"
     else

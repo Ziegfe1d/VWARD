@@ -396,4 +396,17 @@ if "filter(m => tunExists(m.from))" not in _js or "tunExists(S.tq.fallback_from)
     fail("the Panel must not report moves off a tunnel that no longer exists")
 if 'awk -F \'\\t\' -v t="$1" \'$2 != t\' "$td_gd/lists-fallback"' not in _helper:
     fail("deleting a tunnel forgets the guard's moves off it")
+# Keenetic must carry the tunnel, not only its program answer: an OpkgTun of Xray answers
+# through its adapter while Keenetic has it switched off (a Viva, 2026-10-12, every site direct).
+import re
+guard_src = GUARD.read_text()
+wg_ok = re.search(r"^wg_ok\(\)\n\{\n.*?^\}\n", guard_src, re.S | re.M).group(0)
+for state, ok in (("up\nup\n", True), ("down\ndown\n", False), ("up\ndown\n", False), ("", True)):
+    sh = ("probe_iface() { return 0; }\nVWARD_TUNNEL_INTERFACE=OpkgTun2\n"
+          f"vward_interface_state() {{ printf '{state}'; }}\n" + wg_ok + "wg_ok")
+    if (subprocess.run(["sh", "-c", sh]).returncode == 0) != ok:
+        fail(f"wg_ok with Keenetic saying {state!r}: expected {'answers' if ok else 'dead'}")
+health_src = (ROOT / "components/tunnel-guard/scripts/vward-tunnel-health.sh").read_text()
+if 'if [ "$CONFIG_STATE" = down ] || [ "$LINK_STATE" = down ]; then\n    GOOD=0' not in health_src:
+    fail("the tunnel check must not call a tunnel Keenetic has off or without link working")
 print("TUNNEL_FALLBACK=PASS")

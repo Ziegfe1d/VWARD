@@ -280,6 +280,12 @@ if [ "$IF_OK" -eq 1 ] &&
     GOOD=1
 fi
 
+# Keenetic must carry it too: an OpkgTun switched off or without link in Keenetic routes nothing,
+# while its program (Xray) still answers through the adapter.
+if [ "$CONFIG_STATE" = down ] || [ "$LINK_STATE" = down ]; then
+    GOOD=0
+fi
+
 
 if [ "$GOOD" -eq 1 ]; then
 
