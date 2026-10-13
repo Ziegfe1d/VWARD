@@ -3309,11 +3309,13 @@ header_json
     dns_accessible:
       ($inet["dns-accessible"] // false),
 
+    # Keenetic busy past the time limit answers nothing: unknown (null), not «no internet» (a Viva
+    # 2026-10-13: «Нет интернета» while the provider never dropped).
     internet:
-      ($inet.internet // false),
+      (if $inet | has("internet") then $inet.internet else null end),
 
     reliable:
-      ($inet.reliable // false),
+      (if $inet | has("reliable") then $inet.reliable else null end),
 
     recovery_count:
       ($rcnt|tonumber? // 0),

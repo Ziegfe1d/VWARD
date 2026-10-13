@@ -461,7 +461,7 @@ async function siteFix(d) {
   r.fixing = true; r.fix = []; render();
   try {
     const w = st().wan || {};
-    if (!w.internet) { step('Канал провайдера недоступен: туннели не могут установить соединение. Восстановление WAN выполняется автоматически, состояние - в разделе «Сеть».', false); return; }
+    if (w.internet === false) { step('Канал провайдера недоступен: туннели не могут установить соединение. Восстановление WAN выполняется автоматически, состояние - в разделе «Сеть».', false); return; }
     step('Канал провайдера доступен', true);
     const routes = (r.x && r.x.routes) || [], tun = routes.length ? routes[0].interface : '', listName = routes.length ? routes[0].group : '';
     let t = r.t && r.t.ok ? r.t : await apiGet('site-test', { domain: d });
@@ -869,7 +869,10 @@ function extOp(op, pkg, token) {
 /* ---------- Уведомления ---------- */
 function notifications() {
   const n = [], s = S.status;
-  if (S.errors.status) n.push({ sev: 'crit', title: /^(нет связи|роутер не ответил)/.test(S.errors.status) ? 'Нет связи с роутером' : 'Роутер отвечает с ошибкой', text: S.errors.status, to: 'system' });
+  if (S.errors.status) n.push(/^роутер не ответил/.test(S.errors.status)
+    // A timeout is a busy Keenetic, not a lost one (a Viva 2026-10-13: «Нет связи» while it answered slowly).
+    ? { sev: 'warn', title: 'Роутер отвечает медленно', text: S.errors.status + ', VWARD повторит сам', to: 'system' }
+    : { sev: 'crit', title: /^нет связи/.test(S.errors.status) ? 'Нет связи с роутером' : 'Роутер отвечает с ошибкой', text: S.errors.status, to: 'system' });
   const sdc = ((S.lists && S.lists.lists) || []).filter(l => l.smartdns_conflict);
   if (sdc.length) n.push({ sev: 'warn', title: 'Smart DNS уйдёт в VPN', text: 'Домены Smart DNS есть в списках через VPN: ' + sdc.map(l => l.description || l.name).join(', '), to: 'lists' });
   if (!s) return n;
@@ -939,7 +942,7 @@ function cardData(id) {
       // One short line on a phone: the components are on the System page.
       sub: vm ? 'исправление ' + vm[2] : comps ? comps + ' ' + plural(comps, 'компонент', 'компонента', 'компонентов') : 'версия VWARD', pill: p.version ? ['ok', 'Работает'] : ['', '—'] }; }
     case 'updates': return { icon: 'refresh', title: 'Обновления', to: 'updates', value: ['IDLE', 'COMMITTED', undefined, ''].includes(p.phase) ? 'Новых нет' : phaseText(p.phase), sub: fmtStamp(p.last_health_check) ? 'проверено ' + fmtStamp(p.last_health_check) : 'канал ' + (p.channel || '—'), pill: ['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase) ? ['crit', 'Ошибка'] : ['', ''] };
-    case 'wan': return { icon: 'globe', title: 'Интернет', to: 'wan', value: w.internet ? 'В сети' : s.wan ? 'Нет связи' : '—', sub: w.speed ? 'порт ' + fmtSpeed(w.speed) : w.address || 'адрес не получен', pill: w.internet ? ['ok', 'Работает'] : s.wan ? ['crit', 'Не работает'] : ['', '—'] };
+    case 'wan': return { icon: 'globe', title: 'Интернет', to: 'wan', value: w.internet ? 'В сети' : w.internet === false ? 'Нет связи' : s.wan ? 'Роутер отвечает медленно' : '—', sub: w.speed ? 'порт ' + fmtSpeed(w.speed) : w.address || 'адрес не получен', pill: w.internet ? ['ok', 'Работает'] : w.internet === false ? ['crit', 'Не работает'] : s.wan ? ['warn', 'Нет ответа'] : ['', '—'] };
     // Only switched-on tunnels count: one the owner switched off is not a fault (owner 2026-10-12).
     case 'vpn': {
       const on = tunnels.filter(t => !tunOff(t)), off = tunnels.length - on.length, upOn = on.filter(t => isTrue(t.connected)).length, gOff = tunnels.find(tunGuardOff);
@@ -1115,7 +1118,9 @@ function jobOk(names) {
 const AGENT_STATE = { late: ['crit', 'Не запускается'], hung: ['warn', 'Зависал, перезапущен'] };
 function agentsPanel() {
   const s = st(), sv = s.services || {}, known = !!s.services, ag = sv.agents || {};
-  const pill = (seen, ok) => seen && AGENT_STATE[seen] ? AGENT_STATE[seen] : ok == null ? ['', '—'] : ok ? ['ok', 'Работает'] : ['crit', 'Не работает'];
+  // A run that ended with an error (busy Keenetic, the last run still going) is not a broken agent:
+  // the components agent says «Не запускается» or «Зависал» when it is (a Viva 2026-10-13).
+  const pill = (seen, ok) => seen && AGENT_STATE[seen] ? AGENT_STATE[seen] : ok == null ? ['', '—'] : ok ? ['ok', 'Работает'] : ['warn', 'Последний запуск с ошибкой'];
   const rows = [
     ['Агент сети', 'интернет, VPN, DNS и маршруты', pill(ag.network, jobOk(['vward-tunnel-health.sh', 'vward-wan-guard.sh', 'vward-route-reconciler.sh'])), 'wan'],
     ['Агент компонентов', 'программы VWARD, модули туннелей, AdGuard Home и другие агенты', pill(null, known ? !!sv.supervisor : null), 'd-components'],
@@ -1172,7 +1177,7 @@ const RENDER = {
         ['IPv4', w.address || '—'],
         ['Шлюз', (w.gateway || '—') + (w.gateway ? (w.gateway_accessible ? ' · доступен' : ' · недоступен') : '')],
         ['DNS', w.dns_accessible ? 'отвечает' : 'не отвечает']
-      ]), { right: st().wan && !w.internet ? headPill('crit', 'Нет связи') : '' }) +
+      ]), { right: st().wan && w.internet === false ? headPill('crit', 'Нет связи') : '' }) +
       panel('Домашняя сеть', kv([['Wi-Fi клиенты', S.wifi ? fmtInt(((S.wifi.clients) || []).length) + ' ' + plural(((S.wifi.clients) || []).length, 'устройство', 'устройства', 'устройств') : '—', '', 'wifi']])) +
       panel('Восстановление интернета', '<dl class="kv">' +
         ctrlRow('Восстанавливать автоматически', sw('data-cfg-wg', guardOn, 'Восстанавливать интернет автоматически', !cfgOk()), guardOn ? '' : 'выключено: при сбое воспользуйтесь кнопками ниже') +

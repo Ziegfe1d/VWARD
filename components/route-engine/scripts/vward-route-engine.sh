@@ -1600,7 +1600,14 @@ EOF_LISTS
     # Все ручные Keenetic FQDN-группы live-контур не меняет.
     # Smart DNS: адрес прокси общий для всех его доменов, в VPN его не отправляем.
     case "$HOST_TAGS" in
-        *M*|*S*) return ;;
+        *S*) return ;;
+        *M*)
+            # Keenetic routes a list by the addresses it resolved itself; the device asked
+            # AdGuard Home, so Keenetic never saw this name (Viva 2026-10-13: 0 of 42 addresses
+            # of YouTube's video servers in the route, the video went past the VPN). Keenetic is
+            # asked the same name now, apart from this loop (a subshell: no job left behind).
+            ( nslookup "$HOST" "$VWARD_DNS_SERVER" >/dev/null 2>&1 & )
+            return ;;
     esac
 
     # AdaptiveAuto обслуживается двусторонне.

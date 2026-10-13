@@ -489,6 +489,22 @@ watch_services()
         esac
     fi
 
+    # Smart DNS's local DoH client (https-dns-proxy) not listening: started again, from the 3rd
+    # minute after boot (its own start script comes first); a start that does not help waits
+    # 1, 2, 4, 8, then 15 minutes.
+    if [ "$UP" -ge 180 ] && command -v vward_doh_keep >/dev/null 2>&1; then
+        if [ "$DOH_SKIP" -gt 0 ]; then
+            DOH_SKIP=$((DOH_SKIP - 1))
+        else
+            VWARD_UNNICE=$UNNICE vward_doh_keep
+            case "$?" in
+                10) log_event "DOH_STARTED|Smart DNS client was not listening"; DOH_WAIT=1 ;;
+                11) log_event "DOH_START_FAILED"; DOH_SKIP=$DOH_WAIT; DOH_WAIT=$((DOH_WAIT * 2)); [ "$DOH_WAIT" -le 15 ] || DOH_WAIT=15 ;;
+                *) DOH_WAIT=1 ;;
+            esac
+        fi
+    fi
+
     # The real-time watcher (vward-sentinel) sees leaks within seconds; without it this
     # minute's check does.
     if sentinel_alive; then
@@ -513,6 +529,7 @@ watch_services()
 
 
 log_event "SUPERVISOR_START|pid=$$"
+DOH_SKIP=0 DOH_WAIT=1
 TICK=0
 
 

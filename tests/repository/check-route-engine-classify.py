@@ -85,7 +85,7 @@ classifier_stop
         fail(f"empty lists: {r.stdout!r} {r.stderr!r}")
 
 host = ENGINE[ENGINE.index("handle_host()\n"):]
-order = [host.index(x) for x in ('HOST_LISTS=$(classify_host "$HOST")', "*M*|*S*) return", 'if is_adaptive "$HOST"', "*K*) return", 'handle_hint "$HOST"', 'handle_new "$HOST"')]
+order = [host.index(x) for x in ('HOST_LISTS=$(classify_host "$HOST")', "*S*) return ;;", "*M*)", 'if is_adaptive "$HOST"', "*K*) return", 'handle_hint "$HOST"', 'handle_new "$HOST"')]
 if order != sorted(order):
     fail("live path order must stay: my domains and Smart DNS, AdaptiveAuto, skip list, hints, new")
 if "parent_list_match" in host[:host.index('handle_new "$HOST"')]:

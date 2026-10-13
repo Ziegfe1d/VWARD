@@ -333,6 +333,44 @@ vward_agh_pidfiles_clean() {
     done
 }
 
+# vward_doh_keep: a local DoH client that AdGuard Home's Smart DNS goes through ([/a.com/]
+# 127.0.0.1:5453 - https-dns-proxy) and that does not listen is started again by its own start
+# script (Viva 2026-10-13: https-dns-proxy crashed in libnghttp2 at night and the AI services
+# behind Smart DNS stayed broken until someone started it). Three restarts within 6 hours: the
+# HTTPS library is taken for broken and the maintenance agent reinstalls it (curl's HTTPS repair).
+# 0: nothing to do, 10: started again, 11: the start did not help (the caller waits longer).
+vward_doh_keep() {
+    vd_cfg=${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}
+    [ -r "$vd_cfg" ] || vd_cfg=/opt/etc/AdGuardHome.yaml
+    [ -r "$vd_cfg" ] || return 0
+    vd_net=${VWARD_PROC_NET:-/proc/net}
+    vd_down=
+    for vd_p in $(awk '{ while (match($0, /\]((udp|tcp):\/\/)?127\.0\.0\.1:[0-9]+/)) { s = substr($0, RSTART, RLENGTH); sub(/.*:/, "", s); print s; $0 = substr($0, RSTART + RLENGTH) } }' "$vd_cfg" 2>/dev/null | sort -u); do
+        [ "$vd_p" != 53 ] || continue
+        vd_hex=$(printf '%04X' "$vd_p")
+        awk -v h=":$vd_hex" '$2 ~ h "$" {f = 1} END {exit !f}' "$vd_net/udp" "$vd_net/tcp" 2>/dev/null || vd_down="$vd_down $vd_p"
+    done
+    [ -n "$vd_down" ] || return 0
+    vd_init=
+    for vd_s in "${VWARD_INITD:-/opt/etc/init.d}"/S*; do
+        [ -x "$vd_s" ] || continue
+        case "${vd_s##*/}" in *doh*|*https-dns-proxy*) vd_init=$vd_s; break ;; esac
+        grep -q 'https-dns-proxy' "$vd_s" 2>/dev/null && { vd_init=$vd_s; break; }
+    done
+    [ -n "$vd_init" ] || return 0
+    ${VWARD_UNNICE:-} "$vd_init" restart </dev/null >/dev/null 2>&1 || ${VWARD_UNNICE:-} "$vd_init" start </dev/null >/dev/null 2>&1
+    vd_log=${VWARD_DOH_RESTARTS:-/tmp/vward-doh-restarts}
+    vd_now=$(date +%s)
+    { [ ! -r "$vd_log" ] || awk -v n="$vd_now" '$1 + 21600 > n' "$vd_log"; echo "$vd_now"; } > "$vd_log.$$" 2>/dev/null && mv -f "$vd_log.$$" "$vd_log"
+    [ "$(wc -l < "$vd_log" 2>/dev/null)" -lt 3 ] || : > "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" 2>/dev/null
+    sleep "${VWARD_DOH_SETTLE:-2}"
+    for vd_p in $vd_down; do
+        vd_hex=$(printf '%04X' "$vd_p")
+        awk -v h=":$vd_hex" '$2 ~ h "$" {f = 1} END {exit !f}' "$vd_net/udp" "$vd_net/tcp" 2>/dev/null || return 11
+    done
+    return 10
+}
+
 vward_agh_ensure() {
     va_init=${1:-$VWARD_AGH_INIT}
     va_now=; { read -r va_now _ < "${VWARD_UPTIME_FILE:-/proc/uptime}"; } 2>/dev/null || :

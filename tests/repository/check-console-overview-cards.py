@@ -29,6 +29,11 @@ if "{ id: 'routes', title: 'Маршруты'" not in JS or "routes: 'Маршр
     fail("the routing section is «Маршруты» on the card, the page and the bottom bar")
 if "data: ['status', 'route', 'wifi', 'ads', 'adsstats', 'lists', 'awg', 'tq']" not in JS:
     fail("the Overview loads AdGuard Home's statistics")
+API = (ROOT / "web/cgi-bin/api.cgi").read_text()
+if '(if $inet | has("internet") then $inet.internet else null end)' not in API:
+    fail("an unanswered internet status must be unknown (null), not «no internet»")
+if "title: 'Роутер отвечает медленно'" not in JS or "['warn', 'Последний запуск с ошибкой']" not in JS:
+    fail("a slow Keenetic and a run that ended with an error are not «Нет связи» and «Не работает»")
 if not shutil.which("node"):
     print("CONSOLE_OVERVIEW_CARDS=PASS (node not found: texts not run)")
     sys.exit(0)
@@ -63,6 +68,9 @@ S.wifi = { enabled: true, count: 6, clients: [{ mac: 'aa', health: 'WARNING', re
 S.ads = { counts: { blocked: 1 } }; S.adsstats = { ok: true, blocked: 12430 };
 const out = {};
 for (const id of ['wan', 'vpn', 'lists', 'routes', 'wifi', 'ads', 'storage']) { const c = cardData(id); out[id] = [c.title, c.value, c.sub]; }
+// Keenetic did not answer about the internet in time (internet null): not «no internet».
+STATUS.wan = { internet: null, address: '100.86.0.1' }; { const c = cardData('wan'); out.slow = [c.value, c.pill[1]]; }
+STATUS.wan = { internet: false, address: '100.86.0.1' }; { const c = cardData('wan'); out.down = [c.value, c.pill[1]]; }
 // «Мало места»: a tenth of a big drive is plenty (252 GB with 23.8 GB free is not a warning).
 out.low = [lowDisk(264241152, 24956108), lowDisk(8388608, 200000), lowDisk(8388608, 700000), lowDisk(33554432, 2097152)];
 console.log(JSON.stringify(out));
@@ -71,6 +79,8 @@ r = subprocess.run(["node", "-e", harness], capture_output=True, text=True, time
 if r.returncode:
     fail(r.stderr[-1000:])
 o = json.loads(r.stdout)
+if o.pop("slow") != ["Роутер отвечает медленно", "Нет ответа"] or o.pop("down") != ["Нет связи", "Не работает"]:
+    fail("Keenetic's late answer about the internet reads as «no internet» (Viva 2026-10-13)")
 if o.pop("low") != [False, True, True, False]:
     fail("«Мало места» by a share alone: a big drive with gigabytes free warns")
 want = {

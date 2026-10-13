@@ -6,7 +6,8 @@ A captured DNS stream goes through the real engine started by its init script:
   * a site blocked by the ISP but reachable through the tunnel is added to
     AdaptiveAuto on the router and its state is kept on USB;
   * a name repeated within the dedup window is handled and logged once;
-  * a name of a manual Keenetic group is left alone;
+  * a name of a manual Keenetic group is left alone, and Keenetic is asked it (its route then
+    has the address the device got);
   * stopping the engine leaves no capture processes behind.
 Needs root (chroot, mknod, mount).
 """
@@ -49,7 +50,7 @@ if os.geteuid() != 0:
 tmp = Path(tempfile.mkdtemp(prefix="vward-engine."))
 root = tmp / "root"
 subprocess.run([str(REPO / "tests/perf/emulator/build-rootfs.sh"), str(root)], check=True, stdout=subprocess.DEVNULL)
-(root / "emu/dns-queries").write_text("direct-one.example\nblocked-site.example\ndirect-one.example\nyoutube.com\ndirect-one.example\n")
+(root / "emu/dns-queries").write_text("direct-one.example\nblocked-site.example\ndirect-one.example\nyoutube.com\nrr1---sn-test.googlevideo.com\ndirect-one.example\n")
 (root / "emu/blocked-direct").write_text("blocked-site.example\n")
 (root / "opt/var/run/vward").mkdir(parents=True, exist_ok=True)
 subprocess.run(["mount", "-t", "proc", "proc", str(root / "proc")], check=True)
@@ -93,6 +94,13 @@ try:
         fail(f"AUTO_VPN event should carry the direct/VPN probe reason:\n{auto_vpn}")
     if (ram_state / "youtube.com.state").exists() or (opt_state / "youtube.com.state").exists():
         fail("manual group name was checked")
+    # A name of a manual list (googlevideo.com is in vpn-sites): Keenetic is asked it too, so its
+    # route has the address the device got (Viva 2026-10-13: YouTube's video past the VPN).
+    asked = (root / "emu/nslookup.log").read_text().splitlines() if (root / "emu/nslookup.log").exists() else []
+    if not any(l.startswith("rr1---sn-test.googlevideo.com ") for l in asked):
+        fail(f"a name of a manual list is not asked of Keenetic: {asked[-10:]}")
+    if "rr1---sn-test.googlevideo.com" in changes:
+        fail("a name of a manual list changed the router")
 
     sh(root, "/opt/etc/init.d/S91vward-route-engine stop")
     time.sleep(1)
