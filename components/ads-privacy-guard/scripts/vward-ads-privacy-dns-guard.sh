@@ -67,6 +67,8 @@ PROBE_HOST="${VWARD_DNS_GUARD_PROBE_HOST:-example.com}"
 NDMC="${VWARD_NDMC:-ndmc}"
 PIDOF="${VWARD_PIDOF:-pidof}"
 CHAIN_DIR="${VWARD_DNS_CHAIN_STATE:-/tmp/vward-dns-chain}"
+# List domains the route engine bound to AdGuard Home in Keenetic (agh_bind there).
+AGH_BIND="${VWARD_AGH_BINDINGS:-/opt/var/lib/vward/agh-bindings.txt}"
 
 OP="${1:-status}"
 
@@ -378,13 +380,38 @@ agh_looping()
     [ "$al_n" -ge 2 ] && [ $((al_now - al_t)) -lt 180 ]
 }
 
+# agh_unbind: the list domains the route engine bound to AdGuard Home in Keenetic go with it
+# (Keenetic asks the provider's DNS for them again); the route engine binds them anew on use
+# once AdGuard Home is back in the chain. Bindings made by hand («ext») stay.
+agh_unbind()
+{
+    [ -s "$AGH_BIND" ] || return 0
+    au_n=0
+    while read -r au_d au_ns; do
+        case "$au_ns" in ''|ext|failed) continue ;; esac
+        ndm "no ip name-server $au_ns $au_d" </dev/null && au_n=$((au_n + 1))
+    done < "$AGH_BIND"
+    rm -f "$AGH_BIND"
+    ads_log "AGH_UNBIND|count=$au_n|list domains asked of the provider's DNS while AdGuard Home is out"
+}
+
 count_up() { cu_n=0; [ ! -r "$1" ] || read -r cu_n < "$1"; case "$cu_n" in ''|*[!0-9]*) cu_n=0 ;; esac; echo $((cu_n + 1)) > "$1"; echo $((cu_n + 1)); }
+
+# chain_line NS (Keenetic's configuration on stdin): Keenetic hands all queries to NS - the line
+# without a domain («""» in its place when an interface follows). A domain bound to it (Smart DNS, a list) is not the chain: with 24 such
+# bindings the guard took AdGuard Home for in after a fast take-out and never put it back (Viva
+# 2026-10-13).
+chain_line()
+{
+    awk -v n="$1" '$1 == "ip" && $2 == "name-server" && $3 == n && (NF == 3 || $4 == "\"\"" || $4 == "on") {f = 1} END {exit !f}'
+}
 
 # chain_take_out NS REASON: Keenetic stops handing queries to AdGuard Home (the provider's DNS
 # answers alone); back in by chain_sync after 3 answers in a row.
 chain_take_out()
 {
     ndm "no ip name-server $1" || return 1
+    agh_unbind
     ndm "system configuration save" || :
     rm -f "$CHAIN_DIR/fails" "$CHAIN_DIR/oks"
     echo out > "$CHAIN_DIR/state"; ads_epoch > "$CHAIN_DIR/since"; echo "$2" > "$CHAIN_DIR/reason"
@@ -413,7 +440,7 @@ chain_out()
     case "$co_port" in ''|*[!0-9]*|53) return 0 ;; esac
     mkdir -p "$CHAIN_DIR" || return 0
     co_ns="$(agh_dns_host):$co_port"
-    "$NDMC" -c "show running-config" 2>/dev/null | grep -Eq "^ip name-server $co_ns( |\$)" || return 0
+    "$NDMC" -c "show running-config" 2>/dev/null | chain_line "$co_ns" || return 0
     agh_up "$co_port" && agh_answers "$co_port" && return 0
     provider_answers "$co_ns" || { ads_log "DNS_CHAIN_KEEP|ns=$co_ns|the provider's DNS is silent too: AdGuard Home stays"; return 0; }
     chain_take_out "$co_ns" fast
@@ -433,7 +460,7 @@ chain_sync()
     cs_rc=$("$NDMC" -c "show running-config" 2>/dev/null) || return 0
     [ -n "$cs_rc" ] || return 0
     cs_in=0
-    printf '%s\n' "$cs_rc" | grep -Eq "^ip name-server $cs_ns( |\$)" && cs_in=1
+    printf '%s\n' "$cs_rc" | chain_line "$cs_ns" && cs_in=1
     # A short pause (a filter reload, a quick restart) is not a death: a check is three tries
     # 5 s apart, and only three failed checks in a row (3 minutes) take AdGuard Home out.
     cs_ok=0 cs_try=0
@@ -493,7 +520,7 @@ chain_planned()
     cp_port=$(agh_port)
     case "$cp_port" in ''|*[!0-9]*|53) return 0 ;; esac
     cp_ns="$(agh_dns_host):$cp_port"
-    "$NDMC" -c "show running-config" 2>/dev/null | grep -Eq "^ip name-server $cp_ns( |\$)" || return 0
+    "$NDMC" -c "show running-config" 2>/dev/null | chain_line "$cp_ns" || return 0
     provider_answers "$cp_ns" || return 0
     chain_take_out "$cp_ns" update
 }

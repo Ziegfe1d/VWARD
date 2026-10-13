@@ -144,7 +144,8 @@ undo_cmd() {
         dns-proxy) echo "dns-proxy no route object-group $4 $5" ;;
         ip) case "$2" in
                 route) if [ "${3#*/}" != "$3" ]; then echo "no ip route $3 $4"; else echo "no ip route $3 $4 $5"; fi ;;
-                name-server) echo "no ip name-server $3" ;;
+                # A domain bound to a server (Smart DNS, a list asked of AdGuard Home) keeps its domain.
+                name-server) echo "no ip name-server $3${4:+ $4}" ;;
             esac ;;
     esac
 }

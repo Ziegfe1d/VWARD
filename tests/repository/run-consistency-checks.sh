@@ -134,6 +134,7 @@ python3 tests/repository/check-console-files.py || fail "Files page: read only, 
 python3 tests/repository/check-console-devices.py || fail "Only registered devices open VWARD"
 python3 tests/repository/check-route-engine-names.py || fail "Route engine sends only valid names"
 python3 tests/repository/check-route-engine-classify.py || fail "Route engine checks a name against all lists in one pass"
+python3 tests/repository/check-agh-bind.py || fail "List domains are bound to AdGuard Home in Keenetic (routes get the addresses the devices got)"
 python3 tests/repository/check-route-engine-watchdog.py || fail "Watchdog counts engine cores, not subshells"
 python3 tests/repository/check-console-diagnostics-dns.py || fail "Diagnostics: DNS chain, files as installed"
 python3 tests/repository/check-console-ndm-cache.py || fail "Panel caches Keenetic answers briefly"

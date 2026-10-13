@@ -467,6 +467,18 @@ cmd_uninstall() {
     tun=$(sed -n 's/^tunnel=//p' "$INSTALL_STATE" 2>/dev/null)
     g=$(sed -n 's/^adaptive_group_created=//p' "$INSTALL_STATE" 2>/dev/null)
     r=$(sed -n 's/^adaptive_route_created=//p' "$INSTALL_STATE" 2>/dev/null)
+    # List domains VWARD bound to AdGuard Home in Keenetic go with it (Keenetic asks its own
+    # DNS for them again); bindings made by hand stay.
+    ab=/opt/var/lib/vward/agh-bindings.txt
+    if [ -s "$ab" ]; then
+        while read -r d ns; do
+            case "$ns" in ''|ext|failed) continue ;; esac
+            ndm "no ip name-server $ns $d" </dev/null || :
+        done < "$ab"
+        rm -f "$ab"
+        ndm "system configuration save" || :
+        ok "привязки доменов к AdGuard Home убраны"
+    fi
     remove_program
     if [ -d "$ETC" ]; then
         b=/opt/var/backups/vward/uninstall-$(date '+%Y%m%d-%H%M%S')

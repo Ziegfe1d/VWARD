@@ -6,8 +6,9 @@ A captured DNS stream goes through the real engine started by its init script:
   * a site blocked by the ISP but reachable through the tunnel is added to
     AdaptiveAuto on the router and its state is kept on USB;
   * a name repeated within the dedup window is handled and logged once;
-  * a name of a manual Keenetic group is left alone, and Keenetic is asked it (its route then
-    has the address the device got);
+  * a name of a manual Keenetic group is left alone, its list domain is bound to AdGuard Home
+    in Keenetic once and Keenetic is asked the name (its route then has the address the device
+    got);
   * stopping the engine leaves no capture processes behind.
 Needs root (chroot, mknod, mount).
 """
@@ -53,6 +54,8 @@ subprocess.run([str(REPO / "tests/perf/emulator/build-rootfs.sh"), str(root)], c
 (root / "emu/dns-queries").write_text("direct-one.example\nblocked-site.example\ndirect-one.example\nyoutube.com\nrr1---sn-test.googlevideo.com\ndirect-one.example\n")
 (root / "emu/blocked-direct").write_text("blocked-site.example\n")
 (root / "opt/var/run/vward").mkdir(parents=True, exist_ok=True)
+(root / "opt/etc/AdGuardHome").mkdir(parents=True, exist_ok=True)
+(root / "opt/etc/AdGuardHome/AdGuardHome.yaml").write_text("dns:\n  bind_hosts:\n    - 192.0.2.1\n  port: 65053\n")
 subprocess.run(["mount", "-t", "proc", "proc", str(root / "proc")], check=True)
 subprocess.run(["mount", "--bind", str(root / "opt"), str(root / "opt")], check=True)
 try:
@@ -83,8 +86,15 @@ try:
     changes = (root / "emu/ndmc-changes.log").read_text() if (root / "emu/ndmc-changes.log").exists() else ""
     if "object-group fqdn AdaptiveAuto include blocked-site.example" not in changes:
         fail(f"blocked site not added to AdaptiveAuto: {changes!r}")
-    if "direct-one.example" in changes or "youtube.com" in changes:
+    binds = [l for l in changes.splitlines() if l.startswith("ip name-server ")]
+    plain = "\n".join(l for l in changes.splitlines() if not l.startswith("ip name-server "))
+    if "direct-one.example" in changes or "youtube.com" in plain:
         fail(f"unexpected router change: {changes!r}")
+    # The list domains of the names the devices asked: bound to AdGuard Home once each.
+    if sorted(binds) != ["ip name-server 192.0.2.1:65053 googlevideo.com", "ip name-server 192.0.2.1:65053 youtube.com"]:
+        fail(f"list domains not bound to AdGuard Home once each: {binds}")
+    if not (opt_state / "keenetic-config.dirty").exists():
+        fail("the bindings are not left to the hourly save")
     events = (root / "opt/var/log/vward-route-engine-events.log").read_text()
     if events.count("|direct-one.example|") != 1:
         fail(f"direct site should be checked and logged once:\n{events}")

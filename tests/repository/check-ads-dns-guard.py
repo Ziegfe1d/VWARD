@@ -175,7 +175,7 @@ with tempfile.TemporaryDirectory() as tmp:
         "FAKE_CONTROL_LOG": str(tmp / "control.log"),
         "VWARD_ROOT_PREFIX": str(tmp / "root"), "TMPDIR": str(tmp),
         "VWARD_NDMC": str(bindir / "ndmc"), "VWARD_PIDOF": str(bindir / "pidof"), "VWARD_DNS_CHAIN_STATE": str(tmp / "chain"),
-        "VWARD_DNS_CHAIN_PAUSE": "0", "FAKE_RC": str(tmp / "rc"), "FAKE_ISP_ANSWER": str(tmp / "isp-answer"), "FAKE_NDMC_LOG": str(tmp / "ndmc.log"), "FAKE_AGH_PID": str(tmp / "agh.pid"),
+        "VWARD_DNS_CHAIN_PAUSE": "0", "VWARD_AGH_BINDINGS": str(tmp / "agh-bindings.txt"), "FAKE_RC": str(tmp / "rc"), "FAKE_ISP_ANSWER": str(tmp / "isp-answer"), "FAKE_NDMC_LOG": str(tmp / "ndmc.log"), "FAKE_AGH_PID": str(tmp / "agh.pid"),
         "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
     }
     shells = [["sh"]] + ([["busybox", "sh"]] if shutil.which("busybox") else [])
@@ -406,9 +406,18 @@ with tempfile.TemporaryDirectory() as tmp:
         if not inchain() or "DNS_CHAIN_KEEP" not in guardlog():
             fail(f"{shell[0]} the provider silent too: AdGuard Home stays (the internet is down, not it)")
         (tmp / "isp-answer").write_text("1")
+        # List domains the route engine bound to AdGuard Home go out with it; one bound by hand stays.
+        binds = tmp / "agh-bindings.txt"
+        binds.write_text("googlevideo.com 192.168.1.1:65053\nyoutube.com 192.168.1.1:65053\nsmart.example ext\nbad.example failed\n")
+        rc.write_text(rc.read_text() + "ip name-server 192.168.1.1:65053 googlevideo.com\nip name-server 192.168.1.1:65053 youtube.com\n"
+                      "ip name-server 192.168.1.1:65053 smart.example\n")
         out = run("chain-out", shell=shell).stdout
         if inchain() or "chain_state=out" not in out or status().get("chain_reason") != "fast":
             fail(f"{shell[0]} chain-out: out at once: {out!r} {status()}")
+        left = rc.read_text()
+        if "googlevideo.com" in left or "youtube.com" in left or "smart.example" not in left or binds.exists() \
+                or "AGH_UNBIND|count=2" not in guardlog():
+            fail(f"{shell[0]} out of the chain: VWARD's list bindings go, one made by hand stays: {left!r}")
         answer.write_text("1")
         for _ in range(3):
             run("tick", shell=shell)
@@ -467,5 +476,19 @@ with tempfile.TemporaryDirectory() as tmp:
         run("tick", shell=shell)
         if not inchain():
             fail(f"{shell[0]} after the update: stays in")
+
+# Keenetic hands all queries to AdGuard Home only by the line without a domain («""» before an
+# interface); a domain bound to it (Smart DNS, a list) is not the chain (Viva 2026-10-13: with 24
+# such bindings AdGuard Home was taken for in after a fast take-out and never put back).
+src = GUARD.read_text()
+fn = src[src.index("chain_line()\n"):]
+fn = fn[:fn.index("\n}\n") + 3]
+for text, want in (("ip name-server 192.168.1.1:65053\n", 0), ('ip name-server 192.168.1.1:65053 "" on Bridge0\n', 0),
+                   ("ip name-server 192.168.1.1:65053 on Bridge0\n", 0),
+                   ("ip name-server 192.168.1.1:65053 youtube.com\nip name-server 192.168.1.1:65053 claude.ai on ISP\n", 1),
+                   ("ip name-server 192.168.1.1:650531\n", 1)):
+    r = subprocess.run(["sh", "-c", fn + 'chain_line 192.168.1.1:65053'], input=text, text=True)
+    if r.returncode != want:
+        fail(f"chain line {text!r}: rc={r.returncode}")
 
 print("ADS_DNS_GUARD=PASS")

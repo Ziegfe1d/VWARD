@@ -1550,6 +1550,112 @@ list_watch_check()
 }
 
 
+# ------------------------------------------------------------
+# LIST DOMAINS KEENETIC ASKS OF ADGUARD HOME
+# ------------------------------------------------------------
+# A list routes by the addresses Keenetic resolved itself. Keenetic asked the provider's DNS,
+# the devices asked AdGuard Home, and Google answers each with other addresses (Viva
+# 2026-10-13: 9 of 148 addresses of YouTube in the route). A list domain the devices use is
+# bound to AdGuard Home in Keenetic («ip name-server <AdGuard Home> <domain>», as Smart DNS):
+# Keenetic gets AdGuard Home's cached answer, the one the device got (8 of 8 on the Viva).
+# Only the domains in use (the lists hold hundreds), at most AGH_BIND_MAX. The DNS guard takes
+# them out while AdGuard Home does not answer; «Отключить VWARD» and the uninstaller with VWARD.
+# Lines of AGH_BIND: «domain host:port» (VWARD's), «domain ext» (bound by hand: left alone),
+# «domain failed» (Keenetic refused: not asked again until the engine restarts).
+# Shared with the DNS guard and the uninstaller: in VWARD's own folder, not the engine's.
+AGH_BIND="${VWARD_AGH_BINDINGS:-/opt/var/lib/vward/agh-bindings.txt}"
+AGH_BIND_MAX=${VWARD_AGH_BIND_MAX:-200}
+AGH_YAML="${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}"
+DNS_CHAIN_STATE="${VWARD_DNS_CHAIN_STATE:-/tmp/vward-dns-chain}/state"
+CONFIG_DIRTY="$STATE_DIR/keenetic-config.dirty"
+
+# agh_ns: AdGuard Home's DNS for Keenetic («host:port»), empty without AdGuard Home.
+agh_ns()
+{
+    awk -v lan="$VWARD_DNS_SERVER" '/^[^ #]/ {d = ($1 == "dns:"); b = 0; next}
+        d && /^  bind_hosts:/ {b = 1; next}
+        d && /^  [a-z_]+:/ {b = 0}
+        d && /^  port:/ {p = $2}
+        b && $1 == "-" && h == "" {gsub(/["\047]/, "", $2); if ($2 ~ /^[0-9]+(\.[0-9]+)+$/ && $2 != "0.0.0.0") h = $2}
+        END {if (p ~ /^[0-9]+$/ && p != 53 && (h != "" || lan != "")) print (h != "" ? h : lan) ":" p}' "$AGH_YAML" 2>/dev/null
+}
+
+# agh_bound NAME: NAME or a domain above it has a line in AGH_BIND.
+agh_bound()
+{
+    [ -s "$AGH_BIND" ] && awk -v h="$1" '{n = length($1)
+        if (h == $1 || (length(h) > n && substr(h, length(h) - n) == "." $1)) {f = 1; exit}}
+        END {exit !f}' "$AGH_BIND"
+}
+
+# agh_bind NAME: the list domain of NAME (the longest one it falls under) is bound to AdGuard
+# Home. Run in the background: it waits for Keenetic.
+agh_bind()
+{
+    [ "${VWARD_AGH_BIND:-1}" = 1 ] || return 0
+    # AdGuard Home is out of Keenetic's DNS chain (it does not answer): nothing goes to it.
+    [ "$(cat "$DNS_CHAIN_STATE" 2>/dev/null)" != out ] || return 0
+    # «Домены маршрутов через DNS Keenetic» on: AdGuard Home already sends these domains to
+    # Keenetic, which sees the answers; a binding back would make a circle.
+    [ ! -e "${VWARD_ROUTE_DNS_ENABLED:-/opt/etc/vward/ads-privacy-guard/route-dns.enabled}" ] || return 0
+    agh_bound "$1" && return 0
+    AB_D=$(cat "$MANUAL" "$ADAPTIVE" 2>/dev/null | awk -v h="$1" '{d = tolower($1); sub(/^\*\./, "", d); n = length(d)
+        if (n > m && (h == d || (length(h) > n && substr(h, length(h) - n) == "." d))) {m = n; b = d}}
+        END {if (b != "") print b}')
+    # A domain with a dot only: a whole zone («com») is never handed to AdGuard Home.
+    case "$AB_D" in *.*) ;; *) return 0 ;; esac
+    valid_fqdn "$AB_D" || return 0
+    # One at a time; a lock a killed run left is taken back after 2 minutes.
+    [ -z "$(find "$AGH_BIND.lock" -maxdepth 0 -mmin +2 2>/dev/null)" ] || rmdir "$AGH_BIND.lock" 2>/dev/null
+    mkdir "$AGH_BIND.lock" 2>/dev/null || return 0
+    agh_bind_one "$AB_D"
+    rmdir "$AGH_BIND.lock" 2>/dev/null
+}
+
+agh_bind_one()
+{
+    agh_bound "$1" && return 0
+    AB_N=0
+    [ ! -f "$AGH_BIND" ] || AB_N=$(wc -l < "$AGH_BIND")
+    if [ "$AB_N" -ge "$AGH_BIND_MAX" ]; then
+        [ -e "$AGH_BIND.full" ] || echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND_FULL|$1|max=$AGH_BIND_MAX" >> "$EVENT_LOG"
+        : > "$AGH_BIND.full"
+        return 0
+    fi
+    AB_NS=$(agh_ns)
+    [ -n "$AB_NS" ] || return 0
+    AB_RC=$(vward_running_config 2>/dev/null) || return 0
+    [ -n "$AB_RC" ] || return 0
+    # Bound by hand (Smart DNS, the owner): left as it is, and not looked at again.
+    if printf '%s\n' "$AB_RC" | awk -v d="$1" '$1 == "ip" && $2 == "name-server" && $4 == d {f = 1} END {exit !f}'; then
+        echo "$1 ext" >> "$AGH_BIND"
+        return 0
+    fi
+    if AB_OUT=$(ndmc -c "ip name-server $AB_NS $1" 2>&1 </dev/null); then
+        echo "$1 $AB_NS" >> "$AGH_BIND"
+        # Keenetic's saved configuration follows within the hour (the route reconciler).
+        : > "$CONFIG_DIRTY"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND|$1|$AB_NS" >> "$EVENT_LOG"
+    else
+        echo "$1 failed" >> "$AGH_BIND"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND_FAILED|$1|$(printf '%s' "$AB_OUT" | tr '\n' ' ' | cut -c1-160)" >> "$EVENT_LOG"
+    fi
+}
+
+# agh_bind_prune: at the start only the bindings Keenetic still has count (unsaved ones are gone
+# after a reboot and are made again on use; a refused one is tried again).
+agh_bind_prune()
+{
+    rm -f "$AGH_BIND.full"
+    rmdir "$AGH_BIND.lock" 2>/dev/null
+    [ -s "$AGH_BIND" ] || return 0
+    AP_RC=$(vward_running_config 2>/dev/null) || return 0
+    [ -n "$AP_RC" ] || return 0
+    printf '%s\n' "$AP_RC" | awk 'FNR == NR {if ($1 == "ip" && $2 == "name-server" && $4 != "" && $4 != "on") have[$4] = 1; next}
+        ($1 in have) && $2 != "failed"' - "$AGH_BIND" > "$AGH_BIND.new" && mv -f "$AGH_BIND.new" "$AGH_BIND"
+}
+
+
 handle_host()
 {
     case "$1" in
@@ -1603,15 +1709,16 @@ EOF_LISTS
         *S*) return ;;
         *M*)
             # Keenetic routes a list by the addresses it resolved itself; the device asked
-            # AdGuard Home, so Keenetic never saw this name (Viva 2026-10-13: 0 of 42 addresses
-            # of YouTube's video servers in the route, the video went past the VPN). Keenetic is
-            # asked the same name now, apart from this loop (a subshell: no job left behind).
-            ( nslookup "$HOST" "$VWARD_DNS_SERVER" >/dev/null 2>&1 & )
+            # AdGuard Home. The list domain is bound to AdGuard Home (agh_bind), then Keenetic
+            # is asked the same name and gets the answer the device got. Apart from this loop
+            # (a subshell: no job left behind).
+            ( { agh_bind "$HOST"; nslookup "$HOST" "$VWARD_DNS_SERVER"; } >/dev/null 2>&1 & )
             return ;;
     esac
 
     # AdaptiveAuto обслуживается двусторонне.
     if is_adaptive "$HOST"; then
+        ( { agh_bind "$HOST"; nslookup "$HOST" "$VWARD_DNS_SERVER"; } >/dev/null 2>&1 & )
         handle_adaptive "$HOST"
         return
     fi
@@ -1641,6 +1748,8 @@ echo "$(date '+%Y-%m-%d %H:%M:%S')|START" >> "$EVENT_LOG"
 
 # USB state is authoritative for AdaptiveAuto.
 restore_adaptive_from_persist
+
+agh_bind_prune
 
 refresh_sets
 

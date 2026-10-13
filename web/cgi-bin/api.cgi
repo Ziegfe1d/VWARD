@@ -1860,7 +1860,7 @@ if [ "$ACTION" = "diagnostics" ]; then
         SD_KN="$(printf '%s\n' "$DIAG_RC" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {n++} END {print n + 0}')"
         SD_AGH_PORT="$(awk '/^[^ #]/ {d = ($1 == "dns:")} d && $1 == "port:" {print $2; exit}' "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" 2>/dev/null)"
         if [ "$SD_KN" = 0 ] && [ -n "$SD_AGH_PORT" ] && [ "$SD_AGH_PORT" != 53 ] &&
-           ! printf '%s\n' "$DIAG_RC" | awk -v p=":$SD_AGH_PORT" '$1 == "ip" && $2 == "name-server" && index($3, p) {f = 1} END {exit !f}'; then
+           ! printf '%s\n' "$DIAG_RC" | awk -v p=":$SD_AGH_PORT" '$1 == "ip" && $2 == "name-server" && index($3, p) && (NF == 3 || $4 == "\"\"" || $4 == "on") {f = 1} END {exit !f}'; then
             SMARTDNS_STATUS=WARN SMARTDNS_DETAIL="Не действует: Smart DNS настроен в AdGuard Home, а AdGuard Home сейчас не в цепочке DNS (см. «Цепочка DNS»)"
         elif [ -n "$SD_BAD" ]; then
             SMARTDNS_STATUS=FAIL SMARTDNS_DETAIL="Идут через VPN, Smart DNS для них не действует: $SD_BAD"
@@ -1877,7 +1877,7 @@ if [ "$ACTION" = "diagnostics" ]; then
         AGH_DNS_PORT="$(awk '/^[^ #]/ {d = ($1 == "dns:")} d && $1 == "port:" {print $2; exit}' "$AGH_Y" 2>/dev/null)"
         AGH_MAIN_UP="$(awk '/^[^ #]/ {d = ($1 == "dns:"); u = 0; next} /^  [a-z_]+:/ {u = d && ($1 == "upstream_dns:"); next}
             u && $1 == "-" {sub(/^[ \t]*-[ \t]*/, ""); gsub(/["\047]/, ""); if ($0 !~ /^\[/) print}' "$AGH_Y" 2>/dev/null)"
-        KN_TO_AGH="$(printf '%s\n' "$DIAG_RC" | awk -v p=":${AGH_DNS_PORT:-x}" '$1 == "ip" && $2 == "name-server" && index($3, p) {print $3; exit}')"
+        KN_TO_AGH="$(printf '%s\n' "$DIAG_RC" | awk -v p=":${AGH_DNS_PORT:-x}" '$1 == "ip" && $2 == "name-server" && index($3, p) && (NF == 3 || $4 == "\"\"" || $4 == "on") {print $3; exit}')"
         # The router: its LAN address from the profile, or loopback.
         LAN_IP="${VWARD_LAN_ADDRESS:-127.0.0.1}"
         if printf '%s\n' "$AGH_MAIN_UP" | grep -Eq "^(udp://|tcp://)?($LAN_IP|127\.0\.0\.1|localhost)(:53)?$"; then
