@@ -331,7 +331,16 @@ engine_move()
 {
     EM_ROOT=$R/opt/share/vward/updater
     [ -r "$EM_ROOT/current/vward-update-common-base.sh" ] || return 0
-    ! grep -q '^VU_ENGINE_VERSION=' "$EM_ROOT/current/vward-update-common-base.sh" || return 0
+    # Engine 2 that fell behind its release: an engine that once replaced itself left «already
+    # replaced» to crond, and every later run skipped the newer engine (Viva 2026-10-12: 2.0.7
+    # after fix.26). Checked every 6 hours; the same signed move, only when the release's engine
+    # is newer.
+    EM_CUR=$(sed -n 's/^VU_ENGINE_VERSION=//p' "$EM_ROOT/current/vward-update-common-base.sh" | head -n 1)
+    EM_STAMP=$R/opt/var/lib/vward/engine-catchup.stamp
+    if [ -n "$EM_CUR" ]; then
+        [ -z "$(find "$EM_STAMP" -mmin -360 2>/dev/null)" ] || return 0
+        mkdir -p "${EM_STAMP%/*}" 2>/dev/null; : > "$EM_STAMP" 2>/dev/null
+    fi
     EM_CONF=${VWARD_UPDATE_CONFIG:-$R/opt/etc/vward/update.conf}
     em_get() { sed -n "s/^$1=//p" "$EM_CONF" 2>/dev/null | tail -n 1 | tr -d '"'; }
     [ "$(em_get update_enabled)" = 1 ] || return 0
@@ -352,6 +361,11 @@ engine_move()
             jq -r '.signature' "$EM_T/manifest.json" | openssl base64 -d -A > "$EM_T/sig" &&
             openssl pkeyutl -verify -pubin -inkey "$EM_KEY" -rawin -in "$EM_T/signed" -sigfile "$EM_T/sig" >/dev/null 2>&1 || exit 4
         jq -e --arg ch "$EM_CHANNEL" '.signed.schema == 2 and .signed.channel == $ch' "$EM_T/manifest.json" >/dev/null || exit 4
+        if [ -n "$EM_CUR" ]; then
+            em_new=$(jq -r '.signed.engine.version // empty' "$EM_T/manifest.json")
+            case "$em_new" in [0-9]*.[0-9]*.[0-9]*) ;; *) exit 6 ;; esac
+            [ "$em_new" != "$EM_CUR" ] && [ "$(printf '%s\n%s\n' "$EM_CUR" "$em_new" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)" = "$em_new" ] || exit 6
+        fi
         base=$(jq -r '.signed.files_base' "$EM_T/manifest.json")
         case "$base" in https://*/) ;; *) exit 4 ;; esac
         jq -r '.signed.engine.files[] | [.name, .sha256, (.size | tostring)] | @tsv' "$EM_T/manifest.json" |
@@ -361,13 +375,14 @@ engine_move()
             em_fetch "$src" "$EM_T/$name" "$((size + 1))" || exit 3
             [ "$(wc -c < "$EM_T/$name" | tr -d ' ')" = "$size" ] && [ "$(sha256sum "$EM_T/$name" | awk '{print $1}')" = "$sha" ] || exit 4
         done || exit $?
+        unset VWARD_ENGINE_SWITCHED
         sh "$EM_T/vward-update.sh" --engine-adopt "$EM_T" "$EM_T/manifest.json" >/dev/null 2>&1 || exit 5
     )
     EM_RC=$?
     rm -rf "${EM_T:?}"
     case "$EM_RC" in
-        0) echo "ENGINE_MOVED|v2"; echo "$(date '+%Y-%m-%d %H:%M:%S')|engine_move=done" >> "$HOUSE_LOG" ;;
-        3) : ;;
+        0) echo "ENGINE_MOVED|v2"; echo "$(date '+%Y-%m-%d %H:%M:%S')|engine_move=done${EM_CUR:+ from=$EM_CUR}" >> "$HOUSE_LOG" ;;
+        3|6) : ;;
         *) echo "$(date '+%Y-%m-%d %H:%M:%S')|engine_move=failed rc=$EM_RC" >> "$HOUSE_LOG" ;;
     esac
     return 0

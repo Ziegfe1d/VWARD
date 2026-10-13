@@ -4,6 +4,12 @@ set -u
 
 SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$SELF_DIR/vward-update-common.sh"
+# «This run is the new engine VERSION, started by the old one»: for this process only, and only
+# for that version. Left exported as «1», it went on to every program the run restarted (crond
+# after an update) and from there to every later run, which then never installed a newer engine
+# (Viva 2026-10-12: 2.0.7 kept after fix.26).
+VU_ENGINE_SWITCHED=${VWARD_ENGINE_SWITCHED:-}
+unset VWARD_ENGINE_SWITCHED
 
 usage() {
     printf '%s\n' 'Usage: vward-update.sh --status|--status-components|--check|--dry-run|--apply|--apply-pending|--install|--rollback|--recover'
@@ -501,14 +507,12 @@ fi
 schema=$(vu_manifest_schema "$manifest")
 # A newer signed engine, or the same one with a newer registry, is installed
 # first; the rest of this run is done by it.
-if [ "$schema" = 2 ] && [ "$command" != --dry-run ] && [ "${VWARD_ENGINE_SWITCHED:-0}" != 1 ] && vu_engine_outdated "$manifest"; then
+if [ "$schema" = 2 ] && [ "$command" != --dry-run ] && [ "$VU_ENGINE_SWITCHED" != "$VU_ENGINE_VERSION" ] && vu_engine_outdated "$manifest"; then
     if vu_engine_update "$manifest"; then
         trap - EXIT
         trap - HUP INT TERM
         cleanup
-        VWARD_ENGINE_SWITCHED=1
-        export VWARD_ENGINE_SWITCHED
-        exec "$(vu_updater_root)/current/vward-update.sh" "$command"
+        VWARD_ENGINE_SWITCHED=$(jq -r '.signed.engine.version' "$manifest") exec "$(vu_updater_root)/current/vward-update.sh" "$command"
     fi
     vu_log WARN "New update engine not installed; this one continues"
 fi

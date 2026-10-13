@@ -180,6 +180,15 @@ check 'slot A is kept for a revert' grep -qx 'VU_ENGINE_VERSION=2.0.0' "$SLOTS/s
 run --engine-revert; rc=$?
 check 'the engine can go back to the previous slot' sh -c '[ "$1" -eq 0 ] && [ "$2" = "$3" ]' sh "$rc" "$(slot)" "$SLOTS/slots/A"
 
+# 7a. «Already replaced» inherited from crond (restarted by an engine that had replaced itself)
+# does not stop a newer engine (Viva 2026-10-12: 2.0.7 kept after fix.26); the flag stays with
+# the one run that the old engine started.
+new_root stale
+make_manifest stale 0.2.0-rc.2 10 "$(engine_dir stale-new 2.0.1)"
+(VWARD_ENGINE_SWITCHED=1; export VWARD_ENGINE_SWITCHED; run --apply); rc=$?
+check 'an inherited «already replaced» does not skip a newer engine' sh -c '[ "$1" -eq 0 ] && [ "$2" = "$3" ] && grep -q "Update engine 2.0.0 -> 2.0.1" "$4"' sh "$rc" "$(slot)" "$SLOTS/slots/B" "$WORK/last.out"
+check 'the flag is not passed on to what the run starts' sh -c 'grep -qx "unset VWARD_ENGINE_SWITCHED" "$1" && ! grep -q "export VWARD_ENGINE_SWITCHED" "$1"' sh "$ENGINE_SRC/vward-update.sh"
+
 # 8. An engine that fails its self-test never becomes current; the update still applies.
 new_root broken
 broken=$(engine_dir broken 2.0.1)
@@ -259,6 +268,19 @@ housekeeping
 check 'housekeeping moves engine 1 to engine 2' sh -c 'grep -q ENGINE_MOVED "$1" && [ "$2" = "$3" ] && grep -q "^VU_ENGINE_VERSION=2" "$3/vward-update-common-base.sh"' sh "$WORK/last.out" "$(slot)" "$SLOTS/slots/B"
 housekeeping
 check 'the move happens once' sh -c '! grep -q ENGINE_MOVED "$1" && [ "$2" = "$3" ]' sh "$WORK/last.out" "$(slot)" "$SLOTS/slots/B"
+
+# 13a. An engine 2 that fell behind its release (it never replaced itself): housekeeping
+# brings it up to the release's engine, at most every 6 hours.
+new_root catchup
+printf '%s\n' 'manifest_url=https://example.invalid/updates/dev/update-manifest.json' >> "$CONFIG"
+mkdir -p "$ROOT/tmp" "$ROOT/opt/var/log"
+make_manifest catchup 0.2.0-rc.2 10 "$(engine_dir catchup-new 2.0.1)"
+source_dir=$WORK/catchup-source; mkdir -p "$source_dir"; cp "$MANIFEST" "$source_dir/manifest.json"; cp -R "$FILES" "$source_dir/files"
+housekeeping
+check 'housekeeping brings a lagging engine 2 up to its release' sh -c 'grep -q ENGINE_MOVED "$1" && [ "$2" = "$3" ] && grep -qx "VU_ENGINE_VERSION=2.0.1" "$3/vward-update-common-base.sh" && grep -q "engine_move=done from=2.0.0" "$4"' sh "$WORK/last.out" "$(slot)" "$SLOTS/slots/B" "$ROOT/opt/var/log/vward-housekeeping.log"
+rm -f "$ROOT/opt/var/lib/vward/engine-catchup.stamp"
+housekeeping
+check 'an engine as new as its release is left alone' sh -c '! grep -q ENGINE_MOVED "$1" && [ "$2" = "$3" ] && ! grep -q "engine_move=failed" "$4"' sh "$WORK/last.out" "$(slot)" "$SLOTS/slots/B" "$ROOT/opt/var/log/vward-housekeeping.log"
 
 # 14. A release adds a program file while the engine version stays: the registry
 # that names its owner travels with the engine, so the engine refreshes itself

@@ -53,7 +53,7 @@ routine_max_delay_seconds=86400
 update_method=full
 # This engine's own version: a manifest may ask for a newer one (min_updater_version),
 # and a signed manifest carrying a newer engine makes it update itself.
-VU_ENGINE_VERSION=2.0.8
+VU_ENGINE_VERSION=2.0.9
 minimum_updater_version=$VU_ENGINE_VERSION
 manifest_v2_url=
 
