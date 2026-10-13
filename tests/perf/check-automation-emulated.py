@@ -46,6 +46,7 @@ import datetime
 import importlib.util
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -183,6 +184,10 @@ class Router:
     def cmds(self, text, since=0, until=10 ** 9):
         return [m for m, c in self.log if text in c and since <= m <= until]
 
+    def chain_cmds(self, text, since=0, until=10 ** 9):
+        # The chain line itself: a list domain bound to AdGuard Home (agh_bind) is not the chain.
+        return [m for m, c in self.log if c == text and since <= m <= until]
+
     def guard(self):
         return chaos.guard_state(self.root)
 
@@ -274,19 +279,19 @@ def s_wan_down(r, out):
 
 def s_agh_loop(r, out):
     r.run(2); r.run(12, ["agh-loop"])
-    outs = r.cmds("no " + NS)
+    outs = r.chain_cmds("no " + NS)
     expect(bool(outs) and outs[0] <= 4, f"restarting in a loop: out of the DNS chain at the second crash (at {outs[:1]}, from 3)", out)
     r.run(14)
     expect(r.chain_in(), "back in the chain once it runs steadily", out)
     back = [m for m in r.cmds(NS) if m > 14 and not any(c.startswith("no ") for mm, c in r.log if mm == m and NS in c)]
-    expect(len(r.cmds("no " + NS)) <= 1, f"no flapping ({len(r.cmds('no ' + NS))} times out)", out)
+    expect(len(r.chain_cmds("no " + NS)) <= 1, f"no flapping ({len(r.chain_cmds('no ' + NS))} times out)", out)
 
 
 def s_agh_one_crash(r, out):
     r.run(3)
     (r.root / "emu/agh-pid").write_text("4999\n")
     r.run(12)
-    expect(not r.cmds("no " + NS), "one crash (it answers again) is no loop: stays in the chain", out)
+    expect(not r.chain_cmds("no " + NS), "one crash (it answers again) is no loop: stays in the chain", out)
 
 
 def s_agh_update(r, out):
@@ -302,13 +307,13 @@ def s_agh_update(r, out):
     expect(r.chain_in(), "the update is over and it answers: back at once (no 3-minute wait)", out)
     done_at = r.minute
     r.run(6)
-    expect(r.chain_in() and not r.cmds("no " + NS, done_at + 1),
+    expect(r.chain_in() and not r.chain_cmds("no " + NS, done_at + 1),
            "and stays: the update's restarts are not counted as crashes later", out)
 
 
 def s_agh_silent(r, out):
     r.run(2); r.run(8, ["agh"])
-    outs = r.cmds("no " + NS)
+    outs = r.chain_cmds("no " + NS)
     expect(bool(outs) and outs[0] <= 6, f"silent: out within 3 minutes (at {outs[:1]}, from 3)", out)
     r.run(8)
     expect(r.chain_in(), "back after 3 answers in a row", out)
@@ -316,12 +321,12 @@ def s_agh_silent(r, out):
 
 def s_agh_blip(r, out):
     r.run(3); r.run(1, ["agh"]); r.run(6)
-    expect(not r.cmds("no " + NS), "a one-minute silence leaves AdGuard Home in the chain", out)
+    expect(not r.chain_cmds("no " + NS), "a one-minute silence leaves AdGuard Home in the chain", out)
 
 
 def s_agh_and_wan(r, out):
     r.run(2); r.run(8, ["agh", "wan"]); r.run(4)
-    expect(not r.cmds("no " + NS) and r.chain_in(), "no internet at all: the chain is left as it is", out)
+    expect(not r.chain_cmds("no " + NS) and r.chain_in(), "no internet at all: the chain is left as it is", out)
 
 
 def s_engine_kill(r, out):
@@ -431,7 +436,7 @@ def s_reboot_failopen(r, out):
 
 def s_vpn_and_agh(r, out):
     r.run(2); r.run(10, ["tunnel", "agh"])
-    expect(bool(r.cmds("interface Wireguard1 down")) and bool(r.cmds("no " + NS)),
+    expect(bool(r.cmds("interface Wireguard1 down")) and bool(r.chain_cmds("no " + NS)),
            "VPN and AdGuard Home down together: each guard does its part", out)
     r.run(14)
     expect(r.guard().get("FAILOPEN_ACTIVE") == "0" and r.chain_in(), "both back afterwards", out)
@@ -455,7 +460,8 @@ def s_vward_off(r, out, nodns=False):
     if nodns:
         expect(r.chain_in() and "dns_kept=1" in o, "no other DNS answers: AdGuard Home's line stays", out)
     else:
-        expect(not r.chain_in() and "dns=1" in o, "AdGuard Home's DNS line is out (the provider's DNS answers)", out)
+        # dns= counts AdGuard Home's lines: the chain and the list domains bound to it.
+        expect(not r.chain_in() and re.search(r"\bdns=[1-9]", o), "AdGuard Home's DNS line is out (the provider's DNS answers)", out)
     expect((r.root / "opt/etc/vward/components/vward.off").exists(), "the switch is remembered on the USB drive", out)
     _, o, _ = r.sh("/opt/bin/vward-console-config.sh tunnel-guard 0")
     expect("error=vward_off" in o, "the Panel's changes are refused while off", out)
