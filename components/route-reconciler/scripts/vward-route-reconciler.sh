@@ -27,6 +27,10 @@ CHANGE="/tmp/vward-route-change.lock"
 TARGETS="/tmp/vward-route-reconciler-targets.$$"
 CURSOR="$STATE/maint-cursor"
 PERSIST="$STATE/adaptive-persist.txt"
+# Names removed since Keenetic last saved its configuration; the last save of this script.
+CONFIG_DIRTY="$STATE/keenetic-config.dirty"
+CONFIG_SAVED="$STATE/keenetic-config.saved"
+CONFIG_SAVE_EVERY_MIN=${VWARD_RECONCILER_SAVE_EVERY_MIN:-60}
 
 HYST_DIR="/opt/var/lib/vward/route-reconciler"
 DIRECT_OK_THRESHOLD=3
@@ -438,38 +442,13 @@ remove_adaptive()
        "no object-group fqdn $GROUP include $H" \
        >/dev/null 2>&1; then
 
-        if ! ndmc -c \
-           "system configuration save" \
-           >/dev/null 2>&1; then
-
-            rm -f "$PTMP"
-
-            ROLLBACK_ERROR=0
-
-            ndmc -c \
-                "object-group fqdn $GROUP include $H" \
-                >/dev/null 2>&1 || ROLLBACK_ERROR=1
-
-            ndmc -c \
-                "system configuration save" \
-                >/dev/null 2>&1 || ROLLBACK_ERROR=1
-
-            echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_SAVE_ROLLBACK|$H|error=$ROLLBACK_ERROR" >> "$LOG"
-
-            rm -rf "${CHANGE:?}"
-            return 1
-        fi
-
-        # Конфигурация Keenetic уже успешно сохранена.
-        # Теперь коммитим persistent state.
+        # The USB list is what the route engine restores at every start, so it is the record:
+        # committed now. Keenetic's own saved configuration follows at most once an hour (end of
+        # the run) - a save per removed name was 20-27 flash writes an hour on a Viva (13.10).
         if ! mv "$PTMP" "$PERSIST"; then
 
             ndmc -c \
                 "object-group fqdn $GROUP include $H" \
-                >/dev/null 2>&1 || true
-
-            ndmc -c \
-                "system configuration save" \
                 >/dev/null 2>&1 || true
 
             cp -p "$PBACK" "$PERSIST" 2>/dev/null || true
@@ -479,6 +458,8 @@ remove_adaptive()
             rm -rf "${CHANGE:?}"
             return 1
         fi
+
+        : > "$CONFIG_DIRTY"
 
         save_state "$H" "DIRECT_OK"
         rm -f "$HYST_DIR/$SAFE_H.state"
@@ -553,5 +534,16 @@ done
 
 [ "$POS" -gt "$TOTAL" ] && POS=1
 echo "$POS" > "$CURSOR"
+
+# One save for every name removed within the hour (the route engine restores AdaptiveAuto from
+# the USB list at every start, so a reboot before it loses nothing).
+if [ -e "$CONFIG_DIRTY" ] && [ -z "$(find "$CONFIG_SAVED" -mmin "-$CONFIG_SAVE_EVERY_MIN" 2>/dev/null)" ]; then
+    if ndmc -c "system configuration save" >/dev/null 2>&1; then
+        rm -f "$CONFIG_DIRTY"; : > "$CONFIG_SAVED"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_CONFIG_SAVED" >> "$LOG"
+    else
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_CONFIG_SAVE_FAILED" >> "$LOG"
+    fi
+fi
 
 echo "Checked=$DONE Total=$TOTAL Next=$POS"

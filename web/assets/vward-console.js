@@ -935,7 +935,7 @@ function cardData(id) {
   const warnWifi = (wf.clients || []).filter(c => c.health === 'WARNING').length;
   switch (id) {
     // «0.2.0-rc.1.fix.19»: the release on the card, its fix number under it.
-    case 'system': { const vm = /^(.*?)\.fix\.(\d+)$/.exec(p.version || ''); return { icon: 'platform', title: 'Система', to: 'system', value: vm ? vm[1] : p.version || '—',
+    case 'system': { const vm = /^(.*?)\.fix\.(\d+(?:\.\d+)*)$/.exec(p.version || ''); return { icon: 'platform', title: 'Система', to: 'system', value: vm ? vm[1] : p.version || '—',
       // One short line on a phone: the components are on the System page.
       sub: vm ? 'исправление ' + vm[2] : comps ? comps + ' ' + plural(comps, 'компонент', 'компонента', 'компонентов') : 'версия VWARD', pill: p.version ? ['ok', 'Работает'] : ['', '—'] }; }
     case 'updates': return { icon: 'refresh', title: 'Обновления', to: 'updates', value: ['IDLE', 'COMMITTED', undefined, ''].includes(p.phase) ? 'Новых нет' : phaseText(p.phase), sub: fmtStamp(p.last_health_check) ? 'проверено ' + fmtStamp(p.last_health_check) : 'канал ' + (p.channel || '—'), pill: ['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase) ? ['crit', 'Ошибка'] : ['', ''] };
