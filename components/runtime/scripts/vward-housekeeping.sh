@@ -337,6 +337,10 @@ engine_move()
     # is newer.
     EM_CUR=$(sed -n 's/^VU_ENGINE_VERSION=//p' "$EM_ROOT/current/vward-update-common-base.sh" | head -n 1)
     EM_STAMP=$R/opt/var/lib/vward/engine-catchup.stamp
+    # curl crashed on HTTPS within the hour: no download now (the HTTPS repair below comes first),
+    # the check waits for the next hour.
+    EM_TLS_FLAG=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
+    [ -z "$(find "$EM_TLS_FLAG" -mmin -60 2>/dev/null)" ] || [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ] || return 0
     if [ -n "$EM_CUR" ]; then
         [ -z "$(find "$EM_STAMP" -mmin -360 2>/dev/null)" ] || return 0
         mkdir -p "${EM_STAMP%/*}" 2>/dev/null; : > "$EM_STAMP" 2>/dev/null
@@ -354,6 +358,10 @@ engine_move()
             # em_fetch URL|NAME OUTPUT MAX_BYTES
             if [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ]; then cp "$VWARD_ENGINE_MOVE_SOURCE/$1" "$2"; return; fi
             curl --http1.1 -fsS --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 120 --max-filesize "$3" -o "$2" "$1" 2>/dev/null
+            em_rc=$?
+            # A crash (a signal) is remembered for the HTTPS repair and stops the rest of the move.
+            [ "$em_rc" -lt 128 ] || { : > "$EM_TLS_FLAG" 2>/dev/null; exit 3; }
+            return "$em_rc"
         }
         if [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ]; then src=manifest.json; else src=$EM_URL; fi
         em_fetch "$src" "$EM_T/manifest.json" 262144 || exit 3
