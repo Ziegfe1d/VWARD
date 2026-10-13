@@ -343,7 +343,6 @@ engine_move()
     [ -z "$(find "$EM_TLS_FLAG" -mmin -60 2>/dev/null)" ] || [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ] || return 0
     if [ -n "$EM_CUR" ]; then
         [ -z "$(find "$EM_STAMP" -mmin -360 2>/dev/null)" ] || return 0
-        mkdir -p "${EM_STAMP%/*}" 2>/dev/null; : > "$EM_STAMP" 2>/dev/null
     fi
     EM_CONF=${VWARD_UPDATE_CONFIG:-$R/opt/etc/vward/update.conf}
     em_get() { sed -n "s/^$1=//p" "$EM_CONF" 2>/dev/null | tail -n 1 | tr -d '"'; }
@@ -387,6 +386,11 @@ engine_move()
         sh "$EM_T/vward-update.sh" --engine-adopt "$EM_T" "$EM_T/manifest.json" >/dev/null 2>&1 || exit 5
     )
     EM_RC=$?
+    # Checked: the next check in 6 hours. Not downloaded (the network, curl): the next hour
+    # (Viva 2026-10-13: the first check after fix.27 met curl 77 and then waited 6 hours).
+    if [ -n "$EM_CUR" ] && [ "$EM_RC" != 3 ]; then
+        mkdir -p "${EM_STAMP%/*}" 2>/dev/null; : > "$EM_STAMP" 2>/dev/null
+    fi
     rm -rf "${EM_T:?}"
     case "$EM_RC" in
         0) echo "ENGINE_MOVED|v2"; echo "$(date '+%Y-%m-%d %H:%M:%S')|engine_move=done${EM_CUR:+ from=$EM_CUR}" >> "$HOUSE_LOG" ;;

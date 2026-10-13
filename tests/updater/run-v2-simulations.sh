@@ -275,7 +275,11 @@ new_root catchup
 printf '%s\n' 'manifest_url=https://example.invalid/updates/dev/update-manifest.json' >> "$CONFIG"
 mkdir -p "$ROOT/tmp" "$ROOT/opt/var/log"
 make_manifest catchup 0.2.0-rc.2 10 "$(engine_dir catchup-new 2.0.1)"
-source_dir=$WORK/catchup-source; mkdir -p "$source_dir"; cp "$MANIFEST" "$source_dir/manifest.json"; cp -R "$FILES" "$source_dir/files"
+source_dir=$WORK/catchup-source; mkdir -p "$source_dir"; cp -R "$FILES" "$source_dir/files"
+# The release list does not download (curl 77 on a Viva, 2026-10-13): the next hour tries again.
+housekeeping
+check 'a check that could not download is tried again the next hour' sh -c '! grep -q ENGINE_MOVED "$1" && [ "$2" = "$3" ] && [ ! -e "$4" ]' sh "$WORK/last.out" "$(slot)" "$SLOTS/slots/A" "$ROOT/opt/var/lib/vward/engine-catchup.stamp"
+cp "$MANIFEST" "$source_dir/manifest.json"
 housekeeping
 check 'housekeeping brings a lagging engine 2 up to its release' sh -c 'grep -q ENGINE_MOVED "$1" && [ "$2" = "$3" ] && grep -qx "VU_ENGINE_VERSION=2.0.1" "$3/vward-update-common-base.sh" && grep -q "engine_move=done from=2.0.0" "$4"' sh "$WORK/last.out" "$(slot)" "$SLOTS/slots/B" "$ROOT/opt/var/log/vward-housekeeping.log"
 rm -f "$ROOT/opt/var/lib/vward/engine-catchup.stamp"
