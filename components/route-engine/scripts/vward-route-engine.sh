@@ -761,6 +761,24 @@ restore_adaptive_from_persist()
 # ADD TO VPN
 # ------------------------------------------------------------
 
+# Keenetic takes at most 300 names in a group («too many elements»). Full: no new name is tried
+# for an hour (Viva 15.10: refused every 10-30 s, a Keenetic session each time).
+ADAPTIVE_FULL="${VWARD_ADAPTIVE_FULL_FLAG:-$STATE_DIR/adaptive.full}"
+ADAPTIVE_FULL_MIN=${VWARD_ADAPTIVE_FULL_MIN:-60}
+
+# ru_zone NAME: Russian zones and services never need the VPN; a direct check of theirs that
+# failed is a passing fault (Viva 15.10: 110 of AdaptiveAuto's 300 - *.ru, yandex.net, vk.com).
+# VWARD_ADAPTIVE_RU=1 lets them in.
+ru_zone()
+{
+    [ "${VWARD_ADAPTIVE_RU:-0}" != 1 ] || return 1
+    case "$1" in
+        ru|*.ru|xn--p1ai|*.xn--p1ai|yandex.net|*.yandex.net|yandex.com|*.yandex.com|yastatic.net|*.yastatic.net|\
+        vk.com|*.vk.com|vk.me|*.vk.me|userapi.com|*.userapi.com|mycdn.me|*.mycdn.me|avito.st|*.avito.st) return 0 ;;
+    esac
+    return 1
+}
+
 add_adaptive()
 {
     H="$1"
@@ -769,6 +787,14 @@ add_adaptive()
         echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_SKIP_ADAPTIVE_OFF|$H" >> "$EVENT_LOG"
         return 0
     fi
+
+    if ru_zone "$H"; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_SKIP_RU_ZONE|$H" >> "$EVENT_LOG"
+        return 0
+    fi
+
+    # Full within the hour: nothing is tried (the hour is up: one try tells).
+    [ -z "$(find "$ADAPTIVE_FULL" -mmin "-$ADAPTIVE_FULL_MIN" 2>/dev/null)" ] || return 0
 
     change_lock || return 1
     # FINAL_GUARD_V4_ADD
@@ -821,6 +847,18 @@ add_adaptive()
 
     OUT=$(ndmc -c "object-group fqdn $GROUP include $H" 2>&1)
     RC=$?
+    # Keenetic may answer «too many elements» without an error code: the name is not in.
+    case "$OUT" in
+        *"too many elements"*)
+            [ -n "$(find "$ADAPTIVE_FULL" -mmin "-$((ADAPTIVE_FULL_MIN * 2))" 2>/dev/null)" ] || {
+                command -v vward_note >/dev/null 2>&1 &&
+                    vward_note warn "AdaptiveAuto полон" "Keenetic принимает в группу не больше 300 доменов. Новые сайты не добавляются час; уберите ненужные в «Маршруты» - AdaptiveAuto." routes
+            }
+            : > "$ADAPTIVE_FULL"
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|ADAPTIVE_FULL|$H|$GROUP|no new name for $ADAPTIVE_FULL_MIN min" >> "$EVENT_LOG"
+            change_unlock
+            return 0 ;;
+    esac
 
     if [ "$RC" -eq 0 ]; then
 
