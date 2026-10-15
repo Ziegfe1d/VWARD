@@ -356,8 +356,11 @@ engine_move()
         em_fetch() {
             # em_fetch URL|NAME OUTPUT MAX_BYTES
             if [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ]; then cp "$VWARD_ENGINE_MOVE_SOURCE/$1" "$2"; return; fi
+            # One agent tries a curl not known to work first (vward_tls_take); a crash noted there stops here.
+            ! command -v vward_tls_take >/dev/null 2>&1 || vward_tls_take || exit 3
             curl --http1.1 -fsS --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 120 --max-filesize "$3" -o "$2" "$1" 2>/dev/null
             em_rc=$?
+            ! command -v vward_tls_done >/dev/null 2>&1 || vward_tls_done "$em_rc"
             # A crash (a signal) is remembered for the HTTPS repair and stops the rest of the move.
             [ "$em_rc" -lt 128 ] || { : > "$EM_TLS_FLAG" 2>/dev/null; exit 3; }
             return "$em_rc"

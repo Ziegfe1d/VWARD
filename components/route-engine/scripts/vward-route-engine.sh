@@ -523,7 +523,8 @@ probe()
 
     # curl crashed on HTTPS within the hour (Entware's OpenSSL 3.5.5 on some MIPS routers):
     # «could not check», and no crash again. Every decision here needs a check that passed.
-    if tls_broken; then
+    # Not known to work yet: one agent tries curl first, the others wait (vward_tls_take).
+    if tls_broken || { command -v vward_tls_take >/dev/null 2>&1 && ! vward_tls_take; }; then
         P_RC=2 P_CODE=000 P_TIME=-
         return 1
     fi
@@ -545,6 +546,7 @@ probe()
     P_RC=$?
     P_CODE=${OUT%%|*}
     P_TIME=${OUT#*|}
+    ! command -v vward_tls_done >/dev/null 2>&1 || vward_tls_done "$P_RC"
     tls_crash "$P_RC"
 
     [ -z "$P_CODE" ] && P_CODE="000"

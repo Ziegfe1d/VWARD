@@ -121,6 +121,38 @@ vward_rci_get()
     return 1
 }
 
+# vward_tls_take: curl may be run on HTTPS now (it did not crash within the hour). Not known to
+# work within the hour either: one caller tries first and the others wait for its result (up to
+# 20 s), so a broken curl crashes once, not once per agent starting in the same minute (chaos
+# run: 3 crashes at once). vward_tls_done RC: the result noted (a signal: broken for an hour; an
+# answer: works for an hour), the turn given back.
+vward_tls_take()
+{
+    _vt_flag=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
+    _vt_ok=${_vt_flag%.broken}.ok _vt_lock=${_vt_flag%.broken}.probe _vt_mine=0 _vt_w=0
+    [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ] || return 1
+    [ -z "$(find "$_vt_ok" -mmin -60 2>/dev/null)" ] || return 0
+    [ -z "$(find "$_vt_lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] || rmdir "$_vt_lock" 2>/dev/null
+    until mkdir "$_vt_lock" 2>/dev/null; do
+        [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ] || return 1
+        [ -z "$(find "$_vt_ok" -mmin -60 2>/dev/null)" ] || return 0
+        [ "$_vt_w" -lt 20 ] || return 0
+        sleep 1; _vt_w=$((_vt_w + 1))
+    done
+    _vt_mine=1
+    return 0
+}
+
+vward_tls_done()
+{
+    _vt_flag=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
+    if [ "$1" -ge 128 ] 2>/dev/null; then : > "$_vt_flag" 2>/dev/null; rm -f "${_vt_flag%.broken}.ok"
+    elif [ "$1" -lt 126 ] 2>/dev/null; then : > "${_vt_flag%.broken}.ok" 2>/dev/null; fi
+    [ "${_vt_mine:-0}" = 0 ] || rmdir "${_vt_flag%.broken}.probe" 2>/dev/null
+    _vt_mine=0
+    return 0
+}
+
 # vward_fetch CURL-ARGUMENTS: a download (HTTPS) that does not need Entware's OpenSSL. curl
 # first; when curl crashes (126 and up: Entware's OpenSSL 3.5.5 dies on the TLS handshake on
 # some MIPS routers, «Illegal instruction», a Viva 2026-10-11), the same request goes through
@@ -133,14 +165,13 @@ vward_fetch()
 {
     _vf_curl=${VWARD_CURL_BIN:-$(vward_tool curl)} _vf_rc=127
     _vf_flag=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
-    if [ -n "$_vf_curl" ] && [ -z "$(find "$_vf_flag" -mmin -60 2>/dev/null)" ]; then
+    if [ -n "$_vf_curl" ] && vward_tls_take; then
         # HTTP/1.1: Entware's curl crashed in libnghttp2 (HTTP/2) on HTTPS, 81 times in two hours
         # (Viva 2026-10-12, «SIGSEGV ... in libnghttp2.so»); small downloads gain nothing from HTTP/2.
         "$_vf_curl" --http1.1 "$@"
         _vf_rc=$?
+        vward_tls_done "$_vf_rc"
         [ "$_vf_rc" -ge 126 ] || return "$_vf_rc"
-        # Remembered only when it crashed (a signal), not when it is missing.
-        [ "$_vf_rc" -lt 128 ] || : > "$_vf_flag" 2>/dev/null
     fi
     # A list of downloads (--config FILE with «url = "..."» and «output = "..."» lines, as the
     # updater's per-file fetch writes it): one by one through the fallback. Without this every
