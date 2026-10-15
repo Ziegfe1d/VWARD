@@ -1,3 +1,4 @@
 vward-sentinel: tools/vward-sentinel in the VWARD repository (C, musl, static).
 vward-ed25519: tools/vward-ed25519 (Zig, static), the signature check for routers whose openssl cannot.
 vward-dnscap: tools/vward-dnscap (C, musl, static), the route engine's DNS capture without libpcap.
+vward-fetch: tools/vward-fetch (Zig, static), VWARD's own download program in place of Entware's curl.
