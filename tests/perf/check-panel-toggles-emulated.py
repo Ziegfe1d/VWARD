@@ -227,6 +227,15 @@ def compare(before, after, info):
             info.append(f"written out at their values: {k}: {added}")
             continue
         la, lb = (a or "").splitlines(), (b or "").splitlines()
+        if k.endswith("running-config"):
+            # A list domain the route engine bound to AdGuard Home as the devices asked it
+            # (fix.28.1, agh_bind) is its work, not a switch's.
+            bound = re.compile(r"^ip name-server \S+:\d+ [a-z0-9.-]+$")
+            la = [x for x in la if not bound.match(x)]
+            lb = [x for x in lb if not bound.match(x)]
+            if la == lb:
+                info.append(f"list domains bound to AdGuard Home by the route engine meanwhile: {k}")
+                continue
         d = [f"-{x}" for x in la if x not in lb][:3] + [f"+{x}" for x in lb if x not in la][:3]
         bad.append(f"not as before: {k}: {' '.join(d)[:220]}")
     return bad
