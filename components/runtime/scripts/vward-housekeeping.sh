@@ -621,10 +621,25 @@ FLASH_STATE=${VWARD_FLASH_STATE:-$R/tmp/vward-flash}
 FLASH_DMESG=${VWARD_DMESG_BIN:-dmesg}
 flash_watch()
 {
-    mkdir -p "$FLASH_STATE" 2>/dev/null || return 0
-    "$FLASH_DMESG" 2>/dev/null | sed 's/^\[[ 0-9.]*\] *//' |
-        grep -E 'EXT4-fs (error|warning)|EXT[23]-fs error|I/O error|Buffer I/O|FAT-fs \(.*\): error|blk_update_request: (critical medium|I/O)' |
-        sort -u > "$FLASH_STATE/now" 2>/dev/null
+    # The quiet hour costs one program: the kernel's messages that matter, compared by their
+    # length with the last look (CI budget: the maintenance agent runs 24 times a day).
+    fw_raw=$("$FLASH_DMESG" 2>/dev/null) fw_all=
+    while IFS= read -r fw_l; do
+        case "$fw_l" in
+            *"EXT4-fs error"*|*"EXT4-fs warning"*|*"EXT2-fs error"*|*"EXT3-fs error"*|*"I/O error"*|*"Buffer I/O"*|\
+            *"FAT-fs ("*"): error"*|*"blk_update_request: critical medium"*|*"blk_update_request: I/O"*) fw_all="$fw_all$fw_l
+" ;;
+        esac
+    done <<EOF_DMESG
+$fw_raw
+EOF_DMESG
+    fw_raw=
+    fw_sig=${#fw_all} fw_old=
+    [ ! -r "$FLASH_STATE/sig" ] || read -r fw_old < "$FLASH_STATE/sig" || :
+    [ "$fw_sig" != "${fw_old:-0}" ] || return 0
+    [ -d "$FLASH_STATE" ] || mkdir -p "$FLASH_STATE" 2>/dev/null || return 0
+    printf '%s\n' "$fw_sig" > "$FLASH_STATE/sig"
+    printf '%s\n' "$fw_all" | sed 's/^\[[ 0-9.]*\] *//' | grep . | sort -u > "$FLASH_STATE/now" 2>/dev/null
     touch "$FLASH_STATE/seen"
     grep -vxF -f "$FLASH_STATE/seen" "$FLASH_STATE/now" > "$FLASH_STATE/new" 2>/dev/null
     mv -f "$FLASH_STATE/now" "$FLASH_STATE/seen"
@@ -674,15 +689,58 @@ INTEG_DIR=${VWARD_INTEGRITY_DIR:-$R/opt/var/lib/vward/integrity}
 INTEG_LOG=${VWARD_INTEGRITY_LOG:-$R/opt/var/log/vward-integrity.log}
 INTEG_ROOTS=${VWARD_INTEGRITY_ROOTS:-/opt/bin /opt/sbin /opt/lib /opt/share/vward}
 INTEG_UPDATER_LOG=${VWARD_INTEGRITY_UPDATER_LOG:-$R/opt/var/log/vward/updater.log}
+# integrity_clock: IC_NOW (seconds) and IC_HOUR (local, two digits) without a program each hour
+# (CI budget): the wall clock is asked once per boot and then counted on from /proc/uptime.
+integrity_clock()
+{
+    ic_up=; read -r ic_up _ < "${VWARD_UPTIME_FILE:-/proc/uptime}" 2>/dev/null || :
+    ic_up=${ic_up%%.*}
+    case "$ic_up" in ''|*[!0-9]*) return 1 ;; esac
+    ic_e= ic_u= ic_off=
+    [ ! -r "$INTEG_DIR/clock" ] || read -r ic_e ic_u ic_off < "$INTEG_DIR/clock" || :
+    case "$ic_e$ic_u$ic_off" in *[!0-9-]*|'') ic_u= ;; esac
+    # Asked again after a reboot and once a week (the clock may have been set meanwhile).
+    if [ -z "$ic_u" ] || [ "$ic_up" -lt "$ic_u" ] || [ $((ic_up - ic_u)) -gt 604800 ]; then
+        # shellcheck disable=SC2046
+        set -- $(date '+%s %z')
+        case "$1" in ''|*[!0-9]*) return 1 ;; esac
+        # A date without %z (or an odd answer): UTC, an hour off at worst.
+        case "${2:-}" in [+-][0-9][0-9][0-9][0-9]) ic_z=$2 ;; *) ic_z=+0000 ;; esac; ic_s=${ic_z%"${ic_z#?}"}; ic_z=${ic_z#?}
+        ic_hh=${ic_z%??} ic_mm=${ic_z#??}; ic_hh=${ic_hh#0} ic_mm=${ic_mm#0}
+        ic_off=$(( (${ic_hh:-0} * 3600 + ${ic_mm:-0} * 60) * (${ic_s}1) ))
+        ic_e=$1 ic_u=$ic_up
+        [ -d "$INTEG_DIR" ] || mkdir -p "$INTEG_DIR" 2>/dev/null || return 1
+        printf '%s %s %s\n' "$ic_e" "$ic_u" "$ic_off" > "$INTEG_DIR/clock"
+    fi
+    IC_NOW=$((ic_e + ic_up - ic_u))
+    ic_h=$(( ((IC_NOW + ic_off) / 3600) % 24 ))
+    IC_HOUR=$(printf '%02d' "$ic_h")
+}
 integrity_due()
 {
     [ "${VWARD_INTEGRITY_NOW:-0}" = 1 ] && return 0
-    [ -z "$(find "$INTEG_DIR/skipped" -mmin -1440 2>/dev/null)" ] || return 1
-    [ -s "$INTEG_DIR/snapshot.tsv" ] || return 0
+    # One program for the hourly question (CI budget): the time; the rest from the state file.
+    id_at= id_skip= id_first=
+    [ ! -r "$INTEG_DIR/state" ] || while IFS='=' read -r id_k id_v; do
+        case "$id_k" in at) id_at=$id_v ;; skipped) id_skip=$id_v ;; first) id_first=$id_v ;; esac
+    done < "$INTEG_DIR/state"
+    integrity_clock || return 1
+    set -- "$IC_NOW" "$IC_HOUR"
+    case "$id_skip" in ''|*[!0-9]*) ;; *) [ $(( $1 - id_skip )) -ge 86400 ] || return 1 ;; esac
+    # Never looked: the first look (the heaviest) waits for the night too; the time VWARD first
+    # asked is kept, so it comes within two days whatever the hours the router is on.
+    if [ ! -s "$INTEG_DIR/snapshot.tsv" ]; then
+        case "$id_first" in
+            ''|*[!0-9]*) [ -d "$INTEG_DIR" ] || mkdir -p "$INTEG_DIR" 2>/dev/null || return 1
+                printf 'first=%s\n' "$1" >> "$INTEG_DIR/state"; return 1 ;;
+        esac
+        id_at=$((id_first - 72000))
+    fi
+    case "$id_at" in ''|*[!0-9]*) return 0 ;; esac
     # Older than 2 days: whatever the hour; else once a day, between 02:00 and 06:00.
-    [ -z "$(find "$INTEG_DIR/snapshot.tsv" -mmin +2880 2>/dev/null)" ] || return 0
-    [ -n "$(find "$INTEG_DIR/snapshot.tsv" -mmin +1200 2>/dev/null)" ] || return 1
-    case "$(date +%H)" in 02|03|04|05) return 0 ;; esac
+    [ $(( $1 - id_at )) -lt 172800 ] || return 0
+    [ $(( $1 - id_at )) -ge 72000 ] || return 1
+    case "$2" in 02|03|04|05) return 0 ;; esac
     return 1
 }
 integrity_snapshot()
@@ -713,7 +771,7 @@ integrity_watch()
         # No stat or md5sum on this router: said once, the look waits a day.
         rm -f "$INTEG_DIR/snapshot.new"
         echo "$(date '+%Y-%m-%d %H:%M:%S')|SKIPPED|no_tools" >> "$INTEG_LOG"
-        : > "$INTEG_DIR/skipped"
+        { [ ! -r "$INTEG_DIR/state" ] || grep -v '^skipped=' "$INTEG_DIR/state"; echo "skipped=$(date +%s)"; } > "$INTEG_DIR/state.$$" && mv -f "$INTEG_DIR/state.$$" "$INTEG_DIR/state"
         return 0
     fi
     iw_now=$(date '+%Y-%m-%d %H:%M:%S')

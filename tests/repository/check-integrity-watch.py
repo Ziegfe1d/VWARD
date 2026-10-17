@@ -94,6 +94,12 @@ esac
     def new_lines(before: str) -> str:
         return run()[len(before):]
 
+    # Out of the night window the very first look waits (the heaviest; CI budget): only noted.
+    env_day = env | {"VWARD_INTEGRITY_NOW": "0"}
+    res = subprocess.run([busybox, "sh", str(SCRIPT)], env=env_day, capture_output=True, text=True, timeout=120)
+    state = r / "opt/var/lib/vward/integrity/state"
+    if res.returncode != 0 or (r / "opt/var/lib/vward/integrity/snapshot.tsv").exists() or "first=" not in state.read_text():
+        fail("the first look runs at once instead of waiting for the night")
     # The first look only remembers.
     out = run()
     if "|SUMMARY|files=3|first=1|" not in out or (r / "opt/var/lib/vward/integrity/snapshot.tsv").read_text().count("\n") != 3:
