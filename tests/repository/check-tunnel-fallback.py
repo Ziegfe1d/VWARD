@@ -2,7 +2,8 @@
 """Several tunnels: the tunnel guard moves VWARD's routes to the best other tunnel that
 answers when the one it routes through dies (nothing goes direct), brings them back when
 the first answers three minutes in a row, and goes direct as before when no other tunnel
-answers or the fallback is switched off. The quality script keeps the last hour of ping
+answers or the fallback is switched off; a tunnel failing again and again with no other one to go
+to is told to the owner once. The quality script keeps the last hour of ping
 samples and sums up the last 30 minutes."""
 
 import json
@@ -429,6 +430,26 @@ echo result=changed
         fail(f"a list moved off a deleted tunnel must be forgotten: {log[-300:]}")
     if (gdir / "fallback").exists() or "FALLBACK_FORGOTTEN|gone=Wireguard8" not in log:
         fail("the guard's move off a deleted tunnel must be forgotten")
+
+    # The only tunnel keeps failing, no other answers (the Viva 2026-10-17 evening): the 4th bad
+    # minute within the hour tells the owner once; more bad minutes tell nothing new.
+    env["VWARD_TUNNEL_BAD"] = str(tmp / "bad")
+    (gdir / "state").write_text("MODE=AUTO\nDOWN_STREAK=0\nFAILOPEN_ACTIVE=0\nLAST_RECOVERY_TEST=0\nLAST_ACTION=KEEP_UP\n")
+    (tmp / "notes").write_text("")
+    for i in range(3):
+        run("DEGRADED", "")
+    if "переключиться некуда" in (tmp / "notes").read_text():
+        fail("three bad minutes already tell the owner")
+    run("DEGRADED", "")
+    run("DEGRADED", "")
+    if (tmp / "notes").read_text().count("переключиться некуда") != 1 or "NO_ALTERNATIVE_NOTED|bad_minutes=4" not in (tmp / "guard.log").read_text():
+        fail(f"the only failing tunnel with nowhere to go is not told once: {(tmp / 'notes').read_text()}")
+    # Another tunnel answers: the agent has somewhere to go, nothing to tell.
+    (tmp / "bad").unlink(); (tmp / "notes").write_text("")
+    for i in range(5):
+        run("DEGRADED", "Wireguard1\tnwg1\t0\t50\t30\t30\t0\t50\t4\t100\n")
+    if "переключиться некуда" in (tmp / "notes").read_text():
+        fail("told although another tunnel answers")
 _js = (ROOT / "web/assets/vward-console.js").read_text()
 _helper = (ROOT / "components/console/scripts/vward-console-config.sh").read_text()
 if "filter(m => tunExists(m.from))" not in _js or "tunExists(S.tq.fallback_from)" not in _js:

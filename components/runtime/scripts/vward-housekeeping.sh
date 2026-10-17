@@ -495,17 +495,72 @@ if [ -x "$REPAIR_CURL" ] && [ -n "$(find "$REPAIR_TLS_FLAG" -mmin -60 2>/dev/nul
     crash_rc "$rh_after" || rm -f "$REPAIR_TLS_FLAG"
     echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=curl-https|reinstalled=libnghttp2,libcurl,curl,ca-bundle|opkg=$rh_opkg|after=$rh_after" >> "$HOUSE_LOG"
 fi
+# pkg_damaged PKG...: the installed packages whose files differ from the same version in the
+# Entware feed (downloaded into RAM, checked byte for byte). The USB stick spoils files: on the
+# Viva 2026-10-17 libcares of Smart DNS's client differed from its package and the client died
+# at start (SIGILL, then SIGSEGV) for hours; reinstalling everything blindly once a day missed
+# it (libcares was not on the list). Settings under /opt/etc are the owner's: not compared.
+# PKG_UNCHECKED: the packages that could not be checked (no download, another version).
+PKG_TMP=${VWARD_PKG_TMP:-$R/tmp/vward-pkgcheck}
+pkg_damaged()
+{
+    PKG_UNCHECKED=
+    for pd_p in "$@"; do
+        pd_v=$("$OPKG" list-installed "$pd_p" 2>/dev/null | awk -v p="$pd_p" '$1 == p {print $3; exit}')
+        [ -n "$pd_v" ] || continue
+        pd_d=$PKG_TMP/$pd_p
+        rm -rf "${pd_d:?}"; mkdir -p "$pd_d/x/d" || continue
+        ( cd "$pd_d" && "$OPKG" download "$pd_p" </dev/null >/dev/null 2>&1 )
+        pd_ipk=$(ls "$pd_d"/*.ipk 2>/dev/null | head -n 1)
+        # A newer version in the feed tells nothing about the installed files.
+        case "${pd_ipk##*/}" in "${pd_p}_${pd_v}_"*) ;; *) PKG_UNCHECKED="$PKG_UNCHECKED $pd_p"; rm -rf "${pd_d:?}"; continue ;; esac
+        if ! tar -xzf "$pd_ipk" -C "$pd_d/x" 2>/dev/null || ! tar -xzf "$pd_d/x/data.tar.gz" -C "$pd_d/x/d" 2>/dev/null; then
+            PKG_UNCHECKED="$PKG_UNCHECKED $pd_p"; rm -rf "${pd_d:?}"; continue
+        fi
+        pd_bad=
+        ( cd "$pd_d/x/d" && find . -type f ) > "$pd_d/files" 2>/dev/null
+        while IFS= read -r pd_f; do
+            pd_f=${pd_f#.}
+            case "$pd_f" in /opt/etc/*) continue ;; esac
+            [ "$(md5sum < "$pd_d/x/d$pd_f" 2>/dev/null)" = "$(md5sum < "$R$pd_f" 2>/dev/null)" ] || { pd_bad=1; break; }
+        done < "$pd_d/files"
+        rm -rf "${pd_d:?}"
+        [ -z "$pd_bad" ] || echo "$pd_p"
+    done
+    rmdir "$PKG_TMP" 2>/dev/null || :
+}
 # Smart DNS's DoH client (https-dns-proxy) restarted three times within 6 hours (the components
-# agent noted it): its HTTPS libraries and the client reinstalled, at most once a day. curl is not
-# touched for it.
+# agent noted it): its packages are checked against Entware and only the damaged ones are
+# reinstalled, with a copy of their files first, at most once a day; the owner is told the
+# stick spoils files. Intact files: nothing reinstalled (it would not help). curl is not touched.
+DOH_PKGS=${VWARD_DOH_PKGS:-https-dns-proxy libcares libev libnghttp2 libcurl libopenssl}
 if [ -n "$(find "$REPAIR_DOH_FLAG" -mmin -360 2>/dev/null)" ] && repair_due doh; then
-    rd_pkgs="libnghttp2 libcurl"
-    ! "$OPKG" list-installed 2>/dev/null | grep -q '^https-dns-proxy ' || rd_pkgs="$rd_pkgs https-dns-proxy"
-    # shellcheck disable=SC2086
-    "$OPKG" install --force-reinstall $rd_pkgs </dev/null >/dev/null 2>&1
-    rd_opkg=$?
     rm -f "$REPAIR_DOH_FLAG"
-    echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=doh|reinstalled=$(echo $rd_pkgs | tr ' ' ',')|opkg=$rd_opkg" >> "$HOUSE_LOG"
+    rd_out=$R/tmp/vward-doh-damaged.$$
+    # shellcheck disable=SC2086
+    pkg_damaged $DOH_PKGS > "$rd_out"
+    rd_bad=$(tr '\n' ' ' < "$rd_out"); rd_bad=${rd_bad% }; rm -f "$rd_out"
+    if [ -z "$rd_bad" ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=doh|files=intact|unchecked=$(echo $PKG_UNCHECKED | tr ' ' ',')" >> "$HOUSE_LOG"
+    else
+        rd_copy=$REPAIR_DIR/doh-$(date +%Y%m%d-%H%M%S).tar.gz
+        # shellcheck disable=SC2086
+        rd_files=$(for rd_p in $rd_bad; do "$OPKG" files "$rd_p" 2>/dev/null; done | grep '^/opt/' | grep -v '^/opt/etc/')
+        mkdir -p "$REPAIR_DIR"
+        # shellcheck disable=SC2086
+        ( cd "$R/" && tar -czf "$rd_copy" $(printf '%s\n' $rd_files | sed 's#^/##') ) 2>/dev/null || rd_copy=
+        ls -t "$REPAIR_DIR"/doh-*.tar.gz 2>/dev/null | tail -n +3 | while IFS= read -r rd_old; do rm -f "$rd_old"; done
+        # shellcheck disable=SC2086
+        "$OPKG" install --force-reinstall $rd_bad </dev/null >/dev/null 2>&1
+        rd_opkg=$?
+        # shellcheck disable=SC2086
+        rd_still=$(pkg_damaged $rd_bad | tr '\n' ' ')
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=doh|damaged=$(echo $rd_bad | tr ' ' ',')|reinstalled|opkg=$rd_opkg|still_damaged=$(echo $rd_still | tr ' ' ',')|copy=${rd_copy:-none}" >> "$HOUSE_LOG"
+        command -v vward_note >/dev/null 2>&1 ||
+            { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+        ! command -v vward_note >/dev/null 2>&1 || vward_note warn "Флешка портит файлы программ" \
+            "Повреждены файлы пакетов: $(echo $rd_bad | sed 's/ /, /g'). Из-за этого не запускался клиент Smart DNS. VWARD переустановил их из Entware${rd_copy:+, прежние файлы сохранены}. Проверьте флешку на компьютере или замените её: повреждения будут повторяться." system
+    fi
 fi
 repair_if_crashing jq jq "$REPAIR_JQ" -n 1
 repair_if_crashing openssl "libopenssl openssl-util" "$REPAIR_OPENSSL" version

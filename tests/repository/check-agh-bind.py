@@ -13,7 +13,10 @@ the devices asked AdGuard Home, and Google answers each with other addresses (Vi
     list domains to Keenetic (route-dns: a binding back would make a circle);
   * a domain bound by hand (Smart DNS) is left alone; a refused one is not asked again;
   * at most AGH_BIND_MAX domains (logged once);
-  * at a start only the bindings Keenetic still has count, a refused one is tried again.
+  * only while Keenetic has room for DNS servers: 64 in all with the provider's, 8 kept free
+    (Viva 2026-10-17: 64 of 64, the owner's Smart DNS refused);
+  * at a start only the bindings Keenetic still has count, a refused one is tried again, and
+    over Keenetic's limit VWARD's newest bindings are taken out (the owner's stay).
 """
 import shutil
 import subprocess
@@ -38,8 +41,13 @@ for shell in shells:
     with tempfile.TemporaryDirectory() as tmp:
         t = Path(tmp)
         (t / "bin").mkdir()
-        (t / "bin/ndmc").write_text('#!/bin/sh\necho "$2" >> "$T/ndmc.log"\n'
+        (t / "bin/ndmc").write_text('#!/bin/sh\ncase "$2" in "show ip name-server") cat "$T/ns" 2>/dev/null; exit 0 ;; esac\n'
+                                    'echo "$2" >> "$T/ndmc.log"\n'
                                     '[ ! -e "$T/refuse" ] || { echo "Command::Base error: refused"; exit 1; }\n')
+        # Keenetic's own and the provider's servers: 2 here.
+        (t / "ns").write_text("server:\n    address: 198.51.100.1\n    service: Dns::InterfaceSpecific-GigabitEthernet1\n"
+                             "server:\n    address: 198.51.100.2\n    service: Dhcp::Client-GigabitEthernet1\n"
+                             "server:\n    address: 192.0.2.1\n    service: Dns::Manager\n")
         (t / "bin/ndmc").chmod(0o755)
         (t / "manual").write_text("youtube.com\ngooglevideo.com\n*.video.example.net\nsmart.example\nzone\n")
         (t / "adaptive").write_text("blocked.example\n")
@@ -142,5 +150,26 @@ esac
         run("bind", "www.youtube.com")
         if asked().count("ip name-server 192.0.2.1:65053 youtube.com") != 2:
             fail(f"{shell[0]} a refused domain is tried again after a start: {asked()}")
+
+        # Keenetic nearly full: 64 - 2 others - 8 free = 54 configured at most.
+        env["VWARD_AGH_BIND_MAX"] = "200"
+        rc.write_text("ip name-server 192.0.2.1:65053\n" + "".join(f"ip name-server 192.0.2.1:65053 own{i}.example\n" for i in range(53)))
+        (t / "agh-bind-run").mkdir(exist_ok=True)
+        env["VWARD_AGH_BIND_RUN"] = str(t / "agh-bind-run")
+        n = len(asked())
+        run("bind", "x.blocked.example")
+        if len(asked()) != n or "keenetic=no_room" not in events.read_text():
+            fail(f"{shell[0]} bound with no room in Keenetic: {asked()[n:]} {events.read_text()[-200:]}")
+        # Over the limit at a start: VWARD's newest bindings go, the owner's stay.
+        bindings.write_text("googlevideo.com 192.0.2.1:65053\nsmart.example ext\nnew1.example 192.0.2.1:65053\nnew2.example 192.0.2.1:65053\n")
+        rc.write_text("ip name-server 192.0.2.1:65053\nip name-server 192.0.2.1:65053 smart.example\n"
+                      "ip name-server 192.0.2.1:65053 googlevideo.com\nip name-server 192.0.2.1:65053 new1.example\n"
+                      "ip name-server 192.0.2.1:65053 new2.example\n" + "".join(f"ip name-server 192.0.2.1:65053 own{i}.example\n" for i in range(51)))
+        n = len(asked())
+        run("prune")
+        if asked()[n:] != ["no ip name-server 192.0.2.1:65053 new1.example", "no ip name-server 192.0.2.1:65053 new2.example"]:
+            fail(f"{shell[0]} over Keenetic's limit: the newest VWARD bindings go: {asked()[n:]}")
+        if lines() != ["googlevideo.com 192.0.2.1:65053", "smart.example ext"] or "AGH_UNBIND|new2.example" not in events.read_text():
+            fail(f"{shell[0]} after the trim: {lines()}")
 
 print("AGH_BIND=PASS")

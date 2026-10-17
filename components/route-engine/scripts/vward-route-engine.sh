@@ -1599,7 +1599,8 @@ list_watch_check()
 # 2026-10-13: 9 of 148 addresses of YouTube in the route). A list domain the devices use is
 # bound to AdGuard Home in Keenetic («ip name-server <AdGuard Home> <domain>», as Smart DNS):
 # Keenetic gets AdGuard Home's cached answer, the one the device got (8 of 8 on the Viva).
-# Only the domains in use (the lists hold hundreds), at most AGH_BIND_MAX. The DNS guard takes
+# Only the domains in use (the lists hold hundreds), at most AGH_BIND_MAX and only while Keenetic
+# has room for DNS servers (agh_ns_room). The DNS guard takes
 # them out while AdGuard Home does not answer; «Отключить VWARD» and the uninstaller with VWARD.
 # Lines of AGH_BIND: «domain host:port» (VWARD's), «domain ext» (bound by hand: left alone),
 # «domain failed» (Keenetic refused: not asked again until the engine restarts).
@@ -1611,6 +1612,23 @@ AGH_BIND_MAX=${VWARD_AGH_BIND_MAX:-200}
 AGH_BIND_RUN="${VWARD_AGH_BIND_RUN:-/tmp/vward-agh-bind}"
 AGH_YAML="${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}"
 DNS_CHAIN_STATE="${VWARD_DNS_CHAIN_STATE:-/tmp/vward-dns-chain}/state"
+# Keenetic keeps at most 64 DNS servers in all: the configured ones («ip name-server», with a
+# domain or without) and those the provider and Keenetic itself bring. Past that it refuses
+# every new one, the owner's own Smart DNS too (Viva 2026-10-17: 64 of 64, 61 configured, 18
+# refusals in an evening). VWARD binds only while AGH_BIND_FREE places stay free.
+KEENETIC_NS_MAX=${VWARD_KEENETIC_NS_MAX:-64}
+AGH_BIND_FREE=${VWARD_AGH_BIND_FREE:-8}
+
+# agh_ns_room RUNNING_CONFIG: how many more servers VWARD may configure (may be below 0).
+# Keenetic's own and the provider's are those «show ip name-server» lists from another service
+# than Dns::Manager (the configured ones).
+agh_ns_room()
+{
+    AR_SHOW=$(ndmc -c "show ip name-server" 2>/dev/null </dev/null)
+    AR_OTHER=$(printf '%s\n' "$AR_SHOW" | awk '$1 == "service:" && $2 != "Dns::Manager" {n++} END {print n + 0}')
+    AR_CONF=$(printf '%s\n' "$1" | awk '$1 == "ip" && $2 == "name-server" {n++} END {print n + 0}')
+    echo $((KEENETIC_NS_MAX - AR_OTHER - AR_CONF - AGH_BIND_FREE))
+}
 CONFIG_DIRTY="$STATE_DIR/keenetic-config.dirty"
 
 # agh_ns: AdGuard Home's DNS for Keenetic («host:port»), empty without AdGuard Home.
@@ -1676,6 +1694,11 @@ agh_bind_one()
         echo "$1 ext" >> "$AGH_BIND"
         return 0
     fi
+    if [ "$(agh_ns_room "$AB_RC")" -le 0 ]; then
+        [ -e "$AGH_BIND_RUN/full" ] || echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND_FULL|$1|keenetic=no_room|free=$AGH_BIND_FREE" >> "$EVENT_LOG"
+        : > "$AGH_BIND_RUN/full"
+        return 0
+    fi
     if AB_OUT=$(ndmc -c "ip name-server $AB_NS $1" 2>&1 </dev/null); then
         echo "$1 $AB_NS" >> "$AGH_BIND"
         # Keenetic's saved configuration follows within the hour (the route reconciler).
@@ -1698,6 +1721,19 @@ agh_bind_prune()
     [ -n "$AP_RC" ] || return 0
     printf '%s\n' "$AP_RC" | awk 'FNR == NR {if ($1 == "ip" && $2 == "name-server" && $4 != "" && $4 != "on") have[$4] = 1; next}
         ($1 in have) && $2 != "failed"' - "$AGH_BIND" > "$AGH_BIND.new" && mv -f "$AGH_BIND.new" "$AGH_BIND"
+    # Over Keenetic's limit (the free places kept): VWARD's newest bindings go first, the
+    # owner's own and those bound by hand stay.
+    AP_ROOM=$(agh_ns_room "$AP_RC")
+    [ "$AP_ROOM" -lt 0 ] || return 0
+    AP_N=$((0 - AP_ROOM))
+    awk '$2 ~ /:[0-9]+$/' "$AGH_BIND" | tail -n "$AP_N" > "$AGH_BIND.drop"
+    while read -r AP_D AP_NS; do
+        ndmc -c "no ip name-server $AP_NS $AP_D" </dev/null >/dev/null 2>&1 || continue
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_UNBIND|$AP_D|keenetic=no_room" >> "$EVENT_LOG"
+        awk -v d="$AP_D" '$1 != d' "$AGH_BIND" > "$AGH_BIND.new" && mv -f "$AGH_BIND.new" "$AGH_BIND"
+        : > "$CONFIG_DIRTY"
+    done < "$AGH_BIND.drop"
+    rm -f "$AGH_BIND.drop"
 }
 
 

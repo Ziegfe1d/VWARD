@@ -734,6 +734,29 @@ else
     rm -f "$FALLBACK"
 fi
 
+# The tunnel keeps failing and there is nowhere to go: told once. The Viva 2026-10-17 evening:
+# the only VLESS tunnel slow or silent again and again (DEGRADED, restarts), AmneziaWG off, no
+# other tunnel - the agent restarted it quietly and nobody knew why sites did not open. Bad
+# minutes are counted in the last hour (RAM); BAD_TICKS of them and no other answering tunnel:
+# one notification, again at most every 6 hours.
+BAD_FILE=${VWARD_TUNNEL_BAD:-/tmp/vward-tunnel-bad}
+BAD_TICKS=${VWARD_TUNNEL_BAD_TICKS:-4}
+case "$ACTION" in
+    WAIT_DEGRADED|WAIT_RECOVERING|WAIT_DOWN_CONFIRM|ENGINE_RESTARTED|ABORT_WG_RECOVERED)
+        { [ ! -r "$BAD_FILE" ] || awk -v n="$NOW" '$1 == "t" && $2 + 3600 > n' "$BAD_FILE"; echo "t $NOW"
+          [ ! -r "$BAD_FILE" ] || awk '$1 == "noted"' "$BAD_FILE"; } > "$BAD_FILE.$$" 2>/dev/null && mv -f "$BAD_FILE.$$" "$BAD_FILE"
+        BAD_N=$(awk '$1 == "t" {n++} END {print n + 0}' "$BAD_FILE" 2>/dev/null)
+        BAD_NOTED=$(awk '$1 == "noted" {print $2; exit}' "$BAD_FILE" 2>/dev/null)
+        if [ "$BAD_N" -ge "$BAD_TICKS" ] && [ $((NOW - ${BAD_NOTED:-0})) -ge 21600 ] && [ -z "$(fallback_pick 2>/dev/null)" ]; then
+            vward_note warn "«{t}» работает с перебоями, переключиться некуда" \
+                "Туннель за последний час $BAD_N раз не отвечал или отвечал плохо; агент VPN его перезапускает. Другого работающего туннеля нет, поэтому сайты из списков могут открываться медленно или не открываться. Выберите другой сервер, включите или добавьте второй туннель." \
+                "t-$VWARD_TUNNEL_INTERFACE"
+            { awk '$1 == "t"' "$BAD_FILE"; echo "noted $NOW"; } > "$BAD_FILE.$$" 2>/dev/null && mv -f "$BAD_FILE.$$" "$BAD_FILE"
+            echo "$NOW_TEXT|NO_ALTERNATIVE_NOTED|bad_minutes=$BAD_N" >> "$LOG"
+        fi
+        ;;
+esac
+
 case "$ACTION" in
     KEEP_UP|STAY_DOWN|WOULD_STAY_DOWN)
         ;;

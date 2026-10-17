@@ -512,9 +512,9 @@ watch_services()
         else
             VWARD_UNNICE=$UNNICE vward_doh_keep
             case "$?" in
-                10) log_event "DOH_STARTED|Smart DNS client was not listening"; DOH_WAIT=1 DOH_FAILS=0 ;;
+                10) log_event "DOH_STARTED|Smart DNS client was not listening|by=${VD_INIT:-?}"; DOH_WAIT=1 DOH_FAILS=0 ;;
                 11) DOH_FAILS=$((DOH_FAILS + 1))
-                    log_event "DOH_START_FAILED|why=${VD_WHY:-unknown}|in_a_row=$DOH_FAILS|next_try_min=$DOH_WAIT"
+                    log_event "DOH_START_FAILED|why=${VD_WHY:-unknown}|by=${VD_INIT:-?}|in_a_row=$DOH_FAILS|next_try_min=$DOH_WAIT"
                     DOH_SKIP=$DOH_WAIT; DOH_WAIT=$((DOH_WAIT * 2)); [ "$DOH_WAIT" -le 15 ] || DOH_WAIT=15
                     # The third failed start in a row: told once (31-45 silent failures a day went
                     # unnoticed, Viva 2026-10-16); the tries go on with their pauses.

@@ -341,7 +341,8 @@ vward_agh_pidfiles_clean() {
 # not marked broken for it (a DoH client that does not start is no proof curl crashes: VWARD went
 # around a working curl for hours, Viva 2026-10-17).
 # 0: nothing to do, 10: started again, 11: the start did not help (the caller waits longer;
-# VD_WHY: not_running - the client is not running at all, not_listening - it runs, the port is shut).
+# VD_WHY: not_running - the client is not running at all, not_listening - it runs, the port is shut;
+# VD_INIT: the start scripts run).
 vward_doh_keep() {
     vd_cfg=${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}
     [ -r "$vd_cfg" ] || vd_cfg=/opt/etc/AdGuardHome.yaml
@@ -354,14 +355,28 @@ vward_doh_keep() {
         awk -v h=":$vd_hex" '$2 ~ h "$" {f = 1} END {exit !f}' "$vd_net/udp" "$vd_net/tcp" 2>/dev/null || vd_down="$vd_down $vd_p"
     done
     [ -n "$vd_down" ] || return 0
-    vd_init=
-    for vd_s in "${VWARD_INITD:-/opt/etc/init.d}"/S*; do
-        [ -x "$vd_s" ] || continue
-        case "${vd_s##*/}" in *doh*|*https-dns-proxy*) vd_init=$vd_s; break ;; esac
-        grep -q 'https-dns-proxy' "$vd_s" 2>/dev/null && { vd_init=$vd_s; break; }
+    # The start script of the port AdGuard Home asks: the one that names that port. The first
+    # script called «doh» or «https-dns-proxy» was the package's own instance on 5053, and the
+    # Smart DNS one (S98…, port 5453) stayed down for hours (Viva 2026-10-17). Only when no
+    # script names the port (it is in the client's config file) the old guess by the name.
+    VD_INIT=
+    for vd_p in $vd_down; do
+        vd_init=
+        for vd_s in "${VWARD_INITD:-/opt/etc/init.d}"/S*; do
+            [ -x "$vd_s" ] || continue
+            grep -Eq "(^|[^0-9])$vd_p([^0-9]|\$)" "$vd_s" 2>/dev/null && { vd_init=$vd_s; break; }
+        done
+        [ -n "$vd_init" ] || for vd_s in "${VWARD_INITD:-/opt/etc/init.d}"/S*; do
+            [ -x "$vd_s" ] || continue
+            case "${vd_s##*/}" in *doh*|*https-dns-proxy*) vd_init=$vd_s; break ;; esac
+            grep -q 'https-dns-proxy' "$vd_s" 2>/dev/null && { vd_init=$vd_s; break; }
+        done
+        [ -n "$vd_init" ] || continue
+        case " $VD_INIT " in *" ${vd_init##*/} "*) continue ;; esac
+        VD_INIT="${VD_INIT:+$VD_INIT }${vd_init##*/}"
+        ${VWARD_UNNICE:-} "$vd_init" restart </dev/null >/dev/null 2>&1 || ${VWARD_UNNICE:-} "$vd_init" start </dev/null >/dev/null 2>&1
     done
-    [ -n "$vd_init" ] || return 0
-    ${VWARD_UNNICE:-} "$vd_init" restart </dev/null >/dev/null 2>&1 || ${VWARD_UNNICE:-} "$vd_init" start </dev/null >/dev/null 2>&1
+    [ -n "$VD_INIT" ] || return 0
     vd_log=${VWARD_DOH_RESTARTS:-/tmp/vward-doh-restarts}
     vd_now=$(date +%s)
     { [ ! -r "$vd_log" ] || awk -v n="$vd_now" '$1 + 21600 > n' "$vd_log"; echo "$vd_now"; } > "$vd_log.$$" 2>/dev/null && mv -f "$vd_log.$$" "$vd_log"

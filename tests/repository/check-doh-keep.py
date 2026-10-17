@@ -5,6 +5,9 @@ hand). AdGuard Home sends Smart DNS domains to [/a.com/]127.0.0.1:5453; when not
 there, the client's own start script runs again. Listening: left alone. Not used by AdGuard Home:
 left alone. Three restarts within 6 hours: its HTTPS libraries are noted for repair; curl is not
 marked broken for it (VWARD went around a working curl for hours, Viva 2026-10-17).
+The script that names the port is the one started, not the first «https-dns-proxy» one (the
+package's own instance on 5053 was restarted for hours while Smart DNS on 5453 stayed down,
+Viva 2026-10-17).
 """
 from __future__ import annotations
 
@@ -33,8 +36,12 @@ with tempfile.TemporaryDirectory() as tmp:
     (t / "init.d").mkdir()
     agh = t / "AdGuardHome.yaml"
     agh.write_text("dns:\n  upstream_dns:\n    - '[/claude.ai/chatgpt.com/]127.0.0.1:5453'\n    - https://dns.example/dns-query\n")
+    # The package's own instance first in the order, on another port: never the one started.
+    pkg = t / "init.d/S09https-dns-proxy"
+    pkg.write_text(f'#!/bin/sh\n# https-dns-proxy -p 5053\necho "$1" >> "{t}/pkg"\n')
+    pkg.chmod(0o755)
     start = t / "init.d/S98smart-doh"
-    start.write_text(f'#!/bin/sh\necho "$1" >> "{t}/starts"\n[ -e "{t}/broken" ] || printf "%s%s" "{HEAD.strip()}\n" "{LISTEN.strip()}" > "{t}/net/udp"\n')
+    start.write_text(f'#!/bin/sh\n# local DNS 127.0.0.1:5453\necho "$1" >> "{t}/starts"\n[ -e "{t}/broken" ] || printf "%s%s" "{HEAD.strip()}\n" "{LISTEN.strip()}" > "{t}/net/udp"\n')
     start.chmod(0o755)
     (t / "init.d/S90other").write_text("#!/bin/sh\necho other >> \"%s/other\"\n" % t)
     (t / "init.d/S90other").chmod(0o755)
@@ -52,6 +59,12 @@ with tempfile.TemporaryDirectory() as tmp:
     rc = run()
     if rc != 10 or not (t / "starts").exists() or (t / "other").exists():
         fail(f"a silent Smart DNS client is not started by its own script: rc={rc}")
+    if (t / "pkg").exists():
+        fail("the package's instance on another port is restarted instead of the Smart DNS one")
+    by = subprocess.run([busybox, "sh", "-c", f'. "{LIB}"; vward_doh_keep; echo "$VD_INIT"'], env=env | {"VWARD_PROC_NET": str(t / "empty")},
+                        capture_output=True, text=True).stdout.strip()
+    if by != "S98smart-doh":
+        fail(f"the script started is not told: {by!r}")
     # Listening: left alone.
     n = len((t / "starts").read_text().splitlines())
     if run() != 0 or len((t / "starts").read_text().splitlines()) != n:
