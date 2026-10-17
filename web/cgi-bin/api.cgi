@@ -94,6 +94,10 @@ ndm_cached()
     nc_file="$NDM_CACHE_DIR/$1" nc_ttl="$2"
     [ -z "${VWARD_NDMC:-}" ] || nc_ttl=${VWARD_CONSOLE_CACHE_TTL:-0}
     [ -z "${VWARD_CONSOLE_CACHE_TTL:-}" ] || nc_ttl=$VWARD_CONSOLE_CACHE_TTL
+    # Keenetic's configuration: the copy every VWARD agent shares (one read, not one per reader).
+    if [ "$1" = running ] && [ -z "${4:-}" ] && [ "$nc_ttl" -gt 0 ] 2>/dev/null && command -v vward_keenetic_config >/dev/null 2>&1; then
+        vward_keenetic_config "$nc_ttl"; return
+    fi
     if [ "$nc_ttl" -gt 0 ] 2>/dev/null && [ -r "$nc_file" ]; then
         nc_at=0; read -r nc_at < "$nc_file" || nc_at=0
         case "$nc_at" in ''|*[!0-9]*) nc_at=0 ;; esac
@@ -2975,6 +2979,9 @@ if [ "$ACTION" = "log" ]; then
         housekeeping)
             FILE=/opt/var/log/vward-housekeeping.log
             ;;
+        integrity)
+            FILE=/opt/var/log/vward-integrity.log
+            ;;
         off)
             FILE=/opt/var/log/vward-off.log
             ;;
@@ -3167,6 +3174,24 @@ case "$FAILOPEN_REASON" in *[!a-z_,]*) FAILOPEN_REASON= ;; esac
 
 set -- $(df -PTk /opt 2>/dev/null | awk 'NR==2 {print $2, $3, $4, $5}')
 OPT_FS=${1:-} OPT_TOTAL_KB=${2:-} OPT_USED_KB=${3:-} OPT_FREE_KB=${4:-}
+# The USB stick as the maintenance agent saw it this boot (fix.28.2): file system and read/write
+# errors in the kernel's messages, and the damaged places it found.
+FLASH_DIR=${VWARD_FLASH_STATE:-/tmp/vward-flash}
+FLASH_N=0 FLASH_IO=0 FLASH_WHERE=
+if [ -s "$FLASH_DIR/seen" ]; then
+  FLASH_N=$(grep -c . "$FLASH_DIR/seen" 2>/dev/null) FLASH_IO=$(grep -cE 'I/O error|Buffer I/O|critical medium' "$FLASH_DIR/seen" 2>/dev/null)
+  FLASH_WHERE=$(cat "$FLASH_DIR"/inode.* 2>/dev/null | grep -v '^?$' | sort -u | head -n 3 | tr '\n' ',' | sed 's/,$//')
+fi
+
+# The maintenance agent's daily file integrity look (fix.28.3).
+INTEG_STATE=${VWARD_INTEGRITY_DIR:-/opt/var/lib/vward/integrity}/state
+INTEG_AT=0 INTEG_FILES=0 INTEG_SPOILED=0 INTEG_WRITTEN=0 INTEG_UNKNOWN=0
+if [ -r "$INTEG_STATE" ]; then
+  while IFS='=' read -r IK IV; do
+    case "$IV" in ''|*[!0-9]*) continue ;; esac
+    case "$IK" in at) INTEG_AT=$IV ;; files) INTEG_FILES=$IV ;; spoiled) INTEG_SPOILED=$IV ;; written) INTEG_WRITTEN=$IV ;; unknown) INTEG_UNKNOWN=$IV ;; esac
+  done < "$INTEG_STATE"
+fi
 
 # Tool versions change only with opkg; they are cached in RAM until then.
 VERSIONS_CACHE=/tmp/vward-console-versions
@@ -3236,7 +3261,7 @@ header_json
   --arg opt_total_kb "$OPT_TOTAL_KB" \
   --arg opt_used_kb "$OPT_USED_KB" \
   --arg opt_free_kb "$OPT_FREE_KB" \
-  --arg opt_fs "$OPT_FS" \
+  --arg opt_fs "$OPT_FS" --arg integ_at "${INTEG_AT:-0}" --arg integ_files "${INTEG_FILES:-0}" --arg integ_spoiled "${INTEG_SPOILED:-0}" --arg integ_written "${INTEG_WRITTEN:-0}" --arg integ_unknown "${INTEG_UNKNOWN:-0}" --arg flash_n "${FLASH_N:-0}" --arg flash_io "${FLASH_IO:-0}" --arg flash_where "$FLASH_WHERE" \
   --arg jq_version "$JQ_VERSION" \
   --arg curl_version "$CURL_VERSION" \
   --arg lighttpd_version "$LIGHTTPD_VERSION" \
@@ -3271,7 +3296,9 @@ header_json
     total_kb:($opt_total_kb|tonumber? // 0),
     used_kb:($opt_used_kb|tonumber? // 0),
     free_kb:($opt_free_kb|tonumber? // 0),
-    filesystem:$opt_fs
+    filesystem:$opt_fs,
+    flash:{errors:($flash_n|tonumber? // 0), io:($flash_io|tonumber? // 0), where:(if $flash_where == "" then [] else ($flash_where | split(",")) end)},
+    integrity:{at:($integ_at|tonumber? // 0), files:($integ_files|tonumber? // 0), spoiled:($integ_spoiled|tonumber? // 0), written:($integ_written|tonumber? // 0), unknown:($integ_unknown|tonumber? // 0)}
   },
 
   dependencies:{

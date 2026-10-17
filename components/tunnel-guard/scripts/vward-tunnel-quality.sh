@@ -25,6 +25,9 @@ export VWARD_ACTOR
 VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 [ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
 . "$VWARD_PROFILE_LIB"
+# The device library of an older release (a file-by-file update half done): read directly.
+command -v vward_keenetic_config >/dev/null 2>&1 ||
+    vward_keenetic_config() { "${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r'; }
 
 DIR=${VWARD_TUNNEL_QUALITY_DIR:-/tmp/vward-tunnel-quality}
 SAMPLES="$DIR/samples.tsv"
@@ -144,7 +147,7 @@ services() {
     # The tunnels answering now: name and device.
     summary | awk -F '\t' '$5 >= 2 && $3 < 100 {print $1 "\t" $2}' > "$L/alive"
     [ "$(grep -c . "$L/alive")" -ge 2 ] || { rm -f "$SERVICES_DIR/state.tsv"; return 0; }
-    "$NDMC" -c "show running-config" 2>/dev/null | tr -d '\r' |
+    vward_keenetic_config |
         awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
             ctx && $1 == "route" && $2 == "object-group" {print $3 "\t" $4}' > "$L/routes"
     [ -s "$L/routes" ] || return 1

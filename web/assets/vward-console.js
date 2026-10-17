@@ -636,7 +636,7 @@ const LOG_TABS = [
   { id: 'adaptive', label: 'Автоподбор доменов' }, { id: 'routing', label: 'Сверка маршрутов' }, { id: 'policy', label: 'IP-категории' }, { id: 'wifi', label: 'Wi-Fi' },
   { id: 'ads', label: 'Реклама' }, { id: 'updater', label: 'Обновления' }, { id: 'cron', label: 'Расписание' }, { id: 'console', label: 'Панель VWARD' },
   { id: 'awg', label: 'AmneziaWG' }, { id: 'vless', label: 'VLESS' }, { id: 'sentinel', label: 'Реальное время' },
-  { id: 'supervisor', label: 'Агент компонентов' }, { id: 'housekeeping', label: 'Обслуживание' }, { id: 'off', label: 'Отключение VWARD' }
+  { id: 'supervisor', label: 'Агент компонентов' }, { id: 'housekeeping', label: 'Обслуживание' }, { id: 'integrity', label: 'Целостность файлов' }, { id: 'off', label: 'Отключение VWARD' }
 ];
 // «Все»: every journal in one timeline (first, and open by default).
 const LOG_VIEW = [{ id: 'all', label: 'Все' }].concat(LOG_TABS);
@@ -1404,7 +1404,14 @@ const RENDER = {
         (() => { const sc = stabScore(stabRows(S.stab, 86400), stabChecks(S.stab)); return ['Стабильность', sc && sc.index != null ? sc.index + '% за сутки' : S.stab ? 'не проверено' : '…', stabCls(sc && sc.index), 'd-stability']; })(),
         ['Файлы VWARD', '', '', 'd-files']
       ])) + agentsPanel() +
-      panel('Хранилище', kv([['Свободно', fmtKB(g.free_kb) + ' из ' + fmtKB(g.total_kb)], ['Файловая система', g.filesystem || '—'], ['Сжатие журналов', 'каждый час', '', 'd-cron']]) +
+      panel('Хранилище', kv([['Свободно', fmtKB(g.free_kb) + ' из ' + fmtKB(g.total_kb)], ['Файловая система', g.filesystem || '—'],
+        // The stick as the maintenance agent sees it (fix.28.3): kernel errors and the daily file check.
+        (() => { const f = g.flash; return ['Флешка', !f ? '—' : f.errors ? 'ошибок: ' + f.errors : 'ошибок нет', f && f.errors ? (f.io ? 'crit' : 'warn') : '', null, '',
+          f && f.errors ? (f.io ? 'из них чтения и записи: ' + f.io : 'ошибки файловой системы') + (f.where && f.where.length ? ' · ' + f.where.join(', ') : '') : '']; })(),
+        (() => { const it = g.integrity; if (!it || !it.at) return ['Целостность файлов', 'ещё не проверялась', '', 'logs', '', 'раз в сутки, ночью'];
+          return ['Целостность файлов', it.spoiled ? 'испорчено: ' + it.spoiled : 'в порядке', it.spoiled ? 'crit' : 'ok', 'logs', '',
+            'проверено ' + fmtInt(it.files) + ' ' + plural(it.files, 'файл', 'файла', 'файлов') + ' · ' + fmtStamp(it.at) + (it.unknown ? ' · изменено неизвестно кем: ' + it.unknown : '')]; })(),
+        ['Сжатие журналов', 'каждый час', '', 'd-cron']]) +
         '<div class="panel-actions">' + btn('housekeeping', 'archive', 'Сжать журналы сейчас') + '</div>' + resultBox('storage'),
         { desc: 'Большие журналы сжимаются в архив и хранятся по настройке «Хранение журналов».' });
   },

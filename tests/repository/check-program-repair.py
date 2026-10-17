@@ -131,7 +131,7 @@ esac
     installs = [o for o in ops if o.startswith("install")]
     if installs != ["install --force-reinstall libcares"] or (t / "doh.broken").exists():
         fail(f"only the damaged library is reinstalled: {ops}")
-    if "repair=doh|damaged=libcares|reinstalled|opkg=0|still_damaged=|copy=" not in log or "copy=none" in log:
+    if "repair=doh|damaged=libcares|reinstalled=libcares|held=|opkg=0|still_damaged=|copy=" not in log or "copy=none" in log:
         fail(f"the DoH repair is not logged with a copy: {log[-300:]}")
     copies = list((r / "opt/var/lib/vward/repair").glob("doh-*.tar.gz"))
     if len(copies) != 1 or b"SPOILED" not in __import__("gzip").open(copies[0]).read():

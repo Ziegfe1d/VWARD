@@ -10,6 +10,8 @@ VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admissio
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
 . "$VWARD_ADMISSION_LIB"
 command -v vward_defer >/dev/null 2>&1 || vward_defer() { return 1; }
+# An admission library of an older release: the agent acts, as before observation mode.
+command -v vward_agent_acts >/dev/null 2>&1 || vward_agent_acts() { return 0; }
 vward_admission_enter housekeeping || exit $?
 cleanup() { vward_admission_leave 2>/dev/null || true; }
 trap cleanup EXIT
@@ -37,6 +39,7 @@ POLICY="
 /opt/var/log/vward-route-hints.log|262144
 /opt/var/log/vward-route.log|262144
 /opt/var/log/vward-cron-supervisor.log|262144
+/opt/var/log/vward-integrity.log|262144
 /opt/var/log/vward-route-discovery.log|262144
 /opt/var/log/vward-ads-privacy-guard.log|524288
 /opt/var/log/vward-wifi-client-guard.log|262144
@@ -449,6 +452,8 @@ repair_if_crashing()
         echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=$rp_name|crash=$rp_rc|next_try_later" >> "$HOUSE_LOG"
         return 0
     fi
+    # Observation mode of the maintenance agent (fix.28.2): proposed, not reinstalled.
+    vward_agent_acts maintenance "repair:$rp_name" "$rp_name падает (код $rp_rc): переустановить $rp_pkgs" || return 0
     mkdir -p "$REPAIR_DIR" && echo "$rp_now" > "$REPAIR_DIR/$rp_name"
     # shellcheck disable=SC2086
     "$OPKG" install --force-reinstall $rp_pkgs </dev/null >/dev/null 2>&1
@@ -487,7 +492,8 @@ repair_due()
     [ $((rd_now - rd_last)) -ge 86400 ] || return 1
     mkdir -p "$REPAIR_DIR" && echo "$rd_now" > "$REPAIR_DIR/$1"
 }
-if [ -x "$REPAIR_CURL" ] && [ -n "$(find "$REPAIR_TLS_FLAG" -mmin -60 2>/dev/null)" ] && repair_due curl-https; then
+if [ -x "$REPAIR_CURL" ] && [ -n "$(find "$REPAIR_TLS_FLAG" -mmin -60 2>/dev/null)" ] &&
+   vward_agent_acts maintenance repair:curl-https "curl падает на HTTPS: переустановить libnghttp2, libcurl, curl и сертификаты" && repair_due curl-https; then
     "$OPKG" install --force-reinstall libnghttp2 libcurl curl ca-bundle </dev/null >/dev/null 2>&1
     rh_opkg=$?
     https_try
@@ -529,12 +535,64 @@ pkg_damaged()
     done
     rmdir "$PKG_TMP" 2>/dev/null || :
 }
+# pkg_repair TAG PKG...: the damaged packages reinstalled from Entware, a copy of their files
+# first. Never a loop of reinstalls: a package once a day at most; one spoiled again after 2
+# reinstalls within 7 days is left alone (the stick does not keep it, the owner is told to
+# replace it); 3 reinstalls a day on the whole router at most. PR_DONE - reinstalled, PR_HELD -
+# left alone, PR_STILL - still damaged after it, PR_COPY - the copy, PR_OPKG - opkg's answer.
+PKG_BOOK=${VWARD_PKG_REPAIRS:-$REPAIR_DIR/packages.tsv}
+pkg_repair()
+{
+    PR_DONE= PR_HELD= PR_STILL= PR_COPY= PR_OPKG=
+    pr_tag=$1; shift
+    pr_now=$(date +%s)
+    mkdir -p "$REPAIR_DIR" 2>/dev/null || return 0
+    touch "$PKG_BOOK"
+    for pr_p in "$@"; do
+        pr_last=$(awk -v p="$pr_p" '$2 == p {t = $1} END {print t + 0}' "$PKG_BOOK")
+        pr_week=$(awk -v p="$pr_p" -v n="$pr_now" '$2 == p && $1 + 604800 > n {c++} END {print c + 0}' "$PKG_BOOK")
+        pr_day=$(awk -v n="$pr_now" '$1 + 86400 > n {c++} END {print c + 0}' "$PKG_BOOK")
+        pr_n=$(echo $PR_DONE | wc -w)
+        if [ $((pr_now - pr_last)) -lt 86400 ] || [ "$pr_week" -ge 2 ] || [ $((pr_day + pr_n)) -ge 3 ]; then
+            PR_HELD="$PR_HELD $pr_p"
+        else
+            PR_DONE="$PR_DONE $pr_p"
+        fi
+    done
+    PR_DONE=${PR_DONE# } PR_HELD=${PR_HELD# }
+    [ -n "$PR_DONE" ] || return 0
+    PR_COPY=$REPAIR_DIR/$pr_tag-$(date +%Y%m%d-%H%M%S).tar.gz
+    # shellcheck disable=SC2086
+    pr_files=$(for pr_p in $PR_DONE; do "$OPKG" files "$pr_p" 2>/dev/null; done | grep '^/opt/' | grep -v '^/opt/etc/')
+    # shellcheck disable=SC2086
+    ( cd "$R/" && tar -czf "$PR_COPY" $(printf '%s\n' $pr_files | sed 's#^/##') ) 2>/dev/null || PR_COPY=
+    ls -t "$REPAIR_DIR"/*-2*.tar.gz 2>/dev/null | tail -n +4 | while IFS= read -r pr_old; do rm -f "$pr_old"; done
+    # shellcheck disable=SC2086
+    "$OPKG" install --force-reinstall $PR_DONE </dev/null >/dev/null 2>&1
+    PR_OPKG=$?
+    for pr_p in $PR_DONE; do echo "$pr_now $pr_p $pr_tag"; done >> "$PKG_BOOK"
+    awk -v n="$pr_now" '$1 + 2592000 > n' "$PKG_BOOK" > "$PKG_BOOK.$$" && mv -f "$PKG_BOOK.$$" "$PKG_BOOK"
+    pr_out=$R/tmp/vward-pkg-still.$$
+    # shellcheck disable=SC2086
+    pkg_damaged $PR_DONE > "$pr_out"
+    PR_STILL=$(tr '\n' ' ' < "$pr_out"); PR_STILL=${PR_STILL% }; rm -f "$pr_out"
+}
+# pkg_repair_text: what pkg_repair did, for the owner.
+pkg_repair_text()
+{
+    pt=
+    [ -z "$PR_DONE" ] || pt="VWARD переустановил из Entware: $(echo $PR_DONE | sed 's/ /, /g')${PR_COPY:+ (прежние файлы сохранены)}."
+    [ -z "$PR_STILL" ] || pt="$pt Не помогло: $(echo $PR_STILL | sed 's/ /, /g')."
+    [ -z "$PR_HELD" ] || pt="$pt Не переустановлены, чтобы не повторять по кругу: $(echo $PR_HELD | sed 's/ /, /g')."
+    echo "$pt Проверьте флешку на компьютере или замените её: повреждения будут повторяться."
+}
 # Smart DNS's DoH client (https-dns-proxy) restarted three times within 6 hours (the components
 # agent noted it): its packages are checked against Entware and only the damaged ones are
 # reinstalled, with a copy of their files first, at most once a day; the owner is told the
 # stick spoils files. Intact files: nothing reinstalled (it would not help). curl is not touched.
 DOH_PKGS=${VWARD_DOH_PKGS:-https-dns-proxy libcares libev libnghttp2 libcurl libopenssl}
-if [ -n "$(find "$REPAIR_DOH_FLAG" -mmin -360 2>/dev/null)" ] && repair_due doh; then
+if [ -n "$(find "$REPAIR_DOH_FLAG" -mmin -360 2>/dev/null)" ] &&
+   vward_agent_acts maintenance repair:doh "Клиент DoH Smart DNS перезапускался 3 раза: сверить его пакеты с Entware и переустановить испорченные" && repair_due doh; then
     rm -f "$REPAIR_DOH_FLAG"
     rd_out=$R/tmp/vward-doh-damaged.$$
     # shellcheck disable=SC2086
@@ -543,27 +601,189 @@ if [ -n "$(find "$REPAIR_DOH_FLAG" -mmin -360 2>/dev/null)" ] && repair_due doh;
     if [ -z "$rd_bad" ]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=doh|files=intact|unchecked=$(echo $PKG_UNCHECKED | tr ' ' ',')" >> "$HOUSE_LOG"
     else
-        rd_copy=$REPAIR_DIR/doh-$(date +%Y%m%d-%H%M%S).tar.gz
-        # shellcheck disable=SC2086
-        rd_files=$(for rd_p in $rd_bad; do "$OPKG" files "$rd_p" 2>/dev/null; done | grep '^/opt/' | grep -v '^/opt/etc/')
-        mkdir -p "$REPAIR_DIR"
-        # shellcheck disable=SC2086
-        ( cd "$R/" && tar -czf "$rd_copy" $(printf '%s\n' $rd_files | sed 's#^/##') ) 2>/dev/null || rd_copy=
-        ls -t "$REPAIR_DIR"/doh-*.tar.gz 2>/dev/null | tail -n +3 | while IFS= read -r rd_old; do rm -f "$rd_old"; done
-        # shellcheck disable=SC2086
-        "$OPKG" install --force-reinstall $rd_bad </dev/null >/dev/null 2>&1
-        rd_opkg=$?
-        # shellcheck disable=SC2086
-        rd_still=$(pkg_damaged $rd_bad | tr '\n' ' ')
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=doh|damaged=$(echo $rd_bad | tr ' ' ',')|reinstalled|opkg=$rd_opkg|still_damaged=$(echo $rd_still | tr ' ' ',')|copy=${rd_copy:-none}" >> "$HOUSE_LOG"
+        pkg_repair doh $rd_bad
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=doh|damaged=$(echo $rd_bad | tr ' ' ',')|reinstalled=$(echo $PR_DONE | tr ' ' ',')|held=$(echo $PR_HELD | tr ' ' ',')|opkg=$PR_OPKG|still_damaged=$(echo $PR_STILL | tr ' ' ',')|copy=${PR_COPY:-none}" >> "$HOUSE_LOG"
         command -v vward_note >/dev/null 2>&1 ||
             { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
         ! command -v vward_note >/dev/null 2>&1 || vward_note warn "Флешка портит файлы программ" \
-            "Повреждены файлы пакетов: $(echo $rd_bad | sed 's/ /, /g'). Из-за этого не запускался клиент Smart DNS. VWARD переустановил их из Entware${rd_copy:+, прежние файлы сохранены}. Проверьте флешку на компьютере или замените её: повреждения будут повторяться." system
+            "Повреждены файлы пакетов: $(echo $rd_bad | sed 's/ /, /g'). Из-за этого не запускался клиент Smart DNS. $(pkg_repair_text)" system
     fi
 fi
 repair_if_crashing jq jq "$REPAIR_JQ" -n 1
 repair_if_crashing openssl "libopenssl openssl-util" "$REPAIR_OPENSSL" version
+
+# The USB stick (fix.28.2): file system and read/write errors in the kernel's messages. A damaged
+# directory on the stick (Viva 2026-10-17: 10 «EXT4-fs error» on one inode, Keenetic's own
+# usb.d) went unseen until the owner looked by hand. Every hour, only what is new since the last
+# look (the messages live in RAM until a reboot): one journal line, the bell once a day with the
+# damaged place (an inode's path is looked for once) and what to do. Only looks; repairs nothing.
+FLASH_STATE=${VWARD_FLASH_STATE:-$R/tmp/vward-flash}
+FLASH_DMESG=${VWARD_DMESG_BIN:-dmesg}
+flash_watch()
+{
+    mkdir -p "$FLASH_STATE" 2>/dev/null || return 0
+    "$FLASH_DMESG" 2>/dev/null | sed 's/^\[[ 0-9.]*\] *//' |
+        grep -E 'EXT4-fs (error|warning)|EXT[23]-fs error|I/O error|Buffer I/O|FAT-fs \(.*\): error|blk_update_request: (critical medium|I/O)' |
+        sort -u > "$FLASH_STATE/now" 2>/dev/null
+    touch "$FLASH_STATE/seen"
+    grep -vxF -f "$FLASH_STATE/seen" "$FLASH_STATE/now" > "$FLASH_STATE/new" 2>/dev/null
+    mv -f "$FLASH_STATE/now" "$FLASH_STATE/seen"
+    fw_n=$(grep -c . "$FLASH_STATE/new" 2>/dev/null)
+    case "$fw_n" in ''|*[!0-9]*|0) rm -f "$FLASH_STATE/new"; return 0 ;; esac
+    fw_io=$(grep -cE 'I/O error|Buffer I/O|critical medium' "$FLASH_STATE/new")
+    fw_dev=$(sed -n 's/.*(device \([a-z0-9]*\)).*/\1/p; s/.* dev \([a-z0-9]*\)[ ,].*/\1/p' "$FLASH_STATE/new" | head -n 1)
+    fw_paths=
+    for fw_ino in $(sed -n 's/.*inode #\([0-9]*\).*/\1/p' "$FLASH_STATE/new" | sort -u | head -n 3); do
+        fw_p=
+        [ ! -r "$FLASH_STATE/inode.$fw_ino" ] || read -r fw_p < "$FLASH_STATE/inode.$fw_ino"
+        if [ -z "$fw_p" ]; then
+            fw_p=$(find "$R/opt" -xdev -inum "$fw_ino" 2>/dev/null | head -n 1)
+            fw_p=${fw_p#"$R"}
+            printf '%s\n' "${fw_p:-?}" > "$FLASH_STATE/inode.$fw_ino"
+        fi
+        fw_paths="$fw_paths${fw_paths:+, }${fw_p:-inode $fw_ino}"
+    done
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|flash_errors=$fw_n|io=$fw_io|device=${fw_dev:-?}|where=${fw_paths:-?}" >> "$HOUSE_LOG"
+    sed -n '1,5p' "$FLASH_STATE/new" | sed "s/^/$(date '+%Y-%m-%d %H:%M:%S')|flash|/" >> "$HOUSE_LOG"
+    rm -f "$FLASH_STATE/new"
+    # The bell: once a day; read/write errors are the stick itself, the others its file system.
+    [ -z "$(find "$FLASH_STATE/told" -mmin -1440 2>/dev/null)" ] || return 0
+    : > "$FLASH_STATE/told"
+    command -v vward_note >/dev/null 2>&1 ||
+        { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+    command -v vward_note >/dev/null 2>&1 || return 0
+    if [ "$fw_io" -gt 0 ]; then
+        vward_note err "Флешка: ошибки чтения и записи" \
+            "Ядро роутера сообщило об ошибках чтения или записи USB-накопителя${fw_dev:+ ($fw_dev)}: $fw_io. Накопитель может выходить из строя: сохраните копию настроек VWARD (Система → Копия настроек) и замените его."
+    else
+        vward_note warn "Флешка: ошибки файловой системы" \
+            "Ядро роутера нашло ошибки файловой системы USB-накопителя${fw_dev:+ ($fw_dev)}: $fw_n${fw_paths:+; повреждено: $fw_paths}. Ошибок чтения и записи нет. Повреждённый каталог можно переименовать и создать заново; полная проверка (fsck) - на компьютере."
+    fi
+}
+flash_watch
+
+# File integrity (fix.28.3): once a day, at night, every program file of Entware and VWARD -
+# size, time of change, checksum - against yesterday's. A program that writes a file changes
+# its time; the stick that spoils one changes only the contents (Viva 2026-10-17: libcares of
+# Smart DNS's client spoiled, its time as installed). Journal: SPOILED (contents changed, time
+# the same), WRITTEN by=opkg:PKG | vward-update | unknown, ADDED, REMOVED, and a summary. A
+# spoiled file of a package is checked against the same version in Entware and the package
+# reinstalled (pkg_repair: never in a loop); a spoiled file of VWARD itself is told. Files the
+# owner or another program wrote are only written down.
+INTEG_DIR=${VWARD_INTEGRITY_DIR:-$R/opt/var/lib/vward/integrity}
+INTEG_LOG=${VWARD_INTEGRITY_LOG:-$R/opt/var/log/vward-integrity.log}
+INTEG_ROOTS=${VWARD_INTEGRITY_ROOTS:-/opt/bin /opt/sbin /opt/lib /opt/share/vward}
+INTEG_UPDATER_LOG=${VWARD_INTEGRITY_UPDATER_LOG:-$R/opt/var/log/vward/updater.log}
+integrity_due()
+{
+    [ "${VWARD_INTEGRITY_NOW:-0}" = 1 ] && return 0
+    [ -z "$(find "$INTEG_DIR/skipped" -mmin -1440 2>/dev/null)" ] || return 1
+    [ -s "$INTEG_DIR/snapshot.tsv" ] || return 0
+    # Older than 2 days: whatever the hour; else once a day, between 02:00 and 06:00.
+    [ -z "$(find "$INTEG_DIR/snapshot.tsv" -mmin +2880 2>/dev/null)" ] || return 0
+    [ -n "$(find "$INTEG_DIR/snapshot.tsv" -mmin +1200 2>/dev/null)" ] || return 1
+    case "$(date +%H)" in 02|03|04|05) return 0 ;; esac
+    return 1
+}
+integrity_snapshot()
+{
+    is_roots=
+    for is_r in $INTEG_ROOTS; do [ ! -d "$R$is_r" ] || is_roots="$is_roots $R$is_r"; done
+    [ -n "$is_roots" ] || return 1
+    # Each file: the time of change («date -r»: Keenetic's BusyBox has no stat with a format)
+    # and the checksum. The size is not needed: the time and the contents tell it all.
+    # shellcheck disable=SC2086
+    find $is_roots -xdev -type f ! -path '*/opt/lib/opkg/*' ! -name '*.pyc' 2>/dev/null > "$INTEG_DIR/list.$$"
+    while IFS= read -r is_f; do
+        is_m=$(date -r "$is_f" +%s 2>/dev/null) || continue
+        is_h=$(md5sum < "$is_f" 2>/dev/null) || continue
+        printf '%s\t-\t%s\t%s\n' "${is_f#"$R"}" "$is_m" "${is_h%% *}"
+    done < "$INTEG_DIR/list.$$" | sort > "$1"
+    rm -f "$INTEG_DIR/list.$$"
+    [ -s "$1" ]
+}
+integrity_watch()
+{
+    integrity_due || return 0
+    mkdir -p "$INTEG_DIR" 2>/dev/null || return 0
+    iw_t0=$(date +%s)
+    iw_prev_at=0
+    [ ! -s "$INTEG_DIR/snapshot.tsv" ] || iw_prev_at=$(date -r "$INTEG_DIR/snapshot.tsv" +%s 2>/dev/null || echo 0)
+    if ! integrity_snapshot "$INTEG_DIR/snapshot.new"; then
+        # No stat or md5sum on this router: said once, the look waits a day.
+        rm -f "$INTEG_DIR/snapshot.new"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|SKIPPED|no_tools" >> "$INTEG_LOG"
+        : > "$INTEG_DIR/skipped"
+        return 0
+    fi
+    iw_now=$(date '+%Y-%m-%d %H:%M:%S')
+    if [ ! -s "$INTEG_DIR/snapshot.tsv" ]; then
+        mv -f "$INTEG_DIR/snapshot.new" "$INTEG_DIR/snapshot.tsv"
+        iw_n=$(grep -c . "$INTEG_DIR/snapshot.tsv")
+        echo "$iw_now|SUMMARY|files=$iw_n|first=1|seconds=$(( $(date +%s) - iw_t0 ))" >> "$INTEG_LOG"
+        printf 'at=%s\nfiles=%s\nspoiled=0\nwritten=0\nunknown=0\n' "$(date +%s)" "$iw_n" > "$INTEG_DIR/state"
+        return 0
+    fi
+    # The VWARD update installed since the last look (its own journal): VWARD's files it wrote.
+    iw_upd=0
+    awk -v t="$(date -u -d "@$iw_prev_at" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo 0)" '/committed/ && substr($0, 1, 19) >= t {f = 1} END {exit !f}' "$INTEG_UPDATER_LOG" 2>/dev/null && iw_upd=1
+    awk -F '\t' 'FNR == NR {s[$1] = $2; m[$1] = $3; h[$1] = $4; next}
+        !($1 in s) {print "ADDED\t" $1; next}
+        {seen[$1] = 1}
+        m[$1] == $3 && s[$1] == $2 && h[$1] != $4 {print "SPOILED\t" $1; next}
+        m[$1] != $3 || s[$1] != $2 || h[$1] != $4 {print "WRITTEN\t" $1}
+        END {for (f in s) if (!(f in seen)) print "REMOVED\t" f}' "$INTEG_DIR/snapshot.tsv" "$INTEG_DIR/snapshot.new" > "$INTEG_DIR/diff"
+    iw_sp=0 iw_wr=0 iw_un=0 iw_vw= iw_pk=
+    iw_add=$(grep -c '^ADDED' "$INTEG_DIR/diff") iw_rem=$(grep -c '^REMOVED' "$INTEG_DIR/diff")
+    while IFS="$(printf '\t')" read -r iw_k iw_f; do
+        iw_pkg=$(grep -lx -- "$iw_f" "$R"/opt/lib/opkg/info/*.list 2>/dev/null | head -n 1)
+        iw_pkg=${iw_pkg##*/}; iw_pkg=${iw_pkg%.list}
+        case "$iw_k" in
+            SPOILED)
+                iw_sp=$((iw_sp + 1))
+                echo "$iw_now|SPOILED|$iw_f|pkg=${iw_pkg:-vward}" >> "$INTEG_LOG"
+                if [ -n "$iw_pkg" ]; then case " $iw_pk " in *" $iw_pkg "*) ;; *) iw_pk="$iw_pk $iw_pkg" ;; esac
+                else iw_vw="$iw_vw${iw_vw:+, }$iw_f"; fi ;;
+            WRITTEN)
+                iw_wr=$((iw_wr + 1))
+                iw_by=unknown
+                # opkg rewrites the package's file list when it installs it.
+                if [ -n "$iw_pkg" ] && [ "$(date -r "$R/opt/lib/opkg/info/$iw_pkg.list" +%s 2>/dev/null || echo 0)" -ge "$iw_prev_at" ]; then iw_by=opkg:$iw_pkg
+                elif [ -z "$iw_pkg" ] && [ "$iw_upd" = 1 ]; then iw_by=vward-update
+                fi
+                [ "$iw_by" != unknown ] || iw_un=$((iw_un + 1))
+                [ "$iw_wr" -gt 50 ] || echo "$iw_now|WRITTEN|$iw_f|by=$iw_by" >> "$INTEG_LOG" ;;
+            ADDED) [ "$iw_add" -gt 20 ] || echo "$iw_now|ADDED|$iw_f" >> "$INTEG_LOG" ;;
+            REMOVED) [ "$iw_rem" -gt 20 ] || echo "$iw_now|REMOVED|$iw_f" >> "$INTEG_LOG" ;;
+        esac
+    done < "$INTEG_DIR/diff"
+    mv -f "$INTEG_DIR/snapshot.new" "$INTEG_DIR/snapshot.tsv"
+    rm -f "$INTEG_DIR/diff"
+    iw_n=$(grep -c . "$INTEG_DIR/snapshot.tsv")
+    iw_pk=${iw_pk# }
+    PR_DONE= PR_HELD= PR_STILL= PR_COPY= PR_OPKG=
+    if [ -n "$iw_pk" ] && vward_agent_acts maintenance repair:integrity "Испорченные флешкой файлы пакетов ($iw_pk): сверить с Entware и переустановить"; then
+        iw_out=$R/tmp/vward-integ-damaged.$$
+        # shellcheck disable=SC2086
+        pkg_damaged $iw_pk > "$iw_out"
+        iw_conf=$(tr '\n' ' ' < "$iw_out"); iw_conf=${iw_conf% }; rm -f "$iw_out"
+        # shellcheck disable=SC2086
+        [ -z "$iw_conf" ] || pkg_repair integrity $iw_conf
+        echo "$iw_now|REPAIR|spoiled=$(echo $iw_pk | tr ' ' ',')|confirmed=$(echo $iw_conf | tr ' ' ',')|reinstalled=$(echo $PR_DONE | tr ' ' ',')|held=$(echo $PR_HELD | tr ' ' ',')|still=$(echo $PR_STILL | tr ' ' ',')|unchecked=$(echo $PKG_UNCHECKED | tr ' ' ',')" >> "$INTEG_LOG"
+    fi
+    echo "$iw_now|SUMMARY|files=$iw_n|spoiled=$iw_sp|written=$iw_wr|unknown=$iw_un|added=$iw_add|removed=$iw_rem|seconds=$(( $(date +%s) - iw_t0 ))" >> "$INTEG_LOG"
+    echo "$iw_now|integrity=files:$iw_n|spoiled=$iw_sp|written=$iw_wr|unknown=$iw_un" >> "$HOUSE_LOG"
+    printf 'at=%s\nfiles=%s\nspoiled=%s\nwritten=%s\nunknown=%s\nreinstalled=%s\nheld=%s\n' "$(date +%s)" "$iw_n" "$iw_sp" "$iw_wr" "$iw_un" "$PR_DONE" "$PR_HELD" > "$INTEG_DIR/state"
+    [ "$iw_sp" -gt 0 ] || return 0
+    command -v vward_note >/dev/null 2>&1 ||
+        { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+    command -v vward_note >/dev/null 2>&1 || return 0
+    iw_txt="Испорчено файлов: $iw_sp: содержимое изменилось, хотя ни одна программа их не записывала.${iw_pk:+ Пакеты: $(echo $iw_pk | sed 's/ /, /g').}${iw_vw:+ Файлы VWARD: $iw_vw - их исправит переустановка обновления VWARD.}"
+    [ -z "$iw_pk" ] || iw_txt="$iw_txt $(pkg_repair_text)"
+    [ -n "$iw_pk" ] || iw_txt="$iw_txt Проверьте флешку на компьютере или замените её."
+    vward_note err "Флешка портит файлы программ" "$iw_txt" system
+}
+integrity_watch
 
 # VWARD switched off as a whole («Отключить VWARD»): logs, copies and VWARD's own updates go
 # on (a fix may arrive), nothing else VWARD does starts.

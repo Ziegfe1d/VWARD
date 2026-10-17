@@ -123,7 +123,7 @@ audit() {
 # A change done (a background job finishes after its request) drops the Panel's short cache
 # of the router's answers, so the next page shows the router as it is now.
 done_ok() {
-    [ "$2" != changed ] || rm -rf "${VWARD_CONSOLE_CACHE_DIR:-/tmp/vward-console-cache}" 2>/dev/null
+    [ "$2" != changed ] || rm -rf "${VWARD_CONSOLE_CACHE_DIR:-/tmp/vward-console-cache}" "${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}/running-config" 2>/dev/null
     audit "$1 result=$2"; printf 'result=%s\n' "$2"; exit 0
 }
 

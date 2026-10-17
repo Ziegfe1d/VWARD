@@ -417,17 +417,97 @@ vward_https_broken()
 vward_running_config()
 {
     _vrc_jq=${VWARD_JQ_BIN:-$(vward_tool jq)}
+    _vrc_t0=$(date +%s)
     if [ -n "$_vrc_jq" ] &&
        _vrc_cfg=$(vward_rci_get show/running-config 30 |
            "$_vrc_jq" -er '.message | if type == "array" and length > 0 then .[] else error("empty") end' 2>/dev/null) &&
        [ -n "$_vrc_cfg" ]; then
+        vward_keenetic_timed running-config "$_vrc_t0"
         printf '%s\n' "$_vrc_cfg"
         _vrc_cfg=
         return 0
     fi
     _vrc_cfg=
-    command -v ndmc >/dev/null 2>&1 || return 1
+    command -v ndmc >/dev/null 2>&1 || { vward_keenetic_timed running-config "$_vrc_t0" failed; return 1; }
     ndmc -c 'show running-config' 2>/dev/null
+    _vrc_rc=$?
+    vward_keenetic_timed running-config "$_vrc_t0" "$([ "$_vrc_rc" = 0 ] || echo failed)"
+    return "$_vrc_rc"
+}
+
+# «Роутер отвечает медленно» (fix.28.2): every VWARD agent read Keenetic's whole configuration
+# for itself, several times a minute, and each read waits for Keenetic's busy configuration
+# service. Now the agents that only look share one read: the first asks Keenetic, the others
+# take its answer for VWARD_KEENETIC_AGE seconds (they wait for a read under way instead of
+# asking again). Whoever changes Keenetic's configuration drops the copy (vward_keenetic_dirty);
+# programs that change it read it fresh (vward_running_config). Kept in RAM.
+# A stand-in ndmc (VWARD_NDMC, the tests) shares no copy unless its own place is given.
+_VWARD_KCACHE_OWN=${VWARD_KCACHE:+1}
+VWARD_KCACHE=${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}
+VWARD_KEENETIC_SLOW_LOG=${VWARD_KEENETIC_SLOW_LOG:-${VWARD_ROOT_PREFIX:-}/opt/var/log/vward/keenetic-slow.log}
+
+# vward_keenetic_timed WHAT T0 [failed]: an answer of Keenetic that took 3 s or more goes into the
+# journal «who waited»: time, the program, what it asked, seconds (the last 300 kept).
+vward_keenetic_timed()
+{
+    _vkt_s=$(( $(date +%s) - $2 ))
+    [ "$_vkt_s" -ge "${VWARD_KEENETIC_SLOW:-3}" ] || [ -n "${3:-}" ] || return 0
+    mkdir -p "${VWARD_KEENETIC_SLOW_LOG%/*}" 2>/dev/null
+    printf '%s|%s|%s|%s|%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${VWARD_ACTOR:-${0##*/}}" "$1" "$_vkt_s" "${3:-ok}" >> "$VWARD_KEENETIC_SLOW_LOG" 2>/dev/null || return 0
+    [ "$(wc -l < "$VWARD_KEENETIC_SLOW_LOG")" -le 360 ] ||
+        { tail -n 300 "$VWARD_KEENETIC_SLOW_LOG" > "$VWARD_KEENETIC_SLOW_LOG.$$" && mv -f "$VWARD_KEENETIC_SLOW_LOG.$$" "$VWARD_KEENETIC_SLOW_LOG"; } 2>/dev/null
+    return 0
+}
+
+vward_keenetic_dirty() { rm -f "$VWARD_KCACHE/running-config" 2>/dev/null; return 0; }
+
+# _vward_kc_fresh AGE: the shared copy is younger than AGE seconds.
+_vward_kc_fresh()
+{
+    [ -s "$VWARD_KCACHE/running-config" ] || return 1
+    _vkf_m=$(date -r "$VWARD_KCACHE/running-config" +%s 2>/dev/null) || return 1
+    _vkf_d=$(( $(date +%s) - _vkf_m ))
+    [ "$_vkf_d" -ge 0 ] && [ "$_vkf_d" -lt "$1" ]
+}
+
+# vward_keenetic_config [AGE]: Keenetic's running configuration (ndmc text, no CR), shared.
+vward_keenetic_config()
+{
+    _vkc_age=${1:-${VWARD_KEENETIC_AGE:-20}}
+    if [ -n "${VWARD_NDMC:-}" ] && [ -z "$_VWARD_KCACHE_OWN" ]; then
+        "$VWARD_NDMC" -c 'show running-config' 2>/dev/null | tr -d '\r'
+        return
+    fi
+    _vward_kc_fresh "$_vkc_age" && { cat "$VWARD_KCACHE/running-config"; return 0; }
+    mkdir -p "$VWARD_KCACHE" 2>/dev/null || return 1
+    _vkc_own=0 _vkc_w=0
+    while :; do
+        mkdir "$VWARD_KCACHE/lock" 2>/dev/null && { _vkc_own=1; break; }
+        # A read under way: its answer, at most 35 s later; a lock older than a minute is left over.
+        [ -n "$(find "$VWARD_KCACHE/lock" -maxdepth 0 -mmin -1 2>/dev/null)" ] || { rmdir "$VWARD_KCACHE/lock" 2>/dev/null; continue; }
+        [ "$_vkc_w" -lt 35 ] || break
+        sleep 1; _vkc_w=$((_vkc_w + 1))
+        _vward_kc_fresh "$_vkc_age" && { cat "$VWARD_KCACHE/running-config"; return 0; }
+    done
+    # The reader before us may have just finished: its answer then.
+    if [ "$_vkc_own" = 1 ] && _vward_kc_fresh "$_vkc_age"; then
+        rmdir "$VWARD_KCACHE/lock" 2>/dev/null
+        cat "$VWARD_KCACHE/running-config"
+        return 0
+    fi
+    _vkc_t0=$(date +%s)
+    "${VWARD_NDMC:-ndmc}" -c 'show running-config' 2>/dev/null | tr -d '\r' > "$VWARD_KCACHE/running-config.$$"
+    if [ -s "$VWARD_KCACHE/running-config.$$" ]; then
+        vward_keenetic_timed running-config "$_vkc_t0"
+        mv -f "$VWARD_KCACHE/running-config.$$" "$VWARD_KCACHE/running-config"
+        [ "$_vkc_own" = 0 ] || rmdir "$VWARD_KCACHE/lock" 2>/dev/null
+        cat "$VWARD_KCACHE/running-config"
+        return 0
+    fi
+    vward_keenetic_timed running-config "$_vkc_t0" failed
+    rm -f "$VWARD_KCACHE/running-config.$$"
+    [ "$_vkc_own" = 0 ] || rmdir "$VWARD_KCACHE/lock" 2>/dev/null
+    return 1
 }
 
 # State of one Keenetic interface as four lines: state, link, online (yes/no),

@@ -10,6 +10,9 @@ export VWARD_ACTOR
 VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 [ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
 . "$VWARD_PROFILE_LIB"
+# The device library of an older release (a file-by-file update half done): read directly.
+command -v vward_keenetic_config >/dev/null 2>&1 ||
+    vward_keenetic_config() { "${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r'; }
 # The bell's history (fix.26); a library from before it records nothing, the agent works the same.
 command -v vward_note >/dev/null 2>&1 || vward_note() { :; }
 vward_profile_load || exit 1
@@ -217,7 +220,7 @@ lists_fallback()
     if [ ! -s "$LISTS_FALLBACK" ]; then
         [ ! -e "$FALLBACK_OFF" ] && awk -F '\t' '$11 >= 2 {f = 1} END {exit f ? 0 : 1}' "$LW/q" || return 0
     fi
-    "${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r' > "$LW/rc"
+    vward_keenetic_config > "$LW/rc"
     grep -q '^dns-proxy' "$LW/rc" || return 0
     awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "route" && $2 == "object-group" {print $3 "\t" $4}' "$LW/rc" > "$LW/routes"
@@ -358,7 +361,7 @@ case "$FALLBACK_FROM" in *[!A-Za-z0-9_.-]*) FALLBACK_FROM="" ;; esac
 # The first tunnel was deleted since: nothing to come back to.
 # An empty answer (ndmc failed) proves nothing and keeps the memory.
 FB_RC=""
-[ -z "$FALLBACK_FROM" ] || FB_RC=$("${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r')
+[ -z "$FALLBACK_FROM" ] || FB_RC=$(vward_keenetic_config)
 if [ -n "$FALLBACK_FROM" ] && [ -n "$FB_RC" ] && ! printf '%s\n' "$FB_RC" | grep -qx "interface $FALLBACK_FROM"; then
     echo "$(date '+%Y-%m-%d %H:%M:%S')|FALLBACK_FORGOTTEN|gone=$FALLBACK_FROM" >> "$LOG"
     FALLBACK_FROM="" FALLBACK_AT=0

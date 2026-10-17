@@ -341,7 +341,19 @@ agh_dns_host()
         END {if (!f) print lan}' "$AGH_YAML" 2>/dev/null || echo "$LAN"
 }
 
-ndm() { nd_out=$("$NDMC" -c "$1" 2>&1) || return 1; ! printf '%s\n' "$nd_out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command)'; }
+# A change drops the configuration copy the agents share (vward_keenetic_config).
+ndm() {
+    rm -f "${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}/running-config" 2>/dev/null
+    nd_out=$("$NDMC" -c "$1" 2>&1) || return 1; ! printf '%s\n' "$nd_out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command)'
+}
+# ndm_running: Keenetic's configuration, the copy the agents share when the device library is
+# there (one read for all, «Роутер отвечает медленно», fix.28.2), else asked directly.
+ndm_running() {
+    if [ -z "${VWARD_NDMC:-}" ] && [ -r "$ADS_DEVICE_PROFILE_LIB" ]; then
+        ( . "$ADS_DEVICE_PROFILE_LIB" >/dev/null 2>&1 && vward_keenetic_config ) && return 0
+    fi
+    "$NDMC" -c "show running-config" 2>/dev/null
+}
 
 # AdGuard Home restarted 4 times within 10 minutes (its process id changed), the last one
 # within 3 minutes: a loop.
@@ -448,7 +460,7 @@ chain_out()
     co_st=; [ ! -r "$CHAIN_DIR/state" ] || read -r co_st < "$CHAIN_DIR/state" || :
     [ "$co_st" != out ] || return 0
     co_ns="$(agh_dns_host):$co_port"
-    "$NDMC" -c "show running-config" 2>/dev/null | chain_line "$co_ns" || return 0
+    ndm_running | chain_line "$co_ns" || return 0
     agh_up "$co_port" && agh_answers "$co_port" && return 0
     provider_answers "$co_ns" || { ads_log "DNS_CHAIN_KEEP|ns=$co_ns|the provider's DNS is silent too: AdGuard Home stays"; return 0; }
     chain_take_out "$co_ns" fast
@@ -465,7 +477,7 @@ chain_sync()
     # A planned restart (an update) in progress: chain_planned_done decides.
     cs_plan=; [ ! -r "$CHAIN_DIR/planned" ] || read -r cs_plan < "$CHAIN_DIR/planned" || :
     case "$cs_plan" in ''|*[!0-9]*) ;; *) [ "$(ads_epoch)" -gt "$cs_plan" ] || return 0 ;; esac
-    cs_rc=$("$NDMC" -c "show running-config" 2>/dev/null) || return 0
+    cs_rc=$(ndm_running) || return 0
     [ -n "$cs_rc" ] || return 0
     cs_in=0
     printf '%s\n' "$cs_rc" | chain_line "$cs_ns" && cs_in=1
@@ -532,7 +544,7 @@ chain_planned()
     cp_port=$(agh_port)
     case "$cp_port" in ''|*[!0-9]*|53) return 0 ;; esac
     cp_ns="$(agh_dns_host):$cp_port"
-    "$NDMC" -c "show running-config" 2>/dev/null | chain_line "$cp_ns" || return 0
+    ndm_running | chain_line "$cp_ns" || return 0
     provider_answers "$cp_ns" || return 0
     chain_take_out "$cp_ns" update
 }
