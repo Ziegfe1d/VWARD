@@ -1,18 +1,18 @@
 {
   "signed": {
     "schema": 2,
-    "update_id": "vward-0.2.0-rc.2.fix.28.2",
-    "sequence": 2026100712,
-    "version": "0.2.0-rc.2.fix.28.2",
+    "update_id": "vward-0.2.0-rc.2.fix.28.3",
+    "sequence": 2026100713,
+    "version": "0.2.0-rc.2.fix.28.3",
     "channel": "dev",
     "priority": "IMPORTANT",
-    "published_at": "2026-10-17T19:59:02Z",
+    "published_at": "2026-10-17T21:59:40Z",
     "min_updater_version": "2.0.0",
     "files_base": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/v2/files/",
     "files": [
       {
         "target": "/opt/share/vward/VERSION",
-        "sha256": "a95e86cfa2faff236273fd35b5fe52c30f4b601d871bf5b1252584e0be9479b4",
+        "sha256": "c7d8d491c9a40e3a57aba4d77bd290188191332efb63376e69d121ccf9d403ab",
         "size": 20,
         "mode": "0644",
         "component": "platform-core"
@@ -47,7 +47,7 @@
       },
       {
         "target": "/opt/lib/vward/vward-domain-classifier-lib.sh",
-        "sha256": "bbe48fd01ee1b6981aae6ca40be764f0b2b6fe054a09370e04a6c66e7f672476",
+        "sha256": "24a39c04ecde9de0df6398fc3e3fdfb6bfd8942506d90bf554ff6ec9240d9c10",
         "size": 7120,
         "mode": "0644",
         "component": "route-engine"
@@ -138,8 +138,8 @@
       },
       {
         "target": "/opt/bin/vward-tunnel-guard.sh",
-        "sha256": "f2196802653a93597aa1e2e7552e4bd43fe98ce3724a3f464de77660048a1b17",
-        "size": 31625,
+        "sha256": "3c25cf544e07d2a7800f824a5b3a75c0b2bb11f16a44a29e2bcc4bbbb3e1fa06",
+        "size": 31773,
         "mode": "0755",
         "component": "tunnel-guard"
       },
@@ -152,8 +152,8 @@
       },
       {
         "target": "/opt/bin/vward-tunnel-quality.sh",
-        "sha256": "193b6c8f5efb7ca7626bf4a0a775fc2aab3cef61e560831eb0351a31eaa9ce60",
-        "size": 15655,
+        "sha256": "8b79bdbfc4e629b285b22b68bc0e110853731fc01207ca58e4e8ee8431dc3796",
+        "size": 15867,
         "mode": "0755",
         "component": "tunnel-guard"
       },
@@ -236,8 +236,8 @@
       },
       {
         "target": "/opt/bin/vward-housekeeping.sh",
-        "sha256": "ccd07d3377c6669496e9d76e7e0d9c09bdbcb19b42be9650f6591e77348e341d",
-        "size": 31324,
+        "sha256": "1eddfa65e363d4ef07594a94e897e4dd9aa44ff5c73aef8afa09af85c5291610",
+        "size": 45861,
         "mode": "0755",
         "component": "runtime"
       },
@@ -278,8 +278,8 @@
       },
       {
         "target": "/opt/lib/vward/vward-device-profile.sh",
-        "sha256": "561ba98e8eee96f5cde7e1c782b076ef552f83d54c5340aa04708e6b5bb595c3",
-        "size": 39882,
+        "sha256": "7c3ecb68f5fcc6997e010451cdd96bff3e5a376cc4d48940f236c8e9a6f86dff",
+        "size": 44102,
         "mode": "0755",
         "component": "runtime"
       },
@@ -341,22 +341,22 @@
       },
       {
         "target": "/opt/share/vward/console/www/assets/vward-console.js",
-        "sha256": "9e9681121761f88cd7a3812618e71bfd1d3d6db990ca3eea534a4f8552d515a0",
-        "size": 444364,
+        "sha256": "d7b3ca2072c177726dee0d15f8e2d9352d59974790064ff22228c5d36a6bd8dc",
+        "size": 445563,
         "mode": "0644",
         "component": "console"
       },
       {
         "target": "/opt/share/vward/console/www/cgi-bin/api.cgi",
-        "sha256": "c0327408c9ceb23a9b4fba04e9a9c1ceae2b044b6ced25897e00519f57383e4f",
-        "size": 206932,
+        "sha256": "4127250cf4b19c62740055953dcddfe645308fc34483ce80f1d6d3f05aa44b95",
+        "size": 209015,
         "mode": "0755",
         "component": "console"
       },
       {
         "target": "/opt/bin/vward-console-config.sh",
-        "sha256": "cd0f55848f215620bf406b4af28ab0745ca2b8557da3423484702788f4c8ef1f",
-        "size": 124400,
+        "sha256": "26db47da80dcb51bc7e2d5ee20f0910df5b31760739c8db3eab42dbfcb7c352f",
+        "size": 124476,
         "mode": "0755",
         "component": "console"
       },
@@ -467,8 +467,8 @@
       },
       {
         "target": "/opt/bin/vward-ads-privacy-dns-guard.sh",
-        "sha256": "7615db51fff429dbd57ae7f1adfd51ae8bbf45d0ec679083b58e505a135e5c60",
-        "size": 33677,
+        "sha256": "c2cc957a0011eee0312ea57e66f1143d19822377acabe4a9b5a7f2ef0d51f35f",
+        "size": 34207,
         "mode": "0755",
         "component": "ads-privacy-guard"
       },
@@ -488,7 +488,7 @@
       },
       {
         "target": "/opt/share/vward/ads-privacy-guard/vward-ads-privacy-common.sh",
-        "sha256": "798b71e2303a3b742b814fe170ede78f6206b5316fa8480c326fd9b6f7e76776",
+        "sha256": "8be494eeb9a5c3f870fb66ea9a03af8559a24b90546133f2f9002a07496222dc",
         "size": 20494,
         "mode": "0644",
         "component": "ads-privacy-guard"
@@ -588,7 +588,7 @@
         },
         {
           "name": "component-registry.json",
-          "sha256": "b5a8df0f6c9483e8ad0ab219dad3bdb33dc0cb330da21e5bd617a2f6bcfe858c",
+          "sha256": "022dcd61f6165cdbc41513af2e1d5f749e01c7a8127c72438e405ea9b4f7a358",
           "size": 8963,
           "mode": "0644"
         }
@@ -596,7 +596,7 @@
     },
     "compatibility": {
       "min_vward": "0.2.0-rc.1",
-      "max_vward": "0.2.0-rc.2.fix.28.2"
+      "max_vward": "0.2.0-rc.2.fix.28.3"
     },
     "affected_components": [
       "ads-privacy-guard",
@@ -620,5 +620,5 @@
       "key_id": "vward-prod-2026-01"
     }
   },
-  "signature": "O8xigbaGf3sC8CeF/izvuaq22jYiJWH2nv9VrSeFH5QmdC6JvK+B/6PHzLeBvWO9xLssJ6FaRp8kkoCCMLPqCA=="
+  "signature": "UvoIbMNPkbw1+WG+Syy9IGXP1+1oCiTimk6n8d0Lf0K9By4350RzylEhiZapAF9e155kBw+hafeBtSzgXodFAA=="
 }
