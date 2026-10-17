@@ -2,9 +2,8 @@
 """Housekeeping repairs an Entware program that crashes on a plain local task (a damaged copy,
 Viva 2026-10-11): it reinstalls the package, at most once in 6 hours, and logs it. A program that
 only fails (no crash) or does not exist is left alone. curl noted as crashing on HTTPS (libnghttp2,
-Viva 2026-10-12) is tried first: working, it is trusted again with nothing reinstalled (Viva
-2026-10-17: reinstalled every 6 hours for nothing); crashing, its HTTP/2 library and the
-certificates are reinstalled, at most once a day. Smart DNS's DoH client noted as failing gets its
+Viva 2026-10-12) gets its HTTP/2 library and the certificates reinstalled, at most once a day,
+without a test run first (each is one more crash). Smart DNS's DoH client noted as failing gets its
 libraries reinstalled, curl is not marked for it."""
 from __future__ import annotations
 
@@ -71,30 +70,25 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("a working curl is run once and left alone")
 
     # curl crashes only on HTTPS (libnghttp2, Viva 2026-10-12): the local check passes, vward_fetch
-    # noted the crash; HTTPS is tried once, it crashes: the HTTP/2 library, curl and the
-    # certificates are reinstalled, one HTTPS try after, and the note goes when it works.
+    # noted the crash; the HTTP/2 library, curl and the certificates are reinstalled at once, one
+    # HTTPS try after, and the note goes when it works.
     (t / "curl").write_text(f'#!/bin/sh\ncase "$*" in *https://*) echo "$*" >> "{t}/curl.https"; [ -e "{t}/h2fixed" ] || kill -SEGV $$ ;; esac\nexit 0\n')
     (t / "opkg").write_text(f'#!/bin/sh\necho "$*" >> "{t}/opkg.log"\ncase "$*" in install*) : > "{t}/h2fixed" ;; esac\n')
     (t / "tls.broken").write_text("")
     log = run()
     if (t / "opkg.log").read_text().splitlines()[-1] != "install --force-reinstall libnghttp2 libcurl curl ca-bundle":
         fail(f"curl crashing on HTTPS: its HTTP/2 library and the certificates are not reinstalled: {(t / 'opkg.log').read_text()}")
-    if "repair=curl-https|crash=139|reinstalled=libnghttp2,libcurl,curl,ca-bundle|opkg=0|after=0" not in log or (t / "tls.broken").exists():
+    if "repair=curl-https|reinstalled=libnghttp2,libcurl,curl,ca-bundle|opkg=0|after=0" not in log or (t / "tls.broken").exists():
         fail(f"the HTTPS repair is not logged, or curl is not trusted again: {log[-300:]}")
-    if len((t / "curl.https").read_text().splitlines()) != 2:
-        fail(f"one HTTPS try before the reinstall and one after: {(t / 'curl.https').read_text()}")
-    # Crashes again within the day: one try, not reinstalled again, the note stays.
+    if len((t / "curl.https").read_text().splitlines()) != 1:
+        fail(f"no HTTPS try before the reinstall (one more crash), one after: {(t / 'curl.https').read_text()}")
+    # Crashes again within the day: not reinstalled again, curl not run on HTTPS by the repair.
     (t / "h2fixed").unlink(); (t / "tls.broken").write_text(""); (t / "curl.https").unlink()
     n = len((t / "opkg.log").read_text().splitlines())
     run()
-    if len((t / "opkg.log").read_text().splitlines()) != n or len((t / "curl.https").read_text().splitlines()) != 1 or not (t / "tls.broken").exists():
+    if len((t / "opkg.log").read_text().splitlines()) != n or (t / "curl.https").exists() or not (t / "tls.broken").exists():
         fail("the HTTPS repair repeats within the day")
-    # Noted, but curl works on HTTPS (a stale note, or a stop from outside taken for a crash):
-    # trusted again at once, nothing reinstalled (Viva 2026-10-17: reinstalled every 6 hours).
-    (t / "h2fixed").write_text(""); (r / "opt/var/lib/vward/repair/curl-https").write_text("0\n")
-    log = run()
-    if len((t / "opkg.log").read_text().splitlines()) != n or (t / "tls.broken").exists() or "repair=curl-https|test=0|no_crash" not in log:
-        fail(f"a working curl is reinstalled for a note: {log[-300:]}")
+    (t / "tls.broken").unlink()
     # No note of an HTTPS crash: nothing is reinstalled for HTTPS.
     run()
     if len((t / "opkg.log").read_text().splitlines()) != n:

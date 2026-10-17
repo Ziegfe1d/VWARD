@@ -460,13 +460,13 @@ REPAIR_CURL=${VWARD_REPAIR_CURL:-/opt/bin/curl}
 REPAIR_JQ=${VWARD_REPAIR_JQ:-/opt/bin/jq}
 REPAIR_OPENSSL=${VWARD_REPAIR_OPENSSL:-/opt/bin/openssl}
 repair_if_crashing curl curl "$REPAIR_CURL" -s -o /dev/null --noproxy '*' --connect-timeout 3 --max-time 5 http://127.0.0.1:79/rci/show/version
-# curl noted as crashing on HTTPS within the hour (vward_fetch, the probes): the crash was in
-# libnghttp2, the HTTP/2 library (Viva 2026-10-12: 81 crashes in two hours), which the local check
-# above never loads. HTTPS is tried once first: a curl that works is trusted again at once, nothing
-# reinstalled (the note was stale or not a crash: curl reinstalled every 6 hours for nothing and
-# VWARD went around a working curl, Viva 2026-10-17). A crash again: its packages and the
-# certificates reinstalled, at most once a day, and HTTPS tried once after, with the certificates
-# (77 after a reinstall, Viva 2026-10-15).
+# curl noted as crashing on HTTPS within the hour (vward_fetch, the probes - only a real crash is
+# noted since fix.28.1: a stop from outside or a DoH client's trouble marked a working curl and it
+# was reinstalled every 6 hours, Viva 2026-10-17): the crash was in libnghttp2, the HTTP/2 library
+# (Viva 2026-10-12: 81 crashes in two hours), which the local check above never loads. The crash
+# is already seen, so no test run first (each is one more crash): its packages and the
+# certificates are reinstalled at once, at most once a day, and HTTPS is tried once after, with
+# the certificates (77 after a reinstall, Viva 2026-10-15); when it works, curl is trusted again.
 REPAIR_TLS_FLAG=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
 REPAIR_DOH_FLAG=${VWARD_DOH_BROKEN_FLAG:-/tmp/vward-doh.broken}
 https_try()
@@ -487,20 +487,13 @@ repair_due()
     [ $((rd_now - rd_last)) -ge 86400 ] || return 1
     mkdir -p "$REPAIR_DIR" && echo "$rd_now" > "$REPAIR_DIR/$1"
 }
-if [ -x "$REPAIR_CURL" ] && [ -n "$(find "$REPAIR_TLS_FLAG" -mmin -60 2>/dev/null)" ]; then
+if [ -x "$REPAIR_CURL" ] && [ -n "$(find "$REPAIR_TLS_FLAG" -mmin -60 2>/dev/null)" ] && repair_due curl-https; then
+    "$OPKG" install --force-reinstall libnghttp2 libcurl curl ca-bundle </dev/null >/dev/null 2>&1
+    rh_opkg=$?
     https_try
-    rh_before=$?
-    if ! crash_rc "$rh_before"; then
-        rm -f "$REPAIR_TLS_FLAG"
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=curl-https|test=$rh_before|no_crash: nothing reinstalled, curl trusted again" >> "$HOUSE_LOG"
-    elif repair_due curl-https; then
-        "$OPKG" install --force-reinstall libnghttp2 libcurl curl ca-bundle </dev/null >/dev/null 2>&1
-        rh_opkg=$?
-        https_try
-        rh_after=$?
-        crash_rc "$rh_after" || rm -f "$REPAIR_TLS_FLAG"
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=curl-https|crash=$rh_before|reinstalled=libnghttp2,libcurl,curl,ca-bundle|opkg=$rh_opkg|after=$rh_after" >> "$HOUSE_LOG"
-    fi
+    rh_after=$?
+    crash_rc "$rh_after" || rm -f "$REPAIR_TLS_FLAG"
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=curl-https|reinstalled=libnghttp2,libcurl,curl,ca-bundle|opkg=$rh_opkg|after=$rh_after" >> "$HOUSE_LOG"
 fi
 # Smart DNS's DoH client (https-dns-proxy) restarted three times within 6 hours (the components
 # agent noted it): its HTTPS libraries and the client reinstalled, at most once a day. curl is not
