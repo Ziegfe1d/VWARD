@@ -243,7 +243,8 @@ def s_vpn_spare(r, out, stay=False):
     expect(bool(on2) and on2[0] <= 9, f"VWARD's routes move to the second tunnel (at {on2[:1]}, fault from 5)", out)
     expect(not r.cmds("interface Wireguard1 down"), "nothing goes direct while another tunnel answers", out)
     expect(r.device("VWARD_TUNNEL_INTERFACE") == "Wireguard2", f"the second tunnel is VWARD's now ({r.device('VWARD_TUNNEL_INTERFACE')})", out)
-    r.run(14)
+    # Back after 15 minutes of answers in a row (fix.28.1: 3 minutes moved 19 lists back and forth).
+    r.run(20)
     if stay:
         expect(r.device("VWARD_TUNNEL_INTERFACE") == "Wireguard2" and r.routes() == ["Wireguard2"],
                f"«Возвращать на основной» off: the routes stay on the second tunnel ({r.routes()})", out)

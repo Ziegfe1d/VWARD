@@ -42,11 +42,12 @@ with tempfile.TemporaryDirectory() as tmp:
     (bin_ / "curl").write_text(f"""#!/bin/sh
 echo "$*" >> "{tmp}/curl.log"
 out=; dev=; url=
-while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; --interface) dev=$2; shift ;; http*|telnet://*) url=$1 ;; esac; shift; done
+hdr=
+while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; -D) hdr=$2; shift ;; --interface) dev=$2; shift ;; http*|telnet://*) url=$1 ;; esac; shift; done
 case "$url" in
     telnet://*) exit 1 ;;
     http://*:[0-9]*/) h=${{url#http://}}; h=${{h%:*}}; if [ -e "{tmp}/reach.$h" ]; then printf 0.042; exit 52; fi; printf 0.000000; exit 28 ;;
-    https://sub.example/*) [ -f "{tmp}/sub" ] || exit 22; cp "{tmp}/sub" "$out" ;;
+    https://sub.example/*) [ -f "{tmp}/sub" ] || exit 22; cp "{tmp}/sub" "$out"; [ -z "$hdr" ] || cat "{tmp}/sub.hdr" > "$hdr" 2>/dev/null; exit 0 ;;
     https://xray.example/*) cp "{tmp}/x.zip" "$out" ;;
     *) [ -n "$dev" ] && [ -e "{tmp}/up.$dev" ] && exit 0
        [ -n "$dev" ] && [ -e "{tmp}/ok.$(cat "{tmp}/xray.addr" 2>/dev/null)" ] && exit 0; exit 7 ;;
@@ -57,7 +58,7 @@ esac
     (tmp / "ca.crt").write_text("-----BEGIN CERTIFICATE-----\n")
     env = {k: v for k, v in os.environ.items() if k != "SSL_CERT_FILE"} | {"PATH": f"{bin_}:{os.environ['PATH']}", "VWARD_VLESS_ETC": str(etc), "VWARD_VLESS_SHARE": str(share),
                         "VWARD_VLESS_RUN": str(run_), "VWARD_VLESS_LOG": str(tmp / "engine.log"), "VWARD_NDMC": str(bin_ / "ndmc"),
-                        "VWARD_CURL_BIN": str(bin_ / "curl"), "JQ": shutil.which("jq"), "VWARD_VLESS_CONNECT_WAIT": "4", "VWARD_ENGINE_COOLDOWN": "0", "VWARD_CA_BUNDLE": f"{tmp}/no-such.crt {tmp}/ca.crt",
+                        "VWARD_CURL_BIN": str(bin_ / "curl"), "JQ": shutil.which("jq"), "VWARD_VLESS_CONNECT_WAIT": "4", "VWARD_ENGINE_COOLDOWN": "0", "VWARD_ENGINE_STARTS_DIR": str(tmp / "starts"), "VWARD_ENGINE_BACKOFF": "0", "VWARD_ENGINE_STARTS_MAX": "1000", "VWARD_CA_BUNDLE": f"{tmp}/no-such.crt {tmp}/ca.crt",
                         "VWARD_XRAY_URL": "https://xray.example/d", "VWARD_VLESS_ARCH": "mipsle"}
 
     def engine(*args):
@@ -245,6 +246,34 @@ esac
     r = subprocess.run(["sh", str(ENGINE), "kick", "OpkgTun1"], env=cool, text=True, capture_output=True, timeout=60)
     if r.stdout.split() != ["result=unchanged"] or (run_ / "v0.pid").read_text() != pid2:
         fail(f"the guard's kick within the cooldown changes nothing: {r.stdout!r}")
+    # A program that keeps stopping (or a server that stays silent): started again after growing
+    # pauses (1, 2, 4, 8 minutes), at most 6 times within the hour, then left with one notification
+    # (Viva 2026-10-16: restarted every minute, 185 times a day).
+    starts = tmp / "starts-b"; starts.mkdir()
+    notes = tmp / "notes"
+    back = env | {"VWARD_ENGINE_STARTS_DIR": str(starts), "VWARD_ENGINE_BACKOFF": "60", "VWARD_ENGINE_STARTS_MAX": "6",
+                  "VWARD_PROFILE_LIB": str(ROOT / "components/runtime/lib/vward-device-profile.sh"), "VWARD_CONSOLE_NOTES": str(notes)}
+    def died_then(history, want, what):
+        os.kill(int((run_ / "v0.pid").read_text()), 9); time.sleep(0.3)
+        now = int(time.time())
+        (starts / "v0").write_text("".join(f"{now - a}\n" for a in history))
+        r = subprocess.run(["sh", str(ENGINE), "supervise"], env=back, text=True, capture_output=True, timeout=60)
+        if r.stdout.split() != [want]:
+            fail(f"{what}: {r.stdout!r} {r.stderr!r}")
+        if want == "result=unchanged":
+            r = subprocess.run(["sh", str(ENGINE), "supervise"], env=env, text=True, capture_output=True, timeout=60)
+    died_then([10], "result=unchanged", "stopped 10 s after a start: the next start waits a minute")
+    died_then([70], "result=changed", "stopped 70 s after the first start: started again")
+    died_then([900, 700, 500, 100], "result=unchanged", "the fourth start within the hour waits 8 minutes")
+    died_then([3000, 2500, 2000, 1500, 1000, 600], "result=unchanged", "6 starts within the hour: left as it is")
+    if not (starts / "v0.gaveup").exists() or "перезапускался 6 раз за час" not in notes.joinpath("notes.tsv").read_text():
+        fail("6 starts within the hour: one notification")
+    died_then([3000, 2500, 2000, 1500, 1000, 600], "result=unchanged", "still 6 within the hour")
+    if notes.joinpath("notes.tsv").read_text().count("перезапускался") != 1:
+        fail("one notification, not one a minute")
+    died_then([1200], "result=changed", "the last start 20 minutes back: a new trouble, started at once")
+    if (starts / "v0.gaveup").exists():
+        fail("started afresh: the note of the hour goes")
     (tmp / "up.opkgtun1").write_text("")
     shutil.rmtree(sysfs / "opkgtun1")
     pid2 = (run_ / "v0.pid").read_text()
@@ -412,6 +441,68 @@ esac
     _t.sleep(0.5)
     if (tmp / "self.log").read_text().split() != ["failover", tn] or (run_ / f"v{sn}.fails").exists():
         fail("supervise starts a failover after two restarts that did not help")
+    # The subscription ran out (Viva 2026-10-16): the provider sends «⌛ Subscription expired» and
+    # «Contact support» at 0.0.0.0. The servers kept stay (the list never turns into notes), no
+    # server is tried, the tunnel is not restarted, the owner is told once; renewed: all as before.
+    # The device profile (the bell's vward_note), another tunnel for routes, the provider up.
+    (tmp / "profile2.sh").write_text(f'. "{ROOT / "components/runtime/lib/vward-device-profile.sh"}"\n'
+                                     "vward_profile_load() { VWARD_TUNNEL_INTERFACE=OpkgTun9; VWARD_WAN_DEVICE=eth3; }\n")
+    (tmp / "up.eth3").write_text("")
+    env["VWARD_PROFILE_LIB"] = str(tmp / "profile2.sh"); env["VWARD_ETC"] = str(tmp / "vetc")
+    env["VWARD_CONSOLE_NOTES"] = str(tmp / "bell"); env["VWARD_TLS_BROKEN_FLAG"] = str(tmp / "tls.broken")
+    real = [vl("203.0.113.11", DE + "%20DE-1"), vl("203.0.113.12", US + "%20US"), vl("203.0.113.13", DE + "%20DE-2")]
+    stubs = [vl("0.0.0.0", "%E2%8C%9B%20Subscription%20expired"), vl("0.0.0.0", "Contact%20support")]
+    (tmp / "sub").write_text(base64.b64encode("\n".join(stubs).encode()).decode())
+    kept = (etc / f"v{sn}.links").read_text()
+    def bell():
+        return (tmp / "bell/notes.tsv").read_text() if (tmp / "bell/notes.tsv").exists() else ""
+    out = engine("list", tn)
+    if (etc / f"v{sn}.links").read_text() != kept or sum(l.startswith("info.server.") for l in out) != 3 or "expired" in "\n".join(out):
+        fail(f"an expired subscription: the servers kept stay, no notes among them: {out}")
+    if not (run_ / f"v{sn}.expired").exists() or bell().count("Подписка VLESS истекла") != 1:
+        fail("an expired subscription: noted and told once")
+    addr = (tmp / "xray.addr").read_text()
+    if engine("failover", tn) != ["info.failover=expired", "result=unchanged"] or (tmp / "xray.addr").read_text() != addr:
+        fail("an expired subscription: no server is tried")
+    engine("list", tn)
+    if bell().count("Подписка VLESS истекла") != 1:
+        fail("an expired subscription: told once, not on every look")
+    # The minute check: a silent tunnel is neither restarted nor moved while it lasts.
+    (tmp / "self.log").write_text("")
+    (run_ / f"v{sn}.fails").write_text("2\n"); (run_ / f"v{sn}.miss").write_text(""); (run_ / f"v{sn}.failover.at").write_text("0\n")
+    pid_e = (run_ / f"v{sn}.pid").read_text()
+    if engine("supervise") != ["result=unchanged"] or (tmp / "self.log").read_text() or (run_ / f"v{sn}.pid").read_text() != pid_e:
+        fail("an expired subscription: the minute check restarts or moves the tunnel")
+    # Real servers but the date past («subscription-userinfo»): expired too.
+    (tmp / "sub").write_text(base64.b64encode("\n".join(real).encode()).decode())
+    (tmp / "sub.hdr").write_text("HTTP/1.1 200 OK\r\nSubscription-Userinfo: upload=0; download=1; total=0; expire=1000\r\n\r\n")
+    (run_ / f"v{sn}.expired").unlink()
+    engine("list", tn)
+    if not (run_ / f"v{sn}.expired").exists():
+        fail("a subscription whose date is past is not taken for expired")
+    # Renewed: a date ahead, a note among the servers left out; the minute check looks again
+    # after 30 minutes and everything is as before.
+    (tmp / "sub.hdr").write_text(f"HTTP/1.1 200 OK\r\nsubscription-userinfo: upload=0; download=1; total=0; expire={int(time.time()) + 86400}\r\n\r\n")
+    (tmp / "sub").write_text(base64.b64encode("\n".join(real + stubs[1:]).encode()).decode())
+    old = time.time() - 3600
+    os.utime(run_ / f"v{sn}.expired", (old, old))
+    (tmp / "self.log").write_text("")
+    (run_ / f"v{sn}.fails").write_text("2\n"); (run_ / f"v{sn}.miss").write_text(""); (run_ / f"v{sn}.failover.at").write_text("0\n")
+    engine("supervise")
+    if (run_ / f"v{sn}.expired").exists() or "Подписка VLESS снова действует" not in bell() or "0.0.0.0" in (etc / f"v{sn}.links").read_text():
+        fail("renewed: the note goes, the owner is told, the kept servers have no notes")
+    for _ in range(20):
+        if (tmp / "self.log").read_text():
+            break
+        time.sleep(0.1)
+    if (tmp / "self.log").read_text().split() != ["failover", tn]:
+        fail("renewed: the silent tunnel is handled as before (a failover after two restarts)")
+    # A tunnel added from an expired subscription: refused with the reason.
+    (tmp / "sub").write_text(base64.b64encode("\n".join(stubs).encode()).decode())
+    (tmp / "sub.hdr").unlink()
+    if engine("servers", str(fo)) != ["error=subscription_expired"]:
+        fail("servers of an expired subscription: the reason is said")
+    del env["VWARD_PROFILE_LIB"], env["VWARD_CONSOLE_NOTES"], env["VWARD_TLS_BROKEN_FLAG"], env["VWARD_ETC"]
     del env["VWARD_VLESS_SELF"], env["VWARD_SYSFS_NET"]
     out = engine("remove", tn)
     if out != ["result=changed"] or srcf.exists() or (etc / f"v{sn}.links").exists() or (etc / f"v{sn}.idx").exists():

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Housekeeping repairs an Entware program that crashes on a plain local task (a damaged copy,
 Viva 2026-10-11): it reinstalls the package, at most once in 6 hours, and logs it. A program that
-only fails (no crash) or does not exist is left alone. curl that crashed on HTTPS (libnghttp2,
-Viva 2026-10-12) gets its HTTP/2 library reinstalled too."""
+only fails (no crash) or does not exist is left alone. curl noted as crashing on HTTPS (libnghttp2,
+Viva 2026-10-12) is tried first: working, it is trusted again with nothing reinstalled (Viva
+2026-10-17: reinstalled every 6 hours for nothing); crashing, its HTTP/2 library and the
+certificates are reinstalled, at most once a day. Smart DNS's DoH client noted as failing gets its
+libraries reinstalled, curl is not marked for it."""
 from __future__ import annotations
 
 import os
@@ -38,7 +41,8 @@ with tempfile.TemporaryDirectory() as tmp:
     env = os.environ | {"VWARD_ROOT_PREFIX": str(r), "VWARD_ADMISSION_LIB": str(stub), "VWARD_CONSOLE_CONFIG_BIN": str(t / "none"),
                         "VWARD_CRONTAB": str(t / "none"), "VWARD_OPKG_BIN": str(t / "opkg"), "VWARD_REPAIR_CURL": str(t / "curl"),
                         "VWARD_REPAIR_JQ": str(t / "jq"), "VWARD_REPAIR_OPENSSL": str(t / "no-openssl"), "VWARD_SENTINEL_CTL": str(t / "none"),
-                        "VWARD_TLS_BROKEN_FLAG": str(t / "tls.broken"), "VWARD_REPAIR_HTTPS_URL": "https://example.invalid/"}
+                        "VWARD_TLS_BROKEN_FLAG": str(t / "tls.broken"), "VWARD_REPAIR_HTTPS_URL": "https://example.invalid/",
+                        "VWARD_DOH_BROKEN_FLAG": str(t / "doh.broken"), "VWARD_CA_BUNDLE": str(t / "no-ca")}
 
     def run() -> str:
         res = subprocess.run([busybox, "sh", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=120)
@@ -67,29 +71,43 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("a working curl is run once and left alone")
 
     # curl crashes only on HTTPS (libnghttp2, Viva 2026-10-12): the local check passes, vward_fetch
-    # noted the crash; the HTTP/2 library and curl are reinstalled and the note goes when it works.
-    (t / "curl").write_text(f'#!/bin/sh\ncase "$*" in *https://*) echo run >> "{t}/curl.https"; [ -e "{t}/h2fixed" ] || kill -SEGV $$ ;; esac\nexit 0\n')
-    (t / "opkg").write_text(f'#!/bin/sh\necho "$*" >> "{t}/opkg.log"\n: > "{t}/h2fixed"\n')
+    # noted the crash; HTTPS is tried once, it crashes: the HTTP/2 library, curl and the
+    # certificates are reinstalled, one HTTPS try after, and the note goes when it works.
+    (t / "curl").write_text(f'#!/bin/sh\ncase "$*" in *https://*) echo "$*" >> "{t}/curl.https"; [ -e "{t}/h2fixed" ] || kill -SEGV $$ ;; esac\nexit 0\n')
+    (t / "opkg").write_text(f'#!/bin/sh\necho "$*" >> "{t}/opkg.log"\ncase "$*" in install*) : > "{t}/h2fixed" ;; esac\n')
     (t / "tls.broken").write_text("")
     log = run()
-    if (t / "opkg.log").read_text().splitlines()[-1] != "install --force-reinstall libnghttp2 libcurl curl":
-        fail(f"curl crashing on HTTPS: its HTTP/2 library is not reinstalled: {(t / 'opkg.log').read_text()}")
-    if "repair=curl-https|reinstalled=libnghttp2,libcurl,curl|opkg=0|after=0" not in log or (t / "tls.broken").exists():
+    if (t / "opkg.log").read_text().splitlines()[-1] != "install --force-reinstall libnghttp2 libcurl curl ca-bundle":
+        fail(f"curl crashing on HTTPS: its HTTP/2 library and the certificates are not reinstalled: {(t / 'opkg.log').read_text()}")
+    if "repair=curl-https|crash=139|reinstalled=libnghttp2,libcurl,curl,ca-bundle|opkg=0|after=0" not in log or (t / "tls.broken").exists():
         fail(f"the HTTPS repair is not logged, or curl is not trusted again: {log[-300:]}")
-    # The crash is already seen: no test run before the reinstall, one HTTPS try after it.
-    if (t / "curl.https").exists() and len((t / "curl.https").read_text().splitlines()) != 1:
-        fail(f"curl is run on HTTPS more than once by the repair: {(t / 'curl.https').read_text()}")
-    # Crashes again within 6 hours: not reinstalled again, curl not run on HTTPS by the repair.
+    if len((t / "curl.https").read_text().splitlines()) != 2:
+        fail(f"one HTTPS try before the reinstall and one after: {(t / 'curl.https').read_text()}")
+    # Crashes again within the day: one try, not reinstalled again, the note stays.
     (t / "h2fixed").unlink(); (t / "tls.broken").write_text(""); (t / "curl.https").unlink()
     n = len((t / "opkg.log").read_text().splitlines())
     run()
-    if len((t / "opkg.log").read_text().splitlines()) != n or (t / "curl.https").exists():
-        fail("the HTTPS repair repeats within 6 hours")
-    (t / "tls.broken").unlink()
+    if len((t / "opkg.log").read_text().splitlines()) != n or len((t / "curl.https").read_text().splitlines()) != 1 or not (t / "tls.broken").exists():
+        fail("the HTTPS repair repeats within the day")
+    # Noted, but curl works on HTTPS (a stale note, or a stop from outside taken for a crash):
+    # trusted again at once, nothing reinstalled (Viva 2026-10-17: reinstalled every 6 hours).
+    (t / "h2fixed").write_text(""); (r / "opt/var/lib/vward/repair/curl-https").write_text("0\n")
+    log = run()
+    if len((t / "opkg.log").read_text().splitlines()) != n or (t / "tls.broken").exists() or "repair=curl-https|test=0|no_crash" not in log:
+        fail(f"a working curl is reinstalled for a note: {log[-300:]}")
     # No note of an HTTPS crash: nothing is reinstalled for HTTPS.
-    n = len((t / "opkg.log").read_text().splitlines())
     run()
     if len((t / "opkg.log").read_text().splitlines()) != n:
         fail("HTTPS repair without a crash noted")
+    # Smart DNS's DoH client kept failing: its libraries are reinstalled once a day, curl untouched.
+    (t / "doh.broken").write_text("")
+    log = run()
+    ops = (t / "opkg.log").read_text().splitlines()[n:]
+    if ops != ["list-installed", "install --force-reinstall libnghttp2 libcurl"] or (t / "doh.broken").exists() or "repair=doh|reinstalled=libnghttp2,libcurl|opkg=0" not in log:
+        fail(f"the DoH client's libraries: {ops} {log[-200:]}")
+    (t / "doh.broken").write_text("")
+    run()
+    if len((t / "opkg.log").read_text().splitlines()) != n + 2:
+        fail("the DoH repair repeats within the day")
 
 print("PROGRAM_REPAIR=PASS")

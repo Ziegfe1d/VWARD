@@ -361,8 +361,9 @@ engine_move()
             curl --http1.1 -fsS --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 120 --max-filesize "$3" -o "$2" "$1" 2>/dev/null
             em_rc=$?
             ! command -v vward_tls_done >/dev/null 2>&1 || vward_tls_done "$em_rc"
-            # A crash (a signal) is remembered for the HTTPS repair and stops the rest of the move.
-            [ "$em_rc" -lt 128 ] || { : > "$EM_TLS_FLAG" 2>/dev/null; exit 3; }
+            # A crash (a signal of curl's own fault) is remembered for the HTTPS repair and stops
+            # the rest of the move.
+            case "$em_rc" in 132|134|135|136|139) : > "$EM_TLS_FLAG" 2>/dev/null; exit 3 ;; esac
             return "$em_rc"
         }
         if [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ]; then src=manifest.json; else src=$EM_URL; fi
@@ -425,6 +426,10 @@ fi
 # reinstall cured it, openssl too). At most once in 6 hours a program; one log line each.
 REPAIR_DIR=${VWARD_REPAIR_DIR:-$R/opt/var/lib/vward/repair}
 OPKG=${VWARD_OPKG_BIN:-opkg}
+# crash_rc RC: the program died of its own fault (132 illegal instruction, 134 abort, 135 bus
+# error, 136 arithmetic, 139 memory). 137 and 143 are a stop from outside (a time limit), 141 a
+# closed pipe: no crash.
+crash_rc() { case "$1" in 132|134|135|136|139) return 0 ;; esac; return 1; }
 repair_if_crashing()
 {
     rp_name=$1 rp_pkgs=$2
@@ -434,7 +439,7 @@ repair_if_crashing()
     while [ "$rp_try" -lt 2 ]; do
         "$@" </dev/null >/dev/null 2>&1
         rp_rc=$?
-        [ "$rp_rc" -ge 128 ] || return 0
+        crash_rc "$rp_rc" || return 0
         rp_try=$((rp_try + 1))
     done
     rp_now=$(date +%s) rp_last=0
@@ -455,24 +460,59 @@ REPAIR_CURL=${VWARD_REPAIR_CURL:-/opt/bin/curl}
 REPAIR_JQ=${VWARD_REPAIR_JQ:-/opt/bin/jq}
 REPAIR_OPENSSL=${VWARD_REPAIR_OPENSSL:-/opt/bin/openssl}
 repair_if_crashing curl curl "$REPAIR_CURL" -s -o /dev/null --noproxy '*' --connect-timeout 3 --max-time 5 http://127.0.0.1:79/rci/show/version
-# curl that crashed on HTTPS within the hour (vward_fetch noted it): the crash was in libnghttp2,
-# the HTTP/2 library (Viva 2026-10-12: 81 crashes in two hours), which the local check above never
-# loads. The crash is already seen, so no test run first: its packages are reinstalled at once, at
-# most once in 6 hours, and HTTPS is tried once after; when it works, curl is trusted again.
+# curl noted as crashing on HTTPS within the hour (vward_fetch, the probes): the crash was in
+# libnghttp2, the HTTP/2 library (Viva 2026-10-12: 81 crashes in two hours), which the local check
+# above never loads. HTTPS is tried once first: a curl that works is trusted again at once, nothing
+# reinstalled (the note was stale or not a crash: curl reinstalled every 6 hours for nothing and
+# VWARD went around a working curl, Viva 2026-10-17). A crash again: its packages and the
+# certificates reinstalled, at most once a day, and HTTPS tried once after, with the certificates
+# (77 after a reinstall, Viva 2026-10-15).
 REPAIR_TLS_FLAG=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
+REPAIR_DOH_FLAG=${VWARD_DOH_BROKEN_FLAG:-/tmp/vward-doh.broken}
+https_try()
+{
+    ht_ca=
+    for ht_f in ${VWARD_CA_BUNDLE:-/opt/etc/ssl/certs/ca-certificates.crt /opt/etc/ssl/cert.pem}; do
+        [ -s "$ht_f" ] && { ht_ca=$ht_f; break; }
+    done
+    "$REPAIR_CURL" -s -o /dev/null --connect-timeout 5 --max-time 10 ${ht_ca:+--cacert "$ht_ca"} \
+        "${VWARD_REPAIR_HTTPS_URL:-https://raw.githubusercontent.com/}" </dev/null >/dev/null 2>&1
+}
+# repair_due NAME: the last reinstall of NAME was a day ago or more (and now is noted).
+repair_due()
+{
+    rd_now=$(date +%s) rd_last=0
+    [ ! -r "$REPAIR_DIR/$1" ] || read -r rd_last < "$REPAIR_DIR/$1" || :
+    case "$rd_last" in ''|*[!0-9]*) rd_last=0 ;; esac
+    [ $((rd_now - rd_last)) -ge 86400 ] || return 1
+    mkdir -p "$REPAIR_DIR" && echo "$rd_now" > "$REPAIR_DIR/$1"
+}
 if [ -x "$REPAIR_CURL" ] && [ -n "$(find "$REPAIR_TLS_FLAG" -mmin -60 2>/dev/null)" ]; then
-    rh_now=$(date +%s) rh_last=0
-    [ ! -r "$REPAIR_DIR/curl-https" ] || read -r rh_last < "$REPAIR_DIR/curl-https" || :
-    case "$rh_last" in ''|*[!0-9]*) rh_last=0 ;; esac
-    if [ $((rh_now - rh_last)) -ge 21600 ]; then
-        mkdir -p "$REPAIR_DIR" && echo "$rh_now" > "$REPAIR_DIR/curl-https"
-        "$OPKG" install --force-reinstall libnghttp2 libcurl curl </dev/null >/dev/null 2>&1
+    https_try
+    rh_before=$?
+    if ! crash_rc "$rh_before"; then
+        rm -f "$REPAIR_TLS_FLAG"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=curl-https|test=$rh_before|no_crash: nothing reinstalled, curl trusted again" >> "$HOUSE_LOG"
+    elif repair_due curl-https; then
+        "$OPKG" install --force-reinstall libnghttp2 libcurl curl ca-bundle </dev/null >/dev/null 2>&1
         rh_opkg=$?
-        "$REPAIR_CURL" -s -o /dev/null --connect-timeout 5 --max-time 10 "${VWARD_REPAIR_HTTPS_URL:-https://raw.githubusercontent.com/}" </dev/null >/dev/null 2>&1
+        https_try
         rh_after=$?
-        [ "$rh_after" -ge 128 ] || rm -f "$REPAIR_TLS_FLAG"
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=curl-https|reinstalled=libnghttp2,libcurl,curl|opkg=$rh_opkg|after=$rh_after" >> "$HOUSE_LOG"
+        crash_rc "$rh_after" || rm -f "$REPAIR_TLS_FLAG"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=curl-https|crash=$rh_before|reinstalled=libnghttp2,libcurl,curl,ca-bundle|opkg=$rh_opkg|after=$rh_after" >> "$HOUSE_LOG"
     fi
+fi
+# Smart DNS's DoH client (https-dns-proxy) restarted three times within 6 hours (the components
+# agent noted it): its HTTPS libraries and the client reinstalled, at most once a day. curl is not
+# touched for it.
+if [ -n "$(find "$REPAIR_DOH_FLAG" -mmin -360 2>/dev/null)" ] && repair_due doh; then
+    rd_pkgs="libnghttp2 libcurl"
+    ! "$OPKG" list-installed 2>/dev/null | grep -q '^https-dns-proxy ' || rd_pkgs="$rd_pkgs https-dns-proxy"
+    # shellcheck disable=SC2086
+    "$OPKG" install --force-reinstall $rd_pkgs </dev/null >/dev/null 2>&1
+    rd_opkg=$?
+    rm -f "$REPAIR_DOH_FLAG"
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|repair=doh|reinstalled=$(echo $rd_pkgs | tr ' ' ',')|opkg=$rd_opkg" >> "$HOUSE_LOG"
 fi
 repair_if_crashing jq jq "$REPAIR_JQ" -n 1
 repair_if_crashing openssl "libopenssl openssl-util" "$REPAIR_OPENSSL" version

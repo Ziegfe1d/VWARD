@@ -196,16 +196,59 @@ start_one() {
         exec $VWARD_TUNNEL_NICE "$BIN" -i "$(adapter_of "$2")" -c "$ENGINE_ETC/t$1.conf" -s "$ENGINE_RUN/t$1.state" </dev/null >/dev/null 2>"$ENGINE_RUN/t$1.err" 3>&-
     ) &
     echo $! > "$ENGINE_RUN/t$1.pid"
-    date +%s > "$ENGINE_RUN/t$1.started"
+    st_now=$(date +%s)
+    echo "$st_now" > "$ENGINE_RUN/t$1.started"
+    mkdir -p "$STARTS_DIR" 2>/dev/null
+    { [ ! -r "$STARTS_DIR/t$1" ] || tail -n 20 "$STARTS_DIR/t$1"; echo "$st_now"; } > "$STARTS_DIR/t$1.new" 2>/dev/null &&
+        mv -f "$STARTS_DIR/t$1.new" "$STARTS_DIR/t$1"
 }
 
-# recent SLOT: the program was (re)started within the cooldown (120 s). The guard, the
+# The starts VWARD made, in RAM: a reboot starts every tunnel afresh.
+STARTS_DIR=${VWARD_ENGINE_STARTS_DIR:-/tmp/vward-engine-starts}
+
+# restart_due SLOT NAME: the program may be started again by VWARD itself now. A tunnel whose
+# program kept stopping, or whose server stayed silent, was started again every minute, 185
+# times a day, each start dropping the channel again (Viva 2026-10-16): after a start the
+# pauses grow 1, 2, 4, 8 minutes, and after 6 starts within the hour the tunnel is left as it
+# is (one notification) until the hour has passed or the owner restarts it. A start 15 minutes
+# back or more: a new trouble, counted afresh.
+restart_due() {
+    rd_now=$(date +%s) rd_c=0 rd_last=0
+    if [ -r "$STARTS_DIR/t$1" ]; then
+        rd_c=$(awk -v n="$rd_now" '$1 + 3600 > n' "$STARTS_DIR/t$1" | wc -l)
+        rd_last=$(tail -n 1 "$STARTS_DIR/t$1")
+    fi
+    case "$rd_last" in ''|*[!0-9]*) rd_last=0 ;; esac
+    if [ $((rd_now - rd_last)) -ge 900 ]; then
+        [ ! -e "$STARTS_DIR/t$1.gaveup" ] || rm -f "$STARTS_DIR/t$1.gaveup"
+        return 0
+    fi
+    if [ "$rd_c" -ge "${VWARD_ENGINE_STARTS_MAX:-6}" ]; then
+        [ ! -e "$STARTS_DIR/t$1.gaveup" ] || return 1
+        : > "$STARTS_DIR/t$1.gaveup"
+        log "$2: started $rd_c times within the hour, not started again until the hour has passed"
+        command -v vward_note >/dev/null 2>&1 ||
+            { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+        ! command -v vward_note >/dev/null 2>&1 ||
+            vward_note warn "«{t}» перезапускался $rd_c раз за час" \
+                "Туннель не работает после перезапусков: программа останавливается или сервер не отвечает. VWARD не перезапускает его до конца часа, чтобы не ронять канал снова и снова. Проверьте сервер или подписку; кнопка «Перезапустить» работает и сейчас." \
+                "t-$2"
+        return 1
+    fi
+    [ ! -e "$STARTS_DIR/t$1.gaveup" ] || rm -f "$STARTS_DIR/t$1.gaveup"
+    rd_wait=${VWARD_ENGINE_BACKOFF:-60} rd_i=1
+    while [ "$rd_i" -lt "$rd_c" ] && [ "$rd_wait" -lt 480 ]; do rd_wait=$((rd_wait * 2)) rd_i=$((rd_i + 1)); done
+    [ $((rd_now - rd_last)) -ge "$rd_wait" ]
+}
+
+# recent SLOT: the program was (re)started within the cooldown (180 s). The guard, the
 # minute check and a restart from the Panel do not restart it again on top of each other
-# (Viva 2026-10-04: four restarts in a minute, the tunnel never settled).
+# (Viva 2026-10-04: four restarts in a minute, the tunnel never settled), and a tunnel that
+# has just started gets the time to settle before it is judged silent.
 recent() {
     rs=$(cat "$ENGINE_RUN/t$1.started" 2>/dev/null)
     case "$rs" in ''|*[!0-9]*) return 1 ;; esac
-    [ $(( $(date +%s) - rs )) -lt "${VWARD_ENGINE_COOLDOWN:-120}" ]
+    [ $(( $(date +%s) - rs )) -lt "${VWARD_ENGINE_COOLDOWN:-180}" ]
 }
 
 stop_one() {
@@ -381,6 +424,7 @@ op_supervise() {
         case "$name" in OpkgTun[0-9]) ;; *) continue ;; esac
         [ ! -e "$ENGINE_ETC/t$n.off" ] || continue
         if [ -z "$(pid_of "$n")" ]; then
+            restart_due "$n" "$name" || continue
             start_one "$n" "$name" && started=$((started + 1)) && log "restarted $name"
             continue
         fi
@@ -391,6 +435,7 @@ op_supervise() {
         esac
         [ -e "$ENGINE_RUN/t$n.down" ] || continue
         if recent "$n"; then rm -f "$ENGINE_RUN/t$n.down"; continue; fi
+        restart_due "$n" "$name" || continue
         stop_one "$n"
         start_one "$n" "$name" && started=$((started + 1)) && log "restarted $name on its adapter"
     done < "$TUNNELS"
@@ -404,6 +449,7 @@ op_kick() {
     row=$(row_of "$1")
     [ -n "$row" ] || die unknown_tunnel 64
     ! recent "$(printf '%s' "$row" | cut -f1)" || { echo "result=unchanged"; return 0; }
+    restart_due "$(printf '%s' "$row" | cut -f1)" "$1" || { echo "result=unchanged"; return 0; }
     op_restart "$1"
 }
 

@@ -1733,7 +1733,7 @@ if [ "$ACTION" = "diagnostics" ]; then
             0) CURL_STATUS=PASS CURL_DETAIL="HTTPS работает: проверки сайтов, обновления, подписки" ;;
             126|127|13[0-9])
                 # Noted for vward_fetch: it goes straight to its fallback.
-                [ "$CURL_RC" -lt 128 ] || : > /tmp/vward-curl-tls.broken 2>/dev/null
+                case "$CURL_RC" in 132|134|135|136|139) : > /tmp/vward-curl-tls.broken 2>/dev/null ;; esac
                 if command -v uclient-fetch >/dev/null 2>&1; then
                     CURL_STATUS=WARN CURL_DETAIL="curl падает на HTTPS (код $CURL_RC): сломан OpenSSL из Entware. Загрузки идут через uclient-fetch"
                 elif [ -x /opt/share/vward/vless-engine/xray ]; then
@@ -2054,8 +2054,10 @@ if [ "$ACTION" = tunnel-quality ]; then
     if [ "${REQUEST_METHOD:-GET}" = POST ]; then
         read_body 64
         [ "$(form_value op)" = speed ] || { echo '{"ok":false,"error":"invalid_operation"}'; exit 0; }
-        [ ! -d "$Q_LOCK" ] || { echo '{"ok":false,"error":"speed_busy"}'; exit 0; }
-        sh "$QBIN" speed </dev/null >/dev/null 2>&1 &
+        # The lock taken here, at once: two taps a moment apart started two measurements (the
+        # background job took it only later, Viva 2026-10-16).
+        mkdir "$Q_LOCK" 2>/dev/null || { echo '{"ok":false,"error":"speed_busy"}'; exit 0; }
+        VWARD_SPEED_LOCK_TAKEN=1 sh "$QBIN" speed </dev/null >/dev/null 2>&1 &
         echo '{"ok":true,"started":true}'
         exit 0
     fi

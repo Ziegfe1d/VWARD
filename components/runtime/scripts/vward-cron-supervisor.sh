@@ -182,6 +182,20 @@ watch_memory()
     fi
 }
 
+# doh_note: the bell's notification of a Smart DNS client that does not start.
+doh_note()
+{
+    command -v vward_note >/dev/null 2>&1 ||
+        { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+    command -v vward_note >/dev/null 2>&1 || return 0
+    case "${VD_WHY:-}" in
+        not_running) dn_t="Программа клиента не запускается." ;;
+        *) dn_t="Программа клиента работает, но не принимает запросы." ;;
+    esac
+    vward_note warn "Smart DNS: клиент DoH не запускается" \
+        "$dn_t Сайты из Smart DNS (например, ИИ-сервисы) могут не открываться. VWARD пробует запустить его снова с паузами до 15 минут и переустановит его библиотеки HTTPS, если не поможет."
+}
+
 # ---- The components agent ----------------------------------------------------------------
 # This supervisor is VWARD's components agent: it alone starts and restarts VWARD's programs,
 # the tunnels' modules and AdGuard Home. The others (the real-time watcher, the network agent)
@@ -498,9 +512,14 @@ watch_services()
         else
             VWARD_UNNICE=$UNNICE vward_doh_keep
             case "$?" in
-                10) log_event "DOH_STARTED|Smart DNS client was not listening"; DOH_WAIT=1 ;;
-                11) log_event "DOH_START_FAILED"; DOH_SKIP=$DOH_WAIT; DOH_WAIT=$((DOH_WAIT * 2)); [ "$DOH_WAIT" -le 15 ] || DOH_WAIT=15 ;;
-                *) DOH_WAIT=1 ;;
+                10) log_event "DOH_STARTED|Smart DNS client was not listening"; DOH_WAIT=1 DOH_FAILS=0 ;;
+                11) DOH_FAILS=$((DOH_FAILS + 1))
+                    log_event "DOH_START_FAILED|why=${VD_WHY:-unknown}|in_a_row=$DOH_FAILS|next_try_min=$DOH_WAIT"
+                    DOH_SKIP=$DOH_WAIT; DOH_WAIT=$((DOH_WAIT * 2)); [ "$DOH_WAIT" -le 15 ] || DOH_WAIT=15
+                    # The third failed start in a row: told once (31-45 silent failures a day went
+                    # unnoticed, Viva 2026-10-16); the tries go on with their pauses.
+                    [ "$DOH_FAILS" != 3 ] || doh_note ;;
+                *) DOH_WAIT=1 DOH_FAILS=0 ;;
             esac
         fi
     fi
@@ -529,7 +548,7 @@ watch_services()
 
 
 log_event "SUPERVISOR_START|pid=$$"
-DOH_SKIP=0 DOH_WAIT=1
+DOH_SKIP=0 DOH_WAIT=1 DOH_FAILS=0
 TICK=0
 
 

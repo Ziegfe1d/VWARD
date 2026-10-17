@@ -124,8 +124,11 @@ vward_rci_get()
 # vward_tls_take: curl may be run on HTTPS now (it did not crash within the hour). Not known to
 # work within the hour either: one caller tries first and the others wait for its result (up to
 # 20 s), so a broken curl crashes once, not once per agent starting in the same minute (chaos
-# run: 3 crashes at once). vward_tls_done RC: the result noted (a signal: broken for an hour; an
-# answer: works for an hour), the turn given back.
+# run: 3 crashes at once). vward_tls_done RC: the result noted (a crash: broken for an hour; an
+# answer: works for an hour), the turn given back. A crash is a signal of curl's own fault (132
+# illegal instruction, 134 abort, 135 bus error, 136 arithmetic, 139 memory); a stop from outside
+# (137, 143: a time limit) or a closed pipe (141) is none (each marked a working curl broken for
+# an hour, Viva 2026-10-17).
 vward_tls_take()
 {
     _vt_flag=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
@@ -146,8 +149,10 @@ vward_tls_take()
 vward_tls_done()
 {
     _vt_flag=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
-    if [ "$1" -ge 128 ] 2>/dev/null; then : > "$_vt_flag" 2>/dev/null; rm -f "${_vt_flag%.broken}.ok"
-    elif [ "$1" -lt 126 ] 2>/dev/null; then : > "${_vt_flag%.broken}.ok" 2>/dev/null; fi
+    case "$1" in
+        132|134|135|136|139) : > "$_vt_flag" 2>/dev/null; rm -f "${_vt_flag%.broken}.ok" ;;
+        *) [ "$1" -ge 126 ] 2>/dev/null || : > "${_vt_flag%.broken}.ok" 2>/dev/null ;;
+    esac
     [ "${_vt_mine:-0}" = 0 ] || rmdir "${_vt_flag%.broken}.probe" 2>/dev/null
     _vt_mine=0
     return 0

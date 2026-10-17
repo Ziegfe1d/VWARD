@@ -500,7 +500,8 @@ resolve_ipv4()
 }
 
 
-# tls_broken: curl crashed on HTTPS within the hour. tls_crash RC: RC is such a crash (a signal),
+# tls_broken: curl crashed on HTTPS within the hour. tls_crash RC: RC is such a crash (a signal
+# of curl's own fault, not a stop from outside or a closed pipe),
 # noted for an hour (the device profile's vward_fetch reads the same note).
 tls_broken()
 {
@@ -509,7 +510,7 @@ tls_broken()
 
 tls_crash()
 {
-    [ "$1" -ge 128 ] 2>/dev/null || return 1
+    case "$1" in 132|134|135|136|139) ;; *) return 1 ;; esac
     : > "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" 2>/dev/null
     return 0
 }
@@ -1605,6 +1606,9 @@ list_watch_check()
 # Shared with the DNS guard and the uninstaller: in VWARD's own folder, not the engine's.
 AGH_BIND="${VWARD_AGH_BINDINGS:-/opt/var/lib/vward/agh-bindings.txt}"
 AGH_BIND_MAX=${VWARD_AGH_BIND_MAX:-200}
+# The lock and the «full» note in RAM: a mkdir and an rmdir on the USB stick for every name the
+# devices asked was the engine's whole write budget (CI 2026-10-15: 36 operations a minute).
+AGH_BIND_RUN="${VWARD_AGH_BIND_RUN:-/tmp/vward-agh-bind}"
 AGH_YAML="${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}"
 DNS_CHAIN_STATE="${VWARD_DNS_CHAIN_STATE:-/tmp/vward-dns-chain}/state"
 CONFIG_DIRTY="$STATE_DIR/keenetic-config.dirty"
@@ -1646,10 +1650,11 @@ agh_bind()
     case "$AB_D" in *.*) ;; *) return 0 ;; esac
     valid_fqdn "$AB_D" || return 0
     # One at a time; a lock a killed run left is taken back after 2 minutes.
-    [ -z "$(find "$AGH_BIND.lock" -maxdepth 0 -mmin +2 2>/dev/null)" ] || rmdir "$AGH_BIND.lock" 2>/dev/null
-    mkdir "$AGH_BIND.lock" 2>/dev/null || return 0
+    mkdir -p "$AGH_BIND_RUN" 2>/dev/null
+    [ -z "$(find "$AGH_BIND_RUN/lock" -maxdepth 0 -mmin +2 2>/dev/null)" ] || rmdir "$AGH_BIND_RUN/lock" 2>/dev/null
+    mkdir "$AGH_BIND_RUN/lock" 2>/dev/null || return 0
     agh_bind_one "$AB_D"
-    rmdir "$AGH_BIND.lock" 2>/dev/null
+    rmdir "$AGH_BIND_RUN/lock" 2>/dev/null
 }
 
 agh_bind_one()
@@ -1658,8 +1663,8 @@ agh_bind_one()
     AB_N=0
     [ ! -f "$AGH_BIND" ] || AB_N=$(wc -l < "$AGH_BIND")
     if [ "$AB_N" -ge "$AGH_BIND_MAX" ]; then
-        [ -e "$AGH_BIND.full" ] || echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND_FULL|$1|max=$AGH_BIND_MAX" >> "$EVENT_LOG"
-        : > "$AGH_BIND.full"
+        [ -e "$AGH_BIND_RUN/full" ] || echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND_FULL|$1|max=$AGH_BIND_MAX" >> "$EVENT_LOG"
+        : > "$AGH_BIND_RUN/full"
         return 0
     fi
     AB_NS=$(agh_ns)
@@ -1686,8 +1691,8 @@ agh_bind_one()
 # after a reboot and are made again on use; a refused one is tried again).
 agh_bind_prune()
 {
-    rm -f "$AGH_BIND.full"
-    rmdir "$AGH_BIND.lock" 2>/dev/null
+    rm -f "$AGH_BIND_RUN/full" "$AGH_BIND.full"
+    rmdir "$AGH_BIND_RUN/lock" "$AGH_BIND.lock" 2>/dev/null
     [ -s "$AGH_BIND" ] || return 0
     AP_RC=$(vward_running_config 2>/dev/null) || return 0
     [ -n "$AP_RC" ] || return 0

@@ -212,6 +212,14 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("return state left after bypass")
     if "system configuration save" not in (tmp / "running.cfg.log").read_text():
         fail("the router configuration was not saved")
+    # The VPN agent moving many lists at once saves once itself at the end: the helper does not.
+    (tmp / "running.cfg.log").write_text("")
+    env["VWARD_SAVE_LATER"] = "1"
+    run("domain-list", "domain-list4", "vpn", "result=changed", 0)
+    run("domain-list", "domain-list4", "bypass", "result=changed", 0)
+    del env["VWARD_SAVE_LATER"]
+    if "system configuration save" in (tmp / "running.cfg.log").read_text() or dns_block(cfg) != original:
+        fail("VWARD_SAVE_LATER=1: the list moves, the helper does not save")
 
     # 2. Only the short delete form works: the next form is tried and verified.
     Path(str(cfg) + ".mode-short").touch()

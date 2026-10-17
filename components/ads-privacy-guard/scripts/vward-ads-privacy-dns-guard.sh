@@ -415,6 +415,10 @@ chain_take_out()
     ndm "system configuration save" || :
     rm -f "$CHAIN_DIR/fails" "$CHAIN_DIR/oks"
     echo out > "$CHAIN_DIR/state"; ads_epoch > "$CHAIN_DIR/since"; echo "$2" > "$CHAIN_DIR/reason"
+    # The take-outs of the last hour: each more waits longer before AdGuard Home goes back in.
+    to_now=$(ads_epoch)
+    { [ ! -r "$CHAIN_DIR/outs" ] || awk -v n="$to_now" '$1 + 3600 > n' "$CHAIN_DIR/outs"; echo "$to_now"; } > "$CHAIN_DIR/outs.new" 2>/dev/null &&
+        mv -f "$CHAIN_DIR/outs.new" "$CHAIN_DIR/outs"
     ads_log "DNS_CHAIN_OUT|ns=$1|reason=$2|AdGuard Home taken out of the DNS chain: Keenetic uses the provider's DNS"
 }
 
@@ -439,6 +443,10 @@ chain_out()
     co_port=$(agh_port)
     case "$co_port" in ''|*[!0-9]*|53) return 0 ;; esac
     mkdir -p "$CHAIN_DIR" || return 0
+    # Already out: the watcher asks again each minute while AdGuard Home is silent; Keenetic's
+    # configuration is not read for it (it answered slowly enough already, Viva 2026-10-17).
+    co_st=; [ ! -r "$CHAIN_DIR/state" ] || read -r co_st < "$CHAIN_DIR/state" || :
+    [ "$co_st" != out ] || return 0
     co_ns="$(agh_dns_host):$co_port"
     "$NDMC" -c "show running-config" 2>/dev/null | chain_line "$co_ns" || return 0
     agh_up "$co_port" && agh_answers "$co_port" && return 0
@@ -488,7 +496,11 @@ chain_sync()
     # Out of the chain: back after 3 answers in a row, unless AdGuard Home would send the
     # queries back to the router (a loop Keenetic answers by dropping them).
     [ "$cs_ok" = 1 ] || { echo out > "$CHAIN_DIR/state"; return 0; }
-    [ "$(count_up "$CHAIN_DIR/oks")" -ge 3 ] || { echo out > "$CHAIN_DIR/state"; return 0; }
+    # 3 answers in a row (3 minutes); taken out again within the hour: 9, then 15 (out and in
+    # every few minutes, each with a save, was 114 Keenetic errors an hour, Viva 2026-10-16).
+    cs_outs=$(awk -v n="$(ads_epoch)" '$1 + 3600 > n' "$CHAIN_DIR/outs" 2>/dev/null | wc -l)
+    cs_need=3; [ "$cs_outs" -lt 2 ] || cs_need=9; [ "$cs_outs" -lt 3 ] || cs_need=15
+    [ "$(count_up "$CHAIN_DIR/oks")" -ge "$cs_need" ] || { echo out > "$CHAIN_DIR/state"; return 0; }
     if awk '/^[^ #]/ {d = ($1 == "dns:"); u = 0; next} /^  [a-z_]+:/ {u = d && ($1 == "upstream_dns:"); next}
             u && $1 == "-" {gsub(/["\047]/, "", $2); print $2}' "$AGH_YAML" |
         grep -Eq "^((udp|tcp)://)?($LAN|127\.0\.0\.1|localhost)(:53)?$"; then

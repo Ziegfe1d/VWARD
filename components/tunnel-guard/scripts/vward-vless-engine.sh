@@ -121,23 +121,48 @@ op_install() {
     echo "result=changed"
 }
 
+# stubs_drop FILE: the provider's notes dressed as servers left out: a subscription that ran out
+# sends «⌛ Subscription expired», «Contact support» at 0.0.0.0 (Viva 2026-10-16), some send such
+# notes among the servers. A link to no address (0.0.0.0, 127.0.0.1, ::, none) or named «expired».
+stubs_drop() {
+    awk '{ s = $0; nm = ""; i = index(s, "#"); if (i) { nm = tolower(substr(s, i + 1)); s = substr(s, 1, i - 1) }
+           i = index(s, "@"); hp = i ? substr(s, i + 1) : ""
+           if (substr(hp, 1, 1) == "[") h = substr(hp, 2, index(hp, "]") - 2); else { j = index(hp, ":"); h = j ? substr(hp, 1, j - 1) : hp }
+           if (h == "" || h == "0.0.0.0" || h == "127.0.0.1" || h == "::" || h == "::1" || nm ~ /expired/) next
+           print }' "$1" > "$1.real" && mv -f "$1.real" "$1"
+}
+
 # links FILE OUT: the vless:// and trojan:// links of FILE, or of the subscription it names
-# (base64 or plain).
+# (base64 or plain), the provider's notes left out (stubs_drop). 4: the subscription ran out -
+# only notes came, or its own «subscription-userinfo» says the date is past.
 links() {
+    lk_exp=
     src=$(tr -d '\r' < "$1" | grep -v '^#' | awk 'NF {sub(/^[ \t]+/, ""); sub(/[ \t]+$/, ""); print; exit}')
     case "$src" in
         vless://*|trojan://*) tr -d '\r' < "$1" | awk '/^(vless|trojan):\/\// {print $1}' > "$2" ;;
         https://*|http://*)
             printf '%s\n' "$src" | grep -Eq '^https?://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+$' || return 2
+            rm -f "$2.hdr"
             get -fsSL --connect-timeout 10 --max-time 30 --max-filesize 1048576 -A "VWARD" \
-                -o "$2.raw" "$src" 2>/dev/null || return 3
+                -D "$2.hdr" -o "$2.raw" "$src" 2>/dev/null || { rm -f "$2.hdr"; return 3; }
+            lk_exp=$(tr -d '\r' < "$2.hdr" 2>/dev/null | awk 'tolower($1) == "subscription-userinfo:" {
+                n = split($0, a, ";"); for (i = 1; i <= n; i++) if (a[i] ~ /expire=[0-9]+/) { sub(/.*expire=/, "", a[i]); e = a[i] + 0 } }
+                END { if (e) print e }')
+            rm -f "$2.hdr"
             if grep -Eq '(vless|trojan)://' "$2.raw"; then tr -d '\r' < "$2.raw"
             else tr -d '\r\n ' < "$2.raw" | { base64 -d 2>/dev/null || openssl base64 -d -A 2>/dev/null; } | tr -d '\r'; fi |
                 awk '/^(vless|trojan):\/\// {print $1}' > "$2"
             rm -f "$2.raw" ;;
         *) return 2 ;;
     esac
-    [ -s "$2" ]
+    [ -s "$2" ] || return 1
+    lk_n=$(grep -c . "$2")
+    stubs_drop "$2"
+    # Only notes, or the date past: the subscription ran out (a date of 0 is «no end»).
+    [ -s "$2" ] || return 4
+    case "${lk_exp:-}" in ''|0|*[!0-9]*) ;; *) [ "$lk_exp" -gt "$(date +%s)" ] || return 4 ;; esac
+    lk_exp=
+    [ "$lk_n" -gt 0 ]
 }
 
 # parse LINK: the link's parts as KEY<TAB>VALUE lines (percent-decoded), for jq.
@@ -227,7 +252,7 @@ chosen() {
 op_servers() {
     TMPD=$(mktemp -d /tmp/vward-vless.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     links "$1" "$TMPD/links"; rc=$?
-    case "$rc" in 0) ;; 2) die vless_syntax 64 ;; 3) die subscription_unavailable ;; *) die vless_no_servers 64 ;; esac
+    case "$rc" in 0) ;; 2) die vless_syntax 64 ;; 3) die subscription_unavailable ;; 4) die subscription_expired ;; *) die vless_no_servers 64 ;; esac
     i=0
     while IFS= read -r l; do
         i=$((i + 1))
@@ -317,16 +342,56 @@ start_one() {
         exec $VWARD_TUNNEL_NICE "$BIN" run -c "$ENGINE_ETC/v$1.json" </dev/null >/dev/null 2>"$ENGINE_RUN/v$1.err" 3>&-
     ) &
     echo $! > "$ENGINE_RUN/v$1.pid"
-    date +%s > "$ENGINE_RUN/v$1.started"
+    st_now=$(date +%s)
+    echo "$st_now" > "$ENGINE_RUN/v$1.started"
+    mkdir -p "$STARTS_DIR" 2>/dev/null
+    { [ ! -r "$STARTS_DIR/v$1" ] || tail -n 20 "$STARTS_DIR/v$1"; echo "$st_now"; } > "$STARTS_DIR/v$1.new" 2>/dev/null &&
+        mv -f "$STARTS_DIR/v$1.new" "$STARTS_DIR/v$1"
 }
 
-# recent SLOT: the program was (re)started within the cooldown (120 s). The guard, the
+# The starts VWARD made, in RAM: a reboot starts every tunnel afresh.
+STARTS_DIR=${VWARD_ENGINE_STARTS_DIR:-/tmp/vward-engine-starts}
+
+# restart_due SLOT NAME: the program may be started again by VWARD itself now. A tunnel whose
+# program kept stopping, or whose server stayed silent, was started again every minute, 185
+# times a day, each start dropping the channel again (Viva 2026-10-16): after a start the
+# pauses grow 1, 2, 4, 8 minutes, and after 6 starts within the hour the tunnel is left as it
+# is (one notification) until the hour has passed or the owner restarts it. A start 15 minutes
+# back or more: a new trouble, counted afresh.
+restart_due() {
+    rd_now=$(date +%s) rd_c=0 rd_last=0
+    if [ -r "$STARTS_DIR/v$1" ]; then
+        rd_c=$(awk -v n="$rd_now" '$1 + 3600 > n' "$STARTS_DIR/v$1" | wc -l)
+        rd_last=$(tail -n 1 "$STARTS_DIR/v$1")
+    fi
+    case "$rd_last" in ''|*[!0-9]*) rd_last=0 ;; esac
+    if [ $((rd_now - rd_last)) -ge 900 ]; then
+        [ ! -e "$STARTS_DIR/v$1.gaveup" ] || rm -f "$STARTS_DIR/v$1.gaveup"
+        return 0
+    fi
+    if [ "$rd_c" -ge "${VWARD_ENGINE_STARTS_MAX:-6}" ]; then
+        [ ! -e "$STARTS_DIR/v$1.gaveup" ] || return 1
+        : > "$STARTS_DIR/v$1.gaveup"
+        log "$2: started $rd_c times within the hour, not started again until the hour has passed"
+        bell warn "«{t}» перезапускался $rd_c раз за час" \
+            "Туннель не работает после перезапусков: программа останавливается или сервер не отвечает. VWARD не перезапускает его до конца часа, чтобы не ронять канал снова и снова. Проверьте сервер или подписку; кнопка «Перезапустить» работает и сейчас." \
+            "$2"
+        return 1
+    fi
+    [ ! -e "$STARTS_DIR/v$1.gaveup" ] || rm -f "$STARTS_DIR/v$1.gaveup"
+    rd_wait=${VWARD_ENGINE_BACKOFF:-60} rd_i=1
+    while [ "$rd_i" -lt "$rd_c" ] && [ "$rd_wait" -lt 480 ]; do rd_wait=$((rd_wait * 2)) rd_i=$((rd_i + 1)); done
+    [ $((rd_now - rd_last)) -ge "$rd_wait" ]
+}
+
+# recent SLOT: the program was (re)started within the cooldown (180 s). The guard, the
 # minute check and a restart from the Panel do not restart it again on top of each other
-# (Viva 2026-10-04: four restarts in a minute, the tunnel never settled).
+# (Viva 2026-10-04: four restarts in a minute, the tunnel never settled), and a tunnel that
+# has just started gets the time to settle before it is judged silent.
 recent() {
     rs=$(cat "$ENGINE_RUN/v$1.started" 2>/dev/null)
     case "$rs" in ''|*[!0-9]*) return 1 ;; esac
-    [ $(( $(date +%s) - rs )) -lt "${VWARD_ENGINE_COOLDOWN:-120}" ]
+    [ $(( $(date +%s) - rs )) -lt "${VWARD_ENGINE_COOLDOWN:-180}" ]
 }
 
 stop_one() {
@@ -352,7 +417,7 @@ op_add() {
     [ -f "$file" ] && [ ! -L "$file" ] || die vless_syntax 64
     TMPD=$(mktemp -d /tmp/vward-vless.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     links "$file" "$TMPD/links"; rc=$?
-    case "$rc" in 0) ;; 2) die vless_syntax 64 ;; 3) die subscription_unavailable ;; *) die vless_no_servers 64 ;; esac
+    case "$rc" in 0) ;; 2) die vless_syntax 64 ;; 3) die subscription_unavailable ;; 4) die subscription_expired ;; *) die vless_no_servers 64 ;; esac
     link=$(chosen "$file" "$TMPD/links")
     [ -n "$link" ] || die vless_no_servers 64
     idx=$(tr -d '\r' < "$file" | sed -n 's/^#server=\([0-9][0-9]*\)$/\1/p' | head -n 1)
@@ -453,6 +518,7 @@ op_supervise() {
         # A failover at work starts and stops the program itself.
         ! failover_busy "$n" || continue
         if [ -z "$(pid_of "$n")" ]; then
+            restart_due "$n" "$name" || continue
             start_one "$n" && started=$((started + 1)) && log "restarted $name"
             continue
         fi
@@ -473,6 +539,8 @@ op_supervise() {
             [ -e "$ENGINE_RUN/v$n.miss" ] || { : > "$ENGINE_RUN/v$n.miss"; continue; }
         fi
         rm -f "$ENGINE_RUN/v$n.miss"
+        # The subscription ran out: no restart and no other server helps until it is renewed.
+        if expired_wait "$n" "$name"; then continue; fi
         # Two restarts in a row did not bring the server back: another server of the same
         # subscription, in the background (it tries them one by one).
         fails=$(cat "$ENGINE_RUN/v$n.fails" 2>/dev/null); case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
@@ -482,6 +550,7 @@ op_supervise() {
             log "$name: no answer after two restarts, looking for another server"
             continue
         fi
+        restart_due "$n" "$name" || continue
         echo $((fails + 1)) > "$ENGINE_RUN/v$n.fails"
         stop_one "$n"
         start_one "$n" && started=$((started + 1)) && log "restarted $name on its adapter"
@@ -525,6 +594,7 @@ op_kick() {
     n=$(printf '%s' "$row" | cut -f1)
     ! recent "$n" || { echo "result=unchanged"; return 0; }
     ! failover_busy "$n" || { echo "result=unchanged"; return 0; }
+    restart_due "$n" "$1" || { echo "result=unchanged"; return 0; }
     ( op_restart "$1" ) 3>&- >/dev/null && { echo "result=changed"; return 0; }
     [ -s "$ENGINE_ETC/v$n.src" ] && failover_due "$n" || die tunnel_no_handshake
     op_failover "$1"
@@ -577,6 +647,43 @@ try_server() {
     return 0
 }
 
+# bell SEV TITLE TEXT NAME: a notification in the Panel's bell (the device profile's vward_note).
+bell() {
+    command -v vward_note >/dev/null 2>&1 ||
+        { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+    ! command -v vward_note >/dev/null 2>&1 || vward_note "$1" "$2" "$3" "t-$4"
+}
+
+# sub_state SLOT NAME RC: what the subscription said (RC of links). 4, it ran out: noted once
+# ($ENGINE_RUN/vSLOT.expired), the servers kept stay; it answers with servers again: the
+# note goes, the owner is told it works again. Other answers (no connection) change nothing.
+sub_state() {
+    case "$3" in
+        4) [ -e "$ENGINE_RUN/v$1.expired" ] && return 0
+           mkdir -p "$ENGINE_RUN" && : > "$ENGINE_RUN/v$1.expired"
+           log "$2: the subscription ran out (the provider sends notes instead of servers), the servers kept stay"
+           bell warn "Подписка VLESS истекла" \
+               "Провайдер присылает вместо серверов заглушки («Subscription expired»). VWARD оставил прежний список серверов и не перезапускает туннель «{t}» впустую; продлите подписку у провайдера. VWARD проверяет её раз в 30 минут и вернёт туннель сам." "$2" ;;
+        0) [ -e "$ENGINE_RUN/v$1.expired" ] || return 0
+           rm -f "$ENGINE_RUN/v$1.expired" "$ENGINE_RUN/v$1.failover.at"
+           log "$2: the subscription answers with servers again"
+           bell ok "Подписка VLESS снова действует" "Провайдер снова присылает серверы: туннель «{t}» работает как обычно." "$2" ;;
+    esac
+}
+
+# expired_wait SLOT NAME: the tunnel's subscription ran out: 0 while it still has (looked at again
+# every 30 minutes; nothing restarts the tunnel meanwhile, no server helps), 1 when it was renewed.
+expired_wait() {
+    [ -e "$ENGINE_RUN/v$1.expired" ] || return 1
+    [ -n "$(find "$ENGINE_RUN/v$1.expired" -mmin +"${VWARD_VLESS_EXPIRED_EVERY:-30}" 2>/dev/null)" ] || return 0
+    ew_t=$(mktemp -d /tmp/vward-vless.XXXXXX 2>/dev/null) || return 0
+    links "$ENGINE_ETC/v$1.src" "$ew_t/links"; ew_rc=$?
+    case "$ew_rc" in
+        0) (umask 077; cp "$ew_t/links" "$ENGINE_ETC/v$1.links"); rm -rf "${ew_t:?}"; sub_state "$1" "$2" 0; return 1 ;;
+        *) : > "$ENGINE_RUN/v$1.expired"; rm -rf "${ew_t:?}"; return 0 ;;
+    esac
+}
+
 # tunnel_links NAME: the tunnel's slot in $n and its subscription's servers in $TMPD/links (read
 # again when its address answers, else the copy kept from the last time).
 tunnel_links() {
@@ -585,8 +692,11 @@ tunnel_links() {
     n=$(printf '%s' "$row" | cut -f1)
     [ -s "$ENGINE_ETC/v$n.src" ] || [ -s "$ENGINE_ETC/v$n.links" ] || die no_source 64
     TMPD=$(mktemp -d /tmp/vward-vless.XXXXXX 2>/dev/null) || die temporary_file_unavailable
-    if [ -s "$ENGINE_ETC/v$n.src" ] && links "$ENGINE_ETC/v$n.src" "$TMPD/links"; then (umask 077; cp "$TMPD/links" "$ENGINE_ETC/v$n.links")
-    else cp "$ENGINE_ETC/v$n.links" "$TMPD/links" 2>/dev/null || die subscription_unavailable; fi
+    tl_rc=1
+    [ ! -s "$ENGINE_ETC/v$n.src" ] || { links "$ENGINE_ETC/v$n.src" "$TMPD/links"; tl_rc=$?; }
+    sub_state "$n" "$1" "$tl_rc"
+    if [ "$tl_rc" = 0 ]; then (umask 077; cp "$TMPD/links" "$ENGINE_ETC/v$n.links")
+    else cp "$ENGINE_ETC/v$n.links" "$TMPD/links" 2>/dev/null || die subscription_unavailable; stubs_drop "$TMPD/links"; fi
 }
 
 # list NAME: the servers of the tunnel's subscription as the VPN apps show them: name (with the
@@ -662,8 +772,17 @@ op_failover() {
     echo $$ > "$ENGINE_RUN/v$n.failover/pid"
     TMPD=$(mktemp -d /tmp/vward-vless.XXXXXX 2>/dev/null) || { rm -rf "${ENGINE_RUN:?}/v$n.failover"; die temporary_file_unavailable; }
     trap 'rm -rf "${ENGINE_RUN:?}/v$n.failover"; cleanup' EXIT
-    if links "$ENGINE_ETC/v$n.src" "$TMPD/links"; then (umask 077; cp "$TMPD/links" "$ENGINE_ETC/v$n.links")
-    else cp "$ENGINE_ETC/v$n.links" "$TMPD/links" 2>/dev/null || die subscription_unavailable; fi
+    links "$ENGINE_ETC/v$n.src" "$TMPD/links"; fo_rc=$?
+    sub_state "$n" "$1" "$fo_rc"
+    if [ "$fo_rc" = 4 ]; then
+        # Every server refuses an expired subscription: none is tried, the tunnel stays as it is.
+        date +%s > "$ENGINE_RUN/v$n.failover.at"
+        echo "info.failover=expired"
+        echo "result=unchanged"
+        return 0
+    fi
+    if [ "$fo_rc" = 0 ]; then (umask 077; cp "$TMPD/links" "$ENGINE_ETC/v$n.links")
+    else cp "$ENGINE_ETC/v$n.links" "$TMPD/links" 2>/dev/null || die subscription_unavailable; stubs_drop "$TMPD/links"; fi
     cur=$(cat "$ENGINE_ETC/v$n.idx" 2>/dev/null); case "$cur" in ''|*[!0-9]*) cur=1 ;; esac
     # The flag: two regional indicator symbols, 8 bytes of UTF-8 (F0 9F 87 ..).
     nm() { parse "$1" 2>/dev/null | awk -F '\t' '$1 == "name" {print substr($0, 6); exit}'; }

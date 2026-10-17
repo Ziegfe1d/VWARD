@@ -37,13 +37,16 @@ RECOVERY_INTERVAL=300
 DISABLE_FILE="${VWARD_ETC:-/opt/etc/vward}/tunnel-guard.disabled"
 # Several tunnels: when the one VWARD routes through dies, its routes go to the best other
 # tunnel that answers (the quality samples); only with none alive do the lists go direct.
-# When the first one answers again for three minutes, the routes come back to it.
+# When the first one answers again for 15 minutes, the routes come back to it.
 FALLBACK_OFF="${VWARD_ETC:-/opt/etc/vward}/tunnel-fallback.disabled"
 RETURN_OFF="${VWARD_ETC:-/opt/etc/vward}/tunnel-return.disabled"
 FALLBACK="$DIR/fallback"
 QUALITY=${VWARD_TUNNEL_QUALITY_BIN:-/opt/bin/vward-tunnel-quality.sh}
 HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
-RETURN_STREAK=3
+# Routes and lists come back after 15 minutes of answers in a row, not 3: a tunnel that
+# answers a few minutes and fails again moved 19 lists back and forth every quarter of an hour
+# (Viva 2026-10-16, 38 moves each way a day; VWARD's routes 4 minutes after they left).
+RETURN_STREAK=${VWARD_RETURN_STREAK:-15}
 # Keenetic's own lists with their own tunnel (and services) move the same way, one by one:
 # GROUP<TAB>FIRST TUNNEL<TAB>NOW ON<TAB>SINCE per list moved.
 LISTS_FALLBACK="$DIR/lists-fallback"
@@ -178,11 +181,24 @@ lists_best()
 # lists_move GROUP TUNNEL: the Panel's own «Маршрут списка», verified by the helper.
 lists_move()
 {
-    VWARD_TUNNEL_BY_GUARD=1 "$HELPER" domain-list "$1" "$2" </dev/null 2>/dev/null | tail -n 1 | grep -q '^result=changed'
+    VWARD_TUNNEL_BY_GUARD=1 VWARD_SAVE_LATER=1 "$HELPER" domain-list "$1" "$2" </dev/null 2>/dev/null | tail -n 1 | grep -q '^result=changed'
+}
+
+# lists_save: the lists moved in this run kept in Keenetic's saved configuration, once for all
+# of them; a busy Keenetic that does not save now is asked again on the next run (SAVE_PENDING).
+SAVE_PENDING="$DIR/lists-save.pending"
+lists_save()
+{
+    "${VWARD_NDMC:-ndmc}" -c "system configuration save" </dev/null >/dev/null 2>&1 && { rm -f "$SAVE_PENDING"; return 0; }
+    sleep "${VWARD_LISTS_SAVE_RETRY:-5}"
+    "${VWARD_NDMC:-ndmc}" -c "system configuration save" </dev/null >/dev/null 2>&1 && { rm -f "$SAVE_PENDING"; return 0; }
+    [ -e "$SAVE_PENDING" ] ||
+        echo "$NOW_TEXT|LISTS_SAVE_LATER|moved=$LISTS_MOVED|back=$LISTS_BACK|Keenetic did not save: asked again on the next run" >> "$LOG"
+    : > "$SAVE_PENDING"
 }
 
 # A list routed to a tunnel that failed its last two samples goes to the best tunnel that
-# answers; back when its tunnel answers three minutes in a row. VWARD's own group and
+# answers; back when its tunnel answers 15 minutes in a row. All lists of a run are saved once. VWARD's own group and
 # AdaptiveAuto follow VWARD's tunnel (switch_to); with no tunnel answering the list stays
 # (Keenetic's «auto» route takes it past the dead tunnel).
 lists_fallback()
@@ -245,6 +261,7 @@ lists_fallback()
             [ "${from:-$t}" = "$alt" ] || printf '%s\t%s\t%s\t%s\n' "$g" "${from:-$t}" "$alt" "$NOW" >> "$LW/keep"
         done < "$LW/routes"
     fi
+    [ $((LISTS_MOVED + LISTS_BACK)) = 0 ] || lists_save
     # Written only when it changes: the state directory is on the USB stick.
     if [ ! -s "$LW/keep" ]; then
         rm -f "$LISTS_FALLBACK"
@@ -703,6 +720,8 @@ if [ "$MODE|$DOWN_STREAK|$FAILOPEN_ACTIVE|$LAST_RECOVERY_TEST|$ACTION|$FAILOPEN_
 fi
 
 
+# A save Keenetic refused on an earlier run.
+[ ! -e "$SAVE_PENDING" ] || lists_save
 lists_fallback
 
 # Where the routes went when the first tunnel died, until they come back.

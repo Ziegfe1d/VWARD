@@ -3,7 +3,8 @@
 libnghttp2 at night, and the AI services behind Smart DNS stayed broken until it was started by
 hand). AdGuard Home sends Smart DNS domains to [/a.com/]127.0.0.1:5453; when nothing listens
 there, the client's own start script runs again. Listening: left alone. Not used by AdGuard Home:
-left alone. Three restarts within 6 hours: the HTTPS library is taken for broken (curl's repair).
+left alone. Three restarts within 6 hours: its HTTPS libraries are noted for repair; curl is not
+marked broken for it (VWARD went around a working curl for hours, Viva 2026-10-17).
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -38,6 +40,7 @@ with tempfile.TemporaryDirectory() as tmp:
     (t / "init.d/S90other").chmod(0o755)
     env = os.environ | {"VWARD_ADGUARD_CONFIG": str(agh), "VWARD_PROC_NET": str(t / "net"), "VWARD_INITD": str(t / "init.d"),
                         "VWARD_DOH_RESTARTS": str(t / "restarts"), "VWARD_TLS_BROKEN_FLAG": str(t / "tls.broken"),
+                        "VWARD_DOH_BROKEN_FLAG": str(t / "doh.broken"),
                         "VWARD_DOH_SETTLE": "0"}
 
     def run() -> int:
@@ -58,11 +61,19 @@ with tempfile.TemporaryDirectory() as tmp:
     (t / "net/udp").write_text(HEAD)
     if run() != 11:
         fail("a start that did not help is not reported")
-    if (t / "tls.broken").exists():
+    (t / "net/tcp").write_text(HEAD)
+    why = subprocess.run([busybox, "sh", "-c", f'. "{LIB}"; vward_doh_keep; echo "$VD_WHY"'], env=env | {"VWARD_DOH_COMM": "no-such-doh-client"},
+                         capture_output=True, text=True).stdout.strip()
+    if why != "not_running":
+        fail(f"a start that did not help says why: {why!r}")
+    # The books as before this look: two restarts so far.
+    (t / "restarts").write_text(f"{int(time.time()) - 60}\n{int(time.time())}\n")
+    (t / "doh.broken").unlink(missing_ok=True)
+    if (t / "doh.broken").exists():
         fail("two restarts already mark the library")
     run()
-    if not (t / "tls.broken").exists():
-        fail("three restarts within 6 hours do not mark the HTTPS library for repair")
+    if not (t / "doh.broken").exists() or (t / "tls.broken").exists():
+        fail("three restarts within 6 hours mark the DoH client's libraries for repair, never curl")
     # AdGuard Home no longer uses a local client: nothing to keep.
     agh.write_text("dns:\n  upstream_dns:\n    - https://dns.example/dns-query\n")
     n = len((t / "starts").read_text().splitlines())

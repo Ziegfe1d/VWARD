@@ -267,6 +267,10 @@ load_profile() {
 
 snapshot() {
     [ -n "$RUNCFG" ] || RUNCFG=$(mktemp /tmp/vward-console-config.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && [ -s "$RUNCFG" ] && return 0
+    # A busy Keenetic does not answer for a moment («Не сохранено: не удалось прочитать
+    # конфигурацию роутера» while the VPN agent moved lists, Viva 2026-10-16): once more.
+    sleep "${VWARD_SNAPSHOT_RETRY:-3}"
     "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && [ -s "$RUNCFG" ] || die router_config_unavailable
 }
 
@@ -284,6 +288,9 @@ group_set() {
 }
 
 save_router() {
+    # A batch (the VPN agent moving many lists at once) saves once at its end itself: 19 lists
+    # were 19 saves in a minute and the busy Keenetic stopped answering (Viva 2026-10-16).
+    [ "${VWARD_SAVE_LATER:-0}" != 1 ] || return 0
     ndm "system configuration save" || return 1
     mkdir -p "$ROUTE_STATE" 2>/dev/null && echo 0 > "$REFRESH_TS" 2>/dev/null
     return 0

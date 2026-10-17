@@ -336,9 +336,12 @@ vward_agh_pidfiles_clean() {
 # vward_doh_keep: a local DoH client that AdGuard Home's Smart DNS goes through ([/a.com/]
 # 127.0.0.1:5453 - https-dns-proxy) and that does not listen is started again by its own start
 # script (Viva 2026-10-13: https-dns-proxy crashed in libnghttp2 at night and the AI services
-# behind Smart DNS stayed broken until someone started it). Three restarts within 6 hours: the
-# HTTPS library is taken for broken and the maintenance agent reinstalls it (curl's HTTPS repair).
-# 0: nothing to do, 10: started again, 11: the start did not help (the caller waits longer).
+# behind Smart DNS stayed broken until someone started it). Three restarts within 6 hours: its
+# HTTPS libraries are noted for the maintenance agent's repair (VWARD_DOH_BROKEN_FLAG); curl is
+# not marked broken for it (a DoH client that does not start is no proof curl crashes: VWARD went
+# around a working curl for hours, Viva 2026-10-17).
+# 0: nothing to do, 10: started again, 11: the start did not help (the caller waits longer;
+# VD_WHY: not_running - the client is not running at all, not_listening - it runs, the port is shut).
 vward_doh_keep() {
     vd_cfg=${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}
     [ -r "$vd_cfg" ] || vd_cfg=/opt/etc/AdGuardHome.yaml
@@ -362,11 +365,14 @@ vward_doh_keep() {
     vd_log=${VWARD_DOH_RESTARTS:-/tmp/vward-doh-restarts}
     vd_now=$(date +%s)
     { [ ! -r "$vd_log" ] || awk -v n="$vd_now" '$1 + 21600 > n' "$vd_log"; echo "$vd_now"; } > "$vd_log.$$" 2>/dev/null && mv -f "$vd_log.$$" "$vd_log"
-    [ "$(wc -l < "$vd_log" 2>/dev/null)" -lt 3 ] || : > "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" 2>/dev/null
+    [ "$(wc -l < "$vd_log" 2>/dev/null)" -lt 3 ] || : > "${VWARD_DOH_BROKEN_FLAG:-/tmp/vward-doh.broken}" 2>/dev/null
     sleep "${VWARD_DOH_SETTLE:-2}"
     for vd_p in $vd_down; do
         vd_hex=$(printf '%04X' "$vd_p")
-        awk -v h=":$vd_hex" '$2 ~ h "$" {f = 1} END {exit !f}' "$vd_net/udp" "$vd_net/tcp" 2>/dev/null || return 11
+        awk -v h=":$vd_hex" '$2 ~ h "$" {f = 1} END {exit !f}' "$vd_net/udp" "$vd_net/tcp" 2>/dev/null && continue
+        VD_WHY=not_listening
+        pidof "${VWARD_DOH_COMM:-https-dns-proxy}" >/dev/null 2>&1 || VD_WHY=not_running
+        return 11
     done
     return 10
 }

@@ -53,7 +53,7 @@ vward_note() {{ printf '%s|%s|%s\\n' "$1" "$2" "$4" >> "{tmp}/notes"; }}
     # The Panel's helper: «tunnel NAME» moves the routes and changes the profile;
     # «domain-list GROUP TUNNEL» moves one list.
     (bin_ / "helper").write_text(f"""#!/bin/sh
-echo "$* by_guard=${{VWARD_TUNNEL_BY_GUARD:-}}" >> "{tmp}/helper.log"
+echo "$* by_guard=${{VWARD_TUNNEL_BY_GUARD:-}}${{VWARD_SAVE_LATER:+ save_later=$VWARD_SAVE_LATER}}" >> "{tmp}/helper.log"
 case "$1" in
     tunnel)
         case "$2" in Wireguard0) d=nwg0 ;; Wireguard1) d=nwg1 ;; Wireguard2) d=nwg2 ;; esac
@@ -94,11 +94,11 @@ echo result=changed
         fail(f"the first tunnel is remembered and nothing is switched off: {fallback()}")
     if "|to=Wireguard2|from=Wireguard0" not in (tmp / "guard.log").read_text():
         fail("the guard log names where the routes went")
-    # Wireguard0 answers two minutes: not yet; three: the routes come back.
-    if run("UP", "Wireguard0\tnwg0\t0\t50\t2\t30\t60\t50\t5\t40\n") != "ACTION=KEEP_UP":
-        fail("two minutes are not enough to come back")
-    if run("UP", "Wireguard0\tnwg0\t0\t50\t3\t30\t60\t50\t5\t40\n") != "ACTION=FALLBACK_RETURN":
-        fail("three minutes bring the routes back")
+    # Wireguard0 answers 14 minutes: not yet; 15: the routes come back.
+    if run("UP", "Wireguard0\tnwg0\t0\t50\t14\t30\t60\t50\t5\t40\n") != "ACTION=KEEP_UP":
+        fail("14 minutes are not enough to come back")
+    if run("UP", "Wireguard0\tnwg0\t0\t50\t15\t30\t60\t50\t5\t40\n") != "ACTION=FALLBACK_RETURN":
+        fail("15 minutes bring the routes back")
     if (tmp / "iface").read_text().split()[0] != "Wireguard0" or fallback():
         fail("back on the first tunnel, nothing to remember")
     # The guard had the tunnel down and it answers again, but Keenetic still has it switched
@@ -184,14 +184,25 @@ echo result=changed
     run("UP", q((30, 0), (0, 4), (0, 2)))
     if route("Games") != "Wireguard0" or route("Video") != "Wireguard0" or not lists.read_text().startswith("Games\tWireguard1\tWireguard0\t"):
         fail(f"a list moved on keeps its first tunnel: {lists.read_text() if lists.exists() else ''}")
-    # Both answer two minutes: not yet; three: each list comes back to its own first tunnel.
-    run("UP", q((30, 0), (2, 0), (2, 0)))
+    # Both answer 14 minutes: not yet (a tunnel answering a few minutes and failing again moved
+    # 19 lists back and forth every quarter of an hour); 15: each list comes back to its own
+    # first tunnel, the helper does not save each, the guard saves once for all of them.
+    run("UP", q((30, 0), (14, 0), (14, 0)))
     if route("Games") != "Wireguard0" or route("Video") != "Wireguard0":
-        fail("two minutes are not enough to bring a list back")
-    run("UP", q((30, 0), (3, 0), (3, 0)))
+        fail("14 minutes are not enough to bring a list back")
+    (tmp / "ndmc.log").write_text(""); (tmp / "helper.log").write_text("")
+    run("UP", q((30, 0), (15, 0), (15, 0)))
     if route("Games") != "Wireguard1" or route("Video") != "Wireguard2" or lists.exists() or \
             "|LIST_RETURN|list=Games|to=Wireguard1|from=Wireguard0" not in (tmp / "guard.log").read_text():
-        fail("three minutes bring the lists back and nothing is remembered")
+        fail("15 minutes bring the lists back and nothing is remembered")
+    if (tmp / "helper.log").read_text().count("save_later=1") != 2 or (tmp / "ndmc.log").read_text().count("system configuration save") != 1:
+        fail(f"two lists back: one save for both: {(tmp / 'helper.log').read_text()!r} {(tmp / 'ndmc.log').read_text()!r}")
+    # Keenetic was too busy to save on an earlier run: asked again on the next one, nothing moved.
+    (tmp / "ndmc.log").write_text("")
+    (gdir / "lists-save.pending").write_text("")
+    run("UP", q((30, 0), (15, 0), (15, 0)))
+    if (gdir / "lists-save.pending").exists() or "system configuration save" not in (tmp / "ndmc.log").read_text():
+        fail("a save Keenetic refused is asked again on the next run")
     # Someone routes the moved list elsewhere: the guard forgets it and leaves it there.
     run("UP", q((30, 0), (0, 2), (30, 0)))
     (tmp / "routes").write_text((tmp / "routes").read_text().replace("Games Wireguard2", "Games ISP"))
@@ -298,6 +309,15 @@ echo result=changed
     summ = subprocess.run(["sh", str(QUALITY), "summary"], env=qenv, text=True, capture_output=True, check=True).stdout.splitlines()
     if [l.split("\t")[11] for l in summ] != ["20.0", "0"] or summ[0].split("\t")[12] != rows[0][2]:
         fail(f"the summary carries the speed: {summ}")
+    # One measurement at a time (two taps started two, Viva 2026-10-16): a lock held by another
+    # run measures nothing; the Panel takes the lock before it starts one, and that run measures.
+    (tmp / "slock").mkdir(); speed.unlink()
+    subprocess.run(["sh", str(QUALITY), "speed"], env=qenv, check=True, timeout=60)
+    if speed.exists() or not (tmp / "slock").exists():
+        fail("a measurement while another runs")
+    subprocess.run(["sh", str(QUALITY), "speed"], env=qenv | {"VWARD_SPEED_LOCK_TAKEN": "1"}, check=True, timeout=60)
+    if not speed.exists() or (tmp / "slock").exists():
+        fail("the Panel's measurement with the lock it took")
     # Measured by itself: every 6 hours here (the default is at night), in the background.
     (etc / "tunnel-auto.conf").write_text("SPEED=6h\n")
     speed.write_text(f"Wireguard0\tnwg0\t{int(time.time()) - 3600}\t20.0\n")

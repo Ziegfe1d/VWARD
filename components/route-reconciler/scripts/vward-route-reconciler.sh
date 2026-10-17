@@ -135,8 +135,8 @@ probe_result()
     )
 
     RC=$?
-    # A crash (a signal) is noted for an hour, as vward_fetch does.
-    [ "$RC" -lt 128 ] || : > "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" 2>/dev/null
+    # A crash (a signal of curl's own fault) is noted for an hour, as vward_fetch does.
+    case "$RC" in 132|134|135|136|139) : > "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" 2>/dev/null ;; esac
     CODE=${OUT%%|*}
     TIME=${OUT#*|}
 

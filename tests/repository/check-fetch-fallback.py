@@ -115,6 +115,13 @@ esac
     if rc != 22 or flag.exists() or len(log("uc")) != n:
         fail("a working curl's answer went to uclient-fetch")
 
+    # Stopped from outside (a time limit: 143, 137) or a closed pipe (141): the request goes
+    # through the fallback, curl is not marked broken (Viva 2026-10-17: a working curl was
+    # avoided for hours and reinstalled every 6 hours).
+    for code in ("137", "141", "143"):
+        rc, _ = fetch(f"--fail {url}", CURL_RC=code, UC_MODE="ok")
+        if rc != 0 or flag.exists():
+            fail(f"curl stopped from outside ({code}) is marked broken: rc={rc}")
     r = subprocess.run(["sh", "-c", f'. "{LIB}"; vward_https_broken'], env=base)
     if r.returncode == 0:
         fail("vward_https_broken without a crash")

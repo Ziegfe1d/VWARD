@@ -91,7 +91,9 @@ conf_get() {
 
 # speed: every tunnel one after another (together they would share the line and the CPU).
 speed() {
-    mkdir "$SPEED_LOCK" 2>/dev/null || return 0
+    # One measurement at a time; the Panel takes the lock itself before it starts this one.
+    if [ "${VWARD_SPEED_LOCK_TAKEN:-0}" = 1 ]; then [ -d "$SPEED_LOCK" ] || return 0
+    else mkdir "$SPEED_LOCK" 2>/dev/null || return 0; fi
     trap 'rm -rf "${SPEED_LOCK:?}"' EXIT
     vward_profile_load || return 1
     mkdir -p "$(dirname "$SPEED_FILE")" || return 1

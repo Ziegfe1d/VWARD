@@ -418,11 +418,23 @@ with tempfile.TemporaryDirectory() as tmp:
         if "googlevideo.com" in left or "youtube.com" in left or "smart.example" not in left or binds.exists() \
                 or "AGH_UNBIND|count=2" not in guardlog():
             fail(f"{shell[0]} out of the chain: VWARD's list bindings go, one made by hand stays: {left!r}")
+        # Already out: the watcher's next minute does not read Keenetic's configuration again.
+        nd = tmp / "ndmc.log"
+        n0 = len(nd.read_text().splitlines()) if nd.exists() else 0
+        run("chain-out", shell=shell)
+        if (len(nd.read_text().splitlines()) if nd.exists() else 0) != n0:
+            fail(f"{shell[0]} chain-out while out: Keenetic is not asked again")
+        # The second take-out within the hour: back after 9 answers in a row, not 3 (out and in
+        # every few minutes, each with a save).
         answer.write_text("1")
         for _ in range(3):
             run("tick", shell=shell)
+        if inchain():
+            fail(f"{shell[0]} the second take-out within the hour: not back after 3 minutes")
+        for _ in range(6):
+            run("tick", shell=shell)
         if not inchain():
-            fail(f"{shell[0]} back after a fast take-out")
+            fail(f"{shell[0]} back after a fast take-out (9 answers)")
         answer.write_text("1")
         run("chain-out", shell=shell)
         if not inchain():
