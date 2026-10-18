@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Observation mode of the agents («Наблюдение | Действие», fix.28.6): an agent that only watches
+"""Observation mode of the agents (the default, owner 2026-10-18) («Наблюдение | Действие», fix.28.6): an agent that only watches
 writes down what it would do (a proposed action) and changes nothing; the mode is set for all
 agents or one; what keeps the home online and the Panel reachable is never gated."""
 
@@ -30,9 +30,10 @@ with tempfile.TemporaryDirectory() as tmp:
         return r.stdout.strip()
 
     modes = "for a in network components updates maintenance; do printf '%s ' $(vward_agent_mode $a); done"
-    # No settings: every agent acts, as before.
-    if sh(modes) != "act act act act" or sh('vward_agent_acts network x "y" && echo acts') != "acts" or prop.exists():
-        fail("without settings the agents act and write nothing")
+    # No settings: every agent watches (owner 2026-10-18: observation by default) and writes down.
+    if sh(modes) != "watch watch watch watch" or sh('vward_agent_acts network x "y" || echo watched') != "watched" or not prop.exists():
+        fail("without settings the agents watch and write down what they would do")
+    prop.unlink()
     # All watch; one agent acts on its own choice.
     conf.parent.mkdir(parents=True)
     conf.write_text("all=watch\nupdates=act\n")

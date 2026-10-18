@@ -1121,7 +1121,7 @@ const AGENT_STATE = { late: ['crit', 'Не запускается'], hung: ['war
 const AGENTS = [['network', 'Агент сети'], ['components', 'Агент компонентов'], ['updates', 'Агент обновлений'], ['maintenance', 'Агент обслуживания']];
 const AGENT_NAME = Object.fromEntries(AGENTS);
 function agentsMode() {
-  const m = ((S.config && S.config.agents) || {}).mode || {}, all = m.all === 'watch' ? 'watch' : 'act';
+  const m = ((S.config && S.config.agents) || {}).mode || {}, all = m.all === 'act' ? 'act' : 'watch';
   return Object.fromEntries([['all', all]].concat(AGENTS.map(a => [a[0], m[a[0]] === 'watch' || m[a[0]] === 'act' ? m[a[0]] : all])));
 }
 const modePrev = {};

@@ -462,7 +462,7 @@ vward_agh_ensure() {
 # Failures grew as the agents grew; before they are rebuilt around one core, the owner can let
 # an agent only watch: what it would do it writes down as a proposed action («Предполагаемое
 # действие») and does nothing. agents.conf: all=act|watch, then network=, components=, updates=,
-# maintenance= (empty: as all). Not gated, ever: starting a stopped VWARD program, the Panel and
+# maintenance= (empty: as all); no file, no choice: watch (owner 2026-10-18). Not gated, ever: starting a stopped VWARD program, the Panel and
 # SSH, AdGuard Home out of the DNS chain when it is silent (the home keeps its internet).
 VWARD_AGENTS_CONF=${VWARD_AGENTS_CONF:-${VWARD_ROOT_PREFIX:-}/opt/etc/vward/agents.conf}
 VWARD_PROPOSED=${VWARD_PROPOSED:-${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/agents/proposed.tsv}
@@ -476,7 +476,7 @@ vward_agent_mode() {
         done < "$VWARD_AGENTS_CONF"
     fi
     case "$_vam_one" in act|watch) ;; *) _vam_one=$_vam_all ;; esac
-    case "$_vam_one" in watch) echo watch ;; *) echo act ;; esac
+    case "$_vam_one" in act) echo act ;; *) echo watch ;; esac
 }
 
 # vward_agent_acts AGENT ACTION TEXT: 0 the agent acts; 1 it only watches, and the action is

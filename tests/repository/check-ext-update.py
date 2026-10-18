@@ -95,7 +95,10 @@ case "$a" in */rci/) cat "{tmp}/fw.json" ;; --version) echo curl ;; *) exit 7 ;;
         "VWARD_EXT_UPDATE_STATE": str(state), "VWARD_EXT_UPDATE_BACKUP": str(tmp / "backups"),
         "VWARD_ROUTE_STATE": str(tmp / "route"), "VWARD_NSLOOKUP_BIN": str(bindir / "nslookup"),
         "VWARD_ADS_DNS_GUARD_BIN": str(tmp / "dnsguard"),
+        # The agents watch by default (owner 2026-10-18); here the updates agent acts.
+        "VWARD_AGENTS_CONF": str(tmp / "agents.conf"),
     }
+    (tmp / "agents.conf").write_text("all=act\n")
     # The DNS chain guard: told before AdGuard Home is replaced and after.
     (tmp / "dnsguard").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/dnsguard.log"\n')
     (tmp / "dnsguard").chmod(0o755)
