@@ -681,6 +681,16 @@ vward_discover_tunnel_device()
 # Picks the managed VPN tunnel among any number of tunnels without relying
 # on interface names: explicit config, the only tunnel, or the only tunnel that
 # existing routes point to. Prints "<ndm-name> <kernel-name>".
+# vward_tunnel_device_of NAME: Keenetic's own adapter name for a tunnel that has none right now
+# (a VWARD engine's OpkgTunN -> opkgtunN); nothing for other kinds.
+vward_tunnel_device_of()
+{
+    case "$1" in
+        OpkgTun[0-9]|OpkgTun[0-9][0-9]) printf 'opkgtun%s\n' "${1#OpkgTun}" ;;
+        *) return 1 ;;
+    esac
+}
+
 vward_select_tunnel()
 {
     _vp_map=$1
@@ -871,6 +881,12 @@ vward_profile_load()
         elif [ -z "$_vp_devmap" ]; then
             [ -n "${VWARD_TUNNEL_DEVICE:-}" ] || VWARD_TUNNEL_DEVICE=$(vward_discover_tunnel_device)
             [ -n "${VWARD_TUNNEL_INTERFACE:-}" ] || VWARD_TUNNEL_INTERFACE=${VWARD_TUNNEL_DEVICE:-}
+        elif [ -n "${VWARD_TUNNEL_INTERFACE:-}" ] && [ -z "${VWARD_TUNNEL_DEVICE:-}" ] &&
+             _vp_dev=$(vward_tunnel_device_of "$VWARD_TUNNEL_INTERFACE"); then
+            # The chosen tunnel has no adapter now (a VWARD engine's tunnel whose settings were
+            # lost with the USB stick, Viva 2026-10-18): its name still stands, the profile loads,
+            # so the Panel can switch to another tunnel and the agents keep working.
+            VWARD_TUNNEL_DEVICE=$_vp_dev
         else
             _vp_cands=$(vward_map_vpns "$_vp_devmap" "$VWARD_WAN_DEVICE" | awk '{printf "%s%s(%s)", sep, $1, $2; sep=", "}')
             vward_profile_error "tunnel device is missing or ambiguous; VPN candidates: ${_vp_cands:-none}; set VWARD_TUNNEL_INTERFACE in device.conf"

@@ -136,7 +136,7 @@ stubs_drop() {
 # (base64 or plain), the provider's notes left out (stubs_drop). 4: the subscription ran out -
 # only notes came, or its own «subscription-userinfo» says the date is past.
 links() {
-    lk_exp=
+    lk_exp= lk_title=
     src=$(tr -d '\r' < "$1" | grep -v '^#' | awk 'NF {sub(/^[ \t]+/, ""); sub(/[ \t]+$/, ""); print; exit}')
     case "$src" in
         vless://*|trojan://*) tr -d '\r' < "$1" | awk '/^(vless|trojan):\/\// {print $1}' > "$2" ;;
@@ -148,6 +148,11 @@ links() {
             lk_exp=$(tr -d '\r' < "$2.hdr" 2>/dev/null | awk 'tolower($1) == "subscription-userinfo:" {
                 n = split($0, a, ";"); for (i = 1; i <= n; i++) if (a[i] ~ /expire=[0-9]+/) { sub(/.*expire=/, "", a[i]); e = a[i] + 0 } }
                 END { if (e) print e }')
+            # The subscription's own name («profile-title», plain or «base64:…»): the tunnel's
+            # name in Keenetic, not the first server's (owner 2026-10-18).
+            lk_title=$(tr -d '\r' < "$2.hdr" 2>/dev/null | awk 'tolower($1) == "profile-title:" {sub(/^[^:]*:[ \t]*/, ""); print; exit}')
+            case "$lk_title" in base64:*) lk_title=$(printf '%s' "${lk_title#base64:}" | { base64 -d 2>/dev/null || openssl base64 -d -A 2>/dev/null; }) ;; esac
+            lk_title=$(printf '%s' "$lk_title" | tr -d '|"\\\000-\037' | cut -c1-48)
             rm -f "$2.hdr"
             if grep -Eq '(vless|trojan)://' "$2.raw"; then tr -d '\r' < "$2.raw"
             else tr -d '\r\n ' < "$2.raw" | { base64 -d 2>/dev/null || openssl base64 -d -A 2>/dev/null; } | tr -d '\r'; fi |
@@ -262,6 +267,7 @@ op_servers() {
         printf 'info.server.%s=%s|%s|%s|%s|%s\n' "$i" "$(v name)" "$(v host)" "$(v port)" "$(v q.security)" "$(v q.type)"
     done < "$TMPD/links"
     printf 'info.kind=vless\ninfo.servers=%s\n' "$i"
+    [ -z "${lk_title:-}" ] || printf 'info.title=%s\n' "$lk_title"
     echo "result=checked"
 }
 

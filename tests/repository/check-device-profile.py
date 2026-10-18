@@ -180,6 +180,16 @@ with tempfile.TemporaryDirectory() as tmp:
     assert result.returncode == 0, result.stderr
     assert "|Wireguard3|nwg3|" in result.stdout, result.stdout
 
+# The chosen tunnel is a VWARD engine's whose settings went with the USB stick: Keenetic has no
+# adapter for it, the profile still loads (Viva 2026-10-18), so the Panel can switch away from it.
+with tempfile.TemporaryDirectory() as tmp:
+    env = keenetic(Path(tmp), "!\n")
+    (Path(tmp) / "absent.conf").write_text("VWARD_TUNNEL_INTERFACE=OpkgTun2\n")
+    (Path(tmp) / "absent.conf").chmod(0o600)
+    result = run(SHOW, env)
+    assert result.returncode == 0, result.stderr
+    assert "|OpkgTun2|opkgtun2|" in result.stdout, result.stdout
+
 with tempfile.TemporaryDirectory() as tmp:
     env = keenetic(Path(tmp), "!\n", wan_routes=("default via 1.1.1.1 dev wan0", "default via 2.2.2.2 dev wan1"))
     result = run("vward_discover_wan_device", env)

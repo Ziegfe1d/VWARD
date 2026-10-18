@@ -65,6 +65,10 @@ TUNBUSY.OpkgTun0 = 'down'; out.busy = run({ interfaces: [T('OpkgTun0', true, 'up
 S.awg = { tunnels: [{ name: 'OpkgTun0' }], vless: { tunnels: [] } };
 const L = (name, state) => Object.assign(T(name, false, state), { type: 'opkgtun' });
 out.lost = run({ interfaces: [L('OpkgTun0', 'down'), L('OpkgTun1', 'down'), L('OpkgTun2', 'down')], failopen_active: true, failopen_reason: ['silent'] });
+// A connected tunnel has its program, whatever the engines' answer (cut short by a slow Keenetic).
+out.alive = run({ interfaces: [Object.assign(L('OpkgTun3', 'up'), { connected: 'yes', link: 'up' })] }).pills;
+// The engines' answer missing: nothing is called lost.
+S.awg = { tunnels: [] }; out.unknown = run({ interfaces: [L('OpkgTun1', 'up')] }).pills;
 delete S.awg;
 TUNUP.OpkgTun0 = 1; out.connecting = run({ interfaces: [T('OpkgTun0', false, 'up')] }).pills; delete TUNUP.OpkgTun0;
 console.log(JSON.stringify(out));
@@ -94,6 +98,8 @@ if any("не в сети" in n.lower() for n in o["agentOff"]["notes"]) or o["ag
     fail(f"the agent's switch-off is told once, as such: {o['agentOff']}")
 if o["lost"]["pills"] != [":Выключен", "warn:Нет настроек", "warn:Нет настроек"]:
     fail(f"a tunnel without its settings says so: {o['lost']['pills']}")
+if o["alive"] != ["ok:В сети"] or "warn:Нет настроек" in o["unknown"]:
+    fail(f"a connected tunnel, or one the engines did not report on, is not «Нет настроек»: {o['alive']} {o['unknown']}")
 if not any("настройки туннеля не найдены" in n for n in o["lost"]["notes"]):
     fail(f"the agent's switch-off of a tunnel without settings says why: {o['lost']['notes']}")
 print("CONSOLE_TUNNEL_STATUS=PASS")

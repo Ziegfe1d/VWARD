@@ -2345,7 +2345,9 @@ const TUN_TYPE = { wireguard: 'WireGuard', openvpn: 'OpenVPN', sstp: 'SSTP', ppt
 const awgOf = name => ((S.awg && S.awg.tunnels) || []).find(x => x.name === name);
 // A VWARD engine's tunnel whose settings are gone (the USB stick formatted, owner 2026-10-18):
 // Keenetic keeps the OpkgTun connection, no engine holds it. Known once the engines answered.
-const tunLost = t => !!(t && S.awg) && String(t.type || '').toLowerCase() === 'opkgtun' && !vlessOf(t.name) && !awgOf(t.name);
+// A tunnel that is up or connected has its program whatever the engines' answer says (a slow
+// Keenetic cut that answer short and a working new tunnel read «Нет настроек», Viva 2026-10-18).
+const tunLost = t => !!(t && S.awg && S.awg.vless && Array.isArray(S.awg.vless.tunnels) && Array.isArray(S.awg.tunnels)) && String(t.type || '').toLowerCase() === 'opkgtun' && !isTrue(t.connected) && t.link !== 'up' && !vlessOf(t.name) && !awgOf(t.name);
 // A tunnel's line in the list: its kind and anything wrong with it; the handshake and the rest
 // are on the tunnel's own page.
 const tunSub = t => {
@@ -3944,13 +3946,14 @@ async function onSubmit(e, f) {
         $('tcPreview').innerHTML = '<div class="rows vless-pick" role="radiogroup" aria-label="Сервер">' + rows.map(r => '<label class="row"><input type="radio" name="vless-server" value="' + r.i + '"' + (r.i === 1 ? ' checked' : '') + ' data-vname="' + esc(r.name) + '">' +
           '<div class="row-main"><b>' + esc(r.name) + '</b><small>' + esc(r.host + ':' + r.port + ' · ' + (r.sec === 'none' ? 'без шифрования' : r.sec.toUpperCase()) + ' · ' + r.net) + '</small></div></label>').join('') + '</div>' +
           '<p class="field-warn">Туннель поднимет Xray - программа около 36 МБ на флешке, скачивается один раз с GitHub (XTLS/Xray-core), 30-60 МБ памяти. В Keenetic он будет подключением OpkgTun.</p>';
-        if (descEl && !descEl.value.trim()) descEl.value = tunDesc(rows[0].name);
+        // The subscription's own name, not the first server's (owner 2026-10-18).
+        if (descEl && !descEl.value.trim()) descEl.value = tunDesc(x.title) || 'VLESS';
         form.dataset.checked = '1';
         form.querySelector('[type=submit]').textContent = 'Создать туннель';
         return;
       }
       const pick = form.querySelector('[name=vless-server]:checked'), num = pick ? pick.value : '1';
-      const vdesc = tunDesc(descEl && descEl.value) || tunDesc(pick && pick.dataset.vname) || 'VLESS';
+      const vdesc = tunDesc(descEl && descEl.value) || 'VLESS';
       closeLayer();
       await tunnelJob('create', { op: 'create', conf: '#server=' + num + '\n' + text.trim(), description: vdesc }, vdesc);
       return;

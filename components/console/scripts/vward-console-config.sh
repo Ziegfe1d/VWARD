@@ -1326,7 +1326,14 @@ tunnel_names() {
       [ ! -f "$AWG_TUNNELS" ] || awk -F'\t' '{print $2}' "$AWG_TUNNELS"
       [ ! -f "$VLESS_TUNNELS" ] || awk -F'\t' '{print $2}' "$VLESS_TUNNELS"; } | awk 'NF && !s[$0]++'
 }
-is_tunnel() { tunnel_names | grep -qxF -- "$1"; }
+# An engine's tunnel whose settings are gone has no adapter, so no place in the map: Keenetic
+# still has it, and it must be deletable (Viva 2026-10-18: «туннель не найден»). Asked only then.
+is_tunnel() {
+    tunnel_names | grep -qxF -- "$1" && return 0
+    case "$1" in OpkgTun[0-9]|OpkgTun[0-9][0-9]) ;; *) return 1 ;; esac
+    command -v vward_keenetic_config >/dev/null 2>&1 &&
+        vward_keenetic_config 2>/dev/null | grep -qx "interface $1"
+}
 # engine_tunnel NAME: the tunnel is one of VWARD's engines; ENG is that engine.
 engine_tunnel() {
     for et in "$AWG_TUNNELS:$AWG_ENGINE" "$VLESS_TUNNELS:$VLESS_ENGINE"; do
