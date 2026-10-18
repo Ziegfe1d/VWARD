@@ -26,6 +26,7 @@ UNHEALTHY=""
 
 LIVE_LOCK="/tmp/vward-route-engine.lock"
 CONTROL_LOCK="/tmp/S91vward-route-engine.control.lock"
+PLANNED_FLAG="/tmp/vward-route-engine.restarting"
 CHILD_STATE="/tmp/S91vward-route-engine.tcpdump-missing"
 START_WAIT=12
 STOP_WAIT=6
@@ -383,9 +384,13 @@ case "$1" in
                 stop_service
                 ;;
             restart)
+                # A planned restart (a tunnel switch): the real-time agent sees the engine go
+                # and must not start it again in the same second (Viva 2026-10-19).
+                : > "$PLANNED_FLAG" 2>/dev/null
                 stop_service
                 sleep 1
                 start_service
+                rm -f "$PLANNED_FLAG"
                 ;;
         esac
         ;;

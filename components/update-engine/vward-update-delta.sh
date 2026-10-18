@@ -311,6 +311,24 @@ vu_engine_install_from() {
     done || return 1
     got=$(VWARD_ENGINE_SELF_TEST=1 sh "$dir/vward-update.sh" --self-test "$manifest" 2>/dev/null | sed -n 's/^engine_version=//p')
     [ "$got" = "$want" ] || { vu_log ERROR "New engine failed its self-test (reports '${got:-nothing}', expected $want)"; return 1; }
+    # The same engine whose programs are unchanged (a release carries a new component registry):
+    # the data files are replaced in the running slot, one by one and atomically, and the
+    # engine stays where it is (fix.30 logged «2.0.9 -> 2.0.9» and swapped the slot).
+    if [ "$want" = "$VU_ENGINE_VERSION" ] && jq -r '.signed.engine.files[].name' "$manifest" | {
+        same=0
+        while IFS= read -r name; do
+            case "$name" in *.sh) cmp -s "$dir/$name" "$VU_ACTIVE_SLOT/$name" || exit 1; same=1 ;; esac
+        done
+        [ "$same" = 1 ]
+    }; then
+        jq -r '.signed.engine.files[].name' "$manifest" | while IFS= read -r name; do
+            case "$name" in *.sh) continue ;; esac
+            cmp -s "$dir/$name" "$VU_ACTIVE_SLOT/$name" && continue
+            cp -p "$dir/$name" "$VU_ACTIVE_SLOT/.$name.new.$$" && mv -f "$VU_ACTIVE_SLOT/.$name.new.$$" "$VU_ACTIVE_SLOT/$name" || exit 1
+        done || { rm -f "$VU_ACTIVE_SLOT"/.*.new.$$; return 1; }
+        vu_log INFO "Update engine $want: data files refreshed (slot ${VU_ACTIVE_SLOT##*/})"
+        return 0
+    fi
     next_new=$VU_NEXT_SLOT.new.$$
     rm -rf "${next_new:?}"
     mkdir -p "$next_new" || return 1

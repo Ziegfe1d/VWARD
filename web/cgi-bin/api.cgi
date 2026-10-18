@@ -502,8 +502,8 @@ fi
 
 # notes: the bell's history, kept on the router (fix.26): the last 200 pop-ups the Panel showed.
 # GET: newest first and when they were last read. POST op=add (sev, title, text, to, key: one
-# key is taken once in 6 hours, so several open Panels write a warning once) or op=read
-# («Прочитать все»). One line a note: id, time, sev, key, to, title, text, tab-separated.
+# key is taken once in 6 hours, so several open Panels write a warning once), op=read
+# («Прочитать все») or op=resolve (key: the errors of an action that later succeeded). One line a note: id, time, sev, key, to, title, text, tab-separated.
 if [ "$ACTION" = notes ]; then
   header_json
   NOTES_DIR=${VWARD_CONSOLE_NOTES:-/opt/var/lib/vward/console}
@@ -534,6 +534,16 @@ if [ "$ACTION" = notes ]; then
           { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
         if [ "$(wc -l < "$NOTES")" -gt 220 ]; then
           tail -n 200 "$NOTES" > "$NOTES.$$" && mv -f "$NOTES.$$" "$NOTES"; rm -f "$NOTES.$$"
+        fi ;;
+      # resolve KEY: the action succeeded later, its earlier errors leave the history (fix.31).
+      # An error is kept as KEY_CODE, so every error of that action goes.
+      resolve)
+        NO_KEY="$(form_value key)"
+        case "$NO_KEY" in ''|*[!A-Za-z0-9-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+        [ "${#NO_KEY}" -le 64 ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }
+        if [ -s "$NOTES" ]; then
+          (umask 077; awk -F '\t' -v k="$NO_KEY" '!(($3 == "err" || $3 == "crit") && ($4 == k || index($4, k "_") == 1))' "$NOTES" > "$NOTES.$$") &&
+            mv -f "$NOTES.$$" "$NOTES"; rm -f "$NOTES.$$"
         fi ;;
       *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
     esac
@@ -939,7 +949,7 @@ if [ "$ACTION" = ads-data ]; then
   # time the Panel waits for this page on the router (seven programs, each loading its library).
   PD="$(mktemp -d /tmp/vward-ads-data.XXXXXX 2>/dev/null)" || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
   trap 'rm -rf "${PD:?}"' EXIT
-  ( [ -x "$SETTINGS" ] && "$SETTINGS" show 2>/dev/null | awk -F= '$1!="PAUSED"&&NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}' ) > "$PD/SETJSON" &
+  ( [ -x "$SETTINGS" ] && "$SETTINGS" show 2>/dev/null | awk -F= '$1!="PAUSED"&&$1!="ERROR"&&NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}' ) > "$PD/SETJSON" &
   ( [ -x "$SRCCTL" ] && "$SRCCTL" list 2>/dev/null | "$JQ" -Rn --arg state "$AST/sources" '[inputs|split("|")|{id:.[0],mode:.[1],name:.[2],cached:(.[3]=="1"),purpose:.[4],custom:(.[5]=="1")}]' || echo '[]' ) > "$PD/SOURCES" &
   ( [ -x "$JOB" ] && "$JOB" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' || echo '{}' ) > "$PD/JOBS" &
   ( [ -x "$GUARD_BIN" ] && "$GUARD_BIN" status 2>/dev/null | awk -F= 'NF>=2{k=$1;sub(/^[^=]*=/,"",$0);print k "\t" $0}' | "$JQ" -Rn '[inputs|split("\t")|{(.[0]):.[1]}]|add//{}' 2>/dev/null ) > "$PD/GUARD" &
@@ -2459,6 +2469,8 @@ fi
 # tunnel), Smart DNS (its main domain answered by Smart DNS) or the provider; and Smart DNS
 # itself: where it is kept and the server's host. A server's path (it may hold a personal
 # token) never leaves the router.
+# The hosts of shared platforms (the same list as in vward-console-config.sh, a test keeps them equal).
+AI_SHARED=" google.com googleapis.com gstatic.com microsoft.com microsoftapp.net live.net msedge.net a-msedge.net azureedge.net github.com githubusercontent.com amazonaws.com cloudfront.net cloudflare.com cloudflareaccess.com facebook.com fbcdn.net apple.com akamaized.net fastly.net fastly-edge.com datadoghq.com auth0.com adjust.com cloudinary.com appspot.com cloudfunctions.net todesktop.com "
 if [ "$ACTION" = ai-data ]; then
     header_json
     [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
@@ -2472,9 +2484,13 @@ if [ "$ACTION" = ai-data ]; then
     AI_AGH="$(command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains | head -n 400)"
     AI_OWN="$(awk -F= '$1 == "SMARTDNS_URL" {u = substr($0, index($0, "=") + 1); sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); print u; exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)"
     AI_ON="$(awk -F'\t' 'NF >= 3 {print $1 "\t" $2 "\t" $3}' "$CONFIG_ETC/services/enabled.tsv" 2>/dev/null)"
+    # The services waiting for room in Smart DNS (op_ai), and whether AdGuard Home runs.
+    AI_WAIT="$(grep -E '^[a-z0-9][a-z0-9.@_-]{0,62}$' "${VWARD_AI_WAIT:-$CONFIG_ETC/smartdns-wait}" 2>/dev/null | head -n 50)"
+    AI_AGH_RUN=false; pidof AdGuardHome >/dev/null 2>&1 && AI_AGH_RUN=true
     AI_ROUTES="$(printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "route" && $2 == "object-group" {print $3 "\t" $4}')"
-    "$JQ" -c --arg doh "$AI_DOH" --arg agh "$AI_AGH" --arg own "$AI_OWN" --arg on "$AI_ON" --arg routes "$AI_ROUTES" \
+    "$JQ" -c --arg doh "$AI_DOH" --arg agh "$AI_AGH" --arg own "$AI_OWN" --arg on "$AI_ON" --arg routes "$AI_ROUTES" --arg wait "$AI_WAIT" \
+        --argjson agh_run "$AI_AGH_RUN" --arg shared "$AI_SHARED" \
         --argjson agh_on "$([ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] && echo true || echo false)" '
         ($doh | split("\n") | map(select(length > 0) | split("\t"))) as $k
         | ($agh | split("\n") | map(select(length > 0))) as $a
@@ -2482,12 +2498,20 @@ if [ "$ACTION" = ai-data ]; then
         | ($routes | split("\n") | map(select(length > 0) | split("\t") | {key: .[0], value: .[1]}) | from_entries) as $route
         | ([$k[] | .[0]] + $a) as $sd
         | def covered($d): any($sd[]; . as $s | $d == $s or ($d | endswith("." + $s)));
-          def root($d): ($d | split(".") | .[-2:] | join("."));
+          # The own main domains of a service: the same rule as ai_main in vward-console-config.sh.
+          def main($id; $ds): ($id | split(".")[0]) as $b0 | (if ($b0 | length) >= 4 then $b0 else "" end) as $brand
+            | [([$id] + $ds)[] | ascii_downcase | select((explode | all(. == 45 or . == 46 or (. >= 48 and . <= 57) or (. >= 97 and . <= 122))) and (split(".") | length >= 2 and all(length > 0)))] | unique
+            | [.[] | . as $d | ($d | split(".")) as $l | ($l[-2:] | join(".")) as $root | ($brand != "" and ($d | contains($brand))) as $own
+               | select($d == $id or $own or ($shared | contains(" " + $root + " ") | not) or ($id | contains($root)))
+               | {d: $d, k: (if $d == $id then 0 elif $own then 1 elif ($l | length) == 2 then 2 else 3 end), n: ($l | length)}]
+            | sort_by(.k, .n, .d) | map(.d)
+            | reduce .[] as $d ([]; if any(.[]; . as $k | $d | endswith("." + $k)) then . else . + [$d] end) | .[:4];
         {ok: true,
-         smartdns: {keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_domains: ($a | length),
+         smartdns: {keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_running: $agh_run, agh_domains: ($a | length),
+                    waiting: ($wait | split("\n") | map(select(length > 0))),
                     servers: ([$k[] | .[1]] + (if $own == "" then [] else [$own] end) | unique), own: $own},
          services: [.services[] | select(.category == "ai") | . as $s
-           | ([$s.domains[] | root(.)] | unique) as $roots
+           | main($s.id; $s.domains) as $roots
            | ($groups[$s.id] // "") as $g
            | {id: $s.id, title: $s.title, domain: ($s.domains[0] // $s.id), roots: $roots,
               via: (if $g != "" then "vpn" elif ($roots | length) > 0 and all($roots[]; covered(.)) then "dns" else "isp" end),
@@ -2531,7 +2555,14 @@ if [ "$ACTION" = services ]; then
         category) [ -n "$STO" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }; ARGS="service-category $SID $STO" ;;
         off) ARGS="service off $SID" ;;
         # An AI service's way (or «all» of them): auto|TUNNEL = VPN, dns = Smart DNS, isp = provider.
-        ai) case "$STO" in dns|isp) ARGS="ai $SID $STO" ;; auto) ARGS="ai $SID vpn" ;; ?*) ARGS="ai $SID vpn:$STO" ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac ;;
+        # keep=1: the answer to «no room in Smart DNS» - the service still waits for Smart DNS.
+        ai) case "$STO" in dns|isp) ARGS="ai $SID $STO" ;; auto) ARGS="ai $SID vpn" ;; ?*) ARGS="ai $SID vpn:$STO" ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+            [ "$(form_value keep)" != 1 ] || ARGS="$ARGS keep" ;;
+        # The default tunnel in the background (it moves every list and can take a minute):
+        # id = all|own (own: only VWARD's groups), tunnel = the new one.
+        use) [ "$(form_value confirm)" = TUNNEL_SWITCH ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+            case "$SID" in all|own) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+            [ -n "$STO" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }; ARGS="tunnel $STO $SID" ;;
         *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
     esac
     CMD="$CONFIG_HELPER" LABEL="service-$SOP" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""

@@ -66,6 +66,12 @@ case "$EVENT" in
         ;;
     down)
         valid "${2:-}" && known "$2" || exit 64
+        # A planned restart of the route engine (S91vward-route-engine restart) brings it back
+        # itself; a flag older than 2 minutes is a restart that died, then the agent starts it.
+        if [ "$2" = route-engine ] && [ -n "$(find "${VWARD_ROOT_PREFIX:-}/tmp/vward-route-engine.restarting" -mmin -2 2>/dev/null)" ]; then
+            log "down|$2|planned"
+            exit 0
+        fi
         log "down|$2"
         ask "start:$2"
         ;;
@@ -88,7 +94,9 @@ case "$EVENT" in
             log "dns-fail|adguardhome-start"
             ask agh-start
         else
-            log "dns-fail|nothing-to-start"
+            # The same event once an hour in the journal (it is counted every time).
+            F=${VWARD_ROOT_PREFIX:-}/tmp/vward-sentinel-dns-noted
+            [ -n "$(find "$F" -mmin -60 2>/dev/null)" ] || { log "dns-fail|nothing-to-start"; : > "$F" 2>/dev/null; }
             exit 1
         fi
         ;;

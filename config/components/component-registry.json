@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "VWARD Platform",
-  "platform_version": "0.2.0-rc.2.fix.30",
+  "platform_version": "0.2.0-rc.2.fix.31",
   "component_version_policy": "platform-release",
   "components": [
     {
@@ -66,7 +66,7 @@
       "requires_running": [
         "route-engine"
       ],
-      "uses": [],
+      "uses": ["tunnel-guard"],
       "runtime_targets": [
         "/opt/bin/vward-route-reconciler.sh"
       ]

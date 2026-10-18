@@ -150,9 +150,6 @@ op_config() {
         echo "ACT=$ACT"
         echo "HOURS_FILE=${VWARD_SENTINEL_HOURS:-/opt/var/lib/vward/sentinel/hours.tsv}"
         echo "SAMPLE_MS=2000"
-        echo "DNS=127.0.0.1:53"
-        echo "DNS_NAME=vward-probe.invalid"
-        echo "DNS_EVERY=30"
         echo "WATCH=route-engine:$RUN_DIR/route-engine.pid:16384"
         echo "WATCH=panel:/opt/var/run/vward-console-lighttpd.pid:24576"
         # The engines' tunnels that are switched on (a removed or switched-off tunnel left its
@@ -163,6 +160,14 @@ op_config() {
             [ -z "${VWARD_WAN_DEVICE:-}" ] || echo "IFACE=$VWARD_WAN_DEVICE"
             # AdGuard Home in the DNS chain, asked every 5 s (unless the owner keeps the chain: CHAIN=0).
             y=${VWARD_ADGUARD_CONFIG:-}
+            # The router's DNS is asked only with AdGuard Home connected: its answer is what
+            # the probe waits for, and starting it is the one thing the agent can do. Without it
+            # the probe failed every 30 s (Viva 2026-10-18: 115 «DNS не отвечает»).
+            if [ -n "$y" ] && [ -r "$y" ]; then
+                echo "DNS=127.0.0.1:53"
+                echo "DNS_NAME=vward-probe.invalid"
+                echo "DNS_EVERY=30"
+            fi
             if [ -n "$y" ] && [ -r "$y" ] && [ "$(sed -n 's/^CHAIN=//p' "${VWARD_DNS_GUARD_CONF:-/opt/etc/vward/ads-privacy-guard/dns-guard.conf}" 2>/dev/null)" != 0 ]; then
                 cp=$(awk '/^[^ #]/ {d = ($1 == "dns:")} d && $1 == "port:" {print $2; exit}' "$y" 2>/dev/null)
                 ch=$(awk '/^[^ #]/ {d = ($1 == "dns:"); b = 0; next} d && /^  bind_hosts:/ {b = 1; next} d && /^  [a-z_]+:/ {b = 0}

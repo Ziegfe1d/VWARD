@@ -494,6 +494,12 @@ chain_sync()
     if [ "$cs_ok" = 1 ]; then rm -f "$CHAIN_DIR/fails"; else rm -f "$CHAIN_DIR/oks"; fi
     if [ "$cs_in" = 1 ]; then
         echo in > "$CHAIN_DIR/state"
+        # In the chain while AdGuard Home asks the router back (its servers changed since): out
+        # at once, the provider's DNS answers; back only when the loop is gone (below).
+        if agh_upstream_loops; then
+            chain_take_out "$cs_ns" loop_upstream
+            return 0
+        fi
         [ "$cs_ok" = 0 ] || return 0
         [ "$(count_up "$CHAIN_DIR/fails")" -ge 3 ] || [ "$cs_loop" = 1 ] || return 0
         # The whole internet down (the provider's DNS silent too): not AdGuard Home's fault,
@@ -513,13 +519,21 @@ chain_sync()
     cs_outs=$(awk -v n="$(ads_epoch)" '$1 + 3600 > n' "$CHAIN_DIR/outs" 2>/dev/null | wc -l)
     cs_need=3; [ "$cs_outs" -lt 2 ] || cs_need=9; [ "$cs_outs" -lt 3 ] || cs_need=15
     [ "$(count_up "$CHAIN_DIR/oks")" -ge "$cs_need" ] || { echo out > "$CHAIN_DIR/state"; return 0; }
-    if awk '/^[^ #]/ {d = ($1 == "dns:"); u = 0; next} /^  [a-z_]+:/ {u = d && ($1 == "upstream_dns:"); next}
-            u && $1 == "-" {gsub(/["\047]/, "", $2); print $2}' "$AGH_YAML" |
-        grep -Eq "^((udp|tcp)://)?($LAN|127\.0\.0\.1|localhost)(:53)?$"; then
+    if agh_upstream_loops; then
         echo loop_upstream > "$CHAIN_DIR/reason"; echo out > "$CHAIN_DIR/state"
         return 0
     fi
     chain_put_in "$cs_ns"
+}
+
+# agh_upstream_loops: AdGuard Home sends every query (not a [/domain/] row) back to the
+# router's own DNS, so with it in the chain Keenetic and AdGuard Home ask each other («proxy
+# loop detected», Keenetic then drops the server: task 158). Its fallback servers count too.
+agh_upstream_loops()
+{
+    awk '/^[^ #]/ {d = ($1 == "dns:"); u = 0; next} /^  [a-z_]+:/ {u = d && ($1 == "upstream_dns:" || $1 == "fallback_dns:"); next}
+            u && $1 == "-" {gsub(/["\047]/, "", $2); print $2}' "$AGH_YAML" |
+        grep -Eq "^((udp|tcp)://)?($LAN|127\.0\.0\.1|localhost)(:53)?$"
 }
 
 # chain_put_in NS: Keenetic hands the queries to AdGuard Home again.

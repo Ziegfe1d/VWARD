@@ -24,6 +24,11 @@ case "$cmd" in
   "show running-config") cat "$CFG"; exit 0 ;;
   "system configuration save") [ -e "$CFG.nosave" ] && { echo "Core::ConfigurationSaver: error[1]: failed"; exit 0; }; echo saved; exit 0 ;;
 esac
+case "$cmd" in
+  "ip route "*) echo "$cmd" >> "$CFG"; echo ok; exit 0 ;;
+  "no ip route "*) set -- $cmd
+    awk -v n="$4" -v m="$5" -v t="$6" '!($1=="ip" && $2=="route" && $3==n && (($4==m && $5==t) || (m=="255.255.255.255" && $4==t)))' "$CFG" > "$CFG.new"; mv "$CFG.new" "$CFG"; echo ok; exit 0 ;;
+esac
 set -- $cmd
 ctx=; [ "$1" = dns-proxy ] && { ctx=dns-proxy; shift; }
 neg=0; [ "$1" = no ] && { neg=1; shift; }
@@ -112,8 +117,8 @@ esac
         "VWARD_CONSOLE_BACKUP_DIR": str(tmp / "backup"), "VWARD_CONSOLE_AUDIT_LOG": str(tmp / "audit.log"),
     }
 
-    def run(target, expect, rc=None):
-        r = subprocess.run(["sh", str(HELPER), "tunnel", target], env=env, text=True, capture_output=True)
+    def run(target, expect, rc=None, move=None):
+        r = subprocess.run(["sh", str(HELPER), "tunnel", target] + ([move] if move else []), env=env, text=True, capture_output=True)
         out = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ""
         if out != expect:
             fail(f"tunnel {target}: {out!r} != {expect!r} (rc={r.returncode}) {r.stderr.strip()}")
@@ -195,7 +200,7 @@ esac
         fail("policy-sync must be started to move the IP routes")
     if "system configuration save" not in (tmp / "running.cfg.log").read_text().splitlines()[-1]:
         fail("router configuration must be saved last")
-    if "tunnel Wireguard3(nwg3) -> Wireguard8(nwg8) group=streaming routes=2 result=changed" not in (tmp / "audit.log").read_text():
+    if "tunnel Wireguard3(nwg3) -> Wireguard8(nwg8) group=streaming routes=2 subnets=0 result=changed" not in (tmp / "audit.log").read_text():
         fail("audit line missing")
     if (tmp / "change.lock").exists() or (policy / "lock").exists() or list(tmp.glob("device.conf.console.*")):
         fail("locks or temporary files left behind")
@@ -207,6 +212,28 @@ esac
     run("Wireguard3", "result=changed", 0)
     if "streaming Wireguard3 auto" not in routes(cfg) or "VWARD_POLICY_GROUP=streaming" not in devconf.read_text().splitlines():
         fail(f"a switch without a known group: {routes(cfg)} / {devconf.read_text()!r}")
+
+    # «all»: every list and static subnet of the old tunnel comes along (Viva 2026-10-19: 19
+    # lists stayed on the dead OpkgTun2); the routes policy-sync owns stay with it.
+    run("Wireguard8", "error=invalid_arguments", 64, move="every")
+    with cfg.open("a") as f:
+        f.write("ip route 198.51.100.0 255.255.255.0 Wireguard3 auto\nip route 192.0.2.7 Wireguard3 auto\n"
+                "ip route 203.0.113.0 255.255.255.0 Wireguard3 auto\nip route 100.64.9.0 255.255.255.0 Wireguard5 auto\n")
+    run("Wireguard8", "result=changed", 0, move="all")
+    want = sorted(["streaming Wireguard8 auto", "AdaptiveAuto nwg8 auto", "other Wireguard8 auto"])
+    if routes(cfg) != want:
+        fail(f"all: routes {routes(cfg)} != {want}")
+    nets = sorted(l for l in cfg.read_text().splitlines() if l.startswith("ip route "))
+    want = sorted(["ip route 198.51.100.0 255.255.255.0 Wireguard8 auto", "ip route 192.0.2.7 255.255.255.255 Wireguard8 auto",
+                   "ip route 203.0.113.0 255.255.255.0 Wireguard3 auto", "ip route 100.64.9.0 255.255.255.0 Wireguard5 auto"])
+    if nets != want:
+        fail(f"all: subnets {nets} != {want}")
+    if "routes=3 subnets=2 result=changed" not in (tmp / "audit.log").read_text():
+        fail("all: audit line must count the lists and subnets")
+
+    # A refusal goes to the journal with the router's answer.
+    if "tunnel Wireguard8 error=router_rejected reason=" not in (tmp / "audit.log").read_text():
+        fail("a refused command must be audited with its reason")
 
 
 # policy-sync: owned IP routes move to the new tunnel (Keenetic takes interface names).

@@ -14,6 +14,8 @@ trap ads_admission_leave EXIT
 trap 'exit 1' HUP INT TERM
 
 ads_mkdirs || ads_die "cannot create component directories"
+# Not set up yet (AdGuard Home not connected): an answer, not a failure for the journal.
+[ -e "$ADS_CONFIG" ] || { echo "ERROR=adguard_auth_required"; echo "FAIL: AdGuard Home is not connected" >&2; exit 1; }
 [ -r "$ADS_CONFIG" ] || ads_die "config not readable: $ADS_CONFIG"
 
 OP="${1:-show}"

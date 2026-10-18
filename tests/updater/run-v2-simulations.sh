@@ -287,8 +287,8 @@ housekeeping
 check 'an engine as new as its release is left alone' sh -c '! grep -q ENGINE_MOVED "$1" && [ "$2" = "$3" ] && ! grep -q "engine_move=failed" "$4"' sh "$WORK/last.out" "$(slot)" "$SLOTS/slots/B" "$ROOT/opt/var/log/vward-housekeeping.log"
 
 # 14. A release adds a program file while the engine version stays: the registry
-# that names its owner travels with the engine, so the engine refreshes itself
-# (same version, other slot) and the new engine installs the file.
+# that names its owner travels with the engine, so the engine refreshes it in its own slot
+# (same programs: no slot swap, fix.31) and installs the file.
 new_root newfile
 reg=$(engine_dir reg 2.0.0)
 jq '(.components[] | select(.id == "route-tools") | .runtime_targets) += ["/opt/bin/vward-route-extra.sh"]' \
@@ -296,9 +296,9 @@ jq '(.components[] | select(.id == "route-tools") | .runtime_targets) += ["/opt/
 EXTRA_TARGET=/opt/bin/vward-route-extra.sh make_manifest newfile 0.2.0-rc.2 10 "$reg"
 run --apply; rc=$?
 check 'a new file with a same-version engine applies' sh -c '[ "$1" -eq 0 ] && [ "$(cat "$2")" = extra-newfile ]' sh "$rc" "$ROOT/opt/bin/vward-route-extra.sh"
-check 'the engine took the new registry into the other slot' sh -c '[ "$1" = "$2" ] && grep -q vward-route-extra.sh "$2/component-registry.json"' sh "$(slot)" "$SLOTS/slots/B"
+check 'the engine took the new registry in its own slot' sh -c '[ "$1" = "$2" ] && grep -q vward-route-extra.sh "$2/component-registry.json" && grep -q "data files refreshed (slot A)" "$3"' sh "$(slot)" "$SLOTS/slots/A" "$WORK/last.out"
 run --check; rc=$?
-check 'the refreshed engine is not refreshed again' sh -c '[ "$1" -eq 10 ] && [ "$2" = "$3" ]' sh "$rc" "$(slot)" "$SLOTS/slots/B"
+check 'the refreshed engine is not refreshed again' sh -c '[ "$1" -eq 10 ] && [ "$2" = "$3" ]' sh "$rc" "$(slot)" "$SLOTS/slots/A"
 
 # 15. The release already installed, from a manifest signed apart (the v1 one):
 # no update and no replay error.

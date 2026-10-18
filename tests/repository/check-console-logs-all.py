@@ -23,7 +23,8 @@ script = funcs + """
 console.log(JSON.stringify(mergeLogs([
   {label: "Интернет", text: "2026-10-04 11:40:00+0300 class=HEALTHY\\n2026-10-04 12:00:00+0300 class=DOWN\\n  details\\n"},
   {label: "VPN", text: "2026-10-04 11:30:00|OK\\n2026-10-04 11:50:00|FAILOPEN_DOWN"},
-  {label: "Обновления", text: "2026-10-04T08:45:00Z [INFO] check\\nno time line"}]).split("\\n")));
+  {label: "Обновления", text: "2026-10-04T08:45:00Z [INFO] check\\nno time line"},
+  {label: "Wi-Fi", text: "Лог пока пуст или недоступен."}]).split("\\n")));
 """
 r = subprocess.run(["node", "-e", script], text=True, capture_output=True, env=os.environ | {"TZ": "Europe/Moscow"})
 if r.returncode:
@@ -36,7 +37,7 @@ if got != want:
     fail(f"timeline: {got}")
 for need in ("const LOG_VIEW = [{ id: 'all', label: 'Все' }].concat(LOG_TABS);", "logTab = 'all'",
              "LOG_VIEW.map(t => '<button type=\"button\" data-log=\"'", "S.logs.all = mergeLogs(parts)",
-             "copyText(S.logs[logTab] || '')", "download('vward-' + tab + '-' + today() + '.txt'"):
+             "copyText(S.logs[logTab] || '')", "LOG_TABS.filter(tb => tb.id !== 'cron')", "download('vward-' + tab + '-' + today() + '.txt'"):
     if need not in JS:
         fail(f"the Panel lacks {need}")
 print("CONSOLE_LOGS_ALL=PASS")

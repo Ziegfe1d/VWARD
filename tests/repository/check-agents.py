@@ -86,6 +86,12 @@ with tempfile.TemporaryDirectory() as tmp:
     if state.get("updates") != "ok" or state.get("components") != "ok":
         fail(f"the others are ok: {state}")
     young.kill()
+    # Right after the agent itself started, a job has its own interval before it is late (fix.31).
+    (t / "log").write_text("")
+    fresh = script.replace('AGENT_NOTED=" "', 'AGENT_NOTED=" "; SUP_STARTED=$(date +%s)').replace("watch_agents\nwatch_agents\n", "watch_agents\n")
+    subprocess.run(["sh", "-c", fresh], env=os.environ | {"PATH": f"{t}:{os.environ['PATH']}"}, text=True, capture_output=True, timeout=60)
+    if "AGENT_LATE|" in (t / "log").read_text():
+        fail(f"no «late» before a job had its interval since the agent started: {(t / 'log').read_text()}")
 
 if 'printf \'at=%s\\nstate=off\\n\'' not in SUP:
     fail("while VWARD is off the agents are not watched (state=off)")

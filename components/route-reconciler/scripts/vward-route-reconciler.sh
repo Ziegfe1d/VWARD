@@ -477,6 +477,15 @@ remove_adaptive()
     rm -rf "${CHANGE:?}"
 }
 
+# The default tunnel not in service (the agent VPN says DOWN, or its device is gone): a site that
+# does not open directly cannot be judged through it, so it is neither checked nor marked broken
+# (Viva 2026-10-18: 167 «MAINT_BROKEN» through the dead OpkgTun2 in one evening).
+TUN_DOWN=0
+TUN_HEALTH=${VWARD_TUNNEL_HEALTH_STATE:-/tmp/vward-tunnel-health/state}
+[ ! -r "$TUN_HEALTH" ] || [ "$(sed -n 's/^STATUS=//p' "$TUN_HEALTH" | head -n 1)" != DOWN ] || TUN_DOWN=1
+[ -z "$WG" ] || [ ! -d "${VWARD_SYSFS_NET:-/sys/class/net}/lo" ] || [ -d "${VWARD_SYSFS_NET:-/sys/class/net}/$WG" ] || TUN_DOWN=1
+TUN_SKIPPED=0
+
 DONE=0
 
 while [ "$DONE" -lt "$MAX_PER_RUN" ] &&
@@ -522,7 +531,9 @@ while [ "$DONE" -lt "$MAX_PER_RUN" ] &&
     fi
 
     # ISP не восстановился — проверяем текущий VPN.
-    if probe "$H" "$WG" "$IP"; then
+    if [ "$TUN_DOWN" = 1 ]; then
+        TUN_SKIPPED=$((TUN_SKIPPED + 1))
+    elif probe "$H" "$WG" "$IP"; then
         save_state "$H" "AUTO_VPN"
         echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_VPN_OK|$H" >> "$LOG"
     else
@@ -531,6 +542,8 @@ while [ "$DONE" -lt "$MAX_PER_RUN" ] &&
     fi
 
 done
+
+[ "$TUN_SKIPPED" = 0 ] || echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_TUNNEL_DOWN|skipped=$TUN_SKIPPED" >> "$LOG"
 
 [ "$POS" -gt "$TOTAL" ] && POS=1
 echo "$POS" > "$CURSOR"

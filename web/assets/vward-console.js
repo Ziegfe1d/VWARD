@@ -263,7 +263,18 @@ const API_ERRORS = {
   temporary_file_unavailable: 'нет места для временного файла', component_disabled: 'компонент выключен: включите его в «Система → Компоненты»',
   core_component: 'базовый компонент нельзя выключить', wrong_credentials: 'неверный логин или пароль', invalid_mac: 'неверный MAC-адрес', invalid_backup: 'неверное имя копии', unknown_backup: 'копия не найдена', backup_damaged: 'копия повреждена', backup_failed: 'не удалось создать копию', restore_failed: 'не удалось восстановить', adguard_rejected: 'AdGuard Home не принял изменение', unknown_filter: 'такого списка нет в AdGuard Home', invalid_service: 'неизвестный сервис', invalid_setting: 'неизвестная настройка', invalid_name: 'недопустимое название', invalid_password: 'пароль: только латиница, цифры и обычные знаки, до 128 символов', too_many_attempts: 'слишком много попыток - подождите 5 минут',
   router_auth_unavailable: 'роутер не ответил на проверку пароля', invalid_login: 'недопустимый логин', auth_required: 'нужно войти', invalid_url: 'неверный адрес: нужен https без пробелов и логина', invalid_format: 'неизвестный формат списка',
-  adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен'
+  adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен',
+  // fix.31: the codes the Panel showed as they are.
+  smartdns_not_configured: 'Smart DNS не настроен: укажите сервер DoH в разделе «ИИ-сервисы»', smartdns_keenetic_full: 'лимит Smart DNS в Keenetic исчерпан (8 из 8 доменов)',
+  service_list: 'список сервиса не создан в Keenetic', invalid_arguments: 'неверные параметры запроса', helper_failed: 'действие завершилось без ответа',
+  doh_limit: 'в Keenetic нет места для ещё одного сервера DNS-over-HTTPS', doh_remove_failed: 'Keenetic не удалил строку Smart DNS', doh_remove_unsafe: 'строка Smart DNS используется не только VWARD: не удалена',
+  group_not_found: 'список не найден в Keenetic', group_not_routed: 'у списка нет маршрута', unknown_group: 'нет такого списка', invalid_group: 'недопустимое имя списка', list_not_found: 'список не найден',
+  domain_not_resolved: 'домен не разрешается в адрес', download_failed: 'не удалось скачать файл', feed_unavailable: 'сервер обновлений недоступен', unpack_failed: 'архив повреждён',
+  no_space: 'недостаточно места на USB-накопителе', router_save_failed: 'Keenetic не сохранил настройки', tunnel_unavailable: 'туннель недоступен', upgrade_rolled_back: 'обновление откатилось: проверка после установки не прошла',
+  agh_start_failed: 'AdGuard Home не запустился', agh_build_broken: 'сборка AdGuard Home не запускается на этом роутере', agh_no_build: 'нет сборки AdGuard Home для этого процессора',
+  conf_not_awg: 'файл не похож на конфигурацию WireGuard или AmneziaWG', vless_replace_unsupported: 'для этого туннеля замена конфигурации не поддерживается', value_too_long: 'слишком длинное значение',
+  invalid_operation: 'неизвестное действие', method_not_allowed: 'недопустимый запрос', unknown_parameter: 'неизвестный параметр запроса', invalid_body: 'неверный запрос',
+  temporary_file_failed: 'нет места для временного файла', session_failed: 'не удалось начать сеанс', stability_unavailable: 'данные стабильности недоступны', admission_unavailable: 'роутер занят, повторите позже'
 };
 // The router's answer to a refused command; for a file, the settings it holds that nobody knows.
 const errText = x => errBase(x) + (x && x.reason ? (x.error === 'conf_unknown_setting' ? ': ' + x.reason.split(',').join(', ') : ' (ответ роутера: ' + x.reason + ')') : '');
@@ -677,7 +688,9 @@ function logTime(line) {
   return isNaN(t) ? null : t;
 }
 // mergeLogs PARTS: [{label, text}] as one timeline, oldest first; a line without a time
-// belongs to the entry above it; each entry is marked with its journal.
+// belongs to the entry above it; each entry is marked with its journal. A line without a time
+// and nothing above it («Лог пока пуст или недоступен», a program's raw output) stays in its
+// own journal only: in the timeline it stood on top of everything (fix.30).
 function mergeLogs(parts) {
   const entries = [];
   parts.forEach(p => {
@@ -686,7 +699,8 @@ function mergeLogs(parts) {
       if (!line.trim()) return;
       const t = logTime(line);
       if (t == null && last) { last.lines.push('    ' + line); return; }
-      last = { t: t == null ? 0 : t, n: entries.length, lines: ['[' + p.label + '] ' + line] };
+      if (t == null) return;
+      last = { t: t, n: entries.length, lines: ['[' + p.label + '] ' + line] };
       entries.push(last);
     });
   });
@@ -847,7 +861,17 @@ const HEAD_ICONS = [
 ];
 // Four states of a program or module, everywhere (owner 2026-10-17): works, switched off by you,
 // not needed now, failing.
-const ST = { on: ['ok', 'Работает'], off: ['off', 'Выключен'], idle: ['off', 'Отключён'], bad: ['crit', 'Не работает'] };
+const ST = { on: ['ok', 'Работает'], off: ['off', 'Выключен'], idle: ['off', 'Отключён'], bad: ['crit', 'Не работает'], none: ['off', 'Не установлен'], unlinked: ['off', 'Не подключено'] };
+// One state of AdGuard Home for every page (owner 2026-10-19): «Не установлен», «Не подключено»,
+// «Выключен» - grey; «Работает» - green; «Не работает» - red (only for a connected one that fails).
+function aghState() {
+  const a = S.ads || {}, g = S.agh, sv = st().services || {}, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {}, e = (S.ext && S.ext.agh) || {};
+  if (!S.ads) return ['', '—'];
+  if (!ag.port && !sv.adguard && !e.installed && !(e.official || {}).installed) return ST.none;
+  if (!a.agh_connected) return ST.unlinked;
+  if (aghDown(a, g) || sv.adguard_broken || sv.adguard === false) return ST.bad;
+  return g && g.ok && g.protection === false ? ST.off : ST.on;
+}
 const headIcon = t => { const m = HEAD_ICONS.find(x => x[0].test(t || '')); return m ? m[1] : 'info'; };
 function panel(title, body, opts) {
   opts = opts || {};
@@ -953,6 +977,7 @@ function notifications() {
   // A VWARD tunnel whose settings went with the old USB drive: one note with what to do, not «не в сети».
   if (lostT.length) n.push({ sev: 'warn', title: lostT.length === 1 ? 'Туннель без настроек' : 'Туннели без настроек: ' + lostT.length, text: lostT.map(t => t.description || t.name).join(', ') + ' - добавьте заново или удалите', to: 'vpn' });
   if (down.length) n.push({ sev: 'warn', title: down.length === tunnels.length - lostT.length ? 'VPN не в сети' : 'Не все туннели в сети', text: down.map(t => t.description || t.name).join(', '), to: 'vpn' });
+  if (S.ai && aiRoom(S.ai.smartdns)) n.push({ sev: 'info', title: 'В Smart DNS освободилось место', text: S.ai.smartdns.waiting.map(aiName).join(', ') + ' можно перевести на Smart DNS', to: 'ai' });
   // A move off a tunnel that no longer exists is not news: there is nothing to come back to.
   const tunExists = t => !t || ((st() && st().wg && st().wg.interfaces) || []).some(x => x.name === t);
   if (S.tq && S.tq.fallback_from && tunExists(S.tq.fallback_from)) n.push({ sev: 'warn', title: '«' + tunLabel(S.tq.fallback_from) + '» не отвечает', text: 'маршруты VWARD переведены на «' + tunLabel(prof().tunnel_interface) + '»', to: 'vpn' });
@@ -1031,7 +1056,7 @@ function cardData(id) {
       return { icon: 'list', title: 'Доменные списки', to: 'lists', value: S.lists ? vpn + ' через VPN' : '—', sub: S.lists ? (vpn && vpnDirect() ? 'сейчас напрямую' : around + ' в обход') : 'списки Keenetic', pill: !S.lists ? ['', '—'] : vpn && vpnDirect() ? ['warn', 'Напрямую'] : auto ? ['warn', 'Переведено авто: ' + auto] : ['info', ls.length + ' ' + plural(ls.length, 'список', 'списка', 'списков')] };
     }
     case 'routes': return { icon: 'route', title: 'Маршруты', to: 'routes', value: fmtInt(r.ip && r.ip.managed_routes) + ' ' + plural(num(r.ip && r.ip.managed_routes) || 0, 'подсеть', 'подсети', 'подсетей'), sub: vpnDirect() ? 'сейчас напрямую' : fmtInt(r.ip && r.ip.active_count) + '\u00a0' + plural(num(r.ip && r.ip.active_count) || 0, 'IP\u2011категория', 'IP\u2011категории', 'IP\u2011категорий'), pill: !S.route ? ['', '—'] : vpnDirect() ? ['warn', 'Напрямую'] : ['ok', 'Работает'] };
-    case 'wifi': return { icon: 'wifi', title: 'Wi-Fi клиенты', to: 'wifi', value: fmtInt(wf.count) + ' ' + plural(num(wf.count) || 0, 'клиент', 'клиента', 'клиентов'), sub: wf.enabled ? (warnWifi ? wifiWarnText(wf) : 'без замечаний') : 'сбор данных выключен', pill: !S.wifi ? ['', '—'] : warnWifi ? ['warn', 'Внимание'] : wf.enabled ? ['ok', 'Работает'] : ['', 'Выключен'] };
+    case 'wifi': return { icon: 'wifi', title: 'Wi-Fi клиенты', to: 'wifi', value: S.wifi && !wf.enabled ? '—' : fmtInt(wf.count) + ' ' + plural(num(wf.count) || 0, 'клиент', 'клиента', 'клиентов'), sub: wf.enabled ? (warnWifi ? wifiWarnText(wf) : 'без замечаний') : 'сбор данных выключен', pill: !S.wifi ? ['', '—'] : warnWifi ? ['warn', 'Внимание'] : wf.enabled ? ['ok', 'Работает'] : ['', 'Выключен'] };
     // What AdGuard Home blocked today (the domains VWARD itself blocked are a handful and read as
     // «almost nothing blocked»: they are on the Ads page).
     case 'ads': { const q = S.adsstats; return { icon: 'block', title: 'Реклама', to: 'ads', value: q && q.ok ? fmtInt(q.blocked) : '—',
@@ -1256,7 +1281,7 @@ function aiPage() {
       aiSlider(s.id, s.via, s.title) +
       (s.tunnel && tuns.length > 1 ? '<dl class="kv">' + ctrlRow('Туннель', sel('data-ai-tunnel="' + esc(s.id) + '"', 'Туннель для ' + s.title, tuns.map(t => [t.name, tunLabel(t.name)]), s.tunnel || prof().tunnel_interface)) + '</dl>' : '') + '</div>';
   // Smart DNS first: the services «через Smart DNS» open only while it works (owner 2026-10-17).
-  return loadError(['ai']) +
+  return loadError(['ai']) + aiQuestion(sd) + aiRoomPanel(sd) +
     panel('Smart DNS', kv([
         ['Где хранится', !a ? '…' : sd.agh ? 'AdGuard Home' : 'Keenetic', '', null, '', sd.agh ? 'доменов: ' + fmtInt(sd.agh_domains || 0) : 'строк ' + fmtInt(sd.keenetic || 0) + ' из ' + fmtInt(sd.keenetic_max || 8)],
         ['Сервер', !a ? '…' : (sd.servers || []).join(', ') || 'не задан', a && noSd ? 'warn' : ''],
@@ -1274,7 +1299,45 @@ async function smartdnsServer(op, url) {
   actionResult = { id: 'aidns', text: x.ok ? (op === 'set' ? 'Сервер сохранён' : 'Свой сервер убран') : 'Не выполнено: ' + errText(x) };
   await load('ai', true); render();
 }
-async function aiJob(id, to, msg) { await serviceJob({ op: 'ai', id: id, tunnel: to }, msg); await load('ai', true); render(); }
+// aiJob ID WAY MSG [KEEP]: KEEP - the answer to «no room in Smart DNS» (the service still waits
+// for Smart DNS). No room: the Panel asks which way the services that did not fit go (fix.31).
+let AIQ = null;
+async function aiJob(id, to, msg, keep) {
+  const show = text => { actionResult = { id: 'svc', text: text }; render(); };
+  SVC.busy = true; AIQ = null; show(to === 'dns' ? 'Записываем домены Smart DNS…' : 'Переводим…');
+  const j = await bgJob(Object.assign({ op: 'ai', id: id, tunnel: to }, keep ? { keep: '1' } : {}));
+  SVC.busy = false;
+  if (to === 'dns' && (j.left || []).length) AIQ = { ids: j.left };
+  show(j.ok ? (AIQ ? 'Часть сервисов переведена; для остальных выберите маршрут' : msg) : !j.done ? 'Ещё выполняется, проверьте позже' : AIQ ? '' : 'Не выполнено: ' + errText(j.x));
+  await Promise.all([load('ai', true), load('services', true), load('lists', true)]); render();
+}
+async function aiAnswer(way) {
+  const q = AIQ; AIQ = null;
+  if (!q || way === 'cancel') { render(); return; }
+  for (const id of q.ids) await aiJob(id, way, aiName(id) + ': ' + (way === 'isp' ? 'напрямую через провайдера' : 'через VPN-туннель'), true);
+}
+const aiName = id => ((((S.ai || {}).services || []).find(s => s.id === id) || {}).title || id);
+// The question when Keenetic's 8 Smart DNS lines are taken, with what the router has now: a
+// working tunnel (first), AdGuard Home that does not work, a tunnel that is down (why not).
+function aiQuestion(sd) {
+  if (!AIQ) return '';
+  const tuns = ((st().wg && st().wg.interfaces) || []).filter(t => !tunOff(t) && !tunLost(t)), def = prof().tunnel_interface;
+  const up = tuns.find(t => t.name === def && isTrue(t.connected)) || tuns.find(t => isTrue(t.connected));
+  const names = AIQ.ids.map(aiName).join(', ');
+  const notes = [sd.agh && !sd.agh_running ? 'AdGuard Home не работает, поэтому домены записываются в Keenetic.' : '',
+    !tuns.length ? 'VPN-туннеля нет.' : !up ? 'Туннель ' + tunLabel(def || tuns[0].name) + ' не в сети: маршрут через VPN сейчас недоступен.' : ''].filter(Boolean);
+  return panel('Нет места', '<p class="panel-desc">' + esc('Лимит Smart DNS в Keenetic исчерпан (' + (sd.keenetic || 8) + ' из ' + (sd.keenetic_max || 8) + ' доменов). Выберите маршрут для ' + names + '.') + '</p>' +
+    (notes.length ? '<p class="field-warn">' + esc(notes.join(' ')) + '</p>' : '') +
+    '<div class="panel-actions">' + (tuns.length ? btn('ai-answer', 'route', 'Через VPN-туннель', up ? 'primary' : '', ' data-way="auto"' + (up ? '' : ' disabled')) : '') +
+    btn('ai-answer', 'globe', 'Напрямую через провайдера', up ? '' : 'primary', ' data-way="isp"') + btn('ai-answer', 'close', 'Отмена', '', ' data-way="cancel"') + '</div>');
+}
+// Room again (a line went, or AdGuard Home works): the services that waited can go to Smart DNS.
+const aiRoom = sd => !!sd && (sd.waiting || []).length > 0 && ((sd.agh && sd.agh_running) || (sd.keenetic || 0) < (sd.keenetic_max || 8));
+function aiRoomPanel(sd) {
+  if (AIQ || !aiRoom(sd)) return '';
+  return panel('Есть место', '<p class="panel-desc">' + esc('В Smart DNS освободилось место: ' + sd.waiting.map(aiName).join(', ') + ' можно перевести на Smart DNS.') + '</p>' +
+    '<div class="panel-actions">' + sd.waiting.map(id => btn('ai-room', 'route', sd.waiting.length > 1 ? 'Перевести ' + aiName(id) : 'Перевести', 'primary', ' data-ai="' + esc(id) + '"' + (SVC.busy ? ' disabled' : ''))).join('') + '</div>');
+}
 async function aiCheck(id, dom) {
   AICHK[id] = { busy: true }; render();
   let x; try { x = await apiGet('site-test', { domain: dom }); } catch (e) { x = { ok: false }; }
@@ -1440,7 +1503,7 @@ const RENDER = {
         ['Шлюз', (w.gateway || '—') + (w.gateway ? (w.gateway_accessible ? ' · доступен' : ' · недоступен') : '')],
         ['DNS', w.dns_accessible ? 'отвечает' : 'не отвечает']
       ]), { right: st().wan && w.internet === false ? headPill('crit', 'Нет связи') : '' }) +
-      panel('Домашняя сеть', kv([['Wi-Fi клиенты', S.wifi ? fmtInt(((S.wifi.clients) || []).length) + ' ' + plural(((S.wifi.clients) || []).length, 'устройство', 'устройства', 'устройств') : '—', '', 'wifi']])) +
+      panel('Домашняя сеть', kv([['Wi-Fi клиенты', !S.wifi ? '—' : !S.wifi.enabled ? 'сбор данных выключен' : fmtInt(((S.wifi.clients) || []).length) + ' ' + plural(((S.wifi.clients) || []).length, 'устройство', 'устройства', 'устройств'), '', 'wifi']])) +
       panel('Восстановление интернета', '<dl class="kv">' +
         ctrlRow('Восстанавливать автоматически', sw('data-cfg-wg', guardOn, 'Восстанавливать интернет автоматически', !cfgOk()), guardOn ? '' : 'выключено: при сбое воспользуйтесь кнопками ниже') +
         (guardOn ? ctrlRow('Проверять', sel('data-cfg-wanp="CHECK_INTERVAL_MIN"' + (cfgOk() ? '' : ' disabled'), 'Как часто проверять интернет', [[1, 'раз в минуту'], [2, 'раз в 2 минуты'], [5, 'раз в 5 минут'], [10, 'раз в 10 минут'], [15, 'раз в 15 минут'], [30, 'раз в 30 минут']], ((cfg().wan_guard || {}).params || {}).CHECK_INTERVAL_MIN || 1), 'при сбое - каждую минуту, пока связь не вернётся') : '') + '</dl>' +
@@ -1607,11 +1670,9 @@ const RENDER = {
         '</dl>' + resultBox('ads'));
   },
   utils() {
-    const a = S.ads || {}, g = S.agh, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
-    const sv = st().services || {};
-    const agh = !S.ads ? ['', '—'] : !ag.port ? ST.idle : aghDown(a, g) || sv.adguard_broken || sv.adguard === false ? ST.bad : g && g.ok && g.protection === false ? ST.off : ST.on;
+    const agh = aghState();
     const w = S.awg || {}, wn = (w.tunnels || []).length;
-    const awg = !S.awg ? ['', '—'] : awgLost().length || (wn && !(w.tunnels || []).every(t => t.running)) ? ST.bad : !w.installed || !wn ? ST.idle : ST.on;
+    const awg = !S.awg ? ['', '—'] : awgLost().length || (wn && !(w.tunnels || []).every(t => t.running)) ? ST.bad : !w.installed ? ST.none : !wn ? ST.idle : ST.on;
     return loadError(['ads']) + panel('Утилиты', kv([['AdGuard Home', agh[1], agh[0], 'd-agh', '', 'блокировка рекламы'],
         vlessRow() || ['Модуль VLESS', ST.idle[1], ST.idle[0], 'd-vless', '', 'туннели VLESS и Trojan'],
         ['Модуль AmneziaWG', awg[1], awg[0], 'd-awg', '', 'туннели AmneziaWG 3.x']]),
@@ -1658,9 +1719,9 @@ const RENDER = {
     const aghHost = ag.address || location.hostname, aghUrl = ag.port ? 'http://' + aghHost + ':' + ag.port + '/' : '';
     const e = (S.ext && S.ext.agh) || {};
     return loadError(['ads']) +
-      panel('AdGuard Home', kv([aghUrl ? ['Веб-интерфейс', aghHost + ':' + ag.port, '', aghUrl] : ['Веб-интерфейс', 'не найден'],
-          // One state: «Подключено» beside «не ответил» said two things at once (owner 2026-10-17).
-          S.ads ? (!a.agh_connected ? ['Подключение VWARD', 'Не подключено', 'warn'] : aghDown(a, g) ? ['Состояние', ST.bad[1], ST.bad[0]] : ['Состояние', ST.on[1], ST.on[0]]) : null,
+      // One state, the same as in «Утилиты» (aghState); the link only while AdGuard Home answers.
+      panel('AdGuard Home', kv([S.ads ? ['Состояние', aghState()[1], aghState()[0]] : null,
+          aghUrl && g && g.ok ? ['Веб-интерфейс', aghHost + ':' + ag.port, '', aghUrl] : null,
           g && g.ok && g.protection != null ? ['Фильтрация', g.protection ? 'Включена' : 'Выключена', g.protection ? 'ok' : 'warn'] : null,
           st1 && st1.ok ? ['Запросов за сутки', fmtInt(st1.queries), '', 'd-querylog'] : null,
           st1 && st1.ok ? ['Заблокировано за сутки', fmtInt(st1.blocked) + (st1.queries ? ' · ' + Math.round(100 * st1.blocked / st1.queries) + '%' : ''), '', 'd-querylog', ' data-qfilter="blocked"'] : null,
@@ -2616,11 +2677,29 @@ function bandText(b) { return b === '5' ? '5 ГГц' : b === '2.4' ? '2.4 ГГц
 const WIFI_REASONS = { stable: 'переходы редкие, сигнал в норме', frequent_band_switches: 'часто переходит между 2.4 и 5 ГГц', frequent_switches_and_weak_5g: 'часто переходит и слабый сигнал 5 ГГц' };
 function recText(c) { return c.recommendation === 'bind_2g' ? 'Закрепить за 2.4' : c.recommendation === 'review' ? 'Проверить' : c.health === 'WARNING' ? 'Внимание' : 'Норма'; }
 
+// The lists and subnets of the old tunnel besides VWARD's own: a lost tunnel always gives them
+// up (it carries nothing), a working one asks (Viva 2026-10-19: 19 lists stayed on OpkgTun2).
+function tunUseExtra(cur) {
+  const L = S.lists || {}, own = cfgRoute().group || prof().policy_group;
+  const lists = (L.lists || []).filter(l => l.route === cur && l.name !== own && l.name !== 'AdaptiveAuto').length;
+  const nets = (L.subnet_counts || {})[cur] != null ? L.subnet_counts[cur] : ((L.subnets || {})[cur] || []).length;
+  return lists + num(nets || 0);
+}
+function tunUseConfirm(name, cur, up) {
+  const box = confirmBox('tunnel-use', 'Перевести маршруты VWARD' + (cur ? ' с ' + tunLabel(cur) : '') + ' на ' + tunLabel(name) + '? Мои домены, автоподбор доменов и IP-категории пойдут через ' + tunLabel(name) + '.' + (up ? '' : ' Туннель сейчас не в сети: сайты из списков VPN будут недоступны, пока он не подключится.'), 'Переключить', !up);
+  if (!box || !cur) return box;
+  const n = tunUseExtra(cur), t = ((st().wg || {}).interfaces || []).find(x => x.name === cur);
+  if (!n) return box;
+  if (tunLost(t)) return box + '<p class="result-note">Списки и подсети туннеля ' + esc(tunLabel(cur)) + ' (' + n + ') тоже перейдут: у него нет настроек.</p>';
+  return box + '<label class="check-row"><input type="checkbox" data-tun-move-all' + (confirm.moveAll === false ? '' : ' checked') + '> Перенести и списки этого туннеля (' + n + ')</label>';
+}
+document.addEventListener('change', e => { if (e.target.matches && e.target.matches('[data-tun-move-all]') && confirm && confirm.id === 'tunnel-use') confirm.moveAll = e.target.checked; });
+
 function tunnelPage(name) {
   const wg = st().wg || {}, t = (wg.interfaces || []).find(x => x.name === name) || { name: name };
   const up = isTrue(t.connected), cur = prof().tunnel_interface, managed = cur === name, failopen = isTrue(wg.failopen_active);
   const use = managed ? '' : tunOff(t) ? '<p class="field-warn">Туннель выключен: назначить его туннелем по умолчанию можно после включения.</p>' : failopen ? '<p class="field-warn">Сейчас VPN недоступен и трафик идёт напрямую: переключение станет доступно, когда ' + esc(cur ? tunLabel(cur) : 'текущий туннель') + ' восстановится.</p>' :
-    confirmBox('tunnel-use', 'Перевести маршруты VWARD' + (cur ? ' с ' + tunLabel(cur) : '') + ' на ' + tunLabel(name) + '? Мои домены, автоподбор доменов и IP-категории пойдут через ' + tunLabel(name) + '.' + (up ? '' : ' Туннель сейчас не в сети: сайты из списков VPN будут недоступны, пока он не подключится.'), 'Переключить', !up) ||
+    tunUseConfirm(name, cur, up) ||
     '<div class="panel-actions">' + btn('ask', 'route', 'Сделать туннелем по умолчанию', up ? 'primary' : '', ' data-confirm="tunnel-use"' + (cfgOk() ? '' : ' disabled')) + '</div>';
   const off = tunOff(t), e = awgOf(name), v = vlessOf(name), mp = tunnelManagePanel(name, managed);
   const rx = t.rx != null ? t.rx : e && e.rx, tx = t.tx != null ? t.tx : e && e.tx;
@@ -2819,24 +2898,42 @@ function svcProbePanel(id) {
       .concat([['Итог', (act[p.action] || [p.action])[0], p.action === 'none' || p.action === 'failed' ? 'warn' : '', null, '', ((act[p.action] || [])[1] || '') + (p.at ? '; проверен ' + fmtTime(p.at * 1000) : '')]])),
     { desc: 'Раз в 30 минут VWARD открывает сервис через каждый туннель. Не открылся через свой - переходит на самый быстрый, через который открылся.' });
 }
+// A background job of the services action, waited for through control-data: { ok, done, x }.
+// The helper's reason= line (Keenetic's own answer) comes along with its error.
+async function bgJob(fields) {
+  let x, run = {};
+  try { x = await apiPost('services', fields); } catch (err) { x = { ok: false, error: err.message }; }
+  if (!x.ok) return { ok: false, done: true, x: x };
+  const deadline = Date.now() + 3 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 2000));
+    try { run = (await apiGet('control-data')).run || {}; } catch (err) { continue; }
+    if (run.finished) break;
+  }
+  if (!run.finished) return { ok: false, done: false, x: {}, out: [] };
+  const out = String(run.output || '').trim().split('\n'), last = out[out.length - 1] || '';
+  const left = (out.filter(l => /^info\.left=/.test(l)).pop() || '').slice(10).split(',').filter(Boolean);
+  const reason = (out.filter(l => /^reason=/.test(l)).pop() || '').slice(7);
+  return run.rc === 0 ? { ok: true, done: true, left: left, x: { ok: true, result: last.replace(/^result=/, '') } } :
+    { ok: false, done: true, left: left, x: { ok: false, error: /^error=/.test(last) ? last.slice(6) : 'helper_failed', reason: reason } };
+}
 // Switching on writes up to 300 domains into Keenetic: a background job, as for tunnels.
 async function serviceJob(fields, okMsg) {
   const show = text => { actionResult = { id: 'svc', text: text }; render(); };
   SVC.busy = true; show(fields.op === 'off' ? 'Выключаем…' : fields.op === 'on' ? 'Записываем домены в Keenetic…' : 'Переводим…');
-  let x, run = {};
-  try { x = await apiPost('services', fields); } catch (err) { x = { ok: false, error: err.message }; }
-  if (x.ok) {
-    const deadline = Date.now() + 3 * 60 * 1000;
-    while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 2000));
-      try { run = (await apiGet('control-data')).run || {}; } catch (err) { continue; }
-      if (run.finished) break;
-    }
-  }
-  const last = String(run.output || '').trim().split('\n').pop() || '';
+  const j = await bgJob(fields);
   SVC.busy = false;
-  show(!x.ok ? 'Не выполнено: ' + errText(x) : !run.finished ? 'Ещё выполняется, проверьте позже' : run.rc === 0 ? okMsg : 'Не выполнено: ' + errText({ error: last.replace(/^error=/, '') }));
+  show(j.ok ? okMsg : !j.done ? 'Ещё выполняется, проверьте позже' : 'Не выполнено: ' + errText(j.x));
   await Promise.all([load('services', true), load('lists', true)]); render();
+}
+// The default tunnel: moving every list can take Keenetic a minute, so it is a background
+// job (fix.30 showed «роутер не ответил» after 20 s while the switch went on).
+async function tunUseJob(name, move) {
+  runningId = 'tunnel-use'; popup({ sev: 'info', title: 'Переключаем маршруты на ' + tunLabel(name) + '…' }); render();
+  const j = await bgJob({ op: 'use', id: move, tunnel: name, confirm: 'TUNNEL_SWITCH' });
+  runningId = null;
+  toast(j.ok ? (j.x.result === 'unchanged' ? 'Уже туннель по умолчанию' : 'Маршруты VWARD идут через ' + tunLabel(name)) : !j.done ? 'Переключение ещё выполняется, проверьте позже' : 'Не переключено: ' + errText(j.x), j.ok ? 'ok' : !j.done ? 'info' : 'err', 'a-tunnel');
+  await Promise.all(['config', 'status', 'security', 'route', 'lists'].map(k => load(k, true))); render();
 }
 // With several tunnels a list chooses its way: the provider or any tunnel.
 function listViaSel(l, tuns, ok) {
@@ -3561,7 +3658,8 @@ async function refreshPage(busy) {
 async function loadLog(tab, force) {
   if (!force && S.logs[tab] != null) { render(); }
   if (tab === 'all') {
-    const parts = await Promise.all(LOG_TABS.map(tb => apiText('log', { name: tb.id, count: 200 })
+    // «Расписание» is crond's own record of every start, not events: only in its tab.
+    const parts = await Promise.all(LOG_TABS.filter(tb => tb.id !== 'cron').map(tb => apiText('log', { name: tb.id, count: 200 })
       .then(x => { S.logs[tb.id] = x; S.loadedAt['log:' + tb.id] = Date.now(); return { label: tb.label, text: x }; },
             e => ({ label: tb.label, text: 'Журнал недоступен: ' + e.message }))));
     S.logs.all = mergeLogs(parts) || 'Журналы пусты'; S.loadedAt['log:all'] = Date.now();
@@ -3706,10 +3804,24 @@ function noteKeep(n, quiet) {
   apiPost('notes', { op: 'add', sev: item.sev, title: item.title, text: item.text, to: item.to, key: item.key }).catch(() => {});
   if (!quiet) renderNav();
 }
-function toast(msg, sev) {
+// toast MSG [SEV] [ACT]: ACT names the action (a-OP-TARGET): its error is kept as ACT_CODE,
+// and its later success takes the earlier errors out of the history. A message of a step in
+// progress («Переключаем…») is shown, not kept (fix.31).
+function toast(msg, sev, act) {
   const n = { sev: sev || noteSev(String(msg)), title: String(msg) };
   popup(n);
-  if (!NOTE_QUIET.test(n.title)) noteKeep(n);
+  if (act && n.sev === 'ok') noteResolve(act);
+  if (NOTE_QUIET.test(n.title) || /…$/.test(n.title)) return;
+  if (act && n.sev === 'err') n.key = (act + '_' + noteKey(n)).slice(0, 64);
+  noteKeep(n);
+}
+const actKey = f => ('a-' + [f.op, f.action, f.target].filter(Boolean).join('-')).replace(/[^A-Za-z0-9-]/g, '-').slice(0, 48);
+function noteResolve(act) {
+  const items = (S.notes && S.notes.items) || [], keep = items.filter(x => !((x.sev === 'err' || x.sev === 'crit') && (x.key === act || String(x.key).indexOf(act + '_') === 0)));
+  if (keep.length === items.length) return;
+  S.notes = Object.assign({}, S.notes, { items: keep });
+  apiPost('notes', { op: 'resolve', key: act }).catch(() => {});
+  renderNav();
 }
 // A warning that appeared since the last look pops up once and goes into the history; one that
 // went and came back pops up again. Only on the router's fresh answer, not on the browser's copy.
@@ -3795,7 +3907,7 @@ const CONFIRMED = {
   'comp-off': c => { const id = c.comp || current.slice(2); return cfgSet({ op: 'component', target: id, value: '0', confirm: 'COMPONENT_DISABLE' }, '«' + comp(id).name + '» выключен', ['status']); },
   'comp-on': c => { const id = c.comp || current.slice(2); return cfgSet({ op: 'component', target: id, value: '1' }, '«' + comp(id).name + '» включён', ['status']); },
   'tunnel-delete': c => { const name = current.slice(2); return apiPost('tunnel-conf', { op: 'delete', name: name, target: c.to, confirm: 'TUNNEL_DELETE' }).then(x => { toast(x.ok ? tunLabel(name) + ' удалён' : 'Не удалено: ' + errText(x)); return Promise.all([load('status', true), load('lists', true)]).then(() => { if (x.ok) go('vpn', null, 'replace'); else render(); }); }, e => { toast('Ошибка: ' + e.message); render(); }); },
-  'tunnel-use': () => { const name = current.slice(2); toast('Переключаем маршруты на ' + tunLabel(name) + '…'); return cfgSet({ op: 'tunnel', target: name, confirm: 'TUNNEL_SWITCH' }, 'Маршруты VWARD идут через ' + tunLabel(name), ['status', 'security', 'route']); },
+  'tunnel-use': c => tunUseJob(current.slice(2), c.moveAll === false ? 'own' : 'all'),
   'wg-off': () => cfgSet({ op: 'wan-guard', value: '0', confirm: 'WAN_GUARD_DISABLE' }, 'Восстановление интернета выключено'),
   'wan-renew': () => wanOp('wan-renew', 'WAN_RENEW', 'Адрес запрошен заново'),
   'wan-bounce': () => wanOp('wan-bounce', 'WAN_BOUNCE', 'Интернет переподключён'),
@@ -3806,7 +3918,7 @@ const CONFIRMED = {
 async function cfgSet(fields, okMsg, reload) {
   try {
     const x = await apiPost('config', fields);
-    toast(x.ok ? (x.result === 'unchanged' ? 'Уже сохранено' : okMsg) : 'Не сохранено: ' + errText(x));
+    toast(x.ok ? (x.result === 'unchanged' ? 'Уже сохранено' : okMsg) : 'Не сохранено: ' + errText(x), null, actKey(fields));
     return x;
   } catch (e) { toast('Ошибка: ' + e.message); return null; }
   finally { await Promise.all(['config'].concat(reload || []).map(k => load(k, true))); render(); }
@@ -4119,6 +4231,8 @@ document.addEventListener('click', e => {
   else if (a === 'tunnel-up' || a === 'tunnel-restart') tunnelState(a === 'tunnel-up' ? 'up' : 'restart', t.dataset.name);
   else if (a === 'vless-servers') vlessServers(t.dataset.name);
   else if (a === 'ai-check') aiCheck(t.dataset.ai, t.dataset.dom);
+  else if (a === 'ai-answer') aiAnswer(t.dataset.way);
+  else if (a === 'ai-room') { if (!SVC.busy) aiJob(t.dataset.ai, 'dns', aiName(t.dataset.ai) + ': Smart DNS'); }
   else if (a === 'ai-dns-clear') smartdnsServer('clear', '');
   else if (a === 'vsrv-open') { const k = t.dataset.name + '|' + t.dataset.code; if (VOPEN.has(k)) VOPEN.delete(k); else VOPEN.add(k); render(); }
   else if (a === 'tunnel-probe') {

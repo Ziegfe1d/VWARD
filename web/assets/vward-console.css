@@ -531,3 +531,6 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 .row.muted,.vgroup.muted .vhead .row-main{opacity:.55}
 .vgroup+.vgroup{border-top:1px solid var(--line)}
 .vgroup>.rows{margin-left:12px}
+/* A choice under a confirmation (fix.31: «Перенести и списки этого туннеля»). */
+.check-row{display:flex;gap:8px;align-items:center;margin:-8px 16px 16px;font-size:var(--fs-sm)}
+.check-row input{width:18px;height:18px;margin:0;accent-color:var(--accent)}

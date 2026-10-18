@@ -623,10 +623,20 @@ else
                             else
 
                                 # Watching only: the tunnel stays as it is, the action is proposed.
-                                DOWN_STREAK=0
+                                # The streak stays, so the next minutes do not count up again; the
+                                # line goes to the journal once an hour (below).
                                 ACTION="WOULD_DOWN"
-                                vward_agent_acts network "tunnel-down:$VWARD_TUNNEL_INTERFACE" \
-                                    "Туннель $VWARD_TUNNEL_INTERFACE не отвечает: перезапустить его, перевести маршруты на другой туннель или выключить, чтобы сайты из списков шли напрямую" || :
+                                case "$VWARD_TUNNEL_INTERFACE" in
+                                    OpkgTun[0-9]|OpkgTun[0-9][0-9])
+                                        engine_of "$VWARD_TUNNEL_INTERFACE" >/dev/null || ACTION="WOULD_DOWN_LOST" ;;
+                                esac
+                                if [ "$ACTION" = WOULD_DOWN_LOST ]; then
+                                    vward_agent_acts network "tunnel-down:$VWARD_TUNNEL_INTERFACE" \
+                                        "Туннель $VWARD_TUNNEL_INTERFACE без настроек (модуль VPN его не знает): назначьте другой туннель по умолчанию" || :
+                                else
+                                    vward_agent_acts network "tunnel-down:$VWARD_TUNNEL_INTERFACE" \
+                                        "Туннель $VWARD_TUNNEL_INTERFACE не отвечает: перезапустить его, перевести маршруты на другой туннель или выключить, чтобы сайты из списков шли напрямую" || :
+                                fi
                             fi
                         fi
                     fi
@@ -765,8 +775,28 @@ case "$ACTION" in
         ;;
 esac
 
+# The same proposal while watching: once an hour (fix.30: 11 hours of a line every minute).
+WOULD_FILE=${VWARD_TUNNEL_WOULD:-/tmp/vward-tunnel-would}
+case "$ACTION" in
+    WOULD_DOWN|WOULD_DOWN_LOST)
+        W_ACT= W_AT=0
+        [ ! -r "$WOULD_FILE" ] || read -r W_ACT W_AT < "$WOULD_FILE"
+        case "$W_AT" in ''|*[!0-9]*) W_AT=0 ;; esac
+        if [ "${W_ACT:-}" = "$ACTION:$VWARD_TUNNEL_INTERFACE" ] && [ $((NOW - ${W_AT:-0})) -lt 3600 ] && [ $((NOW - ${W_AT:-0})) -ge 0 ]; then
+            ACTION_QUIET=1
+        else
+            echo "$ACTION:$VWARD_TUNNEL_INTERFACE $NOW" > "$WOULD_FILE" 2>/dev/null
+        fi
+        ;;
+    WAIT_DOWN_CONFIRM) ;;
+    *) rm -f "$WOULD_FILE" ;;
+esac
+
 case "$ACTION" in
     KEEP_UP|STAY_DOWN|WOULD_STAY_DOWN)
+        ;;
+    WOULD_DOWN|WOULD_DOWN_LOST)
+        [ "${ACTION_QUIET:-0}" = 1 ] || echo "$NOW_TEXT|$ACTION|health=$WG_STATUS|config=$CONFIG_STATE|age=$AGE|down_streak=$DOWN_STREAK|active=$FAILOPEN_ACTIVE" >> "$LOG"
         ;;
     *)
         echo "$NOW_TEXT|$ACTION|health=$WG_STATUS|config=$CONFIG_STATE|age=$AGE|down_streak=$DOWN_STREAK|active=$FAILOPEN_ACTIVE${FAILOPEN_REASON:+|reason=$FAILOPEN_REASON}${FALLBACK_TO:+|to=$FALLBACK_TO}${FALLBACK_FROM:+|from=$FALLBACK_FROM}${QUALITY_FROM:+|from=$QUALITY_FROM}" \

@@ -431,8 +431,10 @@ watch_agents()
         IFS=$OLDIFS_B
         WS=$1 WG=$2 WF=$3 WL=$4 WH=$5
         WST=ok
-        # Late: its last run is older than it should be (not in the first 15 minutes after boot).
-        if [ "$WL" -gt 0 ] && [ "$WA_UP" -ge 900 ] && [ -n "$WF" ]; then
+        # Late: its last run is older than it should be (not in the first 15 minutes after boot,
+        # nor before a job had its own interval to run since this agent started: 5 false ones
+        # right after an installation, fix.30).
+        if [ "$WL" -gt 0 ] && [ "$WA_UP" -ge 900 ] && [ -n "$WF" ] && [ $((WA_NOW - ${SUP_STARTED:-0})) -ge "$WL" ]; then
             WT=$(date -r "$WF" +%s 2>/dev/null || echo 0)
             if [ $((WA_NOW - WT)) -gt "$WL" ]; then
                 WST=late
@@ -623,6 +625,7 @@ watch_services()
 
 
 log_event "SUPERVISOR_START|pid=$$"
+SUP_STARTED=$(date +%s)
 DOH_SKIP=0 DOH_WAIT=1 DOH_FAILS=0
 TICK=0
 

@@ -118,10 +118,11 @@ with tempfile.TemporaryDirectory() as tmp:
     if TOKEN in (tmp / "audit.log").read_text():
         fail("the token must not reach the journal")
 
-    # An AI service on Smart DNS: its main domains (one per registrable domain) with the own server.
+    # An AI service on Smart DNS: its own main domains as the catalog names them (never cut to the
+    # second level: aistudio.google.com gave google.com), a name inside one taken left out.
     if run("ai", "chat.example", "dns") != "result=changed":
         fail(f"ai dns: {run('ai', 'chat.example', 'dns')}")
-    want = {f"https upstream {OWN} dnsm on ISP domain chat.example", f"https upstream {OWN} dnsm on ISP domain chatstatic.example"}
+    want = {f"https upstream {OWN} dnsm on ISP domain chat.example", f"https upstream {OWN} dnsm on ISP domain cdn.chatstatic.example"}
     if not want <= set(doh()):
         fail(f"the service's main domains through Smart DNS: {doh()}")
     if run("ai", "video.example", "dns") != "error=unknown_service" or run("ai", "chat.example", "tor") != "error=invalid_value":
@@ -138,6 +139,17 @@ with tempfile.TemporaryDirectory() as tmp:
         fail(f"the 9th line must be refused: {len(doh())}")
     if run("smartdns-domain", "remove", "d0.example") != "result=changed" or any(l.endswith(" d0.example") for l in doh()):
         fail("remove a Smart DNS domain from Keenetic")
+    # No room for all of a service's domains (7 of 8 taken, it needs 2): the one added goes again,
+    # the service stays as it was and waits for room; the Panel asks which way (fix.31).
+    before = sorted(doh())
+    if run("ai", "chat.example", "dns") != "error=smartdns_keenetic_full" or sorted(doh()) != before:
+        fail(f"no room: nothing half-done: {doh()}")
+    if (etc / "smartdns-wait").read_text().split() != ["chat.example"]:
+        fail("a service with no room waits for Smart DNS")
+    if run("ai", "chat.example", "isp", "keep") != "result=changed" or not (etc / "smartdns-wait").exists():
+        fail("the answer to the question keeps it waiting")
+    if run("ai", "chat.example", "isp") != "result=changed" or (etc / "smartdns-wait").exists():
+        fail("a way chosen by the owner ends the wait")
     if run("smartdns-server", "clear") != "result=changed" or conf.exists():
         fail("clear the own server")
 
@@ -147,4 +159,20 @@ with tempfile.TemporaryDirectory() as tmp:
         if need not in API:
             fail(f"the API lacks {need}")
 
+# The Panel finds the same main domains as the helper (one rule in two languages, one shared list).
+import re as _re
+helper = (ROOT / "components/console/scripts/vward-console-config.sh").read_text()
+shared = _re.search(r"^AI_SHARED=.*$", helper, _re.M).group(0)
+if shared not in API:
+    fail("the API and the helper must share one list of platforms")
+cat = ROOT / "components/console/data/services-catalog.json"
+fn = helper[helper.index("ai_main() {"):helper.index("\n}\n", helper.index("ai_main() {")) + 3]
+sh_out = subprocess.run(["sh", "-c", shared + "\nJQ=jq; SV_CAT=" + str(cat) + "\n" + fn +
+    "for i in $(jq -r '.services[] | select(.category == \"ai\") | .id' \"$SV_CAT\"); do echo \"$i $(ai_main \"$i\" | tr '\\n' ' ')\"; done"],
+    text=True, capture_output=True).stdout
+jq_def = API[API.index("def main($id; $ds)"):API.index(".[:4];", API.index("def main($id; $ds)")) + 6]
+jq_out = subprocess.run(["jq", "-r", "--arg", "shared", shared.split("=", 1)[1].strip('"'), jq_def +
+    ' .services[] | select(.category == "ai") | "\\(.id) \\(main(.id; .domains) | map(. + " ") | add // "")"', str(cat)], text=True, capture_output=True).stdout
+if sh_out.split("\n") != jq_out.split("\n") or "google.com" in sh_out.split():
+    fail(f"main domains differ between the helper and the API:\n{sh_out}\n{jq_out}")
 print("CONSOLE_AI=PASS")

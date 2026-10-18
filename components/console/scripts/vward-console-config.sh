@@ -81,7 +81,8 @@ function rmask() {return $4 ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/ ? $4 : "255.
 # An engine's reason= line (the refused Keenetic command and its answer) goes on to the
 # Panel; it replaces any refusal of our own, so die does not add a second one.
 relay_reason() {
-    printf '%s\n' "$1" | grep '^reason=' | tail -n 1
+    RELAY_REASON=$(printf '%s\n' "$1" | grep '^reason=' | tail -n 1 | cut -c8-)
+    [ -z "$RELAY_REASON" ] || printf 'reason=%s\n' "$RELAY_REASON"
     NDM_CMD=
 }
 
@@ -89,7 +90,15 @@ relay_reason() {
 # control characters) on a reason= line just before the error line.
 die() {
     # The command Keenetic refused (never a key: those go through ndm_secret) and its answer.
-    [ "$1" != router_rejected ] || [ -z "${NDM_CMD:-}" ] || printf 'reason=%s: %s\n' "$(printf '%s' "$NDM_CMD" | cut -c1-120)" "${NDM_REPLY:-no answer}"
+    # A DoH address carries its owner's token: only its host is shown (Smart DNS lines).
+    die_r=
+    [ "$1" != router_rejected ] || [ -z "${NDM_CMD:-}" ] ||
+        die_r="$(printf '%s' "$NDM_CMD" | sed 's#\(https://[^/ ]*\)/[^ ]*#\1/…#g' | cut -c1-120): ${NDM_REPLY:-no answer}"
+    [ -z "$die_r" ] || printf 'reason=%s\n' "$die_r"
+    # The journal keeps every refusal with the router's answer (fix.30: a failed tunnel
+    # creation left only «rc=1»).
+    die_r=${die_r:-${RELAY_REASON:-}}
+    audit "${OP:-helper} ${ARG1:-} error=$1${die_r:+ reason=$die_r}"
     printf 'error=%s\n' "$1"; exit "${2:-1}"
 }
 
@@ -103,7 +112,7 @@ cleanup() {
     [ -z "$NS_FILE" ] || rm -f "$NS_FILE"
     [ -z "$TMPFILE" ] || rm -f "$TMPFILE.raw"
     [ -z "$RUNCFG" ] || rm -f "$RUNCFG"
-    [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.doh" "$JOURNAL.agh" "$JOURNAL.agh.inc" "$JOURNAL.agh.undo"
+    [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.nets" "$JOURNAL.doh" "$JOURNAL.agh" "$JOURNAL.agh.inc" "$JOURNAL.agh.undo"
     [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
     [ "$LOCKED" != 1 ] || rm -rf "${CHANGE_LOCK:?}"
@@ -611,6 +620,11 @@ op_tunnel() {
     case "${VWARD_POLICY_GROUP:-}" in "$ADAPTIVE_GROUP"|*[!A-Za-z0-9_.-]*) VWARD_POLICY_GROUP= ;; esac
     OLD_IF=$VWARD_TUNNEL_INTERFACE OLD_DEV=$VWARD_TUNNEL_DEVICE GROUP=${VWARD_POLICY_GROUP:-} NEW_IF=$1
     [ "$NEW_IF" != "$OLD_IF" ] || done_ok "tunnel $NEW_IF" unchanged
+    # tunnel NEW [all|own]: all moves every list and subnet of the old tunnel too.  A tunnel
+    # left without settings carries nothing, so its routes always come along (Viva 2026-10-19:
+    # 19 lists stayed on the dead OpkgTun2 after the switch).
+    case "${2:-own}" in all) MOVE_ALL=1 ;; own) MOVE_ALL=0 ;; *) die invalid_arguments 64 ;; esac
+    case "$OLD_IF" in OpkgTun[0-9]|OpkgTun[0-9][0-9]) engine_tunnel "$OLD_IF" || MOVE_ALL=1 ;; esac
     [ "$(awk -F= '$1=="FAILOPEN_ACTIVE"{print $2}' "$TUNNEL_GUARD_STATE" 2>/dev/null)" != 1 ] || die failopen_active
 
     rm -f "$VWARD_DEVICE_MAP_CACHE"
@@ -632,10 +646,10 @@ op_tunnel() {
         ctx && $1 == "route" && $2 == "object-group" && $3 != g2 && ($4 == i || $4 == d) && $3 ~ /^[A-Za-z0-9_.-]+$/ {print $3; exit}' "$RUNCFG")
 
     # ctx<TAB>group<TAB>target<TAB>options for every VWARD group routed to the old tunnel.
-    moves=$(awk -v g1="$GROUP" -v g2="$ADAPTIVE_GROUP" -v i="$OLD_IF" -v d="$OLD_DEV" '
+    moves=$(awk -v g1="$GROUP" -v g2="$ADAPTIVE_GROUP" -v i="$OLD_IF" -v d="$OLD_DEV" -v all="$MOVE_ALL" '
         /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1) ? "dns-proxy" : ""}
         /^!/ {ctx = ""}
-        $1=="route" && $2=="object-group" && ($3==g1 || $3==g2) && ($4==i || $4==d) {
+        $1=="route" && $2=="object-group" && ($3==g1 || $3==g2 || (all == 1 && $3 ~ /^[A-Za-z0-9_.-]+$/)) && ($4==i || $4==d) {
             opt = ""; for (k = 5; k <= NF; k++) opt = opt (opt == "" ? "" : " ") $k
             print (ctx == "" ? "-" : ctx) "\t" $3 "\t" $4 "\t" (opt == "" ? "-" : opt)
         }' "$RUNCFG")
@@ -672,6 +686,34 @@ op_tunnel() {
         route_present "$g" "$nt" && ! route_present "$g" "$t" || die verification_failed
     done < "$JOURNAL.moves"
     moved=$(grep -c . "$JOURNAL.moves")
+    # 3a. Static subnets of the old tunnel (all only).  The routes policy-sync owns stay
+    #     with it: --reconcile below moves them itself.
+    : > "$JOURNAL.nets"
+    if [ "$MOVE_ALL" = 1 ]; then
+        awk -v i="$OLD_IF" -v d="$OLD_DEV" -v own="$POLICY_STATE/owned.dynamic.routes" "$ROUTE_AWK"'
+            function plen(m,   a, n, k, b) {n = split(m, a, "."); b = 0
+                for (k = 1; k <= n; k++) {while (a[k] >= 128) {b++; a[k] = (a[k] - 128) * 2} }
+                return b}
+            BEGIN {while ((getline l < own) > 0) o[l] = 1}
+            $1 == "ip" && $2 == "route" && (rdev() == i || rdev() == d) && !(($3 "/" plen(rmask())) in o) {print $3 " " rmask() " " rdev()}' "$RUNCFG" > "$JOURNAL.nets"
+    fi
+    while read -r net mask t; do
+        [ -n "$net" ] || continue
+        nt=$NEW_IF; [ "$t" = "$OLD_DEV" ] && [ "$OLD_DEV" != "$OLD_IF" ] && nt=$NEW_DEV
+        if ! subnet_present "$net" "$mask" "$nt"; then
+            ndm "ip route $net $mask $nt auto" || die router_rejected
+            echo "no ip route $net $mask $nt" >> "$JOURNAL"
+        fi
+        ndm "no ip route $net $mask $t" || die router_rejected
+        echo "ip route $net $mask $t auto" >> "$JOURNAL"
+    done < "$JOURNAL.nets"
+    if [ -s "$JOURNAL.nets" ]; then
+        snapshot
+        while read -r net mask t; do
+            [ -z "$net" ] || ! subnet_present "$net" "$mask" "$t" || die verification_failed
+        done < "$JOURNAL.nets"
+    fi
+    nets=$(grep -c . "$JOURNAL.nets")
 
     # 4. device.conf: the tunnel, and the policy group pinned so discovery no
     #    longer depends on which tunnel its route points to.
@@ -711,7 +753,7 @@ op_tunnel() {
     [ ! -x "$POLICY_SYNC_BIN" ] || (trap '' HUP; exec "$POLICY_SYNC_BIN" --reconcile) </dev/null >/dev/null 2>&1 &
     # The owner chose this tunnel: the guard does not take the routes back anywhere else.
     [ "${VWARD_TUNNEL_BY_GUARD:-}" = 1 ] || rm -f "${VWARD_TUNNEL_FALLBACK_STATE:-/opt/var/lib/vward/tunnel-guard/fallback}"
-    done_ok "tunnel $OLD_IF($OLD_DEV) -> $NEW_IF($NEW_DEV) group=$GROUP routes=$moved" changed
+    done_ok "tunnel $OLD_IF($OLD_DEV) -> $NEW_IF($NEW_DEV) group=$GROUP routes=$moved subnets=$nets" changed
 }
 
 # ---------- Domain lists: around the tunnel or through it ----------
@@ -2192,19 +2234,49 @@ op_smartdns_server() {
 # ai ID|all vpn|vpn:TUNNEL|dns|isp: the way of an AI service of the catalog (owner 2026-10-17):
 # VPN - the service's list through a tunnel («Сервисы»); Smart DNS - no list, its main domains
 # answered by Smart DNS; provider - neither. Each step is a run of this helper that checks itself.
-ai_roots() {
-    "$JQ" -r --arg i "$1" '.services[] | select(.id == $i) | .domains[]' "$SV_CAT" 2>/dev/null |
-        awk -F. 'NF >= 2 {print tolower($(NF-1) "." $NF)}' | awk '!seen[$0]++' | head -n 4
+# ai_main ID: the service's own main domains for Smart DNS, as the catalog names them - never
+# cut to the second level (aistudio.google.com gave google.com: all of Google through Smart
+# DNS, fix.30). The service's own name first, then the names with its brand, then its own
+# short domains; the hosts of shared platforms (CDN, telemetry, a big company's other
+# services) only when they carry the brand; a name inside one already taken is left out; at
+# most 4 (Keenetic holds 8 Smart DNS domains in all).
+AI_SHARED=" google.com googleapis.com gstatic.com microsoft.com microsoftapp.net live.net msedge.net a-msedge.net azureedge.net github.com githubusercontent.com amazonaws.com cloudfront.net cloudflare.com cloudflareaccess.com facebook.com fbcdn.net apple.com akamaized.net fastly.net fastly-edge.com datadoghq.com auth0.com adjust.com cloudinary.com appspot.com cloudfunctions.net todesktop.com "
+ai_main() {
+    "$JQ" -r --arg i "$1" '.services[] | select(.id == $i) | ([$i] + .domains)[]' "$SV_CAT" 2>/dev/null |
+        awk -v id="$1" -v shared="$AI_SHARED" '
+            BEGIN {brand = id; sub(/[.].*/, "", brand); if (length(brand) < 4) brand = ""}
+            {d = tolower($0)} d !~ /^[a-z0-9-]+([.][a-z0-9-]+)+$/ {next}
+            seen[d]++ {next}
+            {n = split(d, l, "."); root = l[n - 1] "." l[n]; own = brand != "" && index(d, brand)}
+            d != id && !own && index(shared, " " root " ") && index(id, root) == 0 {next}
+            {print (d == id ? 0 : own ? 1 : n == 2 ? 2 : 3) "\t" n "\t" d}' |
+        sort -k1,1n -k2,2n -k3,3 | cut -f3 |
+        awk '{for (k in got) if (length($0) > length(k) && substr($0, length($0) - length(k)) == "." k) next; got[$0] = 1; print}' | head -n 4
 }
 ai_step() {
-    as_out=$(sh "$0" "$@" </dev/null 2>/dev/null | tail -n 1)
-    case "$as_out" in result=*) return 0 ;; esac
+    as_all=$(sh "$0" "$@" </dev/null 2>/dev/null)
+    as_out=$(printf '%s\n' "$as_all" | tail -n 1)
+    case "$as_out" in result=*) AI_RES=${as_out#result=}; return 0 ;; esac
     AI_ERR=${as_out#error=}; case "$AI_ERR" in ''|*[!a-z0-9_]*) AI_ERR=helper_failed ;; esac
+    # Keenetic's own answer goes on to the Panel and the journal (fix.30 showed only «отклонил»).
+    relay_reason "$as_all"
     return 1
 }
+# The AI services the owner sent to Smart DNS when Keenetic had no room (8 of 8): the Panel
+# says when room frees up («Перевести»). One id a line.
+AI_WAIT=${VWARD_AI_WAIT:-$ETC/smartdns-wait}
+ai_wait() {
+    [ -f "$AI_WAIT" ] || [ "$1" = add ] || return 0
+    { [ ! -f "$AI_WAIT" ] || grep -vxF -- "$2" "$AI_WAIT"; [ "$1" != add ] || printf '%s\n' "$2"; } > "$AI_WAIT.$$" 2>/dev/null &&
+        mv -f "$AI_WAIT.$$" "$AI_WAIT"
+    [ -s "$AI_WAIT" ] || rm -f "$AI_WAIT"
+}
+# ai ID|all WAY [keep]: keep - the owner's answer to «no room in Smart DNS»: the service still
+# waits for Smart DNS.
 op_ai() {
     SV_CAT=$(services_catalog) || die services_unavailable
     case "$2" in vpn|dns|isp) ai_to=auto ;; vpn:*) ai_to=${2#vpn:}; vward_valid_ndm_name "$ai_to" || die invalid_value 64 ;; *) die invalid_value 64 ;; esac
+    case "${3:-}" in ''|keep) ;; *) die invalid_value 64 ;; esac
     if [ "$1" = all ]; then
         ai_ids=$("$JQ" -r '.services[] | select(.category == "ai") | .id' "$SV_CAT")
     else
@@ -2212,21 +2284,43 @@ op_ai() {
         "$JQ" -e --arg i "$1" 'any(.services[]; .id == $i and .category == "ai")' "$SV_CAT" >/dev/null 2>&1 || die unknown_service 64
         ai_ids=$1
     fi
-    ai_n=0
+    ai_n=0 ai_left=
     for ai_id in $ai_ids; do
         ai_on=$(service_row "$ai_id")
         case "$2" in
             vpn*) if [ -n "$ai_on" ]; then ai_step service tunnel "$ai_id" "$ai_to" || die "$AI_ERR"
-                  else ai_step service on "$ai_id" "$ai_to" || die "$AI_ERR"; fi ;;
+                  else ai_step service on "$ai_id" "$ai_to" || die "$AI_ERR"; fi
+                  [ "${3:-}" = keep ] || ai_wait del "$ai_id" ;;
+            dns)
+                # The domains first, the VPN list after: with no room (Keenetic's 8 Smart DNS
+                # lines taken, fix.31) the service stays as it was and its new lines go again.
+                ai_added= ai_full=0
+                for ai_d in $(ai_main "$ai_id"); do
+                    if ai_step smartdns-domain add "$ai_d"; then
+                        [ "$AI_RES" != changed ] || ai_added="$ai_added $ai_d"
+                    elif [ "$AI_ERR" = smartdns_keenetic_full ]; then ai_full=1; break
+                    else die "$AI_ERR"; fi
+                done
+                if [ "$ai_full" = 1 ]; then
+                    for ai_d in $ai_added; do ai_step smartdns-domain remove "$ai_d" || :; done
+                    ai_wait add "$ai_id"
+                    ai_left="$ai_left${ai_left:+,}$ai_id"
+                    continue
+                fi
+                [ -z "$ai_on" ] || ai_step service off "$ai_id" || die "$AI_ERR"
+                ai_wait del "$ai_id" ;;
             *) [ -z "$ai_on" ] || ai_step service off "$ai_id" || die "$AI_ERR"
-               for ai_d in $(ai_roots "$ai_id"); do
-                   if [ "$2" = dns ]; then ai_step smartdns-domain add "$ai_d" || die "$AI_ERR"
-                   else ai_step smartdns-domain remove "$ai_d" || die "$AI_ERR"; fi
-               done ;;
+               for ai_d in $(ai_main "$ai_id"); do ai_step smartdns-domain remove "$ai_d" || die "$AI_ERR"; done
+               [ "${3:-}" = keep ] || ai_wait del "$ai_id" ;;
         esac
         ai_n=$((ai_n + 1))
     done
-    done_ok "ai $1 $2 services=$ai_n" changed
+    if [ -n "$ai_left" ]; then
+        # One service: the Panel asks which way instead; several: the rest is asked about.
+        printf 'info.left=%s\n' "$ai_left"
+        [ "$1" = all ] && [ "$ai_n" -gt 0 ] || die smartdns_keenetic_full
+    fi
+    done_ok "ai $1 $2 services=$ai_n${ai_left:+ left=$ai_left}" changed
 }
 
 # smartdns-guard 0|1: 0 lets AdaptiveAuto take Smart DNS domains again.
@@ -2776,11 +2870,12 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
     vless-server) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
-    service) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
+    service|ai) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     wifi-host) [ "$#" -eq 3 ] || die usage 64 ;;
     *) [ "$#" -eq 2 ] || die usage 64 ;;
 esac
@@ -2835,7 +2930,7 @@ case "$OP" in
         set_kv "$AUTH_CONF" DEVICES_ONLY "$ARG1" 0600 || done_ok "console-devices only_registered=$ARG1" unchanged
         done_ok "console-devices only_registered=$ARG1" changed ;;
     update-feed) op_update_feed "$ARG1" ;;
-    tunnel) op_tunnel "$ARG1" ;;
+    tunnel) op_tunnel "$ARG1" "$ARG2" ;;
     policy-group) op_policy_group "$ARG1" ;;
     domain-list) op_domain_list "$ARG1" "$ARG2" ;;
     domain-list-watch) op_domain_list_watch "$ARG1" "$ARG2" ;;
@@ -2851,7 +2946,7 @@ case "$OP" in
     backup-restore) op_backup_restore "$ARG1" ;;
     cleanup) op_cleanup "$ARG1" ;;
     smartdns-server) op_smartdns_server "$ARG1" ;;
-    ai) op_ai "$ARG1" "$ARG2" ;;
+    ai) op_ai "$ARG1" "$ARG2" "$ARG3" ;;
     list) op_list "$ARG1" "$ARG2" ;;
     reset) op_reset "$ARG1" ;;
     tunnel-delete) op_tunnel_delete "$ARG1" "$ARG2" ;;

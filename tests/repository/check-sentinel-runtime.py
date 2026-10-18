@@ -98,6 +98,13 @@ with tempfile.TemporaryDirectory() as tmp:
             fail(f"configuration lacks {need!r}:\n{conf}")
     if "awg-t1" in conf or "awg-t2" in conf:
         fail(f"a switched-off or removed tunnel is watched (it was «started» every few minutes):\n{conf}")
+    # AdGuard Home not connected: the router's DNS is not asked (fix.31: 115 false «DNS не отвечает»).
+    (tmp / "agh.yaml").rename(tmp / "agh.yaml.off")
+    sh("reload")
+    if "DNS=" in (state / "sentinel.conf").read_text():
+        fail("without AdGuard Home connected the DNS probe must be off")
+    (tmp / "agh.yaml.off").rename(tmp / "agh.yaml")
+    sh("reload")
     if sh("start") != "result=unchanged":
         fail("started once")
     time.sleep(0.5)
