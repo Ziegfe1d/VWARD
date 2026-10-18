@@ -86,10 +86,19 @@ vward_note()
 vward_rci_get()
 {
     _vrg_url="${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/$1" _vrg_t=${2:-5}
-    # Every request counted (a byte a request, a file an hour, RAM) for «Стабильность»: the share
-    # of Keenetic's refusals among all requests, not their bare number.
-    _vrg_cd=${VWARD_RCI_CALLS:-/tmp/vward-rci-calls}
-    { [ -d "$_vrg_cd" ] || mkdir -p "$_vrg_cd"; } 2>/dev/null && printf . 2>/dev/null >> "$_vrg_cd/$(date +%Y%m%d%H)"
+    # Every request counted for «Стабильность» (the share of Keenetic's refusals among all
+    # requests): a dot a request in one of 25 files in RAM by the hour of uptime, the hour on
+    # the first line (a file of another hour starts anew). Shell built-ins only, no process.
+    _vrg_cd=${VWARD_RCI_CALLS:-/tmp/vward-rci-calls} _vrg_h=
+    read -r _vrg_h _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
+    _vrg_h=${_vrg_h%%.*}
+    case "$_vrg_h" in ''|*[!0-9]*) ;; *)
+        _vrg_h=$((_vrg_h / 3600)) _vrg_fh=
+        [ -d "$_vrg_cd" ] || mkdir -p "$_vrg_cd" 2>/dev/null
+        read -r _vrg_fh 2>/dev/null < "$_vrg_cd/$((_vrg_h % 25))"
+        [ "$_vrg_fh" = "$_vrg_h" ] || printf '%s\n' "$_vrg_h" 2>/dev/null > "$_vrg_cd/$((_vrg_h % 25))"
+        printf . 2>/dev/null >> "$_vrg_cd/$((_vrg_h % 25))" ;;
+    esac
     _vrg_curl=${VWARD_CURL_BIN:-$(vward_tool curl)}
     if [ -n "$_vrg_curl" ]; then
         _vrg_out=$("$_vrg_curl" --fail --silent --connect-timeout 2 --max-time "$_vrg_t" "$_vrg_url" 2>/dev/null)

@@ -3006,10 +3006,12 @@ if [ "$ACTION" = stability ]; then
     TLS_FLAG=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
     [ -z "$(find "$TLS_FLAG" -mmin -60 2>/dev/null)" ] || TLS_AT=$(date -r "$TLS_FLAG" +%s 2>/dev/null)
     RCI_DAY=$(awk -F'\t' -v cut="$((NOW - 86400))" '$1 ~ /^[0-9]+$/ && $1 >= cut {n++; l = $1} END {printf "%d %d", n, l}' "${VWARD_RCI_FAIL_LOG:-/tmp/vward-rci-fail.log}" 2>/dev/null)
-    # All of Keenetic's requests of the last 24 hours (a byte each, a file an hour); older hours go.
-    RCI_CD=${VWARD_RCI_CALLS:-/tmp/vward-rci-calls}
-    find "$RCI_CD" -type f -mmin +1500 -exec rm -f {} + 2>/dev/null
-    RCI_CALLS=$(ls -ln "$RCI_CD" 2>/dev/null | awk 'NF >= 9 {s += $5} END {printf "%d", s}')
+    # All of Keenetic's requests of the last 24 hours of uptime (25 files by the hour, the hour
+    # on the first line, a dot a request).
+    RCI_CD=${VWARD_RCI_CALLS:-/tmp/vward-rci-calls} RCI_UP=
+    read -r RCI_UP _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
+    RCI_UP=${RCI_UP%%.*}
+    RCI_CALLS=$(cat "$RCI_CD"/* 2>/dev/null | awk -v h="$((${RCI_UP:-0} / 3600))" '/^[0-9]+$/ {ok = ($1 > h - 24); next} ok {n += length($0)} END {printf "%d", n}')
     "$JQ" -n -c --argjson running "$RUNNING" --argjson installed "$INSTALLED" \
         --slurpfile state "$SD/state" --slurpfile hours "$SD/hours" \
         --slurpfile cpu "$SD/cpu" --slurpfile events "$SD/events" --slurpfile tunnels "$SD/tunnels" \

@@ -571,7 +571,10 @@ watch_services()
     [ ! -r "$UPTIME_FILE" ] || read -r UP _ < "$UPTIME_FILE" || :
     UP=${UP%%.*}
     case "$UP" in ''|*[!0-9]*) return 0 ;; esac
-    if [ "$UP" -ge 90 ] && agh_watched; then
+    # Every pass in the first half hour after boot (its own start script may not bring it up),
+    # then once a minute: a look at AdGuard Home is a few programs, the supervisor runs often.
+    if [ "$UP" -ge 90 ] && { [ "$UP" -lt 1800 ] || [ $((UP - ${AGH_LOOK:-0})) -ge "${VWARD_AGH_EVERY:-60}" ]; } && agh_watched; then
+        AGH_LOOK=$UP
         agh_keep "uptime=$UP"
     fi
 

@@ -263,13 +263,13 @@ done
 # Copies of packages before an update from «Обновления» (AdGuard Home is ~30 MB).
 keep_newest "$B/ext-update" d 3
 
-# Keenetic's request counter for «Стабильность» (RAM): a day is enough.
-find "${VWARD_RCI_CALLS:-$R/tmp/vward-rci-calls}" -type f -mmin +1500 -exec rm -f {} + 2>/dev/null
-
 # A tunnel .conf holds its private key: uploads now live in RAM only, and
 # those an older version kept on the USB drive go.
-rm -f "$R/opt/var/run/vward/console-tunnel/upload."* 2>/dev/null
-rmdir "$R/opt/var/run/vward/console-tunnel" 2>/dev/null
+# Only when that folder is still there: two programs fewer every hour (the resource budget).
+if [ -d "$R/opt/var/run/vward/console-tunnel" ]; then
+    rm -f "$R/opt/var/run/vward/console-tunnel/upload."* 2>/dev/null
+    rmdir "$R/opt/var/run/vward/console-tunnel" 2>/dev/null
+fi
 
 # Technical journals: archived ones older than the owner's term go; then, while the archive and
 # the live journals together are over the size limit, the oldest archived one.
