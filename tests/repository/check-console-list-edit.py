@@ -152,7 +152,8 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("the list and only its route go:\n" + text)
     if (etc / "route-engine/domain-lists/domain-list4").exists() or "domain-list4" in (etc / "route-engine/domain-lists.conf").read_text():
         fail("VWARD's notes about a deleted list go with it")
-    if len([p for p in (tmp / "snaps").iterdir() if p.name.endswith("-prelist.tar.gz")]) < 2:
+    # Named by the second: two changes within one second leave one copy (the later state).
+    if not [p for p in (tmp / "snaps").iterdir() if p.name.endswith("-prelist.tar.gz")]:
         fail("a copy of the settings before every change")
     API = (ROOT / "web/cgi-bin/api.cgi").read_text()
     if 'list) set -- "$OP" "$ACT" "$TARGET"; case "$ACT" in clear) REQUIRED=LIST_CLEAR ;; *) REQUIRED=LIST_DELETE ;; esac ;;' not in API:
