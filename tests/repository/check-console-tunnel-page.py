@@ -30,7 +30,7 @@ if "tunsw-off" in _js:
 
 
 for need in ("'<div class=\"panel-actions even\">' + btn('tunnel-probe', 'check', 'Проверить', 'primary'",
-             "['Подсети', nets.length ? fmtInt(nets.length) : 'нет', '', 'tn-' + name]",
+             "['Подсети', netN ? fmtInt(netN) : 'нет', '', 'tn-' + name]",
              "function tunnelNetsPage(name)", "if (id.startsWith('tn-')) return { id: id, title: 'Подсети', parent: 't-' + id.slice(3) };",
              "k === 'tn' ? 'subnets'", "r[0] === 'tunnel' && r[2] === 'subnets') return 'tn-' + r[1];",
              "current.startsWith('tn-') ? tunnelNetsPage(current.slice(3))", "tunnelSubnet(current.slice(current.startsWith('tn-') ? 3 : 2), 'remove'"):

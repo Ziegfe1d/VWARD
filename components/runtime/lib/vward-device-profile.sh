@@ -86,6 +86,10 @@ vward_note()
 vward_rci_get()
 {
     _vrg_url="${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/$1" _vrg_t=${2:-5}
+    # Every request counted (a byte a request, a file an hour, RAM) for «Стабильность»: the share
+    # of Keenetic's refusals among all requests, not their bare number.
+    _vrg_cd=${VWARD_RCI_CALLS:-/tmp/vward-rci-calls}
+    { [ -d "$_vrg_cd" ] || mkdir -p "$_vrg_cd"; } 2>/dev/null && printf . 2>/dev/null >> "$_vrg_cd/$(date +%Y%m%d%H)"
     _vrg_curl=${VWARD_CURL_BIN:-$(vward_tool curl)}
     if [ -n "$_vrg_curl" ]; then
         _vrg_out=$("$_vrg_curl" --fail --silent --connect-timeout 2 --max-time "$_vrg_t" "$_vrg_url" 2>/dev/null)

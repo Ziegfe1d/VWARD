@@ -32,7 +32,8 @@ if "data: ['status', 'route', 'wifi', 'ads', 'adsstats', 'lists', 'awg', 'tq']" 
 API = (ROOT / "web/cgi-bin/api.cgi").read_text()
 if '(if $inet | has("internet") then $inet.internet else null end)' not in API:
     fail("an unanswered internet status must be unknown (null), not «no internet»")
-if "title: 'Роутер отвечает медленно'" not in JS or "['warn', 'Последний запуск с ошибкой']" not in JS:
+# A run that ended with an error is a hint under «Работает» (owner 2026-10-17).
+if "title: 'Роутер отвечает медленно'" not in JS or "ST.on.concat(ok ? '' : 'последний запуск с ошибкой')" not in JS:
     fail("a slow Keenetic and a run that ended with an error are not «Нет связи» and «Не работает»")
 if not shutil.which("node"):
     print("CONSOLE_OVERVIEW_CARDS=PASS (node not found: texts not run)")
@@ -85,7 +86,7 @@ if o.pop("low") != [False, True, True, False]:
     fail("«Мало места» by a share alone: a big drive with gigabytes free warns")
 want = {
     "wan": ["Интернет", "В сети", "порт 1 Гбит/с"],
-    "vpn": ["VPN", "1 из 1", "выключены: 1"],
+    "vpn": ["VPN", "1 из 1", "ещё 1 выключен вами"],
     "lists": ["Доменные списки", "2 через VPN", "1 в обход"],
     "routes": ["Маршруты", "431 подсеть", "8 IP‑категорий"],
     "wifi": ["Wi-Fi клиенты", "6 клиентов", "iPhone: лучше 2,4 ГГц"],

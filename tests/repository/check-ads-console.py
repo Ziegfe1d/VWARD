@@ -171,7 +171,7 @@ POPUP = ("https://wapawet.com/news/prl/hotestfruit_sevenk/?a1=2&k=1&u=aHR0cHM6Ly
          "&u2=Ly9nb29kc3RhdG9yb25lLmNvbS9jbGljay9jbGljay5waHA/aWQ9MiZyb3RhdG9yPTE4OTAy&u3=https%3A%2F%2Ftrk.example.net%2Fc%3Fid%3D1")
 js = (ROOT / "web/assets/vward-console.js").read_text()
 line = lambda k: js[js.index(k):js.index("\n", js.index(k))]
-parts = [line("const DOMAIN ="), line("const esc ="), line("const btn ="), line("const hostOf ="), line("function plural("),
+parts = [line("const DOMAIN ="), line("const esc ="), js[js.index("const BTN_ICONS ="):js.index("\nconst btn =")], line("const btn ="), line("const hostOf ="), line("function plural("),
          js[js.index("const baseDomain"):js.index("async function adsCheck(")]]
 script = "\n".join(parts) + """
 const ico = () => '', panel = (t, b) => b, inputBar = () => '', errText = () => '';

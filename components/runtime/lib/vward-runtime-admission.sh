@@ -397,14 +397,17 @@ vward_agh_ensure() {
     va_now=; { read -r va_now _ < "${VWARD_UPTIME_FILE:-/proc/uptime}"; } 2>/dev/null || :
     va_now=${va_now%%.*}
     if pidof AdGuardHome >/dev/null 2>&1; then
-        # Running for a whole grace since the last start: that start worked, the books are clean.
+        # Running for a whole grace since the last start: that start worked, the books are clean
+        # (and a later failure is told in the bell again: «noted», the supervisor's).
         # A program that dies a minute after every start keeps its growing pauses.
         va_last=; [ ! -r "$VWARD_AGH_STATE/last" ] || read -r va_last < "$VWARD_AGH_STATE/last"
         if [ -n "$va_last" ]; then
             case "$va_last$va_now" in
                 *[!0-9]*|"$va_last") ;;
-                *) [ "$va_now" -lt "$va_last" ] || [ $((va_now - va_last)) -lt "$VWARD_AGH_GRACE" ] || rm -f "$VWARD_AGH_STATE/last" "$VWARD_AGH_STATE/fails" 2>/dev/null ;;
+                *) [ "$va_now" -lt "$va_last" ] || [ $((va_now - va_last)) -lt "$VWARD_AGH_GRACE" ] || rm -f "$VWARD_AGH_STATE/last" "$VWARD_AGH_STATE/fails" "$VWARD_AGH_STATE/noted" 2>/dev/null ;;
             esac
+        else
+            rm -f "$VWARD_AGH_STATE/noted" 2>/dev/null
         fi
         return 0
     fi

@@ -173,7 +173,7 @@ echo result=changed
         time.sleep(0.2)
 
 js = (ROOT / "web/assets/vward-console.js").read_text()
-for need in ("data-svc-cat=", "op: 'category'", "function svcProbePanel(", "Проверка через туннели"):
+for need in ("data-svc-cat=", "op: 'category'", "function svcProbePanel(", "Проверка сайта"):
     if need not in js:
         fail(f"the Panel lacks {need}")
 print("TUNNEL_SERVICES=PASS")

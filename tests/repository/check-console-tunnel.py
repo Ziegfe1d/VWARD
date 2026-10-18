@@ -201,6 +201,13 @@ esac
         fail("locks or temporary files left behind")
     run("Wireguard8", "result=unchanged", 0)
 
+    # device.conf names no group (the profile could not tell it: the old tunnel lost its settings
+    # with the USB stick, Viva 2026-10-18): the group comes from the routes, the switch goes on.
+    devconf.write_text("\n".join(l for l in devconf.read_text().splitlines() if not l.startswith("VWARD_POLICY_GROUP=")) + "\n")
+    run("Wireguard3", "result=changed", 0)
+    if "streaming Wireguard3 auto" not in routes(cfg) or "VWARD_POLICY_GROUP=streaming" not in devconf.read_text().splitlines():
+        fail(f"a switch without a known group: {routes(cfg)} / {devconf.read_text()!r}")
+
 
 # policy-sync: owned IP routes move to the new tunnel (Keenetic takes interface names).
 

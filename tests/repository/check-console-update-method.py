@@ -18,7 +18,9 @@ def fail(message: str) -> None:
     raise SystemExit(f"CONSOLE_UPDATE_METHOD=FAIL: {message}")
 
 
-for need in ("sel('data-cfg-upd=\"update_method\"'", "['full', 'Целиком'], ['files', 'Только изменённые файлы']",
+# Two choices: a slider like the Wi-Fi bands (owner 2026-10-17).
+for need in ("choiceSlider('upd-method', [['full', 'Целиком'], ['files', 'Изменённые файлы']]",
+             "cfgSet({ op: 'update', target: 'update_method', value: v }",
              "lastApplyNote(u.last_apply, u.last_method)"):
     if need not in JS:
         fail(f"the Panel lacks {need!r}")

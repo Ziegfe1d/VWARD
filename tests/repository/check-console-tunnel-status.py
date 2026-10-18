@@ -81,7 +81,7 @@ o = json.loads(r.stdout)
 if o["busy"] != [":Выключение"] or o["connecting"] != [":Подключение"]:
     fail(f"the status while switching: {o['busy']} {o['connecting']}")
 # Switched off by the owner: quiet; only switched-on tunnels counted.
-if o["ownerOff"]["notes"] or o["ownerOff"]["card"]["pill"] != ["ok", "Работает"] or o["ownerOff"]["card"]["value"] != "1 из 1" or "выключены: 2" not in o["ownerOff"]["card"]["sub"]:
+if o["ownerOff"]["notes"] or o["ownerOff"]["card"]["pill"] != ["ok", "Работает"] or o["ownerOff"]["card"]["value"] != "1 из 1" or "ещё 2 выключен" not in o["ownerOff"]["card"]["sub"]:
     fail(f"tunnels the owner switched off are no fault: {o['ownerOff']}")
 if o["ownerOff"]["pills"] != [":Выключен", "ok:В сети", ":Выключен"]:
     fail(f"«Выключен» is grey: {o['ownerOff']['pills']}")

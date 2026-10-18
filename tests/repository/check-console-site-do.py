@@ -23,7 +23,7 @@ def piece(start, end):
 
 
 script = "\n".join([
-    piece("const esc =", "\n"), piece("const btn =", "\n"), piece("function confirmBox(", "\nfunction resultBox"),
+    piece("const esc =", "\n"), piece("const BTN_ICONS =", "\nconst btn =") + "\n", piece("const btn =", "\n"), piece("function confirmBox(", "\nfunction resultBox"),
     piece("const hasDom", "async function siteCheck("),
 ]) + r"""
 const ico = () => '', errText = x => x.error || 'ошибка', render = () => {};

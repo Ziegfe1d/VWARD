@@ -66,6 +66,8 @@ JOURNAL=
 DEVCONF_ORIG=
 DEVCONF_EXISTED=
 TXN=0
+# The download of the official AdGuard Home build (ext-agh-official).
+AO_TMP=
 # An uploaded .conf holds the private key: it goes away with the helper.
 CONF_FILE=
 # The request body of ndm_secret while it is sent.
@@ -106,6 +108,7 @@ cleanup() {
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
     [ "$LOCKED" != 1 ] || rm -rf "${CHANGE_LOCK:?}"
     [ "$EDIT_LOCKED" != 1 ] || rm -rf "${EDIT_LOCK:?}"
+    [ -z "$AO_TMP" ] || rm -rf "${AO_TMP:?}"
     [ "$EXT_LOCKED" != 1 ] || rm -rf "${EXT_STATE:?}/lock"
     [ -z "${AGH_PLANNED:-}" ] || "$DNS_GUARD" planned-done >/dev/null 2>&1 || :
     command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null
@@ -601,8 +604,12 @@ op_policy_group() {
 op_tunnel() {
     case "$1" in ''|*[!A-Za-z0-9_./:-]*) die invalid_tunnel 64 ;; esac
     [ "${#1}" -le 64 ] || die invalid_tunnel 64
-    load_profile
-    OLD_IF=$VWARD_TUNNEL_INTERFACE OLD_DEV=$VWARD_TUNNEL_DEVICE GROUP=$VWARD_POLICY_GROUP NEW_IF=$1
+    # Not load_profile: the group of «Мои домены» is found from the routes when the profile
+    # cannot tell (the old tunnel lost its settings with the USB stick, Viva 2026-10-18:
+    # «группа маршрутизации не найдена» and no way to move off the dead tunnel).
+    load_profile_base
+    case "${VWARD_POLICY_GROUP:-}" in "$ADAPTIVE_GROUP"|*[!A-Za-z0-9_.-]*) VWARD_POLICY_GROUP= ;; esac
+    OLD_IF=$VWARD_TUNNEL_INTERFACE OLD_DEV=$VWARD_TUNNEL_DEVICE GROUP=${VWARD_POLICY_GROUP:-} NEW_IF=$1
     [ "$NEW_IF" != "$OLD_IF" ] || done_ok "tunnel $NEW_IF" unchanged
     [ "$(awk -F= '$1=="FAILOPEN_ACTIVE"{print $2}' "$TUNNEL_GUARD_STATE" 2>/dev/null)" != 1 ] || die failopen_active
 
@@ -620,6 +627,9 @@ op_tunnel() {
     DEVCONF_ORIG=$(mktemp /tmp/vward-console-devconf.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     TXN=1
     snapshot
+    [ -n "$GROUP" ] || GROUP=$(awk -v g2="$ADAPTIVE_GROUP" -v i="$OLD_IF" -v d="$OLD_DEV" '
+        /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
+        ctx && $1 == "route" && $2 == "object-group" && $3 != g2 && ($4 == i || $4 == d) && $3 ~ /^[A-Za-z0-9_.-]+$/ {print $3; exit}' "$RUNCFG")
 
     # ctx<TAB>group<TAB>target<TAB>options for every VWARD group routed to the old tunnel.
     moves=$(awk -v g1="$GROUP" -v g2="$ADAPTIVE_GROUP" -v i="$OLD_IF" -v d="$OLD_DEV" '
@@ -673,7 +683,7 @@ op_tunnel() {
     backup_file "$VWARD_DEVICE_CONFIG" || die backup_failed
     new_tmp "$VWARD_DEVICE_CONFIG" || die write_failed
     { [ ! -f "$VWARD_DEVICE_CONFIG" ] || cat "$VWARD_DEVICE_CONFIG"; } | awk -v i="$NEW_IF" -v d="$NEW_DEV" -v g="$GROUP" '
-        BEGIN {v["VWARD_TUNNEL_INTERFACE"]=i; v["VWARD_TUNNEL_DEVICE"]=d; v["VWARD_POLICY_GROUP"]=g}
+        BEGIN {v["VWARD_TUNNEL_INTERFACE"]=i; v["VWARD_TUNNEL_DEVICE"]=d; if (g != "") v["VWARD_POLICY_GROUP"]=g}
         { k=$0; sub(/=.*/, "", k); if (k in v) { if (!(k in done)) print k "=" v[k]; done[k]=1; next } print }
         END {for (k in v) if (!(k in done)) print k "=" v[k]}' > "$TMPFILE" || die write_failed
     install_tmp "$VWARD_DEVICE_CONFIG" 0600 || die write_failed
@@ -682,7 +692,7 @@ op_tunnel() {
         unset VWARD_TUNNEL_INTERFACE VWARD_TUNNEL_DEVICE VWARD_POLICY_GROUP
         vward_profile_load >/dev/null 2>&1 &&
             [ "$VWARD_TUNNEL_INTERFACE" = "$NEW_IF" ] && [ "$VWARD_TUNNEL_DEVICE" = "$NEW_DEV" ] &&
-            [ "$VWARD_POLICY_GROUP" = "$GROUP" ]
+            { [ -z "$GROUP" ] || [ "$VWARD_POLICY_GROUP" = "$GROUP" ]; }
     ) || die profile_verification_failed
 
     # 5. Persist the router configuration; nothing half-applied survives a reboot.
@@ -1501,6 +1511,9 @@ op_vless_server() {
     case "$2" in OpkgTun[0-9]) ;; *) die invalid_tunnel 64 ;; esac
     case "$1" in
         servers) vs_out=$("$VLESS_ENGINE" list "$2" 2>/dev/null) ;;
+        # A country on or off, or failover between countries (fix.28.2).
+        countries) case "$3:$4" in cross:0|cross:1|--:0|--:1|[A-Z][A-Z]:0|[A-Z][A-Z]:1) ;; *) die invalid_value 64 ;; esac
+                vs_out=$("$VLESS_ENGINE" countries "$2" "$3" "$4" 2>/dev/null) ;;
         select) case "$3" in ''|*[!0-9]*) die invalid_value 64 ;; esac
                 load_profile_base
                 vs_out=$("$VLESS_ENGINE" select "$2" "$3" 2>/dev/null) ;;
@@ -1508,7 +1521,7 @@ op_vless_server() {
     esac
     case "$(printf '%s\n' "$vs_out" | tail -n 1)" in
         result=checked) printf '%s\n' "$vs_out" | grep '^info\.'; done_ok "vless-server servers $2" checked ;;
-        result=changed) printf '%s\n' "$vs_out" | grep '^info\.'; done_ok "vless-server select $2 $3" changed ;;
+        result=changed) printf '%s\n' "$vs_out" | grep '^info\.'; done_ok "vless-server $1 $2 $3 ${4:-}" changed ;;
         error=*) relay_reason "$vs_out"
                  vs_err=$(printf '%s\n' "$vs_out" | sed -n 's/^error=//p' | tail -n 1)
                  case "$vs_err" in ''|*[!a-z0-9_]*) vs_err=engine_failed ;; esac
@@ -1886,7 +1899,7 @@ snapshot_name_ok() { printf '%s\n' "$1" | grep -Eq '^vward-[0-9]{8}-[0-9]{6}(-[a
 
 op_backup_create() {
     # backup-create manual|auto|prerestore: auto only when the newest is a day old.
-    case "$1" in manual|auto|prerestore) ;; *) die invalid_value 64 ;; esac
+    case "$1" in manual|auto|prerestore|prereset|prelist) ;; *) die invalid_value 64 ;; esac
     (umask 077; mkdir -p "$SNAPSHOT_DIR") || die write_failed
     if [ "$1" = auto ]; then
         bc_last=$(ls -1 "$SNAPSHOT_DIR" 2>/dev/null | grep -E '^vward-[0-9]{8}-[0-9]{6}' | sort | tail -n 1)
@@ -1918,6 +1931,125 @@ op_backup_create() {
     done_ok "backup-create $1 $bc_name" changed
 }
 
+# list clear|delete GROUP: a whole list emptied, or removed from Keenetic with its route and
+# exclusions; a copy of VWARD's settings first, every router step undone on a failure.
+# AdaptiveAuto belongs to the route engine and a catalog service's list goes with the service
+# («Сервисы»); VWARD's own list («Мои домены») is only cleared.
+op_list() {
+    case "$1" in clear|delete) ;; *) die invalid_operation 64 ;; esac
+    printf '%s\n' "$2" | grep -Eq '^[A-Za-z0-9._-]{1,64}$' || die invalid_group 64
+    load_profile_base
+    [ "$2" != "$ADAPTIVE_GROUP" ] || die invalid_group 64
+    [ "$1" = clear ] || [ "$2" != "${VWARD_POLICY_GROUP:-}" ] || die invalid_group 64
+    ! awk -F '\t' -v g="$2" '$2 == g {f = 1} END {exit f ? 0 : 1}' "$SERVICES_STATE" 2>/dev/null || die service_list 64
+    change_lock
+    snapshot
+    grep -qx "object-group fqdn $2" "$RUNCFG" || die list_not_found
+    ( op_backup_create prelist ) >/dev/null || die backup_failed
+    JOURNAL=$(mktemp /tmp/vward-console-list.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    TXN=1
+    if [ "$1" = clear ]; then
+        group_domains "$2" > "$JOURNAL.doh"
+        [ -s "$JOURNAL.doh" ] || { TXN=0; done_ok "list clear $2" unchanged; }
+        while IFS= read -r d; do
+            ndm "no object-group fqdn $2 include $d" || die router_rejected
+            echo "object-group fqdn $2 include $d" >> "$JOURNAL"
+        done < "$JOURNAL.doh"
+        snapshot
+        [ -z "$(group_domains "$2")" ] || die verification_failed
+    else
+        lr=$(group_route "$2"); lr_t=${lr%%"$(printf '\t')"*}; lr_o=${lr#*"$(printf '\t')"}
+        [ "$lr_o" != - ] || lr_o=
+        # The list as it is, to put back: description, domains, exclusions, then its route.
+        awk -v g="$2" '/^object-group fqdn / {cur = $3; next} /^!/ {cur = ""}
+            cur == g && ($1 == "include" || $1 == "exclude" || $1 == "description") {sub(/^[ \t]+/, ""); print "object-group fqdn " g " " $0}' "$RUNCFG" > "$JOURNAL.moves"
+        if [ -n "$lr_t" ]; then
+            ndm "dns-proxy no route object-group $2 $lr_t" || die router_rejected
+            echo "dns-proxy route object-group $2 $lr_t${lr_o:+ $lr_o}" >> "$JOURNAL"
+        fi
+        ndm "no object-group fqdn $2" || die router_rejected
+        { echo "object-group fqdn $2"; cat "$JOURNAL.moves"; } | awk '{a[NR] = $0} END {for (i = NR; i > 0; i--) print a[i]}' >> "$JOURNAL"
+        snapshot
+        ! grep -qx "object-group fqdn $2" "$RUNCFG" || die verification_failed
+    fi
+    save_router || die config_save_failed
+    TXN=0
+    if [ "$1" = delete ]; then
+        rm -f "${LISTS_STATE:?}/${2:?}"
+        [ ! -f "$LISTS_CONF" ] || { grep -v "^[a-z_]*\.$2=" "$LISTS_CONF" > "$LISTS_CONF.$$" && cat "$LISTS_CONF.$$" > "$LISTS_CONF"; rm -f "$LISTS_CONF.$$"; }
+    fi
+    done_ok "list $1 $2" changed
+}
+
+# ---- Очистка ----
+# What VWARD may clean, its own files only: ID|DIR|KEEP|PATTERN (the newest KEEP entries
+# stay, so the last copy of every kind is never removed). The owner's backups
+# («Резервные копии»), settings and tunnel keys are not here.
+BACKUPS_ROOT=${VWARD_BACKUPS_ROOT:-/opt/var/backups/vward}
+LOG_ROOT=${VWARD_LOG_ROOT:-/opt/var/log}
+cleanup_groups() {
+    cat <<CG
+archive|$LOG_ROOT/vward/archive|0|*.gz
+diagnostics|$LOG_ROOT/vward/diagnostics|0|*
+forensics|$BACKUPS_ROOT/forensics|1|*
+legacy|$BACKUPS_ROOT/legacy-scripts|0|*
+packages|$BACKUPS_ROOT/ext-update|1|*
+settings|$BACKUP_DIR|1|*
+ads|$BACKUPS_ROOT/ads-privacy-guard|1|publish-*
+ads|$BACKUPS_ROOT/ads-privacy-guard/manual|1|*
+ads|$BACKUPS_ROOT/ads-privacy-guard/settings|1|*
+ads|$BACKUPS_ROOT/ads-privacy-guard/source-settings|1|*
+CG
+}
+# cleanup_old DIR KEEP PATTERN: the entries that may go, oldest last.
+cleanup_old() {
+    [ -d "$1" ] || return 0
+    ( cd "$1" && ls -1td -- $3 2>/dev/null ) | tail -n +$(($2 + 1)) | grep -v '/'
+}
+op_cleanup() {
+    case "$1" in sizes|all|archive|diagnostics|forensics|legacy|packages|settings|ads) ;; *) die invalid_value 64 ;; esac
+    if [ "$1" = sizes ]; then
+        cleanup_groups | while IFS='|' read -r cg_id cg_dir cg_keep cg_pat; do
+            cleanup_old "$cg_dir" "$cg_keep" "$cg_pat" | while IFS= read -r cg_n; do
+                du -sk "$cg_dir/$cg_n" 2>/dev/null | awk -v id="$cg_id" '{print id, $1}'
+            done
+        done | awk '{s[$1] += $2} END {for (k in s) printf "size=%s:%d\n", k, s[k]}'
+        # The live journals: shown, compressed by «Сжать журналы», never deleted here.
+        printf 'size=journals:%s\n' "$(ls -ln "$LOG_ROOT"/vward-*.log "$LOG_ROOT"/vward/*.log 2>/dev/null | awk '{s += $5} END {printf "%d", s / 1024}')"
+        printf 'result=unchanged\n'; exit 0
+    fi
+    cl_n=0 cl_list=$(cleanup_groups)
+    set -f
+    while IFS='|' read -r cg_id cg_dir cg_keep cg_pat; do
+        [ "$1" = all ] || [ "$1" = "$cg_id" ] || continue
+        set +f; cg_old=$(cleanup_old "$cg_dir" "$cg_keep" "$cg_pat"); set -f
+        for cg_n in $cg_old; do
+            rm -rf "${cg_dir:?}/${cg_n:?}" && cl_n=$((cl_n + 1))
+        done
+    done <<CL
+$cl_list
+CL
+    set +f
+    [ "$cl_n" -gt 0 ] || done_ok "cleanup $1" unchanged
+    done_ok "cleanup $1 removed=$cl_n" changed
+}
+
+# ---- Сброс настроек ----
+# reset settings: the switches and parameters as after installation (a copy of the settings
+# first); tunnels, lists, subnets, routes, the update channel and the Panel's login stay.
+op_reset() {
+    [ "$1" = settings ] || die invalid_value 64
+    ( op_backup_create prereset ) >/dev/null || die backup_failed
+    rs_route=
+    [ ! -e "$COMPONENT_STATE/route-engine.disabled" ] || rs_route=1
+    rm -f "$TUNNEL_GUARD_FLAG" "$TUNNEL_FALLBACK_FLAG" "$TUNNEL_RETURN_FLAG" "$WAN_GUARD_FLAG" "$ADAPTIVE_FLAG" \
+        "$ETC/agents.conf" "$TUNNEL_AUTO_CONF" "$JOURNAL_CONF" "$COMPONENT_STATE"/*.disabled 2>/dev/null
+    [ ! -f "$LISTS_CONF" ] || set_kv "$LISTS_CONF" smartdns_guard 1 0644 || true
+    [ ! -f "$EXT_CONF" ] || { set_kv "$EXT_CONF" AGH_AUTO 0 0600; set_kv "$EXT_CONF" ENTWARE_AUTO 0 0600; } || true
+    [ -z "$rs_route" ] || [ ! -x "$ROUTE_ENGINE_INIT" ] || "$ROUTE_ENGINE_INIT" start </dev/null >/dev/null 2>&1 || true
+    mkdir -p "$ROUTE_STATE" 2>/dev/null && echo 0 > "$REFRESH_TS" 2>/dev/null
+    done_ok "reset settings" changed
+}
 op_backup_restore() {
     # backup-restore NAME: VWARD files back as they were in the snapshot.
     snapshot_name_ok "$1" || die invalid_backup 64
@@ -1980,19 +2112,121 @@ op_wifi_host() {
 # smartdns-domain add|remove DOMAIN: the domain resolved by Smart DNS in AdGuard Home,
 # through the upstream already serving most Smart DNS domains (Aeternia and the like);
 # remove takes it and its subdomains out.  Keenetic's own Smart DNS rows are not touched.
+# Smart DNS without AdGuard Home (fix.30): the owner's own DoH server (smartdns-server), else the
+# server already used by Keenetic's own Smart DNS lines; a line per domain in Keenetic, which
+# holds at most 8 of them.
+SMARTDNS_CONF=${VWARD_SMARTDNS_CONF:-$ETC/smartdns.conf}
+SMARTDNS_KEENETIC_MAX=8
+smartdns_url() {
+    su=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
+    [ -n "$su" ] || su=$(doh_lines | awk '$(NF-1) == "domain" {n[$3]++} END {for (u in n) if (n[u] > m) {m = n[u]; b = u}; print b}')
+    [ -n "$su" ] && printf '%s\n' "$su"
+}
+# keenetic_smartdns add|remove DOMAIN
+keenetic_smartdns() {
+    load_profile_base
+    change_lock
+    snapshot
+    ks_have=$(doh_lines | awk -v d="$2" '$(NF-1) == "domain" && tolower($NF) == d')
+    if [ "$1" = add ]; then
+        [ -z "$ks_have" ] || done_ok "smartdns-domain add $2 keenetic" unchanged
+        ks_url=$(smartdns_url) || die smartdns_not_configured
+        [ "$(doh_lines | awk '$(NF-1) == "domain"' | grep -c .)" -lt "$SMARTDNS_KEENETIC_MAX" ] || die smartdns_keenetic_full
+        # The form of the lines already there for this server, else the documented one.
+        ks_tpl=$(doh_lines | awk -v u="$ks_url" '$3 == u && $(NF-1) == "domain" {NF -= 1; print; exit}')
+        # Another server's lines show the form this router takes («dnsm on ISP»).
+        [ -n "$ks_tpl" ] || ks_tpl=$(doh_lines | awk -v u="$ks_url" '$(NF-1) == "domain" {$3 = u; NF -= 1; print; exit}')
+        [ -n "$ks_tpl" ] || ks_tpl="https upstream $ks_url dnsm on $(wan_route_target) domain"
+        ks_line="$ks_tpl $2"
+        ndm "dns-proxy $ks_line" || die router_rejected
+        snapshot
+        doh_present "$ks_line" || die verification_failed
+    else
+        [ -n "$ks_have" ] || return 0
+        printf '%s\n' "$ks_have" | while IFS= read -r ks_line; do
+            doh_remove "$ks_line" || exit 1
+        done || die router_rejected
+    fi
+    save_router || die config_save_failed
+}
 op_smartdns_domain() {
     case "$1" in add|remove) ;; *) die invalid_operation 64 ;; esac
     valid_domain "$2" || die invalid_domain 64
     JOURNAL=$(umask 077; mktemp /tmp/vward-console-smartdns.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     if [ "$1" = add ]; then
         printf '%s\tauto\n' "$2" > "$JOURNAL.agh" || die write_failed
-        agh_control smartdns-put "$JOURNAL.agh" || die "$AGH_ERR"
-    else
-        printf '%s\n' "$2" > "$JOURNAL.agh.inc" || die write_failed
-        agh_control smartdns-take "$JOURNAL.agh.inc" "$JOURNAL.agh" || die "$AGH_ERR"
-        [ -s "$JOURNAL.agh" ] || done_ok "smartdns-domain remove $2" unchanged
+        agh_control smartdns-put "$JOURNAL.agh" && done_ok "smartdns-domain add $2" changed
+        # No AdGuard Home, or one not connected to VWARD: Keenetic itself. One connected but not
+        # set up for Smart DNS says so (the owner chose to keep Smart DNS there).
+        case "$AGH_ERR" in smartdns_agh_unavailable|adguard_unavailable|adguard_auth_required) ;; *) die "$AGH_ERR" ;; esac
+        keenetic_smartdns add "$2"
+        done_ok "smartdns-domain add $2 keenetic" changed
     fi
-    done_ok "smartdns-domain $1 $2" changed
+    printf '%s\n' "$2" > "$JOURNAL.agh.inc" || die write_failed
+    sd_agh=0
+    if agh_control smartdns-take "$JOURNAL.agh.inc" "$JOURNAL.agh"; then [ ! -s "$JOURNAL.agh" ] || sd_agh=1; fi
+    sd_k=0
+    snapshot
+    ! doh_lines | awk -v d="$2" '$(NF-1) == "domain" && tolower($NF) == d {f = 1} END {exit f ? 0 : 1}' || { keenetic_smartdns remove "$2"; sd_k=1; }
+    [ "$sd_agh$sd_k" != 00 ] || done_ok "smartdns-domain remove $2" unchanged
+    done_ok "smartdns-domain remove $2" changed
+}
+# smartdns-server set|clear: the owner's own Smart DNS server, a DoH address. It comes on stdin
+# (it may hold a personal token) and is never printed, logged or passed to another program here.
+op_smartdns_server() {
+    case "$1" in
+        set) IFS= read -r ss_url || die invalid_value 64
+             printf '%s\n' "$ss_url" | grep -Eq '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]{0,200})?$' || die invalid_value 64
+             new_tmp "$SMARTDNS_CONF" || die write_failed
+             printf 'SMARTDNS_URL=%s\n' "$ss_url" > "$TMPFILE" || die write_failed
+             cmp -s "$TMPFILE" "$SMARTDNS_CONF" && done_ok "smartdns-server set" unchanged
+             install_tmp "$SMARTDNS_CONF" 0600 || die write_failed
+             done_ok "smartdns-server set" changed ;;
+        clear) [ -f "$SMARTDNS_CONF" ] || done_ok "smartdns-server clear" unchanged
+             rm -f "$SMARTDNS_CONF" || die write_failed
+             done_ok "smartdns-server clear" changed ;;
+        *) die invalid_operation 64 ;;
+    esac
+}
+
+# ai ID|all vpn|vpn:TUNNEL|dns|isp: the way of an AI service of the catalog (owner 2026-10-17):
+# VPN - the service's list through a tunnel («Сервисы»); Smart DNS - no list, its main domains
+# answered by Smart DNS; provider - neither. Each step is a run of this helper that checks itself.
+ai_roots() {
+    "$JQ" -r --arg i "$1" '.services[] | select(.id == $i) | .domains[]' "$SV_CAT" 2>/dev/null |
+        awk -F. 'NF >= 2 {print tolower($(NF-1) "." $NF)}' | awk '!seen[$0]++' | head -n 4
+}
+ai_step() {
+    as_out=$(sh "$0" "$@" </dev/null 2>/dev/null | tail -n 1)
+    case "$as_out" in result=*) return 0 ;; esac
+    AI_ERR=${as_out#error=}; case "$AI_ERR" in ''|*[!a-z0-9_]*) AI_ERR=helper_failed ;; esac
+    return 1
+}
+op_ai() {
+    SV_CAT=$(services_catalog) || die services_unavailable
+    case "$2" in vpn|dns|isp) ai_to=auto ;; vpn:*) ai_to=${2#vpn:}; vward_valid_ndm_name "$ai_to" || die invalid_value 64 ;; *) die invalid_value 64 ;; esac
+    if [ "$1" = all ]; then
+        ai_ids=$("$JQ" -r '.services[] | select(.category == "ai") | .id' "$SV_CAT")
+    else
+        printf '%s\n' "$1" | grep -Eq '^[a-z0-9][a-z0-9.@_-]{0,62}$' || die invalid_service 64
+        "$JQ" -e --arg i "$1" 'any(.services[]; .id == $i and .category == "ai")' "$SV_CAT" >/dev/null 2>&1 || die unknown_service 64
+        ai_ids=$1
+    fi
+    ai_n=0
+    for ai_id in $ai_ids; do
+        ai_on=$(service_row "$ai_id")
+        case "$2" in
+            vpn*) if [ -n "$ai_on" ]; then ai_step service tunnel "$ai_id" "$ai_to" || die "$AI_ERR"
+                  else ai_step service on "$ai_id" "$ai_to" || die "$AI_ERR"; fi ;;
+            *) [ -z "$ai_on" ] || ai_step service off "$ai_id" || die "$AI_ERR"
+               for ai_d in $(ai_roots "$ai_id"); do
+                   if [ "$2" = dns ]; then ai_step smartdns-domain add "$ai_d" || die "$AI_ERR"
+                   else ai_step smartdns-domain remove "$ai_d" || die "$AI_ERR"; fi
+               done ;;
+        esac
+        ai_n=$((ai_n + 1))
+    done
+    done_ok "ai $1 $2 services=$ai_n" changed
 }
 
 # smartdns-guard 0|1: 0 lets AdaptiveAuto take Smart DNS domains again.
@@ -2177,10 +2411,162 @@ ext_firmware_refresh() {
 }
 
 # ext_upgradable: refresh the list of packages with a newer version (name, installed, new).
+# On the official build of AdGuard Home (ext-agh-official) its Entware package is not offered:
+# opkg would bring back the build that cannot run here.
 ext_upgradable() {
+    agh_official_adopt
+    eu_hold=; [ ! -s "$EXT_STATE/agh-official" ] || eu_hold=adguardhome-go
     "$OPKG" list-upgradable 2>/dev/null |
-        awk -F' - ' 'NF >= 3 && $1 ~ /^[a-z0-9][a-z0-9+._-]*$/ {print $1 "\t" $2 "\t" $3}' > "$EXT_STATE/upgradable.tsv.tmp" &&
+        awk -F' - ' -v hold="$eu_hold" 'NF >= 3 && $1 ~ /^[a-z0-9][a-z0-9+._-]*$/ && $1 != hold {print $1 "\t" $2 "\t" $3}' > "$EXT_STATE/upgradable.tsv.tmp" &&
         mv -f "$EXT_STATE/upgradable.tsv.tmp" "$EXT_STATE/upgradable.tsv"
+}
+
+# ---------- AdGuard Home: the official build ----------
+# Entware's AdGuard Home for mipsel is built for a processor with an FPU: on the MIPS 1004Kc of
+# Keenetic Viva it dies at once on an illegal instruction (exit 132; v0.107.73, 2026-10-16), and
+# DNS went past AdGuard Home for a day. AdGuard's own «softfloat» build runs. VWARD installs that
+# build, pinned to a version and checksums it knows, after a copy of the old file; a build that
+# does not start is taken back. Newer pins come with VWARD releases.
+AGH_OFFICIAL_VERSION=v0.107.73
+AGH_OFFICIAL_BASE=${VWARD_AGH_OFFICIAL_BASE:-https://github.com/AdguardTeam/AdGuardHome/releases/download}
+AGH_OFFICIAL_MIN_FREE_KB=81920
+
+# agh_official_arch: the build for this router (AdGuard's name), or nothing.
+agh_official_arch() {
+    [ -z "${VWARD_AGH_ARCH:-}" ] || { printf '%s\n' "$VWARD_AGH_ARCH"; return 0; }
+    case "$(uname -m 2>/dev/null)" in
+        mips) ;;
+        *) return 1 ;;
+    esac
+    # Byte order from an ELF header (byte 5: 1 little, 2 big).
+    oa_e=$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null | od -An -tu1 | tr -d ' ')
+    [ "$oa_e" = 1 ] && echo mipsle_softfloat
+}
+
+# agh_official_pin ARCH: «archive-sha256 binary-sha256» of the pinned version.
+agh_official_pin() {
+    case "$1" in
+        mipsle_softfloat) echo "${VWARD_AGH_OFFICIAL_PIN:-b56692f9f85676693116c3f4e4922210b6a96c072b8dfa81711185bbabf49bd9 8f316aebdd65aac0090edf005fdb007b9c1bffb28f316f549f79c26a2c479311}" ;;
+        *) return 1 ;;
+    esac
+}
+
+agh_official_bin() { vward_agh_binary 2>/dev/null || echo "$EXT_R/opt/sbin/AdGuardHome"; }
+
+# agh_official_adopt: AdGuard Home already is the pinned official file (put by hand): recorded,
+# so its Entware package is no longer offered.
+agh_official_adopt() {
+    [ ! -s "$EXT_STATE/agh-official" ] || return 0
+    command -v vward_agh_binary >/dev/null 2>&1 || return 0
+    oo_arch=$(agh_official_arch) && oo_pin=$(agh_official_pin "$oo_arch") || return 0
+    oo_bin=$(vward_agh_binary) || return 0
+    [ "$(sha256sum "$oo_bin" 2>/dev/null | cut -d' ' -f1)" = "${oo_pin#* }" ] || return 0
+    printf 'version=%s\narch=%s\nat=%s\nby=found\n' "$AGH_OFFICIAL_VERSION" "$oo_arch" "$(date +%s)" > "$EXT_STATE/agh-official"
+}
+
+ao_note() {
+    command -v vward_note >/dev/null 2>&1 ||
+        { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+    command -v vward_note >/dev/null 2>&1 || return 0
+    vward_note "$1" "$2" "$3" d-agh
+}
+
+# ao_up: AdGuard Home running a minute after its start (it loads its lists first).
+ao_up() {
+    ao_w=0
+    while :; do
+        "${VWARD_PIDOF_BIN:-pidof}" AdGuardHome >/dev/null 2>&1 && return 0
+        [ "$ao_w" -lt "${VWARD_AGH_START_WAIT:-60}" ] || return 1
+        sleep 5; ao_w=$((ao_w + 5))
+    done
+}
+
+# op_ext_agh_official repair|install|status
+#   repair   (the components agent) only when the installed program cannot run;
+#   install  (the Panel, the daily run) the pinned version when another one is installed.
+op_ext_agh_official() {
+    case "$1" in repair|install|status) ;; *) die invalid_value 64 ;; esac
+    mkdir -p "$EXT_STATE" || die write_failed
+    ao_arch=$(agh_official_arch) || ao_arch=
+    ao_pin=; [ -z "$ao_arch" ] || ao_pin=$(agh_official_pin "$ao_arch") || ao_pin=
+    if [ "$1" = status ]; then
+        ao_cur=; [ ! -r "$EXT_STATE/agh-official" ] || ao_cur=$(sed -n 's/^version=//p' "$EXT_STATE/agh-official")
+        printf 'arch=%s\npinned=%s\ninstalled=%s\n' "${ao_arch:-none}" "$([ -n "$ao_pin" ] && echo "$AGH_OFFICIAL_VERSION")" "$ao_cur"
+        exit 0
+    fi
+    ext_lock
+    if [ -z "$ao_pin" ]; then
+        audit "ext-agh-official no build for ${ao_arch:-$(uname -m 2>/dev/null)}"
+        [ "$1" != repair ] || ao_note err "AdGuard Home: нет подходящей сборки" \
+            "Программа AdGuard Home не запускается на этом роутере, а официальной сборки для его процессора VWARD не знает. Установите AdGuard Home вручную."
+        die agh_no_build
+    fi
+    ao_bin=$(agh_official_bin)
+    ao_old=; [ ! -x "$ao_bin" ] || ao_old=$("$ao_bin" --version 2>/dev/null | sed -n 's/.*version //p' | head -n 1)
+    if [ "$1" = repair ] && [ -n "$ao_old" ]; then
+        done_ok "ext-agh-official not needed: $ao_old runs" unchanged
+    fi
+    if [ "$1" = install ] && [ "$ao_old" = "$AGH_OFFICIAL_VERSION" ] &&
+       [ "$(sha256sum "$ao_bin" 2>/dev/null | cut -d' ' -f1)" = "${ao_pin#* }" ]; then
+        agh_official_adopt
+        done_ok "ext-agh-official $AGH_OFFICIAL_VERSION installed already" unchanged
+    fi
+    free=$(df -k "$EXT_R/opt" 2>/dev/null | awk 'NR == 2 {print $4}')
+    case "$free" in ''|*[!0-9]*) free=0 ;; esac
+    [ "$free" -ge "$AGH_OFFICIAL_MIN_FREE_KB" ] || die no_space
+
+    echo "Загрузка AdGuard Home $AGH_OFFICIAL_VERSION ($ao_arch)..."
+    AO_TMP=$(mktemp -d "$EXT_R/opt/tmp/vward-agh.XXXXXX" 2>/dev/null) || { mkdir -p "$EXT_R/opt/tmp" && AO_TMP=$(mktemp -d "$EXT_R/opt/tmp/vward-agh.XXXXXX"); } || die write_failed
+    ao_url="$AGH_OFFICIAL_BASE/$AGH_OFFICIAL_VERSION/AdGuardHome_linux_$ao_arch.tar.gz"
+    if ! "${VWARD_CURL_BIN:-curl}" --fail --silent --show-error --location --connect-timeout 15 --max-time 900 \
+            -o "$AO_TMP/agh.tar.gz" "$ao_url" 2>"$AO_TMP/curl.err"; then
+        audit "ext-agh-official download failed: $(tail -n 1 "$AO_TMP/curl.err" | cut -c1-160)"
+        [ "$1" != repair ] || ao_note err "AdGuard Home не запускается" \
+            "VWARD не смог скачать официальную сборку AdGuard Home (нет связи с GitHub). Попробует снова через сутки, или нажмите «Установить» на странице AdGuard Home."
+        die download_failed
+    fi
+    [ "$(sha256sum "$AO_TMP/agh.tar.gz" | cut -d' ' -f1)" = "${ao_pin% *}" ] || { audit "ext-agh-official archive checksum mismatch"; die checksum_mismatch; }
+    tar -xzf "$AO_TMP/agh.tar.gz" -C "$AO_TMP" 2>/dev/null || die unpack_failed
+    rm -f "$AO_TMP/agh.tar.gz"
+    ao_new=$(find "$AO_TMP" -type f -name AdGuardHome | head -n 1)
+    [ -n "$ao_new" ] && [ "$(sha256sum "$ao_new" | cut -d' ' -f1)" = "${ao_pin#* }" ] || { audit "ext-agh-official binary checksum mismatch"; die checksum_mismatch; }
+    chmod 0755 "$ao_new"
+    "$ao_new" --version >/dev/null 2>&1 || { audit "ext-agh-official $AGH_OFFICIAL_VERSION does not run here"; die agh_build_broken; }
+    echo "Контрольные суммы совпали, сборка запускается."
+
+    dir="$EXT_BACKUP/$(date '+%Y%m%d-%H%M%S')-agh-official"
+    mkdir -p "$dir" || die backup_failed
+    [ ! -f "$ao_bin" ] || cp -a "$ao_bin" "$dir/AdGuardHome" || { rm -rf "${dir:?}"; die backup_failed; }
+    audit "ext-agh-official ${ao_old:-broken} -> $AGH_OFFICIAL_VERSION backup=$dir"
+    ao_init=${VWARD_AGH_INIT:-/opt/etc/init.d/S99adguardhome}
+    AGH_PLANNED=1
+    "$DNS_GUARD" planned 600 >/dev/null 2>&1 || :
+    [ ! -x "$ao_init" ] || "$ao_init" stop </dev/null >/dev/null 2>&1 || :
+    # Beside the target first, then renamed: a running file is never rewritten.
+    mkdir -p "$(dirname "$ao_bin")" && cp "$ao_new" "$ao_bin.vward-new" && mv -f "$ao_bin.vward-new" "$ao_bin" ||
+        { rm -f "$ao_bin.vward-new"; die write_failed; }
+    [ ! -x "$ao_init" ] || "$ao_init" start </dev/null >/dev/null 2>&1 || :
+    if ao_up; then
+        printf 'version=%s\narch=%s\nat=%s\nby=%s\n' "$AGH_OFFICIAL_VERSION" "$ao_arch" "$(date +%s)" "$1" > "$EXT_STATE/agh-official"
+        ext_upgradable || :
+        ext_record adguardhome "${ao_old:-broken}" "$AGH_OFFICIAL_VERSION" ok
+        [ "$1" != repair ] || ao_note ok "AdGuard Home снова работает" \
+            "Установлена официальная сборка AdGuard Home $AGH_OFFICIAL_VERSION для процессора этого роутера; настройки и списки прежние. Прежний файл сохранён."
+        echo "Установлено: AdGuard Home $AGH_OFFICIAL_VERSION"
+        done_ok "ext-agh-official ${ao_old:-broken} -> $AGH_OFFICIAL_VERSION" changed
+    fi
+    # The new build does not stay up: a working old file goes back, a broken one is pointless.
+    echo "AdGuard Home не запустился"
+    if [ -n "$ao_old" ] && [ -f "$dir/AdGuardHome" ]; then
+        cp -a "$dir/AdGuardHome" "$ao_bin.vward-new" && mv -f "$ao_bin.vward-new" "$ao_bin"
+        [ ! -x "$ao_init" ] || "$ao_init" restart </dev/null >/dev/null 2>&1 || :
+        ext_record adguardhome "$ao_old" "$AGH_OFFICIAL_VERSION" rolled_back
+        die upgrade_rolled_back
+    fi
+    ext_record adguardhome broken "$AGH_OFFICIAL_VERSION" failed
+    [ "$1" != repair ] || ao_note err "AdGuard Home не запускается" \
+        "Официальная сборка AdGuard Home $AGH_OFFICIAL_VERSION установлена, но не запускается: вероятно, повреждены настройки AdGuard Home. Журнал: Система → Журналы."
+    die agh_start_failed
 }
 
 op_ext_check() {
@@ -2369,6 +2755,14 @@ op_ext_daily() {
         ( trap - EXIT; op_ext_upgrade "$dp_pkg" auto ) || true
         n=$((n + 1))
     done 2>/dev/null < "$EXT_STATE/upgradable.tsv.daily"
+    # The official AdGuard Home build: a newer pin from a VWARD release, when updates are automatic.
+    if [ "$kv_agh" = 1 ] && [ -s "$EXT_STATE/agh-official" ] &&
+       [ "$(sed -n 's/^version=//p' "$EXT_STATE/agh-official")" != "$AGH_OFFICIAL_VERSION" ] &&
+       vward_agent_acts updates agh-official "Обновить AdGuard Home до $AGH_OFFICIAL_VERSION (официальная сборка)"; then
+        echo "Автоматически: AdGuard Home $AGH_OFFICIAL_VERSION"
+        ( trap - EXIT; op_ext_agh_official install ) || true
+        n=$((n + 1))
+    fi
     done_ok "ext-daily automatic=$n" changed
 }
 
@@ -2382,10 +2776,10 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|policy-group|services-refresh) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|tunnel|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
-    vless-server) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
+    vless-server) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     service) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     wifi-host) [ "$#" -eq 3 ] || die usage 64 ;;
     *) [ "$#" -eq 2 ] || die usage 64 ;;
@@ -2401,7 +2795,7 @@ case "$OP" in list-domain) ARG3=$(printf '%s' "$ARG3" | tr 'A-Z' 'a-z') ;; esac
 
 # VWARD switched off as a whole («Отключить VWARD»): nothing changes until it is on again
 # (a copy of the settings and a look for updates of other software are no change).
-case "$OP" in backup-create|ext-check|journal) ;; *) [ ! -e "$COMPONENT_STATE/vward.off" ] || die vward_off 75 ;; esac
+case "$OP" in backup-create|ext-check|journal|cleanup) ;; *) [ ! -e "$COMPONENT_STATE/vward.off" ] || die vward_off 75 ;; esac
 
 ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$ADMISSION_LIB" ] || die admission_unavailable
@@ -2412,7 +2806,7 @@ vward_admission_enter console-config || die updater_busy 75
 case "$OP" in
     force-vpn|domain-category|tunnel-guard|tunnel-fallback|tunnel-return|tunnel-auto|wan-guard|component|\
     adaptive-mode|classifier|ip-category|console-auth|console-devices|update-feed|domain-list-watch|\
-    smartdns-guard|smartdns-domain|wifi|update|wan-param|wifi-host|service|service-category|ext-auto|firmware|journal|agents-mode)
+    smartdns-guard|smartdns-domain|wifi|update|wan-param|wifi-host|service|service-category|ext-auto|firmware|journal|agents-mode|cleanup|reset)
         edit_lock ;;
 esac
 
@@ -2451,10 +2845,15 @@ case "$OP" in
     update) op_update "$ARG1" "$ARG2" ;;
     wan-param) op_wan_param "$ARG1" "$ARG2" ;;
     tunnel-conf) op_tunnel_conf "$ARG1" "$ARG2" "$ARG3" "$ARG4" ;;
-    vless-server) op_vless_server "$ARG1" "$ARG2" "$ARG3" ;;
+    vless-server) op_vless_server "$ARG1" "$ARG2" "$ARG3" "$ARG4" ;;
     backup-create) op_backup_create "$ARG1" ;;
     wifi-host) op_wifi_host "$ARG1" "$ARG2" "$ARG3" ;;
     backup-restore) op_backup_restore "$ARG1" ;;
+    cleanup) op_cleanup "$ARG1" ;;
+    smartdns-server) op_smartdns_server "$ARG1" ;;
+    ai) op_ai "$ARG1" "$ARG2" ;;
+    list) op_list "$ARG1" "$ARG2" ;;
+    reset) op_reset "$ARG1" ;;
     tunnel-delete) op_tunnel_delete "$ARG1" "$ARG2" ;;
     tunnel-state) op_tunnel_state "$ARG1" "$ARG2" ;;
     tunnel-subnet) op_tunnel_subnet "$ARG1" "$ARG2" "$ARG3" ;;
@@ -2466,6 +2865,7 @@ case "$OP" in
     ext-daily) op_ext_daily ;;
     ext-upgrade) op_ext_upgrade "$ARG1" "$ARG2" ;;
     ext-auto) op_ext_auto "$ARG1" "$ARG2" ;;
+    ext-agh-official) op_ext_agh_official "$ARG1" ;;
     journal) op_journal "$ARG1" "$ARG2" ;;
     agents-mode) op_agents_mode "$ARG1" "$ARG2" ;;
     firmware) op_firmware "$ARG1" "$ARG2" ;;

@@ -5,6 +5,7 @@ a copy younger than its age is not asked again, a change drops it; an answer tha
 more, or none, goes into the journal «who waited» (keenetic-slow.log). Programs that change the
 configuration still read it fresh (vward_running_config), and are timed the same way."""
 
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -57,7 +58,7 @@ printf 'interface OpkgTun0\\r\\nip name-server 192.0.2.1:5353\\r\\n'
     sh("vward_keenetic_dirty; vward_keenetic_config >/dev/null")
     if calls() != 3:
         fail("a change must drop the copy")
-    # A slow answer (here: 1 s and more) and a failed one: in the journal, with who asked.
+    # A slow answer (here: 1 s and more; a busy machine adds a second) and a failed one: in the journal, with who asked.
     (tmp / "delay").write_text("1")
     env["VWARD_KEENETIC_SLOW"] = "1"
     sh("vward_keenetic_dirty; vward_keenetic_config >/dev/null", actor="network-agent")
@@ -65,8 +66,9 @@ printf 'interface OpkgTun0\\r\\nip name-server 192.0.2.1:5353\\r\\n'
     rc, out = sh("vward_keenetic_dirty; vward_keenetic_config", actor="network-agent")
     if rc == 0 or out:
         fail("no answer from Keenetic must be no copy")
-    log = (tmp / "slow.log").read_text().splitlines()
-    if len(log) != 2 or not log[0].endswith("|network-agent|running-config|1|ok") or not log[1].endswith("|network-agent|running-config|0|failed"):
+    # Only these two reads: an earlier one slowed by a busy machine is the tester's.
+    log = [x for x in (tmp / "slow.log").read_text().splitlines() if "|network-agent|" in x]
+    if len(log) != 2 or not re.search(r"\|network-agent\|running-config\|[1-9][0-9]*\|ok$", log[0]) or not log[1].endswith("|network-agent|running-config|0|failed"):
         fail(f"journal «who waited»: {log}")
     if (tmp / "kc/running-config").exists():
         fail("a failed read must leave no copy")

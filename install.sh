@@ -214,13 +214,22 @@ network() {
     done
     # No question (owner 2026-10-18: questions belong in the Panel): the VPN Keenetic already
     # routes a list through, else one that is connected, else the first. The Panel changes it:
-    # VPN -> the tunnel -> «Использовать для маршрутов».
+    # VPN -> the tunnel -> «Использовать для маршрутов». A VWARD engine tunnel (OpkgTun) whose
+    # settings are gone with the old USB drive cannot work: chosen only when nothing else is there.
     n=$(wc -l < "$list" | tr -d ' ')
-    k=$(awk -F '\t' -v r="$routed" '$1 == r {print NR; exit}' "$list")
-    [ -n "$k" ] || k=$(awk -F '\t' '$5 == "работает" {print NR; exit}' "$list")
-    [ -n "$k" ] || k=1
+    # The first line keeps the file non-empty for awk's NR == FNR.
+    { echo -; cat "$ETC/awg-engine/tunnels.tsv" "$ETC/vless-engine/tunnels.tsv" 2>/dev/null | cut -f1; } > "$list.engines"
+    # pick routed|connected|any: the number of the first usable tunnel of that kind.
+    pick() { awk -F '\t' -v r="$routed" -v w="$1" 'NR == FNR {own[$1] = 1; next}
+        $4 == "opkgtun" && !($1 in own) {next}
+        w == "any" || (w == "routed" && $1 == r) || (w == "connected" && $5 == "работает") {print FNR; exit}' "$list.engines" "$list"; }
+    k=$(pick routed); [ -n "$k" ] || k=$(pick connected); [ -n "$k" ] || k=$(pick any)
+    lost=
+    [ -n "$k" ] || { k=1; lost=1; }
     TUNNEL=$(sed -n "${k}p" "$list" | cut -f1); TUNNEL_DEV=$(sed -n "${k}p" "$list" | cut -f2)
-    if [ "$n" -eq 1 ]; then
+    if [ -n "$lost" ]; then
+        warn "VPN: $TUNNEL - туннель VWARD без настроек (флешка заменена). Добавьте туннель заново: Панель VWARD → VPN → «Добавить туннель», затем «Использовать для маршрутов»"
+    elif [ "$n" -eq 1 ]; then
         ok "VPN: $TUNNEL ($(cut -f5 "$list"))"
     else
         ok "VPN: $TUNNEL (из $n; сменить: Панель VWARD → VPN → туннель → «Использовать для маршрутов»)"
@@ -445,8 +454,8 @@ cmd_install() {
     [ "$MODE" = check ] && { line ""; pass "роутер готов к установке. Запустите без --check"; exit 0; }
     mkdir -p /opt/var/log/vward && LOG_OK=1
     line ""
-    line "Будет установлено: VWARD в /opt, задания cron, список $ADAPTIVE_GROUP через $TUNNEL."
-    ask "Устанавливать?" || { line "Отменено. Ничего не изменено."; exit 0; }
+    # Running the command is the consent (owner 2026-10-18): no question here.
+    line "Устанавливается: VWARD в /opt, задания cron, список $ADAPTIVE_GROUP через $TUNNEL."
     trap 'fail "прервано"' INT TERM HUP
     install_engine
     configure
@@ -457,7 +466,7 @@ cmd_install() {
     line "Панель VWARD: http://$LAN_ADDR:$CONSOLE_PORT"
     line "Сайты, которые не открываются напрямую, VWARD сам отправит через $TUNNEL."
     line "Обновления приходят сами. Удаление:"
-    line "  curl -fsSL $BASE_URL/install.sh -o /tmp/vward-install.sh && sh /tmp/vward-install.sh --uninstall"
+    line "  curl -fsSL $BASE_URL/install.sh -o /opt/tmp/vward-install.sh && sh /opt/tmp/vward-install.sh --uninstall"
 }
 
 cmd_uninstall() {

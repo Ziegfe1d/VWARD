@@ -61,6 +61,8 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .tab[aria-current="page"]{color:var(--accent);background:var(--accent-soft)}
 .tab[aria-current="page"] .icon{stroke-width:2.1}
 
+/* Под плавающей нижней панелью страница не просвечивает: полоса цвета фона до её середины (владелец 17.10). */
+body::after{content:"";position:fixed;z-index:19;left:0;right:0;bottom:0;height:calc(10px + env(safe-area-inset-bottom,0px) + var(--tabbar-h) / 2);background:var(--bg);pointer-events:none}
 /* Широкий экран: та же нижняя панель, в ней все разделы */
 @media (min-width:900px){
   .tabbar{left:50%;right:auto;width:min(1080px,calc(100% - 20px));transform:translateX(-50%)}
@@ -72,7 +74,9 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 /* Панели и список «название — значение» */
 .block{display:flex;flex-direction:column;gap:6px;min-width:0}
 .block-head{display:flex;align-items:center;gap:8px;min-height:24px;padding-inline:4px}
-.block-head h2{margin:0;font-size:var(--fs-md);font-weight:650}
+.block-head h2{margin:0;font-size:var(--fs-md);font-weight:650;display:flex;align-items:center;gap:8px}
+.block-head h2 .head-ico{width:20px;height:20px;flex:none;color:var(--accent)}
+.block.folded .block-head h2 .head-ico{color:var(--muted)}
 /* Сворачивание блока: стрелка справа от заголовка, весь заголовок нажимается. */
 .block-head.foldable{cursor:pointer;-webkit-user-select:none;user-select:none}
 .block-head.foldable h2{flex:1;min-width:0}
@@ -87,6 +91,7 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .block-head .note{margin-left:auto;flex:none;display:inline-flex;align-items:center;gap:4px;color:var(--faint);font-size:var(--fs-xs);white-space:nowrap}
 .block-head .note .icon{width:14px;height:14px}
 .panel-desc{margin:0;padding:0 16px 8px;color:var(--muted);font-size:var(--fs-sm)}
+.panel-desc .icon{width:14px;height:14px;vertical-align:-2px}
 .panel>.panel-desc:first-child{padding-top:8px}
 .kv{margin:0;padding:0 16px 6px}
 .kv-row{display:flex;align-items:center;gap:12px;min-height:44px;padding-block:8px;border-top:1px solid var(--line)}
@@ -101,7 +106,9 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .kv-row.link{cursor:pointer}
 .kv-ext{display:inline-flex;align-items:center;gap:8px;color:var(--accent);text-decoration:none}
 .kv-ext .chev{width:16px;height:16px;color:var(--faint)}
-.kv-row.link dd{color:var(--accent)}
+.kv-row.link dd{color:var(--text)}
+/* Blue is for links and buttons only; an empty value is grey (owner 2026-10-17). */
+.kv-row dd .none{color:var(--muted);font-weight:500}
 .kv-row.link .chev{width:18px;height:18px;color:var(--faint)}
 @media (hover:hover){.kv-row.link:hover dt{color:var(--text)}}
 .rows .row .btn{flex:none}
@@ -114,6 +121,9 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .tabbar.flash{animation:flash 1.6s ease}
 .panel-actions{display:flex;flex-wrap:wrap;gap:8px;padding:8px 16px 16px}
 .panel-actions.even>.btn{flex:1 1 120px;min-width:0;padding-inline:10px}
+/* One size of buttons on a phone: a single one takes the row (owner 2026-10-17). */
+@media (max-width:600px){.panel-actions>.btn:only-child{flex:1 1 auto}}
+.block-head .switch{margin-left:4px}
 .input.compact{width:auto;min-height:36px;padding:6px 10px}
 @media (max-width:359px){.topbar{gap:2px;padding-inline:8px}.icon-btn{width:36px;height:36px}}
 /* A phone bar: five labels of up to nine letters fit whole. */
@@ -121,6 +131,13 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 @media (max-width:339px){.tabbar{left:4px;right:4px;padding:4px}.tabbar .tab{padding:0;font-size:9.5px;letter-spacing:-.25px}}
 .kv dd select.input{max-width:190px;font-size:var(--fs-sm);font-weight:400}
 .kv-row .hint{display:block;margin-top:2px;color:var(--faint);font-size:var(--fs-xs)}
+.kv-row .hint[hidden]{display:none}
+.dt-t{display:inline-flex;align-items:center;gap:2px}
+.q-btn{display:inline-grid;place-items:center;width:28px;height:28px;margin:-6px 0;padding:0;border:0;border-radius:50%;background:transparent;color:var(--muted);cursor:pointer;flex:none}
+.icon-btn.pin[aria-pressed="true"]{color:var(--accent)}
+.q-btn .icon{width:17px;height:17px}
+.q-btn[aria-expanded="true"]{color:var(--accent)}
+.block-head h2+.q-btn{margin-left:-4px}
 .kv-row.sub dt{padding-left:14px}
 /* A slider with its value next to it (journal size). */
 .range-field{display:inline-flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap;justify-content:flex-end}
@@ -151,6 +168,24 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .pill.crit::before{background:var(--crit)}
 .pill.crit{color:var(--crit)}
 .pill.info::before{background:var(--accent)}
+.pill.off::before{background:var(--faint)}
+.pill.off{color:var(--muted)}
+/* «В разработке» and «Бета» (owner 2026-10-17) */
+.tag{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:var(--fs-xs,12px);font-weight:600;white-space:nowrap;border:1px solid var(--line-strong);color:var(--muted)}
+.tag.beta{color:var(--accent);border-color:var(--accent)}
+.kv.soon .kv-row dt{color:var(--muted)}
+.kv-row dd .switch{margin-left:8px}
+.kv-row.stack{flex-direction:column;align-items:stretch;gap:8px}
+.kv-row.stack dd{width:100%;max-width:none;justify-content:flex-start}
+.kv-row.stack dd .dd-btn,.kv-row.stack dd select,.kv-row.stack dd .input{width:100%;max-width:none}
+.confirm .input{flex:1 1 120px;min-width:0}
+/* ИИ-сервисы */
+.ai-row{padding:4px 0 8px;border-top:1px solid var(--line)}
+.ai-row:first-child{border-top:0}
+.ai-head{display:flex;align-items:center;gap:8px;padding:8px 16px}
+.ai-head .row-main{flex:1;min-width:0}
+.ai-head .row-main small{display:block;color:var(--muted)}
+.seg-slider.none .seg-thumb{opacity:0}
 /* In a row a long state wraps inside its column instead of running over the row's name. */
 .kv dd .pill{flex:0 1 auto;min-width:0;white-space:normal;overflow-wrap:anywhere;text-align:right}
 
@@ -343,7 +378,7 @@ small.st .icon{width:14px;height:14px}
 /* Всплывающие уведомления: справа вверху, под колокольчиком; потом они в истории колокольчика. */
 #toasts{position:fixed;z-index:70;top:calc(env(safe-area-inset-top,0px) + var(--topbar-h) + 8px);left:16px;right:16px;display:flex;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:none}
 @media (min-width:600px){#toasts{left:auto;right:16px;width:360px}}
-.toast{display:flex;gap:10px;align-items:flex-start;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface);color:var(--text);box-shadow:0 6px 24px rgba(12,18,26,.16);text-align:left;font-size:var(--fs-sm);pointer-events:auto;opacity:0;transform:translateY(-6px);transition:opacity .2s ease,transform .2s ease}
+.toast{display:flex;gap:10px;align-items:flex-start;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface);color:var(--text);box-shadow:0 6px 24px rgba(12,18,26,.16);text-align:left;font-size:var(--fs-sm);pointer-events:auto;opacity:0;transform:translateY(-6px);transition:opacity .2s ease,transform .2s ease;touch-action:none;user-select:none;-webkit-user-select:none}
 .toast.in{opacity:1;transform:none}
 .toast.out{opacity:0;transform:translateX(12px)}
 .toast .sev{width:28px;height:28px}
@@ -436,22 +471,17 @@ small.st .icon{width:14px;height:14px}
 .topbar::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);background-size:40% 100%;background-repeat:no-repeat;opacity:0;transition:opacity .2s}
 body.loading .topbar::after{opacity:1;animation:top-load 1.1s linear infinite}
 @keyframes top-load{from{background-position:-40% 0}to{background-position:140% 0}}
-.topbar::before{content:"Роутер отвечает медленно…";position:absolute;top:calc(100% + 8px);left:50%;transform:translate(-50%,-4px);padding:4px 12px;border-radius:999px;background:var(--warn-soft);color:var(--warn);font-size:var(--fs-xs);white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s}
+.topbar::before{content:"Роутер отвечает медленно…";position:fixed;z-index:21;top:auto;bottom:calc(var(--tabbar-space) + 8px);left:50%;transform:translate(-50%,4px);padding:4px 12px;border-radius:999px;background:var(--warn-soft);color:var(--warn);font-size:var(--fs-xs);white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s}
 body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 @keyframes upd-spin{to{transform:rotate(360deg)}}
-/* A new page slides in; pulling the page down from its top refreshes it. */
+/* A new page slides in; pulling the page down from its top refreshes it (the line under the header runs). */
 @keyframes page-enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .content.page-enter{animation:page-enter .18s ease-out}
-.pull-hint{position:fixed;top:0;left:50%;z-index:60;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:var(--surface,#fff);color:var(--muted);box-shadow:0 2px 8px rgba(0,0,0,.18);transform:translate(-50%,-48px);transition:color .15s;pointer-events:none}
-.pull-hint .icon{width:20px;height:20px}
-.pull-hint.ready{color:var(--accent)}
-.pull-hint.spin{transform:translate(-50%,24px)!important;transition:transform .15s}
-.pull-hint.spin .icon{animation:upd-spin 1s linear infinite}
-@media (prefers-reduced-motion:reduce){.content.page-enter{animation:none}.pull-hint.spin .icon{animation:none}}
+@media (prefers-reduced-motion:reduce){.content.page-enter{animation:none}}
 @media (prefers-reduced-motion:reduce){.icon-btn.spinning .icon,.sk,.card.fade-in,body.loading .topbar::after{animation:none}}
 
 /* Three-way slider (Wi-Fi band): the thumb glides under the chosen option. */
-.seg-slider{position:relative;display:grid;grid-template-columns:repeat(3,1fr);margin:0 16px 12px;padding:4px;background:var(--surface-2);border-radius:999px}
+.seg-slider{position:relative;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:12px 16px;padding:4px;background:var(--surface-2);border-radius:999px}
 .seg-slider button{position:relative;z-index:1;min-width:0;padding:9px 4px;border:0;border-radius:999px;background:transparent;color:var(--muted);font-size:var(--fs-sm);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .25s}
 .seg-slider button[aria-checked="true"]{color:var(--accent-text)}
 .seg-slider button:disabled{cursor:default}
@@ -459,6 +489,18 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 .seg-slider[data-i="1"] .seg-thumb{transform:translateX(100%)}
 .seg-slider[data-i="2"] .seg-thumb{transform:translateX(200%)}
 .seg-slider.off .seg-thumb{background:var(--faint)}
+.seg-slider.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+/* The same space above and below a slider in its frame (owner 2026-10-17). */
+.panel-desc+.seg-slider{margin-top:4px}
+.seg-slider.two .seg-thumb{width:calc((100% - 8px) / 2)}
+.kv-row.stack .seg-slider{margin:8px 0 0;width:100%}
+.kv-row.stack .seg-slider button{padding:9px 2px}
+.seg-slider:not(.off) button:disabled{opacity:.45}
+.seg-slider.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+.seg-slider.four .seg-thumb{width:calc((100% - 8px) / 4)}
+.seg-slider[data-i="3"] .seg-thumb{transform:translateX(300%)}
+/* A switch that cannot be used now looks so (owner 2026-10-17). */
+.switch input:disabled+i{opacity:.4;cursor:not-allowed}
 @media (prefers-reduced-motion:reduce){.seg-thumb,.seg-slider button{transition:none}}
 .log-at{margin:6px 2px 0;color:var(--faint);font-size:var(--fs-xs)}
 .events{list-style:none;margin:0;padding:0}
@@ -479,3 +521,13 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 .fix-steps{margin:0;padding:6px 16px 10px 34px;display:grid;gap:4px;font-size:var(--fs-sm);color:var(--text)}
 .fix-steps li.ok::marker{color:var(--ok)}
 .fix-steps li.crit{color:var(--crit)}
+/* VLESS servers by country (fix.28.2) */
+.vhead{display:flex;align-items:center;gap:8px;padding:10px 8px 10px 16px}
+.vhead .row-main{flex:1;min-width:0;cursor:pointer}
+.vhead .row-main b{display:block}
+.vhead .row-main small{color:var(--muted)}
+.vchev .icon{transition:transform .2s}
+.vgroup.open .vchev .icon{transform:rotate(180deg)}
+.row.muted,.vgroup.muted .vhead .row-main{opacity:.55}
+.vgroup+.vgroup{border-top:1px solid var(--line)}
+.vgroup>.rows{margin-left:12px}

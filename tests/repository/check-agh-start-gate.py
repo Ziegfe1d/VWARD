@@ -155,7 +155,7 @@ js = (ROOT / "web/assets/vward-console.js").read_text()
 for need in ('adguard_broken:($agh_broken != "")', '"${VWARD_AGH_STATE:-/tmp/vward-agh-start}/broken"'):
     if need not in api:
         fail(f"the API lacks {need}")
-if "sv.adguard === false && sv.adguard_broken" not in js or "'Программа AdGuard Home повреждена'" not in js:
+if "sv.adguard === false && sv.adguard_broken" not in js or "'AdGuard Home не запускается'" not in js or "Установить официальную сборку" not in js:
     fail("the Panel must say the AdGuard Home program is broken")
 # One starter, the components agent, through the gate; the real-time watcher asks it.
 for path, need in (("components/runtime/scripts/vward-cron-supervisor.sh", "vward_agh_ensure"), ("components/runtime/scripts/vward-sentinel-act.sh", "ask agh-start")):

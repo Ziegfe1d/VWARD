@@ -93,7 +93,7 @@ api, js = read("web/cgi-bin/api.cgi"), read("web/assets/vward-console.js")
 for need in ("journal|agents-mode) set --", "agents:{mode:$agents_mode,proposed:$proposed}"):
     if need not in api:
         fail(f"the API lacks {need}")
-for need in ("'d-agents': { title: 'Режим агентов'", "data-agent-mode=", "op: 'agents-mode'", "'Наблюдение'", "'Действие'", "panel('Работают всегда'", "panel('Предполагаемые действия'"):
+for need in ("'d-agents': { title: 'Агенты'", "data-agent-mode=", "op: 'agents-mode'", "'Наблюдение'", "'Действие'", "panel('Работают всегда'", "panel('Предполагаемые действия'"):
     if need not in js:
         fail(f"the Panel lacks {need}")
 print("AGENTS_WATCH=PASS")

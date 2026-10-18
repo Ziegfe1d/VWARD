@@ -7,7 +7,7 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-VWARD_ADS_VERSION="0.2.0-rc.2.fix.28.7"
+VWARD_ADS_VERSION="0.2.0-rc.2.fix.30"
 
 ADS_ETC="${VWARD_ADS_ETC:-/opt/etc/vward/ads-privacy-guard}"
 ADS_STATE="${VWARD_ADS_STATE:-/opt/var/lib/vward/ads-privacy-guard}"
@@ -194,6 +194,8 @@ ADS_DEFAULT_CONFIG
 
 ads_load_config()
 {
+    # Not set up yet (AdGuard Home not connected): an answer, not a failure for the journal.
+    [ -e "$ADS_CONFIG" ] || { echo "ERROR=adguard_auth_required"; echo "FAIL: AdGuard Home is not connected" >&2; exit 1; }
     [ -r "$ADS_CONFIG" ] || ads_die "config not readable: $ADS_CONFIG"
     if [ "${ADS_REQUIRE_SECURE_CONFIG:-1}" = 1 ] && ! ads_secure_file_ok "$ADS_CONFIG"; then
         ads_die "config must be root-owned and mode 0600 or 0400: $ADS_CONFIG"

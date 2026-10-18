@@ -250,7 +250,7 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data|site-test|tunnel-quality|stability|vward-off|notes|journal-data|log-archive) ;;
+    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data|site-test|tunnel-quality|stability|vward-off|notes|journal-data|log-archive|cleanup-data|ai-data|smartdns-server) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
@@ -322,7 +322,7 @@ if [ "${REQUEST_METHOD:-GET}" = POST ]; then
             ;;
     esac
     case "$ACTION" in
-        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control|wifi-host|ext-update-control|services|tunnel-quality|vward-off|notes) ;;
+        settings|control|update-control|config|auth|wifi-control|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-control|wifi-host|ext-update-control|services|tunnel-quality|vward-off|notes|smartdns-server) ;;
         *)
             echo 'Status: 405 Method Not Allowed'
             header_json
@@ -750,8 +750,9 @@ if [ "$ACTION" = config-data ]; then
     kv_file "$UCONF" safe_window_start=U_START safe_window_end=U_END check_interval_seconds=U_INTERVAL apply_window=U_WINDOW update_method=U_METHOD manifest_url=U_URL
     COMPONENT_REGISTRY=${VWARD_COMPONENT_REGISTRY:-/opt/share/vward/updater/current/component-registry.json}
     DISABLED="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && basename "$F" .disabled; done | list_json)"
-    # Which component a switched-off one went off with (its flag ends «(with ID)»): it comes back with it.
-    OFF_WITH="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && printf '%s\t%s\n' "$(basename "$F" .disabled)" "$(sed -n 's/.*(with \([a-z0-9-]*\))$/\1/p' "$F" | head -n 1)"; done |
+    # Which component a switched-off one went off with (its flag ends «(with ID)»): it comes back with it;
+    # «install»: the installer left it off (Ads without AdGuard Home), not news for the bell.
+    OFF_WITH="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && printf '%s\t%s\n' "$(basename "$F" .disabled)" "$(sed -n 's/.*(with \([a-z0-9-]*\))$/\1/p;s/^disabled by install\.sh.*/install/p' "$F" | head -n 1)"; done |
         "$JQ" -Rsc '[split("\n")[] | select(length > 0) | split("\t") | {(.[0]): (.[1] // "")}] | add // {}' 2>/dev/null)"
     [ -n "$OFF_WITH" ] || OFF_WITH='{}'
     COMPONENTS="$("$JQ" -c --argjson off "${DISABLED:-[]}" --argjson with "$OFF_WITH" '[.components[] | {id, core:(.core == true), depends_on:(.depends_on // []), requires_running:(.requires_running // []), uses:(.uses // []), enabled:((.id | IN($off[])) | not), off_with:($with[.id] // "")}]' "$COMPONENT_REGISTRY" 2>/dev/null)"
@@ -810,6 +811,9 @@ if [ "$ACTION" = config ]; then
         component) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=COMPONENT_DISABLE ;;
         adaptive-mode|classifier|smartdns-guard|tunnel-fallback|tunnel-return) set -- "$OP" "$VALUE" ;;
         journal|agents-mode) set -- "$OP" "$TARGET" "$VALUE" ;;
+        cleanup) set -- "$OP" "$TARGET"; [ "$TARGET" != sizes ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; } ;;
+        reset) set -- "$OP" "$TARGET"; REQUIRED=RESET_SETTINGS ;;
+        list) set -- "$OP" "$ACT" "$TARGET"; case "$ACT" in clear) REQUIRED=LIST_CLEAR ;; *) REQUIRED=LIST_DELETE ;; esac ;;
         ip-category) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
         policy-group) set -- "$OP" "$TARGET" ;;
@@ -1053,8 +1057,20 @@ if [ "$ACTION" = tunnel-conf ]; then
       TOUT="$("$CONFIG_HELPER" vless-server servers "$TNAME" 2>/dev/null)"
       case "$(printf '%s\n' "$TOUT" | tail -n 1)" in
         result=checked)
-          printf '%s\n' "$TOUT" | sed -n 's/^info\.server\.\([0-9]*\)=/\1|/p' | "$JQ" -Rn --argjson cur "$(printf '%s\n' "$TOUT" | sed -n 's/^info\.current=\([0-9]*\)$/\1/p' | head -n 1 | grep . || echo 0)" '
-            {ok: true, current: $cur, servers: [inputs | split("|") | {n: (.[0] | tonumber), name: .[1], host: .[2], port: (.[3] | tonumber? // null), ms: (.[4] | tonumber? // null), current: (.[5] == "1"), why: (.[6] // "")}]}' ;;
+          printf '%s\n' "$TOUT" | sed -n 's/^info\.server\.\([0-9]*\)=/\1|/p' | "$JQ" -Rn --argjson cur "$(printf '%s\n' "$TOUT" | sed -n 's/^info\.current=\([0-9]*\)$/\1/p' | head -n 1 | grep . || echo 0)" \
+              --arg off "$(printf '%s\n' "$TOUT" | sed -n 's/^info\.countries\.off=//p' | head -n 1)" --arg cross "$(printf '%s\n' "$TOUT" | sed -n 's/^info\.countries\.cross=//p' | head -n 1)" '
+            {ok: true, current: $cur, countries: {off: ($off | split(" ") | map(select(length == 2))), cross: ($cross != "0")}, servers: [inputs | split("|") | {n: (.[0] | tonumber), name: .[1], host: .[2], port: (.[3] | tonumber? // null), ms: (.[4] | tonumber? // null), current: (.[5] == "1"), why: (.[6] // "")}]}' ;;
+        error=*) E="$(printf '%s\n' "$TOUT" | tail -n 1)"; E=${E#error=}; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac; printf '{"ok":false,"error":"%s"}\n' "$E" ;;
+        *) echo '{"ok":false,"error":"helper_failed"}' ;;
+      esac ;;
+    countries)
+      # A country of a VLESS tunnel's servers on or off, or failover between countries.
+      [ -n "$TNAME" ] || { echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0; }
+      TCC="$(form_value target)" TCV="$(form_value value)"
+      case "$TCC:$TCV" in cross:0|cross:1|--:0|--:1|[A-Z][A-Z]:0|[A-Z][A-Z]:1) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+      TOUT="$("$CONFIG_HELPER" vless-server countries "$TNAME" "$TCC" "$TCV" 2>/dev/null)"
+      case "$(printf '%s\n' "$TOUT" | tail -n 1)" in
+        result=changed|result=unchanged) echo '{"ok":true}' ;;
         error=*) E="$(printf '%s\n' "$TOUT" | tail -n 1)"; E=${E#error=}; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac; printf '{"ok":false,"error":"%s"}\n' "$E" ;;
         *) echo '{"ok":false,"error":"helper_failed"}' ;;
       esac ;;
@@ -1130,6 +1146,14 @@ if [ "$ACTION" = wifi-host ]; then
   exit 0
 fi
 
+# «Очистка»: what each group would free, in KB (the helper knows the groups).
+if [ "$ACTION" = cleanup-data ]; then
+  header_json; [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+  [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+  "$CONFIG_HELPER" cleanup sizes 2>/dev/null | sed -n 's/^size=\([a-z]*\):\([0-9]*\)$/\1\t\2/p' |
+    "$JQ" -Rn '[inputs | split("\t") | {key: .[0], value: (.[1] | tonumber)}] | {ok: true, kb: from_entries}'
+  exit 0
+fi
 # Backups of VWARD's settings: list, create, restore, download.
 SNAPSHOT_DIR=${VWARD_SNAPSHOT_DIR:-/opt/var/backups/vward/snapshots}
 if [ "$ACTION" = backup-data ]; then
@@ -2431,6 +2455,66 @@ if [ "$ACTION" = services-data ]; then
     exit 0
 fi
 
+# ai-data: the AI services of the catalog and each one's way - VPN (its list goes through a
+# tunnel), Smart DNS (its main domain answered by Smart DNS) or the provider; and Smart DNS
+# itself: where it is kept and the server's host. A server's path (it may hold a personal
+# token) never leaves the router.
+if [ "$ACTION" = ai-data ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    SV_CAT=${VWARD_SERVICES_FETCHED:-/opt/var/lib/vward/services/catalog.json}
+    "$JQ" -e '.schema == 1 and (.services | length) > 0' "$SV_CAT" >/dev/null 2>&1 || SV_CAT=${VWARD_SERVICES_BUNDLED:-/opt/share/vward/console/services-catalog.json}
+    "$JQ" -e '.schema == 1' "$SV_CAT" >/dev/null 2>&1 || { echo '{"ok":false,"error":"services_unavailable"}'; exit 0; }
+    AI_RUN="$(ndm_cached running 10 "show running-config")"
+    # Smart DNS domains: Keenetic's own lines (domain, server host) and AdGuard Home's.
+    AI_DOH="$(printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
+        ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {h = $3; sub(/^https:\/\//, "", h); sub(/[\/:].*$/, "", h); print tolower($NF) "\t" h}')"
+    AI_AGH="$(command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains | head -n 400)"
+    AI_OWN="$(awk -F= '$1 == "SMARTDNS_URL" {u = substr($0, index($0, "=") + 1); sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); print u; exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)"
+    AI_ON="$(awk -F'\t' 'NF >= 3 {print $1 "\t" $2 "\t" $3}' "$CONFIG_ETC/services/enabled.tsv" 2>/dev/null)"
+    AI_ROUTES="$(printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
+        ctx && $1 == "route" && $2 == "object-group" {print $3 "\t" $4}')"
+    "$JQ" -c --arg doh "$AI_DOH" --arg agh "$AI_AGH" --arg own "$AI_OWN" --arg on "$AI_ON" --arg routes "$AI_ROUTES" \
+        --argjson agh_on "$([ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] && echo true || echo false)" '
+        ($doh | split("\n") | map(select(length > 0) | split("\t"))) as $k
+        | ($agh | split("\n") | map(select(length > 0))) as $a
+        | ($on | split("\n") | map(select(length > 0) | split("\t") | {key: .[0], value: .[1]}) | from_entries) as $groups
+        | ($routes | split("\n") | map(select(length > 0) | split("\t") | {key: .[0], value: .[1]}) | from_entries) as $route
+        | ([$k[] | .[0]] + $a) as $sd
+        | def covered($d): any($sd[]; . as $s | $d == $s or ($d | endswith("." + $s)));
+          def root($d): ($d | split(".") | .[-2:] | join("."));
+        {ok: true,
+         smartdns: {keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_domains: ($a | length),
+                    servers: ([$k[] | .[1]] + (if $own == "" then [] else [$own] end) | unique), own: $own},
+         services: [.services[] | select(.category == "ai") | . as $s
+           | ([$s.domains[] | root(.)] | unique) as $roots
+           | ($groups[$s.id] // "") as $g
+           | {id: $s.id, title: $s.title, domain: ($s.domains[0] // $s.id), roots: $roots,
+              via: (if $g != "" then "vpn" elif ($roots | length) > 0 and all($roots[]; covered(.)) then "dns" else "isp" end),
+              tunnel: (if $g != "" then ($route[$g] // "") else "" end)}]}' "$SV_CAT"
+    exit 0
+fi
+# smartdns-server: the owner's own DoH server for Smart DNS without AdGuard Home. The address
+# goes to the helper on stdin, never in a command line or a journal.
+if [ "$ACTION" = smartdns-server ]; then
+    header_json; [ "${REQUEST_METHOD:-GET}" = POST ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
+    [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+    read_body 512
+    form_only op url || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
+    SSOP="$(form_value op)"
+    SSURL="$(form_value url | sed 's/%3[Aa]/:/g;s/%2[Ff]/\//g;s/%2[Dd]/-/g;s/%2[Ee]/./g;s/%5[Ff]/_/g;s/%7[Ee]/~/g')"
+    case "$SSOP" in set|clear) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;; esac
+    SSOUT="$(printf '%s\n' "$SSURL" | "$CONFIG_HELPER" smartdns-server "$SSOP" 2>/dev/null | tail -n 1)"
+    unset SSURL BODY
+    case "$SSOUT" in
+        result=*) "$JQ" -cn --arg r "${SSOUT#result=}" '{ok: true, result: $r}' ;;
+        error=*) E="${SSOUT#error=}"; case "$E" in *[!a-z0-9_]*) E=helper_failed ;; esac; "$JQ" -cn --arg e "$E" '{ok: false, error: $e}' ;;
+        *) echo '{"ok":false,"error":"helper_failed"}' ;;
+    esac
+    exit 0
+fi
+
 # services: switch a service on (auto or a tunnel), move it to a tunnel, or off.
 # Switching on writes up to 300 domains into Keenetic: it runs in the background
 # like the tunnel jobs (control-data reports it).
@@ -2446,6 +2530,8 @@ if [ "$ACTION" = services ]; then
         on|tunnel) [ -n "$STO" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }; ARGS="service $SOP $SID $STO" ;;
         category) [ -n "$STO" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }; ARGS="service-category $SID $STO" ;;
         off) ARGS="service off $SID" ;;
+        # An AI service's way (or «all» of them): auto|TUNNEL = VPN, dns = Smart DNS, isp = provider.
+        ai) case "$STO" in dns|isp) ARGS="ai $SID $STO" ;; auto) ARGS="ai $SID vpn" ;; ?*) ARGS="ai $SID vpn:$STO" ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac ;;
         *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
     esac
     CMD="$CONFIG_HELPER" LABEL="service-$SOP" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
@@ -2688,16 +2774,20 @@ if [ "$ACTION" = ext-update-data ]; then
     [ -n "$X_UP" ] || X_UP='[]'
     X_FW="$("$JQ" -c . "$EXT_STATE/firmware.json" 2>/dev/null)"
     [ -n "$X_FW" ] || X_FW=null
+    # The official AdGuard Home build VWARD installed (or found) and the version it pins.
+    X_AOV=; [ ! -r "$EXT_STATE/agh-official" ] || X_AOV="$(sed -n 's/^version=//p' "$EXT_STATE/agh-official" | head -n 1)"
+    X_AOP="$(sed -n 's/^AGH_OFFICIAL_VERSION=//p' "$CONFIG_HELPER" 2>/dev/null | head -n 1)"
     X_HIST="$(tail -n 10 "$EXT_STATE/history.tsv" 2>/dev/null |
         "$JQ" -Rn '[inputs | split("\t") | select(length == 5) | {at: (.[0] | tonumber? // 0), name: .[1], from: .[2], to: .[3], result: .[4]}] | reverse' 2>/dev/null)"
     [ -n "$X_HIST" ] || X_HIST='[]'
     "$JQ" -n --argjson at "$X_AT" --argjson orc "$X_ORC" --argjson inst "$X_INST" --argjson up "$X_UP" \
         --argjson fw "$X_FW" --argjson hist "$X_HIST" --argjson run "$(run_json "$EXT_RUN_DIR")" \
-        --argjson agh_auto "$X_AGH" --argjson ent_auto "$X_ENT" \
+        --argjson agh_auto "$X_AGH" --argjson ent_auto "$X_ENT" --arg aov "$X_AOV" --arg aop "$X_AOP" \
         --arg critical " libc libgcc libpthread librt libssp libstdcpp busybox opkg entware-opt entware-release entware-upgrade dropbear " \
         '{ok: true, checked_at: $at, feed_ok: ($orc == 0), installed_count: ($inst | length),
           auto: {agh: ($agh_auto == 1), entware: ($ent_auto == 1)},
-          agh: {installed: ($inst["adguardhome-go"] // null), available: ([$up[] | select(.name == "adguardhome-go") | .available][0] // null)},
+          agh: {installed: ($inst["adguardhome-go"] // null), available: ([$up[] | select(.name == "adguardhome-go") | .available][0] // null),
+            official: {installed: (if $aov == "" then null else $aov end), pinned: (if $aop == "" then null else $aop end)}},
           packages: [$up[] | select(.name != "adguardhome-go") | . + {critical: ($critical | contains(" " + .name + " "))}],
           firmware: $fw, history: $hist, run: $run}'
     exit 0
@@ -2722,6 +2812,10 @@ if [ "$ACTION" = ext-update-control ]; then
             [ "$CONFIRM" = EXT_UPGRADE ] || [ "$CONFIRM" = EXT_UPGRADE_CRITICAL ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
             MODE=manual; [ "$CONFIRM" = EXT_UPGRADE_CRITICAL ] && MODE=critical
             ARGS="ext-upgrade $PKG $MODE" LABEL="ext-upgrade-$PKG" ;;
+        # AdGuard's own build for this processor, pinned by VWARD (a broken or an older one replaced).
+        agh-official)
+            [ "$CONFIRM" = AGH_OFFICIAL ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+            ARGS="ext-agh-official install" LABEL="ext-upgrade-adguardhome-go" ;;
         *) echo '{"ok":false,"error":"unknown_action"}'; exit 0 ;;
     esac
     run_detached "$EXT_RUN_DIR" ext_update_busy
@@ -2912,14 +3006,18 @@ if [ "$ACTION" = stability ]; then
     TLS_FLAG=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
     [ -z "$(find "$TLS_FLAG" -mmin -60 2>/dev/null)" ] || TLS_AT=$(date -r "$TLS_FLAG" +%s 2>/dev/null)
     RCI_DAY=$(awk -F'\t' -v cut="$((NOW - 86400))" '$1 ~ /^[0-9]+$/ && $1 >= cut {n++; l = $1} END {printf "%d %d", n, l}' "${VWARD_RCI_FAIL_LOG:-/tmp/vward-rci-fail.log}" 2>/dev/null)
+    # All of Keenetic's requests of the last 24 hours (a byte each, a file an hour); older hours go.
+    RCI_CD=${VWARD_RCI_CALLS:-/tmp/vward-rci-calls}
+    find "$RCI_CD" -type f -mmin +1500 -exec rm -f {} + 2>/dev/null
+    RCI_CALLS=$(ls -ln "$RCI_CD" 2>/dev/null | awk 'NF >= 9 {s += $5} END {printf "%d", s}')
     "$JQ" -n -c --argjson running "$RUNNING" --argjson installed "$INSTALLED" \
         --slurpfile state "$SD/state" --slurpfile hours "$SD/hours" \
         --slurpfile cpu "$SD/cpu" --slurpfile events "$SD/events" --slurpfile tunnels "$SD/tunnels" \
-        --arg now "$NOW" --arg fok "$FEED_OK" --arg ffail "$FEED_FAIL" --arg frc "$FEED_RC" --arg tls "$TLS_AT" --arg rci "${RCI_DAY:-0 0}" \
+        --arg now "$NOW" --arg fok "$FEED_OK" --arg ffail "$FEED_FAIL" --arg frc "$FEED_RC" --arg tls "$TLS_AT" --arg rci "${RCI_DAY:-0 0}" --arg rcalls "${RCI_CALLS:-0}" \
         'def num: tonumber? // null;
          {ok: true, sentinel: {running: $running, installed: $installed}, state: $state[0], hours: $hours[0], cpu: $cpu[0], events: $events[0],
           checks: {now: ($now | num), tunnels: $tunnels[0], feed_ok_at: ($fok | num), feed_fail_at: ($ffail | num), feed_fail_rc: ($frc | num),
-                   https_crash_at: ($tls | num), rci_fails_day: ($rci | split(" ")[0] | num), rci_fail_at: ($rci | split(" ")[1] | num | if . == 0 then null else . end)}}' 2>/dev/null ||
+                   https_crash_at: ($tls | num), rci_fails_day: ($rci | split(" ")[0] | num), rci_calls_day: ($rcalls | num), rci_fail_at: ($rci | split(" ")[1] | num | if . == 0 then null else . end)}}' 2>/dev/null ||
         echo '{"ok":false,"error":"stability_unavailable"}'
     exit 0
 fi

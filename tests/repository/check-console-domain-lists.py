@@ -298,7 +298,14 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # One domain through Smart DNS from «Домены → Проверка адреса»: the upstream is chosen by
     # AdGuard Home's side ("auto"); removing twice changes nothing the second time.
-    run("smartdns-domain", "add", "Gemini.Google.com", "error=adguard_auth_required")
+    # AdGuard Home not connected to VWARD: the line goes into Keenetic, in the form of the lines there.
+    cfg.write_text(RUNNING)
+    run("smartdns-domain", "add", "Gemini.Google.com", "result=changed", 0)
+    if f"https upstream {AET} dnsm on ISP domain gemini.google.com" not in dns_block(cfg):
+        fail(f"Smart DNS without AdGuard Home: {dns_block(cfg)}")
+    run("smartdns-domain", "remove", "gemini.google.com", "result=changed", 0)
+    if any("gemini" in l for l in dns_block(cfg)):
+        fail(f"Smart DNS line removed: {dns_block(cfg)}")
     st["fail"] = "smartdns_not_configured"; agh_state.write_text(__import__("json").dumps(st))
     run("smartdns-domain", "add", "gemini.google.com", "error=smartdns_not_configured")
     st.pop("fail"); agh_state.write_text(__import__("json").dumps(st))

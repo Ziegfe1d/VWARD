@@ -74,14 +74,18 @@ recover_critical()
 
 # Boot watch. At boot the home network may come up after the Panel's web server, which
 # then cannot bind its address; it is started again here, and after a crash too.
-# AdGuard Home only in the first half hour after boot: its start script does not always
-# bring it up, and later a stopped AdGuard Home is the owner's choice. Every start goes
-# through one gate (vward_agh_ensure): a start is not repeated before 120 s have passed,
-# the pause grows after each failure, an orphaned PID file is removed first.
+# AdGuard Home from 90 s after boot and from then on (fix.28.2: only the first half hour
+# before, and a build that crashed a day later stayed down a whole day, Viva 2026-10-16),
+# while ads protection is on and no package update holds it. Every start goes through one
+# gate (vward_agh_ensure): a start is not repeated before 120 s have passed, the pause grows
+# after each failure, an orphaned PID file is removed first. A program that cannot run on
+# this processor is replaced by the official build (ext-agh-official) and told in the bell.
 CONSOLE_INIT=${VWARD_CONSOLE_INIT:-/opt/etc/init.d/S93vward-console}
 CONSOLE_PIDFILE=${VWARD_CONSOLE_PIDFILE:-/opt/var/run/vward-console-lighttpd.pid}
 AGH_INIT=${VWARD_AGH_INIT:-/opt/etc/init.d/S99adguardhome}
-AGH_WATCH_SECONDS=${VWARD_AGH_WATCH_SECONDS:-1800}
+# An update replacing AdGuard Home announces its restart here (the DNS guard's «planned»: until when).
+AGH_PLANNED_FILE=${VWARD_DNS_CHAIN_STATE:-/tmp/vward-dns-chain}/planned
+CONFIG_BIN=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ ! -r "$VWARD_ADMISSION_LIB" ] || . "$VWARD_ADMISSION_LIB"
 UPTIME_FILE=${VWARD_UPTIME_FILE:-/proc/uptime}
@@ -202,6 +206,72 @@ doh_note()
         "$dn_t Сайты из Smart DNS (например, ИИ-сервисы) могут не открываться. VWARD пробует запустить его снова с паузами до 15 минут и переустановит его библиотеки HTTPS, если не поможет."
 }
 
+# agh_watched: AdGuard Home is VWARD's to keep running: ads protection on (VWARD off turns
+# every component off) and no update replacing it right now (a mere check of the packages
+# holds their lock for minutes and is no reason to look away).
+agh_watched()
+{
+    command -v vward_agh_ensure >/dev/null 2>&1 || return 1
+    vward_component_enabled ads-privacy-guard || return 1
+    aw_until=; [ ! -r "$AGH_PLANNED_FILE" ] || read -r aw_until < "$AGH_PLANNED_FILE" || :
+    case "$aw_until" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$(date +%s)" -ge "$aw_until" ]
+}
+
+# agh_note SEV TITLE TEXT: the bell, through the shared profile library.
+agh_note()
+{
+    command -v vward_note >/dev/null 2>&1 ||
+        { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+    command -v vward_note >/dev/null 2>&1 || return 0
+    vward_note "$1" "$2" "$3" d-agh
+}
+
+# agh_keep WHO: one start through the gate, its result in the journal. A broken program:
+# told once per boot, the official build put in its place (at most once a day, in the
+# background: a download of 10 MB). Starts that do not bring it up (3 in a row): told once.
+agh_keep()
+{
+    VWARD_UNNICE=$UNNICE vward_agh_ensure "$AGH_INIT"
+    case "$?" in
+        10) log_event "AGH_STARTED|$1" ;;
+        13) [ -e "$VWARD_AGH_STATE/noted" ] || {
+                : > "$VWARD_AGH_STATE/noted"
+                ak_rc=; [ ! -r "$VWARD_AGH_STATE/broken" ] || ak_rc=$(cut -d'|' -f2 "$VWARD_AGH_STATE/broken" 2>/dev/null)
+                log_event "AGH_BINARY_BROKEN|$1|exit=${ak_rc:-?}"
+                case "$ak_rc" in
+                    132) ak_t="Программа AdGuard Home не подходит процессору роутера (недопустимая инструкция)." ;;
+                    *) ak_t="Программа AdGuard Home завершается с ошибкой ${ak_rc:-?} сразу после запуска." ;;
+                esac
+                agh_note err "AdGuard Home не запускается" \
+                    "$ak_t Реклама не блокируется, DNS идёт мимо AdGuard Home. VWARD ставит официальную сборку AdGuard Home для этого роутера."
+            }
+            agh_repair "$1" ;;
+        11) ak_f=; [ ! -r "$VWARD_AGH_STATE/fails" ] || read -r ak_f < "$VWARD_AGH_STATE/fails"
+            case "$ak_f" in ''|*[!0-9]*) ak_f=0 ;; esac
+            if [ "$ak_f" -ge 3 ] && [ ! -e "$VWARD_AGH_STATE/noted" ]; then
+                : > "$VWARD_AGH_STATE/noted"
+                log_event "AGH_START_FAILED|$1|in_a_row=$ak_f"
+                agh_note warn "AdGuard Home не запускается" \
+                    "Запуск не помогает уже $ak_f раза подряд. Реклама не блокируется, DNS идёт мимо AdGuard Home. VWARD пробует снова каждые 10 минут; журнал AdGuard Home: Система → Журналы."
+            fi ;;
+    esac
+}
+
+# agh_repair WHO: the official build of AdGuard Home instead of a broken program, by the Panel's
+# helper (backup, checksum, rollback), in the background, at most once a day.
+AGH_REPAIR_STAMP=${VWARD_AGH_REPAIR_STAMP:-/opt/var/lib/vward/ext-update/agh-repair.last}
+agh_repair()
+{
+    [ -x "$CONFIG_BIN" ] || return 0
+    [ -z "$(find "$AGH_REPAIR_STAMP" -mmin -1440 2>/dev/null)" ] || return 0
+    ! command -v vward_agent_acts >/dev/null 2>&1 ||
+        vward_agent_acts components agh-official "AdGuard Home не запускается: установить официальную сборку AdGuard Home" || return 0
+    mkdir -p "$(dirname "$AGH_REPAIR_STAMP")" 2>/dev/null && : > "$AGH_REPAIR_STAMP" || return 0
+    log_event "AGH_REPAIR_STARTED|$1"
+    (trap '' HUP; exec $UNNICE "$CONFIG_BIN" ext-agh-official repair) </dev/null >/dev/null 2>&1 &
+}
+
 # ---- The components agent ----------------------------------------------------------------
 # This supervisor is VWARD's components agent: it alone starts and restarts VWARD's programs,
 # the tunnels' modules and AdGuard Home. The others (the real-time watcher, the network agent)
@@ -258,12 +328,8 @@ agent_do()
 {
     case "$1" in
         agh-start)
-            command -v vward_agh_ensure >/dev/null 2>&1 || return 1
-            VWARD_UNNICE=$UNNICE vward_agh_ensure "$AGH_INIT"
-            case "$?" in
-                10) log_event "AGH_STARTED|asked-by=$RQ_BY" ;;
-                13) log_event "AGH_BINARY_BROKEN|asked-by=$RQ_BY" ;;
-            esac ;;
+            agh_watched || return 1
+            agh_keep "asked-by=$RQ_BY" ;;
         start:*)
             start_of "${1#start:}" && log_event "STARTED|${1#start:}|asked-by=$RQ_BY" ;;
         restart:*)
@@ -505,12 +571,8 @@ watch_services()
     [ ! -r "$UPTIME_FILE" ] || read -r UP _ < "$UPTIME_FILE" || :
     UP=${UP%%.*}
     case "$UP" in ''|*[!0-9]*) return 0 ;; esac
-    if [ "$UP" -ge 90 ] && [ "$UP" -lt "$AGH_WATCH_SECONDS" ] && command -v vward_agh_ensure >/dev/null 2>&1; then
-        VWARD_UNNICE=$UNNICE vward_agh_ensure "$AGH_INIT"
-        case "$?" in
-            10) log_event "AGH_STARTED|uptime=$UP" ;;
-            13) [ "${AGH_BROKEN_LOGGED:-0}" = 1 ] || { AGH_BROKEN_LOGGED=1; log_event "AGH_BINARY_BROKEN|uptime=$UP"; } ;;
-        esac
+    if [ "$UP" -ge 90 ] && agh_watched; then
+        agh_keep "uptime=$UP"
     fi
 
     # Smart DNS's local DoH client (https-dns-proxy) not listening: started again, from the 3rd

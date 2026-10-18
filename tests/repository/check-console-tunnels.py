@@ -45,10 +45,11 @@ if got != want:
     fail(f"list lines: {got} want {want}")
 if "рукопожатие" in piece("const tunSub = t => {", "\n};\n"):
     fail("the list shows no handshake")
+# On and off: the switch in the tunnel page's header, none for the default tunnel (owner 2026-10-17).
 for need in ("'<span class=\"st ok\">по умолчанию</span>'", "'Сделать туннелем по умолчанию'", "['Туннель по умолчанию', managed ? 'Да' : 'Нет'",
              "' · модуль AmneziaWG (VWARD)'", "t.endpoint || (e && e.endpoint) || (v && (v.server_name ? v.server_name + ' · ' + v.server : v.server))", "['Память программы'",
-             "const rx = t.rx != null ? t.rx : e && e.rx", "btn('ask', 'close', 'Выключить', 'danger', ' data-confirm=\"tunnel-down\"'",
-             "'tunnel-down': () => tunnelState('down', current.slice(2))", "canOff = name !== prof().tunnel_interface && !tunOff(t)", "mp[0] + tunnelProbePanel(name) + tunnelTrafficPanel(name) + mp.slice(1).join('')"):
+             "const rx = t.rx != null ? t.rx : e && e.rx", "sw('data-tun-onoff=\"' + esc(name) + '\"', !off", "confirm = { id: 'tunnel-down' }",
+             "'tunnel-down': () => tunnelState('down', current.slice(2))", "(managed ? '' : sw('data-tun-onoff", "mp[0] + tunnelProbePanel(name) + tunnelTrafficPanel(name) + mp.slice(1).join('')"):
     if need not in JS:
         fail(f"the Panel lacks {need}")
 if "для маршрутов" in JS:
@@ -67,7 +68,7 @@ if '"$ENG" enable "$2"' not in body:
 # Switched off by the owner (owner 2026-10-12): the Overview and the tunnel page say the lists
 # go direct, the bell stays quiet (check-console-tunnel-status.py runs it).
 for need in ("!on.some(t => t.name === prof().tunnel_interface) ? 'списки идут напрямую'",
-             "down = tunnels.filter(t => !isTrue(t.connected) && !tunOff(t) && !tunGuardOff(t))",
+             "down = tunnels.filter(t => !isTrue(t.connected) && !tunOff(t) && !tunGuardOff(t) && !tunLost(t))",
              "он назначен по умолчанию, списки VPN идут напрямую"):
     if need not in JS:
         fail(f"a default tunnel switched off outside the Panel: lacks {need}")
@@ -131,7 +132,7 @@ for need in ('"$ROUTE_AWK"\' $1 == "ip" && $2 == "route" && rdev() == i {print $
 # «Резерв и выбор туннеля»: settings only, the tunnels are in «Туннели» (owner 2026-10-12); a
 # VLESS tunnel's quality is a page's answer, not ping; the speed carries its date and is not
 # shown while measuring is off.
-if "panel('Несколько туннелей'" in JS or "panel('Резерв и выбор туннеля'" not in JS or "раз в минуту пинг через каждый туннель" in JS:
+if "panel('Несколько туннелей'" in JS or "panel('Резервный туннель'" not in JS or "раз в минуту пинг через каждый туннель" in JS:
     fail("the reserve panel lists no tunnels and says nothing of ping")
 q = piece("const tqSpeed =", "const TQ_CRITERIA") + r"""
 const fmtTime = x => 'T' + x;

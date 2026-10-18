@@ -482,7 +482,7 @@ op_remove() {
     stop_one "$n"
     ndm "no interface $1" && ndm "system configuration save" || die router_rejected
     rm -f "$ENGINE_ETC/v$n.json" "$ENGINE_ETC/v$n.off" "$ENGINE_RUN/v$n.err" "$ENGINE_ETC/v$n.src" "$ENGINE_ETC/v$n.links" \
-        "$ENGINE_ETC/v$n.idx" "$ENGINE_RUN/v$n.fails" "$ENGINE_RUN/v$n.failover.at"
+        "$ENGINE_ETC/v$n.idx" "$ENGINE_ETC/v$n.countries" "$ENGINE_RUN/v$n.fails" "$ENGINE_RUN/v$n.failover.at"
     awk -F'\t' -v p="$1" '$2 != p' "$TUNNELS" > "$TUNNELS.new" && mv -f "$TUNNELS.new" "$TUNNELS"
     log "removed $1"
     echo "result=changed"
@@ -738,7 +738,8 @@ op_list() {
         why=; [ -n "$ms" ] || case "$(cat "$TMPD/rc.$j" 2>/dev/null)" in 6) why=dns ;; 7) why=refused ;; *) why=timeout ;; esac
         printf 'info.server.%s=%s|%s|%s|%s|%s|%s\n' "$j" "$(v name)" "$(v host)" "$(v port)" "$ms" "$([ "$j" = "$cur" ] && echo 1 || echo 0)" "$why"
     done
-    printf 'info.current=%s\ninfo.servers=%s\n' "$cur" "$i"
+    co_cross=$(countries_get "$n" cross)
+    printf 'info.current=%s\ninfo.servers=%s\ninfo.countries.off=%s\ninfo.countries.cross=%s\n' "$cur" "$i" "$(countries_get "$n" off)" "${co_cross:-1}"
     echo "result=checked"
 }
 
@@ -765,6 +766,42 @@ op_select() {
     start_one "$n"
     log "server $1: server $2 did not answer, server $cur kept"
     die server_unreachable
+}
+
+# Countries of a tunnel's servers (fix.28.2): the owner switches countries off and decides whether
+# a failover may move to another country. $ENGINE_ETC/vSLOT.countries: «off=DE NL» (two-letter
+# codes from the flag at the start of a server's name; «--» for servers without a flag) and
+# «cross=0|1» (1 by default: any country that is on).
+# cc NAME: the country code of a server's name.
+cc() {
+    printf '%s' "$1" | LC_ALL=C od -An -tu1 -N8 | awk '{for (i = 1; i <= NF; i++) b[i] = $i}
+        END {if (b[1] == 240 && b[2] == 159 && b[3] == 135 && b[4] >= 166 && b[4] <= 191 && b[5] == 240 && b[8] >= 166 && b[8] <= 191)
+                 printf "%c%c\n", b[4] - 101, b[8] - 101; else print "--"}'
+}
+countries_get() { sed -n "s/^$2=//p" "$ENGINE_ETC/v$1.countries" 2>/dev/null | tail -n 1; }
+
+# countries NAME [CODE 0|1 | cross 0|1]: the settings, or one change.
+op_countries() {
+    row=$(row_of "$1")
+    [ -n "$row" ] || die unknown_tunnel 64
+    n=$(printf '%s' "$row" | cut -f1)
+    if [ -n "${2:-}" ]; then
+        case "$3" in 0|1) ;; *) die invalid_value 64 ;; esac
+        co_off=$(countries_get "$n" off) co_cross=$(countries_get "$n" cross)
+        case "$2" in
+            cross) co_cross=$3 ;;
+            --|[A-Z][A-Z])
+                co_off=$(printf '%s\n' $co_off | grep -vx -- "$2" | tr '\n' ' ')
+                [ "$3" = 1 ] || co_off="$co_off $2" ;;
+            *) die invalid_value 64 ;;
+        esac
+        co_off=$(printf '%s\n' $co_off | grep -E '^(--|[A-Z][A-Z])$' | sort -u | tr '\n' ' ' | sed 's/ $//')
+        (umask 077; printf 'off=%s\ncross=%s\n' "$co_off" "${co_cross:-1}" > "$ENGINE_ETC/v$n.countries") || die write_failed
+        log "countries $1: off=${co_off:-none} cross=${co_cross:-1}"
+    fi
+    co_cross=$(countries_get "$n" cross)
+    printf 'info.countries.off=%s\ninfo.countries.cross=%s\n' "$(countries_get "$n" off)" "${co_cross:-1}"
+    echo "result=${2:+changed}${2:-checked}"
 }
 
 op_failover() {
@@ -794,11 +831,15 @@ op_failover() {
     nm() { parse "$1" 2>/dev/null | awk -F '\t' '$1 == "name" {print substr($0, 6); exit}'; }
     flag=$(nm "$(sed -n "${cur}p" "$TMPD/links")" | LC_ALL=C cut -b1-8)
     case "$flag" in "$(printf '\360\237\207')"*) ;; *) flag= ;; esac
+    # Countries switched off are never tried; without «cross» only the same country.
+    fo_off=" $(countries_get "$n" off) " fo_cross=$(countries_get "$n" cross)
     i=0
     while IFS= read -r l; do
         i=$((i + 1))
         [ "$i" != "$cur" ] || continue
-        if [ -n "$flag" ] && [ "$(nm "$l" | LC_ALL=C cut -b1-8)" = "$flag" ]; then echo "$i" >> "$TMPD/same"; else echo "$i" >> "$TMPD/other"; fi
+        case "$fo_off" in "  ") ;; *) case "$fo_off" in *" $(cc "$(nm "$l")") "*) continue ;; esac ;; esac
+        if [ -n "$flag" ] && [ "$(nm "$l" | LC_ALL=C cut -b1-8)" = "$flag" ]; then echo "$i" >> "$TMPD/same"
+        elif [ "${fo_cross:-1}" != 0 ]; then echo "$i" >> "$TMPD/other"; fi
     done < "$TMPD/links"
     cat "$TMPD/same" "$TMPD/other" 2>/dev/null | head -n "${VWARD_VLESS_FAILOVER_MAX:-8}" > "$TMPD/try"
     cp "$ENGINE_ETC/v$n.json" "$TMPD/old.json" || die write_failed
@@ -908,6 +949,7 @@ case "${1:-}" in
     failover) [ "$#" -eq 2 ] || die usage 64; op_failover "$2" ;;
     list) [ "$#" -eq 2 ] || die usage 64; op_list "$2" ;;
     select) [ "$#" -eq 3 ] || die usage 64; op_select "$2" "$3" ;;
+    countries) [ "$#" -eq 2 ] || [ "$#" -eq 4 ] || die usage 64; op_countries "$2" "${3:-}" "${4:-}" ;;
     disable) [ "$#" -eq 2 ] || die usage 64; op_disable "$2"; sentinel_reload ;;
     enable) [ "$#" -eq 2 ] || die usage 64; op_enable "$2"; sentinel_reload ;;
     supervise) op_supervise ;;
