@@ -20,7 +20,7 @@ def fail(message: str) -> None:
 _js = (ROOT / "web/assets/vward-console.js").read_text()
 # The switch works at once, as Keenetic's own (owner 2026-10-12): no confirmation, no window; it
 # shows the state it goes to and stays disabled until the router answered.
-for need in ("sw('data-tunsw=\"' + esc(t.name) + '\"', TUNBUSY[t.name] ? TUNBUSY[t.name] !== 'down' : !tunOff(t)", "t.name === managed || !cfgOk() || !!TUNBUSY[t.name]",
+for need in ("sw('data-tunsw=\"' + esc(t.name) + '\"', TUNBUSY[t.name] ? TUNBUSY[t.name] !== 'down' : !tunOff(t)", "t.name === managed || tunLost(t) || !cfgOk() || !!TUNBUSY[t.name]",
              "t.disabled = true; tunnelState(t.checked ? 'up' : 'down', n);", "if (t.dataset.go && e.target.closest('.switch')) return;", 'class="row link tun"',
              "(TUNERR[t.name] ? '<small class=\"st crit\">'"):
     if need not in _js:

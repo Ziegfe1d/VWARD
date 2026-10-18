@@ -119,8 +119,14 @@ installed() { [ -e "$UPDATER_STATE/committed.state" ] || [ -e /opt/etc/init.d/S9
 beta_present() { [ -e /opt/etc/init.d/S91adaptive-live ] || [ -e /opt/bin/agh-adaptive-live.sh ]; }
 agh_present() { [ -r /opt/etc/AdGuardHome/AdGuardHome.yaml ] || [ -x /opt/bin/AdGuardHome ] || [ -x /opt/sbin/AdGuardHome ]; }
 
+# A package counts as there by Entware's own list or by its file: Entware moves files between
+# releases (2026-10: tcpdump in /opt/bin, mod_setenv built into lighttpd 1.4.82, its package only
+# a config file), and the installer stopped with «пакеты не появились» on a router that had them.
 missing_packages() {
-    for p in $PACKAGES; do [ -e "${p#*:}" ] || printf '%s ' "${p%%:*}"; done
+    mp_have=$(opkg list-installed 2>/dev/null | awk '{print $1}')
+    for p in $PACKAGES; do
+        [ -e "${p#*:}" ] || printf '%s\n' "$mp_have" | grep -qxF -- "${p%%:*}" || printf '%s ' "${p%%:*}"
+    done
 }
 
 keenetic_release() {
@@ -167,7 +173,6 @@ packages() {
     if [ -z "$need" ]; then ok "все нужные пакеты уже есть"; return 0; fi
     line "Нужно поставить: $need"
     [ "$MODE" = check ] && return 0
-    ask "Установить эти пакеты из Entware?" || fail "без пакетов VWARD работать не сможет"
     mkdir -p "${LOG%/*}" && LOG_OK=1
     opkg update >/dev/null 2>&1 || fail "opkg update не прошёл - проверьте интернет на роутере"
     # shellcheck disable=SC2086
@@ -197,7 +202,7 @@ network() {
     tunnels=$(vward_map_vpns "$map" "$wan")
     [ -n "$tunnels" ] || fail "в Keenetic нет VPN-подключения. Настройте VPN (WireGuard, OpenVPN и др.) в Keenetic и запустите установку снова"
     ifaces=$(rci_json show/interface)
-    n=0 def=1
+
     routed=$(vward_select_tunnel "$map" 2>/dev/null | awk '{print $1}')
     list=$WORK/tunnels
     : > "$list"
@@ -207,22 +212,18 @@ network() {
             [(.description // ""), ((.type // "") | ascii_downcase), (if (.connected // "") == "yes" or (.link // "") == "up" then "работает" else "не подключён" end)] | join("\t")' 2>/dev/null)
         printf '%s\t%s\t%s\n' "$name" "$dev" "${info:-		}" >> "$list"
     done
+    # No question (owner 2026-10-18: questions belong in the Panel): the VPN Keenetic already
+    # routes a list through, else one that is connected, else the first. The Panel changes it:
+    # VPN -> the tunnel -> «Использовать для маршрутов».
     n=$(wc -l < "$list" | tr -d ' ')
+    k=$(awk -F '\t' -v r="$routed" '$1 == r {print NR; exit}' "$list")
+    [ -n "$k" ] || k=$(awk -F '\t' '$5 == "работает" {print NR; exit}' "$list")
+    [ -n "$k" ] || k=1
+    TUNNEL=$(sed -n "${k}p" "$list" | cut -f1); TUNNEL_DEV=$(sed -n "${k}p" "$list" | cut -f2)
     if [ "$n" -eq 1 ]; then
-        TUNNEL=$(cut -f1 "$list"); TUNNEL_DEV=$(cut -f2 "$list")
         ok "VPN: $TUNNEL ($(cut -f5 "$list"))"
     else
-        line "VPN-подключений: $n. Через какое пускать сайты, которые не открываются напрямую?"
-        i=0
-        while IFS="$(printf '\t')" read -r name dev desc type state; do
-            i=$((i + 1))
-            [ "$name" != "$routed" ] || def=$i
-            line "  $i) $name${desc:+ «$desc»} - $type, $state"
-        done < "$list"
-        [ "$ASSUME_YES" = 0 ] || [ -n "$routed" ] || fail "VPN-подключений несколько - запустите без --yes и выберите"
-        k=$(choose "Номер VPN" "$n" "$def") || fail "нет терминала для выбора - запустите файлом (sh install.sh)"
-        TUNNEL=$(sed -n "${k}p" "$list" | cut -f1); TUNNEL_DEV=$(sed -n "${k}p" "$list" | cut -f2)
-        ok "VPN: $TUNNEL"
+        ok "VPN: $TUNNEL (из $n; сменить: Панель VWARD → VPN → туннель → «Использовать для маршрутов»)"
     fi
 
     # The home network: the profile's own choice, or the owner's when there are several.

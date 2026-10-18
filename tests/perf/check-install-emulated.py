@@ -12,12 +12,12 @@ this repository with a release signed by a one-time key.
      removes the program and its cron lines, keeps the settings in a backup
      and takes AdaptiveAuto out of Keenetic again.
   2. a package that does not match its signature: nothing is left behind.
-  3. two VPN connections and --yes: the installer asks for a choice and
-     changes nothing.
+  3. two VPN connections, none connected or routed: the installer asks nothing,
+     takes the first and says where the Panel changes it.
   4. --check changes nothing.
   5. KeeneticOS 4 is refused.
-  6. KeeneticOS 5.0, AdGuard Home present, two VPN connections: the owner picks the
-     second on a terminal; VWARD routes through it and «Реклама» stays on. After
+  6. KeeneticOS 5.0, AdGuard Home present, two VPN connections: the installer takes
+     one by itself (routed, else connected, else the first); VWARD routes through it and «Реклама» stays on. After
      --uninstall the same router installs again.
 
 Needs root (chroot, mknod, mount) and busybox, jq, openssl, cc.
@@ -224,12 +224,11 @@ def part3_two_vpns(work, release):
         (root / "sys/class/net/ovpn_br0").mkdir()
         (root / "sys/class/net/ovpn_br0/tun_flags").write_text("0x1002\n")
         r = sh(root, "sh /emu/repo/install.sh --yes")
-        if r.returncode == 0 or "VPN-подключений: 2" not in r.stdout or "выберите" not in r.stdout:
-            fail(f"two VPNs with --yes must ask for a choice:\n{r.stdout}")
-        if "OpenVPN0 «Work» - openvpn" not in r.stdout:
-            fail(f"the VPN list must show each connection:\n{r.stdout}")
-        untouched(root, "two VPNs")
-        print("ok - two VPN connections: the owner chooses, nothing changes before")
+        if r.returncode != 0 or "[ PASS ] VWARD установлен" not in r.stdout or "VPN: Wireguard1 (из 2; сменить: Панель VWARD" not in r.stdout:
+            fail(f"two VPNs: the first is taken without a question:\n{r.stdout}")
+        if "Номер VPN" in r.stdout:
+            fail(f"the installer must not ask for the VPN:\n{r.stdout}")
+        print("ok - two VPN connections: the first is taken, no question")
     finally:
         teardown(root)
 
@@ -284,12 +283,12 @@ def part6_choice_agh_reinstall(work, release):
         (root / "sys/class/net/ovpn_br0/tun_flags").write_text("0x1002\n")
         (root / "opt/etc/AdGuardHome").mkdir(parents=True)
         (root / "opt/etc/AdGuardHome/AdGuardHome.yaml").write_text("http:\n  address: 127.0.0.1:3000\n")
-        # Enter: the packages; 2: the second VPN; Enter: install.
-        r = on_terminal(root, "sh /emu/repo/install.sh", "\n2\n\n")
+        # Enter: install (no question about packages or the VPN).
+        r = on_terminal(root, "sh /emu/repo/install.sh", "\n")
         out = r.stdout.replace("\r", "")
-        m = re.search(r"^  2\) (\S+)", out, re.M)
-        if r.returncode != 0 or "[ PASS ] VWARD установлен" not in out or not m:
-            fail(f"install with a choice on the terminal failed:\n{out}")
+        m = re.search(r"VPN: (\S+) \(из 2;", out)
+        if r.returncode != 0 or "[ PASS ] VWARD установлен" not in out or not m or "Номер VPN" in out:
+            fail(f"install on a terminal, the VPN taken without a question, failed:\n{out}")
         chosen = m.group(1)
         for text in ("KeeneticOS 5.0.8", "AdGuard Home найден", f"VPN: {chosen}", f"список AdaptiveAuto идёт через {chosen}"):
             if text not in out:
@@ -305,14 +304,13 @@ def part6_choice_agh_reinstall(work, release):
             fail(f"uninstall failed:\n{un.stdout}")
         if not (root / "opt/etc/init.d/S90crond").exists():
             fail("uninstall must keep S90crond: cron is shared and still running")
-        # Packages are there now: 2 and Enter.
-        again = on_terminal(root, "sh /emu/repo/install.sh", "2\n\n")
+        again = on_terminal(root, "sh /emu/repo/install.sh", "\n")
         out = again.stdout.replace("\r", "")
         if again.returncode != 0 or "[ PASS ] VWARD установлен" not in out or read(root / "opt/share/vward/VERSION").strip() != VERSION:
             fail(f"a reinstall after uninstall failed:\n{out}")
         if not re.search(r"^\d+$", read(root / "opt/var/run/vward-console-lighttpd.pid").strip()):
             fail("the Panel is not running after the reinstall")
-        print("ok - KeeneticOS 5.0, AdGuard Home, VPN chosen on a terminal; uninstall and install again")
+        print("ok - KeeneticOS 5.0, AdGuard Home, the connected VPN taken; uninstall and install again")
     finally:
         teardown(root)
 

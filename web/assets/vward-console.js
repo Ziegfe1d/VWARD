@@ -230,7 +230,7 @@ const API_ERRORS = {
   services_unavailable: 'каталог сервисов недоступен', invalid_service: 'неверное имя сервиса', unknown_service: 'такого сервиса нет в каталоге', service_too_big: 'у сервиса больше 300 доменов - Keenetic столько не примет в один список', service_not_enabled: 'сервис не включён', list_limit: 'Keenetic не принял домены: достигнут предел списка', no_free_list: 'в Keenetic нет свободного номера доменного списка', catalog_invalid: 'каталог скачался повреждённым - работает прежний',
   write_failed: 'не удалось записать файл', custom_manifest_url: 'адрес манифеста задан вручную - канал меняется в update.conf', invalid_tunnel: 'недопустимое имя туннеля', tunnel_no_handshake: 'сервер не ответил на рукопожатие за 30 секунд - туннель не изменён', conf_no_address: 'в файле нет адреса IPv4 (строка Address)', engine_failed: 'программа модуля не ответила', engine_start_failed: 'программа модуля не запустилась', engine_unavailable: 'модуль туннеля не установлен', main_tunnel: 'это туннель по умолчанию: сначала назначьте по умолчанию другой туннель', tunnel_off: 'туннель выключен: сначала включите его на его странице', tunnel_address_taken: 'такой адрес в туннеле уже занят другим туннелем: у двух туннелей он должен быть разным', invalid_subnet: 'нужна подсеть IPv4, например 149.154.160.0/20 (не шире /8)', private_subnet: 'это адреса домашней сети, провайдера или служебные - в VPN они не отправляются', invalid_description: 'название: до 64 символов, без кавычек', no_free_tunnel: 'на роутере нет свободного номера туннеля',
   conf_empty: 'файл пустой', conf_syntax: 'это не файл WireGuard', conf_peer_count: 'в файле должен быть ровно один [Peer]', conf_key_private: 'неверный PrivateKey', conf_public_key: 'неверный PublicKey', conf_preshared_key: 'неверный PresharedKey', conf_address: 'нет адреса IPv4 в Address', conf_endpoint: 'неверный Endpoint (нужно сервер:порт)', conf_mtu: 'MTU вне 1280-1500', conf_keepalive: 'неверный PersistentKeepalive', conf_allowed_ips: 'неверный AllowedIPs', conf_awg: 'неверные параметры AmneziaWG', conf_unknown_setting: 'в файле настройки, которых не знают ни Keenetic, ни модуль AmneziaWG VWARD (новая версия AmneziaWG - нужно обновление модуля); без них туннель работал бы не так, как в файле', tunnel_device_missing: 'туннель не поднят на роутере', unknown_tunnel: 'туннель не найден',
-  failopen_active: 'туннель недоступен, списки VPN на резервном канале: дождитесь восстановления', policy_sync_busy: 'идёт обновление IP-категорий, повторите позже',
+  failopen_active: 'туннель недоступен, списки VPN идут напрямую: дождитесь восстановления', policy_sync_busy: 'идёт обновление IP-категорий, повторите позже',
   unsupported_route: 'правило маршрута группы задано нестандартно: переключите туннель в веб-интерфейсе Keenetic',
   profile_verification_failed: 'профиль устройства не принял новый туннель, изменения отменены',
   rollback_incomplete: 'откат не завершён: проверьте маршруты групп в веб-интерфейсе Keenetic',
@@ -1194,12 +1194,11 @@ const RENDER = {
     // The switch: on and off right in the list (off asks first; the default tunnel is not
     // switched off - its lists would go direct).
     const tsw = t => '<span class="row-acts">' + sw('data-tunsw="' + esc(t.name) + '"', TUNBUSY[t.name] ? TUNBUSY[t.name] !== 'down' : !tunOff(t), (tunOff(t) ? 'Включить ' : 'Выключить ') + (t.description || t.name),
-      t.name === managed || !cfgOk() || !!TUNBUSY[t.name]) + '</span>';
+      t.name === managed || tunLost(t) || !cfgOk() || !!TUNBUSY[t.name]) + '</span>';
     const row = t => { const up = isTrue(t.connected); return '<li class="row link tun" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.description || t.name) + '</b><small>' + (t.name === managed ? '<span class="st ok">по умолчанию</span>' + (tunSub(t) ? ' · ' : '') : '') + esc(tunSub(t) + (tqShort(t) ? ' · ' + tqShort(t) : '')) + '</small>' + (TUNERR[t.name] ? '<small class="st crit">' + esc(TUNERR[t.name]) + '</small>' : '') + '</div><span class="pill ' + tunPill(t)[0] + '">' + tunPill(t)[1] + '</span>' + tsw(t) + ico('chevron', 'chev') + '</li>'; };
     return loadError(['status']) + awgLostPanel() + nativePanel() +
       panel('Туннели', (list.length ? '<ul class="rows">' + list.map(row).join('') + '</ul>' : empty((st().wg || {}).interfaces_unknown ? 'Keenetic не ответил: список туннелей не загружен. Обновите страницу через несколько секунд.' : 'Туннелей нет')) +
-        '<div class="panel-actions">' + btn('tunnel-create', 'plus', 'Добавить туннель', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnels'),
-        { desc: 'Нажмите на туннель, чтобы открыть его; переключатель включает и выключает его.' }) +
+        '<div class="panel-actions">' + btn('tunnel-create', 'plus', 'Добавить туннель', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnels')) +
       tunnelsQualityPanel() + vpnGuardPanel() +
       panel('Дополнительно', kv([['Модуль AmneziaWG', 'Утилиты', '', 'd-awg', '', 'туннели, которые прошивка не умеет', 'out']]));
   },
@@ -1940,7 +1939,7 @@ function vpnGuardPanel() {
   const wg = st().wg || {};
   return panel('Агент VPN', '<dl class="kv">' + ctrlRow('Агент VPN', sw('data-cfg-tg', guardOn(), 'Агент VPN', !cfgOk())) + '</dl>' +
     confirmBox('tg-off', 'Выключить агент VPN? При отказе туннеля маршрутизация списков VPN не переключится на резервный канал.', 'Выключить', true) + kv([
-    ['Маршрутизация списков', isTrue(wg.failopen_active) ? 'Резервный канал (провайдер)' : 'VPN', isTrue(wg.failopen_active) ? 'warn' : 'ok'],
+    ['Маршрутизация списков', isTrue(wg.failopen_active) ? 'Напрямую' : 'VPN', isTrue(wg.failopen_active) ? 'warn' : 'ok'],
     current === 'a-tunnel' ? null : ['История агента VPN', '', '', 'a-tunnel'],
     ['Восстановление VPN', 'автоматическое', '', null, '', 'проверка туннеля каждые 6 минут'],
     ['Отказов подряд', String(num(wg.down_streak) || 0)]
@@ -2311,11 +2310,16 @@ const awgLost = () => (S.awg && S.awg.lost) || [];
 const vlessOf = name => ((S.awg && S.awg.vless && S.awg.vless.tunnels) || []).find(x => x.name === name);
 const TUN_TYPE = { wireguard: 'WireGuard', openvpn: 'OpenVPN', sstp: 'SSTP', pptp: 'PPTP', l2tp: 'L2TP', ike: 'IPsec', ipsec: 'IPsec', proxy: 'Proxy', opkgtun: 'OpkgTun' };
 const awgOf = name => ((S.awg && S.awg.tunnels) || []).find(x => x.name === name);
+// A VWARD engine's tunnel whose settings are gone (the USB stick formatted, owner 2026-10-18):
+// Keenetic keeps the OpkgTun connection, no engine holds it. Known once the engines answered.
+const tunLost = t => !!(t && S.awg) && String(t.type || '').toLowerCase() === 'opkgtun' && !vlessOf(t.name) && !awgOf(t.name);
 // A tunnel's line in the list: its kind and anything wrong with it; the handshake and the rest
 // are on the tunnel's own page.
 const tunSub = t => {
   const v = vlessOf(t.name), e = awgOf(t.name);
-  if (tunGuardOff(t)) return 'выключен агентом VPN: отказ, списки на резервном канале';
+  if (tunLost(t)) return 'настройки не найдены';
+  // The status says it; why - on the tunnel's page (one status a row, owner 2026-10-18).
+  if (tunGuardOff(t)) return '';
   if (v) return 'VLESS' + (v.running || tunOff(t) ? '' : ' · программа остановлена');
   if (e) return 'модуль AmneziaWG' + (e.running || tunOff(t) ? '' : ' · программа остановлена');
   return t.type === 'wireguard' && t.awg ? 'AmneziaWG' : TUN_TYPE[t.type] || t.type || '';
@@ -2324,9 +2328,9 @@ const tunSub = t => {
 const tunOff = t => String(t.state || '').toLowerCase() === 'down' && !tunGuardOff(t);
 // Why the VPN agent switched the default tunnel off (its own words, from the agent's state).
 const FO_WHY = { silent: 'туннель не отвечал', restart: 'перезапуск модуля не помог', restart_servers: 'перезапуск Xray и другие серверы подписки не помогли', no_fallback: 'другого туннеля на связи нет', fallback_off: 'переход на другой туннель выключен' };
-const foText = wg => ((wg && wg.failopen_reason) || []).map(r => FO_WHY[r]).filter(Boolean).join('; ');
+const foText = wg => tunLost(tunNow(prof().tunnel_interface)) ? 'настройки туннеля не найдены - добавьте его заново' : ((wg && wg.failopen_reason) || []).map(r => FO_WHY[r]).filter(Boolean).join('; ');
 // Status of a tunnel in lists: switched off by the owner - grey, not a fault; by the VPN agent - a warning.
-const tunPill = t => TUNBUSY[t.name] ? ['', TUN_BUSY[TUNBUSY[t.name]]] : tunOff(t) ? ['', 'Выключен'] : tunGuardOff(t) ? ['warn', 'Выключен агентом'] : isTrue(t.connected) ? ['ok', 'В сети']
+const tunPill = t => TUNBUSY[t.name] ? ['', TUN_BUSY[TUNBUSY[t.name]]] : tunLost(t) ? ['warn', 'Нет настроек'] : tunOff(t) ? ['', 'Выключен'] : tunGuardOff(t) ? ['warn', 'Выключен агентом'] : isTrue(t.connected) ? ['ok', 'В сети']
   : TUNUP[t.name] ? ['', 'Подключение'] : ['warn', 'Не в сети'];
 // The guard switched it off itself (fail-open: the lists go direct until it answers).
 const tunGuardOff = t => String(t.state || '').toLowerCase() === 'down' && isTrue((st().wg || {}).failopen_active) && t.name === prof().tunnel_interface;
@@ -2348,6 +2352,7 @@ async function tunnelState(op, name) {
   if (!r.ok) TUNERR[name] = r.text;
   if (r.ok && op !== 'down') TUNUP[name] = Date.now(); else delete TUNUP[name];
   await Promise.all([load('status', true), load('awg', true)]);
+  if (r.ok && op === 'up' && tunOff(tunNow(name))) { r.ok = false; TUNERR[name] = 'Туннель не включился'; delete TUNUP[name]; }
   delete TUNBUSY[name]; render();
   if (r.ok && op !== 'down') await tunnelConnecting(name);
   return r;
@@ -2677,7 +2682,7 @@ function tunnelConfSheet(mode, name) {
 }
 function tunnelTrafficPanel(name) {
   const L = S.lists || {}, lists = (L.lists || []).filter(l => l.route === name), nets = (L.subnets || {})[name] || [];
-  return panel('Что идёт через туннель', (!S.lists ? empty('Загрузка…') :
+  return panel('Маршруты', (!S.lists ? empty('Загрузка…') :
       // Lists are changed in one place, «Доменные списки»; subnets on their own page, not a sheet here.
       kv([['Доменные списки', lists.length ? String(lists.length) : 'нет', '', 'lists'],
           ['Подсети', nets.length ? fmtInt(nets.length) : 'нет', '', 'tn-' + name]])) + resultBox('tunnel-traffic'));
@@ -2710,13 +2715,17 @@ function tunnelManagePanel(name, managed) {
   // VWARD's engines (AmneziaWG, VLESS) are Keenetic «OpkgTun» connections: checked first.
   const own = ((st().wg && st().wg.interfaces) || []).find(t => t.name === name);
   const engine = vlessOf(name) || ((S.awg && S.awg.tunnels) || []).some(t => t.name === name);
-  if (!engine && own && own.type && own.type !== 'wireguard')
+  const lost = tunLost(own);
+  if (!engine && !lost && own && own.type && own.type !== 'wireguard')
     return [panel('Конфигурация', '<p class="panel-desc">Туннель настраивается в Keenetic, VWARD только направляет через него маршруты.</p>')];
   const others = ((st().wg && st().wg.interfaces) || []).filter(t => t.name !== name);
   const del = managed ? '<p class="panel-desc">Это туннель по умолчанию, его нельзя удалить или выключить. Сначала назначьте туннелем по умолчанию другой туннель.</p>' :
     (confirm && confirm.id === 'tunnel-delete' ? '<div class="confirm danger"><span>Удалить ' + esc(tunLabel(name)) + '? Его списки и подсети перейдут: ' + esc(confirm.to === 'bypass' ? 'на провайдера' : confirm.to === 'vpn' ? 'в туннель по умолчанию' : tunLabel(confirm.to)) + '. Ключи туннеля удалятся.</span><button class="btn small danger" type="button" data-act="confirm-yes">Удалить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' :
       '<dl class="kv">' + ctrlRow('Куда передать списки и подсети', sel('data-tunnel-del-to', 'Куда передать', [['vpn', 'Туннель по умолчанию'], ['bypass', 'Провайдер']].concat(others.filter(t => t.name !== prof().tunnel_interface).map(t => [t.name, tunLabel(t.name)])), 'vpn')) + '</dl>' +
       '<div class="panel-actions">' + btn('tunnel-delete', 'close', 'Удалить туннель', 'danger', cfgOk() ? '' : ' disabled') + '</div>');
+  if (lost)
+    return [panel('Настройки не найдены', '<p class="panel-desc">Ключей и адреса сервера этого туннеля нет на флешке (например, после её замены или форматирования). Добавьте туннель заново: VPN → «Добавить туннель»' +
+      (managed ? ', сделайте новый туннелем по умолчанию, затем удалите этот.' : ', а этот удалите.') + '</p>' + del)];
   const vl = vlessOf(name);
   if (vl)
     return [vlessServersPanel(name),
@@ -2828,11 +2837,11 @@ function tunnelProbePanel(name) {
     vlessOf(name) ? null : ['Keepalive', sv.keepalive ? sv.keepalive + ' с' : 'выключен']
   ]) + '<p class="panel-desc">Проверено в ' + esc(r.at) + '</p>';
   const t = ((st().wg && st().wg.interfaces) || []).find(x => x.name === name) || {}, canOff = name !== prof().tunnel_interface && !tunOff(t);
-  return panel('Проверка туннеля', body + (confirmBox('tunnel-down', 'Выключить ' + tunLabel(name) + '? Трафик через него остановится, списки и подсети этого туннеля будут недоступны, пока он выключен. Настройка сохранится.', 'Выключить', true) ||
+  return panel('Проверка', body + (confirmBox('tunnel-down', 'Выключить ' + tunLabel(name) + '? Трафик через него остановится, списки и подсети этого туннеля будут недоступны, пока он выключен. Настройка сохранится.', 'Выключить', true) ||
     '<div class="panel-actions even">' + btn('tunnel-probe', 'check', 'Проверить', 'primary', ' data-name="' + esc(name) + '"' + (r && r.busy ? ' disabled' : '')) +
     btn('tunnel-restart', 'refresh', 'Перезапустить', '', ' data-name="' + esc(name) + '"' + (cfgOk() && !TUNBUSY[name] && !TUNUP[name] ? '' : ' disabled')) +
     (canOff ? btn('ask', 'close', 'Выключить', 'danger', ' data-confirm="tunnel-down"' + (cfgOk() && !TUNBUSY[name] ? '' : ' disabled')) : '') + '</div>'),
-    { desc: 'Адрес и страна выхода, отклик. Только по кнопке.' });
+    {});
 }
 const wifiHost = mac => { const c = ((S.wifi && S.wifi.clients) || []).find(x => x.mac === mac); return (c && c.host) || null; };
 const wifiName = mac => { const h = wifiHost(mac); return (h && (h.name || h.hostname)) || mac; };

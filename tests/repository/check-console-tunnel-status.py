@@ -6,6 +6,8 @@
 - A tunnel the VPN agent switched off is a warning in the bell: when and why, the sites
   go direct, the agent turns it back on.
 - A switched-on tunnel that is not connected is a warning, as before.
+- A VWARD engine's tunnel whose settings are gone (USB stick formatted, owner 2026-10-18):
+  «Нет настроек», and the agent's switch-off of it says why.
 """
 import json
 import re
@@ -38,7 +40,7 @@ def line(start):
 
 
 code = "".join([
-    line("const isTrue = "), line("const FO_WHY = "), line("const foText = "), grab("const tunPill = ", "];\n"), line("const tunGuardOff = "),
+    line("const isTrue = "), line("const vlessOf = "), line("const awgOf = "), line("const tunLost = "), line("const tunNow = "), line("const FO_WHY = "), line("const foText = "), grab("const tunPill = ", "];\n"), line("const tunGuardOff = "),
     line("const tunOff = "), line("const viaIs = "), line("const vpnDirect = "),
     grab("function tunDupAddresses("), grab("function notifications() {"), grab("function cardData(id) {"),
 ])
@@ -59,6 +61,11 @@ const out = {
 };
 // Switched in place: what is going on, then «Подключение» until the server answers.
 TUNBUSY.OpkgTun0 = 'down'; out.busy = run({ interfaces: [T('OpkgTun0', true, 'up')] }).pills; delete TUNBUSY.OpkgTun0;
+// Settings gone: an OpkgTun no engine holds (the engines answered: S.awg).
+S.awg = { tunnels: [{ name: 'OpkgTun0' }], vless: { tunnels: [] } };
+const L = (name, state) => Object.assign(T(name, false, state), { type: 'opkgtun' });
+out.lost = run({ interfaces: [L('OpkgTun0', 'down'), L('OpkgTun1', 'down'), L('OpkgTun2', 'down')], failopen_active: true, failopen_reason: ['silent'] });
+delete S.awg;
 TUNUP.OpkgTun0 = 1; out.connecting = run({ interfaces: [T('OpkgTun0', false, 'up')] }).pills; delete TUNUP.OpkgTun0;
 console.log(JSON.stringify(out));
 """
@@ -85,4 +92,8 @@ if len(ag) != 1 or "T1791770000000" not in ag[0] or "другие серверы
     fail(f"the agent's switch-off: when and why: {o['agentOff']['notes']}")
 if any("не в сети" in n.lower() for n in o["agentOff"]["notes"]) or o["agentOff"]["pills"][1] != "warn:Выключен агентом":
     fail(f"the agent's switch-off is told once, as such: {o['agentOff']}")
+if o["lost"]["pills"] != [":Выключен", "warn:Нет настроек", "warn:Нет настроек"]:
+    fail(f"a tunnel without its settings says so: {o['lost']['pills']}")
+if not any("настройки туннеля не найдены" in n for n in o["lost"]["notes"]):
+    fail(f"the agent's switch-off of a tunnel without settings says why: {o['lost']['notes']}")
 print("CONSOLE_TUNNEL_STATUS=PASS")

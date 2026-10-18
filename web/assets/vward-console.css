@@ -217,6 +217,7 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .row:first-child{border-top:0}
 .row-main{flex:1 1 150px;min-width:0}
 .st{font-weight:650}
+.row-main small .st{white-space:nowrap}
 .st.ok{color:var(--ok)}
 .st.crit{color:var(--crit)}
 .st.warn{color:var(--warn)}
