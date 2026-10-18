@@ -108,6 +108,7 @@ python3 tests/repository/check-console-site-do.py || fail "check an address: VPN
 python3 tests/repository/check-ads-page-speed.py || fail "Ads page: only what it shows, programs side by side, AdGuard Home address cached"
 python3 tests/repository/check-console-tunnels.py || fail "VPN list and tunnel page: default tunnel, engine data, switching off"
 python3 tests/repository/check-console-tunnel-status.py || fail "Tunnel statuses: owner switch-off quiet, agent switch-off with time and reason"
+python3 tests/repository/check-agents-watch.py || fail "agents observation mode"
 python3 tests/repository/check-console-overview-cards.py || fail "Overview cards: three lines, honest values"
 python3 tests/repository/check-console-update-method.py || fail "Updates: update method switch and last method"
 python3 tests/repository/check-console-notes.py || fail "Bell: pop-ups top right, history on the router, errors under fields"

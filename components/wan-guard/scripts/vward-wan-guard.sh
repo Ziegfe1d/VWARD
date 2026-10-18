@@ -425,6 +425,12 @@ wan_recover()
         fi
 
         ACTION="WAN_BOUNCE"
+        # Observation mode of the network agent (fix.28.6): proposed, not done.
+        if command -v vward_agent_acts >/dev/null 2>&1 &&
+           ! vward_agent_acts network wan-bounce "Интернет не отвечает: выключить и включить подключение $VWARD_WAN_INTERFACE"; then
+            ACTION="WOULD_WAN_BOUNCE"
+            return
+        fi
 
         umask 077
         WAN_BOUNCE_PHASE=DOWN_COMMAND
@@ -509,6 +515,11 @@ wan_recover()
     fi
 
     ACTION="DHCP_RENEW"
+    if command -v vward_agent_acts >/dev/null 2>&1 &&
+       ! vward_agent_acts network dhcp-renew "Интернет не отвечает: заново получить адрес у провайдера на $VWARD_WAN_INTERFACE"; then
+        ACTION="WOULD_DHCP_RENEW"
+        return
+    fi
 
     LD_LIBRARY_PATH= "$NDMC" -c "interface $VWARD_WAN_INTERFACE ip dhcp client renew" \
         >/tmp/vward-wan-guard.ndmc.renew 2>&1

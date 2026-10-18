@@ -147,6 +147,12 @@ check_leak()
     N=$((N + 1))
     eval "OVER_$1=$N"
     [ "$N" -ge 3 ] || return 0
+    # Observation mode (fix.28.6): proposed, not done.
+    if command -v vward_agent_acts >/dev/null 2>&1 &&
+       ! vward_agent_acts components "mem-restart:$1" "$1 занимает $RSS КБ памяти (предел $3 КБ): перезапустить"; then
+        eval "OVER_$1=0"
+        return 0
+    fi
     kill "$L_PID" 2>/dev/null
     log_event "MEM_RESTART|$1|rss_kb=$RSS|limit_kb=$3"
     eval "OVER_$1=0"
@@ -263,6 +269,8 @@ agent_do()
         restart:*)
             AN=${1#restart:}
             AF=$(pidfile_of "$AN") || return 1
+            ! command -v vward_agent_acts >/dev/null 2>&1 ||
+                vward_agent_acts components "restart:$AN" "Перезапустить $AN (просит $RQ_BY)" || return 0
             AP=
             [ ! -r "$AF" ] || read -r AP < "$AF" || :
             case "$AP" in ''|*[!0-9]*) ;; *)
@@ -374,7 +382,9 @@ watch_agents()
             printf '%s\n' "$WA_RUNS" | awk -v p="$WPP" -v s="$WS" '$1 == p && $2 == s {f = 1} END {exit !f}' && continue
             WN=$((WN + 1))
             WAGE=$(age_of "$WP") || continue
-            if [ "$WH" -gt 0 ] && [ "$WAGE" -gt "$WH" ]; then
+            if [ "$WH" -gt 0 ] && [ "$WAGE" -gt "$WH" ] &&
+               { ! command -v vward_agent_acts >/dev/null 2>&1 ||
+                 vward_agent_acts components "hung:$WS" "$WS работает $WAGE с (больше $WH с): остановить зависший запуск"; }; then
                 kill "$WP" 2>/dev/null && log_event "AGENT_HUNG|$WG|$WS|pid=$WP|age=$WAGE|stopped"
                 WST=hung
             fi

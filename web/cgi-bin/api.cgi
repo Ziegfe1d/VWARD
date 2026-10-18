@@ -758,13 +758,20 @@ if [ "$ACTION" = config-data ]; then
     [ -n "$COMPONENTS" ] || COMPONENTS='[]'
     [ "$W_EN" = 1 ] || W_EN=0
     [ "$W_CTL" = 1 ] || W_CTL=0
+    # Observation mode of the agents and what they proposed (the newest 100 first).
+    AGENTS_MODE="$(awk -F= '$1 ~ /^(all|network|components|updates|maintenance)$/ && $2 ~ /^(act|watch)$/ {printf "%s\t%s\n", $1, $2}' "${VWARD_AGENTS_CONF:-$CONFIG_ETC/agents.conf}" 2>/dev/null |
+        "$JQ" -Rsc '[split("\n")[] | select(length > 0) | split("\t") | {(.[0]): .[1]}] | add // {}' 2>/dev/null)"
+    [ -n "$AGENTS_MODE" ] || AGENTS_MODE='{}'
+    PROPOSED="$(tail -n 100 "${VWARD_PROPOSED:-/opt/var/lib/vward/agents/proposed.tsv}" 2>/dev/null |
+        "$JQ" -Rn '[inputs | split("\t") | select(length == 4) | {at: (.[0] | tonumber? // 0), agent: .[1], action: .[2], text: .[3]}] | reverse' 2>/dev/null)"
+    [ -n "$PROPOSED" ] || PROPOSED='[]'
     "$JQ" -n \
       --arg group "${VWARD_POLICY_GROUP:-}" --argjson groups "${TGROUPS:-[]}" --argjson router "$ROUTER" \
       --argjson route_domains "${ROUTE_DOMAINS:-[]}" --argjson force "${FORCE:-[]}" --argjson adaptive "${ADAPT:-[]}" \
       --argjson categories "${CATS:-[]}" --argjson tunnel_guard "$TG" --argjson wan_guard "$WG_ON" --argjson components "$COMPONENTS" \
       --argjson adaptive_on "$AD_ON" --argjson classifier_on "$CL_ON" --argjson ip_excluded "${IPX:-[]}" \
       --argjson w_en "$W_EN" --argjson w_ctl "$W_CTL" \
-      --argjson wan_params "$WAN_PARAMS" \
+      --argjson wan_params "$WAN_PARAMS" --argjson agents_mode "$AGENTS_MODE" --argjson proposed "$PROPOSED" \
       --arg w_window "$(wnum "$W_WIN" 86400)" --arg w_switch "$(wnum "$W_SW" 20)" \
       --arg w_weak "$(wnum "$W_WEAK" 5)" --arg w_rssi "$(wnum "$W_RSSI" -75)" \
       --arg u_start "$U_START" --arg u_end "$U_END" --arg u_interval "$U_INTERVAL" --arg u_window "$U_WINDOW" --arg u_method "$U_METHOD" \
@@ -772,6 +779,7 @@ if [ "$ACTION" = config-data ]; then
       --argjson writable "$([ -x "$CONFIG_HELPER" ] && echo true || echo false)" \
       '{ok:true,writable:$writable,
         route:{group:$group,groups:$groups,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
+        agents:{mode:$agents_mode,proposed:$proposed},
         tunnel_guard:{enabled:$tunnel_guard},wan_guard:{enabled:$wan_guard,params:$wan_params},components:$components,
         wifi:{ENABLED:($w_en==1),CONTROL_ENABLED:($w_ctl==1),WINDOW_SEC:($w_window|(tonumber? // null)),BAND_SWITCH_WARN:($w_switch|(tonumber? // null)),WEAK_5G_SAMPLE_WARN:($w_weak|(tonumber? // null)),WEAK_5G_RSSI:($w_rssi|(tonumber? // null))},
         update:{safe_window_start:$u_start,safe_window_end:$u_end,check_interval_seconds:($u_interval|(tonumber? // null)),apply_window:(if $u_window == "any" then "any" else "window" end),update_method:(if $u_method == "files" then "files" else "full" end),feed:(if $u_feed == "" then "custom" else $u_feed end)}}'
@@ -801,7 +809,7 @@ if [ "$ACTION" = config ]; then
         wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;
         component) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=COMPONENT_DISABLE ;;
         adaptive-mode|classifier|smartdns-guard|tunnel-fallback|tunnel-return) set -- "$OP" "$VALUE" ;;
-        journal) set -- "$OP" "$TARGET" "$VALUE" ;;
+        journal|agents-mode) set -- "$OP" "$TARGET" "$VALUE" ;;
         ip-category) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
         policy-group) set -- "$OP" "$TARGET" ;;

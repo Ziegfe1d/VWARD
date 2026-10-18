@@ -2008,6 +2008,28 @@ op_journal() {
     done_ok "journal $1=$2" changed
 }
 
+# op_agents_mode AGENT MODE: «Наблюдение | Действие» (fix.28.6). all sets every agent (their own
+# choices go); one agent: its own choice. Read by vward_agent_mode (the admission library).
+op_agents_mode() {
+    case "$1:$2" in
+        all:act|all:watch) ;;
+        network:act|network:watch|components:act|components:watch|updates:act|updates:watch|maintenance:act|maintenance:watch) ;;
+        *) die invalid_value 64 ;;
+    esac
+    am_conf=${VWARD_AGENTS_CONF:-$ETC/agents.conf}
+    if [ "$1" = all ]; then
+        am_old=$(cat "$am_conf" 2>/dev/null)
+        [ "$am_old" != "all=$2" ] || done_ok "agents-mode all=$2" unchanged
+        [ ! -f "$am_conf" ] || backup_file "$am_conf" || die backup_failed
+        new_tmp "$am_conf" || die write_failed
+        printf 'all=%s\n' "$2" > "$TMPFILE" || die write_failed
+        install_tmp "$am_conf" 0644 || die write_failed
+        done_ok "agents-mode all=$2" changed
+    fi
+    set_kv "$am_conf" "$1" "$2" 0644 || done_ok "agents-mode $1=$2" unchanged
+    done_ok "agents-mode $1=$2" changed
+}
+
 # ---------- Components ----------
 #
 # Disabling a component also disables everything that requires it running
@@ -2334,6 +2356,8 @@ op_ext_daily() {
     while IFS="$(printf '\t')" read -r dp_pkg dp_from dp_to; do
         ext_critical "$dp_pkg" && continue
         case "$dp_pkg" in adguardhome-go) [ "$kv_agh" = 1 ] || continue ;; *) [ "$kv_ent" = 1 ] || continue ;; esac
+        # Observation mode of the updates agent (fix.28.6): proposed, not installed.
+        vward_agent_acts updates "ext-upgrade:$dp_pkg" "Установить обновление $dp_pkg $dp_from → $dp_to" || continue
         echo "Автоматически: $dp_pkg"
         ( trap - EXIT; op_ext_upgrade "$dp_pkg" auto ) || true
         n=$((n + 1))
@@ -2375,12 +2399,13 @@ case "$OP" in backup-create|ext-check|journal) ;; *) [ ! -e "$COMPONENT_STATE/vw
 ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$ADMISSION_LIB" ] || die admission_unavailable
 . "$ADMISSION_LIB"
+command -v vward_agent_acts >/dev/null 2>&1 || vward_agent_acts() { return 0; }
 vward_admission_enter console-config || die updater_busy 75
 
 case "$OP" in
     force-vpn|domain-category|tunnel-guard|tunnel-fallback|tunnel-return|tunnel-auto|wan-guard|component|\
     adaptive-mode|classifier|ip-category|console-auth|console-devices|update-feed|domain-list-watch|\
-    smartdns-guard|smartdns-domain|wifi|update|wan-param|wifi-host|service|service-category|ext-auto|firmware|journal)
+    smartdns-guard|smartdns-domain|wifi|update|wan-param|wifi-host|service|service-category|ext-auto|firmware|journal|agents-mode)
         edit_lock ;;
 esac
 
@@ -2435,6 +2460,7 @@ case "$OP" in
     ext-upgrade) op_ext_upgrade "$ARG1" "$ARG2" ;;
     ext-auto) op_ext_auto "$ARG1" "$ARG2" ;;
     journal) op_journal "$ARG1" "$ARG2" ;;
+    agents-mode) op_agents_mode "$ARG1" "$ARG2" ;;
     firmware) op_firmware "$ARG1" "$ARG2" ;;
     *) die invalid_operation 64 ;;
 esac

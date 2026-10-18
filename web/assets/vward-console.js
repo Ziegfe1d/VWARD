@@ -670,6 +670,7 @@ const DETAILS = {
   'd-components': { title: 'Компоненты', parent: 'system' },
   'd-diag': { title: 'Диагностика', parent: 'system' },
   'd-stability': { title: 'Стабильность', parent: 'system', data: ['stab'] },
+  'd-agents': { title: 'Режим агентов', parent: 'system', data: ['config'] },
   'd-files': { title: 'Файлы VWARD', parent: 'system', data: ['files'] },
   'd-cron': { title: 'Задания по расписанию', parent: 'd-diag' },
   'u-vward': { title: 'VWARD', parent: 'updates', data: ['status', 'update', 'config'] },
@@ -1116,8 +1117,30 @@ function jobOk(names) {
 }
 // The components agent watches the other three (late, hung) and says so; their own runs too.
 const AGENT_STATE = { late: ['crit', 'Не запускается'], hung: ['warn', 'Зависал, перезапущен'] };
+// Observation mode (fix.28.6): an agent that only watches writes down what it would do.
+const AGENTS = [['network', 'Агент сети'], ['components', 'Агент компонентов'], ['updates', 'Агент обновлений'], ['maintenance', 'Агент обслуживания']];
+const AGENT_NAME = Object.fromEntries(AGENTS);
+function agentsMode() {
+  const m = ((S.config && S.config.agents) || {}).mode || {}, all = m.all === 'watch' ? 'watch' : 'act';
+  return Object.fromEntries([['all', all]].concat(AGENTS.map(a => [a[0], m[a[0]] === 'watch' || m[a[0]] === 'act' ? m[a[0]] : all])));
+}
+const modePrev = {};
+// «Наблюдение | Действие» as one slider, like the Wi-Fi bands.
+function modeSlider(agent, cur, label) {
+  const ops = [['watch', 'Наблюдение'], ['act', 'Действие']], to = cur === 'act' ? 1 : 0, from = modePrev[agent] != null ? modePrev[agent] : to, on = cfgOk();
+  modePrev[agent] = to;
+  return '<div class="seg-slider two' + (on ? '' : ' off') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
+    ops.map(o => '<button type="button" role="radio" data-agent-mode="' + agent + '" data-mode="' + o[0] + '" aria-checked="' + (o[0] === cur) + '"' + (on ? '' : ' disabled') + '>' + o[1] + '</button>').join('') + '</div>';
+}
+// What keeps the home online and the Panel reachable: never gated by the observation mode.
+const AGENT_LOCKED = [
+  ['Запуск остановленных программ VWARD', 'агент компонентов'], ['Панель VWARD и SSH', 'агент компонентов'],
+  ['AdGuard Home вне цепочки DNS, когда он молчит', 'интернет дома не пропадает'], ['Обновления самого VWARD', 'через них приходят исправления'],
+  ['Сжатие журналов и место на флешке', 'агент обслуживания']
+];
 function agentsPanel() {
   const s = st(), sv = s.services || {}, known = !!s.services, ag = sv.agents || {};
+  const am = agentsMode(), watching = AGENTS.filter(a => am[a[0]] === 'watch').length;
   // A run that ended with an error (busy Keenetic, the last run still going) is not a broken agent:
   // the components agent says «Не запускается» or «Зависал» when it is (a Viva 2026-10-13).
   const pill = (seen, ok) => seen && AGENT_STATE[seen] ? AGENT_STATE[seen] : ok == null ? ['', '—'] : ok ? ['ok', 'Работает'] : ['warn', 'Последний запуск с ошибкой'];
@@ -1127,7 +1150,8 @@ function agentsPanel() {
     ['Агент обновлений', 'VWARD, AdGuard Home, Entware, прошивка, списки', pill(ag.updates, known ? !!sv.crond : null), 'updates'],
     ['Агент обслуживания', 'журналы, копии настроек, место на флешке', pill(ag.maintenance, jobOk(['vward-housekeeping.sh'])), 'logs']
   ];
-  return panel('Агенты', kv(rows.map(r => [r[0], r[2][1], r[2][0], r[3], '', r[1]])),
+  return panel('Агенты', kv(rows.map(r => [r[0], r[2][1], r[2][0], r[3], '', r[1]]).concat([
+      ['Режим агентов', !S.config ? '…' : watching === AGENTS.length ? 'Наблюдение' : watching ? 'Разный' : 'Действие', watching ? 'warn' : '', 'd-agents']])),
     { desc: 'Каждый агент сам следит за своей зоной и чинит её; одно действие делает только один агент. Агент компонентов следит и за остальными: чтобы запускались вовремя, не зависали и не работали дважды.' });
 }
 
@@ -1565,6 +1589,15 @@ const RENDER = {
       panel('Диагностика', (d && d.checks ? '<ul class="rows">' + d.checks.map(x => { const to = x.id === 'smartdns' && /IP-категория/.test(x.detail || '') ? 'd-ipcats' : map[x.id]; return '<li class="row' + (to ? ' link" role="button" tabindex="0" data-go="' + to + '"' : '"') + '><div class="row-main"><b>' + esc(x.label) + '</b><small>' + esc(x.detail || '') + '</small></div><span class="pill ' + (x.status === 'PASS' ? 'ok' : x.status === 'FAIL' ? 'crit' : 'warn') + '">' + (x.status === 'PASS' ? 'Работает' : x.status === 'FAIL' ? 'Не работает' : 'Внимание') + '</span>' + (to ? ico('chevron', 'chev') : '') + '</li>'; }).join('') + '</ul>' : empty(S.errors.diag ? 'Диагностика не выполнена: ' + S.errors.diag : 'Загрузка…')) +
       '<div class="panel-actions">' + btn('diag-run', 'check', 'Запустить проверку', 'primary') + '</div>') +
       panel('Технические журналы', kv([['Технические журналы', 'для сохранения и отправки', '', 'logs']]), { desc: 'Журналы как есть, для диагностики.' });
+  },
+  'd-agents'() {
+    const am = agentsMode(), pr = ((S.config && S.config.agents) || {}).proposed || [];
+    return loadError(['config']) +
+      panel('Все агенты', modeSlider('all', AGENTS.every(a => am[a[0]] === 'watch') ? 'watch' : 'act', 'Режим всех агентов') + resultBox('agents'),
+        { desc: 'Наблюдение: агент находит неполадку и записывает, что сделал бы, но ничего не меняет. Действие: агент чинит сам.' }) +
+      panel('По агентам', AGENTS.map(a => '<p class="panel-desc">' + esc(a[1]) + '</p>' + modeSlider(a[0], am[a[0]], a[1])).join('')) +
+      panel('Работают всегда', kv(AGENT_LOCKED.map(r => [r[0], 'Включено', 'ok', null, '', r[1]]))) +
+      panel('Предполагаемые действия', pr.length ? kv(pr.slice(0, 50).map(p => [AGENT_NAME[p.agent] || p.agent, p.text, '', null, '', fmtStamp(p.at)])) : empty('Пока нет'));
   },
   'd-stability'() {
     const d = S.stab;
@@ -3606,6 +3639,12 @@ document.addEventListener('click', e => {
   if (t.dataset.aghFilterRm) { confirm = { id: 'agh-filter-remove', url: t.dataset.aghFilterRm }; render(); return; }
   if (t.dataset.listDom) { const v = t.dataset.dom, how = t.dataset.listDom; t.disabled = true; cfgSet({ op: 'list-domain', action: how, target: current.slice(2), value: v }, how === 'remove' ? v + ' убран из списка' : 'Исключение ' + v + ' убрано', ['listd', 'lists']); return; }
   if (t.dataset.cfgOp === 'tsubnet') { t.disabled = true; tunnelSubnet(current.slice(current.startsWith('tn-') ? 3 : 2), 'remove', t.dataset.cfgTarget); return; }
+  if (t.dataset.agentMode) {
+    if (t.getAttribute('aria-checked') === 'true') return;
+    const m = t.dataset.mode, ag = t.dataset.agentMode;
+    cfgSet({ op: 'agents-mode', target: ag, value: m }, (ag === 'all' ? 'Все агенты' : AGENT_NAME[ag]) + ': ' + (m === 'watch' ? 'наблюдение' : 'действие'), ['config']);
+    return;
+  }
   if (t.dataset.cfgOp) { const d = t.dataset.cfgTarget, msg = { 'route-domain': d + ' убран из VPN', 'force-vpn': t.dataset.cfgAction === 'add' ? d + ' всегда идёт через VPN' : d + ' убран из списка', adaptive: t.dataset.cfgAction === 'pin' ? d + ' закреплён в моих доменах' : d + ' идёт напрямую' }[t.dataset.cfgOp]; t.disabled = true; cfgSet({ op: t.dataset.cfgOp, action: t.dataset.cfgAction, target: d }, msg, ['route']); return; }
   if (t.dataset.wifiBind) { if (t.getAttribute('aria-checked') === 'true') return; confirm = { id: 'wifi-bind', op: t.dataset.wifiBind }; render(); return; }
   if (t.dataset.tab) {

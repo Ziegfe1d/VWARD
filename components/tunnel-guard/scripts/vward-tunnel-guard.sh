@@ -23,6 +23,8 @@ vward_component_gate tunnel-guard
 vward_admission_enter tunnel-guard || exit $?
 
 MODE="AUTO"
+# Observation mode of the network agent (fix.28.6): what it would do is written down, not done.
+! command -v vward_agent_mode >/dev/null 2>&1 || [ "$(vward_agent_mode network)" = act ] || MODE="WATCH"
 
 HEALTH="${VWARD_TUNNEL_HEALTH_STATE:-/tmp/vward-tunnel-health/state}"
 
@@ -184,6 +186,7 @@ lists_best()
 # lists_move GROUP TUNNEL: the Panel's own «Маршрут списка», verified by the helper.
 lists_move()
 {
+    [ "$MODE" = AUTO ] || { vward_agent_acts network "list-move:$1" "Перевести список «$1» на туннель $2"; return 1; }
     VWARD_TUNNEL_BY_GUARD=1 VWARD_SAVE_LATER=1 "$HELPER" domain-list "$1" "$2" </dev/null 2>/dev/null | tail -n 1 | grep -q '^result=changed'
 }
 
@@ -619,9 +622,11 @@ else
 
                             else
 
-                                FAILOPEN_ACTIVE=1
-                                LAST_RECOVERY_TEST=$NOW
+                                # Watching only: the tunnel stays as it is, the action is proposed.
+                                DOWN_STREAK=0
                                 ACTION="WOULD_DOWN"
+                                vward_agent_acts network "tunnel-down:$VWARD_TUNNEL_INTERFACE" \
+                                    "Туннель $VWARD_TUNNEL_INTERFACE не отвечает: перезапустить его, перевести маршруты на другой туннель или выключить, чтобы сайты из списков шли напрямую" || :
                             fi
                         fi
                     fi

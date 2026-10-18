@@ -458,6 +458,43 @@ vward_agh_ensure() {
     return 10
 }
 
+# ---- Observation mode («Наблюдение | Действие», fix.28.2) ---------------------------------
+# Failures grew as the agents grew; before they are rebuilt around one core, the owner can let
+# an agent only watch: what it would do it writes down as a proposed action («Предполагаемое
+# действие») and does nothing. agents.conf: all=act|watch, then network=, components=, updates=,
+# maintenance= (empty: as all). Not gated, ever: starting a stopped VWARD program, the Panel and
+# SSH, AdGuard Home out of the DNS chain when it is silent (the home keeps its internet).
+VWARD_AGENTS_CONF=${VWARD_AGENTS_CONF:-${VWARD_ROOT_PREFIX:-}/opt/etc/vward/agents.conf}
+VWARD_PROPOSED=${VWARD_PROPOSED:-${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/agents/proposed.tsv}
+
+# vward_agent_mode AGENT: act or watch.
+vward_agent_mode() {
+    _vam_one='' _vam_all=''
+    if [ -r "$VWARD_AGENTS_CONF" ]; then
+        while IFS='=' read -r _vam_k _vam_v; do
+            case "$_vam_k" in all) _vam_all=$_vam_v ;; "$1") _vam_one=$_vam_v ;; esac
+        done < "$VWARD_AGENTS_CONF"
+    fi
+    case "$_vam_one" in act|watch) ;; *) _vam_one=$_vam_all ;; esac
+    case "$_vam_one" in watch) echo watch ;; *) echo act ;; esac
+}
+
+# vward_agent_acts AGENT ACTION TEXT: 0 the agent acts; 1 it only watches, and the action is
+# written down (time, agent, action, text; the same action of the same agent once an hour,
+# the last 200 kept).
+vward_agent_acts() {
+    [ "$(vward_agent_mode "$1")" = watch ] || return 0
+    _vaa_now=$(date +%s)
+    mkdir -p "${VWARD_PROPOSED%/*}" 2>/dev/null || return 1
+    _vaa_last=$(awk -F'\t' -v a="$1" -v x="$2" '$2 == a && $3 == x {t = $1} END {print t + 0}' "$VWARD_PROPOSED" 2>/dev/null)
+    case "$_vaa_last" in ''|*[!0-9]*) _vaa_last=0 ;; esac
+    [ $((_vaa_now - _vaa_last)) -lt 3600 ] && return 1
+    printf '%s\t%s\t%s\t%s\n' "$_vaa_now" "$1" "$2" "$(printf '%s' "$3" | tr '\000-\037\177' ' ')" >> "$VWARD_PROPOSED" 2>/dev/null
+    [ "$(wc -l < "$VWARD_PROPOSED")" -le 220 ] ||
+        { tail -n 200 "$VWARD_PROPOSED" > "$VWARD_PROPOSED.$$" && mv -f "$VWARD_PROPOSED.$$" "$VWARD_PROPOSED"; } 2>/dev/null
+    return 1
+}
+
 # ---- Agents ---------------------------------------------------------------------------
 # Four agents, one zone each: network (internet, VPN, DNS, routes), components (VWARD's
 # programs, the tunnels' modules, AdGuard Home), updates, maintenance. Only the components
