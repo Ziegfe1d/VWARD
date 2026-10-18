@@ -81,6 +81,8 @@ VWARD_CONSOLE_PORT=8088
 VWARD_RCI_BASE=http://127.0.0.1:79/rci
 EOF
 chmod 600 "$ROOT/opt/etc/vward/device.conf"
+# The agents watch by default (owner 2026-10-18); the emulator checks what they do when they act.
+printf 'all=act\n' > "$ROOT/opt/etc/vward/agents.conf"
 cp "$REPO/config/cron/root.crontab" "$ROOT/opt/var/spool/cron/crontabs/root"
 
 # Update Engine in its slot, as the bootstrap installs it.
