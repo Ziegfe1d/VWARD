@@ -73,7 +73,7 @@ h, _, _ = run("AUTO", action="FALLBACK_SWITCH")
 if h:
     fail("nothing moves while the default tunnel does not answer")
 # The helper: move only, the tunnel stays; the API passes it down; the Panel offers it.
-if 'if [ "${3:-}" = move ]; then' not in HELPER or 'done_ok "tunnel-move $1 lists=$td_lists subnets=$td_nets to=$2" changed' not in HELPER:
+if 'if [ "${3:-}" = move ]; then' not in HELPER or 'done_ok "tunnel-move $1 lists=$td_lists subnets=$td_nets failed=$td_fail ip_categories=$td_own to=$2" changed' not in HELPER:
     fail("the helper has no move-only mode")
 if 'set -- tunnel-delete "$TNAME" vpn move' not in API:
     fail("the API does not pass the move down")

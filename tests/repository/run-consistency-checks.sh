@@ -123,6 +123,8 @@ python3 tests/repository/check-ads-jobs.py || fail "Ads job queue: runs, lists, 
 python3 tests/repository/check-route-engine-capture.py || fail "route engine capture: LAN device, pause after quick deaths"
 python3 tests/repository/check-tunnel-fallback.py || fail "fallback tunnel and tunnel quality"
 python3 tests/repository/check-tunnel-lost-sweep.py || fail "lists off a tunnel without settings"
+python3 tests/repository/check-tunnel-move.py || fail "lists off a tunnel without settings: refused subnets, IP categories"
+python3 tests/repository/check-smartdns-keenetic-forms.py || fail "Smart DNS in Keenetic: refused forms journaled, shorter forms tried"
 python3 tests/repository/check-component-ops.py || fail "components: AdGuard Home off, on, setup, removal"
 python3 tests/repository/check-policy-audit-tunnel.py || fail "IP categories judged only through a working tunnel"
 python3 tests/repository/check-tunnel-services.py || fail "services checked through every tunnel"

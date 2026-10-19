@@ -86,7 +86,8 @@ with tempfile.TemporaryDirectory() as d:
     nd.chmod(0o755)
     sh = fn("die") + fn("ndm") + 'NDMC=%s\nndm "no interface Wireguard0" || die router_rejected\n' % nd
     r = subprocess.run(["sh", "-c", sh], text=True, capture_output=True)
-    if r.stdout != "reason=no interface Wireguard0: (error) static route 1.2.3.4 uses Wireguard0\nerror=router_rejected\n":
+    # The whole answer, its lines joined (fix.33: the last line alone was often a bare «[»).
+    if r.stdout != "reason=no interface Wireguard0: Command::Interface: x in use / (error) static route 1.2.3.4 uses Wireguard0\nerror=router_rejected\n":
         fail(f"the router's reply to a rejected command: {r.stdout!r}")
 # A tunnel Keenetic has switched off is «down» for the Panel even while its program keeps the
 # adapter up (an OpkgTun of Xray: `state: up`, conf layer disabled; a Viva 2026-10-12).

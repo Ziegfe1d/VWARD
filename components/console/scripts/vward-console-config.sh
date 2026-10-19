@@ -112,6 +112,7 @@ cleanup() {
     [ -z "$NS_FILE" ] || rm -f "$NS_FILE"
     [ -z "$TMPFILE" ] || rm -f "$TMPFILE.raw"
     [ -z "$RUNCFG" ] || rm -f "$RUNCFG"
+    [ -z "$JOURNAL" ] || rm -f "$JOURNAL.failed" "$JOURNAL.owned"
     [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.nets" "$JOURNAL.doh" "$JOURNAL.agh" "$JOURNAL.agh.inc" "$JOURNAL.agh.undo"
     [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
@@ -246,7 +247,9 @@ ndm() {
     rc=$?
     if [ "$rc" -ne 0 ] || printf '%s\n' "$out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found|no such entry)'; then
         NDM_CMD=$(printf '%s' "$1" | tr -d '\r\n"\\')
-        NDM_REPLY=$(printf '%s\n' "$out" | tr -d '\r"\\' | tr -c '[:print:]\n' ' ' | sed '/^[[:space:]]*$/d' | tail -n 1 | cut -c1-160)
+        # Keenetic's whole answer, its lines joined: the last one alone was often a bare «[»
+        # and the reason above it was lost (Smart DNS and route refusals, Viva 2026-10-19).
+        NDM_REPLY=$(printf '%s\n' "$out" | tr -d '\r"\\' | tr -c '[:print:]\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;/^$/d' | awk 'length($0) > 1 || $0 !~ /^[][]$/' | tr '\n' '|' | sed 's/|$//;s/|/ \/ /g' | cut -c1-400)
         return 1
     fi
     return 0
@@ -1828,6 +1831,7 @@ op_tunnel_delete() {
     # the lists and subnets, the tunnel stays (a tunnel without settings, fix.32).
     load_profile_base
     case "${3:-}" in ''|move) ;; *) die invalid_arguments 64 ;; esac
+    [ "${3:-}" != move ] || OP=tunnel-move
     vward_valid_ndm_name "$1" && is_tunnel "$1" || die unknown_tunnel 64
     [ "$1" != "$VWARD_TUNNEL_INTERFACE" ] || die main_tunnel 64
     case "$2" in
@@ -1853,9 +1857,34 @@ op_tunnel_delete() {
         echo "dns-proxy route object-group $g $1 auto" >> "$JOURNAL"
     done < "$JOURNAL.lists"
     # Static subnets: to another tunnel, or simply out (the default route is the provider).
-    awk -v i="$1" "$ROUTE_AWK"' $1 == "ip" && $2 == "route" && rdev() == i {print $3 " " rmask()}' "$RUNCFG" > "$JOURNAL.nets"
+    # Moving only: the routes of the IP categories belong to policy-sync, which follows the
+    # default tunnel itself (--reconcile below); a subnet Keenetic refuses is told, not fatal.
+    if [ "${3:-}" = move ]; then
+        awk -v i="$1" -v own="$POLICY_STATE/owned.dynamic.routes" "$ROUTE_AWK"'
+            function plen(m,   a, n, k, b) {n = split(m, a, "."); b = 0
+                for (k = 1; k <= n; k++) {while (a[k] >= 128) {b++; a[k] = (a[k] - 128) * 2} }
+                return b}
+            BEGIN {while ((getline l < own) > 0) o[l] = 1}
+            $1 == "ip" && $2 == "route" && rdev() == i {if (($3 "/" plen(rmask())) in o) print $3 " " rmask() > "/dev/stderr"; else print $3 " " rmask()}' "$RUNCFG" > "$JOURNAL.nets" 2> "$JOURNAL.owned"
+    else
+        awk -v i="$1" "$ROUTE_AWK"' $1 == "ip" && $2 == "route" && rdev() == i {print $3 " " rmask()}' "$RUNCFG" > "$JOURNAL.nets"
+    fi
+    : > "$JOURNAL.failed"
     while IFS= read -r net; do
         [ -n "$net" ] || continue
+        if [ "${3:-}" = move ]; then
+            if [ "$td_to" != - ] && ! subnet_present "${net% *}" "${net#* }" "$td_to"; then
+                ndm "ip route $net $td_to auto" || { echo "$net|$NDM_REPLY" >> "$JOURNAL.failed"; continue; }
+                echo "no ip route $net $td_to" >> "$JOURNAL"
+            fi
+            if ! ndm "no ip route $net $1"; then
+                echo "$net|$NDM_REPLY" >> "$JOURNAL.failed"
+                [ "$td_to" = - ] || ndm "no ip route $net $td_to" || :
+                continue
+            fi
+            echo "ip route $net $1 auto" >> "$JOURNAL"
+            continue
+        fi
         if [ "$td_to" != - ]; then
             ndm "ip route $net $td_to auto" || die router_rejected
             echo "no ip route $net $td_to" >> "$JOURNAL"
@@ -1865,15 +1894,24 @@ op_tunnel_delete() {
     done < "$JOURNAL.nets"
     snapshot
     while IFS= read -r g; do [ -z "$g" ] || ! route_present "$g" "$1" || die verification_failed; done < "$JOURNAL.lists"
-    ! awk -v i="$1" "$ROUTE_AWK"' $1 == "ip" && $2 == "route" && rdev() == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG" || die verification_failed
     if [ "${3:-}" = move ]; then
-        td_lists=$(grep -c . "$JOURNAL.lists") td_nets=$(grep -c . "$JOURNAL.nets")
-        [ $((td_lists + td_nets)) -gt 0 ] || { TXN=0; rm -f "$JOURNAL.lists" "$JOURNAL.nets"; done_ok "tunnel-move $1" unchanged; }
+        td_lists=$(grep -c . "$JOURNAL.lists") td_fail=$(grep -c . "$JOURNAL.failed") td_own=$(grep -c . "$JOURNAL.owned")
+        td_nets=$(( $(grep -c . "$JOURNAL.nets") - td_fail ))
+        # Each refused subnet with Keenetic's own answer (the first 20).
+        head -n 20 "$JOURNAL.failed" | while IFS='|' read -r tf_net tf_why; do audit "tunnel-move $1 subnet $tf_net refused: ${tf_why:-no answer}"; done
+        [ $((td_lists + td_nets)) -gt 0 ] || { TXN=0; rm -f "$JOURNAL.lists" "$JOURNAL.nets" "$JOURNAL.failed" "$JOURNAL.owned"
+            [ "$td_fail" = 0 ] || die router_rejected; done_ok "tunnel-move $1 nothing to move ip_categories=$td_own" unchanged; }
         save_router || die config_save_failed
         TXN=0
-        rm -f "$JOURNAL.lists" "$JOURNAL.nets"
-        done_ok "tunnel-move $1 lists=$td_lists subnets=$td_nets to=$2" changed
+        rm -f "$JOURNAL.lists" "$JOURNAL.nets" "$JOURNAL.failed" "$JOURNAL.owned"
+        # The IP categories' routes follow the default tunnel through policy-sync.
+        if [ "$td_own" != 0 ] && [ -x "$POLICY_SYNC_BIN" ]; then
+            (trap '' HUP; exec "$POLICY_SYNC_BIN" --reconcile) </dev/null >/dev/null 2>&1 &
+        fi
+        echo "info.moved=lists:$td_lists,subnets:$td_nets,failed:$td_fail,ip_categories:$td_own"
+        done_ok "tunnel-move $1 lists=$td_lists subnets=$td_nets failed=$td_fail ip_categories=$td_own to=$2" changed
     fi
+    ! awk -v i="$1" "$ROUTE_AWK"' $1 == "ip" && $2 == "route" && rdev() == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG" || die verification_failed
     # Last step: nothing depends on the interface any more.
     if engine_tunnel "$1"; then
         er_out=$("$ENG" remove "$1" 2>/dev/null)
@@ -2233,16 +2271,25 @@ keenetic_smartdns() {
     if [ "$1" = add ]; then
         [ -z "$ks_have" ] || done_ok "smartdns-domain add $2 keenetic" unchanged
         ks_url=$(smartdns_url) || die smartdns_not_configured
-        [ "$(doh_lines | awk '$(NF-1) == "domain"' | grep -c .)" -lt "$SMARTDNS_KEENETIC_MAX" ] || die smartdns_keenetic_full
+        ks_used=$(doh_lines | awk '$(NF-1) == "domain"' | grep -c .)
+        [ "$ks_used" -lt "$SMARTDNS_KEENETIC_MAX" ] || { RELAY_REASON="used $ks_used of $SMARTDNS_KEENETIC_MAX"; die smartdns_keenetic_full; }
         # The form of the lines already there for this server, else the documented one.
+        ks_src=same-server
         ks_tpl=$(doh_lines | awk -v u="$ks_url" '$3 == u && $(NF-1) == "domain" {NF -= 1; print; exit}')
         # Another server's lines show the form this router takes («dnsm on ISP»).
-        [ -n "$ks_tpl" ] || ks_tpl=$(doh_lines | awk -v u="$ks_url" '$(NF-1) == "domain" {$3 = u; NF -= 1; print; exit}')
-        [ -n "$ks_tpl" ] || ks_tpl="https upstream $ks_url dnsm on $(wan_route_target) domain"
-        ks_line="$ks_tpl $2"
-        ndm "dns-proxy $ks_line" || die router_rejected
+        [ -n "$ks_tpl" ] || { ks_src=other-server; ks_tpl=$(doh_lines | awk -v u="$ks_url" '$(NF-1) == "domain" {$3 = u; NF -= 1; print; exit}'); }
+        [ -n "$ks_tpl" ] || { ks_src=default; ks_tpl="https upstream $ks_url dnsm on $(wan_route_target) domain"; }
+        # Keenetic refused a form (fix.33: the default one, with 0 of 8 used, Viva 2026-10-19):
+        # the shorter forms in turn; each refusal goes to the journal with Keenetic's answer.
+        ks_line=
+        for ks_try in "$ks_tpl $2" "https upstream $ks_url dnsm domain $2" "https upstream $ks_url domain $2"; do
+            if ndm "dns-proxy $ks_try"; then ks_line=$ks_try; break; fi
+            audit "smartdns-domain add $2 keenetic refused form=$(printf '%s' "$ks_try" | sed 's#\(https://[^/ ]*\)/[^ ]*#\1/…#g') used=$ks_used/$SMARTDNS_KEENETIC_MAX source=$ks_src: ${NDM_REPLY:-no answer}"
+        done
+        [ -n "$ks_line" ] || die router_rejected
         snapshot
         doh_present "$ks_line" || die verification_failed
+        audit "smartdns-domain add $2 keenetic accepted form=$(printf '%s' "$ks_line" | sed 's#\(https://[^/ ]*\)/[^ ]*#\1/…#g') used=$((ks_used + 1))/$SMARTDNS_KEENETIC_MAX source=$ks_src"
     else
         [ -n "$ks_have" ] || return 0
         printf '%s\n' "$ks_have" | while IFS= read -r ks_line; do
@@ -2612,13 +2659,20 @@ AGH_OFFICIAL_MIN_FREE_KB=81920
 # agh_official_arch: the build for this router (AdGuard's name), or nothing.
 agh_official_arch() {
     [ -z "${VWARD_AGH_ARCH:-}" ] || { printf '%s\n' "$VWARD_AGH_ARCH"; return 0; }
-    case "$(uname -m 2>/dev/null)" in
-        mips) ;;
-        *) return 1 ;;
+    # The same test as the tunnel engines and sentinel (fix.33: «mips» only and a byte order
+    # that had to be read gave «нет сборки» on a Viva the engines found mipsle on).
+    oa_m=$(uname -m 2>/dev/null)
+    case "$oa_m" in
+        mips*) ;;
+        *) audit "ext-agh-official arch: uname=${oa_m:-none}"; return 1 ;;
     esac
-    # Byte order from an ELF header (byte 5: 1 little, 2 big).
-    oa_e=$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null | od -An -tu1 | tr -d ' ')
-    [ "$oa_e" = 1 ] && echo mipsle_softfloat
+    # Byte order from an ELF header (byte 5: 1 little, 2 big); unreadable - little (the MIPS
+    # routers Keenetic makes are little-endian).
+    oa_e=$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null | od -An -tu1 2>/dev/null | tr -d ' ')
+    case "$oa_m:$oa_e" in
+        mipsel*|mipsle*|*:1|*:) echo mipsle_softfloat ;;
+        *) audit "ext-agh-official arch: uname=$oa_m byte_order=$oa_e (big-endian, no build)"; return 1 ;;
+    esac
 }
 
 # agh_official_pin ARCH: «archive-sha256 binary-sha256» of the pinned version.
@@ -3162,7 +3216,8 @@ op_agh_component() {
             done_ok "agh-component enable" changed ;;
         install|reinstall|reset)
             # Checks before anything is changed: the build for this processor, the space, the ports.
-            ai_arch=$(agh_official_arch) && [ -n "$(agh_official_pin "$ai_arch")" ] || die agh_no_build
+            ai_arch=$(agh_official_arch) && [ -n "$(agh_official_pin "$ai_arch")" ] ||
+                { RELAY_REASON="uname=$(uname -m 2>/dev/null) arch=${ai_arch:-none}"; die agh_no_build; }
             ai_had=$(agh_bin_now) || ai_had=
             [ "$1" = install ] || [ -n "$ai_had" ] || die agh_not_installed
             [ "$1" != install ] || [ -z "$ai_had" ] || [ ! -s "$AGH_YAML" ] || { comp_end; done_ok "agh-component install: installed already" unchanged; }
