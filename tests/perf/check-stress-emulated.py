@@ -98,6 +98,31 @@ def recovered(root, scenario, findings):
         findings.append((scenario, "not recovered", "AdGuard Home not back in the DNS chain"))
 
 
+def debug_state(root):
+    """What the emulated router looks like when the soak ends badly: for the CI log."""
+    _, names = ps_count(root)
+    def files(base):
+        out = []
+        for p in base.rglob("*"):
+            try:
+                if p.is_file():
+                    st = p.stat()
+                    out.append((st.st_size, st.st_mtime, p))
+            except OSError:
+                pass
+        return out
+    tmp = [(n, str(p.relative_to(root))) for n, _, p in sorted(files(root / "tmp"), key=lambda f: f[0], reverse=True)[:8]]
+    # The journals written last, their last lines.
+    logs = {}
+    for _, _, p in sorted(files(root / "opt/var/log"), key=lambda f: f[1])[-5:]:
+        try:
+            logs[str(p.relative_to(root))] = p.read_text(errors="replace").splitlines()[-6:]
+        except OSError:
+            pass
+    _, status, _ = chaos.sh(root, "/opt/etc/init.d/S91vward-route-engine status", timeout=30)
+    return {"processes": dict(names), "tmp_largest": tmp, "engine_status": (status or "")[-300:], "logs": logs}
+
+
 def stage_soak(root, minutes, seed, findings, info):
     rnd = random.Random(seed)
     minute, left, flags, prev_stale = 0, 0, [], []
@@ -135,6 +160,8 @@ def stage_soak(root, minutes, seed, findings, info):
     for _ in range(2):  # the last healthy minutes settle everything
         minute += 1; chaos.advance(root); chaos.set_faults(root, [], minute); chaos.run_round(root, minute, [], [], "soak")
     recovered(root, "soak", findings)
+    if any(f[0] == "soak" and f[1] == "not recovered" for f in findings) or (sizes and sizes[-1][2] > 1_000_000):
+        info["soak_debug"] = debug_state(root)
     end_ps, names = ps_count(root)
     # Daemons (route engine, crond, supervisor, sentinel) may run; nothing may pile up.
     if end_ps > start_ps + 4:
@@ -465,7 +492,7 @@ def main():
     findings = [f for f in findings if not (f in seen or seen.add(f))]
     if args.report:
         Path(args.report).write_text(json.dumps({"info": info, "findings": findings}, ensure_ascii=False, indent=1))
-    for k in ("api_load", "api_race", "big"):
+    for k in ("api_load", "api_race", "big", "soak_debug"):
         if k in info:
             print(k, json.dumps(info[k], ensure_ascii=False))
     if "soak" in info:
