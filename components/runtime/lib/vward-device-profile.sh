@@ -147,15 +147,20 @@ vward_tls_take()
     _vt_flag=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
     _vt_ok=${_vt_flag%.broken}.ok _vt_lock=${_vt_flag%.broken}.probe _vt_mine=0 _vt_w=0
     [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ] || return 1
-    [ -z "$(find "$_vt_ok" -mmin -60 2>/dev/null)" ] || return 0
+    # Known to work: still one at a time for a moment. Two callers at the same second both
+    # crashed when curl began to crash (CI chaos run, fix.31: 3 crashes); a crash is instant, so
+    # 2 s behind another caller is enough to see it, and a long download is not waited for.
+    _vt_wait=20
+    [ -z "$(find "$_vt_ok" -mmin -60 2>/dev/null)" ] || _vt_wait=2
     [ -z "$(find "$_vt_lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] || rmdir "$_vt_lock" 2>/dev/null
     until mkdir "$_vt_lock" 2>/dev/null; do
         [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ] || return 1
-        [ -z "$(find "$_vt_ok" -mmin -60 2>/dev/null)" ] || return 0
-        [ "$_vt_w" -lt 20 ] || return 0
+        [ "$_vt_w" -lt "$_vt_wait" ] || return 0
         sleep 1; _vt_w=$((_vt_w + 1))
     done
     _vt_mine=1
+    # The turn came after another caller: its crash may be noted by now.
+    [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ] || { rmdir "$_vt_lock" 2>/dev/null; _vt_mine=0; return 1; }
     return 0
 }
 
