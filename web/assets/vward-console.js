@@ -268,7 +268,7 @@ const API_ERRORS = {
   smartdns_not_configured: 'Smart DNS не настроен: укажите сервер DoH в разделе «ИИ-сервисы»', smartdns_keenetic_full: 'лимит Smart DNS в Keenetic исчерпан (8 из 8 доменов)',
   service_list: 'список сервиса не создан в Keenetic', invalid_arguments: 'неверные параметры запроса', helper_failed: 'действие завершилось без ответа',
   doh_limit: 'в Keenetic нет места для ещё одного сервера DNS-over-HTTPS', doh_remove_failed: 'Keenetic не удалил строку Smart DNS', doh_remove_unsafe: 'строка Smart DNS используется не только VWARD: не удалена',
-  group_not_found: 'список не найден в Keenetic', group_not_routed: 'у списка нет маршрута', unknown_group: 'нет такого списка', invalid_group: 'недопустимое имя списка', list_not_found: 'список не найден',
+  group_not_found: 'список не найден в Keenetic', group_not_routed: 'у списка нет маршрута', unknown_group: 'нет такого списка', invalid_group: 'недопустимое имя списка', list_not_found: 'список не найден', component_busy: 'уже идёт другая операция с компонентом', agh_credentials_required: 'нужны логин и пароль для AdGuard Home', agh_not_installed: 'AdGuard Home не установлен', agh_setup_failed: 'AdGuard Home не принял настройки', agh_stop_failed: 'AdGuard Home не остановился', no_free_port: 'нет свободного порта', dns_release_failed: 'не удалось убрать DNS-строки из Keenetic', default_tunnel_in_module: 'туннель по умолчанию в этом модуле: выберите, куда перевести маршруты', list_too_long: 'в объединённом списке будет больше 300 доменов',
   domain_not_resolved: 'домен не разрешается в адрес', download_failed: 'не удалось скачать файл', feed_unavailable: 'сервер обновлений недоступен', unpack_failed: 'архив повреждён',
   no_space: 'недостаточно места на USB-накопителе', router_save_failed: 'Keenetic не сохранил настройки', tunnel_unavailable: 'туннель недоступен', upgrade_rolled_back: 'обновление откатилось: проверка после установки не прошла',
   agh_start_failed: 'AdGuard Home не запустился', agh_build_broken: 'сборка AdGuard Home не запускается на этом роутере', agh_no_build: 'нет сборки AdGuard Home для этого процессора',
@@ -295,7 +295,7 @@ function adsCheckPanel() {
   const a = S.ads || {}, r = ADSCHK;
   let out = '';
   if (r && r.error) out = '<p class="field-warn">' + esc(r.error) + '</p>';
-  else if (r && r.x && !r.x.ok) out = '<p class="field-warn">' + esc(r.x.error === 'adguard_unavailable' || r.x.error === 'adguard_auth_required' ? 'AdGuard Home недоступен или не подключён: «Утилиты → AdGuard Home».' : errText(r.x)) + '</p>';
+  else if (r && r.x && !r.x.ok) out = '<p class="field-warn">' + esc(r.x.error === 'adguard_unavailable' || r.x.error === 'adguard_auth_required' ? 'AdGuard Home недоступен или не подключён: «Компоненты → AdGuard Home».' : errText(r.x)) + '</p>';
   else if (r && r.x) {
     const x = r.x, d = x.domain, rules = (x.rules || []).map(y => [y.list || 'правило', y.text]), L = linkInfo(r.link || d);
     // A page inside a site's own domain (yandex.ru/an/count/...) without ad markers: blocking
@@ -327,7 +327,7 @@ function adsCheckPanel() {
   }
   return panel('Проверка блокировки', inputBar({ form: 'ads-check', label: 'Домен или ссылка', id: 'adsCheck', value: r && (r.link || r.value), placeholder: 'например, ads.example.com',
     aria: 'Домен или ссылка', busy: r && r.busy, off: S.ads && !a.agh_connected, icon: 'search', btn: 'Проверить' }) + out,
-    { fixed: true, desc: S.ads && !a.agh_connected ? 'Требуется подключение к AdGuard Home: «Утилиты → AdGuard Home».' : 'Статус фильтрации домена, сработавшие списки и правила. Принимает домен или полную рекламную ссылку, включая цепочки переадресации.' });
+    { fixed: true, desc: S.ads && !a.agh_connected ? 'Требуется подключение к AdGuard Home: «Компоненты → AdGuard Home».' : 'Статус фильтрации домена, сработавшие списки и правила. Принимает домен или полную рекламную ссылку, включая цепочки переадресации.' });
 }
 // A link, taken apart: its path, the hosts it redirects through (addresses inside its
 // parameters - plain, URL-encoded or base64, as ad networks pack them), and whether it
@@ -606,7 +606,7 @@ async function load(key, force) {
   if (inflight[key]) return inflight[key];
   if (!force && S[key] && Date.now() - (S.loadedAt[key] || 0) < (KEY_TTL[key] || 5) * 1000) return S[key];
   inflight[key] = (async () => {
-    try { S[key] = await LOADERS[key](); S.errors[key] = null; delete S.cached[key]; cacheWrite(key); }
+    try { S[key] = await LOADERS[key](); S.errors[key] = null; delete S.cached[key]; cacheWrite(key); if (key === 'status') panelVerWatch(); }
     catch (e) { S.errors[key] = e.message; }
     finally { S.loadedAt[key] = Date.now(); delete inflight[key]; }
     return S[key];
@@ -614,6 +614,17 @@ async function load(key, force) {
   return inflight[key];
 }
 const st = () => S.status || {};
+// The router got a new VWARD while this tab was open: its scripts are the old ones. Say so once,
+// with a button that loads the new Panel (owner 2026-10-19).
+let panelVer = '', panelVerSaid = false;
+function panelVerWatch() {
+  const v = (S.status && S.status.platform && S.status.platform.version) || '';
+  if (!v) return;
+  if (!panelVer) { panelVer = v; return; }
+  if (v === panelVer || panelVerSaid) return;
+  panelVerSaid = true;
+  popup({ sev: 'warn', icon: 'save', title: 'Панель обновлена', text: 'На роутере VWARD ' + v + '. Обновите страницу, чтобы открыть новую версию Панели.', stay: true, btn: ['Обновить', () => location.reload()] });
+}
 const plat = () => st().platform || {};
 const prof = () => (S.security && S.security.profile) || {};
 const cfg = () => S.config || {};
@@ -630,13 +641,13 @@ const PAGES = [
   // ИИ-сервисы (owner 2026-10-17): each AI service through VPN, Smart DNS or the provider.
   { id: 'ai', title: 'ИИ-сервисы', icon: 'spark', group: 'Сеть', data: ['ai', 'status', 'config'] },
   // Programs VWARD works with (AdGuard Home, later its own tunnel engine): each has its page here.
-  { id: 'utils', title: 'Утилиты', icon: 'tools', group: 'VWARD', data: ['ads', 'agh', 'security', 'ext', 'awg'] },
+  { id: 'utils', title: 'Компоненты', icon: 'tools', group: 'VWARD', data: ['status', 'ads', 'agh', 'security', 'ext', 'awg'] },
   { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config', 'stab', 'cron', 'cleanup', 'backups', 'update', 'ext'] },
   { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth', 'status', 'config'] },
   // The raw journals: diagnostics to save or send; each section shows its own events itself.
   { id: 'logs', title: 'Журналы', icon: 'logs', group: 'VWARD', data: [] }
 ];
-const SHORT = { ai: 'ИИ', overview: 'Обзор', logs: 'Журналы', wan: 'Сеть', vpn: 'VPN', routes: 'Маршруты', ads: 'Реклама', utils: 'Утилиты', system: 'Система', settings: 'Настройки' };
+const SHORT = { ai: 'ИИ', overview: 'Обзор', logs: 'Журналы', wan: 'Сеть', vpn: 'VPN', routes: 'Маршруты', ads: 'Реклама', utils: 'Компоненты', system: 'Система', settings: 'Настройки' };
 const COMPONENTS = [
   { id: 'route-engine', name: 'Маршрутизация', desc: 'Сайты через VPN и автоподбор.', when: 'служба, работает без расписания', page: 'routes', log: 'adaptive' },
   { id: 'route-reconciler', name: 'Сверка маршрутов', desc: 'Возвращает напрямую то, что снова открывается.', when: 'каждые 5 минут', page: 'routes', log: 'routing' },
@@ -708,7 +719,7 @@ function mergeLogs(parts) {
   return entries.map(e => e.lines.join('\n')).join('\n');
 }
 const DETAILS = {
-  'd-components': { title: 'Компоненты', parent: 'system' },
+  'd-components': { title: 'Компоненты VWARD', parent: 'system' },
   'd-diag': { title: 'Диагностика', parent: 'system' },
   'd-stability': { title: 'Стабильность', parent: 'system', data: ['stab'] },
   'd-files': { title: 'Файлы VWARD', parent: 'system', data: ['files'] },
@@ -743,10 +754,10 @@ const DETAILS = {
   'd-sources': { title: 'Источники списков', parent: 'ads' },
   'd-jobs': { title: 'Задания', parent: 'ads' },
   'd-https': { title: 'HTTPS-фильтр', parent: 'ads' },
-  'd-agh': { title: 'AdGuard Home', parent: 'utils', data: ['ads', 'agh', 'security', 'ext', 'adsstats'] },
+  'd-agh': { title: 'AdGuard Home', parent: 'utils', data: ['status', 'ads', 'agh', 'security', 'ext', 'adsstats'] },
   'd-dnsex': { title: 'Исключения фильтрации', parent: 'd-agh', data: ['ads'] },
-  'd-awg': { title: 'Модуль AmneziaWG', parent: 'utils', data: ['awg', 'status', 'ext'] },
-  'd-vless': { title: 'Модуль VLESS', parent: 'utils', data: ['awg', 'status'] },
+  'd-awg': { title: 'Модуль AmneziaWG', parent: 'utils', data: ['awg', 'status', 'ext', 'lists'] },
+  'd-vless': { title: 'Модуль VLESS', parent: 'utils', data: ['awg', 'status', 'lists'] },
   'd-agents': { title: 'Агенты', parent: 'system', data: ['config', 'status', 'cron'] },
   'd-aghfilters': { title: 'Фильтры AdGuard Home', parent: 'd-agh', data: ['agh', 'ads'] },
   'd-aghservices': { title: 'Блокировка сервисов', parent: 'd-agh', data: ['agh', 'ads'] }
@@ -863,14 +874,19 @@ const HEAD_ICONS = [
 // not needed now, failing.
 const ST = { on: ['ok', 'Работает'], off: ['off', 'Выключен'], idle: ['off', 'Отключён'], bad: ['crit', 'Не работает'], none: ['off', 'Не установлен'], unlinked: ['off', 'Не подключено'] };
 // One state of AdGuard Home for every page (owner 2026-10-19): «Не установлен», «Не подключено»,
-// «Выключен» - grey; «Работает» - green; «Не работает» - red (only for a connected one that fails).
+// «Выключен» - grey; «Работает» - green; «Не работает» - red. [class, text, why]: the program
+// that does not run comes first - connected or not, nothing works through it (Viva 2026-10-19:
+// «Не подключено» on one page, «Не работает» on another, the program not running at all).
 function aghState() {
   const a = S.ads || {}, g = S.agh, sv = st().services || {}, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {}, e = (S.ext && S.ext.agh) || {};
-  if (!S.ads) return ['', '—'];
-  if (!ag.port && !sv.adguard && !e.installed && !(e.official || {}).installed) return ST.none;
-  if (!a.agh_connected) return ST.unlinked;
-  if (aghDown(a, g) || sv.adguard_broken || sv.adguard === false) return ST.bad;
-  return g && g.ok && g.protection === false ? ST.off : ST.on;
+  if (!S.ads || !S.status) return ['', '—', ''];
+  if (!sv.adguard && (sv.adguard_installed === false || (sv.adguard_installed == null && !ag.port && !e.installed && !(e.official || {}).installed))) return ST.none.concat('программа не найдена на роутере');
+  if (sv.adguard_disabled) return ST.off.concat('выключен в Панели');
+  if (sv.adguard_broken) return ST.bad.concat('программа не запускается на этом роутере');
+  if (sv.adguard === false) return ST.bad.concat('программа не запущена');
+  if (!a.agh_connected) return ST.unlinked.concat('VWARD не подключён: нужны логин и пароль');
+  if (aghDown(a, g)) return ST.bad.concat('не отвечает на запросы');
+  return g && g.ok && g.protection === false ? ST.off.concat('фильтрация выключена') : ST.on.concat('');
 }
 const headIcon = t => { const m = HEAD_ICONS.find(x => x[0].test(t || '')); return m ? m[1] : 'info'; };
 function panel(title, body, opts) {
@@ -975,7 +991,8 @@ function notifications() {
   // Keenetic takes no two tunnels with one address: the second one never connects.
   tunDupAddresses(tunnels).forEach(d => n.push({ sev: 'warn', title: 'У двух туннелей один адрес', text: d.names.map(tunLabel).join(', ') + ': ' + d.addr + '. Keenetic не соединит второй туннель - замените конфигурацию одного из них.', to: 't-' + d.names[1] }));
   // A VWARD tunnel whose settings went with the old USB drive: one note with what to do, not «не в сети».
-  if (lostT.length) n.push({ sev: 'warn', title: lostT.length === 1 ? 'Туннель без настроек' : 'Туннели без настроек: ' + lostT.length, text: lostT.map(t => t.description || t.name).join(', ') + ' - добавьте заново или удалите', to: 'vpn' });
+  if (lostT.length) { const routed = lostT.filter(t => tunUseExtra(t.name) > 0);
+    n.push({ sev: 'warn', title: lostT.length === 1 ? 'Туннель без настроек' : 'Туннели без настроек: ' + lostT.length, text: lostT.map(t => t.description || t.name).join(', ') + (routed.length ? ' - на нём списки и подсети, они идут напрямую: перенесите их' : ' - добавьте заново или удалите'), to: routed.length ? 't-' + routed[0].name : 'vpn' }); }
   if (down.length) n.push({ sev: 'warn', title: down.length === tunnels.length - lostT.length ? 'VPN не в сети' : 'Не все туннели в сети', text: down.map(t => t.description || t.name).join(', '), to: 'vpn' });
   if (S.ai && aiRoom(S.ai.smartdns)) n.push({ sev: 'info', title: 'В Smart DNS освободилось место', text: S.ai.smartdns.waiting.map(aiName).join(', ') + ' можно перевести на Smart DNS', to: 'ai' });
   // A move off a tunnel that no longer exists is not news: there is nothing to come back to.
@@ -1285,7 +1302,7 @@ function aiPage() {
     panel('Smart DNS', kv([
         ['Где хранится', !a ? '…' : sd.agh ? 'AdGuard Home' : 'Keenetic', '', null, '', sd.agh ? 'доменов: ' + fmtInt(sd.agh_domains || 0) : 'строк ' + fmtInt(sd.keenetic || 0) + ' из ' + fmtInt(sd.keenetic_max || 8)],
         ['Сервер', !a ? '…' : (sd.servers || []).join(', ') || 'не задан', a && noSd ? 'warn' : ''],
-        ['Домены Smart DNS', 'открыть', '', 'd-smartdns', '', 'и агент: держит их мимо VPN']]) +
+        ['Домены Smart DNS', 'открыть', '', 'd-smartdns', '', 'и агент: держит их мимо VPN']]) + sdStoreRow(a, sd) +
       inputBar({ form: 'ai-dns-add', label: sd.own ? 'Заменить свой сервер DoH' : 'Свой сервер DoH', name: 'server', mono: true, placeholder: 'https://dns.example/dns-query', aria: 'Адрес DoH', off: !cfgOk(), icon: 'plus', btn: 'Сохранить' }) +
       (sd.own ? '<div class="panel-actions">' + btn('ai-dns-clear', 'close', 'Убрать свой сервер') + '</div>' : '') + resultBox('aidns'),
       { desc: 'Сервер, через который открываются сервисы с путём «Smart DNS». Без AdGuard Home VWARD пишет строки в Keenetic (не больше 8). Адрес хранится только на роутере.' }) +
@@ -1294,6 +1311,20 @@ function aiPage() {
     panel('Сервисы', !a ? empty('Загрузка…') : svc.length ? svc.map(row).join('') : empty('В каталоге нет ИИ-сервисов'),
       { desc: 'VPN - через туннель; Smart DNS - через DNS-сервер, который открывает сервис; Провайдер - напрямую.' });
 }
+// Where new Smart DNS domains go, the owner's choice (fix.32); AdGuard Home only while it works.
+function sdStoreRow(a, sd) {
+  if (!a) return '';
+  const sv = st().services || {}, aghOk = !!(sd.agh && sv.adguard && !sv.adguard_disabled);
+  return '<dl class="kv">' + ctrlRow('Новые домены хранить', sel('data-sd-store' + (cfgOk() ? '' : ' disabled'), 'Где хранить домены Smart DNS',
+    [['auto', 'Автоматически'], ['keenetic', 'В роутере Keenetic (до 8)'], ['agh', 'В AdGuard Home', !aghOk && sd.store !== 'agh']], sd.store || 'auto'),
+    sd.store === 'keenetic' ? 'Keenetic держит не больше 8 доменов' : aghOk ? (sd.store === 'agh' ? 'без ограничения числа доменов' : 'в AdGuard Home, пока он работает, иначе в Keenetic') : 'AdGuard Home недоступен: ' + (sd.agh ? 'не работает' : 'не установлен')) + '</dl>';
+}
+document.addEventListener('change', async e => {
+  if (!e.target.matches || !e.target.matches('[data-sd-store]')) return;
+  let x; try { x = await apiPost('smartdns-server', { op: 'store', store: e.target.value }); } catch (err) { x = { ok: false, error: err.message }; }
+  actionResult = { id: 'aidns', text: x.ok ? 'Сохранено: новые домены Smart DNS - ' + ({ auto: 'автоматически', keenetic: 'в Keenetic', agh: 'в AdGuard Home' }[e.target.value]) : 'Не сохранено: ' + errText(x) };
+  await load('ai', true); render();
+});
 async function smartdnsServer(op, url) {
   let x; try { x = await apiPost('smartdns-server', { op: op, url: url }); } catch (err) { x = { ok: false, error: err.message }; }
   actionResult = { id: 'aidns', text: x.ok ? (op === 'set' ? 'Сервер сохранён' : 'Свой сервер убран') : 'Не выполнено: ' + errText(x) };
@@ -1553,7 +1584,7 @@ const RENDER = {
   'd-wificlients'() {
     const w = S.wifi || {}, clients = w.clients || [];
     return loadError(['wifi']) + panel('Все клиенты', (clients.length > 8 ? '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Имя, MAC или адрес" aria-label="Найти клиента" autocomplete="off"></label>' : '') +
-      (clients.length ? '<ul class="rows" data-list-rows>' + clients.map(wifiClientRow).join('') + '</ul>' : empty(w.enabled ? 'Клиентов пока нет' : 'Сбор данных выключен')),
+      (clients.length ? '<ul class="rows" data-list-rows>' + clients.map(wifiClientRow).join('') + '</ul>' : empty(w.enabled ? WIFI_EMPTY[w.empty_reason] || 'Клиентов пока нет' : 'Сбор данных выключен')),
       { desc: fmtInt(clients.length) + ' ' + plural(clients.length, 'клиент', 'клиента', 'клиентов') + '. Рекомендации не применяются автоматически.' });
   },
   wifi() {
@@ -1569,7 +1600,7 @@ const RENDER = {
       ])) +
       // Only the ones worth a look here (warnings first); the full list has its own page.
       panel('Клиенты', clients.length ? '<ul class="rows">' + wifiTop(clients).map(wifiClientRow).join('') + '</ul>' +
-        (clients.length > WIFI_TOP ? kv([['Все клиенты', fmtInt(clients.length), '', 'd-wificlients']]) : '') : empty(w.enabled ? 'Клиентов пока нет' : 'Сбор данных выключен'), { desc: 'Рекомендации не применяются автоматически.' }) +
+        (clients.length > WIFI_TOP ? kv([['Все клиенты', fmtInt(clients.length), '', 'd-wificlients']]) : '') : empty(w.enabled ? WIFI_EMPTY[w.empty_reason] || 'Клиентов пока нет' : 'Сбор данных выключен'), { desc: 'Рекомендации не применяются автоматически.' }) +
       panel('Уведомления', '<dl class="kv">' +
         ctrlRow('Окно анализа', sel('data-cfg-wifi="WINDOW_SEC"', 'Окно анализа', withCur([[21600, '6 часов'], [43200, '12 часов'], [86400, '24 часа'], [172800, '2 суток'], [604800, '7 суток']], wc.WINDOW_SEC, ' с'), wc.WINDOW_SEC), 'за какой период считать переходы') +
         ctrlRow('Переходов между диапазонами', sel('data-cfg-wifi="BAND_SWITCH_WARN"', 'Переходов между диапазонами', withCur([[5, 'от 5'], [10, 'от 10'], [20, 'от 20'], [30, 'от 30'], [50, 'от 50']], wc.BAND_SWITCH_WARN, ''), wc.BAND_SWITCH_WARN)) +
@@ -1609,7 +1640,7 @@ const RENDER = {
         ['HTTPS-фильтр', S.https && S.https.ok ? (S.https.status && isTrue(S.https.status.ENABLED) ? 'Включён' : 'Выключен') : 'недоступен', '', 'd-https'],
         ['Настройки проверки', ({ scheduled: 'по расписанию', dynamic: 'по запросам', manual: 'вручную' })[runMode] || '', '', 'd-adsettings']
       ])) +
-      // AdGuard Home is a program of its own: its page lives in «Утилиты» (no «Дополнительно», owner 2026-10-17).
+      // AdGuard Home is a program of its own: its page lives in «Компоненты» (no «Дополнительно», owner 2026-10-17).
       '';
   },
   'd-adrecent'() {
@@ -1672,11 +1703,12 @@ const RENDER = {
   utils() {
     const agh = aghState();
     const w = S.awg || {}, wn = (w.tunnels || []).length;
-    const awg = !S.awg ? ['', '—'] : awgLost().length || (wn && !(w.tunnels || []).every(t => t.running)) ? ST.bad : !w.installed ? ST.none : !wn ? ST.idle : ST.on;
-    return loadError(['ads']) + panel('Утилиты', kv([['AdGuard Home', agh[1], agh[0], 'd-agh', '', 'блокировка рекламы'],
-        vlessRow() || ['Модуль VLESS', ST.idle[1], ST.idle[0], 'd-vless', '', 'туннели VLESS и Trojan'],
-        ['Модуль AmneziaWG', awg[1], awg[0], 'd-awg', '', 'туннели AmneziaWG 3.x']]),
-      { desc: 'Программы, с которыми работает VWARD.' });
+    const awg = !S.awg ? ['', '—', ''] : modOff('awg') ? ST.off.concat('выключен в Панели') : awgLost().length ? ST.bad.concat('туннель без настроек') : wn && !(w.tunnels || []).every(t => t.running) ? ST.bad.concat('программа туннеля остановлена') :
+      !w.installed ? ST.none.concat('скачается сама с первым туннелем AmneziaWG 3.x') : !wn ? ST.unlinked.concat('нет туннелей AmneziaWG 3.x') : ST.on.concat('');
+    return loadError(['ads']) + panel('Компоненты', kv([['AdGuard Home', agh[1], agh[0], 'd-agh', '', agh[2] || 'блокировка рекламы'],
+        vlessRow(),
+        ['AmneziaWG', awg[1], awg[0], 'd-awg', '', awg[2] || 'туннели AmneziaWG 3.x']].concat(progRows())),
+      { desc: 'Программы, с которыми работает VWARD. «Работает» - только когда программа отвечает.' });
   },
   'd-awg'() {
     const w = S.awg;
@@ -1688,7 +1720,7 @@ const RENDER = {
     return awgLostPanel() + nativePanel() + panel('Модуль AmneziaWG', kv([
         ['Программа', w.installed ? 'vward-awg ' + (w.version || '') : 'не установлена', '', 'https://github.com/Ziegfe1d/VWARD/tree/dev/tools/vward-awg', '', w.installed ? 'процессор ' + (w.arch || '—') : 'скачается сама, когда понадобится'],
         ['Туннели', fmtInt(tl.length)]]) + (tl.length ? '<ul class="rows">' + tl.map(row).join('') + '</ul>' : ''),
-      { desc: 'Держит туннели AmneziaWG 3.x, пока прошивка Keenetic их не умеет (до KeeneticOS 5.2). В Keenetic такой туннель - подключение OpkgTun. Скорость ниже встроенного WireGuard.' }) + soonPanel('awg');
+      { desc: 'Держит туннели AmneziaWG 3.x, пока прошивка Keenetic их не умеет (до KeeneticOS 5.2). В Keenetic такой туннель - подключение OpkgTun. Скорость ниже встроенного WireGuard.' }) + compPanel('awg') + soonPanel('awg');
   },
   'd-agents'() {
     const am = agentsMode(), pr = ((S.config && S.config.agents) || {}).proposed || [];
@@ -1712,15 +1744,15 @@ const RENDER = {
       esc(['Xray', t.rss_kb != null ? 'память ' + fmtKB(t.rss_kb) : ''].filter(Boolean).join(' · ')) + '</small></div><span class="pill ' + (t.running ? 'ok' : 'warn') + '">' +
       (t.running ? 'Работает' : 'Остановлен') + '</span></li>';
     return panel('Модуль VLESS', tl.length ? '<ul class="rows">' + tl.map(row).join('') + '</ul>' : empty('Туннелей VLESS нет'),
-      { desc: 'Держит туннели VLESS и Trojan: программа Xray на каждый туннель.' });
+      { desc: 'Держит туннели VLESS и Trojan: программа Xray на каждый туннель.' }) + compPanel('vless');
   },
   'd-agh'() {
     const a = S.ads || {}, g = S.agh, st1 = S.adsstats, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
     const aghHost = ag.address || location.hostname, aghUrl = ag.port ? 'http://' + aghHost + ':' + ag.port + '/' : '';
     const e = (S.ext && S.ext.agh) || {};
     return loadError(['ads']) +
-      // One state, the same as in «Утилиты» (aghState); the link only while AdGuard Home answers.
-      panel('AdGuard Home', kv([S.ads ? ['Состояние', aghState()[1], aghState()[0]] : null,
+      // One state, the same as in «Компоненты» (aghState); the link only while AdGuard Home answers.
+      panel('AdGuard Home', kv([S.ads ? ['Состояние', aghState()[1], aghState()[0], null, '', aghState()[2]] : null,
           aghUrl && g && g.ok ? ['Веб-интерфейс', aghHost + ':' + ag.port, '', aghUrl] : null,
           g && g.ok && g.protection != null ? ['Фильтрация', g.protection ? 'Включена' : 'Выключена', g.protection ? 'ok' : 'warn'] : null,
           st1 && st1.ok ? ['Запросов за сутки', fmtInt(st1.queries), '', 'd-querylog'] : null,
@@ -1728,7 +1760,7 @@ const RENDER = {
           // The program's own version (the official build is not the Entware package's number).
           ['Версия', (g && g.version) || ((e.official || {}).installed) || (e.installed ? extVer(e.installed) : '—'), '', 'u-agh', '', e.available ? 'доступна ' + extVer(e.available) : '']]),
         { desc: 'Блокирует рекламу по своим фильтрам; VWARD дочищает пропущенное.' }) +
-      aghConnectPanel(a) + aghSettingsPanel(a) + dnsGuardPanel(a) +
+      compPanel('agh') + aghConnectPanel(a) + aghSettingsPanel(a) + dnsGuardPanel(a) +
       (a.agh_connected ? panel('Связь с Keenetic', aghClientsRows(a) + routeDnsRows(a)) : '');
   },
   'd-dnsex'() {
@@ -1750,7 +1782,7 @@ const RENDER = {
       panel('Состояние', kv([
         (() => { const n = ((S.config && S.config.components) || []).filter(x => x.enabled === false).length;
           return ['Управление', n ? 'выключено: ' + n : 'всё включено', n ? 'warn' : '', 'd-control', '', 'все выключатели VWARD']; })(),
-        ['Компоненты', 'по частям VWARD', '', 'd-components'],
+        ['Компоненты VWARD', 'по частям VWARD', '', 'd-components'],
         agentsRow(),
         ['Диагностика', dg.length ? (dg.length - bad) + ' из ' + dg.length + ' в норме' : 'не запускалась', bad ? 'warn' : '', 'd-diag'],
         (() => { const sc = stabScore(stabRows(S.stab, 86400), stabChecks(S.stab)); return ['Стабильность', sc && sc.index != null ? sc.index + '% за сутки' : S.stab ? 'не проверено' : '…', stabCls(sc && sc.index), 'd-stability']; })()
@@ -1987,7 +2019,7 @@ const RENDER = {
     const row = l => '<li class="row link" role="button" tabindex="0" data-go="' + (l.name === (cfgRoute().group || prof().policy_group) ? 'd-mydomains' : 'l-' + esc(l.name)) + '"><div class="row-main"><b>' + esc(l.description || l.name) + '</b><small>' + fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + ' · ' + esc(path(l)) + '</small>' +
       (l.smartdns_conflict || (l.auto && viaIs(l, 'vpn')) ? '<small class="st warn">' + ico('alert') + (l.smartdns_conflict ? 'конфликт со Smart DNS' : 'переведён на VPN автоматически') + '</small>' : '') + '</div>' +
       ico('chevron', 'chev') + '</li>';
-    return cfgNote() + panel('Доменные списки', items.length ? '<ul class="rows">' + items.map(row).join('') + '</ul>' : empty('В Keenetic нет доменных списков')) + soonPanel('lists');
+    return cfgNote() + listDupPanel(items) + panel('Доменные списки', items.length ? '<ul class="rows">' + items.map(row).join('') + '</ul>' : empty('В Keenetic нет доменных списков')) + soonPanel('lists');
   },
   'd-wanrec'() {
     const gp = Object.assign({ CONFIRM_FAILURES: 3, RENEW_COOLDOWN: 600, BOUNCE_COOLDOWN: 1800, MAX_RENEW_HOUR: 3, MAX_BOUNCE_HOUR: 2, MAX_BOUNCE_DAY: 6 }, (cfg().wan_guard || {}).params);
@@ -2674,6 +2706,25 @@ function cronText(c) {
   return c;
 }
 function bandText(b) { return b === '5' ? '5 ГГц' : b === '2.4' ? '2.4 ГГц' : 'диапазон неизвестен'; }
+// Two lists of one service under names that differ only in case or signs (Viva 2026-10-19:
+// «Youtube» 172 and «YouTube» 188 domains): the smaller one goes into the bigger one.
+const listKey = n => String(n || '').toLowerCase().replace(/[^a-z0-9а-яё]/g, '');
+function listDups(items) {
+  const own = cfgRoute().group || prof().policy_group, by = {};
+  items.filter(l => l.name !== 'AdaptiveAuto' && l.name !== own).forEach(l => { const k = listKey(l.name); if (k) (by[k] = by[k] || []).push(l); });
+  return Object.values(by).filter(g => g.length > 1).map(g => g.sort((a, b) => num(b.count) - num(a.count)));
+}
+function listDupPanel(items) {
+  const dups = listDups(items);
+  if (!dups.length) return '';
+  return panel('Похожие списки', dups.map(g => { const [to, ...from] = g, f = from[0];
+    return confirmBox('list-merge-' + f.name, 'Объединить «' + (f.description || f.name) + '» (' + fmtInt(f.count) + ') с «' + (to.description || to.name) + '» (' + fmtInt(to.count) + ')? Домены перейдут в «' + (to.description || to.name) + '» и пойдут по его маршруту, список «' + (f.description || f.name) + '» удалится. Перед этим сохранится резервная копия.', 'Объединить') ||
+      '<p class="panel-desc">«' + esc(f.description || f.name) + '» (' + fmtInt(f.count) + ') и «' + esc(to.description || to.name) + '» (' + fmtInt(to.count) + ') - похоже, один и тот же сервис.</p><div class="panel-actions">' +
+      btn('ask', 'list', 'Объединить', '', ' data-confirm="list-merge-' + esc(f.name) + '" data-name="' + esc(f.name) + '" data-what="' + esc(to.name) + '"' + (cfgOk() ? '' : ' disabled')) + '</div>'; }).join(''),
+    { desc: 'Два списка одного сервиса делят его домены и маршруты; объединённый список проще вести.' });
+}
+const WIFI_EMPTY = { not_collected: 'Сбор ещё не запускался: первые данные появятся в течение 10 минут', collect_failed: 'Сбор завершился с ошибкой: подробности в журнале Wi-Fi',
+  keenetic_empty: 'Keenetic не вернул список устройств', no_wifi: 'Keenetic не видит устройств в Wi-Fi' };
 const WIFI_REASONS = { stable: 'переходы редкие, сигнал в норме', frequent_band_switches: 'часто переходит между 2.4 и 5 ГГц', frequent_switches_and_weak_5g: 'часто переходит и слабый сигнал 5 ГГц' };
 function recText(c) { return c.recommendation === 'bind_2g' ? 'Закрепить за 2.4' : c.recommendation === 'review' ? 'Проверить' : c.health === 'WARNING' ? 'Внимание' : 'Норма'; }
 
@@ -2732,12 +2783,96 @@ function tunnelPage(name) {
 const awgLost = () => (S.awg && S.awg.lost) || [];
 // A tunnel's line in the list: the handshake; for the engine's tunnels it comes from the engine.
 const vlessOf = name => ((S.awg && S.awg.vless && S.awg.vless.tunnels) || []).find(x => x.name === name);
-// vlessRow: the VLESS module's line in «Утилиты» (none without VLESS tunnels).
+// vlessRow: the VLESS module's line in «Компоненты».
+// progRows: VWARD's own helper programs in «Компоненты» (fix.32), one state each from the
+// status answer: «Не установлен», «Выключен» - grey, «Работает» - green, «Не работает» - red.
+const progRows = () => {
+  const sv = st().services || {}, x = k => sv[k] || null, known = !!S.status;
+  const row = (label, o, idle, link, what) => { const s = !known || !o ? ['', '—', ''] : o.running ? ST.on.concat('') : !o.installed ? ST.none.concat('') : idle ? ST.off.concat(idle) : ST.bad.concat('программа не запущена');
+    return [label, s[1], s[0], link, '', s[2] || what]; };
+  return [row('vward-sentinel', x('sentinel'), '', 'd-stability', 'следит за роутером в реальном времени'),
+    row('vward-dnscap', x('dnscap'), 'запускается автоподбором доменов', null, 'узнаёт домены для автоподбора'),
+    row('DoH-клиент (https-dns-proxy)', x('doh'), 'нужен только своему Smart DNS', null, 'свой Smart DNS через DoH')];
+};
+const modOff = m => ((st().services || {}).modules_off || []).includes(m);
+// ---- «Компоненты»: install, on/off, reinstall, reset, remove (fix.32) ----
+// One operation at a time: while one runs (here or after a reboot) the buttons wait.
+let COMP_JOB = null;
+const COMP_NAME = { agh: 'AdGuard Home', awg: 'модуль AmneziaWG', vless: 'модуль VLESS' };
+const COMP_ACT = { install: 'Установить', enable: 'Включить', disable: 'Отключить', reinstall: 'Переустановить', reset: 'Сбросить настройки', remove: 'Удалить' };
+const COMP_DONE = { install: 'установлен', enable: 'включён', disable: 'отключён', reinstall: 'переустановлен', reset: 'настройки сброшены', remove: 'удалён' };
+const compBusy = () => COMP_JOB || (st().services || {}).component_op || null;
+function compModTunnels(m) { return m === 'vless' ? ((S.awg && S.awg.vless && S.awg.vless.tunnels) || []).map(t => t.name) : ((S.awg && S.awg.tunnels) || []).map(t => t.name); }
+// What the step will touch, said before it is done.
+function compPreview(id, act) {
+  const cur = prof().tunnel_interface, n = act === 'disable' && id !== 'agh' ? tunUseExtraAll(compModTunnels(id)) : 0;
+  if (id === 'agh') return {
+    disable: 'Отключить AdGuard Home? DNS-строки AdGuard Home уйдут из Keenetic, реклама перестанет блокироваться, домены Smart DNS перейдут в Keenetic (там до 8 мест). «Включить» вернёт всё.',
+    enable: 'Включить AdGuard Home? Он снова станет DNS роутера, домены Smart DNS вернутся в него.',
+    reinstall: 'Переустановить AdGuard Home? Программа скачается заново, настройки и правила останутся.',
+    reset: 'Сбросить настройки AdGuard Home? Его правила, списки и клиенты заменятся новыми настройками; вход - по сохранённому логину.',
+    remove: 'Удалить AdGuard Home? DNS-строки уйдут из Keenetic, «Реклама» выключится, домены Smart DNS перейдут в Keenetic (до 8). Программа и её настройки удалятся.' }[act] || '';
+  if (act === 'disable') return 'Отключить ' + COMP_NAME[id] + '? Его туннели (' + compModTunnels(id).length + ') выключатся и не будут запускаться' +
+    (n ? ', их списки и подсети (' + n + ') перейдут на ' + tunLabel(cur) : '') + '. «Включить» вернёт туннели и маршруты.';
+  return 'Включить ' + COMP_NAME[id] + '? Туннели модуля включатся, списки и подсети вернутся на них.';
+}
+function tunUseExtraAll(names) { return names.filter(n => n !== prof().tunnel_interface).reduce((a, n) => a + tunUseExtra(n), 0); }
+function compButtons(id) {
+  const sv = st().services || {}, b = (act, cls) => btn('comp-ask', act === 'remove' ? 'trash' : act === 'disable' ? 'close' : 'check', COMP_ACT[act], cls || '', ' data-comp="' + id + '" data-cact="' + act + '"' + (cfgOk() && !compBusy() ? '' : ' disabled'));
+  if (id === 'agh') {
+    const none = aghState()[1] === ST.none[1];
+    if (none) return [b('install', 'primary')];
+    return [sv.adguard_disabled ? b('enable', 'primary') : b('disable'), b('reinstall'), b('reset'), b('remove', 'danger')];
+  }
+  if (!compModTunnels(id).length && !modOff(id)) return [];
+  return [modOff(id) ? b('enable', 'primary') : b('disable')];
+}
+function compPanel(id) {
+  if (id === 'agh' ? !S.status || !S.ads : !S.awg || !S.status) return '';
+  const busy = compBusy(), btns = compButtons(id), c = confirm && confirm.id === 'comp' && confirm.comp === id ? confirm : null;
+  if (!btns.length && !c) return '';
+  const a = S.ads || {}, needLogin = id === 'agh' && !a.agh_connected && c && (c.act === 'install' || c.act === 'reset');
+  const cur = prof().tunnel_interface, inMod = id !== 'agh' && compModTunnels(id).includes(cur);
+  const alt = ((st().wg || {}).interfaces || []).filter(t => t.name !== cur && !compModTunnels(id).includes(t.name) && isTrue(t.connected));
+  let body = '';
+  if (c) {
+    body = '<div class="confirm' + (c.act === 'remove' ? ' danger' : '') + '"><span>' + esc(c.act === 'install' ? 'Установить AdGuard Home? VWARD скачает официальную сборку для этого роутера, займёт свободные порты (веб-интерфейс 3000, DNS 65053 или следующие) и подключит его к Keenetic.' : compPreview(id, c.act)) + '</span>' +
+      (['remove', 'reinstall', 'reset'].includes(c.act) ? '<label class="check-row"><input type="checkbox" data-comp-backup' + (c.backup === false ? '' : ' checked') + '> Сохранить копию настроек перед этим</label>' : '') +
+      (c.act === 'disable' && inMod ? '<label class="check-row">Туннель по умолчанию ' + esc(tunLabel(cur)) + ' в этом модуле. Маршруты VWARD: ' + sel('data-comp-to', 'Куда перевести маршруты', alt.map(t => [t.name, 'через ' + tunLabel(t.name)]).concat([['direct', 'напрямую через провайдера']]), c.to || (alt[0] ? alt[0].name : 'direct')) + '</label>' : '') +
+      (needLogin ? '<p class="panel-desc">Логин и пароль для входа в AdGuard Home (VWARD сохранит их на роутере и будет входить сам):</p><input class="input" name="comp-login" placeholder="логин" aria-label="Логин AdGuard Home" autocomplete="username"><input class="input" name="comp-password" type="password" placeholder="пароль, от 8 символов" aria-label="Пароль AdGuard Home" autocomplete="new-password">' : '') +
+      '<button class="btn small ' + (c.act === 'remove' ? 'danger' : 'primary') + '" type="button" data-act="comp-yes">' + esc(COMP_ACT[c.act]) + '</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>';
+  } else body = '<div class="panel-actions even">' + btns.join('') + '</div>';
+  return panel('Управление', body + (busy ? '<p class="result-note">Идёт операция: ' + esc(String(busy).replace(/^agh-/, 'AdGuard Home: ').replace(/^module-/, 'модуль ')) + '. Остальные кнопки ждут её окончания.</p>' : '') + resultBox('comp-' + id),
+    { desc: id === 'agh' ? 'Установка, отключение и удаление со всеми зависимостями: DNS Keenetic, «Реклама», Smart DNS.' : 'Отключение выключает туннели модуля и переводит их маршруты; включение возвращает их.' });
+}
+async function compRun(c) {
+  const f = { op: 'comp', id: c.comp, action: c.act, confirm: 'COMPONENT_OP' };
+  if (c.backup !== false && ['remove', 'reinstall', 'reset'].includes(c.act)) f.backup = 1;
+  if (c.act === 'disable' && c.comp !== 'agh' && compModTunnels(c.comp).includes(prof().tunnel_interface)) f.tunnel = c.to || 'direct';
+  const li = document.querySelector('[name=comp-login]'), pw = document.querySelector('[name=comp-password]');
+  if (li && pw) {
+    if (!/^[A-Za-z0-9._@-]{1,64}$/.test(li.value.trim()) || pw.value.length < 8) { toast('Введите логин и пароль от 8 символов', 'warn'); return; }
+    f.login = li.value.trim(); f.password = pw.value; pw.value = '';
+  }
+  confirm = null; COMP_JOB = c.comp + '-' + c.act;
+  actionResult = { id: 'comp-' + c.comp, text: COMP_ACT[c.act] + ': выполняется…' }; render();
+  const j = await bgJob(f, c.act === 'install' || c.act === 'reinstall' ? 15 : 5);
+  COMP_JOB = null;
+  const name = COMP_NAME[c.comp], msg = j.ok ? name[0].toUpperCase() + name.slice(1) + ': ' + COMP_DONE[c.act] : !j.done ? 'Ещё выполняется, проверьте позже' : 'Не выполнено: ' + errText(j.x) + (j.x && j.x.reason ? ' (' + j.x.reason + ')' : '');
+  actionResult = { id: 'comp-' + c.comp, text: msg };
+  toast(msg, j.ok ? 'ok' : 'err', 'a-comp-' + c.comp);
+  await Promise.all([load('status', true), load('ads', true), load('awg', true), load('lists', true)]); render();
+}
+document.addEventListener('change', e => {
+  if (!e.target.matches || !confirm || confirm.id !== 'comp') return;
+  if (e.target.matches('[data-comp-backup]')) confirm.backup = e.target.checked;
+  if (e.target.matches('[data-comp-to]')) confirm.to = e.target.value;
+});
 const vlessRow = () => {
-  const tl = (S.awg && S.awg.vless && S.awg.vless.tunnels) || [];
-  if (!tl.length) return null;
-  const stopped = tl.filter(t => !t.running && !t.off).length, s = stopped ? ST.bad : ST.on;
-  return ['Модуль VLESS', s[1], s[0], 'd-vless', '', 'туннели VLESS и Trojan'];
+  const v = (S.awg && S.awg.vless) || {}, tl = v.tunnels || [];
+  const stopped = tl.filter(t => !t.running && !t.off).length;
+  const s = !S.awg ? ['', '—', ''] : modOff('vless') ? ST.off.concat('выключен в Панели') : stopped ? ST.bad.concat('остановлено программ Xray: ' + stopped) : !v.installed && !tl.length ? ST.none.concat('скачается сама с первым туннелем VLESS') : !tl.length ? ST.unlinked.concat('нет туннелей VLESS') : ST.on.concat('');
+  return ['Xray (VLESS)', s[1], s[0], 'd-vless', '', s[2] || 'туннели VLESS и Trojan'];
 };
 const TUN_TYPE = { wireguard: 'WireGuard', openvpn: 'OpenVPN', sstp: 'SSTP', pptp: 'PPTP', l2tp: 'L2TP', ike: 'IPsec', ipsec: 'IPsec', proxy: 'Proxy', opkgtun: 'OpkgTun' };
 const awgOf = name => ((S.awg && S.awg.tunnels) || []).find(x => x.name === name);
@@ -2900,11 +3035,11 @@ function svcProbePanel(id) {
 }
 // A background job of the services action, waited for through control-data: { ok, done, x }.
 // The helper's reason= line (Keenetic's own answer) comes along with its error.
-async function bgJob(fields) {
+async function bgJob(fields, minutes) {
   let x, run = {};
   try { x = await apiPost('services', fields); } catch (err) { x = { ok: false, error: err.message }; }
   if (!x.ok) return { ok: false, done: true, x: x };
-  const deadline = Date.now() + 3 * 60 * 1000;
+  const deadline = Date.now() + (minutes || 3) * 60 * 1000;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 2000));
     try { run = (await apiGet('control-data')).run || {}; } catch (err) { continue; }
@@ -3182,16 +3317,20 @@ function tunnelManagePanel(name, managed) {
       '<div class="panel-actions even">' + btn('tunnel-delete', 'trash', 'Удалить туннель', 'danger', cfgOk() ? '' : ' disabled') + '</div>');
   // The default tunnel cannot be removed: no section for it at all (owner 2026-10-17).
   const delPanel = managed ? '' : panel('Удаление', del, { desc: routed ? 'Списки и подсети туннеля перейдут, куда выберете.' : 'У туннеля нет списков и подсетей.' });
+  // Its lists and subnets go nowhere (the route is withdrawn, sites go via the provider):
+  // one tap moves them to the default tunnel, the tunnel itself stays (fix.32).
+  const mv = !managed && routed ? (confirmBox('tunnel-move', 'Перенести списки и подсети ' + tunLabel(name) + ' (' + tunUseExtra(name) + ') на ' + tunLabel(prof().tunnel_interface) + '? Туннель останется, удалить его можно потом.', 'Перенести') ||
+    '<p class="field-warn">На туннеле ' + esc(String(tunUseExtra(name))) + ' списков и подсетей: пока он без настроек, эти сайты идут напрямую через провайдера.</p><div class="panel-actions">' + btn('ask', 'route', 'Перенести на туннель по умолчанию', 'primary', ' data-confirm="tunnel-move"' + (cfgOk() ? '' : ' disabled')) + '</div>') : '';
   if (lost)
     return [panel('Настройки не найдены', '<p class="panel-desc">Ключей и адреса сервера этого туннеля нет на флешке (например, после её замены или форматирования). Добавьте туннель заново: VPN → «Добавить туннель»' +
-      (managed ? ', сделайте новый туннелем по умолчанию, затем удалите этот.' : ', а этот удалите.') + '</p>' + (managed ? '' : del))];
+      (managed ? ', сделайте новый туннелем по умолчанию, затем удалите этот.' : ', а этот удалите.') + '</p>' + mv + (managed ? '' : del))];
   const vl = vlessOf(name);
   if (vl)
     return [vlessServersPanel(name),
       vl.running ? '' : panel('Модуль VLESS', kv([['Xray', ST.bad[1], ST.bad[0], 'd-vless']])),
       soonPanel('vless') + delPanel];
   if (((S.awg && S.awg.tunnels) || []).some(t => t.name === name))
-    return [nativePanel(), panel('Конфигурация', '<p class="panel-desc">Туннель держит модуль AmneziaWG VWARD. Чтобы сменить сервер, добавьте новый туннель и удалите этот.</p>' + kv([['Модуль AmneziaWG', 'Утилиты', '', 'd-awg', '', '', 'out']])),
+    return [nativePanel(), panel('Конфигурация', '<p class="panel-desc">Туннель держит модуль AmneziaWG VWARD. Чтобы сменить сервер, добавьте новый туннель и удалите этот.</p>' + kv([['Модуль AmneziaWG', 'Компоненты', '', 'd-awg', '', '', 'out']])),
       delPanel];
   return [panel('Конфигурация', '<div class="panel-actions even">' + btn('tunnel-replace', 'refresh', 'Заменить конфигурацию', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('tunnel-conf'),
       { desc: 'Новый .conf в этот же туннель, маршруты останутся.' }),
@@ -3339,6 +3478,8 @@ function aghConnectPanel(a) {
   if (!S.ads) return '';
   // Connected: nothing to show (owner 2026-10-17); not connected: the login, needed for the statistics.
   if (a.agh_connected) return '';
+  // Nothing to connect to: the program is not on the router (a formatted USB stick, Viva 2026-10-19).
+  if (aghState()[1] === ST.none[1]) return '';
   return panel('Подключить VWARD к AdGuard Home', '<form class="inline-form multi" data-form="agh-connect">' + formLabel('Логин и пароль от AdGuard Home') + '<input class="input" name="login" placeholder="логин AdGuard Home" aria-label="Логин AdGuard Home" autocomplete="username"><input class="input" name="password" type="password" placeholder="пароль" aria-label="Пароль AdGuard Home" autocomplete="current-password"><button class="btn primary" type="submit">Подключить</button></form>',
     { desc: 'Пароль проверяется и хранится только на роутере.' });
 }
@@ -3724,7 +3865,7 @@ function openNotes() {
   openSheet('Уведомления', '<div class="sheet-body">' + (n.length || hist.length ? head + now + past : empty('Всё работает штатно')) + '</div>', 'notes', 'bellBtn');
 }
 const SEARCH_INDEX = [
-  ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'VWARD'], ['system', 'Компоненты'], ['system', 'Диагностика'], ['system', 'Файлы VWARD'], ['system', 'Свободно'],
+  ['system', 'Модель'], ['system', 'KeeneticOS'], ['system', 'Веб-интерфейс Keenetic'], ['system', 'VWARD'], ['system', 'Компоненты VWARD'], ['system', 'Диагностика'], ['system', 'Файлы VWARD'], ['system', 'Свободно'],
   ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Восстанавливать автоматически'], ['wan', 'Проверять'], ['wan', 'Обновить адрес'], ['wan', 'Переподключить'], ['d-wanrec', 'Неудачных проверок подряд'],
   ['settings', 'Только зарегистрированные устройства'], ['vpn', 'Агент VPN'], ['vpn', 'Маршрутизация списков'], ['vpn', 'История агента VPN'],
   ['d-smartdns', 'Агент Smart DNS'],
@@ -3761,16 +3902,17 @@ const noteKey = n => { let h = 5381; const t = n.sev + '|' + n.title + '|' + (n.
 // One line and the time; goes by itself in 5 s, an error stays until closed (× or a swipe);
 // three at most, the newest on top. A tap opens the page it is about.
 function popup(n) {
-  const box = $('toasts'), el = document.createElement('div'), stay = n.sev === 'err' || n.sev === 'crit';
+  const box = $('toasts'), el = document.createElement('div'), stay = n.stay || n.sev === 'err' || n.sev === 'crit';
   el.className = 'toast ' + n.sev; el.setAttribute('role', stay ? 'alert' : 'status');
   el.innerHTML = '<span class="sev ' + n.sev + '">' + ico(n.icon || NOTE_ICON[n.sev] || 'bell') + '</span><span class="toast-text"' + (n.to ? ' role="button" tabindex="0" data-go="' + esc(n.to) + '"' : '') + ' title="' + esc(n.title + (n.text ? '. ' + n.text : '')) + '"><b>' + esc(n.title) + '</b>' + (n.text ? '<small>' + esc(n.text) + '</small>' : '') + '</span>' +
-    '<time>' + new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) + '</time><button class="toast-x" type="button" aria-label="Закрыть">' + ico('close') + '</button>';
+    (n.btn ? '<button class="btn small toast-btn" type="button">' + esc(n.btn[0]) + '</button>' : '') + '<time>' + new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) + '</time><button class="toast-x" type="button" aria-label="Закрыть">' + ico('close') + '</button>';
   box.prepend(el);
   while (box.children.length > 3) box.lastChild.remove();
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('in')));
   const gone = () => { if (el.classList.contains('out')) return; el.classList.remove('in'); el.classList.add('out'); el.style.transform = ''; setTimeout(() => el.remove(), 260); };
   if (!stay) setTimeout(gone, 5000);
   el.querySelector('.toast-x').addEventListener('click', e => { e.stopPropagation(); gone(); });
+  if (n.btn) el.querySelector('.toast-btn').addEventListener('click', e => { e.stopPropagation(); n.btn[1](); });
   if (n.to) el.querySelector('.toast-text').addEventListener('click', e => { if (moved) { e.stopPropagation(); e.preventDefault(); return; } gone(); }, true);
   // A swipe left, right or up throws it away (owner 2026-10-17). Pointer events and
   // touch-action:none: with touch events Android's back gesture took the sideways swipe.
@@ -3876,6 +4018,7 @@ async function runAction(resultId, action, fields, okMsg) {
   finally { render(); }
 }
 const CONFIRMED = {
+  'list-merge': c => cfgSet({ op: 'list', action: 'merge', target: c.name, value: c.what, confirm: 'LIST_MERGE' }, 'Списки объединены', ['lists']),
   'list-clear': c => cfgSet({ op: 'list', action: 'clear', target: c.name, confirm: 'LIST_CLEAR' }, 'Список очищен', ['lists', 'listd']),
   'list-del': c => cfgSet({ op: 'list', action: 'delete', target: c.name, confirm: 'LIST_DELETE' }, 'Список удалён', ['lists']).then(x => { if (x && x.ok && current === 'l-' + c.name) go('lists'); }),
   'cleanup': c => cfgSet({ op: 'cleanup', target: c.what }, 'Очищено', ['cleanup', 'status']),
@@ -3906,6 +4049,7 @@ const CONFIRMED = {
   'feed-dev': () => cfgSet({ op: 'update-feed', target: 'dev', confirm: 'UPDATE_FEED_DEV' }, 'Канал: Dev'),
   'comp-off': c => { const id = c.comp || current.slice(2); return cfgSet({ op: 'component', target: id, value: '0', confirm: 'COMPONENT_DISABLE' }, '«' + comp(id).name + '» выключен', ['status']); },
   'comp-on': c => { const id = c.comp || current.slice(2); return cfgSet({ op: 'component', target: id, value: '1' }, '«' + comp(id).name + '» включён', ['status']); },
+  'tunnel-move': () => { const name = current.slice(2); return apiPost('tunnel-conf', { op: 'move', name: name }).then(x => { toast(x.ok ? 'Списки и подсети перенесены на ' + tunLabel(prof().tunnel_interface) : 'Не перенесено: ' + errText(x), x.ok ? 'ok' : 'err', 'a-tunnel-move'); return Promise.all([load('status', true), load('lists', true)]).then(render); }, e => { toast('Ошибка: ' + e.message); render(); }); },
   'tunnel-delete': c => { const name = current.slice(2); return apiPost('tunnel-conf', { op: 'delete', name: name, target: c.to, confirm: 'TUNNEL_DELETE' }).then(x => { toast(x.ok ? tunLabel(name) + ' удалён' : 'Не удалено: ' + errText(x)); return Promise.all([load('status', true), load('lists', true)]).then(() => { if (x.ok) go('vpn', null, 'replace'); else render(); }); }, e => { toast('Ошибка: ' + e.message); render(); }); },
   'tunnel-use': c => tunUseJob(current.slice(2), c.moveAll === false ? 'own' : 'all'),
   'wg-off': () => cfgSet({ op: 'wan-guard', value: '0', confirm: 'WAN_GUARD_DISABLE' }, 'Восстановление интернета выключено'),
@@ -4221,7 +4365,7 @@ document.addEventListener('click', e => {
   else if (a === 'all-check') extOp('check').then(() => updateOp('check'));
   else if (a === 'confirm-no') { confirm = null; render(); }
   else if (a === 'vward-on') { t.disabled = true; vwardPower('on'); }
-  else if (a === 'confirm-yes') { const c = confirm; confirm = null; if (c && CONFIRMED[c.id]) CONFIRMED[c.id](c); else render(); }
+  else if (a === 'confirm-yes') { const c = confirm; confirm = null; const id = c && /^list-merge-/.test(c.id) ? 'list-merge' : c && c.id; if (c && CONFIRMED[id]) CONFIRMED[id](c); else render(); }
   else if (a === 'ads-urule') { t.disabled = true; adsUserRule(t.dataset.op, t.dataset.kind, t.dataset.dom); }
   else if (a === 'ads-chain-block') { t.disabled = true; adsChainBlock(t.dataset.doms.split(' ').filter(d => DOMAIN.test(d))); }
   else if (a === 'site-fix') siteFix(t.dataset.dom);
@@ -4254,6 +4398,8 @@ document.addEventListener('click', e => {
   }
   else if (a === 'tun-open') { const n = t.dataset.name; tunOverlayClose(); go('t-' + n); }
   else if (a === 'agh-filters-refresh') aghSet({ setting: 'filters-refresh' }, 'Списки обновляются');
+  else if (a === 'comp-ask') { confirm = { id: 'comp', comp: t.dataset.comp, act: t.dataset.cact, backup: true }; render(); }
+  else if (a === 'comp-yes') { if (confirm && confirm.id === 'comp') compRun(confirm); }
   else if (a === 'tunnel-create') tunnelConfSheet('create');
   else if (a === 'tunnel-replace') tunnelConfSheet('replace', current.slice(2));
   else if (a === 'tunnel-delete') { const s2 = document.querySelector('[data-tunnel-del-to]'); confirm = { id: 'tunnel-delete', to: s2 ? s2.value : 'vpn' }; render(); }

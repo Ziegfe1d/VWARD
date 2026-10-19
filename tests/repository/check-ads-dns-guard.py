@@ -503,4 +503,48 @@ for text, want in (("ip name-server 192.168.1.1:65053\n", 0), ('ip name-server 1
     if r.returncode != want:
         fail(f"chain line {text!r}: rc={r.returncode}")
 
+# fix.32: AdGuard Home gone with the USB stick, its 25 lines left in Keenetic - every listed domain
+# asked a dead server. Nothing listening on the port twice in a row: the lines go, ad blocking
+# not set up at all; a listening port (a restart) keeps them.
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    bindir = tmp / "bin"; bindir.mkdir()
+    for name, body in (("ndmc", FAKE_NDMC), ("pidof", FAKE_PIDOF)):
+        f = bindir / name; f.write_text(body); f.chmod(0o755)
+    (tmp / "profile.sh").write_text(FAKE_PROFILE + "vward_note() { echo \"$*\" >> \"$FAKE_NOTES\"; }\n")
+    net = tmp / "net"; net.mkdir()
+    head = "  sl  local_address rem_address   st\n"
+    (net / "udp").write_text(head + "   0: 00000000:0035 00000000:0000 07\n"); (net / "udp6").write_text(head)
+    rc = tmp / "rc"
+    rc.write_text("ip name-server 192.168.1.1:65053\nip name-server 192.168.1.1:65053 chatgpt.com\n"
+                  "ip name-server 192.168.1.1:65053 claude.ai\nip name-server 8.8.8.8\nip name-server 192.168.1.1:5353 local.example\n")
+    (tmp / "agh-bindings.txt").write_text("chatgpt.com 192.168.1.1:65053\nclaude.ai 192.168.1.1:65053\nkeep.example ext\n")
+    etc = tmp / "etc"; etc.mkdir()
+    env = os.environ | {"VWARD_ADS_LIB": str(ROOT / "components/ads-privacy-guard/lib/vward-ads-privacy-common.sh"),
+        "VWARD_ADS_ETC": str(etc), "VWARD_ADS_STATE": str(tmp / "state"), "VWARD_ADS_LOG_DIR": str(tmp / "log"),
+        "VWARD_ADS_DEVICE_PROFILE_LIB": str(tmp / "profile.sh"), "FAKE_AGH_YAML": str(tmp / "absent.yaml"),
+        "VWARD_NDMC": str(bindir / "ndmc"), "VWARD_PIDOF": str(bindir / "pidof"), "FAKE_RC": str(rc), "FAKE_NDMC_LOG": str(tmp / "ndmc.log"),
+        "FAKE_AGH_PID": str(tmp / "agh.pid"), "FAKE_NOTES": str(tmp / "notes"), "VWARD_PROC_NET": str(net),
+        "VWARD_DNS_CHAIN_STATE": str(tmp / "chain"), "VWARD_AGH_BINDINGS": str(tmp / "agh-bindings.txt"),
+        "VWARD_DNS_GUARD_LOCK": str(tmp / "lock"), "VWARD_DNS_GUARD_STATE": str(tmp / "guard.state"),
+        "VWARD_DNS_ORPHAN_EVERY_MIN": "0", "VWARD_ROOT_PREFIX": str(tmp), "TMPDIR": str(tmp),
+        "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh")}
+    orphan = lambda: subprocess.run(["sh", str(GUARD), "orphan"], env=env, text=True, capture_output=True, timeout=60)
+    orphan()
+    if "192.168.1.1:65053 chatgpt.com" not in rc.read_text():
+        fail("orphan: one look is not a death (a restart)")
+    # The other local server answers: its line stays.
+    (net / "udp").write_text(head + "   0: 0101A8C0:14E9 00000000:0000 07\n")
+    orphan()
+    lines = rc.read_text().splitlines()
+    if any(":65053" in l for l in lines) or "ip name-server 8.8.8.8" not in lines or "ip name-server 192.168.1.1:5353 local.example" not in lines:
+        fail(f"orphan: the lines into the dead server go, the others stay: {lines}")
+    if (tmp / "agh-bindings.txt").read_text().split("\n")[0] != "keep.example ext" or (tmp / "chain/state").read_text().strip() != "out":
+        fail("orphan: bindings of the dead server forgotten, the chain marked out")
+    if "system configuration save" not in (tmp / "ndmc.log").read_text() or "AdGuard Home" not in (tmp / "notes").read_text():
+        fail("orphan: saved and told in the bell")
+    sched = (ROOT / "components/ads-privacy-guard/scripts/vward-ads-privacy-scheduler.sh").read_text()
+    if sched.index('"$SCH_G" orphan') > sched.index("vward_component_gate ads-privacy-guard"):
+        fail("the scheduler looks for dead DNS lines before the ads gate (ads off or never set up)")
+
 print("ADS_DNS_GUARD=PASS")

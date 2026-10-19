@@ -915,6 +915,14 @@ if [ -x "$POLICY_CHAIN" ] && [ -f "$POLICY_SYNC_LOG" ]; then
         echo "$PC_TODAY" > "$POLICY_CATCHUP_FILE" 2>/dev/null || :
         { "$POLICY_CHAIN" && "$POLICY_RECONCILE"; } </dev/null >/dev/null 2>&1 &
         echo "$PC_NOW|policy=catchup" >> "$HOUSE_LOG"
+    # The check of the sites was skipped or cut short while the tunnel was down: again, once
+    # the tunnel answers (fix.32: «unknown» left for a day).
+    elif [ "$PC_HOUR" != 00 ] && [ -e "$R/opt/var/lib/vward/policy-audit/recheck" ] &&
+        case "$(awk -F= '$1 == "STATUS" {print $2; exit}' "${VWARD_TUNNEL_HEALTH_STATE:-/tmp/vward-tunnel-health/state}" 2>/dev/null)" in UP) true ;; *) false ;; esac &&
+        ! vward_defer policy-catchup; then
+        rm -f "$R/opt/var/lib/vward/policy-audit/recheck"
+        { "$POLICY_CHAIN" && "$POLICY_RECONCILE"; } </dev/null >/dev/null 2>&1 &
+        echo "$PC_NOW|policy=recheck_after_tunnel" >> "$HOUSE_LOG"
     # Otherwise, every hour, the IP categories are matched again to the routed domains and to
     # Smart DNS without downloading anything: a category that now holds a Smart DNS address
     # leaves the tunnel within the hour, not at the next night's update.

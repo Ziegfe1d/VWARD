@@ -17,11 +17,13 @@ RUNNING = "\n".join([
     "dns-proxy",
     "    route object-group domain-list4 Wireguard0 auto",
     "    route object-group domain-list0 Wireguard0 auto",
+    "    route object-group domain-list5 Wireguard0 auto",
     "!",
     "object-group fqdn domain-list4", "    description \"Video\"",
     "    include video.example", "    include cdn.example", "    exclude music.video.example", "!",
     "object-group fqdn domain-list0", "    include my.example", "!",
     "object-group fqdn domain-list7", "    include svc.example", "!",
+    "object-group fqdn domain-list5", "    description \"video\"", "    include video.example", "    include extra.example", "!",
     "object-group fqdn AdaptiveAuto", "    include auto.example", "!",
 ]) + "\n"
 
@@ -139,7 +141,20 @@ with tempfile.TemporaryDirectory() as tmp:
     Path(str(cfg) + ".fail").write_text("no object-group fqdn domain-list4 include cdn.example\n")
     if run("clear", "domain-list4") != "error=router_rejected" or not same():
         fail("a refused clear must put the domains back:\n" + cfg.read_text())
+    Path(str(cfg) + ".fail").write_text("no object-group fqdn domain-list5\n")
+    if run("merge", "domain-list5", "domain-list4") != "error=router_rejected" or not same():
+        fail("a refused merge must put the domains and the route back:\n" + cfg.read_text())
     Path(str(cfg) + ".fail").unlink()
+    for args, want in ((("merge", "domain-list5", "domain-list5"), "error=invalid_group"), (("merge", "domain-list5", "AdaptiveAuto"), "error=invalid_group"),
+                       (("merge", "domain-list5", "domain-list9"), "error=list_not_found")):
+        if run(*args) != want:
+            fail(f"{args}: {run(*args)} != {want}")
+    # Two lists of one service: the other list's domains join, it goes with its route.
+    if run("merge", "domain-list5", "domain-list4") != "result=changed":
+        fail("merge: " + run("merge", "domain-list5", "domain-list4"))
+    text = cfg.read_text()
+    if "domain-list5" in text or text.count("include video.example") != 1 or "include extra.example" not in text or "route object-group domain-list4 Wireguard0 auto" not in text:
+        fail("merge must move the new domains once and remove the other list:\n" + text)
 
     if run("clear", "domain-list0") != "result=changed" or "include my.example" in cfg.read_text() or "object-group fqdn domain-list0" not in cfg.read_text():
         fail("VWARD's own list is cleared and stays")
@@ -156,7 +171,7 @@ with tempfile.TemporaryDirectory() as tmp:
     if not [p for p in (tmp / "snaps").iterdir() if p.name.endswith("-prelist.tar.gz")]:
         fail("a copy of the settings before every change")
     API = (ROOT / "web/cgi-bin/api.cgi").read_text()
-    if 'list) set -- "$OP" "$ACT" "$TARGET"; case "$ACT" in clear) REQUIRED=LIST_CLEAR ;; *) REQUIRED=LIST_DELETE ;; esac ;;' not in API:
+    if 'list) set -- "$OP" "$ACT" "$TARGET"; case "$ACT" in clear) REQUIRED=LIST_CLEAR ;; merge) set -- "$OP" "$ACT" "$TARGET" "$VALUE"; REQUIRED=LIST_MERGE ;; *) REQUIRED=LIST_DELETE ;; esac ;;' not in API:
         fail("the API asks for a confirmation")
 
 print("CONSOLE_LIST_EDIT=PASS")

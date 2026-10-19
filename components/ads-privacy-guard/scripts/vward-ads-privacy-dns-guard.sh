@@ -407,6 +407,79 @@ agh_unbind()
     ads_log "AGH_UNBIND|count=$au_n|list domains asked of the provider's DNS while AdGuard Home is out"
 }
 
+# orphan_sync: Keenetic hands DNS to a server on the router itself (the LAN address or 127.0.0.1,
+# a port other than 53) that nothing listens on: AdGuard Home removed with the USB stick, its
+# chain line and its list bindings left behind - Keenetic asked a dead server for ChatGPT,
+# Claude, YouTube... (Viva 2026-10-19: 25 such lines, no AdGuard Home on the router at all).
+# Seen twice 5 minutes apart (a restart is not a death), every line to it goes: the chain line,
+# the bindings, the record of them. The chain comes back by chain_sync once AdGuard Home answers.
+# Not the observation mode's to hold: a DNS nobody answers breaks the home, taking it out does not.
+ORPHAN_EVERY=${VWARD_DNS_ORPHAN_EVERY_MIN:-4}
+orphan_listening()
+{
+    ol_hex=$(printf '%04X' "$1")
+    awk -v h=":$ol_hex" 'FNR > 1 && $2 ~ h "$" {f = 1} END {exit !f}' \
+        "${VWARD_PROC_NET:-/proc/net}/udp" "${VWARD_PROC_NET:-/proc/net}/udp6" 2>/dev/null
+}
+# ns_release NS CONFIG REASON: every Keenetic DNS line into NS (the chain line and the domains
+# bound to it) out, the chain «out» and the bindings forgotten; prints how many lines went.
+ns_release()
+{
+    nr_n=0
+    for nr_d in $(printf '%s\n' "$2" | awk -v n="$1" '$1 == "ip" && $2 == "name-server" && $3 == n && NF >= 4 && $4 != "on" && $4 != "\"\"" {print $4}'); do
+        ndm "no ip name-server $1 $nr_d" </dev/null >/dev/null 2>&1 && nr_n=$((nr_n + 1))
+    done
+    if printf '%s\n' "$2" | chain_line "$1"; then
+        ndm "no ip name-server $1" </dev/null >/dev/null 2>&1 && nr_n=$((nr_n + 1))
+    fi
+    # «out»: the route engine binds nothing more to it until chain_sync sees it answer again.
+    echo out > "$CHAIN_DIR/state"; echo "$3" > "$CHAIN_DIR/reason"; ads_epoch > "$CHAIN_DIR/since"
+    if [ -s "$AGH_BIND" ]; then
+        awk -v n="$1" '$2 != n' "$AGH_BIND" > "$AGH_BIND.$$" && mv -f "$AGH_BIND.$$" "$AGH_BIND"
+        [ -s "$AGH_BIND" ] || rm -f "$AGH_BIND"
+    fi
+    echo "$nr_n"
+}
+
+# release_all: AdGuard Home switched off or removed from the Panel (fix.32) - its DNS lines in
+# Keenetic go at once, whoever answers on the port, so DNS never points at a stopped program.
+release_all()
+{
+    mkdir -p "$CHAIN_DIR" || return 1
+    ra_rc=$(ndm_running) || return 1
+    ra_list=$(printf '%s\n' "$ra_rc" | awk -v lan="$LAN" '$1 == "ip" && $2 == "name-server" {
+            n = split($3, a, ":"); if (n != 2 || a[2] !~ /^[0-9]+$/ || a[2] == 53) next
+            if (a[1] == lan || a[1] == "127.0.0.1") print $3}' | awk '!s[$0]++')
+    ra_n=0
+    for ra_ns in $ra_list; do ra_n=$((ra_n + $(ns_release "$ra_ns" "$ra_rc" released))); done
+    [ "$ra_n" = 0 ] || { ndm "system configuration save" </dev/null >/dev/null 2>&1 || :; ads_log "DNS_RELEASED|lines=$ra_n|AdGuard Home switched off from the Panel"; }
+    echo "released=$ra_n"
+}
+
+orphan_sync()
+{
+    mkdir -p "$CHAIN_DIR" || return 0
+    [ -z "$(find "$CHAIN_DIR/orphan.at" -mmin "-$ORPHAN_EVERY" 2>/dev/null)" ] || return 0
+    : > "$CHAIN_DIR/orphan.at"
+    os_rc=$(ndm_running) || return 0
+    os_list=$(printf '%s\n' "$os_rc" | awk -v lan="$LAN" '$1 == "ip" && $2 == "name-server" {
+            n = split($3, a, ":"); if (n != 2 || a[2] !~ /^[0-9]+$/ || a[2] == 53) next
+            if (a[1] == lan || a[1] == "127.0.0.1") print $3}' | awk '!s[$0]++')
+    [ -n "$os_list" ] || { rm -f "$CHAIN_DIR"/orphan.*.n; return 0; }
+    for os_ns in $os_list; do
+        os_port=${os_ns##*:} os_f=$CHAIN_DIR/orphan.$os_port.n
+        if orphan_listening "$os_port"; then rm -f "$os_f"; continue; fi
+        [ "$(count_up "$os_f")" -ge 2 ] || continue
+        os_n=$(ns_release "$os_ns" "$os_rc" absent)
+        rm -f "$os_f"
+        [ "$os_n" = 0 ] && continue
+        ndm "system configuration save" </dev/null || :
+        ads_log "DNS_ORPHAN_OUT|ns=$os_ns|lines=$os_n|nothing answers on the router at this port: Keenetic asks the provider's DNS"
+        ( . "$ADS_DEVICE_PROFILE_LIB" >/dev/null 2>&1 && vward_note warn "DNS AdGuard Home убран из Keenetic" \
+            "На роутере никто не отвечает на порту $os_port, а Keenetic отправлял туда запросы ($os_n строк). Строки убраны: DNS идёт через провайдера. Установите или запустите AdGuard Home - VWARD вернёт его в цепочку сам." d-agh ) || :
+    done
+}
+
 count_up() { cu_n=0; [ ! -r "$1" ] || read -r cu_n < "$1"; case "$cu_n" in ''|*[!0-9]*) cu_n=0 ;; esac; echo $((cu_n + 1)) > "$1"; echo $((cu_n + 1)); }
 
 # chain_line NS (Keenetic's configuration on stdin): Keenetic hands all queries to NS - the line
@@ -691,8 +764,21 @@ case "$OP" in
         fi
         echo "chain_state=$(cat "$CHAIN_DIR/state" 2>/dev/null)"
         exit 0 ;;
+    orphan)
+        # Every minute from the ads scheduler, before anything of ad blocking (that may be off or
+        # not set up at all): DNS lines into a dead server on the router go.
+        ads_lock_acquire "$LOCK" 60 || exit 0
+        trap 'ads_lock_release "$LOCK"' EXIT
+        profile_load && orphan_sync
+        exit 0 ;;
+    release)
+        pl_n=0; until ads_lock_acquire "$LOCK" 60; do pl_n=$((pl_n + 1)); [ "$pl_n" -lt 10 ] || exit 1; sleep 2; done
+        trap 'ads_lock_release "$LOCK"' EXIT
+        profile_load || exit 1
+        release_all || exit 1
+        exit 0 ;;
     set|apply|tick) ;;
-    *) echo "usage: $0 status|set enforce|bypass|chain 0|1|set exclude MACS|apply|tick|chain-out|planned SECONDS|planned-done|hook nat|filter" >&2; exit 64 ;;
+    *) echo "usage: $0 status|set enforce|bypass|chain 0|1|set exclude MACS|apply|tick|orphan|release|chain-out|planned SECONDS|planned-done|hook nat|filter" >&2; exit 64 ;;
 esac
 
 # Fail-open for a redirect into a dead AdGuard Home (the owner's own hook included).

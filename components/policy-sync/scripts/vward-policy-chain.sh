@@ -46,7 +46,13 @@ AUDIT_RC=$?
 
 log "AUDIT_PROCESS_FINISHED rc=$AUDIT_RC"
 
-if [ "$AUDIT_RC" -ne 0 ]; then
+# 75: the tunnel does not answer - no site is judged now (it is asked again once the tunnel
+# is back); the categories themselves are still updated.
+AUDIT_SKIPPED=0
+if [ "$AUDIT_RC" -eq 75 ]; then
+    log "AUDIT_SKIPPED tunnel_down"
+    AUDIT_SKIPPED=1
+elif [ "$AUDIT_RC" -ne 0 ]; then
     log "CHAIN_ABORT audit_rc=$AUDIT_RC"
     exit "$AUDIT_RC"
 fi
@@ -59,6 +65,7 @@ WAITED=0
 COMPLETE=0
 AFTER_SUMMARY=""
 
+[ "$AUDIT_SKIPPED" = 0 ] || { COMPLETE=1; WAITED=$((MAX_WAIT + 1)); }
 while [ "$WAITED" -le "$MAX_WAIT" ]; do
 
     AFTER_SUMMARY="$(tail -n 1 "$SUMMARY" 2>/dev/null)"

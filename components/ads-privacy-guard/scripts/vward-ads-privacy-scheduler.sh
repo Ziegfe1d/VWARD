@@ -14,6 +14,17 @@ VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admissio
 [ -r "$VWARD_ADMISSION_LIB" ] || VWARD_ADMISSION_LIB="$SELF_DIR/../../runtime/lib/vward-runtime-admission.sh"
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
 . "$VWARD_ADMISSION_LIB"
+# DNS lines of Keenetic into a dead server on the router (AdGuard Home gone with the USB stick)
+# go whatever the state of ad blocking - off, not set up, AdGuard Home never connected (fix.32).
+# Every 5 minutes of uptime; the other minutes cost no process.
+SCH_UP=; read -r SCH_UP _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"; SCH_UP=${SCH_UP%%.*}
+case "$SCH_UP" in ''|*[!0-9]*) ;; *)
+    if [ $((SCH_UP / 60 % 5)) = 0 ]; then
+        SCH_G="${VWARD_ADS_DNS_GUARD:-/opt/bin/vward-ads-privacy-dns-guard.sh}"
+        [ -x "$SCH_G" ] || SCH_G="$SELF_DIR/vward-ads-privacy-dns-guard.sh"
+        [ ! -x "$SCH_G" ] || "$SCH_G" orphan >/dev/null 2>&1 || :
+    fi ;;
+esac
 vward_component_gate ads-privacy-guard
 vward_admission_enter ads-scheduler || exit $?
 cleanup() { vward_admission_leave 2>/dev/null || true; }

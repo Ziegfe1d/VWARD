@@ -681,11 +681,19 @@ if [ "$ACTION" = wifi-data ]; then
             rx: (.rxbytes // null), tx: (.txbytes // null), rssi: (.rssi // null), txrate: (.txrate // null), ssid: (.ssid // "")}}) | from_entries' 2>/dev/null)"
     [ -n "$HOSTS" ] || HOSTS='{}'
     CLIENTS="$(printf '%s' "$CLIENTS" | "$JQ" -c --argjson h "$HOSTS" 'map(. + {host: ($h[.mac | ascii_downcase] // null)})')"
+    # Why the list is empty while collecting (fix.32): the Panel says it instead of «0».
+    WEMPTY=
+    if [ "$ENABLED" = 1 ] && [ "$COUNT" = 0 ]; then
+        if [ ! -e "$WSTATE/analysis.tsv" ]; then WEMPTY=not_collected
+        elif [ "$RC" != 0 ] && [ "$RC" != -1 ]; then WEMPTY=collect_failed
+        elif [ "$HOSTS" = '{}' ]; then WEMPTY=keenetic_empty
+        else WEMPTY=no_wifi; fi
+    fi
     # Band pinned in Keenetic ("interface <bridge> mac band <mac> 0|1"): 0 is 2.4 GHz, 1 is 5 GHz.
     BINDS="$(ndm_cached running 10 "show running-config" | awk '$1 == "mac" && $2 == "band" && ($4 == "0" || $4 == "1") && $3 ~ /^([0-9a-fA-F][0-9a-fA-F]:){5}[0-9a-fA-F][0-9a-fA-F]$/ {print tolower($3) "\t" ($4 == "0" ? "2g" : "5g")}' |
         "$JQ" -Rn '[inputs | split("\t") | {key: .[0], value: .[1]}] | from_entries' 2>/dev/null)"
     [ -n "$BINDS" ] || BINDS='{}'
-    "$JQ" -n --argjson binds "$BINDS" --argjson enabled "$([ "$ENABLED" = 1 ] && echo true || echo false)" --argjson control_enabled "$([ "$CONTROL_ENABLED" = 1 ] && echo true || echo false)" --argjson auto_apply "$([ "$AUTO_APPLY" = 1 ] && echo true || echo false)" --argjson clients "$CLIENTS" --arg last "$LAST" --argjson rc "$RC" --argjson count "$COUNT" '{ok:true,component:"wifi-client-guard",enabled:$enabled,control_enabled:$control_enabled,auto_apply:$auto_apply,clients:$clients,count:$count,binds:$binds,scheduler:{last:$last,rc:$rc}}'
+    "$JQ" -n --argjson binds "$BINDS" --argjson enabled "$([ "$ENABLED" = 1 ] && echo true || echo false)" --argjson control_enabled "$([ "$CONTROL_ENABLED" = 1 ] && echo true || echo false)" --argjson auto_apply "$([ "$AUTO_APPLY" = 1 ] && echo true || echo false)" --argjson clients "$CLIENTS" --arg last "$LAST" --argjson rc "$RC" --argjson count "$COUNT" --arg empty "$WEMPTY" '{ok:true,component:"wifi-client-guard",empty_reason:$empty,enabled:$enabled,control_enabled:$control_enabled,auto_apply:$auto_apply,clients:$clients,count:$count,binds:$binds,scheduler:{last:$last,rc:$rc}}'
     exit 0
 fi
 
@@ -823,7 +831,7 @@ if [ "$ACTION" = config ]; then
         journal|agents-mode) set -- "$OP" "$TARGET" "$VALUE" ;;
         cleanup) set -- "$OP" "$TARGET"; [ "$TARGET" != sizes ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; } ;;
         reset) set -- "$OP" "$TARGET"; REQUIRED=RESET_SETTINGS ;;
-        list) set -- "$OP" "$ACT" "$TARGET"; case "$ACT" in clear) REQUIRED=LIST_CLEAR ;; *) REQUIRED=LIST_DELETE ;; esac ;;
+        list) set -- "$OP" "$ACT" "$TARGET"; case "$ACT" in clear) REQUIRED=LIST_CLEAR ;; merge) set -- "$OP" "$ACT" "$TARGET" "$VALUE"; REQUIRED=LIST_MERGE ;; *) REQUIRED=LIST_DELETE ;; esac ;;
         ip-category) set -- "$OP" "$TARGET" "$VALUE" ;;
         tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
         policy-group) set -- "$OP" "$TARGET" ;;
@@ -1092,7 +1100,7 @@ if [ "$ACTION" = tunnel-conf ]; then
       ARGS="vless-server select $TNAME $TIDX"
       CMD="$CONFIG_HELPER" LABEL="tunnel-server" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
       run_detached "$CONTROL_RUN_DIR" control_busy ;;
-    restart|up|down|delete|subnet-add|subnet-remove)
+    restart|up|down|delete|move|subnet-add|subnet-remove)
       # On, off and restart at once, as Keenetic's own switch (the server's answer shows in the
       # tunnel's status): in the request, like a deletion. Not while a tunnel job runs.
       [ -n "$TNAME" ] || { echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0; }
@@ -1104,6 +1112,9 @@ if [ "$ACTION" = tunnel-conf ]; then
         [ "$TCONF" = TUNNEL_DELETE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
         TTO="$(form_value target)"; case "$TTO" in ''|*[!A-Za-z0-9_.-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
         set -- tunnel-delete "$TNAME" "$TTO"
+      elif [ "$TOP" = move ]; then
+        # The lists and subnets of a tunnel without settings to the default tunnel; it stays.
+        set -- tunnel-delete "$TNAME" vpn move
       else
         TNET="$(form_decode subnet text)" || TNET=""
         case "$TNET" in ''|*[!0-9./]*) echo '{"ok":false,"error":"invalid_subnet"}'; exit 0 ;; esac
@@ -2482,6 +2493,9 @@ if [ "$ACTION" = ai-data ]; then
     AI_DOH="$(printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {h = $3; sub(/^https:\/\//, "", h); sub(/[\/:].*$/, "", h); print tolower($NF) "\t" h}')"
     AI_AGH="$(command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains | head -n 400)"
+    # Where Smart DNS domains go (fix.32): auto (AdGuard Home when it works), keenetic, agh.
+    AI_STORE="$(awk -F= '$1 == "SMARTDNS_STORE" {print $2; exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)"
+    case "$AI_STORE" in keenetic|agh) ;; *) AI_STORE=auto ;; esac
     AI_OWN="$(awk -F= '$1 == "SMARTDNS_URL" {u = substr($0, index($0, "=") + 1); sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); print u; exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)"
     AI_ON="$(awk -F'\t' 'NF >= 3 {print $1 "\t" $2 "\t" $3}' "$CONFIG_ETC/services/enabled.tsv" 2>/dev/null)"
     # The services waiting for room in Smart DNS (op_ai), and whether AdGuard Home runs.
@@ -2490,7 +2504,7 @@ if [ "$ACTION" = ai-data ]; then
     AI_ROUTES="$(printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "route" && $2 == "object-group" {print $3 "\t" $4}')"
     "$JQ" -c --arg doh "$AI_DOH" --arg agh "$AI_AGH" --arg own "$AI_OWN" --arg on "$AI_ON" --arg routes "$AI_ROUTES" --arg wait "$AI_WAIT" \
-        --argjson agh_run "$AI_AGH_RUN" --arg shared "$AI_SHARED" \
+        --argjson agh_run "$AI_AGH_RUN" --arg shared "$AI_SHARED" --arg store "$AI_STORE" \
         --argjson agh_on "$([ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] && echo true || echo false)" '
         ($doh | split("\n") | map(select(length > 0) | split("\t"))) as $k
         | ($agh | split("\n") | map(select(length > 0))) as $a
@@ -2507,7 +2521,7 @@ if [ "$ACTION" = ai-data ]; then
             | sort_by(.k, .n, .d) | map(.d)
             | reduce .[] as $d ([]; if any(.[]; . as $k | $d | endswith("." + $k)) then . else . + [$d] end) | .[:4];
         {ok: true,
-         smartdns: {keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_running: $agh_run, agh_domains: ($a | length),
+         smartdns: {store: $store, keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_running: $agh_run, agh_domains: ($a | length),
                     waiting: ($wait | split("\n") | map(select(length > 0))),
                     servers: ([$k[] | .[1]] + (if $own == "" then [] else [$own] end) | unique), own: $own},
          services: [.services[] | select(.category == "ai") | . as $s
@@ -2525,8 +2539,18 @@ if [ "$ACTION" = smartdns-server ]; then
     ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
     [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
     read_body 512
-    form_only op url || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
+    form_only op url store || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
     SSOP="$(form_value op)"
+    if [ "$SSOP" = store ]; then
+        SST="$(form_value store)"; case "$SST" in auto|keenetic|agh) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+        SSOUT="$("$CONFIG_HELPER" smartdns-store "$SST" 2>/dev/null | tail -n 1)"
+        case "$SSOUT" in
+            result=*) "$JQ" -cn --arg r "${SSOUT#result=}" '{ok: true, result: $r}' ;;
+            error=*) E="${SSOUT#error=}"; case "$E" in *[!a-z0-9_]*) E=helper_failed ;; esac; "$JQ" -cn --arg e "$E" '{ok: false, error: $e}' ;;
+            *) echo '{"ok":false,"error":"helper_failed"}' ;;
+        esac
+        exit 0
+    fi
     SSURL="$(form_value url | sed 's/%3[Aa]/:/g;s/%2[Ff]/\//g;s/%2[Dd]/-/g;s/%2[Ee]/./g;s/%5[Ff]/_/g;s/%7[Ee]/~/g')"
     case "$SSOP" in set|clear) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;; esac
     SSOUT="$(printf '%s\n' "$SSURL" | "$CONFIG_HELPER" smartdns-server "$SSOP" 2>/dev/null | tail -n 1)"
@@ -2563,10 +2587,38 @@ if [ "$ACTION" = services ]; then
         use) [ "$(form_value confirm)" = TUNNEL_SWITCH ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
             case "$SID" in all|own) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
             [ -n "$STO" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }; ARGS="tunnel $STO $SID" ;;
+        # «Компоненты» (fix.32): AdGuard Home and the tunnels' modules, one operation at a time
+        # (id = agh|awg|vless, action, backup = 1 for a copy of the settings first). Installing
+        # AdGuard Home without a kept login takes the owner's login and password: into a 0600
+        # file for the helper, never argv; the helper removes it.
+        comp) CACT="$(form_value action)"
+            case "$SID:$CACT" in
+                agh:install|agh:enable) ;;
+                agh:disable|agh:remove|agh:reset|agh:reinstall|awg:disable|vless:disable)
+                    [ "$(form_value confirm)" = COMPONENT_OP ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;;
+                awg:enable|vless:enable) ;;
+                *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
+            esac
+            if [ "$SID" = agh ]; then
+                CBK=nobackup; [ "$(form_value backup)" != 1 ] || CBK=backup
+                ARGS="agh-component $CACT $CBK"
+                CLOGIN="$(form_value login)"
+                if [ -n "$CLOGIN" ]; then
+                    printf '%s\n' "$CLOGIN" | grep -Eq '^[A-Za-z0-9._@-]{1,64}$' || { echo '{"ok":false,"error":"invalid_login"}'; exit 0; }
+                    CPASS="$(form_decode password ascii)" || { echo '{"ok":false,"error":"invalid_password"}'; exit 0; }
+                    [ "${#CPASS}" -ge 8 ] && [ "${#CPASS}" -le 128 ] || { echo '{"ok":false,"error":"invalid_password"}'; exit 0; }
+                    VWARD_AGH_CRED_FILE="$(umask 077; mktemp /tmp/vward-agh-cred.XXXXXX 2>/dev/null)" || { echo '{"ok":false,"error":"write_failed"}'; exit 0; }
+                    printf '%s:%s\n' "$CLOGIN" "$CPASS" > "$VWARD_AGH_CRED_FILE" || { rm -f "$VWARD_AGH_CRED_FILE"; echo '{"ok":false,"error":"write_failed"}'; exit 0; }
+                    CPASS=; export VWARD_AGH_CRED_FILE
+                fi
+            else
+                ARGS="module-component $SID $CACT${STO:+ $STO}"
+            fi ;;
         *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
     esac
     CMD="$CONFIG_HELPER" LABEL="service-$SOP" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG=""
-    run_detached "$CONTROL_RUN_DIR" control_busy
+    [ "$SOP" != comp ] || LABEL="component-$SID-$CACT"
+    run_detached "$CONTROL_RUN_DIR" control_busy ${VWARD_AGH_CRED_FILE:-}
 fi
 
 # awg-data: VWARD's tunnel engine (AmneziaWG the firmware cannot) - facts, no keys.
@@ -3252,16 +3304,33 @@ set -- $(ps w 2>/dev/null | awk -v subnet="$VWARD_LAN_SUBNET" -v address="$VWARD
     /[c]rond -b/ && crond == "" { crond = $1 }
     /[v]ward-cron-supervisor.sh/ { sup = 1 }
     /[A]dGuardHome/ { agh = 1 }
+    /[v]ward-sentinel( |$)/ && !/vward-sentinel-act/ { sen = 1 }
+    /[h]ttps-dns-proxy/ { doh = 1 }
     $6 == "/opt/bin/vward-route-engine.sh" || ($5 ~ /^[{]/ && $7 == "/opt/bin/vward-route-engine.sh") { live++ }
     $5 == "tcpdump" && index($0, "src net " subnet) && index($0, "dst host " address) { tcp++ }
     ($5 ~ /\/vward-dnscap$/ || $6 ~ /\/vward-dnscap$/) && index($0, " " subnet " ") { tcp++ }
-    END { print (crond == "" ? "-" : crond), sup + 0, agh + 0, live + 0, tcp + 0 }')
+    END { print (crond == "" ? "-" : crond), sup + 0, agh + 0, live + 0, tcp + 0, sen + 0, doh + 0 }')
 CROND_PID=${1:--}
 [ "$CROND_PID" != - ] || CROND_PID=""
 SUPERVISOR=${2:-0}
 # The other agents as the components agent sees them (ok, late, hung; off), a minute old at most.
 AGENTS="$(awk -F= '$1 ~ /^(network|updates|maintenance|state)$/ && $2 ~ /^(ok|late|hung|off)$/ {printf "%s%s=%s", (n++ ? "," : ""), $1, $2}' "${VWARD_AGENTS_STATE:-/tmp/vward-agents.state}" 2>/dev/null)"
 ADGUARD=${3:-0}
+# «Компоненты» (fix.32): VWARD's real-time watcher, the DNS capture and Smart DNS's DoH client.
+SENTINEL_RUN=${6:-0} DOH_RUN=${7:-0} DNSCAP_RUN=${5:-0}
+SENTINEL_INST=0; [ ! -x "${VWARD_SENTINEL_BIN:-/opt/share/vward/sentinel/vward-sentinel}" ] || SENTINEL_INST=1
+DNSCAP_INST=0; [ ! -x "${VWARD_DNSCAP_BIN:-/opt/share/vward/dnscap/vward-dnscap}" ] || DNSCAP_INST=1
+DOH_INST=0; [ ! -x "${VWARD_DOH_BIN:-/opt/sbin/https-dns-proxy}" ] || DOH_INST=1
+# Switched off in «Компоненты», and the component operation under way (one at a time).
+CSTATE=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
+AGH_OFF=0; [ ! -e "$CSTATE/adguardhome.disabled" ] || AGH_OFF=1
+MOD_OFF="$(for m in awg vless; do [ ! -e "$CSTATE/module-$m.disabled" ] || printf '%s ' "$m"; done)"
+COMP_OP="$(sed -n 's/^op=//p' "${VWARD_COMPONENT_PENDING:-/opt/etc/vward/component-ops/pending}" 2>/dev/null | head -n 1 | tr -cd 'A-Za-z0-9 ._-')"
+# The program is on the router at all (its file or its start script): a profile that still names
+# AdGuard Home after the USB stick was formatted is not an installation (Viva 2026-10-19).
+AGH_INSTALLED=0
+for AGH_F in ${VWARD_AGH_BIN_DIRS:-/opt/sbin /opt/bin} ; do [ -x "$AGH_F/AdGuardHome" ] && AGH_INSTALLED=1; done
+[ ! -x "${VWARD_AGH_INIT:-/opt/etc/init.d/S99adguardhome}" ] || AGH_INSTALLED=1
 # The start gate found the program itself broken (it dies on --version): see vward_agh_ensure.
 AGH_BROKEN=""
 [ ! -r "${VWARD_AGH_STATE:-/tmp/vward-agh-start}/broken" ] || read -r AGH_BROKEN 2>/dev/null < "${VWARD_AGH_STATE:-/tmp/vward-agh-start}/broken"
@@ -3363,7 +3432,9 @@ header_json
   --arg crond_pid "$CROND_PID" \
   --arg supervisor "$SUPERVISOR" \
   --arg agents "$AGENTS" \
-  --arg adguard "$ADGUARD" \
+  --arg adguard "$ADGUARD" --arg adguard_installed "$AGH_INSTALLED" \
+  --arg agh_off "$AGH_OFF" --arg mod_off "$MOD_OFF" --arg comp_op "$COMP_OP" \
+  --arg sen_run "$SENTINEL_RUN" --arg sen_inst "$SENTINEL_INST" --arg cap_run "$DNSCAP_RUN" --arg cap_inst "$DNSCAP_INST" --arg doh_run "$DOH_RUN" --arg doh_inst "$DOH_INST" \
   --arg agh_broken "$AGH_BROKEN" \
   --arg uptime "$UPTIME_SEC" \
   --arg grc "$GRC" \
@@ -3510,7 +3581,14 @@ header_json
     supervisor:($supervisor=="1"),
     agents:($agents | if . == "" then null else (split(",") | map(split("=") | {(.[0]): .[1]}) | add) end),
     adguard:($adguard=="1"),
+    adguard_installed:($adguard_installed=="1"),
     adguard_broken:($agh_broken != ""),
+    sentinel:{installed:($sen_inst=="1"),running:($sen_run=="1")},
+    adguard_disabled:($agh_off=="1"),
+    modules_off:($mod_off | split(" ") | map(select(length > 0))),
+    component_op:(if $comp_op == "" then null else $comp_op end),
+    dnscap:{installed:($cap_inst=="1"),running:(($cap_run|tonumber? // 0) > 0)},
+    doh:{installed:($doh_inst=="1"),running:($doh_run=="1")},
     adaptive_live_pid:$live_pid,
     adaptive_live_count:($live_count|tonumber? // 0),
     tcpdump_count:($tcpdump_count|tonumber? // 0),

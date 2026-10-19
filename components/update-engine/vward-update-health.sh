@@ -117,12 +117,19 @@ if [ -z "$VU_ROOT_PREFIX" ]; then
         [ -n "$console_pid" ] && kill -0 "$console_pid" 2>/dev/null ||
             vu_die "$VU_HEALTH_ERROR" "VWARD Panel service is unavailable"
 
-        console_ping=$(/opt/bin/curl --fail --silent --show-error \
-            --connect-timeout 2 --max-time 5 \
-            "http://$VWARD_LAN_ADDRESS:$VWARD_CONSOLE_PORT/cgi-bin/api.cgi?action=ping" 2>/dev/null || true)
-        printf '%s\n' "$console_ping" | /opt/bin/jq -e \
-            '.ok == true and .service == "vward-console"' >/dev/null 2>&1 ||
-            vu_die "$VU_HEALTH_ERROR" "VWARD Panel API health check failed"
+        # Right after a restart the Panel may need a few seconds: retry before failing.
+        console_try=0
+        while :; do
+            console_ping=$(/opt/bin/curl --fail --silent --show-error \
+                --connect-timeout 2 --max-time 5 \
+                "http://$VWARD_LAN_ADDRESS:$VWARD_CONSOLE_PORT/cgi-bin/api.cgi?action=ping" 2>/dev/null || true)
+            printf '%s\n' "$console_ping" | /opt/bin/jq -e \
+                '.ok == true and .service == "vward-console"' >/dev/null 2>&1 && break
+            console_try=$((console_try + 1))
+            [ "$console_try" -lt "${VU_CONSOLE_PING_TRIES:-4}" ] ||
+                vu_die "$VU_HEALTH_ERROR" "VWARD Panel API health check failed"
+            sleep "${VU_CONSOLE_PING_PAUSE:-5}"
+        done
     fi
 fi
 

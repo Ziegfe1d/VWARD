@@ -742,6 +742,36 @@ fi
 [ ! -e "$SAVE_PENDING" ] || lists_save
 lists_fallback
 
+# lost_sweep: lists and subnets on a tunnel left without settings (an OpkgTun neither engine
+# knows, without link) go nowhere - Keenetic withdraws their «auto» route and the sites go via
+# the provider (Viva 2026-10-19: 19 lists and 451 subnets on a dead OpkgTun2). With the default
+# tunnel answering they move to it, the tunnel stays; watching, it is proposed. Every 30 minutes.
+lost_sweep()
+{
+    [ "$ACTION" = KEEP_UP ] && [ -x "$HELPER" ] || return 0
+    ls_at="$DIR/lost-sweep.at"
+    [ -z "$(find "$ls_at" -mmin "-${VWARD_LOST_SWEEP_MIN:-30}" 2>/dev/null)" ] || return 0
+    : > "$ls_at" 2>/dev/null || return 0
+    ls_cands=$(vward_keenetic_config | awk -v cur="$VWARD_TUNNEL_INTERFACE" '
+        { for (k = 3; k <= NF; k++) if ($k ~ /^OpkgTun[0-9]+$/ && $k != cur && ($1 == "route" || ($1 == "ip" && $2 == "route"))) print $k }' | sort -u)
+    for ls_if in $ls_cands; do
+        engine_of "$ls_if" >/dev/null && continue
+        ls_link=$(vward_interface_state "$ls_if" 2>/dev/null | sed -n 2p)
+        [ "$ls_link" != up ] || continue
+        if [ "$MODE" != AUTO ]; then
+            vward_agent_acts network "lost-move:$ls_if" "Туннель $ls_if без настроек: перенести его списки и подсети на туннель по умолчанию" || :
+            continue
+        fi
+        ls_out=$(VWARD_TUNNEL_BY_GUARD=1 "$HELPER" tunnel-delete "$ls_if" vpn move 2>/dev/null | tail -n 1)
+        [ "$ls_out" = result=changed ] || continue
+        echo "$NOW_TEXT|LOST_MOVED|from=$ls_if|to=$VWARD_TUNNEL_INTERFACE" >> "$LOG"
+        vward_note warn "Списки «{t}» перенесены на туннель по умолчанию" \
+            "У туннеля нет настроек на флешке, и его сайты шли напрямую через провайдера. Списки и подсети теперь идут через туннель по умолчанию; сам туннель остался - добавьте его заново или удалите." \
+            "t-$ls_if"
+    done
+}
+lost_sweep
+
 # Where the routes went when the first tunnel died, until they come back.
 if [ -n "$FALLBACK_FROM" ]; then
     # Written only when it changes: the state directory is on the USB stick.

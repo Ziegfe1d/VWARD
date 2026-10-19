@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "VWARD Platform",
-  "platform_version": "0.2.0-rc.2.fix.31",
+  "platform_version": "0.2.0-rc.2.fix.32",
   "component_version_policy": "platform-release",
   "components": [
     {
@@ -169,7 +169,8 @@
       "requires_running": [],
       "uses": [
         "route-tools",
-        "route-engine"
+        "route-engine",
+        "tunnel-guard"
       ],
       "runtime_targets": [
         "/opt/bin/vward-policy-chain.sh",

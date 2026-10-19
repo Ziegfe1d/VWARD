@@ -388,6 +388,7 @@ small.st .icon{width:14px;height:14px}
 .toast-text b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .toast-text small{display:block;margin-top:2px;color:var(--muted);font-size:var(--fs-xs);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .toast time{flex:none;padding-top:5px;color:var(--faint);font-size:var(--fs-xs);font-variant-numeric:tabular-nums}
+.toast-btn{flex:none;align-self:center}
 .toast-x{flex:none;display:grid;place-items:center;width:28px;height:28px;margin:-2px -4px 0 0;border:0;border-radius:50%;background:none;color:var(--muted)}
 .toast-x .icon{width:16px;height:16px}
 @media (hover:hover){.toast-x:hover{background:var(--surface-2)}}

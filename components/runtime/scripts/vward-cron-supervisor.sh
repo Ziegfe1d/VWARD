@@ -86,6 +86,9 @@ AGH_INIT=${VWARD_AGH_INIT:-/opt/etc/init.d/S99adguardhome}
 # An update replacing AdGuard Home announces its restart here (the DNS guard's «planned»: until when).
 AGH_PLANNED_FILE=${VWARD_DNS_CHAIN_STATE:-/tmp/vward-dns-chain}/planned
 CONFIG_BIN=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
+COMP_STATE_DIR=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
+COMP_PENDING_FILE=${VWARD_COMPONENT_PENDING:-/opt/etc/vward/component-ops/pending}
+AGH_OFF_FILE=${VWARD_AGH_DISABLED:-$COMP_STATE_DIR/adguardhome.disabled}
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ ! -r "$VWARD_ADMISSION_LIB" ] || . "$VWARD_ADMISSION_LIB"
 UPTIME_FILE=${VWARD_UPTIME_FILE:-/proc/uptime}
@@ -213,6 +216,8 @@ agh_watched()
 {
     command -v vward_agh_ensure >/dev/null 2>&1 || return 1
     vward_component_enabled ads-privacy-guard || return 1
+    # Switched off in «Компоненты» (fix.32): not started again.
+    [ ! -e "$AGH_OFF_FILE" ] || return 1
     aw_until=; [ ! -r "$AGH_PLANNED_FILE" ] || read -r aw_until < "$AGH_PLANNED_FILE" || :
     case "$aw_until" in ''|*[!0-9]*) return 0 ;; esac
     [ "$(date +%s)" -ge "$aw_until" ]
@@ -232,6 +237,7 @@ agh_note()
 # background: a download of 10 MB). Starts that do not bring it up (3 in a row): told once.
 agh_keep()
 {
+    [ ! -e "$AGH_OFF_FILE" ] || return 0
     VWARD_UNNICE=$UNNICE vward_agh_ensure "$AGH_INIT"
     case "$?" in
         10) log_event "AGH_STARTED|$1" ;;
@@ -323,6 +329,33 @@ engine_of()
     return 1
 }
 
+# restart_allowed NAME: at most RESTART_MAX starts of one program within an hour (fix.32). One
+# that keeps dying is left stopped, the owner told once in 6 hours: a start loop only eats the
+# router's memory and flash.
+RESTART_DIR=${VWARD_RESTART_DIR:-/tmp/vward-restarts}
+RESTART_MAX=${VWARD_RESTART_MAX:-5}
+restart_allowed()
+{
+    mkdir -p "$RESTART_DIR" 2>/dev/null || return 0
+    RA_F="$RESTART_DIR/$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')"
+    RA_NOW=$(date +%s)
+    RA_N=$(awk -v n="$RA_NOW" '$1 == "t" && $2 + 3600 > n {c++} END {print c + 0}' "$RA_F" 2>/dev/null)
+    if [ "${RA_N:-0}" -ge "$RESTART_MAX" ]; then
+        RA_TOLD=$(awk '$1 == "told" {print $2}' "$RA_F" 2>/dev/null | tail -n 1)
+        if [ $((RA_NOW - ${RA_TOLD:-0})) -ge 21600 ]; then
+            echo "told $RA_NOW" >> "$RA_F"
+            log_event "RESTART_LIMIT|$1|starts_last_hour=$RA_N"
+            command -v vward_note >/dev/null 2>&1 ||
+                { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+            ! command -v vward_note >/dev/null 2>&1 || vward_note err "Компонент $1 остановлен" \
+                "За час он запускался $RA_N раз и снова останавливался. Агент компонентов больше не запускает его до следующего часа, чтобы не нагружать роутер. Подробности: Система → Журналы." utils
+        fi
+        return 1
+    fi
+    { awk -v n="$RA_NOW" '($1 == "t" && $2 + 3600 > n) || $1 == "told"' "$RA_F" 2>/dev/null; echo "t $RA_NOW"; } > "$RA_F.$$" && mv -f "$RA_F.$$" "$RA_F"
+    return 0
+}
+
 # agent_do REQUEST: what another agent asked for.
 agent_do()
 {
@@ -331,10 +364,12 @@ agent_do()
             agh_watched || return 1
             agh_keep "asked-by=$RQ_BY" ;;
         start:*)
+            restart_allowed "${1#start:}" || return 0
             start_of "${1#start:}" && log_event "STARTED|${1#start:}|asked-by=$RQ_BY" ;;
         restart:*)
             AN=${1#restart:}
             AF=$(pidfile_of "$AN") || return 1
+            restart_allowed "$AN" || return 0
             ! command -v vward_agent_acts >/dev/null 2>&1 ||
                 vward_agent_acts components "restart:$AN" "Перезапустить $AN (просит $RQ_BY)" || return 0
             AP=
@@ -351,6 +386,7 @@ agent_do()
             AT=${1#*:}
             AB=$(engine_of "$AT") || return 0
             AO=restart; case "$1" in engine-kick:*) AO=kick ;; esac
+            restart_allowed "module-$AT" || return 0
             "$AB" "$AO" "$AT" </dev/null >/dev/null 2>&1
             log_event "MODULE_$(echo "$AO" | tr 'a-z' 'A-Z')|$AT|asked-by=$RQ_BY" ;;
         *) return 64 ;;
@@ -564,15 +600,23 @@ watch_services()
 
     # The tunnels' modules (AmneziaWG, VLESS): a stopped one starts again. Without such
     # tunnels this is one file test, no process.
-    [ ! -f "${VWARD_AWG_ETC:-/opt/etc/vward/awg-engine}/tunnels.tsv" ] || [ ! -x "$BIN_DIR/vward-awg-engine.sh" ] ||
+    # A module switched off in «Компоненты» (fix.32) is left alone.
+    [ ! -f "${VWARD_AWG_ETC:-/opt/etc/vward/awg-engine}/tunnels.tsv" ] || [ ! -x "$BIN_DIR/vward-awg-engine.sh" ] || [ -e "$COMP_STATE_DIR/module-awg.disabled" ] ||
         "$BIN_DIR/vward-awg-engine.sh" supervise </dev/null >/dev/null 2>&1 || :
-    [ ! -f "${VWARD_VLESS_ETC:-/opt/etc/vward/vless-engine}/tunnels.tsv" ] || [ ! -x "$BIN_DIR/vward-vless-engine.sh" ] ||
+    [ ! -f "${VWARD_VLESS_ETC:-/opt/etc/vward/vless-engine}/tunnels.tsv" ] || [ ! -x "$BIN_DIR/vward-vless-engine.sh" ] || [ -e "$COMP_STATE_DIR/module-vless.disabled" ] ||
         "$BIN_DIR/vward-vless-engine.sh" supervise </dev/null >/dev/null 2>&1 || :
 
     UP=
     [ ! -r "$UPTIME_FILE" ] || read -r UP _ < "$UPTIME_FILE" || :
     UP=${UP%%.*}
     case "$UP" in ''|*[!0-9]*) return 0 ;; esac
+    # An operation on a component the power cut in the middle (fix.32): done again once, 2
+    # minutes after boot, in the background (it may download or wait for Keenetic).
+    if [ "$UP" -ge 120 ] && [ -s "$COMP_PENDING_FILE" ] && [ ! -e /tmp/vward-component-recover.done ] && [ -x "$CONFIG_BIN" ]; then
+        : > /tmp/vward-component-recover.done
+        log_event "COMPONENT_RECOVER|$(sed -n 's/^op=//p' "$COMP_PENDING_FILE" | head -n 1)"
+        ( "$CONFIG_BIN" component-recover now </dev/null >/dev/null 2>&1 & )
+    fi
     # Every pass in the first half hour after boot (its own start script may not bring it up),
     # then once a minute: a look at AdGuard Home is a few programs, the supervisor runs often.
     if [ "$UP" -ge 90 ] && { [ "$UP" -lt 1800 ] || [ $((UP - ${AGH_LOOK:-0})) -ge "${VWARD_AGH_EVERY:-60}" ]; } && agh_watched; then

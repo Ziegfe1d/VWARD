@@ -86,6 +86,20 @@ group_members()
 START_EPOCH=$(date +%s)
 START_TEXT=$(date '+%Y-%m-%d %H:%M:%S')
 
+# A site is judged through the tunnel: with the tunnel down every check through it fails and
+# 271 sites came out «unknown» (Viva 2026-10-19, the default tunnel without settings). Then
+# nothing is checked; the mark asks for a run once the tunnel answers again (housekeeping).
+RECHECK="$STATE_DIR/recheck"
+TH_STATUS=$(awk -F= '$1 == "STATUS" {print $2; exit}' "${VWARD_TUNNEL_HEALTH_STATE:-/tmp/vward-tunnel-health/state}" 2>/dev/null)
+case "$TH_STATUS" in
+    UP|DEGRADED) ;;
+    *) echo "$START_TEXT|SKIPPED_TUNNEL_DOWN|tunnel=${VWARD_TUNNEL_INTERFACE:-?}|health=${TH_STATUS:-none}" >> "$SUMMARY_LOG"
+       : > "$RECHECK"
+       echo "SKIPPED: the tunnel does not answer (${TH_STATUS:-no health state})"
+       exit 75 ;;
+esac
+VPN_FAILS=0
+
 if ! vward_running_config > "$RUNCFG" ||
    [ ! -s "$RUNCFG" ]; then
     echo "ERROR: cannot read running-config"
@@ -227,6 +241,14 @@ while IFS='|' read GROUP HOST; do
 
             VPN_RC=$?
             VPN_CODE=${VPN_OUT%%|*}
+            # Ten sites in a row silent through the tunnel: the tunnel itself went down.
+            if [ "$VPN_RC" -eq 0 ]; then VPN_FAILS=0; else VPN_FAILS=$((VPN_FAILS + 1)); fi
+            if [ "$VPN_FAILS" -ge "${VWARD_AUDIT_TUNNEL_FAILS:-10}" ]; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S')|ABORTED_TUNNEL_DOWN|tunnel=${VWARD_TUNNEL_INTERFACE:-?}|checked=$CHECKED" >> "$SUMMARY_LOG"
+                : > "$RECHECK"
+                echo "ABORTED: the tunnel stopped answering"
+                exit 75
+            fi
 
             [ -n "$VPN_CODE" ] || VPN_CODE="000"
 

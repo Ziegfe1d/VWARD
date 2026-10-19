@@ -160,7 +160,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # The components agent carries the requests out: its functions, from the supervisor itself.
     sup_src = (ROOT / "components/runtime/scripts/vward-cron-supervisor.sh").read_text()
     funcs = "".join(re.search(rf"^{n}\(\)\n\{{\n.*?^\}}\n", sup_src, re.S | re.M).group(0)
-                    for n in ("pidfile_of", "start_of", "engine_of", "agh_keep", "agent_do", "process_requests"))
+                    for n in ("pidfile_of", "start_of", "engine_of", "agh_keep", "restart_allowed", "agent_do", "process_requests"))
     victim = subprocess.Popen(["sleep", "60"])
     (run / "panel.pid").write_text(f"{victim.pid}\n")
     req.mkdir(exist_ok=True)
@@ -170,7 +170,7 @@ with tempfile.TemporaryDirectory() as tmp:
     (req / "start:route-engine").write_text("realtime-agent\n")
     (tmp / "done").unlink(missing_ok=True)
     script = (f'RUN_DIR={run}; CONSOLE_PIDFILE={run}/panel.pid; CONSOLE_INIT={initd}/S93vward-console; INITD={initd}; BIN_DIR={obin}\n'
-              f'AGH_INIT={initd}/S99adguardhome; REQ_DIR={req}; OFF_FLAG={tmp}/no-off; UNNICE=\n'
+              f'AGH_INIT={initd}/S99adguardhome; REQ_DIR={req}; OFF_FLAG={tmp}/no-off; UNNICE=; RESTART_DIR={tmp}/restarts; RESTART_MAX=5\n'
               f'log_event() {{ echo "$*" >> {tmp}/agent.log; }}\n'
               'vward_agh_ensure() { "$1" start; return 10; }\nagh_watched() { :; }\n' + funcs + "process_requests\n")
     r = subprocess.run(["sh", "-c", script], text=True, capture_output=True, timeout=60)

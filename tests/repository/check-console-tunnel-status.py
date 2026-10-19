@@ -49,7 +49,7 @@ let STATUS = null; const S = { errors: {}, lists: null };
 const st = () => STATUS || {}; const prof = () => ({ tunnel_interface: 'OpkgTun2' }); const plat = () => ({});
 const tunLabel = n => n; const fmtTime = t => 'T' + t; const num = v => v == null ? null : Number(v); const fmtKB = v => v; const fmtInt = v => v;
 const TUNBUSY = {}, TUNUP = {}; const TUN_BUSY = { up: 'Включение', down: 'Выключение', restart: 'Перезапуск' };
-const phaseText = v => v; const plural = (n, a) => a; const comp = () => null; const awgLost = () => []; const durText = v => v; const fmtSpeed = v => v;
+const phaseText = v => v; const plural = (n, a) => a; const comp = () => null; const awgLost = () => []; const tunUseExtra = () => 0; const durText = v => v; const fmtSpeed = v => v;
 """ + code + """
 const T = (name, connected, state) => ({ name, description: name, connected: connected ? 'yes' : 'no', state });
 const run = wg => { STATUS = { wg }; S.status = STATUS; return { notes: notifications().map(n => n.title + ' | ' + n.text), card: cardData('vpn'), pills: (wg.interfaces || []).map(t => tunPill(t).join(':')) }; };

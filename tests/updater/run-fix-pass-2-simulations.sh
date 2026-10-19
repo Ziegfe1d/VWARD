@@ -92,6 +92,10 @@ ATTEMPT_FILE=$WORK/q-attempts; printf '0\n' > "$ATTEMPT_FILE"
 set +e; run_watch 304 >/dev/null 2>&1; rc=$?; set -e
 attempts=$(cat "$ATTEMPT_FILE")
 [ "$rc" -eq 11 ] && [ "$attempts" -eq 1 ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = old ] && ok 'quarantined update is not auto-retried' || bad 'quarantine retry block'
+sed -i 's/^manifest_hash=.*/manifest_hash=0000other-signature-version/' "$STATE/quarantine.state"
+printf '0\n' > "$ATTEMPT_FILE"
+set +e; run_watch 304 >/dev/null 2>&1; rc=$?; set -e
+[ "$rc" -eq 11 ] && [ "$(cat "$ROOT/opt/bin/vward-route.sh")" = old ] && ok 'quarantine matches the release, not the manifest hash' || bad 'quarantine by release'
 make_package qgood; make_manifest qgood CRITICAL 2 0.1.2-dev
 set +e; run_watch 200 >/dev/null 2>&1; rc=$?; set -e
 [ "$rc" -eq 0 ] && [ "$(sed -n 's/^last_sequence=//p' "$STATE/committed.state")" = 2 ] && ok 'higher sequence proceeds after old quarantine' || bad 'quarantine higher sequence'

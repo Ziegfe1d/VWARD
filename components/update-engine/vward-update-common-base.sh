@@ -627,11 +627,11 @@ vu_quarantine_matches() {
     [ -r "$VU_QUARANTINE_FILE" ] || return 1
     qseq=$(vu_state_get sequence "$VU_QUARANTINE_FILE" 2>/dev/null || :)
     qid=$(vu_state_get update_id "$VU_QUARANTINE_FILE" 2>/dev/null || :)
-    qhash=$(vu_state_get manifest_hash "$VU_QUARANTINE_FILE" 2>/dev/null || :)
     seq=$(jq -r '.signed.sequence' "$manifest")
     id=$(jq -r '.signed.update_id' "$manifest")
-    hash=$(vu_signed_hash "$manifest") || return 1
-    [ "$qseq" = "$seq" ] && [ "$qid" = "$id" ] && [ "$qhash" = "$hash" ]
+    # The release is sequence + update_id: a v1 and a v2 manifest of the same release have
+    # different hashes, and a hash match let a quarantined release in again.
+    [ -n "$qseq" ] && [ "$qseq" = "$seq" ] && [ "$qid" = "$id" ]
 }
 
 vu_quarantine_store() {

@@ -120,6 +120,10 @@ cleanup() {
     [ -z "$AO_TMP" ] || rm -rf "${AO_TMP:?}"
     [ "$EXT_LOCKED" != 1 ] || rm -rf "${EXT_STATE:?}/lock"
     [ -z "${AGH_PLANNED:-}" ] || "$DNS_GUARD" planned-done >/dev/null 2>&1 || :
+    # A component operation that failed: its own steps undone, the mark and the lock go.
+    if [ "${COMP_LOCKED:-0}" = 1 ]; then comp_undo; rm -f "$COMP_PENDING"; rm -rf "${COMP_LOCK:?}"; fi
+    # The owner's AdGuard Home login the Panel handed over: gone with the operation that used it.
+    [ "${OP:-}" != agh-component ] || case "${VWARD_AGH_CRED_FILE:-}" in /tmp/vward-agh-cred.*) rm -f "$VWARD_AGH_CRED_FILE" ;; esac
     command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null
     return 0
 }
@@ -1819,9 +1823,11 @@ op_tunnel_state() {
 }
 
 op_tunnel_delete() {
-    # tunnel-delete NAME TARGET: move its lists and subnets to TARGET (bypass, vpn
-    # or another tunnel), then remove the interface.  The VWARD tunnel stays.
+    # tunnel-delete NAME TARGET [move]: move its lists and subnets to TARGET (bypass, vpn
+    # or another tunnel), then remove the interface.  The VWARD tunnel stays.  move: only
+    # the lists and subnets, the tunnel stays (a tunnel without settings, fix.32).
     load_profile_base
+    case "${3:-}" in ''|move) ;; *) die invalid_arguments 64 ;; esac
     vward_valid_ndm_name "$1" && is_tunnel "$1" || die unknown_tunnel 64
     [ "$1" != "$VWARD_TUNNEL_INTERFACE" ] || die main_tunnel 64
     case "$2" in
@@ -1860,6 +1866,14 @@ op_tunnel_delete() {
     snapshot
     while IFS= read -r g; do [ -z "$g" ] || ! route_present "$g" "$1" || die verification_failed; done < "$JOURNAL.lists"
     ! awk -v i="$1" "$ROUTE_AWK"' $1 == "ip" && $2 == "route" && rdev() == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG" || die verification_failed
+    if [ "${3:-}" = move ]; then
+        td_lists=$(grep -c . "$JOURNAL.lists") td_nets=$(grep -c . "$JOURNAL.nets")
+        [ $((td_lists + td_nets)) -gt 0 ] || { TXN=0; rm -f "$JOURNAL.lists" "$JOURNAL.nets"; done_ok "tunnel-move $1" unchanged; }
+        save_router || die config_save_failed
+        TXN=0
+        rm -f "$JOURNAL.lists" "$JOURNAL.nets"
+        done_ok "tunnel-move $1 lists=$td_lists subnets=$td_nets to=$2" changed
+    fi
     # Last step: nothing depends on the interface any more.
     if engine_tunnel "$1"; then
         er_out=$("$ENG" remove "$1" 2>/dev/null)
@@ -1978,7 +1992,7 @@ op_backup_create() {
 # AdaptiveAuto belongs to the route engine and a catalog service's list goes with the service
 # («Сервисы»); VWARD's own list («Мои домены») is only cleared.
 op_list() {
-    case "$1" in clear|delete) ;; *) die invalid_operation 64 ;; esac
+    case "$1" in clear|delete) ;; merge) op_list_merge "$2" "$3" ;; *) die invalid_operation 64 ;; esac
     printf '%s\n' "$2" | grep -Eq '^[A-Za-z0-9._-]{1,64}$' || die invalid_group 64
     load_profile_base
     [ "$2" != "$ADAPTIVE_GROUP" ] || die invalid_group 64
@@ -2021,6 +2035,52 @@ op_list() {
         [ ! -f "$LISTS_CONF" ] || { grep -v "^[a-z_]*\.$2=" "$LISTS_CONF" > "$LISTS_CONF.$$" && cat "$LISTS_CONF.$$" > "$LISTS_CONF"; rm -f "$LISTS_CONF.$$"; }
     fi
     done_ok "list $1 $2" changed
+}
+
+# list merge SRC DST: two lists of one service (Viva 2026-10-19: «Youtube» and «YouTube»).
+# SRC's domains go into DST, then SRC goes away with its route; DST keeps its own route.
+op_list_merge() {
+    for lm in "$1" "$2"; do printf '%s\n' "$lm" | grep -Eq '^[A-Za-z0-9._-]{1,64}$' || die invalid_group 64; done
+    [ "$1" != "$2" ] || die invalid_group 64
+    load_profile_base
+    for lm in "$1" "$2"; do [ "$lm" != "$ADAPTIVE_GROUP" ] || die invalid_group 64; done
+    [ "$1" != "${VWARD_POLICY_GROUP:-}" ] || die invalid_group 64
+    ! awk -F '\t' -v g="$1" '$2 == g {f = 1} END {exit f ? 0 : 1}' "$SERVICES_STATE" 2>/dev/null || die service_list 64
+    change_lock
+    snapshot
+    grep -qx "object-group fqdn $1" "$RUNCFG" && grep -qx "object-group fqdn $2" "$RUNCFG" || die list_not_found
+    ( op_backup_create prelist ) >/dev/null || die backup_failed
+    JOURNAL=$(mktemp /tmp/vward-console-list.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    TXN=1
+    group_domains "$2" > "$JOURNAL.have"
+    group_domains "$1" | awk -v f="$JOURNAL.have" 'BEGIN {while ((getline l < f) > 0) h[l] = 1} !($0 in h)' > "$JOURNAL.doh"
+    lm_n=$(grep -c . "$JOURNAL.doh")
+    [ $(( $(grep -c . "$JOURNAL.have") + lm_n )) -le "$SERVICE_LIMIT" ] || die list_too_long
+    while IFS= read -r d; do
+        [ -n "$d" ] || continue
+        ndm "object-group fqdn $2 include $d" || die router_rejected
+        echo "no object-group fqdn $2 include $d" >> "$JOURNAL"
+    done < "$JOURNAL.doh"
+    lr=$(group_route "$1"); lr_t=${lr%%"$(printf '\t')"*}; lr_o=${lr#*"$(printf '\t')"}
+    [ "$lr_o" != - ] || lr_o=
+    awk -v g="$1" '/^object-group fqdn / {cur = $3; next} /^!/ {cur = ""}
+        cur == g && ($1 == "include" || $1 == "exclude" || $1 == "description") {sub(/^[ \t]+/, ""); print "object-group fqdn " g " " $0}' "$RUNCFG" > "$JOURNAL.moves"
+    if [ -n "$lr_t" ]; then
+        ndm "dns-proxy no route object-group $1 $lr_t" || die router_rejected
+        echo "dns-proxy route object-group $1 $lr_t${lr_o:+ $lr_o}" >> "$JOURNAL"
+    fi
+    ndm "no object-group fqdn $1" || die router_rejected
+    { echo "object-group fqdn $1"; cat "$JOURNAL.moves"; } | awk '{a[NR] = $0} END {for (i = NR; i > 0; i--) print a[i]}' >> "$JOURNAL"
+    snapshot
+    ! grep -qx "object-group fqdn $1" "$RUNCFG" || die verification_failed
+    while IFS= read -r d; do
+        [ -z "$d" ] || group_domains "$2" | grep -qxF "$d" || die verification_failed
+    done < "$JOURNAL.doh"
+    save_router || die config_save_failed
+    TXN=0
+    rm -f "${LISTS_STATE:?}/${1:?}" "$JOURNAL.have" "$JOURNAL.doh" "$JOURNAL.moves"
+    [ ! -f "$LISTS_CONF" ] || { grep -v "^[a-z_]*\.$1=" "$LISTS_CONF" > "$LISTS_CONF.$$" && cat "$LISTS_CONF.$$" > "$LISTS_CONF"; rm -f "$LISTS_CONF.$$"; }
+    done_ok "list merge $1 into $2 domains=$lm_n" changed
 }
 
 # ---- Очистка ----
@@ -2191,13 +2251,35 @@ keenetic_smartdns() {
     fi
     save_router || die config_save_failed
 }
+# smartdns-store auto|keenetic|agh: where new Smart DNS domains go (fix.32) - the owner's
+# choice; auto: AdGuard Home while it works, else Keenetic.
+smartdns_store() {
+    ss_v=$(awk -F= '$1 == "SMARTDNS_STORE" {print $2; exit}' "$SMARTDNS_CONF" 2>/dev/null)
+    case "$ss_v" in keenetic|agh) echo "$ss_v" ;; *) echo auto ;; esac
+}
+op_smartdns_store() {
+    case "$1" in auto|keenetic|agh) ;; *) die invalid_value 64 ;; esac
+    [ "$(smartdns_store)" != "$1" ] || done_ok "smartdns-store $1" unchanged
+    # AdGuard Home chosen: it must be there to take them.
+    [ "$1" != agh ] || [ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] || die adguard_unavailable
+    new_tmp "$SMARTDNS_CONF" || die write_failed
+    { grep -v '^SMARTDNS_STORE=' "$SMARTDNS_CONF" 2>/dev/null; [ "$1" = auto ] || printf 'SMARTDNS_STORE=%s\n' "$1"; } > "$TMPFILE" || die write_failed
+    if [ -s "$TMPFILE" ]; then install_tmp "$SMARTDNS_CONF" 0600 || die write_failed; else rm -f "$SMARTDNS_CONF"; fi
+    done_ok "smartdns-store $1" changed
+}
 op_smartdns_domain() {
     case "$1" in add|remove) ;; *) die invalid_operation 64 ;; esac
     valid_domain "$2" || die invalid_domain 64
     JOURNAL=$(umask 077; mktemp /tmp/vward-console-smartdns.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    if [ "$1" = add ] && [ "$(smartdns_store)" = keenetic ]; then
+        keenetic_smartdns add "$2"
+        done_ok "smartdns-domain add $2 keenetic" changed
+    fi
     if [ "$1" = add ]; then
         printf '%s\tauto\n' "$2" > "$JOURNAL.agh" || die write_failed
         agh_control smartdns-put "$JOURNAL.agh" && done_ok "smartdns-domain add $2" changed
+        # The owner keeps Smart DNS in AdGuard Home: no quiet move to Keenetic.
+        [ "$(smartdns_store)" != agh ] || die "$AGH_ERR"
         # No AdGuard Home, or one not connected to VWARD: Keenetic itself. One connected but not
         # set up for Smart DNS says so (the owner chose to keep Smart DNS there).
         case "$AGH_ERR" in smartdns_agh_unavailable|adguard_unavailable|adguard_auth_required) ;; *) die "$AGH_ERR" ;; esac
@@ -2220,12 +2302,14 @@ op_smartdns_server() {
         set) IFS= read -r ss_url || die invalid_value 64
              printf '%s\n' "$ss_url" | grep -Eq '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]{0,200})?$' || die invalid_value 64
              new_tmp "$SMARTDNS_CONF" || die write_failed
-             printf 'SMARTDNS_URL=%s\n' "$ss_url" > "$TMPFILE" || die write_failed
+             { grep -v '^SMARTDNS_URL=' "$SMARTDNS_CONF" 2>/dev/null; printf 'SMARTDNS_URL=%s\n' "$ss_url"; } > "$TMPFILE" || die write_failed
              cmp -s "$TMPFILE" "$SMARTDNS_CONF" && done_ok "smartdns-server set" unchanged
              install_tmp "$SMARTDNS_CONF" 0600 || die write_failed
              done_ok "smartdns-server set" changed ;;
-        clear) [ -f "$SMARTDNS_CONF" ] || done_ok "smartdns-server clear" unchanged
-             rm -f "$SMARTDNS_CONF" || die write_failed
+        clear) grep -q '^SMARTDNS_URL=' "$SMARTDNS_CONF" 2>/dev/null || done_ok "smartdns-server clear" unchanged
+             new_tmp "$SMARTDNS_CONF" || die write_failed
+             grep -v '^SMARTDNS_URL=' "$SMARTDNS_CONF" > "$TMPFILE"
+             if [ -s "$TMPFILE" ]; then install_tmp "$SMARTDNS_CONF" 0600 || die write_failed; else rm -f "$SMARTDNS_CONF" || die write_failed; fi
              done_ok "smartdns-server clear" changed ;;
         *) die invalid_operation 64 ;;
     esac
@@ -2633,6 +2717,15 @@ op_ext_agh_official() {
     [ ! -f "$ao_bin" ] || cp -a "$ao_bin" "$dir/AdGuardHome" || { rm -rf "${dir:?}"; die backup_failed; }
     audit "ext-agh-official ${ao_old:-broken} -> $AGH_OFFICIAL_VERSION backup=$dir"
     ao_init=${VWARD_AGH_INIT:-/opt/etc/init.d/S99adguardhome}
+    # A first installation from «Компоненты» (fix.32): only the file; agh-component sets it up
+    # and starts it itself.
+    if [ "${VWARD_AGH_NOSTART:-0}" = 1 ] && [ -z "$ao_old" ]; then
+        mkdir -p "$(dirname "$ao_bin")" && cp "$ao_new" "$ao_bin.vward-new" && mv -f "$ao_bin.vward-new" "$ao_bin" ||
+            { rm -f "$ao_bin.vward-new"; die write_failed; }
+        printf 'version=%s\narch=%s\nat=%s\nby=%s\n' "$AGH_OFFICIAL_VERSION" "$ao_arch" "$(date +%s)" "$1" > "$EXT_STATE/agh-official"
+        ext_record adguardhome none "$AGH_OFFICIAL_VERSION" ok
+        done_ok "ext-agh-official none -> $AGH_OFFICIAL_VERSION" changed
+    fi
     AGH_PLANNED=1
     "$DNS_GUARD" planned 600 >/dev/null 2>&1 || :
     [ ! -x "$ao_init" ] || "$ao_init" stop </dev/null >/dev/null 2>&1 || :
@@ -2776,9 +2869,20 @@ op_ext_upgrade() {
         AGH_PLANNED=1
         "$DNS_GUARD" planned 600 >/dev/null 2>&1 || :
     fi
+    # AdGuard Home's settings (its rules, lists, clients and login) never go with an update:
+    # a copy before, put back when the package replaced or dropped them (fix.32).
+    eu_yaml=${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}
+    eu_keep=
+    if grep -q '^adguardhome' "$dir/plan.tsv" && [ -s "$EXT_R$eu_yaml" ]; then
+        cp -a "$EXT_R$eu_yaml" "$dir/AdGuardHome.yaml.keep" && chmod 0600 "$dir/AdGuardHome.yaml.keep" && eu_keep=1
+    fi
     urc=0
     "$OPKG" upgrade "$1" > "$dir/opkg.log" 2>&1 || urc=$?
     tail -n 5 "$dir/opkg.log"
+    if [ -n "$eu_keep" ] && ! cmp -s "$dir/AdGuardHome.yaml.keep" "$EXT_R$eu_yaml"; then
+        cp -a "$dir/AdGuardHome.yaml.keep" "$EXT_R$eu_yaml" && echo "Настройки AdGuard Home сохранены"
+        audit "ext-upgrade $1 AdGuard Home settings put back after the package"
+    fi
     ext_restart "$dir/plan.tsv"
     # Services need a moment after a restart.
     hw=0; while :; do
@@ -2860,6 +2964,368 @@ op_ext_daily() {
     done_ok "ext-daily automatic=$n" changed
 }
 
+# ---------- Компоненты (fix.32) ----------
+# One operation on a component at a time (COMP_LOCK). Its mark on the flash (COMP_PENDING) says
+# what was being done; a power loss in the middle leaves it, and «component-recover» (the
+# components agent after a reboot) finishes the same operation - each step can be repeated.
+# A failed step undoes what this operation made and the reason goes to the journal.
+COMP_ETC="$ETC/component-ops"
+COMP_PENDING="$COMP_ETC/pending"
+COMP_LOCK=${VWARD_COMPONENT_OP_LOCK:-/tmp/vward-component-op.lock}
+COMP_LOCKED=0
+COMP_UNDO=
+AGH_DIR=${VWARD_AGH_DIR:-/opt/etc/AdGuardHome}
+AGH_YAML=${VWARD_ADGUARD_CONFIG:-$AGH_DIR/AdGuardHome.yaml}
+AGH_INIT_FILE=${VWARD_AGH_INIT:-/opt/etc/init.d/S99adguardhome}
+AGH_OFF_FLAG=${VWARD_AGH_DISABLED:-$COMPONENT_STATE/adguardhome.disabled}
+AGH_AUTH_FILE=${VWARD_ADS_AGH_AUTH_FILE:-/opt/etc/vward/ads-privacy-guard/agh-api.auth}
+AGH_BACKUPS=${VWARD_AGH_BACKUPS:-/opt/var/backups/vward/adguardhome}
+AGH_WEB_PORT=${VWARD_AGH_WEB_PORT:-3000}
+AGH_DNS_PORT=${VWARD_AGH_DNS_PORT:-65053}
+
+comp_begin() {
+    mkdir -p "$COMP_ETC" || die write_failed
+    dir_lock "$COMP_LOCK" || die component_busy 75
+    echo $$ > "$COMP_LOCK/pid" 2>/dev/null
+    COMP_LOCKED=1
+    printf 'op=%s\nat=%s\n' "$1" "$(date +%s)" > "$COMP_PENDING.tmp" && mv -f "$COMP_PENDING.tmp" "$COMP_PENDING" || die write_failed
+    audit "component-op $1 started"
+}
+# comp_end: done, the mark goes.
+comp_end() { rm -f "$COMP_PENDING"; COMP_UNDO=; }
+# comp_undo: run at exit of a failed operation - the steps registered by comp_will, newest first.
+comp_undo() {
+    [ -n "$COMP_UNDO" ] || return 0
+    printf '%s\n' "$COMP_UNDO" | awk 'NF {a[++n] = $0} END {for (i = n; i > 0; i--) print a[i]}' |
+        while IFS= read -r cu_cmd; do eval "$cu_cmd" >/dev/null 2>&1 || :; done
+    audit "component-op rolled back"
+    COMP_UNDO=
+    rm -f "$COMP_PENDING"
+}
+comp_will() { COMP_UNDO="$COMP_UNDO
+$1"; }
+
+# port_free PORT: nobody listens on it (TCP or UDP, v4 or v6).
+port_free() {
+    pf_hex=$(printf '%04X' "$1")
+    ! awk -v h=":$pf_hex" 'FNR > 1 && $2 ~ h "$" {f = 1} END {exit !f}' \
+        "${VWARD_PROC_NET:-/proc/net}/tcp" "${VWARD_PROC_NET:-/proc/net}/tcp6" \
+        "${VWARD_PROC_NET:-/proc/net}/udp" "${VWARD_PROC_NET:-/proc/net}/udp6" 2>/dev/null
+}
+# port_pick FROM: the first free port from FROM on (20 tries).
+port_pick() {
+    pp=$1
+    while [ "$pp" -lt $(($1 + 20)) ]; do port_free "$pp" && { echo "$pp"; return 0; }; pp=$((pp + 1)); done
+    return 1
+}
+
+agh_bin_now() { command -v vward_agh_binary >/dev/null 2>&1 && vward_agh_binary 2>/dev/null || { [ -x "$EXT_R/opt/sbin/AdGuardHome" ] && echo "$EXT_R/opt/sbin/AdGuardHome"; }; }
+agh_running() { "${VWARD_PIDOF_BIN:-pidof}" AdGuardHome >/dev/null 2>&1; }
+agh_wait() {
+    aw=0
+    while :; do
+        "$@" && return 0
+        [ "$aw" -lt "${VWARD_AGH_START_WAIT:-60}" ] || return 1
+        sleep 2; aw=$((aw + 2))
+    done
+}
+agh_stopped() { ! agh_running; }
+
+# agh_init_write: Entware's own form of a start script, when the program came without one.
+agh_init_write() {
+    [ -f "$AGH_INIT_FILE" ] && return 0
+    mkdir -p "$(dirname "$AGH_INIT_FILE")" || return 1
+    cat > "$AGH_INIT_FILE.tmp" <<AGHINIT || return 1
+#!/bin/sh
+# Written by VWARD (Компоненты → AdGuard Home).
+ENABLED=yes
+PROCS=AdGuardHome
+ARGS="--no-check-update -c $AGH_YAML -w $AGH_DIR"
+PREARGS=""
+DESC=\$PROCS
+PATH=/opt/sbin:/opt/bin:/opt/usr/sbin:/opt/usr/bin:/usr/sbin:/usr/bin:/sbin:/bin
+. /opt/etc/init.d/rc.func
+AGHINIT
+    chmod 0755 "$AGH_INIT_FILE.tmp" && mv -f "$AGH_INIT_FILE.tmp" "$AGH_INIT_FILE"
+}
+
+# agh_creds: the login VWARD keeps for AdGuard Home, else one the Panel passed in a file
+# (VWARD_AGH_CRED_FILE, 0600, removed by the caller). VWARD never makes up an account.
+agh_creds() {
+    for ac in "${VWARD_AGH_CRED_FILE:-}" "$AGH_AUTH_FILE"; do
+        [ -n "$ac" ] && [ -s "$ac" ] && [ ! -L "$ac" ] || continue
+        ac_line=$(head -n 1 "$ac")
+        case "$ac_line" in ?*:?*) printf '%s\n' "$ac_line"; return 0 ;; esac
+    done
+    return 1
+}
+
+# agh_wizard WEB DNS: the first-run setup of a fresh AdGuard Home with the owner's login,
+# through its own setup API; the password goes by stdin, never argv.
+agh_wizard() {
+    aw_bin=$(agh_bin_now) || die agh_not_installed
+    mkdir -p "$AGH_DIR" || die write_failed
+    "$aw_bin" --no-check-update -c "$AGH_YAML" -w "$AGH_DIR" -p "$1" </dev/null >/dev/null 2>&1 &
+    aw_pid=$!
+    comp_will "kill $aw_pid"
+    aw_base="http://127.0.0.1:$1/control/install"
+    agh_wait "${VWARD_CURL_BIN:-curl}" --fail --silent --max-time 3 -o /dev/null "$aw_base/get_addresses" || { kill "$aw_pid" 2>/dev/null; die agh_start_failed; }
+    aw_code=$(agh_creds | "$JQ" -Rc --argjson w "$1" --argjson d "$2" '
+        (index(":")) as $i | {web: {ip: "0.0.0.0", port: $w}, dns: {ip: "0.0.0.0", port: $d},
+         username: .[:$i], password: .[$i + 1:]}' |
+        "${VWARD_CURL_BIN:-curl}" --silent --max-time 30 -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' --data-binary @- "$aw_base/configure" 2>/dev/null)
+    [ "$aw_code" = 200 ] || { kill "$aw_pid" 2>/dev/null; audit "agh-component wizard http=$aw_code"; die agh_setup_failed; }
+    agh_wait test -s "$AGH_YAML" || { kill "$aw_pid" 2>/dev/null; die agh_setup_failed; }
+    kill "$aw_pid" 2>/dev/null; agh_wait agh_stopped || kill -9 "$aw_pid" 2>/dev/null
+    wait "$aw_pid" 2>/dev/null || :
+}
+
+# agh_backup: a copy of AdGuard Home's settings (its rules, lists and clients live there).
+agh_backup() {
+    [ -s "$AGH_YAML" ] || return 0
+    ab_dir="$AGH_BACKUPS/$(date '+%Y%m%d-%H%M%S')"
+    mkdir -p "$ab_dir" && cp -a "$AGH_YAML" "$ab_dir/AdGuardHome.yaml" || die backup_failed
+    chmod 0600 "$ab_dir/AdGuardHome.yaml"
+    ls -1d "$AGH_BACKUPS"/*/ 2>/dev/null | sort | head -n -5 | while IFS= read -r ab_old; do rm -rf "${ab_old:?}"; done
+    echo "Копия настроек AdGuard Home: $ab_dir"
+    audit "agh-component backup $ab_dir"
+}
+
+# Smart DNS domains held by AdGuard Home go to Keenetic's own Smart DNS while it is off
+# (8 lines at most there): the list is kept to take them back.
+AGH_SDNS_MOVED="$COMP_ETC/agh-smartdns.moved"
+agh_smartdns_out() {
+    command -v vward_agh_smartdns_domains >/dev/null 2>&1 || return 0
+    vward_agh_smartdns_domains | awk '!s[$0]++' > "$COMP_ETC/agh-smartdns.all" || return 0
+    : > "$AGH_SDNS_MOVED.tmp"
+    so_n=0 so_left=0
+    while IFS= read -r so_d; do
+        [ -n "$so_d" ] || continue
+        if [ "$(sh "$0" smartdns-keenetic add "$so_d" 2>/dev/null | tail -n 1)" = result=changed ]; then
+            echo "$so_d" >> "$AGH_SDNS_MOVED.tmp"; so_n=$((so_n + 1))
+        else
+            so_left=$((so_left + 1))
+        fi
+    done < "$COMP_ETC/agh-smartdns.all"
+    mv -f "$AGH_SDNS_MOVED.tmp" "$AGH_SDNS_MOVED"
+    rm -f "$COMP_ETC/agh-smartdns.all"
+    echo "smartdns_moved=$so_n smartdns_left=$so_left"
+}
+agh_smartdns_back() {
+    [ -s "$AGH_SDNS_MOVED" ] || return 0
+    while IFS= read -r sb_d; do
+        [ -z "$sb_d" ] || sh "$0" smartdns-keenetic remove "$sb_d" >/dev/null 2>&1 || :
+    done < "$AGH_SDNS_MOVED"
+    rm -f "$AGH_SDNS_MOVED"
+}
+
+agh_off_steps() {
+    # DNS first: Keenetic must not point at a program that stops.
+    [ ! -x "$DNS_GUARD" ] || "$DNS_GUARD" release >/dev/null 2>&1 || die dns_release_failed
+    comp_will "[ ! -x '$DNS_GUARD' ] || '$DNS_GUARD' apply"
+    : > "$AGH_OFF_FLAG"
+    comp_will "rm -f '$AGH_OFF_FLAG'; [ ! -f '$AGH_INIT_FILE' ] || { chmod 0755 '$AGH_INIT_FILE'; '$AGH_INIT_FILE' start; }"
+    [ ! -x "$AGH_INIT_FILE" ] || "$AGH_INIT_FILE" stop </dev/null >/dev/null 2>&1 || :
+    agh_wait agh_stopped || { "${VWARD_KILLALL_BIN:-killall}" AdGuardHome 2>/dev/null; agh_wait agh_stopped || die agh_stop_failed; }
+    # Not started at boot either: Entware skips a start script that is not executable.
+    [ ! -f "$AGH_INIT_FILE" ] || chmod 0644 "$AGH_INIT_FILE"
+    agh_smartdns_out
+}
+agh_on_steps() {
+    [ -f "$AGH_INIT_FILE" ] || agh_init_write || die write_failed
+    chmod 0755 "$AGH_INIT_FILE"
+    rm -f "$AGH_OFF_FLAG"
+    agh_running || "$AGH_INIT_FILE" start </dev/null >/dev/null 2>&1 || :
+    agh_wait agh_running || die agh_start_failed
+    agh_smartdns_back
+    # Back into Keenetic's DNS chain on the guard's next look once it answers.
+    [ ! -x "$DNS_GUARD" ] || "$DNS_GUARD" apply >/dev/null 2>&1 || :
+}
+
+# agh-component install|enable|disable|remove|reset|reinstall [backup]
+op_agh_component() {
+    case "$1" in install|enable|disable|remove|reset|reinstall) ;; *) die invalid_operation 64 ;; esac
+    case "${2:-}" in ''|backup|nobackup) ;; *) die invalid_value 64 ;; esac
+    load_profile_base
+    comp_begin "agh-$1${2:+ $2}"
+    case "$1" in
+        disable)
+            agh_bin_now >/dev/null || die agh_not_installed
+            agh_off_steps
+            comp_end
+            vward_note info "AdGuard Home выключен" "DNS роутера идёт без AdGuard Home, реклама не блокируется. Домены Smart DNS перенесены в Keenetic, сколько поместилось (до 8)." d-agh 2>/dev/null || :
+            done_ok "agh-component disable" changed ;;
+        enable)
+            agh_bin_now >/dev/null || die agh_not_installed
+            agh_on_steps
+            comp_end
+            done_ok "agh-component enable" changed ;;
+        install|reinstall|reset)
+            # Checks before anything is changed: the build for this processor, the space, the ports.
+            ai_arch=$(agh_official_arch) && [ -n "$(agh_official_pin "$ai_arch")" ] || die agh_no_build
+            ai_had=$(agh_bin_now) || ai_had=
+            [ "$1" = install ] || [ -n "$ai_had" ] || die agh_not_installed
+            [ "$1" != install ] || [ -z "$ai_had" ] || [ ! -s "$AGH_YAML" ] || { comp_end; done_ok "agh-component install: installed already" unchanged; }
+            free=$(df -k "$EXT_R/opt" 2>/dev/null | awk 'NR == 2 {print $4}'); case "$free" in ''|*[!0-9]*) free=0 ;; esac
+            [ -n "$ai_had" ] || [ "$free" -ge "$AGH_OFFICIAL_MIN_FREE_KB" ] || die no_space
+            # A new setup of AdGuard Home needs the owner's login: kept by VWARD or given now.
+            ai_need=1; [ ! -s "$AGH_YAML" ] || [ "$1" = reset ] || ai_need=0
+            [ "$ai_need" = 0 ] || agh_creds >/dev/null || die agh_credentials_required
+            [ "${2:-}" != backup ] || agh_backup
+            if [ "$1" = reinstall ] || [ "$1" = reset ]; then
+                [ ! -x "$DNS_GUARD" ] || "$DNS_GUARD" release >/dev/null 2>&1 || :
+                [ ! -x "$AGH_INIT_FILE" ] || "$AGH_INIT_FILE" stop </dev/null >/dev/null 2>&1 || :
+                agh_wait agh_stopped || "${VWARD_KILLALL_BIN:-killall}" AdGuardHome 2>/dev/null || :
+            fi
+            if [ "$1" = reset ] && [ -s "$AGH_YAML" ]; then
+                # Settings out of the way (kept beside, put back if the new setup fails).
+                mv -f "$AGH_YAML" "$AGH_YAML.vward-reset" || die write_failed
+                comp_will "mv -f '$AGH_YAML.vward-reset' '$AGH_YAML'"
+            fi
+            if [ -z "$ai_had" ] || [ "$1" = reinstall ]; then
+                [ -n "$ai_had" ] || comp_will "rm -f '$EXT_R/opt/sbin/AdGuardHome'"
+                ai_out=$(VWARD_AGH_NOSTART=$([ -z "$ai_had" ] && echo 1 || echo 0) sh "$0" ext-agh-official install 2>/dev/null | tail -n 1)
+                case "$ai_out" in result=*) ;; *) RELAY_REASON=${ai_out#error=}; die "${ai_out#error=}" ;; esac
+            fi
+            if [ ! -f "$AGH_INIT_FILE" ]; then comp_will "rm -f '$AGH_INIT_FILE'"; agh_init_write || die write_failed; fi
+            if [ ! -s "$AGH_YAML" ]; then
+                ai_web=$(port_pick "$AGH_WEB_PORT") || die no_free_port
+                ai_dns=$(port_pick "$AGH_DNS_PORT") || die no_free_port
+                comp_will "rm -f '$AGH_YAML'"
+                agh_wizard "$ai_web" "$ai_dns"
+                # The login the owner gave is the one VWARD keeps (as «Подключить VWARD»).
+                if [ -n "${VWARD_AGH_CRED_FILE:-}" ] && [ -s "$VWARD_AGH_CRED_FILE" ]; then
+                    mkdir -p "$(dirname "$AGH_AUTH_FILE")" && (umask 077; head -n 1 "$VWARD_AGH_CRED_FILE" > "$AGH_AUTH_FILE.tmp") &&
+                        chmod 0600 "$AGH_AUTH_FILE.tmp" && mv -f "$AGH_AUTH_FILE.tmp" "$AGH_AUTH_FILE" || die write_failed
+                fi
+                echo "Веб-интерфейс AdGuard Home: порт $ai_web, DNS: порт $ai_dns"
+            fi
+            agh_on_steps
+            rm -f "$AGH_YAML.vward-reset"
+            # Ad blocking back on when VWARD switched it off with the program.
+            if grep -q "(with adguardhome)\$" "$COMPONENT_STATE/ads-privacy-guard.disabled" 2>/dev/null; then sh "$0" component ads-privacy-guard 1 >/dev/null 2>&1 || :; fi
+            comp_end
+            vward_note ok "AdGuard Home работает" "Программа установлена и подключена к VWARD: Keenetic начнёт отправлять в неё DNS-запросы в течение нескольких минут." d-agh 2>/dev/null || :
+            done_ok "agh-component $1" changed ;;
+        remove)
+            agh_bin_now >/dev/null || [ -f "$AGH_INIT_FILE" ] || die agh_not_installed
+            [ "${2:-}" != backup ] || agh_backup
+            agh_off_steps
+            for ar_b in $(agh_bin_now) "$EXT_R/opt/sbin/AdGuardHome" "$EXT_R/opt/bin/AdGuardHome"; do rm -f "$ar_b"; done
+            rm -f "$AGH_INIT_FILE" "$AGH_OFF_FLAG" "$EXT_STATE/agh-official"
+            [ ! -d "$AGH_DIR" ] || rm -rf "${AGH_DIR:?}"
+            # Ad blocking has nothing to work with: off, with a note it went with the program.
+            if [ ! -e "$COMPONENT_STATE/ads-privacy-guard.disabled" ]; then
+                sh "$0" component ads-privacy-guard 0 >/dev/null 2>&1 &&
+                    printf 'disabled from VWARD Panel %s (with adguardhome)\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$COMPONENT_STATE/ads-privacy-guard.disabled" 2>/dev/null || :
+            fi
+            comp_end
+            vward_note warn "AdGuard Home удалён" "Реклама выключена: ей нужен AdGuard Home. Домены Smart DNS перенесены в Keenetic, сколько поместилось (до 8). Установить снова: Компоненты → AdGuard Home." d-agh 2>/dev/null || :
+            done_ok "agh-component remove" changed ;;
+    esac
+}
+
+# smartdns-keenetic add|remove DOMAIN: only Keenetic's own Smart DNS line (AdGuard Home off).
+op_smartdns_keenetic() {
+    case "$1" in add|remove) ;; *) die invalid_operation 64 ;; esac
+    valid_domain "$2" || die invalid_domain 64
+    keenetic_smartdns "$1" "$2"
+    done_ok "smartdns-keenetic $1 $2" changed
+}
+
+# ---- Modules: AmneziaWG, VLESS ----
+# module-component awg|vless disable [TUNNEL|direct] | enable: the module's tunnels off (the
+# agent leaves them off), their lists and subnets to the default tunnel and back on enable.
+# The default tunnel itself in the module: TUNNEL takes over as the default (with all its
+# routes), «direct» leaves them where they are - they go via the provider while it is off.
+MOD_FLAG() { echo "$COMPONENT_STATE/module-$1.disabled"; }
+mod_tunnels() {
+    case "$1" in awg) mt_f=$AWG_TUNNELS ;; vless) mt_f=$VLESS_TUNNELS ;; *) return 1 ;; esac
+    [ -f "$mt_f" ] && awk -F '\t' '$2 ~ /^[A-Za-z0-9_.-]+$/ {print $2}' "$mt_f"
+}
+op_module_component() {
+    case "$1" in awg|vless) ;; *) die invalid_component 64 ;; esac
+    case "$2" in enable|disable) ;; *) die invalid_operation 64 ;; esac
+    load_profile_base
+    mc_flag=$(MOD_FLAG "$1") mc_saved="$COMP_ETC/module-$1.routes"
+    comp_begin "module-$1-$2${3:+ $3}"
+    if [ "$2" = disable ]; then
+        mc_list=$(mod_tunnels "$1")
+        case " $(echo $mc_list) " in
+            *" $VWARD_TUNNEL_INTERFACE "*)
+                case "${3:-}" in
+                    direct) ;;
+                    ''|*[!A-Za-z0-9_.-]*) die default_tunnel_in_module 64 ;;
+                    *) case " $(echo $mc_list) " in *" $3 "*) die invalid_tunnel 64 ;; esac
+                       mc_out=$(sh "$0" tunnel "$3" all 2>/dev/null | tail -n 1)
+                       case "$mc_out" in result=*) ;; *) die "${mc_out#error=}" ;; esac
+                       load_profile_base ;;
+                esac ;;
+        esac
+        # Where each list and subnet of the module's tunnels was: kept to bring it back.
+        snapshot
+        : > "$mc_saved.tmp"
+        for mc_t in $mc_list; do
+            awk -v i="$mc_t" '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
+                ctx && $1 == "route" && $2 == "object-group" && $4 == i {print "list\t" $3 "\t" i}' "$RUNCFG" >> "$mc_saved.tmp"
+            awk -v i="$mc_t" "$ROUTE_AWK"' $1 == "ip" && $2 == "route" && rdev() == i {print "net\t" $3 " " rmask() "\t" i}' "$RUNCFG" >> "$mc_saved.tmp"
+        done
+        [ -s "$mc_saved" ] && [ ! -s "$mc_saved.tmp" ] && rm -f "$mc_saved.tmp" || mv -f "$mc_saved.tmp" "$mc_saved"
+        mc_moved=0
+        for mc_t in $mc_list; do
+            [ "$mc_t" != "$VWARD_TUNNEL_INTERFACE" ] || continue
+            mc_out=$(sh "$0" tunnel-delete "$mc_t" vpn move 2>/dev/null | tail -n 1)
+            case "$mc_out" in result=changed) mc_moved=$((mc_moved + 1)) ;; result=*) ;; *) die "${mc_out#error=}" ;; esac
+            mc_out=$(sh "$0" tunnel-state down "$mc_t" 2>/dev/null | tail -n 1)
+            case "$mc_out" in result=*) ;; *) die "${mc_out#error=}" ;; esac
+        done
+        : > "$mc_flag"
+        comp_end
+        done_ok "module-component $1 disable tunnels=$(echo $mc_list | wc -w) moved=$mc_moved" changed
+    fi
+    rm -f "$mc_flag"
+    for mc_t in $(mod_tunnels "$1"); do
+        [ "$mc_t" != "$VWARD_TUNNEL_INTERFACE" ] || continue
+        mc_out=$(sh "$0" tunnel-state up "$mc_t" 2>/dev/null | tail -n 1)
+        case "$mc_out" in result=*) ;; *) die "${mc_out#error=}" ;; esac
+    done
+    # The lists and subnets go back where they were, while they are still on the default tunnel.
+    if [ -s "$mc_saved" ]; then
+        snapshot
+        mc_tab=$(printf '\t')
+        while IFS="$mc_tab" read -r mc_k mc_v mc_t; do
+            case "$mc_k" in
+                list) [ "$(group_route "$mc_v" | cut -f1)" = "$VWARD_TUNNEL_INTERFACE" ] || continue
+                      sh "$0" domain-list "$mc_v" "$mc_t" >/dev/null 2>&1 || : ;;
+                net) mc_net=${mc_v% *} mc_mask=${mc_v#* }
+                     subnet_present "$mc_net" "$mc_mask" "$VWARD_TUNNEL_INTERFACE" || continue
+                     mc_len=$(echo "$mc_mask" | awk -F. '{b = 0; for (i = 1; i <= 4; i++) {x = $i; while (x >= 128) {b++; x = (x - 128) * 2}} print b}')
+                     sh "$0" tunnel-subnet "$VWARD_TUNNEL_INTERFACE" remove "$mc_net/$mc_len" >/dev/null 2>&1 &&
+                         sh "$0" tunnel-subnet "$mc_t" add "$mc_net/$mc_len" >/dev/null 2>&1 || : ;;
+            esac
+        done < "$mc_saved"
+        rm -f "$mc_saved"
+    fi
+    comp_end
+    done_ok "module-component $1 enable" changed
+}
+
+# component-recover now: after a reboot, an operation the power cut in the middle is done again.
+op_component_recover() {
+    [ -s "$COMP_PENDING" ] || done_ok "component-recover nothing" unchanged
+    cr_op=$(sed -n 's/^op=//p' "$COMP_PENDING")
+    rm -f "$COMP_PENDING"
+    audit "component-recover $cr_op"
+    # The operation runs as a helper of its own: this one lets go of its admission first.
+    command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null
+    case "$cr_op" in
+        agh-disable|agh-enable|agh-remove) exec sh "$0" agh-component "${cr_op#agh-}" nobackup ;;
+        agh-install*|agh-reinstall*|agh-reset*) cr_a=${cr_op#agh-}; exec sh "$0" agh-component "${cr_a%% *}" nobackup ;;
+        module-awg-*|module-vless-*) cr_m=${cr_op#module-}; cr_w=${cr_m#*-}; exec sh "$0" module-component "${cr_m%%-*}" ${cr_w} ;;
+    esac
+    done_ok "component-recover unknown" unchanged
+}
+
 # ---------- Entry ----------
 
 # An uploaded .conf goes away with the helper whatever happens next, a refused
@@ -2870,13 +3336,18 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
+    tunnel-delete) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     vless-server) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     service|ai) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     wifi-host) [ "$#" -eq 3 ] || die usage 64 ;;
+    list) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
+    agh-component|module-component) [ "$#" -ge 1 ] && [ "$#" -le 3 ] || die usage 64 ;;
+    smartdns-keenetic) [ "$#" -eq 2 ] || die usage 64 ;;
+    component-recover) [ "$#" -eq 1 ] || die usage 64 ;;
     *) [ "$#" -eq 2 ] || die usage 64 ;;
 esac
 ARG1=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
@@ -2947,9 +3418,14 @@ case "$OP" in
     cleanup) op_cleanup "$ARG1" ;;
     smartdns-server) op_smartdns_server "$ARG1" ;;
     ai) op_ai "$ARG1" "$ARG2" "$ARG3" ;;
-    list) op_list "$ARG1" "$ARG2" ;;
+    list) op_list "$ARG1" "$ARG2" "$ARG3" ;;
+    agh-component) op_agh_component "$ARG1" "$ARG2" ;;
+    module-component) op_module_component "$ARG1" "$ARG2" "$ARG3" ;;
+    smartdns-keenetic) op_smartdns_keenetic "$ARG1" "$ARG2" ;;
+    smartdns-store) op_smartdns_store "$ARG1" ;;
+    component-recover) op_component_recover ;;
     reset) op_reset "$ARG1" ;;
-    tunnel-delete) op_tunnel_delete "$ARG1" "$ARG2" ;;
+    tunnel-delete) op_tunnel_delete "$ARG1" "$ARG2" "$ARG3" ;;
     tunnel-state) op_tunnel_state "$ARG1" "$ARG2" ;;
     tunnel-subnet) op_tunnel_subnet "$ARG1" "$ARG2" "$ARG3" ;;
     list-domain) op_list_domain "$ARG1" "$ARG2" "$ARG3" ;;

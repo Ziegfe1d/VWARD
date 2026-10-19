@@ -54,7 +54,7 @@ for need in ("'<span class=\"st ok\">по умолчанию</span>'", "'Сде�
         fail(f"the Panel lacks {need}")
 if "для маршрутов" in JS:
     fail("the default tunnel is called «по умолчанию» everywhere")
-if "    restart|up|down|delete|subnet-add|subnet-remove)" not in API or 'set -- tunnel-state "$TOP" "$TNAME"' not in API or "rx: ($t[6] // \"\" | tonumber? // null)" not in API or "off: ($t[5] == \"1\")" not in API:
+if "    restart|up|down|delete|move|subnet-add|subnet-remove)" not in API or 'set -- tunnel-state "$TOP" "$TNAME"' not in API or "rx: ($t[6] // \"\" | tonumber? // null)" not in API or "off: ($t[5] == \"1\")" not in API:
     fail("the API passes down and the engines' traffic and off flag")
 body = HELPER[HELPER.index("op_tunnel_state() {"):HELPER.index("op_tunnel_delete() {")]
 down = body[body.index('if [ "$1" = down ]; then'):body.index('done_ok "tunnel-state down $2" changed')]

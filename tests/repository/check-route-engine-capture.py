@@ -165,7 +165,7 @@ with tempfile.TemporaryDirectory() as tmp:
     a = API.index("set -- $(ps w 2>/dev/null | awk")
     awk_src = API[API.index("'", a) + 1:API.index("')", a)]
     r = subprocess.run(["awk", "-v", "subnet=10.9.0.0/24", "-v", "address=10.9.0.1", awk_src], input=ps, text=True, capture_output=True)
-    if r.stdout.split()[-1] != "3":
+    if r.stdout.split()[4] != "3":
         fail(f"the Panel counts captures {r.stdout!r} {r.stderr[-200:]}")
 if 'install-dnscap' not in S91 or "tcpdump --version" not in S91:
     fail("S91 fetches vward-dnscap before the startup check when tcpdump cannot start")
