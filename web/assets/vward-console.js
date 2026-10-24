@@ -617,14 +617,18 @@ async function load(key, force) {
 const st = () => S.status || {};
 // The router got a new VWARD while this tab was open: its scripts are the old ones. Say so once,
 // with a button that loads the new Panel (owner 2026-10-19).
-let panelVer = '', panelVerSaid = false;
+// On the update screen the toast covered its title (owner 2026-10-24): that screen offers the
+// reload itself, with the button «Перезагрузить страницу».
+let panelVer = '', panelVerSaid = false, panelVerNew = '';
 function panelVerWatch() {
   const v = (S.status && S.status.platform && S.status.platform.version) || '';
   if (!v) return;
   if (!panelVer) { panelVer = v; return; }
-  if (v === panelVer || panelVerSaid) return;
+  if (v === panelVer) return;
+  panelVerNew = v;
+  if (panelVerSaid || current === 'u-vward') return;
   panelVerSaid = true;
-  popup({ sev: 'warn', icon: 'save', title: 'Панель обновлена', text: 'На роутере VWARD ' + v + '. Обновите страницу, чтобы открыть новую версию Панели.', stay: true, btn: ['Обновить', () => location.reload()] });
+  popup({ sev: 'warn', icon: 'save', title: 'Панель обновлена', text: 'На роутере VWARD ' + v + '. Перезагрузите страницу, чтобы открыть новую версию Панели.', stay: true, btn: ['Перезагрузить страницу', () => location.reload()] });
 }
 const plat = () => st().platform || {};
 const prof = () => (S.security && S.security.profile) || {};
@@ -1888,6 +1892,7 @@ const RENDER = {
     const winStart = uc.safe_window_start || String(p.safe_window || '').split(/\s*[-–]\s*/)[0];
     const interval = uc.check_interval_seconds || p.check_interval_seconds;
     const acts = [];
+    if (panelVerNew) acts.push(btn('panel-reload', 'refresh', 'Перезагрузить страницу', 'primary'));
     if (al.check || runningId === 'updates') acts.push(btn('update-op', 'refresh', runningId === 'updates' ? 'Проверяем…' : 'Проверить', 'primary', ' data-op="check"' + (runningId === 'updates' ? ' disabled' : '')));
     if (al.apply) acts.push(btn('ask', 'save', 'Установить', 'primary', ' data-confirm="update-apply"'));
     if (al.retry) acts.push(btn('ask', 'refresh', 'Повторить', '', ' data-confirm="update-retry"'));
@@ -4433,6 +4438,7 @@ document.addEventListener('click', e => {
   else if (a === 'housekeeping') runLong('storage', 'control', { op: 'housekeeping' }, 'control-data', 'Журналы проверены').then(() => load('status', true)).then(render);
   else if (a === 'refresh-hints') runLong('routes', 'control', { op: 'refresh-hints' }, 'control-data', 'Подсказки обновлены').then(() => load('route', true)).then(render);
   else if (a === 'update-op') updateOp(t.dataset.op);
+  else if (a === 'panel-reload') location.reload();
   else if (a === 'diag-run') { load('diag', true).then(() => { render(); toast('Диагностика выполнена'); }); }
   else if (a === 'agh-clients') aghClientsOp('sync');
   else if (a === 'ads-job') adsControl({ op: 'enqueue', job: t.dataset.job }, 'Задание поставлено в очередь', 'ads-job');
