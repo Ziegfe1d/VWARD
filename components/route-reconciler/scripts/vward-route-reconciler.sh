@@ -64,10 +64,27 @@ trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
 
-vward_running_config |
-sed -n '/^object-group fqdn AdaptiveAuto/,/^!/p' |
-awk '$1=="include"{print $2}' |
-sort -u > "$TARGETS"
+# One look at Keenetic's configuration a run (fix.33.2, WP-C): the copy the agents share
+# (vward_keenetic_config), read fresh only when there is none; the check before each removal
+# takes the same list. Keenetic is asked again only when a removal is refused (the name may be
+# gone meanwhile). VWARD_RECONCILER_ONE_LOOK=0: a fresh read each time, as before.
+adaptive_names()
+{
+    if [ "${VWARD_RECONCILER_ONE_LOOK:-1}" = 1 ] && [ "${1:-}" != fresh ] &&
+       command -v vward_keenetic_config >/dev/null 2>&1; then
+        AN_CFG=$(vward_keenetic_config) && [ -n "$AN_CFG" ] ||
+            AN_CFG=$(vward_running_config)
+    else
+        AN_CFG=$(vward_running_config)
+    fi
+    printf '%s\n' "$AN_CFG" |
+    sed -n '/^object-group fqdn AdaptiveAuto/,/^!/p' |
+    awk '$1=="include"{print $2}' |
+    sort -u
+    AN_CFG=
+}
+
+adaptive_names > "$TARGETS"
 
 TOTAL=$(wc -l < "$TARGETS")
 [ "$TOTAL" -eq 0 ] && {
@@ -286,10 +303,8 @@ remove_adaptive()
     echo $$ > "$CHANGE/pid"
     # FINAL_GUARD_V3_MAINT
 
-    if ! vward_running_config |
-         sed -n '/^object-group fqdn AdaptiveAuto/,/^!/p' |
-         awk '$1=="include"{print $2}' |
-         grep -Fxq "$H"; then
+    if { [ "${VWARD_RECONCILER_ONE_LOOK:-1}" = 1 ] && ! grep -Fxq "$H" "$TARGETS"; } ||
+       { [ "${VWARD_RECONCILER_ONE_LOOK:-1}" != 1 ] && ! adaptive_names fresh | grep -Fxq "$H"; }; then
         rm -rf "${CHANGE:?}"
         return 0
     fi
@@ -467,6 +482,14 @@ remove_adaptive()
 
         echo "$(date '+%Y-%m-%d %H:%M:%S')|AUTO_DIRECT_MAINT|$H" >> "$LOG"
         echo "AUTO_DIRECT: $H"
+
+    elif [ "${VWARD_RECONCILER_ONE_LOOK:-1}" = 1 ] && ! adaptive_names fresh | grep -Fxq "$H"; then
+
+        # Refused because the name is already gone (removed after this run looked): done.
+        mv "$PTMP" "$PERSIST" 2>/dev/null || rm -f "$PTMP"
+        save_state "$H" "DIRECT_OK"
+        rm -f "$HYST_DIR/$SAFE_H.state"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|AUTO_DIRECT_MAINT|$H|already_gone" >> "$LOG"
 
     else
 
