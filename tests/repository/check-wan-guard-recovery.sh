@@ -236,9 +236,53 @@ for c in 'fast|{"ok":0}|1' 'slow|{"ok":1}|2' 'cut|{"ok":2}|2' 'down||2'; do
 $c
 CASE
     rm -f "$WAN_TEST_CALLS"
-    got=$(WAN_TEST_RCI=$mode CURL="$WORK/curl" sh -c '. "$1"; sleep(){ :; }; wg_rci_get http://rci/x' sh "$WORK/rci.sh")
+    got=$(WAN_TEST_RCI=$mode CURL="$WORK/curl" sh -c 'vward_cs(){ :; }; vward_keenetic_timed(){ :; }; . "$1"; sleep(){ :; }; wg_rci_get http://rci/x' sh "$WORK/rci.sh")
     [ "$got" = "$want" ] && [ "$(cat "$WAN_TEST_CALLS")" = "$calls" ] ||
         fail "wg_rci_get $mode: got '$got' after $(cat "$WAN_TEST_CALLS") calls"
 done
+
+# Keenetic's RCI silent, the connection checked without it (fix.33.2, WP-B): carrier and an
+# outside address up - the state stays, one journal line an episode, the misses counted; down -
+# UTILITY_DEGRADED as before; VWARD_WAN_RCI_PROBES=0 - as before without checking.
+sed -n -e '/^wg_rci_missing()/,/^}/p' -e '/^wg_num()/,/^}/p' "$SOURCE" > "$WORK/miss.sh"
+grep -q '^wg_rci_missing()' "$WORK/miss.sh" || fail "missing wg_rci_missing helper"
+mkdir -p "$WORK/net/eth3"
+cat > "$WORK/ping" <<'SH'
+#!/bin/sh
+for a in "$@"; do last=$a; done
+echo "$last" >> "$WAN_TEST_PINGS"
+case " $WAN_TEST_UP " in *" $last "*) exit 0 ;; esac
+exit 1
+SH
+chmod +x "$WORK/ping"
+miss() {
+    rm -f "$WORK/pings"
+    WAN_TEST_UP=$1 WAN_TEST_PINGS="$WORK/pings" PING="$WORK/ping" ETH=eth3 VWARD_SYSFS_NET="$WORK/net" \
+        STATE="$WORK/wstate" LOG="$WORK/wan.log" RCI_MISS="$WORK/miss" VERSION=t MODE=t \
+        sh -c 'now(){ echo NOW; }
+            wan_recover(){ echo "recover:$1" >> "$WORK/recover"; }
+            emit_state(){ echo "CLASS=$1"; echo "$2"; echo "$1" > "$STATE"; }
+            . "$1"; wg_rci_missing "$2"' sh "$WORK/miss.sh" "$2"
+}
+export WORK
+echo 1 > "$WORK/net/eth3/carrier"; echo HEALTHY > "$WORK/wstate"; rm -f "$WORK/wan.log" "$WORK/miss" "$WORK/recover"
+out=$(miss "77.88.8.1" isp_rci_unavailable)
+printf '%s\n' "$out" | grep -qx 'CLASS=HEALTHY' && [ "$(cat "$WORK/wstate")" = HEALTHY ] ||
+    fail "RCI silent with the internet up must keep the state: $out"
+[ "$(cat "$WORK/pings")" = "$(printf '1.0.0.1\n77.88.8.1')" ] || fail "the second address is tried when the first is silent"
+miss "1.0.0.1" internet_rci_unavailable >/dev/null
+[ "$(cat "$WORK/pings")" = 1.0.0.1 ] || fail "one answering address is enough"
+[ "$(cat "$WORK/miss")" = 2 ] && [ "$(grep -c 'rci_unavailable reason=isp_rci_unavailable probes=ok class_kept=HEALTHY' "$WORK/wan.log")" = 1 ] &&
+    [ "$(wc -l < "$WORK/wan.log")" = 1 ] || fail "one journal line an episode, the misses counted"
+[ "$(cat "$WORK/recover")" = "$(printf 'recover:UTILITY_DEGRADED\nrecover:UTILITY_DEGRADED')" ] || fail "the recovery is reset as before"
+out=$(miss "" isp_rci_unavailable)
+printf '%s\n' "$out" | grep -qx 'CLASS=UTILITY_DEGRADED' && printf '%s\n' "$out" | grep -q 'reason=isp_rci_unavailable probes=fail carrier=1 ping_cf=1 ping_ya=1' ||
+    fail "RCI silent and nothing answering must stay UTILITY_DEGRADED: $out"
+echo HEALTHY > "$WORK/wstate"; echo 0 > "$WORK/net/eth3/carrier"
+miss "1.0.0.1 77.88.8.1" isp_rci_unavailable | grep -qx 'CLASS=UTILITY_DEGRADED' || fail "no carrier is not a working connection"
+echo 1 > "$WORK/net/eth3/carrier"; echo HEALTHY > "$WORK/wstate"
+out=$(VWARD_WAN_RCI_PROBES=0 miss "1.0.0.1" isp_rci_unavailable)
+printf '%s\n' "$out" | grep -qx 'CLASS=UTILITY_DEGRADED' && [ ! -e "$WORK/pings" ] || fail "VWARD_WAN_RCI_PROBES=0 must keep the old way: $out"
+grep -Fq 'printf '"'"'%s rci_back misses=%s\n'"'"'' "$SOURCE" || fail "the end of an episode must be journaled"
 
 echo WAN_GUARD_RECOVERY=PASS

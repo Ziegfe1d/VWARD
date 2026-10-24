@@ -18,3 +18,6 @@ VWARD_RCI_BASE=http://127.0.0.1:79/rci
 # keenetic-slow.log (fix.33.2); 0 keeps only the old journal of 3 s and more.
 # VWARD_KEENETIC_TIMING=1
 # VWARD_KEENETIC_SLOW=1
+# Keenetic's RCI silent: wan-guard checks the carrier and an outside address before saying
+# «UTILITY_DEGRADED» (fix.33.2); 0 says it at once, as before.
+# VWARD_WAN_RCI_PROBES=1
