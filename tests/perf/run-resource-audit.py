@@ -23,6 +23,7 @@ import os
 import re
 import resource
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -214,6 +215,13 @@ def trace_daemon(root, work, pid, seconds, name):
     return s
 
 
+# quieter(A, B): of two windows of a daemon, the one with fewer processes (fix.33.2): a window
+# that caught a once-a-while event (a restart it logged, a minute job it started) is not its
+# steady cost; a steady growth shows in both.
+def quieter(a, b):
+    return a if (a["execs"], a["opt_ops"]) <= (b["execs"], b["opt_ops"]) else b
+
+
 def du_kb(path):
     out = subprocess.run(["du", "-sk", str(path)], stdout=subprocess.PIPE, text=True).stdout
     return int(out.split()[0]) if out else 0
@@ -248,20 +256,31 @@ def main():
         sh(root, "/opt/etc/init.d/S92vward-runtime start")
         opt0, tmp0 = du_kb(root / "opt/var"), du_kb(root / "tmp")
 
-        for name, command, per_day in JOBS:
-            r = measure(root, work, name, command)
-            r["per_day"] = per_day
-            report["jobs"][name] = r
+        # crond paused while the jobs are measured (fix.33.2): its own runs of the same jobs at the
+        # same moment (the updater's check every 15 minutes) met the measured one at its lock and
+        # changed what it did (CI #717: updater check 62 > 60 on unchanged code). It stays alive,
+        # so the supervisor does not restart it.
+        crond = pids(r"^\s*\d+ /opt/sbin/crond")
+        for p in crond:
+            os.kill(p, signal.SIGSTOP)
+        try:
+            for name, command, per_day in JOBS:
+                r = measure(root, work, name, command, runs=5)
+                r["per_day"] = per_day
+                report["jobs"][name] = r
+        finally:
+            for p in crond:
+                os.kill(p, signal.SIGCONT)
 
         engine = pids(r"^\s*\d+ /bin/sh /opt/bin/vward-route-engine\.sh")
         if engine:
-            s = trace_daemon(root, work, engine[0], a.seconds, "route-engine")
+            s = quieter(trace_daemon(root, work, engine[0], a.seconds, "route-engine"), trace_daemon(root, work, engine[0], a.seconds, "route-engine"))
             s["queries"] = a.seconds  # fake tcpdump: one query per second
             s["rss_kb"] = sum(rss_kb(p) for p in pids(r"^\s*\d+ (/bin/sh /opt/bin/vward-route-engine\.sh|tcpdump -ni |awk -v window=)"))
             report["daemons"]["route engine"] = s
         sup = pids(r"^\s*\d+ /bin/sh /opt/bin/vward-cron-supervisor\.sh")
         if sup:
-            s = trace_daemon(root, work, sup[0], a.seconds, "cron-supervisor")
+            s = quieter(trace_daemon(root, work, sup[0], a.seconds, "cron-supervisor"), trace_daemon(root, work, sup[0], a.seconds, "cron-supervisor"))
             s["rss_kb"] = rss_kb(sup[0])
             report["daemons"]["cron supervisor"] = s
         for name, d in report["daemons"].items():

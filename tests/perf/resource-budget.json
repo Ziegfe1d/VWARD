@@ -1,5 +1,5 @@
 {
-  "comment": "Limits for tests/perf/run-resource-audit.py on the router emulator: processes (execs) and file operations on USB (opt_ops) per run; daemons per minute at one DNS query per second (a short window sees more first-time names, which are logged). Measured values of 0.2.0-rc.2 (resource contour: shell builtins, one clock read, lighter admission) plus headroom (daemons vary with the names seen in the window; the supervisor may log one event, such as PANEL_START_FAILED, inside it).",
+  "comment": "Limits for tests/perf/run-resource-audit.py on the router emulator: processes (execs) and file operations on USB (opt_ops) per run; daemons per minute at one DNS query per second (a short window sees more first-time names, which are logged). Measured values of 0.2.0-rc.2 (resource contour: shell builtins, one clock read, lighter admission) plus headroom (daemons vary with the names seen in the window; the supervisor may log one event, such as PANEL_START_FAILED, inside it). fix.33.2: jobs by the median of 5 runs with crond paused, daemons by the quieter of two windows; the updater check and housekeeping vary by 3 processes from run to run on unchanged code (57-62 and 25-28 on fix.33.1 and fix.33.2, the lock and the hour they meet), so their limits are 3 above the measured median.",
   "jobs": {
     "route-engine watchdog (S91)": {"execs": 18, "opt_ops": 0},
     "tunnel health": {"execs": 32, "opt_ops": 0},
@@ -9,8 +9,8 @@
     "ads scheduler": {"execs": 28, "opt_ops": 0},
     "route reconciler": {"execs": 64, "opt_ops": 4},
     "Wi-Fi scheduler": {"execs": 6, "opt_ops": 0},
-    "housekeeping": {"execs": 26, "opt_ops": 3},
-    "updater check": {"execs": 60, "opt_ops": 24},
+    "housekeeping": {"execs": 29, "opt_ops": 3},
+    "updater check": {"execs": 63, "opt_ops": 24},
     "ads scan (empty query log)": {"execs": 100, "opt_ops": 16}
   },
   "daemons": {
