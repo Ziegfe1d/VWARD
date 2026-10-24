@@ -249,7 +249,9 @@ ndm() {
         NDM_CMD=$(printf '%s' "$1" | tr -d '\r\n"\\')
         # Keenetic's whole answer, its lines joined: the last one alone was often a bare «[»
         # and the reason above it was lost (Smart DNS and route refusals, Viva 2026-10-19).
-        NDM_REPLY=$(printf '%s\n' "$out" | tr -d '\r"\\' | tr -c '[:print:]\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;/^$/d' | awk 'length($0) > 1 || $0 !~ /^[][]$/' | tr '\n' '|' | sed 's/|$//;s/|/ \/ /g' | cut -c1-400)
+        # sed, not tr: Keenetic's BusyBox tr has no [:print:] and kept only the letters of the
+        # class (Viva 2026-10-21); the terminal's «ESC[K» goes too (fix.33.1).
+        NDM_REPLY=$(printf '%s\n' "$out" | tr -d '\r"\\' | sed 's/\x1b\[[0-9;]*[A-Za-z]//g;s/\[K//g;s/[^[:print:]]/ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;/^$/d' | awk 'length($0) > 1 || $0 !~ /^[][]$/' | tr '\n' '|' | sed 's/|$//;s/|/ \/ /g' | cut -c1-400)
         return 1
     fi
     return 0
@@ -2285,6 +2287,9 @@ keenetic_smartdns() {
         for ks_try in "$ks_tpl $2" "https upstream $ks_url dnsm domain $2" "https upstream $ks_url domain $2"; do
             if ndm "dns-proxy $ks_try"; then ks_line=$ks_try; break; fi
             audit "smartdns-domain add $2 keenetic refused form=$(printf '%s' "$ks_try" | sed 's#\(https://[^/ ]*\)/[^ ]*#\1/…#g') used=$ks_used/$SMARTDNS_KEENETIC_MAX source=$ks_src: ${NDM_REPLY:-no answer}"
+            # No «dns-proxy https» at all: Keenetic's DNS-over-HTTPS component is not installed
+            # (Viva 2026-10-21) - no other form helps, the owner is told what to install.
+            case "$NDM_REPLY" in *"no such command: https"*) RELAY_REASON="no dns-proxy https"; die smartdns_doh_component ;; esac
         done
         [ -n "$ks_line" ] || die router_rejected
         snapshot

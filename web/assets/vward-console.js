@@ -265,6 +265,7 @@ const API_ERRORS = {
   router_auth_unavailable: 'роутер не ответил на проверку пароля', invalid_login: 'недопустимый логин', auth_required: 'нужно войти', invalid_url: 'неверный адрес: нужен https без пробелов и логина', invalid_format: 'неизвестный формат списка',
   adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен',
   // fix.31: the codes the Panel showed as they are.
+  smartdns_doh_component: 'В Keenetic нет компонента «Прокси-сервер DNS-over-HTTPS»: установите его в веб-интерфейсе Keenetic («Общие настройки» → «Изменить набор компонентов»), роутер перезагрузится',
   smartdns_not_configured: 'Smart DNS не настроен: укажите сервер DoH в разделе «ИИ-сервисы»', smartdns_keenetic_full: 'лимит Smart DNS в Keenetic исчерпан (8 из 8 доменов)',
   service_list: 'список сервиса не создан в Keenetic', invalid_arguments: 'неверные параметры запроса', helper_failed: 'действие завершилось без ответа',
   doh_limit: 'в Keenetic нет места для ещё одного сервера DNS-over-HTTPS', doh_remove_failed: 'Keenetic не удалил строку Smart DNS', doh_remove_unsafe: 'строка Smart DNS используется не только VWARD: не удалена',
@@ -877,7 +878,14 @@ const ST = { on: ['ok', 'Работает'], off: ['off', 'Выключен'], i
 // «Выключен» - grey; «Работает» - green; «Не работает» - red. [class, text, why]: the program
 // that does not run comes first - connected or not, nothing works through it (Viva 2026-10-19:
 // «Не подключено» on one page, «Не работает» on another, the program not running at all).
+// Data from the browser's copy while the router has not answered yet: no verdict on it (Viva
+// 2026-10-21: «Не установлен» from a copy older than the installation, the router slow).
 function aghState() {
+  const v = aghVerdict();
+  if (S.cached.status && v[0] !== 'ok') return ['', 'Нет данных', 'роутер ещё не ответил, последние данные от ' + new Date(S.cached.status).toTimeString().slice(0, 5)];
+  return v;
+}
+function aghVerdict() {
   const a = S.ads || {}, g = S.agh, sv = st().services || {}, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {}, e = (S.ext && S.ext.agh) || {};
   if (!S.ads || !S.status) return ['', '—', ''];
   if (!sv.adguard && (sv.adguard_installed === false || (sv.adguard_installed == null && !ag.port && !e.installed && !(e.official || {}).installed))) return ST.none.concat('программа не найдена на роутере');
