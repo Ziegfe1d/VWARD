@@ -140,6 +140,8 @@ esac
         "VWARD_DEVICE_MAP_CACHE": str(tmp / "device-map.tsv"),
         "VWARD_SYSFS_NET": str(sysfs),
         "VWARD_CURL_BIN": str(tools / "curl"),
+        # The configuration copy the agents share, this router's own (not the machine's /tmp).
+        "VWARD_KCACHE": str(tmp / "kcache"),
     }
 
 
