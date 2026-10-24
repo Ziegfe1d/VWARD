@@ -2339,7 +2339,10 @@ op_smartdns_domain() {
         done_ok "smartdns-domain add $2 keenetic" changed
     fi
     if [ "$1" = add ]; then
-        printf '%s\tauto\n' "$2" > "$JOURNAL.agh" || die write_failed
+        # The server chosen in the Panel; «auto» (the one AdGuard Home has most) only without one:
+        # a freshly installed AdGuard Home has none and refused every domain (Viva 2026-10-19).
+        sd_u=$(smartdns_url 2>/dev/null) || sd_u=auto
+        printf '%s\t%s\n' "$2" "$sd_u" > "$JOURNAL.agh" || die write_failed
         agh_control smartdns-put "$JOURNAL.agh" && done_ok "smartdns-domain add $2" changed
         # The owner keeps Smart DNS in AdGuard Home: no quiet move to Keenetic.
         [ "$(smartdns_store)" != agh ] || die "$AGH_ERR"
