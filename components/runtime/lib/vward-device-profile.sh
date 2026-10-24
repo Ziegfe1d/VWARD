@@ -673,8 +673,12 @@ vward_build_device_map()
 
     # Only a look: the copy the agents share (fix.33.2, WP-C; every 5 minutes the agent that found
     # the map old read the whole configuration for itself - with the route upkeep, the peaks).
-    # VWARD_MAP_SHARED_CONFIG=0: a fresh read, as before.
-    { [ "${VWARD_MAP_SHARED_CONFIG:-1}" = 1 ] && vward_keenetic_config 2>/dev/null || vward_running_config; } | awk '
+    # VWARD_MAP_SHARED_CONFIG=0, or a stand-in ndmc that shares nothing (the tests): a fresh read.
+    if [ "${VWARD_MAP_SHARED_CONFIG:-1}" = 1 ] && { [ -z "${VWARD_NDMC:-}" ] || [ -n "$_VWARD_KCACHE_OWN" ]; }; then
+        vward_keenetic_config 2>/dev/null || vward_running_config
+    else
+        vward_running_config
+    fi | awk '
         $1=="route" && $2=="object-group" && NF>=4 {print "R\t" $3 "\t" $4}
         # A route to one address has no mask («ip route 192.0.2.1 OpkgTun2 auto»).
         $1=="ip" && $2=="route" && $3 ~ /^[0-9]/ && NF>=4 {print "S\t" ($4 ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/ ? $5 : $4)}
