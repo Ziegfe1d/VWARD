@@ -54,6 +54,9 @@ jobs:
       - name: AdaptiveAuto upkeep on the router emulator (one configuration save an hour)
         run: sudo python3 tests/perf/check-route-reconciler-emulated.py
 
+      - name: Stabilization cases on the router emulator (silent RCI, peaks, route engine stops)
+        run: sudo python3 tests/perf/check-stabilization-emulated.py
+
       - name: Beta to 0.2 cutover on the router emulator
         run: sudo python3 tests/perf/check-cutover-emulated.py
 
