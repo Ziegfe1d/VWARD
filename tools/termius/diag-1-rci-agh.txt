@@ -1,0 +1,140 @@
+cat > /tmp/dg.sh <<'EOF'
+clear
+PFX="vward-diag"
+OUT="/tmp/${PFX}-$(date +%Y%m%d-%H%M%S).txt"
+LAST="/tmp/last_result.txt"
+MAXB=30000
+KEEP=5
+ESC=$(printf '\033')
+tmo() {
+  _ts=$1; shift
+  "$@" & _tp=$!
+  ( sleep "$_ts"; kill "$_tp" 2>/dev/null ) & _tw=$!
+  wait "$_tp"; _tr=$?
+  kill "$_tw" 2>/dev/null
+  return $_tr
+}
+ls -1t /tmp/${PFX}-*.txt 2>/dev/null |
+  tail -n +"$KEEP" |
+  while read -r F; do rm -f "$F"; done
+: > "$OUT"
+ln -sfn "$OUT" "$LAST"
+ln -sfn "$OUT" "/tmp/last_${PFX}.txt"
+send_out() {
+  [ -s "$OUT" ] || return 1
+  sed "s/${ESC}\[[0-9;?]*[a-zA-Z]//g" "$OUT" |
+    tail -c "$MAXB" | base64 | tr -d '\r\n' |
+    { read -r B; printf '\033]52;c;%s\a' "$B"; }
+}
+on_abort() {
+  trap '' INT TERM HUP
+  send_out
+  printf '\n[ ABORTED ]: PARTIAL RESULT IN %s\n' "$LAST"
+  exit 130
+}
+trap on_abort INT TERM HUP
+{
+echo "======================"
+echo " VWARD DIAG DIAG v2.3.3"
+echo " Date: $(date '+%Y-%m-%d %H:%M:%S')"
+if command -v ndmc >/dev/null 2>&1; then
+  ndmc -c "show version" 2>/dev/null |
+    grep -E 'release|title|device' | head -n 3
+else
+  echo "[ NOT_FOUND ] ndmc"
+fi
+echo "======================"
+echo "=== 1. RCI SAMPLES (20 x 3s) ==="
+N=0; SLOW=0; MAXT=0
+while [ "$N" -lt 20 ]; do
+  T=$(tmo 20 curl -s -o /dev/null -w '%{time_total}' \
+    http://127.0.0.1:79/rci/show/system 2>/dev/null)
+  [ -z "$T" ] && T=20
+  MS=$(echo "$T" | awk '{printf "%d", $1*1000}')
+  [ "$MS" -gt "$MAXT" ] && MAXT=$MS
+  if [ "$MS" -gt 1000 ]; then
+    SLOW=$((SLOW+1))
+    echo "[ WARNING ] slow ${MS}ms at $(date +%H:%M:%S)"
+    top -b -n 1 2>/dev/null | sed -n '1,5p' | cut -c1-60
+  fi
+  N=$((N+1)); sleep 3
+done
+echo "SUMMARY-RCI: max=${MAXT}ms slow=$SLOW of $N"
+echo "=== 2. HEAVY CALL COST ==="
+echo "load: $(cut -d' ' -f1-3 /proc/loadavg)"
+S=$(date +%s)
+tmo 25 ndmc -c "show running-config" > /tmp/dg-rc.txt 2>&1
+echo "running-config: $(( $(date +%s)-S ))s," \
+  "$(wc -l < /tmp/dg-rc.txt) lines"
+echo "static routes: $(grep -c '^ip route' /tmp/dg-rc.txt)"
+echo "=== 3. DNS RULES (url masked) ==="
+echo "name-server: $(grep -c '^ip name-server' /tmp/dg-rc.txt)"
+grep -E 'googlevideo|ytimg|https upstream|claude' /tmp/dg-rc.txt |
+  sed 's#https://[^ ]*#<url>#' | head -n 10 | cut -c1-90
+echo "=== 4. ADGUARD HOME ==="
+ps | grep '[A]dGuardHome' | cut -c1-80
+netstat -lnt 2>/dev/null | grep -E ':(53|65053|3000|8088|79) ' |
+  cut -c1-70
+Y=/opt/etc/AdGuardHome/AdGuardHome.yaml
+P=$(grep -m1 'bind_port' "$Y" 2>/dev/null | tr -dc 0-9)
+tmo 5 curl -s -o /dev/null \
+  -w "AGH API: rc=%{http_code} t=%{time_total}s\n" \
+  "http://127.0.0.1:${P:-3000}/control/status" ||
+  echo "[ FAIL ] AGH API no answer (port ${P:-3000})"
+echo "=== 5. YOUTUBE: DNS / ROUTE / GROUP ==="
+IPS=/tmp/dg-ips.txt; : > "$IPS"
+for H in www.youtube.com i.ytimg.com redirector.googlevideo.com; do
+  A=$(nslookup "$H" 192.168.1.1 2>/dev/null |
+    awk '/^Name:/{n=1} n&&/^Address/{print $NF}' |
+    grep -E '^[0-9.]+$' | head -n 2)
+  [ -z "$A" ] && echo "[ FAIL ] no A answer for $H"
+  for I in $A; do
+    echo "$I" >> "$IPS"
+    echo "$H -> $I: $(ip route get "$I" 2>/dev/null |
+      head -n 1 | cut -c1-60)"
+  done
+done
+G=$(tmo 25 ndmc -c 'show object-group fqdn' |
+  grep -o -F -f "$IPS" | sort -u | tr '\n' ' ')
+echo "in fqdn groups: $G"
+echo "MTU opkgtun4: $(ip link show opkgtun4 2>/dev/null |
+  grep -o 'mtu [0-9]*')"
+FMT='rc=%{http_code} c=%{time_connect}s t=%{time_appconnect}s\n'
+for W in "" "--interface opkgtun4"; do
+  echo "TCP ${W:-direct}:"
+  tmo 10 curl -s -o /dev/null $W -w "$FMT" \
+    https://redirector.googlevideo.com/ ||
+    echo "[ FAIL ] ${W:-direct} no answer"
+done
+echo "=== 6. SMARTDNS ==="
+for F in /tmp/vward-route-engine-state/smartdns-domains.txt \
+  /opt/var/lib/vward/route-engine/manual-domains.txt; do
+  if [ -f "$F" ]; then echo "$(wc -l < "$F") lines: $F"
+  else echo "[ NOT_FOUND ] $F"; fi
+done
+echo "AGH per-domain upstreams: $(grep -c '\[/' "$Y" 2>/dev/null)"
+for R in 192.168.1.1 8.8.8.8; do
+  echo "claude.ai via $R: $(nslookup claude.ai $R 2>/dev/null |
+    awk '/^Name:/{n=1} n&&/^Address/{print $NF}' | head -n 1)"
+done
+echo "=== 7. LOGS / CRON ==="
+for F in /opt/var/log/*route*; do
+  [ -f "$F" ] && { echo "--- $F"; tail -n 6 "$F" | cut -c1-110; }
+done
+cat /opt/var/spool/cron/crontabs/* 2>/dev/null |
+  grep -v '^#' | cut -c1-90 | head -n 15
+rm -f /tmp/dg-rc.txt "$IPS"
+echo "======================"
+echo " END"
+echo "======================"
+} 2>&1 | tee "$OUT"
+P=$(grep -c '^\[ PASS \]' "$OUT")
+W=$(grep -c '^\[ WARNING \]' "$OUT")
+F=$(grep -c '^\[ FAIL \]' "$OUT")
+SZ=$(wc -c < "$OUT")
+echo "SUMMARY: pass=$P warn=$W fail=$F size=${SZ}B" | tee -a "$OUT"
+if send_out; then echo "RESULT SENT (OSC52)"
+else echo "[ FAIL ] nothing to send"; fi
+echo "RAW: $LAST"
+EOF
+sh -n /tmp/dg.sh && sh /tmp/dg.sh
