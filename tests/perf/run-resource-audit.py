@@ -43,7 +43,11 @@ JOBS = [
     ("tunnel guard", "/opt/bin/vward-tunnel-guard.sh", 1440),
     ("runtime watchdog (S92)", "/opt/etc/init.d/S92vward-runtime start", 1440),
     ("WAN guard", "/opt/bin/vward-wan-guard.sh", 1440),
-    ("ads scheduler", "/opt/bin/vward-ads-privacy-scheduler.sh", 1440),
+    # The scheduler starts the DNS guard on the minutes of uptime divisible by 5 (fix.32): its cost
+    # depended on the clock when it was measured (CI 2026-10-24: 31-32 processes on dev and on the
+    # branch, 24-25 locally). Both minutes measured, the uptime fixed (VWARD_UPTIME_FILE).
+    ("ads scheduler", "/opt/bin/vward-ads-privacy-scheduler.sh", 1152, {"VWARD_UPTIME_FILE": "/emu/uptime-minute-1"}),
+    ("ads scheduler (DNS guard minute)", "/opt/bin/vward-ads-privacy-scheduler.sh", 288, {"VWARD_UPTIME_FILE": "/emu/uptime-minute-5"}),
     ("route reconciler", "/opt/bin/vward-route-reconciler.sh", 288),
     ("Wi-Fi scheduler", "/opt/bin/vward-wifi-client-scheduler.sh", 288),
     ("housekeeping", "/opt/bin/vward-housekeeping.sh", 24),
@@ -249,6 +253,9 @@ def main():
     subprocess.run(["mount", "--bind", str(root / "opt"), str(root / "opt")], check=True)
     report = {"version": (REPO / "VERSION").read_text().strip(), "jobs": {}, "daemons": {}, "api": {}, "console": {}}
     try:
+        # Fixed uptimes for the jobs whose work depends on the minute (see JOBS).
+        (root / "emu/uptime-minute-1").write_text("3660.00 3000.00\n")
+        (root / "emu/uptime-minute-5").write_text("3600.00 3000.00\n")
         # A router that has run the updater has its run directory.
         (root / "opt/var/run/vward").mkdir(parents=True, exist_ok=True)
         sh(root, "/opt/etc/init.d/S90crond start")
@@ -264,8 +271,8 @@ def main():
         for p in crond:
             os.kill(p, signal.SIGSTOP)
         try:
-            for name, command, per_day in JOBS:
-                r = measure(root, work, name, command, runs=5)
+            for name, command, per_day, *env in JOBS:
+                r = measure(root, work, name, command, runs=5, env=env[0] if env else None)
                 r["per_day"] = per_day
                 report["jobs"][name] = r
         finally:
