@@ -1577,7 +1577,9 @@ op_vless_server() {
                  vs_err=$(printf '%s\n' "$vs_out" | sed -n 's/^error=//p' | tail -n 1)
                  case "$vs_err" in ''|*[!a-z0-9_]*) vs_err=engine_failed ;; esac
                  die "$vs_err" ;;
-        *) die engine_failed ;;
+        # An answer the Panel does not know: its last line goes with the error to the journal.
+        *) RELAY_REASON=$(printf '%s\n' "$vs_out" | tail -n 1 | tr -cd 'A-Za-z0-9=._:/ -' | cut -c1-120)
+           die engine_failed ;;
     esac
 }
 

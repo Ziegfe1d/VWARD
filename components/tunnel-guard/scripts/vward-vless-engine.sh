@@ -801,7 +801,9 @@ op_countries() {
     fi
     co_cross=$(countries_get "$n" cross)
     printf 'info.countries.off=%s\ninfo.countries.cross=%s\n' "$(countries_get "$n" off)" "${co_cross:-1}"
-    echo "result=${2:+changed}${2:-checked}"
+    # Not «result=${2:+changed}${2:-checked}»: with a change that printed «result=changedcross»,
+    # the Panel took it for a failure (engine_failed, Viva 2026-10-19, fix.33.1).
+    if [ -n "${2:-}" ]; then echo "result=changed"; else echo "result=checked"; fi
 }
 
 op_failover() {
