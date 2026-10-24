@@ -19,6 +19,15 @@ DNS="$VWARD_PROBE_DNS"
 
 CONNECT_TIMEOUT=2
 MAX_TIME=3
+
+# tunnel_answers: the tunnel carries traffic at all (the VPN agent's probes, 1.1.1.1 / 1.0.0.1).
+tunnel_answers() {
+    for ta_ip in ${VWARD_AUDIT_TUNNEL_PROBES:-1.1.1.1 1.0.0.1}; do
+        curl --http1.1 -4 --noproxy '*' --interface "$WG" --connect-timeout 4 --max-time 8 \
+            -s -o /dev/null "http://$ta_ip/cdn-cgi/trace" 2>/dev/null && return 0
+    done
+    return 1
+}
 SUCCESS_THRESHOLD=3
 
 STATE_DIR="/opt/var/lib/vward/policy-audit"
@@ -241,8 +250,13 @@ while IFS='|' read GROUP HOST; do
 
             VPN_RC=$?
             VPN_CODE=${VPN_OUT%%|*}
-            # Ten sites in a row silent through the tunnel: the tunnel itself went down.
+            # Ten sites in a row silent through the tunnel: the tunnel itself went down - when it
+            # fails the VPN agent's own probes too (fix.33.1: a run of dead sites in the list cut
+            # the audit short at the same place every hour, the tunnel up).
             if [ "$VPN_RC" -eq 0 ]; then VPN_FAILS=0; else VPN_FAILS=$((VPN_FAILS + 1)); fi
+            if [ "$VPN_FAILS" -ge "${VWARD_AUDIT_TUNNEL_FAILS:-10}" ] && tunnel_answers; then
+                VPN_FAILS=0
+            fi
             if [ "$VPN_FAILS" -ge "${VWARD_AUDIT_TUNNEL_FAILS:-10}" ]; then
                 echo "$(date '+%Y-%m-%d %H:%M:%S')|ABORTED_TUNNEL_DOWN|tunnel=${VWARD_TUNNEL_INTERFACE:-?}|checked=$CHECKED" >> "$SUMMARY_LOG"
                 : > "$RECHECK"
