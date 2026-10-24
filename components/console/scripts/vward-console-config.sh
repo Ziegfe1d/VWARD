@@ -2343,7 +2343,10 @@ op_smartdns_domain() {
     if [ "$1" = add ]; then
         # The server chosen in the Panel; «auto» (the one AdGuard Home has most) only without one:
         # a freshly installed AdGuard Home has none and refused every domain (Viva 2026-10-19).
-        sd_u=$(smartdns_url 2>/dev/null) || sd_u=auto
+        # Read from the file only: smartdns_url's fallback reads Keenetic's configuration, which
+        # is not loaded on this path (its awk then waited for standard input, found by the test).
+        sd_u=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
+        [ -n "$sd_u" ] || sd_u=auto
         printf '%s\t%s\n' "$2" "$sd_u" > "$JOURNAL.agh" || die write_failed
         agh_control smartdns-put "$JOURNAL.agh" && done_ok "smartdns-domain add $2" changed
         # The owner keeps Smart DNS in AdGuard Home: no quiet move to Keenetic.
