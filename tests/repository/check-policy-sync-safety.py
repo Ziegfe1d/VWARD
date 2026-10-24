@@ -151,7 +151,9 @@ with tempfile.TemporaryDirectory() as td:
     # Running configuration comes through the shared profile helper (RCI, then ndmc).
     profile_source = (ROOT / "components/runtime/lib/vward-device-profile.sh").read_text(encoding="utf-8")
     env["VWARD_CURL_BIN"] = "/nonexistent/curl"
-    functions = "\n".join((extract_function(profile_source, "vward_tool"),
+    # The timing of every request to Keenetic (fix.33.2) is not what this test looks at.
+    functions = "\n".join(("vward_uptime_cs() { _VCS=0; }\nvward_keenetic_timed() { :; }",
+                           extract_function(profile_source, "vward_tool"),
                            extract_function(profile_source, "vward_running_config"),
                            group_members, membership_state))
 
