@@ -10,6 +10,7 @@ VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 [ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
 . "$VWARD_PROFILE_LIB"
 vward_profile_load || exit 1
+command -v vward_keenetic_timed >/dev/null 2>&1 || { vward_cs() { _VCS=0; }; vward_keenetic_timed() { :; }; }
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
 . "$VWARD_ADMISSION_LIB"
@@ -211,9 +212,13 @@ wg_num()
 # 2 s tells a busy router from a missing answer (a failure costs 2 s + 5 s).
 wg_rci_get()
 {
+    # Timed like every request to Keenetic (fix.33.2): the retry included, one entry.
+    vward_cs; WG_T0=$_VCS
     # Kept whole: a reply cut by the timeout is never glued to the retry.
     WG_RCI=$("$CURL" -fsS --connect-timeout 2 --max-time 3 "$1" 2>/dev/null) ||
         { sleep 2; WG_RCI=$("$CURL" -fsS --connect-timeout 2 --max-time 5 "$1" 2>/dev/null); } || WG_RCI=""
+    WG_ST=; [ -n "$WG_RCI" ] || WG_ST=no_answer
+    vward_keenetic_timed "rci:${1#"$VWARD_RCI_BASE"/}" "$WG_T0" "$WG_ST"
     printf '%s' "$WG_RCI"
 }
 

@@ -87,22 +87,16 @@ vward_rci_get()
 {
     _vrg_url="${VWARD_RCI_BASE:-http://127.0.0.1:79/rci}/$1" _vrg_t=${2:-5}
     # Every request counted for «Стабильность» (the share of Keenetic's refusals among all
-    # requests): a dot a request in one of 25 files in RAM by the hour of uptime, the hour on
-    # the first line (a file of another hour starts anew). Shell built-ins only, no process.
-    _vrg_cd=${VWARD_RCI_CALLS:-/tmp/vward-rci-calls} _vrg_h=
-    read -r _vrg_h _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
-    _vrg_h=${_vrg_h%%.*}
-    case "$_vrg_h" in ''|*[!0-9]*) ;; *)
-        _vrg_h=$((_vrg_h / 3600)) _vrg_fh=
-        [ -d "$_vrg_cd" ] || mkdir -p "$_vrg_cd" 2>/dev/null
-        read -r _vrg_fh 2>/dev/null < "$_vrg_cd/$((_vrg_h % 25))"
-        [ "$_vrg_fh" = "$_vrg_h" ] || printf '%s\n' "$_vrg_h" 2>/dev/null > "$_vrg_cd/$((_vrg_h % 25))"
-        printf . 2>/dev/null >> "$_vrg_cd/$((_vrg_h % 25))" ;;
-    esac
+    # requests): a dot a request in one of 25 files in RAM by the hour of uptime.
+    _vward_hour_dot "${VWARD_RCI_CALLS:-/tmp/vward-rci-calls}"
     _vrg_curl=${VWARD_CURL_BIN:-$(vward_tool curl)}
     if [ -n "$_vrg_curl" ]; then
+        vward_cs; _vrg_t0=$_VCS
         _vrg_out=$("$_vrg_curl" --fail --silent --connect-timeout 2 --max-time "$_vrg_t" "$_vrg_url" 2>/dev/null)
         _vrg_rc=$?
+        # No answer in time (28) or no connection (7) goes into «who waited» whatever it took.
+        case "$_vrg_rc" in 7|28) _vrg_st=rc=$_vrg_rc ;; *) _vrg_st= ;; esac
+        vward_keenetic_timed "rci:${1%%\?*}" "$_vrg_t0" "$_vrg_st"
         [ "$_vrg_rc" = 0 ] && [ -n "$_vrg_out" ] && { printf '%s\n' "$_vrg_out"; _vrg_out=; return 0; }
         # curl ran and Keenetic answered no (an error, a timeout): wget would hear the same.
         # Only a curl that cannot start (126 and up: not runnable, killed) is replaced; Entware's
@@ -435,20 +429,22 @@ vward_https_broken()
 vward_running_config()
 {
     _vrc_jq=${VWARD_JQ_BIN:-$(vward_tool jq)}
-    _vrc_t0=$(date +%s)
+    # Timed here as one read: the RCI request and ndmc inside are not timed again (_VKT_IN).
+    vward_cs; _vrc_t0=$_VCS _VKT_IN=1
     if [ -n "$_vrc_jq" ] &&
        _vrc_cfg=$(vward_rci_get show/running-config 30 |
            "$_vrc_jq" -er '.message | if type == "array" and length > 0 then .[] else error("empty") end' 2>/dev/null) &&
        [ -n "$_vrc_cfg" ]; then
+        _VKT_IN=
         vward_keenetic_timed running-config "$_vrc_t0"
         printf '%s\n' "$_vrc_cfg"
         _vrc_cfg=
         return 0
     fi
     _vrc_cfg=
-    command -v ndmc >/dev/null 2>&1 || { vward_keenetic_timed running-config "$_vrc_t0" failed; return 1; }
+    command -v ndmc >/dev/null 2>&1 || { _VKT_IN=; vward_keenetic_timed running-config "$_vrc_t0" failed; return 1; }
     ndmc -c 'show running-config' 2>/dev/null
-    _vrc_rc=$?
+    _vrc_rc=$? _VKT_IN=
     vward_keenetic_timed running-config "$_vrc_t0" "$([ "$_vrc_rc" = 0 ] || echo failed)"
     return "$_vrc_rc"
 }
@@ -463,19 +459,86 @@ vward_running_config()
 _VWARD_KCACHE_OWN=${VWARD_KCACHE:+1}
 VWARD_KCACHE=${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}
 VWARD_KEENETIC_SLOW_LOG=${VWARD_KEENETIC_SLOW_LOG:-${VWARD_ROOT_PREFIX:-}/opt/var/log/vward/keenetic-slow.log}
+VWARD_KEENETIC_CALLS=${VWARD_KEENETIC_CALLS:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-calls}
+VWARD_KEENETIC_SLOWN=${VWARD_KEENETIC_SLOWN:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-slow}
 
-# vward_keenetic_timed WHAT T0 [failed]: an answer of Keenetic that took 3 s or more goes into the
-# journal «who waited»: time, the program, what it asked, seconds (the last 300 kept).
+# vward_cs: _VCS = hundredths of a second since boot (shell built-ins only: every request to
+# Keenetic is timed, fix.33.2).
+vward_cs()
+{
+    _VCS=; read -r _VCS _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
+    case "$_VCS" in
+        *[!0-9.]*|'') _VCS=0 ;;
+        *.*) _vcs_f=${_VCS#*.}00; _vcs_f=${_vcs_f%"${_vcs_f#??}"}; _vcs_f=${_vcs_f#0}
+             _VCS=$(( ${_VCS%%.*} * 100 + ${_vcs_f:-0} )) ;;
+        *) _VCS=$((_VCS * 100)) ;;
+    esac
+}
+
+# _vward_hour_dot DIR: one dot in the file of this hour of uptime (25 files by the hour, the hour
+# on the first line; a file of another hour starts anew). Shell built-ins only, no process.
+_vward_hour_dot()
+{
+    _vhd_h=
+    read -r _vhd_h _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
+    _vhd_h=${_vhd_h%%.*}
+    case "$_vhd_h" in ''|*[!0-9]*) return 0 ;; esac
+    _vhd_h=$((_vhd_h / 3600)) _vhd_fh=
+    [ -d "$1" ] || mkdir -p "$1" 2>/dev/null
+    read -r _vhd_fh 2>/dev/null < "$1/$((_vhd_h % 25))"
+    [ "$_vhd_fh" = "$_vhd_h" ] || printf '%s\n' "$_vhd_h" 2>/dev/null > "$1/$((_vhd_h % 25))"
+    printf . 2>/dev/null >> "$1/$((_vhd_h % 25))"
+}
+
+# vward_keenetic_timed WHAT T0 [STATUS]: every request to Keenetic (RCI, ndmc) counted by the hour
+# (VWARD_KEENETIC_CALLS), and one that took VWARD_KEENETIC_SLOW seconds (1) or more, or ended with
+# STATUS (no answer), counted as slow (VWARD_KEENETIC_SLOWN) and written into the journal «who
+# waited»: time, the agent, the program, what it asked, seconds, STATUS or ok (the last 500 kept).
+# T0 from vward_cs. VWARD_KEENETIC_TIMING=0 (device.conf) keeps only the old 3 s journal.
 vward_keenetic_timed()
 {
-    _vkt_s=$(( $(date +%s) - $2 ))
-    [ "$_vkt_s" -ge "${VWARD_KEENETIC_SLOW:-3}" ] || [ -n "${3:-}" ] || return 0
+    [ -z "${_VKT_IN:-}" ] || return 0
+    vward_cs
+    _vkt_cs=$((_VCS - $2))
+    [ "$_vkt_cs" -ge 0 ] || _vkt_cs=0
+    _vkt_slow=${VWARD_KEENETIC_SLOW:-1}
+    if [ "${VWARD_KEENETIC_TIMING:-1}" = 1 ]; then
+        _vward_hour_dot "$VWARD_KEENETIC_CALLS"
+    else
+        _vkt_slow=${VWARD_KEENETIC_SLOW:-3}
+    fi
+    [ "$_vkt_cs" -ge $((_vkt_slow * 100)) ] || [ -n "${3:-}" ] || return 0
+    [ "${VWARD_KEENETIC_TIMING:-1}" != 1 ] || _vward_hour_dot "$VWARD_KEENETIC_SLOWN"
     mkdir -p "${VWARD_KEENETIC_SLOW_LOG%/*}" 2>/dev/null
-    printf '%s|%s|%s|%s|%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${VWARD_ACTOR:-${0##*/}}" "$1" "$_vkt_s" "${3:-ok}" >> "$VWARD_KEENETIC_SLOW_LOG" 2>/dev/null || return 0
-    [ "$(wc -l < "$VWARD_KEENETIC_SLOW_LOG")" -le 360 ] ||
-        { tail -n 300 "$VWARD_KEENETIC_SLOW_LOG" > "$VWARD_KEENETIC_SLOW_LOG.$$" && mv -f "$VWARD_KEENETIC_SLOW_LOG.$$" "$VWARD_KEENETIC_SLOW_LOG"; } 2>/dev/null
+    # Addresses of DoH servers are not for the journal.
+    case "$1" in *://*) _vkt_w=$(printf '%s' "$1" | sed 's#[a-z]*://[^ ]*#<url>#g') ;; *) _vkt_w=$1 ;; esac
+    printf '%s|%s|%s|%s|%d.%02d|%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${VWARD_ACTOR:-${0##*/}}" "${0##*/}" \
+        "$(printf '%s' "$_vkt_w" | tr '|\n\r' '   ' | cut -c1-80)" $((_vkt_cs / 100)) $((_vkt_cs % 100)) "${3:-ok}" \
+        >> "$VWARD_KEENETIC_SLOW_LOG" 2>/dev/null || return 0
+    [ "$(wc -l < "$VWARD_KEENETIC_SLOW_LOG")" -le 600 ] ||
+        { tail -n 500 "$VWARD_KEENETIC_SLOW_LOG" > "$VWARD_KEENETIC_SLOW_LOG.$$" && mv -f "$VWARD_KEENETIC_SLOW_LOG.$$" "$VWARD_KEENETIC_SLOW_LOG"; } 2>/dev/null
     return 0
 }
+
+# Every ndmc of the programs that load this library is timed the same way (fix.33.2, WP-A: who
+# keeps Keenetic busy). Only where Keenetic's ndmc is a program, so «command -v ndmc» still says
+# whether there is one; a stand-in named by VWARD_NDMC (the tests) is called by its path and stays
+# as it is.
+case "$(command -v ndmc 2>/dev/null)" in
+    /*)
+        ndmc()
+        {
+            [ "${VWARD_KEENETIC_TIMING:-1}" = 1 ] || { command ndmc "$@"; return; }
+            vward_cs; _vnd_t0=$_VCS
+            command ndmc "$@"
+            _vnd_rc=$?
+            # A refused command is an answer; a killed or missing ndmc is none.
+            _vnd_st=; [ "$_vnd_rc" -lt 126 ] || _vnd_st=rc=$_vnd_rc
+            vward_keenetic_timed "ndmc:$*" "$_vnd_t0" "$_vnd_st"
+            return "$_vnd_rc"
+        }
+        ;;
+esac
 
 vward_keenetic_dirty() { rm -f "$VWARD_KCACHE/running-config" 2>/dev/null; return 0; }
 
@@ -513,8 +576,9 @@ vward_keenetic_config()
         cat "$VWARD_KCACHE/running-config"
         return 0
     fi
-    _vkc_t0=$(date +%s)
+    vward_cs; _vkc_t0=$_VCS _VKT_IN=1
     "${VWARD_NDMC:-ndmc}" -c 'show running-config' 2>/dev/null | tr -d '\r' > "$VWARD_KCACHE/running-config.$$"
+    _VKT_IN=
     if [ -s "$VWARD_KCACHE/running-config.$$" ]; then
         vward_keenetic_timed running-config "$_vkc_t0"
         mv -f "$VWARD_KCACHE/running-config.$$" "$VWARD_KCACHE/running-config"

@@ -68,7 +68,7 @@ printf 'interface OpkgTun0\\r\\nip name-server 192.0.2.1:5353\\r\\n'
         fail("no answer from Keenetic must be no copy")
     # Only these two reads: an earlier one slowed by a busy machine is the tester's.
     log = [x for x in (tmp / "slow.log").read_text().splitlines() if "|network-agent|" in x]
-    if len(log) != 2 or not re.search(r"\|network-agent\|running-config\|[1-9][0-9]*\|ok$", log[0]) or not log[1].endswith("|network-agent|running-config|0|failed"):
+    if len(log) != 2 or not re.search(r"\|network-agent\|sh\|running-config\|[1-9][0-9]*\.[0-9][0-9]\|ok$", log[0]) or not re.search(r"\|network-agent\|sh\|running-config\|0\.[0-9][0-9]\|failed$", log[1]):
         fail(f"journal «who waited»: {log}")
     if (tmp / "kc/running-config").exists():
         fail("a failed read must leave no copy")
@@ -84,6 +84,54 @@ printf 'interface OpkgTun0\\r\\nip name-server 192.0.2.1:5353\\r\\n'
                        text=True, capture_output=True, timeout=30)
     if r.stdout != want:
         fail("a stand-in ndmc without VWARD_KCACHE must be asked directly")
+
+# fix.33.2 (WP-A): every ndmc of the programs that load the library is timed and counted by the
+# hour; one of 1 s or more goes into the journal with the agent, the program and the command
+# (a DoH address masked); a refused command keeps its exit code and is not «no answer»; the read
+# of the configuration is one entry, not one for RCI and one for ndmc; VWARD_KEENETIC_TIMING=0
+# turns the counting off.
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    (tmp / "bin").mkdir()
+    ndmc = tmp / "bin/ndmc"
+    ndmc.write_text("""#!/bin/sh
+case "$*" in *slow*|*running-config*) sleep 1.2 ;; esac
+case "$*" in *refuse*) echo 'Command::Base error'; exit 3 ;; esac
+echo "answer $*"
+""")
+    ndmc.chmod(0o755)
+    env2 = {"PATH": f"{tmp}/bin:/usr/bin:/bin", "VWARD_KEENETIC_SLOW_LOG": str(tmp / "slow.log"),
+            "VWARD_KEENETIC_CALLS": str(tmp / "calls"), "VWARD_KEENETIC_SLOWN": str(tmp / "slown"),
+            "VWARD_RCI_CALLS": str(tmp / "rci-calls"), "VWARD_RCI_FAIL_LOG": str(tmp / "rci-fail"),
+            "VWARD_RCI_BASE": "http://127.0.0.1:9/rci", "VWARD_KCACHE": str(tmp / "kc"), "VWARD_ACTOR": "route-engine"}
+
+    def sh2(script, extra=None):
+        r = subprocess.run(["sh", "-c", f'. "{LIB}"; {script}'], env=env2 | (extra or {}), text=True, capture_output=True, timeout=60)
+        return r.returncode, r.stdout
+
+    dots = lambda d: sum(len(f.read_text().splitlines()[1]) if len(f.read_text().splitlines()) > 1 else 0 for f in (tmp / d).glob("*")) if (tmp / d).exists() else 0
+    rc, out = sh2('ndmc -c "show version"; echo "rc=$?"; command -v ndmc >/dev/null && echo has')
+    if out != "answer -c show version\nrc=0\nhas\n" or dots("calls") != 1 or (tmp / "slow.log").exists():
+        fail(f"a quick ndmc must be counted and not journaled: {out!r} calls={dots('calls')}")
+    rc, out = sh2('ndmc -c "ip name-server https://dns.example/q slow"; ndmc -c "refuse"; echo "rc=$?"')
+    log = (tmp / "slow.log").read_text().splitlines()
+    if not out.endswith("rc=3\n") or len(log) != 1 or "|route-engine|sh|ndmc:-c ip name-server <url> slow|1." not in log[0] or not log[0].endswith("|ok") or "dns.example" in log[0]:
+        fail(f"a slow ndmc must be journaled with the agent and the command, the address masked; a refusal keeps its code: {out!r} {log}")
+    if dots("calls") != 3 or dots("slown") != 1:
+        fail(f"counters by the hour: calls={dots('calls')} slow={dots('slown')}")
+    # RCI does not answer (no connection), ndmc does in 1.2 s: one entry for the read.
+    rc, out = sh2("vward_running_config")
+    log = (tmp / "slow.log").read_text().splitlines()
+    if rc != 0 or "answer -c show running-config" not in out or len(log) != 2 or "|route-engine|sh|running-config|1." not in log[1]:
+        fail(f"the read of the configuration must be one entry: rc={rc} {log}")
+    before = dots("calls")
+    sh2('ndmc -c "show version"', {"VWARD_KEENETIC_TIMING": "0"})
+    if dots("calls") != before:
+        fail("VWARD_KEENETIC_TIMING=0 must not count")
+    # No ndmc on the machine: no function in its place («command -v ndmc» stays honest).
+    r = subprocess.run(["sh", "-c", f'. "{LIB}"; command -v ndmc || echo none'], env={"PATH": "/usr/bin:/bin"}, text=True, capture_output=True, timeout=30)
+    if r.stdout.strip() != "none":
+        fail("without ndmc there must be no ndmc function")
 
 # Who reads the shared copy, and who drops it.
 uses = {
