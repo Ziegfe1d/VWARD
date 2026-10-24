@@ -535,12 +535,15 @@ case "$(command -v ndmc 2>/dev/null)" in
             # A refused command is an answer; a killed or missing ndmc is none.
             _vnd_st=; [ "$_vnd_rc" -lt 126 ] || _vnd_st=rc=$_vnd_rc
             vward_keenetic_timed "ndmc:$*" "$_vnd_t0" "$_vnd_st"
+            # A command that may change the configuration drops the shared copy (fix.33.2, WP-C):
+            # the agents reading it within its age see the change.
+            case "$*" in "-c show "*|"-c system configuration save"*) ;; *) vward_keenetic_dirty ;; esac
             return "$_vnd_rc"
         }
         ;;
 esac
 
-vward_keenetic_dirty() { rm -f "$VWARD_KCACHE/running-config" 2>/dev/null; return 0; }
+vward_keenetic_dirty() { [ ! -e "$VWARD_KCACHE/running-config" ] || rm -f "$VWARD_KCACHE/running-config" 2>/dev/null; return 0; }
 
 # _vward_kc_fresh AGE: the shared copy is younger than AGE seconds.
 _vward_kc_fresh()

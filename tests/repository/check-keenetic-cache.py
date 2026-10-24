@@ -124,6 +124,13 @@ echo "answer $*"
     log = (tmp / "slow.log").read_text().splitlines()
     if rc != 0 or "answer -c show running-config" not in out or len(log) != 2 or "|route-engine|sh|running-config|1." not in log[1]:
         fail(f"the read of the configuration must be one entry: rc={rc} {log}")
+    # fix.33.2 (WP-C): a command that may change the configuration drops the shared copy, a look
+    # or a save does not.
+    for cmd, kept in (("show version", True), ("system configuration save", True), ("ip name-server 192.0.2.9 x.example", False)):
+        (tmp / "kc").mkdir(exist_ok=True); (tmp / "kc/running-config").write_text("copy\n")
+        sh2(f'ndmc -c "{cmd}"')
+        if (tmp / "kc/running-config").exists() != kept:
+            fail(f"ndmc -c {cmd!r}: the shared copy must be {'kept' if kept else 'dropped'}")
     before = dots("calls")
     sh2('ndmc -c "show version"', {"VWARD_KEENETIC_TIMING": "0"})
     if dots("calls") != before:
