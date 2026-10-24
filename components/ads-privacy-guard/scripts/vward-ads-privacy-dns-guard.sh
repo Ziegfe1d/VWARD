@@ -456,6 +456,29 @@ release_all()
     echo "released=$ra_n"
 }
 
+# orphan_settling: a silent port is not a look that counts yet (fix.33.2, WP-B п.5): the first
+# 5 minutes after boot, or an AdGuard Home process younger than 2 minutes (its port opens a little
+# after the start). Read by the shell from /proc; VWARD_DNS_ORPHAN_SETTLE=0 turns it off.
+orphan_settling()
+{
+    [ "${VWARD_DNS_ORPHAN_SETTLE:-1}" = 1 ] || return 1
+    ost_up=; read -r ost_up _ 2>/dev/null < "${VWARD_PROC:-/proc}/uptime"
+    ost_up=${ost_up%%.*}
+    case "$ost_up" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$ost_up" -ge "${VWARD_DNS_ORPHAN_BOOT_SEC:-300}" ] || return 0
+    ost_pid=$("$PIDOF" AdGuardHome 2>/dev/null) || return 1
+    ost_pid=${ost_pid%% *} ost_stat=
+    case "$ost_pid" in ''|*[!0-9]*) return 1 ;; esac
+    read -r ost_stat 2>/dev/null < "${VWARD_PROC:-/proc}/$ost_pid/stat" || return 1
+    # Fields after «(name) »: state is the 3rd, the start in ticks (100 a second) the 22nd.
+    # shellcheck disable=SC2086
+    set -- ${ost_stat##*) }
+    [ "$#" -ge 20 ] || return 1
+    shift 19
+    case "$1" in ''|*[!0-9]*) return 1 ;; esac
+    [ $((ost_up - $1 / 100)) -lt "${VWARD_DNS_ORPHAN_YOUNG_SEC:-120}" ]
+}
+
 orphan_sync()
 {
     mkdir -p "$CHAIN_DIR" || return 0
@@ -469,6 +492,7 @@ orphan_sync()
     for os_ns in $os_list; do
         os_port=${os_ns##*:} os_f=$CHAIN_DIR/orphan.$os_port.n
         if orphan_listening "$os_port"; then rm -f "$os_f"; continue; fi
+        orphan_settling && continue
         [ "$(count_up "$os_f")" -ge 2 ] || continue
         os_n=$(ns_release "$os_ns" "$os_rc" absent)
         rm -f "$os_f"
