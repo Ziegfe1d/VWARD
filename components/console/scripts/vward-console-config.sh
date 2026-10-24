@@ -112,7 +112,7 @@ cleanup() {
     [ -z "$NS_FILE" ] || rm -f "$NS_FILE"
     [ -z "$TMPFILE" ] || rm -f "$TMPFILE.raw"
     [ -z "$RUNCFG" ] || rm -f "$RUNCFG"
-    [ -z "$JOURNAL" ] || rm -f "$JOURNAL.failed" "$JOURNAL.owned"
+    [ -z "$JOURNAL" ] || rm -f "$JOURNAL.failed" "$JOURNAL.owned" "$JOURNAL.still"
     [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.nets" "$JOURNAL.doh" "$JOURNAL.agh" "$JOURNAL.agh.inc" "$JOURNAL.agh.undo"
     [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
@@ -1879,9 +1879,10 @@ op_tunnel_delete() {
                 ndm "ip route $net $td_to auto" || { echo "$net|$NDM_REPLY" >> "$JOURNAL.failed"; continue; }
                 echo "no ip route $net $td_to" >> "$JOURNAL"
             fi
+            # Keenetic keeps one route per subnet: the new one replaced the old, whose removal is
+            # then refused. Told only if the old one is still there after the move (below).
             if ! ndm "no ip route $net $1"; then
                 echo "$net|$NDM_REPLY" >> "$JOURNAL.failed"
-                [ "$td_to" = - ] || ndm "no ip route $net $td_to" || :
                 continue
             fi
             echo "ip route $net $1 auto" >> "$JOURNAL"
@@ -1897,6 +1898,16 @@ op_tunnel_delete() {
     snapshot
     while IFS= read -r g; do [ -z "$g" ] || ! route_present "$g" "$1" || die verification_failed; done < "$JOURNAL.lists"
     if [ "${3:-}" = move ]; then
+        # Not moved: only what is still on the old tunnel after the move (Viva 2026-10-19: 450
+        # «refused», all of them on the default tunnel afterwards). Its new route is taken back.
+        : > "$JOURNAL.still"
+        while IFS='|' read -r tf_net tf_why; do
+            [ -n "$tf_net" ] || continue
+            subnet_present "${tf_net% *}" "${tf_net#* }" "$1" || continue
+            echo "$tf_net|$tf_why" >> "$JOURNAL.still"
+            [ "$td_to" = - ] || ndm "no ip route $tf_net $td_to" || :
+        done < "$JOURNAL.failed"
+        mv "$JOURNAL.still" "$JOURNAL.failed"
         td_lists=$(grep -c . "$JOURNAL.lists") td_fail=$(grep -c . "$JOURNAL.failed") td_own=$(grep -c . "$JOURNAL.owned")
         td_nets=$(( $(grep -c . "$JOURNAL.nets") - td_fail ))
         # Each refused subnet with Keenetic's own answer (the first 20).
