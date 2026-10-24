@@ -13,6 +13,8 @@ VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admissio
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
 . "$VWARD_ADMISSION_LIB"
 vward_component_gate wifi-client-guard
+# Started by cron with the route upkeep (*/5): 15 s after the minute's agents (fix.33.2, WP-C).
+command -v vward_spread >/dev/null 2>&1 && vward_spread "${VWARD_WIFI_SPREAD:-15}"
 vward_admission_enter wifi-client-guard || exit $?
 
 LOCK_OWNED=0

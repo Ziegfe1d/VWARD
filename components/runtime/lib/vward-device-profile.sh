@@ -461,6 +461,7 @@ VWARD_KCACHE=${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}
 VWARD_KEENETIC_SLOW_LOG=${VWARD_KEENETIC_SLOW_LOG:-${VWARD_ROOT_PREFIX:-}/opt/var/log/vward/keenetic-slow.log}
 VWARD_KEENETIC_CALLS=${VWARD_KEENETIC_CALLS:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-calls}
 VWARD_KEENETIC_SLOWN=${VWARD_KEENETIC_SLOWN:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-slow}
+VWARD_KEENETIC_LAST=${VWARD_KEENETIC_LAST:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-last}
 
 # vward_uptime_cs: _VCS = hundredths of a second since boot (shell built-ins only: every request to
 # Keenetic is timed, fix.33.2).
@@ -504,6 +505,11 @@ vward_keenetic_timed()
     _vkt_slow=${VWARD_KEENETIC_SLOW:-1}
     if [ "${VWARD_KEENETIC_TIMING:-1}" = 1 ]; then
         _vward_hour_dot "$VWARD_KEENETIC_CALLS"
+        # The last request: when (seconds of uptime) and how long, for vward_keenetic_busy.
+        # No answer at all counts as busy.
+        _vkt_b=$_vkt_cs
+        [ -z "${3:-}" ] || [ "$_vkt_b" -ge 200 ] || _vkt_b=200
+        printf '%s %s\n' "$((_VCS / 100))" "$_vkt_b" 2>/dev/null > "$VWARD_KEENETIC_LAST"
     else
         _vkt_slow=${VWARD_KEENETIC_SLOW:-3}
     fi

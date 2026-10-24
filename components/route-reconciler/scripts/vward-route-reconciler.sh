@@ -12,6 +12,13 @@ VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admissio
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
 . "$VWARD_ADMISSION_LIB"
 vward_component_gate route-reconciler
+# fix.33.2 (WP-C): started by cron, 35 s after the minute's agents; upkeep waits while Keenetic
+# answers slowly (at most 30 minutes in a row).
+command -v vward_spread >/dev/null 2>&1 && vward_spread "${VWARD_RECONCILER_SPREAD:-35}"
+if command -v vward_keenetic_busy >/dev/null 2>&1 && vward_defer route-reconciler 1800 vward_keenetic_busy; then
+    echo "Deferred: the router is busy"
+    exit 0
+fi
 vward_admission_enter route-reconciler || exit $?
 
 GROUP="AdaptiveAuto"
