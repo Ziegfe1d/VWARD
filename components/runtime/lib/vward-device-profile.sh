@@ -91,7 +91,7 @@ vward_rci_get()
     _vward_hour_dot "${VWARD_RCI_CALLS:-/tmp/vward-rci-calls}"
     _vrg_curl=${VWARD_CURL_BIN:-$(vward_tool curl)}
     if [ -n "$_vrg_curl" ]; then
-        vward_cs; _vrg_t0=$_VCS
+        vward_uptime_cs; _vrg_t0=$_VCS
         _vrg_out=$("$_vrg_curl" --fail --silent --connect-timeout 2 --max-time "$_vrg_t" "$_vrg_url" 2>/dev/null)
         _vrg_rc=$?
         # No answer in time (28) or no connection (7) goes into «who waited» whatever it took.
@@ -430,7 +430,7 @@ vward_running_config()
 {
     _vrc_jq=${VWARD_JQ_BIN:-$(vward_tool jq)}
     # Timed here as one read: the RCI request and ndmc inside are not timed again (_VKT_IN).
-    vward_cs; _vrc_t0=$_VCS _VKT_IN=1
+    vward_uptime_cs; _vrc_t0=$_VCS _VKT_IN=1
     if [ -n "$_vrc_jq" ] &&
        _vrc_cfg=$(vward_rci_get show/running-config 30 |
            "$_vrc_jq" -er '.message | if type == "array" and length > 0 then .[] else error("empty") end' 2>/dev/null) &&
@@ -462,9 +462,9 @@ VWARD_KEENETIC_SLOW_LOG=${VWARD_KEENETIC_SLOW_LOG:-${VWARD_ROOT_PREFIX:-}/opt/va
 VWARD_KEENETIC_CALLS=${VWARD_KEENETIC_CALLS:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-calls}
 VWARD_KEENETIC_SLOWN=${VWARD_KEENETIC_SLOWN:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-slow}
 
-# vward_cs: _VCS = hundredths of a second since boot (shell built-ins only: every request to
+# vward_uptime_cs: _VCS = hundredths of a second since boot (shell built-ins only: every request to
 # Keenetic is timed, fix.33.2).
-vward_cs()
+vward_uptime_cs()
 {
     _VCS=; read -r _VCS _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
     case "$_VCS" in
@@ -494,11 +494,11 @@ _vward_hour_dot()
 # (VWARD_KEENETIC_CALLS), and one that took VWARD_KEENETIC_SLOW seconds (1) or more, or ended with
 # STATUS (no answer), counted as slow (VWARD_KEENETIC_SLOWN) and written into the journal «who
 # waited»: time, the agent, the program, what it asked, seconds, STATUS or ok (the last 500 kept).
-# T0 from vward_cs. VWARD_KEENETIC_TIMING=0 (device.conf) keeps only the old 3 s journal.
+# T0 from vward_uptime_cs. VWARD_KEENETIC_TIMING=0 (device.conf) keeps only the old 3 s journal.
 vward_keenetic_timed()
 {
     [ -z "${_VKT_IN:-}" ] || return 0
-    vward_cs
+    vward_uptime_cs
     _vkt_cs=$((_VCS - $2))
     [ "$_vkt_cs" -ge 0 ] || _vkt_cs=0
     _vkt_slow=${VWARD_KEENETIC_SLOW:-1}
@@ -529,7 +529,7 @@ case "$(command -v ndmc 2>/dev/null)" in
         ndmc()
         {
             [ "${VWARD_KEENETIC_TIMING:-1}" = 1 ] || { command ndmc "$@"; return; }
-            vward_cs; _vnd_t0=$_VCS
+            vward_uptime_cs; _vnd_t0=$_VCS
             command ndmc "$@"
             _vnd_rc=$?
             # A refused command is an answer; a killed or missing ndmc is none.
@@ -576,7 +576,7 @@ vward_keenetic_config()
         cat "$VWARD_KCACHE/running-config"
         return 0
     fi
-    vward_cs; _vkc_t0=$_VCS _VKT_IN=1
+    vward_uptime_cs; _vkc_t0=$_VCS _VKT_IN=1
     "${VWARD_NDMC:-ndmc}" -c 'show running-config' 2>/dev/null | tr -d '\r' > "$VWARD_KCACHE/running-config.$$"
     _VKT_IN=
     if [ -s "$VWARD_KCACHE/running-config.$$" ]; then

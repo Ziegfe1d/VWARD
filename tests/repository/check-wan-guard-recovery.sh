@@ -236,7 +236,7 @@ for c in 'fast|{"ok":0}|1' 'slow|{"ok":1}|2' 'cut|{"ok":2}|2' 'down||2'; do
 $c
 CASE
     rm -f "$WAN_TEST_CALLS"
-    got=$(WAN_TEST_RCI=$mode CURL="$WORK/curl" sh -c 'vward_cs(){ :; }; vward_keenetic_timed(){ :; }; . "$1"; sleep(){ :; }; wg_rci_get http://rci/x' sh "$WORK/rci.sh")
+    got=$(WAN_TEST_RCI=$mode CURL="$WORK/curl" sh -c 'vward_uptime_cs(){ :; }; vward_keenetic_timed(){ :; }; . "$1"; sleep(){ :; }; wg_rci_get http://rci/x' sh "$WORK/rci.sh")
     [ "$got" = "$want" ] && [ "$(cat "$WAN_TEST_CALLS")" = "$calls" ] ||
         fail "wg_rci_get $mode: got '$got' after $(cat "$WAN_TEST_CALLS") calls"
 done
