@@ -163,8 +163,18 @@ fi
 echo $$ > "$LOCK/pid"
 
 
+# Why the engine ends, in the STOP line (fix.33.2, WP-A): the signal, or «exit» with its code and
+# the last line the shell left in the engine's log (a redirection that fails ends a BusyBox
+# script: «can't create ...»), and how long it ran. S91 takes a lock left behind for an end
+# without this line (killed: kill -9, out of memory).
+STOP_WHY='exit'
+read -r STOP_T0 _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}" || STOP_T0=
+STOP_T0=${STOP_T0%%.*}
+ENGINE_LOG=${VWARD_ROUTE_ENGINE_LOG:-/opt/var/log/vward-route-engine.log}
+
 cleanup()
 {
+    STOP_RC=$?
     [ -n "$TCP_PID" ] && kill "$TCP_PID" 2>/dev/null
     [ -n "$TCP_PID" ] && wait "$TCP_PID" 2>/dev/null
     [ -n "$AWK_PID" ] && kill "$AWK_PID" 2>/dev/null
@@ -174,11 +184,19 @@ cleanup()
     rm -rf "${LOCK:?}"
     vward_admission_leave 2>/dev/null || true
 
-    echo "$(date '+%Y-%m-%d %H:%M:%S')|STOP" >> "$EVENT_LOG"
+    STOP_LAST= STOP_UP=
+    [ "$STOP_RC" = 0 ] || [ "$STOP_WHY" != exit ] ||
+        STOP_LAST=$(tail -n 1 "$ENGINE_LOG" 2>/dev/null | tr '|\r' '  ' | cut -c1-120)
+    read -r STOP_UP _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}" || STOP_UP=
+    STOP_UP=${STOP_UP%%.*}
+    case "$STOP_UP$STOP_T0" in *[!0-9]*|'') STOP_UP= ;; *) STOP_UP=$((STOP_UP - STOP_T0)) ;; esac
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|STOP|reason=$STOP_WHY|rc=$STOP_RC|ran=${STOP_UP:-?}s${STOP_LAST:+|last=$STOP_LAST}" >> "$EVENT_LOG"
 }
 
 trap cleanup EXIT
-trap 'exit 1' HUP INT TERM
+trap 'STOP_WHY=HUP; exit 129' HUP
+trap 'STOP_WHY=INT; exit 130' INT
+trap 'STOP_WHY=TERM; exit 143' TERM
 
 
 # ------------------------------------------------------------
