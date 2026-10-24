@@ -44,7 +44,24 @@ vward_background() {
 
 # vward_busy: the router is busy - the load of the last minute at its number of CPU
 # threads or above, or less than 24 MiB of memory available. Read by the shell.
+# vward_keenetic_busy: Keenetic answered VWARD in 2 s or more (VWARD_KEENETIC_BUSY_CS) at its last
+# request within 90 s (fix.33.2, WP-C): its configuration service is busy, whatever the load says
+# (load 3.5 of 4 threads while RCI took 20 s, Viva 2026-10-24). The last request's time and length
+# come from the device library (every request to Keenetic writes them; wan-guard asks every minute).
+VWARD_KEENETIC_LAST=${VWARD_KEENETIC_LAST:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-last}
+vward_keenetic_busy() {
+    [ "${VWARD_KEENETIC_BUSY:-1}" = 1 ] || return 1
+    vkb_at= vkb_cs= vkb_up=
+    read -r vkb_at vkb_cs 2>/dev/null < "$VWARD_KEENETIC_LAST" || return 1
+    read -r vkb_up _ 2>/dev/null < "$VWARD_PROC/uptime" || return 1
+    vkb_up=${vkb_up%%.*}
+    case "$vkb_at$vkb_cs$vkb_up" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$vkb_up" -ge "$vkb_at" ] && [ $((vkb_up - vkb_at)) -lt "${VWARD_KEENETIC_BUSY_AGE:-90}" ] &&
+        [ "$vkb_cs" -ge "${VWARD_KEENETIC_BUSY_CS:-200}" ]
+}
+
 vward_busy() {
+    vward_keenetic_busy && return 0
     # The real-time watcher keeps a busy flag: no /proc reading here while it runs.
     vb_pid=
     [ ! -r "$VWARD_SENTINEL_PIDFILE" ] || read -r vb_pid 2>/dev/null < "$VWARD_SENTINEL_PIDFILE" || :
@@ -71,12 +88,31 @@ vward_busy() {
     [ "$vb_mem" -lt "$VWARD_BUSY_MEM_KB" ]
 }
 
-# vward_defer NAME [MAX]: optional work (scans, speed, catalogs) waits while the router is
+# vward_spread SECONDS: a job crond started (with the minute jobs, at second 0) starts SECONDS
+# later, so the heavy ones do not ask Keenetic together with the agents of the minute (fix.33.2,
+# WP-C). Started otherwise (the Panel, a test, by hand): at once. VWARD_SPREAD=0 turns it off.
+vward_spread() {
+    [ "${VWARD_SPREAD:-1}" = 1 ] && [ "${VWARD_FOREGROUND:-0}" != 1 ] || return 0
+    case "${1:-}" in ''|*[!0-9]*|0) return 0 ;; esac
+    vs_p=$PPID
+    for vs_i in 1 2; do
+        vs_s=; read -r vs_s 2>/dev/null < "$VWARD_PROC/$vs_p/stat" || return 0
+        case "$vs_s" in *" (crond) "*) sleep "$1"; return 0 ;; esac
+        # shellcheck disable=SC2086
+        set -- "$1" ${vs_s##*) }
+        vs_p=${3:-}
+        case "$vs_p" in ''|*[!0-9]*|0|1) return 0 ;; esac
+    done
+    return 0
+}
+
+# vward_defer NAME [MAX [CHECK]]: optional work (scans, speed, catalogs) waits while the router is
 # busy, but at most MAX seconds in a row (2 hours): then it runs anyway. Returns 0 when
 # NAME should wait now. Guards and repairs never call this.
 vward_defer() {
     vd_f="$VWARD_DEFER_DIR/$1"
-    if ! vward_busy; then
+    # CHECK (3rd argument): what «busy» means for this job; vward_busy by default.
+    if ! "${3:-vward_busy}"; then
         [ ! -e "$vd_f" ] || rm -f "$vd_f"
         return 1
     fi

@@ -3353,6 +3353,9 @@ read_first /opt/share/vward/VERSION VWARD_VERSION
 UPDATER_STATE=/opt/var/lib/vward/updater
 COMPONENTS="$($JQ -c '.components // {}' "$UPDATER_STATE/components.json" 2>/dev/null || echo '{}')"
 kv_file "$UPDATER_STATE/committed.state" installed_update_id=INSTALLED_UPDATE_ID last_sequence=LAST_SEQUENCE last_health_check=LAST_HEALTH
+# The update feed's last look (vward-update-watch): «Последняя проверка» in «Обновления» (fix.33.2;
+# last_health_check is the check after an installation).
+kv_file "${VWARD_UPDATE_STATE_DIR:-$UPDATER_STATE}/feed.state" ok_at=UFEED_OK fail_at=UFEED_FAIL fail_rc=UFEED_RC
 kv_file "$UPDATER_STATE/journal.state" phase=UPDATE_PHASE
 kv_file "$UPDATER_STATE/trust.state" highest_seen_sequence=HIGHEST_SEQUENCE
 ACTIVE_SLOT="$(CDPATH= cd -- /opt/share/vward/updater/current 2>/dev/null && pwd -P)"
@@ -3447,6 +3450,7 @@ header_json
   --arg installed_update_id "$INSTALLED_UPDATE_ID" \
   --arg last_sequence "$LAST_SEQUENCE" \
   --arg last_health "$LAST_HEALTH" \
+  --arg feed_ok "$UFEED_OK" --arg feed_fail "$UFEED_FAIL" --arg feed_rc "$UFEED_RC" \
   --arg update_phase "$UPDATE_PHASE" \
   --arg highest_sequence "$HIGHEST_SEQUENCE" \
   --arg active_slot "$ACTIVE_SLOT" \
@@ -3488,6 +3492,9 @@ header_json
     last_sequence:($last_sequence|tonumber? // 0),
     highest_seen_sequence:($highest_sequence|tonumber? // 0),
     last_health_check:$last_health,
+    feed_ok_at:($feed_ok|tonumber? // null),
+    feed_fail_at:($feed_fail|tonumber? // null),
+    feed_fail_rc:($feed_rc|tonumber? // null),
     phase:(if $update_phase=="" then "IDLE" else $update_phase end),
     active_slot:($active_slot | split("/") | last),
     update_enabled:($update_enabled=="1"),

@@ -163,8 +163,18 @@ fi
 echo $$ > "$LOCK/pid"
 
 
+# Why the engine ends, in the STOP line (fix.33.2, WP-A): the signal, or «exit» with its code and
+# the last line the shell left in the engine's log (a redirection that fails ends a BusyBox
+# script: «can't create ...»), and how long it ran. S91 takes a lock left behind for an end
+# without this line (killed: kill -9, out of memory).
+STOP_WHY='exit'
+read -r STOP_T0 _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}" || STOP_T0=
+STOP_T0=${STOP_T0%%.*}
+ENGINE_LOG=${VWARD_ROUTE_ENGINE_LOG:-/opt/var/log/vward-route-engine.log}
+
 cleanup()
 {
+    STOP_RC=$?
     [ -n "$TCP_PID" ] && kill "$TCP_PID" 2>/dev/null
     [ -n "$TCP_PID" ] && wait "$TCP_PID" 2>/dev/null
     [ -n "$AWK_PID" ] && kill "$AWK_PID" 2>/dev/null
@@ -174,11 +184,19 @@ cleanup()
     rm -rf "${LOCK:?}"
     vward_admission_leave 2>/dev/null || true
 
-    echo "$(date '+%Y-%m-%d %H:%M:%S')|STOP" >> "$EVENT_LOG"
+    STOP_LAST= STOP_UP=
+    [ "$STOP_RC" = 0 ] || [ "$STOP_WHY" != exit ] ||
+        STOP_LAST=$(tail -n 1 "$ENGINE_LOG" 2>/dev/null | tr '|\r' '  ' | cut -c1-120)
+    read -r STOP_UP _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}" || STOP_UP=
+    STOP_UP=${STOP_UP%%.*}
+    case "$STOP_UP$STOP_T0" in *[!0-9]*|'') STOP_UP= ;; *) STOP_UP=$((STOP_UP - STOP_T0)) ;; esac
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|STOP|reason=$STOP_WHY|rc=$STOP_RC|ran=${STOP_UP:-?}s${STOP_LAST:+|last=$STOP_LAST}" >> "$EVENT_LOG"
 }
 
 trap cleanup EXIT
-trap 'exit 1' HUP INT TERM
+trap 'STOP_WHY=HUP; exit 129' HUP
+trap 'STOP_WHY=INT; exit 130' INT
+trap 'STOP_WHY=TERM; exit 143' TERM
 
 
 # ------------------------------------------------------------
@@ -207,8 +225,12 @@ refresh_sets()
     CFG="/tmp/vward-route-engine-running.$$"
     ALL="/tmp/vward-route-engine-all.$$"
 
-    if ! vward_running_config > "$CFG" ||
-       [ ! -s "$CFG" ]; then
+    if [ "$LAST" = 0 ]; then
+        vward_running_config > "$CFG"
+    else
+        shared_config > "$CFG"
+    fi
+    if [ ! -s "$CFG" ]; then
         rm -f "$CFG" "$ALL"
         return 1
     fi
@@ -1619,6 +1641,17 @@ DNS_CHAIN_STATE="${VWARD_DNS_CHAIN_STATE:-/tmp/vward-dns-chain}/state"
 KEENETIC_NS_MAX=${VWARD_KEENETIC_NS_MAX:-64}
 AGH_BIND_FREE=${VWARD_AGH_BIND_FREE:-8}
 
+# shared_config: Keenetic's configuration for a look that changes nothing (fix.33.2, WP-C): the
+# copy the agents share (every change through ndmc drops it), read fresh when there is none.
+# A look before a change (refresh forced to 0) stays fresh. VWARD_ENGINE_SHARED_CONFIG=0: fresh.
+shared_config()
+{
+    if [ "${VWARD_ENGINE_SHARED_CONFIG:-1}" = 1 ] && command -v vward_keenetic_config >/dev/null 2>&1; then
+        vward_keenetic_config && return 0
+    fi
+    vward_running_config
+}
+
 # agh_ns_room RUNNING_CONFIG: how many more servers VWARD may configure (may be below 0).
 # Keenetic's own and the provider's are those «show ip name-server» lists from another service
 # than Dns::Manager (the configured ones).
@@ -1687,7 +1720,7 @@ agh_bind_one()
     fi
     AB_NS=$(agh_ns)
     [ -n "$AB_NS" ] || return 0
-    AB_RC=$(vward_running_config 2>/dev/null) || return 0
+    AB_RC=$(shared_config 2>/dev/null) || return 0
     [ -n "$AB_RC" ] || return 0
     # Bound by hand (Smart DNS, the owner): left as it is, and not looked at again.
     if printf '%s\n' "$AB_RC" | awk -v d="$1" '$1 == "ip" && $2 == "name-server" && $4 == d {f = 1} END {exit !f}'; then
@@ -1717,7 +1750,7 @@ agh_bind_prune()
     rm -f "$AGH_BIND_RUN/full" "$AGH_BIND.full"
     rmdir "$AGH_BIND_RUN/lock" "$AGH_BIND.lock" 2>/dev/null
     [ -s "$AGH_BIND" ] || return 0
-    AP_RC=$(vward_running_config 2>/dev/null) || return 0
+    AP_RC=$(shared_config 2>/dev/null) || return 0
     [ -n "$AP_RC" ] || return 0
     printf '%s\n' "$AP_RC" | awk 'FNR == NR {if ($1 == "ip" && $2 == "name-server" && $4 != "" && $4 != "on") have[$4] = 1; next}
         ($1 in have) && $2 != "failed"' - "$AGH_BIND" > "$AGH_BIND.new" && mv -f "$AGH_BIND.new" "$AGH_BIND"

@@ -64,8 +64,13 @@ subprocess.run(["mount", "-t", "proc", "proc", str(root / "proc")], check=True)
 subprocess.run(["mount", "--bind", str(root / "opt"), str(root / "opt")], check=True)
 try:
     confirmed(names[:5])
+    reads = root / "emu/config-reads.log"
+    reads.unlink(missing_ok=True)
     out = sh(root, "/opt/bin/vward-route-reconciler.sh").stdout
     first = changes(root)
+    # fix.33.2 (WP-C): one look at Keenetic's configuration for the run, five removals included.
+    if len(reads.read_text().splitlines()) != 1:
+        fail(f"one look at the configuration a run: {reads.read_text().splitlines()}")
     removed = [c for c in first if c.startswith("no object-group fqdn AdaptiveAuto include ")]
     if len(removed) != 5:
         fail(f"five names direct again, five removals: {first} / {out[-400:]}")

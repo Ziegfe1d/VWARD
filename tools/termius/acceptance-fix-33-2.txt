@@ -1,0 +1,104 @@
+cat > /tmp/acc332.sh <<'EOF'
+clear
+PFX="vward-acc332"
+OUT="/tmp/${PFX}-$(date +%Y%m%d-%H%M%S).txt"
+LAST="/tmp/last_result.txt"
+MAXB=30000
+KEEP=5
+ESC=$(printf '\033')
+ls -1t /tmp/${PFX}-*.txt 2>/dev/null |
+  tail -n +"$KEEP" |
+  while read -r F; do rm -f "$F"; done
+: > "$OUT"
+ln -sfn "$OUT" "$LAST"
+ln -sfn "$OUT" "/tmp/last_${PFX}.txt"
+send_out() {
+  [ -s "$OUT" ] || return 1
+  sed "s/${ESC}\[[0-9;?]*[a-zA-Z]//g" "$OUT" |
+    tail -c "$MAXB" | base64 | tr -d '\r\n' |
+    { read -r B; printf '\033]52;c;%s\a' "$B"; }
+}
+on_abort() {
+  trap '' INT TERM HUP
+  send_out
+  printf '\n[ ABORTED ]: PARTIAL RESULT IN %s\n' "$LAST"
+  exit 130
+}
+trap on_abort INT TERM HUP
+NOW=$(date +%s)
+CUT=$(date -d "@$((NOW - 86400))" \
+  '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
+dots() {
+  cat "$1"/* 2>/dev/null |
+    awk '/^[0-9]+$/{next} {n+=length($0)} END{print n+0}'
+}
+since() {
+  awk -v c="$CUT" 'substr($0,1,19) >= c' "$1" 2>/dev/null
+}
+EOF
+cat >> /tmp/acc332.sh <<'EOF'
+{
+echo "=========================================="
+echo " VWARD ACCEPTANCE fix.33.2 v2.3.3"
+echo " Date: $(date '+%Y-%m-%d %H:%M:%S')"
+echo " Since: $CUT"
+echo " Version: $(head -n 1 /opt/share/vward/VERSION)"
+echo " load: $(cut -d' ' -f1-3 /proc/loadavg)"
+echo "=========================================="
+echo "=== 1. KEENETIC ANSWERS (25 h, RAM) ==="
+C=$(dots /tmp/vward-keenetic-calls)
+S=$(dots /tmp/vward-keenetic-slow)
+echo "requests=$C slow_1s=$S"
+if [ "$C" -gt 0 ] && [ $((S * 100)) -le "$C" ]; then
+  echo "[ PASS ] slow <= 1%"
+else echo "[ WARNING ] slow > 1% or no data"; fi
+echo "last: $(cat /tmp/vward-keenetic-last 2>/dev/null)"
+L=/opt/var/log/vward/keenetic-slow.log
+echo "--- who waited (agent|program|what), top"
+since "$L" | awk -F'|' '{print $2 "|" $3 "|" $4}' |
+  cut -c1-60 | sort | uniq -c | sort -rn | head -n 8
+since "$L" | tail -n 4 | cut -c1-110
+echo "=== 2. WAN GUARD (24 h) ==="
+W=/opt/var/log/vward-wan-guard.log
+D=$(since "$W" | grep -c 'class=UTILITY_DEGRADED')
+R=$(since "$W" | grep -c 'rci_unavailable')
+echo "UTILITY_DEGRADED=$D rci_episodes=$R"
+[ "$D" -le 5 ] && echo "[ PASS ] degraded <= 5" ||
+  echo "[ FAIL ] degraded > 5"
+since "$W" | grep -E 'rci_|DEGRADED' | tail -n 4 |
+  cut -c1-110
+EOF
+cat >> /tmp/acc332.sh <<'EOF'
+echo "=== 3. ROUTE ENGINE (24 h) ==="
+E=/opt/var/log/vward-route-engine-events.log
+K='STOP|STOP_REQUEST|WATCHDOG_RESTART|START_FAILED'
+since "$E" | grep -E "[|]($K)([|]|\$)" |
+  tail -n 8 | cut -c1-120
+N=$(since "$E" | grep -E '[|](STOP|WATCHDOG_RESTART)[|]' |
+  grep -vc 'reason=')
+[ "$N" = 0 ] && echo "[ PASS ] every stop has a reason" ||
+  echo "[ FAIL ] stops without a reason: $N"
+echo "=== 4. DNS GUARD / UPDATES ==="
+A=/opt/var/log/vward-ads-privacy-guard.log
+echo "DNS_ORPHAN_OUT: $(since "$A" | grep -c ORPHAN_OUT)"
+cat /opt/var/lib/vward/updater/feed.state 2>/dev/null
+tail -n 2 /opt/var/log/vward/updater-watch.log 2>/dev/null |
+  cut -c1-100
+RO=/tmp/vward-route-reconciler-maint.cron.out
+echo "reconciler: $(head -n 1 "$RO" 2>/dev/null |
+  cut -c1-50)"
+echo "=========================================="
+echo " END"
+echo "=========================================="
+} 2>&1 | tee "$OUT"
+P=$(grep -c '^\[ PASS \]' "$OUT")
+W=$(grep -c '^\[ WARNING \]' "$OUT")
+F=$(grep -c '^\[ FAIL \]' "$OUT")
+SZ=$(wc -c < "$OUT")
+echo "SUMMARY: pass=$P warn=$W fail=$F size=${SZ}B" |
+  tee -a "$OUT"
+if send_out; then echo "RESULT SENT (OSC52)"
+else echo "[ FAIL ] nothing to send"; fi
+echo "RAW: $LAST"
+EOF
+sh -n /tmp/acc332.sh && sh /tmp/acc332.sh

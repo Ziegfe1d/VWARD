@@ -166,6 +166,24 @@ clean_service()
 }
 
 
+# last_stop: the reason in the engine's STOP line after its last START (fix.33.2), none without one.
+last_stop()
+{
+    tail -n 300 "$EVENT_LOG" 2>/dev/null | awk -F'|' '
+        $2 == "START" {r = "none"}
+        $2 == "STOP" {r = "?"; for (i = 3; i <= NF; i++) if ($i ~ /^reason=/) r = substr($i, 8)
+                      for (i = 3; i <= NF; i++) if ($i ~ /^rc=/) r = r "/" $i}
+        END {print (r == "" ? "none" : r)}'
+}
+
+# stop_request CMD: who asked the engine to stop (the parent of this script), for the event log.
+stop_request()
+{
+    SR_BY=$(tr '\000' ' ' < "/proc/$PPID/cmdline" 2>/dev/null | cut -c1-100)
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|STOP_REQUEST|cmd=$1|by=${SR_BY:-?}" >> "$EVENT_LOG" 2>/dev/null
+}
+
+
 # Core health belongs to the main Live process.
 # tcpdump is a self-healing child owned by vward-route-engine.sh.
 service_healthy()
@@ -256,9 +274,10 @@ start_service()
         fi
     fi
 
-    # Why the engine is (re)started, for the event log.
+    # Why the engine is (re)started, for the event log, with how the engine itself ended (its
+    # STOP line after its last START; none: killed without a word, kill -9 or out of memory).
     [ -z "$UNHEALTHY" ] || [ "$UNHEALTHY" = no_pidfile ] ||
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|WATCHDOG_RESTART|reason=$UNHEALTHY" >> "$EVENT_LOG" 2>/dev/null
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|WATCHDOG_RESTART|reason=$UNHEALTHY|last_stop=$(last_stop)" >> "$EVENT_LOG" 2>/dev/null
 
     # Only core failure, duplicate core process, or persistent child
     # failure reaches this point.
@@ -307,6 +326,7 @@ start_service()
     done
 
     echo "Adaptive Live failed startup health check after ${START_WAIT}s"
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|START_FAILED|wait=${START_WAIT}s|last_stop=$(last_stop)" >> "$EVENT_LOG" 2>/dev/null
 
     clean_service
     return 1
@@ -381,12 +401,14 @@ case "$1" in
                 start_service
                 ;;
             stop)
+                stop_request stop
                 stop_service
                 ;;
             restart)
                 # A planned restart (a tunnel switch): the real-time agent sees the engine go
                 # and must not start it again in the same second (Viva 2026-10-19).
                 : > "$PLANNED_FLAG" 2>/dev/null
+                stop_request restart
                 stop_service
                 sleep 1
                 start_service

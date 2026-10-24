@@ -10,6 +10,7 @@ VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 [ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
 . "$VWARD_PROFILE_LIB"
 vward_profile_load || exit 1
+command -v vward_keenetic_timed >/dev/null 2>&1 || { vward_uptime_cs() { _VCS=0; }; vward_keenetic_timed() { :; }; }
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
 . "$VWARD_ADMISSION_LIB"
@@ -211,10 +212,50 @@ wg_num()
 # 2 s tells a busy router from a missing answer (a failure costs 2 s + 5 s).
 wg_rci_get()
 {
+    # Timed like every request to Keenetic (fix.33.2): the retry included, one entry.
+    vward_uptime_cs; WG_T0=$_VCS
     # Kept whole: a reply cut by the timeout is never glued to the retry.
     WG_RCI=$("$CURL" -fsS --connect-timeout 2 --max-time 3 "$1" 2>/dev/null) ||
         { sleep 2; WG_RCI=$("$CURL" -fsS --connect-timeout 2 --max-time 5 "$1" 2>/dev/null); } || WG_RCI=""
+    WG_ST=; [ -n "$WG_RCI" ] || WG_ST=no_answer
+    vward_keenetic_timed "rci:${1#"$VWARD_RCI_BASE"/}" "$WG_T0" "$WG_ST"
     printf '%s' "$WG_RCI"
+}
+
+# wg_rci_missing REASON: Keenetic's RCI did not answer (busy: 99 «UTILITY_DEGRADED» in 17 hours
+# on a router whose internet worked, 2026-10-24). The connection is checked without it (fix.33.2,
+# WP-B): the carrier and an outside address through the WAN device. Up: nothing is known to be
+# wrong - the state stays as it was, the recovery is reset as before, the miss is counted and
+# journaled once an episode. Down, or VWARD_WAN_RCI_PROBES=0: UTILITY_DEGRADED as before.
+RCI_MISS=${VWARD_WAN_RCI_MISS:-/tmp/vward-wan-guard-rci-miss}
+wg_rci_missing()
+{
+    WM_PROBES=
+    if [ "${VWARD_WAN_RCI_PROBES:-1}" = 1 ]; then
+        read -r WM_CARRIER 2>/dev/null < "${VWARD_SYSFS_NET:-/sys/class/net}/$ETH/carrier" || WM_CARRIER=unknown
+        "$PING" -c 1 -W 2 -I "$ETH" 1.0.0.1 >/dev/null 2>&1
+        WM_CF=$? WM_YA=1
+        [ "$WM_CF" = 0 ] || { "$PING" -c 1 -W 2 -I "$ETH" 77.88.8.1 >/dev/null 2>&1; WM_YA=$?; }
+        WM_PROBES=" carrier=${WM_CARRIER:-unknown} ping_cf=$WM_CF ping_ya=$WM_YA"
+        if [ "$WM_CARRIER" = 1 ] && { [ "$WM_CF" = 0 ] || [ "$WM_YA" = 0 ]; }; then
+            WM_PREV=; [ ! -r "$STATE" ] || read -r WM_PREV < "$STATE" || :
+            DETAIL="carrier=1 rci=unavailable reason=$1 ping_cf=$WM_CF ping_ya=$WM_YA"
+            wan_recover UTILITY_DEGRADED
+            WM_N=$(wg_num "$RCI_MISS" 0)
+            [ "$WM_N" -gt 0 ] ||
+                printf '%s rci_unavailable reason=%s probes=ok class_kept=%s\n' "$(now)" "$1" "${WM_PREV:-NONE}" >> "$LOG"
+            echo $((WM_N + 1)) > "$RCI_MISS"
+            echo "VERSION=$VERSION"
+            echo "MODE=$MODE"
+            echo "CLASS=${WM_PREV:-UNKNOWN}"
+            echo "$DETAIL"
+            echo "ACTION=${ACTION:-NONE}"
+            exit 0
+        fi
+        WM_PROBES=" probes=fail$WM_PROBES"
+    fi
+    emit_state "UTILITY_DEGRADED" "reason=$1$WM_PROBES"
+    exit 0
 }
 
 wg_reset_fail()
@@ -602,10 +643,7 @@ ISP_FIELDS="$(printf '%s' "$ISP_JSON" | "$JQ" -r '
      .summary.layer.ipv4 // "unknown"] | map(tostring) | join("\u001f")' 2>/dev/null)"
 
 if [ -z "$ISP_JSON" ] || [ -z "$ISP_FIELDS" ]; then
-    emit_state \
-        "UTILITY_DEGRADED" \
-        "reason=isp_rci_unavailable"
-    exit 0
+    wg_rci_missing isp_rci_unavailable
 fi
 
 NET_FIELDS="$(printf '%s' "$NET_JSON" | "$JQ" -r '
@@ -615,10 +653,13 @@ NET_FIELDS="$(printf '%s' "$NET_JSON" | "$JQ" -r '
     map(tostring) | join("\u001f")' 2>/dev/null)"
 
 if [ -z "$NET_JSON" ] || [ -z "$NET_FIELDS" ]; then
-    emit_state \
-        "UTILITY_DEGRADED" \
-        "reason=internet_rci_unavailable"
-    exit 0
+    wg_rci_missing internet_rci_unavailable
+fi
+
+# Keenetic answers again: the misses of the episode in one line.
+if [ -e "$RCI_MISS" ]; then
+    printf '%s rci_back misses=%s\n' "$(now)" "$(wg_num "$RCI_MISS" 0)" >> "$LOG"
+    rm -f "$RCI_MISS"
 fi
 
 IFS="$US" read -r LINK PORT_LINK CONNECTED STATE_RCI ADDRESS DEFAULTGW LAYER_IPV4 <<FIELDS

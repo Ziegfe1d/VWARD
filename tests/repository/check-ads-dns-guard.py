@@ -528,8 +528,18 @@ with tempfile.TemporaryDirectory() as tmp:
         "VWARD_DNS_CHAIN_STATE": str(tmp / "chain"), "VWARD_AGH_BINDINGS": str(tmp / "agh-bindings.txt"),
         "VWARD_DNS_GUARD_LOCK": str(tmp / "lock"), "VWARD_DNS_GUARD_STATE": str(tmp / "guard.state"),
         "VWARD_DNS_ORPHAN_EVERY_MIN": "0", "VWARD_ROOT_PREFIX": str(tmp), "TMPDIR": str(tmp),
-        "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh")}
+        "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"), "VWARD_PROC": str(tmp / "proc")}
     orphan = lambda: subprocess.run(["sh", str(GUARD), "orphan"], env=env, text=True, capture_output=True, timeout=60)
+    # fix.33.2 (WP-B п.5): no look counts in the first 5 minutes after boot, nor while AdGuard Home
+    # is younger than 2 minutes (its port opens after the start).
+    proc = tmp / "proc"; (proc / "4242").mkdir(parents=True)
+    (proc / "4242/stat").write_text("4242 (AdGuardHome) S " + " ".join(["1"] * 18) + " 95000 0 0\n")
+    for up, pid, why in (("100.00 1", "", "the first minutes after boot"), ("1000.00 1", "4242", "AdGuard Home starting")):
+        (proc / "uptime").write_text(up + "\n"); (tmp / "agh.pid").write_text(pid)
+        orphan(); orphan()
+        if "192.168.1.1:65053 chatgpt.com" not in rc.read_text():
+            fail(f"orphan: {why} is no death")
+    (proc / "uptime").write_text("1000.00 1\n"); (tmp / "agh.pid").write_text("")
     orphan()
     if "192.168.1.1:65053 chatgpt.com" not in rc.read_text():
         fail("orphan: one look is not a death (a restart)")
@@ -546,5 +556,18 @@ with tempfile.TemporaryDirectory() as tmp:
     sched = (ROOT / "components/ads-privacy-guard/scripts/vward-ads-privacy-scheduler.sh").read_text()
     if sched.index('"$SCH_G" orphan') > sched.index("vward_component_gate ads-privacy-guard"):
         fail("the scheduler looks for dead DNS lines before the ads gate (ads off or never set up)")
+
+# Ad blocking never set up (no ads-privacy-guard.conf; the owner's router, 2026-10-18..19: 12
+# «config not readable»): opening the Panel's page is an answer, not a failure in the journal.
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    env = os.environ | {"VWARD_ADS_LIB": str(ROOT / "components/ads-privacy-guard/lib/vward-ads-privacy-common.sh"),
+        "VWARD_ADS_ETC": str(tmp / "etc"), "VWARD_ADS_STATE": str(tmp / "state"), "VWARD_ADS_LOG_DIR": str(tmp / "log"),
+        "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"), "VWARD_ROOT_PREFIX": str(tmp), "TMPDIR": str(tmp)}
+    for script, args in (("vward-ads-privacy-settings.sh", ["show"]), ("vward-ads-privacy-scheduler.sh", [])):
+        r = subprocess.run(["sh", str(ROOT / "components/ads-privacy-guard/scripts" / script), *args], env=env, text=True, capture_output=True, timeout=60)
+        logs = " ".join(f.read_text() for f in (tmp / "log").rglob("*") if f.is_file()) if (tmp / "log").exists() else ""
+        if "not readable" in logs or "FAIL|" in logs:
+            fail(f"{script} without a config must not write a failure into the journal: {logs!r}")
 
 print("ADS_DNS_GUARD=PASS")

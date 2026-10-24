@@ -83,6 +83,40 @@ with tempfile.TemporaryDirectory() as tmp:
     if "vward_cpu_account \"${VWARD_ADMISSION_COMPONENT:-}\"" not in LIB.read_text().split("vward_admission_leave() {", 1)[1][:200]:
         fail("every admitted job is accounted when it leaves")
 
+# fix.33.2 (WP-C): Keenetic's last answer of 2 s or more within 90 s is «busy» too (the device
+# library writes when and how long; no answer counts as 2 s); a job crond started waits its
+# seconds, one started by hand or by the Panel does not.
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    proc = tmp / "proc"; proc.mkdir()
+    (proc / "cpuinfo").write_text("processor\t: 0\nprocessor\t: 1\nprocessor\t: 2\nprocessor\t: 3\n")
+    (proc / "loadavg").write_text("0.50 0.40 0.30 1/80 999\n")
+    (proc / "meminfo").write_text("MemAvailable:   60000 kB\n")
+    (proc / "uptime").write_text("1000.12 800.00\n")
+    last = tmp / "last"
+    env = {"PATH": "/usr/bin:/bin", "VWARD_PROC": str(proc), "VWARD_DEFER_DIR": str(tmp / "defer"), "VWARD_KEENETIC_LAST": str(last)}
+    busy = lambda: subprocess.run(["sh", "-c", f'. "{LIB}"; vward_keenetic_busy && echo k; vward_busy && echo b'], env=env, text=True, capture_output=True).stdout.split()
+    for text, want in (("", []), ("990 350", ["k", "b"]), ("990 150", []), ("900 350", []), ("x y", [])):
+        last.write_text(text + "\n") if text else last.unlink(missing_ok=True)
+        if busy() != want:
+            fail(f"Keenetic busy by its last answer {text!r}: {busy()} != {want}")
+    prof = ROOT / "components/runtime/lib/vward-device-profile.sh"
+    for args, want in (("running-config 99500", "1000 512"), ("rci:x 99990 rc=28", "1000 200"), ("rci:x 70000", "1000 30012")):
+        subprocess.run(["sh", "-c", f'. "{prof}"; vward_keenetic_timed {args}'], env=env | {"VWARD_UPTIME_FILE": str(proc / "uptime"),
+                       "VWARD_KEENETIC_SLOW_LOG": str(tmp / "slow.log"), "VWARD_KEENETIC_CALLS": str(tmp / "c"), "VWARD_KEENETIC_SLOWN": str(tmp / "s")}, check=True)
+        if last.read_text().strip() != want:
+            fail(f"the last request {args}: {last.read_text().strip()!r} != {want!r}")
+    # A parent chain with crond two levels up: the job sleeps (sleep is a stand-in that notes it).
+    (tmp / "bin").mkdir()
+    (tmp / "bin/sleep").write_text(f'#!/bin/sh\necho "slept $1" >> "{tmp}/slept"\n'); (tmp / "bin/sleep").chmod(0o755)
+    def spread(parent_comm):
+        (tmp / "slept").unlink(missing_ok=True)
+        script = f'. "{LIB}"; p=$PPID; mkdir -p "{proc}/$p" "{proc}/7"; echo "$p (sh) S 7 1" > "{proc}/$p/stat"; echo "7 ({parent_comm}) S 1 1" > "{proc}/7/stat"; vward_spread 35'
+        subprocess.run(["sh", "-c", f"sh -c '{script}'; true"], env=env | {"PATH": f"{tmp}/bin:/usr/bin:/bin"}, check=True)
+        return (tmp / "slept").read_text().strip() if (tmp / "slept").exists() else ""
+    if spread("crond") != "slept 35" or spread("lighttpd") != "":
+        fail(f"a cron job waits its seconds, another does not: {spread('crond')!r} {spread('lighttpd')!r}")
+
 api = (ROOT / "web/cgi-bin/api.cgi").read_text()
 if "VWARD_FOREGROUND=1\nexport VWARD_FOREGROUND" not in api:
     fail("the API marks its requests as foreground")

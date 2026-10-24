@@ -46,6 +46,12 @@ with tempfile.TemporaryDirectory() as tmp:
     (tmp / "rci.log").write_text(f"{now - 90000}\t28\n{now - 500}\t28\n{now - 100}\t7\n")
     r = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=env, text=True, capture_output=True, timeout=30)
     d = json.loads(r.stdout.split("\n\n", 1)[1])
+    # fix.33.2: «Обновления → Последняя проверка» is the feed's last look, not the check after an
+    # installation (the owner's router, 2026-10-24: 19.10 shown five days after).
+    rs = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=env | {"QUERY_STRING": "action=status"}, text=True, capture_output=True, timeout=60)
+    pf = json.loads(rs.stdout.split("\n\n", 1)[1])["platform"]
+    if pf.get("feed_ok_at") != now - 3600 or pf.get("feed_fail_at") is not None:
+        fail(f"status: the feed's last look: {pf.get('feed_ok_at')} {pf.get('feed_fail_at')}")
     if d.get("sentinel") != {"running": False, "installed": False}:
         fail(f"sentinel: {d.get('sentinel')}")
     st = d["state"]
@@ -126,6 +132,10 @@ for need in ("'d-stability': { title: 'Стабильность', parent: 'syste
              "['Стабильность', sc && sc.index != null ? sc.index + '% за сутки' : S.stab ? 'не проверено'", "'d-stability'() {"):
     if need not in js:
         fail(f"the Panel lacks {need!r}")
+js = (ROOT / "web/assets/vward-console.js").read_text(encoding="utf-8")
+for need in ("feedCheckRow(p),", "['Проверка после установки', fmtStamp(p.last_health_check)", "const ok = num(p.feed_ok_at), bad = num(p.feed_fail_at);"):
+    if need not in js:
+        fail(f"«Обновления» lacks {need!r}")
 if not re.search(r"\|stability(\|[a-z-]+)*\) ;;", (ROOT / "web/cgi-bin/api.cgi").read_text()):
     fail("the API accepts action=stability")
 print("STABILITY_PAGE=PASS")
