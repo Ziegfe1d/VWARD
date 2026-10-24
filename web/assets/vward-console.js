@@ -1901,7 +1901,8 @@ const RENDER = {
       panel('Состояние', kv([
         ['Версия', p.version || '—', '', 'd-notes', '', [p.last_sequence ? 'сборка № ' + p.last_sequence : '', lastApplyNote(u.last_apply, u.last_method)].filter(Boolean).join(' · ')],
         pend.present ? ['Доступно', (pend.version || '') + (pend.priority ? ' · ' + ({ ROUTINE: 'обычное', IMPORTANT: 'важное', CRITICAL: 'критическое' }[String(pend.priority).toUpperCase()] || pend.priority) : ''), 'info', 'd-notes'] : null,
-        p.last_health_check ? ['Последняя проверка', fmtStamp(p.last_health_check), '', 'a-updater'] : ['Последняя проверка', 'не было']
+        feedCheckRow(p),
+        p.last_health_check ? ['Проверка после установки', fmtStamp(p.last_health_check), '', 'a-updater'] : null
       ]) + (conf || (acts.length ? '<div class="panel-actions even">' + acts.join('') + '</div>' : '')) + resultBox('updates'),
       { right: ['FAILED', 'RECOVERY_REQUIRED'].includes(u.phase || p.phase) ? headPill('crit', phaseText(u.phase || p.phase)) : '' }) +
       panel('Настройки обновлений', '<dl class="kv">' +
@@ -2264,6 +2265,14 @@ const REASONS = { source_consensus: 'несколько источников с�
 const reasonText = r => REASONS[r] || (r || '').replace(/_/g, ' ');
 // Router stamps come from `date` ("Thu Sep 24 18:20:02 MSK 2026"), ISO or epoch seconds.
 const MON = { Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12 };
+// «Последняя проверка» in «Обновления»: when the update feed was last read (feed.state of the
+// watcher), with the error when the last try failed; the check after an installation is its own row.
+function feedCheckRow(p) {
+  const ok = num(p.feed_ok_at), bad = num(p.feed_fail_at);
+  if (bad != null && bad > (ok || 0)) return ['Последняя проверка', 'ошибка ' + fmtStamp(bad), 'warn', 'a-updater', '', ok != null ? 'удачная ' + fmtStamp(ok) : ''];
+  return ok != null ? ['Последняя проверка', fmtStamp(ok), '', 'a-updater'] : ['Последняя проверка', 'не было'];
+}
+
 function fmtStamp(t) {
   if (t == null || t === '') return '';
   const s = String(t).trim(), m = /^[A-Z][a-z]{2} ([A-Z][a-z]{2}) +(\d{1,2}) (\d\d:\d\d)(?::\d\d)?(?: \S+)? (\d{4})$/.exec(s);
