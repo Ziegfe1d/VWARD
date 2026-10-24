@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Smart DNS in Keenetic (fix.33): a form Keenetic refuses is journaled with its whole answer,
-the shorter forms are tried in turn; the slots used and where the form came from are written."""
+the shorter forms are tried in turn; the slots used and where the form came from are written.
+fix.33.1: a Keenetic without its DNS-over-HTTPS component («no such command: https») is told so
+at once, in one try, not as «the router refused»; Smart DNS kept in AdGuard Home gets the server
+chosen in the Panel, not «auto» (a fresh AdGuard Home has no Smart DNS rows to take one from)."""
 
 import os
 import subprocess
@@ -31,6 +34,8 @@ if cmd == "show running-config":
     print(cfg.read_text(), end=""); sys.exit(0)
 if cmd == "system configuration save":
     sys.exit(0)
+if cfg.with_name("no-doh").exists() and cmd.startswith("dns-proxy https"):
+    print("\x1b[KCommand::Base error[7405600]: no such command: https.\n\x1b[K"); sys.exit(0)
 if " dnsm on " in cmd:
     print("Core::Configurator: error: synthetic refusal of the form\n["); sys.exit(0)
 lines = cfg.read_text().splitlines()
@@ -86,4 +91,22 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("the refusal is journaled with the form, the slots, the source and Keenetic's whole answer:\n" + audit)
     if "accepted form=https upstream https://doh.example/… dnsm domain chat.example used=1/8" not in audit or "synthetic-token" in audit:
         fail("the accepted form is journaled, the server's token never:\n" + audit)
+    # No DNS-over-HTTPS component: one try, the owner told what to install.
+    (tmp / "no-doh").write_text("")
+    (tmp / "audit.log").write_text("")
+    r = subprocess.run(["sh", str(HELPER), "smartdns-keenetic", "add", "other.example"], env=env, text=True, capture_output=True, timeout=60)
+    audit = (tmp / "audit.log").read_text()
+    if "error=smartdns_doh_component" not in r.stdout:
+        fail(f"no component: smartdns_doh_component, not router_rejected: {r.stdout}")
+    if audit.count("refused form=") != 1 or "no such command: https." not in audit or "\x1b" in audit or "[K" in audit:
+        fail("no component: one try, Keenetic's answer clean in the journal:\n" + audit)
+    # AdGuard Home: what it is handed.
+    ctl = tmp / "ads-control"
+    ctl.write_text('#!/bin/sh\ncat "$3" > "' + str(tmp / "handed") + '"\necho CONTROL=PASS\n'); ctl.chmod(0o755)
+    (tmp / "etc/smartdns.conf").write_text("SMARTDNS_URL=https://doh.example/dns-query/synthetic-token\nSMARTDNS_STORE=agh\n")
+    r = subprocess.run(["sh", str(HELPER), "smartdns-domain", "add", "third.example"], env=env | {"VWARD_ADS_CONTROL_BIN": str(ctl)},
+                       text=True, capture_output=True, timeout=60)
+    handed = (tmp / "handed").read_text() if (tmp / "handed").exists() else ""
+    if "result=changed" not in r.stdout or handed != "third.example\thttps://doh.example/dns-query/synthetic-token\n":
+        fail(f"AdGuard Home gets the Panel's server: {r.stdout} {handed!r}")
 print("SMARTDNS_KEENETIC_FORMS=PASS")

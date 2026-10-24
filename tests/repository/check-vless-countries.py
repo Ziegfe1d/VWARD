@@ -2,7 +2,9 @@
 """VLESS servers by country (fix.28.2): the country of a server from the flag at the start of its
 name; countries switched off are never tried by a failover; without «cross» a failover stays in
 the server's own country; the Panel shows the servers on the tunnel's page at once, grouped by
-country or as one list, sorted by answer time, name or country. Synthetic servers only."""
+country or as one list, sorted by answer time, name or country. Synthetic servers only.
+fix.33.1: a change answers «result=changed» (it was «changedcross», which the Panel took for a
+failure); an answer the Panel does not know leaves its last line with the error in the journal."""
 
 import re
 import subprocess
@@ -45,6 +47,11 @@ with tempfile.TemporaryDirectory() as tmp:
     sh("op_countries OpkgTun2 DE 0 >/dev/null; op_countries OpkgTun2 NL 0 >/dev/null; op_countries OpkgTun2 DE 1 >/dev/null; op_countries OpkgTun2 cross 0 >/dev/null")
     if (tmp / "etc/v2.countries").read_text() != "off=NL\ncross=0\n":
         fail(f"settings: {(tmp / 'etc/v2.countries').read_text()!r}")
+    # The answer line of a change and of a plain read.
+    for args, want in (("DE 0", "result=changed\n"), ("cross 1", "result=changed\n"), ("", "result=checked\n")):
+        out = sh(f"op_countries OpkgTun2 {args}")
+        if not out.endswith(want) or "changedcross" in out or "checkedcross" in out:
+            fail(f"the answer to «{args}» ends with {want!r}: {out!r}")
     for bad in (("de", "0"), ("DE", "2"), ("cross", "x"), ("DE;rm", "0")):
         if "error=invalid_value" not in sh(f"op_countries OpkgTun2 '{bad[0]}' '{bad[1]}'"):
             fail(f"a wrong value must be refused: {bad}")
@@ -63,6 +70,8 @@ api = (ROOT / "web/cgi-bin/api.cgi").read_text(encoding="utf-8")
 js = (ROOT / "web/assets/vward-console.js").read_text(encoding="utf-8")
 if 'vs_out=$("$VLESS_ENGINE" countries "$2" "$3" "$4"' not in helper:
     fail("the helper must pass a country change to the engine")
+if 'RELAY_REASON=$(printf \'%s\\n\' "$vs_out" | tail -n 1' not in helper:
+    fail("an unknown answer of the engine leaves its last line in the journal")
 for need in ('vless-server countries "$TNAME" "$TCC" "$TCV"', "countries: {off:"):
     if need not in api:
         fail(f"the API lacks {need}")

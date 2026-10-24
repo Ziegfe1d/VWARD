@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Moving the lists and subnets off a tunnel without settings (fix.33): a subnet Keenetic
 refuses no longer undoes the whole move - the rest move, the refused ones are journaled with
-Keenetic's whole answer; the IP categories' routes stay with policy-sync."""
+Keenetic's whole answer; the IP categories' routes stay with policy-sync.
+
+fix.33.1, both branches: Keenetic keeps one route per subnet, so the new route replaces the
+old one and the old one's removal is refused - such a false refusal is not counted and not
+told; a subnet that really stays on the old tunnel is told (its new route taken back). The
+answer reaches the journal without terminal codes, also with Keenetic's own BusyBox tools."""
 
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -27,6 +33,7 @@ dns-proxy
 ip route 10.20.0.0 255.255.0.0 OpkgTun2 auto
 ip route 10.30.0.0 255.255.0.0 OpkgTun2 auto
 ip route 10.40.0.0 255.255.0.0 OpkgTun2 auto
+ip route 10.50.0.0 255.255.0.0 OpkgTun2 auto
 """
 
 # Keenetic over a text file. A refused command prints its reason on one line and a bare
@@ -42,6 +49,12 @@ if cmd == "system configuration save":
     sys.exit(0)
 if cmd == "no ip route 10.30.0.0 255.255.0.0 OpkgTun2":
     print("Network::RoutingTable: error: synthetic refusal\n["); sys.exit(0)
+# The false refusal: the new route replaced the old one, removing the old one is refused.
+if cmd == "ip route 10.50.0.0 255.255.0.0 Wireguard0 auto":
+    t = cfg.read_text().replace("ip route 10.50.0.0 255.255.0.0 OpkgTun2 auto\n", "")
+    cfg.write_text(t + "ip route 10.50.0.0 255.255.0.0 Wireguard0 auto\n"); sys.exit(0)
+if cmd == "no ip route 10.50.0.0 255.255.0.0 OpkgTun2":
+    print("\x1b[KCommand::Base error[7405600]: no such route.\n\x1b[K"); sys.exit(0)
 lines = cfg.read_text().splitlines()
 ctx = cmd.startswith("dns-proxy ")
 body = cmd[len("dns-proxy "):] if ctx else cmd
@@ -62,8 +75,7 @@ if not neg:
 cfg.write_text("\n".join(out) + "\n")
 '''
 
-with tempfile.TemporaryDirectory() as tmp:
-    tmp = Path(tmp)
+def run(tmp: Path, busybox: bool) -> None:
     cfg = tmp / "running.cfg"; cfg.write_text(RUNNING)
     ndmc = tmp / "ndmc"; ndmc.write_text(FAKE_NDMC.replace("@CFG@", str(cfg))); ndmc.chmod(0o755)
     devconf = tmp / "device.conf"
@@ -83,7 +95,13 @@ with tempfile.TemporaryDirectory() as tmp:
         "VWARD_CONSOLE_BACKUP_DIR": str(tmp / "backup"), "VWARD_CONSOLE_AUDIT_LOG": str(tmp / "audit.log"),
         "VWARD_SNAPSHOT_DIR": str(tmp / "snaps"), "VWARD_POLICY_SYNC_BIN": str(tmp / "no-sync"),
     }
-    r = subprocess.run(["sh", str(HELPER), "tunnel-delete", "OpkgTun2", "vpn", "move"], env=env, text=True, capture_output=True, timeout=60)
+    if busybox:
+        # Keenetic's own userland: BusyBox tr, sed, awk, cut (its tr has no [:print:]).
+        bb = tmp / "bb"; bb.mkdir()
+        for tool in ("tr", "sed", "awk", "cut", "grep", "head", "tail", "sort", "mktemp", "cat", "rm", "mv"):
+            (bb / tool).symlink_to(shutil.which("busybox"))
+        env["PATH"] = f"{bb}:{env['PATH']}"
+    r = subprocess.run((["busybox", "sh"] if busybox else ["sh"]) + [str(HELPER), "tunnel-delete", "OpkgTun2", "vpn", "move"], env=env, text=True, capture_output=True, timeout=60)
     out = r.stdout.strip().splitlines()
     text = cfg.read_text()
     audit = (tmp / "audit.log").read_text()
@@ -94,13 +112,24 @@ with tempfile.TemporaryDirectory() as tmp:
     if "ip route 10.20.0.0 255.255.0.0 Wireguard0 auto" not in text or "10.20.0.0 255.255.0.0 OpkgTun2" in text:
         fail("the accepted subnet moves:\n" + text)
     if "ip route 10.30.0.0 255.255.0.0 OpkgTun2 auto" not in text or "10.30.0.0 255.255.0.0 Wireguard0" in text:
-        fail("the refused subnet stays where it was, its copy on the default tunnel taken back:\n" + text)
+        fail("a subnet that really stays on the old tunnel stays, its copy on the default tunnel taken back:\n" + text)
+    if "ip route 10.50.0.0 255.255.0.0 Wireguard0 auto" not in text or "10.50.0.0 255.255.0.0 OpkgTun2" in text:
+        fail("a route Keenetic replaced itself is on the default tunnel:\n" + text)
     if "ip route 10.40.0.0 255.255.0.0 OpkgTun2 auto" not in text:
         fail("an IP category's route is left to policy-sync:\n" + text)
-    if "info.moved=lists:1,subnets:1,failed:1,ip_categories:1" not in r.stdout:
+    if "info.moved=lists:1,subnets:2,failed:1,ip_categories:1" not in r.stdout:
         fail(f"the result counts: {r.stdout}")
     if "tunnel-move OpkgTun2 subnet 10.30.0.0 255.255.0.0 refused: Network::RoutingTable: error: synthetic refusal" not in audit:
         fail("the journal names the refused subnet with Keenetic's whole answer, not its last «[»:\n" + audit)
+    if "10.50.0.0" in audit:
+        fail("a false refusal (the route was replaced by Keenetic) is not told:\n" + audit)
+    if "\x1b" in audit or "[K" in audit:
+        fail("no terminal codes in the journal:\n" + audit)
     if "tunnel-delete" in audit:
         fail("a move is journaled as a move, not as a deletion:\n" + audit)
+for bb in (False, True):
+    if bb and not shutil.which("busybox"):
+        continue
+    with tempfile.TemporaryDirectory() as tmp:
+        run(Path(tmp), bb)
 print("TUNNEL_MOVE=PASS")
