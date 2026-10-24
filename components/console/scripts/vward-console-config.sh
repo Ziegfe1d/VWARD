@@ -1200,12 +1200,21 @@ op_services_refresh() {
     # uclient-fetch or of the VLESS module's Xray downloads (no crash on every refresh).
     command -v vward_fetch >/dev/null 2>&1 ||
         { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+    # No -f: the HTTP status tells «not published» (404) from a download that failed.
     if command -v vward_fetch >/dev/null 2>&1; then
         VWARD_CURL_BIN=${VWARD_CURL_BIN:-$(command -v curl)}
-        vward_fetch -fsS --connect-timeout 10 --max-time 60 --max-filesize 524288 -o "$TMPFILE" "$SERVICES_URL" 2>/dev/null
+        sv_code=$(vward_fetch -sS --connect-timeout 10 --max-time 60 --max-filesize 524288 -o "$TMPFILE" -w '%{http_code}' "$SERVICES_URL" 2>/dev/null)
     else
-        "${VWARD_CURL_BIN:-curl}" --http1.1 -fsS --connect-timeout 10 --max-time 60 --max-filesize 524288 -o "$TMPFILE" "$SERVICES_URL" 2>/dev/null
+        sv_code=$("${VWARD_CURL_BIN:-curl}" --http1.1 -sS --connect-timeout 10 --max-time 60 --max-filesize 524288 -o "$TMPFILE" -w '%{http_code}' "$SERVICES_URL" 2>/dev/null)
     fi || die download_failed
+    case "$sv_code" in
+        200) ;;
+        # The daily catalog is not published (its branch or workflow is missing): not an error,
+        # the lists keep following the catalog of the package, one line in the journal.
+        404) rm -f "${TMPFILE:?}"; TMPFILE=
+             done_ok "services-refresh catalog not published, the package catalog is used" unchanged ;;
+        *) die download_failed ;;
+    esac
     services_valid "$TMPFILE" || die catalog_invalid
     if [ -f "$SERVICES_FETCHED" ] && cmp -s "$TMPFILE" "$SERVICES_FETCHED"; then
         rm -f "${TMPFILE:?}"; TMPFILE=; fetched=unchanged

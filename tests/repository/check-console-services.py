@@ -111,7 +111,8 @@ with tempfile.TemporaryDirectory() as tmp:
     served = tmp / "served.json"
     curl = tools / "curl"
     curl.write_text("#!/bin/sh\nout=\nwhile [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n"
-                    f"[ -f {served} ] || exit 22\ncp {served} \"$out\"\n")
+                    f"[ -f {tmp}/notfound ] && {{ echo 404 > \"$out\"; printf 404; exit 0; }}\n"
+                    f"[ -f {served} ] || exit 22\ncp {served} \"$out\"\nprintf 200\n")
     curl.chmod(0o755)
     devconf = tmp / "device.conf"; devconf.write_text(DEVICE_CONF); devconf.chmod(0o600)
     bundled = tmp / "bundled.json"; bundled.write_text(json.dumps(CATALOG))
@@ -199,6 +200,14 @@ with tempfile.TemporaryDirectory() as tmp:
     # Daily catalog: a broken one is refused, a good one is kept and the lists follow it.
     run("service", "on", "claude.ai", "auto", expect="result=changed", rc=0)
     run("services-refresh", "run", expect="error=download_failed", rc=1)
+    # 404: the catalog is not published - no error, one journal line, nothing kept or changed.
+    (tmp / "notfound").write_text("")
+    run("services-refresh", "run", expect="result=unchanged", rc=0)
+    if "catalog not published" not in (tmp / "audit.log").read_text():
+        fail("the unpublished catalog was not journaled")
+    if (tmp / "fetched/catalog.json").exists():
+        fail("a 404 body was kept as the catalog")
+    (tmp / "notfound").unlink()
     served.write_text("{not json")
     run("services-refresh", "run", expect="error=catalog_invalid", rc=1)
     quoted = json.loads(json.dumps(CATALOG)); quoted["services"][0]["title"] = 'Cla"ude'
