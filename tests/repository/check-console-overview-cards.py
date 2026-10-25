@@ -51,7 +51,7 @@ def line(start):
 
 
 code = "".join([line("const isTrue = "), grab("const tunPill = ", "];\n"), line("const tunGuardOff = "), line("const tunOff = "), line("const viaIs = "),
-                line("const vpnDirect = "), line("const lowDisk = "), grab("function wifiWarnText("), grab("function cardData(id) {")])
+                line("const vpnDirect = "), line("const lowDisk = "), line("const adsOff = "), grab("function wifiWarnText("), grab("function cardData(id) {")])
 harness = """
 let STATUS = {}; const S = { lists: null, route: null, wifi: null, ads: null, adsstats: null };
 const st = () => STATUS; const prof = () => ({ tunnel_interface: 'OpkgTun2' }); const plat = () => ({});
@@ -60,6 +60,7 @@ const tunLabel = n => n; const fmtTime = t => 'T' + t; const num = v => v == nul
 const fmtInt = v => String(v); const phaseText = v => v; const durText = v => v; const fmtSpeed = v => (v / 1000) + ' Гбит/с';
 const plural = (n, a, b, c) => { n = Math.abs(n) % 100; const m = n % 10; return n > 10 && n < 20 ? c : m > 1 && m < 5 ? b : m === 1 ? a : c; };
 const wifiName = mac => mac === 'aa' ? 'iPhone' : mac;
+const compOn = id => true;
 """ + code + """
 const T = (name, connected, state) => ({ name, connected: connected ? 'yes' : 'no', state });
 STATUS = { wan: { internet: true, address: '100.86.0.1', speed: 1000 }, storage: { total_kb: 60606054, free_kb: 60186624 },
@@ -73,6 +74,8 @@ for (const id of ['wan', 'vpn', 'lists', 'routes', 'wifi', 'ads', 'storage']) { 
 STATUS.wan = { internet: null, address: '100.86.0.1' }; { const c = cardData('wan'); out.slow = [c.value, c.pill[1]]; }
 STATUS.wan = { internet: false, address: '100.86.0.1' }; { const c = cardData('wan'); out.down = [c.value, c.pill[1]]; }
 // «Мало места»: a tenth of a big drive is plenty (252 GB with 23.8 GB free is not a warning).
+// The ads component switched off (fix.34): «выключено», not «0 заблокировано».
+{ const keep = S.ads; S.ads = { component_enabled: false, counts: { blocked: 0 } }; const c = cardData('ads'); out.adsoff = [c.value, c.sub, c.pill[1]]; S.ads = keep; }
 out.low = [lowDisk(264241152, 24956108), lowDisk(8388608, 200000), lowDisk(8388608, 700000), lowDisk(33554432, 2097152)];
 console.log(JSON.stringify(out));
 """
@@ -82,6 +85,8 @@ if r.returncode:
 o = json.loads(r.stdout)
 if o.pop("slow") != ["Роутер отвечает медленно", "Нет ответа"] or o.pop("down") != ["Нет связи", "Не работает"]:
     fail("Keenetic's late answer about the internet reads as «no internet» (Viva 2026-10-13)")
+if o.pop("adsoff") != ["выключено", "компонент выключен", "Выключен"]:
+    fail("the ads component switched off: the card says «выключено»")
 if o.pop("low") != [False, True, True, False]:
     fail("«Мало места» by a share alone: a big drive with gigabytes free warns")
 want = {
@@ -90,7 +95,7 @@ want = {
     "lists": ["Доменные списки", "2 через VPN", "1 в обход"],
     "routes": ["Маршруты", "431 подсеть", "8 IP‑категорий"],
     "wifi": ["Wi-Fi клиенты", "6 клиентов", "iPhone: лучше 2,4 ГГц"],
-    "ads": ["Реклама", "12430", "заблокировано за сутки"],
+    "ads": ["Реклама", "12430", "блокировок за сутки"],
     "storage": ["Хранилище", "0.4 ГБ", "занято из 57.8 ГБ"],
 }
 for k, v in want.items():

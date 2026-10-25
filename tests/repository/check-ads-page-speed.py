@@ -25,8 +25,9 @@ if "{ id: 'ads', title: 'Реклама и трекеры', icon: 'block', group
     fail("the Ads page must load only ads, security and adspub")
 a = JS.index("  ads() {")
 page = JS[a:JS.index("  'd-adrecent'() {", a)]
+# AdGuard Home's day numbers at the top (fix.34): the overview's copy, else fetched after the page.
 for used in ("S.agh", "S.adsstats"):
-    if used in page:
+    if used in page and not (used == "S.adsstats" and "load('adsstats', true).then(render)" in page):
         fail(f"the Ads page now uses {used!r}: add its loader back to the page data")
 
 blk = API[API.index('if [ "$ACTION" = ads-data ]; then'):]

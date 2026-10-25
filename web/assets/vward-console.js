@@ -671,6 +671,9 @@ const comp = id => COMPONENTS.find(c => c.id === id);
 /* Граф компонентов приходит из реестра через API (config-data). */
 const graphOf = id => ((cfg().components) || []).find(x => x.id === id);
 const compOn = id => { const g = graphOf(id); return !g || g.enabled !== false; };
+let adsStatsAsked = false;
+// Ads switched off as a component: its page's own answer, or the registry when that is loaded.
+const adsOff = () => (S.ads && S.ads.component_enabled === false) || !compOn('ads-privacy-guard');
 /* Что включится или выключится вместе с компонентом - как в vward-console-config.sh. */
 function compCascade(id, off) {
   const g = cfg().components || [];
@@ -1088,8 +1091,12 @@ function cardData(id) {
     case 'wifi': return { icon: 'wifi', title: 'Wi-Fi клиенты', to: 'wifi', value: S.wifi && !wf.enabled ? '—' : fmtInt(wf.count) + ' ' + plural(num(wf.count) || 0, 'клиент', 'клиента', 'клиентов'), sub: wf.enabled ? (warnWifi ? wifiWarnText(wf) : 'без замечаний') : 'сбор данных выключен', pill: !S.wifi ? ['', '—'] : warnWifi ? ['warn', 'Внимание'] : wf.enabled ? ['ok', 'Работает'] : ['', 'Выключен'] };
     // What AdGuard Home blocked today (the domains VWARD itself blocked are a handful and read as
     // «almost nothing blocked»: they are on the Ads page).
-    case 'ads': { const q = S.adsstats; return { icon: 'block', title: 'Реклама', to: 'ads', value: q && q.ok ? fmtInt(q.blocked) : '—',
-      sub: q && q.ok ? 'заблокировано за сутки' : q ? 'нет статистики' : 'загрузка…', pill: !S.ads ? ['', '—'] : a.paused ? ['warn', 'Пауза'] : ((a.dns_guard || {}).chain_state === 'out') ? ['warn', 'Не фильтруется'] : ['ok', 'Работает'] }; }
+    case 'ads': { const q = S.adsstats;
+      // The component switched off (the scheduler leaves at its gate): «выключено», not «0 заблокировано».
+      if (adsOff()) return { icon: 'block', title: 'Реклама', to: 'ads', value: 'выключено', sub: 'компонент выключен', pill: ['', 'Выключен'] };
+      return { icon: 'block', title: 'Реклама', to: 'ads', value: q && q.ok ? fmtInt(q.blocked) : '—',
+      // «заблокировано за сутки» was cut on a phone (fix.34): a shorter line.
+      sub: q && q.ok ? 'блокировок за сутки' : q ? 'нет статистики' : 'загрузка…', pill: !S.ads ? ['', '—'] : a.paused ? ['warn', 'Пауза'] : ((a.dns_guard || {}).chain_state === 'out') ? ['warn', 'Не фильтруется'] : ['ok', 'Работает'] }; }
     case 'storage': { const t = num(g.total_kb), f = num(g.free_kb), used = t ? Math.round((t - f) / t * 100) : null; return { icon: 'storage', title: 'Хранилище', to: 'system', value: t ? fmtKB(t - f) : '—', sub: t ? 'занято из ' + fmtKB(t) : 'нет данных', pill: used == null ? ['', '—'] : lowDisk(t, f) ? ['warn', used + ' %'] : ['ok', used + ' %'], meter: used }; }
   }
   return null;
@@ -1148,6 +1155,8 @@ const listOwn = l => l.name === (cfgRoute().group || prof().policy_group);
 function listConfirm(l) {
   if (!confirm || confirm.name !== l.name || !['list-clear', 'list-del'].includes(confirm.id)) return '';
   const n = fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов'), t = '«' + (l.description || l.name) + '»';
+  // «Мои домены» live in a Keenetic group with its own domains: clearing takes them all (fix.34).
+  if (confirm.id === 'list-clear' && listOwn(l)) return confirmBox('list-clear', 'Будет очищена вся группа ' + t + ', ' + n + ': не только ваши домены, но и все домены этой группы. Группа и её маршрут останутся. Сначала сохранится копия настроек.', 'Очистить', true);
   return confirm.id === 'list-clear' ? confirmBox('list-clear', 'Очистить список ' + t + ' (' + n + ')? Список и его маршрут останутся. Сначала сохранится копия настроек.', 'Очистить', true)
     : confirmBox('list-del', 'Удалить список ' + t + ' (' + n + ')? Из Keenetic уйдут список, его маршрут и исключения. Сначала сохранится копия настроек.' + (l.vward === false ? ' Список создан не VWARD.' : ''), 'Удалить', true);
 }
@@ -1155,7 +1164,7 @@ function listConfirm(l) {
 function myListClear(n) {
   const g = cfgRoute().group || prof().policy_group, l = ((S.lists && S.lists.lists) || []).find(x => x.name === g);
   if (!g || !n) return '';
-  return (l ? listConfirm(l) : '') + (confirm && confirm.name === g ? '' : '<div class="panel-actions">' + btn('ask', 'broom', 'Очистить список', '', ' data-confirm="list-clear" data-name="' + esc(g) + '"' + (cfgOk() && l ? '' : ' disabled')) + '</div>');
+  return (l ? listConfirm(l) : '') + (confirm && confirm.name === g ? '' : '<div class="panel-actions apart">' + btn('ask', 'broom', 'Очистить список', 'warn', ' data-confirm="list-clear" data-name="' + esc(g) + '"' + (cfgOk() && l ? '' : ' disabled')) + '</div>');
 }
 function listPage(name) {
   const l = ((S.lists && S.lists.lists) || []).find(x => x.name === name), d = S.listd, ok = cfgOk();
@@ -1623,19 +1632,31 @@ const RENDER = {
   },
 
   ads() {
+    // AdGuard Home first (fix.34): its state and the day's numbers; managing it is on its own page
+    // (the reset and delete buttons stay there, not here).
+    // The day's numbers are AdGuard Home's counters (slow): the overview's copy, else fetched after
+    // the page is shown, not before it (check-ads-page-speed).
+    const aghTopPanel = () => { const st1 = S.adsstats;
+      if (!st1 && !adsStatsAsked) { adsStatsAsked = true; load('adsstats', true).then(render).catch(() => {}); }
+      return panel('AdGuard Home', kv([S.ads ? ['Состояние', aghState()[1], aghState()[0], null, '', aghState()[2]] : null,
+        st1 && st1.ok ? ['Запросов за сутки', fmtInt(st1.queries), '', 'd-querylog'] : null,
+        st1 && st1.ok ? ['Заблокировано за сутки', fmtInt(st1.blocked) + (st1.queries ? ' · ' + Math.round(100 * st1.blocked / st1.queries) + '%' : ''), '', 'd-querylog', ' data-qfilter="blocked"'] : null,
+        ['Управление AdGuard Home', 'Открыть', '', 'd-agh']])); };
     const a = S.ads || {}, c = a.counts || {}, s = a.settings || {}, j = a.jobs || {}, sc = a.scan || {}, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
     const aghHost = ag.address || location.hostname, aghUrl = ag.port ? 'http://' + aghHost + ':' + ag.port + '/' : '';
     const runMode = s.RUN_MODE || 'scheduled', pub = S.adspub || {};
     const pending = (num(pub.added) || 0) + (num(pub.removed) || 0);
     const cur = j.current || {}, busy = cur.state && cur.state !== 'IDLE';
-    const now = !S.ads ? ['', 'загрузка…'] : a.paused ? ['warn', 'На паузе'] : !a.agh_connected ? ['warn', 'Нет подключения к AdGuard Home', 'd-agh'] :
+    const off = adsOff();
+    const now = !S.ads ? ['', 'загрузка…'] : off ? ['warn', 'Компонент выключен', 'c-ads-privacy-guard'] : a.paused ? ['warn', 'На паузе'] : !a.agh_connected ? ['warn', 'Нет подключения к AdGuard Home', 'd-agh'] :
       busy ? ['info', 'выполняется: ' + jobText(cur).toLowerCase() + (num(j.queued) ? ' · ещё ' + fmtInt(j.queued) + ' в очереди' : ''), 'd-jobs'] :
       num(j.queued) ? ['info', fmtInt(j.queued) + ' ' + plural(num(j.queued), 'задание', 'задания', 'заданий') + ' в очереди', 'd-jobs'] :
       ['ok', ({ scheduled: 'ожидает следующей проверки', dynamic: 'проверяет новые домены сразу', manual: 'проверка только по кнопке' })[runMode] || 'работает', 'd-jobs'];
     const where = !pub.ok ? '—' : pub.mode === 'staged' ? 'не отправляются' : isTrue(s.AUTO_PUBLISH) ? 'автоматически' : 'после подтверждения';
     const recent = a.recent || [];
-    return loadError(['ads']) + chainNotice() + adsCheckPanel() +
-      panel('Проверка VWARD', '<dl class="kv">' + ctrlRow('Проверка рекламы и трекеров', sw('data-ads-pause', !a.paused, 'Проверка рекламы и трекеров', !S.ads), a.paused ? 'на паузе: новые домены не проверяются, задания ждут' : 'домены, пропущенные AdGuard Home, проверяются по источникам и признакам рекламы') + '</dl>' +
+    return loadError(['ads']) + chainNotice() + aghTopPanel() + adsCheckPanel() +
+      panel('Проверка VWARD', (off ? '<p class="field-warn" data-go="c-ads-privacy-guard" role="button" tabindex="0">Компонент «Блокировка рекламы» выключен: проверки не идут. Включить его можно в «Компоненты».</p>'
+        : '<dl class="kv">' + ctrlRow('Проверка рекламы и трекеров', sw('data-ads-pause', !a.paused, 'Проверка рекламы и трекеров', !S.ads), a.paused ? 'на паузе: новые домены не проверяются, задания ждут' : 'домены, пропущенные AdGuard Home, проверяются по источникам и признакам рекламы') + '</dl>') +
         kv([['Состояние', now[1], now[0], now[2]],
           ['Последняя проверка', sc.last_run ? fmtStamp(String(sc.last_run).replace(' ', 'T')) : 'ещё не было', '', 'a-ads', '',
             sc.last_run && sc.unique_allowed != null ? fmtInt(sc.unique_allowed) + ' ' + plural(num(sc.unique_allowed) || 0, 'домен', 'домена', 'доменов') + ' из ' + fmtInt(sc.allowed_records) + ' ' + plural(num(sc.allowed_records) || 0, 'запроса', 'запросов', 'запросов') + ', новых ' + fmtInt(sc.candidates) : ''],
@@ -1650,7 +1671,7 @@ const RENDER = {
         ['Категории блокировки', (a.categories || []).filter(x => x.active).length + ' из ' + (a.categories || []).length + ' включены', '', 'd-adcats'],
         ['Мои правила', fmtInt((a.manual_rules || []).length), '', 'd-rules'],
         ['Источники', (a.sources || []).filter(x => x.mode === 'active').length + ' из ' + (a.sources || []).length + ' активны', '', 'd-sources'],
-        ['HTTPS-фильтр', S.https && S.https.ok ? (S.https.status && isTrue(S.https.status.ENABLED) ? 'Включён' : 'Выключен') : 'недоступен', '', 'd-https'],
+        ['HTTPS-фильтр', S.https && S.https.ok ? (S.https.status && isTrue(S.https.status.ENABLED) ? 'включён' : 'выключен') : 'недоступен', '', 'd-https'],
         ['Настройки проверки', ({ scheduled: 'по расписанию', dynamic: 'по запросам', manual: 'вручную' })[runMode] || '', '', 'd-adsettings']
       ])) +
       // AdGuard Home is a program of its own: its page lives in «Компоненты» (no «Дополнительно», owner 2026-10-17).
@@ -2314,7 +2335,7 @@ function policyGroupRow() {
   const r = cfgRoute(), gs = r.groups || [], cur = r.group || '';
   if (!S.config || !r.router_available || !gs.length || (cur && gs.length < 2)) return '';
   const opts = (cur ? [] : [['', 'выберите группу', true]]).concat(gs.map(g => [g.name, g.description ? g.description + ' (' + g.name + ')' : g.name]));
-  return ctrlRow('Мои домены добавляются в', sel('data-policy-group' + (cfgOk() ? '' : ' disabled'), 'Куда добавлять мои домены', opts, cur), cur ? 'группа Keenetic, идущая через VPN' : 'через VPN идёт несколько списков - выберите один');
+  return ctrlRow('Мои домены сохраняются в выбранной группе вместе с её доменами', sel('data-policy-group' + (cfgOk() ? '' : ' disabled'), 'Куда добавлять мои домены', opts, cur), cur ? 'Список Keenetic, идущий через VPN' : 'через VPN идёт несколько списков - выберите один');
 }
 // Shared by the VPN page and its events page.
 // Quality over the last 30 minutes (a ping sample a minute through every tunnel) and what the
