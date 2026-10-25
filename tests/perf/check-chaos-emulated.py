@@ -290,6 +290,14 @@ def main():
     findings, summary = [], []
     try:
         sh(root, "/opt/etc/init.d/S91vward-route-engine start")
+        # The lock of a job killed with SIGKILL (a process that is gone): the next run takes it over.
+        gone = subprocess.Popen(["true"]); gone.wait()
+        lock = root / "tmp/vward-tunnel-health-watch.lock"
+        lock.mkdir(parents=True, exist_ok=True)
+        (lock / "pid").write_text(f"{gone.pid}\n")
+        sh(root, "/opt/bin/vward-tunnel-health.sh")
+        if lock.exists():
+            findings.append(("healthy", 0, "tunnel health", "stale lock", "the lock of a gone process is not taken over"))
         minute = 0
         for name, bad, after, flags in SCENARIOS:
             if args.scenario and name not in args.scenario:
@@ -319,10 +327,14 @@ def main():
                 run_round(root, minute, active, findings, name, extra)
                 # A job killed with SIGKILL leaves its lock (no trap runs); the next round must
                 # take it over: a lock of a gone process still there a round later is a finding.
+                # Only after a round the jobs ran to their end: a job killed again before it gets
+                # to its lock cannot take the old one over (CI #726, minute 77: tunnel health takes
+                # its lock 0.05-0.14 s after its start on a busy runner and was killed at 0.12 s).
                 now_stale = stale_locks(root)
-                for lock in now_stale:
-                    if lock in prev_stale:
-                        findings.append((name, minute, "-", "stale lock", lock))
+                if "kill" not in active:
+                    for lock in now_stale:
+                        if lock in prev_stale:
+                            findings.append((name, minute, "-", "stale lock", lock))
                 prev_stale = now_stale
             changes = ndmc_changes(root)[before:]
             refused = (refused_f.read_text().splitlines() if refused_f.exists() else [])[refused_before:]

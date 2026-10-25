@@ -145,7 +145,9 @@ def stage_soak(root, minutes, seed, findings, info):
         chaos.run_round(root, minute, flags, sub, "soak")
         findings += [("soak", f"minute {m} {job}: {what}", d) for _, m, job, what, d in sub]
         now_stale = chaos.stale_locks(root)
-        findings += [("soak", f"minute {minute}: stale lock", l) for l in now_stale if l in prev_stale]
+        # Only after a round the jobs ran to their end (check-chaos-emulated.py: CI #726).
+        if "kill" not in flags:
+            findings += [("soak", f"minute {minute}: stale lock", l) for l in now_stale if l in prev_stale]
         prev_stale = now_stale
         if minute % 10 == 0:
             n, names = ps_count(root)
