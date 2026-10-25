@@ -62,6 +62,10 @@ with tempfile.TemporaryDirectory() as tmp:
         fail(f"cached answer differs: {a} {b}")
     if count("show running-config") != 1 or count("show object-group fqdn") != 1:
         fail(f"the second refresh asked the router again: {calls.read_text()}")
+    # The route check of a domain looks at the same copy (fix.34: it read Keenetic each time).
+    get("route-probe&type=domain&value=t.me")
+    if count("show running-config") != 1:
+        fail(f"the route check asked the router for its configuration again: {calls.read_text()}")
     if "address" in (cache / "fqdn-counts").read_text():
         fail("only the per-list counts are kept, not every learned address")
 
@@ -98,5 +102,14 @@ with tempfile.TemporaryDirectory() as tmp:
     get("lists-data"); get("lists-data")
     if count("show running-config") != 4:
         fail("the cache must be off by default when ndmc is replaced")
+
+# Every look of the Panel at the whole configuration goes through the copy with its minute
+# (fix.34: 26 reads of 3.9-7.5 s on a busy Viva 25.10, the overview's among them).
+api = (ROOT / "web/cgi-bin/api.cgi").read_text()
+for n, line in enumerate(api.splitlines(), 1):
+    if '"show running-config"' in line and 'ndm_cached running "$CONFIG_TTL" "show running-config"' not in line:
+        fail(f"api.cgi:{n}: Keenetic's configuration read past the shared copy: {line.strip()}")
+if 'CONFIG_TTL=${VWARD_CONSOLE_CONFIG_TTL:-60}' not in api:
+    fail("the Panel's copy of the configuration: a minute by default")
 
 print("CONSOLE_NDM_CACHE=PASS")

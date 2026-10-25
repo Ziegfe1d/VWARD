@@ -28,3 +28,6 @@ VWARD_RCI_BASE=http://127.0.0.1:79/rci
 # The route engine's start: AdaptiveAuto restored from USB within this many seconds of Keenetic
 # calls, so S91's 12 s start wait holds (fix.34); the names left are counted in the journal.
 # VWARD_RESTORE_SECONDS=8
+# The Panel's look at Keenetic's whole configuration: the shared copy up to this many seconds
+# old (fix.34; was 10). VWARD's own changes drop it at once; 10 brings back the old behaviour.
+# VWARD_CONSOLE_CONFIG_TTL=60

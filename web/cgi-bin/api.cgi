@@ -89,6 +89,12 @@ fetch_json()
 # cache first, so a change is never followed by the old state.  With ndmc
 # replaced (tests) the cache is off unless VWARD_CONSOLE_CACHE_TTL says otherwise.
 NDM_CACHE_DIR=${VWARD_CONSOLE_CACHE_DIR:-/tmp/vward-console-cache}
+# Keenetic's whole configuration: 3.9-7.5 s a read on a busy router (Viva 25.10, keenetic-slow.log,
+# 26 reads by the Panel), and the overview asks it every few seconds. The shared copy is dropped by
+# every change VWARD makes (ndmc and vward-console-config.sh), so it may be a minute old; a change
+# made in Keenetic's own web page shows within that minute.
+CONFIG_TTL=${VWARD_CONSOLE_CONFIG_TTL:-60}
+case "$CONFIG_TTL" in ''|*[!0-9]*) CONFIG_TTL=60 ;; esac
 ndm_cached()
 {
     nc_file="$NDM_CACHE_DIR/$1" nc_ttl="$2"
@@ -690,7 +696,7 @@ if [ "$ACTION" = wifi-data ]; then
         else WEMPTY=no_wifi; fi
     fi
     # Band pinned in Keenetic ("interface <bridge> mac band <mac> 0|1"): 0 is 2.4 GHz, 1 is 5 GHz.
-    BINDS="$(ndm_cached running 10 "show running-config" | awk '$1 == "mac" && $2 == "band" && ($4 == "0" || $4 == "1") && $3 ~ /^([0-9a-fA-F][0-9a-fA-F]:){5}[0-9a-fA-F][0-9a-fA-F]$/ {print tolower($3) "\t" ($4 == "0" ? "2g" : "5g")}' |
+    BINDS="$(ndm_cached running "$CONFIG_TTL" "show running-config" | awk '$1 == "mac" && $2 == "band" && ($4 == "0" || $4 == "1") && $3 ~ /^([0-9a-fA-F][0-9a-fA-F]:){5}[0-9a-fA-F][0-9a-fA-F]$/ {print tolower($3) "\t" ($4 == "0" ? "2g" : "5g")}' |
         "$JQ" -Rn '[inputs | split("\t") | {key: .[0], value: .[1]}] | from_entries' 2>/dev/null)"
     [ -n "$BINDS" ] || BINDS='{}'
     "$JQ" -n --argjson binds "$BINDS" --argjson enabled "$([ "$ENABLED" = 1 ] && echo true || echo false)" --argjson control_enabled "$([ "$CONTROL_ENABLED" = 1 ] && echo true || echo false)" --argjson auto_apply "$([ "$AUTO_APPLY" = 1 ] && echo true || echo false)" --argjson clients "$CLIENTS" --arg last "$LAST" --argjson rc "$RC" --argjson count "$COUNT" --arg empty "$WEMPTY" '{ok:true,component:"wifi-client-guard",empty_reason:$empty,enabled:$enabled,control_enabled:$control_enabled,auto_apply:$auto_apply,clients:$clients,count:$count,binds:$binds,scheduler:{last:$last,rc:$rc}}'
@@ -726,7 +732,7 @@ if [ "$ACTION" = config-data ]; then
     list_json(){ "$JQ" -Rn '[inputs|select(length>0)]'; }
     ROUTER=false; ROUTE_DOMAINS='[]'; TGROUPS='[]'
     if [ "$PROFILE_READY" = true ]; then
-        RUNNING="$(ndm_cached running 10 "show running-config")"
+        RUNNING="$(ndm_cached running "$CONFIG_TTL" "show running-config")"
         if [ -n "$RUNNING" ]; then
             ROUTER=true
             # No group chosen: no domains (an empty name would match lines outside any group).
@@ -1888,7 +1894,7 @@ if [ "$ACTION" = "diagnostics" ]; then
     # Smart DNS: each domain bound to a DNS-over-HTTPS server must resolve to an
     # address that leaves through the provider, never through a tunnel.
     SMARTDNS_STATUS=PASS SMARTDNS_DETAIL="Smart DNS не используется"
-    DIAG_RC="$(ndm_cached running 10 "show running-config")"
+    DIAG_RC="$(ndm_cached running "$CONFIG_TTL" "show running-config")"
     # Smart DNS rows in Keenetic and in AdGuard Home ([/domain/]https://...).
     SD_DOMAINS="$({ printf '%s\n' "$DIAG_RC" | awk '
         /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
@@ -2076,7 +2082,7 @@ if [ "$ACTION" = tunnel-probe ]; then
     fi
     PING_PID=$!
     "$CURL" --http1.1 --interface "$DEV" --silent --max-time 5 https://ipinfo.io/json > "$PROBE_DIR/exit" 2>/dev/null || :
-    PEER="$(ndm_cached running 10 "show running-config" |
+    PEER="$(ndm_cached running "$CONFIG_TTL" "show running-config" |
         awk -v n="interface $NAME" '$0 == n {on = 1; next} on && /^!/ {exit} on {sub(/^ +/, ""); print}')"
     wait "$PING_PID" 2>/dev/null
     ENDPOINT="$(printf '%s\n' "$PEER" | awk '$1 == "endpoint" {print $2; exit}')"
@@ -2226,7 +2232,8 @@ if [ "$ACTION" = "route-probe" ]; then
     trap route_probe_cleanup EXIT
     trap 'exit 1' HUP INT TERM
 
-    "${VWARD_NDMC:-ndmc}" -c "show running-config" 2>/dev/null | tr -d '\r' > "$RUNCFG"
+    # A look that changes nothing: the shared copy too.
+    ndm_cached running "$CONFIG_TTL" "show running-config" > "$RUNCFG" 2>/dev/null
 
     valid_ipv4()
     {
@@ -2377,7 +2384,7 @@ fi
 if [ "$ACTION" = lists-data ]; then
     header_json
     [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
-    RUNNING="$(ndm_cached running 10 "show running-config")"
+    RUNNING="$(ndm_cached running "$CONFIG_TTL" "show running-config")"
     [ -n "$RUNNING" ] || { echo '{"ok":false,"error":"router_config_unavailable"}'; exit 0; }
     LISTS_CONF=${VWARD_DOMAIN_LISTS_CONF:-$CONFIG_ETC/route-engine/domain-lists.conf}
     LISTS_STATE=$CONFIG_ETC/route-engine/domain-lists
@@ -2488,7 +2495,7 @@ if [ "$ACTION" = ai-data ]; then
     SV_CAT=${VWARD_SERVICES_FETCHED:-/opt/var/lib/vward/services/catalog.json}
     "$JQ" -e '.schema == 1 and (.services | length) > 0' "$SV_CAT" >/dev/null 2>&1 || SV_CAT=${VWARD_SERVICES_BUNDLED:-/opt/share/vward/console/services-catalog.json}
     "$JQ" -e '.schema == 1' "$SV_CAT" >/dev/null 2>&1 || { echo '{"ok":false,"error":"services_unavailable"}'; exit 0; }
-    AI_RUN="$(ndm_cached running 10 "show running-config")"
+    AI_RUN="$(ndm_cached running "$CONFIG_TTL" "show running-config")"
     # Smart DNS domains: Keenetic's own lines (domain, server host) and AdGuard Home's.
     AI_DOH="$(printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {h = $3; sub(/^https:\/\//, "", h); sub(/[\/:].*$/, "", h); print tolower($NF) "\t" h}')"
@@ -2629,7 +2636,7 @@ if [ "$ACTION" = awg-data ]; then
     # Keenetic's own WireGuard tunnels that came from an AmneziaWG 3.x file: its import
     # keeps H1-H4 = 1 2 3 4 with S3/S4 but drops the header protection key, so they
     # never connect.  The engine can take them over once it has the file.
-    AWG_LOST="$(ndm_cached running 10 "show running-config" | awk '
+    AWG_LOST="$(ndm_cached running "$CONFIG_TTL" "show running-config" | awk '
         /^interface [^ ]+$/ {cur = $2; desc = ""; asc = ""; peer = ""; next}
         cur != "" && $1 == "description" {d = $0; sub(/^[ \t]*description[ \t]*/, "", d); gsub(/"/, "", d); desc = d}
         cur != "" && $1 == "wireguard" && $2 == "asc" {asc = $0}
@@ -2799,7 +2806,7 @@ if [ "$ACTION" = list-data ]; then
     printf '%s\n' "$NAME" | grep -Eq '^[A-Za-z0-9._-]{1,64}$' || { echo '{"ok":false,"error":"invalid_group"}'; exit 0; }
     # The route engine's list has its own page («Автоподбор доменов»).
     [ "$NAME" != AdaptiveAuto ] || { echo '{"ok":false,"error":"invalid_group"}'; exit 0; }
-    RUNNING="$(ndm_cached running 10 "show running-config")"
+    RUNNING="$(ndm_cached running "$CONFIG_TTL" "show running-config")"
     [ -n "$RUNNING" ] || { echo '{"ok":false,"error":"router_config_unavailable"}'; exit 0; }
     printf '%s\n' "$RUNNING" | awk -v g="$NAME" '
         /^object-group fqdn / {cur=$3; if (cur == g) print "F\t"; next}
@@ -3238,7 +3245,7 @@ else
 fi
 
 # WireGuard connections with obfuscation (`wireguard asc`) are AmneziaWG in Keenetic's firmware.
-AWG_NAMES="$(ndm_cached running 10 "show running-config" | awk '/^interface [^ ]+$/ {cur = $2; next} /^!/ {cur = ""} cur != "" && $1 == "wireguard" && $2 == "asc" {print cur}' | tr '\n' ' ')"
+AWG_NAMES="$(ndm_cached running "$CONFIG_TTL" "show running-config" | awk '/^interface [^ ]+$/ {cur = $2; next} /^!/ {cur = ""} cur != "" && $1 == "wireguard" && $2 == "asc" {print cur}' | tr '\n' ' ')"
 WG_INTERFACES="$(
     printf '%s\n' "$IFACES" |
     "$JQ" -c --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy opkgtun}" --arg wan "${VWARD_WAN_INTERFACE:-}" --arg awgn " $AWG_NAMES" '
