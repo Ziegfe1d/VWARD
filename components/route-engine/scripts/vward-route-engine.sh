@@ -269,7 +269,7 @@ refresh_sets()
 
     mkdir -p "$VOLATILE_DIR" 2>/dev/null
     if [ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" = 0 ]; then
-        : > "$SMARTDNS"
+        printf '' > "$SMARTDNS" 2>/dev/null
     else
         # Smart DNS lives in Keenetic (DoH rows) or in AdGuard Home ([/domain/]https://...).
         {
@@ -533,7 +533,7 @@ tls_broken()
 tls_crash()
 {
     case "$1" in 132|134|135|136|139) ;; *) return 1 ;; esac
-    : > "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" 2>/dev/null
+    printf '' > "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" 2>/dev/null
     return 0
 }
 
@@ -879,7 +879,7 @@ add_adaptive()
                 command -v vward_note >/dev/null 2>&1 &&
                     vward_note warn "AdaptiveAuto полон" "Keenetic принимает в группу не больше 300 доменов. Новые сайты не добавляются час; уберите ненужные в «Маршруты» - AdaptiveAuto." routes
             }
-            : > "$ADAPTIVE_FULL"
+            printf '' > "$ADAPTIVE_FULL" 2>/dev/null
             echo "$(date '+%Y-%m-%d %H:%M:%S')|ADAPTIVE_FULL|$H|$GROUP|no new name for $ADAPTIVE_FULL_MIN min" >> "$EVENT_LOG"
             change_unlock
             return 0 ;;
@@ -1175,7 +1175,7 @@ classify_host()
             printf '%s\n' "$CLS_LINE"
         done
         # The classifier is gone: this name by the scan, the next ones after a restart.
-        : > "$CLS_DIR/dead" 2>/dev/null
+        printf '' > "$CLS_DIR/dead" 2>/dev/null
     fi
     classify_scan "$1"
 }
@@ -1262,7 +1262,7 @@ classifier_start()
     [ -d "$CLS_DIR" ] || mkdir -p "$CLS_DIR" || return 1
     rm -f "$CLS_DIR/req" "$CLS_DIR/resp" "$CLS_DIR/dead"
     mkfifo "$CLS_DIR/req" "$CLS_DIR/resp" || return 1
-    : > "$CLS_DIR/stamp"
+    printf '' > "$CLS_DIR/stamp" 2>/dev/null || return 1
     # shellcheck disable=SC2086 # CLS_AWK is a command and its options
     $CLS_AWK -v w="$LIST_WATCH_MAP" -v m="$MANUAL" -v s="$SMARTDNS" -v k="$SKIP_DOMAINS" -v hf="$HINTS" '
         function load(f, tag,    line, d, n) {
@@ -1312,7 +1312,7 @@ classifier_start()
         }
     ' < "$CLS_DIR/req" > "$CLS_DIR/resp" 2>/dev/null &
     CLS_PID=$!
-    exec 7>"$CLS_DIR/req" 8<"$CLS_DIR/resp" || { kill "$CLS_PID" 2>/dev/null; CLS_PID=""; return 1; }
+    command exec 7>"$CLS_DIR/req" 8<"$CLS_DIR/resp" || { kill "$CLS_PID" 2>/dev/null; CLS_PID=""; return 1; }
     # shellcheck disable=SC2086
     IFS= read $CLS_T -r CLS_LINE <&8 && [ "$CLS_LINE" = ready ] || { CLS_READY=1; classifier_stop; return 1; }
     CLS_READY=1
@@ -1715,7 +1715,7 @@ agh_bind_one()
     [ ! -f "$AGH_BIND" ] || AB_N=$(wc -l < "$AGH_BIND")
     if [ "$AB_N" -ge "$AGH_BIND_MAX" ]; then
         [ -e "$AGH_BIND_RUN/full" ] || echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND_FULL|$1|max=$AGH_BIND_MAX" >> "$EVENT_LOG"
-        : > "$AGH_BIND_RUN/full"
+        printf '' > "$AGH_BIND_RUN/full" 2>/dev/null
         return 0
     fi
     AB_NS=$(agh_ns)
@@ -1729,13 +1729,13 @@ agh_bind_one()
     fi
     if [ "$(agh_ns_room "$AB_RC")" -le 0 ]; then
         [ -e "$AGH_BIND_RUN/full" ] || echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND_FULL|$1|keenetic=no_room|free=$AGH_BIND_FREE" >> "$EVENT_LOG"
-        : > "$AGH_BIND_RUN/full"
+        printf '' > "$AGH_BIND_RUN/full" 2>/dev/null
         return 0
     fi
     if AB_OUT=$(ndmc -c "ip name-server $AB_NS $1" 2>&1 </dev/null); then
         echo "$1 $AB_NS" >> "$AGH_BIND"
         # Keenetic's saved configuration follows within the hour (the route reconciler).
-        : > "$CONFIG_DIRTY"
+        printf '' > "$CONFIG_DIRTY" 2>/dev/null
         echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND|$1|$AB_NS" >> "$EVENT_LOG"
     else
         echo "$1 failed" >> "$AGH_BIND"
@@ -1764,7 +1764,7 @@ agh_bind_prune()
         ndmc -c "no ip name-server $AP_NS $AP_D" </dev/null >/dev/null 2>&1 || continue
         echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_UNBIND|$AP_D|keenetic=no_room" >> "$EVENT_LOG"
         awk -v d="$AP_D" '$1 != d' "$AGH_BIND" > "$AGH_BIND.new" && mv -f "$AGH_BIND.new" "$AGH_BIND"
-        : > "$CONFIG_DIRTY"
+        printf '' > "$CONFIG_DIRTY" 2>/dev/null
     done < "$AGH_BIND.drop"
     rm -f "$AGH_BIND.drop"
 }
@@ -1886,7 +1886,7 @@ while :; do
                 > "$RAW" 2>/dev/null & ;;
         *)
             # Nothing to capture with: the reader still needs its writer to end.
-            : > "$RAW" & ;;
+            printf '' > "$RAW" & ;;
     esac
 
     TCP_PID=$!

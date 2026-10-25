@@ -407,7 +407,7 @@ case "$1" in
             restart)
                 # A planned restart (a tunnel switch): the real-time agent sees the engine go
                 # and must not start it again in the same second (Viva 2026-10-19).
-                : > "$PLANNED_FLAG" 2>/dev/null
+                printf '' > "$PLANNED_FLAG" 2>/dev/null
                 stop_request restart
                 stop_service
                 sleep 1

@@ -112,6 +112,26 @@ try:
     if "rr1---sn-test.googlevideo.com" in changes:
         fail("a name of a manual list changed the router")
 
+    # A write that fails (a full /tmp or USB; here the flag's path is a folder): BusyBox ash ends
+    # the whole script on a failed redirection of «:» or «exec» (fix.34) - the engine goes on.
+    dirty = opt_state / "keenetic-config.dirty"
+    dirty.unlink()
+    dirty.mkdir()
+    with open(root / "emu/dns-queries", "a") as q:
+        q.write("www.instagram.com\n")
+    events_f = root / "opt/var/log/vward-route-engine-events.log"
+    deadline = time.time() + 20
+    while time.time() < deadline and "|AGH_BIND|instagram.com|" not in events_f.read_text():
+        time.sleep(1)
+    time.sleep(3)
+    events = events_f.read_text()
+    if "|AGH_BIND|instagram.com|" not in events:
+        fail(f"no binding after the failed write:\n{events[-800:]}")
+    if "|STOP|" in events or not any(DAEMONS.match(l) and "vward-route-engine.sh" in l for l in
+                                     subprocess.run(["ps", "-eo", "pid,args"], stdout=subprocess.PIPE, text=True).stdout.splitlines()):
+        fail(f"the engine ended on a failed write:\n{events[-800:]}")
+    dirty.rmdir()
+
     sh(root, "/opt/etc/init.d/S91vward-route-engine stop")
     time.sleep(1)
     left = daemons()
