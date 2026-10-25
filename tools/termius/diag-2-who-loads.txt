@@ -105,7 +105,21 @@ for R in 192.168.1.1 8.8.8.8; do
   echo "claude.ai via $R: $(nslookup claude.ai $R 2>/dev/null |
     awk '/^Name:/{n=1} n&&/^Address/{print $NF}' | head -n 1)"
 done
-echo "=== 7. LOGS / CRON ==="
+echo "=== 7. FQDN MIRRORING (show log) ==="
+LG=/tmp/dg-log.txt
+tmo 20 ndmc -c "show log" > "$LG" 2>&1
+FM='FQDN mirroring failed'
+echo "mirroring_failed=$(grep -c "$FM" "$LG")" \
+  "eagain=$(grep -c 'temporarily unavail' "$LG")" \
+  "lines=$(wc -l < "$LG")"
+awk -v m="$FM" '/time:/{t=$0; sub(/.*time:[ ]*/,"",t)}
+  index($0, m) {
+  if ($0 ~ /^[A-Z][a-z][a-z] [ 0-9][0-9] /)
+    print substr($0, 1, 15); else print t }' \
+  "$LG" | sort | uniq -c | sort -rn | head -n 5
+grep "$FM" "$LG" | tail -n 2 | cut -c1-110
+rm -f "$LG"
+echo "=== 8. LOGS / CRON ==="
 for F in /opt/var/log/*route*; do
   [ -f "$F" ] && { echo "--- $F"; tail -n 6 "$F" | cut -c1-110; }
 done
