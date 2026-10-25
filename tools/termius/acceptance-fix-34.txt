@@ -1,0 +1,96 @@
+cat > /tmp/acc34.sh <<'EOF'
+clear
+PFX="vward-acc34"
+OUT="/tmp/${PFX}-$(date +%Y%m%d-%H%M%S).txt"
+LAST="/tmp/last_result.txt"
+MAXB=30000
+KEEP=5
+ESC=$(printf '\033')
+ls -1t /tmp/${PFX}-*.txt 2>/dev/null |
+  tail -n +"$KEEP" |
+  while read -r F; do rm -f "$F"; done
+: > "$OUT"
+ln -sfn "$OUT" "$LAST"
+ln -sfn "$OUT" "/tmp/last_${PFX}.txt"
+send_out() {
+  [ -s "$OUT" ] || return 1
+  sed "s/${ESC}\[[0-9;?]*[a-zA-Z]//g" "$OUT" |
+    tail -c "$MAXB" | base64 | tr -d '\r\n' |
+    { read -r B; printf '\033]52;c;%s\a' "$B"; }
+}
+on_abort() {
+  trap '' INT TERM HUP
+  send_out
+  printf '\n[ ABORTED ]: PARTIAL RESULT IN %s\n' "$LAST"
+  exit 130
+}
+trap on_abort INT TERM HUP
+NOW=$(date +%s)
+CUT=$(date -d "@$((NOW - 86400))" \
+  '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
+since() {
+  awk -v c="$CUT" 'substr($0,1,19) >= c' "$1" 2>/dev/null
+}
+cnt() { since "$1" | grep -c "$2"; }
+EOF
+cat >> /tmp/acc34.sh <<'EOF'
+{
+echo "=========================================="
+echo " VWARD ACCEPTANCE fix.34 v2.3.3"
+echo " Date: $(date '+%Y-%m-%d %H:%M:%S') since $CUT"
+echo " Version: $(cat /opt/share/vward/VERSION 2>/dev/null)"
+echo " up: $(cut -d' ' -f1 /proc/uptime)s" \
+  "load: $(cut -d' ' -f1-3 /proc/loadavg)"
+echo "=== 1. ROUTE ENGINE (24 h) ==="
+E=/opt/var/log/vward-route-engine-events.log
+for K in START_FAILED STOP_REQUEST WATCHDOG_RESTART \
+  RESTART_LIMIT PERSIST_RESTORE; do
+  echo "$K=$(cnt "$E" "[|]$K")"
+done
+N=$(cnt "$E" '[|]START_FAILED')
+[ "$N" -le 1 ] && echo "[ PASS ] START_FAILED <= 1" ||
+  echo "[ FAIL ] START_FAILED=$N"
+since "$E" | grep -E '[|](STOP|PERSIST_RESTORE_)' |
+  tail -n 4 | cut -c1-110
+echo "tmp restore files: $(ls /tmp/vward-route-restore-* \
+  2>/dev/null | wc -l)"
+echo "=== 2. PANEL: SLOW CONFIG READS (24 h) ==="
+L=/opt/var/log/vward/keenetic-slow.log
+A=$(since "$L" | grep 'api.cgi' | grep -c 'running-config')
+echo "api.cgi running-config slow=$A (was 26/day)"
+[ "$A" -le 5 ] && echo "[ PASS ] api.cgi slow <= 5" ||
+  echo "[ WARNING ] api.cgi slow=$A"
+EOF
+cat >> /tmp/acc34.sh <<'EOF'
+echo "=== 3. ADS COMPONENT / DNS CHAIN ==="
+C=/opt/etc/vward/components
+[ -e "$C/ads-privacy-guard.disabled" ] &&
+  echo "ads-privacy-guard: disabled" ||
+  echo "ads-privacy-guard: enabled"
+G=/opt/etc/vward/ads-privacy-guard/dns-guard.conf
+echo "dns-guard.conf: $(cat "$G" 2>/dev/null | tr '\n' ' ')"
+D=/tmp/vward-dns-chain
+ls -1 "$D" 2>/dev/null | tr '\n' ' '; echo
+for F in state reason since silent.since; do
+  [ -f "$D/$F" ] && echo "$F=$(cat "$D/$F")"
+done
+AL=/opt/var/log/vward-ads-privacy-guard.log
+echo "WOULD_TAKE_OUT=$(cnt "$AL" 'WOULD_TAKE_OUT')" \
+  "CHAIN_OUT=$(cnt "$AL" 'DNS_CHAIN_OUT')" \
+  "ORPHAN_OUT=$(cnt "$AL" 'DNS_ORPHAN_OUT')"
+since "$AL" | grep -o 'WOULD_TAKE_OUT|[a-z_]*' |
+  sort | uniq -c
+echo "=== 4. NIGHT IP CHECK ==="
+tail -n 1 /opt/var/log/vward-policy-audit-summary.log 2>&1 |
+  cut -c1-200
+echo "=========================================="
+} 2>&1 | tee "$OUT"
+P=$(grep -c '^\[ PASS \]' "$OUT")
+W=$(grep -c '^\[ WARNING \]' "$OUT")
+F=$(grep -c '^\[ FAIL \]' "$OUT")
+echo "SUMMARY: pass=$P warn=$W fail=$F" | tee -a "$OUT"
+if send_out; then echo "RESULT SENT (OSC52)"
+else echo "[ FAIL ] nothing to send"; fi
+echo "RAW: $LAST"
+EOF
+sh -n /tmp/acc34.sh && sh /tmp/acc34.sh
