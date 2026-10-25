@@ -30,6 +30,52 @@ tunnel_answers() {
 }
 SUCCESS_THRESHOLD=3
 
+# Keenetic busy (fix.34; Viva 25.10: the run at 00:10 took 26-36 min over ~500 sites, 273 of 491
+# not passed, 60 -> 19 passed, as the night's false «Интернет»): the sites go in portions, and
+# between portions the run waits while vward_busy says so, at most AUDIT_PAUSE_MAX seconds in all.
+# Which sites and how they are judged does not change. VWARD_AUDIT_PAUSE=0 turns it off.
+AUDIT_PORTION=${VWARD_AUDIT_PORTION:-20}
+AUDIT_PAUSE_STEP=${VWARD_AUDIT_PAUSE_STEP:-15}
+AUDIT_PAUSE_MAX=${VWARD_AUDIT_PAUSE_MAX:-600}
+PAUSED=0
+PAUSES=0
+audit_pause()
+{
+    [ "${VWARD_AUDIT_PAUSE:-1}" = 1 ] || return 0
+    command -v vward_busy >/dev/null 2>&1 || return 0
+    ap_in=0
+    while [ "$PAUSED" -lt "$AUDIT_PAUSE_MAX" ] && vward_busy; do
+        [ "$ap_in" = 1 ] || PAUSES=$((PAUSES + 1))
+        ap_in=1
+        sleep "$AUDIT_PAUSE_STEP"
+        PAUSED=$((PAUSED + AUDIT_PAUSE_STEP))
+    done
+    return 0
+}
+
+# Why a site did not pass, for the summary line only (diagnostics; the judging is above).
+REASONS=
+audit_reason()
+{
+    case "$CLASS" in
+        ISP_OK) return 0 ;;
+    esac
+    if [ "$CLASS" = UNKNOWN ] && [ "${NEED_VPN:-0}" = 1 ] && [ "${VPN_RC:-0}" -ne 0 ]; then
+        ar=vpn_down
+    else
+        case "$ISP_RC" in
+            0) case "$CODE" in 451) ar=http_451 ;; 4??) ar=http_4xx ;; 5??) ar=http_5xx ;; *) ar=http_other ;; esac ;;
+            6) ar=isp_dns ;;
+            7) ar=isp_refused ;;
+            28) ar=isp_timeout ;;
+            35|60) ar=isp_tls ;;
+            52|56) ar=isp_reset ;;
+            *) ar=isp_rc$ISP_RC ;;
+        esac
+    fi
+    REASONS="$REASONS $ar"
+}
+
 STATE_DIR="/opt/var/lib/vward/policy-audit"
 LOG="/opt/var/log/vward-policy-audit.log"
 SUMMARY_LOG="/opt/var/log/vward-policy-audit-summary.log"
@@ -163,6 +209,7 @@ while IFS='|' read GROUP HOST; do
     esac
 
     CHECKED=$((CHECKED + 1))
+    [ $((CHECKED % AUDIT_PORTION)) -ne 0 ] || audit_pause
 
     SAFE=$(echo "$HOST" | tr '/:*?' '____')
     STATE="$STATE_DIR/$SAFE.state"
@@ -338,9 +385,11 @@ while IFS='|' read GROUP HOST; do
                 UNKNOWN_COUNT=$((UNKNOWN_COUNT + 1))
                 ;;
         esac
+        audit_reason
 
     else
         NODNS=$((NODNS + 1))
+        REASONS="$REASONS nodns"
     fi
 
     TMP="${STATE}.tmp.$$"
@@ -427,7 +476,12 @@ echo "Candidates:  $CANDIDATE_COUNT"
 echo
 echo "No routes or FQDN groups were changed."
 
-echo "$END_TEXT|duration=${ELAPSED}s|targets=$TOTAL|checked=$CHECKED|ok=$OK|fail=$FAIL|unknown=${UNKNOWN_COUNT}|nodns=$NODNS|skipped=$SKIPPED|candidates=$CANDIDATE_COUNT" \
+# shellcheck disable=SC2086 # one reason a word
+REASON_SUM=$(printf '%s\n' $REASONS | sort | uniq -c | sort -rn | awk 'NF == 2 {printf "%s%s:%s", s, $2, $1; s = ","}')
+echo "Reasons:     ${REASON_SUM:-none}"
+echo "Paused:      ${PAUSED}s (${PAUSES} times)"
+
+echo "$END_TEXT|duration=${ELAPSED}s|targets=$TOTAL|checked=$CHECKED|ok=$OK|fail=$FAIL|unknown=${UNKNOWN_COUNT}|nodns=$NODNS|skipped=$SKIPPED|candidates=$CANDIDATE_COUNT|paused=${PAUSED}s|reasons=${REASON_SUM:-none}" \
     >> "$SUMMARY_LOG"
 
 exit 0

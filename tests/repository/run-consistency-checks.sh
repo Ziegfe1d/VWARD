@@ -127,6 +127,7 @@ python3 tests/repository/check-tunnel-move.py || fail "lists off a tunnel withou
 python3 tests/repository/check-smartdns-keenetic-forms.py || fail "Smart DNS in Keenetic: refused forms journaled, shorter forms tried"
 python3 tests/repository/check-component-ops.py || fail "components: AdGuard Home off, on, setup, removal"
 python3 tests/repository/check-policy-audit-tunnel.py || fail "IP categories judged only through a working tunnel"
+python3 tests/repository/check-policy-audit-pause.py || fail "IP categories' night check waits while Keenetic is busy, reasons in its summary"
 python3 tests/repository/check-tunnel-services.py || fail "services checked through every tunnel"
 python3 tests/repository/check-route-engine-alt-tunnel.py || fail "route engine tries the other tunnels"
 python3 tests/repository/check-console-agh-auth.py || fail "Panel AdGuard Home login"

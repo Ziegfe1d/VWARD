@@ -31,3 +31,6 @@ VWARD_RCI_BASE=http://127.0.0.1:79/rci
 # The Panel's look at Keenetic's whole configuration: the shared copy up to this many seconds
 # old (fix.34; was 10). VWARD's own changes drop it at once; 10 brings back the old behaviour.
 # VWARD_CONSOLE_CONFIG_TTL=60
+# IP categories' night check: every 20 sites it waits while Keenetic is busy (15 s at a time,
+# 600 s at most) and counts why sites did not pass (fix.34); 0 runs it straight through.
+# VWARD_AUDIT_PAUSE=1
