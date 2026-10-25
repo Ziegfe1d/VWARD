@@ -181,6 +181,8 @@ cleanup()
     classifier_stop 2>/dev/null
 
     rm -f "$RAW" "$HOSTS"
+    # A TERM in the middle of a restore or a refresh (S91's start wait) left these every minute.
+    rm -f /tmp/vward-route-restore-*."$$" /tmp/vward-route-engine-running."$$" /tmp/vward-route-engine-all."$$"
     rm -rf "${LOCK:?}"
     vward_admission_leave 2>/dev/null || true
 
@@ -685,6 +687,17 @@ valid_fqdn()
     [ "${#1}" -le 253 ]
 }
 
+# restore_time_up: the restore has had its seconds (no clock: never).
+restore_time_up()
+{
+    case "$RS_T0" in ''|*[!0-9]*) return 1 ;; esac
+    RS_NOW=
+    read -r RS_NOW _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
+    RS_NOW=${RS_NOW%%.*}
+    case "$RS_NOW" in ''|*[!0-9]*) return 1 ;; esac
+    [ $((RS_NOW - RS_T0)) -ge "$RS_MAX" ]
+}
+
 restore_adaptive_from_persist()
 {
     if [ ! -f "$PERSIST" ]; then
@@ -699,9 +712,13 @@ restore_adaptive_from_persist()
         return 1
     }
 
+    # A run killed during a restore (S91's start wait, a TERM) left its files: one engine at a time.
+    rm -f /tmp/vward-route-restore-* 2>/dev/null
     CFG="/tmp/vward-route-restore-cfg.$$"
     CUR="/tmp/vward-route-restore-cur.$$"
     WANT="/tmp/vward-route-restore-want.$$"
+    DEL="/tmp/vward-route-restore-del.$$"
+    ADD="/tmp/vward-route-restore-add.$$"
 
     if ! vward_running_config > "$CFG" ||
        [ ! -s "$CFG" ]; then
@@ -724,59 +741,83 @@ restore_adaptive_from_persist()
     tr '[:upper:]' '[:lower:]' |
     sort -u > "$WANT"
 
+    # Both differences in one pass (fix.34: a grep for each name, thousands of names, took longer
+    # than S91's start wait and the engine was killed every minute - CI #726). Keenetic takes 300
+    # names in a group: no more is sent than there is room for after the removals.
+    awk -v del="$DEL" -v add="$ADD" -v max="${VWARD_ADAPTIVE_MAX:-300}" '
+        FILENAME == ARGV[1] {cur[$0] = 1; n++; next}
+        $0 != "" {want[$0] = 1; if (!($0 in cur)) new[++k] = $0}
+        END {
+            printf "" > del; printf "" > add
+            for (h in cur) if (h != "" && !(h in want)) {print h > del; n--}
+            for (i = 1; i <= k; i++) if (n < max) {print new[i] > add; n++} else over++
+            print over + 0
+        }' "$CUR" "$WANT" > "$CFG.over" 2>/dev/null || printf '0\n' > "$CFG.over"
+    OVER=$(cat "$CFG.over" 2>/dev/null); OVER=${OVER:-0}
+
     RC=0
     ADDED=0
     REMOVED=0
     SKIPPED=0
     FAILS=0
+    LEFT=0
+    # S91 waits 12 s for the engine to be up: the restore stops after VWARD_RESTORE_SECONDS (a
+    # Keenetic call is 0.05-1 s; 300 of them would have the engine killed at every start). The
+    # names left are counted; a name of them a device asks again is checked and added as usual.
+    RS_T0=
+    read -r RS_T0 _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
+    RS_T0=${RS_T0%%.*}
+    RS_MAX=${VWARD_RESTORE_SECONDS:-8}
 
     while IFS= read -r H; do
         [ -n "$H" ] || continue
-
-        if ! grep -Fxq "$H" "$WANT"; then
-            if ndmc -c \
-              "no object-group fqdn $GROUP include $H" \
-              >/dev/null 2>&1; then
-                REMOVED=$((REMOVED + 1))
-            else
-                RC=1
-            fi
+        restore_time_up && { LEFT=$((LEFT + 1)); continue; }
+        if ndmc -c \
+          "no object-group fqdn $GROUP include $H" \
+          >/dev/null 2>&1; then
+            REMOVED=$((REMOVED + 1))
+        else
+            RC=1
         fi
-    done < "$CUR"
+    done < "$DEL"
 
     while IFS= read -r H; do
         [ -n "$H" ] || continue
-
-        if ! grep -Fxq "$H" "$CUR"; then
-            # A saved name the router would refuse is not sent at all.
-            if ! valid_fqdn "$H"; then
-                SKIPPED=$((SKIPPED + 1))
-                continue
-            fi
-            if OUT=$(ndmc -c "object-group fqdn $GROUP include $H" 2>&1); then
-                ADDED=$((ADDED + 1))
-            else
-                RC=1
-                FAILS=$((FAILS + 1))
-                # The router's own words for the first few, to know why.
-                [ "$FAILS" -gt 3 ] ||
-                    echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_FAIL|$H|$(printf '%s' "$OUT" | tr '\n|' '  ' | cut -c1-160)" \
-                        >> "$EVENT_LOG"
-            fi
+        # A saved name the router would refuse is not sent at all.
+        if ! valid_fqdn "$H"; then
+            SKIPPED=$((SKIPPED + 1))
+            continue
         fi
-    done < "$WANT"
+        restore_time_up && { LEFT=$((LEFT + 1)); continue; }
+        if OUT=$(ndmc -c "object-group fqdn $GROUP include $H" 2>&1); then
+            case "$OUT" in
+                # The group is full after all (names added by hand meanwhile): no more is sent.
+                *"too many elements"*) printf '' > "$ADAPTIVE_FULL" 2>/dev/null; RC=1; FAILS=$((FAILS + 1)); break ;;
+            esac
+            ADDED=$((ADDED + 1))
+        else
+            RC=1
+            FAILS=$((FAILS + 1))
+            # The router's own words for the first few, to know why.
+            [ "$FAILS" -gt 3 ] ||
+                echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_FAIL|$H|$(printf '%s' "$OUT" | tr '\n|' '  ' | cut -c1-160)" \
+                    >> "$EVENT_LOG"
+            case "$OUT" in *"too many elements"*) printf '' > "$ADAPTIVE_FULL" 2>/dev/null; break ;; esac
+        fi
+    done < "$ADD"
 
-    rm -f "$CFG" "$CUR" "$WANT"
+    rm -f "$CFG" "$CFG.over" "$CUR" "$WANT" "$DEL" "$ADD"
+    [ "$LEFT" -eq 0 ] || RC=1
 
     echo 0 > "$REFRESH_TS"
 
     change_unlock
 
     if [ "$RC" -eq 0 ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_OK|added=$ADDED|removed=$REMOVED|skipped=$SKIPPED" \
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_OK|added=$ADDED|removed=$REMOVED|skipped=$SKIPPED|over_limit=$OVER|left=$LEFT" \
             >> "$EVENT_LOG"
     else
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_PARTIAL|added=$ADDED|removed=$REMOVED|skipped=$SKIPPED|failed=$FAILS" \
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_PARTIAL|added=$ADDED|removed=$REMOVED|skipped=$SKIPPED|failed=$FAILS|over_limit=$OVER|left=$LEFT" \
             >> "$EVENT_LOG"
     fi
 
