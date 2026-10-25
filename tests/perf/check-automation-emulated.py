@@ -16,11 +16,12 @@ did and when, from the router's own log of changes (ndmc), the guards' state and
   wan-down         no internet for 12 minutes: the internet guard renews and restarts the
                    provider's connection within its limits, the VPN guard does not touch the
                    tunnel (the VPN is not the culprit), all calm once the internet is back
-  agh-loop         AdGuard Home restarting every minute: out of the DNS chain at the second
-                   crash, back in once it runs steadily, no flapping
+  agh-loop         AdGuard Home restarting every minute: WOULD_TAKE_OUT|loop in the journal, out
+                   only after 10 silent minutes (fix.34, observation), back once steady, no flapping
   agh-one-crash    one crash, then it answers: stays in the chain
   agh-update       an update VWARD makes: out before it, its restarts are no crash, back at once
-  agh-silent       AdGuard Home silent: out within 3 minutes, back after 3 answers
+  agh-silent       AdGuard Home silent: 4 minutes - the journal only; 10 minutes in a row - out
+                   (fix.34, observation), back after 3 answers
   agh-blip         AdGuard Home silent for one minute: stays in the chain
   agh-and-wan      AdGuard Home silent and no internet: the chain is left as it is
   engine-kill      the route engine killed: running again the next minute, also when killed
@@ -278,13 +279,19 @@ def s_wan_down(r, out):
     expect(r.chain_in(), "AdGuard Home stays in the DNS chain (the provider is silent too)", out)
 
 
+def would(r, why):
+    f = r.root / "opt/var/log/vward-ads-privacy-guard.log"
+    return f.exists() and f"WOULD_TAKE_OUT|{why}|" in f.read_text()
+
+
 def s_agh_loop(r, out):
     r.run(2); r.run(12, ["agh-loop"])
     outs = r.chain_cmds("no " + NS)
-    expect(bool(outs) and outs[0] <= 4, f"restarting in a loop: out of the DNS chain at the second crash (at {outs[:1]}, from 3)", out)
+    # fix.34, observation: restarts are a sign (the journal); only 10 minutes of silence in a row
+    # take it out (the emulated loop is silent too, from minute 3).
+    expect(would(r, "loop") and (not outs or outs[0] >= 13), f"restarting in a loop: WOULD_TAKE_OUT|loop, not out before 10 silent minutes (out at {outs[:1]}, from 3)", out)
     r.run(14)
-    expect(r.chain_in(), "back in the chain once it runs steadily", out)
-    back = [m for m in r.cmds(NS) if m > 14 and not any(c.startswith("no ") for mm, c in r.log if mm == m and NS in c)]
+    expect(r.chain_in(), "in the chain once it runs steadily", out)
     expect(len(r.chain_cmds("no " + NS)) <= 1, f"no flapping ({len(r.chain_cmds('no ' + NS))} times out)", out)
 
 
@@ -313,9 +320,12 @@ def s_agh_update(r, out):
 
 
 def s_agh_silent(r, out):
-    r.run(2); r.run(8, ["agh"])
+    # fix.34, observation: 4 silent minutes - the journal only; 10 in a row - out.
+    r.run(2); r.run(4, ["agh"])
+    expect(not r.chain_cmds("no " + NS) and would(r, "silent"), "silent 4 minutes: stays in the chain, WOULD_TAKE_OUT|silent in the journal", out)
+    r.run(8, ["agh"])
     outs = r.chain_cmds("no " + NS)
-    expect(bool(outs) and outs[0] <= 6, f"silent: out within 3 minutes (at {outs[:1]}, from 3)", out)
+    expect(bool(outs) and 12 <= outs[0] <= 14, f"silent 10 minutes in a row: out (at {outs[:1]}, silent from 3)", out)
     r.run(8)
     expect(r.chain_in(), "back after 3 answers in a row", out)
 
@@ -372,10 +382,11 @@ def s_sentinel(r, out):
     r.run(2)
     (r.root / "emu/fault-agh").write_text("1\n")
     rc, o, _ = r.sh("/opt/bin/vward-sentinel-act.sh chain-fail; echo rc=$?")
-    expect(not r.chain_in(), f"«chain-fail» with AdGuard Home silent: out of the chain at once ({o.strip()[-40:]})", out)
+    # fix.34, observation: the watcher's 15 s are a sign, the journal only.
+    expect(r.chain_in() and would(r, "fast"), f"«chain-fail» with AdGuard Home silent: stays in the chain, WOULD_TAKE_OUT|fast ({o.strip()[-40:]})", out)
     (r.root / "emu/fault-agh").unlink()
     r.run(5)
-    expect(r.chain_in(), "and back once it answers", out)
+    expect(r.chain_in(), "and in once it answers", out)
     (r.root / "emu/agh-pid").write_text("")
     # The watcher asks; the components agent (the supervisor) starts it, at once.
     rc, o, _ = r.sh("/opt/bin/vward-sentinel-act.sh dns-fail; echo rc=$?")
