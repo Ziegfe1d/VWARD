@@ -13,7 +13,8 @@ reconciler, Wi-Fi scheduler). Faults are flags the fake router tools read:
   ndmc-refuse    Keenetic refuses every change
   ndmc-slow      every Keenetic command takes 8 s
   agh            AdGuard Home does not answer (agh-down: its port closed too; agh-loop: a new
-                 process every minute); agh-blip: silent for two minutes only
+                 process every minute); agh-blip: silent for two minutes only; agh-silent 4
+                 minutes (fix.34, observation: the journal only), agh-silent-long 11 (out, back)
   kill           a job killed with SIGKILL in the middle, every round
   twice          every job started twice at the same time
 
@@ -79,7 +80,8 @@ SCENARIOS = [
     ("ndmc-slow", 3, 4, ["ndmc-slow"]),
     ("kill", 4, 4, ["kill"]),
     ("twice", 3, 3, ["twice"]),
-    ("agh-silent", 5, 5, ["agh"]),
+    ("agh-silent", 4, 4, ["agh"]),
+    ("agh-silent-long", 11, 5, ["agh"]),
     ("agh-blip", 2, 4, ["agh"]),
     ("agh-loop", 6, 8, ["agh-loop"]),
     ("agh-down", 5, 5, ["agh", "agh-down"]),
@@ -308,6 +310,8 @@ def main():
                 rc.write_text("ip name-server 192.0.2.1:65053\n" + rc.read_text())
             shutil.rmtree(root / "tmp/vward-dns-chain", ignore_errors=True)
             before = len(ndmc_changes(root))
+            ads_log = root / "opt/var/log/vward-ads-privacy-guard.log"
+            would_before = ads_log.read_text().count("WOULD_TAKE_OUT|") if ads_log.exists() else 0
             refused_f = root / "emu/ndmc-refused.log"
             refused_before = len(refused_f.read_text().splitlines()) if refused_f.exists() else 0
             for log in ("crash.log", "agh-starts.log"):
@@ -345,10 +349,17 @@ def main():
             chain_in = "ip name-server 192.0.2.1:65053" in (root / "emu/running-config").read_text().splitlines()
             if not chain_in:
                 findings.append((name, minute, "-", "not recovered", "AdGuard Home not back in the DNS chain"))
-            if name in ("agh-blip", "wan", "wan-flap") and any(c.startswith("no ip name-server") for c in changes):
-                findings.append((name, minute, "-", "too eager", "AdGuard Home taken out though it was not its fault (a short pause or the whole internet down)"))
-            if name in ("agh-silent", "agh-loop", "agh-down") and not any(c.startswith("no ip name-server") for c in changes):
-                findings.append((name, minute, "-", "no fail-open", "AdGuard Home dead but still in the DNS chain"))
+            # fix.34, observation: only 10 minutes of silence in a row take AdGuard Home out; a
+            # shorter silence, restarts, a closed port or a slow Keenetic write WOULD_TAKE_OUT only.
+            took_out = any(c.startswith("no ip name-server 192.0.2.1:65053") for c in changes)
+            if name in ("agh-blip", "wan", "wan-flap", "ndmc-slow", "rci-slow", "agh-silent", "agh-loop", "agh-down", "agh-broken") and took_out:
+                findings.append((name, minute, "-", "too eager", "AdGuard Home taken out though it was not 10 minutes silent (a short pause, restarts, the whole internet down, a slow Keenetic)"))
+            if name == "agh-silent-long" and not took_out:
+                findings.append((name, minute, "-", "no fail-open", "AdGuard Home silent 11 minutes but still in the DNS chain"))
+            ads_log = root / "opt/var/log/vward-ads-privacy-guard.log"
+            would = ads_log.read_text().count("WOULD_TAKE_OUT|") if ads_log.exists() else 0
+            if name in ("agh-silent", "agh-down") and would <= would_before:
+                findings.append((name, minute, "-", "not seen", "a silent AdGuard Home is not noted (WOULD_TAKE_OUT) in the journal"))
             crashes = collections.Counter(l.split()[0] for l in (root / "emu/crash.log").read_text().splitlines() if l.strip()) if (root / "emu/crash.log").exists() else collections.Counter()
             if name == "curl-https-crash":
                 if crashes["curl"] > 2:

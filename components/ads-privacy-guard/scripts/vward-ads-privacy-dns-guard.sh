@@ -22,9 +22,17 @@
 # (Viva 2026-10-04: AdGuard Home restarted in a loop at night, the home lost DNS, the line was
 # removed by hand and stayed out: no ad filtering, no Smart DNS). CHAIN=0: VWARD leaves the
 # line alone.
+# Observation (CHAIN_OBSERVE=1, the default since fix.34): the short signs above - the real-time
+# watcher's 15 s, 3 failed checks, restarts, a loop back to the router, a port nothing listens on -
+# only write «WOULD_TAKE_OUT|reason» into the journal and change nothing in Keenetic. AdGuard Home
+# leaves the chain only when it has been silent 10 minutes in a row (each minute a real query,
+# three tries; a minute Keenetic is busy does not decide), the provider's DNS answers, and not
+# more often than once an hour; the reason goes to the journal, the bell and the Panel. Back in as
+# before, after 3 answers in a row (Viva 2026-10-19: 25 lines taken out while AdGuard Home was
+# silent after a reinstall, and they never came back). CHAIN_OBSERVE=0: the old quick take-out.
 #
 #   vward-ads-privacy-dns-guard.sh status
-#   vward-ads-privacy-dns-guard.sh set enforce|bypass|chain 0|1
+#   vward-ads-privacy-dns-guard.sh set enforce|bypass|chain 0|1   (CHAIN_OBSERVE=0|1: dns-guard.conf by hand)
 #   vward-ads-privacy-dns-guard.sh set exclude MAC[,MAC...]   ("-" for none)
 #   vward-ads-privacy-dns-guard.sh apply|tick                 (tick: the scheduler, every minute)
 #   vward-ads-privacy-dns-guard.sh chain-out                  (the real-time watcher: AdGuard Home silent)
@@ -72,7 +80,7 @@ AGH_BIND="${VWARD_AGH_BINDINGS:-/opt/var/lib/vward/agh-bindings.txt}"
 
 OP="${1:-status}"
 
-ENFORCE=0 BYPASS=0 EXCLUDE="" FAILOPEN=1 CHAIN=1
+ENFORCE=0 BYPASS=0 EXCLUDE="" FAILOPEN=1 CHAIN=1 CHAIN_OBSERVE=1
 conf_load()
 {
     [ -r "$CONF" ] || return 0
@@ -83,6 +91,7 @@ conf_load()
             EXCLUDE) EXCLUDE=$V ;;
             FAILOPEN) case "$V" in 0) FAILOPEN=0 ;; *) FAILOPEN=1 ;; esac ;;
             CHAIN) case "$V" in 0) CHAIN=0 ;; *) CHAIN=1 ;; esac ;;
+            CHAIN_OBSERVE) case "$V" in 0) CHAIN_OBSERVE=0 ;; *) CHAIN_OBSERVE=1 ;; esac ;;
         esac
     done < "$CONF"
 }
@@ -90,7 +99,7 @@ conf_load()
 conf_write()
 {
     mkdir -p "$(dirname "$CONF")" || return 1
-    printf 'ENFORCE=%s\nBYPASS=%s\nEXCLUDE=%s\nFAILOPEN=%s\nCHAIN=%s\n' "$ENFORCE" "$BYPASS" "$EXCLUDE" "$FAILOPEN" "$CHAIN" > "$CONF.tmp.$$" &&
+    printf 'ENFORCE=%s\nBYPASS=%s\nEXCLUDE=%s\nFAILOPEN=%s\nCHAIN=%s\nCHAIN_OBSERVE=%s\n' "$ENFORCE" "$BYPASS" "$EXCLUDE" "$FAILOPEN" "$CHAIN" "$CHAIN_OBSERVE" > "$CONF.tmp.$$" &&
         chmod 0600 "$CONF.tmp.$$" && mv -f "$CONF.tmp.$$" "$CONF"
 }
 
@@ -491,9 +500,20 @@ orphan_sync()
     [ -n "$os_list" ] || { rm -f "$CHAIN_DIR"/orphan.*.n; return 0; }
     for os_ns in $os_list; do
         os_port=${os_ns##*:} os_f=$CHAIN_DIR/orphan.$os_port.n
-        if orphan_listening "$os_port"; then rm -f "$os_f"; continue; fi
+        if orphan_listening "$os_port"; then rm -f "$os_f" "$CHAIN_DIR/orphan.$os_port.since" "$CHAIN_DIR/would.absent"; continue; fi
         orphan_settling && continue
-        [ "$(count_up "$os_f")" -ge 2 ] || continue
+        if [ "$CHAIN_OBSERVE" = 1 ]; then
+            # Observation: a port nothing listens on is a sign; 10 minutes of it decide.
+            os_now=$(ads_epoch) os_since=
+            [ ! -r "$CHAIN_DIR/orphan.$os_port.since" ] || read -r os_since < "$CHAIN_DIR/orphan.$os_port.since" || :
+            case "$os_since" in ''|*[!0-9]*) os_since=$os_now; echo "$os_now" > "$CHAIN_DIR/orphan.$os_port.since" ;; esac
+            would_take_out absent "$os_ns"
+            chain_may_take_out "$os_ns" $((os_now - os_since)) || continue
+            chain_out_mark
+            rm -f "$CHAIN_DIR/orphan.$os_port.since"
+        else
+            [ "$(count_up "$os_f")" -ge 2 ] || continue
+        fi
         os_n=$(ns_release "$os_ns" "$os_rc" absent)
         rm -f "$os_f"
         [ "$os_n" = 0 ] && continue
@@ -502,6 +522,67 @@ orphan_sync()
         ( . "$ADS_DEVICE_PROFILE_LIB" >/dev/null 2>&1 && vward_note warn "DNS AdGuard Home убран из Keenetic" \
             "На роутере никто не отвечает на порту $os_port, а Keenetic отправлял туда запросы ($os_n строк). Строки убраны: DNS идёт через провайдера. Установите или запустите AdGuard Home - VWARD вернёт его в цепочку сам." d-agh ) || :
     done
+}
+
+# The observation mode (fix.34). CHAIN_SILENT_MIN of silence in a row take AdGuard Home out, at
+# most once in CHAIN_OUT_EVERY seconds.
+CHAIN_SILENT_MIN=${VWARD_DNS_CHAIN_SILENT_MIN:-10}
+CHAIN_OUT_EVERY=${VWARD_DNS_CHAIN_OUT_EVERY:-3600}
+# would_take_out REASON NS: a short sign seen; the journal only, once a silence for each reason.
+would_take_out()
+{
+    [ ! -e "$CHAIN_DIR/would.$1" ] || return 0
+    printf '' > "$CHAIN_DIR/would.$1" 2>/dev/null
+    ads_log "WOULD_TAKE_OUT|$1|ns=$2|observation: Keenetic not changed"
+}
+# chain_answered: AdGuard Home answered - the silence and its notes are over.
+chain_answered() { rm -f "$CHAIN_DIR/silent.since" "$CHAIN_DIR/silent.last" "$CHAIN_DIR"/would.* 2>/dev/null; return 0; }
+# chain_silent_for: a failed check now; prints the seconds of silence in a row (a gap of more than
+# 3 minutes without a check starts it anew: nobody looked in between).
+chain_silent_for()
+{
+    csf_now=$(ads_epoch) csf_since= csf_last=
+    [ ! -r "$CHAIN_DIR/silent.since" ] || read -r csf_since < "$CHAIN_DIR/silent.since" || :
+    [ ! -r "$CHAIN_DIR/silent.last" ] || read -r csf_last < "$CHAIN_DIR/silent.last" || :
+    case "$csf_since$csf_last" in ''|*[!0-9]*) csf_since=$csf_now ;; esac
+    [ $((csf_now - ${csf_last:-$csf_now})) -le 180 ] || csf_since=$csf_now
+    echo "$csf_since" > "$CHAIN_DIR/silent.since"; echo "$csf_now" > "$CHAIN_DIR/silent.last"
+    echo $((csf_now - csf_since))
+}
+# chain_keenetic_busy: Keenetic answered in 2 s or more within 90 s (the agents' common mark): a
+# silence then may be the router's, not AdGuard Home's - such a minute does not decide.
+chain_keenetic_busy()
+{
+    ckb_lib=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+    [ -r "$ckb_lib" ] || return 1
+    ( . "$ckb_lib" >/dev/null 2>&1 && command -v vward_keenetic_busy >/dev/null 2>&1 && vward_keenetic_busy )
+}
+# chain_out_recent: AdGuard Home was taken out within CHAIN_OUT_EVERY seconds.
+chain_out_recent()
+{
+    [ -r "$CHAIN_DIR/outs" ] || return 1
+    awk -v n="$(ads_epoch)" -v e="$CHAIN_OUT_EVERY" '$1 + e > n {f = 1} END {exit !f}' "$CHAIN_DIR/outs"
+}
+chain_out_mark()
+{
+    cm_now=$(ads_epoch)
+    { [ ! -r "$CHAIN_DIR/outs" ] || awk -v n="$cm_now" '$1 + 3600 > n' "$CHAIN_DIR/outs"; echo "$cm_now"; } > "$CHAIN_DIR/outs.new" 2>/dev/null &&
+        mv -f "$CHAIN_DIR/outs.new" "$CHAIN_DIR/outs"
+}
+# chain_may_take_out NS SECONDS: the long silence decides (observation mode): 10 minutes, Keenetic
+# not busy, the provider's DNS answers, no take-out within the hour. Says why not in the journal.
+chain_may_take_out()
+{
+    [ "$2" -ge $((CHAIN_SILENT_MIN * 60)) ] || return 1
+    if chain_keenetic_busy; then would_take_out keenetic_busy "$1"; return 1; fi
+    provider_answers "$1" || { would_take_out provider_silent "$1"; return 1; }
+    if chain_out_recent; then would_take_out hourly_limit "$1"; return 1; fi
+    return 0
+}
+chain_out_note()
+{
+    ( . "$ADS_DEVICE_PROFILE_LIB" >/dev/null 2>&1 && vward_note warn "AdGuard Home убран из цепочки DNS" \
+        "AdGuard Home не отвечал $CHAIN_SILENT_MIN минут подряд, DNS провайдера отвечает. Keenetic спрашивает DNS провайдера; VWARD вернёт AdGuard Home сам после трёх ответов подряд." d-agh ) || :
 }
 
 count_up() { cu_n=0; [ ! -r "$1" ] || read -r cu_n < "$1"; case "$cu_n" in ''|*[!0-9]*) cu_n=0 ;; esac; echo $((cu_n + 1)) > "$1"; echo $((cu_n + 1)); }
@@ -525,9 +606,7 @@ chain_take_out()
     rm -f "$CHAIN_DIR/fails" "$CHAIN_DIR/oks"
     echo out > "$CHAIN_DIR/state"; ads_epoch > "$CHAIN_DIR/since"; echo "$2" > "$CHAIN_DIR/reason"
     # The take-outs of the last hour: each more waits longer before AdGuard Home goes back in.
-    to_now=$(ads_epoch)
-    { [ ! -r "$CHAIN_DIR/outs" ] || awk -v n="$to_now" '$1 + 3600 > n' "$CHAIN_DIR/outs"; echo "$to_now"; } > "$CHAIN_DIR/outs.new" 2>/dev/null &&
-        mv -f "$CHAIN_DIR/outs.new" "$CHAIN_DIR/outs"
+    chain_out_mark
     ads_log "DNS_CHAIN_OUT|ns=$1|reason=$2|AdGuard Home taken out of the DNS chain: Keenetic uses the provider's DNS"
 }
 
@@ -560,6 +639,8 @@ chain_out()
     ndm_running | chain_line "$co_ns" || return 0
     agh_up "$co_port" && agh_answers "$co_port" && return 0
     provider_answers "$co_ns" || { ads_log "DNS_CHAIN_KEEP|ns=$co_ns|the provider's DNS is silent too: AdGuard Home stays"; return 0; }
+    # Observation: 15 s of silence is a sign; the minute check counts the 10 minutes.
+    if [ "$CHAIN_OBSERVE" = 1 ]; then would_take_out fast "$co_ns"; return 0; fi
     chain_take_out "$co_ns" fast
 }
 
@@ -588,16 +669,31 @@ chain_sync()
     done
     cs_loop=0
     if agh_looping; then cs_ok=0 cs_loop=1; fi
-    if [ "$cs_ok" = 1 ]; then rm -f "$CHAIN_DIR/fails"; else rm -f "$CHAIN_DIR/oks"; fi
+    if [ "$cs_ok" = 1 ]; then rm -f "$CHAIN_DIR/fails"; chain_answered; else rm -f "$CHAIN_DIR/oks"; fi
     if [ "$cs_in" = 1 ]; then
         echo in > "$CHAIN_DIR/state"
         # In the chain while AdGuard Home asks the router back (its servers changed since): out
         # at once, the provider's DNS answers; back only when the loop is gone (below).
         if agh_upstream_loops; then
-            chain_take_out "$cs_ns" loop_upstream
-            return 0
+            if [ "$CHAIN_OBSERVE" = 1 ]; then
+                would_take_out loop_upstream "$cs_ns"
+            else
+                chain_take_out "$cs_ns" loop_upstream
+                return 0
+            fi
         fi
         [ "$cs_ok" = 0 ] || return 0
+        if [ "$CHAIN_OBSERVE" = 1 ]; then
+            # Observation: 3 failed checks and restarts are signs; 10 minutes of silence decide.
+            cs_for=$(chain_silent_for)
+            [ "$(count_up "$CHAIN_DIR/fails")" -lt 3 ] || would_take_out silent "$cs_ns"
+            [ "$cs_loop" = 0 ] || would_take_out loop "$cs_ns"
+            chain_may_take_out "$cs_ns" "$cs_for" || return 0
+            chain_take_out "$cs_ns" silent_10min
+            chain_answered
+            chain_out_note
+            return 0
+        fi
         [ "$(count_up "$CHAIN_DIR/fails")" -ge 3 ] || [ "$cs_loop" = 1 ] || return 0
         # The whole internet down (the provider's DNS silent too): not AdGuard Home's fault,
         # and taking it out would change nothing.
@@ -735,6 +831,7 @@ case "$OP" in
         echo "exclude=$EXCLUDE"
         echo "failopen=$FAILOPEN"
         echo "chain=$CHAIN"
+        echo "chain_observe=$CHAIN_OBSERVE"
         echo "chain_state=$(cat "$CHAIN_DIR/state" 2>/dev/null)"
         echo "chain_reason=$(cat "$CHAIN_DIR/reason" 2>/dev/null)"
         echo "chain_since=$(cat "$CHAIN_DIR/since" 2>/dev/null)"

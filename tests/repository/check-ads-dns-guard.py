@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -371,6 +372,9 @@ with tempfile.TemporaryDirectory() as tmp:
         # provider's DNS), back after 3 answers in a row; never into a loop back to the router.
         rc, chaindir, ndlog, pid = tmp / "rc", tmp / "chain", tmp / "ndmc.log", tmp / "agh.pid"
         shutil.rmtree(chaindir, ignore_errors=True)
+        # The quick take-out of before fix.34 (CHAIN_OBSERVE=0); the observation mode is below.
+        conf = etc / "dns-guard.conf"
+        conf.write_text((conf.read_text() if conf.exists() else "") + "CHAIN_OBSERVE=0\n")
         rc.write_text("ip name-server 1.1.1.1\n"); ndlog.write_text(""); pid.write_text("1234\n")
         up.write_text("1"); answer.write_text("1")
         NS = "ip name-server 192.168.1.1:65053"
@@ -489,6 +493,64 @@ with tempfile.TemporaryDirectory() as tmp:
         if not inchain():
             fail(f"{shell[0]} after the update: stays in")
 
+        # fix.34, observation (the default, dns-guard.conf without CHAIN_OBSERVE): the short signs
+        # only write WOULD_TAKE_OUT; AdGuard Home goes out after 10 silent minutes in a row, Keenetic
+        # not busy, the provider answering, once an hour; back after 3 answers as before.
+        (etc / "dns-guard.conf").unlink(missing_ok=True)
+        shutil.rmtree(chaindir, ignore_errors=True); answer.write_text("1"); (tmp / "isp-answer").write_text("1")
+        pid.write_text("2000\n")
+        for _ in range(3):
+            run("tick", shell=shell)
+        if not inchain():
+            fail(f"{shell[0]} observation: in the chain while it answers")
+        log0 = len(guardlog())
+        newlog = lambda: guardlog()[log0:]
+        answer.write_text("0")
+        for _ in range(4):
+            run("tick", shell=shell)
+        run("chain-out", shell=shell)
+        pid.write_text("2001\n"); run("tick", shell=shell)
+        pid.write_text("2002\n"); run("tick", shell=shell)
+        log = newlog()
+        if not inchain() or "DNS_CHAIN_OUT" in log:
+            fail(f"{shell[0]} observation: 6 silent minutes, the watcher and restarts change nothing: {rc.read_text()!r}")
+        for why in ("silent", "fast", "loop"):
+            if log.count(f"WOULD_TAKE_OUT|{why}|") != 1:
+                fail(f"{shell[0]} observation: «WOULD_TAKE_OUT|{why}» once a silence: {log.count(f'WOULD_TAKE_OUT|{why}|')}")
+        (chaindir / "pids").unlink()  # the restarts are over (else a loop keeps it out 3 minutes)
+        # 11 minutes of silence in a row (the first silent check 11 minutes ago): out.
+        (chaindir / "silent.since").write_text(f"{int(time.time()) - 660}\n")
+        run("tick", shell=shell)
+        if inchain() or status().get("chain_reason") != "silent_10min" or "reason=silent_10min" not in newlog():
+            fail(f"{shell[0]} observation: 11 silent minutes take it out: {status()} {rc.read_text()!r}")
+        answer.write_text("1")
+        for _ in range(3):
+            run("tick", shell=shell)
+        if not inchain():
+            fail(f"{shell[0]} observation: back after 3 answers in a row: {status()}")
+        # Silent 11 minutes again within the hour: stays, the journal says why.
+        answer.write_text("0"); run("tick", shell=shell)
+        (chaindir / "silent.since").write_text(f"{int(time.time()) - 660}\n")
+        run("tick", shell=shell)
+        if not inchain() or "WOULD_TAKE_OUT|hourly_limit|" not in newlog():
+            fail(f"{shell[0]} observation: not more than once an hour")
+        # Keenetic busy (an answer of 4.5 s a minute ago): such a minute does not decide.
+        (chaindir / "outs").unlink()
+        upt = int(float(Path("/proc/uptime").read_text().split()[0]))
+        (tmp / "root/tmp/vward-keenetic-last").write_text(f"{upt} 450\n")
+        run("tick", shell=shell)
+        if not inchain() or "WOULD_TAKE_OUT|keenetic_busy|" not in newlog():
+            fail(f"{shell[0]} observation: Keenetic busy does not decide")
+        (tmp / "root/tmp/vward-keenetic-last").unlink()
+        # The provider's DNS silent too: the internet is down, not AdGuard Home.
+        (tmp / "isp-answer").write_text("0"); run("tick", shell=shell)
+        if not inchain() or "WOULD_TAKE_OUT|provider_silent|" not in newlog():
+            fail(f"{shell[0]} observation: the provider silent too keeps it")
+        (tmp / "isp-answer").write_text("1"); run("tick", shell=shell)
+        if inchain():
+            fail(f"{shell[0]} observation: all conditions met, out")
+        answer.write_text("1")
+
 # Keenetic hands all queries to AdGuard Home only by the line without a domain («""» before an
 # interface); a domain bound to it (Smart DNS, a list) is not the chain (Viva 2026-10-13: with 24
 # such bindings AdGuard Home was taken for in after a fast take-out and never put back).
@@ -509,7 +571,7 @@ for text, want in (("ip name-server 192.168.1.1:65053\n", 0), ('ip name-server 1
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     bindir = tmp / "bin"; bindir.mkdir()
-    for name, body in (("ndmc", FAKE_NDMC), ("pidof", FAKE_PIDOF)):
+    for name, body in (("ndmc", FAKE_NDMC), ("pidof", FAKE_PIDOF), ("nslookup", FAKE_NSLOOKUP)):
         f = bindir / name; f.write_text(body); f.chmod(0o755)
     (tmp / "profile.sh").write_text(FAKE_PROFILE + "vward_note() { echo \"$*\" >> \"$FAKE_NOTES\"; }\n")
     net = tmp / "net"; net.mkdir()
@@ -524,12 +586,14 @@ with tempfile.TemporaryDirectory() as tmp:
         "VWARD_ADS_ETC": str(etc), "VWARD_ADS_STATE": str(tmp / "state"), "VWARD_ADS_LOG_DIR": str(tmp / "log"),
         "VWARD_ADS_DEVICE_PROFILE_LIB": str(tmp / "profile.sh"), "FAKE_AGH_YAML": str(tmp / "absent.yaml"),
         "VWARD_NDMC": str(bindir / "ndmc"), "VWARD_PIDOF": str(bindir / "pidof"), "FAKE_RC": str(rc), "FAKE_NDMC_LOG": str(tmp / "ndmc.log"),
-        "FAKE_AGH_PID": str(tmp / "agh.pid"), "FAKE_NOTES": str(tmp / "notes"), "VWARD_PROC_NET": str(net),
+        "FAKE_AGH_PID": str(tmp / "agh.pid"), "FAKE_NOTES": str(tmp / "notes"), "VWARD_PROC_NET": str(net), "VWARD_NSLOOKUP": str(bindir / "nslookup"),
         "VWARD_DNS_CHAIN_STATE": str(tmp / "chain"), "VWARD_AGH_BINDINGS": str(tmp / "agh-bindings.txt"),
         "VWARD_DNS_GUARD_LOCK": str(tmp / "lock"), "VWARD_DNS_GUARD_STATE": str(tmp / "guard.state"),
         "VWARD_DNS_ORPHAN_EVERY_MIN": "0", "VWARD_ROOT_PREFIX": str(tmp), "TMPDIR": str(tmp),
         "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"), "VWARD_PROC": str(tmp / "proc")}
     orphan = lambda: subprocess.run(["sh", str(GUARD), "orphan"], env=env, text=True, capture_output=True, timeout=60)
+    # The take-out of before fix.34 (two looks); the observation mode below.
+    (etc / "dns-guard.conf").write_text("CHAIN_OBSERVE=0\n")
     # fix.33.2 (WP-B п.5): no look counts in the first 5 minutes after boot, nor while AdGuard Home
     # is younger than 2 minutes (its port opens after the start).
     proc = tmp / "proc"; (proc / "4242").mkdir(parents=True)
@@ -553,6 +617,19 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("orphan: bindings of the dead server forgotten, the chain marked out")
     if "system configuration save" not in (tmp / "ndmc.log").read_text() or "AdGuard Home" not in (tmp / "notes").read_text():
         fail("orphan: saved and told in the bell")
+    # Observation (fix.34): a port nothing listens on is a sign; 10 minutes of it decide.
+    (etc / "dns-guard.conf").unlink()
+    shutil.rmtree(tmp / "chain")
+    rc.write_text("ip name-server 192.168.1.1:65053\nip name-server 192.168.1.1:65053 chatgpt.com\nip name-server 8.8.8.8\n")
+    (net / "udp").write_text(head)
+    orphan(); orphan(); orphan()
+    logs = lambda: " ".join(f.read_text() for f in (tmp / "log").rglob("*") if f.is_file())
+    if "192.168.1.1:65053 chatgpt.com" not in rc.read_text() or logs().count("WOULD_TAKE_OUT|absent|") != 1:
+        fail(f"orphan, observation: a few minutes change nothing, the journal says it once: {rc.read_text()!r}")
+    (tmp / "chain/orphan.65053.since").write_text(f"{int(time.time()) - 660}\n")
+    orphan()
+    if ":65053" in rc.read_text() or "ip name-server 8.8.8.8" not in rc.read_text():
+        fail(f"orphan, observation: 11 minutes of nothing listening: the lines go: {rc.read_text()!r} {logs()[-300:]}")
     sched = (ROOT / "components/ads-privacy-guard/scripts/vward-ads-privacy-scheduler.sh").read_text()
     if sched.index('"$SCH_G" orphan') > sched.index("vward_component_gate ads-privacy-guard"):
         fail("the scheduler looks for dead DNS lines before the ads gate (ads off or never set up)")

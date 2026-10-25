@@ -93,7 +93,7 @@ with tempfile.TemporaryDirectory() as tmp:
     conf = (state / "sentinel.conf").read_text()
     for need in (f"WATCH=route-engine:{run}/route-engine.pid:16384", "WATCH=panel:/opt/var/run/vward-console-lighttpd.pid:24576",
                  f"WATCH=awg-t0:{run}/awg-engine/t0.pid:65536", "IFACE=eth3", "IFACE=nwg0", "IFACE=opkgtun0", "DNS=127.0.0.1:53",
-                 "CHAIN=192.168.1.1:65053", "CHAIN_EVERY=5", "CHAIN_MISS=3"):
+                 "CHAIN=192.168.1.1:65053", "CHAIN_EVERY=30", "CHAIN_MISS=3"):
         if need not in conf:
             fail(f"configuration lacks {need!r}:\n{conf}")
     if "awg-t1" in conf or "awg-t2" in conf:

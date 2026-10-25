@@ -168,11 +168,16 @@ op_config() {
                 echo "DNS_NAME=vward-probe.invalid"
                 echo "DNS_EVERY=30"
             fi
-            if [ -n "$y" ] && [ -r "$y" ] && [ "$(sed -n 's/^CHAIN=//p' "${VWARD_DNS_GUARD_CONF:-/opt/etc/vward/ads-privacy-guard/dns-guard.conf}" 2>/dev/null)" != 0 ]; then
+            gc=${VWARD_DNS_GUARD_CONF:-/opt/etc/vward/ads-privacy-guard/dns-guard.conf}
+            # The DNS guard's observation mode (fix.34, the default): a «chain-fail» only writes
+            # WOULD_TAKE_OUT, so the probe is diagnostics - every 30 s, not 5 (Viva 25.10: ~15 700
+            # «vward-probe.invalid» a day in AdGuard Home's log against ~60 real queries).
+            ce=30; [ "$(sed -n 's/^CHAIN_OBSERVE=//p' "$gc" 2>/dev/null)" != 0 ] || ce=5
+            if [ -n "$y" ] && [ -r "$y" ] && [ "$(sed -n 's/^CHAIN=//p' "$gc" 2>/dev/null)" != 0 ]; then
                 cp=$(awk '/^[^ #]/ {d = ($1 == "dns:")} d && $1 == "port:" {print $2; exit}' "$y" 2>/dev/null)
                 ch=$(awk '/^[^ #]/ {d = ($1 == "dns:"); b = 0; next} d && /^  bind_hosts:/ {b = 1; next} d && /^  [a-z_]+:/ {b = 0}
                     b && $1 == "-" {gsub(/["\047]/, "", $2); print $2}' "$y" 2>/dev/null | grep -E '^[0-9]+(\.[0-9]+){3}$' | grep -v '^0\.0\.0\.0$' | head -n 1)
-                case "$cp" in ''|*[!0-9]*|53) ;; *) echo "CHAIN=${ch:-${VWARD_LAN_ADDRESS:-127.0.0.1}}:$cp"; echo "CHAIN_EVERY=5"; echo "CHAIN_MISS=3" ;; esac
+                case "$cp" in ''|*[!0-9]*|53) ;; *) echo "CHAIN=${ch:-${VWARD_LAN_ADDRESS:-127.0.0.1}}:$cp"; echo "CHAIN_EVERY=$ce"; echo "CHAIN_MISS=3" ;; esac
             fi
             vward_map_vpns "$(vward_device_map 2>/dev/null)" "${VWARD_WAN_DEVICE:-}" 2>/dev/null |
                 while read -r _ dev; do [ -n "$dev" ] && echo "IFACE=$dev"; done

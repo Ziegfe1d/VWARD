@@ -1194,7 +1194,8 @@ const cardAlert = p => p && (p[0] === 'warn' || p[0] === 'crit') ? '<span class=
 // AdGuard Home out of Keenetic's DNS chain: said on top, with why and what it means, so nobody
 // guesses why ads come back (the internet itself works through the provider's DNS).
 const CHAIN_WHY = { update: 'VWARD обновляет его', loop: 'он перезапускается по кругу', silent: 'он не отвечает', fast: 'он перестал отвечать',
-  loop_upstream: 'его серверы DNS указывают обратно на роутер (петля)' };
+  loop_upstream: 'его серверы DNS указывают обратно на роутер (петля)', silent_10min: 'он не отвечал 10 минут подряд', absent: 'на его порту никто не отвечает',
+  released: 'он выключен в Панели' };
 function chainNotice() {
   const g = (S.ads && S.ads.dns_guard) || {};
   if (g.chain_state !== 'out') return '';
