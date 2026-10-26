@@ -98,6 +98,7 @@ python3 tests/repository/check-agents.py || fail "Agents: the components agent w
 python3 tests/repository/check-policy-smartdns.py || fail "Smart DNS wins over IP categories"
 python3 tests/repository/check-policy-shrink-guard.py || fail "IP categories shrink guard"
 python3 tests/repository/check-dns-rules-boot.py || fail "DNS rules of the tunnel after a boot"
+python3 tests/repository/check-console-doh-retry.py || fail "Smart DNS line removal retried"
 python3 tests/repository/check-boot-env.py || fail "Entware programs do not take the firmware's library path"
 python3 tests/repository/check-fetch-fallback.py || fail "downloads do not survive a curl that crashes on HTTPS"
 python3 tests/repository/check-program-repair.py || fail "a crashing Entware program is reinstalled"

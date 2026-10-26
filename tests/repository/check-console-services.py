@@ -28,6 +28,8 @@ CATALOG = {
         {"id": "claude.ai", "category": "ai", "title": "Claude", "domains": ["anthropic.com", "claude.ai", "claude.com"]},
         {"id": "big.tv", "category": "video", "title": "Big", "domains": ["d%d.big.tv" % i for i in range(301)], "too_big": True},
         {"id": "bad.tv", "category": "video", "title": "Bad", "domains": ["ok.tv", "x;reboot.tv"]},
+        {"id": "youtube.com", "category": "video", "title": "YouTube",
+         "domains": ["ggpht.com", "googlevideo.com", "youtu.be", "youtube.com", "ytimg.com"]},
     ],
 }
 
@@ -246,5 +248,28 @@ with tempfile.TemporaryDirectory() as tmp:
     if cats.read_text() != "":
         fail(f"back to auto: {cats.read_text()!r}")
     run("service", "off", "claude.ai", expect="result=changed", rc=0)
+
+    # fix.34.1 (b): the state was lost (reinstall of 18.10), YouTube's lists stayed in Keenetic.
+    # «on» takes the most complete one (same name, or 80 % of the catalog's domains), makes none.
+    yt = "\n".join([
+        "object-group fqdn domain-list1", "    description Youtube", "    include youtube.com", "    include ytimg.com",
+        "    include ggpht.com", "!",
+        "object-group fqdn domain-list24", '    description "YouTube"', "    include ggpht.com", "    include googlevideo.com",
+        "    include youtu.be", "    include youtube.com", "    include ytimg.com", "!",
+        "object-group fqdn domain-list25", '    description "Видео"', "    include googlevideo.com", "    include youtu.be",
+        "    include youtube.com", "    include ytimg.com", "!",
+        "object-group fqdn domain-list26", '    description "Музыка"', "    include youtube.com", "!",
+    ]) + "\n"
+    cfg.write_text(RUNNING + yt)
+    state.write_text("")
+    run("service", "on", "youtube.com", "auto", expect="result=changed", rc=0)
+    if state.read_text() != "youtube.com\tdomain-list24\tauto\n":
+        fail(f"the existing list must be taken: {state.read_text()!r}")
+    if cfg.read_text().count("object-group fqdn ") != 6 or "domain-list2\n" in cfg.read_text():
+        fail("no new list may be made when the service's list is there")
+    if "    route object-group domain-list24 Wireguard0 auto" not in cfg.read_text():
+        fail("the taken list is routed")
+    if "adopted duplicates=domain-list25,domain-list1" not in (tmp / "audit.log").read_text():
+        fail("the other lists are shown as duplicates")
 
 print("CONSOLE_SERVICES=PASS")

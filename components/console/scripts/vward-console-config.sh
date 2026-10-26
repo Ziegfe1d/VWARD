@@ -810,8 +810,25 @@ group_doh_lines() {
 
 doh_present() { doh_lines | grep -qxF -- "$1"; }
 
+# doh_remove LINE: doh_remove_once, again when Keenetic kept the line (fix.34.1, r5): 25.10
+# 14:58:01 «domain-list10 error=doh_remove_failed», the same change 55 s later went through -
+# Keenetic was still taking another «https upstream» out. Up to 3 tries, VWARD_DOH_RETRY_DELAY
+# seconds apart (3); a line gone meanwhile counts as removed; «other lines affected» is final.
 doh_remove() {
-    # doh_remove LINE: take one Smart DNS line out.  Keenetic's delete syntax is
+    dr_try=1
+    doh_remove_once "$1"; dr_res=$?
+    while [ "$dr_res" = 1 ] && [ "$dr_try" -lt 3 ]; do
+        sleep "${VWARD_DOH_RETRY_DELAY:-3}"
+        dr_try=$((dr_try + 1))
+        snapshot
+        if doh_present "$1"; then doh_remove_once "$1"; dr_res=$?; else dr_res=0; fi
+    done
+    [ "$dr_try" = 1 ] || audit "doh_remove tries=$dr_try rc=$dr_res"
+    return "$dr_res"
+}
+
+doh_remove_once() {
+    # doh_remove_once LINE: take one Smart DNS line out.  Keenetic's delete syntax is
     # not documented for per-domain upstreams, so the forms are tried in turn and
     # each is verified; a form that also took other lines puts them back.
     # Returns 0 removed, 1 not removable, 2 other lines were affected.
@@ -1038,6 +1055,27 @@ free_list_name() {
     return 1
 }
 
+# service_adopt TITLE DOMAINS: Keenetic's lists that already are this service (fix.34.1, b), the
+# most complete first: «HITS GROUP» per line. The same description (case and spaces aside), or 80 %
+# of the catalog's domains in it. Lists of other services switched on are not taken. Before, «on»
+# without its row in enabled.tsv made another list: after the reinstall of 18.10 YouTube was
+# domain-list1, 24 and 25. service_adopt=0 in domain-lists.conf turns it off.
+service_adopt() {
+    [ "$(awk -F= '$1 == "service_adopt" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" != 0 ] || return 0
+    sa_taken=$([ ! -f "$SERVICES_STATE" ] || cut -f2 "$SERVICES_STATE" | tr '\n' ' ')
+    awk -v t="$1" -v tk="$sa_taken" '
+        function norm(x) {x = tolower(x); gsub(/["[:space:]]/, "", x); return x}
+        BEGIN {n = split(tk, a, " "); for (i = 1; i <= n; i++) taken[a[i]] = 1}
+        NR == FNR {want[tolower($0)] = 1; nw++; next}
+        /^object-group fqdn / {g = $3; if (!(g in taken)) order[++ng] = g; next}
+        /^!/ {g = ""; next}
+        g == "" {next}
+        $1 == "description" {d = $0; sub(/^[[:space:]]*description[[:space:]]*/, "", d); same[g] = norm(d) == norm(t)}
+        $1 == "include" && (tolower($2) in want) {hit[g]++}
+        END {for (i = 1; i <= ng; i++) {g = order[i]; if (same[g] || (nw > 0 && hit[g] * 100 >= 80 * nw)) print hit[g] + 0, g}}
+    ' "$2" "$RUNCFG" | sort -k1,1nr -k2,2
+}
+
 group_domains() {
     awk -v g="$1" '/^object-group fqdn / {cur = $3; next} /^!/ {cur = ""} cur == g && $1 == "include" {print tolower($2)}' "$RUNCFG" | sort -u
 }
@@ -1167,6 +1205,16 @@ op_service() {
     n=$(grep -c . "$JOURNAL.doh")
     [ "$n" -le "$SERVICE_LIMIT" ] || die service_too_big 64
     snapshot
+    sv_found=$(service_adopt "$title" "$JOURNAL.doh")
+    if [ -n "$sv_found" ]; then
+        # The list is there already: it is taken, not made again; the others are duplicates.
+        G=$(printf '%s\n' "$sv_found" | awk 'NR == 1 {print $2}')
+        sv_dups=$(printf '%s\n' "$sv_found" | awk 'NR > 1 {printf "%s%s", c, $2; c = ","}')
+        service_state_set "$sv_id" "$G" "$sv_to"
+        release_lock
+        service_route "$G" "$(service_target "$sv_to" "$sv_id")" || die "$SR_ERR"
+        done_ok "service on $sv_id $G $sv_to adopted${sv_dups:+ duplicates=$sv_dups}" changed
+    fi
     G=$(free_list_name) || die no_free_list
     TXN=1
     ndm "object-group fqdn $G" || die router_rejected
