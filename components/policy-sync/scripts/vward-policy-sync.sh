@@ -657,16 +657,18 @@ smartdns_hold()
             while IFS= read -r CAT; do
                 [ -s "$CATALOG/$CAT.cidr" ] || continue
                 awk -F'[./]' -v c="$CAT" -v hp="$SMARTDNS_HOLD_PREFIX" '
+                    function p2(e,  r) {r = 1; while (e-- > 0) r *= 2; return r}
+                    BEGIN {bz = p2(32 - hp)}
                     NR == FNR {
                         split($0, p, " "); split(p[2], q, ".")
-                        z = 2 ^ (32 - hp); b = int((((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]) / z) * z
+                        z = bz; b = int((((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]) / z) * z
                         n++; bs[n] = b; dom[n] = p[1]
                         bt[n] = int(b / 16777216) "." int(b / 65536) % 256 "." int(b / 256) % 256 "." b % 256 "/" hp
                         next
                     }
                     NF == 5 {
-                        z = 2 ^ (32 - $5); s = int(((($1 * 256 + $2) * 256 + $3) * 256 + $4) / z) * z
-                        for (i = 1; i <= n; i++) if (bs[i] < s + z && s < bs[i] + 2 ^ (32 - hp)) print bt[i] "|" dom[i] "|" c
+                        z = p2(32 - $5); s = int(((($1 * 256 + $2) * 256 + $3) * 256 + $4) / z) * z
+                        for (i = 1; i <= n; i++) if (bs[i] < s + z && s < bs[i] + bz) print bt[i] "|" dom[i] "|" c
                     }' "$SD_ADDR" "$CATALOG/$CAT.cidr"
             done < "$2" | sort -u > "$WORK/smartdns-blocks"
         fi
@@ -685,23 +687,25 @@ smartdns_hold()
     fi
 }
 
+# Powers of two by p2(): BusyBox awk built without its math library has no «^» (CI, fix.34.1).
 # The subnets of $2 without the held blocks of $1 ("a.b.c.d/len|..."): a subnet holding a block
 # is split in halves down to the block, which is left out (a /13 with one held /24: 11 routes).
 smartdns_split()
 {
     awk -v hp="$SMARTDNS_HOLD_PREFIX" '
+        function p2(e,  r) {r = 1; while (e-- > 0) r *= 2; return r}
         function num(a,  q) {split(a, q, "."); return ((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]}
         function dot(v) {return int(v / 16777216) "." int(v / 65536) % 256 "." int(v / 256) % 256 "." v % 256}
         function hit(s, z,  i) {for (i = 1; i <= nb; i++) if (bs[i] < s + z && s < bs[i] + bz) return 1; return 0}
         function emit(s, len,  z) {
-            z = 2 ^ (32 - len)
+            z = p2(32 - len)
             if (!hit(s, z)) {print dot(s) "/" len; return}
             if (len >= hp) return
             emit(s, len + 1); emit(s + z / 2, len + 1)
         }
-        BEGIN {bz = 2 ^ (32 - hp)}
+        BEGIN {bz = p2(32 - hp)}
         NR == FNR {split($0, p, "|"); split(p[1], q, "/"); if (!(q[1] in seen)) {seen[q[1]] = 1; bs[++nb] = num(q[1])}; next}
-        {split($0, p, "/"); if (p[2] !~ /^[0-9]+$/ || p[2] > 32) next; z = 2 ^ (32 - p[2]); emit(int(num(p[1]) / z) * z, p[2] + 0)}
+        {split($0, p, "/"); if (p[2] !~ /^[0-9]+$/ || p[2] > 32) next; z = p2(32 - p[2]); emit(int(num(p[1]) / z) * z, p[2] + 0)}
     ' "$1" "$2"
 }
 
@@ -720,7 +724,8 @@ run_partial()
     grep -q '^object-group fqdn ' "$1" || return 0
     [ -s "$OWNED" ] || return 1
     awk -v rt="$RT" '
-        function mask(l,  m, i, o, b) {m = ""; for (i = 0; i < 4; i++) {b = l - i * 8; b = b >= 8 ? 8 : (b < 0 ? 0 : b); o = 256 - 2 ^ (8 - b); m = m (i ? "." : "") o}; return m}
+        function p2(e,  r) {r = 1; while (e-- > 0) r *= 2; return r}
+        function mask(l,  m, i, o, b) {m = ""; for (i = 0; i < 4; i++) {b = l - i * 8; b = b >= 8 ? 8 : (b < 0 ? 0 : b); o = 256 - p2(8 - b); m = m (i ? "." : "") o}; return m}
         NR == FNR {have[$0] = 1; next}
         {split($0, p, "/"); if (("ip route " p[1] " " mask(p[2]) " " rt " auto") in have || (p[2] == 32 && ("ip route " p[1] " " rt " auto") in have)) {found = 1; exit}}
         END {exit found ? 1 : 0}
