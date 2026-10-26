@@ -341,6 +341,7 @@ bb87a237a5e5838afaa79f82895707a3b77462efa2107580c60bef7f6c68cf2d  tests/updater/
 ad80f9fe3524034baaa55bd2ff146e0f39cd5d020bf1e211483cbeaab2c6dc5c  tests/updater/seed-runtime.sh
 e5fe20abdbebe6156a6c32a9ff9eb0337adc89d4aa77d9556b73f22ce16e85e9  tools/build-services-catalog.py
 cfcbd0d54bc4e9ee08c3ae9470560ba57f7a73bceac19f7ea461de0db82d18b7  tools/termius/acceptance-fix-33-2.txt
+e9471f8a1799aa195d9c018aad9f9859ebcc0b40c9955be62132500f03d9465e  tools/termius/acceptance-fix-34-1.txt
 4eb59fb647f8c65e9a17574ad1e527361bd4e8aceae4d0014de5f718368c8ff9  tools/termius/acceptance-fix-34.txt
 e36a1ed0f4888d431754a51acf25571cb74bedd97235b031f63ed12fd83afaf4  tools/termius/diag-1-rci-agh.txt
 104b8383266001cd26922f69eff4db8fe3902ae7d68dd7dc7bd43fd1856a8273  tools/termius/diag-2-who-loads.txt
