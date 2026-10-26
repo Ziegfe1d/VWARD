@@ -136,6 +136,18 @@ with tempfile.TemporaryDirectory() as tmp:
         if c not in routes:
             fail(f"a subnet without a Smart DNS address is kept as is: {c}")
 
+    # A subnet wider than the block is cut into pieces around it, never dropped whole:
+    # /13 with one held /24 - 11 routes (+10), /16 - 8 routes (+7), two /24 in one /16 - 14.
+    for cidr, blk, n in (("104.16.0.0/13", ["104.18.7.0/24"], 11), ("157.240.0.0/16", ["157.240.200.0/24"], 8),
+                         ("151.101.0.0/16", ["151.101.1.0/24", "151.101.130.0/24"], 14)):
+        (t / "b1").write_text("".join(f"{x}|d.example|c\n" for x in blk))
+        (t / "w1").write_text(cidr + "\n")
+        r = subprocess.run(SH + ["-c", f"SMARTDNS_HOLD_PREFIX=24\n{func('smartdns_split')}smartdns_split {t}/b1 {t}/w1"],
+                           text=True, capture_output=True, timeout=30)
+        pieces = r.stdout.split()
+        if len(pieces) != n or total(pieces) != total([cidr]) - 256 * len(blk) or any(covers(c, x.split("/")[0]) for c in pieces for x in blk):
+            fail(f"{cidr} minus {blk}: {len(pieces)} pieces, want {n}: {pieces}")
+
     cats, held, blocks = run("0")
     if cats != list(CATS) or held or blocks:
         fail(f"with the Smart DNS guard off nothing is held: {cats} {held!r} {blocks!r}")
