@@ -190,6 +190,7 @@ with tempfile.TemporaryDirectory() as td:
 log() {{ :; }}
 ndm() {{ echo "$*" >> "{t}/ndm.log"; }}
 WORK="{t}/work"; CATALOG="{t}/catalog"; OWNED="{t}/owned"; OWNED_DEVICE="{t}/owned-device"; ACTIVE="{t}/active"
+SHRINK_PENDING="{t}/shrink.pending"; LAST_GOOD="{t}/last-good"; LISTS_CONF="{t}/lists.conf"
 RT=OpkgTun2; WG=OpkgTun2
 reconcile_routes "{t}/running" "{t}/cats"
 """

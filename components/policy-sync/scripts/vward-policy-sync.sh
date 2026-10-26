@@ -38,6 +38,13 @@ EXCLUDED="${VWARD_POLICY_EXCLUDED:-/opt/etc/vward/policy-sync/excluded.categorie
 LOCK="$STATE/lock"
 # Categories left off because they would take a Smart DNS domain into the tunnel.
 SMARTDNS_HELD="$STATE/smartdns.categories"
+# Blocks around Smart DNS addresses kept out of the tunnel, and the addresses of the last run.
+SMARTDNS_BLOCKS="$STATE/smartdns.addresses"
+SMARTDNS_ADDR_CACHE="$STATE/smartdns.resolved"
+SMARTDNS_HOLD_PREFIX=24
+# Removals held back by the shrink guard (fix.34.1, r2), and the last set of routes that synced clean.
+SHRINK_PENDING="$STATE/shrink.pending"
+LAST_GOOD="$STATE/owned.last-good"
 LISTS_CONF="${VWARD_DOMAIN_LISTS_CONF:-/opt/etc/vward/route-engine/domain-lists.conf}"
 NSLOOKUP="${VWARD_NSLOOKUP:-nslookup}"
 
@@ -613,51 +620,111 @@ collect_categories()
     mv "$OUT.sorted" "$OUT" || rm -f "$OUT.sorted"
 }
 
-# Smart DNS wins over an IP category: a category whose subnets hold the address a Smart DNS
-# domain resolves to would take that domain into the tunnel (Cloudflare carries openai.com),
-# so it gets no routes. "category|domain" for the Panel goes to $SMARTDNS_HELD.
+# Smart DNS wins over an IP category, address by address (fix.34.1, r1 and r3): the block
+# (/SMARTDNS_HOLD_PREFIX, 24 by default) around each address a Smart DNS domain resolves to
+# stays out of the tunnel, the rest of the category keeps its routes. Before, the whole category
+# went off: meta.ai took all of Meta, copilot.microsoft.com Cloudflare and Discord (25.10).
+# Every Smart DNS domain is resolved (the limit of 32 is gone); a domain that gives no address
+# now keeps its addresses from the run before ($SMARTDNS_ADDR_CACHE). "block|domain|category"
+# goes to $SMARTDNS_BLOCKS (the diagnostics); $SMARTDNS_HELD, whole categories off, stays empty.
 smartdns_hold()
 {
     : > "$SMARTDNS_HELD.new"
+    : > "$WORK/smartdns-blocks"
     if [ -s "$2" ] && [ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" != 0 ]; then
         SD_ADDR="$WORK/smartdns-addresses"
+        SD_LIST="$WORK/smartdns-domains"
         {
             awk '
                 /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
                 ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print tolower($NF)}
             ' "$1"
             command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains
-        } | sort -u | head -n 32 |
+        } | sort -u > "$SD_LIST"
         while IFS= read -r SD; do
             case "$SD" in ''|*[!a-z0-9.-]*) continue ;; esac
             "$NSLOOKUP" "$SD" "${VWARD_DNS_SERVER:-127.0.0.1}" 2>/dev/null |
                 awk -v d="$SD" '/^Name:/ {n = 1; next} n {for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) print d, $i}'
-        done > "$SD_ADDR"
-
+        done < "$SD_LIST" > "$SD_ADDR.now"
+        awk 'FILENAME == ARGV[1] {want[$1] = 1; next}
+             FILENAME == ARGV[2] {now[$1] = 1; print; next}
+             ($1 in want) && !($1 in now)' "$SD_LIST" "$SD_ADDR.now" "$SMARTDNS_ADDR_CACHE" 2>/dev/null |
+            sort -u > "$SD_ADDR"
         if [ -s "$SD_ADDR" ]; then
+            if ! cmp -s "$SD_ADDR" "$SMARTDNS_ADDR_CACHE" 2>/dev/null; then
+                cp "$SD_ADDR" "$SMARTDNS_ADDR_CACHE.new" && mv -f "$SMARTDNS_ADDR_CACHE.new" "$SMARTDNS_ADDR_CACHE"
+            fi
             while IFS= read -r CAT; do
                 [ -s "$CATALOG/$CAT.cidr" ] || continue
-                awk -F'[./]' -v c="$CAT" '
-                    NR == FNR {split($0, p, " "); split(p[2], q, "."); ip[FNR] = ((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]; dom[FNR] = p[1]; n = FNR; next}
+                awk -F'[./]' -v c="$CAT" -v hp="$SMARTDNS_HOLD_PREFIX" '
+                    NR == FNR {
+                        split($0, p, " "); split(p[2], q, ".")
+                        z = 2 ^ (32 - hp); b = int((((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]) / z) * z
+                        n++; bs[n] = b; dom[n] = p[1]
+                        bt[n] = int(b / 16777216) "." int(b / 65536) % 256 "." int(b / 256) % 256 "." b % 256 "/" hp
+                        next
+                    }
                     NF == 5 {
                         z = 2 ^ (32 - $5); s = int(((($1 * 256 + $2) * 256 + $3) * 256 + $4) / z) * z
-                        for (i = 1; i <= n; i++) if (ip[i] >= s && ip[i] < s + z) {print c "|" dom[i]; exit}
+                        for (i = 1; i <= n; i++) if (bs[i] < s + z && s < bs[i] + 2 ^ (32 - hp)) print bt[i] "|" dom[i] "|" c
                     }' "$SD_ADDR" "$CATALOG/$CAT.cidr"
-            done < "$2" >> "$SMARTDNS_HELD.new"
+            done < "$2" | sort -u > "$WORK/smartdns-blocks"
         fi
     fi
 
-    if [ -s "$SMARTDNS_HELD.new" ]; then
-        cut -d'|' -f1 "$SMARTDNS_HELD.new" > "$WORK/smartdns-held"
-        grep -vxF -f "$WORK/smartdns-held" "$2" > "$2.kept" || true
-        mv "$2.kept" "$2"
-        log "SKIP smartdns $(tr '\n' ' ' < "$SMARTDNS_HELD.new")"
+    if [ -s "$WORK/smartdns-blocks" ]; then
+        log "HOLD smartdns blocks=$(cut -d'|' -f1 "$WORK/smartdns-blocks" | sort -u | wc -l) $(cut -d'|' -f3,2 "$WORK/smartdns-blocks" | sort -u | tr '\n' ' ')"
+    fi
+    if ! cmp -s "$WORK/smartdns-blocks" "$SMARTDNS_BLOCKS" 2>/dev/null; then
+        cp "$WORK/smartdns-blocks" "$SMARTDNS_BLOCKS.new" && mv -f "$SMARTDNS_BLOCKS.new" "$SMARTDNS_BLOCKS"
     fi
     if ! cmp -s "$SMARTDNS_HELD.new" "$SMARTDNS_HELD" 2>/dev/null; then
         mv -f "$SMARTDNS_HELD.new" "$SMARTDNS_HELD"
     else
         rm -f "$SMARTDNS_HELD.new"
     fi
+}
+
+# The subnets of $2 without the held blocks of $1 ("a.b.c.d/len|..."): a subnet holding a block
+# is split in halves down to the block, which is left out (a /13 with one held /24: 11 routes).
+smartdns_split()
+{
+    awk -v hp="$SMARTDNS_HOLD_PREFIX" '
+        function num(a,  q) {split(a, q, "."); return ((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]}
+        function dot(v) {return int(v / 16777216) "." int(v / 65536) % 256 "." int(v / 256) % 256 "." v % 256}
+        function hit(s, z,  i) {for (i = 1; i <= nb; i++) if (bs[i] < s + z && s < bs[i] + bz) return 1; return 0}
+        function emit(s, len,  z) {
+            z = 2 ^ (32 - len)
+            if (!hit(s, z)) {print dot(s) "/" len; return}
+            if (len >= hp) return
+            emit(s, len + 1); emit(s + z / 2, len + 1)
+        }
+        BEGIN {bz = 2 ^ (32 - hp)}
+        NR == FNR {split($0, p, "|"); split(p[1], q, "/"); if (!(q[1] in seen)) {seen[q[1]] = 1; bs[++nb] = num(q[1])}; next}
+        {split($0, p, "/"); if (p[2] !~ /^[0-9]+$/ || p[2] > 32) next; z = 2 ^ (32 - p[2]); emit(int(num(p[1]) / z) * z, p[2] + 0)}
+    ' "$1" "$2"
+}
+
+# Settings of the guards in domain-lists.conf: name, default.
+lists_conf()
+{
+    LC="$(awk -F= -v k="$1" '$1 == k {print $2; exit}' "$LISTS_CONF" 2>/dev/null)"
+    case "$LC" in ''|*[!0-9]*) LC="$2" ;; esac
+    echo "$LC"
+}
+
+# The running configuration is incomplete (fix.34.1, r2): no FQDN group, or none of the routes
+# VWARD owns while it owns some (it saved them). Nothing is removed on such a read.
+run_partial()
+{
+    grep -q '^object-group fqdn ' "$1" || return 0
+    [ -s "$OWNED" ] || return 1
+    awk -v rt="$RT" '
+        function mask(l,  m, i, o, b) {m = ""; for (i = 0; i < 4; i++) {b = l - i * 8; b = b >= 8 ? 8 : (b < 0 ? 0 : b); o = 256 - 2 ^ (8 - b); m = m (i ? "." : "") o}; return m}
+        NR == FNR {have[$0] = 1; next}
+        {split($0, p, "/"); if (("ip route " p[1] " " mask(p[2]) " " rt " auto") in have || (p[2] == 32 && ("ip route " p[1] " " rt " auto") in have)) {found = 1; exit}}
+        END {exit found ? 1 : 0}
+    ' "$1" "$OWNED"
 }
 
 route_line()
@@ -689,6 +756,11 @@ reconcile_routes()
 
     sort -u "$WANTED" > "$WANTED.sorted" &&
     mv "$WANTED.sorted" "$WANTED" || rm -f "$WANTED.sorted"
+
+    if [ -s "$WORK/smartdns-blocks" ]; then
+        smartdns_split "$WORK/smartdns-blocks" "$WANTED" | sort -u > "$WANTED.split" &&
+        mv "$WANTED.split" "$WANTED" || rm -f "$WANTED.split"
+    fi
 
     ADDED=0
     REMOVED=0
@@ -756,22 +828,58 @@ reconcile_routes()
         fi
     done < "$WANTED"
 
-    while IFS= read -r CIDR; do
-        [ -n "$CIDR" ] || continue
-
-        grep -Fxq "$CIDR" "$WANTED" && continue
-
-        NET="${CIDR%/*}"
-        PREFIX="${CIDR#*/}"
-        MASK="$(prefix_mask "$PREFIX")" || continue
-
-        if ndm "no ip route $NET $MASK $RT"; then
-            REMOVED=$((REMOVED + 1))
-        else
-            echo "$CIDR" >> "$NEXT_OWNED"
-            ERRORS=$((ERRORS + 1))
+    # Shrink guard (fix.34.1, r2): 25.10 one pass removed 442 of 508 routes (a whole category held
+    # for a Smart DNS domain), Instagram and the sites behind Cloudflare went direct. More than
+    # shrink_max_routes or shrink_max_pct % of the owned routes at once, or a busy router: nothing
+    # is removed (an incomplete running configuration stops the pass before, run_partial), the routes stay owned, the reason goes to
+    # the log and $SHRINK_PENDING (the Panel). Each pass checks again; the held set is removed by
+    # «--confirm-shrink» (the same routes or fewer). shrink_guard=0 turns the guard off.
+    TO_REMOVE="$WORK/to-remove"
+    awk 'NR == FNR {w[$0] = 1; next} $0 != "" && !($0 in w)' "$WANTED" "$OWNED" > "$TO_REMOVE"
+    RM_N="$(wc -l < "$TO_REMOVE")"
+    OWN_N="$(wc -l < "$OWNED")"
+    SHRINK=""
+    if [ "$RM_N" -gt 0 ] && [ "$(lists_conf shrink_guard 1)" != 0 ]; then
+        SH_MAX="$(lists_conf shrink_max_routes 50)"
+        SH_PCT="$(lists_conf shrink_max_pct 20)"
+        if command -v vward_busy >/dev/null 2>&1 && vward_busy; then
+            SHRINK=busy
+        elif [ "$RM_N" -gt "$SH_MAX" ] || { [ "$RM_N" -ge 10 ] && [ $((RM_N * 100)) -gt $((SH_PCT * OWN_N)) ]; }; then
+            SHRINK=limit
+            if [ "${SHRINK_CONFIRMED:-0}" = 1 ] && [ -s "$SHRINK_PENDING.routes" ] &&
+               awk 'NR == FNR {p[$0] = 1; next} !($0 in p) {bad = 1; exit} END {exit bad}' "$SHRINK_PENDING.routes" "$TO_REMOVE"; then
+                SHRINK=""
+                log "SHRINK_CONFIRMED remove=$RM_N owned=$OWN_N"
+            fi
         fi
-    done < "$OWNED"
+    fi
+
+    if [ -n "$SHRINK" ]; then
+        cat "$TO_REMOVE" >> "$NEXT_OWNED"
+        cp "$TO_REMOVE" "$SHRINK_PENDING.routes.new" && mv -f "$SHRINK_PENDING.routes.new" "$SHRINK_PENDING.routes"
+        printf 'reason=%s\nremove=%s\nowned=%s\nmax_routes=%s\nmax_pct=%s\nat=%s\n' "$SHRINK" "$RM_N" "$OWN_N" \
+            "${SH_MAX:-}" "${SH_PCT:-}" "$(date '+%Y-%m-%d %H:%M:%S')" > "$SHRINK_PENDING.new" &&
+            mv -f "$SHRINK_PENDING.new" "$SHRINK_PENDING"
+        echo "SHRINK_HELD=$SHRINK"
+        echo "SHRINK_PENDING=$RM_N"
+        log "SHRINK_HOLD reason=$SHRINK remove=$RM_N owned=$OWN_N max_routes=${SH_MAX:-} max_pct=${SH_PCT:-}"
+    else
+        rm -f "$SHRINK_PENDING" "$SHRINK_PENDING.routes"
+        while IFS= read -r CIDR; do
+            [ -n "$CIDR" ] || continue
+
+            NET="${CIDR%/*}"
+            PREFIX="${CIDR#*/}"
+            MASK="$(prefix_mask "$PREFIX")" || continue
+
+            if ndm "no ip route $NET $MASK $RT"; then
+                REMOVED=$((REMOVED + 1))
+            else
+                echo "$CIDR" >> "$NEXT_OWNED"
+                ERRORS=$((ERRORS + 1))
+            fi
+        done < "$TO_REMOVE"
+    fi
 
     sort -u "$NEXT_OWNED" > "$OWNED.new" &&
     mv "$OWNED.new" "$OWNED" || rm -f "$OWNED.new"
@@ -800,7 +908,12 @@ reconcile_routes()
     echo "ERRORS=$ERRORS"
     echo "CONFIG_SAVE=$SAVE"
 
-    log "SYNC active=$(wc -l < "$ACTIVE") wanted=$(wc -l < "$WANTED") added=$ADDED removed=$REMOVED existing=$EXISTING managed=$(wc -l < "$OWNED") errors=$ERRORS save=$SAVE"
+    log "SYNC active=$(wc -l < "$ACTIVE") wanted=$(wc -l < "$WANTED") added=$ADDED removed=$REMOVED existing=$EXISTING managed=$(wc -l < "$OWNED") errors=$ERRORS save=$SAVE${SHRINK:+ held=$SHRINK}"
+
+    # The last set that synced clean: «--restore-last-good» brings it back in one step.
+    if [ "$ERRORS" -eq 0 ] && [ -z "$SHRINK" ] && [ -s "$OWNED" ] && ! cmp -s "$OWNED" "$LAST_GOOD" 2>/dev/null; then
+        cp "$OWNED" "$LAST_GOOD.new" && mv -f "$LAST_GOOD.new" "$LAST_GOOD"
+    fi
 
     [ "$ERRORS" -eq 0 ]
 }
@@ -821,7 +934,8 @@ case "$MODE" in
             exit 1
         }
         ;;
-    --reconcile)
+    --reconcile|--confirm-shrink|--restore-last-good)
+        [ "$MODE" != --confirm-shrink ] || SHRINK_CONFIRMED=1
         [ -d "$CATALOG" ] || {
             echo "ERROR=CATALOG_MISSING"
             exit 1
@@ -853,6 +967,37 @@ if [ ! -s "$RUN" ]; then
     exit 1
 fi
 
+# An incomplete read would take the routes of the missing groups away: the pass stops here.
+if run_partial "$RUN"; then
+    printf 'reason=partial_config\nat=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" > "$SHRINK_PENDING.new" &&
+        mv -f "$SHRINK_PENDING.new" "$SHRINK_PENDING"
+    log "SKIP reconcile reason=partial_config lines=$(wc -l < "$RUN") owned=$(wc -l < "$OWNED")"
+    echo "RUNNING_CONFIG=INCOMPLETE"
+    echo "SUBNET_SYNC=SKIPPED"
+    exit 0
+fi
+
+# One step back to the last set that synced clean: its routes are added again and owned.
+if [ "$MODE" = --restore-last-good ]; then
+    [ -s "$LAST_GOOD" ] || { echo "ERROR=NO_LAST_GOOD"; exit 1; }
+    R_ADDED=0 R_ERR=0
+    while IFS= read -r CIDR; do
+        ROUTE="$(route_line "$CIDR")" || continue
+        if grep -Fqx "$ROUTE" "$RUN" || { [ "${CIDR#*/}" = 32 ] && grep -Fqx "ip route ${CIDR%/*} $RT auto" "$RUN"; }; then
+            continue
+        fi
+        if ndm "$ROUTE"; then R_ADDED=$((R_ADDED + 1)); else R_ERR=$((R_ERR + 1)); fi
+    done < "$LAST_GOOD"
+    sort -u "$OWNED" "$LAST_GOOD" > "$OWNED.new" && mv "$OWNED.new" "$OWNED"
+    [ "$R_ADDED" -eq 0 ] || ndm "system configuration save" || R_ERR=$((R_ERR + 1))
+    rm -f "$SHRINK_PENDING" "$SHRINK_PENDING.routes"
+    log "RESTORE last-good routes=$(wc -l < "$LAST_GOOD") added=$R_ADDED errors=$R_ERR"
+    echo "RESTORED=$R_ADDED"
+    echo "ERRORS=$R_ERR"
+    [ "$R_ERR" -eq 0 ] && echo "SUBNET_SYNC=OK" || echo "SUBNET_SYNC=PARTIAL"
+    exit 0
+fi
+
 DOMAINS="$WORK/policy-domains"
 CATS="$WORK/desired-categories"
 
@@ -863,6 +1008,8 @@ if [ -s "$EXCLUDED" ]; then
     mv "$CATS.kept" "$CATS"
 fi
 
+SMARTDNS_HOLD_PREFIX="$(lists_conf smartdns_hold_prefix 24)"
+[ "$SMARTDNS_HOLD_PREFIX" -ge 16 ] && [ "$SMARTDNS_HOLD_PREFIX" -le 32 ] || SMARTDNS_HOLD_PREFIX=24
 smartdns_hold "$RUN" "$CATS"
 
 echo "VPN_DOMAINS=$(wc -l < "$DOMAINS")"
