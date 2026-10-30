@@ -6,7 +6,7 @@
 
 ## Пакеты и приёмка
 
-- [ ] RS-123: tests/repository/check-service-faults.py запускает настоящий
+- [x] RS-123: tests/repository/check-service-faults.py запускает настоящий
   console-config.sh с транспортной fixture; сначала RED на потере ручного
   изменения при неудачном первом on и на частичном off/save. Затем минимальный
   fix в console-config.sh. TERM, SIGKILL/reboot (сброс только /tmp), local write
@@ -16,7 +16,7 @@
   small/large входы, число snapshots/команд/exec и временные записи, CPU/RSS
   только процессов теста. Нагрузку хоста не выдавать за измерения Viva.
   Изменение продукта допустимо только после измеренного избыточного действия.
-- [ ] RS-5: components/runtime/lib/vward-routing-decision.sh принимает только
+- [ ] RS-5: components/runtime/lib/vward-routing-audit.sh принимает только
   явные нормализованные inputs; stdout audit, без чтения живой конфигурации,
   запуска служб и мутаций. Тесты: 8 масок M/S/A, 24 направленных одиночных
   переключения, дубли, foreign/unknown ownership, VPN/ISP/DNS/health conflicts,

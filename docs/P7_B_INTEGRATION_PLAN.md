@@ -25,7 +25,8 @@ SHA256SUMS, docs/AGENT.md и docs/ROADMAP.md. Наличие зелёного CI
    SHA256SUMS сгенерировать из окончательных файлов, не выбирать сторону
    конфликта. VERSION/feed/release в этом пакете не меняются.
 5. Запустить совместные функциональные регрессии: console-domain-lists,
-   ads-dns-guard, smartdns-purge, service-ownership, service-transactions,
+   ads-dns-guard, console-smartdns, ads-agh-smartdns, agh-bind,
+   service-ownership, service-transactions,
    service-faults и routing-state-errors; проверить доступные актуальные
    имена тестов в ветке P-7, а не создавать подменяющие проверки.
    Добавить сочетания AGH unavailable + retarget/off/refresh/TERM, rc=0 error,
