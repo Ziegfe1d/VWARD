@@ -21,14 +21,14 @@ P-7 не переносится; совместимость с ним прове
 Файлы: console-config.sh, tunnel-quality.sh, тесты console-services и новые
 service-ownership; только необходимые сообщения Панели.
 
-- [ ] RED: совпадающее имя/80% покрытия не разрешают менять чужую группу;
+- [x] RED: совпадающее имя/80% покрытия не разрешают менять чужую группу;
   legacy enabled.tsv не разрешает off/refresh/retarget/category.
-- [ ] GREEN: отдельное приватное доказательство созданного VWARD состава,
+- [x] GREEN: отдельное приватное доказательство созданного VWARD состава,
   сравнение с текущей группой перед мутацией; потерянное/несовпавшее
   доказательство означает reference-only, без автоматической миграции.
-- [ ] Прежние 3 колонки enabled.tsv сохраняются. Явное управление ручным
+- [x] Прежние 3 колонки enabled.tsv сохраняются. Явное управление ручным
   списком через существующий API не становится автоматическим adoption.
-- [ ] Автоматический подбор туннеля передаёт service ID writer-у, который
+- [x] Автоматический подбор туннеля передаёт service ID writer-у, который
   проверяет принадлежность. Новые собственные группы проходят on/off/refresh.
 
 ## RS-2: неизвестный снимок и неподтверждённое снятие DNS
@@ -64,3 +64,5 @@ RS-6: подключение writer/engine/reconcile/guard/CIDR по частя�
 Особое внимание review: reused group ID, ручное изменение состава после
 создания, ошибочный/потерянный ответ API, сохранение recovery после TERM,
 пересечение locks и state между refresh и service off.
+
+Проверка RS-1: SERVICE_OWNERSHIP, CONSOLE_SERVICES, TUNNEL_SERVICES PASS в отдельной ветке; RED на прежнем коде: adoption/off/retarget/category/refresh/auto-writer/edited-owned. Дополнительные RED→GREEN: ручной маршрут, mode=0666, дополнительный ISP-маршрут и edit во время bypass. Проверка ash/sh syntax и ShellCheck error severity PASS на собранном стеке.
