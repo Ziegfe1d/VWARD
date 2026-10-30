@@ -122,3 +122,22 @@ dns-risk marker и before/after остаются с pending, ответ rollback
 P7_B_INTEGRATION_PLAN.md. На начало продолжения CI #753 для aee436c: repository-
 consistency и updater-tests success, resource-audit in_progress. Финальный
 результат пока не заявляется; назначенная разовая проверка остаётся отдельно.
+
+## RS-4 и RS-5: подготовлено без применения
+
+RS-4: ограниченные сравнительные измерения четырёх routing hot paths, данные
+и ограничения — ROUTING_HOST_MEASUREMENTS_2026-10-30.md. Нет подтверждённого
+снижения нагрузки Viva и нет изменения бюджета; production оптимизации отложены.
+
+RS-5: чистая библиотека vward_routing_audit, нормализованные явные inputs,
+только stdout. Контракт — ROUTING_AUDIT_CONTRACT.md. Все 8 комбинаций/24
+перехода, ownership/conflicts/duplicates/unknown, immutable inputs и отсутствие
+записей проверены. Независимый review подтвердил избыточное вложенное сканирование;
+после RED >3s bounded BusyBox случай проходит за 0.16–0.21s с теми же
+449454 bytes. Сортировка evidence выполняется один раз, coverage индексируется.
+Это измерение конкретного synthetic input на хосте; максимум допустимого входа
+и работа на Viva пока не приняты. Адаптеров live config/caller-ов нет, реальный
+packet path unknown. Следующий этап — RS-6 отдельными read-only адаптерами
+с совместными отказными регрессиями, затем поэтапное подключение writer.
+
+План P-7 сохранён отдельно, физический объединённый кандидат не создан.
