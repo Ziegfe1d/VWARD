@@ -66,6 +66,7 @@ JOURNAL=
 DEVCONF_ORIG=
 DEVCONF_EXISTED=
 TXN=0
+SD_RECOVERY_DIR=
 # The download of the official AdGuard Home build (ext-agh-official).
 AO_TMP=
 # An uploaded .conf holds the private key: it goes away with the helper.
@@ -103,12 +104,23 @@ die() {
 }
 
 cleanup() {
+    sd_rollback_bad=0
     if [ "$TXN" = 1 ]; then
         TXN=0
-        tunnel_undo || { audit "tunnel rollback incomplete"; printf 'error=rollback_incomplete\n'; }
+        tunnel_undo || { sd_rollback_bad=1; audit "tunnel rollback incomplete"; printf 'error=rollback_incomplete\n'; }
         # Smart DNS may already have saved the removal before a local write failed.
         if [ "${SD_TRANSACTION:-0}" = 1 ] && [ -s "$JOURNAL" ]; then
-            save_router || { audit "smartdns rollback save incomplete"; printf 'error=rollback_incomplete\n'; }
+            save_router || { sd_rollback_bad=1; audit "smartdns rollback save incomplete"; printf 'error=rollback_incomplete\n'; }
+        fi
+    fi
+    # An API outage cannot be repaired synchronously. Keep the exact undo pairs
+    # on persistent storage for owner-directed recovery, never in the public log.
+    if [ -n "$SD_RECOVERY_DIR" ]; then
+        if [ "$sd_rollback_bad" = 1 ]; then
+            audit "smartdns rollback recovery=$SD_RECOVERY_DIR/pairs.tsv"
+            printf 'recovery=%s/pairs.tsv\n' "$SD_RECOVERY_DIR"
+        else
+            rm -rf "${SD_RECOVERY_DIR:?}"
         fi
     fi
     [ -z "$TMPFILE" ] || rm -f "$TMPFILE"
@@ -2451,15 +2463,22 @@ smartdns_take_rows() {
             $0 == v || (length($0) > length(v) && substr($0, length($0)-length(v)) == "." v)')
     fi
     if [ -n "$sd_agh_domains" ]; then
+        # Reserve durable private undo storage BEFORE any AGH write. This is
+        # outside the settings-backup rotation and is removed after success or
+        # confirmed rollback, but survives a lost reply followed by an outage.
+        [ ! -L "$BACKUP_DIR-recovery" ] || die backup_failed
+        mkdir -p "$BACKUP_DIR-recovery" || die backup_failed
+        SD_RECOVERY_DIR=$(mktemp -d "$BACKUP_DIR-recovery/smartdns.XXXXXX") || die backup_failed
+        sd_agh_pairs="$SD_RECOVERY_DIR/pairs.tsv"
         # The API can apply a POST and then lose the reply. Register undo before it.
-        printf 'AGH-RESTORE %s\n' "$JOURNAL.agh" >> "$JOURNAL" || die write_failed
+        printf 'AGH-RESTORE %s\n' "$sd_agh_pairs" >> "$JOURNAL" || die write_failed
         if [ "$sd_mode" = server ]; then
-            agh_control smartdns-take-server "$SMARTDNS_CONF" "$JOURNAL.agh" || die "$AGH_ERR"
+            agh_control smartdns-take-server "$SMARTDNS_CONF" "$sd_agh_pairs" || die "$AGH_ERR"
         else
             printf '%s\n' "$sd_value" > "$JOURNAL.agh.inc" || die write_failed
-            agh_control smartdns-take "$JOURNAL.agh.inc" "$JOURNAL.agh" || die "$AGH_ERR"
+            agh_control smartdns-take "$JOURNAL.agh.inc" "$sd_agh_pairs" || die "$AGH_ERR"
         fi
-        if [ -s "$JOURNAL.agh" ]; then
+        if [ -s "$sd_agh_pairs" ]; then
             SD_RESULT=changed
         fi
     fi

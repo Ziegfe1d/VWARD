@@ -212,7 +212,64 @@ with tempfile.TemporaryDirectory() as tmp:
                 fail("two-store rollback " + flag + ": " + r.stdout + str(got))
         elif r.returncode or got != upstreams[1:] or own in cfg.read_text():
             fail("two-store clear: " + r.stdout + str(got))
+        retained = list((tmp / "backup-recovery").glob("smartdns.*"))
+        if flag == "save-fail":
+            if len(retained) != 1 or not (retained[0] / "pairs.tsv").is_file():
+                fail("unconfirmed router save lost the recovery snapshot")
+            shutil.rmtree(retained[0])
+        elif retained:
+            fail("successful or confirmed rollback operations left recovery data")
+    if list((tmp / "backup-recovery").glob("smartdns.*")):
+        fail("successful or confirmed rollback operations left recovery data")
+    # No durable backup available: refuse BEFORE the external mutation.
+    recovery_root = tmp / "backup-recovery"
+    recovery_root.rmdir(); recovery_root.write_text("blocked")
+    reset(); before = cfg.read_text()
+    state.write_text(json.dumps({"up": upstreams}))
+    r = run("smartdns-server", "clear")
+    if not r.returncode or "error=backup_failed" not in r.stdout or json.loads(state.read_text()).get("posts", 0):
+        fail("missing durable undo storage did not prevent AGH mutation: " + r.stdout)
+    if cfg.read_text() != before or conf.read_text() != original:
+        fail("backup failure changed router configuration")
+    recovery_root.unlink()
     # A failing AGH removal must never be reported as unchanged/successful.
+    reset()
+    # POST applied, reply lost, API remains down: preserve private recovery
+    # pairs outside /tmp so a reboot cannot erase the only undo data.
+    offline_curl = fake_curl.replace('args = sys.argv[1:]',
+        'if st.get("offline_after_apply") and st.get("posts", 0) >= 1: sys.exit(7)\nargs = sys.argv[1:]')
+    offline_curl = offline_curl.replace('Path(out).write_text(json.dumps(res))',
+        'if method == "POST" and st.get("offline_after_apply"): sys.exit(7)\nPath(out).write_text(json.dumps(res))')
+    curl.write_text(offline_curl.replace("@STATE@", str(state)))
+    for op in (("smartdns-server", "clear"), ("smartdns-domain", "remove", "claude.ai")):
+        reset()
+        state.write_text(json.dumps({"up": upstreams, "offline_after_apply": True}))
+        r = run(*op)
+        if not r.returncode or "error=rollback_incomplete" not in r.stdout or "result=" in r.stdout:
+            fail("persistent API outage did not report incomplete rollback: " + r.stdout)
+        paths = re.findall(r"^recovery=(.+)$", r.stdout, re.M)
+        if len(paths) != 1 or not Path(paths[0]).is_file():
+            fail("persistent API outage discarded recovery pairs: " + r.stdout)
+        recovery = Path(paths[0])
+        expected = {"claude.ai\t" + own}
+        if op[0] == "smartdns-domain": expected.add("claude.ai\t" + other)
+        if not recovery.is_relative_to(tmp / "backup-recovery") or set(recovery.read_text().splitlines()) != expected:
+            fail("recovery pairs are missing or outside durable backups")
+        if recovery.stat().st_mode & 0o077 or recovery.parent.stat().st_mode & 0o077:
+            fail("recovery data is not private")
+        if conf.read_text() != original or own not in cfg.read_text():
+            fail("API outage damaged the router/config rollback")
+        if own in r.stdout or own in (tmp / "audit.log").read_text():
+            fail("outage exposed the private upstream")
+        # Recover with the production AGH control after service returns; exact
+        # pairs must restore alongside the other upstream for the same domain.
+        st = json.loads(state.read_text()); st["offline_after_apply"] = False
+        state.write_text(json.dumps(st))
+        restored = subprocess.run(["sh", env["VWARD_ADS_CONTROL_BIN"], "agh", "smartdns-restore", str(recovery)],
+                                  env=env, text=True, capture_output=True, timeout=30)
+        if restored.returncode or set(json.loads(state.read_text())["up"]) != set(upstreams):
+            fail("retained pairs cannot restore AGH: " + restored.stdout)
+    curl.write_text(fake_curl.replace("@STATE@", str(state)))
     reset()
     state.write_text(json.dumps({"up": upstreams, "ignore_posts": True}))
     r = run("smartdns-domain", "remove", "claude.ai")
