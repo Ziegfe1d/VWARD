@@ -106,6 +106,10 @@ cleanup() {
     if [ "$TXN" = 1 ]; then
         TXN=0
         tunnel_undo || { audit "tunnel rollback incomplete"; printf 'error=rollback_incomplete\n'; }
+        # Smart DNS may already have saved the removal before a local write failed.
+        if [ "${SD_TRANSACTION:-0}" = 1 ] && [ -s "$JOURNAL" ]; then
+            save_router || { audit "smartdns rollback save incomplete"; printf 'error=rollback_incomplete\n'; }
+        fi
     fi
     [ -z "$TMPFILE" ] || rm -f "$TMPFILE"
     [ -z "$CONF_FILE" ] || rm -f "$CONF_FILE" "$CONF_FILE.raw"
@@ -575,6 +579,7 @@ tunnel_undo() {
             { bad=0; while IFS= read -r undo; do
                 case "$undo" in
                     "DOH-REMOVE "*) doh_remove "${undo#DOH-REMOVE }" || bad=1 ;;
+                    "AGH-RESTORE "*) f=${undo#AGH-RESTORE }; if [ -s "$f" ]; then agh_control smartdns-restore "$f" >/dev/null || bad=1; fi ;;
                     "AGH-PUT "*) agh_control smartdns-put "${undo#AGH-PUT }" >/dev/null || bad=1 ;;
                     "AGH-TAKE "*) f=${undo#AGH-TAKE }; cut -f1 "$f" > "$f.inc" && agh_control smartdns-take "$f.inc" "$f.undo" >/dev/null || bad=1 ;;
                     *" private-key "*|*" preshared-key "*) ndm_secret "$undo" || bad=1 ;;
@@ -2323,7 +2328,7 @@ op_wifi_host() {
 
 # smartdns-domain add|remove DOMAIN: the domain resolved by Smart DNS in AdGuard Home,
 # through the upstream already serving most Smart DNS domains (Aeternia and the like);
-# remove takes it and its subdomains out.  Keenetic's own Smart DNS rows are not touched.
+# remove takes it and its subdomains out of both stores in one transaction.
 # Smart DNS without AdGuard Home (fix.30): the owner's own DoH server (smartdns-server), else the
 # server already used by Keenetic's own Smart DNS lines; a line per domain in Keenetic, which
 # holds at most 8 of them.
@@ -2414,17 +2419,67 @@ op_smartdns_domain() {
         keenetic_smartdns add "$2"
         done_ok "smartdns-domain add $2 keenetic" changed
     fi
-    printf '%s\n' "$2" > "$JOURNAL.agh.inc" || die write_failed
-    sd_agh=0
-    if agh_control smartdns-take "$JOURNAL.agh.inc" "$JOURNAL.agh"; then [ ! -s "$JOURNAL.agh" ] || sd_agh=1; fi
-    sd_k=0
-    snapshot
-    ! doh_lines | awk -v d="$2" '$(NF-1) == "domain" && tolower($NF) == d {f = 1} END {exit f ? 0 : 1}' || { keenetic_smartdns remove "$2"; sd_k=1; }
-    [ "$sd_agh$sd_k" != 00 ] || done_ok "smartdns-domain remove $2" unchanged
-    done_ok "smartdns-domain remove $2" changed
+    smartdns_take_rows domain "$2"
+    TXN=0
+    done_ok "smartdns-domain remove $2" "$SD_RESULT"
 }
+
+# One transaction for both DNS stores. The server selector is an exact URL read from
+# the private configuration; it is never guessed from another server's rules.
+smartdns_take_rows() {
+    load_profile_base
+    change_lock
+    snapshot
+    umask 077
+    [ -n "$JOURNAL" ] || JOURNAL=$(mktemp /tmp/vward-console-smartdns.XXXXXX) || die temporary_file_unavailable
+    TXN=1 SD_TRANSACTION=1 SD_RESULT=unchanged
+    sd_mode=$1 sd_value=$2
+    sd_agh_domains=$(vward_agh_smartdns_domains)
+    if [ "$sd_mode" = domain ]; then
+        sd_agh_domains=$(printf '%s\n' "$sd_agh_domains" | awk -v v="$sd_value" '
+            $0 == v || (length($0) > length(v) && substr($0, length($0)-length(v)) == "." v)')
+    fi
+    if [ -n "$sd_agh_domains" ]; then
+        # The API can apply a POST and then lose the reply. Register undo before it.
+        printf 'AGH-RESTORE %s\n' "$JOURNAL.agh" >> "$JOURNAL" || die write_failed
+        if [ "$sd_mode" = server ]; then
+            agh_control smartdns-take-server "$SMARTDNS_CONF" "$JOURNAL.agh" || die "$AGH_ERR"
+        else
+            printf '%s\n' "$sd_value" > "$JOURNAL.agh.inc" || die write_failed
+            agh_control smartdns-take "$JOURNAL.agh.inc" "$JOURNAL.agh" || die "$AGH_ERR"
+        fi
+        if [ -s "$JOURNAL.agh" ]; then
+            SD_RESULT=changed
+        fi
+    fi
+    # Do not put a subscription URL into awk's process arguments.
+    sd_domain=; [ "$sd_mode" != domain ] || sd_domain=$sd_value
+    doh_lines | awk -v mode="$sd_mode" -v v="$sd_domain" -v conf="$SMARTDNS_CONF" '
+        BEGIN {if (mode == "server") {while ((getline line < conf) > 0)
+            if (index(line, "SMARTDNS_URL=") == 1) {v=substr(line, 14); break}; close(conf)}}
+        $(NF-1) == "domain" {
+            d=tolower($NF)
+            if ((mode == "server" && $3 == v) || (mode == "domain" &&
+                (d == v || (length(d) > length(v) && substr(d, length(d)-length(v)) == "." v)))) print
+        }' > "$JOURNAL.doh" || die write_failed
+    while IFS= read -r sd_line; do
+        [ -n "$sd_line" ] || continue
+        # Record first: a command may change the router even when verification fails.
+        printf 'dns-proxy %s\n' "$sd_line" >> "$JOURNAL" || die write_failed
+        doh_remove "$sd_line"; sd_rc=$?
+        case "$sd_rc" in 0) ;; 2) die doh_remove_unsafe ;; *) die doh_remove_failed ;; esac
+        SD_RESULT=changed
+    done < "$JOURNAL.doh"
+    snapshot
+    while IFS= read -r sd_line; do
+        [ -z "$sd_line" ] || ! doh_present "$sd_line" || die verification_failed
+    done < "$JOURNAL.doh"
+    [ "$SD_RESULT" != changed ] || save_router || die config_save_failed
+}
+
 # smartdns-server set|clear: the owner's own Smart DNS server, a DoH address. It comes on stdin
-# (it may hold a personal token) and is never printed, logged or passed to another program here.
+# (it may hold a personal token). Clear removes its active domain rules from both stores;
+# selectors read the address from the private file rather than exposing it in argv.
 op_smartdns_server() {
     case "$1" in
         set) IFS= read -r ss_url || die invalid_value 64
@@ -2435,9 +2490,16 @@ op_smartdns_server() {
              install_tmp "$SMARTDNS_CONF" 0600 || die write_failed
              done_ok "smartdns-server set" changed ;;
         clear) grep -q '^SMARTDNS_URL=' "$SMARTDNS_CONF" 2>/dev/null || done_ok "smartdns-server clear" unchanged
+             backup_file "$SMARTDNS_CONF" || die backup_failed
+             # Keep the address until both stores and the router save have succeeded.
+             if [ "$(awk -F= '$1 == "smartdns_clear_rules" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" != 0 ]; then
+                 ss_old=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=")+1); exit}' "$SMARTDNS_CONF")
+                 [ -z "$ss_old" ] || smartdns_take_rows server "$ss_old"
+             fi
              new_tmp "$SMARTDNS_CONF" || die write_failed
              grep -v '^SMARTDNS_URL=' "$SMARTDNS_CONF" > "$TMPFILE"
              if [ -s "$TMPFILE" ]; then install_tmp "$SMARTDNS_CONF" 0600 || die write_failed; else rm -f "$SMARTDNS_CONF" || die write_failed; fi
+             TXN=0
              done_ok "smartdns-server clear" changed ;;
         *) die invalid_operation 64 ;;
     esac
@@ -3508,7 +3570,7 @@ vward_admission_enter console-config || die updater_busy 75
 case "$OP" in
     force-vpn|domain-category|tunnel-guard|tunnel-fallback|tunnel-return|tunnel-auto|wan-guard|component|\
     adaptive-mode|classifier|ip-category|console-auth|console-devices|update-feed|domain-list-watch|\
-    smartdns-guard|smartdns-domain|wifi|update|wan-param|wifi-host|service|service-category|ext-auto|firmware|journal|agents-mode|cleanup|reset)
+    smartdns-guard|smartdns-domain|smartdns-server|smartdns-store|wifi|update|wan-param|wifi-host|service|service-category|ext-auto|firmware|journal|agents-mode|cleanup|reset)
         edit_lock ;;
 esac
 

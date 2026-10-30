@@ -122,9 +122,9 @@ if args[1] == "smartdns-take":
             if rest: new.append("[/%s/]%s" % ("/".join(rest), url))
         else: new.append(u)
     s["up"] = new; Path(args[3]).write_text("".join("%s\t%s\n" % p for p in took)); print("TAKEN=%d" % len(took))
-elif args[1] == "smartdns-put":
+elif args[1] in ("smartdns-put", "smartdns-restore"):
     for l in open(args[2]):
-        d, url = l.rstrip("\n").split("\t"); s["up"].append("[/%s/]%s" % (d, url))
+        d, url = l.rstrip("\n").split("\t"); url = "@AET@" if url == "auto" else url; s["up"].append("[/%s/]%s" % (d, url))
 st.write_text(json.dumps(s))
 Path("@YAML@").write_text("dns:\n  upstream_dns:\n" + "".join("    - '%s'\n" % u for u in s["up"]))
 print("CONTROL=PASS")
@@ -265,7 +265,7 @@ with tempfile.TemporaryDirectory() as tmp:
     UP = [f"[/anthropic.com/chatgpt.com/]{AET}", f"[/claude.ai/]{AET}", "https://dns.nextdns.io/abc"]
     agh_state.write_text(__import__("json").dumps({"up": UP}))
     yaml.write_text("dns:\n  upstream_dns:\n" + "".join(f"    - '{u}'\n" for u in UP))
-    ads = tmp / "ads-control"; ads.write_text(FAKE_ADS.replace("@ST@", str(agh_state)).replace("@YAML@", str(yaml))); ads.chmod(0o755)
+    ads = tmp / "ads-control"; ads.write_text(FAKE_ADS.replace("@AET@", AET).replace("@ST@", str(agh_state)).replace("@YAML@", str(yaml))); ads.chmod(0o755)
     env |= {"VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_ADS_CONTROL_BIN": str(ads)}
     agh = lambda: __import__("json").loads(agh_state.read_text())["up"]
     keenetic_before = dns_block(cfg)
@@ -310,7 +310,7 @@ with tempfile.TemporaryDirectory() as tmp:
     run("smartdns-domain", "add", "gemini.google.com", "error=smartdns_not_configured")
     st.pop("fail"); agh_state.write_text(__import__("json").dumps(st))
     run("smartdns-domain", "add", "Gemini.Google.com", "result=changed", 0)
-    if agh()[-1] != "[/gemini.google.com/]auto":
+    if agh()[-1] != f"[/gemini.google.com/]{AET}":
         fail(f"smartdns-domain add: {agh()}")
     run("smartdns-domain", "remove", "gemini.google.com", "result=changed", 0)
     run("smartdns-domain", "remove", "gemini.google.com", "result=unchanged", 0)

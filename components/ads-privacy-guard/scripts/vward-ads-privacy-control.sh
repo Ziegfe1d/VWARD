@@ -134,7 +134,8 @@ if [ "$OP" = agh ]; then
     #                                          is the one already serving most Smart DNS
     #                                          domains (a domain added from the Panel)
     # The whole upstream list is read back; on a mismatch the previous one is put back.
-    smartdns-take|smartdns-put)
+    # smartdns-take-server PRIVATE_CONFIG PAIRS_OUT: only this server's domain rows.
+    smartdns-take|smartdns-take-server|smartdns-put|smartdns-restore)
       [ -r "$A1" ] || agfail invalid_value
       aget dns_info dns.json || agfail adguard_unavailable
       "$ADS_JQ" -e '.upstream_dns | type == "array"' "$W/dns.json" >/dev/null 2>&1 || agfail adguard_unavailable
@@ -145,14 +146,20 @@ if [ "$OP" = agh ]; then
                   or ((if startswith("udp://") or startswith("tcp://") then .[6:] else . end) as $h
                       | ($h | startswith("127.") or startswith("[::1]:")) and ($h | endswith(":53") | not)
                         and ((try ($h | split(":") | last | tonumber) catch null) != null)));'
-      if [ "$AG_SET" = smartdns-take ]; then
+      if [ "$AG_SET" != smartdns-put ] && [ "$AG_SET" != smartdns-restore ]; then
         case "$A2" in ''|*[!A-Za-z0-9._/-]*) agfail invalid_value ;; esac
-        "$ADS_JQ" -Rn '[inputs | ascii_downcase | select(length > 0)]' "$A1" > "$W/inc.json" || agfail invalid_value
-        "$ADS_JQ" -c --slurpfile inc "$W/inc.json" "$SD_LIB"'
-          def under($d): any($inc[0][]; . as $i | $d == $i or ($d | endswith("." + $i)));
+        if [ "$AG_SET" = smartdns-take-server ]; then
+          "$ADS_JQ" -Rn '[inputs | select(startswith("SMARTDNS_URL=")) | ltrimstr("SMARTDNS_URL=") | select(length > 0)] | .[:1]' "$A1" > "$W/inc.json" || agfail invalid_value
+          "$ADS_JQ" -e 'length == 1' "$W/inc.json" >/dev/null || agfail invalid_value
+        else
+          "$ADS_JQ" -Rn '[inputs | ascii_downcase | select(length > 0)]' "$A1" > "$W/inc.json" || agfail invalid_value
+        fi
+        "$ADS_JQ" -c --arg mode "$AG_SET" --slurpfile inc "$W/inc.json" "$SD_LIB"'
+          def under($d; $u): if $mode == "smartdns-take-server" then any($inc[0][]; . == $u)
+            else any($inc[0][]; . as $i | $d == $i or ($d | endswith("." + $i))) end;
           [.upstream_dns[] | . as $raw | row as $r
             | if $r == null or ($r | enc | not) then {keep: $raw, took: []}
-              else ([$r.d[] | select(. as $x | under($x | ascii_downcase))]) as $t
+              else ([$r.d[] | select(. as $x | under($x | ascii_downcase; $r.u))]) as $t
                 | ([$r.d[] | select(. as $x | ($t | index([$x])) == null)]) as $rest
                 | {keep: (if ($t | length) == 0 then $raw elif ($rest | length) == 0 then null else "[/" + ($rest | join("/")) + "/]" + $r.u end),
                    took: [$t[] | {d: ascii_downcase, u: $r.u}]}
@@ -167,18 +174,25 @@ if [ "$OP" = agh ]; then
           aget dns_info dns2.json && "$ADS_JQ" -e --slurpfile p "$W/plan.json" '.upstream_dns == $p[0].upstream_dns' "$W/dns2.json" >/dev/null 2>&1 || {
             "$ADS_JQ" -c '{upstream_dns: .upstream_dns}' "$W/dns.json" > "$W/back.json"
             ads_agh_api_post dns_config "$W/back.json" "$W/out" >/dev/null 2>&1
-            : > "$A2"; agfail verification_failed; }
+            # Drop undo data only after confirming the original upstreams are back.
+            # Otherwise the caller still needs the pairs for its own rollback.
+            if aget dns_info dns-back.json && "$ADS_JQ" -e --slurpfile o "$W/dns.json" '.upstream_dns == $o[0].upstream_dns' "$W/dns-back.json" >/dev/null 2>&1; then
+              printf '' > "$A2" || agfail write_failed
+            fi
+            agfail verification_failed; }
         fi
         echo "TAKEN=$TAKEN"
       else
         "$ADS_JQ" -Rn '[inputs | split("\t") | select(length == 2 and (.[0] | length) > 0 and (.[1] | length) > 0) | {d: .[0], u: .[1]}]' "$A1" > "$W/pairs.json" || agfail invalid_value
         "$ADS_JQ" -e --slurpfile p "$W/pairs.json" "$SD_LIB"'
           ($p[0] | map(select(.u == "auto")) | length) == 0 or ([.upstream_dns[] | row | select(. != null and enc)] | length) > 0' "$W/dns.json" >/dev/null 2>&1 || agfail smartdns_not_configured
-        "$ADS_JQ" -c --slurpfile p "$W/pairs.json" "$SD_LIB"'
+        "$ADS_JQ" -c --arg mode "$AG_SET" --slurpfile p "$W/pairs.json" "$SD_LIB"'
           ([.upstream_dns[] | row | select(. != null and enc)]) as $rows
           | ([$rows[] | .d[] | ascii_downcase]) as $have
           | ($rows | map({u, n: (.d | length)}) | group_by(.u) | map({u: .[0].u, n: (map(.n) | add)}) | max_by(.n) | .u) as $auto
-          | [$p[0][] | (if .u == "auto" then .u = $auto else . end) | select(.d as $d | ($have | index([$d])) == null)] as $add
+          | [$p[0][] | (if .u == "auto" then .u = $auto else . end) | . as $pair | select(if $mode == "smartdns-restore" then
+              (any($rows[]; .u == $pair.u and any(.d[]; ascii_downcase == $pair.d)) | not)
+              else (.d as $d | ($have | index([$d])) == null) end)] as $add
           | {upstream_dns: (.upstream_dns + [$add | group_by(.u)[] | "[/" + (map(.d) | join("/")) + "/]" + .[0].u])}' "$W/dns.json" > "$W/plan.json" || agfail invalid_value
         if ! "$ADS_JQ" -e --slurpfile o "$W/dns.json" '.upstream_dns == $o[0].upstream_dns' "$W/plan.json" >/dev/null 2>&1; then
           ads_agh_api_post dns_config "$W/plan.json" "$W/out" >/dev/null 2>&1 || agfail adguard_rejected
