@@ -66,6 +66,8 @@ JOURNAL=
 DEVCONF_ORIG=
 DEVCONF_EXISTED=
 TXN=0
+SV_TXN=0
+SV_DIR=
 # The download of the official AdGuard Home build (ext-agh-official).
 AO_TMP=
 # An uploaded .conf holds the private key: it goes away with the helper.
@@ -103,6 +105,13 @@ die() {
 }
 
 cleanup() {
+    if [ "$SV_TXN" = 1 ]; then
+        SV_TXN=0
+        if ! service_txn_rollback; then
+            audit "service rollback incomplete recovery=$SV_DIR"
+            printf 'error=rollback_incomplete\nrecovery=%s\n' "$SV_DIR"
+        fi
+    fi
     if [ "$TXN" = 1 ]; then
         TXN=0
         tunnel_undo || { audit "tunnel rollback incomplete"; printf 'error=rollback_incomplete\n'; }
@@ -113,7 +122,7 @@ cleanup() {
     [ -z "$TMPFILE" ] || rm -f "$TMPFILE.raw"
     [ -z "$RUNCFG" ] || rm -f "$RUNCFG"
     [ -z "$JOURNAL" ] || rm -f "$JOURNAL.failed" "$JOURNAL.owned" "$JOURNAL.still"
-    [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.nets" "$JOURNAL.doh" "$JOURNAL.agh" "$JOURNAL.agh.inc" "$JOURNAL.agh.undo"
+    [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.adds" "$JOURNAL.dels" "$JOURNAL.nets" "$JOURNAL.doh" "$JOURNAL.agh" "$JOURNAL.agh.inc" "$JOURNAL.agh.undo"
     [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
     [ "$LOCKED" != 1 ] || rm -rf "${CHANGE_LOCK:?}"
@@ -791,6 +800,7 @@ group_route() {
         }' "$RUNCFG"
 }
 
+# All routes belong in the ownership identity, including conflicting/extra rows.
 group_routes() {
     awk -v g="$1" '/^[^ \t!]/ {ctx=($1=="dns-proxy" && NF==1)} /^!/ {ctx=0}
         ctx && $1=="route" && $2=="object-group" && $3==g {
@@ -917,6 +927,7 @@ op_domain_list() {
     snapshot
     grep -qx "object-group fqdn $G" "$RUNCFG" || die unknown_group 64
     if [ -n "${VWARD_SERVICE_ID:-}" ]; then
+        service_pending_check
         sr_row=$(service_row "$VWARD_SERVICE_ID")
         [ "$(printf '%s' "$sr_row" | cut -f2)" = "$G" ] && service_owned "$G" || die service_reference_only 64
     fi
@@ -1129,6 +1140,149 @@ service_domains() {
     sort -u "$2" -o "$2"
 }
 
+# Durable compensation for multi-step service changes, with no new worker.
+service_txn_backup() {
+    if [ -e "$1" ] || [ -L "$1" ]; then
+        [ -f "$1" ] && [ ! -L "$1" ] && cp -p "$1" "$SV_DIR/$2"
+    else
+        : > "$SV_DIR/$2.absent"
+    fi
+}
+
+service_txn_restore() {
+    if [ -f "$SV_DIR/$2.absent" ]; then
+        rm -f "$1"
+    elif [ -f "$SV_DIR/$2" ]; then
+        mkdir -p "${1%/*}" && cp -p "$SV_DIR/$2" "$1.restore.$$" && mv -f "$1.restore.$$" "$1"
+    else
+        return 1
+    fi
+}
+
+service_pending_check() {
+    for sv_pending in "$BACKUP_DIR"/service-transactions/*/pending; do
+        [ -e "$sv_pending" ] || continue
+        [ "${VWARD_SERVICE_TRANSACTION:-}" = "${sv_pending%/pending}" ] || die service_recovery_required 75
+    done
+}
+
+service_txn_begin() {
+    service_pending_check
+    sv_root="$BACKUP_DIR/service-transactions"
+    mkdir -p "$sv_root" && chmod 0700 "$sv_root" || die backup_failed
+    SV_DIR=$(umask 077; mktemp -d "$sv_root/txn.XXXXXX") || die backup_failed
+    if ! { service_txn_backup "$SERVICES_STATE" enabled &&
+           service_txn_backup "$SERVICES_CATS" categories &&
+           service_txn_backup "$SERVICES_FETCHED" catalog &&
+           : > "$SV_DIR/groups" && : > "$SV_DIR/undo" && : > "$SV_DIR/pending"; }; then
+        rm -rf "${SV_DIR:?}"; SV_DIR=; die backup_failed
+    fi
+    SV_TXN=1
+}
+
+service_txn_group() {
+    valid_group "$1" && service_owned "$1" || die service_reference_only 64
+    grep -Fxq "$1" "$SV_DIR/groups" && return 0
+    service_signature "$1" > "$SV_DIR/group.$1" &&
+        group_routes "$1" > "$SV_DIR/route.$1" &&
+        service_txn_backup "$SERVICES_ETC/owned/$1" "claim.$1" &&
+        service_txn_backup "$LISTS_STATE/$1" "saved.$1" &&
+        printf '%s\n' "$1" >> "$SV_DIR/groups" || die backup_failed
+}
+
+service_txn_commit() {
+    # Keep a completed directory after a crash harmless; pending alone blocks retry.
+    rm -f "$SV_DIR/pending" || die write_failed
+    SV_TXN=0
+    rm -rf "${SV_DIR:?}"
+    SV_DIR=
+}
+
+# Compensation is limited to this transaction's possible delta. An owner edit
+# outside it is left intact, with recovery retained instead of blind replay.
+service_txn_allowed() {
+    service_signature "$1" > "$SV_DIR/current.$1" || return 1
+    sed '/^include /d;/^route=/d' "$SV_DIR/current.$1" > "$SV_DIR/meta.now"
+    sed '/^include /d;/^route=/d' "$SV_DIR/group.$1" > "$SV_DIR/meta.old"
+    cmp -s "$SV_DIR/meta.now" "$SV_DIR/meta.old" || return 1
+    awk -v g="$1" '
+        FILENAME==ARGV[1] && $1=="include" {lo[$2]=1; hi[$2]=1; next}
+        FILENAME==ARGV[2] {
+            if($1=="object-group" && $3==g && $4=="include") lo[$5]=0
+            if($1=="no" && $4==g && $5=="include") hi[$6]=1
+            next
+        }
+        FILENAME==ARGV[3] && $1=="include" {seen[$2]=1; if(!hi[$2]) bad=1}
+        END {for(d in lo) if(lo[d] && !seen[d]) bad=1; exit bad}
+    ' "$SV_DIR/group.$1" "$SV_DIR/undo" "$SV_DIR/current.$1" || return 1
+    group_routes "$1" > "$SV_DIR/routes.now"
+    sv_intended=$(cat "$SV_DIR/target.$1" 2>/dev/null)
+    if [ -z "$sv_intended" ]; then
+        cmp -s "$SV_DIR/routes.now" "$SV_DIR/route.$1"
+    else
+        [ -s "$SV_DIR/routes.now" ] || return 1
+        awk -v t="$sv_intended" 'FILENAME==ARGV[1] {ok[$0]=1; next}
+            !($0 in ok) && $0!=t "\tauto" {bad=1} END {exit bad}' \
+            "$SV_DIR/route.$1" "$SV_DIR/routes.now"
+    fi
+}
+
+service_txn_rollback() {
+    sv_bad=0
+    if [ "$LOCKED" != 1 ]; then
+        dir_lock "$CHANGE_LOCK" || return 1
+        LOCKED=1
+    fi
+    "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && [ -s "$RUNCFG" ] || return 1
+    while IFS= read -r sv_g; do
+        if [ -f "$SV_DIR/foreign.$sv_g" ] || ! service_txn_allowed "$sv_g"; then
+            : > "$SV_DIR/foreign.$sv_g"
+            sv_bad=1
+            audit "service rollback held: owner changed $sv_g"
+        fi
+    done < "$SV_DIR/groups"
+    if [ -s "$SV_DIR/undo" ]; then
+        awk '{a[NR]=$0} END {for(i=NR;i>0;i--) print a[i]}' "$SV_DIR/undo" |
+            while IFS= read -r sv_cmd; do
+                set -- $sv_cmd
+                if [ "$1" = no ]; then sv_ug=$4; else sv_ug=$3; fi
+                [ ! -f "$SV_DIR/foreign.$sv_ug" ] || continue
+                ndm "$sv_cmd" >/dev/null 2>&1 || :
+            done
+    fi
+    while IFS= read -r sv_g; do
+        [ ! -f "$SV_DIR/foreign.$sv_g" ] || continue
+        "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && [ -s "$RUNCFG" ] || return 1
+        group_routes "$sv_g" > "$SV_DIR/routes.now"
+        while IFS="$(printf '\t')" read -r sv_t sv_o; do
+            [ -n "$sv_t" ] || continue
+            grep -Fxq "$sv_t$(printf '\t')$sv_o" "$SV_DIR/routes.now" && continue
+            sv_opts=; [ "$sv_o" = - ] || sv_opts=" $sv_o"
+            ndm "dns-proxy route object-group $sv_g $sv_t$sv_opts" >/dev/null 2>&1 || :
+        done < "$SV_DIR/route.$sv_g"
+        "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && [ -s "$RUNCFG" ] || return 1
+        group_routes "$sv_g" > "$SV_DIR/routes.now"
+        while IFS="$(printf '\t')" read -r sv_t sv_o; do
+            awk -F'\t' -v t="$sv_t" '$1==t {f=1} END {exit !f}' "$SV_DIR/route.$sv_g" && continue
+            ndm "dns-proxy no route object-group $sv_g $sv_t" >/dev/null 2>&1 || :
+        done < "$SV_DIR/routes.now"
+        service_txn_restore "$LISTS_STATE/$sv_g" "saved.$sv_g" || sv_bad=1
+        service_txn_restore "$SERVICES_ETC/owned/$sv_g" "claim.$sv_g" || sv_bad=1
+    done < "$SV_DIR/groups"
+    "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && [ -s "$RUNCFG" ] || return 1
+    while IFS= read -r sv_g; do
+        service_signature "$sv_g" | cmp -s - "$SV_DIR/group.$sv_g" || sv_bad=1
+        group_routes "$sv_g" | cmp -s - "$SV_DIR/route.$sv_g" || sv_bad=1
+    done < "$SV_DIR/groups"
+    service_txn_restore "$SERVICES_STATE" enabled || sv_bad=1
+    service_txn_restore "$SERVICES_CATS" categories || sv_bad=1
+    service_txn_restore "$SERVICES_FETCHED" catalog || sv_bad=1
+    save_router || sv_bad=1
+    [ "$sv_bad" = 0 ] || return 1
+    rm -rf "${SV_DIR:?}"
+    SV_DIR=
+}
+
 # Categories pinned to a tunnel: CATEGORY<TAB>TUNNEL. A service on «Автоматически» of such a
 # category goes through that tunnel; a service pinned itself keeps its own.
 SERVICES_CATS="$SERVICES_ETC/categories.tsv"
@@ -1144,10 +1298,17 @@ service_target() {
 # Route the list through a second helper run: domain-list takes care of Smart DNS
 # lines and AdGuard Home rows the same way as for Keenetic's own lists.
 service_route() {
-    sr_out=$(VWARD_SERVICE_ID="$sv_id" sh "$0" domain-list "$1" "$2" 2>/dev/null | tail -n 1)
+    if [ "${SV_TXN:-0}" = 1 ]; then
+        sv_target=$2; [ "$sv_target" != vpn ] || sv_target=$VWARD_TUNNEL_INTERFACE
+        printf '%s\n' "$sv_target" > "$SV_DIR/target.$1" || die write_failed
+    fi
+    sr_out=$(VWARD_SERVICE_ID="$sv_id" VWARD_SERVICE_TRANSACTION="${SV_DIR:-}" sh "$0" domain-list "$1" "$2" 2>/dev/null | tail -n 1)
     case "$sr_out" in result=*) return 0 ;; esac
     SR_ERR=${sr_out#error=}
     case "$SR_ERR" in ''|*[!a-z0-9_]*) SR_ERR=router_rejected ;; esac
+    if [ "${SV_TXN:-0}" = 1 ] && [ "$SR_ERR" = service_reference_only ]; then
+        : > "$SV_DIR/foreign.$1"
+    fi
     return 1
 }
 
@@ -1178,6 +1339,7 @@ op_service_category() {
     [ -z "$sc_bad" ] || die service_reference_only 64
     sc_cur=$(awk -F'\t' -v c="$1" '$1 == c {print $2; exit}' "$SERVICES_CATS" 2>/dev/null)
     [ "${sc_cur:-auto}" != "$2" ] || done_ok "service-category $1 $2" unchanged
+    service_txn_begin
     mkdir -p "$SERVICES_ETC" || die write_failed
     new_tmp "$SERVICES_CATS" || die write_failed
     { [ ! -f "$SERVICES_CATS" ] || awk -F'\t' -v c="$1" '$1 != c' "$SERVICES_CATS"
@@ -1190,10 +1352,12 @@ op_service_category() {
     [ ! -f "$SERVICES_STATE" ] || [ ! -s "$sc_ids" ] || awk -F'\t' 'NR == FNR {c[$1] = 1; next} ($1 in c) && $3 == "auto" {print $1 "\t" $2}' "$sc_ids" "$SERVICES_STATE" > "$sc_ids.on"
     while IFS="$(printf '\t')" read -r sv_id G; do
         [ -n "$G" ] || continue
+        service_txn_group "$G"
         service_route "$G" "$(service_target auto "$sv_id")" || { rm -f "$sc_ids" "$sc_ids.on"; die "$SR_ERR"; }
         sc_n=$((sc_n + 1))
     done < "$sc_ids.on"
     rm -f "$sc_ids" "$sc_ids.on"
+    service_txn_commit
     done_ok "service-category $1 $2 moved=$sc_n" changed
 }
 
@@ -1210,6 +1374,7 @@ op_service() {
     SV_CAT=$(services_catalog) || die services_unavailable
     load_profile_base
     [ "$sv_to" = auto ] || [ "$sv_op" = off ] || is_tunnel "$sv_to" || die unknown_tunnel 64
+    service_pending_check
     row=$(service_row "$sv_id")
     G=$(printf '%s' "$row" | cut -f2)
     if [ -n "$row" ]; then
@@ -1225,8 +1390,11 @@ op_service() {
 
     if [ "$sv_op" = tunnel ]; then
         [ -n "$row" ] || die service_not_enabled 64
-        service_state_set "$sv_id" "$G" "$sv_to"
+        service_txn_begin
+        service_txn_group "$G"
         service_route "$G" "$(service_target "$sv_to" "$sv_id")" || die "$SR_ERR"
+        service_state_set "$sv_id" "$G" "$sv_to"
+        service_txn_commit
         done_ok "service tunnel $sv_id $G $sv_to" changed
     fi
 
@@ -1253,8 +1421,11 @@ op_service() {
 
     # on: already on means a new tunnel.
     if [ -n "$row" ]; then
-        service_state_set "$sv_id" "$G" "$sv_to"
+        service_txn_begin
+        service_txn_group "$G"
         service_route "$G" "$(service_target "$sv_to" "$sv_id")" || die "$SR_ERR"
+        service_state_set "$sv_id" "$G" "$sv_to"
+        service_txn_commit
         done_ok "service on $sv_id $G $sv_to" changed
     fi
     "$JQ" -e --arg i "$sv_id" 'any(.services[]; .id == $i)' "$SV_CAT" >/dev/null 2>&1 || die unknown_service 64
@@ -1303,6 +1474,7 @@ op_service() {
 # services-refresh: the catalog of the day (iplist, built by VWARD's workflow),
 # kept only when it is valid; the lists of services switched on follow it.
 op_services_refresh() {
+    service_pending_check
     mkdir -p "$(dirname "$SERVICES_FETCHED")" || die write_failed
     new_tmp "$SERVICES_FETCHED" || die write_failed
     # Through vward_fetch of the device profile: when curl crashes on HTTPS, the TLS of
@@ -1325,38 +1497,50 @@ op_services_refresh() {
         *) die download_failed ;;
     esac
     services_valid "$TMPFILE" || die catalog_invalid
-    if [ -f "$SERVICES_FETCHED" ] && cmp -s "$TMPFILE" "$SERVICES_FETCHED"; then
-        rm -f "${TMPFILE:?}"; TMPFILE=; fetched=unchanged
-    else
-        install_tmp "$SERVICES_FETCHED" 0644 || die write_failed; fetched=changed
-    fi
-    [ -s "$SERVICES_STATE" ] || done_ok "services-refresh catalog=$fetched" "$fetched"
-    SV_CAT=$SERVICES_FETCHED
+    fetched=changed
+    [ ! -f "$SERVICES_FETCHED" ] || ! cmp -s "$TMPFILE" "$SERVICES_FETCHED" || fetched=unchanged
+    service_txn_begin
+    mv "$TMPFILE" "$SV_DIR/catalog.new" || die write_failed
+    TMPFILE=
+    SV_CAT="$SV_DIR/catalog.new"
     change_lock
     JOURNAL=$(mktemp /tmp/vward-console-service.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     snapshot
     moved=0
     : > "$JOURNAL.owned"
-    while IFS="$(printf '\t')" read -r id grp pin; do
-        grep -qx "object-group fqdn $grp" "$RUNCFG" || continue
-        service_owned "$grp" || continue
-        echo "$grp" >> "$JOURNAL.owned"
-        service_domains "$id" "$JOURNAL.doh" || continue
-        [ "$(grep -c . "$JOURNAL.doh")" -le "$SERVICE_LIMIT" ] || continue
-        group_domains "$grp" > "$JOURNAL.moves"
-        comm -13 "$JOURNAL.moves" "$JOURNAL.doh" | while IFS= read -r d; do ndm "object-group fqdn $grp include $d" || exit 1; done || die list_limit
-        comm -23 "$JOURNAL.moves" "$JOURNAL.doh" | while IFS= read -r d; do ndm "no object-group fqdn $grp include $d" || exit 1; done || die router_rejected
-        cmp -s "$JOURNAL.moves" "$JOURNAL.doh" || moved=$((moved + 1))
-    done < "$SERVICES_STATE"
-    [ "$moved" = 0 ] || save_router || die config_save_failed
-    if [ "$moved" != 0 ]; then
-        snapshot
+    if [ -s "$SERVICES_STATE" ]; then
         while IFS="$(printf '\t')" read -r id grp pin; do
-            # Only groups that had a valid claim before refresh are re-signed below.
-            grep -Fxq "$grp" "$JOURNAL.owned" 2>/dev/null || continue
-            service_claim "$grp"
+            service_owned "$grp" || continue
+            service_domains "$id" "$JOURNAL.doh" || die catalog_invalid
+            [ "$(grep -c . "$JOURNAL.doh")" -le "$SERVICE_LIMIT" ] || die service_too_big 64
+            service_txn_group "$grp"
+            group_domains "$grp" > "$JOURNAL.moves"
+            # Retire old members first so a valid 300->300 update fits throughout.
+            comm -23 "$JOURNAL.moves" "$JOURNAL.doh" > "$JOURNAL.dels" || die write_failed
+            comm -13 "$JOURNAL.moves" "$JOURNAL.doh" > "$JOURNAL.adds" || die write_failed
+            while IFS= read -r d; do
+                printf 'object-group fqdn %s include %s\n' "$grp" "$d" >> "$SV_DIR/undo" || die write_failed
+                ndm "no object-group fqdn $grp include $d" || die router_rejected
+            done < "$JOURNAL.dels"
+            while IFS= read -r d; do
+                printf 'no object-group fqdn %s include %s\n' "$grp" "$d" >> "$SV_DIR/undo" || die write_failed
+                ndm "object-group fqdn $grp include $d" || die list_limit
+            done < "$JOURNAL.adds"
+            if ! cmp -s "$JOURNAL.moves" "$JOURNAL.doh"; then
+                moved=$((moved + 1))
+                snapshot
+                group_domains "$grp" | cmp -s - "$JOURNAL.doh" || die verification_failed
+                service_claim "$grp"
+            fi
         done < "$SERVICES_STATE"
     fi
+    [ "$moved" = 0 ] || save_router || die config_save_failed
+    if [ "$fetched" = changed ]; then
+        new_tmp "$SERVICES_FETCHED" || die write_failed
+        cp "$SV_DIR/catalog.new" "$TMPFILE" && install_tmp "$SERVICES_FETCHED" 0644 || die write_failed
+    fi
+    rm -f "$JOURNAL.adds" "$JOURNAL.dels"
+    service_txn_commit
     [ "$moved" = 0 ] && [ "$fetched" = unchanged ] && done_ok "services-refresh" unchanged
     done_ok "services-refresh catalog=$fetched lists=$moved" changed
 }
