@@ -74,6 +74,7 @@ python3 tests/repository/check-console-config.py || fail "Panel configuration wr
 python3 tests/repository/check-console-domain-lists.py || fail "Panel domain lists"
 python3 tests/repository/check-console-list-addrs.py || fail "Panel learned addresses of a list"
 python3 tests/repository/check-console-addresses.py || fail "Panel page addresses"
+python3 tests/repository/check-route-probe-evidence.py || fail "P-7 configured/router/client route evidence"
 python3 tests/repository/check-console-route-probe.py || fail "Panel address check"
 python3 tests/repository/check-services-catalog.py || fail "Services catalog"
 python3 tests/repository/check-console-services.py || fail "Panel services"
