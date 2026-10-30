@@ -123,6 +123,7 @@ python3 tests/repository/check-console-update-method.py || fail "Updates: update
 python3 tests/repository/check-console-notes.py || fail "Bell: pop-ups top right, history on the router, errors under fields"
 python3 tests/repository/check-console-fold.py || fail "Panel blocks fold to their title and stay folded"
 python3 tests/repository/check-ads-jobs.py || fail "Ads job queue: runs, lists, cancels, drains"
+python3 tests/repository/check-route-engine-dns-bind.py || fail "P-7 DNS binding recovery"
 python3 tests/repository/check-route-engine-capture.py || fail "route engine capture: LAN device, pause after quick deaths"
 python3 tests/repository/check-tunnel-fallback.py || fail "fallback tunnel and tunnel quality"
 python3 tests/repository/check-tunnel-lost-sweep.py || fail "lists off a tunnel without settings"
