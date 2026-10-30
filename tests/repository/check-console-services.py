@@ -262,14 +262,9 @@ with tempfile.TemporaryDirectory() as tmp:
     ]) + "\n"
     cfg.write_text(RUNNING + yt)
     state.write_text("")
-    run("service", "on", "youtube.com", "auto", expect="result=changed", rc=0)
-    if state.read_text() != "youtube.com\tdomain-list24\tauto\n":
-        fail(f"the existing list must be taken: {state.read_text()!r}")
-    if cfg.read_text().count("object-group fqdn ") != 6 or "domain-list2\n" in cfg.read_text():
-        fail("no new list may be made when the service's list is there")
-    if "    route object-group domain-list24 Wireguard0 auto" not in cfg.read_text():
-        fail("the taken list is routed")
-    if "adopted duplicates=domain-list25,domain-list1" not in (tmp / "audit.log").read_text():
-        fail("the other lists are shown as duplicates")
+    before = cfg.read_text()
+    run("service", "on", "youtube.com", "auto", expect="error=service_reference_only", rc=64)
+    if state.read_text() or cfg.read_text() != before:
+        fail("catalog similarity must not claim, repoint or duplicate a user group")
 
 print("CONSOLE_SERVICES=PASS")
