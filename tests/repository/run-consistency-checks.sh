@@ -77,6 +77,7 @@ python3 tests/repository/check-console-addresses.py || fail "Panel page addresse
 python3 tests/repository/check-console-route-probe.py || fail "Panel address check"
 python3 tests/repository/check-services-catalog.py || fail "Services catalog"
 python3 tests/repository/check-console-services.py || fail "Panel services"
+python3 tests/repository/check-service-ownership.py || fail "service ownership"
 python3 tests/repository/check-awg-engine.py || fail "Tunnel engine (AmneziaWG)"
 python3 tests/repository/check-vless-engine.py || fail "VLESS engine (Xray)"
 python3 tests/repository/check-boot-watch.py || fail "boot watch: the Panel and AdGuard Home after boot"

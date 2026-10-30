@@ -791,6 +791,14 @@ group_route() {
         }' "$RUNCFG"
 }
 
+group_routes() {
+    awk -v g="$1" '/^[^ \t!]/ {ctx=($1=="dns-proxy" && NF==1)} /^!/ {ctx=0}
+        ctx && $1=="route" && $2=="object-group" && $3==g {
+            o=""; for(k=5;k<=NF;k++) o=o (o==""?"":" ") $k
+            print $4 "\t" (o==""?"-":o)
+        }' "$RUNCFG" | sort
+}
+
 doh_lines() {
     # All dns-proxy https upstream lines, without indentation.
     awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
@@ -908,6 +916,10 @@ op_domain_list() {
     TXN=1
     snapshot
     grep -qx "object-group fqdn $G" "$RUNCFG" || die unknown_group 64
+    if [ -n "${VWARD_SERVICE_ID:-}" ]; then
+        sr_row=$(service_row "$VWARD_SERVICE_ID")
+        [ "$(printf '%s' "$sr_row" | cut -f2)" = "$G" ] && service_owned "$G" || die service_reference_only 64
+    fi
     tab=$(printf '\t')
     cur=$(group_route "$G")
     cur_t=${cur%%"$tab"*} cur_o=${cur#*"$tab"}
@@ -925,6 +937,7 @@ op_domain_list() {
         route_present "$G" "$TUN" && ! route_present "$G" "$cur_t" || die verification_failed
         save_router || die config_save_failed
         TXN=0
+        [ -z "${VWARD_SERVICE_ID:-}" ] || service_claim "$G"
         done_ok "domain-list $G $2 route=$cur_t->$TUN" changed
     fi
 
@@ -994,6 +1007,7 @@ op_domain_list() {
     save_router || die config_save_failed
     TXN=0
     [ "$2" != bypass ] || rm -f "$saved"
+    [ -z "${VWARD_SERVICE_ID:-}" ] || service_claim "$G"
     done_ok "domain-list $G $2 $detail" changed
 }
 
@@ -1081,6 +1095,33 @@ group_domains() {
 }
 
 # service_domains ID OUT: the catalog's domains of a service, each one checked.
+# A catalog match and enabled.tsv are references, never proof of ownership.
+# Record the group VWARD actually created; an owner edit or reused ID revokes it.
+service_signature() {
+    { awk -v g="$1" '/^object-group fqdn / {cur=$3; next} /^!/ {cur=""}
+          cur==g {sub(/^[[:space:]]+/, ""); if (NF) print}' "$RUNCFG"
+      group_routes "$1" | sed 's/^/route=/'
+    } | sort
+}
+
+service_owned() {
+    valid_group "$1" || return 1
+    so_file="$SERVICES_ETC/owned/$1"
+    [ -f "$so_file" ] && [ ! -L "$so_file" ] && [ -O "$so_file" ] || return 1
+    so_meta=$(ls -ln "$so_file" 2>/dev/null | awk '{print $1}')
+    case "$so_meta" in -rw-------|-r--------) ;; *) return 1 ;; esac
+    grep -qx "object-group fqdn $1" "$RUNCFG" || return 1
+    service_signature "$1" | cmp -s - "$so_file"
+}
+
+service_claim() {
+    mkdir -p "$SERVICES_ETC/owned" || die write_failed
+    chmod 0700 "$SERVICES_ETC/owned" || die write_failed
+    new_tmp "$SERVICES_ETC/owned/$1" || die write_failed
+    service_signature "$1" > "$TMPFILE" || die write_failed
+    install_tmp "$SERVICES_ETC/owned/$1" 0600 || die write_failed
+}
+
 service_domains() {
     "$JQ" -r --arg i "$1" '.services[] | select(.id == $i) | .domains[]' "$SV_CAT" > "$2" 2>/dev/null || return 1
     [ -s "$2" ] || return 1
@@ -1103,7 +1144,7 @@ service_target() {
 # Route the list through a second helper run: domain-list takes care of Smart DNS
 # lines and AdGuard Home rows the same way as for Keenetic's own lists.
 service_route() {
-    sr_out=$(sh "$0" domain-list "$1" "$2" 2>/dev/null | tail -n 1)
+    sr_out=$(VWARD_SERVICE_ID="$sv_id" sh "$0" domain-list "$1" "$2" 2>/dev/null | tail -n 1)
     case "$sr_out" in result=*) return 0 ;; esac
     SR_ERR=${sr_out#error=}
     case "$SR_ERR" in ''|*[!a-z0-9_]*) SR_ERR=router_rejected ;; esac
@@ -1126,6 +1167,15 @@ op_service_category() {
     "$JQ" -e --arg c "$1" 'any(.categories[]?; .id == $c)' "$SV_CAT" >/dev/null 2>&1 || die invalid_category 64
     load_profile_base
     [ "$2" = auto ] || is_tunnel "$2" || die unknown_tunnel 64
+    snapshot
+    sc_bad=$("$JQ" -r --arg c "$1" '.services[] | select(.category == $c) | .id' "$SV_CAT" |
+        while IFS= read -r sc_id; do
+            sc_row=$(service_row "$sc_id")
+            [ "$(printf '%s' "$sc_row" | cut -f3)" = auto ] || continue
+            sc_g=$(printf '%s' "$sc_row" | cut -f2)
+            service_owned "$sc_g" || echo "$sc_g"
+        done)
+    [ -z "$sc_bad" ] || die service_reference_only 64
     sc_cur=$(awk -F'\t' -v c="$1" '$1 == c {print $2; exit}' "$SERVICES_CATS" 2>/dev/null)
     [ "${sc_cur:-auto}" != "$2" ] || done_ok "service-category $1 $2" unchanged
     mkdir -p "$SERVICES_ETC" || die write_failed
@@ -1162,6 +1212,16 @@ op_service() {
     [ "$sv_to" = auto ] || [ "$sv_op" = off ] || is_tunnel "$sv_to" || die unknown_tunnel 64
     row=$(service_row "$sv_id")
     G=$(printf '%s' "$row" | cut -f2)
+    if [ -n "$row" ]; then
+        snapshot
+        if ! service_owned "$G"; then
+            if [ "$sv_op" = off ]; then
+                service_state_set "$sv_id"
+                done_ok "service off $sv_id reference-only" changed
+            fi
+            die service_reference_only 64
+        fi
+    fi
 
     if [ "$sv_op" = tunnel ]; then
         [ -n "$row" ] || die service_not_enabled 64
@@ -1178,13 +1238,14 @@ op_service() {
             service_route "$G" bypass || die "$SR_ERR"
             change_lock
             snapshot
+            service_owned "$G" || die service_reference_only 64
             t=$(group_route "$G"); t=${t%%"$(printf '\t')"*}
             [ -z "$t" ] || ndm "dns-proxy no route object-group $G $t" || die router_rejected
             ndm "no object-group fqdn $G" || die router_rejected
             snapshot
             ! grep -qx "object-group fqdn $G" "$RUNCFG" || die verification_failed
             save_router || die config_save_failed
-            rm -f "${LISTS_STATE:?}/${G:?}"
+            rm -f "${LISTS_STATE:?}/${G:?}" "$SERVICES_ETC/owned/$G"
         fi
         service_state_set "$sv_id"
         done_ok "service off $sv_id $G" changed
@@ -1210,10 +1271,8 @@ op_service() {
         # The list is there already: it is taken, not made again; the others are duplicates.
         G=$(printf '%s\n' "$sv_found" | awk 'NR == 1 {print $2}')
         sv_dups=$(printf '%s\n' "$sv_found" | awk 'NR > 1 {printf "%s%s", c, $2; c = ","}')
-        service_state_set "$sv_id" "$G" "$sv_to"
-        release_lock
-        service_route "$G" "$(service_target "$sv_to" "$sv_id")" || die "$SR_ERR"
-        done_ok "service on $sv_id $G $sv_to adopted${sv_dups:+ duplicates=$sv_dups}" changed
+        # Do not repoint, refresh or delete a group discovered by similarity.
+        die service_reference_only 64
     fi
     G=$(free_list_name) || die no_free_list
     TXN=1
@@ -1226,6 +1285,7 @@ op_service() {
     snapshot
     group_domains "$G" | cmp -s - "$JOURNAL.doh" || die verification_failed
     save_router || die config_save_failed
+    service_claim "$G"
     TXN=0
     service_state_set "$sv_id" "$G" "$sv_to"
     release_lock
@@ -1234,6 +1294,7 @@ op_service() {
         change_lock
         ndm "no object-group fqdn $G" && save_router
         service_state_set "$sv_id"
+        rm -f "$SERVICES_ETC/owned/$G"
         die "$SR_ERR"
     fi
     done_ok "service on $sv_id $G $sv_to domains=$n" changed
@@ -1275,8 +1336,11 @@ op_services_refresh() {
     JOURNAL=$(mktemp /tmp/vward-console-service.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     snapshot
     moved=0
+    : > "$JOURNAL.owned"
     while IFS="$(printf '\t')" read -r id grp pin; do
         grep -qx "object-group fqdn $grp" "$RUNCFG" || continue
+        service_owned "$grp" || continue
+        echo "$grp" >> "$JOURNAL.owned"
         service_domains "$id" "$JOURNAL.doh" || continue
         [ "$(grep -c . "$JOURNAL.doh")" -le "$SERVICE_LIMIT" ] || continue
         group_domains "$grp" > "$JOURNAL.moves"
@@ -1285,6 +1349,14 @@ op_services_refresh() {
         cmp -s "$JOURNAL.moves" "$JOURNAL.doh" || moved=$((moved + 1))
     done < "$SERVICES_STATE"
     [ "$moved" = 0 ] || save_router || die config_save_failed
+    if [ "$moved" != 0 ]; then
+        snapshot
+        while IFS="$(printf '\t')" read -r id grp pin; do
+            # Only groups that had a valid claim before refresh are re-signed below.
+            grep -Fxq "$grp" "$JOURNAL.owned" 2>/dev/null || continue
+            service_claim "$grp"
+        done < "$SERVICES_STATE"
+    fi
     [ "$moved" = 0 ] && [ "$fetched" = unchanged ] && done_ok "services-refresh" unchanged
     done_ok "services-refresh catalog=$fetched lists=$moved" changed
 }
@@ -3508,7 +3580,7 @@ vward_admission_enter console-config || die updater_busy 75
 case "$OP" in
     force-vpn|domain-category|tunnel-guard|tunnel-fallback|tunnel-return|tunnel-auto|wan-guard|component|\
     adaptive-mode|classifier|ip-category|console-auth|console-devices|update-feed|domain-list-watch|\
-    smartdns-guard|smartdns-domain|wifi|update|wan-param|wifi-host|service|service-category|ext-auto|firmware|journal|agents-mode|cleanup|reset)
+    smartdns-guard|smartdns-domain|wifi|update|wan-param|wifi-host|service|service-category|services-refresh|ext-auto|firmware|journal|agents-mode|cleanup|reset)
         edit_lock ;;
 esac
 
