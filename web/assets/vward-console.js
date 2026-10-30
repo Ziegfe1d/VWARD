@@ -541,25 +541,30 @@ function probeText(r) {
   if (!x.ok) return '<p class="field-warn">' + esc(errText(x)) + '</p>';
   const tuns = ((st().wg && st().wg.interfaces) || []).map(t => t.name);
   const via = t => tuns.includes(t) || t === prof().tunnel_interface ? 'через VPN «' + tunLabel(t) + '»' : t === prof().wan_interface || t === 'ISP' ? 'через провайдера (без VPN)' : 'через ' + t;
+  const routerRows = x.router_routes || [];
+  const routerText = routerRows.length ? routerRows.map(p => p.ip + ': ' + (p.known ? 'через ' + p.device + (p.gateway ? ', шлюз ' + p.gateway : '') : 'маршрут не определён')).join('; ') : 'нет данных о маршруте IPv4';
+  const clientNote = '<p class="panel-desc">Путь устройства не проверен. Маршрут роутера может отличаться от маршрута приложения, UDP и IPv6.</p>';
   if (x.type === 'ip') {
     const cats = (x.policy_matches || []).map(m => m.category);
-    return '<p class="probe-verdict ' + (x.configured_route ? 'vpn' : '') + '">' + esc(x.value) + ': маршрут ' + (x.configured_route ? 'через VPN' : 'через провайдера (без VPN)') + '</p>' +
-      kv([['Основание', x.configured_route ? 'подсеть ' + x.owned_cidr + ' из IP-категорий' : 'адрес не входит в подсети VPN'], ['IP-категории', cats.length ? cats.join(', ') : 'нет']]);
+    return '<p class="probe-verdict">' + esc(x.value) + ': маршрут роутера</p>' +
+      kv([['Маршрут IPv4', routerText], ['IP-категории', cats.length ? cats.join(', ') : 'нет'],
+        ['Настроенный маршрут категории', x.configured_route ? 'подсеть ' + x.owned_cidr + ', ' + (x.interface || '') : 'не найден']]) + clientNote;
   }
   const routes = x.routes || [], name = g => g === 'AdaptiveAuto' ? 'Автоподбор' : (x.names && x.names[g]) || g;
-  const head = esc(x.value) + ': маршрут ' + (routes.length ? esc(via(routes[0].interface)) : 'через провайдера (без VPN)');
+  const head = esc(x.value) + (routes.length ? ': настройка списка ' + esc(via(routes[0].interface)) : ': маршрут в списках не задан');
   const why = routes.length ? routes.map(t => (t.group === 'AdaptiveAuto' ? 'добавлен автоподбором' : 'в списке «' + name(t.group) + '»') + (routes.length > 1 ? ', маршрут ' + via(t.interface) : '')).join('; ')
     : (x.groups || []).length ? 'в списке «' + name(x.groups[0]) + '», маршрут для списка не задан' : 'не входит ни в один список';
   const hints = [...new Set((x.hints || []).map(h => h.category))];
   const s = siteState(r);
-  const head2 = s.blocked ? esc(x.value) + ': заблокирован в AdGuard Home' : s.smart && !routes.length ? esc(x.value) + ': Smart DNS, маршрут через провайдера' : head;
+  const head2 = s.blocked ? esc(x.value) + ': заблокирован в AdGuard Home' : s.smart && !routes.length ? esc(x.value) + ': настроен Smart DNS' : head;
   return '<p class="probe-verdict ' + (routes.length || s.blocked ? 'vpn' : '') + '">' + head2 + '</p>' + kv([
     ['Основание', why],
     s.smart ? ['Smart DNS', s.smartOwn ? 'задан для домена' : 'задан для родительского домена'] : null,
     s.agh ? ['AdGuard Home', s.blocked ? (s.userBlock ? 'блокировка пользовательским правилом' : 'блокировка списком фильтрации') : 'не фильтруется'] : null,
-    ['IPv4-адреса', ((x.dns && x.dns.ipv4) || []).join(', ') || 'не определены'],
+    ['Маршрут роутера IPv4', routerText],
+    ['IPv4 проверочного DNS', ((x.dns && x.dns.ipv4) || []).join(', ') || 'не определены'],
     hints.length ? ['В каталоге сервисов', hints.slice(0, 3).join(', ')] : null
-  ]);
+  ]) + clientNote;
 }
 const ADSV = { filter: 'all', search: '', blockedSearch: '', allowedSearch: '', filtersOpen: false };
 // Files page: the open folder.

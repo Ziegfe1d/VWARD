@@ -1716,12 +1716,31 @@ agh_ns()
         END {if (p ~ /^[0-9]+$/ && p != 53 && (h != "" || lan != "")) print (h != "" ? h : lan) ":" p}' "$AGH_YAML" 2>/dev/null
 }
 
-# agh_bound NAME: NAME or a domain above it has a line in AGH_BIND.
+# agh_bound NAME: a live binding, or a failed attempt still inside its retry window.
+# Old "failed" rows without a timestamp must not suppress retries until restart.
 agh_bound()
 {
-    [ -s "$AGH_BIND" ] && awk -v h="$1" '{n = length($1)
-        if (h == $1 || (length(h) > n && substr(h, length(h) - n) == "." $1)) {f = 1; exit}}
+    [ -s "$AGH_BIND" ] || return 1
+    AB_RETRY=${VWARD_AGH_BIND_RETRY:-60}
+    case "$AB_RETRY" in ''|*[!0-9]*) AB_RETRY=60 ;; esac
+    awk -v h="$1" -v now="${QNOW:-$(date +%s)}" -v retry="$AB_RETRY" '
+        $2 == "failed" && retry != 0 && ($3 !~ /^[0-9]+$/ || now < $3 || now-$3 >= retry) {next}
+        {n = length($1)
+         if (h == $1 || (length(h) > n && substr(h, length(h) - n) == "." $1)) {f = 1; exit}}
         END {exit !f}' "$AGH_BIND"
+}
+
+# Under the existing binding lock, atomically replace a domain's single state row.
+agh_bind_record()
+{
+    AB_TMP="$AGH_BIND.new.$$"
+    (umask 077
+     { if [ -f "$AGH_BIND" ]; then awk -v d="$1" '$1 != d' "$AGH_BIND" || exit 1; fi
+       printf '%s %s%s\n' "$1" "$2" "${3:+ $3}"
+     } > "$AB_TMP") && mv -f "$AB_TMP" "$AGH_BIND"
+    AB_RECORD_RC=$?
+    rm -f "$AB_TMP"
+    return "$AB_RECORD_RC"
 }
 
 # agh_bind NAME: the list domain of NAME (the longest one it falls under) is bound to AdGuard
@@ -1745,15 +1764,16 @@ agh_bind()
     mkdir -p "$AGH_BIND_RUN" 2>/dev/null
     [ -z "$(find "$AGH_BIND_RUN/lock" -maxdepth 0 -mmin +2 2>/dev/null)" ] || rmdir "$AGH_BIND_RUN/lock" 2>/dev/null
     mkdir "$AGH_BIND_RUN/lock" 2>/dev/null || return 0
-    agh_bind_one "$AB_D"
+    agh_bind_one "$AB_D"; AB_BIND_RC=$?
     rmdir "$AGH_BIND_RUN/lock" 2>/dev/null
+    return "$AB_BIND_RC"
 }
 
 agh_bind_one()
 {
     agh_bound "$1" && return 0
     AB_N=0
-    [ ! -f "$AGH_BIND" ] || AB_N=$(wc -l < "$AGH_BIND")
+    [ ! -f "$AGH_BIND" ] || AB_N=$(awk '$2 != "failed" {n++} END {print n+0}' "$AGH_BIND")
     if [ "$AB_N" -ge "$AGH_BIND_MAX" ]; then
         [ -e "$AGH_BIND_RUN/full" ] || echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND_FULL|$1|max=$AGH_BIND_MAX" >> "$EVENT_LOG"
         printf '' > "$AGH_BIND_RUN/full" 2>/dev/null
@@ -1765,21 +1785,31 @@ agh_bind_one()
     [ -n "$AB_RC" ] || return 0
     # Bound by hand (Smart DNS, the owner): left as it is, and not looked at again.
     if printf '%s\n' "$AB_RC" | awk -v d="$1" '$1 == "ip" && $2 == "name-server" && $4 == d {f = 1} END {exit !f}'; then
-        echo "$1 ext" >> "$AGH_BIND"
-        return 0
+        agh_bind_record "$1" ext
+        return $?
     fi
     if [ "$(agh_ns_room "$AB_RC")" -le 0 ]; then
         [ -e "$AGH_BIND_RUN/full" ] || echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND_FULL|$1|keenetic=no_room|free=$AGH_BIND_FREE" >> "$EVENT_LOG"
         printf '' > "$AGH_BIND_RUN/full" 2>/dev/null
         return 0
     fi
-    if AB_OUT=$(ndmc -c "ip name-server $AB_NS $1" 2>&1 </dev/null); then
-        echo "$1 $AB_NS" >> "$AGH_BIND"
+    AB_OUT=$(ndmc -c "ip name-server $AB_NS $1" 2>&1 </dev/null); AB_STATUS=$?
+    # Keenetic may report a rejected command in text while returning exit status zero.
+    if [ "$AB_STATUS" = 0 ] && ! printf '%s\n' "$AB_OUT" | grep -Eqi 'error|failed|invalid|unknown command|not found|too many elements'; then
+        if ! agh_bind_record "$1" "$AB_NS"; then
+            # No durable ownership: do not leave our new DNS rule looking manual.
+            AB_UNDO=$(ndmc -c "no ip name-server $AB_NS $1" 2>&1 </dev/null); AB_UNDO_RC=$?
+            if [ "$AB_UNDO_RC" != 0 ] || printf '%s\n' "$AB_UNDO" | grep -Eqi 'error|failed|invalid|unknown command|not found'; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND_ROLLBACK_FAILED|$1" >> "$EVENT_LOG"
+            fi
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND_STATE_FAILED|$1" >> "$EVENT_LOG"
+            return 1
+        fi
         # Keenetic's saved configuration follows within the hour (the route reconciler).
         printf '' > "$CONFIG_DIRTY" 2>/dev/null
         echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND|$1|$AB_NS" >> "$EVENT_LOG"
     else
-        echo "$1 failed" >> "$AGH_BIND"
+        agh_bind_record "$1" failed "${QNOW:-$(date +%s)}" || return 1
         echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND_FAILED|$1|$(printf '%s' "$AB_OUT" | tr '\n' ' ' | cut -c1-160)" >> "$EVENT_LOG"
     fi
 }
