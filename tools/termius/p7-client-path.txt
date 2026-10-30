@@ -41,12 +41,14 @@ diag() {
   [ -r "$L" ] || { echo 'FAIL: no profile'; return; }
   . "$L"
   vward_profile_load || { echo 'FAIL: profile'; return; }
+  echo "ADAPTIVE_RU=${VWARD_ADAPTIVE_RU:-0}"
+  echo "AGH_BIND_RETRY=${VWARD_AGH_BIND_RETRY:-60}"
   R=/opt/share/vward/updater/current
-  jq -r '.platform_version // "unknown"' \
-    "$R/component-registry.json" 2>/dev/null
 EOF
 
 cat >> /tmp/vward-p7-path.sh <<'EOF'
+  jq -r '.platform_version // "unknown"' \
+    "$R/component-registry.json" 2>/dev/null
   tmo 12 ndmc -c 'show running-config' > "$TMP/rc"
   echo "CONFIG_RC=$?"
   awk '/^object-group fqdn / {g=$3} /^!/ {g=""}
@@ -77,11 +79,11 @@ cat >> /tmp/vward-p7-path.sh <<'EOF'
     done
   done < "$TMP/hosts"
   echo '=== CLIENT / WAN / TUNNEL HEADERS: 12s ==='
-  echo 'No packet payload is captured.'
-  if ! command -v tcpdump >/dev/null 2>&1; then
 EOF
 
 cat >> /tmp/vward-p7-path.sh <<'EOF'
+  echo 'No packet payload is captured.'
+  if ! command -v tcpdump >/dev/null 2>&1; then
     echo 'SKIPPED: tcpdump unavailable'
     return
   fi
