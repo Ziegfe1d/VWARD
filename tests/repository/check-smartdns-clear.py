@@ -5,6 +5,7 @@ The admission stub represents an idle updater; no router or network is accessed.
 import ast
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -117,6 +118,35 @@ with tempfile.TemporaryDirectory() as tmp:
     if r.returncode or own not in cfg.read_text() or "SMARTDNS_URL=" in conf.read_text():
         fail("smartdns_clear_rules=0 did not retain legacy clear")
     switches.unlink()
+    # A removed server must not return from saved group state on a later bypass.
+    saved_dir = tmp / "etc/route-engine/domain-lists"
+    saved_dir.mkdir(parents=True, exist_ok=True)
+    saved = saved_dir / "domain-list4"
+    saved_original = ("route=ISP\tauto\n" + "doh=https upstream " + own + " domain claude.ai\n" +
+                      "agh=claude.ai\t" + own + "\n" + "doh=https upstream " + other + " domain other.example\n" +
+                      "agh=other.example\t" + other + "\n")
+    reset(); saved.write_text(saved_original); saved.chmod(0o600)
+    r = run("smartdns-server", "clear")
+    if r.returncode or own in saved.read_text() or other not in saved.read_text() or not saved.read_text().startswith("route=ISP\tauto\n"):
+        fail("saved state can resurrect removed server: " + r.stdout + saved.read_text())
+    # Refuse a symlink after editing the first snapshot; the first edit and DNS roll back.
+    reset(); saved.write_text(saved_original)
+    target = tmp / "untouched"; target.write_text(saved_original)
+    linked = saved_dir / "domain-list9"; linked.symlink_to(target)
+    r = run("smartdns-server", "clear")
+    linked.unlink()
+    if not r.returncode or saved.read_text() != saved_original or target.read_text() != saved_original or conf.read_text() != original or own not in cfg.read_text():
+        fail("saved-state failure did not roll back: " + r.stdout)
+    # A header-read error must abort; it is not an unrelated file (grep rc=1).
+    source = HELPER.read_text()
+    prune = re.search(r'^smartdns_prune_saved\(\) \{\n.*?^\}\n', source, re.M | re.S)
+    assert prune, 'saved cleanup function missing'
+    script = ('LISTS_STATE="' + str(saved_dir) + '"\n' +
+              'valid_group() { return 0; }; grep() { return 2; }; die() { exit 19; }\n' +
+              prune.group(0) + 'smartdns_prune_saved\n')
+    read_error = subprocess.run(['sh','-c',script],capture_output=True,text=True)
+    if read_error.returncode != 19 or saved.read_text() != saved_original:
+        fail('snapshot read error was ignored')
     # Both stores together, with real AGH control and a fake HTTP transport.
     fixture = ast.parse((ROOT / "tests/repository/check-ads-agh-smartdns.py").read_text())
     fake_curl = next(ast.literal_eval(n.value) for n in fixture.body if isinstance(n, ast.Assign)

@@ -328,4 +328,17 @@ with tempfile.TemporaryDirectory() as tmp:
     run("domain-list-watch", "domain-list4", "2", "error=invalid_value", 64)
     run("domain-list-watch", "AdaptiveAuto", "1", "error=invalid_group", 64)
 
+    # P-7: after explicit server clear, returning a group to ISP must not resurrect it.
+    cfg.write_text(RUNNING)
+    env["VWARD_ADGUARD_CONFIG"] = str(tmp / "absent.yaml")
+    env["VWARD_ADS_CONTROL_BIN"] = str(tmp / "absent-control")
+    (etc / "smartdns.conf").write_text("SMARTDNS_URL=" + AET + "\n")
+    run("domain-list", "domain-list4", "vpn", "result=changed", 0)
+    cleared = subprocess.run(["sh", str(HELPER), "smartdns-server", "clear"],env=env,text=True,capture_output=True)
+    if cleared.returncode or "result=changed" not in cleared.stdout:
+        fail("saved-state clear failed: " + cleared.stdout)
+    run("domain-list", "domain-list4", "bypass", "result=changed", 0)
+    if any(AET in line for line in dns_block(cfg)) or "route object-group domain-list4 ISP auto" not in dns_block(cfg):
+        fail("return from VPN resurrected the cleared server: " + str(dns_block(cfg)))
+
 print("CONSOLE_DOMAIN_LISTS=PASS")
