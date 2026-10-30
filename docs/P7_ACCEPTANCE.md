@@ -32,7 +32,12 @@ repository-consistency, updater-tests, resource-audit SUCCESS; завершён 
 route-probe API/UI, CONSOLE_DOH_RETRY прошли. ADS_AGH_SMARTDNS,
 SMARTDNS_KEENETIC_FORMS и CONSOLE_DOMAIN_LISTS прошли с временной idle-admission
 fixture вне репозитория; штатные первые два блокировались известной средой PID/proc.
-Защита production admission, тесты, ресурсные пределы и workflows не ослаблялись.
+Полный штатный локальный consistency этой сессии остановился на
+`check-console-security.py:76` (известное admission/PID ограничение);
+CONSOLE_SECURITY отдельно с временной idle-admission fixture PASS.
+Локальный полный зелёный набор не заявляется. Независимое review окончательного
+fix и диагностик: блокирующих замечаний нет. Защита production admission,
+тесты, ресурсные пределы и workflows не ослаблялись.
 
 [#751](https://github.com/Ziegfe1d/VWARD/actions/runs/41051886403),
 HEAD `93644437eb6f6fe73e207262b671fc40b76752f9`: completed/success,
