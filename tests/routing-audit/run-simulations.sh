@@ -225,5 +225,5 @@ input_before=$(cksum "$TMP/intents" "$TMP/snapshot")
 [ ! -s "$TMP/error" ] || fail 'audit ran unexpected command'
 [ -z "$(ls -A "$TMP/empty")" ] || fail 'audit wrote files'
 [ "$(cksum "$TMP/intents" "$TMP/snapshot")" = "$input_before" ] || fail 'audit changed inputs'
-printf 'PASS: scope, order, malformed input, bounds, load/call purity\n' 
+printf 'PASS: scope, order, malformed input, bounds, load/call purity\n'
 printf 'ROUTING_AUDIT_SIMULATIONS=PASS\n'
