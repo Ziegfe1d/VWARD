@@ -66,6 +66,7 @@ JOURNAL=
 DEVCONF_ORIG=
 DEVCONF_EXISTED=
 TXN=0
+SD_RECOVERY_DIR=
 # The download of the official AdGuard Home build (ext-agh-official).
 AO_TMP=
 # An uploaded .conf holds the private key: it goes away with the helper.
@@ -103,12 +104,23 @@ die() {
 }
 
 cleanup() {
+    sd_rollback_bad=0
     if [ "$TXN" = 1 ]; then
         TXN=0
-        tunnel_undo || { audit "tunnel rollback incomplete"; printf 'error=rollback_incomplete\n'; }
+        tunnel_undo || { sd_rollback_bad=1; audit "tunnel rollback incomplete"; printf 'error=rollback_incomplete\n'; }
         # Smart DNS may already have saved the removal before a local write failed.
         if [ "${SD_TRANSACTION:-0}" = 1 ] && [ -s "$JOURNAL" ]; then
-            save_router || { audit "smartdns rollback save incomplete"; printf 'error=rollback_incomplete\n'; }
+            save_router || { sd_rollback_bad=1; audit "smartdns rollback save incomplete"; printf 'error=rollback_incomplete\n'; }
+        fi
+    fi
+    # An API outage cannot be repaired synchronously. Keep the exact undo pairs
+    # on persistent storage for owner-directed recovery, never in the public log.
+    if [ -n "$SD_RECOVERY_DIR" ]; then
+        if [ "$sd_rollback_bad" = 1 ]; then
+            audit "smartdns rollback recovery=$SD_RECOVERY_DIR/pairs.tsv"
+            printf 'recovery=%s/pairs.tsv\n' "$SD_RECOVERY_DIR"
+        else
+            rm -rf "${SD_RECOVERY_DIR:?}"
         fi
     fi
     [ -z "$TMPFILE" ] || rm -f "$TMPFILE"
@@ -118,6 +130,7 @@ cleanup() {
     [ -z "$RUNCFG" ] || rm -f "$RUNCFG"
     [ -z "$JOURNAL" ] || rm -f "$JOURNAL.failed" "$JOURNAL.owned" "$JOURNAL.still"
     [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.nets" "$JOURNAL.doh" "$JOURNAL.agh" "$JOURNAL.agh.inc" "$JOURNAL.agh.undo"
+    [ -z "$JOURNAL" ] || rm -rf "$JOURNAL.saved"
     [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
     [ "$LOCKED" != 1 ] || rm -rf "${CHANGE_LOCK:?}"
@@ -578,6 +591,13 @@ tunnel_undo() {
         awk '{a[NR]=$0} END{for (i=NR;i>0;i--) print a[i]}' "$JOURNAL" |
             { bad=0; while IFS= read -r undo; do
                 case "$undo" in
+                    "SD-FILE-RESTORE "*)
+                        sf_rest=${undo#SD-FILE-RESTORE }; sf_tab=$(printf '\t')
+                        sf_to=${sf_rest%%"$sf_tab"*}; sf_from=${sf_rest#*"$sf_tab"}
+                        if [ -L "$sf_to" ] || ! cp -p "$sf_from" "$sf_to.undo.$$" ||
+                           ! mv -f "$sf_to.undo.$$" "$sf_to"; then bad=1; fi
+                        rm -f "$sf_to.undo.$$"
+                        ;;
                     "DOH-REMOVE "*) doh_remove "${undo#DOH-REMOVE }" || bad=1 ;;
                     "AGH-RESTORE "*) f=${undo#AGH-RESTORE }; if [ -s "$f" ]; then agh_control smartdns-restore "$f" >/dev/null || bad=1; fi ;;
                     "AGH-PUT "*) agh_control smartdns-put "${undo#AGH-PUT }" >/dev/null || bad=1 ;;
@@ -2420,6 +2440,9 @@ op_smartdns_domain() {
         done_ok "smartdns-domain add $2 keenetic" changed
     fi
     smartdns_take_rows domain "$2"
+    if [ "$(awk -F= '$1 == "smartdns_clear_rules" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" != 0 ]; then
+        smartdns_prune_saved domain "$2"
+    fi
     TXN=0
     done_ok "smartdns-domain remove $2" "$SD_RESULT"
 }
@@ -2440,15 +2463,22 @@ smartdns_take_rows() {
             $0 == v || (length($0) > length(v) && substr($0, length($0)-length(v)) == "." v)')
     fi
     if [ -n "$sd_agh_domains" ]; then
+        # Reserve durable private undo storage BEFORE any AGH write. This is
+        # outside the settings-backup rotation and is removed after success or
+        # confirmed rollback, but survives a lost reply followed by an outage.
+        [ ! -L "$BACKUP_DIR-recovery" ] || die backup_failed
+        mkdir -p "$BACKUP_DIR-recovery" || die backup_failed
+        SD_RECOVERY_DIR=$(mktemp -d "$BACKUP_DIR-recovery/smartdns.XXXXXX") || die backup_failed
+        sd_agh_pairs="$SD_RECOVERY_DIR/pairs.tsv"
         # The API can apply a POST and then lose the reply. Register undo before it.
-        printf 'AGH-RESTORE %s\n' "$JOURNAL.agh" >> "$JOURNAL" || die write_failed
+        printf 'AGH-RESTORE %s\n' "$sd_agh_pairs" >> "$JOURNAL" || die write_failed
         if [ "$sd_mode" = server ]; then
-            agh_control smartdns-take-server "$SMARTDNS_CONF" "$JOURNAL.agh" || die "$AGH_ERR"
+            agh_control smartdns-take-server "$SMARTDNS_CONF" "$sd_agh_pairs" || die "$AGH_ERR"
         else
             printf '%s\n' "$sd_value" > "$JOURNAL.agh.inc" || die write_failed
-            agh_control smartdns-take "$JOURNAL.agh.inc" "$JOURNAL.agh" || die "$AGH_ERR"
+            agh_control smartdns-take "$JOURNAL.agh.inc" "$sd_agh_pairs" || die "$AGH_ERR"
         fi
-        if [ -s "$JOURNAL.agh" ]; then
+        if [ -s "$sd_agh_pairs" ]; then
             SD_RESULT=changed
         fi
     fi
@@ -2477,6 +2507,46 @@ smartdns_take_rows() {
     [ "$SD_RESULT" != changed ] || save_router || die config_save_failed
 }
 
+# Drop the chosen server's or domain's deferred DNS rows, so a later bypass
+# cannot resurrect an explicit removal. No routing state is changed.
+smartdns_prune_saved() {
+    sd_prune_mode=${1:-server} sd_prune_domain=${2:-}
+    sd_saved_n=0
+    for sd_file in "$LISTS_STATE"/*; do
+        [ -f "$sd_file" ] || continue
+        [ ! -L "$sd_file" ] || die unsafe_saved_state
+        valid_group "${sd_file##*/}" || continue
+        grep -q '^route=' "$sd_file"; sd_header_rc=$?
+        case "$sd_header_rc" in 0) ;; 1) continue ;; *) die saved_state_read_failed ;; esac
+        new_tmp "$sd_file" || die write_failed
+        awk -v conf="$SMARTDNS_CONF" -v mode="$sd_prune_mode" -v v="$sd_prune_domain" '
+            function selected(d,url) {
+                if (mode == "server") return u!="" && url==u
+                d=tolower(d)
+                return d==v || (length(d)>length(v) && substr(d,length(d)-length(v))=="." v)
+            }
+            BEGIN {if (mode == "server") {while ((getline line < conf) > 0)
+                if (index(line,"SMARTDNS_URL=")==1) {u=substr(line,14); break}; close(conf)}
+            }
+            /^doh=/ {n=split(substr($0,5),a," ")
+                if (a[1]=="https" && a[2]=="upstream" && a[n-1]=="domain" && selected(a[n],a[3])) next}
+            /^agh=/ {line=substr($0,5); t=index(line,"\t")
+                if (t && selected(substr(line,1,t-1),substr(line,t+1))) next}
+            {print}' "$sd_file" > "$TMPFILE" || die write_failed
+        if cmp -s "$TMPFILE" "$sd_file"; then
+            rm -f "$TMPFILE"; TMPFILE=; continue
+        fi
+        [ -d "$JOURNAL.saved" ] || mkdir -m 700 "$JOURNAL.saved" || die backup_failed
+        sd_saved_n=$((sd_saved_n+1))
+        sd_before="$JOURNAL.saved/$sd_saved_n"
+        cp -p "$sd_file" "$sd_before" || die backup_failed
+        printf 'SD-FILE-RESTORE %s\t%s\n' "$sd_file" "$sd_before" >> "$JOURNAL" || die write_failed
+        backup_file "$sd_file" || die backup_failed
+        install_tmp "$sd_file" 0600 || die write_failed
+        SD_RESULT=changed
+    done
+}
+
 # smartdns-server set|clear: the owner's own Smart DNS server, a DoH address. It comes on stdin
 # (it may hold a personal token). Clear removes its active domain rules from both stores;
 # selectors read the address from the private file rather than exposing it in argv.
@@ -2494,7 +2564,10 @@ op_smartdns_server() {
              # Keep the address until both stores and the router save have succeeded.
              if [ "$(awk -F= '$1 == "smartdns_clear_rules" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" != 0 ]; then
                  ss_old=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=")+1); exit}' "$SMARTDNS_CONF")
-                 [ -z "$ss_old" ] || smartdns_take_rows server "$ss_old"
+                 if [ -n "$ss_old" ]; then
+                     smartdns_take_rows server "$ss_old"
+                     smartdns_prune_saved server
+                 fi
              fi
              new_tmp "$SMARTDNS_CONF" || die write_failed
              grep -v '^SMARTDNS_URL=' "$SMARTDNS_CONF" > "$TMPFILE"

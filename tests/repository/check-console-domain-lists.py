@@ -328,4 +328,37 @@ with tempfile.TemporaryDirectory() as tmp:
     run("domain-list-watch", "domain-list4", "2", "error=invalid_value", 64)
     run("domain-list-watch", "AdaptiveAuto", "1", "error=invalid_group", 64)
 
+    # P-7: after explicit server clear, returning a group to ISP must not resurrect it.
+    cfg.write_text(RUNNING)
+    env["VWARD_ADGUARD_CONFIG"] = str(tmp / "absent.yaml")
+    env["VWARD_ADS_CONTROL_BIN"] = str(tmp / "absent-control")
+    (etc / "smartdns.conf").write_text("SMARTDNS_URL=" + AET + "\n")
+    run("domain-list", "domain-list4", "vpn", "result=changed", 0)
+    cleared = subprocess.run(["sh", str(HELPER), "smartdns-server", "clear"],env=env,text=True,capture_output=True)
+    if cleared.returncode or "result=changed" not in cleared.stdout:
+        fail("saved-state clear failed: " + cleared.stdout)
+    run("domain-list", "domain-list4", "bypass", "result=changed", 0)
+    if any(AET in line for line in dns_block(cfg)) or "route object-group domain-list4 ISP auto" not in dns_block(cfg):
+        fail("return from VPN resurrected the cleared server: " + str(dns_block(cfg)))
+
+    # Individual removal has the same lifetime: active -> VPN snapshot -> remove -> bypass.
+    cfg.write_text(RUNNING)
+    (etc / "smartdns.conf").write_text("SMARTDNS_URL=" + AET + "\n")
+    env["VWARD_ADGUARD_CONFIG"] = str(yaml)
+    env["VWARD_ADS_CONTROL_BIN"] = str(ads)
+    up = [f"[/claude.ai/anthropic.com/]{AET}", "9.9.9.9"]
+    agh_state.write_text(__import__("json").dumps({"up": up}))
+    yaml.write_text("dns:\n  upstream_dns:\n" + "".join(f"    - '{u}'\n" for u in up))
+    run("domain-list", "domain-list4", "vpn", "result=changed", 0)
+    run("smartdns-domain", "remove", "claude.ai", "result=changed", 0)
+    run("domain-list", "domain-list4", "bypass", "result=changed", 0)
+    block = dns_block(cfg)
+    if any(line.endswith("domain claude.ai") for line in block) or any("claude.ai" in row for row in agh()):
+        fail("return from VPN resurrected the removed domain: " + str(block) + str(agh()))
+    if (f"https upstream {AET} dnsm on ISP domain anthropic.com" not in block or
+            f"[/anthropic.com/]{AET}" not in agh() or "route object-group domain-list4 ISP auto" not in block):
+        fail("domain removal lost the other domain or return route: " + str(block) + str(agh()))
+    if (etc / "smartdns.conf").read_text() != "SMARTDNS_URL=" + AET + "\n":
+        fail("individual domain removal changed the server preference")
+
 print("CONSOLE_DOMAIN_LISTS=PASS")

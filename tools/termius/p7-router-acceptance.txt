@@ -1,0 +1,209 @@
+clear
+cat > /tmp/p7-router-acceptance.sh <<'EOF'
+clear
+umask 077
+PFX=vward-p7-router
+OUT="/tmp/$PFX-$(date +%Y%m%d-%H%M%S).txt"
+MAXB=30000
+ESC=$(printf '\033')
+ls -1t /tmp/$PFX-*.txt 2>/dev/null |
+  tail -n +5 |
+  while read -r F; do rm -f "$F"; done
+printf '' > "$OUT" || exit 1
+ln -sfn "$OUT" /tmp/last_result.txt
+ln -sfn "$OUT" "/tmp/last_$PFX.txt"
+TMP=$(mktemp -d /tmp/vward-p7.XXXXXX) || exit 1
+tmo() {
+  _ts=$1; shift
+  "$@" & _tp=$!
+  ( sleep "$_ts"; kill "$_tp" 2>/dev/null ) & _tw=$!
+  wait "$_tp"; _tr=$?
+  kill "$_tw" 2>/dev/null
+  return $_tr
+}
+send_out() {
+  sed "s/${ESC}\[[0-9;?]*[a-zA-Z]//g" "$OUT" |
+    tail -c "$MAXB" | base64 | tr -d '\r\n' |
+    { read -r B; printf '\033]52;c;%s\a' "$B"; }
+}
+on_abort() {
+  trap '' INT TERM HUP
+  send_out
+  rm -rf "$TMP"
+  echo '[ ABORTED / DISCONNECTED ]:'
+  echo 'PARTIAL RESULT SAVED TO /tmp/last_result.txt'
+  exit 130
+}
+trap on_abort INT TERM HUP
+diag() {
+  echo 'P7 READ ONLY: no configuration changes'
+  date '+%Y-%m-%d %H:%M:%S %z'
+  tmo 5 ndmc -c 'show version' > "$TMP/ver" 2>&1
+  VRC=$?
+  grep -E 'release|title|device' "$TMP/ver" |
+    head -n 3
+  echo "VERSION_RC=$VRC"
+  [ "$VRC" = 0 ] || echo '[ WARNING ] no version reply'
+  MEM=$(awk '/MemFree:|Buffers:|^Cached:/ {s+=$2}
+    /MemAvailable:/ {a=$2}
+    END {print a ? a : s}' /proc/meminfo)
+  echo "[ OK ] MEMORY_KB=$MEM"
+EOF
+
+clear
+cat >> /tmp/p7-router-acceptance.sh <<'EOF'
+  L=/opt/lib/vward/vward-device-profile.sh
+  [ -r "$L" ] || {
+    echo '[ NOT_FOUND ] device profile'; return
+  }
+  . "$L"
+  vward_profile_load || {
+    echo '[ FAIL ] device profile'; return
+  }
+  [ "$MEM" -ge 20480 ] || {
+    cat /proc/loadavg
+    echo '[ SKIPPED ] config/API/top: low memory'; return
+  }
+  echo '[ OK ] INSTALLED VERSION'
+  head -n 1 /opt/share/vward/VERSION 2>/dev/null
+  echo '[ OK ] EFFECTIVE FLAGS'
+  echo "AGH_BIND_RETRY=${VWARD_AGH_BIND_RETRY:-60}"
+  echo "ADAPTIVE_RU=${VWARD_ADAPTIVE_RU:-0}"
+  E=/opt/etc/vward
+  grep -E '^SMARTDNS_STORE=' "$E/smartdns.conf" || :
+  grep '^smartdns_clear_rules=' \
+    "$E/domain-lists.conf" 2>/dev/null || :
+  tmo 12 ndmc -c 'show running-config' > "$TMP/rc"
+  RC=$?
+  echo "CONFIG_RC=$RC"
+  [ "$RC" = 0 ] || {
+    echo '[ FAIL ] incomplete config'; return
+  }
+  echo '[ OK ] DNS OWNERSHIP (URLs never printed)'
+  B=/opt/var/backups/vward/console-config
+  ls -1t "$B"/smartdns.conf.* 2>/dev/null |
+    head -n 20 > "$TMP/files"
+  set --
+  while IFS= read -r F; do
+    [ ! -L "$F" ] && [ -r "$F" ] && set -- "$@" "$F"
+  done < "$TMP/files"
+  [ ! -r "$E/smartdns.conf" ] ||
+    set -- "$@" "$E/smartdns.conf"
+  awk '
+    /^SMARTDNS_URL=/ {
+      u=substr($0,14); owner[u]=FILENAME; next
+    }
+    $1=="https" && $2=="upstream" {
+EOF
+
+clear
+cat >> /tmp/p7-router-acceptance.sh <<'EOF'
+      if (!id[$3]) id[$3]=++n
+      f=owner[$3]; sub(/^.*\//,"",f)
+      if (f=="") f="UNKNOWN"
+      print "domain=" $NF,"server=" id[$3],"owner=" f
+      rows++
+    }
+    END {print "[ OK ] HTTPS_RULES=" rows+0}
+  ' "$@" "$TMP/rc"
+  echo '[ OK ] APP FQDN MEMBERSHIP (bounded)'
+  awk '$1=="object-group" && $2=="fqdn" {g=$3}
+    $1=="!" {g=""}
+    $1=="include" && (g=="domain-list11" ||
+    $2=="api.ozon.ru" || $2=="lampa.mx") {print g,$2}
+  ' "$TMP/rc" | head -n 15
+  echo '[ OK ] DNS BINDINGS / FQDN ROUTES' 
+  awk '$1=="ip" && $2=="name-server" &&
+    $3 !~ /:\/\// {print}
+    $1=="route" && $2=="object-group" {print}
+  ' "$TMP/rc" | head -n 45
+  R=/opt/var/lib/vward/route-engine
+  echo '[ OK ] BINDING STATE (bounded)'
+  F=/opt/var/lib/vward/agh-bindings.txt
+  head -n 15 "$F" 2>/dev/null
+  echo '[ OK ] SAVED DNS ROW COUNTS'
+  for F in "$R"/domain-lists/*; do
+    [ -f "$F" ] && [ ! -L "$F" ] || continue
+    N=$(grep -cE '^(doh|agh)=' "$F")
+    [ "$N" = 0 ] || echo "${F##*/}: rows=$N"
+  done
+  echo '[ OK ] AGH STATUS / UPSTREAM DOMAINS'
+  Y=${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome}
+  [ -f "$Y" ] || Y="$Y/AdGuardHome.yaml"
+  awk '$1=="dns:" {d=1;next}
+    /^[^ #]/ {d=0}
+    d && $1=="port:" {print "DNS_PORT=" $2}
+  ' "$Y" 2>/dev/null
+  vward_agh_smartdns_domains | head -n 20
+EOF
+
+clear
+cat >> /tmp/p7-router-acceptance.sh <<'EOF'
+  A="$E/ads-privacy-guard/agh-api.auth"
+  U="http://$VWARD_ADGUARD_ADDRESS"
+  U="$U:$VWARD_ADGUARD_PORT/control/dns_info"
+  META=$(ls -ln "$A" 2>/dev/null |
+    awk '{print $3,$1}')
+  case "$META" in
+    '0 -rw-------'|'0 -r--------')
+      awk 'BEGIN {q=sprintf("%c",34); printf "user=" q}
+        {gsub(/\\/,"\\\\"); gsub(/"/,"\\\"")
+         printf "%s",$0} END {print q}' "$A" > \
+        "$TMP/agh-auth"
+      tmo 6 curl -K "$TMP/agh-auth" -fsS \
+          --connect-timeout 2 \
+          --max-time 5 "$U" -o "$TMP/agh" 2>/dev/null
+      RC=$?
+      echo "AGH_GET_RC=$RC"
+      if [ "$RC" = 0 ]; then
+        echo '[ PASS ] AGH API read verified'
+        jq '{upstream_count:(.upstream_dns|length),
+          upstream_file:(.upstream_dns_file!="" and
+          .upstream_dns_file!=null)}' "$TMP/agh"
+      else
+        echo '[ WARNING ] AGH API not verified'
+      fi ;;
+    *) echo '[ SKIPPED ] no private AGH credentials' ;;
+  esac
+  echo '[ OK ] RESOURCE SNAPSHOT'
+  cat /proc/loadavg
+  grep -E 'MemTotal|MemAvailable|MemFree' /proc/meminfo
+  if [ "$MEM" -lt 20480 ]; then
+    echo '[ SKIPPED ] top: memory below 20 MB'
+  else
+    tmo 4 top -b -n 1 > "$TMP/top" 2>&1
+    awk '/^(Mem:|CPU:|Load average:)/ {print;next}
+      $1~/^[0-9]+$/ && n++<12 {
+EOF
+
+clear
+cat >> /tmp/p7-router-acceptance.sh <<'EOF'
+        for(i=1;i<=7 && i<=NF;i++) printf "%s ",$i
+        print ""}' "$TMP/top"
+  fi
+  echo '[ OK ] BACKGROUND COUNTS (no command secrets)'
+  for C in /proc/[0-9]*/comm; do
+    [ -r "$C" ] && cat "$C"
+  done | sort | uniq -c | sort -rn | head -n 15
+  echo '[ WARNING ] snapshot cannot prove 24h criteria'
+}
+{ diag; } 2>&1 | tee "$OUT"
+rm -rf "$TMP"
+P=$(grep -c '\[ PASS \]' "$OUT")
+O=$(grep -c '\[ OK \]' "$OUT")
+W=$(grep -cE '\[ (WARNING|SKIPPED|NOT_FOUND) \]' "$OUT")
+F=$(grep -c '\[ FAIL \]' "$OUT")
+printf 'SUMMARY: pass=%s ok=%s warn=%s fail=%s\n' \
+  "$P" "$O" "$W" "$F" | tee -a "$OUT"
+N=$(wc -c < "$OUT")
+[ "$N" -le "$MAXB" ] ||
+  echo "[ WARNING ] size=$N sent=$MAXB"
+send_out
+echo
+echo 'RESULT SENT (OSC52)'
+echo 'RAW: /tmp/last_result.txt'
+EOF
+
+clear
+/opt/bin/sh -n /tmp/p7-router-acceptance.sh && \
+  /opt/bin/sh /tmp/p7-router-acceptance.sh

@@ -1,4 +1,5 @@
-cat > /tmp/vward-p7-path.sh <<'EOF'
+clear
+cat > /tmp/p7-client-path.sh <<'EOF'
 clear
 umask 077
 PFX=vward-p7-path
@@ -29,88 +30,147 @@ on_abort() {
   trap '' INT TERM HUP
   send_out
   rm -rf "$TMP"
-  echo '[ ABORTED ] RAW: /tmp/last_result.txt'
+  echo '[ ABORTED / DISCONNECTED ]:'
+  echo 'PARTIAL RESULT SAVED TO /tmp/last_result.txt'
   exit 130
 }
 trap on_abort INT TERM HUP
 diag() {
   echo 'P7 READ ONLY: no configuration changes'
   date '+%Y-%m-%d %H:%M:%S %z'
-  echo 'Open ONE affected app during the capture.'
+  tmo 5 ndmc -c 'show version' > "$TMP/ver" 2>&1
+  VRC=$?
+  grep -E 'release|title|device' "$TMP/ver" |
+    head -n 3
+  echo "VERSION_RC=$VRC"
+  [ "$VRC" = 0 ] || echo '[ WARNING ] no version reply'
+  MEM=$(awk '/MemFree:|Buffers:|^Cached:/ {s+=$2}
+    /MemAvailable:/ {a=$2}
+    END {print a ? a : s}' /proc/meminfo)
+  echo "[ OK ] MEMORY_KB=$MEM"
+EOF
+
+clear
+cat >> /tmp/p7-client-path.sh <<'EOF'
   L=/opt/lib/vward/vward-device-profile.sh
-  [ -r "$L" ] || { echo 'FAIL: no profile'; return; }
+  [ -r "$L" ] || {
+    echo '[ NOT_FOUND ] device profile'; return
+  }
   . "$L"
-  vward_profile_load || { echo 'FAIL: profile'; return; }
-  R=/opt/share/vward/updater/current
-  jq -r '.platform_version // "unknown"' \
-    "$R/component-registry.json" 2>/dev/null
+  vward_profile_load || {
+    echo '[ FAIL ] device profile'; return
+  }
+  [ "$MEM" -ge 20480 ] || {
+    echo '[ SKIPPED ] capture: memory below 20 MB'; return
+  }
+  echo 'Enter ONE affected client IPv4 or IPv6:'
+  IFS= read -r CLIENT < /dev/tty
+  case "$CLIENT" in
+    ''|*[!0-9a-fA-F.:]*)
+      echo '[ FAIL ] invalid client address'; return ;;
+  esac
+  echo 'Enter actual app domain (blank = api.ozon.ru):'
+  IFS= read -r H < /dev/tty
+  H=${H:-api.ozon.ru}
+  case "$H" in
+    *[!A-Za-z0-9.-]*|-*|.*)
+      echo '[ FAIL ] invalid domain'; return ;;
+  esac
+  echo "[ OK ] CLIENT=$CLIENT DOMAIN=$H"
+  tmo 3 ip neigh show > "$TMP/neigh" 2>/dev/null
+  MAC=$(awk -v c="$CLIENT" '$1==c {
+    for(i=1;i<NF;i++)
+      if($i=="lladdr") {print $(i+1);exit}
+  }' "$TMP/neigh")
+  [ -n "$MAC" ] || MAC=$(awk -v c="$CLIENT" \
+    '$1==c {print $4;exit}' /proc/net/arp)
+  case "$MAC" in
+    *[!0-9a-fA-F:]*|'') MAC= ;;
+  esac
+  [ "${#MAC}" = 17 ] || MAC=
+  echo "[ OK ] LAN_MAC=${MAC:-unknown}"
+
+  echo '[ WARNING ] client DNS/DoH is not inferred'
+  echo '[ OK ] ROUTER DNS A/AAAA (not client replies)'
+  for Q in A AAAA; do
+    tmo 5 nslookup -type="$Q" "$H" \
 EOF
 
-cat >> /tmp/vward-p7-path.sh <<'EOF'
-  tmo 12 ndmc -c 'show running-config' > "$TMP/rc"
-  echo "CONFIG_RC=$?"
-  awk '/^object-group fqdn / {g=$3} /^!/ {g=""}
-    g=="domain-list11" && $1=="include" {print $2}' \
-    "$TMP/rc" | head -n 2 > "$TMP/games"
-  printf '%s\n' api.ozon.ru lampa.mx > "$TMP/hosts"
-  cat "$TMP/games" >> "$TMP/hosts"
-  echo '=== RECENT OZON DECISIONS ==='
-  E=/opt/var/log/vward-route-engine-events.log
-  tail -n 500 "$E" 2>/dev/null |
-    grep -Fi 'api.ozon.ru' | tail -n 4
-  echo '=== DNS SOURCES AND ROUTER IPv4 ROUTES ==='
-  while read -r H; do
-    for S in "$VWARD_DNS_SERVER" "$VWARD_PROBE_DNS"; do
-      [ -n "$S" ] || continue
-      echo "DOMAIN=$H DNS=$S"
-      tmo 5 nslookup "$H" "$S" > "$TMP/dns" 2>&1
-      echo "DNS_RC=$?"
-      awk '/^Name:/ {a=1} a && /^Address/ {print}' \
-        "$TMP/dns" | head -n 4
-      awk '/^Name:/ {a=1}
-        a && /^Address/ && $NF ~ /^[0-9.]+$/ \
-        {print $NF}' "$TMP/dns" |
-        head -n 2 > "$TMP/ips"
-      while read -r I; do
-        tmo 3 ip route get "$I" 2>&1 | head -n 1
-      done < "$TMP/ips"
-    done
-  done < "$TMP/hosts"
-  echo '=== CLIENT / WAN / TUNNEL HEADERS: 12s ==='
-  echo 'No packet payload is captured.'
-  if ! command -v tcpdump >/dev/null 2>&1; then
-EOF
-
-cat >> /tmp/vward-p7-path.sh <<'EOF'
-    echo 'SKIPPED: tcpdump unavailable'
-    return
-  fi
+clear
+cat >> /tmp/p7-client-path.sh <<'EOF'
+      "$VWARD_DNS_SERVER" > "$TMP/dns" 2>&1
+    RC=$?
+    echo "DNS_TYPE=$Q RC=$RC"
+    head -n 12 "$TMP/dns"
+  done
+  echo '[ OK ] CLIENT ROUTING POLICY'
+  tmo 3 ip rule show | head -n 15
+  tmo 3 ip -6 rule show | head -n 15
+  echo '[ OK ] OPEN ONE APP NOW: CAPTURE 15s'
+  command -v tcpdump >/dev/null 2>&1 || {
+    echo '[ NOT_FOUND ] tcpdump'; return
+  }
+  # LAN identifies the client; WAN/tunnel destination
+  # headers establish correlation across NAT. No payload.
   PIDS=
   for D in "$VWARD_LAN_DEVICE" "$VWARD_WAN_DEVICE" \
     "$VWARD_TUNNEL_DEVICE"; do
-    case "$D" in ''|*[!A-Za-z0-9_.:-]*) continue ;; esac
-    tmo 12 tcpdump -nni "$D" -q -c 16 \
-      'udp or tcp port 443' > "$TMP/cap-$D" 2>&1 &
+    case "$D" in
+      ''|*[!A-Za-z0-9_.:-]*) continue ;;
+    esac
+    FILTER='udp or tcp port 443 or tcp port 53'
+    if [ "$D" = "$VWARD_LAN_DEVICE" ]; then
+      if [ -n "$MAC" ]; then
+        FILTER="ether host $MAC and ($FILTER)"
+      else
+        FILTER="host $CLIENT and ($FILTER)"
+      fi
+    fi
+    tmo 15 tcpdump -p -nni "$D" -q -c 50 \
+      "$FILTER" > "$TMP/cap-$D" 2>&1 &
     PIDS="$PIDS $!"
   done
   for P in $PIDS; do wait "$P"; done
   for F in "$TMP"/cap-*; do
     [ -f "$F" ] || continue
-    echo "--- ${F##*/} ---"
-    head -n 20 "$F"
+    echo "[ OK ] ${F##*/} IPv4/IPv6 TCP/UDP HEADERS"
+    head -n 54 "$F"
   done
-  echo 'SUMMARY: client path requires matching headers.'
-  echo 'Router ip-route-get alone is not client proof.'
+  echo '[ WARNING ] Match LAN destinations to WAN/tunnel.'
+  echo 'No matching packets is insufficient evidence.'
+EOF
+
+clear
+cat >> /tmp/p7-client-path.sh <<'EOF'
+  echo 'IPv6 privacy addresses may need a separate sample.'
+  echo 'For confirmed destination: enter IPv4/IPv6 or blank'
+  IFS= read -r DST < /dev/tty
+  case "$DST" in
+    ''|*[!0-9a-fA-F.:]*) return ;;
+  esac
+  echo '[ OK ] ROUTER ROUTE (not proof of client path)'
+  case "$DST" in
+    *:*) tmo 3 ip -6 route get "$DST" ;;
+    *) tmo 3 ip route get "$DST" ;;
+  esac
 }
-diag 2>&1 | tee "$OUT"
+{ diag; } 2>&1 | tee "$OUT"
 rm -rf "$TMP"
+P=$(grep -c '\[ PASS \]' "$OUT")
+O=$(grep -c '\[ OK \]' "$OUT")
+W=$(grep -cE '\[ (WARNING|SKIPPED|NOT_FOUND) \]' "$OUT")
+F=$(grep -c '\[ FAIL \]' "$OUT")
+printf 'SUMMARY: pass=%s ok=%s warn=%s fail=%s\n' \
+  "$P" "$O" "$W" "$F" | tee -a "$OUT"
 N=$(wc -c < "$OUT")
-[ "$N" -le "$MAXB" ] || echo "WARNING: size=$N"
+[ "$N" -le "$MAXB" ] ||
+  echo "[ WARNING ] size=$N sent=$MAXB"
 send_out
 echo
 echo 'RESULT SENT (OSC52)'
 echo 'RAW: /tmp/last_result.txt'
 EOF
 
-/opt/bin/sh -n /tmp/vward-p7-path.sh && \
-  /opt/bin/sh /tmp/vward-p7-path.sh
+clear
+/opt/bin/sh -n /tmp/p7-client-path.sh && \
+  /opt/bin/sh /tmp/p7-client-path.sh
