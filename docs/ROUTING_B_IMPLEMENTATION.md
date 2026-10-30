@@ -35,12 +35,14 @@ service-ownership; только необходимые сообщения Пан
 
 Файлы: route-reconciler.sh, ads-privacy-dns-guard.sh, новые отказные тесты.
 
-- [ ] RED: refused remove + failed config read стирает persist; refused
+- [x] RED: refused remove + failed config read стирает persist; refused
   DNS removal стирает запись владения.
-- [ ] GREEN: чтение возвращает unknown отдельно от absent; persist не
+- [x] GREEN: чтение возвращает unknown отдельно от absent; persist не
   меняется. DNS ledger сохраняет неподтверждённые строки атомарно.
-- [ ] Отдельно проверить подтверждённое отсутствие/успешное снятие, ext,
-  rc=0 с текстом ошибки, write failure и повтор операции.
+- [x] Подтверждённое отсутствие/успешное снятие и сохранение ext/failed
+  проверены новым отказным тестом и существующим DNS guard test.
+- [ ] Дополнительная матрица rc=0 с текстом ошибки, local write failure
+  и повтор операции для каждого нового отказного пути до RS-8.
 
 ## RS-3: транзакции сервисов
 
@@ -66,3 +68,5 @@ RS-6: подключение writer/engine/reconcile/guard/CIDR по частя�
 пересечение locks и state между refresh и service off.
 
 Проверка RS-1: SERVICE_OWNERSHIP, CONSOLE_SERVICES, TUNNEL_SERVICES PASS в отдельной ветке; RED на прежнем коде: adoption/off/retarget/category/refresh/auto-writer/edited-owned. Дополнительные RED→GREEN: ручной маршрут, mode=0666, дополнительный ISP-маршрут и edit во время bypass. Проверка ash/sh syntax и ShellCheck error severity PASS на собранном стеке.
+
+Проверка RS-2: ROUTING_STATE_ERRORS: RED unknown lost persist / unbind discarded ledger / ns_release discarded ledger → PASS. Полный существующий ADS_DNS_GUARD PASS с локальным PID-oracle fixture, позитивные absent/present и снятие успешных правил проверены. Пути resolver/backup только в тестовой извлечённой функции перенаправлены в TemporaryDirectory, тест не требует записи в /opt.
