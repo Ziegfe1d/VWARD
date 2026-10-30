@@ -127,6 +127,7 @@ python3 tests/repository/check-route-engine-capture.py || fail "route engine cap
 python3 tests/repository/check-tunnel-fallback.py || fail "fallback tunnel and tunnel quality"
 python3 tests/repository/check-tunnel-lost-sweep.py || fail "lists off a tunnel without settings"
 python3 tests/repository/check-tunnel-move.py || fail "lists off a tunnel without settings: refused subnets, IP categories"
+python3 tests/repository/check-smartdns-clear.py || fail "P-7 Smart DNS clear and rollback"
 python3 tests/repository/check-smartdns-keenetic-forms.py || fail "Smart DNS in Keenetic: refused forms journaled, shorter forms tried"
 python3 tests/repository/check-component-ops.py || fail "components: AdGuard Home off, on, setup, removal"
 python3 tests/repository/check-policy-audit-tunnel.py || fail "IP categories judged only through a working tunnel"
