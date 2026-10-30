@@ -85,6 +85,11 @@ adaptive_names()
         AN_CFG=$(vward_running_config) || return 1
     fi
     [ -n "$AN_CFG" ] || return 1
+    # A successful transport may still return an error instead of configuration.
+    printf '%s\n' "$AN_CFG" | awk '
+        /^[[:space:]]*(Command::|[Ee][Rr][Rr][Oo][Rr][: ]|[Ff]ailed[: ])/ {bad=1}
+        /^(object-group fqdn |dns-proxy$|interface |ip |system$)/ {seen=1}
+        END {exit bad || !seen}' || return 1
     printf '%s\n' "$AN_CFG" |
     sed -n '/^object-group fqdn AdaptiveAuto/,/^!/p' |
     awk '$1=="include"{print $2}' |
