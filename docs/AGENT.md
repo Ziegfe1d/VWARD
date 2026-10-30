@@ -127,6 +127,10 @@ Pin записывается после подтверждения retarget. Cat
 /proc среды. Admission/barrier в продукте и штатные CI-тесты не менялись.
 Без merge в dev/main, VERSION/feed/sign/release и изменений роутера.
 
+### RS-123: продолжение B (2026-10-30 22:40 МСК)
+
+Кодовый коммит `264c6de77e8f6aa883ea249baa0296c8b57989e4`. Закрыты подтверждённые отказы первого service on/off: durable inverse до создания/удаления, сохранность owner edit при неудачном on, откат при отказе state/save, снимки error-text/unknown не разрешают компенсацию. Неподтверждённые дочерние DNS/AGH изменения сохраняют private dns-risk/pending и точные before/after данные вместо ложного полного rollback. enabled/categories/catalog восстанавливаются только после собственной записи и совпадения ожидаемого postimage; чужие локальные edits не стираются. Четыре важных review findings получили регрессии, второго review не выполнялось. SERVICE_FAULTS, SERVICE_OWNERSHIP, SERVICE_TRANSACTIONS, CONSOLE_SERVICES, TUNNEL_SERVICES, CONSOLE_DOMAIN_LISTS PASS с внешней локальной PID-oracle fixture (реальный admission/barrier сохранён); ROUTING_STATE_ERRORS PASS без неё: rc0 error text, persist mv failure, DNS ledger mv/text-error/repeat. TERM откатывается; SIGKILL + моделирование reboot через сброс volatile locks сохраняет private recovery и дважды запрещает мутации; проверена конкурирующая операция. BusyBox syntax, ShellCheck error severity и diff-check PASS. Полная аппаратная перезагрузка/потеря питания носителя не моделировались. P-7 не импортирован; план совместных регрессий — P7_B_INTEGRATION_PLAN.md.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -193,7 +197,11 @@ Pin записывается после подтверждения retarget. Cat
 
 - 2026-10-30 · [Агент] · RS-3 / ограничения интеграции · Read-only merge-tree со стеком P-7 5869f11 выявил конфликты console-config.sh, SHA256SUMS, docs/AGENT.md, docs/ROADMAP.md; ref/worktree не менялись, совмещённого кандидата нет. Три важных замечания независимого review закрыты тестами: весь набор маршрутов в proof, повторный ownership check после bypass, компенсация только собственной дельты при ручном edit. TERM/kill/reboot и полная матрица local write failure остаются открыты до RS-8. Доказательства и границы проверок — docs/ROUTING_B_IMPLEMENTATION.md.
 
+- 2026-10-30 22:40 · [Агент] · RS-123 / продолжение B · Закрыты подтверждённые отказы первого service on/off: durable inverse до создания/удаления, сохранность owner edit при неудачном on, откат при отказе state/save, снимки error-text/unknown не разрешают компенсацию. Неподтверждённые дочерние DNS/AGH изменения сохраняют private dns-risk/pending и точные before/after данные вместо ложного полного rollback. enabled/categories/catalog восстанавливаются только после собственной записи и совпадения ожидаемого postimage; чужие локальные edits не стираются. Четыре важных review findings получили регрессии, второго review не выполнялось. SERVICE_FAULTS, SERVICE_OWNERSHIP, SERVICE_TRANSACTIONS, CONSOLE_SERVICES, TUNNEL_SERVICES, CONSOLE_DOMAIN_LISTS PASS с внешней локальной PID-oracle fixture (реальный admission/barrier сохранён); ROUTING_STATE_ERRORS PASS без неё: rc0 error text, persist mv failure, DNS ledger mv/text-error/repeat. TERM откатывается; SIGKILL + моделирование reboot через сброс volatile locks сохраняет private recovery и дважды запрещает мутации; проверена конкурирующая операция. BusyBox syntax, ShellCheck error severity и diff-check PASS. Полная аппаратная перезагрузка/потеря питания носителя не моделировались. P-7 не импортирован; план совместных регрессий — P7_B_INTEGRATION_PLAN.md. Код `264c6de77e8f6aa883ea249baa0296c8b57989e4`. Все результаты программные/fixture; на устройстве ничего не выполнялось. VERSION/feed/release и dev/main не менялись, без merge.
+
 ## 4. Открытые вопросы и нужные данные
+
+- (2026-10-30 22:40, RS-123) Финальная приёмка нового стека в CI и на устройстве отдельно. Авто-replay pending не добавлен: нужны проверка принадлежности и owner-directed recovery; P-7 не интегрирован, RS-6/7/8 остаются отдельными пакетами.
 
 - (2026-10-30 21:43, RS-3, актуальное) Архитектура B утверждена; новое согласование варианта не требуется. Проверки в CI и на Keenetic ещё не заменены локальными fixture-прогонами. RS-4: нужны сравнимые измерения; RS-5…8 и интеграция остальных автоматов остаются отдельными пакетами. Коммиты/черновики разрешены, выпуск только после «Выпускаем».
 

@@ -295,13 +295,20 @@ load_profile() {
     case "$VWARD_POLICY_GROUP" in *[!A-Za-z0-9_.-]*) die policy_group_unavailable ;; esac
 }
 
+config_snapshot_valid() {
+    [ -s "$1" ] && awk '
+        /^[[:space:]]*(Command::|[Ee][Rr][Rr][Oo][Rr][: ]|[Ff]ailed[: ])/ {bad=1}
+        /^(object-group fqdn |dns-proxy$|interface |ip |system$)/ {seen=1}
+        END {exit bad || !seen}' "$1"
+}
+
 snapshot() {
     [ -n "$RUNCFG" ] || RUNCFG=$(mktemp /tmp/vward-console-config.XXXXXX 2>/dev/null) || die temporary_file_unavailable
-    "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && [ -s "$RUNCFG" ] && return 0
+    "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && config_snapshot_valid "$RUNCFG" && return 0
     # A busy Keenetic does not answer for a moment («Не сохранено: не удалось прочитать
     # конфигурацию роутера» while the VPN agent moved lists, Viva 2026-10-16): once more.
     sleep "${VWARD_SNAPSHOT_RETRY:-3}"
-    "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && [ -s "$RUNCFG" ] || die router_config_unavailable
+    "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && config_snapshot_valid "$RUNCFG" || die router_config_unavailable
 }
 
 in_group() {
@@ -1068,6 +1075,7 @@ service_state_set() {
     new_tmp "$SERVICES_STATE" || die write_failed
     { [ -f "$SERVICES_STATE" ] && awk -F'\t' -v i="$1" '$1 != i' "$SERVICES_STATE"
       [ -z "${2:-}" ] || printf '%s\t%s\t%s\n' "$1" "$2" "$3"; } > "$TMPFILE" || die write_failed
+    service_txn_intend enabled "$SERVICES_STATE"
     install_tmp "$SERVICES_STATE" 0644 || die write_failed
 }
 
@@ -1149,6 +1157,29 @@ service_txn_backup() {
     fi
 }
 
+# Compare-and-restore only the local global files this operation intended to write.
+# An unrelated owner edit is neither an undo target nor transaction-owned data.
+service_txn_before() {
+    if [ -f "$SV_DIR/$2.absent" ]; then
+        [ ! -e "$1" ] && [ ! -L "$1" ]
+    else
+        [ -f "$1" ] && [ ! -L "$1" ] && cmp -s "$SV_DIR/$2" "$1"
+    fi
+}
+
+service_txn_intend() {
+    [ "${SV_TXN:-0}" = 1 ] || return 0
+    service_txn_before "$2" "$1" || die write_failed
+    cp -p "$TMPFILE" "$SV_DIR/after.$1" || die write_failed
+}
+
+service_txn_restore_written() {
+    [ -f "$SV_DIR/after.$2" ] || return 0
+    service_txn_before "$1" "$2" && return 0
+    [ -f "$1" ] && [ ! -L "$1" ] && cmp -s "$SV_DIR/after.$2" "$1" || return 1
+    service_txn_restore "$1" "$2"
+}
+
 service_txn_restore() {
     if [ -f "$SV_DIR/$2.absent" ]; then
         rm -f "$1"
@@ -1190,6 +1221,16 @@ service_txn_group() {
         printf '%s\n' "$1" >> "$SV_DIR/groups" || die backup_failed
 }
 
+# Record an initially absent resource before the first external create.
+service_txn_new_group() {
+    : > "$SV_DIR/group.$1" && : > "$SV_DIR/route.$1" &&
+        service_txn_backup "$SERVICES_ETC/owned/$1" "claim.$1" &&
+        service_txn_backup "$LISTS_STATE/$1" "saved.$1" &&
+        { printf 'description "%s"\n' "$2"; sed 's/^/include /' "$JOURNAL.doh"; } > "$SV_DIR/new.$1" &&
+        printf '%s\n' "$1" >> "$SV_DIR/groups" &&
+        printf 'no object-group fqdn %s\n' "$1" >> "$SV_DIR/undo" || die backup_failed
+}
+
 service_txn_commit() {
     # Keep a completed directory after a crash harmless; pending alone blocks retry.
     rm -f "$SV_DIR/pending" || die write_failed
@@ -1202,6 +1243,15 @@ service_txn_commit() {
 # outside it is left intact, with recovery retained instead of blind replay.
 service_txn_allowed() {
     service_signature "$1" > "$SV_DIR/current.$1" || return 1
+    if [ -f "$SV_DIR/new.$1" ]; then
+        # A partial create may contain only the intended body, never owner edits.
+        awk 'FILENAME==ARGV[1] {ok[$0]=1; next}
+            !/^route=/ && !($0 in ok) {bad=1} END {exit bad}' \
+            "$SV_DIR/new.$1" "$SV_DIR/current.$1" || return 1
+    elif [ -f "$SV_DIR/deleted.$1" ] && ! grep -qx "object-group fqdn $1" "$RUNCFG"; then
+        [ -z "$(group_routes "$1")" ]
+        return $?
+    else
     sed '/^include /d;/^route=/d' "$SV_DIR/current.$1" > "$SV_DIR/meta.now"
     sed '/^include /d;/^route=/d' "$SV_DIR/group.$1" > "$SV_DIR/meta.old"
     cmp -s "$SV_DIR/meta.now" "$SV_DIR/meta.old" || return 1
@@ -1215,12 +1265,13 @@ service_txn_allowed() {
         FILENAME==ARGV[3] && $1=="include" {seen[$2]=1; if(!hi[$2]) bad=1}
         END {for(d in lo) if(lo[d] && !seen[d]) bad=1; exit bad}
     ' "$SV_DIR/group.$1" "$SV_DIR/undo" "$SV_DIR/current.$1" || return 1
+    fi
     group_routes "$1" > "$SV_DIR/routes.now"
     sv_intended=$(cat "$SV_DIR/target.$1" 2>/dev/null)
     if [ -z "$sv_intended" ]; then
         cmp -s "$SV_DIR/routes.now" "$SV_DIR/route.$1"
     else
-        [ -s "$SV_DIR/routes.now" ] || return 1
+        [ "$sv_intended" = bypass ] || [ -f "$SV_DIR/new.$1" ] || [ -s "$SV_DIR/routes.now" ] || return 1
         awk -v t="$sv_intended" 'FILENAME==ARGV[1] {ok[$0]=1; next}
             !($0 in ok) && $0!=t "\tauto" {bad=1} END {exit bad}' \
             "$SV_DIR/route.$1" "$SV_DIR/routes.now"
@@ -1229,11 +1280,13 @@ service_txn_allowed() {
 
 service_txn_rollback() {
     sv_bad=0
+    # Staging can fail before the operation's first snapshot exists.
+    [ -n "$RUNCFG" ] || RUNCFG=$(mktemp /tmp/vward-console-config.XXXXXX 2>/dev/null) || return 1
     if [ "$LOCKED" != 1 ]; then
         dir_lock "$CHANGE_LOCK" || return 1
         LOCKED=1
     fi
-    "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && [ -s "$RUNCFG" ] || return 1
+    "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && config_snapshot_valid "$RUNCFG" || return 1
     while IFS= read -r sv_g; do
         if [ -f "$SV_DIR/foreign.$sv_g" ] || ! service_txn_allowed "$sv_g"; then
             : > "$SV_DIR/foreign.$sv_g"
@@ -1252,7 +1305,7 @@ service_txn_rollback() {
     fi
     while IFS= read -r sv_g; do
         [ ! -f "$SV_DIR/foreign.$sv_g" ] || continue
-        "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && [ -s "$RUNCFG" ] || return 1
+        "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && config_snapshot_valid "$RUNCFG" || return 1
         group_routes "$sv_g" > "$SV_DIR/routes.now"
         while IFS="$(printf '\t')" read -r sv_t sv_o; do
             [ -n "$sv_t" ] || continue
@@ -1260,7 +1313,7 @@ service_txn_rollback() {
             sv_opts=; [ "$sv_o" = - ] || sv_opts=" $sv_o"
             ndm "dns-proxy route object-group $sv_g $sv_t$sv_opts" >/dev/null 2>&1 || :
         done < "$SV_DIR/route.$sv_g"
-        "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && [ -s "$RUNCFG" ] || return 1
+        "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && config_snapshot_valid "$RUNCFG" || return 1
         group_routes "$sv_g" > "$SV_DIR/routes.now"
         while IFS="$(printf '\t')" read -r sv_t sv_o; do
             awk -F'\t' -v t="$sv_t" '$1==t {f=1} END {exit !f}' "$SV_DIR/route.$sv_g" && continue
@@ -1269,15 +1322,20 @@ service_txn_rollback() {
         service_txn_restore "$LISTS_STATE/$sv_g" "saved.$sv_g" || sv_bad=1
         service_txn_restore "$SERVICES_ETC/owned/$sv_g" "claim.$sv_g" || sv_bad=1
     done < "$SV_DIR/groups"
-    "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && [ -s "$RUNCFG" ] || return 1
+    "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && config_snapshot_valid "$RUNCFG" || return 1
     while IFS= read -r sv_g; do
         service_signature "$sv_g" | cmp -s - "$SV_DIR/group.$sv_g" || sv_bad=1
         group_routes "$sv_g" | cmp -s - "$SV_DIR/route.$sv_g" || sv_bad=1
     done < "$SV_DIR/groups"
-    service_txn_restore "$SERVICES_STATE" enabled || sv_bad=1
-    service_txn_restore "$SERVICES_CATS" categories || sv_bad=1
-    service_txn_restore "$SERVICES_FETCHED" catalog || sv_bad=1
+    service_txn_restore_written "$SERVICES_STATE" enabled || sv_bad=1
+    service_txn_restore_written "$SERVICES_CATS" categories || sv_bad=1
+    service_txn_restore_written "$SERVICES_FETCHED" catalog || sv_bad=1
     save_router || sv_bad=1
+    # Parent route/file compensation does not prove reversal of child DNS/AGH.
+    # Retain exact private before/after evidence for owner-directed recovery.
+    for sv_dns in "$SV_DIR"/dns-risk.*; do
+        [ ! -f "$sv_dns" ] || { sv_bad=1; audit "service rollback DNS unverified"; }
+    done
     [ "$sv_bad" = 0 ] || return 1
     rm -rf "${SV_DIR:?}"
     SV_DIR=
@@ -1301,9 +1359,24 @@ service_route() {
     if [ "${SV_TXN:-0}" = 1 ]; then
         sv_target=$2; [ "$sv_target" != vpn ] || sv_target=$VWARD_TUNNEL_INTERFACE
         printf '%s\n' "$sv_target" > "$SV_DIR/target.$1" || die write_failed
+        sv_cur=$(group_route "$1"); sv_cur=${sv_cur%%"$(printf '\t')"*}
+        if [ "$2" = bypass ]; then
+            if grep -Eq '^(doh|agh)=' "$LISTS_STATE/$1" 2>/dev/null; then
+                : > "$SV_DIR/dns-risk.$1" || die write_failed
+            fi
+        elif ! is_tunnel "$sv_cur"; then
+            if [ -x "$ADS_CONTROL" ] || [ -n "$(group_doh_lines "$1")" ]; then
+                : > "$SV_DIR/dns-risk.$1" || die write_failed
+            fi
+        fi
     fi
     sr_out=$(VWARD_SERVICE_ID="$sv_id" VWARD_SERVICE_TRANSACTION="${SV_DIR:-}" sh "$0" domain-list "$1" "$2" 2>/dev/null | tail -n 1)
-    case "$sr_out" in result=*) return 0 ;; esac
+    case "$sr_out" in result=*)
+        if [ "${SV_TXN:-0}" = 1 ] && [ -f "$SV_DIR/dns-risk.$1" ]; then
+            service_txn_backup "$LISTS_STATE/$1" "dns-after.$1" || die backup_failed
+        fi
+        return 0 ;;
+    esac
     SR_ERR=${sr_out#error=}
     case "$SR_ERR" in ''|*[!a-z0-9_]*) SR_ERR=router_rejected ;; esac
     if [ "${SV_TXN:-0}" = 1 ] && [ "$SR_ERR" = service_reference_only ]; then
@@ -1344,6 +1417,7 @@ op_service_category() {
     new_tmp "$SERVICES_CATS" || die write_failed
     { [ ! -f "$SERVICES_CATS" ] || awk -F'\t' -v c="$1" '$1 != c' "$SERVICES_CATS"
       [ "$2" = auto ] || printf '%s\t%s\n' "$1" "$2"; } > "$TMPFILE" || die write_failed
+    service_txn_intend categories "$SERVICES_CATS"
     install_tmp "$SERVICES_CATS" 0644 || die write_failed
     sc_ids=$(mktemp /tmp/vward-console-category.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     "$JQ" -r --arg c "$1" '.services[] | select(.category == $c) | .id' "$SV_CAT" > "$sc_ids" 2>/dev/null
@@ -1401,6 +1475,8 @@ op_service() {
     if [ "$sv_op" = off ]; then
         [ -n "$row" ] || done_ok "service off $sv_id" unchanged
         snapshot
+        service_txn_begin
+        service_txn_group "$G"
         if grep -qx "object-group fqdn $G" "$RUNCFG"; then
             # The route off first (Smart DNS lines come back), then the list goes.
             service_route "$G" bypass || die "$SR_ERR"
@@ -1409,6 +1485,11 @@ op_service() {
             service_owned "$G" || die service_reference_only 64
             t=$(group_route "$G"); t=${t%%"$(printf '\t')"*}
             [ -z "$t" ] || ndm "dns-proxy no route object-group $G $t" || die router_rejected
+            # Inverse creation/body commands are durable before deletion.
+            awk -v g="$G" '!/^route=/ {a[++n]=$0}
+                END {for(i=n;i>0;i--) print "object-group fqdn " g " " a[i];
+                     print "object-group fqdn " g}' "$SV_DIR/group.$G" >> "$SV_DIR/undo" || die write_failed
+            : > "$SV_DIR/deleted.$G" || die write_failed
             ndm "no object-group fqdn $G" || die router_rejected
             snapshot
             ! grep -qx "object-group fqdn $G" "$RUNCFG" || die verification_failed
@@ -1416,6 +1497,7 @@ op_service() {
             rm -f "${LISTS_STATE:?}/${G:?}" "$SERVICES_ETC/owned/$G"
         fi
         service_state_set "$sv_id"
+        service_txn_commit
         done_ok "service off $sv_id $G" changed
     fi
 
@@ -1446,9 +1528,9 @@ op_service() {
         die service_reference_only 64
     fi
     G=$(free_list_name) || die no_free_list
-    TXN=1
+    service_txn_begin
+    service_txn_new_group "$G" "$title"
     ndm "object-group fqdn $G" || die router_rejected
-    echo "no object-group fqdn $G" >> "$JOURNAL"
     ndm "object-group fqdn $G description \"$title\"" || die router_rejected
     while IFS= read -r d; do
         ndm "object-group fqdn $G include $d" || die list_limit
@@ -1460,14 +1542,8 @@ op_service() {
     TXN=0
     service_state_set "$sv_id" "$G" "$sv_to"
     release_lock
-    if ! service_route "$G" "$(service_target "$sv_to" "$sv_id")"; then
-        # Without its route the list is of no use: it goes, and the service stays off.
-        change_lock
-        ndm "no object-group fqdn $G" && save_router
-        service_state_set "$sv_id"
-        rm -f "$SERVICES_ETC/owned/$G"
-        die "$SR_ERR"
-    fi
+    service_route "$G" "$(service_target "$sv_to" "$sv_id")" || die "$SR_ERR"
+    service_txn_commit
     done_ok "service on $sv_id $G $sv_to domains=$n" changed
 }
 
@@ -1537,7 +1613,9 @@ op_services_refresh() {
     [ "$moved" = 0 ] || save_router || die config_save_failed
     if [ "$fetched" = changed ]; then
         new_tmp "$SERVICES_FETCHED" || die write_failed
-        cp "$SV_DIR/catalog.new" "$TMPFILE" && install_tmp "$SERVICES_FETCHED" 0644 || die write_failed
+        cp "$SV_DIR/catalog.new" "$TMPFILE" || die write_failed
+        service_txn_intend catalog "$SERVICES_FETCHED"
+        install_tmp "$SERVICES_FETCHED" 0644 || die write_failed
     fi
     rm -f "$JOURNAL.adds" "$JOURNAL.dels"
     service_txn_commit

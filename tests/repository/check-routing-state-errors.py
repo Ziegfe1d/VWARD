@@ -19,7 +19,7 @@ def function(path, name):
 errors = []
 with tempfile.TemporaryDirectory() as d:
     t = Path(d)
-    for mode in ('unknown', 'absent', 'present'):
+    for mode in ('unknown', 'error-text', 'write-error', 'absent', 'present'):
         persist = t / 'persist'
         persist.write_text('example.org\nother.example\n')
         targets = t / 'targets'
@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory() as d:
         resolver = t / 'resolve'
         resolver.write_text('#!/bin/sh\nprintf "Address 1: 203.0.113.4\\n"\n')
         resolver.chmod(0o755)
-        cfg = {'unknown': 'return 1', 'absent': 'printf "dns-proxy\\n!\\n"',
+        cfg = {'unknown': 'return 1', 'error-text': 'printf "error: config unavailable\\n"', 'write-error': 'printf "dns-proxy\\n!\\n"', 'absent': 'printf "dns-proxy\\n!\\n"',
                'present': 'printf "object-group fqdn AdaptiveAuto\\n    include example.org\\n!\\n"'}[mode]
         setup = f'''STATE="{t}"
 LOG="{t}/events"
@@ -46,7 +46,7 @@ vward_running_config() {{ {cfg}; }}
 '''
         script = setup + function(REC, 'adaptive_names') + function(REC, 'save_state')
         script += function(REC, 'remove_adaptive').replace('/opt/bin/vward-route-resolve4.sh', str(resolver)).replace('/opt/var/backups/vward/route-reconciler', str(t / 'backups'))
-        script += 'remove_adaptive example.org\n'
+        script += ('mv() { return 1; }\n' if mode == 'write-error' else '') + 'remove_adaptive example.org\n'
         r = subprocess.run(['sh', '-c', script], capture_output=True, text=True)
         want = 'other.example\n' if mode == 'absent' else 'example.org\nother.example\n'
         if persist.read_text() != want: errors.append(mode + ': lost persist')
@@ -73,5 +73,31 @@ chain_line() {{ return 1; }}
         subprocess.run(['sh', '-c', script], capture_output=True, text=True, check=True)
         got = ledger.read_text() if ledger.exists() else ''
         if got != original.split('\n', 1)[1]: errors.append(operation + ': unconfirmed/foreign ownership discarded')
+    # Real ndm reply validation: rc=0 text errors are refusals. A failed local
+    # rename retains the authoritative ledger even after an external removal.
+    for operation in ('agh_unbind', 'ns_release'):
+        for fault in ('text-error', 'mv-error', 'repeat'):
+            ledger = t / 'ledger'
+            original = 'ok.example 127.0.0.1:65053\nbad.example 127.0.0.1:65053\nmanual.example ext\nretry.example failed 42\n'
+            ledger.write_text(original)
+            transport = t / 'ndmc'
+            transport.write_text('#!/bin/sh\ncase "$*" in *bad.example*) echo "error: refused";; *) echo ok;; esac\n')
+            transport.chmod(0o755)
+            script = f'''AGH_BIND="{ledger}"
+CHAIN_DIR="{t}"
+NDMC="{transport}"
+VWARD_KCACHE="{t}/cache"
+ads_log() {{ :; }}
+ads_epoch() {{ echo 123; }}
+chain_line() {{ return 1; }}
+'''
+            script += function(DNS, 'ndm') + function(DNS, operation)
+            if fault == 'mv-error': script += 'mv() { return 1; }\n'
+            call = 'agh_unbind\n' if operation == 'agh_unbind' else "ns_release '127.0.0.1:65053' 'ip name-server 127.0.0.1:65053 ok.example\nip name-server 127.0.0.1:65053 bad.example' outage\n"
+            script += call * (2 if fault == 'repeat' else 1)
+            r = subprocess.run(['sh', '-c', script], capture_output=True, text=True)
+            want = original if fault == 'mv-error' else original.split('\n', 1)[1]
+            if ledger.read_text() != want: errors.append(operation + '/' + fault + ': lost retry evidence')
+            if fault == 'mv-error' and r.returncode == 0: errors.append(operation + ': failed ledger write reported success')
 if errors: raise SystemExit('ROUTING_STATE_ERRORS=FAIL: ' + '; '.join(errors))
 print('ROUTING_STATE_ERRORS=PASS')
