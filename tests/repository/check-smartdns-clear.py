@@ -126,6 +126,34 @@ with tempfile.TemporaryDirectory() as tmp:
                       "agh=claude.ai\t" + own + "\n" + "doh=https upstream " + other + " domain other.example\n" +
                       "agh=other.example\t" + other + "\n")
     reset(); saved.write_text(saved_original); saved.chmod(0o600)
+    # Removing a domain while its group is in VPN must also remove deferred DNS.
+    # Keep the server preference, return route, other domains and suffix neighbours.
+    domain_saved = (saved_original + "doh=https upstream " + other + " domain api.claude.ai\n" +
+                    "agh=api.claude.ai\t" + other + "\n" +
+                    "doh=https upstream " + own + " domain notclaude.ai\n" +
+                    "agh=notclaude.ai\t" + own + "\n")
+    saved.write_text(domain_saved)
+    r = run("smartdns-domain", "remove", "claude.ai")
+    expected_saved = ("route=ISP\tauto\n" + "doh=https upstream " + other + " domain other.example\n" +
+                      "agh=other.example\t" + other + "\n" +
+                      "doh=https upstream " + own + " domain notclaude.ai\n" +
+                      "agh=notclaude.ai\t" + own + "\n")
+    if r.returncode or r.stdout.strip() != "result=changed" or saved.read_text() != expected_saved or conf.read_text() != original:
+        fail("removed domain remains in deferred DNS: " + r.stdout + saved.read_text())
+    # With no active rows left, a saved-only change is still changed, then idempotent.
+    saved.write_text(domain_saved)
+    r = run("smartdns-domain", "remove", "claude.ai")
+    if r.returncode or r.stdout.strip() != "result=changed" or saved.read_text() != expected_saved:
+        fail("saved-only domain removal was not reported: " + r.stdout)
+    if run("smartdns-domain", "remove", "claude.ai").stdout.strip() != "result=unchanged":
+        fail("saved-only domain removal is not idempotent")
+    # The existing compatibility switch retains the old active-only domain removal.
+    saved.write_text(domain_saved); switches.write_text("smartdns_clear_rules=0\n")
+    r = run("smartdns-domain", "remove", "claude.ai")
+    switches.unlink()
+    if r.returncode or saved.read_text() != domain_saved:
+        fail("legacy domain removal changed deferred state: " + r.stdout)
+    reset(); saved.write_text(saved_original)
     r = run("smartdns-server", "clear")
     if r.returncode or own in saved.read_text() or other not in saved.read_text() or not saved.read_text().startswith("route=ISP\tauto\n"):
         fail("saved state can resurrect removed server: " + r.stdout + saved.read_text())
@@ -137,7 +165,13 @@ with tempfile.TemporaryDirectory() as tmp:
     linked.unlink()
     if not r.returncode or saved.read_text() != saved_original or target.read_text() != saved_original or conf.read_text() != original or own not in cfg.read_text():
         fail("saved-state failure did not roll back: " + r.stdout)
+    reset(); saved.write_text(domain_saved); linked.symlink_to(target)
+    r = run("smartdns-domain", "remove", "claude.ai")
+    linked.unlink()
+    if not r.returncode or saved.read_text() != domain_saved or target.read_text() != saved_original or conf.read_text() != original or own not in cfg.read_text():
+        fail("domain saved-state failure did not roll back: " + r.stdout)
     # A header-read error must abort; it is not an unrelated file (grep rc=1).
+    saved.write_text(saved_original)
     source = HELPER.read_text()
     prune = re.search(r'^smartdns_prune_saved\(\) \{\n.*?^\}\n', source, re.M | re.S)
     assert prune, 'saved cleanup function missing'

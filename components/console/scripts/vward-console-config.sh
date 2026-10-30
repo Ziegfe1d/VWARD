@@ -2428,6 +2428,9 @@ op_smartdns_domain() {
         done_ok "smartdns-domain add $2 keenetic" changed
     fi
     smartdns_take_rows domain "$2"
+    if [ "$(awk -F= '$1 == "smartdns_clear_rules" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" != 0 ]; then
+        smartdns_prune_saved domain "$2"
+    fi
     TXN=0
     done_ok "smartdns-domain remove $2" "$SD_RESULT"
 }
@@ -2485,9 +2488,10 @@ smartdns_take_rows() {
     [ "$SD_RESULT" != changed ] || save_router || die config_save_failed
 }
 
-# Drop only the chosen server's deferred restore rows. Otherwise a later bypass
-# would resurrect a server the owner explicitly removed. No routing state is changed.
+# Drop the chosen server's or domain's deferred DNS rows, so a later bypass
+# cannot resurrect an explicit removal. No routing state is changed.
 smartdns_prune_saved() {
+    sd_prune_mode=${1:-server} sd_prune_domain=${2:-}
     sd_saved_n=0
     for sd_file in "$LISTS_STATE"/*; do
         [ -f "$sd_file" ] || continue
@@ -2496,13 +2500,19 @@ smartdns_prune_saved() {
         grep -q '^route=' "$sd_file"; sd_header_rc=$?
         case "$sd_header_rc" in 0) ;; 1) continue ;; *) die saved_state_read_failed ;; esac
         new_tmp "$sd_file" || die write_failed
-        awk -v conf="$SMARTDNS_CONF" '
-            BEGIN {while ((getline line < conf) > 0)
+        awk -v conf="$SMARTDNS_CONF" -v mode="$sd_prune_mode" -v v="$sd_prune_domain" '
+            function selected(d,url) {
+                if (mode == "server") return u!="" && url==u
+                d=tolower(d)
+                return d==v || (length(d)>length(v) && substr(d,length(d)-length(v))=="." v)
+            }
+            BEGIN {if (mode == "server") {while ((getline line < conf) > 0)
                 if (index(line,"SMARTDNS_URL=")==1) {u=substr(line,14); break}; close(conf)}
-            /^doh=/ {split(substr($0,5),a," ")
-                if (u!="" && a[1]=="https" && a[2]=="upstream" && a[3]==u) next}
+            }
+            /^doh=/ {n=split(substr($0,5),a," ")
+                if (a[1]=="https" && a[2]=="upstream" && a[n-1]=="domain" && selected(a[n],a[3])) next}
             /^agh=/ {line=substr($0,5); t=index(line,"\t")
-                if (u!="" && t && substr(line,t+1)==u) next}
+                if (t && selected(substr(line,1,t-1),substr(line,t+1))) next}
             {print}' "$sd_file" > "$TMPFILE" || die write_failed
         if cmp -s "$TMPFILE" "$sd_file"; then
             rm -f "$TMPFILE"; TMPFILE=; continue
@@ -2514,6 +2524,7 @@ smartdns_prune_saved() {
         printf 'SD-FILE-RESTORE %s\t%s\n' "$sd_file" "$sd_before" >> "$JOURNAL" || die write_failed
         backup_file "$sd_file" || die backup_failed
         install_tmp "$sd_file" 0600 || die write_failed
+        SD_RESULT=changed
     done
 }
 
@@ -2536,7 +2547,7 @@ op_smartdns_server() {
                  ss_old=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=")+1); exit}' "$SMARTDNS_CONF")
                  if [ -n "$ss_old" ]; then
                      smartdns_take_rows server "$ss_old"
-                     smartdns_prune_saved
+                     smartdns_prune_saved server
                  fi
              fi
              new_tmp "$SMARTDNS_CONF" || die write_failed
