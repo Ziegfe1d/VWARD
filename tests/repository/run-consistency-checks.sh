@@ -81,6 +81,13 @@ python3 tests/repository/check-service-ownership.py || fail "service ownership"
 python3 tests/repository/check-service-transactions.py || fail "service transactions"
 python3 tests/repository/check-service-faults.py || fail "service fault matrix"
 python3 tests/repository/check-routing-measurements.py || fail "routing measurement accounting"
+sh tests/routing-audit/run-simulations.sh || fail "routing audit simulations"
+if command -v busybox >/dev/null 2>&1; then
+    busybox ash tests/routing-audit/run-simulations.sh || fail "BusyBox routing audit simulations"
+    python3 tests/routing-audit/check-bounded-cost.py --busybox "$(command -v busybox)" || fail "routing audit bounded cost"
+else
+    echo "NOTE: BusyBox audit/cost runtime requires busybox; host audit ran above"
+fi
 python3 tests/repository/check-routing-state-errors.py || fail "routing state on read/removal errors"
 python3 tests/repository/check-awg-engine.py || fail "Tunnel engine (AmneziaWG)"
 python3 tests/repository/check-vless-engine.py || fail "VLESS engine (Xray)"
