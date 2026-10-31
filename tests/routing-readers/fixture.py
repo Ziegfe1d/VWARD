@@ -16,6 +16,7 @@ SNAP, SHADOW = LIBDIR / 'vward-routing-snapshot.sh', LIBDIR / 'vward-routing-sha
 OBSERVE = LIBDIR / 'vward-routing-observe.sh'
 PLAN = LIBDIR / 'vward-routing-plan.sh'
 JOURNAL = LIBDIR / 'vward-routing-journal.sh'
+DRYRUN = LIBDIR / 'vward-routing-dryrun.sh'
 SHELL = [os.environ['RS6_BUSYBOX'], 'ash'] if os.environ.get('RS6_BUSYBOX') else ['sh']
 
 CFG = ('interface Wireguard0\n!\ninterface Wireguard1\n!\ndns-proxy\n'
