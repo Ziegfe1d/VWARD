@@ -2255,6 +2255,24 @@ if [ "$ACTION" = "route-probe" ]; then
         awk -v p="$P" 'BEGIN{for(i=1;i<=4;i++){bits=p-(i-1)*8;if(bits>=8)o=255;else if(bits<=0)o=0;else o=256-2^(8-bits);printf "%s%d",(i>1?".":""),o}print ""}'
     }
 
+    # The router's own IPv4 route is separate evidence from a configured FQDN list.
+    # It cannot establish a client's policy, UDP or IPv6 path.
+    router_routes_json()
+    {
+        if [ "${VWARD_ROUTE_PROBE_KERNEL:-1}" = 0 ]; then echo '[]'; return; fi
+        printf '%s\n' "$1" | while IFS= read -r RP_IP; do
+            valid_ipv4 "$RP_IP" || continue
+            RP_OUT=$("${VWARD_IP_BIN:-ip}" route get "$RP_IP" 2>/dev/null); RP_RC=$?
+            printf '%s\n' "$RP_OUT" | awk -v ip="$RP_IP" -v rc="$RP_RC" '
+                NR == 1 && rc == 0 {for (i=1;i<NF;i++) {
+                    if ($i == "dev") dev=$(i+1)
+                    if ($i == "via") gateway=$(i+1)
+                    if ($i == "src") source=$(i+1)
+                }}
+                END {printf "%s\t%s\t%s\t%s\n",ip,dev,gateway,source}'
+        done | "$JQ" -Rn '[inputs | split("\t") | {ip:.[0],known:(.[1] != ""),device:.[1],gateway:.[2],source:.[3]}]'
+    }
+
     case "$TYPE" in
         domain)
             case "$VALUE" in
@@ -2264,10 +2282,11 @@ if [ "$ACTION" = "route-probe" ]; then
                     ;;
             esac
 
-            DNS_OUT="$(/opt/bin/vward-route-resolve4.sh "$VALUE" 2>/dev/null)"
+            DNS_OUT="$("${VWARD_RESOLVE4_BIN:-/opt/bin/vward-route-resolve4.sh}" "$VALUE" 2>/dev/null)"
             IPS="$(printf '%s\n' "$DNS_OUT" | awk '/^Address [0-9]+:/ && $3 ~ /^[0-9]+\./ {print $3}' | sort -u | head -n 12)"
             IPS_JSON="$(printf '%s\n' "$IPS" | "$JQ" -Rsc 'split("\n")|map(select(length>0))')"
 
+            ROUTER_ROUTES_JSON=$(router_routes_json "$IPS")
             HINTS_JSON="$(
                 if [ -r "$HINT_CATALOG" ]; then
                     awk -F'|' -v h="$VALUE" '
@@ -2303,8 +2322,8 @@ if [ "$ACTION" = "route-probe" ]; then
 
             "$JQ" -n --arg type domain --arg value "$VALUE" \
               --argjson ips "$IPS_JSON" --argjson hints "$HINTS_JSON" \
-              --argjson adaptive "$ADAPTIVE" --argjson groups "$GROUPS_JSON" --argjson routes "$ROUTES_JSON" --argjson names "$NAMES_JSON" \
-              '{ok:true,type:$type,value:$value,dns:{ipv4:$ips},hints:$hints,adaptive_auto:$adaptive,groups:$groups,routes:$routes,names:$names}'
+              --argjson adaptive "$ADAPTIVE" --argjson groups "$GROUPS_JSON" --argjson routes "$ROUTES_JSON" --argjson names "$NAMES_JSON" --argjson router_routes "$ROUTER_ROUTES_JSON" \
+              '{ok:true,type:$type,value:$value,dns:{ipv4:$ips,source:"probe_dns"},hints:$hints,adaptive_auto:$adaptive,groups:$groups,routes:$routes,names:$names,router_routes:$router_routes,client_path_verified:false}'
             ;;
         ip)
             valid_ipv4 "$VALUE" || {
@@ -2341,9 +2360,10 @@ if [ "$ACTION" = "route-probe" ]; then
             rm -f "$MATCHES_FILE"
             MATCHES_FILE=""
 
+            ROUTER_ROUTES_JSON=$(router_routes_json "$VALUE")
             "$JQ" -n --arg type ip --arg value "$VALUE" --arg owned "$OWNED_CIDR" --arg iface "$ROUTE_INTERFACE" \
-              --argjson matches "$MATCHES_JSON" --argjson configured "$CONFIGURED" \
-              '{ok:true,type:$type,value:$value,policy_matches:$matches,owned_cidr:$owned,configured_route:$configured,interface:$iface}'
+              --argjson matches "$MATCHES_JSON" --argjson configured "$CONFIGURED" --argjson router_routes "$ROUTER_ROUTES_JSON" \
+              '{ok:true,type:$type,value:$value,policy_matches:$matches,owned_cidr:$owned,configured_route:$configured,interface:$iface,router_routes:$router_routes,client_path_verified:false}'
             ;;
         group)
             case "$VALUE" in
