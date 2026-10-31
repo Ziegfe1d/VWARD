@@ -98,3 +98,10 @@ writer/engine/reconcile/guard/CIDR и UI — только RS-6/RS-7.
 доступной host-среде. Полные предельные объёмы не прогонялись; это регрессия
 конкретной лишней работы, а не измерение бюджета Keenetic/MIPS или live-нагрузки.
 Python нужен только host-тесту; runtime по-прежнему использует sh и awk.
+
+## RS6, этап 1 (31.10.2026)
+
+Отдельная native read библиотека vward-routing-read.sh выводит тот же TSV,
+не меняя RS5 API и пределы. Источники, truth/unknown, snapshot-local REF,
+сравнения legacy и следующий shadow этап — [RS6_READ_ADAPTERS.md](RS6_READ_ADAPTERS.md).
+Она не подключена к writer/Панели, health/packet-path unknown; rights всегда reference.

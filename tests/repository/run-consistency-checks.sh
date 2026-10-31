@@ -83,8 +83,10 @@ python3 tests/repository/check-service-transactions.py || fail "service transact
 python3 tests/repository/check-service-faults.py || fail "service fault matrix"
 python3 tests/repository/check-routing-measurements.py || fail "routing measurement accounting"
 sh tests/routing-audit/run-simulations.sh || fail "routing audit simulations"
+python3 tests/routing-readers/check-readers.py || fail "native routing read adapters"
 if command -v busybox >/dev/null 2>&1; then
     busybox ash tests/routing-audit/run-simulations.sh || fail "BusyBox routing audit simulations"
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-readers.py || fail "BusyBox native routing read adapters"
     python3 tests/routing-audit/check-bounded-cost.py --busybox "$(command -v busybox)" || fail "routing audit bounded cost"
 else
     echo "NOTE: BusyBox audit/cost runtime requires busybox; host audit ran above"
