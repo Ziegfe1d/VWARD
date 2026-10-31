@@ -14,6 +14,7 @@ LIBDIR = ROOT / 'components/runtime/lib'
 READ, AUDIT = LIBDIR / 'vward-routing-read.sh', LIBDIR / 'vward-routing-audit.sh'
 SNAP, SHADOW = LIBDIR / 'vward-routing-snapshot.sh', LIBDIR / 'vward-routing-shadow.sh'
 OBSERVE = LIBDIR / 'vward-routing-observe.sh'
+PLAN = LIBDIR / 'vward-routing-plan.sh'
 SHELL = [os.environ['RS6_BUSYBOX'], 'ash'] if os.environ.get('RS6_BUSYBOX') else ['sh']
 
 CFG = ('interface Wireguard0\n!\ninterface Wireguard1\n!\ndns-proxy\n'

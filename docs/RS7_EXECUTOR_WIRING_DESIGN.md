@@ -64,7 +64,11 @@ R2 — удаление recovery после аддитивного undo; R3 — 
 Независимый аудит другим агентом (правило `AGENTS.md`: адресный) обязателен именно здесь — для
 каждого подключаемого writer, переключения DNS и восстановления после сбоев.
 
-## C. RS-7 этап 1 — конкретный следующий пакет (read-only, без записи)
+## C. RS-7 этап 1 — реализовано (read-only, без записи)
+
+**Статус 31.10.2026:** пункты 1, 3 и 4 ниже выполнены в `components/runtime/lib/vward-routing-plan.sh`
+(`vward_routing_plan`, `vward_routing_plan_log`) и `tests/routing-readers/check-plan.py` (sh и BusyBox).
+Пункт 2 (журнал-до-записи) остаётся этапом 2: схема и валидатор без записи на роутере.
 
 Программная приёмка RS-6 (audit/dry-run) закрыта этапом 3. RS-7 начинается с чистого планировщика:
 
@@ -87,3 +91,23 @@ R2 — удаление recovery после аддитивного undo; R3 — 
 Не входит и требует отдельного разрешения: подключение любого writer, DNS-переключение, изменение
 Keenetic/AGH/VPN, выпуск. Последовательность общего выпуска: RS-7 → fix.34.2 / 34.2b / 34.3 → журналы
 fix.35 → Панель и dnsmasq → интеграционная приёмка.
+
+### C.1. Контракт планировщика (как реализовано)
+
+`vward_routing_plan GENERATION AUDIT IDENTITY SHADOW CONTEXT` → строки
+`DOMAIN ACTION TARGET DNS ELIGIBLE PERMIT NEEDS REASON GENERATION`. ACTION — только `none|add`
+(остальное — следующие этапы). `PERMIT` — `denied:writers-disabled` либо `requires-approval`,
+**никогда `granted`**. `NEEDS` — что будущий writer обязан сделать сам:
+`recheck-generation,owner-proof,change-lock,journal-before-write`. CONTEXT (`dns_mode`
+`agh|dnsmasq|native|both|unknown`, `agh_recovery`, `writers`, `age`, `max_age`) передаёт вызывающий:
+планировщик не читает часы, файлы роутера и состояние DNS. Блокировки (reason): `snapshot-or-source-unknown`,
+`dependency-unknown/unavailable`, `conflicting-target-or-dns` (без скрытого приоритета),
+`ambiguous-wanted`, `service-target-defaulted`, `shadow-<class>`/`shadow-unknown`,
+`ownership-unproven|unknown` (худшее среди **активных** ref, а не имя группы), `snapshot-age-unknown|stale`,
+`dns-mode-unknown`, `dns-modes-conflict` (AGH и dnsmasq активны вместе — запрещено), `agh-recovery-pending|unknown`
+(неподтверждённое восстановление AGH блокирует любое DNS-зависимое действие), `domain-not-in-snapshot`
+(wildcard-расширенный домен, неизвестный снимку, только отражается). Поколение не совпало — rc 3,
+`unknown generation-mismatch`. Сегодня все планы `ELIGIBLE=no` (health DNS/AGH/VPN всегда unknown);
+положительный путь проверен на синтетическом снимке с health `available`.
+`vward_routing_plan_log` печатает ограниченные строки `PLAN|домен|действие|eligible|permit|reason|generation`
+для существующего журнала событий (время и запись добавляет вызывающий).
