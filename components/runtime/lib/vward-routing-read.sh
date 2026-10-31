@@ -1,9 +1,14 @@
 #!/bin/sh
 # RS-6: native persisted inputs -> RS-5 TSV; explicit invocation, stdout only.
 # Reads the existing shared cache; NEVER refreshes it or invokes a writer.
+# Modes: intents | snapshot (RS5 TSV) | identity (RS-6 stable identity table).
+# REF = hash of canonical content (source, container, domain, scope, route, DNS),
+# never a row position: reordering lines cannot rename a record. Identity is not
+# ownership: only a private proof file that matches the group exactly says
+# `verified`; the right to change is always `reference` here.
 vward_routing_read() (
     [ "$#" = 1 ] || return 2
-    case "$1" in intents|snapshot) VRR_MODE=$1 ;; *) return 2 ;; esac
+    case "$1" in intents|snapshot|identity) VRR_MODE=$1 ;; *) return 2 ;; esac
     VRR_ETC=${VWARD_CONSOLE_ETC:-/opt/etc/vward}
     VRR_STATE=${VWARD_ROUTE_STATE:-/opt/var/lib/vward/route-engine}
     VRR_CFG=${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}/running-config
@@ -41,6 +46,7 @@ vward_routing_read() (
             printf 'readable\t%s\n' "$vrr_input"
         done
         for vrr_proof in "$VRR_ETC"/services/owned/*; do
+            if [ -e "$vrr_proof" ] || [ -L "$vrr_proof" ]; then printf 'proofpresent\t%s\n' "${vrr_proof##*/}"; fi
             [ -f "$vrr_proof" ] && [ ! -L "$vrr_proof" ] && [ -O "$vrr_proof" ] || continue
             vrr_meta=$(ls -ln "$vrr_proof" 2>/dev/null | awk '{print $1}')
             case "$vrr_meta" in -rw-------|-r--------) printf 'private\t%s\n' "${vrr_proof##*/}" ;; esac
@@ -51,7 +57,30 @@ vward_routing_read() (
         done
         if [ -e "$VRR_ETC/route-engine/adaptive.disabled" ]; then printf 'disabled\t1\n'; fi
     } | LC_ALL=C awk '
-    BEGIN { FS=OFS="\t"; mode=ENVIRON["VRR_MODE"]; etc=ENVIRON["VRR_ETC"]; state=ENVIRON["VRR_STATE"] }
+    BEGIN {
+        FS=OFS="\t"; mode=ENVIRON["VRR_MODE"]; etc=ENVIRON["VRR_ETC"]; state=ENVIRON["VRR_STATE"]
+        for(ci=32;ci<127;ci++) ord[sprintf("%c",ci)]=ci
+        hexd="0123456789abcdef"
+    }
+    # Stable 64-bit style fingerprint of validated ASCII tokens (two independent
+    # moduli; doubles stay exact). Collisions are detected where IDs are issued.
+    function hex8(n, i,r) {r=""; for(i=0;i<8;i++) {r=substr(hexd,(n%16)+1,1) r; n=int(n/16)} return r}
+    function hh(str, i,c,a,b) {
+        a=5381; b=52711
+        for(i=1;i<=length(str);i++) {
+            c=ord[substr(str,i,1)]
+            a=(a*131+c)%4294967291; b=(b*257+c+i)%4294967279
+        }
+        HA=a; HB=b
+        return hex8(a) hex8(b)
+    }
+    # Issue an ID for a canonical record; two different records with one ID is fatal.
+    function mkid(prefix,canon, v) {
+        v=hh(canon)
+        if((v in idcanon) && idcanon[v]!=canon) {invalid=1; return prefix "-collision"}
+        idcanon[v]=canon
+        return prefix "-" v
+    }
     function id(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/}
     function domain(s, n,a,i) {
         if(length(s)>253 || s !~ /^[a-z0-9.-]+$/) return 0
@@ -81,7 +110,10 @@ vward_routing_read() (
             if(a[1]=="object-group" && a[2]=="fqdn") {
                 if(l !~ /^object-group fqdn /) {bad[kind]=1;group="";return}
                 if(!id(a[3]) || n!=3) {bad[kind]=1;return}
-                group=a[3]; if(!(group in gn)) {gn[group]=++ng; groups[ng]=group}; return
+                group=a[3]
+                if(!(group in gn)) {gn[group]=++ng; groups[ng]=group}
+                else dup[group]=1  # same name declared twice: ambiguous, never merged silently
+                return
             }
             if(ctx && a[1]=="route" && a[2]=="object-group") {
                 g=a[3];t=a[4]; if(!id(g)||!id(t)) {bad[kind]=1;return}
@@ -141,8 +173,13 @@ vward_routing_read() (
         for(k in smart) if(d==k || (length(d)>length(k) && substr(d,length(d)-length(k))=="." k)) return "smartdns"
         return known["agh"] ? "default" : "unknown"
     }
+    # absent = never claimed; unknown = present but not a safe private file or
+    # config unreadable; mismatch = claimed once, content changed since (edit or
+    # reused group name); vward = private proof matches the group exactly.
     function owned(g, path,l,rc,n,k,a,b,ok) {
-        if(!(g in private) || !known["cfg"]) return "unknown"
+        if(!known["cfg"]) return "unknown"
+        if(!(g in proofpresent)) return "absent"
+        if(!(g in private)) return "unknown"
         path=etc "/services/owned/" g; ok=1;n=0
         while((rc=(getline l < path))>0) {
             n++; if(n>4096 || !(g SUBSEP l in sig)) {ok=0;break}; proof[l]++
@@ -150,7 +187,13 @@ vward_routing_read() (
         close(path); if(rc<0) ok=0
         for(k in sig) {split(k,a,SUBSEP); if(a[1]==g && proof[a[2]]!=sig[k]) ok=0}
         for(k in proof) delete proof[k]
-        return ok && n>0 ? "vward" : "unknown"
+        return ok && n>0 ? "vward" : "mismatch"
+    }
+    function identstate(g) {
+        if(!known["cfg"] || (g in dup)) return "unknown"
+        if(pst[g]=="vward") return "verified"
+        if(pst[g]=="absent") return "reference-only"
+        return "unknown"
     }
     function remember(d) {
         if(d!="" && !(d in output_domains)) {output_domains[d]=1; output_nd++}
@@ -182,13 +225,19 @@ vward_routing_read() (
         }
         for(pos=1;pos<=output_n;pos++) print output[pos]
     }
-    function intent(s,r,d,t) {remember(d); if(mode=="intents") emit(s OFS r OFS d OFS "exact" OFS t OFS dns(d) OFS 1,d)}
+    function intent(s,key,d,t,cont,content,link,ident, r,x) {
+        remember(d); x=dns(d)
+        r=mkid(tolower(s), s "|" key "|" d "|exact|" t "|" x)
+        if(mode=="intents") emit(s OFS r OFS d OFS "exact" OFS t OFS x OFS 1,d)
+        else if(mode=="identity") emit(r OFS "intent" OFS s OFS cont OFS content OFS mkid("t","T|exact|" t "|" x) OFS link OFS ident OFS "reference",d)
+    }
     $1=="catalog" {
         if(NF!=4 || !domain(tolower($4))) catalog_bad=1
         else {nc++; cid[nc]=$2; ccat[nc]=$3; cd[nc]=tolower($4)}; next
     }
     $1=="readable" && NF==2 {readable[$2]=1;next}
     $1=="private" && id($2) {private[$2]=1;next}
+    $1=="proofpresent" && id($2) {proofpresent[$2]=1;next}
     $1=="pending" {pending=1;next}
     $1=="disabled" {disabled=1;next}
     END {
@@ -200,8 +249,12 @@ vward_routing_read() (
         ak=known["persist"] ? "known":"unknown"
         # Legacy groups have no global manual switch. These are observed enabled
         # sources, NOT persisted RS-7 toggles. Missing input never means disabled.
+        # Order-independent content fingerprint: commutative sum of line hashes.
+        for(k in sig) {split(k,a,SUBSEP); hh(a[2] "*" sig[k]); cA[a[1]]=(cA[a[1]]+HA)%4294967291; cB[a[1]]=(cB[a[1]]+HB)%4294967279; cN[a[1]]++}
         for(i=1;i<=ng && !invalid;i++) {
-            g=groups[i]; owner=owned(g)
+            g=groups[i]; pst[g]=owned(g); owner=(pst[g]=="vward") ? "vward" : "unknown"
+            gcont[g]=mkid("g","G|" g); gcontent[g]="c-" hex8(cA[g]) hex8(cB[g]) "." cN[g]+0
+            if(g in dup) mk="unknown"
             saved_header=0; bad["saved"]=0
             load(etc "/route-engine/domain-lists/" g,"saved")
             # Missing saved state is normal; a present malformed state cannot
@@ -210,8 +263,13 @@ vward_routing_read() (
             for(j=1;j<=nd[g] && !invalid;j++) for(k=1;k<=nr[g] && !invalid;k++) {
                 d=dom[g,j]; t=target(rt[g,k]); if(t=="") {mk="unknown";continue}
                 if(known["cfg"]) remember(d)
-                if(known["cfg"] && mode=="snapshot") emit("route" OFS "r." i "." j "." k OFS d OFS "exact" OFS t OFS dns(d) OFS owner OFS "reference",d)
-                if(known["cfg"] && !(g in used) && g!="AdaptiveAuto") intent("M","m." i "." j "." k,d,t)
+                lnk=(g=="AdaptiveAuto") ? "runtime-group" : "native-group"
+                if(known["cfg"] && mode!="intents") {
+                    rr=mkid("r","R|" g "|" d "|exact|" t "|" dns(d))
+                    if(mode=="snapshot") emit("route" OFS rr OFS d OFS "exact" OFS t OFS dns(d) OFS owner OFS "reference",d)
+                    else emit(rr OFS "route" OFS "-" OFS gcont[g] OFS gcontent[g] OFS mkid("t","T|exact|" t "|" dns(d)) OFS lnk OFS identstate(g) OFS "reference",d)
+                }
+                if(known["cfg"] && !(g in used) && g!="AdaptiveAuto") intent("M",g,d,t,gcont[g],gcontent[g],lnk,identstate(g))
             }
             if(nd[g]>0 && nr[g]==0) mk="unknown"
         }
@@ -224,13 +282,14 @@ vward_routing_read() (
                 if(t=="auto") {t=category[ccat[c]]; if(t=="") t=profile["VWARD_TUNNEL_INTERFACE"]}
                 t=target(t)
                 if(t=="" || catalog_bad || !known["enabled"] || !known["dev"] || !known["categories"]) {sk="unknown";continue}
-                intent("S","s." sn[s] "." c,cd[c],t)
+                sg=service_group[s]
+                intent("S",s,cd[c],t,mkid("v","V|" s),(sg in gn) ? gcontent[sg] : "-","service-link",(sg in gn) ? identstate(sg) : "unknown")
             }
             if(!found) sk="unknown"
         }
         t=target(profile["VWARD_TUNNEL_INTERFACE"])
         if(t=="" || !known["dev"] || !known["cfg"]) ak="unknown"
-        if(t!="" && known["persist"] && known["dev"]) for(d in adaptive) {if(invalid) break; intent("A","a." adaptive[d],d,t)}
+        if(t!="" && known["persist"] && known["dev"]) for(d in adaptive) {if(invalid) break; intent("A","",d,t,"-","-","adaptive-persist","reference-only")}
         if(pending) mk=sk=ak="unknown"
         if(mode=="snapshot") {
             emit("snapshot" OFS "legacy-read" OFS "unknown","")

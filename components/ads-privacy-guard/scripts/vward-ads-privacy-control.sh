@@ -58,6 +58,23 @@ if [ "$OP" = agh ]; then
   jpost() { printf '%s' "$2" > "$W/body.json"; ads_agh_api_post "$1" "$W/body.json" "$W/out" >/dev/null 2>&1; }
   jput() { printf '%s' "$2" > "$W/body.json"; ads_agh_api_put "$1" "$W/body.json" "$W/out" >/dev/null 2>&1; }
   aget() { ads_agh_api_get "$1" "$W/$2" >/dev/null 2>&1; }
+  # Guarded compensation (RS-6 s.6): the earlier upstream list returns only while
+  # AdGuard Home still holds exactly the list this call wrote. A different state
+  # means someone else changed it meanwhile: write nothing, keep the evidence.
+  # 0 = original confirmed present; 1 = not restored (state unknown or foreign).
+  # agh_unchanged: the plan was built from dns.json; write only if AdGuard Home
+  # still holds exactly that list (a user edit since the read would be lost).
+  agh_unchanged() {
+    aget dns_info dns-pre.json && "$ADS_JQ" -e --slurpfile o "$W/dns.json" '.upstream_dns == $o[0].upstream_dns' "$W/dns-pre.json" >/dev/null 2>&1
+  }
+  agh_guarded_back() {
+    aget dns_info dns-now.json || return 1
+    "$ADS_JQ" -e --slurpfile o "$W/dns.json" '.upstream_dns == $o[0].upstream_dns' "$W/dns-now.json" >/dev/null 2>&1 && return 0
+    "$ADS_JQ" -e --slurpfile p "$W/plan.json" '.upstream_dns == $p[0].upstream_dns' "$W/dns-now.json" >/dev/null 2>&1 || return 1
+    "$ADS_JQ" -c '{upstream_dns: .upstream_dns}' "$W/dns.json" > "$W/back.json"
+    ads_agh_api_post dns_config "$W/back.json" "$W/out" >/dev/null 2>&1
+    aget dns_info dns-back.json && "$ADS_JQ" -e --slurpfile o "$W/dns.json" '.upstream_dns == $o[0].upstream_dns' "$W/dns-back.json" >/dev/null 2>&1
+  }
   valid_url() { printf '%s\n' "$1" | grep -Eq '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._~/%+=&?-]*$' && [ "${#1}" -le 300 ]; }
   aget status status.json || agfail adguard_unavailable
   case "$AG_SET" in
@@ -169,14 +186,14 @@ if [ "$OP" = agh ]; then
         chmod 0600 "$A2" 2>/dev/null
         TAKEN=$(grep -c . "$A2")
         if [ "$TAKEN" -gt 0 ]; then
+          # Nothing is written (and nothing is "taken") over a list that changed since the read.
+          agh_unchanged || { : > "$A2"; agfail verification_failed; }
           "$ADS_JQ" -c '{upstream_dns: .upstream_dns}' "$W/plan.json" > "$W/body.json" || agfail invalid_value
           ads_agh_api_post dns_config "$W/body.json" "$W/out" >/dev/null 2>&1 || agfail adguard_rejected
           aget dns_info dns2.json && "$ADS_JQ" -e --slurpfile p "$W/plan.json" '.upstream_dns == $p[0].upstream_dns' "$W/dns2.json" >/dev/null 2>&1 || {
-            "$ADS_JQ" -c '{upstream_dns: .upstream_dns}' "$W/dns.json" > "$W/back.json"
-            ads_agh_api_post dns_config "$W/back.json" "$W/out" >/dev/null 2>&1
             # Drop undo data only after confirming the original upstreams are back.
             # Otherwise the caller still needs the pairs for its own rollback.
-            if aget dns_info dns-back.json && "$ADS_JQ" -e --slurpfile o "$W/dns.json" '.upstream_dns == $o[0].upstream_dns' "$W/dns-back.json" >/dev/null 2>&1; then
+            if agh_guarded_back; then
               printf '' > "$A2" || agfail write_failed
             fi
             agfail verification_failed; }
@@ -194,6 +211,7 @@ if [ "$OP" = agh ]; then
               (any($rows[]; .u == $pair.u and any(.d[]; ascii_downcase == $pair.d)) | not)
               else (.d as $d | ($have | index([$d])) == null) end)] as $add
           | {upstream_dns: (.upstream_dns + [$add | group_by(.u)[] | "[/" + (map(.d) | join("/")) + "/]" + .[0].u])}' "$W/dns.json" > "$W/plan.json" || agfail invalid_value
+        agh_unchanged || agfail verification_failed
         if [ -n "${VWARD_AGH_RECOVERY_DIR:-}" ]; then
           # Parent reserved this private directory before calling us. Evidence
           # must commit before POST; it is not permission for automatic replay.
@@ -206,8 +224,7 @@ if [ "$OP" = agh ]; then
         if ! "$ADS_JQ" -e --slurpfile o "$W/dns.json" '.upstream_dns == $o[0].upstream_dns' "$W/plan.json" >/dev/null 2>&1; then
           ads_agh_api_post dns_config "$W/plan.json" "$W/out" >/dev/null 2>&1 || agfail adguard_rejected
           aget dns_info dns2.json && "$ADS_JQ" -e --slurpfile p "$W/plan.json" '.upstream_dns == $p[0].upstream_dns' "$W/dns2.json" >/dev/null 2>&1 || {
-            "$ADS_JQ" -c '{upstream_dns: .upstream_dns}' "$W/dns.json" > "$W/back.json"
-            ads_agh_api_post dns_config "$W/back.json" "$W/out" >/dev/null 2>&1
+            agh_guarded_back || :
             agfail verification_failed; }
         fi
         echo "PUT=$(grep -c . "$A1")"
