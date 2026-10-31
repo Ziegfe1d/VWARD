@@ -152,9 +152,13 @@ vward_routing_read() (
         for(k in proof) delete proof[k]
         return ok && n>0 ? "vward" : "unknown"
     }
-    function emit(line,d) {
-        if(invalid) return
+    function remember(d) {
         if(d!="" && !(d in output_domains)) {output_domains[d]=1; output_nd++}
+        if(output_nd>1024) invalid=1
+    }
+    function emit(line,d) {
+        remember(d)
+        if(invalid) return
         if(!(line in output_seen)) {
             output_seen[line]=1; output_n++; output_bytes+=length(line)+1
             if(output_n<=4096 && output_bytes<=1048576) output[output_n]=line
@@ -178,7 +182,7 @@ vward_routing_read() (
         }
         for(pos=1;pos<=output_n;pos++) print output[pos]
     }
-    function intent(s,r,d,t) {if(mode=="intents") emit(s OFS r OFS d OFS "exact" OFS t OFS dns(d) OFS 1,d)}
+    function intent(s,r,d,t) {remember(d); if(mode=="intents") emit(s OFS r OFS d OFS "exact" OFS t OFS dns(d) OFS 1,d)}
     $1=="catalog" {
         if(NF!=4 || !domain(tolower($4))) catalog_bad=1
         else {nc++; cid[nc]=$2; ccat[nc]=$3; cd[nc]=tolower($4)}; next
@@ -205,6 +209,7 @@ vward_routing_read() (
             if(known["saved"] && saved_header!=1) mk="unknown"
             for(j=1;j<=nd[g] && !invalid;j++) for(k=1;k<=nr[g] && !invalid;k++) {
                 d=dom[g,j]; t=target(rt[g,k]); if(t=="") {mk="unknown";continue}
+                if(known["cfg"]) remember(d)
                 if(known["cfg"] && mode=="snapshot") emit("route" OFS "r." i "." j "." k OFS d OFS "exact" OFS t OFS dns(d) OFS owner OFS "reference",d)
                 if(known["cfg"] && !(g in used) && g!="AdaptiveAuto") intent("M","m." i "." j "." k,d,t)
             }

@@ -183,6 +183,14 @@ with tempfile.TemporaryDirectory() as d:
         shell=([os.environ["RS6_BUSYBOX"],"ash"] if os.environ.get("RS6_BUSYBOX") else ["sh"])
         result=subprocess.run(shell+["-c", '. "$1"; vward_routing_read "$2"', "reader",str(LIB),mode],env=env,text=True,capture_output=True,timeout=3)
         assert result.returncode==2 and result.stdout=="", "expanded output breached RS5 limit: "+mode
+    # RS5 bounds apply to the UNION of both projections as well as each file.
+    cfg.write_text("dns-proxy\n    route object-group AdaptiveAuto Wireguard0 auto\n!\nobject-group fqdn AdaptiveAuto\n"+
+                   "".join("    include old%d.example\n"%n for n in range(900))+"!\n")
+    persist.write_text("".join("new%d.example\n"%n for n in range(900)))
+    for mode in ("intents","snapshot"):
+        shell=([os.environ["RS6_BUSYBOX"],"ash"] if os.environ.get("RS6_BUSYBOX") else ["sh"])
+        result=subprocess.run(shell+["-c", '. "$1"; vward_routing_read "$2"', "reader",str(LIB),mode],env=env,text=True,capture_output=True,timeout=3)
+        assert result.returncode==2 and result.stdout=="", "combined domain union breached RS5 limit: "+mode
     # Source loading itself is inert, including the caller environment.
     r=subprocess.run(['sh','-c','sentinel=preserved; original_path=$PATH; original_ifs=$IFS; . "$1"; [ "$sentinel" = preserved ] && [ "$PATH" = "$original_path" ] && [ "$IFS" = "$original_ifs" ]','load',str(LIB)],
                      env=env,capture_output=True,text=True,timeout=3)

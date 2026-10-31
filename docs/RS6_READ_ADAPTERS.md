@@ -54,7 +54,7 @@ reader; адаптер сам не создаёт и не обновляет т�
 - Для обычных файлов применяется preflight regular/readable/non-symlink;
   FIFO не открывается и не блокирует процесс. Ограниченный native parse:
   4096 строк/1MiB на файл. Expand имеет лимиты RS5: 4096 строк/1MiB и 1024
-  уникальных домена на выход. Превышение → rc2, stderr, НЕТ partial stdout.
+  уникальных домена в объединении обеих проекций. Превышение → rc2, stderr, НЕТ partial stdout.
   До stdout результат буферизуется ограниченно и сортируется O(N log N).
 - REF пока уникальны только внутри конкретного чтения: positional native
   records, не persistent identity и не ownership token. Review minor о
@@ -81,7 +81,7 @@ mode owner proof, saved state, неизменность inputs/exceptions, по�
 
 Review RED→GREEN: (1) вложенная phantom group, (2) 300 includes×14 targets,
 ранее возвращавшие >4096 строк, теперь rc2 без stdout. Дополнительный RED
-FIFO timeout 3s→GREEN unknown. Независимое review нашло 4 Important в общем
+FIFO timeout 3s→GREEN unknown. Дополнительная union-регрессия: по 900 разных runtime/persist доменов, каждая проекция <1024, но union >1024, RED→GREEN rc2 без stdout. Независимое review нашло 4 Important в общем
 кандидате (2 integration, 2 adapter); все закрыты регрессиями в одном fix pass.
 Второе review не проводилось; результаты fixes подтверждаются тестами.
 
