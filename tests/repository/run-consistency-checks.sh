@@ -89,6 +89,7 @@ python3 tests/routing-readers/check-snapshot.py || fail "routing consistent snap
 python3 tests/routing-readers/check-shadow.py || fail "routing shadow comparison"
 python3 tests/routing-readers/check-observe.py || fail "routing read-only observers"
 python3 tests/routing-readers/check-plan.py || fail "RS-7 pure routing planner"
+python3 tests/routing-readers/check-journal.py || fail "RS-7 write-ahead journal (test data only)"
 if command -v busybox >/dev/null 2>&1; then
     busybox ash tests/routing-audit/run-simulations.sh || fail "BusyBox routing audit simulations"
     RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-readers.py || fail "BusyBox native routing read adapters"
@@ -97,6 +98,7 @@ if command -v busybox >/dev/null 2>&1; then
     RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-shadow.py || fail "BusyBox routing shadow comparison"
     RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-observe.py || fail "BusyBox routing read-only observers"
     RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-plan.py || fail "BusyBox RS-7 pure routing planner"
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-journal.py || fail "BusyBox RS-7 write-ahead journal"
     python3 tests/routing-audit/check-bounded-cost.py --busybox "$(command -v busybox)" || fail "routing audit bounded cost"
 else
     echo "NOTE: BusyBox audit/cost runtime requires busybox; host audit ran above"

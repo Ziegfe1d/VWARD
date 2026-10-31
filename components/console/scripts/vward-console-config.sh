@@ -125,6 +125,10 @@ cleanup() {
     # An API outage cannot be repaired synchronously. Keep the exact undo pairs
     # on persistent storage for owner-directed recovery, never in the public log.
     if [ -n "$SD_RECOVERY_DIR" ]; then
+        if [ "$sd_rollback_bad" = 0 ] && [ -e "$SD_RECOVERY_DIR/restore.inexact" ]; then
+            sd_rollback_bad=1
+            audit "smartdns rollback inexact (AdGuard Home changed meanwhile)"
+        fi
         if [ "$sd_rollback_bad" = 1 ]; then
             audit "smartdns rollback recovery=$SD_RECOVERY_DIR/pairs.tsv"
             printf 'recovery=%s/pairs.tsv\n' "$SD_RECOVERY_DIR"
@@ -632,7 +636,16 @@ tunnel_undo() {
                         ;;
                     "DOH-REMOVE "*) doh_remove "${undo#DOH-REMOVE }" || bad=1 ;;
                     "AGH-UNCERTAIN "*) bad=1 ;;
-                    "AGH-RESTORE "*) f=${undo#AGH-RESTORE }; if [ -s "$f" ]; then agh_control smartdns-restore "$f" >/dev/null || bad=1; fi ;;
+                    "AGH-RESTORE "*) f=${undo#AGH-RESTORE }
+                        if [ -s "$f" ]; then
+                            # The take wrote the list before into the same private directory.
+                            VWARD_AGH_RECOVERY_DIR=${f%/*}; export VWARD_AGH_RECOVERY_DIR
+                            agh_control smartdns-restore "$f" >/dev/null || bad=1
+                            # Additive restore that did not give back the exact earlier rows
+                            # (or could not prove it): the evidence must outlive this run.
+                            printf '%s\n' "$AGH_OUT" | grep -qx 'RESTORE_EXACT=yes' || : > "${f%/*}/restore.inexact"
+                            unset VWARD_AGH_RECOVERY_DIR
+                        fi ;;
                     "AGH-PUT "*) agh_control smartdns-put "${undo#AGH-PUT }" >/dev/null || bad=1 ;;
                     "AGH-TAKE "*) f=${undo#AGH-TAKE }; cut -f1 "$f" > "$f.inc" && agh_control smartdns-take "$f.inc" "$f.undo" >/dev/null || bad=1 ;;
                     *" private-key "*|*" preshared-key "*) ndm_secret "$undo" || bad=1 ;;
@@ -933,7 +946,9 @@ doh_remove_once() {
 ADS_CONTROL=${VWARD_ADS_CONTROL_BIN:-/opt/bin/vward-ads-privacy-control.sh}
 agh_control() {
     [ -x "$ADS_CONTROL" ] || { AGH_ERR=smartdns_agh_unavailable; return 1; }
-    ac_out=$("$ADS_CONTROL" agh "$@" 2>&1) && printf '%s\n' "$ac_out" | grep -qx 'CONTROL=PASS' && return 0
+    ac_out=$("$ADS_CONTROL" agh "$@" 2>&1); ac_rc=$?
+    AGH_OUT=$ac_out
+    [ "$ac_rc" = 0 ] && printf '%s\n' "$ac_out" | grep -qx 'CONTROL=PASS' && return 0
     AGH_ERR=$(printf '%s\n' "$ac_out" | sed -n 's/^ERROR=//p' | head -n 1)
     case "$AGH_ERR" in adguard_auth_required|adguard_unavailable|upstream_file_unsupported|smartdns_not_configured) ;; *) AGH_ERR=smartdns_agh_failed ;; esac
     return 1
@@ -960,7 +975,9 @@ agh_take() {
         END {exit f ? 0 : 1}' "$2.inc" - || return 0
     agh_recovery_reserve take
     printf 'AGH-RESTORE %s/pairs.tsv\n' "$SD_RECOVERY_DIR" >> "$JOURNAL" || die write_failed
-    agh_control smartdns-take "$2.inc" "$SD_RECOVERY_DIR/pairs.tsv" || return 1
+    VWARD_AGH_RECOVERY_DIR=$SD_RECOVERY_DIR; export VWARD_AGH_RECOVERY_DIR
+    agh_control smartdns-take "$2.inc" "$SD_RECOVERY_DIR/pairs.tsv" || { unset VWARD_AGH_RECOVERY_DIR; return 1; }
+    unset VWARD_AGH_RECOVERY_DIR
     cp "$SD_RECOVERY_DIR/pairs.tsv" "$2" || die write_failed
 }
 
@@ -2842,12 +2859,14 @@ smartdns_take_rows() {
         sd_agh_pairs="$SD_RECOVERY_DIR/pairs.tsv"
         # The API can apply a POST and then lose the reply. Register undo before it.
         printf 'AGH-RESTORE %s\n' "$sd_agh_pairs" >> "$JOURNAL" || die write_failed
+        VWARD_AGH_RECOVERY_DIR=$SD_RECOVERY_DIR; export VWARD_AGH_RECOVERY_DIR
         if [ "$sd_mode" = server ]; then
             agh_control smartdns-take-server "$SMARTDNS_CONF" "$sd_agh_pairs" || die "$AGH_ERR"
         else
             printf '%s\n' "$sd_value" > "$JOURNAL.agh.inc" || die write_failed
             agh_control smartdns-take "$JOURNAL.agh.inc" "$sd_agh_pairs" || die "$AGH_ERR"
         fi
+        unset VWARD_AGH_RECOVERY_DIR
         if [ -s "$sd_agh_pairs" ]; then
             SD_RESULT=changed
         fi

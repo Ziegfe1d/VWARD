@@ -187,6 +187,9 @@ with tempfile.TemporaryDirectory() as tmp:
                      and any(isinstance(t, ast.Name) and t.id == "FAKE_CURL" for t in n.targets))
     state = tmp / "agh.json"
     curl = tmp / "curl"
+    fake_curl = fake_curl.replace('else: st["up"] = body["upstream_dns"]; res = {}',
+        'else:\n        st["up"] = body["upstream_dns"]; res = {}\n        if st.get("user_edit_after_post") and st["posts"] == 1: st["up"] = st["up"] + st["user_edit_after_post"]')
+    assert 'user_edit_after_post' in fake_curl
     fake_curl = fake_curl.replace('Path(out).write_text(json.dumps(res))',
         'if method == "POST" and st.get("fail_after_apply") and st.get("posts") == 1: sys.exit(22)\nPath(out).write_text(json.dumps(res))')
     curl.write_text(fake_curl.replace("@STATE@", str(state))); curl.chmod(0o755)
@@ -221,6 +224,37 @@ with tempfile.TemporaryDirectory() as tmp:
             fail("successful or confirmed rollback operations left recovery data")
     if list((tmp / "backup-recovery").glob("smartdns.*")):
         fail("successful or confirmed rollback operations left recovery data")
+    # RS-7 R2: an additive AGH rollback that does NOT give back the exact earlier list (a user
+    # edit arrived meanwhile) is not a confirmed rollback: the private recovery evidence stays
+    # (and the routing gate stays closed) instead of being deleted as "successful".
+    USER = "[/user-added.example/]https://user.example/dns-query"
+    reset()
+    state.write_text(json.dumps({"up": upstreams, "user_edit_after_post": [USER]}))
+    (tmp / "refuse").touch()
+    r = run("smartdns-server", "clear")
+    (tmp / "refuse").unlink()
+    got = json.loads(state.read_text())["up"]
+    if not r.returncode or USER not in got or not set(upstreams) <= set(got):
+        fail("inexact rollback lost data: " + r.stdout + str(got))
+    retained = list((tmp / "backup-recovery").glob("smartdns.*"))
+    if len(retained) != 1 or not (retained[0] / "dns.before.json").is_file() or not (retained[0] / "restore.inexact").exists():
+        fail("RED: an inexact additive AGH rollback deleted the recovery evidence: " + r.stdout + str(retained))
+    if json.loads((retained[0] / "dns.before.json").read_text())["upstream_dns"] != upstreams:
+        fail("recovery evidence does not hold the list before the change")
+    gate = run("smartdns-server", "clear")
+    if gate.returncode != 75 or "error=routing_recovery_required" not in gate.stdout:
+        fail("retained AGH recovery did not close the routing gate: " + gate.stdout)
+    shutil.rmtree(retained[0])
+    # The same failure without a foreign edit restores exactly: nothing is retained.
+    reset()
+    state.write_text(json.dumps({"up": upstreams}))
+    (tmp / "refuse").touch()
+    r = run("smartdns-server", "clear")
+    (tmp / "refuse").unlink()
+    if not r.returncode or json.loads(state.read_text())["up"] != upstreams and set(json.loads(state.read_text())["up"]) != set(upstreams):
+        fail("exact rollback did not restore: " + r.stdout)
+    if list((tmp / "backup-recovery").glob("smartdns.*")):
+        fail("an exact, confirmed rollback left recovery data")
     # No durable backup available: refuse BEFORE the external mutation.
     recovery_root = tmp / "backup-recovery"
     recovery_root.rmdir(); recovery_root.write_text("blocked")
