@@ -1446,6 +1446,7 @@ SameSite=Strict, 5 неверных попыток за 5 минут - блок�
   данных; R2 (recovery после аддитивного отката) исправлен — RS7_EXECUTOR_WIRING_DESIGN.md §D. Следующий безопасный этап —
   §E: сухой исполнитель одного пути на эмуляторе, выключатель off, без реального Keenetic.
 
-- RS-7 этап 3 (31.10.2026): сухой исполнитель одного пути на stand-in Keenetic — RS7_EXECUTOR_WIRING_DESIGN.md §E.
+- RS-7 этап 3 (31.10.2026): сухой исполнитель одного пути на встроенном эмуляторе Keenetic (только файл данных,
+  внешние исполняемые файлы не запускаются) — RS7_EXECUTOR_WIRING_DESIGN.md §E.
   Supercell/Brawl Stars: разбор FQDN-маршрутизации Keenetic и read-only проверка — DIAGNOSTICS_SUPERCELL_2026-10-31.md;
   открыто: адреса игры в ipset при живой игре, DNS клиента (Private DNS/DoH), IPv6 при его появлении у провайдера.
