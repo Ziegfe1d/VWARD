@@ -133,3 +133,11 @@ expansion ограничены; предельная конфигурация б
 До «Выпускаем» нет dev/main merge, VERSION/feed/sign/release, установки или
 изменений Keenetic/VPN/AGH. Audit read не даёт права менять пользовательские
 группы и не подтверждает клиентский packet path.
+
+## Этап 2 (31.10.2026)
+
+Пункты 1–3 «Следующего безопасного пакета» выполнены в audit-only виде: стабильные ID
+(REF больше не позиционный; оговорка про сравнение по domain/source/target выше относится
+к этапу 1), согласованный snapshot с generation и shadow comparison —
+[RS6_IDENTITY_SNAPSHOT_SHADOW.md](RS6_IDENTITY_SNAPSHOT_SHADOW.md). Пункт 5 (проект writer)
+— [RS7_EXECUTOR_WIRING_DESIGN.md](RS7_EXECUTOR_WIRING_DESIGN.md). Пункт 4 (Viva) открыт.

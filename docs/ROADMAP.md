@@ -1419,3 +1419,8 @@ SameSite=Strict, 5 неверных попыток за 5 минут - блок�
 - RS6 stage 1 подготовлен отдельным read-only пакетом: RS6_READ_ADAPTERS.md.
   Следующий шаг — согласованный read-only snapshot/shadow comparison; live write
   требует отдельного согласования, аппаратные ворота остаются открытыми.
+
+- RS6 этап 2 (31.10.2026): постоянные ID, согласованный snapshot с generation и shadow
+  comparison реализованы как audit-only: RS6_IDENTITY_SNAPSHOT_SHADOW.md. Модель AGH recovery
+  и проект подключения исполнителей: RS7_EXECUTOR_WIRING_DESIGN.md. Исполнители, Панель,
+  Keenetic/AGH/DNS/VPN не затронуты; аппаратная приёмка и релиз остаются закрытыми.
