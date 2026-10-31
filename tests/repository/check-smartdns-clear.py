@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""P-7 P0-DNS: deleting a server removes only its active rules; failures roll back.
+The admission stub represents an idle updater; no router or network is accessed.
+"""
+import ast
+import json
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[2]
+HELPER = ROOT / "components/console/scripts/vward-console-config.sh"
+RUNNING = "interface Wireguard0\n!\ndns-proxy\n    route object-group Mine Wireguard0 auto\n!\n"
+def fail(msg):
+    raise SystemExit("SMARTDNS_CLEAR=FAIL: " + msg)
+FAKE_NDMC = r'''#!/usr/bin/env python3
+import sys
+from pathlib import Path
+cfg = Path("@CFG@")
+cmd = sys.argv[2]
+if cmd == "show running-config":
+    print(cfg.read_text(), end=""); sys.exit(0)
+if cmd == "system configuration save":
+    sys.exit(1 if cfg.with_name("save-fail").exists() else 0)
+if cfg.with_name("no-doh").exists() and cmd.startswith("dns-proxy https"):
+    print("\x1b[KCommand::Base error[7405600]: no such command: https.\n\x1b[K"); sys.exit(0)
+if cfg.with_name("refuse").exists() and cmd.startswith("dns-proxy no "):
+    print("Core::Configurator: error: synthetic refusal of the form\n["); sys.exit(0)
+lines = cfg.read_text().splitlines()
+ctx = cmd.startswith("dns-proxy ")
+body = cmd[len("dns-proxy "):] if ctx else cmd
+neg = body.startswith("no ")
+if neg: body = body[3:]
+out, inblock = [], False
+for l in lines:
+    if l == "dns-proxy": inblock = True
+    elif l == "!": inblock = False
+    if neg and ((ctx and inblock and l.strip().startswith(body)) or (not ctx and not l.startswith(" ") and l.startswith(body))):
+        continue
+    out.append(l)
+if not neg:
+    if ctx:
+        i = out.index("dns-proxy"); j = out.index("!", i); out.insert(j, "    " + body)
+    else:
+        out.append(body)
+cfg.write_text("\n".join(out) + "\n")
+'''
+
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    cfg = tmp / "running.cfg"; cfg.write_text(RUNNING)
+    ndmc = tmp / "ndmc"; ndmc.write_text(FAKE_NDMC.replace("@CFG@", str(cfg))); ndmc.chmod(0o755)
+    devconf = tmp / "device.conf"
+    devconf.write_text("VWARD_LAN_ADDRESS=10.77.0.1\nVWARD_LAN_SUBNET=10.77.0.0/24\nVWARD_LAN_DEVICE=br0\nVWARD_LAN_INTERFACE=Bridge0\n"
+                       "VWARD_WAN_DEVICE=eth3\nVWARD_WAN_INTERFACE=GigabitEthernet1\nVWARD_TUNNEL_INTERFACE=Wireguard0\nVWARD_TUNNEL_DEVICE=nwg0\n"
+                       "VWARD_POLICY_GROUP=Mine\n"); devconf.chmod(0o600)
+    pol = tmp / "policy"; pol.mkdir()
+    (tmp / "root/tmp").mkdir(parents=True)
+    (tmp / "etc").mkdir()
+    (tmp / "etc/smartdns.conf").write_text("SMARTDNS_URL=https://doh.example/dns-query/synthetic-token\n")
+    env = os.environ | {
+        "VWARD_NDMC": str(ndmc), "VWARD_DEVICE_CONFIG": str(devconf), "VWARD_DEVICE_CONFIG_OWNER_UID": str(os.getuid()),
+        "VWARD_DEVICE_MAP_CACHE": str(tmp / "map.tsv"), "VWARD_SYSFS_NET": str(tmp / "sys"),
+        "VWARD_PROFILE_LIB": str(ROOT / "components/runtime/lib/vward-device-profile.sh"),
+        "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
+        "VWARD_ROOT_PREFIX": str(tmp / "root"), "VWARD_ROUTE_CHANGE_LOCK": str(tmp / "change.lock"),
+        "VWARD_ROUTE_STATE": str(tmp / "route"), "VWARD_CONSOLE_ETC": str(tmp / "etc"), "VWARD_POLICY_STATE": str(pol),
+        "VWARD_CONSOLE_BACKUP_DIR": str(tmp / "backup"), "VWARD_CONSOLE_AUDIT_LOG": str(tmp / "audit.log"),
+        "VWARD_SNAPSHOT_DIR": str(tmp / "snaps"), "VWARD_POLICY_SYNC_BIN": str(tmp / "no-sync"),
+    }
+    admission = tmp / "admission.sh"
+    admission.write_text("vward_admission_enter() { return 0; }\nvward_admission_leave() { return 0; }\n")
+    env["VWARD_ADMISSION_LIB"] = str(admission)
+    env["VWARD_DOH_RETRY_DELAY"] = "0"
+    env["VWARD_ADGUARD_CONFIG"] = str(tmp / "missing.yaml")
+    own = "https://doh.example/dns-query/synthetic-token"
+    other = "https://other.example/dns-query"
+    conf = tmp / "etc/smartdns.conf"
+    original = "SMARTDNS_URL=" + own + "\nSMARTDNS_STORE=keenetic\n"
+    rows = ["https upstream " + own + " domain claude.ai", "https upstream " + own + " domain chatgpt.com", "https upstream " + other + " domain other.example"]
+    def reset():
+        conf.write_text(original)
+        cfg.write_text(RUNNING.replace("    route", "    " + "\n    ".join(rows) + "\n    route"))
+    def run(*args):
+        return subprocess.run(["sh", str(HELPER), *args], env=env, text=True, capture_output=True, timeout=30)
+    reset()
+    r = run("smartdns-server", "clear")
+    if r.returncode or "result=changed" not in r.stdout or own in cfg.read_text():
+        fail("active rules survived clear: " + r.stdout + cfg.read_text())
+    if other not in cfg.read_text() or conf.read_text() != "SMARTDNS_STORE=keenetic\n":
+        fail("another server or store preference was changed")
+    if "synthetic-token" in (tmp / "audit.log").read_text():
+        fail("the server token leaked into the audit log")
+    if run("smartdns-server", "clear").stdout.strip() != "result=unchanged":
+        fail("second clear is not idempotent")
+    for flag in ("refuse", "save-fail"):
+        reset()
+        before = cfg.read_text()
+        (tmp / flag).touch()
+        r = run("smartdns-server", "clear")
+        (tmp / flag).unlink()
+        if not r.returncode or "result=changed" in r.stdout or conf.read_text() != original or set(cfg.read_text().splitlines()) != set(before.splitlines()):
+            fail(flag + " did not retain configuration and restore rules: " + r.stdout)
+    # Removing a domain includes its subdomains and must report AGH failure.
+    reset()
+    cfg.write_text(cfg.read_text().replace("domain claude.ai", "domain api.claude.ai"))
+    r = run("smartdns-domain", "remove", "claude.ai")
+    if r.returncode or "domain api.claude.ai" in cfg.read_text():
+        fail("subdomain was left in Keenetic: " + r.stdout)
+    # Compatibility switch: explicitly retain the previous address-only clear.
+    reset()
+    switches = tmp / "etc/route-engine/domain-lists.conf"
+    switches.parent.mkdir(parents=True, exist_ok=True)
+    switches.write_text("smartdns_clear_rules=0\n")
+    r = run("smartdns-server", "clear")
+    if r.returncode or own not in cfg.read_text() or "SMARTDNS_URL=" in conf.read_text():
+        fail("smartdns_clear_rules=0 did not retain legacy clear")
+    switches.unlink()
+    # A removed server must not return from saved group state on a later bypass.
+    saved_dir = tmp / "etc/route-engine/domain-lists"
+    saved_dir.mkdir(parents=True, exist_ok=True)
+    saved = saved_dir / "domain-list4"
+    saved_original = ("route=ISP\tauto\n" + "doh=https upstream " + own + " domain claude.ai\n" +
+                      "agh=claude.ai\t" + own + "\n" + "doh=https upstream " + other + " domain other.example\n" +
+                      "agh=other.example\t" + other + "\n")
+    reset(); saved.write_text(saved_original); saved.chmod(0o600)
+    # Removing a domain while its group is in VPN must also remove deferred DNS.
+    # Keep the server preference, return route, other domains and suffix neighbours.
+    domain_saved = (saved_original + "doh=https upstream " + other + " domain api.claude.ai\n" +
+                    "agh=api.claude.ai\t" + other + "\n" +
+                    "doh=https upstream " + own + " domain notclaude.ai\n" +
+                    "agh=notclaude.ai\t" + own + "\n")
+    saved.write_text(domain_saved)
+    r = run("smartdns-domain", "remove", "claude.ai")
+    expected_saved = ("route=ISP\tauto\n" + "doh=https upstream " + other + " domain other.example\n" +
+                      "agh=other.example\t" + other + "\n" +
+                      "doh=https upstream " + own + " domain notclaude.ai\n" +
+                      "agh=notclaude.ai\t" + own + "\n")
+    if r.returncode or r.stdout.strip() != "result=changed" or saved.read_text() != expected_saved or conf.read_text() != original:
+        fail("removed domain remains in deferred DNS: " + r.stdout + saved.read_text())
+    # With no active rows left, a saved-only change is still changed, then idempotent.
+    saved.write_text(domain_saved)
+    r = run("smartdns-domain", "remove", "claude.ai")
+    if r.returncode or r.stdout.strip() != "result=changed" or saved.read_text() != expected_saved:
+        fail("saved-only domain removal was not reported: " + r.stdout)
+    if run("smartdns-domain", "remove", "claude.ai").stdout.strip() != "result=unchanged":
+        fail("saved-only domain removal is not idempotent")
+    # The existing compatibility switch retains the old active-only domain removal.
+    saved.write_text(domain_saved); switches.write_text("smartdns_clear_rules=0\n")
+    r = run("smartdns-domain", "remove", "claude.ai")
+    switches.unlink()
+    if r.returncode or saved.read_text() != domain_saved:
+        fail("legacy domain removal changed deferred state: " + r.stdout)
+    reset(); saved.write_text(saved_original)
+    r = run("smartdns-server", "clear")
+    if r.returncode or own in saved.read_text() or other not in saved.read_text() or not saved.read_text().startswith("route=ISP\tauto\n"):
+        fail("saved state can resurrect removed server: " + r.stdout + saved.read_text())
+    # Refuse a symlink after editing the first snapshot; the first edit and DNS roll back.
+    reset(); saved.write_text(saved_original)
+    target = tmp / "untouched"; target.write_text(saved_original)
+    linked = saved_dir / "domain-list9"; linked.symlink_to(target)
+    r = run("smartdns-server", "clear")
+    linked.unlink()
+    if not r.returncode or saved.read_text() != saved_original or target.read_text() != saved_original or conf.read_text() != original or own not in cfg.read_text():
+        fail("saved-state failure did not roll back: " + r.stdout)
+    reset(); saved.write_text(domain_saved); linked.symlink_to(target)
+    r = run("smartdns-domain", "remove", "claude.ai")
+    linked.unlink()
+    if not r.returncode or saved.read_text() != domain_saved or target.read_text() != saved_original or conf.read_text() != original or own not in cfg.read_text():
+        fail("domain saved-state failure did not roll back: " + r.stdout)
+    # A header-read error must abort; it is not an unrelated file (grep rc=1).
+    saved.write_text(saved_original)
+    source = HELPER.read_text()
+    prune = re.search(r'^smartdns_prune_saved\(\) \{\n.*?^\}\n', source, re.M | re.S)
+    assert prune, 'saved cleanup function missing'
+    script = ('LISTS_STATE="' + str(saved_dir) + '"\n' +
+              'valid_group() { return 0; }; grep() { return 2; }; die() { exit 19; }\n' +
+              prune.group(0) + 'smartdns_prune_saved\n')
+    read_error = subprocess.run(['sh','-c',script],capture_output=True,text=True)
+    if read_error.returncode != 19 or saved.read_text() != saved_original:
+        fail('snapshot read error was ignored')
+    # Both stores together, with real AGH control and a fake HTTP transport.
+    fixture = ast.parse((ROOT / "tests/repository/check-ads-agh-smartdns.py").read_text())
+    fake_curl = next(ast.literal_eval(n.value) for n in fixture.body if isinstance(n, ast.Assign)
+                     and any(isinstance(t, ast.Name) and t.id == "FAKE_CURL" for t in n.targets))
+    state = tmp / "agh.json"
+    curl = tmp / "curl"
+    fake_curl = fake_curl.replace('Path(out).write_text(json.dumps(res))',
+        'if method == "POST" and st.get("fail_after_apply") and st.get("posts") == 1: sys.exit(22)\nPath(out).write_text(json.dumps(res))')
+    curl.write_text(fake_curl.replace("@STATE@", str(state))); curl.chmod(0o755)
+    auth = tmp / "agh.auth"; auth.write_text("admin:pw\n"); auth.chmod(0o600)
+    yaml = tmp / "agh.yaml"
+    yaml.write_text("dns:\n  upstream_dns:\n    - '[/claude.ai/]" + own + "'\n")
+    env.update({"VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_ADS_CONTROL_BIN": str(ROOT / "components/ads-privacy-guard/scripts/vward-ads-privacy-control.sh"),
+                "VWARD_ADS_LIB": str(ROOT / "components/ads-privacy-guard/lib/vward-ads-privacy-common.sh"),
+                "VWARD_ADS_ETC": str(tmp / "ads"), "VWARD_ADS_STATE": str(tmp / "ads-state"),
+                "VWARD_ADS_LOG_DIR": str(tmp / "ads-log"), "VWARD_ADS_JQ": shutil.which("jq"), "VWARD_ADS_CURL": str(curl),
+                "VWARD_ADS_AGH_AUTH_FILE": str(auth), "VWARD_ADS_CONTROL_LOCK": str(tmp / "ads.lock"),
+                "AGH_API_BASE": "http://192.0.2.1:3001/control", "TMPDIR": str(tmp)})
+    upstreams = ["[/claude.ai/]" + own, "[/claude.ai/]" + other, "9.9.9.9"]
+    for flag in (None, "refuse", "save-fail", "agh-refuse", "agh-partial"):
+        reset()
+        state.write_text(json.dumps({"up": upstreams, "ignore_posts": flag == "agh-refuse", "fail_after_apply": flag == "agh-partial"}))
+        if flag in ("refuse", "save-fail"): (tmp / flag).touch()
+        r = run("smartdns-server", "clear")
+        if flag in ("refuse", "save-fail"): (tmp / flag).unlink()
+        got = json.loads(state.read_text())["up"]
+        if flag:
+            if not r.returncode or set(got) != set(upstreams) or conf.read_text() != original or own not in cfg.read_text():
+                fail("two-store rollback " + flag + ": " + r.stdout + str(got))
+        elif r.returncode or got != upstreams[1:] or own in cfg.read_text():
+            fail("two-store clear: " + r.stdout + str(got))
+        retained = list((tmp / "backup-recovery").glob("smartdns.*"))
+        if flag == "save-fail":
+            if len(retained) != 1 or not (retained[0] / "pairs.tsv").is_file():
+                fail("unconfirmed router save lost the recovery snapshot")
+            shutil.rmtree(retained[0])
+        elif retained:
+            fail("successful or confirmed rollback operations left recovery data")
+    if list((tmp / "backup-recovery").glob("smartdns.*")):
+        fail("successful or confirmed rollback operations left recovery data")
+    # No durable backup available: refuse BEFORE the external mutation.
+    recovery_root = tmp / "backup-recovery"
+    recovery_root.rmdir(); recovery_root.write_text("blocked")
+    reset(); before = cfg.read_text()
+    state.write_text(json.dumps({"up": upstreams}))
+    r = run("smartdns-server", "clear")
+    if not r.returncode or "error=routing_recovery_required" not in r.stdout or json.loads(state.read_text()).get("posts", 0):
+        fail("missing durable undo storage did not prevent AGH mutation: " + r.stdout)
+    if cfg.read_text() != before or conf.read_text() != original:
+        fail("backup failure changed router configuration")
+    recovery_root.unlink()
+    # A failing AGH removal must never be reported as unchanged/successful.
+    reset()
+    # POST applied, reply lost, API remains down: preserve private recovery
+    # pairs outside /tmp so a reboot cannot erase the only undo data.
+    offline_curl = fake_curl.replace('args = sys.argv[1:]',
+        'if st.get("offline_after_apply") and st.get("posts", 0) >= 1: sys.exit(7)\nargs = sys.argv[1:]')
+    offline_curl = offline_curl.replace('Path(out).write_text(json.dumps(res))',
+        'if method == "POST" and st.get("offline_after_apply"): sys.exit(7)\nPath(out).write_text(json.dumps(res))')
+    curl.write_text(offline_curl.replace("@STATE@", str(state)))
+    for op in (("smartdns-server", "clear"), ("smartdns-domain", "remove", "claude.ai")):
+        reset()
+        state.write_text(json.dumps({"up": upstreams, "offline_after_apply": True}))
+        r = run(*op)
+        if not r.returncode or "error=rollback_incomplete" not in r.stdout or "result=" in r.stdout:
+            fail("persistent API outage did not report incomplete rollback: " + r.stdout)
+        paths = re.findall(r"^recovery=(.+)$", r.stdout, re.M)
+        if len(paths) != 1 or not Path(paths[0]).is_file():
+            fail("persistent API outage discarded recovery pairs: " + r.stdout)
+        recovery = Path(paths[0])
+        expected = {"claude.ai\t" + own}
+        if op[0] == "smartdns-domain": expected.add("claude.ai\t" + other)
+        if not recovery.is_relative_to(tmp / "backup-recovery") or set(recovery.read_text().splitlines()) != expected:
+            fail("recovery pairs are missing or outside durable backups")
+        if recovery.stat().st_mode & 0o077 or recovery.parent.stat().st_mode & 0o077:
+            fail("recovery data is not private")
+        if conf.read_text() != original or own not in cfg.read_text():
+            fail("API outage damaged the router/config rollback")
+        if own in r.stdout or own in (tmp / "audit.log").read_text():
+            fail("outage exposed the private upstream")
+        # Cross-stack gate: pending AGH recovery must prevent subsequent routing
+        # and DNS writes even after volatile locks disappear (reboot model).
+        for retry in (("smartdns-server", "clear"), ("smartdns-domain", "add", "next.example"),
+                      ("domain-list", "Mine", "bypass"), ("service", "on", "claude.ai", "auto"),
+                      ("component","route-engine","1"), ("component-recover","recover"),
+                      ("tunnel-conf","add","/nonexistent"), ("vless-server","add","synthetic")):
+            before_cfg, before_agh = cfg.read_bytes(), state.read_bytes()
+            blocked = run(*retry)
+            if blocked.returncode != 75 or "error=routing_recovery_required" not in blocked.stdout:
+                fail("pending AGH recovery allowed another mutation: " + repr(retry) + blocked.stdout)
+            if cfg.read_bytes() != before_cfg or state.read_bytes() != before_agh or not recovery.is_file():
+                fail("blocked retry changed state or discarded recovery")
+        # Recover with the production AGH control after service returns; exact
+        # pairs must restore alongside the other upstream for the same domain.
+        st = json.loads(state.read_text()); st["offline_after_apply"] = False
+        state.write_text(json.dumps(st))
+        restored = subprocess.run(["sh", env["VWARD_ADS_CONTROL_BIN"], "agh", "smartdns-restore", str(recovery)],
+                                  env=env, text=True, capture_output=True, timeout=30)
+        if restored.returncode or set(json.loads(state.read_text())["up"]) != set(upstreams):
+            fail("retained pairs cannot restore AGH: " + restored.stdout)
+        shutil.rmtree(recovery.parent)  # test models explicit owner completion only
+    # Integration regression: a group transition can lose the same API reply.
+    for direction in ("vpn", "bypass"):
+        reset()
+        cfg.write_text(cfg.read_text().replace("Mine Wireguard0 auto", "Mine " + ("ISP" if direction=="vpn" else "Wireguard0") + " auto") +
+                       "object-group fqdn Mine\n    include claude.ai\n!\n")
+        before_router = set(cfg.read_text().splitlines())
+        if direction=="bypass":
+            (saved_dir / "Mine").write_text("route=ISP\tauto\nagh=claude.ai\t"+own+"\n")
+        state.write_text(json.dumps({"up": upstreams if direction=="vpn" else ["9.9.9.9"], "offline_after_apply": True}))
+        r = run("domain-list", "Mine", direction)
+        paths=re.findall(r"^recovery=(.+)$",r.stdout,re.M)
+        if not r.returncode or "error=rollback_incomplete" not in r.stdout or len(paths)!=1:
+            fail("domain-list lost POST has no durable recovery: "+direction+r.stdout)
+        evidence=Path(paths[0])
+        if not evidence.is_file() or not evidence.read_text() or not (evidence.parent/"operation").is_file():
+            fail("domain-list inverse/evidence was lost")
+        if set(cfg.read_text().splitlines()) != before_router:
+            fail("domain-list router rollback differs after AGH outage")
+        blocked=run("smartdns-store","keenetic")
+        if blocked.returncode!=75 or "error=routing_recovery_required" not in blocked.stdout:
+            fail("domain-list recovery did not block next operation")
+        if direction=="bypass":
+            before=json.loads((evidence.parent/"dns.before.json").read_text())["upstream_dns"]
+            planned=json.loads((evidence.parent/"dns.planned.json").read_text())["upstream_dns"]
+            if before!=["9.9.9.9"] or own not in "".join(planned):
+                fail("put lost native before/planned evidence")
+        shutil.rmtree(evidence.parent)  # test fixture only, no automatic product replay
+        (saved_dir / "Mine").unlink(missing_ok=True)
+    curl.write_text(fake_curl.replace("@STATE@", str(state)))
+    reset()
+    cfg.write_text(cfg.read_text()+"object-group fqdn Mine\n    include claude.ai\n!\n")
+    (saved_dir/"Mine").write_text("route=ISP\tauto\nagh=claude.ai\t"+own+"\n")
+    state.write_text(json.dumps({"up":["[/claude.ai/]"+other,"9.9.9.9"]}))
+    (tmp/"save-fail").touch()
+    result=run("domain-list","Mine","bypass")
+    (tmp/"save-fail").unlink()
+    if not result.returncode or "error=rollback_incomplete" not in result.stdout or json.loads(state.read_text())["up"]!=["[/claude.ai/]"+other,"9.9.9.9"]:
+        fail("put rollback removed a preexisting foreign upstream: "+result.stdout)
+    for evidence in (tmp/"backup-recovery").glob("smartdns.*"):
+        shutil.rmtree(evidence)
+    (saved_dir/"Mine").unlink()
+    curl.write_text(fake_curl.replace("@STATE@", str(state)))
+    reset()
+    state.write_text(json.dumps({"up": upstreams, "ignore_posts": True}))
+    r = run("smartdns-domain", "remove", "claude.ai")
+    if not r.returncode or "result=" in r.stdout or own not in cfg.read_text():
+        fail("AGH failure was hidden: " + r.stdout)
+print("SMARTDNS_CLEAR=PASS")

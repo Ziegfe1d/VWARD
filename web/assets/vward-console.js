@@ -253,7 +253,7 @@ const API_ERRORS = {
   route_change_busy: 'маршруты сейчас меняет другая задача, повторите', profile_unavailable: 'профиль устройства не определён',
   policy_group_unavailable: 'группа маршрутизации не найдена', list_full: 'список заполнен', backup_failed: 'не удалось сделать резервную копию',
   conf_not_awg3: 'в файле нет настроек AmneziaWG 3.x - это другой файл', conf_other_tunnel: 'файл от другого туннеля: ключ сервера не совпадает', adopt_move_failed: 'туннель поднят в модуле, но списки не перенеслись - перенесите их на странице туннеля', engine_replace_unsupported: 'туннель модуля не заменяется - добавьте новый и удалите этот', engine_full: 'в модуле уже 5 туннелей', speed_busy: 'замер скорости уже идёт', subscription_expired: 'подписка истекла: провайдер присылает заглушки вместо серверов - продлите её у провайдера', subscription_unavailable: 'адрес подписки не ответил', checksum_mismatch: 'скачанная программа не совпала с контрольной суммой', arch_unsupported: 'процессор роутера не поддерживается контуром',
-  services_unavailable: 'каталог сервисов недоступен', invalid_service: 'неверное имя сервиса', unknown_service: 'такого сервиса нет в каталоге', service_too_big: 'у сервиса больше 300 доменов - Keenetic столько не примет в один список', service_not_enabled: 'сервис не включён', list_limit: 'Keenetic не принял домены: достигнут предел списка', no_free_list: 'в Keenetic нет свободного номера доменного списка', catalog_invalid: 'каталог скачался повреждённым - работает прежний',
+  services_unavailable: 'каталог сервисов недоступен', invalid_service: 'неверное имя сервиса', unknown_service: 'такого сервиса нет в каталоге', service_too_big: 'у сервиса больше 300 доменов - Keenetic столько не примет в один список', service_not_enabled: 'сервис не включён', service_reference_only: 'список создан или изменён пользователем; автоматическое изменение запрещено', service_recovery_required: 'сохранена незавершённая операция сервисов; требуется проверка восстановления', list_limit: 'Keenetic не принял домены: достигнут предел списка', no_free_list: 'в Keenetic нет свободного номера доменного списка', catalog_invalid: 'каталог скачался повреждённым - работает прежний',
   write_failed: 'не удалось записать файл', custom_manifest_url: 'адрес манифеста задан вручную - канал меняется в update.conf', invalid_tunnel: 'недопустимое имя туннеля', tunnel_no_handshake: 'сервер не ответил на рукопожатие за 30 секунд - туннель не изменён', conf_no_address: 'в файле нет адреса IPv4 (строка Address)', engine_failed: 'программа модуля не ответила', engine_start_failed: 'программа модуля не запустилась', engine_unavailable: 'модуль туннеля не установлен', main_tunnel: 'это туннель по умолчанию: сначала назначьте по умолчанию другой туннель', tunnel_off: 'туннель выключен: сначала включите его на его странице', tunnel_address_taken: 'такой адрес в туннеле уже занят другим туннелем: у двух туннелей он должен быть разным', invalid_subnet: 'нужна подсеть IPv4, например 149.154.160.0/20 (не шире /8)', private_subnet: 'это адреса домашней сети, провайдера или служебные - в VPN они не отправляются', invalid_description: 'название: до 64 символов, без кавычек', no_free_tunnel: 'на роутере нет свободного номера туннеля',
   conf_empty: 'файл пустой', conf_syntax: 'это не файл WireGuard', conf_peer_count: 'в файле должен быть ровно один [Peer]', conf_key_private: 'неверный PrivateKey', conf_public_key: 'неверный PublicKey', conf_preshared_key: 'неверный PresharedKey', conf_address: 'нет адреса IPv4 в Address', conf_endpoint: 'неверный Endpoint (нужно сервер:порт)', conf_mtu: 'MTU вне 1280-1500', conf_keepalive: 'неверный PersistentKeepalive', conf_allowed_ips: 'неверный AllowedIPs', conf_awg: 'неверные параметры AmneziaWG', conf_unknown_setting: 'в файле настройки, которых не знают ни Keenetic, ни модуль AmneziaWG VWARD (новая версия AmneziaWG - нужно обновление модуля); без них туннель работал бы не так, как в файле', tunnel_device_missing: 'туннель не поднят на роутере', unknown_tunnel: 'туннель не найден',
   failopen_active: 'туннель недоступен, списки VPN идут напрямую: дождитесь восстановления', policy_sync_busy: 'идёт обновление IP-категорий, повторите позже',
@@ -541,25 +541,30 @@ function probeText(r) {
   if (!x.ok) return '<p class="field-warn">' + esc(errText(x)) + '</p>';
   const tuns = ((st().wg && st().wg.interfaces) || []).map(t => t.name);
   const via = t => tuns.includes(t) || t === prof().tunnel_interface ? 'через VPN «' + tunLabel(t) + '»' : t === prof().wan_interface || t === 'ISP' ? 'через провайдера (без VPN)' : 'через ' + t;
+  const routerRows = x.router_routes || [];
+  const routerText = routerRows.length ? routerRows.map(p => p.ip + ': ' + (p.known ? 'через ' + p.device + (p.gateway ? ', шлюз ' + p.gateway : '') : 'маршрут не определён')).join('; ') : 'нет данных о маршруте IPv4';
+  const clientNote = '<p class="panel-desc">Путь устройства не проверен. Маршрут роутера может отличаться от маршрута приложения, UDP и IPv6.</p>';
   if (x.type === 'ip') {
     const cats = (x.policy_matches || []).map(m => m.category);
-    return '<p class="probe-verdict ' + (x.configured_route ? 'vpn' : '') + '">' + esc(x.value) + ': маршрут ' + (x.configured_route ? 'через VPN' : 'через провайдера (без VPN)') + '</p>' +
-      kv([['Основание', x.configured_route ? 'подсеть ' + x.owned_cidr + ' из IP-категорий' : 'адрес не входит в подсети VPN'], ['IP-категории', cats.length ? cats.join(', ') : 'нет']]);
+    return '<p class="probe-verdict">' + esc(x.value) + ': маршрут роутера</p>' +
+      kv([['Маршрут IPv4', routerText], ['IP-категории', cats.length ? cats.join(', ') : 'нет'],
+        ['Настроенный маршрут категории', x.configured_route ? 'подсеть ' + x.owned_cidr + ', ' + (x.interface || '') : 'не найден']]) + clientNote;
   }
   const routes = x.routes || [], name = g => g === 'AdaptiveAuto' ? 'Автоподбор' : (x.names && x.names[g]) || g;
-  const head = esc(x.value) + ': маршрут ' + (routes.length ? esc(via(routes[0].interface)) : 'через провайдера (без VPN)');
+  const head = esc(x.value) + (routes.length ? ': настройка списка ' + esc(via(routes[0].interface)) : ': маршрут в списках не задан');
   const why = routes.length ? routes.map(t => (t.group === 'AdaptiveAuto' ? 'добавлен автоподбором' : 'в списке «' + name(t.group) + '»') + (routes.length > 1 ? ', маршрут ' + via(t.interface) : '')).join('; ')
     : (x.groups || []).length ? 'в списке «' + name(x.groups[0]) + '», маршрут для списка не задан' : 'не входит ни в один список';
   const hints = [...new Set((x.hints || []).map(h => h.category))];
   const s = siteState(r);
-  const head2 = s.blocked ? esc(x.value) + ': заблокирован в AdGuard Home' : s.smart && !routes.length ? esc(x.value) + ': Smart DNS, маршрут через провайдера' : head;
+  const head2 = s.blocked ? esc(x.value) + ': заблокирован в AdGuard Home' : s.smart && !routes.length ? esc(x.value) + ': настроен Smart DNS' : head;
   return '<p class="probe-verdict ' + (routes.length || s.blocked ? 'vpn' : '') + '">' + head2 + '</p>' + kv([
     ['Основание', why],
     s.smart ? ['Smart DNS', s.smartOwn ? 'задан для домена' : 'задан для родительского домена'] : null,
     s.agh ? ['AdGuard Home', s.blocked ? (s.userBlock ? 'блокировка пользовательским правилом' : 'блокировка списком фильтрации') : 'не фильтруется'] : null,
-    ['IPv4-адреса', ((x.dns && x.dns.ipv4) || []).join(', ') || 'не определены'],
+    ['Маршрут роутера IPv4', routerText],
+    ['IPv4 проверочного DNS', ((x.dns && x.dns.ipv4) || []).join(', ') || 'не определены'],
     hints.length ? ['В каталоге сервисов', hints.slice(0, 3).join(', ')] : null
-  ]);
+  ]) + clientNote;
 }
 const ADSV = { filter: 'all', search: '', blockedSearch: '', allowedSearch: '', filtersOpen: false };
 // Files page: the open folder.

@@ -419,7 +419,7 @@ with tempfile.TemporaryDirectory() as tmp:
         if inchain() or "chain_state=out" not in out or status().get("chain_reason") != "fast":
             fail(f"{shell[0]} chain-out: out at once: {out!r} {status()}")
         left = rc.read_text()
-        if "googlevideo.com" in left or "youtube.com" in left or "smart.example" not in left or binds.exists() \
+        if "googlevideo.com" in left or "youtube.com" in left or "smart.example" not in left or not binds.exists() or binds.read_text() != "smart.example ext\nbad.example failed\n" \
                 or "AGH_UNBIND|count=2" not in guardlog():
             fail(f"{shell[0]} out of the chain: VWARD's list bindings go, one made by hand stays: {left!r}")
         # Already out: the watcher's next minute does not read Keenetic's configuration again.

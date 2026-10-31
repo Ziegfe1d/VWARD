@@ -34,3 +34,9 @@ VWARD_RCI_BASE=http://127.0.0.1:79/rci
 # IP categories' night check: every 20 sites it waits while Keenetic is busy (15 s at a time,
 # 600 s at most) and counts why sites did not pass (fix.34); 0 runs it straight through.
 # VWARD_AUDIT_PAUSE=1
+
+# Retry rejected route-domain DNS bindings after 60 s; 0 retains the old hold until restart.
+# VWARD_AGH_BIND_RETRY=60
+
+# Show the router IPv4 route separately from FQDN settings; 0 skips local route lookups.
+# VWARD_ROUTE_PROBE_KERNEL=1
