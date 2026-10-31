@@ -227,11 +227,7 @@ refresh_sets()
     CFG="/tmp/vward-route-engine-running.$$"
     ALL="/tmp/vward-route-engine-all.$$"
 
-    if [ "$LAST" = 0 ]; then
-        vward_running_config > "$CFG"
-    else
-        shared_config > "$CFG"
-    fi
+    shared_config > "$CFG"
     if [ ! -s "$CFG" ]; then
         rm -f "$CFG" "$ALL"
         return 1
@@ -720,7 +716,10 @@ restore_adaptive_from_persist()
     DEL="/tmp/vward-route-restore-del.$$"
     ADD="/tmp/vward-route-restore-add.$$"
 
-    if ! vward_running_config > "$CFG" ||
+    # The shared copy (at most VWARD_KEENETIC_AGE old; a write by this engine drops it): the refresh
+    # and the AGH prune that follow at the start reuse this one read instead of asking again.
+    # Viva 31.10: two direct reads of 5-13 s each before the capture started, S91 waits 12 s.
+    if ! shared_config > "$CFG" ||
        [ ! -s "$CFG" ]; then
 
         rm -f "$CFG" "$CUR" "$WANT"
@@ -809,7 +808,9 @@ restore_adaptive_from_persist()
     rm -f "$CFG" "$CFG.over" "$CUR" "$WANT" "$DEL" "$ADD"
     [ "$LEFT" -eq 0 ] || RC=1
 
-    echo 0 > "$REFRESH_TS"
+    # The sets are rebuilt at once only when the restore changed the group; an unchanged one needs no
+    # second read of the whole configuration (its ndmc writes dropped the shared copy anyway).
+    [ $((ADDED + REMOVED)) -eq 0 ] || echo 0 > "$REFRESH_TS"
 
     change_unlock
 
