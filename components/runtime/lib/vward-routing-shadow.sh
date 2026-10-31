@@ -19,7 +19,10 @@
 #   CONFIGURED/DESIRED: ISP | VPN:IFACE | none | unknown | - (no opinion)
 #   DNS: opaque policy id | unknown | -      OWNERSHIP: vward|manual|unknown|-
 #   ACTION: none|observe|skip|add|remove|switch|restore
-#   BASIS: native-config|catalog-pin|persist|state|manual-list|guard-fallback|cidr-plan|none
+#   BASIS: native-config|catalog-pin|persist|state|manual-list|guard-fallback|cidr-plan|
+#          force-vpn|service-target-defaulted|none
+#   DOMAIN `-` is allowed for tunnel-guard (interface level) and, with
+#   CONFIGURED=DESIRED=unknown, for any mechanism (its input was unreadable).
 # Every field is a closed token or a safe identifier: free text (and with it any
 # secret/URL/token) cannot pass.
 #
@@ -99,10 +102,10 @@ vward_routing_shadow() (
             next
         }
         if(NF!=8 || $1!~/^(route-engine|route-reconciler|services|tunnel-guard|policy-sync)$/ ||
-           !($2=="-" ? $1=="tunnel-guard" : domain($2)) || ($1=="tunnel-guard" && $2!="-") ||
+           !($2=="-" ? ($1=="tunnel-guard" || ($3=="unknown" && $4=="unknown")) : domain($2)) ||
            !ltarget($3) || !ltarget($4) || !($5=="-" || $5=="unknown" || id($5)) ||
            $6!~/^(vward|manual|unknown|-)$/ || $7!~/^(none|observe|skip|add|remove|switch|restore)$/ ||
-           $8!~/^(native-config|catalog-pin|persist|state|manual-list|guard-fallback|cidr-plan|none)$/) { invalid=1; next }
+           $8!~/^(native-config|catalog-pin|persist|state|manual-list|guard-fallback|cidr-plan|force-vpn|service-target-defaulted|none)$/) { invalid=1; next }
         ln++; l_mech[ln]=$1; l_dom[ln]=$2; l_conf[ln]=$3; l_des[ln]=$4; l_dns[ln]=$5; l_own[ln]=$6; l_act[ln]=$7; l_basis[ln]=$8
         next
     }
@@ -142,6 +145,10 @@ vward_routing_shadow() (
         if(gen_mismatch) { print "unknown\tgeneration-mismatch"; exit 3 }
         for(r=1;r<=ln;r++) {
             mech=l_mech[r]; dom=l_dom[r]; lc=l_conf[r]; ld=l_des[r]; ldn=l_dns[r]; lo=l_own[r]; la=l_act[r]; lb=l_basis[r]
+            if(dom=="-" && mech!="tunnel-guard") {
+                emit("-",mech,"unknown","legacy-unknown","info","low","-","-","legacy=" lc,"legacy=" ld,"-","-","rs=observe-only|legacy=" la,"mechanism-input-unreadable")
+                continue
+            }
             if(dom=="-") {
                 # tunnel-guard owns tunnel quality/fallback; RS6 has no health evidence yet.
                 if(lc=="unknown" || ld=="unknown") emit("-",mech,"unknown","legacy-unknown","info","low","-","-","legacy=" lc,"legacy=" ld,"-","-","rs=observe-only|legacy=" la,"legacy-state-unknown")
@@ -161,6 +168,9 @@ vward_routing_shadow() (
             cfg="rs=" clist "|legacy=" lc; des="rs=" wlist "|legacy=" ld; dns="rs=" dlist "|legacy=" ldn
             own="identity=" rs_ident "|legacy=" lo; act="rs=observe-only|legacy=" la
             conf=(rs_issues=="-") ? "high" : "medium"
+            # Services replace an unknown/invalid target by the literal "vpn" (the profile tunnel);
+            # RS-6 keeps it unknown. Recorded as its own class; the production logic is not changed here.
+            if(mech=="services" && lb=="service-target-defaulted" && (relevant_unknown("S") || !(ld in wt))) { emit(dom,mech,"diverge","service-target-defaulted","info","low",srcs,ids,cfg,des,dns,own,act,"legacy-defaults-to-vpn-rs-keeps-unknown"); continue }
             # Route facts come from the native config (source M): when it is unknown no
             # mechanism can be compared on configured routes, whatever its own source.
             if(relevant_unknown(L "M")) { emit(dom,mech,"unknown","rs-unknown","info","low",srcs,ids,cfg,des,dns,own,act,"snapshot-or-source-unknown"); continue }

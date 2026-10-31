@@ -87,12 +87,14 @@ python3 tests/routing-readers/check-readers.py || fail "native routing read adap
 python3 tests/routing-readers/check-identity.py || fail "routing persistent identities"
 python3 tests/routing-readers/check-snapshot.py || fail "routing consistent snapshot"
 python3 tests/routing-readers/check-shadow.py || fail "routing shadow comparison"
+python3 tests/routing-readers/check-observe.py || fail "routing read-only observers"
 if command -v busybox >/dev/null 2>&1; then
     busybox ash tests/routing-audit/run-simulations.sh || fail "BusyBox routing audit simulations"
     RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-readers.py || fail "BusyBox native routing read adapters"
     RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-identity.py || fail "BusyBox routing persistent identities"
     RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-snapshot.py || fail "BusyBox routing consistent snapshot"
     RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-shadow.py || fail "BusyBox routing shadow comparison"
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-observe.py || fail "BusyBox routing read-only observers"
     python3 tests/routing-audit/check-bounded-cost.py --busybox "$(command -v busybox)" || fail "routing audit bounded cost"
 else
     echo "NOTE: BusyBox audit/cost runtime requires busybox; host audit ran above"

@@ -128,3 +128,10 @@ RED→GREEN: (1) REF меняется при перестановке строк
 
 Не проверялось: Keenetic Viva/MIPS (стоимость, flash wear), живой роутер, клиентский путь
 пакетов. Полный CI запускается только на конечном HEAD пакета.
+
+## 5. Этап 3 (31.10.2026)
+
+Рантайм-наблюдатели LEGACY реализованы: `vward-routing-observe.sh`, `legacy.tsv` в OUTDIR
+координатора, проверенные копии входов (stage), mechanism-level `unknown`, новые BASIS
+`force-vpn` и `service-target-defaulted`. Подробности, паритет и результаты —
+[RS6_STAGE3_OBSERVERS_PLAN.md](RS6_STAGE3_OBSERVERS_PLAN.md). Исполнители по-прежнему не подключены.

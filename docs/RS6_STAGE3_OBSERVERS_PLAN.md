@@ -1,4 +1,62 @@
-# RS-6 этап 3: реальные наблюдатели для теневого сравнения — план
+# RS-6 этап 3: реальные наблюдатели для теневого сравнения
+
+**Статус: реализовано** (audit/dry-run, исполнители не подключены). Результаты — ниже; разделы
+1–6 — исходный анализ и план, по которому выполнена реализация.
+
+## 0. Что реализовано
+
+| Файл | Содержание |
+|---|---|
+| `components/runtime/lib/vward-routing-observe.sh` | `vward_routing_observe STAGE PROJDIR GENERATION NOW` — пять наблюдателей, чистое чтение проверенных копий, LEGACY на stdout |
+| `components/runtime/lib/vward-routing-snapshot.sh` | отпечатки входов наблюдателей; **stage** с копиями; сверка каждой копии с отпечатком, снятым *до* копирования; `legacy.tsv` в OUTDIR; `generation` по содержимому |
+| `components/runtime/lib/vward-routing-shadow.sh` | новые BASIS (`force-vpn`, `service-target-defaulted`), класс `service-target-defaulted`, mechanism-level `unknown` |
+| `tests/routing-readers/check-observe.py`, `fixture.py` | паритет с настоящими функциями и отрицательные сценарии; подключено к `run-consistency-checks.sh` (sh и BusyBox) |
+
+### Согласованность копий
+
+Порядок: отпечаток входов (CRC+размер, inode, mtime) → копия каждого входа в приватный stage →
+`cksum` копии **обязан** равняться CRC+размер из отпечатка до копирования (иначе
+`changed-during-read`) → проекции (читатель) и наблюдатели → повторный отпечаток оригиналов, равенство
+первому. Наблюдатели читают **только stage**, `NOW` фиксируется один раз координатором, поколение —
+хэш содержимого отпечатка. ABA-сценарий (файл изменён до копирования и возвращён с тем же
+содержимым, размером, inode и mtime) не виден повторному отпечатку и ловится только сверкой копии:
+мутация «отключить сверку» роняет тест `race-aba`. Не-копируемые/ненадёжные входы: небезопасные
+(symlink, FIFO, >1 MiB, не regular) — для обязательных входов весь снимок `unknown`; для входов
+наблюдателей (`obs-*`) — «мягко»: снимок остаётся, а соответствующий механизм даёт одну строку
+`MECH - unknown unknown - - none none` (читается как `legacy-unknown`, не как совпадение).
+
+### Что читает каждый наблюдатель и чего не заявляет
+
+| Механизм | Читает | Точная логика | Не заявляет |
+|---|---|---|---|
+| route-engine | `manual-domains.txt`, `adaptive-domains.txt`, `adaptive-persist.txt`, AdaptiveAuto в config | `is_manual_known`: точное имя и `*.d` только для **строгих** поддоменов (apex не входит); manual-known ⇒ `skip`; adaptive/persist вне AdaptiveAuto ⇒ `add`/`restore` | живые пробы |
+| route-reconciler | AdaptiveAuto, `force-vpn.conf` | `force_vpn_match`: `*.d` сводится к `d`, поэтому apex **входит** (отличие от route-engine зафиксировано тестом); не-forced домен ⇒ DESIRED `unknown` | результат ISP/VPN-проб |
+| services | `enabled.tsv`, `categories.tsv`, каталог (fetched→bundled), маршруты групп, identity | `service_target`: pin → pin; auto → туннель категории, если это известный туннель; **иначе литерал `vpn`** (= туннель профиля) | право записи: `verified` ⇒ `vward`, но RIGHT остаётся `reference` |
+| tunnel-guard | `lists-fallback`, `samples.tsv` качества | сохранённый перенос действует, пока группа маршрутизируется на `to`; профильный туннель: ≥2 подряд сбоя и лучший живой (`lists_best`) ⇒ `switch`; данные старше 180 с/нет ⇒ `unknown` | здоровье на устройстве, DNS/AGH |
+| policy-sync | группы, маршрутизируемые в туннель профиля (имя или устройство) | `collect_vpn_domains`: все `include` таких групп | **IP/CIDR-маршруты**: BASIS `cidr-plan`, совпадение доменов не доказывает ip route |
+
+### Зафиксированное расхождение «Сервисы» ↔ RS-6
+
+`service_target` возвращает `vpn`, когда категория не найдена, её туннель не известен
+(`is_tunnel` ложно) или нет `categories.tsv`. RS-6 считает цель `unknown` для неизвестного
+интерфейса или отсутствующего файла (но берёт туннель профиля, если у категории просто нет строки —
+здесь решения совпадают). Класс `service-target-defaulted` (info, confidence low, verdict diverge)
+записывается только когда это реально меняет решение; боевая логика **не меняется**, решение о ней —
+отдельный пакет.
+
+## Результаты проверок (sh и BusyBox ash 1.36.1)
+
+`check-observe.py`, `check-snapshot.py`, `check-shadow.py`, `check-identity.py`, `check-readers.py`,
+`run-simulations.sh`, `check-bounded-cost.py` — PASS на обоих. Стоимость на хосте (не Keenetic/MIPS):
+400 доменов, 199 KiB результата — 0,39 с (sh), 0,49–0,62 с (BusyBox). Лимиты не менялись
+(4096 строк/1 MiB на вход, 1024 домена, 256 записей каталога, 4096 строк LEGACY; 5000 строк
+manual-domains ⇒ `unknown observer-failed`, без файлов). Секреты/URL в `legacy.tsv` отсутствуют (тест).
+ShellCheck 0.9.0, уровень warning — чисто. Пунктов 1–6 плана ниже это не отменяет; пункт «следующий
+исполнитель/аудит» устарел: правило теперь — один агент, аудит адресно (`AGENTS.md`).
+
+---
+
+# Исходный план этапа 3
 
 Только анализ и план (HEAD кода `eece891`, PR #21). Код, исполнители, роутер, `dev`/`main`,
 VERSION и feed не затронуты. Основа: `RS6_IDENTITY_SNAPSHOT_SHADOW.md` §3 (формат LEGACY).
@@ -97,5 +155,5 @@ R1 расхождение копии логики и боевых функций
 снимка, остальное unknown; R5 `lists-fallback` может устареть относительно кэша — проверка, что
 группа и `to` реально в running-config, иначе `legacy-unknown`.
 
-Следующий исполнитель: Claude Code или Codex — по очереди через GitHub; перед реализацией
-независимый аудит этапа 2 (Codex) и отдельное подтверждение владельца на объём этапа 3.
+Исполнитель — один доступный агент (Claude Code или Codex, по лимитам); независимый аудит — только
+адресно для рискованных изменений записи (RS-7).

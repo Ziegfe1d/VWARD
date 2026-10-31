@@ -85,7 +85,7 @@ def shadow(f, gen, audit, ident, legacy, env=None):
 
 def coordinated(f):
     out = f.p/'snap'; out.mkdir(mode=0o700, exist_ok=True)
-    r = f.run('. "$1"; . "$2"; vward_routing_consistent_read "$3"', READ, SNAP, out)
+    r = f.run('. "$1"; . "$2"; . "$4"; vward_routing_consistent_read "$3"', READ, SNAP, out, OBSERVE)
     assert r.returncode == 0, r.stdout + r.stderr
     gen = (out/'generation').read_text().strip()
     audit = f.audit((out/'intents.tsv').read_text(), (out/'snapshot.tsv').read_text())

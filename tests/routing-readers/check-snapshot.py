@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fixture import *
 
 def consistent(f, out, env=None, timeout=10):
-    return f.run('. "$1"; . "$2"; vward_routing_consistent_read "$3"', READ, SNAP, out, env=env, timeout=timeout)
+    return f.run('. "$1"; . "$2"; . "$4"; vward_routing_consistent_read "$3"', READ, SNAP, out, OBSERVE, env=env, timeout=timeout)
 
 def files(out):
     return sorted(os.listdir(out))
@@ -24,7 +24,7 @@ with Fixture() as f:
     r = consistent(f, out)
     assert r.returncode == 0 and r.stdout.startswith('ok\tg-'), (r.stdout, r.stderr)
     gen = r.stdout.split('\t')[1].strip()
-    assert files(out) == ['generation', 'identity.tsv', 'intents.tsv', 'snapshot.tsv']
+    assert files(out) == ['generation', 'identity.tsv', 'intents.tsv', 'legacy.tsv', 'snapshot.tsv']
     assert (out/'generation').read_text().strip() == gen
     snap = (out/'snapshot.tsv').read_text()
     assert f'snapshot\t{gen}\tknown\n' in snap and 'legacy-read' not in snap
@@ -80,7 +80,7 @@ with Fixture() as f:
     # Unsafe OUTDIR -> usage error, nothing written.
     bad = f.p/'open'; bad.mkdir(mode=0o755); bad.chmod(0o755)
     r = consistent(f, bad); assert r.returncode == 2 and files(bad) == []
-    r = f.run('. "$1"; . "$2"; vward_routing_consistent_read relative', READ, SNAP); assert r.returncode == 2
+    r = f.run('. "$1"; . "$2"; . "$3"; vward_routing_consistent_read relative', READ, SNAP, OBSERVE); assert r.returncode == 2
     link = f.p/'lnk'; os.symlink(out, link)
     r = consistent(f, link); assert r.returncode == 2
 
@@ -97,7 +97,7 @@ with Fixture() as f:
     real = f.p/'real-read.sh'
     real.write_text(READ.read_text().replace('vward_routing_read() (', 'vward_routing_read_real() (', 1))
     wrapper = f'''
-    . "{real}"; . "{SNAP}"
+    . "{real}"; . "{SNAP}"; . "{OBSERVE}"
     n=0
     vward_routing_read() {{
         n=$((n+1))
@@ -118,7 +118,7 @@ with Fixture() as f:
     # And the unchanged flow still succeeds afterwards (no stuck state).
     assert consistent(f, out).returncode == 0
     # No stale tmp dirs, no extra files in OUTDIR.
-    assert files(out) == ['generation', 'identity.tsv', 'intents.tsv', 'snapshot.tsv']
+    assert files(out) == ['generation', 'identity.tsv', 'intents.tsv', 'legacy.tsv', 'snapshot.tsv']
 
     # 8 source combinations and 24 single-toggle transitions on the COORDINATED snapshot:
     # only the normalized snapshot flags change; the native inputs stay immutable.
@@ -139,5 +139,5 @@ with Fixture() as f:
     ins = digest(f.p)
     assert consistent(f, out).returncode == 0 and {k: v for k, v in digest(f.p).items() if not k.startswith('out/')} == {k: v for k, v in ins.items() if not k.startswith('out/')}
     # Loading the library is inert.
-    r = f.run('sentinel=1; before=$(set | wc -l); . "$1"; . "$2"; [ "$sentinel" = 1 ]', READ, SNAP); assert r.returncode == 0
+    r = f.run('sentinel=1; . "$1"; . "$2"; . "$3"; [ "$sentinel" = 1 ]', READ, SNAP, OBSERVE); assert r.returncode == 0
 print('RS6_SNAPSHOT=PASS: generation, freshness, change detection, missing/corrupt/unreadable -> unknown, no partial output')

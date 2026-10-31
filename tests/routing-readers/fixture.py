@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LIBDIR = ROOT / 'components/runtime/lib'
 READ, AUDIT = LIBDIR / 'vward-routing-read.sh', LIBDIR / 'vward-routing-audit.sh'
 SNAP, SHADOW = LIBDIR / 'vward-routing-snapshot.sh', LIBDIR / 'vward-routing-shadow.sh'
+OBSERVE = LIBDIR / 'vward-routing-observe.sh'
 SHELL = [os.environ['RS6_BUSYBOX'], 'ash'] if os.environ.get('RS6_BUSYBOX') else ['sh']
 
 CFG = ('interface Wireguard0\n!\ninterface Wireguard1\n!\ndns-proxy\n'
@@ -82,3 +83,16 @@ class Fixture:
                                text=True, capture_output=True, timeout=5)
             assert r.returncode == 0, r.stderr
             return r.stdout
+
+
+def legacy_fn(path, name, prefix, call, extra_sub=None):
+    """Run ONE real function of a production script (never the whole daemon)."""
+    import re
+    src = (ROOT/path).read_text()
+    m = re.search(r"^" + name + r"\(\)\s*\{\n.*?^\}\n", src, re.M | re.S)
+    assert m, name
+    body = m.group(0)
+    for a, b in (extra_sub or []):
+        assert a in body, a
+        body = body.replace(a, b)
+    return subprocess.run(["sh", "-c", prefix + "\n" + body + "\n" + call], capture_output=True, text=True, timeout=5)
