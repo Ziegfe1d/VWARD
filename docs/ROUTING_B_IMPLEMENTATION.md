@@ -141,3 +141,15 @@ packet path unknown. Следующий этап — RS-6 отдельными r
 с совместными отказными регрессиями, затем поэтапное подключение writer.
 
 План P-7 сохранён отдельно, физический объединённый кандидат не создан.
+
+## Checkpoint 31.10.2026: интеграция и RS6 stage 1
+
+P-7 и B физически объединены merge 656c38e02fc896a4482e644c56e284247c133baa
+в отдельном draft #18. Историческое «не объединён» выше superseded этим
+checkpoint; приёмка общего CI ещё открыта. CI #753/#754 окончательно success
+на точных исходных HEAD; повторов длительных jobs нет. Матрица новых AGH
+отказов/фиксов — P7_B_INTEGRATION_2026-10-31.md.
+
+RS6 stage 1: native configuration/cache → RS5 inputs, audit-only. Никаких
+реальных writer callers/новых служб/UI. Контракт, tests/measurements и план
+shadow coordinator до отдельно согласуемого live writer — RS6_READ_ADAPTERS.md.
