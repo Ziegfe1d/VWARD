@@ -273,7 +273,8 @@ while IFS='|' read GROUP HOST; do
 
         if [ "$ISP_RC" -eq 0 ]; then
             case "$CODE" in
-                2??|3??)
+                # 400/401/403/404: the server answered directly (owner 02.11).
+                2??|3??|400|401|403|404)
                     CLASS="ISP_OK"
                     ;;
                 5??)

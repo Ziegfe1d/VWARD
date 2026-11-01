@@ -228,7 +228,9 @@ classify_isp_vs_vpn()
 
     if [ "$IRC" -eq 0 ]; then
         case "$IC" in
-            2??|3??)
+            # 400/401/403/404: the server itself answered - the site is reachable directly
+            # (owner 02.11: 403 is a real answer, not a reason for the VPN).
+            2??|3??|400|401|403|404)
                 CLASS="ISP_OK"
                 ;;
 

@@ -696,6 +696,23 @@ restore_time_up()
     [ $((RS_NOW - RS_T0)) -ge "$RS_MAX" ]
 }
 
+# ru_clean_files LIST: the names of LIST out of the saved AdaptiveAuto list and its cache (each
+# written to a temporary file and moved over, a failed write leaves the file as it was), and their
+# state files gone.
+ru_clean_files()
+{
+    for rc_f in "$PERSIST" "$ADAPTIVE"; do
+        [ -n "$rc_f" ] && [ -s "$rc_f" ] || continue
+        awk -v rf="$1" 'BEGIN {while ((getline l < rf) > 0) ru[l] = 1} !(tolower($0) in ru)' "$rc_f" > "$rc_f.ru.$$" 2>/dev/null &&
+            mv -f "$rc_f.ru.$$" "$rc_f" 2>/dev/null || rm -f "$rc_f.ru.$$" 2>/dev/null
+    done
+    while IFS= read -r rc_h; do
+        [ -n "$rc_h" ] || continue
+        state_path "$rc_h"
+        rm -f "$SF_OPT" "$SF_TMP" 2>/dev/null
+    done < "$1"
+}
+
 restore_adaptive_from_persist()
 {
     if [ ! -f "$PERSIST" ]; then
@@ -762,6 +779,10 @@ restore_adaptive_from_persist()
             rm -f "$WANT.new"
             echo "$(date '+%Y-%m-%d %H:%M:%S')|ADAPTIVE_RU_OUT|n=$(wc -l < "$WANT.ru" | tr -d ' ')|$(head -n 12 "$WANT.ru" | tr '\n' ' ' | cut -c1-200)" \
                 >> "$EVENT_LOG"
+            # The saved list and the cache without them, their VPN states gone (owner 02.11: after a
+            # manual removal in Keenetic they stayed in adaptive-persist.txt as BROKEN/AUTO_VPN and
+            # could come back at a start). The copy above keeps them for the undo.
+            ru_clean_files "$WANT.ru"
         fi
         rm -f "$WANT.ru"
     fi
@@ -1590,8 +1611,22 @@ handle_hint()
             return
         fi
 
-        # DIRECT перестал работать:
-        # Hint позволяет сразу вернуть VPN.
+        # DIRECT перестал работать? One failed check is not enough (02.11: ir-20.ozone.ru answered
+        # 403 directly at 18:10 and went into the VPN at 18:12 on one failed check): once more a
+        # second later, and the direct check itself must work (vward_isp_control).
+        sleep 1
+        if [ -n "$IP" ] && probe "$HOST" "$WAN" "$IP"; then
+            save_state "$HOST" "DIRECT_OK"
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_DIRECT_OK|$HOST|$P_CODE|$P_TIME" >> "$EVENT_LOG"
+            return
+        fi
+        HC=0
+        ! command -v vward_isp_control >/dev/null 2>&1 || { vward_isp_control; HC=$?; }
+        if [ "$HC" = 1 ]; then
+            save_state "$HOST" "ISP_PROBE_UNRELIABLE"
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_ABORT_ISP_UNRELIABLE|$HOST" >> "$EVENT_LOG"
+            return
+        fi
         save_state "$HOST" "HINT_DIRECT_FAIL"
 
         add_hint_adaptive "$HOST"

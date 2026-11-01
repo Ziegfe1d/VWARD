@@ -41,13 +41,13 @@ for src, name, need in ((ENGINE, "add_adaptive", "ru_zone \"$H\""), (ENGINE, "ad
 if 'if ru_zone "$HOST"; then' not in DISC:
     fail("discovery must skip Russian zones before adding")
 
-RU = ["api.ozon.ru", "user-features.wb.ru", "user-vector-info.wb.ru", "rec-ftl.wb.ru",
+RU = ["api.ozon.ru", "ir-20.ozone.ru", "user-features.wb.ru", "user-vector-info.wb.ru", "rec-ftl.wb.ru",
       "personal-clusters.wildberries.ru", "cart-storage-api.wildberries.ru", "adserver.gear-hub.ru",
       "fda.middle-api.magnit.ru", "drm-prod-statist-diag-yc.mirdomovyat.ru"]
 OTHER = ["chatgpt.com", "claude.ai", "rutracker.org"]
 CFG = "dns-proxy\n    route object-group AdaptiveAuto OpkgTun4 auto\n!\nobject-group fqdn AdaptiveAuto\n{inc}!\n"
 code = func(ENGINE, "shared_config") + func(ENGINE, "valid_fqdn") + func(ENGINE, "restore_time_up") + \
-    func(ENGINE, "ru_zone") + func(ENGINE, "restore_adaptive_from_persist")
+    func(ENGINE, "ru_zone") + func(ENGINE, "state_path") + func(ENGINE, "ru_clean_files") + func(ENGINE, "restore_adaptive_from_persist")
 shells = [["sh"]] + ([["busybox", "sh"]] if shutil.which("busybox") else [])
 
 for shell in shells:
@@ -59,11 +59,14 @@ for shell in shells:
         script = t / "run.sh"
         script.write_text(f"""T="{t}"; PERSIST="$T/persist"; EVENT_LOG="$T/events"; GROUP=AdaptiveAuto; REFRESH_TS="$T/ts"
 ADAPTIVE_FULL="$T/full"; RU_BACKUP="$T/persist.ru-backup"; RU_REMOVED="$T/ru-removed"; VWARD_ENGINE_SHARED_CONFIG=1
+ADAPTIVE="$T/adaptive"; STATE_DIR="$T/st"; VOLATILE_DIR="$T/vol"
 change_lock() {{ :; }}; change_unlock() {{ :; }}
 vward_running_config() {{ cat "$T/rc"; }}; vward_keenetic_config() {{ cat "$T/rc"; }}
 {code}
 restore_adaptive_from_persist
 """)
+
+        (t / "st").mkdir(exist_ok=True); (t / "vol").mkdir(exist_ok=True)
 
         def run(group, persist, ru=None):
             (t / "rc").write_text(CFG.format(inc="".join(f"    include {h}\n" for h in group)))
@@ -78,6 +81,9 @@ restore_adaptive_from_persist
             return (t / "ndmc.log").read_text().splitlines() if (t / "ndmc.log").exists() else []
 
         # 1. In the group and in the saved list (the router's state): the restore takes them out.
+        (t / "adaptive").write_text("".join(h + "\n" for h in RU + OTHER))
+        for h in RU + OTHER:
+            (t / "st" / f"{h}.state").write_text("STATUS=AUTO_VPN\n")
         calls = run(RU + OTHER, RU + OTHER)
         gone = {c.split()[-1] for c in calls if c.startswith("no object-group fqdn AdaptiveAuto include ")}
         if gone != set(RU) or any(not c.startswith("no ") for c in calls):
@@ -86,14 +92,25 @@ restore_adaptive_from_persist
             fail("the saved list must be copied before the first removal")
         if sorted((t / "ru-removed").read_text().split()) != sorted(RU):
             fail("the names taken out must be kept")
-        if "ADAPTIVE_RU_OUT|n=9|" not in (t / "events").read_text():
+        if "ADAPTIVE_RU_OUT|n=10|" not in (t / "events").read_text():
             fail("the removal must be in the event log")
+        # Owner 02.11: the saved list, the cache and the states are cleaned too (nothing to come back).
+        if (t / "persist").read_text().split() != OTHER or (t / "adaptive").read_text().split() != OTHER:
+            fail(f"RED: Russian zones must leave adaptive-persist.txt and adaptive-domains.txt: {(t / 'persist').read_text().split()}")
+        if any((t / "st" / f"{h}.state").exists() for h in RU) or not all((t / "st" / f"{h}.state").exists() for h in OTHER):
+            fail("their .state files go, the others stay")
         # 2. Next start: nothing more to do, the record is not doubled, the backup is not overwritten.
         (t / "persist").write_text("".join(f"{h}\n" for h in OTHER))
         if run(OTHER, OTHER + RU[:1]):
             fail("a Russian name left in the saved list must not be put back")
-        if len((t / "ru-removed").read_text().split()) != len(RU) or len((t / "persist.ru-backup").read_text().split()) != 12:
+        if len((t / "ru-removed").read_text().split()) != len(RU) or len((t / "persist.ru-backup").read_text().split()) != len(RU) + len(OTHER):
             fail("the record and the backup must not change on a later start")
+        # 2b. The owner removed them by hand in Keenetic, the saved list still has them (02.11 00:47):
+        #     a restart does not bring them back, and cleans the saved list.
+        (t / "persist").write_text("".join(f"{h}\n" for h in RU[:7] + OTHER))
+        calls = run(OTHER, RU[:7] + OTHER)
+        if any(c.startswith("object-group fqdn AdaptiveAuto include ") for c in calls) or (t / "persist").read_text().split() != OTHER:
+            fail(f"RED: after a manual removal in Keenetic the saved names must not come back: {calls}")
         # 3. Undo: VWARD_ADAPTIVE_RU=1 and the backup as the saved list put them back.
         calls = run(OTHER, (t / "persist.ru-backup").read_text().split(), ru="1")
         back = {c.split()[-1] for c in calls if c.startswith("object-group fqdn AdaptiveAuto include ")}
