@@ -455,6 +455,9 @@ vward_running_config()
 # take its answer for VWARD_KEENETIC_AGE seconds (they wait for a read under way instead of
 # asking again). Whoever changes Keenetic's configuration drops the copy (vward_keenetic_dirty);
 # programs that change it read it fresh (vward_running_config). Kept in RAM.
+# Age 55 s (01.11.2026, was 20): the minute's agents start seconds apart (vward_spread) and each
+# read again after 20 s - about two full reads a minute (1730 Keenetic sessions in 13.5 h, ndm 38 %
+# CPU on average); one read now serves the whole minute. A write still drops the copy at once.
 # A stand-in ndmc (VWARD_NDMC, the tests) shares no copy unless its own place is given.
 _VWARD_KCACHE_OWN=${VWARD_KCACHE:+1}
 VWARD_KCACHE=${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}
@@ -563,7 +566,7 @@ _vward_kc_fresh()
 # vward_keenetic_config [AGE]: Keenetic's running configuration (ndmc text, no CR), shared.
 vward_keenetic_config()
 {
-    _vkc_age=${1:-${VWARD_KEENETIC_AGE:-20}}
+    _vkc_age=${1:-${VWARD_KEENETIC_AGE:-55}}
     if [ -n "${VWARD_NDMC:-}" ] && [ -z "$_VWARD_KCACHE_OWN" ]; then
         "$VWARD_NDMC" -c 'show running-config' 2>/dev/null | tr -d '\r'
         return

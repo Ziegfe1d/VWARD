@@ -44,7 +44,7 @@ vward_routing_consistent_read() (
     vrs_state=${VWARD_ROUTE_STATE:-/opt/var/lib/vward/route-engine}
     vrs_cfg=${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}/running-config
     vrs_backup=${VWARD_CONSOLE_BACKUP_DIR:-/opt/var/backups/vward/console-config}
-    vrs_max_age=${VWARD_ROUTING_CACHE_AGE:-${VWARD_KEENETIC_AGE:-20}}
+    vrs_max_age=${VWARD_ROUTING_CACHE_AGE:-${VWARD_KEENETIC_AGE:-55}}
     vrs_limit=${VWARD_ROUTING_READ_TIMEOUT:-10}
     case $vrs_max_age$vrs_limit in ''|*[!0-9]*) return 2 ;; esac
 
