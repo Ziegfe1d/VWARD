@@ -37,7 +37,7 @@ grep -oE 'QH":"[^"]*(lampa|cub|tmdb)[^"]*' \
 rm -f /tmp/q.j
 grep -oE '\[/[^]]*(copilot|cursor|deepl)' \
  $A/AdGuardHome.yaml
-for S in 127.0.0.1 127.0.0.1:65053; do
+for S in 192.168.1.1 192.168.1.1:65053; do
  nslookup copilot.microsoft.com $S 2>&1 |
  tail -n 2; done
 ndmc -c 'show log' | grep -B1 'parse err' |
