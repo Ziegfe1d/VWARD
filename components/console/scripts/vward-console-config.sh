@@ -4086,6 +4086,15 @@ mod_tunnels() {
 }
 op_module_component() {
     case "$1" in awg|vless) ;; *) die invalid_component 64 ;; esac
+    # Install (owner 02.11, «Управление»): the AmneziaWG program, the same download the engine does
+    # by itself for the first tunnel (signed sums, checked); tunnels and routes are not touched.
+    if [ "$1:$2" = awg:install ]; then
+        [ -x "$AWG_ENGINE" ] || die engine_unavailable
+        mi_out=$("$AWG_ENGINE" install 2>/dev/null | tail -n 1)
+        case "$mi_out" in result=changed|result=unchanged) done_ok "module-component awg install" "${mi_out#result=}" ;; esac
+        mi_err=${mi_out#error=}; case "$mi_err" in ''|*[!a-z0-9_]*) mi_err=helper_failed ;; esac
+        die "$mi_err"
+    fi
     case "$2" in enable|disable) ;; *) die invalid_operation 64 ;; esac
     load_profile_base
     mc_flag=$(MOD_FLAG "$1") mc_saved="$COMP_ETC/module-$1.routes"

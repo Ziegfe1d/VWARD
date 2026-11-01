@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """«?» next to its title (owner 2026-11-01, Keenetic «Диагностика (?)»): a block's «?» follows its
-h2; a page's own block puts its «?» into the page title at the top, never alone apart from it;
-the explanation opens by click or keyboard and the same «?» keeps the focus."""
+h2; the explanation opens by click or keyboard and the same «?» keeps the focus.
+Owner 2026-11-02: no «?» in the top bar on ANY page (back, title, search, bell, theme only); the
+page's own block shows its explanation in place instead (the texts are kept)."""
 
 from pathlib import Path
 
@@ -15,14 +16,14 @@ def fail(message: str) -> None:
 
 
 panel = JS[JS.index("function panel(title, body, opts) {"):JS.index("\n}\n", JS.index("function panel(title, body, opts) {"))]
-if "if (same && longDesc) PAGEQ = { k: dq, title: title };" not in panel:
-    fail("a page's own block must hand its «?» to the page title")
+if "(opts.desc && (!longDesc || same || qOpen(dq))" not in panel:
+    fail("a page's own block must show its explanation in place (its «?» left the top bar)")
 if "(longDesc && !folded && !same ? qBtn(dq, title) : '')" not in panel:
     fail("a block's «?» must follow its own title only")
 if "const head = same && !extra ? ''" not in panel:
     fail("no title-less head holding a lone «?»")
-if "$('pageTitle').innerHTML = '<span class=\"page-title-text\">' + esc(p.title) + '</span>' + (PAGEQ ? qBtn(PAGEQ.k, PAGEQ.title) : '');" not in JS:
-    fail("the page title must carry the page's «?»")
+if "$('pageTitle').innerHTML = '<span class=\"page-title-text\">' + esc(p.title) + '</span>';" not in JS or "qBtn(PAGEQ" in JS:
+    fail("RED: no «?» in the top bar on any page (owner 02.11)")
 if "PAGEQ = null;" not in JS[JS.index("function render() {"):JS.index("function render() {") + 200]:
     fail("PAGEQ must be reset on every render")
 if "again.focus()" not in JS:

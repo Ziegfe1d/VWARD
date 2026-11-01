@@ -27,4 +27,25 @@ if "sd.alive === 'no'" not in js or "Smart DNS не отвечает" not in js:
     fail("the Panel must say that the Smart DNS server does not answer")
 if "в Keenetic строк ' + (c.keenetic || 0)" not in js or "Убирать нечего" not in js:
     fail("«Убрать свой сервер» must report what was cleared, and say when there was nothing")
+# 13 (owner 02.11): «DNS» screen - one status line of the chosen way with a dot, a spinner pill while a
+# check runs (no toast), «Проверить» with the refresh icon and disabled meanwhile, Smart DNS segment
+# off with its reason when the server does not answer; not installed components folded.
+if "{ id: 'ai', title: 'DNS'," not in js or "const SHORT = { ai: 'DNS'," not in js:
+    fail("«ИИ-сервисы»/«ИИ» must be «DNS»")
+if "[/^Проверить/, 'refresh']" not in js or "[/^Переустановить/, 'refresh']" not in js:
+    fail("«Проверить» and «Переустановить» use the refresh icon")
+if "<span class=\"busy-pill\"><i class=\"spin\"" not in js or "'не проверен'" not in js or "Smart DNS · сервер не отвечает" not in js:
+    fail("the card's status: a spinner pill while checking, «<way> · не проверен», a dead Smart DNS said")
+if "o[0] === 'dns' && dnsDown && cur !== 'dns'" not in js or "Smart DNS: сервер не отвечает" not in js:
+    fail("the Smart DNS segment must be off with its reason when the server does not answer")
+if "Не установлены (' + missing.length + ')" not in js:
+    fail("«Компоненты»: not installed folded into «Не установлены (N)»")
+# 14: «Управление» everywhere; AmneziaWG «Установить»; a not installed package shows no update rows.
+if "if (id === 'awg' && S.awg && !S.awg.installed) return [b('install', 'primary')];" not in js:
+    fail("AmneziaWG not installed: «Установить» in «Управление»")
+cc = js[js.index("function compCard("):js.index("const TUN_TYPE =")]
+if "f.installed ? [['Автопроверка обновлений'" not in cc or "mgmtNote(" not in cc or "(f.installed ? loadError(['status']) : '')" not in cc:
+    fail("a not installed package: state, source, use and «Управление» only, no data warning")
+if "fix.3" in js[js.index("function soonPanel("):js.index("function soonPanel(") + 600] or "<span class=\"tag soon\">скоро</span>" not in js:
+    fail("«В разработке» shows «скоро», not a fix number")
 print("CONSOLE_DIAG_UI=PASS")

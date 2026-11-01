@@ -2708,7 +2708,7 @@ if [ "$ACTION" = services ]; then
                 agh:install|agh:enable) ;;
                 agh:disable|agh:remove|agh:reset|agh:reinstall|awg:disable|vless:disable)
                     [ "$(form_value confirm)" = COMPONENT_OP ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;;
-                awg:enable|vless:enable) ;;
+                awg:enable|vless:enable|awg:install) ;;
                 *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
             esac
             if [ "$SID" = agh ]; then
