@@ -148,6 +148,36 @@ with tempfile.TemporaryDirectory() as tmp:
         if len(pieces) != n or total(pieces) != total([cidr]) - 256 * len(blk) or any(covers(c, x.split("/")[0]) for c in pieces for x in blk):
             fail(f"{cidr} minus {blk}: {len(pieces)} pieces, want {n}: {pieces}")
 
+    # A CDN answers with another address on the next run (01.11: planned 7 deletions, done 17 + 9
+    # added). The run before is the cache; the held blocks must not float: old block stays, new one
+    # is added, and a third identical run changes nothing.
+    ROT = "ai3.example"
+    old_b = ".".join(ADDR[ROT].split(".")[:3]) + ".0/24"
+    ADDR_BEFORE = dict(ADDR)
+    ADDR[ROT] = "198.18.5.200"
+    (t / "nslookup").write_text(
+        "#!/bin/sh\necho \"$1\" >> \"${0%/*}/asked\"\ncase \"$1\" in\n"
+        + "".join(f"{d}) a='{a}' ;;\n" for d, a in ADDR.items()) + "*) a= ;;\nesac\n"
+        "printf 'Server: 127.0.0.1\\nAddress 1: 127.0.0.1\\n\\nName: %s\\n' \"$1\"\n"
+        "[ -z \"$a\" ] || printf 'Address 1: %s\\nAddress 2: 2001:db8::1\\n' \"$a\"\n")
+    cache_before = (t / "resolved").read_text()
+    (t / "resolved").write_text(cache_before + f"{ROT} {ADDR_BEFORE[ROT]}\n")
+    script = (f'WORK={t}; CATALOG={t}/catalog; SMARTDNS_HELD={t}/held; SMARTDNS_BLOCKS={t}/blocks\n'
+              f'SMARTDNS_ADDR_CACHE={t}/resolved; SMARTDNS_HOLD_PREFIX=24; LISTS_CONF={t}/lists.conf; NSLOOKUP={t}/nslookup\n'
+              f'vward_agh_smartdns_domains() {{ cat {t}/agh; }}\nlog() {{ :; }}\n'
+              + func("smartdns_hold") + f'smartdns_hold {t}/run {t}/cats\n')
+    (t / "lists.conf").write_text("smartdns_guard=1\n")
+    r = subprocess.run(SH + ["-c", script], text=True, capture_output=True, timeout=60)
+    if r.returncode != 0 or r.stderr:
+        fail(f"smartdns_hold (rotation): {r.returncode} {r.stderr}")
+    rot = {b for b, d, _ in (x.split("|") for x in (t / "blocks").read_text().split()) if d == ROT}
+    if rot != {old_b, "198.18.5.0/24"}:
+        fail(f"the held block of a rotating CDN answer must stay and the new one join: {sorted(rot)}")
+    first = ((t / "blocks").read_text(), (t / "resolved").read_text())
+    r = subprocess.run(SH + ["-c", script], text=True, capture_output=True, timeout=60)
+    if r.returncode != 0 or ((t / "blocks").read_text(), (t / "resolved").read_text()) != first:
+        fail("an identical run must change neither the blocks nor the cache")
+
     cats, held, blocks = run("0")
     if cats != list(CATS) or held or blocks:
         fail(f"with the Smart DNS guard off nothing is held: {cats} {held!r} {blocks!r}")

@@ -625,7 +625,10 @@ collect_categories()
 # stays out of the tunnel, the rest of the category keeps its routes. Before, the whole category
 # went off: meta.ai took all of Meta, copilot.microsoft.com Cloudflare and Discord (25.10).
 # Every Smart DNS domain is resolved (the limit of 32 is gone); a domain that gives no address
-# now keeps its addresses from the run before ($SMARTDNS_ADDR_CACHE). "block|domain|category"
+# now keeps its addresses from the run before ($SMARTDNS_ADDR_CACHE). A CDN answers with other
+# addresses on every run: the answer is added to the cached ones (up to 16 per domain, the answer
+# first), so the held blocks do not float between runs and are not deleted and added again
+# (planned 7 deletions, done 17 + 9 added, 01.11). "block|domain|category"
 # goes to $SMARTDNS_BLOCKS (the diagnostics); $SMARTDNS_HELD, whole categories off, stays empty.
 smartdns_hold()
 {
@@ -647,8 +650,8 @@ smartdns_hold()
                 awk -v d="$SD" '/^Name:/ {n = 1; next} n {for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) print d, $i}'
         done < "$SD_LIST" > "$SD_ADDR.now"
         awk 'FILENAME == ARGV[1] {want[$1] = 1; next}
-             FILENAME == ARGV[2] {now[$1] = 1; print; next}
-             ($1 in want) && !($1 in now)' "$SD_LIST" "$SD_ADDR.now" "$SMARTDNS_ADDR_CACHE" 2>/dev/null |
+             FILENAME == ARGV[2] {n[$1]++; print; next}
+             ($1 in want) && n[$1] < 16 {n[$1]++; print}' "$SD_LIST" "$SD_ADDR.now" "$SMARTDNS_ADDR_CACHE" 2>/dev/null |
             sort -u > "$SD_ADDR"
         if [ -s "$SD_ADDR" ]; then
             if ! cmp -s "$SD_ADDR" "$SMARTDNS_ADDR_CACHE" 2>/dev/null; then
