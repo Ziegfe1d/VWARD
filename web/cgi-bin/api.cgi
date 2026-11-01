@@ -842,6 +842,10 @@ if [ "$ACTION" = config ]; then
         tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
         policy-group) set -- "$OP" "$TARGET" ;;
         domain-list|domain-list-watch) set -- "$OP" "$TARGET" "$VALUE" ;;
+        # r-lists: a list's way (Авто / Через VPN / Напрямую); taking a list under VWARD's
+        # management is the owner's explicit, confirmed decision.
+        list-mode) set -- "$OP" "$TARGET" "$VALUE" ;;
+        list-adopt) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 1 ] || REQUIRED=LIST_ADOPT ;;
         update-feed) set -- "$OP" "$TARGET"; [ "$TARGET" != dev ] || REQUIRED=UPDATE_FEED_DEV ;;
         ext-auto) set -- "$OP" "$TARGET" "$VALUE" ;;
         list-domain) set -- "$OP" "$ACT" "$TARGET" "$VALUE" ;;
@@ -2410,6 +2414,14 @@ if [ "$ACTION" = lists-data ]; then
     LISTS_STATE=$CONFIG_ETC/route-engine/domain-lists
     WATCHED="$(awk -F= '$1 ~ /^watch\./ && $2 == "1" {print substr($1, 7)}' "$LISTS_CONF" 2>/dev/null | "$JQ" -Rn '[inputs | select(length > 0)]')"
     RETURNS="$(ls "$LISTS_STATE" 2>/dev/null | "$JQ" -Rn '[inputs | select(length > 0)]')"
+    # Lists VWARD manages (r-lists, owner 2026-11-01): taken under management by the owner
+    # (managed.G=1), or already switched by the owner through VWARD (a watch key or a saved
+    # route). Neither a number nor a name proves it; every other list is not VWARD's.
+    MANAGED="$({ awk -F= '($1 ~ /^managed\./ && $2 == "1") {print substr($1, 9)} ($1 ~ /^watch\./) {print substr($1, 7)}' "$LISTS_CONF" 2>/dev/null
+        ls "$LISTS_STATE" 2>/dev/null; } | sort -u | "$JQ" -Rn '[inputs | select(length > 0)]')"
+    UNMANAGED="$(awk -F= '$1 ~ /^managed\./ && $2 == "0" {print substr($1, 9)}' "$LISTS_CONF" 2>/dev/null | "$JQ" -Rn '[inputs | select(length > 0)]')"
+    [ -n "$MANAGED" ] || MANAGED='[]'
+    [ -n "$UNMANAGED" ] || UNMANAGED='[]'
     AUTO="$(grep -h '|LIST_AUTO_VPN|' "${VWARD_ROUTE_EVENTS_LOG:-/opt/var/log/vward-route-engine-events.log}" 2>/dev/null | tail -n 50 |
         awk -F'|' 'NF >= 4 {print $4 "\t" $1 "\t" $3}' | "$JQ" -Rn '[inputs | split("\t") | {(.[0]): {at: .[1], host: .[2]}}] | add // {}')"
     [ -n "$WATCHED" ] || WATCHED='[]'
@@ -2438,7 +2450,7 @@ if [ "$ACTION" = lists-data ]; then
         /^ip route [0-9]/ && NF >= 4 {print "S\t" $4 "\t" $3 "\t255.255.255.255"}
     ' | { cat; command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains | sed 's/^/A\t/'; } | "$JQ" -Rn --arg tun "${VWARD_TUNNEL_INTERFACE:-}" --arg dev "${VWARD_TUNNEL_DEVICE:-}" --arg wan "${VWARD_WAN_INTERFACE:-}" \
         --argjson guard "$([ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" = 0 ] && echo false || echo true)" \
-        --argjson watched "$WATCHED" --argjson returns "$RETURNS" --argjson auto "$AUTO" --argjson addrs "$ADDRS" '
+        --argjson watched "$WATCHED" --argjson managed "$MANAGED" --argjson unmanaged "$UNMANAGED" --argjson returns "$RETURNS" --argjson auto "$AUTO" --argjson addrs "$ADDRS" '
         def bits: {"255":8,"254":7,"252":6,"248":5,"240":4,"224":3,"192":2,"128":1,"0":0}[.] // 0;
         reduce (inputs | split("\t")) as $r ({g: {}, order: [], r: {}, doh: [], agh: [], s: {}};
             if $r[0] == "G" then (if .g[$r[1]] then . else .g[$r[1]] = {description: "", domains: []} | .order += [$r[1]] end)
@@ -2464,6 +2476,7 @@ if [ "$ACTION" = lists-data ]; then
               smartdns_conflict: ((($t == $tun or $t == $dev) and $t != "") and
                 any($s.doh[] as $d | $l.domains[] as $i | $d == $i or ($d | endswith("." + $i)) or ($i | endswith("." + $d)); .)),
               watch: ($watched | index([$n]) != null), returnable: ($returns | index([$n]) != null),
+              managed: (($managed | index([$n]) != null) and ($unmanaged | index([$n]) == null)),
               auto: ($auto[$n] // null), addresses: ($addrs[$n] // null)}]}'
     exit 0
 fi

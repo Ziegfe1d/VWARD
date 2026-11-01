@@ -361,4 +361,56 @@ with tempfile.TemporaryDirectory() as tmp:
     if (etc / "smartdns.conf").read_text() != "SMARTDNS_URL=" + AET + "\n":
         fail("individual domain removal changed the server preference")
 
+    # r-lists (owner 2026-11-01): «Авто / Через VPN / Напрямую» only for lists VWARD manages,
+    # through the existing writer; a number or a name proves nothing.
+    cfg.write_text(RUNNING)
+    lconf = etc / "route-engine/domain-lists.conf"
+    lconf.write_text("")
+    for g in ("domain-list3", "domain-list4"):
+        sf = etc / "route-engine/domain-lists" / g
+        if sf.exists():
+            sf.unlink()
+    before = cfg.read_text()
+    sorted_before = dns_block(cfg)
+    run("list-mode", "domain-list3", "vpn", "error=list_not_managed", 64)
+    run("list-mode", "AdaptiveAuto", "vpn", "error=invalid_group", 64)
+    run("list-mode", "domain-list3", "around", "error=invalid_value", 64)
+    run("list-adopt", "domain-list9", "1", "error=unknown_group", 64)
+    run("list-adopt", "domain-list3", "2", "error=invalid_value", 64)
+    if cfg.read_text() != before:
+        fail("a refused list-mode/list-adopt changed the router")
+    run("list-adopt", "domain-list3", "1", "result=changed", 0)
+    run("list-adopt", "domain-list3", "1", "result=unchanged", 0)
+    if cfg.read_text() != before:
+        fail("taking a list under management must not write to the router")
+    # Через VPN: the writer moves the route and the watch goes off.
+    run("domain-list-watch", "domain-list3", "1", "result=changed", 0)
+    run("list-mode", "domain-list3", "vpn", "result=changed", 0)
+    if "route object-group domain-list3 Wireguard0 auto" not in dns_block(cfg) or "watch.domain-list3=0" not in lconf.read_text().splitlines():
+        fail(f"list-mode vpn: {dns_block(cfg)} {lconf.read_text()!r}")
+    run("list-mode", "domain-list3", "vpn", "result=unchanged", 0)
+    # Авто: the route engine decides; the route and the domains stay as they are.
+    after_vpn = cfg.read_text()
+    run("list-mode", "domain-list3", "auto", "result=changed", 0)
+    if cfg.read_text() != after_vpn or "watch.domain-list3=1" not in lconf.read_text().splitlines():
+        fail("«Авто» must only hand the list to VWARD's policy, nothing else")
+    # Напрямую: back through the writer, exactly as before.
+    run("list-mode", "domain-list3", "bypass", "result=changed", 0)
+    if dns_block(cfg) != sorted_before or "watch.domain-list3=0" not in lconf.read_text().splitlines():
+        fail(f"list-mode bypass did not restore the list: {dns_block(cfg)}")
+    # A refused route leaves the list and its watch as they were.
+    run("list-mode", "domain-list3", "auto", "result=changed", 0)
+    Path(str(cfg) + ".mode-reject-route").write_text("")
+    run("list-mode", "domain-list3", "vpn", "error=router_rejected")
+    Path(str(cfg) + ".mode-reject-route").unlink()
+    if dns_block(cfg) != sorted_before or "watch.domain-list3=1" not in lconf.read_text().splitlines():
+        fail("a refused route changed the list or its watch")
+    # Given back: not VWARD's any more, even with the old watch key.
+    run("list-adopt", "domain-list3", "0", "result=changed", 0)
+    run("list-mode", "domain-list3", "vpn", "error=list_not_managed", 64)
+    # Already switched by the owner through VWARD (saved return route): managed.
+    run("domain-list", "domain-list4", "vpn", "result=changed", 0)
+    run("list-mode", "domain-list4", "bypass", "result=changed", 0)
+    cfg.write_text(RUNNING)
+
 print("CONSOLE_DOMAIN_LISTS=PASS")

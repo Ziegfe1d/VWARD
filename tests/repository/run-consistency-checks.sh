@@ -157,6 +157,7 @@ python3 tests/repository/check-console-tunnel-status.py || fail "Tunnel statuses
 python3 tests/repository/check-agents-watch.py || fail "agents observation mode"
 python3 tests/repository/check-console-overview-cards.py || fail "Overview cards: three lines, honest values"
 python3 tests/repository/check-console-components.py || fail "«Компоненты»: groups, one state model, nothing green unconfirmed"
+python3 tests/repository/check-console-lists-center.py || fail "r-lists: domain lists center, managed lists only"
 python3 tests/repository/check-console-update-method.py || fail "Updates: update method switch and last method"
 python3 tests/repository/check-console-notes.py || fail "Bell: pop-ups top right, history on the router, errors under fields"
 python3 tests/repository/check-console-fold.py || fail "Panel blocks fold to their title and stay folded"

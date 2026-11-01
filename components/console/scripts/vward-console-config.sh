@@ -1118,6 +1118,68 @@ op_domain_list_watch() {
     done_ok "domain-list-watch $1 $2" changed
 }
 
+# ---------- Domain lists under VWARD's management (r-lists, owner 2026-11-01) ----------
+#
+# A list is VWARD's to steer only when the owner made it so: taken under management here
+# (managed.G=1, list-adopt) or already switched by the owner through VWARD (a watch key or
+# a saved return route). A catalog service's list goes with its service, AdaptiveAuto with
+# the route engine, «Мои домены» is always the tunnel; Keenetic's own and unknown lists are
+# never touched - a number or a name proves nothing. No new way of writing to Keenetic:
+# the route goes through the domain-list writer (journal, verification, undo), the rest is
+# VWARD's own lists.conf.
+list_managed() {
+    lm_saved=0; [ ! -f "$LISTS_STATE/$1" ] || lm_saved=1
+    { [ -r "$LISTS_CONF" ] && cat "$LISTS_CONF"; } 2>/dev/null |
+        awk -F= -v g="$1" -v s="$lm_saved" '$1 == "managed." g {m = $2} $1 == "watch." g {w = 1}
+            END {exit (m == "1" || (m != "0" && (w || s))) ? 0 : 1}'
+}
+list_steerable() {
+    # list_steerable GROUP: dies unless the group may be steered or taken under management.
+    valid_group "$1" || die invalid_group 64
+    load_profile_base
+    [ "$1" != "${VWARD_POLICY_GROUP:-}" ] || die invalid_group 64
+    ! awk -F '\t' -v g="$1" '$2 == g {f = 1} END {exit f ? 0 : 1}' "$SERVICES_STATE" 2>/dev/null || die service_list 64
+}
+
+# list-adopt GROUP 1|0: the owner takes an existing list under VWARD's management (or gives
+# it back). Only VWARD's lists.conf changes; the router is only read (the list must exist).
+op_list_adopt() {
+    list_steerable "$1"
+    case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
+    if [ "$2" = 1 ]; then
+        snapshot
+        grep -qx "object-group fqdn $1" "$RUNCFG" || die unknown_group 64
+    fi
+    set_kv "$LISTS_CONF" "managed.$1" "$2" 0644 || done_ok "list-adopt $1 $2" unchanged
+    done_ok "list-adopt $1 $2" changed
+}
+
+# list-mode GROUP auto|vpn|bypass: one managed list's way. auto - VWARD's own policy decides
+# (the route engine's watch on; the route and the domains stay). vpn / bypass - the route
+# first through the domain-list writer, then the watch off: a refused route leaves the list
+# exactly as it was; a watch that could not be switched off after a moved route is reported
+# as list_mode_partial (the route is moved and verified, the engine may still move it).
+op_list_mode() {
+    list_steerable "$1"
+    case "$2" in auto|vpn|bypass) ;; *) die invalid_value 64 ;; esac
+    list_managed "$1" || die list_not_managed 64
+    if [ "$2" = auto ]; then
+        lm_out=$(sh "$0" domain-list-watch "$1" 1 2>/dev/null); lm_rc=$?
+        [ "$lm_rc" = 0 ] || die "$(printf '%s\n' "$lm_out" | sed -n 's/^error=//p' | tail -n 1 | tr -cd 'a-z0-9_')" "$lm_rc"
+        done_ok "list-mode $1 auto" "$(printf '%s\n' "$lm_out" | sed -n 's/^result=//p' | tail -n 1)"
+    fi
+    lm_out=$(sh "$0" domain-list "$1" "$2" 2>/dev/null); lm_rc=$?
+    if [ "$lm_rc" != 0 ]; then
+        lm_err=$(printf '%s\n' "$lm_out" | sed -n 's/^error=//p' | tail -n 1 | tr -cd 'a-z0-9_')
+        die "${lm_err:-router_rejected}" "$lm_rc"
+    fi
+    lm_route=$(printf '%s\n' "$lm_out" | sed -n 's/^result=//p' | tail -n 1)
+    lm_w=$(sh "$0" domain-list-watch "$1" 0 2>/dev/null) || die list_mode_partial
+    lm_wr=$(printf '%s\n' "$lm_w" | sed -n 's/^result=//p' | tail -n 1)
+    [ "$lm_route" = unchanged ] && [ "$lm_wr" = unchanged ] && done_ok "list-mode $1 $2" unchanged
+    done_ok "list-mode $1 $2" changed
+}
+
 # ---------- Services (catalog from iplist) ----------
 # A service switched on is a Keenetic domain list VWARD makes itself (domain-listN,
 # described with the service's name), routed like any other list, so it shows in
@@ -4014,7 +4076,7 @@ case "$OP" in
 esac
 ARG1=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
 ARG2=${2:-}
-case "$OP" in wifi|update|wan-param|tunnel|policy-group|domain-list|domain-list-watch|tunnel-conf|tunnel-delete|tunnel-subnet|backup-restore|wifi-host) ARG1=$1 ;; esac
+case "$OP" in wifi|update|wan-param|tunnel|policy-group|domain-list|domain-list-watch|list-adopt|list-mode|tunnel-conf|tunnel-delete|tunnel-subnet|backup-restore|wifi-host) ARG1=$1 ;; esac
 case "$OP" in ext-upgrade|ext-auto|firmware) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 ARG3=${3:-}
 ARG4=${4:-}
@@ -4033,7 +4095,7 @@ vward_admission_enter console-config || die updater_busy 75
 
 case "$OP" in
     force-vpn|domain-category|tunnel-guard|tunnel-fallback|tunnel-return|tunnel-auto|wan-guard|component|\
-    adaptive-mode|classifier|ip-category|console-auth|console-devices|update-feed|domain-list-watch|\
+    adaptive-mode|classifier|ip-category|console-auth|console-devices|update-feed|domain-list-watch|list-adopt|\
     smartdns-guard|smartdns-domain|smartdns-server|smartdns-store|wifi|update|wan-param|wifi-host|service|service-category|services-refresh|ext-auto|firmware|journal|agents-mode|cleanup|reset)
         edit_lock ;;
 esac
@@ -4074,6 +4136,8 @@ case "$OP" in
     policy-group) op_policy_group "$ARG1" ;;
     domain-list) op_domain_list "$ARG1" "$ARG2" ;;
     domain-list-watch) op_domain_list_watch "$ARG1" "$ARG2" ;;
+    list-adopt) op_list_adopt "$ARG1" "$ARG2" ;;
+    list-mode) op_list_mode "$ARG1" "$ARG2" ;;
     smartdns-guard) op_smartdns_guard "$ARG1" ;;
     smartdns-domain) op_smartdns_domain "$ARG1" "$ARG2" ;;
     wifi) op_wifi "$ARG1" "$ARG2" ;;
