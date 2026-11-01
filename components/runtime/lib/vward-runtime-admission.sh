@@ -88,6 +88,35 @@ vward_busy() {
     [ "$vb_mem" -lt "$VWARD_BUSY_MEM_KB" ]
 }
 
+# vward_isp_control: the direct (provider) check itself works - Russian sites that are always up,
+# reached the way a site check reaches a site (curl over the WAN device, the same time limits).
+# A site check through the provider that failed while this fails too says nothing about the site
+# (01.11.2026: the audit had ok 4 of 482, 281 timeouts, api.ozon.ru «broken»): the verdict is
+# «unknown», never «the provider blocks it». One curl per VWARD_ISP_CONTROL_TTL (120 s) at most,
+# the answer kept in /tmp. 0: works; 1: does not; 2: cannot tell (no WAN device, no curl).
+# VWARD_ISP_CONTROL=0 turns it off (always 0).
+vward_isp_control() {
+    [ "${VWARD_ISP_CONTROL:-1}" = 1 ] || return 0
+    vic_f=${VWARD_ISP_CONTROL_STATE:-/tmp/vward-isp-control}
+    vic_now=$(date +%s)
+    vic_t= vic_r=
+    [ ! -r "$vic_f" ] || read -r vic_t vic_r 2>/dev/null < "$vic_f" || :
+    case "$vic_t:$vic_r" in
+        *[!0-9:]*|:*|*:) ;;
+        *) [ "$vic_now" -lt "$vic_t" ] || [ $((vic_now - vic_t)) -ge "${VWARD_ISP_CONTROL_TTL:-120}" ] || return "$vic_r" ;;
+    esac
+    [ -n "${VWARD_WAN_DEVICE:-}" ] && command -v curl >/dev/null 2>&1 || return 2
+    vic_r=1
+    for vic_u in ${VWARD_ISP_CONTROL_URLS:-https://ya.ru/ https://vk.com/}; do
+        vic_c=$(curl --http1.1 -4 --noproxy '*' --interface "$VWARD_WAN_DEVICE" \
+            --connect-timeout "${VWARD_ISP_CONTROL_CT:-2}" --max-time "${VWARD_ISP_CONTROL_MT:-3}" \
+            -A "Mozilla/5.0" -s -o /dev/null -w '%{http_code}' "$vic_u" 2>/dev/null) &&
+            [ "${vic_c:-000}" != 000 ] && { vic_r=0; break; }
+    done
+    echo "$vic_now $vic_r" > "$vic_f.$$" 2>/dev/null && mv -f "$vic_f.$$" "$vic_f" 2>/dev/null
+    return "$vic_r"
+}
+
 # vward_spread SECONDS: a job crond started (with the minute jobs, at second 0) starts SECONDS
 # later, so the heavy ones do not ask Keenetic together with the agents of the minute (fix.33.2,
 # WP-C). Started otherwise (the Panel, a test, by hand): at once. VWARD_SPREAD=0 turns it off.

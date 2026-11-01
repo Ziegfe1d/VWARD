@@ -750,7 +750,7 @@ restore_adaptive_from_persist()
     # are kept in adaptive-ru-removed.txt. Undo: VWARD_ADAPTIVE_RU=1 in device.conf, the backup
     # back as adaptive-persist.txt, then S91vward-route-engine restart.
     if [ "${VWARD_ADAPTIVE_RU:-0}" != 1 ]; then
-        : > "$WANT.ru"
+        printf '' > "$WANT.ru" 2>/dev/null
         while IFS= read -r H; do
             if ru_zone "$H"; then echo "$H" >> "$WANT.ru"; else echo "$H"; fi
         done < "$WANT" > "$WANT.keep" && mv -f "$WANT.keep" "$WANT"
@@ -926,6 +926,17 @@ add_adaptive()
     DIRECT_RC=$P_RC
     DIRECT_CODE=$P_CODE
     DIRECT_TIME=$P_TIME
+
+    # The direct check failed: does the direct check work at all (01.11: ok 4 of 482, Russian shops
+    # «broken»)? If the control sites fail too, nothing is proven about this site: no VPN for it.
+    ISPC=0
+    ! command -v vward_isp_control >/dev/null 2>&1 || { vward_isp_control; ISPC=$?; }
+    if [ "$ISPC" = 1 ]; then
+        save_state "$H" "ISP_PROBE_UNRELIABLE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_ABORT_ISP_UNRELIABLE|$H|direct_rc=$DIRECT_RC|direct_http=$DIRECT_CODE" >> "$EVENT_LOG"
+        change_unlock
+        return 0
+    fi
 
     if ! probe "$H" "$WG" "$GIP"; then
         save_state "$H" "ISP_FAIL_WG_FAIL"

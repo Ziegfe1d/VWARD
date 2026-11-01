@@ -529,6 +529,15 @@ TUN_SKIPPED=0
 
 DONE=0
 
+# The direct check does not work now (the control sites fail through the provider too, 01.11):
+# no name can be judged - none is checked this run (no load for nothing, no «broken» marks).
+ISPC=0
+! command -v vward_isp_control >/dev/null 2>&1 || { vward_isp_control; ISPC=$?; }
+if [ "$ISPC" = 1 ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_ISP_PROBE_UNRELIABLE|skipped=$TOTAL" >> "$LOG"
+    DONE=$MAX_PER_RUN
+fi
+
 while [ "$DONE" -lt "$MAX_PER_RUN" ] &&
       [ "$DONE" -lt "$TOTAL" ]; do
 
