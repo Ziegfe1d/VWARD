@@ -82,7 +82,7 @@ API принимает POST только с заголовком `X-VWARD-Reques
 | `wan-guard 0/1` | Защита интернета (выключение - токен `WAN_GUARD_DISABLE`) | `/opt/etc/vward/wan-guard.disabled` |
 | `component ID 0/1` | компонент включён (выключение - токен `COMPONENT_DISABLE`) | `/opt/etc/vward/components/<id>.disabled` |
 | `update apply_window window/any` | «По расписанию» / «Автоматически» (вместе с `auto_apply` через `settings`) | `/opt/etc/vward/update.conf` |
-| `update-feed beta/dev` | канал: ветка подписанного feed (Dev - токен `UPDATE_FEED_DEV`) | `manifest_url` в `update.conf` |
+| `update-feed main/dev` | канал: «Стабильная» (ветка main) или «Разработка» (ветка dev, токен `UPDATE_FEED_DEV`); прежняя `beta` распознаётся и сама не меняется | `manifest_url` в `update.conf` |
 | `adaptive-mode 0/1` | «Автоподбор доменов» добавляет новые домены | `/opt/etc/vward/route-engine/adaptive.disabled` |
 | `classifier 0/1` | автоопределение категории новых доменов | `CLASSIFIER_ENABLED` в `domain-classifier.conf` |
 | `ip-category NAME 0/1` | IP-категория может получать маршруты | `/opt/etc/vward/policy-sync/excluded.categories` |

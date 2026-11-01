@@ -597,14 +597,16 @@ op_ip_category() {
     done_ok "ip-category $1=$2" changed
 }
 
-# update-feed beta|dev: which branch's signed feed the updater follows.  Only the
-# branch in a standard raw.githubusercontent.com URL is replaced; the signed
-# channel, the key and the anti-replay checks stay as they are.
+# update-feed main|dev: which branch's signed feed the updater follows - «Стабильная»
+# (main) or «Разработка» (dev).  beta is the retired channel: still accepted so an
+# install that follows it keeps working and can be set back, never chosen for it.
+# Only the branch in a standard raw.githubusercontent.com URL is replaced; the signed
+# channel, the key and the sequence/anti-rollback checks stay as they are.
 op_update_feed() {
-    case "$1" in beta|dev) ;; *) die invalid_value 64 ;; esac
+    case "$1" in main|dev|beta) ;; *) die invalid_value 64 ;; esac
     [ -f "$UPDATE_FILE" ] || die config_unavailable
     url=$(awk -F= '$1=="manifest_url"{print substr($0,index($0,"=")+1);exit}' "$UPDATE_FILE")
-    new=$(printf '%s\n' "$url" | sed -n -E "s#^(https://raw\.githubusercontent\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/)(beta|dev)(/updates/[a-z0-9-]+/update-manifest\.json)\$#\1$1\3#p")
+    new=$(printf '%s\n' "$url" | sed -n -E "s#^(https://raw\.githubusercontent\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/)(main|beta|dev)(/updates/[a-z0-9-]+/update-manifest\.json)\$#\1$1\3#p")
     [ -n "$new" ] || die custom_manifest_url
     set_kv "$UPDATE_FILE" manifest_url "$new" 0600 || done_ok "update-feed $1" unchanged
     done_ok "update-feed $1" changed

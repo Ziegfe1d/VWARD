@@ -800,7 +800,7 @@ if [ "$ACTION" = config-data ]; then
       --arg w_window "$(wnum "$W_WIN" 86400)" --arg w_switch "$(wnum "$W_SW" 20)" \
       --arg w_weak "$(wnum "$W_WEAK" 5)" --arg w_rssi "$(wnum "$W_RSSI" -75)" \
       --arg u_start "$U_START" --arg u_end "$U_END" --arg u_interval "$U_INTERVAL" --arg u_window "$U_WINDOW" --arg u_method "$U_METHOD" \
-      --arg u_feed "$(printf '%s\n' "$U_URL" | sed -n -E 's#^https://raw[.]githubusercontent[.]com/[^/]+/[^/]+/(beta|dev)/updates/[a-z0-9-]+/update-manifest[.]json$#\1#p')" \
+      --arg u_feed "$(printf '%s\n' "$U_URL" | sed -n -E 's#^https://raw[.]githubusercontent[.]com/[^/]+/[^/]+/(main|beta|dev)/updates/[a-z0-9-]+/update-manifest[.]json$#\1#p')" \
       --argjson writable "$([ -x "$CONFIG_HELPER" ] && echo true || echo false)" \
       '{ok:true,writable:$writable,
         route:{group:$group,groups:$groups,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
@@ -3348,6 +3348,20 @@ SENTINEL_RUN=${6:-0} DOH_RUN=${7:-0} DNSCAP_RUN=${5:-0}
 SENTINEL_INST=0; [ ! -x "${VWARD_SENTINEL_BIN:-/opt/share/vward/sentinel/vward-sentinel}" ] || SENTINEL_INST=1
 DNSCAP_INST=0; [ ! -x "${VWARD_DNSCAP_BIN:-/opt/share/vward/dnscap/vward-dnscap}" ] || DNSCAP_INST=1
 DOH_INST=0; [ ! -x "${VWARD_DOH_BIN:-/opt/sbin/https-dns-proxy}" ] || DOH_INST=1
+# Proof of work, not only of a process (owner 2026-11-01): the watcher wrote its state within
+# 3 minutes (1 = yes, 0 = stale, "" = no file); the DNS capture produced host states within
+# 15 minutes (1 = yes, "" = no evidence either way: a quiet network is not a failure).
+age_of() { [ -e "$1" ] || { echo ""; return; }; a_m=$(date -r "$1" +%s 2>/dev/null) || { echo ""; return; }; echo $(( $(date +%s) - a_m )); }
+SEN_AGE=$(age_of "${VWARD_SENTINEL_STATE:-/tmp/vward-sentinel}/state")
+SENTINEL_FRESH=""; [ -z "$SEN_AGE" ] || { if [ "$SEN_AGE" -le 180 ]; then SENTINEL_FRESH=1; else SENTINEL_FRESH=0; fi; }
+CAP_AGE=$(age_of "${VWARD_ROUTE_VOLATILE_STATE:-/tmp/vward-route-engine-state}")
+DNSCAP_FRESH=""; [ -z "$CAP_AGE" ] || [ "$CAP_AGE" -gt 900 ] || DNSCAP_FRESH=1
+# dnsmasq, sing-box, the DNS mode and Entware update permissions: one read-only report
+# (functions only; nothing is started). Absent libraries -> no data, never a guess.
+COMPONENTS_TSV=""
+if [ -r /opt/lib/vward/vward-components-status.sh ] && [ -r /opt/lib/vward/vward-entware-pkg.sh ] && [ -r /opt/lib/vward/vward-dns-mode.sh ]; then
+    COMPONENTS_TSV=$( . /opt/lib/vward/vward-entware-pkg.sh; . /opt/lib/vward/vward-dns-mode.sh; . /opt/lib/vward/vward-components-status.sh; vward_components_status 2>/dev/null )
+fi
 # Switched off in «Компоненты», and the component operation under way (one at a time).
 CSTATE=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
 AGH_OFF=0; [ ! -e "$CSTATE/adguardhome.disabled" ] || AGH_OFF=1
@@ -3464,7 +3478,7 @@ header_json
   --arg agents "$AGENTS" \
   --arg adguard "$ADGUARD" --arg adguard_installed "$AGH_INSTALLED" \
   --arg agh_off "$AGH_OFF" --arg mod_off "$MOD_OFF" --arg comp_op "$COMP_OP" \
-  --arg sen_run "$SENTINEL_RUN" --arg sen_inst "$SENTINEL_INST" --arg cap_run "$DNSCAP_RUN" --arg cap_inst "$DNSCAP_INST" --arg doh_run "$DOH_RUN" --arg doh_inst "$DOH_INST" \
+  --arg sen_run "$SENTINEL_RUN" --arg sen_inst "$SENTINEL_INST" --arg cap_run "$DNSCAP_RUN" --arg cap_inst "$DNSCAP_INST" --arg doh_run "$DOH_RUN" --arg doh_inst "$DOH_INST" --arg sen_fresh "$SENTINEL_FRESH" --arg cap_fresh "$DNSCAP_FRESH" --arg comps "$COMPONENTS_TSV" \
   --arg agh_broken "$AGH_BROKEN" \
   --arg uptime "$UPTIME_SEC" \
   --arg grc "$GRC" \
@@ -3617,11 +3631,12 @@ header_json
     adguard:($adguard=="1"),
     adguard_installed:($adguard_installed=="1"),
     adguard_broken:($agh_broken != ""),
-    sentinel:{installed:($sen_inst=="1"),running:($sen_run=="1")},
+    sentinel:{installed:($sen_inst=="1"),running:($sen_run=="1"),fresh:(if $sen_fresh == "" then null else $sen_fresh == "1" end)},
     adguard_disabled:($agh_off=="1"),
     modules_off:($mod_off | split(" ") | map(select(length > 0))),
     component_op:(if $comp_op == "" then null else $comp_op end),
-    dnscap:{installed:($cap_inst=="1"),running:(($cap_run|tonumber? // 0) > 0)},
+    dnscap:{installed:($cap_inst=="1"),running:(($cap_run|tonumber? // 0) > 0),fresh:(if $cap_fresh == "1" then true else null end)},
+    components:($comps | split("\n") | map(select(length > 0) | split("\t") | select(length == 5) | {id: .[0], source: .[1], state: .[2], version: .[3], label: .[4]})),
     doh:{installed:($doh_inst=="1"),running:($doh_run=="1")},
     adaptive_live_pid:$live_pid,
     adaptive_live_count:($live_count|tonumber? // 0),
