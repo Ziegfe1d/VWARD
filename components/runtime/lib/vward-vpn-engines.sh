@@ -121,18 +121,41 @@ vward_singbox_render() (
     case $vve_p in vless|trojan) ;; *) return 75 ;; esac
     [ "$vve_n" != xhttp ] || return 75
     t=$2.tmp.$$
+    # Parsed by awk (Entware jq has no regex functions); key/value pairs reach jq through a
+    # private file, never through process arguments (the id is a key).
+    (umask 077; awk '
+        function dec(s,  o, i, c, h) { o = ""; for (i = 1; i <= length(s); i++) { c = substr(s, i, 1)
+            if (c == "%" && i + 2 <= length(s)) { h = substr(s, i + 1, 2); o = o sprintf("%c", hx(h)); i += 2 } else o = o c }
+            return o }
+        function hx(h,  i, v, d) { v = 0; h = toupper(h); for (i = 1; i <= 2; i++) { d = index("0123456789ABCDEF", substr(h, i, 1)) - 1
+            if (d < 0) return 63; v = v * 16 + d } return v }
+        NF && $0 !~ /^#/ && !done {
+            l = $0; done = 1
+            p = index(l, "://"); sch = tolower(substr(l, 1, p - 1)); rest = substr(l, p + 3)
+            h = index(rest, "#"); if (h) rest = substr(rest, 1, h - 1)
+            q = index(rest, "?"); query = ""; if (q) { query = substr(rest, q + 1); rest = substr(rest, 1, q - 1) }
+            sl = index(rest, "/"); if (sl) rest = substr(rest, 1, sl - 1)
+            at = index(rest, "@"); if (!at) exit 3
+            id = substr(rest, 1, at - 1); hp = substr(rest, at + 1)
+            if (substr(hp, 1, 1) == "[") { e = index(hp, "]"); host = substr(hp, 2, e - 2); port = substr(hp, e + 2) }
+            else { c = index(hp, ":"); host = substr(hp, 1, c - 1); port = substr(hp, c + 1) }
+            if (port !~ /^[0-9]+$/ || host == "") exit 3
+            printf "sch\t%s\nid\t%s\nhost\t%s\nport\t%s\n", sch, dec(id), host, port
+            n = split(query, a, "&")
+            for (i = 1; i <= n; i++) { k = a[i]; v = ""; e = index(k, "="); if (e) { v = substr(k, e + 1); k = substr(k, 1, e - 1) }
+                if (k ~ /^[A-Za-z]+$/) printf "q.%s\t%s\n", k, dec(v) }
+        }
+        END { if (!done) exit 3 }' "$1" > "$t.kv") || { rm -f "$t.kv"; return 75; }
     (umask 077; "${JQ:-jq}" -Rn --arg tun "$3" '
-        def dec: gsub("%2F"; "/") | gsub("%3A"; ":") | gsub("%40"; "@") | gsub("%3D"; "=") | gsub("%2C"; ",");
-        [inputs | select(length > 0 and (startswith("#") | not))] | .[0] as $l
-        | ($l | capture("^(?<sch>[a-zA-Z]+)://(?<id>[^@]+)@(?<host>\\[[^]]+\\]|[^:/?#]+):(?<port>[0-9]+)[^?#]*(\\?(?<q>[^#]*))?")) as $m
-        | (($m.q // "") | split("&") | map(select(length > 0) | split("=") | {(.[0]): ((.[1:] | join("=")) | dec)}) | add // {}) as $p
-        | ($m.sch | ascii_downcase) as $sch
+        [inputs | split("\t") | {(.[0]): (.[1:] | join("\t"))}] | add as $k
+        | ($k | with_entries(select(.key | startswith("q."))) | with_entries(.key |= ltrimstr("q."))) as $p
+        | $k.sch as $sch
         | ($p.security // (if $sch == "trojan" then "tls" else "none" end)) as $sec
         | ($p.type // "tcp") as $net
         | {log: {level: "warn"},
            inbounds: [{type: "tun", tag: "tun-in", interface_name: $tun, auto_route: false, strict_route: false, stack: "system"}],
-           outbounds: [({type: $sch, tag: "proxy", server: ($m.host | ltrimstr("[") | rtrimstr("]")), server_port: ($m.port | tonumber)}
-             + (if $sch == "vless" then {uuid: ($m.id | dec), flow: ($p.flow // "")} else {password: ($m.id | dec)} end)
+           outbounds: [({type: $sch, tag: "proxy", server: $k.host, server_port: ($k.port | tonumber)}
+             + (if $sch == "vless" then {uuid: $k.id, flow: ($p.flow // "")} else {password: $k.id} end)
              + (if $sec == "tls" or $sec == "reality" then {tls: ({enabled: true, server_name: ($p.sni // $p.host // "")}
                  + (if $sec == "reality" then {utls: {enabled: true, fingerprint: ($p.fp // "chrome")},
                       reality: {enabled: true, public_key: ($p.pbk // ""), short_id: ($p.sid // "")}} else {} end))} else {} end)
@@ -141,7 +164,8 @@ vward_singbox_render() (
                 elif $net == "httpupgrade" then {transport: {type: "httpupgrade", path: ($p.path // "/"), host: ($p.host // "")}}
                 else {} end)),
              {type: "direct", tag: "direct"}],
-           route: {final: "proxy", auto_detect_interface: false}}' < "$1" > "$t") || { rm -f "$t"; return 75; }
+           route: {final: "proxy", auto_detect_interface: false}}' < "$t.kv" > "$t") || { rm -f "$t" "$t.kv"; return 75; }
+    rm -f "$t.kv"
     mv -f "$t" "$2"
 )
 
