@@ -1069,7 +1069,7 @@ function notifications() {
   const total = num(stg.total_kb), free = num(stg.free_kb);
   if (total && free != null && lowDisk(total, free)) n.push({ sev: 'warn', title: 'Мало места в хранилище', text: 'свободно ' + fmtKB(free), to: 'system' });
   if (['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase)) n.push({ sev: 'crit', title: 'Обновление требует внимания', text: phaseText(p.phase), to: 'u-vward' });
-  if (S.update && S.update.pending && S.update.pending.present) n.push({ sev: 'news', icon: 'save', title: 'Вышла новая версия VWARD', text: (S.update.pending.version || '') + ' - нажмите, чтобы посмотреть и установить', to: 'u-vward' });
+  if (S.update && S.update.pending && S.update.pending.present && S.update.pending.feed !== 'other') n.push({ sev: 'news', icon: 'save', title: 'Вышла новая версия VWARD', text: (S.update.pending.version || '') + ' - нажмите, чтобы посмотреть и установить', to: 'u-vward' });
   const wc = ((S.wifi && S.wifi.clients) || []).filter(c => c.health === 'WARNING').length;
   if (wc) n.push({ sev: 'warn', title: 'Wi-Fi: ' + wc + ' ' + plural(wc, 'клиент требует', 'клиента требуют', 'клиентов требуют') + ' внимания', text: 'частые переходы между 2.4 и 5 ГГц', to: 'wifi' });
   const offComps = ((S.config && S.config.components) || []).filter(x => x.enabled === false && x.off_with !== 'install');
@@ -1915,11 +1915,11 @@ const RENDER = {
   updatesPanel() {
     const p = plat(), u = S.update || {}, pend = u.pending || {}, x = S.ext || {}, fw = x.firmware || {}, agh = x.agh || {};
     const pk = x.packages || [], checked = x.checked_at ? fmtStamp(x.checked_at) : '';
-    const vwardVal = pend.present ? 'доступна ' + (pend.version || 'новая версия') : (p.version || '—');
+    const pon = pend.present && pend.feed !== 'other', vwardVal = pon ? 'доступна ' + (pend.version || 'новая версия') : (p.version || '—');
     const aghVal = agh.available ? 'доступна ' + extVer(agh.available) : agh.installed ? extVer(agh.installed) : S.ext ? 'не установлен' : '—';
     const fwVal = !x.firmware ? (S.ext ? 'нет данных' : '—') : fw.update_available ? 'доступна новая' : fw.title || fw.release;
     return panel('Обновления', kv([
-        ['VWARD', vwardVal, pend.present ? 'info' : '', 'u-vward', '', pend.present ? 'установлена ' + (p.version || '—') : autoText(isTrue(p.auto_apply))],
+        ['VWARD', vwardVal, pon ? 'info' : '', 'u-vward', '', pon ? 'установлена ' + (p.version || '—') : autoText(isTrue(p.auto_apply))],
         ['AdGuard Home', aghVal, agh.available ? 'info' : '', 'u-agh', '', agh.available ? 'установлена ' + extVer(agh.installed) : autoText(x.auto && x.auto.agh)],
         ['Прошивка Keenetic', fwVal, fw.update_available ? 'info' : '', 'u-fw', '', fw.channel ? 'канал ' + fwChannel(fw.channel) + ' · ' + autoText(fw.auto_update) : ''],
         ['Пакеты Entware', pk.length ? pk.length + ' ' + plural(pk.length, 'обновление', 'обновления', 'обновлений') : S.ext && !x.checked_at ? 'не проверялись' : 'актуальны', pk.length ? 'info' : '', 'u-opkg', '', x.installed_count ? 'установлено ' + x.installed_count + ' · ' + autoText(x.auto && x.auto.entware) : '']
@@ -2004,6 +2004,8 @@ const RENDER = {
     return loadError(['update', 'status']) +
       panel('Состояние', kv([
         ['Версия', p.version || '—', '', 'd-notes', '', [p.last_sequence ? 'сборка № ' + p.last_sequence : '', lastApplyNote(u.last_apply, u.last_method)].filter(Boolean).join(' · ')],
+        // Found on the other channel before the switch: the updater will not install it here (owner 2026-11-01).
+        pend.present && pend.feed === 'other' ? ['Найдено на другом канале', pend.version || '—', '', 'd-notes', '', 'не установится, пока выбран текущий канал'] :
         pend.present ? ['Доступно', (pend.version || '') + (pend.priority ? ' · ' + ({ ROUTINE: 'обычное', IMPORTANT: 'важное', CRITICAL: 'критическое' }[String(pend.priority).toUpperCase()] || pend.priority) : ''), 'info', 'd-notes'] : null,
         feedCheckRow(p),
         p.last_health_check ? ['Проверка после установки', fmtStamp(p.last_health_check), '', 'a-updater'] : null

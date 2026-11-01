@@ -174,5 +174,62 @@ chmod 755 "$ROOT/opt/share/vward/updater/slot-a/vward-update.sh"
 ln -s slot-a "$ROOT/opt/share/vward/updater/current"
 expect_code 'stable bootstrap hands off to current slot' 0 env VWARD_ROOT_PREFIX="$ROOT" "$UPDATER/vward-update-bootstrap.sh" --status
 
+# Owner 2026-11-01: an update found on «Разработка» (dev) must never be applied after the
+# router was switched to «Стабильная» (main) - not by the schedule, not by «Установить», not
+# after a reboot; back on dev it is applied as usual. Everything else stays as it is.
+FEED=https://raw.githubusercontent.com/Owner/Repo
+feed_set() { sed -i '/^manifest_url=/d' "$CONFIG"; printf 'manifest_url=%s/%s/updates/dev/update-manifest.json\n' "$FEED" "$1" >> "$CONFIG"; }
+route_now() { cat "$ROOT/opt/bin/vward-route.sh"; }
+new_root feed-switch; make_package feed-switch; make_manifest feed-switch ROUTINE 1 0.1.1-dev
+feed_set dev
+expect_code 'feed: update found on dev is pending' 0 run_update --check
+grep -q "^feed=$FEED/dev/" "$ROOT/opt/var/lib/vward/updater/pending/pending.state" && pass 'feed: pending records the feed it came from' || fail 'feed: pending has no feed'
+feed_set main
+cp "$CONFIG" "$WORK/conf-main"
+expect_code 'feed: dev update refused on main (schedule / Install / after reboot)' 32 run_update --apply-pending
+if [ "$(route_now)" = old ] && [ -r "$ROOT/opt/var/lib/vward/updater/pending/manifest.json" ] && cmp -s "$CONFIG" "$WORK/conf-main" &&
+    [ "$(sed -n 's/^phase=//p' "$ROOT/opt/var/lib/vward/updater/journal.state" | tail -n 1)" = IDLE ]; then
+    pass 'feed: nothing applied, pending, channel and settings kept, phase IDLE'
+else
+    fail "feed: state after refusal (route=$(route_now))"
+fi
+expect_code 'feed: refused again on retry (idempotent)' 32 run_update --apply-pending
+feed_set dev
+expect_code 'feed: back on dev (dev -> main -> dev) the same update applies' 0 run_update --apply-pending
+[ "$(route_now)" = new-feed-switch ] && pass 'feed: applied after returning to dev' || fail 'feed: not applied on dev'
+
+# The channel changed while the update was downloading: checked again inside the barrier.
+new_root feed-race; make_package feed-race; make_manifest feed-race ROUTINE 1 0.1.1-dev
+feed_set dev
+expect_code 'feed race: pending on dev' 0 run_update --check
+expect_code 'feed race: switch during download refused inside the barrier' 32 env VWARD_TEST_FEED_BEFORE_BARRIER="$FEED/main/updates/dev/update-manifest.json" \
+    VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" VWARD_TEST_MANIFEST="$MANIFEST" VWARD_TEST_PACKAGE="$PACKAGE" "$UPDATER/vward-update.sh" --apply-pending
+[ "$(route_now)" = old ] && [ ! -e "$ROOT/tmp/vward-update.lock" ] && pass 'feed race: nothing written, barrier released' || fail 'feed race: written or barrier left'
+# The same race on a direct «Проверить и установить» (no pending update yet).
+new_root feed-race-direct; make_package feed-race-direct; make_manifest feed-race-direct CRITICAL 1 0.1.1-dev
+feed_set dev
+expect_code 'feed race: direct apply refused when the channel changes mid-way' 32 env VWARD_TEST_FEED_BEFORE_BARRIER="$FEED/main/updates/dev/update-manifest.json" \
+    VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" VWARD_TEST_MANIFEST="$MANIFEST" VWARD_TEST_PACKAGE="$PACKAGE" "$UPDATER/vward-update.sh" --apply
+[ "$(route_now)" = old ] && pass 'feed race: direct apply wrote nothing' || fail 'feed race: direct apply wrote'
+
+# A pending update stored by an engine without the binding: its feed is not proven.
+new_root feed-legacy; make_package feed-legacy; make_manifest feed-legacy ROUTINE 1 0.1.1-dev
+feed_set dev
+expect_code 'feed legacy: pending on dev' 0 run_update --check
+sed -i '/^feed=/d' "$ROOT/opt/var/lib/vward/updater/pending/pending.state"
+expect_code 'feed legacy: pending without a feed is not applied' 32 run_update --apply-pending
+expect_code 'feed legacy: the next check binds it again' 0 run_update --check
+expect_code 'feed legacy: then it applies' 0 run_update --apply-pending
+
+# Own feed (custom manifest_url) and the retired beta branch are bound the same way.
+new_root feed-custom; make_package feed-custom; make_manifest feed-custom ROUTINE 1 0.1.1-dev
+printf 'manifest_url=https://mirror.example/vward/update-manifest.json\n' >> "$CONFIG"
+expect_code 'feed custom: pending on own feed' 0 run_update --check
+expect_code 'feed custom: applies on the same feed' 0 run_update --apply-pending
+new_root feed-beta; make_package feed-beta; make_manifest feed-beta ROUTINE 1 0.1.1-dev
+feed_set beta
+expect_code 'feed beta: pending on beta' 0 run_update --check
+expect_code 'feed beta: applies while still on beta' 0 run_update --apply-pending
+
 printf '1..%s\n' "$((passed + failed))"
 [ "$failed" -eq 0 ]

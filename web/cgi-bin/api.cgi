@@ -2739,6 +2739,17 @@ if [ "$ACTION" = "update-data" ]; then
             PENDING_SEQUENCE="$($JQ -r '.signed.sequence' "$PENDING_DIR/manifest.json" 2>/dev/null)"
         fi
     fi
+    # The channel the pending update was found on against the one update.conf names now
+    # (owner 2026-11-01): another one - the updater will not install it; neither does «Установить».
+    PENDING_FEED=null
+    if [ "$PENDING" = true ]; then
+        PF="$(sed -n 's/^feed=//p' "$PENDING_DIR/pending.state" 2>/dev/null | tail -n 1 | tr '\001' '\t')"
+        UC="${VWARD_UPDATE_CONFIG:-$CONFIG_ETC/update.conf}"
+        PN="$(awk '{k=$0; sub(/=.*/,"",k); gsub(/[ \t\r]/,"",k)} k=="manifest_url"{u=substr($0,index($0,"=")+1); gsub(/^[ \t]+|[ \t\r]+$/,"",u)} k=="manifest_v2_url"{v=substr($0,index($0,"=")+1); gsub(/^[ \t]+|[ \t\r]+$/,"",v)} END{printf "%s\t%s", u, v}' "$UC" 2>/dev/null)"
+        if [ -z "$PF" ]; then PENDING_FEED='"unbound"'
+        elif [ "$PF" = "$PN" ]; then PENDING_FEED='"current"'
+        else PENDING_FEED='"other"'; fi
+    fi
 
     ACTIVE_BACKUP="$(sed -n 's/^active_backup=//p' "$JOURNAL" 2>/dev/null | tail -n 1)"
     ROLLBACK=false
@@ -2764,8 +2775,8 @@ if [ "$ACTION" = "update-data" ]; then
         CHECK_ALLOWED=true
         if [ "$PENDING" = true ]; then
             case "$PHASE" in
-                AVAILABLE|VERIFIED|IDLE|COMMITTED) APPLY_ALLOWED=true ;;
-                FAILED) RETRY_ALLOWED=true ;;
+                AVAILABLE|VERIFIED|IDLE|COMMITTED) [ "$PENDING_FEED" = '"other"' ] || APPLY_ALLOWED=true ;;
+                FAILED) [ "$PENDING_FEED" = '"other"' ] || RETRY_ALLOWED=true ;;
             esac
         fi
         [ "$ROLLBACK" = true ] && ROLLBACK_ALLOWED=true
@@ -2802,6 +2813,7 @@ if [ "$ACTION" = "update-data" ]; then
       --arg sequence "$PENDING_SEQUENCE" \
       --argjson busy "$BUSY" \
       --argjson pending "$PENDING" \
+      --argjson pending_feed "$PENDING_FEED" \
       --argjson rollback "$ROLLBACK" \
       --argjson check_allowed "$CHECK_ALLOWED" \
       --argjson apply_allowed "$APPLY_ALLOWED" \
@@ -2809,7 +2821,7 @@ if [ "$ACTION" = "update-data" ]; then
       --argjson rollback_allowed "$ROLLBACK_ALLOWED" \
       --argjson recover_allowed "$RECOVER_ALLOWED" \
       --argjson run "$RUN_JSON" \
-      '{ok:true,phase:$phase,busy:$busy,pending:{present:$pending,version:$version,priority:$priority,sequence:$sequence},rollback_available:$rollback,allowed:{check:$check_allowed,apply:$apply_allowed,retry:$retry_allowed,rollback:$rollback_allowed,recover:$recover_allowed},
+      '{ok:true,phase:$phase,busy:$busy,pending:{present:$pending,version:$version,priority:$priority,sequence:$sequence,feed:$pending_feed},rollback_available:$rollback,allowed:{check:$check_allowed,apply:$apply_allowed,retry:$retry_allowed,rollback:$rollback_allowed,recover:$recover_allowed},
         run:$run,engine:{version:$engine},
         last_apply:(if $la_changed < 0 then null else {version:$la_version,changed_files:$la_changed,fetched_bytes:$la_bytes,applied_at:$la_at} end),
         last_method:(if $lm_method == "" then null else {method:$lm_method,at:$lm_at} end)}'
