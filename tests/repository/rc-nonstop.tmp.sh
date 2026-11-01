@@ -1,0 +1,259 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd -P)
+# device.conf belongs to root on the router; the test fixtures belong to the runner.
+VWARD_DEVICE_CONFIG_OWNER_UID=$(id -u)
+export VWARD_DEVICE_CONFIG_OWNER_UID
+cd "$ROOT"
+
+fail() { echo "FAIL: $*"; }
+
+VERSION=$(sed -n '1p' VERSION)
+REGISTRY_VERSION=$(sed -n 's/.*"platform_version": "\([^"]*\)".*/\1/p' config/components/component-registry.json)
+[ -n "$VERSION" ] || fail "VERSION is empty"
+[ "$VERSION" = "$REGISTRY_VERSION" ] || fail "VERSION and registry differ"
+grep -Fq "**$VERSION**" README.md || fail "README version differs"
+python3 tests/repository/check-version-synchronization.py || fail "Version synchronization"
+python3 tests/repository/check-no-personal-data.py || fail "no data of the owner's router in the repository"
+
+for DOC in docs/INSTALL.md docs/INSTALLATION_MAP.md docs/DEPENDENCIES.md docs/PANEL.md \
+    docs/NAMING_MIGRATION.md docs/UPDATER_ARCHITECTURE.md \
+    docs/UPDATE_POLICY.md docs/UPDATE_RECOVERY.md docs/UPDATE_SECURITY.md \
+    docs/SECURITY_HARDENING.md
+do
+    [ -r "$DOC" ] || fail "missing documentation: $DOC"
+done
+
+grep -E 'Smart Updater|>Update</button>|192\.168\.1\.1' web/index.html web/assets/vward-console.js >/dev/null &&
+    fail "Panel contains legacy naming or universal device hardcode"
+# Keenetic's BusyBox stat has no -c; the CI host's BusyBox does, so only this catches it.
+grep -rnE '(^|[^A-Za-z_])stat +(-c|--format|--printf)' components web scripts >/dev/null &&
+    fail "router code uses stat -c, which Keenetic BusyBox lacks"
+# Entware jq is built without Oniguruma: test/match/sub and friends fail at run time.
+# awk's sub/gsub/match take commas, jq's take semicolons.
+grep -rnE --include='*.sh' --include='*.cgi' '(^|[^a-z_])(test|capture|scan|splits)\(|(sub|gsub|match)\("[^"]*";' \
+    components web scripts >/dev/null &&
+    fail "router jq uses a regex function, which Entware jq lacks"
+grep -E '\?\.|\?\?|scrollTo\(\{' web/assets/vward-console.js >/dev/null &&
+    fail "Panel contains incompatible mobile JavaScript"
+
+grep -Fq 'function iconSvg' web/assets/vward-console.js || fail "canonical SVG icon system missing"
+grep -Fq "{ id: 'settings', title: 'Настройки'" web/assets/vward-console.js || fail "settings section missing"
+grep -Fq 'border-radius:28px' web/assets/vward-console.css || fail "floating mobile toolbar missing"
+grep -Fq 'env(safe-area-inset-bottom,0px)' web/assets/vward-console.css ||
+    fail "mobile toolbar safe-area handling missing"
+
+for ID in platform-core route-engine route-reconciler route-tools tunnel-guard \
+    wan-guard wifi-client-guard policy-sync runtime console update-engine ads-privacy-guard
+do
+    grep -Fq "\"id\": \"$ID\"" config/components/component-registry.json ||
+        fail "registry component missing: $ID"
+    grep -Fq "{ id: '$ID', name: '" web/assets/vward-console.js || fail "Panel component mapping missing: $ID"
+done
+
+for LOG_NAME in wan recovery cron routing updater tunnel policy console wifi ads
+do
+    grep -Fq "{ id: '$LOG_NAME', label: '" web/assets/vward-console.js ||
+        fail "Panel log tab missing: $LOG_NAME"
+    grep -Eq "^[[:space:]]*$LOG_NAME\)" web/cgi-bin/api.cgi ||
+        fail "Panel log allowlist missing: $LOG_NAME"
+done
+
+sh -n web/cgi-bin/api.cgi || fail "Panel API syntax"
+python3 tests/repository/check-console-bindings.py || fail "Panel bindings"
+python3 tests/repository/check-console-activity.py || fail "sections show their events in plain words"
+python3 tests/repository/check-console-responsive.py || fail "Panel responsive layout"
+python3 tests/repository/check-console-kv-layout.py || fail "Panel rows: a long value never runs over the name"
+python3 tests/repository/check-updater-wan-fallback.py || fail "Updater: a dead tunnel does not stop update downloads"
+python3 tests/repository/check-console-logs-all.py || fail "Panel journals: «Все» in one timeline"
+python3 tests/repository/check-console-tunnel-page.py || fail "Panel tunnel page: buttons on one row, subnets on their own page"
+python3 tests/repository/check-console-icon-system.py || fail "Panel icon and typography system"
+python3 tests/repository/check-console-security.py || fail "Panel security"
+python3 tests/repository/check-console-config.py || fail "Panel configuration writer"
+python3 tests/repository/check-console-domain-lists.py || fail "Panel domain lists"
+python3 tests/repository/check-console-list-addrs.py || fail "Panel learned addresses of a list"
+python3 tests/repository/check-console-addresses.py || fail "Panel page addresses"
+python3 tests/repository/check-route-probe-evidence.py || fail "P-7 configured/router/client route evidence"
+python3 tests/repository/check-console-route-probe.py || fail "Panel address check"
+python3 tests/repository/check-services-catalog.py || fail "Services catalog"
+python3 tests/repository/check-console-services.py || fail "Panel services"
+python3 tests/repository/check-service-ownership.py || fail "service ownership"
+python3 tests/repository/check-service-transactions.py || fail "service transactions"
+python3 tests/repository/check-service-faults.py || fail "service fault matrix"
+python3 tests/repository/check-routing-measurements.py || fail "routing measurement accounting"
+sh tests/routing-audit/run-simulations.sh || fail "routing audit simulations"
+python3 tests/routing-readers/check-readers.py || fail "native routing read adapters"
+python3 tests/routing-readers/check-identity.py || fail "routing persistent identities"
+python3 tests/routing-readers/check-snapshot.py || fail "routing consistent snapshot"
+python3 tests/routing-readers/check-shadow.py || fail "routing shadow comparison"
+python3 tests/routing-readers/check-observe.py || fail "routing read-only observers"
+python3 tests/routing-readers/check-plan.py || fail "RS-7 pure routing planner"
+python3 tests/routing-readers/check-journal.py || fail "RS-7 write-ahead journal (test data only)"
+python3 tests/routing-readers/check-dryrun.py || fail "RS-7 dry-run executor on a Keenetic stand-in"
+python3 tests/entware/check-entware-lifecycle.py || fail "Entware external package lifecycle (emulated root)"
+python3 tests/dns/check-dns-mode.py || fail "DNS mode selector and safe dnsmasq rendering"
+python3 tests/vpn/check-vpn-engines.py || fail "VPN engines: one engine per tunnel, proven sing-box support"
+python3 tests/entware/check-components-status.py || fail "Panel components report (never Работает without proof)"
+if command -v busybox >/dev/null 2>&1; then
+    busybox ash tests/routing-audit/run-simulations.sh || fail "BusyBox routing audit simulations"
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-readers.py || fail "BusyBox native routing read adapters"
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-identity.py || fail "BusyBox routing persistent identities"
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-snapshot.py || fail "BusyBox routing consistent snapshot"
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-shadow.py || fail "BusyBox routing shadow comparison"
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-observe.py || fail "BusyBox routing read-only observers"
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-plan.py || fail "BusyBox RS-7 pure routing planner"
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-journal.py || fail "BusyBox RS-7 write-ahead journal"
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-dryrun.py || fail "BusyBox RS-7 dry-run executor"
+    ENTWARE_BUSYBOX="$(command -v busybox)" python3 tests/entware/check-entware-lifecycle.py || fail "BusyBox Entware package lifecycle"
+    DNS_BUSYBOX="$(command -v busybox)" python3 tests/dns/check-dns-mode.py || fail "BusyBox DNS mode selector"
+    VPN_BUSYBOX="$(command -v busybox)" python3 tests/vpn/check-vpn-engines.py || fail "BusyBox VPN engines"
+    ENTWARE_BUSYBOX="$(command -v busybox)" python3 tests/entware/check-components-status.py || fail "BusyBox Panel components report"
+    python3 tests/routing-audit/check-bounded-cost.py --busybox "$(command -v busybox)" || fail "routing audit bounded cost"
+else
+    echo "NOTE: BusyBox audit/cost runtime requires busybox; host audit ran above"
+fi
+python3 tests/repository/check-routing-state-errors.py || fail "routing state on read/removal errors"
+python3 tests/repository/check-awg-engine.py || fail "Tunnel engine (AmneziaWG)"
+python3 tests/repository/check-vless-engine.py || fail "VLESS engine (Xray)"
+python3 tests/repository/check-boot-watch.py || fail "boot watch: the Panel and AdGuard Home after boot"
+python3 tests/repository/check-agh-start-gate.py || fail "AdGuard Home start gate"
+python3 tests/repository/check-agh-official.py || fail "AdGuard Home official build"
+python3 tests/repository/check-keenetic-cache.py || fail "one shared read of the Keenetic configuration"
+python3 tests/repository/check-flash-watch.py || fail "USB stick watch"
+python3 tests/repository/check-integrity-watch.py || fail "file integrity journal: spoiled files found and repaired without a loop"
+python3 tests/repository/check-agents-watch.py || fail "agents observation mode"
+python3 tests/repository/check-vless-countries.py || fail "VLESS servers by country"
+python3 tests/repository/check-api-broken-jq.py || fail "API with a broken jq"
+python3 tests/repository/check-sentinel.py || fail "real-time watcher program"
+python3 tests/repository/check-dnscap.py || fail "DNS capture program (vward-dnscap)"
+python3 tests/repository/check-sentinel-runtime.py || fail "real-time watcher in the runtime"
+python3 tests/repository/check-stability-page.py || fail "Panel: Система, Стабильность"
+python3 tests/repository/check-vward-off.py || fail "Emergency switch: Отключить VWARD"
+python3 tests/repository/check-ssh-safety.py || fail "SSH always reachable"
+python3 tests/repository/check-agents.py || fail "Agents: the components agent watches the others"
+python3 tests/repository/check-policy-smartdns.py || fail "Smart DNS wins over IP categories"
+python3 tests/repository/check-adaptive-ru-zone.py || fail "Russian zones leave AdaptiveAuto and never come back through the VPN"
+python3 tests/repository/check-isp-control.py || fail "a failed direct check is not a verdict when the direct check itself does not work"
+python3 tests/repository/check-keenetic-shared-age.py || fail "one read of the configuration serves the minute"
+python3 tests/repository/check-console-diag-ui.py || fail "Panel diagnostics button and disabled component names"
+python3 tests/repository/check-policy-shrink-guard.py || fail "IP categories shrink guard"
+python3 tests/repository/check-dns-rules-boot.py || fail "DNS rules of the tunnel after a boot"
+python3 tests/repository/check-console-doh-retry.py || fail "Smart DNS line removal retried"
+python3 tests/repository/check-boot-env.py || fail "Entware programs do not take the firmware's library path"
+python3 tests/repository/check-fetch-fallback.py || fail "downloads do not survive a curl that crashes on HTTPS"
+python3 tests/repository/check-program-repair.py || fail "a crashing Entware program is reinstalled"
+python3 tests/repository/check-keenetic-cache.py || fail "one shared read of the Keenetic configuration"
+python3 tests/repository/check-flash-watch.py || fail "USB stick watch"
+python3 tests/repository/check-integrity-watch.py || fail "file integrity journal: spoiled files found and repaired without a loop"
+python3 tests/repository/check-doh-keep.py || fail "Smart DNS's local DoH client is kept running"
+python3 tests/repository/check-update-quiet.py || fail "Nothing restarts VWARD during an update"
+python3 tests/repository/check-tunnel-probe.py || fail "A working tunnel is not called dead"
+python3 tests/repository/check-resource-yield.py || fail "VWARD gives way to the router"
+python3 tests/repository/check-list-watch.py || fail "Route engine list watch"
+python3 tests/repository/check-wan-guard-params.py || fail "Internet guard limits"
+python3 tests/repository/check-console-tunnel-probe.py || fail "Panel tunnel check"
+python3 tests/repository/check-console-site-test.py || fail "site check, tunnel restart and switch-on"
+python3 tests/repository/check-console-site-do.py || fail "check an address: VPN, Smart DNS, directly or blocked"
+python3 tests/repository/check-ads-page-speed.py || fail "Ads page: only what it shows, programs side by side, AdGuard Home address cached"
+python3 tests/repository/check-console-tunnels.py || fail "VPN list and tunnel page: default tunnel, engine data, switching off"
+python3 tests/repository/check-console-tunnel-status.py || fail "Tunnel statuses: owner switch-off quiet, agent switch-off with time and reason"
+python3 tests/repository/check-agents-watch.py || fail "agents observation mode"
+python3 tests/repository/check-console-overview-cards.py || fail "Overview cards: three lines, honest values"
+python3 tests/repository/check-console-components.py || fail "«Компоненты»: groups, one state model, nothing green unconfirmed"
+python3 tests/repository/check-console-lists-center.py || fail "r-lists: domain lists center, managed lists only"
+python3 tests/repository/check-console-ads-ui.py || fail "ads-ui: order, honest statuses, exact share"
+python3 tests/repository/check-console-help-icon.py || fail "«?» next to its title"
+python3 tests/repository/check-version-numbering.py || fail "release numbering: fix.N / fix.N.M order"
+python3 tests/repository/check-console-update-method.py || fail "Updates: update method switch and last method"
+python3 tests/repository/check-console-notes.py || fail "Bell: pop-ups top right, history on the router, errors under fields"
+python3 tests/repository/check-console-fold.py || fail "Panel blocks fold to their title and stay folded"
+python3 tests/repository/check-ads-jobs.py || fail "Ads job queue: runs, lists, cancels, drains"
+python3 tests/repository/check-route-engine-dns-bind.py || fail "P-7 DNS binding recovery"
+python3 tests/repository/check-route-engine-capture.py || fail "route engine capture: LAN device, pause after quick deaths"
+python3 tests/repository/check-tunnel-fallback.py || fail "fallback tunnel and tunnel quality"
+python3 tests/repository/check-tunnel-lost-sweep.py || fail "lists off a tunnel without settings"
+python3 tests/repository/check-tunnel-move.py || fail "lists off a tunnel without settings: refused subnets, IP categories"
+python3 tests/repository/check-smartdns-clear.py || fail "P-7 Smart DNS clear and rollback"
+python3 tests/repository/check-smartdns-keenetic-forms.py || fail "Smart DNS in Keenetic: refused forms journaled, shorter forms tried"
+python3 tests/repository/check-component-ops.py || fail "components: AdGuard Home off, on, setup, removal"
+python3 tests/repository/check-policy-audit-tunnel.py || fail "IP categories judged only through a working tunnel"
+python3 tests/repository/check-policy-audit-pause.py || fail "IP categories' night check waits while Keenetic is busy, reasons in its summary"
+python3 tests/repository/check-tunnel-services.py || fail "services checked through every tunnel"
+python3 tests/repository/check-route-engine-alt-tunnel.py || fail "route engine tries the other tunnels"
+python3 tests/repository/check-console-agh-auth.py || fail "Panel AdGuard Home login"
+python3 tests/repository/check-console-smartdns.py || fail "Smart DNS guard"
+python3 tests/repository/check-console-tunnels.py || fail "Panel tunnels"
+python3 tests/repository/check-console-fold.py || fail "Panel blocks fold to their title and stay folded"
+python3 tests/repository/check-ads-jobs.py || fail "Ads job queue: runs, lists, cancels, drains"
+python3 tests/repository/check-route-engine-capture.py || fail "route engine capture: LAN device, pause after quick deaths"
+python3 tests/repository/check-ads-agh-settings.py || fail "AdGuard Home ad settings"
+python3 tests/repository/check-ads-agh-clients.py || fail "Device names reach AdGuard Home without a restart"
+python3 tests/repository/check-ads-dns-guard.py || fail "DNS of every device goes through AdGuard Home"
+python3 tests/repository/check-ads-route-dns.py || fail "routed domains go through Keenetic DNS"
+python3 tests/repository/check-route-sources.py || fail "routing sources keep their last good copy"
+python3 tests/repository/check-ads-agh-smartdns.py || fail "AdGuard Home Smart DNS rows for tunnel lists"
+python3 tests/repository/check-ads-agh-restore-safety.py || fail "AdGuard Home rollback never overwrites newer user changes"
+python3 tests/repository/check-ads-default-config.py || fail "Ads default settings"
+python3 tests/repository/check-console-backups.py || fail "Settings backups"
+python3 tests/repository/check-console-cleanup.py || fail "Cleanup and settings reset"
+python3 tests/repository/check-console-list-edit.py || fail "Clearing and deleting lists"
+python3 tests/repository/check-console-ai.py || fail "AI services and Smart DNS without AdGuard Home"
+python3 tests/repository/check-update-manual-install.py || fail "Manual install from VWARD"
+python3 tests/repository/check-wifi-hosts.py || fail "Wi-Fi device names and access"
+python3 tests/repository/check-console-files.py || fail "Files page: read only, secrets closed"
+python3 tests/repository/check-console-devices.py || fail "Only registered devices open VWARD"
+python3 tests/repository/check-route-engine-names.py || fail "Route engine sends only valid names"
+python3 tests/repository/check-route-engine-classify.py || fail "Route engine checks a name against all lists in one pass"
+python3 tests/repository/check-agh-bind.py || fail "List domains are bound to AdGuard Home in Keenetic (routes get the addresses the devices got)"
+python3 tests/repository/check-adaptive-full.py || fail "AdaptiveAuto: no Russian services, quiet for an hour at Keenetic's limit"
+python3 tests/repository/check-write-fail-survives.py || fail "A failed write does not end the route engine or S91 (BusyBox ash)"
+python3 tests/repository/check-route-engine-restore.py || fail "AdaptiveAuto restored at the start in one pass, within Keenetic's 300, no files left"
+python3 tests/repository/check-route-engine-start-reads.py || fail "engine start reads the configuration once (31.10 START_FAILED loop)"
+python3 tests/repository/check-route-engine-start-wait.py || fail "slow healthy engine start is waited for; a passing second core does not restart"
+python3 tests/repository/check-route-engine-watchdog.py || fail "Watchdog counts engine cores, not subshells"
+python3 tests/repository/check-console-diagnostics-dns.py || fail "Diagnostics: DNS chain, files as installed"
+python3 tests/repository/check-console-ndm-cache.py || fail "Panel caches Keenetic answers briefly"
+python3 tests/repository/check-release-notes.py || fail "What is new in a version"
+python3 tests/repository/check-console-request.py || fail "Panel request guards and form parsing"
+python3 tests/repository/check-housekeeping.py || fail "Housekeeping rotates logs and keeps copies to their newest few"
+python3 tests/repository/check-ext-update.py || fail "Updates of other software"
+python3 tests/repository/check-stale-locks.py || fail "Locks whose owner is gone are removed at boot and hourly"
+python3 tests/repository/check-console-tunnel.py || fail "Panel tunnel switch"
+python3 tests/repository/check-console-tunnel-add.py || fail "Panel tunnel add from .conf, switching off"
+python3 tests/repository/check-console-tunnel-import.py || fail "Panel tunnel import: keys, duplicate and silent-server questions"
+python3 tests/repository/check-component-graph.py || fail "Component dependency graph"
+python3 tests/repository/check-component-resilience.py || fail "Component disable resilience"
+python3 tests/repository/check-ads-console.py || fail "Ads Panel functions"
+python3 tests/repository/check-console-auth.py || fail "Panel login"
+python3 tests/repository/check-device-profile.py || fail "Device profile"
+python3 tests/repository/check-settings-registry.py || fail "Settings registry"
+python3 tests/repository/check-update-schema-registry.py || fail "Updater schema registry"
+python3 tests/repository/check-dev-release-pipeline.py || fail "Dev release pipeline"
+python3 tests/repository/check-package-map.py || fail "Signed package map"
+python3 tests/repository/check-wifi-client-guard.py || fail "Wi-Fi Client Guard safety"
+sh tests/repository/check-update-boot-recovery.sh || fail "Updater boot recovery"
+sh tests/repository/check-full-health-profile.sh || fail "Full update health profile"
+python3 tests/repository/check-ads-privacy-settings-registry.py || fail "Ads & Privacy Guard settings registry"
+python3 tests/repository/check-ads-privacy-integration.py || fail "Ads & Privacy Guard integration"
+grep -Fq 'interface $VWARD_WAN_INTERFACE down' components/wan-guard/scripts/vward-wan-guard.sh || fail "WAN down action is not profile-bound"
+grep -Fq 'interface $VWARD_WAN_INTERFACE up' components/wan-guard/scripts/vward-wan-guard.sh || fail "WAN up action is not profile-bound"
+grep -Fq '"$CAPTURE_FILTER"' components/route-engine/scripts/vward-route-engine.sh || fail "DNS capture filter is not expanded safely"
+grep -Fq "'src net \$VWARD_LAN_SUBNET" components/route-engine/scripts/vward-route-engine.sh && fail "DNS capture filter remains single-quoted"
+python3 tests/repository/check-policy-sync-safety.py || fail "VPN audit safety"
+python3 tests/repository/check-policy-groups.py || fail "IP categories see tunnel lists"
+sh tests/repository/check-wan-guard-recovery.sh || fail "WAN recovery cancellation safety"
+python3 tests/repository/check-wan-manual-recovery.py || fail "Manual WAN recovery"
+sh tests/repository/check-runtime-pid-safety.sh || fail "Runtime PID identity safety"
+sh tests/repository/check-terminating-signal-traps.sh || fail "Terminating signal trap safety"
+sh tests/repository/check-runtime-update-admission.sh || fail "Runtime update admission safety"
+sh tests/repository/check-updater-stale-lock-atomic.sh || fail "Updater stale-lock atomicity"
+sh tests/repository/check-external-archive-safety.sh || fail "External archive safety"
+python3 tests/repository/check-cutover-cron-parity.py || fail "Cutover cron parity"
+for SCRIPT in components/*/scripts/*.sh components/runtime/init.d/* \
+    components/update-engine/*.sh tests/updater/*.sh scripts/beta-to-dev-cutover.sh
+do
+    sh -n "$SCRIPT" || fail "shell syntax: $SCRIPT"
+done
+
+echo "CONSISTENCY_CHECKS=PASS"
