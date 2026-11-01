@@ -11,6 +11,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
+# No network in the tests: the Smart DNS liveness check (01.11) is not asked; the dead-server case
+# is covered by check-smartdns-url-remove.py with a seeded answer.
+os.environ["VWARD_DOH_ALIVE"] = "0"
 HELPER = ROOT / "components/console/scripts/vward-console-config.sh"
 RUNNING = "interface Wireguard0\n!\ndns-proxy\n    route object-group Mine Wireguard0 auto\n!\n"
 def fail(msg):
