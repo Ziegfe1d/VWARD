@@ -22,4 +22,9 @@ if "Проверка выполняется" not in js or "diagRunNote() +" not 
     fail("the page must say the check is running and show the result")
 if "'выключено: ' + n :" in js or "off.join(', ')" not in js:
     fail("«Управление» must name the switched-off components")
+# Smart DNS (01.11): a server that does not answer is said so; «Убрать свой сервер» tells what was cleared.
+if "sd.alive === 'no'" not in js or "Smart DNS не отвечает" not in js:
+    fail("the Panel must say that the Smart DNS server does not answer")
+if "в Keenetic строк ' + (c.keenetic || 0)" not in js or "Убирать нечего" not in js:
+    fail("«Убрать свой сервер» must report what was cleared, and say when there was nothing")
 print("CONSOLE_DIAG_UI=PASS")

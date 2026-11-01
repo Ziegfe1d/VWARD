@@ -1946,10 +1946,23 @@ if [ "$ACTION" = "diagnostics" ]; then
                 fi
             fi
         done
+        # The server itself answers (01.11.2026: the subscription ended; every client got «Temporary
+        # failure in name resolution» for the bound domains). Every server of the rows, at most 3.
+        SD_DEAD=0 SD_SRV=0
+        for SD_U in $({ printf '%s\n' "$DIAG_RC" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
+                ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print $3}'
+                command -v vward_agh_smartdns_urls >/dev/null 2>&1 && vward_agh_smartdns_urls; } | sort -u | head -n 3); do
+            command -v vward_doh_alive >/dev/null 2>&1 || break
+            SD_SRV=$((SD_SRV + 1))
+            VWARD_DOH_ALIVE_MT=${VWARD_DOH_ALIVE_MT:-4} vward_doh_alive "$SD_U"; [ $? != 1 ] || SD_DEAD=$((SD_DEAD + 1))
+        done
+        SD_U=
         # Smart DNS rows inside AdGuard Home do nothing while Keenetic does not hand it the queries.
         SD_KN="$(printf '%s\n' "$DIAG_RC" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {n++} END {print n + 0}')"
         SD_AGH_PORT="$(awk '/^[^ #]/ {d = ($1 == "dns:")} d && $1 == "port:" {print $2; exit}' "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" 2>/dev/null)"
-        if [ "$SD_KN" = 0 ] && [ -n "$SD_AGH_PORT" ] && [ "$SD_AGH_PORT" != 53 ] &&
+        if [ "$SD_DEAD" -gt 0 ]; then
+            SMARTDNS_STATUS=FAIL SMARTDNS_DETAIL="Smart DNS не отвечает: сервер ($SD_DEAD из $SD_SRV) не отвечает на запросы, привязанные к нему домены ($(printf '%s\n' "$SD_DOMAINS" | grep -c .)) не открываются. Уберите сервер в «ИИ → Smart DNS» или переведите сервисы на VPN"
+        elif [ "$SD_KN" = 0 ] && [ -n "$SD_AGH_PORT" ] && [ "$SD_AGH_PORT" != 53 ] &&
            ! printf '%s\n' "$DIAG_RC" | awk -v p=":$SD_AGH_PORT" '$1 == "ip" && $2 == "name-server" && index($3, p) && (NF == 3 || $4 == "\"\"" || $4 == "on") {f = 1} END {exit !f}'; then
             SMARTDNS_STATUS=WARN SMARTDNS_DETAIL="Не действует: Smart DNS настроен в AdGuard Home, а AdGuard Home сейчас не в цепочке DNS (см. «Цепочка DNS»)"
         elif [ -n "$SD_BAD" ]; then
@@ -2564,6 +2577,18 @@ if [ "$ACTION" = ai-data ]; then
     AI_STORE="$(awk -F= '$1 == "SMARTDNS_STORE" {print $2; exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)"
     case "$AI_STORE" in keenetic|agh) ;; *) AI_STORE=auto ;; esac
     AI_OWN="$(awk -F= '$1 == "SMARTDNS_URL" {u = substr($0, index($0, "=") + 1); sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); print u; exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)"
+    # Does the server answer (01.11.2026: the subscription ended, the domains stopped resolving): the
+    # owner's own server, else the one Keenetic's lines and AdGuard Home's rows use most. 5 min cache.
+    AI_ALIVE=""
+    AI_URL="$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)"
+    [ -n "$AI_URL" ] || AI_URL="$({ printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
+        ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print $3}'
+        command -v vward_agh_smartdns_urls >/dev/null 2>&1 && vward_agh_smartdns_urls; } | sort | uniq -c | sort -rn | awk 'NR == 1 {print $2}')"
+    if [ -n "$AI_URL" ] && command -v vward_doh_alive >/dev/null 2>&1; then
+        VWARD_DOH_ALIVE_MT=${VWARD_DOH_ALIVE_MT:-4} vward_doh_alive "$AI_URL"
+        case $? in 0) AI_ALIVE=yes ;; 1) AI_ALIVE=no ;; *) AI_ALIVE=unknown ;; esac
+    fi
+    AI_URL=
     AI_ON="$(awk -F'\t' 'NF >= 3 {print $1 "\t" $2 "\t" $3}' "$CONFIG_ETC/services/enabled.tsv" 2>/dev/null)"
     # The services waiting for room in Smart DNS (op_ai), and whether AdGuard Home runs.
     AI_WAIT="$(grep -E '^[a-z0-9][a-z0-9.@_-]{0,62}$' "${VWARD_AI_WAIT:-$CONFIG_ETC/smartdns-wait}" 2>/dev/null | head -n 50)"
@@ -2571,7 +2596,7 @@ if [ "$ACTION" = ai-data ]; then
     AI_ROUTES="$(printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "route" && $2 == "object-group" {print $3 "\t" $4}')"
     "$JQ" -c --arg doh "$AI_DOH" --arg agh "$AI_AGH" --arg own "$AI_OWN" --arg on "$AI_ON" --arg routes "$AI_ROUTES" --arg wait "$AI_WAIT" \
-        --argjson agh_run "$AI_AGH_RUN" --arg shared "$AI_SHARED" --arg store "$AI_STORE" \
+        --argjson agh_run "$AI_AGH_RUN" --arg shared "$AI_SHARED" --arg store "$AI_STORE" --arg alive "$AI_ALIVE" \
         --argjson agh_on "$([ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] && echo true || echo false)" '
         ($doh | split("\n") | map(select(length > 0) | split("\t"))) as $k
         | ($agh | split("\n") | map(select(length > 0))) as $a
@@ -2590,7 +2615,7 @@ if [ "$ACTION" = ai-data ]; then
         {ok: true,
          smartdns: {store: $store, keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_running: $agh_run, agh_domains: ($a | length),
                     waiting: ($wait | split("\n") | map(select(length > 0))),
-                    servers: ([$k[] | .[1]] + (if $own == "" then [] else [$own] end) | unique), own: $own},
+                    servers: ([$k[] | .[1]] + (if $own == "" then [] else [$own] end) | unique), own: $own, alive: $alive},
          services: [.services[] | select(.category == "ai") | . as $s
            | main($s.id; $s.domains) as $roots
            | ($groups[$s.id] // "") as $g
@@ -2620,10 +2645,14 @@ if [ "$ACTION" = smartdns-server ]; then
     fi
     SSURL="$(form_value url | sed 's/%3[Aa]/:/g;s/%2[Ff]/\//g;s/%2[Dd]/-/g;s/%2[Ee]/./g;s/%5[Ff]/_/g;s/%7[Ee]/~/g')"
     case "$SSOP" in set|clear) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;; esac
-    SSOUT="$(printf '%s\n' "$SSURL" | "$CONFIG_HELPER" smartdns-server "$SSOP" 2>/dev/null | tail -n 1)"
+    SSALL="$(printf '%s\n' "$SSURL" | "$CONFIG_HELPER" smartdns-server "$SSOP" 2>/dev/null)"
     unset SSURL BODY
+    SSOUT="$(printf '%s\n' "$SSALL" | tail -n 1)"
+    # What «clear» took out of the router (counts only): keenetic:N,agh:N,saved:N.
+    SSCLR="$(printf '%s\n' "$SSALL" | sed -n 's/^cleared=//p' | grep -E '^keenetic:[0-9]+,agh:[0-9]+,saved:[0-9]+$' | tail -n 1)"
     case "$SSOUT" in
-        result=*) "$JQ" -cn --arg r "${SSOUT#result=}" '{ok: true, result: $r}' ;;
+        result=*) "$JQ" -cn --arg r "${SSOUT#result=}" --arg c "$SSCLR" '{ok: true, result: $r}
+            + (if $c == "" then {} else {cleared: ($c | split(",") | map(split(":") | {key: .[0], value: (.[1] | tonumber)}) | from_entries)} end)' ;;
         error=*) E="${SSOUT#error=}"; case "$E" in *[!a-z0-9_]*) E=helper_failed ;; esac; "$JQ" -cn --arg e "$E" '{ok: false, error: $e}' ;;
         *) echo '{"ok":false,"error":"helper_failed"}' ;;
     esac

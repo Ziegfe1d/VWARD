@@ -145,6 +145,7 @@ cleanup() {
     [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.adds" "$JOURNAL.dels" "$JOURNAL.nets" "$JOURNAL.doh" "$JOURNAL.agh" "$JOURNAL.agh.inc" "$JOURNAL.agh.undo"
     [ -z "$JOURNAL" ] || rm -rf "$JOURNAL.saved"
     [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
+    case "${SD_TMPCONF:-}" in /tmp/vward-console-sdconf.*) rm -f "$SD_TMPCONF" "$SD_TMPCONF.all" ;; esac
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
     [ "$LOCKED" != 1 ] || rm -rf "${CHANGE_LOCK:?}"
     [ "$EDIT_LOCKED" != 1 ] || rm -rf "${EDIT_LOCK:?}"
@@ -933,6 +934,10 @@ doh_remove_once() {
         [ "$dr_other_lost" = 0 ] || snapshot
         doh_present "$1" || { dr_rc=0; break; }
     done
+    if [ "$dr_rc" = 1 ] && [ "$dr_other_lost" = 0 ]; then
+        doh_remove_url "$1" "$dr_url" "$dr_before"; dr_rc=$?
+        [ "$dr_rc" != 2 ] || dr_other_lost=1
+    fi
     rm -f "$dr_before"
     if [ "$dr_other_lost" = 1 ]; then
         # An unsafe form: leave the line as it was, the caller aborts.
@@ -940,6 +945,58 @@ doh_remove_once() {
         return 2
     fi
     return "$dr_rc"
+}
+
+# doh_remove_url LINE URL BEFORE: the form KeeneticOS 5.1.8 takes (owner, Viva 01.11.2026):
+# «dns-proxy no https upstream URL». It takes EVERY line of that server at once, so it is used
+# only as the last form and guarded:
+# - the configuration read now must be the one the lines were taken from (BEFORE), else stop;
+# - every other line of the same server is put back exactly as it was, unless the caller is
+#   taking it out too (DOH_ALLOWED: a file of the lines of this operation);
+# - lines of other servers must be untouched;
+# - anything not as planned: every line of the server is put back, 2 (the caller aborts).
+# Returns 0 removed, 1 not removable (nothing changed), 2 lines affected and restored.
+doh_remove_url() {
+    case "$2" in https://*) ;; *) return 1 ;; esac
+    du_now=$(mktemp /tmp/vward-console-doh.XXXXXX 2>/dev/null) || return 1
+    snapshot; doh_lines > "$du_now"
+    # A changed or empty read: nothing is done (another program changed Keenetic meanwhile).
+    if [ ! -s "$du_now" ] || ! cmp -s "$du_now" "$3"; then rm -f "$du_now"; return 1; fi
+    # Lines of this server ($3 == URL) to put back, and lines of other servers to keep.
+    awk -v u="$2" '$3 == u' "$du_now" > "$du_now.same"
+    awk -v u="$2" '$3 != u' "$du_now" > "$du_now.other"
+    awk -v t="$1" -v allowed="${DOH_ALLOWED:-}" '
+        BEGIN {if (allowed != "") while ((getline l < allowed) > 0) ok[l] = 1}
+        $0 != t && !($0 in ok)' "$du_now.same" > "$du_now.back"
+    ndm "dns-proxy no https upstream $2" || :
+    snapshot
+    du_bad=0
+    doh_lines | awk -v u="$2" '$3 != u' | cmp -s - "$du_now.other" || du_bad=1
+    if [ "$du_bad" = 0 ]; then
+        while IFS= read -r du_l; do
+            [ -n "$du_l" ] || continue
+            doh_present "$du_l" || ndm "dns-proxy $du_l" || { du_bad=1; break; }
+        done < "$du_now.back"
+        snapshot
+    fi
+    if [ "$du_bad" = 0 ]; then
+        doh_present "$1" && du_bad=1
+        while IFS= read -r du_l; do [ -z "$du_l" ] || doh_present "$du_l" || du_bad=1; done < "$du_now.back"
+        doh_lines | awk -v u="$2" '$3 != u' | cmp -s - "$du_now.other" || du_bad=1
+    fi
+    if [ "$du_bad" = 1 ]; then
+        # Not as planned: every line of the server back as it was (the target too).
+        while IFS= read -r du_l; do
+            [ -z "$du_l" ] || doh_present "$du_l" || ndm "dns-proxy $du_l" || :
+        done < "$du_now.same"
+        snapshot
+        audit "doh_remove_url restored server lines=$(grep -c . "$du_now.same")"
+        rm -f "$du_now" "$du_now.same" "$du_now.other" "$du_now.back"
+        return 2
+    fi
+    audit "doh_remove_url removed=1 kept=$(grep -c . "$du_now.back") taken_with=$(($(grep -c . "$du_now.same") - $(grep -c . "$du_now.back") - 1))"
+    rm -f "$du_now" "$du_now.same" "$du_now.other" "$du_now.back"
+    return 0
 }
 
 # Smart DNS kept in AdGuard Home ([/domain/]https://...): the rows of a list sent
@@ -989,6 +1046,25 @@ wan_route_target() {
     t=$(awk -v w="$VWARD_WAN_INTERFACE" '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "route" && $2 == "object-group" && ($4 == "ISP" || $4 == w) {print $4; exit}' "$RUNCFG")
     printf '%s\n' "${t:-$VWARD_WAN_INTERFACE}"
+}
+
+# doh_drop_dead FILE doh|agh: lines of FILE whose Smart DNS server does not answer leave FILE
+# (vward_doh_alive 1; «cannot tell» keeps them); their number is added to DOH_DEAD_N.
+# doh lines: «https upstream URL ...»; agh pairs: «domain<TAB>URL».
+doh_drop_dead() {
+    [ -s "$1" ] && command -v vward_doh_alive >/dev/null 2>&1 || return 0
+    : > "$1.keep" || die write_failed
+    while IFS= read -r dd_l; do
+        [ -n "$dd_l" ] || continue
+        if [ "$2" = doh ]; then set -- "$1" "$2" $dd_l; dd_u=${5:-}; else dd_u=${dd_l#*"$tab"}; fi
+        if [ -n "$dd_u" ] && { vward_doh_alive "$dd_u"; [ $? = 1 ]; }; then
+            DOH_DEAD_N=$((${DOH_DEAD_N:-0} + 1))
+            continue
+        fi
+        printf '%s\n' "$dd_l" >> "$1.keep" || die write_failed
+    done < "$1"
+    mv -f "$1.keep" "$1" || die write_failed
+    [ -z "${DOH_DEAD_N:-}" ] || audit "smartdns server not answering: ${DOH_DEAD_N} line(s) not put back"
 }
 
 op_domain_list() {
@@ -1045,12 +1121,16 @@ op_domain_list() {
             echo "dns-proxy route object-group $G $cur_t$o" >> "$JOURNAL"
         fi
         # 2. Smart DNS answers would send the tunnel to the Smart DNS proxy.
+        DOH_ALLOWED="$JOURNAL.doh"
         while IFS= read -r L; do
             [ -n "$L" ] || continue
+            # Taken already with another line of this list (removal by server, doh_remove_url).
+            doh_present "$L" || { echo "dns-proxy $L" >> "$JOURNAL"; continue; }
             doh_remove "$L"; rc=$?
             [ "$rc" = 0 ] || { [ "$rc" = 2 ] && die doh_remove_unsafe; die doh_remove_failed; }
             echo "dns-proxy $L" >> "$JOURNAL"
         done < "$JOURNAL.doh"
+        DOH_ALLOWED=
         # 2b. The same rows kept in AdGuard Home.
         agh_take "$G" "$JOURNAL.agh" || die "$AGH_ERR"
         # 3. Verify, then remember how to come back.
@@ -1068,6 +1148,11 @@ op_domain_list() {
         { [ -n "$cur_t" ] && is_tunnel "$cur_t"; } || { TXN=0; done_ok "domain-list $G bypass" unchanged; }
         TUN=$cur_t
         sed -n 's/^doh=//p' "$saved" 2>/dev/null > "$JOURNAL.doh"
+        sed -n 's/^agh=//p' "$saved" 2>/dev/null > "$JOURNAL.agh"
+        # A Smart DNS server that does not answer gets no domains back (01.11.2026: the
+        # subscription ended, the saved lines came back and 8 domains stopped resolving for every
+        # client): they stay on the ordinary DNS; the saved state goes with this switch.
+        doh_drop_dead "$JOURNAL.doh" doh; doh_drop_dead "$JOURNAL.agh" agh
         if [ "$new_t" != - ]; then
             o=; [ "$new_o" = - ] || o=" $new_o"
             ndm "dns-proxy route object-group $G $new_t$o" || die router_rejected
@@ -1083,7 +1168,6 @@ op_domain_list() {
             printf '%s\n' "$out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found)' && die router_rejected
             echo "DOH-REMOVE $L" >> "$JOURNAL"
         done < "$JOURNAL.doh"
-        sed -n 's/^agh=//p' "$saved" 2>/dev/null > "$JOURNAL.agh"
         if [ -s "$JOURNAL.agh" ]; then
             agh_recovery_reserve put
             cp "$JOURNAL.agh" "$SD_RECOVERY_DIR/pairs.tsv" || die backup_failed
@@ -1099,7 +1183,7 @@ op_domain_list() {
         [ "$new_t" = - ] || route_present "$G" "$new_t" || die verification_failed
         ! route_present "$G" "$TUN" || die verification_failed
         while IFS= read -r L; do [ -z "$L" ] || doh_present "$L" || die verification_failed; done < "$JOURNAL.doh"
-        detail="route=$TUN->$new_t doh=$(grep -c . "$JOURNAL.doh") agh=$(grep -c . "$JOURNAL.agh")"
+        detail="route=$TUN->$new_t doh=$(grep -c . "$JOURNAL.doh") agh=$(grep -c . "$JOURNAL.agh")${DOH_DEAD_N:+ smartdns_dead=$DOH_DEAD_N}"
     fi
 
     save_router || die config_save_failed
@@ -2945,10 +3029,13 @@ smartdns_take_rows() {
             if ((mode == "server" && $3 == v) || (mode == "domain" &&
                 (d == v || (length(d) > length(v) && substr(d, length(d)-length(v)) == "." v)))) print
         }' > "$JOURNAL.doh" || die write_failed
+    # One removal by server may take several lines of this operation at once (doh_remove_url).
+    DOH_ALLOWED="$JOURNAL.doh"
     while IFS= read -r sd_line; do
         [ -n "$sd_line" ] || continue
         # Record first: a command may change the router even when verification fails.
         printf 'dns-proxy %s\n' "$sd_line" >> "$JOURNAL" || die write_failed
+        doh_present "$sd_line" || { SD_RESULT=changed; continue; }
         doh_remove "$sd_line"; sd_rc=$?
         case "$sd_rc" in 0) ;; 2) die doh_remove_unsafe ;; *) die doh_remove_failed ;; esac
         SD_RESULT=changed
@@ -3012,21 +3099,51 @@ op_smartdns_server() {
              cmp -s "$TMPFILE" "$SMARTDNS_CONF" && done_ok "smartdns-server set" unchanged
              install_tmp "$SMARTDNS_CONF" 0600 || die write_failed
              done_ok "smartdns-server set" changed ;;
-        clear) grep -q '^SMARTDNS_URL=' "$SMARTDNS_CONF" 2>/dev/null || done_ok "smartdns-server clear" unchanged
+        clear)
+             # The owner's own server (smartdns.conf) in both stores, with a Panel report of what was
+             # cleared (01.11.2026: the button cleared the address only, Keenetic's lines and the 36
+             # AdGuard Home rows stayed on the dead server).
+             ss_own=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=")+1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
+             # Only the owner's own server: another server is never cleared by this button.
+             [ -n "$ss_own" ] || done_ok "smartdns-server clear" unchanged
+             ss_conf=$SMARTDNS_CONF
+             load_profile_base; snapshot
+             # Every server the two stores use, in a private file (addresses may hold tokens).
+             SD_TMPCONF=$(umask 077; mktemp /tmp/vward-console-sdconf.XXXXXX) || die temporary_file_unavailable
+             { doh_lines | awk '$(NF-1) == "domain" {print $3}'; vward_agh_smartdns_urls; } | sort -u > "$SD_TMPCONF.all" || die write_failed
+             ss_old=
+             if grep -qxF -- "$ss_own" "$SD_TMPCONF.all"; then
+                 ss_old=$ss_own
+             else
+                 # The rows use another address of the same server (another token or path, 01.11: the
+                 # Panel's button cleared the address only): the same host, and only one such
+                 # address - else only the owner's own address is cleared, as before.
+                 ss_same=$(SS_OWN=$ss_own awk 'function host(u) {sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); return tolower(u)}
+                     BEGIN {h = host(ENVIRON["SS_OWN"])} host($0) == h' "$SD_TMPCONF.all")
+                 if [ "$(printf '%s\n' "$ss_same" | grep -c .)" = 1 ]; then ss_old=$ss_same; else ss_old=$ss_own; fi
+             fi
+             rm -f "$SD_TMPCONF.all"
              backup_file "$SMARTDNS_CONF" || die backup_failed
+             # The selectors read the address from a file, never from a command line.
+             SMARTDNS_CONF=$SD_TMPCONF
+             { grep -v '^SMARTDNS_URL=' "$ss_conf" 2>/dev/null; printf 'SMARTDNS_URL=%s\n' "$ss_old"; } > "$SMARTDNS_CONF" || die write_failed
+             SD_DOH_N=0 SD_AGH_N=0 sd_saved_n=0
              # Keep the address until both stores and the router save have succeeded.
              if [ "$(awk -F= '$1 == "smartdns_clear_rules" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" != 0 ]; then
-                 ss_old=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=")+1); exit}' "$SMARTDNS_CONF")
-                 if [ -n "$ss_old" ]; then
-                     smartdns_take_rows server "$ss_old"
-                     smartdns_prune_saved server
-                 fi
+                 smartdns_take_rows server "$ss_old"
+                 SD_DOH_N=$(grep -c . "$JOURNAL.doh" 2>/dev/null); SD_AGH_N=$(grep -c . "${sd_agh_pairs:-/dev/null}" 2>/dev/null)
+                 smartdns_prune_saved server
              fi
+             rm -f "$SMARTDNS_CONF"; SMARTDNS_CONF=$ss_conf
              new_tmp "$SMARTDNS_CONF" || die write_failed
              grep -v '^SMARTDNS_URL=' "$SMARTDNS_CONF" > "$TMPFILE"
              if [ -s "$TMPFILE" ]; then install_tmp "$SMARTDNS_CONF" 0600 || die write_failed; else rm -f "$SMARTDNS_CONF" || die write_failed; fi
+             SD_RESULT=changed
              TXN=0
-             done_ok "smartdns-server clear" changed ;;
+             # What was cleared, for the Panel (no address): lines in Keenetic, rows in AdGuard Home,
+             # saved list states that would have brought them back.
+             printf 'cleared=keenetic:%s,agh:%s,saved:%s\n' "${SD_DOH_N:-0}" "${SD_AGH_N:-0}" "${sd_saved_n:-0}"
+             done_ok "smartdns-server clear keenetic=${SD_DOH_N:-0} agh=${SD_AGH_N:-0} saved=${sd_saved_n:-0}" "${SD_RESULT:-unchanged}" ;;
         *) die invalid_operation 64 ;;
     esac
 }

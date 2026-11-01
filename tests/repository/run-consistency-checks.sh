@@ -175,6 +175,7 @@ python3 tests/repository/check-tunnel-fallback.py || fail "fallback tunnel and t
 python3 tests/repository/check-tunnel-lost-sweep.py || fail "lists off a tunnel without settings"
 python3 tests/repository/check-tunnel-move.py || fail "lists off a tunnel without settings: refused subnets, IP categories"
 python3 tests/repository/check-smartdns-clear.py || fail "P-7 Smart DNS clear and rollback"
+python3 tests/repository/check-smartdns-url-remove.py || fail "Smart DNS removal by server on KeeneticOS 5.1.8; a dead server gets no lines back"
 python3 tests/repository/check-smartdns-keenetic-forms.py || fail "Smart DNS in Keenetic: refused forms journaled, shorter forms tried"
 python3 tests/repository/check-component-ops.py || fail "components: AdGuard Home off, on, setup, removal"
 python3 tests/repository/check-policy-audit-tunnel.py || fail "IP categories judged only through a working tunnel"

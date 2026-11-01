@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory() as tmp:
     comp.write_text(json.dumps({"components": {"x": {"files": {f: hashlib.sha256(b).hexdigest() for f, b in files.items()}}}}))
     env = os.environ | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=diagnostics", "JQ": shutil.which("jq"), "CURL": "/bin/false",
                         "PATH": f"{tools}:{os.environ['PATH']}", "VWARD_NDMC": str(ndmc), "VWARD_NSLOOKUP": str(tools / "nslookup"),
-                        "VWARD_PROFILE_LIB": str(ROOT / "components/runtime/lib/vward-device-profile.sh"),
+                        "VWARD_DOH_ALIVE": "0", "VWARD_PROFILE_LIB": str(ROOT / "components/runtime/lib/vward-device-profile.sh"),
                         "VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_ROOT_PREFIX": str(root), "VWARD_LAN_ADDRESS": "192.168.1.1"}
 
     def diag(conf, up, port):
@@ -166,5 +166,19 @@ with tempfile.TemporaryDirectory() as tmp:
     r = sd("192.0.2.0/24\n", HELD)
     if r["status"] != "PASS":
         fail(f"route through the provider: {r}")
+    # The Smart DNS server itself does not answer (01.11: the subscription ended, domains stopped
+    # resolving for every client): FAIL «не отвечает», whatever the routes (answer seeded, no network).
+    alive = tmp / "alive"; alive.mkdir()
+    k = subprocess.run(["sh", "-c", 'printf %s "$U" | cksum | cut -d" " -f1'], env={"U": "https://x.example/dns-query", "PATH": "/usr/bin:/bin"},
+                       capture_output=True, text=True).stdout.strip()
+    (alive / k).write_text("1\n")
+    env["VWARD_DOH_ALIVE"] = "1"; env["VWARD_DOH_ALIVE_DIR"] = str(alive)
+    r = sd("192.0.2.0/24\n", HELD)
+    if r["status"] != "FAIL" or "не отвечает" not in r["detail"] or "x.example" in r["detail"]:
+        fail(f"RED: a Smart DNS server that does not answer must be FAIL, without its address: {r}")
+    (alive / k).write_text("0\n")
+    if sd("192.0.2.0/24\n", HELD)["status"] != "PASS":
+        fail("a server that answers keeps the route verdict")
+    env["VWARD_DOH_ALIVE"] = "0"
 
 print("CONSOLE_DIAGNOSTICS_DNS=PASS")

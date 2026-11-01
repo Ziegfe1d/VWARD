@@ -1423,10 +1423,13 @@ function aiPage() {
       aiSlider(s.id, s.via, s.title) +
       (s.tunnel && tuns.length > 1 ? '<dl class="kv">' + ctrlRow('Туннель', sel('data-ai-tunnel="' + esc(s.id) + '"', 'Туннель для ' + s.title, tuns.map(t => [t.name, tunLabel(t.name)]), s.tunnel || prof().tunnel_interface)) + '</dl>' : '') + '</div>';
   // Smart DNS first: the services «через Smart DNS» open only while it works (owner 2026-10-17).
-  return loadError(['ai']) + aiQuestion(sd) + aiRoomPanel(sd) +
+  // The server does not answer (01.11.2026: the subscription ended): its domains do not resolve.
+  const sdDead = a && sd.alive === 'no' ? panel('Smart DNS не отвечает', '<p class="result-note warn">Сервер Smart DNS не отвечает на запросы: сайты, привязанные к нему (' +
+    fmtInt((sd.keenetic || 0) + (sd.agh_domains || 0)) + '), не открываются. Уберите сервер кнопкой ниже или переведите сервисы на VPN.</p>') : '';
+  return loadError(['ai']) + sdDead + aiQuestion(sd) + aiRoomPanel(sd) +
     panel('Smart DNS', kv([
         ['Где хранится', !a ? '…' : sd.agh ? 'AdGuard Home' : 'Keenetic', '', null, '', sd.agh ? 'доменов: ' + fmtInt(sd.agh_domains || 0) : 'строк ' + fmtInt(sd.keenetic || 0) + ' из ' + fmtInt(sd.keenetic_max || 8)],
-        ['Сервер', !a ? '…' : (sd.servers || []).join(', ') || 'не задан', a && noSd ? 'warn' : ''],
+        ['Сервер', !a ? '…' : ((sd.servers || []).join(', ') || 'не задан') + (sd.alive === 'no' ? ' · не отвечает' : sd.alive === 'yes' ? ' · отвечает' : ''), a && sd.alive === 'no' ? 'crit' : a && noSd ? 'warn' : ''],
         ['Домены Smart DNS', 'открыть', '', 'd-smartdns', '', 'и агент: держит их мимо VPN']]) + sdStoreRow(a, sd) +
       inputBar({ form: 'ai-dns-add', label: sd.own ? 'Заменить свой сервер DoH' : 'Свой сервер DoH', name: 'server', mono: true, placeholder: 'https://dns.example/dns-query', aria: 'Адрес DoH', off: !cfgOk(), icon: 'plus', btn: 'Сохранить' }) +
       (sd.own ? '<div class="panel-actions">' + btn('ai-dns-clear', 'close', 'Убрать свой сервер') + '</div>' : '') + resultBox('aidns'),
@@ -1452,7 +1455,9 @@ document.addEventListener('change', async e => {
 });
 async function smartdnsServer(op, url) {
   let x; try { x = await apiPost('smartdns-server', { op: op, url: url }); } catch (err) { x = { ok: false, error: err.message }; }
-  actionResult = { id: 'aidns', text: x.ok ? (op === 'set' ? 'Сервер сохранён' : 'Свой сервер убран') : 'Не выполнено: ' + errText(x) };
+  const c = x.cleared || {};
+  actionResult = { id: 'aidns', text: x.ok ? (op === 'set' ? 'Сервер сохранён' : x.result === 'unchanged' ? 'Убирать нечего: привязок к своему серверу нет' :
+    'Свой сервер убран. Очищено: в Keenetic строк ' + (c.keenetic || 0) + ', в AdGuard Home доменов ' + (c.agh || 0) + ', сохранённых состояний списков ' + (c.saved || 0)) : 'Не выполнено: ' + errText(x) };
   await load('ai', true); render();
 }
 // aiJob ID WAY MSG [KEEP]: KEEP - the answer to «no room in Smart DNS» (the service still waits
