@@ -37,7 +37,8 @@ for shell in shells:
         (t / "bin").mkdir()
         # curl stand-in: «up» answers 200 for the hosts listed, else a timeout (rc 28, 000).
         (t / "bin/curl").write_text('#!/bin/sh\necho "$*" >> "$T/calls"\nfor a; do u=$a; done\n'
-                                    'h=${u#*://}; h=${h%%/*}\nif grep -qx "$h" "$T/up" 2>/dev/null; then printf 200; exit 0; fi\n'
+                                    'h=${u#*://}; h=${h%%/*}\n[ ! -e "$T/crash" ] || kill -ILL $$\n'
+                                    'if grep -qx "$h" "$T/up" 2>/dev/null; then printf 200; exit 0; fi\n'
                                     'printf 000; exit 28\n')
         (t / "bin/curl").chmod(0o755)
 
@@ -47,7 +48,7 @@ for shell in shells:
                 (t / "state").unlink(missing_ok=True)
             (t / "calls").unlink(missing_ok=True)
             env = {"PATH": f"{t}/bin:/usr/bin:/bin", "T": str(t), "VWARD_WAN_DEVICE": "eth3",
-                   "VWARD_ISP_CONTROL_STATE": str(t / "state")} | (env_extra or {})
+                   "VWARD_ISP_CONTROL_STATE": str(t / "state"), "VWARD_TLS_BROKEN_FLAG": str(t / "tls.broken")} | (env_extra or {})
             r = subprocess.run([*shell, "-c", fn + "vward_isp_control; echo rc=$?"], env=env, capture_output=True, text=True)
             calls = (t / "calls").read_text().splitlines() if (t / "calls").exists() else []
             return r.stdout.strip(), calls
@@ -73,6 +74,18 @@ for shell in shells:
         out, calls = run([], {"VWARD_WAN_DEVICE": ""})
         if out != "rc=2":
             fail("no WAN device: cannot tell (2), never «unreliable»")
+        # curl crashing on HTTPS (CI chaos «curl-https-crash»: the control added 2 crashes): one try,
+        # then «cannot tell», nothing kept; with curl known broken: no curl at all.
+        (t / "crash").write_text("")
+        out, calls = run(["ya.ru"])
+        if out != "rc=2" or len(calls) != 1 or (t / "state").exists():
+            fail(f"a crashing curl: one try, «cannot tell», nothing kept: {out} {calls}")
+        (t / "crash").unlink()
+        (t / "tls.broken").write_text("")
+        out, calls = run(["ya.ru"])
+        if out != "rc=2" or calls:
+            fail(f"curl known broken on HTTPS: no curl, «cannot tell»: {out} {calls}")
+        (t / "tls.broken").unlink()
 
 # The deciders.
 add = ENGINE[ENGINE.index("\nadd_adaptive()\n"):ENGINE.index("\nremove_adaptive()\n")]

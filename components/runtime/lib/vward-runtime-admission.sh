@@ -110,13 +110,22 @@ vward_isp_control() {
         *) [ "$vic_now" -lt "$vic_t" ] || [ $((vic_now - vic_t)) -ge "${VWARD_ISP_CONTROL_TTL:-120}" ] || return "$vic_r" ;;
     esac
     [ -n "${VWARD_WAN_DEVICE:-}" ] && command -v curl >/dev/null 2>&1 || return 2
-    vic_r=1
+    # curl crashing on HTTPS (Entware's OpenSSL on some MIPS routers): the shared turn and
+    # «broken for an hour» of the site checks (vward_tls_take/done), never a crash of its own;
+    # a curl that cannot do HTTPS cannot tell (2).
+    [ -z "$(find "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" -mmin -60 2>/dev/null)" ] || return 2
+    ! command -v vward_tls_take >/dev/null 2>&1 || vward_tls_take || return 2
+    vic_r=1 vic_rc=0
     for vic_u in ${VWARD_ISP_CONTROL_URLS:-https://ya.ru/ https://vk.com/}; do
         vic_c=$(curl --http1.1 -4 --noproxy '*' --interface "$VWARD_WAN_DEVICE" \
             --connect-timeout "${VWARD_ISP_CONTROL_CT:-2}" --max-time "${VWARD_ISP_CONTROL_MT:-3}" \
-            -A "Mozilla/5.0" -s -o /dev/null -w '%{http_code}' "$vic_u" 2>/dev/null) &&
-            [ "${vic_c:-000}" != 000 ] && { vic_r=0; break; }
+            -A "Mozilla/5.0" -s -o /dev/null -w '%{http_code}' "$vic_u" 2>/dev/null)
+        vic_rc=$?
+        [ "$vic_rc" = 0 ] && [ "${vic_c:-000}" != 000 ] && { vic_r=0; break; }
+        case "$vic_rc" in 132|134|135|136|139) vic_r=2; break ;; esac
     done
+    ! command -v vward_tls_done >/dev/null 2>&1 || vward_tls_done "$vic_rc"
+    [ "$vic_r" = 2 ] && return 2
     printf '%s %s\n' "$vic_now" "$vic_r" > "$vic_f" 2>/dev/null
     return "$vic_r"
 }
