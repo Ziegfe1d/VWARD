@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""A tunnel without settings: its lists and subnets go to the default tunnel (fix.32)."""
+"""A tunnel without settings: its lists and subnets go to the default tunnel (fix.32) - since 02.11.2026
+only with the owner's explicit consent (VWARD_LOST_MOVE=auto): otherwise only proposed, in any mode,
+and in «Действие» the owner is told once a day instead (the default tunnel carries his own subnets
+and DNS rules; nothing is moved onto it without him)."""
 import re
 import subprocess
 import sys
@@ -36,7 +39,7 @@ ip route 10.20.0.0 255.255.0.0 OpkgTun2 auto
 """
 
 
-def run(mode: str, action: str = "KEEP_UP", link5: str = "down") -> tuple[str, str, str]:
+def run(mode: str, action: str = "KEEP_UP", link5: str = "down", consent: str = "", agent: str = "watch") -> tuple[str, str, str]:
     with tempfile.TemporaryDirectory() as tmp:
         t = Path(tmp)
         (t / "cfg").write_text(CONFIG)
@@ -44,7 +47,8 @@ def run(mode: str, action: str = "KEEP_UP", link5: str = "down") -> tuple[str, s
         (t / "helper").chmod(0o755)
         sh = f"""
 ACTION={action} MODE={mode} DIR="{t}" LOG="{t}/guard.log" NOW_TEXT=now HELPER="{t}/helper"
-VWARD_TUNNEL_INTERFACE=OpkgTun4
+VWARD_TUNNEL_INTERFACE=OpkgTun4 {('VWARD_LOST_MOVE=' + consent) if consent else ''}
+vward_agent_mode() {{ echo {agent}; }}
 vward_keenetic_config() {{ cat "{t}/cfg"; }}
 engine_of() {{ [ "$1" = OpkgTun5 ] && echo /bin/engine; [ "$1" = OpkgTun5 ]; }}
 vward_interface_state() {{ case "$1" in OpkgTun5) printf 'up\\n{link5}\\n' ;; *) printf 'up\\ndown\\n' ;; esac; }}
@@ -61,7 +65,14 @@ lost_sweep
         return read("helper.log"), read("notes") + read("guard.log"), read("proposed")
 
 
+# RED before 02.11: AUTO moved the lists and subnets without asking.
 h, notes, prop = run("AUTO")
+if h or "lost-move:OpkgTun2" not in prop:
+    fail(f"RED: without the owner's consent nothing moves, it is proposed: {h!r} {prop!r}")
+h, notes, prop = run("AUTO", agent="act")
+if h or "t-OpkgTun2" not in notes or notes.count("Туннель «{t}» без настроек") != 1:
+    fail(f"in «Действие» without consent: told once, nothing moved: {h!r} {notes!r}")
+h, notes, prop = run("AUTO", consent="auto")
 if h != "tunnel-delete OpkgTun2 vpn move\n":
     fail(f"only the tunnel without settings moves, once in 30 minutes: {h!r}")
 if "LOST_MOVED|from=OpkgTun2|to=OpkgTun4" not in notes or "t-OpkgTun2" not in notes:
@@ -69,7 +80,7 @@ if "LOST_MOVED|from=OpkgTun2|to=OpkgTun4" not in notes or "t-OpkgTun2" not in no
 h, notes, prop = run("WATCH")
 if h or "lost-move:OpkgTun2" not in prop:
     fail(f"watching proposes and changes nothing: {h!r} {prop!r}")
-h, _, _ = run("AUTO", action="FALLBACK_SWITCH")
+h, _, _ = run("AUTO", action="FALLBACK_SWITCH", consent="auto")
 if h:
     fail("nothing moves while the default tunnel does not answer")
 # The helper: move only, the tunnel stays; the API passes it down; the Panel offers it.
