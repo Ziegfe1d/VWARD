@@ -3240,10 +3240,18 @@ if [ "$ACTION" = "log" ]; then
 
     header_text
 
-    if [ -n "$FILE" ] && [ -r "$FILE" ]; then
+    # Empty, not created yet and unreadable are different states (owner 2026-11-01): the
+    # Panel shows which source has nothing and which cannot be read.
+    if [ -z "$FILE" ]; then
+        echo "Журнал недоступен: неизвестный журнал."
+    elif [ -r "$FILE" ] && [ -s "$FILE" ]; then
         tail -n "$COUNT" "$FILE" 2>/dev/null
+    elif [ -r "$FILE" ]; then
+        echo "Журнал пуст: записей пока нет."
+    elif [ -e "$FILE" ]; then
+        echo "Журнал недоступен: нет прав на чтение."
     else
-        echo "Лог пока пуст или недоступен."
+        echo "Журнал ещё не создан: программа пока ничего не записала."
     fi
 
     exit 0

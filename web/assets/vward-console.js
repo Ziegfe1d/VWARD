@@ -67,6 +67,7 @@ const ICON_PATHS = {
   share: '<circle cx="17.5" cy="6" r="2.2"/><circle cx="6.5" cy="12" r="2.2"/><circle cx="17.5" cy="18" r="2.2"/><path d="m8.5 11 7-3.9M8.5 13l7 3.9"/>',
   save: '<path d="M12 4.5v10"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 19.5h14"/>',
   archive: '<rect x="4" y="4.5" width="16" height="4.5" rx="1.5"/><path d="M5.5 9v9a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5V9"/><path d="M10 13h4"/>',
+  sort: '<path d="M7 4v16"/><path d="m4 17 3 3 3-3"/><path d="M13 6h7"/><path d="M13 12h5"/><path d="M13 18h3"/>',
   wrap: '<path d="M4 6.5h16"/><path d="M4 12h12.5a3 3 0 0 1 0 6H13"/><path d="m15 16-2 2 2 2"/><path d="M4 17.5h5"/>',
   trash: '<path d="M4.5 7h15"/><path d="M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2"/><path d="M6.5 7l.8 11.5a1.5 1.5 0 0 0 1.5 1.5h6.4a1.5 1.5 0 0 0 1.5-1.5L17.5 7"/><path d="M10 11v5.5M14 11v5.5"/>',
   broom: '<path d="M19.5 4.5 12 12"/><path d="M12.5 11.5 8.8 9.2c-1.1-.7-2.6-.4-3.3.7L4 12.5l7.5 7.5 2.6-1.5c1.1-.7 1.4-2.2.7-3.3z"/><path d="m7 15 2.5 2.5"/>',
@@ -715,20 +716,26 @@ function logTime(line) {
 // belongs to the entry above it; each entry is marked with its journal. A line without a time
 // and nothing above it («Лог пока пуст или недоступен», a program's raw output) stays in its
 // own journal only: in the timeline it stood on top of everything (fix.30).
-function mergeLogs(parts) {
+// Newest first by default (owner 2026-11-01), the order is the viewer's choice; an entry keeps
+// its continuation lines under its own time whatever the order. info (optional) receives
+// each source's state - its last event, empty, not created or unreadable - so a source with
+// nothing new is not «broken» and a broken one is not silently left out.
+function mergeLogs(parts, newestFirst, info) {
   const entries = [];
   parts.forEach(p => {
-    let last = null;
-    String(p.text || '').split('\n').forEach(line => {
+    let last = null, latest = null, n = 0;
+    const text = String(p.text || ''), first = text.trim().split('\n')[0] || '';
+    text.split('\n').forEach(line => {
       if (!line.trim()) return;
       const t = logTime(line);
       if (t == null && last) { last.lines.push('    ' + line); return; }
       if (t == null) return;
       last = { t: t, n: entries.length, lines: ['[' + p.label + '] ' + line] };
-      entries.push(last);
+      entries.push(last); n++; if (latest == null || t > latest) latest = t;
     });
+    if (info) info.push({ label: p.label, last: latest, state: n ? 'ok' : /^Журнал недоступен/.test(first) ? 'error' : /^Журнал ещё не создан/.test(first) ? 'missing' : 'empty' });
   });
-  entries.sort((a, b) => a.t - b.t || a.n - b.n);
+  entries.sort((a, b) => newestFirst ? b.t - a.t || b.n - a.n : a.t - b.t || a.n - b.n);
   return entries.map(e => e.lines.join('\n')).join('\n');
 }
 const DETAILS = {
@@ -861,6 +868,9 @@ let hiddenCards = store.get('vward-card-hidden', []).filter(id => CARD_IDS.inclu
 let cardView = store.get('vward-card-view', 'grid'); if (!['grid', 'list'].includes(cardView)) cardView = 'grid';
 let authForm = false, loginOpen = false;
 let current = 'overview', editing = false, confirm = null, logTab = 'all', logWrap = true, actionResult = null;
+// «Все»: newest first unless the viewer chose otherwise (kept in this browser); each source's state.
+let logNewest = store.get('vward-log-order') !== 'oldest';
+const LOGINFO = [];
 
 /* ---------- Построение блоков ---------- */
 // The heading and its description sit above the card; the card holds only the content.
@@ -956,7 +966,10 @@ function panel(title, body, opts) {
   const foldable = !same && !opts.fixed && !!title, key = foldable ? foldKey(title) : '', folded = foldable && !!FOLDED[key];
   const toggle = foldable ? '<button class="block-toggle" type="button" data-fold="' + esc(key) + '" aria-expanded="' + !folded + '" aria-label="' + (folded ? 'Развернуть' : 'Свернуть') + ' «' + esc(title) + '»" title="' + (folded ? 'Развернуть' : 'Свернуть') + '">' + ico('chevron') + '</button>' : '';
   const longDesc = opts.desc && String(opts.desc).length > DESC_MAX && !!title, dq = 'p:' + title;
-  const head = same && !extra && !longDesc ? '' : '<div class="block-head' + (foldable ? ' foldable' : '') + '"' + (foldable ? ' data-fold="' + esc(key) + '"' : '') + '>' + (same ? '' : '<h2>' + ico(opts.icon || headIcon(title), 'head-ico') + esc(title) + '</h2>') + (longDesc && !folded ? qBtn(dq, title) : '') + (opts.beta ? '<span class="tag beta">Бета</span>' : '') + (opts.readonly ? '<span class="note">' + ico('lock') + 'Только чтение</span>' : '') + (opts.right || '') + toggle + '</div>';
+  // A page's own block: its «?» goes next to the page title at the top (owner 2026-11-01:
+  // the title and its «?» together, never apart); the explanation opens in the block.
+  if (same && longDesc) PAGEQ = { k: dq, title: title };
+  const head = same && !extra ? '' : '<div class="block-head' + (foldable ? ' foldable' : '') + '"' + (foldable ? ' data-fold="' + esc(key) + '"' : '') + '>' + (same ? '' : '<h2>' + ico(opts.icon || headIcon(title), 'head-ico') + esc(title) + '</h2>') + (longDesc && !folded && !same ? qBtn(dq, title) : '') + (opts.beta ? '<span class="tag beta">Бета</span>' : '') + (opts.readonly ? '<span class="note">' + ico('lock') + 'Только чтение</span>' : '') + (opts.right || '') + toggle + '</div>';
   return '<section class="block' + (folded ? ' folded' : '') + '"' + (same ? ' aria-label="' + esc(title) + '"' : '') + '>' + head + (folded ? '' : (opts.desc && (!longDesc || qOpen(dq)) ? '<p class="block-desc">' + esc(opts.desc) + '</p>' : '') + (body ? '<div class="panel">' + body + '</div>' : '')) + '</section>';
 }
 /* A long explanation hides behind «?» next to its title and opens in place (owner 2026-10-17);
@@ -1709,7 +1722,7 @@ const RENDER = {
       if (!st1 && !adsStatsAsked) { adsStatsAsked = true; load('adsstats', true).then(render).catch(() => {}); }
       return panel('AdGuard Home', kv([S.ads ? ['Состояние', aghState()[1], aghState()[0], null, '', aghState()[2]] : null,
         st1 && st1.ok ? ['Запросов за сутки', fmtInt(st1.queries), '', 'd-querylog'] : null,
-        st1 && st1.ok ? ['Заблокировано за сутки', fmtInt(st1.blocked) + (st1.queries ? ' · ' + Math.round(100 * st1.blocked / st1.queries) + '%' : ''), '', 'd-querylog', ' data-qfilter="blocked"'] : null,
+        st1 && st1.ok ? ['Заблокировано за сутки', fmtInt(st1.blocked) + blockedShare(st1.blocked, st1.queries), '', 'd-querylog', ' data-qfilter="blocked"'] : null,
         ['Управление AdGuard Home', 'Открыть', '', 'd-agh']])); };
     const a = S.ads || {}, c = a.counts || {}, s = a.settings || {}, j = a.jobs || {}, sc = a.scan || {}, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
     const aghHost = ag.address || location.hostname, aghUrl = ag.port ? 'http://' + aghHost + ':' + ag.port + '/' : '';
@@ -1717,13 +1730,14 @@ const RENDER = {
     const pending = (num(pub.added) || 0) + (num(pub.removed) || 0);
     const cur = j.current || {}, busy = cur.state && cur.state !== 'IDLE';
     const off = adsOff();
-    const now = !S.ads ? ['', 'загрузка…'] : off ? ['warn', 'Компонент выключен', 'c-ads-privacy-guard'] : a.paused ? ['warn', 'На паузе'] : !a.agh_connected ? ['warn', 'Нет подключения к AdGuard Home', 'd-agh'] :
-      busy ? ['info', 'выполняется: ' + jobText(cur).toLowerCase() + (num(j.queued) ? ' · ещё ' + fmtInt(j.queued) + ' в очереди' : ''), 'd-jobs'] :
-      num(j.queued) ? ['info', fmtInt(j.queued) + ' ' + plural(num(j.queued), 'задание', 'задания', 'заданий') + ' в очереди', 'd-jobs'] :
-      ['ok', ({ scheduled: 'ожидает следующей проверки', dynamic: 'проверяет новые домены сразу', manual: 'проверка только по кнопке' })[runMode] || 'работает', 'd-jobs'];
+    // ads-ui (owner 2026-11-01): switched on, waiting, recently checked, paused, failed and no data
+    // are different things; green only for a check that finished recently, never for the wait.
+    const now = adsNow(a, s, j, sc, off, runMode);
     const where = !pub.ok ? '—' : pub.mode === 'staged' ? 'не отправляются' : isTrue(s.AUTO_PUBLISH) ? 'автоматически' : 'после подтверждения';
     const recent = a.recent || [];
-    return loadError(['ads']) + chainNotice() + aghTopPanel() + adsCheckPanel() +
+    // Order (owner 2026-11-01): VWARD's own check first, then lists and rules, then the blocking
+    // check, AdGuard Home - an external program - last.
+    return loadError(['ads']) + chainNotice() +
       panel('Проверка VWARD', (off ? '<p class="field-warn" data-go="c-ads-privacy-guard" role="button" tabindex="0">Компонент «Блокировка рекламы» выключен: проверки не идут. Включить его можно в «Компоненты».</p>'
         : '<dl class="kv">' + ctrlRow('Проверка рекламы и трекеров', sw('data-ads-pause', !a.paused, 'Проверка рекламы и трекеров', !S.ads), a.paused ? 'на паузе: новые домены не проверяются, задания ждут' : 'домены, пропущенные AdGuard Home, проверяются по источникам и признакам рекламы') + '</dl>') +
         kv([['Состояние', now[1], now[0], now[2]],
@@ -1742,7 +1756,7 @@ const RENDER = {
         ['Источники', (a.sources || []).filter(x => x.mode === 'active').length + ' из ' + (a.sources || []).length + ' активны', '', 'd-sources'],
         ['HTTPS-фильтр', S.https && S.https.ok ? (S.https.status && isTrue(S.https.status.ENABLED) ? 'включён' : 'выключен') : 'недоступен', '', 'd-https'],
         ['Настройки проверки', ({ scheduled: 'по расписанию', dynamic: 'по запросам', manual: 'вручную' })[runMode] || '', '', 'd-adsettings']
-      ])) +
+      ])) + adsCheckPanel() + aghTopPanel() +
       // AdGuard Home is a program of its own: its page lives in «Компоненты» (no «Дополнительно», owner 2026-10-17).
       '';
   },
@@ -1892,7 +1906,7 @@ const RENDER = {
           aghUrl && g && g.ok ? ['Веб-интерфейс', aghHost + ':' + ag.port, '', aghUrl] : null,
           g && g.ok && g.protection != null ? ['Фильтрация', g.protection ? 'Включена' : 'Выключена', g.protection ? 'ok' : 'warn'] : null,
           st1 && st1.ok ? ['Запросов за сутки', fmtInt(st1.queries), '', 'd-querylog'] : null,
-          st1 && st1.ok ? ['Заблокировано за сутки', fmtInt(st1.blocked) + (st1.queries ? ' · ' + Math.round(100 * st1.blocked / st1.queries) + '%' : ''), '', 'd-querylog', ' data-qfilter="blocked"'] : null,
+          st1 && st1.ok ? ['Заблокировано за сутки', fmtInt(st1.blocked) + blockedShare(st1.blocked, st1.queries), '', 'd-querylog', ' data-qfilter="blocked"'] : null,
           // The program's own version (the official build is not the Entware package's number).
           ['Версия', (g && g.version) || ((e.official || {}).installed) || (e.installed ? extVer(e.installed) : '—'), '', 'u-agh', '', e.available ? 'доступна ' + extVer(e.available) : '']]),
         { desc: 'Блокирует рекламу по своим фильтрам; VWARD дочищает пропущенное.' }) +
@@ -2077,11 +2091,12 @@ const RENDER = {
       '<button class="icon-btn" type="button" data-act="log-share" aria-label="Поделиться" title="Поделиться">' + ico('share') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-save" aria-label="Сохранить журнал в .txt" title="Сохранить журнал в .txt">' + ico('save') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-save-all" aria-label="Сохранить все журналы" title="Сохранить все журналы">' + ico('archive') + '</button>' +
+      (logTab === 'all' ? '<button class="icon-btn" type="button" data-act="log-order" aria-pressed="' + logNewest + '" aria-label="' + (logNewest ? 'Сначала новые' : 'Сначала старые') + '" title="' + (logNewest ? 'Сначала новые' : 'Сначала старые') + '">' + ico('sort') + '</button>' : '') +
       '<button class="icon-btn" type="button" data-act="log-wrap" aria-pressed="' + logWrap + '" aria-label="Перенос строк" title="Перенос строк">' + ico('wrap') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-reload" aria-label="Обновить журнал" title="Обновить журнал">' + ico('refresh') + '</button></div></div><div class="panel">' +
       '<div class="chips" role="group" aria-label="Журнал">' + LOG_VIEW.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
       '<pre class="logbox' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + esc(text == null ? 'Загрузка…' : text) + '</pre>' +
-      '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p></div></section>' + journalPanel() + soonPanel('logs');
+      '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p>' + (logTab === 'all' ? logSources() : '') + '</div></section>' + journalPanel() + soonPanel('logs');
   },
 
   'd-components'() {
@@ -2825,6 +2840,30 @@ function feedPick(v) {
   const cur = (cfg().update || {}).feed;
   if (v === cur || !(v in FEED_HINT) || v === 'beta') return;
   confirm = { id: v === 'dev' ? 'feed-dev' : 'feed-main' }; render();
+}
+// The blocked share of AdGuard Home's queries with sense for small numbers: 191 of 38 232 is
+// «≈ 0,5 %», not «0%»; a non-zero share under 0,1 % is «< 0,1 %»; no queries - no share.
+function blockedShare(blocked, queries) {
+  const b = Number(blocked) || 0, q = Number(queries) || 0;
+  if (!q) return '';
+  const p = 100 * b / q, t = !b ? '0' : p < 0.1 ? '< 0,1' : p < 10 ? (Math.round(p * 10) / 10).toFixed(1).replace('.', ',').replace(',0', '') : String(Math.round(p));
+  return ' · ' + (!b || p < 0.1 ? '' : '≈ ') + t + '\u00a0%';
+}
+// The state of VWARD's own check (ads-ui): [class, text, link]. «Ожидает следующей проверки» is
+// grey; green only when the last check finished within a day; no answer - «Нет данных».
+function adsNow(a, s, j, sc, off, runMode) {
+  const cur = j.current || {}, busy = cur.state && cur.state !== 'IDLE', last = j.last || {};
+  if (!S.ads) return ['', 'Нет данных'];
+  if (S.cached.ads) return ['', 'Нет данных', '', 'роутер ещё не ответил'];
+  if (off) return ['warn', 'Компонент выключен', 'c-ads-privacy-guard'];
+  if (a.paused) return ['warn', 'На паузе'];
+  if (!a.agh_connected) return ['warn', 'Нет подключения к AdGuard Home', 'd-agh'];
+  if (busy) return ['info', 'выполняется: ' + jobText(cur).toLowerCase() + (num(j.queued) ? ' · ещё ' + fmtInt(j.queued) + ' в очереди' : ''), 'd-jobs'];
+  if (last.state === 'FAILED' && last.type === 'scan') return ['crit', 'последняя проверка с ошибкой', 'd-jobs'];
+  if (num(j.queued)) return ['info', fmtInt(j.queued) + ' ' + plural(num(j.queued), 'задание', 'задания', 'заданий') + ' в очереди', 'd-jobs'];
+  const at = sc.last_run ? Date.parse(String(sc.last_run).replace(' ', 'T')) : NaN, fresh = !isNaN(at) && Date.now() - at < 26 * 3600e3;
+  const how = ({ scheduled: 'ожидает следующей проверки', dynamic: 'проверяет новые домены сразу', manual: 'проверка только по кнопке' })[runMode] || 'включена';
+  return fresh ? ['ok', 'работает · ' + how, 'd-jobs'] : ['', how + (sc.last_run ? '' : ' · проверок ещё не было'), 'd-jobs'];
 }
 const THEME_OPS = [['light', 'Светлая'], ['dark', 'Тёмная'], ['system', 'Система'], ['time', 'По времени']];
 let themePrev = null;
@@ -3871,9 +3910,11 @@ document.addEventListener('click', e => {
   const q = e.target.closest('[data-q]');
   if (!q) return;
   e.preventDefault(); e.stopPropagation();
-  const k = qKey(q.dataset.q);
+  const k = qKey(q.dataset.q), id = q.dataset.q;
   if (QOPEN.has(k)) QOPEN.delete(k); else QOPEN.add(k);
   render();
+  // Redrawn: the same «?» keeps the keyboard focus.
+  const again = [...document.querySelectorAll('[data-q]')].find(b => b.dataset.q === id); if (again) again.focus();
 }, true);
 document.addEventListener('click', e => {
   const fold = e.target.closest('[data-fold]');
@@ -3900,15 +3941,18 @@ document.addEventListener('keydown', e => {
 window.addEventListener('resize', () => ddClose());
 window.addEventListener('scroll', e => { if (ddOpen && !(e.target && e.target.closest && e.target.closest('#ddMenu'))) ddClose(); }, true);
 
+let PAGEQ = null;
 function render() {
   const p = page(current);
-  $('pageTitle').textContent = p.title;
+  PAGEQ = null;
   document.title = p.title + ' · VWARD';
   const back = $('backBtn');
   back.classList.toggle('detail', !!p.parent);
   back.hidden = current === 'overview';
   back.setAttribute('aria-label', p.parent ? 'Назад: ' + page(p.parent).title : 'Назад к обзору');
   const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('deps-') ? depsPage(comp(current.slice(5))) : current.startsWith('l-') ? listPage(current.slice(2)) : current.startsWith('ip-') ? addrPage(current.slice(3)) : current.startsWith('s-') ? servicePage(current.slice(2)) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('tn-') ? tunnelNetsPage(current.slice(3)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
+  // The page title and, when the page's own block has a long explanation, its «?» right by it.
+  $('pageTitle').innerHTML = '<span class="page-title-text">' + esc(p.title) + '</span>' + (PAGEQ ? qBtn(PAGEQ.k, PAGEQ.title) : '');
   patchContent(offNotice() + html, rendered !== current);
   rendered = current;
   // A chosen chip scrolled out of its row is brought back into view (the row only, not the page).
@@ -3982,7 +4026,8 @@ async function loadLog(tab, force) {
     const parts = await Promise.all(LOG_TABS.filter(tb => tb.id !== 'cron').map(tb => apiText('log', { name: tb.id, count: 200 })
       .then(x => { S.logs[tb.id] = x; S.loadedAt['log:' + tb.id] = Date.now(); return { label: tb.label, text: x }; },
             e => ({ label: tb.label, text: 'Журнал недоступен: ' + e.message }))));
-    S.logs.all = mergeLogs(parts) || 'Журналы пусты'; S.loadedAt['log:all'] = Date.now();
+    LOGINFO.length = 0;
+    S.logs.all = mergeLogs(parts, logNewest, LOGINFO) || 'Журналы пусты'; S.loadedAt['log:all'] = Date.now();
   } else {
     try { S.logs[tab] = await apiText('log', { name: tab, count: 200 }); S.loadedAt['log:' + tab] = Date.now(); }
     catch (e) { S.logs[tab] = 'Журнал недоступен: ' + e.message; }
@@ -3992,6 +4037,13 @@ async function loadLog(tab, force) {
     if (b && at) { if (b.textContent !== S.logs[tab]) b.textContent = S.logs[tab]; at.textContent = logStamp(tab); } else render();
   }
   return S.logs[tab];
+}
+// The last event of each source, apart from the moment the journals were loaded.
+function logSources() {
+  if (!LOGINFO.length) return '';
+  const st1 = { empty: 'записей нет', missing: 'ещё не создан', error: 'не читается' };
+  return '<details class="log-sources"><summary>' + (logNewest ? 'Сначала новые' : 'Сначала старые') + ' · последние события по журналам</summary><dl class="kv">' +
+    LOGINFO.map(i => '<div class="kv-row"><dt>' + esc(i.label) + '</dt><dd' + (i.state === 'error' ? ' class="warn"' : '') + '>' + esc(i.last != null ? fmtTime(new Date(i.last).toISOString()) : st1[i.state]) + '</dd></div>').join('') + '</dl></details>';
 }
 function logStamp(tab) {
   const t = S.loadedAt['log:' + tab];
@@ -4609,6 +4661,7 @@ document.addEventListener('click', e => {
   else if (a === 'ads-job-cancel') { t.disabled = true; adsControl({ op: 'job-cancel', id: t.dataset.id }, 'Задание отменено', 'ads-job-run'); }
   else if (a === 'https-op') runAction('https', 'ads-https-control', { op: t.dataset.op }, 'Готово').then(() => load('https', true)).then(render);
   else if (a === 'log-reload') loadLog(logTab, true);
+  else if (a === 'log-order') { logNewest = !logNewest; store.set('vward-log-order', logNewest ? 'newest' : 'oldest'); loadLog('all', true); }
   else if (a === 'log-wrap') { logWrap = !logWrap; t.setAttribute('aria-pressed', logWrap); const b = $('logBox'); if (b) b.classList.toggle('nowrap', !logWrap); }
   else if (a === 'log-copy') copyText(S.logs[logTab] || '');
   else if (a === 'log-share') {
