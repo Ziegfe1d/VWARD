@@ -764,6 +764,67 @@ function mergeLogs(parts, newestFirst, info) {
   entries.sort((a, b) => newestFirst ? b.t - a.t || b.n - a.n : a.t - b.t || a.n - b.n);
   return entries.map(e => e.lines.join('\n')).join('\n');
 }
+/* The journals as cards (owner 02.11, display only - copy, save and share keep the raw files):
+   time HH:MM:SS (the date once a day), a level sign, words instead of internal codes, numbers
+   rounded with units, no «|»; the autopick checks (HINT_*) folded into one counter in «Важное»,
+   warnings and errors always shown. */
+let logImportant = store.get('vward-log-view') !== 'all';
+const LOG_CODES = {
+  HINT_DIRECT_OK: 'Проверка напрямую: открывается', HINT_ADAPTIVE_CHECK: 'Проверка автоподбора', HINT_WG_UNAVAILABLE: 'Подсказка: VPN недоступен, проверка без него',
+  HINT_SKIP_RU_ZONE: 'Российский домен: не через VPN', HINT_AGH_BLOCKED: 'Подсказка: домен блокирует AdGuard Home', HINT_SKIP_ADAPTIVE_OFF: 'Подсказка: автоподбор выключен',
+  CONSOLE_CONFIG: 'Настройки Панели VWARD изменены', START: 'Автоподбор запущен', STOP: 'Автоподбор остановлен', STOP_REQUEST: 'Остановка по запросу',
+  WATCHDOG_RESTART: 'Перезапуск после сбоя', WATCHDOG_CORES_TRANSIENT: 'Второй процесс исчез сам, перезапуск не нужен', START_FAILED: 'Запуск не удался', START_SLOW: 'Медленный запуск, дождались',
+  PERSIST_RESTORE_OK: 'AdaptiveAuto восстановлен', PERSIST_RESTORE_PARTIAL: 'AdaptiveAuto восстановлен не полностью', PERSIST_RESTORE_LOCK_FAIL: 'Восстановление AdaptiveAuto отложено: изменения заняты',
+  PERSIST_RESTORE_FAIL: 'Keenetic отклонил команду восстановления', PERSIST_RESTORE_SKIP_INVALID: 'Имя пропущено: Keenetic его не примет', PERSIST_MISSING_START: 'Сохранённого AdaptiveAuto нет',
+  ADAPTIVE_RU_OUT: 'Российские домены выведены из VPN', AUTO_VPN: 'Через VPN (автоподбор)', AUTO_DIRECT_MAINT: 'Снова напрямую', VPN_OK: 'Открывается через VPN', VPN_OK_RETRY: 'Открывается через VPN',
+  DIRECT_OK: 'Открывается напрямую', DIRECT_UNSTABLE: 'Напрямую нестабильно', NO_IPV4: 'Нет IPv4-адреса', ADAPTIVE_NO_IPV4: 'Нет IPv4-адреса', RECHECK_ADAPTIVE: 'Повторная проверка',
+  BROKEN_ISP_AND_VPN: 'Не открывается ни напрямую, ни через VPN', MAINT_BROKEN: 'Не открывается ни напрямую, ни через VPN', MAINT_VPN_OK: 'Открывается через VPN',
+  MAINT_ISP_UNKNOWN: 'Проверка через провайдера без ответа', MAINT_ISP_BAD: 'Провайдер не пропускает', MAINT_DIRECT_CONFIRM: 'Напрямую: подтверждение', MAINT_DIRECT_CONFIRM_WAIT: 'Напрямую: ждём подтверждения',
+  MAINT_ISP_PROBE_UNRELIABLE: 'Проверка через провайдера недостоверна: сайты не оцениваются', ADD_ABORT_ISP_UNRELIABLE: 'Не добавлен в VPN: проверка через провайдера недостоверна',
+  ADD_SKIP_RU_ZONE: 'Российский домен: не через VPN', ADD_ABORT_WG_FAIL: 'Не добавлен: VPN тоже не открывает', ADD_ABORT_DIRECT_RECOVERED: 'Не добавлен: открылся напрямую',
+  ABORTED_ISP_PROBE_UNRELIABLE: 'Проверка IP-категорий остановлена: проверка через провайдера недостоверна', ABORTED_TUNNEL_DOWN: 'Проверка IP-категорий остановлена: туннель не отвечает',
+  AGH_BIND_FULL: 'Нет места для DNS-привязки в Keenetic', AGH_UNBIND: 'DNS-привязка снята', ADAPTIVE_FULL: 'AdaptiveAuto полон'
+};
+const logLevel = t => /ERROR|FAILED\b|_FAIL\b|CRASH|BROKEN|ошибк|не удал/i.test(t) ? 'err' :
+  /WARN|UNSTABLE|UNRELIABLE|TIMEOUT|_DOWN\b|RESTART|ABORT|SKIP|FULL\b|не отвечает/i.test(t) ? 'warn' :
+  /_OK\b|\bOK\b|PASS|SUCCESS|RECOVERED|RESTORED|_UP\b/.test(t) ? 'ok' : 'info';
+const LOG_SIGN = { err: 'alert', warn: 'alert', ok: 'check', info: 'info' };
+const wbr = h => h.replace(/([.\-\/])(?=[A-Za-z0-9А-Яа-я])/g, '$1<wbr>');
+function logField(f) {
+  const m = /^([a-z_]+)=(.*)$/i.exec(f), k = m ? m[1] : '', v0 = m ? m[2] : f;
+  let v = v0.replace(/\b(\d+)\.(\d{3,})\b/g, (x, a, b) => (Math.round(+(a + '.' + b) * 100) / 100).toString().replace('.', ','));
+  // A time field, or a bare fraction with 3+ decimals (curl's time of a probe): seconds.
+  if ((/time|took|elapsed|dur|wait/i.test(k) && /^\d+([.,]\d+)?$/.test(v)) || (!k && /^\d+\.\d{3,}$/.test(v0))) v += ' с';
+  return (k ? k.replace(/_/g, ' ') + ': ' : '') + v;
+}
+function logEntry(raw) {
+  let src = '', line = raw.split('\n')[0], more = raw.split('\n').slice(1).map(x => x.trim()).filter(Boolean);
+  const sm = /^\[([^\]]+)\] (.*)$/.exec(line); if (sm) { src = sm[1]; line = sm[2]; }
+  const t = logTime(line), body = line.replace(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*(?:Z|[+-]\d{2}:?\d{2})?\s*\|?\s*/, '');
+  // A code first, after «|» or a space (CONSOLE_CONFIG op ...): words instead.
+  const cm = /^([A-Z][A-Z0-9_]{2,})(?:\s*\|\s*|\s+|$)/.exec(body), code = cm ? cm[1] : '';
+  const parts = (cm ? body.slice(cm[0].length) : body).split('|').map(x => x.trim()).filter(Boolean);
+  const words = (code ? (LOG_CODES[code] || code.toLowerCase().replace(/_/g, ' ')) : '') + (parts.length ? (code ? ': ' : '') + parts.map(logField).join(' · ') : '');
+  return { t: t, src: src, code: code, text: words.replace(/\bCONSOLE\b/g, 'Панель VWARD').replace(/Консоль/g, 'Панель VWARD'), more: more, level: logLevel(code + ' ' + body) };
+}
+function logFeed(text) {
+  if (text == null) return '<p class="panel-desc">Загрузка…</p>';
+  const raw = [], lines = String(text).split('\n');
+  lines.forEach(l => { if (!l.trim()) return; if (logTime(l.replace(/^\[[^\]]+\] /, '')) == null && raw.length) raw[raw.length - 1] += '\n' + l; else raw.push(l); });
+  if (!raw.length) return '<p class="panel-desc">' + esc(String(text).trim() || 'Записей нет') + '</p>';
+  let day = '', html = '', hints = [], hintAt = -1;
+  const card = e => '<div class="log-e ' + e.level + '"><time>' + (e.t ? new Date(e.t).toLocaleTimeString('ru-RU') : '') + '</time>' + ico(LOG_SIGN[e.level], 'log-sign') +
+    '<div class="log-t">' + (e.src ? '<small class="log-src">' + esc(e.src) + '</small>' : '') + wbr(esc(e.text)) + (e.more.length ? '<small class="log-more">' + wbr(esc(e.more.join(' '))) + '</small>' : '') + '</div></div>';
+  const out = [];
+  raw.map(logEntry).forEach(e => {
+    const d = e.t ? new Date(e.t).toLocaleDateString('ru-RU') : '';
+    if (d && d !== day) { day = d; out.push('<div class="log-day">' + esc(d) + '</div>'); }
+    if (logImportant && /^HINT_/.test(e.code) && (e.level === 'info' || e.level === 'ok')) { if (hintAt < 0) { hintAt = out.length; out.push(''); } hints.push(card(e)); return; }
+    out.push(card(e));
+  });
+  if (hintAt >= 0) out[hintAt] = '<details class="log-group"><summary>' + ico('route', 'log-sign') + 'Автоподбор: ' + hints.length + ' ' + plural(hints.length, 'проверка', 'проверки', 'проверок') + '</summary>' + hints.join('') + '</details>';
+  return out.join('');
+}
 const DETAILS = {
   'd-components': { title: 'Компоненты VWARD', parent: 'system' },
   'd-diag': { title: 'Диагностика', parent: 'system' },
@@ -2180,7 +2241,8 @@ const RENDER = {
       '<button class="icon-btn" type="button" data-act="log-wrap" aria-pressed="' + logWrap + '" aria-label="Перенос строк" title="Перенос строк">' + ico('wrap') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-reload" aria-label="Обновить журнал" title="Обновить журнал">' + ico('refresh') + '</button></div></div><div class="panel">' +
       '<div class="chips" role="group" aria-label="Журнал">' + LOG_VIEW.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
-      '<pre class="logbox' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + esc(text == null ? 'Загрузка…' : text) + '</pre>' +
+      '<div class="chips log-view" role="group" aria-label="Что показывать"><button type="button" data-act="log-view" data-v="important" aria-pressed="' + logImportant + '">Важное</button><button type="button" data-act="log-view" data-v="all" aria-pressed="' + !logImportant + '">Все</button></div>' +
+      '<div class="logfeed' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + logFeed(text) + '</div>' +
       '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p>' + (logTab === 'all' ? logSources() : '') + '</div></section>' + journalPanel() + soonPanel('logs');
   },
 
@@ -4141,7 +4203,7 @@ async function loadLog(tab, force) {
   }
   if (current === 'logs' && logTab === tab) {
     const b = $('logBox'), at = $('logAt');
-    if (b && at) { if (b.textContent !== S.logs[tab]) b.textContent = S.logs[tab]; at.textContent = logStamp(tab); } else render();
+    if (b && at) { if (b.dataset.raw !== S.logs[tab]) { b.innerHTML = logFeed(S.logs[tab]); b.dataset.raw = S.logs[tab]; } at.textContent = logStamp(tab); } else render();
   }
   return S.logs[tab];
 }
@@ -4149,7 +4211,7 @@ async function loadLog(tab, force) {
 function logSources() {
   if (!LOGINFO.length) return '';
   const st1 = { empty: 'записей нет', missing: 'ещё не создан', error: 'не читается' };
-  return '<details class="log-sources"><summary>' + (logNewest ? 'Сначала новые' : 'Сначала старые') + ' · последние события по журналам</summary><dl class="kv">' +
+  return '<details class="log-sources"><summary>' + ico('sort', 'log-sign') + '<span>' + (logNewest ? 'Сначала новые' : 'Сначала старые') + '</span><small>источники</small>' + ico('chevron', 'chev') + '</summary><dl class="kv">' +
     LOGINFO.map(i => '<div class="kv-row"><dt>' + esc(i.label) + '</dt><dd' + (i.state === 'error' ? ' class="warn"' : '') + '>' + esc(i.last != null ? fmtTime(new Date(i.last).toISOString()) : st1[i.state]) + '</dd></div>').join('') + '</dl></details>';
 }
 function logStamp(tab) {
@@ -4781,6 +4843,7 @@ document.addEventListener('click', e => {
   else if (a === 'log-order') { logNewest = !logNewest; store.set('vward-log-order', logNewest ? 'newest' : 'oldest'); loadLog('all', true); }
   else if (a === 'log-wrap') { logWrap = !logWrap; t.setAttribute('aria-pressed', logWrap); const b = $('logBox'); if (b) b.classList.toggle('nowrap', !logWrap); }
   else if (a === 'log-copy') copyText(S.logs[logTab] || '');
+  else if (a === 'log-view') { logImportant = t.dataset.v !== 'all'; store.set('vward-log-view', logImportant ? 'important' : 'all'); render(); }
   else if (a === 'log-share') {
     const text = S.logs[logTab] || '';
     if (navigator.share) navigator.share({ title: 'Журнал VWARD: ' + logLabel(logTab), text: text }).catch(err => { if (err && err.name !== 'AbortError') toast('Поделиться не удалось - используйте «Сохранить»'); });

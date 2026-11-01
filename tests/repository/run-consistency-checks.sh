@@ -137,6 +137,7 @@ python3 tests/repository/check-adaptive-ru-zone.py || fail "Russian zones leave 
 python3 tests/repository/check-isp-control.py || fail "a failed direct check is not a verdict when the direct check itself does not work"
 python3 tests/repository/check-keenetic-shared-age.py || fail "one read of the configuration serves the minute"
 python3 tests/repository/check-console-diag-ui.py || fail "Panel diagnostics button and disabled component names"
+python3 tests/repository/check-console-log-feed.py || fail "journals as cards with words, one time format, autopick folded"
 python3 tests/repository/check-policy-shrink-guard.py || fail "IP categories shrink guard"
 python3 tests/repository/check-dns-rules-boot.py || fail "DNS rules of the tunnel after a boot"
 python3 tests/repository/check-console-doh-retry.py || fail "Smart DNS line removal retried"

@@ -584,3 +584,21 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
 .tag-mark{display:block;color:var(--accent);font-size:var(--fs-xs)}
 .tag-mark.off{color:var(--muted)}
 .dom-row .row-main b{font-size:var(--fs-sm);font-weight:500;overflow-wrap:normal;word-break:normal}
+/* «Журналы» as cards (owner 02.11): time, a level sign, words; no word broken in the middle. */
+.logfeed{margin:0 16px 12px;max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:var(--r-md)}
+.log-e{display:grid;grid-template-columns:auto auto 1fr;gap:8px;align-items:start;padding:8px 12px;border-top:1px solid var(--line);font-size:var(--fs-sm)}
+.log-e:first-child{border-top:0}
+.log-e time{color:var(--faint);font-variant-numeric:tabular-nums;font-size:var(--fs-xs);padding-top:2px}
+.log-sign{width:16px;height:16px;flex:none;color:var(--faint)}
+.log-e.ok .log-sign{color:var(--ok)}.log-e.warn .log-sign{color:var(--warn)}.log-e.err .log-sign{color:var(--crit)}
+.log-t{min-width:0;overflow-wrap:break-word;word-break:normal}
+.log-src{display:block;color:var(--muted);font-size:var(--fs-xs)}
+.log-more{display:block;color:var(--muted);font-size:var(--fs-xs)}
+.log-day{position:sticky;top:0;z-index:1;padding:4px 12px;background:var(--surface-2);color:var(--muted);font-size:var(--fs-xs);font-weight:600}
+.log-group>summary{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--line);cursor:pointer;color:var(--muted);font-size:var(--fs-sm);list-style:none}
+.log-group>summary::-webkit-details-marker{display:none}
+.logfeed.nowrap .log-t{white-space:nowrap}
+.log-sources>summary{display:flex;align-items:center;gap:8px;margin:0 16px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-md);cursor:pointer;list-style:none;font-size:var(--fs-sm)}
+.log-sources>summary::-webkit-details-marker{display:none}
+.log-sources>summary small{margin-left:auto;color:var(--muted)}
+.log-view{margin-top:0}
