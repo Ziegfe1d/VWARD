@@ -529,15 +529,6 @@ TUN_SKIPPED=0
 
 DONE=0
 
-# The direct check does not work now (the control sites fail through the provider too, 01.11):
-# no name can be judged - none is checked this run (no load for nothing, no «broken» marks).
-ISPC=0
-! command -v vward_isp_control >/dev/null 2>&1 || { vward_isp_control; ISPC=$?; }
-if [ "$ISPC" = 1 ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_ISP_PROBE_UNRELIABLE|skipped=$TOTAL" >> "$LOG"
-    DONE=$MAX_PER_RUN
-fi
-
 while [ "$DONE" -lt "$MAX_PER_RUN" ] &&
       [ "$DONE" -lt "$TOTAL" ]; do
 
@@ -578,6 +569,16 @@ while [ "$DONE" -lt "$MAX_PER_RUN" ] &&
             remove_adaptive "$H"
             continue
         fi
+    fi
+
+    # The direct check failed: does it work at all (01.11: api.ozon.ru, wb.ru «broken», ISP=000)?
+    # If the control sites fail too, no name is judged for the rest of this run (no marks, no load).
+    ISPC=0
+    ! command -v vward_isp_control >/dev/null 2>&1 || { vward_isp_control; ISPC=$?; }
+    if [ "$ISPC" = 1 ]; then
+        save_state "$H" "ADAPTIVE_ISP_UNRELIABLE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_ISP_PROBE_UNRELIABLE|$H|left=$((MAX_PER_RUN - DONE))" >> "$LOG"
+        break
     fi
 
     # ISP не восстановился — проверяем текущий VPN.

@@ -79,8 +79,16 @@ add = ENGINE[ENGINE.index("\nadd_adaptive()\n"):ENGINE.index("\nremove_adaptive(
 i_ctrl, i_vpn, i_add = add.find("vward_isp_control"), add.find('probe "$H" "$WG" "$GIP"'), add.find("object-group fqdn $GROUP include $H")
 if not (0 < i_ctrl < i_vpn < i_add) or "ADD_ABORT_ISP_UNRELIABLE" not in add:
     fail("add_adaptive must stop before the VPN probe and the add when the direct check is unreliable")
-if "MAINT_ISP_PROBE_UNRELIABLE" not in RECON or RECON.find("vward_isp_control") > RECON.find('while [ "$DONE" -lt "$MAX_PER_RUN" ]'):
-    fail("the reconciler must not judge names while the direct check is unreliable")
-if "ABORTED_ISP_PROBE_UNRELIABLE" not in AUDIT or "exit 75" not in AUDIT[AUDIT.find("ABORTED_ISP_PROBE_UNRELIABLE"):][:400]:
-    fail("the audit must stop with 75 while the direct check is unreliable")
+loop = RECON[RECON.find('while [ "$DONE" -lt "$MAX_PER_RUN" ]'):]
+c, v = loop.find("vward_isp_control"), loop.find('probe "$H" "$WG" "$IP"')
+if "MAINT_ISP_PROBE_UNRELIABLE" not in loop or not (0 < c < v) or "break" not in loop[c:v]:
+    fail("the reconciler must stop judging names once the direct check proves unreliable")
+# Lazy: only after a direct check failed (the healthy path costs no process: resource budget).
+if loop.find("vward_isp_control") < loop.find('if probe "$H" "$WAN" "$IP"; then'):
+    fail("the reconciler must ask the control only after a failed direct check")
+a = AUDIT.find("ABORTED_ISP_PROBE_UNRELIABLE")
+if a < 0 or "exit 75" not in AUDIT[a:a + 400] or AUDIT.rfind("vward_isp_control", 0, a) < AUDIT.find('ISP_RC=$?'):
+    fail("the audit must stop with 75 when a failed direct check proves unreliable")
+if re.search(r"vward_isp_control\(\) \{.*?\$\(date", fn, re.S):
+    fail("no clock process: the control reads /proc/uptime")
 print("ISP_CONTROL=PASS")

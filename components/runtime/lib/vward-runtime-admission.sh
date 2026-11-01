@@ -98,7 +98,11 @@ vward_busy() {
 vward_isp_control() {
     [ "${VWARD_ISP_CONTROL:-1}" = 1 ] || return 0
     vic_f=${VWARD_ISP_CONTROL_STATE:-/tmp/vward-isp-control}
-    vic_now=$(date +%s)
+    # The clock without a process: seconds since boot (the answer is kept in RAM, lost at boot).
+    vic_now=
+    read -r vic_now _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}" || :
+    vic_now=${vic_now%%.*}
+    case "$vic_now" in ''|*[!0-9]*) vic_now=0 ;; esac
     vic_t= vic_r=
     [ ! -r "$vic_f" ] || read -r vic_t vic_r 2>/dev/null < "$vic_f" || :
     case "$vic_t:$vic_r" in
@@ -113,7 +117,7 @@ vward_isp_control() {
             -A "Mozilla/5.0" -s -o /dev/null -w '%{http_code}' "$vic_u" 2>/dev/null) &&
             [ "${vic_c:-000}" != 000 ] && { vic_r=0; break; }
     done
-    echo "$vic_now $vic_r" > "$vic_f.$$" 2>/dev/null && mv -f "$vic_f.$$" "$vic_f" 2>/dev/null
+    printf '%s %s\n' "$vic_now" "$vic_r" > "$vic_f" 2>/dev/null
     return "$vic_r"
 }
 

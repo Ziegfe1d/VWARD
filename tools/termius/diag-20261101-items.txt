@@ -1,0 +1,47 @@
+Diagnostic only, changes nothing. Two pastes, then it runs.
+Items 2 (WAN device), 6 (parse error), 9 (AGH NX), 10 (Smart DNS
+rows in AGH), 12 (Lampa domains). URLs are masked, no tokens.
+
+=== PASTE 1 ===
+cat > /tmp/dg4.sh <<'EOF'
+clear
+P=vward-dg4; O=/tmp/$P-$(date +%Y%m%d-%H%M%S).txt
+ls -1t /tmp/$P-*.txt 2>/dev/null | tail -n +5 |
+ while read -r F; do rm -f "$F"; done
+: > "$O"; ln -sfn "$O" /tmp/last_result.txt
+E=$(printf '\033')
+so() { sed "s/$E\[[0-9;?]*[a-zA-Z]//g" "$O" |
+ tail -c 30000 | base64 | tr -d '\r\n' |
+ { read -r B; printf '\033]52;c;%s\a' "$B"; }; }
+trap 'so; echo ABORTED; exit 130' INT TERM HUP
+M() { sed 's#https://[^ "]*#https://***#g'; }
+{ echo "DG4 $(date '+%F %T')"
+. /opt/lib/vward/vward-device-profile.sh
+vward_profile_load; W=$VWARD_WAN_DEVICE
+echo "wan=$W"; ip route show default | head -2
+for I in "$W" ""; do curl -so /dev/null \
+ ${I:+--interface $I} -m 8 -w \
+ "if=${I:-def} %{http_code} %{time_appconnect}\n" \
+ https://ya.ru/; done
+EOF
+
+=== PASTE 2 ===
+cat >> /tmp/dg4.sh <<'EOF'
+A=/opt/etc/AdGuardHome; tail -n 3000 \
+ $A/data/querylog.json > /tmp/q.j
+echo "q=$(wc -l </tmp/q.j)" \
+ "blk=$(grep -c 'IsFiltered":true' /tmp/q.j)" \
+ "ptr=$(grep -c 'QT":"PTR' /tmp/q.j)"
+grep -oE 'QH":"[^"]*(lampa|cub|tmdb)[^"]*' \
+ /tmp/q.j | sort | uniq -c | sort -rn | head
+rm -f /tmp/q.j
+grep -oE '\[/[^]]*(copilot|cursor|deepl)' \
+ $A/AdGuardHome.yaml
+for S in 127.0.0.1 127.0.0.1:65053; do
+ nslookup copilot.microsoft.com $S 2>&1 |
+ tail -n 2; done
+ndmc -c 'show log' | grep -B1 'parse err' |
+ tail -n 8 | M; } 2>&1 | tee -a "$O"
+so; echo "RESULT SENT (OSC52)"; echo "RAW: $O"
+EOF
+sh -n /tmp/dg4.sh && sh /tmp/dg4.sh
