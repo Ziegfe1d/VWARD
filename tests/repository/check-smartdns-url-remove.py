@@ -179,4 +179,19 @@ with tempfile.TemporaryDirectory() as tmp:
         audit = (tmp / "audit.log").read_text()
         if own_rc == 1 and ("smartdns_dead=1" not in audit or "synthetic-token" in audit):
             fail("the skipped line must be reported, without the address")
+    # 9. «Все ИИ-сервисы» -> VPN (0b): a service's list into the tunnel takes its Smart DNS lines out
+    #    first; on 5.1.8 every per-domain form failed and the switch died (doh_remove_failed). Now the
+    #    list goes to the tunnel, its lines leave, the other lines of the server stay, all saved.
+    env["VWARD_DOH_ALIVE"] = "0"
+    conf.write_text("SMARTDNS_STORE=keenetic\n")
+    grp9 = "object-group fqdn domain-list5\n    include chatgpt.com\n    include openai.com\n!\n"
+    cfg.write_text(grp9 + RUNNING.replace("    route", "    " + "\n    ".join(rows) + "\n    route object-group domain-list5 ISP auto\n    route"))
+    (saved_dir / "domain-list5").unlink(missing_ok=True)
+    r = run("domain-list", "domain-list5", "vpn")
+    got = doh()
+    if r.returncode or "result=changed" not in r.stdout or got != set(rows) - {rows[4], rows[7]}:
+        fail("RED: a list with Smart DNS lines must go into the tunnel on 5.1.8: " + r.stdout + str(sorted(set(rows) ^ got)))
+    sv5 = (saved_dir / "domain-list5").read_text()
+    if "doh=" + rows[4] not in sv5 or "doh=" + rows[7] not in sv5:
+        fail("the lines taken out must be saved for the way back: " + sv5)
 print("SMARTDNS_URL_REMOVE=PASS")
