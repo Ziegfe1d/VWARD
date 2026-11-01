@@ -23,7 +23,8 @@ vve_root() {
 
 vward_vpn_engine_owner() (
     [ "$#" -eq 1 ] || return 2
-    case $1 in OpkgTun[0-9]|OpkgTun[0-9][0-9]|Wireguard[0-9]*|Proxy[0-9]*) ;; *) return 2 ;; esac
+    # VWARD engines own only OpkgTun connections; any other Keenetic interface is not theirs.
+    case $1 in OpkgTun[0-9]|OpkgTun[0-9][0-9]) ;; *) return 2 ;; esac
     vve_root
     found=
     for e in "xray|$VVE_XRAY" "awg|$VVE_AWG" "singbox|$VVE_SB"; do

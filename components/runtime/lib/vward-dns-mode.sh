@@ -86,7 +86,8 @@ vward_dns_dnsmasq_validate() (
     [ "$#" -eq 1 ] || return 2
     vwd_root
     [ -f "$1" ] && [ ! -L "$1" ] || return 2
-    r=$(awk -F= '
+    # The router's own LAN address comes from the device profile, never a constant.
+    r=$(awk -F= -v lan="${VWARD_LAN_ADDRESS:-}" '
         /^[ \t]*(#|$)/ {next}
         {k = $1; v = substr($0, length($1) + 2)}
         k == "port" {np++; port = v}
@@ -95,7 +96,7 @@ vward_dns_dnsmasq_validate() (
         k == "conf-file" || k == "conf-dir" || k == "addn-hosts" || k == "dhcp-script" {print "external-include-" k; exit}
         k == "server" {s = v; sub(/^\/[^\/]*\//, "", s); split(s, a, "#")
             if (a[1] ~ /^127\./ && (a[2] == "" || a[2] == "53" || a[2] == port)) {print "loop-" s; exit}
-            if (a[1] == "192.168.1.1" || a[1] == "0.0.0.0") {print "loop-" s; exit}
+            if ((lan != "" && a[1] == lan) || a[1] == "0.0.0.0") {print "loop-" s; exit}
             ns++}
         END {if (np != 1) print "port-count"; else if (port == 53 || port == 65053) print "port-reserved"; else if (!ns) print "no-upstream"}' "$1")
     [ -z "$r" ] || { printf 'refuse\t%s\n' "$r" | head -n 1; return 75; }
@@ -114,6 +115,7 @@ vward_dns_dnsmasq_validate() (
 #   smartdns_rules smartdns_mapped  counts (every Smart DNS domain must keep its route)
 #   native_upstream               yes|no      (Keenetic has its own upstream configured)
 #   probe_dnsmasq                 ok|fail|none (answers from dnsmasq on its port, before the switch)
+#   router_address                the router's LAN address (device profile)
 #   writer                        disabled|enabled
 # Output: one step per line, "STEP<TAB>action", or "refuse<TAB>reason".
 vward_dns_mode_plan() (
@@ -134,6 +136,7 @@ vward_dns_mode_plan() (
         native) [ "$ar$dr" = nono ] || ref mode-disagrees-with-running ;;
     esac
     [ "$1" != "$cur" ] || { printf 'none\talready-%s\n' "$cur"; exit 0; }
+    ra=$(f router_address); vwd_ip "$ra" || ref router-address-unknown
     if [ "$1" = dnsmasq ]; then
         [ "$(f dnsmasq_installed)" = yes ] || ref dnsmasq-not-installed
         [ "$(f dnsmasq_config)" = valid ] || ref dnsmasq-config-not-valid
@@ -154,8 +157,8 @@ vward_dns_mode_plan() (
         agh) echo "2	start AdGuard Home on :65053 (not in the chain yet), probe it directly" ;;
         native) echo "2	verify Keenetic's own upstream answers" ;;
     esac
-    old=; case $cur in agh) old=192.168.1.1:65053 ;; dnsmasq) old=192.168.1.1:$(f dnsmasq_port) ;; esac
-    new=; case $1 in agh) new=192.168.1.1:65053 ;; dnsmasq) new=192.168.1.1:$(f dnsmasq_port) ;; esac
+    old=; case $cur in agh) old=$ra:65053 ;; dnsmasq) old=$ra:$(f dnsmasq_port) ;; esac
+    new=; case $1 in agh) new=$ra:65053 ;; dnsmasq) new=$ra:$(f dnsmasq_port) ;; esac
     if [ -n "$new" ]; then into="ip name-server $new"; else into=native; fi
     echo "4	replace chain: ${old:+no ip name-server $old; }$into"
     echo "5	verify answers through Keenetic :53 (FQDN routing and Smart DNS domains included)"
