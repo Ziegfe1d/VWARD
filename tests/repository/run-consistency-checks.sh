@@ -160,6 +160,7 @@ python3 tests/repository/check-console-components.py || fail "«Компонен
 python3 tests/repository/check-console-lists-center.py || fail "r-lists: domain lists center, managed lists only"
 python3 tests/repository/check-console-ads-ui.py || fail "ads-ui: order, honest statuses, exact share"
 python3 tests/repository/check-console-help-icon.py || fail "«?» next to its title"
+python3 tests/repository/check-version-numbering.py || fail "release numbering: fix.N / fix.N.M order"
 python3 tests/repository/check-console-update-method.py || fail "Updates: update method switch and last method"
 python3 tests/repository/check-console-notes.py || fail "Bell: pop-ups top right, history on the router, errors under fields"
 python3 tests/repository/check-console-fold.py || fail "Panel blocks fold to their title and stay folded"
