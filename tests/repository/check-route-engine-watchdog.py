@@ -74,7 +74,7 @@ for use in ("LCNT=$(adaptive_core_count)",):
         fail("health, startup and status checks must count cores, not command lines")
 if "WATCHDOG_RESTART|reason=$UNHEALTHY" not in S91:
     fail("a restart must log its reason")
-if "|procs=$(core_detail)" not in S91 or S91.count("|procs=$(core_detail)") != 2 or "START_FAILED|wait=${START_WAIT}s|last_stop=$(last_stop)|alive=" not in S91:
+if "|procs=$(core_detail)" not in S91 or S91.count("|procs=$(core_detail)") != 2 or "START_FAILED|wait=${N}s|last_stop=$(last_stop)|alive=" not in S91:
     fail("WATCHDOG_RESTART and START_FAILED must name the processes and the lock they saw")
 
 print("ROUTE_ENGINE_WATCHDOG=PASS")

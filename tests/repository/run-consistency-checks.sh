@@ -209,6 +209,7 @@ python3 tests/repository/check-adaptive-full.py || fail "AdaptiveAuto: no Russia
 python3 tests/repository/check-write-fail-survives.py || fail "A failed write does not end the route engine or S91 (BusyBox ash)"
 python3 tests/repository/check-route-engine-restore.py || fail "AdaptiveAuto restored at the start in one pass, within Keenetic's 300, no files left"
 python3 tests/repository/check-route-engine-start-reads.py || fail "engine start reads the configuration once (31.10 START_FAILED loop)"
+python3 tests/repository/check-route-engine-start-wait.py || fail "slow healthy engine start is waited for; a passing second core does not restart"
 python3 tests/repository/check-route-engine-watchdog.py || fail "Watchdog counts engine cores, not subshells"
 python3 tests/repository/check-console-diagnostics-dns.py || fail "Diagnostics: DNS chain, files as installed"
 python3 tests/repository/check-console-ndm-cache.py || fail "Panel caches Keenetic answers briefly"

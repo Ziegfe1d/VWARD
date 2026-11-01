@@ -29,6 +29,7 @@ CONTROL_LOCK="/tmp/S91vward-route-engine.control.lock"
 PLANNED_FLAG="/tmp/vward-route-engine.restarting"
 CHILD_STATE="/tmp/S91vward-route-engine.tcpdump-missing"
 START_WAIT=12
+START_WAIT_SLOW=${VWARD_ROUTE_ENGINE_START_SLOW:-60}
 STOP_WAIT=6
 CONTROL_WAIT=20
 
@@ -285,6 +286,21 @@ start_service()
         fi
     fi
 
+    # A second core seen once (01.11: WATCHDOG_RESTART cores=2 -> STOP TERM -> START_FAILED, every
+    # ~14 min): looked at again after 2 s, the restart only when it is still there. A real second
+    # engine stays and is restarted as before; a passing one (a subshell between its fork and its
+    # parent's wait, an engine that was ending) no longer costs a restart.
+    case "$UNHEALTHY" in
+        cores=[2-9]*|cores=1[0-9]*)
+            CORES_SEEN=$UNHEALTHY CORES_PROCS=$(core_detail)
+            sleep 2
+            if service_healthy; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S')|WATCHDOG_CORES_TRANSIENT|seen=$CORES_SEEN|procs=$CORES_PROCS" >> "$EVENT_LOG" 2>/dev/null
+                return 0
+            fi
+            ;;
+    esac
+
     # Why the engine is (re)started, for the event log, with how the engine itself ended (its
     # STOP line after its last START; none: killed without a word, kill -9 or out of memory).
     [ -z "$UNHEALTHY" ] || [ "$UNHEALTHY" = no_pidfile ] ||
@@ -314,7 +330,12 @@ start_service()
 
     N=0
 
-    while [ "$N" -lt "$START_WAIT" ]; do
+    # The engine's start (restore of AdaptiveAuto: the route-change lock up to 10 s, Keenetic's
+    # configuration 5-14 s on a loaded Viva, up to 8 s of writes) can take longer than START_WAIT.
+    # Killing it then was the loop of 1.11 (START_FAILED wait=12s, STOP TERM, PERSIST_RESTORE_LOCK_FAIL).
+    # After START_WAIT the wait goes on, up to START_WAIT_SLOW, only for an engine that is alive,
+    # holds its own lock and is the only one; anything else fails at START_WAIT as before.
+    while [ "$N" -lt "$START_WAIT_SLOW" ]; do
 
         kill -0 "$PID" 2>/dev/null || break
 
@@ -328,17 +349,24 @@ start_service()
 
             rm -f "$CHILD_STATE"
 
+            [ "$N" -lt "$START_WAIT" ] ||
+                echo "$(date '+%Y-%m-%d %H:%M:%S')|START_SLOW|wait=${N}s" >> "$EVENT_LOG" 2>/dev/null
             echo "Adaptive Live started PID=$PID tcpdump=1 wait=${N}s"
             return 0
+        fi
+
+        if [ "$N" -ge "$START_WAIT" ] &&
+           ! { [ "$LOCKPID" = "$PID" ] && [ "$LCNT" -eq 1 ]; }; then
+            break
         fi
 
         sleep 1
         N=$((N + 1))
     done
 
-    echo "Adaptive Live failed startup health check after ${START_WAIT}s"
+    echo "Adaptive Live failed startup health check after ${N}s"
     kill -0 "$PID" 2>/dev/null && SF_ALIVE=1 || SF_ALIVE=0
-    echo "$(date '+%Y-%m-%d %H:%M:%S')|START_FAILED|wait=${START_WAIT}s|last_stop=$(last_stop)|alive=$SF_ALIVE|lock=$(cat "$LIVE_LOCK/pid" 2>/dev/null)|pid=$PID|cores=$(adaptive_core_count)|tcpdump=$(adaptive_tcpdump_pids | wc -l)|procs=$(core_detail)" >> "$EVENT_LOG" 2>/dev/null
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|START_FAILED|wait=${N}s|last_stop=$(last_stop)|alive=$SF_ALIVE|lock=$(cat "$LIVE_LOCK/pid" 2>/dev/null)|pid=$PID|cores=$(adaptive_core_count)|tcpdump=$(adaptive_tcpdump_pids | wc -l)|procs=$(core_detail)" >> "$EVENT_LOG" 2>/dev/null
 
     clean_service
     return 1
