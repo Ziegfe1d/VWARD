@@ -563,3 +563,17 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 .field-warn.retry{display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 details.missing-comps>summary{list-style:none;cursor:pointer}
 details.missing-comps>summary::-webkit-details-marker{display:none}
+/* 02.11 (owner): a button's label is never broken inside a word. */
+.kv-row .btn.small{white-space:nowrap}
+/* «Агенты»: the agents' modes as compact rows; the proposed actions readable, left-aligned. */
+.compact-modes .kv-row{padding-top:6px;padding-bottom:6px}
+.compact-modes .seg-slider{max-width:240px}
+.prop-agent{margin:12px 16px 4px;font-size:var(--fs-sm);color:var(--muted);font-weight:600}
+.props{list-style:none;margin:0;padding:0}
+.prop{padding:8px 16px;border-top:1px solid var(--line);text-align:left}
+.prop-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.prop-head b{font-weight:600}
+.prop-head time{flex:none;color:var(--faint);font-size:var(--fs-xs)}
+.prop p{margin:2px 0 0;color:var(--muted);font-size:var(--fs-sm)}
+.prop ul{margin:2px 0 0;padding-left:18px;color:var(--muted);font-size:var(--fs-sm)}
+.prop-old{margin:8px 16px;color:var(--muted);font-size:var(--fs-sm)}

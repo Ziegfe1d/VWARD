@@ -3219,12 +3219,32 @@ if [ "$ACTION" = stability ]; then
     read -r RCI_UP _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
     RCI_UP=${RCI_UP%%.*}
     RCI_CALLS=$(cat "$RCI_CD"/* 2>/dev/null | awk -v h="$((${RCI_UP:-0} / 3600))" '/^[0-9]+$/ {ok = ($1 > h - 24); next} ok {n += length($0)} END {printf "%d", n}')
+    # Memory of the router and of every running program of VWARD and AdGuard Home (owner 02.11:
+    # the list was partial, AdGuard Home the largest): resident and swapped out, one way for all
+    # (/proc/PID/status VmRSS/VmSwap).
+    MEM="$(awk '$1 ~ /^(MemTotal|MemAvailable|SwapTotal|SwapFree):$/ {sub(":", "", $1); printf "%s\"%s\":%d", (n++ ? "," : ""), $1, $2}' "${VWARD_PROC:-/proc}/meminfo" 2>/dev/null)"
+    {
+        printf '['; pn=0
+        ps w 2>/dev/null | awk '{for (i = 5; i <= NF; i++) {b = $i; sub(/.*\//, "", b)
+            if (b ~ /^(vward-route-engine\.sh|vward-sentinel|vward-cron-supervisor\.sh|vward-dnscap|vward-awg|xray|lighttpd|AdGuardHome|https_dns_proxy|sing-box|dnsmasq)$/) {print $1 "\t" b; next}}}' |
+        while IFS="$(printf '\t')" read -r PP PN; do
+            PR=$(awk '$1 == "VmRSS:" {r = $2} $1 == "VmSwap:" {w = $2} $1 == "PPid:" {pp = $2} END {printf "%d %d %d", r, w, pp}' "${VWARD_PROC:-/proc}/$PP/status" 2>/dev/null)
+            set -- $PR
+            [ "${1:-0}" -gt 0 ] || continue
+            [ "$pn" = 0 ] || printf ','
+            printf '{"name":"%s","pid":%s,"rss_kb":%s,"swap_kb":%s,"ppid":%s}' "$PN" "$PP" "$1" "$2" "$3"; pn=1
+        done
+        printf ']'
+    } > "$SD/progs"
+    "$JQ" -e 'type == "array"' "$SD/progs" >/dev/null 2>&1 || echo '[]' > "$SD/progs"
     "$JQ" -n -c --argjson running "$RUNNING" --argjson installed "$INSTALLED" \
+        --argjson mem "{${MEM}}" --slurpfile progs "$SD/progs" \
         --slurpfile state "$SD/state" --slurpfile hours "$SD/hours" \
         --slurpfile cpu "$SD/cpu" --slurpfile events "$SD/events" --slurpfile tunnels "$SD/tunnels" \
         --arg now "$NOW" --arg fok "$FEED_OK" --arg ffail "$FEED_FAIL" --arg frc "$FEED_RC" --arg tls "$TLS_AT" --arg rci "${RCI_DAY:-0 0}" --arg rcalls "${RCI_CALLS:-0}" \
         'def num: tonumber? // null;
          {ok: true, sentinel: {running: $running, installed: $installed}, state: $state[0], hours: $hours[0], cpu: $cpu[0], events: $events[0],
+          mem: $mem, progs: ($progs[0] | map(select(.name as $n | . as $p | ($progs[0] | any(.pid == $p.ppid and .name == $n)) | not))),
           checks: {now: ($now | num), tunnels: $tunnels[0], feed_ok_at: ($fok | num), feed_fail_at: ($ffail | num), feed_fail_rc: ($frc | num),
                    https_crash_at: ($tls | num), rci_fails_day: ($rci | split(" ")[0] | num), rci_calls_day: ($rcalls | num), rci_fail_at: ($rci | split(" ")[1] | num | if . == 0 then null else . end)}}' 2>/dev/null ||
         echo '{"ok":false,"error":"stability_unavailable"}'

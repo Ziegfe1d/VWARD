@@ -126,9 +126,9 @@ if out["b"]["index"] != 100 or out["none"] is not None:
     fail(f"a clean hour is 100, no hours is no index: {out['b']} {out['none']}")
 if out["c"] != [[1000, 9, 1, None, 0, 0, 50000, None, 0, 0]]:
     fail(f"the running hour from the watcher's totals: {out['c']}")
-if out["ev"] != "AmneziaWG, туннель 0: утечка памяти (70010 КБ), перезапущен" or out["mr"] != "Панель VWARD: утечка памяти, перезапущен":
+if out["ev"] != "AmneziaWG · туннель 0: утечка памяти (70010 КБ), перезапущен" or out["mr"] != "Панель VWARD: утечка памяти, перезапущен":
     fail(f"events in words: {out['ev']} / {out['mr']}")
-for need in ("'d-stability': { title: 'Стабильность', parent: 'system', data: ['stab'] }", "stab: () => apiGet('stability')",
+for need in ("'d-stability': { title: 'Стабильность', parent: 'system', data: ['stab', 'status'] }", "stab: () => apiGet('stability')",
              "['Стабильность', sc && sc.index != null ? sc.index + '% за сутки' : S.stab ? 'не проверено'", "'d-stability'() {"):
     if need not in js:
         fail(f"the Panel lacks {need!r}")

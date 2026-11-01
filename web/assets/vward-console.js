@@ -186,7 +186,12 @@ function stabRows(d, span) {
   return rows;
 }
 const STAB_WATCH = n => n === 'route-engine' ? 'Маршрутизация' : n === 'panel' ? 'Панель VWARD' :
-  /^awg-t\d+$/.test(n) ? 'AmneziaWG, туннель ' + n.slice(5) : /^xray-v\d+$/.test(n) ? 'Xray (VLESS), туннель ' + n.slice(6) : n;
+  /^awg-t\d+$/.test(n) ? 'AmneziaWG · туннель ' + n.slice(5) : /^xray-v\d+$/.test(n) ? 'Xray · туннель ' + n.slice(6) : n;
+// Programs by name, one name everywhere (owner 02.11).
+const PROG_NAME = { 'vward-route-engine.sh': 'Маршрутизация', 'vward-sentinel': 'Контроль состояния', 'vward-cron-supervisor.sh': 'Агент компонентов', 'vward-dnscap': 'Захват DNS-запросов',
+  'vward-awg': 'AmneziaWG', xray: 'Xray', lighttpd: 'Панель VWARD', AdGuardHome: 'AdGuard Home', https_dns_proxy: 'DoH-клиент', 'sing-box': 'sing-box', dnsmasq: 'dnsmasq' };
+// A duration for people (owner 02.11): «8 ч 28 мин», seconds only under a minute.
+const fmtDur = sec => { const n = Math.round(+sec || 0); if (n < 60) return (Math.round((+sec || 0) * 10) / 10).toString().replace('.', ',') + ' с'; const d = Math.floor(n / 86400), h = Math.floor(n % 86400 / 3600), m = Math.floor(n % 3600 / 60); return d ? d + ' д ' + h + ' ч' : h ? h + ' ч ' + m + ' мин' : m + ' мин'; };
 function stabEvent(w) {
   const f = String(w || '').split('|');
   const name = STAB_WATCH(f[2] || '');
@@ -762,7 +767,7 @@ function mergeLogs(parts, newestFirst, info) {
 const DETAILS = {
   'd-components': { title: 'Компоненты VWARD', parent: 'system' },
   'd-diag': { title: 'Диагностика', parent: 'system' },
-  'd-stability': { title: 'Стабильность', parent: 'system', data: ['stab'] },
+  'd-stability': { title: 'Стабильность', parent: 'system', data: ['stab', 'status'] },
   'd-files': { title: 'Файлы VWARD', parent: 'system', data: ['files'] },
   'd-control': { title: 'Управление', parent: 'system', data: ['config', 'status', 'ads', 'lists', 'ext'] },
   'd-cron': { title: 'Задания по расписанию', parent: 'd-diag' },
@@ -909,6 +914,8 @@ function foldToggle(key) {
 // The icon of a block's title (owner 2026-10-17: every section with its sign), by its words.
 const HEAD_ICONS = [
   [/^Добавить|^Новый/, 'plus'],
+  // Each section its own sign (owner 02.11: one «i» for different sections).
+  [/Хранение журнал/, 'archive'], [/Восстановление интернета/, 'globe'], [/^Исключени/, 'filter'], [/^Режим/, 'sliders'], [/События и реакции/, 'pulse'],
   [/Удален|Корзин/, 'trash'], [/Очистк/, 'broom'], [/Сброс/, 'reset'], [/Аварийн/, 'power'], [/Резервн/, 'archive'],
   [/Сертификат/, 'cert'], [/ИИ-сервис/, 'spark'], [/Управлени/, 'sliders'], [/Агент|Работают всегда|Решения агента|Предполагаем/, 'shield'],
   [/Сервер|Страны/, 'server'], [/Smart DNS|DNS/, 'dns'], [/AdGuard|Фильтр|Блокиров|Заблокир|Разрешено|Правил|На проверке/, 'block'],
@@ -1385,7 +1392,7 @@ function agentsPanel() {
     ['Агент сети', 'интернет, VPN, DNS', pill(ag.network, jobOk(['vward-tunnel-health.sh', 'vward-wan-guard.sh', 'vward-route-reconciler.sh'])), 'wan'],
     ['Агент компонентов', 'программы и модули', pill(null, known ? !!sv.supervisor : null), 'd-components'],
     ['Агент обновлений', 'обновления программ', pill(ag.updates, known ? !!sv.crond : null), 'u-vward'],
-    ['Агент обслуживания', 'журналы и флешка', pill(ag.maintenance, jobOk(['vward-housekeeping.sh'])), 'logs']
+    ['Агент обслуживания', 'журналы и накопитель', pill(ag.maintenance, jobOk(['vward-housekeeping.sh'])), 'logs']
   ];
   // The mode and the proposed actions are on the same page below: no rows leading to it (owner 2026-10-18).
   return panel('Агенты', kv(rows.map(r => [r[0], r[2][1], r[2][0], r[3], '', r[2][2] ? r[1] + ' · ' + r[2][2] : r[1]])),
@@ -1620,12 +1627,32 @@ const AGENT_PROTOCOLS = [
   ['network', 'Интернет не отвечает', 'провайдер не отвечает подряд несколько проверок', 'заново получить адрес, затем переподключить'],
   ['components', 'Программа занимает много памяти', 'память выше предела несколько проверок подряд', 'перезапустить программу'],
   ['components', 'Запуск завис', 'задание работает дольше своего предела', 'остановить зависший запуск'],
-  ['components', 'Программу просят перезапустить', 'другой агент сообщил о сбое', 'перезапустить программу'],
+  ['components', 'Программа просит перезапуск', 'другой агент сообщил о сбое', 'перезапустить программу'],
   ['components', 'AdGuard Home не запускается', 'программа падает с «Illegal instruction»', 'поставить официальную сборку той же версии'],
-  ['updates', 'Есть обновление пакета', 'новая версия в Entware или у AdGuard', 'установить с копией и откатом'],
+  ['updates', 'Доступно обновление пакета', 'новая версия в Entware или у AdGuard', 'установить с копией и откатом'],
   ['maintenance', 'Программа падает', 'клиент DoH или curl падают при запуске', 'сверить пакеты с Entware и переустановить испорченные'],
-  ['maintenance', 'Флешка портит файлы', 'сверка файлов нашла изменённые без записи программой', 'переустановить испорченные пакеты']
+  ['maintenance', 'Ошибки на USB-накопителе', 'сверка файлов нашла изменённые без записи программой', 'переустановить испорченные пакеты']
 ];
+// «Предполагаемые действия» (owner 02.11): grouped by agent, the same action folded («× 3, последняя
+// …»), a short bold title and the time, the proposal below; tunnels by their Panel names; the
+// newest 10 with «Показать ещё»; older than a week folded.
+let PROP_ALL = false;
+function proposedHtml(pr) {
+  if (!pr.length) return empty('Пока нет');
+  const names = t => String(t || '').replace(/\b(OpkgTun\d+|Wireguard\d+)\b/g, n => tunLabel(n) !== n ? tunLabel(n) + ' (' + n + ')' : n);
+  const groups = [], byKey = {};
+  pr.forEach(p => { const k = p.agent + '|' + p.action; if (!byKey[k]) { byKey[k] = { p: p, n: 0, last: p.at }; groups.push(byKey[k]); } byKey[k].n++; });
+  const weekAgo = Date.now() / 1000 - 7 * 86400, fresh = groups.filter(g => +g.p.at >= weekAgo), old = groups.filter(g => +g.p.at < weekAgo);
+  const shown = PROP_ALL ? fresh : fresh.slice(0, 10);
+  const item = g => { const t = names(g.p.text), m = /^([^:]{3,80}):\s*(.*)$/.exec(t), title = m ? m[1] : t, rest = m ? m[2] : '';
+    const opts = rest.split(/,\s*|\s+или\s+/).filter(Boolean);
+    return '<li class="prop"><div class="prop-head"><b>' + esc(title) + '</b><time>' + esc(fmtStamp(g.last)) + (g.n > 1 ? ' · × ' + g.n : '') + '</time></div>' +
+      (opts.length > 1 ? '<p>Предложит одно из ' + opts.length + ':</p><ul>' + opts.map(o => '<li>' + esc(o) + '</li>').join('') + '</ul>' : rest ? '<p>' + esc(rest) + '</p>' : '') + '</li>'; };
+  const byAgent = list => AGENTS.map(a => { const l = list.filter(g => g.p.agent === a[0]); return l.length ? '<h3 class="prop-agent">' + esc(a[1]) + '</h3><ul class="props">' + l.map(item).join('') + '</ul>' : ''; }).join('');
+  return (shown.length ? byAgent(shown) : empty('За неделю новых нет')) +
+    (fresh.length > 10 && !PROP_ALL ? '<div class="panel-actions"><button class="btn small" type="button" data-act="prop-more">Показать ещё (' + (fresh.length - 10) + ')</button></div>' : '') +
+    (old.length ? '<details class="prop-old"><summary>Старше недели (' + old.length + ')</summary>' + byAgent(old) + '</details>' : '');
+}
 const AGENT_LOCKED = [
   ['Запуск остановленных программ VWARD', 'агент компонентов'], ['Панель VWARD и SSH', 'агент компонентов'],
   ['AdGuard Home вне цепочки DNS, когда он молчит', 'интернет дома не пропадает'], ['Обновления самого VWARD', 'через них приходят исправления'],
@@ -1926,15 +1953,15 @@ const RENDER = {
   'd-agents'() {
     const am = agentsMode(), pr = ((S.config && S.config.agents) || {}).proposed || [];
     return loadError(['config']) + agentsPanel() +
-      panel('Режим', '<p class="panel-desc">Все агенты</p>' + modeSlider('all', AGENTS.every(a => am[a[0]] === 'watch') ? 'watch' : 'act', 'Режим всех агентов') +
-        AGENTS.map(a => '<p class="panel-desc">' + esc(a[1]) + '</p>' + modeSlider(a[0], am[a[0]], a[1])).join('') + resultBox('agents'),
-        { desc: 'Наблюдение: агент находит неполадку и записывает, что сделал бы, но ничего не меняет. Действие: агент чинит сам.' }) +
-      panel('Протоколы', kv(AGENT_PROTOCOLS.map(r => [r[1], am[r[0]] === 'act' ? 'Действие' : 'Наблюдение', am[r[0]] === 'act' ? '' : 'warn', null, '', AGENT_NAME[r[0]] + ': ' + r[2] + ' → ' + r[3]])),
-        { desc: 'Известные случаи: признак и одно безопасное действие. В наблюдении агент только записывает его в «Предполагаемые действия».' }) +
+      panel('Режим', '<p class="panel-desc">Наблюдение: только замечает и пишет в журнал. Действие: сам исправляет.</p>' +
+        '<dl class="kv">' + ctrlRow('Все агенты', modeSlider('all', AGENTS.every(a => am[a[0]] === 'watch') ? 'watch' : 'act', 'Режим всех агентов'), '', 'stack') + '</dl>' +
+        '<dl class="kv compact-modes">' + AGENTS.map(a => ctrlRow(a[1], modeSlider(a[0], am[a[0]], a[1]))).join('') + '</dl>' + resultBox('agents')) +
+      panel('События и реакции', kv(AGENT_PROTOCOLS.map(r => [r[1], am[r[0]] === 'act' ? 'Действие' : 'Наблюдение', am[r[0]] === 'act' ? 'ok' : 'info', null, '', AGENT_NAME[r[0]] + ': ' + r[2] + ' → ' + r[3]])),
+        { desc: 'Что агент замечает и что делает. В наблюдении он только записывает это в «Предполагаемые действия».' }) +
       panel('Работают всегда', kv(AGENT_LOCKED.map(r => [r[0], 'Включено', 'ok', null, '', r[1]])),
         { desc: 'Без этого роутер может остаться без интернета или без доступа к Панели, поэтому режим наблюдения их не останавливает.' }) +
-      panel('Предполагаемые действия', pr.length ? kv(pr.slice(0, 50).map(p => [AGENT_NAME[p.agent] || p.agent, p.text, '', null, '', fmtStamp(p.at)])) : empty('Пока нет'),
-        { desc: 'Что агенты сделали бы в режиме наблюдения. Одно и то же действие записывается не чаще раза в час.' }) + soonPanel('d-agents');
+      panel('Предполагаемые действия', proposedHtml(pr),
+        { desc: 'Что агент сделал бы в режиме «Действие». Одно и то же действие записывается не чаще раза в час.' }) + soonPanel('d-agents');
   },
   // The VLESS module's programs (Xray), one row a tunnel: moved here from the tunnel's page,
   // which only says so when the program has stopped (owner 2026-10-17).
@@ -2177,8 +2204,17 @@ const RENDER = {
       w.pid ? (w.limit_kb && w.rss_kb > w.limit_kb ? 'crit' : 'ok') : '', '', '',
       [w.pid && w.base_kb > 0 ? 'обычно ' + fmtKB(w.base_kb) : '', w.pid ? 'процессор ' + (w.cpu_x100 / 100).toFixed(1).replace('.', ',') + '%' : '',
        'предел ' + fmtKB(w.limit_kb), w.downs ? 'пропадал ' + times(w.downs, 'раз', 'раза', 'раз') : '', w.leaks ? times(w.leaks, 'утечка', 'утечки', 'утечек') : ''].filter(Boolean).join(' · ')]);
-    const cpu = (d.cpu || []).slice().sort((a, b) => b.cs - a.cs).map(c => [STAB_JOB[c.component] || c.component, (c.cs / 100).toFixed(1).replace('.', ',') + ' с', '', '', '',
-      times(c.runs, 'запуск', 'запуска', 'запусков') + ' с загрузки роутера']);
+    // Load (owner 02.11): the total in hours and minutes, the average of one run and the share of
+    // the router's uptime; a run of 5 s and more is marked.
+    const up = num((st().router || {}).uptime_sec);
+    const cpu = (d.cpu || []).slice().sort((a, b) => b.cs - a.cs).map(c => { const sec = c.cs / 100, per = c.runs ? sec / c.runs : 0;
+      return [STAB_JOB[c.component] || c.component, fmtDur(sec), per >= 5 ? 'warn' : '', '', '',
+        [times(c.runs, 'запуск', 'запуска', 'запусков'), c.runs ? '≈ ' + fmtDur(per) + ' за запуск' : '', up ? (Math.round(sec / up * 1000) / 10).toString().replace('.', ',') + ' % времени работы' : ''].filter(Boolean).join(' · ')]; });
+    // Memory (owner 02.11): every running program of VWARD and AdGuard Home, resident and in swap.
+    const mem = d.mem || {}, progs = (d.progs || []).slice().sort((a, b) => (b.rss_kb + b.swap_kb) - (a.rss_kb + a.swap_kb));
+    const memRow = mem.MemTotal ? ['Память роутера', 'свободно ' + fmtKB(mem.MemAvailable) + ' из ' + fmtKB(mem.MemTotal), mem.MemAvailable < mem.MemTotal * 0.15 ? 'warn' : '', '', '',
+      mem.SwapTotal ? 'swap занят ' + fmtKB(mem.SwapTotal - mem.SwapFree) + ' из ' + fmtKB(mem.SwapTotal) : 'swap нет'] : null;
+    const progRows = progs.map(p => [PROG_NAME[p.name] || p.name, fmtKB(p.rss_kb), '', '', '', p.swap_kb ? 'ещё ' + fmtKB(p.swap_kb) + ' в swap' : '']);
     const ev = (d.events || []).map(e => '<li class="row"><div class="row-main"><b>' + esc(stabEvent(e.what)) + '</b><small>' + esc(e.at) + '</small></div></li>').join('');
     return panel('Итог', kv([
       ['За сутки', idx(day), stabCls(day && day.index)], ['За неделю', idx(week), stabCls(week && week.index)],
@@ -2194,8 +2230,9 @@ const RENDER = {
         ['Нагрузка', st.load_x100 != null ? (st.load_x100 / 100).toFixed(2).replace('.', ',') : '—', st.busy ? 'warn' : '', '', '', st.busy ? 'роутер занят: необязательная работа VWARD ждёт' : st.load_max_x100 ? 'больше всего ' + (st.load_max_x100 / 100).toFixed(2).replace('.', ',') : ''],
         ['Событий обработано', String(st.events || 0), '', '', '', (st.link_events || 0) + ' от интерфейсов']
       ]), { desc: sen.running ? 'Следит за памятью и нагрузкой каждые 2 секунды, за интерфейсами — мгновенно, за DNS — каждые 30 секунд.' : 'Агент ставится сам в течение часа; пока его нет, проверки идут раз в минуту.' }) +
-      (watch.length ? panel('Программы VWARD', kv(watch)) : '') +
-      (cpu.length ? panel('Нагрузка', kv(cpu), { desc: 'Сколько процессора потратило каждое задание VWARD со всем, что оно запускало.' }) : '') +
+      (progRows.length || memRow ? panel('Программы VWARD', kv([memRow].concat(progRows)), { desc: 'Память каждой работающей программы VWARD и AdGuard Home (резидентная и в swap), одним способом.' }) : '') +
+      (watch.length ? panel('Под наблюдением агента', kv(watch)) : '') +
+      (cpu.length ? panel('Нагрузка', kv(cpu), { desc: 'Суммарное время работы процессора каждого задания VWARD с загрузки роутера' + (up ? ' (роутер работает ' + fmtUptime(up) + ')' : '') + '. Отмечены задания дольше 5 с за запуск.' }) : '') +
       panel('Последние события', ev ? '<ul class="rows">' + ev + '</ul>' : empty('Событий пока нет'));
   },
   'd-cron'() {
@@ -2590,7 +2627,7 @@ function wanNowRows() {
   const busy = String(runningId || '').startsWith('wan-') ? runningId : '';
   return '<dl class="kv">' +
         ctrlRow('Обновить адрес', btn('ask', 'refresh', busy === 'wan-renew' ? 'Обновляем…' : 'Обновить', 'small', ' data-confirm="wan-renew"' + (busy ? ' disabled' : '')), 'повторный запрос адреса у провайдера (DHCP), соединение не разрывается') +
-        ctrlRow('Переподключить', btn('ask', 'undo', busy === 'wan-bounce' ? 'Переподключаем…' : 'Переподключить', 'small', ' data-confirm="wan-bounce"' + (busy ? ' disabled' : '')), 'интерфейс провайдера выключается и включается, интернета нет около 10 с') + '</dl>' +
+        ctrlRow('Переподключить', btn('ask', 'power', busy === 'wan-bounce' ? 'Переподключаем…' : 'Переподключить', 'small', ' data-confirm="wan-bounce"' + (busy ? ' disabled' : '')), 'интерфейс провайдера выключается и включается, интернета нет около 10 с') + '</dl>' +
         (confirmBox('wan-renew', 'Попросить у провайдера новый адрес? Связь может прерваться на несколько секунд.', 'Обновить') ||
          confirmBox('wan-bounce', 'Переподключить интернет? Он пропадёт примерно на 10 секунд, домашняя сеть продолжит работать.', 'Переподключить') || '');
 }
@@ -4679,6 +4716,7 @@ document.addEventListener('click', e => {
   else if (a === 'ai-answer') aiAnswer(t.dataset.way);
   else if (a === 'ai-room') { if (!SVC.busy) aiJob(t.dataset.ai, 'dns', aiName(t.dataset.ai) + ': Smart DNS'); }
   else if (a === 'ai-dns-clear') smartdnsServer('clear', '');
+  else if (a === 'prop-more') { PROP_ALL = true; render(); }
   else if (a === 'vsrv-open') { const k = t.dataset.name + '|' + t.dataset.code; if (VOPEN.has(k)) VOPEN.delete(k); else VOPEN.add(k); render(); }
   else if (a === 'tunnel-probe') {
     const n = t.dataset.name; S.tprobe[n] = { busy: true }; render();
