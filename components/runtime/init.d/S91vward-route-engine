@@ -95,6 +95,17 @@ adaptive_core_count()
 }
 
 
+# core_detail: "pid:ppid" of every process the core count looks at (01.11, for the event log only: a
+# second core is then a named process with its parent, not a bare number).
+core_detail()
+{
+    for CD_P in $(adaptive_live_pids); do
+        read -r _ _ _ CD_PP _ 2>/dev/null < "/proc/$CD_P/stat" || continue
+        echo "$CD_P:$CD_PP"
+    done | tr '\n' ','
+}
+
+
 adaptive_tcpdump_pids()
 {
     ps w |
@@ -277,7 +288,7 @@ start_service()
     # Why the engine is (re)started, for the event log, with how the engine itself ended (its
     # STOP line after its last START; none: killed without a word, kill -9 or out of memory).
     [ -z "$UNHEALTHY" ] || [ "$UNHEALTHY" = no_pidfile ] ||
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|WATCHDOG_RESTART|reason=$UNHEALTHY|last_stop=$(last_stop)" >> "$EVENT_LOG" 2>/dev/null
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|WATCHDOG_RESTART|reason=$UNHEALTHY|last_stop=$(last_stop)|pid=${PID:-}|lock=${LOCKPID:-}|procs=$(core_detail)|by=$(tr '\000' ' ' < "/proc/$PPID/cmdline" 2>/dev/null | cut -c1-60)" >> "$EVENT_LOG" 2>/dev/null
 
     # Only core failure, duplicate core process, or persistent child
     # failure reaches this point.
@@ -326,7 +337,8 @@ start_service()
     done
 
     echo "Adaptive Live failed startup health check after ${START_WAIT}s"
-    echo "$(date '+%Y-%m-%d %H:%M:%S')|START_FAILED|wait=${START_WAIT}s|last_stop=$(last_stop)" >> "$EVENT_LOG" 2>/dev/null
+    kill -0 "$PID" 2>/dev/null && SF_ALIVE=1 || SF_ALIVE=0
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|START_FAILED|wait=${START_WAIT}s|last_stop=$(last_stop)|alive=$SF_ALIVE|lock=$(cat "$LIVE_LOCK/pid" 2>/dev/null)|pid=$PID|cores=$(adaptive_core_count)|tcpdump=$(adaptive_tcpdump_pids | wc -l)|procs=$(core_detail)" >> "$EVENT_LOG" 2>/dev/null
 
     clean_service
     return 1

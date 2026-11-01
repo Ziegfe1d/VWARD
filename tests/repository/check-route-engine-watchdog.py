@@ -8,6 +8,7 @@ itself an engine process are counted, and a restart writes its reason to the
 engine's event log.
 """
 
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -42,6 +43,16 @@ try:
         fail("a second independent engine must still count")
     if count([str(parent.pid), "999999"]) != "1":
         fail("a process gone meanwhile must not count")
+    # 01.11: a restart names the processes it counted (pid:ppid), so a second core in the journal is a
+    # process with its parent and the one command that asked, not a bare number.
+    cd_start = S91.index("core_detail()\n")
+    cd_fn = S91[cd_start:S91.index("\n}\n", cd_start) + 3]
+    script = "adaptive_live_pids() { printf '%s\\n' " + " ".join([str(parent.pid)] + child) + "; }\n" + cd_fn + "core_detail\n"
+    det = subprocess.run(["sh", "-c", script], capture_output=True, text=True).stdout.strip()
+    if det != f"{parent.pid}:{os.getppid()},{child[0]}:{parent.pid}," and not det.startswith(f"{parent.pid}:"):
+        fail(f"core_detail must list pid:ppid of each counted process: {det!r}")
+    if f"{child[0]}:{parent.pid}" not in det:
+        fail(f"core_detail must show the subshell with its parent: {det!r}")
 finally:
     parent.kill(); other.kill()
 
@@ -63,5 +74,7 @@ for use in ("LCNT=$(adaptive_core_count)",):
         fail("health, startup and status checks must count cores, not command lines")
 if "WATCHDOG_RESTART|reason=$UNHEALTHY" not in S91:
     fail("a restart must log its reason")
+if "|procs=$(core_detail)" not in S91 or S91.count("|procs=$(core_detail)") != 2 or "START_FAILED|wait=${START_WAIT}s|last_stop=$(last_stop)|alive=" not in S91:
+    fail("WATCHDOG_RESTART and START_FAILED must name the processes and the lock they saw")
 
 print("ROUTE_ENGINE_WATCHDOG=PASS")

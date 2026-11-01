@@ -27,6 +27,7 @@ import importlib.util
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -93,7 +94,10 @@ def recovered(root, scenario, findings):
     if gs.get("FAILOPEN_ACTIVE") == "1":
         findings.append((scenario, "not recovered", "tunnel guard still in fail-open"))
     if not chaos.engine_running(root):
+        # The first answer of «status» (01.11: a later one said RUNNING - was the engine caught in a restart?).
+        _, first, _ = chaos.sh(root, "/opt/etc/init.d/S91vward-route-engine status", timeout=30)
         findings.append((scenario, "not recovered", "route engine not running"))
+        recovered.first_status = (first or "")[-300:]
     if "ip name-server 192.0.2.1:65053" not in (root / "emu/running-config").read_text().splitlines():
         findings.append((scenario, "not recovered", "AdGuard Home not back in the DNS chain"))
 
@@ -120,7 +124,18 @@ def debug_state(root):
         except OSError:
             pass
     _, status, _ = chaos.sh(root, "/opt/etc/init.d/S91vward-route-engine status", timeout=30)
-    return {"processes": dict(names), "tmp_largest": tmp, "engine_status": (status or "")[-300:], "logs": logs}
+    # The engine's own journal around the end (starts, stops, restarts and what they saw), the
+    # processes with their parents, and the first «status» answer of the failed check.
+    ev = root / "opt/var/log/vward-route-engine-events.log"
+    marks = []
+    try:
+        marks = [l[:260] for l in ev.read_text(errors="replace").splitlines()
+                 if re.search(r"[|](START|STOP|STOP_REQUEST|WATCHDOG_RESTART|START_FAILED|PERSIST_RESTORE_LOCK_FAIL)([|]|$)", l)][-25:]
+    except OSError:
+        pass
+    _, procs, _ = chaos.sh(root, "ps w | grep -E 'route-engine|tcpdump|dnscap' | grep -v grep", timeout=15)
+    return {"processes": dict(names), "tmp_largest": tmp, "engine_status": (status or "")[-300:], "logs": logs,
+            "first_status": getattr(recovered, "first_status", ""), "engine_events": marks, "engine_ps": (procs or "")[-900:]}
 
 
 def stage_soak(root, minutes, seed, findings, info):
