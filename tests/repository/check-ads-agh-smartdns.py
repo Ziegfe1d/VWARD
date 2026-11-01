@@ -81,6 +81,25 @@ with tempfile.TemporaryDirectory() as tmp:
     S = lambda: json.loads(state.read_text())
     inc = tmp / "inc.txt"; pairs = tmp / "pairs.txt"
 
+    # P-7: remove a server by its exact private URL, across shared domain rows.
+    # The control process receives the config path, never the token as an argument.
+    server_conf = tmp / "smartdns.conf"
+    server_conf.write_text(f"SMARTDNS_URL={D}\nSMARTDNS_STORE=agh\n")
+    alternate = "[/anthropic.com/]https://other.example/dns-query"
+    state.write_text(json.dumps({"up": UP + [alternate]}))
+    out = ctl("smartdns-take-server", str(server_conf), str(pairs))
+    if "TAKEN=3" not in out or S()["up"] != UP[2:] + [alternate]:
+        fail(f"server clear did not preserve unrelated upstreams: {out} {S()}")
+    if set(pairs.read_text().splitlines()) != {f"{d}\t{D}" for d in ["anthropic.com", "claude.ai", "chatgpt.com"]}:
+        fail("server clear did not record its rollback pairs")
+    if "TAKEN=0" not in ctl("smartdns-take-server", str(server_conf), str(pairs)):
+        fail("server clear is not idempotent")
+    state.write_text(json.dumps({"up": UP, "ignore_posts": True}))
+    ctl("smartdns-take-server", str(server_conf), str(pairs), ok=False)
+    if S()["up"] != UP:
+        fail("refused server clear changed the upstreams")
+    state.write_text(json.dumps({"up": UP}))
+
     # A list holding anthropic.com (and api.anthropic.com below it) and a domain without Smart DNS.
     inc.write_text("anthropic.com\ntelegram.org\n")
     out = ctl("smartdns-take", str(inc), str(pairs))

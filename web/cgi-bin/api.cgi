@@ -800,7 +800,7 @@ if [ "$ACTION" = config-data ]; then
       --arg w_window "$(wnum "$W_WIN" 86400)" --arg w_switch "$(wnum "$W_SW" 20)" \
       --arg w_weak "$(wnum "$W_WEAK" 5)" --arg w_rssi "$(wnum "$W_RSSI" -75)" \
       --arg u_start "$U_START" --arg u_end "$U_END" --arg u_interval "$U_INTERVAL" --arg u_window "$U_WINDOW" --arg u_method "$U_METHOD" \
-      --arg u_feed "$(printf '%s\n' "$U_URL" | sed -n -E 's#^https://raw[.]githubusercontent[.]com/[^/]+/[^/]+/(beta|dev)/updates/[a-z0-9-]+/update-manifest[.]json$#\1#p')" \
+      --arg u_feed "$(printf '%s\n' "$U_URL" | sed -n -E 's#^https://raw[.]githubusercontent[.]com/[^/]+/[^/]+/(main|beta|dev)/updates/[a-z0-9-]+/update-manifest[.]json$#\1#p')" \
       --argjson writable "$([ -x "$CONFIG_HELPER" ] && echo true || echo false)" \
       '{ok:true,writable:$writable,
         route:{group:$group,groups:$groups,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
@@ -842,6 +842,10 @@ if [ "$ACTION" = config ]; then
         tunnel) set -- "$OP" "$TARGET"; REQUIRED=TUNNEL_SWITCH ;;
         policy-group) set -- "$OP" "$TARGET" ;;
         domain-list|domain-list-watch) set -- "$OP" "$TARGET" "$VALUE" ;;
+        # r-lists: a list's way (Авто / Через VPN / Напрямую); taking a list under VWARD's
+        # management is the owner's explicit, confirmed decision.
+        list-mode) set -- "$OP" "$TARGET" "$VALUE" ;;
+        list-adopt) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 1 ] || REQUIRED=LIST_ADOPT ;;
         update-feed) set -- "$OP" "$TARGET"; [ "$TARGET" != dev ] || REQUIRED=UPDATE_FEED_DEV ;;
         ext-auto) set -- "$OP" "$TARGET" "$VALUE" ;;
         list-domain) set -- "$OP" "$ACT" "$TARGET" "$VALUE" ;;
@@ -2255,6 +2259,24 @@ if [ "$ACTION" = "route-probe" ]; then
         awk -v p="$P" 'BEGIN{for(i=1;i<=4;i++){bits=p-(i-1)*8;if(bits>=8)o=255;else if(bits<=0)o=0;else o=256-2^(8-bits);printf "%s%d",(i>1?".":""),o}print ""}'
     }
 
+    # The router's own IPv4 route is separate evidence from a configured FQDN list.
+    # It cannot establish a client's policy, UDP or IPv6 path.
+    router_routes_json()
+    {
+        if [ "${VWARD_ROUTE_PROBE_KERNEL:-1}" = 0 ]; then echo '[]'; return; fi
+        printf '%s\n' "$1" | while IFS= read -r RP_IP; do
+            valid_ipv4 "$RP_IP" || continue
+            RP_OUT=$("${VWARD_IP_BIN:-ip}" route get "$RP_IP" 2>/dev/null); RP_RC=$?
+            printf '%s\n' "$RP_OUT" | awk -v ip="$RP_IP" -v rc="$RP_RC" '
+                NR == 1 && rc == 0 {for (i=1;i<NF;i++) {
+                    if ($i == "dev") dev=$(i+1)
+                    if ($i == "via") gateway=$(i+1)
+                    if ($i == "src") source=$(i+1)
+                }}
+                END {printf "%s\t%s\t%s\t%s\n",ip,dev,gateway,source}'
+        done | "$JQ" -Rn '[inputs | split("\t") | {ip:.[0],known:(.[1] != ""),device:.[1],gateway:.[2],source:.[3]}]'
+    }
+
     case "$TYPE" in
         domain)
             case "$VALUE" in
@@ -2264,10 +2286,11 @@ if [ "$ACTION" = "route-probe" ]; then
                     ;;
             esac
 
-            DNS_OUT="$(/opt/bin/vward-route-resolve4.sh "$VALUE" 2>/dev/null)"
+            DNS_OUT="$("${VWARD_RESOLVE4_BIN:-/opt/bin/vward-route-resolve4.sh}" "$VALUE" 2>/dev/null)"
             IPS="$(printf '%s\n' "$DNS_OUT" | awk '/^Address [0-9]+:/ && $3 ~ /^[0-9]+\./ {print $3}' | sort -u | head -n 12)"
             IPS_JSON="$(printf '%s\n' "$IPS" | "$JQ" -Rsc 'split("\n")|map(select(length>0))')"
 
+            ROUTER_ROUTES_JSON=$(router_routes_json "$IPS")
             HINTS_JSON="$(
                 if [ -r "$HINT_CATALOG" ]; then
                     awk -F'|' -v h="$VALUE" '
@@ -2303,8 +2326,8 @@ if [ "$ACTION" = "route-probe" ]; then
 
             "$JQ" -n --arg type domain --arg value "$VALUE" \
               --argjson ips "$IPS_JSON" --argjson hints "$HINTS_JSON" \
-              --argjson adaptive "$ADAPTIVE" --argjson groups "$GROUPS_JSON" --argjson routes "$ROUTES_JSON" --argjson names "$NAMES_JSON" \
-              '{ok:true,type:$type,value:$value,dns:{ipv4:$ips},hints:$hints,adaptive_auto:$adaptive,groups:$groups,routes:$routes,names:$names}'
+              --argjson adaptive "$ADAPTIVE" --argjson groups "$GROUPS_JSON" --argjson routes "$ROUTES_JSON" --argjson names "$NAMES_JSON" --argjson router_routes "$ROUTER_ROUTES_JSON" \
+              '{ok:true,type:$type,value:$value,dns:{ipv4:$ips,source:"probe_dns"},hints:$hints,adaptive_auto:$adaptive,groups:$groups,routes:$routes,names:$names,router_routes:$router_routes,client_path_verified:false}'
             ;;
         ip)
             valid_ipv4 "$VALUE" || {
@@ -2341,9 +2364,10 @@ if [ "$ACTION" = "route-probe" ]; then
             rm -f "$MATCHES_FILE"
             MATCHES_FILE=""
 
+            ROUTER_ROUTES_JSON=$(router_routes_json "$VALUE")
             "$JQ" -n --arg type ip --arg value "$VALUE" --arg owned "$OWNED_CIDR" --arg iface "$ROUTE_INTERFACE" \
-              --argjson matches "$MATCHES_JSON" --argjson configured "$CONFIGURED" \
-              '{ok:true,type:$type,value:$value,policy_matches:$matches,owned_cidr:$owned,configured_route:$configured,interface:$iface}'
+              --argjson matches "$MATCHES_JSON" --argjson configured "$CONFIGURED" --argjson router_routes "$ROUTER_ROUTES_JSON" \
+              '{ok:true,type:$type,value:$value,policy_matches:$matches,owned_cidr:$owned,configured_route:$configured,interface:$iface,router_routes:$router_routes,client_path_verified:false}'
             ;;
         group)
             case "$VALUE" in
@@ -2390,6 +2414,14 @@ if [ "$ACTION" = lists-data ]; then
     LISTS_STATE=$CONFIG_ETC/route-engine/domain-lists
     WATCHED="$(awk -F= '$1 ~ /^watch\./ && $2 == "1" {print substr($1, 7)}' "$LISTS_CONF" 2>/dev/null | "$JQ" -Rn '[inputs | select(length > 0)]')"
     RETURNS="$(ls "$LISTS_STATE" 2>/dev/null | "$JQ" -Rn '[inputs | select(length > 0)]')"
+    # Lists VWARD manages (r-lists, owner 2026-11-01): taken under management by the owner
+    # (managed.G=1), or already switched by the owner through VWARD (a watch key or a saved
+    # route). Neither a number nor a name proves it; every other list is not VWARD's.
+    MANAGED="$({ awk -F= '($1 ~ /^managed\./ && $2 == "1") {print substr($1, 9)} ($1 ~ /^watch\./) {print substr($1, 7)}' "$LISTS_CONF" 2>/dev/null
+        ls "$LISTS_STATE" 2>/dev/null; } | sort -u | "$JQ" -Rn '[inputs | select(length > 0)]')"
+    UNMANAGED="$(awk -F= '$1 ~ /^managed\./ && $2 == "0" {print substr($1, 9)}' "$LISTS_CONF" 2>/dev/null | "$JQ" -Rn '[inputs | select(length > 0)]')"
+    [ -n "$MANAGED" ] || MANAGED='[]'
+    [ -n "$UNMANAGED" ] || UNMANAGED='[]'
     AUTO="$(grep -h '|LIST_AUTO_VPN|' "${VWARD_ROUTE_EVENTS_LOG:-/opt/var/log/vward-route-engine-events.log}" 2>/dev/null | tail -n 50 |
         awk -F'|' 'NF >= 4 {print $4 "\t" $1 "\t" $3}' | "$JQ" -Rn '[inputs | split("\t") | {(.[0]): {at: .[1], host: .[2]}}] | add // {}')"
     [ -n "$WATCHED" ] || WATCHED='[]'
@@ -2418,7 +2450,7 @@ if [ "$ACTION" = lists-data ]; then
         /^ip route [0-9]/ && NF >= 4 {print "S\t" $4 "\t" $3 "\t255.255.255.255"}
     ' | { cat; command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains | sed 's/^/A\t/'; } | "$JQ" -Rn --arg tun "${VWARD_TUNNEL_INTERFACE:-}" --arg dev "${VWARD_TUNNEL_DEVICE:-}" --arg wan "${VWARD_WAN_INTERFACE:-}" \
         --argjson guard "$([ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" = 0 ] && echo false || echo true)" \
-        --argjson watched "$WATCHED" --argjson returns "$RETURNS" --argjson auto "$AUTO" --argjson addrs "$ADDRS" '
+        --argjson watched "$WATCHED" --argjson managed "$MANAGED" --argjson unmanaged "$UNMANAGED" --argjson returns "$RETURNS" --argjson auto "$AUTO" --argjson addrs "$ADDRS" '
         def bits: {"255":8,"254":7,"252":6,"248":5,"240":4,"224":3,"192":2,"128":1,"0":0}[.] // 0;
         reduce (inputs | split("\t")) as $r ({g: {}, order: [], r: {}, doh: [], agh: [], s: {}};
             if $r[0] == "G" then (if .g[$r[1]] then . else .g[$r[1]] = {description: "", domains: []} | .order += [$r[1]] end)
@@ -2444,6 +2476,7 @@ if [ "$ACTION" = lists-data ]; then
               smartdns_conflict: ((($t == $tun or $t == $dev) and $t != "") and
                 any($s.doh[] as $d | $l.domains[] as $i | $d == $i or ($d | endswith("." + $i)) or ($i | endswith("." + $d)); .)),
               watch: ($watched | index([$n]) != null), returnable: ($returns | index([$n]) != null),
+              managed: (($managed | index([$n]) != null) and ($unmanaged | index([$n]) == null)),
               auto: ($auto[$n] // null), addresses: ($addrs[$n] // null)}]}'
     exit 0
 fi
@@ -2719,6 +2752,17 @@ if [ "$ACTION" = "update-data" ]; then
             PENDING_SEQUENCE="$($JQ -r '.signed.sequence' "$PENDING_DIR/manifest.json" 2>/dev/null)"
         fi
     fi
+    # The channel the pending update was found on against the one update.conf names now
+    # (owner 2026-11-01): another one - the updater will not install it; neither does «Установить».
+    PENDING_FEED=null
+    if [ "$PENDING" = true ]; then
+        PF="$(sed -n 's/^feed=//p' "$PENDING_DIR/pending.state" 2>/dev/null | tail -n 1 | tr '\001' '\t')"
+        UC="${VWARD_UPDATE_CONFIG:-$CONFIG_ETC/update.conf}"
+        PN="$(awk '{k=$0; sub(/=.*/,"",k); gsub(/[ \t\r]/,"",k)} k=="manifest_url"{u=substr($0,index($0,"=")+1); gsub(/^[ \t]+|[ \t\r]+$/,"",u)} k=="manifest_v2_url"{v=substr($0,index($0,"=")+1); gsub(/^[ \t]+|[ \t\r]+$/,"",v)} END{printf "%s\t%s", u, v}' "$UC" 2>/dev/null)"
+        if [ -z "$PF" ]; then PENDING_FEED='"unbound"'
+        elif [ "$PF" = "$PN" ]; then PENDING_FEED='"current"'
+        else PENDING_FEED='"other"'; fi
+    fi
 
     ACTIVE_BACKUP="$(sed -n 's/^active_backup=//p' "$JOURNAL" 2>/dev/null | tail -n 1)"
     ROLLBACK=false
@@ -2744,8 +2788,8 @@ if [ "$ACTION" = "update-data" ]; then
         CHECK_ALLOWED=true
         if [ "$PENDING" = true ]; then
             case "$PHASE" in
-                AVAILABLE|VERIFIED|IDLE|COMMITTED) APPLY_ALLOWED=true ;;
-                FAILED) RETRY_ALLOWED=true ;;
+                AVAILABLE|VERIFIED|IDLE|COMMITTED) [ "$PENDING_FEED" = '"other"' ] || APPLY_ALLOWED=true ;;
+                FAILED) [ "$PENDING_FEED" = '"other"' ] || RETRY_ALLOWED=true ;;
             esac
         fi
         [ "$ROLLBACK" = true ] && ROLLBACK_ALLOWED=true
@@ -2782,6 +2826,7 @@ if [ "$ACTION" = "update-data" ]; then
       --arg sequence "$PENDING_SEQUENCE" \
       --argjson busy "$BUSY" \
       --argjson pending "$PENDING" \
+      --argjson pending_feed "$PENDING_FEED" \
       --argjson rollback "$ROLLBACK" \
       --argjson check_allowed "$CHECK_ALLOWED" \
       --argjson apply_allowed "$APPLY_ALLOWED" \
@@ -2789,7 +2834,7 @@ if [ "$ACTION" = "update-data" ]; then
       --argjson rollback_allowed "$ROLLBACK_ALLOWED" \
       --argjson recover_allowed "$RECOVER_ALLOWED" \
       --argjson run "$RUN_JSON" \
-      '{ok:true,phase:$phase,busy:$busy,pending:{present:$pending,version:$version,priority:$priority,sequence:$sequence},rollback_available:$rollback,allowed:{check:$check_allowed,apply:$apply_allowed,retry:$retry_allowed,rollback:$rollback_allowed,recover:$recover_allowed},
+      '{ok:true,phase:$phase,busy:$busy,pending:{present:$pending,version:$version,priority:$priority,sequence:$sequence,feed:$pending_feed},rollback_available:$rollback,allowed:{check:$check_allowed,apply:$apply_allowed,retry:$retry_allowed,rollback:$rollback_allowed,recover:$recover_allowed},
         run:$run,engine:{version:$engine},
         last_apply:(if $la_changed < 0 then null else {version:$la_version,changed_files:$la_changed,fetched_bytes:$la_bytes,applied_at:$la_at} end),
         last_method:(if $lm_method == "" then null else {method:$lm_method,at:$lm_at} end)}'
@@ -3195,10 +3240,18 @@ if [ "$ACTION" = "log" ]; then
 
     header_text
 
-    if [ -n "$FILE" ] && [ -r "$FILE" ]; then
+    # Empty, not created yet and unreadable are different states (owner 2026-11-01): the
+    # Panel shows which source has nothing and which cannot be read.
+    if [ -z "$FILE" ]; then
+        echo "Журнал недоступен: неизвестный журнал."
+    elif [ -r "$FILE" ] && [ -s "$FILE" ]; then
         tail -n "$COUNT" "$FILE" 2>/dev/null
+    elif [ -r "$FILE" ]; then
+        echo "Журнал пуст: записей пока нет."
+    elif [ -e "$FILE" ]; then
+        echo "Журнал недоступен: нет прав на чтение."
     else
-        echo "Лог пока пуст или недоступен."
+        echo "Журнал ещё не создан: программа пока ничего не записала."
     fi
 
     exit 0
@@ -3328,6 +3381,20 @@ SENTINEL_RUN=${6:-0} DOH_RUN=${7:-0} DNSCAP_RUN=${5:-0}
 SENTINEL_INST=0; [ ! -x "${VWARD_SENTINEL_BIN:-/opt/share/vward/sentinel/vward-sentinel}" ] || SENTINEL_INST=1
 DNSCAP_INST=0; [ ! -x "${VWARD_DNSCAP_BIN:-/opt/share/vward/dnscap/vward-dnscap}" ] || DNSCAP_INST=1
 DOH_INST=0; [ ! -x "${VWARD_DOH_BIN:-/opt/sbin/https-dns-proxy}" ] || DOH_INST=1
+# Proof of work, not only of a process (owner 2026-11-01): the watcher wrote its state within
+# 3 minutes (1 = yes, 0 = stale, "" = no file); the DNS capture produced host states within
+# 15 minutes (1 = yes, "" = no evidence either way: a quiet network is not a failure).
+age_of() { [ -e "$1" ] || { echo ""; return; }; a_m=$(date -r "$1" +%s 2>/dev/null) || { echo ""; return; }; echo $(( $(date +%s) - a_m )); }
+SEN_AGE=$(age_of "${VWARD_SENTINEL_STATE:-/tmp/vward-sentinel}/state")
+SENTINEL_FRESH=""; [ -z "$SEN_AGE" ] || { if [ "$SEN_AGE" -le 180 ]; then SENTINEL_FRESH=1; else SENTINEL_FRESH=0; fi; }
+CAP_AGE=$(age_of "${VWARD_ROUTE_VOLATILE_STATE:-/tmp/vward-route-engine-state}")
+DNSCAP_FRESH=""; [ -z "$CAP_AGE" ] || [ "$CAP_AGE" -gt 900 ] || DNSCAP_FRESH=1
+# dnsmasq, sing-box, the DNS mode and Entware update permissions: one read-only report
+# (functions only; nothing is started). Absent libraries -> no data, never a guess.
+COMPONENTS_TSV=""
+if [ -r /opt/lib/vward/vward-components-status.sh ] && [ -r /opt/lib/vward/vward-entware-pkg.sh ] && [ -r /opt/lib/vward/vward-dns-mode.sh ]; then
+    COMPONENTS_TSV=$( . /opt/lib/vward/vward-entware-pkg.sh; . /opt/lib/vward/vward-dns-mode.sh; . /opt/lib/vward/vward-components-status.sh; vward_components_status 2>/dev/null )
+fi
 # Switched off in «Компоненты», and the component operation under way (one at a time).
 CSTATE=${VWARD_COMPONENT_STATE:-/opt/etc/vward/components}
 AGH_OFF=0; [ ! -e "$CSTATE/adguardhome.disabled" ] || AGH_OFF=1
@@ -3444,7 +3511,7 @@ header_json
   --arg agents "$AGENTS" \
   --arg adguard "$ADGUARD" --arg adguard_installed "$AGH_INSTALLED" \
   --arg agh_off "$AGH_OFF" --arg mod_off "$MOD_OFF" --arg comp_op "$COMP_OP" \
-  --arg sen_run "$SENTINEL_RUN" --arg sen_inst "$SENTINEL_INST" --arg cap_run "$DNSCAP_RUN" --arg cap_inst "$DNSCAP_INST" --arg doh_run "$DOH_RUN" --arg doh_inst "$DOH_INST" \
+  --arg sen_run "$SENTINEL_RUN" --arg sen_inst "$SENTINEL_INST" --arg cap_run "$DNSCAP_RUN" --arg cap_inst "$DNSCAP_INST" --arg doh_run "$DOH_RUN" --arg doh_inst "$DOH_INST" --arg sen_fresh "$SENTINEL_FRESH" --arg cap_fresh "$DNSCAP_FRESH" --arg comps "$COMPONENTS_TSV" \
   --arg agh_broken "$AGH_BROKEN" \
   --arg uptime "$UPTIME_SEC" \
   --arg grc "$GRC" \
@@ -3597,11 +3664,12 @@ header_json
     adguard:($adguard=="1"),
     adguard_installed:($adguard_installed=="1"),
     adguard_broken:($agh_broken != ""),
-    sentinel:{installed:($sen_inst=="1"),running:($sen_run=="1")},
+    sentinel:{installed:($sen_inst=="1"),running:($sen_run=="1"),fresh:(if $sen_fresh == "" then null else $sen_fresh == "1" end)},
     adguard_disabled:($agh_off=="1"),
     modules_off:($mod_off | split(" ") | map(select(length > 0))),
     component_op:(if $comp_op == "" then null else $comp_op end),
-    dnscap:{installed:($cap_inst=="1"),running:(($cap_run|tonumber? // 0) > 0)},
+    dnscap:{installed:($cap_inst=="1"),running:(($cap_run|tonumber? // 0) > 0),fresh:(if $cap_fresh == "1" then true else null end)},
+    components:($comps | split("\n") | map(select(length > 0) | split("\t") | select(length == 5) | {id: .[0], source: .[1], state: .[2], version: .[3], label: .[4]})),
     doh:{installed:($doh_inst=="1"),running:($doh_run=="1")},
     adaptive_live_pid:$live_pid,
     adaptive_live_count:($live_count|tonumber? // 0),

@@ -56,12 +56,17 @@ for shell in shells:
             ("UNKNOWN", 28, "000", 1, 7),        # the tunnel fails too
             ("UNKNOWN", 0, "503", 0, 0),         # 5xx straight
             ("ISP_BAD", 0, "451", 1, 0),
+            ("UNKNOWN", 28, "000", 1, 0),        # ISP timeout, the tunnel answered but not conclusively
         ]
         body = "".join(f'CLASS={c}; ISP_RC={rc}; CODE={code}; NEED_VPN={nv}; VPN_RC={vr}; audit_reason\n' for c, rc, code, nv, vr in cases)
         body += 'REASONS="$REASONS nodns"\n' + summary + 'echo "$REASON_SUM"'
         got = run(body)
-        want = {"isp_timeout:2", "vpn_down:1", "nodns:1", "isp_reset:1", "http_5xx:1", "http_451:1"}
-        if set(got.split(",")) != want or not got.startswith("isp_timeout:2,"):
+        # Diagnostics 31.10.2026: «vpn_down» meant «both probes failed for this site» (not a tunnel
+        # outage) and «isp_timeout» mixed sites the tunnel reached with sites nobody reached. The
+        # names now say which probe answered; the judging itself is unchanged.
+        want = {"direct_timeout_vpn_ok:2", "both_failed_timeout:1", "nodns:1", "direct_reset_vpn_ok:1",
+                "inconclusive_http_5xx:1", "direct_http_451_vpn_ok:1", "inconclusive_timeout:1"}
+        if set(got.split(",")) != want or not got.startswith("direct_timeout_vpn_ok:2,"):
             fail(f"{shell[0]}: the reasons, the most frequent first: {got}")
 
 if "[ $((CHECKED % AUDIT_PORTION)) -ne 0 ] || audit_pause" not in AUDIT:

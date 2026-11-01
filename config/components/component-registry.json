@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "VWARD Platform",
-  "platform_version": "0.2.0-rc.2.fix.34.1",
+  "platform_version": "0.2.0-rc.2.fix.35",
   "component_version_policy": "platform-release",
   "components": [
     {
@@ -199,6 +199,10 @@
         "/opt/bin/vward-off.sh",
         "/opt/lib/vward/vward-device-profile.sh",
         "/opt/lib/vward/vward-runtime-admission.sh",
+        "/opt/lib/vward/vward-entware-pkg.sh",
+        "/opt/lib/vward/vward-dns-mode.sh",
+        "/opt/lib/vward/vward-vpn-engines.sh",
+        "/opt/lib/vward/vward-components-status.sh",
         "/opt/etc/init.d/S90crond",
         "/opt/etc/init.d/S91vward-route-engine",
         "/opt/etc/init.d/S92vward-runtime",

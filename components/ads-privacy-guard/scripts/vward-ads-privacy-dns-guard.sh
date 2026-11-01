@@ -407,13 +407,34 @@ agh_looping()
 agh_unbind()
 {
     [ -s "$AGH_BIND" ] || return 0
-    au_n=0
-    while read -r au_d au_ns; do
-        case "$au_ns" in ''|ext|failed) continue ;; esac
-        ndm "no ip name-server $au_ns $au_d" </dev/null && au_n=$((au_n + 1))
-    done < "$AGH_BIND"
-    rm -f "$AGH_BIND"
-    ads_log "AGH_UNBIND|count=$au_n|list domains asked of the provider's DNS while AdGuard Home is out"
+    au_keep="$AGH_BIND.keep.$$"
+    au_input="$AGH_BIND.read.$$"
+    (umask 077; cat "$AGH_BIND" > "$au_input" && : > "$au_keep") || {
+        rm -f "$au_input" "$au_keep"; return 1;
+    }
+    au_n=0 au_bad=0
+    while IFS= read -r au_line || [ -n "$au_line" ]; do
+        read -r au_d au_ns au_rest <<EOF_BIND
+$au_line
+EOF_BIND
+        case "$au_ns" in
+            ''|ext|failed) printf '%s\n' "$au_line" >> "$au_keep" || au_bad=1 ;;
+            *) if ndm "no ip name-server $au_ns $au_d" </dev/null; then
+                   au_n=$((au_n + 1))
+               else
+                   printf '%s\n' "$au_line" >> "$au_keep" || au_bad=1
+                   ads_log "AGH_UNBIND_PENDING|domain=$au_d"
+               fi ;;
+        esac
+    done < "$au_input" || au_bad=1
+    rm -f "$au_input"
+    if [ "$au_bad" != 0 ] || ! mv -f "$au_keep" "$AGH_BIND"; then
+        rm -f "$au_keep"
+        ads_log "AGH_UNBIND_PENDING|reason=ledger_write_failed"
+        return 1
+    fi
+    [ -s "$AGH_BIND" ] || rm -f "$AGH_BIND"
+    ads_log "AGH_UNBIND|count=$au_n|unconfirmed bindings retained"
 }
 
 # orphan_sync: Keenetic hands DNS to a server on the router itself (the LAN address or 127.0.0.1,
@@ -435,16 +456,31 @@ orphan_listening()
 ns_release()
 {
     nr_n=0
+    nr_keep="$AGH_BIND.keep.$$"
+    if [ -f "$AGH_BIND" ]; then
+        (umask 077; cat "$AGH_BIND" > "$nr_keep") || { rm -f "$nr_keep"; echo 0; return 1; }
+    fi
     for nr_d in $(printf '%s\n' "$2" | awk -v n="$1" '$1 == "ip" && $2 == "name-server" && $3 == n && NF >= 4 && $4 != "on" && $4 != "\"\"" {print $4}'); do
-        ndm "no ip name-server $1 $nr_d" </dev/null >/dev/null 2>&1 && nr_n=$((nr_n + 1))
+        if ndm "no ip name-server $1 $nr_d" </dev/null >/dev/null 2>&1; then
+            nr_n=$((nr_n + 1))
+            if [ -f "$nr_keep" ]; then
+                awk -v n="$1" -v d="$nr_d" '!($1 == d && $2 == n)' "$nr_keep" > "$nr_keep.new" &&
+                    mv -f "$nr_keep.new" "$nr_keep" || {
+                        rm -f "$nr_keep" "$nr_keep.new"; echo "$nr_n"; return 1;
+                    }
+            fi
+        else
+            ads_log "DNS_RELEASE_PENDING|domain=$nr_d"
+        fi
     done
     if printf '%s\n' "$2" | chain_line "$1"; then
         ndm "no ip name-server $1" </dev/null >/dev/null 2>&1 && nr_n=$((nr_n + 1))
     fi
-    # «out»: the route engine binds nothing more to it until chain_sync sees it answer again.
     echo out > "$CHAIN_DIR/state"; echo "$3" > "$CHAIN_DIR/reason"; ads_epoch > "$CHAIN_DIR/since"
-    if [ -s "$AGH_BIND" ]; then
-        awk -v n="$1" '$2 != n' "$AGH_BIND" > "$AGH_BIND.$$" && mv -f "$AGH_BIND.$$" "$AGH_BIND"
+    if [ -f "$nr_keep" ]; then
+        if ! mv -f "$nr_keep" "$AGH_BIND"; then
+            rm -f "$nr_keep"; echo "$nr_n"; return 1
+        fi
         [ -s "$AGH_BIND" ] || rm -f "$AGH_BIND"
     fi
     echo "$nr_n"

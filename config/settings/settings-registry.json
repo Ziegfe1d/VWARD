@@ -299,7 +299,7 @@
       "secret": false,
       "restart_requirement": "component",
       "risk": "high",
-      "read_only_reason": "Подписанный канал не меняется; источник (ветка beta или dev) выбирается в «Обновлениях»"
+      "read_only_reason": "Подписанный канал не меняется; источник (ветка main - «Стабильная» или dev - «Разработка») выбирается в «Обновлениях»"
     },
     {
       "id": "update.check_interval",

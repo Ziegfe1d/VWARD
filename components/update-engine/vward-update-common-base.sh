@@ -53,7 +53,7 @@ routine_max_delay_seconds=86400
 update_method=full
 # This engine's own version: a manifest may ask for a newer one (min_updater_version),
 # and a signed manifest carrying a newer engine makes it update itself.
-VU_ENGINE_VERSION=2.0.9
+VU_ENGINE_VERSION=2.0.10
 minimum_updater_version=$VU_ENGINE_VERSION
 manifest_v2_url=
 
@@ -694,6 +694,38 @@ vu_manifest_check_policy() {
     return "$VU_OK"
 }
 
+# The feed an update is taken from: manifest_url and manifest_v2_url (tab-separated) as
+# update.conf holds them NOW, read from the file and not from this process's memory, so a
+# channel changed in the Panel after this process started is seen.  The owner may switch
+# «Стабильная» / «Разработка» at any time (2026-11-01): an update found on one feed is
+# never applied once the router follows another one.
+vu_feed_now() {
+    if [ -r "$VU_CONFIG" ]; then
+        awk -v u="$manifest_url" -v v="$manifest_v2_url" '
+            function val(x) { x = substr(x, index(x, "=") + 1); gsub(/^[ \t]+|[ \t\r]+$/, "", x)
+                if (x ~ /^".*"$/ || x ~ /^\047.*\047$/) x = substr(x, 2, length(x) - 2); return x }
+            { k = $0; sub(/=.*/, "", k); gsub(/[ \t\r]/, "", k) }
+            k == "manifest_url" { u2 = val($0); hu = 1 }
+            k == "manifest_v2_url" { v2 = val($0); hv = 1 }
+            END { printf "%s\t%s\n", hu ? u2 : u, hv ? v2 : v }' "$VU_CONFIG"
+    else
+        printf '%s\t%s\n' "$manifest_url" "$manifest_v2_url"
+    fi
+}
+# The feed this process fetched from (its configuration as loaded at start).
+vu_feed_loaded() { printf '%s\t%s\n' "$manifest_url" "$manifest_v2_url"; }
+
+# vu_feed_bound: the update in hand belongs to the feed update.conf names now - the one
+# this process fetched from and, for a stored (pending) update, the one it was found on.
+# A pending update stored before this binding existed has no feed: it is never used as it is
+# (vward-update.sh reads the configured feed again instead).
+vu_feed_bound() {
+    vfb_now=$(vu_feed_now) || return 1
+    [ "$(vu_feed_loaded)" = "$vfb_now" ] || return 1
+    [ "${use_pending_manifest:-0}" = 1 ] || return 0
+    [ "$(sed -n 's/^feed=//p' "$VU_PENDING_DIR/pending.state" 2>/dev/null | tail -n 1 | tr '\001' '\t')" = "$vfb_now" ]
+}
+
 vu_pending_store() {
     manifest=$1
     mkdir -p "$VU_PENDING_DIR" || return 1
@@ -718,6 +750,8 @@ vu_pending_store() {
         printf 'first_seen_at=%s\n' "$first_seen"
         printf 'manifest_hash=%s\n' "$manifest_hash"
         printf 'escalated=0\n'
+        # The feed it was found on (\001 between the two addresses: one line, no tab).
+        printf 'feed=%s\n' "$(vu_feed_loaded | tr '\t' '\001')"
     } > "$pending_state" || return 1
     vu_atomic_write "$VU_PENDING_DIR/manifest.json" "$manifest_tmp" || return 1
     vu_atomic_write "$VU_PENDING_DIR/pending.state" "$pending_state" || return 1
@@ -880,7 +914,7 @@ vu_safe_target() {
     target=$1
     case "$target" in *../*|*/..|*/./*|*//* ) return 1 ;; esac
     case "$target" in
-        /opt/bin/vward-route-test.sh|/opt/bin/vward-route-reconciler.sh|/opt/bin/vward-route-hints-update.sh|/opt/bin/vward-housekeeping.sh|/opt/bin/vward-route-resolve4.sh|/opt/bin/vward-route.sh|/opt/bin/vward-route-engine.sh|/opt/bin/vward-route-discovery.sh|/opt/bin/vward-cron-supervisor.sh|/opt/bin/vward-sentinel.sh|/opt/bin/vward-sentinel-act.sh|/opt/bin/vward-off.sh|/opt/bin/vward-policy-chain.sh|/opt/bin/vward-policy-audit.sh|/opt/bin/vward-policy-reconcile.sh|/opt/bin/vward-policy-sync.sh|/opt/bin/vward-wan-guard.sh|/opt/bin/vward-wan-recovery.sh|/opt/bin/vward-tunnel-guard.sh|/opt/bin/vward-tunnel-health.sh|/opt/bin/vward-awg-engine.sh|/opt/bin/vward-vless-engine.sh|/opt/bin/vward-tunnel-quality.sh|/opt/lib/vward/vward-device-profile.sh|/opt/lib/vward/vward-runtime-admission.sh|/opt/etc/init.d/S89vward-update-recovery|/opt/etc/init.d/S90crond|/opt/etc/init.d/S91vward-route-engine|/opt/etc/init.d/S92vward-runtime|/opt/etc/init.d/S93vward-console|/opt/share/vward/console/lighttpd.conf|/opt/share/vward/console/www/index.html|/opt/share/vward/console/www/assets/vward-console.css|/opt/share/vward/console/www/assets/vward-console.js|/opt/share/vward/console/www/cgi-bin/api.cgi|/opt/bin/vward-console-config.sh|/opt/share/vward/settings-registry.json|/opt/share/vward/console/services-catalog.json|/opt/share/vward/package-map.tsv|/opt/share/vward/VERSION) return 0 ;;
+        /opt/bin/vward-route-test.sh|/opt/bin/vward-route-reconciler.sh|/opt/bin/vward-route-hints-update.sh|/opt/bin/vward-housekeeping.sh|/opt/bin/vward-route-resolve4.sh|/opt/bin/vward-route.sh|/opt/bin/vward-route-engine.sh|/opt/bin/vward-route-discovery.sh|/opt/bin/vward-cron-supervisor.sh|/opt/bin/vward-sentinel.sh|/opt/bin/vward-sentinel-act.sh|/opt/bin/vward-off.sh|/opt/bin/vward-policy-chain.sh|/opt/bin/vward-policy-audit.sh|/opt/bin/vward-policy-reconcile.sh|/opt/bin/vward-policy-sync.sh|/opt/bin/vward-wan-guard.sh|/opt/bin/vward-wan-recovery.sh|/opt/bin/vward-tunnel-guard.sh|/opt/bin/vward-tunnel-health.sh|/opt/bin/vward-awg-engine.sh|/opt/bin/vward-vless-engine.sh|/opt/bin/vward-tunnel-quality.sh|/opt/lib/vward/vward-device-profile.sh|/opt/lib/vward/vward-runtime-admission.sh|/opt/lib/vward/vward-entware-pkg.sh|/opt/lib/vward/vward-dns-mode.sh|/opt/lib/vward/vward-vpn-engines.sh|/opt/lib/vward/vward-components-status.sh|/opt/etc/init.d/S89vward-update-recovery|/opt/etc/init.d/S90crond|/opt/etc/init.d/S91vward-route-engine|/opt/etc/init.d/S92vward-runtime|/opt/etc/init.d/S93vward-console|/opt/share/vward/console/lighttpd.conf|/opt/share/vward/console/www/index.html|/opt/share/vward/console/www/assets/vward-console.css|/opt/share/vward/console/www/assets/vward-console.js|/opt/share/vward/console/www/cgi-bin/api.cgi|/opt/bin/vward-console-config.sh|/opt/share/vward/settings-registry.json|/opt/share/vward/console/services-catalog.json|/opt/share/vward/package-map.tsv|/opt/share/vward/VERSION) return 0 ;;
         /opt/bin/vward-wifi-client-monitor.sh|/opt/bin/vward-wifi-client-analyze.sh|/opt/bin/vward-wifi-client-control.sh|/opt/bin/vward-wifi-client-scheduler.sh) return 0 ;;
         /opt/bin/vward-ads-privacy-guard.sh|/opt/bin/vward-ads-privacy-sources-update.sh|/opt/bin/vward-ads-privacy-publish.sh|/opt/bin/vward-ads-privacy-probe.sh|/opt/bin/vward-ads-privacy-control.sh|/opt/bin/vward-ads-privacy-scheduler.sh|/opt/bin/vward-ads-privacy-settings.sh|/opt/bin/vward-ads-privacy-source-control.sh|/opt/bin/vward-ads-privacy-query-read.sh|/opt/bin/vward-ads-privacy-view.sh|/opt/bin/vward-ads-privacy-clients.sh|/opt/bin/vward-ads-privacy-dns-guard.sh|/opt/bin/vward-ads-privacy-route-dns.sh|/opt/bin/vward-ads-privacy-rules-rebuild.sh|/opt/bin/vward-ads-privacy-job.sh|/opt/bin/vward-ads-privacy-health.sh|/opt/bin/vward-ads-privacy-https.sh) return 0 ;;
         /opt/bin/vward-domain-classifier.sh|/opt/bin/vward-domain-migrate-dry-run.sh|/opt/lib/vward/vward-domain-classifier-lib.sh) return 0 ;;
@@ -1129,6 +1163,9 @@ vu_barrier_enter() {
     printf '%s\n' "$VU_LOCK_TOKEN" > "$VU_BARRIER_LOCK/owner" || return 1
     VU_BARRIER_OWNED=1
     [ -z "$VU_ROOT_PREFIX" ] || [ "${VWARD_TEST_CONFLICT_AFTER_BARRIER:-0}" != 1 ] || : > "$VU_ROOT_PREFIX/tmp/vward-wan-guard.lock"
+    # Test fixture: the channel changed in the Panel while the update was downloading.
+    [ -z "$VU_ROOT_PREFIX" ] || [ -z "${VWARD_TEST_FEED_BEFORE_BARRIER:-}" ] ||
+        sed -i "s#^manifest_url=.*#manifest_url=$VWARD_TEST_FEED_BEFORE_BARRIER#" "$VU_CONFIG"
     vu_activity_clear || return 1
     return 0
 }

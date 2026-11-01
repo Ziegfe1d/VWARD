@@ -54,24 +54,33 @@ audit_pause()
 }
 
 # Why a site did not pass, for the summary line only (diagnostics; the judging is above).
+# The name says which probe answered (diagnostics 31.10.2026: «vpn_down» was read as a tunnel
+# outage, but it meant that both probes failed for one site; «isp_timeout» mixed both cases):
+#   direct_<cause>_vpn_ok   ISP_BAD: the provider failed, the tunnel reached the site
+#   both_failed_<cause>     neither probe reached the site (no proof of a block either way)
+#   inconclusive_<cause>    an answer that proves nothing (5xx, 451 through both, ...)
+# A tunnel outage is never reported here: the run aborts with ABORTED_TUNNEL_DOWN instead.
 REASONS=
 audit_reason()
 {
     case "$CLASS" in
         ISP_OK) return 0 ;;
     esac
-    if [ "$CLASS" = UNKNOWN ] && [ "${NEED_VPN:-0}" = 1 ] && [ "${VPN_RC:-0}" -ne 0 ]; then
-        ar=vpn_down
+    case "$ISP_RC" in
+        0) case "$CODE" in 451) ar=http_451 ;; 4??) ar=http_4xx ;; 5??) ar=http_5xx ;; *) ar=http_other ;; esac ;;
+        6) ar=dns ;;
+        7) ar=refused ;;
+        28) ar=timeout ;;
+        35|60) ar=tls ;;
+        52|56) ar=reset ;;
+        *) ar=rc$ISP_RC ;;
+    esac
+    if [ "$CLASS" = ISP_BAD ]; then
+        ar=direct_${ar}_vpn_ok
+    elif [ "${NEED_VPN:-0}" = 1 ] && [ "${VPN_RC:-0}" -ne 0 ]; then
+        ar=both_failed_$ar
     else
-        case "$ISP_RC" in
-            0) case "$CODE" in 451) ar=http_451 ;; 4??) ar=http_4xx ;; 5??) ar=http_5xx ;; *) ar=http_other ;; esac ;;
-            6) ar=isp_dns ;;
-            7) ar=isp_refused ;;
-            28) ar=isp_timeout ;;
-            35|60) ar=isp_tls ;;
-            52|56) ar=isp_reset ;;
-            *) ar=isp_rc$ISP_RC ;;
-        esac
+        ar=inconclusive_$ar
     fi
     REASONS="$REASONS $ar"
 }

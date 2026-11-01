@@ -173,7 +173,7 @@ EOF_ROW
         if [ -n "$scat" ] && [ -n "$pinned" ] && awk -F '\t' -v t="$pinned" '$1 == t {f = 1} END {exit f ? 0 : 1}' "$L/alive"; then
             act=category
             if [ "$cur" != "$pinned" ]; then
-                if "$HELPER" domain-list "$g" "$pinned" </dev/null 2>/dev/null | tail -n 1 | grep -q '^result='; then cur=$pinned; else act=failed; fi
+                if VWARD_SERVICE_ID="$id" "$HELPER" domain-list "$g" "$pinned" </dev/null 2>/dev/null | tail -n 1 | grep -q '^result='; then cur=$pinned; else act=failed; fi
             fi
             printf '%s\t%s\t%s\t\t%s\t%s\n' "$id" "$g" "$cur" "$now" "$act" >> "$L/state"
             continue
@@ -202,7 +202,7 @@ EOF_ROW
         # Its tunnel opens it (or is not among the answering ones: the guard moves it): kept.
         if [ -n "$curv" ] && [ "$curv" != open ]; then
             if [ -z "$best" ]; then act=none
-            elif "$HELPER" domain-list "$g" "$best" </dev/null 2>/dev/null | tail -n 1 | grep -q '^result='; then act=moved cur=$best
+            elif VWARD_SERVICE_ID="$id" "$HELPER" domain-list "$g" "$best" </dev/null 2>/dev/null | tail -n 1 | grep -q '^result='; then act=moved cur=$best
             else act=failed; fi
         fi
         printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$g" "$cur" "$res" "$now" "$act" >> "$L/state"

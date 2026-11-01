@@ -33,6 +33,7 @@ def fail(msg):
 
 restore = ENGINE[ENGINE.index("valid_fqdn()\n"):ENGINE.index("# ADD TO VPN")]
 cleanup = ENGINE[ENGINE.index("cleanup()\n"):ENGINE.index("trap cleanup EXIT")]
+shared = ENGINE[ENGINE.index("\nshared_config()\n") + 1:ENGINE.index("\n}\n", ENGINE.index("\nshared_config()\n")) + 3]
 shells = [["sh"]] + ([["busybox", "sh"]] if shutil.which("busybox") else [])
 
 
@@ -56,6 +57,7 @@ classifier_stop() {{ :; }}; vward_admission_leave() {{ :; }}
 {cleanup}
 trap cleanup EXIT
 trap 'STOP_WHY=TERM; exit 143' TERM
+{shared}
 {restore}
 echo "pid=$$" > "{t}/pid"
 restore_adaptive_from_persist

@@ -34,8 +34,17 @@ cleanup() {
 fetch_and_verify_manifest() {
     mkdir -p "$VU_STAGING_DIR" || return "$VU_INSTALL_ERROR"
     manifest=$VU_STAGING_DIR/update-manifest.json
+    if [ "${use_pending_manifest:-0}" = 1 ] && [ -r "$VU_PENDING_DIR/manifest.json" ] &&
+        ! grep -q '^feed=' "$VU_PENDING_DIR/pending.state" 2>/dev/null; then
+        # Stored by an engine without the binding (2.0.9, the engine that installs this one):
+        # where it came from is not known, so it is not used. The feed update.conf names now
+        # is read again instead, with every check - the same update when that feed offers it.
+        vu_log INFO "Pending update has no recorded feed; reading the configured feed again"
+        use_pending_manifest=0
+    fi
     if [ "${use_pending_manifest:-0}" = 1 ]; then
         [ -r "$VU_PENDING_DIR/manifest.json" ] || return "$VU_NO_UPDATE"
+        vu_feed_bound || { VU_FEED_BLOCKED=1; return "$VU_COMPAT_ERROR"; }
         cp "$VU_PENDING_DIR/manifest.json" "$manifest" || return "$VU_VERIFY_ERROR"
     elif [ -n "${VWARD_LOCAL_MANIFEST:-}" ]; then
         case "$VWARD_LOCAL_MANIFEST" in "$VU_STAGING_DIR"/*) ;; *) return "$VU_VERIFY_ERROR" ;; esac
@@ -267,6 +276,17 @@ quarantine_after_rollback() {
     vu_log WARN "Update $(jq -r '.signed.update_id' "$manifest") quarantined after $reason failure"
 }
 
+# The update in hand was found on another feed than the one update.conf names now (the owner
+# changed the channel): nothing is applied; the pending update, the channel and every
+# setting stay as they are, the reason goes to the log and the Panel's notes. Back on the
+# feed it came from, it is applied as usual (sequence and anti-rollback still checked).
+feed_blocked() {
+    vu_log WARN "Update not applied: it was found on another update feed than the one now configured"
+    vu_note warn "Обновление не установлено: оно найдено на другом канале" "канал сменён после проверки"
+    vu_transition IDLE
+    exit "$VU_COMPAT_ERROR"
+}
+
 apply_update() {
     manifest=$1
     package_dir=$2
@@ -275,6 +295,10 @@ apply_update() {
     vu_hard_safety_check "$package_dir" || vu_die "$VU_SAFETY_ERROR" "Pre-barrier safety, space or activity check failed"
     vu_barrier_enter || vu_die "$VU_SAFETY_ERROR" "Could not enter the update barrier"
     vu_hard_safety_check "$package_dir" || vu_die "$VU_SAFETY_ERROR" "Post-barrier safety recheck failed"
+    # Last check before anything is written: inside the barrier the Panel cannot change the
+    # channel any more (its helper is refused while an update holds the barrier), so a change
+    # made during the download is seen here and nothing after it can slip in.
+    [ "${VU_FIRST_INSTALL:-0}" = 1 ] || vu_feed_bound || feed_blocked
 
     manifest_hash=$(vu_signed_hash "$manifest")
     update_id=$(jq -r '.signed.update_id' "$manifest")
@@ -484,7 +508,9 @@ case "$fetch_rc" in
     "$VU_QUARANTINED") [ "$command" = --dry-run ] || vu_transition FAILED; exit "$VU_QUARANTINED" ;;
     "$VU_NETWORK_ERROR") vu_die "$VU_NETWORK_ERROR" "Manifest download failed" ;;
     "$VU_VERIFY_ERROR") vu_die "$VU_VERIFY_ERROR" "Manifest structure/signature verification failed" ;;
-    "$VU_COMPAT_ERROR") vu_die "$VU_COMPAT_ERROR" "Manifest violates version, channel, replay or compatibility policy" ;;
+    "$VU_COMPAT_ERROR")
+        [ "${VU_FEED_BLOCKED:-0}" = 1 ] && feed_blocked
+        vu_die "$VU_COMPAT_ERROR" "Manifest violates version, channel, replay or compatibility policy" ;;
     "$VU_SAFETY_ERROR") vu_die "$VU_SAFETY_ERROR" "Manifest/package staging safety preflight failed" ;;
     *) vu_die "$fetch_rc" "Manifest processing failed" ;;
 esac

@@ -80,10 +80,16 @@ adaptive_names()
     if [ "${VWARD_RECONCILER_ONE_LOOK:-1}" = 1 ] && [ "${1:-}" != fresh ] &&
        command -v vward_keenetic_config >/dev/null 2>&1; then
         AN_CFG=$(vward_keenetic_config) && [ -n "$AN_CFG" ] ||
-            AN_CFG=$(vward_running_config)
+            AN_CFG=$(vward_running_config) || return 1
     else
-        AN_CFG=$(vward_running_config)
+        AN_CFG=$(vward_running_config) || return 1
     fi
+    [ -n "$AN_CFG" ] || return 1
+    # A successful transport may still return an error instead of configuration.
+    printf '%s\n' "$AN_CFG" | awk '
+        /^[[:space:]]*(Command::|[Ee][Rr][Rr][Oo][Rr][: ]|[Ff]ailed[: ])/ {bad=1}
+        /^(object-group fqdn |dns-proxy$|interface |ip |system$)/ {seen=1}
+        END {exit bad || !seen}' || return 1
     printf '%s\n' "$AN_CFG" |
     sed -n '/^object-group fqdn AdaptiveAuto/,/^!/p' |
     awk '$1=="include"{print $2}' |
@@ -91,7 +97,7 @@ adaptive_names()
     AN_CFG=
 }
 
-adaptive_names > "$TARGETS"
+adaptive_names > "$TARGETS" || { echo "CONFIG_UNKNOWN: reconciliation skipped"; exit 1; }
 
 TOTAL=$(wc -l < "$TARGETS")
 [ "$TOTAL" -eq 0 ] && {
@@ -311,7 +317,7 @@ remove_adaptive()
     # FINAL_GUARD_V3_MAINT
 
     if { [ "${VWARD_RECONCILER_ONE_LOOK:-1}" = 1 ] && ! grep -Fxq "$H" "$TARGETS"; } ||
-       { [ "${VWARD_RECONCILER_ONE_LOOK:-1}" != 1 ] && ! adaptive_names fresh | grep -Fxq "$H"; }; then
+       { [ "${VWARD_RECONCILER_ONE_LOOK:-1}" != 1 ] && AN_CHECK=$(adaptive_names fresh) && ! printf '%s\n' "$AN_CHECK" | grep -Fxq "$H"; }; then
         rm -rf "${CHANGE:?}"
         return 0
     fi
@@ -490,10 +496,15 @@ remove_adaptive()
         echo "$(date '+%Y-%m-%d %H:%M:%S')|AUTO_DIRECT_MAINT|$H" >> "$LOG"
         echo "AUTO_DIRECT: $H"
 
-    elif [ "${VWARD_RECONCILER_ONE_LOOK:-1}" = 1 ] && ! adaptive_names fresh | grep -Fxq "$H"; then
+    elif [ "${VWARD_RECONCILER_ONE_LOOK:-1}" = 1 ] && AN_CHECK=$(adaptive_names fresh) && ! printf '%s\n' "$AN_CHECK" | grep -Fxq "$H"; then
 
         # Refused because the name is already gone (removed after this run looked): done.
-        mv "$PTMP" "$PERSIST" 2>/dev/null || rm -f "$PTMP"
+        if ! mv "$PTMP" "$PERSIST" 2>/dev/null; then
+            rm -f "$PTMP"
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_COMMIT_ERROR|$H" >> "$LOG"
+            rm -rf "${CHANGE:?}"
+            return 1
+        fi
         save_state "$H" "DIRECT_OK"
         rm -f "$HYST_DIR/$SAFE_H.state"
         echo "$(date '+%Y-%m-%d %H:%M:%S')|AUTO_DIRECT_MAINT|$H|already_gone" >> "$LOG"

@@ -243,18 +243,34 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # Feed: only the branch of a standard URL changes; custom URLs are left alone.
     upd.write_text(upd.read_text() + "manifest_url=https://raw.githubusercontent.com/Owner/Repo/dev/updates/dev/update-manifest.json\n")
-    run("update-feed", "beta", expect="result=changed")
-    if "manifest_url=https://raw.githubusercontent.com/Owner/Repo/beta/updates/dev/update-manifest.json" not in upd.read_text():
+    # Channels (owner 2026-11-01): «Стабильная» = main, «Разработка» = dev; beta retired.
+    feed_url = "manifest_url=https://raw.githubusercontent.com/Owner/Repo/{}/updates/dev/update-manifest.json"
+    run("update-feed", "main", expect="result=changed")
+    if feed_url.format("main") not in upd.read_text():
         fail(f"feed switch rewrote the URL wrongly: {upd.read_text()!r}")
+    run("update-feed", "main", expect="result=unchanged")
+    run("update-feed", "dev", expect="result=changed")
+    run("update-feed", "main", expect="result=changed")
+    for bad in ("stable", "main ", "beta;dev", "release"):
+        run("update-feed", bad, expect="error=invalid_value")
+    # An install still on the retired beta branch is understood and can leave it; the
+    # rest of update.conf is kept, nothing moves it by itself.
+    before = upd.read_text().replace(feed_url.format("main"), feed_url.format("beta"))
+    upd.write_text(before)
     run("update-feed", "beta", expect="result=unchanged")
-    run("update-feed", "main", expect="error=invalid_value")
+    if upd.read_text() != before:
+        fail("a beta install must stay as it is")
+    run("update-feed", "dev", expect="result=changed")
+    if upd.read_text() != before.replace(feed_url.format("beta"), feed_url.format("dev")):
+        fail(f"leaving beta must change only the branch: {upd.read_text()!r}")
+    run("update-feed", "beta", expect="result=changed")
     run("update", "apply_window", "any", expect="result=changed")
     run("update", "apply_window", "never", expect="error=invalid_value")
     run("update", "update_method", "files", expect="result=changed")
     run("update", "update_method", "delta", expect="error=invalid_value")
     text = upd.read_text().replace("Owner/Repo/beta", "Owner/Repo/dev")
     upd.write_text(text.replace("https://raw.githubusercontent.com", "https://mirror.example"))
-    run("update-feed", "beta", expect="error=custom_manifest_url")
+    run("update-feed", "main", expect="error=custom_manifest_url")
     upd.write_text(text)
     # Routing switches: AdaptiveAuto additions, classifier, excluded IP categories.
     run("adaptive-mode", "0", expect="result=changed")

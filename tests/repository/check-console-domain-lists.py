@@ -122,9 +122,9 @@ if args[1] == "smartdns-take":
             if rest: new.append("[/%s/]%s" % ("/".join(rest), url))
         else: new.append(u)
     s["up"] = new; Path(args[3]).write_text("".join("%s\t%s\n" % p for p in took)); print("TAKEN=%d" % len(took))
-elif args[1] == "smartdns-put":
+elif args[1] in ("smartdns-put", "smartdns-restore"):
     for l in open(args[2]):
-        d, url = l.rstrip("\n").split("\t"); s["up"].append("[/%s/]%s" % (d, url))
+        d, url = l.rstrip("\n").split("\t"); url = "@AET@" if url == "auto" else url; s["up"].append("[/%s/]%s" % (d, url))
 st.write_text(json.dumps(s))
 Path("@YAML@").write_text("dns:\n  upstream_dns:\n" + "".join("    - '%s'\n" % u for u in s["up"]))
 print("CONTROL=PASS")
@@ -265,7 +265,7 @@ with tempfile.TemporaryDirectory() as tmp:
     UP = [f"[/anthropic.com/chatgpt.com/]{AET}", f"[/claude.ai/]{AET}", "https://dns.nextdns.io/abc"]
     agh_state.write_text(__import__("json").dumps({"up": UP}))
     yaml.write_text("dns:\n  upstream_dns:\n" + "".join(f"    - '{u}'\n" for u in UP))
-    ads = tmp / "ads-control"; ads.write_text(FAKE_ADS.replace("@ST@", str(agh_state)).replace("@YAML@", str(yaml))); ads.chmod(0o755)
+    ads = tmp / "ads-control"; ads.write_text(FAKE_ADS.replace("@AET@", AET).replace("@ST@", str(agh_state)).replace("@YAML@", str(yaml))); ads.chmod(0o755)
     env |= {"VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_ADS_CONTROL_BIN": str(ads)}
     agh = lambda: __import__("json").loads(agh_state.read_text())["up"]
     keenetic_before = dns_block(cfg)
@@ -310,7 +310,7 @@ with tempfile.TemporaryDirectory() as tmp:
     run("smartdns-domain", "add", "gemini.google.com", "error=smartdns_not_configured")
     st.pop("fail"); agh_state.write_text(__import__("json").dumps(st))
     run("smartdns-domain", "add", "Gemini.Google.com", "result=changed", 0)
-    if agh()[-1] != "[/gemini.google.com/]auto":
+    if agh()[-1] != f"[/gemini.google.com/]{AET}":
         fail(f"smartdns-domain add: {agh()}")
     run("smartdns-domain", "remove", "gemini.google.com", "result=changed", 0)
     run("smartdns-domain", "remove", "gemini.google.com", "result=unchanged", 0)
@@ -327,5 +327,90 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("watch flag not written")
     run("domain-list-watch", "domain-list4", "2", "error=invalid_value", 64)
     run("domain-list-watch", "AdaptiveAuto", "1", "error=invalid_group", 64)
+
+    # P-7: after explicit server clear, returning a group to ISP must not resurrect it.
+    cfg.write_text(RUNNING)
+    env["VWARD_ADGUARD_CONFIG"] = str(tmp / "absent.yaml")
+    env["VWARD_ADS_CONTROL_BIN"] = str(tmp / "absent-control")
+    (etc / "smartdns.conf").write_text("SMARTDNS_URL=" + AET + "\n")
+    run("domain-list", "domain-list4", "vpn", "result=changed", 0)
+    cleared = subprocess.run(["sh", str(HELPER), "smartdns-server", "clear"],env=env,text=True,capture_output=True)
+    if cleared.returncode or "result=changed" not in cleared.stdout:
+        fail("saved-state clear failed: " + cleared.stdout)
+    run("domain-list", "domain-list4", "bypass", "result=changed", 0)
+    if any(AET in line for line in dns_block(cfg)) or "route object-group domain-list4 ISP auto" not in dns_block(cfg):
+        fail("return from VPN resurrected the cleared server: " + str(dns_block(cfg)))
+
+    # Individual removal has the same lifetime: active -> VPN snapshot -> remove -> bypass.
+    cfg.write_text(RUNNING)
+    (etc / "smartdns.conf").write_text("SMARTDNS_URL=" + AET + "\n")
+    env["VWARD_ADGUARD_CONFIG"] = str(yaml)
+    env["VWARD_ADS_CONTROL_BIN"] = str(ads)
+    up = [f"[/claude.ai/anthropic.com/]{AET}", "9.9.9.9"]
+    agh_state.write_text(__import__("json").dumps({"up": up}))
+    yaml.write_text("dns:\n  upstream_dns:\n" + "".join(f"    - '{u}'\n" for u in up))
+    run("domain-list", "domain-list4", "vpn", "result=changed", 0)
+    run("smartdns-domain", "remove", "claude.ai", "result=changed", 0)
+    run("domain-list", "domain-list4", "bypass", "result=changed", 0)
+    block = dns_block(cfg)
+    if any(line.endswith("domain claude.ai") for line in block) or any("claude.ai" in row for row in agh()):
+        fail("return from VPN resurrected the removed domain: " + str(block) + str(agh()))
+    if (f"https upstream {AET} dnsm on ISP domain anthropic.com" not in block or
+            f"[/anthropic.com/]{AET}" not in agh() or "route object-group domain-list4 ISP auto" not in block):
+        fail("domain removal lost the other domain or return route: " + str(block) + str(agh()))
+    if (etc / "smartdns.conf").read_text() != "SMARTDNS_URL=" + AET + "\n":
+        fail("individual domain removal changed the server preference")
+
+    # r-lists (owner 2026-11-01): «Авто / Через VPN / Напрямую» only for lists VWARD manages,
+    # through the existing writer; a number or a name proves nothing.
+    cfg.write_text(RUNNING)
+    lconf = etc / "route-engine/domain-lists.conf"
+    lconf.write_text("")
+    for g in ("domain-list3", "domain-list4"):
+        sf = etc / "route-engine/domain-lists" / g
+        if sf.exists():
+            sf.unlink()
+    before = cfg.read_text()
+    sorted_before = dns_block(cfg)
+    run("list-mode", "domain-list3", "vpn", "error=list_not_managed", 64)
+    run("list-mode", "AdaptiveAuto", "vpn", "error=invalid_group", 64)
+    run("list-mode", "domain-list3", "around", "error=invalid_value", 64)
+    run("list-adopt", "domain-list9", "1", "error=unknown_group", 64)
+    run("list-adopt", "domain-list3", "2", "error=invalid_value", 64)
+    if cfg.read_text() != before:
+        fail("a refused list-mode/list-adopt changed the router")
+    run("list-adopt", "domain-list3", "1", "result=changed", 0)
+    run("list-adopt", "domain-list3", "1", "result=unchanged", 0)
+    if cfg.read_text() != before:
+        fail("taking a list under management must not write to the router")
+    # Через VPN: the writer moves the route and the watch goes off.
+    run("domain-list-watch", "domain-list3", "1", "result=changed", 0)
+    run("list-mode", "domain-list3", "vpn", "result=changed", 0)
+    if "route object-group domain-list3 Wireguard0 auto" not in dns_block(cfg) or "watch.domain-list3=0" not in lconf.read_text().splitlines():
+        fail(f"list-mode vpn: {dns_block(cfg)} {lconf.read_text()!r}")
+    run("list-mode", "domain-list3", "vpn", "result=unchanged", 0)
+    # Авто: the route engine decides; the route and the domains stay as they are.
+    after_vpn = cfg.read_text()
+    run("list-mode", "domain-list3", "auto", "result=changed", 0)
+    if cfg.read_text() != after_vpn or "watch.domain-list3=1" not in lconf.read_text().splitlines():
+        fail("«Авто» must only hand the list to VWARD's policy, nothing else")
+    # Напрямую: back through the writer, exactly as before.
+    run("list-mode", "domain-list3", "bypass", "result=changed", 0)
+    if dns_block(cfg) != sorted_before or "watch.domain-list3=0" not in lconf.read_text().splitlines():
+        fail(f"list-mode bypass did not restore the list: {dns_block(cfg)}")
+    # A refused route leaves the list and its watch as they were.
+    run("list-mode", "domain-list3", "auto", "result=changed", 0)
+    Path(str(cfg) + ".mode-reject-route").write_text("")
+    run("list-mode", "domain-list3", "vpn", "error=router_rejected")
+    Path(str(cfg) + ".mode-reject-route").unlink()
+    if dns_block(cfg) != sorted_before or "watch.domain-list3=1" not in lconf.read_text().splitlines():
+        fail("a refused route changed the list or its watch")
+    # Given back: not VWARD's any more, even with the old watch key.
+    run("list-adopt", "domain-list3", "0", "result=changed", 0)
+    run("list-mode", "domain-list3", "vpn", "error=list_not_managed", 64)
+    # Already switched by the owner through VWARD (saved return route): managed.
+    run("domain-list", "domain-list4", "vpn", "result=changed", 0)
+    run("list-mode", "domain-list4", "bypass", "result=changed", 0)
+    cfg.write_text(RUNNING)
 
 print("CONSOLE_DOMAIN_LISTS=PASS")

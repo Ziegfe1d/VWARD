@@ -22,6 +22,6 @@ if grep -RInEi 'BEGIN (RSA|OPENSSH|EC|PRIVATE) KEY|private[_-]?key[=:]|password[
   --exclude=SHA256SUMS --exclude=run-package-validation.sh >/tmp/vward-ads-secrets.$$; then cat /tmp/vward-ads-secrets.$$; rm -f /tmp/vward-ads-secrets.$$; echo 'FAIL: secret-like material found' >&2; exit 1; fi
 rm -f /tmp/vward-ads-secrets.$$
 if [ -r "$ROOT/SHA256SUMS" ]; then
-  (cd "$ROOT" && sha256sum -c SHA256SUMS >/dev/null) || { echo 'FAIL: SHA256SUMS mismatch' >&2; exit 1; }
+  (cd "$ROOT" && sha256sum -c --quiet SHA256SUMS) || { echo 'FAIL: SHA256SUMS mismatch' >&2; exit 1; }
 fi
 echo PACKAGE_VALIDATION=PASS
