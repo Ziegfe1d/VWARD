@@ -53,7 +53,7 @@ routine_max_delay_seconds=86400
 update_method=full
 # This engine's own version: a manifest may ask for a newer one (min_updater_version),
 # and a signed manifest carrying a newer engine makes it update itself.
-VU_ENGINE_VERSION=2.0.9
+VU_ENGINE_VERSION=2.0.10
 minimum_updater_version=$VU_ENGINE_VERSION
 manifest_v2_url=
 
@@ -717,8 +717,8 @@ vu_feed_loaded() { printf '%s\t%s\n' "$manifest_url" "$manifest_v2_url"; }
 
 # vu_feed_bound: the update in hand belongs to the feed update.conf names now - the one
 # this process fetched from and, for a stored (pending) update, the one it was found on.
-# A pending update stored before this binding existed has no feed: not proven, refused; the
-# next check of the feed stores it again with its feed.
+# A pending update stored before this binding existed has no feed: it is never used as it is
+# (vward-update.sh reads the configured feed again instead).
 vu_feed_bound() {
     vfb_now=$(vu_feed_now) || return 1
     [ "$(vu_feed_loaded)" = "$vfb_now" ] || return 1

@@ -34,6 +34,14 @@ cleanup() {
 fetch_and_verify_manifest() {
     mkdir -p "$VU_STAGING_DIR" || return "$VU_INSTALL_ERROR"
     manifest=$VU_STAGING_DIR/update-manifest.json
+    if [ "${use_pending_manifest:-0}" = 1 ] && [ -r "$VU_PENDING_DIR/manifest.json" ] &&
+        ! grep -q '^feed=' "$VU_PENDING_DIR/pending.state" 2>/dev/null; then
+        # Stored by an engine without the binding (2.0.9, the engine that installs this one):
+        # where it came from is not known, so it is not used. The feed update.conf names now
+        # is read again instead, with every check - the same update when that feed offers it.
+        vu_log INFO "Pending update has no recorded feed; reading the configured feed again"
+        use_pending_manifest=0
+    fi
     if [ "${use_pending_manifest:-0}" = 1 ]; then
         [ -r "$VU_PENDING_DIR/manifest.json" ] || return "$VU_NO_UPDATE"
         vu_feed_bound || { VU_FEED_BLOCKED=1; return "$VU_COMPAT_ERROR"; }

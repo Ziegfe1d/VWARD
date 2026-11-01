@@ -212,14 +212,23 @@ expect_code 'feed race: direct apply refused when the channel changes mid-way' 3
     VWARD_ROOT_PREFIX="$ROOT" VWARD_UPDATE_CONFIG="$CONFIG" VWARD_TEST_MANIFEST="$MANIFEST" VWARD_TEST_PACKAGE="$PACKAGE" "$UPDATER/vward-update.sh" --apply
 [ "$(route_now)" = old ] && pass 'feed race: direct apply wrote nothing' || fail 'feed race: direct apply wrote'
 
-# A pending update stored by an engine without the binding: its feed is not proven.
+# A pending update stored by an engine without the binding (2.0.9 - the engine that installs
+# this one and hands the run over): it is not used as it is; the configured feed is read again.
 new_root feed-legacy; make_package feed-legacy; make_manifest feed-legacy ROUTINE 1 0.1.1-dev
 feed_set dev
 expect_code 'feed legacy: pending on dev' 0 run_update --check
 sed -i '/^feed=/d' "$ROOT/opt/var/lib/vward/updater/pending/pending.state"
-expect_code 'feed legacy: pending without a feed is not applied' 32 run_update --apply-pending
-expect_code 'feed legacy: the next check binds it again' 0 run_update --check
-expect_code 'feed legacy: then it applies' 0 run_update --apply-pending
+expect_code 'feed legacy: unbound pending - the configured feed is read again and applied' 0 run_update --apply-pending
+[ "$(route_now)" = new-feed-legacy ] && pass 'feed legacy: applied from the configured feed' || fail 'feed legacy: not applied'
+# Unbound pending while the configured feed offers an older build: nothing is applied.
+new_root feed-legacy-old; make_package feed-legacy-old; make_manifest feed-legacy-old ROUTINE 1 0.1.1-dev
+feed_set dev
+expect_code 'feed legacy old: pending on dev' 0 run_update --check
+sed -i '/^feed=/d' "$ROOT/opt/var/lib/vward/updater/pending/pending.state"
+feed_set main
+make_manifest feed-legacy-old-main ROUTINE 1 0.0.9
+expect_code 'feed legacy old: the configured feed only has an older build - refused' 32 run_update --apply-pending
+[ "$(route_now)" = old ] && pass 'feed legacy old: nothing written' || fail 'feed legacy old: written'
 
 # Own feed (custom manifest_url) and the retired beta branch are bound the same way.
 new_root feed-custom; make_package feed-custom; make_manifest feed-custom ROUTINE 1 0.1.1-dev
