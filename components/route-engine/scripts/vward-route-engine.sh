@@ -796,13 +796,23 @@ restore_adaptive_from_persist()
 
     while IFS= read -r H; do
         [ -n "$H" ] || continue
+        # A name Keenetic would not parse is not sent (1.11 17:12: «argument parse error» three
+        # times within the engine's restart; the removals were neither checked nor journaled).
+        if ! valid_fqdn "$H"; then
+            SKIPPED=$((SKIPPED + 1))
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_SKIP_INVALID|$(printf '%s' "$H" | tr -c 'A-Za-z0-9._*-' '?' | cut -c1-80)" >> "$EVENT_LOG"
+            continue
+        fi
         restore_time_up && { LEFT=$((LEFT + 1)); continue; }
-        if ndmc -c \
-          "no object-group fqdn $GROUP include $H" \
-          >/dev/null 2>&1; then
+        if OUT=$(ndmc -c "no object-group fqdn $GROUP include $H" 2>&1) &&
+           ! printf '%s\n' "$OUT" | grep -qi 'error'; then
             REMOVED=$((REMOVED + 1))
         else
             RC=1
+            FAILS=$((FAILS + 1))
+            [ "$FAILS" -gt 3 ] ||
+                echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_FAIL|no include $H|$(printf '%s' "$OUT" | tr '\n|' '  ' | cut -c1-160)" \
+                    >> "$EVENT_LOG"
         fi
     done < "$DEL"
 

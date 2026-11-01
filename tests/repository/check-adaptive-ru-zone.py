@@ -100,4 +100,27 @@ restore_adaptive_from_persist
         if back != set(RU):
             fail(f"the undo must restore exactly the removed names: {sorted(back)}")
 
+# 01.11 item 6: a name in the group that Keenetic would not parse is not sent for removal (three
+# «argument parse error» within the engine's restart, 17:12); a refused removal is journaled.
+with tempfile.TemporaryDirectory() as tmp:
+    t = Path(tmp)
+    (t / "bin").mkdir()
+    (t / "bin/ndmc").write_text('#!/bin/sh\necho "$2" >> "$T/ndmc.log"\ncase "$2" in *refused.example*) echo "Command::Base: argument parse error.";; esac\nexit 0\n')
+    (t / "bin/ndmc").chmod(0o755)
+    (t / "run.sh").write_text(f"""T="{t}"; PERSIST="$T/persist"; EVENT_LOG="$T/events"; GROUP=AdaptiveAuto; REFRESH_TS="$T/ts"
+ADAPTIVE_FULL="$T/full"; RU_BACKUP="$T/b"; RU_REMOVED="$T/r"; VWARD_ENGINE_SHARED_CONFIG=1
+change_lock() {{ :; }}; change_unlock() {{ :; }}
+vward_running_config() {{ cat "$T/rc"; }}; vward_keenetic_config() {{ cat "$T/rc"; }}
+{code}
+restore_adaptive_from_persist
+""")
+    (t / "rc").write_text(CFG.format(inc="    include bad_name.example\n    include refused.example\n    include ok.example\n"))
+    (t / "persist").write_text("ok.example\n")
+    subprocess.run(["sh", str(t / "run.sh")], env={"PATH": f"{t}/bin:/usr/bin:/bin", "T": str(t)}, capture_output=True, text=True, timeout=60)
+    calls = (t / "ndmc.log").read_text()
+    ev = (t / "events").read_text()
+    if "bad_name" in calls or "PERSIST_RESTORE_SKIP_INVALID|bad_name.example" not in ev:
+        fail("RED: an invalid name must not be sent to Keenetic, and must be journaled")
+    if "PERSIST_RESTORE_FAIL|no include refused.example|Command::Base: argument parse error." not in ev:
+        fail("RED: a refused removal must be journaled with Keenetic's answer: " + ev)
 print("ADAPTIVE_RU_ZONE=PASS")
