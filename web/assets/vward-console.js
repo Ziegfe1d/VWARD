@@ -1207,7 +1207,9 @@ function listPath(l) {
 }
 let listWant = '';
 // r-lists: «Авто» - VWARD's policy decides (watch); otherwise the route the list has now.
-const LIST_MODES = [['auto', 'Авто'], ['vpn', 'Через VPN'], ['bypass', 'Напрямую']];
+// One set of names on every screen (owner 02.11): Авто | VPN | Провайдер (as on «DNS»). A list's
+// «DNS» way needs a Smart DNS writer per list, not there yet: the segment is not shown (fix.36).
+const LIST_MODES = [['auto', 'Авто'], ['vpn', 'VPN'], ['bypass', 'Провайдер']];
 const listMode = l => l.watch ? 'auto' : viaIs(l, 'vpn') ? 'vpn' : viaIs(l, 'bypass') ? 'bypass' : '';
 const LISTPICK = new Set(), LISTBULK = { busy: '' };
 function listDelText(ls) {
@@ -1275,6 +1277,8 @@ function myListClear(n) {
   if (!g || !n) return '';
   return (l ? listConfirm(l) : '') + (confirm && confirm.name === g ? '' : '<div class="panel-actions apart">' + btn('ask', 'broom', 'Очистить список', 'warn', ' data-confirm="list-clear" data-name="' + esc(g) + '"' + (cfgOk() && l ? '' : ' disabled')) + '</div>');
 }
+// A fitting example for an exclusion: a subdomain of the list's own first domain.
+const exampleDomain = inc => (inc && inc[0] ? String(inc[0]).replace(/^\*\./, '') : 'example.com');
 function listPage(name) {
   const l = ((S.lists && S.lists.lists) || []).find(x => x.name === name), d = S.listd, ok = cfgOk();
   const tuns = (st().wg && st().wg.interfaces) || [];
@@ -1294,16 +1298,18 @@ function listPage(name) {
       (l.smartdns_conflict ? '<p class="field-warn">В списке есть домены Smart DNS: их общий адрес уйдёт в VPN, и Smart DNS перестанет работать для всех сервисов. Переведите список в обход VPN или уберите эти домены.</p>' : '') +
       (l.auto && viaIs(l, 'vpn') ? '<p class="field-warn">Переведён на VPN автоматически ' + esc(l.auto.at) + ': не открылся ' + esc(l.auto.host) + '</p>' : '')) +
     panel('Домены', addF('add', 'example.com', 'Добавить домен в список') +
-      (inc.length > 8 ? '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти в списке" aria-label="Найти домен в списке" autocomplete="off"></label>' : '') +
-      (!fresh ? empty('Загрузка…') : inc.length ? '<ul class="rows" data-list-rows>' + inc.map(v => '<li class="row" data-d="' + esc(v) + '"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('remove', v, 'Убрать ' + v + ' из списка') + '</span></li>').join('') + '</ul>' : empty('В списке нет доменов')) +
-      // Clear or delete the whole list, right by its domains (owner 2026-10-17).
-      (l.name === 'AdaptiveAuto' ? '' : listConfirm(l) || '<div class="panel-actions even">' + btn('ask', 'broom', 'Очистить', '', ' data-confirm="list-clear" data-name="' + esc(l.name) + '"' + (ok && l.count ? '' : ' disabled')) +
-        (listOwn(l) || l.managed || svcOf(l.name) ? '' : btn('ask', 'check', 'Взять под управление VWARD', '', ' data-confirm="list-adopt" data-name="' + esc(l.name) + '"' + (ok ? '' : ' disabled'))) +
-        (listOwn(l) ? '' : btn('ask', 'trash', 'Удалить список', 'danger', ' data-confirm="list-del" data-name="' + esc(l.name) + '"' + (ok ? '' : ' disabled'))) + '</div>' +
-        (confirm && confirm.id === 'list-adopt' && confirm.name === l.name ? confirmBox('list-adopt', 'Взять список «' + (l.description || l.name) + '» под управление VWARD? Он появится среди «Списков VWARD»: общий переключатель «Авто / Через VPN / Напрямую» будет менять и его путь. Домены и маршрут сейчас не меняются.', 'Взять') : '')),
+      (fresh ? '<p class="panel-desc">' + fmtInt(inc.length) + ' ' + plural(inc.length, 'домен', 'домена', 'доменов') + '</p>' : '') + (inc.length > 8 ? '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти в списке" aria-label="Найти домен в списке" autocomplete="off"></label>' : '') +
+      (!fresh ? empty('Загрузка…') : inc.length ? '<ul class="rows" data-list-rows>' + inc.map(v => '<li class="row dom-row" data-d="' + esc(v) + '"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('remove', v, 'Убрать ' + v + ' из списка') + '</span></li>').join('') + '</ul>' : empty('В списке нет доменов')),
       { desc: fmtInt(inc.length || l.count) + ' ' + plural(inc.length || l.count, 'домен', 'домена', 'доменов') + '. Домен действует вместе с поддоменами. Изменения сразу сохраняются в Keenetic.' }) +
-    panel('Исключения', addF('exclude', 'music.example.com', 'Добавить исключение') +
-      (!fresh ? '' : exc.length ? '<ul class="rows">' + exc.map(v => '<li class="row"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('unexclude', v, 'Убрать исключение ' + v) + '</span></li>').join('') + '</ul>' : empty('Исключений нет')),
+    // «Управление» of a list (owner 02.11): the list's actions in their own section, as on AdGuard Home.
+    (l.name === 'AdaptiveAuto' ? '' : panel('Управление', listConfirm(l) || '<div class="panel-actions even">' +
+        btn('ask', 'broom', 'Очистить список', '', ' data-confirm="list-clear" data-name="' + esc(l.name) + '"' + (ok && l.count ? '' : ' disabled')) +
+        (listOwn(l) || l.managed || svcOf(l.name) ? '' : btn('ask', 'sliders', 'Взять под управление', '', ' data-confirm="list-adopt" data-name="' + esc(l.name) + '"' + (ok ? '' : ' disabled'))) +
+        (listOwn(l) ? '' : btn('ask', 'trash', 'Удалить список', 'danger', ' data-confirm="list-del" data-name="' + esc(l.name) + '"' + (ok ? '' : ' disabled'))) + '</div>' +
+        (confirm && confirm.id === 'list-adopt' && confirm.name === l.name ? confirmBox('list-adopt', 'Взять список «' + (l.description || l.name) + '» под управление VWARD? Его путь будет меняться переключателем «Авто | VPN | Провайдер» здесь и общим «Все списки». Домены и маршрут сейчас не меняются.', 'Взять под управление') : ''),
+      { desc: 'Очистить список - убрать все домены, список и маршрут останутся. Удалить список - убрать его из Keenetic полностью. Перед обоими сохраняется копия настроек.' })) +
+    panel('Исключения', addF('exclude', 'sub.' + exampleDomain(inc), 'Добавить исключение') +
+      (!fresh ? '' : exc.length ? '<ul class="rows">' + exc.map(v => '<li class="row"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('unexclude', v, 'Убрать исключение ' + v) + '</span></li>').join('') + '</ul>' : '<p class="panel-desc">Исключений нет</p>'),
       { desc: 'Поддомены, которые идут мимо этого списка.' });
 }
 
@@ -2272,20 +2278,20 @@ const RENDER = {
       '<p class="panel-desc">Это обычное состояние новой установки: VWARD сам списков не создаёт и чужие не переносит. Список появляется, когда вы включаете сервис или добавляете свои домены.</p>' +
       '<div class="panel-actions">' + '<button class="btn small" type="button" data-go="d-services">' + ico('plus') + 'Сервисы</button><button class="btn small" type="button" data-go="d-mydomains">' + ico('plus') + 'Мои домены</button>' + '</div>') + soonPanel('lists');
     const modes = mine.map(listMode), common = modes.length && modes.every(m => m === modes[0]) ? modes[0] : '';
-    const busy = LISTBULK.busy, picked = mine.filter(l => LISTPICK.has(l.name));
-    const mineRow = l => ctrlRow(l.description || l.name, choiceSlider('list-mode:' + l.name, LIST_MODES, listMode(l), 'Путь списка ' + (l.description || l.name)),
-      fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + ' · ' + path(l) + (l.watch && l.auto ? ' · переведён на VPN автоматически' : ''));
-    const pick = l => '<label class="check"><input type="checkbox" data-list-pick="' + esc(l.name) + '"' + (LISTPICK.has(l.name) ? ' checked' : '') + (ok && !busy ? '' : ' disabled') + '> ' + esc(l.description || l.name) + ' <small>' + fmtInt(l.count) + '</small></label>';
+    const busy = LISTBULK.busy;
+    // One list of all lists (owner 02.11): every row opens its list (a list under VWARD's management
+    // was a switch row without a link - Supercell could not be opened); under a managed list its own
+    // «Авто | VPN | Провайдер»; «под управлением VWARD» is a small mark; no check boxes here.
+    const own = cfgRoute().group || prof().policy_group;
+    const one = l => { const m = mine.indexOf(l) >= 0;
+      return '<div class="list-item">' + row(l).replace('</small>', '</small>' + (m ? '<small class="tag-mark">под управлением VWARD</small>' : l.name === own ? '' : '<small class="tag-mark off">не под управлением VWARD</small>')) +
+        (m ? choiceSlider('list-mode:' + l.name, LIST_MODES, listMode(l), 'Путь списка ' + (l.description || l.name)) : '') + '</div>'; };
     return cfgNote() + listDupPanel(items) +
-      (mine.length ? panel('Списки VWARD', '<dl class="kv">' +
-        ctrlRow('Все списки VWARD', choiceSlider('list-mode-all', LIST_MODES, common, 'Путь всех списков VWARD'), common ? '' : 'у списков разный путь') +
-        mine.map(mineRow).join('') + '</dl>' + (busy ? '<p class="panel-desc">' + esc(busy) + '</p>' : '') +
-        '<div class="list-picks">' + mine.map(pick).join('') + '</div><div class="panel-actions">' +
-        btn('ask', 'trash', 'Удалить выбранные', 'small danger', ' data-confirm="lists-del"' + (picked.length && ok && !busy ? '' : ' disabled')) + '</div>' +
-        (confirm && confirm.id === 'lists-del' ? confirmBox('lists-del', listDelText(picked), 'Удалить', true) : '') + resultBox('lists'),
-        { desc: 'Авто - путь выбирает VWARD, домены не удаляются. Через VPN и Напрямую - путь закреплён.' }) : '') +
-      panel(mine.length ? 'Другие списки' : 'Доменные списки', rest.length ? '<ul class="rows">' + rest.map(row).join('') + '</ul>' : empty('Нет'),
-        { desc: 'Списки Keenetic и сервисов. VWARD меняет их только по вашему выбору на странице списка.' }) + soonPanel('lists');
+      panel('Доменные списки', (mine.length ? '<dl class="kv">' +
+        ctrlRow('Все списки', choiceSlider('list-mode-all', LIST_MODES, common, 'Путь всех списков VWARD'), common ? 'списки под управлением VWARD' : 'Разные: у списков разный путь', 'stack') + '</dl>' : '') +
+        (busy ? '<p class="panel-desc">' + esc(busy) + '</p>' : '') +
+        '<div class="list-all">' + items.map(one).join('') + '</div>' + resultBox('lists'),
+        { desc: 'Авто - путь выбирает VWARD по проверке, домены не удаляются. VPN и Провайдер - путь закреплён. Путь меняется у списков под управлением VWARD; другой список можно взять под управление на его странице.' }) + soonPanel('lists');
   },
   'd-wanrec'() {
     const gp = Object.assign({ CONFIRM_FAILURES: 3, RENEW_COOLDOWN: 600, BOUNCE_COOLDOWN: 1800, MAX_RENEW_HOUR: 3, MAX_BOUNCE_HOUR: 2, MAX_BOUNCE_DAY: 6 }, (cfg().wan_guard || {}).params);
@@ -4653,7 +4659,16 @@ document.addEventListener('click', e => {
   if (t.dataset.filesUp) { if (FILES.path) filesGo(FILES.root, FILES.path.split('/').slice(0, -1).join('/')); else filesGo('', ''); return; }
   if (t.dataset.backupRestore) { confirm = { id: 'backup-restore', name: t.dataset.backupRestore }; render(); return; }
   if (t.dataset.aghFilterRm) { confirm = { id: 'agh-filter-remove', url: t.dataset.aghFilterRm }; render(); return; }
-  if (t.dataset.listDom) { const v = t.dataset.dom, how = t.dataset.listDom; t.disabled = true; cfgSet({ op: 'list-domain', action: how, target: current.slice(2), value: v }, how === 'remove' ? v + ' убран из списка' : 'Исключение ' + v + ' убрано', ['listd', 'lists']); return; }
+  if (t.dataset.listDom) {
+    const v = t.dataset.dom, how = t.dataset.listDom, target = current.slice(2); t.disabled = true;
+    // The cross removes at once; «Отменить» in the notification brings it back for a few seconds (owner 02.11).
+    apiPost('config', { op: 'list-domain', action: how, target: target, value: v }).then(x => {
+      if (!x.ok) { toast('Не сохранено: ' + errText(x)); return; }
+      popup({ sev: 'ok', title: how === 'remove' ? v + ' убран из списка' : 'Исключение ' + v + ' убрано',
+        btn: ['Отменить', () => cfgSet({ op: 'list-domain', action: how === 'remove' ? 'add' : 'exclude', target: target, value: v }, v + ' возвращён', ['listd', 'lists'])] });
+    }, e => toast('Ошибка: ' + e.message)).then(() => Promise.all(['config', 'listd', 'lists'].map(k => load(k, true)))).then(render);
+    return;
+  }
   if (t.dataset.cfgOp === 'tsubnet') { t.disabled = true; tunnelSubnet(current.slice(current.startsWith('tn-') ? 3 : 2), 'remove', t.dataset.cfgTarget); return; }
   if (t.dataset.myPin) { const d = t.dataset.myPin, on = t.getAttribute('aria-pressed') !== 'true'; t.disabled = true; cfgSet({ op: 'force-vpn', action: on ? 'add' : 'remove', target: d }, on ? d + ' всегда идёт через VPN' : d + ': снято «всегда через VPN»', ['route']); return; }
   if (t.dataset.myRm) { t.disabled = true; myRemove(t.dataset.myRm); return; }

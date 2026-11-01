@@ -383,7 +383,7 @@ small.st .icon{width:14px;height:14px}
 #toasts{position:fixed;z-index:70;top:calc(env(safe-area-inset-top,0px) + var(--topbar-h) + 8px);left:16px;right:16px;display:flex;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:none}
 @media (min-width:600px){#toasts{left:auto;right:16px;width:360px}}
 /* A phone: the messages above the bottom bar, the newest only - at the top they covered the page's text (fix.34). */
-@media (max-width:599px){#toasts{top:auto;bottom:calc(var(--tabbar-space) + 8px);flex-direction:column-reverse}#toasts .toast:not(:first-child){display:none}}
+@media (max-width:599px){#toasts .toast:not(:first-child){display:none}}
 .toast{display:flex;gap:10px;align-items:flex-start;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface);color:var(--text);box-shadow:0 6px 24px rgba(12,18,26,.16);text-align:left;font-size:var(--fs-sm);pointer-events:auto;opacity:0;transform:translateY(-6px);transition:opacity .2s ease,transform .2s ease;touch-action:none;user-select:none;-webkit-user-select:none}
 .toast.in{opacity:1;transform:none}
 .toast.out{opacity:0;transform:translateX(12px)}
@@ -577,3 +577,10 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
 .prop p{margin:2px 0 0;color:var(--muted);font-size:var(--fs-sm)}
 .prop ul{margin:2px 0 0;padding-left:18px;color:var(--muted);font-size:var(--fs-sm)}
 .prop-old{margin:8px 16px;color:var(--muted);font-size:var(--fs-sm)}
+/* «Доменные списки» (owner 02.11): one list, every row opens; a small mark of management; domain rows compact. */
+.list-item{border-top:1px solid var(--line)}
+.list-item:first-child{border-top:0}
+.list-item>.seg-slider{margin:0 16px 10px}
+.tag-mark{display:block;color:var(--accent);font-size:var(--fs-xs)}
+.tag-mark.off{color:var(--muted)}
+.dom-row .row-main b{font-size:var(--fs-sm);font-weight:500;overflow-wrap:normal;word-break:normal}

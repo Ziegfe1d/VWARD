@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""r-lists (owner 2026-11-01): «Доменные списки» - «Авто / Через VPN / Напрямую» for all and for
-each list VWARD manages, «Удалить выбранные» with an exact preview, 0 lists as a normal state.
-Keenetic's own, service and unknown lists are never offered for mass actions."""
+"""r-lists (owner 2026-11-01): «Доменные списки» - a way for all and for each list VWARD manages,
+0 lists as a normal state; Keenetic's own, service and unknown lists are never offered for mass actions.
+Owner 2026-11-02: ONE list of all lists, every row opens its list (a managed list was a row without a
+link - Supercell could not be opened), «Авто | VPN | Провайдер», «Разные» when the ways differ,
+«под управлением VWARD» as a small mark, no check boxes or «Удалить выбранные» on this page."""
 
 import json
 import shutil
@@ -19,10 +21,15 @@ def fail(message: str) -> None:
 
 
 page = JS[JS.index("  lists() {"):JS.index("  'd-wanrec'()")]
-for need in ("Доменных списков пока нет", "VWARD сам списков не создаёт и чужие не переносит", "'Списки VWARD'",
-             "'Все списки VWARD'", "'Удалить выбранные'", "data-confirm=\"lists-del\"", "'Другие списки'"):
+for need in ("Доменных списков пока нет", "VWARD сам списков не создаёт и чужие не переносит", "ctrlRow('Все списки'",
+             "'Разные: у списков разный путь'", "под управлением VWARD", "items.map(one)", "row(l)"):
     if need not in page:
         fail(f"lists page: {need} missing")
+for gone in ("'Удалить выбранные'", "data-list-pick", "'Другие списки'", "panel('Списки VWARD'"):
+    if gone in page:
+        fail(f"RED: lists page still has {gone} (owner 02.11)")
+if "const LIST_MODES = [['auto', 'Авто'], ['vpn', 'VPN'], ['bypass', 'Провайдер']];" not in JS:
+    fail("the ways are «Авто | VPN | Провайдер» everywhere")
 if "l.managed && l.name !== (cfgRoute().group || prof().policy_group)" not in page:
     fail("only managed lists (not «Мои домены») get the switches")
 # The mass switch skips service lists and lists already on the chosen way.
