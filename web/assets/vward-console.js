@@ -609,6 +609,27 @@ const inflight = {};
 // asking them every 15 seconds only loaded the router. An action reloads what it changed.
 const KEY_TTL = { off: 10, notes: 25, status: 5, ads: 10, tq: 55, route: 55, awg: 25, wifi: 55, diag: 55, stab: 55, lists: 110, config: 110, adspub: 55, adsstats: 110, agh: 110,
   https: 290, security: 290, services: 290, update: 110, ext: 590, backups: 290, cron: 110 };
+// «Запустить проверку»: the progress, the result or the error stay on the page (the bell is only
+// an extra channel). load() keeps errors in S.errors, so a failed run is not reported as done.
+let DIAG_RUN = null;
+function diagRun() {
+  if (DIAG_RUN && DIAG_RUN.busy) return;
+  DIAG_RUN = { busy: true };
+  render();
+  load('diag', true).then(() => {
+    const ch = (S.diag && S.diag.checks) || [], err = S.errors.diag, ok = ch.filter(x => x.status === 'PASS').length;
+    DIAG_RUN = err ? { error: err, at: new Date() } : { done: true, at: new Date(), ok: ok, n: ch.length };
+    render();
+    if (err) toast('Диагностика не выполнена: ' + err, 'warn'); else toast('Диагностика выполнена');
+  });
+}
+const diagRunNote = () => {
+  const r = DIAG_RUN; if (!r) return '';
+  if (r.busy) return '<p class="result-note" role="status">Проверка выполняется…</p>';
+  const at = r.at.toLocaleTimeString('ru-RU');
+  return r.error ? '<p class="result-note warn" role="status">Проверка не выполнена в ' + at + ': ' + esc(r.error) + '</p>'
+                 : '<p class="result-note" role="status">Проверка выполнена в ' + at + ': в норме ' + r.ok + ' из ' + r.n + '.</p>';
+};
 async function load(key, force) {
   if (inflight[key]) return inflight[key];
   if (!force && S[key] && Date.now() - (S.loadedAt[key] || 0) < (KEY_TTL[key] || 5) * 1000) return S[key];
@@ -1930,8 +1951,8 @@ const RENDER = {
         ['Время работы', fmtUptime(r.uptime_sec)]
       ])) +
       panel('Состояние', kv([
-        (() => { const n = ((S.config && S.config.components) || []).filter(x => x.enabled === false).length;
-          return ['Управление', n ? 'выключено: ' + n : 'всё включено', n ? 'warn' : '', 'd-control', '', 'все выключатели VWARD']; })(),
+        (() => { const off = ((S.config && S.config.components) || []).filter(x => x.enabled === false).map(x => (comp(x.id) || {}).name || x.id);
+          return ['Управление', off.length ? 'выключено: ' + off.join(', ') : 'всё включено', off.length ? 'warn' : '', 'd-control', '', 'все выключатели VWARD']; })(),
         ['Компоненты VWARD', 'по частям VWARD', '', 'd-components'],
         agentsRow(),
         ['Диагностика', dg.length ? (dg.length - bad) + ' из ' + dg.length + ' в норме' : 'не запускалась', bad ? 'warn' : '', 'd-diag'],
@@ -2109,7 +2130,7 @@ const RENDER = {
     return panel('Задания по расписанию', kv([['Задания по расписанию', sv.crond && sv.supervisor ? 'Работают' : sv.crond ? 'Агент компонентов остановлен' : 'расписание не работает', sv.crond && sv.supervisor ? 'ok' : 'crit', 'd-cron']]),
         { desc: 'Нажмите, чтобы открыть задания.' }) +
       panel('Диагностика', (d && d.checks ? '<ul class="rows">' + d.checks.map(x => { const to = x.id === 'smartdns' && /IP-категория/.test(x.detail || '') ? 'd-ipcats' : map[x.id]; return '<li class="row' + (to ? ' link" role="button" tabindex="0" data-go="' + to + '"' : '"') + '><div class="row-main"><b>' + esc(x.label) + '</b><small>' + esc(x.detail || '') + '</small></div><span class="pill ' + (x.status === 'PASS' ? 'ok' : x.status === 'FAIL' ? 'crit' : 'warn') + '">' + (x.status === 'PASS' ? 'Работает' : x.status === 'FAIL' ? 'Не работает' : 'Внимание') + '</span>' + (to ? ico('chevron', 'chev') : '') + '</li>'; }).join('') + '</ul>' : empty(S.errors.diag ? 'Диагностика не выполнена: ' + S.errors.diag : 'Загрузка…')) +
-      '<div class="panel-actions">' + btn('diag-run', 'check', 'Запустить проверку', 'primary') + '</div>') +
+      diagRunNote() + '<div class="panel-actions">' + btn('diag-run', 'check', DIAG_RUN && DIAG_RUN.busy ? 'Проверка выполняется…' : 'Запустить проверку', 'primary', DIAG_RUN && DIAG_RUN.busy ? ' disabled aria-busy="true"' : '') + '</div>') +
       panel('Журналы', kv([['Технические журналы', 'для сохранения и отправки', '', 'logs']]), { desc: 'Журналы как есть, для диагностики.' });
   },
   'd-stability'() {
@@ -4654,7 +4675,7 @@ document.addEventListener('click', e => {
   else if (a === 'refresh-hints') runLong('routes', 'control', { op: 'refresh-hints' }, 'control-data', 'Подсказки обновлены').then(() => load('route', true)).then(render);
   else if (a === 'update-op') updateOp(t.dataset.op);
   else if (a === 'panel-reload') location.reload();
-  else if (a === 'diag-run') { load('diag', true).then(() => { render(); toast('Диагностика выполнена'); }); }
+  else if (a === 'diag-run') diagRun();
   else if (a === 'agh-clients') aghClientsOp('sync');
   else if (a === 'ads-job') adsControl({ op: 'enqueue', job: t.dataset.job }, 'Задание поставлено в очередь', 'ads-job');
   else if (a === 'ads-job-run') { t.disabled = true; adsControl({ op: 'job-run' }, 'Очередь запущена', 'ads-job-run'); }

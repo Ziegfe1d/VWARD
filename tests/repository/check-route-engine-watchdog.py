@@ -45,6 +45,19 @@ try:
 finally:
     parent.kill(); other.kill()
 
+# 01.11 hypothesis «WATCHDOG_RESTART cores=2 = the helper awk list-watch counted as a second engine»:
+# the match is on the exact script field of "ps w", never on a substring of the command line.
+fn_live = S91[S91.index("adaptive_live_pids()\n"):]
+fn_live = fn_live[:fn_live.index("\n}\n") + 3]
+PS = """  101 root      3200 S    /bin/sh /opt/bin/vward-route-engine.sh
+  205 root      1100 S    awk -v g=list-watch -f /opt/bin/vward-route-engine.sh.awk /opt/var/run/vward/list-watch.map
+  206 root      1100 S    grep vward-route-engine.sh /opt/var/run/vward/list-watch.map
+  207 root      1100 S    {awk} /bin/sh /opt/bin/vward-route-engine.sh-helper list-watch
+  300 root      3200 S    {/opt/bin/vward-route-engine.sh} /bin/sh /opt/bin/vward-route-engine.sh"""
+r = subprocess.run(["sh", "-c", "ps() { cat <<'EOF'\n" + PS + "\nEOF\n}\n" + fn_live + "adaptive_live_pids"], capture_output=True, text=True)
+if r.stdout.split() != ["101", "300"]:
+    fail(f"only the engine itself is a core, helpers (awk, grep, *-helper) are not: {r.stdout.split()}")
+
 for use in ("LCNT=$(adaptive_core_count)",):
     if S91.count(use) != 3:
         fail("health, startup and status checks must count cores, not command lines")
