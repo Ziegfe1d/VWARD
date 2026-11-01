@@ -182,6 +182,34 @@ with tempfile.TemporaryDirectory() as tmp:
     if cats != list(CATS) or held or blocks:
         fail(f"with the Smart DNS guard off nothing is held: {cats} {held!r} {blocks!r}")
 
+# 01.11 item 7: Keenetic's own DNS server (1.0.0.1 «on ISP», Cloudflare category through OpkgTun4) is
+# held out of the tunnel; a server bound to a tunnel (the owner's DNS rules of OpkgTun4) is not.
+with tempfile.TemporaryDirectory() as tmp:
+    t = Path(tmp)
+    (t / "catalog").mkdir()
+    (t / "catalog/cloudflare.cidr").write_text("1.0.0.0/24\n104.16.0.0/13\n")
+    (t / "catalog/google.cidr").write_text("8.8.8.0/24\n")
+    (t / "cats").write_text("cloudflare\ngoogle\n")
+    (t / "run").write_text("ip name-server 1.0.0.1 on ISP\nip name-server 8.8.8.8 example.org on OpkgTun4\n"
+                           "ip name-server 192.168.1.1:65053\ndns-proxy\n    tls upstream 9.9.9.9\n!\n")
+    (t / "lists.conf").write_text("smartdns_guard=1\n")
+    (t / "nslookup").write_text("#!/bin/sh\nexit 0\n"); (t / "nslookup").chmod(0o755)
+    script = (f'WORK={t}; CATALOG={t}/catalog; SMARTDNS_HELD={t}/held; SMARTDNS_BLOCKS={t}/blocks\n'
+              f'SMARTDNS_ADDR_CACHE={t}/resolved; SMARTDNS_HOLD_PREFIX=24; LISTS_CONF={t}/lists.conf; NSLOOKUP={t}/nslookup\n'
+              f'log() {{ :; }}\n' + func("smartdns_hold") + f'smartdns_hold {t}/run {t}/cats\n')
+    r = subprocess.run(SH + ["-c", script], text=True, capture_output=True, timeout=60)
+    blocks = (t / "blocks").read_text() if (t / "blocks").exists() else ""
+    if r.returncode or "1.0.0.0/24|keenetic-dns|cloudflare" not in blocks:
+        fail(f"RED: Keenetic's own DNS server must be held out of the tunnel: {blocks!r} {r.stderr}")
+    if "8.8.8.0/24" in blocks or "192.168." in blocks:
+        fail(f"a server bound to a tunnel and private addresses are not held: {blocks!r}")
+    (t / "lists.conf").write_text("smartdns_guard=1\ndns_server_hold=0\n")
+    for f in ("blocks", "resolved"):
+        (t / f).unlink(missing_ok=True)
+    subprocess.run(SH + ["-c", script], text=True, capture_output=True, timeout=60)
+    if "keenetic-dns" in ((t / "blocks").read_text() if (t / "blocks").exists() else ""):
+        fail("dns_server_hold=0 turns it off")
+
 api = (ROOT / "web/cgi-bin/api.cgi").read_text()
 js = (ROOT / "web/assets/vward-console.js").read_text()
 if "(IP-категория $SD_CAT)" not in api or "smartdns_held:$smartdns_held" not in api:
