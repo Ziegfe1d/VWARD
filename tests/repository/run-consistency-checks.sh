@@ -93,6 +93,7 @@ python3 tests/routing-readers/check-journal.py || fail "RS-7 write-ahead journal
 python3 tests/routing-readers/check-dryrun.py || fail "RS-7 dry-run executor on a Keenetic stand-in"
 python3 tests/entware/check-entware-lifecycle.py || fail "Entware external package lifecycle (emulated root)"
 python3 tests/dns/check-dns-mode.py || fail "DNS mode selector and safe dnsmasq rendering"
+python3 tests/vpn/check-vpn-engines.py || fail "VPN engines: one engine per tunnel, proven sing-box support"
 if command -v busybox >/dev/null 2>&1; then
     busybox ash tests/routing-audit/run-simulations.sh || fail "BusyBox routing audit simulations"
     RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-readers.py || fail "BusyBox native routing read adapters"
@@ -105,6 +106,7 @@ if command -v busybox >/dev/null 2>&1; then
     RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-dryrun.py || fail "BusyBox RS-7 dry-run executor"
     ENTWARE_BUSYBOX="$(command -v busybox)" python3 tests/entware/check-entware-lifecycle.py || fail "BusyBox Entware package lifecycle"
     DNS_BUSYBOX="$(command -v busybox)" python3 tests/dns/check-dns-mode.py || fail "BusyBox DNS mode selector"
+    VPN_BUSYBOX="$(command -v busybox)" python3 tests/vpn/check-vpn-engines.py || fail "BusyBox VPN engines"
     python3 tests/routing-audit/check-bounded-cost.py --busybox "$(command -v busybox)" || fail "routing audit bounded cost"
 else
     echo "NOTE: BusyBox audit/cost runtime requires busybox; host audit ran above"

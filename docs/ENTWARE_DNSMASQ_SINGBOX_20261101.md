@@ -103,3 +103,25 @@ Xray/AGH не затронуты, `opkg upgrade` не вызывается. Му
 
 Keenetic dns-proxy остаётся фронтом :53 во всех режимах — ipset FQDN-маршрутизации продолжает видеть ответы.
 Тест `tests/dns/check-dns-mode.py` (sh и BusyBox); мутации 4 инвариантов (оба обработчика, DHCP, петля, системный порт) роняют тест.
+
+## 7. Пакет D — sing-box (реализовано: состояние, совместимость, генерация, проверка, план; без активации)
+
+`components/runtime/lib/vward-vpn-engines.sh`:
+- `vward_vpn_engine_owner` — какой движок держит `OpkgTunN` (`tunnels.tsv` Xray, AmneziaWG, sing-box); два — `conflict`, отказ.
+- `vward_vpn_link_class` — протокол/транспорт/защита одной ссылки или WG-конфигурации **без вывода ключей**; AmneziaWG
+  распознаётся по `Jc/Jmin/...` и не считается WireGuard.
+- `vward_singbox_caps` — версия и теги установленной сборки (`sing-box version`, ничего не запускает); нет программы → `unknown`.
+- `vward_vpn_engine_compat` — только доказанная поддержка: при `unknown` sing-box не поддерживает ничего; **XHTTP → нет**
+  (остаётся на Xray); **AmneziaWG → нет** (остаётся на AmneziaWG); REALITY только с `with_utls`; WireGuard только с
+  `with_wireguard`; VLESS/Trojan с tcp/ws/grpc/httpupgrade и tls/none.
+- `vward_singbox_render` — JSON 0600 для одной ссылки на существующем адаптере `opkgtunN` (`auto_route: false`: маршрутами
+  владеет Keenetic); XHTTP, WireGuard и AmneziaWG не генерируются.
+- `vward_singbox_check` — `sing-box check` (только разбор) при наличии программы.
+- `vward_vpn_engine_plan` — смена движка туннеля: отказ без совместимости, без проверенной конфигурации, без доказанной
+  работы на тестовом пути, без установленного движка, при двух владельцах. Порядок: журнал → остановить прежний (его
+  запись остаётся путём возврата, ключи/профили/подписки не трогаются) → занять туннель → проверка tunnel-guard →
+  фиксация, иначе возврат прежнего. Writer выключен.
+
+**Не проверено (только на устройстве):** присоединение `tun`-inbound sing-box к адаптеру, созданному Keenetic для OpkgTun;
+фактические теги сборки Entware `sing-box-go`; WARP-профиль; память/CPU на Viva.
+Тест `tests/vpn/check-vpn-engines.py` (sh и BusyBox), мутации 4 защит роняют тест.
