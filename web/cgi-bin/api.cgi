@@ -1976,6 +1976,21 @@ if [ "$ACTION" = "diagnostics" ]; then
         fi
     fi
 
+    # Lampa TV (01.11.2026: «не грузится», no data in the diagnostics): its own sites and the movie
+    # database it reads (TMDB, blocked in Russia) - does each resolve, and does it go through a
+    # tunnel or the provider (the router's own route; a TV with its own DNS is not seen here).
+    LAMPA_STATUS=PASS LAMPA_DETAIL=""
+    for LD in ${VWARD_LAMPA_DOMAINS:-lampa.mx cub.red api.themoviedb.org image.tmdb.org}; do
+        LD_IP="$("${VWARD_NSLOOKUP:-nslookup}" "$LD" "${VWARD_DNS_SERVER:-127.0.0.1}" 2>/dev/null | awk '/^Name:/ {n = 1; next} n {for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) {print $i; exit}}')"
+        if [ -z "$LD_IP" ]; then LAMPA_STATUS=WARN LD_WAY="нет адреса"
+        else
+            LD_DEV="$("${VWARD_IP:-ip}" route get "$LD_IP" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')"
+            if [ -n "$LD_DEV" ] && { [ "$LD_DEV" = "${VWARD_TUNNEL_DEVICE:-}" ] || [ -d "/sys/class/net/$LD_DEV/wireguard" ] || [ "$(cat "/sys/class/net/$LD_DEV/type" 2>/dev/null)" = 65534 ]; }; then LD_WAY="VPN"
+            else LD_WAY="провайдер"; case "$LD" in *themoviedb.org|*tmdb.org) LAMPA_STATUS=WARN; LD_WAY="провайдер (в России блокируется)" ;; esac; fi
+        fi
+        LAMPA_DETAIL="$LAMPA_DETAIL${LAMPA_DETAIL:+; }$LD: $LD_WAY"
+    done
+
     # DNS chain: Keenetic hands queries to AdGuard Home, and AdGuard Home must not
     # hand them back to the router (a loop Keenetic answers by dropping requests).
     DNS_STATUS=PASS DNS_DETAIL=""
@@ -2071,7 +2086,7 @@ if [ "$ACTION" = "diagnostics" ]; then
       --arg adguard "$ADGUARD_STATUS" --arg adaptive "$ADAPTIVE_STATUS" \
       --arg updater "$UPDATE_STATUS" --arg config "$CONFIG_STATUS" --arg cgi "$CGI_STATUS" \
       --arg wan "$WAN_STATUS" --arg wg "$WG_STATUS" --arg wg_detail "$WG_DETAIL" \
-      --arg smartdns "$SMARTDNS_STATUS" --arg smartdns_detail "$SMARTDNS_DETAIL" \
+      --arg smartdns "$SMARTDNS_STATUS" --arg smartdns_detail "$SMARTDNS_DETAIL" --arg lampa "$LAMPA_STATUS" --arg lampa_detail "$LAMPA_DETAIL" \
       --arg dns "$DNS_STATUS" --arg dns_detail "$DNS_DETAIL" --arg files "$FILES_STATUS" --arg files_detail "$FILES_DETAIL" \
       --arg wan_rc "$LAST_WAN_RC" --arg wg_rc "$LAST_WG_RC" --arg route_rc "$LAST_ROUTE_RC" \
       --argjson wg_count "$WG_COUNT" --argjson opt_free "$OPT_FREE" \
@@ -2091,6 +2106,7 @@ if [ "$ACTION" = "diagnostics" ]; then
         {id:"wg",component:"tunnel-guard",label:"VPN-туннели",status:$wg,detail:$wg_detail},
         {id:"smartdns",component:"route-engine",label:"Smart DNS мимо VPN",status:$smartdns,detail:$smartdns_detail},
         {id:"dns-chain",component:"route-engine",label:"Цепочка DNS",status:$dns,detail:$dns_detail},
+        {id:"lampa",component:"route-engine",label:"Lampa TV",status:$lampa,detail:$lampa_detail},
         {id:"files",component:"update-engine",label:"Файлы VWARD",status:$files,detail:$files_detail},
         {id:"updater",component:"update-engine",label:"Движок обновлений",status:$updater,detail:"рабочая копия движка на месте"},
         {id:"update-config",component:"update-engine",label:"Настройки обновлений",status:$config,detail:"файл настроек читается"}

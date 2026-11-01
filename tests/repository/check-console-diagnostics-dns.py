@@ -180,5 +180,14 @@ with tempfile.TemporaryDirectory() as tmp:
     if sd("192.0.2.0/24\n", HELD)["status"] != "PASS":
         fail("a server that answers keeps the route verdict")
     env["VWARD_DOH_ALIVE"] = "0"
+    # Lampa TV (01.11): its domains, resolved and their way; TMDB through the provider is a warning.
+    (tmp / "ipdev").write_text("eth3\n")
+    lp = diag(SD_CONF, ["9.9.9.10"], 65053)["lampa"]
+    if lp["status"] != "WARN" or "lampa.mx: провайдер" not in lp["detail"] or "api.themoviedb.org: провайдер (в России блокируется)" not in lp["detail"]:
+        fail(f"Lampa TV: its domains and their way: {lp}")
+    (tmp / "ipdev").write_text("tun9\n")
+    lp = diag(SD_CONF, ["9.9.9.10"], 65053)["lampa"]
+    if lp["status"] != "PASS" or "image.tmdb.org: VPN" not in lp["detail"]:
+        fail(f"Lampa TV through the tunnel: {lp}")
 
 print("CONSOLE_DIAGNOSTICS_DNS=PASS")
