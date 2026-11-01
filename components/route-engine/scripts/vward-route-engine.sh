@@ -25,6 +25,8 @@ STATE_DIR="/opt/var/lib/vward/route-engine"
 MANUAL="$STATE_DIR/manual-domains.txt"
 ADAPTIVE="$STATE_DIR/adaptive-domains.txt"
 PERSIST="$STATE_DIR/adaptive-persist.txt"
+RU_BACKUP="$STATE_DIR/adaptive-persist.ru-backup.txt"
+RU_REMOVED="$STATE_DIR/adaptive-ru-removed.txt"
 REFRESH_TS="$STATE_DIR/groups-refresh"
 
 EVENT_LOG="/opt/var/log/vward-route-engine-events.log"
@@ -740,6 +742,30 @@ restore_adaptive_from_persist()
     tr '[:upper:]' '[:lower:]' |
     sort -u > "$WANT"
 
+    # Russian zones never go through the VPN (01.11: api.ozon.ru, *.wb.ru, *.wildberries.ru,
+    # magnit.ru ... kept in the saved list from versions before ru_zone, put back at every start,
+    # and never taken out: the reconciler needs a direct check that passes, and the direct checks
+    # failed). They are left out of what is restored, so the restore takes them out of the group.
+    # The saved list is copied once before (adaptive-persist.ru-backup.txt), the names taken out
+    # are kept in adaptive-ru-removed.txt. Undo: VWARD_ADAPTIVE_RU=1 in device.conf, the backup
+    # back as adaptive-persist.txt, then S91vward-route-engine restart.
+    if [ "${VWARD_ADAPTIVE_RU:-0}" != 1 ]; then
+        : > "$WANT.ru"
+        while IFS= read -r H; do
+            if ru_zone "$H"; then echo "$H" >> "$WANT.ru"; else echo "$H"; fi
+        done < "$WANT" > "$WANT.keep" && mv -f "$WANT.keep" "$WANT"
+        if [ -s "$WANT.ru" ]; then
+            [ -s "$RU_BACKUP" ] || cp -p "$PERSIST" "$RU_BACKUP" 2>/dev/null
+            # Not «grep -v -f»: BusyBox prints nothing with an empty pattern file.
+            awk -v rf="$RU_REMOVED" 'BEGIN {while ((getline l < rf) > 0) seen[l] = 1} !($0 in seen)' \
+                "$WANT.ru" > "$WANT.new" 2>/dev/null && cat "$WANT.new" >> "$RU_REMOVED" 2>/dev/null
+            rm -f "$WANT.new"
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|ADAPTIVE_RU_OUT|n=$(wc -l < "$WANT.ru" | tr -d ' ')|$(head -n 12 "$WANT.ru" | tr '\n' ' ' | cut -c1-200)" \
+                >> "$EVENT_LOG"
+        fi
+        rm -f "$WANT.ru"
+    fi
+
     # Both differences in one pass (fix.34: a grep for each name, thousands of names, took longer
     # than S91's start wait and the engine was killed every minute - CI #726). Keenetic takes 300
     # names in a group: no more is sent than there is room for after the removals.
@@ -1437,6 +1463,11 @@ add_hint_adaptive()
 
     if [ -e "$ADAPTIVE_DISABLED" ]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_SKIP_ADAPTIVE_OFF|$H" >> "$EVENT_LOG"
+        return 0
+    fi
+
+    if ru_zone "$H"; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_SKIP_RU_ZONE|$H" >> "$EVENT_LOG"
         return 0
     fi
 
