@@ -1905,7 +1905,7 @@ if [ "$ACTION" = "diagnostics" ]; then
         ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print tolower($NF)}'
         command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains; } | sort -u | head -n 16)"
     if [ -n "$SD_DOMAINS" ]; then
-        SD_BAD=""; SD_PEND=""; SD_N=0
+        SD_BAD=""; SD_PEND=""; SD_FOREIGN=""; SD_N=0
         for SD in $SD_DOMAINS; do
             case "$SD" in *[!a-z0-9.-]*) continue ;; esac
             SD_IP="$("${VWARD_NSLOOKUP:-nslookup}" "$SD" "${VWARD_DNS_SERVER:-127.0.0.1}" 2>/dev/null | awk '/^Name:/ {n = 1; next} n {for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) {print $i; exit}}')"
@@ -1920,14 +1920,26 @@ if [ "$ACTION" = "diagnostics" ]; then
                         NF == 5 {z = 2 ^ (32 - $5); s = int(((($1 * 256 + $2) * 256 + $3) * 256 + $4) / z) * z; if (a >= s && a < s + z) {f = 1; exit}}
                         END {exit !f}' "${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}/catalog/$SD_C.cidr" 2>/dev/null && { SD_CAT=$SD_C; break; }
                 done
-                # The address sits in a block policy-sync holds out of the tunnel, and the route is not
-                # removed yet (the next sync does it, or the CDN gave a new address): pending, not a leak.
+                # Who owns the route that takes the address: a catalog subnet covering it that VWARD
+                # added (owned.dynamic.routes), or only subnets that were there before (Keenetic's
+                # own, another list): policy-sync never removes those, so the /24 cannot be cut out.
+                SD_OWN=""
+                [ -z "$SD_CAT" ] || SD_OWN="$(awk -F'[./]' -v ip="$SD_IP" 'FILENAME == ARGV[1] {o[$0] = 1; next}
+                    BEGIN {split(ip, q, "."); a = ((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]}
+                    NF == 5 {z = 1; for (i = $5 + 0; i < 32; i++) z *= 2
+                        s = int(((($1 * 256 + $2) * 256 + $3) * 256 + $4) / z) * z
+                        if (a >= s && a < s + z) {if ($0 in o) own = 1; else cov = 1}}
+                    END {print own ? "own" : cov ? "foreign" : ""}' "${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}/owned.dynamic.routes" \
+                    "${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}/catalog/$SD_CAT.cidr" 2>/dev/null)"
+                # The address sits in a block policy-sync holds out of the tunnel.
                 SD_HOLD=""
-                [ -z "$SD_CAT" ] || awk -F'|' -v ip="$SD_IP" 'BEGIN {split(ip, q, "."); a = ((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]}
+                awk -F'|' -v ip="$SD_IP" 'BEGIN {split(ip, q, "."); a = ((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]}
                     {split($1, b, "[./]"); if (b[5] !~ /^[0-9]+$/) next; z = 1; for (i = b[5] + 0; i < 32; i++) z *= 2
                      s = int((((b[1] * 256 + b[2]) * 256 + b[3]) * 256 + b[4]) / z) * z; if (a >= s && a < s + z) {f = 1; exit}}
                     END {exit !f}' "${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}/smartdns.addresses" 2>/dev/null && SD_HOLD=1
-                if [ -n "$SD_HOLD" ]; then
+                if [ "$SD_OWN" = foreign ]; then
+                    SD_FOREIGN="$SD_FOREIGN${SD_FOREIGN:+, }$SD (IP-категория $SD_CAT)"
+                elif [ "$SD_OWN" = own ] && [ -n "$SD_HOLD" ]; then
                     SD_PEND="$SD_PEND${SD_PEND:+, }$SD"
                 else
                     SD_BAD="$SD_BAD${SD_BAD:+, }$SD${SD_CAT:+ (IP-категория $SD_CAT)}"
@@ -1942,6 +1954,8 @@ if [ "$ACTION" = "diagnostics" ]; then
             SMARTDNS_STATUS=WARN SMARTDNS_DETAIL="Не действует: Smart DNS настроен в AdGuard Home, а AdGuard Home сейчас не в цепочке DNS (см. «Цепочка DNS»)"
         elif [ -n "$SD_BAD" ]; then
             SMARTDNS_STATUS=FAIL SMARTDNS_DETAIL="Идут через VPN, Smart DNS для них не действует: $SD_BAD"
+        elif [ -n "$SD_FOREIGN" ]; then
+            SMARTDNS_STATUS=FOREIGN SMARTDNS_DETAIL="Маршрут не принадлежит VWARD, вырезать исключённый блок невозможно (VWARD чужие маршруты не снимает): $SD_FOREIGN"
         elif [ -n "$SD_PEND" ]; then
             SMARTDNS_STATUS=WARN SMARTDNS_DETAIL="Адрес уже в исключённом блоке, но маршрут в туннеле ещё не снят (ждёт сверки, обычно до минуты; домен мог получить новый адрес): $SD_PEND"
         else

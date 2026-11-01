@@ -133,29 +133,38 @@ with tempfile.TemporaryDirectory() as tmp:
     if w["status"] != "PASS" or "все включённые на связи" not in w["detail"] or "код" in w["detail"]:
         fail(f"all connected: {w}")
 
-    # Smart DNS beside the tunnel (01.11): the real route of the answer decides. An address in a block
-    # policy-sync holds out of the tunnel, route not yet removed, is pending (WARN); an address in
-    # the tunnel with no held block is a leak (FAIL); the route through the provider is a pass.
+    # Smart DNS beside the tunnel (01.11): the real route of the answer decides, and who owns it.
+    # - VWARD's own route (owned.dynamic.routes) + a held block: pending, the next sync removes it (WARN);
+    # - VWARD's own route and no held block: a real leak (FAIL);
+    # - only subnets VWARD did not add (the catalog subnet is «existing»): it never removes those, the
+    #   /24 cannot be cut out - its own status FOREIGN, held block or not, never hidden as WARN;
+    # - the route through the provider: PASS.
     pol = tmp / "policy"; (pol / "catalog").mkdir(parents=True)
     (pol / "active.categories").write_text("cdn\n"); (pol / "catalog/cdn.cidr").write_text("192.0.2.0/24\n")
     env["VWARD_POLICY_STATE"] = str(pol); env["VWARD_TUNNEL_DEVICE"] = "tun9"; env["VWARD_IP"] = str(tools / "ip")
     (tools / "ip").write_text('#!/bin/sh\necho "$3 dev $(cat ' + str(tmp / "ipdev") + ') src 10.0.0.1"\n'); (tools / "ip").chmod(0o755)
     SD_CONF = "dns-proxy\n    https upstream https://x.example/dns-query dnsm on ISP domain gemini.google.com\n!\n"
     (tmp / "ipdev").write_text("tun9\n")
-    (pol / "smartdns.addresses").write_text("")
-    sd = diag(SD_CONF, ["9.9.9.10"], 65053)["smartdns"]
-    if sd["status"] != "FAIL" or "IP-категория cdn" not in sd["detail"]:
-        fail(f"tunnel route, no held block: a leak: {sd}")
-    (pol / "smartdns.addresses").write_text("192.0.2.0/24|gemini.google.com|cdn\n")
-    sd = diag(SD_CONF, ["9.9.9.10"], 65053)["smartdns"]
-    if sd["status"] != "WARN" or "ждёт сверки" not in sd["detail"]:
-        fail(f"held block, route not removed yet: pending, not a leak: {sd}")
-    (pol / "smartdns.addresses").write_text("198.51.100.0/24|gemini.google.com|cdn\n")
-    if diag(SD_CONF, ["9.9.9.10"], 65053)["smartdns"]["status"] != "FAIL":
-        fail("a held block elsewhere does not excuse this address")
+    HELD = "192.0.2.0/24|gemini.google.com|cdn\n"
+    def sd(owned, held):
+        (pol / "owned.dynamic.routes").write_text(owned); (pol / "smartdns.addresses").write_text(held)
+        return diag(SD_CONF, ["9.9.9.10"], 65053)["smartdns"]
+    r = sd("192.0.2.0/24\n", "")
+    if r["status"] != "FAIL" or "IP-категория cdn" not in r["detail"]:
+        fail(f"own route, no held block: a leak: {r}")
+    r = sd("192.0.2.0/24\n", HELD)
+    if r["status"] != "WARN" or "ждёт сверки" not in r["detail"]:
+        fail(f"own route, held block, not removed yet: pending: {r}")
+    for held in ("", HELD):
+        r = sd("198.51.100.0/24\n", held)
+        if r["status"] != "FOREIGN" or "не принадлежит VWARD" not in r["detail"] or "невозможно" not in r["detail"]:
+            fail(f"a route VWARD did not add (existing) must not be WARN/FAIL-as-pending: {r}")
+    r = sd("192.0.2.0/24\n", "198.51.100.0/24|gemini.google.com|cdn\n")
+    if r["status"] != "FAIL":
+        fail(f"a held block elsewhere does not excuse this address: {r}")
     (tmp / "ipdev").write_text("eth3\n")
-    sd = diag(SD_CONF, ["9.9.9.10"], 65053)["smartdns"]
-    if sd["status"] != "PASS":
-        fail(f"route through the provider: {sd}")
+    r = sd("192.0.2.0/24\n", HELD)
+    if r["status"] != "PASS":
+        fail(f"route through the provider: {r}")
 
 print("CONSOLE_DIAGNOSTICS_DNS=PASS")
