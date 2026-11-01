@@ -1905,13 +1905,13 @@ if [ "$ACTION" = "diagnostics" ]; then
         ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print tolower($NF)}'
         command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains; } | sort -u | head -n 16)"
     if [ -n "$SD_DOMAINS" ]; then
-        SD_BAD=""; SD_N=0
+        SD_BAD=""; SD_PEND=""; SD_N=0
         for SD in $SD_DOMAINS; do
             case "$SD" in *[!a-z0-9.-]*) continue ;; esac
-            SD_IP="$(nslookup "$SD" "${VWARD_DNS_SERVER:-127.0.0.1}" 2>/dev/null | awk '/^Name:/ {n = 1; next} n {for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) {print $i; exit}}')"
+            SD_IP="$("${VWARD_NSLOOKUP:-nslookup}" "$SD" "${VWARD_DNS_SERVER:-127.0.0.1}" 2>/dev/null | awk '/^Name:/ {n = 1; next} n {for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) {print $i; exit}}')"
             [ -n "$SD_IP" ] || continue
             SD_N=$((SD_N + 1))
-            SD_DEV="$(ip route get "$SD_IP" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')"
+            SD_DEV="$("${VWARD_IP:-ip}" route get "$SD_IP" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')"
             if [ -n "$SD_DEV" ] && { [ "$SD_DEV" = "${VWARD_TUNNEL_DEVICE:-}" ] || [ -d "/sys/class/net/$SD_DEV/wireguard" ] || [ "$(cat "/sys/class/net/$SD_DEV/type" 2>/dev/null)" = 65534 ]; }; then
                 # Which IP category takes the address, if one does.
                 SD_CAT=""
@@ -1920,7 +1920,18 @@ if [ "$ACTION" = "diagnostics" ]; then
                         NF == 5 {z = 2 ^ (32 - $5); s = int(((($1 * 256 + $2) * 256 + $3) * 256 + $4) / z) * z; if (a >= s && a < s + z) {f = 1; exit}}
                         END {exit !f}' "${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}/catalog/$SD_C.cidr" 2>/dev/null && { SD_CAT=$SD_C; break; }
                 done
-                SD_BAD="$SD_BAD${SD_BAD:+, }$SD${SD_CAT:+ (IP-категория $SD_CAT)}"
+                # The address sits in a block policy-sync holds out of the tunnel, and the route is not
+                # removed yet (the next sync does it, or the CDN gave a new address): pending, not a leak.
+                SD_HOLD=""
+                [ -z "$SD_CAT" ] || awk -F'|' -v ip="$SD_IP" 'BEGIN {split(ip, q, "."); a = ((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]}
+                    {split($1, b, "[./]"); if (b[5] !~ /^[0-9]+$/) next; z = 1; for (i = b[5] + 0; i < 32; i++) z *= 2
+                     s = int((((b[1] * 256 + b[2]) * 256 + b[3]) * 256 + b[4]) / z) * z; if (a >= s && a < s + z) {f = 1; exit}}
+                    END {exit !f}' "${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}/smartdns.addresses" 2>/dev/null && SD_HOLD=1
+                if [ -n "$SD_HOLD" ]; then
+                    SD_PEND="$SD_PEND${SD_PEND:+, }$SD"
+                else
+                    SD_BAD="$SD_BAD${SD_BAD:+, }$SD${SD_CAT:+ (IP-категория $SD_CAT)}"
+                fi
             fi
         done
         # Smart DNS rows inside AdGuard Home do nothing while Keenetic does not hand it the queries.
@@ -1931,6 +1942,8 @@ if [ "$ACTION" = "diagnostics" ]; then
             SMARTDNS_STATUS=WARN SMARTDNS_DETAIL="Не действует: Smart DNS настроен в AdGuard Home, а AdGuard Home сейчас не в цепочке DNS (см. «Цепочка DNS»)"
         elif [ -n "$SD_BAD" ]; then
             SMARTDNS_STATUS=FAIL SMARTDNS_DETAIL="Идут через VPN, Smart DNS для них не действует: $SD_BAD"
+        elif [ -n "$SD_PEND" ]; then
+            SMARTDNS_STATUS=WARN SMARTDNS_DETAIL="Адрес уже в исключённом блоке, но маршрут в туннеле ещё не снят (ждёт сверки, обычно до минуты; домен мог получить новый адрес): $SD_PEND"
         else
             SMARTDNS_DETAIL="Доменов: $(printf '%s\n' "$SD_DOMAINS" | wc -l | tr -d ' '), проверено адресов: $SD_N, все идут через провайдера"
         fi

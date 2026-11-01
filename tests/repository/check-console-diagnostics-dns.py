@@ -133,4 +133,29 @@ with tempfile.TemporaryDirectory() as tmp:
     if w["status"] != "PASS" or "все включённые на связи" not in w["detail"] or "код" in w["detail"]:
         fail(f"all connected: {w}")
 
+    # Smart DNS beside the tunnel (01.11): the real route of the answer decides. An address in a block
+    # policy-sync holds out of the tunnel, route not yet removed, is pending (WARN); an address in
+    # the tunnel with no held block is a leak (FAIL); the route through the provider is a pass.
+    pol = tmp / "policy"; (pol / "catalog").mkdir(parents=True)
+    (pol / "active.categories").write_text("cdn\n"); (pol / "catalog/cdn.cidr").write_text("192.0.2.0/24\n")
+    env["VWARD_POLICY_STATE"] = str(pol); env["VWARD_TUNNEL_DEVICE"] = "tun9"; env["VWARD_IP"] = str(tools / "ip")
+    (tools / "ip").write_text('#!/bin/sh\necho "$3 dev $(cat ' + str(tmp / "ipdev") + ') src 10.0.0.1"\n'); (tools / "ip").chmod(0o755)
+    SD_CONF = "dns-proxy\n    https upstream https://x.example/dns-query dnsm on ISP domain gemini.google.com\n!\n"
+    (tmp / "ipdev").write_text("tun9\n")
+    (pol / "smartdns.addresses").write_text("")
+    sd = diag(SD_CONF, ["9.9.9.10"], 65053)["smartdns"]
+    if sd["status"] != "FAIL" or "IP-категория cdn" not in sd["detail"]:
+        fail(f"tunnel route, no held block: a leak: {sd}")
+    (pol / "smartdns.addresses").write_text("192.0.2.0/24|gemini.google.com|cdn\n")
+    sd = diag(SD_CONF, ["9.9.9.10"], 65053)["smartdns"]
+    if sd["status"] != "WARN" or "ждёт сверки" not in sd["detail"]:
+        fail(f"held block, route not removed yet: pending, not a leak: {sd}")
+    (pol / "smartdns.addresses").write_text("198.51.100.0/24|gemini.google.com|cdn\n")
+    if diag(SD_CONF, ["9.9.9.10"], 65053)["smartdns"]["status"] != "FAIL":
+        fail("a held block elsewhere does not excuse this address")
+    (tmp / "ipdev").write_text("eth3\n")
+    sd = diag(SD_CONF, ["9.9.9.10"], 65053)["smartdns"]
+    if sd["status"] != "PASS":
+        fail(f"route through the provider: {sd}")
+
 print("CONSOLE_DIAGNOSTICS_DNS=PASS")
