@@ -217,6 +217,7 @@ python3 tests/repository/check-route-engine-start-wait.py || fail "slow healthy 
 python3 tests/repository/check-route-engine-watchdog.py || fail "Watchdog counts engine cores, not subshells"
 python3 tests/repository/check-route-engine-bind-workers.py || fail "DNS workers remain children; real duplicate detected"
 python3 tests/repository/check-keenetic-cache-owner.py || fail "Dead config reader does not delay restart"
+python3 tests/repository/check-keenetic-cache-race.py || fail "A dropped Keenetic config copy is read again, never answered empty"
 python3 tests/repository/check-route-engine-start-phases.py || fail "Startup phase timing"
 python3 tests/entware/check-panel-package-install.py || fail "Panel package install remains disabled"
 python3 tests/repository/check-panel-xray-install.py || fail "Xray install commits binary and metadata safely"

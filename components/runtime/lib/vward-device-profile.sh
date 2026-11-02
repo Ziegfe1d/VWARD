@@ -571,7 +571,10 @@ vward_keenetic_config()
         "$VWARD_NDMC" -c 'show running-config' 2>/dev/null | tr -d '\r'
         return
     fi
-    _vward_kc_fresh "$_vkc_age" && { cat "$VWARD_KCACHE/running-config"; return 0; }
+    # The copy may be dropped (vward_keenetic_dirty) between «fresh» and «read»: only a copy that
+    # opened is an answer, else Keenetic is read again - never an empty answer with success
+    # (CI #792 api-load). An opened file stays whole even when it is removed meanwhile.
+    _vward_kc_fresh "$_vkc_age" && cat "$VWARD_KCACHE/running-config" 2>/dev/null && return 0
     mkdir -p "$VWARD_KCACHE" 2>/dev/null || return 1
     # $$ is inherited by subshells; the builtin opens /proc/self for this actual reader.
     read -r _vkc_pid _ < /proc/self/stat 2>/dev/null || _vkc_pid=$$
@@ -614,13 +617,12 @@ vward_keenetic_config()
             { if rmdir "$VWARD_KCACHE/lock" 2>/dev/null; then continue; fi; }
         [ "$_vkc_w" -lt 35 ] || break
         sleep 1; _vkc_w=$((_vkc_w + 1))
-        _vward_kc_fresh "$_vkc_age" && { cat "$VWARD_KCACHE/running-config"; return 0; }
+        _vward_kc_fresh "$_vkc_age" && cat "$VWARD_KCACHE/running-config" 2>/dev/null && return 0
     done
     # The reader before us may have just finished: its answer then.
-    if [ "$_vkc_own" = 1 ] && _vward_kc_fresh "$_vkc_age"; then
+    if [ "$_vkc_own" = 1 ] && _vward_kc_fresh "$_vkc_age" && cat "$VWARD_KCACHE/running-config" 2>/dev/null; then
         rm -f "$_vkc_lease"
         rmdir "$VWARD_KCACHE/lock" 2>/dev/null
-        cat "$VWARD_KCACHE/running-config"
         return 0
     fi
     vward_uptime_cs; _vkc_t0=$_VCS _VKT_IN=1
@@ -628,10 +630,12 @@ vward_keenetic_config()
     _VKT_IN=
     if [ -s "$VWARD_KCACHE/running-config.$_vkc_pid" ]; then
         vward_keenetic_timed running-config "$_vkc_t0"
+        # Its own read is answered from its own file, before it is shared: a drop right after
+        # publishing cannot take the answer away.
+        cat "$VWARD_KCACHE/running-config.$_vkc_pid"
         mv -f "$VWARD_KCACHE/running-config.$_vkc_pid" "$VWARD_KCACHE/running-config"
         [ "$_vkc_own" = 0 ] || rm -f "$_vkc_lease"
         rmdir "$VWARD_KCACHE/lock" 2>/dev/null
-        cat "$VWARD_KCACHE/running-config"
         return 0
     fi
     vward_keenetic_timed running-config "$_vkc_t0" failed
