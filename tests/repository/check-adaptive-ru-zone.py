@@ -111,6 +111,16 @@ restore_adaptive_from_persist
         calls = run(OTHER, RU[:7] + OTHER)
         if any(c.startswith("object-group fqdn AdaptiveAuto include ") for c in calls) or (t / "persist").read_text().split() != OTHER:
             fail(f"RED: after a manual removal in Keenetic the saved names must not come back: {calls}")
+        # fix.36: clean repeat is not another removal; the regular restore says which policy ran.
+        previous_events = (t / "events").read_text().count("|ADAPTIVE_RU_OUT|")
+        for _ in range(3):
+            if run(OTHER, OTHER):
+                fail("clean repeat unexpectedly wrote to Keenetic")
+        events = (t / "events").read_text()
+        if events.count("|ADAPTIVE_RU_OUT|") != previous_events:
+            fail("clean repeats must not invent another RU removal")
+        if "|ru_allowed=0" not in events.splitlines()[-1]:
+            fail("ordinary restore must report the RU policy even without new removals")
         # 3. Undo: VWARD_ADAPTIVE_RU=1 and the backup as the saved list put them back.
         calls = run(OTHER, (t / "persist.ru-backup").read_text().split(), ru="1")
         back = {c.split()[-1] for c in calls if c.startswith("object-group fqdn AdaptiveAuto include ")}

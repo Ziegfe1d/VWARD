@@ -46,4 +46,61 @@ for gone in ("|", "CONSOLE", "2026-11-02T", "1.256241", "HINT_"):
         fail(f"«Важное» still shows {gone!r}")
 if "Автоподбор:" in al or al.count('class="log-e') != 5:
     fail("«Все» shows every entry, nothing folded")
+
+# fix.35.2 (owner 02.11): the DNS guard's events in words with their level, a reason in words, the
+# same entry repeated in a row folded into one card that says how often and when.
+h2 = h.split("const T = [")[0] + """
+const D = ['[Реклама] 2026-11-02 10:52:00|DNS_CHAIN_OUT|ns=192.168.1.1:65053|reason=loop_upstream',
+ '[Реклама] 2026-11-02 10:51:00|WOULD_TAKE_OUT|silent|ns=192.168.1.1:65053|observation: Keenetic not changed',
+ '[Реклама] 2026-11-02 10:50:00|WOULD_TAKE_OUT|silent|ns=192.168.1.1:65053|observation: Keenetic not changed',
+ '[Реклама] 2026-11-02 10:49:00|WOULD_TAKE_OUT|silent|ns=192.168.1.1:65053|observation: Keenetic not changed',
+ '[Интернет] 2026-11-02 10:48:00|WOULD_TAKE_OUT|silent|ns=192.168.1.1:65053|observation: Keenetic not changed',
+ '[Реклама] 2026-11-02 10:47:00|DNS_CHAIN_IN|ns=192.168.1.1:65053|AdGuard Home back in the DNS chain'].join('\\n');
+console.log(logFeed(D));"""
+r = subprocess.run(["node", "-e", h2], capture_output=True, text=True, env=os.environ | {"TZ": "Europe/Moscow"})
+if r.returncode:
+    fail(r.stderr[-400:])
+f = r.stdout
+if f.count('class="log-e') != 4:
+    fail(f"three WOULD_TAKE_OUT in a row from one journal are one card, another journal's one is not: {f.count('class=\"log-e')}")
+for need in ("AdGuard Home выведен из цепочки DNS", "причина: AdGuard Home отправляет запросы обратно роутеру",
+             "Наблюдение: VWARD вывел бы AdGuard Home", "AdGuard Home не отвечал", "Повторилось 3 раза подряд, 10:49:00–10:51:00",
+             "AdGuard Home снова в цепочке DNS", 'log-e ok', 'log-e warn'):
+    if need not in f.replace("<wbr>", ""):
+        fail(f"DNS guard events: {need!r} missing")
+for gone in ("DNS_CHAIN", "WOULD_TAKE_OUT", "loop_upstream"):
+    if gone in f.replace("<wbr>", ""):
+        fail(f"internal code {gone!r} shown")
+
+# The API cuts «Журналы» to the last 24 hours (hours=24); without hours a section page still sees
+# its last events however old; a journal without times is shown as it is; an empty window is said.
+import tempfile, datetime as dt
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp); log = tmp / "opt/var/log"; log.mkdir(parents=True)
+    now = dt.datetime.now(dt.timezone.utc)
+    loc = lambda h: (now - dt.timedelta(hours=h)).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    utc = lambda h: (now - dt.timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    (log / "vward-ads-privacy-guard.log").write_text(
+        f"{loc(30)}|OLD_EVENT|a\n  old continuation\n{loc(25)}|OLD_TWO|b\n{utc(23)} NEW_UTC x\n{loc(2)}|NEW_LOCAL|c\n  new continuation\n")
+    (log / "vward-tunnel-guard.log").write_text(f"{loc(40)}|ONLY_OLD|x\n")
+    (log / "vward-wan-guard.log").write_text("raw line one\nraw line two\n")
+    def api(name, hours=None):
+        q = f"action=log&name={name}" + (f"&hours={hours}" if hours is not None else "")
+        e = os.environ | {"REQUEST_METHOD": "GET", "QUERY_STRING": q, "VWARD_ROOT_PREFIX": str(tmp), "JQ": shutil.which("jq"),
+                          "VWARD_PROFILE_LIB": str(tmp / "none")}
+        out = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=e, capture_output=True, text=True).stdout
+        return out.split("\n\n", 1)[1] if "\n\n" in out else out
+    a = api("ads", 24)
+    if "OLD_" in a or "old continuation" in a or "NEW_UTC" not in a or "NEW_LOCAL" not in a or "new continuation" not in a:
+        fail(f"RED: hours=24 keeps exactly the last day, continuations with their entry: {a!r}")
+    if "OLD_EVENT" not in api("ads"):
+        fail("without hours a section page sees old events as before")
+    if not api("tunnel", 24).startswith("За последние 24 ч записей нет"):
+        fail(f"an empty window is said, not shown as an empty journal: {api('tunnel', 24)!r}")
+    if "raw line two" not in api("wan", 24):
+        fail("a journal without times is shown as it is")
+    if "NEW_UTC" in api("ads", 1) or "NEW_LOCAL" not in api("ads", 3):
+        fail("hours=N is N hours")
+if "hours: LOG_HOURS" not in JS or "const LOG_HOURS = 24" not in JS or "quiet: 'за 24 ч записей нет'" not in JS:
+    fail("«Журналы» ask the API for the last 24 hours and name a quiet source")
 print("CONSOLE_LOG_FEED=PASS")

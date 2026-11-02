@@ -571,36 +571,76 @@ vward_keenetic_config()
         "$VWARD_NDMC" -c 'show running-config' 2>/dev/null | tr -d '\r'
         return
     fi
-    _vward_kc_fresh "$_vkc_age" && { cat "$VWARD_KCACHE/running-config"; return 0; }
+    # The copy may be dropped (vward_keenetic_dirty) between «fresh» and «read»: only a copy that
+    # opened is an answer, else Keenetic is read again - never an empty answer with success
+    # (CI #792 api-load). An opened file stays whole even when it is removed meanwhile.
+    _vward_kc_fresh "$_vkc_age" && cat "$VWARD_KCACHE/running-config" 2>/dev/null && return 0
     mkdir -p "$VWARD_KCACHE" 2>/dev/null || return 1
+    # $$ is inherited by subshells; the builtin opens /proc/self for this actual reader.
+    read -r _vkc_pid _ < /proc/self/stat 2>/dev/null || _vkc_pid=$$
+    _vkc_lease="$VWARD_KCACHE/lock/owner.$_vkc_pid"
     _vkc_own=0 _vkc_w=0
     while :; do
-        mkdir "$VWARD_KCACHE/lock" 2>/dev/null && { _vkc_own=1; break; }
+        if mkdir "$VWARD_KCACHE/lock" 2>/dev/null; then
+            # A concurrent stale-directory reaper may have removed the empty directory.
+            # In that case refuse this read, never continue without a proven lease.
+            printf '%s\n' "$_vkc_pid" 2>/dev/null > "$_vkc_lease" || return 1
+            # A delayed reaper can replace the empty directory before publication.
+            # A lease published into another reader's directory is not exclusive.
+            _vkc_exclusive=1
+            for _vkc_peer in "$VWARD_KCACHE/lock"/owner.*; do
+                [ "$_vkc_peer" = "$_vkc_lease" ] || _vkc_exclusive=0
+            done
+            if [ "$_vkc_exclusive" = 1 ]; then
+                _vkc_own=1
+                break
+            fi
+            rm -f "$_vkc_lease"
+        fi
+        # Remove only the exact dead owner's file. Two reapers cannot unlink a new
+        # reader's lease; rmdir succeeds only while the directory is empty.
+        _vkc_dead=0
+        for _vkc_f in "$VWARD_KCACHE/lock"/owner.*; do
+            _vkc_old=${_vkc_f##*/owner.}
+            case "$_vkc_old" in ''|*[!0-9]*) continue ;; esac
+            if ! kill -0 "$_vkc_old" 2>/dev/null; then
+                rm -f "$_vkc_f"
+                _vkc_dead=1
+            fi
+        done
+        if [ "$_vkc_dead" = 1 ]; then
+            rmdir "$VWARD_KCACHE/lock" 2>/dev/null
+            continue
+        fi
         # A read under way: its answer, at most 35 s later; a lock older than a minute is left over.
-        [ -n "$(find "$VWARD_KCACHE/lock" -maxdepth 0 -mmin -1 2>/dev/null)" ] || { rmdir "$VWARD_KCACHE/lock" 2>/dev/null; continue; }
+        [ -n "$(find "$VWARD_KCACHE/lock" -maxdepth 0 -mmin -1 2>/dev/null)" ] ||
+            { if rmdir "$VWARD_KCACHE/lock" 2>/dev/null; then continue; fi; }
         [ "$_vkc_w" -lt 35 ] || break
         sleep 1; _vkc_w=$((_vkc_w + 1))
-        _vward_kc_fresh "$_vkc_age" && { cat "$VWARD_KCACHE/running-config"; return 0; }
+        _vward_kc_fresh "$_vkc_age" && cat "$VWARD_KCACHE/running-config" 2>/dev/null && return 0
     done
     # The reader before us may have just finished: its answer then.
-    if [ "$_vkc_own" = 1 ] && _vward_kc_fresh "$_vkc_age"; then
+    if [ "$_vkc_own" = 1 ] && _vward_kc_fresh "$_vkc_age" && cat "$VWARD_KCACHE/running-config" 2>/dev/null; then
+        rm -f "$_vkc_lease"
         rmdir "$VWARD_KCACHE/lock" 2>/dev/null
-        cat "$VWARD_KCACHE/running-config"
         return 0
     fi
     vward_uptime_cs; _vkc_t0=$_VCS _VKT_IN=1
-    "${VWARD_NDMC:-ndmc}" -c 'show running-config' 2>/dev/null | tr -d '\r' > "$VWARD_KCACHE/running-config.$$"
+    "${VWARD_NDMC:-ndmc}" -c 'show running-config' 2>/dev/null | tr -d '\r' > "$VWARD_KCACHE/running-config.$_vkc_pid"
     _VKT_IN=
-    if [ -s "$VWARD_KCACHE/running-config.$$" ]; then
+    if [ -s "$VWARD_KCACHE/running-config.$_vkc_pid" ]; then
         vward_keenetic_timed running-config "$_vkc_t0"
-        mv -f "$VWARD_KCACHE/running-config.$$" "$VWARD_KCACHE/running-config"
-        [ "$_vkc_own" = 0 ] || rmdir "$VWARD_KCACHE/lock" 2>/dev/null
-        cat "$VWARD_KCACHE/running-config"
+        # Its own read is answered from its own file, before it is shared: a drop right after
+        # publishing cannot take the answer away.
+        cat "$VWARD_KCACHE/running-config.$_vkc_pid"
+        mv -f "$VWARD_KCACHE/running-config.$_vkc_pid" "$VWARD_KCACHE/running-config"
+        [ "$_vkc_own" = 0 ] || rm -f "$_vkc_lease"
+        rmdir "$VWARD_KCACHE/lock" 2>/dev/null
         return 0
     fi
     vward_keenetic_timed running-config "$_vkc_t0" failed
-    rm -f "$VWARD_KCACHE/running-config.$$"
-    [ "$_vkc_own" = 0 ] || rmdir "$VWARD_KCACHE/lock" 2>/dev/null
+    rm -f "$VWARD_KCACHE/running-config.$_vkc_pid"
+    [ "$_vkc_own" = 0 ] || { rm -f "$_vkc_lease"; rmdir "$VWARD_KCACHE/lock" 2>/dev/null; }
     return 1
 }
 
@@ -859,6 +899,141 @@ vward_discover_lan_interface()
     vward_map_ndm_for_kernel "$_vp_devmap" "$1"
 }
 
+# vward_router_addresses: the router's own addresses, the LAN address first (the address
+# Keenetic asks AdGuard Home from), then every other local IPv4/IPv6 address (guest segments,
+# WAN): a DNS server on any of them at port 53 is Keenetic's own.  VWARD_ROUTER_ADDRS overrides.
+vward_router_addresses()
+{
+    if [ -n "${VWARD_ROUTER_ADDRS:-}" ]; then printf '%s\n' "$VWARD_ROUTER_ADDRS"; return 0; fi
+    { printf '%s\n' "${VWARD_LAN_ADDRESS:-}"
+      "${VWARD_IP:-ip}" -o addr show 2>/dev/null |
+          awk '{for (i = 1; i < NF; i++) if ($i == "inet" || $i == "inet6") {a = $(i + 1); sub(/\/.*/, "", a); print a}}'
+    } | awk 'NF && !s[$1]++ {printf "%s%s", (n++ ? " " : ""), $1} END {print ""}'
+}
+
+# vward_agh_dns_loops [YAML] [ADDRESSES]: AdGuard Home settings that hand a query to the
+# router's own DNS (Keenetic :53 on any router address; ADDRESSES as vward_router_addresses
+# prints them, the LAN first).  Configured is not happened: such a query comes back only while
+# Keenetic forwards it to AdGuard Home - then Keenetic logs «proxy loop detected» and drops it.
+# A setting is called harmless only with proof that no way leads back (fix.37, Keenetic 02.11).
+# Read only; one kind per line, each once, no addresses:
+#   main            an upstream_dns row for every domain: every query, once in the chain
+#   fallback        fallback_dns: when the main servers fail
+#   bootstrap       bootstrap_dns while some server is a name (DoH/DoT/plain name, sdns://,
+#                   upstream_dns_file, a client's upstreams): AdGuard Home resolves it there
+#   bootstrap_idle  bootstrap_dns, every server an address: bootstrap is not used (AdGuard
+#                   Home resolves only its servers' names by it)
+#   private         local_ptr_upstreams with private resolvers on: reverse names Keenetic does
+#                   not know come back (not proven otherwise)
+#   private_off     use_private_ptr_resolvers: false - AdGuard Home does not ask them
+#   domain          [/public domain/] rows to the router
+#   domain_local    [/lan, local, home.arpa, *.arpa .../] rows: names Keenetic does not know
+#                   come back (not proven otherwise)
+#   domain_client   [/domain/] rows, but the queries Keenetic forwards bypass them: exactly one
+#                   persistent client has the LAN address itself, no CIDR client exists, and
+#                   that client has its own servers, none of them the router
+vward_agh_dns_loops()
+{
+    _vp_y=${1:-$VWARD_ADGUARD_CONFIG}
+    [ -n "$_vp_y" ] && [ -r "$_vp_y" ] || return 0
+    awk -v addrs="${2:-${VWARD_LAN_ADDRESS:-}}" '
+        function unq(a) { gsub(/["\047]/, "", a); gsub(/^[ \t]+|[ \t]+$/, "", a); return a }
+        function hostport(a,    i, n) {
+            H = a; P = ""
+            if (substr(a, 1, 1) == "[") { i = index(a, "]"); if (!i) { H = ""; return }
+                H = substr(a, 2, i - 2); P = substr(a, i + 1); sub(/^:/, "", P); return }
+            n = gsub(/:/, ":", a)
+            if (n == 1) { i = index(a, ":"); H = substr(a, 1, i - 1); P = substr(a, i + 1) }
+        }
+        function router(a) {
+            a = unq(a)
+            if (a ~ /^(udp|tcp):\/\//) a = substr(a, index(a, "//") + 2)
+            else if (a ~ /^[a-z]+:\/\//) return 0
+            hostport(a)
+            if (P != "" && P != "53") return 0
+            return (H != "" && (H in RA)) || H == "localhost" || H == "::1" || H == "0:0:0:0:0:0:0:1" || H ~ /^127\.[0-9]+\.[0-9]+\.[0-9]+$/
+        }
+        # A server AdGuard Home reaches by name (resolved by bootstrap_dns); stamps count as names.
+        function named(a,    s) {
+            a = unq(a)
+            if (a == "" || a == "#") return 0
+            if (a ~ /^sdns:\/\//) return 1
+            if (a ~ /^[a-z]+:\/\//) a = substr(a, index(a, "//") + 2)
+            s = index(a, "/"); if (s) a = substr(a, 1, s - 1)
+            hostport(a)
+            return H != "" && H != "localhost" && H !~ /^[0-9.]+$/ && index(H, ":") == 0
+        }
+        function local_zone(d) {
+            d = tolower(d); sub(/\.$/, "", d)
+            return d ~ /(^|\.)(lan|local|localdomain|home|home\.arpa|internal|intranet|in-addr\.arpa|ip6\.arpa)$/
+        }
+        # entry KIND VALUE: one server row; returns 1 when it leads to the router.
+        function entry(kind, v,    i, n, w, t, doms, dn, dd, loc, r) {
+            v = unq(v)
+            if (v == "" || substr(v, 1, 1) == "#") return 0
+            doms = ""
+            if (substr(v, 1, 2) == "[/") { i = index(v, "/]"); if (!i) return 0
+                doms = substr(v, 3, i - 3); v = substr(v, i + 2) }
+            n = split(v, w, /[ \t]+/); r = 0
+            for (t = 1; t <= n; t++) {
+                if (w[t] == "" || w[t] == "#") continue
+                if (router(w[t])) r = 1
+                else if (kind != "bootstrap" && named(w[t])) need = 1
+            }
+            if (!r || kind == "client") return r
+            if (kind == "main" && doms != "") {
+                dn = split(doms, dd, /\//); loc = 1
+                for (t = 1; t <= dn; t++) if (dd[t] != "" && !local_zone(dd[t])) loc = 0
+                if (loc) dloc = 1; else dpub = 1
+                return 1
+            }
+            hit[kind] = 1
+            return 1
+        }
+        function list(kind, v,    n, w, t) {
+            sub(/^\[/, "", v); sub(/\][ \t]*$/, "", v); n = split(v, w, /,/)
+            for (t = 1; t <= n; t++) entry(kind, w[t])
+        }
+        function client_end() { if (cid) { nlan++; if (cup && !cbad) good++ } cid = 0; cup = 0; cbad = 0; ck = "" }
+        function client_val(k, v,    n, w, t) {
+            v = unq(v); if (v == "") return
+            if (substr(v, 1, 1) == "[" && substr(v, 1, 2) != "[/") { sub(/^\[/, "", v); sub(/\][ \t]*$/, "", v); n = split(v, w, /,/)
+                for (t = 1; t <= n; t++) client_val(k, w[t]); return }
+            if (k == "ids") { if (v == lan) cid = 1; if (index(v, "/")) cidr = 1 }
+            if (k == "upstreams") { if (entry("client", v)) cbad = 1; else if (v != "#") cup = 1 }
+        }
+        BEGIN { n = split(addrs, A, /[ \t\n]+/); lan = ""
+            for (i = 1; i <= n; i++) if (A[i] != "") { if (lan == "") lan = A[i]; RA[A[i]] = 1 }
+            ptr = 1 }
+        /^[^ #]/ { if (cl) client_end(); d = ($1 == "dns:"); c = ($1 == "clients:"); cl = 0; k = ""; next }
+        c && /^  [a-z_]+:/ { if (cl) client_end(); cl = ($1 == "persistent:"); next }
+        cl && /^    - / { client_end(); sub(/^    - /, "      ") }
+        cl && /^      [a-z_]+:/ { ck = $1; sub(/:$/, "", ck); v = $0; sub(/^ *[a-z_]+:[ \t]*/, "", v); client_val(ck, v); next }
+        cl && ck != "" && $1 == "-" { v = $0; sub(/^[ \t]*-[ \t]*/, "", v); client_val(ck, v); next }
+        d && /^  [a-z_]+:/ {
+            k = ""; v = $0; sub(/^  [a-z_]+:[ \t]*/, "", v)
+            if ($1 == "upstream_dns:") k = "main"; else if ($1 == "fallback_dns:") k = "fallback"
+            else if ($1 == "bootstrap_dns:") k = "bootstrap"; else if ($1 == "local_ptr_upstreams:") k = "private"
+            else if ($1 == "use_private_ptr_resolvers:" && unq(v) == "false") ptr = 0
+            else if ($1 == "upstream_dns_file:" && unq(v) != "") need = 1
+            if (k != "" && substr(v, 1, 1) == "[") { list(k, v); k = "" }
+            next
+        }
+        d && k != "" && $1 == "-" { v = $0; sub(/^[ \t]*-[ \t]*/, "", v); entry(k, v) }
+        END {
+            if (cl) client_end()
+            if (hit["main"]) print "main"
+            if (hit["fallback"]) print "fallback"
+            if (hit["bootstrap"]) print (need ? "bootstrap" : "bootstrap_idle")
+            if (hit["private"]) print (ptr ? "private" : "private_off")
+            bypass = (lan != "" && nlan == 1 && good == 1 && !cidr)
+            if ((dpub || dloc) && bypass) print "domain_client"
+            else { if (dpub) print "domain"; if (dloc) print "domain_local" }
+        }
+    ' "$_vp_y" 2>/dev/null
+    return 0
+}
+
 # Smart DNS domains kept in AdGuard Home: per-domain upstreams of the form
 # [/a.com/b.com/]https://... (or tls://, quic://, sdns://), from upstream_dns
 # and from upstream_dns_file; also a local DoH client on this router
@@ -911,16 +1086,17 @@ vward_doh_alive()
     # VWARD_DOH_ALIVE=0: not checked («cannot tell», the behaviour before; tests without network).
     [ "${VWARD_DOH_ALIVE:-1}" = 1 ] || return 2
     case "$1" in https://*) ;; *) return 2 ;; esac
-    command -v curl >/dev/null 2>&1 || return 2
+    _vda_curl=${VWARD_CURL_BIN:-curl}
+    command -v "$_vda_curl" >/dev/null 2>&1 || return 2
     [ -z "$(find "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" -mmin -60 2>/dev/null)" ] || return 2
     _vda_k=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
     _vda_f=${VWARD_DOH_ALIVE_DIR:-/tmp/vward-doh-alive}/$_vda_k
-    if [ -s "$_vda_f" ] && [ -z "$(find "$_vda_f" -mmin +"${VWARD_DOH_ALIVE_AGE_MIN:-5}" 2>/dev/null)" ]; then
+    if [ "${VWARD_DOH_ALIVE_FRESH:-0}" != 1 ] && [ -s "$_vda_f" ] && [ -z "$(find "$_vda_f" -mmin +"${VWARD_DOH_ALIVE_AGE_MIN:-5}" 2>/dev/null)" ]; then
         read -r _vda_r < "$_vda_f" 2>/dev/null && case "$_vda_r" in 0|1) return "$_vda_r" ;; esac
     fi
     case "$1" in *\?*) _vda_q="$1&" ;; *) _vda_q="$1?" ;; esac
     _vda_c=$(printf 'url = "%sdns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"\n' "$_vda_q" |
-        curl -K - -s -o /dev/null -m "${VWARD_DOH_ALIVE_MT:-6}" -H 'accept: application/dns-message' -w '%{http_code}' 2>/dev/null)
+        "$_vda_curl" -K - -s -o /dev/null -m "${VWARD_DOH_ALIVE_MT:-6}" -H 'accept: application/dns-message' -w '%{http_code}' 2>/dev/null)
     _vda_rc=$?
     case "$_vda_rc" in 132|134|135|136|139) return 2 ;; esac
     _vda_r=1; [ "$_vda_c" != 200 ] || _vda_r=0

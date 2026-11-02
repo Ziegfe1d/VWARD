@@ -2002,8 +2002,20 @@ if [ "$ACTION" = "diagnostics" ]; then
         KN_TO_AGH="$(printf '%s\n' "$DIAG_RC" | awk -v p=":${AGH_DNS_PORT:-x}" '$1 == "ip" && $2 == "name-server" && index($3, p) && (NF == 3 || $4 == "\"\"" || $4 == "on") {print $3; exit}')"
         # The router: its LAN address from the profile, or loopback.
         LAN_IP="${VWARD_LAN_ADDRESS:-127.0.0.1}"
-        if printf '%s\n' "$AGH_MAIN_UP" | grep -Eq "^(udp://|tcp://)?($LAN_IP|127\.0\.0\.1|localhost)(:53)?$"; then
-            DNS_STATUS=FAIL DNS_DETAIL="AdGuard Home отправляет запросы обратно роутеру ($LAN_IP) - петля: Keenetic будет отбрасывать запросы. Укажите в AdGuard Home внешние серверы."
+        # AdGuard Home settings that hand a query back to the router, by the rule the DNS guard
+        # uses too (vward_agh_dns_loops, fix.37). Settings, not observed events: «main» loops
+        # every query (FAIL); the others only under a condition and only while Keenetic hands
+        # queries to AdGuard Home (below). Read only: nothing is changed.
+        AGH_LOOPS=" "
+        if command -v vward_agh_dns_loops >/dev/null 2>&1; then
+            AGH_LOOPS=" $(vward_agh_dns_loops "$AGH_Y" "$(VWARD_LAN_ADDRESS=$LAN_IP; vward_router_addresses)" | tr '\n' ' ')"
+        elif printf '%s\n' "$AGH_MAIN_UP" | grep -Eq "^(udp://|tcp://)?($LAN_IP|127\.0\.0\.1|localhost)(:53)?$"; then
+            AGH_LOOPS=" main "
+        fi
+        case "$AGH_LOOPS" in
+            *" main "*) DNS_STATUS=FAIL DNS_DETAIL="AdGuard Home отправляет запросы обратно роутеру ($LAN_IP) - петля: Keenetic будет отбрасывать запросы. Укажите в AdGuard Home внешние серверы." ;;
+        esac
+        if [ "$DNS_STATUS" = FAIL ]; then :
         elif [ -n "$KN_TO_AGH" ]; then
             DNS_DETAIL="Keenetic → AdGuard Home ($KN_TO_AGH) → $(printf '%s\n' "$AGH_MAIN_UP" | head -n 2 | tr '\n' ' ')"
         elif [ "${AGH_DNS_PORT:-}" = 53 ]; then
@@ -2022,6 +2034,23 @@ if [ "$ACTION" = "diagnostics" ]; then
                 *:loop_upstream) DNS_STATUS=FAIL DNS_DETAIL="AdGuard Home не возвращается в цепочку: он отправляет запросы обратно роутеру (петля). Укажите в AdGuard Home внешние серверы" ;;
                 *) DNS_DETAIL="AdGuard Home не в цепочке: VWARD вернёт его, когда он ответит 3 раза подряд (до 3 минут). Пока реклама и Smart DNS не работают" ;;
             esac
+        fi
+        # Conditional loops: a setting that sends some queries back, a loop only while Keenetic
+        # forwards them to AdGuard Home (in its chain). Out of the chain they resolve on the
+        # router and are not named. No warning only with proof that nothing comes back: bootstrap
+        # unused (every server an address), private resolvers off, or the router's own AdGuard Home
+        # client with its own servers (domain_client) - see vward_agh_dns_loops.
+        AGH_SHORT=""
+        if [ -n "$KN_TO_AGH" ]; then
+            AGH_SET="Это настройка, а не замеченный сбой"
+            case "$AGH_LOOPS" in *" fallback "*) AGH_SHORT="резервные серверы AdGuard Home (fallback_dns) ведут на роутер: если основные не ответят, запросы пойдут по кругу и Keenetic их отбросит. $AGH_SET; укажите внешние резервные серверы" ;; esac
+            case "$AGH_LOOPS" in *" bootstrap "*) AGH_SHORT="$AGH_SHORT${AGH_SHORT:+; }bootstrap-серверы AdGuard Home ведут на роутер, а его серверы заданы именами: пока AdGuard Home узнаёт их адреса, возможна петля. $AGH_SET; укажите внешние bootstrap-серверы" ;; esac
+            case "$AGH_LOOPS" in *" private "*) AGH_SHORT="$AGH_SHORT${AGH_SHORT:+; }обратные (PTR) запросы домашней сети AdGuard Home задаёт роутеру: для адресов, которых Keenetic не знает, запрос может вернуться в AdGuard Home. $AGH_SET" ;; esac
+            case "$AGH_LOOPS" in *" domain "*) AGH_SHORT="$AGH_SHORT${AGH_SHORT:+; }строки для отдельных доменов в AdGuard Home ведут на роутер, а запросы самого роутера не выделены в AdGuard Home отдельным клиентом: запросы этих доменов пойдут по кругу" ;; esac
+            case "$AGH_LOOPS" in *" domain_local "*) AGH_SHORT="$AGH_SHORT${AGH_SHORT:+; }локальные зоны (lan, local, обратные зоны) AdGuard Home отправляет роутеру: имена, которых Keenetic не знает, могут вернуться в AdGuard Home. $AGH_SET" ;; esac
+        fi
+        if [ -n "$AGH_SHORT" ] && [ "$DNS_STATUS" != FAIL ]; then
+            DNS_STATUS=WARN DNS_DETAIL="$DNS_DETAIL${DNS_DETAIL:+; }$AGH_SHORT"
         fi
     else
         DNS_DETAIL="AdGuard Home не найден: DNS обслуживает Keenetic"
@@ -2468,6 +2497,18 @@ if [ "$ACTION" = lists-data ]; then
     [ -n "$RUNNING" ] || { echo '{"ok":false,"error":"router_config_unavailable"}'; exit 0; }
     LISTS_CONF=${VWARD_DOMAIN_LISTS_CONF:-$CONFIG_ETC/route-engine/domain-lists.conf}
     LISTS_STATE=$CONFIG_ETC/route-engine/domain-lists
+    LD_LISTS=$(find "$LISTS_STATE.dns" -maxdepth 1 -type f 2>/dev/null | sed 's#.*/##' | "$JQ" -Rn '[inputs | select(length > 0)]')
+    [ -n "$LD_LISTS" ] || LD_LISTS='[]'
+    LD_STATE=not_configured
+    LD_URL=$(awk -F= '$1=="SMARTDNS_URL" {print substr($0,index($0,"=")+1); exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)
+    if [ -n "$LD_URL" ]; then
+        LD_STATE=unknown
+        if command -v vward_doh_alive >/dev/null 2>&1; then
+            VWARD_DOH_ALIVE_MT=4 vward_doh_alive "$LD_URL"; LD_RC=$?
+            case "$LD_RC" in 0) LD_STATE=ready ;; 1) LD_STATE=dead ;; esac
+        fi
+    fi
+    LD_URL=
     WATCHED="$(awk -F= '$1 ~ /^watch\./ && $2 == "1" {print substr($1, 7)}' "$LISTS_CONF" 2>/dev/null | "$JQ" -Rn '[inputs | select(length > 0)]')"
     RETURNS="$(ls "$LISTS_STATE" 2>/dev/null | "$JQ" -Rn '[inputs | select(length > 0)]')"
     # Lists VWARD manages (r-lists, owner 2026-11-01): taken under management by the owner
@@ -2506,6 +2547,7 @@ if [ "$ACTION" = lists-data ]; then
         /^ip route [0-9]/ && NF >= 4 {print "S\t" $4 "\t" $3 "\t255.255.255.255"}
     ' | { cat; command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains | sed 's/^/A\t/'; } | "$JQ" -Rn --arg tun "${VWARD_TUNNEL_INTERFACE:-}" --arg dev "${VWARD_TUNNEL_DEVICE:-}" --arg wan "${VWARD_WAN_INTERFACE:-}" \
         --argjson guard "$([ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" = 0 ] && echo false || echo true)" \
+        --arg dns_state "$LD_STATE" --argjson dns_lists "$LD_LISTS" \
         --argjson watched "$WATCHED" --argjson managed "$MANAGED" --argjson unmanaged "$UNMANAGED" --argjson returns "$RETURNS" --argjson auto "$AUTO" --argjson addrs "$ADDRS" '
         def bits: {"255":8,"254":7,"252":6,"248":5,"240":4,"224":3,"192":2,"128":1,"0":0}[.] // 0;
         reduce (inputs | split("\t")) as $r ({g: {}, order: [], r: {}, doh: [], agh: [], s: {}};
@@ -2520,7 +2562,7 @@ if [ "$ACTION" = lists-data ]; then
         # Keenetic keeps at most 8 DoH rows; AdGuard Home has no such limit.
         | .keenetic = .doh | .doh = (reduce (.doh + .agh)[] as $d ([]; if index([$d]) then . else . + [$d] end))
         | . as $s
-        | {ok: true, tunnel: $tun, doh_used: ($s.keenetic | length), doh_limit: 8, smartdns_domains: $s.doh, smartdns_guard: $guard,
+        | {ok: true, tunnel: $tun, doh_used: ($s.keenetic | length), doh_limit: 8, smartdns_domains: $s.doh, smartdns_guard: $guard, smartdns_state: $dns_state,
            smartdns_sources: {keenetic: $s.keenetic, adguard: ($s.agh | unique)},
            subnets: ($s.s | with_entries(.value |= .[:300])), subnet_counts: ($s.s | with_entries(.value |= length)),
            lists: [$s.order[] | select(. != "AdaptiveAuto") | . as $n | $s.g[$n] as $l | ($s.r[$n] // "") as $t |
@@ -2531,7 +2573,7 @@ if [ "$ACTION" = lists-data ]; then
               # tunnel list sends that address - and every Smart DNS service - into the tunnel.
               smartdns_conflict: ((($t == $tun or $t == $dev) and $t != "") and
                 any($s.doh[] as $d | $l.domains[] as $i | $d == $i or ($d | endswith("." + $i)) or ($i | endswith("." + $d)); .)),
-              watch: ($watched | index([$n]) != null), returnable: ($returns | index([$n]) != null),
+              watch: ($watched | index([$n]) != null), returnable: ($returns | index([$n]) != null), dns_mode: ($dns_lists | index([$n]) != null),
               managed: (($managed | index([$n]) != null) and ($unmanaged | index([$n]) == null)),
               auto: ($auto[$n] // null), addresses: ($addrs[$n] // null)}]}'
     exit 0
@@ -2684,9 +2726,15 @@ if [ "$ACTION" = services ]; then
     [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
     read_body 1024
     SOP="$(form_value op)"; SID="$(form_value id)"; STO="$(form_value tunnel)"
-    printf '%s\n' "$SID" | grep -Eq '^[a-z0-9][a-z0-9.@_-]{0,62}$' || { echo '{"ok":false,"error":"invalid_service"}'; exit 0; }
+    if [ "$SOP" = list-mode ]; then
+        printf '%s\n' "$SID" | grep -Eq '^[A-Za-z0-9_.-]{1,64}$' || { echo '{"ok":false,"error":"invalid_group"}'; exit 0; }
+    else
+        printf '%s\n' "$SID" | grep -Eq '^[a-z0-9][a-z0-9.@_-]{0,62}$' || { echo '{"ok":false,"error":"invalid_service"}'; exit 0; }
+    fi
     case "$STO" in *[!A-Za-z0-9_.-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
     case "$SOP" in
+        list-mode) case "$STO" in dns|auto|vpn|bypass) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+            ARGS="list-mode $SID $STO" ;;
         on|tunnel) [ -n "$STO" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }; ARGS="service $SOP $SID $STO" ;;
         category) [ -n "$STO" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }; ARGS="service-category $SID $STO" ;;
         off) ARGS="service off $SID" ;;
@@ -2708,7 +2756,7 @@ if [ "$ACTION" = services ]; then
                 agh:install|agh:enable) ;;
                 agh:disable|agh:remove|agh:reset|agh:reinstall|awg:disable|vless:disable)
                     [ "$(form_value confirm)" = COMPONENT_OP ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;;
-                awg:enable|vless:enable|awg:install) ;;
+                awg:enable|vless:enable|awg:install|vless:install|dnsmasq:install|singbox:install) ;;
                 *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
             esac
             if [ "$SID" = agh ]; then
@@ -2723,6 +2771,9 @@ if [ "$ACTION" = services ]; then
                     printf '%s:%s\n' "$CLOGIN" "$CPASS" > "$VWARD_AGH_CRED_FILE" || { rm -f "$VWARD_AGH_CRED_FILE"; echo '{"ok":false,"error":"write_failed"}'; exit 0; }
                     CPASS=; export VWARD_AGH_CRED_FILE
                 fi
+            elif [ "$SID" = dnsmasq ] || [ "$SID" = singbox ]; then
+                CPKG=dnsmasq-full; [ "$SID" != singbox ] || CPKG=sing-box-go
+                ARGS="package-install $CPKG install"
             else
                 ARGS="module-component $SID $CACT${STO:+ $STO}"
             fi ;;
@@ -3325,10 +3376,18 @@ if [ "$ACTION" = "log" ]; then
             ;;
     esac
 
+    # Tests run on a copy of the router's files (empty prefix on the router).
+    [ -z "$FILE" ] || FILE="${VWARD_ROOT_PREFIX:-}$FILE"
     COUNT="$(qget count)"
     case "$COUNT" in ''|*[!0-9]*) COUNT=200 ;; esac
     # Up to 1000 lines: a section's own page keeps the few events worth showing.
     [ "$COUNT" -ge 20 ] 2>/dev/null && [ "$COUNT" -le 1000 ] 2>/dev/null || COUNT=200
+    # hours=N (1-168): only the entries of the last N hours (owner 02.11: «Журналы» load the
+    # last 24 hours, cut here, not in the browser). Older entries stay in the file and its
+    # archives. No hours: as before (a section's own page shows its last events, however old).
+    HOURS="$(qget hours)"
+    case "$HOURS" in ''|*[!0-9]*) HOURS="" ;; esac
+    [ -z "$HOURS" ] || { [ "$HOURS" -ge 1 ] && [ "$HOURS" -le 168 ]; } || HOURS=24
 
     header_text
 
@@ -3336,6 +3395,34 @@ if [ "$ACTION" = "log" ]; then
     # Panel shows which source has nothing and which cannot be read.
     if [ -z "$FILE" ]; then
         echo "Журнал недоступен: неизвестный журнал."
+    elif [ -r "$FILE" ] && [ -s "$FILE" ] && [ -n "$HOURS" ]; then
+        # An entry starts with its time («2026-11-02 10:51:03», «…T…», with «Z»/«+0300» or
+        # without - then the router's own time); lines without a time belong to the entry above.
+        # A journal without times at all (a program's raw output) is shown as it is.
+        LOG_NOW="$(date +%s)" LOG_TZ="$(date +%z)"
+        LOG_OUT="$(tail -n $((COUNT * 5)) "$FILE" 2>/dev/null | awk -v now="$LOG_NOW" -v tz="$LOG_TZ" -v h="$HOURS" '
+            function ep(t, z,    y, m, d, o) {
+                y = substr(t, 1, 4) + 0; m = substr(t, 6, 2) + 0; d = substr(t, 9, 2) + 0
+                if (m <= 2) { y--; m += 9 } else m -= 3
+                d = 365 * y + int(y / 4) - int(y / 100) + int(y / 400) + int((153 * m + 2) / 5) + d - 719469
+                if (z == "") z = tz
+                o = 0; if (z != "Z") { gsub(/:/, "", z); o = (substr(z, 1, 1) == "-" ? -1 : 1) * (substr(z, 2, 2) * 3600 + substr(z, 4, 2) * 60) }
+                return d * 86400 + substr(t, 12, 2) * 3600 + substr(t, 15, 2) * 60 + substr(t, 18, 2) - o
+            }
+            {
+                if (match($0, /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ T][0-9][0-9]:[0-9][0-9]:[0-9][0-9]/)) {
+                    dated++; z = substr($0, 20); sub(/^\.[0-9]+/, "", z); sub(/^ +/, "", z)
+                    if (z ~ /^Z/) z = "Z"; else if (z ~ /^[+-][0-9][0-9]:?[0-9][0-9]/) { z = substr(z, 1, 6); sub(/[^0-9]$/, "", z) } else z = ""
+                    keep = (ep($0, z) >= now - h * 3600)
+                }
+                if (keep) print; else if (!dated) raw[++nr] = $0
+            }
+            END { if (!dated) for (i = 1; i <= nr; i++) print raw[i] }')"
+        if [ -n "$LOG_OUT" ]; then
+            printf '%s\n' "$LOG_OUT" | tail -n "$COUNT"
+        else
+            echo "За последние $HOURS ч записей нет: старые записи остаются в файле журнала и в архиве."
+        fi
     elif [ -r "$FILE" ] && [ -s "$FILE" ]; then
         tail -n "$COUNT" "$FILE" 2>/dev/null
     elif [ -r "$FILE" ]; then

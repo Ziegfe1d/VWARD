@@ -91,6 +91,89 @@ with tempfile.TemporaryDirectory() as tmp:
     if d["dns-chain"]["status"] != "WARN" or "порту 53" not in d["dns-chain"]["detail"]:
         fail(f"AdGuard Home on port 53: {d['dns-chain']}")
 
+    # fix.37 (Keenetic 02.11 10:51: «proxy loop detected: 192.168.1.1 <-> 192.168.1.1»). One rule with
+    # the DNS guard (vward_agh_dns_loops). A setting is not an event: only «main» is a loop of every
+    # query (FAIL). fallback/bootstrap/per-domain rows loop only under a condition and only while
+    # Keenetic forwards to AdGuard Home - a warning then, nothing out of the chain. Settings that are
+    # not applied (bootstrap with address-only servers, PTR with private resolvers off) or resolve
+    # locally (local zones, the router's own AdGuard Home client) are no loop at all.
+    IN, OUT = "ip name-server 192.168.1.1:65053\n!\n", "ip name-server 89.207.216.1\n!\n"
+    def diag_extra(extra, up=("9.9.9.10",), conf=IN):
+        running.write_text(conf)
+        yaml.write_text("dns:\n  bind_hosts:\n    - 192.168.1.1\n  port: 65053\n  upstream_dns:\n"
+                        + "".join(f"    - '{u}'\n" for u in up) + extra)
+        r = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=env, text=True, capture_output=True)
+        return {c["id"]: c for c in json.loads(r.stdout.split("\n\n", 1)[1])["checks"]}["dns-chain"]
+    NAMED = ("https://dns.quad9.net/dns-query",)
+    c = diag_extra("  fallback_dns:\n    - 192.168.1.1:53\n")
+    if c["status"] != "WARN" or "резервные" not in c["detail"] or "не замеченный сбой" not in c["detail"]:
+        fail(f"RED: fallback_dns back to the router (the guard's loop) was «Норма»: a conditional loop: {c}")
+    c = diag_extra("  fallback_dns: [udp://127.0.0.1]\n")
+    if c["status"] != "WARN":
+        fail(f"an inline fallback list is read too: {c}")
+    c = diag_extra("  bootstrap_dns:\n    - 192.168.1.1\n  fallback_dns: []\n", up=NAMED)
+    if c["status"] != "WARN" or "bootstrap" not in c["detail"]:
+        fail(f"bootstrap through the router with a named server: a conditional loop: {c}")
+    c = diag_extra("", up=("9.9.9.10", "[/chatgpt.com/]192.168.1.1:53"))
+    if c["status"] != "WARN" or "отдельных доменов" not in c["detail"]:
+        fail(f"a public per-domain row back to the router, no own client: {c}")
+    # No warning only with proof that nothing comes back.
+    CLIENT = ("clients:\n  persistent:\n    - name: Keenetic DNS (VWARD)\n      ids:\n        - 192.168.1.1\n        - 127.0.0.1\n"
+              "      upstreams:\n        - 9.9.9.10\n")
+    for name, extra, up in (
+            ("unused bootstrap (every server an address)", "  bootstrap_dns:\n    - 192.168.1.1\n", ("9.9.9.10",)),
+            ("private resolvers off", "  local_ptr_upstreams:\n    - 192.168.1.1\n  use_private_ptr_resolvers: false\n", ("9.9.9.10",)),
+            ("the router's own client bypasses a public row", CLIENT, ("9.9.9.10", "[/chatgpt.com/]192.168.1.1:53")),
+            ("the router's own client bypasses a local zone row", CLIENT, ("9.9.9.10", "[/lan/]192.168.1.1")),
+            ("external bootstrap", "  bootstrap_dns:\n    - 9.9.9.10\n", NAMED),
+            ("another address, another port", "  bootstrap_dns:\n    - 192.168.1.10\n  fallback_dns:\n    - 192.168.1.1:5353\n", ("192.168.1.100:53",))):
+        c = diag_extra(extra, up=up)
+        if c["status"] != "PASS":
+            fail(f"not a loop ({name}): {c}")
+    # Negative cases (fix.37 review): an address of the router or a local-looking name is no proof.
+    def client(ids, ups, extra=""):
+        return ("clients:\n  persistent:\n    - name: r\n      ids:\n" + "".join(f"        - {i}\n" for i in ids)
+                + "      upstreams:\n" + "".join(f"        - '{u}'\n" for u in ups) + extra)
+    ROW = ("9.9.9.10", "[/chatgpt.com/]192.168.1.1:53")
+    for name, extra, up, want in (
+            ("PTR to the router, private resolvers on (default)", "  local_ptr_upstreams:\n    - 192.168.1.1\n  use_private_ptr_resolvers: true\n", ("9.9.9.10",), "обратные"),
+            ("PTR to the router, the switch not written (AdGuard Home's default is on)", "  local_ptr_upstreams: [192.168.1.1]\n", ("9.9.9.10",), "обратные"),
+            ("local zones to the router", "", ("9.9.9.10", "[/lan/1.168.192.in-addr.arpa/]192.168.1.1"), "локальные зоны"),
+            ("client with 127.0.0.1 only (Keenetic asks from the LAN address)", client(["127.0.0.1"], ["9.9.9.10"]), ROW, "отдельных доменов"),
+            ("client whose servers include the router", client(["192.168.1.1"], ["9.9.9.10", "192.168.1.1"]), ROW, "отдельных доменов"),
+            ("client with a per-domain row back to the router", client(["192.168.1.1"], ["9.9.9.10", "[/x.com/]127.0.0.1"]), ROW, "отдельных доменов"),
+            ("client without servers of its own", client(["192.168.1.1"], []), ROW, "отдельных доменов"),
+            ("two clients claim the router", client(["192.168.1.1"], ["9.9.9.10"]) + "    - name: twin\n      ids:\n        - 192.168.1.1\n", ROW, "отдельных доменов"),
+            ("a CIDR client may take the router", client(["192.168.1.1"], ["9.9.9.10"]) + "    - name: net\n      ids:\n        - 192.168.1.0/24\n", ROW, "отдельных доменов"),
+            ("bootstrap with a DNS stamp server", "  bootstrap_dns:\n    - 192.168.1.1\n", ("sdns://AgcAAAAAAAAABzkuOS45Ljk",), "bootstrap"),
+            ("bootstrap with a client server by name", "  bootstrap_dns:\n    - 192.168.1.1\n" + client(["192.168.1.50"], ["tls://dns.example"]), ("9.9.9.10",), "bootstrap")):
+        c = diag_extra(extra, up=up)
+        if c["status"] != "WARN" or want not in c["detail"]:
+            fail(f"no proof, must warn ({name}): {c}")
+    # Another router address (a guest segment) at :53 is Keenetic's DNS too: a loop of every query.
+    env["VWARD_ROUTER_ADDRS"] = "192.168.1.1 10.1.30.1"
+    c = diag_extra("", up=("10.1.30.1",))
+    if c["status"] != "FAIL" or "петля" not in c["detail"]:
+        fail(f"an upstream on the router's guest address: {c}")
+    del env["VWARD_ROUTER_ADDRS"]
+    # Out of Keenetic's chain, a conditional setting loops nothing now: not named.
+    c = diag_extra("  fallback_dns:\n    - 192.168.1.1\n", conf=OUT)
+    if "резервные" in c["detail"]:
+        fail(f"out of the chain the fallback setting is not a loop: {c}")
+    # The library itself: each kind once, applied or not.
+    lib = ROOT / "components/runtime/lib/vward-device-profile.sh"
+    def kinds(text):
+        yaml.write_text(text)
+        return sorted(subprocess.run(["sh", "-c", '. "$1"; vward_agh_dns_loops "$2" 192.168.1.1', "sh", str(lib), str(yaml)],
+                                     capture_output=True, text=True).stdout.split())
+    k = kinds("dns:\n  port: 65053\n  upstream_dns:\n    - 9.9.9.10\n    - '[/a.lan/]localhost'\n    - '[/b.com/]127.0.0.1'\n"
+              "  bootstrap_dns: ['192.168.1.1:53', 1.1.1.1]\n  fallback_dns:\n    - tcp://192.168.1.1\n"
+              "  local_ptr_upstreams: [192.168.1.1]\n  use_private_ptr_resolvers: false\n")
+    if k != ["bootstrap_idle", "domain", "domain_local", "fallback", "private_off"]:
+        fail(f"the library names each kind once: {k}")
+    if kinds("dns:\n  upstream_dns:\n    - tls://dns.example\n  upstream_dns_file: ''\n  bootstrap_dns:\n    - 127.0.0.1\n") != ["bootstrap"]:
+        fail("a DoT server by name uses bootstrap")
+
     # AdGuard Home out of the chain: what the DNS guard knows (taken out, why, when; back on its own).
     chain = tmp / "chain"; chain.mkdir()
     env["VWARD_DNS_CHAIN_STATE"] = str(chain)
