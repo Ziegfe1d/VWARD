@@ -219,7 +219,6 @@ while IFS='|' read GROUP HOST; do
 
     CHECKED=$((CHECKED + 1))
     [ $((CHECKED % AUDIT_PORTION)) -ne 0 ] || audit_pause
-
     SAFE=$(echo "$HOST" | tr '/:*?' '____')
     STATE="$STATE_DIR/$SAFE.state"
 
@@ -274,7 +273,8 @@ while IFS='|' read GROUP HOST; do
 
         if [ "$ISP_RC" -eq 0 ]; then
             case "$CODE" in
-                2??|3??)
+                # 400/401/403/404: the server answered directly (owner 02.11).
+                2??|3??|400|401|403|404)
                     CLASS="ISP_OK"
                     ;;
                 5??)
@@ -286,6 +286,19 @@ while IFS='|' read GROUP HOST; do
             esac
         else
             NEED_VPN=1
+        fi
+
+        # The direct check failed: does it work at all (01.11: ok 4 of 482, 281 timeouts through the
+        # provider)? If the control sites fail too, no site is judged: the run stops with 75 (the
+        # chain still updates the categories); the night's next run judges them.
+        if [ "$NEED_VPN" -eq 1 ]; then
+            ISPC=0
+            ! command -v vward_isp_control >/dev/null 2>&1 || { vward_isp_control; ISPC=$?; }
+            if [ "$ISPC" = 1 ]; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S')|ABORTED_ISP_PROBE_UNRELIABLE|wan=$WAN|checked=$((CHECKED - 1))" >> "$SUMMARY_LOG"
+                echo "ABORTED: the direct check does not work (control sites fail through the provider)"
+                exit 75
+            fi
         fi
 
         if [ "$NEED_VPN" -eq 1 ]; then

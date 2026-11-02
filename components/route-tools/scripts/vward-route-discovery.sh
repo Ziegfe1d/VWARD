@@ -38,6 +38,17 @@ RECHECK_SEC=3600
 # Пока только наблюдение.
 AUTO_ADD="${AUTO_ADD:-0}"
 
+# ru_zone NAME: the route engine's own list (vward-route-engine.sh); kept the same by a test.
+ru_zone()
+{
+    [ "${VWARD_ADAPTIVE_RU:-0}" != 1 ] || return 1
+    case "$1" in
+        ru|*.ru|xn--p1ai|*.xn--p1ai|yandex.net|*.yandex.net|yandex.com|*.yandex.com|yastatic.net|*.yastatic.net|\
+        vk.com|*.vk.com|vk.me|*.vk.me|userapi.com|*.userapi.com|mycdn.me|*.mycdn.me|avito.st|*.avito.st) return 0 ;;
+    esac
+    return 1
+}
+
 mkdir -p "$STATE_DIR"
 
 if ! mkdir "$LOCK" 2>/dev/null; then
@@ -265,6 +276,12 @@ while read HOST; do
     if [ "$LAST_PROBE" -gt 0 ] &&
        [ $((NOW - LAST_PROBE)) -lt "$RECHECK_SEC" ]; then
         SKIPPED_FRESH=$((SKIPPED_FRESH + 1))
+        continue
+    fi
+
+    # Russian zones never go through the VPN (the same list as the route engine, 01.11).
+    if ru_zone "$HOST"; then
+        printf "%-42s SKIP_RU_ZONE\n" "$HOST"
         continue
     fi
 

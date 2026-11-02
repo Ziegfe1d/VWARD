@@ -455,6 +455,9 @@ vward_running_config()
 # take its answer for VWARD_KEENETIC_AGE seconds (they wait for a read under way instead of
 # asking again). Whoever changes Keenetic's configuration drops the copy (vward_keenetic_dirty);
 # programs that change it read it fresh (vward_running_config). Kept in RAM.
+# Age 55 s (01.11.2026, was 20): the minute's agents start seconds apart (vward_spread) and each
+# read again after 20 s - about two full reads a minute (1730 Keenetic sessions in 13.5 h, ndm 38 %
+# CPU on average); one read now serves the whole minute. A write still drops the copy at once.
 # A stand-in ndmc (VWARD_NDMC, the tests) shares no copy unless its own place is given.
 _VWARD_KCACHE_OWN=${VWARD_KCACHE:+1}
 VWARD_KCACHE=${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}
@@ -563,7 +566,7 @@ _vward_kc_fresh()
 # vward_keenetic_config [AGE]: Keenetic's running configuration (ndmc text, no CR), shared.
 vward_keenetic_config()
 {
-    _vkc_age=${1:-${VWARD_KEENETIC_AGE:-20}}
+    _vkc_age=${1:-${VWARD_KEENETIC_AGE:-55}}
     if [ -n "${VWARD_NDMC:-}" ] && [ -z "$_VWARD_KCACHE_OWN" ]; then
         "$VWARD_NDMC" -c 'show running-config' 2>/dev/null | tr -d '\r'
         return
@@ -881,6 +884,48 @@ vward_agh_smartdns_domains()
             n = split(substr($0, 3, e - 3), a, "/")
             for (i = 1; i <= n; i++) if (a[i] ~ /^[A-Za-z0-9._-]+$/ && index(a[i], ".")) print tolower(a[i])
         }'
+}
+
+# vward_agh_smartdns_urls: the server of each Smart DNS row of AdGuard Home ([/a.com/]URL), one per
+# domain (the same rows as vward_agh_smartdns_domains); only https:// servers.
+vward_agh_smartdns_urls()
+{
+    [ -r "$VWARD_ADGUARD_CONFIG" ] || return 0
+    awk '
+        /^[^ #]/ {dns = ($1 == "dns:"); u = 0; next}
+        /^  [a-z_]+:/ {u = dns && ($1 == "upstream_dns:"); next}
+        u && $1 == "-" {sub(/^[ \t]*-[ \t]*/, ""); print}
+    ' "$VWARD_ADGUARD_CONFIG" 2>/dev/null | tr -d '"\047' | awk '
+        /^\[\// {e = index($0, "/]"); if (e < 3) next; up = substr($0, e + 2); if (up !~ /^https:\/\//) next
+                  n = split(substr($0, 3, e - 3), a, "/"); for (i = 1; i <= n; i++) if (index(a[i], ".")) print up}'
+}
+
+# vward_doh_alive URL: the DoH server answers a DNS query (RFC 8484 GET, example.com A) within
+# VWARD_DOH_ALIVE_MT seconds (6). 0: answers (HTTP 200); 1: does not (no answer, an HTTP error:
+# 01.11.2026 the subscription ended and Smart DNS domains stopped resolving for every client);
+# 2: cannot tell (no curl, curl known to crash on HTTPS). The address may hold a personal token:
+# it goes to curl on stdin (not in its arguments) and never to a log; the answer is kept 5 min in
+# RAM under a checksum of the address.
+vward_doh_alive()
+{
+    # VWARD_DOH_ALIVE=0: not checked («cannot tell», the behaviour before; tests without network).
+    [ "${VWARD_DOH_ALIVE:-1}" = 1 ] || return 2
+    case "$1" in https://*) ;; *) return 2 ;; esac
+    command -v curl >/dev/null 2>&1 || return 2
+    [ -z "$(find "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" -mmin -60 2>/dev/null)" ] || return 2
+    _vda_k=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+    _vda_f=${VWARD_DOH_ALIVE_DIR:-/tmp/vward-doh-alive}/$_vda_k
+    if [ -s "$_vda_f" ] && [ -z "$(find "$_vda_f" -mmin +"${VWARD_DOH_ALIVE_AGE_MIN:-5}" 2>/dev/null)" ]; then
+        read -r _vda_r < "$_vda_f" 2>/dev/null && case "$_vda_r" in 0|1) return "$_vda_r" ;; esac
+    fi
+    case "$1" in *\?*) _vda_q="$1&" ;; *) _vda_q="$1?" ;; esac
+    _vda_c=$(printf 'url = "%sdns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"\n' "$_vda_q" |
+        curl -K - -s -o /dev/null -m "${VWARD_DOH_ALIVE_MT:-6}" -H 'accept: application/dns-message' -w '%{http_code}' 2>/dev/null)
+    _vda_rc=$?
+    case "$_vda_rc" in 132|134|135|136|139) return 2 ;; esac
+    _vda_r=1; [ "$_vda_c" != 200 ] || _vda_r=0
+    mkdir -p "${_vda_f%/*}" 2>/dev/null && printf '%s\n' "$_vda_r" > "$_vda_f" 2>/dev/null
+    return "$_vda_r"
 }
 
 vward_profile_load()

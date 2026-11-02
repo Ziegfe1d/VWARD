@@ -228,7 +228,9 @@ classify_isp_vs_vpn()
 
     if [ "$IRC" -eq 0 ]; then
         case "$IC" in
-            2??|3??)
+            # 400/401/403/404: the server itself answered - the site is reachable directly
+            # (owner 02.11: 403 is a real answer, not a reason for the VPN).
+            2??|3??|400|401|403|404)
                 CLASS="ISP_OK"
                 ;;
 
@@ -569,6 +571,16 @@ while [ "$DONE" -lt "$MAX_PER_RUN" ] &&
             remove_adaptive "$H"
             continue
         fi
+    fi
+
+    # The direct check failed: does it work at all (01.11: api.ozon.ru, wb.ru «broken», ISP=000)?
+    # If the control sites fail too, no name is judged for the rest of this run (no marks, no load).
+    ISPC=0
+    ! command -v vward_isp_control >/dev/null 2>&1 || { vward_isp_control; ISPC=$?; }
+    if [ "$ISPC" = 1 ]; then
+        save_state "$H" "ADAPTIVE_ISP_UNRELIABLE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_ISP_PROBE_UNRELIABLE|$H|left=$((MAX_PER_RUN - DONE))" >> "$LOG"
+        break
     fi
 
     # ISP не восстановился — проверяем текущий VPN.

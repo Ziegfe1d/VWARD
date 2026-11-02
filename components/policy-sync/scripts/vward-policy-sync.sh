@@ -625,7 +625,10 @@ collect_categories()
 # stays out of the tunnel, the rest of the category keeps its routes. Before, the whole category
 # went off: meta.ai took all of Meta, copilot.microsoft.com Cloudflare and Discord (25.10).
 # Every Smart DNS domain is resolved (the limit of 32 is gone); a domain that gives no address
-# now keeps its addresses from the run before ($SMARTDNS_ADDR_CACHE). "block|domain|category"
+# now keeps its addresses from the run before ($SMARTDNS_ADDR_CACHE). A CDN answers with other
+# addresses on every run: the answer is added to the cached ones (up to 16 per domain, the answer
+# first), so the held blocks do not float between runs and are not deleted and added again
+# (planned 7 deletions, done 17 + 9 added, 01.11). "block|domain|category"
 # goes to $SMARTDNS_BLOCKS (the diagnostics); $SMARTDNS_HELD, whole categories off, stays empty.
 smartdns_hold()
 {
@@ -646,9 +649,29 @@ smartdns_hold()
             "$NSLOOKUP" "$SD" "${VWARD_DNS_SERVER:-127.0.0.1}" 2>/dev/null |
                 awk -v d="$SD" '/^Name:/ {n = 1; next} n {for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) print d, $i}'
         done < "$SD_LIST" > "$SD_ADDR.now"
+        # Keenetic's own DNS servers stay out of the tunnel too (01.11.2026: 1.0.0.0/24 of the
+        # Cloudflare category went through OpkgTun4 while Keenetic used 1.0.0.1 «on ISP»): every
+        # public IPv4 server of «ip name-server» and of «dns-proxy ... upstream» that is not bound
+        # to another interface than the provider's. Servers bound «on <tunnel>» (the owner's DNS
+        # rules of a tunnel) are left as they are. dns_server_hold=0 in domain-lists.conf: off.
+        if [ "$(awk -F= '$1 == "dns_server_hold" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" != 0 ]; then
+            awk -v wan="${VWARD_WAN_INTERFACE:-}" '
+                function ip(a) {sub(/^(https|tls):\/\//, "", a); sub(/[\/:].*$/, "", a); return a}
+                function bound(  i) {for (i = 3; i < NF; i++) if ($i == "on") return $(i + 1); return ""}
+                function keep(a,  q) {
+                    if (a !~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) return
+                    split(a, q, "."); if (q[1] == 10 || q[1] == 127 || q[1] == 0 || (q[1] == 192 && q[2] == 168) || (q[1] == 172 && q[2] >= 16 && q[2] <= 31) || (q[1] == 169 && q[2] == 254) || (q[1] == 100 && q[2] >= 64 && q[2] <= 127)) return
+                    b = bound(); if (b != "" && b != "ISP" && b != wan) return
+                    print "keenetic-dns " a
+                }
+                /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
+                $1 == "ip" && $2 == "name-server" {keep(ip($3))}
+                ctx && ($1 == "https" || $1 == "tls") && $2 == "upstream" {keep(ip($3))}
+            ' "$1" | sort -u >> "$SD_ADDR.now"
+        fi
         awk 'FILENAME == ARGV[1] {want[$1] = 1; next}
-             FILENAME == ARGV[2] {now[$1] = 1; print; next}
-             ($1 in want) && !($1 in now)' "$SD_LIST" "$SD_ADDR.now" "$SMARTDNS_ADDR_CACHE" 2>/dev/null |
+             FILENAME == ARGV[2] {n[$1]++; print; next}
+             ($1 in want) && n[$1] < 16 {n[$1]++; print}' "$SD_LIST" "$SD_ADDR.now" "$SMARTDNS_ADDR_CACHE" 2>/dev/null |
             sort -u > "$SD_ADDR"
         if [ -s "$SD_ADDR" ]; then
             if ! cmp -s "$SD_ADDR" "$SMARTDNS_ADDR_CACHE" 2>/dev/null; then

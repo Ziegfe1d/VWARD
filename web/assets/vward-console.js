@@ -186,7 +186,12 @@ function stabRows(d, span) {
   return rows;
 }
 const STAB_WATCH = n => n === 'route-engine' ? 'Маршрутизация' : n === 'panel' ? 'Панель VWARD' :
-  /^awg-t\d+$/.test(n) ? 'AmneziaWG, туннель ' + n.slice(5) : /^xray-v\d+$/.test(n) ? 'Xray (VLESS), туннель ' + n.slice(6) : n;
+  /^awg-t\d+$/.test(n) ? 'AmneziaWG · туннель ' + n.slice(5) : /^xray-v\d+$/.test(n) ? 'Xray · туннель ' + n.slice(6) : n;
+// Programs by name, one name everywhere (owner 02.11).
+const PROG_NAME = { 'vward-route-engine.sh': 'Маршрутизация', 'vward-sentinel': 'Контроль состояния', 'vward-cron-supervisor.sh': 'Агент компонентов', 'vward-dnscap': 'Захват DNS-запросов',
+  'vward-awg': 'AmneziaWG', xray: 'Xray', lighttpd: 'Панель VWARD', AdGuardHome: 'AdGuard Home', https_dns_proxy: 'DoH-клиент', 'sing-box': 'sing-box', dnsmasq: 'dnsmasq' };
+// A duration for people (owner 02.11): «8 ч 28 мин», seconds only under a minute.
+const fmtDur = sec => { const n = Math.round(+sec || 0); if (n < 60) return (Math.round((+sec || 0) * 10) / 10).toString().replace('.', ',') + ' с'; const d = Math.floor(n / 86400), h = Math.floor(n % 86400 / 3600), m = Math.floor(n % 3600 / 60); return d ? d + ' д ' + h + ' ч' : h ? h + ' ч ' + m + ' мин' : m + ' мин'; };
 function stabEvent(w) {
   const f = String(w || '').split('|');
   const name = STAB_WATCH(f[2] || '');
@@ -609,6 +614,27 @@ const inflight = {};
 // asking them every 15 seconds only loaded the router. An action reloads what it changed.
 const KEY_TTL = { off: 10, notes: 25, status: 5, ads: 10, tq: 55, route: 55, awg: 25, wifi: 55, diag: 55, stab: 55, lists: 110, config: 110, adspub: 55, adsstats: 110, agh: 110,
   https: 290, security: 290, services: 290, update: 110, ext: 590, backups: 290, cron: 110 };
+// «Запустить проверку»: the progress, the result or the error stay on the page (the bell is only
+// an extra channel). load() keeps errors in S.errors, so a failed run is not reported as done.
+let DIAG_RUN = null;
+function diagRun() {
+  if (DIAG_RUN && DIAG_RUN.busy) return;
+  DIAG_RUN = { busy: true };
+  render();
+  load('diag', true).then(() => {
+    const ch = (S.diag && S.diag.checks) || [], err = S.errors.diag, ok = ch.filter(x => x.status === 'PASS').length;
+    DIAG_RUN = err ? { error: err, at: new Date() } : { done: true, at: new Date(), ok: ok, n: ch.length };
+    render();
+    if (err) toast('Диагностика не выполнена: ' + err, 'warn'); else toast('Диагностика выполнена');
+  });
+}
+const diagRunNote = () => {
+  const r = DIAG_RUN; if (!r) return '';
+  if (r.busy) return '<p class="result-note" role="status">Проверка выполняется…</p>';
+  const at = r.at.toLocaleTimeString('ru-RU');
+  return r.error ? '<p class="result-note warn" role="status">Проверка не выполнена в ' + at + ': ' + esc(r.error) + '</p>'
+                 : '<p class="result-note" role="status">Проверка выполнена в ' + at + ': в норме ' + r.ok + ' из ' + r.n + '.</p>';
+};
 async function load(key, force) {
   if (inflight[key]) return inflight[key];
   if (!force && S[key] && Date.now() - (S.loadedAt[key] || 0) < (KEY_TTL[key] || 5) * 1000) return S[key];
@@ -650,7 +676,7 @@ const PAGES = [
   { id: 'routes', title: 'Маршруты', icon: 'list', group: 'Сеть', data: ['route', 'security', 'status', 'config', 'lists', 'services'] },
   { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adspub'] },
   // ИИ-сервисы (owner 2026-10-17): each AI service through VPN, Smart DNS or the provider.
-  { id: 'ai', title: 'ИИ-сервисы', icon: 'spark', group: 'Сеть', data: ['ai', 'status', 'config'] },
+  { id: 'ai', title: 'DNS', icon: 'spark', group: 'Сеть', data: ['ai', 'status', 'config'] },
   // Programs VWARD works with (AdGuard Home, later its own tunnel engine): each has its page here.
   { id: 'utils', title: 'Компоненты', icon: 'tools', group: 'VWARD', data: ['status', 'ads', 'agh', 'security', 'ext', 'awg'] },
   { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config', 'stab', 'cron', 'cleanup', 'backups', 'update', 'ext'] },
@@ -658,7 +684,7 @@ const PAGES = [
   // The raw journals: diagnostics to save or send; each section shows its own events itself.
   { id: 'logs', title: 'Журналы', icon: 'logs', group: 'VWARD', data: [] }
 ];
-const SHORT = { ai: 'ИИ', overview: 'Обзор', logs: 'Журналы', wan: 'Сеть', vpn: 'VPN', routes: 'Маршруты', ads: 'Реклама', utils: 'Компоненты', system: 'Система', settings: 'Настройки' };
+const SHORT = { ai: 'DNS', overview: 'Обзор', logs: 'Журналы', wan: 'Сеть', vpn: 'VPN', routes: 'Маршруты', ads: 'Реклама', utils: 'Компоненты', system: 'Система', settings: 'Настройки' };
 const COMPONENTS = [
   { id: 'route-engine', name: 'Маршрутизация', desc: 'Сайты через VPN и автоподбор.', when: 'служба, работает без расписания', page: 'routes', log: 'adaptive' },
   { id: 'route-reconciler', name: 'Сверка маршрутов', desc: 'Возвращает напрямую то, что снова открывается.', when: 'каждые 5 минут', page: 'routes', log: 'routing' },
@@ -738,10 +764,71 @@ function mergeLogs(parts, newestFirst, info) {
   entries.sort((a, b) => newestFirst ? b.t - a.t || b.n - a.n : a.t - b.t || a.n - b.n);
   return entries.map(e => e.lines.join('\n')).join('\n');
 }
+/* The journals as cards (owner 02.11, display only - copy, save and share keep the raw files):
+   time HH:MM:SS (the date once a day), a level sign, words instead of internal codes, numbers
+   rounded with units, no «|»; the autopick checks (HINT_*) folded into one counter in «Важное»,
+   warnings and errors always shown. */
+let logImportant = (typeof store === 'undefined' ? null : store.get('vward-log-view')) !== 'all';
+const LOG_CODES = {
+  HINT_DIRECT_OK: 'Проверка напрямую: открывается', HINT_ADAPTIVE_CHECK: 'Проверка автоподбора', HINT_WG_UNAVAILABLE: 'Подсказка: VPN недоступен, проверка без него',
+  HINT_SKIP_RU_ZONE: 'Российский домен: не через VPN', HINT_AGH_BLOCKED: 'Подсказка: домен блокирует AdGuard Home', HINT_SKIP_ADAPTIVE_OFF: 'Подсказка: автоподбор выключен',
+  CONSOLE_CONFIG: 'Настройки Панели VWARD изменены', START: 'Автоподбор запущен', STOP: 'Автоподбор остановлен', STOP_REQUEST: 'Остановка по запросу',
+  WATCHDOG_RESTART: 'Перезапуск после сбоя', WATCHDOG_CORES_TRANSIENT: 'Второй процесс исчез сам, перезапуск не нужен', START_FAILED: 'Запуск не удался', START_SLOW: 'Медленный запуск, дождались',
+  PERSIST_RESTORE_OK: 'AdaptiveAuto восстановлен', PERSIST_RESTORE_PARTIAL: 'AdaptiveAuto восстановлен не полностью', PERSIST_RESTORE_LOCK_FAIL: 'Восстановление AdaptiveAuto отложено: изменения заняты',
+  PERSIST_RESTORE_FAIL: 'Keenetic отклонил команду восстановления', PERSIST_RESTORE_SKIP_INVALID: 'Имя пропущено: Keenetic его не примет', PERSIST_MISSING_START: 'Сохранённого AdaptiveAuto нет',
+  ADAPTIVE_RU_OUT: 'Российские домены выведены из VPN', AUTO_VPN: 'Через VPN (автоподбор)', AUTO_DIRECT_MAINT: 'Снова напрямую', VPN_OK: 'Открывается через VPN', VPN_OK_RETRY: 'Открывается через VPN',
+  DIRECT_OK: 'Открывается напрямую', DIRECT_UNSTABLE: 'Напрямую нестабильно', NO_IPV4: 'Нет IPv4-адреса', ADAPTIVE_NO_IPV4: 'Нет IPv4-адреса', RECHECK_ADAPTIVE: 'Повторная проверка',
+  BROKEN_ISP_AND_VPN: 'Не открывается ни напрямую, ни через VPN', MAINT_BROKEN: 'Не открывается ни напрямую, ни через VPN', MAINT_VPN_OK: 'Открывается через VPN',
+  MAINT_ISP_UNKNOWN: 'Проверка через провайдера без ответа', MAINT_ISP_BAD: 'Провайдер не пропускает', MAINT_DIRECT_CONFIRM: 'Напрямую: подтверждение', MAINT_DIRECT_CONFIRM_WAIT: 'Напрямую: ждём подтверждения',
+  MAINT_ISP_PROBE_UNRELIABLE: 'Проверка через провайдера недостоверна: сайты не оцениваются', ADD_ABORT_ISP_UNRELIABLE: 'Не добавлен в VPN: проверка через провайдера недостоверна',
+  ADD_SKIP_RU_ZONE: 'Российский домен: не через VPN', ADD_ABORT_WG_FAIL: 'Не добавлен: VPN тоже не открывает', ADD_ABORT_DIRECT_RECOVERED: 'Не добавлен: открылся напрямую',
+  ABORTED_ISP_PROBE_UNRELIABLE: 'Проверка IP-категорий остановлена: проверка через провайдера недостоверна', ABORTED_TUNNEL_DOWN: 'Проверка IP-категорий остановлена: туннель не отвечает',
+  AGH_BIND_FULL: 'Нет места для DNS-привязки в Keenetic', AGH_UNBIND: 'DNS-привязка снята', ADAPTIVE_FULL: 'AdaptiveAuto полон'
+};
+const logLevel = t => /ERROR|FAILED\b|_FAIL\b|CRASH|BROKEN|ошибк|не удал/i.test(t) ? 'err' :
+  /WARN|UNSTABLE|UNRELIABLE|TIMEOUT|_DOWN\b|RESTART|ABORT|SKIP|FULL\b|не отвечает/i.test(t) ? 'warn' :
+  /_OK\b|\bOK\b|PASS|SUCCESS|RECOVERED|RESTORED|_UP\b/.test(t) ? 'ok' : 'info';
+const LOG_SIGN = { err: 'alert', warn: 'alert', ok: 'check', info: 'info' };
+const wbr = h => h.replace(/([.\-\/])(?=[A-Za-z0-9А-Яа-я])/g, '$1<wbr>');
+function logField(f) {
+  const m = /^([a-z_]+)=(.*)$/i.exec(f), k = m ? m[1] : '', v0 = m ? m[2] : f;
+  let v = v0.replace(/\b(\d+)\.(\d{3,})\b/g, (x, a, b) => (Math.round(+(a + '.' + b) * 100) / 100).toString().replace('.', ','));
+  // A time field, or a bare fraction with 3+ decimals (curl's time of a probe): seconds.
+  if ((/time|took|elapsed|dur|wait/i.test(k) && /^\d+([.,]\d+)?$/.test(v)) || (!k && /^\d+\.\d{3,}$/.test(v0))) v += ' с';
+  return (k ? k.replace(/_/g, ' ') + ': ' : '') + v;
+}
+function logEntry(raw) {
+  let src = '', line = raw.split('\n')[0], more = raw.split('\n').slice(1).map(x => x.trim()).filter(Boolean);
+  const sm = /^\[([^\]]+)\] (.*)$/.exec(line); if (sm) { src = sm[1]; line = sm[2]; }
+  const t = logTime(line), body = line.replace(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*(?:Z|[+-]\d{2}:?\d{2})?\s*\|?\s*/, '');
+  // A code first, after «|» or a space (CONSOLE_CONFIG op ...): words instead.
+  const cm = /^([A-Z][A-Z0-9_]{2,})(?:\s*\|\s*|\s+|$)/.exec(body), code = cm ? cm[1] : '';
+  const parts = (cm ? body.slice(cm[0].length) : body).split('|').map(x => x.trim()).filter(Boolean);
+  const words = (code ? (LOG_CODES[code] || code.toLowerCase().replace(/_/g, ' ')) : '') + (parts.length ? (code ? ': ' : '') + parts.map(logField).join(' · ') : '');
+  return { t: t, src: src, code: code, text: words.replace(/\bCONSOLE\b/g, 'Панель VWARD').replace(/Консоль/g, 'Панель VWARD'), more: more, level: logLevel(code + ' ' + body) };
+}
+function logFeed(text) {
+  if (text == null) return '<p class="panel-desc">Загрузка…</p>';
+  const raw = [], lines = String(text).split('\n');
+  lines.forEach(l => { if (!l.trim()) return; if (logTime(l.replace(/^\[[^\]]+\] /, '')) == null && raw.length) raw[raw.length - 1] += '\n' + l; else raw.push(l); });
+  if (!raw.length) return '<p class="panel-desc">' + esc(String(text).trim() || 'Записей нет') + '</p>';
+  let day = '', html = '', hints = [], hintAt = -1;
+  const card = e => '<div class="log-e ' + e.level + '"><time>' + (e.t ? new Date(e.t).toLocaleTimeString('ru-RU') : '') + '</time>' + ico(LOG_SIGN[e.level], 'log-sign') +
+    '<div class="log-t">' + (e.src ? '<small class="log-src">' + esc(e.src) + '</small>' : '') + wbr(esc(e.text)) + (e.more.length ? '<small class="log-more">' + wbr(esc(e.more.join(' '))) + '</small>' : '') + '</div></div>';
+  const out = [];
+  raw.map(logEntry).forEach(e => {
+    const d = e.t ? new Date(e.t).toLocaleDateString('ru-RU') : '';
+    if (d && d !== day) { day = d; out.push('<div class="log-day">' + esc(d) + '</div>'); }
+    if (logImportant && /^HINT_/.test(e.code) && (e.level === 'info' || e.level === 'ok')) { if (hintAt < 0) { hintAt = out.length; out.push(''); } hints.push(card(e)); return; }
+    out.push(card(e));
+  });
+  if (hintAt >= 0) out[hintAt] = '<details class="log-group"><summary>' + ico('route', 'log-sign') + 'Автоподбор: ' + hints.length + ' ' + plural(hints.length, 'проверка', 'проверки', 'проверок') + '</summary>' + hints.join('') + '</details>';
+  return out.join('');
+}
 const DETAILS = {
   'd-components': { title: 'Компоненты VWARD', parent: 'system' },
   'd-diag': { title: 'Диагностика', parent: 'system' },
-  'd-stability': { title: 'Стабильность', parent: 'system', data: ['stab'] },
+  'd-stability': { title: 'Стабильность', parent: 'system', data: ['stab', 'status'] },
   'd-files': { title: 'Файлы VWARD', parent: 'system', data: ['files'] },
   'd-control': { title: 'Управление', parent: 'system', data: ['config', 'status', 'ads', 'lists', 'ext'] },
   'd-cron': { title: 'Задания по расписанию', parent: 'd-diag' },
@@ -776,7 +863,7 @@ const DETAILS = {
   'd-https': { title: 'HTTPS-фильтр', parent: 'ads' },
   'd-agh': { title: 'AdGuard Home', parent: 'utils', data: ['status', 'ads', 'agh', 'security', 'ext', 'adsstats'] },
   'd-dnsex': { title: 'Исключения фильтрации', parent: 'd-agh', data: ['ads'] },
-  'd-awg': { title: 'Модуль AmneziaWG', parent: 'utils', data: ['awg', 'status', 'ext', 'lists'] },
+  'd-awg': { title: 'AmneziaWG', parent: 'utils', data: ['awg', 'status', 'ext', 'lists'] },
   'd-vless': { title: 'Модуль VLESS', parent: 'utils', data: ['awg', 'status', 'lists'] },
   'd-dnsmasq': { title: 'dnsmasq', parent: 'utils', data: ['status'] },
   'd-singbox': { title: 'sing-box', parent: 'utils', data: ['status', 'awg'] },
@@ -888,6 +975,8 @@ function foldToggle(key) {
 // The icon of a block's title (owner 2026-10-17: every section with its sign), by its words.
 const HEAD_ICONS = [
   [/^Добавить|^Новый/, 'plus'],
+  // Each section its own sign (owner 02.11: one «i» for different sections).
+  [/Хранение журнал/, 'archive'], [/Восстановление интернета/, 'globe'], [/^Исключени/, 'filter'], [/^Режим/, 'sliders'], [/События и реакции/, 'pulse'],
   [/Удален|Корзин/, 'trash'], [/Очистк/, 'broom'], [/Сброс/, 'reset'], [/Аварийн/, 'power'], [/Резервн/, 'archive'],
   [/Сертификат/, 'cert'], [/ИИ-сервис/, 'spark'], [/Управлени/, 'sliders'], [/Агент|Работают всегда|Решения агента|Предполагаем/, 'shield'],
   [/Сервер|Страны/, 'server'], [/Smart DNS|DNS/, 'dns'], [/AdGuard|Фильтр|Блокиров|Заблокир|Разрешено|Правил|На проверке/, 'block'],
@@ -968,9 +1057,9 @@ function panel(title, body, opts) {
   const longDesc = opts.desc && String(opts.desc).length > DESC_MAX && !!title, dq = 'p:' + title;
   // A page's own block: its «?» goes next to the page title at the top (owner 2026-11-01:
   // the title and its «?» together, never apart); the explanation opens in the block.
-  if (same && longDesc) PAGEQ = { k: dq, title: title };
+  if (same && longDesc) PAGEQ = { k: dq, title: title, shown: true };
   const head = same && !extra ? '' : '<div class="block-head' + (foldable ? ' foldable' : '') + '"' + (foldable ? ' data-fold="' + esc(key) + '"' : '') + '>' + (same ? '' : '<h2>' + ico(opts.icon || headIcon(title), 'head-ico') + esc(title) + '</h2>') + (longDesc && !folded && !same ? qBtn(dq, title) : '') + (opts.beta ? '<span class="tag beta">Бета</span>' : '') + (opts.readonly ? '<span class="note">' + ico('lock') + 'Только чтение</span>' : '') + (opts.right || '') + toggle + '</div>';
-  return '<section class="block' + (folded ? ' folded' : '') + '"' + (same ? ' aria-label="' + esc(title) + '"' : '') + '>' + head + (folded ? '' : (opts.desc && (!longDesc || qOpen(dq)) ? '<p class="block-desc">' + esc(opts.desc) + '</p>' : '') + (body ? '<div class="panel">' + body + '</div>' : '')) + '</section>';
+  return '<section class="block' + (folded ? ' folded' : '') + '"' + (same ? ' aria-label="' + esc(title) + '"' : '') + '>' + head + (folded ? '' : (opts.desc && (!longDesc || same || qOpen(dq)) ? '<p class="block-desc">' + esc(opts.desc) + '</p>' : '') + (body ? '<div class="panel">' + body + '</div>' : '')) + '</section>';
 }
 /* A long explanation hides behind «?» next to its title and opens in place (owner 2026-10-17);
    short ones stay visible. QOPEN keeps what is open across re-renders of the page. */
@@ -1000,7 +1089,7 @@ const sel = (attr, label, opts, value) => '<select class="input compact" ' + att
 // One sign per action across the Panel (owner 2026-10-17): delete - a bin, clear - a broom...
 const BTN_ICONS = [[/^Удалить/, 'trash'], [/^Очистить/, 'broom'], [/^Скачать/, 'download'], [/^Установить/, 'box'], [/^Выйти/, 'logout'],
   [/^Сбросить|^Полный сброс/, 'reset'], [/^(Выключить|Отключить|Включить)/, 'power'], [/^(Перезапустить|Обновить|Повторить)/, 'refresh'],
-  [/^Проверить/, 'check'], [/^Добавить/, 'plus'], [/^Сохранить|^Применить/, 'save'], [/^Восстановить|^Вернуть/, 'undo'], [/^Отмена/, 'close']];
+  [/^Проверить/, 'refresh'], [/^Переустановить/, 'refresh'], [/^Добавить/, 'plus'], [/^Сохранить|^Применить/, 'save'], [/^Восстановить|^Вернуть/, 'undo'], [/^Отмена/, 'close']];
 const btnIcon = (label, icon) => { const m = BTN_ICONS.find(x => x[0].test(label || '')); return m ? m[1] : icon; };
 const btn = (act, icon, label, cls, extra) => { const i = btnIcon(label, icon); return '<button class="btn' + (cls ? ' ' + cls : '') + '" type="button" data-act="' + act + '"' + (extra || '') + '>' + (i ? ico(i) : '') + esc(label) + '</button>'; };
 const empty = t => '<div class="empty">' + esc(t) + '</div>';
@@ -1016,7 +1105,8 @@ function resultBox(id) {
 }
 function loadError(keys) {
   const errs = keys.map(k => S.errors[k]).filter(Boolean);
-  return errs.length ? '<p class="field-warn">Часть данных не получена: ' + esc(errs[0]) + '. Повторим автоматически.</p>' : '';
+  // One short line with a spinner (owner 02.11): it does not grow the page or cover it.
+  return errs.length ? '<p class="field-warn retry" title="' + esc(errs[0]) + '"><i class="spin" aria-hidden="true"></i>Часть данных не получена · повторяем…</p>' : '';
 }
 
 /* ---------- Обновления других программ ---------- */
@@ -1178,7 +1268,9 @@ function listPath(l) {
 }
 let listWant = '';
 // r-lists: «Авто» - VWARD's policy decides (watch); otherwise the route the list has now.
-const LIST_MODES = [['auto', 'Авто'], ['vpn', 'Через VPN'], ['bypass', 'Напрямую']];
+// One set of names on every screen (owner 02.11): Авто | VPN | Провайдер (as on «DNS»). A list's
+// «DNS» way needs a Smart DNS writer per list, not there yet: the segment is not shown (fix.36).
+const LIST_MODES = [['auto', 'Авто'], ['vpn', 'VPN'], ['bypass', 'Провайдер']];
 const listMode = l => l.watch ? 'auto' : viaIs(l, 'vpn') ? 'vpn' : viaIs(l, 'bypass') ? 'bypass' : '';
 const LISTPICK = new Set(), LISTBULK = { busy: '' };
 function listDelText(ls) {
@@ -1246,6 +1338,8 @@ function myListClear(n) {
   if (!g || !n) return '';
   return (l ? listConfirm(l) : '') + (confirm && confirm.name === g ? '' : '<div class="panel-actions apart">' + btn('ask', 'broom', 'Очистить список', 'warn', ' data-confirm="list-clear" data-name="' + esc(g) + '"' + (cfgOk() && l ? '' : ' disabled')) + '</div>');
 }
+// A fitting example for an exclusion: a subdomain of the list's own first domain.
+const exampleDomain = inc => (inc && inc[0] ? String(inc[0]).replace(/^\*\./, '') : 'example.com');
 function listPage(name) {
   const l = ((S.lists && S.lists.lists) || []).find(x => x.name === name), d = S.listd, ok = cfgOk();
   const tuns = (st().wg && st().wg.interfaces) || [];
@@ -1265,16 +1359,18 @@ function listPage(name) {
       (l.smartdns_conflict ? '<p class="field-warn">В списке есть домены Smart DNS: их общий адрес уйдёт в VPN, и Smart DNS перестанет работать для всех сервисов. Переведите список в обход VPN или уберите эти домены.</p>' : '') +
       (l.auto && viaIs(l, 'vpn') ? '<p class="field-warn">Переведён на VPN автоматически ' + esc(l.auto.at) + ': не открылся ' + esc(l.auto.host) + '</p>' : '')) +
     panel('Домены', addF('add', 'example.com', 'Добавить домен в список') +
-      (inc.length > 8 ? '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти в списке" aria-label="Найти домен в списке" autocomplete="off"></label>' : '') +
-      (!fresh ? empty('Загрузка…') : inc.length ? '<ul class="rows" data-list-rows>' + inc.map(v => '<li class="row" data-d="' + esc(v) + '"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('remove', v, 'Убрать ' + v + ' из списка') + '</span></li>').join('') + '</ul>' : empty('В списке нет доменов')) +
-      // Clear or delete the whole list, right by its domains (owner 2026-10-17).
-      (l.name === 'AdaptiveAuto' ? '' : listConfirm(l) || '<div class="panel-actions even">' + btn('ask', 'broom', 'Очистить', '', ' data-confirm="list-clear" data-name="' + esc(l.name) + '"' + (ok && l.count ? '' : ' disabled')) +
-        (listOwn(l) || l.managed || svcOf(l.name) ? '' : btn('ask', 'check', 'Взять под управление VWARD', '', ' data-confirm="list-adopt" data-name="' + esc(l.name) + '"' + (ok ? '' : ' disabled'))) +
-        (listOwn(l) ? '' : btn('ask', 'trash', 'Удалить список', 'danger', ' data-confirm="list-del" data-name="' + esc(l.name) + '"' + (ok ? '' : ' disabled'))) + '</div>' +
-        (confirm && confirm.id === 'list-adopt' && confirm.name === l.name ? confirmBox('list-adopt', 'Взять список «' + (l.description || l.name) + '» под управление VWARD? Он появится среди «Списков VWARD»: общий переключатель «Авто / Через VPN / Напрямую» будет менять и его путь. Домены и маршрут сейчас не меняются.', 'Взять') : '')),
+      (fresh ? '<p class="panel-desc">' + fmtInt(inc.length) + ' ' + plural(inc.length, 'домен', 'домена', 'доменов') + '</p>' : '') + (inc.length > 8 ? '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти в списке" aria-label="Найти домен в списке" autocomplete="off"></label>' : '') +
+      (!fresh ? empty('Загрузка…') : inc.length ? '<ul class="rows" data-list-rows>' + inc.map(v => '<li class="row dom-row" data-d="' + esc(v) + '"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('remove', v, 'Убрать ' + v + ' из списка') + '</span></li>').join('') + '</ul>' : empty('В списке нет доменов')),
       { desc: fmtInt(inc.length || l.count) + ' ' + plural(inc.length || l.count, 'домен', 'домена', 'доменов') + '. Домен действует вместе с поддоменами. Изменения сразу сохраняются в Keenetic.' }) +
-    panel('Исключения', addF('exclude', 'music.example.com', 'Добавить исключение') +
-      (!fresh ? '' : exc.length ? '<ul class="rows">' + exc.map(v => '<li class="row"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('unexclude', v, 'Убрать исключение ' + v) + '</span></li>').join('') + '</ul>' : empty('Исключений нет')),
+    // «Управление» of a list (owner 02.11): the list's actions in their own section, as on AdGuard Home.
+    (l.name === 'AdaptiveAuto' ? '' : panel('Управление', listConfirm(l) || '<div class="panel-actions even">' +
+        btn('ask', 'broom', 'Очистить список', '', ' data-confirm="list-clear" data-name="' + esc(l.name) + '"' + (ok && l.count ? '' : ' disabled')) +
+        (listOwn(l) || l.managed || svcOf(l.name) ? '' : btn('ask', 'sliders', 'Взять под управление', '', ' data-confirm="list-adopt" data-name="' + esc(l.name) + '"' + (ok ? '' : ' disabled'))) +
+        (listOwn(l) ? '' : btn('ask', 'trash', 'Удалить список', 'danger', ' data-confirm="list-del" data-name="' + esc(l.name) + '"' + (ok ? '' : ' disabled'))) + '</div>' +
+        (confirm && confirm.id === 'list-adopt' && confirm.name === l.name ? confirmBox('list-adopt', 'Взять список «' + (l.description || l.name) + '» под управление VWARD? Его путь будет меняться переключателем «Авто | VPN | Провайдер» здесь и общим «Все списки». Домены и маршрут сейчас не меняются.', 'Взять под управление') : ''),
+      { desc: 'Очистить список - убрать все домены, список и маршрут останутся. Удалить список - убрать его из Keenetic полностью. Перед обоими сохраняется копия настроек.' })) +
+    panel('Исключения', addF('exclude', 'sub.' + exampleDomain(inc), 'Добавить исключение') +
+      (!fresh ? '' : exc.length ? '<ul class="rows">' + exc.map(v => '<li class="row"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('unexclude', v, 'Убрать исключение ' + v) + '</span></li>').join('') + '</ul>' : '<p class="panel-desc">Исключений нет</p>'),
       { desc: 'Поддомены, которые идут мимо этого списка.' });
 }
 
@@ -1363,7 +1459,7 @@ function agentsPanel() {
     ['Агент сети', 'интернет, VPN, DNS', pill(ag.network, jobOk(['vward-tunnel-health.sh', 'vward-wan-guard.sh', 'vward-route-reconciler.sh'])), 'wan'],
     ['Агент компонентов', 'программы и модули', pill(null, known ? !!sv.supervisor : null), 'd-components'],
     ['Агент обновлений', 'обновления программ', pill(ag.updates, known ? !!sv.crond : null), 'u-vward'],
-    ['Агент обслуживания', 'журналы и флешка', pill(ag.maintenance, jobOk(['vward-housekeeping.sh'])), 'logs']
+    ['Агент обслуживания', 'журналы и накопитель', pill(ag.maintenance, jobOk(['vward-housekeeping.sh'])), 'logs']
   ];
   // The mode and the proposed actions are on the same page below: no rows leading to it (owner 2026-10-18).
   return panel('Агенты', kv(rows.map(r => [r[0], r[2][1], r[2][0], r[3], '', r[2][2] ? r[1] + ' · ' + r[2][2] : r[1]])),
@@ -1383,34 +1479,53 @@ function agentsRow() {
    like a service's. A server's path may hold a personal token: the Panel shows only its host. */
 const AI_VIA = [['vpn', 'VPN'], ['dns', 'Smart DNS'], ['isp', 'Провайдер']];
 const aiPrev = {}, AICHK = {};
-function aiSlider(id, cur, label, off) {
+// dnsDown: the Smart DNS server does not answer or is not set - its segment is off, with the reason.
+function aiSlider(id, cur, label, off, dnsDown) {
   const to = Math.max(0, AI_VIA.findIndex(o => o[0] === cur)), on = cfgOk() && !!S.ai && !SVC.busy && !off;
   const from = aiPrev[id] != null ? aiPrev[id] : to; aiPrev[id] = to;
   return '<div class="seg-slider' + (on ? '' : ' off') + (cur ? '' : ' none') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
-    AI_VIA.map(o => '<button type="button" role="radio" data-ai-via="' + o[0] + '" data-ai="' + esc(id) + '" aria-checked="' + (o[0] === cur) + '"' + (on ? '' : ' disabled') + '>' + o[1] + '</button>').join('') + '</div>';
+    AI_VIA.map(o => { const dis = !on || (o[0] === 'dns' && dnsDown && cur !== 'dns');
+      return '<button type="button" role="radio" data-ai-via="' + o[0] + '" data-ai="' + esc(id) + '" aria-checked="' + (o[0] === cur) + '"' + (dis ? ' disabled' : '') + (o[0] === 'dns' && dnsDown ? ' title="сервер не отвечает"' : '') + '>' + o[1] + '</button>'; }).join('') + '</div>' +
+    (dnsDown ? '<p class="seg-note">Smart DNS: сервер не отвечает</p>' : '');
 }
 function aiPage() {
   const a = S.ai, svc = (a && a.services) || [], sd = (a && a.smartdns) || {}, tuns = ((st().wg && st().wg.interfaces) || []).filter(t => !tunOff(t));
   const allVia = svc.length && svc.every(s => s.via === svc[0].via) ? svc[0].via : '';
   const noSd = !sd.agh && !(sd.servers || []).length;
-  const chk = s => { const c = AICHK[s.id]; if (!c) return 'не проверялся'; if (c.busy) return 'проверяется…'; if (!c.ok) return 'проверка не удалась';
-    return c.results.map(r => { const w = r.via; return (w === 'direct' ? 'напрямую' : tunLabel(w)) + ': ' + (SVC_VERDICT[r.verdict] || r.verdict); }).join(' · '); };
-  const wayText = { vpn: s => 'через ' + tunLabel(s.tunnel || prof().tunnel_interface), dns: () => 'через Smart DNS', isp: () => 'через провайдера' };
-  const row = s => '<div class="ai-row"><div class="ai-head"><div class="row-main"><b>' + esc(s.title) + '</b><small>' +
-      esc((wayText[s.via] || wayText.isp)(s) + ' · ' + chk(s)) + '</small></div>' +
-      btn('ai-check', 'check', 'Проверить', 'small', ' data-ai="' + esc(s.id) + '" data-dom="' + esc(s.domain) + '"' + (AICHK[s.id] && AICHK[s.id].busy ? ' disabled' : '')) + '</div>' +
-      aiSlider(s.id, s.via, s.title) +
+  // The card's one status line (owner 02.11): the CHOSEN way and its check, a coloured dot; while a
+  // check runs, a compact pill with a spinner in the same place (the line keeps its height, the
+  // card does not jump; no toast - fix.26). The per-way results open below on demand.
+  const sdDown = !!a && (sd.alive === 'no' || noSd);
+  const wayName = { vpn: 'VPN', dns: 'Smart DNS', isp: 'Провайдер' };
+  const status = s => {
+    const c = AICHK[s.id], w = s.via || 'isp';
+    if (c && c.busy) return '<span class="busy-pill"><i class="spin" aria-hidden="true"></i>проверяется…</span>';
+    if (w === 'dns' && sdDown) return '<span class="stat"><i class="dot crit"></i>Smart DNS · сервер не отвечает</span>';
+    const r = c && c.ok ? (c.results || []).find(x => w === 'vpn' ? 'direct' !== x.via : 'direct' === x.via) : null;
+    const v = r ? r.verdict : '', cls = !c ? '' : !c.ok ? 'warn' : v === 'open' ? 'ok' : v ? 'crit' : 'warn';
+    const txt = !c ? 'не проверен' : !c.ok ? 'проверка не удалась' : r ? (SVC_VERDICT[v] || v) : 'нет данных';
+    return '<span class="stat"><i class="dot ' + cls + '"></i>' + esc(wayName[w] + ' · ' + txt) + '</span>';
+  };
+  const detail = s => { const c = AICHK[s.id]; if (!c || c.busy || !c.ok || !(c.results || []).length) return '';
+    return '<details class="ai-detail"><summary>Подробнее</summary>' + c.results.map(r => esc(('direct' === r.via ? 'напрямую' : tunLabel(r.via)) + ': ' + (SVC_VERDICT[r.verdict] || r.verdict))).join('<br>') + '</details>'; };
+  const busyBtn = s => AICHK[s.id] && AICHK[s.id].busy;
+  const row = s => '<div class="ai-row"><div class="ai-head"><div class="row-main"><b>' + esc(s.title) + '</b><small class="ai-status">' + status(s) + '</small></div>' +
+      btn('ai-check', 'refresh', 'Проверить', 'small' + (busyBtn(s) ? ' spinning' : ''), ' data-ai="' + esc(s.id) + '" data-dom="' + esc(s.domain) + '"' + (busyBtn(s) ? ' disabled' : '')) + '</div>' +
+      aiSlider(s.id, s.via, s.title, false, sdDown) + detail(s) +
       (s.tunnel && tuns.length > 1 ? '<dl class="kv">' + ctrlRow('Туннель', sel('data-ai-tunnel="' + esc(s.id) + '"', 'Туннель для ' + s.title, tuns.map(t => [t.name, tunLabel(t.name)]), s.tunnel || prof().tunnel_interface)) + '</dl>' : '') + '</div>';
   // Smart DNS first: the services «через Smart DNS» open only while it works (owner 2026-10-17).
-  return loadError(['ai']) + aiQuestion(sd) + aiRoomPanel(sd) +
+  // The server does not answer (01.11.2026: the subscription ended): its domains do not resolve.
+  const sdDead = a && sd.alive === 'no' ? panel('Smart DNS не отвечает', '<p class="result-note warn">Сервер Smart DNS не отвечает на запросы: сайты, привязанные к нему (' +
+    fmtInt((sd.keenetic || 0) + (sd.agh_domains || 0)) + '), не открываются. Уберите сервер кнопкой ниже или переведите сервисы на VPN.</p>') : '';
+  return loadError(['ai']) + sdDead + aiQuestion(sd) + aiRoomPanel(sd) +
     panel('Smart DNS', kv([
         ['Где хранится', !a ? '…' : sd.agh ? 'AdGuard Home' : 'Keenetic', '', null, '', sd.agh ? 'доменов: ' + fmtInt(sd.agh_domains || 0) : 'строк ' + fmtInt(sd.keenetic || 0) + ' из ' + fmtInt(sd.keenetic_max || 8)],
-        ['Сервер', !a ? '…' : (sd.servers || []).join(', ') || 'не задан', a && noSd ? 'warn' : ''],
+        ['Сервер', !a ? '…' : ((sd.servers || []).join(', ') || 'не задан') + (sd.alive === 'no' ? ' · не отвечает' : sd.alive === 'yes' ? ' · отвечает' : ''), a && sd.alive === 'no' ? 'crit' : a && noSd ? 'warn' : ''],
         ['Домены Smart DNS', 'открыть', '', 'd-smartdns', '', 'и агент: держит их мимо VPN']]) + sdStoreRow(a, sd) +
       inputBar({ form: 'ai-dns-add', label: sd.own ? 'Заменить свой сервер DoH' : 'Свой сервер DoH', name: 'server', mono: true, placeholder: 'https://dns.example/dns-query', aria: 'Адрес DoH', off: !cfgOk(), icon: 'plus', btn: 'Сохранить' }) +
       (sd.own ? '<div class="panel-actions">' + btn('ai-dns-clear', 'close', 'Убрать свой сервер') + '</div>' : '') + resultBox('aidns'),
       { desc: 'Сервер, через который открываются сервисы с путём «Smart DNS». Без AdGuard Home VWARD пишет строки в Keenetic (не больше 8). Адрес хранится только на роутере.' }) +
-    panel('Все ИИ-сервисы', aiSlider('all', allVia, 'Все ИИ-сервисы') + resultBox('svc'),
+    panel('Все ИИ-сервисы', aiSlider('all', allVia, 'Все ИИ-сервисы', false, sdDown) + resultBox('svc'),
       { beta: true, desc: allVia ? 'Одним нажатием переключить все сервисы, например когда Smart DNS сбоит.' : 'Сейчас у сервисов разный путь. Нажмите, чтобы отправить все одним путём.' }) +
     panel('Сервисы', !a ? empty('Загрузка…') : svc.length ? svc.map(row).join('') : empty('В каталоге нет ИИ-сервисов'),
       { desc: 'VPN - через туннель; Smart DNS - через DNS-сервер, который открывает сервис; Провайдер - напрямую.' });
@@ -1431,7 +1546,9 @@ document.addEventListener('change', async e => {
 });
 async function smartdnsServer(op, url) {
   let x; try { x = await apiPost('smartdns-server', { op: op, url: url }); } catch (err) { x = { ok: false, error: err.message }; }
-  actionResult = { id: 'aidns', text: x.ok ? (op === 'set' ? 'Сервер сохранён' : 'Свой сервер убран') : 'Не выполнено: ' + errText(x) };
+  const c = x.cleared || {};
+  actionResult = { id: 'aidns', text: x.ok ? (op === 'set' ? 'Сервер сохранён' : x.result === 'unchanged' ? 'Убирать нечего: привязок к своему серверу нет' :
+    'Свой сервер убран. Очищено: в Keenetic строк ' + (c.keenetic || 0) + ', в AdGuard Home доменов ' + (c.agh || 0) + ', сохранённых состояний списков ' + (c.saved || 0)) : 'Не выполнено: ' + errText(x) };
   await load('ai', true); render();
 }
 // aiJob ID WAY MSG [KEEP]: KEEP - the answer to «no room in Smart DNS» (the service still waits
@@ -1552,7 +1669,7 @@ const SOON = {
 };
 function soonPanel(key) {
   const l = SOON[key] || [];
-  return l.length ? panel('В разработке', '<dl class="kv soon">' + l.map(x => '<div class="kv-row" data-key="' + esc(x[0]) + '"><dt>' + esc(x[0]) + '<span class="hint">' + esc(x[2]) + '</span></dt><dd><span class="tag soon">В разработке · ' + esc(x[1]) + '</span></dd></div>').join('') + '</dl>', { icon: 'clock' }) : '';
+  return l.length ? panel('В разработке', '<dl class="kv soon">' + l.map(x => '<div class="kv-row" data-key="' + esc(x[0]) + '"><dt>' + esc(x[0]) + '<span class="hint">' + esc(x[2]) + '</span></dt><dd><span class="tag soon">скоро</span></dd></div>').join('') + '</dl>', { icon: 'clock' }) : '';
 }
 // Observation mode (fix.28.2; watch by default since fix.28.6): an agent that only watches writes down what it would do.
 const AGENTS = [['network', 'Агент сети'], ['components', 'Агент компонентов'], ['updates', 'Агент обновлений'], ['maintenance', 'Агент обслуживания']];
@@ -1577,12 +1694,32 @@ const AGENT_PROTOCOLS = [
   ['network', 'Интернет не отвечает', 'провайдер не отвечает подряд несколько проверок', 'заново получить адрес, затем переподключить'],
   ['components', 'Программа занимает много памяти', 'память выше предела несколько проверок подряд', 'перезапустить программу'],
   ['components', 'Запуск завис', 'задание работает дольше своего предела', 'остановить зависший запуск'],
-  ['components', 'Программу просят перезапустить', 'другой агент сообщил о сбое', 'перезапустить программу'],
+  ['components', 'Программа просит перезапуск', 'другой агент сообщил о сбое', 'перезапустить программу'],
   ['components', 'AdGuard Home не запускается', 'программа падает с «Illegal instruction»', 'поставить официальную сборку той же версии'],
-  ['updates', 'Есть обновление пакета', 'новая версия в Entware или у AdGuard', 'установить с копией и откатом'],
+  ['updates', 'Доступно обновление пакета', 'новая версия в Entware или у AdGuard', 'установить с копией и откатом'],
   ['maintenance', 'Программа падает', 'клиент DoH или curl падают при запуске', 'сверить пакеты с Entware и переустановить испорченные'],
-  ['maintenance', 'Флешка портит файлы', 'сверка файлов нашла изменённые без записи программой', 'переустановить испорченные пакеты']
+  ['maintenance', 'Ошибки на USB-накопителе', 'сверка файлов нашла изменённые без записи программой', 'переустановить испорченные пакеты']
 ];
+// «Предполагаемые действия» (owner 02.11): grouped by agent, the same action folded («× 3, последняя
+// …»), a short bold title and the time, the proposal below; tunnels by their Panel names; the
+// newest 10 with «Показать ещё»; older than a week folded.
+let PROP_ALL = false;
+function proposedHtml(pr) {
+  if (!pr.length) return empty('Пока нет');
+  const names = t => String(t || '').replace(/\b(OpkgTun\d+|Wireguard\d+)\b/g, n => tunLabel(n) !== n ? tunLabel(n) + ' (' + n + ')' : n);
+  const groups = [], byKey = {};
+  pr.forEach(p => { const k = p.agent + '|' + p.action; if (!byKey[k]) { byKey[k] = { p: p, n: 0, last: p.at }; groups.push(byKey[k]); } byKey[k].n++; });
+  const weekAgo = Date.now() / 1000 - 7 * 86400, fresh = groups.filter(g => +g.p.at >= weekAgo), old = groups.filter(g => +g.p.at < weekAgo);
+  const shown = PROP_ALL ? fresh : fresh.slice(0, 10);
+  const item = g => { const t = names(g.p.text), m = /^([^:]{3,80}):\s*(.*)$/.exec(t), title = m ? m[1] : t, rest = m ? m[2] : '';
+    const opts = rest.split(/,\s*|\s+или\s+/).filter(Boolean);
+    return '<li class="prop"><div class="prop-head"><b>' + esc(title) + '</b><time>' + esc(fmtStamp(g.last)) + (g.n > 1 ? ' · × ' + g.n : '') + '</time></div>' +
+      (opts.length > 1 ? '<p>Предложит одно из ' + opts.length + ':</p><ul>' + opts.map(o => '<li>' + esc(o) + '</li>').join('') + '</ul>' : rest ? '<p>' + esc(rest) + '</p>' : '') + '</li>'; };
+  const byAgent = list => AGENTS.map(a => { const l = list.filter(g => g.p.agent === a[0]); return l.length ? '<h3 class="prop-agent">' + esc(a[1]) + '</h3><ul class="props">' + l.map(item).join('') + '</ul>' : ''; }).join('');
+  return (shown.length ? byAgent(shown) : empty('За неделю новых нет')) +
+    (fresh.length > 10 && !PROP_ALL ? '<div class="panel-actions"><button class="btn small" type="button" data-act="prop-more">Показать ещё (' + (fresh.length - 10) + ')</button></div>' : '') +
+    (old.length ? '<details class="prop-old"><summary>Старше недели (' + old.length + ')</summary>' + byAgent(old) + '</details>' : '');
+}
 const AGENT_LOCKED = [
   ['Запуск остановленных программ VWARD', 'агент компонентов'], ['Панель VWARD и SSH', 'агент компонентов'],
   ['AdGuard Home вне цепочки DNS, когда он молчит', 'интернет дома не пропадает'], ['Обновления самого VWARD', 'через них приходят исправления'],
@@ -1836,14 +1973,19 @@ const RENDER = {
     const sb = Object.assign(pkgFacts('sing-box-go'), { selected: false });
     // Системные службы: a process is not enough, the work must be fresh.
     const seF = sentinelFacts(sv.sentinel || {}, known), cpF = dnscapFacts(sv.dnscap || {}, known);
-    return loadError(['status']) +
-      panel('DNS и фильтрация', kv([['AdGuard Home', agh[1], agh[0], 'd-agh', '', agh[2] || 'DNS и фильтрация'], row('dnsmasq', dq, 'd-dnsmasq', 'DNS и кэширование'),
-          dohF.installed ? row('DoH-клиент', dohF, 'd-doh', 'Smart DNS через DoH') : null]),
-        { desc: 'Активный DNS выбирается в настройках: AdGuard Home, dnsmasq или штатный DNS Keenetic. Одновременно работает только один.' }) +
-      panel('VPN-движки', kv([row('Xray', xF, 'd-vless', 'VLESS, Trojan'), row('AmneziaWG', wF, 'd-awg', 'VPN-туннели'), row('sing-box', sb, 'd-singbox', 'Сетевые протоколы')]),
-        { desc: 'Движок используется, когда обслуживает туннель. Один туннель - один движок.' }) +
+    // Not installed (owner 02.11): out of their groups, folded into one line «Не установлены (N)».
+    const missing = [], keep = (r, f) => { if (f && f.installed === false && f.known !== false) { missing.push(r); return null; } return r; };
+    const aghNone = agh[1] === ST.none[1];
+    const dns = [aghNone ? (missing.push(['AdGuard Home', agh[1], agh[0], 'd-agh', '', 'DNS и фильтрация']), null) : ['AdGuard Home', agh[1], agh[0], 'd-agh', '', agh[2] || 'DNS и фильтрация'],
+      keep(row('dnsmasq', dq, 'd-dnsmasq', 'DNS и кэширование'), dq), dohF.installed ? row('DoH-клиент', dohF, 'd-doh', 'Smart DNS через DoH') : null];
+    const vpn = [keep(row('Xray', xF, 'd-vless', 'VLESS, Trojan'), xF), keep(row('AmneziaWG', wF, 'd-awg', 'VPN-туннели'), wF), keep(row('sing-box', sb, 'd-singbox', 'Сетевые протоколы'), sb)];
+    const has = rows => rows.filter(Boolean).length > 0;
+    return (known ? loadError(['status']) : '') +
+      (has(dns) ? panel('DNS и фильтрация', kv(dns), { desc: 'Активный DNS выбирается в настройках: AdGuard Home, dnsmasq или штатный DNS Keenetic. Одновременно работает только один.' }) : '') +
+      (has(vpn) ? panel('VPN-движки', kv(vpn), { desc: 'Движок используется, когда обслуживает туннель. Один туннель - один движок.' }) : '') +
       panel('Системные службы', kv([row('Контроль состояния', seF, 'd-stability', 'Мониторинг VWARD'), row('Захват DNS-запросов', cpF, 'd-dnscap', 'Автоподбор доменов')]),
-        { desc: '«Работает» - только когда проверка подтверждает работу, а не одно наличие процесса.' });
+        { desc: '«Работает» - только когда проверка подтверждает работу, а не одно наличие процесса.' }) +
+      (missing.length ? '<details class="block missing-comps"><summary class="block-head"><h2>' + ico('box', 'head-ico') + 'Не установлены (' + missing.length + ')</h2></summary><div class="panel">' + kv(missing) + '</div></details>' : '');
   },
   // Cards of the components added on 01.11.2026: what is known, nothing that cannot be done yet.
   'd-dnsmasq'() { return compCard('dnsmasq-full', 'dnsmasq', 'dnsmasq', 'Альтернатива AdGuard Home в DNS-цепочке. После установки остаётся выключенным, пока вы не выберете его в настройках DNS.'); },
@@ -1853,7 +1995,8 @@ const RENDER = {
     return loadError(['status']) + panel('Захват DNS-запросов', kv([['Состояние', c[1], c[0]],
       ['Программа', cp.installed ? 'vward-dnscap' : 'не найдена'], ['Процесс', cp.running ? 'запущен' : 'не запущен'],
       ['Подтверждение работы', cp.fresh === true ? 'домены обработаны за последние 15 минут' : 'нет данных за 15 минут']]),
-      { desc: 'Узнаёт домены из DNS-запросов устройств для автоподбора. «Работает» - только когда за последние 15 минут обработаны домены.' });
+      { desc: 'Узнаёт домены из DNS-запросов устройств для автоподбора. «Работает» - только когда за последние 15 минут обработаны домены.' }) +
+      mgmtNote('Служба компонента «Маршрутизация»: включается и выключается вместе с ним (Система → Компоненты VWARD → Маршрутизация). Удалить отдельно нельзя - без неё не работает автоподбор.');
   },
   'd-doh'() {
     const d = (st().services || {}).doh || {}, c = compStatus(dohFacts(d, !!S.status && !S.cached.status));
@@ -1862,28 +2005,30 @@ const RENDER = {
   },
   'd-awg'() {
     const w = S.awg;
-    if (!w) return panel('Модуль AmneziaWG', empty('Загрузка…'));
+    if (!w) return panel('AmneziaWG', empty('Загрузка…'));
     const tl = w.tunnels || [];
     const row = t => '<li class="row link" role="button" tabindex="0" data-go="t-' + esc(t.name) + '"><div class="row-main"><b>' + esc(t.description || t.name) + '</b><small>' +
       esc([t.endpoint, t.handshake != null ? 'рукопожатие ' + agoText(t.handshake) : 'рукопожатия нет', t.rss_kb ? 'память ' + Math.round(t.rss_kb / 1024) + ' МБ' : ''].filter(Boolean).join(' · ')) +
       '</small></div><span class="pill ' + (t.running && t.handshake != null ? 'ok' : 'warn') + '">' + (t.running ? (t.handshake != null ? 'Работает' : 'Нет связи') : 'Не работает') + '</span>' + ico('chevron', 'chev') + '</li>';
-    return awgLostPanel() + nativePanel() + panel('Модуль AmneziaWG', kv([
-        ['Программа', w.installed ? 'vward-awg ' + (w.version || '') : 'не установлена', '', 'https://github.com/Ziegfe1d/VWARD/tree/dev/tools/vward-awg', '', w.installed ? 'процессор ' + (w.arch || '—') : 'скачается сама, когда понадобится'],
+    return awgLostPanel() + nativePanel() + panel('AmneziaWG', kv([
+        // Not installed: plain text, no link (ROADMAP 5.0a); «Установить» is in «Управление».
+        w.installed ? ['Программа', 'vward-awg ' + (w.version || ''), '', 'https://github.com/Ziegfe1d/VWARD/tree/dev/tools/vward-awg', '', 'процессор ' + (w.arch || '—')]
+          : ['Программа', 'не установлена', '', null, '', 'кнопка «Установить» ниже или сама при первом туннеле'],
         ['Туннели', fmtInt(tl.length)]]) + (tl.length ? '<ul class="rows">' + tl.map(row).join('') + '</ul>' : ''),
       { desc: 'Держит туннели AmneziaWG 3.x, пока прошивка Keenetic их не умеет (до KeeneticOS 5.2). В Keenetic такой туннель - подключение OpkgTun. Скорость ниже встроенного WireGuard.' }) + compPanel('awg') + soonPanel('awg');
   },
   'd-agents'() {
     const am = agentsMode(), pr = ((S.config && S.config.agents) || {}).proposed || [];
     return loadError(['config']) + agentsPanel() +
-      panel('Режим', '<p class="panel-desc">Все агенты</p>' + modeSlider('all', AGENTS.every(a => am[a[0]] === 'watch') ? 'watch' : 'act', 'Режим всех агентов') +
-        AGENTS.map(a => '<p class="panel-desc">' + esc(a[1]) + '</p>' + modeSlider(a[0], am[a[0]], a[1])).join('') + resultBox('agents'),
-        { desc: 'Наблюдение: агент находит неполадку и записывает, что сделал бы, но ничего не меняет. Действие: агент чинит сам.' }) +
-      panel('Протоколы', kv(AGENT_PROTOCOLS.map(r => [r[1], am[r[0]] === 'act' ? 'Действие' : 'Наблюдение', am[r[0]] === 'act' ? '' : 'warn', null, '', AGENT_NAME[r[0]] + ': ' + r[2] + ' → ' + r[3]])),
-        { desc: 'Известные случаи: признак и одно безопасное действие. В наблюдении агент только записывает его в «Предполагаемые действия».' }) +
+      panel('Режим', '<p class="panel-desc">Наблюдение: только замечает и пишет в журнал. Действие: сам исправляет.</p>' +
+        '<dl class="kv">' + ctrlRow('Все агенты', modeSlider('all', AGENTS.every(a => am[a[0]] === 'watch') ? 'watch' : 'act', 'Режим всех агентов'), '', 'stack') + '</dl>' +
+        '<dl class="kv compact-modes">' + AGENTS.map(a => ctrlRow(a[1], modeSlider(a[0], am[a[0]], a[1]))).join('') + '</dl>' + resultBox('agents')) +
+      panel('События и реакции', kv(AGENT_PROTOCOLS.map(r => [r[1], am[r[0]] === 'act' ? 'Действие' : 'Наблюдение', am[r[0]] === 'act' ? 'ok' : 'info', null, '', AGENT_NAME[r[0]] + ': ' + r[2] + ' → ' + r[3]])),
+        { desc: 'Что агент замечает и что делает. В наблюдении он только записывает это в «Предполагаемые действия».' }) +
       panel('Работают всегда', kv(AGENT_LOCKED.map(r => [r[0], 'Включено', 'ok', null, '', r[1]])),
         { desc: 'Без этого роутер может остаться без интернета или без доступа к Панели, поэтому режим наблюдения их не останавливает.' }) +
-      panel('Предполагаемые действия', pr.length ? kv(pr.slice(0, 50).map(p => [AGENT_NAME[p.agent] || p.agent, p.text, '', null, '', fmtStamp(p.at)])) : empty('Пока нет'),
-        { desc: 'Что агенты сделали бы в режиме наблюдения. Одно и то же действие записывается не чаще раза в час.' }) + soonPanel('d-agents');
+      panel('Предполагаемые действия', proposedHtml(pr),
+        { desc: 'Что агент сделал бы в режиме «Действие». Одно и то же действие записывается не чаще раза в час.' }) + soonPanel('d-agents');
   },
   // The VLESS module's programs (Xray), one row a tunnel: moved here from the tunnel's page,
   // which only says so when the program has stopped (owner 2026-10-17).
@@ -1894,7 +2039,8 @@ const RENDER = {
       esc(['Xray', t.rss_kb != null ? 'память ' + fmtKB(t.rss_kb) : ''].filter(Boolean).join(' · ')) + '</small></div><span class="pill ' + (t.running ? 'ok' : 'warn') + '">' +
       (t.running ? 'Работает' : 'Остановлен') + '</span></li>';
     return panel('Модуль VLESS', tl.length ? '<ul class="rows">' + tl.map(row).join('') + '</ul>' : empty('Туннелей VLESS нет'),
-      { desc: 'Держит туннели VLESS и Trojan: программа Xray на каждый туннель.' }) + compPanel('vless');
+      { desc: 'Держит туннели VLESS и Trojan: программа Xray на каждый туннель.' }) +
+      (compButtons('vless').length ? compPanel('vless') : mgmtNote('Программа Xray ставится сама при добавлении первого туннеля VLESS или Trojan; отключать пока нечего.'));
   },
   'd-agh'() {
     const a = S.ads || {}, g = S.agh, st1 = S.adsstats, ag = (S.security && S.security.external_services && S.security.external_services.adguard) || {};
@@ -1930,8 +2076,8 @@ const RENDER = {
         ['Время работы', fmtUptime(r.uptime_sec)]
       ])) +
       panel('Состояние', kv([
-        (() => { const n = ((S.config && S.config.components) || []).filter(x => x.enabled === false).length;
-          return ['Управление', n ? 'выключено: ' + n : 'всё включено', n ? 'warn' : '', 'd-control', '', 'все выключатели VWARD']; })(),
+        (() => { const off = ((S.config && S.config.components) || []).filter(x => x.enabled === false).map(x => (comp(x.id) || {}).name || x.id);
+          return ['Управление', off.length ? 'выключено: ' + off.join(', ') : 'всё включено', off.length ? 'warn' : '', 'd-control', '', 'все выключатели VWARD']; })(),
         ['Компоненты VWARD', 'по частям VWARD', '', 'd-components'],
         agentsRow(),
         ['Диагностика', dg.length ? (dg.length - bad) + ' из ' + dg.length + ' в норме' : 'не запускалась', bad ? 'warn' : '', 'd-diag'],
@@ -2095,7 +2241,8 @@ const RENDER = {
       '<button class="icon-btn" type="button" data-act="log-wrap" aria-pressed="' + logWrap + '" aria-label="Перенос строк" title="Перенос строк">' + ico('wrap') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-reload" aria-label="Обновить журнал" title="Обновить журнал">' + ico('refresh') + '</button></div></div><div class="panel">' +
       '<div class="chips" role="group" aria-label="Журнал">' + LOG_VIEW.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
-      '<pre class="logbox' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + esc(text == null ? 'Загрузка…' : text) + '</pre>' +
+      '<div class="chips log-view" role="group" aria-label="Что показывать"><button type="button" data-act="log-view" data-v="important" aria-pressed="' + logImportant + '">Важное</button><button type="button" data-act="log-view" data-v="all" aria-pressed="' + !logImportant + '">Все</button></div>' +
+      '<div class="logfeed' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + logFeed(text) + '</div>' +
       '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p>' + (logTab === 'all' ? logSources() : '') + '</div></section>' + journalPanel() + soonPanel('logs');
   },
 
@@ -2108,8 +2255,8 @@ const RENDER = {
     const sv = st().services || {};
     return panel('Задания по расписанию', kv([['Задания по расписанию', sv.crond && sv.supervisor ? 'Работают' : sv.crond ? 'Агент компонентов остановлен' : 'расписание не работает', sv.crond && sv.supervisor ? 'ok' : 'crit', 'd-cron']]),
         { desc: 'Нажмите, чтобы открыть задания.' }) +
-      panel('Диагностика', (d && d.checks ? '<ul class="rows">' + d.checks.map(x => { const to = x.id === 'smartdns' && /IP-категория/.test(x.detail || '') ? 'd-ipcats' : map[x.id]; return '<li class="row' + (to ? ' link" role="button" tabindex="0" data-go="' + to + '"' : '"') + '><div class="row-main"><b>' + esc(x.label) + '</b><small>' + esc(x.detail || '') + '</small></div><span class="pill ' + (x.status === 'PASS' ? 'ok' : x.status === 'FAIL' ? 'crit' : 'warn') + '">' + (x.status === 'PASS' ? 'Работает' : x.status === 'FAIL' ? 'Не работает' : 'Внимание') + '</span>' + (to ? ico('chevron', 'chev') : '') + '</li>'; }).join('') + '</ul>' : empty(S.errors.diag ? 'Диагностика не выполнена: ' + S.errors.diag : 'Загрузка…')) +
-      '<div class="panel-actions">' + btn('diag-run', 'check', 'Запустить проверку', 'primary') + '</div>') +
+      panel('Диагностика', (d && d.checks ? '<ul class="rows">' + d.checks.map(x => { const to = x.id === 'smartdns' && /IP-категория/.test(x.detail || '') ? 'd-ipcats' : map[x.id]; return '<li class="row' + (to ? ' link" role="button" tabindex="0" data-go="' + to + '"' : '"') + '><div class="row-main"><b>' + esc(x.label) + '</b><small>' + esc(x.detail || '') + '</small></div><span class="pill ' + (x.status === 'PASS' ? 'ok' : x.status === 'FAIL' ? 'crit' : 'warn') + '">' + (x.status === 'PASS' ? 'Работает' : x.status === 'FAIL' ? 'Не работает' : x.status === 'FOREIGN' ? 'Чужой маршрут' : 'Внимание') + '</span>' + (to ? ico('chevron', 'chev') : '') + '</li>'; }).join('') + '</ul>' : empty(S.errors.diag ? 'Диагностика не выполнена: ' + S.errors.diag : 'Загрузка…')) +
+      diagRunNote() + '<div class="panel-actions">' + btn('diag-run', 'check', DIAG_RUN && DIAG_RUN.busy ? 'Проверка выполняется…' : 'Запустить проверку', 'primary', DIAG_RUN && DIAG_RUN.busy ? ' disabled aria-busy="true"' : '') + '</div>') +
       panel('Журналы', kv([['Технические журналы', 'для сохранения и отправки', '', 'logs']]), { desc: 'Журналы как есть, для диагностики.' });
   },
   'd-stability'() {
@@ -2125,8 +2272,17 @@ const RENDER = {
       w.pid ? (w.limit_kb && w.rss_kb > w.limit_kb ? 'crit' : 'ok') : '', '', '',
       [w.pid && w.base_kb > 0 ? 'обычно ' + fmtKB(w.base_kb) : '', w.pid ? 'процессор ' + (w.cpu_x100 / 100).toFixed(1).replace('.', ',') + '%' : '',
        'предел ' + fmtKB(w.limit_kb), w.downs ? 'пропадал ' + times(w.downs, 'раз', 'раза', 'раз') : '', w.leaks ? times(w.leaks, 'утечка', 'утечки', 'утечек') : ''].filter(Boolean).join(' · ')]);
-    const cpu = (d.cpu || []).slice().sort((a, b) => b.cs - a.cs).map(c => [STAB_JOB[c.component] || c.component, (c.cs / 100).toFixed(1).replace('.', ',') + ' с', '', '', '',
-      times(c.runs, 'запуск', 'запуска', 'запусков') + ' с загрузки роутера']);
+    // Load (owner 02.11): the total in hours and minutes, the average of one run and the share of
+    // the router's uptime; a run of 5 s and more is marked.
+    const up = num((st().router || {}).uptime_sec);
+    const cpu = (d.cpu || []).slice().sort((a, b) => b.cs - a.cs).map(c => { const sec = c.cs / 100, per = c.runs ? sec / c.runs : 0;
+      return [STAB_JOB[c.component] || c.component, fmtDur(sec), per >= 5 ? 'warn' : '', '', '',
+        [times(c.runs, 'запуск', 'запуска', 'запусков'), c.runs ? '≈ ' + fmtDur(per) + ' за запуск' : '', up ? (Math.round(sec / up * 1000) / 10).toString().replace('.', ',') + ' % времени работы' : ''].filter(Boolean).join(' · ')]; });
+    // Memory (owner 02.11): every running program of VWARD and AdGuard Home, resident and in swap.
+    const mem = d.mem || {}, progs = (d.progs || []).slice().sort((a, b) => (b.rss_kb + b.swap_kb) - (a.rss_kb + a.swap_kb));
+    const memRow = mem.MemTotal ? ['Память роутера', 'свободно ' + fmtKB(mem.MemAvailable) + ' из ' + fmtKB(mem.MemTotal), mem.MemAvailable < mem.MemTotal * 0.15 ? 'warn' : '', '', '',
+      mem.SwapTotal ? 'swap занят ' + fmtKB(mem.SwapTotal - mem.SwapFree) + ' из ' + fmtKB(mem.SwapTotal) : 'swap нет'] : null;
+    const progRows = progs.map(p => [PROG_NAME[p.name] || p.name, fmtKB(p.rss_kb), '', '', '', p.swap_kb ? 'ещё ' + fmtKB(p.swap_kb) + ' в swap' : '']);
     const ev = (d.events || []).map(e => '<li class="row"><div class="row-main"><b>' + esc(stabEvent(e.what)) + '</b><small>' + esc(e.at) + '</small></div></li>').join('');
     return panel('Итог', kv([
       ['За сутки', idx(day), stabCls(day && day.index)], ['За неделю', idx(week), stabCls(week && week.index)],
@@ -2142,8 +2298,9 @@ const RENDER = {
         ['Нагрузка', st.load_x100 != null ? (st.load_x100 / 100).toFixed(2).replace('.', ',') : '—', st.busy ? 'warn' : '', '', '', st.busy ? 'роутер занят: необязательная работа VWARD ждёт' : st.load_max_x100 ? 'больше всего ' + (st.load_max_x100 / 100).toFixed(2).replace('.', ',') : ''],
         ['Событий обработано', String(st.events || 0), '', '', '', (st.link_events || 0) + ' от интерфейсов']
       ]), { desc: sen.running ? 'Следит за памятью и нагрузкой каждые 2 секунды, за интерфейсами — мгновенно, за DNS — каждые 30 секунд.' : 'Агент ставится сам в течение часа; пока его нет, проверки идут раз в минуту.' }) +
-      (watch.length ? panel('Программы VWARD', kv(watch)) : '') +
-      (cpu.length ? panel('Нагрузка', kv(cpu), { desc: 'Сколько процессора потратило каждое задание VWARD со всем, что оно запускало.' }) : '') +
+      (progRows.length || memRow ? panel('Программы VWARD', kv([memRow].concat(progRows)), { desc: 'Память каждой работающей программы VWARD и AdGuard Home (резидентная и в swap), одним способом.' }) : '') +
+      (watch.length ? panel('Под наблюдением агента', kv(watch)) : '') +
+      (cpu.length ? panel('Нагрузка', kv(cpu), { desc: 'Суммарное время работы процессора каждого задания VWARD с загрузки роутера' + (up ? ' (роутер работает ' + fmtUptime(up) + ')' : '') + '. Отмечены задания дольше 5 с за запуск.' }) : '') +
       panel('Последние события', ev ? '<ul class="rows">' + ev + '</ul>' : empty('Событий пока нет'));
   },
   'd-cron'() {
@@ -2183,20 +2340,20 @@ const RENDER = {
       '<p class="panel-desc">Это обычное состояние новой установки: VWARD сам списков не создаёт и чужие не переносит. Список появляется, когда вы включаете сервис или добавляете свои домены.</p>' +
       '<div class="panel-actions">' + '<button class="btn small" type="button" data-go="d-services">' + ico('plus') + 'Сервисы</button><button class="btn small" type="button" data-go="d-mydomains">' + ico('plus') + 'Мои домены</button>' + '</div>') + soonPanel('lists');
     const modes = mine.map(listMode), common = modes.length && modes.every(m => m === modes[0]) ? modes[0] : '';
-    const busy = LISTBULK.busy, picked = mine.filter(l => LISTPICK.has(l.name));
-    const mineRow = l => ctrlRow(l.description || l.name, choiceSlider('list-mode:' + l.name, LIST_MODES, listMode(l), 'Путь списка ' + (l.description || l.name)),
-      fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + ' · ' + path(l) + (l.watch && l.auto ? ' · переведён на VPN автоматически' : ''));
-    const pick = l => '<label class="check"><input type="checkbox" data-list-pick="' + esc(l.name) + '"' + (LISTPICK.has(l.name) ? ' checked' : '') + (ok && !busy ? '' : ' disabled') + '> ' + esc(l.description || l.name) + ' <small>' + fmtInt(l.count) + '</small></label>';
+    const busy = LISTBULK.busy;
+    // One list of all lists (owner 02.11): every row opens its list (a list under VWARD's management
+    // was a switch row without a link - Supercell could not be opened); under a managed list its own
+    // «Авто | VPN | Провайдер»; «под управлением VWARD» is a small mark; no check boxes here.
+    const own = cfgRoute().group || prof().policy_group;
+    const one = l => { const m = mine.indexOf(l) >= 0;
+      return '<div class="list-item">' + row(l).replace('</small>', '</small>' + (m ? '<small class="tag-mark">под управлением VWARD</small>' : l.name === own ? '' : '<small class="tag-mark off">не под управлением VWARD</small>')) +
+        (m ? choiceSlider('list-mode:' + l.name, LIST_MODES, listMode(l), 'Путь списка ' + (l.description || l.name)) : '') + '</div>'; };
     return cfgNote() + listDupPanel(items) +
-      (mine.length ? panel('Списки VWARD', '<dl class="kv">' +
-        ctrlRow('Все списки VWARD', choiceSlider('list-mode-all', LIST_MODES, common, 'Путь всех списков VWARD'), common ? '' : 'у списков разный путь') +
-        mine.map(mineRow).join('') + '</dl>' + (busy ? '<p class="panel-desc">' + esc(busy) + '</p>' : '') +
-        '<div class="list-picks">' + mine.map(pick).join('') + '</div><div class="panel-actions">' +
-        btn('ask', 'trash', 'Удалить выбранные', 'small danger', ' data-confirm="lists-del"' + (picked.length && ok && !busy ? '' : ' disabled')) + '</div>' +
-        (confirm && confirm.id === 'lists-del' ? confirmBox('lists-del', listDelText(picked), 'Удалить', true) : '') + resultBox('lists'),
-        { desc: 'Авто - путь выбирает VWARD, домены не удаляются. Через VPN и Напрямую - путь закреплён.' }) : '') +
-      panel(mine.length ? 'Другие списки' : 'Доменные списки', rest.length ? '<ul class="rows">' + rest.map(row).join('') + '</ul>' : empty('Нет'),
-        { desc: 'Списки Keenetic и сервисов. VWARD меняет их только по вашему выбору на странице списка.' }) + soonPanel('lists');
+      panel('Доменные списки', (mine.length ? '<dl class="kv">' +
+        ctrlRow('Все списки', choiceSlider('list-mode-all', LIST_MODES, common, 'Путь всех списков VWARD'), common ? 'списки под управлением VWARD' : 'Разные: у списков разный путь', 'stack') + '</dl>' : '') +
+        (busy ? '<p class="panel-desc">' + esc(busy) + '</p>' : '') +
+        '<div class="list-all">' + items.map(one).join('') + '</div>' + resultBox('lists'),
+        { desc: 'Авто - путь выбирает VWARD по проверке, домены не удаляются. VPN и Провайдер - путь закреплён. Путь меняется у списков под управлением VWARD; другой список можно взять под управление на его странице.' }) + soonPanel('lists');
   },
   'd-wanrec'() {
     const gp = Object.assign({ CONFIRM_FAILURES: 3, RENEW_COOLDOWN: 600, BOUNCE_COOLDOWN: 1800, MAX_RENEW_HOUR: 3, MAX_BOUNCE_HOUR: 2, MAX_BOUNCE_DAY: 6 }, (cfg().wan_guard || {}).params);
@@ -2538,7 +2695,7 @@ function wanNowRows() {
   const busy = String(runningId || '').startsWith('wan-') ? runningId : '';
   return '<dl class="kv">' +
         ctrlRow('Обновить адрес', btn('ask', 'refresh', busy === 'wan-renew' ? 'Обновляем…' : 'Обновить', 'small', ' data-confirm="wan-renew"' + (busy ? ' disabled' : '')), 'повторный запрос адреса у провайдера (DHCP), соединение не разрывается') +
-        ctrlRow('Переподключить', btn('ask', 'undo', busy === 'wan-bounce' ? 'Переподключаем…' : 'Переподключить', 'small', ' data-confirm="wan-bounce"' + (busy ? ' disabled' : '')), 'интерфейс провайдера выключается и включается, интернета нет около 10 с') + '</dl>' +
+        ctrlRow('Переподключить', btn('ask', 'power', busy === 'wan-bounce' ? 'Переподключаем…' : 'Переподключить', 'small', ' data-confirm="wan-bounce"' + (busy ? ' disabled' : '')), 'интерфейс провайдера выключается и включается, интернета нет около 10 с') + '</dl>' +
         (confirmBox('wan-renew', 'Попросить у провайдера новый адрес? Связь может прерваться на несколько секунд.', 'Обновить') ||
          confirmBox('wan-bounce', 'Переподключить интернет? Он пропадёт примерно на 10 секунд, домашняя сеть продолжит работать.', 'Переподключить') || '');
 }
@@ -3033,12 +3190,14 @@ function compPreview(id, act) {
 }
 function tunUseExtraAll(names) { return names.filter(n => n !== prof().tunnel_interface).reduce((a, n) => a + tunUseExtra(n), 0); }
 function compButtons(id) {
-  const sv = st().services || {}, b = (act, cls) => btn('comp-ask', act === 'remove' ? 'trash' : act === 'disable' ? 'close' : 'check', COMP_ACT[act], cls || '', ' data-comp="' + id + '" data-cact="' + act + '"' + (cfgOk() && !compBusy() ? '' : ' disabled'));
+  const sv = st().services || {}, b = (act, cls) => btn('comp-ask', act === 'remove' ? 'trash' : act === 'reinstall' ? 'refresh' : act === 'install' ? 'box' : 'power', COMP_ACT[act], cls || '', ' data-comp="' + id + '" data-cact="' + act + '"' + (cfgOk() && !compBusy() ? '' : ' disabled'));
   if (id === 'agh') {
     const none = aghState()[1] === ST.none[1];
     if (none) return [b('install', 'primary')];
     return [sv.adguard_disabled ? b('enable', 'primary') : b('disable'), b('reinstall'), b('reset'), b('remove', 'danger')];
   }
+  // Not installed (owner 02.11): «Установить» only - for AmneziaWG, whose program VWARD downloads.
+  if (id === 'awg' && S.awg && !S.awg.installed) return [b('install', 'primary')];
   if (!compModTunnels(id).length && !modOff(id)) return [];
   return [modOff(id) ? b('enable', 'primary') : b('disable')];
 }
@@ -3051,14 +3210,14 @@ function compPanel(id) {
   const alt = ((st().wg || {}).interfaces || []).filter(t => t.name !== cur && !compModTunnels(id).includes(t.name) && isTrue(t.connected));
   let body = '';
   if (c) {
-    body = '<div class="confirm' + (c.act === 'remove' ? ' danger' : '') + '"><span>' + esc(c.act === 'install' ? 'Установить AdGuard Home? VWARD скачает официальную сборку для этого роутера, займёт свободные порты (веб-интерфейс 3000, DNS 65053 или следующие) и подключит его к Keenetic.' : compPreview(id, c.act)) + '</span>' +
+    body = '<div class="confirm' + (c.act === 'remove' ? ' danger' : '') + '"><span>' + esc(c.act === 'install' ? (id === 'awg' ? 'Установить модуль AmneziaWG? VWARD скачает программу vward-awg для этого роутера и сверит её контрольную сумму. Туннели и маршруты не меняются.' : 'Установить AdGuard Home? VWARD скачает официальную сборку для этого роутера, займёт свободные порты (веб-интерфейс 3000, DNS 65053 или следующие) и подключит его к Keenetic.') : compPreview(id, c.act)) + '</span>' +
       (['remove', 'reinstall', 'reset'].includes(c.act) ? '<label class="check-row"><input type="checkbox" data-comp-backup' + (c.backup === false ? '' : ' checked') + '> Сохранить копию настроек перед этим</label>' : '') +
       (c.act === 'disable' && inMod ? '<label class="check-row">Туннель по умолчанию ' + esc(tunLabel(cur)) + ' в этом модуле. Маршруты VWARD: ' + sel('data-comp-to', 'Куда перевести маршруты', alt.map(t => [t.name, 'через ' + tunLabel(t.name)]).concat([['direct', 'напрямую через провайдера']]), c.to || (alt[0] ? alt[0].name : 'direct')) + '</label>' : '') +
       (needLogin ? '<p class="panel-desc">Логин и пароль для входа в AdGuard Home (VWARD сохранит их на роутере и будет входить сам):</p><input class="input" name="comp-login" placeholder="логин" aria-label="Логин AdGuard Home" autocomplete="username"><input class="input" name="comp-password" type="password" placeholder="пароль, от 8 символов" aria-label="Пароль AdGuard Home" autocomplete="new-password">' : '') +
       '<button class="btn small ' + (c.act === 'remove' ? 'danger' : 'primary') + '" type="button" data-act="comp-yes">' + esc(COMP_ACT[c.act]) + '</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>';
   } else body = '<div class="panel-actions even">' + btns.join('') + '</div>';
   return panel('Управление', body + (busy ? '<p class="result-note">Идёт операция: ' + esc(String(busy).replace(/^agh-/, 'AdGuard Home: ').replace(/^module-/, 'модуль ')) + '. Остальные кнопки ждут её окончания.</p>' : '') + resultBox('comp-' + id),
-    { desc: id === 'agh' ? 'Установка, отключение и удаление со всеми зависимостями: DNS Keenetic, «Реклама», Smart DNS.' : 'Отключение выключает туннели модуля и переводит их маршруты; включение возвращает их.' });
+    { desc: id === 'agh' ? 'Установка, отключение и удаление со всеми зависимостями: DNS Keenetic, «Реклама», Smart DNS.' : id === 'awg' && S.awg && !S.awg.installed ? 'Программа модуля не установлена; «Установить» скачает её. Без неё туннели AmneziaWG не запускаются.' : 'Отключение выключает туннели модуля и переводит их маршруты; включение возвращает их.' });
 }
 async function compRun(c) {
   const f = { op: 'comp', id: c.comp, action: c.act, confirm: 'COMPONENT_OP' };
@@ -3083,14 +3242,22 @@ document.addEventListener('change', e => {
   if (e.target.matches('[data-comp-backup]')) confirm.backup = e.target.checked;
   if (e.target.matches('[data-comp-to]')) confirm.to = e.target.value;
 });
+// «Управление» of a component VWARD cannot operate from the Panel (owner 02.11: the same section
+// everywhere; an action that does not apply is not shown - here it is said why).
+function mgmtNote(text) { return panel('Управление', '<p class="panel-desc">' + esc(text) + '</p>'); }
 function compCard(id, name, kind, desc) {
   const f = pkgFacts(id), c = (((st().services || {}).components) || []), perm = k => { const x = c.find(r => r.id === 'entware-auto-' + k); return x ? x.label : 'Нет данных'; };
   const sel = kind === 'dnsmasq' ? dnsMode() === 'dnsmasq' : false;
   const s = compStatus(Object.assign({}, f, { selected: sel, works: sel ? (f.running ? null : false) : null }));
-  return loadError(['status']) + panel(name, kv([['Состояние', s[1], s[0]], ['Версия', f.installed && f.version && f.version !== '-' ? f.version : '—'],
-      ['Источник', 'пакет Entware'], ['Использование', kind === 'dnsmasq' ? (sel ? 'выбран активным DNS' : 'не выбран') : 'туннелей нет'],
-      ['Автопроверка обновлений', perm('check')], ['Автозагрузка обновлений', perm('download')], ['Автоустановка обновлений', perm('apply')],
-      ['Диагностика', ((c.find(r => r.id === id) || {}).label) || 'Нет данных']]), { desc: desc });
+  // Not installed (owner 02.11): only what tells it - state, source, use; no update rows, no
+  // «Диагностика: Не установлен», no «part of the data» warning.
+  const rows = [['Состояние', s[1], s[0]]].concat(f.installed ? [['Версия', f.version && f.version !== '-' ? f.version : '—']] : [],
+    [['Источник', 'пакет Entware'], ['Использование', kind === 'dnsmasq' ? (sel ? 'выбран активным DNS' : 'не выбран') : 'туннелей нет']],
+    f.installed ? [['Автопроверка обновлений', perm('check')], ['Автозагрузка обновлений', perm('download')], ['Автоустановка обновлений', perm('apply')],
+      ['Диагностика', ((c.find(r => r.id === id) || {}).label) || 'Нет данных']] : []);
+  return (f.installed ? loadError(['status']) : '') + panel(name, kv(rows), { desc: desc }) +
+    mgmtNote(f.installed ? 'Обновление пакета - в «Обновления программ». Удаление и сброс из Панели VWARD появятся в следующем выпуске.' :
+      'Установка пакета из Панели VWARD появится в следующем выпуске; сейчас пакет ставится вручную через Entware.');
 }
 const TUN_TYPE = { wireguard: 'WireGuard', openvpn: 'OpenVPN', sstp: 'SSTP', pptp: 'PPTP', l2tp: 'L2TP', ike: 'IPsec', ipsec: 'IPsec', proxy: 'Proxy', opkgtun: 'OpkgTun' };
 const awgOf = name => ((S.awg && S.awg.tunnels) || []).find(x => x.name === name);
@@ -3952,7 +4119,9 @@ function render() {
   back.setAttribute('aria-label', p.parent ? 'Назад: ' + page(p.parent).title : 'Назад к обзору');
   const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('deps-') ? depsPage(comp(current.slice(5))) : current.startsWith('l-') ? listPage(current.slice(2)) : current.startsWith('ip-') ? addrPage(current.slice(3)) : current.startsWith('s-') ? servicePage(current.slice(2)) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('tn-') ? tunnelNetsPage(current.slice(3)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
   // The page title and, when the page's own block has a long explanation, its «?» right by it.
-  $('pageTitle').innerHTML = '<span class="page-title-text">' + esc(p.title) + '</span>' + (PAGEQ ? qBtn(PAGEQ.k, PAGEQ.title) : '');
+  // No «?» in the top bar on any page (owner 02.11): back, title, search, bell, theme; the page's
+  // own explanation is shown in its block instead.
+  $('pageTitle').innerHTML = '<span class="page-title-text">' + esc(p.title) + '</span>';
   patchContent(offNotice() + html, rendered !== current);
   rendered = current;
   // A chosen chip scrolled out of its row is brought back into view (the row only, not the page).
@@ -4034,7 +4203,7 @@ async function loadLog(tab, force) {
   }
   if (current === 'logs' && logTab === tab) {
     const b = $('logBox'), at = $('logAt');
-    if (b && at) { if (b.textContent !== S.logs[tab]) b.textContent = S.logs[tab]; at.textContent = logStamp(tab); } else render();
+    if (b && at) { if (b.dataset.raw !== S.logs[tab]) { b.innerHTML = logFeed(S.logs[tab]); b.dataset.raw = S.logs[tab]; } at.textContent = logStamp(tab); } else render();
   }
   return S.logs[tab];
 }
@@ -4042,7 +4211,7 @@ async function loadLog(tab, force) {
 function logSources() {
   if (!LOGINFO.length) return '';
   const st1 = { empty: 'записей нет', missing: 'ещё не создан', error: 'не читается' };
-  return '<details class="log-sources"><summary>' + (logNewest ? 'Сначала новые' : 'Сначала старые') + ' · последние события по журналам</summary><dl class="kv">' +
+  return '<details class="log-sources"><summary>' + ico('sort', 'log-sign') + '<span>' + (logNewest ? 'Сначала новые' : 'Сначала старые') + '</span><small>источники</small>' + ico('chevron', 'chev') + '</summary><dl class="kv">' +
     LOGINFO.map(i => '<div class="kv-row"><dt>' + esc(i.label) + '</dt><dd' + (i.state === 'error' ? ' class="warn"' : '') + '>' + esc(i.last != null ? fmtTime(new Date(i.last).toISOString()) : st1[i.state]) + '</dd></div>').join('') + '</dl></details>';
 }
 function logStamp(tab) {
@@ -4552,7 +4721,16 @@ document.addEventListener('click', e => {
   if (t.dataset.filesUp) { if (FILES.path) filesGo(FILES.root, FILES.path.split('/').slice(0, -1).join('/')); else filesGo('', ''); return; }
   if (t.dataset.backupRestore) { confirm = { id: 'backup-restore', name: t.dataset.backupRestore }; render(); return; }
   if (t.dataset.aghFilterRm) { confirm = { id: 'agh-filter-remove', url: t.dataset.aghFilterRm }; render(); return; }
-  if (t.dataset.listDom) { const v = t.dataset.dom, how = t.dataset.listDom; t.disabled = true; cfgSet({ op: 'list-domain', action: how, target: current.slice(2), value: v }, how === 'remove' ? v + ' убран из списка' : 'Исключение ' + v + ' убрано', ['listd', 'lists']); return; }
+  if (t.dataset.listDom) {
+    const v = t.dataset.dom, how = t.dataset.listDom, target = current.slice(2); t.disabled = true;
+    // The cross removes at once; «Отменить» in the notification brings it back for a few seconds (owner 02.11).
+    apiPost('config', { op: 'list-domain', action: how, target: target, value: v }).then(x => {
+      if (!x.ok) { toast('Не сохранено: ' + errText(x)); return; }
+      popup({ sev: 'ok', title: how === 'remove' ? v + ' убран из списка' : 'Исключение ' + v + ' убрано',
+        btn: ['Отменить', () => cfgSet({ op: 'list-domain', action: how === 'remove' ? 'add' : 'exclude', target: target, value: v }, v + ' возвращён', ['listd', 'lists'])] });
+    }, e => toast('Ошибка: ' + e.message)).then(() => Promise.all(['config', 'listd', 'lists'].map(k => load(k, true)))).then(render);
+    return;
+  }
   if (t.dataset.cfgOp === 'tsubnet') { t.disabled = true; tunnelSubnet(current.slice(current.startsWith('tn-') ? 3 : 2), 'remove', t.dataset.cfgTarget); return; }
   if (t.dataset.myPin) { const d = t.dataset.myPin, on = t.getAttribute('aria-pressed') !== 'true'; t.disabled = true; cfgSet({ op: 'force-vpn', action: on ? 'add' : 'remove', target: d }, on ? d + ' всегда идёт через VPN' : d + ': снято «всегда через VPN»', ['route']); return; }
   if (t.dataset.myRm) { t.disabled = true; myRemove(t.dataset.myRm); return; }
@@ -4615,6 +4793,7 @@ document.addEventListener('click', e => {
   else if (a === 'ai-answer') aiAnswer(t.dataset.way);
   else if (a === 'ai-room') { if (!SVC.busy) aiJob(t.dataset.ai, 'dns', aiName(t.dataset.ai) + ': Smart DNS'); }
   else if (a === 'ai-dns-clear') smartdnsServer('clear', '');
+  else if (a === 'prop-more') { PROP_ALL = true; render(); }
   else if (a === 'vsrv-open') { const k = t.dataset.name + '|' + t.dataset.code; if (VOPEN.has(k)) VOPEN.delete(k); else VOPEN.add(k); render(); }
   else if (a === 'tunnel-probe') {
     const n = t.dataset.name; S.tprobe[n] = { busy: true }; render();
@@ -4654,7 +4833,7 @@ document.addEventListener('click', e => {
   else if (a === 'refresh-hints') runLong('routes', 'control', { op: 'refresh-hints' }, 'control-data', 'Подсказки обновлены').then(() => load('route', true)).then(render);
   else if (a === 'update-op') updateOp(t.dataset.op);
   else if (a === 'panel-reload') location.reload();
-  else if (a === 'diag-run') { load('diag', true).then(() => { render(); toast('Диагностика выполнена'); }); }
+  else if (a === 'diag-run') diagRun();
   else if (a === 'agh-clients') aghClientsOp('sync');
   else if (a === 'ads-job') adsControl({ op: 'enqueue', job: t.dataset.job }, 'Задание поставлено в очередь', 'ads-job');
   else if (a === 'ads-job-run') { t.disabled = true; adsControl({ op: 'job-run' }, 'Очередь запущена', 'ads-job-run'); }
@@ -4664,6 +4843,7 @@ document.addEventListener('click', e => {
   else if (a === 'log-order') { logNewest = !logNewest; store.set('vward-log-order', logNewest ? 'newest' : 'oldest'); loadLog('all', true); }
   else if (a === 'log-wrap') { logWrap = !logWrap; t.setAttribute('aria-pressed', logWrap); const b = $('logBox'); if (b) b.classList.toggle('nowrap', !logWrap); }
   else if (a === 'log-copy') copyText(S.logs[logTab] || '');
+  else if (a === 'log-view') { logImportant = t.dataset.v !== 'all'; store.set('vward-log-view', logImportant ? 'important' : 'all'); render(); }
   else if (a === 'log-share') {
     const text = S.logs[logTab] || '';
     if (navigator.share) navigator.share({ title: 'Журнал VWARD: ' + logLabel(logTab), text: text }).catch(err => { if (err && err.name !== 'AbortError') toast('Поделиться не удалось - используйте «Сохранить»'); });

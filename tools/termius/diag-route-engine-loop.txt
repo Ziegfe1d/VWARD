@@ -1,0 +1,75 @@
+Diagnostic only, changes nothing. Two pastes (termius-standard 1.7).
+It shows what restarts the route engine: the events around each
+cycle, the processes with their parents, the locks, the cron callers.
+No secrets are printed. Paste 1, then paste 2.
+
+=== PASTE 1 ===
+cat > /tmp/dg3.sh <<'EOF'
+clear
+PFX="vward-diag3"
+OUT="/tmp/${PFX}-$(date +%Y%m%d-%H%M%S).txt"
+LAST="/tmp/last_result.txt"
+MAXB=30000
+KEEP=5
+ESC=$(printf '\033')
+ls -1t /tmp/${PFX}-*.txt 2>/dev/null |
+  tail -n +"$KEEP" |
+  while read -r F; do rm -f "$F"; done
+: > "$OUT"
+ln -sfn "$OUT" "$LAST"
+ln -sfn "$OUT" "/tmp/last_${PFX}.txt"
+send_out() {
+  [ -s "$OUT" ] || return 1
+  sed "s/${ESC}\[[0-9;?]*[a-zA-Z]//g" "$OUT" |
+    tail -c "$MAXB" | base64 | tr -d '\r\n' |
+    { read -r B; printf '\033]52;c;%s\a' "$B"; }
+}
+on_abort() {
+  trap '' INT TERM HUP
+  send_out
+  printf '\n[ ABORTED ]: PARTIAL IN %s\n' "$LAST"
+  exit 130
+}
+trap on_abort INT TERM HUP
+EOF
+
+=== PASTE 2 ===
+cat >> /tmp/dg3.sh <<'EOF'
+E=/opt/var/log/vward-route-engine-events.log
+{
+echo " VWARD DIAG-3 loop $(date '+%Y-%m-%d %H:%M:%S')"
+echo "load: $(cut -d' ' -f1-3 /proc/loadavg)"
+echo "=== 1. LOOP LINES (last 40) ==="
+K='[|](START|STOP|STOP_REQUEST|WATCHDOG_RESTART|'
+K="${K}START_FAILED|PERSIST_RESTORE_LOCK_FAIL)([|]|\$)"
+grep -E "$K" "$E" | tail -n 40 | cut -c1-230
+echo "=== 2. ENGINE PROCESSES (pid ppid) ==="
+S=/opt/bin/vward-route-engine.sh
+for P in $(ps w | awk -v s=$S \
+  '$6==s || $7==s {print $1}'); do
+  read -r _ _ _ PP _ < /proc/$P/stat
+  echo "pid=$P ppid=$PP"
+done
+ps w | grep -E 'tcpdump|dnscap|S91' |
+  grep -v grep | cut -c1-110
+echo "=== 3. LOCKS ==="
+for L in /tmp/vward-route-engine.lock \
+ /tmp/vward-route-change.lock \
+ /tmp/S91vward-route-engine.control.lock; do
+  P=$(cat $L/pid 2>/dev/null)
+  if [ -n "$P" ] && kill -0 "$P" 2>/dev/null
+  then A=alive; else A=none_or_dead; fi
+  echo "$L pid=${P:-none} $A"
+done
+echo "=== 4. CRON CALLERS ==="
+cat /opt/var/spool/cron/crontabs/root \
+ /opt/etc/crontabs/root 2>/dev/null |
+ grep -E 'S91|supervisor|route-engine' |
+ cut -c1-110
+} 2>&1 | tee -a "$OUT"
+echo "SUMMARY: lines=$(wc -l < "$OUT")"
+send_out
+echo "RESULT SENT (OSC52)"
+echo "RAW: $LAST"
+EOF
+(sh -n /tmp/dg3.sh && sh /tmp/dg3.sh)

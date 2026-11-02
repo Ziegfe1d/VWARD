@@ -758,8 +758,20 @@ lost_sweep()
         engine_of "$ls_if" >/dev/null && continue
         ls_link=$(vward_interface_state "$ls_if" 2>/dev/null | sed -n 2p)
         [ "$ls_link" != up ] || continue
-        if [ "$MODE" != AUTO ]; then
-            vward_agent_acts network "lost-move:$ls_if" "Туннель $ls_if без настроек: перенести его списки и подсети на туннель по умолчанию" || :
+        # Never without the owner (02.11.2026): moving another tunnel's lists and subnets onto the
+        # default tunnel changes what goes through it (the owner keeps his own subnets and DNS rules
+        # there). Only proposed, in either agent mode, unless VWARD_LOST_MOVE=auto in device.conf.
+        if [ "$MODE" != AUTO ] || [ "${VWARD_LOST_MOVE:-ask}" != auto ]; then
+            if [ "$(vward_agent_mode network 2>/dev/null)" = act ]; then
+                [ -n "$(find "$DIR/lost-asked.$ls_if" -mmin -1440 2>/dev/null)" ] || {
+                    : > "$DIR/lost-asked.$ls_if" 2>/dev/null
+                    vward_note warn "Туннель «{t}» без настроек" \
+                        "Его списки и подсети идут напрямую через провайдера. VWARD сам их не переносит: перенесите на другой туннель или удалите туннель в его карточке." \
+                        "t-$ls_if"
+                }
+            else
+                vward_agent_acts network "lost-move:$ls_if" "Туннель $ls_if без настроек: перенести его списки и подсети на туннель по умолчанию (только с вашего подтверждения)" || :
+            fi
             continue
         fi
         ls_out=$(VWARD_TUNNEL_BY_GUARD=1 "$HELPER" tunnel-delete "$ls_if" vpn move 2>/dev/null | tail -n 1)

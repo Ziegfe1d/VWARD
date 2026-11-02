@@ -25,6 +25,8 @@ STATE_DIR="/opt/var/lib/vward/route-engine"
 MANUAL="$STATE_DIR/manual-domains.txt"
 ADAPTIVE="$STATE_DIR/adaptive-domains.txt"
 PERSIST="$STATE_DIR/adaptive-persist.txt"
+RU_BACKUP="$STATE_DIR/adaptive-persist.ru-backup.txt"
+RU_REMOVED="$STATE_DIR/adaptive-ru-removed.txt"
 REFRESH_TS="$STATE_DIR/groups-refresh"
 
 EVENT_LOG="/opt/var/log/vward-route-engine-events.log"
@@ -694,6 +696,23 @@ restore_time_up()
     [ $((RS_NOW - RS_T0)) -ge "$RS_MAX" ]
 }
 
+# ru_clean_files LIST: the names of LIST out of the saved AdaptiveAuto list and its cache (each
+# written to a temporary file and moved over, a failed write leaves the file as it was), and their
+# state files gone.
+ru_clean_files()
+{
+    for rc_f in "$PERSIST" "$ADAPTIVE"; do
+        [ -n "$rc_f" ] && [ -s "$rc_f" ] || continue
+        awk -v rf="$1" 'BEGIN {while ((getline l < rf) > 0) ru[l] = 1} !(tolower($0) in ru)' "$rc_f" > "$rc_f.ru.$$" 2>/dev/null &&
+            mv -f "$rc_f.ru.$$" "$rc_f" 2>/dev/null || rm -f "$rc_f.ru.$$" 2>/dev/null
+    done
+    while IFS= read -r rc_h; do
+        [ -n "$rc_h" ] || continue
+        state_path "$rc_h"
+        rm -f "$SF_OPT" "$SF_TMP" 2>/dev/null
+    done < "$1"
+}
+
 restore_adaptive_from_persist()
 {
     if [ ! -f "$PERSIST" ]; then
@@ -740,6 +759,34 @@ restore_adaptive_from_persist()
     tr '[:upper:]' '[:lower:]' |
     sort -u > "$WANT"
 
+    # Russian zones never go through the VPN (01.11: api.ozon.ru, *.wb.ru, *.wildberries.ru,
+    # magnit.ru ... kept in the saved list from versions before ru_zone, put back at every start,
+    # and never taken out: the reconciler needs a direct check that passes, and the direct checks
+    # failed). They are left out of what is restored, so the restore takes them out of the group.
+    # The saved list is copied once before (adaptive-persist.ru-backup.txt), the names taken out
+    # are kept in adaptive-ru-removed.txt. Undo: VWARD_ADAPTIVE_RU=1 in device.conf, the backup
+    # back as adaptive-persist.txt, then S91vward-route-engine restart.
+    if [ "${VWARD_ADAPTIVE_RU:-0}" != 1 ]; then
+        printf '' > "$WANT.ru" 2>/dev/null
+        while IFS= read -r H; do
+            if ru_zone "$H"; then echo "$H" >> "$WANT.ru"; else echo "$H"; fi
+        done < "$WANT" > "$WANT.keep" && mv -f "$WANT.keep" "$WANT"
+        if [ -s "$WANT.ru" ]; then
+            [ -s "$RU_BACKUP" ] || cp -p "$PERSIST" "$RU_BACKUP" 2>/dev/null
+            # Not «grep -v -f»: BusyBox prints nothing with an empty pattern file.
+            awk -v rf="$RU_REMOVED" 'BEGIN {while ((getline l < rf) > 0) seen[l] = 1} !($0 in seen)' \
+                "$WANT.ru" > "$WANT.new" 2>/dev/null && cat "$WANT.new" >> "$RU_REMOVED" 2>/dev/null
+            rm -f "$WANT.new"
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|ADAPTIVE_RU_OUT|n=$(wc -l < "$WANT.ru" | tr -d ' ')|$(head -n 12 "$WANT.ru" | tr '\n' ' ' | cut -c1-200)" \
+                >> "$EVENT_LOG"
+            # The saved list and the cache without them, their VPN states gone (owner 02.11: after a
+            # manual removal in Keenetic they stayed in adaptive-persist.txt as BROKEN/AUTO_VPN and
+            # could come back at a start). The copy above keeps them for the undo.
+            ru_clean_files "$WANT.ru"
+        fi
+        rm -f "$WANT.ru"
+    fi
+
     # Both differences in one pass (fix.34: a grep for each name, thousands of names, took longer
     # than S91's start wait and the engine was killed every minute - CI #726). Keenetic takes 300
     # names in a group: no more is sent than there is room for after the removals.
@@ -770,13 +817,23 @@ restore_adaptive_from_persist()
 
     while IFS= read -r H; do
         [ -n "$H" ] || continue
+        # A name Keenetic would not parse is not sent (1.11 17:12: «argument parse error» three
+        # times within the engine's restart; the removals were neither checked nor journaled).
+        if ! valid_fqdn "$H"; then
+            SKIPPED=$((SKIPPED + 1))
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_SKIP_INVALID|$(printf '%s' "$H" | tr -c 'A-Za-z0-9._*-' '?' | cut -c1-80)" >> "$EVENT_LOG"
+            continue
+        fi
         restore_time_up && { LEFT=$((LEFT + 1)); continue; }
-        if ndmc -c \
-          "no object-group fqdn $GROUP include $H" \
-          >/dev/null 2>&1; then
+        if OUT=$(ndmc -c "no object-group fqdn $GROUP include $H" 2>&1) &&
+           ! printf '%s\n' "$OUT" | grep -qi 'error'; then
             REMOVED=$((REMOVED + 1))
         else
             RC=1
+            FAILS=$((FAILS + 1))
+            [ "$FAILS" -gt 3 ] ||
+                echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_FAIL|no include $H|$(printf '%s' "$OUT" | tr '\n|' '  ' | cut -c1-160)" \
+                    >> "$EVENT_LOG"
         fi
     done < "$DEL"
 
@@ -900,6 +957,17 @@ add_adaptive()
     DIRECT_RC=$P_RC
     DIRECT_CODE=$P_CODE
     DIRECT_TIME=$P_TIME
+
+    # The direct check failed: does the direct check work at all (01.11: ok 4 of 482, Russian shops
+    # «broken»)? If the control sites fail too, nothing is proven about this site: no VPN for it.
+    ISPC=0
+    ! command -v vward_isp_control >/dev/null 2>&1 || { vward_isp_control; ISPC=$?; }
+    if [ "$ISPC" = 1 ]; then
+        save_state "$H" "ISP_PROBE_UNRELIABLE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_ABORT_ISP_UNRELIABLE|$H|direct_rc=$DIRECT_RC|direct_http=$DIRECT_CODE" >> "$EVENT_LOG"
+        change_unlock
+        return 0
+    fi
 
     if ! probe "$H" "$WG" "$GIP"; then
         save_state "$H" "ISP_FAIL_WG_FAIL"
@@ -1440,6 +1508,11 @@ add_hint_adaptive()
         return 0
     fi
 
+    if ru_zone "$H"; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_SKIP_RU_ZONE|$H" >> "$EVENT_LOG"
+        return 0
+    fi
+
     change_lock || return 1
 
     echo 0 > "$REFRESH_TS"
@@ -1538,8 +1611,22 @@ handle_hint()
             return
         fi
 
-        # DIRECT перестал работать:
-        # Hint позволяет сразу вернуть VPN.
+        # DIRECT перестал работать? One failed check is not enough (02.11: ir-20.ozone.ru answered
+        # 403 directly at 18:10 and went into the VPN at 18:12 on one failed check): once more a
+        # second later, and the direct check itself must work (vward_isp_control).
+        sleep 1
+        if [ -n "$IP" ] && probe "$HOST" "$WAN" "$IP"; then
+            save_state "$HOST" "DIRECT_OK"
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_DIRECT_OK|$HOST|$P_CODE|$P_TIME" >> "$EVENT_LOG"
+            return
+        fi
+        HC=0
+        ! command -v vward_isp_control >/dev/null 2>&1 || { vward_isp_control; HC=$?; }
+        if [ "$HC" = 1 ]; then
+            save_state "$HOST" "ISP_PROBE_UNRELIABLE"
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_ABORT_ISP_UNRELIABLE|$HOST" >> "$EVENT_LOG"
+            return
+        fi
         save_state "$HOST" "HINT_DIRECT_FAIL"
 
         add_hint_adaptive "$HOST"

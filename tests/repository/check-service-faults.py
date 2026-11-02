@@ -10,6 +10,10 @@ import time
 from pathlib import Path
 import service_fixture as fixture
 
+# No network in the tests: the Smart DNS liveness check (01.11) is not asked; the dead-server case
+# is covered by check-smartdns-url-remove.py with a seeded answer.
+os.environ["VWARD_DOH_ALIVE"] = "0"
+
 errors = []
 for case in ('new-owner-edit', 'new-state-write', 'off-save', 'off-dns', 'unknown-rollback', 'owner-local', 'postimage-owner'):
     with tempfile.TemporaryDirectory() as d:

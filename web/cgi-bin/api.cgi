@@ -1905,13 +1905,13 @@ if [ "$ACTION" = "diagnostics" ]; then
         ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print tolower($NF)}'
         command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains; } | sort -u | head -n 16)"
     if [ -n "$SD_DOMAINS" ]; then
-        SD_BAD=""; SD_N=0
+        SD_BAD=""; SD_PEND=""; SD_FOREIGN=""; SD_N=0
         for SD in $SD_DOMAINS; do
             case "$SD" in *[!a-z0-9.-]*) continue ;; esac
-            SD_IP="$(nslookup "$SD" "${VWARD_DNS_SERVER:-127.0.0.1}" 2>/dev/null | awk '/^Name:/ {n = 1; next} n {for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) {print $i; exit}}')"
+            SD_IP="$("${VWARD_NSLOOKUP:-nslookup}" "$SD" "${VWARD_DNS_SERVER:-127.0.0.1}" 2>/dev/null | awk '/^Name:/ {n = 1; next} n {for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) {print $i; exit}}')"
             [ -n "$SD_IP" ] || continue
             SD_N=$((SD_N + 1))
-            SD_DEV="$(ip route get "$SD_IP" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')"
+            SD_DEV="$("${VWARD_IP:-ip}" route get "$SD_IP" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')"
             if [ -n "$SD_DEV" ] && { [ "$SD_DEV" = "${VWARD_TUNNEL_DEVICE:-}" ] || [ -d "/sys/class/net/$SD_DEV/wireguard" ] || [ "$(cat "/sys/class/net/$SD_DEV/type" 2>/dev/null)" = 65534 ]; }; then
                 # Which IP category takes the address, if one does.
                 SD_CAT=""
@@ -1920,21 +1920,76 @@ if [ "$ACTION" = "diagnostics" ]; then
                         NF == 5 {z = 2 ^ (32 - $5); s = int(((($1 * 256 + $2) * 256 + $3) * 256 + $4) / z) * z; if (a >= s && a < s + z) {f = 1; exit}}
                         END {exit !f}' "${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}/catalog/$SD_C.cidr" 2>/dev/null && { SD_CAT=$SD_C; break; }
                 done
-                SD_BAD="$SD_BAD${SD_BAD:+, }$SD${SD_CAT:+ (IP-категория $SD_CAT)}"
+                # Who owns the route that takes the address: a catalog subnet covering it that VWARD
+                # added (owned.dynamic.routes), or only subnets that were there before (Keenetic's
+                # own, another list): policy-sync never removes those, so the /24 cannot be cut out.
+                SD_OWN=""
+                [ -z "$SD_CAT" ] || SD_OWN="$(awk -F'[./]' -v ip="$SD_IP" 'FILENAME == ARGV[1] {o[$0] = 1; next}
+                    BEGIN {split(ip, q, "."); a = ((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]}
+                    NF == 5 {z = 1; for (i = $5 + 0; i < 32; i++) z *= 2
+                        s = int(((($1 * 256 + $2) * 256 + $3) * 256 + $4) / z) * z
+                        if (a >= s && a < s + z) {if ($0 in o) own = 1; else cov = 1}}
+                    END {print own ? "own" : cov ? "foreign" : ""}' "${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}/owned.dynamic.routes" \
+                    "${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}/catalog/$SD_CAT.cidr" 2>/dev/null)"
+                # The address sits in a block policy-sync holds out of the tunnel.
+                SD_HOLD=""
+                awk -F'|' -v ip="$SD_IP" 'BEGIN {split(ip, q, "."); a = ((q[1] * 256 + q[2]) * 256 + q[3]) * 256 + q[4]}
+                    {split($1, b, "[./]"); if (b[5] !~ /^[0-9]+$/) next; z = 1; for (i = b[5] + 0; i < 32; i++) z *= 2
+                     s = int((((b[1] * 256 + b[2]) * 256 + b[3]) * 256 + b[4]) / z) * z; if (a >= s && a < s + z) {f = 1; exit}}
+                    END {exit !f}' "${VWARD_POLICY_STATE:-/opt/var/lib/vward/policy-sync}/smartdns.addresses" 2>/dev/null && SD_HOLD=1
+                if [ "$SD_OWN" = foreign ]; then
+                    SD_FOREIGN="$SD_FOREIGN${SD_FOREIGN:+, }$SD (IP-категория $SD_CAT)"
+                elif [ "$SD_OWN" = own ] && [ -n "$SD_HOLD" ]; then
+                    SD_PEND="$SD_PEND${SD_PEND:+, }$SD"
+                else
+                    SD_BAD="$SD_BAD${SD_BAD:+, }$SD${SD_CAT:+ (IP-категория $SD_CAT)}"
+                fi
             fi
         done
+        # The server itself answers (01.11.2026: the subscription ended; every client got «Temporary
+        # failure in name resolution» for the bound domains). Every server of the rows, at most 3.
+        SD_DEAD=0 SD_SRV=0
+        for SD_U in $({ printf '%s\n' "$DIAG_RC" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
+                ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print $3}'
+                command -v vward_agh_smartdns_urls >/dev/null 2>&1 && vward_agh_smartdns_urls; } | sort -u | head -n 3); do
+            command -v vward_doh_alive >/dev/null 2>&1 || break
+            SD_SRV=$((SD_SRV + 1))
+            VWARD_DOH_ALIVE_MT=${VWARD_DOH_ALIVE_MT:-4} vward_doh_alive "$SD_U"; [ $? != 1 ] || SD_DEAD=$((SD_DEAD + 1))
+        done
+        SD_U=
         # Smart DNS rows inside AdGuard Home do nothing while Keenetic does not hand it the queries.
         SD_KN="$(printf '%s\n' "$DIAG_RC" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {n++} END {print n + 0}')"
         SD_AGH_PORT="$(awk '/^[^ #]/ {d = ($1 == "dns:")} d && $1 == "port:" {print $2; exit}' "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" 2>/dev/null)"
-        if [ "$SD_KN" = 0 ] && [ -n "$SD_AGH_PORT" ] && [ "$SD_AGH_PORT" != 53 ] &&
+        if [ "$SD_DEAD" -gt 0 ]; then
+            SMARTDNS_STATUS=FAIL SMARTDNS_DETAIL="Smart DNS не отвечает: сервер ($SD_DEAD из $SD_SRV) не отвечает на запросы, привязанные к нему домены ($(printf '%s\n' "$SD_DOMAINS" | grep -c .)) не открываются. Уберите сервер в «ИИ → Smart DNS» или переведите сервисы на VPN"
+        elif [ "$SD_KN" = 0 ] && [ -n "$SD_AGH_PORT" ] && [ "$SD_AGH_PORT" != 53 ] &&
            ! printf '%s\n' "$DIAG_RC" | awk -v p=":$SD_AGH_PORT" '$1 == "ip" && $2 == "name-server" && index($3, p) && (NF == 3 || $4 == "\"\"" || $4 == "on") {f = 1} END {exit !f}'; then
             SMARTDNS_STATUS=WARN SMARTDNS_DETAIL="Не действует: Smart DNS настроен в AdGuard Home, а AdGuard Home сейчас не в цепочке DNS (см. «Цепочка DNS»)"
         elif [ -n "$SD_BAD" ]; then
             SMARTDNS_STATUS=FAIL SMARTDNS_DETAIL="Идут через VPN, Smart DNS для них не действует: $SD_BAD"
+        elif [ -n "$SD_FOREIGN" ]; then
+            SMARTDNS_STATUS=FOREIGN SMARTDNS_DETAIL="Маршрут не принадлежит VWARD, вырезать исключённый блок невозможно (VWARD чужие маршруты не снимает): $SD_FOREIGN"
+        elif [ -n "$SD_PEND" ]; then
+            SMARTDNS_STATUS=WARN SMARTDNS_DETAIL="Адрес уже в исключённом блоке, но маршрут в туннеле ещё не снят (ждёт сверки, обычно до минуты; домен мог получить новый адрес): $SD_PEND"
         else
             SMARTDNS_DETAIL="Доменов: $(printf '%s\n' "$SD_DOMAINS" | wc -l | tr -d ' '), проверено адресов: $SD_N, все идут через провайдера"
         fi
     fi
+
+    # Lampa TV (01.11.2026: «не грузится», no data in the diagnostics): its own sites and the movie
+    # database it reads (TMDB, blocked in Russia) - does each resolve, and does it go through a
+    # tunnel or the provider (the router's own route; a TV with its own DNS is not seen here).
+    LAMPA_STATUS=PASS LAMPA_DETAIL=""
+    for LD in ${VWARD_LAMPA_DOMAINS:-lampa.mx cub.red api.themoviedb.org image.tmdb.org}; do
+        LD_IP="$("${VWARD_NSLOOKUP:-nslookup}" "$LD" "${VWARD_DNS_SERVER:-127.0.0.1}" 2>/dev/null | awk '/^Name:/ {n = 1; next} n {for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) {print $i; exit}}')"
+        if [ -z "$LD_IP" ]; then LAMPA_STATUS=WARN LD_WAY="нет адреса"
+        else
+            LD_DEV="$("${VWARD_IP:-ip}" route get "$LD_IP" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')"
+            if [ -n "$LD_DEV" ] && { [ "$LD_DEV" = "${VWARD_TUNNEL_DEVICE:-}" ] || [ -d "/sys/class/net/$LD_DEV/wireguard" ] || [ "$(cat "/sys/class/net/$LD_DEV/type" 2>/dev/null)" = 65534 ]; }; then LD_WAY="VPN"
+            else LD_WAY="провайдер"; case "$LD" in *themoviedb.org|*tmdb.org) LAMPA_STATUS=WARN; LD_WAY="провайдер (в России блокируется)" ;; esac; fi
+        fi
+        LAMPA_DETAIL="$LAMPA_DETAIL${LAMPA_DETAIL:+; }$LD: $LD_WAY"
+    done
 
     # DNS chain: Keenetic hands queries to AdGuard Home, and AdGuard Home must not
     # hand them back to the router (a loop Keenetic answers by dropping requests).
@@ -2031,7 +2086,7 @@ if [ "$ACTION" = "diagnostics" ]; then
       --arg adguard "$ADGUARD_STATUS" --arg adaptive "$ADAPTIVE_STATUS" \
       --arg updater "$UPDATE_STATUS" --arg config "$CONFIG_STATUS" --arg cgi "$CGI_STATUS" \
       --arg wan "$WAN_STATUS" --arg wg "$WG_STATUS" --arg wg_detail "$WG_DETAIL" \
-      --arg smartdns "$SMARTDNS_STATUS" --arg smartdns_detail "$SMARTDNS_DETAIL" \
+      --arg smartdns "$SMARTDNS_STATUS" --arg smartdns_detail "$SMARTDNS_DETAIL" --arg lampa "$LAMPA_STATUS" --arg lampa_detail "$LAMPA_DETAIL" \
       --arg dns "$DNS_STATUS" --arg dns_detail "$DNS_DETAIL" --arg files "$FILES_STATUS" --arg files_detail "$FILES_DETAIL" \
       --arg wan_rc "$LAST_WAN_RC" --arg wg_rc "$LAST_WG_RC" --arg route_rc "$LAST_ROUTE_RC" \
       --argjson wg_count "$WG_COUNT" --argjson opt_free "$OPT_FREE" \
@@ -2051,6 +2106,7 @@ if [ "$ACTION" = "diagnostics" ]; then
         {id:"wg",component:"tunnel-guard",label:"VPN-туннели",status:$wg,detail:$wg_detail},
         {id:"smartdns",component:"route-engine",label:"Smart DNS мимо VPN",status:$smartdns,detail:$smartdns_detail},
         {id:"dns-chain",component:"route-engine",label:"Цепочка DNS",status:$dns,detail:$dns_detail},
+        {id:"lampa",component:"route-engine",label:"Lampa TV",status:$lampa,detail:$lampa_detail},
         {id:"files",component:"update-engine",label:"Файлы VWARD",status:$files,detail:$files_detail},
         {id:"updater",component:"update-engine",label:"Движок обновлений",status:$updater,detail:"рабочая копия движка на месте"},
         {id:"update-config",component:"update-engine",label:"Настройки обновлений",status:$config,detail:"файл настроек читается"}
@@ -2537,6 +2593,18 @@ if [ "$ACTION" = ai-data ]; then
     AI_STORE="$(awk -F= '$1 == "SMARTDNS_STORE" {print $2; exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)"
     case "$AI_STORE" in keenetic|agh) ;; *) AI_STORE=auto ;; esac
     AI_OWN="$(awk -F= '$1 == "SMARTDNS_URL" {u = substr($0, index($0, "=") + 1); sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); print u; exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)"
+    # Does the server answer (01.11.2026: the subscription ended, the domains stopped resolving): the
+    # owner's own server, else the one Keenetic's lines and AdGuard Home's rows use most. 5 min cache.
+    AI_ALIVE=""
+    AI_URL="$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)"
+    [ -n "$AI_URL" ] || AI_URL="$({ printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
+        ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print $3}'
+        command -v vward_agh_smartdns_urls >/dev/null 2>&1 && vward_agh_smartdns_urls; } | sort | uniq -c | sort -rn | awk 'NR == 1 {print $2}')"
+    if [ -n "$AI_URL" ] && command -v vward_doh_alive >/dev/null 2>&1; then
+        VWARD_DOH_ALIVE_MT=${VWARD_DOH_ALIVE_MT:-4} vward_doh_alive "$AI_URL"
+        case $? in 0) AI_ALIVE=yes ;; 1) AI_ALIVE=no ;; *) AI_ALIVE=unknown ;; esac
+    fi
+    AI_URL=
     AI_ON="$(awk -F'\t' 'NF >= 3 {print $1 "\t" $2 "\t" $3}' "$CONFIG_ETC/services/enabled.tsv" 2>/dev/null)"
     # The services waiting for room in Smart DNS (op_ai), and whether AdGuard Home runs.
     AI_WAIT="$(grep -E '^[a-z0-9][a-z0-9.@_-]{0,62}$' "${VWARD_AI_WAIT:-$CONFIG_ETC/smartdns-wait}" 2>/dev/null | head -n 50)"
@@ -2544,7 +2612,7 @@ if [ "$ACTION" = ai-data ]; then
     AI_ROUTES="$(printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "route" && $2 == "object-group" {print $3 "\t" $4}')"
     "$JQ" -c --arg doh "$AI_DOH" --arg agh "$AI_AGH" --arg own "$AI_OWN" --arg on "$AI_ON" --arg routes "$AI_ROUTES" --arg wait "$AI_WAIT" \
-        --argjson agh_run "$AI_AGH_RUN" --arg shared "$AI_SHARED" --arg store "$AI_STORE" \
+        --argjson agh_run "$AI_AGH_RUN" --arg shared "$AI_SHARED" --arg store "$AI_STORE" --arg alive "$AI_ALIVE" \
         --argjson agh_on "$([ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] && echo true || echo false)" '
         ($doh | split("\n") | map(select(length > 0) | split("\t"))) as $k
         | ($agh | split("\n") | map(select(length > 0))) as $a
@@ -2563,7 +2631,7 @@ if [ "$ACTION" = ai-data ]; then
         {ok: true,
          smartdns: {store: $store, keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_running: $agh_run, agh_domains: ($a | length),
                     waiting: ($wait | split("\n") | map(select(length > 0))),
-                    servers: ([$k[] | .[1]] + (if $own == "" then [] else [$own] end) | unique), own: $own},
+                    servers: ([$k[] | .[1]] + (if $own == "" then [] else [$own] end) | unique), own: $own, alive: $alive},
          services: [.services[] | select(.category == "ai") | . as $s
            | main($s.id; $s.domains) as $roots
            | ($groups[$s.id] // "") as $g
@@ -2593,10 +2661,14 @@ if [ "$ACTION" = smartdns-server ]; then
     fi
     SSURL="$(form_value url | sed 's/%3[Aa]/:/g;s/%2[Ff]/\//g;s/%2[Dd]/-/g;s/%2[Ee]/./g;s/%5[Ff]/_/g;s/%7[Ee]/~/g')"
     case "$SSOP" in set|clear) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;; esac
-    SSOUT="$(printf '%s\n' "$SSURL" | "$CONFIG_HELPER" smartdns-server "$SSOP" 2>/dev/null | tail -n 1)"
+    SSALL="$(printf '%s\n' "$SSURL" | "$CONFIG_HELPER" smartdns-server "$SSOP" 2>/dev/null)"
     unset SSURL BODY
+    SSOUT="$(printf '%s\n' "$SSALL" | tail -n 1)"
+    # What «clear» took out of the router (counts only): keenetic:N,agh:N,saved:N.
+    SSCLR="$(printf '%s\n' "$SSALL" | sed -n 's/^cleared=//p' | grep -E '^keenetic:[0-9]+,agh:[0-9]+,saved:[0-9]+$' | tail -n 1)"
     case "$SSOUT" in
-        result=*) "$JQ" -cn --arg r "${SSOUT#result=}" '{ok: true, result: $r}' ;;
+        result=*) "$JQ" -cn --arg r "${SSOUT#result=}" --arg c "$SSCLR" '{ok: true, result: $r}
+            + (if $c == "" then {} else {cleared: ($c | split(",") | map(split(":") | {key: .[0], value: (.[1] | tonumber)}) | from_entries)} end)' ;;
         error=*) E="${SSOUT#error=}"; case "$E" in *[!a-z0-9_]*) E=helper_failed ;; esac; "$JQ" -cn --arg e "$E" '{ok: false, error: $e}' ;;
         *) echo '{"ok":false,"error":"helper_failed"}' ;;
     esac
@@ -2636,7 +2708,7 @@ if [ "$ACTION" = services ]; then
                 agh:install|agh:enable) ;;
                 agh:disable|agh:remove|agh:reset|agh:reinstall|awg:disable|vless:disable)
                     [ "$(form_value confirm)" = COMPONENT_OP ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;;
-                awg:enable|vless:enable) ;;
+                awg:enable|vless:enable|awg:install) ;;
                 *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
             esac
             if [ "$SID" = agh ]; then
@@ -3147,12 +3219,32 @@ if [ "$ACTION" = stability ]; then
     read -r RCI_UP _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
     RCI_UP=${RCI_UP%%.*}
     RCI_CALLS=$(cat "$RCI_CD"/* 2>/dev/null | awk -v h="$((${RCI_UP:-0} / 3600))" '/^[0-9]+$/ {ok = ($1 > h - 24); next} ok {n += length($0)} END {printf "%d", n}')
+    # Memory of the router and of every running program of VWARD and AdGuard Home (owner 02.11:
+    # the list was partial, AdGuard Home the largest): resident and swapped out, one way for all
+    # (/proc/PID/status VmRSS/VmSwap).
+    MEM="$(awk '$1 ~ /^(MemTotal|MemAvailable|SwapTotal|SwapFree):$/ {sub(":", "", $1); printf "%s\"%s\":%d", (n++ ? "," : ""), $1, $2}' "${VWARD_PROC:-/proc}/meminfo" 2>/dev/null)"
+    {
+        printf '['; pn=0
+        ps w 2>/dev/null | awk '{for (i = 5; i <= NF; i++) {b = $i; sub(/.*\//, "", b)
+            if (b ~ /^(vward-route-engine\.sh|vward-sentinel|vward-cron-supervisor\.sh|vward-dnscap|vward-awg|xray|lighttpd|AdGuardHome|https_dns_proxy|sing-box|dnsmasq)$/) {print $1 "\t" b; next}}}' |
+        while IFS="$(printf '\t')" read -r PP PN; do
+            PR=$(awk '$1 == "VmRSS:" {r = $2} $1 == "VmSwap:" {w = $2} $1 == "PPid:" {pp = $2} END {printf "%d %d %d", r, w, pp}' "${VWARD_PROC:-/proc}/$PP/status" 2>/dev/null)
+            set -- $PR
+            [ "${1:-0}" -gt 0 ] || continue
+            [ "$pn" = 0 ] || printf ','
+            printf '{"name":"%s","pid":%s,"rss_kb":%s,"swap_kb":%s,"ppid":%s}' "$PN" "$PP" "$1" "$2" "$3"; pn=1
+        done
+        printf ']'
+    } > "$SD/progs"
+    "$JQ" -e 'type == "array"' "$SD/progs" >/dev/null 2>&1 || echo '[]' > "$SD/progs"
     "$JQ" -n -c --argjson running "$RUNNING" --argjson installed "$INSTALLED" \
+        --argjson mem "{${MEM}}" --slurpfile progs "$SD/progs" \
         --slurpfile state "$SD/state" --slurpfile hours "$SD/hours" \
         --slurpfile cpu "$SD/cpu" --slurpfile events "$SD/events" --slurpfile tunnels "$SD/tunnels" \
         --arg now "$NOW" --arg fok "$FEED_OK" --arg ffail "$FEED_FAIL" --arg frc "$FEED_RC" --arg tls "$TLS_AT" --arg rci "${RCI_DAY:-0 0}" --arg rcalls "${RCI_CALLS:-0}" \
         'def num: tonumber? // null;
          {ok: true, sentinel: {running: $running, installed: $installed}, state: $state[0], hours: $hours[0], cpu: $cpu[0], events: $events[0],
+          mem: $mem, progs: ($progs[0] | map(select(.name as $n | . as $p | ($progs[0] | any(.pid == $p.ppid and .name == $n)) | not))),
           checks: {now: ($now | num), tunnels: $tunnels[0], feed_ok_at: ($fok | num), feed_fail_at: ($ffail | num), feed_fail_rc: ($frc | num),
                    https_crash_at: ($tls | num), rci_fails_day: ($rci | split(" ")[0] | num), rci_calls_day: ($rcalls | num), rci_fail_at: ($rci | split(" ")[1] | num | if . == 0 then null else . end)}}' 2>/dev/null ||
         echo '{"ok":false,"error":"stability_unavailable"}'

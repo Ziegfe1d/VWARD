@@ -8,6 +8,7 @@ itself an engine process are counted, and a restart writes its reason to the
 engine's event log.
 """
 
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -42,13 +43,38 @@ try:
         fail("a second independent engine must still count")
     if count([str(parent.pid), "999999"]) != "1":
         fail("a process gone meanwhile must not count")
+    # 01.11: a restart names the processes it counted (pid:ppid), so a second core in the journal is a
+    # process with its parent and the one command that asked, not a bare number.
+    cd_start = S91.index("core_detail()\n")
+    cd_fn = S91[cd_start:S91.index("\n}\n", cd_start) + 3]
+    script = "adaptive_live_pids() { printf '%s\\n' " + " ".join([str(parent.pid)] + child) + "; }\n" + cd_fn + "core_detail\n"
+    det = subprocess.run(["sh", "-c", script], capture_output=True, text=True).stdout.strip()
+    if det != f"{parent.pid}:{os.getppid()},{child[0]}:{parent.pid}," and not det.startswith(f"{parent.pid}:"):
+        fail(f"core_detail must list pid:ppid of each counted process: {det!r}")
+    if f"{child[0]}:{parent.pid}" not in det:
+        fail(f"core_detail must show the subshell with its parent: {det!r}")
 finally:
     parent.kill(); other.kill()
+
+# 01.11 hypothesis «WATCHDOG_RESTART cores=2 = the helper awk list-watch counted as a second engine»:
+# the match is on the exact script field of "ps w", never on a substring of the command line.
+fn_live = S91[S91.index("adaptive_live_pids()\n"):]
+fn_live = fn_live[:fn_live.index("\n}\n") + 3]
+PS = """  101 root      3200 S    /bin/sh /opt/bin/vward-route-engine.sh
+  205 root      1100 S    awk -v g=list-watch -f /opt/bin/vward-route-engine.sh.awk /opt/var/run/vward/list-watch.map
+  206 root      1100 S    grep vward-route-engine.sh /opt/var/run/vward/list-watch.map
+  207 root      1100 S    {awk} /bin/sh /opt/bin/vward-route-engine.sh-helper list-watch
+  300 root      3200 S    {/opt/bin/vward-route-engine.sh} /bin/sh /opt/bin/vward-route-engine.sh"""
+r = subprocess.run(["sh", "-c", "ps() { cat <<'EOF'\n" + PS + "\nEOF\n}\n" + fn_live + "adaptive_live_pids"], capture_output=True, text=True)
+if r.stdout.split() != ["101", "300"]:
+    fail(f"only the engine itself is a core, helpers (awk, grep, *-helper) are not: {r.stdout.split()}")
 
 for use in ("LCNT=$(adaptive_core_count)",):
     if S91.count(use) != 3:
         fail("health, startup and status checks must count cores, not command lines")
 if "WATCHDOG_RESTART|reason=$UNHEALTHY" not in S91:
     fail("a restart must log its reason")
+if "|procs=$(core_detail)" not in S91 or S91.count("|procs=$(core_detail)") != 2 or "START_FAILED|wait=${N}s|last_stop=$(last_stop)|alive=" not in S91:
+    fail("WATCHDOG_RESTART and START_FAILED must name the processes and the lock they saw")
 
 print("ROUTE_ENGINE_WATCHDOG=PASS")
