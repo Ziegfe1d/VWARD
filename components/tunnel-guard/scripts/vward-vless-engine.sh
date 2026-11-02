@@ -72,7 +72,22 @@ die() { [ "$1" != router_rejected ] || [ -z "${NDM_REASON:-}" ] || printf 'reaso
 log() { mkdir -p "${ENGINE_LOG%/*}" 2>/dev/null; printf '%s|VLESS_ENGINE|%s|by=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" "${VWARD_ACTOR:-shell}" >> "$ENGINE_LOG" 2>/dev/null; }
 
 TMPD=
-cleanup() { [ -z "$TMPD" ] || rm -rf "${TMPD:?}"; }
+XI_LOCKED=0
+cleanup() {
+    if [ "$XI_LOCKED" = 1 ]; then
+        xi_owner=
+        read -r xi_owner < "$ENGINE_SHARE/.install.lock/pid" 2>/dev/null || :
+        if [ "$xi_owner" = "$XI_PID" ]; then
+            rm -f "$ENGINE_SHARE/.install.lock/pid"
+            rmdir "$ENGINE_SHARE/.install.lock" 2>/dev/null
+        fi
+        XI_LOCKED=0
+    fi
+    [ -n "$TMPD" ] || return 0
+    # An interrupted binary/version commit keeps its private before image.
+    grep -qxF "$TMPD" "$ENGINE_SHARE/install.pending" 2>/dev/null && return 0
+    rm -rf "${TMPD:?}"
+}
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
@@ -102,6 +117,25 @@ unzip_one() {
 }
 
 op_install() {
+    mkdir -p "$ENGINE_SHARE" || die write_failed
+    read -r XI_PID _ < /proc/self/stat 2>/dev/null || XI_PID=$$
+    if ! mkdir "$ENGINE_SHARE/.install.lock" 2>/dev/null; then
+        xi_owner=
+        read -r xi_owner < "$ENGINE_SHARE/.install.lock/pid" 2>/dev/null || :
+        case "$xi_owner" in ''|*[!0-9]*) die install_recovery_required ;; esac
+        kill -0 "$xi_owner" 2>/dev/null && die install_busy 75
+        # Never recursively reap a persistent install lock: it can own a before
+        # image or be between binary/version writes. Classify it through recovery.
+        die install_recovery_required 75
+    fi
+    XI_LOCKED=1
+    printf '%s\n' "$XI_PID" > "$ENGINE_SHARE/.install.lock/pid" || die write_failed
+    # All preconditions and before images are checked under the install lock.
+    [ ! -e "$ENGINE_SHARE/install.pending" ] && [ ! -L "$ENGINE_SHARE/install.pending" ] || die install_recovery_required
+    [ ! -L "$BIN" ] && [ ! -L "$ENGINE_SHARE/version" ] || die unsafe_install_target
+    [ ! -e "$ENGINE_SHARE/version" ] || [ -f "$ENGINE_SHARE/version" ] || die unsafe_install_target
+    xi_version_before=-
+    [ ! -f "$ENGINE_SHARE/version" ] || xi_version_before=$(sha256_of "$ENGINE_SHARE/version")
     [ ! -x "$BIN" ] || [ "$(cat "$ENGINE_SHARE/version" 2>/dev/null)" != "$XRAY_VERSION" ] || { echo "result=unchanged"; return 0; }
     a=$(engine_arch) || die arch_unsupported
     set -- $(xray_zip "$a") || die arch_unsupported
@@ -115,8 +149,31 @@ op_install() {
     rm -f "$TMPD/x.zip"
     chmod 0755 "$TMPD/xray" || die write_failed
     "$TMPD/xray" version >/dev/null 2>&1 || die binary_not_runnable
+    [ ! -L "$BIN" ] && [ ! -L "$ENGINE_SHARE/version" ] || die unsafe_install_target
+    [ ! -e "$ENGINE_SHARE/version" ] || [ -f "$ENGINE_SHARE/version" ] || die unsafe_install_target
+    xi_version_now=-
+    [ ! -f "$ENGINE_SHARE/version" ] || xi_version_now=$(sha256_of "$ENGINE_SHARE/version")
+    [ "$xi_version_now" = "$xi_version_before" ] || die install_concurrent
+    printf '%s\n' "$XRAY_VERSION" > "$TMPD/version.new" || die write_failed
+    xi_old=0
+    if [ -f "$BIN" ]; then cp -p "$BIN" "$TMPD/xray.before" || die backup_failed; xi_old=1; fi
+    xi_new=$(sha256_of "$TMPD/xray")
+    xi_marker="$ENGINE_SHARE/install.pending.tmp.$XI_PID"
+    (umask 077; printf '%s\n' "$TMPD" > "$xi_marker") || die write_failed
+    [ ! -e "$ENGINE_SHARE/install.pending" ] && [ ! -L "$ENGINE_SHARE/install.pending" ] || die install_recovery_required
+    mv -f "$xi_marker" "$ENGINE_SHARE/install.pending" || die write_failed
+    sync
     mv -f "$TMPD/xray" "$BIN" || die write_failed
-    echo "$XRAY_VERSION" > "$ENGINE_SHARE/version"
+    if ! mv -f "$TMPD/version.new" "$ENGINE_SHARE/version"; then
+        [ "$(sha256_of "$BIN")" = "$xi_new" ] || die install_recovery_required
+        if [ "$xi_old" = 1 ]; then mv -f "$TMPD/xray.before" "$BIN" || die install_recovery_required
+        else rm -f "$BIN" || die install_recovery_required; fi
+        grep -qxF "$TMPD" "$ENGINE_SHARE/install.pending" && rm -f "$ENGINE_SHARE/install.pending"
+        die write_failed
+    fi
+    [ -f "$ENGINE_SHARE/version" ] && [ ! -L "$ENGINE_SHARE/version" ] &&
+        grep -qxF "$XRAY_VERSION" "$ENGINE_SHARE/version" || die install_recovery_required
+    grep -qxF "$TMPD" "$ENGINE_SHARE/install.pending" && rm -f "$ENGINE_SHARE/install.pending" || die install_recovery_required
     log "installed xray $XRAY_VERSION arch=$a"
     echo "result=changed"
 }

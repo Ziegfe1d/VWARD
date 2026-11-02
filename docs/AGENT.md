@@ -160,6 +160,37 @@ PR #18 — P-7+B merge `656c38e02fc896a4482e644c56e284247c133baa`, code CI #755.
 
 Дополнение к историческому IN_PROGRESS выше: #755 на `656c38e02fc896a4482e644c56e284247c133baa` и #757 на `960ded6d62f6ab1bb8024d3306a13ad7fa2c894d` завершились SUCCESS; все три обязательных jobs SUCCESS. Штатная программная CI-проверка этих точных кандидатов закрыта, аппаратная приёмка и последующие этапы RS-6 остаются открытыми. Подробные доказательства — новая запись раздела 3.
 
+### fix.36 — кандидат по поручению владельца 02.11.2026
+
+База dev `dd4fb94`, установленный fix.35.1 / 2026110102 подтверждён владельцем:
+COMMITTED, full health passed, без отката. Новая сессия ограничена текущими проблемами;
+разрешение на выпуск после зелёного CI и проверенного отката дано в поручении, повторное GO не нужно.
+Код `31dfab5` → `a576703` → `8d2f485` (0.2.0-rc.2.fix.36); план и подробный отчёт:
+[FIX36_PLAN.md](FIX36_PLAN.md), [FIX36_REPORT.md](FIX36_REPORT.md).
+Источник ложного второго корня воспроизведён: двойной фон agh_bind/nslookup;
+короткий и долгий процесс дают разные результаты перепроверки. Счётчик и защита настоящих дублей сохранены.
+Добавлены real-PID cache leases и фазы старта, DNS-списки и установка отсутствующих пакетов/Xray из Панели
+без активации служб. Подтверждённые RU/DNS ручные действия владельца не отменялись, агенты не переключались.
+Целевые регрессии/отказы и sh/BusyBox PASS; rollback с реального подписанного пакета fix.35.1 — 13/13.
+Полный локальный consistency НЕ PASS: RS7 dry-run вызывает mkdir /opt/var (read-only host filesystem).
+Штатный CI конечного HEAD, публикация и аппаратная приёмка — отдельные ворота, не объявлены выполненными.
+
+### fix.36 — результат штатного CI 02.11.2026 13:25 МСК
+
+CI [#789 / 41416501880](https://github.com/Ziegfe1d/VWARD/actions/runs/41416501880)
+на `c0cc511e430bca665c81484ffd26b6199e26cf64` завершён FAILURE, attempt 1.
+`updater-tests` и `resource-audit` SUCCESS, `repository-consistency` FAILURE;
+`dispatch-transition` SKIPPED. Выпуска/подписи/merge нет.
+Причина — check-terminating-signal-traps.sh отклонил совместный reset
+`trap - EXIT HUP INT TERM`; обработчик cleanup с сигналами не объединялся,
+но статический контракт требует раздельных строк. Исправление `99af534` разделяет
+reset EXIT и HUP/INT/TERM, не ослабляя проверку и сохраняя поведение дочерней задачи.
+Целевые terminating-signal/bind-workers/watchdog/admission/stale-lock/archive/cron
+проверки PASS. Полный CI исправленного HEAD не запускался: штатный workflow не
+умеет отдельно запустить consistency на новом HEAD, а повтор уже успешных длительных
+jobs запрещён владельцем. Требуется согласовать исключение для нового полного CI;
+до него выпуск заблокирован, прежние SUCCESS не приписываются новому SHA.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -347,6 +378,12 @@ PR #18 — P-7+B merge `656c38e02fc896a4482e644c56e284247c133baa`, code CI #755.
 
 - 2026-11-02 · [Claude Code] · fix.35.1, п. 1 дополнение (ручная проверка владельца 00:47) · Источник российских доменов в AdaptiveAuto на коде fix.35: hints.conf содержит ozon.ru/ozone.ru/wb.ru/wildberries.ru; `handle_hint` при одной неудачной прямой пробе вызывал `add_hint_adaptive`, а тот не проверял `ru_zone` и прямую пробу повторно (ir-20.ozone.ru: HINT_DIRECT_OK 403 в 18:10:16, HINT_AUTO_VPN в 18:12:18); первые MAINT_BROKEN/ISP_UNKNOWN 1.11 06:30–07:10 — уже добавленные так домены и домены из persist прежних версий, которые восстанавливались при каждом старте. Исправлено: повтор прямой пробы + контроль, `ru_zone` в пути подсказок, чистка persist/кэша/.state при старте (копия для отката), 400/401/403/404 = ISP_OK в reconciler и аудите. hints.conf не правился. Тесты: check-adaptive-ru-zone.py (в т.ч. ручное удаление в Keenetic + persist), check-probe-codes.py (RED→GREEN). Lampa: в AdaptiveAuto нет; строка «Lampa TV» в диагностике.
 
+- 2026-11-02 11:52 МСК · [Агент / Codex] · fix.36, по поручению новой сессии · База `dd4fb94`, fix.35.1 / 2026110102 установлен и принят владельцем; роутер не менялся. Причина `cores=2` воспроизведена настоящими shell-процессами: `( { agh_bind; nslookup; } & )` создавал orphan с PPID=1 и argv движка; короткий исчезает до перепроверки, долгий переживает 2 с. `adaptive_live_pids` выбирает точное поле скрипта, awk list-watch не считается; `by=` — caller S91. Теперь фон остаётся дочерним и ожидается при выходе; независимый второй движок по-прежнему обнаруживается. PIDFILE/LIVE_LOCK/CONTROL_LOCK, service_healthy/clean_service и источники запуска сверены. Убитый shared-config reader оставлял lock с ожиданием 35 с; real-PID lease, уникальный временный файл и проверка эксклюзивности после publication закрывают dead-reader/ABA. START_PHASE измеряет restore/agh-prune/refresh; таймауты не увеличены. Причина каждого исторического старта 34–39 с на устройстве отдельно не доказана. ADAPTIVE_RU_OUT пишется только при новой чистке persist в events.log, ротация gzip в vward/archive; clean restore теперь сообщает ru_allowed=0. Российская политика не менялась, новая физическая чистка не выполнялась.
+- 2026-11-02 11:52 МСК · [Агент / Codex] · fix.36, DNS-списки и установка · Явный DNS для управляемого списка: настроенный отвечающий сервер, unknown/dead — отказ, лимит 8 с чужими строками, exclusive ownership и scope других групп, приватные before/after до записи, проверяемая компенсация; UNKNOWN/SIGKILL сохраняет smartdns recovery и закрывает повтор. Старые редакторы активного DNS-списка блокируются до явного выбора другого пути; watch=1 выходит через DNS→auto. Долгая операция использует существующий detached job. Установка отсутствующих dnsmasq-full/sing-box-go: официальный HTTPS feed из opkg.conf, SHA/размер/архитектура/установленные зависимости, безопасные tar-члены, чужие файлы и maintainer scripts запрещены; установлено выключенным, auto-права не меняются. Xray использует существующую закреплённую SHA256, внутренний install lock, собственный pending и guarded binary/version commit; настроенные туннели запрещают установку из Панели. Ничего на устройстве не устанавливалось/не запускалось, NextDNS/8 ручных подсетей/16 DNS не тронуты, старые удалённые Smart DNS-привязки не восстанавливались. Отдельный DoH-клиент остаётся Н. Режимы каждого агента и WAIT_DEGRADED описаны в FIX36_REPORT; read-only ответ владельца 10:50: UP, 32 успешные проверки, обе пробы=1. Сбой 10:18 не выдан за доказанный отказ туннеля.
+- 2026-11-02 11:52 МСК · [Агент / Codex] · review/верификация · Адресный read-only reviewer нашёл 3 Important (membership race, обход proof прежними writers, параллельный Xray install); RED→GREEN каждого, плюс подтверждённый barrier fixture ABA cache lease и version-directory race. Целевые sh/BusyBox, ShellCheck error severity, JS syntax, install/list/Smart DNS/cache/bindings/components, no-personal-data PASS. Полный локальный consistency остановлен RS7 dry-run: контрольный вызов вернул `mkdir /opt/var: Read-only file system; FAIL: cannot create component directories`, полный локальный PASS НЕ заявляется. Первая release rehearsal обнаружила новую неподдерживаемую target-библиотеку; функции встроены в уже подписываемый console-config (`8d2f485`), набор 78 targets сохранён, allowlists не расширены. На подписанном пакете fix.35.1 выполнена производная штатной rehearsal с реальным baseline вместо минимального beta: 13/13, full health, сохранность чужих файлов, rollback каждого baseline файла и удаление новых. Rehearsal key не попал в feed. Кодовые коммиты `31dfab5`, `a576703`, `8d2f485`; штатный CI конечного набора и подписанная публикация ещё не выполнены. Сырой self-test и вывод диагностики не коммитились; корректировки P-7 не предлагаются. Журнал — отдельный docs-коммит.
+
+- 2026-11-02 13:25 МСК · [Агент / Codex] · fix.36 / единственная плановая проверка CI · [#789 / run 41416501880](https://github.com/Ziegfe1d/VWARD/actions/runs/41416501880), HEAD `c0cc511e430bca665c81484ffd26b6199e26cf64`, attempt 1, completed/failure (10:15:30 UTC). Jobs: updater-tests `125181534313` SUCCESS; resource-audit `125181534431` SUCCESS; repository-consistency `125181534062` FAILURE в check-terminating-signal-traps.sh; dispatch-transition SKIPPED. Все новые DNS/package/cache/Xray/bind-worker тесты до этого места PASS; RS7 dry-run в штатном CI тоже PASS (локальный read-only /opt не отменяется). Причина отказа: статический запрет общей строки trap EXIT и terminating signals сработал на `trap - EXIT HUP INT TERM` фонового DNS worker. Локально воспроизведено RED; `99af534` разделяет reset на EXIT и HUP/INT/TERM без изменения handler/счётчика/таймаутов. Terminating-signal, bind-worker с реальными процессами, watchdog, BusyBox syntax, ShellCheck error severity, runtime update admission, updater stale-lock atomicity, external archive safety, cutover cron parity PASS (beta-marker cross-check локально SKIPPED: origin/beta не загружен). SHA256SUMS обновлён, commit [skip ci] сохраняет запрет владельца на повтор успешных длительных jobs. Новый полный CI, merge, подпись и публикация не запускались. Штатный workflow не имеет режима запуска только consistency на новом HEAD; требуется решение об исключении для нового полного CI. Роутер, настройки агентов, DNS и маршруты не менялись. GitHub CLI download логов получил отказ redirect-storage; содержимое лога прочитано через штатный GitHub connector, ограничение не обходилось.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 31.10.2026 / текущие ворота: дождаться штатных #755 и #757; подтвердить границы на Viva отдельно. У RS6 snapshot всегда unknown, health не подключены, REF только внутри снимка. После этого read-only coordinator и canonical identity; никакого подключения к live writer без отдельного согласования.
@@ -420,6 +457,10 @@ PR #18 — P-7+B merge `656c38e02fc896a4482e644c56e284247c133baa`, code CI #755.
 
 
 - (2026-10-31 07:51 МСК, дополнение к прежним pending) Ворота штатного CI #755/#757 закрыты SUCCESS на точных code HEAD; повторять эти успешные длительные задания не нужно. Аппаратная приёмка Viva/потеря питания/клиентский путь и фактические метрики остаются открытыми. У stage 1 snapshot всегда unknown, REF snapshot-local; стабильная identity, согласованный read-only snapshot и shadow comparison — отдельная дальнейшая работа. При неподтверждённом AGH rollback recovery/gate сохраняются: автоматическое восстановление без проверки текущего состояния и прав не разрешено. Live writer и любые изменения роутера требуют отдельного разрешения.
+
+- 02.11.2026 / fix.36: требуется штатный CI конечного кандидата и подпись/публикация dev после SUCCESS; GO уже дан владельцем. На роутере не менять режимы агентов, DNS/NextDNS/ручные подсети и не перезагружать. После установки владельцем — подтвердить отсутствие orphan/WATCHDOG_RESTART и длительности START_PHASE; старые PID/этапы задним числом не восстанавливаются. Ozon/Wildberries в приложениях, Lampa TV, экраны и ночной скан 03.11 00:10 остаются на его проверке. ADAPTIVE_RU_OUT при отсутствии новой чистки не повторяется; фактическое положение первой строки в архиве на устройстве не читалось.
+
+- 02.11.2026 13:25 МСК / fix.36: CI #789 красный только по статическому trap-контракту; фикс `99af534` и целевые проверки PASS. Необходимо разрешение на новый полный CI исправленного HEAD, поскольку текущий workflow запускает все три jobs, а два уже успешных длительных jobs владелец запретил повторять. До нового зелёного CI подписанная публикация не разрешена. Никакого автоматического переноса старых SUCCESS на другой SHA или изменения workflow ради обхода ворот.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 

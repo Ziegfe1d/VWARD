@@ -573,34 +573,70 @@ vward_keenetic_config()
     fi
     _vward_kc_fresh "$_vkc_age" && { cat "$VWARD_KCACHE/running-config"; return 0; }
     mkdir -p "$VWARD_KCACHE" 2>/dev/null || return 1
+    # $$ is inherited by subshells; the builtin opens /proc/self for this actual reader.
+    read -r _vkc_pid _ < /proc/self/stat 2>/dev/null || _vkc_pid=$$
+    _vkc_lease="$VWARD_KCACHE/lock/owner.$_vkc_pid"
     _vkc_own=0 _vkc_w=0
     while :; do
-        mkdir "$VWARD_KCACHE/lock" 2>/dev/null && { _vkc_own=1; break; }
+        if mkdir "$VWARD_KCACHE/lock" 2>/dev/null; then
+            # A concurrent stale-directory reaper may have removed the empty directory.
+            # In that case refuse this read, never continue without a proven lease.
+            printf '%s\n' "$_vkc_pid" 2>/dev/null > "$_vkc_lease" || return 1
+            # A delayed reaper can replace the empty directory before publication.
+            # A lease published into another reader's directory is not exclusive.
+            _vkc_exclusive=1
+            for _vkc_peer in "$VWARD_KCACHE/lock"/owner.*; do
+                [ "$_vkc_peer" = "$_vkc_lease" ] || _vkc_exclusive=0
+            done
+            if [ "$_vkc_exclusive" = 1 ]; then
+                _vkc_own=1
+                break
+            fi
+            rm -f "$_vkc_lease"
+        fi
+        # Remove only the exact dead owner's file. Two reapers cannot unlink a new
+        # reader's lease; rmdir succeeds only while the directory is empty.
+        _vkc_dead=0
+        for _vkc_f in "$VWARD_KCACHE/lock"/owner.*; do
+            _vkc_old=${_vkc_f##*/owner.}
+            case "$_vkc_old" in ''|*[!0-9]*) continue ;; esac
+            if ! kill -0 "$_vkc_old" 2>/dev/null; then
+                rm -f "$_vkc_f"
+                _vkc_dead=1
+            fi
+        done
+        if [ "$_vkc_dead" = 1 ]; then
+            rmdir "$VWARD_KCACHE/lock" 2>/dev/null
+            continue
+        fi
         # A read under way: its answer, at most 35 s later; a lock older than a minute is left over.
-        [ -n "$(find "$VWARD_KCACHE/lock" -maxdepth 0 -mmin -1 2>/dev/null)" ] || { rmdir "$VWARD_KCACHE/lock" 2>/dev/null; continue; }
+        [ -n "$(find "$VWARD_KCACHE/lock" -maxdepth 0 -mmin -1 2>/dev/null)" ] ||
+            { if rmdir "$VWARD_KCACHE/lock" 2>/dev/null; then continue; fi; }
         [ "$_vkc_w" -lt 35 ] || break
         sleep 1; _vkc_w=$((_vkc_w + 1))
         _vward_kc_fresh "$_vkc_age" && { cat "$VWARD_KCACHE/running-config"; return 0; }
     done
     # The reader before us may have just finished: its answer then.
     if [ "$_vkc_own" = 1 ] && _vward_kc_fresh "$_vkc_age"; then
+        rm -f "$_vkc_lease"
         rmdir "$VWARD_KCACHE/lock" 2>/dev/null
         cat "$VWARD_KCACHE/running-config"
         return 0
     fi
     vward_uptime_cs; _vkc_t0=$_VCS _VKT_IN=1
-    "${VWARD_NDMC:-ndmc}" -c 'show running-config' 2>/dev/null | tr -d '\r' > "$VWARD_KCACHE/running-config.$$"
+    "${VWARD_NDMC:-ndmc}" -c 'show running-config' 2>/dev/null | tr -d '\r' > "$VWARD_KCACHE/running-config.$_vkc_pid"
     _VKT_IN=
-    if [ -s "$VWARD_KCACHE/running-config.$$" ]; then
+    if [ -s "$VWARD_KCACHE/running-config.$_vkc_pid" ]; then
         vward_keenetic_timed running-config "$_vkc_t0"
-        mv -f "$VWARD_KCACHE/running-config.$$" "$VWARD_KCACHE/running-config"
-        [ "$_vkc_own" = 0 ] || rmdir "$VWARD_KCACHE/lock" 2>/dev/null
+        mv -f "$VWARD_KCACHE/running-config.$_vkc_pid" "$VWARD_KCACHE/running-config"
+        [ "$_vkc_own" = 0 ] || rm -f "$_vkc_lease"
+        rmdir "$VWARD_KCACHE/lock" 2>/dev/null
         cat "$VWARD_KCACHE/running-config"
         return 0
     fi
     vward_keenetic_timed running-config "$_vkc_t0" failed
-    rm -f "$VWARD_KCACHE/running-config.$$"
-    [ "$_vkc_own" = 0 ] || rmdir "$VWARD_KCACHE/lock" 2>/dev/null
+    rm -f "$VWARD_KCACHE/running-config.$_vkc_pid"
+    [ "$_vkc_own" = 0 ] || { rm -f "$_vkc_lease"; rmdir "$VWARD_KCACHE/lock" 2>/dev/null; }
     return 1
 }
 
@@ -1046,16 +1082,17 @@ vward_doh_alive()
     # VWARD_DOH_ALIVE=0: not checked («cannot tell», the behaviour before; tests without network).
     [ "${VWARD_DOH_ALIVE:-1}" = 1 ] || return 2
     case "$1" in https://*) ;; *) return 2 ;; esac
-    command -v curl >/dev/null 2>&1 || return 2
+    _vda_curl=${VWARD_CURL_BIN:-curl}
+    command -v "$_vda_curl" >/dev/null 2>&1 || return 2
     [ -z "$(find "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" -mmin -60 2>/dev/null)" ] || return 2
     _vda_k=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
     _vda_f=${VWARD_DOH_ALIVE_DIR:-/tmp/vward-doh-alive}/$_vda_k
-    if [ -s "$_vda_f" ] && [ -z "$(find "$_vda_f" -mmin +"${VWARD_DOH_ALIVE_AGE_MIN:-5}" 2>/dev/null)" ]; then
+    if [ "${VWARD_DOH_ALIVE_FRESH:-0}" != 1 ] && [ -s "$_vda_f" ] && [ -z "$(find "$_vda_f" -mmin +"${VWARD_DOH_ALIVE_AGE_MIN:-5}" 2>/dev/null)" ]; then
         read -r _vda_r < "$_vda_f" 2>/dev/null && case "$_vda_r" in 0|1) return "$_vda_r" ;; esac
     fi
     case "$1" in *\?*) _vda_q="$1&" ;; *) _vda_q="$1?" ;; esac
     _vda_c=$(printf 'url = "%sdns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"\n' "$_vda_q" |
-        curl -K - -s -o /dev/null -m "${VWARD_DOH_ALIVE_MT:-6}" -H 'accept: application/dns-message' -w '%{http_code}' 2>/dev/null)
+        "$_vda_curl" -K - -s -o /dev/null -m "${VWARD_DOH_ALIVE_MT:-6}" -H 'accept: application/dns-message' -w '%{http_code}' 2>/dev/null)
     _vda_rc=$?
     case "$_vda_rc" in 132|134|135|136|139) return 2 ;; esac
     _vda_r=1; [ "$_vda_c" != 200 ] || _vda_r=0
