@@ -859,6 +859,57 @@ vward_discover_lan_interface()
     vward_map_ndm_for_kernel "$_vp_devmap" "$1"
 }
 
+# vward_agh_dns_loops [YAML] [LAN]: where AdGuard Home would hand a query back to the
+# router's own DNS (Keenetic :53), which hands it to AdGuard Home again: Keenetic logs
+# «proxy loop detected: <router> <-> <router>», drops the request and inactivates the
+# server (fix.37, Keenetic 02.11).  One kind per line, each once, no addresses:
+#   main      upstream_dns rows for every domain     - every query loops
+#   fallback  fallback_dns                           - when the main servers fail
+#   bootstrap bootstrap_dns                          - while AdGuard Home resolves its servers' names
+#   private   local_ptr_upstreams                    - reverse (PTR) queries of the home network
+#   domain    [/domain/] rows of upstream_dns        - those domains only
+# The router: LAN, 127.0.0.0/8, ::1, localhost, port 53 or none, plain/udp/tcp.  Read only.
+vward_agh_dns_loops()
+{
+    _vp_y=${1:-$VWARD_ADGUARD_CONFIG}
+    [ -n "$_vp_y" ] && [ -r "$_vp_y" ] || return 0
+    awk -v lan="${2:-${VWARD_LAN_ADDRESS:-}}" '
+        function router(a,    h, p, i, n) {
+            gsub(/["\047]/, "", a)
+            if (a ~ /^(udp|tcp):\/\//) a = substr(a, index(a, "//") + 2)
+            else if (a ~ /^[a-z]+:\/\//) return 0
+            h = a; p = ""
+            if (substr(a, 1, 1) == "[") { i = index(a, "]"); if (!i) return 0
+                h = substr(a, 2, i - 2); p = substr(a, i + 1); if (p != "" && substr(p, 1, 1) != ":") return 0; p = substr(p, 2) }
+            else { n = gsub(/:/, ":", a); if (n == 1) { i = index(a, ":"); h = substr(a, 1, i - 1); p = substr(a, i + 1) } }
+            if (p != "" && p != "53") return 0
+            return (h != "" && h == lan) || h == "localhost" || h == "::1" || h == "0:0:0:0:0:0:0:1" || h ~ /^127\.[0-9]+\.[0-9]+\.[0-9]+$/
+        }
+        function row(kind, v,    t, i, n, w) {
+            gsub(/^[ \t]+|[ \t]+$/, "", v); gsub(/["\047]/, "", v)
+            if (v == "" || substr(v, 1, 1) == "#") return
+            if (substr(v, 1, 2) == "[/") { i = index(v, "/]"); if (!i) return; v = substr(v, i + 2); if (kind == "main") kind = "domain" }
+            n = split(v, w, /[ \t]+/)
+            for (t = 1; t <= n; t++) if (w[t] != "#" && router(w[t]) && !seen[kind]++) print kind
+        }
+        function inline(kind, v,    n, w, t) {
+            sub(/^\[/, "", v); sub(/\][ \t]*$/, "", v); n = split(v, w, /,/)
+            for (t = 1; t <= n; t++) row(kind, w[t])
+        }
+        /^[^ #]/ {d = ($1 == "dns:"); k = ""; next}
+        d && /^  [a-z_]+:/ {
+            k = ""
+            if ($1 == "upstream_dns:") k = "main"; else if ($1 == "fallback_dns:") k = "fallback"
+            else if ($1 == "bootstrap_dns:") k = "bootstrap"; else if ($1 == "local_ptr_upstreams:") k = "private"
+            v = $0; sub(/^  [a-z_]+:[ \t]*/, "", v)
+            if (k != "" && substr(v, 1, 1) == "[") { inline(k, v); k = "" }
+            next
+        }
+        d && k != "" && $1 == "-" {v = $0; sub(/^[ \t]*-[ \t]*/, "", v); row(k, v)}
+    ' "$_vp_y" 2>/dev/null
+    return 0
+}
+
 # Smart DNS domains kept in AdGuard Home: per-domain upstreams of the form
 # [/a.com/b.com/]https://... (or tls://, quic://, sdns://), from upstream_dns
 # and from upstream_dns_file; also a local DoH client on this router
