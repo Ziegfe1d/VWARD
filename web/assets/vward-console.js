@@ -762,7 +762,7 @@ function mergeLogs(parts, newestFirst, info) {
       last = { t: t, n: entries.length, lines: ['[' + p.label + '] ' + line] };
       entries.push(last); n++; if (latest == null || t > latest) latest = t;
     });
-    if (info) info.push({ label: p.label, last: latest, state: n ? 'ok' : /^Журнал недоступен/.test(first) ? 'error' : /^Журнал ещё не создан/.test(first) ? 'missing' : 'empty' });
+    if (info) info.push({ label: p.label, last: latest, state: n ? 'ok' : /^Журнал недоступен/.test(first) ? 'error' : /^Журнал ещё не создан/.test(first) ? 'missing' : /^За последние \d+ ч записей нет/.test(first) ? 'quiet' : 'empty' });
   });
   entries.sort((a, b) => newestFirst ? b.t - a.t || b.n - a.n : a.t - b.t || a.n - b.n);
   return entries.map(e => e.lines.join('\n')).join('\n');
@@ -773,6 +773,9 @@ function mergeLogs(parts, newestFirst, info) {
    warnings and errors always shown. */
 let logImportant = (typeof store === 'undefined' ? null : store.get('vward-log-view')) !== 'all';
 const LOG_CODES = {
+  DNS_CHAIN_OUT: 'AdGuard Home выведен из цепочки DNS, Keenetic спрашивает DNS провайдера', DNS_CHAIN_IN: 'AdGuard Home снова в цепочке DNS',
+  DNS_CHAIN_KEEP: 'AdGuard Home оставлен в цепочке: DNS провайдера тоже не отвечает', WOULD_TAKE_OUT: 'Наблюдение: VWARD вывел бы AdGuard Home из цепочки, Keenetic не изменён',
+  START_PHASE: 'Запуск движка: этап',
   HINT_DIRECT_OK: 'Проверка напрямую: открывается', HINT_ADAPTIVE_CHECK: 'Проверка автоподбора', HINT_WG_UNAVAILABLE: 'Подсказка: VPN недоступен, проверка без него',
   HINT_SKIP_RU_ZONE: 'Российский домен: не через VPN', HINT_AGH_BLOCKED: 'Подсказка: домен блокирует AdGuard Home', HINT_SKIP_ADAPTIVE_OFF: 'Подсказка: автоподбор выключен',
   CONSOLE_CONFIG: 'Настройки Панели VWARD изменены', START: 'Автоподбор запущен', STOP: 'Автоподбор остановлен', STOP_REQUEST: 'Остановка по запросу',
@@ -789,12 +792,17 @@ const LOG_CODES = {
   AGH_BIND_FULL: 'Нет места для DNS-привязки в Keenetic', AGH_UNBIND: 'DNS-привязка снята', ADAPTIVE_FULL: 'AdaptiveAuto полон'
 };
 const logLevel = t => /ERROR|FAILED\b|_FAIL\b|CRASH|BROKEN|ошибк|не удал/i.test(t) ? 'err' :
-  /WARN|UNSTABLE|UNRELIABLE|TIMEOUT|_DOWN\b|RESTART|ABORT|SKIP|FULL\b|не отвечает/i.test(t) ? 'warn' :
-  /_OK\b|\bOK\b|PASS|SUCCESS|RECOVERED|RESTORED|_UP\b/.test(t) ? 'ok' : 'info';
+  /WARN|UNSTABLE|UNRELIABLE|TIMEOUT|_DOWN\b|RESTART|ABORT|SKIP|FULL\b|не отвечает|DNS_CHAIN_OUT|WOULD_TAKE_OUT/i.test(t) ? 'warn' :
+  /_OK\b|\bOK\b|PASS|SUCCESS|RECOVERED|RESTORED|_UP\b|DNS_CHAIN_IN\b/.test(t) ? 'ok' : 'info';
 const LOG_SIGN = { err: 'alert', warn: 'alert', ok: 'check', info: 'info' };
 const wbr = h => h.replace(/([.\-\/])(?=[A-Za-z0-9А-Яа-я])/g, '$1<wbr>');
+// Reasons the DNS guard writes (DNS_CHAIN_OUT reason=…, WOULD_TAKE_OUT …): words, not codes.
+const LOG_VALUES = { loop_upstream: 'AdGuard Home отправляет запросы обратно роутеру', loop: 'AdGuard Home перезапускался по кругу', silent: 'AdGuard Home не отвечал',
+  silent_10min: 'AdGuard Home не отвечал 10 минут', fast: 'AdGuard Home не отвечал 15 с', update: 'плановый перезапуск AdGuard Home', keenetic_busy: 'Keenetic был занят',
+  provider_silent: 'DNS провайдера тоже не отвечал', hourly_limit: 'уже выводился в этот час' };
 function logField(f) {
   const m = /^([a-z_]+)=(.*)$/i.exec(f), k = m ? m[1] : '', v0 = m ? m[2] : f;
+  if ((!k || k === 'reason') && LOG_VALUES[v0]) return (k ? 'причина: ' : '') + LOG_VALUES[v0];
   let v = v0.replace(/\b(\d+)\.(\d{3,})\b/g, (x, a, b) => (Math.round(+(a + '.' + b) * 100) / 100).toString().replace('.', ','));
   // A time field, or a bare fraction with 3+ decimals (curl's time of a probe): seconds.
   if ((/time|took|elapsed|dur|wait/i.test(k) && /^\d+([.,]\d+)?$/.test(v)) || (!k && /^\d+\.\d{3,}$/.test(v0))) v += ' с';
@@ -816,13 +824,22 @@ function logFeed(text) {
   lines.forEach(l => { if (!l.trim()) return; if (logTime(l.replace(/^\[[^\]]+\] /, '')) == null && raw.length) raw[raw.length - 1] += '\n' + l; else raw.push(l); });
   if (!raw.length) return '<p class="panel-desc">' + esc(String(text).trim() || 'Записей нет') + '</p>';
   let day = '', html = '', hints = [], hintAt = -1;
-  const card = e => '<div class="log-e ' + e.level + '"><time>' + (e.t ? new Date(e.t).toLocaleTimeString('ru-RU') : '') + '</time>' + ico(LOG_SIGN[e.level], 'log-sign') +
-    '<div class="log-t">' + (e.src ? '<small class="log-src">' + esc(e.src) + '</small>' : '') + wbr(esc(e.text)) + (e.more.length ? '<small class="log-more">' + wbr(esc(e.more.join(' '))) + '</small>' : '') + '</div></div>';
+  // The same entry again and again in a row (a minute check repeating itself) is one card that
+  // says how often and since when; a different entry in between keeps both (owner 02.11).
+  const tm = x => x ? new Date(x).toLocaleTimeString('ru-RU') : '';
+  const card = (e, rep) => '<div class="log-e ' + e.level + '"><time>' + tm(e.t) + '</time>' + ico(LOG_SIGN[e.level], 'log-sign') +
+    '<div class="log-t">' + (e.src ? '<small class="log-src">' + esc(e.src) + '</small>' : '') + wbr(esc(e.text)) + (e.more.length ? '<small class="log-more">' + wbr(esc(e.more.join(' '))) + '</small>' : '') +
+    (rep ? '<small class="log-more">Повторилось ' + rep.n + ' ' + plural(rep.n, 'раз', 'раза', 'раз') + ' подряд, ' + tm(Math.min(rep.a, rep.b)) + '–' + tm(Math.max(rep.a, rep.b)) + '</small>' : '') + '</div></div>';
   const out = [];
+  let rep = null;
   raw.map(logEntry).forEach(e => {
     const d = e.t ? new Date(e.t).toLocaleDateString('ru-RU') : '';
+    const key = e.src + '\n' + e.level + '\n' + e.text + '\n' + e.more.join(' ');
+    if (rep && rep.key === key && d === day) { rep.n++; rep.b = e.t; out[rep.at] = card(rep.e, rep); return; }
+    rep = null;
     if (d && d !== day) { day = d; out.push('<div class="log-day">' + esc(d) + '</div>'); }
     if (logImportant && /^HINT_/.test(e.code) && (e.level === 'info' || e.level === 'ok')) { if (hintAt < 0) { hintAt = out.length; out.push(''); } hints.push(card(e)); return; }
+    rep = { key: key, e: e, n: 1, a: e.t, b: e.t, at: out.length };
     out.push(card(e));
   });
   if (hintAt >= 0) out[hintAt] = '<details class="log-group"><summary>' + ico('route', 'log-sign') + 'Автоподбор: ' + hints.length + ' ' + plural(hints.length, 'проверка', 'проверки', 'проверок') + '</summary>' + hints.join('') + '</details>';
@@ -4215,17 +4232,19 @@ async function refreshPage(busy) {
 }
 // The open journal follows the router: on opening, every REFRESH_SEC while shown,
 // on coming back to the tab, and right before it is saved.
+const LOG_HOURS = 24;
 async function loadLog(tab, force) {
   if (!force && S.logs[tab] != null) { render(); }
   if (tab === 'all') {
     // «Расписание» is crond's own record of every start, not events: only in its tab.
-    const parts = await Promise.all(LOG_TABS.filter(tb => tb.id !== 'cron').map(tb => apiText('log', { name: tb.id, count: 200 })
+    // The last 24 hours only, cut by the API (owner 02.11); older entries stay in the files and archives.
+    const parts = await Promise.all(LOG_TABS.filter(tb => tb.id !== 'cron').map(tb => apiText('log', { name: tb.id, count: 200, hours: LOG_HOURS })
       .then(x => { S.logs[tb.id] = x; S.loadedAt['log:' + tb.id] = Date.now(); return { label: tb.label, text: x }; },
             e => ({ label: tb.label, text: 'Журнал недоступен: ' + e.message }))));
     LOGINFO.length = 0;
     S.logs.all = mergeLogs(parts, logNewest, LOGINFO) || 'Журналы пусты'; S.loadedAt['log:all'] = Date.now();
   } else {
-    try { S.logs[tab] = await apiText('log', { name: tab, count: 200 }); S.loadedAt['log:' + tab] = Date.now(); }
+    try { S.logs[tab] = await apiText('log', { name: tab, count: 200, hours: LOG_HOURS }); S.loadedAt['log:' + tab] = Date.now(); }
     catch (e) { S.logs[tab] = 'Журнал недоступен: ' + e.message; }
   }
   if (current === 'logs' && logTab === tab) {
@@ -4237,7 +4256,7 @@ async function loadLog(tab, force) {
 // The last event of each source, apart from the moment the journals were loaded.
 function logSources() {
   if (!LOGINFO.length) return '';
-  const st1 = { empty: 'записей нет', missing: 'ещё не создан', error: 'не читается' };
+  const st1 = { empty: 'записей нет', missing: 'ещё не создан', error: 'не читается', quiet: 'за 24 ч записей нет' };
   return '<details class="log-sources"><summary>' + ico('sort', 'log-sign') + '<span>' + (logNewest ? 'Сначала новые' : 'Сначала старые') + '</span><small>источники</small>' + ico('chevron', 'chev') + '</summary><dl class="kv">' +
     LOGINFO.map(i => '<div class="kv-row"><dt>' + esc(i.label) + '</dt><dd' + (i.state === 'error' ? ' class="warn"' : '') + '>' + esc(i.last != null ? fmtTime(new Date(i.last).toISOString()) : st1[i.state]) + '</dd></div>').join('') + '</dl></details>';
 }

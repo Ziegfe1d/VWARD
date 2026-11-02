@@ -3376,10 +3376,18 @@ if [ "$ACTION" = "log" ]; then
             ;;
     esac
 
+    # Tests run on a copy of the router's files (empty prefix on the router).
+    [ -z "$FILE" ] || FILE="${VWARD_ROOT_PREFIX:-}$FILE"
     COUNT="$(qget count)"
     case "$COUNT" in ''|*[!0-9]*) COUNT=200 ;; esac
     # Up to 1000 lines: a section's own page keeps the few events worth showing.
     [ "$COUNT" -ge 20 ] 2>/dev/null && [ "$COUNT" -le 1000 ] 2>/dev/null || COUNT=200
+    # hours=N (1-168): only the entries of the last N hours (owner 02.11: «Журналы» load the
+    # last 24 hours, cut here, not in the browser). Older entries stay in the file and its
+    # archives. No hours: as before (a section's own page shows its last events, however old).
+    HOURS="$(qget hours)"
+    case "$HOURS" in ''|*[!0-9]*) HOURS="" ;; esac
+    [ -z "$HOURS" ] || { [ "$HOURS" -ge 1 ] && [ "$HOURS" -le 168 ]; } || HOURS=24
 
     header_text
 
@@ -3387,6 +3395,34 @@ if [ "$ACTION" = "log" ]; then
     # Panel shows which source has nothing and which cannot be read.
     if [ -z "$FILE" ]; then
         echo "Журнал недоступен: неизвестный журнал."
+    elif [ -r "$FILE" ] && [ -s "$FILE" ] && [ -n "$HOURS" ]; then
+        # An entry starts with its time («2026-11-02 10:51:03», «…T…», with «Z»/«+0300» or
+        # without - then the router's own time); lines without a time belong to the entry above.
+        # A journal without times at all (a program's raw output) is shown as it is.
+        LOG_NOW="$(date +%s)" LOG_TZ="$(date +%z)"
+        LOG_OUT="$(tail -n $((COUNT * 5)) "$FILE" 2>/dev/null | awk -v now="$LOG_NOW" -v tz="$LOG_TZ" -v h="$HOURS" '
+            function ep(t, z,    y, m, d, o) {
+                y = substr(t, 1, 4) + 0; m = substr(t, 6, 2) + 0; d = substr(t, 9, 2) + 0
+                if (m <= 2) { y--; m += 9 } else m -= 3
+                d = 365 * y + int(y / 4) - int(y / 100) + int(y / 400) + int((153 * m + 2) / 5) + d - 719469
+                if (z == "") z = tz
+                o = 0; if (z != "Z") { gsub(/:/, "", z); o = (substr(z, 1, 1) == "-" ? -1 : 1) * (substr(z, 2, 2) * 3600 + substr(z, 4, 2) * 60) }
+                return d * 86400 + substr(t, 12, 2) * 3600 + substr(t, 15, 2) * 60 + substr(t, 18, 2) - o
+            }
+            {
+                if (match($0, /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ T][0-9][0-9]:[0-9][0-9]:[0-9][0-9]/)) {
+                    dated++; z = substr($0, 20); sub(/^\.[0-9]+/, "", z); sub(/^ +/, "", z)
+                    if (z ~ /^Z/) z = "Z"; else if (z ~ /^[+-][0-9][0-9]:?[0-9][0-9]/) { z = substr(z, 1, 6); sub(/[^0-9]$/, "", z) } else z = ""
+                    keep = (ep($0, z) >= now - h * 3600)
+                }
+                if (keep) print; else if (!dated) raw[++nr] = $0
+            }
+            END { if (!dated) for (i = 1; i <= nr; i++) print raw[i] }')"
+        if [ -n "$LOG_OUT" ]; then
+            printf '%s\n' "$LOG_OUT" | tail -n "$COUNT"
+        else
+            echo "За последние $HOURS ч записей нет: старые записи остаются в файле журнала и в архиве."
+        fi
     elif [ -r "$FILE" ] && [ -s "$FILE" ]; then
         tail -n "$COUNT" "$FILE" 2>/dev/null
     elif [ -r "$FILE" ]; then
