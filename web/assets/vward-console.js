@@ -768,7 +768,7 @@ function mergeLogs(parts, newestFirst, info) {
    time HH:MM:SS (the date once a day), a level sign, words instead of internal codes, numbers
    rounded with units, no «|»; the autopick checks (HINT_*) folded into one counter in «Важное»,
    warnings and errors always shown. */
-let logImportant = store.get('vward-log-view') !== 'all';
+let logImportant = (typeof store === 'undefined' ? null : store.get('vward-log-view')) !== 'all';
 const LOG_CODES = {
   HINT_DIRECT_OK: 'Проверка напрямую: открывается', HINT_ADAPTIVE_CHECK: 'Проверка автоподбора', HINT_WG_UNAVAILABLE: 'Подсказка: VPN недоступен, проверка без него',
   HINT_SKIP_RU_ZONE: 'Российский домен: не через VPN', HINT_AGH_BLOCKED: 'Подсказка: домен блокирует AdGuard Home', HINT_SKIP_ADAPTIVE_OFF: 'Подсказка: автоподбор выключен',
