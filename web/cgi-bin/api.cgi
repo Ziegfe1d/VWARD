@@ -2008,7 +2008,7 @@ if [ "$ACTION" = "diagnostics" ]; then
         # queries to AdGuard Home (below). Read only: nothing is changed.
         AGH_LOOPS=" "
         if command -v vward_agh_dns_loops >/dev/null 2>&1; then
-            AGH_LOOPS=" $(vward_agh_dns_loops "$AGH_Y" "$LAN_IP" | tr '\n' ' ')"
+            AGH_LOOPS=" $(vward_agh_dns_loops "$AGH_Y" "$(VWARD_LAN_ADDRESS=$LAN_IP; vward_router_addresses)" | tr '\n' ' ')"
         elif printf '%s\n' "$AGH_MAIN_UP" | grep -Eq "^(udp://|tcp://)?($LAN_IP|127\.0\.0\.1|localhost)(:53)?$"; then
             AGH_LOOPS=" main "
         fi
@@ -2037,13 +2037,17 @@ if [ "$ACTION" = "diagnostics" ]; then
         fi
         # Conditional loops: a setting that sends some queries back, a loop only while Keenetic
         # forwards them to AdGuard Home (in its chain). Out of the chain they resolve on the
-        # router and are not named. Unused bootstrap, PTR to the router (AdGuard Home's
-        # documented setting), local zones and rows the router's own client bypasses: no warning.
+        # router and are not named. No warning only with proof that nothing comes back: bootstrap
+        # unused (every server an address), private resolvers off, or the router's own AdGuard Home
+        # client with its own servers (domain_client) - see vward_agh_dns_loops.
         AGH_SHORT=""
         if [ -n "$KN_TO_AGH" ]; then
-            case "$AGH_LOOPS" in *" fallback "*) AGH_SHORT="резервные серверы AdGuard Home (fallback_dns) ведут на роутер: если основные не ответят, запросы пойдут по кругу и Keenetic их отбросит. Это настройка, а не замеченный сбой; укажите внешние резервные серверы" ;; esac
-            case "$AGH_LOOPS" in *" bootstrap "*) AGH_SHORT="$AGH_SHORT${AGH_SHORT:+; }bootstrap-серверы AdGuard Home ведут на роутер, а его серверы заданы именами: пока AdGuard Home узнаёт их адреса, возможна петля. Это настройка, а не замеченный сбой; укажите внешние bootstrap-серверы" ;; esac
+            AGH_SET="Это настройка, а не замеченный сбой"
+            case "$AGH_LOOPS" in *" fallback "*) AGH_SHORT="резервные серверы AdGuard Home (fallback_dns) ведут на роутер: если основные не ответят, запросы пойдут по кругу и Keenetic их отбросит. $AGH_SET; укажите внешние резервные серверы" ;; esac
+            case "$AGH_LOOPS" in *" bootstrap "*) AGH_SHORT="$AGH_SHORT${AGH_SHORT:+; }bootstrap-серверы AdGuard Home ведут на роутер, а его серверы заданы именами: пока AdGuard Home узнаёт их адреса, возможна петля. $AGH_SET; укажите внешние bootstrap-серверы" ;; esac
+            case "$AGH_LOOPS" in *" private "*) AGH_SHORT="$AGH_SHORT${AGH_SHORT:+; }обратные (PTR) запросы домашней сети AdGuard Home задаёт роутеру: для адресов, которых Keenetic не знает, запрос может вернуться в AdGuard Home. $AGH_SET" ;; esac
             case "$AGH_LOOPS" in *" domain "*) AGH_SHORT="$AGH_SHORT${AGH_SHORT:+; }строки для отдельных доменов в AdGuard Home ведут на роутер, а запросы самого роутера не выделены в AdGuard Home отдельным клиентом: запросы этих доменов пойдут по кругу" ;; esac
+            case "$AGH_LOOPS" in *" domain_local "*) AGH_SHORT="$AGH_SHORT${AGH_SHORT:+; }локальные зоны (lan, local, обратные зоны) AdGuard Home отправляет роутеру: имена, которых Keenetic не знает, могут вернуться в AdGuard Home. $AGH_SET" ;; esac
         fi
         if [ -n "$AGH_SHORT" ] && [ "$DNS_STATUS" != FAIL ]; then
             DNS_STATUS=WARN DNS_DETAIL="$DNS_DETAIL${DNS_DETAIL:+; }$AGH_SHORT"

@@ -61,7 +61,7 @@ bootstrap/PTR.
 
 | # | Гипотеза | За | Против / что проверить |
 |---|---|---|---|
-| H1 | Настройка AGH возвращает запрос на :53 роутера (`upstream_dns`, `fallback_dns`, `bootstrap_dns` при upstream-именах, PTR, доменная строка без своего клиента роутера) | так устроен классический loop ndnproxy ↔ AGH | при `upstream_dns` → роутер петля была бы постоянной; остальное условно. Проверка: ключи AGH (счётчики) и `Upstream` в журнале запросов AGH на 10:50:50–10:51:09 |
+| H1 | Настройка AGH возвращает запрос на :53 роутера (`upstream_dns`, `fallback_dns`, `bootstrap_dns` при upstream-именах, PTR, доменная строка без своего клиента роутера) | так устроен классический loop ndnproxy ↔ AGH | при `upstream_dns` → роутер петля была бы постоянной; остальное условно. Проверка: ключи AGH (счётчики) и класс `Upstream` в журнале запросов AGH за 07:50:50–07:51:09 UTC (10:51 МСК) |
 | H2 | Keenetic считает петлёй запрос, пришедший с адреса роутера, который он сам переслал бы на сервер с тем же адресом (192.168.1.1:65053) | VWARD по умолчанию спрашивает DNS роутера с его LAN-адреса: `VWARD_DNS_SERVER=$VWARD_LAN_ADDRESS` (`vward-device-profile.sh`); такие запросы делают движок (`agh_bind; nslookup`), reconcile, Панель (`api.cgi`, проверочный запрос) | таких запросов много, а событий три; возможно, петлёй считаются только запросы, не найденные в кэше Keenetic. Проверка: запросы с адреса роутера в журнале AGH в то же окно |
 | H3 | Keenetic сам вывел сервер из работы: `inactivated` — его реакция на отброшенные запросы или на собственные тайм-ауты, без настройки-петли | Avg.Resp≈926 мс у AGH | порядок строк loop/inactivated и соседние сообщения ndm (контекст 10:50–10:51) |
 | H4 | Перезапуск или переподключение AGH в этот момент (обновление фильтров, страж DNS, ручной вывод владельца около 10:50) | совпадение по времени с read-only выводом владельца (FIX36_REPORT) | события VWARD 10:45–10:55 (`DNS_CHAIN_*`, `WOULD_TAKE_OUT`, перезапуски AGH) |
@@ -119,43 +119,48 @@ bootstrap/PTR.
 исправлено.
 
 **Сейчас:** `vward_agh_dns_loops` (`components/runtime/lib/vward-device-profile.sh`) читает YAML только для чтения и
-отделяет **настроенное** от **применяемого**:
+отделяет **настроенное** от **применяемого**. Правило ревью 02.11: настройку можно назвать безвредной **только при
+доказательстве**, что обратного пути к роутеру нет. Адрес роутера в настройке или «локально выглядящее» имя таким
+доказательством не считаются.
 
-| Вид | Когда называется | Страж | Панель (AGH в цепочке Keenetic) | Панель (AGH вне цепочки) |
+| Вид | Когда называется | Доказательство отсутствия обратного пути | Страж | Панель (AGH в цепочке) |
 |---|---|---|---|---|
-| `main` | строка `upstream_dns` без домена → роутер | держит AGH вне цепочки (как раньше) | FAIL | FAIL |
-| `fallback` | `fallback_dns` → роутер | держит вне цепочки (как раньше) | WARN «настройка, а не замеченный сбой» | не называется (причину выдаёт страж) |
-| `bootstrap` | `bootstrap_dns` → роутер **и** есть upstream по имени (DoH/DoT/имя, `upstream_dns_file`) | не влияет | WARN | не называется |
-| `bootstrap_idle` | `bootstrap_dns` → роутер, все upstream — адреса (bootstrap не применяется) | не влияет | не называется | — |
-| `private` / `private_off` | `local_ptr_upstreams` → роутер при включённых / выключенных приватных PTR | не влияет | не называется: это штатная настройка AGH, роутер знает имена своей сети | — |
-| `domain` | `[/публичный домен/]роутер`, нет своего клиента роутера | не влияет | WARN | не называется |
-| `domain_client` | то же, но постоянный клиент AGH с адресом роутера и своими upstream (как «Keenetic DNS (VWARD)») | не влияет | не называется: запросы роутера не возвращаются | — |
-| `domain_local` | `[/lan, local, home.arpa, *.arpa…/]роутер` | не влияет | не называется: локальная резолюция | — |
+| `main` | строка `upstream_dns` без домена → роутер | — | держит AGH вне цепочки (как раньше) | FAIL |
+| `fallback` | `fallback_dns` → роутер | — | держит вне цепочки (как раньше) | WARN |
+| `bootstrap` | `bootstrap_dns` → роутер, и хоть один сервер задан именем (DoH/DoT/имя, `sdns://`, `upstream_dns_file`, upstream клиента) | — | не влияет | WARN |
+| `bootstrap_idle` | `bootstrap_dns` → роутер, все серверы — адреса | AGH разрешает через bootstrap только имена своих серверов, а имён нет | не влияет | не называется |
+| `private` | `local_ptr_upstreams` → роутер, приватные PTR включены (явно или по умолчанию AGH) | нет: обратные имена, которых Keenetic не знает, могут вернуться | не влияет | WARN |
+| `private_off` | то же при `use_private_ptr_resolvers: false` | AGH эти серверы не спрашивает | не влияет | не называется |
+| `domain` | `[/публичный домен/]роутер` | — | не влияет | WARN |
+| `domain_local` | `[/lan, local, home.arpa, *.arpa…/]роутер` | нет: имена, которых Keenetic не знает, могут вернуться | не влияет | WARN |
+| `domain_client` | доменные строки (публичные или локальные), но запросы от Keenetic их обходят | ровно один постоянный клиент AGH имеет **LAN-адрес** (адрес, с которого Keenetic спрашивает AGH) в `ids`; клиентов с CIDR-`ids` нет; у клиента есть свои серверы и ни один не ведёт на роутер (включая `[/домен/]`) | не влияет | не называется |
 
-Роутер — это LAN, 127.0.0.0/8, `::1`, localhost, порт 53 или без порта, plain/udp/tcp. Не роутер: `192.168.1.10`, `:5353`, DoH-URL.
-Ни одна строка не доказывает **активную** петлю: это свойства настройки. Активную петлю показывает только журнал
-запросов AGH и ndm (§5).
+Роутер — это все адреса роутера (`vward_router_addresses`: LAN первым, затем все IPv4/IPv6 из `ip -o addr show`,
+например гостевой сегмент), 127.0.0.0/8, `::1`, localhost; порт 53 или без порта; plain/udp/tcp. Не роутер:
+`192.168.1.10`, `:5353`, DoH-URL. Пока AGH вне цепочки Keenetic, условные виды не называются: Keenetic их запросы в
+AGH не передаёт. Ни одна строка не доказывает **активную** петлю: это свойства настройки. Активную петлю показывают
+только журнал запросов AGH и журнал ndm (§5).
 
 **Изменение поведения стража (явно):** для форм, которые знали оба прежних чтения, ничего не меняется. Новые формы
-полного повтора — `127.0.0.2…`, `::1`, inline-списки, несколько адресов в одной строке — страж теперь тоже считает
-петлёй. В режиме «Наблюдение» (выбор владельца) это только `WOULD_TAKE_OUT` в журнале. Bootstrap, PTR и доменные
-строки AGH из цепочки не выводят. Если библиотеки нет (старая установка), страж работает по прежнему чтению.
+повтора всех запросов — `127.0.0.2…`, `::1`, другой адрес роутера (гостевой сегмент), inline-списки, несколько
+адресов в одной строке — страж теперь тоже считает петлёй. В режиме «Наблюдение» (выбор владельца) это только
+`WOULD_TAKE_OUT` в журнале. Bootstrap, PTR и доменные строки AGH из цепочки не выводят. Если библиотеки нет (старая
+установка), страж работает по прежнему чтению. `main` при доказанном клиенте роутера намеренно не смягчается
+(осторожная сторона).
 
-| Тест | RED на `dev` `dd4fb94` | GREEN |
+| Тест | RED | GREEN |
 |---|---|---|
-| `check-console-diagnostics-dns.py` | `fallback_dns → 192.168.1.1:53`: «Цепочка DNS» = PASS | WARN; bootstrap с именем, публичная доменная строка — WARN; неприменённый bootstrap, PTR, локальные зоны, свой клиент роутера, внешние адреса/порты — PASS; вне цепочки fallback не называется; виды библиотеки |
-| `check-ads-dns-guard.py` | `127.0.0.2:53` в `upstream_dns`: AGH возвращается в цепочку (`(True, '')`) | `loop_upstream`; fallback держит вне цепочки с библиотекой и без неё; bootstrap/PTR/доменная строка AGH не выводят |
+| `check-console-diagnostics-dns.py` | на `dev` `dd4fb94`: `fallback_dns → 192.168.1.1:53` = PASS («Норма»); на `84129ff`: PTR к роутеру = PASS | доказанные случаи — PASS: неиспользуемый bootstrap, `use_private_ptr_resolvers: false`, свой клиент роутера (публичная и локальная строка), внешние адреса/порты. Отрицательные — WARN: PTR при включённых и по умолчанию; локальные зоны без клиента; клиент только с `127.0.0.1`; клиент с роутером среди серверов; клиент с `[/x/]127.0.0.1`; клиент без серверов; два клиента с LAN; CIDR-клиент; bootstrap при `sdns://`; bootstrap при имени у клиента. Upstream на гостевом адресе роутера — FAIL. Вне цепочки fallback не называется |
+| `check-ads-dns-guard.py` | на `dev`: `127.0.0.2:53` — AGH возвращается в цепочку | `loop_upstream`; гостевой адрес роутера — `loop_upstream`; fallback вне цепочки с библиотекой и без неё; bootstrap/PTR/доменная строка AGH не выводят |
 
 Проверено: оба теста на `sh` (dash) и BusyBox 1.36.1 (страж — оба интерпретатора в одном прогоне);
-`busybox sh -n` и `shellcheck -S error` изменённых файлов; `check-agents-watch`, `check-keenetic-cache`,
-`check-routing-state-errors`, `check-sentinel-runtime`, `check-vward-off`, `check-console-ndm-cache`,
-`check-terminating-signal-traps`, `check-no-personal-data`, `check-version-synchronization` PASS. BusyBox Keenetic
-5.1.8 на устройстве **не проверен**. Полный CI — один раз на конечном HEAD PR #33.
+`busybox sh -n` и `shellcheck -S error` изменённых файлов. BusyBox на Keenetic 5.1.8 **не проверен**.
 
-**Риски и откат.** Ложное WARN возможно при необычной, но намеренной настройке AGH: формулировка говорит
-«настройка», а не «сбой». Нагрузка: один `awk` по YAML на запрос диагностики и на минутную проверку стража,
-без опроса и без вызовов Keenetic. Откат — штатный файловый rollback Update Engine (Ed25519/SHA-256 без
-ослабления); конфигурацию Keenetic/AGH изменение не трогает.
+**Риски и откат.** WARN возможен там, где обратного пути на деле нет, но доказать это по настройке нельзя
+(например, PTR-запросы к роутеру: Keenetic может знать все имена). Формулировка говорит «настройка, а не
+замеченный сбой». Нагрузка: один `awk` по YAML и одно `ip -o addr show` на запрос диагностики и на проверку стража,
+без опроса и без вызовов Keenetic. Откат — штатный файловый rollback Update Engine (Ed25519/SHA-256 без ослабления);
+конфигурацию Keenetic/AGH изменение не трогает.
 
 ## 4. Проверено статически / принять на Keenetic / заблокировано
 
@@ -171,16 +176,33 @@ bootstrap/PTR.
 
 ## 5. Одна read-only диагностика (termius-standard v2.3.3)
 
-Команда только диагностическая, ничего не изменяет и DNS-запросов не отправляет. Что читает:
-- ключи `dns:` AGH: только счётчики «роутер / имя / внешний» и `use_private_ptr_resolvers`, без URL;
-- число id клиентов AGH с адресом роутера;
-- `/etc/resolv.conf` и число IPv6-наборов;
-- журнал запросов AGH за 10:50:50–10:51:09: кто спрашивал (роутер или клиент), тип запроса, класс upstream; имена — только для запросов с адреса роутера, не больше 8;
-- ndm `show log`: строки 10:50–10:51 и строки loop/inactivated/ResolveQueue (последние 25, обрезка 110 символов). Эти строки могут содержать имена устройств — пересылать только агенту, в репозиторий не класть;
-- журналы VWARD за 10:45–10:55, `route-dns`, цепочку и окончание ночного задания.
+Команда только диагностическая, ничего не изменяет и DNS-запросов не отправляет. Шесть вставок
+(897/1019/1010/924/925/950 байт, строки ≤ 58 символов, ASCII); запуск — в конце шестой. Вставка 3 пишет
+вспомогательный `/tmp/vward-f37.awk`, скрипт удаляет его в конце.
 
-Четыре вставки (716/978/773/802 байт, строки ≤ 55 символов, ASCII); запуск — в конце четвёртой. Проверено на
-fixture под BusyBox 1.36 и dash.
+Что важно для замечаний 02.11:
+- **Время.** Окно задано абсолютным моментом: `E=1793605860` = 2026-11-02 07:51:00 UTC = 10:51:00 МСК, ±10 с.
+  Каждая запись журнала AGH переводится в UTC по собственному смещению из поля `T` (`+03:00`, `Z`, `-08:00`…), поэтому
+  часовой пояс процесса AGH не важен. Журналы VWARD ищутся по минутам 10:46–10:56 МСК в местном времени оболочки
+  **и** в UTC (`date -d @…`, `date -u -d @…`), в шапке выводится `date +%z`. Журнал ndm фильтруется по видам
+  событий, а не по времени: метки в нём уже есть.
+- **Где журнал AGH.** Процесс AdGuard Home ищется по `/proc/*/cmdline`. Из `-w/--work-dir` и `-c/--config` берутся
+  рабочий каталог и конфигурация (иначе — каталог исполняемого файла, затем `VWARD_ADGUARD_CONFIG` из device.conf,
+  затем `/opt/etc/AdGuardHome`). Каталог журнала — `querylog.dir_path`, иначе `<work>/data`. Выводятся
+  `enabled/file_enabled/interval/size_memory`, размер и первая/последняя метка `T` файлов `querylog.json.1` и
+  `querylog.json`. Отсутствие записей на диске даёт `[ NOT_VERIFIED ] … memory buffer not read`, а **не**
+  «событий не было»: последние записи AGH держит в памяти (`size_memory`) и пишет на диск пачками.
+- **Обезличивание.** Из журнала AGH выводятся только счётчики `смещение от 10:51:00 (с) / источник router|client /
+  тип запроса / класс upstream ROUTER|ext|cache|none`; домены `QH`, URL и клиентские IP не выводятся. Строки ndm,
+  VWARD и `resolv.conf` проходят `anon`: адрес роутера → `router`, `127.0.0.1` → `loopback`, прочие IPv4 → `<ip>`,
+  IPv6 → `<ip6>`, MAC → `<mac>`, URL → `<url>`, имена с точкой → `<name>`. Ключи AGH выводятся только счётчиками.
+
+Проверено на fixture под BusyBox 1.36 (sh и все утилиты из BusyBox, подставные `ndmc`/`ipset`) и dash:
+- записи `10:51:03+03:00` и `07:51:04Z` попадают в окно, `10:51:05+00:00` и `10:50:49+03:00` — нет, `23:51:03-08:00` — попадает;
+- кэш распознаётся;
+- имена и адреса клиентов в вывод не попадают;
+- `--work-dir=` и `-c` разбираются, `querylog.dir_path` читается;
+- без AGH-файлов — `NOT_FOUND`/`NOT_VERIFIED`.
 
 Вставка 1:
 
@@ -204,11 +226,16 @@ on_abort() {
  exit 130
 }
 trap on_abort INT TERM HUP
-Y=/opt/etc/AdGuardHome/AdGuardHome.yaml
-L=$(sed -n 's/^VWARD_LAN_ADDRESS=//p' \
- /opt/etc/vward/device.conf 2>/dev/null | tr -d '"')
-[ -n "$L" ] || L=192.168.1.1
-G=/opt/var/log
+N='[A-Za-z0-9_-]'
+anon() {
+ sed -E -e "s/$LQ/@R@/g" -e 's/127\.0\.0\.1/@O@/g' \
+ -e 's#[a-z]+://[^ ]*#<url>#g' \
+ -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<ip>/g' \
+ -e 's/([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}/<mac>/g' \
+ -e 's/(^|[ =(])[0-9a-fA-F]*::[0-9a-fA-F:]*/\1<ip6>/g' \
+ -e "s/$N+(\.$N+)*\.[A-Za-z]{2,}/<name>/g" \
+ -e 's/@R@/router/g' -e 's/@O@/loopback/g'
+}
 EOF
 ```
 
@@ -216,9 +243,100 @@ EOF
 
 ```sh
 cat >> /tmp/vward-f37.sh <<'EOF'
+E=1793605860
+L=$(sed -n 's/^VWARD_LAN_ADDRESS=//p' \
+ /opt/etc/vward/device.conf 2>/dev/null | tr -d '"')
+[ -n "$L" ] || L=192.168.1.1
+LQ=$(echo "$L" | sed 's/\./\\./g')
+G=/opt/var/log
+P=; for d in /proc/[0-9]*; do
+ grep -qs '[A]dGuardHome' "$d/cmdline" && { P=$d; break; }
+done
+W=; Y=; [ -n "$P" ] && set -- $(tr '\0' ' ' <$P/cmdline)
+while [ $# -gt 0 ]; do case "$1" in
+ -w|--work-dir) W=$2 ;; -c|--config) Y=$2 ;;
+ --work-dir=*) W=${1#*=} ;; --config=*) Y=${1#*=} ;;
+esac; shift; done
+[ -n "$W" ] || { X=$(readlink "$P/exe" 2>/dev/null)
+ [ -n "$X" ] && W=${X%/*}; }
+[ -n "$Y" ] || Y=$(sed -n 's/^VWARD_ADGUARD_CONFIG=//p' \
+ /opt/etc/vward/device.conf 2>/dev/null | tr -d '"')
+[ -n "$W" ] || W=${Y%/*}
+[ -n "$W" ] || W=/opt/etc/AdGuardHome
+[ -n "$Y" ] || Y=AdGuardHome.yaml
+case "$Y" in /*) ;; *) Y=$W/$Y ;; esac
+QD=$(awk '/^[^ #]/{q=($1=="querylog:");next}
+ q&&$1=="dir_path:"{gsub(/["\047]/,"",$2);print $2}' \
+ "$Y" 2>/dev/null)
+[ -n "$QD" ] || QD=$W/data
+Q=$QD/querylog.json
+EOF
+```
+
+Вставка 3:
+
+```sh
+cat > /tmp/vward-f37.awk <<'EOF'
+function x(f,  s){s=$0
+ if(!match(s,"\""f"\":\"[^\"]*\""))return ""
+ s=substr(s,RSTART,RLENGTH);sub(/^"[^"]*":"/,"",s)
+ sub(/"$/,"",s);return s}
+function ep(t,  y,m,d,o,z){y=substr(t,1,4)+0
+ m=substr(t,6,2)+0;d=substr(t,9,2)+0
+ if(m<=2){y--;m+=9}else m-=3
+ d=365*y+int(y/4)-int(y/100)+int(y/400)+\
+ int((153*m+2)/5)+d-719469;o=0
+ z=substr(t,length(t)-5)
+ if(z~/^[+-][0-9][0-9]:[0-9][0-9]$/)o=(substr(z,1,1)\
+ =="-"?-1:1)*(substr(z,2,2)*3600+substr(z,5,2)*60)
+ return d*86400+substr(t,12,2)*3600+\
+ substr(t,15,2)*60+substr(t,18,2)-o}
+{t=ep(x("T"));if(t<e-10||t>=e+10)next;n++
+ ip=x("IP");h=x("Upstream");sub(/^[a-z]+:\/\//,"",h)
+ sub(/\/.*/,"",h);sub(/:[0-9]+$/,"",h)
+ c=(ip==l||ip~/^127\./)?"router":"client"
+ v=(h=="")?"none":(h==l||h~/^127\./)?"ROUTER":"ext"
+ if(index($0,"\"Cached\":true"))v="cache"
+ k[sprintf("%+03ds",t-e)" "c" "x("QT")" up="v]++}
+END{if(!n)print "[ NOT_VERIFIED ] no records on"\
+ " disk in window; memory buffer not read"
+ for(i in k)print i,k[i]}
+EOF
+```
+
+Вставка 4:
+
+```sh
+cat >> /tmp/vward-f37.sh <<'EOF'
 {
-echo "== vward-f37 read-only $(date)"
+echo "== vward-f37 read-only $(date) $(date +%z)"
 ndmc -c "show version" | grep -E 'release|device'
+echo "-- AGH proc=${P:+yes} work=$W conf=$Y"
+[ -r "$Y" ] || echo "[ NOT_FOUND ] AGH config"
+echo "-- querylog settings / files"
+awk '/^[^ #]/{q=($1=="querylog:");next} q&&/^  [a-z]/' \
+ "$Y" 2>/dev/null |
+ grep -E 'enabled|interval|size_mem|dir_path'
+for f in $Q.1 $Q; do
+ [ -r "$f" ] || { echo "[ NOT_FOUND ] $f"; continue; }
+ echo "$f $(wc -c <"$f")B" \
+  "$(head -n1 "$f" | grep -o '"T":"[^"]*"')" \
+  "$(tail -n1 "$f" | grep -o '"T":"[^"]*"')"
+done
+echo "-- AGH records 07:50:50-07:51:09Z = 10:51 MSK"
+for f in $Q.1 $Q; do [ -r "$f" ] &&
+ grep -h '"T":"2026-11-0[12]T' "$f"; done |
+ awk -v l="$L" -v e=$E -f /tmp/vward-f37.awk | sort
+echo "-- ndm log: loop / inactivated / queue"
+ndmc -c "show log" | grep -E 'loop det|inactivat|'\
+'ResolveQueue' | anon | cut -c1-110 | tail -n 20
+EOF
+```
+
+Вставка 5:
+
+```sh
+cat >> /tmp/vward-f37.sh <<'EOF'
 echo "-- AGH keys: router/name/ext (counts only)"
 awk -v l="$L" 'function r(k,v){gsub(/["\047]/,"",v)
  gsub(/[][]/," ",v);n=split(v,w,/[ ,]+/)
@@ -234,59 +352,36 @@ awk -v l="$L" 'function r(k,v){gsub(/["\047]/,"",v)
  d&&$1=="-"&&k!=""{v=$0;sub(/^ *- */,"",v);r(k,v)}
  END{print "router_client_ids:",rc+0
  for(x in c)print (x~/ROUTER/?"[ WARNING ]":\
- "[ OK ]"),x,c[x]}' "$Y" |
+ "[ OK ]"),x,c[x]}' "$Y" 2>/dev/null |
  grep -E 'upstream|bootstrap|fallback|ptr|client'
-echo "-- resolv.conf"; grep nameserver /etc/resolv.conf
+echo "-- resolv.conf: $(grep nameserver /etc/resolv.conf |
+ anon | tr '\n' ' ')"
 echo "-- ipv6 sets: $(ipset -t list 2>/dev/null |
  grep -c 'family inet6')"
 EOF
 ```
 
-Вставка 3:
+Вставка 6 (запускает):
 
 ```sh
 cat >> /tmp/vward-f37.sh <<'EOF'
-echo "-- AGH querylog 10:50:50-10:51:09"
-Q=/opt/etc/AdGuardHome/data/querylog.json
-[ -r "$Q" ] || echo "[ NOT_FOUND ] $Q"
-grep -hE '"T":"2026-11-02T10:5(0:5|1:0)' \
- $Q.1 $Q 2>/dev/null | awk -v l="$L" '
-function x(f,  s){s=$0
- if(!match(s,"\""f"\":\"[^\"]*\""))return ""
- s=substr(s,RSTART,RLENGTH);sub(/^"[^"]*":"/,"",s)
- sub(/"$/,"",s);return s}
-{ip=x("IP");u=x("Upstream")
- c=(ip==l||ip~/^127\./)?"router":"client"
- v=(u=="")?"none":(index(u,l)||u~/127\.0\./)?\
- "ROUTER":"ext"
- k[c" "x("QT")" up="v]++
- if(c=="router"&&n++<8)print "router-q",x("QH")}
-END{for(i in k)print i,k[i]}'
-echo "-- ndm log 10:50-10:51 / loop / queue"
-ndmc -c "show log" | grep -E ' 10:5[01]:|loop det|'\
-'inactivat|ResolveQueue' | cut -c1-110 | tail -n 25
-EOF
-```
-
-Вставка 4 (запускает):
-
-```sh
-cat >> /tmp/vward-f37.sh <<'EOF'
-echo "-- VWARD 02.11 10:45-10:55"
-grep -hE '11-02.10:(4[5-9]|5[0-5])' $G/vward*.log |
- cut -c1-100 | tail -n 15
-echo "-- route-dns / chain"
+R=; i=-5; while [ $i -le 5 ]; do T=$((E+60*i))
+ R="$R|$(date -d @$T +%m-%d.%H:%M)"
+ R="$R|$(date -u -d @$T +%m-%d.%H:%M)"; i=$((i+1)); done
+echo "-- VWARD logs 10:46-10:56 MSK (local and UTC)"
+grep -hE "(${R#|})" $G/vward*.log 2>/dev/null |
+ anon | cut -c1-100 | tail -n 15
+echo "-- route-dns / chain / night job (end, rc)"
 ls /opt/etc/vward/ads-privacy-guard/route-dns.* 2>&1
-cat /tmp/vward-route-dns.status 2>/dev/null
-cat /tmp/vward-dns-chain/state \
- /tmp/vward-dns-chain/reason 2>/dev/null
-echo "-- night job 00:10 (end, rc)"
-cat /tmp/vward-policy-chain.cron.last \
+cat /tmp/vward-route-dns.status \
+ /tmp/vward-dns-chain/state /tmp/vward-dns-chain/reason \
+ /tmp/vward-policy-chain.cron.last \
  /tmp/vward-policy-chain.cron.rc 2>/dev/null
 } 2>&1 | tee "$OUT"
-W=$(grep -c "^\[ WARNING" "$OUT")
-K=$(grep -c "^\[ OK" "$OUT")
-echo "SUMMARY: pass=0 ok=$K warn=$W fail=0" |
+rm -f /tmp/vward-f37.awk
+WN=$(grep -c "^\[ WARNING" "$OUT")
+KN=$(grep -c "^\[ OK" "$OUT")
+echo "SUMMARY: pass=0 ok=$KN warn=$WN fail=0" |
  tee -a "$OUT"
 ln -sfn "$OUT" /tmp/last_result.txt
 ln -sfn "$OUT" /tmp/last_vward.txt
@@ -296,9 +391,12 @@ EOF
 sh -n /tmp/vward-f37.sh && sh /tmp/vward-f37.sh
 ```
 
-Как читать: `router A up=ROUTER` в журнале AGH за окно — подтверждает H1 (AGH вернул запрос роутеру);
-`router … up=ext` без `ROUTER` при строках loop — довод в пользу H2; пустое окно — журнал AGH короче или выключен
-(тогда вывод — «не проверено»). `[ WARNING ] … ROUTER` в ключах — только настройка, не событие.
+Как читать:
+- `+03s router A up=ROUTER` — в окне AGH получил запрос с адреса роутера и отправил его роутеру: это довод за H1 (петля через настройку AGH).
+- `router … up=ext` рядом со строками loop в ndm — довод за H2.
+- Только `client … up=ext` — запросы шли от клиентов и ушли наружу.
+- `NOT_VERIFIED` — записей за окно на диске нет; вывод «не проверено», а не «событий не было».
+- `[ WARNING ] … ROUTER` в ключах — свойство настройки, не событие.
 
 ## 6. Интеграция после fix.36
 

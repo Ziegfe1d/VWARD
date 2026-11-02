@@ -859,31 +859,44 @@ vward_discover_lan_interface()
     vward_map_ndm_for_kernel "$_vp_devmap" "$1"
 }
 
-# vward_agh_dns_loops [YAML] [LAN]: AdGuard Home settings that hand a query to the router's own
-# DNS (Keenetic :53).  Configured is not happened: the query comes back to AdGuard Home only
-# while Keenetic forwards it there (AdGuard Home in Keenetic's DNS chain, a name Keenetic does
-# not answer itself) - then Keenetic logs «proxy loop detected» and drops it.  Settings that
-# are not applied, or that resolve locally, are named apart (fix.37, Keenetic 02.11).  Read
-# only; one kind per line, each once, no addresses:
+# vward_router_addresses: the router's own addresses, the LAN address first (the address
+# Keenetic asks AdGuard Home from), then every other local IPv4/IPv6 address (guest segments,
+# WAN): a DNS server on any of them at port 53 is Keenetic's own.  VWARD_ROUTER_ADDRS overrides.
+vward_router_addresses()
+{
+    if [ -n "${VWARD_ROUTER_ADDRS:-}" ]; then printf '%s\n' "$VWARD_ROUTER_ADDRS"; return 0; fi
+    { printf '%s\n' "${VWARD_LAN_ADDRESS:-}"
+      "${VWARD_IP:-ip}" -o addr show 2>/dev/null |
+          awk '{for (i = 1; i < NF; i++) if ($i == "inet" || $i == "inet6") {a = $(i + 1); sub(/\/.*/, "", a); print a}}'
+    } | awk 'NF && !s[$1]++ {printf "%s%s", (n++ ? " " : ""), $1} END {print ""}'
+}
+
+# vward_agh_dns_loops [YAML] [ADDRESSES]: AdGuard Home settings that hand a query to the
+# router's own DNS (Keenetic :53 on any router address; ADDRESSES as vward_router_addresses
+# prints them, the LAN first).  Configured is not happened: such a query comes back only while
+# Keenetic forwards it to AdGuard Home - then Keenetic logs «proxy loop detected» and drops it.
+# A setting is called harmless only with proof that no way leads back (fix.37, Keenetic 02.11).
+# Read only; one kind per line, each once, no addresses:
 #   main            an upstream_dns row for every domain: every query, once in the chain
-#   fallback        fallback_dns: only when the main servers fail
-#   bootstrap       bootstrap_dns, used: an upstream is a host name (DoH/DoT/plain name)
-#   bootstrap_idle  bootstrap_dns, unused: every upstream is an address
-#   private         local_ptr_upstreams with use_private_ptr_resolvers on: AdGuard Home's
-#                   documented setting (the router names its home network); a loop only for
-#                   reverse names Keenetic does not know
-#   private_off     local_ptr_upstreams with use_private_ptr_resolvers: false
-#   domain          [/public domain/] rows, no own client for the router's queries
-#   domain_client   the same, but a persistent client with the router's address and its own
-#                   upstreams answers the router's queries: they do not come back
-#   domain_local    [/local zone/] rows only (lan, local, home.arpa, *.arpa, ...): Keenetic
-#                   answers those itself
-# The router: LAN, 127.0.0.0/8, ::1, localhost; port 53 or none; plain, udp://, tcp://.
+#   fallback        fallback_dns: when the main servers fail
+#   bootstrap       bootstrap_dns while some server is a name (DoH/DoT/plain name, sdns://,
+#                   upstream_dns_file, a client's upstreams): AdGuard Home resolves it there
+#   bootstrap_idle  bootstrap_dns, every server an address: bootstrap is not used (AdGuard
+#                   Home resolves only its servers' names by it)
+#   private         local_ptr_upstreams with private resolvers on: reverse names Keenetic does
+#                   not know come back (not proven otherwise)
+#   private_off     use_private_ptr_resolvers: false - AdGuard Home does not ask them
+#   domain          [/public domain/] rows to the router
+#   domain_local    [/lan, local, home.arpa, *.arpa .../] rows: names Keenetic does not know
+#                   come back (not proven otherwise)
+#   domain_client   [/domain/] rows, but the queries Keenetic forwards bypass them: exactly one
+#                   persistent client has the LAN address itself, no CIDR client exists, and
+#                   that client has its own servers, none of them the router
 vward_agh_dns_loops()
 {
     _vp_y=${1:-$VWARD_ADGUARD_CONFIG}
     [ -n "$_vp_y" ] && [ -r "$_vp_y" ] || return 0
-    awk -v lan="${2:-${VWARD_LAN_ADDRESS:-}}" '
+    awk -v addrs="${2:-${VWARD_LAN_ADDRESS:-}}" '
         function unq(a) { gsub(/["\047]/, "", a); gsub(/^[ \t]+|[ \t]+$/, "", a); return a }
         function hostport(a,    i, n) {
             H = a; P = ""
@@ -898,12 +911,13 @@ vward_agh_dns_loops()
             else if (a ~ /^[a-z]+:\/\//) return 0
             hostport(a)
             if (P != "" && P != "53") return 0
-            return (H != "" && H == lan) || H == "localhost" || H == "::1" || H == "0:0:0:0:0:0:0:1" || H ~ /^127\.[0-9]+\.[0-9]+\.[0-9]+$/
+            return (H != "" && (H in RA)) || H == "localhost" || H == "::1" || H == "0:0:0:0:0:0:0:1" || H ~ /^127\.[0-9]+\.[0-9]+\.[0-9]+$/
         }
-        # A host name AdGuard Home must resolve first (by bootstrap_dns).
+        # A server AdGuard Home reaches by name (resolved by bootstrap_dns); stamps count as names.
         function named(a,    s) {
             a = unq(a)
-            if (a == "" || a == "#" || a ~ /^sdns:\/\//) return 0
+            if (a == "" || a == "#") return 0
+            if (a ~ /^sdns:\/\//) return 1
             if (a ~ /^[a-z]+:\/\//) a = substr(a, index(a, "//") + 2)
             s = index(a, "/"); if (s) a = substr(a, 1, s - 1)
             hostport(a)
@@ -913,11 +927,12 @@ vward_agh_dns_loops()
             d = tolower(d); sub(/\.$/, "", d)
             return d ~ /(^|\.)(lan|local|localdomain|home|home\.arpa|internal|intranet|in-addr\.arpa|ip6\.arpa)$/
         }
+        # entry KIND VALUE: one server row; returns 1 when it leads to the router.
         function entry(kind, v,    i, n, w, t, doms, dn, dd, loc, r) {
             v = unq(v)
-            if (v == "" || substr(v, 1, 1) == "#") return
+            if (v == "" || substr(v, 1, 1) == "#") return 0
             doms = ""
-            if (substr(v, 1, 2) == "[/") { i = index(v, "/]"); if (!i) return
+            if (substr(v, 1, 2) == "[/") { i = index(v, "/]"); if (!i) return 0
                 doms = substr(v, 3, i - 3); v = substr(v, i + 2) }
             n = split(v, w, /[ \t]+/); r = 0
             for (t = 1; t <= n; t++) {
@@ -925,28 +940,31 @@ vward_agh_dns_loops()
                 if (router(w[t])) r = 1
                 else if (kind != "bootstrap" && named(w[t])) need = 1
             }
-            if (!r) return
+            if (!r || kind == "client") return r
             if (kind == "main" && doms != "") {
                 dn = split(doms, dd, /\//); loc = 1
                 for (t = 1; t <= dn; t++) if (dd[t] != "" && !local_zone(dd[t])) loc = 0
                 if (loc) dloc = 1; else dpub = 1
-                return
+                return 1
             }
             hit[kind] = 1
+            return 1
         }
         function list(kind, v,    n, w, t) {
             sub(/^\[/, "", v); sub(/\][ \t]*$/, "", v); n = split(v, w, /,/)
             for (t = 1; t <= n; t++) entry(kind, w[t])
         }
-        function client_end() { if (cid && cup) rclient = 1; cid = 0; cup = 0; ck = "" }
+        function client_end() { if (cid) { nlan++; if (cup && !cbad) good++ } cid = 0; cup = 0; cbad = 0; ck = "" }
         function client_val(k, v,    n, w, t) {
             v = unq(v); if (v == "") return
-            if (substr(v, 1, 1) == "[") { sub(/^\[/, "", v); sub(/\][ \t]*$/, "", v); n = split(v, w, /,/)
+            if (substr(v, 1, 1) == "[" && substr(v, 1, 2) != "[/") { sub(/^\[/, "", v); sub(/\][ \t]*$/, "", v); n = split(v, w, /,/)
                 for (t = 1; t <= n; t++) client_val(k, w[t]); return }
-            if (k == "ids" && (v == lan || v == "127.0.0.1")) cid = 1
-            if (k == "upstreams" && v != "#" && !router(v)) cup = 1
+            if (k == "ids") { if (v == lan) cid = 1; if (index(v, "/")) cidr = 1 }
+            if (k == "upstreams") { if (entry("client", v)) cbad = 1; else if (v != "#") cup = 1 }
         }
-        BEGIN { ptr = 1 }
+        BEGIN { n = split(addrs, A, /[ \t\n]+/); lan = ""
+            for (i = 1; i <= n; i++) if (A[i] != "") { if (lan == "") lan = A[i]; RA[A[i]] = 1 }
+            ptr = 1 }
         /^[^ #]/ { if (cl) client_end(); d = ($1 == "dns:"); c = ($1 == "clients:"); cl = 0; k = ""; next }
         c && /^  [a-z_]+:/ { if (cl) client_end(); cl = ($1 == "persistent:"); next }
         cl && /^    - / { client_end(); sub(/^    - /, "      ") }
@@ -968,8 +986,9 @@ vward_agh_dns_loops()
             if (hit["fallback"]) print "fallback"
             if (hit["bootstrap"]) print (need ? "bootstrap" : "bootstrap_idle")
             if (hit["private"]) print (ptr ? "private" : "private_off")
-            if (dpub) print (rclient ? "domain_client" : "domain")
-            if (dloc) print "domain_local"
+            bypass = (lan != "" && nlan == 1 && good == 1 && !cidr)
+            if ((dpub || dloc) && bypass) print "domain_client"
+            else { if (dpub) print "domain"; if (dloc) print "domain_local" }
         }
     ' "$_vp_y" 2>/dev/null
     return 0

@@ -465,12 +465,12 @@ with tempfile.TemporaryDirectory() as tmp:
         # Without the library (an older install) its own reading stays (fallback counted too).
         profile = tmp / "profile.sh"
         stub = profile.read_text()
-        def loop_case(text, shared):
+        def loop_case(text, shared, extra=None):
             profile.write_text((f'. "{ROOT}/components/runtime/lib/vward-device-profile.sh"\n' if shared else "") + stub)
             shutil.rmtree(chaindir, ignore_errors=True)
             yaml.write_text(text)
             for _ in range(4):
-                run("tick", shell=shell)
+                run("tick", shell=shell, extra=extra)
             return inchain(), status().get("chain_reason")
         for shared in (True, False):
             r = loop_case(good_yaml + "  fallback_dns:\n    - 192.168.1.1:53\n", shared)
@@ -480,6 +480,11 @@ with tempfile.TemporaryDirectory() as tmp:
         r = loop_case(good_yaml.replace("upstream_dns:", "upstream_dns:\n    - 127.0.0.2:53", 1), True)
         if r != (False, "loop_upstream"):
             fail(f"{shell[0]} RED: the guard does not use the shared rule (127.0.0.2:53): {r}")
+        # The router's other address (a guest segment) at :53 is Keenetic's DNS too (fix.37 review).
+        r = loop_case(good_yaml.replace("upstream_dns:", "upstream_dns:\n    - 10.1.30.1", 1), True,
+                      {"VWARD_ROUTER_ADDRS": "192.168.1.1 10.1.30.1"})
+        if r != (False, "loop_upstream"):
+            fail(f"{shell[0]} an upstream on the router's guest address: kept out: {r}")
         for name, text in (
                 ("bootstrap", good_yaml + "  bootstrap_dns:\n    - 192.168.1.1\n"),
                 ("PTR", good_yaml + "  local_ptr_upstreams:\n    - 192.168.1.1\n"),
