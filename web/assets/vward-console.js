@@ -272,7 +272,8 @@ const API_ERRORS = {
   adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен',
   // fix.31: the codes the Panel showed as they are.
   smartdns_doh_component: 'В Keenetic нет компонента «Прокси-сервер DNS-over-HTTPS»: установите его в веб-интерфейсе Keenetic («Общие настройки» → «Изменить набор компонентов»), роутер перезагрузится',
-  smartdns_not_configured: 'Smart DNS не настроен: укажите сервер DoH в разделе «ИИ-сервисы»', smartdns_keenetic_full: 'лимит Smart DNS в Keenetic исчерпан (8 из 8 доменов)',
+  smartdns_not_configured: 'Smart DNS не настроен: укажите сервер DoH в разделе «ИИ-сервисы»',
+  smartdns_server_ambiguous: 'у этого сервера несколько адресов: вставьте точный адрес в поле «Свой сервер DoH» и нажмите «Убрать по адресу»', smartdns_keenetic_full: 'лимит Smart DNS в Keenetic исчерпан (8 из 8 доменов)',
   service_list: 'список сервиса не создан в Keenetic', invalid_arguments: 'неверные параметры запроса', helper_failed: 'действие завершилось без ответа',
   doh_limit: 'в Keenetic нет места для ещё одного сервера DNS-over-HTTPS', doh_remove_failed: 'Keenetic не удалил строку Smart DNS', doh_remove_unsafe: 'строка Smart DNS используется не только VWARD: не удалена',
   package_install_refused: 'установка пакета отклонена проверкой безопасности или зависимостей', package_recovery_required: 'нужно разобрать незавершённую установку пакета', engine_in_use: 'у движка уже есть настроенные туннели', install_recovery_required: 'нужно разобрать незавершённую установку Xray', unzip_unavailable: 'не найдена программа распаковки ZIP',
@@ -1565,13 +1566,31 @@ function aiPage() {
         ['Где хранится', !a ? '…' : sd.agh ? 'AdGuard Home' : 'Keenetic', '', null, '', sd.agh ? 'доменов: ' + fmtInt(sd.agh_domains || 0) : 'строк ' + fmtInt(sd.keenetic || 0) + ' из ' + fmtInt(sd.keenetic_max || 8)],
         ['Сервер', !a ? '…' : ((sd.servers || []).join(', ') || 'не задан') + (sd.alive === 'no' ? ' · не отвечает' : sd.alive === 'yes' ? ' · отвечает' : ''), a && sd.alive === 'no' ? 'crit' : a && noSd ? 'warn' : ''],
         ['Домены Smart DNS', 'открыть', '', 'd-smartdns', '', 'и агент: держит их мимо VPN']]) + sdStoreRow(a, sd) +
+      sdServers(a, sd) +
       inputBar({ form: 'ai-dns-add', label: sd.own ? 'Заменить свой сервер DoH' : 'Свой сервер DoH', name: 'server', mono: true, placeholder: 'https://dns.example/dns-query', aria: 'Адрес DoH', off: !cfgOk(), icon: 'plus', btn: 'Сохранить' }) +
-      (sd.own ? '<div class="panel-actions">' + btn('ai-dns-clear', 'close', 'Убрать свой сервер') + '</div>' : '') + resultBox('aidns'),
+      '<div class="panel-actions">' + (sd.own ? btn('ai-dns-clear', 'close', 'Убрать свой сервер') : '') +
+        ((sd.server_rows || []).length ? btn('ai-dns-clear-url', 'close', 'Убрать по адресу', '', cfgOk() ? '' : ' disabled') : '') + '</div>' + resultBox('aidns'),
       { desc: 'Сервер, через который открываются сервисы с путём «Smart DNS». Без AdGuard Home VWARD пишет строки в Keenetic (не больше 8). Адрес хранится только на роутере.' }) +
     panel('Все ИИ-сервисы', aiSlider('all', allVia, 'Все ИИ-сервисы', false, sdDown) + resultBox('svc'),
       { beta: true, desc: allVia ? 'Одним нажатием переключить все сервисы, например когда Smart DNS сбоит.' : 'Сейчас у сервисов разный путь. Нажмите, чтобы отправить все одним путём.' }) +
     panel('Сервисы', !a ? empty('Загрузка…') : svc.length ? svc.map(row).join('') : empty('В каталоге нет ИИ-сервисов'),
       { desc: 'VPN - через туннель; Smart DNS - через DNS-сервер, который открывает сервис; Провайдер - напрямую.' });
+}
+// Every server Keenetic's lines and AdGuard Home's rows still use, with what it holds and its own
+// «Убрать» (fix.35.3, 02.11: the subscription ended, the own address was already gone, its 35 rows
+// stayed and the page offered no button). Removal is the owner's choice, confirmed: only that
+// server's domain rows go, the other servers and the general upstreams stay.
+function sdServers(a, sd) {
+  const rows = (a && sd.server_rows) || [];
+  if (!rows.length) return '';
+  return '<dl class="kv">' + rows.map(r => {
+    const what = [r.keenetic ? 'в Keenetic ' + fmtInt(r.keenetic) : '', r.agh ? 'в AdGuard Home ' + fmtInt(r.agh) : ''].filter(Boolean).join(', ') || 'привязок нет';
+    const alive = r.host === sd.alive_host ? (sd.alive === 'no' ? ' · не отвечает' : sd.alive === 'yes' ? ' · отвечает' : sd.alive === 'unknown' ? ' · ответ не подтверждён' : '') : '';
+    const cid = 'sd-drop:' + r.host;
+    const ctl = confirm && confirm.id === cid ? confirmBox(cid, 'Убрать привязки к ' + r.host + ' (' + what + ')? Другие серверы и общий DNS останутся.', 'Убрать', true)
+      : btn('ask', 'close', 'Убрать', 'small', ' data-confirm="' + esc(cid) + '"' + (cfgOk() ? '' : ' disabled'));
+    return ctrlRow(r.host + (r.own ? ' (свой)' : ''), ctl, 'доменов: ' + what + alive, 'stack');
+  }).join('') + '</dl>';
 }
 // Where new Smart DNS domains go, the owner's choice (fix.32); AdGuard Home only while it works.
 function sdStoreRow(a, sd) {
@@ -1587,12 +1606,22 @@ document.addEventListener('change', async e => {
   actionResult = { id: 'aidns', text: x.ok ? 'Сохранено: новые домены Smart DNS - ' + ({ auto: 'автоматически', keenetic: 'в Keenetic', agh: 'в AdGuard Home' }[e.target.value]) : 'Не сохранено: ' + errText(x) };
   await load('ai', true); render();
 });
-async function smartdnsServer(op, url) {
-  let x; try { x = await apiPost('smartdns-server', { op: op, url: url }); } catch (err) { x = { ok: false, error: err.message }; }
+// host: a server of the list (sdServers); url: an exact address the owner pasted. The result is read
+// again from the router: «убран» only when no row of that server is left (an empty own address
+// proves nothing, 02.11).
+async function smartdnsServer(op, url, host) {
+  const body = Object.assign({ op: op, url: url || '' }, host ? { host: host } : {});
+  actionResult = { id: 'aidns', text: op === 'set' ? 'Сохраняем…' : 'Убираем привязки…' }; render();
+  let x; try { x = await apiPost('smartdns-server', body); } catch (err) { x = { ok: false, error: err.message }; }
   const c = x.cleared || {};
-  actionResult = { id: 'aidns', text: x.ok ? (op === 'set' ? 'Сервер сохранён' : x.result === 'unchanged' ? 'Убирать нечего: привязок к своему серверу нет' :
-    'Свой сервер убран. Очищено: в Keenetic строк ' + (c.keenetic || 0) + ', в AdGuard Home доменов ' + (c.agh || 0) + ', сохранённых состояний списков ' + (c.saved || 0)) : 'Не выполнено: ' + errText(x) };
-  await load('ai', true); render();
+  await load('ai', true);
+  const sd = (S.ai && S.ai.smartdns) || {}, left = (sd.server_rows || []).filter(r => host ? r.host === host : r.own);
+  const n = r => (r.keenetic || 0) + (r.agh || 0), still = left.reduce((t, r) => t + n(r), 0), other = (sd.server_rows || []).filter(r => !r.own && n(r));
+  actionResult = { id: 'aidns', text: !x.ok ? 'Не выполнено: ' + errText(x) : op === 'set' ? 'Сервер сохранён' :
+    still ? 'Выполнено не полностью: у сервера осталось привязок ' + fmtInt(still) + ' - повторите или смотрите «Журналы»' :
+    x.result === 'unchanged' ? (other.length && !host ? 'У своего сервера привязок нет; ещё используются: ' + other.map(r => r.host).join(', ') + ' - уберите нужный кнопкой «Убрать»' : 'Убирать нечего: привязок к этому серверу нет') :
+    'Сервер убран. Очищено: в Keenetic строк ' + (c.keenetic || 0) + ', в AdGuard Home доменов ' + (c.agh || 0) + ', сохранённых состояний списков ' + (c.saved || 0) + '. Сервисы этого сервера теперь идут через провайдера: выберите для них VPN' };
+  render();
 }
 // aiJob ID WAY MSG [KEEP]: KEEP - the answer to «no room in Smart DNS» (the service still waits
 // for Smart DNS). No room: the Panel asks which way the services that did not fit go (fix.31).
@@ -4464,6 +4493,7 @@ async function runAction(resultId, action, fields, okMsg) {
   finally { render(); }
 }
 const CONFIRMED = {
+  'sd-drop': c => smartdnsServer('clear', '', c.id.slice(8)),
   'list-merge': c => cfgSet({ op: 'list', action: 'merge', target: c.name, value: c.what, confirm: 'LIST_MERGE' }, 'Списки объединены', ['lists']),
   'list-clear': c => cfgSet({ op: 'list', action: 'clear', target: c.name, confirm: 'LIST_CLEAR' }, 'Список очищен', ['lists', 'listd']),
   'lists-del': () => { const ns = [...LISTPICK]; LISTPICK.clear(); return listBulk({ op: 'list', action: 'delete', confirm: 'LIST_DELETE' }, ns, 'Удаление списков'); },
@@ -4826,7 +4856,7 @@ document.addEventListener('click', e => {
   else if (a === 'all-check') extOp('check').then(() => updateOp('check'));
   else if (a === 'confirm-no') { confirm = null; render(); }
   else if (a === 'vward-on') { t.disabled = true; vwardPower('on'); }
-  else if (a === 'confirm-yes') { const c = confirm; confirm = null; const id = c && /^list-merge-/.test(c.id) ? 'list-merge' : c && c.id; if (c && CONFIRMED[id]) CONFIRMED[id](c); else render(); }
+  else if (a === 'confirm-yes') { const c = confirm; confirm = null; const id = c && /^list-merge-/.test(c.id) ? 'list-merge' : c && /^sd-drop:/.test(c.id) ? 'sd-drop' : c && c.id; if (c && CONFIRMED[id]) CONFIRMED[id](c); else render(); }
   else if (a === 'ads-urule') { t.disabled = true; adsUserRule(t.dataset.op, t.dataset.kind, t.dataset.dom); }
   else if (a === 'ads-chain-block') { t.disabled = true; adsChainBlock(t.dataset.doms.split(' ').filter(d => DOMAIN.test(d))); }
   else if (a === 'site-fix') siteFix(t.dataset.dom);
@@ -4839,6 +4869,9 @@ document.addEventListener('click', e => {
   else if (a === 'ai-answer') aiAnswer(t.dataset.way);
   else if (a === 'ai-room') { if (!SVC.busy) aiJob(t.dataset.ai, 'dns', aiName(t.dataset.ai) + ': Smart DNS'); }
   else if (a === 'ai-dns-clear') smartdnsServer('clear', '');
+  else if (a === 'ai-dns-clear-url') { const f = t.closest('.panel') && t.closest('.panel').querySelector('form[data-form="ai-dns-add"] input[name="server"]'); const v = f ? f.value.trim() : '';
+    if (!/^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?(\/[A-Za-z0-9._~\/-]{0,200})?$/.test(v)) { actionResult = { id: 'aidns', text: 'Вставьте в поле точный адрес сервера (https://…), который нужно убрать' }; render(); }
+    else { smartdnsServer('clear', v); if (f) f.value = ''; } }
   else if (a === 'prop-more') { PROP_ALL = true; render(); }
   else if (a === 'vsrv-open') { const k = t.dataset.name + '|' + t.dataset.code; if (VOPEN.has(k)) VOPEN.delete(k); else VOPEN.add(k); render(); }
   else if (a === 'tunnel-probe') {

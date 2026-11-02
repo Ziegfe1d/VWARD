@@ -3336,6 +3336,12 @@ smartdns_prune_saved() {
 # smartdns-server set|clear: the owner's own Smart DNS server, a DoH address. It comes on stdin
 # (it may hold a personal token). Clear removes its active domain rules from both stores;
 # selectors read the address from the private file rather than exposing it in argv.
+# clear takes an optional selector on stdin (fix.35.3): empty - the owner's own server
+# (SMARTDNS_URL); «host:NAME» - a server the stores still use, chosen by the owner in the Panel;
+# an exact https:// address the owner pasted. 02.11.2026: the subscription had ended, the own
+# address was already gone while Keenetic and AdGuard Home still held its rows, and clear said
+# «unchanged» - an empty own address proves nothing about the rows. A host with several
+# addresses (tokens) is not guessed: the owner pastes the exact one.
 op_smartdns_server() {
     case "$1" in
         set) IFS= read -r ss_url || die invalid_value 64
@@ -3350,30 +3356,63 @@ op_smartdns_server() {
              # cleared (01.11.2026: the button cleared the address only, Keenetic's lines and the 36
              # AdGuard Home rows stayed on the dead server).
              ss_own=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=")+1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
-             # Only the owner's own server: another server is never cleared by this button.
-             [ -n "$ss_own" ] || done_ok "smartdns-server clear" unchanged
+             ss_sel=; [ -t 0 ] || IFS= read -r ss_sel || :
+             case "$ss_sel" in
+                 '') ;;
+                 host:*) ss_sel=host:$(printf '%s' "${ss_sel#host:}" | tr 'A-Z' 'a-z')
+                         printf '%s\n' "${ss_sel#host:}" | grep -Eq '^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$' || die invalid_value 64 ;;
+                 *) printf '%s\n' "$ss_sel" | grep -Eq '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]{0,200})?$' || die invalid_value 64 ;;
+             esac
+             # No own address and no choice: the own server has nothing left; another server is never
+             # taken unasked - the Panel lists the servers still in use, each with its own button.
+             [ -n "$ss_sel" ] || [ -n "$ss_own" ] || done_ok "smartdns-server clear" unchanged
              ss_conf=$SMARTDNS_CONF
              load_profile_base; snapshot
              # Every server the two stores use, in a private file (addresses may hold tokens).
              SD_TMPCONF=$(umask 077; mktemp /tmp/vward-console-sdconf.XXXXXX) || die temporary_file_unavailable
              { doh_lines | awk '$(NF-1) == "domain" {print $3}'; vward_agh_smartdns_urls; } | sort -u > "$SD_TMPCONF.all" || die write_failed
+             # The address to look for: the owner's own one, or the pasted one; a host - its one address.
+             ss_want=${ss_sel:-$ss_own}
              ss_old=
-             if grep -qxF -- "$ss_own" "$SD_TMPCONF.all"; then
-                 ss_old=$ss_own
-             else
-                 # The rows use another address of the same server (another token or path, 01.11: the
-                 # Panel's button cleared the address only): the same host, and only one such
-                 # address - else only the owner's own address is cleared, as before.
-                 ss_same=$(SS_OWN=$ss_own awk 'function host(u) {sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); return tolower(u)}
-                     BEGIN {h = host(ENVIRON["SS_OWN"])} host($0) == h' "$SD_TMPCONF.all")
-                 if [ "$(printf '%s\n' "$ss_same" | grep -c .)" = 1 ]; then ss_old=$ss_same; else ss_old=$ss_own; fi
-             fi
+             case "$ss_want" in
+                 host:*)
+                     ss_same=$(SS_H=${ss_want#host:} awk 'function host(u) {sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); return tolower(u)}
+                         host($0) == ENVIRON["SS_H"]' "$SD_TMPCONF.all")
+                     case "$(printf '%s\n' "$ss_same" | grep -c .)" in
+                         0) ;;
+                         1) ss_old=$ss_same ;;
+                         *) rm -f "$SD_TMPCONF.all"; die smartdns_server_ambiguous ;;
+                     esac ;;
+                 *)
+                     if grep -qxF -- "$ss_want" "$SD_TMPCONF.all"; then
+                         ss_old=$ss_want
+                     else
+                         # The rows use another address of the same server (another token or path, 01.11: the
+                         # Panel's button cleared the address only): the same host, and only one such
+                         # address - else only the address asked for, as before.
+                         ss_same=$(SS_OWN=$ss_want awk 'function host(u) {sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); return tolower(u)}
+                             BEGIN {h = host(ENVIRON["SS_OWN"])} host($0) == h' "$SD_TMPCONF.all")
+                         if [ "$(printf '%s\n' "$ss_same" | grep -c .)" = 1 ]; then ss_old=$ss_same; else ss_old=$ss_want; fi
+                     fi ;;
+             esac
              rm -f "$SD_TMPCONF.all"
+             # The owner's own address goes only with its own server (no selector, or the same host).
+             ss_drop_own=0
+             if [ -n "$ss_own" ]; then
+                 if [ -z "$ss_sel" ]; then ss_drop_own=1
+                 elif [ -n "$ss_old" ] && SS_A=$ss_own SS_B=$ss_old awk 'function host(u) {sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); return tolower(u)}
+                         BEGIN {exit !(host(ENVIRON["SS_A"]) == host(ENVIRON["SS_B"]))}'; then ss_drop_own=1
+                 elif [ "${ss_sel#host:}" != "$ss_sel" ] && SS_A=$ss_own SS_H=${ss_sel#host:} awk 'function host(u) {sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); return tolower(u)}
+                         BEGIN {exit !(host(ENVIRON["SS_A"]) == ENVIRON["SS_H"])}'; then ss_drop_own=1; [ -n "$ss_old" ] || ss_old=$ss_own
+                 fi
+             fi
+             # A chosen server no store uses any more, and not the own one: nothing to clear.
+             [ -n "$ss_old" ] || done_ok "smartdns-server clear" unchanged
              backup_file "$SMARTDNS_CONF" || die backup_failed
              # The selectors read the address from a file, never from a command line.
              SMARTDNS_CONF=$SD_TMPCONF
              { grep -v '^SMARTDNS_URL=' "$ss_conf" 2>/dev/null; printf 'SMARTDNS_URL=%s\n' "$ss_old"; } > "$SMARTDNS_CONF" || die write_failed
-             SD_DOH_N=0 SD_AGH_N=0 sd_saved_n=0
+             SD_DOH_N=0 SD_AGH_N=0 sd_saved_n=0 SD_RESULT=unchanged
              # Keep the address until both stores and the router save have succeeded.
              if [ "$(awk -F= '$1 == "smartdns_clear_rules" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" != 0 ]; then
                  smartdns_take_rows server "$ss_old"
@@ -3381,10 +3420,12 @@ op_smartdns_server() {
                  smartdns_prune_saved server
              fi
              rm -f "$SMARTDNS_CONF"; SMARTDNS_CONF=$ss_conf
-             new_tmp "$SMARTDNS_CONF" || die write_failed
-             grep -v '^SMARTDNS_URL=' "$SMARTDNS_CONF" > "$TMPFILE"
-             if [ -s "$TMPFILE" ]; then install_tmp "$SMARTDNS_CONF" 0600 || die write_failed; else rm -f "$SMARTDNS_CONF" || die write_failed; fi
-             SD_RESULT=changed
+             if [ "$ss_drop_own" = 1 ]; then
+                 new_tmp "$SMARTDNS_CONF" || die write_failed
+                 grep -v '^SMARTDNS_URL=' "$SMARTDNS_CONF" > "$TMPFILE"
+                 if [ -s "$TMPFILE" ]; then install_tmp "$SMARTDNS_CONF" 0600 || die write_failed; else rm -f "$SMARTDNS_CONF" || die write_failed; fi
+                 SD_RESULT=changed
+             fi
              TXN=0
              # What was cleared, for the Panel (no address): lines in Keenetic, rows in AdGuard Home,
              # saved list states that would have brought them back.

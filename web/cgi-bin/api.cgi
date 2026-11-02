@@ -2646,6 +2646,11 @@ if [ "$ACTION" = ai-data ]; then
         VWARD_DOH_ALIVE_MT=${VWARD_DOH_ALIVE_MT:-4} vward_doh_alive "$AI_URL"
         case $? in 0) AI_ALIVE=yes ;; 1) AI_ALIVE=no ;; *) AI_ALIVE=unknown ;; esac
     fi
+    # Which server that answer is about (its host only), and the host of every AdGuard Home row:
+    # the Panel lists each server still in use with its own «Убрать» (fix.35.3: rows of an expired
+    # server stayed after its own address was gone, and no button was left to take them out).
+    AI_ALIVE_HOST="$(printf '%s\n' "$AI_URL" | awk '{u = $0; sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); print tolower(u); exit}')"
+    AI_AGH_HOSTS="$(command -v vward_agh_smartdns_urls >/dev/null 2>&1 && vward_agh_smartdns_urls | head -n 400 | awk '{u = $0; sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); print tolower(u)}')"
     AI_URL=
     AI_ON="$(awk -F'\t' 'NF >= 3 {print $1 "\t" $2 "\t" $3}' "$CONFIG_ETC/services/enabled.tsv" 2>/dev/null)"
     # The services waiting for room in Smart DNS (op_ai), and whether AdGuard Home runs.
@@ -2655,11 +2660,13 @@ if [ "$ACTION" = ai-data ]; then
         ctx && $1 == "route" && $2 == "object-group" {print $3 "\t" $4}')"
     "$JQ" -c --arg doh "$AI_DOH" --arg agh "$AI_AGH" --arg own "$AI_OWN" --arg on "$AI_ON" --arg routes "$AI_ROUTES" --arg wait "$AI_WAIT" \
         --argjson agh_run "$AI_AGH_RUN" --arg shared "$AI_SHARED" --arg store "$AI_STORE" --arg alive "$AI_ALIVE" \
+        --arg alive_host "$AI_ALIVE_HOST" --arg agh_hosts "$AI_AGH_HOSTS" \
         --argjson agh_on "$([ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] && echo true || echo false)" '
         ($doh | split("\n") | map(select(length > 0) | split("\t"))) as $k
         | ($agh | split("\n") | map(select(length > 0))) as $a
         | ($on | split("\n") | map(select(length > 0) | split("\t") | {key: .[0], value: .[1]}) | from_entries) as $groups
         | ($routes | split("\n") | map(select(length > 0) | split("\t") | {key: .[0], value: .[1]}) | from_entries) as $route
+        | ($agh_hosts | split("\n") | map(select(length > 0))) as $ah
         | ([$k[] | .[0]] + $a) as $sd
         | def covered($d): any($sd[]; . as $s | $d == $s or ($d | endswith("." + $s)));
           # The own main domains of a service: the same rule as ai_main in vward-console-config.sh.
@@ -2673,7 +2680,11 @@ if [ "$ACTION" = ai-data ]; then
         {ok: true,
          smartdns: {store: $store, keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_running: $agh_run, agh_domains: ($a | length),
                     waiting: ($wait | split("\n") | map(select(length > 0))),
-                    servers: ([$k[] | .[1]] + (if $own == "" then [] else [$own] end) | unique), own: $own, alive: $alive},
+                    servers: ([$k[] | .[1]] + $ah + (if $own == "" then [] else [$own] end) | unique), own: $own, alive: $alive,
+                    alive_host: $alive_host,
+                    server_rows: ([$k[] | .[1]] + $ah + (if $own == "" then [] else [$own] end) | unique
+                      | map(. as $h | {host: $h, own: ($h == $own), keenetic: ([$k[] | select(.[1] == $h)] | length),
+                                       agh: ([$ah[] | select(. == $h)] | length)}))},
          services: [.services[] | select(.category == "ai") | . as $s
            | main($s.id; $s.domains) as $roots
            | ($groups[$s.id] // "") as $g
@@ -2689,7 +2700,7 @@ if [ "$ACTION" = smartdns-server ]; then
     ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
     [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
     read_body 512
-    form_only op url store || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
+    form_only op url store host || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
     SSOP="$(form_value op)"
     if [ "$SSOP" = store ]; then
         SST="$(form_value store)"; case "$SST" in auto|keenetic|agh) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
@@ -2703,6 +2714,14 @@ if [ "$ACTION" = smartdns-server ]; then
     fi
     SSURL="$(form_value url | sed 's/%3[Aa]/:/g;s/%2[Ff]/\//g;s/%2[Dd]/-/g;s/%2[Ee]/./g;s/%5[Ff]/_/g;s/%7[Ee]/~/g')"
     case "$SSOP" in set|clear) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;; esac
+    # clear of a server the stores still use, chosen by its host in the Panel (fix.35.3): the helper
+    # finds its one address in Keenetic and AdGuard Home; the Panel never holds the address itself.
+    SSHOST="$(form_value host | tr 'A-Z' 'a-z')"
+    if [ -n "$SSHOST" ]; then
+        [ "$SSOP" = clear ] && [ -z "$SSURL" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }
+        printf '%s\n' "$SSHOST" | grep -Eq '^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$' || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }
+        SSURL="host:$SSHOST"
+    fi
     SSALL="$(printf '%s\n' "$SSURL" | "$CONFIG_HELPER" smartdns-server "$SSOP" 2>/dev/null)"
     unset SSURL BODY
     SSOUT="$(printf '%s\n' "$SSALL" | tail -n 1)"
