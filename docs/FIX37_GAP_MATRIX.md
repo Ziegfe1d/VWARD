@@ -14,6 +14,7 @@ URL Smart DNS, имена устройств) сюда не переносятс
 | Совместимость PR #33 с `ca1595d` | `git merge-tree`: код (`vward-device-profile.sh`, `api.cgi`) сливается автоматически, конфликт только в `SHA256SUMS`. Пробное слияние во временном worktree с пересчётом `SHA256SUMS`: `check-console-diagnostics-dns`, `check-ads-dns-guard`, `check-list-smartdns-mode`, `check-keenetic-cache-owner`, `check-route-engine-bind-workers` PASS, `sha256sum -c` PASS. Это локальная проба, не CI |
 | CI PR #33 | #790 на `3500a04`: `repository-consistency` SUCCESS, `updater-tests` FAILURE (манифест, §3.1), `resource-audit` в работе на момент проверки. Новый HEAD требует своего CI |
 | Установленная версия на Keenetic | самотест 02.11 12:48 доказывает только KeeneticOS 5.1.8; версия VWARD им **не доказана**. fix.36 на момент самотеста не установлен — события 02.11 ему не приписываются |
+| BusyBox на Keenetic | **v1.37.0** (Entware; со слов владельца, баннер Termius). Проверки этой ветки — BusyBox 1.36.1 и dash; 1.37.0 не проверялась |
 
 Статусы: **подтверждено / вероятно / не проверено / опровергнуто**. «Есть код» ≠ «принято на Keenetic».
 
@@ -154,7 +155,11 @@ AGH не передаёт. Ни одна строка не доказывает 
 | `check-ads-dns-guard.py` | на `dev`: `127.0.0.2:53` — AGH возвращается в цепочку | `loop_upstream`; гостевой адрес роутера — `loop_upstream`; fallback вне цепочки с библиотекой и без неё; bootstrap/PTR/доменная строка AGH не выводят |
 
 Проверено: оба теста на `sh` (dash) и BusyBox 1.36.1 (страж — оба интерпретатора в одном прогоне);
-`busybox sh -n` и `shellcheck -S error` изменённых файлов. BusyBox на Keenetic 5.1.8 **не проверен**.
+`busybox sh -n` и `shellcheck -S error` изменённых файлов. **На роутере владельца BusyBox v1.37.0** (Entware, баннер
+Termius; сообщил владелец 02.11). Локально и в CI (`ubuntu-latest`) проверено на **1.36.1**; 1.37.0 в этой сессии
+не проверялась: загрузку стороннего бинарного пакета 1.37 политика сессии не разрешила. Используются только `sh`, `awk`,
+`sed -E`, `grep -E`, `date -d @…`, `readlink`, `tr` в формах, общих для 1.36 и 1.37; подтверждение на устройстве —
+`sh -n` в начале запуска диагностики (§5) и её вывод.
 
 **Риски и откат.** WARN возможен там, где обратного пути на деле нет, но доказать это по настройке нельзя
 (например, PTR-запросы к роутеру: Keenetic может знать все имена). Формулировка говорит «настройка, а не
@@ -174,37 +179,56 @@ AGH не передаёт. Ни одна строка не доказывает 
   RS-6/RS-7, переключение DNS-режимов, запись `a2`, 8 ручных подсетей Google, 16 DNS-правил, NextDNS, режимы агентов,
   слияние, подпись, выпуск, установка; граница fix.36/fix.37 (§1).
 
-## 5. Одна read-only диагностика (termius-standard v2.3.3)
+## 5. Одна read-only диагностика с окном-параметром (termius-standard v2.3.3)
 
-Команда только диагностическая, ничего не изменяет и DNS-запросов не отправляет. Шесть вставок
-(897/1019/1010/924/925/950 байт, строки ≤ 58 символов, ASCII); запуск — в конце шестой. Вставка 3 пишет
-вспомогательный `/tmp/vward-f37.awk`, скрипт удаляет его в конце.
+Команда только диагностическая, ничего не изменяет и DNS-запросов не отправляет. Восемь вставок
+(897/855/856/943/1043/1056/925/1063 байт, строки ≤ 58 символов, ASCII) создают `/tmp/vward-f37.sh` и
+`/tmp/vward-f37.awk` и сразу запускают проверку за последние 15 минут. Файлы остаются в `/tmp` (RAM) до перезагрузки,
+поэтому дальше достаточно одной короткой строки:
 
-Что важно для замечаний 02.11:
-- **Время.** Окно задано абсолютным моментом: `E=1793605860` = 2026-11-02 07:51:00 UTC = 10:51:00 МСК, ±10 с.
-  Каждая запись журнала AGH переводится в UTC по собственному смещению из поля `T` (`+03:00`, `Z`, `-08:00`…), поэтому
-  часовой пояс процесса AGH не важен. Журналы VWARD ищутся по минутам 10:46–10:56 МСК в местном времени оболочки
-  **и** в UTC (`date -d @…`, `date -u -d @…`), в шапке выводится `date +%z`. Журнал ndm фильтруется по видам
-  событий, а не по времени: метки в нём уже есть.
-- **Где журнал AGH.** Процесс AdGuard Home ищется по `/proc/*/cmdline`. Из `-w/--work-dir` и `-c/--config` берутся
-  рабочий каталог и конфигурация (иначе — каталог исполняемого файла, затем `VWARD_ADGUARD_CONFIG` из device.conf,
-  затем `/opt/etc/AdGuardHome`). Каталог журнала — `querylog.dir_path`, иначе `<work>/data`. Выводятся
-  `enabled/file_enabled/interval/size_memory`, размер и первая/последняя метка `T` файлов `querylog.json.1` и
-  `querylog.json`. Отсутствие записей на диске даёт `[ NOT_VERIFIED ] … memory buffer not read`, а **не**
-  «событий не было»: последние записи AGH держит в памяти (`size_memory`) и пишет на диск пачками.
-- **Обезличивание.** Из журнала AGH выводятся только счётчики `смещение от 10:51:00 (с) / источник router|client /
-  тип запроса / класс upstream ROUTER|ext|cache|none`; домены `QH`, URL и клиентские IP не выводятся. Строки ndm,
-  VWARD и `resolv.conf` проходят `anon`: адрес роутера → `router`, `127.0.0.1` → `loopback`, прочие IPv4 → `<ip>`,
-  IPv6 → `<ip6>`, MAC → `<mac>`, URL → `<url>`, имена с точкой → `<name>`. Ключи AGH выводятся только счётчиками.
+| Когда | Строка в Termius | Окно |
+|---|---|---|
+| Сразу после нового `proxy loop detected` | `sh /tmp/vward-f37.sh 10` | последние 10 минут (1–60; иначе 15), шаг 1 мин |
+| Известен момент события | `sh /tmp/vward-f37.sh '2026-11-03 21:14:05' +0300` | ±60 с вокруг момента, шаг 1 с; смещение — пояс, в котором записан момент (по умолчанию `+0300`) |
+| После перезагрузки роутера | повторить восемь вставок | — |
 
-Проверено на fixture под BusyBox 1.36 (sh и все утилиты из BusyBox, подставные `ndmc`/`ipset`) и dash:
-- записи `10:51:03+03:00` и `07:51:04Z` попадают в окно, `10:51:05+00:00` и `10:50:49+03:00` — нет, `23:51:03-08:00` — попадает;
-- кэш распознаётся;
-- имена и адреса клиентов в вывод не попадают;
-- `--work-dir=` и `-c` разбираются, `querylog.dir_path` читается;
-- без AGH-файлов — `NOT_FOUND`/`NOT_VERIFIED`.
+**Время.** Окно задаётся абсолютными моментами `S..F` (эпоха). Момент пересчитывается в UTC по указанному смещению
+(`date -u -d` + сдвиг) и не зависит от пояса оболочки Entware. Каждая запись AGH переводится в UTC по собственному
+смещению из поля времени. Журналы VWARD ищутся по каждой минуте окна в местном времени оболочки **и** в UTC. Журнал
+ndm фильтруется по видам событий, его метки выводятся как есть.
 
-Вставка 1:
+**Журнал AGH.** Основной путь — API самого AdGuard Home (`/control/querylog`), он отдаёт и записи из памяти, ещё не
+сброшенные на диск. Вызов идёт через уже установленную функцию VWARD `ads_agh_api_get`: учётные данные curl получает
+через stdin (`-K -`), в командной строке и в выводе их нет. Чтение идёт назад страницами по 500 до начала окна, не
+больше 6 страниц. Если API недоступен (нет библиотеки VWARD, AGH не отвечает), читаются файлы `querylog.json.1`/`.json`
+из каталога, найденного по процессу: исполняемый файл `*/AdGuardHome` в `/proc/*/exe`, затем `-w/--work-dir`,
+`-c/--config`, `querylog.dir_path`; иначе путь из `device.conf` или `/opt/etc/AdGuardHome`.
+
+Покрытие называется явно:
+- `[ OK ] no queries in window` — журнал прочитан дальше начала окна, записей нет;
+- `[ PARTIAL ] log not read back to window start` — 6 страниц не дошли до начала окна;
+- `[ PARTIAL ] disk only, memory buffer not read` и `[ NOT_VERIFIED ] none found: …` — данных недостаточно, вывод
+  «событий не было» запрещён.
+
+**Обезличивание.** Из журнала AGH выводятся только счётчики `время UTC (шаг окна) / источник router|client / тип запроса /
+класс upstream ROUTER|ext|cache|none`. Домены, URL, токены и IP клиентов не выводятся. Временные файлы с сырыми
+записями (`/tmp/vward-f37.tsv`, `.json`) удаляются сразу после подсчёта. Строки ndm, VWARD и `resolv.conf` проходят
+`anon` (адрес роутера → `router`, `127.0.0.1` → `loopback`, IPv4 → `<ip>`, IPv6 → `<ip6>`, MAC → `<mac>`, URL → `<url>`,
+имена с точкой → `<name>`).
+
+**Проверено на fixture** под BusyBox 1.36.1 (sh и все утилиты из BusyBox; подставные `ndmc`, `ipset`, API) и dash:
+- момент `'2026-11-02 10:51:03' +0300` → окно 07:50:03Z–07:52:03Z: записи `+03:00`, `Z`, upstream `[::1]:53`
+  классифицированы, запись вне окна отброшена; вторая страница запрошена с закодированным `older_than`, чтение
+  остановлено при достижении начала окна;
+- режим «последние 10 минут» на записях относительно текущего времени;
+- API, не дочитанный до начала окна → `[ PARTIAL ]` после 6 страниц;
+- без библиотеки VWARD — чтение с диска с `[ PARTIAL ] disk only…`;
+- неверные аргументы → подсказка и код 2;
+- процесс AGH находится по исполняемому файлу (`--work-dir=`, `-c`), процесс-приманка со словом «AdGuardHome» в
+  командной строке игнорируется (первая версия ловила такую приманку — исправлено);
+- в выводе нет имён, IP клиентов и URL.
+
+Вставка 1 (заголовок, сохранение результата, обезличивание):
 
 ```sh
 clear
@@ -239,18 +263,40 @@ anon() {
 EOF
 ```
 
-Вставка 2:
+Вставка 2 (окно):
 
 ```sh
 cat >> /tmp/vward-f37.sh <<'EOF'
-E=1793605860
+A=${1:-15}; Z=${2:-+0300}; NOW=$(date +%s)
+case "$A" in
+ [0-9]|[0-9][0-9]) [ "$A" -ge 1 ] && [ "$A" -le 60 ] ||
+  A=15; S=$((NOW-A*60)); F=$NOW; GR=60 ;;
+ [12][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]' '[0-2]*)
+  case "$Z" in [+-][0-9][0-9][0-9][0-9]) ;;
+   *) echo "bad offset $Z"; exit 2 ;; esac
+  E=$(date -u -d "$A" +%s) || exit 2
+  H=${Z#?}; H=${H%??}; M=${Z#???}; H=${H#0}; M=${M#0}
+  case "$Z" in -*) E=$((E+H*3600+M*60)) ;;
+   *) E=$((E-H*3600-M*60)) ;; esac
+  S=$((E-60)); F=$((E+60)); GR=1 ;;
+ *) echo "usage: sh $0 [MIN 1-60 |" \
+  "'YYYY-MM-DD HH:MM:SS' [+HHMM]]"; exit 2 ;;
+esac
+WIN="$(date -u -d @$S '+%F %T')Z..$(date -u -d @$F +%T)Z"
 L=$(sed -n 's/^VWARD_LAN_ADDRESS=//p' \
  /opt/etc/vward/device.conf 2>/dev/null | tr -d '"')
 [ -n "$L" ] || L=192.168.1.1
-LQ=$(echo "$L" | sed 's/\./\\./g')
-G=/opt/var/log
+LQ=$(echo "$L" | sed 's/\./\\./g'); G=/opt/var/log
+EOF
+```
+
+Вставка 3 (где AdGuard Home и его журнал):
+
+```sh
+cat >> /tmp/vward-f37.sh <<'EOF'
 P=; for d in /proc/[0-9]*; do
- grep -qs '[A]dGuardHome' "$d/cmdline" && { P=$d; break; }
+ case "$(readlink "$d/exe" 2>/dev/null)" in
+  */AdGuardHome) P=$d; break ;; esac
 done
 W=; Y=; [ -n "$P" ] && set -- $(tr '\0' ' ' <$P/cmdline)
 while [ $# -gt 0 ]; do case "$1" in
@@ -273,14 +319,10 @@ Q=$QD/querylog.json
 EOF
 ```
 
-Вставка 3:
+Вставка 4 (вспомогательный awk: время и классы):
 
 ```sh
 cat > /tmp/vward-f37.awk <<'EOF'
-function x(f,  s){s=$0
- if(!match(s,"\""f"\":\"[^\"]*\""))return ""
- s=substr(s,RSTART,RLENGTH);sub(/^"[^"]*":"/,"",s)
- sub(/"$/,"",s);return s}
 function ep(t,  y,m,d,o,z){y=substr(t,1,4)+0
  m=substr(t,6,2)+0;d=substr(t,9,2)+0
  if(m<=2){y--;m+=9}else m-=3
@@ -291,29 +333,65 @@ function ep(t,  y,m,d,o,z){y=substr(t,1,4)+0
  =="-"?-1:1)*(substr(z,2,2)*3600+substr(z,5,2)*60)
  return d*86400+substr(t,12,2)*3600+\
  substr(t,15,2)*60+substr(t,18,2)-o}
-{t=ep(x("T"));if(t<e-10||t>=e+10)next;n++
- ip=x("IP");h=x("Upstream");sub(/^[a-z]+:\/\//,"",h)
- sub(/\/.*/,"",h);sub(/:[0-9]+$/,"",h)
- c=(ip==l||ip~/^127\./)?"router":"client"
- v=(h=="")?"none":(h==l||h~/^127\./)?"ROUTER":"ext"
- if(index($0,"\"Cached\":true"))v="cache"
- k[sprintf("%+03ds",t-e)" "c" "x("QT")" up="v]++}
-END{if(!n)print "[ NOT_VERIFIED ] no records on"\
- " disk in window; memory buffer not read"
- for(i in k)print i,k[i]}
+BEGIN{FS="\t"}
+mode=="ep"{print ep($1);exit}
+{t=ep($1);if(t<s||t>=f)next;n++;h=$4
+ sub(/^[a-z]+:\/\//,"",h);sub(/\/.*/,"",h)
+ sub(/:[0-9]+$/,"",h);gsub(/[][]/,"",h)
+ r=(h==l||h~/^127\./||h=="::1")
+ c=($2==l||$2~/^127\./||$2=="::1")?"router":"client"
+ v=($5=="true")?"cache":(h=="")?"none":r?"ROUTER":"ext"
+ k[(t-t%g)" "c" "$3" up="v]++}
+END{if(mode=="ep")exit;if(!n)print "NONE"
+ for(i in k){split(i,p," ");u=p[1]%86400
+ printf "%02d:%02d:%02dZ %s %s %s %d\n",int(u/3600),\
+ int(u%3600/60),u%60,p[2],p[3],p[4],k[i]}}
 EOF
 ```
 
-Вставка 4:
+Вставка 5 (чтение журнала AGH: API, иначе диск):
+
+```sh
+cat >> /tmp/vward-f37.sh <<'EOF'
+TQ=/tmp/vward-f37.tsv; TJ=/tmp/vward-f37.json
+CL=${CL:-/opt/share/vward/ads-privacy-guard}
+[ -f "$CL" ] || CL=$CL/vward-ads-privacy-common.sh
+: >$TQ; API=0; COV=0; OT=; i=0
+JQ='[.time,.client,.question.type,(.upstream//""),'\
+'(.cached//false|tostring)]|@tsv'
+while [ $i -lt 6 ] && [ -r $CL ]; do i=$((i+1))
+ ( . $CL; ads_agh_api_get "querylog?limit=500&"\
+"response_status=all${OT:+&older_than=$OT}" $TJ ) \
+  >/dev/null 2>&1 || break
+ API=1; jq -r ".data[]?|$JQ" $TJ >>$TQ 2>/dev/null
+ OT=$(jq -r '.oldest//""' $TJ 2>/dev/null)
+ [ -n "$OT" ] || { COV=1; break; }
+ OE=$(echo "$OT" | awk -v mode=ep -f /tmp/vward-f37.awk)
+ [ "${OE:-0}" -lt "$S" ] && { COV=1; break; }
+ OT=$(echo "$OT" | sed 's/+/%2B/g;s/:/%3A/g')
+done
+if [ $API = 0 ]; then
+ DP=; for T in $((S-86400)) $S $((F+86400)); do
+  DP="$DP|$(date -u -d @$T +%F)"; done
+ for f in $Q.1 $Q; do [ -r "$f" ] &&
+  grep -hE "\"T\":\"(${DP#|})" "$f" | jq -r \
+  '[.T,.IP,.QT,(.Upstream//""),'\
+'(.Cached//false|tostring)]|@tsv' 2>/dev/null
+ done >>$TQ
+fi
+EOF
+```
+
+Вставка 6 (вывод: окно, настройки журнала, записи):
 
 ```sh
 cat >> /tmp/vward-f37.sh <<'EOF'
 {
 echo "== vward-f37 read-only $(date) $(date +%z)"
 ndmc -c "show version" | grep -E 'release|device'
+echo "-- window $WIN step=${GR}s"
 echo "-- AGH proc=${P:+yes} work=$W conf=$Y"
 [ -r "$Y" ] || echo "[ NOT_FOUND ] AGH config"
-echo "-- querylog settings / files"
 awk '/^[^ #]/{q=($1=="querylog:");next} q&&/^  [a-z]/' \
  "$Y" 2>/dev/null |
  grep -E 'enabled|interval|size_mem|dir_path'
@@ -323,17 +401,21 @@ for f in $Q.1 $Q; do
   "$(head -n1 "$f" | grep -o '"T":"[^"]*"')" \
   "$(tail -n1 "$f" | grep -o '"T":"[^"]*"')"
 done
-echo "-- AGH records 07:50:50-07:51:09Z = 10:51 MSK"
-for f in $Q.1 $Q; do [ -r "$f" ] &&
- grep -h '"T":"2026-11-0[12]T' "$f"; done |
- awk -v l="$L" -v e=$E -f /tmp/vward-f37.awk | sort
-echo "-- ndm log: loop / inactivated / queue"
-ndmc -c "show log" | grep -E 'loop det|inactivat|'\
-'ResolveQueue' | anon | cut -c1-110 | tail -n 20
+echo "-- AGH records (source: $([ $API = 1 ] &&
+ echo api || echo disk), pages=$i)"
+awk -v l="$L" -v s=$S -v f=$F -v g=$GR \
+ -f /tmp/vward-f37.awk $TQ | sort >$TJ
+NV="log not read back to window start"
+[ $API = 1 ] || NV="disk only, memory buffer not read"
+if grep -q '^NONE' $TJ; then
+ if [ $COV = 1 ]; then echo "[ OK ] no queries in window"
+ else echo "[ NOT_VERIFIED ] none found: $NV"; fi
+else cat $TJ; [ $COV = 1 ] || echo "[ PARTIAL ] $NV"; fi
+rm -f $TQ $TJ
 EOF
 ```
 
-Вставка 5:
+Вставка 7 (ключи AGH, счётчики):
 
 ```sh
 cat >> /tmp/vward-f37.sh <<'EOF'
@@ -361,14 +443,17 @@ echo "-- ipv6 sets: $(ipset -t list 2>/dev/null |
 EOF
 ```
 
-Вставка 6 (запускает):
+Вставка 8 (ndm, журналы VWARD, состояние; запускает):
 
 ```sh
 cat >> /tmp/vward-f37.sh <<'EOF'
-R=; i=-5; while [ $i -le 5 ]; do T=$((E+60*i))
+echo "-- ndm log: loop / inactivated / queue"
+ndmc -c "show log" | grep -E 'loop det|inactivat|'\
+'ResolveQueue' | anon | cut -c1-110 | tail -n 20
+R=; T=$((S-S%60)); while [ $T -le $F ]; do
  R="$R|$(date -d @$T +%m-%d.%H:%M)"
- R="$R|$(date -u -d @$T +%m-%d.%H:%M)"; i=$((i+1)); done
-echo "-- VWARD logs 10:46-10:56 MSK (local and UTC)"
+ R="$R|$(date -u -d @$T +%m-%d.%H:%M)"; T=$((T+60)); done
+echo "-- VWARD logs in window (local and UTC)"
 grep -hE "(${R#|})" $G/vward*.log 2>/dev/null |
  anon | cut -c1-100 | tail -n 15
 echo "-- route-dns / chain / night job (end, rc)"
@@ -378,7 +463,6 @@ cat /tmp/vward-route-dns.status \
  /tmp/vward-policy-chain.cron.last \
  /tmp/vward-policy-chain.cron.rc 2>/dev/null
 } 2>&1 | tee "$OUT"
-rm -f /tmp/vward-f37.awk
 WN=$(grep -c "^\[ WARNING" "$OUT")
 KN=$(grep -c "^\[ OK" "$OUT")
 echo "SUMMARY: pass=0 ok=$KN warn=$WN fail=0" |
@@ -392,13 +476,17 @@ sh -n /tmp/vward-f37.sh && sh /tmp/vward-f37.sh
 ```
 
 Как читать:
-- `+03s router A up=ROUTER` — в окне AGH получил запрос с адреса роутера и отправил его роутеру: это довод за H1 (петля через настройку AGH).
+- `… router A up=ROUTER` — AGH получил запрос с адреса роутера и отправил его роутеру: довод за H1.
 - `router … up=ext` рядом со строками loop в ndm — довод за H2.
 - Только `client … up=ext` — запросы шли от клиентов и ушли наружу.
-- `NOT_VERIFIED` — записей за окно на диске нет; вывод «не проверено», а не «событий не было».
+- `NOT_VERIFIED`/`PARTIAL` — данных недостаточно; вывод «не проверено».
 - `[ WARNING ] … ROUTER` в ключах — свойство настройки, не событие.
 
 ## 6. Интеграция после fix.36
+
+**Только squash-слияние PR #33** (указание владельца 02.11). Коммит `d438d22` содержит сторонний PyPI-архив
+`BusyBox-1.0.3.tar.gz`, удалённый в `c3a3df9`. Обычное слияние или rebase-слияние перенесло бы его в историю `dev`.
+Слияние и выпуск — только по отдельному разрешению владельца.
 
 Влить конечный HEAD PR #32 в эту ветку слиянием (не переносом файлов) и пересчитать `SHA256SUMS` после индексации.
 Затем сделать предупреждение «описание ≠ путь» поверх кода PR #32, добавить записи в `docs/AGENT.md` и `CHANGELOG.md`
