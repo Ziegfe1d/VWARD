@@ -36,7 +36,7 @@ want = ["[VPN] 2026-10-04 11:30:00|OK", "[Интернет] 2026-10-04 11:40:00+
 if got != want:
     fail(f"timeline: {got}")
 for need in ("const LOG_VIEW = [{ id: 'all', label: 'Все' }].concat(LOG_TABS);", "logTab = 'all'",
-             "LOG_VIEW.map(t => '<button type=\"button\" data-log=\"'", "S.logs.all = mergeLogs(parts, logNewest, LOGINFO)",
+             "LOG_VIEW.map(t => '<button type=\"button\" data-log=\"'", "const info = [], merged = mergeLogs(parts, logNewest, info);",
              "copyText(S.logs[logTab] || '')", "LOG_TABS.filter(tb => tb.id !== 'cron')", "download('vward-' + tab + '-' + today() + '.txt'"):
     if need not in JS:
         fail(f"the Panel lacks {need}")

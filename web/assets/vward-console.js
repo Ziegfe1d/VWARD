@@ -120,10 +120,17 @@ async function apiGet(action, params) {
   const q = new URLSearchParams(Object.assign({ action: action }, params || {}));
   return apiJson(await apiFetch(API + '?' + q.toString()));
 }
+// A journal text: an HTTP error, a JSON error instead of the text or a body that stops coming are
+// failures, never an empty journal (fix.35.3: apiFetch's 20 s end with the headers, not the body).
 async function apiText(action, params) {
   const q = new URLSearchParams(Object.assign({ action: action }, params || {}));
   const r = await apiFetch(API + '?' + q.toString());
-  return r.text();
+  if (!r.ok) throw new Error('роутер ответил ошибкой HTTP ' + r.status);
+  let tm;
+  const t = await Promise.race([r.text(), new Promise((_, no) => { tm = setTimeout(() => no(new Error('роутер не передал ответ за 20 секунд')), 20000); })])
+    .finally(() => clearTimeout(tm));
+  if (/^\s*\{\s*"ok"\s*:\s*false/.test(t)) { let x = {}; try { x = JSON.parse(t); } catch (e) { /* a cut answer */ } throw new Error(x.error ? errText(x) : 'роутер вернул ошибку вместо журнала'); }
+  return t;
 }
 async function apiPost(action, fields) {
   const r = await apiFetch(API + '?action=' + encodeURIComponent(action), {
@@ -2326,7 +2333,8 @@ const RENDER = {
       '<div class="chips" role="group" aria-label="Журнал">' + LOG_VIEW.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
       '<div class="chips log-view" role="group" aria-label="Что показывать"><button type="button" data-act="log-view" data-v="important" aria-pressed="' + logImportant + '">Важное</button><button type="button" data-act="log-view" data-v="all" aria-pressed="' + !logImportant + '">Все</button></div>' +
       '<div class="logfeed' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + logFeed(text) + '</div>' +
-      '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p>' + (logTab === 'all' ? logSources() : '') + '</div></section>' + journalPanel() + soonPanel('logs');
+      '<p class="field-warn" id="logWarn"' + (LOGWARN[logTab] ? '' : ' hidden') + '>' + esc(LOGWARN[logTab] || '') + '</p>' +
+      '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p>' + (logTab === 'all' ? '<div id="logSrc">' + logSources() + '</div>' : '') + '</div></section>' + journalPanel() + soonPanel('logs');
   },
 
   'd-components'() {
@@ -4273,32 +4281,75 @@ async function refreshPage(busy) {
 // The open journal follows the router: on opening, every REFRESH_SEC while shown,
 // on coming back to the tab, and right before it is saved.
 const LOG_HOURS = 24;
-async function loadLog(tab, force) {
-  if (!force && S.logs[tab] != null) { render(); }
+// fix.35.3 (02.11: «Журналы пусты» at 21:45 over entries shown until 21:41, every source «не
+// читается», the time renewed): a failed refresh keeps the last good text of each source and its
+// time, with a warning; an empty window is said only when the sources answered so. One load per
+// journal at a time: the 15 s refresh does not pile up 17 requests behind a slow router, and an
+// older answer never overwrites a newer one. The owner's own request (auto false) runs once more
+// after the one in progress.
+const LOGRUN = {}, LOGGOOD = {}, LOGWARN = {};
+function loadLog(tab, force, auto) {
+  const r = LOGRUN[tab];
+  if (r) { if (force && !auto) r.again = true; return r.p; }
+  if (!force && S.logs[tab] != null) render();
+  const run = LOGRUN[tab] = { again: false };
+  run.p = (async () => { let out; do { run.again = false; out = await loadLogOnce(tab); } while (run.again); return out; })()
+    .finally(() => { delete LOGRUN[tab]; });
+  return run.p;
+}
+const logFailed = x => /^Журнал недоступен/.test(String(x || '').trim());
+async function loadLogOnce(tab) {
+  const hhmm = t => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   if (tab === 'all') {
     // «Расписание» is crond's own record of every start, not events: only in its tab.
     // The last 24 hours only, cut by the API (owner 02.11); older entries stay in the files and archives.
     const parts = await Promise.all(LOG_TABS.filter(tb => tb.id !== 'cron').map(tb => apiText('log', { name: tb.id, count: 200, hours: LOG_HOURS })
-      .then(x => { S.logs[tb.id] = x; S.loadedAt['log:' + tb.id] = Date.now(); return { label: tb.label, text: x }; },
-            e => ({ label: tb.label, text: 'Журнал недоступен: ' + e.message }))));
-    LOGINFO.length = 0;
-    S.logs.all = mergeLogs(parts, logNewest, LOGINFO) || 'Журналы пусты'; S.loadedAt['log:all'] = Date.now();
+      .then(x => { S.logs[tb.id] = x; S.loadedAt['log:' + tb.id] = Date.now(); if (!logFailed(x)) LOGGOOD[tb.id] = { text: x, at: Date.now() }; return { label: tb.label, text: x }; },
+            e => { const g = LOGGOOD[tb.id]; return { label: tb.label, text: g ? g.text : 'Журнал недоступен: ' + e.message, err: e.message, at: g && g.at }; })));
+    const info = [], merged = mergeLogs(parts, logNewest, info);
+    parts.forEach((p, i) => { if (p.err) Object.assign(info[i], p.at ? { state: 'stale', at: p.at } : { state: 'error' }, { err: p.err }); });
+    LOGINFO.length = 0; info.forEach(i => LOGINFO.push(i));
+    const bad = parts.filter(p => p.err), why = bad.length ? bad[0].err : '';
+    if (bad.length === parts.length && LOGGOOD.all) {
+      // Nothing came: the last good timeline stays with its own time.
+      S.logs.all = LOGGOOD.all.text;
+      LOGWARN.all = 'Журналы не обновились (' + why + '): показаны записи на ' + hhmm(LOGGOOD.all.at);
+    } else {
+      S.logs.all = merged || (bad.length ? 'Журналы не прочитаны: ' + why : 'Журналы пусты');
+      S.loadedAt['log:all'] = Date.now();
+      if (merged) LOGGOOD.all = { text: merged, at: Date.now() };
+      LOGWARN.all = bad.length ? 'Не обновились ' + bad.length + ' из ' + parts.length + ' журналов (' + why + ')' + (bad.some(p => p.at) ? ': у них показаны прежние записи' : '') : '';
+    }
   } else {
-    try { S.logs[tab] = await apiText('log', { name: tab, count: 200, hours: LOG_HOURS }); S.loadedAt['log:' + tab] = Date.now(); }
-    catch (e) { S.logs[tab] = 'Журнал недоступен: ' + e.message; }
+    try {
+      const x = await apiText('log', { name: tab, count: 200, hours: LOG_HOURS });
+      S.logs[tab] = x; S.loadedAt['log:' + tab] = Date.now(); LOGWARN[tab] = '';
+      if (!logFailed(x)) LOGGOOD[tab] = { text: x, at: Date.now() };
+    } catch (e) {
+      const g = LOGGOOD[tab];
+      if (g) { S.logs[tab] = g.text; LOGWARN[tab] = 'Журнал не обновился (' + e.message + '): показаны записи на ' + hhmm(g.at); }
+      else { S.logs[tab] = 'Журнал недоступен: ' + e.message; LOGWARN[tab] = ''; }
+    }
   }
   if (current === 'logs' && logTab === tab) {
-    const b = $('logBox'), at = $('logAt');
-    if (b && at) { if (b.dataset.raw !== S.logs[tab]) { b.innerHTML = logFeed(S.logs[tab]); b.dataset.raw = S.logs[tab]; } at.textContent = logStamp(tab); } else render();
+    const b = $('logBox'), at = $('logAt'), src = $('logSrc'), w = $('logWarn');
+    if (b && at && w && (tab !== 'all' || src)) {
+      if (b.dataset.raw !== S.logs[tab]) { b.innerHTML = logFeed(S.logs[tab]); b.dataset.raw = S.logs[tab]; }
+      at.textContent = logStamp(tab); w.textContent = LOGWARN[tab] || ''; w.hidden = !LOGWARN[tab];
+      if (src) { const open = src.querySelector('details') && src.querySelector('details').open; src.innerHTML = logSources(); if (open && src.querySelector('details')) src.querySelector('details').open = true; }
+    } else render();
   }
   return S.logs[tab];
 }
-// The last event of each source, apart from the moment the journals were loaded.
+// The last event of each source, apart from the moment the journals were loaded; a source that did
+// not answer this time says so, with the time of the entries still shown for it.
 function logSources() {
   if (!LOGINFO.length) return '';
   const st1 = { empty: 'записей нет', missing: 'ещё не создан', error: 'не читается', quiet: 'за 24 ч записей нет' };
+  const val = i => i.state === 'stale' ? 'не обновился, записи на ' + new Date(i.at).toLocaleTimeString('ru-RU') : i.state === 'error' && i.err ? 'не прочитан: ' + i.err :
+    i.last != null ? fmtTime(new Date(i.last).toISOString()) : st1[i.state];
   return '<details class="log-sources"><summary>' + ico('sort', 'log-sign') + '<span>' + (logNewest ? 'Сначала новые' : 'Сначала старые') + '</span><small>источники</small>' + ico('chevron', 'chev') + '</summary><dl class="kv">' +
-    LOGINFO.map(i => '<div class="kv-row"><dt>' + esc(i.label) + '</dt><dd' + (i.state === 'error' ? ' class="warn"' : '') + '>' + esc(i.last != null ? fmtTime(new Date(i.last).toISOString()) : st1[i.state]) + '</dd></div>').join('') + '</dl></details>';
+    LOGINFO.map(i => '<div class="kv-row"><dt>' + esc(i.label) + '</dt><dd' + (i.state === 'error' || i.state === 'stale' ? ' class="warn"' : '') + '>' + esc(val(i)) + '</dd></div>').join('') + '</dl></details>';
 }
 function logStamp(tab) {
   const t = S.loadedAt['log:' + tab];
@@ -5277,7 +5328,7 @@ function tick() {
   else if (updOverlay && !updOverlay.done && !updOverlay.manual && ph === 'IDLE' && updOverlay.seenBusy) updOverlayShow({ done: true, ok: true, version: plat().version });
   if (updOverlay && UPD_BUSY.includes(ph)) updOverlay.seenBusy = true;
   if (theme === 'time') applyTheme();
-  if (current !== 'logs') refreshPage(); else loadLog(logTab, true);
+  if (current !== 'logs') refreshPage(); else loadLog(logTab, true, true);
   load('status', true).then(renderNav);
 }
 function restartTimer() {
@@ -5288,7 +5339,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   // tick() reloads the open journal too; otherwise the journal alone.
   if (Date.now() - (S.loadedAt.status || 0) >= REFRESH_SEC * 1000) tick();
-  else if (current === 'logs') loadLog(logTab, true);
+  else if (current === 'logs') loadLog(logTab, true, true);
 });
 
 $('backBtn').innerHTML = ico('back');
