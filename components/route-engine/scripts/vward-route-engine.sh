@@ -1945,7 +1945,8 @@ agh_bind_start()
         fi
     done
     (
-        trap - EXIT HUP INT TERM
+        trap - EXIT
+        trap - HUP INT TERM
         agh_bind "$1"
         nslookup "$1" "$VWARD_DNS_SERVER"
     ) >/dev/null 2>&1 &
