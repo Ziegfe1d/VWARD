@@ -2002,9 +2002,10 @@ if [ "$ACTION" = "diagnostics" ]; then
         KN_TO_AGH="$(printf '%s\n' "$DIAG_RC" | awk -v p=":${AGH_DNS_PORT:-x}" '$1 == "ip" && $2 == "name-server" && index($3, p) && (NF == 3 || $4 == "\"\"" || $4 == "on") {print $3; exit}')"
         # The router: its LAN address from the profile, or loopback.
         LAN_IP="${VWARD_LAN_ADDRESS:-127.0.0.1}"
-        # Every way AdGuard Home hands a query back to the router, by the rule the DNS guard
-        # shares (fix.37: fallback_dns was the guard's loop but «Норма» here; bootstrap, PTR
-        # and per-domain rows were seen by nobody). Read only: nothing is changed.
+        # AdGuard Home settings that hand a query back to the router, by the rule the DNS guard
+        # uses too (vward_agh_dns_loops, fix.37). Settings, not observed events: «main» loops
+        # every query (FAIL); the others only under a condition and only while Keenetic hands
+        # queries to AdGuard Home (below). Read only: nothing is changed.
         AGH_LOOPS=" "
         if command -v vward_agh_dns_loops >/dev/null 2>&1; then
             AGH_LOOPS=" $(vward_agh_dns_loops "$AGH_Y" "$LAN_IP" | tr '\n' ' ')"
@@ -2013,7 +2014,6 @@ if [ "$ACTION" = "diagnostics" ]; then
         fi
         case "$AGH_LOOPS" in
             *" main "*) DNS_STATUS=FAIL DNS_DETAIL="AdGuard Home отправляет запросы обратно роутеру ($LAN_IP) - петля: Keenetic будет отбрасывать запросы. Укажите в AdGuard Home внешние серверы." ;;
-            *" fallback "*) DNS_STATUS=FAIL DNS_DETAIL="Резервные серверы AdGuard Home (fallback_dns) ведут обратно на роутер ($LAN_IP) - петля, как только основные не ответят: Keenetic будет отбрасывать запросы. Укажите в AdGuard Home внешние резервные серверы." ;;
         esac
         if [ "$DNS_STATUS" = FAIL ]; then :
         elif [ -n "$KN_TO_AGH" ]; then
@@ -2035,13 +2035,16 @@ if [ "$ACTION" = "diagnostics" ]; then
                 *) DNS_DETAIL="AdGuard Home не в цепочке: VWARD вернёт его, когда он ответит 3 раза подряд (до 3 минут). Пока реклама и Smart DNS не работают" ;;
             esac
         fi
-        # Short loops: not every query, but enough for Keenetic to drop requests and switch
-        # AdGuard Home off for a while («proxy loop detected» ... «inactivated»). A warning, not
-        # a proven cause of any one event: the Panel says what the settings allow.
+        # Conditional loops: a setting that sends some queries back, a loop only while Keenetic
+        # forwards them to AdGuard Home (in its chain). Out of the chain they resolve on the
+        # router and are not named. Unused bootstrap, PTR to the router (AdGuard Home's
+        # documented setting), local zones and rows the router's own client bypasses: no warning.
         AGH_SHORT=""
-        case "$AGH_LOOPS" in *" bootstrap "*) AGH_SHORT="bootstrap-серверы AdGuard Home ведут на роутер: пока AdGuard Home узнаёт адреса своих серверов (после перезапуска, по истечении кэша), возможна кратковременная петля - Keenetic пишет «proxy loop detected» и на время отключает AdGuard Home. Укажите внешние bootstrap-серверы" ;; esac
-        case "$AGH_LOOPS" in *" private "*) AGH_SHORT="$AGH_SHORT${AGH_SHORT:+; }серверы обратных (PTR) запросов AdGuard Home ведут на роутер: для обратных запросов домашней сети возможна кратковременная петля" ;; esac
-        case "$AGH_LOOPS" in *" domain "*) AGH_SHORT="$AGH_SHORT${AGH_SHORT:+; }строки для отдельных доменов в AdGuard Home ведут на роутер: для этих доменов возможна петля, если запросы самого роутера не выделены в AdGuard Home отдельным клиентом" ;; esac
+        if [ -n "$KN_TO_AGH" ]; then
+            case "$AGH_LOOPS" in *" fallback "*) AGH_SHORT="резервные серверы AdGuard Home (fallback_dns) ведут на роутер: если основные не ответят, запросы пойдут по кругу и Keenetic их отбросит. Это настройка, а не замеченный сбой; укажите внешние резервные серверы" ;; esac
+            case "$AGH_LOOPS" in *" bootstrap "*) AGH_SHORT="$AGH_SHORT${AGH_SHORT:+; }bootstrap-серверы AdGuard Home ведут на роутер, а его серверы заданы именами: пока AdGuard Home узнаёт их адреса, возможна петля. Это настройка, а не замеченный сбой; укажите внешние bootstrap-серверы" ;; esac
+            case "$AGH_LOOPS" in *" domain "*) AGH_SHORT="$AGH_SHORT${AGH_SHORT:+; }строки для отдельных доменов в AdGuard Home ведут на роутер, а запросы самого роутера не выделены в AdGuard Home отдельным клиентом: запросы этих доменов пойдут по кругу" ;; esac
+        fi
         if [ -n "$AGH_SHORT" ] && [ "$DNS_STATUS" != FAIL ]; then
             DNS_STATUS=WARN DNS_DETAIL="$DNS_DETAIL${DNS_DETAIL:+; }$AGH_SHORT"
         fi

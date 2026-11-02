@@ -91,49 +91,60 @@ with tempfile.TemporaryDirectory() as tmp:
     if d["dns-chain"]["status"] != "WARN" or "порту 53" not in d["dns-chain"]["detail"]:
         fail(f"AdGuard Home on port 53: {d['dns-chain']}")
 
-    # fix.37 (Keenetic 02.11 10:51: three «proxy loop detected: 192.168.1.1 <-> 192.168.1.1» and
-    # «DNS server 192.168.1.1 inactivated»). The DNS guard already took fallback_dns into account;
-    # the Panel looked at upstream_dns only. bootstrap_dns, local_ptr_upstreams and per-domain rows
-    # that point back at the router are loops too (short ones: only while AdGuard Home resolves
-    # its own servers, a PTR, or those domains) - named as a warning, never as «Норма».
-    def diag_extra(extra, up=("9.9.9.10",), conf="ip name-server 192.168.1.1:65053\n!\n"):
+    # fix.37 (Keenetic 02.11 10:51: «proxy loop detected: 192.168.1.1 <-> 192.168.1.1»). One rule with
+    # the DNS guard (vward_agh_dns_loops). A setting is not an event: only «main» is a loop of every
+    # query (FAIL). fallback/bootstrap/per-domain rows loop only under a condition and only while
+    # Keenetic forwards to AdGuard Home - a warning then, nothing out of the chain. Settings that are
+    # not applied (bootstrap with address-only servers, PTR with private resolvers off) or resolve
+    # locally (local zones, the router's own AdGuard Home client) are no loop at all.
+    IN, OUT = "ip name-server 192.168.1.1:65053\n!\n", "ip name-server 89.207.216.1\n!\n"
+    def diag_extra(extra, up=("9.9.9.10",), conf=IN):
         running.write_text(conf)
         yaml.write_text("dns:\n  bind_hosts:\n    - 192.168.1.1\n  port: 65053\n  upstream_dns:\n"
                         + "".join(f"    - '{u}'\n" for u in up) + extra)
         r = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=env, text=True, capture_output=True)
         return {c["id"]: c for c in json.loads(r.stdout.split("\n\n", 1)[1])["checks"]}["dns-chain"]
+    NAMED = ("https://dns.quad9.net/dns-query",)
     c = diag_extra("  fallback_dns:\n    - 192.168.1.1:53\n")
-    if c["status"] != "FAIL" or "резервн" not in c["detail"]:
-        fail(f"RED: fallback_dns back to the router is the same loop the DNS guard sees: {c}")
+    if c["status"] != "WARN" or "резервные" not in c["detail"] or "не замеченный сбой" not in c["detail"]:
+        fail(f"RED: fallback_dns back to the router (the guard's loop) was «Норма»: a conditional loop: {c}")
     c = diag_extra("  fallback_dns: [udp://127.0.0.1]\n")
-    if c["status"] != "FAIL":
-        fail(f"RED: an inline fallback list is read too: {c}")
-    c = diag_extra("  bootstrap_dns:\n    - 192.168.1.1\n  fallback_dns: []\n", up=("https://dns.quad9.net/dns-query",))
-    if c["status"] != "WARN" or "bootstrap" not in c["detail"] or "кратковременн" not in c["detail"]:
-        fail(f"RED: bootstrap through the router: a short loop, a warning: {c}")
-    c = diag_extra("  local_ptr_upstreams:\n    - 192.168.1.1\n  use_private_ptr_resolvers: true\n")
-    if c["status"] != "WARN" or "обратных" not in c["detail"]:
-        fail(f"RED: private PTR resolver = the router: a warning: {c}")
-    c = diag_extra("", up=("9.9.9.10", "[/example.lan/]192.168.1.1:53"))
+    if c["status"] != "WARN":
+        fail(f"an inline fallback list is read too: {c}")
+    c = diag_extra("  bootstrap_dns:\n    - 192.168.1.1\n  fallback_dns: []\n", up=NAMED)
+    if c["status"] != "WARN" or "bootstrap" not in c["detail"]:
+        fail(f"bootstrap through the router with a named server: a conditional loop: {c}")
+    c = diag_extra("", up=("9.9.9.10", "[/chatgpt.com/]192.168.1.1:53"))
     if c["status"] != "WARN" or "отдельных доменов" not in c["detail"]:
-        fail(f"RED: a per-domain row back to the router: a warning: {c}")
-    # Not loops: an external bootstrap, another router port (AdGuard Home itself on 65053 is not
-    # Keenetic's :53), an address that only starts like the router's.
-    for extra, up in (("  bootstrap_dns:\n    - 9.9.9.10\n    - 149.112.112.10\n", ("9.9.9.10",)),
-                      ("  bootstrap_dns:\n    - 192.168.1.10\n", ("192.168.1.100:53",)),
-                      ("  fallback_dns:\n    - 192.168.1.1:5353\n", ("9.9.9.10",))):
+        fail(f"a public per-domain row back to the router, no own client: {c}")
+    for name, extra, up in (
+            ("unused bootstrap (servers are addresses)", "  bootstrap_dns:\n    - 192.168.1.1\n", ("9.9.9.10",)),
+            ("PTR to the router (AdGuard Home's documented setting)", "  local_ptr_upstreams:\n    - 192.168.1.1\n  use_private_ptr_resolvers: true\n", ("9.9.9.10",)),
+            ("local zones to the router", "", ("9.9.9.10", "[/lan/1.168.192.in-addr.arpa/]192.168.1.1")),
+            ("the router's own client bypasses the row", "clients:\n  persistent:\n    - name: Keenetic DNS (VWARD)\n      ids:\n        - 192.168.1.1\n"
+             "      upstreams:\n        - 9.9.9.10\n", ("9.9.9.10", "[/chatgpt.com/]192.168.1.1:53")),
+            ("external bootstrap", "  bootstrap_dns:\n    - 9.9.9.10\n", NAMED),
+            ("another address, another port", "  bootstrap_dns:\n    - 192.168.1.10\n  fallback_dns:\n    - 192.168.1.1:5353\n", ("192.168.1.100:53",))):
         c = diag_extra(extra, up=up)
         if c["status"] != "PASS":
-            fail(f"not a loop ({extra.strip()} / {up}): {c}")
-    # The shared library answers the same way for the DNS guard's two lists (one rule, two readers).
+            fail(f"not a loop ({name}): {c}")
+    # Out of Keenetic's chain, a conditional setting loops nothing now: not named.
+    c = diag_extra("  fallback_dns:\n    - 192.168.1.1\n", conf=OUT)
+    if "резервные" in c["detail"]:
+        fail(f"out of the chain the fallback setting is not a loop: {c}")
+    # The library itself: each kind once, applied or not.
     lib = ROOT / "components/runtime/lib/vward-device-profile.sh"
-    yaml.write_text("dns:\n  port: 65053\n  upstream_dns:\n    - 9.9.9.10\n    - '[/a.lan/]localhost'\n"
-                    "  bootstrap_dns: ['192.168.1.1:53', 1.1.1.1]\n  fallback_dns:\n    - tcp://192.168.1.1\n"
-                    "  local_ptr_upstreams: []\n")
-    kinds = subprocess.run(["sh", "-c", '. "$1"; vward_agh_dns_loops "$2" 192.168.1.1', "sh", str(lib), str(yaml)],
-                           capture_output=True, text=True).stdout.split()
-    if sorted(kinds) != ["bootstrap", "domain", "fallback"]:
-        fail(f"the library names each loop kind once: {kinds}")
+    def kinds(text):
+        yaml.write_text(text)
+        return sorted(subprocess.run(["sh", "-c", '. "$1"; vward_agh_dns_loops "$2" 192.168.1.1', "sh", str(lib), str(yaml)],
+                                     capture_output=True, text=True).stdout.split())
+    k = kinds("dns:\n  port: 65053\n  upstream_dns:\n    - 9.9.9.10\n    - '[/a.lan/]localhost'\n    - '[/b.com/]127.0.0.1'\n"
+              "  bootstrap_dns: ['192.168.1.1:53', 1.1.1.1]\n  fallback_dns:\n    - tcp://192.168.1.1\n"
+              "  local_ptr_upstreams: [192.168.1.1]\n  use_private_ptr_resolvers: false\n")
+    if k != ["bootstrap_idle", "domain", "domain_local", "fallback", "private_off"]:
+        fail(f"the library names each kind once: {k}")
+    if kinds("dns:\n  upstream_dns:\n    - tls://dns.example\n  upstream_dns_file: ''\n  bootstrap_dns:\n    - 127.0.0.1\n") != ["bootstrap"]:
+        fail("a DoT server by name uses bootstrap")
 
     # AdGuard Home out of the chain: what the DNS guard knows (taken out, why, when; back on its own).
     chain = tmp / "chain"; chain.mkdir()

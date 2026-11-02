@@ -760,6 +760,17 @@ chain_sync()
 # loop detected», Keenetic then drops the server: task 158). Its fallback servers count too.
 agh_upstream_loops()
 {
+    # The rule the Panel shows (vward_agh_dns_loops, fix.37): «main» and «fallback» only - the
+    # loops of every query; bootstrap/PTR/per-domain rows never take AdGuard Home out. Without
+    # the library (an older install), the guard's own reading below, as before.
+    aul_k=$(
+        . "$ADS_DEVICE_PROFILE_LIB" >/dev/null 2>&1 || exit 1
+        command -v vward_agh_dns_loops >/dev/null 2>&1 || exit 1
+        vward_agh_dns_loops "$AGH_YAML" "$LAN"; echo end
+    ) && case "$aul_k" in *end)
+        case " $(printf '%s' "$aul_k" | tr '\n' ' ') " in *" main "*|*" fallback "*) return 0 ;; esac
+        return 1 ;;
+    esac
     awk '/^[^ #]/ {d = ($1 == "dns:"); u = 0; next} /^  [a-z_]+:/ {u = d && ($1 == "upstream_dns:" || $1 == "fallback_dns:"); next}
             u && $1 == "-" {gsub(/["\047]/, "", $2); print $2}' "$AGH_YAML" |
         grep -Eq "^((udp|tcp)://)?($LAN|127\.0\.0\.1|localhost)(:53)?$"

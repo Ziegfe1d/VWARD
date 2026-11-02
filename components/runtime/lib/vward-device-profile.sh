@@ -859,53 +859,118 @@ vward_discover_lan_interface()
     vward_map_ndm_for_kernel "$_vp_devmap" "$1"
 }
 
-# vward_agh_dns_loops [YAML] [LAN]: where AdGuard Home would hand a query back to the
-# router's own DNS (Keenetic :53), which hands it to AdGuard Home again: Keenetic logs
-# «proxy loop detected: <router> <-> <router>», drops the request and inactivates the
-# server (fix.37, Keenetic 02.11).  One kind per line, each once, no addresses:
-#   main      upstream_dns rows for every domain     - every query loops
-#   fallback  fallback_dns                           - when the main servers fail
-#   bootstrap bootstrap_dns                          - while AdGuard Home resolves its servers' names
-#   private   local_ptr_upstreams                    - reverse (PTR) queries of the home network
-#   domain    [/domain/] rows of upstream_dns        - those domains only
-# The router: LAN, 127.0.0.0/8, ::1, localhost, port 53 or none, plain/udp/tcp.  Read only.
+# vward_agh_dns_loops [YAML] [LAN]: AdGuard Home settings that hand a query to the router's own
+# DNS (Keenetic :53).  Configured is not happened: the query comes back to AdGuard Home only
+# while Keenetic forwards it there (AdGuard Home in Keenetic's DNS chain, a name Keenetic does
+# not answer itself) - then Keenetic logs «proxy loop detected» and drops it.  Settings that
+# are not applied, or that resolve locally, are named apart (fix.37, Keenetic 02.11).  Read
+# only; one kind per line, each once, no addresses:
+#   main            an upstream_dns row for every domain: every query, once in the chain
+#   fallback        fallback_dns: only when the main servers fail
+#   bootstrap       bootstrap_dns, used: an upstream is a host name (DoH/DoT/plain name)
+#   bootstrap_idle  bootstrap_dns, unused: every upstream is an address
+#   private         local_ptr_upstreams with use_private_ptr_resolvers on: AdGuard Home's
+#                   documented setting (the router names its home network); a loop only for
+#                   reverse names Keenetic does not know
+#   private_off     local_ptr_upstreams with use_private_ptr_resolvers: false
+#   domain          [/public domain/] rows, no own client for the router's queries
+#   domain_client   the same, but a persistent client with the router's address and its own
+#                   upstreams answers the router's queries: they do not come back
+#   domain_local    [/local zone/] rows only (lan, local, home.arpa, *.arpa, ...): Keenetic
+#                   answers those itself
+# The router: LAN, 127.0.0.0/8, ::1, localhost; port 53 or none; plain, udp://, tcp://.
 vward_agh_dns_loops()
 {
     _vp_y=${1:-$VWARD_ADGUARD_CONFIG}
     [ -n "$_vp_y" ] && [ -r "$_vp_y" ] || return 0
     awk -v lan="${2:-${VWARD_LAN_ADDRESS:-}}" '
-        function router(a,    h, p, i, n) {
-            gsub(/["\047]/, "", a)
+        function unq(a) { gsub(/["\047]/, "", a); gsub(/^[ \t]+|[ \t]+$/, "", a); return a }
+        function hostport(a,    i, n) {
+            H = a; P = ""
+            if (substr(a, 1, 1) == "[") { i = index(a, "]"); if (!i) { H = ""; return }
+                H = substr(a, 2, i - 2); P = substr(a, i + 1); sub(/^:/, "", P); return }
+            n = gsub(/:/, ":", a)
+            if (n == 1) { i = index(a, ":"); H = substr(a, 1, i - 1); P = substr(a, i + 1) }
+        }
+        function router(a) {
+            a = unq(a)
             if (a ~ /^(udp|tcp):\/\//) a = substr(a, index(a, "//") + 2)
             else if (a ~ /^[a-z]+:\/\//) return 0
-            h = a; p = ""
-            if (substr(a, 1, 1) == "[") { i = index(a, "]"); if (!i) return 0
-                h = substr(a, 2, i - 2); p = substr(a, i + 1); if (p != "" && substr(p, 1, 1) != ":") return 0; p = substr(p, 2) }
-            else { n = gsub(/:/, ":", a); if (n == 1) { i = index(a, ":"); h = substr(a, 1, i - 1); p = substr(a, i + 1) } }
-            if (p != "" && p != "53") return 0
-            return (h != "" && h == lan) || h == "localhost" || h == "::1" || h == "0:0:0:0:0:0:0:1" || h ~ /^127\.[0-9]+\.[0-9]+\.[0-9]+$/
+            hostport(a)
+            if (P != "" && P != "53") return 0
+            return (H != "" && H == lan) || H == "localhost" || H == "::1" || H == "0:0:0:0:0:0:0:1" || H ~ /^127\.[0-9]+\.[0-9]+\.[0-9]+$/
         }
-        function row(kind, v,    t, i, n, w) {
-            gsub(/^[ \t]+|[ \t]+$/, "", v); gsub(/["\047]/, "", v)
+        # A host name AdGuard Home must resolve first (by bootstrap_dns).
+        function named(a,    s) {
+            a = unq(a)
+            if (a == "" || a == "#" || a ~ /^sdns:\/\//) return 0
+            if (a ~ /^[a-z]+:\/\//) a = substr(a, index(a, "//") + 2)
+            s = index(a, "/"); if (s) a = substr(a, 1, s - 1)
+            hostport(a)
+            return H != "" && H != "localhost" && H !~ /^[0-9.]+$/ && index(H, ":") == 0
+        }
+        function local_zone(d) {
+            d = tolower(d); sub(/\.$/, "", d)
+            return d ~ /(^|\.)(lan|local|localdomain|home|home\.arpa|internal|intranet|in-addr\.arpa|ip6\.arpa)$/
+        }
+        function entry(kind, v,    i, n, w, t, doms, dn, dd, loc, r) {
+            v = unq(v)
             if (v == "" || substr(v, 1, 1) == "#") return
-            if (substr(v, 1, 2) == "[/") { i = index(v, "/]"); if (!i) return; v = substr(v, i + 2); if (kind == "main") kind = "domain" }
-            n = split(v, w, /[ \t]+/)
-            for (t = 1; t <= n; t++) if (w[t] != "#" && router(w[t]) && !seen[kind]++) print kind
+            doms = ""
+            if (substr(v, 1, 2) == "[/") { i = index(v, "/]"); if (!i) return
+                doms = substr(v, 3, i - 3); v = substr(v, i + 2) }
+            n = split(v, w, /[ \t]+/); r = 0
+            for (t = 1; t <= n; t++) {
+                if (w[t] == "" || w[t] == "#") continue
+                if (router(w[t])) r = 1
+                else if (kind != "bootstrap" && named(w[t])) need = 1
+            }
+            if (!r) return
+            if (kind == "main" && doms != "") {
+                dn = split(doms, dd, /\//); loc = 1
+                for (t = 1; t <= dn; t++) if (dd[t] != "" && !local_zone(dd[t])) loc = 0
+                if (loc) dloc = 1; else dpub = 1
+                return
+            }
+            hit[kind] = 1
         }
-        function inline(kind, v,    n, w, t) {
+        function list(kind, v,    n, w, t) {
             sub(/^\[/, "", v); sub(/\][ \t]*$/, "", v); n = split(v, w, /,/)
-            for (t = 1; t <= n; t++) row(kind, w[t])
+            for (t = 1; t <= n; t++) entry(kind, w[t])
         }
-        /^[^ #]/ {d = ($1 == "dns:"); k = ""; next}
+        function client_end() { if (cid && cup) rclient = 1; cid = 0; cup = 0; ck = "" }
+        function client_val(k, v,    n, w, t) {
+            v = unq(v); if (v == "") return
+            if (substr(v, 1, 1) == "[") { sub(/^\[/, "", v); sub(/\][ \t]*$/, "", v); n = split(v, w, /,/)
+                for (t = 1; t <= n; t++) client_val(k, w[t]); return }
+            if (k == "ids" && (v == lan || v == "127.0.0.1")) cid = 1
+            if (k == "upstreams" && v != "#" && !router(v)) cup = 1
+        }
+        BEGIN { ptr = 1 }
+        /^[^ #]/ { if (cl) client_end(); d = ($1 == "dns:"); c = ($1 == "clients:"); cl = 0; k = ""; next }
+        c && /^  [a-z_]+:/ { if (cl) client_end(); cl = ($1 == "persistent:"); next }
+        cl && /^    - / { client_end(); sub(/^    - /, "      ") }
+        cl && /^      [a-z_]+:/ { ck = $1; sub(/:$/, "", ck); v = $0; sub(/^ *[a-z_]+:[ \t]*/, "", v); client_val(ck, v); next }
+        cl && ck != "" && $1 == "-" { v = $0; sub(/^[ \t]*-[ \t]*/, "", v); client_val(ck, v); next }
         d && /^  [a-z_]+:/ {
-            k = ""
+            k = ""; v = $0; sub(/^  [a-z_]+:[ \t]*/, "", v)
             if ($1 == "upstream_dns:") k = "main"; else if ($1 == "fallback_dns:") k = "fallback"
             else if ($1 == "bootstrap_dns:") k = "bootstrap"; else if ($1 == "local_ptr_upstreams:") k = "private"
-            v = $0; sub(/^  [a-z_]+:[ \t]*/, "", v)
-            if (k != "" && substr(v, 1, 1) == "[") { inline(k, v); k = "" }
+            else if ($1 == "use_private_ptr_resolvers:" && unq(v) == "false") ptr = 0
+            else if ($1 == "upstream_dns_file:" && unq(v) != "") need = 1
+            if (k != "" && substr(v, 1, 1) == "[") { list(k, v); k = "" }
             next
         }
-        d && k != "" && $1 == "-" {v = $0; sub(/^[ \t]*-[ \t]*/, "", v); row(k, v)}
+        d && k != "" && $1 == "-" { v = $0; sub(/^[ \t]*-[ \t]*/, "", v); entry(k, v) }
+        END {
+            if (cl) client_end()
+            if (hit["main"]) print "main"
+            if (hit["fallback"]) print "fallback"
+            if (hit["bootstrap"]) print (need ? "bootstrap" : "bootstrap_idle")
+            if (hit["private"]) print (ptr ? "private" : "private_off")
+            if (dpub) print (rclient ? "domain_client" : "domain")
+            if (dloc) print "domain_local"
+        }
     ' "$_vp_y" 2>/dev/null
     return 0
 }
