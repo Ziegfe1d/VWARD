@@ -582,8 +582,17 @@ vward_keenetic_config()
             # A concurrent stale-directory reaper may have removed the empty directory.
             # In that case refuse this read, never continue without a proven lease.
             printf '%s\n' "$_vkc_pid" 2>/dev/null > "$_vkc_lease" || return 1
-            _vkc_own=1
-            break
+            # A delayed reaper can replace the empty directory before publication.
+            # A lease published into another reader's directory is not exclusive.
+            _vkc_exclusive=1
+            for _vkc_peer in "$VWARD_KCACHE/lock"/owner.*; do
+                [ "$_vkc_peer" = "$_vkc_lease" ] || _vkc_exclusive=0
+            done
+            if [ "$_vkc_exclusive" = 1 ]; then
+                _vkc_own=1
+                break
+            fi
+            rm -f "$_vkc_lease"
         fi
         # Remove only the exact dead owner's file. Two reapers cannot unlink a new
         # reader's lease; rmdir succeeds only while the directory is empty.
@@ -938,16 +947,17 @@ vward_doh_alive()
     # VWARD_DOH_ALIVE=0: not checked («cannot tell», the behaviour before; tests without network).
     [ "${VWARD_DOH_ALIVE:-1}" = 1 ] || return 2
     case "$1" in https://*) ;; *) return 2 ;; esac
-    command -v curl >/dev/null 2>&1 || return 2
+    _vda_curl=${VWARD_CURL_BIN:-curl}
+    command -v "$_vda_curl" >/dev/null 2>&1 || return 2
     [ -z "$(find "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" -mmin -60 2>/dev/null)" ] || return 2
     _vda_k=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
     _vda_f=${VWARD_DOH_ALIVE_DIR:-/tmp/vward-doh-alive}/$_vda_k
-    if [ -s "$_vda_f" ] && [ -z "$(find "$_vda_f" -mmin +"${VWARD_DOH_ALIVE_AGE_MIN:-5}" 2>/dev/null)" ]; then
+    if [ "${VWARD_DOH_ALIVE_FRESH:-0}" != 1 ] && [ -s "$_vda_f" ] && [ -z "$(find "$_vda_f" -mmin +"${VWARD_DOH_ALIVE_AGE_MIN:-5}" 2>/dev/null)" ]; then
         read -r _vda_r < "$_vda_f" 2>/dev/null && case "$_vda_r" in 0|1) return "$_vda_r" ;; esac
     fi
     case "$1" in *\?*) _vda_q="$1&" ;; *) _vda_q="$1?" ;; esac
     _vda_c=$(printf 'url = "%sdns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"\n' "$_vda_q" |
-        curl -K - -s -o /dev/null -m "${VWARD_DOH_ALIVE_MT:-6}" -H 'accept: application/dns-message' -w '%{http_code}' 2>/dev/null)
+        "$_vda_curl" -K - -s -o /dev/null -m "${VWARD_DOH_ALIVE_MT:-6}" -H 'accept: application/dns-message' -w '%{http_code}' 2>/dev/null)
     _vda_rc=$?
     case "$_vda_rc" in 132|134|135|136|139) return 2 ;; esac
     _vda_r=1; [ "$_vda_c" != 200 ] || _vda_r=0

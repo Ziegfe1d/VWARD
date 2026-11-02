@@ -53,6 +53,7 @@ console	web/assets/vward-console.css	/opt/share/vward/console/www/assets/vward-c
 console	web/assets/vward-console.js	/opt/share/vward/console/www/assets/vward-console.js	0644
 console	web/cgi-bin/api.cgi	/opt/share/vward/console/www/cgi-bin/api.cgi	0755
 console	components/console/scripts/vward-console-config.sh	/opt/bin/vward-console-config.sh	0755
+console	components/console/lib/vward-list-dns.sh	/opt/lib/vward/vward-list-dns.sh	0644
 console	config/settings/settings-registry.json	/opt/share/vward/settings-registry.json	0644
 console	components/console/data/services-catalog.json	/opt/share/vward/console/services-catalog.json	0644
 ads-privacy-guard	components/ads-privacy-guard/scripts/vward-ads-privacy-guard.sh	/opt/bin/vward-ads-privacy-guard.sh	0755

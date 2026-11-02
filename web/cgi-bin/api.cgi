@@ -2468,6 +2468,18 @@ if [ "$ACTION" = lists-data ]; then
     [ -n "$RUNNING" ] || { echo '{"ok":false,"error":"router_config_unavailable"}'; exit 0; }
     LISTS_CONF=${VWARD_DOMAIN_LISTS_CONF:-$CONFIG_ETC/route-engine/domain-lists.conf}
     LISTS_STATE=$CONFIG_ETC/route-engine/domain-lists
+    LD_LISTS=$(find "$LISTS_STATE.dns" -maxdepth 1 -type f 2>/dev/null | sed 's#.*/##' | "$JQ" -Rn '[inputs | select(length > 0)]')
+    [ -n "$LD_LISTS" ] || LD_LISTS='[]'
+    LD_STATE=not_configured
+    LD_URL=$(awk -F= '$1=="SMARTDNS_URL" {print substr($0,index($0,"=")+1); exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)
+    if [ -n "$LD_URL" ]; then
+        LD_STATE=unknown
+        if command -v vward_doh_alive >/dev/null 2>&1; then
+            VWARD_DOH_ALIVE_MT=4 vward_doh_alive "$LD_URL"; LD_RC=$?
+            case "$LD_RC" in 0) LD_STATE=ready ;; 1) LD_STATE=dead ;; esac
+        fi
+    fi
+    LD_URL=
     WATCHED="$(awk -F= '$1 ~ /^watch\./ && $2 == "1" {print substr($1, 7)}' "$LISTS_CONF" 2>/dev/null | "$JQ" -Rn '[inputs | select(length > 0)]')"
     RETURNS="$(ls "$LISTS_STATE" 2>/dev/null | "$JQ" -Rn '[inputs | select(length > 0)]')"
     # Lists VWARD manages (r-lists, owner 2026-11-01): taken under management by the owner
@@ -2506,6 +2518,7 @@ if [ "$ACTION" = lists-data ]; then
         /^ip route [0-9]/ && NF >= 4 {print "S\t" $4 "\t" $3 "\t255.255.255.255"}
     ' | { cat; command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains | sed 's/^/A\t/'; } | "$JQ" -Rn --arg tun "${VWARD_TUNNEL_INTERFACE:-}" --arg dev "${VWARD_TUNNEL_DEVICE:-}" --arg wan "${VWARD_WAN_INTERFACE:-}" \
         --argjson guard "$([ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" = 0 ] && echo false || echo true)" \
+        --arg dns_state "$LD_STATE" --argjson dns_lists "$LD_LISTS" \
         --argjson watched "$WATCHED" --argjson managed "$MANAGED" --argjson unmanaged "$UNMANAGED" --argjson returns "$RETURNS" --argjson auto "$AUTO" --argjson addrs "$ADDRS" '
         def bits: {"255":8,"254":7,"252":6,"248":5,"240":4,"224":3,"192":2,"128":1,"0":0}[.] // 0;
         reduce (inputs | split("\t")) as $r ({g: {}, order: [], r: {}, doh: [], agh: [], s: {}};
@@ -2520,7 +2533,7 @@ if [ "$ACTION" = lists-data ]; then
         # Keenetic keeps at most 8 DoH rows; AdGuard Home has no such limit.
         | .keenetic = .doh | .doh = (reduce (.doh + .agh)[] as $d ([]; if index([$d]) then . else . + [$d] end))
         | . as $s
-        | {ok: true, tunnel: $tun, doh_used: ($s.keenetic | length), doh_limit: 8, smartdns_domains: $s.doh, smartdns_guard: $guard,
+        | {ok: true, tunnel: $tun, doh_used: ($s.keenetic | length), doh_limit: 8, smartdns_domains: $s.doh, smartdns_guard: $guard, smartdns_state: $dns_state,
            smartdns_sources: {keenetic: $s.keenetic, adguard: ($s.agh | unique)},
            subnets: ($s.s | with_entries(.value |= .[:300])), subnet_counts: ($s.s | with_entries(.value |= length)),
            lists: [$s.order[] | select(. != "AdaptiveAuto") | . as $n | $s.g[$n] as $l | ($s.r[$n] // "") as $t |
@@ -2531,7 +2544,7 @@ if [ "$ACTION" = lists-data ]; then
               # tunnel list sends that address - and every Smart DNS service - into the tunnel.
               smartdns_conflict: ((($t == $tun or $t == $dev) and $t != "") and
                 any($s.doh[] as $d | $l.domains[] as $i | $d == $i or ($d | endswith("." + $i)) or ($i | endswith("." + $d)); .)),
-              watch: ($watched | index([$n]) != null), returnable: ($returns | index([$n]) != null),
+              watch: ($watched | index([$n]) != null), returnable: ($returns | index([$n]) != null), dns_mode: ($dns_lists | index([$n]) != null),
               managed: (($managed | index([$n]) != null) and ($unmanaged | index([$n]) == null)),
               auto: ($auto[$n] // null), addresses: ($addrs[$n] // null)}]}'
     exit 0
@@ -2684,9 +2697,15 @@ if [ "$ACTION" = services ]; then
     [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
     read_body 1024
     SOP="$(form_value op)"; SID="$(form_value id)"; STO="$(form_value tunnel)"
-    printf '%s\n' "$SID" | grep -Eq '^[a-z0-9][a-z0-9.@_-]{0,62}$' || { echo '{"ok":false,"error":"invalid_service"}'; exit 0; }
+    if [ "$SOP" = list-mode ]; then
+        printf '%s\n' "$SID" | grep -Eq '^[A-Za-z0-9_.-]{1,64}$' || { echo '{"ok":false,"error":"invalid_group"}'; exit 0; }
+    else
+        printf '%s\n' "$SID" | grep -Eq '^[a-z0-9][a-z0-9.@_-]{0,62}$' || { echo '{"ok":false,"error":"invalid_service"}'; exit 0; }
+    fi
     case "$STO" in *[!A-Za-z0-9_.-]*) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
     case "$SOP" in
+        list-mode) case "$STO" in dns|auto|vpn|bypass) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+            ARGS="list-mode $SID $STO" ;;
         on|tunnel) [ -n "$STO" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }; ARGS="service $SOP $SID $STO" ;;
         category) [ -n "$STO" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }; ARGS="service-category $SID $STO" ;;
         off) ARGS="service off $SID" ;;
@@ -2708,7 +2727,7 @@ if [ "$ACTION" = services ]; then
                 agh:install|agh:enable) ;;
                 agh:disable|agh:remove|agh:reset|agh:reinstall|awg:disable|vless:disable)
                     [ "$(form_value confirm)" = COMPONENT_OP ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;;
-                awg:enable|vless:enable|awg:install) ;;
+                awg:enable|vless:enable|awg:install|vless:install|dnsmasq:install|singbox:install) ;;
                 *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
             esac
             if [ "$SID" = agh ]; then
@@ -2723,6 +2742,9 @@ if [ "$ACTION" = services ]; then
                     printf '%s:%s\n' "$CLOGIN" "$CPASS" > "$VWARD_AGH_CRED_FILE" || { rm -f "$VWARD_AGH_CRED_FILE"; echo '{"ok":false,"error":"write_failed"}'; exit 0; }
                     CPASS=; export VWARD_AGH_CRED_FILE
                 fi
+            elif [ "$SID" = dnsmasq ] || [ "$SID" = singbox ]; then
+                CPKG=dnsmasq-full; [ "$SID" != singbox ] || CPKG=sing-box-go
+                ARGS="package-install $CPKG install"
             else
                 ARGS="module-component $SID $CACT${STO:+ $STO}"
             fi ;;

@@ -15,7 +15,8 @@
 # dependency pulled implicitly (every dependency must already be installed), never another
 # package touched or restarted. A package is installed DISABLED: its init scripts are set to
 # ENABLED=no and it must not be running afterwards. Apply is refused unless the owner switch
-# VWARD_ENTWARE_APPLY=1 is set (off by default) - nothing in VWARD calls it yet.
+# VWARD_ENTWARE_APPLY=1 is set (off by default); the explicit Panel install grants
+# it only for one absent package inside vward_entware_install_manual.
 # Root: ${VWARD_ROOT_PREFIX:-}/opt (an emulated root in tests); opkg is "$ROOT/opt/bin/opkg".
 # rc: 0 ok; 1 failed and restored; 2 usage/invalid; 3 unknown (state kept, gate closed);
 #     75 refused (switch/permission, not allow-listed, unsafe, gate closed, busy).
@@ -116,6 +117,21 @@ vward_entware_inspect() (
     [ "$got" = "$want_sha" ] || { printf '%s\trefuse\tsha256-mismatch\n' "$1"; return 75; }
     t=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/vward-ipk.XXXXXX") || return 2
     trap 'rm -rf "$t"' EXIT
+    # Validate archive names/types before extracting control scripts. Never follow
+    # a symlink/hardlink or a traversal member supplied by an external package.
+    tar -tzf "$2" > "$t/top" 2>/dev/null &&
+        tar -tvzf "$2" > "$t/top.types" 2>/dev/null ||
+        { printf '%s\trefuse\tcorrupt-package\n' "$1"; return 75; }
+    awk '$0 !~ /^(\.\/)?(debian-binary|control.tar.gz|data.tar.gz)$/ && $0 != "./" {bad=1}
+        END {exit bad}' "$t/top" || return 75
+    awk 'substr($1,1,1)!="-" && substr($1,1,1)!="d" {bad=1} END {exit bad}' "$t/top.types" || return 75
+    tar -xzOf "$2" ./control.tar.gz > "$t/ctl" 2>/dev/null ||
+        tar -xzOf "$2" control.tar.gz > "$t/ctl" 2>/dev/null || return 75
+    tar -tzf "$t/ctl" > "$t/control.names" 2>/dev/null &&
+        tar -tvzf "$t/ctl" > "$t/control.types" 2>/dev/null || return 75
+    awk '$0 !~ /^(\.\/)?(control|conffiles|preinst|postinst|prerm|postrm)$/ && $0 != "./" {bad=1}
+        END {exit bad}' "$t/control.names" || return 75
+    awk 'substr($1,1,1)!="-" && substr($1,1,1)!="d" {bad=1} END {exit bad}' "$t/control.types" || return 75
     (cd "$t" && tar -xzf "$2" ./control.tar.gz ./data.tar.gz 2>/dev/null || tar -xzf "$2" control.tar.gz data.tar.gz) 2>/dev/null ||
         { printf '%s\trefuse\tcorrupt-package\n' "$1"; return 75; }
     mkdir "$t/c" && tar -xzf "$t/control.tar.gz" -C "$t/c" 2>/dev/null || { printf '%s\trefuse\tcorrupt-control\n' "$1"; return 75; }
@@ -132,10 +148,60 @@ vward_entware_inspect() (
     done
     # Payload: only under /opt, never a VWARD-owned path, never outside the root.
     tar -tzf "$t/data.tar.gz" 2>/dev/null > "$t/files" || { printf '%s\trefuse\tcorrupt-data\n' "$1"; return 75; }
-    if awk '{p = $0; sub(/^\.\//, "/", p)} p !~ /^\/opt(\/|$)/ || p ~ /\.\./ || p ~ /^\/opt\/bin\/vward-/ || p ~ /^\/opt\/lib\/vward\// || p ~ /^\/opt\/share\/vward\// || p ~ /^\/opt\/etc\/init\.d\/S..vward-/ {bad = 1} END {exit bad ? 0 : 1}' "$t/files"; then
+    if awk '$0 == "./" {next} {p = $0; sub(/^\.\//, "/", p)} p !~ /^\/opt(\/|$)/ || p ~ /\.\./ || p ~ /^\/opt\/bin\/vward-/ || p ~ /^\/opt\/lib\/vward\// || p ~ /^\/opt\/share\/vward\// || p ~ /^\/opt\/etc\/init\.d\/S..vward-/ {bad = 1} END {exit bad ? 0 : 1}' "$t/files"; then
         printf '%s\trefuse\tunsafe-payload-path\n' "$1"; return 75
     fi
+    tar -tvzf "$t/data.tar.gz" > "$t/data.types" 2>/dev/null || return 75
+    awk 'substr($1,1,1)!="-" && substr($1,1,1)!="d" {bad=1} END {exit bad}' "$t/data.types" || return 75
     printf '%s\tverified\t%s\t%s\n' "$1" "$(printf '%s' "$line" | cut -f4)" "$got"
+)
+
+# Explicit Panel install only: use the configured official Entware feed over TLS,
+# install one absent allow-listed package, and leave it disabled. No auto permission
+# or persistent settings are changed; existing packages use the update workflow.
+vward_entware_install_manual() (
+    [ "$#" -eq 1 ] || return 2
+    vwe_root; vwe_known "$1" || return 75
+    vward_entware_gate || return 75
+    status=$(vward_entware_status "$1") || return 75
+    if [ "$(printf '%s\n' "$status" | cut -f2)" = installed ]; then
+        printf '%s\tunchanged\tinstalled\n' "$1"; return 0
+    fi
+    # Configured feed only, never an arbitrary URL from an HTTP request.
+    feed=$(cat "$VWE_R/opt/etc/opkg.conf" "$VWE_R/opt/etc/opkg/"*.conf 2>/dev/null |
+        awk '$1=="src/gz" && $3 ~ /^https?:\/\/bin[.]entware[.]net\/[A-Za-z0-9_.\/-]+$/ {
+        u=$3; sub(/^http:/,"https:",u); sub(/\/$/,"",u); if (u !~ /\.\./) seen[u]=1}
+        END {for(u in seen) {n++; value=u} if(n==1) print value}')
+    [ -n "$feed" ] || { printf '%s\trefuse\ttrusted-feed-unavailable\n' "$1"; return 75; }
+    (umask 077; mkdir -p "$VWE_CACHE") || return 2
+    w=$(umask 077; mktemp -d "$VWE_CACHE/.download.XXXXXX") || return 2
+    trap 'rm -rf "$w"' EXIT
+    trap 'exit 1' HUP INT TERM
+    curl_bin=${VWARD_CURL_BIN:-curl}
+    "$curl_bin" -fsSL --proto '=https' --proto-redir '=https' --connect-timeout 10 \
+        --max-time 45 --max-filesize 2097152 -o "$w/Packages.gz" "$feed/Packages.gz" || return 1
+    gzip -dc "$w/Packages.gz" | head -c 8388609 > "$w/Packages"
+    [ "$(wc -c < "$w/Packages")" -le 8388608 ] || return 75
+    vward_entware_check "$1" "$w/Packages" || return 75
+    stanza=$(vwe_stanza "$1" "$w/Packages") || return 75
+    filename=$(vwe_field "$stanza" Filename)
+    case "$filename" in ''|*[!A-Za-z0-9_.+-]*|*..*|.*) return 75 ;; *.ipk) ;; *) return 75 ;; esac
+    size=$(vwe_field "$stanza" Size)
+    [ "$size" -le 67108864 ] || return 75
+    "$curl_bin" -fsSL --proto '=https' --proto-redir '=https' --connect-timeout 10 \
+        --max-time 300 --max-filesize "$size" -o "$w/package.ipk" "$feed/$filename" || return 1
+    vward_entware_inspect "$1" "$w/package.ipk" "$w/Packages" || return 75
+    # The Panel's new-install path does not execute unreviewed maintainer code.
+    # The generic manual lifecycle remains separate; current official packages
+    # without these scripts can be installed disabled without an autostart race.
+    tar -xzOf "$w/package.ipk" ./control.tar.gz > "$w/control.tar.gz" 2>/dev/null ||
+        tar -xzOf "$w/package.ipk" control.tar.gz > "$w/control.tar.gz" 2>/dev/null || return 75
+    tar -tzf "$w/control.tar.gz" > "$w/control.names" || return 75
+    if grep -Eq '(^|/)(preinst|postinst|prerm|postrm)$' "$w/control.names"; then
+        printf '%s\trefuse\tmaintainer-script-unreviewed\n' "$1"; return 75
+    fi
+    VWARD_ENTWARE_APPLY=1 VWARD_ENTWARE_INSTALL_ONLY=1 \
+        vward_entware_apply "$1" "$w/package.ipk" "$w/Packages" manual
 )
 
 vward_entware_gate() (
@@ -166,6 +232,23 @@ vwe_disable() {
 vwe_conffiles() { awk -v p="$1" '
     /^Package: / {cur = ($2 == p)} cur && /^Conffiles:/ {c = 1; next} c && /^ / {print $1; next} {c = 0}' "$VWE_DB/status" 2>/dev/null; }
 
+vwe_absent_paths() {
+    vap_data=$2/data.tar.gz
+    tar -xzOf "$1" ./data.tar.gz > "$vap_data" 2>/dev/null ||
+        tar -xzOf "$1" data.tar.gz > "$vap_data" 2>/dev/null || return 75
+    tar -tzf "$vap_data" > "$2/paths" || return 75
+    while IFS= read -r vap_path; do
+        case "$vap_path" in ./|*/|opt|./opt) continue ;; esac
+        vap_path=/${vap_path#./}; vap_path=/${vap_path#/}
+        [ ! -e "$VWE_R$vap_path" ] && [ ! -L "$VWE_R$vap_path" ] || return 75
+        vap_parent=${vap_path%/*}
+        while [ "$vap_parent" != /opt ] && [ "$vap_parent" != / ]; do
+            [ ! -L "$VWE_R$vap_parent" ] || return 75
+            vap_parent=${vap_parent%/*}
+        done
+    done < "$2/paths"
+}
+
 vward_entware_apply() (
     [ "$#" -eq 4 ] || return 2
     vwe_root; vwe_known "$1" || return 75
@@ -178,6 +261,10 @@ vward_entware_apply() (
     trap 'rm -rf "$VWE_STATE/.lock" "$VWE_STATE/.work.$$"' EXIT
     echo $$ > "$VWE_STATE/.lock/pid" || return 2
     vward_entware_gate >/dev/null || return 75
+    if [ "${VWARD_ENTWARE_INSTALL_ONLY:-0}" = 1 ] &&
+       [ "$(vward_entware_status "$1" | cut -f2)" = installed ]; then
+        printf '%s\tunchanged\tinstalled\n' "$1"; return 0
+    fi
     ins=$(vward_entware_inspect "$1" "$2" "$3") || { printf '%s\n' "$ins"; return 75; }
     newv=$(printf '%s' "$ins" | cut -f3); sha=$(printf '%s' "$ins" | cut -f4)
     prev=$(vward_entware_status "$1"); prevv=$(printf '%s' "$prev" | cut -f3)
@@ -197,6 +284,9 @@ vward_entware_apply() (
         [ -f "$back" ] && [ ! -L "$back" ] || { printf '%s\trefuse\tno-rollback-image\n' "$1"; return 75; }
     fi
     w=$VWE_STATE/.work.$$; (umask 077; mkdir "$w") || return 2
+    if [ "${VWARD_ENTWARE_INSTALL_ONLY:-0}" = 1 ]; then
+        vwe_absent_paths "$2" "$w" || { printf '%s\trefuse\tpath-conflict\n' "$1"; return 75; }
+    fi
     # Private backup of the conffiles (the user's edits) before anything changes.
     for c in $(vwe_conffiles "$1"); do
         [ -f "$VWE_R$c" ] || continue

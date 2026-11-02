@@ -275,6 +275,9 @@ const API_ERRORS = {
   smartdns_not_configured: 'Smart DNS не настроен: укажите сервер DoH в разделе «ИИ-сервисы»', smartdns_keenetic_full: 'лимит Smart DNS в Keenetic исчерпан (8 из 8 доменов)',
   service_list: 'список сервиса не создан в Keenetic', invalid_arguments: 'неверные параметры запроса', helper_failed: 'действие завершилось без ответа',
   doh_limit: 'в Keenetic нет места для ещё одного сервера DNS-over-HTTPS', doh_remove_failed: 'Keenetic не удалил строку Smart DNS', doh_remove_unsafe: 'строка Smart DNS используется не только VWARD: не удалена',
+  package_install_refused: 'установка пакета отклонена проверкой безопасности или зависимостей', package_recovery_required: 'нужно разобрать незавершённую установку пакета', engine_in_use: 'у движка уже есть настроенные туннели', install_recovery_required: 'нужно разобрать незавершённую установку Xray', unzip_unavailable: 'не найдена программа распаковки ZIP',
+  smartdns_dead: 'Smart DNS-сервер не отвечает', smartdns_unknown: 'ответ Smart DNS-сервера не подтверждён', list_dns_shared_domain: 'домен используется другим списком: нет права менять его DNS', list_dns_reference_only: 'DNS или список изменены вне операции: запись остановлена', list_dns_conflict: 'для домена уже настроен другой DNS-сервер', list_dns_concurrent: 'настройки изменились во время операции', list_dns_write_failed: 'роутер отклонил запись DNS списка', list_dns_verification_failed: 'результат записи DNS не подтверждён',
+  list_dns_active: 'сначала выберите для списка VPN или Провайдер, затем меняйте домены или удаляйте список', operation_still_running: 'операция ещё выполняется, результат появится в журнале', install_busy: 'установка Xray уже выполняется', install_concurrent: 'файлы Xray изменились во время загрузки',
   group_not_found: 'список не найден в Keenetic', group_not_routed: 'у списка нет маршрута', unknown_group: 'нет такого списка', invalid_group: 'недопустимое имя списка', list_not_found: 'список не найден', component_busy: 'уже идёт другая операция с компонентом', agh_credentials_required: 'нужны логин и пароль для AdGuard Home', agh_not_installed: 'AdGuard Home не установлен', agh_setup_failed: 'AdGuard Home не принял настройки', agh_stop_failed: 'AdGuard Home не остановился', no_free_port: 'нет свободного порта', dns_release_failed: 'не удалось убрать DNS-строки из Keenetic', default_tunnel_in_module: 'туннель по умолчанию в этом модуле: выберите, куда перевести маршруты', list_too_long: 'в объединённом списке будет больше 300 доменов',
   domain_not_resolved: 'домен не разрешается в адрес', download_failed: 'не удалось скачать файл', feed_unavailable: 'сервер обновлений недоступен', unpack_failed: 'архив повреждён',
   no_space: 'недостаточно места на USB-накопителе', router_save_failed: 'Keenetic не сохранил настройки', tunnel_unavailable: 'туннель недоступен', upgrade_rolled_back: 'обновление откатилось: проверка после установки не прошла',
@@ -1268,10 +1271,18 @@ function listPath(l) {
 }
 let listWant = '';
 // r-lists: «Авто» - VWARD's policy decides (watch); otherwise the route the list has now.
-// One set of names on every screen (owner 02.11): Авто | VPN | Провайдер (as on «DNS»). A list's
-// «DNS» way needs a Smart DNS writer per list, not there yet: the segment is not shown (fix.36).
-const LIST_MODES = [['auto', 'Авто'], ['vpn', 'VPN'], ['bypass', 'Провайдер']];
-const listMode = l => l.watch ? 'auto' : viaIs(l, 'vpn') ? 'vpn' : viaIs(l, 'bypass') ? 'bypass' : '';
+// Four explicit paths; DNS requires the configured responding Smart DNS server.
+const LIST_MODES = [['auto', 'Авто'], ['vpn', 'VPN'], ['dns', 'DNS'], ['bypass', 'Провайдер']];
+const listMode = l => l.dns_mode ? 'dns' : l.watch ? 'auto' : viaIs(l, 'vpn') ? 'vpn' : viaIs(l, 'bypass') ? 'bypass' : '';
+function listDnsWhy(l) {
+  const d = S.lists || {}, state = d.smartdns_state;
+  if (state !== 'ready') return state === 'not_configured' ? 'Smart DNS-сервер не настроен' : state === 'dead' ? 'Smart DNS-сервер не отвечает' : 'Ответ Smart DNS-сервера не подтверждён';
+  const rows = (d.smartdns_sources && d.smartdns_sources.keenetic) || [], used = num(d.doh_used) || 0, limit = num(d.doh_limit) || 8;
+  const need = (l.domains || []).filter(x => rows.indexOf(x) < 0).length;
+  return l.count > limit || used + need > limit ? 'Недоступно: лимит ' + used + ' из ' + limit + ', списку нужно ещё ' + need : '';
+}
+function listModes(l) { const why = listDnsWhy(l); return LIST_MODES.map(o => [o[0], o[1], !!LISTBULK.busy || o[0] === 'dns' && !!why]); }
+function listAllModes(ls) { const d = S.lists || {}, rows = (d.smartdns_sources && d.smartdns_sources.keenetic) || [], needed = new Set(); ls.forEach(l => (l.domains || []).forEach(x => { if (rows.indexOf(x) < 0) needed.add(x); })); const why = ls.some(l => !!listDnsWhy(l)) || (num(d.doh_used) || 0) + needed.size > (num(d.doh_limit) || 8); return LIST_MODES.map(o => [o[0], o[1], !!LISTBULK.busy || o[0] === 'dns' && why]); }
 const LISTPICK = new Set(), LISTBULK = { busy: '' };
 function listDelText(ls) {
   const n = ls.reduce((a, l) => a + (l.count || 0), 0), vpn = ls.filter(l => viaIs(l, 'vpn'));
@@ -1285,11 +1296,25 @@ async function listBulk(fields, names, what) {
   const done = [], bad = [];
   for (const g of names) {
     LISTBULK.busy = what + ': ' + (done.length + bad.length + 1) + ' из ' + names.length; render();
-    const x = await apiPost('config', Object.assign({ target: g }, fields)).catch(e => ({ ok: false, error: e.message }));
+    const x = await (fields.op === 'list-mode' ? listModeWrite(g, fields.value) : apiPost('config', Object.assign({ target: g }, fields))).catch(e => ({ ok: false, error: e.message }));
     (x && x.ok ? done : bad).push(x && x.ok ? g : g + ' - ' + errText(x));
   }
   LISTBULK.busy = '';
   actionResult = { id: 'lists', text: what + ': готово ' + done.length + ' из ' + names.length + (bad.length ? '. Не выполнено: ' + bad.join('; ') : '') };
+  await Promise.all(['config', 'lists'].map(k => load(k, true))); render();
+}
+async function listModeWrite(group, mode) {
+  const job = await bgJob({ op: 'list-mode', id: group, tunnel: mode });
+  return job.done ? job.x : { ok: false, error: 'operation_still_running' };
+}
+async function listModeSet(group, mode) {
+  if (LISTBULK.busy) return;
+  LISTBULK.busy = 'Меняем путь списка…'; render();
+  let x;
+  try { x = await listModeWrite(group, mode); }
+  catch (e) { x = { ok: false, error: e.message }; }
+  LISTBULK.busy = '';
+  actionResult = { id: 'lists', text: x.ok ? (x.result === 'unchanged' ? 'Уже сохранено' : 'Путь списка изменён') : 'Не сохранено: ' + errText(x) };
   await Promise.all(['config', 'lists'].map(k => load(k, true))); render();
 }
 // One Keenetic domain list: where it goes, its domains and exclusions, all editable here.
@@ -1348,25 +1373,26 @@ function listPage(name) {
   if (name === (cfgRoute().group || prof().policy_group)) { setTimeout(() => go('d-mydomains'), 0); return ''; }
   if ((!d || d.name !== name) && listWant !== name) { listWant = name; load('listd', true).then(render); }
   const fresh = d && d.name === name, title = l.description || l.name, can = ok && (viaIs(l, 'vpn') || viaIs(l, 'bypass'));
-  const rm = (act, v, label) => '<button class="icon-btn" type="button" data-list-dom="' + act + '" data-dom="' + esc(v) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (ok ? '' : ' disabled') + '>' + ico('close') + '</button>';
-  const addF = (kind, ph, label) => inputBar({ form: 'list-add', attrs: ' data-kind="' + kind + '"', label: label, name: 'domain', placeholder: ph, aria: 'Домен', off: !ok, icon: 'plus', btn: 'Добавить' });
+  const editOk = ok && !l.dns_mode;
+  const rm = (act, v, label) => '<button class="icon-btn" type="button" data-list-dom="' + act + '" data-dom="' + esc(v) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (editOk ? '' : ' disabled') + '>' + ico('close') + '</button>';
+  const addF = (kind, ph, label) => inputBar({ form: 'list-add', attrs: ' data-kind="' + kind + '"', label: label, name: 'domain', placeholder: ph, aria: 'Домен', off: !editOk, icon: 'plus', btn: 'Добавить' });
   const inc = fresh ? d.include : [], exc = fresh ? d.exclude : [];
   return cfgNote() + (fresh || !d || !d.error ? '' : '<p class="field-warn">' + esc(errText(d)) + '</p>') +
     panel(title, '<dl class="kv">' +
-      (tuns.length > 1 ? ctrlRow('Куда идёт', listViaSel(l, tuns, ok)) : ctrlRow('В обход VPN', sw('data-list-bypass="' + esc(l.name) + '"', viaIs(l, 'bypass'), 'В обход VPN: ' + title, !can), viaIs(l, 'bypass') ? 'сейчас идёт через провайдера' : 'сейчас идёт через VPN')) +
+      (l.dns_mode ? ctrlRow('Куда идёт', choiceSlider('list-mode:' + l.name, listModes(l), listMode(l), 'Путь списка ' + title)) : tuns.length > 1 ? ctrlRow('Куда идёт', listViaSel(l, tuns, ok)) : ctrlRow('В обход VPN', sw('data-list-bypass="' + esc(l.name) + '"', viaIs(l, 'bypass'), 'В обход VPN: ' + title, !can), viaIs(l, 'bypass') ? 'сейчас идёт через провайдера' : 'сейчас идёт через VPN')) +
       ctrlRow('Следить', sw('data-list-watch="' + esc(l.name) + '"', l.watch, 'Следить: ' + title, !ok), 'если в обход VPN сервис перестанет открываться, VWARD сам переведёт список на VPN') + '</dl>' +
       kv([['IP-адреса', l.addresses != null ? fmtInt(l.addresses) : '—', '', 'ip-' + l.name, '', 'адреса, которые Keenetic узнал для доменов списка']]) +
       (l.smartdns_conflict ? '<p class="field-warn">В списке есть домены Smart DNS: их общий адрес уйдёт в VPN, и Smart DNS перестанет работать для всех сервисов. Переведите список в обход VPN или уберите эти домены.</p>' : '') +
       (l.auto && viaIs(l, 'vpn') ? '<p class="field-warn">Переведён на VPN автоматически ' + esc(l.auto.at) + ': не открылся ' + esc(l.auto.host) + '</p>' : '')) +
-    panel('Домены', addF('add', 'example.com', 'Добавить домен в список') +
+    panel('Домены', (l.dns_mode ? '<p class="panel-desc">Чтобы изменить домены или удалить список, сначала выберите другой путь.</p>' : '') + addF('add', 'example.com', 'Добавить домен в список') +
       (fresh ? '<p class="panel-desc">' + fmtInt(inc.length) + ' ' + plural(inc.length, 'домен', 'домена', 'доменов') + '</p>' : '') + (inc.length > 8 ? '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти в списке" aria-label="Найти домен в списке" autocomplete="off"></label>' : '') +
       (!fresh ? empty('Загрузка…') : inc.length ? '<ul class="rows" data-list-rows>' + inc.map(v => '<li class="row dom-row" data-d="' + esc(v) + '"><div class="row-main"><b>' + dom(v) + '</b></div><span class="row-acts">' + rm('remove', v, 'Убрать ' + v + ' из списка') + '</span></li>').join('') + '</ul>' : empty('В списке нет доменов')),
       { desc: fmtInt(inc.length || l.count) + ' ' + plural(inc.length || l.count, 'домен', 'домена', 'доменов') + '. Домен действует вместе с поддоменами. Изменения сразу сохраняются в Keenetic.' }) +
     // «Управление» of a list (owner 02.11): the list's actions in their own section, as on AdGuard Home.
     (l.name === 'AdaptiveAuto' ? '' : panel('Управление', listConfirm(l) || '<div class="panel-actions even">' +
-        btn('ask', 'broom', 'Очистить список', '', ' data-confirm="list-clear" data-name="' + esc(l.name) + '"' + (ok && l.count ? '' : ' disabled')) +
-        (listOwn(l) || l.managed || svcOf(l.name) ? '' : btn('ask', 'sliders', 'Взять под управление', '', ' data-confirm="list-adopt" data-name="' + esc(l.name) + '"' + (ok ? '' : ' disabled'))) +
-        (listOwn(l) ? '' : btn('ask', 'trash', 'Удалить список', 'danger', ' data-confirm="list-del" data-name="' + esc(l.name) + '"' + (ok ? '' : ' disabled'))) + '</div>' +
+        btn('ask', 'broom', 'Очистить список', '', ' data-confirm="list-clear" data-name="' + esc(l.name) + '"' + (editOk && l.count ? '' : ' disabled')) +
+        (listOwn(l) || l.managed || svcOf(l.name) ? '' : btn('ask', 'sliders', 'Взять под управление', '', ' data-confirm="list-adopt" data-name="' + esc(l.name) + '"' + (editOk ? '' : ' disabled'))) +
+        (listOwn(l) ? '' : btn('ask', 'trash', 'Удалить список', 'danger', ' data-confirm="list-del" data-name="' + esc(l.name) + '"' + (editOk ? '' : ' disabled'))) + '</div>' +
         (confirm && confirm.id === 'list-adopt' && confirm.name === l.name ? confirmBox('list-adopt', 'Взять список «' + (l.description || l.name) + '» под управление VWARD? Его путь будет меняться переключателем «Авто | VPN | Провайдер» здесь и общим «Все списки». Домены и маршрут сейчас не меняются.', 'Взять под управление') : ''),
       { desc: 'Очистить список - убрать все домены, список и маршрут останутся. Удалить список - убрать его из Keenetic полностью. Перед обоими сохраняется копия настроек.' })) +
     panel('Исключения', addF('exclude', 'sub.' + exampleDomain(inc), 'Добавить исключение') +
@@ -2347,10 +2373,10 @@ const RENDER = {
     const own = cfgRoute().group || prof().policy_group;
     const one = l => { const m = mine.indexOf(l) >= 0;
       return '<div class="list-item">' + row(l).replace('</small>', '</small>' + (m ? '<small class="tag-mark">под управлением VWARD</small>' : l.name === own ? '' : '<small class="tag-mark off">не под управлением VWARD</small>')) +
-        (m ? choiceSlider('list-mode:' + l.name, LIST_MODES, listMode(l), 'Путь списка ' + (l.description || l.name)) : '') + '</div>'; };
+        (m ? choiceSlider('list-mode:' + l.name, listModes(l), listMode(l), 'Путь списка ' + (l.description || l.name)) + (listDnsWhy(l) ? '<p class="panel-desc">DNS: ' + esc(listDnsWhy(l)) + '</p>' : '') : '') + '</div>'; };
     return cfgNote() + listDupPanel(items) +
       panel('Доменные списки', (mine.length ? '<dl class="kv">' +
-        ctrlRow('Все списки', choiceSlider('list-mode-all', LIST_MODES, common, 'Путь всех списков VWARD'), common ? 'списки под управлением VWARD' : 'Разные: у списков разный путь', 'stack') + '</dl>' : '') +
+        ctrlRow('Все списки', choiceSlider('list-mode-all', listAllModes(mine), common, 'Путь всех списков VWARD'), common ? 'списки под управлением VWARD' : 'Разные: у списков разный путь', 'stack') + '</dl>' : '') +
         (busy ? '<p class="panel-desc">' + esc(busy) + '</p>' : '') +
         '<div class="list-all">' + items.map(one).join('') + '</div>' + resultBox('lists'),
         { desc: 'Авто - путь выбирает VWARD по проверке, домены не удаляются. VPN и Провайдер - путь закреплён. Путь меняется у списков под управлением VWARD; другой список можно взять под управление на его странице.' }) + soonPanel('lists');
@@ -2983,7 +3009,7 @@ function segPick(key, v) {
   else if (key === 'upd-feed') feedPick(v);
   else if (key === 'list-mode-all') { const ls = ((S.lists && S.lists.lists) || []).filter(l => l.managed && !svcOf(l.name) && l.name !== (cfgRoute().group || prof().policy_group) && listMode(l) !== v);
     if (ls.length) listBulk({ op: 'list-mode', value: v }, ls.map(l => l.name), 'Все списки: ' + LIST_MODES.find(m => m[0] === v)[1]); }
-  else if (key.startsWith('list-mode:')) cfgSet({ op: 'list-mode', target: key.slice(10), value: v }, 'Путь списка: ' + LIST_MODES.find(m => m[0] === v)[1], ['lists']);
+  else if (key.startsWith('list-mode:')) listModeSet(key.slice(10), v);
 }
 // Update channels (owner 2026-11-01): «Стабильная» = branch main, «Разработка» = branch dev.
 // beta is the retired channel: an install that follows it is shown as such and is never
@@ -3170,11 +3196,11 @@ const modOff = m => ((st().services || {}).modules_off || []).includes(m);
 // ---- «Компоненты»: install, on/off, reinstall, reset, remove (fix.32) ----
 // One operation at a time: while one runs (here or after a reboot) the buttons wait.
 let COMP_JOB = null;
-const COMP_NAME = { agh: 'AdGuard Home', awg: 'модуль AmneziaWG', vless: 'модуль VLESS' };
+const COMP_NAME = { agh: 'AdGuard Home', awg: 'модуль AmneziaWG', vless: 'Xray', dnsmasq: 'dnsmasq', singbox: 'sing-box' };
 const COMP_ACT = { install: 'Установить', enable: 'Включить', disable: 'Отключить', reinstall: 'Переустановить', reset: 'Сбросить настройки', remove: 'Удалить' };
 const COMP_DONE = { install: 'установлен', enable: 'включён', disable: 'отключён', reinstall: 'переустановлен', reset: 'настройки сброшены', remove: 'удалён' };
 const compBusy = () => COMP_JOB || (st().services || {}).component_op || null;
-function compModTunnels(m) { return m === 'vless' ? ((S.awg && S.awg.vless && S.awg.vless.tunnels) || []).map(t => t.name) : ((S.awg && S.awg.tunnels) || []).map(t => t.name); }
+function compModTunnels(m) { return m === 'vless' ? ((S.awg && S.awg.vless && S.awg.vless.tunnels) || []).map(t => t.name) : m === 'awg' ? ((S.awg && S.awg.tunnels) || []).map(t => t.name) : []; }
 // What the step will touch, said before it is done.
 function compPreview(id, act) {
   const cur = prof().tunnel_interface, n = act === 'disable' && id !== 'agh' ? tunUseExtraAll(compModTunnels(id)) : 0;
@@ -3198,11 +3224,13 @@ function compButtons(id) {
   }
   // Not installed (owner 02.11): «Установить» only - for AmneziaWG, whose program VWARD downloads.
   if (id === 'awg' && S.awg && !S.awg.installed) return [b('install', 'primary')];
+  if (id === 'vless' && S.awg && S.awg.vless && !S.awg.vless.installed && !compModTunnels(id).length) return [b('install', 'primary')];
+  if (id === 'dnsmasq' || id === 'singbox') { const f = pkgFacts(id === 'dnsmasq' ? 'dnsmasq-full' : 'sing-box-go'); return f.known !== false && f.installed === false ? [b('install', 'primary')] : []; }
   if (!compModTunnels(id).length && !modOff(id)) return [];
   return [modOff(id) ? b('enable', 'primary') : b('disable')];
 }
 function compPanel(id) {
-  if (id === 'agh' ? !S.status || !S.ads : !S.awg || !S.status) return '';
+  if (!S.status || (id === 'agh' ? !S.ads : (id === 'awg' || id === 'vless') && !S.awg)) return '';
   const busy = compBusy(), btns = compButtons(id), c = confirm && confirm.id === 'comp' && confirm.comp === id ? confirm : null;
   if (!btns.length && !c) return '';
   const a = S.ads || {}, needLogin = id === 'agh' && !a.agh_connected && c && (c.act === 'install' || c.act === 'reset');
@@ -3210,14 +3238,14 @@ function compPanel(id) {
   const alt = ((st().wg || {}).interfaces || []).filter(t => t.name !== cur && !compModTunnels(id).includes(t.name) && isTrue(t.connected));
   let body = '';
   if (c) {
-    body = '<div class="confirm' + (c.act === 'remove' ? ' danger' : '') + '"><span>' + esc(c.act === 'install' ? (id === 'awg' ? 'Установить модуль AmneziaWG? VWARD скачает программу vward-awg для этого роутера и сверит её контрольную сумму. Туннели и маршруты не меняются.' : 'Установить AdGuard Home? VWARD скачает официальную сборку для этого роутера, займёт свободные порты (веб-интерфейс 3000, DNS 65053 или следующие) и подключит его к Keenetic.') : compPreview(id, c.act)) + '</span>' +
+    body = '<div class="confirm' + (c.act === 'remove' ? ' danger' : '') + '"><span>' + esc(c.act === 'install' ? (id === 'vless' ? 'Установить Xray? VWARD скачает официальную сборку и сверит закреплённую SHA-256. Без запуска туннелей.' : id === 'dnsmasq' || id === 'singbox' ? 'Установить ' + COMP_NAME[id] + '? VWARD проверит HTTPS-источник Entware, SHA-256 и зависимости. Программа останется выключенной. Существующие настройки не меняются.' : id === 'awg' ? 'Установить модуль AmneziaWG? VWARD скачает программу vward-awg для этого роутера и сверит её контрольную сумму. Туннели и маршруты не меняются.' : 'Установить AdGuard Home? VWARD скачает официальную сборку для этого роутера, займёт свободные порты (веб-интерфейс 3000, DNS 65053 или следующие) и подключит его к Keenetic.') : compPreview(id, c.act)) + '</span>' +
       (['remove', 'reinstall', 'reset'].includes(c.act) ? '<label class="check-row"><input type="checkbox" data-comp-backup' + (c.backup === false ? '' : ' checked') + '> Сохранить копию настроек перед этим</label>' : '') +
       (c.act === 'disable' && inMod ? '<label class="check-row">Туннель по умолчанию ' + esc(tunLabel(cur)) + ' в этом модуле. Маршруты VWARD: ' + sel('data-comp-to', 'Куда перевести маршруты', alt.map(t => [t.name, 'через ' + tunLabel(t.name)]).concat([['direct', 'напрямую через провайдера']]), c.to || (alt[0] ? alt[0].name : 'direct')) + '</label>' : '') +
       (needLogin ? '<p class="panel-desc">Логин и пароль для входа в AdGuard Home (VWARD сохранит их на роутере и будет входить сам):</p><input class="input" name="comp-login" placeholder="логин" aria-label="Логин AdGuard Home" autocomplete="username"><input class="input" name="comp-password" type="password" placeholder="пароль, от 8 символов" aria-label="Пароль AdGuard Home" autocomplete="new-password">' : '') +
       '<button class="btn small ' + (c.act === 'remove' ? 'danger' : 'primary') + '" type="button" data-act="comp-yes">' + esc(COMP_ACT[c.act]) + '</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>';
   } else body = '<div class="panel-actions even">' + btns.join('') + '</div>';
   return panel('Управление', body + (busy ? '<p class="result-note">Идёт операция: ' + esc(String(busy).replace(/^agh-/, 'AdGuard Home: ').replace(/^module-/, 'модуль ')) + '. Остальные кнопки ждут её окончания.</p>' : '') + resultBox('comp-' + id),
-    { desc: id === 'agh' ? 'Установка, отключение и удаление со всеми зависимостями: DNS Keenetic, «Реклама», Smart DNS.' : id === 'awg' && S.awg && !S.awg.installed ? 'Программа модуля не установлена; «Установить» скачает её. Без неё туннели AmneziaWG не запускаются.' : 'Отключение выключает туннели модуля и переводит их маршруты; включение возвращает их.' });
+    { desc: id === 'dnsmasq' || id === 'singbox' || id === 'vless' && !compModTunnels(id).length ? 'Установка программы без включения службы и без изменения туннелей.' : id === 'agh' ? 'Установка, отключение и удаление со всеми зависимостями: DNS Keenetic, «Реклама», Smart DNS.' : id === 'awg' && S.awg && !S.awg.installed ? 'Программа модуля не установлена; «Установить» скачает её. Без неё туннели AmneziaWG не запускаются.' : 'Отключение выключает туннели модуля и переводит их маршруты; включение возвращает их.' });
 }
 async function compRun(c) {
   const f = { op: 'comp', id: c.comp, action: c.act, confirm: 'COMPONENT_OP' };
@@ -3256,8 +3284,7 @@ function compCard(id, name, kind, desc) {
     f.installed ? [['Автопроверка обновлений', perm('check')], ['Автозагрузка обновлений', perm('download')], ['Автоустановка обновлений', perm('apply')],
       ['Диагностика', ((c.find(r => r.id === id) || {}).label) || 'Нет данных']] : []);
   return (f.installed ? loadError(['status']) : '') + panel(name, kv(rows), { desc: desc }) +
-    mgmtNote(f.installed ? 'Обновление пакета - в «Обновления программ». Удаление и сброс из Панели VWARD появятся в следующем выпуске.' :
-      'Установка пакета из Панели VWARD появится в следующем выпуске; сейчас пакет ставится вручную через Entware.');
+    (f.installed ? mgmtNote('Обновление пакета - в «Обновления программ». Удаление и сброс из Панели VWARD появятся в следующем выпуске.') : compPanel(kind));
 }
 const TUN_TYPE = { wireguard: 'WireGuard', openvpn: 'OpenVPN', sstp: 'SSTP', pptp: 'PPTP', l2tp: 'L2TP', ike: 'IPsec', ipsec: 'IPsec', proxy: 'Proxy', opkgtun: 'OpkgTun' };
 const awgOf = name => ((S.awg && S.awg.tunnels) || []).find(x => x.name === name);

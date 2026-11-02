@@ -69,6 +69,8 @@ TXN=0
 SV_TXN=0
 SV_DIR=
 SD_RECOVERY_DIR=
+LD_TXN=0
+LD_DIR=
 # The download of the official AdGuard Home build (ext-agh-official).
 AO_TMP=
 # An uploaded .conf holds the private key: it goes away with the helper.
@@ -106,6 +108,13 @@ die() {
 }
 
 cleanup() {
+    if [ "$LD_TXN" = 1 ]; then
+        LD_TXN=0
+        if ! list_dns_rollback; then
+            audit "list DNS rollback unverified"
+            printf 'recovery=%s\nerror=rollback_incomplete\n' "$LD_DIR"
+        fi
+    fi
     if [ "$SV_TXN" = 1 ]; then
         SV_TXN=0
         if ! service_txn_rollback; then
@@ -140,7 +149,7 @@ cleanup() {
     [ -z "$CONF_FILE" ] || rm -f "$CONF_FILE" "$CONF_FILE.raw"
     [ -z "$NS_FILE" ] || rm -f "$NS_FILE"
     [ -z "$TMPFILE" ] || rm -f "$TMPFILE.raw"
-    [ -z "$RUNCFG" ] || rm -f "$RUNCFG"
+    [ -z "$RUNCFG" ] || rm -f "$RUNCFG" "$RUNCFG.domains" "$RUNCFG.identity"
     [ -z "$JOURNAL" ] || rm -f "$JOURNAL.failed" "$JOURNAL.owned" "$JOURNAL.still"
     [ -z "$JOURNAL" ] || rm -f "$JOURNAL" "$JOURNAL.moves" "$JOURNAL.adds" "$JOURNAL.dels" "$JOURNAL.nets" "$JOURNAL.doh" "$JOURNAL.agh" "$JOURNAL.agh.inc" "$JOURNAL.agh.undo"
     [ -z "$JOURNAL" ] || rm -rf "$JOURNAL.saved"
@@ -418,6 +427,7 @@ op_list_domain() {
     # AdaptiveAuto is the route engine's; VWARD's own group is edited in «Мои домены».
     [ "$2" != "$ADAPTIVE_GROUP" ] && [ "$2" != "${VWARD_POLICY_GROUP:-}" ] || die invalid_group 64
     change_lock
+    list_dns_inactive "$2"
     snapshot
     grep -q "^object-group fqdn $2\$" "$RUNCFG" || die list_not_found
     ld_has() {
@@ -1068,6 +1078,9 @@ doh_drop_dead() {
 }
 
 op_domain_list() {
+    if [ "$2" = dns ] || [ -f "$LISTS_STATE.dns/$1" ]; then
+        list_dns_dispatch "$1" "$2"
+    fi
     # domain-list GROUP vpn|bypass|TUNNEL: vpn is the VWARD tunnel.
     valid_group "$1" || die invalid_group 64
     case "$2" in ''|*[!A-Za-z0-9_.-]*) die invalid_value 64 ;; esac
@@ -1196,6 +1209,9 @@ op_domain_list() {
 op_domain_list_watch() {
     valid_group "$1" || die invalid_group 64
     case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
+    if [ "$2" = 1 ] && [ -f "$LISTS_STATE.dns/$1" ]; then
+        list_dns_dispatch "$1" auto
+    fi
     set_kv "$LISTS_CONF" "watch.$1" "$2" 0644 || done_ok "domain-list-watch $1 $2" unchanged
     # The route engine rebuilds its watch map on the next group refresh.
     mkdir -p "$ROUTE_STATE" 2>/dev/null && echo 0 > "$REFRESH_TS" 2>/dev/null
@@ -1230,6 +1246,7 @@ list_steerable() {
 op_list_adopt() {
     list_steerable "$1"
     case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
+    [ "$2" != 0 ] || list_dns_inactive "$1"
     if [ "$2" = 1 ]; then
         snapshot
         grep -qx "object-group fqdn $1" "$RUNCFG" || die unknown_group 64
@@ -1245,8 +1262,11 @@ op_list_adopt() {
 # as list_mode_partial (the route is moved and verified, the engine may still move it).
 op_list_mode() {
     list_steerable "$1"
-    case "$2" in auto|vpn|bypass) ;; *) die invalid_value 64 ;; esac
+    case "$2" in auto|vpn|bypass|dns) ;; *) die invalid_value 64 ;; esac
     list_managed "$1" || die list_not_managed 64
+    if [ "$2" = dns ] || [ -f "$LISTS_STATE.dns/$1" ]; then
+        list_dns_dispatch "$1" "$2"
+    fi
     if [ "$2" = auto ]; then
         lm_out=$(sh "$0" domain-list-watch "$1" 1 2>/dev/null); lm_rc=$?
         [ "$lm_rc" = 0 ] || die "$(printf '%s\n' "$lm_out" | sed -n 's/^error=//p' | tail -n 1 | tr -cd 'a-z0-9_')" "$lm_rc"
@@ -1262,6 +1282,19 @@ op_list_mode() {
     lm_wr=$(printf '%s\n' "$lm_w" | sed -n 's/^result=//p' | tail -n 1)
     [ "$lm_route" = unchanged ] && [ "$lm_wr" = unchanged ] && done_ok "list-mode $1 $2" unchanged
     done_ok "list-mode $1 $2" changed
+}
+
+list_dns_dispatch() {
+    ld_lib=${VWARD_LIST_DNS_LIB:-/opt/lib/vward/vward-list-dns.sh}
+    [ -r "$ld_lib" ] || die list_dns_unavailable
+    . "$ld_lib"
+    op_list_dns "$1" "$2"
+}
+
+# Editing an active DNS list would invalidate the exact ownership proof while
+# leaving its global DNS rows behind. First select another path explicitly.
+list_dns_inactive() {
+    [ ! -e "$LISTS_STATE.dns/$1" ] && [ ! -L "$LISTS_STATE.dns/$1" ] || die list_dns_active 75
 }
 
 # ---------- Services (catalog from iplist) ----------
@@ -2669,6 +2702,7 @@ op_list() {
     [ "$1" = clear ] || [ "$2" != "${VWARD_POLICY_GROUP:-}" ] || die invalid_group 64
     ! awk -F '\t' -v g="$2" '$2 == g {f = 1} END {exit f ? 0 : 1}' "$SERVICES_STATE" 2>/dev/null || die service_list 64
     change_lock
+    list_dns_inactive "$2"
     snapshot
     grep -qx "object-group fqdn $2" "$RUNCFG" || die list_not_found
     ( op_backup_create prelist ) >/dev/null || die backup_failed
@@ -2717,6 +2751,8 @@ op_list_merge() {
     [ "$1" != "${VWARD_POLICY_GROUP:-}" ] || die invalid_group 64
     ! awk -F '\t' -v g="$1" '$2 == g {f = 1} END {exit f ? 0 : 1}' "$SERVICES_STATE" 2>/dev/null || die service_list 64
     change_lock
+    list_dns_inactive "$1"
+    list_dns_inactive "$2"
     snapshot
     grep -qx "object-group fqdn $1" "$RUNCFG" && grep -qx "object-group fqdn $2" "$RUNCFG" || die list_not_found
     ( op_backup_create prelist ) >/dev/null || die backup_failed
@@ -4084,17 +4120,41 @@ mod_tunnels() {
     case "$1" in awg) mt_f=$AWG_TUNNELS ;; vless) mt_f=$VLESS_TUNNELS ;; *) return 1 ;; esac
     [ -f "$mt_f" ] && awk -F '\t' '$2 ~ /^[A-Za-z0-9_.-]+$/ {print $2}' "$mt_f"
 }
+op_package_install() {
+    case "$1:$2" in dnsmasq-full:install|sing-box-go:install) ;; *) die invalid_operation 64 ;; esac
+    pi_lib=${VWARD_ENTWARE_LIB:-/opt/lib/vward/vward-entware-pkg.sh}
+    [ -r "$pi_lib" ] || die package_manager_unavailable
+    . "$pi_lib"
+    pi_out=$(vward_entware_install_manual "$1" 2>/dev/null); pi_rc=$?
+    pi_last=$(printf '%s\n' "$pi_out" | tail -n 1)
+    if [ "$pi_rc" = 0 ]; then
+        case "$pi_last" in *"$(printf '\t')done"*) done_ok "package-install $1 disabled" changed ;;
+            *"$(printf '\t')unchanged"*) done_ok "package-install $1" unchanged ;; esac
+    fi
+    RELAY_REASON=$(printf '%s\n' "$pi_last" | cut -f3 | tr -cd 'A-Za-z0-9_.:-')
+    [ "$pi_rc" != 3 ] || die package_recovery_required 75
+    die package_install_refused 75
+}
+
 op_module_component() {
     case "$1" in awg|vless) ;; *) die invalid_component 64 ;; esac
     # Install (owner 02.11, «Управление»): the AmneziaWG program, the same download the engine does
     # by itself for the first tunnel (signed sums, checked); tunnels and routes are not touched.
-    if [ "$1:$2" = awg:install ]; then
-        [ -x "$AWG_ENGINE" ] || die engine_unavailable
-        mi_out=$("$AWG_ENGINE" install 2>/dev/null | tail -n 1)
-        case "$mi_out" in result=changed|result=unchanged) done_ok "module-component awg install" "${mi_out#result=}" ;; esac
+    case "$1:$2" in awg:install|vless:install)
+        mi_engine=$AWG_ENGINE
+        if [ "$1" = vless ]; then
+            mi_engine=$VLESS_ENGINE
+            [ ! -s "$VLESS_TUNNELS" ] || die engine_in_use 75
+            [ ! -x "${VWARD_VLESS_SHARE:-/opt/share/vward/vless-engine}/xray" ] || done_ok "module-component vless install" unchanged
+            command -v unzip >/dev/null 2>&1 || command -v busybox >/dev/null 2>&1 || die unzip_unavailable
+        fi
+        [ -x "$mi_engine" ] || die engine_unavailable
+        mi_out=$("$mi_engine" install 2>/dev/null | tail -n 1)
+        case "$mi_out" in result=changed|result=unchanged) done_ok "module-component $1 install" "${mi_out#result=}" ;; esac
         mi_err=${mi_out#error=}; case "$mi_err" in ''|*[!a-z0-9_]*) mi_err=helper_failed ;; esac
         die "$mi_err"
-    fi
+        ;;
+    esac
     case "$2" in enable|disable) ;; *) die invalid_operation 64 ;; esac
     load_profile_base
     mc_flag=$(MOD_FLAG "$1") mc_saved="$COMP_ETC/module-$1.routes"
@@ -4222,14 +4282,14 @@ vward_admission_enter console-config || die updater_busy 75
 case "$OP" in
     force-vpn|domain-category|tunnel-guard|tunnel-fallback|tunnel-return|tunnel-auto|wan-guard|component|\
     adaptive-mode|classifier|ip-category|console-auth|console-devices|update-feed|domain-list-watch|list-adopt|\
-    smartdns-guard|smartdns-domain|smartdns-server|smartdns-store|wifi|update|wan-param|wifi-host|service|service-category|services-refresh|ext-auto|firmware|journal|agents-mode|cleanup|reset)
+    smartdns-guard|smartdns-domain|smartdns-server|smartdns-store|wifi|update|wan-param|wifi-host|service|service-category|services-refresh|ext-auto|firmware|journal|agents-mode|cleanup|reset|package-install)
         edit_lock ;;
 esac
 
 # Check before any file-only/AGH-only dispatch, then again under CHANGE for
 # router mutations, closing the wait-for-lock window.
 case "$OP" in
-    route-domain|force-vpn|adaptive|domain-category|domain-list|list|list-domain|service|service-category|services-refresh|tunnel|tunnel-delete|tunnel-subnet|policy-group|smartdns-domain|smartdns-server|smartdns-store|smartdns-keenetic|smartdns-guard|backup-restore|reset|agh-component|module-component|component|component-recover|tunnel-conf|vless-server|tunnel-guard|tunnel-auto|tunnel-return|tunnel-fallback|wan-guard|adaptive-mode|classifier|ip-category|ai)
+    route-domain|force-vpn|adaptive|domain-category|domain-list|domain-list-watch|list-mode|list|list-domain|service|service-category|services-refresh|tunnel|tunnel-delete|tunnel-subnet|policy-group|smartdns-domain|smartdns-server|smartdns-store|smartdns-keenetic|smartdns-guard|backup-restore|reset|agh-component|module-component|component|component-recover|tunnel-conf|vless-server|tunnel-guard|tunnel-auto|tunnel-return|tunnel-fallback|wan-guard|adaptive-mode|classifier|ip-category|ai)
         routing_recovery_check ;;
 esac
 
@@ -4266,6 +4326,7 @@ case "$OP" in
     list-mode) op_list_mode "$ARG1" "$ARG2" ;;
     smartdns-guard) op_smartdns_guard "$ARG1" ;;
     smartdns-domain) op_smartdns_domain "$ARG1" "$ARG2" ;;
+    package-install) op_package_install "$ARG1" "$ARG2" ;;
     wifi) op_wifi "$ARG1" "$ARG2" ;;
     update) op_update "$ARG1" "$ARG2" ;;
     wan-param) op_wan_param "$ARG1" "$ARG2" ;;

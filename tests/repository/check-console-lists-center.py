@@ -2,7 +2,7 @@
 """r-lists (owner 2026-11-01): «Доменные списки» - a way for all and for each list VWARD manages,
 0 lists as a normal state; Keenetic's own, service and unknown lists are never offered for mass actions.
 Owner 2026-11-02: ONE list of all lists, every row opens its list (a managed list was a row without a
-link - Supercell could not be opened), «Авто | VPN | Провайдер», «Разные» when the ways differ,
+link - Supercell could not be opened), «Авто | VPN | DNS | Провайдер», «Разные» when the ways differ,
 «под управлением VWARD» as a small mark, no check boxes or «Удалить выбранные» on this page."""
 
 import json
@@ -28,8 +28,8 @@ for need in ("Доменных списков пока нет", "VWARD сам с
 for gone in ("'Удалить выбранные'", "data-list-pick", "'Другие списки'", "panel('Списки VWARD'"):
     if gone in page:
         fail(f"RED: lists page still has {gone} (owner 02.11)")
-if "const LIST_MODES = [['auto', 'Авто'], ['vpn', 'VPN'], ['bypass', 'Провайдер']];" not in JS:
-    fail("the ways are «Авто | VPN | Провайдер» everywhere")
+if "const LIST_MODES = [['auto', 'Авто'], ['vpn', 'VPN'], ['dns', 'DNS'], ['bypass', 'Провайдер']];" not in JS:
+    fail("the ways are «Авто | VPN | DNS | Провайдер» everywhere")
 if "l.managed && l.name !== (cfgRoute().group || prof().policy_group)" not in page:
     fail("only managed lists (not «Мои домены») get the switches")
 # The mass switch skips service lists and lists already on the chosen way.
@@ -52,13 +52,20 @@ def stmt(start, end=";\n"):
     return JS[i:JS.index(end, i) + len(end)]
 
 
-code = stmt("const LIST_MODES = ") + stmt("const listMode = ") + stmt("function listDelText(ls) {", "\n}\n")
+code = stmt("function listDnsWhy(l) {", "\n}\n") + stmt("function listModes(l) {", "\n") + stmt("const LIST_MODES = ") + stmt("const listMode = ") + stmt("function listDelText(ls) {", "\n}\n")
 harness = """
+const S={lists:{}},num=x=>Number(x),LISTBULK={busy:''};
 const viaIs = (l, v) => l.via === v; const fmtInt = n => String(n);
 const plural = (n, a, b, c) => { n = Math.abs(n) % 100; const m = n % 10; return n > 10 && n < 20 ? c : m > 1 && m < 5 ? b : m === 1 ? a : c; };
 """ + code + """
 const L = (name, via, watch, count, description) => ({ name, via, watch, count, description });
+const blocked=listModes({domains:['example.com'],count:1}).find(x=>x[0]==='dns')[2];
+S.lists={smartdns_state:'ready',doh_used:2,doh_limit:8};
+const available=!listModes({domains:['example.com'],count:1}).find(x=>x[0]==='dns')[2];
+S.lists.doh_used=8;
+const full=listModes({domains:['example.com'],count:1}).find(x=>x[0]==='dns')[2];
 console.log(JSON.stringify({
+  dns: [blocked,available,full,listMode({dns_mode:true,via:'bypass'})],
   modes: [listMode(L('a', 'vpn', true)), listMode(L('b', 'vpn', false)), listMode(L('c', 'bypass', false)), listMode(L('d', 'none', false))],
   one: listDelText([L('domain-list5', 'vpn', false, 3, 'Игры')]),
   two: listDelText([L('x', 'bypass', false, 1, ''), L('y', 'vpn', true, 21, 'Видео')])
@@ -68,6 +75,8 @@ r = subprocess.run(["node", "-e", harness], capture_output=True, text=True, time
 if r.returncode:
     fail(r.stderr.strip()[-500:])
 got = json.loads(r.stdout)
+if got["dns"] != [True, True, True, "dns"]:
+    fail(f"DNS readiness/slot guard: {got['dns']}")
 if got["modes"] != ["auto", "vpn", "bypass", ""]:
     fail(f"modes: {got['modes']}")
 if got["one"] != ("Удалить 1 список (Игры)? 3 домена перестанут подбираться; 1 список сейчас идёт через VPN и пойдёт напрямую. "

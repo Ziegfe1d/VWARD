@@ -51,4 +51,41 @@ vward_keenetic_config
         out, err = proc.communicate(timeout=6)
         assert proc.returncode == 0 and out == b'dns-proxy\n!\n', (out, err)
     assert (t / 'reads').read_text().splitlines() == ['read'], 'live lock stolen / repeated ndmc'
+    # Deterministic ABA: a delayed reaper observes the old lease, removes the
+    # next reader's empty directory, and publishes its own before that reader
+    # resumes. Both clients must still share one completed configuration read.
+    (t / 'kc/running-config').unlink(); (t / 'reads').unlink()
+    (t / 'kc/lock').mkdir()
+    (t / f'kc/lock/owner.{dead.pid}').write_text('old\n')
+    (t / 'ndmc').write_text('#!/bin/sh\necho read >> "$T/reads"\ntouch "$T/read-started"\nsleep 0.5\necho dns-proxy\necho "!"\n')
+    barriers = f'''
+mkdir() {{
+ command mkdir "$@"; mb_rc=$?
+ if [ "$mb_rc" = 0 ] && [ "$1" = "$VWARD_KCACHE/lock" ] && [ "$CLIENT" = A ]; then
+   touch "$T/A-empty"
+   while [ ! -e "$T/read-started" ]; do sleep 0.01; done
+ fi
+ return "$mb_rc"
+}}
+rm() {{
+ if [ "$CLIENT" = B ] && [ "${{2:-}}" = "$VWARD_KCACHE/lock/owner.{dead.pid}" ]; then
+   touch "$T/B-observed"
+   while [ ! -e "$T/A-empty" ]; do sleep 0.01; done
+ fi
+ command rm "$@"
+}}
+'''
+    env.pop('DELAY', None)
+    b = subprocess.Popen(['sh', '-c', barriers + base], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         env=env | {'CLIENT': 'B'})
+    deadline = time.monotonic() + 3
+    while not (t / 'B-observed').exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert (t / 'B-observed').exists(), 'reaper barrier not reached'
+    a = subprocess.Popen(['sh', '-c', barriers + base], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         env=env | {'CLIENT': 'A'})
+    for proc in (a, b):
+        out, err = proc.communicate(timeout=6)
+        assert proc.returncode == 0 and out == b'dns-proxy\n!\n', (out, err)
+    assert (t / 'reads').read_text().splitlines() == ['read'], 'CACHE_OWNER=FAIL: ABA published two simultaneous readers'
 print('CACHE_OWNER=PASS')
