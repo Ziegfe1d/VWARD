@@ -31,7 +31,7 @@ if f"## {version}:" not in (ROOT / "CHANGELOG.md").read_text():
     fail("CHANGELOG has no section for this version («Что нового» reads it)")
 
 pairs = [("0.2.0-rc.2.fix.32", "0.2.0-rc.2.fix.34.1"), ("0.2.0-rc.2.fix.34.1", "0.2.0-rc.2.fix.35"),
-         ("0.2.0-rc.2.fix.35", "0.2.0-rc.2.fix.35.1"), ("0.2.0-rc.2.fix.35.1", "0.2.0-rc.2.fix.35.2"),
+         ("0.2.0-rc.2.fix.35", "0.2.0-rc.2.fix.35.1"), ("0.2.0-rc.2.fix.35.1", "0.2.0-rc.2.fix.35.2"), ("0.2.0-rc.2.fix.35.2", "0.2.0-rc.2.fix.35.3"),
          ("0.2.0-rc.2.fix.35.9", "0.2.0-rc.2.fix.35.10"), ("0.2.0-rc.2.fix.35.10", "0.2.0-rc.2.fix.36"),
          ("0.2.0-rc.2.fix.36", "0.2.0-rc.2.fix.37"), ("0.1.9-beta", "0.2.0-rc.2.fix.35")]
 script = ". components/update-engine/vward-update-common-base.sh >/dev/null 2>&1\n" + "".join(

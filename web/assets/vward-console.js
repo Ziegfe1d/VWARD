@@ -1569,9 +1569,9 @@ function aiPage() {
     // «Провайдер» while the list «ChatGPT OpenAI (ISP)» went through VPN) - shown, never switched.
     const lst = (s.lists || []).filter(l => w === 'vpn' ? l.route === 'ISP' : l.route && l.route !== 'ISP')[0];
     if (lst && !(c && c.busy)) return '<span class="stat"><i class="dot warn"></i>' + esc('Выбрано: ' + wayName[w] + ' · домены в списке «' + (l => l.title || l.group)(lst) + '» идут ' + (lst.route === 'ISP' ? 'через провайдера' : 'через «' + tunLabel(lst.route) + '»')) + '</span>';
-    const v = r ? r.verdict : '', sdProxy = w !== 'dns' && c && c.smartdns && r && r.via === 'direct';
+    const v = r ? r.verdict : '', sdProxy = w !== 'dns' && c && c.smartdns && r && 'direct' === r.via;
     const cls = !c ? '' : !c.ok ? 'warn' : v === 'open' && !sdProxy ? 'ok' : v === 'open' || v === 'answer' ? 'warn' : v ? 'crit' : 'warn';
-    const txt = !c ? 'не проверен' : !c.ok ? 'проверка не удалась' : r ? (r.via === 'direct' ? 'напрямую ' : '') + (SVC_VERDICT[v] || v) + (r.code ? ' (' + r.code + ')' : '') + (sdProxy ? ', адрес от Smart DNS' : '') : 'нет данных';
+    const txt = !c ? 'не проверен' : !c.ok ? 'проверка не удалась' : r ? ('direct' === r.via ? 'напрямую ' : '') + (SVC_VERDICT[v] || v) + (r.code ? ' (' + r.code + ')' : '') + (sdProxy ? ', адрес от Smart DNS' : '') : 'нет данных';
     return '<span class="stat"><i class="dot ' + cls + '"></i>' + esc(wayName[w] + ' · ' + txt) + '</span>';
   };
   const detail = s => { const c = AICHK[s.id]; if (!c || c.busy || !c.ok || !(c.results || []).length) return '';
