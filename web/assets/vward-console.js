@@ -478,11 +478,16 @@ async function siteDo(how, d) {
 }
 const DIRECT = 'direct';
 const siteVia = v => v === DIRECT ? 'Провайдер (без VPN)' : 'VPN «' + tunLabel(v) + '»';
-const siteVal = y => y.verdict === 'open' ? 'доступен · ' + fmtInt(y.ms) + ' мс' : y.verdict === 'blocked' ? 'доступ ограничен (HTTP ' + y.code + ')' : 'нет ответа, таймаут 6 с';
+// fix.35.3: an answer is not «доступен» unless it is a page or a redirect (403/404/5xx named as they are).
+const siteVal = y => y.verdict === 'open' ? 'доступен · ' + fmtInt(y.ms) + ' мс' : y.verdict === 'blocked' ? 'доступ ограничен (HTTP ' + y.code + ')' :
+  y.verdict === 'denied' ? 'отказ в доступе (HTTP 403)' : y.verdict === 'error' ? 'ошибка сервера (HTTP ' + y.code + ')' : y.verdict === 'answer' ? 'ответ HTTP ' + y.code + ': работа сайта не подтверждена' : 'нет ответа, таймаут 6 с';
+// Where the tested address came from: a Smart DNS domain may get the Smart DNS proxy's address, then a
+// «direct» answer is that proxy's, not the provider's path to the site.
+const siteSrc = x => 'Адрес ' + x.ip + (x.dns ? ' от DNS ' + x.dns : '') + (x.smartdns ? ': домен идёт через Smart DNS - ответ «без VPN» может быть от прокси Smart DNS, прямой путь не подтверждён' : '');
 function siteTestText(r) {
   if (!r || r.busy || !r.t) return '';
   const x = r.t;
-  const rows = x.ok ? kv(x.results.map(y => [siteVia(y.via), siteVal(y), y.verdict === 'open' ? 'ok' : 'crit'])) :
+  const rows = x.ok ? kv(x.results.map(y => [siteVia(y.via), siteVal(y), y.verdict === 'open' ? (x.smartdns && y.via === DIRECT ? 'warn' : 'ok') : y.verdict === 'answer' ? 'warn' : 'crit'])) + '<p class="panel-desc">' + esc(siteSrc(x)) + '</p>' :
     '<p class="field-warn">' + esc(x.error === 'domain_not_resolved' ? 'Домен не разрешается в DNS: проверьте написание.' : errText(x)) + '</p>';
   const mv = r.move && !r.fixing ? '<div class="panel-actions">' + btn('site-move', 'route', 'Перевести список на «' + tunLabel(r.move.to) + '»', 'primary', ' data-list="' + esc(r.move.list) + '" data-to="' + esc(r.move.to) + '"') + '</div>' : '';
   const fix = r.fix ? '<ul class="fix-steps">' + r.fix.map(f => '<li class="' + (f.ok === false ? 'crit' : f.ok ? 'ok' : '') + '">' + esc(f.text) + '</li>').join('') + '</ul>' : '';
@@ -1546,12 +1551,18 @@ function aiPage() {
     if (c && c.busy) return '<span class="busy-pill"><i class="spin" aria-hidden="true"></i>проверяется…</span>';
     if (w === 'dns' && sdDown) return '<span class="stat"><i class="dot crit"></i>Smart DNS · сервер не отвечает</span>';
     const r = c && c.ok ? (c.results || []).find(x => w === 'vpn' ? 'direct' !== x.via : 'direct' === x.via) : null;
-    const v = r ? r.verdict : '', cls = !c ? '' : !c.ok ? 'warn' : v === 'open' ? 'ok' : v ? 'crit' : 'warn';
-    const txt = !c ? 'не проверен' : !c.ok ? 'проверка не удалась' : r ? (SVC_VERDICT[v] || v) : 'нет данных';
+    // The chosen way is a policy; a list of the same domains may send them elsewhere (02.11: ChatGPT
+    // «Провайдер» while the list «ChatGPT OpenAI (ISP)» went through VPN) - shown, never switched.
+    const lst = (s.lists || []).filter(l => w === 'vpn' ? l.route === 'ISP' : l.route && l.route !== 'ISP')[0];
+    if (lst && !(c && c.busy)) return '<span class="stat"><i class="dot warn"></i>' + esc('Выбрано: ' + wayName[w] + ' · домены в списке «' + (l => l.title || l.group)(lst) + '» идут ' + (lst.route === 'ISP' ? 'через провайдера' : 'через «' + tunLabel(lst.route) + '»')) + '</span>';
+    const v = r ? r.verdict : '', sdProxy = w !== 'dns' && c && c.smartdns && r && r.via === 'direct';
+    const cls = !c ? '' : !c.ok ? 'warn' : v === 'open' && !sdProxy ? 'ok' : v === 'open' || v === 'answer' ? 'warn' : v ? 'crit' : 'warn';
+    const txt = !c ? 'не проверен' : !c.ok ? 'проверка не удалась' : r ? (r.via === 'direct' ? 'напрямую ' : '') + (SVC_VERDICT[v] || v) + (r.code ? ' (' + r.code + ')' : '') + (sdProxy ? ', адрес от Smart DNS' : '') : 'нет данных';
     return '<span class="stat"><i class="dot ' + cls + '"></i>' + esc(wayName[w] + ' · ' + txt) + '</span>';
   };
   const detail = s => { const c = AICHK[s.id]; if (!c || c.busy || !c.ok || !(c.results || []).length) return '';
-    return '<details class="ai-detail"><summary>Подробнее</summary>' + c.results.map(r => esc(('direct' === r.via ? 'напрямую' : tunLabel(r.via)) + ': ' + (SVC_VERDICT[r.verdict] || r.verdict))).join('<br>') + '</details>'; };
+    return '<details class="ai-detail"><summary>Подробнее</summary>' + c.results.map(r => esc(('direct' === r.via ? 'напрямую' : tunLabel(r.via)) + ': ' + (SVC_VERDICT[r.verdict] || r.verdict) + (r.code ? ' (HTTP ' + r.code + ')' : ''))).join('<br>') +
+      (c.ip ? '<br>' + esc(siteSrc(c)) : '') + '<br>' + esc('Проверяется одна страница ' + (c.domain || '') + ' с роутера; это не подтверждает путь трафика устройств и работу всего сервиса.') + '</details>'; };
   const busyBtn = s => AICHK[s.id] && AICHK[s.id].busy;
   const row = s => '<div class="ai-row"><div class="ai-head"><div class="row-main"><b>' + esc(s.title) + '</b><small class="ai-status">' + status(s) + '</small></div>' +
       btn('ai-check', 'refresh', 'Проверить', 'small' + (busyBtn(s) ? ' spinning' : ''), ' data-ai="' + esc(s.id) + '" data-dom="' + esc(s.domain) + '"' + (busyBtn(s) ? ' disabled' : '')) + '</div>' +
@@ -1665,7 +1676,7 @@ function aiRoomPanel(sd) {
 async function aiCheck(id, dom) {
   AICHK[id] = { busy: true }; render();
   let x; try { x = await apiGet('site-test', { domain: dom }); } catch (e) { x = { ok: false }; }
-  AICHK[id] = x && x.ok ? { ok: true, results: x.results || [] } : { ok: false }; render();
+  AICHK[id] = x && x.ok ? { ok: true, results: x.results || [], ip: x.ip, dns: x.dns, smartdns: !!x.smartdns, domain: x.domain } : { ok: false }; render();
 }
 
 /* ---------- Очистка ----------
@@ -3458,7 +3469,7 @@ const SVC = { cat: 'on', busy: false };
 const svcOf = group => ((S.services && S.services.enabled) || []).find(e => e.group === group);
 const svcCatTunnel = cat => (((S.services && S.services.category_tunnels) || []).find(c => c.category === cat) || {}).tunnel || '';
 const svcProbe = id => ((S.services && S.services.probe) || []).find(p => p.id === id);
-const SVC_VERDICT = { open: 'открывается', blocked: 'заблокирован', none: 'нет ответа' };
+const SVC_VERDICT = { open: 'открывается', blocked: 'заблокирован', none: 'нет ответа', denied: 'отказ (HTTP 403)', error: 'ошибка сервера', answer: 'ответ без подтверждения работы' };
 function svcVia(e) {
   const l = ((S.lists && S.lists.lists) || []).find(x => x.name === e.group);
   const x = ((S.services && S.services.services) || []).find(v => v.id === e.id), pin = e.tunnel === 'auto' && x && svcCatTunnel(x.category);
