@@ -176,3 +176,19 @@ rehearsal key не опубликован, feed не изменялся.
 Первый package rehearsal выявил ошибку интеграции нового target: код DNS перенесён
 в существующий console-config, новые target/расширения allowlist удалены. Итог —
 прежние 78 signed targets и успешная rehearsal с fix.35.1. CI ожидается отдельно.
+
+
+## CI #789 — 02.11.2026 13:25 МСК
+
+[Run 41416501880](https://github.com/Ziegfe1d/VWARD/actions/runs/41416501880),
+HEAD c0cc511e430bca665c81484ffd26b6199e26cf64: **FAILURE**.
+updater-tests и resource-audit SUCCESS; repository-consistency FAILURE;
+dispatch-transition SKIPPED. Штатные RS7 и все новые тесты до trap-check PASS.
+Проверка trap запретила общую строку reset `trap - EXIT HUP INT TERM`.
+99af534 разделяет EXIT и terminating signals на две строки; проверка не менялась.
+Локальные terminating-signal/bind-workers/watchdog/admission/stale-lock/archive/cron
+проверки PASS; BusyBox syntax и ShellCheck error severity PASS.
+Новый полный CI не запущен: нет режима consistency-only, повтор успешных длительных
+jobs запрещён владельцем. Для него требуется согласованное исключение; старые
+SUCCESS не выдаются за проверки нового SHA. PR #32 остаётся draft; выпуска,
+подписи и merge нет. Роутер не менялся.
