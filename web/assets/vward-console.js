@@ -3070,7 +3070,9 @@ function choiceSlider(key, opts, cur, label, local) {
   // A value none of the choices names (a retired channel) selects nothing: no thumb.
   const at = opts.findIndex(o => o[0] === cur), to = Math.max(0, at), from = choicePrev[key] != null ? choicePrev[key] : to, on = local || cfgOk();
   choicePrev[key] = to;
-  return '<div class="seg-slider' + (['', '', ' two', '', ' four'][opts.length] || '') + (on ? '' : ' off') + (at < 0 ? ' none' : '') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
+  // A long last label (`Авто | VPN | DNS | Провайдер`, owner 02.11: «Провай…») gets a wider segment.
+  const wide = opts.length === 4 && String(opts[3][1]).length >= 8 ? ' last-wide' : '';
+  return '<div class="seg-slider' + (['', '', ' two', '', ' four'][opts.length] || '') + wide + (on ? '' : ' off') + (at < 0 ? ' none' : '') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
     opts.map(o => '<button type="button" role="radio" data-seg="' + key + '" data-v="' + esc(o[0]) + '" aria-checked="' + (o[0] === cur) + '"' + (on && !o[2] ? '' : ' disabled') + '>' + esc(o[1]) + '</button>').join('') + '</div>';
 }
 function segPick(key, v) {

@@ -506,6 +506,12 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 .seg-slider.four{grid-template-columns:repeat(4,minmax(0,1fr))}
 .seg-slider.four .seg-thumb{width:calc((100% - 8px) / 4)}
 .seg-slider[data-i="3"] .seg-thumb{transform:translateX(300%)}
+/* 02.11 (owner): «Провайдер» in full - the last of four segments wider (0.9 : 0.9 : 0.9 : 1.3), the
+   thumb follows: its width per segment, its shift in its own widths. */
+.seg-slider.four.last-wide{grid-template-columns:.9fr .9fr .9fr 1.3fr}
+.seg-slider.four.last-wide .seg-thumb{width:calc((100% - 8px) * .225);transition:transform .25s,width .25s}
+.seg-slider.four.last-wide[data-i="3"] .seg-thumb{width:calc((100% - 8px) * .325);transform:translateX(207.69%)}
+.seg-slider.four.last-wide button{padding-inline:2px;text-overflow:clip}
 /* A switch that cannot be used now looks so (owner 2026-10-17). */
 .switch input:disabled+i{opacity:.4;cursor:not-allowed}
 @media (prefers-reduced-motion:reduce){.seg-thumb,.seg-slider button{transition:none}}
