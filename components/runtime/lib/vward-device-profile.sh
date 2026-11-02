@@ -573,34 +573,61 @@ vward_keenetic_config()
     fi
     _vward_kc_fresh "$_vkc_age" && { cat "$VWARD_KCACHE/running-config"; return 0; }
     mkdir -p "$VWARD_KCACHE" 2>/dev/null || return 1
+    # $$ is inherited by subshells; the builtin opens /proc/self for this actual reader.
+    read -r _vkc_pid _ < /proc/self/stat 2>/dev/null || _vkc_pid=$$
+    _vkc_lease="$VWARD_KCACHE/lock/owner.$_vkc_pid"
     _vkc_own=0 _vkc_w=0
     while :; do
-        mkdir "$VWARD_KCACHE/lock" 2>/dev/null && { _vkc_own=1; break; }
+        if mkdir "$VWARD_KCACHE/lock" 2>/dev/null; then
+            # A concurrent stale-directory reaper may have removed the empty directory.
+            # In that case refuse this read, never continue without a proven lease.
+            printf '%s\n' "$_vkc_pid" 2>/dev/null > "$_vkc_lease" || return 1
+            _vkc_own=1
+            break
+        fi
+        # Remove only the exact dead owner's file. Two reapers cannot unlink a new
+        # reader's lease; rmdir succeeds only while the directory is empty.
+        _vkc_dead=0
+        for _vkc_f in "$VWARD_KCACHE/lock"/owner.*; do
+            _vkc_old=${_vkc_f##*/owner.}
+            case "$_vkc_old" in ''|*[!0-9]*) continue ;; esac
+            if ! kill -0 "$_vkc_old" 2>/dev/null; then
+                rm -f "$_vkc_f"
+                _vkc_dead=1
+            fi
+        done
+        if [ "$_vkc_dead" = 1 ]; then
+            rmdir "$VWARD_KCACHE/lock" 2>/dev/null
+            continue
+        fi
         # A read under way: its answer, at most 35 s later; a lock older than a minute is left over.
-        [ -n "$(find "$VWARD_KCACHE/lock" -maxdepth 0 -mmin -1 2>/dev/null)" ] || { rmdir "$VWARD_KCACHE/lock" 2>/dev/null; continue; }
+        [ -n "$(find "$VWARD_KCACHE/lock" -maxdepth 0 -mmin -1 2>/dev/null)" ] ||
+            { if rmdir "$VWARD_KCACHE/lock" 2>/dev/null; then continue; fi; }
         [ "$_vkc_w" -lt 35 ] || break
         sleep 1; _vkc_w=$((_vkc_w + 1))
         _vward_kc_fresh "$_vkc_age" && { cat "$VWARD_KCACHE/running-config"; return 0; }
     done
     # The reader before us may have just finished: its answer then.
     if [ "$_vkc_own" = 1 ] && _vward_kc_fresh "$_vkc_age"; then
+        rm -f "$_vkc_lease"
         rmdir "$VWARD_KCACHE/lock" 2>/dev/null
         cat "$VWARD_KCACHE/running-config"
         return 0
     fi
     vward_uptime_cs; _vkc_t0=$_VCS _VKT_IN=1
-    "${VWARD_NDMC:-ndmc}" -c 'show running-config' 2>/dev/null | tr -d '\r' > "$VWARD_KCACHE/running-config.$$"
+    "${VWARD_NDMC:-ndmc}" -c 'show running-config' 2>/dev/null | tr -d '\r' > "$VWARD_KCACHE/running-config.$_vkc_pid"
     _VKT_IN=
-    if [ -s "$VWARD_KCACHE/running-config.$$" ]; then
+    if [ -s "$VWARD_KCACHE/running-config.$_vkc_pid" ]; then
         vward_keenetic_timed running-config "$_vkc_t0"
-        mv -f "$VWARD_KCACHE/running-config.$$" "$VWARD_KCACHE/running-config"
-        [ "$_vkc_own" = 0 ] || rmdir "$VWARD_KCACHE/lock" 2>/dev/null
+        mv -f "$VWARD_KCACHE/running-config.$_vkc_pid" "$VWARD_KCACHE/running-config"
+        [ "$_vkc_own" = 0 ] || rm -f "$_vkc_lease"
+        rmdir "$VWARD_KCACHE/lock" 2>/dev/null
         cat "$VWARD_KCACHE/running-config"
         return 0
     fi
     vward_keenetic_timed running-config "$_vkc_t0" failed
-    rm -f "$VWARD_KCACHE/running-config.$$"
-    [ "$_vkc_own" = 0 ] || rmdir "$VWARD_KCACHE/lock" 2>/dev/null
+    rm -f "$VWARD_KCACHE/running-config.$_vkc_pid"
+    [ "$_vkc_own" = 0 ] || { rm -f "$_vkc_lease"; rmdir "$VWARD_KCACHE/lock" 2>/dev/null; }
     return 1
 }
 

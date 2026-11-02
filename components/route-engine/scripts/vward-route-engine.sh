@@ -80,6 +80,7 @@ ADAPTIVE_RECHECK=60
 
 TCP_PID=""
 AWK_PID=""
+AGH_JOBS=""
 
 # Where the DNS queries are caught.  The queries to the router come in on the LAN bridge;
 # «-i any» made tcpdump die with SIGSEGV in libpcap on the router (seen twice after
@@ -177,6 +178,7 @@ ENGINE_LOG=${VWARD_ROUTE_ENGINE_LOG:-/opt/var/log/vward-route-engine.log}
 cleanup()
 {
     STOP_RC=$?
+    agh_bind_stop
     [ -n "$TCP_PID" ] && kill "$TCP_PID" 2>/dev/null
     [ -n "$TCP_PID" ] && wait "$TCP_PID" 2>/dev/null
     [ -n "$AWK_PID" ] && kill "$AWK_PID" 2>/dev/null
@@ -872,10 +874,10 @@ restore_adaptive_from_persist()
     change_unlock
 
     if [ "$RC" -eq 0 ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_OK|added=$ADDED|removed=$REMOVED|skipped=$SKIPPED|over_limit=$OVER|left=$LEFT" \
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_OK|added=$ADDED|removed=$REMOVED|skipped=$SKIPPED|over_limit=$OVER|left=$LEFT|ru_allowed=${VWARD_ADAPTIVE_RU:-0}" \
             >> "$EVENT_LOG"
     else
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_PARTIAL|added=$ADDED|removed=$REMOVED|skipped=$SKIPPED|failed=$FAILS|over_limit=$OVER|left=$LEFT" \
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_RESTORE_PARTIAL|added=$ADDED|removed=$REMOVED|skipped=$SKIPPED|failed=$FAILS|over_limit=$OVER|left=$LEFT|ru_allowed=${VWARD_ADAPTIVE_RU:-0}" \
             >> "$EVENT_LOG"
     fi
 
@@ -1929,6 +1931,37 @@ agh_bind_prune()
 }
 
 
+# The binding shell must remain a child of Live. Double-forking it made it
+# ppid=1 with Live's argv: S91 correctly saw a second root for the duration
+# of shared_config/ndmc/nslookup (sometimes more than its 2-second recheck).
+agh_bind_start()
+{
+    ABJ_KEEP=
+    for ABJ_PID in $AGH_JOBS; do
+        if kill -0 "$ABJ_PID" 2>/dev/null; then
+            ABJ_KEEP="$ABJ_KEEP $ABJ_PID"
+        else
+            wait "$ABJ_PID" 2>/dev/null
+        fi
+    done
+    (
+        trap - EXIT HUP INT TERM
+        agh_bind "$1"
+        nslookup "$1" "$VWARD_DNS_SERVER"
+    ) >/dev/null 2>&1 &
+    AGH_JOBS="$ABJ_KEEP $!"
+}
+
+agh_bind_stop()
+{
+    # Let an in-flight binding finish; killing just its shell would orphan its
+    # command substitutions. S91's bounded stop already terminates the whole Live tree.
+    for ABJ_PID in $AGH_JOBS; do
+        wait "$ABJ_PID" 2>/dev/null
+    done
+    AGH_JOBS=""
+}
+
 handle_host()
 {
     case "$1" in
@@ -1983,15 +2016,14 @@ EOF_LISTS
         *M*)
             # Keenetic routes a list by the addresses it resolved itself; the device asked
             # AdGuard Home. The list domain is bound to AdGuard Home (agh_bind), then Keenetic
-            # is asked the same name and gets the answer the device got. Apart from this loop
-            # (a subshell: no job left behind).
-            ( { agh_bind "$HOST"; nslookup "$HOST" "$VWARD_DNS_SERVER"; } >/dev/null 2>&1 & )
+            # is asked the same name and gets the answer the device got.
+            agh_bind_start "$HOST"
             return ;;
     esac
 
     # AdaptiveAuto обслуживается двусторонне.
     if is_adaptive "$HOST"; then
-        ( { agh_bind "$HOST"; nslookup "$HOST" "$VWARD_DNS_SERVER"; } >/dev/null 2>&1 & )
+        agh_bind_start "$HOST"
         handle_adaptive "$HOST"
         return
     fi
@@ -2017,14 +2049,27 @@ EOF_LISTS
 # MAIN LIVE LOOP
 # ------------------------------------------------------------
 
+startup_phase()
+{
+    read -r BOOT_NOW _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}" || return 0
+    BOOT_NOW=${BOOT_NOW%%.*}
+    case "$BOOT_NOW$BOOT_LAST$STOP_T0" in ''|*[!0-9]*) return 0 ;; esac
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|START_PHASE|phase=$1|elapsed=$((BOOT_NOW - BOOT_LAST))s|total=$((BOOT_NOW - STOP_T0))s|rc=$2" >> "$EVENT_LOG"
+    BOOT_LAST=$BOOT_NOW
+}
+
 echo "$(date '+%Y-%m-%d %H:%M:%S')|START" >> "$EVENT_LOG"
+BOOT_LAST=$STOP_T0
 
 # USB state is authoritative for AdaptiveAuto.
 restore_adaptive_from_persist
+startup_phase restore "$?"
 
 agh_bind_prune
+startup_phase agh-prune "$?"
 
 refresh_sets
+startup_phase refresh "$?"
 
 while :; do
 
