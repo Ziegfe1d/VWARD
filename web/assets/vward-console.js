@@ -828,6 +828,13 @@ function logEntry(raw) {
   // A code first, after «|» or a space (CONSOLE_CONFIG op ...): words instead.
   const cm = /^([A-Z][A-Z0-9_]{2,})(?:\s*\|\s*|\s+|$)/.exec(body), code = cm ? cm[1] : '';
   const parts = (cm ? body.slice(cm[0].length) : body).split('|').map(x => x.trim()).filter(Boolean);
+  // A Panel action says what really happened (fix.35.3: «result=checked» read «изменены»); its
+  // technical words go to the details, the raw line stays in copy and export.
+  if (code === 'CONSOLE_CONFIG') {
+    const all = parts.join(' '), r = (/\bresult=([a-z_]+)/.exec(all) || [])[1], er = (/\berror=([a-z0-9_]+)/.exec(all) || [])[1];
+    const what = r === 'changed' ? 'изменены' : r === 'unchanged' ? 'без изменений' : r === 'checked' ? 'проверены' : er ? 'действие не выполнено' + (API_ERRORS[er] ? ': ' + API_ERRORS[er] : '') : 'действие';
+    return { t: t, src: src, code: code, text: 'Настройки Панели VWARD: ' + what, more: [all].concat(more), level: er ? 'warn' : logLevel(code + ' ' + body) };
+  }
   const words = (code ? (LOG_CODES[code] || code.toLowerCase().replace(/_/g, ' ')) : '') + (parts.length ? (code ? ': ' : '') + parts.map(logField).join(' · ') : '');
   return { t: t, src: src, code: code, text: words.replace(/\bCONSOLE\b/g, 'Панель VWARD').replace(/Консоль/g, 'Панель VWARD'), more: more, level: logLevel(code + ' ' + body) };
 }
@@ -4287,10 +4294,13 @@ const LOG_HOURS = 24;
 // journal at a time: the 15 s refresh does not pile up 17 requests behind a slow router, and an
 // older answer never overwrites a newer one. The owner's own request (auto false) runs once more
 // after the one in progress.
-const LOGRUN = {}, LOGGOOD = {}, LOGWARN = {};
+// After a refresh that did not come through (a router slow to answer, 02.11 21:43-21:48 Keenetic's
+// own DNS queue was late), the automatic one waits a minute instead of 15 s; the owner's does not.
+const LOGRUN = {}, LOGGOOD = {}, LOGWARN = {}, LOGBACK = {};
 function loadLog(tab, force, auto) {
   const r = LOGRUN[tab];
   if (r) { if (force && !auto) r.again = true; return r.p; }
+  if (auto && (LOGBACK[tab] || 0) > Date.now()) return Promise.resolve(S.logs[tab]);
   if (!force && S.logs[tab] != null) render();
   const run = LOGRUN[tab] = { again: false };
   run.p = (async () => { let out; do { run.again = false; out = await loadLogOnce(tab); } while (run.again); return out; })()
@@ -4310,6 +4320,7 @@ async function loadLogOnce(tab) {
     parts.forEach((p, i) => { if (p.err) Object.assign(info[i], p.at ? { state: 'stale', at: p.at } : { state: 'error' }, { err: p.err }); });
     LOGINFO.length = 0; info.forEach(i => LOGINFO.push(i));
     const bad = parts.filter(p => p.err), why = bad.length ? bad[0].err : '';
+    LOGBACK.all = bad.length ? Date.now() + 60000 : 0;
     if (bad.length === parts.length && LOGGOOD.all) {
       // Nothing came: the last good timeline stays with its own time.
       S.logs.all = LOGGOOD.all.text;
@@ -4323,10 +4334,10 @@ async function loadLogOnce(tab) {
   } else {
     try {
       const x = await apiText('log', { name: tab, count: 200, hours: LOG_HOURS });
-      S.logs[tab] = x; S.loadedAt['log:' + tab] = Date.now(); LOGWARN[tab] = '';
+      S.logs[tab] = x; S.loadedAt['log:' + tab] = Date.now(); LOGWARN[tab] = ''; LOGBACK[tab] = 0;
       if (!logFailed(x)) LOGGOOD[tab] = { text: x, at: Date.now() };
     } catch (e) {
-      const g = LOGGOOD[tab];
+      const g = LOGGOOD[tab]; LOGBACK[tab] = Date.now() + 60000;
       if (g) { S.logs[tab] = g.text; LOGWARN[tab] = 'Журнал не обновился (' + e.message + '): показаны записи на ' + hhmm(g.at); }
       else { S.logs[tab] = 'Журнал недоступен: ' + e.message; LOGWARN[tab] = ''; }
     }

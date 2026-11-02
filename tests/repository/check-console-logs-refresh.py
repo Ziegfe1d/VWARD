@@ -53,6 +53,8 @@ async function apiText(action, p) {
   await sleep(5);
   await loadLog('all', true);
   out.afterFailure = S.logs.all; out.timeKept = S.loadedAt['log:all'] === at1; out.warn2 = LOGWARN.all;
+  // After a failed refresh the automatic one waits (no request); the owner's own goes at once.
+  calls = 0; await loadLog('all', true, true); out.backoffCalls = calls;
   out.states2 = LOGINFO.map(i => i.state);
   // One source fails: the other's new entries and the failed one's previous entries, with a warning.
   mode = { wan: '2026-11-02 21:50:00+0300 class=DOWN', tunnel: 'fail' };
@@ -64,7 +66,7 @@ async function apiText(action, p) {
   out.empty = S.logs.all; out.warn4 = LOGWARN.all;
   // No overlap: an automatic refresh while one runs starts nothing; the owner's request runs once more.
   mode = { wan: '2026-11-02 22:00:00+0300 a', tunnel: '2026-11-02 22:00:01|b' };
-  calls = 0;
+  calls = 0; LOGBACK.all = 0;
   const p1 = loadLog('all', true, true), p2 = loadLog('all', true, true), p3 = loadLog('all', true, true);
   out.samePromise = p1 === p2 && p2 === p3;
   await p1; out.autoCalls = calls;
@@ -95,6 +97,8 @@ if "не обновились" not in o["warn2"] or o["states2"] != ["stale", "s
     fail("the failure must be said, the sources «не обновился»: " + json.dumps(o))
 if "21:50:00" not in o["partial"] or "21:41:47" not in o["partial"] or "1 из 2" not in o["warn3"] or o["states3"] != ["ok", "stale"]:
     fail("a partial failure: new entries plus the failed source's previous ones, with a warning: " + json.dumps(o))
+if o["backoffCalls"] != 0:
+    fail("the automatic refresh right after a failed one must wait: " + json.dumps(o))
 if o["empty"] != "Журналы пусты" or o["warn4"]:
     fail("an empty window answered by the sources: " + json.dumps(o))
 if not o["samePromise"] or o["autoCalls"] != 2:

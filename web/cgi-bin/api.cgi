@@ -2052,6 +2052,27 @@ if [ "$ACTION" = "diagnostics" ]; then
         if [ -n "$AGH_SHORT" ] && [ "$DNS_STATUS" != FAIL ]; then
             DNS_STATUS=WARN DNS_DETAIL="$DNS_DETAIL${DNS_DETAIL:+; }$AGH_SHORT"
         fi
+        # fix.35.3 (self-test 02.11 23:11): the live ndnproxymain.conf held two provider DNS servers
+        # for every name («.») next to AdGuard Home: Keenetic may send any query past AdGuard Home,
+        # so its Smart DNS rows and filtering do not cover every query. «Keenetic → AdGuard Home» in
+        # the settings is then not the whole chain. Read only; a file that cannot be read says nothing.
+        if [ -n "$KN_TO_AGH" ] && [ "$DNS_STATUS" != FAIL ]; then
+            for NDP in ${VWARD_NDNPROXY_CONF:-/var/ndnproxymain.conf /tmp/ndnproxymain.conf}; do
+                [ -r "$NDP" ] || continue
+                NDP_OTHER="$(awk -v agh="$KN_TO_AGH" '/dns_server/ {
+                        n = split($0, a, /[ \t=]+/); srv = ""; scope = a[n]
+                        for (i = 1; i <= n; i++) if (a[i] ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+(:[0-9]+)?$/ || a[i] ~ /^[0-9a-fA-F]*:[0-9a-fA-F:.]+$/) {srv = a[i]; break}
+                        if (srv == "" || scope != ".") next
+                        s = srv; sub(/:53$/, "", s); if (srv == agh || s == agh) next
+                        if (!(s in seen)) {seen[s] = 1; print s}
+                    }' "$NDP" 2>/dev/null | head -n 4)"
+                if [ -n "$NDP_OTHER" ]; then
+                    DNS_STATUS=WARN
+                    DNS_DETAIL="$DNS_DETAIL; Keenetic спрашивает для всех имён ещё и $(printf '%s\n' "$NDP_OTHER" | tr '\n' ' ' | sed 's/ $//') (DNS провайдера или резерв): часть запросов может идти мимо AdGuard Home - его Smart DNS и фильтрация применяются не ко всем запросам"
+                fi
+                break
+            done
+        fi
     else
         DNS_DETAIL="AdGuard Home не найден: DNS обслуживает Keenetic"
     fi
