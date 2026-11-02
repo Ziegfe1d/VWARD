@@ -120,10 +120,17 @@ async function apiGet(action, params) {
   const q = new URLSearchParams(Object.assign({ action: action }, params || {}));
   return apiJson(await apiFetch(API + '?' + q.toString()));
 }
+// A journal text: an HTTP error, a JSON error instead of the text or a body that stops coming are
+// failures, never an empty journal (fix.35.3: apiFetch's 20 s end with the headers, not the body).
 async function apiText(action, params) {
   const q = new URLSearchParams(Object.assign({ action: action }, params || {}));
   const r = await apiFetch(API + '?' + q.toString());
-  return r.text();
+  if (!r.ok) throw new Error('роутер ответил ошибкой HTTP ' + r.status);
+  let tm;
+  const t = await Promise.race([r.text(), new Promise((_, no) => { tm = setTimeout(() => no(new Error('роутер не передал ответ за 20 секунд')), 20000); })])
+    .finally(() => clearTimeout(tm));
+  if (/^\s*\{\s*"ok"\s*:\s*false/.test(t)) { let x = {}; try { x = JSON.parse(t); } catch (e) { /* a cut answer */ } throw new Error(x.error ? errText(x) : 'роутер вернул ошибку вместо журнала'); }
+  return t;
 }
 async function apiPost(action, fields) {
   const r = await apiFetch(API + '?action=' + encodeURIComponent(action), {
@@ -272,7 +279,8 @@ const API_ERRORS = {
   adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен',
   // fix.31: the codes the Panel showed as they are.
   smartdns_doh_component: 'В Keenetic нет компонента «Прокси-сервер DNS-over-HTTPS»: установите его в веб-интерфейсе Keenetic («Общие настройки» → «Изменить набор компонентов»), роутер перезагрузится',
-  smartdns_not_configured: 'Smart DNS не настроен: укажите сервер DoH в разделе «ИИ-сервисы»', smartdns_keenetic_full: 'лимит Smart DNS в Keenetic исчерпан (8 из 8 доменов)',
+  smartdns_not_configured: 'Smart DNS не настроен: укажите сервер DoH в разделе «ИИ-сервисы»',
+  smartdns_server_ambiguous: 'у этого сервера несколько адресов: вставьте точный адрес в поле «Свой сервер DoH» и нажмите «Убрать по адресу»', smartdns_keenetic_full: 'лимит Smart DNS в Keenetic исчерпан (8 из 8 доменов)',
   service_list: 'список сервиса не создан в Keenetic', invalid_arguments: 'неверные параметры запроса', helper_failed: 'действие завершилось без ответа',
   doh_limit: 'в Keenetic нет места для ещё одного сервера DNS-over-HTTPS', doh_remove_failed: 'Keenetic не удалил строку Smart DNS', doh_remove_unsafe: 'строка Smart DNS используется не только VWARD: не удалена',
   package_install_refused: 'установка пакета отклонена проверкой безопасности или зависимостей', package_recovery_required: 'нужно разобрать незавершённую установку пакета', engine_in_use: 'у движка уже есть настроенные туннели', install_recovery_required: 'нужно разобрать незавершённую установку Xray', unzip_unavailable: 'не найдена программа распаковки ZIP',
@@ -477,11 +485,16 @@ async function siteDo(how, d) {
 }
 const DIRECT = 'direct';
 const siteVia = v => v === DIRECT ? 'Провайдер (без VPN)' : 'VPN «' + tunLabel(v) + '»';
-const siteVal = y => y.verdict === 'open' ? 'доступен · ' + fmtInt(y.ms) + ' мс' : y.verdict === 'blocked' ? 'доступ ограничен (HTTP ' + y.code + ')' : 'нет ответа, таймаут 6 с';
+// fix.35.3: an answer is not «доступен» unless it is a page or a redirect (403/404/5xx named as they are).
+const siteVal = y => y.verdict === 'open' ? 'доступен · ' + fmtInt(y.ms) + ' мс' : y.verdict === 'blocked' ? 'доступ ограничен (HTTP ' + y.code + ')' :
+  y.verdict === 'denied' ? 'отказ в доступе (HTTP 403)' : y.verdict === 'error' ? 'ошибка сервера (HTTP ' + y.code + ')' : y.verdict === 'answer' ? 'ответ HTTP ' + y.code + ': работа сайта не подтверждена' : 'нет ответа, таймаут 6 с';
+// Where the tested address came from: a Smart DNS domain may get the Smart DNS proxy's address, then a
+// «direct» answer is that proxy's, not the provider's path to the site.
+const siteSrc = x => 'Адрес ' + x.ip + (x.dns ? ' от DNS ' + x.dns : '') + (x.smartdns ? ': домен идёт через Smart DNS - ответ «без VPN» может быть от прокси Smart DNS, прямой путь не подтверждён' : '');
 function siteTestText(r) {
   if (!r || r.busy || !r.t) return '';
   const x = r.t;
-  const rows = x.ok ? kv(x.results.map(y => [siteVia(y.via), siteVal(y), y.verdict === 'open' ? 'ok' : 'crit'])) :
+  const rows = x.ok ? kv(x.results.map(y => [siteVia(y.via), siteVal(y), y.verdict === 'open' ? (x.smartdns && y.via === DIRECT ? 'warn' : 'ok') : y.verdict === 'answer' ? 'warn' : 'crit'])) + '<p class="panel-desc">' + esc(siteSrc(x)) + '</p>' :
     '<p class="field-warn">' + esc(x.error === 'domain_not_resolved' ? 'Домен не разрешается в DNS: проверьте написание.' : errText(x)) + '</p>';
   const mv = r.move && !r.fixing ? '<div class="panel-actions">' + btn('site-move', 'route', 'Перевести список на «' + tunLabel(r.move.to) + '»', 'primary', ' data-list="' + esc(r.move.list) + '" data-to="' + esc(r.move.to) + '"') + '</div>' : '';
   const fix = r.fix ? '<ul class="fix-steps">' + r.fix.map(f => '<li class="' + (f.ok === false ? 'crit' : f.ok ? 'ok' : '') + '">' + esc(f.text) + '</li>').join('') + '</ul>' : '';
@@ -815,6 +828,13 @@ function logEntry(raw) {
   // A code first, after «|» or a space (CONSOLE_CONFIG op ...): words instead.
   const cm = /^([A-Z][A-Z0-9_]{2,})(?:\s*\|\s*|\s+|$)/.exec(body), code = cm ? cm[1] : '';
   const parts = (cm ? body.slice(cm[0].length) : body).split('|').map(x => x.trim()).filter(Boolean);
+  // A Panel action says what really happened (fix.35.3: «result=checked» read «изменены»); its
+  // technical words go to the details, the raw line stays in copy and export.
+  if (code === 'CONSOLE_CONFIG') {
+    const all = parts.join(' '), r = (/\bresult=([a-z_]+)/.exec(all) || [])[1], er = (/\berror=([a-z0-9_]+)/.exec(all) || [])[1];
+    const what = r === 'changed' ? 'изменены' : r === 'unchanged' ? 'без изменений' : r === 'checked' ? 'проверены' : er ? 'действие не выполнено' + (API_ERRORS[er] ? ': ' + API_ERRORS[er] : '') : 'действие';
+    return { t: t, src: src, code: code, text: 'Настройки Панели VWARD: ' + what, more: [all].concat(more), level: er ? 'warn' : logLevel(code + ' ' + body) };
+  }
   const words = (code ? (LOG_CODES[code] || code.toLowerCase().replace(/_/g, ' ')) : '') + (parts.length ? (code ? ': ' : '') + parts.map(logField).join(' · ') : '');
   return { t: t, src: src, code: code, text: words.replace(/\bCONSOLE\b/g, 'Панель VWARD').replace(/Консоль/g, 'Панель VWARD'), more: more, level: logLevel(code + ' ' + body) };
 }
@@ -1545,12 +1565,18 @@ function aiPage() {
     if (c && c.busy) return '<span class="busy-pill"><i class="spin" aria-hidden="true"></i>проверяется…</span>';
     if (w === 'dns' && sdDown) return '<span class="stat"><i class="dot crit"></i>Smart DNS · сервер не отвечает</span>';
     const r = c && c.ok ? (c.results || []).find(x => w === 'vpn' ? 'direct' !== x.via : 'direct' === x.via) : null;
-    const v = r ? r.verdict : '', cls = !c ? '' : !c.ok ? 'warn' : v === 'open' ? 'ok' : v ? 'crit' : 'warn';
-    const txt = !c ? 'не проверен' : !c.ok ? 'проверка не удалась' : r ? (SVC_VERDICT[v] || v) : 'нет данных';
+    // The chosen way is a policy; a list of the same domains may send them elsewhere (02.11: ChatGPT
+    // «Провайдер» while the list «ChatGPT OpenAI (ISP)» went through VPN) - shown, never switched.
+    const lst = (s.lists || []).filter(l => w === 'vpn' ? l.route === 'ISP' : l.route && l.route !== 'ISP')[0];
+    if (lst && !(c && c.busy)) return '<span class="stat"><i class="dot warn"></i>' + esc('Выбрано: ' + wayName[w] + ' · домены в списке «' + (l => l.title || l.group)(lst) + '» идут ' + (lst.route === 'ISP' ? 'через провайдера' : 'через «' + tunLabel(lst.route) + '»')) + '</span>';
+    const v = r ? r.verdict : '', sdProxy = w !== 'dns' && c && c.smartdns && r && 'direct' === r.via;
+    const cls = !c ? '' : !c.ok ? 'warn' : v === 'open' && !sdProxy ? 'ok' : v === 'open' || v === 'answer' ? 'warn' : v ? 'crit' : 'warn';
+    const txt = !c ? 'не проверен' : !c.ok ? 'проверка не удалась' : r ? ('direct' === r.via ? 'напрямую ' : '') + (SVC_VERDICT[v] || v) + (r.code ? ' (' + r.code + ')' : '') + (sdProxy ? ', адрес от Smart DNS' : '') : 'нет данных';
     return '<span class="stat"><i class="dot ' + cls + '"></i>' + esc(wayName[w] + ' · ' + txt) + '</span>';
   };
   const detail = s => { const c = AICHK[s.id]; if (!c || c.busy || !c.ok || !(c.results || []).length) return '';
-    return '<details class="ai-detail"><summary>Подробнее</summary>' + c.results.map(r => esc(('direct' === r.via ? 'напрямую' : tunLabel(r.via)) + ': ' + (SVC_VERDICT[r.verdict] || r.verdict))).join('<br>') + '</details>'; };
+    return '<details class="ai-detail"><summary>Подробнее</summary>' + c.results.map(r => esc(('direct' === r.via ? 'напрямую' : tunLabel(r.via)) + ': ' + (SVC_VERDICT[r.verdict] || r.verdict) + (r.code ? ' (HTTP ' + r.code + ')' : ''))).join('<br>') +
+      (c.ip ? '<br>' + esc(siteSrc(c)) : '') + '<br>' + esc('Проверяется одна страница ' + (c.domain || '') + ' с роутера; это не подтверждает путь трафика устройств и работу всего сервиса.') + '</details>'; };
   const busyBtn = s => AICHK[s.id] && AICHK[s.id].busy;
   const row = s => '<div class="ai-row"><div class="ai-head"><div class="row-main"><b>' + esc(s.title) + '</b><small class="ai-status">' + status(s) + '</small></div>' +
       btn('ai-check', 'refresh', 'Проверить', 'small' + (busyBtn(s) ? ' spinning' : ''), ' data-ai="' + esc(s.id) + '" data-dom="' + esc(s.domain) + '"' + (busyBtn(s) ? ' disabled' : '')) + '</div>' +
@@ -1565,13 +1591,31 @@ function aiPage() {
         ['Где хранится', !a ? '…' : sd.agh ? 'AdGuard Home' : 'Keenetic', '', null, '', sd.agh ? 'доменов: ' + fmtInt(sd.agh_domains || 0) : 'строк ' + fmtInt(sd.keenetic || 0) + ' из ' + fmtInt(sd.keenetic_max || 8)],
         ['Сервер', !a ? '…' : ((sd.servers || []).join(', ') || 'не задан') + (sd.alive === 'no' ? ' · не отвечает' : sd.alive === 'yes' ? ' · отвечает' : ''), a && sd.alive === 'no' ? 'crit' : a && noSd ? 'warn' : ''],
         ['Домены Smart DNS', 'открыть', '', 'd-smartdns', '', 'и агент: держит их мимо VPN']]) + sdStoreRow(a, sd) +
+      sdServers(a, sd) +
       inputBar({ form: 'ai-dns-add', label: sd.own ? 'Заменить свой сервер DoH' : 'Свой сервер DoH', name: 'server', mono: true, placeholder: 'https://dns.example/dns-query', aria: 'Адрес DoH', off: !cfgOk(), icon: 'plus', btn: 'Сохранить' }) +
-      (sd.own ? '<div class="panel-actions">' + btn('ai-dns-clear', 'close', 'Убрать свой сервер') + '</div>' : '') + resultBox('aidns'),
+      '<div class="panel-actions">' + (sd.own ? btn('ai-dns-clear', 'close', 'Убрать свой сервер') : '') +
+        ((sd.server_rows || []).length ? btn('ai-dns-clear-url', 'close', 'Убрать по адресу', '', cfgOk() ? '' : ' disabled') : '') + '</div>' + resultBox('aidns'),
       { desc: 'Сервер, через который открываются сервисы с путём «Smart DNS». Без AdGuard Home VWARD пишет строки в Keenetic (не больше 8). Адрес хранится только на роутере.' }) +
     panel('Все ИИ-сервисы', aiSlider('all', allVia, 'Все ИИ-сервисы', false, sdDown) + resultBox('svc'),
       { beta: true, desc: allVia ? 'Одним нажатием переключить все сервисы, например когда Smart DNS сбоит.' : 'Сейчас у сервисов разный путь. Нажмите, чтобы отправить все одним путём.' }) +
     panel('Сервисы', !a ? empty('Загрузка…') : svc.length ? svc.map(row).join('') : empty('В каталоге нет ИИ-сервисов'),
       { desc: 'VPN - через туннель; Smart DNS - через DNS-сервер, который открывает сервис; Провайдер - напрямую.' });
+}
+// Every server Keenetic's lines and AdGuard Home's rows still use, with what it holds and its own
+// «Убрать» (fix.35.3, 02.11: the subscription ended, the own address was already gone, its 35 rows
+// stayed and the page offered no button). Removal is the owner's choice, confirmed: only that
+// server's domain rows go, the other servers and the general upstreams stay.
+function sdServers(a, sd) {
+  const rows = (a && sd.server_rows) || [];
+  if (!rows.length) return '';
+  return '<dl class="kv">' + rows.map(r => {
+    const what = [r.keenetic ? 'в Keenetic ' + fmtInt(r.keenetic) : '', r.agh ? 'в AdGuard Home ' + fmtInt(r.agh) : ''].filter(Boolean).join(', ') || 'привязок нет';
+    const alive = r.host === sd.alive_host ? (sd.alive === 'no' ? ' · не отвечает' : sd.alive === 'yes' ? ' · отвечает' : sd.alive === 'unknown' ? ' · ответ не подтверждён' : '') : '';
+    const cid = 'sd-drop:' + r.host;
+    const ctl = confirm && confirm.id === cid ? confirmBox(cid, 'Убрать привязки к ' + r.host + ' (' + what + ')? Другие серверы и общий DNS останутся.', 'Убрать', true)
+      : btn('ask', 'close', 'Убрать', 'small', ' data-confirm="' + esc(cid) + '"' + (cfgOk() ? '' : ' disabled'));
+    return ctrlRow(r.host + (r.own ? ' (свой)' : ''), ctl, 'доменов: ' + what + alive, 'stack');
+  }).join('') + '</dl>';
 }
 // Where new Smart DNS domains go, the owner's choice (fix.32); AdGuard Home only while it works.
 function sdStoreRow(a, sd) {
@@ -1587,12 +1631,22 @@ document.addEventListener('change', async e => {
   actionResult = { id: 'aidns', text: x.ok ? 'Сохранено: новые домены Smart DNS - ' + ({ auto: 'автоматически', keenetic: 'в Keenetic', agh: 'в AdGuard Home' }[e.target.value]) : 'Не сохранено: ' + errText(x) };
   await load('ai', true); render();
 });
-async function smartdnsServer(op, url) {
-  let x; try { x = await apiPost('smartdns-server', { op: op, url: url }); } catch (err) { x = { ok: false, error: err.message }; }
+// host: a server of the list (sdServers); url: an exact address the owner pasted. The result is read
+// again from the router: «убран» only when no row of that server is left (an empty own address
+// proves nothing, 02.11).
+async function smartdnsServer(op, url, host) {
+  const body = Object.assign({ op: op, url: url || '' }, host ? { host: host } : {});
+  actionResult = { id: 'aidns', text: op === 'set' ? 'Сохраняем…' : 'Убираем привязки…' }; render();
+  let x; try { x = await apiPost('smartdns-server', body); } catch (err) { x = { ok: false, error: err.message }; }
   const c = x.cleared || {};
-  actionResult = { id: 'aidns', text: x.ok ? (op === 'set' ? 'Сервер сохранён' : x.result === 'unchanged' ? 'Убирать нечего: привязок к своему серверу нет' :
-    'Свой сервер убран. Очищено: в Keenetic строк ' + (c.keenetic || 0) + ', в AdGuard Home доменов ' + (c.agh || 0) + ', сохранённых состояний списков ' + (c.saved || 0)) : 'Не выполнено: ' + errText(x) };
-  await load('ai', true); render();
+  await load('ai', true);
+  const sd = (S.ai && S.ai.smartdns) || {}, left = (sd.server_rows || []).filter(r => host ? r.host === host : r.own);
+  const n = r => (r.keenetic || 0) + (r.agh || 0), still = left.reduce((t, r) => t + n(r), 0), other = (sd.server_rows || []).filter(r => !r.own && n(r));
+  actionResult = { id: 'aidns', text: !x.ok ? 'Не выполнено: ' + errText(x) : op === 'set' ? 'Сервер сохранён' :
+    still ? 'Выполнено не полностью: у сервера осталось привязок ' + fmtInt(still) + ' - повторите или смотрите «Журналы»' :
+    x.result === 'unchanged' ? (other.length && !host ? 'У своего сервера привязок нет; ещё используются: ' + other.map(r => r.host).join(', ') + ' - уберите нужный кнопкой «Убрать»' : 'Убирать нечего: привязок к этому серверу нет') :
+    'Сервер убран. Очищено: в Keenetic строк ' + (c.keenetic || 0) + ', в AdGuard Home доменов ' + (c.agh || 0) + ', сохранённых состояний списков ' + (c.saved || 0) + '. Сервисы этого сервера теперь идут через провайдера: выберите для них VPN' };
+  render();
 }
 // aiJob ID WAY MSG [KEEP]: KEEP - the answer to «no room in Smart DNS» (the service still waits
 // for Smart DNS). No room: the Panel asks which way the services that did not fit go (fix.31).
@@ -1636,7 +1690,7 @@ function aiRoomPanel(sd) {
 async function aiCheck(id, dom) {
   AICHK[id] = { busy: true }; render();
   let x; try { x = await apiGet('site-test', { domain: dom }); } catch (e) { x = { ok: false }; }
-  AICHK[id] = x && x.ok ? { ok: true, results: x.results || [] } : { ok: false }; render();
+  AICHK[id] = x && x.ok ? { ok: true, results: x.results || [], ip: x.ip, dns: x.dns, smartdns: !!x.smartdns, domain: x.domain } : { ok: false }; render();
 }
 
 /* ---------- Очистка ----------
@@ -2286,7 +2340,8 @@ const RENDER = {
       '<div class="chips" role="group" aria-label="Журнал">' + LOG_VIEW.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
       '<div class="chips log-view" role="group" aria-label="Что показывать"><button type="button" data-act="log-view" data-v="important" aria-pressed="' + logImportant + '">Важное</button><button type="button" data-act="log-view" data-v="all" aria-pressed="' + !logImportant + '">Все</button></div>' +
       '<div class="logfeed' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + logFeed(text) + '</div>' +
-      '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p>' + (logTab === 'all' ? logSources() : '') + '</div></section>' + journalPanel() + soonPanel('logs');
+      '<p class="field-warn" id="logWarn"' + (LOGWARN[logTab] ? '' : ' hidden') + '>' + esc(LOGWARN[logTab] || '') + '</p>' +
+      '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p>' + (logTab === 'all' ? '<div id="logSrc">' + logSources() + '</div>' : '') + '</div></section>' + journalPanel() + soonPanel('logs');
   },
 
   'd-components'() {
@@ -3015,7 +3070,9 @@ function choiceSlider(key, opts, cur, label, local) {
   // A value none of the choices names (a retired channel) selects nothing: no thumb.
   const at = opts.findIndex(o => o[0] === cur), to = Math.max(0, at), from = choicePrev[key] != null ? choicePrev[key] : to, on = local || cfgOk();
   choicePrev[key] = to;
-  return '<div class="seg-slider' + (['', '', ' two', '', ' four'][opts.length] || '') + (on ? '' : ' off') + (at < 0 ? ' none' : '') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
+  // A long last label (`Авто | VPN | DNS | Провайдер`, owner 02.11: «Провай…») gets a wider segment.
+  const wide = opts.length === 4 && String(opts[3][1]).length >= 8 ? ' last-wide' : '';
+  return '<div class="seg-slider' + (['', '', ' two', '', ' four'][opts.length] || '') + wide + (on ? '' : ' off') + (at < 0 ? ' none' : '') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
     opts.map(o => '<button type="button" role="radio" data-seg="' + key + '" data-v="' + esc(o[0]) + '" aria-checked="' + (o[0] === cur) + '"' + (on && !o[2] ? '' : ' disabled') + '>' + esc(o[1]) + '</button>').join('') + '</div>';
 }
 function segPick(key, v) {
@@ -3429,7 +3486,7 @@ const SVC = { cat: 'on', busy: false };
 const svcOf = group => ((S.services && S.services.enabled) || []).find(e => e.group === group);
 const svcCatTunnel = cat => (((S.services && S.services.category_tunnels) || []).find(c => c.category === cat) || {}).tunnel || '';
 const svcProbe = id => ((S.services && S.services.probe) || []).find(p => p.id === id);
-const SVC_VERDICT = { open: 'открывается', blocked: 'заблокирован', none: 'нет ответа' };
+const SVC_VERDICT = { open: 'открывается', blocked: 'заблокирован', none: 'нет ответа', denied: 'отказ (HTTP 403)', error: 'ошибка сервера', answer: 'ответ без подтверждения работы' };
 function svcVia(e) {
   const l = ((S.lists && S.lists.lists) || []).find(x => x.name === e.group);
   const x = ((S.services && S.services.services) || []).find(v => v.id === e.id), pin = e.tunnel === 'auto' && x && svcCatTunnel(x.category);
@@ -4233,32 +4290,79 @@ async function refreshPage(busy) {
 // The open journal follows the router: on opening, every REFRESH_SEC while shown,
 // on coming back to the tab, and right before it is saved.
 const LOG_HOURS = 24;
-async function loadLog(tab, force) {
-  if (!force && S.logs[tab] != null) { render(); }
+// fix.35.3 (02.11: «Журналы пусты» at 21:45 over entries shown until 21:41, every source «не
+// читается», the time renewed): a failed refresh keeps the last good text of each source and its
+// time, with a warning; an empty window is said only when the sources answered so. One load per
+// journal at a time: the 15 s refresh does not pile up 17 requests behind a slow router, and an
+// older answer never overwrites a newer one. The owner's own request (auto false) runs once more
+// after the one in progress.
+// After a refresh that did not come through (a router slow to answer, 02.11 21:43-21:48 Keenetic's
+// own DNS queue was late), the automatic one waits a minute instead of 15 s; the owner's does not.
+const LOGRUN = {}, LOGGOOD = {}, LOGWARN = {}, LOGBACK = {};
+function loadLog(tab, force, auto) {
+  const r = LOGRUN[tab];
+  if (r) { if (force && !auto) r.again = true; return r.p; }
+  if (auto && (LOGBACK[tab] || 0) > Date.now()) return Promise.resolve(S.logs[tab]);
+  if (!force && S.logs[tab] != null) render();
+  const run = LOGRUN[tab] = { again: false };
+  run.p = (async () => { let out; do { run.again = false; out = await loadLogOnce(tab); } while (run.again); return out; })()
+    .finally(() => { delete LOGRUN[tab]; });
+  return run.p;
+}
+const logFailed = x => /^Журнал недоступен/.test(String(x || '').trim());
+async function loadLogOnce(tab) {
+  const hhmm = t => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   if (tab === 'all') {
     // «Расписание» is crond's own record of every start, not events: only in its tab.
     // The last 24 hours only, cut by the API (owner 02.11); older entries stay in the files and archives.
     const parts = await Promise.all(LOG_TABS.filter(tb => tb.id !== 'cron').map(tb => apiText('log', { name: tb.id, count: 200, hours: LOG_HOURS })
-      .then(x => { S.logs[tb.id] = x; S.loadedAt['log:' + tb.id] = Date.now(); return { label: tb.label, text: x }; },
-            e => ({ label: tb.label, text: 'Журнал недоступен: ' + e.message }))));
-    LOGINFO.length = 0;
-    S.logs.all = mergeLogs(parts, logNewest, LOGINFO) || 'Журналы пусты'; S.loadedAt['log:all'] = Date.now();
+      .then(x => { S.logs[tb.id] = x; S.loadedAt['log:' + tb.id] = Date.now(); if (!logFailed(x)) LOGGOOD[tb.id] = { text: x, at: Date.now() }; return { label: tb.label, text: x }; },
+            e => { const g = LOGGOOD[tb.id]; return { label: tb.label, text: g ? g.text : 'Журнал недоступен: ' + e.message, err: e.message, at: g && g.at }; })));
+    const info = [], merged = mergeLogs(parts, logNewest, info);
+    parts.forEach((p, i) => { if (p.err) Object.assign(info[i], p.at ? { state: 'stale', at: p.at } : { state: 'error' }, { err: p.err }); });
+    LOGINFO.length = 0; info.forEach(i => LOGINFO.push(i));
+    const bad = parts.filter(p => p.err), why = bad.length ? bad[0].err : '';
+    LOGBACK.all = bad.length ? Date.now() + 60000 : 0;
+    if (bad.length === parts.length && LOGGOOD.all) {
+      // Nothing came: the last good timeline stays with its own time.
+      S.logs.all = LOGGOOD.all.text;
+      LOGWARN.all = 'Журналы не обновились (' + why + '): показаны записи на ' + hhmm(LOGGOOD.all.at);
+    } else {
+      S.logs.all = merged || (bad.length ? 'Журналы не прочитаны: ' + why : 'Журналы пусты');
+      S.loadedAt['log:all'] = Date.now();
+      if (merged) LOGGOOD.all = { text: merged, at: Date.now() };
+      LOGWARN.all = bad.length ? 'Не обновились ' + bad.length + ' из ' + parts.length + ' журналов (' + why + ')' + (bad.some(p => p.at) ? ': у них показаны прежние записи' : '') : '';
+    }
   } else {
-    try { S.logs[tab] = await apiText('log', { name: tab, count: 200, hours: LOG_HOURS }); S.loadedAt['log:' + tab] = Date.now(); }
-    catch (e) { S.logs[tab] = 'Журнал недоступен: ' + e.message; }
+    try {
+      const x = await apiText('log', { name: tab, count: 200, hours: LOG_HOURS });
+      S.logs[tab] = x; S.loadedAt['log:' + tab] = Date.now(); LOGWARN[tab] = ''; LOGBACK[tab] = 0;
+      if (!logFailed(x)) LOGGOOD[tab] = { text: x, at: Date.now() };
+    } catch (e) {
+      const g = LOGGOOD[tab]; LOGBACK[tab] = Date.now() + 60000;
+      if (g) { S.logs[tab] = g.text; LOGWARN[tab] = 'Журнал не обновился (' + e.message + '): показаны записи на ' + hhmm(g.at); }
+      else { S.logs[tab] = 'Журнал недоступен: ' + e.message; LOGWARN[tab] = ''; }
+    }
   }
   if (current === 'logs' && logTab === tab) {
-    const b = $('logBox'), at = $('logAt');
-    if (b && at) { if (b.dataset.raw !== S.logs[tab]) { b.innerHTML = logFeed(S.logs[tab]); b.dataset.raw = S.logs[tab]; } at.textContent = logStamp(tab); } else render();
+    const b = $('logBox'), at = $('logAt'), src = $('logSrc'), w = $('logWarn');
+    if (b && at && w && (tab !== 'all' || src)) {
+      if (b.dataset.raw !== S.logs[tab]) { b.innerHTML = logFeed(S.logs[tab]); b.dataset.raw = S.logs[tab]; }
+      at.textContent = logStamp(tab); w.textContent = LOGWARN[tab] || ''; w.hidden = !LOGWARN[tab];
+      if (src) { const open = src.querySelector('details') && src.querySelector('details').open; src.innerHTML = logSources(); if (open && src.querySelector('details')) src.querySelector('details').open = true; }
+    } else render();
   }
   return S.logs[tab];
 }
-// The last event of each source, apart from the moment the journals were loaded.
+// The last event of each source, apart from the moment the journals were loaded; a source that did
+// not answer this time says so, with the time of the entries still shown for it.
 function logSources() {
   if (!LOGINFO.length) return '';
   const st1 = { empty: 'записей нет', missing: 'ещё не создан', error: 'не читается', quiet: 'за 24 ч записей нет' };
+  const val = i => i.state === 'stale' ? 'не обновился, записи на ' + new Date(i.at).toLocaleTimeString('ru-RU') : i.state === 'error' && i.err ? 'не прочитан: ' + i.err :
+    i.last != null ? fmtTime(new Date(i.last).toISOString()) : st1[i.state];
   return '<details class="log-sources"><summary>' + ico('sort', 'log-sign') + '<span>' + (logNewest ? 'Сначала новые' : 'Сначала старые') + '</span><small>источники</small>' + ico('chevron', 'chev') + '</summary><dl class="kv">' +
-    LOGINFO.map(i => '<div class="kv-row"><dt>' + esc(i.label) + '</dt><dd' + (i.state === 'error' ? ' class="warn"' : '') + '>' + esc(i.last != null ? fmtTime(new Date(i.last).toISOString()) : st1[i.state]) + '</dd></div>').join('') + '</dl></details>';
+    LOGINFO.map(i => '<div class="kv-row"><dt>' + esc(i.label) + '</dt><dd' + (i.state === 'error' || i.state === 'stale' ? ' class="warn"' : '') + '>' + esc(val(i)) + '</dd></div>').join('') + '</dl></details>';
 }
 function logStamp(tab) {
   const t = S.loadedAt['log:' + tab];
@@ -4464,6 +4568,7 @@ async function runAction(resultId, action, fields, okMsg) {
   finally { render(); }
 }
 const CONFIRMED = {
+  'sd-drop': c => smartdnsServer('clear', '', c.id.slice(8)),
   'list-merge': c => cfgSet({ op: 'list', action: 'merge', target: c.name, value: c.what, confirm: 'LIST_MERGE' }, 'Списки объединены', ['lists']),
   'list-clear': c => cfgSet({ op: 'list', action: 'clear', target: c.name, confirm: 'LIST_CLEAR' }, 'Список очищен', ['lists', 'listd']),
   'lists-del': () => { const ns = [...LISTPICK]; LISTPICK.clear(); return listBulk({ op: 'list', action: 'delete', confirm: 'LIST_DELETE' }, ns, 'Удаление списков'); },
@@ -4826,7 +4931,7 @@ document.addEventListener('click', e => {
   else if (a === 'all-check') extOp('check').then(() => updateOp('check'));
   else if (a === 'confirm-no') { confirm = null; render(); }
   else if (a === 'vward-on') { t.disabled = true; vwardPower('on'); }
-  else if (a === 'confirm-yes') { const c = confirm; confirm = null; const id = c && /^list-merge-/.test(c.id) ? 'list-merge' : c && c.id; if (c && CONFIRMED[id]) CONFIRMED[id](c); else render(); }
+  else if (a === 'confirm-yes') { const c = confirm; confirm = null; const id = c && /^list-merge-/.test(c.id) ? 'list-merge' : c && /^sd-drop:/.test(c.id) ? 'sd-drop' : c && c.id; if (c && CONFIRMED[id]) CONFIRMED[id](c); else render(); }
   else if (a === 'ads-urule') { t.disabled = true; adsUserRule(t.dataset.op, t.dataset.kind, t.dataset.dom); }
   else if (a === 'ads-chain-block') { t.disabled = true; adsChainBlock(t.dataset.doms.split(' ').filter(d => DOMAIN.test(d))); }
   else if (a === 'site-fix') siteFix(t.dataset.dom);
@@ -4839,6 +4944,9 @@ document.addEventListener('click', e => {
   else if (a === 'ai-answer') aiAnswer(t.dataset.way);
   else if (a === 'ai-room') { if (!SVC.busy) aiJob(t.dataset.ai, 'dns', aiName(t.dataset.ai) + ': Smart DNS'); }
   else if (a === 'ai-dns-clear') smartdnsServer('clear', '');
+  else if (a === 'ai-dns-clear-url') { const f = t.closest('.panel') && t.closest('.panel').querySelector('form[data-form="ai-dns-add"] input[name="server"]'); const v = f ? f.value.trim() : '';
+    if (!/^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?(\/[A-Za-z0-9._~\/-]{0,200})?$/.test(v)) { actionResult = { id: 'aidns', text: 'Вставьте в поле точный адрес сервера (https://…), который нужно убрать' }; render(); }
+    else { smartdnsServer('clear', v); if (f) f.value = ''; } }
   else if (a === 'prop-more') { PROP_ALL = true; render(); }
   else if (a === 'vsrv-open') { const k = t.dataset.name + '|' + t.dataset.code; if (VOPEN.has(k)) VOPEN.delete(k); else VOPEN.add(k); render(); }
   else if (a === 'tunnel-probe') {
@@ -5233,7 +5341,7 @@ function tick() {
   else if (updOverlay && !updOverlay.done && !updOverlay.manual && ph === 'IDLE' && updOverlay.seenBusy) updOverlayShow({ done: true, ok: true, version: plat().version });
   if (updOverlay && UPD_BUSY.includes(ph)) updOverlay.seenBusy = true;
   if (theme === 'time') applyTheme();
-  if (current !== 'logs') refreshPage(); else loadLog(logTab, true);
+  if (current !== 'logs') refreshPage(); else loadLog(logTab, true, true);
   load('status', true).then(renderNav);
 }
 function restartTimer() {
@@ -5244,7 +5352,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   // tick() reloads the open journal too; otherwise the journal alone.
   if (Date.now() - (S.loadedAt.status || 0) >= REFRESH_SEC * 1000) tick();
-  else if (current === 'logs') loadLog(logTab, true);
+  else if (current === 'logs') loadLog(logTab, true, true);
 });
 
 $('backBtn').innerHTML = ico('back');

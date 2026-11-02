@@ -46,7 +46,8 @@ with tempfile.TemporaryDirectory() as tmp:
     env = os.environ | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=diagnostics", "JQ": shutil.which("jq"), "CURL": "/bin/false",
                         "PATH": f"{tools}:{os.environ['PATH']}", "VWARD_NDMC": str(ndmc), "VWARD_NSLOOKUP": str(tools / "nslookup"),
                         "VWARD_DOH_ALIVE": "0", "VWARD_PROFILE_LIB": str(ROOT / "components/runtime/lib/vward-device-profile.sh"),
-                        "VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_ROOT_PREFIX": str(root), "VWARD_LAN_ADDRESS": "192.168.1.1"}
+                        "VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_ROOT_PREFIX": str(root), "VWARD_LAN_ADDRESS": "192.168.1.1",
+                        "VWARD_NDNPROXY_CONF": str(tmp / "ndnproxymain.conf")}
 
     def diag(conf, up, port):
         running.write_text(conf)
@@ -66,6 +67,20 @@ with tempfile.TemporaryDirectory() as tmp:
 
     if "ответили роутер и AdGuard Home" not in d["dns-chain"]["detail"]:
         fail(f"the chain is asked for real, not only read from the settings: {d['dns-chain']}")
+    # fix.35.3 (self-test 02.11): the live DNS proxy file holds provider servers for every name next to
+    # AdGuard Home - a warning naming them, not «Норма»; domain-bound servers are not general ones.
+    ndp = tmp / "ndnproxymain.conf"
+    ndp.write_text("dns_server = 192.168.1.1:65053 .\ndns_server = 203.0.113.53:53 .\ndns_server = 203.0.113.54 .\n"
+                   "dns_server = 8.8.8.8:53 youtube.com\ndns_server = 1.1.1.1:53 youtube.com\n")
+    d = diag("ip name-server 192.168.1.1:65053\n!\n", ["9.9.9.10", AET], 65053)
+    det = d["dns-chain"]["detail"]
+    if d["dns-chain"]["status"] != "WARN" or "203.0.113.53 203.0.113.54" not in det or "мимо AdGuard Home" not in det or "8.8.8.8" in det:
+        fail(f"RED: provider DNS beside AdGuard Home must be a warning: {d['dns-chain']}")
+    ndp.write_text("dns_server = 192.168.1.1:65053 .\ndns_server = 8.8.8.8:53 youtube.com\n")
+    d = diag("ip name-server 192.168.1.1:65053\n!\n", ["9.9.9.10", AET], 65053)
+    if d["dns-chain"]["status"] != "PASS":
+        fail(f"AdGuard Home the only general server: {d['dns-chain']}")
+    ndp.unlink()
     # A chain right in the settings, but AdGuard Home silent: FAIL, not «Норма».
     silent.write_text("192.168.1.1:65053\n")
     d = diag("ip name-server 192.168.1.1:65053\n!\n", ["9.9.9.10"], 65053)

@@ -2052,6 +2052,27 @@ if [ "$ACTION" = "diagnostics" ]; then
         if [ -n "$AGH_SHORT" ] && [ "$DNS_STATUS" != FAIL ]; then
             DNS_STATUS=WARN DNS_DETAIL="$DNS_DETAIL${DNS_DETAIL:+; }$AGH_SHORT"
         fi
+        # fix.35.3 (self-test 02.11 23:11): the live ndnproxymain.conf held two provider DNS servers
+        # for every name («.») next to AdGuard Home: Keenetic may send any query past AdGuard Home,
+        # so its Smart DNS rows and filtering do not cover every query. «Keenetic → AdGuard Home» in
+        # the settings is then not the whole chain. Read only; a file that cannot be read says nothing.
+        if [ -n "$KN_TO_AGH" ] && [ "$DNS_STATUS" != FAIL ]; then
+            for NDP in ${VWARD_NDNPROXY_CONF:-/var/ndnproxymain.conf /tmp/ndnproxymain.conf}; do
+                [ -r "$NDP" ] || continue
+                NDP_OTHER="$(awk -v agh="$KN_TO_AGH" '/dns_server/ {
+                        n = split($0, a, /[ \t=]+/); srv = ""; scope = a[n]
+                        for (i = 1; i <= n; i++) if (a[i] ~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+(:[0-9]+)?$/ || a[i] ~ /^[0-9a-fA-F]*:[0-9a-fA-F:.]+$/) {srv = a[i]; break}
+                        if (srv == "" || scope != ".") next
+                        s = srv; sub(/:53$/, "", s); if (srv == agh || s == agh) next
+                        if (!(s in seen)) {seen[s] = 1; print s}
+                    }' "$NDP" 2>/dev/null | head -n 4)"
+                if [ -n "$NDP_OTHER" ]; then
+                    DNS_STATUS=WARN
+                    DNS_DETAIL="$DNS_DETAIL; Keenetic спрашивает для всех имён ещё и $(printf '%s\n' "$NDP_OTHER" | tr '\n' ' ' | sed 's/ $//') (DNS провайдера или резерв): часть запросов может идти мимо AdGuard Home - его Smart DNS и фильтрация применяются не ко всем запросам"
+                fi
+                break
+            done
+        fi
     else
         DNS_DETAIL="AdGuard Home не найден: DNS обслуживает Keenetic"
     fi
@@ -2253,9 +2274,19 @@ if [ "$ACTION" = site-test ]; then
     case "$SD" in ''|*[!a-z0-9.-]*|.*|*.|*..*|-*) echo '{"ok":false,"error":"invalid_domain"}'; exit 0 ;; esac
     [ "${#SD}" -le 253 ] || { echo '{"ok":false,"error":"invalid_domain"}'; exit 0; }
     command -v vward_map_vpns >/dev/null 2>&1 || { echo '{"ok":false,"error":"profile_unavailable"}'; exit 0; }
-    SIP="$("${VWARD_RESOLVE4_BIN:-/opt/bin/vward-route-resolve4.sh}" "$SD" 2>/dev/null |
-        awk '/^Address [0-9]+:/ && $3 ~ /^[0-9]+\./ {ip = $3} END {print ip}')"
+    SRES="$("${VWARD_RESOLVE4_BIN:-/opt/bin/vward-route-resolve4.sh}" "$SD" 2>/dev/null)"
+    SIP="$(printf '%s\n' "$SRES" | awk '/^Address [0-9]+:/ && $3 ~ /^[0-9]+\./ {ip = $3} END {print ip}')"
     vward_valid_ipv4 "$SIP" 2>/dev/null || { printf '{"ok":false,"error":"domain_not_resolved","domain":"%s"}\n' "$SD"; exit 0; }
+    # Where the address came from (fix.35.3, 02.11: «Провайдер · открывается» for a service the owner
+    # cannot open directly). The DNS server that answered, and whether the name is a Smart DNS domain
+    # (Keenetic's lines, AdGuard Home's rows): then the address may be the Smart DNS proxy's, and a
+    # direct answer from it proves nothing about the provider's own path.
+    SDNS="$(printf '%s\n' "$SRES" | awk '$1 == "Server:" {print $2; exit}' | tr -cd '0-9A-Fa-f.:')"
+    SSMART=false
+    { printf '%s\n' "$(ndm_cached running "$CONFIG_TTL" "show running-config" 2>/dev/null)" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
+          ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print tolower($NF)}'
+      command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains; } |
+        awk -v d="$SD" '$0 != "" && (d == $0 || (length(d) > length($0) && substr(d, length(d) - length($0)) == "." $0)) {f = 1} END {exit !f}' && SSMART=true
     ST_DIR="$(mktemp -d /tmp/vward-console-site.XXXXXX 2>/dev/null)" || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
     trap 'rm -rf "${ST_DIR:?}"' EXIT
     { printf 'direct %s\n' "${VWARD_WAN_DEVICE:-}"
@@ -2274,14 +2305,19 @@ if [ "$ACTION" = site-test ]; then
         k=$((k + 1))
         IFS="$(printf '\t')" read -r sname sdev < "$ST_DIR/t.$k"
         read -r scode stime sloc 2>/dev/null < "$ST_DIR/r.$k" || :
+        # Only a page or a redirect is «opens»; 403/404 or a server error answer from the address
+        # but do not show the service works (02.11: any answer counted as «открывается»).
         case "${scode:-000}:$(printf '%s' "$sloc" | tr 'A-Z' 'a-z')" in
             000:*) sv=none ;;
             451:*|*unavailable*|*region*|*restricted*|*not-available*|*blocked*) sv=blocked ;;
-            *) sv=open ;;
+            2[0-9][0-9]:*|3[0-9][0-9]:*) sv=open ;;
+            403:*) sv=denied ;;
+            5[0-9][0-9]:*) sv=error ;;
+            *) sv=answer ;;
         esac
         printf '%s\t%s\t%s\t%s\t%s\n' "$sname" "$sdev" "${scode:-000}" "$(awk -v t="${stime:-0}" 'BEGIN {printf "%d", t * 1000}')" "$sv"
-    done | "$JQ" -Rn --arg domain "$SD" --arg ip "$SIP" \
-        '{ok: true, domain: $domain, ip: $ip, results: [inputs | split("\t") | {via: .[0], device: .[1], code: (.[2] | tonumber? // 0), ms: (.[3] | tonumber? // null), verdict: .[4]}]}'
+    done | "$JQ" -Rn --arg domain "$SD" --arg ip "$SIP" --arg dns "$SDNS" --argjson smartdns "$SSMART" \
+        '{ok: true, domain: $domain, ip: $ip, dns: $dns, smartdns: $smartdns, results: [inputs | split("\t") | {via: .[0], device: .[1], code: (.[2] | tonumber? // 0), ms: (.[3] | tonumber? // null), verdict: .[4]}]}'
     exit 0
 fi
 
@@ -2646,6 +2682,11 @@ if [ "$ACTION" = ai-data ]; then
         VWARD_DOH_ALIVE_MT=${VWARD_DOH_ALIVE_MT:-4} vward_doh_alive "$AI_URL"
         case $? in 0) AI_ALIVE=yes ;; 1) AI_ALIVE=no ;; *) AI_ALIVE=unknown ;; esac
     fi
+    # Which server that answer is about (its host only), and the host of every AdGuard Home row:
+    # the Panel lists each server still in use with its own «Убрать» (fix.35.3: rows of an expired
+    # server stayed after its own address was gone, and no button was left to take them out).
+    AI_ALIVE_HOST="$(printf '%s\n' "$AI_URL" | awk '{u = $0; sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); print tolower(u); exit}')"
+    AI_AGH_HOSTS="$(command -v vward_agh_smartdns_urls >/dev/null 2>&1 && vward_agh_smartdns_urls | head -n 400 | awk '{u = $0; sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); print tolower(u)}')"
     AI_URL=
     AI_ON="$(awk -F'\t' 'NF >= 3 {print $1 "\t" $2 "\t" $3}' "$CONFIG_ETC/services/enabled.tsv" 2>/dev/null)"
     # The services waiting for room in Smart DNS (op_ai), and whether AdGuard Home runs.
@@ -2653,13 +2694,23 @@ if [ "$ACTION" = ai-data ]; then
     AI_AGH_RUN=false; pidof AdGuardHome >/dev/null 2>&1 && AI_AGH_RUN=true
     AI_ROUTES="$(printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "route" && $2 == "object-group" {print $3 "\t" $4}')"
-    "$JQ" -c --arg doh "$AI_DOH" --arg agh "$AI_AGH" --arg own "$AI_OWN" --arg on "$AI_ON" --arg routes "$AI_ROUTES" --arg wait "$AI_WAIT" \
+    # Every domain list with its includes and title (fix.35.3): a service's domains may be sent by
+    # another list (a manual one, «ChatGPT OpenAI (ISP)» through VPN 02.11) - the page shows it.
+    AI_INC="$(printf '%s\n' "$AI_RUN" | awk '/^object-group fqdn / {g = $3; next} /^!/ {g = ""}
+        g != "" && $1 == "include" {print g "\t" tolower($2)}
+        g != "" && $1 == "description" {sub(/^[ \t]*description[ \t]+/, ""); gsub(/["\t]/, ""); print g "\t#" $0}' | head -n 4000)"
+    "$JQ" -c --arg doh "$AI_DOH" --arg agh "$AI_AGH" --arg own "$AI_OWN" --arg on "$AI_ON" --arg routes "$AI_ROUTES" --arg wait "$AI_WAIT" --arg inc "$AI_INC" --arg wan "${VWARD_WAN_INTERFACE:-}" \
         --argjson agh_run "$AI_AGH_RUN" --arg shared "$AI_SHARED" --arg store "$AI_STORE" --arg alive "$AI_ALIVE" \
+        --arg alive_host "$AI_ALIVE_HOST" --arg agh_hosts "$AI_AGH_HOSTS" \
         --argjson agh_on "$([ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] && echo true || echo false)" '
         ($doh | split("\n") | map(select(length > 0) | split("\t"))) as $k
         | ($agh | split("\n") | map(select(length > 0))) as $a
         | ($on | split("\n") | map(select(length > 0) | split("\t") | {key: .[0], value: .[1]}) | from_entries) as $groups
         | ($routes | split("\n") | map(select(length > 0) | split("\t") | {key: .[0], value: .[1]}) | from_entries) as $route
+        | ($agh_hosts | split("\n") | map(select(length > 0))) as $ah
+        | ($inc | split("\n") | map(select(length > 0) | split("\t"))) as $gi
+        | ([$gi[] | select(.[1] | startswith("#")) | {key: .[0], value: (.[1] | ltrimstr("#"))}] | from_entries) as $title
+        | ([$gi[] | select(.[1] | startswith("#") | not)]) as $incl
         | ([$k[] | .[0]] + $a) as $sd
         | def covered($d): any($sd[]; . as $s | $d == $s or ($d | endswith("." + $s)));
           # The own main domains of a service: the same rule as ai_main in vward-console-config.sh.
@@ -2673,13 +2724,20 @@ if [ "$ACTION" = ai-data ]; then
         {ok: true,
          smartdns: {store: $store, keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_running: $agh_run, agh_domains: ($a | length),
                     waiting: ($wait | split("\n") | map(select(length > 0))),
-                    servers: ([$k[] | .[1]] + (if $own == "" then [] else [$own] end) | unique), own: $own, alive: $alive},
+                    servers: ([$k[] | .[1]] + $ah + (if $own == "" then [] else [$own] end) | unique), own: $own, alive: $alive,
+                    alive_host: $alive_host,
+                    server_rows: ([$k[] | .[1]] + $ah + (if $own == "" then [] else [$own] end) | unique
+                      | map(. as $h | {host: $h, own: ($h == $own), keenetic: ([$k[] | select(.[1] == $h)] | length),
+                                       agh: ([$ah[] | select(. == $h)] | length)}))},
          services: [.services[] | select(.category == "ai") | . as $s
            | main($s.id; $s.domains) as $roots
            | ($groups[$s.id] // "") as $g
            | {id: $s.id, title: $s.title, domain: ($s.domains[0] // $s.id), roots: $roots,
               via: (if $g != "" then "vpn" elif ($roots | length) > 0 and all($roots[]; covered(.)) then "dns" else "isp" end),
-              tunnel: (if $g != "" then ($route[$g] // "") else "" end)}]}' "$SV_CAT"
+              tunnel: (if $g != "" then ($route[$g] // "") else "" end),
+              lists: ([$incl[] | select(.[0] != $g and ($route[.[0]] // "") != "") | . as $i
+                        | select(any($roots[]; . == $i[1] or endswith("." + $i[1]))) | .[0]] | unique | .[:3]
+                      | map({group: ., title: ($title[.] // ""), route: (if $route[.] == "ISP" or ($wan != "" and $route[.] == $wan) then "ISP" else $route[.] end)}))}]}' "$SV_CAT"
     exit 0
 fi
 # smartdns-server: the owner's own DoH server for Smart DNS without AdGuard Home. The address
@@ -2689,7 +2747,7 @@ if [ "$ACTION" = smartdns-server ]; then
     ! updater_mutation_busy || { echo '{"ok":false,"error":"updater_busy"}'; exit 0; }
     [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
     read_body 512
-    form_only op url store || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
+    form_only op url store host || { echo '{"ok":false,"error":"unknown_parameter"}'; exit 0; }
     SSOP="$(form_value op)"
     if [ "$SSOP" = store ]; then
         SST="$(form_value store)"; case "$SST" in auto|keenetic|agh) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
@@ -2703,6 +2761,14 @@ if [ "$ACTION" = smartdns-server ]; then
     fi
     SSURL="$(form_value url | sed 's/%3[Aa]/:/g;s/%2[Ff]/\//g;s/%2[Dd]/-/g;s/%2[Ee]/./g;s/%5[Ff]/_/g;s/%7[Ee]/~/g')"
     case "$SSOP" in set|clear) ;; *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;; esac
+    # clear of a server the stores still use, chosen by its host in the Panel (fix.35.3): the helper
+    # finds its one address in Keenetic and AdGuard Home; the Panel never holds the address itself.
+    SSHOST="$(form_value host | tr 'A-Z' 'a-z')"
+    if [ -n "$SSHOST" ]; then
+        [ "$SSOP" = clear ] && [ -z "$SSURL" ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }
+        printf '%s\n' "$SSHOST" | grep -Eq '^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$' || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }
+        SSURL="host:$SSHOST"
+    fi
     SSALL="$(printf '%s\n' "$SSURL" | "$CONFIG_HELPER" smartdns-server "$SSOP" 2>/dev/null)"
     unset SSURL BODY
     SSOUT="$(printf '%s\n' "$SSALL" | tail -n 1)"
