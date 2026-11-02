@@ -63,7 +63,6 @@ print("ok")''')
                VWARD_ROUTE_CHANGE_LOCK=str(t / 'change.lock'),
                VWARD_PROFILE_LIB=str(ROOT / 'components/runtime/lib/vward-device-profile.sh'),
                VWARD_ADMISSION_LIB=str(ROOT / 'components/runtime/lib/vward-runtime-admission.sh'),
-               VWARD_LIST_DNS_LIB=str(ROOT / 'components/console/lib/vward-list-dns.sh'),
                VWARD_ADS_CONTROL_BIN=str(t / 'no-ads'), VWARD_DOH_ALIVE='0', VWARD_JOURNAL_SYNC='0')
     def run(mode, expect='result=changed', group='domain-list3'):
         r = subprocess.run(['sh', str(HELPER), 'list-mode', group, mode], env=env, capture_output=True, text=True, timeout=30)
