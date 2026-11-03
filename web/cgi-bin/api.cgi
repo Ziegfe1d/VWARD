@@ -2811,7 +2811,7 @@ if [ "$ACTION" = smartdns-server ]; then
         printf '%s\n' "$SSHOST" | grep -Eq '^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$' || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }
         SSURL="host:$SSHOST"
     fi
-    SSALL="$(printf '%s\n' "$SSURL" | "$CONFIG_HELPER" smartdns-server "$SSOP" 2>/dev/null)"
+    SSALL="$(printf '%s\n' "$SSURL" | VWARD_SMARTDNS_SELECTOR=1 "$CONFIG_HELPER" smartdns-server "$SSOP" 2>/dev/null)"
     unset SSURL BODY
     SSOUT="$(printf '%s\n' "$SSALL" | tail -n 1)"
     # What «clear» took out of the router (counts only): keenetic:N,agh:N,saved:N.

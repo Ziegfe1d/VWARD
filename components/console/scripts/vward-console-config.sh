@@ -1122,8 +1122,33 @@ op_domain_list() {
         done_ok "domain-list $G $2 route=$cur_t->$TUN" changed
     fi
 
+    if [ "$2" != bypass ] && [ "$cur_t" = "$TUN" ]; then
+        # fix.35.5 (A9): the route already on the tunnel is not the whole answer - a Smart DNS row of
+        # the list's domains still active (a move cut short) would answer them with the proxy. Only
+        # those rows go now, added to the saved state; its «route=» (where the list came from) stays.
+        group_doh_lines "$G" > "$JOURNAL.doh"
+        agh_take "$G" "$JOURNAL.agh" || die "$AGH_ERR"
+        if [ ! -s "$JOURNAL.doh" ] && [ ! -s "$JOURNAL.agh" ]; then TXN=0; done_ok "domain-list $G $2" unchanged; fi
+        DOH_ALLOWED="$JOURNAL.doh"
+        while IFS= read -r L; do
+            [ -n "$L" ] || continue
+            doh_present "$L" || { echo "dns-proxy $L" >> "$JOURNAL"; continue; }
+            doh_remove "$L"; rc=$?
+            [ "$rc" = 0 ] || { [ "$rc" = 2 ] && die doh_remove_unsafe; die doh_remove_failed; }
+            echo "dns-proxy $L" >> "$JOURNAL"
+        done < "$JOURNAL.doh"
+        DOH_ALLOWED=
+        snapshot
+        while IFS= read -r L; do [ -z "$L" ] || ! doh_present "$L" || die verification_failed; done < "$JOURNAL.doh"
+        new_tmp "$saved" || die write_failed
+        { if [ -f "$saved" ] && grep -q '^route=' "$saved"; then cat "$saved"; else printf 'route=%s\tauto\n' "$(wan_route_target)"; fi
+          sed -n 's/^./doh=&/p' "$JOURNAL.doh"; sed -n 's/^./agh=&/p' "$JOURNAL.agh"; } | awk '!seen[$0]++' > "$TMPFILE" || die write_failed
+        install_tmp "$saved" 0600 || die write_failed
+        save_router || die config_save_failed
+        TXN=0
+        done_ok "domain-list $G $2 route=$TUN doh=$(grep -c . "$JOURNAL.doh") agh=$(grep -c . "$JOURNAL.agh")" changed
+    fi
     if [ "$2" != bypass ]; then
-        [ "$cur_t" != "$TUN" ] || { TXN=0; done_ok "domain-list $G $2" unchanged; }
         group_doh_lines "$G" > "$JOURNAL.doh"
         # 1. The tunnel route first, so the list never loses its route.
         ndm "dns-proxy route object-group $G $TUN auto" || die router_rejected
@@ -3661,7 +3686,9 @@ op_smartdns_server() {
              # cleared (01.11.2026: the button cleared the address only, Keenetic's lines and the 36
              # AdGuard Home rows stayed on the dead server).
              ss_own=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=")+1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
-             ss_sel=; [ -t 0 ] || IFS= read -r ss_sel || :
+             # The selector comes on stdin only when the caller says it sends one (fix.35.5: a caller
+             # with an open, silent stdin - a test runner, a job - waited here for ever).
+             ss_sel=; [ "${VWARD_SMARTDNS_SELECTOR:-0}" != 1 ] || IFS= read -r ss_sel || :
              case "$ss_sel" in
                  '') ;;
                  host:*) ss_sel=host:$(printf '%s' "${ss_sel#host:}" | tr 'A-Z' 'a-z')

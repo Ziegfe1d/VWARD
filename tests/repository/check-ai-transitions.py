@@ -132,4 +132,18 @@ with tempfile.TemporaryDirectory() as t:
     p = proof.read_text()
     if r != "result=changed" or OWN in p or ("D " + lines[1]) not in p or not p.startswith("G include chat.example\n"):
         fail(f"RED A5: the removed server's proof rows must go, the rest stays: {r} {p!r}")
+with tempfile.TemporaryDirectory() as t:
+    # A9: the list already on the tunnel but a Smart DNS row of its domain still active (a move cut
+    # short): «VPN» again takes the row out and keeps where the list came from (before: unchanged).
+    line = f"https upstream {OWN} dnsm on ISP domain chat.example"
+    run, doh, cfg, etc = setup(Path(t), [line, "route object-group domain-list5 Wireguard0 auto"])
+    cfg.write_text(cfg.read_text() + "object-group fqdn domain-list5\n    include chat.example\n!\n")
+    saved = etc / "route-engine/domain-lists/domain-list5"; saved.parent.mkdir(parents=True)
+    saved.write_text("route=GigabitEthernet1\tauto\n"); saved.chmod(0o600)
+    r = run("domain-list", "domain-list5", "vpn")
+    sv = saved.read_text()
+    if not r.startswith("result=changed") or line in doh() or not sv.startswith("route=GigabitEthernet1\tauto\n") or ("doh=" + line) not in sv:
+        fail(f"RED A9: a row left active must go, the saved route stays: {r} {doh()} {sv!r}")
+    if run("domain-list", "domain-list5", "vpn") != "result=unchanged":
+        fail("then the same move is unchanged")
 print("AI_TRANSITIONS=PASS")
