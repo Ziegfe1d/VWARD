@@ -8,6 +8,7 @@ behaviours: the exact mirror form, only the short form, and an unsafe form that
 drops every line of the same server.  The 8-line DoH limit is enforced.
 """
 
+import hashlib
 import os
 import subprocess
 import tempfile
@@ -16,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 HELPER = ROOT / "components/console/scripts/vward-console-config.sh"
 
-AET = "https://de.aeternia.space:8443/dns-query/abc"
+AET = "https://smartdns.example.test:8443/dns-query/synthetic"
 UPSTREAMS = [f"https upstream {AET} dnsm on ISP domain {d}" for d in (
     "chatgpt.com", "openai.com", "copilot.com", "copilot.microsoft.com", "claude.ai", "anthropic.com")]
 
@@ -141,6 +142,29 @@ def dns_block(cfg: Path) -> list:
     return sorted(l.strip() for l in lines[start + 1:lines.index("!", start)])
 
 
+def exact_return_state(lines, route, rows, selection=""):
+    """One route, one current-selection proof and exactly the saved DNS rows."""
+    proof = "smartdns_config=" + hashlib.sha256(selection.encode()).hexdigest()
+    assert lines and lines[0] == "route=" + route
+    assert sorted(lines) == sorted(["route=" + route, proof, *rows])
+
+
+# A marker is required, not ignored as a new optional field. Unknown keys,
+# duplicates, wrong selection hashes and corrupt/absent proofs must fail.
+sample = ["route=ISP\tauto", "smartdns_config=" + hashlib.sha256(b"").hexdigest(), "doh=sample"]
+exact_return_state(sample, "ISP\tauto", ["doh=sample"])
+for bad in (sample[:1] + sample[2:], sample + sample[1:2],
+            [sample[0], "smartdns_config=", sample[2]],
+            [sample[0], "smartdns_config=" + "0" * 64, sample[2]],
+            sample + ["unexpected=value"], sample + sample[:1]):
+    try:
+        exact_return_state(bad, "ISP\tauto", ["doh=sample"])
+    except AssertionError:
+        pass
+    else:
+        fail("invalid return-state proof was accepted by the test contract")
+
+
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     tools = tmp / "tools"; tools.mkdir()
@@ -200,8 +224,10 @@ with tempfile.TemporaryDirectory() as tmp:
     run("domain-list", "domain-list4", "vpn", "result=changed", 0)
     claude_in_tunnel()
     saved = state.read_text().splitlines()
-    if saved[0] != "route=ISP\tauto" or sorted(saved[1:]) != sorted("doh=" + u for u in UPSTREAMS if "claude.ai" in u or "anthropic.com" in u):
-        fail(f"return state is wrong: {saved}")
+    try:
+        exact_return_state(saved, "ISP\tauto", ["doh=" + u for u in UPSTREAMS if "claude.ai" in u or "anthropic.com" in u])
+    except AssertionError:
+        fail("return state route/proof/DNS rows differ from the exact capture")
     if oct(state.stat().st_mode & 0o777) != "0o600":
         fail("return state holds Smart DNS URLs and must be 0600")
     run("domain-list", "domain-list4", "vpn", "result=unchanged", 0)
@@ -276,8 +302,10 @@ with tempfile.TemporaryDirectory() as tmp:
     if agh() != [f"[/chatgpt.com/]{AET}", "https://dns.nextdns.io/abc"]:
         fail(f"AdGuard Home rows of the list stayed or others went: {agh()}")
     saved = state.read_text().splitlines()
-    if sorted(saved[1:]) != sorted([f"agh=anthropic.com\t{AET}", f"agh=claude.ai\t{AET}"]):
-        fail(f"AdGuard Home pairs not remembered: {saved}")
+    try:
+        exact_return_state(saved, "ISP\tauto", [f"agh=anthropic.com\t{AET}", f"agh=claude.ai\t{AET}"])
+    except AssertionError:
+        fail("AdGuard Home return route/proof/pairs differ from the exact capture")
     run("domain-list", "domain-list4", "bypass", "result=changed", 0)
     if sorted(agh()) != sorted([f"[/chatgpt.com/]{AET}", "https://dns.nextdns.io/abc", f"[/anthropic.com/]{AET}", f"[/claude.ai/]{AET}"]):
         fail(f"AdGuard Home rows not back: {agh()}")

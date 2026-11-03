@@ -2756,6 +2756,7 @@ if [ "$ACTION" = ai-data ]; then
     # another list (a manual one, «ChatGPT OpenAI (ISP)» through VPN 02.11) - the page shows it.
     AI_INC="$(printf '%s\n' "$AI_RUN" | awk '/^object-group fqdn / {g = $3; next} /^!/ {g = ""}
         g != "" && $1 == "include" {print g "\t" tolower($2)}
+        g != "" && $1 == "exclude" {print g "\t!" tolower($2)}
         g != "" && $1 == "description" {sub(/^[ \t]*description[ \t]+/, ""); gsub(/["\t]/, ""); print g "\t#" $0}' | head -n 4000)"
     "$JQ" -c --arg doh "$AI_DOH" --arg agh "$AI_AGH" --arg own "$AI_OWN" --arg on "$AI_ON" --arg routes "$AI_ROUTES" --arg wait "$AI_WAIT" --arg inc "$AI_INC" --arg wan "${VWARD_WAN_INTERFACE:-}" \
         --argjson recovery "$(svc_recovery_json || echo '[]')" \
@@ -2771,9 +2772,13 @@ if [ "$ACTION" = ai-data ]; then
         | ($agh_hosts | split("\n") | map(select(length > 0))) as $ah
         | ($inc | split("\n") | map(select(length > 0) | split("\t"))) as $gi
         | ([$gi[] | select(.[1] | startswith("#")) | {key: .[0], value: (.[1] | ltrimstr("#"))}] | from_entries) as $title
-        | ([$gi[] | select(.[1] | startswith("#") | not)]) as $incl
+        | ([$gi[] | select(.[1] | startswith("!") ) | [.[0], (.[1] | ltrimstr("!"))]]) as $excl
+        | ([$gi[] | select((.[1] | startswith("#") or startswith("!")) | not)]) as $incl
         | ([$k[] | .[0]] + $a) as $sd
-        | def covered($d): any($sd[]; . as $s | $d == $s or ($d | endswith("." + $s)));
+        | def under($d; $p): $d == $p or ($d | endswith("." + $p));
+          def group_covers($g; $d): any($incl[]; .[0] == $g and under($d; .[1]))
+            and all($excl[]; .[0] != $g or ((under($d; .[1]) or under(.[1]; $d)) | not));
+          def covered($d): any($sd[]; . as $s | $d == $s or ($d | endswith("." + $s)));
           # The own main domains of a service: the same rule as ai_main in vward-console-config.sh.
           def main($id; $ds): ($id | split(".")[0]) as $b0 | (if ($b0 | length) >= 4 then $b0 else "" end) as $brand
             | [([$id] + $ds)[] | ascii_downcase | select((explode | all(. == 45 or . == 46 or (. >= 48 and . <= 57) or (. >= 97 and . <= 122))) and (split(".") | length >= 2 and all(length > 0)))] | unique
@@ -2782,7 +2787,7 @@ if [ "$ACTION" = ai-data ]; then
                | {d: $d, k: (if $d == $id then 0 elif $own then 1 elif ($l | length) == 2 then 2 else 3 end), n: ($l | length)}]
             | sort_by(.k, .n, .d) | map(.d)
             | reduce .[] as $d ([]; if any(.[]; . as $k | $d | endswith("." + $k)) then . else . + [$d] end) | .[:4];
-        {ok: true, recovery: $recovery, reference_token: $reference_token,
+        {ok: true, evidence: "configuration", client_path_verified: false, recovery: $recovery, reference_token: $reference_token,
          smartdns: {store: $store, keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_running: $agh_run, agh_domains: ($a | length),
                     storage: {component: "AdGuard Home", supported: ($cap_supported == "1"), available: ($cap_available == "1"), reason: $cap_why, handler: $handler, target: $store_target},
                     waiting: ($wait | split("\n") | map(select(length > 0))),
@@ -2795,16 +2800,19 @@ if [ "$ACTION" = ai-data ]; then
            | main($s.id; $s.domains) as $roots
            | ($groups[$s.id] // "") as $g
            | ([$incl[] | . as $i | select(($route[$i[0]] // "") != "")
-               | select(any($s.domains[]; . as $d | $d == $i[1] or ($d | endswith("." + $i[1])) or ($i[1] | endswith("." + $d)))) | .[0]] | unique
+               | select(any($s.domains[]; . as $d | select(under($d; $i[1]) or under($i[1]; $d))
+                   | (if under($d; $i[1]) then $d else $i[1] end) as $part
+                   | all($excl[]; .[0] != $i[0] or (under($part; .[1]) | not)))) | .[0]] | unique
                | map(. as $pg | {group: ., title: ($title[.] // ""), route: (if $route[.] == "ISP" or ($wan != "" and $route[.] == $wan) then "ISP" else $route[.] end),
                     members: [$incl[] | select(.[0] == $pg) | .[1]],
-                    reference: ($g == "" and $route[$pg] == $default_tunnel and ($claims | split(" ") | index($pg)) == null
-                      and all($s.domains[]; . as $d | any($incl[]; . as $pi | $pi[0] == $pg and ($d == $pi[1] or ($d | endswith("." + $pi[1])))))
+                    excluded: [$excl[] | select(.[0] == $pg) | .[1]],
+                    reference: ($g == "" and $pg != "AdaptiveAuto" and $route[$pg] == $default_tunnel and ($claims | split(" ") | index($pg)) == null
+                      and all($excl[]; .[0] != $pg) and all($s.domains[]; group_covers($pg; .))
                       and all($s.domains[]; covered(.) | not))})) as $paths
            | (any($paths[]; .route != "ISP")) as $vpn
            | (any($paths[]; .route == "ISP")) as $isp
            | (any($roots[]; covered(.))) as $some_dns
-           | ([$s.domains[] | . as $d | select(any($incl[]; . as $i | ($route[$i[0]] // "") != "" and ($d == $i[1] or ($d | endswith("." + $i[1])))))] | length) as $routed
+           | ([$s.domains[] | . as $d | select(any($paths[]; group_covers(.group; $d)))] | length) as $routed
            | (if ($snapshot_ok | not) then "unknown" elif ([$paths[].route] | unique | length) > 1 then "mixed" elif $vpn and ($isp or $some_dns or $routed < ($s.domains | length)) then "mixed" elif $vpn then "vpn"
               elif ($roots | length) > 0 and all($roots[]; covered(.)) then "dns" elif $some_dns then "mixed" else "isp" end) as $effective
            | {id: $s.id, title: $s.title, domain: ($s.domains[0] // $s.id), roots: $roots,

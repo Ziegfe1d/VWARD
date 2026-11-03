@@ -88,6 +88,7 @@ python3 tests/repository/check-service-portable.py || fail "fix.35.6 portable se
 python3 tests/repository/check-service-reference-choice.py || fail "explicit manual reference grants no mutation permission"
 python3 tests/repository/check-ai-interruptions.py || fail "AI checkpoint, descendants, TERM/SIGKILL and guarded retry"
 python3 tests/repository/check-ai-final-verification.py || fail "AI group final result preserves owner edits and verifies every completed member"
+python3 tests/repository/check-ai-routing-findings.py || fail "AI configuration evidence, excluded coverage and Cursor VPN without Smart DNS"
 python3 tests/repository/check-smartdns-saved-authorization.py || fail "removed/replaced saved DNS is neither probed nor restored"
 python3 tests/repository/check-smartdns-set-race.py || fail "server replacement serializes with saved DNS restore"
 python3 tests/repository/check-smartdns-storage-ui.py || fail "one storage control with factual counts and verified preference"

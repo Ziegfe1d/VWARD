@@ -1629,7 +1629,8 @@ function aiPage() {
     const c = AICHK[s.id], w = s.via || 'isp';
     if (s.selected === null && !(c && c.busy)) {
       const paths = (s.paths || []).map(l => '«' + (l.title || l.group) + '»: ' + (l.route === 'ISP' ? 'провайдер' : tunLabel(l.route)));
-      return '<span class="stat"><i class="dot warn"></i>' + esc((s.effective === 'mixed' ? 'Пересекаются DNS и маршруты' : s.effective === 'unknown' ? 'Путь не подтверждён' : 'Маршрут из доменных списков') + (paths.length ? ' · ' + paths.join('; ') : '') + '. Связь сервиса не задана.') + '</span>';
+      const partial = s.coverage && s.coverage.routed < s.coverage.catalog;
+      return '<span class="stat"><i class="dot warn"></i>' + esc((s.effective === 'mixed' ? partial ? 'Неполное покрытие каталога: ' + s.coverage.routed + ' из ' + s.coverage.catalog : 'Пересекаются маршруты или DNS' : s.effective === 'unknown' ? 'Путь не подтверждён' : 'Маршрут из доменных списков') + (paths.length ? ' · ' + paths.join('; ') : '') + '. Связь сервиса не задана.') + '</span>';
     }
     if (c && c.busy) return '<span class="busy-pill"><i class="spin" aria-hidden="true"></i>проверяется…</span>';
     if (w === 'dns' && sdDown) return '<span class="stat"><i class="dot ' + (sdServerDown ? 'crit' : 'warn') + '"></i>Smart DNS · ' + esc(sdReason) + '</span>';
