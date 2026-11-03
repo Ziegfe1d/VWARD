@@ -136,6 +136,27 @@ with tempfile.TemporaryDirectory() as d:
     if "state=accepted:" not in (resolved_of(s)[0] / "resolved").read_text():
         fail("accept is recorded as the owner's choice")
 
+# 2b. fix.35.5: the same case, the owner chooses «Вернуть как до операции»: status shows what differs
+#     (domains added/removed, the list's title), restore gives back the list's image before the
+#     operation - the extra domain goes - and closes it as restored; the services work again.
+with tempfile.TemporaryDirectory() as d:
+    s = fixture.Services(Path(d))
+    before = killed_refresh(s, owner_edit=True)
+    txn = pending_of(s)[0].parent
+    st = s.run("service-recover", "status")
+    diff = [l for l in st.stdout.splitlines() if l.startswith("info.diff=")]
+    if not diff or not diff[0].startswith("info.diff=" + txn.name + "|domain-list0|2|0|") or not diff[0].endswith("|Claude"):
+        fail("RED: status must say what differs from before (+2 domains, the title): " + st.stdout)
+    r = s.run("service-recover", txn.name, "restore")
+    if last(r) != "result=changed" or pending_of(s):
+        fail("restore must close the operation: " + r.stdout + r.stderr[-300:])
+    if s.cfg.read_text() != before:
+        fail("restore must give back the list as before the operation: " + s.cfg.read_text())
+    if "state=restored:" not in (resolved_of(s)[0] / "resolved").read_text():
+        fail("restore is recorded as the owner's choice")
+    if s.run("service", "off", "claude.ai").returncode:
+        fail("after restore the service operations work again")
+
 # 3. A rollback whose DNS part could not be confirmed (the list's Smart DNS row was put back into
 #    AdGuard Home, then the operation failed): the row on the wrong side keeps it pending (dns:);
 #    once AdGuard Home no longer holds it the same resolve closes it as rolled back.
@@ -207,14 +228,14 @@ with tempfile.TemporaryDirectory() as d:
     body = json.loads(r.stdout.split("\n\n", 1)[-1])
     rec = body.get("recovery")
     if rec != [{"id": "txn.Zz09Yy", "op": "service on chatgpt.com auto", "since": rec[0]["since"] if rec else "", "groups": ["domain-list3"],
-                "running": False, "dns": 1, "owner_edit": 0}]:
+                "running": False, "dns": 1, "other_change": 0, "state": None, "why": None, "diff": []}]:
         fail("RED: services-data must list the unfinished operation: " + r.stdout[-400:])
 api = API.read_text()
-for need in ('if [ "$SOP" = recover ]; then', 'SERVICE_RECOVER_ACCEPT', 'ARGS="service-recover $SID $SRM"', "recovery: $recovery"):
+for need in ('if [ "$SOP" = recover ]; then', 'SERVICE_RECOVER_ACCEPT', 'SERVICE_RECOVER_RESTORE', 'ARGS="service-recover $SID $SRM"', "recovery: $recovery"):
     if need not in api:
         fail("api.cgi lacks " + need)
 js = (fixture.ROOT / "web/assets/vward-console.js").read_text()
-for need in ("function recoveryPanel(list)", "recoveryPanel(a && a.recovery)", "recoveryPanel(V.recovery)", "'svrec-accept': c => svRecover(c.id.slice(13), 'accept')"):
+for need in ("function recoveryPanel(list)", "recoveryPanel(a && a.recovery)", "recoveryPanel(V.recovery)", "'svrec-accept': c => svRecover(c.id.slice(13), 'accept')", "'svrec-restore': c => svRecover(c.id.slice(14), 'restore')", "изменён не этой операцией"):
     if need not in js:
         fail("Panel lacks " + need)
 print("SERVICE_RECOVER=PASS")

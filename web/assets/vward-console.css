@@ -495,7 +495,7 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 .seg-thumb{position:absolute;top:4px;bottom:4px;left:4px;width:calc((100% - 8px) / 3);border-radius:999px;background:var(--accent);box-shadow:var(--shadow);transition:transform .28s cubic-bezier(.3,.7,.2,1)}
 .seg-slider[data-i="1"] .seg-thumb{transform:translateX(100%)}
 .seg-slider[data-i="2"] .seg-thumb{transform:translateX(200%)}
-.seg-slider.off .seg-thumb{background:var(--faint)}
+.seg-slider.off .seg-thumb{background:var(--accent);opacity:.45}
 .seg-slider.two{grid-template-columns:repeat(2,minmax(0,1fr))}
 /* The same space above and below a slider in its frame (owner 2026-10-17). */
 .panel-desc+.seg-slider{margin-top:4px}
@@ -553,7 +553,9 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 @keyframes spin{to{transform:rotate(360deg)}}
 .spin{display:inline-block;flex:none;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .9s linear infinite}
 .busy-pill{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:1px 10px;border-radius:999px;background:var(--surface-2);color:var(--muted);font-size:var(--fs-xs);line-height:18px;white-space:nowrap}
-.ai-head .row-main small.ai-status{display:flex;align-items:center;height:20px;margin-top:2px;overflow:hidden;white-space:nowrap}
+.ai-head .row-main small.ai-status{display:flex;align-items:flex-start;min-height:20px;margin-top:2px;white-space:normal;overflow-wrap:anywhere}
+.ai-head .row-main small.ai-status .stat{display:flex;align-items:flex-start;gap:6px;white-space:normal;overflow:visible;text-overflow:clip;min-width:0}
+.ai-head .row-main small.ai-status .dot{margin-top:5px;flex:none}
 .stat{display:inline-flex;align-items:center;gap:6px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .stat .dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--faint)}
 .stat .dot.ok{background:var(--ok)}.stat .dot.warn{background:var(--warn)}.stat .dot.crit{background:var(--crit)}
@@ -620,3 +622,9 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
 .sd-servers .stat{display:flex;align-items:center;gap:6px}
 .ai-res{margin:4px 16px 0}
 .log-wait{min-height:3em}
+
+/* fix.35.5: a locked slider keeps its chosen segment visible (accent, faded) - grey is not «chosen»;
+   the reason is the note under it. Recovery actions wrap on a phone. */
+.seg-slider.off button[aria-checked="true"]{color:var(--accent-text)}
+.panel-actions.wrap{flex-wrap:wrap}
+.panel-actions.wrap .btn{white-space:normal;text-align:left}

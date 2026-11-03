@@ -107,6 +107,8 @@ with tempfile.TemporaryDirectory() as tmp:
         "VWARD_ADS_LOG_DIR": str(tmp / "ads-log"), "VWARD_ADS_JQ": shutil.which("jq"), "VWARD_ADS_CURL": str(curl),
         "VWARD_ADS_AGH_AUTH_FILE": str(auth), "VWARD_ADS_CONTROL_LOCK": str(tmp / "ads.lock"),
         "AGH_API_BASE": "http://192.0.2.1:3001/control", "TMPDIR": str(tmp),
+        # The API says it sends a selector on stdin (fix.35.5: without the flag stdin is not read).
+        "VWARD_SMARTDNS_SELECTOR": "1",
     }
     conf = tmp / "etc/smartdns.conf"
     saved_dir = tmp / "etc/route-engine/domain-lists"; saved_dir.mkdir(parents=True)

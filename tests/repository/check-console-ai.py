@@ -154,7 +154,7 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("clear the own server")
 
     API = (ROOT / "web/cgi-bin/api.cgi").read_text()
-    for need in ('printf \'%s\\n\' "$SSURL" | "$CONFIG_HELPER" smartdns-server "$SSOP"', 'if [ "$ACTION" = ai-data ]; then',
+    for need in ('printf \'%s\\n\' "$SSURL" | VWARD_SMARTDNS_SELECTOR=1 "$CONFIG_HELPER" smartdns-server "$SSOP"', 'if [ "$ACTION" = ai-data ]; then',
                  'sub(/[\\/:].*$/, "", h)', 'ai) case "$STO" in dns|isp) ARGS="ai $SID $STO"'):
         if need not in API:
             fail(f"the API lacks {need}")

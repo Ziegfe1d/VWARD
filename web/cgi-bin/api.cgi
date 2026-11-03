@@ -2635,8 +2635,25 @@ svc_recovery_json() {
         SR_DNS=0; for SR_F in "$SR_D"/dns-risk.*; do [ ! -f "$SR_F" ] || SR_DNS=$((SR_DNS + 1)); done
         SR_FOR=0; for SR_F in "$SR_D"/foreign.*; do [ ! -f "$SR_F" ] || SR_FOR=$((SR_FOR + 1)); done
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$SR_ID" "$SR_OP" "$SR_AT" "$SR_G" "$SR_LIVE" "$SR_DNS" "$SR_FOR"
-    done | "$JQ" -Rnc '[inputs | split("\t") | select(length == 7) | {id: .[0], op: .[1], since: .[2],
-        groups: (.[3] | split(" ") | map(select(length > 0))), running: (.[4] == "1"), dns: (.[5] | tonumber), owner_edit: (.[6] | tonumber)}]'
+    done > "${SR_TMP:=$(mktemp /tmp/vward-console-svrec.XXXXXX 2>/dev/null || echo /dev/null)}"
+    # What differs from before each one (fix.35.5): only when one is pending, from the helper,
+    # which compares the router - lists, domains added/removed, routes, titles; no addresses.
+    SR_DET=
+    if [ -s "$SR_TMP" ] && [ -x "$CONFIG_HELPER" ]; then
+        SR_DET="$("$CONFIG_HELPER" service-recover status 2>/dev/null | grep -E '^info\.(txn|diff)=' | head -n 60)"
+    fi
+    "$JQ" -Rnc --arg det "$SR_DET" '
+        ($det | split("\n") | map(select(startswith("info.txn=")) | ltrimstr("info.txn=") | split("|")
+            | {key: .[0], value: {state: .[3], why: (.[5] // "")}}) | from_entries) as $st
+        | ($det | split("\n") | map(select(startswith("info.diff=")) | ltrimstr("info.diff=") | split("|")
+            | {id: .[0], group: .[1], added: (.[2] | tonumber? // 0), removed: (.[3] | tonumber? // 0),
+               route_before: .[4], route_now: .[5], title: (.[6] // "")})) as $diff
+        | [inputs | split("\t") | select(length == 7) | . as $r | {id: .[0], op: .[1], since: .[2],
+        groups: (.[3] | split(" ") | map(select(length > 0))), running: (.[4] == "1"), dns: (.[5] | tonumber), other_change: (.[6] | tonumber),
+        state: ($st[$r[0]].state // null), why: ($st[$r[0]].why // null),
+        diff: [$diff[] | select(.id == $r[0]) | del(.id)]}]' "$SR_TMP"
+    [ "$SR_TMP" = /dev/null ] || rm -f "$SR_TMP"
+    SR_TMP=
 }
 if [ "$ACTION" = services-data ]; then
     header_json
@@ -2794,7 +2811,7 @@ if [ "$ACTION" = smartdns-server ]; then
         printf '%s\n' "$SSHOST" | grep -Eq '^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$' || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }
         SSURL="host:$SSHOST"
     fi
-    SSALL="$(printf '%s\n' "$SSURL" | "$CONFIG_HELPER" smartdns-server "$SSOP" 2>/dev/null)"
+    SSALL="$(printf '%s\n' "$SSURL" | VWARD_SMARTDNS_SELECTOR=1 "$CONFIG_HELPER" smartdns-server "$SSOP" 2>/dev/null)"
     unset SSURL BODY
     SSOUT="$(printf '%s\n' "$SSALL" | tail -n 1)"
     # What «clear» took out of the router (counts only): keenetic:N,agh:N,saved:N.
@@ -2825,6 +2842,7 @@ if [ "$ACTION" = services ]; then
         case "$SRM" in
             resolve) ;;
             accept) [ "$(form_value confirm)" = SERVICE_RECOVER_ACCEPT ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;;
+            restore) [ "$(form_value confirm)" = SERVICE_RECOVER_RESTORE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;;
             *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
         esac
         CMD="$CONFIG_HELPER" LABEL="service-recover" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG="" ARGS="service-recover $SID $SRM"

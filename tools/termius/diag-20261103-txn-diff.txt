@@ -1,0 +1,79 @@
+cat > /tmp/txndiff.sh <<'EOF'
+clear
+PFX="vward-txndiff"
+OUT="/tmp/${PFX}-$(date +%Y%m%d-%H%M%S).txt"
+LAST="/tmp/last_result.txt"
+MAXB=30000
+ESC=$(printf '\033')
+ls -1t /tmp/${PFX}-*.txt 2>/dev/null |
+  tail -n +5 |
+  while read -r F; do rm -f "$F"; done
+: > "$OUT"
+ln -sfn "$OUT" "$LAST"
+ln -sfn "$OUT" "/tmp/last_${PFX}.txt"
+send_out() {
+  [ -s "$OUT" ] || return 1
+  sed "s/${ESC}\[[0-9;?]*[a-zA-Z]//g" "$OUT" |
+    tail -c "$MAXB" | base64 | tr -d '\r\n' |
+    { read -r B; printf '\033]52;c;%s\a' "$B"; }
+}
+on_abort() {
+  trap '' INT TERM HUP
+  send_out
+  printf '\n[ ABORTED ]: PARTIAL RESULT IN %s\n' "$LAST"
+  exit 130
+}
+trap on_abort INT TERM HUP
+T=/opt/var/backups/vward/console-config
+T="$T/service-transactions"
+RC=/tmp/txndiff.rc
+ndmc -c "show running-config" > "$RC" 2>/dev/null
+EOF
+cat >> /tmp/txndiff.sh <<'EOF'
+mem() {
+  awk -v g="$1" '/^object-group fqdn /{c=$3;next}
+    /^!/{c=""} c==g && $1=="include"{print $2}' "$RC" |
+    sort -u
+}
+rt() {
+  awk -v g="$1" '$1=="route" && $2=="object-group" &&
+    $3==g {print $4}' "$RC"
+}
+EOF
+cat >> /tmp/txndiff.sh <<'EOF'
+{
+echo "== VWARD txn diff (read only) $(date)"
+head -n 1 /opt/share/vward/VERSION 2>/dev/null
+for P in "$T"/*/pending; do
+  [ -e "$P" ] || continue
+  D=${P%/pending}
+  echo "-- ${D##*/} op: $(cat "$D/op" 2>/dev/null)"
+  echo "files: $(ls "$D" | tr '\n' ' ')"
+  for G in $(cat "$D/groups"); do
+    echo "list $G target=$(cat "$D/target.$G" 2>/dev/null)"
+    sed -n 's/^include //p' "$D/group.$G" |
+      sort -u > /tmp/txndiff.b
+    mem "$G" > /tmp/txndiff.n
+    RB=$(cut -f1 "$D/route.$G" | tr '\n' ' ')
+    echo " route before: $RB"
+    echo " route now: $(rt "$G" | tr '\n' ' ')"
+    A=$(comm -13 /tmp/txndiff.b /tmp/txndiff.n |
+      tr "\n" " ")
+    R=$(comm -23 /tmp/txndiff.b /tmp/txndiff.n |
+      tr "\n" " ")
+    echo " added: $A"
+    echo " removed: $R"
+  done
+done
+echo "[ OK ] done"
+} 2>&1 | tee "$OUT"
+EOF
+cat >> /tmp/txndiff.sh <<'EOF'
+rm -f /tmp/txndiff.b /tmp/txndiff.n "$RC"
+echo "SUMMARY: ok=$(grep -c '\[ OK \]' "$OUT")" |
+  tee -a "$OUT"
+send_out
+echo "RESULT SENT (OSC52)"
+echo "RAW: $LAST"
+EOF
+sh -n /tmp/txndiff.sh && sh /tmp/txndiff.sh

@@ -1122,8 +1122,33 @@ op_domain_list() {
         done_ok "domain-list $G $2 route=$cur_t->$TUN" changed
     fi
 
+    if [ "$2" != bypass ] && [ "$cur_t" = "$TUN" ]; then
+        # fix.35.5 (A9): the route already on the tunnel is not the whole answer - a Smart DNS row of
+        # the list's domains still active (a move cut short) would answer them with the proxy. Only
+        # those rows go now, added to the saved state; its «route=» (where the list came from) stays.
+        group_doh_lines "$G" > "$JOURNAL.doh"
+        agh_take "$G" "$JOURNAL.agh" || die "$AGH_ERR"
+        if [ ! -s "$JOURNAL.doh" ] && [ ! -s "$JOURNAL.agh" ]; then TXN=0; done_ok "domain-list $G $2" unchanged; fi
+        DOH_ALLOWED="$JOURNAL.doh"
+        while IFS= read -r L; do
+            [ -n "$L" ] || continue
+            doh_present "$L" || { echo "dns-proxy $L" >> "$JOURNAL"; continue; }
+            doh_remove "$L"; rc=$?
+            [ "$rc" = 0 ] || { [ "$rc" = 2 ] && die doh_remove_unsafe; die doh_remove_failed; }
+            echo "dns-proxy $L" >> "$JOURNAL"
+        done < "$JOURNAL.doh"
+        DOH_ALLOWED=
+        snapshot
+        while IFS= read -r L; do [ -z "$L" ] || ! doh_present "$L" || die verification_failed; done < "$JOURNAL.doh"
+        new_tmp "$saved" || die write_failed
+        { if [ -f "$saved" ] && grep -q '^route=' "$saved"; then cat "$saved"; else printf 'route=%s\tauto\n' "$(wan_route_target)"; fi
+          sed -n 's/^./doh=&/p' "$JOURNAL.doh"; sed -n 's/^./agh=&/p' "$JOURNAL.agh"; } | awk '!seen[$0]++' > "$TMPFILE" || die write_failed
+        install_tmp "$saved" 0600 || die write_failed
+        save_router || die config_save_failed
+        TXN=0
+        done_ok "domain-list $G $2 route=$TUN doh=$(grep -c . "$JOURNAL.doh") agh=$(grep -c . "$JOURNAL.agh")" changed
+    fi
     if [ "$2" != bypass ]; then
-        [ "$cur_t" != "$TUN" ] || { TXN=0; done_ok "domain-list $G $2" unchanged; }
         group_doh_lines "$G" > "$JOURNAL.doh"
         # 1. The tunnel route first, so the list never loses its route.
         ndm "dns-proxy route object-group $G $TUN auto" || die router_rejected
@@ -1840,6 +1865,18 @@ svr_live() {
     esac
     [ "$svr_pid" != "$$" ] && kill -0 "$svr_pid" 2>/dev/null
 }
+# agh_domain_urls DOMAIN: the servers of AdGuard Home's Smart DNS rows that name DOMAIN, one a line
+# (into a private file by the caller: they may hold a token).
+agh_domain_urls() {
+    [ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] || return 0
+    ADU_D=$1 awk '
+        /^[^ #]/ {dns = ($1 == "dns:"); u = 0; next}
+        /^  [a-z_]+:/ {u = dns && ($1 == "upstream_dns:"); next}
+        u && $1 == "-" {l = $0; sub(/^[ \t]*-[ \t]*/, "", l); gsub(/["\047]/, "", l)
+            e = index(l, "/]"); if (substr(l, 1, 2) != "[/" || e < 3) next
+            n = split(substr(l, 3, e - 3), a, "/"); for (i = 1; i <= n; i++) if (tolower(a[i]) == ENVIRON["ADU_D"]) {print substr(l, e + 2); break}}
+    ' "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" | sort -u
+}
 # svr_rows FILE: the Smart DNS rows of a saved list state («doh=LINE», «agh=DOMAIN<TAB>URL»).
 svr_rows() { grep -E '^(doh|agh)=' "$1" 2>/dev/null | sort -u; }
 # svr_row_active ROW: the row is in Keenetic (doh) or in AdGuard Home's upstreams (agh) now.
@@ -1896,11 +1933,89 @@ svr_classify() {
         fi
         # A list whose Smart DNS rows moved with it: they must sit where they were.
         if [ -f "$SV_DIR/dns-risk.$svr_g" ]; then svr_dns_at "$svr_g" "$SV_DIR/saved.$svr_g" || SVR_WHY="$SVR_WHY dns:$svr_g"; fi
-        [ ! -f "$SV_DIR/foreign.$svr_g" ] || SVR_WHY="$SVR_WHY owner-edit:$svr_g"
+        # foreign.GROUP: a rollback found the list changed by something other than this operation
+        # (another operation, the autopick or a hand edit - the marker does not say which).
+        [ ! -f "$SV_DIR/foreign.$svr_g" ] || SVR_WHY="$SVR_WHY other-change:$svr_g"
     done < "$SV_DIR/groups"
     rm -f "$SV_DIR/rows.all" "$SV_DIR/rows.side"
     SVR_WHY=${SVR_WHY# }
     if [ -z "$SVR_WHY" ]; then SVR_STATE=rolled_back; else SVR_STATE=partial; fi
+}
+# svr_diff DIR: one «info.diff=» line per list of the operation that differs from before it -
+# GROUP|+added|-removed|route before|route now|title (domains and tunnel names, no addresses), so the
+# owner sees what «Вернуть как до операции» would change and what «Оставить как есть» keeps.
+svr_diff() {
+    while IFS= read -r svd_g; do
+        valid_group "$svd_g" || continue
+        sed -n 's/^include //p' "$1/group.$svd_g" 2>/dev/null | tr 'A-Z' 'a-z' | sort -u > "$1/diff.before"
+        group_domains "$svd_g" > "$1/diff.now"
+        svd_add=$(comm -13 "$1/diff.before" "$1/diff.now" | grep -c .)
+        svd_del=$(comm -23 "$1/diff.before" "$1/diff.now" | grep -c .)
+        svd_rb=$(cut -f1 "$1/route.$svd_g" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
+        svd_rn=$(group_routes "$svd_g" | cut -f1 | tr '\n' ' ' | sed 's/ $//')
+        svd_t=$(awk -v g="$svd_g" '/^object-group fqdn / {c = $3; next} /^!/ {c = ""} c == g && $1 == "description" {sub(/^[ \t]*description[ \t]*/, ""); gsub(/["|]/, ""); print; exit}' "$RUNCFG")
+        [ -n "$svd_t" ] || svd_t=$(sed -n 's/^description //p' "$1/group.$svd_g" 2>/dev/null | tr -d '"|' | head -n 1)
+        grep -qx "object-group fqdn $svd_g" "$RUNCFG" || svd_rn=absent
+        [ -f "$1/new.$svd_g" ] && svd_rb=absent
+        if [ "$svd_add" != 0 ] || [ "$svd_del" != 0 ] || [ "$svd_rb" != "$svd_rn" ]; then
+            printf 'info.diff=%s|%s|%s|%s|%s|%s\n' "$svd_g" "$svd_add" "$svd_del" "${svd_rb:-none}" "${svd_rn:-none}" "$svd_t"
+        fi
+    done < "$1/groups"
+    rm -f "$1/diff.before" "$1/diff.now"
+}
+# svr_restore DIR: the owner's «Вернуть как до операции» - each list of the operation back to its
+# image before it (members, route; a list it created goes), its claim and saved state, and the files
+# it wrote. It overrides a change made since, by the owner's explicit choice; Smart DNS rows are not
+# moved (said when they are on the wrong side). Checked against the images and saved, else an error.
+svr_restore() {
+    while IFS= read -r svs_g; do
+        valid_group "$svs_g" || return 1
+        group_routes "$svs_g" > "$1/routes.now"
+        if [ -f "$1/new.$svs_g" ]; then
+            while IFS="$(printf '\t')" read -r svs_t svs_o; do
+                [ -z "$svs_t" ] || ndm "dns-proxy no route object-group $svs_g $svs_t" || return 1
+            done < "$1/routes.now"
+            ! grep -qx "object-group fqdn $svs_g" "$RUNCFG" || ndm "no object-group fqdn $svs_g" || return 1
+        else
+            grep -qx "object-group fqdn $svs_g" "$RUNCFG" || ndm "object-group fqdn $svs_g" || return 1
+            svs_desc=$(sed -n 's/^description //p' "$1/group.$svs_g" | head -n 1)
+            svs_now=$(service_signature "$svs_g" | sed -n 's/^description //p' | head -n 1)
+            [ -z "$svs_desc" ] || [ "$svs_desc" = "$svs_now" ] || ndm "object-group fqdn $svs_g description $svs_desc" || return 1
+            sed -n 's/^include //p' "$1/group.$svs_g" | tr 'A-Z' 'a-z' | sort -u > "$1/diff.before"
+            group_domains "$svs_g" > "$1/diff.now"
+            comm -13 "$1/diff.before" "$1/diff.now" | while IFS= read -r svs_d; do
+                ndm "no object-group fqdn $svs_g include $svs_d" || exit 1
+            done || return 1
+            comm -23 "$1/diff.before" "$1/diff.now" | while IFS= read -r svs_d; do
+                ndm "object-group fqdn $svs_g include $svs_d" || exit 1
+            done || return 1
+            while IFS="$(printf '\t')" read -r svs_t svs_o; do
+                [ -n "$svs_t" ] || continue
+                awk -F'\t' -v t="$svs_t" '$1 == t {f = 1} END {exit !f}' "$1/route.$svs_g" || ndm "dns-proxy no route object-group $svs_g $svs_t" || return 1
+            done < "$1/routes.now"
+            while IFS="$(printf '\t')" read -r svs_t svs_o; do
+                [ -n "$svs_t" ] || continue
+                grep -Fxq "$svs_t$(printf '\t')$svs_o" "$1/routes.now" && continue
+                svs_opts=; [ "$svs_o" = - ] || svs_opts=" $svs_o"
+                ndm "dns-proxy route object-group $svs_g $svs_t$svs_opts" || return 1
+            done < "$1/route.$svs_g"
+        fi
+        service_txn_restore "$SERVICES_ETC/owned/$svs_g" "claim.$svs_g" || return 1
+        service_txn_restore "$LISTS_STATE/$svs_g" "saved.$svs_g" || return 1
+    done < "$1/groups"
+    for svs_f in "enabled:$SERVICES_STATE" "categories:$SERVICES_CATS" "catalog:$SERVICES_FETCHED"; do
+        service_txn_before "${svs_f#*:}" "${svs_f%%:*}" || service_txn_restore "${svs_f#*:}" "${svs_f%%:*}" || return 1
+    done
+    snapshot
+    while IFS= read -r svs_g; do
+        if [ -f "$1/new.$svs_g" ]; then
+            ! grep -qx "object-group fqdn $svs_g" "$RUNCFG" && [ -z "$(group_routes "$svs_g")" ] || return 1
+        else
+            service_signature "$svs_g" | cmp -s - "$1/group.$svs_g" || return 1
+        fi
+    done < "$1/groups"
+    save_router || return 1
+    rm -f "$1/diff.before" "$1/diff.now" "$1/routes.now"
 }
 # svr_close DIR STATE: the operation is over; its evidence moves to the resolved folder.
 svr_close() {
@@ -1925,12 +2040,13 @@ op_service_recover() {
             else svr_classify "$svr_d"; fi
             printf 'info.txn=%s|%s|%s|%s|%s|%s\n' "${svr_d##*/}" "$(tr -d '|\n' < "$svr_d/op" 2>/dev/null)" "$(( $(date +%s) - svr_at ))" \
                 "$SVR_STATE" "$(tr '\n' ' ' < "$svr_d/groups" | sed 's/ $//')" "$SVR_WHY"
+            [ "$SVR_STATE" = running ] || svr_diff "$svr_d" | sed "s/^info.diff=/info.diff=${svr_d##*/}|/"
         done
         SV_DIR=
         done_ok "service-recover status" checked
     fi
     case "$1" in txn.[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]) ;; *) die invalid_value 64 ;; esac
-    case "$2" in resolve|accept) ;; *) die invalid_operation 64 ;; esac
+    case "$2" in resolve|accept|restore) ;; *) die invalid_operation 64 ;; esac
     svr_d="${BACKUP_DIR:?}/service-transactions/$1"
     [ -d "$svr_d" ] && [ ! -L "$svr_d" ] && [ -f "$svr_d/pending" ] || die service_recovery_absent 64
     change_lock
@@ -1938,16 +2054,34 @@ op_service_recover() {
     snapshot
     svr_classify "$svr_d"
     printf 'info.state=%s\ninfo.why=%s\n' "$SVR_STATE" "$SVR_WHY"
+    svr_diff "$svr_d"
     if [ "$2" = accept ]; then
         svr_close "$svr_d" "accepted:$SVR_STATE"; SV_DIR=
         done_ok "service-recover $1 accept state=$SVR_STATE" changed
+    fi
+    if [ "$2" = restore ]; then
+        # The owner chose «before»: a copy of the evidence first, then the images back, checked.
+        svr_copy="$svr_d.attempt"
+        cp -Rp "$svr_d" "$svr_copy" || die backup_failed
+        rm -f "${svr_copy:?}/pending"
+        SV_DIR=$svr_d
+        if ! svr_restore "$svr_d"; then
+            rm -rf "${svr_copy:?}"; SV_DIR=
+            audit "service-recover $1 restore failed"
+            die service_recovery_restore_failed
+        fi
+        rm -rf "${svr_copy:?}"
+        snapshot; svr_classify "$svr_d"
+        printf 'info.state=%s\ninfo.why=%s\n' "$SVR_STATE" "$SVR_WHY"
+        svr_close "$svr_d" "restored:$SVR_STATE"; SV_DIR=
+        done_ok "service-recover $1 restore state=$SVR_STATE" changed
     fi
     if [ "$SVR_STATE" = rolled_back ]; then
         svr_close "$svr_d" rolled_back; SV_DIR=
         done_ok "service-recover $1 rolled_back" changed
     fi
     # Partly done: this operation's own compensation; an owner's edit is never undone.
-    case " $SVR_WHY" in *" owner-edit:"*) RELAY_REASON=$SVR_WHY; SV_DIR=; die service_recovery_unverified ;; esac
+    case " $SVR_WHY" in *" other-change:"*) RELAY_REASON=$SVR_WHY; SV_DIR=; die service_recovery_unverified ;; esac
     # Only Smart DNS rows on the wrong side: the compensation does not move them (it gives back
     # routes and files), and running it again over lists already as before is not done.
     case " $SVR_WHY" in *" list:"*|*" file:"*) ;; *) RELAY_REASON=$SVR_WHY; SV_DIR=; die service_recovery_unverified ;; esac
@@ -3311,8 +3445,19 @@ keenetic_smartdns() {
     snapshot
     ks_have=$(doh_lines | awk -v d="$2" '$(NF-1) == "domain" && tolower($NF) == d')
     if [ "$1" = add ]; then
-        [ -z "$ks_have" ] || done_ok "smartdns-domain add $2 keenetic" unchanged
         ks_url=$(smartdns_url) || die smartdns_not_configured
+        # fix.35.5 (A4): «unchanged» only when the domain already goes to this very server; a line
+        # to another server is not rewritten unasked, and it is not reported as done either.
+        if [ -n "$ks_have" ]; then
+            ks_tmp=$(umask 077; mktemp /tmp/vward-console-ksurl.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+            printf '%s\n' "$ks_url" > "$ks_tmp" || die write_failed
+            if printf '%s\n' "$ks_have" | awk 'FILENAME == ARGV[1] {u = $0; next} $3 != u {bad = 1} END {exit bad}' "$ks_tmp" -; then
+                rm -f "$ks_tmp"
+            else
+                rm -f "$ks_tmp"; die smartdns_domain_other_server
+            fi
+            done_ok "smartdns-domain add $2 keenetic" unchanged
+        fi
         ks_used=$(doh_lines | awk '$(NF-1) == "domain"' | grep -c .)
         [ "$ks_used" -lt "$SMARTDNS_KEENETIC_MAX" ] || { RELAY_REASON="used $ks_used of $SMARTDNS_KEENETIC_MAX"; die smartdns_keenetic_full; }
         # The form of the lines already there for this server, else the documented one.
@@ -3374,6 +3519,17 @@ op_smartdns_domain() {
         # is not loaded on this path (its awk then waited for standard input, found by the test).
         sd_u=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
         [ -n "$sd_u" ] || sd_u=auto
+        # fix.35.5 (A4): AdGuard Home's put skips a domain it already has; the answer says which
+        # server holds it instead of «changed» (same server: unchanged; another: not rewritten).
+        if [ "$sd_u" != auto ] && [ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ]; then
+            agh_domain_urls "$2" > "$JOURNAL.have" || die write_failed
+            if [ -s "$JOURNAL.have" ]; then
+                printf '%s\n' "$sd_u" > "$JOURNAL.want" || die write_failed
+                awk 'FILENAME == ARGV[1] {u = $0; next} $0 != u {bad = 1} END {exit bad}' "$JOURNAL.want" "$JOURNAL.have" ||
+                    die smartdns_domain_other_server
+                done_ok "smartdns-domain add $2" unchanged
+            fi
+        fi
         printf '%s\t%s\n' "$2" "$sd_u" > "$JOURNAL.agh" || die write_failed
         agh_control smartdns-put "$JOURNAL.agh" && done_ok "smartdns-domain add $2" changed
         # The owner keeps Smart DNS in AdGuard Home: no quiet move to Keenetic.
@@ -3459,14 +3615,22 @@ smartdns_take_rows() {
 
 # Drop the chosen server's or domain's deferred DNS rows, so a later bypass
 # cannot resurrect an explicit removal. No routing state is changed.
+# fix.35.5 (A5): the DNS-mode proofs of managed lists (domain-lists.dns/GROUP, «D <line>») name the
+# rows that list owns; a removed server's or domain's row is taken out of them in the same journal,
+# else the list's next move found its proof row gone and refused (list_dns_reference_only).
 smartdns_prune_saved() {
     sd_prune_mode=${1:-server} sd_prune_domain=${2:-}
     sd_saved_n=0
-    for sd_file in "$LISTS_STATE"/*; do
+    [ ! -L "$LISTS_STATE.dns" ] || die unsafe_saved_state
+    for sd_file in "$LISTS_STATE"/* "$LISTS_STATE.dns"/*; do
         [ -f "$sd_file" ] || continue
         [ ! -L "$sd_file" ] || die unsafe_saved_state
         valid_group "${sd_file##*/}" || continue
-        grep -q '^route=' "$sd_file"; sd_header_rc=$?
+        if [ "${sd_file%/*}" = "$LISTS_STATE" ]; then
+            grep -q '^route=' "$sd_file"; sd_header_rc=$?
+        else
+            grep -q '^D ' "$sd_file"; sd_header_rc=$?
+        fi
         case "$sd_header_rc" in 0) ;; 1) continue ;; *) die saved_state_read_failed ;; esac
         new_tmp "$sd_file" || die write_failed
         awk -v conf="$SMARTDNS_CONF" -v mode="$sd_prune_mode" -v v="$sd_prune_domain" '
@@ -3479,6 +3643,8 @@ smartdns_prune_saved() {
                 if (index(line,"SMARTDNS_URL=")==1) {u=substr(line,14); break}; close(conf)}
             }
             /^doh=/ {n=split(substr($0,5),a," ")
+                if (a[1]=="https" && a[2]=="upstream" && a[n-1]=="domain" && selected(a[n],a[3])) next}
+            /^D / {n=split(substr($0,3),a," ")
                 if (a[1]=="https" && a[2]=="upstream" && a[n-1]=="domain" && selected(a[n],a[3])) next}
             /^agh=/ {line=substr($0,5); t=index(line,"\t")
                 if (t && selected(substr(line,1,t-1),substr(line,t+1))) next}
@@ -3520,7 +3686,9 @@ op_smartdns_server() {
              # cleared (01.11.2026: the button cleared the address only, Keenetic's lines and the 36
              # AdGuard Home rows stayed on the dead server).
              ss_own=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=")+1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
-             ss_sel=; [ -t 0 ] || IFS= read -r ss_sel || :
+             # The selector comes on stdin only when the caller says it sends one (fix.35.5: a caller
+             # with an open, silent stdin - a test runner, a job - waited here for ever).
+             ss_sel=; [ "${VWARD_SMARTDNS_SELECTOR:-0}" != 1 ] || IFS= read -r ss_sel || :
              case "$ss_sel" in
                  '') ;;
                  host:*) ss_sel=host:$(printf '%s' "${ss_sel#host:}" | tr 'A-Z' 'a-z')
@@ -3630,6 +3798,15 @@ ai_step() {
     relay_reason "$as_all"
     return 1
 }
+# ai_undo "DOMAINS": a failed move to Smart DNS takes back the rows it added itself (fix.35.5, A2:
+# before only the «no room» case did, a refused second row left the first one). A row that cannot be
+# taken back is named in the journal and the error says the move is incomplete.
+ai_undo() {
+    au_bad=
+    for au_d in $1; do ai_step smartdns-domain remove "$au_d" || au_bad="$au_bad $au_d"; done
+    [ -z "$au_bad" ] || { audit "ai undo incomplete:$au_bad"; RELAY_REASON="smartdns rows left:$au_bad"; }
+    return 0
+}
 # The AI services the owner sent to Smart DNS when Keenetic had no room (8 of 8): the Panel
 # says when room frees up («Перевести»). One id a line.
 AI_WAIT=${VWARD_AI_WAIT:-$ETC/smartdns-wait}
@@ -3652,6 +3829,16 @@ op_ai() {
         "$JQ" -e --arg i "$1" 'any(.services[]; .id == $i and .category == "ai")' "$SV_CAT" >/dev/null 2>&1 || die unknown_service 64
         ai_ids=$1
     fi
+    # fix.35.5 (A3, A8): everything that can refuse the whole move is asked BEFORE the first write -
+    # an unfinished service operation or routing recovery (before: two Smart DNS rows were written,
+    # then «service off» refused with service_recovery_required and the rows stayed), and for Smart
+    # DNS a server to write to at all (AdGuard Home being installed is not a server).
+    service_pending_check
+    routing_recovery_check
+    if [ "$2" = dns ]; then
+        load_profile_base; snapshot
+        { smartdns_url >/dev/null 2>&1; } || [ -n "$(vward_agh_smartdns_urls 2>/dev/null | head -n 1)" ] || die smartdns_not_configured
+    fi
     ai_n=0 ai_left=
     for ai_id in $ai_ids; do
         ai_on=$(service_row "$ai_id")
@@ -3663,11 +3850,24 @@ op_ai() {
                 # The domains first, the VPN list after: with no room (Keenetic's 8 Smart DNS
                 # lines taken, fix.31) the service stays as it was and its new lines go again.
                 ai_added= ai_full=0
-                for ai_d in $(ai_main "$ai_id"); do
+                # Keenetic's 8 lines are counted for the whole service before the first one goes
+                # (fix.35.5): no half of a service on Smart DNS.
+                if [ "$(smartdns_store)" = keenetic ] || { [ "$(smartdns_store)" = auto ] && ! [ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ]; }; then
+                    [ -n "${RUNCFG:-}" ] && [ -s "$RUNCFG" ] || { load_profile_base; snapshot; }
+                    ai_need=0
+                    for ai_d in $(ai_main "$ai_id"); do
+                        [ -n "$(doh_lines | awk -v d="$ai_d" '$(NF-1) == "domain" && tolower($NF) == d')" ] || ai_need=$((ai_need + 1))
+                    done
+                    [ $(( $(doh_lines | awk '$(NF-1) == "domain"' | grep -c .) + ai_need )) -le "$SMARTDNS_KEENETIC_MAX" ] || ai_full=1
+                fi
+                [ "$ai_full" = 1 ] || for ai_d in $(ai_main "$ai_id"); do
                     if ai_step smartdns-domain add "$ai_d"; then
                         [ "$AI_RES" != changed ] || ai_added="$ai_added $ai_d"
                     elif [ "$AI_ERR" = smartdns_keenetic_full ]; then ai_full=1; break
-                    else die "$AI_ERR"; fi
+                    else
+                        # Any other refusal: this move's own rows go again, the service stays as it was.
+                        ai_e=$AI_ERR; ai_undo "$ai_added"; die "$ai_e"
+                    fi
                 done
                 if [ "$ai_full" = 1 ]; then
                     for ai_d in $ai_added; do ai_step smartdns-domain remove "$ai_d" || :; done
@@ -3675,7 +3875,9 @@ op_ai() {
                     ai_left="$ai_left${ai_left:+,}$ai_id"
                     continue
                 fi
-                [ -z "$ai_on" ] || ai_step service off "$ai_id" || die "$AI_ERR"
+                if [ -n "$ai_on" ] && ! ai_step service off "$ai_id"; then
+                    ai_e=$AI_ERR; ai_undo "$ai_added"; die "$ai_e"
+                fi
                 ai_wait del "$ai_id" ;;
             *) [ -z "$ai_on" ] || ai_step service off "$ai_id" || die "$AI_ERR"
                for ai_d in $(ai_main "$ai_id"); do ai_step smartdns-domain remove "$ai_d" || die "$AI_ERR"; done
