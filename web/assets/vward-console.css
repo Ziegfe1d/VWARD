@@ -495,7 +495,7 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 .seg-thumb{position:absolute;top:4px;bottom:4px;left:4px;width:calc((100% - 8px) / 3);border-radius:999px;background:var(--accent);box-shadow:var(--shadow);transition:transform .28s cubic-bezier(.3,.7,.2,1)}
 .seg-slider[data-i="1"] .seg-thumb{transform:translateX(100%)}
 .seg-slider[data-i="2"] .seg-thumb{transform:translateX(200%)}
-.seg-slider.off .seg-thumb{background:var(--faint)}
+.seg-slider.off .seg-thumb{background:var(--accent);opacity:.45}
 .seg-slider.two{grid-template-columns:repeat(2,minmax(0,1fr))}
 /* The same space above and below a slider in its frame (owner 2026-10-17). */
 .panel-desc+.seg-slider{margin-top:4px}
@@ -625,7 +625,6 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
 
 /* fix.35.5: a locked slider keeps its chosen segment visible (accent, faded) - grey is not «chosen»;
    the reason is the note under it. Recovery actions wrap on a phone. */
-.seg-slider.off .seg-thumb{background:var(--accent);opacity:.45}
 .seg-slider.off button[aria-checked="true"]{color:var(--accent-text)}
 .panel-actions.wrap{flex-wrap:wrap}
 .panel-actions.wrap .btn{white-space:normal;text-align:left}
