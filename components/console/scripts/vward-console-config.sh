@@ -1675,7 +1675,7 @@ service_txn_begin() {
            service_txn_backup "$SERVICES_CATS" categories &&
            service_txn_backup "$SERVICES_FETCHED" catalog &&
            : > "$SV_DIR/groups" && : > "$SV_DIR/undo" &&
-           # Whose it is and what it was (fix.35.3.1): «service-recover» tells a running
+           # Whose it is and what it was (fix.35.4): «service-recover» tells a running
            # operation from one left behind, and names it for the owner. No secrets here.
            echo "$$" > "$SV_DIR/pid" && printf '%s %s %s\n' "$OP" "$ARG1" "${ARG2:-}" > "$SV_DIR/op" &&
            : > "$SV_DIR/pending"; }; then
@@ -1814,7 +1814,7 @@ service_txn_rollback() {
     SV_DIR=
 }
 
-# ---------- Unfinished service operations (fix.35.3.1) ----------
+# ---------- Unfinished service operations (fix.35.4) ----------
 # 02.11-03.11.2026: «service on» and «ai chatgpt.com» refused with service_recovery_required since
 # 02.11 06:17 and nothing in VWARD could end it: a pending operation stays pending for ever (a kill,
 # or a rollback that could not be confirmed - every DNS-touching one). service-recover compares what
@@ -1831,7 +1831,7 @@ SV_RESOLVED_KEEP=20
 svr_live() {
     svr_pid=$(cat "$1/pid" 2>/dev/null)
     case "$svr_pid" in ''|*[!0-9]*)
-        # Before fix.35.3.1 no pid was kept: live while any other helper process runs.
+        # Before fix.35.4 no pid was kept: live while any other helper process runs.
         for svr_p in /proc/[0-9]*; do
             [ "${svr_p#/proc/}" != "$$" ] || continue
             tr '\000' ' ' < "$svr_p/cmdline" 2>/dev/null | grep -q 'vward-console-config' && return 0

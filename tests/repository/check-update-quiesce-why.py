@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fix.35.3.1: «Could not quiesce VWARD runtime» says what was still at work.
+"""fix.35.4: «Could not quiesce VWARD runtime» says what was still at work.
 
 03.11.2026 02:02:59: the updater stopped with «Could not quiesce VWARD runtime» and nothing more; the
 runtime came back at 02:03:13 and the next try installed fix.35.3. The reason (a component still

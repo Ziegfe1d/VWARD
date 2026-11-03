@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fix.35.3.1: an unfinished service operation has a way out (service-recover).
+"""fix.35.4: an unfinished service operation has a way out (service-recover).
 
 03.11.2026 04:49-04:50: «service on» / «ai chatgpt.com» refused with service_recovery_required; the same
 refusal since 02.11 06:17. A pending service transaction (a killed run, or a rollback whose DNS part
@@ -82,7 +82,7 @@ def killed_refresh(s, owner_edit=False):
     return before
 
 
-# 1. A killed run: blocked (RED before fix.35.3.1 - no way out), status names it, resolve undoes only
+# 1. A killed run: blocked (RED before fix.35.4 - no way out), status names it, resolve undoes only
 #    its own change, the evidence moves to «resolved», the next service operation works.
 with tempfile.TemporaryDirectory() as d:
     s = fixture.Services(Path(d))

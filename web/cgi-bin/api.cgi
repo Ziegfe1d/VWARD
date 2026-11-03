@@ -2617,7 +2617,7 @@ fi
 
 # services-data: the services catalog (iplist) without its domains - one service's
 # domains with ?id= - and the services switched on.
-# Unfinished service operations (fix.35.3.1): what blocks every service change with
+# Unfinished service operations (fix.35.4): what blocks every service change with
 # service_recovery_required, read from the files (no helper run): id, what it was, since when, its
 # lists, whether it still runs, and whether Smart DNS rows or an owner's edit are involved. The
 # Panel's «Проверить и завершить» asks the helper (service-recover), which compares the router.
@@ -2817,7 +2817,7 @@ if [ "$ACTION" = services ]; then
     [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
     read_body 1024
     SOP="$(form_value op)"; SID="$(form_value id)"; STO="$(form_value tunnel)"
-    # An unfinished service operation (fix.35.3.1): «resolve» - the helper compares the router and
+    # An unfinished service operation (fix.35.4): «resolve» - the helper compares the router and
     # closes it or gives back its own change; «accept» - the owner keeps the router as it is now.
     if [ "$SOP" = recover ]; then
         case "$SID" in txn.[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac

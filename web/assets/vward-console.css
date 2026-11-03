@@ -609,7 +609,7 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
 .log-sources>summary small{margin-left:auto;color:var(--muted)}
 .log-view{margin-top:0}
 
-/* fix.35.3.1: the journal's two choices say what they choose; a Smart DNS server is one row - its
+/* fix.35.4: the journal's two choices say what they choose; a Smart DNS server is one row - its
    name wraps inside the card, its domains and its answer below, its button aside; a service's
    result sits under it. */
 .chips-label{margin:10px 16px 0;color:var(--muted);font-size:var(--fs-xs);font-weight:600}

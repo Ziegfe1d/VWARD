@@ -125,7 +125,7 @@ global.setTimeout = (f, ms) => realSetTimeout(f, Math.min(ms, 30));
     next = { ok, status, text: () => body };
     try { res.push('ok:' + await apiText('log', { name: 'wan' })); } catch (e) { res.push('err:' + e.message); }
   }
-  // fix.35.3.1: a JSON answer whose body is aborted by apiFetch's 20 s ends the wait with an error.
+  // fix.35.4: a JSON answer whose body is aborted by apiFetch's 20 s ends the wait with an error.
   const aborted = Object.assign(new Error('aborted'), { name: 'AbortError' });
   let done = 0;
   try { await apiJson({ text: () => Promise.reject(aborted), vwardDone: () => { done++; } }); res.push('json:ok'); } catch (e) { res.push('json:' + e.message); }

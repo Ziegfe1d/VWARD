@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fix.35.3.1: «Smart DNS отвечает» needs a whole DNS answer, not HTTP 200.
+"""fix.35.4: «Smart DNS отвечает» needs a whole DNS answer, not HTTP 200.
 
 03.11.2026: the expired Smart DNS server with 35 domains read «отвечает». vward_doh_alive sent the
 body to /dev/null and took HTTP 200 for success, whatever curl's exit code (a run out of time with

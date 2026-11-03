@@ -94,7 +94,7 @@ if body.count("save_router") != 2 or down.count("save_router") != 1 or '[ "$1" !
 # One address check: in «Маршрутизация» only; the Ads page's is «Проверка блокировки» (owner 2026-10-12).
 if js.count("sitePanel()") != 2 or "panel('Проверка блокировки', inputBar({ form: 'ads-check'" not in js:
     fail("the address check stands once (routing), the ads check is named for what it does")
-# fix.35.3.1: «проверяется…» always ends - an error clears it, and the late answer of an older check
+# fix.35.4: «проверяется…» always ends - an error clears it, and the late answer of an older check
 # is not taken for the result of the new one.
 a = js.index("let AISEQ = 0;"); b = js.index("\n}\n", js.index("async function aiCheck(")) + 3
 script = "const AICHK = {}; const render = () => {}; let calls = [];\n" \

@@ -969,7 +969,7 @@ vu_in_safe_window() {
 }
 
 vu_activity_clear() {
-    # VU_ACTIVITY_WHY: what is still at work when it is not clear (fix.35.3.1: «Could not quiesce»
+    # VU_ACTIVITY_WHY: what is still at work when it is not clear (fix.35.4: «Could not quiesce»
     # at 02:02:59 03.11 said nothing more). A name of a component or a lock, nothing secret.
     VU_ACTIVITY_WHY=
     active_root="$VU_ROOT_PREFIX/tmp/vward-runtime-active"

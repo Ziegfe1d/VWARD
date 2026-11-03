@@ -1090,7 +1090,7 @@ vward_doh_alive()
     _vda_curl=${VWARD_CURL_BIN:-curl}
     command -v "$_vda_curl" >/dev/null 2>&1 || return 2
     [ -z "$(find "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" -mmin -60 2>/dev/null)" ] || return 2
-    # The key of the kept answer: a checksum of the address with what this build has (fix.35.3.1:
+    # The key of the kept answer: a checksum of the address with what this build has (fix.35.4:
     # without cksum the key was empty and the answer was written over the folder itself); none -
     # nothing is kept, the server is asked every time.
     _vda_k=
@@ -1113,7 +1113,7 @@ vward_doh_alive()
         "$_vda_curl" -K - -s -o "$_vda_b" -m "${VWARD_DOH_ALIVE_MT:-6}" -H 'accept: application/dns-message' -w '%{http_code}' 2>/dev/null)
     _vda_rc=$?
     case "$_vda_rc" in 132|134|135|136|139) rm -f "$_vda_b"; return 2 ;; esac
-    # «Answers» is a whole DNS answer to the query sent (fix.35.3.1: HTTP 200 alone read «отвечает»,
+    # «Answers» is a whole DNS answer to the query sent (fix.35.4: HTTP 200 alone read «отвечает»,
     # even with an empty or cut body, or a curl that ran out of time): curl ended well, HTTP 200,
     # our id 0, the answer bit, RCODE 0 and at least one record. It says the server resolves; it does
     # not say a service works through it.

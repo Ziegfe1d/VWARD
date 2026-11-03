@@ -95,7 +95,7 @@ const ico = iconSvg;
 
 /* ---------- API ---------- */
 const API = '/cgi-bin/api.cgi';
-// The 20 s cover the whole answer, its body too (fix.35.3.1: the timer stopped with the headers and a
+// The 20 s cover the whole answer, its body too (fix.35.4: the timer stopped with the headers and a
 // body that stopped coming left «проверяется…» for ever); apiBody reads it within them and aborts.
 async function apiFetch(url, options) {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
@@ -1560,7 +1560,7 @@ function aiSlider(id, cur, label, off, dnsDown) {
     (dnsDown ? '<p class="seg-note">Smart DNS: сервер не отвечает</p>' : '') +
     (S.ai && !on && !off ? '<p class="seg-note muted">' + (SVC.busy ? 'Идёт переключение - дождитесь результата' : !cfgOk() ? 'Изменение недоступно: нет прав на настройку' : '') + '</p>' : '');
 }
-/* An unfinished service operation (fix.35.3.1, 03.11: «service on» refused with
+/* An unfinished service operation (fix.35.4, 03.11: «service on» refused with
    service_recovery_required again and again, no way out): what it was, since when, its lists, and the
    two exits - «Проверить и завершить» (VWARD compares the router: nothing of it left -> closed; partly
    done -> its own change given back; an owner's edit or Smart DNS rows on the wrong side -> stays,
@@ -1645,7 +1645,7 @@ function aiPage() {
 // stayed and the page offered no button). Removal is the owner's choice, confirmed: only that
 // server's domain rows go, the other servers and the general upstreams stay.
 // The answer of the one server asked (the own one, else the most used): a whole DNS answer is
-// «отвечает на DNS» - it does not show that a service works through it (fix.35.3.1).
+// «отвечает на DNS» - it does not show that a service works through it (fix.35.4).
 const SD_WHY = { 'dns:rcode5': 'отказывает в ответе', 'dns:rcode2': 'ошибка сервера DNS', 'dns:empty': 'пустой ответ', 'dns:short': 'неполный ответ', 'dns:invalid': 'ответ не DNS', 'curl:28': 'нет ответа за отведённое время' };
 function sdAnswer(r, sd) {
   if (r.host !== sd.alive_host) return ['', 'не проверялся'];
