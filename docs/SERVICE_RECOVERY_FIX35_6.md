@@ -84,6 +84,29 @@ Important/Critical. Ранее пройденные тесты не выданы
 
 ## Выпуск и остаточная приёмка
 
+### Отказ первого CI и точечная поправка иконки
+
+PR [#37](https://github.com/Ziegfe1d/VWARD/pull/37), исходный code/docs HEAD
+`4b0a3f9b4fc9adb63322eb200bf3d5741969e00d`. Штатный
+[CI 41720844865](https://github.com/Ziegfe1d/VWARD/actions/runs/41720844865)
+не прошёл: **repository-consistency FAILURE и updater-tests FAILURE**, одна первая причина —
+`check-console-icon-system.py:17`, `icons used but not declared: link`.
+resource-audit на момент чтения ещё выполнялся; устаревший красный run остановлен,
+чтобы не продолжать длительные проверки дерева, уже требующего исправления.
+Пропущенные после отказа шаги updater-tests не являются PASS.
+
+Иконка кнопки явной read-only связи использовалась без записи в `ICON_PATHS`.
+Коммит `ec7fcaa85d3dc53e39906630512a2793a5bada88` добавил полноценную SVG-цепочку в
+существующий реестр; действие, подпись и классы кнопки не изменены. Assert, тест и
+workflow сохранены. Локально RED→GREEN: CONSOLE_ICON_SYSTEM; дополнительно PASS —
+Node syntax, SMARTDNS_STORAGE_UI, CONSOLE_BINDINGS, CONSOLE_RESPONSIVE.
+SHA256SUMS пересчитан штатным скриптом. Новый штатный CI конечного docs HEAD обязателен;
+первый отказ на иконке не доказывает исправность остального набора. Точные результаты
+нового CI/публикации будут добавлены после ворот; выпуск пока не выполнен.
+
+Большие локальные прогоны и прежний успешный файловый rollback ниже не повторялись
+ради одной SVG-записи. Штатный CI и release rehearsal должны проверить новый пакет.
+
 Код сохранён как `755a69e97dfe0f5768a36fa1d315dff1df4d5389`; последующий docs HEAD будет
 точкой штатного CI. Локальный откат этого runtime: **13/13 PASS** поверх реально подписанного
 fix.35.5 / 2026110302, full health, signed target digest/mode, сохранность чужих файлов,
