@@ -29,7 +29,7 @@ def block(start, end_marker):
 
 merge = JS[JS.index("function logTime"):JS.index("\n}\n", JS.index("function mergeLogs")) + 3]
 loader = block("const LOGRUN = {}", "function logStamp(")
-api_text = block("async function apiText(", "async function apiPost(")
+api_text = block("async function apiBody(", "async function apiGet(") + block("async function apiText(", "async function apiPost(")
 script = r"""
 const S = { logs: {}, loadedAt: {} }, LOGINFO = [], LOG_HOURS = 24;
 let logNewest = true, current = 'other', logTab = 'all', calls = 0, mode = {};
@@ -125,6 +125,11 @@ global.setTimeout = (f, ms) => realSetTimeout(f, Math.min(ms, 30));
     next = { ok, status, text: () => body };
     try { res.push('ok:' + await apiText('log', { name: 'wan' })); } catch (e) { res.push('err:' + e.message); }
   }
+  // fix.35.3.1: a JSON answer whose body is aborted by apiFetch's 20 s ends the wait with an error.
+  const aborted = Object.assign(new Error('aborted'), { name: 'AbortError' });
+  let done = 0;
+  try { await apiJson({ text: () => Promise.reject(aborted), vwardDone: () => { done++; } }); res.push('json:ok'); } catch (e) { res.push('json:' + e.message); }
+  res.push('timer:' + done);
   console.log(JSON.stringify(res));
 })();
 """
@@ -133,7 +138,8 @@ if r.returncode:
     fail(r.stderr[-600:])
 got = json.loads(r.stdout)
 if not (got[0].startswith("err:") and "502" in got[0] and got[1] == "err:код auth_required" and got[2].startswith("err:")
-        and "20 секунд" in got[2] and got[3] == "ok:2026-11-02 21:00:00 ok"):
+        and "20 секунд" in got[2] and got[3] == "ok:2026-11-02 21:00:00 ok"
+        and got[4] == "json:роутер не передал ответ за 20 секунд" and got[5] == "timer:1"):
     fail("apiText must fail on HTTP errors, JSON errors and a stalled body: " + json.dumps(got))
 # The in-place refresh updates the warning and the sources too; the automatic tick never piles up.
 for need in ("src.innerHTML = logSources()", "w.textContent = LOGWARN[tab] || ''", "loadLog(logTab, true, true);", 'id="logSrc"', 'id="logWarn"'):

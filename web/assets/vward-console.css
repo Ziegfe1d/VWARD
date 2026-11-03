@@ -608,3 +608,15 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
 .log-sources>summary::-webkit-details-marker{display:none}
 .log-sources>summary small{margin-left:auto;color:var(--muted)}
 .log-view{margin-top:0}
+
+/* fix.35.3.1: the journal's two choices say what they choose; a Smart DNS server is one row - its
+   name wraps inside the card, its domains and its answer below, its button aside; a service's
+   result sits under it. */
+.chips-label{margin:10px 16px 0;color:var(--muted);font-size:var(--fs-xs);font-weight:600}
+.chips-label+.chips{margin-top:4px}
+.sd-servers .row-main{min-width:0}
+.sd-host{overflow-wrap:anywhere;word-break:break-word}
+.sd-servers .row-main small{display:block;white-space:normal;overflow:visible;text-overflow:clip}
+.sd-servers .stat{display:flex;align-items:center;gap:6px}
+.ai-res{margin:4px 16px 0}
+.log-wait{min-height:3em}

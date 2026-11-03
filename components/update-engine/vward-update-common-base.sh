@@ -969,6 +969,9 @@ vu_in_safe_window() {
 }
 
 vu_activity_clear() {
+    # VU_ACTIVITY_WHY: what is still at work when it is not clear (fix.35.3.1: «Could not quiesce»
+    # at 02:02:59 03.11 said nothing more). A name of a component or a lock, nothing secret.
+    VU_ACTIVITY_WHY=
     active_root="$VU_ROOT_PREFIX/tmp/vward-runtime-active"
     if [ -d "$active_root" ] && [ ! -L "$active_root" ]; then
         active_owner_uid=${VWARD_ADMISSION_OWNER_UID:-$(id -u)}
@@ -981,7 +984,8 @@ vu_activity_clear() {
             active_saved_start=$(cat "$active_slot/pid_start" 2>/dev/null) || return 1
             case "$active_pid:$active_saved_start" in *[!0-9:]*|:*|*:) return 1 ;; esac
             active_live_start=$(vu_pid_start "$active_pid" 2>/dev/null || :)
-            [ -z "$active_live_start" ] || [ "$active_live_start" != "$active_saved_start" ] || return 1
+            [ -z "$active_live_start" ] || [ "$active_live_start" != "$active_saved_start" ] ||
+                { VU_ACTIVITY_WHY="active:$(tr -cd 'A-Za-z0-9._-' < "$active_slot/component" 2>/dev/null | cut -c1-40)"; return 1; }
             active_reap="${active_slot}.stale.$$"
             [ ! -e "$active_reap" ] || return 1
             mv "$active_slot" "$active_reap" 2>/dev/null || return 1
@@ -991,7 +995,7 @@ vu_activity_clear() {
     elif [ -e "$active_root" ]; then
         return 1
     fi
-    [ ! -e "$VU_RUN_DIR/runtime-active" ] || return 1
+    [ ! -e "$VU_RUN_DIR/runtime-active" ] || { VU_ACTIVITY_WHY=runtime-active; return 1; }
     for conflict in \
         "$VU_ROOT_PREFIX/tmp/vward-route-reconciler-maint.lock" \
         "$VU_ROOT_PREFIX/tmp/vward-route-engine.lock" \
@@ -1009,7 +1013,7 @@ vu_activity_clear() {
         "$VU_ROOT_PREFIX/opt/var/lib/vward/ads-privacy-guard/sources-update.lock" \
         "$VU_ROOT_PREFIX/opt/var/lib/vward/ads-privacy-guard/publish.lock" \
         "$VU_ROOT_PREFIX/opt/var/lib/vward/ads-privacy-guard/jobs/worker.lock"; do
-        [ ! -e "$conflict" ] || return 1
+        [ ! -e "$conflict" ] || { VU_ACTIVITY_WHY="lock:${conflict##*/}"; return 1; }
     done
     return 0
 }
@@ -1060,14 +1064,15 @@ vu_runtime_quiesce() {
     # components agent to bring them back (it did, every 15 minutes, on a router: «Could not
     # quiesce»). It rests during the update; the components agent starts it again on resume.
     [ ! -x "${VU_SENTINEL_CTL:-/opt/bin/vward-sentinel.sh}" ] || "${VU_SENTINEL_CTL:-/opt/bin/vward-sentinel.sh}" stop >/dev/null 2>&1 || :
+    VU_QUIESCE_WHY=
     if [ "$VU_RESTART_SUPERVISOR" = 1 ]; then
-        /opt/etc/init.d/S92vward-runtime stop >/dev/null 2>&1 || return 1
+        /opt/etc/init.d/S92vward-runtime stop >/dev/null 2>&1 || { VU_QUIESCE_WHY=supervisor-stop; return 1; }
     fi
     if [ "$VU_RESTART_CROND" = 1 ]; then
-        vu_crond_stop || return 1
+        vu_crond_stop || { VU_QUIESCE_WHY=crond-stop; return 1; }
     fi
     if [ "$VU_RESTART_LIVE" = 1 ]; then
-        /opt/etc/init.d/S91vward-route-engine stop >/dev/null 2>&1 || return 1
+        /opt/etc/init.d/S91vward-route-engine stop >/dev/null 2>&1 || { VU_QUIESCE_WHY=route-engine-stop; return 1; }
     fi
 
     waited=0
@@ -1075,8 +1080,8 @@ vu_runtime_quiesce() {
         sleep 1
         waited=$((waited + 1))
     done
-    vu_activity_clear || return 1
-    pidof crond >/dev/null 2>&1 && return 1
+    vu_activity_clear || { VU_QUIESCE_WHY="busy ${VU_ACTIVITY_WHY:-unknown} after ${waited}s"; return 1; }
+    pidof crond >/dev/null 2>&1 && { VU_QUIESCE_WHY=crond-running; return 1; }
 
     VU_RUNTIME_QUIESCED=1
     vu_log INFO "Runtime quiesced for update"

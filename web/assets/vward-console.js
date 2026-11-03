@@ -95,12 +95,14 @@ const ico = iconSvg;
 
 /* ---------- API ---------- */
 const API = '/cgi-bin/api.cgi';
+// The 20 s cover the whole answer, its body too (fix.35.3.1: the timer stopped with the headers and a
+// body that stopped coming left «проверяется…» for ever); apiBody reads it within them and aborts.
 async function apiFetch(url, options) {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
   let r;
   try { r = await fetch(url, Object.assign({ cache: 'no-store', credentials: 'same-origin' }, options || {}, { signal: controller.signal })); }
-  catch (e) { throw new Error(e.name === 'AbortError' ? 'роутер не ответил за 20 секунд' : 'нет связи с роутером'); }
-  finally { clearTimeout(timer); }
+  catch (e) { clearTimeout(timer); throw new Error(e.name === 'AbortError' ? 'роутер не ответил за 20 секунд' : 'нет связи с роутером'); }
+  r.vwardDone = () => clearTimeout(timer);
   if (r.status === 401) { showLogin(); throw new Error('нужно войти'); }
   if (r.status === 403 && r.headers.get('Content-Type') && r.headers.get('Content-Type').includes('json')) {
     const x = await r.clone().json().catch(() => ({}));
@@ -108,8 +110,13 @@ async function apiFetch(url, options) {
   }
   return r;
 }
+async function apiBody(r) {
+  try { return await r.text(); }
+  catch (e) { throw new Error(e.name === 'AbortError' ? 'роутер не передал ответ за 20 секунд' : 'ответ роутера оборвался'); }
+  finally { if (r.vwardDone) r.vwardDone(); }
+}
 async function apiJson(r) {
-  const t = await r.text();
+  const t = await apiBody(r);
   if (!t.trim()) throw new Error('роутер вернул пустой ответ');
   let x;
   try { x = JSON.parse(t); } catch (e) { throw new Error('роутер вернул неполный ответ'); }
@@ -125,9 +132,9 @@ async function apiGet(action, params) {
 async function apiText(action, params) {
   const q = new URLSearchParams(Object.assign({ action: action }, params || {}));
   const r = await apiFetch(API + '?' + q.toString());
-  if (!r.ok) throw new Error('роутер ответил ошибкой HTTP ' + r.status);
+  if (!r.ok) { if (r.vwardDone) r.vwardDone(); throw new Error('роутер ответил ошибкой HTTP ' + r.status); }
   let tm;
-  const t = await Promise.race([r.text(), new Promise((_, no) => { tm = setTimeout(() => no(new Error('роутер не передал ответ за 20 секунд')), 20000); })])
+  const t = await Promise.race([apiBody(r), new Promise((_, no) => { tm = setTimeout(() => no(new Error('роутер не передал ответ за 20 секунд')), 20000); })])
     .finally(() => clearTimeout(tm));
   if (/^\s*\{\s*"ok"\s*:\s*false/.test(t)) { let x = {}; try { x = JSON.parse(t); } catch (e) { /* a cut answer */ } throw new Error(x.error ? errText(x) : 'роутер вернул ошибку вместо журнала'); }
   return t;
@@ -839,7 +846,7 @@ function logEntry(raw) {
   return { t: t, src: src, code: code, text: words.replace(/\bCONSOLE\b/g, 'Панель VWARD').replace(/Консоль/g, 'Панель VWARD'), more: more, level: logLevel(code + ' ' + body) };
 }
 function logFeed(text) {
-  if (text == null) return '<p class="panel-desc">Загрузка…</p>';
+  if (text == null) return '<p class="panel-desc log-wait">Загрузка записей…</p>';
   const raw = [], lines = String(text).split('\n');
   lines.forEach(l => { if (!l.trim()) return; if (logTime(l.replace(/^\[[^\]]+\] /, '')) == null && raw.length) raw[raw.length - 1] += '\n' + l; else raw.push(l); });
   if (!raw.length) return '<p class="panel-desc">' + esc(String(text).trim() || 'Записей нет') + '</p>';
@@ -1498,7 +1505,8 @@ function journalPanel() {
       '</dl>' + kv([
         ['Сейчас', fmtKB(Math.round(((a.bytes || 0) + (l.bytes || 0)) / 1024))],
         ['Самая старая запись', oldest ? 'с ' + oldest : 'архива пока нет']
-      ]) : empty('Загрузка…')) +
+      ]) : S.errors.journal ? '<p class="field-warn">Настройки хранения не загружены: ' + esc(S.errors.journal) + '</p><div class="panel-actions">' + btn('journal-reload', 'refresh', 'Повторить', 'small') + '</div>' :
+        empty('Загрузка настроек хранения…')) +
     '<div class="panel-actions">' + btn('log-save-all', 'archive', 'Скачать все журналы') + '</div>',
     { desc: 'Журналы не стираются: старые записи сжимаются в архив и хранятся весь срок. Если журналы займут больше заданного размера, первыми уходят самые старые. «Скачать все журналы» - полная история одним архивом.' });
 }
@@ -1549,7 +1557,8 @@ function aiSlider(id, cur, label, off, dnsDown) {
   return '<div class="seg-slider' + (on ? '' : ' off') + (cur ? '' : ' none') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
     AI_VIA.map(o => { const dis = !on || (o[0] === 'dns' && dnsDown && cur !== 'dns');
       return '<button type="button" role="radio" data-ai-via="' + o[0] + '" data-ai="' + esc(id) + '" aria-checked="' + (o[0] === cur) + '"' + (dis ? ' disabled' : '') + (o[0] === 'dns' && dnsDown ? ' title="сервер не отвечает"' : '') + '>' + o[1] + '</button>'; }).join('') + '</div>' +
-    (dnsDown ? '<p class="seg-note">Smart DNS: сервер не отвечает</p>' : '');
+    (dnsDown ? '<p class="seg-note">Smart DNS: сервер не отвечает</p>' : '') +
+    (S.ai && !on && !off ? '<p class="seg-note muted">' + (SVC.busy ? 'Идёт переключение - дождитесь результата' : !cfgOk() ? 'Изменение недоступно: нет прав на настройку' : '') + '</p>' : '');
 }
 /* An unfinished service operation (fix.35.3.1, 03.11: «service on» refused with
    service_recovery_required again and again, no way out): what it was, since when, its lists, and the
@@ -1601,7 +1610,7 @@ function aiPage() {
     if (lst && !(c && c.busy)) return '<span class="stat"><i class="dot warn"></i>' + esc('Выбрано: ' + wayName[w] + ' · домены в списке «' + (l => l.title || l.group)(lst) + '» идут ' + (lst.route === 'ISP' ? 'через провайдера' : 'через «' + tunLabel(lst.route) + '»')) + '</span>';
     const v = r ? r.verdict : '', sdProxy = w !== 'dns' && c && c.smartdns && r && 'direct' === r.via;
     const cls = !c ? '' : !c.ok ? 'warn' : v === 'open' && !sdProxy ? 'ok' : v === 'open' || v === 'answer' ? 'warn' : v ? 'crit' : 'warn';
-    const txt = !c ? 'не проверен' : !c.ok ? 'проверка не удалась' : r ? ('direct' === r.via ? 'напрямую ' : '') + (SVC_VERDICT[v] || v) + (r.code ? ' (' + r.code + ')' : '') + (sdProxy ? ', адрес от Smart DNS' : '') : 'нет данных';
+    const txt = !c ? 'не проверен' : !c.ok ? 'проверка не удалась' + (c.why ? ': ' + c.why : '') : r ? ('direct' === r.via ? 'напрямую ' : '') + (SVC_VERDICT[v] || v) + (r.code ? ' (' + r.code + ')' : '') + (sdProxy ? ', адрес от Smart DNS' : '') : 'нет данных';
     return '<span class="stat"><i class="dot ' + cls + '"></i>' + esc(wayName[w] + ' · ' + txt) + '</span>';
   };
   const detail = s => { const c = AICHK[s.id]; if (!c || c.busy || !c.ok || !(c.results || []).length) return '';
@@ -1610,16 +1619,16 @@ function aiPage() {
   const busyBtn = s => AICHK[s.id] && AICHK[s.id].busy;
   const row = s => '<div class="ai-row"><div class="ai-head"><div class="row-main"><b>' + esc(s.title) + '</b><small class="ai-status">' + status(s) + '</small></div>' +
       btn('ai-check', 'refresh', 'Проверить', 'small' + (busyBtn(s) ? ' spinning' : ''), ' data-ai="' + esc(s.id) + '" data-dom="' + esc(s.domain) + '"' + (busyBtn(s) ? ' disabled' : '')) + '</div>' +
-      aiSlider(s.id, s.via, s.title, false, sdDown) + detail(s) +
+      aiSlider(s.id, s.via, s.title, false, sdDown) + (AIRES[s.id] ? '<p class="result-note ai-res">' + esc(AIRES[s.id]) + '</p>' : '') + detail(s) +
       (s.tunnel && tuns.length > 1 ? '<dl class="kv">' + ctrlRow('Туннель', sel('data-ai-tunnel="' + esc(s.id) + '"', 'Туннель для ' + s.title, tuns.map(t => [t.name, tunLabel(t.name)]), s.tunnel || prof().tunnel_interface)) + '</dl>' : '') + '</div>';
   // Smart DNS first: the services «через Smart DNS» open only while it works (owner 2026-10-17).
   // The server does not answer (01.11.2026: the subscription ended): its domains do not resolve.
-  const sdDead = a && sd.alive === 'no' ? panel('Smart DNS не отвечает', '<p class="result-note warn">Сервер Smart DNS не отвечает на запросы: сайты, привязанные к нему (' +
+  const sdDead = a && sd.alive === 'no' ? panel('Smart DNS не отвечает', '<p class="result-note warn">Сервер Smart DNS не отвечает на DNS-запросы: сайты, привязанные к нему (' +
     fmtInt((sd.keenetic || 0) + (sd.agh_domains || 0)) + '), не открываются. Уберите сервер кнопкой ниже или переведите сервисы на VPN.</p>') : '';
   return loadError(['ai']) + recoveryPanel(a && a.recovery) + sdDead + aiQuestion(sd) + aiRoomPanel(sd) +
     panel('Smart DNS', kv([
         ['Где хранится', !a ? '…' : sd.agh ? 'AdGuard Home' : 'Keenetic', '', null, '', sd.agh ? 'доменов: ' + fmtInt(sd.agh_domains || 0) : 'строк ' + fmtInt(sd.keenetic || 0) + ' из ' + fmtInt(sd.keenetic_max || 8)],
-        ['Сервер', !a ? '…' : ((sd.servers || []).join(', ') || 'не задан') + (sd.alive === 'no' ? ' · не отвечает' : sd.alive === 'yes' ? ' · отвечает' : ''), a && sd.alive === 'no' ? 'crit' : a && noSd ? 'warn' : ''],
+        (sd.server_rows || []).length ? null : ['Сервер', !a ? '…' : 'не задан', a && noSd ? 'warn' : ''],
         ['Домены Smart DNS', 'открыть', '', 'd-smartdns', '', 'и агент: держит их мимо VPN']]) + sdStoreRow(a, sd) +
       sdServers(a, sd) +
       inputBar({ form: 'ai-dns-add', label: sd.own ? 'Заменить свой сервер DoH' : 'Свой сервер DoH', name: 'server', mono: true, placeholder: 'https://dns.example/dns-query', aria: 'Адрес DoH', off: !cfgOk(), icon: 'plus', btn: 'Сохранить' }) +
@@ -1635,17 +1644,27 @@ function aiPage() {
 // «Убрать» (fix.35.3, 02.11: the subscription ended, the own address was already gone, its 35 rows
 // stayed and the page offered no button). Removal is the owner's choice, confirmed: only that
 // server's domain rows go, the other servers and the general upstreams stay.
+// The answer of the one server asked (the own one, else the most used): a whole DNS answer is
+// «отвечает на DNS» - it does not show that a service works through it (fix.35.3.1).
+const SD_WHY = { 'dns:rcode5': 'отказывает в ответе', 'dns:rcode2': 'ошибка сервера DNS', 'dns:empty': 'пустой ответ', 'dns:short': 'неполный ответ', 'dns:invalid': 'ответ не DNS', 'curl:28': 'нет ответа за отведённое время' };
+function sdAnswer(r, sd) {
+  if (r.host !== sd.alive_host) return ['', 'не проверялся'];
+  const why = sd.alive_why ? SD_WHY[sd.alive_why] || (/^http:/.test(sd.alive_why) ? 'HTTP ' + sd.alive_why.slice(5) : sd.alive_why) : '';
+  return sd.alive === 'yes' ? ['ok', 'отвечает на DNS (работа сервисов не проверена)'] : sd.alive === 'no' ? ['crit', 'не отвечает' + (why ? ': ' + why : '')] :
+    sd.alive === 'unknown' ? ['warn', 'ответ не подтверждён'] : ['', 'не проверялся'];
+}
 function sdServers(a, sd) {
   const rows = (a && sd.server_rows) || [];
   if (!rows.length) return '';
-  return '<dl class="kv">' + rows.map(r => {
+  return '<ul class="rows sd-servers">' + rows.map(r => {
     const what = [r.keenetic ? 'в Keenetic ' + fmtInt(r.keenetic) : '', r.agh ? 'в AdGuard Home ' + fmtInt(r.agh) : ''].filter(Boolean).join(', ') || 'привязок нет';
-    const alive = r.host === sd.alive_host ? (sd.alive === 'no' ? ' · не отвечает' : sd.alive === 'yes' ? ' · отвечает' : sd.alive === 'unknown' ? ' · ответ не подтверждён' : '') : '';
-    const cid = 'sd-drop:' + r.host;
-    const ctl = confirm && confirm.id === cid ? confirmBox(cid, 'Убрать привязки к ' + r.host + ' (' + what + ')? Другие серверы и общий DNS останутся.', 'Убрать', true)
-      : btn('ask', 'close', 'Убрать', 'small', ' data-confirm="' + esc(cid) + '"' + (cfgOk() ? '' : ' disabled'));
-    return ctrlRow(r.host + (r.own ? ' (свой)' : ''), ctl, 'доменов: ' + what + alive, 'stack');
-  }).join('') + '</dl>';
+    const st = sdAnswer(r, sd), cid = 'sd-drop:' + r.host;
+    const ctl = confirm && confirm.id === cid ? '' : btn('ask', 'close', 'Убрать', 'small', ' data-confirm="' + esc(cid) + '" aria-label="Убрать сервер ' + esc(r.host) + '"' + (cfgOk() ? '' : ' disabled'));
+    return '<li class="row sd-server"><div class="row-main"><b class="sd-host">' + esc(r.host) + (r.own ? ' <small class="muted">свой</small>' : '') + '</b>' +
+      '<small>доменов: ' + esc(what) + '</small><small class="stat"><i class="dot ' + st[0] + '"></i>' + esc(st[1]) + '</small></div>' +
+      (ctl ? '<span class="row-acts">' + ctl + '</span>' : '') + '</li>' +
+      (confirm && confirm.id === cid ? '<li class="row">' + confirmBox(cid, 'Убрать привязки к ' + r.host + ' (' + what + ')? Другие серверы и общий DNS останутся.', 'Убрать', true) + '</li>' : '');
+  }).join('') + '</ul>';
 }
 // Where new Smart DNS domains go, the owner's choice (fix.32); AdGuard Home only while it works.
 function sdStoreRow(a, sd) {
@@ -1681,8 +1700,10 @@ async function smartdnsServer(op, url, host) {
 // aiJob ID WAY MSG [KEEP]: KEEP - the answer to «no room in Smart DNS» (the service still waits
 // for Smart DNS). No room: the Panel asks which way the services that did not fit go (fix.31).
 let AIQ = null;
+const AIRES = {};
 async function aiJob(id, to, msg, keep) {
-  const show = text => { actionResult = { id: 'svc', text: text }; render(); };
+  // One service: its result under it; «all»: under «Все ИИ-сервисы».
+  const show = text => { if (id === 'all') actionResult = { id: 'svc', text: text }; else { AIRES[id] = text; actionResult = null; } render(); };
   SVC.busy = true; AIQ = null; show(to === 'dns' ? 'Записываем домены Smart DNS…' : 'Переводим…');
   const j = await bgJob(Object.assign({ op: 'ai', id: id, tunnel: to }, keep ? { keep: '1' } : {}));
   SVC.busy = false;
@@ -1717,10 +1738,13 @@ function aiRoomPanel(sd) {
   return panel('Есть место', '<p class="panel-desc">' + esc('В Smart DNS освободилось место: ' + sd.waiting.map(aiName).join(', ') + ' можно перевести на Smart DNS.') + '</p>' +
     '<div class="panel-actions">' + sd.waiting.map(id => btn('ai-room', 'route', sd.waiting.length > 1 ? 'Перевести ' + aiName(id) : 'Перевести', 'primary', ' data-ai="' + esc(id) + '"' + (SVC.busy ? ' disabled' : ''))).join('') + '</div>');
 }
+let AISEQ = 0;
 async function aiCheck(id, dom) {
-  AICHK[id] = { busy: true }; render();
-  let x; try { x = await apiGet('site-test', { domain: dom }); } catch (e) { x = { ok: false }; }
-  AICHK[id] = x && x.ok ? { ok: true, results: x.results || [], ip: x.ip, dns: x.dns, smartdns: !!x.smartdns, domain: x.domain } : { ok: false }; render();
+  const seq = ++AISEQ; AICHK[id] = { busy: true, seq: seq }; render();
+  let x; try { x = await apiGet('site-test', { domain: dom }); } catch (e) { x = { ok: false, error: e.message }; }
+  // Only the answer of this very check ends it (an older one arriving late is dropped).
+  if (!AICHK[id] || AICHK[id].seq !== seq) return;
+  AICHK[id] = x && x.ok ? { ok: true, results: x.results || [], ip: x.ip, dns: x.dns, smartdns: !!x.smartdns, domain: x.domain } : { ok: false, why: x && x.error }; render();
 }
 
 /* ---------- Очистка ----------
@@ -2367,8 +2391,8 @@ const RENDER = {
       (logTab === 'all' ? '<button class="icon-btn" type="button" data-act="log-order" aria-pressed="' + logNewest + '" aria-label="' + (logNewest ? 'Сначала новые' : 'Сначала старые') + '" title="' + (logNewest ? 'Сначала новые' : 'Сначала старые') + '">' + ico('sort') + '</button>' : '') +
       '<button class="icon-btn" type="button" data-act="log-wrap" aria-pressed="' + logWrap + '" aria-label="Перенос строк" title="Перенос строк">' + ico('wrap') + '</button>' +
       '<button class="icon-btn" type="button" data-act="log-reload" aria-label="Обновить журнал" title="Обновить журнал">' + ico('refresh') + '</button></div></div><div class="panel">' +
-      '<div class="chips" role="group" aria-label="Журнал">' + LOG_VIEW.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
-      '<div class="chips log-view" role="group" aria-label="Что показывать"><button type="button" data-act="log-view" data-v="important" aria-pressed="' + logImportant + '">Важное</button><button type="button" data-act="log-view" data-v="all" aria-pressed="' + !logImportant + '">Все</button></div>' +
+      '<p class="chips-label">Источник</p><div class="chips" role="group" aria-label="Источник журнала">' + LOG_VIEW.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
+      '<p class="chips-label">Важность</p><div class="chips log-view" role="group" aria-label="Важность записей"><button type="button" data-act="log-view" data-v="important" aria-pressed="' + logImportant + '">Важное</button><button type="button" data-act="log-view" data-v="all" aria-pressed="' + !logImportant + '">Все</button></div>' +
       '<div class="logfeed' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + logFeed(text) + '</div>' +
       '<p class="field-warn" id="logWarn"' + (LOGWARN[logTab] ? '' : ' hidden') + '>' + esc(LOGWARN[logTab] || '') + '</p>' +
       '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p>' + (logTab === 'all' ? '<div id="logSrc">' + logSources() + '</div>' : '') + '</div></section>' + journalPanel() + soonPanel('logs');
@@ -4976,6 +5000,7 @@ document.addEventListener('click', e => {
   else if (a === 'ai-room') { if (!SVC.busy) aiJob(t.dataset.ai, 'dns', aiName(t.dataset.ai) + ': Smart DNS'); }
   else if (a === 'ai-dns-clear') smartdnsServer('clear', '');
   else if (a === 'svrec-resolve') svRecover(t.dataset.id, 'resolve');
+  else if (a === 'journal-reload') load('journal', true).then(render, render);
   else if (a === 'ai-dns-clear-url') { const f = t.closest('.panel') && t.closest('.panel').querySelector('form[data-form="ai-dns-add"] input[name="server"]'); const v = f ? f.value.trim() : '';
     if (!/^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?(\/[A-Za-z0-9._~\/-]{0,200})?$/.test(v)) { actionResult = { id: 'aidns', text: 'Вставьте в поле точный адрес сервера (https://…), который нужно убрать' }; render(); }
     else { smartdnsServer('clear', v); if (f) f.value = ''; } }

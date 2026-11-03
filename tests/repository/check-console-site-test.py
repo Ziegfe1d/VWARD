@@ -94,4 +94,21 @@ if body.count("save_router") != 2 or down.count("save_router") != 1 or '[ "$1" !
 # One address check: in «Маршрутизация» only; the Ads page's is «Проверка блокировки» (owner 2026-10-12).
 if js.count("sitePanel()") != 2 or "panel('Проверка блокировки', inputBar({ form: 'ads-check'" not in js:
     fail("the address check stands once (routing), the ads check is named for what it does")
+# fix.35.3.1: «проверяется…» always ends - an error clears it, and the late answer of an older check
+# is not taken for the result of the new one.
+a = js.index("let AISEQ = 0;"); b = js.index("\n}\n", js.index("async function aiCheck(")) + 3
+script = "const AICHK = {}; const render = () => {}; let calls = [];\n" \
+    "function apiGet(a, q) { return new Promise((ok, no) => calls.push({ ok, no })); }\n" + js[a:b] + """
+(async () => {
+  const p1 = aiCheck('x', 'x.example'), p2 = aiCheck('x', 'x.example');
+  calls[1].ok({ ok: true, results: [{ via: 'direct', verdict: 'open', code: 200 }] }); await p2;
+  calls[0].ok({ ok: true, results: [{ via: 'direct', verdict: 'none', code: 0 }] }); await p1;
+  const kept = AICHK.x.results[0].verdict;
+  const p3 = aiCheck('y', 'y.example'); calls[2].no(new Error('роутер не передал ответ за 20 секунд')); await p3;
+  console.log(JSON.stringify({ kept, busy: !!AICHK.y.busy, why: AICHK.y.why }));
+})();"""
+r = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30)
+o = json.loads(r.stdout or "{}")
+if o != {"kept": "open", "busy": False, "why": "роутер не передал ответ за 20 секунд"}:
+    fail(f"RED: a check must end and keep its own answer: {r.stdout} {r.stderr[-300:]}")
 print("CONSOLE_SITE_TEST=PASS")

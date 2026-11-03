@@ -2704,6 +2704,8 @@ if [ "$ACTION" = ai-data ]; then
         VWARD_DOH_ALIVE_MT=${VWARD_DOH_ALIVE_MT:-4} vward_doh_alive "$AI_URL"
         case $? in 0) AI_ALIVE=yes ;; 1) AI_ALIVE=no ;; *) AI_ALIVE=unknown ;; esac
     fi
+    # Why it does not answer, in words of the probe (curl:N, http:N, dns:...; never the address).
+    AI_ALIVE_WHY="$(printf '%s' "${VWARD_DOH_ALIVE_WHY:-}" | tr -cd 'a-z0-9:')"
     # Which server that answer is about (its host only), and the host of every AdGuard Home row:
     # the Panel lists each server still in use with its own «Убрать» (fix.35.3: rows of an expired
     # server stayed after its own address was gone, and no button was left to take them out).
@@ -2724,7 +2726,7 @@ if [ "$ACTION" = ai-data ]; then
     "$JQ" -c --arg doh "$AI_DOH" --arg agh "$AI_AGH" --arg own "$AI_OWN" --arg on "$AI_ON" --arg routes "$AI_ROUTES" --arg wait "$AI_WAIT" --arg inc "$AI_INC" --arg wan "${VWARD_WAN_INTERFACE:-}" \
         --argjson recovery "$(svc_recovery_json || echo '[]')" \
         --argjson agh_run "$AI_AGH_RUN" --arg shared "$AI_SHARED" --arg store "$AI_STORE" --arg alive "$AI_ALIVE" \
-        --arg alive_host "$AI_ALIVE_HOST" --arg agh_hosts "$AI_AGH_HOSTS" \
+        --arg alive_host "$AI_ALIVE_HOST" --arg agh_hosts "$AI_AGH_HOSTS" --arg alive_why "$AI_ALIVE_WHY" \
         --argjson agh_on "$([ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] && echo true || echo false)" '
         ($doh | split("\n") | map(select(length > 0) | split("\t"))) as $k
         | ($agh | split("\n") | map(select(length > 0))) as $a
@@ -2748,7 +2750,7 @@ if [ "$ACTION" = ai-data ]; then
          smartdns: {store: $store, keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_running: $agh_run, agh_domains: ($a | length),
                     waiting: ($wait | split("\n") | map(select(length > 0))),
                     servers: ([$k[] | .[1]] + $ah + (if $own == "" then [] else [$own] end) | unique), own: $own, alive: $alive,
-                    alive_host: $alive_host,
+                    alive_host: $alive_host, alive_why: $alive_why,
                     server_rows: ([$k[] | .[1]] + $ah + (if $own == "" then [] else [$own] end) | unique
                       | map(. as $h | {host: $h, own: ($h == $own), keenetic: ([$k[] | select(.[1] == $h)] | length),
                                        agh: ([$ah[] | select(. == $h)] | length)}))},

@@ -291,7 +291,7 @@ apply_update() {
     manifest=$1
     package_dir=$2
     vu_barrier_request || vu_die "$VU_SAFETY_ERROR" "Could not publish the update request"
-    vu_runtime_quiesce || vu_die "$VU_SAFETY_ERROR" "Could not quiesce VWARD runtime"
+    vu_runtime_quiesce || vu_die "$VU_SAFETY_ERROR" "Could not quiesce VWARD runtime${VU_QUIESCE_WHY:+: $VU_QUIESCE_WHY}"
     vu_hard_safety_check "$package_dir" || vu_die "$VU_SAFETY_ERROR" "Pre-barrier safety, space or activity check failed"
     vu_barrier_enter || vu_die "$VU_SAFETY_ERROR" "Could not enter the update barrier"
     vu_hard_safety_check "$package_dir" || vu_die "$VU_SAFETY_ERROR" "Post-barrier safety recheck failed"
