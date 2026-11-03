@@ -1,0 +1,66 @@
+cat > /tmp/svcpend.sh <<'EOF'
+clear
+PFX="vward-svcpend"
+OUT="/tmp/${PFX}-$(date +%Y%m%d-%H%M%S).txt"
+LAST="/tmp/last_result.txt"
+MAXB=30000
+ESC=$(printf '\033')
+ls -1t /tmp/${PFX}-*.txt 2>/dev/null |
+  tail -n +5 |
+  while read -r F; do rm -f "$F"; done
+: > "$OUT"
+ln -sfn "$OUT" "$LAST"
+ln -sfn "$OUT" "/tmp/last_${PFX}.txt"
+send_out() {
+  [ -s "$OUT" ] || return 1
+  sed "s/${ESC}\[[0-9;?]*[a-zA-Z]//g" "$OUT" |
+    tail -c "$MAXB" | base64 | tr -d '\r\n' |
+    { read -r B; printf '\033]52;c;%s\a' "$B"; }
+}
+on_abort() {
+  trap '' INT TERM HUP
+  send_out
+  printf '\n[ ABORTED ]: PARTIAL RESULT IN %s\n' "$LAST"
+  exit 130
+}
+trap on_abort INT TERM HUP
+B=/opt/var/backups/vward/console-config
+T="$B/service-transactions"
+A=/opt/var/log/vward/console-audit.log
+EOF
+cat >> /tmp/svcpend.sh <<'EOF'
+{
+echo "== VWARD service pending (read only) $(date)"
+ndmc -c "show version" 2>/dev/null |
+  grep -E 'release|title' | head -n 3
+head -n 1 /opt/share/vward/VERSION 2>/dev/null
+N=0
+for P in "$T"/*/pending; do
+  [ -e "$P" ] || continue
+  N=$((N + 1)); D=${P%/pending}
+  echo "-- ${D##*/}"
+  date -r "$P" '+pending_at=%F %T' 2>/dev/null
+  echo "files: $(ls "$D" | tr '\n' ' ')"
+  for F in groups undo; do
+    echo "$F lines=$(grep -c . "$D/$F" 2>/dev/null)"
+  done
+  echo "groups: $(tr '\n' ' ' < "$D/groups")"
+done
+echo "[ OK ] pending=$N"
+EOF
+cat >> /tmp/svcpend.sh <<'EOF'
+echo "== audit (service, rollback, recovery)"
+grep -E 'service|rollback|recover' "$A" 2>/dev/null |
+  sed 's#https://[^ ]*#https://...#g' |
+  tail -n 15
+echo "== pgrep helper"
+ps w 2>/dev/null | grep 'vward-console-config' |
+  grep -v grep | head -n 5
+} 2>&1 | tee "$OUT"
+echo "SUMMARY: ok=$(grep -c '\[ OK \]' "$OUT")" |
+  tee -a "$OUT"
+send_out
+echo "RESULT SENT (OSC52)"
+echo "RAW: $LAST"
+EOF
+sh -n /tmp/svcpend.sh && sh /tmp/svcpend.sh

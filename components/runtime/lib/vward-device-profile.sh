@@ -1076,7 +1076,8 @@ vward_agh_smartdns_urls()
 }
 
 # vward_doh_alive URL: the DoH server answers a DNS query (RFC 8484 GET, example.com A) within
-# VWARD_DOH_ALIVE_MT seconds (6). 0: answers (HTTP 200); 1: does not (no answer, an HTTP error:
+# VWARD_DOH_ALIVE_MT seconds (6). 0: answers (a whole DNS answer, see below; VWARD_DOH_ALIVE_WHY
+# says why not: curl:N, http:N, dns:short|invalid|rcodeN|empty); 1: does not (no answer, an HTTP error:
 # 01.11.2026 the subscription ended and Smart DNS domains stopped resolving for every client);
 # 2: cannot tell (no curl, curl known to crash on HTTPS). The address may hold a personal token:
 # it goes to curl on stdin (not in its arguments) and never to a log; the answer is kept 5 min in
@@ -1089,18 +1090,47 @@ vward_doh_alive()
     _vda_curl=${VWARD_CURL_BIN:-curl}
     command -v "$_vda_curl" >/dev/null 2>&1 || return 2
     [ -z "$(find "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" -mmin -60 2>/dev/null)" ] || return 2
-    _vda_k=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
-    _vda_f=${VWARD_DOH_ALIVE_DIR:-/tmp/vward-doh-alive}/$_vda_k
-    if [ "${VWARD_DOH_ALIVE_FRESH:-0}" != 1 ] && [ -s "$_vda_f" ] && [ -z "$(find "$_vda_f" -mmin +"${VWARD_DOH_ALIVE_AGE_MIN:-5}" 2>/dev/null)" ]; then
-        read -r _vda_r < "$_vda_f" 2>/dev/null && case "$_vda_r" in 0|1) return "$_vda_r" ;; esac
+    # The key of the kept answer: a checksum of the address with what this build has (fix.35.4:
+    # without cksum the key was empty and the answer was written over the folder itself); none -
+    # nothing is kept, the server is asked every time.
+    _vda_k=
+    for _vda_h in cksum sha256sum md5sum; do
+        command -v "$_vda_h" >/dev/null 2>&1 || continue
+        _vda_k=$(printf '%s' "$1" | "$_vda_h" 2>/dev/null | cut -d' ' -f1)
+        case "$_vda_k" in ''|*[!0-9a-f]*) _vda_k= ;; *) break ;; esac
+    done
+    _vda_f=
+    [ -z "$_vda_k" ] || _vda_f=${VWARD_DOH_ALIVE_DIR:-/tmp/vward-doh-alive}/$_vda_k
+    VWARD_DOH_ALIVE_WHY=
+    if [ -n "$_vda_f" ] && [ "${VWARD_DOH_ALIVE_FRESH:-0}" != 1 ] && [ -f "$_vda_f" ] && [ -s "$_vda_f" ] &&
+       [ -z "$(find "$_vda_f" -mmin +"${VWARD_DOH_ALIVE_AGE_MIN:-5}" 2>/dev/null)" ]; then
+        read -r _vda_r VWARD_DOH_ALIVE_WHY < "$_vda_f" 2>/dev/null && case "$_vda_r" in 0|1) return "$_vda_r" ;; esac
     fi
+    command -v od >/dev/null 2>&1 || return 2
+    _vda_b=$(umask 077; mktemp /tmp/vward-doh-alive.XXXXXX 2>/dev/null) || return 2
     case "$1" in *\?*) _vda_q="$1&" ;; *) _vda_q="$1?" ;; esac
     _vda_c=$(printf 'url = "%sdns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"\n' "$_vda_q" |
-        "$_vda_curl" -K - -s -o /dev/null -m "${VWARD_DOH_ALIVE_MT:-6}" -H 'accept: application/dns-message' -w '%{http_code}' 2>/dev/null)
+        "$_vda_curl" -K - -s -o "$_vda_b" -m "${VWARD_DOH_ALIVE_MT:-6}" -H 'accept: application/dns-message' -w '%{http_code}' 2>/dev/null)
     _vda_rc=$?
-    case "$_vda_rc" in 132|134|135|136|139) return 2 ;; esac
-    _vda_r=1; [ "$_vda_c" != 200 ] || _vda_r=0
-    mkdir -p "${_vda_f%/*}" 2>/dev/null && printf '%s\n' "$_vda_r" > "$_vda_f" 2>/dev/null
+    case "$_vda_rc" in 132|134|135|136|139) rm -f "$_vda_b"; return 2 ;; esac
+    # «Answers» is a whole DNS answer to the query sent (fix.35.4: HTTP 200 alone read «отвечает»,
+    # even with an empty or cut body, or a curl that ran out of time): curl ended well, HTTP 200,
+    # our id 0, the answer bit, RCODE 0 and at least one record. It says the server resolves; it does
+    # not say a service works through it.
+    _vda_h=$(od -An -tu1 -N12 "$_vda_b" 2>/dev/null | tr -s ' \n' ' ')
+    rm -f "$_vda_b"
+    if [ "$_vda_rc" != 0 ]; then VWARD_DOH_ALIVE_WHY=curl:$_vda_rc
+    elif [ "$_vda_c" != 200 ]; then VWARD_DOH_ALIVE_WHY=http:${_vda_c:-none}
+    else
+        VWARD_DOH_ALIVE_WHY=$(printf '%s\n' "$_vda_h" | awk '{
+            if (NF < 12) {print "dns:short"; exit}
+            if ($1 != 0 || $2 != 0 || $3 < 128) {print "dns:invalid"; exit}
+            if ($4 % 16 != 0) {print "dns:rcode" ($4 % 16); exit}
+            if ($7 * 256 + $8 < 1) {print "dns:empty"; exit}
+            print "dns:ok"}')
+    fi
+    _vda_r=1; [ "$VWARD_DOH_ALIVE_WHY" != dns:ok ] || _vda_r=0
+    [ -z "$_vda_f" ] || { mkdir -p "${_vda_f%/*}" 2>/dev/null && printf '%s %s\n' "$_vda_r" "$VWARD_DOH_ALIVE_WHY" > "$_vda_f" 2>/dev/null; } || :
     return "$_vda_r"
 }
 

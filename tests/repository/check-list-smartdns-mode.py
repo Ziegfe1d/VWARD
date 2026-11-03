@@ -73,7 +73,10 @@ print("ok")''')
     (etc / 'smartdns.conf').write_text('SMARTDNS_URL=https://dns.example.invalid/private-test\n')
     # Unknown is a refusal too. Only an actual successful probe enables DNS.
     run('dns', 'error=smartdns_unknown')
-    curl = t / 'curl'; curl.write_text('#!/bin/sh\n[ ! -e "$T/dead" ] || { printf 000; exit 28; }\nprintf 200\n'); curl.chmod(0o755)
+    curl = t / 'curl'; curl.write_text('#!/bin/sh\n[ ! -e "$T/dead" ] || { printf 000; exit 28; }\n'
+                     # fix.35.4: a live server sends a whole DNS answer (id 0, QR, RCODE 0, 1 record), not only 200.
+                     'o=; while [ $# -gt 0 ]; do [ "$1" != -o ] || o=$2; shift; done\n'
+                     '[ -z "$o" ] || printf "\\000\\000\\201\\200\\000\\001\\000\\001\\000\\000\\000\\000" > "$o"\nprintf 200\n'); curl.chmod(0o755)
     env.update(VWARD_DOH_ALIVE='1', VWARD_CURL_BIN=str(curl), VWARD_DOH_ALIVE_DIR=str(t / 'alive'), T=td)
     (t / 'dead').touch()
     run('dns', 'error=smartdns_dead')

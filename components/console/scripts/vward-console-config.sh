@@ -1674,7 +1674,11 @@ service_txn_begin() {
     if ! { service_txn_backup "$SERVICES_STATE" enabled &&
            service_txn_backup "$SERVICES_CATS" categories &&
            service_txn_backup "$SERVICES_FETCHED" catalog &&
-           : > "$SV_DIR/groups" && : > "$SV_DIR/undo" && : > "$SV_DIR/pending"; }; then
+           : > "$SV_DIR/groups" && : > "$SV_DIR/undo" &&
+           # Whose it is and what it was (fix.35.4): «service-recover» tells a running
+           # operation from one left behind, and names it for the owner. No secrets here.
+           echo "$$" > "$SV_DIR/pid" && printf '%s %s %s\n' "$OP" "$ARG1" "${ARG2:-}" > "$SV_DIR/op" &&
+           : > "$SV_DIR/pending"; }; then
         rm -rf "${SV_DIR:?}"; SV_DIR=; die backup_failed
     fi
     SV_TXN=1
@@ -1808,6 +1812,166 @@ service_txn_rollback() {
     [ "$sv_bad" = 0 ] || return 1
     rm -rf "${SV_DIR:?}"
     SV_DIR=
+}
+
+# ---------- Unfinished service operations (fix.35.4) ----------
+# 02.11-03.11.2026: «service on» and «ai chatgpt.com» refused with service_recovery_required since
+# 02.11 06:17 and nothing in VWARD could end it: a pending operation stays pending for ever (a kill,
+# or a rollback that could not be confirmed - every DNS-touching one). service-recover compares what
+# Keenetic and VWARD's files hold now with the operation's own before and after:
+#   status            each pending operation, read only: running or left, its state, why
+#   ID resolve        nothing of it left (all as before) -> closed; partly done -> this operation's
+#                     own compensation (service_txn_rollback, an owner's edit never undone), then
+#                     checked again; anything still unconfirmed stays pending with its reason
+#   ID accept         the owner keeps the router as it is now (after seeing the reason)
+# Closing never deletes evidence: the directory moves to service-transactions.resolved with a
+# «resolved» note (state, time); «pending» goes only with that move. A running operation is never
+# touched.
+SV_RESOLVED_KEEP=20
+svr_live() {
+    svr_pid=$(cat "$1/pid" 2>/dev/null)
+    case "$svr_pid" in ''|*[!0-9]*)
+        # Before fix.35.4 no pid was kept: live while any other helper process runs.
+        for svr_p in /proc/[0-9]*; do
+            [ "${svr_p#/proc/}" != "$$" ] || continue
+            tr '\000' ' ' < "$svr_p/cmdline" 2>/dev/null | grep -q 'vward-console-config' && return 0
+        done
+        return 1 ;;
+    esac
+    [ "$svr_pid" != "$$" ] && kill -0 "$svr_pid" 2>/dev/null
+}
+# svr_rows FILE: the Smart DNS rows of a saved list state («doh=LINE», «agh=DOMAIN<TAB>URL»).
+svr_rows() { grep -E '^(doh|agh)=' "$1" 2>/dev/null | sort -u; }
+# svr_row_active ROW: the row is in Keenetic (doh) or in AdGuard Home's upstreams (agh) now.
+svr_row_active() {
+    case "$1" in
+        doh=*) doh_present "${1#doh=}" ;;
+        agh=*) sra=${1#agh=}; sra_d=${sra%%"$(printf '\t')"*}; sra_u=${sra#*"$(printf '\t')"}
+            [ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] || return 1
+            SRA_D=$sra_d SRA_U=$sra_u awk '
+                /^[^ #]/ {dns = ($1 == "dns:"); u = 0; next}
+                /^  [a-z_]+:/ {u = dns && ($1 == "upstream_dns:"); next}
+                u && $1 == "-" {l = $0; sub(/^[ \t]*-[ \t]*/, "", l); gsub(/["\047]/, "", l)
+                    e = index(l, "/]"); if (substr(l, 1, 2) != "[/" || e < 3) next
+                    if (substr(l, e + 2) != ENVIRON["SRA_U"]) next
+                    n = split(substr(l, 3, e - 3), a, "/"); for (i = 1; i <= n; i++) if (tolower(a[i]) == ENVIRON["SRA_D"]) f = 1}
+                END {exit !f}' "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ;;
+        *) return 1 ;;
+    esac
+}
+# svr_dns_at GROUP SAVED: the list's Smart DNS rows sit on the side whose saved state is SAVED:
+# the saved file is the same, and every row of either side is active exactly when SAVED does not
+# hold it (a list in VPN keeps its rows saved, out of the stores; through the provider, active).
+svr_dns_at() {
+    if [ -f "$2" ]; then cmp -s "$2" "$LISTS_STATE/$1" || return 1
+    else [ ! -e "$LISTS_STATE/$1" ] || return 1; fi
+    { svr_rows "$SV_DIR/saved.$1"; svr_rows "$SV_DIR/dns-after.$1"; } | sort -u > "$SV_DIR/rows.all"
+    svr_rows "$2" > "$SV_DIR/rows.side"
+    while IFS= read -r svr_r; do
+        [ -n "$svr_r" ] || continue
+        if grep -qxF -- "$svr_r" "$SV_DIR/rows.side"; then
+            ! svr_row_active "$svr_r" || return 1
+        else
+            svr_row_active "$svr_r" || return 1
+        fi
+    done < "$SV_DIR/rows.all"
+}
+# svr_classify DIR: SVR_STATE rolled_back (Keenetic and VWARD's files hold exactly what was there
+# before this operation) or partial; SVR_WHY what differs (names only). «Completed» is never read
+# from the state: an operation records a step only when it begins it, so the steps it never reached
+# are unknown - only its own commit says it ended.
+svr_classify() {
+    SV_DIR=$1 SVR_WHY=
+    for svr_f in "enabled:$SERVICES_STATE" "categories:$SERVICES_CATS" "catalog:$SERVICES_FETCHED"; do
+        svr_n=${svr_f%%:*} svr_p=${svr_f#*:}
+        service_txn_before "$svr_p" "$svr_n" || SVR_WHY="$SVR_WHY file:$svr_n"
+    done
+    while IFS= read -r svr_g; do
+        [ -n "$svr_g" ] || continue
+        valid_group "$svr_g" || { SVR_WHY="$SVR_WHY list:invalid"; continue; }
+        if [ -f "$SV_DIR/new.$svr_g" ]; then
+            ! grep -qx "object-group fqdn $svr_g" "$RUNCFG" && [ -z "$(group_routes "$svr_g")" ] || SVR_WHY="$SVR_WHY list:$svr_g"
+        else
+            service_signature "$svr_g" | cmp -s - "$SV_DIR/group.$svr_g" || SVR_WHY="$SVR_WHY list:$svr_g"
+        fi
+        # A list whose Smart DNS rows moved with it: they must sit where they were.
+        if [ -f "$SV_DIR/dns-risk.$svr_g" ]; then svr_dns_at "$svr_g" "$SV_DIR/saved.$svr_g" || SVR_WHY="$SVR_WHY dns:$svr_g"; fi
+        [ ! -f "$SV_DIR/foreign.$svr_g" ] || SVR_WHY="$SVR_WHY owner-edit:$svr_g"
+    done < "$SV_DIR/groups"
+    rm -f "$SV_DIR/rows.all" "$SV_DIR/rows.side"
+    SVR_WHY=${SVR_WHY# }
+    if [ -z "$SVR_WHY" ]; then SVR_STATE=rolled_back; else SVR_STATE=partial; fi
+}
+# svr_close DIR STATE: the operation is over; its evidence moves to the resolved folder.
+svr_close() {
+    svr_to="${BACKUP_DIR:?}/service-transactions.resolved"
+    mkdir -p "$svr_to" && chmod 0700 "$svr_to" || die backup_failed
+    printf 'state=%s\nat=%s\nwhy=%s\n' "$2" "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$SVR_WHY" > "$1/resolved" || die write_failed
+    mv "$1" "$svr_to/" || die write_failed
+    rm -f "${svr_to:?}/${1##*/}/pending"
+    ls -1td "$svr_to"/txn.* 2>/dev/null | tail -n +$((SV_RESOLVED_KEEP + 1)) |
+        while IFS= read -r svr_old; do case "$svr_old" in "$svr_to"/txn.?*) rm -rf "${svr_old:?}" ;; esac; done
+    audit "service-recover ${1##*/} closed state=$2${SVR_WHY:+ why=$SVR_WHY}"
+}
+op_service_recover() {
+    load_profile_base
+    if [ "$1" = status ]; then
+        snapshot
+        for svr_p in "$BACKUP_DIR"/service-transactions/*/pending; do
+            [ -e "$svr_p" ] || continue
+            svr_d=${svr_p%/pending}
+            svr_at=$(date -r "$svr_p" +%s 2>/dev/null) || svr_at=$(date +%s)
+            if svr_live "$svr_d"; then SVR_STATE=running SVR_WHY=
+            else svr_classify "$svr_d"; fi
+            printf 'info.txn=%s|%s|%s|%s|%s|%s\n' "${svr_d##*/}" "$(tr -d '|\n' < "$svr_d/op" 2>/dev/null)" "$(( $(date +%s) - svr_at ))" \
+                "$SVR_STATE" "$(tr '\n' ' ' < "$svr_d/groups" | sed 's/ $//')" "$SVR_WHY"
+        done
+        SV_DIR=
+        done_ok "service-recover status" checked
+    fi
+    case "$1" in txn.[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]) ;; *) die invalid_value 64 ;; esac
+    case "$2" in resolve|accept) ;; *) die invalid_operation 64 ;; esac
+    svr_d="${BACKUP_DIR:?}/service-transactions/$1"
+    [ -d "$svr_d" ] && [ ! -L "$svr_d" ] && [ -f "$svr_d/pending" ] || die service_recovery_absent 64
+    change_lock
+    ! svr_live "$svr_d" || die service_recovery_running 75
+    snapshot
+    svr_classify "$svr_d"
+    printf 'info.state=%s\ninfo.why=%s\n' "$SVR_STATE" "$SVR_WHY"
+    if [ "$2" = accept ]; then
+        svr_close "$svr_d" "accepted:$SVR_STATE"; SV_DIR=
+        done_ok "service-recover $1 accept state=$SVR_STATE" changed
+    fi
+    if [ "$SVR_STATE" = rolled_back ]; then
+        svr_close "$svr_d" rolled_back; SV_DIR=
+        done_ok "service-recover $1 rolled_back" changed
+    fi
+    # Partly done: this operation's own compensation; an owner's edit is never undone.
+    case " $SVR_WHY" in *" owner-edit:"*) RELAY_REASON=$SVR_WHY; SV_DIR=; die service_recovery_unverified ;; esac
+    # Only Smart DNS rows on the wrong side: the compensation does not move them (it gives back
+    # routes and files), and running it again over lists already as before is not done.
+    case " $SVR_WHY" in *" list:"*|*" file:"*) ;; *) RELAY_REASON=$SVR_WHY; SV_DIR=; die service_recovery_unverified ;; esac
+    svr_copy="$svr_d.attempt"
+    cp -Rp "$svr_d" "$svr_copy" || die backup_failed
+    rm -f "${svr_copy:?}/pending"
+    SV_DIR=$svr_d
+    service_txn_rollback || :
+    SV_DIR=
+    if [ -d "$svr_d" ]; then
+        snapshot; svr_classify "$svr_d"
+        printf 'info.state=%s\ninfo.why=%s\n' "$SVR_STATE" "$SVR_WHY"
+        rm -rf "${svr_copy:?}"
+        if [ "$SVR_STATE" = rolled_back ]; then
+            svr_close "$svr_d" rolled_back; SV_DIR=
+            done_ok "service-recover $1 rolled_back" changed
+        fi
+        RELAY_REASON=$SVR_WHY; SV_DIR=; die service_recovery_unverified
+    fi
+    # The compensation confirmed itself and removed its directory: the copy is the evidence.
+    mv "$svr_copy" "$svr_d" || die write_failed
+    SVR_WHY=compensated
+    svr_close "$svr_d" rolled_back; SV_DIR=
+    done_ok "service-recover $1 rolled_back" changed
 }
 
 # Categories pinned to a tunnel: CATEGORY<TAB>TUNNEL. A service on «Автоматически» of such a
@@ -4509,11 +4673,12 @@ case "$OP" in
     agh-component|module-component) [ "$#" -ge 1 ] && [ "$#" -le 3 ] || die usage 64 ;;
     smartdns-keenetic) [ "$#" -eq 2 ] || die usage 64 ;;
     component-recover) [ "$#" -eq 1 ] || die usage 64 ;;
+    service-recover) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die usage 64 ;;
     *) [ "$#" -eq 2 ] || die usage 64 ;;
 esac
 ARG1=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
 ARG2=${2:-}
-case "$OP" in wifi|update|wan-param|tunnel|policy-group|domain-list|domain-list-watch|list-adopt|list-mode|tunnel-conf|tunnel-delete|tunnel-subnet|backup-restore|wifi-host) ARG1=$1 ;; esac
+case "$OP" in wifi|update|wan-param|tunnel|policy-group|domain-list|domain-list-watch|list-adopt|list-mode|tunnel-conf|tunnel-delete|tunnel-subnet|backup-restore|wifi-host|service-recover) ARG1=$1 ;; esac
 case "$OP" in ext-upgrade|ext-auto|firmware) ARG2=$(printf '%s' "$ARG2" | tr 'A-Z' 'a-z') ;; esac
 ARG3=${3:-}
 ARG4=${4:-}
@@ -4595,6 +4760,7 @@ case "$OP" in
     smartdns-keenetic) op_smartdns_keenetic "$ARG1" "$ARG2" ;;
     smartdns-store) op_smartdns_store "$ARG1" ;;
     component-recover) op_component_recover ;;
+    service-recover) op_service_recover "$ARG1" "$ARG2" ;;
     reset) op_reset "$ARG1" ;;
     tunnel-delete) op_tunnel_delete "$ARG1" "$ARG2" "$ARG3" ;;
     tunnel-state) op_tunnel_state "$ARG1" "$ARG2" ;;
