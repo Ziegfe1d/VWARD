@@ -2617,6 +2617,27 @@ fi
 
 # services-data: the services catalog (iplist) without its domains - one service's
 # domains with ?id= - and the services switched on.
+# Unfinished service operations (fix.35.3.1): what blocks every service change with
+# service_recovery_required, read from the files (no helper run): id, what it was, since when, its
+# lists, whether it still runs, and whether Smart DNS rows or an owner's edit are involved. The
+# Panel's «Проверить и завершить» asks the helper (service-recover), which compares the router.
+svc_recovery_json() {
+    SR_ROOT="${VWARD_CONSOLE_BACKUP_DIR:-/opt/var/backups/vward/console-config}/service-transactions"
+    for SR_P in "$SR_ROOT"/txn.*/pending; do
+        [ -f "$SR_P" ] || continue
+        SR_D=${SR_P%/pending}; SR_ID=${SR_D##*/}
+        case "$SR_ID" in txn.[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]) ;; *) continue ;; esac
+        SR_PID="$(cat "$SR_D/pid" 2>/dev/null)"; SR_LIVE=0
+        case "$SR_PID" in ''|*[!0-9]*) ;; *) ! kill -0 "$SR_PID" 2>/dev/null || SR_LIVE=1 ;; esac
+        SR_AT="$(date -r "$SR_P" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null)"
+        SR_OP="$(head -n 1 "$SR_D/op" 2>/dev/null | tr -cd 'A-Za-z0-9 ._@:-' | cut -c1-80)"
+        SR_G="$(grep -E '^[A-Za-z0-9_.-]{1,64}$' "$SR_D/groups" 2>/dev/null | head -n 10 | tr '\n' ' ')"
+        SR_DNS=0; for SR_F in "$SR_D"/dns-risk.*; do [ ! -f "$SR_F" ] || SR_DNS=$((SR_DNS + 1)); done
+        SR_FOR=0; for SR_F in "$SR_D"/foreign.*; do [ ! -f "$SR_F" ] || SR_FOR=$((SR_FOR + 1)); done
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$SR_ID" "$SR_OP" "$SR_AT" "$SR_G" "$SR_LIVE" "$SR_DNS" "$SR_FOR"
+    done | "$JQ" -Rnc '[inputs | split("\t") | select(length == 7) | {id: .[0], op: .[1], since: .[2],
+        groups: (.[3] | split(" ") | map(select(length > 0))), running: (.[4] == "1"), dns: (.[5] | tonumber), owner_edit: (.[6] | tonumber)}]'
+}
 if [ "$ACTION" = services-data ]; then
     header_json
     [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
@@ -2638,11 +2659,12 @@ if [ "$ACTION" = services-data ]; then
     # Categories pinned to a tunnel, and the last check of the services on «Автоматически».
     SV_PINS="$(cat "$CONFIG_ETC/services/categories.tsv" 2>/dev/null)"
     SV_PROBE="$(cat "${VWARD_TUNNEL_SERVICES_DIR:-/tmp/vward-tunnel-services}/state.tsv" 2>/dev/null)"
-    "$JQ" -c --arg from "$SV_FROM" --arg checked "$SV_CHECKED" --argjson on "$SV_ON" --arg pins "$SV_PINS" --arg probe "$SV_PROBE" '
+    SV_REC="$(svc_recovery_json)"; [ -n "$SV_REC" ] || SV_REC='[]'
+    "$JQ" -c --arg from "$SV_FROM" --arg checked "$SV_CHECKED" --argjson on "$SV_ON" --arg pins "$SV_PINS" --arg probe "$SV_PROBE" --argjson recovery "$SV_REC" '
         {ok: true, from: $from, checked: $checked, source: .source, source_url: .source_url, license: .license,
          revision: .revision, updated: .updated, limit: .limit, categories: .categories,
          services: [.services[] | {id, title, category, count: (.domains | length), too_big: (.too_big // false)}],
-         enabled: $on,
+         enabled: $on, recovery: $recovery,
          category_tunnels: [$pins | split("\n")[] | split("\t") | select(length == 2 and (.[1] | length) > 0) | {category: .[0], tunnel: .[1]}],
          probe: [$probe | split("\n")[] | split("\t") | select(length == 6) |
            {id: .[0], group: .[1], tunnel: .[2], at: (.[4] | tonumber? // null), action: .[5],
@@ -2700,6 +2722,7 @@ if [ "$ACTION" = ai-data ]; then
         g != "" && $1 == "include" {print g "\t" tolower($2)}
         g != "" && $1 == "description" {sub(/^[ \t]*description[ \t]+/, ""); gsub(/["\t]/, ""); print g "\t#" $0}' | head -n 4000)"
     "$JQ" -c --arg doh "$AI_DOH" --arg agh "$AI_AGH" --arg own "$AI_OWN" --arg on "$AI_ON" --arg routes "$AI_ROUTES" --arg wait "$AI_WAIT" --arg inc "$AI_INC" --arg wan "${VWARD_WAN_INTERFACE:-}" \
+        --argjson recovery "$(svc_recovery_json || echo '[]')" \
         --argjson agh_run "$AI_AGH_RUN" --arg shared "$AI_SHARED" --arg store "$AI_STORE" --arg alive "$AI_ALIVE" \
         --arg alive_host "$AI_ALIVE_HOST" --arg agh_hosts "$AI_AGH_HOSTS" \
         --argjson agh_on "$([ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] && echo true || echo false)" '
@@ -2721,7 +2744,7 @@ if [ "$ACTION" = ai-data ]; then
                | {d: $d, k: (if $d == $id then 0 elif $own then 1 elif ($l | length) == 2 then 2 else 3 end), n: ($l | length)}]
             | sort_by(.k, .n, .d) | map(.d)
             | reduce .[] as $d ([]; if any(.[]; . as $k | $d | endswith("." + $k)) then . else . + [$d] end) | .[:4];
-        {ok: true,
+        {ok: true, recovery: $recovery,
          smartdns: {store: $store, keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_running: $agh_run, agh_domains: ($a | length),
                     waiting: ($wait | split("\n") | map(select(length > 0))),
                     servers: ([$k[] | .[1]] + $ah + (if $own == "" then [] else [$own] end) | unique), own: $own, alive: $alive,
@@ -2792,6 +2815,19 @@ if [ "$ACTION" = services ]; then
     [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
     read_body 1024
     SOP="$(form_value op)"; SID="$(form_value id)"; STO="$(form_value tunnel)"
+    # An unfinished service operation (fix.35.3.1): «resolve» - the helper compares the router and
+    # closes it or gives back its own change; «accept» - the owner keeps the router as it is now.
+    if [ "$SOP" = recover ]; then
+        case "$SID" in txn.[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+        SRM="$(form_value mode)"
+        case "$SRM" in
+            resolve) ;;
+            accept) [ "$(form_value confirm)" = SERVICE_RECOVER_ACCEPT ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; } ;;
+            *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
+        esac
+        CMD="$CONFIG_HELPER" LABEL="service-recover" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG="" ARGS="service-recover $SID $SRM"
+        run_detached "$CONTROL_RUN_DIR" control_busy
+    fi
     if [ "$SOP" = list-mode ]; then
         printf '%s\n' "$SID" | grep -Eq '^[A-Za-z0-9_.-]{1,64}$' || { echo '{"ok":false,"error":"invalid_group"}'; exit 0; }
     else

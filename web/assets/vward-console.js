@@ -266,7 +266,7 @@ const API_ERRORS = {
   route_change_busy: 'маршруты сейчас меняет другая задача, повторите', profile_unavailable: 'профиль устройства не определён',
   policy_group_unavailable: 'группа маршрутизации не найдена', list_full: 'список заполнен', backup_failed: 'не удалось сделать резервную копию',
   conf_not_awg3: 'в файле нет настроек AmneziaWG 3.x - это другой файл', conf_other_tunnel: 'файл от другого туннеля: ключ сервера не совпадает', adopt_move_failed: 'туннель поднят в модуле, но списки не перенеслись - перенесите их на странице туннеля', engine_replace_unsupported: 'туннель модуля не заменяется - добавьте новый и удалите этот', engine_full: 'в модуле уже 5 туннелей', speed_busy: 'замер скорости уже идёт', subscription_expired: 'подписка истекла: провайдер присылает заглушки вместо серверов - продлите её у провайдера', subscription_unavailable: 'адрес подписки не ответил', checksum_mismatch: 'скачанная программа не совпала с контрольной суммой', arch_unsupported: 'процессор роутера не поддерживается контуром',
-  services_unavailable: 'каталог сервисов недоступен', invalid_service: 'неверное имя сервиса', unknown_service: 'такого сервиса нет в каталоге', service_too_big: 'у сервиса больше 300 доменов - Keenetic столько не примет в один список', service_not_enabled: 'сервис не включён', service_reference_only: 'список создан или изменён пользователем; автоматическое изменение запрещено', service_recovery_required: 'сохранена незавершённая операция сервисов; требуется проверка восстановления', list_limit: 'Keenetic не принял домены: достигнут предел списка', no_free_list: 'в Keenetic нет свободного номера доменного списка', catalog_invalid: 'каталог скачался повреждённым - работает прежний',
+  services_unavailable: 'каталог сервисов недоступен', invalid_service: 'неверное имя сервиса', unknown_service: 'такого сервиса нет в каталоге', service_too_big: 'у сервиса больше 300 доменов - Keenetic столько не примет в один список', service_not_enabled: 'сервис не включён', service_reference_only: 'список создан или изменён пользователем; автоматическое изменение запрещено', service_recovery_required: 'не завершена прежняя операция сервисов: сначала завершите её в блоке «Незавершённая операция» (страницы «DNS» и «Сервисы»)', service_recovery_unverified: 'состояние не совпало с тем, что было до операции: она оставлена незавершённой', service_recovery_running: 'операция ещё выполняется', service_recovery_absent: 'операция уже завершена', list_limit: 'Keenetic не принял домены: достигнут предел списка', no_free_list: 'в Keenetic нет свободного номера доменного списка', catalog_invalid: 'каталог скачался повреждённым - работает прежний',
   write_failed: 'не удалось записать файл', custom_manifest_url: 'адрес манифеста задан вручную - канал меняется в update.conf', invalid_tunnel: 'недопустимое имя туннеля', tunnel_no_handshake: 'сервер не ответил на рукопожатие за 30 секунд - туннель не изменён', conf_no_address: 'в файле нет адреса IPv4 (строка Address)', engine_failed: 'программа модуля не ответила', engine_start_failed: 'программа модуля не запустилась', engine_unavailable: 'модуль туннеля не установлен', main_tunnel: 'это туннель по умолчанию: сначала назначьте по умолчанию другой туннель', tunnel_off: 'туннель выключен: сначала включите его на его странице', tunnel_address_taken: 'такой адрес в туннеле уже занят другим туннелем: у двух туннелей он должен быть разным', invalid_subnet: 'нужна подсеть IPv4, например 149.154.160.0/20 (не шире /8)', private_subnet: 'это адреса домашней сети, провайдера или служебные - в VPN они не отправляются', invalid_description: 'название: до 64 символов, без кавычек', no_free_tunnel: 'на роутере нет свободного номера туннеля',
   conf_empty: 'файл пустой', conf_syntax: 'это не файл WireGuard', conf_peer_count: 'в файле должен быть ровно один [Peer]', conf_key_private: 'неверный PrivateKey', conf_public_key: 'неверный PublicKey', conf_preshared_key: 'неверный PresharedKey', conf_address: 'нет адреса IPv4 в Address', conf_endpoint: 'неверный Endpoint (нужно сервер:порт)', conf_mtu: 'MTU вне 1280-1500', conf_keepalive: 'неверный PersistentKeepalive', conf_allowed_ips: 'неверный AllowedIPs', conf_awg: 'неверные параметры AmneziaWG', conf_unknown_setting: 'в файле настройки, которых не знают ни Keenetic, ни модуль AmneziaWG VWARD (новая версия AmneziaWG - нужно обновление модуля); без них туннель работал бы не так, как в файле', tunnel_device_missing: 'туннель не поднят на роутере', unknown_tunnel: 'туннель не найден',
   failopen_active: 'туннель недоступен, списки VPN идут напрямую: дождитесь восстановления', policy_sync_busy: 'идёт обновление IP-категорий, повторите позже',
@@ -1551,6 +1551,36 @@ function aiSlider(id, cur, label, off, dnsDown) {
       return '<button type="button" role="radio" data-ai-via="' + o[0] + '" data-ai="' + esc(id) + '" aria-checked="' + (o[0] === cur) + '"' + (dis ? ' disabled' : '') + (o[0] === 'dns' && dnsDown ? ' title="сервер не отвечает"' : '') + '>' + o[1] + '</button>'; }).join('') + '</div>' +
     (dnsDown ? '<p class="seg-note">Smart DNS: сервер не отвечает</p>' : '');
 }
+/* An unfinished service operation (fix.35.3.1, 03.11: «service on» refused with
+   service_recovery_required again and again, no way out): what it was, since when, its lists, and the
+   two exits - «Проверить и завершить» (VWARD compares the router: nothing of it left -> closed; partly
+   done -> its own change given back; an owner's edit or Smart DNS rows on the wrong side -> stays,
+   with the reason) and «Оставить как есть» (the owner keeps the router as it is, confirmed). */
+let SVREC = null;
+const SVR_WHY = { list: 'список {g} изменён не полностью', dns: 'строки Smart DNS списка {g} не на своём месте', 'owner-edit': 'список {g} изменён вручную', file: 'файл настроек сервисов ({g}) изменён' };
+const svrWhy = w => String(w || '').split(' ').filter(Boolean).map(t => { const i = t.indexOf(':'), k = t.slice(0, i), g = t.slice(i + 1);
+  return (SVR_WHY[k] || t).replace('{g}', ({ enabled: 'включённые', categories: 'категории', catalog: 'каталог' })[g] || g); }).join('; ');
+function recoveryPanel(list) {
+  if (!list || !list.length) return '';
+  return panel('Незавершённая операция сервисов', list.map(r => {
+    const cid = 'svrec-accept:' + r.id, busy = SVREC && SVREC.id === r.id && SVREC.busy;
+    const note = (r.running ? 'Ещё выполняется: дождитесь конца.' : 'Пока она не закрыта, VWARD не меняет сервисы, чтобы не повторить её поверх неизвестного состояния.') +
+      (r.dns ? ' Затрагивает строки Smart DNS.' : '') + (r.owner_edit ? ' Список менялся вручную - он не будет отменён.' : '');
+    const res = SVREC && SVREC.id === r.id && SVREC.text ? '<p class="result-note' + (SVREC.ok ? '' : ' warn') + '">' + esc(SVREC.text) + '</p>' : '';
+    const acts = r.running ? '' : confirm && confirm.id === cid ? confirmBox(cid, 'Оставить роутер как есть и закрыть операцию? Её данные останутся в резервной папке.', 'Оставить как есть', true) :
+      '<div class="panel-actions">' + btn('svrec-resolve', 'check', busy ? 'Проверяем…' : 'Проверить и завершить', 'small primary' + (busy ? ' spinning' : ''), ' data-id="' + esc(r.id) + '"' + (busy || !cfgOk() ? ' disabled' : '')) +
+        btn('ask', 'close', 'Оставить как есть', 'small', ' data-confirm="' + esc(cid) + '"' + (busy || !cfgOk() ? ' disabled' : '')) + '</div>';
+    return kv([['Операция', r.op || 'сервисы'], ['С', r.since ? fmtTime(r.since) : '—'], r.groups.length ? ['Списки', r.groups.join(', ')] : null]) +
+      '<p class="panel-desc">' + esc(note) + '</p>' + acts + res;
+  }).join(''), { desc: 'Операция прервалась (перезапуск, сбой связи или отказ роутера) или её откат не подтвердился.' });
+}
+async function svRecover(id, mode) {
+  SVREC = { id: id, busy: true }; render();
+  const j = await bgJob(Object.assign({ op: 'recover', id: id, mode: mode }, mode === 'accept' ? { confirm: 'SERVICE_RECOVER_ACCEPT' } : {}));
+  SVREC = { id: id, ok: j.ok, text: j.ok ? (mode === 'accept' ? 'Закрыто: роутер оставлен как есть' : 'Завершено: состояние как до операции, сервисы снова можно менять') :
+    !j.done ? 'Ещё выполняется, проверьте позже' : 'Не завершено: ' + errText(j.x) + (j.why ? ' (' + svrWhy(j.why) + ')' : '') };
+  await Promise.all([load('ai', true), load('services', true)]); render();
+}
 function aiPage() {
   const a = S.ai, svc = (a && a.services) || [], sd = (a && a.smartdns) || {}, tuns = ((st().wg && st().wg.interfaces) || []).filter(t => !tunOff(t));
   const allVia = svc.length && svc.every(s => s.via === svc[0].via) ? svc[0].via : '';
@@ -1586,7 +1616,7 @@ function aiPage() {
   // The server does not answer (01.11.2026: the subscription ended): its domains do not resolve.
   const sdDead = a && sd.alive === 'no' ? panel('Smart DNS не отвечает', '<p class="result-note warn">Сервер Smart DNS не отвечает на запросы: сайты, привязанные к нему (' +
     fmtInt((sd.keenetic || 0) + (sd.agh_domains || 0)) + '), не открываются. Уберите сервер кнопкой ниже или переведите сервисы на VPN.</p>') : '';
-  return loadError(['ai']) + sdDead + aiQuestion(sd) + aiRoomPanel(sd) +
+  return loadError(['ai']) + recoveryPanel(a && a.recovery) + sdDead + aiQuestion(sd) + aiRoomPanel(sd) +
     panel('Smart DNS', kv([
         ['Где хранится', !a ? '…' : sd.agh ? 'AdGuard Home' : 'Keenetic', '', null, '', sd.agh ? 'доменов: ' + fmtInt(sd.agh_domains || 0) : 'строк ' + fmtInt(sd.keenetic || 0) + ' из ' + fmtInt(sd.keenetic_max || 8)],
         ['Сервер', !a ? '…' : ((sd.servers || []).join(', ') || 'не задан') + (sd.alive === 'no' ? ' · не отвечает' : sd.alive === 'yes' ? ' · отвечает' : ''), a && sd.alive === 'no' ? 'crit' : a && noSd ? 'warn' : ''],
@@ -2502,7 +2532,7 @@ const RENDER = {
       [['auto', 'Автоматически']].concat(tuns.map(t => [t.name, tunLabel(t.name)])), svcCatTunnel(catObj.id) || 'auto'),
       svcCatTunnel(catObj.id) ? 'сервисы категории на «Автоматически» идут через этот туннель' : 'VWARD проверяет каждый сервис через туннели сам') + '</dl>',
       { desc: 'Сервис с закреплённым туннелем остаётся на своём.' }) : '';
-    return cfgNote() + catPin + panel('Сервисы', '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти сервис" aria-label="Найти сервис" autocomplete="off"></label>' +
+    return cfgNote() + recoveryPanel(V.recovery) + catPin + panel('Сервисы', '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти сервис" aria-label="Найти сервис" autocomplete="off"></label>' +
       '<div class="chips" role="group" aria-label="Категория">' + chips.map(c => '<button type="button" data-act="svc-cat" data-cat="' + esc(c[0]) + '" aria-pressed="' + (SVC.cat === c[0]) + '">' + esc(c[1]) + '</button>').join('') + '</div>' +
       resultBox('svc') + (shown.length ? '<ul class="rows" data-list-rows>' + shown.map(row).join('') + '</ul>' : empty(SVC.cat === 'on' ? 'Пока ничего не включено' : 'Нет сервисов')),
       { desc: 'Включённый сервис идёт через VPN. В Keenetic он появится доменным списком со своим названием.' });
@@ -3534,9 +3564,9 @@ async function bgJob(fields, minutes) {
   if (!run.finished) return { ok: false, done: false, x: {}, out: [] };
   const out = String(run.output || '').trim().split('\n'), last = out[out.length - 1] || '';
   const left = (out.filter(l => /^info\.left=/.test(l)).pop() || '').slice(10).split(',').filter(Boolean);
-  const reason = (out.filter(l => /^reason=/.test(l)).pop() || '').slice(7);
-  return run.rc === 0 ? { ok: true, done: true, left: left, x: { ok: true, result: last.replace(/^result=/, '') } } :
-    { ok: false, done: true, left: left, x: { ok: false, error: /^error=/.test(last) ? last.slice(6) : 'helper_failed', reason: reason } };
+  const reason = (out.filter(l => /^reason=/.test(l)).pop() || '').slice(7), why = (out.filter(l => /^info\.why=/.test(l)).pop() || '').slice(9);
+  return run.rc === 0 ? { ok: true, done: true, left: left, why: why, x: { ok: true, result: last.replace(/^result=/, '') } } :
+    { ok: false, done: true, left: left, why: why, x: { ok: false, error: /^error=/.test(last) ? last.slice(6) : 'helper_failed', reason: reason } };
 }
 // Switching on writes up to 300 domains into Keenetic: a background job, as for tunnels.
 async function serviceJob(fields, okMsg) {
@@ -4569,6 +4599,7 @@ async function runAction(resultId, action, fields, okMsg) {
 }
 const CONFIRMED = {
   'sd-drop': c => smartdnsServer('clear', '', c.id.slice(8)),
+  'svrec-accept': c => svRecover(c.id.slice(13), 'accept'),
   'list-merge': c => cfgSet({ op: 'list', action: 'merge', target: c.name, value: c.what, confirm: 'LIST_MERGE' }, 'Списки объединены', ['lists']),
   'list-clear': c => cfgSet({ op: 'list', action: 'clear', target: c.name, confirm: 'LIST_CLEAR' }, 'Список очищен', ['lists', 'listd']),
   'lists-del': () => { const ns = [...LISTPICK]; LISTPICK.clear(); return listBulk({ op: 'list', action: 'delete', confirm: 'LIST_DELETE' }, ns, 'Удаление списков'); },
@@ -4931,7 +4962,7 @@ document.addEventListener('click', e => {
   else if (a === 'all-check') extOp('check').then(() => updateOp('check'));
   else if (a === 'confirm-no') { confirm = null; render(); }
   else if (a === 'vward-on') { t.disabled = true; vwardPower('on'); }
-  else if (a === 'confirm-yes') { const c = confirm; confirm = null; const id = c && /^list-merge-/.test(c.id) ? 'list-merge' : c && /^sd-drop:/.test(c.id) ? 'sd-drop' : c && c.id; if (c && CONFIRMED[id]) CONFIRMED[id](c); else render(); }
+  else if (a === 'confirm-yes') { const c = confirm; confirm = null; const id = c && /^list-merge-/.test(c.id) ? 'list-merge' : c && /^sd-drop:/.test(c.id) ? 'sd-drop' : c && /^svrec-accept:/.test(c.id) ? 'svrec-accept' : c && c.id; if (c && CONFIRMED[id]) CONFIRMED[id](c); else render(); }
   else if (a === 'ads-urule') { t.disabled = true; adsUserRule(t.dataset.op, t.dataset.kind, t.dataset.dom); }
   else if (a === 'ads-chain-block') { t.disabled = true; adsChainBlock(t.dataset.doms.split(' ').filter(d => DOMAIN.test(d))); }
   else if (a === 'site-fix') siteFix(t.dataset.dom);
@@ -4944,6 +4975,7 @@ document.addEventListener('click', e => {
   else if (a === 'ai-answer') aiAnswer(t.dataset.way);
   else if (a === 'ai-room') { if (!SVC.busy) aiJob(t.dataset.ai, 'dns', aiName(t.dataset.ai) + ': Smart DNS'); }
   else if (a === 'ai-dns-clear') smartdnsServer('clear', '');
+  else if (a === 'svrec-resolve') svRecover(t.dataset.id, 'resolve');
   else if (a === 'ai-dns-clear-url') { const f = t.closest('.panel') && t.closest('.panel').querySelector('form[data-form="ai-dns-add"] input[name="server"]'); const v = f ? f.value.trim() : '';
     if (!/^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?(\/[A-Za-z0-9._~\/-]{0,200})?$/.test(v)) { actionResult = { id: 'aidns', text: 'Вставьте в поле точный адрес сервера (https://…), который нужно убрать' }; render(); }
     else { smartdnsServer('clear', v); if (f) f.value = ''; } }
