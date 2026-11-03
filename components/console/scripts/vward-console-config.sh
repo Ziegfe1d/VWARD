@@ -68,6 +68,9 @@ DEVCONF_EXISTED=
 TXN=0
 SV_TXN=0
 SV_DIR=
+AI_DIR=
+AI_TXN=0
+AI_CHILD_SLOT=
 SD_RECOVERY_DIR=
 LD_TXN=0
 LD_DIR=
@@ -122,6 +125,13 @@ cleanup() {
             printf 'error=rollback_incomplete\nrecovery=%s\n' "$SV_DIR"
         fi
     fi
+    if [ "$AI_TXN" = 1 ]; then
+        # Only an exact original scope proves a failed composite move undone.
+        # Otherwise keep the intent/checkpoint across TERM, lost reply and reboot.
+        if [ ! -f "$AI_DIR/inflight" ] && ai_scope > "$AI_DIR/current" && cmp -s "$AI_DIR/before" "$AI_DIR/current"; then
+            rm -f "$AI_DIR/pending"
+        fi
+    fi
     sd_rollback_bad=0
     if [ "$TXN" = 1 ]; then
         TXN=0
@@ -158,6 +168,7 @@ cleanup() {
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
     [ "$LOCKED" != 1 ] || rm -rf "${CHANGE_LOCK:?}"
     [ "$EDIT_LOCKED" != 1 ] || rm -rf "${EDIT_LOCK:?}"
+    [ -z "$AI_CHILD_SLOT" ] || rm -f "$AI_CHILD_SLOT"
     [ -z "$AO_TMP" ] || rm -rf "${AO_TMP:?}"
     [ "$EXT_LOCKED" != 1 ] || rm -rf "${EXT_STATE:?}/lock"
     [ -z "${AGH_PLANNED:-}" ] || "$DNS_GUARD" planned-done >/dev/null 2>&1 || :
@@ -1061,19 +1072,33 @@ wan_route_target() {
 # doh_drop_dead FILE doh|agh: lines of FILE whose Smart DNS server does not answer leave FILE
 # (vward_doh_alive 1; «cannot tell» keeps them); their number is added to DOH_DEAD_N.
 # doh lines: «https upstream URL ...»; agh pairs: «domain<TAB>URL».
+# A saved URL is a return image, not current server authorization. In particular
+# a healthy removed/replaced server must neither be probed nor resurrected.
+doh_restore_allowed() {
+    dra_selected=$(awk -F= '$1=="SMARTDNS_URL" {print substr($0,index($0,"=")+1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
+    if [ -n "$dra_selected" ]; then [ "$dra_selected" = "$1" ]; return $?; fi
+    dra_active=$({ doh_lines | awk '$(NF-1)=="domain" {print $3}'; vward_agh_smartdns_urls; })
+    for dra_url in $dra_active; do [ "$dra_url" != "$1" ] || return 0; done
+    return 1
+}
 doh_drop_dead() {
-    [ -s "$1" ] && command -v vward_doh_alive >/dev/null 2>&1 || return 0
+    [ -s "$1" ] || return 0
     : > "$1.keep" || die write_failed
     while IFS= read -r dd_l; do
         [ -n "$dd_l" ] || continue
         if [ "$2" = doh ]; then set -- "$1" "$2" $dd_l; dd_u=${5:-}; else dd_u=${dd_l#*"$tab"}; fi
-        if [ -n "$dd_u" ] && { vward_doh_alive "$dd_u"; [ $? = 1 ]; }; then
+        if [ -n "$dd_u" ] && ! doh_restore_allowed "$dd_u"; then
+            DOH_UNCONFIGURED_N=$((${DOH_UNCONFIGURED_N:-0} + 1))
+            continue
+        fi
+        if [ -n "$dd_u" ] && command -v vward_doh_alive >/dev/null 2>&1 && { vward_doh_alive "$dd_u"; [ $? = 1 ]; }; then
             DOH_DEAD_N=$((${DOH_DEAD_N:-0} + 1))
             continue
         fi
         printf '%s\n' "$dd_l" >> "$1.keep" || die write_failed
     done < "$1"
     mv -f "$1.keep" "$1" || die write_failed
+    [ -z "${DOH_UNCONFIGURED_N:-}" ] || audit "saved Smart DNS server no longer configured: $DOH_UNCONFIGURED_N rows not restored"
     [ -z "${DOH_DEAD_N:-}" ] || audit "smartdns server not answering: ${DOH_DEAD_N} line(s) not put back"
 }
 
@@ -1190,7 +1215,11 @@ op_domain_list() {
         # A Smart DNS server that does not answer gets no domains back (01.11.2026: the
         # subscription ended, the saved lines came back and 8 domains stopped resolving for every
         # client): they stay on the ordinary DNS; the saved state goes with this switch.
-        doh_drop_dead "$JOURNAL.doh" doh; doh_drop_dead "$JOURNAL.agh" agh
+        if [ "${VWARD_SERVICE_DISCARD_DNS:-0}" = 1 ] && [ -n "${VWARD_SERVICE_ID:-}" ]; then
+            : > "$JOURNAL.doh"; : > "$JOURNAL.agh"
+        else
+            doh_drop_dead "$JOURNAL.doh" doh; doh_drop_dead "$JOURNAL.agh" agh
+        fi
         if [ "$new_t" != - ]; then
             o=; [ "$new_o" = - ] || o=" $new_o"
             ndm "dns-proxy route object-group $G $new_t$o" || die router_rejected
@@ -1422,7 +1451,8 @@ op_list_dns() {
     # Reuse an owned DNS decision only while its exact group/route proof matches.
     if [ -f "$LD_PROOF" ]; then
         service_signature "$LD_GROUP" > "$RUNCFG.identity"
-        sed -n 's/^G //p' "$LD_PROOF" | cmp -s - "$RUNCFG.identity" || die list_dns_reference_only 75
+        ld_old_identity=$(sed -n 's/^G //p' "$LD_PROOF" | service_canonical) || die list_dns_reference_only 75
+        [ "$ld_old_identity" = "$(cat "$RUNCFG.identity")" ] || die list_dns_reference_only 75
         while IFS= read -r ld_line; do
             case "$ld_line" in 'D '*) doh_present "${ld_line#D }" || die list_dns_reference_only 75 ;; esac
         done < "$LD_PROOF"
@@ -1610,7 +1640,31 @@ group_domains() {
 # service_domains ID OUT: the catalog's domains of a service, each one checked.
 # A catalog match and enabled.tsv are references, never proof of ownership.
 # Record the group VWARD actually created; an owner edit or reused ID revokes it.
+# LEFT minus RIGHT. FILENAME (not NR==FNR) also handles an empty RIGHT.
+# Check inputs before awk: a missing image is unknown, never an empty set.
+service_difference() {
+    [ -f "$1" ] && [ -r "$1" ] && [ -f "$2" ] && [ -r "$2" ] || return 1
+    awk 'FILENAME==ARGV[1] {seen[$0]=1; next} !($0 in seen)' "$2" "$1"
+}
+
+# Keenetic removes syntactic quotes from simple descriptions. Only normalize a
+# complete quoted description, with no embedded quote/escape; every other byte
+# (include/exclude, description value, route and options) remains significant.
+service_canonical() {
+    awk '/^description "/ && /"$/ {
+        d=substr($0,14,length($0)-14)
+        if (d !~ /["\\\\]/) $0="description " d
+    } {print}' | sort
+}
+service_matches() {
+    [ -f "$2" ] && [ -r "$2" ] || return 1
+    sm_now=$(service_signature "$1") && sm_old=$(service_canonical < "$2") && [ "$sm_now" = "$sm_old" ]
+}
+
 service_signature() {
+    service_signature_raw "$1" | service_canonical
+}
+service_signature_raw() {
     { awk -v g="$1" '/^object-group fqdn / {cur=$3; next} /^!/ {cur=""}
           cur==g {sub(/^[[:space:]]+/, ""); if (NF) print}' "$RUNCFG"
       group_routes "$1" | sed 's/^/route=/'
@@ -1624,7 +1678,7 @@ service_owned() {
     so_meta=$(ls -ln "$so_file" 2>/dev/null | awk '{print $1}')
     case "$so_meta" in -rw-------|-r--------) ;; *) return 1 ;; esac
     grep -qx "object-group fqdn $1" "$RUNCFG" || return 1
-    service_signature "$1" | cmp -s - "$so_file"
+    service_matches "$1" "$so_file"
 }
 
 service_claim() {
@@ -1633,6 +1687,61 @@ service_claim() {
     new_tmp "$SERVICES_ETC/owned/$1" || die write_failed
     service_signature "$1" > "$TMPFILE" || die write_failed
     install_tmp "$SERVICES_ETC/owned/$1" 0600 || die write_failed
+}
+
+# A private creation journal is provenance; catalog/name similarity is not.
+# Reconnect only an exact, accepted creation with an authoritative registration
+# postimage. A different route is an owner decision, not permission to retarget.
+service_origin() {
+    so_id=$1 so_target=$2 so_found=
+    [ "$so_target" != vpn ] || so_target=$VWARD_TUNNEL_INTERFACE
+    for so_dir in "$BACKUP_DIR"/service-transactions.resolved/txn.*; do
+        [ -d "$so_dir" ] && [ ! -L "$so_dir" ] && [ -O "$so_dir" ] || continue
+        [ "$(ls -ld "$so_dir" | awk '{print $1}')" = drwx------ ] || continue
+        so_ok=1
+        for so_f in after.enabled resolved groups; do
+            [ -f "$so_dir/$so_f" ] && [ ! -L "$so_dir/$so_f" ] && [ -O "$so_dir/$so_f" ] || so_ok=0
+        done
+        [ "$so_ok" = 1 ] || continue
+        grep -Eq '^state=(accepted:partial|committed)$' "$so_dir/resolved" || continue
+        so_g=$(awk -F'\t' -v i="$so_id" '$1==i && NF==3 {print $2}' "$so_dir/after.enabled")
+        valid_group "$so_g" || continue
+        if [ -e "$SERVICES_STATE" ]; then
+            [ -r "$SERVICES_STATE" ] && awk -F'\t' -v g="$so_g" '$2==g {found=1} END {exit found}' "$SERVICES_STATE" || continue
+        fi
+        so_ok=1
+        for so_f in new group route; do
+            [ -f "$so_dir/$so_f.$so_g" ] && [ ! -L "$so_dir/$so_f.$so_g" ] && [ -O "$so_dir/$so_f.$so_g" ] || so_ok=0
+        done
+        [ "$so_ok" = 1 ] && [ ! -s "$so_dir/group.$so_g" ] && [ ! -s "$so_dir/route.$so_g" ] || continue
+        grep -Fxq "$so_g" "$so_dir/groups" || continue
+        so_body=$(service_signature "$so_g" | sed '/^route=/d') || continue
+        so_old=$(service_canonical < "$so_dir/new.$so_g") || continue
+        [ -n "$so_body" ] && [ "$so_body" = "$so_old" ] || continue
+        so_routes=$(group_routes "$so_g")
+        [ -z "$so_routes" ] || [ "$so_routes" = "$so_target$(printf '\t')auto" ] || continue
+        # Creation began with an absent group: only an empty return route is
+        # justified. A live old URL is still not permission to resurrect it.
+        if [ -e "$LISTS_STATE/$so_g" ] || [ -L "$LISTS_STATE/$so_g" ]; then
+            [ -f "$LISTS_STATE/$so_g" ] && [ ! -L "$LISTS_STATE/$so_g" ] && [ -O "$LISTS_STATE/$so_g" ] || continue
+            awk 'BEGIN {n=0} /^route=-([\t](-|auto))?$/ {n++; next} {bad=1} END {exit bad || n!=1}' "$LISTS_STATE/$so_g" || continue
+        fi
+        [ -z "$so_found" ] || [ "$so_found" = "$so_g" ] || return 1
+        so_found=$so_g
+    done
+    [ -n "$so_found" ] || return 1
+    printf '%s\n' "$so_found"
+}
+
+# Capture an existing proven resource BEFORE installing a fresh claim. Treating
+# it as a new group would give rollback permission to delete the owner's list.
+service_txn_reconnect() {
+    service_signature_raw "$1" > "$SV_DIR/group.$1" &&
+        group_routes "$1" > "$SV_DIR/route.$1" &&
+        service_txn_backup "$SERVICES_ETC/owned/$1" "claim.$1" &&
+        service_txn_backup "$LISTS_STATE/$1" "saved.$1" &&
+        printf '%s\n' "$1" >> "$SV_DIR/groups" || die backup_failed
+    service_claim "$1"
 }
 
 service_domains() {
@@ -1685,9 +1794,18 @@ service_txn_restore() {
 }
 
 service_pending_check() {
+    # Finish child writer compensation before replaying a composite AI intent.
+    for sv_kind in writer ai; do
     for sv_pending in "$BACKUP_DIR"/service-transactions/*/pending; do
         [ -e "$sv_pending" ] || continue
-        [ "${VWARD_SERVICE_TRANSACTION:-}" = "${sv_pending%/pending}" ] || die service_recovery_required 75
+        [ "${VWARD_SERVICE_TRANSACTION:-}" != "${sv_pending%/pending}" ] || continue
+        [ "${VWARD_AI_TRANSACTION:-}" != "${sv_pending%/pending}" ] || continue
+        if [ -f "${sv_pending%/pending}/ai" ]; then [ "$sv_kind" = ai ] || continue
+        else [ "$sv_kind" = writer ] || continue; fi
+        # Same guarded recovery as the diagnostic operation, before this action's
+        # first write. Unknown or live work remains a barrier, never blind accept.
+        svr_auto "${sv_pending%/pending}" || die service_recovery_required 75
+    done
     done
 }
 
@@ -1702,7 +1820,7 @@ service_txn_begin() {
            : > "$SV_DIR/groups" && : > "$SV_DIR/undo" &&
            # Whose it is and what it was (fix.35.4): «service-recover» tells a running
            # operation from one left behind, and names it for the owner. No secrets here.
-           echo "$$" > "$SV_DIR/pid" && printf '%s %s %s\n' "$OP" "$ARG1" "${ARG2:-}" > "$SV_DIR/op" &&
+           echo "$$" > "$SV_DIR/pid" && vward_admission_pid_start $$ > "$SV_DIR/pid_start" && printf '%s %s %s\n' "$OP" "$ARG1" "${ARG2:-}" > "$SV_DIR/op" &&
            : > "$SV_DIR/pending"; }; then
         rm -rf "${SV_DIR:?}"; SV_DIR=; die backup_failed
     fi
@@ -1712,7 +1830,7 @@ service_txn_begin() {
 service_txn_group() {
     valid_group "$1" && service_owned "$1" || die service_reference_only 64
     grep -Fxq "$1" "$SV_DIR/groups" && return 0
-    service_signature "$1" > "$SV_DIR/group.$1" &&
+    service_signature_raw "$1" > "$SV_DIR/group.$1" &&
         group_routes "$1" > "$SV_DIR/route.$1" &&
         service_txn_backup "$SERVICES_ETC/owned/$1" "claim.$1" &&
         service_txn_backup "$LISTS_STATE/$1" "saved.$1" &&
@@ -1740,18 +1858,21 @@ service_txn_commit() {
 # Compensation is limited to this transaction's possible delta. An owner edit
 # outside it is left intact, with recovery retained instead of blind replay.
 service_txn_allowed() {
+    [ -f "$SV_DIR/group.$1" ] && [ -f "$SV_DIR/route.$1" ] || return 1
     service_signature "$1" > "$SV_DIR/current.$1" || return 1
+    service_canonical < "$SV_DIR/group.$1" > "$SV_DIR/before.$1" || return 1
     if [ -f "$SV_DIR/new.$1" ]; then
+        service_canonical < "$SV_DIR/new.$1" > "$SV_DIR/allowed.$1" || return 1
         # A partial create may contain only the intended body, never owner edits.
         awk 'FILENAME==ARGV[1] {ok[$0]=1; next}
             !/^route=/ && !($0 in ok) {bad=1} END {exit bad}' \
-            "$SV_DIR/new.$1" "$SV_DIR/current.$1" || return 1
+            "$SV_DIR/allowed.$1" "$SV_DIR/current.$1" || return 1
     elif [ -f "$SV_DIR/deleted.$1" ] && ! grep -qx "object-group fqdn $1" "$RUNCFG"; then
         [ -z "$(group_routes "$1")" ]
         return $?
     else
     sed '/^include /d;/^route=/d' "$SV_DIR/current.$1" > "$SV_DIR/meta.now"
-    sed '/^include /d;/^route=/d' "$SV_DIR/group.$1" > "$SV_DIR/meta.old"
+    sed '/^include /d;/^route=/d' "$SV_DIR/before.$1" > "$SV_DIR/meta.old"
     cmp -s "$SV_DIR/meta.now" "$SV_DIR/meta.old" || return 1
     awk -v g="$1" '
         FILENAME==ARGV[1] && $1=="include" {lo[$2]=1; hi[$2]=1; next}
@@ -1762,7 +1883,7 @@ service_txn_allowed() {
         }
         FILENAME==ARGV[3] && $1=="include" {seen[$2]=1; if(!hi[$2]) bad=1}
         END {for(d in lo) if(lo[d] && !seen[d]) bad=1; exit bad}
-    ' "$SV_DIR/group.$1" "$SV_DIR/undo" "$SV_DIR/current.$1" || return 1
+    ' "$SV_DIR/before.$1" "$SV_DIR/undo" "$SV_DIR/current.$1" || return 1
     fi
     group_routes "$1" > "$SV_DIR/routes.now"
     sv_intended=$(cat "$SV_DIR/target.$1" 2>/dev/null)
@@ -1822,7 +1943,7 @@ service_txn_rollback() {
     done < "$SV_DIR/groups"
     "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && config_snapshot_valid "$RUNCFG" || return 1
     while IFS= read -r sv_g; do
-        service_signature "$sv_g" | cmp -s - "$SV_DIR/group.$sv_g" || sv_bad=1
+        service_matches "$sv_g" "$SV_DIR/group.$sv_g" || sv_bad=1
         group_routes "$sv_g" | cmp -s - "$SV_DIR/route.$sv_g" || sv_bad=1
     done < "$SV_DIR/groups"
     service_txn_restore_written "$SERVICES_STATE" enabled || sv_bad=1
@@ -1853,17 +1974,100 @@ service_txn_rollback() {
 # «resolved» note (state, time); «pending» goes only with that move. A running operation is never
 # touched.
 SV_RESOLVED_KEEP=20
+svr_auto() {
+    svr_auto_dir=$1 svr_auto_locked=$LOCKED
+    ! svr_live "$svr_auto_dir" || return 1
+    if [ -f "$svr_auto_dir/ai" ]; then
+        svr_auto_edit=$EDIT_LOCKED
+        if [ "$EDIT_LOCKED" = 1 ]; then rm -rf "${EDIT_LOCK:?}"; EDIT_LOCKED=0; fi
+        svr_auto_result=0; ai_resume "$svr_auto_dir" || svr_auto_result=1
+        [ "$svr_auto_edit" != 1 ] || edit_lock
+        return "$svr_auto_result"
+    fi
+    [ -f "$svr_auto_dir/groups" ] && [ -f "$svr_auto_dir/undo" ] || return 1
+    # A journal without global before images cannot prove compensation.
+    for svr_auto_f in enabled categories catalog; do
+        [ -f "$svr_auto_dir/$svr_auto_f" ] || [ -f "$svr_auto_dir/$svr_auto_f.absent" ] || return 1
+    done
+    load_profile_base
+    change_lock
+    snapshot
+    svr_classify "$svr_auto_dir"
+    if [ "$SVR_STATE" = rolled_back ]; then
+        svr_close "$svr_auto_dir" rolled_back; SV_DIR=
+    else
+        svr_auto_copy=$(umask 077; mktemp -d "$BACKUP_DIR/service-transactions/auto.XXXXXX") || die backup_failed
+        cp -Rp "$svr_auto_dir/." "$svr_auto_copy/" || die backup_failed
+        SV_DIR=$svr_auto_copy
+        # Re-evaluate historical foreign markers against canonical body, rather
+        # than trusting a past false mismatch. DNS must already match the before
+        # side; this recovery never resurrects a saved server or guesses API state.
+        svr_auto_ok=1
+        while IFS= read -r svr_auto_g; do
+            valid_group "$svr_auto_g" && service_txn_allowed "$svr_auto_g" || { svr_auto_ok=0; break; }
+            if [ -f "$SV_DIR/dns-risk.$svr_auto_g" ]; then
+                svr_dns_at "$svr_auto_g" "$SV_DIR/saved.$svr_auto_g" || { svr_auto_ok=0; break; }
+            fi
+        done < "$SV_DIR/groups"
+        if [ "$svr_auto_ok" = 1 ]; then
+            while IFS= read -r svr_auto_g; do
+                rm -f "$SV_DIR/foreign.$svr_auto_g" "$SV_DIR/dns-risk.$svr_auto_g"
+            done < "$SV_DIR/groups"
+            if service_txn_rollback; then
+                SVR_WHY=compensated; svr_close "$svr_auto_dir" rolled_back
+            else
+                svr_auto_ok=0
+            fi
+        fi
+        rm -rf "${svr_auto_copy:?}"
+        SV_DIR=
+        [ "$svr_auto_locked" = 1 ] || release_lock
+        [ "$svr_auto_ok" = 1 ] || return 1
+    fi
+    [ "$svr_auto_locked" = 1 ] || release_lock
+}
 svr_live() {
+    # A legacy service shell may be dead while its external request is applying.
+    ai_writers_live && return 0
+    if [ -f "$1/ai" ]; then
+        for svr_child in "$1"/children/*; do
+            [ -f "$svr_child" ] || continue
+            svr_cp=${svr_child##*/}
+            case "$svr_cp" in ''|*[!0-9]*) return 0 ;; esac
+            kill -0 "$svr_cp" 2>/dev/null || continue
+            svr_cs=$(cat "$svr_child") || return 0
+            vward_pid_start_var "$svr_cp" || return 0
+            case "$va_rest" in 'Z '*|'X '*) continue ;; esac
+            [ "$svr_cs" != "$VA_PS" ] || return 0
+        done
+    fi
     svr_pid=$(cat "$1/pid" 2>/dev/null)
     case "$svr_pid" in ''|*[!0-9]*)
         # Before fix.35.4 no pid was kept: live while any other helper process runs.
         for svr_p in /proc/[0-9]*; do
             [ "${svr_p#/proc/}" != "$$" ] || continue
-            tr '\000' ' ' < "$svr_p/cmdline" 2>/dev/null | grep -q 'vward-console-config' && return 0
+            { tr '\000' '\n' < "$svr_p/cmdline"; } 2>/dev/null | grep -Eq '(^|/)vward-console-config[.]sh$' && return 0
         done
         return 1 ;;
     esac
-    [ "$svr_pid" != "$$" ] && kill -0 "$svr_pid" 2>/dev/null
+    [ "$svr_pid" != "$$" ] && kill -0 "$svr_pid" 2>/dev/null || return 1
+    # Old journals have no birth time: conservatively retain any live saved PID.
+    if [ -f "$1/pid_start" ]; then
+        svr_start=$(cat "$1/pid_start") || return 0
+        vward_pid_start_var "$svr_pid" || { kill -0 "$svr_pid" 2>/dev/null; return $?; }
+        [ "$svr_start" = "$VA_PS" ] || return 1
+    fi
+    return 0
+}
+ai_writers_live() {
+    # A killed shell may leave ndmc/HTTP alive. A retained inflight operation
+    # cannot be explicitly closed while a possible writer is still running.
+    for aw_p in /proc/[0-9]*/cmdline; do
+        { tr '\000' '\n' < "$aw_p"; } 2>/dev/null | awk -v nd="$NDMC" -v ads="$ADS_CONTROL" -v curl="${VWARD_CURL_BIN:-curl}" '
+            $0==nd || $0==ads || $0==curl || /(^|\/)(ndmc|vward-ndmc[.]sh|vward-ads-privacy-control[.]sh|curl|wget|uclient-fetch)$/ {live=1}
+            END {exit !live}' && return 0
+    done
+    return 1
 }
 # agh_domain_urls DOMAIN: the servers of AdGuard Home's Smart DNS rows that name DOMAIN, one a line
 # (into a private file by the caller: they may hold a token).
@@ -1929,7 +2133,7 @@ svr_classify() {
         if [ -f "$SV_DIR/new.$svr_g" ]; then
             ! grep -qx "object-group fqdn $svr_g" "$RUNCFG" && [ -z "$(group_routes "$svr_g")" ] || SVR_WHY="$SVR_WHY list:$svr_g"
         else
-            service_signature "$svr_g" | cmp -s - "$SV_DIR/group.$svr_g" || SVR_WHY="$SVR_WHY list:$svr_g"
+            service_matches "$svr_g" "$SV_DIR/group.$svr_g" || SVR_WHY="$SVR_WHY list:$svr_g"
         fi
         # A list whose Smart DNS rows moved with it: they must sit where they were.
         if [ -f "$SV_DIR/dns-risk.$svr_g" ]; then svr_dns_at "$svr_g" "$SV_DIR/saved.$svr_g" || SVR_WHY="$SVR_WHY dns:$svr_g"; fi
@@ -1945,12 +2149,16 @@ svr_classify() {
 # GROUP|+added|-removed|route before|route now|title (domains and tunnel names, no addresses), so the
 # owner sees what «Вернуть как до операции» would change and what «Оставить как есть» keeps.
 svr_diff() {
+    [ -f "$1/groups" ] && [ -r "$1/groups" ] || return 1
     while IFS= read -r svd_g; do
         valid_group "$svd_g" || continue
-        sed -n 's/^include //p' "$1/group.$svd_g" 2>/dev/null | tr 'A-Z' 'a-z' | sort -u > "$1/diff.before"
+        [ -f "$1/group.$svd_g" ] && [ -r "$1/group.$svd_g" ] && [ -f "$1/route.$svd_g" ] || return 1
+        sed -n 's/^include //p' "$1/group.$svd_g" | tr 'A-Z' 'a-z' | sort -u > "$1/diff.before"
         group_domains "$svd_g" > "$1/diff.now"
-        svd_add=$(comm -13 "$1/diff.before" "$1/diff.now" | grep -c .)
-        svd_del=$(comm -23 "$1/diff.before" "$1/diff.now" | grep -c .)
+        service_difference "$1/diff.now" "$1/diff.before" > "$1/diff.delta" || return 1
+        svd_add=$(wc -l < "$1/diff.delta" | tr -d ' ')
+        service_difference "$1/diff.before" "$1/diff.now" > "$1/diff.delta" || return 1
+        svd_del=$(wc -l < "$1/diff.delta" | tr -d ' ')
         svd_rb=$(cut -f1 "$1/route.$svd_g" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
         svd_rn=$(group_routes "$svd_g" | cut -f1 | tr '\n' ' ' | sed 's/ $//')
         svd_t=$(awk -v g="$svd_g" '/^object-group fqdn / {c = $3; next} /^!/ {c = ""} c == g && $1 == "description" {sub(/^[ \t]*description[ \t]*/, ""); gsub(/["|]/, ""); print; exit}' "$RUNCFG")
@@ -1980,15 +2188,18 @@ svr_restore() {
             grep -qx "object-group fqdn $svs_g" "$RUNCFG" || ndm "object-group fqdn $svs_g" || return 1
             svs_desc=$(sed -n 's/^description //p' "$1/group.$svs_g" | head -n 1)
             svs_now=$(service_signature "$svs_g" | sed -n 's/^description //p' | head -n 1)
-            [ -z "$svs_desc" ] || [ "$svs_desc" = "$svs_now" ] || ndm "object-group fqdn $svs_g description $svs_desc" || return 1
+            svs_canon=$(printf 'description %s\n' "$svs_desc" | service_canonical | sed 's/^description //')
+            [ -z "$svs_desc" ] || [ "$svs_canon" = "$svs_now" ] || ndm "object-group fqdn $svs_g description $svs_desc" || return 1
             sed -n 's/^include //p' "$1/group.$svs_g" | tr 'A-Z' 'a-z' | sort -u > "$1/diff.before"
             group_domains "$svs_g" > "$1/diff.now"
-            comm -13 "$1/diff.before" "$1/diff.now" | while IFS= read -r svs_d; do
+            service_difference "$1/diff.now" "$1/diff.before" > "$1/diff.delta" || return 1
+            while IFS= read -r svs_d; do
                 ndm "no object-group fqdn $svs_g include $svs_d" || exit 1
-            done || return 1
-            comm -23 "$1/diff.before" "$1/diff.now" | while IFS= read -r svs_d; do
+            done < "$1/diff.delta" || return 1
+            service_difference "$1/diff.before" "$1/diff.now" > "$1/diff.delta" || return 1
+            while IFS= read -r svs_d; do
                 ndm "object-group fqdn $svs_g include $svs_d" || exit 1
-            done || return 1
+            done < "$1/diff.delta" || return 1
             while IFS="$(printf '\t')" read -r svs_t svs_o; do
                 [ -n "$svs_t" ] || continue
                 awk -F'\t' -v t="$svs_t" '$1 == t {f = 1} END {exit !f}' "$1/route.$svs_g" || ndm "dns-proxy no route object-group $svs_g $svs_t" || return 1
@@ -2011,7 +2222,7 @@ svr_restore() {
         if [ -f "$1/new.$svs_g" ]; then
             ! grep -qx "object-group fqdn $svs_g" "$RUNCFG" && [ -z "$(group_routes "$svs_g")" ] || return 1
         else
-            service_signature "$svs_g" | cmp -s - "$1/group.$svs_g" || return 1
+            service_matches "$svs_g" "$1/group.$svs_g" || return 1
         fi
     done < "$1/groups"
     save_router || return 1
@@ -2037,10 +2248,16 @@ op_service_recover() {
             svr_d=${svr_p%/pending}
             svr_at=$(date -r "$svr_p" +%s 2>/dev/null) || svr_at=$(date +%s)
             if svr_live "$svr_d"; then SVR_STATE=running SVR_WHY=
+            elif [ -f "$svr_d/ai" ]; then SVR_STATE=partial SVR_WHY=ai:unverified
             else svr_classify "$svr_d"; fi
-            printf 'info.txn=%s|%s|%s|%s|%s|%s\n' "${svr_d##*/}" "$(tr -d '|\n' < "$svr_d/op" 2>/dev/null)" "$(( $(date +%s) - svr_at ))" \
+            printf 'info.txn=%s|%s|%s|%s|%s|%s\n' "${svr_d##*/}" "$({ tr -d '|\n' < "$svr_d/op"; } 2>/dev/null)" "$(( $(date +%s) - svr_at ))" \
                 "$SVR_STATE" "$(tr '\n' ' ' < "$svr_d/groups" | sed 's/ $//')" "$SVR_WHY"
-            [ "$SVR_STATE" = running ] || svr_diff "$svr_d" | sed "s/^info.diff=/info.diff=${svr_d##*/}|/"
+            if [ "$SVR_STATE" != running ]; then
+                if [ -f "$svr_d/ai" ]; then
+                    ai_diff "$svr_d" > "$svr_d/diff.report" || { SV_DIR=; die service_recovery_unverified; }
+                else svr_diff "$svr_d" > "$svr_d/diff.report" || { SV_DIR=; die service_recovery_unverified; }; fi
+                sed "s/^info.diff=/info.diff=${svr_d##*/}|/" "$svr_d/diff.report"
+            fi
         done
         SV_DIR=
         done_ok "service-recover status" checked
@@ -2051,10 +2268,22 @@ op_service_recover() {
     [ -d "$svr_d" ] && [ ! -L "$svr_d" ] && [ -f "$svr_d/pending" ] || die service_recovery_absent 64
     change_lock
     ! svr_live "$svr_d" || die service_recovery_running 75
+    if [ -f "$svr_d/ai" ]; then
+        if [ "$2" = resolve ]; then
+            release_lock
+            ai_resume "$svr_d" || die service_recovery_unverified
+        elif [ "$2" = accept ]; then
+            # An explicit owner decision keeps actual state; it never adopts a
+            # group or restores a DNS address. The exact private images remain.
+            SVR_WHY=ai:owner_kept_current; svr_close "$svr_d" accepted:partial
+        else die service_recovery_unverified; fi
+        SV_DIR=
+        done_ok "service-recover $1 $2 ai" changed
+    fi
     snapshot
     svr_classify "$svr_d"
     printf 'info.state=%s\ninfo.why=%s\n' "$SVR_STATE" "$SVR_WHY"
-    svr_diff "$svr_d"
+    svr_diff "$svr_d" || { SV_DIR=; die service_recovery_unverified; }
     if [ "$2" = accept ]; then
         svr_close "$svr_d" "accepted:$SVR_STATE"; SV_DIR=
         done_ok "service-recover $1 accept state=$SVR_STATE" changed
@@ -2128,7 +2357,7 @@ service_route() {
         printf '%s\n' "$sv_target" > "$SV_DIR/target.$1" || die write_failed
         sv_cur=$(group_route "$1"); sv_cur=${sv_cur%%"$(printf '\t')"*}
         if [ "$2" = bypass ]; then
-            if grep -Eq '^(doh|agh)=' "$LISTS_STATE/$1" 2>/dev/null; then
+            if [ "${VWARD_SERVICE_DISCARD_DNS:-0}" != 1 ] && grep -Eq '^(doh|agh)=' "$LISTS_STATE/$1" 2>/dev/null; then
                 : > "$SV_DIR/dns-risk.$1" || die write_failed
             fi
         elif ! is_tunnel "$sv_cur"; then
@@ -2137,8 +2366,9 @@ service_route() {
             fi
         fi
     fi
-    sr_out=$(VWARD_SERVICE_ID="$sv_id" VWARD_SERVICE_TRANSACTION="${SV_DIR:-}" sh "$0" domain-list "$1" "$2" 2>/dev/null | tail -n 1)
-    case "$sr_out" in result=*)
+    sr_all=$(VWARD_SERVICE_ID="$sv_id" VWARD_SERVICE_TRANSACTION="${SV_DIR:-}" sh "$0" domain-list "$1" "$2" 2>/dev/null); sr_rc=$?
+    sr_out=$(printf '%s\n' "$sr_all" | tail -n 1)
+    case "$sr_rc:$sr_out" in 0:result=*)
         if [ "${SV_TXN:-0}" = 1 ] && [ -f "$SV_DIR/dns-risk.$1" ]; then
             service_txn_backup "$LISTS_STATE/$1" "dns-after.$1" || die backup_failed
         fi
@@ -2202,6 +2432,29 @@ op_service_category() {
     done_ok "service-category $1 $2 moved=$sc_n" changed
 }
 
+# Explicit observation of a manual list is a reference, never an ownership claim.
+# It is useful only when the entire catalog is already on the requested route.
+service_reference_matches() {
+    srm_target=$2; [ "$srm_target" != vpn ] || srm_target=$VWARD_TUNNEL_INTERFACE
+    [ "$(group_routes "$1")" = "$srm_target$(printf '\t')auto" ] || return 1
+    srm_domains=$("$JQ" -r --arg i "$3" '.services[] | select(.id==$i) | .domains[]' "$SV_CAT") || return 1
+    [ -n "$srm_domains" ] || return 1
+    for srm_d in $srm_domains; do valid_domain "$srm_d" || return 1; done
+    awk -v g="$1" -v ds="$srm_domains" '
+        BEGIN {n=split(ds,w,"\n")}
+        /^object-group fqdn / {cur=$3; next} /^!/ {cur=""}
+        cur==g && NF {if($1=="description") next; if($1=="include") {have[tolower($2)]=1; next}; bad=1}
+        END {for(i=1;i<=n;i++) {d=w[i]; found=0; while(d!="") {if(d in have) {found=1; break}; k=index(d,"."); d=k?substr(d,k+1):""}; if(!found) bad=1}; exit bad}
+    ' "$RUNCFG" || return 1
+    srm_yaml=${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}
+    [ ! -e "$srm_yaml" ] || [ -r "$srm_yaml" ] || return 1
+    srm_dns=$({ doh_lines | awk '$(NF-1)=="domain" {print tolower($NF)}'; vward_agh_smartdns_domains; })
+    awk -v ds="$srm_domains" -v active="$srm_dns" 'BEGIN {
+        n=split(ds,w,"\n"); m=split(active,a,"\n")
+        for(i=1;i<=n;i++) for(j=1;j<=m;j++) if(a[j]!="" && (w[i]==a[j] || (length(w[i])>length(a[j]) && substr(w[i],length(w[i])-length(a[j]))=="." a[j]))) exit 1
+    }'
+}
+
 op_service() {
     # service on ID auto|TUNNEL | tunnel ID auto|TUNNEL | off ID
     sv_op=$1 sv_id=$2 sv_to=${3:-}
@@ -2209,13 +2462,29 @@ op_service() {
     case "$sv_op" in
         on|tunnel)
             case "$sv_to" in auto) ;; ''|*[!A-Za-z0-9_.-]*) die invalid_value 64 ;; esac ;;
+        reference)
+            valid_group "$sv_to" || die invalid_group 64
+            printf '%s\n' "${4:-}" | grep -Eq '^[0-9a-f]{64}$' || die invalid_value 64 ;;
         off) [ -z "$sv_to" ] || die usage 64 ;;
         *) die invalid_operation 64 ;;
     esac
     SV_CAT=$(services_catalog) || die services_unavailable
     load_profile_base
-    [ "$sv_to" = auto ] || [ "$sv_op" = off ] || is_tunnel "$sv_to" || die unknown_tunnel 64
+    [ "$sv_to" = auto ] || [ "$sv_op" = off ] || [ "$sv_op" = reference ] || is_tunnel "$sv_to" || die unknown_tunnel 64
     service_pending_check
+    if [ "$sv_op" = reference ]; then
+        change_lock; snapshot
+        [ ! -e "$SERVICES_ETC/owned/$sv_to" ] && [ ! -L "$SERVICES_ETC/owned/$sv_to" ] || die service_reference_only 64
+        srf_cfg=$(cat "$RUNCFG") || die config_unavailable
+        srf_token=$(printf '%s\n' "$srf_cfg" | sha256sum | cut -d' ' -f1)
+        [ "$srf_token" = "$4" ] || die reference_preview_changed 75
+        service_reference_matches "$sv_to" "$(service_target auto "$sv_id")" "$sv_id" || die service_reference_only 64
+        srf_row=$(service_row "$sv_id")
+        [ -z "$srf_row" ] || [ "$srf_row" = "$sv_id$(printf '\t')$sv_to$(printf '\t')auto" ] || die service_reference_only 64
+        service_state_set "$sv_id" "$sv_to" auto
+        [ "$(service_row "$sv_id")" = "$sv_id$(printf '\t')$sv_to$(printf '\t')auto" ] || die verification_failed
+        done_ok "service reference $sv_id $sv_to read-only" changed
+    fi
     row=$(service_row "$sv_id")
     G=$(printf '%s' "$row" | cut -f2)
     if [ -n "$row" ]; then
@@ -2224,6 +2493,10 @@ op_service() {
             if [ "$sv_op" = off ]; then
                 service_state_set "$sv_id"
                 done_ok "service off $sv_id reference-only" changed
+            fi
+            if [ ! -e "$SERVICES_ETC/owned/$G" ] && [ ! -L "$SERVICES_ETC/owned/$G" ] &&
+               service_reference_matches "$G" "$(service_target "$sv_to" "$sv_id")" "$sv_id"; then
+                done_ok "service $sv_op $sv_id $G observed route unchanged" unchanged
             fi
             die service_reference_only 64
         fi
@@ -2286,6 +2559,17 @@ op_service() {
     n=$(grep -c . "$JOURNAL.doh")
     [ "$n" -le "$SERVICE_LIMIT" ] || die service_too_big 64
     snapshot
+    sv_proven=$(service_origin "$sv_id" "$(service_target "$sv_to" "$sv_id")")
+    if [ -n "$sv_proven" ]; then
+        G=$sv_proven
+        service_txn_begin
+        service_txn_reconnect "$G"
+        service_state_set "$sv_id" "$G" "$sv_to"
+        release_lock
+        service_route "$G" "$(service_target "$sv_to" "$sv_id")" || die "$SR_ERR"
+        service_txn_commit
+        done_ok "service on $sv_id $G $sv_to reconnected" changed
+    fi
     sv_found=$(service_adopt "$title" "$JOURNAL.doh")
     if [ -n "$sv_found" ]; then
         # The list is there already: it is taken, not made again; the others are duplicates.
@@ -2359,8 +2643,8 @@ op_services_refresh() {
             service_txn_group "$grp"
             group_domains "$grp" > "$JOURNAL.moves"
             # Retire old members first so a valid 300->300 update fits throughout.
-            comm -23 "$JOURNAL.moves" "$JOURNAL.doh" > "$JOURNAL.dels" || die write_failed
-            comm -13 "$JOURNAL.moves" "$JOURNAL.doh" > "$JOURNAL.adds" || die write_failed
+            service_difference "$JOURNAL.moves" "$JOURNAL.doh" > "$JOURNAL.dels" || die write_failed
+            service_difference "$JOURNAL.doh" "$JOURNAL.moves" > "$JOURNAL.adds" || die write_failed
             while IFS= read -r d; do
                 printf 'object-group fqdn %s include %s\n' "$grp" "$d" >> "$SV_DIR/undo" || die write_failed
                 ndm "no object-group fqdn $grp include $d" || die router_rejected
@@ -3497,18 +3781,28 @@ smartdns_store() {
 op_smartdns_store() {
     case "$1" in auto|keenetic|agh) ;; *) die invalid_value 64 ;; esac
     [ "$(smartdns_store)" != "$1" ] || done_ok "smartdns-store $1" unchanged
-    # AdGuard Home chosen: it must be there to take them.
-    [ "$1" != agh ] || [ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] || die adguard_unavailable
+    # Preference for future writes may be chosen before a server/component exists.
+    # Availability is checked by the writer, never by silently replacing this choice.
     new_tmp "$SMARTDNS_CONF" || die write_failed
     { grep -v '^SMARTDNS_STORE=' "$SMARTDNS_CONF" 2>/dev/null; [ "$1" = auto ] || printf 'SMARTDNS_STORE=%s\n' "$1"; } > "$TMPFILE" || die write_failed
     if [ -s "$TMPFILE" ]; then install_tmp "$SMARTDNS_CONF" 0600 || die write_failed; else rm -f "$SMARTDNS_CONF"; fi
     done_ok "smartdns-store $1" changed
 }
+smartdns_effective_store() {
+    ses=$(smartdns_store)
+    if [ "$ses" = auto ]; then
+        ses=keenetic
+        ses_cap=$(vward_smartdns_storage)
+        [ "$(printf '%s\n' "$ses_cap" | cut -f3)" != 1 ] || ses=agh
+    fi
+    printf '%s\n' "$ses"
+}
 op_smartdns_domain() {
     case "$1" in add|remove) ;; *) die invalid_operation 64 ;; esac
     valid_domain "$2" || die invalid_domain 64
+    load_profile_base
     JOURNAL=$(umask 077; mktemp /tmp/vward-console-smartdns.XXXXXX 2>/dev/null) || die temporary_file_unavailable
-    if [ "$1" = add ] && [ "$(smartdns_store)" = keenetic ]; then
+    if [ "$1" = add ] && [ "$(smartdns_effective_store)" = keenetic ]; then
         keenetic_smartdns add "$2"
         done_ok "smartdns-domain add $2 keenetic" changed
     fi
@@ -3790,13 +4084,133 @@ ai_main() {
         awk '{for (k in got) if (length($0) > length(k) && substr($0, length($0) - length(k)) == "." k) next; got[$0] = 1; print}' | head -n 4
 }
 ai_step() {
-    as_all=$(sh "$0" "$@" </dev/null 2>/dev/null)
+    as_discard=0
+    [ "${1:-}:${2:-}" != service:off ] || as_discard=1
+    if [ "$AI_TXN" = 1 ]; then
+        printf '%s\n' "$*" > "$AI_DIR/inflight" || die write_failed
+        as_start=$(vward_admission_pid_start $$) || die write_failed
+    fi
+    if [ "$AI_TXN" = 1 ]; then
+        # A file, not a pipe to the AI parent: after its SIGKILL the child can
+        # still finish its own checked write/cleanup without dying of SIGPIPE.
+        (umask 077; : > "$AI_DIR/step.output") || die write_failed
+        VWARD_SERVICE_DISCARD_DNS="$as_discard" VWARD_AI_PARENT_PID="$$" VWARD_AI_PARENT_START="${as_start:-}" VWARD_AI_CHILD_DIR="$AI_DIR" VWARD_AI_TRANSACTION="$AI_DIR" VWARD_SERVICE_TRANSACTION="$AI_DIR" sh "$0" "$@" > "$AI_DIR/step.output" </dev/null 2>/dev/null
+        as_rc=$?; as_all=$(cat "$AI_DIR/step.output")
+    else
+        as_all=$(sh "$0" "$@" </dev/null 2>/dev/null); as_rc=$?
+    fi
     as_out=$(printf '%s\n' "$as_all" | tail -n 1)
-    case "$as_out" in result=*) AI_RES=${as_out#result=}; return 0 ;; esac
+    case "$as_rc:$as_out" in 0:result=*)
+        AI_RES=${as_out#result=}; ai_checkpoint
+        [ "$AI_TXN" != 1 ] || rm -f "$AI_DIR/inflight" || die write_failed
+        return 0 ;; esac
+    [ "$AI_TXN" != 1 ] || rm -f "$AI_DIR/inflight" || die write_failed
     AI_ERR=${as_out#error=}; case "$AI_ERR" in ''|*[!a-z0-9_]*) AI_ERR=helper_failed ;; esac
     # Keenetic's own answer goes on to the Panel and the journal (fix.30 showed only «отклонил»).
     relay_reason "$as_all"
     return 1
+}
+
+# A composite AI move has a durable boundary, in addition to each existing
+# writer's own rollback. No new worker or routing executor is introduced.
+# The checkpoint includes DNS/FQDN and local return/ownership data, never public.
+ai_scope() {
+    [ -n "$RUNCFG" ] || RUNCFG=$(mktemp /tmp/vward-console-config.XXXXXX 2>/dev/null) || return 1
+    "$NDMC" -c 'show running-config' > "$RUNCFG" 2>/dev/null && config_snapshot_valid "$RUNCFG" || return 1
+    awk '/^[^ \t!]/ {c=($1=="dns-proxy" || ($1=="object-group" && $2=="fqdn"))}
+        c {print} /^!/ {c=0}' "$RUNCFG" || return 1
+    for ais_f in "$SERVICES_STATE" "$SERVICES_CATS" "$SMARTDNS_CONF" "$AI_WAIT" \
+        "$SERVICES_ETC"/owned/* "$LISTS_STATE"/* "$LISTS_STATE.dns"/*; do
+        [ -e "$ais_f" ] || continue
+        [ -f "$ais_f" ] && [ ! -L "$ais_f" ] && [ -r "$ais_f" ] || return 1
+        printf '\nFILE %s\n' "$ais_f"
+        cat "$ais_f" || return 1
+    done
+    # AGH rows must be included too; an unreadable configured store is unknown.
+    ais_yaml=${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}
+    if [ -e "$ais_yaml" ]; then
+        [ -f "$ais_yaml" ] && [ ! -L "$ais_yaml" ] && [ -r "$ais_yaml" ] || return 1
+        printf '\nAGH\n'; cat "$ais_yaml" || return 1
+    fi
+}
+ai_checkpoint() {
+    [ "$AI_TXN" = 1 ] || return 0
+    ai_scope > "$AI_DIR/checkpoint.next" && mv -f "$AI_DIR/checkpoint.next" "$AI_DIR/checkpoint" || die write_failed
+}
+ai_inventory() {
+    doh_lines | awk '$(NF-1)=="domain" {print tolower($NF) "\tkeenetic"}'
+    vward_agh_smartdns_domains | awk 'NF {print $0 "\tagh"}'
+}
+# Action-scoped preview, computed from private before images. No settings or
+# original evidence is changed. Includes DNS storage deltas as well as lists.
+ai_diff() {
+    aid_dir=$1
+    aid_tmp=$(umask 077; mktemp -d /tmp/vward-ai-diff.XXXXXX) || return 1
+    cp -Rp "$aid_dir/." "$aid_tmp/" || { rm -rf "${aid_tmp:?}"; return 1; }
+    awk '/^object-group fqdn / {print $3}' "$RUNCFG" > "$aid_tmp/now.groups"
+    while IFS= read -r aid_g; do
+        valid_group "$aid_g" || { rm -rf "${aid_tmp:?}"; return 1; }
+        if ! grep -Fxq "$aid_g" "$aid_tmp/groups"; then
+            printf '%s\n' "$aid_g" >> "$aid_tmp/groups"
+            : > "$aid_tmp/group.$aid_g"; : > "$aid_tmp/route.$aid_g"; : > "$aid_tmp/new.$aid_g"
+        fi
+    done < "$aid_tmp/now.groups"
+    svr_diff "$aid_tmp" || { rm -rf "${aid_tmp:?}"; return 1; }
+    ai_inventory | sort -u > "$aid_tmp/now.dns"
+    service_difference "$aid_tmp/now.dns" "$aid_tmp/before.dns" > "$aid_tmp/add.dns" &&
+        service_difference "$aid_tmp/before.dns" "$aid_tmp/now.dns" > "$aid_tmp/del.dns" || { rm -rf "${aid_tmp:?}"; return 1; }
+    while IFS="$(printf '\t')" read -r aid_domain aid_store; do
+        printf 'info.dns=%s|add|%s|%s\n' "${aid_dir##*/}" "$aid_domain" "$aid_store"
+    done < "$aid_tmp/add.dns"
+    while IFS="$(printf '\t')" read -r aid_domain aid_store; do
+        printf 'info.dns=%s|remove|%s|%s\n' "${aid_dir##*/}" "$aid_domain" "$aid_store"
+    done < "$aid_tmp/del.dns"
+    rm -rf "${aid_tmp:?}"
+}
+ai_journal_begin() {
+    if [ -n "${VWARD_AI_RESUME:-}" ]; then
+        AI_DIR=$VWARD_AI_RESUME
+        [ -f "$AI_DIR/ai" ] && [ -f "$AI_DIR/pending" ] || die service_recovery_unverified
+    else
+        edit_lock
+        for aij_pending in "$BACKUP_DIR"/service-transactions/*/pending; do
+            [ ! -e "$aij_pending" ] || die service_recovery_required 75
+        done
+        mkdir -p "$BACKUP_DIR/service-transactions" && chmod 0700 "$BACKUP_DIR/service-transactions" || die backup_failed
+        AI_DIR=$(umask 077; mktemp -d "$BACKUP_DIR/service-transactions/txn.XXXXXX") || die backup_failed
+        (umask 077
+         printf '%s\n' "$1" "$2" "${3:-}" > "$AI_DIR/ai" &&
+         printf 'ai %s %s\n' "$1" "$2" > "$AI_DIR/op" &&
+         echo $$ > "$AI_DIR/pid" && vward_admission_pid_start $$ > "$AI_DIR/pid_start" &&
+         ai_scope > "$AI_DIR/before" && cp "$AI_DIR/before" "$AI_DIR/checkpoint" &&
+         ai_inventory | sort -u > "$AI_DIR/before.dns" &&
+         cp "$SV_CAT" "$AI_DIR/catalog" && awk '/^object-group fqdn / {print $3}' "$RUNCFG" > "$AI_DIR/groups" &&
+         while IFS= read -r aij_g; do
+             service_signature "$aij_g" > "$AI_DIR/group.$aij_g" && group_routes "$aij_g" > "$AI_DIR/route.$aij_g" || exit 1
+         done < "$AI_DIR/groups" && : > "$AI_DIR/pending") || die backup_failed
+        rm -rf "${EDIT_LOCK:?}"; EDIT_LOCKED=0
+    fi
+    printf '%s\n' "$$" > "$AI_DIR/pid" && vward_admission_pid_start $$ > "$AI_DIR/pid_start" || die write_failed
+    AI_TXN=1
+}
+ai_resume() {
+    air_dir=$1
+    # A read can still equal the old checkpoint while an orphaned external
+    # writer has not applied yet. Never automatically replay an inflight step.
+    [ ! -f "$air_dir/inflight" ] || return 1
+    dir_lock "$air_dir/resume.lock" || return 1
+    if [ ! -f "$air_dir/pending" ]; then rm -rf "${air_dir:?}/resume.lock"; return 0; fi
+    load_profile_base
+    # Snapshot equality is required before an automatic replay of the same
+    # idempotent action. A child applied without a checkpoint is ambiguous.
+    if ! { ai_scope > "$air_dir/current" && cmp -s "$air_dir/current" "$air_dir/checkpoint" &&
+           air_cat=$(services_catalog) && cmp -s "$air_cat" "$air_dir/catalog"; }; then
+        rm -rf "${air_dir:?}/resume.lock"; return 1
+    fi
+    air_id=$(sed -n '1p' "$air_dir/ai") air_way=$(sed -n '2p' "$air_dir/ai") air_keep=$(sed -n '3p' "$air_dir/ai")
+    air_out=$(VWARD_AI_RESUME="$air_dir" VWARD_SERVICE_TRANSACTION="$air_dir" sh "$0" ai "$air_id" "$air_way" "$air_keep" </dev/null 2>/dev/null)
+    rm -rf "${air_dir:?}/resume.lock"
+    [ "$(printf '%s\n' "$air_out" | tail -n 1)" = result=changed ] && [ ! -f "$air_dir/pending" ]
 }
 # ai_undo "DOMAINS": a failed move to Smart DNS takes back the rows it added itself (fix.35.5, A2:
 # before only the «no room» case did, a refused second row left the first one). A row that cannot be
@@ -3813,13 +4227,15 @@ AI_WAIT=${VWARD_AI_WAIT:-$ETC/smartdns-wait}
 ai_wait() {
     [ -f "$AI_WAIT" ] || [ "$1" = add ] || return 0
     { [ ! -f "$AI_WAIT" ] || grep -vxF -- "$2" "$AI_WAIT"; [ "$1" != add ] || printf '%s\n' "$2"; } > "$AI_WAIT.$$" 2>/dev/null &&
-        mv -f "$AI_WAIT.$$" "$AI_WAIT"
-    [ -s "$AI_WAIT" ] || rm -f "$AI_WAIT"
+        mv -f "$AI_WAIT.$$" "$AI_WAIT" || die write_failed
+    [ -s "$AI_WAIT" ] || rm -f "$AI_WAIT" || die write_failed
+    ai_checkpoint
 }
 # ai ID|all WAY [keep]: keep - the owner's answer to «no room in Smart DNS»: the service still
 # waits for Smart DNS.
 op_ai() {
     SV_CAT=$(services_catalog) || die services_unavailable
+    load_profile_base
     case "$2" in vpn|dns|isp) ai_to=auto ;; vpn:*) ai_to=${2#vpn:}; vward_valid_ndm_name "$ai_to" || die invalid_value 64 ;; *) die invalid_value 64 ;; esac
     case "${3:-}" in ''|keep) ;; *) die invalid_value 64 ;; esac
     if [ "$1" = all ]; then
@@ -3838,7 +4254,11 @@ op_ai() {
     if [ "$2" = dns ]; then
         load_profile_base; snapshot
         { smartdns_url >/dev/null 2>&1; } || [ -n "$(vward_agh_smartdns_urls 2>/dev/null | head -n 1)" ] || die smartdns_not_configured
+        ai_url=$(smartdns_url) || ai_url=$(vward_agh_smartdns_urls 2>/dev/null | head -n 1)
+        vward_doh_alive "$ai_url"; ai_alive=$?
+        case "$ai_alive" in 0) ;; 1) die smartdns_dead ;; *) die smartdns_unknown ;; esac
     fi
+    ai_journal_begin "$1" "$2" "${3:-}"
     ai_n=0 ai_left=
     for ai_id in $ai_ids; do
         ai_on=$(service_row "$ai_id")
@@ -3852,7 +4272,7 @@ op_ai() {
                 ai_added= ai_full=0
                 # Keenetic's 8 lines are counted for the whole service before the first one goes
                 # (fix.35.5): no half of a service on Smart DNS.
-                if [ "$(smartdns_store)" = keenetic ] || { [ "$(smartdns_store)" = auto ] && ! [ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ]; }; then
+                if [ "$(smartdns_effective_store)" = keenetic ]; then
                     [ -n "${RUNCFG:-}" ] && [ -s "$RUNCFG" ] || { load_profile_base; snapshot; }
                     ai_need=0
                     for ai_d in $(ai_main "$ai_id"); do
@@ -3888,8 +4308,17 @@ op_ai() {
     if [ -n "$ai_left" ]; then
         # One service: the Panel asks which way instead; several: the rest is asked about.
         printf 'info.left=%s\n' "$ai_left"
-        [ "$1" = all ] && [ "$ai_n" -gt 0 ] || die smartdns_keenetic_full
+        if [ "$1" != all ] || [ "$ai_n" = 0 ]; then
+            # A verified capacity refusal (plus the requested wait entry) is
+            # terminal, not an unknown write that should block a later VPN choice.
+            AI_TXN=0; SVR_WHY=waiting_capacity; svr_close "$AI_DIR" committed
+            die smartdns_keenetic_full
+        fi
     fi
+    ai_checkpoint
+    AI_TXN=0
+    SVR_WHY=composite_verified
+    svr_close "$AI_DIR" committed
     done_ok "ai $1 $2 services=$ai_n${ai_left:+ left=$ai_left}" changed
 }
 
@@ -4869,7 +5298,8 @@ case "$OP" in
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
     tunnel-delete) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     vless-server) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
-    service|ai) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
+    service) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || { [ "$#" -eq 4 ] && [ "$1" = reference ]; } || die usage 64 ;;
+    ai) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     wifi-host) [ "$#" -eq 3 ] || die usage 64 ;;
     list) [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || die usage 64 ;;
     agh-component|module-component) [ "$#" -ge 1 ] && [ "$#" -le 3 ] || die usage 64 ;;
@@ -4896,6 +5326,17 @@ ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 . "$ADMISSION_LIB"
 command -v vward_agent_acts >/dev/null 2>&1 || vward_agent_acts() { return 0; }
 vward_admission_enter console-config || die updater_busy 75
+
+# Register every descendant before it can write. If its original AI parent died
+# before registration, refuse even when a retry has already acquired the intent.
+if [ -n "${VWARD_AI_CHILD_DIR:-}" ]; then
+    case "$VWARD_AI_CHILD_DIR" in "$BACKUP_DIR"/service-transactions/txn.??????) ;; *) die service_recovery_required 75 ;; esac
+    [ -f "$VWARD_AI_CHILD_DIR/ai" ] && [ -f "$VWARD_AI_CHILD_DIR/pending" ] || die service_recovery_required 75
+    mkdir -p "$VWARD_AI_CHILD_DIR/children" && chmod 0700 "$VWARD_AI_CHILD_DIR/children" || die write_failed
+    AI_CHILD_SLOT="$VWARD_AI_CHILD_DIR/children/$$"
+    (umask 077; vward_admission_pid_start $$ > "$AI_CHILD_SLOT") || die write_failed
+    vward_pid_start_var "${VWARD_AI_PARENT_PID:-}" && [ "$VA_PS" = "${VWARD_AI_PARENT_START:-}" ] || die service_recovery_required 75
+fi
 
 case "$OP" in
     force-vpn|domain-category|tunnel-guard|tunnel-fallback|tunnel-return|tunnel-auto|wan-guard|component|\
@@ -4968,7 +5409,7 @@ case "$OP" in
     tunnel-state) op_tunnel_state "$ARG1" "$ARG2" ;;
     tunnel-subnet) op_tunnel_subnet "$ARG1" "$ARG2" "$ARG3" ;;
     list-domain) op_list_domain "$ARG1" "$ARG2" "$ARG3" ;;
-    service) op_service "$ARG1" "$ARG2" "$ARG3" ;;
+    service) op_service "$ARG1" "$ARG2" "$ARG3" "$ARG4" ;;
     service-category) op_service_category "$ARG1" "$ARG2" ;;
     services-refresh) op_services_refresh ;;
     ext-check) op_ext_check ;;

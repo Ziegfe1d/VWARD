@@ -1075,6 +1075,29 @@ vward_agh_smartdns_urls()
                   n = split(substr($0, 3, e - 3), a, "/"); for (i = 1; i <= n; i++) if (index(a[i], ".")) print up}'
 }
 
+# Smart DNS: installation, supported writer and active DNS handler are distinct.
+# No process is started and no configuration is written.
+vward_smartdns_storage() (
+    vs_mode=agh
+    vs_lib=${VWARD_DNS_MODE_LIB:-/opt/lib/vward/vward-dns-mode.sh}
+    if [ -r "$vs_lib" ]; then
+        . "$vs_lib"
+        vs_mode=$(vward_dns_mode_get); vs_mode=${vs_mode%%"$(printf '\t')"*}
+    fi
+    vs_yaml=${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}
+    vs_control=${VWARD_ADS_CONTROL_BIN:-/opt/bin/vward-ads-privacy-control.sh}
+    vs_supported=0 vs_available=0 vs_why=not_installed
+    if [ -x "$vs_control" ] && [ -r "$vs_yaml" ]; then
+        vs_supported=1 vs_why=not_running
+        if awk '$1=="upstream_dns_file:" && $2!="" && $2!="\"\"" && $2!="\047\047" {found=1} END {exit !found}' "$vs_yaml"; then
+            vs_supported=0 vs_why=upstream_file_unsupported
+        elif [ "$vs_mode" != agh ]; then vs_why=inactive_handler
+        elif [ -e "${VWARD_COMPONENT_STATE:-${VWARD_ROOT_PREFIX:-}/opt/etc/vward/components}/adguardhome.disabled" ]; then vs_why=disabled
+        elif pidof AdGuardHome >/dev/null 2>&1; then vs_available=1 vs_why=; fi
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\n' 'AdGuard Home' "$vs_supported" "$vs_available" "${vs_why:--}" "$vs_mode"
+)
+
 # vward_doh_alive URL: the DoH server answers a DNS query (RFC 8484 GET, example.com A) within
 # VWARD_DOH_ALIVE_MT seconds (6). 0: answers (a whole DNS answer, see below; VWARD_DOH_ALIVE_WHY
 # says why not: curl:N, http:N, dns:short|invalid|rcodeN|empty); 1: does not (no answer, an HTTP error:

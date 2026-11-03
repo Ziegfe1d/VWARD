@@ -58,6 +58,7 @@ for case in ('new-owner-edit', 'new-state-write', 'off-save', 'off-dns', 'unknow
             before = s.cfg.read_text()
             state = s.state.read_text()
             if case == 'off-dns':
+                (s.etc/'smartdns.conf').write_text('SMARTDNS_URL=https://dns.example/dns-query\n')
                 saved = s.etc / 'route-engine/domain-lists/domain-list0'
                 with saved.open('a') as f: f.write('agh=claude.ai\thttps://dns.example/dns-query\n')
                 ads = s.tmp / 'ads'
@@ -179,11 +180,19 @@ for case in ('term', 'kill-reboot', 'concurrent', 'stage-write', 'catalog-write'
                     shutil.rmtree(p, ignore_errors=True)
                 (s.tmp / 'root/tmp').mkdir(parents=True, exist_ok=True)
                 current = s.cfg.read_bytes()
-                for _ in range(2):
-                    retry = s.run('service', 'off', 'claude.ai')
-                    assert retry.returncode != 0 and 'error=service_recovery_required' in retry.stdout, retry.stdout
-                    assert s.cfg.read_bytes() == current
-                    assert {p.name: p.read_bytes() for p in recovery.iterdir() if p.is_file()} == evidence
+                if case == 'kill-reboot':
+                    retry = s.run('service', 'tunnel', 'claude.ai', 'auto')
+                    assert retry.returncode == 0, retry.stdout + retry.stderr
+                    assert 'include new.example' not in s.cfg.read_text()
+                    assert not list((s.tmp / 'backup/service-transactions').glob('*/pending'))
+                    assert list((s.tmp / 'backup/service-transactions.resolved').glob('*/resolved'))
+                else:
+                    for _ in range(2):
+                        retry = s.run('service', 'off', 'claude.ai')
+                        assert retry.returncode != 0 and 'error=service_recovery_required' in retry.stdout, retry.stdout
+                        assert s.cfg.read_bytes() == current
+                        assert {p.name: p.read_bytes() for p in recovery.iterdir() if p.is_file()} == evidence
+
             else:
                 assert r.returncode != 0 and not pending, case + ': rollback/recovery mismatch: ' + r.stdout + '\nCFG=' + s.cfg.read_text() + '\nFILES=' + repr({p.name:p.read_text() for p in pending[0].parent.iterdir() if p.is_file()} if pending else {})
                 assert s.cfg.read_text() == before and s.state.read_bytes() == state, case + ': partial commit'

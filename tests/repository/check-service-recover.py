@@ -89,9 +89,6 @@ with tempfile.TemporaryDirectory() as d:
     before = killed_refresh(s)
     if "include new.example" not in s.cfg.read_text():
         fail("the fixture did not apply the first include")
-    r = s.run("service", "off", "claude.ai")
-    if "error=service_recovery_required" not in r.stdout:
-        fail("a pending operation must still block: " + r.stdout)
     txn = pending_of(s)[0].parent
     st = s.run("service-recover", "status")
     rows = [l for l in st.stdout.splitlines() if l.startswith("info.txn=")]
@@ -118,6 +115,14 @@ with tempfile.TemporaryDirectory() as d:
         fail("after the recovery the service operations work again: " + r.stdout)
     if s.run("service-recover", "status").stdout.count("info.txn=") != 0:
         fail("status after the recovery")
+
+# 1b. A normal action now finishes proven compensation itself, without a maintenance screen.
+with tempfile.TemporaryDirectory() as d:
+    s = fixture.Services(Path(d))
+    before = killed_refresh(s)
+    r = s.run("service", "tunnel", "claude.ai", "auto")
+    assert r.returncode == 0 and not pending_of(s), r.stdout + r.stderr
+    assert s.cfg.read_text() == before and len(resolved_of(s)) == 1
 
 # 2. A killed run whose list the owner edited meanwhile: no undo over the owner's edit, the reason is
 #    said and it stays pending; «accept» is the owner's way out and keeps the edit.
@@ -163,6 +168,7 @@ with tempfile.TemporaryDirectory() as d:
 with tempfile.TemporaryDirectory() as d:
     s = fixture.Services(Path(d))
     assert s.run("service", "on", "claude.ai", "auto").returncode == 0
+    (s.etc/"smartdns.conf").write_text("SMARTDNS_URL=https://dns.example/dns-query\n")
     saved = s.etc / "route-engine/domain-lists/domain-list0"
     with saved.open("a") as f:
         f.write("agh=claude.ai\thttps://dns.example/dns-query\n")
@@ -235,7 +241,7 @@ for need in ('if [ "$SOP" = recover ]; then', 'SERVICE_RECOVER_ACCEPT', 'SERVICE
     if need not in api:
         fail("api.cgi lacks " + need)
 js = (fixture.ROOT / "web/assets/vward-console.js").read_text()
-for need in ("function recoveryPanel(list)", "recoveryPanel(a && a.recovery)", "recoveryPanel(V.recovery)", "'svrec-accept': c => svRecover(c.id.slice(13), 'accept')", "'svrec-restore': c => svRecover(c.id.slice(14), 'restore')", "изменён не этой операцией"):
+for need in ("function recoveryPanel(list)", "actionRecovery(a && a.recovery)", "actionRecovery(V.recovery)", "'svrec-accept': c => svRecover(c.id.slice(13), 'accept')", "'svrec-restore': c => svRecover(c.id.slice(14), 'restore')", "изменён не этой операцией"):
     if need not in js:
         fail("Panel lacks " + need)
 print("SERVICE_RECOVER=PASS")
