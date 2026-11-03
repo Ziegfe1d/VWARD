@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Healthy saved URL is not permission to restore a removed/replaced server."""
 import ast
+import hashlib
+import re
+import subprocess
 import tempfile
 from pathlib import Path
 import service_fixture as fixture
@@ -32,4 +35,22 @@ for selected in (OLD, NEW, ''):
         assert text.count('https upstream https://resolver.example/dns-query/') == 2
         if selected != OLD:
             assert not calls.exists() or 'old.example.test' not in calls.read_text(), 'unconfigured old server probed'
-print('SMARTDNS_SAVED_AUTHORIZATION=PASS current, removed, replaced; unrelated DNS preserved')
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    conf = td/'config'; conf.write_text('')
+    saved = td/'saved'
+    source = fixture.HELPER.read_text()
+    functions = '\n'.join(re.findall(r'^(?:doh_restore_allowed|smartdns_config_signature|smartdns_selected_url|smartdns_saved_marker)\(\) \{\n.*?^\}', source, re.M|re.S))
+    def allowed(prefix=''):
+        script = ('SMARTDNS_CONF="$1"; saved="$2"\n'+functions+'\n'+prefix+'\ndoh_restore_allowed "$3"')
+        return subprocess.run(['sh','-c',script,'guard',str(conf),str(saved),OLD],capture_output=True).returncode
+    for marker in ('smartdns_config=\n', 'smartdns_config=bad\n',
+                   'smartdns_config='+'a'*64+'\nsmartdns_config='+'a'*64+'\n'):
+        saved.write_text(marker)
+        assert allowed() == 2, 'invalid marker downgraded to legacy permission'
+    saved.write_text('smartdns_config='+hashlib.sha256(b'').hexdigest()+'\n')
+    assert allowed() == 0
+    assert allowed('awk() { return 2; }') == 2, 'read failure authorized a saved server'
+    saved.write_text('route=ISP\tauto\n')
+    assert allowed() == 0, 'legacy unconfigured return lost its liveness path'
+print('SMARTDNS_SAVED_AUTHORIZATION=PASS current, removed, replaced; invalid/read-error proof refuses; legacy preserved')

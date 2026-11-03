@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import service_fixture as fixture
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -42,6 +43,7 @@ elif path == "dns_config" and method == "POST":
     else: st["up"] = body["upstream_dns"]; res = {}
 if res is None: sys.exit(22)
 st_path.write_text(json.dumps(st))
+if path == "dns_config" and st.get("drop_reply"): sys.exit(22)
 Path(out).write_text(json.dumps(res))
 '''
 
@@ -65,6 +67,7 @@ with tempfile.TemporaryDirectory() as tmp:
     patched.write_text(lib.replace('case "$ads_auth_meta" in "0 -rw-------"', f'case "$ads_auth_meta" in "{os.getuid()} -rw-------"'))
     env = os.environ | {
         "VWARD_ADS_LIB": str(patched), "VWARD_ADS_ETC": str(etc), "VWARD_ADS_STATE": str(tmp / "state"), "VWARD_ADS_LOG_DIR": str(tmp / "log"),
+        "VWARD_ADS_BACKUP_ROOT": str(tmp / "backups"),
         "VWARD_ADS_JQ": shutil.which("jq"), "VWARD_ADS_CURL": str(curl), "VWARD_ADS_AGH_AUTH_FILE": str(auth),
         "AGH_API_BASE": "http://192.0.2.1:3001/control", "VWARD_ROOT_PREFIX": str(tmp / "root"),
         "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"), "TMPDIR": str(tmp),
@@ -122,6 +125,15 @@ with tempfile.TemporaryDirectory() as tmp:
     ctl("smartdns-put", str(pairs))
     if S().get("posts", 0) != posts:
         fail("a pair already present is not written again")
+    if 'CHANGED=0' not in ctl('smartdns-check',str(pairs)) or S().get('posts',0) != posts:
+        fail('checking an existing binding must be read only')
+    pairs.write_text('absent.example\t'+D+'\n')
+    if 'smartdns_binding_missing' not in ctl('smartdns-check',str(pairs),ok=False) or S().get('posts',0) != posts:
+        fail('checking a missing binding must not create it')
+    pairs.write_text('anthropic.com\thttps://other.example/dns-query\n')
+    before = S()['up']
+    if 'smartdns_domain_other_server' not in ctl('smartdns-put',str(pairs),ok=False) or S()['up'] != before:
+        fail('a preexisting different server must not become a false successful put')
 
     # A parent in the list takes subdomains; the whole row goes when all its domains go.
     inc.write_text("claude.ai\nchatgpt.com\n")
@@ -155,6 +167,21 @@ with tempfile.TemporaryDirectory() as tmp:
     st = S(); st["up"] = ["[/lan/]127.0.0.1:53", "https://dns.nextdns.io/abc"]; state.write_text(json.dumps(st))
     if "smartdns_not_configured" not in ctl("smartdns-put", str(pairs), ok=False):
         fail("auto without any Smart DNS row must be refused")
+
+    # Lost POST reply on domain-add: real parent retains before/planned evidence.
+    parent = tmp/'parent'; parent.mkdir()
+    s = fixture.Services(parent)
+    s.env.update(env)
+    s.env.update(VWARD_CONSOLE_ETC=str(s.etc), VWARD_CONSOLE_BACKUP_DIR=str(parent/'backup'),
+                 VWARD_ADS_CONTROL_BIN=str(CONTROL), VWARD_PROFILE_LIB=str(ROOT/'components/runtime/lib/vward-device-profile.sh'))
+    (s.etc/'smartdns.conf').write_text('SMARTDNS_URL='+D+'\nSMARTDNS_STORE=agh\n')
+    state.write_text(json.dumps({'up': UP, 'drop_reply': True}))
+    r = s.run('smartdns-domain','add','new.example')
+    recovery = list((parent/'backup-recovery').glob('smartdns.*'))
+    if r.returncode == 0 or 'error=rollback_incomplete' not in r.stdout or not recovery:
+        fail('lost reply must not discard domain-add recovery: '+r.stdout+r.stderr[-200:])
+    if not all((recovery[0]/n).is_file() for n in ('dns.before.json','dns.planned.json')):
+        fail('domain-add lost its before/planned images')
 
     # Upstreams from a file are not edited.
     st = S(); st["ignore_posts"] = False; st["file"] = "/opt/etc/up.txt"; state.write_text(json.dumps(st))

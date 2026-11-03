@@ -143,6 +143,8 @@ for case in ('term', 'kill-reboot', 'concurrent', 'stage-write', 'catalog-write'
                 body = ndmc.read_text()
                 pause = ('\ndef fault_pause():\n'
                          '    if cmd != "object-group fqdn domain-list0 include new.example": return\n'
+                         '    import os\n'
+                         f'    Path({str(s.tmp / "transport.pid")!r}).write_text(str(os.getpid()))\n'
                          f'    Path({str(entered)!r}).touch()\n'
                          f'    while not Path({str(resume)!r}).exists():\n'
                          '        import time; time.sleep(0.01)\n')
@@ -165,6 +167,15 @@ for case in ('term', 'kill-reboot', 'concurrent', 'stage-write', 'catalog-write'
                 worker.join(30)
                 assert not worker.is_alive() and result, 'writer did not finish'
                 r = result[0]
+                # A real reboot ends the external transport too. Do not model
+                # it by clearing locks while an orphan is still applying.
+                transport = s.tmp/'transport.pid'
+                if transport.exists():
+                    transport_pid = transport.read_text()
+                    deadline = time.monotonic()+5
+                    while fixture.process_has_arg(transport_pid, str(ndmc)) and time.monotonic()<deadline:
+                        time.sleep(0.01)
+                    assert not fixture.process_has_arg(transport_pid, str(ndmc)), 'transport did not finish'
             else:
                 r = s.run('services-refresh', 'run')
             pending = list((s.tmp / 'backup/service-transactions').glob('*/pending'))

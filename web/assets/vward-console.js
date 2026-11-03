@@ -270,6 +270,8 @@ const API_ERRORS = {
   config_unavailable: 'файл настроек недоступен', invalid_mac: 'неверный MAC-адрес',
   invalid_value: 'недопустимое значение', invalid_window: 'начало и конец окна совпадают', invalid_category: 'нет такой категории',
   router_rejected: 'роутер отклонил изменение', verification_failed: 'изменение не подтвердилось и отменено',
+  ai_verification_failed: 'итоговый путь сервисов не подтвердился; проверь фактические маршруты, ручные изменения сохранены',
+  saved_state_unknown: 'данные возврата DNS повреждены или недоступны; запись остановлена, данные сохранены',
   config_save_failed: 'роутер не сохранил конфигурацию', router_config_unavailable: 'не удалось прочитать конфигурацию роутера',
   route_change_busy: 'маршруты сейчас меняет другая задача, повторите', profile_unavailable: 'профиль устройства не определён',
   policy_group_unavailable: 'группа маршрутизации не найдена', list_full: 'список заполнен', backup_failed: 'не удалось сделать резервную копию',
@@ -1552,13 +1554,13 @@ function agentsRow() {
 const AI_VIA = [['vpn', 'VPN'], ['dns', 'Smart DNS'], ['isp', 'Провайдер']];
 const aiPrev = {}, AICHK = {};
 // dnsDown: the Smart DNS server does not answer or is not set - its segment is off, with the reason.
-function aiSlider(id, cur, label, off, dnsDown) {
+function aiSlider(id, cur, label, off, dnsDown, dnsWhy) {
   const to = Math.max(0, AI_VIA.findIndex(o => o[0] === cur)), on = cfgOk() && !!S.ai && !SVC.busy && !off;
   const from = aiPrev[id] != null ? aiPrev[id] : to; aiPrev[id] = to;
   return '<div class="seg-slider' + (on ? '' : ' off') + (cur ? '' : ' none') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
     AI_VIA.map(o => { const dis = !on || (o[0] === 'dns' && dnsDown && cur !== 'dns');
-      return '<button type="button" role="radio" data-ai-via="' + o[0] + '" data-ai="' + esc(id) + '" aria-checked="' + (o[0] === cur) + '"' + (dis ? ' disabled' : '') + (o[0] === 'dns' && dnsDown ? ' title="сервер не отвечает"' : '') + '>' + o[1] + '</button>'; }).join('') + '</div>' +
-    (dnsDown ? '<p class="seg-note">Smart DNS: сервер не отвечает</p>' : '') +
+      return '<button type="button" role="radio" data-ai-via="' + o[0] + '" data-ai="' + esc(id) + '" aria-checked="' + (o[0] === cur) + '"' + (dis ? ' disabled' : '') + (o[0] === 'dns' && dnsDown ? ' title="' + esc(dnsWhy || 'сервер не отвечает') + '"' : '') + '>' + o[1] + '</button>'; }).join('') + '</div>' +
+    (dnsDown ? '<p class="seg-note">Smart DNS: ' + esc(dnsWhy || 'сервер не отвечает') + '</p>' : '') +
     (S.ai && !on && !off && (SVC.busy ? AIBUSY === id : !cfgOk()) ? '<p class="seg-note muted">' + (SVC.busy ? 'Переключается…' : 'Изменение недоступно: нет прав на настройку') + '</p>' : '');
 }
 /* An unfinished service operation (fix.35.4, 03.11: «service on» refused with
@@ -1618,7 +1620,9 @@ function aiPage() {
   // The card's one status line (owner 02.11): the CHOSEN way and its check, a coloured dot; while a
   // check runs, a compact pill with a spinner in the same place (the line keeps its height, the
   // card does not jump; no toast - fix.26). The per-way results open below on demand.
-  const sdDown = !!a && (sd.alive !== 'yes' || noSd || (sd.store === 'agh' && !(sd.storage && sd.storage.available)));
+  const sdServerDown = sd.alive !== 'yes' || noSd;
+  const sdReason = noSd ? 'сервер не настроен' : sd.alive === 'no' ? 'сервер не отвечает' : sd.alive !== 'yes' ? 'ответ сервера не подтверждён' : sd.store === 'agh' && !(sd.storage && sd.storage.available) ? 'хранилище новых привязок недоступно' : '';
+  const sdDown = !!a && !!sdReason;
   const wayName = { vpn: 'VPN', dns: 'Smart DNS', isp: 'Провайдер' };
   const status = s => {
     const c = AICHK[s.id], w = s.via || 'isp';
@@ -1627,11 +1631,12 @@ function aiPage() {
       return '<span class="stat"><i class="dot warn"></i>' + esc((s.effective === 'mixed' ? 'Пересекаются DNS и маршруты' : s.effective === 'unknown' ? 'Путь не подтверждён' : 'Маршрут из доменных списков') + (paths.length ? ' · ' + paths.join('; ') : '') + '. Связь сервиса не задана.') + '</span>';
     }
     if (c && c.busy) return '<span class="busy-pill"><i class="spin" aria-hidden="true"></i>проверяется…</span>';
-    if (w === 'dns' && sdDown) return '<span class="stat"><i class="dot crit"></i>Smart DNS · сервер не отвечает</span>';
+    if (w === 'dns' && sdDown) return '<span class="stat"><i class="dot ' + (sdServerDown ? 'crit' : 'warn') + '"></i>Smart DNS · ' + esc(sdReason) + '</span>';
     const r = c && c.ok ? (c.results || []).find(x => w === 'vpn' ? 'direct' !== x.via : 'direct' === x.via) : null;
     // The chosen way is a policy; a list of the same domains may send them elsewhere (02.11: ChatGPT
     // «Провайдер» while the list «ChatGPT OpenAI (ISP)» went through VPN) - shown, never switched.
-    const lst = (s.lists || []).filter(l => w === 'vpn' ? l.route === 'ISP' : l.route && l.route !== 'ISP')[0];
+    const lst = (s.lists || []).filter(l => w === 'vpn' ? l.route && l.route !== (s.tunnel || prof().tunnel_interface) : l.route && l.route !== 'ISP')[0];
+    if (w === 'vpn' && s.coverage && s.coverage.routed < s.coverage.catalog) return '<span class="stat"><i class="dot warn"></i>' + esc('Выбрано: VPN · маршруты для ' + s.coverage.routed + ' из ' + s.coverage.catalog + ' доменов каталога; покрытие неполное') + '</span>';
     if (lst && !(c && c.busy)) return '<span class="stat"><i class="dot warn"></i>' + esc('Выбрано: ' + wayName[w] + ' · домены в списке «' + (l => l.title || l.group)(lst) + '» идут ' + (lst.route === 'ISP' ? 'через провайдера' : 'через «' + tunLabel(lst.route) + '»')) + '</span>';
     const v = r ? r.verdict : '', sdProxy = w !== 'dns' && c && c.smartdns && r && 'direct' === r.via;
     const cls = !c ? '' : !c.ok ? 'warn' : v === 'open' && !sdProxy ? 'ok' : v === 'open' || v === 'answer' ? 'warn' : v ? 'crit' : 'warn';
@@ -1644,7 +1649,7 @@ function aiPage() {
   const busyBtn = s => AICHK[s.id] && AICHK[s.id].busy;
   const row = s => '<div class="ai-row"><div class="ai-head"><div class="row-main"><b>' + esc(s.title) + '</b><small class="ai-status">' + status(s) + '</small></div>' +
       btn('ai-check', 'refresh', 'Проверить', 'small' + (busyBtn(s) ? ' spinning' : ''), ' data-ai="' + esc(s.id) + '" data-dom="' + esc(s.domain) + '"' + (busyBtn(s) ? ' disabled' : '')) + '</div>' +
-      aiSlider(s.id, s.selected === null ? '' : s.via, s.title, false, sdDown) + (AIRES[s.id] ? '<p class="result-note ai-res">' + esc(AIRES[s.id]) + '</p>' : '') + aiReferenceChoice(s) + detail(s) +
+      aiSlider(s.id, s.selected === null ? '' : s.via, s.title, false, sdDown, sdReason) + (AIRES[s.id] ? '<p class="result-note ai-res">' + esc(AIRES[s.id]) + '</p>' : '') + aiReferenceChoice(s) + ((s.paths || []).length > 1 ? '<details class="ai-detail"><summary>Источники маршрута</summary>' + s.paths.map(p => esc((p.title || p.group) + ' (' + p.group + '): ' + (p.route === 'ISP' ? 'провайдер' : tunLabel(p.route)))).join('<br>') + '</details>' : '') + detail(s) +
       (s.tunnel && tuns.length > 1 ? '<dl class="kv">' + ctrlRow('Туннель', sel('data-ai-tunnel="' + esc(s.id) + '"', 'Туннель для ' + s.title, tuns.map(t => [t.name, tunLabel(t.name)]), s.tunnel || prof().tunnel_interface)) + '</dl>' : '') + '</div>';
   // Smart DNS first: the services «через Smart DNS» open only while it works (owner 2026-10-17).
   // The server does not answer (01.11.2026: the subscription ended): its domains do not resolve.
@@ -1659,7 +1664,7 @@ function aiPage() {
       '<div class="panel-actions">' + (sd.own ? btn('ai-dns-clear', 'close', 'Убрать свой сервер') : '') +
         ((sd.server_rows || []).length ? btn('ai-dns-clear-url', 'close', 'Убрать по адресу', '', cfgOk() ? '' : ' disabled') : '') + '</div>' + resultBox('aidns'),
       { desc: 'Сервер, через который открываются сервисы с путём «Smart DNS». Без AdGuard Home VWARD пишет строки в Keenetic (не больше 8). Адрес хранится только на роутере.' }) +
-    panel('Все ИИ-сервисы', aiSlider('all', allVia, 'Все ИИ-сервисы', false, sdDown) +
+    panel('Все ИИ-сервисы', aiSlider('all', allVia, 'Все ИИ-сервисы', false, sdDown, sdReason) +
       (SVC.busy && AIBUSY && AIBUSY !== 'all' ? '<p class="seg-note muted">Переключается «' + esc(aiName(AIBUSY)) + '»: остальные сервисы доступны после него</p>' : '') + resultBox('svc'),
       { beta: true, desc: allVia ? 'Одним нажатием переключить все сервисы, например когда Smart DNS сбоит.' : 'Сейчас у сервисов разный путь. Нажмите, чтобы отправить все одним путём.' }) +
     panel('Сервисы', !a ? empty('Загрузка…') : svc.length ? svc.map(row).join('') : empty('В каталоге нет ИИ-сервисов'),
@@ -1712,8 +1717,9 @@ async function sdStoreSet(v) {
     x = await apiPost('smartdns-server', { op: 'store', store: v });
   } catch (err) { x = { ok: false, error: err.message }; }
   try { confirmed = await apiGet('ai-data'); } catch (_) { confirmed = null; }
-  const verified = confirmed && confirmed.ok && confirmed.smartdns && confirmed.smartdns.store === v;
-  if (confirmed && confirmed.ok) S.ai = confirmed;
+  const readable = confirmed && confirmed.ok && Array.isArray(confirmed.services) && confirmed.smartdns && typeof confirmed.smartdns === 'object';
+  const verified = readable && confirmed.smartdns.store === v;
+  if (readable) S.ai = confirmed;
   actionResult = { id: 'aidns', text: verified ? 'Хранилище сохранено. Существующие привязки не перенесены.' :
     'Выбор не подтверждён: ' + (x && !x.ok ? errText(x) : 'не удалось перечитать настройку') };
   SDSTORE_BUSY = false; render();
@@ -1758,16 +1764,27 @@ async function aiReference(id, group, token) {
 // wait under one line on «Все ИИ-сервисы» (one switch at a time stays).
 let AIBUSY = null;
 async function aiJob(id, to, msg, keep) {
-  // One service: its result under it; «all»: under «Все ИИ-сервисы».
   const show = text => { if (id === 'all') actionResult = { id: 'svc', text: text }; else { AIRES[id] = text; actionResult = null; } render(); };
   SVC.busy = true; AIBUSY = id; AIQ = null; show(to === 'dns' ? 'Записываем домены Smart DNS…' : 'Переводим…');
-  const j = await bgJob(Object.assign({ op: 'ai', id: id, tunnel: to }, keep ? { keep: '1' } : {}));
-  SVC.busy = false; AIBUSY = null;
+  let j = { ok: false, done: true, x: { error: 'helper_failed' } }, confirmed = null;
+  try {
+    j = await bgJob(Object.assign({ op: 'ai', id: id, tunnel: to }, keep ? { keep: '1' } : {}));
+    try { confirmed = await apiGet('ai-data'); } catch (_) { confirmed = null; }
+    if (confirmed && confirmed.ok && Array.isArray(confirmed.services) && confirmed.smartdns && typeof confirmed.smartdns === 'object') S.ai = confirmed;
+    else confirmed = null;
+    await Promise.all([load('services', true), load('lists', true)]);
+  } catch (e) { j = { ok: false, done: true, x: { error: e.message || 'helper_failed' } }; }
+  finally { SVC.busy = false; AIBUSY = null; }
   SVREC_ACTION = !j.ok && j.done;
   AIREF[id] = !j.ok && j.x && j.x.error === 'service_reference_only';
+  if (id === 'all' && AIREF[id]) ((S.ai && S.ai.services) || []).forEach(s => { AIREF[s.id] = (s.paths || []).some(p => p.reference); });
   if (to === 'dns' && (j.left || []).length) AIQ = { ids: j.left };
-  show(j.ok ? (AIQ ? 'Часть сервисов переведена; для остальных выберите маршрут' : msg) : !j.done ? 'Ещё выполняется, проверьте позже' : AIQ ? '' : 'Не выполнено: ' + errText(j.x));
-  await Promise.all([load('ai', true), load('services', true), load('lists', true)]); render();
+  const expected = to === 'dns' ? 'dns' : to === 'isp' ? 'isp' : 'vpn';
+  const rows = confirmed && confirmed.ok ? (confirmed.services || []).filter(s => (id === 'all' || s.id === id) && !(j.left || []).includes(s.id)) : [];
+  const verified = rows.length > 0 && rows.every(s => s.selected === expected);
+  const conflict = verified && rows.some(s => s.effective !== expected);
+  show(j.ok ? (!verified ? 'Результат переключения не подтверждён перечитыванием; смотри текущий путь и «Журналы».' : conflict ? 'Настройка сервиса применена. Есть пересекающиеся DNS или маршруты: смотри источники ниже.' : AIQ ? 'Часть сервисов переведена; для остальных выбери маршрут' : msg) :
+    !j.done ? 'Ещё выполняется; результат появится в «Задания»' : AIQ ? '' : 'Не выполнено: ' + errText(j.x));
 }
 async function aiAnswer(way) {
   const q = AIQ; AIQ = null;
@@ -3637,7 +3654,7 @@ function svcProbePanel(id) {
 async function bgJob(fields, minutes) {
   let x, run = {};
   try { x = await apiPost('services', fields); } catch (err) { x = { ok: false, error: err.message }; }
-  if (!x.ok) return { ok: false, done: true, x: x };
+  if (!x || !x.ok) return { ok: false, done: true, x: x || { error: 'helper_failed' } };
   const deadline = Date.now() + (minutes || 3) * 60 * 1000;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 2000));

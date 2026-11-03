@@ -89,8 +89,7 @@ def save():''')
         deadline = time.monotonic()+10
         def active_children():
             return [p for p in (s.tmp/'backup/service-transactions').glob('*/children/*')
-                    if Path('/proc', p.name, 'stat').exists() and
-                    Path('/proc', p.name, 'stat').read_text().split(') ',1)[1].split()[0] != 'Z']
+                    if fixture.process_state(p.name) not in (None, 'Z', 'X')]
         while active_children() and time.monotonic()<deadline:
             time.sleep(0.01)
         assert not active_children(), 'child did not leave'
@@ -111,4 +110,4 @@ def save():''')
         assert r.returncode == 0 and s.cfg.read_bytes() == before, r.stdout
         assert s.run('ai', 'claude.ai', 'isp').returncode == 0
         assert 'https upstream' not in s.cfg.read_text()
-print('AI_INTERRUPtIONS=PASS checkpoint, live descendant, TERM, SIGKILL, reboot, retry')
+print('AI_INTERRUPTIONS=PASS checkpoint, live descendant, TERM, SIGKILL, reboot, retry')

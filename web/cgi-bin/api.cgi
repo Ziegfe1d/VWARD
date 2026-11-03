@@ -2703,7 +2703,7 @@ if [ "$ACTION" = ai-data ]; then
     "$JQ" -e '.schema == 1 and (.services | length) > 0' "$SV_CAT" >/dev/null 2>&1 || SV_CAT=${VWARD_SERVICES_BUNDLED:-/opt/share/vward/console/services-catalog.json}
     "$JQ" -e '.schema == 1' "$SV_CAT" >/dev/null 2>&1 || { echo '{"ok":false,"error":"services_unavailable"}'; exit 0; }
     AI_RUN="$(ndm_cached running "$CONFIG_TTL" "show running-config")"
-    AI_REFERENCE_TOKEN="$(printf '%s\n' "$AI_RUN" | sha256sum | cut -d' ' -f1)"
+    AI_REFERENCE_TOKEN="$(printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {c=($1=="dns-proxy" || ($1=="object-group" && $2=="fqdn"))} c {print} /^!/ {c=0}' | sha256sum | cut -d' ' -f1)"
     AI_CLAIMS=
     for AI_CLAIM in "$CONFIG_ETC"/services/owned/*; do
         [ ! -e "$AI_CLAIM" ] && [ ! -L "$AI_CLAIM" ] || AI_CLAIMS="$AI_CLAIMS ${AI_CLAIM##*/}"
@@ -2738,7 +2738,7 @@ if [ "$ACTION" = ai-data ]; then
     AI_ON="$(awk -F'\t' 'NF >= 3 {print $1 "\t" $2 "\t" $3}' "$CONFIG_ETC/services/enabled.tsv" 2>/dev/null)"
     # The services waiting for room in Smart DNS (op_ai), and whether AdGuard Home runs.
     AI_WAIT="$(grep -E '^[a-z0-9][a-z0-9.@_-]{0,62}$' "${VWARD_AI_WAIT:-$CONFIG_ETC/smartdns-wait}" 2>/dev/null | head -n 50)"
-    AI_AGH_RUN=false; pidof AdGuardHome >/dev/null 2>&1 && AI_AGH_RUN=true
+    AI_AGH_RUN=false; "${VWARD_PIDOF_BIN:-pidof}" AdGuardHome >/dev/null 2>&1 && AI_AGH_RUN=true
     AI_CAP='AdGuard Home	0	0	not_installed	unknown'
     if command -v vward_smartdns_storage >/dev/null 2>&1; then AI_CAP="$(vward_smartdns_storage)"; fi
     AI_CAP_SUPPORTED="$(printf '%s\n' "$AI_CAP" | cut -f2)"
@@ -2795,7 +2795,7 @@ if [ "$ACTION" = ai-data ]; then
            | main($s.id; $s.domains) as $roots
            | ($groups[$s.id] // "") as $g
            | ([$incl[] | . as $i | select(($route[$i[0]] // "") != "")
-               | select(any($s.domains[]; . == $i[1] or endswith("." + $i[1]))) | .[0]] | unique
+               | select(any($s.domains[]; . as $d | $d == $i[1] or ($d | endswith("." + $i[1])) or ($i[1] | endswith("." + $d)))) | .[0]] | unique
                | map(. as $pg | {group: ., title: ($title[.] // ""), route: (if $route[.] == "ISP" or ($wan != "" and $route[.] == $wan) then "ISP" else $route[.] end),
                     members: [$incl[] | select(.[0] == $pg) | .[1]],
                     reference: ($g == "" and $route[$pg] == $default_tunnel and ($claims | split(" ") | index($pg)) == null
@@ -2804,12 +2804,13 @@ if [ "$ACTION" = ai-data ]; then
            | (any($paths[]; .route != "ISP")) as $vpn
            | (any($paths[]; .route == "ISP")) as $isp
            | (any($roots[]; covered(.))) as $some_dns
-           | (if ($snapshot_ok | not) then "unknown" elif $vpn and ($isp or $some_dns) then "mixed" elif $vpn then "vpn"
+           | ([$s.domains[] | . as $d | select(any($incl[]; . as $i | ($route[$i[0]] // "") != "" and ($d == $i[1] or ($d | endswith("." + $i[1])))))] | length) as $routed
+           | (if ($snapshot_ok | not) then "unknown" elif ([$paths[].route] | unique | length) > 1 then "mixed" elif $vpn and ($isp or $some_dns or $routed < ($s.domains | length)) then "mixed" elif $vpn then "vpn"
               elif ($roots | length) > 0 and all($roots[]; covered(.)) then "dns" elif $some_dns then "mixed" else "isp" end) as $effective
            | {id: $s.id, title: $s.title, domain: ($s.domains[0] // $s.id), roots: $roots,
               via: (if $g != "" then "vpn" elif ($roots | length) > 0 and all($roots[]; covered(.)) then "dns" else "isp" end),
               selected: (if $g != "" then "vpn" elif ($roots | length) > 0 and all($roots[]; covered(.)) then "dns" elif $effective == "isp" then "isp" else null end),
-              effective: $effective, paths: $paths,
+              effective: $effective, paths: $paths, coverage: {routed: $routed, catalog: ($s.domains | length)},
               tunnel: (if $g != "" then ($route[$g] // "") else "" end),
               lists: [$paths[] | select(.group != $g)]}]}' "$SV_CAT"
     exit 0

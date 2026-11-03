@@ -128,7 +128,7 @@ cleanup() {
     if [ "$AI_TXN" = 1 ]; then
         # Only an exact original scope proves a failed composite move undone.
         # Otherwise keep the intent/checkpoint across TERM, lost reply and reboot.
-        if [ ! -f "$AI_DIR/inflight" ] && ai_scope > "$AI_DIR/current" && cmp -s "$AI_DIR/before" "$AI_DIR/current"; then
+        if [ ! -f "$AI_DIR/inflight" ] && ! ai_writers_live && ai_scope > "$AI_DIR/current" && cmp -s "$AI_DIR/before" "$AI_DIR/current"; then
             rm -f "$AI_DIR/pending"
         fi
     fi
@@ -1030,7 +1030,7 @@ agh_control() {
     AGH_OUT=$ac_out
     [ "$ac_rc" = 0 ] && printf '%s\n' "$ac_out" | grep -qx 'CONTROL=PASS' && return 0
     AGH_ERR=$(printf '%s\n' "$ac_out" | sed -n 's/^ERROR=//p' | head -n 1)
-    case "$AGH_ERR" in adguard_auth_required|adguard_unavailable|upstream_file_unsupported|smartdns_not_configured) ;; *) AGH_ERR=smartdns_agh_failed ;; esac
+    case "$AGH_ERR" in adguard_auth_required|adguard_unavailable|upstream_file_unsupported|smartdns_not_configured|smartdns_domain_other_server|smartdns_binding_missing) ;; *) AGH_ERR=smartdns_agh_failed ;; esac
     return 1
 }
 
@@ -1075,11 +1075,41 @@ wan_route_target() {
 # A saved URL is a return image, not current server authorization. In particular
 # a healthy removed/replaced server must neither be probed nor resurrected.
 doh_restore_allowed() {
-    dra_selected=$(awk -F= '$1=="SMARTDNS_URL" {print substr($0,index($0,"=")+1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
+    # New return images remember the explicit server selection at capture.
+    # Removing/replacing that selection revokes the image, while a legacy
+    # image with no configured server keeps its established liveness check.
+    dra_proof=$(smartdns_saved_marker) || return 2
+    if [ "$dra_proof" != - ]; then
+        dra_now=$(smartdns_config_signature) || return 2
+        [ "$dra_proof" = "$dra_now" ]; return $?
+    fi
+    dra_selected=$(smartdns_selected_url) || return 2
     if [ -n "$dra_selected" ]; then [ "$dra_selected" = "$1" ]; return $?; fi
-    dra_active=$({ doh_lines | awk '$(NF-1)=="domain" {print $3}'; vward_agh_smartdns_urls; })
-    for dra_url in $dra_active; do [ "$dra_url" != "$1" ] || return 0; done
-    return 1
+    return 0
+}
+smartdns_selected_url() {
+    if [ ! -e "$SMARTDNS_CONF" ] && [ ! -L "$SMARTDNS_CONF" ]; then return 0; fi
+    [ -f "$SMARTDNS_CONF" ] && [ -r "$SMARTDNS_CONF" ] || return 1
+    awk -F= '$1=="SMARTDNS_URL" {n++; v=substr($0,index($0,"=")+1)}
+        END {if(n>1) exit 1; print v}' "$SMARTDNS_CONF"
+}
+smartdns_saved_marker() {
+    if [ ! -e "${saved:-/dev/null}" ] && [ ! -L "${saved:-/dev/null}" ]; then printf '%s\n' -; return 0; fi
+    [ -f "${saved:-/dev/null}" ] && [ -r "${saved:-/dev/null}" ] || return 1
+    awk -F= '$1=="smartdns_config" {n++; v=substr($0,index($0,"=")+1)}
+        END {if(n>1 || (n && (length(v)!=64 || v ~ /[^0-9a-f]/))) exit 1; print n?v:"-"}' "$saved"
+}
+smartdns_config_signature() {
+    scs_url=$(smartdns_selected_url) || return 1
+    scs_hash=$(printf '%s' "$scs_url" | sha256sum) || return 1
+    printf '%s\n' "${scs_hash%% *}"
+}
+smartdns_return_marker() {
+    srm_old=$(smartdns_saved_marker) || return 1
+    if [ "$srm_old" != - ]; then printf 'smartdns_config=%s\n' "$srm_old"; return 0; fi
+    [ -s "$JOURNAL.doh" ] || [ -s "$JOURNAL.agh" ] || return 0
+    srm_new=$(smartdns_config_signature) || return 1
+    printf 'smartdns_config=%s\n' "$srm_new"
 }
 doh_drop_dead() {
     [ -s "$1" ] || return 0
@@ -1087,7 +1117,10 @@ doh_drop_dead() {
     while IFS= read -r dd_l; do
         [ -n "$dd_l" ] || continue
         if [ "$2" = doh ]; then set -- "$1" "$2" $dd_l; dd_u=${5:-}; else dd_u=${dd_l#*"$tab"}; fi
-        if [ -n "$dd_u" ] && ! doh_restore_allowed "$dd_u"; then
+        dd_allowed=0
+        if [ -n "$dd_u" ]; then doh_restore_allowed "$dd_u" || dd_allowed=$?; fi
+        [ "$dd_allowed" != 2 ] || die saved_state_unknown
+        if [ "$dd_allowed" != 0 ]; then
             DOH_UNCONFIGURED_N=$((${DOH_UNCONFIGURED_N:-0} + 1))
             continue
         fi
@@ -1165,8 +1198,10 @@ op_domain_list() {
         DOH_ALLOWED=
         snapshot
         while IFS= read -r L; do [ -z "$L" ] || ! doh_present "$L" || die verification_failed; done < "$JOURNAL.doh"
+        return_marker=$(smartdns_return_marker) || die saved_state_unknown
         new_tmp "$saved" || die write_failed
-        { if [ -f "$saved" ] && grep -q '^route=' "$saved"; then cat "$saved"; else printf 'route=%s\tauto\n' "$(wan_route_target)"; fi
+        { if [ -f "$saved" ] && grep -q '^route=' "$saved"; then sed '/^smartdns_config=/d' "$saved"; else printf 'route=%s\tauto\n' "$(wan_route_target)"; fi
+          [ -z "$return_marker" ] || printf '%s\n' "$return_marker"
           sed -n 's/^./doh=&/p' "$JOURNAL.doh"; sed -n 's/^./agh=&/p' "$JOURNAL.agh"; } | awk '!seen[$0]++' > "$TMPFILE" || die write_failed
         install_tmp "$saved" 0600 || die write_failed
         save_router || die config_save_failed
@@ -1201,8 +1236,11 @@ op_domain_list() {
         route_present "$G" "$TUN" || die verification_failed
         [ -z "$cur_t" ] || ! route_present "$G" "$cur_t" || die verification_failed
         while IFS= read -r L; do [ -z "$L" ] || ! doh_present "$L" || die verification_failed; done < "$JOURNAL.doh"
+        return_marker=$(smartdns_return_marker) || die saved_state_unknown
         new_tmp "$saved" || die write_failed
-        { printf 'route=%s\t%s\n' "${cur_t:--}" "$cur_o"; sed -n 's/^./doh=&/p' "$JOURNAL.doh"; sed -n 's/^./agh=&/p' "$JOURNAL.agh"; } > "$TMPFILE" || die write_failed
+        { printf 'route=%s\t%s\n' "${cur_t:--}" "$cur_o"
+          [ -z "$return_marker" ] || printf '%s\n' "$return_marker"
+          sed -n 's/^./doh=&/p' "$JOURNAL.doh"; sed -n 's/^./agh=&/p' "$JOURNAL.agh"; } > "$TMPFILE" || die write_failed
         install_tmp "$saved" 0600 || die write_failed
         detail="route=${cur_t:--}->$TUN doh=$(grep -c . "$JOURNAL.doh") agh=$(grep -c . "$JOURNAL.agh")"
     else
@@ -2063,9 +2101,21 @@ ai_writers_live() {
     # A killed shell may leave ndmc/HTTP alive. A retained inflight operation
     # cannot be explicitly closed while a possible writer is still running.
     for aw_p in /proc/[0-9]*/cmdline; do
-        { tr '\000' '\n' < "$aw_p"; } 2>/dev/null | awk -v nd="$NDMC" -v ads="$ADS_CONTROL" -v curl="${VWARD_CURL_BIN:-curl}" '
-            $0==nd || $0==ads || $0==curl || /(^|\/)(ndmc|vward-ndmc[.]sh|vward-ads-privacy-control[.]sh|curl|wget|uclient-fetch)$/ {live=1}
-            END {exit !live}' && return 0
+        { tr '\000' '\n' < "$aw_p"; } 2>/dev/null | awk -v nd="$NDMC" -v ads="$ADS_CONTROL" -v curl="${VWARD_CURL_BIN:-curl}" -v acurl="${VWARD_ADS_CURL:-/opt/bin/curl}" '
+            function base(x) {sub(/^.*\//,"",x); return x}
+            function writer(x) {return x==nd || x==ads || x==curl || x==acurl || base(x) ~ /^(ndmc|vward-ndmc[.]sh|vward-ads-privacy-control[.]sh|vward-fetch|curl|wget|uclient-fetch)$/}
+            {a[NR]=$0}
+            END {
+                i=1; if(base(a[i])=="env") {i++; while(i<=NR && (a[i] ~ /^-/ || index(a[i],"="))) i++}
+                if(base(a[i])=="busybox") i++
+                if(writer(a[i])) exit 0
+                if(base(a[i]) !~ /^(sh|ash|dash|bash|ksh|zsh|python[0-9.]*)$/) exit 1
+                i++; while(i<=NR && a[i] ~ /^-/) {
+                    if(a[i]=="-c" || a[i]=="-m" || a[i] ~ /^-[a-zA-Z]*n/) exit 1
+                    i++
+                }
+                exit !writer(a[i])
+            }' && return 0
     done
     return 1
 }
@@ -2454,6 +2504,12 @@ service_reference_matches() {
         for(i=1;i<=n;i++) for(j=1;j<=m;j++) if(a[j]!="" && (w[i]==a[j] || (length(w[i])>length(a[j]) && substr(w[i],length(w[i])-length(a[j]))=="." a[j]))) exit 1
     }'
 }
+service_reference_token() {
+    # Hash the previewed DNS/FQDN scope, excluding generated headers and
+    # unrelated interface settings that can change between two readbacks.
+    awk '/^[^ \t!]/ {c=($1=="dns-proxy" || ($1=="object-group" && $2=="fqdn"))}
+        c {print} /^!/ {c=0}' "$RUNCFG" | sha256sum | cut -d' ' -f1
+}
 
 op_service() {
     # service on ID auto|TUNNEL | tunnel ID auto|TUNNEL | off ID
@@ -2475,8 +2531,7 @@ op_service() {
     if [ "$sv_op" = reference ]; then
         change_lock; snapshot
         [ ! -e "$SERVICES_ETC/owned/$sv_to" ] && [ ! -L "$SERVICES_ETC/owned/$sv_to" ] || die service_reference_only 64
-        srf_cfg=$(cat "$RUNCFG") || die config_unavailable
-        srf_token=$(printf '%s\n' "$srf_cfg" | sha256sum | cut -d' ' -f1)
+        srf_token=$(service_reference_token) || die config_unavailable
         [ "$srf_token" = "$4" ] || die reference_preview_changed 75
         service_reference_matches "$sv_to" "$(service_target auto "$sv_id")" "$sv_id" || die service_reference_only 64
         srf_row=$(service_row "$sv_id")
@@ -3797,35 +3852,63 @@ smartdns_effective_store() {
     fi
     printf '%s\n' "$ses"
 }
+smartdns_write_url() {
+    swu=$(awk -F= '$1=="SMARTDNS_URL" {print substr($0,index($0,"=")+1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
+    if [ -z "$swu" ]; then
+        if [ "$(smartdns_effective_store)" = agh ]; then
+            swu=$(vward_agh_smartdns_urls | sort | uniq -c | sort -rn | awk 'NR==1 {print $2}')
+        else swu=$(smartdns_url); fi
+    fi
+    [ -n "$swu" ] && printf '%s\n' "$swu"
+}
+smartdns_existing_urls() {
+    { doh_lines | awk -v d="$1" '$(NF-1)=="domain" && tolower($NF)==d {print $3}'
+      agh_domain_urls "$1"; } | sort -u
+}
 op_smartdns_domain() {
     case "$1" in add|remove) ;; *) die invalid_operation 64 ;; esac
     valid_domain "$2" || die invalid_domain 64
     load_profile_base
     JOURNAL=$(umask 077; mktemp /tmp/vward-console-smartdns.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    if [ "$1" = add ]; then
+        snapshot
+        sd_u=$(smartdns_write_url) || die smartdns_not_configured
+        sd_existing=$(smartdns_existing_urls "$2") || die config_unavailable
+        [ -z "$sd_existing" ] || [ "$sd_existing" = "$sd_u" ] || die smartdns_domain_other_server
+        if [ -n "$sd_existing" ]; then
+            if [ -n "$(doh_lines | awk -v d="$2" '$(NF-1)=="domain" && tolower($NF)==d')" ]; then
+                keenetic_smartdns add "$2"
+                done_ok "smartdns-domain add $2 existing keenetic" unchanged
+            fi
+            printf '%s\t%s\n' "$2" "$sd_u" > "$JOURNAL.agh" || die write_failed
+            agh_control smartdns-check "$JOURNAL.agh" && done_ok "smartdns-domain add $2 existing agh" unchanged
+            [ "$AGH_ERR" = smartdns_binding_missing ] || die "$AGH_ERR"
+        fi
+    fi
     if [ "$1" = add ] && [ "$(smartdns_effective_store)" = keenetic ]; then
         keenetic_smartdns add "$2"
         done_ok "smartdns-domain add $2 keenetic" changed
     fi
     if [ "$1" = add ]; then
-        # The server chosen in the Panel; «auto» (the one AdGuard Home has most) only without one:
-        # a freshly installed AdGuard Home has none and refused every domain (Viva 2026-10-19).
-        # Read from the file only: smartdns_url's fallback reads Keenetic's configuration, which
-        # is not loaded on this path (its awk then waited for standard input, found by the test).
-        sd_u=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
-        [ -n "$sd_u" ] || sd_u=auto
-        # fix.35.5 (A4): AdGuard Home's put skips a domain it already has; the answer says which
-        # server holds it instead of «changed» (same server: unchanged; another: not rewritten).
-        if [ "$sd_u" != auto ] && [ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ]; then
-            agh_domain_urls "$2" > "$JOURNAL.have" || die write_failed
-            if [ -s "$JOURNAL.have" ]; then
-                printf '%s\n' "$sd_u" > "$JOURNAL.want" || die write_failed
-                awk 'FILENAME == ARGV[1] {u = $0; next} $0 != u {bad = 1} END {exit bad}' "$JOURNAL.want" "$JOURNAL.have" ||
-                    die smartdns_domain_other_server
-                done_ok "smartdns-domain add $2" unchanged
-            fi
-        fi
+        # New binding only. Existing bindings keep their actual store; changing
+        # the future-write preference is not a migration or a second binding.
         printf '%s\t%s\n' "$2" "$sd_u" > "$JOURNAL.agh" || die write_failed
-        agh_control smartdns-put "$JOURNAL.agh" && done_ok "smartdns-domain add $2" changed
+        agh_recovery_reserve put
+        printf 'AGH-UNCERTAIN %s\n' "$SD_RECOVERY_DIR" >> "$JOURNAL" || die write_failed
+        TXN=1
+        VWARD_AGH_RECOVERY_DIR=$SD_RECOVERY_DIR; export VWARD_AGH_RECOVERY_DIR
+        if agh_control smartdns-put "$JOURNAL.agh"; then
+            unset VWARD_AGH_RECOVERY_DIR
+            TXN=0
+            if printf '%s\n' "$AGH_OUT" | grep -qx CHANGED=0; then done_ok "smartdns-domain add $2" unchanged; fi
+            done_ok "smartdns-domain add $2" changed
+        fi
+        unset VWARD_AGH_RECOVERY_DIR
+        # This executor records both images BEFORE a POST. With neither image,
+        # refusal happened before its first write; otherwise retain uncertainty.
+        if [ ! -e "$SD_RECOVERY_DIR/dns.before.json" ] && [ ! -e "$SD_RECOVERY_DIR/dns.planned.json" ]; then
+            rm -rf "${SD_RECOVERY_DIR:?}"; SD_RECOVERY_DIR=; TXN=0; : > "$JOURNAL"
+        else die "$AGH_ERR"; fi
         # The owner keeps Smart DNS in AdGuard Home: no quiet move to Keenetic.
         [ "$(smartdns_store)" != agh ] || die "$AGH_ERR"
         # No AdGuard Home, or one not connected to VWARD: Keenetic itself. One connected but not
@@ -3970,6 +4053,7 @@ op_smartdns_server() {
     case "$1" in
         set) IFS= read -r ss_url || die invalid_value 64
              printf '%s\n' "$ss_url" | grep -Eq '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]{0,200})?$' || die invalid_value 64
+             change_lock
              new_tmp "$SMARTDNS_CONF" || die write_failed
              { grep -v '^SMARTDNS_URL=' "$SMARTDNS_CONF" 2>/dev/null; printf 'SMARTDNS_URL=%s\n' "$ss_url"; } > "$TMPFILE" || die write_failed
              cmp -s "$TMPFILE" "$SMARTDNS_CONF" && done_ok "smartdns-server set" unchanged
@@ -4104,7 +4188,11 @@ ai_step() {
         AI_RES=${as_out#result=}; ai_checkpoint
         [ "$AI_TXN" != 1 ] || rm -f "$AI_DIR/inflight" || die write_failed
         return 0 ;; esac
-    [ "$AI_TXN" != 1 ] || rm -f "$AI_DIR/inflight" || die write_failed
+    if [ "$AI_TXN" = 1 ] && [ "$as_rc" -lt 128 ] &&
+       ! printf '%s\n' "$as_all" | grep -q '^recovery=' && ! ai_writers_live &&
+       ai_scope > "$AI_DIR/current" && cmp -s "$AI_DIR/current" "$AI_DIR/checkpoint"; then
+        rm -f "$AI_DIR/inflight" || die write_failed
+    fi
     AI_ERR=${as_out#error=}; case "$AI_ERR" in ''|*[!a-z0-9_]*) AI_ERR=helper_failed ;; esac
     # Keenetic's own answer goes on to the Panel and the journal (fix.30 showed only «отклонил»).
     relay_reason "$as_all"
@@ -4216,10 +4304,56 @@ ai_resume() {
 # before only the «no room» case did, a refused second row left the first one). A row that cannot be
 # taken back is named in the journal and the error says the move is incomplete.
 ai_undo() {
+    [ -n "$1" ] || return 0
+    # Removing a domain is broader than removing one URI row. Never compensate
+    # over an owner edit or a child whose external request is still applying.
+    if ai_writers_live || ! ai_scope > "$AI_DIR/current" || ! cmp -s "$AI_DIR/current" "$AI_DIR/checkpoint"; then
+        RELAY_REASON='DNS compensation not proven; private evidence retained'
+        return 1
+    fi
+    ai_inventory > "$AI_DIR/undo.inventory" || return 1
+    for au_d in $1; do
+        # The existing remove executor removes the whole subtree. It is a safe
+        # inverse only for one newly-created row, with no earlier/foreign rows.
+        awk -v d="$au_d" '$1==d || (length($1)>length(d) && substr($1,length($1)-length(d))=="." d) {bad=1} END {exit bad}' "$AI_DIR/before.dns" || return 1
+        awk -v d="$au_d" '$1==d {n++; next}
+            length($1)>length(d) && substr($1,length($1)-length(d))=="." d {bad=1}
+            END {exit bad || n!=1}' "$AI_DIR/undo.inventory" || return 1
+        [ "$(smartdns_existing_urls "$au_d")" = "${ai_url:-}" ] || return 1
+    done
     au_bad=
     for au_d in $1; do ai_step smartdns-domain remove "$au_d" || au_bad="$au_bad $au_d"; done
-    [ -z "$au_bad" ] || { audit "ai undo incomplete:$au_bad"; RELAY_REASON="smartdns rows left:$au_bad"; }
-    return 0
+    [ -z "$au_bad" ] || { audit "ai undo incomplete:$au_bad"; RELAY_REASON="smartdns rows left:$au_bad"; return 1; }
+}
+ai_fail() {
+    # A group may have completed earlier services before a safe refusal. A
+    # verified terminal partial result is not an unfinished external write.
+    if [ "$AI_TXN" = 1 ] && [ ! -f "$AI_DIR/inflight" ] && ! ai_writers_live &&
+       ai_scope > "$AI_DIR/current" && cmp -s "$AI_DIR/current" "$AI_DIR/checkpoint"; then
+        AI_TXN=0; SVR_WHY="partial:$1"; svr_close "$AI_DIR" partial_verified
+    fi
+    die "$1"
+}
+ai_verify_service() {
+    av_row=$(service_row "$1")
+    case "$2" in
+        vpn*)
+            av_g=$(printf '%s' "$av_row" | cut -f2)
+            [ -n "$av_g" ] || return 1
+            if [ -e "$SERVICES_ETC/owned/$av_g" ]; then
+                service_owned "$av_g" || return 1
+                av_target=$(service_target "$ai_to" "$1"); [ "$av_target" != vpn ] || av_target=$VWARD_TUNNEL_INTERFACE
+                [ "$(group_routes "$av_g")" = "$av_target$(printf '\t')auto" ] || return 1
+                for av_d in $(group_domains "$av_g"); do [ -z "$(smartdns_existing_urls "$av_d")" ] || return 1; done
+            else service_reference_matches "$av_g" "$(service_target "$ai_to" "$1")" "$1" || return 1; fi ;;
+        dns|isp)
+            [ -z "$av_row" ] || return 1
+            for av_d in $(ai_main "$1"); do
+                av_urls=$(smartdns_existing_urls "$av_d") || return 1
+                if [ "$2" = dns ]; then [ "$av_urls" = "$ai_url" ] || return 1
+                else [ -z "$av_urls" ] || return 1; fi
+            done ;;
+    esac
 }
 # The AI services the owner sent to Smart DNS when Keenetic had no room (8 of 8): the Panel
 # says when room frees up («Перевести»). One id a line.
@@ -4253,8 +4387,7 @@ op_ai() {
     routing_recovery_check
     if [ "$2" = dns ]; then
         load_profile_base; snapshot
-        { smartdns_url >/dev/null 2>&1; } || [ -n "$(vward_agh_smartdns_urls 2>/dev/null | head -n 1)" ] || die smartdns_not_configured
-        ai_url=$(smartdns_url) || ai_url=$(vward_agh_smartdns_urls 2>/dev/null | head -n 1)
+        ai_url=$(smartdns_write_url) || die smartdns_not_configured
         vward_doh_alive "$ai_url"; ai_alive=$?
         case "$ai_alive" in 0) ;; 1) die smartdns_dead ;; *) die smartdns_unknown ;; esac
     fi
@@ -4263,8 +4396,8 @@ op_ai() {
     for ai_id in $ai_ids; do
         ai_on=$(service_row "$ai_id")
         case "$2" in
-            vpn*) if [ -n "$ai_on" ]; then ai_step service tunnel "$ai_id" "$ai_to" || die "$AI_ERR"
-                  else ai_step service on "$ai_id" "$ai_to" || die "$AI_ERR"; fi
+            vpn*) if [ -n "$ai_on" ]; then ai_step service tunnel "$ai_id" "$ai_to" || ai_fail "$AI_ERR"
+                  else ai_step service on "$ai_id" "$ai_to" || ai_fail "$AI_ERR"; fi
                   [ "${3:-}" = keep ] || ai_wait del "$ai_id" ;;
             dns)
                 # The domains first, the VPN list after: with no room (Keenetic's 8 Smart DNS
@@ -4286,23 +4419,25 @@ op_ai() {
                     elif [ "$AI_ERR" = smartdns_keenetic_full ]; then ai_full=1; break
                     else
                         # Any other refusal: this move's own rows go again, the service stays as it was.
-                        ai_e=$AI_ERR; ai_undo "$ai_added"; die "$ai_e"
+                        ai_e=$AI_ERR; ai_undo "$ai_added" || die rollback_incomplete; ai_fail "$ai_e"
                     fi
                 done
                 if [ "$ai_full" = 1 ]; then
-                    for ai_d in $ai_added; do ai_step smartdns-domain remove "$ai_d" || :; done
+                    ai_undo "$ai_added" || die rollback_incomplete
                     ai_wait add "$ai_id"
                     ai_left="$ai_left${ai_left:+,}$ai_id"
                     continue
                 fi
                 if [ -n "$ai_on" ] && ! ai_step service off "$ai_id"; then
-                    ai_e=$AI_ERR; ai_undo "$ai_added"; die "$ai_e"
+                    ai_e=$AI_ERR; ai_undo "$ai_added" || die rollback_incomplete; ai_fail "$ai_e"
                 fi
                 ai_wait del "$ai_id" ;;
-            *) [ -z "$ai_on" ] || ai_step service off "$ai_id" || die "$AI_ERR"
-               for ai_d in $(ai_main "$ai_id"); do ai_step smartdns-domain remove "$ai_d" || die "$AI_ERR"; done
+            *) [ -z "$ai_on" ] || ai_step service off "$ai_id" || ai_fail "$AI_ERR"
+               for ai_d in $(ai_main "$ai_id"); do ai_step smartdns-domain remove "$ai_d" || ai_fail "$AI_ERR"; done
                [ "${3:-}" = keep ] || ai_wait del "$ai_id" ;;
         esac
+        snapshot
+        ai_verify_service "$ai_id" "$2" || ai_fail ai_verification_failed
         ai_n=$((ai_n + 1))
     done
     if [ -n "$ai_left" ]; then
@@ -4315,6 +4450,13 @@ op_ai() {
             die smartdns_keenetic_full
         fi
     fi
+    # A later group step may observe an owner edit to an earlier service.
+    # Recheck every completed member before promising composite success.
+    snapshot
+    for ai_id in $ai_ids; do
+        case ",$ai_left," in *",$ai_id,"*) continue ;; esac
+        ai_verify_service "$ai_id" "$2" || ai_fail ai_verification_failed
+    done
     ai_checkpoint
     AI_TXN=0
     SVR_WHY=composite_verified
@@ -5350,6 +5492,10 @@ esac
 case "$OP" in
     route-domain|force-vpn|adaptive|domain-category|domain-list|domain-list-watch|list-mode|list|list-domain|service|service-category|services-refresh|tunnel|tunnel-delete|tunnel-subnet|policy-group|smartdns-domain|smartdns-server|smartdns-store|smartdns-keenetic|smartdns-guard|backup-restore|reset|agh-component|module-component|component|component-recover|tunnel-conf|vless-server|tunnel-guard|tunnel-auto|tunnel-return|tunnel-fallback|wan-guard|adaptive-mode|classifier|ip-category|ai)
         routing_recovery_check ;;
+esac
+case "$OP" in
+    domain-list|list-mode|smartdns-domain|smartdns-server|smartdns-store|smartdns-keenetic)
+        service_pending_check ;;
 esac
 
 case "$OP" in

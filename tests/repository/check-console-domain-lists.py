@@ -266,7 +266,9 @@ with tempfile.TemporaryDirectory() as tmp:
     agh_state.write_text(__import__("json").dumps({"up": UP}))
     yaml.write_text("dns:\n  upstream_dns:\n" + "".join(f"    - '{u}'\n" for u in UP))
     ads = tmp / "ads-control"; ads.write_text(FAKE_ADS.replace("@AET@", AET).replace("@ST@", str(agh_state)).replace("@YAML@", str(yaml))); ads.chmod(0o755)
-    env |= {"VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_ADS_CONTROL_BIN": str(ads)}
+    # This fixture represents a running AGH API, rather than an installed/off component.
+    pidof = tmp / 'pidof'; pidof.write_text('#!/bin/sh\n[ "$1" = AdGuardHome ]\n'); pidof.chmod(0o755)
+    env |= {"VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_ADS_CONTROL_BIN": str(ads), "VWARD_PIDOF_BIN": str(pidof)}
     agh = lambda: __import__("json").loads(agh_state.read_text())["up"]
     keenetic_before = dns_block(cfg)
 

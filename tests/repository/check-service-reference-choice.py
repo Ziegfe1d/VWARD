@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Explicit read-only association is not adoption, and grants no mutation right."""
-import hashlib
 import json
 import subprocess
 import tempfile
@@ -12,15 +11,17 @@ with tempfile.TemporaryDirectory() as td:
     s.cfg.write_text(s.cfg.read_text().replace('domain-list7 ISP auto', 'domain-list7 Wireguard0 auto')
                      .replace('    include user.example\n', '    include user.example\n    include anthropic.com\n    include claude.com\n'))
     before = s.cfg.read_bytes()
-    token = hashlib.sha256((s.cfg.read_text().rstrip('\n')+'\n').encode()).hexdigest()
     api = subprocess.run(['sh', str(fixture.ROOT/'web/cgi-bin/api.cgi')], env=s.env | {
         'REQUEST_METHOD': 'GET', 'QUERY_STRING': 'action=ai-data', 'JQ': 'jq',
         'VWARD_CONSOLE_CACHE_TTL': '0', 'VWARD_SERVICES_FETCHED': str(s.cat)}, capture_output=True, text=True, timeout=30)
     assert api.returncode == 0 and api.stdout.split('\n\n', 1)[-1].strip(), api.stdout + api.stderr
     data = json.loads(api.stdout.split('\n\n', 1)[-1])
-    assert data['reference_token'] == token
+    token = data['reference_token']
+    assert len(token) == 64
     ref = data['services'][0]['paths'][0]
     assert ref['reference'] and ref['group'] == 'domain-list7' and len(ref['members']) == 4, data
+    s.cfg.write_text('! generated header changed\n'+s.cfg.read_text())
+    before = s.cfg.read_bytes()
     r = s.run('service', 'reference', 'claude.ai', 'domain-list7', token)
     assert r.returncode == 0, r.stdout + r.stderr
     assert s.cfg.read_bytes() == before

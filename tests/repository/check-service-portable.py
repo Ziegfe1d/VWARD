@@ -55,6 +55,20 @@ svr_live "$1"
     code = 'ai_writers_live(){ return 1; }\n'+function('svr_live').replace('/proc/[0-9]*', str(p)+'/[0-9]*')+'\nsvr_live "$1"'
     r = subprocess.run(['sh', '-c', code, 'test', str(txn)], capture_output=True)
     assert r.returncode == 1 and not r.stderr, r.stderr
+    # Reading a writer as data (or sh -n) is not an active writer. Native and
+    # interpreted execution are, including the actual BusyBox invocation.
+    procdir = p/'proc/123'; procdir.mkdir(parents=True)
+    writer_code = function('ai_writers_live').replace('/proc/[0-9]*/cmdline',str(p)+'/proc/[0-9]*/cmdline')
+    command = 'NDMC=/opt/bin/ndmc; ADS_CONTROL=/opt/bin/vward-ads-privacy-control.sh; VWARD_CURL_BIN=/opt/bin/curl\n'+writer_code+'\nai_writers_live'
+    for argv, expected in [(['shellcheck','-s','sh','/opt/bin/vward-ads-privacy-control.sh'],1),
+                           (['python3','reader.py','/opt/bin/ndmc'],1),
+                           (['busybox','ash','-n','/opt/bin/vward-ads-privacy-control.sh'],1),
+                           (['/opt/bin/ndmc','-c','show running-config'],0),
+                           (['python3','/opt/bin/ndmc','-c','show running-config'],0),
+                           (['busybox','ash','/opt/bin/vward-ads-privacy-control.sh','agh','smartdns-put'],0)]:
+        (procdir/'cmdline').write_bytes(b'\0'.join(a.encode() for a in argv)+b'\0')
+        r = subprocess.run(['sh','-c',command],capture_output=True)
+        assert r.returncode == expected and not r.stderr, (argv,r.returncode,r.stderr)
 
 with tempfile.TemporaryDirectory() as td:
     s = fixture.Services(Path(td))

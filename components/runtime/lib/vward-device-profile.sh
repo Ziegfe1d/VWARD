@@ -1093,7 +1093,7 @@ vward_smartdns_storage() (
             vs_supported=0 vs_why=upstream_file_unsupported
         elif [ "$vs_mode" != agh ]; then vs_why=inactive_handler
         elif [ -e "${VWARD_COMPONENT_STATE:-${VWARD_ROOT_PREFIX:-}/opt/etc/vward/components}/adguardhome.disabled" ]; then vs_why=disabled
-        elif pidof AdGuardHome >/dev/null 2>&1; then vs_available=1 vs_why=; fi
+        elif "${VWARD_PIDOF_BIN:-pidof}" AdGuardHome >/dev/null 2>&1; then vs_available=1 vs_why=; fi
     fi
     printf '%s\t%s\t%s\t%s\t%s\n' 'AdGuard Home' "$vs_supported" "$vs_available" "${vs_why:--}" "$vs_mode"
 )

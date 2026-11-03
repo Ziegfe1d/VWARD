@@ -52,6 +52,8 @@ def killed_refresh(s, owner_edit=False):
     ndmc = Path(s.env["VWARD_NDMC"]); body = ndmc.read_text()
     pause = ('\ndef fault_pause():\n'
              '    if cmd != "object-group fqdn domain-list0 include new.example": return\n'
+             '    import os\n'
+             f'    Path({str(s.tmp / "transport.pid")!r}).write_text(str(os.getpid()))\n'
              f'    Path({str(entered)!r}).touch()\n'
              f'    while not Path({str(resume)!r}).exists():\n'
              '        import time; time.sleep(0.01)\n')
@@ -71,6 +73,11 @@ def killed_refresh(s, owner_edit=False):
         os.kill(int(pidfile.read_text()), signal.SIGKILL)
         resume.touch()
         t.join(30)
+        transport_pid = (s.tmp/'transport.pid').read_text()
+        deadline = time.monotonic()+5
+        while fixture.process_has_arg(transport_pid, str(ndmc)) and time.monotonic()<deadline:
+            time.sleep(0.01)
+        assert not fixture.process_has_arg(transport_pid, str(ndmc)), 'transport did not finish'
     finally:
         fixture.HELPER = original
         resume.touch()

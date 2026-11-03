@@ -20,7 +20,12 @@ def rows():
             result.extend((d,u) for d in ds.split('/'))
     return result
 r=rows()
-if op=='smartdns-put':
+if op=='smartdns-check':
+    pairs=[tuple(l.split('\\t')) for l in Path(sys.argv[3]).read_text().splitlines()]
+    if not all(pair in r for pair in pairs):
+        print('ERROR=smartdns_binding_missing'); sys.exit(1)
+    print('CONTROL=PASS'); print('CHANGED=0'); sys.exit(0)
+elif op=='smartdns-put':
     for line in Path(sys.argv[3]).read_text().splitlines():
         d,u=line.split('\\t')
         if not any(d==a for a,b in r): r.append((d,u))
@@ -35,5 +40,7 @@ p.write_text("dns:\\n  upstream_dns:\\n    - 9.9.9.10\\n"+''.join("    - '[/"+d+
 print('CONTROL=PASS')
 ''')
     control.chmod(0o755)
-    env.update(VWARD_ADGUARD_CONFIG=str(yaml), VWARD_ADS_CONTROL_BIN=str(control))
+    pidof = Path(tmp)/'agh-pidof'
+    pidof.write_text('#!/bin/sh\n[ "$1" = AdGuardHome ]\n'); pidof.chmod(0o755)
+    env.update(VWARD_ADGUARD_CONFIG=str(yaml), VWARD_ADS_CONTROL_BIN=str(control), VWARD_PIDOF_BIN=str(pidof))
     return yaml
