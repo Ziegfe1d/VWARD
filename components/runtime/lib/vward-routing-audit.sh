@@ -279,6 +279,7 @@ vward_routing_service_policy() (
         rev=ENVIRON["VWARD_B_REV"];floor=ENVIRON["VWARD_B_FLOOR"]
     }
     function id(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/}
+    function refid(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:@-]*$/}
     function revision(s) {return s ~ /^[0-9]+$/ && s+0<=2147483647}
     function route(t,d) {return (t=="ISP" || (t ~ /^VPN:/ && id(substr(t,5)))) && id(d)}
     function add(key,src,ref,t,d,state,reason) {
@@ -292,7 +293,7 @@ vward_routing_service_policy() (
         if(FNR>4096 || bytes>1048576) {bad=1;next}
         if(FNR==1 && NF==2 && $1=="schema" && $2=="1") {header=1;next}
         k=$1 ":" $2
-        if(NF!=8 || $1 !~ /^[MSA]$/ || !id($2) || !route($3,$4) || $5 !~ /^[01]$/ ||
+        if(NF!=8 || $1 !~ /^[MSA]$/ || !refid($2) || !route($3,$4) || $5 !~ /^[01]$/ ||
            !revision($7) || $7+0>rev+0 || k in seen || ($1=="S" && $2=="choice")) {bad=1;next}
         seen[k]=1
         if($1=="A") {

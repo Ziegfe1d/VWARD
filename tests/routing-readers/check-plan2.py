@@ -35,6 +35,9 @@ with Fixture() as f:
         (out/'plan.tsv').write_text(r.stdout)
         return rows
     rows=plan();assert any(r[:4]==['step','1','create','route'] for r in rows),rows
+    put('context',context+'VPN:Ghost\tavailable\n')
+    rows=plan(target='VPN:Ghost');assert any(r[0]=='hold' for r in rows),'context boolean invented a VPN target outside native profile'
+    put('context',context);rows=plan()
     assert any(r[0]=='step' and r[3]=='choice' for r in rows)
     journal=f.p/'journal';journal.mkdir(mode=0o700)
     r=f.run('. "$1"; vward_journal2_plan "$2" op-1 "$3"',JOURNAL,journal,out/'plan.tsv',env=env)
@@ -82,6 +85,22 @@ with Fixture() as f:
     rows=plan('off','-','-',1)
     assert not any(r[0]=='step' and r[2]=='remove' for r in rows),'S off deleted independent A coverage'
     assert any(r[0]=='step' and r[3]=='claims' for r in rows),rows
+    put('evidence','');put('context',context+'VPN:Wireguard1\tavailable\n')
+    rows=plan('vpn','VPN:Wireguard1','default',1)
+    assert any(r[0]=='step' and r[2:5]==['move','route','own1'] and 'p-old' in r[6] for r in rows),'native target move lost stable resource/birth ID'
+    # A common-owned A-only rule is not a new native manual intent. Turning A
+    # off withdraws its known contribution; absence of an S claim is not orphan
+    # ownership and must not force a redundant S-on/off workaround.
+    f.enabled.write_text('')
+    put('choices','schema\t1\nservice\tsvc\t1\tauto\t-\t-\t0\n')
+    put('context',context.replace('source:A\t1','source:A\t0'))
+    put('resources',row.replace('S:svc','A:a1'))
+    put('evidence','A\ta1\tx.example\texact\tVPN:Wireguard0\tdefault\t1\tactive\t0\tsvc\n')
+    rows=plan('off','-','-',1)
+    assert any(r[0]=='step' and r[2:5]==['remove','route','own1'] for r in rows),('withdrawing A preserved its obsolete physical rule',rows,(out/'policy.tsv').read_text(),(stage/'intents.tsv').read_text(),(stage/'inventory.tsv').read_text())
+    f.enabled.write_text('svc\tdomain-list0\tauto\n')
+    put('choices','schema\t1\nservice\tsvc\t1\tvpn\tVPN:Wireguard0\tdefault\t0\n')
+    put('context',context)
     put('resources',row.replace('p-old','p-reused'))
     rows=plan('off','-','-',1);assert any(r[0]=='hold' for r in rows) and not any(r[0]=='step' for r in rows),'reused identity mutated'
     assert not trace.exists()

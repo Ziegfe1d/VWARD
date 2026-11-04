@@ -20,7 +20,7 @@ vr2_hash() {
     [ "${#vr2_h}" = 64 ] && printf '%s\n' "$vr2_h"
 }
 vr2_stage_files() {
-    printf '%s\n' 'intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv decision/version.tsv decision/choices.tsv decision/bindings.tsv decision/evidence.tsv decision/policies.tsv decision/saved.tsv decision/queue.tsv decision/tombstones.tsv decision/context.tsv decision/resources.tsv decision/proofs.tsv'
+    printf '%s\n' 'intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv native.cfg enabled.tsv decision/version.tsv decision/choices.tsv decision/bindings.tsv decision/evidence.tsv decision/policies.tsv decision/saved.tsv decision/queue.tsv decision/tombstones.tsv decision/context.tsv decision/resources.tsv decision/proofs.tsv'
 }
 # Integrity of published preparation files, including the exact expected file
 # set. A valid-looking edit cannot keep using an earlier content generation.
@@ -84,10 +84,11 @@ vward_routing_project2() (
     VWARD_B_SID=$2 LC_ALL=C awk '
     BEGIN {FS=OFS="\t";sid=ENVIRON["VWARD_B_SID"]}
     function id(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/}
+    function refid(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:@-]*$/}
     function service(s) {return length(s)<=63 && s ~ /^[a-z0-9][a-z0-9.@_-]*$/}
     function domain(s, a,n,i) {
         if(length(s)>253 || s !~ /^[a-z0-9.-]+$/) return 0
-        n=split(s,a,".");if(n<2) return 0
+        n=split(s,a,".");if(n<2 || a[n] ~ /^[0-9]+$/) return 0
         for(i=1;i<=n;i++) if(length(a[i])>63 || a[i] !~ /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/) return 0
         return 1
     }
@@ -116,7 +117,7 @@ vward_routing_project2() (
         next
     }
     FILENAME==ARGV[3] {
-        if(NF!=10 || $1 !~ /^[MSA]$/ || !id($2) || !domain($3) || $4 !~ /^(exact|subtree)$/ ||
+        if(NF!=10 || $1 !~ /^[MSA]$/ || !refid($2) || !domain($3) || $4 !~ /^(exact|subtree)$/ ||
            ($5!="ISP" && !($5 ~ /^VPN:/ && id(substr($5,5)))) || !id($6) || $7 !~ /^[01]$/ ||
            $8 !~ /^(explicit|active|positive|history|unknown)$/ || $9 !~ /^[0-9]+$/ || $9+0>2147483647 ||
            ($10!="-" && !service($10)) || seene[$1 SUBSEP $2]++) {bad=1;next}
@@ -129,6 +130,10 @@ vward_routing_project2() (
         if(NF!=11 || !id($2) || ($4!="-" && !domain($4)) || $5 !~ /^(exact|subtree)$/) {bad=1;next}
         if($4!="-") domains[$4]=1
         if(index("," $11 ",",",S:" sid ",")) {own[$4]=1;if(!($4 in scope)) scope[$4]=$5}
+        if($1=="route" && $9=="vward") {
+            own_key[$2]=$3 SUBSEP $4 SUBSEP $5 SUBSEP $6 SUBSEP $7
+            own_prefix[$2]=$1;for(j=2;j<=10;j++)own_prefix[$2]=own_prefix[$2] OFS $j
+        }
         next
     }
     FILENAME==ARGV[6] {
@@ -136,15 +141,39 @@ vward_routing_project2() (
         # observed presence is not replaced by an empty v2 evidence file.
         if($1!="M") next
         es[++ne]="M";er[ne]=$2;ed[ne]=$3;escp[ne]=$4;et[ne]=$5;ep[ne]=$6
-        selected[ne]=$7;kind[ne]="explicit";epoch[ne]=0;origin[ne]="-";domains[$3]=1;next
+        selected[ne]=$7;kind[ne]="explicit";epoch[ne]=0;origin[ne]="-";domains[$3]=1;native_ref[ne]=$2;next
     }
     FILENAME==ARGV[7] {
         if($1=="source" && $4=="unknown") native_unknown[$2]=1
         next
     }
+    FILENAME==ARGV[8] {
+        if($1=="resource" && $8=="vward" && $10=="verified")
+            native_group[$12]="group:" $3
+        next
+    }
+    FILENAME==ARGV[9] {
+        p=$1;for(j=2;j<=10;j++)p=p OFS $j
+        if(NF==11)origin_proof[$2]=p
+        next
+    }
+    FILENAME==ARGV[10] {
+        if($2=="intent" && $3=="M" && $8=="verified")intent_container[$1]=$4
+        next
+    }
     END {
         if(!service(sid) || nb>1024 || ne>4096 || bad) exit 2
         if(!(sid in mode)) {mode[sid]="auto";tgt[sid]="-";dns[sid]="-";rev[sid]=floor[sid]=0}
+        # A native projection of this same managed physical resource is not a
+        # second manual source. Require BOTH exact private native proof and the
+        # v2 origin/content row; names or a manifest alone never suppress M.
+        for(r in own_key) if(origin_proof[r]==own_prefix[r])common_key[own_key[r]]=1
+        for(i in native_ref) {
+            c=intent_container[native_ref[i]]
+            if(!(c in native_group))continue
+            k=native_group[c] SUBSEP ed[i] SUBSEP escp[i] SUBSEP et[i] SUBSEP ep[i]
+            if(k in common_key)common_native[i]=1
+        }
         for(d in domains) {
             member=binding(sid,d)
             if(member=="none" && !own[d]) continue
@@ -164,6 +193,7 @@ vward_routing_project2() (
             if(member=="none" || member=="excluded") {m="auto";t=p="-"}
             emit("atom" OFS d OFS sc OFS m OFS t OFS p OFS rev[sid] OFS floor[sid] OFS why)
             for(i=1;i<=ne;i++) if(covers(ed[i],d,escp[i])) {
+                if(i in common_native) continue
                 if(es[i]=="S" && origin[i]==sid) continue
                 sel=(ctx["source:" es[i]]=="1") ? selected[i] : 0
                 k=kind[i];membership=(es[i]=="A") ? (member=="unknown" ? "unknown" : (member=="excluded" ? "excluded" : "bound")) : "peer"
@@ -175,7 +205,7 @@ vward_routing_project2() (
                 emit("intent" OFS d OFS "S" OFS s OFS tgt[s] OFS dns[s] OFS (ctx["source:S"]=="1" ? 1 : 0) OFS "explicit" OFS 0 OFS "peer")
         }
     }' "$vr2_tmp/choices" "$1/decision/bindings.tsv" "$1/decision/evidence.tsv" "$1/decision/context.tsv" \
-        "$1/decision/resources.tsv" "$1/intents.tsv" "$1/snapshot.tsv" > "$vr2_tmp/input" || return 2
+        "$1/decision/resources.tsv" "$1/intents.tsv" "$1/snapshot.tsv" "$1/inventory.tsv" "$1/decision/proofs.tsv" "$1/identity.tsv" > "$vr2_tmp/input" || return 2
     awk -F'\t' '$1=="atom"' "$vr2_tmp/input" | LC_ALL=C sort -t "$(printf '\t')" -k2,2 > "$vr2_tmp/atoms"
     : > "$vr2_tmp/policy"
     while IFS="$(printf '\t')" read -r _vr2_tag vr2_d _vr2_scope vr2_mode vr2_target vr2_dns vr2_rev vr2_floor vr2_why; do

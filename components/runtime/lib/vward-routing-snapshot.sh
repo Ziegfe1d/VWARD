@@ -36,6 +36,7 @@ vward_routing_consistent_read() (
     rm -f "$vrs_out/generation" "$vrs_out/intents.tsv" "$vrs_out/snapshot.tsv" "$vrs_out/identity.tsv" "$vrs_out/legacy.tsv" 2>/dev/null
     [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -f "$vrs_out/inventory.tsv"
     [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -f "$vrs_out/groups.tsv"
+    [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -f "$vrs_out/native.cfg" "$vrs_out/enabled.tsv"
     [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -f "$vrs_out/seal" "$vrs_out/seal.sha"
     [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -rf "$vrs_out/decision"
     vrs_tmp=$(umask 077; mktemp -d "$vrs_out/.read.XXXXXX" 2>/dev/null) || return 2
@@ -54,7 +55,7 @@ vward_routing_consistent_read() (
     case $vrs_max_age$vrs_limit in ''|*[!0-9]*) return 2 ;; esac
 
     # One line per input: LABEL STATE. STATE: absent | bad | oversize | nostat |
-    # "SHA256 SIZE INODE MTIME". Labels never contain a host path.
+    # "SHA256 SIZE INODE MTIME MODE UID". Authority is part of consistency.
     vrs_one() {
         if [ ! -e "$2" ] && [ ! -L "$2" ]; then printf '%s absent\n' "$1"; return 0; fi
         if [ -L "$2" ] || [ ! -f "$2" ] || [ ! -r "$2" ]; then printf '%s bad\n' "$1"; return 0; fi
@@ -68,7 +69,9 @@ vward_routing_consistent_read() (
         vrs_ino=$(ls -di "$2" 2>/dev/null | awk '{print $1}')
         vrs_mt=$(date -r "$2" +%s 2>/dev/null)
         case $vrs_ino$vrs_mt in ''|*[!0-9]*) printf '%s nostat\n' "$1"; return 0 ;; esac
-        printf '%s %s %s %s %s\n' "$1" "$vrs_crc" "$vrs_sz" "$vrs_ino" "$vrs_mt"
+        vrs_auth=$(ls -ldn "$2" 2>/dev/null | awk '{print substr($1,1,10),$3}')
+        [ -n "$vrs_auth" ] || { printf '%s nostat\n' "$1"; return 0; }
+        printf '%s %s %s %s %s %s\n' "$1" "$vrs_crc" "$vrs_sz" "$vrs_ino" "$vrs_mt" "$vrs_auth"
     }
     # Directory entries, bounded to 256, names restricted to the identifier charset.
     vrs_dir() {
@@ -179,8 +182,9 @@ vward_routing_consistent_read() (
     done
     set --
 
-    # Generation: content-only fingerprint (no inode/time), stable across reboot.
-    vrs_gen=$(awk '{print $1, $2, $3}' "$vrs_tmp/fp.before" | LC_ALL=C awk '
+    # Content + authority, excluding inode/time: stable across reboot, but a
+    # revoked private proof cannot retain its former generation.
+    vrs_gen=$(awk '{print $1, $2, $3, $6, $7}' "$vrs_tmp/fp.before" | LC_ALL=C awk '
         BEGIN {for(c=32;c<127;c++) ord[sprintf("%c",c)]=c; hd="0123456789abcdef"}
         function hex8(n, i,r) {r=""; for(i=0;i<8;i++) {r=substr(hd,(n%16)+1,1) r; n=int(n/16)} return r}
         {s=s $0 "\n"}
@@ -231,13 +235,16 @@ vward_routing_consistent_read() (
         mv "$vrs_tmp/$vrs_name.tsv" "$vrs_out/$vrs_name.tsv" || { rm -f "$vrs_out/intents.tsv" "$vrs_out/snapshot.tsv" "$vrs_out/identity.tsv" "$vrs_out/legacy.tsv"; return 2; }
     done
     if [ -n "$vrs_decision_names" ]; then
+        cp "$vrs_stage/cfg" "$vrs_out/native.cfg" || return 2
+        if [ -f "$vrs_stage/enabled" ]; then cp "$vrs_stage/enabled" "$vrs_out/enabled.tsv" || return 2
+        else : > "$vrs_out/enabled.tsv";fi
         awk '/^object-group fqdn / && NF==3 {print $3}' "$vrs_stage/cfg" | LC_ALL=C sort -u > "$vrs_out/groups.tsv" || return 2
         (umask 077; mkdir "$vrs_out/decision") || return 2
         for vrs_l in $vrs_decision_names; do
             mv "$vrs_stage/$vrs_l" "$vrs_out/decision/${vrs_l#v2-}.tsv" || return 2
         done
         printf 'routing-stage\t2\t%s\n' "$vrs_gen" > "$vrs_out/seal" || return 2
-        for vrs_name in intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv \
+        for vrs_name in intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv native.cfg enabled.tsv \
             decision/version.tsv decision/choices.tsv decision/bindings.tsv decision/evidence.tsv \
             decision/policies.tsv decision/saved.tsv decision/queue.tsv decision/tombstones.tsv \
             decision/context.tsv decision/resources.tsv decision/proofs.tsv; do

@@ -52,9 +52,11 @@ vward_routing_plan2() (
     VWARD_B_GEN=$vr2_gen VWARD_B_SID=$vr2_sid VWARD_B_OP=$3 LC_ALL=C awk '
     BEGIN {FS=OFS="\t";gen=ENVIRON["VWARD_B_GEN"];sid=ENVIRON["VWARD_B_SID"];op=ENVIRON["VWARD_B_OP"]}
     function id(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/}
+    function refid(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:@-]*$/}
+    function service(s) {return length(s)<=63 && s ~ /^[a-z0-9][a-z0-9.@_-]*$/}
     function domain(s,a,n,i) {
         if(length(s)>253 || s !~ /^[a-z0-9.-]+$/) return 0
-        n=split(s,a,".");if(n<2) return 0
+        n=split(s,a,".");if(n<2 || a[n] ~ /^[0-9]+$/) return 0
         for(i=1;i<=n;i++) if(length(a[i])>63 || a[i] !~ /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/) return 0
         return 1
     }
@@ -62,6 +64,20 @@ vward_routing_plan2() (
     function encode(s) {gsub(/\t/,"|",s);return s}
     function prefix(s,a,n,i,r) {n=split(s,a,OFS);r=a[1];for(i=2;i<=10;i++)r=r OFS a[i];return r}
     function hold(d,reason) {holds[d SUBSEP reason]=1;nh=1}
+    function consumers_known(list,d, a,n,i,r,src,key) {
+        if(list=="-")return 0
+        n=split(list,a,",")
+        for(i=1;i<=n;i++) {
+            r=a[i];src=substr(r,1,1);key=d SUBSEP r
+            if(index("," refs[d] ",","," r ","))continue
+            if(ctx["source:" src]=="0")continue
+            if(r=="S:" sid && atom_mode[d]=="auto")continue
+            if(src=="S" && choice_mode[substr(r,3)]=="auto")continue
+            if(contribution_state[key]=="inactive" || contribution_state[key]=="suppressed")continue
+            return 0
+        }
+        return 1
+    }
     function sort(a,n, width,left,mid,right,i,j,k,tmp) {
         for(width=1;width<n;width*=2) {
             for(left=1;left<=n;left+=2*width) {
@@ -82,7 +98,7 @@ vward_routing_plan2() (
         if((plan_bytes+=length(steps[ns])+1)>1048000) {bad=1;delete steps[ns]}
     }
     function check_dependency(kind,backend,target,d) {
-        if(kind=="route" && target ~ /^VPN:/ && ctx[target]!="available") hold(d,"vpn-unavailable-or-unknown")
+        if(kind=="route" && target ~ /^VPN:/ && (ctx[target]!="available" || !(target in native_vpn))) hold(d,"vpn-unavailable-or-unknown")
         if(kind=="dns" && ctx["storage:" backend]!="available") hold(d,"storage-unavailable-or-unknown")
     }
     function native_group(target,policy, key,i,r,a,j) {
@@ -105,7 +121,8 @@ vward_routing_plan2() (
             verdict[$1]=$4
             if($4=="unknown" || $4=="unresolved") hold($1,$4)
         } else if($2=="contribution") {
-            if(NF!=8 || $3 !~ /^[MSA]$/ || !id($4) || $7 !~ /^(active|inactive|suppressed|unknown)$/) {bad=1;next}
+            if(NF!=8 || $3 !~ /^[MSA]$/ || !refid($4) || $7 !~ /^(active|inactive|suppressed|unknown)$/) {bad=1;next}
+            contribution_state[$1 SUBSEP $3 ":" $4]=$7
             if($7=="active") {
                 key=$5 SUBSEP $6
                 if($1 in wanted && wanted[$1]!=key) hold($1,"peer-conflict")
@@ -144,7 +161,7 @@ vward_routing_plan2() (
         tomb[$1]=$2;next
     }
     FILENAME==ARGV[8] {if($1=="service" && $2==sid) choice_pre=$0;next}
-    FILENAME==ARGV[9] {if($1=="service" && $2==sid) choice_post=$0;next}
+    FILENAME==ARGV[9] {if($1=="service") {choice_mode[$2]=$4;if($2==sid)choice_post=$0}next}
     FILENAME==ARGV[10] {
         if(NF!=13 || $1!="resource" || $11!="reference") {bad=1;next}
         native["group:" $3 SUBSEP $4 SUBSEP $5 SUBSEP $6 SUBSEP $7]=$0
@@ -152,8 +169,9 @@ vward_routing_plan2() (
         next
     }
     FILENAME==ARGV[11] {if(NF!=1 || !id($1)) bad=1;group_names[$1]=1;next}
+    FILENAME==ARGV[12] {if($1=="health" && $2~/^VPN:/)native_vpn[$2]=1;next}
     END {
-        if(nd>1024 || nr>4096 || bad || !id(sid)) exit 2
+        if(nd>1024 || nr>4096 || bad || !service(sid)) exit 2
         # Map actual native observations. Omitted resources remain references;
         # an input manifest cannot make a missing/replaced native row managed.
         for(r in resource) {
@@ -181,6 +199,7 @@ vward_routing_plan2() (
         }
         for(i=1;i<=nd;i++) {
             d=domains[i];target=(d in wanted) ? wt[d] : "ISP";policy=(d in wanted) ? wp[d] : "default"
+            move_rid="";move_pre="";move_birth=""
             if(scope[d]=="subtree" && ctx["scope:subtree"]!="available") hold(d,"scope-unproven")
             kind=(policy!="default") ? "dns" : (target ~ /^VPN:/ ? "route" : "none")
             dest_backend="native"
@@ -200,6 +219,7 @@ vward_routing_plan2() (
                 if(compatible) {
                     covered=1
                     if(a[9]=="vward" && proof_ok[r] && !touched[r]) {
+                        if(!consumers_known(a[11],d))hold(d,"resource-consumer-unknown")
                         post=prefix(resource[r]) OFS refs[d]
                         if(post!=resource[r]) step("add","claims",r,resource[r],post,a[10],refs[d],"restore-own-consumers")
                         touched[r]=1
@@ -214,19 +234,25 @@ vward_routing_plan2() (
                 }
                 # Removal is scoped to this one resource. A parent subtree or
                 # independently consumed atom requires a separate reconciliation.
-                if(a[4]!=d || (a[11]!="-" && !index("," a[11] ",",",S:" sid ","))) {hold(d,"resource-has-independent-consumers");continue}
+                if(a[4]!=d || !consumers_known(a[11],d)) {hold(d,"resource-has-independent-consumers");continue}
                 if(!removed[r]) {
                     if(a[1]=="dns") check_dependency("dns",a[8],a[6],d)
-                    step("remove",a[1],r,resource[r],"-",a[10],"-","restore-own-resource")
+                    if(kind==a[1] && kind!="none") {
+                        if(move_rid!="")hold(d,"ambiguous-owned-move")
+                        move_rid=r;move_pre=resource[r];move_birth=a[10]
+                    } else step("remove",a[1],r,resource[r],"-",a[10],"-","restore-own-resource")
                     removed[r]=1
                 }
             }
+            if(covered && move_rid!="") step("remove",kind,move_rid,move_pre,"-",move_birth,"-","restore-own-resource")
             if(kind!="none" && !covered) {
-                rid="b-" op "-" ++newid;birth="p-" op "-" newid
+                if(move_rid!="") {rid=move_rid;birth=move_birth}
+                else {rid="b-" op "-" ++newid;birth="p-" op "-" newid}
                 nat=(kind=="route") ? native_group(target,policy) : "upstream:" url[policy]
                 if(nat=="") {hold(d,"no-free-native-group");continue}
                 post=kind OFS rid OFS nat OFS d OFS scope[d] OFS target OFS policy OFS dest_backend OFS "vward" OFS birth OFS refs[d]
-                step("create",kind,rid,"-",post,birth,refs[d],"remove-own-resource")
+                if(move_rid!="") step("move",kind,rid,move_pre,post,birth,refs[d],"restore-own-resource")
+                else step("create",kind,rid,"-",post,birth,refs[d],"remove-own-resource")
                 created[rid]=post
             }
         }
@@ -246,7 +272,7 @@ vward_routing_plan2() (
         for(i=1;i<=ns;i++) print steps[i]
     }' "$2/policy.tsv" "$2/atoms.tsv" "$1/decision/resources.tsv" "$1/decision/proofs.tsv" \
         "$1/decision/context.tsv" "$1/decision/policies.tsv" "$1/decision/tombstones.tsv" \
-        "$1/decision/choices.tsv" "$2/choices.tsv" "$1/inventory.tsv" "$1/groups.tsv"
+        "$1/decision/choices.tsv" "$2/choices.tsv" "$1/inventory.tsv" "$1/groups.tsv" "$1/snapshot.tsv"
 )
 
 vward_routing_plan() (

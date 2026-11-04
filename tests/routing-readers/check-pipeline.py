@@ -46,5 +46,19 @@ with Fixture() as f:
     p.unlink();p.symlink_to(inp/'choices.tsv');r=stage();assert r.returncode==3 and not (out/'generation').exists()
     p.unlink();p.write_text('')
     assert stage().returncode==0
+    # Permission changes are authority changes even when file bytes/inode/mtime
+    # are unchanged. Mixed identities cannot share a known generation.
+    real=f.p/'read-real.sh';real.write_text(READ.read_text().replace('vward_routing_read() (','vward_routing_read_real() (',1))
+    script='''
+    . "$1"; . "$2"; . "$3"; test_proof=$6
+    vward_routing_read() {
+        [ "$1" != identity ] || chmod 0644 "$test_proof"
+        vward_routing_read_real "$@"
+    }
+    vward_routing_consistent_read2 "$4" "$5"
+    '''
+    r=f.run(script,real,OBSERVE,SNAP,out,inp,f.proof,env=env)
+    assert r.returncode==3 and not (out/'generation').exists(),'authority changed between projections but stage stayed known'
+    f.proof.chmod(0o600)
     assert not trace.exists(),'stage called transport/comm/cksum'
 print('B_PIPELINE_STAGE=PASS native+choice/bindings/evidence/versions, consistent copies, no transports/cksum')

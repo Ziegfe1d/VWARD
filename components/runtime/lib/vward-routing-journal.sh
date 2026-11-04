@@ -90,7 +90,9 @@ vrj2_plan_valid() {
         {
             if(NF!=11 || $1!="step" || $2!=++n || $3!~/^(create|add|remove|move)$/ ||
                $4!~/^(route|dns|group|dns-scope|nativeproof|claims|choice|manifest|proof|registry|saved|queue|policy|tombstone)$/ ||
-               $5!~/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/ || length($5)>64 || $6==$7) bad=1
+               length($5)>64 || $6==$7) bad=1
+            if($4=="choice") {if($5!~/^[a-z0-9][a-z0-9.@_-]*$/ || length($5)>63)bad=1}
+            else if($5!~/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/)bad=1
             for(i=1;i<=NF;i++) if($i!~/^[A-Za-z0-9_.:@,|\/-]+$/ || index($i,"//")) bad=1
         }
         END{exit (NR>0 && !bad) ? 0 : 2}' "$1"
@@ -258,6 +260,9 @@ vward_journal2_compensating() (
     vrj2_lock "$1" || return $?
     trap 'vrj2_unlock "$1"' EXIT
     case $(cat "$1/$2/state") in pending|unknown) ;; *) return 75 ;; esac
+    # A proved failure/finished inverse withdraws this write capability. If a
+    # resource is recreated later, identical bytes alone do not grant replay.
+    case $(cat "$1/$2/step.$3/state") in pending|unknown|done|compensating) ;; *) return 75 ;; esac
     vrj2_allowed=0
     if cmp -s "$4" "$1/$2/step.$3/post"; then vrj2_allowed=1
     else

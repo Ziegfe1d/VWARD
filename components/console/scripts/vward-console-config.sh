@@ -382,6 +382,22 @@ group_set() {
     if [ "$3" = add ]; then ndm "object-group fqdn $1 include $2"; else ndm "no object-group fqdn $1 include $2"; fi
 }
 
+# B preparation: internal worker, no CLI dispatch/caller is wired. The OFF
+# coordinator supplies a checked locked context and a DATA-only ndm emulator.
+# There is deliberately no API argument or environment flag to skip locks.
+vward_routing_console_group_locked() {
+    vrb_worker_context || return 75
+    case $1 in
+        create) ndm "object-group fqdn $2" ;;
+        include) group_set "$2" "$3" "$4" ;;
+        route)
+            if [ "$4" = add ]; then ndm "dns-proxy route object-group $2 $3 auto"
+            else ndm "dns-proxy no route object-group $2 $3 auto";fi ;;
+        delete) ndm "no object-group fqdn $2" ;;
+        *) return 2 ;;
+    esac
+}
+
 save_router() {
     # A batch (the VPN agent moving many lists at once) saves once at its end itself: 19 lists
     # were 19 saves in a minute and the busy Keenetic stopped answering (Viva 2026-10-16).

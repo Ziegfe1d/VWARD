@@ -64,5 +64,17 @@ with Fixture() as f:
     p=stage/'decision/bindings.tsv';p.write_text(p.read_text().replace('x.example','other.example'))
     r=f.run('. "$1"; . "$2"; vward_routing_project2 "$3" svc "$4" "$5"',AUDIT,PROJECT,stage,next_choices,out,env=env)
     assert r.returncode!=0 and not (out/'generation').exists(),'tampered staged input reused a valid generation'
+    # SID charset is broader than a native group/target identifier. Preserve
+    # the real canonical ID through peer policy without widening native paths.
+    put('choices','schema\t1\nservice\tpeer@unit.example\t1\tvpn\tVPN:Wireguard0\tdefault\t0\n')
+    put('bindings',bindings+'peer@unit.example\tx.example\texact\tconfirmed\tipv4\tknown\n')
+    put('evidence','');put('context',context)
+    rows=call();assert any(x[1:4]==['contribution','S','peer@unit.example'] for x in rows),rows
+    # Literal IP observations are not FQDN membership, even if dotted.
+    put('bindings',bindings.replace('x.example','192.0.2.1'))
+    r=f.run('. "$1"; . "$2"; . "$3"; vward_routing_consistent_read2 "$4" "$5"',READ,OBSERVE,SNAP,stage,inputs,env=env)
+    assert r.returncode==0
+    r=f.run('. "$1"; . "$2"; vward_routing_project2 "$3" svc "$4" "$5"',AUDIT,PROJECT,stage,next_choices,out,env=env)
+    assert r.returncode!=0,'IP was accepted as a service domain'
     assert not trace.exists(),'projection called a transport'
 print('B_PROJECTION=PASS native stage + real choice/policy, peers/epochs/persist/scopes/new names, no transports')

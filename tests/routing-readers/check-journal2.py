@@ -63,6 +63,9 @@ with Fixture() as f:
     assert call('vward_journal2_compensating',j,'op2',1,current).returncode==0
     image('-')
     assert call('vward_journal2_compensated',j,'op2',1,G1,current).returncode==0
+    image(post)
+    assert call('vward_journal2_compensating',j,'op2',1,current).returncode==75,'a compensated resource was recreated and its old inverse replayed'
+    image('-')
     baseline=f.p/'baseline';baseline.mkdir(mode=0o700)
     for name in ('step.1','step.2'):
         (baseline/name).write_text('-\n');(baseline/name).chmod(0o600)

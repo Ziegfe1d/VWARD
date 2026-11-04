@@ -431,3 +431,46 @@ DNS/полный режим не включаются пользователю. 
 
 Уже зелёный CI41815122230 относится к479f268 и не покрывает это новое продолжение. Новых
 часовых/full CI на каждый внутренний модуль нет; один штатный прогон после связанной подготовки.
+
+### G.2. Сквозной OFF checkpoint (продолжение, не разрешение live)
+
+`vward-routing-workers.sh` по typed route atoms компилирует один physical group step и
+отдельные native proof / resources / content proof / choice / legacy registry steps.
+Pre/post sidecars и закрытый command set закреплены SHA в immutable parent plan. Все
+предсказуемые intermediate group images записаны **до** первой команды. Перенос tunnel
+сохраняет resource ID и creation origin; меняются native placement и content revision.
+Неизвестный body/exclude/options или неполное покрытие группы не перезаписываются.
+
+`vward-routing-pipeline.sh` исполняется только над приватным DATA emulator `JDIR/.emu`,
+под прежним default-OFF gate. Реальные console `group_set` и internal worker проверены
+на fixed emulator ndm; исполняемый файл из env/API не выбирается. Единственный envelope —
+existing admission → EDIT → CHANGE → краткий journal lock; вложенного console CLI нет.
+Worker lease сохраняется до последнего возможного rename; pending/unknown не допускают
+forward replay. Новый snapshot после каждой logical delta даёт Gi, обязательны save и
+проверенная local registration. `committed` означает только конфигурацию fixture,
+client-path остаётся `false`; router/RPC/DNS/AGH calls этим checkpoint не выполняются.
+
+Explicit OFF compensation разрешена только из exact own postimage либо заранее sealed
+prefix. Inspect ничего не повторяет. Foreign edit удерживает barrier и свои байты;
+baseline closure требует отдельного rollback-save и проверенных исходных scopes.
+Частичный native отказ и save failure воспроизведены в одной цепочке с readback.
+
+`vward-routing-migrate.sh` проверяет пару code/state version, private before/after seal,
+переводит старое activity в history и восстанавливает baseline побайтово только из своих
+неизменённых images. Новый принятый choice/foreign data запрещает downgrade до первой
+записи. Это **fixture state migration**, не доказательство миграции всех installed
+legacy return states или отката пользовательских данных updater на устройстве.
+
+Адресные sh/BusyBox1.37 checkpoint-тесты прошли для начальной цепочки on/repeat/off,
+private migration/downgrade, partial prefix и отказа save; последующие stable move,
+новое имя, foreign edit, SID `@`, literal-IP refusal и A-only withdrawal проверяются
+отдельно. SHA/owner/mode участвуют в snapshot fingerprint; изменение прав proof между
+проекциями воспроизведено RED→GREEN. Context boolean не создаёт отсутствующий в native
+profile VPN target. Повтор native M для точно доказанного common-owned resource не
+становится новым ручным основанием; неизвестный origin не подавляет native manual.
+
+**Ещё не закрыто:** общий DNS physical compiler/оба backend и server lifecycle; полный
+legacy migration и tombstone/backwriter fences; связанный 8/24 и TERM/KILL/concurrency
+matrix; общий API/UI outcome и один адресный review; новый конечный CI. Новые библиотеки
+не добавлены в signed targets, callers/UI не подключены. Старый CI479f268 не покрывает
+этот код. Работа продолжается в той же ветке без промежуточного merge/release/GO.
