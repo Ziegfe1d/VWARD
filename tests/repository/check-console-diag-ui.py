@@ -2,6 +2,7 @@
 """Panel, 01.11: «Запустить проверку» shows progress and the result on the page (a failed run is
 not «выполнена»), and «Управление» names the switched-off components, not a bare count."""
 import re
+import subprocess
 from pathlib import Path
 
 js = (Path(__file__).resolve().parents[2] / "web/assets/vward-console.js").read_text()
@@ -34,10 +35,43 @@ if "{ id: 'ai', title: 'DNS'," not in js or "const SHORT = { ai: 'DNS'," not in 
     fail("«ИИ-сервисы»/«ИИ» must be «DNS»")
 if "[/^Проверить/, 'refresh']" not in js or "[/^Переустановить/, 'refresh']" not in js:
     fail("«Проверить» and «Переустановить» use the refresh icon")
-if "<span class=\"busy-pill\"><i class=\"spin\"" not in js or "'не проверен'" not in js or "Smart DNS · сервер не отвечает" not in js:
-    fail("the card's status: a spinner pill while checking, «<way> · не проверен», a dead Smart DNS said")
-if "o[0] === 'dns' && dnsDown && cur !== 'dns'" not in js or "Smart DNS: сервер не отвечает" not in js:
-    fail("the Smart DNS segment must be off with its reason when the server does not answer")
+at = js.index('  const status = s => {', js.index('function aiPage()'))
+status = js[at:js.index('\n  };', at)+5]
+at = js.index('function aiSlider(')
+slider = js[at:js.index('\n}', at)+2]
+# Rendering must meet the contract even when the reason is assembled rather
+# than written as one source-code literal. No UI guard is bypassed here.
+checks = '''
+const assert=require('node:assert/strict');
+const esc=String,tunLabel=String,prof=()=>({tunnel_interface:'tun'});
+const cfgOk=()=>true, S={ai:{}}, SVC={busy:false};
+const AICHK={},SVC_VERDICT={},aiPrev={}; const AIBUSY=null;
+const AI_VIA=[['vpn','VPN'],['dns','Smart DNS'],['isp','Провайдер']];
+const wayName={vpn:'VPN',dns:'Smart DNS',isp:'Провайдер'};
+let sdDown=false,sdServerDown=false,sdReason='';
+'''+status+'\n'+slider+'''
+assert(status({id:'s',via:'vpn',selected:'vpn'}).includes('VPN · не проверен'));
+AICHK.s={busy:true};
+let text=status({id:'s',via:'vpn',selected:null});
+assert(text.includes('busy-pill') && text.includes('class="spin"') && text.includes('проверяется'));
+delete AICHK.s; sdDown=true; sdServerDown=true;
+for(const why of ['сервер не отвечает','сервер не настроен','ответ сервера не подтверждён']) {
+  sdReason=why;
+  text=status({id:'s',via:'dns',selected:'dns'});
+  assert(text.includes('Smart DNS · '+why) && text.includes('dot crit'));
+  text=aiSlider('s','vpn','service',false,true,why);
+  const dns=text.match(/<button[^>]*data-ai-via="dns"[^>]*>/)[0];
+  assert(dns.includes(' disabled') && dns.includes('title="'+why+'"'));
+  assert(text.includes('Smart DNS: '+why));
+  for(const way of ['vpn','isp'])
+    assert(!text.match(new RegExp('<button[^>]*data-ai-via="'+way+'"[^>]*>'))[0].includes(' disabled'));
+}
+text=aiSlider('s','dns','service',false,true,'сервер не отвечает');
+assert(!text.match(/<button[^>]*data-ai-via="dns"[^>]*>/)[0].includes(' disabled'));
+'''
+r = subprocess.run(['node', '-e', checks], capture_output=True, text=True)
+if r.returncode:
+    fail('card/slider render: ' + r.stderr[-700:])
 if "Не установлены (' + missing.length + ')" not in js:
     fail("«Компоненты»: not installed folded into «Не установлены (N)»")
 # 14: «Управление» everywhere; AmneziaWG «Установить»; a not installed package shows no update rows.
