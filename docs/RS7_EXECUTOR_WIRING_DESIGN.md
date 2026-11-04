@@ -204,3 +204,162 @@ AGH API, потерянными ответами и SIGKILL на каждом ш
 `vward_routing_consistent_read` и решений `vward_routing_plan`, плюс read-only проверка FQDN-маршрутизации
 Supercell на устройстве (`DIAGNOSTICS_SUPERCELL_2026-10-31.md` §5). Включение настоящей записи — только после
 адресного независимого аудита и отдельного разрешения владельца.
+
+## F. Уточнение 04.11.2026: единое намерение и первый writer
+
+**Статус: проект/чистая тестовая модель, live execution выключено.** Основание — поручение
+владельца Unified Routing/DNS от04.11; база dev3f4802b, PR37 слит, fix35.6 опубликован отдельно.
+Это уточнение B и разделов B–E выше, не разрешение подключить общий writer или выпустить пакет.
+Критические поправки PR37 не копируются; VERSION/feed/package-map/активные настройки не меняются.
+
+### F.1. Дельта и выбор пути
+
+| Уже есть | Точка кода | Разрыв / следующий шаг |
+|---|---|---|
+| Pure M/S/A audit | vward-routing-audit.sh / vward_routing_audit | Нет явного service mode и различия off/ISP; v1 остаётся совместимым |
+| Native read/identity/snapshot | vward-routing-read.sh / vward_routing_read, vward-routing-snapshot.sh / vward_routing_consistent_read | Health/client path unknown; новый choice state ещё не входит в fingerprint/stage |
+| Пять observers/shadow | vward-routing-observe.sh / vward_routing_observe, vward-routing-shadow.sh | Отражают legacy решения, не согласуют их; CIDR фактических policy/mark не моделируется |
+| Planner/journal/file emulator | vward-routing-plan.sh / vward_routing_plan, journal/dryrun | Только none/add, permit никогда granted; не DNS/move/remove/restore executor |
+| Service/DNS исполнители | console-config.sh: op_service, op_domain_list, op_ai, smartdns helpers | Каждый защищает свою дельту; op_ai не объединяет M/A/persist/IP-источники |
+| Auto/persist/reconciler | route-engine: handle_adaptive/add_adaptive/restore_adaptive_from_persist; reconciler: adaptive_names/remove_adaptive | Не потребляют единый явный выбор, могут восстановить старое намерение |
+| UI configuration evidence | api.cgi ai-data; console.js aiPage | Уже selected/effective/coverage/storage, ещё нет общего operation state всех источников |
+
+| Категория дельты | Состояние этого этапа |
+|---|---|
+| Готово в изолированном коде | Canonical choice и policy **одного подготовленного atom**; v1 audit не изменён |
+| Только dry-run | Legacy snapshot/shadow/none-add plan/журнал/эмулятор, без новых форматов и live permission |
+| Отсутствует | Stage binding/epochs, общий typed delta, per-operation health, migration, live coordinator, Auto/restore/policy wiring, shared API/UI |
+| Нужна Keenetic-приёмка | Новые переходы/повторы/persist/restart, IPv6/client policy/DNS lifecycle и MIPS стоимость; Claude IPv4 08:30 уже подтверждён отдельно |
+
+Рассмотрены: локальные заплаты каждому writer (сохраняют рассогласование/многократные reads),
+новый независимый controller (дублирует исполнителей/locks/истину), продолжение B (выбрано
+владельцем). Минимальный B-путь: один сервисный выбор → нормализованные вклады/конфликты →
+план/прежние executors → readback. Никакого daemon/timer/poller или третьего набора writers.
+
+### F.2. Данные и операции
+
+Формат CHOICES и pure API — ROUTING_AUDIT_CONTRACT.md. Это один service-intent, а не
+второй enabled.tsv: будущие legacy registry/сегменты/тумблеры — проекции принятого состояния.
+До подключения authoritative choice **не сохраняется на устройстве** и не влияет на legacy.
+
+| Действие | Изменение service choice | Что сохраняется |
+|---|---|---|
+| on / явно VPN | mode=vpn, выбранный tunnel, DNS default | M/A происхождение и совместимые references, данные возврата в operation journal |
+| off при VPN | mode=auto, только S VPN-вклад снимается | Независимые M/A остаются, off не ISP-pin |
+| off при DNS/ISP/auto | no-op | DNS/ISP choice не стирается от программного отображения VPN-off |
+| явно DNS | mode=dns, ISP+поддержанный DNS policy ID | Desired отдельно от applied; history Auto сохраняется, активный конфликт требует safe delta |
+| явно ISP | mode=isp, ISP/default | Auto не переопределяет pin, соседние ручные правила не удаляются |
+| вернуть Auto | mode=auto, clear pin | Если ранее DNS/ISP — AUTO_FLOOR повышен, старый persist не становится новым положительным доказательством |
+
+Дополнение M/S/A: 8/24 относятся к наличию VPN-вкладов, не к четырём значениям service mode.
+MODE=dns имеет выключенный VPN-тумблер, но действующее service DNS-намерение. Глобально
+недоступный источник с сохранённым pin даёт blocked/unknown, а не разрешение Auto/ISP fallback.
+Новые подтверждённые собственные домены получают прежний mode без предварительного Auto-add.
+Membership/revision ресурса отделяется от стабильного service ID; каталог/shared-host не proof.
+
+Для новой policy-проекции: BINDINGS связывает стабильный service scope с нормализованными
+S-ref и подтверждённой атрибуцией домена; A evidence различает observed-active, новую positive
+probe и history. При DNS/ISP A-вклад suppressed; при VPN несовместимый A suppressed, совместимый
+может использовать ту же запись. History/unknown не разрешают restore/add. После выхода из
+DNS/ISP active evidence должно быть не старше AUTO_FLOOR, новая probe — текущей REV.
+Противоречащие явные M/S choices → unresolved независимо от порядка. Внешние маршруты не
+исчезают из observed coverage из-за suppression desired: до точного удаления/readback переход
+не применён. Legacy/unknown AdaptiveAuto не получает ownership от имени группы/persist.
+
+### F.3. Первый предлагаемый live путь — только после отдельного GO
+
+Один сервис → VPN **в чистой области** или reuse полностью совместимого покрытия.
+Предусловия: verified snapshot/generation/identity, однозначный tunnel, отсутствие DNS/ISP
+pin/внешнего конфликта/recovery/неизвестного CIDR или client policy; подтверждённый own scope.
+Нет права на существующую группу — reference либо отказ; новый собственный ресурс можно
+создать только прежним writer с durable creation proof. Legacy/manual/AdaptiveAuto не усыновляются.
+Smart DNS-сервер/AGH не являются зависимостью этого VPN-only пути.
+
+Lock order проектируется по фактическому console пути: existing admission → EDIT → CHANGE,
+затем приватный journal lock, без удержания parent EDIT при вложенном CLI, который берёт EDIT
+сам. Выбор: один внешний coordinator удерживает операционные locks, внутренний worker вызывается
+как функция через проверенный internal API; произвольный флаг «пропустить locks» не вводится.
+До такого refactor первый live caller не подключается. Update/recovery barrier не меняется.
+
+Конкретные границы refactor (проект, код пока прежний): console `op_service on ID TUNNEL`
+после валидации ID/catalog/profile/pending-check передаёт подготовленный план coordinator.
+Existing `service_txn_new_group`, `service_claim`, `service_state_set` и часть `service_route`
+выделяются в internal locked workers **того же скрипта**, не новый executable. Нынешний
+`op_service` отпускает CHANGE перед `service_route`, а helpers берут его сами; такую цепочку
+нельзя просто вызвать под внешним CHANGE. Workers не получают флаг обхода locks от API/env:
+locked context создаёт только coordinator после admission/EDIT/CHANGE и сверки snapshot.
+Обычный legacy CLI продолжает брать locks через wrapper. Create/route/save/local-registry шаги
+получают один parent journal, а не два независимо committed перехода. Перед wiring нужны
+fixture конкуренции обоих wrappers, отказа save, killed parent/worker и freshness Gi.
+
+Порядок: snapshotG0 → validate/no-write plan → journal pre+expected post → write → invalidate
+cache → fresh readbackG1 → verify/save → journal commit и projection. Следующий шаг сравнивается
+с доказанным Gi, не с неизменным G0 (исправляет формулировку B.3 для многосоставной операции).
+Generation не даёт права: identity/content/ownership и delta всегда перепроверяются.
+
+Компенсация: только обратная собственная delta при совпавшем expected post-image. Lost reply
+→ readback pre/post/other; TERM/SIGKILL/reboot → reconcile journal без слепого replay; foreign
+edit сохраняется. Новую пустую группу удалять лишь при creation proof и отсутствии иных ссылок.
+При сбое commit локальных choice/registry их postimage сверяется перед возвратом; unknown
+не закрывает recovery. Совместное состояние next code + state version проверяется перед downgrade.
+
+Первый путь НЕ включает DNS/ISP, потому что эти режимы нельзя честно включить, пока restore,
+reconciler/Auto/force-VPN/policy-sync/guard способны вернуть конфликт. После review первого
+writer требуется конкретный GO владельца, аппаратная проверка и отдельное решение о выпуске.
+
+### F.4. Следующие связанные пакеты и критерии
+
+- [x] **Контракт/модель (сейчас, одна подготовленная область):** canonical choice transition; 8/24 и повтор; off не ISP;
+  DNS/ISP projection не service-on; peer conflict и suppress-history модель; poison paths,
+  input immutable, bounds, BusyBox. Runtime вызовов/нового persistent state нет.
+- [ ] **Read adapters/coordinator:** choice/membership/Auto evidence входят в stage/fingerprint/
+  generation; одна сборка на operation, не полный config на каждую строку. Versioned state
+  migration и rollback до прежнего формата сначала на fixture. Missing tool → unknown;
+  comm/cksum на Keenetic не предполагаются.
+- [ ] **Planner v2/dryrun:** typed add/remove/move/DNS/hold delta, physical refs и dependents,
+  scope/exclude/shared IP conflicts, per-backend dependencies/capacity. Старый journal не
+  принимает новый plan как granted; новая схема/валидатор и postimage recovery проверяются.
+- [ ] **Первый VPN writer:** проект F.3, тесты отказа/потерянного ответа/поколения/конкуренции,
+  независимый адресный audit, затем отдельный GO. UI до подключения не обещает общего apply.
+- [ ] **DNS/list transition:** Keenetic8 + AGH API/readback/upstream_dns_file/unknown POST;
+  URL-wide removal учитывает соседей; deletion/migration server — явный plan и возврат,
+  old URL tombstone согласован с saved/proofs/queue. dnsmasq writer не выдумывается.
+- [ ] **Auto/restore/reconciler затем policy/guard/CIDR:** все пути потребляют принятую REV/
+  suppression, не воскрешают withdrawn history; совместимые refs не плодят physical rules.
+  Промежуточная частичная цепочка остаётся выключенной, без hidden ISP fallback/global kill switch.
+- [ ] **API/UI:** один operation outcome и desired/configured/client-verified со source/coverage,
+  partial/mixed/unknown и причиной; busy конечен, batch по каждому сервису. Существующий storage
+  selector сохранён, технические группы в details, длинные статусы без обрезания/дублирующего403.
+- [ ] **Admission:** адресные RED→GREEN → штатный CI exactHEAD → согласованный Keenetic test →
+  отдельное решение по архитектурному выпуску. VERSION/sequence сейчас не назначаются.
+
+Стоимость: pure модель — только bounded awk/sh, 0 ndmc/RCI/DNS/AGH и 0 writes. Для wiring
+измеряются config reads, elapsed/CPU/RAM/flash по operation; budgets/timeout не увеличиваются.
+Cross-system Keenetic+AGH atomicity не обещается. Доказательство client IPv4 Claude наfix35.5
+04.11 08:30 уже получено; оно не доказывает IPv6/весь каталог и не повод повторять сетевой аудит.
+
+### F.5. Границы DNS и данных до проекта подключения
+
+Общий результат операции включает две оси target+DNS policy. ID policy не хранит URL/token;
+выбранный сервер и подтверждённое фактическое размещение учитываются отдельно. Недоступный
+выбранный сервер → blocked/unknown с сохранением pin, без молчаливого ISP fallback.
+VPN-only не зависит от истёкшего Smart DNS и не пробует его. Pure policy выше не проверяет health.
+
+Keenetic plan считает **все** занятые HTTPS upstream строки и весь delta до первой записи
+(8 — предел устройства, две NextDNS и чужие записи не вытесняются). AGH допускается только
+при поддержанном active handler/API/readback; installed не значит active. При upstream_dns_file
+нынешний writer отказывает: до отдельной реализации нельзя обходить это переносом в API.
+Неизвестный POST удерживает private before/planned и barrier до сверки; blind replay запрещён.
+dnsmasq не является Smart DNS backend без проверенного writer.
+
+Удаление/смена сервера — один явный план собственных точных строк, всех dependents и saved/proofs/
+queue/persist/cache. Deleted policy получает tombstone/revision; restore проверяет её перед записью,
+чужие upstream остаются. Migration storage не происходит от переключения selector. Сначала
+fixture обоих backend, заполнения 8 слотов, отказов по шагам и lost reply; затем отдельное GO.
+
+До live требуется схема BINDINGS (exact/subtree, excludes, unknown attribution, CNAME/family/
+client-policy evidence), staged fingerprints без предположения comm/cksum, referential checks и
+state-version migration. Нынешняя pure projection принимает только подготовленный atom, не
+доказывает wildcard/IPv6/QUIC/CDN scope. Тесты downgrade должны покрыть следующий code+state,
+старый code+restored state и refusal несовместимого состояния. Файловый rollback updater отдельно.
+Промежуточный pipeline не включается в API/Панель, пока persist/restore/policy/guard могут его отменить.

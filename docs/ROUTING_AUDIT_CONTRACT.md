@@ -1,7 +1,105 @@
 # RS-5: нормализованный audit-контракт v1
 
-`components/runtime/lib/vward-routing-audit.sh` определяет только функцию
-`vward_routing_audit INTENTS SNAPSHOT`. Загрузка через `.` ничего не запускает,
+## Уточнение 04.11.2026: проект явного намерения, без live wiring
+
+База продолжения — dev `3f4802b` после выпущенного fix.35.6 / PR #37.
+Контракт v1 и `vward_routing_audit INTENTS SNAPSHOT` ниже сохраняются. Они не описывают
+явный DNS/ISP/VPN pin, выключение VPN-вклада и его отличие от выбора Провайдера.
+Новые чистые проекции — продолжение этой библиотеки, не второй контроллер/хранилище UI.
+Проект первого подключения и план — [RS7_EXECUTOR_WIRING_DESIGN.md, F](RS7_EXECUTOR_WIRING_DESIGN.md#f-уточнение-04112026-единое-намерение-и-первый-writer).
+
+### Один сервис — одно намерение
+
+Предлагаемый формат CHOICES v1 (ещё **не создаётся в /opt**): строка `schema<TAB>1`,
+затем `service SID REV MODE TARGET DNS AUTO_FLOOR` (7 полей TSV).
+SID — стабильный catalog service ID; это не group ID и не ownership proof.
+REV — целое 0..2147483647; ревизия меняется только при семантическом изменении.
+MODE=`auto|vpn|dns|isp`. VPN-тумблер выводится из `MODE==vpn`, не хранится отдельно.
+TARGET/DNS: auto=`-/-`, vpn=`VPN:INTERFACE/default`, dns=`ISP/POLICY_ID`, isp=`ISP/default`.
+POLICY_ID — непрозрачный ID без URL/host/token, не доказательство доступности сервера.
+AUTO_FLOOR — ревизия последнего выхода из DNS/ISP-pin в auto **или VPN**, 0 до такого события.
+Она запрещает оживлять старую историю Auto при возврате в Авто. Активная независимая
+Auto-ссылка после обычного service-off сохраняется; положительная новая проба относится
+к текущей ревизии выбора. Полная семантика active/history/probe указана в F.
+
+Чистая `vward_routing_choice LEDGER SID ACTION TARGET DNS EXPECTED_REV` возвращает новый
+канонический LEDGER на stdout. ACTION=`on|off|vpn|dns|isp|auto`; expected revision — CAS
+над **входным снимком**, не lock/CAS над роутером. `off` меняет только vpn→auto;
+off при dns/isp/auto — no-op. Явный `auto` снимает любое закрепление. on/vpn заменяет
+старый DNS/ISP pin тем же сервисным VPN-намерением. Повтор не увеличивает REV.
+Отсутствие SID в корректном ledger означает auto/rev0, нечитаемый/отсутствующий/повреждённый
+ledger — ошибка, не пустое состояние. Повтор SID и неизвестная schema отвергаются.
+Старый audit не читает новый формат; будущая миграция/rollback требуют отдельного gate.
+LEDGER — абсолютный путь к читаемому обычному файлу, не symlink/FIFO. Ошибка формата —
+rc2, stale REV — rc3; оба без частичного stdout. Другие сервисы сохраняются, SID сортируются.
+
+### Чистая модель политики одной области
+
+`vward_routing_service_policy MODE TARGET DNS REV AUTO_FLOOR EVIDENCE` реализует только
+сведение намерений **одного заранее нормализованного domain/scope atom**. Первые пять
+аргументов — поля канонического choice; это не installed reader/CAS. Функция не определяет
+принадлежность домена, пересечения/исключения, свежесть пробы или источник глобального toggle.
+Будущий stage adapter обязан подтвердить область, membership и epoch; простая строка `bound`
+не даёт права менять ресурс. Каталог/совпадение имени не заменяет эту проверку.
+
+EVIDENCE — абсолютный обычный файл (не symlink/FIFO), header `schema<TAB>1`, далее 8 полей TSV:
+`SOURCE REF TARGET DNS SELECTED EVIDENCE EPOCH MEMBERSHIP`.
+M/S означают **независимые peer** явные вклады, EVIDENCE=`explicit`, EPOCH=0, MEMBERSHIP=`peer`.
+Вклад выбранного сервиса не дублируется во входе: при mode!=auto он создаётся как `S:choice`
+(это имя запрещено peer S). A: EVIDENCE=`active|positive|history|unknown`, MEMBERSHIP=
+`bound|excluded|unknown`, EPOCH=ревизия выбора при получении доказательства, не wall clock.
+SELECTED=0/1 — уже нормализованная активность источника/вклада, не включение каталога целиком.
+Дубликаты SOURCE:REF, неизвестная schema, future epoch, URL вместо DNS ID — rc2 без stdout.
+
+Выход: `policy 1 VERDICT denied unknown` (5 TSV полей), затем отсортированные строки
+`contribution SOURCE REF TARGET DNS STATE REASON` (7 полей). VERDICT=`inactive|desired|unknown|unresolved`.
+STATE=`active|inactive|suppressed|unknown`. `desired` означает только совместимые намерения;
+даже `inactive` не означает подтверждённый Провайдер. Последние поля header всегда permission
+`denied` и packet-path `unknown`. До 1024 входных вкладов + один выводимый S:choice.
+
+- DNS/ISP suppress только подтверждённый bound A, не M/S peer. VPN suppress несовместимый A;
+  совместимый сохраняется как самостоятельное основание для reuse без новой физической записи.
+- history всегда inactive. positive допустим только при EPOCH==REV, active — EPOCH>=AUTO_FLOOR;
+  будущая epoch запрещена. Выход DNS/ISP→VPN→off тоже повышает floor и не оживляет старый persist.
+- excluded A не относится к области; unknown membership/evidence даёт unknown, не suppression
+  и не право применить pin. Несовместимые активные M/S остаются unresolved независимо от порядка.
+- Обычный VPN-off без предыдущего DNS/ISP-pin сохраняет независимое активное A; explicit Auto
+  после pin требует новой положительной проверки/доказанного текущего active. History не становится active.
+
+Это **модель намерений**, не полный planner: configured routes остаются в исходном snapshot,
+suppressed не удаляет их и не означает applied. Новый stream намеренно несовместим с v1 INTENTS;
+старый audit отвергает его. Health/storage/capacity/coverage/identity и физический diff ещё не
+подключены. Writer, journal replay и Панель не вызывают новую функцию. Schema v1 ledger — проект,
+не обещание совместимости данных при downgrade; состояние на устройстве этим пакетом не создаётся.
+
+### Приоритет выбора и равноправие источников
+
+Явный режим выше **автоматического обнаружения**, не выше независимого явного manual pin.
+Совместимые M/S/A сохраняют ссылки на одно эффективное покрытие. Несовместимый M или
+другой явный service pin — unresolved, до первой записи требуется точный согласованный
+план. Ни порядок файлов, ни более длинное имя, ни время строки не выбирают победителя.
+Совместимый внешний ресурс — reference, никогда не приобретает managed/owned от совпадения.
+Suppress intent Auto не означает удалить наблюдаемую группу или объявить переход выполненным.
+Наблюдаемый конфликт остаётся до разрешённой дельты и readback.
+
+Чистая policy-проекция возвращает desired, active/suppressed/history/unknown contributions;
+согласованный snapshot и health/coverage issues добавляются следующим stage adapter. Передать
+только desired в старый planner недостаточно.
+Смешанный вывод новой проекции не является v1 INTENTS/PLAN и не принимается dryrun/journal.
+Все новые планы всё ещё denied/require approval, permission никогда не granted.
+
+Нормализация/границы: exact/subtree только из доказанных возможностей; wildcard/exclude/CNAME,
+shared CDN/IP, IPv6/UDP и client policy не выводятся из простого совпадения FQDN. Неизвестное
+разделение — partial/unknown, не «сервис применён». v1 global health не разрешает объявить
+AGH обязательным для VPN без Smart DNS: зависимости уточняются отдельно по операции/backend.
+Новые pure-функции не читают роутер, часы, сеть или конфигурационные пути и не пишут файлы.
+Лимиты не расширяются: 4096 строк/1 MiB на input, 1024 service/domain keys; awk/sh без
+предположений о comm/cksum на устройстве. Live вызовов и package-map wiring нет.
+
+---
+
+Исходный API `components/runtime/lib/vward-routing-audit.sh` —
+`vward_routing_audit INTENTS SNAPSHOT`. Его v1 поведение не изменено. Загрузка через `.` ничего не запускает,
 не создаёт файлов и не меняет переменных вызывающего shell. Вызов читает два
 явно заданных обычных файла и пишет TSV в stdout; ошибки — в stderr, rc=2,
 без частичного stdout. Валидный аудит, включая конфликт/unknown, возвращает 0.

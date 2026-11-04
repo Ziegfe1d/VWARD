@@ -96,6 +96,8 @@ python3 tests/repository/check-smartdns-storage-contract.py || fail "storage pre
 python3 tests/repository/check-ai-catalog-cycle.py || fail "every AI service and group through VPN/DNS/ISP, both stores"
 python3 tests/repository/check-routing-measurements.py || fail "routing measurement accounting"
 sh tests/routing-audit/run-simulations.sh || fail "routing audit simulations"
+python3 tests/routing-audit/check-service-choice.py || fail "B canonical service choice"
+python3 tests/routing-audit/check-service-policy.py || fail "B service policy projection"
 python3 tests/routing-readers/check-readers.py || fail "native routing read adapters"
 python3 tests/routing-readers/check-identity.py || fail "routing persistent identities"
 python3 tests/routing-readers/check-snapshot.py || fail "routing consistent snapshot"
@@ -110,6 +112,8 @@ python3 tests/vpn/check-vpn-engines.py || fail "VPN engines: one engine per tunn
 python3 tests/entware/check-components-status.py || fail "Panel components report (never Работает without proof)"
 if command -v busybox >/dev/null 2>&1; then
     busybox ash tests/routing-audit/run-simulations.sh || fail "BusyBox routing audit simulations"
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-audit/check-service-choice.py || fail "BusyBox B service choice"
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-audit/check-service-policy.py || fail "BusyBox B service policy"
     RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-readers.py || fail "BusyBox native routing read adapters"
     RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-identity.py || fail "BusyBox routing persistent identities"
     RS6_BUSYBOX="$(command -v busybox)" python3 tests/routing-readers/check-snapshot.py || fail "BusyBox routing consistent snapshot"
