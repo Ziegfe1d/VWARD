@@ -419,3 +419,15 @@ state-version migration. Нынешняя pure projection принимает т�
 выпущенным обновлением. Пока не закрыты все связанные backwriters/restore/reconciler/policy/guard,
 DNS/полный режим не включаются пользователю. Исторический local full FAIL read-only /opt/var
 и local Chromium SKIP сохраняются; новый программный пакет требует собственных доказательств.
+
+### G.1. Текущий программный checkpoint (продолжение, не финал)
+
+| Категория | Состояние |
+|---|---|
+| Закрыто кодом в подготовке | Stage v2 со всеми decision inputs под native generation/SHA seal; native inventory stable ID/content/proof; настоящий choice→policy→typed plan; parent journal v2/Gi/save/CAS inverse |
+| Подтверждено адресно | sh/BusyBox1.37 ash+awk: stage copies/изменение inputs/missing/FIFO/symlink; native manual conflict; peers/history/freshness/excludes/new subtree child; typed preview/foreign reference/Keenetic8/AGH-file/tombstone; format rejection старым journal; parent child readback/Gi/save/replay/corruption/own inverse |
+| Блокирует подключение | Coordinator+locked native workers, связанные migration/downgrade и server lifecycle, весь chained fault fixture и targeted review ещё не завершены |
+| До рабочего обновления | Общий outcome/API/UI + backwriter fences, конечный CI нового code HEAD, конкретный готовый VPN-only activation проект и отдельное согласование владельца; hardware приёмка отдельно |
+
+Уже зелёный CI41815122230 относится к479f268 и не покрывает это новое продолжение. Новых
+часовых/full CI на каждый внутренний модуль нет; один штатный прогон после связанной подготовки.

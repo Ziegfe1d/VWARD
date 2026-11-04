@@ -27,6 +27,306 @@
 # rc: 0 ok; 1 write/IO failure (nothing new may be done); 2 invalid usage/input;
 # 75 refused by the safety rules (busy, gate closed, replay, not eligible).
 
+# v2 keeps an immutable typed parent plan and per-step pre/post images. The v1
+# parser deliberately sees these operation directories as unknown (no accidental
+# downgrade/replay). These functions ONLY record evidence; no executor is loaded.
+vrj2_id() { vrj_id "$1" && [ "${#1}" -le 32 ]; }
+vrj2_seq() { case $1 in ''|0*|*[!0-9]*) return 2 ;; esac; [ "${#1}" -le 4 ] && [ "$1" -le 4096 ]; }
+vrj2_gen() { printf '%s\n' "$1" | grep -Eq '^g-[0-9a-f]{16}$'; }
+vrj2_file() {
+    [ -f "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] && [ -r "$1" ] || return 2
+    case $(ls -ldn "$1" | awk '{print substr($1,1,10)}') in -rw-------|-r--------) ;; *) return 2 ;; esac
+    [ "$(wc -c < "$1")" -le 1048576 ]
+}
+vrj2_pid_start() {
+    [ -r "/proc/$1/stat" ] || return 1
+    IFS= read -r vrj2_ps < "/proc/$1/stat" || return 1
+    vrj2_ps=${vrj2_ps##*) }
+    # shellcheck disable=SC2086
+    set -- $vrj2_ps
+    [ "$#" -ge 20 ] || return 1
+    shift 19
+    case $1 in ''|*[!0-9]*) return 1 ;; esac
+    printf '%s\n' "$1"
+}
+vrj2_lock() {
+    IFS=' ' read -r vrj2_me _ < /proc/self/stat || return 1
+    vrj2_start=$(vrj2_pid_start "$vrj2_me") || return 1
+    if ! mkdir "$1/.lock" 2>/dev/null; then
+        vrj_dir "$1/.lock" && vrj2_file "$1/.lock/pid" && vrj2_file "$1/.lock/pid_start" || return 75
+        vrj2_file "$1/.lock/owner" && vrj2_file "$1/.lock/owner.sha" || return 75
+        [ "$(vrj_hash "$1/.lock/owner")" = "$(cat "$1/.lock/owner.sha")" ] || return 75
+        vrj2_old=$(cat "$1/.lock/pid");vrj2_os=$(cat "$1/.lock/pid_start")
+        [ "$(cat "$1/.lock/owner")" = "$(printf '%s\t%s' "$vrj2_old" "$vrj2_os")" ] || return 75
+        case $vrj2_old:$vrj2_os in *[!0-9:]*|:*) return 75 ;; esac
+        vrj2_live=$(vrj2_pid_start "$vrj2_old") || vrj2_live=
+        [ "$vrj2_live" != "$vrj2_os" ] || return 75
+        # One reclaimer, recheck the same owner record; never steal a live lock.
+        mkdir "$1/.reclaim" 2>/dev/null || return 75
+        if [ "$(cat "$1/.lock/pid" 2>/dev/null)" != "$vrj2_old" ] ||
+           [ "$(cat "$1/.lock/pid_start" 2>/dev/null)" != "$vrj2_os" ]; then rmdir "$1/.reclaim"; return 75; fi
+        rm -rf "$1/.lock" || { rmdir "$1/.reclaim"; return 1; }
+        mkdir "$1/.lock" || { rmdir "$1/.reclaim"; return 75; }
+        rmdir "$1/.reclaim" || return 1
+    fi
+    printf '%s\n' "$vrj2_me" > "$1/.lock/pid" && printf '%s\n' "$vrj2_start" > "$1/.lock/pid_start" &&
+        printf '%s\t%s\n' "$vrj2_me" "$vrj2_start" > "$1/.lock/owner" &&
+        vrj_hash "$1/.lock/owner" > "$1/.lock/owner.sha"
+}
+vrj2_unlock() {
+    [ ! -L "$1/.lock" ] && [ "$(cat "$1/.lock/pid" 2>/dev/null)" = "${vrj2_me:-}" ] &&
+        [ "$(cat "$1/.lock/pid_start" 2>/dev/null)" = "${vrj2_start:-}" ] || return 1
+    rm -rf "$1/.lock"
+}
+# Batch atomic files then ONE compulsory flush per journal boundary. The caller
+# cannot disable this flush with VWARD_JOURNAL_SYNC; no mutation follows a failure.
+vrj2_put() { VWARD_JOURNAL_SYNC=0 vrj_put "$1" "$2"; }
+vrj2_flush() { command -v sync >/dev/null 2>&1 && sync; }
+vrj2_plan_valid() {
+    [ -f "$1" ] && [ ! -L "$1" ] && [ "$(wc -c < "$1")" -le 1048576 ] || return 2
+    LC_ALL=C awk -F'\t' '
+        NR>4096 {bad=1}
+        NR==1 {if(NF!=4 || $1!="routing-plan" || $2!=2 || $3!~/^g-[0-9a-f]+$/ || length($3)!=18 || $4!="denied") bad=1;next}
+        {
+            if(NF!=11 || $1!="step" || $2!=++n || $3!~/^(create|add|remove|move)$/ ||
+               $4!~/^(route|dns|group|dns-scope|nativeproof|claims|choice|manifest|proof|registry|saved|queue|policy|tombstone)$/ ||
+               $5!~/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/ || length($5)>64 || $6==$7) bad=1
+            for(i=1;i<=NF;i++) if($i!~/^[A-Za-z0-9_.:@,|\/-]+$/ || index($i,"//")) bad=1
+        }
+        END{exit (NR>0 && !bad) ? 0 : 2}' "$1"
+}
+vrj2_ready() {
+    vrj_dir "$1" && vrj2_id "$2" && vrj_dir "$1/$2" || return 2
+    for vrj2_f in schema plan plan.sha state generation; do vrj2_file "$1/$2/$vrj2_f" || return 2; done
+    [ "$(cat "$1/$2/schema")" = "$(printf 'routing-journal\t2')" ] || return 2
+    vrj2_digest=$(vrj_hash "$1/$2/plan") || return 2
+    [ "$vrj2_digest" = "$(cat "$1/$2/plan.sha")" ] && vrj2_plan_valid "$1/$2/plan" || return 2
+    vrj2_gen "$(cat "$1/$2/generation")" || return 2
+    case $(cat "$1/$2/state") in planned|pending|unknown|committed|compensated) ;; *) return 2 ;; esac
+}
+vrj2_step_row() { awk -F'\t' -v n="$2" '$1=="step" && $2==n {print;found=1} END{exit found?0:1}' "$1/plan"; }
+vrj2_decode() { printf '%s\n' "$1" | tr '|' '\t'; }
+vrj2_step_valid() {
+    vrj2_seq "$3" && vrj_dir "$1/$2/step.$3" || return 2
+    vrj2_row=$(vrj2_step_row "$1/$2" "$3") || return 2
+    vrj2_pre=$(printf '%s\n' "$vrj2_row" | cut -f6);vrj2_post=$(printf '%s\n' "$vrj2_row" | cut -f7)
+    for vrj2_f in pre post state generation; do vrj2_file "$1/$2/step.$3/$vrj2_f" || return 2; done
+    [ "$(vrj2_decode "$vrj2_pre")" = "$(cat "$1/$2/step.$3/pre")" ] &&
+        [ "$(vrj2_decode "$vrj2_post")" = "$(cat "$1/$2/step.$3/post")" ] || return 2
+    case $(cat "$1/$2/step.$3/state") in pending|done|failed|unknown|compensating|compensated) ;; *) return 2 ;; esac
+}
+vrj2_gate_except() (
+    [ "$#" -eq 2 ] && vrj_dir "$1" || return 2
+    for vrj2_d in "$1"/*; do
+        [ -e "$vrj2_d" ] || [ -L "$vrj2_d" ] || continue
+        vrj2_op=${vrj2_d##*/};vrj2_id "$vrj2_op" || return 75
+        [ "$vrj2_op" != "$2" ] || continue
+        if [ -e "$vrj2_d/schema" ]; then
+            vrj2_ready "$1" "$vrj2_op" || return 75
+            for vrj2_s in "$vrj2_d"/step.*; do
+                [ -e "$vrj2_s" ] || [ -L "$vrj2_s" ] || continue
+                vrj2_step_valid "$1" "$vrj2_op" "${vrj2_s##*/step.}" || return 75
+                case $(cat "$vrj2_s/state") in pending|unknown|compensating) return 75 ;; esac
+                [ "$(cat "$vrj2_d/state")" != planned ] || return 75
+                if [ "$(cat "$vrj2_d/state")" = compensated ]; then
+                    case $(cat "$vrj2_s/state") in compensated|failed) ;; *) return 75 ;; esac
+                fi
+            done
+            case $(cat "$vrj2_d/state") in pending|unknown) return 75 ;; esac
+            if [ "$(cat "$vrj2_d/state")" = committed ]; then
+                vrj2_count=$(awk -F'\t' '$1=="step"{n++} END{print n+0}' "$vrj2_d/plan")
+                vrj2_n=1
+                while [ "$vrj2_n" -le "$vrj2_count" ]; do
+                    vrj2_step_valid "$1" "$vrj2_op" "$vrj2_n" && [ "$(cat "$vrj2_d/step.$vrj2_n/state")" = 'done' ] || return 75
+                    vrj2_n=$((vrj2_n+1))
+                done
+                if awk -F'\t' '$1=="step" && $4~/^(route|dns|group|dns-scope)$/{f=1} END{exit f?0:1}' "$vrj2_d/plan"; then
+                    vrj2_file "$vrj2_d/save" && [ "$(cat "$vrj2_d/save")" = 'done' ] || return 75
+                fi
+            fi
+            if [ "$(cat "$vrj2_d/state")" = compensated ]; then
+                vrj2_file "$vrj2_d/resolved" && vrj2_file "$vrj2_d/resolved.sha" || return 75
+                [ "$(vrj_hash "$vrj2_d/resolved")" = "$(cat "$vrj2_d/resolved.sha")" ] &&
+                    [ "$(vrj_get "$vrj2_d/resolved" plan_sha "$vrj2_op")" = "$(cat "$vrj2_d/plan.sha")" ] &&
+                    [ "$(vrj_get "$vrj2_d/resolved" result "$vrj2_op")" = compensated ] || return 75
+            fi
+        else
+            case $(vrj_state "$1" "$vrj2_op" | cut -f1) in done|failed|resolved|plan) ;; *) return 75 ;; esac
+        fi
+    done
+)
+vward_journal2_gate() (
+    [ "$#" -eq 1 ] || return 2
+    vrj2_gate_except "$1" ""
+)
+vward_journal2_plan() (
+    umask 077
+    [ "$#" -eq 3 ] && vrj_dir "$1" && vrj2_id "$2" && vrj2_plan_valid "$3" || return 2
+    vrj2_lock "$1" || return $?
+    trap 'vrj2_unlock "$1"' EXIT
+    vward_journal2_gate "$1" || return 75
+    [ ! -e "$1/$2" ] && [ ! -L "$1/$2" ] || return 75
+    mkdir "$1/$2" || return 1
+    vrj2_text=$(cat "$3");vrj2_generation=$(printf '%s\n' "$vrj2_text" | head -n1 | cut -f3)
+    vrj2_put "$1/$2/schema" "$(printf 'routing-journal\t2')" && vrj2_put "$1/$2/plan" "$vrj2_text" &&
+        vrj2_put "$1/$2/plan.sha" "$(vrj_hash "$1/$2/plan")" && vrj2_put "$1/$2/state" planned &&
+        vrj2_put "$1/$2/generation" "$vrj2_generation" && vrj2_flush
+)
+vward_journal2_begin() (
+    umask 077
+    [ "$#" -eq 5 ] && vrj2_seq "$3" && vrj2_gen "$4" && vrj2_file "$5" || return 2
+    vrj2_ready "$1" "$2" || return 2
+    vrj2_lock "$1" || return $?
+    trap 'vrj2_unlock "$1"' EXIT
+    case $(cat "$1/$2/state") in planned|pending) ;; *) return 75 ;; esac
+    vrj2_gate_except "$1" "$2" || return 75
+    [ "$(cat "$1/$2/generation")" = "$4" ] || return 75
+    [ ! -e "$1/$2/step.$3" ] && [ ! -L "$1/$2/step.$3" ] || return 75
+    vrj2_n=1
+    while [ "$vrj2_n" -lt "$3" ]; do
+        vrj2_step_valid "$1" "$2" "$vrj2_n" && [ "$(cat "$1/$2/step.$vrj2_n/state")" = 'done' ] || return 75
+        vrj2_n=$((vrj2_n+1))
+    done
+    vrj2_row=$(vrj2_step_row "$1/$2" "$3") || return 2
+    vrj2_pre=$(printf '%s\n' "$vrj2_row" | cut -f6);vrj2_post=$(printf '%s\n' "$vrj2_row" | cut -f7)
+    [ "$(vrj2_decode "$vrj2_pre")" = "$(cat "$5")" ] || return 75
+    mkdir "$1/$2/step.$3" || return 1
+    vrj2_put "$1/$2/step.$3/pre" "$(vrj2_decode "$vrj2_pre")" &&
+        vrj2_put "$1/$2/step.$3/post" "$(vrj2_decode "$vrj2_post")" &&
+        vrj2_put "$1/$2/step.$3/generation" "$4" && vrj2_put "$1/$2/step.$3/state" pending &&
+        vrj2_put "$1/$2/state" pending && vrj2_flush
+)
+vward_journal2_finish() (
+    umask 077
+    [ "$#" -eq 5 ] && vrj2_gen "$4" && vrj2_file "$5" || return 2
+    vrj2_ready "$1" "$2" && vrj2_step_valid "$1" "$2" "$3" || return 2
+    vrj2_lock "$1" || return $?
+    trap 'vrj2_unlock "$1"' EXIT
+    case $(cat "$1/$2/state") in pending|unknown) ;; *) return 75 ;; esac
+    case $(cat "$1/$2/step.$3/state") in pending|unknown) ;; *) return 75 ;; esac
+    vrj2_rc=3;vrj2_result=unknown
+    if cmp -s "$5" "$1/$2/step.$3/post"; then vrj2_result='done';vrj2_rc=0
+    elif cmp -s "$5" "$1/$2/step.$3/pre"; then vrj2_result=failed;vrj2_rc=1;fi
+    vrj2_put "$1/$2/step.$3/observed" "$(cat "$5")" && vrj2_put "$1/$2/step.$3/state" "$vrj2_result" || return 1
+    if [ "$vrj2_result" = 'done' ]; then vrj2_put "$1/$2/generation" "$4" || return 1;fi
+    [ "$vrj2_result" != unknown ] || vrj2_put "$1/$2/state" unknown || return 1
+    vrj2_flush || return 1
+    return "$vrj2_rc"
+)
+vward_journal2_saved() (
+    umask 077
+    [ "$#" -eq 3 ] && vrj2_ready "$1" "$2" || return 2
+    case $3 in pending|done|failed|unknown) ;; *) return 2 ;; esac
+    vrj2_lock "$1" || return $?
+    trap 'vrj2_unlock "$1"' EXIT
+    case $(cat "$1/$2/state") in pending|unknown) ;; *) return 75 ;; esac
+    vrj2_put "$1/$2/save" "$3" && vrj2_flush
+)
+vward_journal2_commit() (
+    umask 077
+    [ "$#" -eq 3 ] && vrj2_gen "$3" && vrj2_ready "$1" "$2" || return 2
+    vrj2_lock "$1" || return $?
+    trap 'vrj2_unlock "$1"' EXIT
+    [ "$(cat "$1/$2/state")" = pending ] && [ "$(cat "$1/$2/generation")" = "$3" ] || return 75
+    vrj2_count=$(awk -F'\t' '$1=="step"{n++} END{print n+0}' "$1/$2/plan")
+    vrj2_n=1
+    while [ "$vrj2_n" -le "$vrj2_count" ]; do
+        vrj2_step_valid "$1" "$2" "$vrj2_n" && [ "$(cat "$1/$2/step.$vrj2_n/state")" = 'done' ] || return 75
+        vrj2_n=$((vrj2_n+1))
+    done
+    if awk -F'\t' '$1=="step" && $4~/^(route|dns|group|dns-scope)$/{found=1} END{exit found?0:1}' "$1/$2/plan"; then
+        vrj2_file "$1/$2/save" && [ "$(cat "$1/$2/save")" = 'done' ] || return 75
+    fi
+    vrj2_put "$1/$2/state" committed && vrj2_flush
+)
+
+vward_journal2_unknown() (
+    umask 077
+    [ "$#" -eq 3 ] && vrj_tok "$3" && vrj2_ready "$1" "$2" || return 2
+    vrj2_lock "$1" || return $?
+    trap 'vrj2_unlock "$1"' EXIT
+    case $(cat "$1/$2/state") in planned|pending|unknown) ;; *) return 75 ;; esac
+    vrj2_put "$1/$2/reason" "$3" && vrj2_put "$1/$2/state" unknown && vrj2_flush
+)
+
+# The inverse is authorised only from the immutable full post-image, or a
+# GROUP/DNS-SCOPE prefix whose hash was included BEFORE the original write.
+# Nothing is executed here; a worker still must compare its fresh actual scope.
+vward_journal2_compensating() (
+    umask 077
+    [ "$#" -eq 4 ] && vrj2_file "$4" && vrj2_ready "$1" "$2" && vrj2_step_valid "$1" "$2" "$3" || return 2
+    vrj2_lock "$1" || return $?
+    trap 'vrj2_unlock "$1"' EXIT
+    case $(cat "$1/$2/state") in pending|unknown) ;; *) return 75 ;; esac
+    vrj2_allowed=0
+    if cmp -s "$4" "$1/$2/step.$3/post"; then vrj2_allowed=1
+    else
+        vrj2_observed=$(cat "$4")
+        vrj2_row=$(vrj2_step_row "$1/$2" "$3") || return 2
+        if printf '%s\n' "$vrj2_row" | awk -F'\t' -v h="$vrj2_observed" '
+            $4~/^(group|dns-scope)$/ && h~/^[0-9a-f]+$/ && length(h)==64 {
+                n=split($10,a,",");for(i=1;i<=n;i++) if(a[i]=="prefix:" h) found=1
+            } END{exit found?0:1}'; then vrj2_allowed=1;fi
+    fi
+    [ "$vrj2_allowed" = 1 ] || return 75
+    vrj2_put "$1/$2/step.$3/inverse.from" "$(cat "$4")" &&
+        vrj2_put "$1/$2/step.$3/state" compensating && vrj2_flush
+)
+vward_journal2_compensated() (
+    umask 077
+    [ "$#" -eq 5 ] && vrj2_gen "$4" && vrj2_file "$5" && vrj2_ready "$1" "$2" && vrj2_step_valid "$1" "$2" "$3" || return 2
+    vrj2_lock "$1" || return $?
+    trap 'vrj2_unlock "$1"' EXIT
+    case $(cat "$1/$2/state") in pending|unknown) ;; *) return 75 ;; esac
+    cmp -s "$5" "$1/$2/step.$3/pre" || return 75
+    vrj2_put "$1/$2/step.$3/state" compensated && vrj2_put "$1/$2/generation" "$4" && vrj2_flush
+)
+vward_journal2_rollback_saved() (
+    umask 077
+    [ "$#" -eq 3 ] && vrj2_ready "$1" "$2" || return 2
+    case $3 in pending|done|failed|unknown) ;; *) return 2 ;; esac
+    vrj2_lock "$1" || return $?
+    trap 'vrj2_unlock "$1"' EXIT
+    case $(cat "$1/$2/state") in pending|unknown) ;; *) return 75 ;; esac
+    vrj2_put "$1/$2/rollback-save" "$3" && vrj2_flush
+)
+
+# Baseline proof is supplied as private readbacks step.N for the EARLIEST image
+# of each kind/resource, after all inverses. It permits unrelated foreign edits:
+# only this operation own scopes are compared, not a whole-file restore.
+vward_journal2_abort() (
+    umask 077
+    [ "$#" -eq 4 ] && vrj2_gen "$3" && vrj_dir "$4" && vrj2_ready "$1" "$2" || return 2
+    vrj2_lock "$1" || return $?
+    trap 'vrj2_unlock "$1"' EXIT
+    case $(cat "$1/$2/state") in planned|pending|unknown) ;; *) return 75 ;; esac
+    [ "$(cat "$4/generation" 2>/dev/null)" = "$3" ] || return 75
+    vrj2_need_save=0
+    for vrj2_step in "$1/$2"/step.*; do
+        [ -e "$vrj2_step" ] || [ -L "$vrj2_step" ] || continue
+        vrj2_n=${vrj2_step##*/step.}
+        vrj2_step_valid "$1" "$2" "$vrj2_n" || return 75
+        case $(cat "$vrj2_step/state") in compensated|failed) ;; *) return 75 ;; esac
+        if [ -e "$vrj2_step/inverse.from" ]; then
+            vrj2_row=$(vrj2_step_row "$1/$2" "$vrj2_n") || return 2
+            case $(printf '%s\n' "$vrj2_row" | cut -f4) in route|dns|group|dns-scope) vrj2_need_save=1 ;; esac
+        fi
+    done
+    vrj2_list=$(awk -F'\t' '$1=="step" && !seen[$4 SUBSEP $5]++ {print $2}' "$1/$2/plan")
+    for vrj2_n in $vrj2_list; do
+        vrj2_file "$4/step.$vrj2_n" || return 75
+        vrj2_row=$(vrj2_step_row "$1/$2" "$vrj2_n") || return 2
+        vrj2_pre=$(printf '%s\n' "$vrj2_row" | cut -f6)
+        [ "$(cat "$4/step.$vrj2_n")" = "$(vrj2_decode "$vrj2_pre")" ] || return 75
+    done
+    if [ "$vrj2_need_save" = 1 ]; then
+        vrj2_file "$1/$2/rollback-save" && [ "$(cat "$1/$2/rollback-save")" = 'done' ] || return 75
+    fi
+    vrj2_receipt=$(printf 'record=resolved\nopid=%s\nplan_sha=%s\ngeneration=%s\nresult=compensated' "$2" "$(cat "$1/$2/plan.sha")" "$3")
+    vrj2_put "$1/$2/resolved" "$vrj2_receipt" && vrj2_put "$1/$2/resolved.sha" "$(vrj_hash "$1/$2/resolved")" &&
+        vrj2_put "$1/$2/generation" "$3" && vrj2_put "$1/$2/state" compensated && vrj2_flush
+)
+
 # Closed tokens only: no spaces, no quotes, no URL ("//"), so no secret can be stored.
 vrj_tok() { case $1 in ''|*[!A-Za-z0-9_.:@,/-]*|*//*) return 1 ;; esac; [ "${#1}" -le 256 ]; }
 vrj_id() { case $1 in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.:-]*) return 1 ;; esac; [ "${#1}" -le 64 ]; }

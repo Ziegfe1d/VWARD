@@ -203,3 +203,74 @@ Python нужен только host-тесту; runtime по-прежнему и
 не меняя RS5 API и пределы. Источники, truth/unknown, snapshot-local REF,
 сравнения legacy и следующий shadow этап — [RS6_READ_ADAPTERS.md](RS6_READ_ADAPTERS.md).
 Она не подключена к writer/Панели, health/packet-path unknown; rights всегда reference.
+
+## Продолжение PR38: согласованный stage и типизированная подготовка v2 (live OFF)
+
+`vward_routing_consistent_read2 OUT INPUTDIR` — тот же native snapshot плюс обязательные
+`version/choices/bindings/evidence/policies/saved/queue/tombstones/context/resources/proofs.tsv`.
+INPUTDIR/OUT — разные приватные owned0700 каталоги, без symlink. Версия данных — строка
+`routing-state<TAB>2`. Canonical choices сохраняют schema1 и смысл предыдущего раздела.
+SHA256/size/inode/mtime до/после охватывают **и** native inputs, **и** decision inputs;
+generation зависит от содержимого. `cksum`/`comm` не нужны. Staged bytes проверяются повторно.
+V1 OUT без новых входов сохраняет прежние пять файлов; v2 дополнительно даёт inventory.tsv,
+groups.tsv и private decision copies. Seal связывает все подготовленные outputs и generation;
+generation публикуется последним. Несогласованный/изменённый stage не используется повторно.
+Seal доказывает целостность снимка, не истинность внешнего health-факта и не право владения.
+
+Native `inventory` reader: 13 TSV полей `resource REF GROUP DOMAIN SCOPE TARGET DNS OWNER
+CONTENT IDENTITY reference CONTAINER STABLE_RESOURCE_ID`. Native имя, стабильный u-ID/container,
+изменяемые REF/content и exact proof разделены. Target/content change не меняет stable ID,
+но лишает stale proof действительности. Rights по-прежнему reference. Это не adoption по имени.
+
+Нормализованные v2 inputs (предварительный формат, не installed state):
+
+| Файл | Поля TSV |
+|---|---|
+| bindings | SID DOMAIN exact/subtree confirmed/excluded/shared/unknown ipv4/dual/unknown known/unknown(client-policy) |
+| evidence | SOURCE REF DOMAIN SCOPE TARGET DNS SELECTED explicit/active/positive/history/unknown EPOCH ORIGIN_SID/- |
+| context | KEY VALUE; source:M/S/A, VPN:IF, storage:keenetic/agh, probe:REF=fresh, scope:subtree=available |
+| policies | ID keenetic/agh available/unavailable/unknown active/inactive/unknown none/supported/unsupported(upstream-file) REV URL_KEY |
+| resources | KIND RID NATIVE DOMAIN SCOPE TARGET DNS BACKEND OWNER BIRTH CONSUMERS |
+| proofs | первые 10 полей resource, затем CONTENT_REV вместо consumers; exact private receipt |
+| tombstones | POLICY REV deleted |
+
+KIND пока route/dns; NATIVE — `group:NAME` либо `upstream:OPAQUE_KEY`, не resource ID/URL.
+CONSUMERS — множество `M:REF,S:REF,A:REF` либо `-`. Backend native/keenetic/agh.
+OWNER=vward не выдаёт право: нужны exact private receipt и verified native identity; незарегистрированное
+наблюдаемое покрытие остаётся reference. Для saved/queue, миграции и actual backend receipts формат
+ещё уточняется в связанной реализации; не подавать эти данные старому live writer.
+
+`vward_routing_project2 STAGE SID NEXT_CHOICES OUT` соединяет **настоящие** choice/policy из audit
+с membership, native manual intents, peer choices и freshness/epochs. NEXT_CHOICES пересчитывается
+из staged ledger общим transition: нельзя подменить REV/floor либо изменить второй сервис.
+Сохраняет atoms.tsv/policy.tsv/choices.tsv/service и seal; неизвестный native source/peer membership
+не превращается в ISP. Новый подтверждённый child наследует pin; shared/excluded не приобретают ownership.
+Программный VPN-off при DNS остаётся no-op. Loading/read не вызывает transport/background repairs.
+
+`vward_routing_plan2 STAGE PROJECT OPID` возвращает только текст:
+
+```
+routing-plan<TAB>2<TAB>GEN<TAB>denied
+step SEQ ACTION KIND RID PRE POST PROOF CONSUMERS CHECKS INVERSE
+```
+
+Все step-поля TSV. PRE/POST — canonical resource/choice row с `|` вместо TAB; `-` значит отсутствие.
+ACTION=create/add/remove/move; claims — только local consumer metadata. Конкретные native ref/scope,
+identity и собственная обратная дельта сохраняются в row, исходный native snapshot не исчезает.
+При любом `hold DOMAIN REASON` **ни одной** step/choice-commit строки не возвращается.
+Весь переход проверяет Keenetic8, active backend/upstream-file/tombstone, совместимость references
+и только необходимые зависимости. Чистый VPN не проверяет Smart DNS/AGH; реальное снятие AGH требует
+известного AGH storage. Переход off/auto сохраняет внешний VPN, совместимый ISP не конфликт.
+Поддерево требует доказанной backend capability; отсутствие доказательства — hold, не расширение scope.
+4096 строк/1MiB на input и расширенный output, до1024 domains/4096 resources; границы не увеличены.
+
+Parent journal v2 хранит immutable plan+SHA, generation Gi и private per-step pre/post/observed.
+BEGIN только в порядке шагов, до write; FINISH сравнивает post/pre/other. Новый Gi записывается
+после доказанного собственного результата, следующий шаг с прежним G0 отвергается. Commit требует
+всех readbacks и обязательного save. Used OPID не повторяется. Старый v1 journal отвергает v2 plan
+и считает такой active каталог unknown; downgrade требует версионированной миграции.
+Компенсация — только по immutable postimage либо записанному **до write** group/DNS-scope prefix;
+чужой образ не разрешает inverse. Abort проверяет earliest preimage каждого своего scope и baseline
+save, хранит resolution receipt. Метка committed/compensated сама по себе не заменяет доказательства.
+Все эти функции только записывают свидетельства; executor/coordinator/recovery и полный chained
+fixture ещё должны быть соединены. Это не разрешение live и не claim аппаратной приёмки.

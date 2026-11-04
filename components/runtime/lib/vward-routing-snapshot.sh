@@ -1,5 +1,5 @@
 #!/bin/sh
-# RS-6: consistent read coordinator. Defines ONE function; loading does nothing.
+# RS-6: consistent read coordinators v1/v2; loading defines functions only.
 #
 #   vward_routing_consistent_read OUTDIR
 #
@@ -21,6 +21,7 @@
 # projections are derived from. The cache is never refreshed here (no ndmc/RCI).
 # No daemon, no timer, no background process, nothing outside OUTDIR is written.
 vward_routing_consistent_read() (
+    umask 077
     [ "$#" = 1 ] || return 2
     command -v vward_routing_read >/dev/null 2>&1 && command -v vward_routing_observe >/dev/null 2>&1 ||
         { printf '%s\n' 'routing snapshot: reader and observers must be loaded' >&2; return 2; }
@@ -33,6 +34,9 @@ vward_routing_consistent_read() (
     fi
     # A previous result must never survive a failed attempt.
     rm -f "$vrs_out/generation" "$vrs_out/intents.tsv" "$vrs_out/snapshot.tsv" "$vrs_out/identity.tsv" "$vrs_out/legacy.tsv" 2>/dev/null
+    [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -f "$vrs_out/inventory.tsv"
+    [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -f "$vrs_out/groups.tsv"
+    [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -f "$vrs_out/seal" "$vrs_out/seal.sha"
     [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -rf "$vrs_out/decision"
     vrs_tmp=$(umask 077; mktemp -d "$vrs_out/.read.XXXXXX" 2>/dev/null) || return 2
     trap 'rm -rf "$vrs_tmp"' EXIT
@@ -187,7 +191,9 @@ vward_routing_consistent_read() (
         }') || return 2
     case $vrs_gen in g-????????????????) ;; *) vrs_unknown generation-failed; return 3 ;; esac
 
-    for vrs_mode in intents snapshot identity; do
+    vrs_modes='intents snapshot identity'
+    [ -z "$vrs_decision_names" ] || vrs_modes="$vrs_modes inventory"
+    for vrs_mode in $vrs_modes; do
         vward_routing_read "$vrs_mode" > "$vrs_tmp/$vrs_mode.tsv" 2> "$vrs_tmp/$vrs_mode.err" || { vrs_unknown "reader-failed:$vrs_mode"; return 3; }
         if [ "$(wc -c < "$vrs_tmp/$vrs_mode.tsv")" -gt 1048576 ]; then vrs_unknown "output-oversize:$vrs_mode"; return 3; fi
     done
@@ -221,14 +227,25 @@ vward_routing_consistent_read() (
         vrs_unknown snapshot-header; return 3
     fi
     mv "$vrs_tmp/snapshot.final" "$vrs_tmp/snapshot.tsv" || return 2
-    for vrs_name in intents snapshot identity legacy; do
+    for vrs_name in $vrs_modes legacy; do
         mv "$vrs_tmp/$vrs_name.tsv" "$vrs_out/$vrs_name.tsv" || { rm -f "$vrs_out/intents.tsv" "$vrs_out/snapshot.tsv" "$vrs_out/identity.tsv" "$vrs_out/legacy.tsv"; return 2; }
     done
     if [ -n "$vrs_decision_names" ]; then
+        awk '/^object-group fqdn / && NF==3 {print $3}' "$vrs_stage/cfg" | LC_ALL=C sort -u > "$vrs_out/groups.tsv" || return 2
         (umask 077; mkdir "$vrs_out/decision") || return 2
         for vrs_l in $vrs_decision_names; do
             mv "$vrs_stage/$vrs_l" "$vrs_out/decision/${vrs_l#v2-}.tsv" || return 2
         done
+        printf 'routing-stage\t2\t%s\n' "$vrs_gen" > "$vrs_out/seal" || return 2
+        for vrs_name in intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv \
+            decision/version.tsv decision/choices.tsv decision/bindings.tsv decision/evidence.tsv \
+            decision/policies.tsv decision/saved.tsv decision/queue.tsv decision/tombstones.tsv \
+            decision/context.tsv decision/resources.tsv decision/proofs.tsv; do
+            vrs_ck=$(sha256sum < "$vrs_out/$vrs_name") || return 2
+            printf '%s\t%s\n' "${vrs_ck%% *}" "$vrs_name" >> "$vrs_out/seal" || return 2
+        done
+        vrs_ck=$(sha256sum < "$vrs_out/seal") || return 2
+        printf '%s\n' "${vrs_ck%% *}" > "$vrs_out/seal.sha" || return 2
     fi
     # The marker is written last: no marker, no valid snapshot.
     printf '%s\n' "$vrs_gen" > "$vrs_out/generation" || { rm -f "$vrs_out/intents.tsv" "$vrs_out/snapshot.tsv" "$vrs_out/identity.tsv" "$vrs_out/legacy.tsv"; return 2; }

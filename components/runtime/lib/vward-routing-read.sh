@@ -1,14 +1,14 @@
 #!/bin/sh
 # RS-6: native persisted inputs -> RS-5 TSV; explicit invocation, stdout only.
 # Reads the existing shared cache; NEVER refreshes it or invokes a writer.
-# Modes: intents | snapshot (RS5 TSV) | identity (RS-6 stable identity table).
+# Modes: intents | snapshot (RS5 TSV) | identity | inventory (v2 native names + stable IDs).
 # REF = hash of canonical content (source, container, domain, scope, route, DNS),
 # never a row position: reordering lines cannot rename a record. Identity is not
 # ownership: only a private proof file that matches the group exactly says
 # `verified`; the right to change is always `reference` here.
 vward_routing_read() (
     [ "$#" = 1 ] || return 2
-    case "$1" in intents|snapshot|identity) VRR_MODE=$1 ;; *) return 2 ;; esac
+    case "$1" in intents|snapshot|identity|inventory) VRR_MODE=$1 ;; *) return 2 ;; esac
     VRR_ETC=${VWARD_CONSOLE_ETC:-/opt/etc/vward}
     VRR_STATE=${VWARD_ROUTE_STATE:-/opt/var/lib/vward/route-engine}
     VRR_CFG=${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}/running-config
@@ -267,7 +267,8 @@ vward_routing_read() (
                 if(known["cfg"] && mode!="intents") {
                     rr=mkid("r","R|" g "|" d "|exact|" t "|" dns(d))
                     if(mode=="snapshot") emit("route" OFS rr OFS d OFS "exact" OFS t OFS dns(d) OFS owner OFS "reference",d)
-                    else emit(rr OFS "route" OFS "-" OFS gcont[g] OFS gcontent[g] OFS mkid("t","T|exact|" t "|" dns(d)) OFS lnk OFS identstate(g) OFS "reference",d)
+                    else if(mode=="identity") emit(rr OFS "route" OFS "-" OFS gcont[g] OFS gcontent[g] OFS mkid("t","T|exact|" t "|" dns(d)) OFS lnk OFS identstate(g) OFS "reference",d)
+                    else if(mode=="inventory") emit("resource" OFS rr OFS g OFS d OFS "exact" OFS t OFS dns(d) OFS owner OFS gcontent[g] OFS identstate(g) OFS "reference" OFS gcont[g] OFS mkid("u","U|" g "|" d "|exact"),d)
                 }
                 if(known["cfg"] && !(g in used) && g!="AdaptiveAuto") intent("M",g,d,t,gcont[g],gcontent[g],lnk,identstate(g))
             }
