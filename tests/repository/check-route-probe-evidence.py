@@ -15,6 +15,7 @@ with tempfile.TemporaryDirectory() as td:
 case "$1" in
  api.ozon.ru) echo 'Name: api.ozon.ru'; echo 'Address 1: 192.0.2.10' ;;
  lampa.mx) echo 'Name: lampa.mx'; echo 'Address 1: 198.51.100.20' ;;
+ timeout.example) echo 'Name: timeout.example'; exit 143 ;;
  *) exit 1 ;;
 esac
 ''');resolve.chmod(0o755)
@@ -38,6 +39,8 @@ esac
     assert la['routes']==[] and la['router_routes'][0]['device']=='tun9',la
     sc=probe('domain','game.example')
     assert sc['dns']['ipv4']==[] and sc['router_routes']==[] and sc['client_path_verified'] is False,sc
+    interrupted=probe('domain','timeout.example')
+    assert interrupted['dns']['ipv4']==[] and interrupted['router_routes']==[] and interrupted['client_path_verified'] is False,interrupted
     ipx=probe('ip','198.51.100.20')
     assert ipx['router_routes'][0]['device']=='tun9' and ipx['configured_route'] is False,ipx
     assert probe('ip','203.0.113.77')['router_routes'][0]['known'] is False

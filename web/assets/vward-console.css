@@ -502,6 +502,9 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 .seg-slider.two .seg-thumb{width:calc((100% - 8px) / 2)}
 .kv-row.stack .seg-slider{margin:8px 0 0;width:100%}
 .kv-row.stack .seg-slider button{padding:9px 2px}
+.sd-storage .kv-row{display:block}
+.sd-storage .seg-slider{width:100%;margin:8px 0}
+.sd-storage .seg-slider button{white-space:normal;overflow:visible;text-overflow:clip;min-height:44px;line-height:1.25}
 .seg-slider:not(.off) button:disabled{opacity:.45}
 .seg-slider.four{grid-template-columns:repeat(4,minmax(0,1fr))}
 .seg-slider.four .seg-thumb{width:calc((100% - 8px) / 4)}

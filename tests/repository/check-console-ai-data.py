@@ -59,6 +59,8 @@ with tempfile.TemporaryDirectory() as tmp:
     if not d.get("ok"):
         fail("ai-data: " + body[:300])
     sd = d["smartdns"]
+    assert sd.get('storage', {}).get('component') == 'AdGuard Home', sd
+    assert sd['storage']['target'] == 'keenetic' and sd['store'] == 'auto', sd
     rows = {x["host"]: x for x in sd.get("server_rows", [])}
     if set(rows) != {"keen.example", "old-smartdns.example"}:
         fail("RED: every server in use must be listed, AdGuard Home's too: " + json.dumps(sd))
@@ -71,6 +73,7 @@ with tempfile.TemporaryDirectory() as tmp:
     if not gpt:
         fail("no catalog service with chatgpt.com: " + ", ".join(svc))
     lists = gpt.get("lists", [])
+    assert gpt.get('selected') is None and gpt.get('effective') == 'mixed', gpt
     if not any(l["group"] == "domain-list7" and l["route"] == "Wireguard0" and l["title"] == "ChatGPT OpenAI (ISP)" for l in lists):
         fail("RED: the list sending ChatGPT's domains through VPN must be named: " + json.dumps(gpt))
     claude = svc.get("claude.ai")

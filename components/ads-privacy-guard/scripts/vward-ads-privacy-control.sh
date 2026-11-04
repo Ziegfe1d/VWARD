@@ -163,7 +163,7 @@ if [ "$OP" = agh ]; then
     #                                          domains (a domain added from the Panel)
     # The whole upstream list is read back; on a mismatch the previous one is put back.
     # smartdns-take-server PRIVATE_CONFIG PAIRS_OUT: only this server's domain rows.
-    smartdns-take|smartdns-take-server|smartdns-put|smartdns-restore)
+    smartdns-take|smartdns-take-server|smartdns-put|smartdns-restore|smartdns-check)
       [ -r "$A1" ] || agfail invalid_value
       aget dns_info dns.json || agfail adguard_unavailable
       "$ADS_JQ" -e '.upstream_dns | type == "array"' "$W/dns.json" >/dev/null 2>&1 || agfail adguard_unavailable
@@ -174,7 +174,7 @@ if [ "$OP" = agh ]; then
                   or ((if startswith("udp://") or startswith("tcp://") then .[6:] else . end) as $h
                       | ($h | startswith("127.") or startswith("[::1]:")) and ($h | endswith(":53") | not)
                         and ((try ($h | split(":") | last | tonumber) catch null) != null)));'
-      if [ "$AG_SET" != smartdns-put ] && [ "$AG_SET" != smartdns-restore ]; then
+      if [ "$AG_SET" != smartdns-put ] && [ "$AG_SET" != smartdns-restore ] && [ "$AG_SET" != smartdns-check ]; then
         case "$A2" in ''|*[!A-Za-z0-9._/-]*) agfail invalid_value ;; esac
         if [ "$AG_SET" = smartdns-take-server ]; then
           "$ADS_JQ" -Rn '[inputs | select(startswith("SMARTDNS_URL=")) | ltrimstr("SMARTDNS_URL=") | select(length > 0)] | .[:1]' "$A1" > "$W/inc.json" || agfail invalid_value
@@ -215,6 +215,20 @@ if [ "$OP" = agh ]; then
         "$ADS_JQ" -Rn '[inputs | split("\t") | select(length == 2 and (.[0] | length) > 0 and (.[1] | length) > 0) | {d: .[0], u: .[1]}]' "$A1" > "$W/pairs.json" || agfail invalid_value
         "$ADS_JQ" -e --slurpfile p "$W/pairs.json" "$SD_LIB"'
           ($p[0] | map(select(.u == "auto")) | length) == 0 or ([.upstream_dns[] | row | select(. != null and enc)] | length) > 0' "$W/dns.json" >/dev/null 2>&1 || agfail smartdns_not_configured
+        if [ "$AG_SET" = smartdns-put ] || [ "$AG_SET" = smartdns-check ]; then
+          # The fresh API image is authoritative even if the local YAML lagged.
+          # Skipping a domain on a different server is not a successful put.
+          "$ADS_JQ" -e --slurpfile p "$W/pairs.json" "$SD_LIB"'
+            [.upstream_dns[] | row | select(. != null and enc)] as $rows
+            | all($p[0][]; . as $pair | $pair.u == "auto" or
+                all($rows[] | select(any(.d[]; ascii_downcase == $pair.d)); .u == $pair.u))' "$W/dns.json" >/dev/null 2>&1 || agfail smartdns_domain_other_server
+        fi
+        if [ "$AG_SET" = smartdns-check ]; then
+          "$ADS_JQ" -e --slurpfile p "$W/pairs.json" "$SD_LIB"'
+            [.upstream_dns[] | row | select(. != null and enc)] as $rows
+            | all($p[0][]; . as $pair | any($rows[]; .u == $pair.u and any(.d[]; ascii_downcase == $pair.d)))' "$W/dns.json" >/dev/null 2>&1 || agfail smartdns_binding_missing
+          echo 'CONTROL=PASS'; echo 'CHANGED=0'; exit 0
+        fi
         "$ADS_JQ" -c --arg mode "$AG_SET" --slurpfile p "$W/pairs.json" "$SD_LIB"'
           ([.upstream_dns[] | row | select(. != null and enc)]) as $rows
           | ([$rows[] | .d[] | ascii_downcase]) as $have
@@ -228,7 +242,9 @@ if [ "$OP" = agh ]; then
         # before the POST. restore: the evidence written by the original take is the
         # reference and is never overwritten.
         if [ "$AG_SET" = smartdns-put ]; then agh_evidence || agfail write_failed; fi
+        ag_put_changed=0
         if ! "$ADS_JQ" -e --slurpfile o "$W/dns.json" '.upstream_dns == $o[0].upstream_dns' "$W/plan.json" >/dev/null 2>&1; then
+          ag_put_changed=1
           ads_agh_api_post dns_config "$W/plan.json" "$W/out" >/dev/null 2>&1 || agfail adguard_rejected
           aget dns_info dns2.json && "$ADS_JQ" -e --slurpfile p "$W/plan.json" '.upstream_dns == $p[0].upstream_dns' "$W/dns2.json" >/dev/null 2>&1 || {
             agh_guarded_back || :
@@ -245,6 +261,7 @@ if [ "$OP" = agh ]; then
           echo "RESTORE_EXACT=$ag_ex"
         fi
         echo "PUT=$(grep -c . "$A1")"
+        echo "CHANGED=$ag_put_changed"
       fi ;;
     *) agfail invalid_setting ;;
   esac

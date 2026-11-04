@@ -13,6 +13,20 @@ FAKE = ast.literal_eval(constants['FAKE_NDMC'])
 DEVICE = ast.literal_eval(constants['DEVICE_CONF'])
 
 
+def process_has_arg(pid, argument):
+    try:
+        return argument.encode() in (Path('/proc')/str(pid)/'cmdline').read_bytes().split(b'\0')
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+
+
+def process_state(pid):
+    try:
+        return (Path('/proc')/str(pid)/'stat').read_text().split(') ',1)[1].split()[0]
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+
+
 class Services:
     def __init__(self, tmp):
         self.tmp = tmp

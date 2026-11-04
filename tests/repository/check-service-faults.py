@@ -58,6 +58,7 @@ for case in ('new-owner-edit', 'new-state-write', 'off-save', 'off-dns', 'unknow
             before = s.cfg.read_text()
             state = s.state.read_text()
             if case == 'off-dns':
+                (s.etc/'smartdns.conf').write_text('SMARTDNS_URL=https://dns.example/dns-query\n')
                 saved = s.etc / 'route-engine/domain-lists/domain-list0'
                 with saved.open('a') as f: f.write('agh=claude.ai\thttps://dns.example/dns-query\n')
                 ads = s.tmp / 'ads'
@@ -142,6 +143,8 @@ for case in ('term', 'kill-reboot', 'concurrent', 'stage-write', 'catalog-write'
                 body = ndmc.read_text()
                 pause = ('\ndef fault_pause():\n'
                          '    if cmd != "object-group fqdn domain-list0 include new.example": return\n'
+                         '    import os\n'
+                         f'    Path({str(s.tmp / "transport.pid")!r}).write_text(str(os.getpid()))\n'
                          f'    Path({str(entered)!r}).touch()\n'
                          f'    while not Path({str(resume)!r}).exists():\n'
                          '        import time; time.sleep(0.01)\n')
@@ -164,6 +167,15 @@ for case in ('term', 'kill-reboot', 'concurrent', 'stage-write', 'catalog-write'
                 worker.join(30)
                 assert not worker.is_alive() and result, 'writer did not finish'
                 r = result[0]
+                # A real reboot ends the external transport too. Do not model
+                # it by clearing locks while an orphan is still applying.
+                transport = s.tmp/'transport.pid'
+                if transport.exists():
+                    transport_pid = transport.read_text()
+                    deadline = time.monotonic()+5
+                    while fixture.process_has_arg(transport_pid, str(ndmc)) and time.monotonic()<deadline:
+                        time.sleep(0.01)
+                    assert not fixture.process_has_arg(transport_pid, str(ndmc)), 'transport did not finish'
             else:
                 r = s.run('services-refresh', 'run')
             pending = list((s.tmp / 'backup/service-transactions').glob('*/pending'))
@@ -179,11 +191,19 @@ for case in ('term', 'kill-reboot', 'concurrent', 'stage-write', 'catalog-write'
                     shutil.rmtree(p, ignore_errors=True)
                 (s.tmp / 'root/tmp').mkdir(parents=True, exist_ok=True)
                 current = s.cfg.read_bytes()
-                for _ in range(2):
-                    retry = s.run('service', 'off', 'claude.ai')
-                    assert retry.returncode != 0 and 'error=service_recovery_required' in retry.stdout, retry.stdout
-                    assert s.cfg.read_bytes() == current
-                    assert {p.name: p.read_bytes() for p in recovery.iterdir() if p.is_file()} == evidence
+                if case == 'kill-reboot':
+                    retry = s.run('service', 'tunnel', 'claude.ai', 'auto')
+                    assert retry.returncode == 0, retry.stdout + retry.stderr
+                    assert 'include new.example' not in s.cfg.read_text()
+                    assert not list((s.tmp / 'backup/service-transactions').glob('*/pending'))
+                    assert list((s.tmp / 'backup/service-transactions.resolved').glob('*/resolved'))
+                else:
+                    for _ in range(2):
+                        retry = s.run('service', 'off', 'claude.ai')
+                        assert retry.returncode != 0 and 'error=service_recovery_required' in retry.stdout, retry.stdout
+                        assert s.cfg.read_bytes() == current
+                        assert {p.name: p.read_bytes() for p in recovery.iterdir() if p.is_file()} == evidence
+
             else:
                 assert r.returncode != 0 and not pending, case + ': rollback/recovery mismatch: ' + r.stdout + '\nCFG=' + s.cfg.read_text() + '\nFILES=' + repr({p.name:p.read_text() for p in pending[0].parent.iterdir() if p.is_file()} if pending else {})
                 assert s.cfg.read_text() == before and s.state.read_bytes() == state, case + ': partial commit'

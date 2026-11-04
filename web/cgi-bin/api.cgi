@@ -2640,7 +2640,7 @@ svc_recovery_json() {
     # which compares the router - lists, domains added/removed, routes, titles; no addresses.
     SR_DET=
     if [ -s "$SR_TMP" ] && [ -x "$CONFIG_HELPER" ]; then
-        SR_DET="$("$CONFIG_HELPER" service-recover status 2>/dev/null | grep -E '^info\.(txn|diff)=' | head -n 60)"
+        SR_DET="$("$CONFIG_HELPER" service-recover status 2>/dev/null | grep -E '^info\.(txn|diff|dns)=' | head -n 120)"
     fi
     "$JQ" -Rnc --arg det "$SR_DET" '
         ($det | split("\n") | map(select(startswith("info.txn=")) | ltrimstr("info.txn=") | split("|")
@@ -2651,7 +2651,8 @@ svc_recovery_json() {
         | [inputs | split("\t") | select(length == 7) | . as $r | {id: .[0], op: .[1], since: .[2],
         groups: (.[3] | split(" ") | map(select(length > 0))), running: (.[4] == "1"), dns: (.[5] | tonumber), other_change: (.[6] | tonumber),
         state: ($st[$r[0]].state // null), why: ($st[$r[0]].why // null),
-        diff: [$diff[] | select(.id == $r[0]) | del(.id)]}]' "$SR_TMP"
+        diff: [$diff[] | select(.id == $r[0]) | del(.id)]}
+        + (if ($r[1] | startswith("ai ")) then {dns_diff: [$det | split("\n")[] | select(startswith("info.dns=")) | ltrimstr("info.dns=") | split("|") | select(.[0] == $r[0]) | {action: .[1], domain: .[2], store: .[3]}]} else {} end)]' "$SR_TMP"
     [ "$SR_TMP" = /dev/null ] || rm -f "$SR_TMP"
     SR_TMP=
 }
@@ -2702,6 +2703,11 @@ if [ "$ACTION" = ai-data ]; then
     "$JQ" -e '.schema == 1 and (.services | length) > 0' "$SV_CAT" >/dev/null 2>&1 || SV_CAT=${VWARD_SERVICES_BUNDLED:-/opt/share/vward/console/services-catalog.json}
     "$JQ" -e '.schema == 1' "$SV_CAT" >/dev/null 2>&1 || { echo '{"ok":false,"error":"services_unavailable"}'; exit 0; }
     AI_RUN="$(ndm_cached running "$CONFIG_TTL" "show running-config")"
+    AI_REFERENCE_TOKEN="$(printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {c=($1=="dns-proxy" || ($1=="object-group" && $2=="fqdn"))} c {print} /^!/ {c=0}' | sha256sum | cut -d' ' -f1)"
+    AI_CLAIMS=
+    for AI_CLAIM in "$CONFIG_ETC"/services/owned/*; do
+        [ ! -e "$AI_CLAIM" ] && [ ! -L "$AI_CLAIM" ] || AI_CLAIMS="$AI_CLAIMS ${AI_CLAIM##*/}"
+    done
     # Smart DNS domains: Keenetic's own lines (domain, server host) and AdGuard Home's.
     AI_DOH="$(printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {h = $3; sub(/^https:\/\//, "", h); sub(/[\/:].*$/, "", h); print tolower($NF) "\t" h}')"
@@ -2732,18 +2738,32 @@ if [ "$ACTION" = ai-data ]; then
     AI_ON="$(awk -F'\t' 'NF >= 3 {print $1 "\t" $2 "\t" $3}' "$CONFIG_ETC/services/enabled.tsv" 2>/dev/null)"
     # The services waiting for room in Smart DNS (op_ai), and whether AdGuard Home runs.
     AI_WAIT="$(grep -E '^[a-z0-9][a-z0-9.@_-]{0,62}$' "${VWARD_AI_WAIT:-$CONFIG_ETC/smartdns-wait}" 2>/dev/null | head -n 50)"
-    AI_AGH_RUN=false; pidof AdGuardHome >/dev/null 2>&1 && AI_AGH_RUN=true
+    AI_AGH_RUN=false; "${VWARD_PIDOF_BIN:-pidof}" AdGuardHome >/dev/null 2>&1 && AI_AGH_RUN=true
+    AI_CAP='AdGuard Home	0	0	not_installed	unknown'
+    if command -v vward_smartdns_storage >/dev/null 2>&1; then AI_CAP="$(vward_smartdns_storage)"; fi
+    AI_CAP_SUPPORTED="$(printf '%s\n' "$AI_CAP" | cut -f2)"
+    AI_CAP_AVAILABLE="$(printf '%s\n' "$AI_CAP" | cut -f3)"
+    AI_CAP_WHY="$(printf '%s\n' "$AI_CAP" | cut -f4)"
+    AI_HANDLER="$(printf '%s\n' "$AI_CAP" | cut -f5)"
+    AI_STORE_TARGET=$AI_STORE
+    if [ "$AI_STORE" = auto ]; then
+        AI_STORE_TARGET=keenetic; [ "$AI_CAP_AVAILABLE" != 1 ] || AI_STORE_TARGET=agh
+    elif [ "$AI_STORE" = agh ] && [ "$AI_CAP_AVAILABLE" != 1 ]; then AI_STORE_TARGET=unavailable; fi
+    AI_SNAPSHOT_OK=false; printf '%s\n' "$AI_RUN" | grep -qx 'dns-proxy' && AI_SNAPSHOT_OK=true
     AI_ROUTES="$(printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "route" && $2 == "object-group" {print $3 "\t" $4}')"
     # Every domain list with its includes and title (fix.35.3): a service's domains may be sent by
     # another list (a manual one, «ChatGPT OpenAI (ISP)» through VPN 02.11) - the page shows it.
     AI_INC="$(printf '%s\n' "$AI_RUN" | awk '/^object-group fqdn / {g = $3; next} /^!/ {g = ""}
         g != "" && $1 == "include" {print g "\t" tolower($2)}
+        g != "" && $1 == "exclude" {print g "\t!" tolower($2)}
         g != "" && $1 == "description" {sub(/^[ \t]*description[ \t]+/, ""); gsub(/["\t]/, ""); print g "\t#" $0}' | head -n 4000)"
     "$JQ" -c --arg doh "$AI_DOH" --arg agh "$AI_AGH" --arg own "$AI_OWN" --arg on "$AI_ON" --arg routes "$AI_ROUTES" --arg wait "$AI_WAIT" --arg inc "$AI_INC" --arg wan "${VWARD_WAN_INTERFACE:-}" \
         --argjson recovery "$(svc_recovery_json || echo '[]')" \
         --argjson agh_run "$AI_AGH_RUN" --arg shared "$AI_SHARED" --arg store "$AI_STORE" --arg alive "$AI_ALIVE" \
         --arg alive_host "$AI_ALIVE_HOST" --arg agh_hosts "$AI_AGH_HOSTS" --arg alive_why "$AI_ALIVE_WHY" \
+        --arg cap_supported "$AI_CAP_SUPPORTED" --arg cap_available "$AI_CAP_AVAILABLE" --arg cap_why "$AI_CAP_WHY" --arg handler "$AI_HANDLER" --arg store_target "$AI_STORE_TARGET" --argjson snapshot_ok "$AI_SNAPSHOT_OK" \
+        --arg reference_token "$AI_REFERENCE_TOKEN" --arg claims "$AI_CLAIMS" --arg default_tunnel "${VWARD_TUNNEL_INTERFACE:-}" \
         --argjson agh_on "$([ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] && echo true || echo false)" '
         ($doh | split("\n") | map(select(length > 0) | split("\t"))) as $k
         | ($agh | split("\n") | map(select(length > 0))) as $a
@@ -2752,9 +2772,13 @@ if [ "$ACTION" = ai-data ]; then
         | ($agh_hosts | split("\n") | map(select(length > 0))) as $ah
         | ($inc | split("\n") | map(select(length > 0) | split("\t"))) as $gi
         | ([$gi[] | select(.[1] | startswith("#")) | {key: .[0], value: (.[1] | ltrimstr("#"))}] | from_entries) as $title
-        | ([$gi[] | select(.[1] | startswith("#") | not)]) as $incl
+        | ([$gi[] | select(.[1] | startswith("!") ) | [.[0], (.[1] | ltrimstr("!"))]]) as $excl
+        | ([$gi[] | select((.[1] | startswith("#") or startswith("!")) | not)]) as $incl
         | ([$k[] | .[0]] + $a) as $sd
-        | def covered($d): any($sd[]; . as $s | $d == $s or ($d | endswith("." + $s)));
+        | def under($d; $p): $d == $p or ($d | endswith("." + $p));
+          def group_covers($g; $d): any($incl[]; .[0] == $g and under($d; .[1]))
+            and all($excl[]; .[0] != $g or ((under($d; .[1]) or under(.[1]; $d)) | not));
+          def covered($d): any($sd[]; . as $s | $d == $s or ($d | endswith("." + $s)));
           # The own main domains of a service: the same rule as ai_main in vward-console-config.sh.
           def main($id; $ds): ($id | split(".")[0]) as $b0 | (if ($b0 | length) >= 4 then $b0 else "" end) as $brand
             | [([$id] + $ds)[] | ascii_downcase | select((explode | all(. == 45 or . == 46 or (. >= 48 and . <= 57) or (. >= 97 and . <= 122))) and (split(".") | length >= 2 and all(length > 0)))] | unique
@@ -2763,8 +2787,9 @@ if [ "$ACTION" = ai-data ]; then
                | {d: $d, k: (if $d == $id then 0 elif $own then 1 elif ($l | length) == 2 then 2 else 3 end), n: ($l | length)}]
             | sort_by(.k, .n, .d) | map(.d)
             | reduce .[] as $d ([]; if any(.[]; . as $k | $d | endswith("." + $k)) then . else . + [$d] end) | .[:4];
-        {ok: true, recovery: $recovery,
+        {ok: true, evidence: "configuration", client_path_verified: false, recovery: $recovery, reference_token: $reference_token,
          smartdns: {store: $store, keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_running: $agh_run, agh_domains: ($a | length),
+                    storage: {component: "AdGuard Home", supported: ($cap_supported == "1"), available: ($cap_available == "1"), reason: $cap_why, handler: $handler, target: $store_target},
                     waiting: ($wait | split("\n") | map(select(length > 0))),
                     servers: ([$k[] | .[1]] + $ah + (if $own == "" then [] else [$own] end) | unique), own: $own, alive: $alive,
                     alive_host: $alive_host, alive_why: $alive_why,
@@ -2774,12 +2799,28 @@ if [ "$ACTION" = ai-data ]; then
          services: [.services[] | select(.category == "ai") | . as $s
            | main($s.id; $s.domains) as $roots
            | ($groups[$s.id] // "") as $g
+           | ([$incl[] | . as $i | select(($route[$i[0]] // "") != "")
+               | select(any($s.domains[]; . as $d | select(under($d; $i[1]) or under($i[1]; $d))
+                   | (if under($d; $i[1]) then $d else $i[1] end) as $part
+                   | all($excl[]; .[0] != $i[0] or (under($part; .[1]) | not)))) | .[0]] | unique
+               | map(. as $pg | {group: ., title: ($title[.] // ""), route: (if $route[.] == "ISP" or ($wan != "" and $route[.] == $wan) then "ISP" else $route[.] end),
+                    members: [$incl[] | select(.[0] == $pg) | .[1]],
+                    excluded: [$excl[] | select(.[0] == $pg) | .[1]],
+                    reference: ($g == "" and $pg != "AdaptiveAuto" and $route[$pg] == $default_tunnel and ($claims | split(" ") | index($pg)) == null
+                      and all($excl[]; .[0] != $pg) and all($s.domains[]; group_covers($pg; .))
+                      and all($s.domains[]; covered(.) | not))})) as $paths
+           | (any($paths[]; .route != "ISP")) as $vpn
+           | (any($paths[]; .route == "ISP")) as $isp
+           | (any($roots[]; covered(.))) as $some_dns
+           | ([$s.domains[] | . as $d | select(any($paths[]; group_covers(.group; $d)))] | length) as $routed
+           | (if ($snapshot_ok | not) then "unknown" elif ([$paths[].route] | unique | length) > 1 then "mixed" elif $vpn and ($isp or $some_dns or $routed < ($s.domains | length)) then "mixed" elif $vpn then "vpn"
+              elif ($roots | length) > 0 and all($roots[]; covered(.)) then "dns" elif $some_dns then "mixed" else "isp" end) as $effective
            | {id: $s.id, title: $s.title, domain: ($s.domains[0] // $s.id), roots: $roots,
               via: (if $g != "" then "vpn" elif ($roots | length) > 0 and all($roots[]; covered(.)) then "dns" else "isp" end),
+              selected: (if $g != "" then "vpn" elif ($roots | length) > 0 and all($roots[]; covered(.)) then "dns" elif $effective == "isp" then "isp" else null end),
+              effective: $effective, paths: $paths, coverage: {routed: $routed, catalog: ($s.domains | length)},
               tunnel: (if $g != "" then ($route[$g] // "") else "" end),
-              lists: ([$incl[] | select(.[0] != $g and ($route[.[0]] // "") != "") | . as $i
-                        | select(any($roots[]; . == $i[1] or endswith("." + $i[1]))) | .[0]] | unique | .[:3]
-                      | map({group: ., title: ($title[.] // ""), route: (if $route[.] == "ISP" or ($wan != "" and $route[.] == $wan) then "ISP" else $route[.] end)}))}]}' "$SV_CAT"
+              lists: [$paths[] | select(.group != $g)]}]}' "$SV_CAT"
     exit 0
 fi
 # smartdns-server: the owner's own DoH server for Smart DNS without AdGuard Home. The address
@@ -2846,6 +2887,15 @@ if [ "$ACTION" = services ]; then
             *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
         esac
         CMD="$CONFIG_HELPER" LABEL="service-recover" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG="" ARGS="service-recover $SID $SRM"
+        run_detached "$CONTROL_RUN_DIR" control_busy
+    fi
+    if [ "$SOP" = reference ]; then
+        [ "$(form_value confirm)" = SERVICE_REFERENCE_ONLY ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+        printf '%s\n' "$SID" | grep -Eq '^[a-z0-9][a-z0-9.@_-]{0,62}$' &&
+        printf '%s\n' "$STO" | grep -Eq '^[A-Za-z0-9_.-]{1,64}$' || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }
+        SRT="$(form_value token)"
+        printf '%s\n' "$SRT" | grep -Eq '^[0-9a-f]{64}$' || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; }
+        CMD="$CONFIG_HELPER" LABEL="service-reference" START="$(date '+%Y-%m-%dT%H:%M:%S%z')" ARG="" ARGS="service reference $SID $STO $SRT"
         run_detached "$CONTROL_RUN_DIR" control_busy
     fi
     if [ "$SOP" = list-mode ]; then

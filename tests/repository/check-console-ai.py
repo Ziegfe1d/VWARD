@@ -9,6 +9,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+from doh_fixture import responder
 
 ROOT = Path(__file__).resolve().parents[2]
 HELPER = ROOT / "components/console/scripts/vward-console-config.sh"
@@ -90,6 +91,7 @@ with tempfile.TemporaryDirectory() as tmp:
         "VWARD_SERVICES_FETCHED": str(cat), "VWARD_SERVICES_BUNDLED": str(cat),
     }
 
+    responder(tmp, env)
     def run(*args, stdin=""):
         r = subprocess.run(["sh", str(HELPER), *args], env=env, text=True, capture_output=True, input=stdin)
         out = r.stdout.strip().splitlines()

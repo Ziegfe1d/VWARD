@@ -65,6 +65,7 @@ const ICON_PATHS = {
   down: '<path d="m6 9 6 6 6-6"/>',
   copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/>',
   share: '<circle cx="17.5" cy="6" r="2.2"/><circle cx="6.5" cy="12" r="2.2"/><circle cx="17.5" cy="18" r="2.2"/><path d="m8.5 11 7-3.9M8.5 13l7 3.9"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
   save: '<path d="M12 4.5v10"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 19.5h14"/>',
   archive: '<rect x="4" y="4.5" width="16" height="4.5" rx="1.5"/><path d="M5.5 9v9a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5V9"/><path d="M10 13h4"/>',
   sort: '<path d="M7 4v16"/><path d="m4 17 3 3 3-3"/><path d="M13 6h7"/><path d="M13 12h5"/><path d="M13 18h3"/>',
@@ -250,6 +251,7 @@ function stabCheckRows(k) {
 const stabCls = i => i == null ? '' : i >= 95 ? 'ok' : i >= 80 ? 'warn' : 'crit';
 const pct = x => x == null ? '—' : (Math.round(x * 1000) / 10).toString().replace('.', ',') + '%';
 const API_ERRORS = {
+  reference_preview_changed: 'настройки изменились после предпросмотра; перечитай состояние и повтори выбор',
   jq_broken: 'на роутере не работает программа jq - переустановите её: opkg install --force-reinstall jq',
   upstream_not_encrypted: 'сначала зашифруйте выход AdGuard Home (https://... в «Upstream DNS-серверы»)', invalid_mac: 'неверный MAC-адрес',
   chain_failed: 'DNS Keenetic не ответил через AdGuard Home', client_conflict: 'адрес роутера занят другим клиентом AdGuard Home',
@@ -269,11 +271,13 @@ const API_ERRORS = {
   config_unavailable: 'файл настроек недоступен', invalid_mac: 'неверный MAC-адрес',
   invalid_value: 'недопустимое значение', invalid_window: 'начало и конец окна совпадают', invalid_category: 'нет такой категории',
   router_rejected: 'роутер отклонил изменение', verification_failed: 'изменение не подтвердилось и отменено',
+  ai_verification_failed: 'итоговый путь сервисов не подтвердился; проверь фактические маршруты, ручные изменения сохранены',
+  saved_state_unknown: 'данные возврата DNS повреждены или недоступны; запись остановлена, данные сохранены',
   config_save_failed: 'роутер не сохранил конфигурацию', router_config_unavailable: 'не удалось прочитать конфигурацию роутера',
   route_change_busy: 'маршруты сейчас меняет другая задача, повторите', profile_unavailable: 'профиль устройства не определён',
   policy_group_unavailable: 'группа маршрутизации не найдена', list_full: 'список заполнен', backup_failed: 'не удалось сделать резервную копию',
   conf_not_awg3: 'в файле нет настроек AmneziaWG 3.x - это другой файл', conf_other_tunnel: 'файл от другого туннеля: ключ сервера не совпадает', adopt_move_failed: 'туннель поднят в модуле, но списки не перенеслись - перенесите их на странице туннеля', engine_replace_unsupported: 'туннель модуля не заменяется - добавьте новый и удалите этот', engine_full: 'в модуле уже 5 туннелей', speed_busy: 'замер скорости уже идёт', subscription_expired: 'подписка истекла: провайдер присылает заглушки вместо серверов - продлите её у провайдера', subscription_unavailable: 'адрес подписки не ответил', checksum_mismatch: 'скачанная программа не совпала с контрольной суммой', arch_unsupported: 'процессор роутера не поддерживается контуром',
-  services_unavailable: 'каталог сервисов недоступен', invalid_service: 'неверное имя сервиса', unknown_service: 'такого сервиса нет в каталоге', service_too_big: 'у сервиса больше 300 доменов - Keenetic столько не примет в один список', service_not_enabled: 'сервис не включён', service_reference_only: 'список создан или изменён пользователем; автоматическое изменение запрещено', service_recovery_required: 'не завершена прежняя операция сервисов: сначала завершите её в блоке «Незавершённая операция» (страницы «DNS» и «Сервисы»)', service_recovery_unverified: 'состояние не совпало с тем, что было до операции: она оставлена незавершённой', service_recovery_restore_failed: 'не удалось вернуть списки как до операции: она оставлена незавершённой, данные сохранены', smartdns_domain_other_server: 'домен уже направлен на другой сервер Smart DNS: он не перезаписан - уберите прежний сервер или выберите его', service_recovery_running: 'операция ещё выполняется', service_recovery_absent: 'операция уже завершена', list_limit: 'Keenetic не принял домены: достигнут предел списка', no_free_list: 'в Keenetic нет свободного номера доменного списка', catalog_invalid: 'каталог скачался повреждённым - работает прежний',
+  services_unavailable: 'каталог сервисов недоступен', invalid_service: 'неверное имя сервиса', unknown_service: 'такого сервиса нет в каталоге', service_too_big: 'у сервиса больше 300 доменов - Keenetic столько не примет в один список', service_not_enabled: 'сервис не включён', service_reference_only: 'список создан или изменён пользователем; автоматическое изменение запрещено', service_recovery_required: 'предыдущее действие не удалось подтвердить; проверь результат ниже и выбери, что сохранить', service_recovery_unverified: 'состояние не совпало с тем, что было до операции: она оставлена незавершённой', service_recovery_restore_failed: 'не удалось вернуть списки как до операции: она оставлена незавершённой, данные сохранены', smartdns_domain_other_server: 'домен уже направлен на другой сервер Smart DNS: он не перезаписан - уберите прежний сервер или выберите его', service_recovery_running: 'операция ещё выполняется', service_recovery_absent: 'операция уже завершена', list_limit: 'Keenetic не принял домены: достигнут предел списка', no_free_list: 'в Keenetic нет свободного номера доменного списка', catalog_invalid: 'каталог скачался повреждённым - работает прежний',
   write_failed: 'не удалось записать файл', custom_manifest_url: 'адрес манифеста задан вручную - канал меняется в update.conf', invalid_tunnel: 'недопустимое имя туннеля', tunnel_no_handshake: 'сервер не ответил на рукопожатие за 30 секунд - туннель не изменён', conf_no_address: 'в файле нет адреса IPv4 (строка Address)', engine_failed: 'программа модуля не ответила', engine_start_failed: 'программа модуля не запустилась', engine_unavailable: 'модуль туннеля не установлен', main_tunnel: 'это туннель по умолчанию: сначала назначьте по умолчанию другой туннель', tunnel_off: 'туннель выключен: сначала включите его на его странице', tunnel_address_taken: 'такой адрес в туннеле уже занят другим туннелем: у двух туннелей он должен быть разным', invalid_subnet: 'нужна подсеть IPv4, например 149.154.160.0/20 (не шире /8)', private_subnet: 'это адреса домашней сети, провайдера или служебные - в VPN они не отправляются', invalid_description: 'название: до 64 символов, без кавычек', no_free_tunnel: 'на роутере нет свободного номера туннеля',
   conf_empty: 'файл пустой', conf_syntax: 'это не файл WireGuard', conf_peer_count: 'в файле должен быть ровно один [Peer]', conf_key_private: 'неверный PrivateKey', conf_public_key: 'неверный PublicKey', conf_preshared_key: 'неверный PresharedKey', conf_address: 'нет адреса IPv4 в Address', conf_endpoint: 'неверный Endpoint (нужно сервер:порт)', conf_mtu: 'MTU вне 1280-1500', conf_keepalive: 'неверный PersistentKeepalive', conf_allowed_ips: 'неверный AllowedIPs', conf_awg: 'неверные параметры AmneziaWG', conf_unknown_setting: 'в файле настройки, которых не знают ни Keenetic, ни модуль AmneziaWG VWARD (новая версия AmneziaWG - нужно обновление модуля); без них туннель работал бы не так, как в файле', tunnel_device_missing: 'туннель не поднят на роутере', unknown_tunnel: 'туннель не найден',
   failopen_active: 'туннель недоступен, списки VPN идут напрямую: дождитесь восстановления', policy_sync_busy: 'идёт обновление IP-категорий, повторите позже',
@@ -1551,13 +1555,13 @@ function agentsRow() {
 const AI_VIA = [['vpn', 'VPN'], ['dns', 'Smart DNS'], ['isp', 'Провайдер']];
 const aiPrev = {}, AICHK = {};
 // dnsDown: the Smart DNS server does not answer or is not set - its segment is off, with the reason.
-function aiSlider(id, cur, label, off, dnsDown) {
+function aiSlider(id, cur, label, off, dnsDown, dnsWhy) {
   const to = Math.max(0, AI_VIA.findIndex(o => o[0] === cur)), on = cfgOk() && !!S.ai && !SVC.busy && !off;
   const from = aiPrev[id] != null ? aiPrev[id] : to; aiPrev[id] = to;
   return '<div class="seg-slider' + (on ? '' : ' off') + (cur ? '' : ' none') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
     AI_VIA.map(o => { const dis = !on || (o[0] === 'dns' && dnsDown && cur !== 'dns');
-      return '<button type="button" role="radio" data-ai-via="' + o[0] + '" data-ai="' + esc(id) + '" aria-checked="' + (o[0] === cur) + '"' + (dis ? ' disabled' : '') + (o[0] === 'dns' && dnsDown ? ' title="сервер не отвечает"' : '') + '>' + o[1] + '</button>'; }).join('') + '</div>' +
-    (dnsDown ? '<p class="seg-note">Smart DNS: сервер не отвечает</p>' : '') +
+      return '<button type="button" role="radio" data-ai-via="' + o[0] + '" data-ai="' + esc(id) + '" aria-checked="' + (o[0] === cur) + '"' + (dis ? ' disabled' : '') + (o[0] === 'dns' && dnsDown ? ' title="' + esc(dnsWhy || 'сервер не отвечает') + '"' : '') + '>' + o[1] + '</button>'; }).join('') + '</div>' +
+    (dnsDown ? '<p class="seg-note">Smart DNS: ' + esc(dnsWhy || 'сервер не отвечает') + '</p>' : '') +
     (S.ai && !on && !off && (SVC.busy ? AIBUSY === id : !cfgOk()) ? '<p class="seg-note muted">' + (SVC.busy ? 'Переключается…' : 'Изменение недоступно: нет прав на настройку') + '</p>' : '');
 }
 /* An unfinished service operation (fix.35.4, 03.11: «service on» refused with
@@ -1565,10 +1569,13 @@ function aiSlider(id, cur, label, off, dnsDown) {
    two exits - «Проверить и завершить» (VWARD compares the router: nothing of it left -> closed; partly
    done -> its own change given back; an owner's edit or Smart DNS rows on the wrong side -> stays,
    with the reason) and «Оставить как есть» (the owner keeps the router as it is, confirmed). */
-let SVREC = null;
+let SVREC = null, SVREC_ACTION = false;
+function actionRecovery(list) {
+  return SVREC_ACTION ? recoveryPanel(list) : '';
+}
 // The reasons in words; «other-change» is a rollback that found the list changed by something other
 // than this operation - another operation, the autopick or a hand edit: the marker cannot tell which.
-const SVR_WHY = { list: 'список {g} не такой, как до операции', dns: 'строки Smart DNS списка {g} не на своём месте', 'other-change': 'список {g} изменён не этой операцией', file: 'файл настроек сервисов ({g}) изменён' };
+const SVR_WHY = { ai: 'переход сервиса прерван между проверенными шагами; текущее состояние сохранено', list: 'список {g} не такой, как до операции', dns: 'строки Smart DNS списка {g} не на своём месте', 'other-change': 'список {g} изменён не этой операцией', file: 'файл настроек сервисов ({g}) изменён' };
 const svrTitles = r => { const m = {}; (r && r.diff || []).forEach(d => { if (d.title) m[d.group] = d.title; }); return m; };
 const svrWhy = (w, titles) => String(w || '').split(' ').filter(Boolean).map(t => { const i = t.indexOf(':'), k = t.slice(0, i), g = t.slice(i + 1);
   const name = (titles && titles[g]) ? '«' + titles[g] + '»' : (({ enabled: 'включённые', categories: 'категории', catalog: 'каталог' })[g] || g);
@@ -1579,13 +1586,14 @@ const svrDiff = d => (d.title ? '«' + d.title + '»' : d.group) + ': ' + [d.add
   d.route_before !== d.route_now ? 'маршрут ' + svrRoute(d.route_before) + ' → сейчас ' + svrRoute(d.route_now) : ''].filter(Boolean).join(', ');
 function recoveryPanel(list) {
   if (!list || !list.length) return '';
-  return panel('Незавершённая операция сервисов', list.map(r => {
+  return panel('Результат предыдущего действия', list.map(r => {
     const cid = 'svrec-accept:' + r.id, rid = 'svrec-restore:' + r.id, busy = SVREC && SVREC.id === r.id && SVREC.busy, titles = svrTitles(r);
     const diffs = (r.diff || []).filter(d => d.added || d.removed || d.route_before !== d.route_now);
+    const dnsDiff = (r.dns_diff || []).map(d => (d.action === 'add' ? 'добавлено: ' : 'снято: ') + d.domain + ' (' + (d.store === 'agh' ? 'AdGuard Home' : 'Роутер') + ')');
     const note = r.running ? 'Ещё выполняется: дождитесь конца.' : 'Пока она не закрыта, VWARD не меняет сервисы, чтобы не повторить её поверх неизвестного состояния.' +
       (r.dns ? ' Затрагивает строки Smart DNS.' : '') + (r.why ? ' Сейчас: ' + svrWhy(r.why, titles) + '.' : '');
     const res = SVREC && SVREC.id === r.id && SVREC.text ? '<p class="result-note' + (SVREC.ok ? '' : ' warn') + '">' + esc(SVREC.text) + '</p>' : '';
-    const ask = confirm && confirm.id === cid ? confirmBox(cid, 'Оставить роутер как есть и закрыть операцию? Списки останутся как сейчас' + (diffs.length ? ' (' + diffs.map(svrDiff).join('; ') + ')' : '') + '; данные операции сохранятся в резервной папке.', 'Оставить как есть', true) :
+    const ask = confirm && confirm.id === cid ? confirmBox(cid, 'Оставить роутер как есть и закрыть операцию? Списки останутся как сейчас' + (diffs.length ? ' (' + diffs.map(svrDiff).join('; ') + ')' : '') + (dnsDiff.length ? '. DNS: ' + dnsDiff.join('; ') : '') + '; данные операции сохранятся в резервной папке.', 'Оставить как есть', true) :
       confirm && confirm.id === rid ? confirmBox(rid, 'Вернуть списки операции как до неё? ' + (diffs.length ? 'Изменится: ' + diffs.map(svrDiff).join('; ') + ' - станет как до операции. ' : '') + 'Изменения после операции в этих списках будут отменены; строки Smart DNS не переносятся.', 'Вернуть', true) : '';
     const acts = r.running ? '' : ask || '<div class="panel-actions wrap">' +
       btn('svrec-resolve', 'check', busy ? 'Проверяем…' : 'Проверить и завершить', 'small primary' + (busy ? ' spinning' : ''), ' data-id="' + esc(r.id) + '"' + (busy || !cfgOk() ? ' disabled' : '')) +
@@ -1594,7 +1602,7 @@ function recoveryPanel(list) {
     return kv([['Операция', r.op || 'сервисы'], ['Отмечена', r.since ? fmtTime(r.since) : '—', '', null, '', 'время отметки о незавершённой операции']]) +
       (diffs.length ? '<ul class="rows">' + diffs.map(d => '<li class="row"><div class="row-main"><b>' + esc(d.title || d.group) + '</b><small>' + esc(svrDiff(d).replace(/^[^:]*: /, '')) + '</small>' +
         (d.title ? '<small class="muted">' + esc(d.group) + '</small>' : '') + '</div></li>').join('') + '</ul>' : '') +
-      '<p class="panel-desc">' + esc(note) + '</p>' + acts + res;
+      (dnsDiff.length ? '<p class="panel-desc">DNS: ' + esc(dnsDiff.join('; ')) + '</p>' : '') + '<p class="panel-desc">' + esc(note) + '</p>' + acts + res;
   }).join(''), { desc: 'Операция прервалась (перезапуск, сбой связи или отказ роутера) или её откат не подтвердился. «Проверить и завершить» закрывает её, если всё как до неё, или отменяет только её собственное изменение.' });
 }
 async function svRecover(id, mode) {
@@ -1613,16 +1621,24 @@ function aiPage() {
   // The card's one status line (owner 02.11): the CHOSEN way and its check, a coloured dot; while a
   // check runs, a compact pill with a spinner in the same place (the line keeps its height, the
   // card does not jump; no toast - fix.26). The per-way results open below on demand.
-  const sdDown = !!a && (sd.alive === 'no' || noSd);
+  const sdServerDown = sd.alive !== 'yes' || noSd;
+  const sdReason = noSd ? 'сервер не настроен' : sd.alive === 'no' ? 'сервер не отвечает' : sd.alive !== 'yes' ? 'ответ сервера не подтверждён' : sd.store === 'agh' && !(sd.storage && sd.storage.available) ? 'хранилище новых привязок недоступно' : '';
+  const sdDown = !!a && !!sdReason;
   const wayName = { vpn: 'VPN', dns: 'Smart DNS', isp: 'Провайдер' };
   const status = s => {
     const c = AICHK[s.id], w = s.via || 'isp';
+    if (s.selected === null && !(c && c.busy)) {
+      const paths = (s.paths || []).map(l => '«' + (l.title || l.group) + '»: ' + (l.route === 'ISP' ? 'провайдер' : tunLabel(l.route)));
+      const partial = s.coverage && s.coverage.routed < s.coverage.catalog;
+      return '<span class="stat"><i class="dot warn"></i>' + esc((s.effective === 'mixed' ? partial ? 'Неполное покрытие каталога: ' + s.coverage.routed + ' из ' + s.coverage.catalog : 'Пересекаются маршруты или DNS' : s.effective === 'unknown' ? 'Путь не подтверждён' : 'Маршрут из доменных списков') + (paths.length ? ' · ' + paths.join('; ') : '') + '. Связь сервиса не задана.') + '</span>';
+    }
     if (c && c.busy) return '<span class="busy-pill"><i class="spin" aria-hidden="true"></i>проверяется…</span>';
-    if (w === 'dns' && sdDown) return '<span class="stat"><i class="dot crit"></i>Smart DNS · сервер не отвечает</span>';
+    if (w === 'dns' && sdDown) return '<span class="stat"><i class="dot ' + (sdServerDown ? 'crit' : 'warn') + '"></i>Smart DNS · ' + esc(sdReason) + '</span>';
     const r = c && c.ok ? (c.results || []).find(x => w === 'vpn' ? 'direct' !== x.via : 'direct' === x.via) : null;
     // The chosen way is a policy; a list of the same domains may send them elsewhere (02.11: ChatGPT
     // «Провайдер» while the list «ChatGPT OpenAI (ISP)» went through VPN) - shown, never switched.
-    const lst = (s.lists || []).filter(l => w === 'vpn' ? l.route === 'ISP' : l.route && l.route !== 'ISP')[0];
+    const lst = (s.lists || []).filter(l => w === 'vpn' ? l.route && l.route !== (s.tunnel || prof().tunnel_interface) : l.route && l.route !== 'ISP')[0];
+    if (w === 'vpn' && s.coverage && s.coverage.routed < s.coverage.catalog) return '<span class="stat"><i class="dot warn"></i>' + esc('Выбрано: VPN · маршруты для ' + s.coverage.routed + ' из ' + s.coverage.catalog + ' доменов каталога; покрытие неполное') + '</span>';
     if (lst && !(c && c.busy)) return '<span class="stat"><i class="dot warn"></i>' + esc('Выбрано: ' + wayName[w] + ' · домены в списке «' + (l => l.title || l.group)(lst) + '» идут ' + (lst.route === 'ISP' ? 'через провайдера' : 'через «' + tunLabel(lst.route) + '»')) + '</span>';
     const v = r ? r.verdict : '', sdProxy = w !== 'dns' && c && c.smartdns && r && 'direct' === r.via;
     const cls = !c ? '' : !c.ok ? 'warn' : v === 'open' && !sdProxy ? 'ok' : v === 'open' || v === 'answer' ? 'warn' : v ? 'crit' : 'warn';
@@ -1635,15 +1651,14 @@ function aiPage() {
   const busyBtn = s => AICHK[s.id] && AICHK[s.id].busy;
   const row = s => '<div class="ai-row"><div class="ai-head"><div class="row-main"><b>' + esc(s.title) + '</b><small class="ai-status">' + status(s) + '</small></div>' +
       btn('ai-check', 'refresh', 'Проверить', 'small' + (busyBtn(s) ? ' spinning' : ''), ' data-ai="' + esc(s.id) + '" data-dom="' + esc(s.domain) + '"' + (busyBtn(s) ? ' disabled' : '')) + '</div>' +
-      aiSlider(s.id, s.via, s.title, false, sdDown) + (AIRES[s.id] ? '<p class="result-note ai-res">' + esc(AIRES[s.id]) + '</p>' : '') + detail(s) +
+      aiSlider(s.id, s.selected === null ? '' : s.via, s.title, false, sdDown, sdReason) + (AIRES[s.id] ? '<p class="result-note ai-res">' + esc(AIRES[s.id]) + '</p>' : '') + aiReferenceChoice(s) + ((s.paths || []).length > 1 ? '<details class="ai-detail"><summary>Источники маршрута</summary>' + s.paths.map(p => esc((p.title || p.group) + ' (' + p.group + '): ' + (p.route === 'ISP' ? 'провайдер' : tunLabel(p.route)))).join('<br>') + '</details>' : '') + detail(s) +
       (s.tunnel && tuns.length > 1 ? '<dl class="kv">' + ctrlRow('Туннель', sel('data-ai-tunnel="' + esc(s.id) + '"', 'Туннель для ' + s.title, tuns.map(t => [t.name, tunLabel(t.name)]), s.tunnel || prof().tunnel_interface)) + '</dl>' : '') + '</div>';
   // Smart DNS first: the services «через Smart DNS» open only while it works (owner 2026-10-17).
   // The server does not answer (01.11.2026: the subscription ended): its domains do not resolve.
   const sdDead = a && sd.alive === 'no' ? panel('Smart DNS не отвечает', '<p class="result-note warn">Сервер Smart DNS не отвечает на DNS-запросы: сайты, привязанные к нему (' +
     fmtInt((sd.keenetic || 0) + (sd.agh_domains || 0)) + '), не открываются. Уберите сервер кнопкой ниже или переведите сервисы на VPN.</p>') : '';
-  return loadError(['ai']) + recoveryPanel(a && a.recovery) + sdDead + aiQuestion(sd) + aiRoomPanel(sd) +
+  return loadError(['ai']) + actionRecovery(a && a.recovery) + sdDead + aiQuestion(sd) + aiRoomPanel(sd) +
     panel('Smart DNS', kv([
-        ['Где хранится', !a ? '…' : sd.agh ? 'AdGuard Home' : 'Keenetic', '', null, '', sd.agh ? 'доменов: ' + fmtInt(sd.agh_domains || 0) : 'строк ' + fmtInt(sd.keenetic || 0) + ' из ' + fmtInt(sd.keenetic_max || 8)],
         (sd.server_rows || []).length ? null : ['Сервер', !a ? '…' : 'не задан', a && noSd ? 'warn' : ''],
         ['Домены Smart DNS', 'открыть', '', 'd-smartdns', '', 'и агент: держит их мимо VPN']]) + sdStoreRow(a, sd) +
       sdServers(a, sd) +
@@ -1651,7 +1666,7 @@ function aiPage() {
       '<div class="panel-actions">' + (sd.own ? btn('ai-dns-clear', 'close', 'Убрать свой сервер') : '') +
         ((sd.server_rows || []).length ? btn('ai-dns-clear-url', 'close', 'Убрать по адресу', '', cfgOk() ? '' : ' disabled') : '') + '</div>' + resultBox('aidns'),
       { desc: 'Сервер, через который открываются сервисы с путём «Smart DNS». Без AdGuard Home VWARD пишет строки в Keenetic (не больше 8). Адрес хранится только на роутере.' }) +
-    panel('Все ИИ-сервисы', aiSlider('all', allVia, 'Все ИИ-сервисы', false, sdDown) +
+    panel('Все ИИ-сервисы', aiSlider('all', allVia, 'Все ИИ-сервисы', false, sdDown, sdReason) +
       (SVC.busy && AIBUSY && AIBUSY !== 'all' ? '<p class="seg-note muted">Переключается «' + esc(aiName(AIBUSY)) + '»: остальные сервисы доступны после него</p>' : '') + resultBox('svc'),
       { beta: true, desc: allVia ? 'Одним нажатием переключить все сервисы, например когда Smart DNS сбоит.' : 'Сейчас у сервисов разный путь. Нажмите, чтобы отправить все одним путём.' }) +
     panel('Сервисы', !a ? empty('Загрузка…') : svc.length ? svc.map(row).join('') : empty('В каталоге нет ИИ-сервисов'),
@@ -1684,19 +1699,33 @@ function sdServers(a, sd) {
   }).join('') + '</ul>';
 }
 // Where new Smart DNS domains go, the owner's choice (fix.32); AdGuard Home only while it works.
+let SDSTORE_BUSY = false;
 function sdStoreRow(a, sd) {
   if (!a) return '';
-  const sv = st().services || {}, aghOk = !!(sd.agh && sv.adguard && !sv.adguard_disabled);
-  return '<dl class="kv">' + ctrlRow('Новые домены хранить', sel('data-sd-store' + (cfgOk() ? '' : ' disabled'), 'Где хранить домены Smart DNS',
-    [['auto', 'Автоматически'], ['keenetic', 'В роутере Keenetic (до 8)'], ['agh', 'В AdGuard Home', !aghOk && sd.store !== 'agh']], sd.store || 'auto'),
-    sd.store === 'keenetic' ? 'Keenetic держит не больше 8 доменов' : aghOk ? (sd.store === 'agh' ? 'без ограничения числа доменов' : 'в AdGuard Home, пока он работает, иначе в Keenetic') : 'AdGuard Home недоступен: ' + (sd.agh ? 'не работает' : 'не установлен')) + '</dl>';
+  const cap = sd.storage || {}, component = cap.component || 'AdGuard Home';
+  const reason = ({ not_installed: 'компонент не установлен или не подключён', not_running: 'компонент не запущен', disabled: 'компонент выключен', inactive_handler: 'выбран другой DNS-обработчик', upstream_file_unsupported: 'привязки из внешнего файла не поддерживаются' })[cap.reason] || 'доступность не подтверждена';
+  const counts = [(sd.keenetic || 0) ? 'Роутер: ' + fmtInt(sd.keenetic) + ' из ' + fmtInt(sd.keenetic_max || 8) : '', (sd.agh_domains || 0) ? component + ': ' + fmtInt(sd.agh_domains) : ''].filter(Boolean).join(' · ') || 'Привязок пока нет';
+  const target = cap.target === 'agh' ? component : cap.target === 'keenetic' ? 'Роутер' : 'недоступно';
+  const note = counts + '. ' + (sd.store === 'auto' || !sd.store ? 'Новые привязки: ' + target : 'Выбрано: ' + (sd.store === 'agh' ? component : 'Роутер')) +
+    (sd.store === 'agh' && !cap.available ? ' · ' + reason : '') + '. Выбор действует только на новые привязки; существующие не переносятся.';
+  return '<dl class="kv sd-storage">' + ctrlRow('Хранилище Smart DNS', choiceSlider('sd-store',
+    [['auto', 'Авто', SDSTORE_BUSY], ['keenetic', 'Роутер', SDSTORE_BUSY], ['agh', component, SDSTORE_BUSY]], sd.store || 'auto', 'Хранилище Smart DNS'), note) + '</dl>';
 }
-document.addEventListener('change', async e => {
-  if (!e.target.matches || !e.target.matches('[data-sd-store]')) return;
-  let x; try { x = await apiPost('smartdns-server', { op: 'store', store: e.target.value }); } catch (err) { x = { ok: false, error: err.message }; }
-  actionResult = { id: 'aidns', text: x.ok ? 'Сохранено: новые домены Smart DNS - ' + ({ auto: 'автоматически', keenetic: 'в Keenetic', agh: 'в AdGuard Home' }[e.target.value]) : 'Не сохранено: ' + errText(x) };
-  await load('ai', true); render();
-});
+async function sdStoreSet(v) {
+  if (SDSTORE_BUSY) return;
+  SDSTORE_BUSY = true; render();
+  let x, confirmed;
+  try {
+    x = await apiPost('smartdns-server', { op: 'store', store: v });
+  } catch (err) { x = { ok: false, error: err.message }; }
+  try { confirmed = await apiGet('ai-data'); } catch (_) { confirmed = null; }
+  const readable = confirmed && confirmed.ok && Array.isArray(confirmed.services) && confirmed.smartdns && typeof confirmed.smartdns === 'object';
+  const verified = readable && confirmed.smartdns.store === v;
+  if (readable) S.ai = confirmed;
+  actionResult = { id: 'aidns', text: verified ? 'Хранилище сохранено. Существующие привязки не перенесены.' :
+    'Выбор не подтверждён: ' + (x && !x.ok ? errText(x) : 'не удалось перечитать настройку') };
+  SDSTORE_BUSY = false; render();
+}
 // host: a server of the list (sdServers); url: an exact address the owner pasted. The result is read
 // again from the router: «убран» only when no row of that server is left (an empty own address
 // proves nothing, 02.11).
@@ -1717,19 +1746,47 @@ async function smartdnsServer(op, url, host) {
 // aiJob ID WAY MSG [KEEP]: KEEP - the answer to «no room in Smart DNS» (the service still waits
 // for Smart DNS). No room: the Panel asks which way the services that did not fit go (fix.31).
 let AIQ = null;
-const AIRES = {};
+const AIRES = {}, AIREF = {};
+function aiReferenceChoice(s) {
+  if (!AIREF[s.id]) return '';
+  const candidates = (s.paths || []).filter(p => p.reference), token = S.ai && S.ai.reference_token;
+  if (!candidates.length || !token) return '<p class="seg-note">Существующие списки остаются под ручным управлением. Подтверждённой связи VWARD с ними нет; их состав и маршрут показаны выше.</p>';
+  return '<div class="ai-reference"><p class="panel-desc">Можно связать сервис с уже применённым маршрутом, оставив список под ручным управлением. VWARD не получит права менять или удалять его.</p>' + candidates.map(p =>
+    '<details><summary>' + esc((p.title || p.group) + ' · ' + tunLabel(p.route) + ' · доменов: ' + (p.members || []).length) + '</summary><p class="panel-desc">' + esc((p.members || []).join(', ')) + '</p></details>' +
+    btn('ai-reference', 'link', 'Связать без права изменения', 'small', ' data-ai="' + esc(s.id) + '" data-group="' + esc(p.group) + '" data-token="' + esc(token) + '"' + (SVC.busy || !cfgOk() ? ' disabled' : ''))).join('') + '</div>';
+}
+async function aiReference(id, group, token) {
+  SVC.busy = true; render();
+  const j = await bgJob({ op: 'reference', id: id, tunnel: group, token: token, confirm: 'SERVICE_REFERENCE_ONLY' });
+  SVC.busy = false; AIREF[id] = !j.ok;
+  AIRES[id] = j.ok ? 'Связано с текущим маршрутом. Список остаётся ручным; изменение его маршрута и удаление не разрешены.' : 'Связь не подтверждена: ' + errText(j.x);
+  await Promise.all([load('ai', true), load('services', true)]); render();
+}
 // The service being switched now ('all' for every one): only it says «Переключается…», the others
 // wait under one line on «Все ИИ-сервисы» (one switch at a time stays).
 let AIBUSY = null;
 async function aiJob(id, to, msg, keep) {
-  // One service: its result under it; «all»: under «Все ИИ-сервисы».
   const show = text => { if (id === 'all') actionResult = { id: 'svc', text: text }; else { AIRES[id] = text; actionResult = null; } render(); };
   SVC.busy = true; AIBUSY = id; AIQ = null; show(to === 'dns' ? 'Записываем домены Smart DNS…' : 'Переводим…');
-  const j = await bgJob(Object.assign({ op: 'ai', id: id, tunnel: to }, keep ? { keep: '1' } : {}));
-  SVC.busy = false; AIBUSY = null;
+  let j = { ok: false, done: true, x: { error: 'helper_failed' } }, confirmed = null;
+  try {
+    j = await bgJob(Object.assign({ op: 'ai', id: id, tunnel: to }, keep ? { keep: '1' } : {}));
+    try { confirmed = await apiGet('ai-data'); } catch (_) { confirmed = null; }
+    if (confirmed && confirmed.ok && Array.isArray(confirmed.services) && confirmed.smartdns && typeof confirmed.smartdns === 'object') S.ai = confirmed;
+    else confirmed = null;
+    await Promise.all([load('services', true), load('lists', true)]);
+  } catch (e) { j = { ok: false, done: true, x: { error: e.message || 'helper_failed' } }; }
+  finally { SVC.busy = false; AIBUSY = null; }
+  SVREC_ACTION = !j.ok && j.done;
+  AIREF[id] = !j.ok && j.x && j.x.error === 'service_reference_only';
+  if (id === 'all' && AIREF[id]) ((S.ai && S.ai.services) || []).forEach(s => { AIREF[s.id] = (s.paths || []).some(p => p.reference); });
   if (to === 'dns' && (j.left || []).length) AIQ = { ids: j.left };
-  show(j.ok ? (AIQ ? 'Часть сервисов переведена; для остальных выберите маршрут' : msg) : !j.done ? 'Ещё выполняется, проверьте позже' : AIQ ? '' : 'Не выполнено: ' + errText(j.x));
-  await Promise.all([load('ai', true), load('services', true), load('lists', true)]); render();
+  const expected = to === 'dns' ? 'dns' : to === 'isp' ? 'isp' : 'vpn';
+  const rows = confirmed && confirmed.ok ? (confirmed.services || []).filter(s => (id === 'all' || s.id === id) && !(j.left || []).includes(s.id)) : [];
+  const verified = rows.length > 0 && rows.every(s => s.selected === expected);
+  const conflict = verified && rows.some(s => s.effective !== expected);
+  show(j.ok ? (!verified ? 'Результат переключения не подтверждён перечитыванием; смотри текущий путь и «Журналы».' : conflict ? 'Настройка сервиса применена. Есть пересекающиеся DNS или маршруты: смотри источники ниже.' : AIQ ? 'Часть сервисов переведена; для остальных выбери маршрут' : msg) :
+    !j.done ? 'Ещё выполняется; результат появится в «Задания»' : AIQ ? '' : 'Не выполнено: ' + errText(j.x));
 }
 async function aiAnswer(way) {
   const q = AIQ; AIQ = null;
@@ -2576,7 +2633,7 @@ const RENDER = {
       [['auto', 'Автоматически']].concat(tuns.map(t => [t.name, tunLabel(t.name)])), svcCatTunnel(catObj.id) || 'auto'),
       svcCatTunnel(catObj.id) ? 'сервисы категории на «Автоматически» идут через этот туннель' : 'VWARD проверяет каждый сервис через туннели сам') + '</dl>',
       { desc: 'Сервис с закреплённым туннелем остаётся на своём.' }) : '';
-    return cfgNote() + recoveryPanel(V.recovery) + catPin + panel('Сервисы', '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти сервис" aria-label="Найти сервис" autocomplete="off"></label>' +
+    return cfgNote() + actionRecovery(V.recovery) + catPin + panel('Сервисы', '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти сервис" aria-label="Найти сервис" autocomplete="off"></label>' +
       '<div class="chips" role="group" aria-label="Категория">' + chips.map(c => '<button type="button" data-act="svc-cat" data-cat="' + esc(c[0]) + '" aria-pressed="' + (SVC.cat === c[0]) + '">' + esc(c[1]) + '</button>').join('') + '</div>' +
       resultBox('svc') + (shown.length ? '<ul class="rows" data-list-rows>' + shown.map(row).join('') + '</ul>' : empty(SVC.cat === 'on' ? 'Пока ничего не включено' : 'Нет сервисов')),
       { desc: 'Включённый сервис идёт через VPN. В Keenetic он появится доменным списком со своим названием.' });
@@ -3151,6 +3208,7 @@ function choiceSlider(key, opts, cur, label, local) {
 }
 function segPick(key, v) {
   if (key === 'vsrv-sort') { VVIEW.sort = v; vViewSave(); render(); }
+  else if (key === 'sd-store') sdStoreSet(v);
   else if (key === 'upd-mode') updateMode(v);
   else if (key === 'upd-method') cfgSet({ op: 'update', target: 'update_method', value: v }, v === 'files' ? 'Способ: изменённые файлы' : 'Способ: целиком', ['status']);
   else if (key === 'tq-speed') cfgSet({ op: 'tunnel-auto', target: 'speed', value: v }, 'Замер скорости: ' + (TQ_SPEED.find(o => o[0] === v) || [, v])[1], ['tq']);
@@ -3598,7 +3656,7 @@ function svcProbePanel(id) {
 async function bgJob(fields, minutes) {
   let x, run = {};
   try { x = await apiPost('services', fields); } catch (err) { x = { ok: false, error: err.message }; }
-  if (!x.ok) return { ok: false, done: true, x: x };
+  if (!x || !x.ok) return { ok: false, done: true, x: x || { error: 'helper_failed' } };
   const deadline = Date.now() + (minutes || 3) * 60 * 1000;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 2000));
@@ -3617,7 +3675,7 @@ async function serviceJob(fields, okMsg) {
   const show = text => { actionResult = { id: 'svc', text: text }; render(); };
   SVC.busy = true; show(fields.op === 'off' ? 'Выключаем…' : fields.op === 'on' ? 'Записываем домены в Keenetic…' : 'Переводим…');
   const j = await bgJob(fields);
-  SVC.busy = false;
+  SVC.busy = false; SVREC_ACTION = !j.ok && j.done;
   show(j.ok ? okMsg : !j.done ? 'Ещё выполняется, проверьте позже' : 'Не выполнено: ' + errText(j.x));
   await Promise.all([load('services', true), load('lists', true)]); render();
 }
@@ -5018,6 +5076,7 @@ document.addEventListener('click', e => {
   else if (a === 'vless-servers') vlessServers(t.dataset.name);
   else if (a === 'ai-check') aiCheck(t.dataset.ai, t.dataset.dom);
   else if (a === 'ai-answer') aiAnswer(t.dataset.way);
+  else if (a === 'ai-reference') aiReference(t.dataset.ai, t.dataset.group, t.dataset.token);
   else if (a === 'ai-room') { if (!SVC.busy) aiJob(t.dataset.ai, 'dns', aiName(t.dataset.ai) + ': Smart DNS'); }
   else if (a === 'ai-dns-clear') smartdnsServer('clear', '');
   else if (a === 'svrec-resolve') svRecover(t.dataset.id, 'resolve');
