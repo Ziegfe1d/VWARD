@@ -377,3 +377,45 @@ state-version migration. Нынешняя pure projection принимает т�
 доказывает wildcard/IPv6/QUIC/CDN scope. Тесты downgrade должны покрыть следующий code+state,
 старый code+restored state и refusal несовместимого состояния. Файловый rollback updater отдельно.
 Промежуточный pipeline не включается в API/Панель, пока persist/restore/policy/guard могут его отменить.
+
+## G. Программное продолжение PR38 (поручение 04.11, исполнение только на fixtures)
+
+База `8ab46d5`; CI модели на479f268 уже принят. Это продолжение F, без нового live caller,
+пакета/VERSION/feed/merge. Один исполнитель; адресный review coordinator/ownership/recovery
+проводится после сквозных регрессий, до проекта первого включения. Никакого повторного общего аудита.
+
+### План связанных изменений
+
+- [ ] **Согласованный stage v2.** В existing snapshot library добавить проверенную копию choices,
+  bindings/excludes, Auto evidence/epochs, схем, native resource view и exact identity proofs.
+  SHA256 + bytes/inode/mtime до/после; generation по content, без comm/cksum. Версия/пределы,
+  недостающий/изменившийся/неполный input → unknown; один stage на операцию и fresh Gi после записи.
+- [ ] **Связанная policy/typed plan v2.** Использовать реальный canonical choice и service policy
+  из audit, не отдельную копию приоритетов. Desired и все observed resources сохраняются;
+  compatible references переиспользуются, один effective rule имеет несколько consumers.
+  План хранит конкретный resource ID/scope/proof/consumers/pre/post/check/own inverse;
+  create/add/remove/move/hold, local states и server deletion/migration. Формат v2 старым journal
+  не принимается. Только зависимости затронутого backend (VPN не проверяет Smart DNS).
+- [ ] **Версионированные данные.** Приватная backup/migration/version guard/downgrade; old code
+  читает только восстановленную old schema. Tombstone/epochs и withdrawn saved/queue не возвращают
+  удалённый сервер/Auto. Совместимость кода и данных проверяется отдельно от updater file rollback.
+- [ ] **Parent journal/coordinator/locked workers.** Журнал pre/post до write, фиксированный
+  порядок admission→EDIT→CHANGE→journal, без child CLI, повторно берущего эти locks. Никаких
+  API/env bypass flags или выбираемого исполняемого файла. Default/live OFF; встроенный emulator
+  и существующие native writer fixtures — единственный исполняемый путь на этом этапе.
+  Потерянный ответ классифицируется readback, Gi обновляется после собственного шага;
+  save/local commit обязательны; компенсация CAS только своей resource delta, foreign edit сохраняется.
+- [ ] **Сквозная регрессия на одних входах.** 8/24/repeat, all mode transitions, M/A/shared refs,
+  new names/excludes/subtree/unknown, both DNS stores/capacity8/URL dependents, delete/replace,
+  stale epochs/reboot, migration/downgrade, fault each significant step/save/local write/lost reply,
+  TERM/SIGKILL/competition/reused ID. Реальные существующие executor functions проверяются с
+  подставными ndmc/AGH в той же цепочке, не только эмуляция результата planner.
+- [ ] **Адресный review, финальные ворота и передача.** Только новый конечный code HEAD получает
+  один полный штатный CI; source-модель и её старый CI повторно не прогоняются ради отчёта.
+  Измеряются reads/transports/writes/elapsed, не увеличиваются бюджеты. Затем конкретный готовый
+  VPN-only проект подключения/выключения/отката/одна owner acceptance с остаточными рисками.
+
+В этом плане off-worker не является разрешением live wiring; общий pipeline нельзя объявить
+выпущенным обновлением. Пока не закрыты все связанные backwriters/restore/reconciler/policy/guard,
+DNS/полный режим не включаются пользователю. Исторический local full FAIL read-only /opt/var
+и local Chromium SKIP сохраняются; новый программный пакет требует собственных доказательств.

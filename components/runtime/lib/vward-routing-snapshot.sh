@@ -11,7 +11,7 @@
 # If a correct snapshot cannot be proven: NO output file is left, stdout is
 # `unknown<TAB>REASON`, rc 3. Usage/environment errors: rc 2 (stderr).
 #
-# Consistency is proved, not assumed: every input is fingerprinted (content CRC+
+# Consistency is proved, not assumed: every input is fingerprinted (content SHA256+
 # size, inode, mtime) before AND after the projections are read; any difference ->
 # unknown. Observer inputs are COPIED into a private stage and each copy must equal
 # the fingerprint taken before the copy (a file replaced meanwhile -> unknown);
@@ -33,6 +33,7 @@ vward_routing_consistent_read() (
     fi
     # A previous result must never survive a failed attempt.
     rm -f "$vrs_out/generation" "$vrs_out/intents.tsv" "$vrs_out/snapshot.tsv" "$vrs_out/identity.tsv" "$vrs_out/legacy.tsv" 2>/dev/null
+    [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -rf "$vrs_out/decision"
     vrs_tmp=$(umask 077; mktemp -d "$vrs_out/.read.XXXXXX" 2>/dev/null) || return 2
     trap 'rm -rf "$vrs_tmp"' EXIT
     trap 'exit 3' HUP INT TERM
@@ -49,18 +50,21 @@ vward_routing_consistent_read() (
     case $vrs_max_age$vrs_limit in ''|*[!0-9]*) return 2 ;; esac
 
     # One line per input: LABEL STATE. STATE: absent | bad | oversize | nostat |
-    # "CRC SIZE INODE MTIME". Labels never contain a host path.
+    # "SHA256 SIZE INODE MTIME". Labels never contain a host path.
     vrs_one() {
         if [ ! -e "$2" ] && [ ! -L "$2" ]; then printf '%s absent\n' "$1"; return 0; fi
         if [ -L "$2" ] || [ ! -f "$2" ] || [ ! -r "$2" ]; then printf '%s bad\n' "$1"; return 0; fi
         vrs_sz=$(wc -c < "$2" 2>/dev/null) || { printf '%s bad\n' "$1"; return 0; }
         if [ "$vrs_sz" -gt 1048576 ]; then printf '%s oversize\n' "$1"; return 0; fi
-        vrs_crc=$(cksum < "$2" 2>/dev/null) || { printf '%s bad\n' "$1"; return 0; }
+        vrs_crc=$(sha256sum < "$2" 2>/dev/null) || { printf '%s bad\n' "$1"; return 0; }
+        vrs_crc=${vrs_crc%% *}
+        case $vrs_crc in ''|*[!0-9a-f]*) printf '%s bad\n' "$1"; return 0 ;; esac
+        [ "${#vrs_crc}" = 64 ] || { printf '%s bad\n' "$1"; return 0; }
         # BusyBox on Keenetic has no stat format option: inode from ls -di, mtime seconds from date -r.
         vrs_ino=$(ls -di "$2" 2>/dev/null | awk '{print $1}')
         vrs_mt=$(date -r "$2" +%s 2>/dev/null)
         case $vrs_ino$vrs_mt in ''|*[!0-9]*) printf '%s nostat\n' "$1"; return 0 ;; esac
-        printf '%s %s %s %s\n' "$1" "$vrs_crc" "$vrs_ino" "$vrs_mt"
+        printf '%s %s %s %s %s\n' "$1" "$vrs_crc" "$vrs_sz" "$vrs_ino" "$vrs_mt"
     }
     # Directory entries, bounded to 256, names restricted to the identifier charset.
     vrs_dir() {
@@ -100,11 +104,19 @@ vward_routing_consistent_read() (
         # Unfinished recovery evidence: presence only; the reader makes sources unknown.
         for vrs_t in "$vrs_backup"/service-transactions/*/pending; do vrs_presence txn "$vrs_t"; done
         for vrs_t in "$vrs_backup-recovery"/smartdns.*; do vrs_presence smartdns-recovery "$vrs_t"; done
+        for vrs_l in $vrs_decision_names; do vrs_one "$vrs_l" "$VWARD_ROUTING_INPUTS/${vrs_l#v2-}.tsv"; done
     }
 
+    vrs_decision_names=
+    if [ -n "${VWARD_ROUTING_INPUTS:-}" ]; then
+        case $VWARD_ROUTING_INPUTS in /*) ;; *) return 2 ;; esac
+        [ -d "$VWARD_ROUTING_INPUTS" ] && [ ! -L "$VWARD_ROUTING_INPUTS" ] && [ -O "$VWARD_ROUTING_INPUTS" ] &&
+            [ "$(ls -ldn "$VWARD_ROUTING_INPUTS" | awk '{print substr($1,1,10)}')" = drwx------ ] || return 2
+        vrs_decision_names='v2-version v2-choices v2-bindings v2-evidence v2-policies v2-saved v2-queue v2-tombstones v2-context v2-resources v2-proofs'
+    fi
     vrs_start=$(date +%s) || return 2
     vrs_fingerprint > "$vrs_tmp/fp.before" || return 2
-    vrs_fatal='$2=="nostat" || (($2=="bad" || $2=="oversize") && $1 !~ /^obs-/)'
+    vrs_fatal='$2=="nostat" || ($1 ~ /^v2-/ && $2=="absent") || (($2=="bad" || $2=="oversize") && $1 !~ /^obs-/)'
     if awk "$vrs_fatal {f=1} END{exit f?0:1}" "$vrs_tmp/fp.before"; then
         # Which input: label only (never a path), enough to find it.
         vrs_unknown "input-unreadable:$(awk "$vrs_fatal {print \$1; exit}" "$vrs_tmp/fp.before")"
@@ -127,7 +139,7 @@ vward_routing_consistent_read() (
     mkdir "$vrs_stage" || return 2
     : > "$vrs_stage/STATE" || return 2
     for vrs_l in cfg dev map agh enabled categories persist catalog-fetched catalog-bundled \
-        obs-manual obs-adaptive obs-forcevpn obs-listsfb obs-samples; do
+        obs-manual obs-adaptive obs-forcevpn obs-listsfb obs-samples $vrs_decision_names; do
         case $vrs_l in
             cfg) vrs_src=$vrs_cfg ;;
             dev) vrs_src=${VWARD_DEVICE_CONFIG:-$vrs_etc/device.conf} ;;
@@ -143,6 +155,7 @@ vward_routing_consistent_read() (
             obs-forcevpn) vrs_src=$vrs_etc/route-engine/force-vpn.conf ;;
             obs-listsfb) vrs_src=${VWARD_TUNNEL_GUARD_DIR:-/opt/var/lib/vward/tunnel-guard}/lists-fallback ;;
             obs-samples) vrs_src=${VWARD_TUNNEL_QUALITY_DIR:-/tmp/vward-tunnel-quality}/samples.tsv ;;
+            v2-*) vrs_src=$VWARD_ROUTING_INPUTS/${vrs_l#v2-}.tsv ;;
         esac
         vrs_row=$(awk -v l="$vrs_l" '$1==l {print; exit}' "$vrs_tmp/fp.before")
         # shellcheck disable=SC2086
@@ -150,13 +163,13 @@ vward_routing_consistent_read() (
         case ${2:-} in
             absent) printf '%s\tabsent\n' "$vrs_l" >> "$vrs_stage/STATE" ;;
             bad|oversize) printf '%s\t%s\n' "$vrs_l" "$2" >> "$vrs_stage/STATE" ;;
-            ''|*[!0-9]*) vrs_unknown "stage-state:$vrs_l"; return 3 ;;
+            '') vrs_unknown "stage-state:$vrs_l"; return 3 ;;
             *)
                 if [ -L "$vrs_src" ] || [ ! -f "$vrs_src" ] || ! cp "$vrs_src" "$vrs_stage/$vrs_l" 2>/dev/null; then
                     vrs_unknown changed-during-read; return 3
                 fi
-                vrs_ck=$(cksum < "$vrs_stage/$vrs_l" 2>/dev/null)
-                if [ "$vrs_ck" != "$2 $3" ]; then vrs_unknown changed-during-read; return 3; fi
+                vrs_ck=$(sha256sum < "$vrs_stage/$vrs_l" 2>/dev/null)
+                if [ "${vrs_ck%% *}" != "$2" ] || [ "$(wc -c < "$vrs_stage/$vrs_l")" -ne "$3" ]; then vrs_unknown changed-during-read; return 3; fi
                 printf '%s\tok\n' "$vrs_l" >> "$vrs_stage/STATE" ;;
         esac
     done
@@ -211,7 +224,23 @@ vward_routing_consistent_read() (
     for vrs_name in intents snapshot identity legacy; do
         mv "$vrs_tmp/$vrs_name.tsv" "$vrs_out/$vrs_name.tsv" || { rm -f "$vrs_out/intents.tsv" "$vrs_out/snapshot.tsv" "$vrs_out/identity.tsv" "$vrs_out/legacy.tsv"; return 2; }
     done
+    if [ -n "$vrs_decision_names" ]; then
+        (umask 077; mkdir "$vrs_out/decision") || return 2
+        for vrs_l in $vrs_decision_names; do
+            mv "$vrs_stage/$vrs_l" "$vrs_out/decision/${vrs_l#v2-}.tsv" || return 2
+        done
+    fi
     # The marker is written last: no marker, no valid snapshot.
     printf '%s\n' "$vrs_gen" > "$vrs_out/generation" || { rm -f "$vrs_out/intents.tsv" "$vrs_out/snapshot.tsv" "$vrs_out/identity.tsv" "$vrs_out/legacy.tsv"; return 2; }
     printf 'ok\t%s\n' "$vrs_gen"
+)
+
+# Same native snapshot AND decision inputs under the SAME content generation.
+# Data are staged, not declared semantically valid here: policy/plan validates schemas.
+# No new live reader, configuration refresh, transport or installed-state writer.
+vward_routing_consistent_read2() (
+    [ "$#" -eq 2 ] || return 2
+    VWARD_ROUTING_INPUTS=$2
+    export VWARD_ROUTING_INPUTS
+    vward_routing_consistent_read "$1"
 )
