@@ -84,6 +84,33 @@ Important/Critical. Ранее пройденные тесты не выданы
 
 ## Выпуск и остаточная приёмка
 
+### CI 41732954957: полный результат и поправка проверки рендера
+
+На точном HEAD `034ad1af98c0580797cd30c0db98aeb9c1fa6123`
+[run 41732954957](https://github.com/Ziegfe1d/VWARD/actions/runs/41732954957)
+завершён FAILURE: **updater-tests SUCCESS**, **resource-audit SUCCESS**,
+**repository-consistency FAILURE**, main-only dispatch-transition SKIPPED.
+Штатный release rehearsal, часовой stress, Chromium crawl и resource budget — SUCCESS
+в соответствующих jobs; их не запускали повторно на этом дереве.
+
+Конкретный отказ [job 126254734416](https://github.com/Ziegfe1d/VWARD/actions/runs/41732954957/job/126254734416):
+`check-console-diag-ui.py` искал буквальные строки `Smart DNS · сервер не отвечает`
+и `Smart DNS: сервер не отвечает` в исходнике. Теперь UI собирает их из `sdReason`/`dnsWhy`,
+чтобы различать отсутствие сервера, отказ и неизвестный ответ. Отказ воспроизведён локально;
+производственный рендер уже выдавал требуемый результат.
+
+Коммит `cf91cf99ef6cdd9edca5ee5d9ad05b213b1c750c` меняет только тест и SHA256SUMS:
+вместо проверки наличия исходных литералов исполняет реальные status/aiSlider в Node.
+Проверяются «VPN · не проверен», busy-pill/spinner, точная причина Smart DNS, disabled/title
+недоступного DNS и доступность VPN/Provider; текущий выбранный DNS не блокируется слепо.
+Остальные проверки diagnostics/components сохранены. Локально CONSOLE_DIAG_UI,
+SMARTDNS_STORAGE_UI и AI_ROUTING_FINDINGS PASS. Отрицательные mutation controls подтвердили,
+что удаление DNS guard, причины отказа или spinner приводит к FAIL; тест не ослаблен.
+
+Production runtime/tree targets не изменены относительно 034ad1a. Но новое конечное дерево
+с тестом и журналом требует собственного штатного CI; прежние SUCCESS не переносятся на
+другой HEAD. Публикации нет. Локальный полный consistency/аппаратная приёмка не объявлены PASS.
+
 ### Новые сведения владельца 04.11 и второй отказ CI
 
 На HEAD `37742c9a77580614a1f7974c2af50eb9f589cc6a`:

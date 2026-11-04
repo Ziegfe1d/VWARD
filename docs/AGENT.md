@@ -201,6 +201,8 @@ jobs запрещён владельцем. Требуется согласов�
 
 04.11.2026 01:39 МСК — PR #37 / code `4066ba9`: второй CI `41723677202` дал updater-tests SUCCESS, consistency FAILURE на старом ожидании saved-state. Marker сохранён, точный контракт и отрицательные сценарии исправлены. Read-only ai-data учитывает exclude и отделяет конфигурацию от клиентского пути; нужен CI нового конечного HEAD.
 
+04.11.2026 08:20 МСК — PR #37 / CI41732954957 на034ad1a завершён: updater-tests и resource-audit SUCCESS, consistency FAILURE на устаревшей проверке UI-литералов. Тестовый фикс cf91cf9 проверяет реальный рендер и mutation controls; runtime неизменен. Нужен штатный CI нового конечного HEAD, выпуска пока нет.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -442,7 +444,15 @@ CI [41723677202](https://github.com/Ziegfe1d/VWARD/actions/runs/41723677202) н�
 
 Адресный fixture выявил исключения, игнорировавшиеся ai-data (ложное full21/21 и reference). Read-only подсчёт учитывает exclude, AdaptiveAuto/excluded группа не предлагаются как manual reference; evidence=configuration/client_path_verified=false. UI различает частичное покрытие и пересечения. Это не объяснение eth3 на реальном устройстве. Независимый узкий review JQ/eligibility без новых Important/Critical. PASS: domain-lists/marker authorization/set-race; новый Claude other-source/partial/exclude/unknown и Cursor VPN без DoH, повтор/manual-preservation/save-compensation; route-probe RC143 unknown и связанные API/UI/reference/icon проверки. Большие завершённые локальные прогоны не повторялись. A1/A6/A7/A10, фактический persist/reboot, клиентская приёмка и объяснение DNS/маршрутов открыты; основные writers/ownership/recovery/ручные правила не менялись. Отчёт SERVICE_RECOVERY_FIX35_6.md и ROADMAP4.3e дополнены; публикации нет.
 
+### 04.11.2026 08:20 МСК · [Агент] · fix.35.6: закрытые CI jobs и контракт рендера
+
+Однократное чтение [CI41732954957](https://github.com/Ziegfe1d/VWARD/actions/runs/41732954957) на034ad1af98c0580797cd30c0db98aeb9c1fa6123: completed FAILURE, updater-tests SUCCESS (штатный release rehearsal включён), resource-audit SUCCESS (часовой stress, Chromium pages, resource budget включены), consistency FAILURE, main-only dispatch-transition SKIPPED. Успешные длительные jobs этого дерева не перезапускались. job126254734416 остановился на check-console-diag-ui: старое требование буквальных Smart DNS строк в исходнике, теперь формируемых sdReason/dnsWhy. Runtime корректно выдаёт текст, его не меняли.
+
+cf91cf99ef6cdd9edca5ee5d9ad05b213b1c750c меняет только тест/SHA: реальные status/aiSlider исполняются Node, проверяются первоначальный статус, busy/spinner, точная причина unavailable DNS, disabled/title и доступность альтернатив, текущий выбранный DNS. Остальные checks сохранены. CONSOLE_DIAG_UI RED→GREEN, SMARTDNS_STORAGE_UI/AI_ROUTING_FINDINGS PASS; mutation controls удалённых guard/reason/spinner отвергнуты. Свежие PR HEAD034ad1a и dev385ecd4 подтверждены, чужих runtime изменений нет. Нужен новый конечный CI после фикса теста; предыдущие SUCCESS не переносятся на другой HEAD. Отчёт дополнен; выпуск ещё не выполнен, роутер не подключался. Отложенная задача та же, временно приостановлена на время поправки, затем привязывается к новому run.
+
 ## 4. Открытые вопросы и нужные данные
+
+- 04.11.2026 08:20 МСК / PR #37: поправка cf91cf9 касается только теста динамического рендера; нужен собственный штатный CI конечного HEAD. Выпуск после зелёных обязательных jobs разрешён. Нового вывода owner-run DNS/client-flow команды нет; VERSION/FQDN/time и клиентский путь Claude/Cursor/Gemini остаются неизвестными.
 
 - 04.11.2026 01:39 МСК / PR #37: нужен штатный CI нового конечного HEAD после4066ba9. Одну существующую отложенную задачу временно приостановили для исключения параллельного выпуска, после push её перепривязать к актуальному run. Нужен вывод одной подготовленной узкой read-only команды: installed VERSION/time, точный Gemini FQDN/процесс и DNS-source, клиентская policy/mark и поток. До этого eth3/RC143/8.47.69.0 не дают причинного диагноза.
 
