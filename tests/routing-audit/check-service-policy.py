@@ -70,6 +70,7 @@ with Fixture() as f:
                 'S\tchoice\tISP\tdefault\t1\texplicit\t0\tpeer\n']:
         r=run(rows=bad);assert r.returncode==2 and not r.stdout,(bad,r.stdout,r.stderr)
     r=run('dns','ISP','default');assert r.returncode==2 and not r.stdout
+    r=run('dns','ISP',r'pol\151cy1');assert r.returncode==2 and not r.stdout,'escaped DNS ID accepted'
     r=run(rev=1,floor=2);assert r.returncode==2 and not r.stdout
     for invalid in ['schema\t2\n', 'schema\t1\n'*2, 'schema\t1\n'+'x\n'*4096,
                     'schema\t1\n'+'x'*1048576,

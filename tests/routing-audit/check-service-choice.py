@@ -67,6 +67,8 @@ with Fixture() as f:
     # Refuse stale/invalid input with no partial state; missing never becomes auto.
     state.write_text('schema\t1\nservice\tclaude.ai\t9\tvpn\tVPN:tun1\tdefault\t0\n')
     r=call('off',rev=8); assert r.returncode==3 and not r.stdout,(r.stdout,r.stderr)
+    for sid in (r'claude\056ai', 'claude.ai\n'):
+        r=call('off',rev=9,sid=sid);assert r.returncode==2 and not r.stdout,'escaped SID accepted'
     for action,target,dns in [('delete','-','-'),('vpn','ISP','default'),('dns','ISP','default'),
                               ('on','VPN:tun1','https://dns.example.test/dns-query'),('off','ISP','default')]:
         r=call(action,target,dns,9);assert r.returncode==2 and not r.stdout,(action,r.stdout,r.stderr)

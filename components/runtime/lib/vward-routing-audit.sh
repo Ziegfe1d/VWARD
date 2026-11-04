@@ -195,8 +195,12 @@ vward_routing_choice() (
     [ "$#" -eq 6 ] || { printf '%s\n' 'routing choice: expected LEDGER SID ACTION TARGET DNS EXPECTED_REV' >&2; return 2; }
     case $1 in /*) ;; *) printf '%s\n' 'routing choice: absolute ledger required' >&2; return 2 ;; esac
     [ -f "$1" ] && [ -r "$1" ] && [ ! -L "$1" ] || { printf '%s\n' 'routing choice: readable regular ledger required' >&2; return 2; }
-    LC_ALL=C awk -v sid="$2" -v action="$3" -v target="$4" -v dns="$5" -v expected="$6" '
-    BEGIN {FS=OFS="\t"}
+    VWARD_B_SID=$2 VWARD_B_ACTION=$3 VWARD_B_TARGET=$4 VWARD_B_DNS=$5 VWARD_B_REV=$6 LC_ALL=C awk '
+    BEGIN {
+        FS=OFS="\t"
+        sid=ENVIRON["VWARD_B_SID"];action=ENVIRON["VWARD_B_ACTION"]
+        target=ENVIRON["VWARD_B_TARGET"];dns=ENVIRON["VWARD_B_DNS"];expected=ENVIRON["VWARD_B_REV"]
+    }
     function service(s) {return length(s)<=63 && s ~ /^[a-z0-9][a-z0-9.@_-]*$/}
     function id(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/}
     function revision(s) {return s ~ /^[0-9]+$/ && s+0<=2147483647}
@@ -268,8 +272,12 @@ vward_routing_service_policy() (
     [ "$#" -eq 6 ] || { printf '%s\n' 'routing policy: expected MODE TARGET DNS REV FLOOR EVIDENCE' >&2; return 2; }
     case $6 in /*) ;; *) printf '%s\n' 'routing policy: absolute evidence required' >&2; return 2 ;; esac
     [ -f "$6" ] && [ -r "$6" ] && [ ! -L "$6" ] || { printf '%s\n' 'routing policy: readable regular evidence required' >&2; return 2; }
-    LC_ALL=C awk -v mode="$1" -v target="$2" -v dns="$3" -v rev="$4" -v floor="$5" '
-    BEGIN {FS=OFS="\t"}
+    VWARD_B_MODE=$1 VWARD_B_TARGET=$2 VWARD_B_DNS=$3 VWARD_B_REV=$4 VWARD_B_FLOOR=$5 LC_ALL=C awk '
+    BEGIN {
+        FS=OFS="\t"
+        mode=ENVIRON["VWARD_B_MODE"];target=ENVIRON["VWARD_B_TARGET"];dns=ENVIRON["VWARD_B_DNS"]
+        rev=ENVIRON["VWARD_B_REV"];floor=ENVIRON["VWARD_B_FLOOR"]
+    }
     function id(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/}
     function revision(s) {return s ~ /^[0-9]+$/ && s+0<=2147483647}
     function route(t,d) {return (t=="ISP" || (t ~ /^VPN:/ && id(substr(t,5)))) && id(d)}
