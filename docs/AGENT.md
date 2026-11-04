@@ -205,6 +205,19 @@ jobs запрещён владельцем. Требуется согласов�
 
 04.11.2026 11:03 МСК — fix.35.6 опубликован только dev, signed sequence2026110401/IMPORTANT. CI41778782842 наf142f56: все3обязательных SUCCESS; mergece767eb tree совпал; release41788816630 SUCCESS, publishaa35521. Public v1/v2 Ed25519 + packageSHA7348515377b845a8441c7cd9d9d096454456791a41d74b7d28a9758721c60f24 + 78targets/88blobs PASS. Приёмка роутера не выполнена. Подробный итог/команда/граница native pending — SERVICE_RECOVERY_FIX35_6.md.
 
+04.11.2026 12:58 МСК — продолжение архитектуры B по новому поручению, база dev `3f4802b`
+(PR #37/fix.35.6 уже выпущен отдельно), ветка `work/unified-routing-20261104`, code `a96fc66`
+(модель `e0efe6e`, literal-ID `f787472`, связанный layout `a96fc66`).
+Pure canonical choice и policy одной подготовленной области реализованы, v1 audit неизменён.
+Service-off не ISP-pin; DNS/ISP/VPN и Auto evidence/peer conflicts моделируются без installed
+state и live callers. Длинный статус Панели вынесен под название/кнопку; общий apply не добавлен.
+Общая цепочка adapters/plan/writers/Auto/restore/API ещё не
+соединена. Проект конкретного первого VPN-only writer и отката — RS7_EXECUTOR_WIRING_DESIGN.md §F.
+Локальные адресные PASS sh/BusyBox1.37 ash+awk, 8/24+repeat, 6 mutation controls и real-template
+UI layout. Полный локальный consistency запущен однократно: FAIL RS7 dryrun, read-only /opt/var
+host (stderr подтверждён адресно); остаток не принят. CI конечного HEAD обязателен, ещё не запущен.
+Новый номер/sequence не назначены; live этап и архитектурный выпуск требуют отдельного согласования.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -464,7 +477,50 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
 
 Отложенная задача выпуска приостановлена после SUCCESS, дубликатов нет. Agent/NextDNS/Google8/DNS16/удалённыеSmartDNS и роутер не менялись. Вывод прежней narrowROкоманды не получен; Claude/Cursor/Gemini и клиентские приложения/actualroute/ownership/persist/reboot проверяет владелец. A1/A6/A7/A10/перенос остаются открыты. После этого выпуска рекомендована новая сессия сGitHub HEAD; лимиты контекста/использования не сбрасываются.
 
+- 2026-11-04 12:58 МСК · [Агент / Codex] · B единая маршрутизация/DNS, стадия модели · База
+  dev3f4802b подтверждена fetch, зависимость PR37 уже интегрирована, ветка work/unified-routing-20261104.
+  Один исполнитель, ранее предложен доступный Sol/High; новый daemon/опрос/writer не добавляется.
+  Code e0efe6e + f787472: к прежней pure audit библиотеке добавлены choice и single-scope policy. Один service
+  mode вместо двух stores; off при DNS/ISP no-op; off VPN снимает только S. Pins suppress bound Auto,
+  независимый explicit M/S конфликт не переопределяется. История не считается новой пробой; floor
+  при DNS/ISP→VPN→off не допускает прежний persist. Output denied/packet unknown, не live permission.
+  **RED→GREEN:** отсутствующие функции → новые проверки; отдельный pin→VPN→off regression сначала
+  падал, исправлен epoch floor. Дополнительный RED literal-ID: awk -v декодировал backslash до
+  валидации, исправлено передачей исходных строк только в окружение одного awk-процесса.
+  Новые escape-ID negative fixtures PASS. PASS sh и фактические BusyBox1.37 ash+awk: 8 M/S/A/24 перехода+повтор,
+  DNS/ISP/off/Auto/tunnel change, peers/history/unknown/excluded, revision CAS/overflow, schema/bounds/
+  symlink/FIFO и no partial stdout. Pure input immutable, poisoned transports/comm/cksum не вызваны.
+  Шесть отдельных mutant (repeat, floor, peer priority, suppress, history, granted permission) отвергнуты
+  целевыми assertions. Canonical choice на1024 keys: BusyBox host0.0315s; прежний bounded audit
+  64 domains/128refs/449454bytes:0.162s при неизменном лимите3s. Это не RAM/CPU/flash замер MIPS.
+  PASS existing audit simulations sh+ash, readers, planner sh+ash, source-v1 prefix byte equality,
+  shellcheck/syntax, version/no-personal-data/SHA. Общий локальный consistency выполнен один раз:
+  FAIL check-dryrun.py:199, expected done, got failed. Адресное добавление stderr к диагностике
+  неизменного fixture подтвердило mkdir /opt/var: Read-only file system, component directories
+  unavailable. Защиты/fixture/assert не ослаблены. До отказа прошли model, catalog, identity,
+  snapshot/shadow/observers/planner/journal; остаток полного локального suite не принят.
+  Chromium локально SKIP (нет playwright). CI точного конечного HEAD ещё впереди.
+  **Документы:** ROADMAP4.3d/e/7, ARCHITECTURE, B implementation, contract, RS7§F, UI spec и unreleased
+  CHANGELOG уточнены. Code a96fc66: связанный layout aiPage/CSS — статус отдельно под названием
+  и кнопкой на полную ширину. RED→GREEN реального card template/DOM; прежние status/guard/spinner
+  assertions сохранены. PASS diag UI/storage UI/route evidence/responsive/Node syntax; визуально
+  только штатный CI/затем Keenetic. Production writers/workflow/package-map/VERSION/feed не меняются.
+  **Первичные данные владельца:** fix35.5,04.11 08:30:36МСК, запрос Claude одного LAN-клиента без
+  VPN на нём → IPv4 160.79.104.10 с tunnel NAT198.18.4.1; establishedTCP2/otherTCP2/UDP2. Это
+  клиентский IPv4 VPN в этом окне, не IPv6/весь каталог. Старый eth3 lookup утечку не доказывает.
+  Cursor/GeminiRC143/shared8.47.69.0 остаются ограниченными данными, не повод широкого опроса.
+  Старую txn.xs72ii владелец архивировал03.11 19:05 без измененияDNS/FQDN, исходная причина unknown;
+  прежний вопрос о выборе superseded. Роутер/настройки/NextDNS/Google8/DNS16/агенты не затрагивались,
+  истёкший Smart DNS не пробовался. Приватный clientIP/URL/token/raw вывод не переносились.
+
 ## 4. Открытые вопросы и нужные данные
+
+- 04.11.2026, B code a96fc66 (pure model f787472): первичный Claude IPv4 path и решение по txn.xs72ii теперь
+  получены (новая запись §3 и ROADMAP4.3e), прежние запросы этих данных не повторять. IPv6/весь
+  каталог и новые переходы не приняты. Нужен CI конечного HEAD; после модели — staged binding/
+  epochs, typed planner, versioned migration/downgrade и fixture recovery/конкуренции. Проект
+  первого live VPN writer — RS7§F.3, wiring только после адресного review и конкретного GO.
+  До этого общий apply/API/UI не включены. SmartDNS lifecycle/storage A1/A6/A7/A10 не закрыты.
 
 - 04.11.2026 11:03 МСК / fix.35.6: прежние pendingCI/release ворота закрыты CI41778782842 + release41788816630 + publicverification PASS. Осталась установка владельцем и аппаратная приёмка по отчёту. У native pending нет атомарного expected-targetpin; это явно описано и записано в ROADMAP Н, отдельный updater guard ещё не сделан. Нужны installedVERSION/time/FQDN/clientpolicy/flow из ранее подготовленной однойROкоманды; прежние localeth3/RC143/sharedIP не дают причинного диагноза.
 
