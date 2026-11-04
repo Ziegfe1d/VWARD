@@ -49,6 +49,9 @@ vward_routing_plan2() (
     cmp -s "$1/generation" "$2/generation" || return 3
     vr2_gen=$(cat "$1/generation");vr2_sid=$(cat "$2/service")
     printf '%s\n' "$vr2_gen" | grep -Eq '^g-[0-9a-f]{16}$' || return 2
+    vr2_authority=$(mktemp "$2/.dns-authority.XXXXXX") || return 1
+    trap 'rm -f "$vr2_authority"' EXIT
+    vr2_dns_owned_authority "$1/decision/resources.tsv" "$1/decision/proofs.tsv" "$2/dns.tsv" > "$vr2_authority" || return 2
     VWARD_B_GEN=$vr2_gen VWARD_B_SID=$vr2_sid VWARD_B_OP=$3 LC_ALL=C awk '
     BEGIN {FS=OFS="\t";gen=ENVIRON["VWARD_B_GEN"];sid=ENVIRON["VWARD_B_SID"];op=ENVIRON["VWARD_B_OP"]}
     function id(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/}
@@ -64,6 +67,14 @@ vward_routing_plan2() (
     function encode(s) {gsub(/\t/,"|",s);return s}
     function prefix(s,a,n,i,r) {n=split(s,a,OFS);r=a[1];for(i=2;i<=10;i++)r=r OFS a[i];return r}
     function hold(d,reason) {holds[d SUBSEP reason]=1;nh=1}
+    function union_refs(left,right, a,n,i,seen,keys,k,nk,result) {
+        n=split(left "," right,a,",")
+        for(i=1;i<=n;i++)if(a[i]!="" && a[i]!="-")seen[a[i]]=1
+        for(k in seen)keys[++nk]=k
+        sort(keys,nk);result=""
+        for(i=1;i<=nk;i++)result=result (i==1?"":",") keys[i]
+        return result==""?"-":result
+    }
     function consumers_known(list,d, a,n,i,r,src,key) {
         if(list=="-")return 0
         n=split(list,a,",")
@@ -99,7 +110,7 @@ vward_routing_plan2() (
     }
     function check_dependency(kind,backend,target,d) {
         if(kind=="route" && target ~ /^VPN:/ && (ctx[target]!="available" || !(target in native_vpn))) hold(d,"vpn-unavailable-or-unknown")
-        if(kind=="dns" && ctx["storage:" backend]!="available") hold(d,"storage-unavailable-or-unknown")
+        if(kind=="dns" && (ctx["storage:" backend]!="available" || dns_observed[backend]!="known")) hold(d,"storage-unavailable-or-unknown")
     }
     function native_group(target,policy, key,i,r,a,j) {
         key=target SUBSEP policy
@@ -146,7 +157,11 @@ vward_routing_plan2() (
         resource[$2]=$0;nr++;next
     }
     FILENAME==ARGV[4] {
-        if(NF!=11 || !id($2) || $11 !~ /^[0-9]+$/ || $11+0>2147483647 || ($2 in proof)) {bad=1;next}
+        pn=split($11,pv,":")
+        if(NF!=11 || !id($2) || pv[1] !~ /^[0-9]+$/ || pv[1]+0>2147483647 || ($2 in proof) ||
+            ($1=="dns" && (pn!=2 || length(pv[2])!=48 || pv[2]!~/^[0-9a-f]+$/)) ||
+            ($1=="route" && pn!=1) || $1!~/^(route|dns)$/) {bad=1;next}
+        proof_content[$2]=pv[2]
         proof[$2]=prefix($0);next
     }
     FILENAME==ARGV[5] {if(NF!=2 || ($1 in ctx)) bad=1;ctx[$1]=$2;next}
@@ -170,12 +185,32 @@ vward_routing_plan2() (
     }
     FILENAME==ARGV[11] {if(NF!=1 || !id($1)) bad=1;group_names[$1]=1;next}
     FILENAME==ARGV[12] {if($1=="health" && $2~/^VPN:/)native_vpn[$2]=1;next}
+    FILENAME==ARGV[13] {
+        if($1=="backend") {
+            if(NF!=4 || $2!~/^(keenetic|agh)$/ || $3!~/^(known|unknown)$/ || $4!~/^[0-9]+$/ || ($2 in dns_observed)){bad=1;next}
+            dns_observed[$2]=$3;dns_slots[$2]=$4+0;next
+        }
+        if($1=="witness") {
+            if(NF!=3 || !id($2) || length($3)!=48 || $3!~/^[0-9a-f]+$/ || ($2 in dns_content)){bad=1;next}
+            dns_content[$2]=$3;next
+        }
+        if(NF!=11 || $1!="dns" || $9!="manual" || $10!="reference"){bad=1;next}
+        dns_native[$3 SUBSEP $4 SUBSEP $5 SUBSEP $8]=$0;dns_row[$2]=$0;next
+    }
+    FILENAME==ARGV[15] {if(NF!=2 || ($1 in dns_authority))bad=1;dns_authority[$1]=$2;next}
+    FILENAME==ARGV[14] {if(NF!=2 || !id($1) || !id($2) || ($1 in upstream_key))bad=1;upstream_key[$1]=$2;next}
     END {
         if(nd>1024 || nr>4096 || bad || !service(sid)) exit 2
         # Map actual native observations. Omitted resources remain references;
         # an input manifest cannot make a missing/replaced native row managed.
         for(r in resource) {
             split(resource[r],a,OFS)
+            relevant=0
+            for(k=1;k<=nd;k++)if(covers(a[4],domains[k],a[5]) || covers(domains[k],a[4],scope[domains[k]])) {relevant=1;break}
+            # Out-of-scope resources remain immutable observations. Their
+            # unavailable backend neither grants rights nor becomes a health
+            # dependency of this operation. Any actual overlap still validates.
+            if(!relevant)continue
             if(a[9]=="vward") {
                 if(!(r in proof) || proof[r]!=prefix(resource[r])) hold(a[4],"ownership-unproven")
                 else proof_ok[r]=1
@@ -187,27 +222,83 @@ vward_routing_plan2() (
                     split(native[key],b,OFS);matched_native[b[13]]=1
                     if(a[9]=="vward" && (b[8]!="vward" || b[10]!="verified")) hold(a[4],"native-proof-unverified")
                 }
+            } else {
+                key=a[3] SUBSEP a[4] SUBSEP a[5] SUBSEP a[8]
+                if(!(key in dns_native))hold(a[4],"native-dns-resource-changed")
+                else {
+                    split(dns_native[key],b,OFS);matched_dns[b[2]]=1
+                    if(a[9]=="vward" && dns_authority[r]!="authorized")hold(a[4],dns_authority[r]==""?"ownership-unproven":dns_authority[r])
+                }
             }
         }
         for(r in native_row) if(!matched_native[r]) resource[r]=native_row[r]
+        for(r in dns_row)if(!matched_dns[r])resource[r]=dns_row[r]
         for(r in resource) rkeys[++nk]=r
         if(nk>4096) exit 2
         sort(rkeys,nk)
+        # Parent suffixes are compiled before their known descendants. One
+        # backend binding carries the UNION of all compatible consumer claims.
+        # An excluded/conflicting descendant cannot be silently covered by a
+        # broader physical suffix merely because its root was confirmed.
+        for(i=1;i<=nd;i++)domain_order[i]=sprintf("%03d:%s",length(domains[i]),domains[i])
+        sort(domain_order,nd)
+        for(i=1;i<=nd;i++)domains[i]=substr(domain_order[i],5)
+        for(i=1;i<=nd;i++) {
+            d=domains[i]
+            if(!(d in wanted) || wp[d]=="default")continue
+            dns_root[d]=d
+            for(j=1;j<i;j++) {
+                p=domains[j]
+                if((p in dns_root) && scope[p]=="subtree" && covers(p,d,"subtree") &&
+                    wt[p]==wt[d] && backend[wp[p]]==backend[wp[d]] &&
+                    upstream_key[url[wp[p]]]==upstream_key[url[wp[d]]]) {dns_root[d]=dns_root[p];break}
+            }
+            dns_refs[dns_root[d]]=union_refs(dns_refs[dns_root[d]],refs[d])
+            if(scope[d]=="subtree")for(j=1;j<=nd;j++) {
+                child=domains[j]
+                if(child==d || !covers(d,child,"subtree"))continue
+                if(!(child in wanted) || wt[child]!=wt[d] || wp[child]=="default" ||
+                    backend[wp[child]]!=backend[wp[d]] || upstream_key[url[wp[child]]]!=upstream_key[url[wp[d]]])
+                    hold(d,"dns-prefix-child-conflict")
+            }
+        }
+        for(d in dns_refs)refs[d]=dns_refs[d]
         if(nd==0 && choice_post!="") {
             split(choice_post,a,OFS)
             if(a[4]!="auto") hold("-","service-scope-unknown")
         }
         for(i=1;i<=nd;i++) {
             d=domains[i];target=(d in wanted) ? wt[d] : "ISP";policy=(d in wanted) ? wp[d] : "default"
+            if((d in dns_root) && dns_root[d]!=d) {
+                # Existing exact own child rows may be consolidated into the
+                # authorised parent. Unknown/independent claims HOLD first.
+                for(j=1;j<=nk;j++) {
+                    r=rkeys[j];split(resource[r],a,OFS)
+                    if(a[1]!="dns" || a[4]!=d || a[9]!="vward")continue
+                    if(!proof_ok[r] || !consumers_known(a[11],d)) {hold(d,"resource-has-independent-consumers");continue}
+                    if(!removed[r]) {check_dependency("dns",a[8],a[6],d)
+                        step("remove","dns",r,resource[r],"-",a[10],"-","restore-own-resource");removed[r]=1}
+                }
+                continue
+            }
             move_rid="";move_pre="";move_birth=""
             if(scope[d]=="subtree" && ctx["scope:subtree"]!="available") hold(d,"scope-unproven")
             kind=(policy!="default") ? "dns" : (target ~ /^VPN:/ ? "route" : "none")
+            # A native include is an observed exact name. Subtree attribution
+            # lets later confirmed names inherit intent; it does not turn the
+            # current physical include into a wildcard ownership proof.
+            physical_scope=(kind=="dns"?"subtree":"exact")
             dest_backend="native"
             if(kind=="dns") {
                 dest_backend=backend[policy]
                 if(dest_backend=="" || available[policy]!="available" || handler[policy]!="active") hold(d,"dns-policy-unavailable-or-unknown")
                 if(dest_backend=="agh" && upfile[policy]=="unsupported") hold(d,"upstream-file-unsupported")
                 if(policy in tomb && policy_rev[policy]+0<=tomb[policy]+0) hold(d,"dns-policy-deleted")
+                if(!(url[policy] in upstream_key))hold(d,"dns-policy-location-unknown")
+                # Both current upstream backends express a DNS suffix. An
+                # exact-only service attribution cannot authorise that broader
+                # physical scope, even if the server is healthy.
+                if(scope[d]!="subtree")hold(d,"dns-prefix-scope-unproven")
             }
             if(kind!="none") check_dependency(kind,dest_backend,target,d)
             covered=0
@@ -215,7 +306,8 @@ vward_routing_plan2() (
                 split(resource[r],a,OFS)
                 if(!covers(a[4],d,a[5])) continue
                 compatible=((kind=="none" && a[1]=="route" && a[6]=="ISP" && a[7]=="default") ||
-                    (a[1]==kind && a[6]==target && a[7]==policy && a[8]==dest_backend && (scope[d]=="exact" || a[5]=="subtree")))
+                    (a[1]==kind && a[6]==target && ((kind!="dns" && a[7]==policy) || (kind=="dns" && a[3]=="upstream:" upstream_key[url[policy]])) &&
+                        a[8]==dest_backend && (physical_scope=="exact" || a[5]=="subtree")))
                 if(compatible) {
                     covered=1
                     if(a[9]=="vward" && proof_ok[r] && !touched[r]) {
@@ -248,16 +340,16 @@ vward_routing_plan2() (
             if(kind!="none" && !covered) {
                 if(move_rid!="") {rid=move_rid;birth=move_birth}
                 else {rid="b-" op "-" ++newid;birth="p-" op "-" newid}
-                nat=(kind=="route") ? native_group(target,policy) : "upstream:" url[policy]
+                nat=(kind=="route") ? native_group(target,policy) : "upstream:" upstream_key[url[policy]]
                 if(nat=="") {hold(d,"no-free-native-group");continue}
-                post=kind OFS rid OFS nat OFS d OFS scope[d] OFS target OFS policy OFS dest_backend OFS "vward" OFS birth OFS refs[d]
+                post=kind OFS rid OFS nat OFS d OFS physical_scope OFS target OFS policy OFS dest_backend OFS "vward" OFS birth OFS refs[d]
                 if(move_rid!="") step("move",kind,rid,move_pre,post,birth,refs[d],"restore-own-resource")
                 else step("create",kind,rid,"-",post,birth,refs[d],"remove-own-resource")
                 created[rid]=post
             }
         }
-        slots=0
-        for(r in resource) {split(resource[r],a,OFS);if(a[1]=="dns" && a[8]=="keenetic" && !removed[r])slots++}
+        slots=dns_slots["keenetic"]
+        for(r in resource) {split(resource[r],a,OFS);if(a[1]=="dns" && a[8]=="keenetic" && removed[r])slots--}
         for(r in created) {split(created[r],a,OFS);if(a[1]=="dns" && a[8]=="keenetic")slots++}
         if(slots>8) hold("-","keenetic-capacity")
         if(choice_pre!=choice_post) step("move","choice",sid,(choice_pre=="" ? "-" : choice_pre),(choice_post=="" ? "-" : choice_post),"revision-cas","S:" sid,"restore-own-choice")
@@ -272,7 +364,7 @@ vward_routing_plan2() (
         for(i=1;i<=ns;i++) print steps[i]
     }' "$2/policy.tsv" "$2/atoms.tsv" "$1/decision/resources.tsv" "$1/decision/proofs.tsv" \
         "$1/decision/context.tsv" "$1/decision/policies.tsv" "$1/decision/tombstones.tsv" \
-        "$1/decision/choices.tsv" "$2/choices.tsv" "$1/inventory.tsv" "$1/groups.tsv" "$1/snapshot.tsv"
+        "$1/decision/choices.tsv" "$2/choices.tsv" "$1/inventory.tsv" "$1/groups.tsv" "$1/snapshot.tsv" "$2/dns.tsv" "$2/upstream-keys.tsv" "$vr2_authority"
 )
 
 vward_routing_plan() (

@@ -9,7 +9,7 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from fixture import Fixture, READ, SNAP, OBSERVE, AUDIT, PLAN, JOURNAL, DRYRUN, digest
 
-EXTRA=('version','choices','bindings','evidence','policies','saved','queue','tombstones','context','resources','proofs')
+EXTRA=('version','choices','bindings','evidence','policies','saved','queue','tombstones','context','resources','proofs','upstreams')
 with Fixture() as f:
     inp=f.p/'decision';inp.mkdir(mode=0o700)
     for name in EXTRA:(inp/(name+'.tsv')).write_text('')

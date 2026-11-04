@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Typed planner consumes the actual staged native inventory and shared projection."""
 import os,sys
+import hashlib
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from fixture import Fixture,READ,OBSERVE,SNAP,AUDIT,PLAN,JOURNAL,LIBDIR
@@ -9,7 +10,7 @@ with Fixture() as f:
     clean='interface Wireguard0\n!\ninterface Wireguard1\n!\ndns-proxy\n!\n'
     f.cfg.write_text(clean);f.enabled.write_text('');f.persist.write_text('')
     inputs=f.p/'decision';inputs.mkdir(mode=0o700)
-    for name in ('version','choices','bindings','evidence','policies','saved','queue','tombstones','context','resources','proofs'):
+    for name in ('version','choices','bindings','evidence','policies','saved','queue','tombstones','context','resources','proofs','upstreams'):
         (inputs/(name+'.tsv')).write_text('');(inputs/(name+'.tsv')).chmod(0o600)
     def put(name,text):(inputs/(name+'.tsv')).write_text(text)
     put('version','routing-state\t2\n');put('choices','schema\t1\n')
@@ -62,15 +63,60 @@ with Fixture() as f:
     assert any(r[0]=='step' and r[3]=='route' for r in plan())
     rows=plan('dns','ISP','policy1');assert any(r[0]=='hold' for r in rows) and not any(r[0]=='step' for r in rows)
     put('policies','policy1\tkeenetic\tavailable\tactive\tnone\t1\turl1\n')
+    put('upstreams','url1\thttps://dns.example.test/dns-query\n')
+    put('bindings',binding.replace('exact','subtree'))
+    put('context',context+'scope:subtree\tavailable\n')
     rows=plan('dns','ISP','policy1');assert any(r[0]=='step' and r[3]=='dns' for r in rows),rows
+    # One physical suffix, all consumers. The child is confirmed by the
+    # parent's subtree; its own exact attribution does not require a second
+    # over-broad DNS binding or let the first atom discard the peer's claim.
+    put('bindings','svc\texample.test\tsubtree\tconfirmed\tdual\tknown\npeer\tsub.example.test\texact\tconfirmed\tipv4\tknown\n')
+    put('choices','schema\t1\nservice\tpeer\t1\tdns\tISP\tpolicy1\t0\n')
+    rows=plan('dns','ISP','policy1')
+    ds=[r for r in rows if r[0]=='step' and r[3]=='dns']
+    assert not any(r[0]=='hold' for r in rows) and len(ds)==1,('subtree was duplicated or exact child lost inherited coverage',rows)
+    assert ds[0][6].split('|')[3]=='example.test' and set(ds[0][6].split('|')[10].split(','))=={'S:svc','S:peer'},'shared child consumer disappeared'
+    put('bindings','svc\texample.test\tsubtree\tconfirmed\tdual\tknown\nsvc\tsub.example.test\tsubtree\texcluded\tdual\tknown\n')
+    put('choices','schema\t1\n')
+    rows=plan('dns','ISP','policy1')
+    assert any(r[0]=='hold' for r in rows) and not any(r[0]=='step' for r in rows),'parent DNS silently covered an excluded child'
+    put('bindings',binding.replace('exact','subtree'))
+    f.cfg.write_text(clean.replace('dns-proxy\n','dns-proxy\n    https upstream https://dns.example.test/dns-query domain x.example\n'))
+    rows=plan('dns','ISP','policy1')
+    assert not any(r[0]=='step' and r[3]=='dns' for r in rows),'compatible native DNS was duplicated or adopted'
+    f.cfg.write_text(f.cfg.read_text().replace('dns.example.test','foreign.example.test'))
+    rows=plan('dns','ISP','policy1')
+    assert any(r[0]=='hold' and r[2]=='foreign-resource-conflict' for r in rows),'another server became a managed binding'
+    f.cfg.write_text(clean)
     put('tombstones','policy1\t1\tdeleted\n')
     assert any(r[0]=='hold' for r in plan('dns','ISP','policy1')),'deleted policy resurrected'
     put('tombstones','')
     # Whole-transition Keenetic capacity includes foreign/global entries.
-    put('resources',''.join(f'dns\tr{i}\tupstream:u{i}\t-\texact\tISP\tdefault\tkeenetic\tmanual\treference\t-\n' for i in range(8)))
+    f.cfg.write_text(clean.replace('dns-proxy\n','dns-proxy\n'+''.join(f'    https upstream https://s{i}.example.test/dns-query\n' for i in range(8))))
     assert any(r[0]=='hold' for r in plan('dns','ISP','policy1')),'slot limit ignored'
-    put('resources','');put('policies','policy1\tagh\tavailable\tactive\tunsupported\t1\turl1\n')
+    f.cfg.write_text(clean);put('policies','policy1\tagh\tavailable\tactive\tunsupported\t1\turl1\n')
     assert any(r[0]=='hold' for r in plan('dns','ISP','policy1')),'upstream_dns_file silently ignored'
+    put('bindings',binding);put('context',context)
+    # Replacing a URL behind the SAME logical policy ID is a physical move.
+    # Logical ID equality cannot keep an old endpoint or reuse its content proof.
+    old_url='https://old.example.test/dns-query'
+    new_url='https://replacement.example.test/dns-query'
+    native='upstream:uh-'+hashlib.sha256(old_url.encode()).hexdigest()[:48]
+    f.cfg.write_text(clean.replace('dns-proxy\n','dns-proxy\n    https upstream '+old_url+' domain x.example\n'))
+    put('upstreams',f'old\t{old_url}\nnew\t{new_url}\n')
+    put('policies','policy1\tkeenetic\tavailable\tactive\tnone\t2\tnew\n')
+    put('bindings',binding.replace('exact','subtree'));put('context',context+'scope:subtree\tavailable\n')
+    put('choices','schema\t1\nservice\tsvc\t1\tdns\tISP\tpolicy1\t0\n')
+    dns_row=f'dns\town-dns\t{native}\tx.example\tsubtree\tISP\tpolicy1\tkeenetic\tvward\tp-old\tS:svc\n'
+    content=hashlib.sha256(('https upstream '+old_url+' domain x.example\n').encode()).hexdigest()[:48]
+    put('resources',dns_row);put('proofs','\t'.join(dns_row.strip().split('\t')[:10])+'\t1:'+content+'\n')
+    rows=plan('dns','ISP','policy1',1)
+    assert any(r[0]=='step' and r[2:5]==['move','dns','own-dns'] and native not in r[6] for r in rows),'policy ID equality hid a changed physical URL'
+    f.cfg.write_text(f.cfg.read_text().replace(' domain x.example',' dnsm on ISP domain x.example'))
+    rows=plan('dns','ISP','policy1',1)
+    assert any(r[0]=='hold' and r[2]=='native-dns-proof-changed' for r in rows) and not any(r[0]=='step' for r in rows),'an owner DNS metadata edit retained mutation rights'
+    f.cfg.write_text(clean);put('bindings',binding);put('context',context)
+    put('resources','');put('proofs','');put('choices','schema\t1\n')
     # A proven owned route can lose S while retaining independent active A.
     f.cfg.write_text(clean.replace('dns-proxy\n','dns-proxy\n    route object-group domain-list0 Wireguard0 auto\n')+
                      'object-group fqdn domain-list0\n    include x.example\n!\n')

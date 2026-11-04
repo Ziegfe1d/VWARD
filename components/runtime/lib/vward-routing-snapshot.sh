@@ -36,7 +36,7 @@ vward_routing_consistent_read() (
     rm -f "$vrs_out/generation" "$vrs_out/intents.tsv" "$vrs_out/snapshot.tsv" "$vrs_out/identity.tsv" "$vrs_out/legacy.tsv" 2>/dev/null
     [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -f "$vrs_out/inventory.tsv"
     [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -f "$vrs_out/groups.tsv"
-    [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -f "$vrs_out/native.cfg" "$vrs_out/enabled.tsv"
+    [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -f "$vrs_out/native.cfg" "$vrs_out/enabled.tsv" "$vrs_out/agh.json" "$vrs_out/inputs.fp"
     [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -f "$vrs_out/seal" "$vrs_out/seal.sha"
     [ -z "${VWARD_ROUTING_INPUTS:-}" ] || rm -rf "$vrs_out/decision"
     vrs_tmp=$(umask 077; mktemp -d "$vrs_out/.read.XXXXXX" 2>/dev/null) || return 2
@@ -112,14 +112,16 @@ vward_routing_consistent_read() (
         for vrs_t in "$vrs_backup"/service-transactions/*/pending; do vrs_presence txn "$vrs_t"; done
         for vrs_t in "$vrs_backup-recovery"/smartdns.*; do vrs_presence smartdns-recovery "$vrs_t"; done
         for vrs_l in $vrs_decision_names; do vrs_one "$vrs_l" "$VWARD_ROUTING_INPUTS/${vrs_l#v2-}.tsv"; done
+        [ -z "$vrs_decision_names" ] || vrs_one obs-agh-image "${VWARD_ROUTING_AGH_IMAGE:-/nonexistent/vward-agh-image}"
     }
 
-    vrs_decision_names=
+    vrs_decision_names=;vrs_aux_names=
     if [ -n "${VWARD_ROUTING_INPUTS:-}" ]; then
         case $VWARD_ROUTING_INPUTS in /*) ;; *) return 2 ;; esac
         [ -d "$VWARD_ROUTING_INPUTS" ] && [ ! -L "$VWARD_ROUTING_INPUTS" ] && [ -O "$VWARD_ROUTING_INPUTS" ] &&
             [ "$(ls -ldn "$VWARD_ROUTING_INPUTS" | awk '{print substr($1,1,10)}')" = drwx------ ] || return 2
-        vrs_decision_names='v2-version v2-choices v2-bindings v2-evidence v2-policies v2-saved v2-queue v2-tombstones v2-context v2-resources v2-proofs'
+        vrs_decision_names='v2-version v2-choices v2-bindings v2-evidence v2-policies v2-saved v2-queue v2-tombstones v2-context v2-resources v2-proofs v2-upstreams'
+        vrs_aux_names=obs-agh-image
     fi
     vrs_start=$(date +%s) || return 2
     vrs_fingerprint > "$vrs_tmp/fp.before" || return 2
@@ -146,7 +148,7 @@ vward_routing_consistent_read() (
     mkdir "$vrs_stage" || return 2
     : > "$vrs_stage/STATE" || return 2
     for vrs_l in cfg dev map agh enabled categories persist catalog-fetched catalog-bundled \
-        obs-manual obs-adaptive obs-forcevpn obs-listsfb obs-samples $vrs_decision_names; do
+        obs-manual obs-adaptive obs-forcevpn obs-listsfb obs-samples $vrs_decision_names $vrs_aux_names; do
         case $vrs_l in
             cfg) vrs_src=$vrs_cfg ;;
             dev) vrs_src=${VWARD_DEVICE_CONFIG:-$vrs_etc/device.conf} ;;
@@ -162,6 +164,7 @@ vward_routing_consistent_read() (
             obs-forcevpn) vrs_src=$vrs_etc/route-engine/force-vpn.conf ;;
             obs-listsfb) vrs_src=${VWARD_TUNNEL_GUARD_DIR:-/opt/var/lib/vward/tunnel-guard}/lists-fallback ;;
             obs-samples) vrs_src=${VWARD_TUNNEL_QUALITY_DIR:-/tmp/vward-tunnel-quality}/samples.tsv ;;
+            obs-agh-image) vrs_src=${VWARD_ROUTING_AGH_IMAGE:-/nonexistent/vward-agh-image} ;;
             v2-*) vrs_src=$VWARD_ROUTING_INPUTS/${vrs_l#v2-}.tsv ;;
         esac
         vrs_row=$(awk -v l="$vrs_l" '$1==l {print; exit}' "$vrs_tmp/fp.before")
@@ -235,7 +238,10 @@ vward_routing_consistent_read() (
         mv "$vrs_tmp/$vrs_name.tsv" "$vrs_out/$vrs_name.tsv" || { rm -f "$vrs_out/intents.tsv" "$vrs_out/snapshot.tsv" "$vrs_out/identity.tsv" "$vrs_out/legacy.tsv"; return 2; }
     done
     if [ -n "$vrs_decision_names" ]; then
+        cp "$vrs_tmp/fp.before" "$vrs_out/inputs.fp" || return 2
         cp "$vrs_stage/cfg" "$vrs_out/native.cfg" || return 2
+        if [ -f "$vrs_stage/obs-agh-image" ]; then cp "$vrs_stage/obs-agh-image" "$vrs_out/agh.json" || return 2
+        else printf '%s\n' '{"unknown":true}' > "$vrs_out/agh.json";fi
         if [ -f "$vrs_stage/enabled" ]; then cp "$vrs_stage/enabled" "$vrs_out/enabled.tsv" || return 2
         else : > "$vrs_out/enabled.tsv";fi
         awk '/^object-group fqdn / && NF==3 {print $3}' "$vrs_stage/cfg" | LC_ALL=C sort -u > "$vrs_out/groups.tsv" || return 2
@@ -244,10 +250,10 @@ vward_routing_consistent_read() (
             mv "$vrs_stage/$vrs_l" "$vrs_out/decision/${vrs_l#v2-}.tsv" || return 2
         done
         printf 'routing-stage\t2\t%s\n' "$vrs_gen" > "$vrs_out/seal" || return 2
-        for vrs_name in intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv native.cfg enabled.tsv \
+        for vrs_name in intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv native.cfg enabled.tsv agh.json inputs.fp \
             decision/version.tsv decision/choices.tsv decision/bindings.tsv decision/evidence.tsv \
             decision/policies.tsv decision/saved.tsv decision/queue.tsv decision/tombstones.tsv \
-            decision/context.tsv decision/resources.tsv decision/proofs.tsv; do
+            decision/context.tsv decision/resources.tsv decision/proofs.tsv decision/upstreams.tsv; do
             vrs_ck=$(sha256sum < "$vrs_out/$vrs_name") || return 2
             printf '%s\t%s\n' "${vrs_ck%% *}" "$vrs_name" >> "$vrs_out/seal" || return 2
         done

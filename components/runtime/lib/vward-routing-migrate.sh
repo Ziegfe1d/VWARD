@@ -3,7 +3,7 @@
 # Same OFF DATA-root and operation envelope as the pipeline; no native write.
 # File rollback and accepted user-state downgrade are separate decisions.
 vrb_state_names() {
-    printf '%s\n' choices bindings evidence policies saved queue tombstones context resources proofs version
+    printf '%s\n' choices bindings evidence policies saved queue tombstones context resources proofs upstreams version
 }
 vward_routing_state_gate() (
     [ "$#" -eq 2 ] && vrj_dir "$2" || return 2
@@ -85,6 +85,7 @@ vward_routing_state_restore1() (
         [ "$vrb_current" = "$(vr2_hash "$vrb_migration/before/$vrb_m.tsv")" ] ||
             [ "$vrb_current" = "$(vr2_hash "$vrb_migration/after/$vrb_m.tsv")" ] || return 75
     done
+    vrb_revocations_gate "$1" "$vrb_migration/before" || return 75
     printf '%s\n' "$2" > "$vrb_e/decision/.migration-pending" && vrj2_flush || return 1
     for vrb_m in $(vrb_state_names); do
         vrb_current=$(vr2_hash "$vrb_e/decision/$vrb_m.tsv") || return 75

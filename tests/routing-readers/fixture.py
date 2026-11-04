@@ -99,3 +99,73 @@ def legacy_fn(path, name, prefix, call, extra_sub=None):
         assert a in body, a
         body = body.replace(a, b)
     return subprocess.run(["sh", "-c", prefix + "\n" + body + "\n" + call], capture_output=True, text=True, timeout=5)
+
+
+def function_source(path, name):
+    """Extract one real shell function, including nested/one-line/subshell forms.
+
+    Never source a daemon/CLI just to import its helpers. No body replacement.
+    """
+    import re
+    src=Path(path).read_text()
+    m=re.search(r'^(?P<indent>[ \t]*)'+re.escape(name)+r'\(\)[ \t]*(?:\n[ \t]*)?(?P<open>[{(])(?P<tail>[^\n]*)\n',src,re.M)
+    assert m,name
+    close='}' if m['open']=='{' else ')'
+    if m['tail'].rstrip().endswith(close):return m[0]
+    end=re.search('^'+re.escape(m['indent']+close)+r'[ \t]*\n',src[m.end():],re.M)
+    assert end,name
+    return src[m.start():m.end()+end.end()]
+
+
+class PipelineFixture(Fixture):
+    """Existing DATA router fixture plus the real internal console/AGH workers."""
+    def __init__(self):
+        super().__init__()
+        self.j=self.p/'journal';self.j.mkdir(mode=0o700)
+        self.e=self.j/'.emu';self.e.mkdir(mode=0o700)
+        self.decision=self.e/'decision';self.decision.mkdir(mode=0o700)
+        (self.e/'services/owned').mkdir(mode=0o700,parents=True)
+        for name in ('version','choices','bindings','evidence','policies','saved','queue','tombstones','context','resources','proofs','upstreams'):
+            p=self.decision/(name+'.tsv');p.write_text('');p.chmod(0o600)
+        (self.decision/'version.tsv').write_text('routing-state\t2\n')
+        (self.decision/'choices.tsv').write_text('schema\t1\n')
+        (self.decision/'bindings.tsv').write_text('svc\tx.example\texact\tconfirmed\tipv4\tknown\nsvc\ty.example\texact\tconfirmed\tipv4\tknown\n')
+        (self.decision/'context.tsv').write_text('source:M\t1\nsource:S\t1\nsource:A\t1\nVPN:Wireguard0\tavailable\nVPN:Wireguard1\tavailable\n')
+        (self.e/'running.cfg').write_text('interface Wireguard0\n!\ninterface Wireguard1\n!\ndns-proxy\n!\n')
+        (self.e/'running.cfg').chmod(0o600)
+        (self.e/'device.conf').write_bytes(self.dev.read_bytes())
+        (self.e/'device-map.tsv').write_bytes(self.map.read_bytes())
+        (self.e/'catalog.json').write_bytes(self.catalog.read_bytes())
+        (self.e/'agh-domains').write_text('')
+        (self.e/'services/enabled.tsv').write_text('');(self.e/'services/enabled.tsv').chmod(0o600)
+        (self.e/'services/categories.tsv').write_text('ai\tWireguard0\n')
+        (self.e/'route').mkdir(mode=0o700);(self.e/'route/adaptive-persist.txt').write_text('')
+        shim=self.p/'poison';shim.mkdir();self.trace=self.p/'transport'
+        for name in ('ndmc','curl','comm','cksum','nslookup','ip'):
+            p=shim/name;p.write_text('#!/bin/sh\necho called >> "'+str(self.trace)+'"\nexit 99\n');p.chmod(0o755)
+        if os.environ.get('RS6_BUSYBOX'):(shim/'awk').symlink_to(Path(os.environ['RS6_BUSYBOX']).resolve())
+        self.env|={'PATH':str(shim)+':'+os.environ['PATH'],'VWARD_RS7_DRYRUN':'1'}
+        console=ROOT/'components/console/scripts/vward-console-config.sh'
+        control=ROOT/'components/ads-privacy-guard/scripts/vward-ads-privacy-control.sh'
+        common=ROOT/'components/ads-privacy-guard/lib/vward-ads-privacy-common.sh'
+        functions=self.p/'console-functions'
+        functions.write_text(''.join(function_source(console,n) for n in ('dir_lock','group_set','vward_routing_console_group_locked','doh_lines','doh_present','doh_remove_url'))+
+                             ''.join(function_source(common,n) for n in ('ads_epoch','ads_num','ads_pid_start','ads_read_line','ads_lock_create','ads_lock_acquire','ads_lock_release'))+
+                             ''.join(function_source(control,n) for n in ('agfail','aget','agh_unchanged','agh_evidence','agh_guarded_back','valid_url','ads_smartdns_locked')))
+        self.libs=(READ,OBSERVE,SNAP,AUDIT,LIBDIR/'vward-routing-project.sh',PLAN,JOURNAL,DRYRUN,
+                   LIBDIR/'vward-runtime-admission.sh',LIBDIR/'vward-routing-workers.sh',LIBDIR/'vward-routing-migrate.sh',
+                   LIBDIR/'vward-routing-dns.sh',LIBDIR/'vward-routing-lifecycle.sh',LIBDIR/'vward-routing-pipeline.sh',functions)
+
+    def script(self,command):
+        return ('for lib in '+' '.join('"${'+str(i)+'}"' for i in range(1,len(self.libs)+1))+
+                '; do . "$lib"; done\nshift '+str(len(self.libs))+'\n'+command)
+
+    def invoke(self,name,*args,more=None,timeout=45):
+        return self.run(self.script('"$@"'),*self.libs,name,*args,env=self.env|(more or {}),timeout=timeout)
+
+    def configure_dns(self,store):
+        (self.decision/'policies.tsv').write_text(f'policy1\t{store}\tavailable\tactive\tnone\t1\turl1\n')
+        (self.decision/'upstreams.tsv').write_text('url1\thttps://dns.example.test/dns-query\n')
+        p=self.decision/'context.tsv';p.write_text(p.read_text()+f'storage:{store}\tavailable\nscope:subtree\tavailable\n')
+        p=self.decision/'bindings.tsv';p.write_text(p.read_text().replace('exact','subtree'))
+        p=self.e/'agh.json';p.write_text('{"upstream_dns":["9.9.9.9"],"upstream_dns_file":"","protection_enabled":true}\n');p.chmod(0o600)

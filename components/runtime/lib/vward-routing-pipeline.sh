@@ -5,12 +5,28 @@
 # JDIR/.emu owns running.cfg, decision/, services/, and all fault files. Loading
 # this library cannot enable a writer. Even poisoned NDMC/curl are never called.
 
+vrb_legacy_gate() (
+    # Recovery is an admission barrier, not an optional M/S/A contribution.
+    # Never repair/replay another controller's transaction from this path.
+    for vrb_legacy_dir in "$1/backup" "$1/backup/service-transactions" "$1/backup-recovery"; do
+        if [ -e "$vrb_legacy_dir" ] || [ -L "$vrb_legacy_dir" ]; then
+            [ -d "$vrb_legacy_dir" ] && [ ! -L "$vrb_legacy_dir" ] &&
+                [ -r "$vrb_legacy_dir" ] && [ -x "$vrb_legacy_dir" ] || return 75
+        fi
+    done
+    for vrb_legacy_item in "$1/backup/service-transactions"/* "$1/backup-recovery"/smartdns.*; do
+        [ ! -e "$vrb_legacy_item" ] && [ ! -L "$vrb_legacy_item" ] || return 75
+    done
+)
+
 vrb_worker_context() {
     [ "${vrb_inside:-}" = locked-emulator ] && vrj_dir "$vrb_j" &&
         vrj2_ready "$vrb_j" "$vrb_op" &&
         { [ "$(cat "$vrb_j/$vrb_op/state")" = pending ] || [ "$(cat "$vrb_j/$vrb_op/state")" = unknown ]; } &&
-        [ "$(cat "$vrb_j/.edit/.lock/owner" 2>/dev/null)" = "$(printf '%s\t%s' "${vrj2_me:-}" "${vrj2_start:-}")" ] &&
-        [ "$(cat "$vrb_j/.change/.lock/owner" 2>/dev/null)" = "$(printf '%s\t%s' "${vrj2_me:-}" "${vrj2_start:-}")" ] || return 75
+        [ "$(cat "$vrb_edit_path/owner" 2>/dev/null)" = "$(printf '%s\t%s' "${vrj2_me:-}" "${vrj2_start:-}")" ] &&
+        [ "$(cat "$vrb_change_path/owner" 2>/dev/null)" = "$(printf '%s\t%s' "${vrj2_me:-}" "${vrj2_start:-}")" ] &&
+        [ "$(vrj2_pid_start "${vrj2_me:-}")" = "${vrj2_start:-}" ] &&
+        vrb_legacy_gate "$vrb_e" || return 75
     case ${vrb_role:-} in
         forward)
             [ "$(cat "$vrb_j/$vrb_op/state")" = pending ] &&
@@ -22,6 +38,129 @@ vrb_worker_context() {
         *) return 75 ;;
     esac
 }
+
+# A final DATA publisher is the leased process itself (exec, no untracked mv
+# child). A dead operation cannot leave a child able to publish after recovery.
+# Durable intent remains after death; quiet checks never infer death from PID
+# alone. This certifies DATA publication, not completion of a remote transport.
+vrb_single_link() {
+    # Only the numeric metadata field is read; filename text is never parsed.
+    # Keenetic's stat may lack -c, whereas ls -ldn is supported on both stores.
+    # shellcheck disable=SC2012
+    [ "$(LC_ALL=C ls -ldn "$1" | awk '{print $2}')" = 1 ]
+}
+# Only numeric mode/owner metadata is parsed; filename bytes are not fields.
+# shellcheck disable=SC2012
+vrb_owned_data_file() {
+    if [ "$1" = "$vrb_e/services/enabled.tsv" ]; then
+        [ -f "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] && [ -r "$1" ] || return 75
+        # Registry contains public IDs/targets. Only this exact legacy file
+        # accepts 0644; private proofs/URLs/decision files remain private.
+        case $(ls -ldn "$1" | awk '{print substr($1,1,10)}') in -rw-------|-r--------|-rw-r--r--) ;; *) return 75 ;; esac
+        [ "$(wc -c < "$1")" -le 1048576 ]
+    else vrj2_file "$1";fi
+}
+# shellcheck disable=SC2012
+vrb_publication_mode() (
+    vrb_pm_dest=$1
+    case $vrb_pm_dest in
+        "$vrb_e/running.cfg") vrb_pm_label=cfg ;;
+        "$vrb_e/agh.json") vrb_pm_label=obs-agh-image ;;
+        "$vrb_e/services/enabled.tsv") vrb_pm_label=enabled ;;
+        "$vrb_e/services/owned/"*) vrb_pm_label=owned:${vrb_pm_dest##*/} ;;
+        "$vrb_e/decision/"*.tsv) vrb_pm_key=${vrb_pm_dest##*/};vrb_pm_label=v2-${vrb_pm_key%.tsv} ;;
+        "$vrb_e/saved.cfg")
+            case ${vrb_role:-} in save|baseline-save) ;; *) return 75 ;; esac
+            if [ -e "$1" ] || [ -L "$1" ]; then
+                vrj2_file "$1" && [ "$(ls -ldn "$1" | awk '{print substr($1,1,10)}')" = -rw------- ] || return 75
+            fi
+            printf '%s\n' 0600;return 0 ;;
+        *) return 75 ;;
+    esac
+    vrj2_file "$vrb_t/inputs.fp" || return 75
+    vrb_pm_hash=$(vr2_hash "$vrb_t/inputs.fp") || return 75
+    vrj2_step_row "$vrb_j/$vrb_op" "$vrb_active_step" | awk -F'\t' -v h="$vrb_pm_hash" '
+        {n=split($10,a,",");for(i=1;i<=n;i++)if(a[i]=="attrs:" h)ok=1}END{exit ok?0:1}' || return 75
+    vrb_pm_old=$(awk -v l="$vrb_pm_label" '$1==l {
+        if(NF==7)print $6 " " $7;else if($2=="absent")print "absent";else exit 2;n++}
+        END{if(n>1)exit 2;if(!n)print "absent"}' "$vrb_t/inputs.fp") || return 75
+    vrb_pm_current=absent
+    if [ -e "$1" ] || [ -L "$1" ]; then
+        vrb_owned_data_file "$1" && vrb_single_link "$1" || return 75
+        vrb_pm_current=$(ls -ldn "$1" | awk '{print substr($1,1,10),$3}') || return 75
+    fi
+    vrb_pm_uid=$(id -u) || return 75
+    if [ "$vrb_pm_old" = absent ]; then
+        if [ "$vrb_pm_current" != absent ]; then
+            [ "$vrb_role" = inverse ] && [ "$vrb_pm_current" = "-rw------- $vrb_pm_uid" ] || return 75
+        fi
+        printf '%s\n' 0600;return 0
+    fi
+    case $vrb_pm_old in
+        "-rw------- $vrb_pm_uid") vrb_pm_mode=0600 ;;
+        "-r-------- $vrb_pm_uid") vrb_pm_mode=0400 ;;
+        "-rw-r--r-- $vrb_pm_uid") [ "$vrb_pm_label" = enabled ] || return 75;vrb_pm_mode=0644 ;;
+        *) return 75 ;;
+    esac
+    if [ "$vrb_pm_current" = absent ]; then
+        [ "$vrb_role" = inverse ] && [ "$(cat "$vrb_t/post.$vrb_active_step")" = - ] || return 75
+    else [ "$vrb_pm_current" = "$vrb_pm_old" ] || return 75;fi
+    printf '%s\n' "$vrb_pm_mode"
+)
+vrb_publish() (
+    vrb_worker_context || return 75
+    if [ "$1" != - ]; then vrj2_file "$1" && vrb_single_link "$1" || return 75;fi
+    vrj_dir "${2%/*}" || return 75
+    if [ -e "$2" ] || [ -L "$2" ]; then
+        vrb_owned_data_file "$2" && vrb_single_link "$2" || return 75
+    fi
+    vrb_pub_mode=$(vrb_publication_mode "$2") || return 75
+    [ "$1" = - ] || chmod "$vrb_pub_mode" "$1" || return 1
+    if [ ! -e "$vrb_j/$vrb_op/workers" ]; then mkdir "$vrb_j/$vrb_op/workers" || return 1;fi
+    vrj_dir "$vrb_j/$vrb_op/workers" || return 75
+    IFS=' ' read -r vrb_pub_pid _ < /proc/self/stat || return 1
+    vrb_pub_start=$(vrj2_pid_start "$vrb_pub_pid") || return 1
+    cat /proc/sys/kernel/random/boot_id > "$vrb_j/$vrb_op/workers/$vrb_pub_pid.$vrb_pub_start" || return 1
+    vr2_hash "$vrb_j/$vrb_op/workers/$vrb_pub_pid.$vrb_pub_start" > "$vrb_j/$vrb_op/workers/$vrb_pub_pid.$vrb_pub_start.sha" || return 1
+    vrj2_flush || return 1
+    if [ -f "$vrb_e/publish-pause" ]; then
+        printf '%s\t%s\n' "$vrb_pub_pid" "$vrb_pub_start" > "$vrb_e/publish-waiting" || return 1
+        while [ -f "$vrb_e/publish-pause" ]; do sleep 0.05;done
+    fi
+    vrb_worker_context || return 75
+    [ "$(vrb_publication_mode "$2")" = "$vrb_pub_mode" ] || return 75
+    if [ "$1" = - ]; then exec rm -f "$2";fi
+    exec mv "$1" "$2"
+)
+vrb_publish_quiet() (
+    [ ! -L "$1/workers" ] || return 75
+    [ -e "$1/workers" ] || return 0
+    vrj_dir "$1/workers" || return 75
+    vrb_pq_boot=$(cat /proc/sys/kernel/random/boot_id) || return 75
+    for vrb_pq_lease in "$1/workers"/*; do
+        [ ! -e "$vrb_pq_lease" ] && [ ! -L "$vrb_pq_lease" ] && continue
+        vrj2_file "$vrb_pq_lease" || return 75
+        case $vrb_pq_lease in *.sha) vrj2_file "${vrb_pq_lease%.sha}" || return 75;continue ;; esac
+        vrj2_file "$vrb_pq_lease.sha" && [ "$(vr2_hash "$vrb_pq_lease")" = "$(cat "$vrb_pq_lease.sha")" ] || return 75
+        vrb_pq_key=${vrb_pq_lease##*/}
+        vrb_pq_pid=${vrb_pq_key%%.*};vrb_pq_start=${vrb_pq_key#*.}
+        case $vrb_pq_pid:$vrb_pq_start in *[!0-9:]*|:*|*:) return 75 ;; esac
+        # A different boot proves all publishers of that boot gone. Same boot
+        # needs both PID and starttime; an unparseable live PID remains unknown.
+        vrb_pq_oldboot=$(cat "$vrb_pq_lease")
+        printf '%s\n' "$vrb_pq_oldboot" | grep -Eq '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' || return 75
+        [ "$vrb_pq_oldboot" = "$vrb_pq_boot" ] || continue
+        vrb_pq_current=$(vrj2_pid_start "$vrb_pq_pid") || vrb_pq_current=
+        if kill -0 "$vrb_pq_pid" 2>/dev/null && { [ -z "$vrb_pq_current" ] || [ "$vrb_pq_current" = "$vrb_pq_start" ]; }; then return 75;fi
+    done
+)
+vrb_publish_image() (
+    # Fresh private temporary leaf avoids following a reused .new symlink.
+    vrj_dir "${2%/*}" || return 75
+    vrb_pi_tmp=$(mktemp "${2%/*}/.image.XXXXXX") || return 1
+    cat "$1" > "$vrb_pi_tmp" || return 1
+    vrb_publish "$vrb_pi_tmp" "$2"
+)
 vrb_pipeline_ready() {
     # Existing emulator gate, same private files; live paths are never selected.
     vrd_ready "$1" && vrj_dir "$1/.emu/decision" && vrj_dir "$1/.emu/services" || return 75
@@ -32,9 +171,37 @@ vrb_pipeline_ready() {
     command -v vward_admission_enter >/dev/null 2>&1 &&
         command -v vward_routing_console_group_locked >/dev/null 2>&1 || return 75
 }
+
+# SAME public lock directories and pid layout as the existing console. Its
+# real dir_lock helper remains the acquiring worker; no nested CLI is used.
+# A legacy/unproven abandoned lock is not silently reclaimed by the new path.
+vrb_shared_lock() {
+    if [ -e "$1" ] || [ -L "$1" ]; then
+        vrj_dir "$1" && vrj2_file "$1/owner" && vrj2_file "$1/owner.sha" || return 75
+        [ "$(vr2_hash "$1/owner")" = "$(cat "$1/owner.sha")" ] || return 75
+        IFS="$(printf '\t')" read -r vrb_sl_pid vrb_sl_start vrb_sl_extra < "$1/owner" || return 75
+        case $vrb_sl_pid:$vrb_sl_start in *[!0-9:]*|:*|*:) return 75 ;; esac
+        [ -z "$vrb_sl_extra" ] && [ "$(cat "$1/pid")" = "$vrb_sl_pid" ] || return 75
+        if kill -0 "$vrb_sl_pid" 2>/dev/null; then return 75;fi
+        for vrb_sl_op in "$vrb_j"/*; do
+            [ -d "$vrb_sl_op" ] || continue
+            [ ! -L "$vrb_sl_op" ] || return 75
+            vrb_publish_quiet "$vrb_sl_op" || return 75
+        done
+    fi
+    dir_lock "$1" || return 75
+    [ "$(cat "$1/pid")" = "$$" ] && vrj_dir "$1" || return 75
+    printf '%s\n' "$vrj2_me" > "$1/pid" && printf '%s\n' "$vrj2_start" > "$1/pid_start" &&
+        printf '%s\t%s\n' "$vrj2_me" "$vrj2_start" > "$1/owner" && vr2_hash "$1/owner" > "$1/owner.sha"
+}
+vrb_shared_unlock() {
+    [ ! -L "$1" ] && [ "$(cat "$1/owner" 2>/dev/null)" = "$(printf '%s\t%s' "$vrj2_me" "$vrj2_start")" ] &&
+        [ "$(cat "$1/pid" 2>/dev/null)" = "$vrj2_me" ] && [ "$(cat "$1/pid_start" 2>/dev/null)" = "$vrj2_start" ] || return 75
+    rm -f "$1/pid" "$1/pid_start" "$1/owner" "$1/owner.sha" && rmdir "$1"
+}
 vrb_local_path() {
     case $1:$2 in
-        manifest:resources|manifest:proofs|manifest:choices) printf '%s/decision/%s.tsv\n' "$vrb_e" "$2" ;;
+        manifest:resources|manifest:proofs|manifest:choices|manifest:policies|manifest:tombstones|manifest:saved|manifest:queue|manifest:evidence) printf '%s/decision/%s.tsv\n' "$vrb_e" "$2" ;;
         nativeproof:domain-list[0-9]|nativeproof:domain-list[0-9][0-9]) printf '%s/services/owned/%s\n' "$vrb_e" "$2" ;;
         registry:enabled) printf '%s/services/enabled.tsv\n' "$vrb_e" ;;
         *) return 2 ;;
@@ -43,10 +210,16 @@ vrb_local_path() {
 vrb_scope_read() (
     case $1 in
         group) vrb_cfg_image "$vrb_e/running.cfg" "$2" > "$3" ;;
+        dns-scope)
+            case $2 in
+                keenetic) vrb_https_scope "$vrb_e/running.cfg" > "$3" ;;
+                agh) vrj2_file "$vrb_e/agh.json" && vrb_agh_scope "$vrb_e/agh.json" > "$3" ;;
+                *) return 2 ;;
+            esac ;;
         *)
             vrb_path=$(vrb_local_path "$1" "$2") || return 2
             if [ ! -e "$vrb_path" ] && [ ! -L "$vrb_path" ]; then printf '%s\n' - > "$3"
-            else vrj2_file "$vrb_path" && cat "$vrb_path" > "$3";fi ;;
+            else vrb_owned_data_file "$vrb_path" && cat "$vrb_path" > "$3";fi ;;
     esac
 )
 # A single fixed emulator command. Existing console group_set/worker construct
@@ -55,9 +228,10 @@ vrb_emu_ndm() (
     vrb_worker_context || return 75
     printf '%s\n' "$1" >> "$vrb_e/calls"
     [ ! -f "$vrb_e/refuse" ] || [ "$(cat "$vrb_e/refuse")" != "$1" ] || return 1
+    case $1 in 'dns-proxy https upstream '*|'dns-proxy no https upstream '*) vrb_emu_dns_command "$1";return $? ;; esac
     if [ "$1" = 'system configuration save' ]; then
         [ ! -e "$vrb_e/save-fails" ] || return 1
-        cp "$vrb_e/running.cfg" "$vrb_e/saved.cfg" || return 1
+        vrb_publish_image "$vrb_e/running.cfg" "$vrb_e/saved.cfg" || return 1
         return 0
     fi
     # No eval, shell splitting only after the closed alphabet is validated.
@@ -103,7 +277,7 @@ vrb_emu_ndm() (
         {print}
         END{if(!absent)printf "object-group fqdn %s\n%s!\n",g,body}' \
         "$vrb_t/native.next" "$vrb_e/running.cfg" > "$vrb_t/config.next" || return 1
-    mv "$vrb_t/config.next" "$vrb_e/running.cfg" || return 1
+    vrb_publish "$vrb_t/config.next" "$vrb_e/running.cfg" || return 1
     [ ! -f "$vrb_e/lost" ] || [ "$(cat "$vrb_e/lost")" != "$vrb_kind" ] || return 28
     return 0
 )
@@ -111,10 +285,9 @@ vrb_emu_ndm() (
 vrb_write_scope() (
     vrb_role=forward;vrb_active_step=$3
     vrb_worker_context || return 75
-    # Durable worker lease covers the shell that can perform a final rename.
-    # Its children only prepare scratch; after killing this shell they cannot
-    # publish. A future LIVE transport needs its own lease before exec; this
-    # emulator receipt deliberately does not certify such a transport.
+    # Outer worker identity plus a distinct durable lease for EVERY final
+    # publisher (vrb_publish). Killing this shell alone does not prove its
+    # descendants quiet. A future LIVE transport still needs its own receipt.
     IFS=' ' read -r vrb_worker_pid _ < /proc/self/stat || return 1
     vrb_worker_start=$(vrj2_pid_start "$vrb_worker_pid") || return 1
     printf '%s\t%s\n' "$vrb_worker_pid" "$vrb_worker_start" > "$vrb_j/$vrb_op/worker" || return 1
@@ -125,6 +298,7 @@ vrb_write_scope() (
     [ "$(vr2_hash "$vrb_t/pre.$vrb_write_step")" = "$(printf '%s\n' "$vrb_write_row" | cut -f6)" ] &&
         [ "$(vr2_hash "$vrb_t/post.$vrb_write_step")" = "$(printf '%s\n' "$vrb_write_row" | cut -f7)" ] || return 3
     case $vrb_write_kind in
+        dns-scope) vrb_dns_write "$vrb_write_id" "$vrb_write_step" ;;
         group)
             vrb_command_sha=$(vr2_hash "$vrb_t/commands.$vrb_write_step") || return 3
             printf '%s\n' "$vrb_write_row" | awk -F'\t' -v h="$vrb_command_sha" '
@@ -149,10 +323,9 @@ vrb_write_scope() (
             vrb_scope_read "$vrb_write_kind" "$vrb_write_id" "$vrb_t/current" || return 3
             cmp -s "$vrb_t/current" "$vrb_t/pre.$vrb_write_step" || return 3
             [ ! -f "$vrb_e/local-fails" ] || [ "$(cat "$vrb_e/local-fails")" != "$vrb_write_id" ] || return 1
-            if [ "$(cat "$vrb_t/$vrb_write_dir.$vrb_write_step")" = - ]; then rm -f "$vrb_path"
+            if [ "$(cat "$vrb_t/$vrb_write_dir.$vrb_write_step")" = - ]; then vrb_publish - "$vrb_path"
             else
-                cp "$vrb_t/$vrb_write_dir.$vrb_write_step" "$vrb_path.new" &&
-                    chmod 0600 "$vrb_path.new" && mv "$vrb_path.new" "$vrb_path"
+                vrb_publish_image "$vrb_t/$vrb_write_dir.$vrb_write_step" "$vrb_path"
             fi ;;
     esac
 )
@@ -209,25 +382,35 @@ vrb_envelope() {
     export VWARD_ROOT_PREFIX VWARD_COMPONENT_STATE VWARD_CPU_DIR VWARD_BACKGROUND VWARD_ADMISSION_OWNED VWARD_ADMISSION_SLOT
     vward_admission_enter routing-rehearsal || return 75
     vrb_edit=0;vrb_change=0;vrb_inside=;vrb_role=;vrb_active_step=
-    trap '[ "$vrb_change" != 1 ] || vrj2_unlock "$vrb_j/.change"
-          [ "$vrb_edit" != 1 ] || vrj2_unlock "$vrb_j/.edit"
+    vrb_edit_path=$VWARD_ROOT_PREFIX/tmp/vward-console-edit.lock
+    vrb_change_path=$VWARD_ROOT_PREFIX/tmp/vward-route-change.lock
+    IFS=' ' read -r vrj2_me _ < /proc/self/stat || return 1
+    vrj2_start=$(vrj2_pid_start "$vrj2_me") || return 1
+    trap '[ "$vrb_change" != 1 ] || vrb_shared_unlock "$vrb_change_path"
+          [ "$vrb_edit" != 1 ] || vrb_shared_unlock "$vrb_edit_path"
           vward_admission_leave' EXIT
     trap 'exit 143' HUP INT TERM
-    for vrb_lock in .edit .change; do
-        if [ ! -e "$vrb_j/$vrb_lock" ] && [ ! -L "$vrb_j/$vrb_lock" ]; then mkdir "$vrb_j/$vrb_lock" || return 1;fi
-        vrj_dir "$vrb_j/$vrb_lock" || return 75
-    done
-    vrj2_lock "$vrb_j/.edit" || return 75;vrb_edit=1
-    vrj2_lock "$vrb_j/.change" || return 75;vrb_change=1
+    vrb_shared_lock "$vrb_edit_path" || return 75;vrb_edit=1
+    vrb_shared_lock "$vrb_change_path" || return 75;vrb_change=1
+    vrb_legacy_gate "$vrb_e" || return 75
+    vrb_revocations_gate "$vrb_j" "$vrb_e/decision" || return 75
     VWARD_CONSOLE_ETC=$vrb_e;VWARD_ROUTE_STATE=$vrb_e/route
     VWARD_KCACHE=$vrb_e;VWARD_DEVICE_CONFIG=$vrb_e/device.conf
     VWARD_DEVICE_MAP_CACHE=$vrb_e/device-map.tsv
     VWARD_SERVICES_FETCHED=$vrb_e/catalog.json;VWARD_SERVICES_BUNDLED=$vrb_e/missing
     VWARD_ROUTING_AGH_DOMAINS=$vrb_e/agh-domains
+    VWARD_ROUTING_AGH_IMAGE=$vrb_e/agh.json
     VWARD_CONSOLE_BACKUP_DIR=$vrb_e/backup
     export VWARD_CONSOLE_ETC VWARD_ROUTE_STATE VWARD_KCACHE VWARD_DEVICE_CONFIG VWARD_DEVICE_MAP_CACHE \
-        VWARD_SERVICES_FETCHED VWARD_SERVICES_BUNDLED VWARD_ROUTING_AGH_DOMAINS VWARD_CONSOLE_BACKUP_DIR
+        VWARD_SERVICES_FETCHED VWARD_SERVICES_BUNDLED VWARD_ROUTING_AGH_DOMAINS VWARD_ROUTING_AGH_IMAGE VWARD_CONSOLE_BACKUP_DIR
     ndm() { vrb_emu_ndm "$@"; }
+    RUNCFG=$vrb_e/running-config
+    export RUNCFG
+    # Fixed DATA adapters called by the imported console helpers.
+    # shellcheck disable=SC2317
+    snapshot() { cp "$vrb_e/running.cfg" "$RUNCFG"; }
+    # shellcheck disable=SC2317
+    audit() { :; }
 }
 
 vrb_fresh_stage() {
@@ -235,6 +418,57 @@ vrb_fresh_stage() {
     vward_routing_consistent_read2 "$vrb_t/fresh" "$vrb_e/decision" > "$vrb_t/read.status" || return 3
     cat "$vrb_t/fresh/generation"
 }
+
+# A new hash is not automatically an own Gi. Verify that ONLY the declared
+# scope changed. A concurrent decision/profile/queue edit closes the operation,
+# even when the backend happened to reach this step's expected postimage.
+vrb_delta_valid() (
+    [ "$#" -eq 4 ] && vr2_stage_valid "$1" && vr2_stage_valid "$2" || return 2
+    case $3 in
+        group) vrb_allowed=cfg ;;
+        nativeproof) vrb_allowed=owned:$4 ;;
+        manifest) vrb_allowed=v2-$4 ;;
+        registry) [ "$4" = enabled ] || return 2;vrb_allowed=enabled ;;
+        dns-scope)
+            case $4 in keenetic) vrb_allowed=cfg ;; agh) vrb_allowed=obs-agh-image ;; *) return 2 ;; esac ;;
+        *) return 2 ;;
+    esac
+    awk -v allowed="$vrb_allowed" -v uid="$(id -u)" '
+        FILENAME==ARGV[1] {before_n[$1]++;k=$1 SUBSEP before_n[$1];before[k]=$1 " " $2 " " $3 " " $6 " " $7;bmode[k]=$6;buid[k]=$7;label[k]=$1;next}
+        {after_n[$1]++;k=$1 SUBSEP after_n[$1];after[k]=$1 " " $2 " " $3 " " $6 " " $7;amode[k]=$6;auid[k]=$7;label[k]=$1}
+        END{for(k in label) {
+            if(before[k]!=after[k] && label[k]!=allowed)bad=1
+            if(label[k]==allowed) {
+                if(bmode[k]!="" && amode[k]!="" && (bmode[k]!=amode[k] || buid[k]!=auid[k]))bad=1
+                if(bmode[k]=="" && amode[k]!="" && (amode[k]!="-rw-------" || auid[k]!=uid))bad=1
+            }
+        }exit bad?1:0}' \
+        "$1/inputs.fp" "$2/inputs.fp" || return 3
+    if [ "$3" = group ]; then
+        for vrb_side in "$1" "$2"; do
+            awk -v g="$4" '
+                /^object-group fqdn / {skip=($3==g)}
+                skip {if($0=="!")skip=0;next}
+                /^dns-proxy$/ {dns=1}
+                /^!/ {dns=0}
+                dns && $1=="route" && $2=="object-group" && $3==g {next}
+                {print}' "$vrb_side/native.cfg" > "$vrb_side/.outside" || return 2
+        done
+        cmp -s "$1/.outside" "$2/.outside" || return 3
+    fi
+    if [ "$3:$4" = dns-scope:keenetic ]; then
+        for vrb_side in "$1" "$2"; do
+            awk '/^dns-proxy$/ {dns=1} /^[^ \t]/ && $0!="dns-proxy" {dns=0}
+                dns && $1=="https" && $2=="upstream" {next}{print}' "$vrb_side/native.cfg" > "$vrb_side/.outside" || return 2
+        done
+        cmp -s "$1/.outside" "$2/.outside" || return 3
+    elif [ "$3:$4" = dns-scope:agh ]; then
+        for vrb_side in "$1" "$2"; do
+            "${JQ:-jq}" -ceS 'del(.upstream_dns)' "$vrb_side/agh.json" > "$vrb_side/.outside" || return 2
+        done
+        cmp -s "$1/.outside" "$2/.outside" || return 3
+    fi
+)
 
 # JDIR OPID SID ACTION TARGET DNS EXPECTED_REV. All paths for the simulated
 # sources are bound below to JDIR/.emu; inherited profile/cache paths cannot
@@ -260,12 +494,27 @@ vward_routing_pipeline2() (
         printf 'outcome\tblocked\tdesired-only\tunknown\tfalse\temulated\n';return 75
     fi
     vward_routing_lower2 "$vrb_t/stage" "$vrb_t/typed" "$vrb_t/lowered" || return 75
-    vrb_t=$vrb_t/lowered
+    vrb_execute2 "$vrb_t/lowered"
+)
+
+# One executor for service choices AND server lifecycle plans. This internal
+# function has no transport selection and still requires the OFF DATA envelope.
+vrb_execute2() {
+    [ "$#" -eq 1 ] && vrj_dir "$1" && vrb_pipeline_ready "$vrb_j" || return 75
+    vrb_t=$1
     if ! grep -q '^step' "$vrb_t/plan"; then
         printf 'outcome\tunchanged\tconfigured\tverified\tfalse\temulated\n';return 0
     fi
     mkdir "$vrb_t/fresh" || return 1
     vward_journal2_plan "$vrb_j" "$vrb_op" "$vrb_t/plan" || return 75
+    if [ -e "$vrb_t/withdrawal" ] || [ -L "$vrb_t/withdrawal" ]; then
+        vrj2_file "$vrb_t/withdrawal" || return 75
+        vrb_withdraw_hash=$(vr2_hash "$vrb_t/withdrawal") || return 75
+        awk -F'\t' -v h="$vrb_withdraw_hash" '$1=="step"&&$4=="manifest"&&$5=="tombstones" {
+            n=split($10,a,",");for(i=1;i<=n;i++)if(a[i]=="revocations:" h)ok=1}END{exit ok?0:1}' "$vrb_t/plan" || return 75
+        cp "$vrb_t/withdrawal" "$vrb_j/$vrb_op/withdrawal" &&
+            printf '%s\n' "$vrb_withdraw_hash" > "$vrb_j/$vrb_op/withdrawal.sha" && vrj2_flush || return 1
+    fi
     # Bind sidecars to journal plan before writes. SHA comparisons happen again
     # immediately before use; the journal hash commits to exact pre/post bytes.
     cp -R "$vrb_t" "$vrb_j/$vrb_op/prepared" || return 1
@@ -273,6 +522,14 @@ vward_routing_pipeline2() (
     vrb_gen=$(cat "$vrb_t/generation")
     while IFS="$(printf '\t')" read -r vrb_tag vrb_n _vrb_action vrb_kind vrb_id vrb_pre vrb_post _vrb_proof _vrb_refs _vrb_checks _vrb_inverse; do
         [ "$vrb_tag" = step ] || continue
+        cp "$vrb_e/running.cfg" "$vrb_e/running-config" || return 1
+        vrb_now=$(vrb_fresh_stage) || return 3
+        if [ "$vrb_now" != "$vrb_gen" ]; then
+            vward_journal2_unknown "$vrb_j" "$vrb_op" input-changed-before-step
+            printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\temulated\n';return 3
+        fi
+        rm -rf "$vrb_t/before" || return 1
+        cp -R "$vrb_t/fresh" "$vrb_t/before" || return 1
         [ "$(vr2_hash "$vrb_t/pre.$vrb_n")" = "$vrb_pre" ] &&
             [ "$(vr2_hash "$vrb_t/post.$vrb_n")" = "$vrb_post" ] || return 3
         vrb_scope_read "$vrb_kind" "$vrb_id" "$vrb_t/current" || return 3
@@ -281,8 +538,16 @@ vward_routing_pipeline2() (
         vrb_rc=0;vrb_write_scope "$vrb_kind" "$vrb_id" "$vrb_n" post || vrb_rc=$?
         cp "$vrb_e/running.cfg" "$vrb_e/running-config" || return 1
         vrb_gen=$(vrb_fresh_stage) || { vward_journal2_unknown "$vrb_j" "$vrb_op" readback-unavailable;return 3; }
+        if ! vrb_delta_valid "$vrb_t/before" "$vrb_t/fresh" "$vrb_kind" "$vrb_id"; then
+            vward_journal2_unknown "$vrb_j" "$vrb_op" input-changed-during-step
+            printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\temulated\n';return 3
+        fi
         vrb_scope_read "$vrb_kind" "$vrb_id" "$vrb_t/current" || return 3
         vr2_hash "$vrb_t/current" > "$vrb_t/current.hash"
+        if [ "$vrb_kind:$vrb_id" = dns-scope:agh ] && [ "$vrb_rc" != 0 ]; then
+            vward_journal2_unknown "$vrb_j" "$vrb_op" agh-unconfirmed-response
+            printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\temulated\n';return 3
+        fi
         vward_journal2_finish "$vrb_j" "$vrb_op" "$vrb_n" "$vrb_gen" "$vrb_t/current.hash" || {
             vward_journal2_unknown "$vrb_j" "$vrb_op" incomplete-step
             printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\temulated\n';return 3;
@@ -292,16 +557,27 @@ vward_routing_pipeline2() (
     done < "$vrb_t/plan"
     vward_journal2_saved "$vrb_j" "$vrb_op" pending || return 1
     vrb_role=save
-    if ! ndm 'system configuration save'; then
+    vrb_publish_quiet "$vrb_j/$vrb_op" || return 75
+    vrb_ndm_save=0
+    awk -F'\t' '$1=="step"&&($4=="group" || ($4=="dns-scope" && $5=="keenetic")){found=1}END{exit found?0:1}' "$vrb_t/plan" && vrb_ndm_save=1
+    if [ "$vrb_ndm_save" = 1 ] && ! ndm 'system configuration save'; then
         vward_journal2_saved "$vrb_j" "$vrb_op" failed
         vward_journal2_unknown "$vrb_j" "$vrb_op" save-failed
         printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\temulated\n';return 3
     fi
-    cmp -s "$vrb_e/running.cfg" "$vrb_e/saved.cfg" || return 3
+    if [ "$vrb_ndm_save" = 1 ] && ! cmp -s "$vrb_e/running.cfg" "$vrb_e/saved.cfg"; then
+        vward_journal2_unknown "$vrb_j" "$vrb_op" save-readback-mismatch;return 3
+    fi
+    cp "$vrb_e/running.cfg" "$vrb_e/running-config" || return 1
+    vrb_now=$(vrb_fresh_stage) || { vward_journal2_unknown "$vrb_j" "$vrb_op" save-generation-unavailable;return 3; }
+    if [ "$vrb_now" != "$vrb_gen" ]; then
+        vward_journal2_unknown "$vrb_j" "$vrb_op" input-changed-on-save
+        printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\temulated\n';return 3
+    fi
     vward_journal2_saved "$vrb_j" "$vrb_op" 'done' &&
         vward_journal2_commit "$vrb_j" "$vrb_op" "$vrb_gen" || return 3
     printf 'outcome\tcommitted\tconfigured\tverified\tfalse\temulated\n'
-)
+}
 
 vward_routing_pipeline_recover2() (
     umask 077
@@ -309,8 +585,15 @@ vward_routing_pipeline_recover2() (
     case $3 in inspect|compensate) ;; *) return 2 ;; esac
     vrb_envelope "$1" "$2" || return 75
     vrj2_ready "$vrb_j" "$vrb_op" || return 75
+    [ ! -e "$vrb_j/$vrb_op/withdrawal" ] && [ ! -L "$vrb_j/$vrb_op/withdrawal" ] || return 75
     vrj2_gate_except "$vrb_j" "$vrb_op" || return 75
     case $(cat "$vrb_j/$vrb_op/state") in planned|pending|unknown) ;; *) return 75 ;; esac
+    vrb_publish_quiet "$vrb_j/$vrb_op" || return 75
+    # An acknowledged DATA write is distinct from an unresolved request. Do
+    # not race compensation with a POST whose completion is still unproven.
+    for vrb_request in "$vrb_j/$vrb_op"/dns-evidence/*/request.pending "$vrb_j/$vrb_op"/dns-inverse.*/evidence/request.pending; do
+        [ ! -e "$vrb_request" ] && [ ! -L "$vrb_request" ] || return 75
+    done
     if [ -e "$vrb_j/$vrb_op/worker" ] || [ -L "$vrb_j/$vrb_op/worker" ]; then
         vrj2_file "$vrb_j/$vrb_op/worker" || return 75
         IFS="$(printf '\t')" read -r vrb_pid vrb_start vrb_extra < "$vrb_j/$vrb_op/worker" || return 75
@@ -341,12 +624,19 @@ vward_routing_pipeline_recover2() (
                     # Derive set difference to the EXACT saved baseline. No CLI
                     # or policy recomputation and no forward command replay.
                     vrb_inverse_group "$vrb_id" "$vrb_n" || return 3
+                elif [ "$vrb_kind" = dns-scope ]; then
+                    vrb_dns_inverse "$vrb_id" "$vrb_n" || return 3
                 else
                     vrb_path=$(vrb_local_path "$vrb_kind" "$vrb_id") || return 2
                     vrb_scope_read "$vrb_kind" "$vrb_id" "$vrb_t/check" || return 3
                     cmp -s "$vrb_t/check" "$vrb_t/current" || return 75
-                    if [ "$(cat "$vrb_t/pre.$vrb_n")" = - ]; then rm -f "$vrb_path"
-                    else cp "$vrb_t/pre.$vrb_n" "$vrb_path.new" && mv "$vrb_path.new" "$vrb_path" || return 1;fi
+                    if [ "$(cat "$vrb_t/pre.$vrb_n")" = - ]; then
+                        vrb_role=inverse;vrb_active_step=$vrb_n
+                        vrb_publish - "$vrb_path" || return 1
+                    else
+                        vrb_role=inverse;vrb_active_step=$vrb_n
+                        vrb_publish_image "$vrb_t/pre.$vrb_n" "$vrb_path" || return 1
+                    fi
                 fi
             fi
             cp "$vrb_e/running.cfg" "$vrb_e/running-config" || return 1
@@ -359,8 +649,16 @@ vward_routing_pipeline_recover2() (
     done
     vward_journal2_rollback_saved "$vrb_j" "$vrb_op" pending || return 1
     vrb_role=baseline-save
-    ndm 'system configuration save' || return 3
-    cmp -s "$vrb_e/running.cfg" "$vrb_e/saved.cfg" || return 3
+    vrb_ndm_save=0
+    while IFS="$(printf '\t')" read -r vrb_tag vrb_n _vrb_action vrb_kind vrb_id _vrb_rest; do
+        [ "$vrb_tag" = step ] || continue
+        [ -e "$vrb_j/$vrb_op/step.$vrb_n/inverse.from" ] || continue
+        case $vrb_kind:$vrb_id in group:*|dns-scope:keenetic) vrb_ndm_save=1 ;; esac
+    done < "$vrb_t/plan"
+    if [ "$vrb_ndm_save" = 1 ]; then
+        ndm 'system configuration save' || return 3
+        cmp -s "$vrb_e/running.cfg" "$vrb_e/saved.cfg" || return 3
+    fi
     vward_journal2_rollback_saved "$vrb_j" "$vrb_op" 'done' || return 1
     mkdir "$vrb_t/baseline" 2>/dev/null || vrj_dir "$vrb_t/baseline" || return 1
     while IFS="$(printf '\t')" read -r vrb_tag vrb_n _vrb_action vrb_kind vrb_id _vrb_rest; do
@@ -373,4 +671,3 @@ vward_routing_pipeline_recover2() (
     vward_journal2_abort "$vrb_j" "$vrb_op" "$vrb_gen" "$vrb_t/baseline" || return 75
     printf 'outcome\tcompensated\tdesired-only\tbaseline\tfalse\temulated\n'
 )
-

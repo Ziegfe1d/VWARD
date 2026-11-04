@@ -87,83 +87,12 @@ if [ "$OP" = agh ]; then
     aget dns_info dns-back.json && "$ADS_JQ" -e --slurpfile o "$W/dns.json" '.upstream_dns == $o[0].upstream_dns' "$W/dns-back.json" >/dev/null 2>&1
   }
   valid_url() { printf '%s\n' "$1" | grep -Eq '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._~/%+=&?-]*$' && [ "${#1}" -le 300 ]; }
-  aget status status.json || agfail adguard_unavailable
-  case "$AG_SET" in
-    protection)
-      B=$(bool "$A1")
-      jpost protection "{\"enabled\":$B}" || jpost dns_config "{\"protection_enabled\":$B}" || agfail adguard_rejected
-      aget status status.json && "$ADS_JQ" -e --argjson b "$B" '.protection_enabled == $b' "$W/status.json" >/dev/null || agfail verification_failed ;;
-    filtering|interval)
-      aget filtering/status filtering.json || agfail adguard_unavailable
-      if [ "$AG_SET" = filtering ]; then B=$(bool "$A1"); I=$("$ADS_JQ" -r '.interval // 24' "$W/filtering.json")
-      else case "$A1" in 0|1|12|24|72|168) I=$A1 ;; *) agfail invalid_value ;; esac; B=$("$ADS_JQ" -r '.enabled == true' "$W/filtering.json"); fi
-      jpost filtering/config "{\"enabled\":$B,\"interval\":$I}" || agfail adguard_rejected
-      aget filtering/status filtering.json && "$ADS_JQ" -e --argjson b "$B" --argjson i "$I" '.enabled == $b and .interval == $i' "$W/filtering.json" >/dev/null || agfail verification_failed ;;
-    safebrowsing|parental)
-      B=$(bool "$A1"); E=disable; [ "$B" = true ] && E=enable
-      jpost "$AG_SET/$E" "" || agfail adguard_rejected
-      aget "$AG_SET/status" x.json && "$ADS_JQ" -e --argjson b "$B" '.enabled == $b' "$W/x.json" >/dev/null || agfail verification_failed ;;
-    safesearch)
-      B=$(bool "$A1")
-      if aget safesearch/status ss.json && "$ADS_JQ" -e 'has("bing")' "$W/ss.json" >/dev/null 2>&1; then
-        jput safesearch/settings "$("$ADS_JQ" -c --argjson b "$B" '.enabled = $b' "$W/ss.json")" || agfail adguard_rejected
-      else
-        E=disable; [ "$B" = true ] && E=enable; jpost "safesearch/$E" "" || agfail adguard_rejected
-      fi
-      aget safesearch/status ss.json && "$ADS_JQ" -e --argjson b "$B" '.enabled == $b' "$W/ss.json" >/dev/null || agfail verification_failed ;;
-    filters-refresh)
-      jpost filtering/refresh '{"whitelist":false}' || agfail adguard_rejected ;;
-    # user-rule add|remove DOMAIN: the owner's own rule from «Проверить или заблокировать» -
-    # ||domain^ blocks, @@||domain^ lets through - among AdGuard Home's user rules, outside
-    # VWARD's marker block (the publisher keeps every rule outside it). Every other rule stays.
-    user-rule)
-      case "$A2" in ''|*[!a-z0-9.@\|^-]*) agfail invalid_value ;; esac
-      printf '%s\n' "$A2" | grep -Eq '^(@@)?\|\|[a-z0-9.-]+\^$' || agfail invalid_value
-      aget filtering/status filtering.json || agfail adguard_unavailable
-      case "$A1" in
-        add) NEW=$("$ADS_JQ" -c --arg r "$A2" '{rules: (((.user_rules // []) - [$r]) + [$r])}' "$W/filtering.json") ;;
-        remove) NEW=$("$ADS_JQ" -c --arg r "$A2" '{rules: ((.user_rules // []) - [$r])}' "$W/filtering.json") ;;
-        *) agfail invalid_value ;;
-      esac
-      jpost filtering/set_rules "$NEW" || agfail adguard_rejected
-      aget filtering/status filtering.json && "$ADS_JQ" -e --arg r "$A2" --arg op "$A1" '((.user_rules // []) | index($r) != null) == ($op == "add")' "$W/filtering.json" >/dev/null || agfail verification_failed ;;
-    filter-enable)
-      valid_url "$A1" || agfail invalid_url; B=$(bool "$A2")
-      aget filtering/status filtering.json || agfail adguard_unavailable
-      NAME=$("$ADS_JQ" -r --arg u "$A1" '[.filters[]? | select(.url == $u)][0].name // empty' "$W/filtering.json")
-      [ -n "$NAME" ] || agfail unknown_filter
-      jpost filtering/set_url "$("$ADS_JQ" -cn --arg u "$A1" --arg n "$NAME" --argjson b "$B" '{url: $u, whitelist: false, data: {name: $n, url: $u, enabled: $b}}')" || agfail adguard_rejected
-      aget filtering/status filtering.json && "$ADS_JQ" -e --arg u "$A1" --argjson b "$B" 'any(.filters[]?; .url == $u and .enabled == $b)' "$W/filtering.json" >/dev/null || agfail verification_failed ;;
-    filter-add)
-      valid_url "$A1" || agfail invalid_url
-      case "$A2" in ''|*[!A-Za-z0-9\ ._-]*) agfail invalid_name ;; esac; [ "${#A2}" -le 64 ] || agfail invalid_name
-      jpost filtering/add_url "$("$ADS_JQ" -cn --arg u "$A1" --arg n "$A2" '{name: $n, url: $u, whitelist: false}')" || agfail adguard_rejected
-      aget filtering/status filtering.json && "$ADS_JQ" -e --arg u "$A1" 'any(.filters[]?; .url == $u)' "$W/filtering.json" >/dev/null || agfail verification_failed ;;
-    filter-remove)
-      valid_url "$A1" || agfail invalid_url
-      jpost filtering/remove_url "$("$ADS_JQ" -cn --arg u "$A1" '{url: $u, whitelist: false}')" || agfail adguard_rejected
-      aget filtering/status filtering.json && ! "$ADS_JQ" -e --arg u "$A1" 'any(.filters[]?; .url == $u)' "$W/filtering.json" >/dev/null || agfail verification_failed ;;
-    service)
-      case "$A1" in ''|*[!a-z0-9_]*) agfail invalid_service ;; esac; B=$(bool "$A2")
-      if aget blocked_services/get sg.json; then
-        NEW=$("$ADS_JQ" -c --arg s "$A1" --argjson b "$B" '.ids = (((.ids // []) - [$s]) + (if $b then [$s] else [] end))' "$W/sg.json")
-        jput blocked_services/update "$NEW" || agfail adguard_rejected
-        aget blocked_services/get sg.json && "$ADS_JQ" -e --arg s "$A1" --argjson b "$B" '((.ids // []) | index($s) != null) == $b' "$W/sg.json" >/dev/null || agfail verification_failed
-      elif aget blocked_services/list sl.json; then
-        NEW=$("$ADS_JQ" -c --arg s "$A1" --argjson b "$B" '((. // []) - [$s]) + (if $b then [$s] else [] end)' "$W/sl.json")
-        jpost blocked_services/set "$NEW" || agfail adguard_rejected
-        aget blocked_services/list sl.json && "$ADS_JQ" -e --arg s "$A1" --argjson b "$B" '((. // []) | index($s) != null) == $b' "$W/sl.json" >/dev/null || agfail verification_failed
-      else agfail adguard_unavailable; fi ;;
-    # Smart DNS rows ([/domain/]https://...) for the domain lists sent into a tunnel:
-    #   smartdns-take DOMAINS_FILE PAIRS_OUT  domains of the list and below leave their rows
-    #                                          (other domains of a row stay); taken pairs
-    #                                          "domain<TAB>upstream" go to PAIRS_OUT
-    #   smartdns-put PAIRS_FILE                those pairs come back; the upstream "auto"
-    #                                          is the one already serving most Smart DNS
-    #                                          domains (a domain added from the Panel)
-    # The whole upstream list is read back; on a mismatch the previous one is put back.
-    # smartdns-take-server PRIVATE_CONFIG PAIRS_OUT: only this server's domain rows.
-    smartdns-take|smartdns-take-server|smartdns-put|smartdns-restore|smartdns-check)
+  # Internal worker shared with the OFF rehearsal; ordinary CLI still owns
+  # admission and CONTROL_LOCK before this call. No API/env lock bypass.
+  ads_smartdns_locked() {
+    [ "${CL_HELD:-}" = 1 ] && [ -d "$CONTROL_LOCK" ] && [ ! -L "$CONTROL_LOCK" ] &&
+      [ -O "$CONTROL_LOCK" ] && [ "$(ads_read_line "$CONTROL_LOCK/pid")" = "$$" ] &&
+      [ "$(ads_read_line "$CONTROL_LOCK/pid_start")" = "$(ads_pid_start $$)" ] || return 75
       [ -r "$A1" ] || agfail invalid_value
       aget dns_info dns.json || agfail adguard_unavailable
       "$ADS_JQ" -e '.upstream_dns | type == "array"' "$W/dns.json" >/dev/null 2>&1 || agfail adguard_unavailable
@@ -176,14 +105,23 @@ if [ "$OP" = agh ]; then
                         and ((try ($h | split(":") | last | tonumber) catch null) != null)));'
       if [ "$AG_SET" != smartdns-put ] && [ "$AG_SET" != smartdns-restore ] && [ "$AG_SET" != smartdns-check ]; then
         case "$A2" in ''|*[!A-Za-z0-9._/-]*) agfail invalid_value ;; esac
-        if [ "$AG_SET" = smartdns-take-server ]; then
+        if [ "$AG_SET" = smartdns-take-pairs ]; then
+          # Internal typed worker only (not a public AG_SET dispatch case).
+          # Exact native domain+URL pairs; a shared row or another URL is not
+          # permission to remove its independently managed bindings.
+          [ -f "$A1" ] && [ ! -L "$A1" ] && [ -O "$A1" ] &&
+            [ "$(wc -c < "$A1")" -le 1048576 ] && [ "$(wc -l < "$A1")" -le 4096 ] || agfail invalid_value
+          awk 'BEGIN{FS="\t"} NF!=2 || $1!~/^[a-z0-9.-]+$/ || $2=="" || $2~/[[:space:]\\]/{bad=1} END{exit bad?1:0}' "$A1" || agfail invalid_value
+          "$ADS_JQ" -Rn '[inputs | split("\t") | {d: (.[0] | ascii_downcase), u: .[1]}]' "$A1" > "$W/inc.json" || agfail invalid_value
+        elif [ "$AG_SET" = smartdns-take-server ]; then
           "$ADS_JQ" -Rn '[inputs | select(startswith("SMARTDNS_URL=")) | ltrimstr("SMARTDNS_URL=") | select(length > 0)] | .[:1]' "$A1" > "$W/inc.json" || agfail invalid_value
           "$ADS_JQ" -e 'length == 1' "$W/inc.json" >/dev/null || agfail invalid_value
         else
           "$ADS_JQ" -Rn '[inputs | ascii_downcase | select(length > 0)]' "$A1" > "$W/inc.json" || agfail invalid_value
         fi
         "$ADS_JQ" -c --arg mode "$AG_SET" --slurpfile inc "$W/inc.json" "$SD_LIB"'
-          def under($d; $u): if $mode == "smartdns-take-server" then any($inc[0][]; . == $u)
+          def under($d; $u): if $mode == "smartdns-take-pairs" then any($inc[0][]; .d == $d and .u == $u)
+            elif $mode == "smartdns-take-server" then any($inc[0][]; . == $u)
             else any($inc[0][]; . as $i | $d == $i or ($d | endswith("." + $i))) end;
           [.upstream_dns[] | . as $raw | row as $r
             | if $r == null or ($r | enc | not) then {keep: $raw, took: []}
@@ -262,7 +200,86 @@ if [ "$OP" = agh ]; then
         fi
         echo "PUT=$(grep -c . "$A1")"
         echo "CHANGED=$ag_put_changed"
-      fi ;;
+      fi
+  }
+  aget status status.json || agfail adguard_unavailable
+  case "$AG_SET" in
+    protection)
+      B=$(bool "$A1")
+      jpost protection "{\"enabled\":$B}" || jpost dns_config "{\"protection_enabled\":$B}" || agfail adguard_rejected
+      aget status status.json && "$ADS_JQ" -e --argjson b "$B" '.protection_enabled == $b' "$W/status.json" >/dev/null || agfail verification_failed ;;
+    filtering|interval)
+      aget filtering/status filtering.json || agfail adguard_unavailable
+      if [ "$AG_SET" = filtering ]; then B=$(bool "$A1"); I=$("$ADS_JQ" -r '.interval // 24' "$W/filtering.json")
+      else case "$A1" in 0|1|12|24|72|168) I=$A1 ;; *) agfail invalid_value ;; esac; B=$("$ADS_JQ" -r '.enabled == true' "$W/filtering.json"); fi
+      jpost filtering/config "{\"enabled\":$B,\"interval\":$I}" || agfail adguard_rejected
+      aget filtering/status filtering.json && "$ADS_JQ" -e --argjson b "$B" --argjson i "$I" '.enabled == $b and .interval == $i' "$W/filtering.json" >/dev/null || agfail verification_failed ;;
+    safebrowsing|parental)
+      B=$(bool "$A1"); E=disable; [ "$B" = true ] && E=enable
+      jpost "$AG_SET/$E" "" || agfail adguard_rejected
+      aget "$AG_SET/status" x.json && "$ADS_JQ" -e --argjson b "$B" '.enabled == $b' "$W/x.json" >/dev/null || agfail verification_failed ;;
+    safesearch)
+      B=$(bool "$A1")
+      if aget safesearch/status ss.json && "$ADS_JQ" -e 'has("bing")' "$W/ss.json" >/dev/null 2>&1; then
+        jput safesearch/settings "$("$ADS_JQ" -c --argjson b "$B" '.enabled = $b' "$W/ss.json")" || agfail adguard_rejected
+      else
+        E=disable; [ "$B" = true ] && E=enable; jpost "safesearch/$E" "" || agfail adguard_rejected
+      fi
+      aget safesearch/status ss.json && "$ADS_JQ" -e --argjson b "$B" '.enabled == $b' "$W/ss.json" >/dev/null || agfail verification_failed ;;
+    filters-refresh)
+      jpost filtering/refresh '{"whitelist":false}' || agfail adguard_rejected ;;
+    # user-rule add|remove DOMAIN: the owner's own rule from «Проверить или заблокировать» -
+    # ||domain^ blocks, @@||domain^ lets through - among AdGuard Home's user rules, outside
+    # VWARD's marker block (the publisher keeps every rule outside it). Every other rule stays.
+    user-rule)
+      case "$A2" in ''|*[!a-z0-9.@\|^-]*) agfail invalid_value ;; esac
+      printf '%s\n' "$A2" | grep -Eq '^(@@)?\|\|[a-z0-9.-]+\^$' || agfail invalid_value
+      aget filtering/status filtering.json || agfail adguard_unavailable
+      case "$A1" in
+        add) NEW=$("$ADS_JQ" -c --arg r "$A2" '{rules: (((.user_rules // []) - [$r]) + [$r])}' "$W/filtering.json") ;;
+        remove) NEW=$("$ADS_JQ" -c --arg r "$A2" '{rules: ((.user_rules // []) - [$r])}' "$W/filtering.json") ;;
+        *) agfail invalid_value ;;
+      esac
+      jpost filtering/set_rules "$NEW" || agfail adguard_rejected
+      aget filtering/status filtering.json && "$ADS_JQ" -e --arg r "$A2" --arg op "$A1" '((.user_rules // []) | index($r) != null) == ($op == "add")' "$W/filtering.json" >/dev/null || agfail verification_failed ;;
+    filter-enable)
+      valid_url "$A1" || agfail invalid_url; B=$(bool "$A2")
+      aget filtering/status filtering.json || agfail adguard_unavailable
+      NAME=$("$ADS_JQ" -r --arg u "$A1" '[.filters[]? | select(.url == $u)][0].name // empty' "$W/filtering.json")
+      [ -n "$NAME" ] || agfail unknown_filter
+      jpost filtering/set_url "$("$ADS_JQ" -cn --arg u "$A1" --arg n "$NAME" --argjson b "$B" '{url: $u, whitelist: false, data: {name: $n, url: $u, enabled: $b}}')" || agfail adguard_rejected
+      aget filtering/status filtering.json && "$ADS_JQ" -e --arg u "$A1" --argjson b "$B" 'any(.filters[]?; .url == $u and .enabled == $b)' "$W/filtering.json" >/dev/null || agfail verification_failed ;;
+    filter-add)
+      valid_url "$A1" || agfail invalid_url
+      case "$A2" in ''|*[!A-Za-z0-9\ ._-]*) agfail invalid_name ;; esac; [ "${#A2}" -le 64 ] || agfail invalid_name
+      jpost filtering/add_url "$("$ADS_JQ" -cn --arg u "$A1" --arg n "$A2" '{name: $n, url: $u, whitelist: false}')" || agfail adguard_rejected
+      aget filtering/status filtering.json && "$ADS_JQ" -e --arg u "$A1" 'any(.filters[]?; .url == $u)' "$W/filtering.json" >/dev/null || agfail verification_failed ;;
+    filter-remove)
+      valid_url "$A1" || agfail invalid_url
+      jpost filtering/remove_url "$("$ADS_JQ" -cn --arg u "$A1" '{url: $u, whitelist: false}')" || agfail adguard_rejected
+      aget filtering/status filtering.json && ! "$ADS_JQ" -e --arg u "$A1" 'any(.filters[]?; .url == $u)' "$W/filtering.json" >/dev/null || agfail verification_failed ;;
+    service)
+      case "$A1" in ''|*[!a-z0-9_]*) agfail invalid_service ;; esac; B=$(bool "$A2")
+      if aget blocked_services/get sg.json; then
+        NEW=$("$ADS_JQ" -c --arg s "$A1" --argjson b "$B" '.ids = (((.ids // []) - [$s]) + (if $b then [$s] else [] end))' "$W/sg.json")
+        jput blocked_services/update "$NEW" || agfail adguard_rejected
+        aget blocked_services/get sg.json && "$ADS_JQ" -e --arg s "$A1" --argjson b "$B" '((.ids // []) | index($s) != null) == $b' "$W/sg.json" >/dev/null || agfail verification_failed
+      elif aget blocked_services/list sl.json; then
+        NEW=$("$ADS_JQ" -c --arg s "$A1" --argjson b "$B" '((. // []) - [$s]) + (if $b then [$s] else [] end)' "$W/sl.json")
+        jpost blocked_services/set "$NEW" || agfail adguard_rejected
+        aget blocked_services/list sl.json && "$ADS_JQ" -e --arg s "$A1" --argjson b "$B" '((. // []) | index($s) != null) == $b' "$W/sl.json" >/dev/null || agfail verification_failed
+      else agfail adguard_unavailable; fi ;;
+    # Smart DNS rows ([/domain/]https://...) for the domain lists sent into a tunnel:
+    #   smartdns-take DOMAINS_FILE PAIRS_OUT  domains of the list and below leave their rows
+    #                                          (other domains of a row stay); taken pairs
+    #                                          "domain<TAB>upstream" go to PAIRS_OUT
+    #   smartdns-put PAIRS_FILE                those pairs come back; the upstream "auto"
+    #                                          is the one already serving most Smart DNS
+    #                                          domains (a domain added from the Panel)
+    # The whole upstream list is read back; on a mismatch the previous one is put back.
+    # smartdns-take-server PRIVATE_CONFIG PAIRS_OUT: only this server's domain rows.
+    smartdns-take|smartdns-take-server|smartdns-put|smartdns-restore|smartdns-check)
+      ads_smartdns_locked || exit $? ;;
     *) agfail invalid_setting ;;
   esac
   ads_log "CONTROL|agh|$AG_SET|$A1|$A2|ok"

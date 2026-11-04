@@ -10,7 +10,7 @@ with Fixture() as f:
     clean='interface Wireguard0\n!\ninterface Wireguard1\n!\ndns-proxy\n!\n'
     f.cfg.write_text(clean);f.enabled.write_text('');f.persist.write_text('')
     inputs=f.p/'decision';inputs.mkdir(mode=0o700)
-    for name in ('version','choices','bindings','evidence','policies','saved','queue','tombstones','context','resources','proofs'):
+    for name in ('version','choices','bindings','evidence','policies','saved','queue','tombstones','context','resources','proofs','upstreams'):
         (inputs/(name+'.tsv')).write_text('')
     def put(name,text):(inputs/(name+'.tsv')).write_text(text)
     put('version','routing-state\t2\n');put('choices','schema\t1\n')

@@ -25,18 +25,20 @@ vward_routing_lower2() (
     umask 077
     [ "$#" -eq 3 ] && vr2_stage_valid "$1" && vr2_file "$2" && vr2_private_dir "$3" || return 2
     [ ! -e "$3/plan" ] && [ ! -e "$3/generation" ] || return 75
+    cp "$1/inputs.fp" "$3/inputs.fp" || return 1
+    vrb_attrs_hash=$(vr2_hash "$3/inputs.fp") || return 1
     head -n1 "$2" > "$3/plan" || return 1
     vrb_g=$(cat "$1/generation")
     [ "$(cut -f3 "$3/plan")" = "$vrb_g" ] && vrj2_plan_valid "$2" || return 2
     # Reject unsupported physical actions before ANY journal/writer. This is a
     # preparation compiler, not an implicit fallback to a different backend.
-    awk -F'\t' '$1=="step" && $4!~/^(route|claims|choice)$/{bad=1} END{exit bad?1:0}' "$2" || return 75
+    awk -F'\t' '$1=="step" && $4!~/^(route|dns|claims|choice)$/{bad=1} END{exit bad?1:0}' "$2" || return 75
     cp "$1/decision/resources.tsv" "$3/resources.before" || return 1
     cp "$3/resources.before" "$3/resources.after" || return 1
     # Typed rows replace their exact own RID; peers remain byte-for-byte rows.
     awk -F'\t' 'BEGIN{OFS="\t"}
         FILENAME==ARGV[1] {$1=$1;rows[$2]=$0;next}
-        $1=="step" && $4~/^(route|claims)$/ {
+        $1=="step" && $4~/^(route|dns|claims)$/ {
             if($7=="-")delete rows[$5]
             else {v=$7;gsub(/\|/,OFS,v);rows[$5]=v}
         }
@@ -51,7 +53,7 @@ vward_routing_lower2() (
         # PRE/POST files already exist in private scratch; freeze their bytes.
         cp "$3" "$vrb_out/pre.$vrb_n" && cp "$4" "$vrb_out/post.$vrb_n" || return 1
         printf 'step\t%s\tmove\t%s\t%s\t%s\t%s\tcreation-and-cas\t-\t%s\trestore-own-scope\n' \
-            "$vrb_n" "$1" "$2" "$(vr2_hash "$3")" "$(vr2_hash "$4")" "$5" >> "$vrb_out/plan"
+            "$vrb_n" "$1" "$2" "$(vr2_hash "$3")" "$(vr2_hash "$4")" "$5,attrs:$vrb_attrs_hash" >> "$vrb_out/plan"
     }
     vrb_out=$3
     while IFS= read -r vrb_group; do
@@ -113,30 +115,45 @@ vward_routing_lower2() (
         else grep -v '^group=' "$3/native.post" > "$3/proof.post";fi
         vrb_emit nativeproof "$vrb_group" "$3/proof.pre" "$3/proof.post" generation,identity,postimage || return 1
     done < "$3/groups"
+    vrb_dns_compile "$1" "$3" || return $?
     # Model manifest and its origin/content revision proof have separate writes.
     awk -F'\t' 'BEGIN{OFS="\t"}FILENAME==ARGV[1]{old[$2]=$0;next}
+        FILENAME==ARGV[2]{witness[$1]=$2;next}
         $9=="vward" {r=$0;sub(/\t[^\t]*$/,"",r);rev=1
             if($2 in old){split(old[$2],a,OFS);before=old[$2];sub(/\t[^\t]*$/,"",before)
-                rev=a[11]+(before==r?0:1)}print r,rev}' \
-        "$1/decision/proofs.tsv" "$3/resources.after" | LC_ALL=C sort > "$3/proofs.after" || return 1
+                if($1=="dns" && before==r){print old[$2];next}
+                split(a[11],version,":");rev=version[1]+(before==r?0:1)}
+            if($1=="dns"){if(!($2 in witness))exit 2;rev=rev ":" witness[$2]}
+            print r,rev}' \
+        "$1/decision/proofs.tsv" "$3/dns-witness" "$3/resources.after" > "$3/proofs.unsorted" || return 2
+    LC_ALL=C sort "$3/proofs.unsorted" > "$3/proofs.after" || return 1
     for vrb_key in resources proofs choices; do
         if [ "$vrb_key" = choices ]; then
             awk -F'\t' 'BEGIN{OFS="\t"}FILENAME==ARGV[1]{if($1=="schema")header=$0;else rows[$2]=$0;next}
                 $1=="step" && $4=="choice" {v=$7;gsub(/\|/,OFS,v);if(v=="-")delete rows[$5];else rows[$5]=v}
-                END{print header;for(k in rows)print rows[k]}' "$1/decision/choices.tsv" "$2" > "$3/choices.after" || return 1
+                END{print header;for(k in rows)print rows[k]}' "$1/decision/choices.tsv" "$2" | LC_ALL=C sort > "$3/choices.after" || return 1
         fi
         cmp -s "$1/decision/$vrb_key.tsv" "$3/$vrb_key.after" ||
             vrb_emit manifest "$vrb_key" "$1/decision/$vrb_key.tsv" "$3/$vrb_key.after" generation,identity,postimage || return 1
     done
     # The old services view remains a projection; DNS/ISP are not service-on.
-    vrb_sid=$(awk -F'\t' '$1=="step"&&$4=="choice"{print $5}' "$2")
-    if [ -n "$vrb_sid" ]; then
-        awk -F'\t' -v s="$vrb_sid" 'BEGIN{OFS="\t"}
-            FILENAME==ARGV[1] {if($1!=s)print;next}
-            $1=="route" && index("," $11 ",",",S:" s ",") && !seen++ {g=$3;sub(/^group:/,"",g);print s,g,substr($6,5)}' \
-            "$1/enabled.tsv" "$3/resources.after" > "$3/enabled.after" || return 1
-        cmp -s "$1/enabled.tsv" "$3/enabled.after" || vrb_emit registry enabled "$1/enabled.tsv" "$3/enabled.after" generation,identity,postimage || return 1
-    fi
+    awk -F'\t' 'BEGIN{OFS="\t"}
+        FILENAME==ARGV[1] || FILENAME==ARGV[2] {
+            if($1!="route" || $9!="vward")next
+            n=split($11,refs,",");g=$3;sub(/^group:/,"",g)
+            for(i=1;i<=n;i++)if(refs[i]~/^S:/) {
+                s=substr(refs[i],3)
+                if(FILENAME==ARGV[1])prior[s SUBSEP g]=1
+                else {v=s OFS g OFS substr($6,5);if(s in desired && desired[s]!=v)bad=1;desired[s]=v}
+            }next
+        }
+        {if(($1 SUBSEP $2) in prior)next
+            if($1 in desired) {if($0!=desired[$1])bad=1;next}
+            keep[++nk]=$0}
+        END{if(bad)exit 75;for(i=1;i<=nk;i++)print keep[i];for(s in desired)print desired[s]}' \
+        "$3/resources.before" "$3/resources.after" "$1/enabled.tsv" > "$3/enabled.unsorted" || return 75
+    LC_ALL=C sort "$3/enabled.unsorted" > "$3/enabled.after" || return 1
+    cmp -s "$1/enabled.tsv" "$3/enabled.after" || vrb_emit registry enabled "$1/enabled.tsv" "$3/enabled.after" generation,identity,postimage || return 1
     vrj2_plan_valid "$3/plan" || return 2
     printf '%s\n' "$vrb_g" > "$3/generation"
 )

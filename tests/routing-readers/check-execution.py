@@ -5,56 +5,17 @@ The native command worker and group_set are extracted from the EXISTING console
 script; fixed DATA ndm belongs to the OFF coordinator. No fixture invents an
 applied outcome, ownership proof, or policy result.
 """
-import os
-from pathlib import Path
-import re
-from fixture import Fixture, LIBDIR, ROOT, READ, SNAP, OBSERVE, AUDIT, PLAN, JOURNAL, DRYRUN
+import shutil
+from fixture import PipelineFixture
 
-with Fixture() as f:
-    j=f.p/'journal';j.mkdir(mode=0o700)
-    e=j/'.emu';e.mkdir(mode=0o700)
-    decision=e/'decision';decision.mkdir(mode=0o700)
-    (e/'services/owned').mkdir(mode=0o700,parents=True)
-    for name in ('version','choices','bindings','evidence','policies','saved','queue','tombstones','context','resources','proofs'):
-        (decision/(name+'.tsv')).write_text('');(decision/(name+'.tsv')).chmod(0o600)
-    (decision/'version.tsv').write_text('routing-state\t2\n')
-    (decision/'choices.tsv').write_text('schema\t1\n')
-    (decision/'bindings.tsv').write_text('svc\tx.example\texact\tconfirmed\tipv4\tknown\nsvc\ty.example\texact\tconfirmed\tipv4\tknown\n')
-    (decision/'context.tsv').write_text('source:M\t1\nsource:S\t1\nsource:A\t1\nVPN:Wireguard0\tavailable\nVPN:Wireguard1\tavailable\n')
-    (e/'running.cfg').write_text('interface Wireguard0\n!\ninterface Wireguard1\n!\ndns-proxy\n!\n');(e/'running.cfg').chmod(0o600)
-    (e/'device.conf').write_bytes(f.dev.read_bytes())
-    (e/'device-map.tsv').write_bytes(f.map.read_bytes())
-    (e/'catalog.json').write_bytes(f.catalog.read_bytes())
-    (e/'agh-domains').write_text('')
-    (e/'services/enabled.tsv').write_text('');(e/'services/enabled.tsv').chmod(0o600)
-    (e/'services/categories.tsv').write_text('ai\tWireguard0\n')
-    (e/'route').mkdir(mode=0o700)
-    (e/'route/adaptive-persist.txt').write_text('')
-    shim=f.p/'poison';shim.mkdir();trace=f.p/'transport'
-    for name in ('ndmc','curl','comm','cksum'):
-        p=shim/name;p.write_text('#!/bin/sh\necho called >> "'+str(trace)+'"\nexit 99\n');p.chmod(0o755)
-    if os.environ.get('RS6_BUSYBOX'):(shim/'awk').symlink_to(Path(os.environ['RS6_BUSYBOX']).resolve())
-    env=f.env|{'PATH':str(shim)+':'+os.environ['PATH'],'VWARD_RS7_DRYRUN':'1'}
-    console=(ROOT/'components/console/scripts/vward-console-config.sh').read_text()
-    def function(name):
-        m=re.search(r'^'+name+r'\(\)\s*\{\n.*?^\}\n',console,re.M|re.S)
-        assert m,name
-        return m[0]
-    functions=f.p/'console-functions';functions.write_text(function('group_set')+'\n'+function('vward_routing_console_group_locked'))
-    libs=(READ,OBSERVE,SNAP,AUDIT,LIBDIR/'vward-routing-project.sh',PLAN,JOURNAL,DRYRUN,
-          LIBDIR/'vward-runtime-admission.sh',LIBDIR/'vward-routing-workers.sh',LIBDIR/'vward-routing-migrate.sh',LIBDIR/'vward-routing-pipeline.sh',functions)
+with PipelineFixture() as f:
+    j,e,decision=f.j,f.e,f.decision
+    trace=f.trace
     def call(op,action='vpn',target='VPN:Wireguard0',dns='default',rev=0,more=None):
-        script='for lib in '+ ' '.join('"${'+str(i)+'}"' for i in range(1,len(libs)+1))+'; do . "$lib"; done\n'
-        script+='shift '+str(len(libs))+'\nvward_routing_pipeline2 "$@"'
-        return f.run(script,*libs,j,op,'svc',action,target,dns,rev,env=env|(more or {}),timeout=45)
+        return f.invoke('vward_routing_pipeline2',j,op,'svc',action,target,dns,rev,more=more)
     def recover(op,mode='compensate'):
-        script='for lib in '+ ' '.join('"${'+str(i)+'}"' for i in range(1,len(libs)+1))+'; do . "$lib"; done\n'
-        script+='shift '+str(len(libs))+'\nvward_routing_pipeline_recover2 "$@"'
-        return f.run(script,*libs,j,op,mode,env=env,timeout=45)
-    def local(name,*args):
-        script='for lib in '+ ' '.join('"${'+str(i)+'}"' for i in range(1,len(libs)+1))+'; do . "$lib"; done\n'
-        script+='shift '+str(len(libs))+'\n"$@"'
-        return f.run(script,*libs,name,*args,env=env,timeout=30)
+        return f.invoke('vward_routing_pipeline_recover2',j,op,mode)
+    def local(name,*args):return f.invoke(name,*args)
     # Data migration has its own private baseline, schema guard and downgrade
     # refusal. This is independent of an updater replacing program files.
     (decision/'version.tsv').write_text('routing-state\t1\n')
@@ -79,6 +40,25 @@ with Fixture() as f:
     # historical active A contributor (an explicit fixture input change).
     (decision/'evidence.tsv').write_text('')
     r=local('vward_routing_state_migrate2',j,'m2');assert r.returncode==0,(r.returncode,r.stdout,r.stderr)
+    # The same operation path must support real typed DNS decisions on both
+    # stores, not merely print an eligible preview without a backend worker.
+    base_j,base_e,base_decision=j,e,decision
+    for store in ('keenetic','agh'):
+        j=f.p/('dns-'+store);j.mkdir(mode=0o700)
+        e=j/'.emu';shutil.copytree(base_e,e)
+        decision=e/'decision'
+        (decision/'policies.tsv').write_text(f'policy1\t{store}\tavailable\tactive\tnone\t1\turl1\n')
+        (decision/'upstreams.tsv').write_text('url1\thttps://dns.example.test/dns-query\n');(decision/'upstreams.tsv').chmod(0o600)
+        (decision/'context.tsv').write_text((decision/'context.tsv').read_text()+f'storage:{store}\tavailable\n')
+        (decision/'context.tsv').write_text((decision/'context.tsv').read_text()+'scope:subtree\tavailable\n')
+        (decision/'bindings.tsv').write_text((decision/'bindings.tsv').read_text().replace('exact','subtree'))
+        (e/'agh.json').write_text('{"upstream_dns":["9.9.9.9"],"upstream_dns_file":""}\n');(e/'agh.json').chmod(0o600)
+        r=call('dns1','dns','ISP','policy1',0)
+        assert r.returncode==0,(store,r.returncode,r.stdout,r.stderr)
+        assert (j/'dns1/state').read_text()=='committed\n'
+        assert all(x.split('\t')[0]=='dns' for x in (decision/'resources.tsv').read_text().splitlines())
+        assert (e/'services/enabled.tsv').read_text()==''
+    j,e,decision=base_j,base_e,base_decision
     # OFF-by-default and executor override guards remain closed, even when a
     # valid native service would otherwise be eligible.
     before=(e/'running.cfg').read_bytes()

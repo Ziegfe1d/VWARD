@@ -474,3 +474,58 @@ legacy migration и tombstone/backwriter fences; связанный 8/24 и TERM
 matrix; общий API/UI outcome и один адресный review; новый конечный CI. Новые библиотеки
 не добавлены в signed targets, callers/UI не подключены. Старый CI479f268 не покрывает
 этот код. Работа продолжается в той же ветке без промежуточного merge/release/GO.
+
+### G.3. Связанные DNS и server lifecycle на DATA (продолжение, live OFF)
+
+Один lowerer и `vrb_execute2` теперь используют те же stage/choice/policy/plan/J2/Gi для
+VPN и DNS. Keenetic: whole HTTPS scope, фактический лимит8 со всеми global/foreign строками,
+sealed URL-wide commands и prefix images, существующий `doh_remove_url`. AGH: существующий
+`ads_smartdns_locked` сначала на приватной копии для компиляции, затем на DATA API под настоящим
+component lock; отдельный точный take-pairs сохраняет другие URI и соседей shared row. Это
+не HTTP/NDMC, не новый transport и не установленный caller. Plain DNS/dnsmasq не объявлены backend.
+URI связывается SHA256/192 с opaque container, не mutable URL alias. Own DNS proof содержит
+revision + content witness; чтение конфигурации остаётся reference без права присвоения.
+
+Parent suffix агрегирует совместимых consumers, exact child наследует подтверждённый parent;
+excluded/conflicting child удерживает весь план. Native include остаётся exact даже при subtree
+принадлежности сервиса: новая подтверждённая запись наследует намерение отдельно. Выключенный
+S снимает вклад, сохраняя accepted choice; legacy enabled выводится из действительных собственных
+S claims при каждом изменении. Foreign registration collision удерживает запись. Неизменённый
+DNS backend не проверяется и его evidence не освежается ради чистого VPN другого сервиса.
+
+`vward-routing-lifecycle.sh` переносит свои DNS resources на новый endpoint с прежними RID/birth
+и очищает dependents обоих хранилищ, saved/queue, Auto activity и accepted DNS choices при delete.
+Политики одного location key учитываются вместе. Withdrawal SHA закреплён в immutable plan
+до backend write; tombstone монотонен. Подстановка старого ledger/downgrade не отменяет withdrawal.
+Это unpublished state2 bookkeeping, **не** импорт всех installed legacy saved/queue. Unknown
+server operation не разрешает inverse, возвращающий отозванный endpoint; нужен отдельный
+проверенный шаг восстановления, а не blind replay. Потерянный AGH POST оставляет before/planned,
+request.pending и parent barrier даже при совпадении postimage; автоматического восстановления нет.
+
+Уточнение прежнего G.2: одного outer worker PID недостаточно. Финальный DATA publisher теперь
+сам exec-процесс с durable PID/start/boot/SHA lease; quiet gate и повторная проверка живого
+владельца действуют до exec. Это доказывает DATA publication, не завершение будущего NDMC/HTTP.
+Существующие EDIT/CHANGE пути и реальный console `dir_lock` общие для legacy/B fixtures;
+empty/unproven holder не отбирается. Остаточные stale-lock/reboot/legacy backwriter границы
+подлежат полному fault matrix и одному адресному review до проекта подключения.
+
+Локальные file modes/UID берутся из sealed inputs.fp, SHA attrs включён в plan. Registry0644
+разрешён только по его точному пути; private400/600 сохраняются, новые private leaf600.
+Свежий tmp + leased rename/unlink не следует symlink/hardlink; чужой chmod не становится own Gi
+и не перетирается компенсацией. Save нужен только для native group/Keenetic; AGH/local-only
+не сохраняет посторонний running-config.
+
+Адресно проверено: sh connected native/DNS cycles/repeat/local failure/CAS inverse;
+BusyBox1.37 ash+awk — plan/subtree/shared/exclude, реальный AGH helper, native Gi/foreign edit/
+save/legacy barrier, file modes/chmod и server replace/delete. BusyBox отказ `$6++` воспроизведён
+минимально и заменён на `$6=$6+1`, без ослабления assertions. Sh connected cube прошёл
+8 состояний/24 направленных перехода/8 повторов: 24 native DATA calls, host377.33s, не MIPS.
+SIGKILL actual final publisher / orphan, hardlink и реальные legacy lock contenders проверены
+адресно. Это разные локальные checkpoints, **не** единый финальный exact-tree CI.
+
+**Следующее в той же подготовке:** реальный legacy import/downgrade и eligibility/fences для
+старых raw saved/persist/queues; полный fault/TERM/KILL/reboot/reused-ID matrix; общий structured
+outcome/API/UI (desired/configured/client-verified=false); один адресный review, регистрация новых
+tests и один штатный CI конечного нового HEAD. До этих ворот нет live GO/merge/release и нет
+аппаратной приёмки. Старый CI41815122230 не относится к новому коду; исторические local full
+FAIL read-only /opt/var и Chromium local SKIP не меняются.
