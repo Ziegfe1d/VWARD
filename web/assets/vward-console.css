@@ -184,7 +184,7 @@ body::after{content:"";position:fixed;z-index:19;left:0;right:0;bottom:0;height:
 /* ИИ-сервисы */
 .ai-row{padding:2px 0 6px;border-top:1px solid var(--line)}
 .ai-row:first-child{border-top:0}
-.ai-head{display:flex;align-items:center;gap:8px;padding:6px 16px 4px}
+.ai-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 16px 4px}
 .ai-head .row-main{flex:1;min-width:0}
 .ai-head .row-main small{display:block;color:var(--muted)}
 .seg-slider.none .seg-thumb{opacity:0}
@@ -556,9 +556,9 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 @keyframes spin{to{transform:rotate(360deg)}}
 .spin{display:inline-block;flex:none;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .9s linear infinite}
 .busy-pill{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:1px 10px;border-radius:999px;background:var(--surface-2);color:var(--muted);font-size:var(--fs-xs);line-height:18px;white-space:nowrap}
-.ai-head .row-main small.ai-status{display:flex;align-items:flex-start;min-height:20px;margin-top:2px;white-space:normal;overflow-wrap:anywhere}
-.ai-head .row-main small.ai-status .stat{display:flex;align-items:flex-start;gap:6px;white-space:normal;overflow:visible;text-overflow:clip;min-width:0}
-.ai-head .row-main small.ai-status .dot{margin-top:5px;flex:none}
+.ai-head>small.ai-status{display:flex;flex-basis:100%;align-items:flex-start;min-height:20px;color:var(--muted);white-space:normal;overflow-wrap:anywhere}
+.ai-head>small.ai-status .stat{display:flex;align-items:flex-start;gap:6px;white-space:normal;overflow:visible;text-overflow:clip;min-width:0}
+.ai-head>small.ai-status .dot{margin-top:5px;flex:none}
 .stat{display:inline-flex;align-items:center;gap:6px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .stat .dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--faint)}
 .stat .dot.ok{background:var(--ok)}.stat .dot.warn{background:var(--warn)}.stat .dot.crit{background:var(--crit)}

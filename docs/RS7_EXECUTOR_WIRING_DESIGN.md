@@ -338,6 +338,20 @@ writer требуется конкретный GO владельца, аппар
 Cross-system Keenetic+AGH atomicity не обещается. Доказательство client IPv4 Claude наfix35.5
 04.11 08:30 уже получено; оно не доказывает IPv6/весь каталог и не повод повторять сетевой аудит.
 
+Связанная правка Панели этого этапа: фактический aiPage row оставлял статус в той же flex
+строке, что кнопку; теперь статус — отдельный полноширинный ребёнок header. RED→GREEN
+реального template/DOM в check-console-diag-ui.py, прежние status/DNS guard/spinner assertions
+сохранены. Responsive/storage/evidence проверки PASS; визуальный Chromium локально SKIP
+(playwright отсутствует), требуется штатный CI. Это не новый shared API/apply.
+
+Локальный полный consistency выполнен однократно: **FAIL** на старом check-dryrun.py:199,
+ожидалось done, получено failed. Адресное чтение stderr того же fixture подтвердило
+`mkdir: cannot create directory /opt/var: Read-only file system`, затем отказ создания component
+directories. Production dryrun/control этим этапом не менялись; ограничения host не обходились,
+assertions не ослаблялись. Пройденная до отказа часть включает новый model, прежние identity/
+snapshot/shadow/observers/planner/journal и каталог AI. Остаток полного local suite не проверен;
+точный final HEAD требует своих штатных repository-consistency/updater-tests/resource-audit.
+
 ### F.5. Границы DNS и данных до проекта подключения
 
 Общий результат операции включает две оси target+DNS policy. ID policy не хранит URL/token;

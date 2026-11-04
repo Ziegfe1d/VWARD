@@ -3,6 +3,7 @@
 not «выполнена»), and «Управление» names the switched-off components, not a bare count."""
 import re
 import subprocess
+from html.parser import HTMLParser
 from pathlib import Path
 
 js = (Path(__file__).resolve().parents[2] / "web/assets/vward-console.js").read_text()
@@ -72,6 +73,28 @@ assert(!text.match(/<button[^>]*data-ai-via="dns"[^>]*>/)[0].includes(' disabled
 r = subprocess.run(['node', '-e', checks], capture_output=True, text=True)
 if r.returncode:
     fail('card/slider render: ' + r.stderr[-700:])
+# The complete status gets its own full-width row; the check button must not
+# consume its width. Render the real card template, then inspect semantic DOM.
+at=js.index('  const row = s =>',js.index('function aiPage()'))
+card=js[at:js.index('  // Smart DNS first:',at)]
+markup=subprocess.check_output(['node','-e', '''
+const esc=String,AICHK={},AIRES={},tuns=[],sdDown=false,sdReason='';
+const status=()=>'<span class="stat">Длинный статус сервиса с подробной причиной</span>';
+const btn=(a,i,t,c,x)=>'<button '+x+'>'+t+'</button>';
+const busyBtn=()=>false,aiSlider=()=>'',aiReferenceChoice=()=>'',detail=()=>'';
+'''+card+'''console.log(row({id:'canva',title:'Canva',domain:'canva.example',selected:'vpn',via:'vpn'}));'''],text=True)
+class Card(HTMLParser):
+    def __init__(self):super().__init__();self.stack=[];self.parents={}
+    def handle_starttag(self,tag,attrs):
+        a=dict(attrs)
+        if a.get('class')=='ai-status':self.parents['status']=list(self.stack)
+        if tag=='button':self.parents['button']=list(self.stack)
+        if tag not in ('input','br','img','hr'):self.stack.append((tag,a.get('class','')))
+    def handle_endtag(self,tag):
+        if self.stack and self.stack[-1][0]==tag:self.stack.pop()
+p=Card();p.feed(markup)
+if p.parents.get('status',[])[-1:]!=[('div','ai-head')] or p.parents.get('button')!=p.parents.get('status'):
+    fail('the service status needs its own header row, outside the title/button width')
 if "Не установлены (' + missing.length + ')" not in js:
     fail("«Компоненты»: not installed folded into «Не установлены (N)»")
 # 14: «Управление» everywhere; AmneziaWG «Установить»; a not installed package shows no update rows.

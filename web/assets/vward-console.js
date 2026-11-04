@@ -1649,8 +1649,9 @@ function aiPage() {
     return '<details class="ai-detail"><summary>Подробнее</summary>' + c.results.map(r => esc(('direct' === r.via ? 'напрямую' : tunLabel(r.via)) + ': ' + (SVC_VERDICT[r.verdict] || r.verdict) + (r.code && !/\d{3}/.test(SVC_VERDICT[r.verdict] || '') ? ' (HTTP ' + r.code + ')' : ''))).join('<br>') +
       (c.ip ? '<br>' + esc(siteSrc(c)) : '') + '<br>' + esc('Проверяется одна страница ' + (c.domain || '') + ' с роутера; это не подтверждает путь трафика устройств и работу всего сервиса.') + '</details>'; };
   const busyBtn = s => AICHK[s.id] && AICHK[s.id].busy;
-  const row = s => '<div class="ai-row"><div class="ai-head"><div class="row-main"><b>' + esc(s.title) + '</b><small class="ai-status">' + status(s) + '</small></div>' +
-      btn('ai-check', 'refresh', 'Проверить', 'small' + (busyBtn(s) ? ' spinning' : ''), ' data-ai="' + esc(s.id) + '" data-dom="' + esc(s.domain) + '"' + (busyBtn(s) ? ' disabled' : '')) + '</div>' +
+  const row = s => '<div class="ai-row"><div class="ai-head"><div class="row-main"><b>' + esc(s.title) + '</b></div>' +
+      btn('ai-check', 'refresh', 'Проверить', 'small' + (busyBtn(s) ? ' spinning' : ''), ' data-ai="' + esc(s.id) + '" data-dom="' + esc(s.domain) + '"' + (busyBtn(s) ? ' disabled' : '')) +
+      '<small class="ai-status">' + status(s) + '</small></div>' +
       aiSlider(s.id, s.selected === null ? '' : s.via, s.title, false, sdDown, sdReason) + (AIRES[s.id] ? '<p class="result-note ai-res">' + esc(AIRES[s.id]) + '</p>' : '') + aiReferenceChoice(s) + ((s.paths || []).length > 1 ? '<details class="ai-detail"><summary>Источники маршрута</summary>' + s.paths.map(p => esc((p.title || p.group) + ' (' + p.group + '): ' + (p.route === 'ISP' ? 'провайдер' : tunLabel(p.route)))).join('<br>') + '</details>' : '') + detail(s) +
       (s.tunnel && tuns.length > 1 ? '<dl class="kv">' + ctrlRow('Туннель', sel('data-ai-tunnel="' + esc(s.id) + '"', 'Туннель для ' + s.title, tuns.map(t => [t.name, tunLabel(t.name)]), s.tunnel || prof().tunnel_interface)) + '</dl>' : '') + '</div>';
   // Smart DNS first: the services «через Smart DNS» open only while it works (owner 2026-10-17).
