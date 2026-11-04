@@ -1,0 +1,280 @@
+clear
+(
+umask 077
+set -f
+PFX=vward-fix35-6-install
+OUT="/tmp/$PFX-$(date +%Y%m%d-%H%M%S).txt"
+MAXB=30000
+ESC=$(printf '\033')
+ls -1t /tmp/$PFX-*.txt 2>/dev/null |
+  tail -n +5 |
+  while IFS= read -r F; do rm -f "$F"; done
+: > "$OUT" || exit 1
+ln -sfn "$OUT" /tmp/last_result.txt
+ln -sfn "$OUT" "/tmp/last_$PFX.txt"
+B=
+JOB=
+tmo() {
+  _ts=$1; shift
+  "$@" & _tp=$!
+  ( sleep "$_ts"; kill "$_tp" 2>/dev/null ) & _tw=$!
+  wait "$_tp"; _tr=$?
+  kill "$_tw" 2>/dev/null
+  return $_tr
+}
+send_out() {
+  sed "s/${ESC}\[[0-9;?]*[a-zA-Z]//g" "$OUT" |
+    tail -c "$MAXB" | base64 | tr -d '\r\n' |
+    { read -r X; printf '\033]52;c;%s\a' "$X"; }
+}
+on_abort() {
+  trap '' INT TERM HUP
+  echo '[ ABORTED / DISCONNECTED ]:' | tee -a "$OUT"
+  echo 'PARTIAL RESULT SAVED TO /tmp/last_result.txt'
+  [ -z "$B" ] || echo "PRIVATE BACKUP/LOG: $B"
+  echo 'Do not repeat. A started updater keeps running.'
+  send_out
+  exit 130
+}
+trap on_abort INT TERM HUP
+main() {
+  echo 'VWARD fix35.6: signed update, no router reboot'
+  echo '[ WARNING ] pending has no atomic version pin'
+  echo 'Candidate is checked before; identity after apply.'
+  date '+%Y-%m-%d %H:%M:%S %z'
+  tmo 5 ndmc -c 'show version' > /tmp/vward-fw.$$ 2>&1
+  grep -E 'release|title|device' /tmp/vward-fw.$$ |
+    head -n 3
+  rm -f /tmp/vward-fw.$$
+  for X in /opt/bin/vward-update.sh /opt/bin/sh; do
+    [ -x "$X" ] || {
+      echo "[ FAIL ] missing $X"; return 1
+    }
+  done
+  for X in jq sha256sum tar nohup; do
+    command -v "$X" >/dev/null 2>&1 || {
+      echo "[ FAIL ] missing $X"; return 1
+    }
+  done
+  S=/opt/var/lib/vward/updater
+  V=0.2.0-rc.2.fix.35.6
+  Q=2026110401
+  CUR=$(cat /opt/share/vward/VERSION 2>/dev/null)
+  echo "[ OK ] INSTALLED=$CUR TARGET=$V SEQUENCE=$Q"
+  [ -n "$CUR" ] || {
+    echo '[ FAIL ] installed VERSION missing'; return 1
+  }
+  if [ "$CUR" = "$V" ] &&
+    grep -qx "last_sequence=$Q" "$S/committed.state";
+  then
+    echo '[ PASS ] target already committed; no reapply'
+    return 0
+  fi
+  MEM=$(awk '/MemFree:|Buffers:|^Cached:/ {s+=$2}
+    /MemAvailable:/ {a=$2}
+    END {print a ? a : s}' /proc/meminfo)
+  [ "${MEM:-0}" -ge 20480 ] || {
+    echo '[ SKIPPED ] memory below 20 MB'; return 1
+  }
+  BASE=/opt/var/backups/vward
+  mkdir -p "$BASE" || return 1
+  B=$(mktemp -d "$BASE/fix35-6-owner.XXXXXX") || return 1
+  chmod 0700 "$B" || return 1
+  echo "[ OK ] PRIVATE_BACKUP=$B"
+  cat > "$B/run.sh" <<'RUN'
+#!/opt/bin/sh
+umask 077
+set -f
+trap '' HUP
+B=$1
+LOCK=/tmp/vward-fix35-6-owner.lock
+OWNED=0
+finish() {
+  R=$1
+  printf '%s\n' "$R" > "$B/rc.tmp"
+  mv -f "$B/rc.tmp" "$B/rc"
+  if [ "$OWNED" = 1 ] &&
+    [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$$" ]; then
+    rm -f "$LOCK/pid"
+    rmdir "$LOCK" 2>/dev/null
+  fi
+  exit "$R"
+}
+trap 'echo "[ FAIL ] worker interrupted"; finish 130' \
+  INT TERM
+if ! mkdir "$LOCK" 2>/dev/null; then
+  LP=$(cat "$LOCK/pid" 2>/dev/null)
+  case "$LP" in ''|*[!0-9]*)
+    echo '[ SKIPPED ] owner lock unknown'; finish 20;;
+  esac
+  if kill -0 "$LP" 2>/dev/null; then
+    echo '[ SKIPPED ] owner update already running'
+    finish 20
+  fi
+  rm -f "$LOCK/pid"
+  rmdir "$LOCK" && mkdir "$LOCK" || finish 20
+fi
+OWNED=1
+echo $$ > "$LOCK/pid" || finish 1
+U=/opt/bin/vward-update.sh
+S=/opt/var/lib/vward/updater
+V=0.2.0-rc.2.fix.35.6
+Q=2026110401
+tmo() {
+  _ts=$1; shift
+  "$@" & _tp=$!
+  ( sleep "$_ts"; kill "$_tp" 2>/dev/null ) & _tw=$!
+  wait "$_tp"; _tr=$?
+  kill "$_tw" 2>/dev/null
+  return $_tr
+}
+echo '[ OK ] PRIVATE CONFIGURATION BACKUP'
+tar -czf "$B/vward-config.tar.gz" -C /opt/etc vward || {
+  echo '[ FAIL ] VWARD configuration backup'; finish 1
+}
+A=/opt/etc/AdGuardHome/AdGuardHome.yaml
+if [ -f "$A" ]; then
+  cp -p "$A" "$B/AdGuardHome.yaml" || finish 1
+fi
+tmo 10 ndmc -c 'show running-config' \
+  > "$B/running.before" 2> "$B/ndmc-before.err"
+R=$?
+if [ "$R" != 0 ] ||
+  ! grep -qx 'dns-proxy' "$B/running.before"; then
+  echo "[ FAIL ] backup running-config RC=$R"; finish 1
+fi
+cp -p /opt/share/vward/VERSION "$B/VERSION.before" ||
+  finish 1
+E=/opt/etc/vward
+: > "$B/protected.before"
+for F in agents.conf smartdns.conf services/enabled.tsv; do
+  if [ -f "$E/$F" ]; then
+    sha256sum "$E/$F" >> "$B/protected.before"
+  else printf 'ABSENT %s\n' "$E/$F" \
+    >> "$B/protected.before"; fi
+done
+protect_dns() {
+  awk '
+    /nextdns[.]io/ {print; next}
+    $1=="ip" && $2=="name-server" {
+      for(i=1;i<NF;i++)
+        if($i=="on" && $(i+1)=="OpkgTun4") {print;break}
+    }' "$1" | LC_ALL=C sort > "$2"
+}
+protect_dns "$B/running.before" "$B/dns.before"
+echo '[ PASS ] private backups completed'
+echo '[ OK ] STANDARD SIGNED CHECK'
+"$U" --check
+R=$?
+echo "CHECK_RC=$R"
+if [ "$R" != 0 ]; then
+  echo '[ FAIL ] check refused; no forced apply'
+  finish "$R"
+fi
+P=$S/pending/manifest.json
+grep -q '^feed=' "$S/pending/pending.state" || {
+  echo '[ FAIL ] pending has no feed binding; stop'
+  finish 1
+}
+jq -e --arg v "$V" --argjson q "$Q" \
+  '.signed.version==$v and .signed.sequence==$q and
+   .signed.channel=="dev" and
+   .signed.priority=="IMPORTANT" and
+   .signed.health_profile=="full" and
+   .signed.requires_reboot==false' "$P" >/dev/null || {
+  echo '[ FAIL ] pending is not this signed release'
+  finish 1
+}
+echo '[ PASS ] pending snapshot matches fix35.6'
+echo '[ WARNING ] concurrent checks can replace pending'
+echo '[ OK ] STANDARD APPLY-PENDING; automatic rollback'
+VWARD_UPDATE_MANUAL=1 "$U" --apply-pending
+R=$?
+echo "INSTALL_RC=$R"
+if [ "$R" != 0 ]; then
+  echo '[ FAIL ] updater stopped; inspect saved state'
+  "$U" --status
+  finish "$R"
+fi
+NOW=$(cat /opt/share/vward/VERSION 2>/dev/null)
+if [ "$NOW" != "$V" ] ||
+  ! grep -qx "installed_version=$V" "$S/committed.state" ||
+  ! grep -qx "last_sequence=$Q" "$S/committed.state"; then
+  echo '[ FAIL ] installed/committed identity mismatch'
+  finish 1
+fi
+echo "[ PASS ] COMMITTED VERSION=$NOW SEQUENCE=$Q"
+grep '^phase=' "$S/journal.state" 2>/dev/null
+: > "$B/protected.after"
+for F in agents.conf smartdns.conf services/enabled.tsv; do
+  if [ -f "$E/$F" ]; then
+    sha256sum "$E/$F" >> "$B/protected.after"
+  else printf 'ABSENT %s\n' "$E/$F" \
+    >> "$B/protected.after"; fi
+done
+if cmp -s "$B/protected.before" "$B/protected.after"; then
+  echo '[ PASS ] agent/DNS/service preference files kept'
+else
+  echo '[ FAIL ] protected settings changed; backups kept'
+  finish 1
+fi
+tmo 10 ndmc -c 'show running-config' \
+  > "$B/running.after" 2> "$B/ndmc-after.err"
+R=$?
+if [ "$R" = 0 ] &&
+  grep -qx 'dns-proxy' "$B/running.after"; then
+  protect_dns "$B/running.after" "$B/dns.after"
+  if cmp -s "$B/dns.before" "$B/dns.after"; then
+    echo '[ PASS ] NextDNS/OpkgTun4 DNS lines kept'
+  else
+    echo '[ FAIL ] protected DNS diff; no blind restore'
+    finish 1
+  fi
+else
+  echo "[ WARNING ] DNS readback unknown RC=$R"
+fi
+echo '[ OK ] router/client acceptance remains separate'
+finish 0
+RUN
+  /opt/bin/sh -n "$B/run.sh" || return 1
+  echo '[ OK ] START: standard updater job survives SSH'
+  nohup /opt/bin/sh "$B/run.sh" "$B" \
+    > "$B/install.log" 2>&1 < /dev/null &
+  JOB=$!
+  echo "JOB_PID=$JOB"
+  echo 'Do not paste again after interruption.'
+  N=0
+  while [ ! -f "$B/rc" ] && kill -0 "$JOB" 2>/dev/null;
+  do
+    sleep 5
+    N=$((N + 1))
+    [ "$N" -ge 12 ] || continue
+    N=0
+    echo '[ OK ] updater is running; log stays private'
+  done
+  if [ ! -f "$B/rc" ]; then
+    echo '[ FAIL ] worker ended without result'
+    echo 'Do not retry; inspect private log and state.'
+    return 1
+  fi
+  tail -n 35 "$B/install.log"
+  R=$(cat "$B/rc")
+  echo "FINAL_RC=$R"
+  echo "PRIVATE_BACKUP_AND_FULL_LOG=$B"
+  return "$R"
+}
+{ main; } 2>&1 | tee "$OUT"
+P=$(grep -c '\[ PASS \]' "$OUT")
+O=$(grep -c '\[ OK \]' "$OUT")
+W=$(grep -cE '\[ (WARNING|SKIPPED|NOT_FOUND) \]' "$OUT")
+F=$(grep -c '\[ FAIL \]' "$OUT")
+printf 'SUMMARY: pass=%s ok=%s warn=%s fail=%s\n' \
+  "$P" "$O" "$W" "$F" | tee -a "$OUT"
+N=$(wc -c < "$OUT")
+[ "$N" -le "$MAXB" ] ||
+  echo "[ WARNING ] size=$N sent=$MAXB"
+send_out
+echo
+echo 'RESULT SENT (OSC52)'
+echo 'RAW: /tmp/last_result.txt'
+)

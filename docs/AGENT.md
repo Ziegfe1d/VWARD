@@ -203,6 +203,8 @@ jobs запрещён владельцем. Требуется согласов�
 
 04.11.2026 08:20 МСК — PR #37 / CI41732954957 на034ad1a завершён: updater-tests и resource-audit SUCCESS, consistency FAILURE на устаревшей проверке UI-литералов. Тестовый фикс cf91cf9 проверяет реальный рендер и mutation controls; runtime неизменен. Нужен штатный CI нового конечного HEAD, выпуска пока нет.
 
+04.11.2026 11:03 МСК — fix.35.6 опубликован только dev, signed sequence2026110401/IMPORTANT. CI41778782842 наf142f56: все3обязательных SUCCESS; mergece767eb tree совпал; release41788816630 SUCCESS, publishaa35521. Public v1/v2 Ed25519 + packageSHA7348515377b845a8441c7cd9d9d096454456791a41d74b7d28a9758721c60f24 + 78targets/88blobs PASS. Приёмка роутера не выполнена. Подробный итог/команда/граница native pending — SERVICE_RECOVERY_FIX35_6.md.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -450,7 +452,21 @@ CI [41723677202](https://github.com/Ziegfe1d/VWARD/actions/runs/41723677202) н�
 
 cf91cf99ef6cdd9edca5ee5d9ad05b213b1c750c меняет только тест/SHA: реальные status/aiSlider исполняются Node, проверяются первоначальный статус, busy/spinner, точная причина unavailable DNS, disabled/title и доступность альтернатив, текущий выбранный DNS. Остальные checks сохранены. CONSOLE_DIAG_UI RED→GREEN, SMARTDNS_STORAGE_UI/AI_ROUTING_FINDINGS PASS; mutation controls удалённых guard/reason/spinner отвергнуты. Свежие PR HEAD034ad1a и dev385ecd4 подтверждены, чужих runtime изменений нет. Нужен новый конечный CI после фикса теста; предыдущие SUCCESS не переносятся на другой HEAD. Отчёт дополнен; выпуск ещё не выполнен, роутер не подключался. Отложенная задача та же, временно приостановлена на время поправки, затем привязывается к новому run.
 
+### 04.11.2026 11:03 МСК · [Агент] · fix.35.6: фактический выпуск и публичная проверка
+
+CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) однократно прочитан SUCCESS наf142f567ec13fe28c1c35321fbdb9a28a1b9cb25: repository-consistency/updater-tests/resource-audit SUCCESS, main-only dispatch-transition SKIPPED. Свежийdev был385ecd457502748a2bf6bd00d2f845a67ef0a383 без чужого runtime. PR37 снятсdraft и слит plugin сexpected_head_sha, mergece767ebfecf3af6fd9b525e3b2b8c11e8e0ea895/[skip ci]; mergetree86d6d63d29a0b249c9ff95874b65fa3c91c0ec92 проверен равным testedtree. Успешные CIjobs не перезапускались вручную.
+
+Штатный [release41788816630](https://github.com/Ziegfe1d/VWARD/actions/runs/41788816630) SUCCESS наce767eb: validate/build/rehearsal/sign-stage/stagedvalidation/publish/upload. Sequence2026110401 свободен после публично прочитанногоfix35.5/2026110302, min_vward0.1.9-beta, priorityIMPORTANT. Publish aa355211f1cdc4130912bd7cff7deb9be8d10c09 от04.11 10:38:16МСК; diff сtestedf142 только updates/dev/SHA256SUMS, новый runtime не попал. Main не менялся. Productionprivatekey не читался, только штатный workflow.
+
+Публичный dev проверен послеworkflowSUCCESS: v1/v2 signature немодифицированным updater--self-test cдоверенным productionpublickey PASS, версия0.2.0-rc.2.fix.35.6/seq2026110401/channeldev/IMPORTANT/min0.1.9-beta/fullhealth/autrollback/no reboot; package643001байт SHA2567348515377b845a8441c7cd9d9d096454456791a41d74b7d28a9758721c60f24. Все78targetpayloads SHA/mode совпали сtestedrepo/map, v2mapсовпал, все88уникальных публичных blobs/enginefiles проверены SHA/size. Отчёт SERVICE_RECOVERY_FIX35_6.md обновлён фактическими ссылками. Это публикация, не только dispatch. Ранее localrollback13/13fix35.5 и exactCI/release rehearsal SUCCESS не выдаются за физическую приёмку; localfullconsistency не переобъявлен PASS (read-only /opt/varhost).
+
+Подготовлена tools/termius/install-fix35-6.txt: privatebackup/config/running, обычный signed check/pending и owner manual apply, nohupjob/rcfile/OSC52, стандартные engineguards/автоматический rollback; никаких тестовых manifest/configoverride или отдельных маршрутных/DNS/agent команд. Синтаксис/ASCII≤60/shellcheck и8синтетическихwrappercases PASS, на роутере не исполнялось. Адресный review выявил важную открытую границу: внешняя проверка pending version/seq не атомарна относительно других check; новый pending может появиться до apply. Команда честно предупреждает, проверяет до/после и feedbinding, не обещает immutablepin; native expected-targetguard вынесен в ROADMAP Н, опубликованный runtime не патчится. Все прежние runtimeImportant закрыты, эта новая граница установки не скрыта.
+
+Отложенная задача выпуска приостановлена после SUCCESS, дубликатов нет. Agent/NextDNS/Google8/DNS16/удалённыеSmartDNS и роутер не менялись. Вывод прежней narrowROкоманды не получен; Claude/Cursor/Gemini и клиентские приложения/actualroute/ownership/persist/reboot проверяет владелец. A1/A6/A7/A10/перенос остаются открыты. После этого выпуска рекомендована новая сессия сGitHub HEAD; лимиты контекста/использования не сбрасываются.
+
 ## 4. Открытые вопросы и нужные данные
+
+- 04.11.2026 11:03 МСК / fix.35.6: прежние pendingCI/release ворота закрыты CI41778782842 + release41788816630 + publicverification PASS. Осталась установка владельцем и аппаратная приёмка по отчёту. У native pending нет атомарного expected-targetpin; это явно описано и записано в ROADMAP Н, отдельный updater guard ещё не сделан. Нужны installedVERSION/time/FQDN/clientpolicy/flow из ранее подготовленной однойROкоманды; прежние localeth3/RC143/sharedIP не дают причинного диагноза.
 
 - 04.11.2026 08:20 МСК / PR #37: поправка cf91cf9 касается только теста динамического рендера; нужен собственный штатный CI конечного HEAD. Выпуск после зелёных обязательных jobs разрешён. Нового вывода owner-run DNS/client-flow команды нет; VERSION/FQDN/time и клиентский путь Claude/Cursor/Gemini остаются неизвестными.
 

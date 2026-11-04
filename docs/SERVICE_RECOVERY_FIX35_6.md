@@ -5,6 +5,54 @@
 полный CI и критическую публикацию только в dev. fix.36 остаётся отдельным приёмочным выпуском.
 Роутер не подключался, установки и изменения конфигурации выполняет владелец.
 
+## Итог выпуска: опубликовано и публично проверено 04.11.2026
+
+**0.2.0-rc.2.fix.35.6 / sequence 2026110401 / IMPORTANT**, только dev.
+
+| Ворота | Фактический результат |
+|---|---|
+| [CI 41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) | repository-consistency, updater-tests, resource-audit SUCCESS на `f142f567ec13fe28c1c35321fbdb9a28a1b9cb25`; main-only dispatch-transition SKIPPED |
+| [PR #37](https://github.com/Ziegfe1d/VWARD/pull/37) | merge `ce767ebfecf3af6fd9b525e3b2b8c11e8e0ea895`, expected_head_sha и `[skip ci]`; tree `86d6d63d29a0b249c9ff95874b65fa3c91c0ec92` полностью равен проверенному |
+| [Release workflow 41788816630](https://github.com/Ziegfe1d/VWARD/actions/runs/41788816630) | SUCCESS на source merge ce767eb: validate, reproducible build, release rehearsal, production-sign/stage, staged validation, publish и artifact upload |
+| Publish commit | `aa355211f1cdc4130912bd7cff7deb9be8d10c09`, 04.11 10:38:16 МСК; diff с tested f142 — только updates/dev и SHA256SUMS, дополнительного runtime нет |
+| Публичные v1/v2 подписи | PASS немодифицированным updater `--self-test`, доверенный production **public** key; private key используется только в workflow |
+| Пакет | 643001 байт; SHA-256 `7348515377b845a8441c7cd9d9d096454456791a41d74b7d28a9758721c60f24` |
+| Полнота | Все 78 targets, payload SHA/mode и source map совпали с tested f142; v2 map совпал; все 88 уникальных публичных v2/engine blobs проверены по SHA/размеру |
+
+Публично проверены [v1 manifest](https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/update-manifest.json),
+[v2 manifest](https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/v2/manifest.json) и
+[package](https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/packages/vward-0.2.0-rc.2.fix.35.6.tar.gz).
+Параметры подписей: channel dev, sequence 2026110401, priority IMPORTANT, min_vward 0.1.9-beta,
+health full, automatic rollback, requires_reboot=false. Это результат проверки опубликованных файлов,
+а не вывод из dispatch. Main не менялся. Откат: ранее local13/13 на подписанном fix.35.5 и
+exact official rehearsal CI/release SUCCESS; это не аппаратная приёмка Viva. Локальный полный
+consistency по-прежнему не объявляется PASS из-за прежнего read-only host /opt/var.
+
+## Установка владельцем и известная граница pending
+
+[Одна команда установки](../tools/termius/install-fix35-6.txt) делает приватные backups VWARD/AGH
+и running-config, вызывает штатные signed `--check`/`--apply-pending`, оставляет updater-lock,
+barrier/подпись/anti-replay/health/rollback в штатном engine. Nohup job переживает обрыв SSH;
+проверяются VERSION/sequence/committed.state и сохранность agent/Smart DNS/service preferences,
+NextDNS/OpkgTun4 DNS. Никаких отдельных команд изменения туннелей, маршрутов или режимов агентов.
+Резервные копии/полный лог остаются приватно на USB, в репозиторий данные не переносить.
+
+**Открытая граница, выявленная адресным review команды:** native pending не имеет атомарной
+проверки expected version/sequence внутри updater-lock. Внешний precheck проверяет только снимок;
+конкурирующий `--check` может заменить pending до apply. Команда это явно предупреждает, проверяет
+кандидат до/результат после, отказывает при неизвестном feed binding, но **не обещает immutable pin**.
+Используется предпочитаемый владельцем штатный pending workflow; env manifest/config override,
+новый updater writer или обход lock не добавлены. Поддержка атомарного expected-target — отдельный
+пункт ROADMAP, не скрытое свойство этого выпуска. Если требуется строго фиксированная версия,
+этот native workflow такой гарантии не предоставляет.
+
+Команда проверена BusyBox syntax/ASCII/строки ≤60/shellcheck; 8 синтетических wrapper-сценариев
+PASS: success, busy, wrong version, missing feed, apply failure, protected DNS change, HUP,
+live owner lock. Это проверки оболочки с fake updater, не повтор official rollback/работа роутера.
+На устройстве команда **не выполнялась**. Прежние подробности/отказы ниже — история подготовки;
+финальный опубликованный статус определяется этим разделом. Режимы агентов остаются выбранными
+владельцем, клиентские маршруты/приложения/реальный persist и A1/A6/A7/A10 не объявлены принятыми.
+
 ## Первичные данные и причины
 
 03.11 владелец подтвердил установленный fix.35.5; SHA-256 console-config:
