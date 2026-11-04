@@ -218,6 +218,18 @@ UI layout. Полный локальный consistency запущен однок
 host (stderr подтверждён адресно); остаток не принят. CI конечного HEAD обязателен, ещё не запущен.
 Новый номер/sequence не назначены; live этап и архитектурный выпуск требуют отдельного согласования.
 
+04.11.2026 15:35 МСК — PR [#38](https://github.com/Ziegfe1d/VWARD/pull/38), B model: штатный
+[CI 41815122230](https://github.com/Ziegfe1d/VWARD/actions/runs/41815122230), attempt1,
+на exact HEAD `479f268cb712bb170646c07334da5382e0c110f3`,
+tree `bb763bacb2940b819e183256130798567a66a663` — **SUCCESS**.
+repository-consistency / updater-tests / resource-audit — все SUCCESS, main-only
+dispatch-transition — SKIPPED. Rehearsal, Chromium, hour stress и resource budget — SUCCESS.
+CI завершён 04.11 в11:53:10UTC/14:53:10МСК, проверен однократно после отложенного ожидания.
+Это закрывает CI-ворота **модели**, не аппаратную приёмку/общий pipeline. PR остаётся draft,
+база dev `3f4802b`; журнальная добавка — отдельный docs [skip ci] коммит на ветке PR,
+только AGENT.md + SHA256SUMS, runtime идентичен проверенному HEAD. Длительные проверки
+не перезапускаются. Local consistency остаётся FAIL из-за read-only /opt/var; причина сохранена.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -513,7 +525,36 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   прежний вопрос о выборе superseded. Роутер/настройки/NextDNS/Google8/DNS16/агенты не затрагивались,
   истёкший Smart DNS не пробовался. Приватный clientIP/URL/token/raw вывод не переносились.
 
+- 2026-11-04 15:35 МСК · [Агент / Codex] · PR38, B model, фактический CI итог · Продолжена
+  только проверка этапа; исходный HEAD479f268 и treebb763bac сверены с чистым worktree и GitHub.
+  PR38 открыт/draft, head479f268, base3f4802b, без merge. Один раз прочитаны run41815122230
+  и jobs: repository-consistency126523805997 SUCCESS, updater-tests126523922194 SUCCESS,
+  resource-audit126523810622 SUCCESS; dispatch-transition126532430798 SKIPPED (main-only).
+  Run attempt1 завершён11:53:10UTC. В обязательных jobs SUCCESS также official release rehearsal
+  over beta, SHA manifest/coverage, Chromium pages, hour stress и resource budget. Тесты/workflow/
+  signatures/ownership/admission не менялись и не повторялись; старый SUCCESS не подменяет
+  этот exact HEAD. Локальный полный consistency **не PASS**: прежний check-dryrun.py199,
+  expected done/got failed, stderr mkdir /opt/var read-only / cannot create component directories;
+  CI SUCCESS не переписывает этот результат. Local Chromium SKIP был только ограничением host,
+  штатный Chromium теперь SUCCESS; Keenetic/реальное переключение этим не проверены.
+  Добавлены только append-only записи AGENT§2/3/4 и штатно SHA256SUMS, отдельный docs[skip ci]
+  коммит на work/unified-routing-20261104, без нового full CI. PR body обновляется точным итогом
+  и docs SHA. Единственная отложенная проверка закрыта, новых расписаний/poll/rerun нет.
+  Общая цепочка ещё отсутствует: choice/policy работает на одной подготовленной области,
+  permission denied/packet unknown. Staged binding/epochs, typed delta, migration/downgrade,
+  recovery/конкуренция — следующие off-этапы. Проект первого VPN-only writer/locks/Gi/rollback
+  остаётся RS7_EXECUTOR_WIRING_DESIGN.md §F.3; live wiring — только после адресного review и
+  конкретного согласования владельца. Роутер/DNS/агенты/защищённые правила не затрагивались.
+  Нет merge/dev/main/feed/VERSION/sequence/release; fix35.6/PR37 повторно не открывались.
+
 ## 4. Открытые вопросы и нужные данные
+
+- 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
+  на479f268: все3 mandatory SUCCESS, dispatch-transition main-only SKIPPED. Это не закрывает
+  общий pipeline/аппаратную приёмку. Следующая граница — staged binding/epochs/typed plan,
+  versioned migration/rollback и recovery/конкуренция в выключенном исполнении; перед первым
+  live writer нужны адресный review и отдельное согласование конкретного проекта RS7§F.3.
+  A1/A6/A7/A10/storage migration и IPv6/весь каталог/новые переходы Keenetic остаются открыты.
 
 - 04.11.2026, B code a96fc66 (pure model f787472): первичный Claude IPv4 path и решение по txn.xs72ii теперь
   получены (новая запись §3 и ROADMAP4.3e), прежние запросы этих данных не повторять. IPv6/весь
