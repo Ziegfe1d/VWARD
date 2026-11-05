@@ -744,3 +744,48 @@ OFF/libs UNINSTALLED/API noendpoint/clientprooffalse/bridges PREPARED NOT WIRED 
 Следующая live граница только конкретный VPN-only GO §F.3/G.4 с legacy fences/quiescence/
 transport completion и owner acceptance; A1/A6/A7/A10/storage/hardware открыты.
 Роутер не подключался; merge/dev/main/feed/VERSION/release/live wiring отсутствуют.
+
+
+**Дополнение §G.4b — CI812 / updater directory cost (06.11.2026 00:03 МСК).**
+
+CI812 /42088055302 exact209278374192e9642ac6e64daa2cd811ee26c944,
+tree428e351fb8992437ee14dbf022d175dad74c367f, PR38/base dev3f4802b6574c0c7b441bf3da84e6841abb173349:
+repository-consistency127458395533 SUCCESS, updater-tests127458395452 SUCCESS(official
+rehearsal), resource-audit127458394925 FAILURE только на budget updater check62exec>61;
+main-only127503063069 SKIPPED. Preceding resource stabilization/stress/Chromium SUCCESS.
+Run/jobs прочитаны однократно; старые successful jobs не rerun и не перенесены на новый tree.
+Полный consistency на этом exact HEAD впервые принят; общий software gate ещё НЕ PASS.
+
+Изолированный Ubuntu24.04 + штатные build-rootfs и run-resource-audit.measure(runs5),
+crond paused, actual updater watch --once: RED median63exec [63,62,65,61,63],19opt_ops.
+Трасса показала10 mkdir, включая4 лишних -p для уже существующих log/state каталогов.
+Минимальная production дельта — только2 строки vu_log/vu_state_set в updater common base:
+существующий каталог проверяется builtin; отсутствующий по-прежнему создаёт настоящий mkdir.
+Ошибки создания/записи, stderr logging/best-effort contract, atomic state replacement,
+mode600, sync, locks, replay/signature/barriers/rollback не изменены. Symlink к каталогу
+сохраняет прежнюю mkdir -p семантику, новых ownership полномочий не добавлено.
+Новый check-updater-directory-cost.py: first create, repeated bytes/other-key/modes,
+real create refusal/failed write/file collision/logger refusal/symlink compatibility.
+Счётчик вызывает command mkdir, не fake-success; baseline RED на repeated cost, затем
+sh/BusyBox1.37 и isolated static BusyBox1.36 при022 GREEN; регистрация в обычном runner.
+Base updater simulations38/38 PASS, WAN fallback/openssl refusal PASS, syntax/privacy/
+no-new-ShellCheck/package-map78 PASS. Отдельный addressed review только этих2строк/нового
+теста закрыт без новых Important/Critical, общий аудит не повторялся.
+
+Тот же targeted emulator job после фикса: median54exec [62,54,54,60,52],19opt_ops;
+mkdir10→6. Outlier62 выше61 сохранён; median5/бюджеты/методика/workflow не менялись.
+Разницу median не приписываем целиком четырём вызовам: полные samples приведены выше.
+Это targeted local job, НЕ полный resource-audit PASS/НЕ MIPS/НЕ аппаратная приёмка.
+Новый exact code HEAD должен снова пройти все3mandatory jobs, прежние SUCCESS не заменяют их.
+
+Уточнение предыдущей записи CI811: cutover beta-marker cross-check был SKIP, поскольку
+origin/beta локально недоступен. Остальной suffix PASS по checkpoints не означает PASS
+этой подпроверки или full-local suite. Исторические full-local FAIL(readonly/opt/var,
+check-dryrun.py199) и local Chromium SKIP(noPlaywright) остаются в истории.
+OFF pipeline/libs UNINSTALLED/normal legacy+updater bridges PREPARED NOT WIRED/API noendpoint/
+activationoff/client_path_verifiedfalse не изменены. Package-map/allowlists78/VERSION/feed/
+workflow/budgets прежние; production delta относительно2092783 явно учтена: updater base2строки.
+Следующий live шаг только конкретный VPN-only GO §F.3/G.4 с legacy fences/updater quiescence/
+physical completion/readback/save/ownCASrollback/schema и owner acceptance. DNS/ISP/Auto/
+manual/unknown/shared migration writes закрыты; A1/A6/A7/A10/storage/hardware открыты.
+Нет router/merge/dev/main/feed/release/install/live wiring.

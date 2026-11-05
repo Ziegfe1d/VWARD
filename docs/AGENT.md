@@ -287,6 +287,8 @@ sh/BB1.37/staticBB1.36 + negative missing-dependency control PASS. Runtime не�
 
 05.11.2026 21:49 МСК / PR38 CI811: exacta7236ff/treec9f9ace5, [run42064101678](https://github.com/Ziegfe1d/VWARD/actions/runs/42064101678) completed FAILURE. Updater127373353240 и resource127373353230 SUCCESS; consistency127373352612 FAILURE в old SmartDNS clear, main-only127411549796 SKIPPED. Test-only actual lock dependency/private backup fixture correction + sh/BB PASS; прежний runtime неизменён. Непринятый suffix проверен локально до конца, но новый exact CI/all3 ещё нужен. Live OFF.
 
+06.11.2026 00:03 МСК / PR38: [CI812/42088055302](https://github.com/Ziegfe1d/VWARD/actions/runs/42088055302) наexact209278374192e9642ac6e64daa2cd811ee26c944/tree428e351fb8992437ee14dbf022d175dad74c367f: consistency127458395533 и updater127458395452 SUCCESS; resource127458394925 FAILURE(updater check62>61), main-only127503063069 SKIPPED. Реальный targeted RED63→GREEN54; только2строки updater directory cost + regression. Новый exact CI all3 нужен, общий PASS не заявлен; live OFF.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -768,6 +770,48 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   Роутер не подключался; merge/dev/main/feed/VERSION/release/live wiring отсутствуют.
 
 
+- 06.11.2026 00:03 МСК / [Агент] / PR38 CI812: CI812 /42088055302 exact209278374192e9642ac6e64daa2cd811ee26c944,
+  tree428e351fb8992437ee14dbf022d175dad74c367f, PR38/base dev3f4802b6574c0c7b441bf3da84e6841abb173349:
+  repository-consistency127458395533 SUCCESS, updater-tests127458395452 SUCCESS(official
+  rehearsal), resource-audit127458394925 FAILURE только на budget updater check62exec>61;
+  main-only127503063069 SKIPPED. Preceding resource stabilization/stress/Chromium SUCCESS.
+  Run/jobs прочитаны однократно; старые successful jobs не rerun и не перенесены на новый tree.
+  Полный consistency на этом exact HEAD впервые принят; общий software gate ещё НЕ PASS.
+
+  Изолированный Ubuntu24.04 + штатные build-rootfs и run-resource-audit.measure(runs5),
+  crond paused, actual updater watch --once: RED median63exec [63,62,65,61,63],19opt_ops.
+  Трасса показала10 mkdir, включая4 лишних -p для уже существующих log/state каталогов.
+  Минимальная production дельта — только2 строки vu_log/vu_state_set в updater common base:
+  существующий каталог проверяется builtin; отсутствующий по-прежнему создаёт настоящий mkdir.
+  Ошибки создания/записи, stderr logging/best-effort contract, atomic state replacement,
+  mode600, sync, locks, replay/signature/barriers/rollback не изменены. Symlink к каталогу
+  сохраняет прежнюю mkdir -p семантику, новых ownership полномочий не добавлено.
+  Новый check-updater-directory-cost.py: first create, repeated bytes/other-key/modes,
+  real create refusal/failed write/file collision/logger refusal/symlink compatibility.
+  Счётчик вызывает command mkdir, не fake-success; baseline RED на repeated cost, затем
+  sh/BusyBox1.37 и isolated static BusyBox1.36 при022 GREEN; регистрация в обычном runner.
+  Base updater simulations38/38 PASS, WAN fallback/openssl refusal PASS, syntax/privacy/
+  no-new-ShellCheck/package-map78 PASS. Отдельный addressed review только этих2строк/нового
+  теста закрыт без новых Important/Critical, общий аудит не повторялся.
+
+  Тот же targeted emulator job после фикса: median54exec [62,54,54,60,52],19opt_ops;
+  mkdir10→6. Outlier62 выше61 сохранён; median5/бюджеты/методика/workflow не менялись.
+  Разницу median не приписываем целиком четырём вызовам: полные samples приведены выше.
+  Это targeted local job, НЕ полный resource-audit PASS/НЕ MIPS/НЕ аппаратная приёмка.
+  Новый exact code HEAD должен снова пройти все3mandatory jobs, прежние SUCCESS не заменяют их.
+
+  Уточнение предыдущей записи CI811: cutover beta-marker cross-check был SKIP, поскольку
+  origin/beta локально недоступен. Остальной suffix PASS по checkpoints не означает PASS
+  этой подпроверки или full-local suite. Исторические full-local FAIL(readonly/opt/var,
+  check-dryrun.py199) и local Chromium SKIP(noPlaywright) остаются в истории.
+  OFF pipeline/libs UNINSTALLED/normal legacy+updater bridges PREPARED NOT WIRED/API noendpoint/
+  activationoff/client_path_verifiedfalse не изменены. Package-map/allowlists78/VERSION/feed/
+  workflow/budgets прежние; production delta относительно2092783 явно учтена: updater base2строки.
+  Следующий live шаг только конкретный VPN-only GO §F.3/G.4 с legacy fences/updater quiescence/
+  physical completion/readback/save/ownCASrollback/schema и owner acceptance. DNS/ISP/Auto/
+  manual/unknown/shared migration writes закрыты; A1/A6/A7/A10/storage/hardware открыты.
+  Нет router/merge/dev/main/feed/release/install/live wiring.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -906,6 +950,8 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   updater quiescence/physical transport/owner acceptance; merge/release не разрешены.
 
 - 05.11.2026 21:49 МСК / PR38: CI811 не зелёный. Все3 SmartDNS fixture исправлены без runtime delta; локально ранее непринятый suffix PASS по checkpoints, НЕ весь local suite. Нужен новый exact-HEAD CI all3. VPN-only GO/legacy wiring/quiescence/physical transport/hardware остаются следующей границей; merge/release не разрешены.
+
+- 06.11.2026 00:03 МСК / PR38: полный consistency и updater/rehearsal на2092783 приняты CI812; resource budget ещё отказал(updater62>61). Minimal directory cost fix и targeted54/19 PASS не заменяют новый exact all3mandatory CI. Local beta cross-check SKIP, full-local FAIL/Chromium localSKIP сохранены. Следующая live граница VPN-only GO/legacy fences/quiescence/physical transport/hardware, не merge/release.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 
