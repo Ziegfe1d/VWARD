@@ -244,6 +244,14 @@ journal2 sh/BusyBox PASS(cost + missing/alias/non-done). Каждый invoke п�
 Новый конечный HEAD дополнит только регистрацию32 cases для штатных sh/BusyBox gates и SHA;
 он требует одного полного CI. Пока нет exact-HEAD official PASS; live/router/release OFF.
 
+05.11.2026 / PR38: [CI42000443090](https://github.com/Ziegfe1d/VWARD/actions/runs/42000443090)
+на exact HEAD `77dc0271c81992dea2edc0b4f646b7ff6666c5dd`, tree
+`dbfad33af02893cce99d22b2d8c8d1625b2f17ca` прочитан однократно: repository-consistency FAILURE,
+updater-tests/resource-audit IN_PROGRESS. Отказ ранний: compatibility grep нашёл запрещённый
+literal `stat -c` в поясняющем комментарии vward-routing-legacy.sh:56, не в вызове команды.
+Исправляется только wording комментария; grep/guards/workflow остаются прежними. Остаток suite
+не принят; другие jobs не отменяются и их pending не объявлен SUCCESS. Новый HEAD требует CI.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -609,6 +617,13 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   version/privacy/append-only/SHA проверки PASS; старые local full FAIL/Chromium SKIP прежние.
   Следующий code commit регистрирует32 новых cases, затем один official CI. Нет merge/release.
 
+- 05.11.2026 / PR38 CI42000443090: job127153999187 repository-consistency остановился на
+  compatibility grep (stat option literal в комментарии legacy library). Это не PASS остатка
+  и не недостаток BusyBox metadata implementation(ls -ldn). Точная правка wording без изменения
+  поведения и без ослабления guard; финальный исправленный HEAD требует собственного CI.
+  На первом чтении updater-tests127153999124/resource-audit127153998894 IN_PROGRESS, не
+  отменяются/не перечитываются циклом. Нет merge/dev/main/feed/release/router действий.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -723,6 +738,10 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   программная граница — один штатный CI конечного HEAD со всеми32 новыми cases в обеих shell
   ветках. Прежние pending строки выше исторические. Успех фикстур не закрывает настоящие
   transport completion/legacy entry-point wiring/updater quiescence/owner acceptance §G.4.
+
+- 05.11.2026 / PR38: прежний запрос CI ещё открыт: первый новый run42000443090 обнаружил
+  ранний static compatibility отказ. Исправление комментария не доказывает непройденный остаток;
+  новая exact-HEAD штатная проверка обязательна. Live/router/аппаратная приёмка не разрешены.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 

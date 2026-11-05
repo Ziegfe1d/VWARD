@@ -601,3 +601,10 @@ sh native PASS260.64s; BusyBox1.37 ash+awk DNS PASS339.94s; TERM/SIGKILL PASS44.
 восстанавливает byte-exact baseline. Это уточняет pending строки G.4, не переписывает
 исторические checkpoint результаты. Регистрация32 новых cases в обеих shell ветках и
 один полный exact-HEAD CI — следующие ворота; legacy live wiring по-прежнему отсутствует.
+
+
+CI42000443090 на77dc027 (05.11.2026): repository-consistency FAILURE до новых suites —
+compatibility grep сопоставил запрещённый option literal в комментарии legacy library:56.
+Выполняемый metadata reader использует ls -ldn; правится только wording, не guard/code.
+Updater/resource jobs при первом чтении ещё IN_PROGRESS; не отменены. Остаток не доказан,
+новый конечный HEAD требует своего CI; ни live GO, ни публикации нет.
