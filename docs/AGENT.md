@@ -237,6 +237,13 @@ callers/updater **не подключены** к подготовленным B 
 библиотеки не установлены и не добавлены в signed78 targets. Следующий итоговый code HEAD ещё
 требует собственного CI; прежний CI41815122230 не переносится на G4. PR остаётся draft.
 
+05.11.2026 / PR38, финальная OFF подготовка: runtime `a5814b391a1f85345d2de99e798948221d12bc58`,
+предыдущий journal `ca15c4c7fc5ad69f01d35c6dae468b39d8814a52`. Связанный повтор на этом runtime:
+sh native execution PASS260.64s; BusyBox1.37 ash+awk DNS PASS339.94s и TERM/SIGKILL PASS44.80s;
+journal2 sh/BusyBox PASS(cost + missing/alias/non-done). Каждый invoke по-прежнему≤45s.
+Новый конечный HEAD дополнит только регистрацию32 cases для штатных sh/BusyBox gates и SHA;
+он требует одного полного CI. Пока нет exact-HEAD official PASS; live/router/release OFF.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -588,6 +595,20 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   не запущен. Исторические local full consistency FAIL(read-only /opt/var) и Chromium SKIP
   сохраняются; fixture PASS не является hardware acceptance. Роутер не подключался.
 
+- 05.11.2026 / PR38, завершение адресной подготовки после ca15c4c: durable logs подтвердили
+  native sh260.64s, DNS BusyBox339.94s, TERM(native post)/SIGKILL(late metadata) BusyBox44.80s.
+  Последние два не теряют parent pending после PID death; inspect не пишет, только явная
+  собственная compensation возвращает byte-exact native/config ledger и снимает barrier.
+  DNS: both stores/repeat/VPN/ISP/Auto/foreign rows/capacity8; unknown AGH POST не inverse,
+  отказ local registration компенсирует exact own backend, unrelated AGH не вызывается VPN.
+  Native: schema migration/downgrade/move/new name/off/partial/save/foreign-edit preservation.
+  Это один текущий runtime a5814b3; более ранние cube/lifecycle/import/outcome/fault cases
+  остаются результатами своих checkpoints и должны войти в финальный exact CI вместе.
+  Runtime review закрыт, включая эквивалентность gate single-pass без ослабления checks.
+  Shell/BusyBox syntax,9 новых routing libs + new runner ShellCheck, Python/Node/diagnostic UI,
+  version/privacy/append-only/SHA проверки PASS; старые local full FAIL/Chromium SKIP прежние.
+  Следующий code commit регистрирует32 новых cases, затем один official CI. Нет merge/release.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -697,6 +718,11 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   один lock/admission envelope и настоящие transport receipts. Подготовленные функции пока
   не защищают неподключённые старые daemons. DNS/live/API actions остаются закрыты; A1/A6/A7/
   A10/storage migration и аппаратная приёмка остаются открыты. Merge/release не разрешены.
+
+- 05.11.2026 / PR38: адресный native/DNS/signal повтор закрыт, следующая обязательная
+  программная граница — один штатный CI конечного HEAD со всеми32 новыми cases в обеих shell
+  ветках. Прежние pending строки выше исторические. Успех фикстур не закрывает настоящие
+  transport completion/legacy entry-point wiring/updater quiescence/owner acceptance §G.4.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 

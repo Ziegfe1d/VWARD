@@ -592,3 +592,12 @@ Connected native suite sh PASS260.64s при прежних45s каждого in
 не замер latency реального NDMC. Старый fault hook foreign-after скорректирован на внешний
 edit ПОСЛЕ own DATA publication: собственный planned candidate остаётся sealed, чужой edit
 не получает receipt, не принимается как свой Gi и сохраняется при отказе inverse.
+
+
+Финальный адресный повтор runtime `a5814b391a1f85345d2de99e798948221d12bc58`:
+sh native PASS260.64s; BusyBox1.37 ash+awk DNS PASS339.94s; TERM/SIGKILL PASS44.80s.
+Сигналы введены после настоящего native post и поздней local metadata соответственно;
+после смерти PID pending сохраняется, inspect не replay, explicit own compensation
+восстанавливает byte-exact baseline. Это уточняет pending строки G.4, не переписывает
+исторические checkpoint результаты. Регистрация32 новых cases в обеих shell ветках и
+один полный exact-HEAD CI — следующие ворота; legacy live wiring по-прежнему отсутствует.
