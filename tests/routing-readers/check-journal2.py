@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Versioned parent journal: evolving Gi, no replay, readback and mandatory save."""
 from pathlib import Path
-from fixture import Fixture,JOURNAL,LIBDIR
+from fixture import Fixture,JOURNAL,LIBDIR,function_source
 G0='g-0000000000000000';G1='g-1111111111111111';G2='g-2222222222222222'
 with Fixture() as f:
     j=f.p/'journal';j.mkdir(mode=0o700)
@@ -34,6 +34,23 @@ with Fixture() as f:
     assert call('vward_journal2_commit',j,'op1',G2).returncode==75,'committed before required save'
     assert call('vward_journal2_saved',j,'op1','done').returncode==0
     assert call('vward_journal2_commit',j,'op1',G2).returncode==0
+    # Closed history is fully checked ONCE per leaf, not twice per later step.
+    # Count semantic validation work, without relaxing any wall-clock budget.
+    count=f.p/'validations'
+    original=function_source(JOURNAL,'vrj2_step_valid').replace('vrj2_step_valid()', 'vrj2_step_valid_counted()',1)
+    script='. "$1";. "$2";shift 2;\n'+original+'\n'+'vrj2_step_valid() { printf \'%s\\n\' "$3" >> "$COUNT"; vrj2_step_valid_counted "$@"; }\nvward_journal2_gate "$1"\n'
+    r=f.run(script,LIBDIR/'vward-runtime-admission.sh',JOURNAL,j,env=f.env|{'COUNT':str(count)})
+    assert r.returncode==0,(r.returncode,r.stderr)
+    assert count.read_text().splitlines()==['1','2'],'closed history validated twice per leaf'
+    # A valid cardinality also needs each exact leaf's semantics and identity.
+    for state in ('failed','compensated','planned'):
+        (j/'op1/step.2/state').write_text(state+'\n')
+        assert call('vward_journal2_gate',j).returncode==75,'committed parent hid a non-done child'
+    (j/'op1/step.2/state').write_text('done\n')
+    import shutil
+    shutil.copytree(j/'op1/step.2',j/'op1/step.02')
+    assert call('vward_journal2_gate',j).returncode==75,'alias step inflated completeness'
+    shutil.rmtree(j/'op1/step.02')
     assert call('vward_journal2_gate',j).returncode==0
     (j/'op1/step.2').rename(j/'op1/.hold')
     assert call('vward_journal2_gate',j).returncode==75,'committed label hid missing readback evidence'

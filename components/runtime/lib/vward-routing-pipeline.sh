@@ -390,9 +390,6 @@ vrb_emu_ndm() (
     else vrb_native_expected=$vrb_t/expected;fi
     cmp -s "$vrb_t/native.current" "$vrb_native_expected" || return 75
     vrb_prefix_apply "$vrb_t/native.current" "$vrb_kind" "$vrb_group" "$vrb_value" "$vrb_neg" > "$vrb_t/native.next" || return 3
-    if [ -f "$vrb_e/foreign-after" ] && [ "$(cat "$vrb_e/foreign-after")" = "$vrb_kind" ]; then
-        printf '%s\n' 'include owner-edit.example' >> "$vrb_t/native.next"
-    fi
     # Replace exactly one group and its routes, preserving every other byte.
     awk -v g="$vrb_group" '
         FILENAME==ARGV[1] {
@@ -411,6 +408,13 @@ vrb_emu_ndm() (
         END{if(!absent)printf "object-group fqdn %s\n%s!\n",g,body}' \
         "$vrb_t/native.next" "$vrb_t/config.before" > "$vrb_t/config.next" || return 1
     vrb_publish "$vrb_t/config.next" "$vrb_e/running.cfg" "$(vr2_hash "$vrb_t/config.before")" || return 75
+    if [ -f "$vrb_e/foreign-after" ] && [ "$(cat "$vrb_e/foreign-after")" = "$vrb_kind" ]; then
+        # DATA fault injection represents an EXTERNAL edit after our issued
+        # command. It must not alter our candidate or receive our receipt.
+        awk -v g="$vrb_group" '{print} $0=="object-group fqdn " g {print "    include owner-edit.example"}' \
+            "$vrb_e/running.cfg" > "$vrb_t/foreign.next" &&
+            cat "$vrb_t/foreign.next" > "$vrb_e/running.cfg" || return 1
+    fi
     [ ! -f "$vrb_e/lost" ] || [ "$(cat "$vrb_e/lost")" != "$vrb_kind" ] || return 28
     return 0
 )

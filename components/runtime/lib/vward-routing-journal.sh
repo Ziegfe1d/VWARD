@@ -133,23 +133,28 @@ vrj2_gate_except() (
         [ "$vrj2_op" != "$2" ] || continue
         if [ -e "$vrj2_d/schema" ]; then
             vrj2_ready "$1" "$vrj2_op" || return 75
+            vrj2_seen=0
             for vrj2_s in "$vrj2_d"/step.*; do
                 [ -e "$vrj2_s" ] || [ -L "$vrj2_s" ] || continue
                 vrj2_step_valid "$1" "$vrj2_op" "${vrj2_s##*/step.}" || return 75
+                vrj2_seen=$((vrj2_seen+1))
                 case $(cat "$vrj2_s/state") in pending|unknown|compensating) return 75 ;; esac
                 [ "$(cat "$vrj2_d/state")" != planned ] || return 75
                 if [ "$(cat "$vrj2_d/state")" = compensated ]; then
                     case $(cat "$vrj2_s/state") in compensated|failed) ;; *) return 75 ;; esac
                 fi
+                if [ "$(cat "$vrj2_d/state")" = committed ]; then
+                    [ "$(cat "$vrj2_s/state")" = done ] || return 75
+                fi
             done
             case $(cat "$vrj2_d/state") in pending|unknown) return 75 ;; esac
             if [ "$(cat "$vrj2_d/state")" = committed ]; then
                 vrj2_count=$(awk -F'\t' '$1=="step"{n++} END{print n+0}' "$vrj2_d/plan")
-                vrj2_n=1
-                while [ "$vrj2_n" -le "$vrj2_count" ]; do
-                    vrj2_step_valid "$1" "$vrj2_op" "$vrj2_n" && [ "$(cat "$vrj2_d/step.$vrj2_n/state")" = 'done' ] || return 75
-                    vrj2_n=$((vrj2_n+1))
-                done
+                # plan_valid enforces unique sequential step IDs. Every leaf
+                # above must match one exact plan row (no zero/alias/extra ID),
+                # so cardinality proves completeness without validating each
+                # closed historical leaf a second time on every later step.
+                [ "$vrj2_seen" = "$vrj2_count" ] || return 75
                 if awk -F'\t' '$1=="step" && $4~/^(route|dns|group|dns-scope)$/{f=1} END{exit f?0:1}' "$vrj2_d/plan"; then
                     vrj2_file "$vrj2_d/save" && [ "$(cat "$vrj2_d/save")" = 'done' ] || return 75
                 fi
