@@ -516,6 +516,9 @@ vrb_inverse_group() (
 # Common operation envelope: existing admission, then EDIT, then CHANGE. The
 # journal acquires only its short lock inside these locks, never a nested CLI.
 vrb_envelope() {
+    # This owns the operation context (environment, traps and private state),
+    # including direct internal rehearsals under a permissive caller umask.
+    umask 077
     vrb_data_ready "$1" && vrj2_id "$2" || return 75
     vrb_j=$1;vrb_e=$1/.emu;vrb_op=$2
     for vrb_parent in "$vrb_e/root" "$vrb_e/root/tmp" "$vrb_e/services/owned"; do

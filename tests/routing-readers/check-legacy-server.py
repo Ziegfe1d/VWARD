@@ -8,7 +8,8 @@ for store in ('keenetic','agh'):
         old='https://dns.example.test/dns-query';new='https://replacement.example.test/dns-query'
         other='https://other.example.test/dns-query'
         p=f.decision/'upstreams.tsv';p.write_text(p.read_text()+'replacement\t'+new+'\n')
-        raw=f.e/'route-engine/domain-lists';raw.mkdir(parents=True,mode=0o700)
+        (f.e/'route-engine').mkdir(mode=0o700)
+        raw=f.e/'route-engine/domain-lists';raw.mkdir(mode=0o700)
         proofs=f.e/'route-engine/domain-lists.dns';proofs.mkdir(mode=0o700)
         saved=raw/'domain-list0';saved.write_text('route=ISP\tauto\nsmartdns_config='+'0'*64+'\n'+
             f'doh=https upstream {old} domain x.example\nagh=y.example\t{old}\n'+f'doh=https upstream {other} domain owner.example\n')

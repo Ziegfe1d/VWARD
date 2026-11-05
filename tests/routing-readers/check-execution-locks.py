@@ -4,7 +4,7 @@ import os,signal,subprocess,time
 from fixture import PipelineFixture,SHELL
 
 with PipelineFixture() as f:
-    r=f.invoke('vrb_envelope',f.j,'prepare');assert r.returncode==0,(r.returncode,r.stderr)
+    r=f.run(f.script('umask 022; vrb_envelope "$@"'),*f.libs,f.j,'prepare');assert r.returncode==0,(r.returncode,r.stderr)
     lock=f.e/'root/tmp/vward-console-edit.lock'
     # Existing legacy record (pid only), held by this live test process.
     lock.mkdir(mode=0o700);(lock/'pid').write_text(str(os.getpid())+'\n')

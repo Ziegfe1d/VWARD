@@ -13,6 +13,18 @@ def stop(p):
         except ProcessLookupError:pass
         p.communicate(timeout=5)
 
+# Private constructors enforce their own modes even for a permissive caller.
+with PipelineFixture() as f:
+    j=f.p/'permissive-lock';j.mkdir(mode=0o700)
+    command='''umask 022
+    vrj2_lock "$1" && vrj_dir "$1/.lock" || exit 75
+    for leaf in pid pid_start boot owner owner.sha;do vrj2_file "$1/.lock/$leaf" || exit 75;done
+    case $(umask) in 0022|022) ;; *) exit 75 ;; esac
+    vrj2_unlock "$1"
+    '''
+    r=f.run(f.script(command),*f.libs,j)
+    assert r.returncode==0 and not (j/'.lock').exists(),(r.returncode,r.stderr,'private lock depended on ambient umask')
+
 with PipelineFixture() as f:
     path=f.p/'gate-target';ready=f.p/'ready'
     args=SHELL+['-c',f.script('vward_lock_gate_enter "$1" || exit $?; : > "$2"; sleep 30'),'owner',*map(str,f.libs),str(path),str(ready)]
@@ -113,4 +125,45 @@ exec /bin/rm "$@"
         r=f.invoke('vrj_lock',j)
         assert r.returncode==75 and path.exists(),'v1 stole a live v2 lock'
     finally:stop(q);stop(p)
+# A metadata writer must not outlive its owner and write into a replacement
+# shared lock. Pause AFTER its first real pid write; kill only the parent.
+for metadata_kind in ('journal','legacy'):
+    with PipelineFixture() as f:
+        j=f.p/'metadata-race';j.mkdir(mode=0o700);path=j/'.lock'
+        paused=f.p/'meta-paused';resume=f.p/'meta-resume';held=f.p/'replacement-held'
+        hook='''
+        printf() {
+            command printf "$@"
+            if [ -f "$META_LOCK/pid" ] && [ ! -e "$META_PAUSED" ];then
+                IFS=' ' read -r meta_writer _ < /proc/self/stat || return 1
+                command printf '%s\n' "$meta_writer" > "$META_PAUSED"
+                while [ ! -f "$META_RESUME" ];do sleep .02;done
+            fi
+        }
+        METADATA_CALL
+        '''.replace('METADATA_CALL','vrj2_lock "$1"' if metadata_kind=='journal' else 'vward_lock_take "$1/.lock"')
+        p=subprocess.Popen(SHELL+['-c',f.script(hook),'metadata',*map(str,f.libs),str(j)],
+            env=f.env|{'META_LOCK':str(path),'META_PAUSED':str(paused),'META_RESUME':str(resume)},
+            stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+        q=None
+        try:
+            until(paused);writer=int(paused.read_text())
+            os.kill(p.pid,signal.SIGKILL);p.wait(timeout=5)
+            time.sleep(.05)  # distinguish actual starttime even at coarse kernel ticks
+            q=subprocess.Popen(SHELL+['-c',f.script('vward_lock_take "$1" || exit $?; : > "$2";sleep 30'),'replacement',*map(str,f.libs),str(path),str(held)],
+                env=f.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+            until(held)
+            baseline={x.name:(x.read_bytes(),x.stat().st_mode&0o777) for x in path.iterdir()}
+            assert (path/'pid').read_text()==str(q.pid)+'\n'
+            resume.touch()
+            if writer!=p.pid:
+                end=time.monotonic()+5
+                from pathlib import Path
+                while time.monotonic()<end:
+                    stat=Path(f'/proc/{writer}/stat')
+                    if not stat.exists() or stat.read_text().rsplit(') ',1)[1].split()[0]=='Z':break
+                    time.sleep(.02)
+            after={x.name:(x.read_bytes(),x.stat().st_mode&0o777) for x in path.iterdir()}
+            assert after==baseline,'orphan metadata writer corrupted a replacement live owner'
+        finally:stop(q);stop(p)
 print('B_LOCK_ELECTION=PASS actual legacy stale-reclaim serialization, live owner preserved, killed gate owner recoverable')

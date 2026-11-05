@@ -66,9 +66,16 @@ vrj2_take_under_gate() {
         # Every new acquirer is inside the SAME actual-PID election here.
         vward_lock_gate_exec rm -rf "$1/.lock" && vward_lock_gate_exec mkdir "$1/.lock" || return 75
     fi
+    # Metadata stays in the elected owner process: a separate writer shell
+    # could survive it and corrupt a replacement shared lock after reclaim.
+    vrj2_metadata_umask=$(umask) || return 1
+    umask 077
+    vrj2_metadata_rc=0
     printf '%s\n' "$vrj2_me" > "$1/.lock/pid" && printf '%s\n' "$vrj2_start" > "$1/.lock/pid_start" &&
         printf '%s\n' "$vrj2_boot" > "$1/.lock/boot" && printf '%s\t%s\t%s\n' "$vrj2_me" "$vrj2_start" "$vrj2_boot" > "$1/.lock/owner" &&
-        vrj_hash "$1/.lock/owner" > "$1/.lock/owner.sha"
+        vrj_hash "$1/.lock/owner" > "$1/.lock/owner.sha" || vrj2_metadata_rc=$?
+    umask "$vrj2_metadata_umask" || return 1
+    return "$vrj2_metadata_rc"
 }
 vrj2_lock() {
     vrj_lock_runtime || return 75

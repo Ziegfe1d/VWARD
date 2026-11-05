@@ -365,6 +365,9 @@ vward_lock_gate_number() {
 # A final filesystem utility may outlive the shell which called it. Its own
 # actual identity is registered before exec, just as for DATA publication.
 vward_lock_gate_exec() (
+    # Final mkdir must create a private lock independently of the caller's
+    # ambient umask; this affects only the leased utility's own process.
+    umask 077
     vward_lock_gate_dir "$vlg_claim" && vward_lock_gate_live "$vlg_key" || return 75
     IFS=' ' read -r vlg_exec_pid _ < /proc/self/stat || return 75
     vlg_exec_start=$(vward_admission_pid_start "$vlg_exec_pid") || return 75
@@ -404,9 +407,13 @@ vward_lock_gate_enter() {
     vlg_key=$vlg_boot.$vlg_me.$vlg_start;vlg_claim=$vlg_dir/$vlg_key
     (umask 077;mkdir "$vlg_claim") || return 75
     (umask 077;printf '%s\n' "$vlg_me" > "$vlg_claim/pid" && printf '%s\n' "$vlg_start" > "$vlg_claim/start") || return 75
-    vlg_max=0;vlg_count=0
+    vlg_max=0;vlg_count=1
     for vlg_other in "$vlg_dir"/*; do
         [ -e "$vlg_other" ] || [ -L "$vlg_other" ] || continue
+        # Our unnumbered choosing ticket contributes no maximum. Keep it in
+        # the same 256-ticket bound without spawning metadata tools for self;
+        # the final utility and leave still validate our own private claim.
+        [ "$vlg_other" != "$vlg_claim" ] || continue
         vward_lock_gate_dir "$vlg_other" || { vward_lock_gate_leave "$1";return 75; }
         vlg_rc=0;vward_lock_gate_live "${vlg_other##*/}" || vlg_rc=$?
         [ "$vlg_rc" != 2 ] || { vward_lock_gate_leave "$1";return 75; }
@@ -502,7 +509,14 @@ vward_lock_take() {
     fi
     if [ "$vl_take_rc" = 0 ]; then
         IFS=' ' read -r vl_take_pid _ < /proc/self/stat || vl_take_rc=1
-        (umask 077;printf '%s\n' "$vlg_boot" > "$1/boot" && printf '%s\n' "$vl_take_pid" > "$1/pid" && vward_admission_pid_start "$vl_take_pid" > "$1/pid_start") || vl_take_rc=1
+        # Shared-path metadata must be written by the elected owner itself,
+        # never by an unleased shell which could outlive that owner.
+        if vl_take_umask=$(umask); then
+            umask 077
+            printf '%s\n' "$vlg_boot" > "$1/boot" && printf '%s\n' "$vl_take_pid" > "$1/pid" &&
+                vward_admission_pid_start "$vl_take_pid" > "$1/pid_start" || vl_take_rc=1
+            umask "$vl_take_umask" || vl_take_rc=1
+        else vl_take_rc=1;fi
     fi
     vward_lock_gate_leave "$1" || return 1
     return "$vl_take_rc"
@@ -533,6 +547,10 @@ vward_locks_sweep() {
     for vl_lock in $VWARD_LOCKS; do
         vl_lock=${VWARD_ROOT_PREFIX:-}$vl_lock
         if [ ! -d "$vl_lock" ] || [ -L "$vl_lock" ]; then continue;fi
+        # Observation of a healthy lock is read-only. This preliminary test
+        # grants NO deletion authority: stale candidates are checked again
+        # inside the same election as take/release below (including ABA).
+        vward_lock_stale "$vl_lock" || continue
         vward_lock_gate_enter "$vl_lock" || continue
         vl_swept=0
         if vward_lock_stale "$vl_lock"; then vward_lock_gate_exec rm -rf "$vl_lock" && vl_swept=1;fi

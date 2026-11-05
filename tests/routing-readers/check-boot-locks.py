@@ -28,7 +28,8 @@ with PipelineFixture() as f:
     r=f.invoke('vward_routing_pipeline2',f.j,'partial','svc','vpn','VPN:Wireguard0','default',0)
     assert r.returncode==3,(r.returncode,r.stdout,r.stderr)
     worker=f.j/'partial/worker';worker.write_text(f'{pid}\t{start}\t{old}\n');worker.chmod(0o600)
-    (f.j/'partial/worker.sha').write_text(hashlib.sha256(worker.read_bytes()).hexdigest()+'\n')
+    receipt=f.j/'partial/worker.sha'
+    receipt.write_text(hashlib.sha256(worker.read_bytes()).hexdigest()+'\n');receipt.chmod(0o600)
     (f.e/'local-fails').unlink()
     r=f.invoke('vward_routing_pipeline_recover2',f.j,'partial','compensate')
     assert r.returncode==0,(r.returncode,r.stdout,r.stderr,'old-boot outer worker blocked exact own recovery')

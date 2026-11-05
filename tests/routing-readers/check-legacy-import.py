@@ -12,7 +12,8 @@ with PipelineFixture() as f:
     p=f.e/'services/owned/domain-list0';p.write_text('include x.example\ninclude y.example\nroute=Wireguard0\tauto\n');p.chmod(0o400)
     (f.e/'catalog.json').write_text('{"schema":1,"services":[{"id":"svc","title":"Service","category":"ai","domains":["x.example","y.example"]}]}')
     (f.e/'route/adaptive-persist.txt').write_text('old.example\nx.example\n')
-    saved=f.e/'route-engine/domain-lists';saved.mkdir(parents=True,mode=0o700)
+    (f.e/'route-engine').mkdir(mode=0o700)
+    saved=f.e/'route-engine/domain-lists';saved.mkdir(mode=0o700)
     p=saved/'domain-list0';p.write_text('route=ISP\tauto\nsmartdns_config='+'0'*64+'\ndoh=https upstream https://old.example.test/dns-query domain x.example\nagh=y.example\thttps://other.example.test/dns-query\n');p.chmod(0o600)
     p=f.e/'smartdns.conf';p.write_text('SMARTDNS_URL=https://old.example.test/dns-query\nSMARTDNS_STORE=keenetic\n');p.chmod(0o600)
     legacy={p.relative_to(f.e): (p.read_bytes(),p.stat().st_mode&0o777) for p in f.e.rglob('*') if p.is_file()}

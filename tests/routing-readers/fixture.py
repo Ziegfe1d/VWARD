@@ -143,7 +143,10 @@ class PipelineFixture(Fixture):
         self.j=self.p/'journal';self.j.mkdir(mode=0o700)
         self.e=self.j/'.emu';self.e.mkdir(mode=0o700)
         self.decision=self.e/'decision';self.decision.mkdir(mode=0o700)
-        (self.e/'services/owned').mkdir(mode=0o700,parents=True)
+        # parents=True applies mode only to the leaf; CI's umask022 otherwise
+        # leaves services0755 and correctly closes the private DATA gate.
+        (self.e/'services').mkdir(mode=0o700)
+        (self.e/'services/owned').mkdir(mode=0o700)
         for name in ('version','choices','bindings','evidence','policies','saved','queue','tombstones','context','resources','proofs','upstreams'):
             p=self.decision/(name+'.tsv');p.write_text('');p.chmod(0o600)
         (self.decision/'version.tsv').write_text('routing-state\t2\n')
