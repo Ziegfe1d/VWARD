@@ -274,3 +274,12 @@ BEGIN только в порядке шагов, до write; FINISH сравни
 save, хранит resolution receipt. Метка committed/compensated сама по себе не заменяет доказательства.
 Все эти функции только записывают свидетельства; executor/coordinator/recovery и полный chained
 fixture ещё должны быть соединены. Это не разрешение live и не claim аппаратной приёмки.
+
+
+Дополнение05.11.2026 (PR38 G4, OFF): coordinator/locked workers соединены на fixed DATA
+с J2, state-set migration, DNS lifecycle и общим configuration outcome. Dispatch scope
+receipt, native boot/deadline и actual publisher lifetime не заменяются matching image,
+PID-only или cached freshness. Чужой matching post не присваивается и не компенсируется.
+Живое исполнение не подключено: legacy eligibility/updater bridge только подготовлены,
+normal callers/actions/новые libs не установлены. Актуальные gates и конкретная следующая
+VPN-only граница — RS7_EXECUTOR_WIRING_DESIGN.md §G.4; исторические описания выше сохранены.

@@ -529,3 +529,66 @@ outcome/API/UI (desired/configured/client-verified=false); один адресн
 tests и один штатный CI конечного нового HEAD. До этих ворот нет live GO/merge/release и нет
 аппаратной приёмки. Старый CI41815122230 не относится к новому коду; исторические local full
 FAIL read-only /opt/var и Chromium local SKIP не меняются.
+
+### G.4. OFF migration, lifetime, final dispatch и общий outcome (05.11.2026)
+
+| Категория | Текущий факт |
+|---|---|
+| Закрыто кодом подготовки | Consistent bootstrap0→legacy import2; normalized1→2/downgrade; version-last state-set в J2; actual console/AGH workers на fixed DATA; saved/proofs/profile prune; common outcome/API serializer/optional gray UI |
+| Safety | PID/start/**boot** final leases; cooperative lock election/release включая v1; per-publisher dispatch scope receipt; full-content CAS + owner/mode + ancestry; probe native boot/deadline≤55s; unknown AGH POST persistent barrier |
+| Подтверждено адресно | Native/DNS cycles, both stores/capacity8, cube8/24/repeat, migrate/downgrade, foreign chmod/edit, stale/ABA/orphan/zombie/reboot, source lifetime, API/UI и отрицательные controls на разных локальных checkpoints; один addressed review без оставшихся Important в его OFF scope |
+| Ещё ворота | Финальный связанный повтор, регистрация32 новых cases в штатном CI и один новый exact-tree полный CI; старые local full FAIL/Chromium SKIP не переписаны в PASS |
+| Не подключено | Новые libs не в package-map/signed targets; обычные legacy/updater callbacks не вызывают подготовленные eligibility/reconcile functions; API endpoint/actions не включены; никакого router/NDMC/HTTP |
+
+`vward-routing-state.sh` агрегирует12 local leaves в один sealed physical state scope и
+компилирует все forward/inverse prefixes до BEGIN. Это устраняет50 повторных stage reads
+на каждую leaf, а не увеличивает45s budget. Импорт архивирует старые return/Dproof как opaque
+данные, proof не присваивается по имени. Downgrade требует exact postimages/content/mode/UID
+всех baseline inputs и не опускает withdrawal floor. Saved/queue/history не оживляют server.
+
+`vward-routing-dispatch.sh` отделяет issued attempt от одного matching image. Final DATA
+publisher после preflight пишет receipt, связанный с OP/step/plan/scope SHA и собственной
+lease; после flush снова проверяет owner/barriers/ancestry/full CAS. Known late refusal
+снимает новую receipt. Forward replay запрещён, явная inverse принимает только собственный
+issued post/prefix и exact CAS; unknown AGH POST не разрешается matching body. Receipt —
+свидетельство authorized attempt, не ACK hardware и не проверка клиентского пакета.
+
+Общий outcome выводится из свежей projection и J2: desired отдельно от configured,
+M/S/A являются источниками, не режимами агентов. Нет или устарела evidence — unknown/history,
+partial/mixed показаны отдельно. `activation=off`, `client_path_verified=false` неизменно.
+Serializer принимает bounded owned JSON+SHA и разрешённые presentation fields; endpoint
+не добавлен, optional UI note не меняет действия старой Панели.
+
+**Один конкретный следующий этап VPN-only (§F.3), ещё без разрешения live.** После зелёного
+exact CI предложить только переход одного доказанного service-owned native FQDN scope
+между подтверждёнными VPN targets, с неизменным RID и private registration/proof. Entry point —
+отдельный B service action, тот же admission→EDIT→CHANGE→J2; internal group worker без child
+CLI. До первой записи все пересекающиеся console/list, Auto/restore, reconciler/policy/guard
+callbacks обязаны вызывать scoped eligibility, а updater — pending/unknown + publisher
+quiescence; старый код предварительно quiesce. Handoff в common reconcile после выхода из
+старого lock, не вложенный CLI. Prepared bridge **сейчас не wired** и один shared lock этого
+не заменяет. Native transport должен иметь собственную завершённость/lease/readback/save,
+не полагаться на DATA rename receipt. Package-map/admission integration — только в этом
+отдельном согласованном этапе, не в текущем PR38 checkpoint.
+
+DNS/ISP/Auto writes, manual/unknown/shared conflict, migration server и clear/adopt не входят
+в первый live action; при неизвестной области отказ до write. Выключение закрывает новые
+entry points, сохраняет private pending и inspection; при unknown не fallback к старому
+writer. Откат к old code только после quiescence и доказанной собственных CAS compensation,
+baseline save и совместимости state schema; не blind replay и не восстановление удалённого
+endpoint. Одна owner acceptance: один service-owned VPN move→repeat→обратно, actual native
+route/registry/claim и сохранность ручных правил; отдельно TERM/restart/persist. Остаточные
+риски — настоящие NDMC latency/orphan, все legacy entry points, power loss и клиентский путь.
+Это проект границы следующего GO, не выполненное подключение/установка или выпуск.
+
+
+Дополнение G.4 (тот же финальный пакет): выявленный native move timeout45 не обойдён.
+Профиль показал повторный `vrj2_step_valid` каждого terminal history leaf в одном gate.
+Первый проход теперь также проверяет committed→done, cardinality совпадает с sequential
+unique plan; exact row/seq исключают alias/extra, число исключает missing. Ни один leaf
+не пропущен, hash/schema/save/resolved guards прежние. Cost RED→GREEN + отрицательные
+missing/alias/non-done checks sh/BusyBox PASS; адресный review подтвердил эквивалентность.
+Connected native suite sh PASS260.64s при прежних45s каждого invoke. Это host fixture,
+не замер latency реального NDMC. Старый fault hook foreign-after скорректирован на внешний
+edit ПОСЛЕ own DATA publication: собственный planned candidate остаётся sealed, чужой edit
+не получает receipt, не принимается как свой Gi и сохраняется при отказе inverse.

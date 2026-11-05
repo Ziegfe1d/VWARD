@@ -230,6 +230,13 @@ CI завершён 04.11 в11:53:10UTC/14:53:10МСК, проверен одн�
 только AGENT.md + SHA256SUMS, runtime идентичен проверенному HEAD. Длительные проверки
 не перезапускаются. Local consistency остаётся FAIL из-за read-only /opt/var; причина сохранена.
 
+05.11.2026 / PR38, продолжение G4: локальный checkpoint `0e87c0714118d0bc3def557e875645ceccbecabd`
+содержит OFF bootstrap/import/downgrade, единый state-set/J2, boot-qualified leases/lock election,
+конечный content CAS, dispatch receipts и общий configuration outcome. Нормальные legacy
+callers/updater **не подключены** к подготовленным B eligibility/reconcile functions; новые
+библиотеки не установлены и не добавлены в signed78 targets. Следующий итоговый code HEAD ещё
+требует собственного CI; прежний CI41815122230 не переносится на G4. PR остаётся draft.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -547,6 +554,40 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   конкретного согласования владельца. Роутер/DNS/агенты/защищённые правила не затрагивались.
   Нет merge/dev/main/feed/VERSION/sequence/release; fix35.6/PR37 повторно не открывались.
 
+- 05.11.2026 / PR38 G4: один исполнитель продолжил подготовку в той же ветке, без live wiring.
+  Согласованный stage включает native inputs и 12 decision-файлов; bootstrap всегда version0,
+  opaque legacy return/DNS proofs не дают ownership. Импорт реального legacy DATA и normalized
+  migration/downgrade идут через тот же state-set/J2; version-last и prefix CAS сохраняют400/600,
+  exact registry644 и отказ при accepted choice/foreign chmod. Probe boot+monotonic deadline
+  ограничены55s; reboot/expiry/history не становятся свежим Auto.
+  Lease и dispatch receipt связывают OP/step/plan/scope SHA с actual publisher PID/start/boot;
+  matching post без dispatch не становится своим. Утерянный AGH POST сохраняет private
+  before/planned/request.pending и общий barrier. Короткая общая lock election покрывает
+  acquire/reclaim/release, старые v1 и J2; actual orphan rm/mkdir сохраняют свою lease.
+  Legacy server prune использует настоящий helper над private clone, сохраняет другие URI,
+  profile и modes; одинаковые basename/second/PID получают разные private backup-файлы.
+  Общий executor outcome/serializer/optional UI различает desired/configured/partial/mixed/
+  unknown; activation=off, client_path_verified=false. API endpoint и UI actions не подключены.
+  Адресный независимый review закрыл найденные Important в рамках OFF DATA: final CAS,
+  admission identity, chmod, lock ABA/orphan/reboot, probe lifetime, RAW ancestry, matching
+  foreign post и zombie owner. Это не review разрешения live transport.
+  Локально подтверждены адресные native/DNS/cube/migration/lifecycle/locks/outcome/negative
+  fixtures на разных checkpoints; старый sh cube8/24/8repeat:24 native DATA calls,579.95s
+  под конкурентной нагрузкой, не MIPS и не сопоставимый isolated benchmark. Последний повтор
+  native execution выявил устаревшую fault injection: чужой edit добавлялся в own candidate
+  ДО publisher. Guard корректно отказал; injection перенесена ПОСЛЕ own DATA publication,
+  assertion сохранности foreign edit оставлен. Текущий связанный повтор ещё выполняется.
+  Дополнительный timeout45 в move воспроизведён: gate дважды валидировал каждый закрытый
+  исторический step. RED count assertion подтвердил дублирование. После одного exact-pass
+  и проверки cardinality committed полнота/missing/alias/extra/non-done/corruption/save guards
+  сохранены; sh/BusyBox journal2 PASS, адресный review без новых Important. Таймаут45 не менялся.
+  Связанный native execution sh PASS(260.64s вся suite, каждый invoke≤45s), включая corrected
+  foreign-after injection, migration/downgrade/move/partial/save/CAS; DNS/signals ещё проверяются.
+  Все32 новые routing cases зарегистрированы для sh/BusyBox в штатном consistency; прежние
+  checks/assertions/budgets/workflow/targets/version/feed не ослаблены. Новый exact CI пока
+  не запущен. Исторические local full consistency FAIL(read-only /opt/var) и Chromium SKIP
+  сохраняются; fixture PASS не является hardware acceptance. Роутер не подключался.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -650,6 +691,12 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
 - 02.11.2026 / fix.36: требуется штатный CI конечного кандидата и подпись/публикация dev после SUCCESS; GO уже дан владельцем. На роутере не менять режимы агентов, DNS/NextDNS/ручные подсети и не перезагружать. После установки владельцем — подтвердить отсутствие orphan/WATCHDOG_RESTART и длительности START_PHASE; старые PID/этапы задним числом не восстанавливаются. Ozon/Wildberries в приложениях, Lampa TV, экраны и ночной скан 03.11 00:10 остаются на его проверке. ADAPTIVE_RU_OUT при отсутствии новой чистки не повторяется; фактическое положение первой строки в архиве на устройстве не читалось.
 
 - 02.11.2026 13:25 МСК / fix.36: CI #789 красный только по статическому trap-контракту; фикс `99af534` и целевые проверки PASS. Необходимо разрешение на новый полный CI исправленного HEAD, поскольку текущий workflow запускает все три jobs, а два уже успешных длительных jobs владелец запретил повторять. До нового зелёного CI подписанная публикация не разрешена. Никакого автоматического переноса старых SUCCESS на другой SHA или изменения workflow ради обхода ворот.
+
+- 05.11.2026 / PR38 G4: перед подключением нужны exact-HEAD CI и конкретный VPN-only GO
+  по RS7§F.3/G.4: wire legacy scope eligibility и updater quiescence до любого нового writer,
+  один lock/admission envelope и настоящие transport receipts. Подготовленные функции пока
+  не защищают неподключённые старые daemons. DNS/live/API actions остаются закрыты; A1/A6/A7/
+  A10/storage migration и аппаратная приёмка остаются открыты. Merge/release не разрешены.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 

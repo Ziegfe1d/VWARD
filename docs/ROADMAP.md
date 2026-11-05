@@ -1023,6 +1023,15 @@ Home — оба режима выбора сохраняются; ручной �
 - [x] `txn.xs72ii`: владелец архивировал 03.11 в 19:05 с сохранением DNS/FQDN; повторное решение
       не нужно. Причина **первого** прерывания остаётся неизвестной, этот факт не закрыт архивированием.
 
+05.11.2026 / PR38 G4: OFF цепочка stage→choice/policy→typed plan→J2→actual workers(DATA)
+→readback/save/CAS compensation дополнена migration/downgrade, server saved/proofs/profile
+prune, boot/deadline, final dispatch receipts и общим outcome/API serializer/optional UI.
+Адресный review закрыт в OFF scope; финальный exact CI ещё обязателен. Подготовленные
+legacy/updater eligibility callbacks **не wired** в обычные daemons; signed targets78/map/
+VERSION/feed прежние. A1/A6/A7/A10/storage и hardware остаются открыты. Следующая конкретная
+VPN-only граница entry points/quiescence/receipts/rollback/owner acceptance — RS7§G.4;
+текущий пакет не разрешает live/merge/release. Старый model CI41815122230 не покрывает G4.
+
 ### 4.4 Стабильность: этапы (индекс - `STABILITY.md`)
 | Этап | Выпуск | Что сделать |
 |---|---|---|
