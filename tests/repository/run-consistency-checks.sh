@@ -256,6 +256,9 @@ python3 tests/repository/check-console-request.py || fail "Panel request guards 
 python3 tests/repository/check-housekeeping.py || fail "Housekeeping rotates logs and keeps copies to their newest few"
 python3 tests/repository/check-ext-update.py || fail "Updates of other software"
 python3 tests/repository/check-stale-locks.py || fail "Locks whose owner is gone are removed at boot and hourly"
+if command -v busybox >/dev/null 2>&1; then
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/repository/check-stale-locks.py || fail "BusyBox stale locks, read-only healthy sweep and replacement-owner race"
+fi
 python3 tests/repository/check-console-tunnel.py || fail "Panel tunnel switch"
 python3 tests/repository/check-console-tunnel-add.py || fail "Panel tunnel add from .conf, switching off"
 python3 tests/repository/check-console-tunnel-import.py || fail "Panel tunnel import: keys, duplicate and silent-server questions"
