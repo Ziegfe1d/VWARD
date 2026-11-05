@@ -389,12 +389,26 @@ vward_lock_gate_quiet() {
         [ "$vlg_exec_rc" = 1 ] || return 2
     done
 }
+# Read one decimal owner record with shell builtins. Like command-substitution
+# cat, trailing empty lines are harmless; an embedded/extra field is not.
+vward_lock_gate_decimal() (
+    vlg_decimal=;vlg_decimal_tail=
+    {
+        IFS= read -r vlg_decimal || [ -n "$vlg_decimal" ] || return 2
+        case $vlg_decimal in ''|*[!0-9]*) return 2 ;; esac
+        [ "${#vlg_decimal}" -le 20 ] || return 2
+        while IFS= read -r vlg_decimal_tail || [ -n "$vlg_decimal_tail" ]; do
+            [ -z "$vlg_decimal_tail" ] || return 2
+        done
+    } < "$1" || return 2
+    printf '%s\n' "$vlg_decimal"
+)
 vward_lock_gate_leave() {
     [ -n "${vlg_claim:-}" ] && [ "${vlg_claim%/*}" = "$1.gate" ] || return 75
     vward_lock_gate_dir "$vlg_claim" || return 75
     IFS=' ' read -r vlg_leave_pid _ < /proc/self/stat || return 75
-    [ "$(cat "$vlg_claim/pid" 2>/dev/null)" = "$vlg_leave_pid" ] &&
-        [ "$(cat "$vlg_claim/start" 2>/dev/null)" = "$(vward_admission_pid_start "$vlg_leave_pid")" ] || return 75
+    [ "$(vward_lock_gate_decimal "$vlg_claim/pid" 2>/dev/null)" = "$vlg_leave_pid" ] &&
+        [ "$(vward_lock_gate_decimal "$vlg_claim/start" 2>/dev/null)" = "$(vward_admission_pid_start "$vlg_leave_pid")" ] || return 75
     rm -rf "$vlg_claim"
 }
 vward_lock_gate_enter() {
@@ -403,7 +417,11 @@ vward_lock_gate_enter() {
     vlg_start=$(vward_admission_pid_start "$vlg_me") || return 75
     IFS= read -r vlg_boot < /proc/sys/kernel/random/boot_id || return 75
     vlg_dir=$1.gate
-    (umask 077;mkdir "$vlg_dir" 2>/dev/null) || vward_lock_gate_dir "$vlg_dir" || return 75
+    if [ -e "$vlg_dir" ] || [ -L "$vlg_dir" ]; then
+        vward_lock_gate_dir "$vlg_dir" || return 75
+    else
+        (umask 077;mkdir "$vlg_dir" 2>/dev/null) || vward_lock_gate_dir "$vlg_dir" || return 75
+    fi
     vlg_key=$vlg_boot.$vlg_me.$vlg_start;vlg_claim=$vlg_dir/$vlg_key
     (umask 077;mkdir "$vlg_claim") || return 75
     (umask 077;printf '%s\n' "$vlg_me" > "$vlg_claim/pid" && printf '%s\n' "$vlg_start" > "$vlg_claim/start") || return 75
@@ -531,8 +549,8 @@ vward_lock_release() {
     elif [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ]; then
         IFS=' ' read -r vl_release_pid _ < /proc/self/stat || vl_release_pid=
         vl_release_start=$(vward_admission_pid_start "$vl_release_pid") || vl_release_start=
-        if [ -n "$vl_release_start" ] && [ "$(cat "$1/pid" 2>/dev/null)" = "$vl_release_pid" ] &&
-            [ "$(cat "$1/pid_start" 2>/dev/null)" = "$vl_release_start" ] &&
+        if [ -n "$vl_release_start" ] && [ "$(vward_lock_gate_decimal "$1/pid" 2>/dev/null)" = "$vl_release_pid" ] &&
+            [ "$(vward_lock_gate_decimal "$1/pid_start" 2>/dev/null)" = "$vl_release_start" ] &&
             [ "$(vward_lock_boot_id "$1/boot")" = "$vlg_boot" ]; then
             vward_lock_gate_exec rm -rf "$1" && vl_release_rc=0
         fi

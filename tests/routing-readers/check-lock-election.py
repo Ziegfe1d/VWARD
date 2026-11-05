@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Dead reclaimers must not block forever or erase the next live lock owner."""
 import os,signal,subprocess,time
-from fixture import PipelineFixture,SHELL
+from fixture import PipelineFixture,SHELL,LIBDIR,function_source
 
 def until(path):
     end=time.monotonic()+8
@@ -12,6 +12,21 @@ def stop(p):
         try:os.killpg(p.pid,signal.SIGKILL)
         except ProcessLookupError:pass
         p.communicate(timeout=5)
+
+def paused_exec_source():
+    # Static BusyBox may exec its own rm applet without PATH lookup. Pause the
+    # ACTUAL leased publisher after final guards instead of wrapping rm in PATH.
+    # Every production guard/lease and the final exec remain unchanged.
+    source=function_source(LIBDIR/'vward-runtime-admission.sh','vward_lock_gate_exec')
+    point='    exec "$@"\n'
+    assert source.count(point)==1,'leased final exec fault point changed'
+    fault='''    if [ "$#" = 3 ] && [ "$1:$2" = rm:-rf ] && [ "$3" = "$MATCH" ];then
+        IFS=' ' read -r fixture_writer _ < /proc/self/stat || return 75
+        printf '%s\n' "$fixture_writer" > "$PAUSED"
+        while [ ! -f "$RESUME" ];do sleep .02;done
+    fi
+'''
+    return source.replace(point,fault+point)
 
 # Private constructors enforce their own modes even for a permissive caller.
 with PipelineFixture() as f:
@@ -24,6 +39,28 @@ with PipelineFixture() as f:
     '''
     r=f.run(f.script(command),*f.libs,j)
     assert r.returncode==0 and not (j/'.lock').exists(),(r.returncode,r.stderr,'private lock depended on ambient umask')
+
+# Removing cat must not turn a prefix/extra-line record into owner authority.
+for suffix,expected in [('',0),('\n\n',0),('\nforeign',75)]:
+    with PipelineFixture() as f:
+        lock=f.p/'decimal-record'
+        cmd='''vward_lock_gate_enter "$1" || exit $?
+        printf '%s%s' "$vlg_me" "$2" > "$vlg_claim/pid"
+        vward_lock_gate_leave "$1"
+        '''
+        r=f.run(f.script(cmd),*f.libs,lock,suffix)
+        assert r.returncode==expected,(suffix,r.returncode,r.stderr,'owner record shape changed')
+
+for suffix,expected in [('',0),('\n\n',0),('\nforeign',1)]:
+    with PipelineFixture() as f:
+        lock=f.p/'release-record'
+        cmd='''vward_lock_take "$1" || exit $?
+        read -r original < "$1/pid_start" || exit 75
+        printf '%s%s' "$original" "$2" > "$1/pid_start"
+        vward_lock_release "$1"
+        '''
+        r=f.run(f.script(cmd),*f.libs,lock,suffix)
+        assert r.returncode==expected,(suffix,r.returncode,r.stderr,'release accepted extra owner data')
 
 with PipelineFixture() as f:
     path=f.p/'gate-target';ready=f.p/'ready'
@@ -40,14 +77,9 @@ with PipelineFixture() as f:
     path=f.p/'legacy.lock';path.mkdir(mode=0o700)
     dead=subprocess.Popen(['true']);dead.wait();(path/'pid').write_text(str(dead.pid)+'\n')
     paused=f.p/'paused';resume=f.p/'resume';held=f.p/'held';entered=f.p/'entered'
-    shim=f.p/'bin';shim.mkdir()
-    rm=shim/'rm';rm.write_text('''#!/bin/sh
-case "$*" in *legacy.lock) : > "$PAUSED";while [ ! -f "$RESUME" ];do sleep .02;done ;; esac
-exec /bin/rm "$@"
-''');rm.chmod(0o755)
     command='dir_lock "$1" || exit $?; : > "$2"; sleep 30'
-    p=subprocess.Popen(SHELL+['-c',f.script(command),'reclaim',*map(str,f.libs),str(path),str(held)],
-        env=f.env|{'PAUSED':str(paused),'RESUME':str(resume),'PATH':str(shim)+':'+f.env['PATH']},stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+    p=subprocess.Popen(SHELL+['-c',f.script(paused_exec_source()+command),'reclaim',*map(str,f.libs),str(path),str(held)],
+        env=f.env|{'PAUSED':str(paused),'RESUME':str(resume),'MATCH':str(path)},stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
     q=None
     try:
         until(paused)
@@ -66,13 +98,9 @@ exec /bin/rm "$@"
 with PipelineFixture() as f:
     path=f.p/'legacy.lock';path.mkdir(mode=0o700)
     dead=subprocess.Popen(['true']);dead.wait();(path/'pid').write_text(str(dead.pid)+'\n')
-    paused=f.p/'paused';resume=f.p/'resume';shim=f.p/'bin';shim.mkdir()
-    rm=shim/'rm';rm.write_text('''#!/bin/sh
-case "$*" in *legacy.lock) echo $$ > "$PAUSED";while [ ! -f "$RESUME" ];do sleep .02;done ;; esac
-exec /bin/rm "$@"
-''');rm.chmod(0o755)
-    p=subprocess.Popen(SHELL+['-c',f.script('vward_lock_take "$1"'),'parent',*map(str,f.libs),str(path)],
-        env=f.env|{'PAUSED':str(paused),'RESUME':str(resume),'PATH':str(shim)+':'+f.env['PATH']},
+    paused=f.p/'paused';resume=f.p/'resume'
+    p=subprocess.Popen(SHELL+['-c',f.script(paused_exec_source()+'vward_lock_take "$1"'),'parent',*map(str,f.libs),str(path)],
+        env=f.env|{'PAUSED':str(paused),'RESUME':str(resume),'MATCH':str(path)},
         stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
     try:
         until(paused);worker=int(paused.read_text());os.kill(p.pid,signal.SIGKILL);p.wait(timeout=5)
@@ -95,13 +123,9 @@ exec /bin/rm "$@"
 # final v2 release utility merely because its parent died.
 with PipelineFixture() as f:
     j=f.p/'locks';j.mkdir(mode=0o700);path=j/'.lock'
-    paused=f.p/'paused';resume=f.p/'resume';shim=f.p/'bin';shim.mkdir()
-    rm=shim/'rm';rm.write_text('''#!/bin/sh
-if [ "$*" = "-rf $MATCH" ];then echo $$ > "$PAUSED";while [ ! -f "$RESUME" ];do sleep .02;done;fi
-exec /bin/rm "$@"
-''');rm.chmod(0o755)
-    p=subprocess.Popen(SHELL+['-c',f.script('vrj2_lock "$1" && vrj2_unlock "$1"'),'release',*map(str,f.libs),str(j)],
-        env=f.env|{'PAUSED':str(paused),'RESUME':str(resume),'MATCH':str(path),'PATH':str(shim)+':'+f.env['PATH']},
+    paused=f.p/'paused';resume=f.p/'resume'
+    p=subprocess.Popen(SHELL+['-c',f.script(paused_exec_source()+'vrj2_lock "$1" && vrj2_unlock "$1"'),'release',*map(str,f.libs),str(j)],
+        env=f.env|{'PAUSED':str(paused),'RESUME':str(resume),'MATCH':str(path)},
         stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
     q=None
     try:
