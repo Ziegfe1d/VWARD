@@ -76,7 +76,7 @@ VU_QUARANTINE_FILE=$VU_STATE_DIR/quarantine.state
 vu_log() {
     level=$1
     shift
-    mkdir -p "$VU_LOG_DIR" 2>/dev/null || :
+    [ -d "$VU_LOG_DIR" ] || mkdir -p "$VU_LOG_DIR" 2>/dev/null || :
     message="$(date -u '+%Y-%m-%dT%H:%M:%SZ') [$level] $*"
     printf '%s\n' "$message" >&2
     [ "${VWARD_NO_PERSIST_LOG:-0}" = 1 ] || printf '%s\n' "$message" >> "$VU_LOG_DIR/updater.log" 2>/dev/null || :
@@ -148,7 +148,7 @@ vu_state_get() {
 vu_state_set() {
     key=$1
     value=$2
-    mkdir -p "$VU_STATE_DIR" || return 1
+    [ -d "$VU_STATE_DIR" ] || mkdir -p "$VU_STATE_DIR" || return 1
     file=${3:-$VU_STATE_DIR/state}
     tmp=$file.tmp.$$
     if [ -r "$file" ]; then
