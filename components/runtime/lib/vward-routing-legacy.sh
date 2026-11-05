@@ -53,7 +53,7 @@ vrb_legacy_archive() (
         vrb_data_ancestry "$vrb_la_src" || return 75
         cp -p "$vrb_la_src" "$3/$vrb_la_label" || return 1
         [ "$(vr2_hash "$3/$vrb_la_label")" = "$vrb_la_hash" ] && [ "$(wc -c < "$3/$vrb_la_label")" -eq "$vrb_la_size" ] || return 75
-        # Numeric metadata only, never filename fields. stat -c is not portable
+        # Numeric metadata only, never filename fields. GNU stat flags are not portable
         # to Keenetic; archived files may be a legacy public registry0644.
         # shellcheck disable=SC2012
         [ "$(ls -ldn "$3/$vrb_la_label" | awk '{print substr($1,1,10),$3}')" = "$vrb_la_mode $vrb_la_uid" ] || return 75
