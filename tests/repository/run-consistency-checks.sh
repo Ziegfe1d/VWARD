@@ -135,6 +135,9 @@ else
     echo "NOTE: BusyBox audit/cost runtime requires busybox; host audit ran above"
 fi
 python3 tests/repository/check-routing-state-errors.py || fail "routing state on read/removal errors"
+if command -v busybox >/dev/null 2>&1; then
+    RS6_BUSYBOX="$(command -v busybox)" python3 tests/repository/check-routing-state-errors.py || fail "BusyBox routing state: real shared lock and persist failure branches"
+fi
 python3 tests/repository/check-awg-engine.py || fail "Tunnel engine (AmneziaWG)"
 python3 tests/repository/check-vless-engine.py || fail "VLESS engine (Xray)"
 python3 tests/repository/check-boot-watch.py || fail "boot watch: the Panel and AdGuard Home after boot"
