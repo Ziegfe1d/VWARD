@@ -262,6 +262,17 @@ Stress/Chromium в resource job SUCCESS; main-only dispatch-transition1271605584
 owner-process metadata lifetime и read-only healthy sweep; budgets/guards/workflow прежние.
 Адресные RED→GREEN и review закрыты; новый exact-HEAD CI ещё требуется, остаток не принят.
 
+05.11.2026 17:03 МСК / PR38: [CI42020983953](https://github.com/Ziegfe1d/VWARD/actions/runs/42020983953)
+на exact04e45911fb980c290de1abce0c64db908d2c8163/tree4589934b37c6b2ef025e9899d25d53e2251bfaa8
+завершён FAILURE; прочитан однократно. Updater-tests127223390990 SUCCESS(rehearsal),
+repository-consistency127223391052 FAILURE(BusyBox lock-election fault point не достигнут),
+resource-audit127223390622 FAILURE(reconciler67exec>64); main-only127253422871 SKIPPED.
+Housekeeping уже PASS26exec≤28/2opt_ops≤3; stress/Chromium SUCCESS. Все32 sh cases PASS,
+включая8/24/8repeat/24native DATA calls(host495.96s), но BusyBox остаток после lock case не принят.
+Static BusyBox PATH-bypass воспроизведён; пауза перенесена в actual leased worker передexec,
+assertions/таймауты сохранены. Локальный targeted emulator reconciler RED69→GREEN61≤64,
+2opt_ops≤4, без изменения методики/бюджета. Новый exact CI всё равно обязателен; live OFF.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -664,6 +675,31 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   Это OFF software preparation: legacy eligibility/updater callbacks ещё НЕ WIRED, libs
   UNINSTALLED, API endpoint/actions не включены. Роутер не подключался; merge/release нет.
 
+- 05.11.2026 17:03 МСК / PR38 CI42020983953: полный sh prepared subset из32 cases прошёл,
+  но BusyBox остановился check-lock-election.py:53 until(paused), поэтому его остаток НЕ PASS.
+  Local Ubuntu24.04 dynamic BusyBox1.36.1 case PASS; static1.36.1 воспроизвёл тот же RED:
+  exec rm выбирает applet и обходит PATH shim. Точный build CI бинарника в логе не печатался;
+  подтверждённый локальный static repro устраняется переносом fault point в исходник actual
+  leased worker, после его guards/lease и перед тем же finalexec. Marker — actual /proc PID;
+  все stale/reclaim/orphan/release/v1-v2/metadata assertions и8s bounds сохранены, skips нет.
+  Sh/BusyBox1.37 и Ubuntu static1.36 race/stale cases GREEN; это не permission live transport.
+  Reconciler budget67>64 также сохранён как отдельный отказ. В isolated Ubuntu24.04 Docker
+  выполнен штатный build-rootfs + run-resource-audit.measure(runs5), crond paused как в audit:
+  RED69[70,69,67,70,66]exec/2opt_ops. Trace показал лишние failed mkdir existing.gate и cat
+  owner fields. Existing gate теперь проходит прежнюю private validation без лишнего mkdir;
+  absent/create race сохраняет fallback. Decimal builtin reader заменяет cat в leave/release:
+  actualPID/start/boot/lease checks прежние, EOF/trailing blank допустимы как раньше, extra
+  nonempty/invalid fields отказывают. Новые shape tests PASS; addressed review без Important.
+  После первых сокращений median64[61,64,58,64,64]; конечный targeted GREEN61[62,75,57,55,61],
+  opt_ops2. Выброс75 не скрыт: штатный median-of5 и budget64/4 не изменены. Это только
+  targeted local resource result, НЕ весь job/full local consistency и НЕ MIPS.
+  Sh/BB lock election PASS; BB shared locks6.26s, J2 5.11s, sh v1 journal4.96s; stale tests
+  sh/BB/static1.36 PASS. Public workflow/map/allowlists78/version/feed unchanged; raw traces
+  и Docker setup остались вне repo. Full exact CI исправленного HEAD ещё требуется.
+  Старые local full FAIL(readonly/opt/var) и Chromium localSKIP не переписаны; official
+  stress/Chromium SUCCESS относятся к04e4591. Libs UNINSTALLED, legacy/updater callbacks
+  PREPARED NOT WIRED, packet/clientprooffalse; роутер не подключался, merge/release нет.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -788,6 +824,12 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   новый полный exact-HEAD CI обязан подтвердить resource budget и весь остаток. После него
   только конкретный VPN-only GO §F.3/G.4; legacy wiring/quiescence/physical transport и
   hardware не выполнены. A1/A6/A7/A10/storage остаются открыты; публикация не разрешена.
+
+- 05.11.2026 17:03 МСК / PR38: CI809 не зелёный — BusyBox portable fault injection и
+  reconciler budget исправлены адресно; нужны exact-HEAD all3mandatory SUCCESS и остаток
+  BusyBox subset. Штатный общий resource job не объявлен локальным PASS на основании одной
+  targeted job. Следующая live граница остаётся VPN-only §F.3/G.4 с отдельным конкретным GO;
+  legacy wiring/quiescence/physical transport/hardware/A1/A6/A7/A10/storage открыты.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 

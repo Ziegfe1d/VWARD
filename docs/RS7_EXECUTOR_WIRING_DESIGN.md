@@ -649,3 +649,38 @@ Budget/test/workflow/ownership/DNS/signature/barrier guards не ослабле�
 allowlists/VERSION/feed прежние. Normal legacy/updater bridge НЕ WIRED, libs UNINSTALLED,
 packet path/client proof не установлен, router не подключался. Нет merge/live/release.
 Исторические local full FAIL(read-only /opt/var) и local Chromium SKIP не переписываются.
+
+
+#### G.4b. CI809: переносимый fault point и фактический reconciler budget (05.11.2026 17:03 МСК)
+
+Exact CI42020983953/04e4591: updater/rehearsal SUCCESS; repository-consistency FAILURE в
+BusyBox lock-election:53 (до pause); resource-audit FAILURE только reconciler67exec>64.
+Housekeeping26exec/2opt_ops уже в прежних28/3, все preceding resource steps/stress/Chromium
+SUCCESS. Полный32-case sh subset PASS, включая cube8/24/8repeat/24native DATA calls495.96s
+host; BusyBox часть после lock case не принята. Run прочитан однократно, rerun/poll нет.
+
+Ubuntu24.04 Docker dynamic BB1.36 case PASS, static BB1.36 case RED: exec-rm applet обходит
+PATH shim. Точный вариант CI бинарника не выводился; локальный воспроизводимый отказ
+устранён переносом pause ВНУТРЬ actual leased PID после finalguards/lease перед тем жеexec.
+Источник функции извлекается без замены guard/body; добавлен только bounded fault point.
+Marker — /proc actual PID. Прежние competing-owner/orphan/release/v1-v2/metadata assertions
+и8s limits сохранены; static1.36/sh/BB1.37 GREEN. Production fault flag/exec override не добавлен.
+
+Targeted штатный resource measure в isolated Ubuntu24.04 Docker: build-rootfs, real strace,
+crond paused, тот же median5. До:69exec[70,69,67,70,66],2opt_ops → FAIL64/4. После private
+validation existing gate без failed mkdir и builtin decimal reads owner fields leave/release:
+61exec[62,75,57,55,61],2opt_ops → targeted PASS64/4. Промежуточный median64 сохранён в private
+notes. Outlier75 не скрыт, budget/методика/утверждения/сэмплы CI не изменялись. Это один local
+job, не полный resource-audit PASS/не MIPS. Ancestor/actualPID/start/BOOT/finallease/cleanup
+checks сохраняются; absent mkdir race fallback прежний, extra-field owner records отклонены,
+EOF/trailing blanks допустимы. Addressed review закрыт без Important/Critical.
+
+| Закрыто кодом | Переносимая pause в leased actor, стоимость прежнего lock protocol без потери authority checks |
+|---|---|
+| Подтверждено адресно | Static BB RED→GREEN, sh/BB1.37, field-shape/legacy/journal/recovery; реальный targeted resource RED69→GREEN61 |
+| Не принято | Новый exact CI целиком и оставшийся BusyBox subset; local full consistency/Chromium historical FAIL/SKIP сохранены |
+| Live граница | Прежний §F.3/G.4: все legacy entry points/eligibility/quiescence/physical transport/owner acceptance и отдельный GO |
+
+Ни pipeline semantics, ни ownership/DNS/signature/admission guards, ни78targets/map/allowlists/
+workflow/VERSION/feed не расширены. Libs UNINSTALLED, bridges PREPARED ONLY/no normalcaller,
+API actions не wired; clientpathfalse. Роутер не подключался, merge/release/live нет.

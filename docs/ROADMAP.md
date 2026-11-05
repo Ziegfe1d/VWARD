@@ -1039,6 +1039,12 @@ owner-process metadata lifetime, healthy sweep без USB writes и без ли�
 Targeted RED→GREEN/review закрыты; budget/test guards неизменны, новый exact CI обязателен.
 Это не live wiring/публикация; normal legacy/updater callbacks ещё не подключены. См.RS7§G.4a.
 
+05.11.2026 17:03 МСК / PR38 CI809: all32 sh cases PASS; BusyBox faultpoint отказал на
+static applet PATH-bypass, resource budget только reconciler67>64. Исправлены portable
+lease pause и стоимость metadata reads/existing gate; targeted local emulator median69→61
+при неизменном64/4. Updater/rehearsal/stress/Chromium/housekeeping прошли на04e4591; новый
+exact CI и остаток BusyBox обязательны. Подробности/границы — RS7§G.4b. Live/merge/release нет.
+
 ### 4.4 Стабильность: этапы (индекс - `STABILITY.md`)
 | Этап | Выпуск | Что сделать |
 |---|---|---|
