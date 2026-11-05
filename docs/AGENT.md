@@ -285,6 +285,8 @@ Consistency127294493897 FAILURE только в следующем old check-rou
 sh/BB1.37/staticBB1.36 + negative missing-dependency control PASS. Runtime неизменён;
 новый exact-HEAD CI обязателен. Никакого live/router/merge/release.
 
+05.11.2026 21:49 МСК / PR38 CI811: exacta7236ff/treec9f9ace5, [run42064101678](https://github.com/Ziegfe1d/VWARD/actions/runs/42064101678) completed FAILURE. Updater127373353240 и resource127373353230 SUCCESS; consistency127373352612 FAILURE в old SmartDNS clear, main-only127411549796 SKIPPED. Test-only actual lock dependency/private backup fixture correction + sh/BB PASS; прежний runtime неизменён. Непринятый suffix проверен локально до конца, но новый exact CI/all3 ещё нужен. Live OFF.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -732,6 +734,40 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   SUCCESS относятся кba24acd. Router не подключался; bridges PREPARED NOT WIRED, libs
   UNINSTALLED/API actionsOFF/clientprooffalse. A1/A6/A7/A10/storage/hardware остаются открыты.
 
+- 05.11.2026 21:49 МСК / [Агент] / PR38 CI811: CI811 /42064101678 exacta7236ffe91e96d8fab7c9155692cb6c6a64458a7
+  (treec9f9ace545d470b2f355833a8490c91e4562efd0) завершён FAILURE, прочитан однократно.
+  Updater127373353240 SUCCESS(official rehearsal), resource127373353230 SUCCESS(полный
+  budget/stress/Chromium), main-only127411549796 SKIPPED. Consistency127373352612 прошёл
+  новые32 Bcases наsh/BusyBox и исправленный persist fixture, затем остановился на old
+  check-smartdns-clear.py: route_change_busy. Остаток этого официального suite не принят.
+
+  Точная причина test harness воспроизведена: три старых Smart DNS fixture заменяли всю
+  admission library двумя idle enter/leave функциями, поэтому actual dir_lock не находил
+  vward_lock_take и отказывал ДО удаления. Test-only correction sources настоящую common
+  library, оставляя прежнюю idle updater модель только для enter/leave. Fake-success lock,
+  production fallback, ослабления guards/assertions/timeouts нет. Clear и orphan-clear также
+  получили свой temporary ADS_BACKUP_ROOT: default /opt/var на read-only host мешал дойти до
+  их AGH assertions; production mkdir refusal не менялся. AST исходных assert и вызовов fail
+  не изменён. Sh иBusyBox1.37 при022: все3 fixture PASS; private missing
+  lock source control снова воспроизводит отказ. Runtime/components/web/config/scripts/
+  package-map/allowlists78/workflow/VERSION/feed побайтовоa7236ff/ba24acd.
+
+  Ранее непринятый хвост consistency от SmartDNS clear до конца штатного runner проверен
+  по последовательным checkpoint: все оставшиеся проверки PASS. Это только suffix, НЕ полный
+  local consistency PASS. Три исправленных fixture проверены отдельно sh/BusyBox1.37 при022;
+  основной suffix — isolated Ubuntu24.04/static BusyBox1.36 с исходными runner assertions,
+  без изменения production/runtime/workflow. Host ограничения обнаружены честно: component-ops
+  требовал разрешённый local HTTP; hardcoded /usr/bin BusyBox и default /opt/var потребовали
+  изолированный контейнер; diagnostics DNS/cutover требовали curl/git и прошли на host.
+  Никаких host/CI safeguards ради результата не ослабляли. Исторические
+  local full FAIL(readonly/opt/var/check-dryrun.py199) и local Chromium SKIP остаются в истории.
+  Новый exact test/doc HEAD ещё требует всех3 обязательных jobs; прежние SUCCESS не переносятся.
+  OFF/libs UNINSTALLED/API noendpoint/clientprooffalse/bridges PREPARED NOT WIRED сохранены.
+  Следующая live граница только конкретный VPN-only GO §F.3/G.4 с legacy fences/quiescence/
+  transport completion и owner acceptance; A1/A6/A7/A10/storage/hardware открыты.
+  Роутер не подключался; merge/dev/main/feed/VERSION/release/live wiring отсутствуют.
+
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -868,6 +904,8 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   test-only dependency/coverage correction PASS; следующий exact-HEAD CI обязан принять
   остаток consistency. Live VPN-only §F.3/G.4 по-прежнему требует конкретного GO/legacy fences/
   updater quiescence/physical transport/owner acceptance; merge/release не разрешены.
+
+- 05.11.2026 21:49 МСК / PR38: CI811 не зелёный. Все3 SmartDNS fixture исправлены без runtime delta; локально ранее непринятый suffix PASS по checkpoints, НЕ весь local suite. Нужен новый exact-HEAD CI all3. VPN-only GO/legacy wiring/quiescence/physical transport/hardware остаются следующей границей; merge/release не разрешены.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 
