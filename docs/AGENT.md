@@ -273,6 +273,18 @@ Static BusyBox PATH-bypass воспроизведён; пауза перенес
 assertions/таймауты сохранены. Локальный targeted emulator reconciler RED69→GREEN61≤64,
 2opt_ops≤4, без изменения методики/бюджета. Новый exact CI всё равно обязателен; live OFF.
 
+05.11.2026 19:21 МСК / PR38: [CI42041878759](https://github.com/Ziegfe1d/VWARD/actions/runs/42041878759)
+exactba24acd5593da5df279cd82b2a8c8bba60c67b41/tree2a31b68854f1da54faee3176c470a6e60054f3fa
+завершён FAILURE, проверен однократно. Updater127294494148 и resource-audit127294494143
+**SUCCESS**, включая rehearsal/stress/Chromium/неизменный resource budget. Все32Bcases наsh
+иBusyBox PASS; cube8/24/8repeat/24DATAcalls host366.76s/sh и192.78s/BB, неMIPS.
+Consistency127294493897 FAILURE только в следующем old check-routing-state-errors.py;
+остаток после него не принят. Main-only127326028280 SKIPPED. Причина: extracted remove_adaptive
+вызывал vward_lock_take без общей library и завершался ДО persist ветки. Test-only correction
+подключает настоящую admission library, проверяет реальный branch reach и own release;
+sh/BB1.37/staticBB1.36 + negative missing-dependency control PASS. Runtime неизменён;
+новый exact-HEAD CI обязателен. Никакого live/router/merge/release.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -700,6 +712,26 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   stress/Chromium SUCCESS относятся к04e4591. Libs UNINSTALLED, legacy/updater callbacks
   PREPARED NOT WIRED, packet/clientprooffalse; роутер не подключался, merge/release нет.
 
+- 05.11.2026 19:21 МСК / PR38 CI810: общий resource job и updater/rehearsal наконец SUCCESS
+  наba24acd, все новые32case×sh/BB прошли, включая portable lease pause. Старые SUCCESS не
+  переносятся на другой tree. Единственный отказ consistency далее — check-routing-state-errors:
+  unknown/error-text/write-error/absent/present все rc1 с `vward_lock_take: not found`.
+  Сообщение absent:lost persist означало НЕ достигнутую ветку, не доказанное повреждение runtime.
+  Подтверждённый RED: прежний harness извлекал actual remove_adaptive после перехода к common
+  lock API, но не подключал его настоящую зависимость. Test-only fix sources actual runtime
+  admission functions (без whole CLI/daemon), все прежние config/read/write/ownership/assertions
+  сохранены. Spy подтверждает ровно одну ожидаемую native remove attempt каждого scenario;
+  после него собственный CHANGE lock должен быть released. Early refusal больше не выдаётся
+  за успешный тест сохранности. Удаление source из private copy воспроизводит FAIL нового
+  branch-reach assertion. Sh, BusyBox1.37 ash, Ubuntu static1.36 ash приumask022 GREEN;
+  штатная BB проверка этого legacy failure fixture добавлена рядом сsh, безskip/новыхtimeouts.
+  Production components/web/config/map/allowlists78/VERSION/feed/workflow не менялись;
+  последний исправленный runtime остаётся побайтовоba24acd. Новому test/doc HEAD нужен свой
+  полный CI, остаток позднего consistency не объявлен принятым. Исторические local full
+  FAIL(readonly/opt/var) и Chromium localSKIP сохранены; official Chromium/runtime budget
+  SUCCESS относятся кba24acd. Router не подключался; bridges PREPARED NOT WIRED, libs
+  UNINSTALLED/API actionsOFF/clientprooffalse. A1/A6/A7/A10/storage/hardware остаются открыты.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -830,6 +862,12 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   BusyBox subset. Штатный общий resource job не объявлен локальным PASS на основании одной
   targeted job. Следующая live граница остаётся VPN-only §F.3/G.4 с отдельным конкретным GO;
   legacy wiring/quiescence/physical transport/hardware/A1/A6/A7/A10/storage открыты.
+
+- 05.11.2026 19:21 МСК / PR38: budget/rehearsal и32×2 новые Bcases подтверждены CI810,
+  но общий software gate ещё открыт из-за old persist error harness. Runtime unchanged,
+  test-only dependency/coverage correction PASS; следующий exact-HEAD CI обязан принять
+  остаток consistency. Live VPN-only §F.3/G.4 по-прежнему требует конкретного GO/legacy fences/
+  updater quiescence/physical transport/owner acceptance; merge/release не разрешены.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 

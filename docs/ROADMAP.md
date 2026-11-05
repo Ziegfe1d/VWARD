@@ -1045,6 +1045,11 @@ lease pause и стоимость metadata reads/existing gate; targeted local e
 при неизменном64/4. Updater/rehearsal/stress/Chromium/housekeeping прошли на04e4591; новый
 exact CI и остаток BusyBox обязательны. Подробности/границы — RS7§G.4b. Live/merge/release нет.
 
+05.11.2026 19:21 МСК / PR38 CI810: resource budget/rehearsal/stress/Chromium SUCCESS,
+новые32 Bcases×sh/BB PASS. Остался old persist failure fixture без общей lock dependency;
+test-only source/branch-reach/release correction GREEN наsh/BB1.37/static1.36, runtime unchanged.
+Следующий exact CI должен принять поздний остаток; live/merge/release не разрешены. RS7§G.4b.
+
 ### 4.4 Стабильность: этапы (индекс - `STABILITY.md`)
 | Этап | Выпуск | Что сделать |
 |---|---|---|

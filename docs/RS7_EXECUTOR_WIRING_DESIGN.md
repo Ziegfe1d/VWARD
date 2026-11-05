@@ -684,3 +684,27 @@ EOF/trailing blanks допустимы. Addressed review закрыт без Imp
 Ни pipeline semantics, ни ownership/DNS/signature/admission guards, ни78targets/map/allowlists/
 workflow/VERSION/feed не расширены. Libs UNINSTALLED, bridges PREPARED ONLY/no normalcaller,
 API actions не wired; clientpathfalse. Роутер не подключался, merge/release/live нет.
+
+
+**Дополнение §G.4b — CI810 / test-only persist fixture (05.11.2026 19:21 МСК).**
+
+CI42041878759 exactba24acd/tree2a31b688: updater127294494148/rehearsal и resource127294494143
+SUCCESS, включая stress/Chromium/неизменный budget. Все32 новых B cases прошли sh иBusyBox;
+обе source cubes8/24/8repeat/24nativeDATAcalls366.76s/192.78s(host, неMIPS). Consistency
+127294493897 остановился далее old routing-state-errors fixture; main-only127326028280
+SKIPPED. Run/jobs прочитаны один раз, rerun/poll нет; весь поздний остаток не принят.
+
+RED воспроизведён: harness извлекал реальный remove_adaptive, но не source common admission
+после его перехода на vward_lock_take. Все5 сценариев заканчивались rc1/notfound ДО persist;
+absent:lost persist был несостоявшимся ожиданием, не свидетельством потери данных runtime.
+Test-only fix подключает настоящие lock functions, spy требует одну expected remove attempt
+и own CHANGE release. Unknown config/write refusal/DNS-ledger ownership assertions сохранены;
+не source whole daemon/CLI и не fake-success lock. Negative missing-dependency control теперь
+явно FAIL branch-reach; sh/BB1.37/staticBB1.36 GREEN при022. BB case добавлен в штатный runner.
+
+Runtime components/web/config/package-map/allowlists78/VERSION/feed/workflow побайтово прежние.
+Новый test/doc HEAD требует своего exact CI; предыдущие SUCCESS не заменяют этих ворот.
+Прежние local full FAIL(readonly/opt/var) и local Chromium SKIP не исправляются отчётом;
+официальные Chromium/budget SUCCESS выше относятся кba24acd. Hardware не принимался.
+OFF pipeline/bridges prepared-not-wired/API noendpoint/libs uninstalled/clientprooffalse
+и следующая конкретная VPN-only граница §F.3/G.4 прежние. Нет router/merge/live/release.
