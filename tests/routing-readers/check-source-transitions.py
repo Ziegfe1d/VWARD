@@ -13,12 +13,13 @@ while stack:
 walk.reverse()
 assert len(walk)==25 and len(set(zip(walk,walk[1:])))==24 and set(walk)==set(range(8))
 with PipelineFixture() as f:
+    f.clock=('11111111-1111-1111-1111-111111111111',100)
     (f.decision/'bindings.tsv').write_text('svc\tx.example\texact\tconfirmed\tipv4\tknown\n')
     (f.decision/'evidence.tsv').write_text('M\tm1\tx.example\texact\tVPN:Wireguard0\tdefault\t1\texplicit\t0\t-\nA\ta1\tx.example\texact\tVPN:Wireguard0\tdefault\t1\tactive\t0\tsvc\n')
     seen=set();started=time.monotonic()
     for index,n in enumerate(walk):
         flags={src:int(bool(n&(1<<b))) for b,src in enumerate('MSA')}
-        (f.decision/'context.tsv').write_text(''.join(f'source:{s}\t{v}\n' for s,v in flags.items())+'VPN:Wireguard0\tavailable\nVPN:Wireguard1\tavailable\n')
+        (f.decision/'context.tsv').write_text(''.join(f'source:{s}\t{v}\n' for s,v in flags.items())+'VPN:Wireguard0\tavailable\nVPN:Wireguard1\tavailable\nprobe:a1\tfresh\nprobe-boot:a1\t11111111-1111-1111-1111-111111111111\nprobe-until:a1\t155\n')
         r=f.invoke('vward_routing_pipeline2',f.j,f'edge{index}','svc','vpn','VPN:Wireguard0','default',int(index>0))
         assert r.returncode==0,(index,n,r.returncode,r.stdout,r.stderr)
         assert (f.j/f'edge{index}'/'state').read_text()=='committed\n' or not n

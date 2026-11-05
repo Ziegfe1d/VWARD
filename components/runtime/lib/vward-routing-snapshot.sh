@@ -20,13 +20,27 @@
 # live-router proof: it covers the files and the shared Keenetic cache the
 # projections are derived from. The cache is never refreshed here (no ndmc/RCI).
 # No daemon, no timer, no background process, nothing outside OUTDIR is written.
-vward_routing_consistent_read() (
+# Read-only native clock. Persisted wall time cannot establish probe freshness.
+# Tests may substitute DATA facts by defining this function after sourcing;
+# production accepts no clock executable/path override.
+vr2_clock_read() {
+    IFS= read -r vr2_cr_boot < /proc/sys/kernel/random/boot_id || return 1
+    read -r vr2_cr_now _ < /proc/uptime || return 1
+    vr2_cr_now=${vr2_cr_now%%.*}
+    printf '%s %s\n' "$vr2_cr_boot" "$vr2_cr_now"
+}
+vrsi_consistent_read() (
     umask 077
-    [ "$#" = 1 ] || return 2
-    command -v vward_routing_read >/dev/null 2>&1 && command -v vward_routing_observe >/dev/null 2>&1 ||
-        { printf '%s\n' 'routing snapshot: reader and observers must be loaded' >&2; return 2; }
+    [ "$#" -eq 2 ] || return 2
+    vrs_read_kind=$2
+    case $vrs_read_kind in strict|legacy-observation) ;; *) return 2 ;; esac
+    if ! command -v vward_routing_read >/dev/null 2>&1 || ! command -v vward_routing_observe >/dev/null 2>&1; then
+        printf '%s\n' 'routing snapshot: reader and observers must be loaded' >&2; return 2
+    fi
     vrs_out=$1
     case $vrs_out in /*) ;; *) printf '%s\n' 'routing snapshot: absolute OUTDIR required' >&2; return 2 ;; esac
+    # Read only mode metadata; filename fields are never parsed.
+    # shellcheck disable=SC2012
     if [ -L "$vrs_out" ] || [ ! -d "$vrs_out" ] || [ ! -O "$vrs_out" ] || [ ! -w "$vrs_out" ] ||
         [ "$(ls -ldn "$vrs_out" 2>/dev/null | awk '{print substr($1,1,10)}')" != drwx------ ]; then
         printf '%s\n' 'routing snapshot: OUTDIR must be a private directory owned by the caller' >&2
@@ -66,9 +80,11 @@ vward_routing_consistent_read() (
         case $vrs_crc in ''|*[!0-9a-f]*) printf '%s bad\n' "$1"; return 0 ;; esac
         [ "${#vrs_crc}" = 64 ] || { printf '%s bad\n' "$1"; return 0; }
         # BusyBox on Keenetic has no stat format option: inode from ls -di, mtime seconds from date -r.
+        # shellcheck disable=SC2012
         vrs_ino=$(ls -di "$2" 2>/dev/null | awk '{print $1}')
         vrs_mt=$(date -r "$2" +%s 2>/dev/null)
         case $vrs_ino$vrs_mt in ''|*[!0-9]*) printf '%s nostat\n' "$1"; return 0 ;; esac
+        # shellcheck disable=SC2012
         vrs_auth=$(ls -ldn "$2" 2>/dev/null | awk '{print substr($1,1,10),$3}')
         [ -n "$vrs_auth" ] || { printf '%s nostat\n' "$1"; return 0; }
         printf '%s %s %s %s %s %s\n' "$1" "$vrs_crc" "$vrs_sz" "$vrs_ino" "$vrs_mt" "$vrs_auth"
@@ -112,12 +128,39 @@ vward_routing_consistent_read() (
         for vrs_t in "$vrs_backup"/service-transactions/*/pending; do vrs_presence txn "$vrs_t"; done
         for vrs_t in "$vrs_backup-recovery"/smartdns.*; do vrs_presence smartdns-recovery "$vrs_t"; done
         for vrs_l in $vrs_decision_names; do vrs_one "$vrs_l" "$VWARD_ROUTING_INPUTS/${vrs_l#v2-}.tsv"; done
-        [ -z "$vrs_decision_names" ] || vrs_one obs-agh-image "${VWARD_ROUTING_AGH_IMAGE:-/nonexistent/vward-agh-image}"
+        if [ -n "$vrs_decision_names" ]; then
+            vrs_one obs-agh-image "${VWARD_ROUTING_AGH_IMAGE:-/nonexistent/vward-agh-image}"
+            vrs_one obs-smartdns-profile "$vrs_etc/smartdns.conf"
+            vrs_dir obs-dnsproof "$vrs_etc/route-engine/domain-lists.dns"
+            vrs_clock=$(vr2_clock_read) || vrs_clock=unknown
+            printf '%s\n' "$vrs_clock" | awk '
+                NF==2 && length($1)==36 && $1~/^[0-9a-f-]+$/ && $2~/^[0-9]+$/ && length($2)<=10 {ok=1;print "obs-boot",$1}
+                END{if(!ok)print "obs-boot unknown"}'
+            if [ -r "$VWARD_ROUTING_INPUTS/evidence.tsv" ] && [ -r "$VWARD_ROUTING_INPUTS/context.tsv" ]; then
+                # A probe lease is at most the existing native cache window
+                # (55 s). No operation or persisted 'fresh' extends it.
+                awk -F'\t' -v clock="$vrs_clock" 'BEGIN{split(clock,c," ");valid=(length(c[1])==36 && c[1]~/^[0-9a-f-]+$/ && c[2]~/^[0-9]+$/ && length(c[2])<=10)}
+                    FILENAME==ARGV[1]{if(NF!=2 || seen[$1]++)bad=1;ctx[$1]=$2;next}
+                    $1=="A" && $2~/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/ && length($2)<=64 {
+                        r=$2;s="history"
+                        if($8=="active" || $8=="positive") {
+                            s="unknown";b=ctx["probe-boot:" r];u=ctx["probe-until:" r]
+                            if(!bad && valid && length(b)==36 && b~/^[0-9a-f-]+$/ && u~/^[0-9]+$/ && length(u)<=10) {
+                                if(b!=c[1])s="old-boot"
+                                else if(u+0<=c[2]+0)s="expired"
+                                else if(u+0-c[2]<=55 && ctx["probe:" r]=="fresh")s="fresh"
+                            }
+                        }
+                        print "obs-probe:" r,s
+                    }' "$VWARD_ROUTING_INPUTS/context.tsv" "$VWARD_ROUTING_INPUTS/evidence.tsv" | LC_ALL=C sort
+            fi
+        fi
     }
 
     vrs_decision_names=;vrs_aux_names=
     if [ -n "${VWARD_ROUTING_INPUTS:-}" ]; then
         case $VWARD_ROUTING_INPUTS in /*) ;; *) return 2 ;; esac
+        # shellcheck disable=SC2012
         [ -d "$VWARD_ROUTING_INPUTS" ] && [ ! -L "$VWARD_ROUTING_INPUTS" ] && [ -O "$VWARD_ROUTING_INPUTS" ] &&
             [ "$(ls -ldn "$VWARD_ROUTING_INPUTS" | awk '{print substr($1,1,10)}')" = drwx------ ] || return 2
         vrs_decision_names='v2-version v2-choices v2-bindings v2-evidence v2-policies v2-saved v2-queue v2-tombstones v2-context v2-resources v2-proofs v2-upstreams'
@@ -125,7 +168,15 @@ vward_routing_consistent_read() (
     fi
     vrs_start=$(date +%s) || return 2
     vrs_fingerprint > "$vrs_tmp/fp.before" || return 2
+    # Literal awk field expressions, not shell expansion.
+    # shellcheck disable=SC2016
     vrs_fatal='$2=="nostat" || ($1 ~ /^v2-/ && $2=="absent") || (($2=="bad" || $2=="oversize") && $1 !~ /^obs-/)'
+    if [ "$vrs_read_kind" = legacy-observation ]; then
+        # Read-only observation of absent/partial bootstrap data. This is NOT
+        # usable state2: its staged version is forced to observation0 below.
+        # shellcheck disable=SC2016
+        vrs_fatal='$2=="nostat" || (($2=="bad" || $2=="oversize") && $1 !~ /^obs-/)'
+    fi
     if awk "$vrs_fatal {f=1} END{exit f?0:1}" "$vrs_tmp/fp.before"; then
         # Which input: label only (never a path), enough to find it.
         vrs_unknown "input-unreadable:$(awk "$vrs_fatal {print \$1; exit}" "$vrs_tmp/fp.before")"
@@ -165,6 +216,8 @@ vward_routing_consistent_read() (
             obs-listsfb) vrs_src=${VWARD_TUNNEL_GUARD_DIR:-/opt/var/lib/vward/tunnel-guard}/lists-fallback ;;
             obs-samples) vrs_src=${VWARD_TUNNEL_QUALITY_DIR:-/tmp/vward-tunnel-quality}/samples.tsv ;;
             obs-agh-image) vrs_src=${VWARD_ROUTING_AGH_IMAGE:-/nonexistent/vward-agh-image} ;;
+            obs-smartdns-profile) vrs_src=$vrs_etc/smartdns.conf ;;
+            obs-dnsproof:*) vrs_src=$vrs_etc/route-engine/domain-lists.dns/${vrs_l#obs-dnsproof:} ;;
             v2-*) vrs_src=$VWARD_ROUTING_INPUTS/${vrs_l#v2-}.tsv ;;
         esac
         vrs_row=$(awk -v l="$vrs_l" '$1==l {print; exit}' "$vrs_tmp/fp.before")
@@ -239,6 +292,7 @@ vward_routing_consistent_read() (
     done
     if [ -n "$vrs_decision_names" ]; then
         cp "$vrs_tmp/fp.before" "$vrs_out/inputs.fp" || return 2
+        awk '$1~/^obs-probe:/{sub(/^obs-probe:/,"",$1);print $1 "\t" $2}' "$vrs_tmp/fp.before" > "$vrs_out/probes.tsv" || return 2
         cp "$vrs_stage/cfg" "$vrs_out/native.cfg" || return 2
         if [ -f "$vrs_stage/obs-agh-image" ]; then cp "$vrs_stage/obs-agh-image" "$vrs_out/agh.json" || return 2
         else printf '%s\n' '{"unknown":true}' > "$vrs_out/agh.json";fi
@@ -247,10 +301,16 @@ vward_routing_consistent_read() (
         awk '/^object-group fqdn / && NF==3 {print $3}' "$vrs_stage/cfg" | LC_ALL=C sort -u > "$vrs_out/groups.tsv" || return 2
         (umask 077; mkdir "$vrs_out/decision") || return 2
         for vrs_l in $vrs_decision_names; do
-            mv "$vrs_stage/$vrs_l" "$vrs_out/decision/${vrs_l#v2-}.tsv" || return 2
+            if [ -f "$vrs_stage/$vrs_l" ]; then
+                mv "$vrs_stage/$vrs_l" "$vrs_out/decision/${vrs_l#v2-}.tsv" || return 2
+            elif [ "$vrs_read_kind" = legacy-observation ]; then
+                : > "$vrs_out/decision/${vrs_l#v2-}.tsv" || return 2
+                [ "$vrs_l" != v2-choices ] || printf 'schema\t1\n' > "$vrs_out/decision/choices.tsv"
+            else return 2;fi
         done
+        if [ "$vrs_read_kind" = legacy-observation ]; then printf 'routing-state\t0\n' > "$vrs_out/decision/version.tsv" || return 2;fi
         printf 'routing-stage\t2\t%s\n' "$vrs_gen" > "$vrs_out/seal" || return 2
-        for vrs_name in intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv native.cfg enabled.tsv agh.json inputs.fp \
+        for vrs_name in intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv native.cfg enabled.tsv agh.json inputs.fp probes.tsv \
             decision/version.tsv decision/choices.tsv decision/bindings.tsv decision/evidence.tsv \
             decision/policies.tsv decision/saved.tsv decision/queue.tsv decision/tombstones.tsv \
             decision/context.tsv decision/resources.tsv decision/proofs.tsv decision/upstreams.tsv; do
@@ -268,9 +328,22 @@ vward_routing_consistent_read() (
 # Same native snapshot AND decision inputs under the SAME content generation.
 # Data are staged, not declared semantically valid here: policy/plan validates schemas.
 # No new live reader, configuration refresh, transport or installed-state writer.
+vward_routing_consistent_read() (
+    [ "$#" -eq 1 ] || return 2
+    vrsi_consistent_read "$1" strict
+)
 vward_routing_consistent_read2() (
     [ "$#" -eq 2 ] || return 2
     VWARD_ROUTING_INPUTS=$2
     export VWARD_ROUTING_INPUTS
-    vward_routing_consistent_read "$1"
+    vrsi_consistent_read "$1" strict
+)
+# Observes a legacy bootstrap only. It always emits version0, including after
+# a partial/final version marker, so ordinary project2 cannot grant authority.
+# No environment switch selects this adapter or authorises a writer.
+vward_routing_bootstrap_read2() (
+    [ "$#" -eq 2 ] || return 2
+    VWARD_ROUTING_INPUTS=$2
+    export VWARD_ROUTING_INPUTS
+    vrsi_consistent_read "$1" legacy-observation
 )

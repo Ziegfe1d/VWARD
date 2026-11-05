@@ -166,14 +166,14 @@ cleanup() {
     [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
     case "${SD_TMPCONF:-}" in /tmp/vward-console-sdconf.*) rm -f "$SD_TMPCONF" "$SD_TMPCONF.all" ;; esac
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
-    [ "$LOCKED" != 1 ] || rm -rf "${CHANGE_LOCK:?}"
-    [ "$EDIT_LOCKED" != 1 ] || rm -rf "${EDIT_LOCK:?}"
+    [ "$LOCKED" != 1 ] || vward_lock_release "$CHANGE_LOCK"
+    [ "$EDIT_LOCKED" != 1 ] || vward_lock_release "$EDIT_LOCK"
     [ -z "$AI_CHILD_SLOT" ] || rm -f "$AI_CHILD_SLOT"
     [ -z "$AO_TMP" ] || rm -rf "${AO_TMP:?}"
     [ "$EXT_LOCKED" != 1 ] || rm -rf "${EXT_STATE:?}/lock"
     [ -z "${AGH_PLANNED:-}" ] || "$DNS_GUARD" planned-done >/dev/null 2>&1 || :
     # A component operation that failed: its own steps undone, the mark and the lock go.
-    if [ "${COMP_LOCKED:-0}" = 1 ]; then comp_undo; rm -f "$COMP_PENDING"; rm -rf "${COMP_LOCK:?}"; fi
+    if [ "${COMP_LOCKED:-0}" = 1 ]; then comp_undo; rm -f "$COMP_PENDING"; vward_lock_release "$COMP_LOCK"; fi
     # The owner's AdGuard Home login the Panel handed over: gone with the operation that used it.
     [ "${OP:-}" != agh-component ] || case "${VWARD_AGH_CRED_FILE:-}" in /tmp/vward-agh-cred.*) rm -f "$VWARD_AGH_CRED_FILE" ;; esac
     command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null
@@ -214,7 +214,10 @@ backup_file() {
     [ -f "$1" ] || return 0
     mkdir -p "$BACKUP_DIR" || return 1
     base=$(basename "$1")
-    cp -p "$1" "$BACKUP_DIR/$base.$(date '+%Y%m%d-%H%M%S').$$" || return 1
+    # Return state and DNS proof share a basename. Two backups within one
+    # process/second must preserve BOTH originals, including a private0400 one.
+    backup_leaf=$(umask 077;mktemp "$BACKUP_DIR/$base.$(date '+%Y%m%d-%H%M%S').$$.XXXXXX") || return 1
+    if ! cp -p "$1" "$backup_leaf"; then rm -f "$backup_leaf";return 1;fi
     ls -1t "$BACKUP_DIR/$base".* 2>/dev/null | tail -n +$((BACKUP_KEEP + 1)) | while IFS= read -r old; do rm -f "$old"; done
     return 0
 }
@@ -254,29 +257,15 @@ set_kv() {
 
 # ---------- Router configuration ----------
 
-# dir_lock DIR: the lock DIR for this process, waiting up to 10 s for another holder.
-# A holder that is gone (its pid dead), or a lock without a pid for 3 s (its holder was
-# killed between mkdir and writing the pid), is taken over.
+# Same shared election as runtime take/sweep. No dead-owner observation is
+# carried across another contender's acquisition; ownerless locks stay unknown.
 dir_lock() {
-    dl_n=0 dl_nopid=0
-    while ! mkdir "$1" 2>/dev/null; do
-        dl_old=
-        read -r dl_old 2>/dev/null < "$1/pid" || :
-        if [ -n "$dl_old" ] && ! kill -0 "$dl_old" 2>/dev/null; then
-            rm -rf "${1:?}"
-            continue
-        fi
-        if [ -z "$dl_old" ]; then
-            dl_nopid=$((dl_nopid + 1))
-            [ "$dl_nopid" -lt 3 ] || { rm -rf "${1:?}"; dl_nopid=0; continue; }
-        else
-            dl_nopid=0
-        fi
-        dl_n=$((dl_n + 1))
+    dl_n=0
+    while ! vward_lock_take "$1"; do
+        dl_n=$((dl_n+1))
         [ "$dl_n" -lt 10 ] || return 1
         sleep 1
     done
-    echo $$ > "$1/pid"
 }
 
 # Persistent AGH undo is unresolved evidence, including an empty reservation
@@ -867,7 +856,7 @@ op_tunnel() {
     fi
     rm -f "$TUNNEL_GUARD_STATE" "$TUNNEL_HEALTH_STATE"
     rm -rf "$POLICY_STATE/lock"; POLICY_LOCKED=0
-    rm -rf "${CHANGE_LOCK:?}"; LOCKED=0
+    vward_lock_release "$CHANGE_LOCK"; LOCKED=0
     [ ! -x "$ROUTE_ENGINE_INIT" ] || "$ROUTE_ENGINE_INIT" restart </dev/null >/dev/null 2>&1 || true
     # IP routes follow in the background (policy-sync withdraws them from the old device).
     [ ! -x "$POLICY_SYNC_BIN" ] || (trap '' HUP; exec "$POLICY_SYNC_BIN" --reconcile) </dev/null >/dev/null 2>&1 &
@@ -2033,7 +2022,7 @@ svr_auto() {
     ! svr_live "$svr_auto_dir" || return 1
     if [ -f "$svr_auto_dir/ai" ]; then
         svr_auto_edit=$EDIT_LOCKED
-        if [ "$EDIT_LOCKED" = 1 ]; then rm -rf "${EDIT_LOCK:?}"; EDIT_LOCKED=0; fi
+        if [ "$EDIT_LOCKED" = 1 ]; then vward_lock_release "$EDIT_LOCK"; EDIT_LOCKED=0; fi
         svr_auto_result=0; ai_resume "$svr_auto_dir" || svr_auto_result=1
         [ "$svr_auto_edit" != 1 ] || edit_lock
         return "$svr_auto_result"
@@ -2450,7 +2439,7 @@ service_route() {
 
 release_lock() {
     [ "$LOCKED" = 1 ] || return 0
-    rm -rf "${CHANGE_LOCK:?}"
+    vward_lock_release "$CHANGE_LOCK"
     LOCKED=0
 }
 
@@ -3248,7 +3237,7 @@ op_tunnel_conf() {
                 [ -x "$AWG_ENGINE" ] || die conf_rejected_awg
                 audit "tunnel-conf create $NEW_IF: AmneziaWG refused by the firmware, engine instead"
                 printf 'info.engine=firmware_refused\n'
-                rm -rf "${CHANGE_LOCK:?}"; LOCKED=0
+                vward_lock_release "$CHANGE_LOCK"; LOCKED=0
                 create_on_engine
             fi
             AP_AWG_SOFT=0
@@ -4292,7 +4281,7 @@ ai_journal_begin() {
          while IFS= read -r aij_g; do
              service_signature "$aij_g" > "$AI_DIR/group.$aij_g" && group_routes "$aij_g" > "$AI_DIR/route.$aij_g" || exit 1
          done < "$AI_DIR/groups" && : > "$AI_DIR/pending") || die backup_failed
-        rm -rf "${EDIT_LOCK:?}"; EDIT_LOCKED=0
+        vward_lock_release "$EDIT_LOCK"; EDIT_LOCKED=0
     fi
     printf '%s\n' "$$" > "$AI_DIR/pid" && vward_admission_pid_start $$ > "$AI_DIR/pid_start" || die write_failed
     AI_TXN=1

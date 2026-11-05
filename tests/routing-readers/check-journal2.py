@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Versioned parent journal: evolving Gi, no replay, readback and mandatory save."""
 from pathlib import Path
-from fixture import Fixture,JOURNAL
+from fixture import Fixture,JOURNAL,LIBDIR
 G0='g-0000000000000000';G1='g-1111111111111111';G2='g-2222222222222222'
 with Fixture() as f:
     j=f.p/'journal';j.mkdir(mode=0o700)
@@ -11,7 +11,7 @@ with Fixture() as f:
     plan.write_text(f'routing-plan\t2\t{G0}\tdenied\n'+
         f'step\t1\tcreate\troute\tr1\t-\t{post}\tp-op1-1\tS:svc\tgeneration,identity,postimage,save\tremove-own-resource\n'+
         f'step\t2\tmove\tchoice\tsvc\t-\t{choice}\trevision-cas\tS:svc\tgeneration,identity,postimage,save\trestore-own-choice\n')
-    def call(name,*args):return f.run('. "$1"; shift; "$@"',JOURNAL,name,*args)
+    def call(name,*args):return f.run('. "$1";. "$2"; shift 2; "$@"',LIBDIR/'vward-runtime-admission.sh',JOURNAL,name,*args)
     def image(row):
         current.write_text(row.replace('|','\t')+'\n');current.chmod(0o600)
     r=call('vward_journal2_plan',j,'op1',plan);assert r.returncode==0,(r.stdout,r.stderr)

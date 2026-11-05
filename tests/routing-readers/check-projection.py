@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parent))
-from fixture import Fixture,READ,SNAP,OBSERVE,AUDIT,LIBDIR
+from fixture import Fixture,READ,SNAP,OBSERVE,AUDIT,LIBDIR,probe_context
 PROJECT=Path(sys.argv[1]) if len(sys.argv)>1 else LIBDIR/'vward-routing-project.sh'
 with Fixture() as f:
     clean='interface Wireguard0\n!\ninterface Wireguard1\n!\ndns-proxy\n!\n'
@@ -41,13 +41,15 @@ with Fixture() as f:
     put('evidence','M\tm1\tx.example\texact\tISP\tdefault\t1\texplicit\t0\t-\n')
     assert call()[0][3]=='unresolved','manual explicit choice was overridden'
     put('evidence','A\ta1\tx.example\texact\tVPN:Wireguard0\tdefault\t1\tactive\t0\tsvc\n')
+    put('context',context+probe_context())
     rows=call('dns','ISP','policy1');assert any(x[2:4]==['A','a1'] and x[6]=='suppressed' for x in rows),rows
     # Persist history cannot survive DNS->VPN->off; fresh positive current epoch can.
     put('choices','schema\t1\nservice\tsvc\t3\tauto\t-\t-\t2\n')
     assert not any(x[1]=='contribution' and x[6]=='active' for x in call('off','-','-',3))
     put('evidence','A\ta1\tx.example\texact\tVPN:Wireguard0\tdefault\t1\tpositive\t3\tsvc\n')
+    put('context',context)
     rows=call('off','-','-',3);assert rows[0][3]=='unknown','probe freshness silently assumed'
-    put('context',context+'probe:a1\tfresh\n')
+    put('context',context+probe_context())
     assert any(x[1]=='contribution' and x[6]=='active' for x in call('off','-','-',3))
     put('choices','schema\t1\n');put('evidence','')
     put('bindings',bindings.replace('confirmed','shared'))

@@ -58,6 +58,7 @@ class Fixture:
         self.proof = self.etc/'services/owned/domain-list0'
         self.proof.write_text('include s.example\ninclude x.example\nroute=Wireguard0\tauto\n'); self.proof.chmod(0o600)
         self.env = os.environ | {
+            'VWARD_ADMISSION_LIB': str(LIBDIR/'vward-runtime-admission.sh'),
             'VWARD_CONSOLE_ETC': str(self.etc), 'VWARD_ROUTE_STATE': str(self.state),
             'VWARD_KCACHE': str(self.cache), 'VWARD_DEVICE_CONFIG': str(self.dev),
             'VWARD_DEVICE_MAP_CACHE': str(self.map), 'VWARD_SERVICES_FETCHED': str(self.catalog),
@@ -70,8 +71,18 @@ class Fixture:
     def __exit__(self, *a): self.close()
 
     def run(self, script, *args, env=None, timeout=5):
-        return subprocess.run(SHELL + ['-c', script, 'x', *map(str, args)], env=env or self.env,
-                              text=True, capture_output=True, timeout=timeout)
+        # A timeout must also reap our own worker descendants. It neither
+        # extends the budget nor leaves orphans mutating a later fixture.
+        import signal
+        p = subprocess.Popen(SHELL + ['-c', script, 'x', *map(str, args)], env=env or self.env,
+                             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        try:
+            out, err = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            os.killpg(p.pid, signal.SIGKILL)
+            p.communicate()
+            raise
+        return subprocess.CompletedProcess(p.args, p.returncode, out, err)
 
     def read(self, mode):
         r = self.run('. "$1"; vward_routing_read "$2"', READ, mode, timeout=3)
@@ -117,6 +128,14 @@ def function_source(path, name):
     return src[m.start():m.end()+end.end()]
 
 
+def probe_context(ref='a1'):
+    # A current native clock fact for short reader/planner fixtures only.
+    # Long connected tests pin an explicit DATA clock instead.
+    boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    now=int(float(Path('/proc/uptime').read_text().split()[0]))
+    return f'probe:{ref}\tfresh\nprobe-boot:{ref}\t{boot}\nprobe-until:{ref}\t{now+55}\n'
+
+
 class PipelineFixture(Fixture):
     """Existing DATA router fixture plus the real internal console/AGH workers."""
     def __init__(self):
@@ -149,14 +168,20 @@ class PipelineFixture(Fixture):
         control=ROOT/'components/ads-privacy-guard/scripts/vward-ads-privacy-control.sh'
         common=ROOT/'components/ads-privacy-guard/lib/vward-ads-privacy-common.sh'
         functions=self.p/'console-functions'
-        functions.write_text(''.join(function_source(console,n) for n in ('dir_lock','group_set','vward_routing_console_group_locked','doh_lines','doh_present','doh_remove_url'))+
+        functions.write_text(''.join(function_source(console,n) for n in ('dir_lock','group_set','vward_routing_console_group_locked','doh_lines','doh_present','doh_remove_url',
+                             'new_tmp','install_tmp','backup_file','valid_group','smartdns_prune_saved'))+
                              ''.join(function_source(common,n) for n in ('ads_epoch','ads_num','ads_pid_start','ads_read_line','ads_lock_create','ads_lock_acquire','ads_lock_release'))+
                              ''.join(function_source(control,n) for n in ('agfail','aget','agh_unchanged','agh_evidence','agh_guarded_back','valid_url','ads_smartdns_locked')))
         self.libs=(READ,OBSERVE,SNAP,AUDIT,LIBDIR/'vward-routing-project.sh',PLAN,JOURNAL,DRYRUN,
                    LIBDIR/'vward-runtime-admission.sh',LIBDIR/'vward-routing-workers.sh',LIBDIR/'vward-routing-migrate.sh',
-                   LIBDIR/'vward-routing-dns.sh',LIBDIR/'vward-routing-lifecycle.sh',LIBDIR/'vward-routing-pipeline.sh',functions)
+                   LIBDIR/'vward-routing-dns.sh',LIBDIR/'vward-routing-lifecycle.sh',LIBDIR/'vward-routing-legacy.sh',LIBDIR/'vward-routing-state.sh',LIBDIR/'vward-routing-outcome.sh',LIBDIR/'vward-routing-dispatch.sh',LIBDIR/'vward-routing-pipeline.sh',functions)
 
+    clock = None
     def script(self,command):
+        if self.clock is not None:
+            boot, now = self.clock
+            assert len(boot)==36 and all(c in '0123456789abcdef-' for c in boot) and isinstance(now,int)
+            command = 'vr2_clock_read() { printf \'%s %s\\n\' '+boot+' '+str(now)+'; };\n'+command
         return ('for lib in '+' '.join('"${'+str(i)+'}"' for i in range(1,len(self.libs)+1))+
                 '; do . "$lib"; done\nshift '+str(len(self.libs))+'\n'+command)
 

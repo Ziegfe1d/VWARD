@@ -321,13 +321,152 @@ VWARD_LOCKS="/tmp/vward-route-reconciler-maint.lock /tmp/vward-route-engine.lock
 /opt/var/lib/vward/ads-privacy-guard/jobs/worker.lock /opt/var/lib/vward/ext-update/lock
 /tmp/vward-ads-control.lock /tmp/vward-console-edit.lock"
 
+# Cooperative short election for acquiring/reclaiming a lock. Each choosing
+# ticket's NAME already contains actual PID/start/boot, before its first file.
+# A dead reclaimer therefore leaves no ownerless global '.reclaim' semaphore.
+# Bakery order serializes ALL updated contenders; stale observation alone
+# never permits unlinking a path that another contender has since acquired.
+vward_lock_gate_live() {
+    vlg_key_boot=${1%%.*};vlg_key_rest=${1#*.}
+    vlg_key_pid=${vlg_key_rest%%.*};vlg_key_start=${vlg_key_rest#*.}
+    [ "${#vlg_key_boot}" -eq 36 ] || return 2
+    case $vlg_key_boot in *[!0-9a-f-]*) return 2 ;; esac
+    case $vlg_key_pid:$vlg_key_start in *[!0-9:]*|:*|*:) return 2 ;; esac
+    [ "${#vlg_key_pid}" -le 10 ] && [ "${#vlg_key_start}" -le 20 ] || return 2
+    [ "$vlg_key_boot" = "$vlg_boot" ] || return 1
+    vlg_live_start=$(vward_admission_pid_start "$vlg_key_pid") || vlg_live_start=
+    if [ -n "$vlg_live_start" ]; then
+        [ "$vlg_live_start" = "$vlg_key_start" ] || return 1
+        vlg_stat=;read -r vlg_stat < "/proc/$vlg_key_pid/stat" || return 2
+        vlg_stat=${vlg_stat##*) }
+        # A finished final utility can remain a zombie under an unreaping
+        # container init. Z/X cannot execute another filesystem operation.
+        case $vlg_stat in Z\ *|X\ *) return 1 ;; esac
+        return 0
+    fi
+    kill -0 "$vlg_key_pid" 2>/dev/null && return 2
+    return 1
+}
+# Metadata fields only; paths are never parsed as ls output.
+# shellcheck disable=SC2012
+vward_lock_gate_dir() {
+    [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] &&
+        [ "$(ls -ldn "$1" | awk '{print substr($1,1,10)}')" = drwx------ ]
+}
+vward_lock_gate_number() {
+    [ -f "$1/number" ] && [ ! -L "$1/number" ] && [ -O "$1/number" ] || return 1
+    # shellcheck disable=SC2012
+    [ "$(ls -ldn "$1/number" | awk '{print substr($1,1,10),$2}')" = '-rw------- 1' ] || return 2
+    vlg_n=;read -r vlg_n < "$1/number" || return 2
+    case $vlg_n in ''|*[!0-9]*|0*) return 2 ;; esac
+    [ "${#vlg_n}" -le 10 ] && [ "$vlg_n" -lt 2147483647 ] || return 2
+    printf '%s\n' "$vlg_n"
+}
+# A final filesystem utility may outlive the shell which called it. Its own
+# actual identity is registered before exec, just as for DATA publication.
+vward_lock_gate_exec() (
+    vward_lock_gate_dir "$vlg_claim" && vward_lock_gate_live "$vlg_key" || return 75
+    IFS=' ' read -r vlg_exec_pid _ < /proc/self/stat || return 75
+    vlg_exec_start=$(vward_admission_pid_start "$vlg_exec_pid") || return 75
+    (umask 077;printf '%s\n' "$vlg_boot" > "$vlg_claim/exec.$vlg_exec_pid.$vlg_exec_start") || return 75
+    # If the parent died before registration, no write may start. If it dies
+    # after this test, contenders see this actual exec PID until it is gone.
+    vward_lock_gate_dir "$vlg_claim" && vward_lock_gate_live "$vlg_key" || return 75
+    exec "$@"
+)
+vward_lock_gate_quiet() {
+    for vlg_lease in "$1"/exec.*; do
+        [ -e "$vlg_lease" ] || [ -L "$vlg_lease" ] || continue
+        [ -f "$vlg_lease" ] && [ ! -L "$vlg_lease" ] && [ -O "$vlg_lease" ] || return 2
+        # shellcheck disable=SC2012
+        [ "$(ls -ldn "$vlg_lease" | awk '{print substr($1,1,10),$2}')" = '-rw------- 1' ] || return 2
+        vlg_exec_key=${vlg_lease##*/exec.}
+        vlg_exec_boot=;read -r vlg_exec_boot < "$vlg_lease" || return 2
+        vlg_exec_rc=0;vward_lock_gate_live "$vlg_exec_boot.$vlg_exec_key" || vlg_exec_rc=$?
+        [ "$vlg_exec_rc" = 1 ] || return 2
+    done
+}
+vward_lock_gate_leave() {
+    [ -n "${vlg_claim:-}" ] && [ "${vlg_claim%/*}" = "$1.gate" ] || return 75
+    vward_lock_gate_dir "$vlg_claim" || return 75
+    IFS=' ' read -r vlg_leave_pid _ < /proc/self/stat || return 75
+    [ "$(cat "$vlg_claim/pid" 2>/dev/null)" = "$vlg_leave_pid" ] &&
+        [ "$(cat "$vlg_claim/start" 2>/dev/null)" = "$(vward_admission_pid_start "$vlg_leave_pid")" ] || return 75
+    rm -rf "$vlg_claim"
+}
+vward_lock_gate_enter() {
+    case $1 in /*) ;; *) return 75 ;; esac
+    IFS=' ' read -r vlg_me _ < /proc/self/stat || return 75
+    vlg_start=$(vward_admission_pid_start "$vlg_me") || return 75
+    IFS= read -r vlg_boot < /proc/sys/kernel/random/boot_id || return 75
+    vlg_dir=$1.gate
+    (umask 077;mkdir "$vlg_dir" 2>/dev/null) || vward_lock_gate_dir "$vlg_dir" || return 75
+    vlg_key=$vlg_boot.$vlg_me.$vlg_start;vlg_claim=$vlg_dir/$vlg_key
+    (umask 077;mkdir "$vlg_claim") || return 75
+    (umask 077;printf '%s\n' "$vlg_me" > "$vlg_claim/pid" && printf '%s\n' "$vlg_start" > "$vlg_claim/start") || return 75
+    vlg_max=0;vlg_count=0
+    for vlg_other in "$vlg_dir"/*; do
+        [ -e "$vlg_other" ] || [ -L "$vlg_other" ] || continue
+        vward_lock_gate_dir "$vlg_other" || { vward_lock_gate_leave "$1";return 75; }
+        vlg_rc=0;vward_lock_gate_live "${vlg_other##*/}" || vlg_rc=$?
+        [ "$vlg_rc" != 2 ] || { vward_lock_gate_leave "$1";return 75; }
+        if [ "$vlg_rc" != 0 ]; then
+            vward_lock_gate_quiet "$vlg_other" || { vward_lock_gate_leave "$1";return 75; }
+            rm -rf "$vlg_other" || { vward_lock_gate_leave "$1";return 75; };continue
+        fi
+        vlg_count=$((vlg_count+1));[ "$vlg_count" -le 256 ] || { vward_lock_gate_leave "$1";return 75; }
+        vlg_value=$(vward_lock_gate_number "$vlg_other") || vlg_value=0
+        [ "$vlg_value" -le "$vlg_max" ] || vlg_max=$vlg_value
+    done
+    vlg_number=$((vlg_max+1));[ "$vlg_number" -lt 2147483647 ] || { vward_lock_gate_leave "$1";return 75; }
+    (umask 077;printf '%s\n' "$vlg_number" > "$vlg_claim/number") || return 75
+    vlg_attempt=0
+    while [ "$vlg_attempt" -lt 40 ]; do
+        vlg_wait=0
+        for vlg_other in "$vlg_dir"/*; do
+            [ -e "$vlg_other" ] || [ -L "$vlg_other" ] || continue
+            [ "$vlg_other" != "$vlg_claim" ] || continue
+            vward_lock_gate_dir "$vlg_other" || { vward_lock_gate_leave "$1";return 75; }
+            vlg_rc=0;vward_lock_gate_live "${vlg_other##*/}" || vlg_rc=$?
+            [ "$vlg_rc" != 2 ] || { vward_lock_gate_leave "$1";return 75; }
+            if [ "$vlg_rc" != 0 ]; then
+                vward_lock_gate_quiet "$vlg_other" || { vward_lock_gate_leave "$1";return 75; }
+                continue
+            fi
+            vlg_value=$(vward_lock_gate_number "$vlg_other") || { vlg_wait=1;continue; }
+            # Numeric number/PID ordering avoids locale-dependent path order.
+            vlg_other_rest=${vlg_other##*/};vlg_other_rest=${vlg_other_rest#*.};vlg_other_pid=${vlg_other_rest%%.*}
+            if [ "$vlg_value" -lt "$vlg_number" ] || { [ "$vlg_value" = "$vlg_number" ] && [ "$vlg_other_pid" -lt "$vlg_me" ]; }; then vlg_wait=1;fi
+        done
+        [ "$vlg_wait" != 0 ] || return 0
+        vlg_attempt=$((vlg_attempt+1));sleep 0.05
+    done
+    vward_lock_gate_leave "$1"
+    return 75
+}
+
 # vward_lock_stale DIR: the lock's owner is gone - its process is dead or the
 # id now belongs to another process (pid_start differs), or the lock has had no
 # owner id for an hour.
-# Shell builtins only: the hourly sweep looks at every lock.
+# Native boot identity is checked before PID/start; a reused pair after reboot
+# is not the old owner. A missing legacy boot stamp keeps the older PID rule.
+vward_lock_boot_id() {
+    [ -f "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] || return 1
+    # Authority metadata only, not filename fields.
+    # shellcheck disable=SC2012
+    case $(ls -ldn "$1" | awk '{print substr($1,1,10),$2}') in '-rw------- 1'|'-r-------- 1') ;; *) return 1 ;; esac
+    vl_boot=;read -r vl_boot < "$1" || return 1
+    printf '%s\n' "$vl_boot" | grep -Eq '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' || return 1
+    printf '%s\n' "$vl_boot"
+}
 vward_lock_stale() {
     vl_dir=$1
     [ -d "$vl_dir" ] && [ ! -L "$vl_dir" ] || return 1
+    if [ -e "$vl_dir/boot" ] || [ -L "$vl_dir/boot" ]; then
+        vl_old_boot=$(vward_lock_boot_id "$vl_dir/boot") || return 1
+        IFS= read -r vl_now_boot < /proc/sys/kernel/random/boot_id || return 1
+        [ "$vl_old_boot" = "$vl_now_boot" ] || return 0
+    fi
     vl_pid=; [ ! -r "$vl_dir/pid" ] || read -r vl_pid < "$vl_dir/pid"
     case "$vl_pid" in
         ''|*[!0-9]*) [ -n "$(find "$vl_dir" -maxdepth 0 -mmin +60 2>/dev/null)" ]; return ;;
@@ -341,32 +480,64 @@ vward_lock_stale() {
     [ "$vl_saved" != "${20:-}" ]
 }
 
-# vward_lock_drop DIR: remove a stale lock; a rename first, so a lock a new
-# owner has just taken is never removed.
+# Drop only a proved STALE lock, under the same election as acquisition.
+# Active holders use release, which requires their actual owner identity.
 vward_lock_drop() {
-    vl_old=$1.stale.$$
-    [ ! -e "$vl_old" ] && [ ! -L "$vl_old" ] || return 1
-    mv "$1" "$vl_old" 2>/dev/null || return 1
-    rm -rf "${vl_old:?}"
+    vward_lock_gate_enter "$1" || return 1
+    vl_drop_rc=1
+    if vward_lock_stale "$1"; then vward_lock_gate_exec rm -rf "$1" && vl_drop_rc=0;fi
+    vward_lock_gate_leave "$1" || return 1
+    return "$vl_drop_rc"
 }
 
-# vward_lock_take DIR: take the lock folder DIR for this shell ($$); a lock whose
+# vward_lock_take DIR: take the lock folder DIR for this actual kernel shell; a lock whose
 # owner is gone is taken over.  Fails while a live owner holds it.
 vward_lock_take() {
-    if ! mkdir "$1" 2>/dev/null; then
-        vward_lock_stale "$1" && vward_lock_drop "$1" || return 1
-        mkdir "$1" 2>/dev/null || return 1
+    vward_lock_gate_enter "$1" || return 1
+    vl_take_rc=0
+    if ! vward_lock_gate_exec mkdir "$1" 2>/dev/null; then
+        if vward_lock_stale "$1"; then
+            vward_lock_gate_exec rm -rf "${1:?}" && vward_lock_gate_exec mkdir "$1" 2>/dev/null || vl_take_rc=1
+        else vl_take_rc=1;fi
     fi
-    printf '%s\n' "$$" > "$1/pid" || return 1
-    vward_admission_pid_start $$ > "$1/pid_start" 2>/dev/null || :
+    if [ "$vl_take_rc" = 0 ]; then
+        IFS=' ' read -r vl_take_pid _ < /proc/self/stat || vl_take_rc=1
+        (umask 077;printf '%s\n' "$vlg_boot" > "$1/boot" && printf '%s\n' "$vl_take_pid" > "$1/pid" && vward_admission_pid_start "$vl_take_pid" > "$1/pid_start") || vl_take_rc=1
+    fi
+    vward_lock_gate_leave "$1" || return 1
+    return "$vl_take_rc"
 }
 
-# vward_locks_sweep: remove every stale lock of VWARD_LOCKS.
+# Release is a mutation too. A delayed orphan rm cannot run over a new
+# holder: it has a final-utility lease in the same election until completion.
+vward_lock_release() {
+    vward_lock_gate_enter "$1" || return 1
+    vl_release_rc=1
+    if [ ! -e "$1" ] && [ ! -L "$1" ]; then vl_release_rc=0
+    elif [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ]; then
+        IFS=' ' read -r vl_release_pid _ < /proc/self/stat || vl_release_pid=
+        vl_release_start=$(vward_admission_pid_start "$vl_release_pid") || vl_release_start=
+        if [ -n "$vl_release_start" ] && [ "$(cat "$1/pid" 2>/dev/null)" = "$vl_release_pid" ] &&
+            [ "$(cat "$1/pid_start" 2>/dev/null)" = "$vl_release_start" ] &&
+            [ "$(vward_lock_boot_id "$1/boot")" = "$vlg_boot" ]; then
+            vward_lock_gate_exec rm -rf "$1" && vl_release_rc=0
+        fi
+    fi
+    vward_lock_gate_leave "$1" || return 1
+    return "$vl_release_rc"
+}
+
+# Sweep and take participate in the SAME short election. The stale test is
+# inside it; a stale value observed before entering grants no deletion right.
 vward_locks_sweep() {
     for vl_lock in $VWARD_LOCKS; do
         vl_lock=${VWARD_ROOT_PREFIX:-}$vl_lock
-        vward_lock_stale "$vl_lock" || continue
-        vward_lock_drop "$vl_lock" && echo "STALE_LOCK_REMOVED|$vl_lock"
+        if [ ! -d "$vl_lock" ] || [ -L "$vl_lock" ]; then continue;fi
+        vward_lock_gate_enter "$vl_lock" || continue
+        vl_swept=0
+        if vward_lock_stale "$vl_lock"; then vward_lock_gate_exec rm -rf "$vl_lock" && vl_swept=1;fi
+        vward_lock_gate_leave "$vl_lock" || return 1
+        [ "$vl_swept" != 1 ] || echo "STALE_LOCK_REMOVED|$vl_lock"
     done
     return 0
 }
@@ -508,7 +679,7 @@ vward_agh_ensure() {
         while [ "$va_i" -lt "$va_fails" ] && [ "$va_pause" -lt 600 ]; do va_pause=$((va_pause * 2)); va_i=$((va_i + 1)); done
         [ "$va_pause" -le 600 ] || va_pause=600
         if [ $((va_now - va_last)) -lt "$va_pause" ]; then
-            vward_lock_drop "$VWARD_AGH_STATE/lock"
+            vward_lock_release "$VWARD_AGH_STATE/lock"
             return 11
         fi
         # The previous start did not bring it up: the next pause is longer.
@@ -520,13 +691,13 @@ vward_agh_ensure() {
         va_was=; [ ! -r "$VWARD_AGH_STATE/broken" ] || { IFS= read -r va_was < "$VWARD_AGH_STATE/broken"; } 2>/dev/null || :
         if [ "${va_was#*|*|}" = "$va_bin" ] && [ -n "$(find "$VWARD_AGH_STATE/broken" -mmin -60 2>/dev/null)" ] &&
            [ -z "$(find "$va_bin" -newer "$VWARD_AGH_STATE/broken" 2>/dev/null)" ]; then
-            vward_lock_drop "$VWARD_AGH_STATE/lock"
+            vward_lock_release "$VWARD_AGH_STATE/lock"
             return 13
         fi
         "$va_bin" --version >/dev/null 2>&1; va_rc=$?
         if [ "$va_rc" != 0 ]; then
             printf '%s|%s|%s\n' "$va_now" "$va_rc" "$va_bin" > "$VWARD_AGH_STATE/broken"
-            vward_lock_drop "$VWARD_AGH_STATE/lock"
+            vward_lock_release "$VWARD_AGH_STATE/lock"
             return 13
         fi
         rm -f "$VWARD_AGH_STATE/broken"
@@ -534,7 +705,7 @@ vward_agh_ensure() {
     vward_agh_pidfiles_clean
     printf '%s\n' "$va_now" > "$VWARD_AGH_STATE/last"
     printf '%s\n' "$va_fails" > "$VWARD_AGH_STATE/fails"
-    vward_lock_drop "$VWARD_AGH_STATE/lock"
+    vward_lock_release "$VWARD_AGH_STATE/lock"
     ${VWARD_UNNICE:-} "$va_init" start </dev/null >/dev/null 2>&1
     return 10
 }

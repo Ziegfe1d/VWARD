@@ -611,46 +611,18 @@ alt_tunnel()
 change_lock()
 {
     N=0
-    NOPID=0
-
-    while ! mkdir "$CHANGE_LOCK" 2>/dev/null; do
-
-        OLD=
-        read -r OLD 2>/dev/null < "$CHANGE_LOCK/pid" || :
-
-        if [ -n "$OLD" ] &&
-           ! kill -0 "$OLD" 2>/dev/null; then
-
-            rm -rf "${CHANGE_LOCK:?}"
-            continue
-        fi
-
-        # No pid for 3 s: its holder was killed between mkdir and writing the pid.
-        if [ -z "$OLD" ]; then
-            NOPID=$((NOPID + 1))
-            if [ "$NOPID" -ge 3 ]; then
-                rm -rf "${CHANGE_LOCK:?}"
-                NOPID=0
-                continue
-            fi
-        else
-            NOPID=0
-        fi
-
+    while ! vward_lock_take "$CHANGE_LOCK"; do
+        N=$((N+1))
+        [ "$N" -lt 10 ] || return 1
         sleep 1
-        N=$((N + 1))
-
-        [ "$N" -ge 10 ] && return 1
     done
-
-    echo $$ > "$CHANGE_LOCK/pid"
     return 0
 }
 
 
 change_unlock()
 {
-    rm -rf "${CHANGE_LOCK:?}"
+    vward_lock_release "$CHANGE_LOCK"
 }
 
 

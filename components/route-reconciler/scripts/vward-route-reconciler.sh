@@ -301,32 +301,18 @@ remove_adaptive()
 {
     H="$1"
 
-    if ! mkdir "$CHANGE" 2>/dev/null; then
-        OLD=$(cat "$CHANGE/pid" 2>/dev/null)
-
-        # Its holder is gone, or it has had no pid for over a minute (killed between
-        # mkdir and writing the pid): taken over.
-        if { [ -n "$OLD" ] && ! kill -0 "$OLD" 2>/dev/null; } ||
-           { [ -z "$OLD" ] && [ -n "$(find "$CHANGE" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
-            rm -rf "${CHANGE:?}"
-            mkdir "$CHANGE" || return 1
-        else
-            return 1
-        fi
-    fi
-
-    echo $$ > "$CHANGE/pid"
+    vward_lock_take "$CHANGE" || return 1
     # FINAL_GUARD_V3_MAINT
 
     if { [ "${VWARD_RECONCILER_ONE_LOOK:-1}" = 1 ] && ! grep -Fxq "$H" "$TARGETS"; } ||
        { [ "${VWARD_RECONCILER_ONE_LOOK:-1}" != 1 ] && AN_CHECK=$(adaptive_names fresh) && ! printf '%s\n' "$AN_CHECK" | grep -Fxq "$H"; }; then
-        rm -rf "${CHANGE:?}"
+        vward_lock_release "$CHANGE"
         return 0
     fi
 
     if force_vpn_match "$H"; then
         echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_FORCE_VPN|$H" >> "$LOG"
-        rm -rf "${CHANGE:?}"
+        vward_lock_release "$CHANGE"
         return 0
     fi
 
@@ -366,7 +352,7 @@ remove_adaptive()
             rm -f "$HYST_DIR/$SAFE_H.state"
             save_state "$H" "ADAPTIVE_ISP_BAD"
             echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_ISP_BAD|$H|ISP=$IC|VPN=$VC" >> "$LOG"
-            rm -rf "${CHANGE:?}"
+            vward_lock_release "$CHANGE"
             return 0
             ;;
 
@@ -375,7 +361,7 @@ remove_adaptive()
             rm -f "$HYST_DIR/$SAFE_H.state"
             save_state "$H" "ADAPTIVE_ISP_UNKNOWN"
             echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_ISP_UNKNOWN|$H|ISP=$IC|VPN=$VC" >> "$LOG"
-            rm -rf "${CHANGE:?}"
+            vward_lock_release "$CHANGE"
             return 0
             ;;
     esac
@@ -411,7 +397,7 @@ remove_adaptive()
 
         echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_DIRECT_CONFIRM_WAIT|$H|streak=$HSTREAK" >> "$LOG"
 
-        rm -rf "${CHANGE:?}"
+        vward_lock_release "$CHANGE"
         return 0
     fi
 
@@ -435,7 +421,7 @@ remove_adaptive()
 
         echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_DIRECT_CONFIRM|$H|streak=$HSTREAK/$DIRECT_OK_THRESHOLD" >> "$LOG"
 
-        rm -rf "${CHANGE:?}"
+        vward_lock_release "$CHANGE"
         return 0
     fi
 
@@ -445,7 +431,7 @@ remove_adaptive()
 
     if [ ! -f "$PERSIST" ]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_MISSING_MAINT|$H" >> "$LOG"
-        rm -rf "${CHANGE:?}"
+        vward_lock_release "$CHANGE"
         return 1
     fi
 
@@ -456,7 +442,7 @@ remove_adaptive()
 
     if ! cp -p "$PERSIST" "$PBACK"; then
         echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_BACKUP_ERROR|$H" >> "$LOG"
-        rm -rf "${CHANGE:?}"
+        vward_lock_release "$CHANGE"
         return 1
     fi
 
@@ -464,7 +450,7 @@ remove_adaptive()
 
     if ! awk -v h="$H" '$0 != h {print}' "$PERSIST" > "$PTMP"; then
         rm -f "$PTMP"
-        rm -rf "${CHANGE:?}"
+        vward_lock_release "$CHANGE"
         return 1
     fi
 
@@ -485,7 +471,7 @@ remove_adaptive()
 
             echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_COMMIT_ROLLBACK|$H" >> "$LOG"
 
-            rm -rf "${CHANGE:?}"
+            vward_lock_release "$CHANGE"
             return 1
         fi
 
@@ -504,7 +490,7 @@ remove_adaptive()
         if ! mv "$PTMP" "$PERSIST" 2>/dev/null; then
             rm -f "$PTMP"
             echo "$(date '+%Y-%m-%d %H:%M:%S')|PERSIST_COMMIT_ERROR|$H" >> "$LOG"
-            rm -rf "${CHANGE:?}"
+            vward_lock_release "$CHANGE"
             return 1
         fi
         save_state "$H" "DIRECT_OK"
@@ -517,7 +503,7 @@ remove_adaptive()
         echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_REMOVE_ERROR|$H" >> "$LOG"
     fi
 
-    rm -rf "${CHANGE:?}"
+    vward_lock_release "$CHANGE"
 }
 
 # The default tunnel not in service (the agent VPN says DOWN, or its device is gone): a site that

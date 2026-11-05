@@ -18,7 +18,8 @@ with PipelineFixture() as f:
     try:
         until(lambda:(f.e/'publish-waiting').exists())
         publisher,start=map(int,(f.e/'publish-waiting').read_text().split())
-        lease=f.j/'killed/workers'/f'{publisher}.{start}'
+        boot=__import__('pathlib').Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        lease=f.j/'killed/workers'/f'{boot}.{publisher}.{start}'
         assert lease.exists(),'actual final publisher has no durable lease'
         r=f.invoke('vrb_publish_quiet',f.j/'killed');assert r.returncode==75,'live publisher declared quiet'
         worker=int((f.j/'killed/worker').read_text().split()[0])

@@ -4,12 +4,14 @@
 
 vrb_append_manifest() (
     [ "$#" -eq 5 ] && vrj_dir "$1" && vrj2_file "$3" && vrj2_file "$4" || return 2
-    case $2 in policies|tombstones|saved|queue|evidence) ;; *) return 2 ;; esac
+    case $2 in version|choices|bindings|context|resources|proofs|upstreams|policies|tombstones|saved|queue|evidence) ;; *) return 2 ;; esac
     cmp -s "$3" "$4" && return 0
     vrb_lm_n=$(awk -F'\t' '$1=="step"{n++}END{print n+1}' "$1/plan")
     cp "$3" "$1/pre.$vrb_lm_n" && cp "$4" "$1/post.$vrb_lm_n" || return 1
+    vrb_lm_checks=$5,attrs:$(vr2_hash "$1/inputs.fp")
+    if [ -e "$1/reader" ] || [ -L "$1/reader" ]; then vrj2_file "$1/reader" || return 2;vrb_lm_checks=$vrb_lm_checks,reader:$(vr2_hash "$1/reader");fi
     printf 'step\t%s\tmove\tmanifest\t%s\t%s\t%s\tcreation-and-cas\t-\tgeneration,identity,postimage%s\trestore-own-scope\n' \
-        "$vrb_lm_n" "$2" "$(vr2_hash "$3")" "$(vr2_hash "$4")" "$5,attrs:$(vr2_hash "$1/inputs.fp")" >> "$1/plan" || return 1
+        "$vrb_lm_n" "$2" "$(vr2_hash "$3")" "$(vr2_hash "$4")" "$vrb_lm_checks" >> "$1/plan" || return 1
     vrj2_plan_valid "$1/plan"
 )
 
@@ -40,8 +42,9 @@ vward_routing_server2() (
     [ "$#" -eq 6 ] && vrj_id "$3" || return 2
     case $4 in delete) [ "$5" = - ] || return 2 ;; replace) vrj_id "$5" || return 2 ;; *) return 2 ;; esac
     case $6 in ''|*[!0-9]*) return 2 ;; esac
+    vrb_pipeline_ready "$1" || return 75
     vrb_envelope "$1" "$2" || return 75
-    : "${vrb_e:?}" "${vrb_j:?}"
+    : "${vrb_e:?}" "${vrb_j:?}" "${vrb_op:?}"
     vward_routing_state_gate 2 "$vrb_e/decision" && vward_journal2_gate "$vrb_j" || return 75
     vrb_ls=$(mktemp -d "$vrb_j/.server.XXXXXX") || return 1
     mkdir "$vrb_ls/stage" "$vrb_ls/lowered" "$vrb_ls/after" || return 1
@@ -111,11 +114,21 @@ vward_routing_server2() (
         done < "$vrb_ls/services"
     fi
     vward_routing_lower2 "$vrb_ls/stage" "$vrb_ls/typed" "$vrb_ls/lowered" || return 75
+    vrb_compile_legacy_prune "$vrb_ls/stage" "$vrb_ls/lowered" "$4" "$vrb_oldkey" "$5" || return 75
     cp "$vrb_ls/withdrawal" "$vrb_ls/lowered/withdrawal" || return 1
     vrb_withdraw_hash=$(vr2_hash "$vrb_ls/withdrawal") || return 1
     for vrb_key in saved queue evidence policies tombstones; do
         vrb_extra=;[ "$vrb_key" != tombstones ] || vrb_extra=,revocations:$vrb_withdraw_hash
         vrb_append_manifest "$vrb_ls/lowered" "$vrb_key" "$vrb_ls/stage/decision/$vrb_key.tsv" "$vrb_ls/after/$vrb_key" "$vrb_extra" || return 75
     done
-    vrb_execute2 "$vrb_ls/lowered"
+    vrb_outcome_bind "$vrb_ls/stage" "$vrb_ls/lowered" - || return 75
+    vrb_result=0;vrb_execute2 "$vrb_ls/lowered" || vrb_result=$?
+    vrb_outcome_stage=$vrb_ls/lowered/fresh
+    [ -e "$vrb_outcome_stage/generation" ] || vrb_outcome_stage=$vrb_ls/stage
+    vrb_outcome_emit "$vrb_outcome_stage" "$vrb_ls/lowered" || return 3
+    if [ -d "$vrb_j/$vrb_op/prepared" ] && cmp -s "$vrb_ls/lowered/plan" "$vrb_j/$vrb_op/plan"; then
+        cp "$vrb_ls/lowered/outcome.json" "$vrb_j/$vrb_op/prepared/outcome.json" &&
+            cp "$vrb_ls/lowered/outcome.json.sha" "$vrb_j/$vrb_op/prepared/outcome.json.sha" || return 3
+    fi
+    return "$vrb_result"
 )

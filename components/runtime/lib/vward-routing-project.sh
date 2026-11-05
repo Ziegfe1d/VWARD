@@ -22,7 +22,7 @@ vr2_hash() {
     [ "${#vr2_h}" = 64 ] && printf '%s\n' "$vr2_h"
 }
 vr2_stage_files() {
-    printf '%s\n' 'intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv native.cfg enabled.tsv agh.json inputs.fp decision/version.tsv decision/choices.tsv decision/bindings.tsv decision/evidence.tsv decision/policies.tsv decision/saved.tsv decision/queue.tsv decision/tombstones.tsv decision/context.tsv decision/resources.tsv decision/proofs.tsv decision/upstreams.tsv'
+    printf '%s\n' 'intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv native.cfg enabled.tsv agh.json inputs.fp probes.tsv decision/version.tsv decision/choices.tsv decision/bindings.tsv decision/evidence.tsv decision/policies.tsv decision/saved.tsv decision/queue.tsv decision/tombstones.tsv decision/context.tsv decision/resources.tsv decision/proofs.tsv decision/upstreams.tsv'
 }
 # Integrity of published preparation files, including the exact expected file
 # set. A valid-looking edit cannot keep using an earlier content generation.
@@ -307,6 +307,7 @@ vward_routing_project2() (
         if($2=="intent" && $3=="M" && $8=="verified")intent_container[$1]=$4
         next
     }
+    FILENAME==ARGV[11] {if(NF!=2 || ($1 in probe))bad=1;probe[$1]=$2;next}
     END {
         if(!service(sid) || nb>1024 || ne>4096 || bad) exit 2
         if(!(sid in mode)) {mode[sid]="auto";tgt[sid]="-";dns[sid]="-";rev[sid]=floor[sid]=0}
@@ -348,14 +349,17 @@ vward_routing_project2() (
                 sel=(ctx["source:" es[i]]=="1") ? selected[i] : 0
                 k=kind[i];membership=(es[i]=="A") ? (member=="unknown" ? "unknown" : (member=="excluded" ? "excluded" : "bound")) : "peer"
                 if(es[i]=="A" && origin[i]!="-" && origin[i]!=sid) membership="unknown"
-                if(es[i]=="A" && k=="positive" && ctx["probe:" er[i]]!="fresh") k="unknown"
+                if(es[i]=="A" && (k=="positive" || k=="active") && probe[er[i]]!="fresh") {
+                    if(probe[er[i]]=="old-boot" || probe[er[i]]=="expired") {k="history";sel=0}
+                    else k="unknown"
+                }
                 emit("intent" OFS d OFS es[i] OFS er[i] OFS et[i] OFS ep[i] OFS sel OFS k OFS epoch[i] OFS membership)
             }
             for(s in mode) if(s!=sid && mode[s]!="auto" && binding(s,d)=="confirmed")
                 emit("intent" OFS d OFS "S" OFS s OFS tgt[s] OFS dns[s] OFS (ctx["source:S"]=="1" ? 1 : 0) OFS "explicit" OFS 0 OFS "peer")
         }
     }' "$vr2_tmp/choices" "$1/decision/bindings.tsv" "$1/decision/evidence.tsv" "$1/decision/context.tsv" \
-        "$1/decision/resources.tsv" "$1/intents.tsv" "$1/snapshot.tsv" "$1/inventory.tsv" "$1/decision/proofs.tsv" "$1/identity.tsv" > "$vr2_tmp/input" || return 2
+        "$1/decision/resources.tsv" "$1/intents.tsv" "$1/snapshot.tsv" "$1/inventory.tsv" "$1/decision/proofs.tsv" "$1/identity.tsv" "$1/probes.tsv" > "$vr2_tmp/input" || return 2
     awk -F'\t' '$1=="atom"' "$vr2_tmp/input" | LC_ALL=C sort -t "$(printf '\t')" -k2,2 > "$vr2_tmp/atoms"
     : > "$vr2_tmp/policy"
     while IFS="$(printf '\t')" read -r _vr2_tag vr2_d _vr2_scope vr2_mode vr2_target vr2_dns vr2_rev vr2_floor vr2_why; do

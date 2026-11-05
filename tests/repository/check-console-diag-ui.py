@@ -77,12 +77,13 @@ if r.returncode:
 # consume its width. Render the real card template, then inspect semantic DOM.
 at=js.index('  const row = s =>',js.index('function aiPage()'))
 card=js[at:js.index('  // Smart DNS first:',at)]
+prepared_note=re.search(r'^function routingOutcomeNote\(o\) \{.*?^\}\n',js,re.M|re.S).group()
 markup=subprocess.check_output(['node','-e', '''
 const esc=String,AICHK={},AIRES={},tuns=[],sdDown=false,sdReason='';
 const status=()=>'<span class="stat">Длинный статус сервиса с подробной причиной</span>';
 const btn=(a,i,t,c,x)=>'<button '+x+'>'+t+'</button>';
 const busyBtn=()=>false,aiSlider=()=>'',aiReferenceChoice=()=>'',detail=()=>'';
-'''+card+'''console.log(row({id:'canva',title:'Canva',domain:'canva.example',selected:'vpn',via:'vpn'}));'''],text=True)
+'''+prepared_note+card+'''console.log(row({id:'canva',title:'Canva',domain:'canva.example',selected:'vpn',via:'vpn'}));'''],text=True)
 class Card(HTMLParser):
     def __init__(self):super().__init__();self.stack=[];self.parents={}
     def handle_starttag(self,tag,attrs):

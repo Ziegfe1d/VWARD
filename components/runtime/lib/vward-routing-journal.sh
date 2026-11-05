@@ -49,34 +49,42 @@ vrj2_pid_start() {
     case $1 in ''|*[!0-9]*) return 1 ;; esac
     printf '%s\n' "$1"
 }
-vrj2_lock() {
-    IFS=' ' read -r vrj2_me _ < /proc/self/stat || return 1
-    vrj2_start=$(vrj2_pid_start "$vrj2_me") || return 1
-    if ! mkdir "$1/.lock" 2>/dev/null; then
+# Requires the shared admission library's cooperative election. v1 below
+# remains a separate parser/protocol; no state2 worker falls back to its lock.
+vrj2_take_under_gate() {
+    [ ! -e "$1/.reclaim" ] && [ ! -L "$1/.reclaim" ] || return 75
+    if ! vward_lock_gate_exec mkdir "$1/.lock" 2>/dev/null; then
         vrj_dir "$1/.lock" && vrj2_file "$1/.lock/pid" && vrj2_file "$1/.lock/pid_start" || return 75
         vrj2_file "$1/.lock/owner" && vrj2_file "$1/.lock/owner.sha" || return 75
         [ "$(vrj_hash "$1/.lock/owner")" = "$(cat "$1/.lock/owner.sha")" ] || return 75
         vrj2_old=$(cat "$1/.lock/pid");vrj2_os=$(cat "$1/.lock/pid_start")
-        [ "$(cat "$1/.lock/owner")" = "$(printf '%s\t%s' "$vrj2_old" "$vrj2_os")" ] || return 75
-        case $vrj2_old:$vrj2_os in *[!0-9:]*|:*) return 75 ;; esac
-        vrj2_live=$(vrj2_pid_start "$vrj2_old") || vrj2_live=
-        [ "$vrj2_live" != "$vrj2_os" ] || return 75
-        # One reclaimer, recheck the same owner record; never steal a live lock.
-        mkdir "$1/.reclaim" 2>/dev/null || return 75
-        if [ "$(cat "$1/.lock/pid" 2>/dev/null)" != "$vrj2_old" ] ||
-           [ "$(cat "$1/.lock/pid_start" 2>/dev/null)" != "$vrj2_os" ]; then rmdir "$1/.reclaim"; return 75; fi
-        rm -rf "$1/.lock" || { rmdir "$1/.reclaim"; return 1; }
-        mkdir "$1/.lock" || { rmdir "$1/.reclaim"; return 75; }
-        rmdir "$1/.reclaim" || return 1
+        vrj2_old_boot=$(vward_lock_boot_id "$1/.lock/boot") || return 75
+        [ "$(cat "$1/.lock/owner")" = "$(printf '%s\t%s\t%s' "$vrj2_old" "$vrj2_os" "$vrj2_old_boot")" ] || return 75
+        case $vrj2_old:$vrj2_os in *[!0-9:]*|:*|*:) return 75 ;; esac
+        vrj2_alive_rc=0;vward_lock_gate_live "$vrj2_old_boot.$vrj2_old.$vrj2_os" || vrj2_alive_rc=$?
+        [ "$vrj2_alive_rc" = 1 ] || return 75
+        # Every new acquirer is inside the SAME actual-PID election here.
+        vward_lock_gate_exec rm -rf "$1/.lock" && vward_lock_gate_exec mkdir "$1/.lock" || return 75
     fi
     printf '%s\n' "$vrj2_me" > "$1/.lock/pid" && printf '%s\n' "$vrj2_start" > "$1/.lock/pid_start" &&
-        printf '%s\t%s\n' "$vrj2_me" "$vrj2_start" > "$1/.lock/owner" &&
+        printf '%s\n' "$vrj2_boot" > "$1/.lock/boot" && printf '%s\t%s\t%s\n' "$vrj2_me" "$vrj2_start" "$vrj2_boot" > "$1/.lock/owner" &&
         vrj_hash "$1/.lock/owner" > "$1/.lock/owner.sha"
+}
+vrj2_lock() {
+    vrj_lock_runtime || return 75
+    IFS=' ' read -r vrj2_me _ < /proc/self/stat || return 1
+    vrj2_start=$(vrj2_pid_start "$vrj2_me") || return 1
+    IFS= read -r vrj2_boot < /proc/sys/kernel/random/boot_id || return 1
+    vward_lock_gate_enter "$1/.lock" || return 75
+    vrj2_take_rc=0;vrj2_take_under_gate "$1" || vrj2_take_rc=$?
+    vward_lock_gate_leave "$1/.lock" || return 75
+    return "$vrj2_take_rc"
 }
 vrj2_unlock() {
     [ ! -L "$1/.lock" ] && [ "$(cat "$1/.lock/pid" 2>/dev/null)" = "${vrj2_me:-}" ] &&
-        [ "$(cat "$1/.lock/pid_start" 2>/dev/null)" = "${vrj2_start:-}" ] || return 1
-    rm -rf "$1/.lock"
+        [ "$(cat "$1/.lock/pid_start" 2>/dev/null)" = "${vrj2_start:-}" ] &&
+        [ "$(vward_lock_boot_id "$1/.lock/boot")" = "${vrj2_boot:-}" ] || return 1
+    vward_lock_release "$1/.lock"
 }
 # Batch atomic files then ONE compulsory flush per journal boundary. The caller
 # cannot disable this flush with VWARD_JOURNAL_SYNC; no mutation follows a failure.
@@ -269,7 +277,7 @@ vward_journal2_compensating() (
         vrj2_observed=$(cat "$4")
         vrj2_row=$(vrj2_step_row "$1/$2" "$3") || return 2
         if printf '%s\n' "$vrj2_row" | awk -F'\t' -v h="$vrj2_observed" '
-            $4~/^(group|dns-scope)$/ && h~/^[0-9a-f]+$/ && length(h)==64 {
+            ($4~/^(group|dns-scope)$/ || ($4=="saved" && $5=="routing-state")) && h~/^[0-9a-f]+$/ && length(h)==64 {
                 n=split($10,a,",");for(i=1;i<=n;i++) if(a[i]=="prefix:" h) found=1
             } END{exit found?0:1}'; then vrj2_allowed=1;fi
     fi
@@ -398,20 +406,21 @@ vrj_state() {
     printf 'void\tno-record\n'
 }
 
-vrj_lock() {
-    vrj_n=0
-    while ! mkdir "$1/.lock" 2>/dev/null; do
-        vrj_p=$(cat "$1/.lock/pid" 2>/dev/null)
-        # A lock left by a killed process (SIGKILL, reboot) is taken over; a live one is busy.
-        case $vrj_p in ''|*[!0-9]*) vrj_p= ;; esac
-        if [ -n "$vrj_p" ] && kill -0 "$vrj_p" 2>/dev/null; then return 75; fi
-        [ -n "$vrj_p" ] || [ "$vrj_n" -ge 1 ] || { vrj_n=1; continue; }
-        rm -rf "$1/.lock" 2>/dev/null
-        vrj_n=$((vrj_n + 1)); [ "$vrj_n" -le 2 ] || return 75
-    done
-    echo $$ > "$1/.lock/pid" 2>/dev/null || { rmdir "$1/.lock" 2>/dev/null; return 1; }
+# Existing v1 may contend with v2 on the SAME directory before its parser
+# refuses state2. Its lock/release must participate in the same election.
+vrj_lock_runtime() {
+    command -v vward_lock_gate_enter >/dev/null 2>&1 && return 0
+    vrj_admission_lib=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+    [ -r "$vrj_admission_lib" ] || return 75
+    # Existing trusted runtime-library locator, not an executor/guard bypass.
+    # shellcheck disable=SC1090
+    . "$vrj_admission_lib"
+    command -v vward_lock_gate_enter >/dev/null 2>&1
 }
-vrj_unlock() { rm -rf "$1/.lock" 2>/dev/null; }
+vrj_lock() {
+    vrj_lock_runtime && vward_lock_take "$1/.lock" || return 75
+}
+vrj_unlock() { vward_lock_release "$1/.lock"; }
 
 vward_journal_status() (
     [ "$#" -eq 1 ] || return 2

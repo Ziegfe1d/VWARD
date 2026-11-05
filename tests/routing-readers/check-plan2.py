@@ -4,7 +4,7 @@ import os,sys
 import hashlib
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
-from fixture import Fixture,READ,OBSERVE,SNAP,AUDIT,PLAN,JOURNAL,LIBDIR
+from fixture import Fixture,READ,OBSERVE,SNAP,AUDIT,PLAN,JOURNAL,LIBDIR,probe_context
 PROJECT=LIBDIR/'vward-routing-project.sh'
 with Fixture() as f:
     clean='interface Wireguard0\n!\ninterface Wireguard1\n!\ndns-proxy\n!\n'
@@ -41,7 +41,7 @@ with Fixture() as f:
     put('context',context);rows=plan()
     assert any(r[0]=='step' and r[3]=='choice' for r in rows)
     journal=f.p/'journal';journal.mkdir(mode=0o700)
-    r=f.run('. "$1"; vward_journal2_plan "$2" op-1 "$3"',JOURNAL,journal,out/'plan.tsv',env=env)
+    r=f.run('. "$1";. "$2"; vward_journal2_plan "$3" op-1 "$4"',LIBDIR/'vward-runtime-admission.sh',JOURNAL,journal,out/'plan.tsv',env=env)
     assert r.returncode==0,(r.stdout,r.stderr)
     r=f.run('. "$1"; vward_journal_plan "$2" legacy "$3" x.example S vward verified',JOURNAL,journal,out/'plan.tsv',env=env)
     assert r.returncode==2 and not (journal/'legacy').exists(),'old journal accepted the typed plan'
@@ -127,6 +127,7 @@ with Fixture() as f:
     put('choices','schema\t1\nservice\tsvc\t1\tvpn\tVPN:Wireguard0\tdefault\t0\n')
     rows=plan('off','-','-',1)
     assert any(r[0]=='step' and r[2:4]==['remove','route'] for r in rows),rows
+    put('context',context+probe_context())
     put('evidence','A\ta1\tx.example\texact\tVPN:Wireguard0\tdefault\t1\tactive\t0\tsvc\n')
     rows=plan('off','-','-',1)
     assert not any(r[0]=='step' and r[2]=='remove' for r in rows),'S off deleted independent A coverage'

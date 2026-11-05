@@ -188,14 +188,31 @@ vrb_agh_model_session() (
         [ ! -e "$vrb_am_faults/agh-refuse" ] || return 1
         "$ADS_JQ" -e 'keys==["upstream_dns"] and (.upstream_dns | type)=="array" and
             all(.upstream_dns[];type=="string")' "$2" >/dev/null || return 2
+        # Build from ONE coherent full model image, preserving unrelated JSON
+        # fields. The actual worker owns only upstream_dns, with its own CAS.
+        vrb_capture_image "$vrb_am_model" "$W/transport.before.json" || return 75
+        vrb_agh_scope "$W/transport.before.json" > "$W/transport.scope" || return 75
+        case $2 in
+            "$W/plan.json"|"$W/body.json") vrb_am_expected=$W/dns.json;vrb_am_planned=$W/plan.json ;;
+            "$W/back.json") vrb_am_expected=$W/plan.json;vrb_am_planned=$W/dns.json ;;
+            *) return 2 ;;
+        esac
+        vrb_agh_scope "$vrb_am_expected" > "$W/transport.expected" || return 75
+        cmp -s "$W/transport.scope" "$W/transport.expected" || return 75
+        # The existing take worker sends body.json (projection of plan.json),
+        # put sends plan.json, inverse sends back.json. Accept only that exact
+        # closed payload for the applicable pre/post transition.
+        vrb_agh_scope "$2" > "$W/transport.request" &&
+            vrb_agh_scope "$vrb_am_planned" > "$W/transport.planned" &&
+            cmp -s "$W/transport.request" "$W/transport.planned" || return 75
         # Original helper already persisted before/planned. Preserve a separate
         # in-flight marker until its ACK AND readback have both been accepted.
         printf '%s\n' pending > "$vrb_am_evidence/request.pending" && vrj2_flush || return 1
         vrb_am_new=$(mktemp "${vrb_am_model%/*}/.agh-data.XXXXXX") || return 1
         # shellcheck disable=SC2016
-        "$ADS_JQ" -cS --slurpfile n "$2" '.upstream_dns=$n[0].upstream_dns' "$vrb_am_model" > "$vrb_am_new" || return 1
+        "$ADS_JQ" -cS --slurpfile n "$2" '.upstream_dns=$n[0].upstream_dns' "$W/transport.before.json" > "$vrb_am_new" || return 1
         if [ "$vrb_am_model" = "${vrb_e:-}/agh.json" ]; then
-            vrb_publish "$vrb_am_new" "$vrb_am_model" || return 1
+            vrb_publish "$vrb_am_new" "$vrb_am_model" "$(vr2_hash "$W/transport.before.json")" || return 75
         else mv "$vrb_am_new" "$vrb_am_model" || return 1;fi
         if [ -e "$vrb_am_faults/agh-lost" ]; then vrb_am_uncertain=1;return 22;fi
         printf '%s\n' '{}' > "$3"
@@ -250,12 +267,17 @@ vrb_emu_dns_command() (
         'dns-proxy https upstream '*) vrb_ed_add=${vrb_ed_cmd#dns-proxy };vrb_ed_uri= ;;
         *) return 2 ;;
     esac
+    vrb_capture_image "$vrb_e/running.cfg" "$vrb_t/config.before" || return 75
+    vrb_https_scope "$vrb_t/config.before" > "$vrb_t/dns.before" || return 75
+    if [ "$vrb_role" = inverse ]; then vrb_ed_expected=$vrb_t/dns.inverse.expected
+    else vrb_ed_expected=$vrb_t/dns.expected;fi
+    cmp -s "$vrb_t/dns.before" "$vrb_ed_expected" || return 75
     awk -v u="$vrb_ed_uri" -v add="$vrb_ed_add" '
         /^dns-proxy$/ {dns=1;print;if(add!="")print "    " add;next}
         /^[^ \t]/ {dns=0}
         dns && $1=="https" && $2=="upstream" && u!="" && $3==u {next}
-        {print}' "$vrb_e/running.cfg" > "$vrb_t/config.next" || return 1
-    vrb_publish "$vrb_t/config.next" "$vrb_e/running.cfg" || return 1
+        {print}' "$vrb_t/config.before" > "$vrb_t/config.next" || return 1
+    vrb_publish "$vrb_t/config.next" "$vrb_e/running.cfg" "$(vr2_hash "$vrb_t/config.before")" || return 75
     [ ! -e "$vrb_e/dns-lost" ] || return 28
 )
 
@@ -329,16 +351,16 @@ vrb_dns_inverse() (
             snapshot;doh_lines > "$vrb_t/doh.inverse.before"
             vrb_di_line=$(awk -v u="$vrb_di_uri" '$3==u{print;exit}' "$vrb_t/doh.inverse.before")
             DOH_ALLOWED=$vrb_t/dns.inverse.expected;export DOH_ALLOWED
-            doh_remove_url "$vrb_di_line" "$vrb_di_uri" "$vrb_t/doh.inverse.before" || return 3
             awk -v u="$vrb_di_uri" '$3!=u' "$vrb_t/dns.inverse.expected" > "$vrb_t/dns.inverse.next"
+            doh_remove_url "$vrb_di_line" "$vrb_di_uri" "$vrb_t/doh.inverse.before" || return 3
             mv "$vrb_t/dns.inverse.next" "$vrb_t/dns.inverse.expected" || return 1
         done < "$vrb_t/dns.inverse.urls"
         awk 'FILENAME==ARGV[1]{seen[$0]=1;next}!($0 in seen){print}' "$vrb_t/dns.inverse.expected" "$vrb_t/pre.$2" > "$vrb_t/dns.inverse.adds"
         while IFS= read -r vrb_di_line; do
             vrb_scope_read dns-scope keenetic "$vrb_t/check" || return 3
             cmp -s "$vrb_t/check" "$vrb_t/dns.inverse.expected" || return 75
-            ndm "dns-proxy $vrb_di_line" || :
             { cat "$vrb_t/dns.inverse.expected";printf '%s\n' "$vrb_di_line"; } | LC_ALL=C sort > "$vrb_t/dns.inverse.next"
+            ndm "dns-proxy $vrb_di_line" || :
             mv "$vrb_t/dns.inverse.next" "$vrb_t/dns.inverse.expected" || return 1
         done < "$vrb_t/dns.inverse.adds"
     else return 2;fi
