@@ -789,3 +789,54 @@ workflow/budgets прежние; production delta относительно209278
 physical completion/readback/save/ownCASrollback/schema и owner acceptance. DNS/ISP/Auto/
 manual/unknown/shared migration writes закрыты; A1/A6/A7/A10/storage/hardware открыты.
 Нет router/merge/dev/main/feed/release/install/live wiring.
+
+
+**Итог §G.4b — CI813 / OFF software gates закрыты (06.11.2026 02:12 МСК).**
+
+[CI813 /42109284350](https://github.com/Ziegfe1d/VWARD/actions/runs/42109284350)
+завершён **SUCCESS** на exact code HEAD `168a853bf12073e3b499002c67e2182e6ea3c7a5`,
+tested tree `7597f8e12418d66157b039b33ec2524efeb4ed7a`,
+base dev `3f4802b6574c0c7b441bf3da84e6841abb173349`, [PR38](https://github.com/Ziegfe1d/VWARD/pull/38).
+Run/jobs прочитаны однократно; PR head/tree и base совпали, worktree чистый, draft сохранён.
+
+- repository-consistency **127532263462 SUCCESS**: полный штатный suite, включая32 новых
+  B cases наsh/BusyBox, прежний поздний хвост и новый updater directory-cost regression.
+- updater-tests **127532262882 SUCCESS**, включая штатный Release rehearsal over beta.
+- resource-audit **127532263711 SUCCESS**: полный прежний budget, stabilization, часовой
+  random-fault stress и все страницы Панели в Chromium на эмуляторе.
+- main-only dispatch-transition **127577196956 SKIPPED**, необязателен для этой ветки.
+
+Это собственные ворота168a853, не перенос старых SUCCESS. CI812 и предыдущие отказы/
+RED→GREEN остаются в истории. Две последние runtime строки updater common base и их
+regression вошли в прошедшее дерево; map/allowlists78/budgets/workflow/VERSION/feed прежние.
+Адресные reviews закрыты без оставшихся Important/Critical в проверенном OFF scope;
+общий аудит не повторялся. Успешные длительные проверки не rerun. Для этого итогового
+журнала — отдельный docs[skip ci]+штатный SHA256SUMS; runtime/tests должны остаться
+побайтово tested168a853, нового полного CI ради записи нет.
+
+**OFF архитектурная подготовка закрыта по software gates.** Это не live wiring и не выпуск.
+Native+12decision stage→actual choice/policy→typed plan→parentJ2/Gi→EXISTING locked console/
+AGH workers на FIXED private DATA→readback/save/ownCAS проверены как OFF цепочка.
+Новые libs UNINSTALLED/не signed78 targets; normal OLD legacy eligibility/reconcile и
+updater bridge PREPARED ONLY / НЕ WIRED. Shared lock не заменяет wiring. API serializer
+только definition/noendpoint; optional gray UI/actions прежние; activation=off,
+client_path_verified=false, новые форматы denied, packet/client path unknown. M/S/A —
+источники, не режимы агентов. Unknown AGH POST сохраняет private before/planned/
+request.pending+barrier, без autoreplay/blind inverse. Receipt доказывает issued attempt,
+не hardware ACK/клиентский путь.
+
+Исторические full-local consistency FAIL(readonly/opt/var/check-dryrun.py199), local
+Chromium SKIP(noPlaywright), beta-marker cross-check SKIP(origin/beta локально недоступен)
+сохранены. Успех штатного CI не переписывает эти локальные результаты и не даёт аппаратной
+приёмки. Новых router outputs нет; owner ничего не устанавливал, роутер не подключался.
+
+Следующая граница — ОДИН конкретный VPN-only GO §F.3/G.4: service-owned exactscope
+move/repeat/back; ВСЕ пересекающиеся legacy backwriters получают scoped eligibility и
+updater quiescence ДОwrite; common admission→EDIT→CHANGE→J2/internalworker/nochildCLI;
+physical transport completion/lease/readback/save; failclosed disable/ownCAS rollback/
+schema/downgrade; одна owner acceptance actualroute/registry/claim/manual preservation/
+repeat/restart/persist. Проект документально подготовлен, wiring НЕ согласован.
+DNS/ISP/Auto/manual/unknown/shared migration writes закрыты; A1/A6/A7/A10/storage/hardware
+открыты. Никакого merge/dev/main/feed/VERSION/sequence/release/install/live wiring.
+Разовая B-задача6aeb0aa808408191877cad08d219e816 подлежит отключению после записи итога;
+старый release task не переоткрывается.

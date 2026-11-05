@@ -289,6 +289,8 @@ sh/BB1.37/staticBB1.36 + negative missing-dependency control PASS. Runtime не�
 
 06.11.2026 00:03 МСК / PR38: [CI812/42088055302](https://github.com/Ziegfe1d/VWARD/actions/runs/42088055302) наexact209278374192e9642ac6e64daa2cd811ee26c944/tree428e351fb8992437ee14dbf022d175dad74c367f: consistency127458395533 и updater127458395452 SUCCESS; resource127458394925 FAILURE(updater check62>61), main-only127503063069 SKIPPED. Реальный targeted RED63→GREEN54; только2строки updater directory cost + regression. Новый exact CI all3 нужен, общий PASS не заявлен; live OFF.
 
+06.11.2026 02:12 МСК / PR38: **OFF-подготовка закрыта по software gates**. [CI813/42109284350](https://github.com/Ziegfe1d/VWARD/actions/runs/42109284350) exact168a853bf12073e3b499002c67e2182e6ea3c7a5/tree7597f8e12418d66157b039b33ec2524efeb4ed7a: repository-consistency127532263462, updater-tests127532262882, resource-audit127532263711 **SUCCESS**; main-only127577196956 SKIPPED. Draft PR38/base dev3f4802b6574c0c7b441bf3da84e6841abb173349 совпали. Только итоговые docs[skip ci]+SHA; без повторного CI. Live/merge/release не разрешены; следующая граница VPN-only §F.3/G.4.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -812,6 +814,54 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   manual/unknown/shared migration writes закрыты; A1/A6/A7/A10/storage/hardware открыты.
   Нет router/merge/dev/main/feed/release/install/live wiring.
 
+- 06.11.2026 02:12 МСК / [Агент] / PR38 завершение OFF: [CI813 /42109284350](https://github.com/Ziegfe1d/VWARD/actions/runs/42109284350)
+  завершён **SUCCESS** на exact code HEAD `168a853bf12073e3b499002c67e2182e6ea3c7a5`,
+  tested tree `7597f8e12418d66157b039b33ec2524efeb4ed7a`,
+  base dev `3f4802b6574c0c7b441bf3da84e6841abb173349`, [PR38](https://github.com/Ziegfe1d/VWARD/pull/38).
+  Run/jobs прочитаны однократно; PR head/tree и base совпали, worktree чистый, draft сохранён.
+
+  - repository-consistency **127532263462 SUCCESS**: полный штатный suite, включая32 новых
+    B cases наsh/BusyBox, прежний поздний хвост и новый updater directory-cost regression.
+  - updater-tests **127532262882 SUCCESS**, включая штатный Release rehearsal over beta.
+  - resource-audit **127532263711 SUCCESS**: полный прежний budget, stabilization, часовой
+    random-fault stress и все страницы Панели в Chromium на эмуляторе.
+  - main-only dispatch-transition **127577196956 SKIPPED**, необязателен для этой ветки.
+
+  Это собственные ворота168a853, не перенос старых SUCCESS. CI812 и предыдущие отказы/
+  RED→GREEN остаются в истории. Две последние runtime строки updater common base и их
+  regression вошли в прошедшее дерево; map/allowlists78/budgets/workflow/VERSION/feed прежние.
+  Адресные reviews закрыты без оставшихся Important/Critical в проверенном OFF scope;
+  общий аудит не повторялся. Успешные длительные проверки не rerun. Для этого итогового
+  журнала — отдельный docs[skip ci]+штатный SHA256SUMS; runtime/tests должны остаться
+  побайтово tested168a853, нового полного CI ради записи нет.
+
+  **OFF архитектурная подготовка закрыта по software gates.** Это не live wiring и не выпуск.
+  Native+12decision stage→actual choice/policy→typed plan→parentJ2/Gi→EXISTING locked console/
+  AGH workers на FIXED private DATA→readback/save/ownCAS проверены как OFF цепочка.
+  Новые libs UNINSTALLED/не signed78 targets; normal OLD legacy eligibility/reconcile и
+  updater bridge PREPARED ONLY / НЕ WIRED. Shared lock не заменяет wiring. API serializer
+  только definition/noendpoint; optional gray UI/actions прежние; activation=off,
+  client_path_verified=false, новые форматы denied, packet/client path unknown. M/S/A —
+  источники, не режимы агентов. Unknown AGH POST сохраняет private before/planned/
+  request.pending+barrier, без autoreplay/blind inverse. Receipt доказывает issued attempt,
+  не hardware ACK/клиентский путь.
+
+  Исторические full-local consistency FAIL(readonly/opt/var/check-dryrun.py199), local
+  Chromium SKIP(noPlaywright), beta-marker cross-check SKIP(origin/beta локально недоступен)
+  сохранены. Успех штатного CI не переписывает эти локальные результаты и не даёт аппаратной
+  приёмки. Новых router outputs нет; owner ничего не устанавливал, роутер не подключался.
+
+  Следующая граница — ОДИН конкретный VPN-only GO §F.3/G.4: service-owned exactscope
+  move/repeat/back; ВСЕ пересекающиеся legacy backwriters получают scoped eligibility и
+  updater quiescence ДОwrite; common admission→EDIT→CHANGE→J2/internalworker/nochildCLI;
+  physical transport completion/lease/readback/save; failclosed disable/ownCAS rollback/
+  schema/downgrade; одна owner acceptance actualroute/registry/claim/manual preservation/
+  repeat/restart/persist. Проект документально подготовлен, wiring НЕ согласован.
+  DNS/ISP/Auto/manual/unknown/shared migration writes закрыты; A1/A6/A7/A10/storage/hardware
+  открыты. Никакого merge/dev/main/feed/VERSION/sequence/release/install/live wiring.
+  Разовая B-задача6aeb0aa808408191877cad08d219e816 подлежит отключению после записи итога;
+  старый release task не переоткрывается.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -952,6 +1002,8 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
 - 05.11.2026 21:49 МСК / PR38: CI811 не зелёный. Все3 SmartDNS fixture исправлены без runtime delta; локально ранее непринятый suffix PASS по checkpoints, НЕ весь local suite. Нужен новый exact-HEAD CI all3. VPN-only GO/legacy wiring/quiescence/physical transport/hardware остаются следующей границей; merge/release не разрешены.
 
 - 06.11.2026 00:03 МСК / PR38: полный consistency и updater/rehearsal на2092783 приняты CI812; resource budget ещё отказал(updater62>61). Minimal directory cost fix и targeted54/19 PASS не заменяют новый exact all3mandatory CI. Local beta cross-check SKIP, full-local FAIL/Chromium localSKIP сохранены. Следующая live граница VPN-only GO/legacy fences/quiescence/physical transport/hardware, не merge/release.
+
+- 06.11.2026 02:12 МСК / PR38: вопрос exact-tree software gate закрыт CI813/168a853 — все3 mandatory SUCCESS, optional main-only SKIPPED. Это закрывает предыдущие запросы нового CI в истории, но не live wiring/аппаратную приёмку. VPN-only GO §F.3/G.4, ВСЕ legacy fences + updater quiescence ДОwrite, physical completion/own rollback/schema и одна owner acceptance остаются открытой границей. DNS/ISP/Auto/manual/unknown/shared migration writes закрыты; A1/A6/A7/A10/storage/hardware открыты. Full-local FAIL/Chromium SKIP/beta-marker SKIP сохраняются. Merge/release/router не выполнялись.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 
