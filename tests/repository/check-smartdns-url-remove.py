@@ -73,7 +73,8 @@ with tempfile.TemporaryDirectory() as tmp:
                        "VWARD_WAN_DEVICE=eth3\nVWARD_WAN_INTERFACE=GigabitEthernet1\nVWARD_TUNNEL_INTERFACE=Wireguard0\nVWARD_TUNNEL_DEVICE=nwg0\n"
                        "VWARD_POLICY_GROUP=Mine\n"); devconf.chmod(0o600)
     (tmp / "policy").mkdir(); (tmp / "root/tmp").mkdir(parents=True); (tmp / "etc").mkdir()
-    adm = tmp / "admission.sh"; adm.write_text("vward_admission_enter() { return 0; }\nvward_admission_leave() { return 0; }\n")
+    adm = tmp / "admission.sh"; adm.write_text(f'. "{ROOT / "components/runtime/lib/vward-runtime-admission.sh"}"\n' +
+        "vward_admission_enter() { return 0; }\nvward_admission_leave() { return 0; }\n")
     env = os.environ | {
         "VWARD_NDMC": str(ndmc), "VWARD_DEVICE_CONFIG": str(devconf), "VWARD_DEVICE_CONFIG_OWNER_UID": str(os.getuid()),
         "VWARD_DEVICE_MAP_CACHE": str(tmp / "map.tsv"), "VWARD_SYSFS_NET": str(tmp / "sys"),
