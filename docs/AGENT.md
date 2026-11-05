@@ -252,6 +252,16 @@ literal `stat -c` в поясняющем комментарии vward-routing-l
 Исправляется только wording комментария; grep/guards/workflow остаются прежними. Остаток suite
 не принят; другие jobs не отменяются и их pending не объявлен SUCCESS. Новый HEAD требует CI.
 
+05.11.2026 14:38 МСК / PR38: CI[42000841257](https://github.com/Ziegfe1d/VWARD/actions/runs/42000841257)
+на exact ced666eb6595a27cd47b408504903e0abf8d8055 завершён **FAILURE**, прочитан однократно.
+repository-consistency127155341118 FAILURE (first AGH preflight fixture, rc75 вместо3);
+updater-tests127155341536 **SUCCESS**, включая official rehearsal;
+resource-audit127155341722 FAILURE (budget: reconciler execs67>64; housekeeping47>28,opt_ops10>3).
+Stress/Chromium в resource job SUCCESS; main-only dispatch-transition127160558461 SKIPPED.
+Код исправления `531fe7a635642b17126bb9f93a80b6ba02d8e220`: private constructors/fixtures приumask022,
+owner-process metadata lifetime и read-only healthy sweep; budgets/guards/workflow прежние.
+Адресные RED→GREEN и review закрыты; новый exact-HEAD CI ещё требуется, остаток не принят.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -624,6 +634,36 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   На первом чтении updater-tests127153999124/resource-audit127153998894 IN_PROGRESS, не
   отменяются/не перечитываются циклом. Нет merge/dev/main/feed/release/router действий.
 
+- 05.11.2026 14:38 МСК / PR38, CI42000841257: first new AGH preflight case rc75 воспроизведён
+  приumask022. Path.mkdir(parents=True,mode0700) оставлял services parent0755; private DATA gate
+  правильно отказывал ДО операции. Fixture теперь явно создаёт parent0700; то же исправлено
+  для legacy route-engine parents и нового worker.sha0600. Production read/ownership guard
+  не ослаблен. Читатели projection/pipeline/DNS-view и при022 уже PASS, их не меняли.
+  Direct J2/private envelope также зависели от ambient umask: .lock0755/metadata0644 не мог
+  закрыться. Leased mkdir и operation context теперь private; owner metadata временно077 с
+  восстановлением caller umask. Отдельный metadata writer-child недопустим: addressed review
+  выявил lifetime race, реальный regression остановил его послеpid, убил толькоparent,
+  заменил lock живым holder и возобновил child — получено повреждение нового lock(RED).
+  Теперь journal и generic take пишут shared metadata самим elected owner; тот же test для
+  обоих вариантов GREEN, без увеличенияtimeouts. Новых Important/Critical по closure нет.
+  Resource FAIL исследован отдельно: sweep создавал election/писал USB даже для healthy lock,
+  first choosing scan повторно проверял свой ticket. Preliminary stale read теперь только
+  пропускает healthy; stale повторно проверяется ВНУТРИ SAME election перед leased rm.
+  Regression healthy flash tree без изменений RED→GREEN и replacement-owner interleaving PASS.
+  Own ticket учитывается в том же256 bound, final exec/leave проверяют его private claim.
+  Host real-tool invocation profile gate enter/leave:9→7; это НЕ полный emulator budget PASS.
+  Бюджеты64/28/3 и assertions/workflow/targets78/package-map/allowlists/VERSION/feed прежние.
+  Адресные PASS при022: sh/BusyBox1.37 ash+awk lock election/orphan/metadata lifetime/private
+  modes/restore; shared legacy/B contention; AGH preflight refusal; stale sweep/boot hook.
+  BusyBox reboot57.34s, actual legacy import/downgrade91.81s и both-store legacy server188.00s;
+  BusyBox J2 5.53s и sh v1 journal5.77s PASS. Каждый invoke budget45s прежний; время suite
+  не latency MIPS. Syntax/Python/privacy/diff и отсутствие новых ShellCheck diagnostics PASS.
+  Runtime `531fe7a635642b17126bb9f93a80b6ba02d8e220` ещё требует полного CI; resource budget и
+  непройденный остаток32 новых cases не объявлены зелёными. Прежние local full FAIL(read-only
+  /opt/var)/Chromium localSKIP сохранены; official Chromium SUCCESS относится кced666e.
+  Это OFF software preparation: legacy eligibility/updater callbacks ещё НЕ WIRED, libs
+  UNINSTALLED, API endpoint/actions не включены. Роутер не подключался; merge/release нет.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -742,6 +782,12 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
 - 05.11.2026 / PR38: прежний запрос CI ещё открыт: первый новый run42000443090 обнаружил
   ранний static compatibility отказ. Исправление комментария не доказывает непройденный остаток;
   новая exact-HEAD штатная проверка обязательна. Live/router/аппаратная приёмка не разрешены.
+
+- 05.11.2026 14:38 МСК / PR38: exact CIced666e имеет два конкретных отказа; updater/rehearsal,
+  stress и Chromium прошли. Исправление private-mode/lifetime/cost проверено адресно, но
+  новый полный exact-HEAD CI обязан подтвердить resource budget и весь остаток. После него
+  только конкретный VPN-only GO §F.3/G.4; legacy wiring/quiescence/physical transport и
+  hardware не выполнены. A1/A6/A7/A10/storage остаются открыты; публикация не разрешена.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 

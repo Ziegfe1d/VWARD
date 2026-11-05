@@ -608,3 +608,44 @@ compatibility grep сопоставил запрещённый option literal в
 Выполняемый metadata reader использует ls -ldn; правится только wording, не guard/code.
 Updater/resource jobs при первом чтении ещё IN_PROGRESS; не отменены. Остаток не доказан,
 новый конечный HEAD требует своего CI; ни live GO, ни публикации нет.
+
+
+#### G.4a. Исправление фактических CI отказов (05.11.2026 14:38 МСК)
+
+CI42000841257 exactced666e: updater-tests/rehearsal SUCCESS; repository-consistency FAILURE
+на втором новом case(AGH preflight); resource-audit FAILURE только на resource budget,
+хотя все его preceding steps, stress и Chromium SUCCESS. Значения: reconciler67exec>64,
+housekeeping47exec>28/10opt_ops>3. Run прочитан однократно; успешные длительные gates не rerun.
+
+Код `531fe7a635642b17126bb9f93a80b6ba02d8e220` сохраняет смысл OFF chain и закрывает причины:
+
+- Приumask022 services/route-engine fixture parents теперь явно0700, worker.sha0600.
+  Private gate остаётся прежним; default parents0755 был реальным ранним отказом, а не
+  исполнением инъекции AGH. Direct private J2/envelope конструируют свои modes независимо
+  от ambient caller. Caller umask восстанавливается, существующие400/600/644 rules прежние.
+- Shared metadata пишет сам elected owner. Отдельный writer shell мог пережитьparent,
+  затем дописать в заменённый lock; реальный pause-after-pid/parent-only-kill/live-replacement/
+  resume regression воспроизвёл RED, теперь GREEN дляjournal иgeneric take. Leased exec
+  имеет child-only umask077; никакого unleased late shared-path writer не добавлено.
+- Healthy sweep ничего не пишет на USB. Наружный stale check лишь пропускает наблюдение;
+  mutation по-прежнему требует повторного stale check внутри SAME election + leased rm.
+  Healthy-tree RED→GREEN и replacement-owner race PASS. Свой choosing ticket не требует
+  повторного ls/awk; он учтён в том же256 bound и проверен в finalexec/leave. Host profile
+  enter/leave9→7 real-tool calls, но emulator budget пока НЕ доказан.
+
+Адресно sh/BusyBox1.37 ash+awk приumask022 PASS: preflight/locks/orphan/lifetime/modes/
+caller-mask restoration, stale sweep/boot/replacement race. BB reboot57.34s, legacy import/
+byte+mode downgrade91.81s, both-store legacy server188.00s, J2 5.53s; sh v1 journal5.77s.
+Addressed review этих risky deltas закрыт без оставшихся Important/Critical; общий audit
+не повторялся. Это отдельные targeted suites; новый exact CI должен проверить весь остаток.
+
+| Закрыто кодом | Private construction/owner metadata lifetime/healthy-sweep cost |
+|---|---|
+| Подтверждено | Указанные RED→GREEN + targeted sh/BB + review |
+| Блокирует software gate | Новый exact CI: resource budget и все32 cases/обе shell ветки |
+| Блокирует live | Прежний §G.4 VPN-only entry points, всеlegacy eligibility/updater quiescence, physical transport, конкретный GO и owner acceptance |
+
+Budget/test/workflow/ownership/DNS/signature/barrier guards не ослаблены. Targets78/map/
+allowlists/VERSION/feed прежние. Normal legacy/updater bridge НЕ WIRED, libs UNINSTALLED,
+packet path/client proof не установлен, router не подключался. Нет merge/live/release.
+Исторические local full FAIL(read-only /opt/var) и local Chromium SKIP не переписываются.

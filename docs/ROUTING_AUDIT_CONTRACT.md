@@ -283,3 +283,11 @@ PID-only или cached freshness. Чужой matching post не присваив
 Живое исполнение не подключено: legacy eligibility/updater bridge только подготовлены,
 normal callers/actions/новые libs не установлены. Актуальные gates и конкретная следующая
 VPN-only граница — RS7_EXECUTOR_WIRING_DESIGN.md §G.4; исторические описания выше сохранены.
+
+
+Уточнение05.11.2026 (PR38 private-mode/lifetime CI correction): shared lock metadata
+пишет elected owner, не unleased shell-child. Private constructors задают свои modes,
+восстанавливая caller umask; permissive fixture не повод ослабить ownership/read gate.
+Healthy lock observation не создаёт USB election; deletion всё равно требует fresh stale
+check внутри SAME election и leased utility. Адресные проверки не заменяют exact CI budget;
+CI42000841257 был FAIL, следующий HEAD требует собственных ворот. Live по-прежнему OFF.

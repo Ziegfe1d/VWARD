@@ -1032,6 +1032,13 @@ VERSION/feed прежние. A1/A6/A7/A10/storage и hardware остаются �
 VPN-only граница entry points/quiescence/receipts/rollback/owner acceptance — RS7§G.4;
 текущий пакет не разрешает live/merge/release. Старый model CI41815122230 не покрывает G4.
 
+05.11.2026 14:38 МСК / PR38: CI42000841257 наced666e завершён FAILURE: первый AGH
+preflight fixture(umask022/private parent) и resource budget(reconciler/housekeeping);
+updater/rehearsal, stress, Chromium SUCCESS. Исправление531fe7a: explicit private construction,
+owner-process metadata lifetime, healthy sweep без USB writes и без лишнего self-ticket ls/awk.
+Targeted RED→GREEN/review закрыты; budget/test guards неизменны, новый exact CI обязателен.
+Это не live wiring/публикация; normal legacy/updater callbacks ещё не подключены. См.RS7§G.4a.
+
 ### 4.4 Стабильность: этапы (индекс - `STABILITY.md`)
 | Этап | Выпуск | Что сделать |
 |---|---|---|
