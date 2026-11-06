@@ -840,3 +840,29 @@ DNS/ISP/Auto/manual/unknown/shared migration writes закрыты; A1/A6/A7/A10
 открыты. Никакого merge/dev/main/feed/VERSION/sequence/release/install/live wiring.
 Разовая B-задача6aeb0aa808408191877cad08d219e816 подлежит отключению после записи итога;
 старый release task не переоткрывается.
+
+
+### G.5. GO на production wiring и самостоятельный dev-кандидат (06.11.2026)
+
+**06.11.2026 — явный GO владельца на завершение общей маршрутизации и dev-выпуск**
+(поручение `VWARD_PR38_GO_Complete_And_Release_DEV_2026-11-06.md`). В PR38 разрешены
+production wiring общей snapshot→choice/membership→policy→typed plan→coordinator/
+существующие workers→readback/save→outcome цепочки, API/Панель, установка необходимых
+библиотек в точный package-map/signed состав, migration/downgrade, затем самостоятельный
+PR/merge в dev, версия, штатная production подпись/публикация и public verification после
+software gates, addressed review и проверенного отката. Прежние «только OFF», «новый GO
+перед каждым writer» и «отдельное Выпускаем» становятся историческими ТОЛЬКО в этих границах.
+Порядок внутренних этапов: сначала VPN, затем DNS/ISP/Auto, server lifecycle и остальные
+потребители; конечный результат НЕ ограничивается двумя VPN или выключенной моделью.
+Один implementer, независимый review только рискованного wiring/locks/ownership/recovery/
+миграции/package integration. Один полный CI на связанном конечном code HEAD; CI813 не
+покрывает будущий wiring, успешные проверки того же дерева не rerun. При FAIL — конкретный
+RED→GREEN без ослабления protections/budgets/signatures и новый exact CI исправленного кода.
+Роутер не подключать/не менять/не устанавливать/не перезагружать, main/stable не менять;
+выбор режимов/компонентов и hardware acceptance за владельцем. Agents Observation, ручные
+защищённые правила и удалённые владельцем SmartDNS привязки не менять. Unknown AGH POST/
+private recovery/barrier/own CAS и запрет blind replay остаются. Dev publication не hardware.
+
+Принятый OFF code168a853 / CI813 SUCCESS и docs e8f6b11 сохраняются baseline.
+Новая граница исполнения описывается в docs/superpowers/plans/2026-11-06-routing-live.md;
+это продолжение существующих контрактов F/G, не повторный аудит и не заявление публикации.

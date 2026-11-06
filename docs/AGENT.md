@@ -291,6 +291,8 @@ sh/BB1.37/staticBB1.36 + negative missing-dependency control PASS. Runtime не�
 
 06.11.2026 02:12 МСК / PR38: **OFF-подготовка закрыта по software gates**. [CI813/42109284350](https://github.com/Ziegfe1d/VWARD/actions/runs/42109284350) exact168a853bf12073e3b499002c67e2182e6ea3c7a5/tree7597f8e12418d66157b039b33ec2524efeb4ed7a: repository-consistency127532263462, updater-tests127532262882, resource-audit127532263711 **SUCCESS**; main-only127577196956 SKIPPED. Draft PR38/base dev3f4802b6574c0c7b441bf3da84e6841abb173349 совпали. Только итоговые docs[skip ci]+SHA; без повторного CI. Live/merge/release не разрешены; следующая граница VPN-only §F.3/G.4.
 
+06.11.2026 08:47 МСК / PR38 — владелец явно разрешил общую production цепочку VPN→DNS/ISP/Auto/server lifecycle/API/Панель/package migration и самостоятельный dev-выпуск после review/exact CI/rollback/public verification. Прежний OFF/отдельный GO исторический в этих границах; CI813 остаётся baseline и не rerun. Router/main/stable/режимы устройства вне разрешения. Работа начата с e8f6b11, свежий dev3f4802b6574c0c7b441bf3da84e6841abb173349 подтверждён.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -862,6 +864,25 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   Разовая B-задача6aeb0aa808408191877cad08d219e816 подлежит отключению после записи итога;
   старый release task не переоткрывается.
 
+- 06.11.2026 08:47 МСК / [Владелец, поручение 06.11; Агент фиксирует] / PR38 новое GO: **06.11.2026 — явный GO владельца на завершение общей маршрутизации и dev-выпуск**
+  (поручение `VWARD_PR38_GO_Complete_And_Release_DEV_2026-11-06.md`). В PR38 разрешены
+  production wiring общей snapshot→choice/membership→policy→typed plan→coordinator/
+  существующие workers→readback/save→outcome цепочки, API/Панель, установка необходимых
+  библиотек в точный package-map/signed состав, migration/downgrade, затем самостоятельный
+  PR/merge в dev, версия, штатная production подпись/публикация и public verification после
+  software gates, addressed review и проверенного отката. Прежние «только OFF», «новый GO
+  перед каждым writer» и «отдельное Выпускаем» становятся историческими ТОЛЬКО в этих границах.
+  Порядок внутренних этапов: сначала VPN, затем DNS/ISP/Auto, server lifecycle и остальные
+  потребители; конечный результат НЕ ограничивается двумя VPN или выключенной моделью.
+  Один implementer, независимый review только рискованного wiring/locks/ownership/recovery/
+  миграции/package integration. Один полный CI на связанном конечном code HEAD; CI813 не
+  покрывает будущий wiring, успешные проверки того же дерева не rerun. При FAIL — конкретный
+  RED→GREEN без ослабления protections/budgets/signatures и новый exact CI исправленного кода.
+  Роутер не подключать/не менять/не устанавливать/не перезагружать, main/stable не менять;
+  выбор режимов/компонентов и hardware acceptance за владельцем. Agents Observation, ручные
+  защищённые правила и удалённые владельцем SmartDNS привязки не менять. Unknown AGH POST/
+  private recovery/barrier/own CAS и запрет blind replay остаются. Dev publication не hardware.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -1004,6 +1025,8 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
 - 06.11.2026 00:03 МСК / PR38: полный consistency и updater/rehearsal на2092783 приняты CI812; resource budget ещё отказал(updater62>61). Minimal directory cost fix и targeted54/19 PASS не заменяют новый exact all3mandatory CI. Local beta cross-check SKIP, full-local FAIL/Chromium localSKIP сохранены. Следующая live граница VPN-only GO/legacy fences/quiescence/physical transport/hardware, не merge/release.
 
 - 06.11.2026 02:12 МСК / PR38: вопрос exact-tree software gate закрыт CI813/168a853 — все3 mandatory SUCCESS, optional main-only SKIPPED. Это закрывает предыдущие запросы нового CI в истории, но не live wiring/аппаратную приёмку. VPN-only GO §F.3/G.4, ВСЕ legacy fences + updater quiescence ДОwrite, physical completion/own rollback/schema и одна owner acceptance остаются открытой границей. DNS/ISP/Auto/manual/unknown/shared migration writes закрыты; A1/A6/A7/A10/storage/hardware открыты. Full-local FAIL/Chromium SKIP/beta-marker SKIP сохраняются. Merge/release/router не выполнялись.
+
+- 06.11.2026 08:47 МСК / PR38: permission gate на wiring/dev-выпуск снят явным поручением 06.11.2026; повторное согласование внутренних этапов не нужно. Технические gates — все scoped legacy fences/real transport completion/координатор, полный режимный цикл и installed layout, fault matrix, адресный review, конечный CI, rollback и public artifacts. Hardware acceptance остаётся за владельцем, реальных новых router outputs нет.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 
