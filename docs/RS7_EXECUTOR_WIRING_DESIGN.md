@@ -866,3 +866,29 @@ private recovery/barrier/own CAS и запрет blind replay остаются. 
 Принятый OFF code168a853 / CI813 SUCCESS и docs e8f6b11 сохраняются baseline.
 Новая граница исполнения описывается в docs/superpowers/plans/2026-11-06-routing-live.md;
 это продолжение существующих контрактов F/G, не повторный аудит и не заявление публикации.
+
+**Checkpoint §G.5 — native transport / first-state lifetime (06.11.2026 21:00 МСК).**
+
+Codec77adde15a5baf99012aa6e3351c6718a6219bb6 связывает SAME pipeline/locked worker
+с actual NDMC publisher PID/start/BOOT, real completion/readback/save и canonical metadata.
+Final ROOT transfer observation0 выполняет actual same-PID publisher внутри SAME CHANGE
+cooperative election; sourcegone+inode+seal+ACK перед actual legacy import/state-set/versionlast.
+Pending старого service txn отказывает до ROOT, старый owner recovery доступен. Parent-only
+kill/lateRoot0 и empty/matching/extra foreignRoot не дают adoption/replay; updater повторяет
+quiet gate после quiescence. Kernel zombie не execution authority, live/unknown остаются fenced.
+Explicit native inspect не делает transport IO; unresolved request запрещает compensate,
+inverse rc75 никогда не становится ACK по совпавшим bytes.
+
+SH native 1/2/3 VPN transitions/repeats/off/missing target, SH+BB first bootstrap/bundled
+catalog/private proof/manual preservation/lifetime/actor/Auto old metadata fences/recovery PASS.
+Native last preflight сохранён при снижении first-service read count34→≤24; foreign-after-
+prediction и foreign-after-ACK закрываются свежим CAS/sealed Gi. Ранее конкурентные45s FAIL
+не скрыты, лимит не увеличен; current serial SH matrix PASS, не MIPS. DATA modes/import/
+byte+mode downgrade SH и base updater38 PASS. Addressed review дельт без новых Important/Critical;
+не общий аудит и не приёмка остальных writers. Полные доказательства/ограничения — AGENT§3.
+
+Это промежуточный uninstalled checkpoint: live AGH/store lifecycle/M/S/A/common API/Panel,
+все old callbacks, signed package ABI/downgrade и новый exact CI/rollback/dev-public gates
+ещё открыты. Нельзя публиковать его как завершённую общую маршрутизацию. Исторические local
+full consistency FAIL/Chromium SKIP/beta cross-check SKIP сохраняются. CI813 не повторялся,
+новый полный CI/merge/release/router не выполнялись; полный owner GO остаётся действующим.

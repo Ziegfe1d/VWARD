@@ -293,6 +293,8 @@ sh/BB1.37/staticBB1.36 + negative missing-dependency control PASS. Runtime не�
 
 06.11.2026 08:47 МСК / PR38 — владелец явно разрешил общую production цепочку VPN→DNS/ISP/Auto/server lifecycle/API/Панель/package migration и самостоятельный dev-выпуск после review/exact CI/rollback/public verification. Прежний OFF/отдельный GO исторический в этих границах; CI813 остаётся baseline и не rerun. Router/main/stable/режимы устройства вне разрешения. Работа начата с e8f6b11, свежий dev3f4802b6574c0c7b441bf3da84e6841abb173349 подтверждён.
 
+06.11.2026 21:00 МСК / PR38 production wiring: codec77adde15a5baf99012aa6e3351c6718a6219bb6 — fixed native adapter общего J2, metadata-only first bootstrap/import, actual publisher lifetime и Auto pre-local-write fences. Адресные fixtures/review закрывают этот scope; libs ещё UNINSTALLED/endpoint не подключён, общий пакет не готов. Старый CI813 не повторялся; нового полного CI/публикации/роутера нет.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -883,6 +885,39 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   защищённые правила и удалённые владельцем SmartDNS привязки не менять. Unknown AGH POST/
   private recovery/barrier/own CAS и запрет blind replay остаются. Dev publication не hardware.
 
+- 06.11.2026 21:00 МСК / [Агент] / PR38 native checkpoint c77adde15a5baf99012aa6e3351c6718a6219bb6:
+  SAME choice/policy/typed plan/J2 и существующий locked console worker связаны с отдельным
+  actual NDMC process: PID/start/BOOT lease, same-PID exec, ACK+fresh readback+save;
+  DATA receipt не выдаётся за native ACK. RAM observations, private durable J2 evidence.
+  ROOT создаётся observation0 под EDIT+CHANGE через final publisher в SAME CHANGE election;
+  parent требует sourcegone/inode/seal+ACK, затем actual legacy importer/state-set/versionlast.
+  Pre-B pending отказывает ДО ROOT; actual old console service-recover accept остаётся доступен.
+  Bundled catalog fallback/private exact proof import сохранён; manual group/все старые bytes+modes
+  не меняются. Parent-only death/lateRoot0/empty+matching+extra foreignRoot: без adoption/replay,
+  updater после quiescence блокирует поздний неизвестный ROOT. Zombie не execution authority;
+  live/unknown kernel identity блокирует. Inspect native pending без transport; compensate
+  unresolved request отказывает, inverse rc75 не превращается в matching-bytes ACK.
+  Cache prediction не отменяет последний actual native preflight; ACK handoff same worker;
+  parent scope hash привязан к sealed Gi. First service running-config reads RED34→GREEN≤24,
+  последний guard сохранён; actual foreign edit после prediction/ACK сохраняется/даёт unknown.
+  Serial SH native 1/2/3 VPN A→B→C→A/repeat/off/missing-target PASS: actual fixture route,
+  startup/registry/proof, manual preservation; off != ISP. Ранее 45s failures под конкурентной
+  нагрузкой не скрыты, timeout не повышен; это не MIPS/аппаратная скорость.
+  SH+BB1.37 bootstrap(bundled/import/pending), root publisher lifetime, actual actor lifetime/IFS,
+  actual four old Auto restore/add/hint/persist handoff и native recovery PASS. Positive unrelated
+  domain control доказывает рабочий loader/reader, а не отказ отсутствующей зависимости.
+  Native lost ACK/save failure/parent-only kill до+после записи SH PASS на этом checkpoint;
+  прежние BB native/fault результаты на своих checkpoints. DATA modes/foreign mode/import+
+  guarded byte/mode exact downgrade SH PASS; base updater simulations38/38 PASS с новыми guards.
+  Syntax Python/sh/BB, no-new ShellCheck diagnostic versus cb8, privacy/diff/SHA PASS.
+  Addressed reviewer native/ROOT/actor/recovery+Auto delta: новых Important/Critical нет,
+  тесты запускал implementer; весь backwriter/migration gate этим не закрыт.
+  Новые libs пока UNINSTALLED, AGH live adapter ещё отказывает при наличии AGH; это временная
+  незавершённость, не продуктовый fallback. Полные M/S/A/DNS/ISP/Auto/lifecycle, остальные old
+  writers, реальные API/Panel/package/ABI downgrade, exact CI/rollback/public dev ещё открыты.
+  Historical full-local consistency FAIL(read-only /opt/var), Chromium localSKIP(noPlaywright),
+  beta cross-check SKIP(origin/beta недоступен) сохранены. Router не подключался/не менялся.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -1027,6 +1062,8 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
 - 06.11.2026 02:12 МСК / PR38: вопрос exact-tree software gate закрыт CI813/168a853 — все3 mandatory SUCCESS, optional main-only SKIPPED. Это закрывает предыдущие запросы нового CI в истории, но не live wiring/аппаратную приёмку. VPN-only GO §F.3/G.4, ВСЕ legacy fences + updater quiescence ДОwrite, physical completion/own rollback/schema и одна owner acceptance остаются открытой границей. DNS/ISP/Auto/manual/unknown/shared migration writes закрыты; A1/A6/A7/A10/storage/hardware открыты. Full-local FAIL/Chromium SKIP/beta-marker SKIP сохраняются. Merge/release/router не выполнялись.
 
 - 06.11.2026 08:47 МСК / PR38: permission gate на wiring/dev-выпуск снят явным поручением 06.11.2026; повторное согласование внутренних этапов не нужно. Технические gates — все scoped legacy fences/real transport completion/координатор, полный режимный цикл и installed layout, fault matrix, адресный review, конечный CI, rollback и public artifacts. Hardware acceptance остаётся за владельцем, реальных новых router outputs нет.
+
+- 06.11.2026 21:00 МСК / PR38 c77adde: first native binding/bootstrap и адресные lifetime/fault/recovery software gates пройдены на fixtures, не на устройстве. Общая live цепочка/API/package ещё не подключена; AGH отсутствует в этом native checkpoint. Auto старые direct writers защищены, common A handoff/остальные callbacks пока открыты. Разрешение полного GO действует; продолжение — оба DNS stores, все источники/потребители и migration/package closure, затем новый exact CI/rollback/dev/public verification. Ни partial native-only, ни OFF prototype не выпускать.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 
