@@ -892,3 +892,33 @@ byte+mode downgrade SH и base updater38 PASS. Addressed review дельт бе�
 ещё открыты. Нельзя публиковать его как завершённую общую маршрутизацию. Исторические local
 full consistency FAIL/Chromium SKIP/beta cross-check SKIP сохраняются. CI813 не повторялся,
 новый полный CI/merge/release/router не выполнялись; полный owner GO остаётся действующим.
+
+**Checkpoint §G.5 — actual DNS transports / HTTP lifetime (07.11.2026 02:46 МСК).**
+
+Codee863946406da16a4e5c5f687bdaf2278cf35fe4c: SAME existing DNS workers/J2 используют
+fixed native HTTPS compiler и actual leased NDMC/curl HTTP (PID/start/BOOT, same-PID exec,
+real transport completion+fresh readback, pending не receipt ACK). Native DNS→VPN→ISP→DNS→Auto
+SH и realHTTP AGH DNS/repeat→VPN→ISP→DNS→Auto SH+BB PASS. Foreign same-URL AGH neighbour,
+plain/settings/manual native сохранены. Keenetic capacity8/foreign same-URL refusal и real
+lost-first/final-reply guards PASS; final-matching-image negative control доказывает запрет
+premature ownership до позднего save refusal. HTTP loss/killONLYC before+after serverwrite
+SH+BB: actual curl lease, old/new/updater fences, before/planned/pending сохранены, no replay.
+
+7AGH helper definitions перемещены BYTE-EXACT control→common, старые callers работают.
+Первый observer менял legacy agh-domains вместе с API image: это новое derived input,
+не повод отключать Gi. Только exact projection ОБОИХ SAME sealed JSON+hash/mode600/uid
+может разрешить agh-label delta; other-field CAS прежний, tamper/mutation control PASS.
+Addressed review нашёл/закрыл Important collateral ADS registry merge при source common:
+actual configured-custom-source RED→GREEN, common import больше не пишет, все17 old callers
+явно вызывают прежний merge после source, без envskip. SH+BB readonly/refused/oldCLI controls
+PASS; review не является новым полным аудитом/не принимает открытые integration gates.
+
+Old AGH SmartDNS/settings/ADSconsole и restore safety с owned fixture backup dir PASS;
+первый local restore FAIL был ДО операции из-за read-only /opt/var, не исчезает из истории.
+Full DATA DNS SH suite и syntax/privacy/no-new ShellCheck/SHA1403 PASS. Новые cases в runner,
+не новый full CI. New live libs UNINSTALLED, map/allowlists78/workflow/budgets/VERSION/feed
+прежние; current adapters не готовый пользовательский продукт. Actual CLI/API/Panel,
+все old callbacks/fresh inputs/default+category selectors, lifecycle/ABI/Root0 recovery/
+downgrade и новый exact CI/rollback/dev/public ещё нужны. AGH read failure prototype пока
+глобально failclosed; selective unrelated case открыт. Historical local FAIL/SKIP остаются.
+Router/main/dev/release не менялись, client path unknown, полный owner GO действует.

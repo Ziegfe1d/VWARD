@@ -295,6 +295,8 @@ sh/BB1.37/staticBB1.36 + negative missing-dependency control PASS. Runtime не�
 
 06.11.2026 21:00 МСК / PR38 production wiring: codec77adde15a5baf99012aa6e3351c6718a6219bb6 — fixed native adapter общего J2, metadata-only first bootstrap/import, actual publisher lifetime и Auto pre-local-write fences. Адресные fixtures/review закрывают этот scope; libs ещё UNINSTALLED/endpoint не подключён, общий пакет не готов. Старый CI813 не повторялся; нового полного CI/публикации/роутера нет.
 
+07.11.2026 02:46 МСК / PR38 wiring checkpoint e863946406da16a4e5c5f687bdaf2278cf35fe4c: существующие DNS workers связаны с actual leased NDMC/curl HTTP, обоими stores и общим J2. Native/AGH циклы и unknown/lifetime fixtures PASS; Important побочной ADS записи закрыт RED→GREEN. API/Panel/all old callbacks/package ещё не подключены, кандидат не готов; полного нового CI/merge/release/router нет.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -918,6 +920,46 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   Historical full-local consistency FAIL(read-only /opt/var), Chromium localSKIP(noPlaywright),
   beta cross-check SKIP(origin/beta недоступен) сохранены. Router не подключался/не менялся.
 
+- 07.11.2026 02:46 МСК / [Агент] / PR38 DNS transport e863946406da16a4e5c5f687bdaf2278cf35fe4c:
+  SAME typed plan/J2/существующие helpers используют fixed native HTTPS compiler и actual
+  same-PID NDMC/curl publishers PID/start/BOOT. HTTP credentials — private curl config,
+  request body/path закрыты; subscription/DoH endpoint не опрашивается. Receipt != ACK.
+  Existing7AGH function bodies перенесены BYTE-EXACT из control.sh в signed common.sh;
+  ни nested CLI, ни новый backend. Actual helper lock/CAS/asserts сохранены.
+  Native Keenetic DNS→VPN→ISP→DNS→Auto SH PASS; loss of first/final reply, capacity8,
+  foreign-after-own same URL refusal PASS. Real last-command lostACK negative control
+  показал premature claims до позднего save refusal без post-worker request guard;
+  с guard выбор/proofs не публикуются, pending сохраняется, replay/inverse запрещены.
+  Actual AGH loopback HTTP+real curl, DNS/repeat→VPN→ISP→DNS→Auto SH+BB1.37 PASS:
+  same-URL foreign neighbour, plain resolver/settings, native readback/save сохранены.
+  AGH-only действие не записывает/не сохраняет unrelated native config. Dispatch lease
+  принадлежит actual curl executable, не shell. SH+BB lostHTTPreply/killONLYcoordinator
+  до+после serverwrite: old/new/updater fenced, before/planned/pending остаются после
+  позднего ответа, без ACK/adoption/replay. Это software fixture, не hardware acceptance.
+  Первый HTTP prototype дал input-changed-during-step: actual observer менял и agh-domains.
+  Разрешена только доказанная derived agh-delta из ОБОИХ SAME sealed API JSON: exact hash,
+  private mode600/uid; другие JSON fields/attrs/CAS прежние. SH tamper+label-only negative
+  control PASS, нельзя просто allowlist agh и скрыть чужую подмену input.
+  Addressed review нашёл Important: source common.sh выполнял top-level custom registry
+  merge вне CONTROL/J2. Configured-custom-source observation реально воспроизвела запись.
+  В common только definitions/config, SAME merge явно вызывают все17 прежних entrypoints
+  сразу после source (прежний порядок); env bypass не добавлен. SH+BB actual observation+
+  refused missingVPN не трогают ADS state; actual old CLI сохраняет initialization.
+  Review закрыл Important; иных доказанных Important/Critical в просмотренной дельте нет,
+  reviewer тесты не запускал, остальные gates не принимал. Production guards не ослаблялись.
+  Совместимость: old AGH SmartDNS/settings и ADSconsole PASS, old restore safety PASS при
+  owned external backup dir. Первый old restore local FAIL был ДО POST (/opt/var read-only,
+  отсутствовал fixture backup env), не native rollback corruption; тест/asserts не менялись.
+  Full DATA DNS suite SH PASS: оба stores/transitions/repeats/unknown/noinverse/owninverse/
+  unrelated-unavailable-AGH/capacity8. Syntax/Python/sh/BB/no-new ShellCheck/privacy/diff/
+  SHA1403 PASS. Runner новые cases зарегистрировал, workflow/budgets/maps/allowlists78 прежние.
+  Все новые live libs пока UNINSTALLED, entrypoint/API/Panel не wired. Реальные all-old
+  callbacks, fresh canonical inputs/selectors/first bootstrap recovery, server lifecycle,
+  selective unrelated AGH failure, installed ABI/downgrade и connected acceptance открыты.
+  CI813 не перечитывался/не переносится; новый full exact CI будет после complete package.
+  Historical full-local consistency FAIL/Chromium localSKIP/beta cross-check SKIP сохранены.
+  Dev/main/VERSION/feed/sequence/release/роутер не менялись; Agents Observation неизменны.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -1064,6 +1106,8 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
 - 06.11.2026 08:47 МСК / PR38: permission gate на wiring/dev-выпуск снят явным поручением 06.11.2026; повторное согласование внутренних этапов не нужно. Технические gates — все scoped legacy fences/real transport completion/координатор, полный режимный цикл и installed layout, fault matrix, адресный review, конечный CI, rollback и public artifacts. Hardware acceptance остаётся за владельцем, реальных новых router outputs нет.
 
 - 06.11.2026 21:00 МСК / PR38 c77adde: first native binding/bootstrap и адресные lifetime/fault/recovery software gates пройдены на fixtures, не на устройстве. Общая live цепочка/API/package ещё не подключена; AGH отсутствует в этом native checkpoint. Auto старые direct writers защищены, common A handoff/остальные callbacks пока открыты. Разрешение полного GO действует; продолжение — оба DNS stores, все источники/потребители и migration/package closure, затем новый exact CI/rollback/dev/public verification. Ни partial native-only, ни OFF prototype не выпускать.
+
+- 07.11.2026 02:46 МСК / PR38 e863946: physical transport adapters обоих DNS stores проверены на fixtures, но общая пользовательская цепочка ещё не завершена. Следующие технические gates — actual CLI/API/Panel + свежие canonical inputs/auto selectors, все legacy callbacks, lifecycle/installed ABI/recovery/downgrade, затем новый exact CI/rollback/public dev. AGH read failure пока глобально failclosed в prototype; selective unrelated behavior ещё нужен. Signed78 targets/map прежние, новые libs не установлены. Разрешение полного GO действует, partial native/DNS-only пакет не выпускать; hardware/роутер не принимались.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 

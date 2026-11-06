@@ -75,3 +75,16 @@
 - [ ] Merge expected head into dev after gates, verify merged runtime tree; standard dev release workflow/private signing inside workflow only, no docs push during its feed push.
 - [ ] Verify actual public feeds/package/production signature/SHA/version/sequence/targets/v2 blobs; dispatch is not publication. Append factual SHA/run/results and final PR report.
 - [ ] One owner-run Termius command (backup, standard signed updater/pending, timeout only safe reads/downloads, full standard output/abort). One actual VPN hardware checklist and return/manual preservation; multi-VPN hardware only when available.
+
+
+## Recorded implementation checkpoints (not integration completion)
+
+- c77adde / docs a57b198: actual native publisher/ACK, guarded observation0/import,
+  native1/2/3VPN + loss/signals/firstROOT/actor/updater fixtures. Addressed review closed.
+- e863946: actual leased NDMC HTTPS and curl/HTTP adapters of existing DNS workers;
+  both-store mode cycles, real HTTP loss/parent-only death, exact derived observations,
+  configured-custom-source no-IO import and oldCLI compatibility verified. Addressed
+  collateral-write Important closed. AGENT§3/RS7G.5 record exact PASS/FAIL/SKIP limits.
+- Still open: all-old writers and actual user entrypoints/Panel/fresh inputs/selectors,
+  server lifecycle/installed closure/Root0 recovery/ABI downgrade, full connected matrix,
+  new exact CI/rollback/public dev release. These checkpoints are not a partial release.
