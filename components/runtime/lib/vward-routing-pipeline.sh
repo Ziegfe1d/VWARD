@@ -604,6 +604,8 @@ vrb_activation() { printf 'off\n'; }
 vrb_execution_context() { vrb_inside=locked-emulator; }
 vrb_transport_refresh() { cp "$(vrb_native_path)" "$vrb_e/running-config"; }
 vrb_transport_saved() { cmp -s "$(vrb_native_path)" "$vrb_e/saved.cfg"; }
+vrb_transport_requests_quiet() { return 0; }
+vrb_scope_derived_deltas() { return 0; }
 
 vrb_fresh_stage() {
     # One coherent snapshot per logical scope delta, not per include command.
@@ -645,6 +647,7 @@ vrb_delta_valid() (
         *) return 2 ;;
     esac
     vrb_probe_deltas "$@" > "$1/.probe-deltas" || return 3
+    vrb_scope_derived_deltas "$@" >> "$1/.probe-deltas" || return 3
     awk -v allowed="$vrb_allowed" -v uid="$(id -u)" '
         FILENAME==ARGV[1] {probe[$1]=1;next}
         FILENAME==ARGV[2] {before_n[$1]++;k=$1 SUBSEP before_n[$1];before[k]=$1 " " $2 " " $3 " " $6 " " $7;bmode[k]=$6;buid[k]=$7;label[k]=$1;next}
@@ -778,6 +781,7 @@ vrb_execute2() {
         fi
         vward_journal2_begin "$vrb_j" "$vrb_op" "$vrb_n" "$vrb_gen" "$vrb_t/current.hash" || return 75
         vrb_rc=0;vrb_write_scope "$vrb_kind" "$vrb_id" "$vrb_n" post || vrb_rc=$?
+        vrb_transport_requests_quiet || vrb_rc=75
         vrb_transport_refresh || return 1
         vrb_gen=$(vrb_fresh_stage) || { vward_journal2_unknown "$vrb_j" "$vrb_op" readback-unavailable;return 3; }
         if ! vrb_delta_valid "$vrb_t/before" "$vrb_t/fresh" "$vrb_kind" "$vrb_id"; then

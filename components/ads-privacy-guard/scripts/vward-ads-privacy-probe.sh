@@ -9,6 +9,7 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo "FAIL: common library not found" >&2; exit 1; }
 . "$LIB"
+ads_source_registry_merge
 
 DOMAIN="$(ads_normalize_domain "${1:-}")"
 [ -n "$DOMAIN" ] || { echo "Usage: $0 domain" >&2; exit 2; }

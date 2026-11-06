@@ -12,7 +12,7 @@ with Fixture() as f:
     state.write_text(json.dumps(baseline));pairs.write_text('x.example\t'+uri+'\n')
     functions=f.p/'functions'
     functions.write_text(''.join(function_source(common,n) for n in ('ads_epoch','ads_num','ads_pid_start','ads_read_line','ads_lock_create','ads_lock_acquire','ads_lock_release'))+
-                         ''.join(function_source(control,n) for n in ('agfail','aget','agh_unchanged','agh_evidence','agh_guarded_back','valid_url','ads_smartdns_locked')))
+                         ''.join(function_source(common,n) for n in ('agfail','aget','agh_unchanged','agh_evidence','agh_guarded_back','valid_url','ads_smartdns_locked')))
     shim=f.p/'bin';shim.mkdir()
     if os.environ.get('RS6_BUSYBOX'):(shim/'awk').symlink_to(Path(os.environ['RS6_BUSYBOX']).resolve())
     env=f.env|{'PATH':str(shim)+':'+os.environ['PATH']}

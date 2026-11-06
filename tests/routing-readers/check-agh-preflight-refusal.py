@@ -3,7 +3,7 @@
 from fixture import PipelineFixture,ROOT,function_source
 with PipelineFixture() as f:
     f.configure_dns('agh')
-    source=ROOT/'components/ads-privacy-guard/scripts/vward-ads-privacy-control.sh'
+    source=ROOT/'components/ads-privacy-guard/lib/vward-ads-privacy-common.sh'
     real=function_source(source,'agh_unchanged').replace('agh_unchanged() {','agh_unchanged_real() {',1)
     hook=real+'''
     agh_unchanged() {

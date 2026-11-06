@@ -35,7 +35,7 @@ vrb_dispatch_scope() (
             [ "$2" = "$(vrb_native_path)" ] && [ "$1" != - ] || return 75
             vrb_https_scope "$1" > "$vrb_t/dispatch.scope.$vrb_pub_pid" || return 75 ;;
         dns-scope:agh)
-            [ "$2" = "$vrb_e/agh.json" ] && [ "$1" != - ] || return 75
+            [ "$2" = "$(vrb_agh_path)" ] && [ "$1" != - ] || return 75
             vrb_agh_scope "$1" > "$vrb_t/dispatch.scope.$vrb_pub_pid" || return 75 ;;
         saved:routing-state)
             case $2 in "$vrb_e/decision/"*.tsv) ;; *) return 75 ;; esac

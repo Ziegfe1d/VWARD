@@ -232,6 +232,9 @@ vrb_agh_model_session() (
 # Compile from exactly the same actual worker and private model that execution
 # uses. Only cloned state changes here. Parameters and each intermediate image
 # are available BEFORE the parent journal can authorise a backend mutation.
+vrb_agh_path() { printf '%s/agh.json\n' "$vrb_e"; }
+vrb_agh_session() { vrb_agh_model_session "$@"; }
+
 vrb_agh_predict() (
     umask 077
     [ "$#" -eq 4 ] && vr2_stage_valid "$1" && vr2_private_dir "$4" || return 2
@@ -258,25 +261,64 @@ vrb_agh_predict() (
 
 # Fixed native DATA parser. The existing console helpers construct these
 # commands; neither a router address nor executable can be selected here.
-vrb_emu_dns_command() (
-    : "${vrb_e:?}" "${vrb_t:?}"
-    vrb_worker_context || return 75
-    vrb_ed_cmd=$1
-    case $vrb_ed_cmd in
-        'dns-proxy no https upstream '*) vrb_ed_uri=${vrb_ed_cmd#dns-proxy no https upstream };vrb_ed_add= ;;
-        'dns-proxy https upstream '*) vrb_ed_add=${vrb_ed_cmd#dns-proxy };vrb_ed_uri= ;;
+# Pure physical prediction for the SAME compiled Keenetic DNS worker. The
+# durable journal authorizes the resulting scope hash, never this parser alone.
+vrb_native_dns_compile() (
+    umask 077
+    [ "$#" -eq 4 ] && [ "${#1}" -le 2048 ] && vrj2_file "$2" &&
+        vrb_single_link "$2" && vrj2_file "$3" && vrj_dir "$4" || return 2
+    vrb_nd_command=$1;vrb_nd_cfg=$2;vrb_nd_expected=$3;vrb_nd_work=$4
+    # Grammar is data, not shell tokens/eval. This excludes extra commands,
+    # ambiguous whitespace, native switches and URL-wide delete suffix guesses.
+    printf '%s\n' "$vrb_nd_command" | LC_ALL=C awk '
+        function ident(s){return length(s)<=64 && s~/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/}
+        function url(s,a,n,h,p){
+            if(length(s)>300 || s!~/^https:\/\/[A-Za-z0-9.:-]+\/[A-Za-z0-9._~\/%+=&?-]*$/)return 0
+            h=substr(s,9);p=index(h,"/");h=substr(h,1,p-1);n=split(h,a,":")
+            return n<=2 && a[1]!="" && (n==1 || (a[2]~/^[0-9]+$/ && a[2]+0>0 && a[2]+0<=65535))
+        }
+        function domain(s,a,n,i){
+            if(length(s)>253 || s!~/^[a-z0-9.-]+$/)return 0
+            n=split(s,a,".");if(n<2 || a[n]~/^[0-9]+$/)return 0
+            for(i=1;i<=n;i++)if(length(a[i])>63 || a[i]!~/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/)return 0
+            return 1
+        }
+        {if(NR!=1 || $0~/[\t\r]/)bad=1
+         line=$1;for(i=2;i<=NF;i++)line=line " " $i;if(line!=$0)bad=1
+         if(NF==5 && $1=="dns-proxy" && $2=="no" && $3=="https" && $4=="upstream" && url($5))ok=1
+         if($1=="dns-proxy" && $2=="https" && $3=="upstream" && url($4)) {
+             i=5;dnsm=0
+             if($i=="dnsm"){dnsm=1;i++}
+             if($i=="on" && ident($(i+1)))i+=2
+             if(!dnsm && $i=="dnsm")i++
+             if(i+1==NF && $i=="domain" && domain($(i+1)))ok=1
+         }}
+        END{exit bad || !ok}' || return 2
+    case $vrb_nd_command in
+        'dns-proxy no https upstream '*) vrb_nd_uri=${vrb_nd_command#dns-proxy no https upstream };vrb_nd_add= ;;
+        'dns-proxy https upstream '*) vrb_nd_add=${vrb_nd_command#dns-proxy };vrb_nd_uri= ;;
         *) return 2 ;;
     esac
-    vrb_capture_image "$(vrb_native_path)" "$vrb_t/config.before" || return 75
-    vrb_https_scope "$vrb_t/config.before" > "$vrb_t/dns.before" || return 75
-    if [ "$vrb_role" = inverse ]; then vrb_ed_expected=$vrb_t/dns.inverse.expected
-    else vrb_ed_expected=$vrb_t/dns.expected;fi
-    cmp -s "$vrb_t/dns.before" "$vrb_ed_expected" || return 75
-    awk -v u="$vrb_ed_uri" -v add="$vrb_ed_add" '
+    vrb_nd_before=$(vr2_hash "$vrb_nd_cfg") || return 75
+    cat "$vrb_nd_cfg" > "$vrb_nd_work/config.before" || return 1
+    [ "$(vr2_hash "$vrb_nd_work/config.before")" = "$vrb_nd_before" ] &&
+        [ "$(vr2_hash "$vrb_nd_cfg")" = "$vrb_nd_before" ] || return 75
+    vrb_https_scope "$vrb_nd_work/config.before" > "$vrb_nd_work/dns.before" || return 75
+    cmp -s "$vrb_nd_work/dns.before" "$vrb_nd_expected" || return 75
+    awk -v u="$vrb_nd_uri" -v add="$vrb_nd_add" '
         /^dns-proxy$/ {dns=1;print;if(add!="")print "    " add;next}
         /^[^ \t]/ {dns=0}
         dns && $1=="https" && $2=="upstream" && u!="" && $3==u {next}
-        {print}' "$vrb_t/config.before" > "$vrb_t/config.next" || return 1
+        {print}' "$vrb_nd_work/config.before" > "$vrb_nd_work/config.next" || return 1
+    vrb_https_scope "$vrb_nd_work/config.next" > "$vrb_nd_work/dns.next"
+)
+
+vrb_emu_dns_command() (
+    : "${vrb_e:?}" "${vrb_t:?}"
+    vrb_worker_context || return 75
+    if [ "$vrb_role" = inverse ]; then vrb_ed_expected=$vrb_t/dns.inverse.expected
+    else vrb_ed_expected=$vrb_t/dns.expected;fi
+    vrb_native_dns_compile "$1" "$(vrb_native_path)" "$vrb_ed_expected" "$vrb_t" || return $?
     vrb_publish "$vrb_t/config.next" "$(vrb_native_path)" "$(vr2_hash "$vrb_t/config.before")" || return 75
     [ ! -e "$vrb_e/dns-lost" ] || return 28
 )
@@ -306,6 +348,7 @@ vrb_dns_write() (
                 doh_remove_url "$vrb_dw_line" "$vrb_dw_value" "$vrb_t/doh.before" || return 3
             elif [ "$vrb_dw_action" = add ]; then ndm "dns-proxy $vrb_dw_value" || :
             else return 2;fi
+            vrb_transport_requests_quiet || return 75
             vrb_scope_read dns-scope keenetic "$vrb_t/current" || return 3
             cmp -s "$vrb_t/current" "$vrb_dw_dir/prefix.$vrb_dw_i" || return 3
             cp "$vrb_t/current" "$vrb_t/dns.expected" || return 1
@@ -319,7 +362,7 @@ vrb_dns_write() (
             vrb_dw_work=$vrb_j/$vrb_op/dns-evidence/call.$vrb_dw_i
             vrb_dw_evidence=$vrb_j/$vrb_op/dns-evidence/evidence.$vrb_dw_i
             mkdir "$vrb_dw_work" "$vrb_dw_evidence" || return 1
-            vrb_agh_model_session "$vrb_e/agh.json" "$(cat "$vrb_dw_dir/mode.$vrb_dw_i")" \
+            vrb_agh_session "$(vrb_agh_path)" "$(cat "$vrb_dw_dir/mode.$vrb_dw_i")" \
                 "$vrb_dw_dir/params.$vrb_dw_i" "$vrb_dw_work/taken" "$vrb_dw_work" "$vrb_dw_evidence" "$vrb_e" || return 3
             [ ! -e "$vrb_dw_evidence/request.pending" ] || return 3
             vrb_scope_read dns-scope agh "$vrb_t/current" || return 3
@@ -339,7 +382,7 @@ vrb_dns_inverse() (
         mkdir "$vrb_di_work/call" "$vrb_di_work/evidence" || return 1
         vrb_scope_read dns-scope agh "$vrb_t/check" || return 3
         cmp -s "$vrb_t/check" "$vrb_t/current" || return 75
-        vrb_agh_model_session "$vrb_e/agh.json" guarded-back "$vrb_t/pre.$2" "$vrb_t/current" \
+        vrb_agh_session "$(vrb_agh_path)" guarded-back "$vrb_t/pre.$2" "$vrb_t/current" \
             "$vrb_di_work/call" "$vrb_di_work/evidence" "$vrb_e" || return 3
     elif [ "$1" = keenetic ]; then
         cp "$vrb_t/current" "$vrb_t/dns.inverse.expected" || return 1
@@ -353,6 +396,7 @@ vrb_dns_inverse() (
             DOH_ALLOWED=$vrb_t/dns.inverse.expected;export DOH_ALLOWED
             awk -v u="$vrb_di_uri" '$3!=u' "$vrb_t/dns.inverse.expected" > "$vrb_t/dns.inverse.next"
             doh_remove_url "$vrb_di_line" "$vrb_di_uri" "$vrb_t/doh.inverse.before" || return 3
+            vrb_transport_requests_quiet || return 75
             mv "$vrb_t/dns.inverse.next" "$vrb_t/dns.inverse.expected" || return 1
         done < "$vrb_t/dns.inverse.urls"
         awk 'FILENAME==ARGV[1]{seen[$0]=1;next}!($0 in seen){print}' "$vrb_t/dns.inverse.expected" "$vrb_t/pre.$2" > "$vrb_t/dns.inverse.adds"
@@ -361,6 +405,7 @@ vrb_dns_inverse() (
             cmp -s "$vrb_t/check" "$vrb_t/dns.inverse.expected" || return 75
             { cat "$vrb_t/dns.inverse.expected";printf '%s\n' "$vrb_di_line"; } | LC_ALL=C sort > "$vrb_t/dns.inverse.next"
             ndm "dns-proxy $vrb_di_line" || :
+            vrb_transport_requests_quiet || return 75
             mv "$vrb_t/dns.inverse.next" "$vrb_t/dns.inverse.expected" || return 1
         done < "$vrb_t/dns.inverse.adds"
     else return 2;fi

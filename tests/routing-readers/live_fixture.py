@@ -76,6 +76,15 @@ elif t[0]=='dns-proxy':
         if neg:
             if row in lines[start:end]:lines.remove(row)
         elif row not in lines[start:end]:lines.insert(end,row)
+    elif t[:2]==['https','upstream']:
+        start=lines.index('dns-proxy\\n');end=lines.index('!\\n',start)
+        if neg and len(t)==3:
+            # The real platform may remove all domains on this URL.
+            lines=[line for i,line in enumerate(lines) if not (start<i<end and line.split()[:3]==t[:3])]
+        elif not neg and len(t) in (5,6,7,8) and t[-2]=='domain':
+            row='    '+' '.join(t)+'\\n'
+            if row not in lines[start:end]:lines.insert(end,row)
+        else:sys.exit(2)
     else:sys.exit(2)
 else:sys.exit(2)
 cfg.write_text(''.join(lines))
@@ -92,8 +101,10 @@ if (base/'native-lost-reply').exists() and (base/'native-lost-reply').read_text(
                      'VWARD_ADGUARD_CONFIG':str(self.prefix/'opt/etc/AdGuardHome/AdGuardHome.yaml'),
                      'VWARD_CONSOLE_BACKUP_DIR':str(self.prefix/'opt/var/backups/vward/console-config')}
         self.env.pop('VWARD_RS7_DRYRUN',None)
+        self.env.pop('AGH_API_BASE',None) # Only AghLiveFixture configures a loopback API.
         self.libs += (LIBDIR/'vward-device-profile.sh',LIBDIR/'vward-routing-admission.sh')
         if (LIBDIR/'vward-routing-live.sh').exists():self.libs += (LIBDIR/'vward-routing-live.sh',)
+        if (LIBDIR/'vward-routing-live-agh.sh').exists():self.libs += (LIBDIR/'vward-routing-live-agh.sh',)
         if (LIBDIR/'vward-routing-bootstrap.sh').exists():self.libs += (LIBDIR/'vward-routing-bootstrap.sh',)
 
     def console(self,*args):

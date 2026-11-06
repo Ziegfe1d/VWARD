@@ -174,7 +174,7 @@ class PipelineFixture(Fixture):
         functions.write_text(''.join(function_source(console,n) for n in ('dir_lock','group_set','vward_routing_console_group_locked','doh_lines','doh_present','doh_remove_url',
                              'new_tmp','install_tmp','backup_file','valid_group','smartdns_prune_saved'))+
                              ''.join(function_source(common,n) for n in ('ads_epoch','ads_num','ads_pid_start','ads_read_line','ads_lock_create','ads_lock_acquire','ads_lock_release'))+
-                             ''.join(function_source(control,n) for n in ('agfail','aget','agh_unchanged','agh_evidence','agh_guarded_back','valid_url','ads_smartdns_locked')))
+                             ''.join(function_source(common,n) for n in ('agfail','aget','agh_unchanged','agh_evidence','agh_guarded_back','valid_url','ads_smartdns_locked')))
         self.libs=(READ,OBSERVE,SNAP,AUDIT,LIBDIR/'vward-routing-project.sh',PLAN,JOURNAL,DRYRUN,
                    LIBDIR/'vward-runtime-admission.sh',LIBDIR/'vward-routing-workers.sh',LIBDIR/'vward-routing-migrate.sh',
                    LIBDIR/'vward-routing-dns.sh',LIBDIR/'vward-routing-lifecycle.sh',LIBDIR/'vward-routing-legacy.sh',LIBDIR/'vward-routing-state.sh',LIBDIR/'vward-routing-outcome.sh',LIBDIR/'vward-routing-dispatch.sh',LIBDIR/'vward-routing-pipeline.sh',functions)

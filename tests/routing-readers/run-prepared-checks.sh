@@ -14,6 +14,7 @@ for CASE in \
     check-live-auto-backwriters.py \
     check-updater-actor-lifetime.py \
     check-native-compiler.py \
+    check-native-dns-compiler.py \
     check-live-default-binding.py \
     check-live-bootstrap.py \
     check-live-bootstrap-lifetime.py \
@@ -23,6 +24,13 @@ for CASE in \
     check-live-updater-race.py \
     check-live-recovery.py \
     check-live-vpn-transitions.py \
+    check-live-keenetic-dns.py \
+    check-live-keenetic-dns-faults.py \
+    check-live-dns-ack-boundary.py \
+    check-live-agh-import.py \
+    check-live-agh.py \
+    check-live-agh-faults.py \
+    check-live-agh-derived.py \
     check-boot-locks.py \
     check-bootstrap-read.py \
     check-coordinator-admission.py \

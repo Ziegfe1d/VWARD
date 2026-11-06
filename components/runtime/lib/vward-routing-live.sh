@@ -69,6 +69,7 @@ vrl_path_gate() (
         "$vrl_etc/route-engine/domain-lists/"*|"$vrl_etc/route-engine/domain-lists.dns/"*|\
         "${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/services/catalog.json"|\
         "${VWARD_ROOT_PREFIX:-}/opt/share/vward/console/services-catalog.json"|\
+        "${VWARD_ROOT_PREFIX:-}/opt/share/vward/ads-privacy-guard/vward-ads-privacy-common.sh"|\
         "${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/route-engine/adaptive-persist.txt") vrl_pg_stop=${VWARD_ROOT_PREFIX:-}/opt ;;
         "${VWARD_ROOT_PREFIX:-}/tmp/"*) vrl_pg_stop=${VWARD_ROOT_PREFIX:-}/tmp ;;
         *) return 75 ;;
@@ -107,19 +108,8 @@ vrl_refresh() {
     vrl_observation_copy "$vrl_rf_tmp" > "$vrl_rf_dest" || return 1
     rm -f "$vrl_rf_tmp" "$vrl_rf_tmp.stderr"
 }
-vrl_dns_observe() {
-    # Installed AGH is not an empty DNS store. Its actual read/POST adapter is
-    # required before that scope can run; never infer absence from a failed API.
-    # No connected caller/package activation is installed in this checkpoint.
-    [ "${VWARD_ADGUARD_CONFIG:-${VWARD_ROOT_PREFIX:-}/opt/etc/AdGuardHome/AdGuardHome.yaml}" = "${VWARD_ROOT_PREFIX:-}/opt/etc/AdGuardHome/AdGuardHome.yaml" ] || return 75
-    for vrl_do_path in "${VWARD_ROOT_PREFIX:-}/opt/etc/AdGuardHome" "${VWARD_ROOT_PREFIX:-}/opt/bin/AdGuardHome"; do
-        [ ! -e "$vrl_do_path" ] && [ ! -L "$vrl_do_path" ] || return 75
-    done
-    if [ -e "$vrl_cache/agh-domains" ] || [ -L "$vrl_cache/agh-domains" ]; then
-        vrj2_file "$vrl_cache/agh-domains" && vrb_single_link "$vrl_cache/agh-domains" || return 75
-    fi
-    : > "$vrl_cache/agh-domains"
-}
+vrl_dns_observe() { vrl_agh_observe; }
+
 vrl_observation_copy() {
     vrl_oc_cr=$(printf '\r')
     while IFS= read -r vrl_oc_line || [ -n "$vrl_oc_line" ]; do
@@ -130,6 +120,8 @@ vrl_observation_copy() {
 vrl_scope_read() (
     case $1:$2 in
         group:*) vrl_refresh && vrb_cfg_image "$vrl_cache/running-config" "$2" > "$3" ;;
+        dns-scope:keenetic) vrl_refresh && vrb_https_scope "$vrl_cache/running-config" > "$3" ;;
+        dns-scope:agh) vrl_refresh && vrb_agh_scope "$vrl_cache/agh.json" > "$3" ;;
         saved:routing-state) vrb_state_image "$vrb_e/decision" "$3" ;;
         *)
             vrl_sr_path=$(vrl_local_path "$1" "$2") || return 75
@@ -166,7 +158,7 @@ vrl_worker_scope_after() {
 }
 vrl_parent_scope_hash() {
     : "${vrb_t:?}"
-    if [ "$2" = group ]; then
+    if [ "$2" = group ] || [ "$2" = dns-scope ]; then
         # Use the scope from the SAME sealed G0/G1 snapshot as this journal
         # transition; another query here would be a different, unbound Gi.
         vrb_outcome_scope_hash "$1" "$2" "$3" > "$4"
@@ -207,6 +199,7 @@ vrl_native_exec() (
 )
 vrl_native_ndm() {
     [ "$#" -eq 1 ] && vrb_worker_context || return 75
+    vrl_requests_quiet || return 75
     vrl_ack_call=
     vrl_refresh || return 75
     vrl_nc_save=0
@@ -215,11 +208,20 @@ vrl_native_ndm() {
         vrl_nc_save=1
     else
         [ "$vrb_role" != save ] && [ "$vrb_role" != baseline-save ] || return 75
-        if [ "$vrb_role" = inverse ]; then vrl_nc_expected=$vrb_t/inverse.expected
-        else vrl_nc_expected=$vrb_t/expected;fi
-        vrb_native_compile "$1" "$vrl_cache/running-config" "$vrl_nc_expected" "$vrb_t" || return 75
-        IFS="$(printf '\t')" read -r _vrl_kind vrl_nc_group _vrl_value _vrl_neg < "$vrb_t/native.command" || return 75
-        vrj2_step_row "$vrb_j/$vrb_op" "$vrb_active_step" | awk -F'\t' -v g="$vrl_nc_group" '$4=="group" && $5==g{ok=1}END{exit ok?0:1}' || return 75
+        vrl_nc_scope=$(vrj2_step_row "$vrb_j/$vrb_op" "$vrb_active_step" | cut -f4,5) || return 75
+        case $vrl_nc_scope in
+            "$(printf 'group\t')"*)
+                if [ "$vrb_role" = inverse ]; then vrl_nc_expected=$vrb_t/inverse.expected
+                else vrl_nc_expected=$vrb_t/expected;fi
+                vrb_native_compile "$1" "$vrl_cache/running-config" "$vrl_nc_expected" "$vrb_t" || return 75
+                IFS="$(printf '\t')" read -r _vrl_kind vrl_nc_group _vrl_value _vrl_neg < "$vrb_t/native.command" || return 75
+                [ "$vrl_nc_scope" = "$(printf 'group\t%s' "$vrl_nc_group")" ] || return 75 ;;
+            "$(printf 'dns-scope\tkeenetic')")
+                if [ "$vrb_role" = inverse ]; then vrl_nc_expected=$vrb_t/dns.inverse.expected
+                else vrl_nc_expected=$vrb_t/dns.expected;fi
+                vrb_native_dns_compile "$1" "$vrl_cache/running-config" "$vrl_nc_expected" "$vrb_t" || return 75 ;;
+            *) return 75 ;;
+        esac
     fi
     vrl_call=$(mktemp -d "$vrb_j/$vrb_op/native.XXXXXX") || return 1
     printf '%s\n' "$1" > "$vrl_call/command" && vr2_hash "$vrl_call/command" > "$vrl_call/command.sha" &&
@@ -236,19 +238,32 @@ vrl_native_ndm() {
         [ "$(vr2_hash "$vrl_cache/running-config")" = "$(cat "$vrl_call/config.before.sha")" ] || return 75
         vrl_last_save=$vrl_call
     else
-        vrb_cfg_image "$vrl_cache/running-config" "$vrl_nc_group" > "$vrl_call/readback" &&
-            cmp -s "$vrl_call/readback" "$vrb_t/native.next" &&
+        if [ "$vrl_nc_scope" = "$(printf 'dns-scope\tkeenetic')" ]; then
+            vrb_https_scope "$vrl_cache/running-config" > "$vrl_call/readback" || return 75
+            vrl_nc_post=$vrb_t/dns.next
+        else
+            vrb_cfg_image "$vrl_cache/running-config" "$vrl_nc_group" > "$vrl_call/readback" || return 75
+            vrl_nc_post=$vrb_t/native.next
+        fi
+        cmp -s "$vrl_call/readback" "$vrl_nc_post" &&
             vr2_hash "$vrl_call/readback" > "$vrl_call/readback.sha" || return 75
     fi
     vrb_worker_context || return 75
     printf '%s\n' acknowledged-readback > "$vrl_call/completion" &&
         vr2_hash "$vrl_call/completion" > "$vrl_call/completion.sha" && vrj2_flush || return 1
     rm -f "$vrl_call/request.pending" && vrj2_flush || return 75
-    if [ "$vrl_nc_save" != 1 ]; then
+    if [ "$vrl_nc_save" != 1 ] && [ "$vrl_nc_scope" != "$(printf 'dns-scope\tkeenetic')" ]; then
         vrl_ack_call=$vrl_call;vrl_ack_group=$vrl_nc_group;vrl_ack_op=$vrb_op;vrl_ack_step=$vrb_active_step
         IFS=' ' read -r vrl_ack_pid _ < /proc/self/stat || return 75
         vrl_ack_start=$(vrj2_pid_start "$vrl_ack_pid") || return 75
     fi
+}
+vrl_requests_quiet() {
+    for vrl_rq_request in "$vrb_j/$vrb_op"/native.*/request.pending \
+        "$vrb_j/$vrb_op"/dns-evidence/*/request.pending \
+        "$vrb_j/$vrb_op"/dns-inverse.*/evidence/request.pending; do
+        [ ! -e "$vrl_rq_request" ] && [ ! -L "$vrl_rq_request" ] || return 75
+    done
 }
 vrl_saved() {
     case ${vrl_last_save:-} in "$vrb_j/$vrb_op/native."*) ;; *) return 75 ;; esac
@@ -348,6 +363,10 @@ vrl_bind() {
     vrb_native_path() { printf '%s/running-config\n' "$vrl_cache"; }
     vrb_transport_refresh() { vrl_refresh; }
     vrb_transport_saved() { vrl_saved; }
+    vrb_agh_path() { printf '%s/agh.json\n' "$vrl_cache"; }
+    vrb_agh_session() { vrl_agh_session "$@"; }
+    vrb_scope_derived_deltas() { vrl_agh_derived_deltas "$@"; }
+    vrb_transport_requests_quiet() { vrl_requests_quiet; }
     ndm() { vrl_native_ndm "$@" || return 75; }
     snapshot() { vrl_refresh; }
 }
