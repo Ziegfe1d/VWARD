@@ -3,6 +3,26 @@
 # a scope nor enables a transport. The installed binding supplies a fresh stage
 # under the existing CHANGE lock and the common persistent journal.
 
+vward_routing_legacy_recovery_gate() (
+    vrgr_backup=${VWARD_CONSOLE_BACKUP_DIR:-${VWARD_ROOT_PREFIX:-}/opt/var/backups/vward/console-config}
+    for vrgr_dir in "$vrgr_backup" "$vrgr_backup/service-transactions" "$vrgr_backup-recovery"; do
+        [ -e "$vrgr_dir" ] || [ -L "$vrgr_dir" ] || continue
+        [ -d "$vrgr_dir" ] && [ ! -L "$vrgr_dir" ] && [ -r "$vrgr_dir" ] && [ -x "$vrgr_dir" ] || return 75
+    done
+    for vrgr_txn in "$vrgr_backup/service-transactions"/*; do
+        [ -e "$vrgr_txn" ] || [ -L "$vrgr_txn" ] || continue
+        [ -d "$vrgr_txn" ] && [ ! -L "$vrgr_txn" ] || return 75
+        [ ! -e "$vrgr_txn/pending" ] && [ ! -L "$vrgr_txn/pending" ] || return 75
+    done
+    # AGH reserves its directory before POST evidence exists. Even an empty
+    # reservation is unresolved; never replay/delete it on a dead-PID guess.
+    # Service transactions use their existing durable pending protocol: a
+    # completed directory left after pending removal is harmless and retained.
+    for vrgr_pending in "$vrgr_backup-recovery"/smartdns.*; do
+        [ ! -e "$vrgr_pending" ] && [ ! -L "$vrgr_pending" ] || return 75
+    done
+)
+
 vward_routing_legacy_command_scopes() (
     [ "$#" -eq 1 ] && [ "${#1}" -le 2048 ] || return 75
     # Tokens are data, never shell code. Only canonical scope IDs leave here;

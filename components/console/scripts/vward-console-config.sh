@@ -287,6 +287,8 @@ change_lock() {
     dir_lock "$CHANGE_LOCK" || die route_change_busy 75
     LOCKED=1
     routing_recovery_check
+    _crg_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    if [ -e "$_crg_root" ] || [ -L "$_crg_root" ]; then routing_operation_check;fi
 }
 
 # Quick edits of VWARD's own files (read, change, write back) go one at a time: two tabs
@@ -296,9 +298,55 @@ EDIT_LOCKED=0
 edit_lock() {
     dir_lock "$EDIT_LOCK" || die route_change_busy 75
     EDIT_LOCKED=1
+    _crg_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    if [ -e "$_crg_root" ] || [ -L "$_crg_root" ]; then routing_operation_check;fi
+}
+
+routing_gate_load() {
+    command -v vward_routing_scope_gate >/dev/null 2>&1 && return 0
+    _crg_lib=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+    [ -f "$_crg_lib" ] && [ ! -L "$_crg_lib" ] && [ -O "$_crg_lib" ] && [ -r "$_crg_lib" ] || return 75
+    # Definitions only: validation/discovery remains with the original action.
+    # shellcheck source=/dev/null
+    . "$_crg_lib"
+}
+routing_native_check() {
+    _crg_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    [ -e "$_crg_root" ] || [ -L "$_crg_root" ] || return 0
+    routing_gate_load && vward_routing_ndmc_gate -c "$1"
+}
+routing_scope_check() {
+    _crg_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    [ -e "$_crg_root" ] || [ -L "$_crg_root" ] || return 0
+    routing_gate_load && vward_routing_scope_gate "$1" "$2" || die routing_policy_handoff 75
+}
+
+# Semantic scope is checked before the FIRST file/native mutation, then again
+# after waiting for each shared lock. Low-level ndmc alone would allow an empty
+# group to be created before refusing its later protected include.
+routing_operation_check() {
+    _cro_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    [ -e "$_cro_root" ] || [ -L "$_cro_root" ] || return 0
+    case ${OP:-} in
+        route-domain|force-vpn|adaptive|smartdns-domain)
+            routing_scope_check domain "${ARG2:-}" ;;
+        domain-list|domain-list-watch|list-mode|list-adopt)
+            routing_scope_check group "${ARG1:-}" ;;
+        list-domain)
+            routing_scope_check group "${ARG1:-}"
+            routing_scope_check domain "${ARG3:-}" ;;
+        list|domain-category|service|service-category|services-refresh|service-recover|ai|policy-group|ip-category|\
+        smartdns-server|smartdns-store|smartdns-keenetic|smartdns-guard|adaptive-mode|classifier|\
+        tunnel|tunnel-delete|tunnel-subnet|tunnel-conf|vless-server|tunnel-guard|tunnel-auto|\
+        tunnel-return|tunnel-fallback|backup-restore|reset|cleanup|agh-component|module-component|\
+        component|component-recover)
+            routing_scope_check all routing-state ;;
+    esac
 }
 
 ndm() {
+    _crg_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    if [ -e "$_crg_root" ] || [ -L "$_crg_root" ]; then routing_native_check "$1" || return 75;fi
     out=$("$NDMC" -c "$1" 2>&1)
     rc=$?
     if [ "$rc" -ne 0 ] || printf '%s\n' "$out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found|no such entry)'; then
@@ -5473,6 +5521,7 @@ ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 . "$ADMISSION_LIB"
 command -v vward_agent_acts >/dev/null 2>&1 || vward_agent_acts() { return 0; }
 vward_admission_enter console-config || die updater_busy 75
+routing_operation_check
 
 # Register every descendant before it can write. If its original AI parent died
 # before registration, refuse even when a retry has already acquired the intent.

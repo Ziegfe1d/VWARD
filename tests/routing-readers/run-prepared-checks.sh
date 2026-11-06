@@ -9,6 +9,7 @@ for CASE in \
     check-backwriter-eligibility.py \
     check-live-admission.py \
     check-live-native-boundary.py \
+    check-live-updater-admission.py \
     check-boot-locks.py \
     check-bootstrap-read.py \
     check-coordinator-admission.py \
