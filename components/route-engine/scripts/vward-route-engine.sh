@@ -633,6 +633,10 @@ change_unlock()
 
 persist_sync_cache()
 {
+    if [ -e "${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing" ] ||
+       [ -L "${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing" ]; then
+        vward_routing_scope_gate auto AdaptiveAuto || return 75
+    fi
     TMPP="${PERSIST}.new.$$"
 
     grep -v '^[[:space:]]*$' "$ADAPTIVE" 2>/dev/null |
@@ -700,6 +704,11 @@ restore_adaptive_from_persist()
             >> "$EVENT_LOG"
         return 1
     }
+
+    if [ -e "${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing" ] ||
+       [ -L "${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing" ]; then
+        vward_routing_scope_gate auto AdaptiveAuto || { change_unlock;return 75; }
+    fi
 
     # A run killed during a restore (S91's start wait, a TERM) left its files: one engine at a time.
     rm -f /tmp/vward-route-restore-* 2>/dev/null
@@ -895,6 +904,10 @@ add_adaptive()
     [ -z "$(find "$ADAPTIVE_FULL" -mmin "-$ADAPTIVE_FULL_MIN" 2>/dev/null)" ] || return 0
 
     change_lock || return 1
+    if [ -e "${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing" ] ||
+       [ -L "${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing" ]; then
+        vward_routing_scope_gate auto AdaptiveAuto || { change_unlock;return 75; }
+    fi
     # FINAL_GUARD_V4_ADD
     echo 0 > "$REFRESH_TS"
     refresh_sets
@@ -1488,6 +1501,10 @@ add_hint_adaptive()
     fi
 
     change_lock || return 1
+    if [ -e "${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing" ] ||
+       [ -L "${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing" ]; then
+        vward_routing_scope_gate auto AdaptiveAuto || { change_unlock;return 75; }
+    fi
 
     echo 0 > "$REFRESH_TS"
     refresh_sets

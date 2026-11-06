@@ -39,7 +39,7 @@ vward_routing_state_migrate2() (
     # State1 cannot express an accepted DNS/ISP pin or durable fresh evidence.
     awk -F'\t' '$1=="schema"{next}$1!="service"||NF!=7||$4!~/^(auto|vpn)$/{bad=1}END{exit bad?1:0}' \
         "$vrb_e/decision/choices.tsv" || return 75
-    cp "$vrb_e/running.cfg" "$vrb_e/running-config" || return 1
+    vrb_transport_refresh || return 1
     vward_routing_bootstrap_read2 "$vrb_migration/stage" "$vrb_e/decision" > "$vrb_migration/read.status" || return 3
     for vrb_m in $(vrb_state_names); do
         vrb_owned_data_file "$vrb_e/decision/$vrb_m.tsv" && vrb_single_link "$vrb_e/decision/$vrb_m.tsv" || return 75
@@ -85,7 +85,7 @@ vward_routing_state_restore1() (
     mkdir "$vrb_restore_work/stage" "$vrb_restore_work/lowered" || return 1
     vrb_state_image "$vrb_e/decision" "$vrb_restore_work/current" &&
         cmp -s "$vrb_restore_work/current" "$vrb_j/$vrb_restore_source/prepared/state/post" || return 75
-    cp "$vrb_e/running.cfg" "$vrb_e/running-config" || return 1
+    vrb_transport_refresh || return 1
     vward_routing_bootstrap_read2 "$vrb_restore_work/stage" "$vrb_e/decision" > "$vrb_restore_work/read.status" || return 3
     vrb_compile_state_set "$vrb_restore_work/stage" "$vrb_e/decision" "$vrb_migration/before" "$vrb_restore_work/lowered" .tsv || return 75
     vrb_execute2 "$vrb_restore_work/lowered" || return $?

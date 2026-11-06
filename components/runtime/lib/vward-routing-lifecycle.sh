@@ -48,7 +48,7 @@ vward_routing_server2() (
     vward_routing_state_gate 2 "$vrb_e/decision" && vward_journal2_gate "$vrb_j" || return 75
     vrb_ls=$(mktemp -d "$vrb_j/.server.XXXXXX") || return 1
     mkdir "$vrb_ls/stage" "$vrb_ls/lowered" "$vrb_ls/after" || return 1
-    cp "$vrb_e/running.cfg" "$vrb_e/running-config" || return 1
+    vrb_transport_refresh || return 1
     vward_routing_consistent_read2 "$vrb_ls/stage" "$vrb_e/decision" > "$vrb_ls/read.status" || return 3
     vr2_dns_view "$vrb_ls/stage" > "$vrb_ls/dns.tsv" || return 3
     vr2_dns_owned_authority "$vrb_ls/stage/decision/resources.tsv" "$vrb_ls/stage/decision/proofs.tsv" "$vrb_ls/dns.tsv" > "$vrb_ls/authority" || return 3

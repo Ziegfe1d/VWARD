@@ -20,7 +20,7 @@ def installed(f):
     shutil.copytree(f.j, state / 'journal')
     return prefix, state
 
-def request(f, prefix, spy=False, busy=False, fail_publish=False):
+def request(f, prefix, spy=False, busy=False, fail_publish=False, late_root=False, without_quiet=False):
     script = 'SELF_DIR='+shlex.quote(str(UPDATER))+'\n. "$SELF_DIR/vward-update-common.sh"\n'
     if spy:
         script += r'''
@@ -49,6 +49,11 @@ printf() {
     if busy:
         script += '. "$VU_ROOT_PREFIX/opt/lib/vward/vward-runtime-admission.sh"\n'
         script += 'vward_lock_take "$VU_ROOT_PREFIX/tmp/vward-console-edit.lock" || exit 91\n'
+    if without_quiet:
+        actual=function_source(UPDATER/'vward-update-common-base.sh','vu_barrier_enter')
+        point='    vu_routing_quiet_check || return 1\n'
+        assert actual.count(point)==2,'post-quiescence fault points changed'
+        script += actual.replace(point,'')
     script += '''
 vu_lock_acquire || exit 9
 trap 'vu_barrier_leave; vu_lock_release' EXIT
@@ -57,6 +62,16 @@ previous_mask=$(umask)
 case $- in *C*) previous_noclobber=1 ;; *) previous_noclobber=0 ;; esac
 result=0
 vu_barrier_request || result=$?
+'''
+    if late_root:
+        script += '''
+if [ "$result" = 0 ]; then
+    (umask 077; mkdir "$VU_ROOT_PREFIX/opt/var/lib/vward/routing" &&
+        mkdir "$VU_ROOT_PREFIX/opt/var/lib/vward/routing/decision" "$VU_ROOT_PREFIX/opt/var/lib/vward/routing/journal") || exit 97
+    vu_barrier_enter || result=$?
+fi
+'''
+    script += '''
 [ "$(umask)" = "$previous_mask" ] || exit 94
 case $- in *C*) current_noclobber=1 ;; *) current_noclobber=0 ;; esac
 [ "$previous_noclobber" = "$current_noclobber" ] || exit 95
@@ -105,6 +120,15 @@ with PipelineFixture() as f:
     assert not (prefix/'tmp/vward-console-edit.lock').exists(), 'failed marker leaked EDIT'
     assert (prefix/'tmp/vward-update-requested').exists(), 'unconfirmed partial marker silently discarded'
 print('LIVE_UPDATER_ADMISSION=PASS persistent unknown held, healthy request freezes EDIT then releases; evidence preserved')
+
+for without_quiet in (True,False):
+    with PipelineFixture() as f:
+        prefix,state=installed(f);shutil.rmtree(state)
+        r=request(f,prefix,late_root=True,without_quiet=without_quiet)
+        assert r.returncode==(0 if without_quiet else 1),('late first activation',without_quiet,r.returncode,r.stdout,r.stderr)
+        assert state.is_dir() and not (state/'decision/version.tsv').exists()
+        assert not (prefix/'tmp/vward-update.lock').exists(),'late-schema refusal leaked the update barrier'
+print('LIVE_UPDATER_LATE_ROOT=PASS removed post-quiescence guards RED, actual guards GREEN on incomplete late first activation')
 
 def until(path):
     end=time.monotonic()+8

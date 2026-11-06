@@ -267,7 +267,7 @@ vrb_emu_dns_command() (
         'dns-proxy https upstream '*) vrb_ed_add=${vrb_ed_cmd#dns-proxy };vrb_ed_uri= ;;
         *) return 2 ;;
     esac
-    vrb_capture_image "$vrb_e/running.cfg" "$vrb_t/config.before" || return 75
+    vrb_capture_image "$(vrb_native_path)" "$vrb_t/config.before" || return 75
     vrb_https_scope "$vrb_t/config.before" > "$vrb_t/dns.before" || return 75
     if [ "$vrb_role" = inverse ]; then vrb_ed_expected=$vrb_t/dns.inverse.expected
     else vrb_ed_expected=$vrb_t/dns.expected;fi
@@ -277,7 +277,7 @@ vrb_emu_dns_command() (
         /^[^ \t]/ {dns=0}
         dns && $1=="https" && $2=="upstream" && u!="" && $3==u {next}
         {print}' "$vrb_t/config.before" > "$vrb_t/config.next" || return 1
-    vrb_publish "$vrb_t/config.next" "$vrb_e/running.cfg" "$(vr2_hash "$vrb_t/config.before")" || return 75
+    vrb_publish "$vrb_t/config.next" "$(vrb_native_path)" "$(vr2_hash "$vrb_t/config.before")" || return 75
     [ ! -e "$vrb_e/dns-lost" ] || return 28
 )
 

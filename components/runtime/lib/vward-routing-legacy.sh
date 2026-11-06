@@ -21,8 +21,25 @@ vrb_bootstrap_plan() (
 vrb_legacy_empty() (
     vrj_dir "$1" || return 75
     [ ! -e "$1/.migration-pending" ] && [ ! -L "$1/.migration-pending" ] || return 75
-    for vrb_le_file in "$1"/*; do
-        [ ! -e "$vrb_le_file" ] && [ ! -L "$vrb_le_file" ] || return 75
+    vrb_le_present=0
+    for vrb_le_file in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+        [ -e "$vrb_le_file" ] || [ -L "$vrb_le_file" ] || continue
+        case ${vrb_le_file##*/} in
+            version.tsv|choices.tsv|bindings.tsv|evidence.tsv|policies.tsv|saved.tsv|queue.tsv|tombstones.tsv|context.tsv|resources.tsv|proofs.tsv|upstreams.tsv) vrb_le_present=1 ;;
+            *) return 75 ;;
+        esac
+    done
+    [ "$vrb_le_present" != 0 ] || return 0
+    # A complete newly published observation0 is also empty of intentions.
+    # Partial/unknown/v2 data is never adopted as an empty legacy ledger.
+    vrb_state_image "$1" /dev/null || return 75
+    for vrb_le_key in $(vrb_state_names); do
+        vrj2_file "$1/$vrb_le_key.tsv" && vrb_single_link "$1/$vrb_le_key.tsv" || return 75
+        case $vrb_le_key in
+            version) [ "$(cat "$1/version.tsv")" = "$(printf 'routing-state\t0')" ] || return 75 ;;
+            choices) [ "$(cat "$1/choices.tsv")" = "$(printf 'schema\t1')" ] || return 75 ;;
+            *) [ ! -s "$1/$vrb_le_key.tsv" ] || return 75 ;;
+        esac
     done
 )
 vrb_legacy_native_fp() {
@@ -30,23 +47,28 @@ vrb_legacy_native_fp() {
     # a changed accepted setting after reboot or an equivalent cache refresh.
     awk '$1!~/^(v2-|obs-probe:|obs-boot$)/ {if(NF==7)print $1,$2,$3,$6,$7;else print}' "$1" | LC_ALL=C sort
 }
+vrb_legacy_source() {
+    case $1 in
+            cfg) vrb_ls_src=$(vrb_native_path) ;;
+            dev) vrb_ls_src=$2/device.conf ;;
+            map) vrb_ls_src=$2/device-map.tsv ;;
+            enabled) vrb_ls_src=$2/services/enabled.tsv ;;
+            categories) vrb_ls_src=$2/services/categories.tsv ;;
+            persist) vrb_ls_src=$2/route/adaptive-persist.txt ;;
+            catalog-fetched) vrb_ls_src=$2/catalog.json ;;
+            catalog-bundled) vrb_ls_src=${VWARD_SERVICES_BUNDLED:-$2/missing} ;;
+            owned:*) vrb_ls_src=$2/services/owned/${1#owned:} ;;
+            list:*) vrb_ls_src=$2/route-engine/domain-lists/${1#list:} ;;
+            obs-dnsproof:*) vrb_ls_src=$2/route-engine/domain-lists.dns/${1#obs-dnsproof:} ;;
+            obs-smartdns-profile) vrb_ls_src=$2/smartdns.conf ;;
+            *) return 2 ;;
+        esac
+    printf '%s\n' "$vrb_ls_src"
+}
 vrb_legacy_archive() (
     [ "$#" -eq 3 ] && vr2_stage_valid "$1" && vrj_dir "$2" && vrj_dir "$3" || return 2
     while read -r vrb_la_label vrb_la_hash vrb_la_size _vrb_inode _vrb_mtime vrb_la_mode vrb_la_uid; do
-        case $vrb_la_label in
-            cfg) vrb_la_src=$2/running.cfg ;;
-            dev) vrb_la_src=$2/device.conf ;;
-            map) vrb_la_src=$2/device-map.tsv ;;
-            enabled) vrb_la_src=$2/services/enabled.tsv ;;
-            categories) vrb_la_src=$2/services/categories.tsv ;;
-            persist) vrb_la_src=$2/route/adaptive-persist.txt ;;
-            catalog-fetched) vrb_la_src=$2/catalog.json ;;
-            owned:*) vrb_la_src=$2/services/owned/${vrb_la_label#owned:} ;;
-            list:*) vrb_la_src=$2/route-engine/domain-lists/${vrb_la_label#list:} ;;
-            obs-dnsproof:*) vrb_la_src=$2/route-engine/domain-lists.dns/${vrb_la_label#obs-dnsproof:} ;;
-            obs-smartdns-profile) vrb_la_src=$2/smartdns.conf ;;
-            *) continue ;;
-        esac
+        vrb_la_src=$(vrb_legacy_source "$vrb_la_label" "$2") || continue
         [ "$vrb_la_hash" != absent ] || continue
         case $vrb_la_hash in *[!0-9a-f]*) return 75 ;; esac
         [ "${#vrb_la_hash}" -eq 64 ] && [ ! -L "$vrb_la_src" ] && [ -f "$vrb_la_src" ] || return 75
@@ -75,6 +97,11 @@ vward_routing_legacy_migrate2() (
     [ "$#" -eq 2 ] || return 2
     vrb_envelope "$1" "$2" || return 75
     : "${vrb_e:?}" "${vrb_j:?}" "${vrb_op:?}"
+    vrb_legacy_migrate_locked
+)
+
+# Called only inside the same admitted EDIT/CHANGE operation envelope.
+vrb_legacy_migrate_locked() {
     vrb_legacy_empty "$vrb_e/decision" && vward_journal2_gate "$vrb_j" || return 75
     if [ ! -e "$vrb_j/.migrations" ]; then mkdir "$vrb_j/.migrations" || return 1;fi
     vrj_dir "$vrb_j/.migrations" || return 75
@@ -82,7 +109,7 @@ vward_routing_legacy_migrate2() (
     [ ! -e "$vrb_li" ] && [ ! -L "$vrb_li" ] || return 75
     mkdir "$vrb_li" "$vrb_li/stage" "$vrb_li/legacy" "$vrb_li/after" "$vrb_li/lowered" || return 1
     printf '%s\n' legacy0 > "$vrb_li/kind"
-    cp "$vrb_e/running.cfg" "$vrb_e/running-config" || return 1
+    vrb_transport_refresh || return 1
     vward_routing_bootstrap_read2 "$vrb_li/stage" "$vrb_e/decision" > "$vrb_li/read.status" || return 3
     vrb_legacy_archive "$vrb_li/stage" "$vrb_e" "$vrb_li/legacy" || return 75
     vrb_legacy_native_fp "$vrb_li/stage/inputs.fp" > "$vrb_li/native.before" || return 1
@@ -100,11 +127,20 @@ vward_routing_legacy_migrate2() (
         vward_routing_choice "$vrb_li/after/choices" "$vrb_sid" vpn "$vrb_target" default 0 > "$vrb_li/choices.next" || return 75
         mv "$vrb_li/choices.next" "$vrb_li/after/choices" || return 1
     done < "$vrb_li/registrations"
-    # jq variables are literal; an empty but valid catalog has zero records.
-    # shellcheck disable=SC2016
-    "${JQ:-jq}" -r 'if .schema==1 and (.services|type)=="array" then .services[] | .id as $s |
-        .domains[] | select(type=="string") | [$s,ascii_downcase] | @tsv else error("catalog unknown") end' \
-        "$vrb_li/legacy/catalog-fetched" > "$vrb_li/catalog.tsv" || return 75
+    # Match the existing reader: validated fetched catalog, then signed bundled.
+    vrb_li_catalog=0
+    for vrb_li_catalog_key in catalog-fetched catalog-bundled; do
+        [ -f "$vrb_li/legacy/$vrb_li_catalog_key" ] || continue
+        # shellcheck disable=SC2016
+        if "${JQ:-jq}" -er 'if .schema==1 and (.services|type)=="array" and (.services|length)>0 and
+            all(.services[];(.id|type)=="string" and (.category|type)=="string" and
+                (.domains|type)=="array" and (.domains|length)>0 and all(.domains[];type=="string"))
+            then .services[] | .id as $s | .domains[] | [$s,ascii_downcase] | @tsv
+            else error("catalog unknown") end' "$vrb_li/legacy/$vrb_li_catalog_key" > "$vrb_li/catalog.tsv"; then
+            vrb_li_catalog=1;break
+        fi
+    done
+    [ "$vrb_li_catalog" = 1 ] || return 75
     awk -F'\t' -v op="$vrb_op" 'BEGIN{OFS="\t"}
         FILENAME==ARGV[1]{sid[$2]=$1;next}
         $1=="resource"&&($3 in sid)&&$8=="vward"&&$10=="verified"&&$7=="default" {
@@ -139,7 +175,7 @@ vward_routing_legacy_migrate2() (
     # ordinary producer nor old journal treats a partial state as usable v2.
     vrb_compile_state_set "$vrb_li/stage" "$vrb_e/decision" "$vrb_li/after" "$vrb_li/lowered" '' || return 75
     vrb_execute2 "$vrb_li/lowered"
-)
+}
 
 vward_routing_legacy_restore0() (
     umask 077
@@ -154,7 +190,7 @@ vward_routing_legacy_restore0() (
     vrb_lr_work=$(mktemp -d "$vrb_j/.downgrade.XXXXXX") || return 1
     mkdir "$vrb_lr_work/stage" "$vrb_lr_work/lowered" "$vrb_lr_work/empty" || return 1
     vrb_revocations_gate "$vrb_j" "$vrb_lr_work/empty" || return 75
-    cp "$vrb_e/running.cfg" "$vrb_e/running-config" || return 1
+    vrb_transport_refresh || return 1
     vward_routing_bootstrap_read2 "$vrb_lr_work/stage" "$vrb_e/decision" > "$vrb_lr_work/read.status" || return 3
     vrb_legacy_native_fp "$vrb_lr_work/stage/inputs.fp" > "$vrb_lr_work/native.now"
     vrb_legacy_native_fp "$vrb_lr_source/prepared/inputs.fp" > "$vrb_lr_work/native.before" || return 75
@@ -279,7 +315,7 @@ vward_routing_update_eligibility2() (
     for vrb_ue_op in "$1"/*; do
         [ ! -e "$vrb_ue_op" ] && [ ! -L "$vrb_ue_op" ] && continue
         vrj_dir "$vrb_ue_op" && vrb_publish_quiet "$vrb_ue_op" || return 75
-        for vrb_ue_pending in "$vrb_ue_op"/dns-evidence/*/request.pending "$vrb_ue_op"/dns-inverse.*/evidence/request.pending; do
+        for vrb_ue_pending in "$vrb_ue_op"/dns-evidence/*/request.pending "$vrb_ue_op"/dns-inverse.*/evidence/request.pending "$vrb_ue_op"/native.*/request.pending; do
             [ ! -e "$vrb_ue_pending" ] && [ ! -L "$vrb_ue_pending" ] || return 75
         done
     done

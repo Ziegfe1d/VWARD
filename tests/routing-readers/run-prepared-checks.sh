@@ -1,5 +1,6 @@
 #!/bin/sh
-# Complete OFF B integration coverage; each Python case keeps its own budget.
+# B integration: fixed DATA and native-transport fixtures, never a real router.
+# Each Python case keeps its own unchanged per-invocation budget.
 set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname "$0")/../.." && pwd -P)
 cd "$ROOT"
@@ -10,6 +11,18 @@ for CASE in \
     check-live-admission.py \
     check-live-native-boundary.py \
     check-live-updater-admission.py \
+    check-live-auto-backwriters.py \
+    check-updater-actor-lifetime.py \
+    check-native-compiler.py \
+    check-live-default-binding.py \
+    check-live-bootstrap.py \
+    check-live-bootstrap-lifetime.py \
+    check-live-transport.py \
+    check-live-transport-faults.py \
+    check-live-native-foreign.py \
+    check-live-updater-race.py \
+    check-live-recovery.py \
+    check-live-vpn-transitions.py \
     check-boot-locks.py \
     check-bootstrap-read.py \
     check-coordinator-admission.py \
@@ -41,7 +54,7 @@ for CASE in \
     check-state-migration.py
 do
     python3 "tests/routing-readers/$CASE" || {
-        echo "FAIL: prepared OFF routing: $CASE" >&2
+        echo "FAIL: routing integration fixture: $CASE" >&2
         exit 1
     }
 done

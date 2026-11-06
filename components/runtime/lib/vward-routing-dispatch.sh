@@ -29,10 +29,10 @@ vrb_dispatch_scope() (
     vrb_ds_kind=$(printf '%s\n' "$vrb_ds_row" | cut -f4);vrb_ds_id=$(printf '%s\n' "$vrb_ds_row" | cut -f5)
     case $vrb_ds_kind:$vrb_ds_id in
         group:*)
-            [ "$2" = "$vrb_e/running.cfg" ] && [ "$1" != - ] || return 75
+            [ "$2" = "$(vrb_native_path)" ] && [ "$1" != - ] || return 75
             vrb_cfg_image "$1" "$vrb_ds_id" > "$vrb_t/dispatch.scope.$vrb_pub_pid" || return 75 ;;
         dns-scope:keenetic)
-            [ "$2" = "$vrb_e/running.cfg" ] && [ "$1" != - ] || return 75
+            [ "$2" = "$(vrb_native_path)" ] && [ "$1" != - ] || return 75
             vrb_https_scope "$1" > "$vrb_t/dispatch.scope.$vrb_pub_pid" || return 75 ;;
         dns-scope:agh)
             [ "$2" = "$vrb_e/agh.json" ] && [ "$1" != - ] || return 75

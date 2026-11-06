@@ -84,7 +84,7 @@ vrb_outcome_emit() (
         vrb_oe_total=$((vrb_oe_total+1))
         vrb_oe_actual=$(vrb_outcome_scope_hash "$1" "$vrb_kind" "$vrb_id") || vrb_oe_actual=unknown
         case $vrb_kind:$vrb_id in
-            group:*|dns-scope:keenetic) vrb_oe_path=$vrb_e/running.cfg ;;
+            group:*|dns-scope:keenetic) vrb_oe_path=$(vrb_native_path) ;;
             dns-scope:agh) vrb_oe_path=$vrb_e/agh.json ;;
             *) vrb_oe_path=$(vrb_local_path "$vrb_kind" "$vrb_id") || vrb_oe_path= ;;
         esac
@@ -101,7 +101,7 @@ vrb_outcome_emit() (
     # native config and raw return files are deliberately NOT JSON inputs.
     # shellcheck disable=SC2016
     "${JQ:-jq}" -n --arg sid "$vrb_oe_sid" --arg generation "$(cat "$1/generation")" --arg desired_generation "$(cat "$2/generation")" \
-        --arg state "$vrb_oe_state" --arg configured "$vrb_oe_configured" --argjson persisted "$vrb_oe_persisted" \
+        --arg activation "$(vrb_activation)" --arg state "$vrb_oe_state" --arg configured "$vrb_oe_configured" --argjson persisted "$vrb_oe_persisted" \
         --argjson matched "$vrb_oe_matched" --argjson steps "$vrb_oe_total" --rawfile choices "$2/outcome.choices" \
         --rawfile resources "$2/outcome.resources" --rawfile context "$1/decision/context.tsv" --rawfile atoms "$vrb_oe_tmp/atoms" --rawfile policy "$vrb_oe_tmp/policy" '
         def rows: split("\n") | map(select(length>0)|split("\t"));
@@ -112,7 +112,7 @@ vrb_outcome_emit() (
         ($sources|map(select(.state=="active")|[.target,.policy])|unique|length) as $targets |
         ($context|rows|map(select(.[0]|startswith("source:"))|{key:(.[0]|ltrimstr("source:")),value:(if .[1]=="0" then 0 elif .[1]=="1" then 1 else null end)})|from_entries) as $switches |
         ([$a[]|select(.[8]=="-")|.[1]]-[$p[]|select(.[1]=="policy" and (.[3]=="unknown" or .[3]=="unresolved"))|.[0]]|length) as $known |
-        {schema:2,activation:"off",evidence:"configuration",client_verified:false,scope:"own-planned-deltas",source_switches:{M:$switches.M,S:$switches.S,A:$switches.A},
+        {schema:2,activation:$activation,evidence:"configuration",client_verified:false,client_path_verified:false,scope:"own-planned-deltas",source_switches:{M:$switches.M,S:$switches.S,A:$switches.A},
          service:(if $sid=="" then null else $sid end),operation:{state:$state},
          desired:{mode:($c[3]//(if $sid=="" then "server-policy" else "auto" end)),target:($c[4]//null),policy:($c[5]//null),revision:($c[2]|tonumber? // 0),generation:$desired_generation,resources:$r},
          configured:{state:(if $configured=="verified" and $targets>1 then "mixed" else $configured end),persisted:$persisted,generation:$generation,matched_steps:$matched,total_steps:$steps},
@@ -130,14 +130,14 @@ vward_routing_outcome_read2() (
     vrb_or_work=$(mktemp -d "$1/.outcome-read.XXXXXX") || return 1
     trap 'rm -rf "$vrb_or_work"' EXIT
     mkdir "$vrb_or_work/stage" || return 1
-    vrb_capture_image "$vrb_e/running.cfg" "$vrb_or_work/running-config" || return 75
+    vrb_capture_image "$(vrb_native_path)" "$vrb_or_work/running-config" || return 75
     VWARD_CONSOLE_ETC=$vrb_e;VWARD_ROUTE_STATE=$vrb_e/route;VWARD_KCACHE=$vrb_or_work;VWARD_ROOT_PREFIX=$vrb_e/root
     VWARD_DEVICE_CONFIG=$vrb_e/device.conf;VWARD_DEVICE_MAP_CACHE=$vrb_e/device-map.tsv
     VWARD_SERVICES_FETCHED=$vrb_e/catalog.json;VWARD_SERVICES_BUNDLED=$vrb_e/missing
     VWARD_ROUTING_AGH_DOMAINS=$vrb_e/agh-domains;VWARD_ROUTING_AGH_IMAGE=$vrb_e/agh.json;VWARD_CONSOLE_BACKUP_DIR=$vrb_e/backup
     export VWARD_CONSOLE_ETC VWARD_ROUTE_STATE VWARD_KCACHE VWARD_ROOT_PREFIX VWARD_DEVICE_CONFIG VWARD_DEVICE_MAP_CACHE VWARD_SERVICES_FETCHED VWARD_SERVICES_BUNDLED VWARD_ROUTING_AGH_DOMAINS VWARD_ROUTING_AGH_IMAGE VWARD_CONSOLE_BACKUP_DIR
     vward_routing_consistent_read2 "$vrb_or_work/stage" "$vrb_e/decision" > "$vrb_or_work/status" || return 3
-    [ "$(vr2_hash "$vrb_e/running.cfg")" = "$(vr2_hash "$vrb_or_work/running-config")" ] || return 3
+    [ "$(vr2_hash "$(vrb_native_path)")" = "$(vr2_hash "$vrb_or_work/running-config")" ] || return 3
     vrb_outcome_emit "$vrb_or_work/stage" "$vrb_t" || return $?
     cat "$vrb_t/outcome.json"
 )
