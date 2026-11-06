@@ -529,6 +529,23 @@ vward_keenetic_timed()
     return 0
 }
 
+# OLD native writers are fenced only after common state exists. Ordinary boot
+# must not create a routing intention, and read-only diagnostics stay available
+# even during incomplete migration or a persistent unknown operation.
+vward_routing_ndmc_gate() {
+    _vrng_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    [ -e "$_vrng_root" ] || [ -L "$_vrng_root" ] || return 0
+    [ "$#" -eq 2 ] && [ "$1" = -c ] || return 75
+    case $2 in 'show running-config'|'show ip name-server') return 0 ;; esac
+    _vrng_lib=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+    _vrng_lib=${_vrng_lib%/*}/vward-routing-loader.sh
+    [ -f "$_vrng_lib" ] && [ ! -L "$_vrng_lib" ] && [ -O "$_vrng_lib" ] && [ -r "$_vrng_lib" ] || return 75
+    # shellcheck source=/dev/null
+    . "$_vrng_lib" || return 75
+    vward_routing_modules_load "${_vrng_lib%/*}" || return 75
+    vward_routing_native_admit "$2"
+}
+
 # Every ndmc of the programs that load this library is timed the same way (fix.33.2, WP-A: who
 # keeps Keenetic busy). Only where Keenetic's ndmc is a program, so «command -v ndmc» still says
 # whether there is one; a stand-in named by VWARD_NDMC (the tests) is called by its path and stays
@@ -537,6 +554,7 @@ case "$(command -v ndmc 2>/dev/null)" in
     /*)
         ndmc()
         {
+            vward_routing_ndmc_gate "$@" || return $?
             [ "${VWARD_KEENETIC_TIMING:-1}" = 1 ] || { command ndmc "$@"; return; }
             vward_uptime_cs; _vnd_t0=$_VCS
             command ndmc "$@"

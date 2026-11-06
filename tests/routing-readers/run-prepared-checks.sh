@@ -7,6 +7,8 @@ for CASE in \
     check-agh-locked.py \
     check-agh-preflight-refusal.py \
     check-backwriter-eligibility.py \
+    check-live-admission.py \
+    check-live-native-boundary.py \
     check-boot-locks.py \
     check-bootstrap-read.py \
     check-coordinator-admission.py \

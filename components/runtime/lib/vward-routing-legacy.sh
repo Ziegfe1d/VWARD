@@ -320,8 +320,23 @@ vward_routing_legacy_eligibility2() (
         FILENAME==ARGV[4]{if(NF!=11 || $1!~/^(route|dns)$/ || $5!~/^(exact|subtree)$/)bad=1
             if($9=="vward"){rd[++nr]=$4;rs[nr]=$5;if($3=="group:" query && kind=="group")hold=1}next}
         FILENAME==ARGV[5]{if(NF!=3 || $3!="deleted")bad=1;if(kind=="policy" && $1==query)hold=1;next}
-        /^object-group fqdn / {inside=($3==query);next} /^!/ {inside=0}
-        inside && $1=="include" && NF==2 {group_domain[$2]=1}
+        FILENAME==ARGV[6] {
+            # This input is native text, while the preceding decision files
+            # are TSV. Applying FS=tab to its space-separated header/body
+            # silently made every native group appear empty to the fence.
+            if(/^object-group fqdn /) {
+                split($0,native,/[ \t]+/);inside=(native[3]==query)
+                if(inside && ++native_groups>1)bad=1
+                next
+            }
+            if(/^!/)inside=0
+            if(inside) {
+                line=$0;sub(/^[ \t]+/,"",line);sub(/[ \t]+$/,"",line);count=split(line,native,/[ \t]+/)
+                if(count==2 && native[1]=="include")group_domain[tolower(native[2])]=1
+                else if(line!="")bad=1
+            }
+            next
+        }
         END{
             if(kind=="domain" && protected(query))hold=1
             if(kind=="group")for(d in group_domain)if(protected(d))hold=1
