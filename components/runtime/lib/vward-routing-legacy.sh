@@ -122,10 +122,17 @@ vrb_legacy_observation_compile() {
     printf 'routing-state\t2\n' > "$vrb_li/after/version"
     # Existing accepted registration is an intent. Ownership still requires the
     # independent exact PRIVATE native proof. Names/catalog/persist are not it.
-    awk -F'\t' 'BEGIN{OFS="\t"}FILENAME==ARGV[1]{if(NF!=3 || seen[$1]++ || ($2 in sid && sid[$2]!=$1)){bad=1;next}sid[$2]=$1;next}
+    # The raw third column (auto|TUNNEL) IS the selection: auto stays the
+    # logical selector VPN:auto, a tunnel stays an explicit pin. The observed
+    # native route is evidence only and must still be one VPN route; it never
+    # replaces auto, moves a pin, or fills a missing selection.
+    awk -F'\t' 'BEGIN{OFS="\t"}
+        function id(s){return length(s)<=64 && s~/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/}
+        FILENAME==ARGV[1]{if(NF!=3 || seen[$1]++ || ($2 in sid && sid[$2]!=$1) || ($3!="auto" && !id($3))){bad=1;next}
+            sid[$2]=$1;raw[$2]=($3=="auto")?"VPN:auto":"VPN:" $3;next}
         $1=="resource" && ($3 in sid) {
             if($6!~/^VPN:/ || ($3 in target && target[$3]!=$6))bad=1;target[$3]=$6
-        }END{if(bad)exit 2;for(g in sid){if(!(g in target))exit 2;print sid[g],g,target[g]}}' \
+        }END{if(bad)exit 2;for(g in sid){if(!(g in target))exit 2;print sid[g],g,raw[g]}}' \
         "$vrb_li/stage/enabled.tsv" "$vrb_li/stage/inventory.tsv" > "$vrb_li/registrations" || return 75
     while IFS="$(printf '\t')" read -r vrb_sid _vrb_group vrb_target; do
         vward_routing_choice "$vrb_li/after/choices" "$vrb_sid" vpn "$vrb_target" default 0 > "$vrb_li/choices.next" || return 75

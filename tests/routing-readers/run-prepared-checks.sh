@@ -29,6 +29,7 @@ for CASE in \
     check-live-cold-map.py \
     check-live-cold-map-lifetime.py \
     check-live-import-attribution.py \
+    check-live-raw-intent.py \
     check-live-bootstrap-ancestry.py \
     check-live-bootstrap-lifetime.py \
     check-live-transport.py \

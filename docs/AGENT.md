@@ -303,6 +303,8 @@ sh/BB1.37/staticBB1.36 + negative missing-dependency control PASS. Runtime не�
 
 - 07.11.2026 10:22 МСК / PR38 first-request checkpoint `868f7d3`: SAME legacy stage/archive/state-set compile перенесён ДО leased first-ROOT publication; actual ACK/fresh CAS перед execute сохранены. Invalid inputs не оставляют canonical0/2, cold map берётся existing profile discovery ТОЛЬКО в unique private RAM, не shared cache. Catalog-confirmed per-member S attribution и повторная ancestry validation закрыли addressed Important. Targeted SH/BB PASS; не весь connected suite/не hardware. Новые5cases/runner, SHA1419/privacy/syntax/no-new SC PASS. Root0 recovery/raw legacy intent/all writers/API/Panel/package/ABI/final gates ещё открыты, release не готов.
 
+- 07.11.2026 12:40 МСК / PR38 handoff Codex → Claude Code: исходный HEAD `a65a10d4fd9dc8e113fb3a9a25a9eedf41ad0dd1` (docs), код `868f7d3`, dev `3f4802b`; PR не менялся после снимка владельца, параллельного writer нет. Локальная рабочая копия Codex НЕ доступна: незакоммиченные изменения неизвестны и не выдаются ни за потерянные, ни за завершённые; продолжение — с последнего опубликованного коммита. Raw legacy intent RED восстановлен заново на production importer и закрыт (§3). Далее в этом же PR: P0-2 → P0-1 → P0-3, затем ревизия PR/веток (ROADMAP §7, 07.11). Release по-прежнему не готов.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -1047,6 +1049,16 @@ Targeted результаты по checkpoints: first-request valid/native-write
 5новыхcases зарегистрированы общим SH/BB runner. Invoke45/probe55/fault8/resource budgets неизменны. Static sh/BB/Python, no-new ShellCheck, privacy, diff, SHA1419 PASS. Full local consistency исторически FAIL(read-only /opt/var/check-dryrun199), local Chromium SKIP(noPlaywright), beta marker SKIP(origin/beta unavailable) остаются. Старый CI813 не читался/не переносится, нового полного CI/merge/dev/feed/VERSION/package activation/release/router действия нет; signed78/map/allowlists/workflow прежние, libs UNINSTALLED.
 
 Следом уже подтверждён отдельный raw-intent RED: old importer заменяет auto наблюдаемым VPN:Wireguard0; регрессия raw auto/pin/missing/observed ISP ещё НЕ GREEN. Explicit Root0 inspection/own abort/recovery, все normal old callbacks/M/A/list/category/modes/lifecycle/API/Panel/installed ABI/downgrade/connected faults/final exact CI/rollback/public dev ещё нужны. Fixtures не клиентский путь/аппаратная приёмка.
+
+### 07.11.2026 12:40 МСК — [Claude Code] PR38: handoff и raw legacy intent RED→GREEN
+
+Передача Codex → Claude Code по поручению владельца 07.11 (ROADMAP §7). Исходный опубликованный HEAD `a65a10d`; незакоммиченная работа Codex недоступна, поэтому RED не «восстановлен из diff», а написан заново по описанию §G.5.3 и проверен на `a65a10d`.
+
+Первопричина: `vrb_legacy_observation_compile` (`vward-routing-legacy.sh`) брал цель выбора из наблюдаемого native route (`inventory $6`) и игнорировал третий столбец `enabled.tsv` (`auto|TUNNEL`, формат `service_state_set` Панели). Поэтому raw `auto` становился пином `VPN:Wireguard0`, пин `Wireguard1`/отсутствующий `Wireguard9` переносился на наблюдаемый `Wireguard0`, а пустой выбор заполнялся наблюдением. Это же ломало `vr2_own_service_withdrawal` (сверка `VPN:auto`↔`auto`), что согласуется с прежним timeout45 explicit-pin off.
+
+Исправление адресное: выбор = raw (auto→`VPN:auto`, туннель→`VPN:TUNNEL`, проверка id как у `vward_routing_choice`); пустой/некорректный raw — отказ импорта до ROOT. Наблюдаемый маршрут по-прежнему обязан быть одним VPN-маршрутом (ISP/отсутствие — прежний отказ), а ресурсы/доказательства S импортируются как раньше; смысл «выбрано/применено/источник», чужие route entries и exact per-member attribution не менялись.
+
+Тесты: новый `check-live-raw-intent.py` (actual copied console CLI, первый ROOT): raw auto+Wireguard0, pin Wireguard1 при наблюдаемом Wireguard0, pin OpkgTun4 (VLESS) и auto при наблюдаемом OpkgTun4, pin отсутствующего Wireguard9, observed ISP и пустой raw. На `a65a10d` RED (4 выбора нормализованы к физическому маршруту, пустой raw импортирован); после исправления GREEN на sh (dash) и BusyBox v1.36.1 (Ubuntu). BusyBox 1.37.0 владельца здесь не проверялся. Две прежние регрессии (`check-legacy-import`, `check-live-bootstrap`) закрепляли саму ошибку (`auto`→`VPN:Wireguard0`); их ожидание исправлено на `VPN:auto` с комментарием, остальные утверждения не тронуты; обе GREEN sh+BB. Также GREEN (sh): import-attribution(+BB), service-withdrawal, live-console-entry, live-inputs, live-membership, live-vpn-transitions (1/2/3 VPN), live-native-boundary, live-default-binding, state-migration. `check-live-first-request` в этой среде превышает invoke45 так же на неизменном `a65a10d` (CPU-время fork/exec, 4 ядра); лимит не увеличивался, это ресурсный риск, а не PASS. Роутер не подключался; release/merge нет.
 
 ## 4. Открытые вопросы и нужные данные
 

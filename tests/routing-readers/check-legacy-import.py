@@ -25,7 +25,9 @@ with PipelineFixture() as f:
         assert (f.e/path).read_bytes()==data and (f.e/path).stat().st_mode&0o777==mode,('migration changed native legacy',path)
     assert not (f.e/'calls').exists() and not f.trace.exists(),'import issued a backend write'
     assert (f.decision/'version.tsv').read_text()=='routing-state\t2\n'
-    assert '\tvpn\tVPN:Wireguard0\tdefault\t' in (f.decision/'choices.tsv').read_text()
+    # Raw legacy selection 'auto' stays the logical selector; the observed
+    # Wireguard0 route is evidence only (never normalized into a pin).
+    assert '\tvpn\tVPN:auto\tdefault\t' in (f.decision/'choices.tsv').read_text()
     evidence=(f.decision/'evidence.tsv').read_text()
     assert evidence and all('\t0\thistory\t0\t' in x for x in evidence.splitlines()),'persist became a fresh Auto proof'
     rows=(f.decision/'resources.tsv').read_text().splitlines()

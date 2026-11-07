@@ -48,7 +48,8 @@ with LiveFixture() as f:
     assert r.returncode==0,(r.returncode,r.stdout,r.stderr)
     assert f.native.read_bytes()==before and f.startup.read_bytes()==startup,'migration wrote/saved native legacy configuration'
     assert all(p.read_bytes()==data and p.stat().st_mode&0o777==mode for p,(data,mode) in old.items())
-    assert '\tvpn\tVPN:Wireguard0\tdefault\t' in (f.live/'decision/choices.tsv').read_text()
+    # Raw 'auto' is kept as VPN:auto, not the observed physical Wireguard0.
+    assert '\tvpn\tVPN:auto\tdefault\t' in (f.live/'decision/choices.tsv').read_text()
     rows=(f.live/'decision/resources.tsv').read_text().splitlines()
     assert len(rows)==2 and all(r.split('\t')[8]=='vward' for r in rows),rows
     assert 'outside.example' not in (f.live/'decision/resources.tsv').read_text(),'manual group adopted by importer'
