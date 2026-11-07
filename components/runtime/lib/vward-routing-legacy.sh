@@ -101,18 +101,22 @@ vward_routing_legacy_migrate2() (
 )
 
 # Called only inside the same admitted EDIT/CHANGE operation envelope.
-vrb_legacy_migrate_locked() {
-    vrb_legacy_empty "$vrb_e/decision" && vward_journal2_gate "$vrb_j" || return 75
-    if [ ! -e "$vrb_j/.migrations" ]; then mkdir "$vrb_j/.migrations" || return 1;fi
-    vrj_dir "$vrb_j/.migrations" || return 75
-    vrb_li=$vrb_j/.migrations/$vrb_op
+# Preparation has no transport or publication. Both the regular importer and
+# first-root preflight use these same compiled observations and state-set data.
+vrb_legacy_prepare() {
+    [ "$#" -eq 2 ] && vrb_legacy_empty "$2" || return 75
+    vrb_li=$1
+    case $2 in */decision) vrb_lp_root=${2%/decision} ;; *) return 75 ;; esac
+    vrj_dir "$vrb_lp_root" && vrj_dir "${vrb_li%/*}" || return 75
     [ ! -e "$vrb_li" ] && [ ! -L "$vrb_li" ] || return 75
     mkdir "$vrb_li" "$vrb_li/stage" "$vrb_li/legacy" "$vrb_li/after" "$vrb_li/lowered" || return 1
     printf '%s\n' legacy0 > "$vrb_li/kind"
-    vrb_transport_refresh || return 1
-    vward_routing_bootstrap_read2 "$vrb_li/stage" "$vrb_e/decision" > "$vrb_li/read.status" || return 3
-    vrb_legacy_archive "$vrb_li/stage" "$vrb_e" "$vrb_li/legacy" || return 75
+    vward_routing_bootstrap_read2 "$vrb_li/stage" "$2" > "$vrb_li/read.status" || return 3
+    vrb_legacy_archive "$vrb_li/stage" "$vrb_lp_root" "$vrb_li/legacy" || return 75
     vrb_legacy_native_fp "$vrb_li/stage/inputs.fp" > "$vrb_li/native.before" || return 1
+    vrb_legacy_observation_compile
+}
+vrb_legacy_observation_compile() {
     for vrb_key in $(vrb_state_names); do : > "$vrb_li/after/$vrb_key" || return 1;done
     printf 'schema\t1\n' > "$vrb_li/after/choices"
     printf 'routing-state\t2\n' > "$vrb_li/after/version"
@@ -141,11 +145,15 @@ vrb_legacy_migrate_locked() {
         fi
     done
     [ "$vrb_li_catalog" = 1 ] || return 75
+    # A private full-group witness proves its current image, not that every
+    # member belongs to this service. Unknown members remain observations;
+    # they must not acquire S withdrawal rights through the registry alone.
     awk -F'\t' -v op="$vrb_op" 'BEGIN{OFS="\t"}
         FILENAME==ARGV[1]{sid[$2]=$1;next}
-        $1=="resource"&&($3 in sid)&&$8=="vward"&&$10=="verified"&&$7=="default" {
+        FILENAME==ARGV[2]{catalog[$1 SUBSEP $2]=1;next}
+        $1=="resource"&&($3 in sid)&&((sid[$3] SUBSEP $4) in catalog)&&$8=="vward"&&$10=="verified"&&$7=="default" {
             print "route",$13,"group:" $3,$4,"exact",$6,"default","native","vward","p-" op "-" $13,"S:" sid[$3]
-        }' "$vrb_li/registrations" "$vrb_li/stage/inventory.tsv" | LC_ALL=C sort > "$vrb_li/after/resources" || return 1
+        }' "$vrb_li/registrations" "$vrb_li/catalog.tsv" "$vrb_li/stage/inventory.tsv" | LC_ALL=C sort > "$vrb_li/after/resources" || return 1
     awk -F'\t' 'BEGIN{OFS="\t"}{for(i=1;i<=10;i++)printf "%s\t",$i;print 1}' "$vrb_li/after/resources" > "$vrb_li/after/proofs"
     awk -F'\t' 'BEGIN{OFS="\t"}FILENAME==ARGV[1]{catalog[$1 SUBSEP $2]=1;next}
         {s=$11;sub(/^S:/,"",s);known=((s SUBSEP $4) in catalog);print s,$4,"exact",(known?"confirmed":"unknown"),(known?"ipv4":"unknown"),(known?"known":"unknown")}' \
@@ -171,8 +179,14 @@ vrb_legacy_migrate_locked() {
         vrb_saved_id=$(printf '%s' "$vrb_label" | sha256sum);vrb_saved_id=${vrb_saved_id%% *}
         printf 'legacy-%s\tlegacy-history\t0\t%s\t0\t%s\n' "${vrb_saved_id%????????????????}" "$(cat "$vrb_li/stage/generation")" "$vrb_hash" >> "$vrb_li/after/saved"
     done < "$vrb_li/stage/inputs.fp"
-    # Version last. A crash keeps the parent barrier and observation0; neither
-    # ordinary producer nor old journal treats a partial state as usable v2.
+}
+vrb_legacy_migrate_locked() {
+    vrb_legacy_empty "$vrb_e/decision" && vward_journal2_gate "$vrb_j" || return 75
+    if [ ! -e "$vrb_j/.migrations" ]; then mkdir "$vrb_j/.migrations" || return 1;fi
+    vrj_dir "$vrb_j/.migrations" || return 75
+    vrb_transport_refresh || return 1
+    vrb_legacy_prepare "$vrb_j/.migrations/$vrb_op" "$vrb_e/decision" || return 75
+    # Version last. A crash retains the existing parent/observation barrier.
     vrb_compile_state_set "$vrb_li/stage" "$vrb_e/decision" "$vrb_li/after" "$vrb_li/lowered" '' || return 75
     vrb_execute2 "$vrb_li/lowered"
 }

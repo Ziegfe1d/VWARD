@@ -20,6 +20,11 @@ def stop(p):
     except ProcessLookupError:pass
     p.communicate(timeout=5)
 
+def observation_only(f,before,startup):
+    assert f.native.read_bytes()==before and f.startup.read_bytes()==startup,'bootstrap wrote/saved native routing'
+    calls=f.calls.read_text().splitlines() if f.calls.exists() else []
+    assert calls and all(row.endswith('\tshow running-config') for row in calls),('bootstrap issued a native mutation',calls)
+
 def start(f):
     if os.environ.get('RS6_BUSYBOX'):
         (f.p/'poison/mv').symlink_to(os.environ['RS6_BUSYBOX'])
@@ -45,7 +50,7 @@ with LiveFixture() as f:
     shutil.rmtree(f.live)
     installed=f.prefix/'opt/lib/vward';installed.mkdir(parents=True)
     for lib in LIBDIR.glob('*.sh'):shutil.copy2(lib,installed/lib.name)
-    before=f.native.read_bytes()
+    before=f.native.read_bytes();startup=f.startup.read_bytes()
     p=None;q=None
     try:
         p,publisher,stage,resume=start(f)
@@ -77,7 +82,7 @@ printf 'late-root-refused\n'
         assert f.live.is_dir() and not stage.exists()
         assert (f.live/'decision/version.tsv').read_text()=='routing-state\t0\n'
         assert not (f.live/'.bootstrap/completion').exists(),'dead parent invented root-publication ACK'
-        assert f.native.read_bytes()==before and not f.calls.exists(),'late bootstrap touched native routing'
+        observation_only(f,before,startup)
         finish.touch();out,err=q.communicate(timeout=8)
         assert q.returncode==0 and b'late-root-refused' in out,(q.returncode,out,err)
         retained=digest(f.live)
@@ -89,6 +94,7 @@ printf 'late-root-refused\n'
 for foreign in ('empty','matching','extra'):
     with LiveFixture() as f:
         shutil.rmtree(f.live)
+        before=f.native.read_bytes();startup=f.startup.read_bytes()
         p=None
         try:
             p,publisher,stage,resume=start(f)
@@ -100,6 +106,6 @@ for foreign in ('empty','matching','extra'):
             assert p.returncode==75,(foreign,p.returncode,out,err)
             assert f.live.stat().st_ino==inode and digest(f.live)==retained,(foreign,'foreign directory changed/nested/adopted')
             assert stage.is_dir() and not (f.live/'.bootstrap/completion').exists()
-            assert not f.calls.exists(),'refused bootstrap queried/changed native state'
+            observation_only(f,before,startup)
         finally:stop(p)
 print('LIVE_BOOTSTRAP_LIFETIME=PASS actual publisher survives parent-only kill under CHANGE; updater refuses late0; empty/matching/extra foreign roots preserved')

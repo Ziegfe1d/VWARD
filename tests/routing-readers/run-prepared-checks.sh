@@ -25,6 +25,11 @@ for CASE in \
     check-live-membership.py \
     check-service-withdrawal.py \
     check-live-bootstrap.py \
+    check-live-first-request.py \
+    check-live-cold-map.py \
+    check-live-cold-map-lifetime.py \
+    check-live-import-attribution.py \
+    check-live-bootstrap-ancestry.py \
     check-live-bootstrap-lifetime.py \
     check-live-transport.py \
     check-live-transport-faults.py \

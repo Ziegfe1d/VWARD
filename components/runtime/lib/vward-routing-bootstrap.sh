@@ -7,6 +7,7 @@ vrl_init_parent() {
     # identity, not inherited $$, authorizes the still-held shared locks.
     [ "${vrb_edit:-0}" = 1 ] && [ "${vrb_change:-0}" = 1 ] || return 75
     : "${vrl_root:?}" "${vrb_edit_path:?}" "${vrb_change_path:?}" "${vrj2_me:?}" "${vrj2_start:?}" "${vrj2_boot:?}"
+    vrl_init_ancestry || return 75
     [ ! -e "$vrl_root" ] && [ ! -L "$vrl_root" ] || return 75
     for vrl_ip_lock in "$vrb_edit_path" "$vrb_change_path"; do
         vrj_dir "$vrl_ip_lock" && vrj2_file "$vrl_ip_lock/owner" && vrj2_file "$vrl_ip_lock/owner.sha" &&
@@ -25,6 +26,14 @@ vrl_init_base() {
     vrl_paths_bind || return 75
     [ "$#" -eq 1 ] && [ "$1" = "$vrl_root/journal" ] || return 75
     [ ! -e "$vrl_root" ] && [ ! -L "$vrl_root" ] || return 75
+    vrl_init_ancestry
+}
+vrl_init_ancestry() (
+    # Recheck before preparation AND inside the final leased publisher.
+    # Candidate and destination are fixed siblings under this same ancestry;
+    # an earlier check cannot authorize a later replacement by an alias.
+    : "${vrl_root:?}"
+    [ "$vrl_root" = "${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing" ] || return 75
     vrl_ib_path=${vrl_root%/*}
     while [ "$vrl_ib_path" != "${VWARD_ROOT_PREFIX:-}/opt" ]; do
         [ -d "$vrl_ib_path" ] && [ ! -L "$vrl_ib_path" ] && [ -O "$vrl_ib_path" ] || return 75
@@ -36,7 +45,7 @@ vrl_init_base() {
         [ -n "$vrl_ib_path" ] || return 75
     done
     [ -d "$vrl_ib_path" ] && [ -O "$vrl_ib_path" ]
-}
+)
 vrl_init_seal_valid() (
     : "${vrb_op:?}"
     [ "$#" -eq 1 ] && vrj_dir "$1" && vrj_dir "$1/.bootstrap" && vrj_dir "$1/journal" || return 75
@@ -74,6 +83,19 @@ vrl_init_publish() (
     # transfer and source absence: a no-clobber success is NOT publication ACK.
     exec mv -nT "$1" "$vrl_root"
 )
+vrl_init_prepare() {
+    # A failed read/compile cannot strand an unusable canonical root. These
+    # observations are the SAME importer, prepared under the real shared locks;
+    # only the acknowledged-root owner may execute their metadata-only J2.
+    : "${vrl_etc:?}"
+    vrl_init_parent && vrj2_file "$vrl_etc/device.conf" || return 75
+    vrl_map_prepare || return 75
+    vrl_observation_read || return 75
+    mkdir "$1/journal/.migrations" || return 1
+    vrl_ip_work=$1/journal/.migrations/$vrb_op
+    vrb_legacy_prepare "$vrl_ip_work" "$1/decision" || return 75
+    vrb_compile_state_set "$vrl_ip_work/stage" "$1/decision" "$vrl_ip_work/after" "$vrl_ip_work/lowered" '' || return 75
+}
 vrl_init_root() {
     vrl_init_parent || return 75
     vrl_boot_stage=$(mktemp -d "${vrl_root%/*}/.routing-init.XXXXXX") || return 1
@@ -85,6 +107,7 @@ vrl_init_root() {
         vr2_hash "$vrl_boot_stage/.bootstrap/decision" > "$vrl_boot_stage/.bootstrap/decision.sha" &&
         printf '%s\t%s\t%s\t%s\n' "$vrb_op" "$vrj2_me" "$vrj2_start" "$vrj2_boot" > "$vrl_boot_stage/.bootstrap/parent" &&
         vr2_hash "$vrl_boot_stage/.bootstrap/parent" > "$vrl_boot_stage/.bootstrap/parent.sha" && vrj2_flush || return 1
+    vrl_init_prepare "$vrl_boot_stage" || return 75
     # Numeric metadata only. The candidate is on the same installed filesystem.
     # shellcheck disable=SC2012
     vrl_ir_inode=$(ls -di "$vrl_boot_stage" | awk '{print $1}') || return 75
@@ -109,5 +132,8 @@ vward_routing_live_bootstrap() (
     [ "$#" -eq 1 ] && vrj2_id "$1" || return 75
     vrl_bind
     vrl_envelope "${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing/journal" "$1" bootstrap || return 75
-    vrb_legacy_migrate_locked
+    : "${vrb_j:?}"
+    # Inode transfer preserved the staged decision/source generation. The real
+    # executor still takes a fresh generation/CAS before any metadata write.
+    vrb_execute2 "$vrb_j/.migrations/$vrb_op/lowered"
 )

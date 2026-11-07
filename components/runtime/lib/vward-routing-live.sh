@@ -33,7 +33,7 @@ vrl_legacy_source() {
     case $1 in
         cfg) vrb_native_path ;;
         dev) printf '%s/device.conf\n' "$vrl_etc" ;;
-        map) printf '%s/tmp/vward-device-map.tsv\n' "${VWARD_ROOT_PREFIX:-}" ;;
+        map) : "${vrl_map:?}";printf '%s\n' "$vrl_map" ;;
         enabled) printf '%s/services/enabled.tsv\n' "$vrl_etc" ;;
         categories) printf '%s/services/categories.tsv\n' "$vrl_etc" ;;
         persist) printf '%s/opt/var/lib/vward/route-engine/adaptive-persist.txt\n' "${VWARD_ROOT_PREFIX:-}" ;;
@@ -90,6 +90,10 @@ vrl_path_gate() (
 
 vrl_refresh() {
     vrl_ready "$vrb_j" || return 75
+    vrl_observation_read
+}
+vrl_observation_read() {
+    : "${vrl_cache:?}" "${vrl_ndmc:?}"
     vrl_dns_observe || return 75
     vrl_rf_tmp=$(mktemp "$vrl_cache/.native-read.XXXXXX") || return 1
     if ! "$vrl_ndmc" -c 'show running-config' > "$vrl_rf_tmp" 2> "$vrl_rf_tmp.stderr"; then
@@ -325,7 +329,6 @@ vrl_envelope() {
     [ ! -e "${VWARD_ROOT_PREFIX:-}/tmp/vward-update-requested" ] && [ ! -L "${VWARD_ROOT_PREFIX:-}/tmp/vward-update-requested" ] &&
         [ ! -e "${VWARD_ROOT_PREFIX:-}/tmp/vward-update.lock" ] && [ ! -L "${VWARD_ROOT_PREFIX:-}/tmp/vward-update.lock" ] || return 75
     vward_routing_legacy_recovery_gate || return 75
-    if [ "${3:-}" = bootstrap ]; then vrl_init_root || return 75;fi
     # Forward admission belongs to the actual pipeline/server/migration entry:
     # each checks journal2_gate BEFORE plan/state/native writes. Repeating that
     # global gate here would also prevent explicit own recovery from inspecting
@@ -336,8 +339,38 @@ vrl_envelope() {
     VWARD_CONSOLE_ETC=$vrl_etc
     VWARD_ROUTING_AGH_IMAGE=$vrl_cache/agh.json
     VWARD_ROUTING_AGH_DOMAINS=$vrl_cache/agh-domains
-    export VWARD_KCACHE RUNCFG VWARD_CONSOLE_ETC VWARD_ROUTING_AGH_IMAGE VWARD_ROUTING_AGH_DOMAINS
+    vrl_map=${VWARD_ROOT_PREFIX:-}/tmp/vward-device-map.tsv
+    VWARD_DEVICE_MAP_CACHE=$vrl_map
+    export VWARD_KCACHE RUNCFG VWARD_CONSOLE_ETC VWARD_ROUTING_AGH_IMAGE VWARD_ROUTING_AGH_DOMAINS VWARD_DEVICE_MAP_CACHE
+    if [ "${3:-}" = bootstrap ]; then vrl_init_root || return 75;fi
     vrb_revocations_gate "$vrb_j" "$vrb_e/decision" || return 75
+}
+
+vrl_cold_map_bind() {
+    : "${vrl_cache:?}"
+    # A surviving discovery may write only this unique private observation.
+    # It has no shared-map publication authority or mutable request path.
+    vrl_map=$vrl_cache/device-map.tsv
+    VWARD_DEVICE_MAP_CACHE=$vrl_map
+    export VWARD_DEVICE_MAP_CACHE
+}
+
+vrl_map_prepare() {
+    vrl_mp_map=$(vrl_legacy_source map) || return 75
+    if [ ! -e "$vrl_mp_map" ] && [ ! -L "$vrl_mp_map" ]; then
+        # The existing discovery writes only a unique private RAM observation;
+        # a child surviving its parent cannot replace a newer shared map.
+        vrb_data_ancestry "$vrl_mp_map" || return 75
+        vrl_cold_map_bind || return 75
+        vrl_mp_map=$(vrl_legacy_source map) || return 75
+        (vward_device_map >/dev/null) || return 75
+    fi
+    [ -f "$vrl_mp_map" ] && [ ! -L "$vrl_mp_map" ] && [ -O "$vrl_mp_map" ] && [ -r "$vrl_mp_map" ] || return 75
+    # Public interface-map data may be0644; other users cannot supply its bytes.
+    # shellcheck disable=SC2012
+    case $(ls -ldn "$vrl_mp_map" | awk '{print substr($1,1,10)}') in
+        -rw-------|-r--------|-rw-r--r--|-r--r--r--) ;; *) return 75 ;;
+    esac
 }
 
 # Bind fixed functions only inside this explicitly invoked coordinator process.

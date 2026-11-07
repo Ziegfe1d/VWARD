@@ -20,6 +20,7 @@ class LiveFixture(PipelineFixture):
         for name in ('enabled.tsv','categories.tsv'):
             shutil.copy2(self.e/'services'/name,self.etc/'services'/name)
         shutil.copy2(self.e/'device.conf',self.etc/'device.conf')
+        (self.etc/'device.conf').chmod(0o600)
         (self.prefix/'tmp').mkdir()
         shutil.copy2(self.e/'device-map.tsv',self.prefix/'tmp/vward-device-map.tsv')
         (self.prefix/'tmp/vward-device-map.tsv').write_text(''.join(
@@ -131,6 +132,30 @@ if (base/'native-lost-reply').exists() and (base/'native-lost-reply').read_text(
         # a failed console test must not leave native publishers in later tests.
         return self.run('exec "$@"',*SHELL,str(getattr(self,'console_path',ROOT/'components/console/scripts/vward-console-config.sh')),*args,
                         env=env,timeout=45)
+
+    def install_rci(self):
+        """Existing profile discovery uses a show-only curl fixture, no network."""
+        curl=self.p/'rci-curl-fixture'
+        curl.write_text('''#!/usr/bin/env python3
+import json,pathlib,sys,time
+from urllib.parse import urlsplit,parse_qs
+p=pathlib.Path(__file__).parent
+u=urlsplit(sys.argv[-1]);q=parse_qs(u.query)
+with (p/'rci.calls').open('a') as out:out.write(u.path+'?'+u.query+'\\n')
+if (p/'rci-unavailable').exists():sys.exit(22)
+names={'Wireguard0':('Wireguard','nwg0','private'),'Wireguard1':('Wireguard','nwg1','private'),'GigabitEthernet1':('GigabitEthernet','eth3','public')}
+if u.path=='/rci/show/interface' and not q:
+    if (p/'rci-pause').exists():
+        (p/'rci-paused').touch()
+        while not (p/'rci-resume').exists():time.sleep(.02)
+    print(json.dumps({n:{'type':t,'security-level':s} for n,(t,k,s) in names.items()}))
+elif u.path=='/rci/show/interface/system-name' and set(q)=={'name'} and len(q['name'])==1 and q['name'][0] in names:
+    print(json.dumps(names[q['name'][0]][1]))
+else:sys.exit(23)
+''')
+        curl.chmod(0o755)
+        self.env|={'VWARD_CURL_BIN':str(curl),'VWARD_RCI_BASE':'http://127.0.0.1:79/rci',
+                   'VWARD_RCI_CALLS':str(self.p/'rci-count'),'VWARD_RCI_FAIL_LOG':str(self.p/'rci-fail')}
 
     def install_console(self):
         """Copy actual candidate closure, as deployed, without changing map."""
