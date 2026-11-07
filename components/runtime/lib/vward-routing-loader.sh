@@ -1,6 +1,14 @@
 #!/bin/sh
 # Fixed installed dependency closure. No executor path is an API argument;
 # sourcing this loader only defines functions and never changes native state.
+vward_routing_source_trusted() {
+    [ "$#" -eq 1 ] && [ -f "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] && [ -r "$1" ] || return 75
+    # shellcheck disable=SC2012
+    case $(ls -ldn "$1" | awk '{print substr($1,1,10)}') in
+        -rw-------|-r--------|-rwx------|-r-x------|-rw-r-----|-rwxr-x---|-rw-r--r--|-rwxr-xr-x|-r-xr-xr-x) return 0 ;;
+        *) return 75 ;;
+    esac
+}
 vward_routing_modules_load() {
     case ${1:-} in /*) ;; *) return 75 ;; esac
     [ -d "$1" ] && [ ! -L "$1" ] || return 75
@@ -12,10 +20,35 @@ vward-routing-lifecycle.sh vward-routing-legacy.sh vward-routing-state.sh
 vward-routing-outcome.sh vward-routing-dispatch.sh vward-routing-pipeline.sh
 vward-routing-admission.sh'
     for vrload_file in $vrload_names; do
-        [ -f "$1/$vrload_file" ] && [ ! -L "$1/$vrload_file" ] &&
-            [ -O "$1/$vrload_file" ] && [ -r "$1/$vrload_file" ] || return 75
+        vward_routing_source_trusted "$1/$vrload_file" || return 75
     done
     for vrload_file in $vrload_names; do
+        # shellcheck source=/dev/null
+        . "$1/$vrload_file" || return 75
+    done
+}
+
+# Full live closure is distinct from a legacy permission observation. Its
+# deployment capsule is signed package data, not a mode/backend API switch.
+vward_routing_live_modules_load() {
+    [ "$#" -eq 1 ] && [ "$1" = "${VWARD_ROOT_PREFIX:-}/opt/lib/vward" ] &&
+        [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] || return 75
+    for vrload_parent in "$1" "${1%/*}"; do
+        [ -d "$vrload_parent" ] && [ ! -L "$vrload_parent" ] && [ -O "$vrload_parent" ] || return 75
+        # shellcheck disable=SC2012
+        case $(ls -ldn "$vrload_parent" | awk '{print substr($1,1,10)}') in
+            drwx------|drwxr-x---|drwxr-xr-x|drwx--x--x) ;; *) return 75 ;;
+        esac
+    done
+    vrload_cap=$1/routing-capabilities.tsv
+    vward_routing_source_trusted "$vrload_cap" &&
+        printf 'routing-runtime\t2\n' | cmp -s - "$vrload_cap" || return 75
+    vrload_live='vward-device-profile.sh vward-routing-live.sh vward-routing-live-agh.sh vward-routing-bootstrap.sh vward-routing-inputs.sh vward-routing-command.sh'
+    for vrload_file in $vrload_live; do
+        vward_routing_source_trusted "$1/$vrload_file" || return 75
+    done
+    vward_routing_modules_load "$1" || return 75
+    for vrload_file in $vrload_live; do
         # shellcheck source=/dev/null
         . "$1/$vrload_file" || return 75
     done

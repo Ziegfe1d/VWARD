@@ -51,6 +51,11 @@ vward_routing_read() (
             vrr_meta=$(ls -ln "$vrr_proof" 2>/dev/null | awk '{print $1}')
             case "$vrr_meta" in -rw-------|-r--------) printf 'private\t%s\n' "${vrr_proof##*/}" ;; esac
         done
+        # Category pins are optional in the existing console: exact absence
+        # selects the profile default. Bad/unreadable/alias files stay unknown.
+        if [ ! -e "$VRR_ETC/services/categories.tsv" ] && [ ! -L "$VRR_ETC/services/categories.tsv" ]; then
+            printf 'optional-absent\tcategories\n'
+        fi
         # A durable pending/reservation after reboot makes the observation unknown.
         for vrr_pending in "$VRR_BACKUP"/service-transactions/*/pending "$VRR_BACKUP-recovery"/smartdns.*; do
             if [ -e "$vrr_pending" ] || [ -L "$vrr_pending" ]; then printf 'pending\t1\n'; fi
@@ -236,6 +241,7 @@ vward_routing_read() (
         else {nc++; cid[nc]=$2; ccat[nc]=$3; cd[nc]=tolower($4)}; next
     }
     $1=="readable" && NF==2 {readable[$2]=1;next}
+    $1=="optional-absent" && $2=="categories" && NF==2 {categories_absent=1;next}
     $1=="private" && id($2) {private[$2]=1;next}
     $1=="proofpresent" && id($2) {proofpresent[$2]=1;next}
     $1=="pending" {pending=1;next}
@@ -244,6 +250,7 @@ vward_routing_read() (
         load(ENVIRON["VRR_DEV"],"dev"); load(ENVIRON["VRR_MAP"],"map")
         load(ENVIRON["VRR_CFG"],"cfg"); load(ENVIRON["VRR_AGH"],"agh")
         load(etc "/services/enabled.tsv","enabled"); load(etc "/services/categories.tsv","categories")
+        if(categories_absent)known["categories"]=1
         load(state "/adaptive-persist.txt","persist")
         mk=known["cfg"] ? "known":"unknown"; sk=known["enabled"] ? "known":"unknown"
         ak=known["persist"] ? "known":"unknown"

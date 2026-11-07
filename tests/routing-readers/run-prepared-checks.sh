@@ -16,6 +16,13 @@ for CASE in \
     check-native-compiler.py \
     check-native-dns-compiler.py \
     check-live-default-binding.py \
+    check-vpn-selector.py \
+    check-optional-category.py \
+    check-live-loader-trust.py \
+    check-live-console-entry.py \
+    check-live-inputs.py \
+    check-live-membership.py \
+    check-service-withdrawal.py \
     check-live-bootstrap.py \
     check-live-bootstrap-lifetime.py \
     check-live-transport.py \

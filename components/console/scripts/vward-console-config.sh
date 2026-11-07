@@ -310,6 +310,38 @@ routing_gate_load() {
     # shellcheck source=/dev/null
     . "$_crg_lib"
 }
+# Run before OLD EDIT/CHANGE acquisition: the fixed coordinator owns its own
+# admission/locks and calls internal workers, never a second console CLI.
+routing_live_dispatch() {
+    [ "$OP" = service ] || return 0
+    case $ARG1 in on|tunnel|off) ;; *) return 0 ;; esac
+    rld_lib=${VWARD_ROOT_PREFIX:-}/opt/lib/vward
+    if [ ! -e "$rld_lib/routing-capabilities.tsv" ] && [ ! -L "$rld_lib/routing-capabilities.tsv" ] &&
+       [ ! -e "$rld_lib/vward-routing-command.sh" ] && [ ! -L "$rld_lib/vward-routing-command.sh" ]; then return 0;fi
+    [ -f "$rld_lib/vward-routing-loader.sh" ] && [ ! -L "$rld_lib/vward-routing-loader.sh" ] &&
+        [ -O "$rld_lib/vward-routing-loader.sh" ] || die routing_unavailable 75
+    # This first source cannot rely on a helper inside the yet-untrusted file.
+    for rld_parent in "$rld_lib" "${rld_lib%/*}"; do
+        [ -d "$rld_parent" ] && [ ! -L "$rld_parent" ] && [ -O "$rld_parent" ] || die routing_unavailable 75
+        # shellcheck disable=SC2012
+        case $(ls -ldn "$rld_parent" | awk '{print substr($1,1,10)}') in
+            drwx------|drwxr-x---|drwxr-xr-x|drwx--x--x) ;; *) die routing_unavailable 75 ;;
+        esac
+    done
+    # shellcheck disable=SC2012
+    case $(ls -ldn "$rld_lib/vward-routing-loader.sh" | awk '{print substr($1,1,10)}') in
+        -rw-------|-r--------|-rwx------|-r-x------|-rw-r-----|-rwxr-x---|-rw-r--r--|-rwxr-xr-x|-r-xr-xr-x) ;; *) die routing_unavailable 75 ;;
+    esac
+    # shellcheck source=/dev/null
+    . "$rld_lib/vward-routing-loader.sh" || die routing_unavailable 75
+    vward_routing_live_modules_load "$rld_lib" || die routing_unavailable 75
+    rld_rc=0;rld_out=$(vward_routing_live_command "$ARG1" "$ARG2" "$ARG3") || rld_rc=$?
+    [ "$rld_rc" = 0 ] || { [ -z "$rld_out" ] || printf '%s\n' "$rld_out";die routing_not_applied "$rld_rc"; }
+    rld_result=changed
+    if printf '%s\n' "$rld_out" | grep -q '^outcome[[:space:]]unchanged[[:space:]]'; then rld_result=unchanged;fi
+    done_ok "service $ARG1 $ARG2 common routing" "$rld_result"
+}
+
 routing_native_check() {
     _crg_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
     [ -e "$_crg_root" ] || [ -L "$_crg_root" ] || return 0
@@ -5521,6 +5553,7 @@ ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 . "$ADMISSION_LIB"
 command -v vward_agent_acts >/dev/null 2>&1 || vward_agent_acts() { return 0; }
 vward_admission_enter console-config || die updater_busy 75
+routing_live_dispatch
 routing_operation_check
 
 # Register every descendant before it can write. If its original AI parent died

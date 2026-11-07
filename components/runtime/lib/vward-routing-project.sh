@@ -197,6 +197,38 @@ vr2_dns_owned_authority() (
 
 # STAGE SID CANONICAL_NEXT_CHOICES OUTDIR -> OUTDIR/atoms.tsv, policy.tsv.
 # Atoms keep unknown membership/client policy explicit. This does not claim ownership.
+# A retired catalog entry cannot authorize on. Explicit vpn->auto withdrawal
+# may use only an already accepted, exact PRIVATE own scope. This also proves
+# that every legacy service registration is a projection of canonical state;
+# a missing/foreign/unknown registration never disappears behind this bridge.
+vr2_own_service_withdrawal() (
+    [ "$#" -eq 3 ] && vr2_stage_valid "$1" || return 75
+    awk -F'\t' -v sid="$2" '
+        function refs(s,r){return index("," s ",",",S:" r ",")>0}
+        function prefix(s,a,n,i,r){n=split(s,a,"\t");r=a[1];for(i=2;i<=10;i++)r=r "\t" a[i];return r}
+        FILENAME==ARGV[1]{if($1=="service"){mode[$2]=$4;target[$2]=$5}next}
+        FILENAME==ARGV[2]{if($1=="service" && $2==sid && $4=="auto")withdraw=1;next}
+        FILENAME==ARGV[3]{proof[$2]=prefix($0);next}
+        FILENAME==ARGV[4]{
+            if(refs($11,sid) && ($1!="route" || $9!="vward" || proof[$2]!=prefix($0)))bad=1
+            if($1=="route" && $9=="vward" && proof[$2]==prefix($0)){
+                g=$3;sub(/^group:/,"",g);key=g SUBSEP $4 SUBSEP $6
+                own[key]=$11;expected[g]++;if(refs($11,sid))requested++
+            }next
+        }
+        FILENAME==ARGV[5]{if($1=="resource"){
+            g=$3;actual[g]++;key=g SUBSEP $4 SUBSEP $6
+            if($5=="exact" && $7=="default" && $8=="vward" && $10=="verified" && (key in own)){
+                matched[g]++;native_refs[g]=native_refs[g] "," own[key]
+            }
+        }next}
+        {if(NF!=3 || seen[$1]++ || mode[$1]!="vpn" ||
+            !((target[$1]=="VPN:auto" && $3=="auto") || target[$1]=="VPN:" $3) ||
+            actual[$2]<1 || actual[$2]!=expected[$2] || actual[$2]!=matched[$2] || !refs(native_refs[$2],$1))bad=1;n++}
+        END{exit bad || mode[sid]!="vpn" || !withdraw || requested<1 || n<1}' \
+        "$1/decision/choices.tsv" "$3" "$1/decision/proofs.tsv" "$1/decision/resources.tsv" "$1/inventory.tsv" "$1/enabled.tsv"
+)
+
 vward_routing_project2() (
     umask 077
     [ "$#" -eq 4 ] || return 2
@@ -227,8 +259,12 @@ vward_routing_project2() (
     vr2_old_rev=$(awk -F'\t' -v s="$2" '$1=="service" && $2==s {print $3;found=1} END{if(!found)print 0}' "$1/decision/choices.tsv")
     vward_routing_choice "$1/decision/choices.tsv" "$2" "$5" "$6" "$7" "$vr2_old_rev" > "$vr2_tmp/expected" || return 2
     cmp -s "$vr2_tmp/expected" "$vr2_tmp/choices" || return 3
-    VWARD_B_SID=$2 LC_ALL=C awk '
-    BEGIN {FS=OFS="\t";sid=ENVIRON["VWARD_B_SID"]}
+    vr2_withdraw=0
+    if [ "$5" = auto ]; then
+        vr2_own_service_withdrawal "$1" "$2" "$vr2_tmp/choices" && vr2_withdraw=1
+    fi
+    VWARD_B_SID=$2 VWARD_B_WITHDRAW=$vr2_withdraw LC_ALL=C awk '
+    BEGIN {FS=OFS="\t";sid=ENVIRON["VWARD_B_SID"];withdraw=ENVIRON["VWARD_B_WITHDRAW"]==1}
     function id(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/}
     function refid(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:@-]*$/}
     function service(s) {return length(s)<=63 && s ~ /^[a-z0-9][a-z0-9.@_-]*$/}
@@ -239,6 +275,14 @@ vward_routing_project2() (
         return 1
     }
     function covers(p,d,s) {return p==d || (s=="subtree" && length(d)>length(p) && substr(d,length(d)-length(p))=="." p)}
+    function selected_target(s,t, k,r) {
+        if(t!="VPN:auto")return t
+        k="service-vpn:" s
+        r=(k in ctx)?ctx[k]:ctx["default-vpn"]
+        # Preserve the logical selector in choices. Only this projection may
+        # resolve it using captured inputs; unknown never becomes Provider.
+        return r~/^VPN:/ && id(substr(r,5)) && r!="VPN:auto" ? r : "VPN:auto"
+    }
     function emit(line) {if(++out_n>4096 || (out_bytes+=length(line)+1)>1048576) exit 2;print line}
     function binding(s,d, i,result) {
         result="none"
@@ -326,9 +370,9 @@ vward_routing_project2() (
             if(member=="none" && !own[d]) continue
             if(++nd>1024) exit 2
             sc=(d in scope) ? scope[d] : "exact";why="-"
-            if(member=="unknown") why="membership-unknown"
+            if(member=="unknown" && !(withdraw && own[d])) why="membership-unknown"
             if(ctx["source:S"]!="0" && ctx["source:S"]!="1" && mode[sid]!="auto") why="service-source-unknown"
-            for(src in native_unknown) if(ctx["source:" src]!="0") why="native-source-unknown"
+            for(src in native_unknown) if(ctx["source:" src]!="0" && !(src=="S" && withdraw)) why="native-source-unknown"
             for(i=1;i<=ne;i++) if(covers(ed[i],d,escp[i]) && selected[i]==1 &&
                 ctx["source:" es[i]]!="0" && ctx["source:" es[i]]!="1") why="source-unknown"
             for(s in mode) if(s!=sid && mode[s]!="auto") {
@@ -336,12 +380,13 @@ vward_routing_project2() (
                 if(peer=="unknown") why="peer-membership-unknown"
                 if(peer=="confirmed" && ctx["source:S"]!="0" && ctx["source:S"]!="1") why="service-source-unknown"
             }
-            m=mode[sid];t=tgt[sid];p=dns[sid]
+            m=mode[sid];t=selected_target(sid,tgt[sid]);p=dns[sid]
             # A global source switch disables its contribution, not the saved
             # owner choice. Re-enabling S uses that same accepted choice. M/A
             # still pass through the real common policy, including its floor.
             if(ctx["source:S"]=="0") {m="auto";t=p="-"}
             if(member=="none" || member=="excluded") {m="auto";t=p="-"}
+            if(m=="vpn" && t=="VPN:auto" && why=="-")why="default-vpn-unknown"
             emit("atom" OFS d OFS sc OFS m OFS t OFS p OFS rev[sid] OFS floor[sid] OFS why)
             for(i=1;i<=ne;i++) if(covers(ed[i],d,escp[i])) {
                 if(i in common_native) continue
@@ -356,7 +401,7 @@ vward_routing_project2() (
                 emit("intent" OFS d OFS es[i] OFS er[i] OFS et[i] OFS ep[i] OFS sel OFS k OFS epoch[i] OFS membership)
             }
             for(s in mode) if(s!=sid && mode[s]!="auto" && binding(s,d)=="confirmed")
-                emit("intent" OFS d OFS "S" OFS s OFS tgt[s] OFS dns[s] OFS (ctx["source:S"]=="1" ? 1 : 0) OFS "explicit" OFS 0 OFS "peer")
+                emit("intent" OFS d OFS "S" OFS s OFS selected_target(s,tgt[s]) OFS dns[s] OFS (ctx["source:S"]=="1" ? 1 : 0) OFS "explicit" OFS 0 OFS "peer")
         }
     }' "$vr2_tmp/choices" "$1/decision/bindings.tsv" "$1/decision/evidence.tsv" "$1/decision/context.tsv" \
         "$1/decision/resources.tsv" "$1/intents.tsv" "$1/snapshot.tsv" "$1/inventory.tsv" "$1/decision/proofs.tsv" "$1/identity.tsv" "$1/probes.tsv" > "$vr2_tmp/input" || return 2

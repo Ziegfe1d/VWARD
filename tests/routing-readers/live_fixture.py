@@ -42,6 +42,11 @@ assert len(sys.argv)==3 and sys.argv[1]=='-c'
 cmd=sys.argv[2]
 with (base/'native.commands').open('a') as out: out.write(str(os.getpid())+'\\t'+cmd+'\\n')
 if cmd=='show running-config': print(cfg.read_text(),end='');sys.exit(0)
+if cmd.startswith('show interface '):
+    name=cmd.removeprefix('show interface ')
+    if (base/('interface-unknown-'+name)).exists() or ('interface '+name+'\\n') not in cfg.read_text():
+        print('Command:: unknown interface');sys.exit(1)
+    print('state: up\\nlink: up\\nonline: unknown');sys.exit(0)
 def pause(phase):
     control=base/('native-pause-'+phase)
     if control.exists() and control.read_text().strip()==cmd:
@@ -115,11 +120,27 @@ if (base/'native-lost-reply').exists() and (base/'native-lost-reply').read_text(
                           'VWARD_TUNNEL_INTERFACE=Wireguard0\nVWARD_TUNNEL_DEVICE=nwg0\n'
                           'VWARD_POLICY_GROUP=Mine\n')
         device.chmod(0o600)
-        env=self.env|{'VWARD_PROFILE_LIB':str(LIBDIR/'vward-device-profile.sh'),
-                      'VWARD_ADMISSION_LIB':str(LIBDIR/'vward-runtime-admission.sh'),
+        env=self.env|{'VWARD_PROFILE_LIB':self.env.get('VWARD_PROFILE_LIB',str(LIBDIR/'vward-device-profile.sh')),
+                      'VWARD_ADMISSION_LIB':self.env.get('VWARD_ADMISSION_LIB',str(LIBDIR/'vward-runtime-admission.sh')),
                       'VWARD_DEVICE_CONFIG_OWNER_UID':str(os.getuid()),
                       'VWARD_CONSOLE_EDIT_LOCK':str(self.prefix/'tmp/vward-console-edit.lock'),
                       'VWARD_ROUTE_CHANGE_LOCK':str(self.prefix/'tmp/vward-route-change.lock'),
                       'VWARD_CONSOLE_AUDIT_LOG':str(self.p/'console-audit')}
-        return subprocess.run(SHELL+[str(ROOT/'components/console/scripts/vward-console-config.sh'),*args],
-                              env=env,capture_output=True,text=True,timeout=45)
+        # The shared fixture runner reaps OUR whole process group on timeout;
+        # a failed console test must not leave native publishers in later tests.
+        return self.run('exec "$@"',*SHELL,str(getattr(self,'console_path',ROOT/'components/console/scripts/vward-console-config.sh')),*args,
+                        env=env,timeout=45)
+
+    def install_console(self):
+        """Copy actual candidate closure, as deployed, without changing map."""
+        lib=self.prefix/'opt/lib/vward';lib.mkdir(parents=True)
+        for source in LIBDIR.glob('*.sh'):
+            dest=lib/source.name;shutil.copy2(source,dest);dest.chmod(0o644)
+        shutil.copy2(ROOT/'config/runtime/routing-capabilities.tsv',lib/'routing-capabilities.tsv')
+        (lib/'routing-capabilities.tsv').chmod(0o644)
+        binpath=self.prefix/'opt/bin';binpath.mkdir()
+        self.console_path=binpath/'vward-console-config.sh'
+        shutil.copy2(ROOT/'components/console/scripts/vward-console-config.sh',self.console_path)
+        self.console_path.chmod(0o755)
+        self.env|={'VWARD_PROFILE_LIB':str(lib/'vward-device-profile.sh'),
+                   'VWARD_ADMISSION_LIB':str(lib/'vward-runtime-admission.sh')}

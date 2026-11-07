@@ -138,20 +138,21 @@ vward_routing_lower2() (
     done
     # The old services view remains a projection; DNS/ISP are not service-on.
     awk -F'\t' 'BEGIN{OFS="\t"}
-        FILENAME==ARGV[1] || FILENAME==ARGV[2] {
+        FILENAME==ARGV[1] {if($1=="service" && $4=="vpn" && $5=="VPN:auto")automatic[$2]=1;next}
+        FILENAME==ARGV[2] || FILENAME==ARGV[3] {
             if($1!="route" || $9!="vward")next
             n=split($11,refs,",");g=$3;sub(/^group:/,"",g)
             for(i=1;i<=n;i++)if(refs[i]~/^S:/) {
                 s=substr(refs[i],3)
-                if(FILENAME==ARGV[1])prior[s SUBSEP g]=1
-                else {v=s OFS g OFS substr($6,5);if(s in desired && desired[s]!=v)bad=1;desired[s]=v}
+                if(FILENAME==ARGV[2])prior[s SUBSEP g]=1
+                else {v=s OFS g OFS (automatic[s]?"auto":substr($6,5));if(s in desired && desired[s]!=v)bad=1;desired[s]=v}
             }next
         }
         {if(($1 SUBSEP $2) in prior)next
             if($1 in desired) {if($0!=desired[$1])bad=1;next}
             keep[++nk]=$0}
         END{if(bad)exit 75;for(i=1;i<=nk;i++)print keep[i];for(s in desired)print desired[s]}' \
-        "$3/resources.before" "$3/resources.after" "$1/enabled.tsv" > "$3/enabled.unsorted" || return 75
+        "$3/choices.after" "$3/resources.before" "$3/resources.after" "$1/enabled.tsv" > "$3/enabled.unsorted" || return 75
     LC_ALL=C sort "$3/enabled.unsorted" > "$3/enabled.after" || return 1
     cmp -s "$1/enabled.tsv" "$3/enabled.after" || vrb_emit registry enabled "$1/enabled.tsv" "$3/enabled.after" generation,identity,postimage || return 1
     vrj2_plan_valid "$3/plan" || return 2

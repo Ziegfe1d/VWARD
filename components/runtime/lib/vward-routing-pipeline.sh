@@ -606,6 +606,7 @@ vrb_transport_refresh() { cp "$(vrb_native_path)" "$vrb_e/running-config"; }
 vrb_transport_saved() { cmp -s "$(vrb_native_path)" "$vrb_e/saved.cfg"; }
 vrb_transport_requests_quiet() { return 0; }
 vrb_scope_derived_deltas() { return 0; }
+vrb_inputs_refresh() { return 0; }
 
 vrb_fresh_stage() {
     # One coherent snapshot per logical scope delta, not per include command.
@@ -697,6 +698,18 @@ vward_routing_pipeline2() (
     vrb_envelope "$1" "$2" || return 75
     vward_routing_state_gate 2 "$vrb_e/decision" || return 75
     vward_journal2_gate "$vrb_j" || return 75
+    if [ "$4" = off ]; then
+        # Validate CAS under the real lock even for an idempotent off. Off of
+        # auto/DNS/ISP has no S-VPN contribution to withdraw and must not turn
+        # an expired catalog/server observation into a write or erase DNS intent.
+        vward_routing_choice "$vrb_e/decision/choices.tsv" "$3" "$4" "$5" "$6" "$7" >/dev/null || return 75
+        vrb_off_mode=$(awk -F'\t' -v s="$3" '$1=="service"&&$2==s {print $4;n++}END{if(!n)print "auto"}' "$vrb_e/decision/choices.tsv") || return 75
+        if [ "$vrb_off_mode" != vpn ]; then
+            printf 'outcome\tunchanged\tdesired-only\tunknown\tfalse\t%s\n' "$(vrb_execution_evidence)"
+            return 0
+        fi
+    fi
+    vrb_inputs_refresh "$3" "$4" "$5" "$6" "$7" || return 75
     vrb_t=$(mktemp -d "$vrb_j/.operation.XXXXXX") || return 1
     # Keep compiled sidecars after failure/crash: recovery never reconstructs a
     # more permissive plan from newly changed policy or an untrusted cache.
