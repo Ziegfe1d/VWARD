@@ -128,34 +128,113 @@ vward_rci_get()
     return 1
 }
 
-# vward_tls_take: curl may be run on HTTPS now (it did not crash within the hour). Not known to
-# work within the hour either: one caller tries first and the others wait for its result (up to
-# 20 s), so a broken curl crashes once, not once per agent starting in the same minute (chaos
-# run: 3 crashes at once). vward_tls_done RC: the result noted (a crash: broken for an hour; an
-# answer: works for an hour), the turn given back. A crash is a signal of curl's own fault (132
-# illegal instruction, 134 abort, 135 bus error, 136 arithmetic, 139 memory); a stop from outside
-# (137, 143: a time limit) or a closed pipe (141) is none (each marked a working curl broken for
-# an hour, Viva 2026-10-17).
+# vward_tls_take [WAIT]: the shared HTTPS turn for curl. 0: THIS caller owns the turn
+# (_vt_mine=1) and may run curl now; it gives the turn back with vward_tls_done. 1: curl crashed
+# on HTTPS within the hour (no curl for an hour). 2: the turn was not given within WAIT seconds -
+# nothing may be concluded from it: a check is UNKNOWN, a download takes its fallback. There is
+# no success without the turn (P0-1, 07.11.2026: a busy turn used to return 0 after the wait).
+# Why a turn: a broken curl crashes once, not once per agent starting in the same minute (chaos
+# run: 3 crashes at once). WAIT: 20 s while curl is not known to work within the hour; 5 s when it
+# is (.ok: no crash code in the last hour - NOT an HTTP success; a check takes at most ~3 s, so a
+# check queued behind another one still gets its turn). A download asks for 20 s itself.
+# The turn is a directory with the owner's «PID START» (field 22 of /proc/PID/stat): a dead owner
+# (killed, crashed shell, PID reused) is taken away at once, a live one only past
+# VWARD_TLS_TURN_MAX_MIN minutes (10: no curl here runs longer than 120 s). A turn without an owner
+# (made before this version, or the instant between mkdir and the owner line) after a minute.
+# vward_tls_done RC: the result noted (a crash: broken for an hour; an end that is no crash:
+# works for an hour) and the turn given back - only the caller's own. A crash is a signal of
+# curl's own fault (132 illegal instruction, 134 abort, 135 bus error, 136 arithmetic, 139 memory);
+# a stop from outside (137, 143: a time limit) or a closed pipe (141) is none (each marked a
+# working curl broken for an hour, Viva 2026-10-17).
+_vward_tls_proc()
+{
+    # FILE (a /proc/PID/stat): _vt_ps = PID START. Read by the builtin: /proc/self is THIS (sub)shell.
+    _vt_ps= _vt_line=
+    read -r _vt_line 2>/dev/null < "$1" || [ -n "$_vt_line" ] || return 1
+    _vt_rest=${_vt_line##*) }
+    [ "$_vt_rest" != "$_vt_line" ] || return 1
+    # shellcheck disable=SC2086
+    set -- $_vt_rest
+    [ "$#" -ge 20 ] || return 1
+    eval "_vt_ps=\"\${_vt_line%% *} \${20}\""
+    case "$_vt_ps" in *[!0-9\ ]*) _vt_ps=; return 1 ;; esac
+}
+
+_vward_tls_reap()
+{
+    # 0: a dead or expired turn was taken away (try mkdir again); 1: the turn is someone's.
+    [ -d "$_vt_lock" ] || return 1
+    # One reaper at a time: two could otherwise judge the same dead turn and the second take
+    # away the new owner's. A reaper that died leaves its empty note: gone after a minute.
+    [ -z "$(find "$_vt_lock.reap" -maxdepth 0 -mmin +1 2>/dev/null)" ] || rmdir "$_vt_lock.reap" 2>/dev/null
+    mkdir "$_vt_lock.reap" 2>/dev/null || return 1
+    _vt_o=
+    [ ! -r "$_vt_lock/owner" ] || read -r _vt_o 2>/dev/null < "$_vt_lock/owner"
+    _vt_dead=1
+    case "$_vt_o" in
+        [0-9]*' '[0-9]*)
+            if _vward_tls_proc "/proc/${_vt_o%% *}/stat" && [ "$_vt_ps" = "$_vt_o" ] &&
+               [ -z "$(find "$_vt_lock" -maxdepth 0 -mmin +"${VWARD_TLS_TURN_MAX_MIN:-10}" 2>/dev/null)" ]; then
+                _vt_dead=0
+            fi ;;
+        *) [ -n "$(find "$_vt_lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] || _vt_dead=0 ;;
+    esac
+    if [ "$_vt_dead" = 1 ] && mv "$_vt_lock" "$_vt_lock.gone.$$" 2>/dev/null; then
+        rm -f "$_vt_lock.gone.$$/owner"; rmdir "$_vt_lock.gone.$$" 2>/dev/null
+        rmdir "$_vt_lock.reap" 2>/dev/null
+        return 0
+    fi
+    rmdir "$_vt_lock.reap" 2>/dev/null
+    return 1
+}
+
 vward_tls_take()
 {
     _vt_flag=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
-    _vt_ok=${_vt_flag%.broken}.ok _vt_lock=${_vt_flag%.broken}.probe _vt_mine=0 _vt_w=0
+    _vt_ok=${_vt_flag%.broken}.ok _vt_lock=${_vt_flag%.broken}.probe _vt_mine=0 _vt_w=0 _vt_r=0
     [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ] || return 1
-    # Known to work: still one at a time for a moment. Two callers at the same second both
-    # crashed when curl began to crash (CI chaos run, fix.31: 3 crashes); a crash is instant, so
-    # 2 s behind another caller is enough to see it, and a long download is not waited for.
-    _vt_wait=20
-    [ -z "$(find "$_vt_ok" -mmin -60 2>/dev/null)" ] || _vt_wait=2
-    [ -z "$(find "$_vt_lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] || rmdir "$_vt_lock" 2>/dev/null
-    until mkdir "$_vt_lock" 2>/dev/null; do
+    _vt_wait=${1:-}
+    case "$_vt_wait" in
+        ''|*[!0-9]*)
+            _vt_wait=20
+            [ -z "$(find "$_vt_ok" -mmin -60 2>/dev/null)" ] || _vt_wait=${VWARD_TLS_TURN_WAIT_OK:-5} ;;
+    esac
+    _vward_tls_proc /proc/self/stat || _vt_ps="$$ 0"
+    _vt_id=$_vt_ps
+    while :; do
+        if mkdir "$_vt_lock" 2>/dev/null; then
+            printf '%s\n' "$_vt_id" 2>/dev/null > "$_vt_lock/owner" && break
+            # No owner line, no turn: never run curl on a turn nobody can recognise.
+            rm -f "$_vt_lock/owner"; rmdir "$_vt_lock" 2>/dev/null
+            return 2
+        fi
+        # A dead owner's turn is taken away at once (bounded: a live one is never touched).
+        if [ "$_vt_r" -lt 3 ] && _vward_tls_reap; then _vt_r=$((_vt_r + 1)); continue; fi
         [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ] || return 1
-        [ "$_vt_w" -lt "$_vt_wait" ] || return 0
+        [ "$_vt_w" -lt "$_vt_wait" ] || return 2
         sleep 1; _vt_w=$((_vt_w + 1))
     done
     _vt_mine=1
     # The turn came after another caller: its crash may be noted by now.
-    [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ] || { rmdir "$_vt_lock" 2>/dev/null; _vt_mine=0; return 1; }
+    if [ -n "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ]; then
+        _vward_tls_give
+        return 1
+    fi
     return 0
+}
+
+_vward_tls_give()
+{
+    # Gives back only OUR turn: a turn taken away from us meanwhile is someone else's now.
+    if [ "${_vt_mine:-0}" = 1 ]; then
+        _vt_l=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
+        _vt_l=${_vt_l%.broken}.probe _vt_o=
+        [ ! -r "$_vt_l/owner" ] || read -r _vt_o 2>/dev/null < "$_vt_l/owner"
+        if [ -n "$_vt_o" ] && [ "$_vt_o" = "${_vt_id:-}" ]; then
+            rm -f "$_vt_l/owner"; rmdir "$_vt_l" 2>/dev/null
+        fi
+    fi
+    _vt_mine=0
 }
 
 vward_tls_done()
@@ -165,8 +244,7 @@ vward_tls_done()
         132|134|135|136|139) : > "$_vt_flag" 2>/dev/null; rm -f "${_vt_flag%.broken}.ok" ;;
         *) [ "$1" -ge 126 ] 2>/dev/null || : > "${_vt_flag%.broken}.ok" 2>/dev/null ;;
     esac
-    [ "${_vt_mine:-0}" = 0 ] || rmdir "${_vt_flag%.broken}.probe" 2>/dev/null
-    _vt_mine=0
+    _vward_tls_give
     return 0
 }
 
@@ -182,7 +260,8 @@ vward_fetch()
 {
     _vf_curl=${VWARD_CURL_BIN:-$(vward_tool curl)} _vf_rc=127
     _vf_flag=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
-    if [ -n "$_vf_curl" ] && vward_tls_take; then
+    # A download waits up to 20 s for the turn; not given: the fallback below, never curl unowned.
+    if [ -n "$_vf_curl" ] && vward_tls_take 20; then
         # HTTP/1.1: Entware's curl crashed in libnghttp2 (HTTP/2) on HTTPS, 81 times in two hours
         # (Viva 2026-10-12, «SIGSEGV ... in libnghttp2.so»); small downloads gain nothing from HTTP/2.
         "$_vf_curl" --http1.1 "$@"

@@ -74,6 +74,10 @@ DIRECT_COOLDOWN=60
 # Ошибки "не работает нигде" не долбим постоянно.
 FAIL_COOLDOWN=300
 
+# A check that could not tell (probe 2: not run, curl broken or stopped from outside) keeps
+# the last trusted state; the host waits this long before it is tried again.
+UNKNOWN_COOLDOWN=60
+
 # Домен в AdaptiveAuto при следующем использовании
 # может быть проверен на возврат ISP уже через минуту.
 ADAPTIVE_RECHECK=60
@@ -408,6 +412,13 @@ read_state()
 }
 
 
+# save_state HOST STATUS: 0 only when the new record is written, published under its read name
+# and read back as the authoritative copy (P0-3). AUTO_VPN|BROKEN|ADAPTIVE_* go to USB, the rest
+# to RAM; read_state takes the newer of the two (-nt, one-second and on USB coarser resolution),
+# so the other copy must be gone before the new one is visible - else an equal-second USB copy
+# would still win. The other copy is first renamed aside (same directory: atomic) and given back
+# if the new one cannot be published: a failed write, rename or move never loses the previous
+# record. 1: nothing changed for the reader (the reason in the event log, no success line).
 save_state()
 {
     H="$1"
@@ -427,16 +438,67 @@ save_state()
     esac
 
     TMP="${STATE}.tmp.$$"
+    SS_NOW=${QNOW:-$(date +%s)}
+    SS_ASIDE=
 
-    {
+    if ! {
         echo "HOST=$H"
         echo "STATUS=$STATUS"
-        echo "LAST_CHECK=${QNOW:-$(date +%s)}"
-    } > "$TMP" &&
+        echo "LAST_CHECK=$SS_NOW"
+    } 2>/dev/null > "$TMP" || [ "$(sed -n 's/^STATUS=//p' "$TMP" 2>/dev/null)" != "$STATUS" ]; then
+        rm -f "$TMP"
+        state_save_fail "$H" "$STATUS" write
+        return 1
+    fi
 
-    mv "$TMP" "$STATE" || rm -f "$TMP"
+    if [ -e "$OTHER" ] || [ -L "$OTHER" ]; then
+        SS_ASIDE="${OTHER}.prev.$$"
+        if ! mv -f "$OTHER" "$SS_ASIDE" 2>/dev/null; then
+            rm -f "$TMP"
+            state_save_fail "$H" "$STATUS" other
+            return 1
+        fi
+    fi
 
-    [ ! -e "$OTHER" ] || rm -f "$OTHER"
+    if ! mv -f "$TMP" "$STATE" 2>/dev/null; then
+        rm -f "$TMP"
+        # Give the previous record back under its read name.
+        [ -z "$SS_ASIDE" ] || mv -f "$SS_ASIDE" "$OTHER" 2>/dev/null
+        state_save_fail "$H" "$STATUS" publish
+        return 1
+    fi
+    [ -z "$SS_ASIDE" ] || rm -f "$SS_ASIDE"
+
+    # Readback: the copy a reader takes now must be this record (a concurrent writer may differ).
+    read_state "$H" && [ "$ST_STATUS" = "$STATUS" ] && [ "$ST_LAST" = "$SS_NOW" ] || {
+        state_save_fail "$H" "$STATUS" readback
+        return 1
+    }
+    rm -f "$VOLATILE_DIR/$SF_NAME.unknown" 2>/dev/null
+    return 0
+}
+
+state_save_fail()
+{
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|STATE_SAVE_FAIL|$1|status=$2|step=$3" >> "$EVENT_LOG"
+}
+
+# state_recover: at start, a record renamed aside by a save_state that was killed between its
+# two renames (*.state.prev.PID, only save_state makes them) is given back when neither copy of
+# that domain exists; otherwise it is an obsolete copy and goes. Nothing else is touched.
+state_recover()
+{
+    for SR_F in "$STATE_DIR"/*.state.prev.* "$VOLATILE_DIR"/*.state.prev.*; do
+        [ -f "$SR_F" ] || continue
+        SR_BASE=${SR_F%.prev.*}
+        SR_NAME=${SR_BASE##*/}
+        if [ ! -e "$STATE_DIR/$SR_NAME" ] && [ ! -e "$VOLATILE_DIR/$SR_NAME" ]; then
+            mv -f "$SR_F" "$SR_BASE" 2>/dev/null &&
+                echo "$(date '+%Y-%m-%d %H:%M:%S')|STATE_RECOVERED|$SR_NAME" >> "$EVENT_LOG"
+        else
+            rm -f "$SR_F"
+        fi
+    done
 }
 
 
@@ -540,18 +602,29 @@ tls_crash()
 }
 
 
+# probe HOST IFACE IP: 0 SUCCESS - the site answered (any HTTP answer but 451); 1 NETWORK_FAIL -
+# the check ran and gave no usable answer (no connection, time limit, TLS error, 451); 2
+# UNKNOWN_NOT_EXECUTED - the check did not run (curl broken within the hour, the shared HTTPS turn
+# not given) or its end says nothing about the site (curl's own crash, a stop from outside, no
+# curl). Only 0 and 1 are results; 2 must never become a failure state or a route.
+# P_EXEC yes|no, P_CLASS SUCCESS|NETWORK_FAIL|UNKNOWN, P_WHY (for 2), P_RC/P_CODE/P_TIME.
 probe()
 {
     H="$1"
     IFACE="$2"
     IP="$3"
+    P_EXEC=no P_CLASS=UNKNOWN P_WHY= P_RC=- P_CODE=000 P_TIME=-
 
     # curl crashed on HTTPS within the hour (Entware's OpenSSL 3.5.5 on some MIPS routers):
     # «could not check», and no crash again. Every decision here needs a check that passed.
     # Not known to work yet: one agent tries curl first, the others wait (vward_tls_take).
-    if tls_broken || { command -v vward_tls_take >/dev/null 2>&1 && ! vward_tls_take; }; then
-        P_RC=2 P_CODE=000 P_TIME=-
-        return 1
+    if tls_broken; then
+        P_WHY=tls_broken
+        return 2
+    fi
+    if command -v vward_tls_take >/dev/null 2>&1 && ! vward_tls_take; then
+        P_WHY=tls_turn
+        return 2
     fi
 
     OUT=$(
@@ -569,6 +642,7 @@ probe()
     )
 
     P_RC=$?
+    P_EXEC=yes
     P_CODE=${OUT%%|*}
     P_TIME=${OUT#*|}
     ! command -v vward_tls_done >/dev/null 2>&1 || vward_tls_done "$P_RC"
@@ -576,12 +650,54 @@ probe()
 
     [ -z "$P_CODE" ] && P_CODE="000"
     [ -z "$P_TIME" ] && P_TIME="-"
+    case "$P_CODE" in [0-9][0-9][0-9]) ;; *) P_CODE=000 ;; esac
+
+    if ! probe_ran "$P_RC"; then
+        P_WHY=curl_rc
+        return 2
+    fi
 
     # Любой реальный HTTP-ответ означает доступность сети.
     # 451 отдельно считаем подозрительным блоком.
-    [ "$P_RC" -eq 0 ] &&
-    [ "$P_CODE" != "000" ] &&
-    [ "$P_CODE" != "451" ]
+    if [ "$P_RC" -eq 0 ] && [ "$P_CODE" != "000" ] && [ "$P_CODE" != "451" ]; then
+        P_CLASS=SUCCESS
+        return 0
+    fi
+    P_CLASS=NETWORK_FAIL
+    return 1
+}
+
+# probe_ran RC: curl's exit code is a result about the network (0, or curl's own error code for
+# the connection: 6, 7, 28 time limit, 35 TLS, 52 empty reply, 56, 60 certificate...). Not one:
+# 2 (init), 27 (memory), 43 (internal), 126/127 (no curl) and 128 and up (killed by a signal:
+# 132-139 its own crash, 137/143 a stop from outside, 141 a closed pipe).
+probe_ran()
+{
+    case "$1" in
+        ''|*[!0-9]*|2|27|43|126|127) return 1 ;;
+    esac
+    [ "$1" -lt 128 ]
+}
+
+# unknown_recent HOST: the last check of HOST could not tell less than UNKNOWN_COOLDOWN ago.
+unknown_recent()
+{
+    state_path "$1"
+    UR_LAST=
+    [ -f "$VOLATILE_DIR/$SF_NAME.unknown" ] &&
+        read -r UR_LAST _ 2>/dev/null < "$VOLATILE_DIR/$SF_NAME.unknown"
+    case "$UR_LAST" in ''|*[!0-9]*) return 1 ;; esac
+    [ $((${QNOW:-$(date +%s)} - UR_LAST)) -lt "$UNKNOWN_COOLDOWN" ]
+}
+
+# probe_unknown HOST STAGE: the check could not tell. Nothing is saved: the last trusted state
+# (DIRECT_OK, AUTO_VPN, BROKEN...) and every route stay as they are. A RAM note (not a state)
+# holds the next check back for UNKNOWN_COOLDOWN; one line per note in the event log.
+probe_unknown()
+{
+    state_path "$1"
+    printf '%s %s\n' "${QNOW:-$(date +%s)}" "$2" > "$VOLATILE_DIR/$SF_NAME.unknown" 2>/dev/null
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|PROBE_UNKNOWN|$1|stage=$2|executed=$P_EXEC|why=$P_WHY|rc=$P_RC|http=$P_CODE" >> "$EVENT_LOG"
 }
 
 
@@ -921,7 +1037,7 @@ add_adaptive()
     fi
 
     if agh_blocked "$H"; then
-        save_state "$H" "AGH_BLOCKED"
+        save_state "$H" "AGH_BLOCKED" || { change_unlock; return 1; }
         echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_ABORT_AGH|$H" >> "$EVENT_LOG"
         change_unlock
         return 0
@@ -934,9 +1050,15 @@ add_adaptive()
         return 0
     fi
 
-    if probe "$H" "$WAN" "$GIP"; then
-        save_state "$H" "DIRECT_OK"
+    probe "$H" "$WAN" "$GIP"; PRB=$?
+    if [ "$PRB" = 0 ]; then
+        save_state "$H" "DIRECT_OK" || { change_unlock; return 1; }
         echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_ABORT_DIRECT_RECOVERED|$H" >> "$EVENT_LOG"
+        change_unlock
+        return 0
+    fi
+    if [ "$PRB" != 1 ]; then
+        probe_unknown "$H" add-direct
         change_unlock
         return 0
     fi
@@ -950,15 +1072,28 @@ add_adaptive()
     ISPC=0
     ! command -v vward_isp_control >/dev/null 2>&1 || { vward_isp_control; ISPC=$?; }
     if [ "$ISPC" = 1 ]; then
-        save_state "$H" "ISP_PROBE_UNRELIABLE"
+        save_state "$H" "ISP_PROBE_UNRELIABLE" || { change_unlock; return 1; }
         echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_ABORT_ISP_UNRELIABLE|$H|direct_rc=$DIRECT_RC|direct_http=$DIRECT_CODE" >> "$EVENT_LOG"
         change_unlock
         return 0
     fi
+    # The control sites could not be checked (2): the direct failure proves nothing yet.
+    if [ "$ISPC" != 0 ]; then
+        P_EXEC=no P_WHY=isp_control P_RC=- P_CODE=000
+        probe_unknown "$H" add-isp-control
+        change_unlock
+        return 0
+    fi
 
-    if ! probe "$H" "$WG" "$GIP"; then
-        save_state "$H" "ISP_FAIL_WG_FAIL"
+    probe "$H" "$WG" "$GIP"; PRB=$?
+    if [ "$PRB" = 1 ]; then
+        save_state "$H" "ISP_FAIL_WG_FAIL" || { change_unlock; return 1; }
         echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_ABORT_WG_FAIL|$H" >> "$EVENT_LOG"
+        change_unlock
+        return 0
+    fi
+    if [ "$PRB" != 0 ]; then
+        probe_unknown "$H" add-vpn
         change_unlock
         return 0
     fi
@@ -992,7 +1127,7 @@ add_adaptive()
 
         echo 0 > "$REFRESH_TS"
 
-        save_state "$H" "AUTO_VPN"
+        SS_OK=1; save_state "$H" "AUTO_VPN" || SS_OK=0
 
         # Помогаем Keenetic сразу наполнить runtime FQDN IP.
         nslookup "$H" $VWARD_DNS_SERVER >/dev/null 2>&1
@@ -1000,6 +1135,8 @@ add_adaptive()
         echo "$(date '+%Y-%m-%d %H:%M:%S')|AUTO_VPN|$H|$GROUP|reason=DIRECT_UNAVAILABLE_VPN_OK|ip=$GIP|dns=IPV4_OK|adguard=NOT_BLOCKED|direct_rc=$DIRECT_RC|direct_http=$DIRECT_CODE|direct_time=$DIRECT_TIME|vpn_rc=$VPN_RC|vpn_http=$VPN_CODE|vpn_time=$VPN_TIME" \
             >> "$EVENT_LOG"
 
+        # The route is in (ndmc answered 0); without its saved record this is no success.
+        [ "$SS_OK" = 1 ] || { change_unlock; return 1; }
         echo "AUTO_VPN: $H"
 
         change_unlock
@@ -1037,13 +1174,14 @@ handle_adaptive()
     HOST="$1"
 
     adaptive_due "$HOST" || return
+    unknown_recent "$HOST" && return
 
     echo "$(date '+%Y-%m-%d %H:%M:%S')|RECHECK_ADAPTIVE|$HOST" \
         >> "$EVENT_LOG"
 
     if agh_blocked "$HOST"; then
 
-        save_state "$HOST" "ADAPTIVE_AGH_BLOCKED"
+        save_state "$HOST" "ADAPTIVE_AGH_BLOCKED" || return 1
 
         echo "$(date '+%Y-%m-%d %H:%M:%S')|ADAPTIVE_AGH_BLOCKED|$HOST" \
             >> "$EVENT_LOG"
@@ -1055,7 +1193,7 @@ handle_adaptive()
 
     if [ -z "$IP" ]; then
 
-        save_state "$HOST" "ADAPTIVE_NO_IPV4"
+        save_state "$HOST" "ADAPTIVE_NO_IPV4" || return 1
 
         echo "$(date '+%Y-%m-%d %H:%M:%S')|ADAPTIVE_NO_IPV4|$HOST" \
             >> "$EVENT_LOG"
@@ -1065,18 +1203,21 @@ handle_adaptive()
 
 
     # ISP success №1
-    if probe "$HOST" "$WAN" "$IP"; then
+    probe "$HOST" "$WAN" "$IP"; PRB=$?
+    if [ "$PRB" = 0 ]; then
 
         sleep 1
 
         # ISP success №2
-        if probe "$HOST" "$WAN" "$IP"; then
+        probe "$HOST" "$WAN" "$IP"; PRB=$?
+        if [ "$PRB" = 0 ]; then
 
             remove_adaptive "$HOST"
             return
         fi
+        [ "$PRB" = 1 ] || { probe_unknown "$HOST" adaptive-direct; return; }
 
-        save_state "$HOST" "ADAPTIVE_DIRECT_UNSTABLE"
+        save_state "$HOST" "ADAPTIVE_DIRECT_UNSTABLE" || return 1
 
         echo "$(date '+%Y-%m-%d %H:%M:%S')|DIRECT_UNSTABLE|$HOST" \
             >> "$EVENT_LOG"
@@ -1085,22 +1226,27 @@ handle_adaptive()
     fi
 
 
-    # ISP не работает -> проверяем текущий VPN.
-    if probe "$HOST" "$WG" "$IP"; then
+    [ "$PRB" = 1 ] || { probe_unknown "$HOST" adaptive-direct; return; }
 
-        save_state "$HOST" "AUTO_VPN"
+    # ISP не работает -> проверяем текущий VPN.
+    probe "$HOST" "$WG" "$IP"; PRB=$?
+    if [ "$PRB" = 0 ]; then
+
+        save_state "$HOST" "AUTO_VPN" || return 1
 
         echo "$(date '+%Y-%m-%d %H:%M:%S')|VPN_OK|$HOST" \
             >> "$EVENT_LOG"
 
         return
     fi
+    [ "$PRB" = 1 ] || { probe_unknown "$HOST" adaptive-vpn; return; }
 
     sleep 1
 
-    if probe "$HOST" "$WG" "$IP"; then
+    probe "$HOST" "$WG" "$IP"; PRB=$?
+    if [ "$PRB" = 0 ]; then
 
-        save_state "$HOST" "AUTO_VPN"
+        save_state "$HOST" "AUTO_VPN" || return 1
 
         echo "$(date '+%Y-%m-%d %H:%M:%S')|VPN_OK_RETRY|$HOST" \
             >> "$EVENT_LOG"
@@ -1109,9 +1255,11 @@ handle_adaptive()
     fi
 
 
+    [ "$PRB" = 1 ] || { probe_unknown "$HOST" adaptive-vpn; return; }
+
     # Не работает ни ISP, ни VPN.
     # Ничего не удаляем: просто отмечаем.
-    save_state "$HOST" "BROKEN"
+    save_state "$HOST" "BROKEN" || return 1
 
     echo "$(date '+%Y-%m-%d %H:%M:%S')|BROKEN_ISP_AND_VPN|$HOST" \
         >> "$EVENT_LOG"
@@ -1137,11 +1285,12 @@ handle_new()
     HOST="$1"
 
     regular_cooldown "$HOST" && return
+    unknown_recent "$HOST" && return
 
 
     if agh_blocked "$HOST"; then
 
-        save_state "$HOST" "AGH_BLOCKED"
+        save_state "$HOST" "AGH_BLOCKED" || return 1
 
         event_result AGH_BLOCKED "AGH_BLOCKED|$HOST"
 
@@ -1153,7 +1302,7 @@ handle_new()
 
     if [ -z "$IP" ]; then
 
-        save_state "$HOST" "NO_IPV4"
+        save_state "$HOST" "NO_IPV4" || return 1
 
         event_result NO_IPV4 "NO_IPV4|$HOST"
 
@@ -1162,39 +1311,46 @@ handle_new()
 
 
     # ISP работает -> DIRECT.
-    if probe "$HOST" "$WAN" "$IP"; then
+    probe "$HOST" "$WAN" "$IP"; PRB=$?
+    if [ "$PRB" = 0 ]; then
 
-        save_state "$HOST" "DIRECT_OK"
+        save_state "$HOST" "DIRECT_OK" || return 1
 
         event_result DIRECT_OK "DIRECT_OK|$HOST|$P_CODE|$P_TIME"
 
         return
     fi
+    # Could not tell: no failure state, no route; the last trusted state stays.
+    [ "$PRB" = 1 ] || { probe_unknown "$HOST" direct; return; }
 
 
     # Подтверждаем ISP FAIL второй раз.
     sleep 1
 
-    if probe "$HOST" "$WAN" "$IP"; then
+    probe "$HOST" "$WAN" "$IP"; PRB=$?
+    if [ "$PRB" = 0 ]; then
 
-        save_state "$HOST" "DIRECT_OK"
+        save_state "$HOST" "DIRECT_OK" || return 1
 
         event_result DIRECT_OK "DIRECT_OK_RETRY|$HOST|$P_CODE|$P_TIME"
 
         return
     fi
+    [ "$PRB" = 1 ] || { probe_unknown "$HOST" direct-retry; return; }
 
 
     # ISP FAIL x2. Проверяем WG.
-    if ! probe "$HOST" "$WG" "$IP"; then
+    probe "$HOST" "$WG" "$IP"; PRB=$?
+    [ "$PRB" != 2 ] || { probe_unknown "$HOST" vpn; return; }
+    if [ "$PRB" != 0 ]; then
 
         if ALT=$(alt_tunnel "$HOST" "$IP"); then
-            save_state "$HOST" "ISP_FAIL_ALT_OK"
+            save_state "$HOST" "ISP_FAIL_ALT_OK" || return 1
             event_result ISP_FAIL_ALT_OK "ISP_FAIL_ALT_OK|$HOST|tunnel=$ALT"
             return
         fi
 
-        save_state "$HOST" "ISP_FAIL_WG_FAIL"
+        save_state "$HOST" "ISP_FAIL_WG_FAIL" || return 1
 
         event_result ISP_FAIL_WG_FAIL "ISP_FAIL_WG_FAIL|$HOST"
 
@@ -1205,9 +1361,11 @@ handle_new()
     # Подтверждаем WG второй раз.
     sleep 1
 
-    if ! probe "$HOST" "$WG" "$IP"; then
+    probe "$HOST" "$WG" "$IP"; PRB=$?
+    [ "$PRB" != 2 ] || { probe_unknown "$HOST" vpn-retry; return; }
+    if [ "$PRB" != 0 ]; then
 
-        save_state "$HOST" "ISP_FAIL_WG_UNSTABLE"
+        save_state "$HOST" "ISP_FAIL_WG_UNSTABLE" || return 1
 
         event_result ISP_FAIL_WG_UNSTABLE "ISP_FAIL_WG_UNSTABLE|$HOST"
 
@@ -1527,7 +1685,7 @@ add_hint_adaptive()
     fi
 
     if agh_blocked "$H"; then
-        save_state "$H" "AGH_BLOCKED"
+        save_state "$H" "AGH_BLOCKED" || { change_unlock; return 1; }
         echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_AGH_BLOCKED|$H" >> "$EVENT_LOG"
         change_unlock
         return 0
@@ -1558,11 +1716,12 @@ add_hint_adaptive()
 
         echo 0 > "$REFRESH_TS"
 
-        save_state "$H" "AUTO_VPN"
+        SS_OK=1; save_state "$H" "AUTO_VPN" || SS_OK=0
 
         nslookup "$H" $VWARD_DNS_SERVER >/dev/null 2>&1
 
         echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_AUTO_VPN|$H|$GROUP" >> "$EVENT_LOG"
+        [ "$SS_OK" = 1 ] || { change_unlock; return 1; }
         echo "HINT_AUTO_VPN: $H"
 
         change_unlock
@@ -1585,40 +1744,56 @@ handle_hint()
     if hint_direct_known "$HOST"; then
 
         regular_cooldown "$HOST" && return
+        unknown_recent "$HOST" && return
 
         if agh_blocked "$HOST"; then
-            save_state "$HOST" "AGH_BLOCKED"
+            save_state "$HOST" "AGH_BLOCKED" || return 1
             return
         fi
 
         IP=$(resolve_ipv4 "$HOST")
+        # No IPv4 address: nothing was checked, the known DIRECT_OK is not a failure.
+        if [ -z "$IP" ]; then
+            P_EXEC=no P_WHY=no_ipv4 P_RC=- P_CODE=000
+            probe_unknown "$HOST" hint-direct
+            return
+        fi
 
-        if [ -n "$IP" ] && probe "$HOST" "$WAN" "$IP"; then
-            save_state "$HOST" "DIRECT_OK"
+        probe "$HOST" "$WAN" "$IP"; PRB=$?
+        if [ "$PRB" = 0 ]; then
+            save_state "$HOST" "DIRECT_OK" || return 1
 
             echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_DIRECT_OK|$HOST|$P_CODE|$P_TIME" \
                 >> "$EVENT_LOG"
 
             return
         fi
+        [ "$PRB" = 1 ] || { probe_unknown "$HOST" hint-direct; return; }
 
         # DIRECT перестал работать? One failed check is not enough (02.11: ir-20.ozone.ru answered
         # 403 directly at 18:10 and went into the VPN at 18:12 on one failed check): once more a
         # second later, and the direct check itself must work (vward_isp_control).
         sleep 1
-        if [ -n "$IP" ] && probe "$HOST" "$WAN" "$IP"; then
-            save_state "$HOST" "DIRECT_OK"
+        probe "$HOST" "$WAN" "$IP"; PRB=$?
+        if [ "$PRB" = 0 ]; then
+            save_state "$HOST" "DIRECT_OK" || return 1
             echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_DIRECT_OK|$HOST|$P_CODE|$P_TIME" >> "$EVENT_LOG"
             return
         fi
+        [ "$PRB" = 1 ] || { probe_unknown "$HOST" hint-direct-retry; return; }
         HC=0
         ! command -v vward_isp_control >/dev/null 2>&1 || { vward_isp_control; HC=$?; }
         if [ "$HC" = 1 ]; then
-            save_state "$HOST" "ISP_PROBE_UNRELIABLE"
+            save_state "$HOST" "ISP_PROBE_UNRELIABLE" || return 1
             echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_ABORT_ISP_UNRELIABLE|$HOST" >> "$EVENT_LOG"
             return
         fi
-        save_state "$HOST" "HINT_DIRECT_FAIL"
+        if [ "$HC" != 0 ]; then
+            P_EXEC=no P_WHY=isp_control P_RC=- P_CODE=000
+            probe_unknown "$HOST" hint-isp-control
+            return
+        fi
+        save_state "$HOST" "HINT_DIRECT_FAIL" || return 1
 
         add_hint_adaptive "$HOST"
         return
@@ -1657,6 +1832,15 @@ list_watch_map()
 }
 
 
+# list_watch_unknown HOST WHY RC: the watched check could not tell. The failure count stays
+# as it was (neither raised nor reset); the cooldown holds the next try back.
+list_watch_unknown()
+{
+    echo "$LW_NOW $LW_FAILS" > "$LW_ST"
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|LIST_WATCH_UNKNOWN|$1|$LW_G|why=$2|rc=$3|fails=$LW_FAILS" >> "$EVENT_LOG"
+}
+
+
 list_watch_check()
 {
     # A watched list's service is checked the way the client reaches it: the
@@ -1688,6 +1872,11 @@ list_watch_check()
     [ -n "$LW_IP" ] || return 0
     # No HTTPS check possible: a list is never moved to the tunnel on a crash of curl.
     ! tls_broken || return 0
+    # The same shared HTTPS turn as probe(). Not given: nothing was checked, nothing counted.
+    if command -v vward_tls_take >/dev/null 2>&1 && ! vward_tls_take; then
+        list_watch_unknown "$1" tls_turn -
+        return 0
+    fi
 
     LW_OUT=$(
         curl --http1.1 -4 \
@@ -1702,7 +1891,12 @@ list_watch_check()
             -w '%{http_code} %{redirect_url}' \
             "https://$1/" 2>/dev/null
     )
-    ! tls_crash "$?" || return 0
+    LW_RC=$?
+    ! command -v vward_tls_done >/dev/null 2>&1 || vward_tls_done "$LW_RC"
+    ! tls_crash "$LW_RC" || { list_watch_unknown "$1" curl_rc "$LW_RC"; return 0; }
+    # A stop from outside (137/143), a closed pipe (141) or no curl says nothing about the
+    # service: UNKNOWN, never a failure toward LIST_AUTO_VPN.
+    probe_ran "$LW_RC" || { list_watch_unknown "$1" curl_rc "$LW_RC"; return 0; }
     LW_CODE=${LW_OUT%% *}
     LW_LOC=${LW_OUT#* }
     [ -n "$LW_CODE" ] || LW_CODE=000
@@ -2050,6 +2244,10 @@ startup_phase()
 
 echo "$(date '+%Y-%m-%d %H:%M:%S')|START" >> "$EVENT_LOG"
 BOOT_LAST=$STOP_T0
+
+# A record a killed save_state renamed aside comes back first (P0-3).
+state_recover
+startup_phase state-recover "$?"
 
 # USB state is authoritative for AdaptiveAuto.
 restore_adaptive_from_persist

@@ -149,6 +149,11 @@ probe_result()
         echo "2|000|-"
         return 0
     fi
+    # The shared HTTPS turn (vward_tls_take, P0-1): not given - could not check (2), no verdict.
+    if command -v vward_tls_take >/dev/null 2>&1 && ! vward_tls_take; then
+        echo "2|000|-"
+        return 0
+    fi
 
     OUT=$(
         curl --http1.1 -4 \
@@ -165,6 +170,7 @@ probe_result()
     )
 
     RC=$?
+    ! command -v vward_tls_done >/dev/null 2>&1 || vward_tls_done "$RC"
     # A crash (a signal of curl's own fault) is noted for an hour, as vward_fetch does.
     case "$RC" in 132|134|135|136|139) : > "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" 2>/dev/null ;; esac
     CODE=${OUT%%|*}
@@ -201,6 +207,14 @@ probe()
     [ "$PCODE" != "451" ] || return 1
 
     return 0
+}
+
+
+# isp_check_ran RC: curl's exit code is a result about the network (as the route engine's probe_ran).
+isp_check_ran()
+{
+    case "$1" in ''|*[!0-9]*|2|27|43|126|127) return 1 ;; esac
+    [ "$1" -lt 128 ]
 }
 
 
@@ -266,7 +280,9 @@ classify_isp_vs_vpn()
                 ;;
         esac
 
-    else
+    elif isp_check_ran "$IRC"; then
+        # The direct check ran and failed (P0-2): only then is it ISP_BAD. Not run, crashed or
+        # stopped from outside (2, 27, 43, 126/127, 128 and up) stays UNKNOWN.
         if [ "$VRC" -eq 0 ]; then
             case "$VC" in
                 2??|3??|4??)

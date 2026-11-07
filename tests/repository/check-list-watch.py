@@ -13,6 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 ENGINE = (ROOT / "components/route-engine/scripts/vward-route-engine.sh").read_text()
 FUNCS = ENGINE[ENGINE.index("list_watch_map()\n"):ENGINE.index("handle_host()\n")]
+# The shared classifier of curl exit codes (P0-2): which end is a result about the network.
+FUNCS = ENGINE[ENGINE.index("probe_ran()\n"):ENGINE.index("unknown_recent()\n")] + FUNCS
 
 CFG = """dns-proxy
     route object-group domain-list4 ISP auto
