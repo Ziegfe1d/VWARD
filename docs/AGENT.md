@@ -297,6 +297,8 @@ sh/BB1.37/staticBB1.36 + negative missing-dependency control PASS. Runtime не�
 
 07.11.2026 02:46 МСК / PR38 wiring checkpoint e863946406da16a4e5c5f687bdaf2278cf35fe4c: существующие DNS workers связаны с actual leased NDMC/curl HTTP, обоими stores и общим J2. Native/AGH циклы и unknown/lifetime fixtures PASS; Important побочной ADS записи закрыт RED→GREEN. API/Panel/all old callbacks/package ещё не подключены, кандидат не готов; полного нового CI/merge/release/router нет.
 
+07.11.2026 08:56 МСК / PR38 service-entry checkpoint `aa72a645e9beddeae4d4e119c1eab9a017d16f02`: actual copied console service on/tunnel/off проходит через fixed common J2, fresh captured membership/category/configuration health; логический VPN:auto сохраняется. SH/BusyBox адресные проверки PASS, два Important review закрыты RED→GREEN. Deployment capsule и новые libs ещё НЕ в signed78/package-map; первый запуск/cold map/recovery, остальные writers/режимы/API/Panel/lifecycle/ABI ещё открыты. Новый full CI и выпуск не запускались; промежуточный SDK не готов к публикации.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -960,6 +962,59 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   Historical full-local consistency FAIL/Chromium localSKIP/beta cross-check SKIP сохранены.
   Dev/main/VERSION/feed/sequence/release/роутер не менялись; Agents Observation неизменны.
 
+- 07.11.2026 08:56 МСК — [Агент], PR38 owner GO, code `aa72a645e9beddeae4d4e119c1eab9a017d16f02` поверх cd3c904.
+  Ordinary service on/tunnel/off подключены до старых EDIT/CHANGE к fixed installed
+  closure/canonical path и общему admission→EDIT→CHANGE→J2/internal workers. Actual copied
+  CLI/profile/libs проверены на внешнем native fixture: registry/proof/readback/save,
+  off/repeat/missing explicit tunnel; no nested CLI/old transaction. Корректная ABI2
+  capsule требуется целиком, missing/wrong/extra bytes/code отказывают без native query.
+  Trust RED: owned world-writable code реально исполнялся при source. Теперь все source
+  files и ancestors проверяются до source; first loader проверяется самим console.
+  SH+BusyBox code/ancestor/actual first-source marker controls PASS, без нового override.
+  VPN:auto — raw selector в choices и legacy registration. Только captured category/default
+  разрешает physical target; explicit pin выше категории, missing target не Provider.
+  Fresh catalog/dev/categories архивируются из SAME generation. Native show interface
+  даёт только configuration/link availability, online unknown не объявлен отказом;
+  packet/client path не проверен. Catalog membership не native ownership/не full coverage.
+  Addressed review нашёл два Important: retired domain оставался confirmed и мог получить
+  запись; retired SID не позволял off. Actual CLI RED обоих воспроизведён. Retired
+  confirmation становится unknown, excluded/shared не стираются. Explicit vpn→auto
+  withdrawal требует canonical resource+origin prefix и actual PRIVATE full native group,
+  ВСЕ legacy registrations должны быть покрыты canonical VPN projections. Только этот
+  own S withdrawal может разрешить retired membership/legacy S unknown; M/A/peer unknown
+  не разрешены. Actual missing proof/foreign member/unbound registration отказаны;
+  independent A active без fresh native-boot probe остаётся typed HOLD. SH+BB PASS.
+  Off уже auto/DNS/ISP — no-op под admission/locks/journal gate/canonical expectedRev CAS,
+  сохраняет иной intent и не опрашивает backend. Ответ desired-only/unknown/client=false,
+  не новый configured proof. Semantic repeat не создаёт matching-image state transaction:
+  все12 prospective files сравниваются с SAME stage до J2, physical guards не обходятся.
+  Optional category file: только истинное отсутствие означает profile default; alias,
+  directory/malformed остаются unknown. Direct SH+BB и старый reader8/24/parity PASS.
+  Current check-live-inputs SH+BB PASS: captured category→VPN2, raw auto, repeat/no extra
+  J2, missing category target отказ, unknown interface не cached UP, absent file→VPN0.
+  До physical metadata J2 теперь SAME pure choice/project/typed preview; HOLD не создаёт
+  durable observation receipt. Allowed preview DISCARDED, затем real metadata J2 и real
+  fresh re-plan под SAME actual C/locks, без path/backend/executable от API.
+  Cost/limits: первая BB серия отказала45s на ПОСЛЕДНЕМ category→default move; ранние шаги
+  прошли. Совпало с параллельным old native-boundary SH/BB (это тоже resource load).
+  Изолированные private profiles: first33.50/move39.31; full first31.27, rejected9.65/10.15,
+  move38.38s. Причинность closed-history/исходного timeout НЕ доказана, MIPS не измерялся.
+  Отдельно измерены ненужные metadata J2 на denied choice5.00/5.31s; regression RED→GREEN
+  проверяет ранний pure HOLD без J2, не ослабляет history/Gi/CAS/last native preflight.
+  Последняя серия строго serial: inputs/membership/console entry SH+BB и withdrawal BB PASS;
+  withdrawal SH на предшествующем checkpoint PASS. Лимит каждого invoke45s не увеличен.
+  Fixture timeout теперь через существующий process-group runner, OUR descendants reaped.
+  Новые7cases зарегистрированы в общем SH/BB runner. Pure selector/projection SH+BB,
+  old native-boundary SH+BB, syntax/Python/sh/BB/no-new ShellCheck/privacy/version и SHA1413
+  PASS. Full local consistency НЕ заявлен: прежний read-only /opt/var FAIL, Chromium local
+  SKIP и beta-marker SKIP сохраняются. CI813 не reread/rerun и не относится к этому code.
+  Новые libs/capsule UNINSTALLED, map/allowlists signed78/workflow/VERSION/feed прежние.
+  First ROOT/cold discovery/preflight/recovery, все legacy callbacks/M/A/list/category,
+  оба-store lifecycle/общие API/status/Panel, installed ABI/downgrade/connected faults,
+  новый exact CI/rollback/dev/public gates ещё открыты; partial on/off не выпускать.
+  Environment restart сохранил workspace/index/logs. Router не подключался/не менялся,
+  Agents Observation/manual rules/NextDNS/owner-removed DNS неизменны, hardware не принят.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -1108,6 +1163,8 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
 - 06.11.2026 21:00 МСК / PR38 c77adde: first native binding/bootstrap и адресные lifetime/fault/recovery software gates пройдены на fixtures, не на устройстве. Общая live цепочка/API/package ещё не подключена; AGH отсутствует в этом native checkpoint. Auto старые direct writers защищены, common A handoff/остальные callbacks пока открыты. Разрешение полного GO действует; продолжение — оба DNS stores, все источники/потребители и migration/package closure, затем новый exact CI/rollback/dev/public verification. Ни partial native-only, ни OFF prototype не выпускать.
 
 - 07.11.2026 02:46 МСК / PR38 e863946: physical transport adapters обоих DNS stores проверены на fixtures, но общая пользовательская цепочка ещё не завершена. Следующие технические gates — actual CLI/API/Panel + свежие canonical inputs/auto selectors, все legacy callbacks, lifecycle/installed ABI/recovery/downgrade, затем новый exact CI/rollback/public dev. AGH read failure пока глобально failclosed в prototype; selective unrelated behavior ещё нужен. Signed78 targets/map прежние, новые libs не установлены. Разрешение полного GO действует, partial native/DNS-only пакет не выпускать; hardware/роутер не принимались.
+
+- 07.11.2026 08:56 МСК / PR38 `aa72a64`: actual ordinary CLI и свежие source observations проверены на fixtures, но общий GO ещё не завершён. Следом — первый root/cold map и безопасный recovery, все остальные entrypoints/backwriters и источники/режимы, lifecycle/API/Panel/package/ABI/downgrade; затем новый exact CI/rollback/public dev. Native full-read latency и legitimate long-history cost остаются рисками для MIPS; isolated host PASS не hardware. Все текущие7cases SH/BB приняты адресно, не полный suite. Signed78 и VERSION прежние, никаких release/router actions.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 

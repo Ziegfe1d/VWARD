@@ -88,3 +88,10 @@
 - Still open: all-old writers and actual user entrypoints/Panel/fresh inputs/selectors,
   server lifecycle/installed closure/Root0 recovery/ABI downgrade, full connected matrix,
   new exact CI/rollback/public dev release. These checkpoints are not a partial release.
+
+- aa72a64: ordinary copied-console service on/tunnel/off, trusted fixed deployment
+  capsule/closure, captured membership/category/configuration health, logical default and
+  exact own retired-service withdrawal SH/BB verified. Two review Important RED→GREEN;
+  same pure preflight avoids J2 on denied selections. No packaged activation yet. First
+  bootstrap/cold discovery/recovery/all writers/full modes/APIUI/lifecycle/ABI/final gates
+  remain open; AGENT§3/G.5.1 record exact local limits and host timeout/isolated evidence.

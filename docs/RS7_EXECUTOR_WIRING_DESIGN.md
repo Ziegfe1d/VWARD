@@ -922,3 +922,38 @@ Full DATA DNS SH suite и syntax/privacy/no-new ShellCheck/SHA1403 PASS. Нов�
 downgrade и новый exact CI/rollback/dev/public ещё нужны. AGH read failure prototype пока
 глобально failclosed; selective unrelated case открыт. Historical local FAIL/SKIP остаются.
 Router/main/dev/release не менялись, client path unknown, полный owner GO действует.
+
+#### G.5.1. Actual ordinary service entry и fresh observations (07.11.2026 08:56 МСК)
+
+Code `aa72a645e9beddeae4d4e119c1eab9a017d16f02`. Actual copied installed-style console on/tunnel/off → fixed trusted
+closure → same admitted EDIT/CHANGE owner → real J2/native workers. Это первая user-action
+связь, а не завершение API/Panel/all modes. Capsule ABI2 exact bytes/полная source closure
+и nonwritable ancestors/code обязательны до source; partial deployment не legacy fallback.
+Новые libs/capsule ещё uninstalled, signed targets78/maps/workflow/VERSION/feed прежние.
+
+Raw VPN:auto сохраняется, physical category/default разрешается из captured profile/catalog/
+categories; explicit pin выше. Missing target/unknown interface не cached UP/Provider.
+Native config/link observation не packet health; catalog не native ownership/full coverage.
+Prospective metadata pure preview denied; allowed preview не permission и отбрасывается.
+Только потом actual metadata state-set J2 + fresh real re-plan под SAME locks; denied request
+не создаёт receipt. Semantic no-op не создаёт физическую matching-image transaction.
+
+Два Important actual RED→GREEN: retired catalog binding downgraded unknown; deleted SID
+можно снять только exact own withdrawal. Canonical resource/proof prefix + actual private
+full native group + coverage ВСЕХ legacy registrations нужны для narrow vpn→auto bridge;
+foreign/unknown/unbound не authority. Unknown M/A/peer сохраняют HOLD. Source exclusions
+не стираются. Off auto/DNS/ISP сохраняет intent/без backend probe, unknown/client false.
+
+SH+BB actual console/inputs/membership, pure selector/projection, optional categories и
+source trust PASS; native withdrawal controls SH checkpoint+BB current PASS. Old readers8/24
+и old native-boundary SH+BB PASS. Last-invoke45 unchanged; один earlier BB finalmove timeout
+совпал с concurrent local boundary load. Isolated full profile final38.38s, НЕ MIPS/не proof
+причины. Denied metadata cost5.00/5.31s отдельно RED→GREEN pure preflight. History/CAS/Gi/
+physical ACK/last native preflight не ослаблялись, history cache/prune не добавлялся.
+Подробные результаты/FAIL/SKIP — AGENT§3; SHA1413/privacy/syntax/no-new SC PASS.
+
+Следующие gates остаются обязательными: cold first ROOT preflight/discovery/recovery,
+все overlapping old writers/общие источники/все modes/server lifecycle/API/status/Panel,
+installed closure+authenticated ABI/downgrade/connected faults, адресный review конечной
+связи, новый exact CI/rollback/dev-public verification. Current on/off SDK не выпуск.
+Owner GO действует без новых approval menus; router/main/stable вне действий агента.
