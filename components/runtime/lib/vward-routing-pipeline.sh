@@ -24,17 +24,33 @@ vrb_backend_context() {
 }
 # vrj_* fields are set by vrj_ls/vrj_slurp (journal library).
 # shellcheck disable=SC2154
-vrb_worker_context() {
-    vrb_backend_context && vrj_dir "$vrb_j" &&
+# Integrity-only facts that cannot change while this coordinator holds its
+# locks and its own immutable journal plan: directory shapes, the plan record,
+# lock owner digests and boot stamps. They are proven once per request
+# (vrb_worker_static, ~50 processes) and then only the cheap, builtin checks
+# run before every worker/native command: state values, owner records,
+# boot_id, live coordinator, slot and updater barriers. Memo is keyed by the
+# journal, operation and actual coordinator identity; a subshell cannot
+# extend another operation's proof.
+vrb_worker_static() {
+    vrj_dir "$vrb_j" &&
         vrb_data_ancestry "$vrb_edit_path/owner" && vrb_data_ancestry "$vrb_change_path/owner" &&
         vrj2_ready "$vrb_j" "$vrb_op" &&
-        { vrj_slurp "$vrb_j/$vrb_op/state"; [ "$vrj_sv" = pending ] || [ "$vrj_sv" = unknown ]; } &&
-        { vrj_slurp "$vrb_edit_path/owner"; [ "$vrj_sv" = "$(printf '%s\t%s\t%s' "${vrj2_me:-}" "${vrj2_start:-}" "${vrj2_boot:-}")" ]; } &&
-        { vrj_slurp "$vrb_change_path/owner"; [ "$vrj_sv" = "$(printf '%s\t%s\t%s' "${vrj2_me:-}" "${vrj2_start:-}" "${vrj2_boot:-}")" ]; } &&
         { vrj_slurp "$vrb_edit_path/owner.sha"; [ "$(vr2_hash "$vrb_edit_path/owner")" = "$vrj_sv" ]; } &&
         { vrj_slurp "$vrb_change_path/owner.sha"; [ "$(vr2_hash "$vrb_change_path/owner")" = "$vrj_sv" ]; } &&
         [ "$(vward_lock_boot_id "$vrb_edit_path/boot")" = "${vrj2_boot:-}" ] &&
-        [ "$(vward_lock_boot_id "$vrb_change_path/boot")" = "${vrj2_boot:-}" ] &&
+        [ "$(vward_lock_boot_id "$vrb_change_path/boot")" = "${vrj2_boot:-}" ] || return 75
+    vrb_ws_memo="$vrb_j|$vrb_op|${vrj2_me:-}|${vrj2_start:-}|${vrj2_boot:-}"
+}
+vrb_worker_context() {
+    if [ "${vrb_ws_memo:-}" != "$vrb_j|$vrb_op|${vrj2_me:-}|${vrj2_start:-}|${vrj2_boot:-}" ]; then
+        vrb_worker_static || return 75
+    fi
+    vrb_backend_context &&
+        { vrj_slurp "$vrb_j/$vrb_op/generation"; vrj2_gen "$vrj_sv"; } &&
+        { vrj_slurp "$vrb_j/$vrb_op/state"; [ "$vrj_sv" = pending ] || [ "$vrj_sv" = unknown ]; } &&
+        { vrj_slurp "$vrb_edit_path/owner"; [ "$vrj_sv" = "${vrj2_me:-}$vrj_tab${vrj2_start:-}$vrj_tab${vrj2_boot:-}" ]; } &&
+        { vrj_slurp "$vrb_change_path/owner"; [ "$vrj_sv" = "${vrj2_me:-}$vrj_tab${vrj2_start:-}$vrj_tab${vrj2_boot:-}" ]; } &&
         { vrj_slurp /proc/sys/kernel/random/boot_id; [ "$vrj_sv" = "${vrj2_boot:-}" ]; } &&
         vlg_boot="$vrj2_boot" vward_lock_gate_live "$vrj2_boot.$vrj2_me.$vrj2_start" &&
         { vrj_slurp "$vrb_coord_slot/pid"; [ "$vrj_sv" = "${vrj2_me:-}" ]; } &&
@@ -779,6 +795,8 @@ vrb_execute2() {
     # immediately before use; the journal hash commits to exact pre/post bytes.
     cp -R "$vrb_t" "$vrb_j/$vrb_op/prepared" || return 1
     vrb_execution_context
+    # Once per request, in this coordinator shell (see vrb_worker_static).
+    vrb_worker_static && vrb_backend_context || return 75
     vrb_gen=$(cat "$vrb_t/generation")
     while IFS="$(printf '\t')" read -r vrb_tag vrb_n _vrb_action vrb_kind vrb_id vrb_pre vrb_post _vrb_proof _vrb_refs _vrb_checks _vrb_inverse; do
         [ "$vrb_tag" = step ] || continue
@@ -883,6 +901,7 @@ vward_routing_pipeline_recover2() (
     done
     vward_journal2_unknown "$vrb_j" "$vrb_op" explicit-compensation || return 75
     vrb_execution_context
+    vrb_worker_static && vrb_backend_context || return 75
     vrb_n=$(awk -F'\t' '$1=="step"{n++}END{print n+0}' "$vrb_t/plan")
     while [ "$vrb_n" -gt 0 ]; do
         vrb_row=$(vrj2_step_row "$vrb_j/$vrb_op" "$vrb_n") || return 75

@@ -32,7 +32,111 @@
 # downgrade/replay). These functions ONLY record evidence; no executor is loaded.
 vrj2_id() { vrj_id "$1" && [ "${#1}" -le 32 ]; }
 vrj2_seq() { case $1 in ''|0*|*[!0-9]*) return 2 ;; esac; [ "${#1}" -le 4 ] && [ "$1" -le 4096 ]; }
-vrj2_gen() { printf '%s\n' "$1" | grep -Eq '^g-[0-9a-f]{16}$'; }
+# Same verdict as printf '%s\n' "$1" | grep -Eq '^g-[0-9a-f]{16}$' (ANY line
+# matches), with shell builtins: generations are checked hundreds of times.
+vrj2_gen() {
+    vrj2_gl=$1
+    while :; do
+        vrj2_g1=${vrj2_gl%%"$vrj_nl"*}
+        case $vrj2_g1 in
+            g-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) return 0 ;;
+        esac
+        [ "$vrj2_g1" != "$vrj2_gl" ] || return 1
+        vrj2_gl=${vrj2_gl#*"$vrj_nl"}
+    done
+}
+vrj_nl='
+'
+vrj_tab=$(printf '\t')
+# Read-only metadata cache (process budget). ONE ls -ln over a set of
+# directories records mode/links/uid/size of every listed entry, ONE
+# sha256sum the plan digests and ONE awk the plan schema. It is set only
+# inside a read-only validation subshell (gate, ready/step checks before a
+# journal write) and consulted by the SAME predicates; any path the batch did
+# not prove falls back to its own ls/sha256sum/awk. Writers clear it first.
+vrj_mc_key() {
+    vrj_mk=;vrj_mr=$1
+    while [ -n "$vrj_mr" ]; do
+        vrj_mcs=${vrj_mr%%[!A-Za-z0-9]*}
+        if [ -n "$vrj_mcs" ]; then vrj_mk=$vrj_mk$vrj_mcs;vrj_mr=${vrj_mr#"$vrj_mcs"};continue;fi
+        case $vrj_mr in
+            /*) vrj_mk=${vrj_mk}_s ;; .*) vrj_mk=${vrj_mk}_d ;; :*) vrj_mk=${vrj_mk}_c ;;
+            -*) vrj_mk=${vrj_mk}_h ;; _*) vrj_mk=${vrj_mk}_u ;; *) return 1 ;;
+        esac
+        vrj_mr=${vrj_mr#?}
+    done
+}
+vrj_mc_off() { vrj_mc_base=; }
+# vrj_mc_load BASE DIR... (every DIR is BASE or below it)
+vrj_mc_load() {
+    vrj_mc_base=;vrj_mc_b=$1;shift
+    [ "$#" -gt 0 ] || return 0
+    case $vrj_mc_b in /*) ;; *) return 0 ;; esac
+    # shellcheck disable=SC2012
+    vrj_mc_out=$(LC_ALL=C ls -ln "$@" 2>/dev/null) || return 0
+    vrj_mc_cur=;[ "$#" -ne 1 ] || vrj_mc_cur=$1
+    while IFS= read -r vrj_mc_l; do
+        case $vrj_mc_l in
+            '') continue ;;
+            /*:) vrj_mc_cur=${vrj_mc_l%:};continue ;;
+            total\ *) continue ;;
+        esac
+        case $vrj_mc_cur in "$vrj_mc_b") vrj_mc_rel= ;; "$vrj_mc_b"/*) vrj_mc_rel=${vrj_mc_cur#"$vrj_mc_b"/}/ ;; *) continue ;; esac
+        vrj_mc_t=$vrj_mc_l;vrj_mc_f=
+        for vrj_mc_i in 1 2 3 4 5 6 7 8; do
+            vrj_mc_w=${vrj_mc_t%%[ ]*};vrj_mc_f="$vrj_mc_f $vrj_mc_w"
+            vrj_mc_t=${vrj_mc_t#*[ ]};vrj_mc_t=${vrj_mc_t#"${vrj_mc_t%%[! ]*}"}
+        done
+        case $vrj_mc_t in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.:-]*) continue ;; esac
+        # shellcheck disable=SC2086
+        set -- $vrj_mc_f
+        [ "$#" -eq 8 ] || continue
+        vrj_mc_key "$vrj_mc_rel$vrj_mc_t" || continue
+        eval "vrj_mc_$vrj_mk=\"\${1%\"\${1#??????????}\"} \$2 \$3 \$5\""
+    done <<EOF
+$vrj_mc_out
+EOF
+    vrj_mc_base=$vrj_mc_b
+}
+vrj_mc_get() {
+    [ -n "${vrj_mc_base:-}" ] || return 1
+    case $1 in "$vrj_mc_base"/*) ;; *) return 1 ;; esac
+    vrj_mc_key "${1#"$vrj_mc_base"/}" || return 1
+    eval "vrj_mv=\${vrj_mc_$vrj_mk-}"
+    [ -n "$vrj_mv" ] || return 1
+    # shellcheck disable=SC2086
+    set -- $vrj_mv
+    [ "$#" -eq 4 ] || return 1
+    vrj_lmode=$1;vrj_llinks=$2;vrj_luid=$3;vrj_lsize=$4
+}
+# vrj_mc_plans PLAN...: digests (one sha256sum) and schema verdicts (one awk).
+vrj_mc_plans() {
+    [ -n "${vrj_mc_base:-}" ] && [ "$#" -gt 0 ] || return 0
+    vrj_mc_sums=$(LC_ALL=C sha256sum "$@" 2>/dev/null) || vrj_mc_sums=
+    if [ -n "$vrj_mc_sums" ]; then
+        for vrj_mc_p in "$@"; do
+            vrj_mc_l=${vrj_mc_sums%%"$vrj_nl"*};vrj_mc_sums=${vrj_mc_sums#"$vrj_mc_l"};vrj_mc_sums=${vrj_mc_sums#"$vrj_nl"}
+            [ "${vrj_mc_l#*  }" = "$vrj_mc_p" ] || break
+            vrj_mc_h=${vrj_mc_l%%  *}
+            case $vrj_mc_h in *[!0-9a-f]*) break ;; esac
+            [ "${#vrj_mc_h}" = 64 ] || break
+            vrj_mc_key "${vrj_mc_p#"$vrj_mc_base"/}" || break
+            eval "vrj_mh_$vrj_mk=\$vrj_mc_h"
+        done
+    fi
+    vrj_mc_pv=$(vrj2_plan_awk "$@" 2>/dev/null) || return 0
+    for vrj_mc_p in "$@"; do
+        vrj_mc_key "${vrj_mc_p#"$vrj_mc_base"/}" || continue
+        case "$vrj_nl$vrj_mc_pv$vrj_nl" in *"${vrj_nl}V$vrj_tab$vrj_mc_p$vrj_nl"*) eval "vrj_mp_$vrj_mk=0" ;; *) eval "vrj_mp_$vrj_mk=2" ;; esac
+    done
+}
+vrj_mc_value() { # vrj_mc_value PREFIX PATH -> vrj_mv
+    [ -n "${vrj_mc_base:-}" ] || return 1
+    case $2 in "$vrj_mc_base"/*) ;; *) return 1 ;; esac
+    vrj_mc_key "${2#"$vrj_mc_base"/}" || return 1
+    eval "vrj_mv=\${$1_$vrj_mk-}"
+    [ -n "$vrj_mv" ]
+}
 # vrj_ls PATH: fields of ONE ls -ldn, without an awk pipeline (these checks
 # run hundreds of times per request): vrj_lmode = first 10 chars of field 1
 # (as awk substr($1,1,10)), vrj_llinks/vrj_luid/vrj_lsize = fields 2/3/5.
@@ -40,6 +144,7 @@ vrj2_gen() { printf '%s\n' "$1" | grep -Eq '^g-[0-9a-f]{16}$'; }
 # vrj_llinks/vrj_luid are read by the pipeline/state libraries.
 # shellcheck disable=SC2012,SC2034
 vrj_ls() {
+    vrj_mc_get "$1" && return 0
     vrj_lt=$(LC_ALL=C ls -ldn "$1" 2>/dev/null) || return 1
     case $vrj_lt in *'
 '*|'') return 1 ;; esac
@@ -48,6 +153,21 @@ vrj_ls() {
     vrj_lt=${vrj_lt#*[ 	]};vrj_lt=${vrj_lt#"${vrj_lt%%[! 	]*}"};vrj_luid=${vrj_lt%%[ 	]*}
     vrj_lt=${vrj_lt#*[ 	]};vrj_lt=${vrj_lt#"${vrj_lt%%[! 	]*}"}
     vrj_lt=${vrj_lt#*[ 	]};vrj_lt=${vrj_lt#"${vrj_lt%%[! 	]*}"};vrj_lsize=${vrj_lt%%[ 	]*}
+}
+# vrj_lsmodes PATH...: ONE ls -ldn for a set; vrj_lmodes = the first 10 chars
+# of field 1 of every row (space separated, in ls order), vrj_lcount = rows.
+# For checks where every path must have a mode from the same allowed set
+# (an ancestor chain), row order is irrelevant: no filename text is parsed.
+# shellcheck disable=SC2012
+vrj_lsmodes() {
+    vrj_lmodes=;vrj_lcount=0
+    vrj_lt=$(LC_ALL=C ls -ldn "$@" 2>/dev/null) || return 1
+    while IFS= read -r vrj_ll; do
+        vrj_ll=${vrj_ll%%[ 	]*};vrj_ll=${vrj_ll%"${vrj_ll#??????????}"}
+        vrj_lmodes="$vrj_lmodes$vrj_ll ";vrj_lcount=$((vrj_lcount+1))
+    done <<EOF
+$vrj_lt
+EOF
 }
 # vrj_slurp FILE: vrj_sv = exactly what "$(cat FILE 2>/dev/null)" yields
 # (all lines, trailing newlines removed; empty when unreadable), without a
@@ -130,10 +250,22 @@ vrj2_unlock() {
 vrj2_put() { VWARD_JOURNAL_SYNC=0 vrj_put "$1" "$2"; }
 vrj2_flush() { command -v sync >/dev/null 2>&1 && sync; }
 vrj2_plan_valid() {
-    [ -f "$1" ] && [ ! -L "$1" ] && [ "$(wc -c < "$1")" -le 1048576 ] || return 2
+    [ -f "$1" ] && [ ! -L "$1" ] || return 2
+    if vrj_mc_get "$1"; then [ "$vrj_lsize" -le 1048576 ] || return 2
+    else [ "$(wc -c < "$1")" -le 1048576 ] || return 2;fi
+    if vrj_mc_value vrj_mp "$1"; then return "$vrj_mv";fi
+    vrj2_plan_awk "$1" >/dev/null
+}
+# One awk for any number of plans: prints V<TAB>FILE for each valid plan
+# (same per-file rules as before; NR is per file). With ONE file its exit
+# status is the former plan_valid result.
+vrj2_plan_awk() {
     LC_ALL=C awk -F'\t' '
-        NR>4096 {bad=1}
-        NR==1 {if(NF!=4 || $1!="routing-plan" || $2!=2 || $3!~/^g-[0-9a-f]+$/ || length($3)!=18 || $4!="denied") bad=1;next}
+        function fin() {if(cur!="" && lines>0 && !bad) {print "V\t" cur;ok++}}
+        FNR==1 {fin();cur=FILENAME;bad=0;n=0;lines=0;files++}
+        {lines=FNR}
+        FNR>4096 {bad=1}
+        FNR==1 {if(NF!=4 || $1!="routing-plan" || $2!=2 || $3!~/^g-[0-9a-f]+$/ || length($3)!=18 || $4!="denied") bad=1;next}
         {
             if(NF!=11 || $1!="step" || $2!=++n || $3!~/^(create|add|remove|move)$/ ||
                $4!~/^(route|dns|group|dns-scope|nativeproof|claims|choice|manifest|proof|registry|saved|queue|policy|tombstone)$/ ||
@@ -142,30 +274,95 @@ vrj2_plan_valid() {
             else if($5!~/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/)bad=1
             for(i=1;i<=NF;i++) if($i!~/^[A-Za-z0-9_.:@,|\/-]+$/ || index($i,"//")) bad=1
         }
-        END{exit (NR>0 && !bad) ? 0 : 2}' "$1"
+        END{fin();exit (ARGC==2 ? (ok==1 ? 0 : 2) : 0)}' "$@"
 }
 vrj2_ready() {
     vrj_dir "$1" && vrj2_id "$2" && vrj_dir "$1/$2" || return 2
     for vrj2_f in schema plan plan.sha state generation; do vrj2_file "$1/$2/$vrj2_f" || return 2; done
-    vrj_slurp "$1/$2/schema";[ "$vrj_sv" = "$(printf 'routing-journal\t2')" ] || return 2
-    vrj2_digest=$(vrj_hash "$1/$2/plan") || return 2
+    vrj_slurp "$1/$2/schema";[ "$vrj_sv" = "routing-journal${vrj_tab}2" ] || return 2
+    # Same checks as vrj_hash; a batch digest avoids the command substitution.
+    if [ -f "$1/$2/plan" ] && [ ! -L "$1/$2/plan" ] && [ -r "$1/$2/plan" ] && vrj_mc_get "$1/$2/plan" &&
+        [ "$vrj_lsize" -le 1048576 ] && vrj_mc_value vrj_mh "$1/$2/plan"; then vrj2_digest=$vrj_mv
+    else vrj2_digest=$(vrj_hash "$1/$2/plan") || return 2;fi
     vrj_slurp "$1/$2/plan.sha";[ "$vrj2_digest" = "$vrj_sv" ] && vrj2_plan_valid "$1/$2/plan" || return 2
     vrj_slurp "$1/$2/generation";vrj2_gen "$vrj_sv" || return 2
     vrj_slurp "$1/$2/state";case $vrj_sv in planned|pending|unknown|committed|compensated) ;; *) return 2 ;; esac
 }
 vrj2_step_row() { awk -F'\t' -v n="$2" '$1=="step" && $2==n {print;found=1} END{exit found?0:1}' "$1/plan"; }
 vrj2_decode() { printf '%s\n' "$1" | tr '|' '\t'; }
+# vrj2_row_fields PLANDIR N: vrj2_row, vrj2_pre (cut -f6), vrj2_post (cut -f7)
+# without awk/cut/tr forks. Only the canonical case is answered in shell:
+# exactly one "step" row whose field 2 is the plain decimal N and no row with
+# a non-canonical field 2. Anything else uses the original pipelines.
+vrj2_row_fields() {
+    vrj2_row=;vrj2_rn=0;vrj2_rx=0
+    { while IFS= read -r vrj2_rl || [ -n "$vrj2_rl" ]; do
+        case $vrj2_rl in "step$vrj_tab"*) ;; *) continue ;; esac
+        vrj2_r2=${vrj2_rl#*"$vrj_tab"};vrj2_r2=${vrj2_r2%%"$vrj_tab"*}
+        case $vrj2_r2 in [1-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9]) ;; *) vrj2_rx=1;continue ;; esac
+        [ "$vrj2_r2" = "$2" ] || continue
+        vrj2_row=$vrj2_rl;vrj2_rn=$((vrj2_rn+1))
+      done; } < "$1/plan" 2>/dev/null || vrj2_rx=1
+    if [ "$vrj2_rx" = 0 ] && [ "$vrj2_rn" = 1 ]; then
+        case $vrj2_row in *"$vrj_tab"*"$vrj_tab"*"$vrj_tab"*"$vrj_tab"*"$vrj_tab"*"$vrj_tab"*) ;; *) vrj2_rx=1 ;; esac
+    fi
+    if [ "$vrj2_rx" != 0 ] || [ "$vrj2_rn" != 1 ]; then
+        vrj2_row=$(vrj2_step_row "$1" "$2") || return 2
+        vrj2_pre=$(printf '%s\n' "$vrj2_row" | cut -f6);vrj2_post=$(printf '%s\n' "$vrj2_row" | cut -f7)
+        vrj2_dpre=$(vrj2_decode "$vrj2_pre");vrj2_dpost=$(vrj2_decode "$vrj2_post")
+        return 0
+    fi
+    vrj2_rt=${vrj2_row#*"$vrj_tab"*"$vrj_tab"*"$vrj_tab"*"$vrj_tab"*"$vrj_tab"}
+    vrj2_pre=${vrj2_rt%%"$vrj_tab"*};vrj2_rt=${vrj2_rt#*"$vrj_tab"};vrj2_post=${vrj2_rt%%"$vrj_tab"*}
+    # tr '|' TAB, as vrj2_decode; plan_valid admits no newline in a field.
+    vrj2_dpre=;vrj2_rt=$vrj2_pre
+    while :; do case $vrj2_rt in *'|'*) vrj2_dpre=$vrj2_dpre${vrj2_rt%%'|'*}$vrj_tab;vrj2_rt=${vrj2_rt#*'|'} ;; *) vrj2_dpre=$vrj2_dpre$vrj2_rt;break ;; esac;done
+    vrj2_dpost=;vrj2_rt=$vrj2_post
+    while :; do case $vrj2_rt in *'|'*) vrj2_dpost=$vrj2_dpost${vrj2_rt%%'|'*}$vrj_tab;vrj2_rt=${vrj2_rt#*'|'} ;; *) vrj2_dpost=$vrj2_dpost$vrj2_rt;break ;; esac;done
+}
 vrj2_step_valid() {
     vrj2_seq "$3" && vrj_dir "$1/$2/step.$3" || return 2
-    vrj2_row=$(vrj2_step_row "$1/$2" "$3") || return 2
-    vrj2_pre=$(printf '%s\n' "$vrj2_row" | cut -f6);vrj2_post=$(printf '%s\n' "$vrj2_row" | cut -f7)
+    vrj2_row_fields "$1/$2" "$3" || return 2
     for vrj2_f in pre post state generation; do vrj2_file "$1/$2/step.$3/$vrj2_f" || return 2; done
-    vrj_slurp "$1/$2/step.$3/pre";[ "$(vrj2_decode "$vrj2_pre")" = "$vrj_sv" ] || return 2
-    vrj_slurp "$1/$2/step.$3/post";[ "$(vrj2_decode "$vrj2_post")" = "$vrj_sv" ] || return 2
+    vrj_slurp "$1/$2/step.$3/pre";[ "$vrj2_dpre" = "$vrj_sv" ] || return 2
+    vrj_slurp "$1/$2/step.$3/post";[ "$vrj2_dpost" = "$vrj_sv" ] || return 2
     vrj_slurp "$1/$2/step.$3/state";case $vrj_sv in pending|done|failed|unknown|compensating|compensated) ;; *) return 2 ;; esac
+}
+# vrj2_plan_counts PLAN: vrj2_count = rows with $1=="step", vrj2_native = 1 if
+# such a row has $4 route|dns|group|dns-scope (the former two awk scans).
+vrj2_plan_counts() {
+    vrj2_count=0;vrj2_native=0
+    { while IFS= read -r vrj2_pl || [ -n "$vrj2_pl" ]; do
+        case $vrj2_pl in step|"step$vrj_tab"*) ;; *) continue ;; esac
+        vrj2_count=$((vrj2_count+1))
+        case $vrj2_pl in "step$vrj_tab"*"$vrj_tab"*"$vrj_tab"*) ;; *) continue ;; esac
+        vrj2_p4=${vrj2_pl#*"$vrj_tab"*"$vrj_tab"*"$vrj_tab"};vrj2_p4=${vrj2_p4%%"$vrj_tab"*}
+        case $vrj2_p4 in route|dns|group|dns-scope) vrj2_native=1 ;; esac
+      done; } < "$1" || return 1
+}
+# Load the read-only cache for JDIR, its v2 operations and their steps.
+vrj2_cache_ops() {
+    if [ -n "${1%/*}" ]; then set -- "${1%/*}" "${1%/*}" "$1";else set -- "$1" "$1";fi
+    vrj2_cp=
+    for vrj2_d in "${3:-$1}"/*; do
+        [ -d "$vrj2_d" ] && [ ! -L "$vrj2_d" ] || continue
+        set -- "$@" "$vrj2_d"
+        for vrj2_s in "$vrj2_d"/step.*; do
+            [ -d "$vrj2_s" ] && [ ! -L "$vrj2_s" ] && set -- "$@" "$vrj2_s"
+        done
+        [ ! -f "$vrj2_d/plan" ] || vrj2_cp="$vrj2_cp$vrj2_d/plan$vrj_nl"
+    done
+    vrj_mc_load "$@"
+    [ -n "${vrj_mc_base:-}" ] || return 0
+    set --
+    while IFS= read -r vrj2_p; do [ -z "$vrj2_p" ] || set -- "$@" "$vrj2_p"; done <<EOF
+$vrj2_cp
+EOF
+    vrj_mc_plans "$@"
 }
 vrj2_gate_except() (
     [ "$#" -eq 2 ] && vrj_dir "$1" || return 2
+    vrj2_cache_ops "$1"
     for vrj2_d in "$1"/*; do
         [ -e "$vrj2_d" ] || [ -L "$vrj2_d" ] || continue
         vrj2_op=${vrj2_d##*/};vrj2_id "$vrj2_op" || return 75
@@ -173,32 +370,37 @@ vrj2_gate_except() (
         if [ -e "$vrj2_d/schema" ]; then
             vrj2_ready "$1" "$vrj2_op" || return 75
             vrj2_seen=0
+            vrj_slurp "$vrj2_d/state";vrj2_ds=$vrj_sv
             for vrj2_s in "$vrj2_d"/step.*; do
                 [ -e "$vrj2_s" ] || [ -L "$vrj2_s" ] || continue
                 vrj2_step_valid "$1" "$vrj2_op" "${vrj2_s##*/step.}" || return 75
                 vrj2_seen=$((vrj2_seen+1))
-                case $(cat "$vrj2_s/state") in pending|unknown|compensating) return 75 ;; esac
-                [ "$(cat "$vrj2_d/state")" != planned ] || return 75
-                if [ "$(cat "$vrj2_d/state")" = compensated ]; then
-                    case $(cat "$vrj2_s/state") in compensated|failed) ;; *) return 75 ;; esac
+                # vrj_slurp == "$(cat FILE)" (check-validation-primitives).
+                vrj_slurp "$vrj2_s/state";vrj2_ss=$vrj_sv
+                vrj_slurp "$vrj2_d/state";vrj2_ds=$vrj_sv
+                case $vrj2_ss in pending|unknown|compensating) return 75 ;; esac
+                [ "$vrj2_ds" != planned ] || return 75
+                if [ "$vrj2_ds" = compensated ]; then
+                    case $vrj2_ss in compensated|failed) ;; *) return 75 ;; esac
                 fi
-                if [ "$(cat "$vrj2_d/state")" = committed ]; then
-                    [ "$(cat "$vrj2_s/state")" = done ] || return 75
+                if [ "$vrj2_ds" = committed ]; then
+                    [ "$vrj2_ss" = done ] || return 75
                 fi
             done
-            case $(cat "$vrj2_d/state") in pending|unknown) return 75 ;; esac
-            if [ "$(cat "$vrj2_d/state")" = committed ]; then
-                vrj2_count=$(awk -F'\t' '$1=="step"{n++} END{print n+0}' "$vrj2_d/plan")
+            vrj_slurp "$vrj2_d/state";vrj2_ds=$vrj_sv
+            case $vrj2_ds in pending|unknown) return 75 ;; esac
+            if [ "$vrj2_ds" = committed ]; then
+                vrj2_plan_counts "$vrj2_d/plan" || return 75
                 # plan_valid enforces unique sequential step IDs. Every leaf
                 # above must match one exact plan row (no zero/alias/extra ID),
                 # so cardinality proves completeness without validating each
                 # closed historical leaf a second time on every later step.
                 [ "$vrj2_seen" = "$vrj2_count" ] || return 75
-                if awk -F'\t' '$1=="step" && $4~/^(route|dns|group|dns-scope)$/{f=1} END{exit f?0:1}' "$vrj2_d/plan"; then
-                    vrj2_file "$vrj2_d/save" && [ "$(cat "$vrj2_d/save")" = 'done' ] || return 75
+                if [ "$vrj2_native" = 1 ]; then
+                    vrj2_file "$vrj2_d/save" && { vrj_slurp "$vrj2_d/save";[ "$vrj_sv" = 'done' ]; } || return 75
                 fi
             fi
-            if [ "$(cat "$vrj2_d/state")" = compensated ]; then
+            if [ "$vrj2_ds" = compensated ]; then
                 vrj2_file "$vrj2_d/resolved" && vrj2_file "$vrj2_d/resolved.sha" || return 75
                 [ "$(vrj_hash "$vrj2_d/resolved")" = "$(cat "$vrj2_d/resolved.sha")" ] &&
                     [ "$(vrj_get "$vrj2_d/resolved" plan_sha "$vrj2_op")" = "$(cat "$vrj2_d/plan.sha")" ] &&
@@ -405,7 +607,10 @@ vrj_put() {
 
 vrj_hash() {
     [ -f "$1" ] && [ ! -L "$1" ] && [ -r "$1" ] || return 1
-    [ "$(wc -c < "$1")" -le 1048576 ] || return 1
+    if vrj_mc_get "$1"; then
+        [ "$vrj_lsize" -le 1048576 ] || return 1
+        if vrj_mc_value vrj_mh "$1"; then printf '%s\n' "$vrj_mv";return 0;fi
+    else [ "$(wc -c < "$1")" -le 1048576 ] || return 1;fi
     vrj_h=$(sha256sum < "$1" 2>/dev/null) || return 1
     vrj_h=${vrj_h%% *}
     case $vrj_h in [0-9a-f]*) [ "${#vrj_h}" = 64 ] && printf '%s\n' "$vrj_h" ;; *) return 1 ;; esac

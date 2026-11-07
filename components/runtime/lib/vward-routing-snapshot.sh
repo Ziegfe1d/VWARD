@@ -70,7 +70,7 @@ vrsi_consistent_read() (
 
     # One line per input: LABEL STATE. STATE: absent | bad | oversize | nostat |
     # "SHA256 SIZE INODE MTIME MODE UID". Authority is part of consistency.
-    vrs_one() {
+    vrs_one_file() {
         if [ ! -e "$2" ] && [ ! -L "$2" ]; then printf '%s absent\n' "$1"; return 0; fi
         if [ -L "$2" ] || [ ! -f "$2" ] || [ ! -r "$2" ]; then printf '%s bad\n' "$1"; return 0; fi
         # Process budget (runs ~50 files x 2 per consistent read): ONE ls -ldin
@@ -127,6 +127,109 @@ vrsi_consistent_read() (
         vrs_auth="$vrs_am ${vrs_auth%%[ 	]*}"
         printf '%s %s %s %s %s %s\n' "$1" "$vrs_crc" "$vrs_sz" "$vrs_ino" "$vrs_mt" "$vrs_auth"
     }
+    # Process budget: a fingerprint covers ~50 inputs and runs twice per
+    # consistent read, ~12-19 reads per request. The walk below runs twice:
+    # "collect" records the (label, path) list, ONE ls -ldin --full-time and
+    # ONE sha256sum then cover the whole set, and "emit" prints exactly the
+    # rows vrs_one_file would print (mtime as epoch seconds, as date -r +%s).
+    # Any input the batch cannot prove (unsupported option, vanished file,
+    # unparsable row, name mismatch) falls back to vrs_one_file for that input.
+    vrs_one() {
+        vrs_k=$((vrs_k+1))
+        if [ "$vrs_fp_mode" = collect ]; then
+            eval "vrs_p_$vrs_k=\$2"
+            return 0
+        fi
+        eval "vrs_pp=\${vrs_p_$vrs_k-};vrs_rr=\${vrs_r_$vrs_k-}"
+        if [ "$vrs_pp" = "$2" ] && [ -n "$vrs_rr" ]; then printf '%s %s\n' "$1" "$vrs_rr"; return 0; fi
+        vrs_one_file "$1" "$2"
+    }
+    # Epoch seconds of an ls --full-time date/time/zone triple; rc 1 if unparsable.
+    vrs_epoch() {
+        vrs_ey=${1%%-*};vrs_et=${1#*-};vrs_em=${vrs_et%%-*};vrs_ed=${vrs_et#*-}
+        vrs_eh=${2%%:*};vrs_et=${2#*:};vrs_emi=${vrs_et%%:*};vrs_es=${vrs_et#*:};vrs_es=${vrs_es%%.*}
+        case $vrs_ey:$vrs_em:$vrs_ed:$vrs_eh:$vrs_emi:$vrs_es in
+            [0-9][0-9][0-9][0-9]:[0-9][0-9]:[0-9][0-9]:[0-9][0-9]:[0-9][0-9]:[0-9][0-9]) ;; *) return 1 ;;
+        esac
+        case $3 in [+-][0-9][0-9][0-9][0-9]) ;; *) return 1 ;; esac
+        vrs_ez=${3#?};vrs_ezh=${vrs_ez%??};vrs_ezm=${vrs_ez#??}
+        # Strip leading zeros: arithmetic would read them as octal.
+        vrs_em=${vrs_em#0};vrs_ed=${vrs_ed#0};vrs_eh=${vrs_eh#0};vrs_emi=${vrs_emi#0};vrs_es=${vrs_es#0}
+        vrs_ezh=${vrs_ezh#0};vrs_ezm=${vrs_ezm#0};vrs_ey=${vrs_ey#0};vrs_ey=${vrs_ey#0};vrs_ey=${vrs_ey#0}
+        [ "$vrs_em" -ge 1 ] && [ "$vrs_em" -le 12 ] && [ "$vrs_ed" -ge 1 ] && [ "$vrs_ed" -le 31 ] || return 1
+        # Days from civil (proleptic Gregorian), integer arithmetic only.
+        [ "$vrs_em" -gt 2 ] || vrs_ey=$((vrs_ey-1))
+        vrs_era=$((vrs_ey/400));vrs_yoe=$((vrs_ey-vrs_era*400))
+        if [ "$vrs_em" -gt 2 ]; then vrs_mp=$((vrs_em-3)); else vrs_mp=$((vrs_em+9)); fi
+        vrs_doy=$(((153*vrs_mp+2)/5+vrs_ed-1));vrs_doe=$((vrs_yoe*365+vrs_yoe/4-vrs_yoe/100+vrs_doy))
+        vrs_eo=$(((vrs_ezh*60+vrs_ezm)*60));[ "${3%"${3#?}"}" = + ] || vrs_eo=$((0-vrs_eo))
+        vrs_ev=$(((vrs_era*146097+vrs_doe-719468)*86400+vrs_eh*3600+vrs_emi*60+vrs_es-vrs_eo))
+    }
+    vrs_fp_batch() {
+        vrs_n=$vrs_k;vrs_i=0;set --
+        while [ "$vrs_i" -lt "$vrs_n" ]; do
+            vrs_i=$((vrs_i+1));eval "vrs_pp=\$vrs_p_$vrs_i";eval "vrs_r_$vrs_i="
+            [ -e "$vrs_pp" ] || [ -L "$vrs_pp" ] || continue
+            [ ! -L "$vrs_pp" ] && [ -f "$vrs_pp" ] && [ -r "$vrs_pp" ] || continue
+            case $vrs_pp in /*) ;; *) continue ;; esac
+            case $vrs_pp in *'
+'*|*\\*) continue ;; esac
+            set -- "$@" "$vrs_pp"
+        done
+        [ "$#" -gt 0 ] || return 0
+        # shellcheck disable=SC2012
+        vrs_ls=$(LC_ALL=C ls -ldin --full-time "$@" 2>/dev/null) || return 0
+        vrs_sum=;vrs_i=0
+        while [ "$vrs_i" -lt "$vrs_n" ]; do
+            vrs_i=$((vrs_i+1));eval "vrs_pp=\$vrs_p_$vrs_i"
+            vrs_row=
+            while IFS= read -r vrs_line; do
+                vrs_t=${vrs_line#"${vrs_line%%[! ]*}"}
+                vrs_ino=${vrs_t%% *};vrs_t=${vrs_t#*[ ]};vrs_t=${vrs_t#"${vrs_t%%[! ]*}"}
+                vrs_am=${vrs_t%% *};vrs_t=${vrs_t#*[ ]};vrs_t=${vrs_t#"${vrs_t%%[! ]*}"}
+                vrs_t=${vrs_t#*[ ]};vrs_t=${vrs_t#"${vrs_t%%[! ]*}"};vrs_au=${vrs_t%% *}
+                vrs_t=${vrs_t#*[ ]};vrs_t=${vrs_t#"${vrs_t%%[! ]*}"}
+                vrs_t=${vrs_t#*[ ]};vrs_t=${vrs_t#"${vrs_t%%[! ]*}"};vrs_sz=${vrs_t%% *}
+                vrs_t=${vrs_t#*[ ]};vrs_t=${vrs_t#"${vrs_t%%[! ]*}"};vrs_d1=${vrs_t%% *}
+                vrs_t=${vrs_t#*[ ]};vrs_t=${vrs_t#"${vrs_t%%[! ]*}"};vrs_d2=${vrs_t%% *}
+                vrs_t=${vrs_t#*[ ]};vrs_t=${vrs_t#"${vrs_t%%[! ]*}"};vrs_d3=${vrs_t%% *}
+                vrs_t=${vrs_t#*[ ]}
+                [ "$vrs_t" = "$vrs_pp" ] || continue
+                vrs_am=${vrs_am%"${vrs_am#??????????}"}
+                case $vrs_ino:$vrs_au:$vrs_sz in *[!0-9:]*|:*|*::*|*:) break ;; esac
+                [ "${#vrs_am}" = 10 ] || break
+                case $vrs_am in -*) ;; *) break ;; esac
+                vrs_epoch "$vrs_d1" "$vrs_d2" "$vrs_d3" || break
+                vrs_row="$vrs_sz $vrs_ino $vrs_ev $vrs_am $vrs_au";break
+            done <<EOF
+$vrs_ls
+EOF
+            [ -n "$vrs_row" ] || continue
+            if [ "${vrs_row%% *}" -gt 1048576 ]; then eval "vrs_r_$vrs_i=oversize";continue;fi
+            eval "vrs_r_$vrs_i=\$vrs_row";vrs_sum="$vrs_sum $vrs_i"
+        done
+        set --
+        for vrs_i in $vrs_sum; do eval "set -- \"\$@\" \"\$vrs_p_$vrs_i\""; done
+        [ "$#" -gt 0 ] || return 0
+        vrs_ck=$(LC_ALL=C sha256sum "$@" 2>/dev/null) || vrs_ck=
+        vrs_left=$vrs_sum
+        while IFS= read -r vrs_line; do
+            vrs_i=${vrs_left# };vrs_i=${vrs_i%% *};[ -n "$vrs_i" ] || { vrs_left=bad;break; }
+            vrs_left=${vrs_left# };vrs_left=${vrs_left#"$vrs_i"}
+            eval "vrs_pp=\$vrs_p_$vrs_i;vrs_rr=\$vrs_r_$vrs_i"
+            vrs_h=${vrs_line%%  *}
+            if [ "${vrs_line#*  }" != "$vrs_pp" ] || [ "${#vrs_h}" != 64 ]; then vrs_left=bad;break;fi
+            case $vrs_h in *[!0-9a-f]*) vrs_left=bad;break ;; esac
+            eval "vrs_r_$vrs_i=\"\$vrs_h \$vrs_rr\""
+        done <<EOF
+$vrs_ck
+EOF
+        if [ -n "${vrs_left# }" ]; then
+            # Unproven digest set: every row of this batch uses the per-file path.
+            for vrs_i in $vrs_sum; do eval "vrs_r_$vrs_i="; done
+        fi
+        return 0
+    }
     # Directory entries, bounded to 256, names restricted to the identifier charset.
     vrs_dir() {
         vrs_n=0
@@ -144,6 +247,11 @@ vrsi_consistent_read() (
         if [ -e "$2" ] || [ -L "$2" ]; then printf '%s present\n' "$1"; fi
     }
     vrs_fingerprint() {
+        vrs_fp_mode=collect;vrs_k=0;vrs_fp_walk > /dev/null
+        vrs_fp_batch
+        vrs_fp_mode=emit;vrs_k=0;vrs_fp_walk
+    }
+    vrs_fp_walk() {
         vrs_one cfg "$vrs_cfg"
         vrs_one dev "${VWARD_DEVICE_CONFIG:-$vrs_etc/device.conf}"
         vrs_one map "${VWARD_DEVICE_MAP_CACHE:-/tmp/vward-device-map.tsv}"
@@ -170,6 +278,7 @@ vrsi_consistent_read() (
             vrs_one obs-agh-image "${VWARD_ROUTING_AGH_IMAGE:-/nonexistent/vward-agh-image}"
             vrs_one obs-smartdns-profile "$vrs_etc/smartdns.conf"
             vrs_dir obs-dnsproof "$vrs_etc/route-engine/domain-lists.dns"
+            [ "$vrs_fp_mode" = emit ] || return 0
             vrs_clock=$(vr2_clock_read) || vrs_clock=unknown
             printf '%s\n' "$vrs_clock" | awk '
                 NF==2 && length($1)==36 && $1~/^[0-9a-f-]+$/ && $2~/^[0-9]+$/ && length($2)<=10 {ok=1;print "obs-boot",$1}
@@ -236,6 +345,7 @@ vrsi_consistent_read() (
     vrs_stage=$vrs_tmp/stage
     mkdir "$vrs_stage" || return 2
     : > "$vrs_stage/STATE" || return 2
+    vrs_verify=
     for vrs_l in cfg dev map agh enabled categories persist catalog-fetched catalog-bundled \
         obs-manual obs-adaptive obs-forcevpn obs-listsfb obs-samples $vrs_decision_names $vrs_aux_names; do
         case $vrs_l in
@@ -258,7 +368,12 @@ vrsi_consistent_read() (
             obs-dnsproof:*) vrs_src=$vrs_etc/route-engine/domain-lists.dns/${vrs_l#obs-dnsproof:} ;;
             v2-*) vrs_src=$VWARD_ROUTING_INPUTS/${vrs_l#v2-}.tsv ;;
         esac
-        vrs_row=$(awk -v l="$vrs_l" '$1==l {print; exit}' "$vrs_tmp/fp.before")
+        # First row whose first field is the label (as awk $1==l; print; exit).
+        vrs_row=
+        while IFS= read -r vrs_line; do
+            [ "${vrs_line%%[ 	]*}" = "$vrs_l" ] || continue
+            vrs_row=$vrs_line;break
+        done < "$vrs_tmp/fp.before"
         # shellcheck disable=SC2086
         set -- $vrs_row
         case ${2:-} in
@@ -269,11 +384,44 @@ vrsi_consistent_read() (
                 if [ -L "$vrs_src" ] || [ ! -f "$vrs_src" ] || ! cp "$vrs_src" "$vrs_stage/$vrs_l" 2>/dev/null; then
                     vrs_unknown changed-during-read; return 3
                 fi
-                vrs_ck=$(sha256sum < "$vrs_stage/$vrs_l" 2>/dev/null)
-                if [ "${vrs_ck%% *}" != "$2" ] || [ "$(wc -c < "$vrs_stage/$vrs_l")" -ne "$3" ]; then vrs_unknown changed-during-read; return 3; fi
+                # Verified below with ONE sha256sum and ONE wc for all copies.
+                vrs_verify="$vrs_verify$vrs_l $2 $3
+"
                 printf '%s\tok\n' "$vrs_l" >> "$vrs_stage/STATE" ;;
         esac
     done
+    set --
+    vrs_want=
+    while IFS=' ' read -r vrs_l vrs_h vrs_sz; do
+        [ -n "$vrs_l" ] || continue
+        set -- "$@" "$vrs_stage/$vrs_l";vrs_want="$vrs_want$vrs_h:$vrs_sz "
+    done <<EOF
+$vrs_verify
+EOF
+    if [ "$#" -gt 0 ]; then
+        vrs_ck=$(LC_ALL=C sha256sum "$@" 2>/dev/null) || { vrs_unknown changed-during-read; return 3; }
+        vrs_wc=$(LC_ALL=C wc -c "$@" 2>/dev/null) || { vrs_unknown changed-during-read; return 3; }
+        vrs_left=$vrs_want;vrs_n=0
+        while IFS= read -r vrs_line; do
+            [ "$vrs_n" -lt "$#" ] || break;vrs_n=$((vrs_n+1))
+            vrs_e=${vrs_left%% *};vrs_left=${vrs_left#* }
+            [ "${vrs_line%%  *}" = "${vrs_e%%:*}" ] || { vrs_unknown changed-during-read; return 3; }
+        done <<EOF
+$vrs_ck
+EOF
+        [ "$vrs_n" -eq "$#" ] && [ -z "$vrs_left" ] || { vrs_unknown changed-during-read; return 3; }
+        vrs_left=$vrs_want;vrs_n=0
+        while IFS= read -r vrs_line; do
+            [ "$vrs_n" -lt "$#" ] || break;vrs_n=$((vrs_n+1))
+            vrs_e=${vrs_left%% *};vrs_left=${vrs_left#* }
+            vrs_line=${vrs_line#"${vrs_line%%[! 	]*}"};vrs_line=${vrs_line%%[ 	]*}
+            case $vrs_line in ''|*[!0-9]*) vrs_unknown changed-during-read; return 3 ;; esac
+            [ "$vrs_line" -eq "${vrs_e#*:}" ] || { vrs_unknown changed-during-read; return 3; }
+        done <<EOF
+$vrs_wc
+EOF
+        [ "$vrs_n" -eq "$#" ] && [ -z "$vrs_left" ] || { vrs_unknown changed-during-read; return 3; }
+    fi
     set --
 
     # Content + authority, excluding inode/time: stable across reboot, but a

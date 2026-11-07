@@ -37,6 +37,17 @@ vr2_hash() {
     case $vr2_h in ''|*[!0-9a-f]*) return 2 ;; esac
     [ "${#vr2_h}" = 64 ] && printf '%s\n' "$vr2_h"
 }
+# vr2_slurp FILE: vr2_sv = exactly "$(cat FILE 2>/dev/null)", no fork (as vrj_slurp).
+vr2_slurp() {
+    vr2_sv=;vr2_sn=
+    { while IFS= read -r vr2_sl || [ -n "$vr2_sl" ]; do
+        vr2_sv=$vr2_sv$vr2_sn$vr2_sl;vr2_sn='
+'
+      done; } 2>/dev/null < "$1"
+    while :; do case $vr2_sv in *'
+') vr2_sv=${vr2_sv%?} ;; *) break ;; esac; done
+}
+vr2_stage_names='intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv native.cfg enabled.tsv agh.json inputs.fp probes.tsv decision/version.tsv decision/choices.tsv decision/bindings.tsv decision/evidence.tsv decision/policies.tsv decision/saved.tsv decision/queue.tsv decision/tombstones.tsv decision/context.tsv decision/resources.tsv decision/proofs.tsv decision/upstreams.tsv'
 vr2_stage_files() {
     printf '%s\n' 'intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv native.cfg enabled.tsv agh.json inputs.fp probes.tsv decision/version.tsv decision/choices.tsv decision/bindings.tsv decision/evidence.tsv decision/policies.tsv decision/saved.tsv decision/queue.tsv decision/tombstones.tsv decision/context.tsv decision/resources.tsv decision/proofs.tsv decision/upstreams.tsv'
 }
@@ -44,14 +55,38 @@ vr2_stage_files() {
 # set. A valid-looking edit cannot keep using an earlier content generation.
 vr2_seal_valid() (
     [ "$#" -eq 3 ] && vr2_private_dir "$1" || return 2
-    vr2_file "$1/generation" && vr2_file "$1/seal" && vr2_file "$1/seal.sha" || return 2
-    [ "$(vr2_hash "$1/seal")" = "$(cat "$1/seal.sha")" ] || return 3
+    # vr2_file for the three seal files with ONE wc (rows in argument order).
+    for vr2_f in generation seal seal.sha; do
+        [ -f "$1/$vr2_f" ] && [ ! -L "$1/$vr2_f" ] && [ -r "$1/$vr2_f" ] || return 2
+    done
+    vr2_out=$(LC_ALL=C wc -lc "$1/generation" "$1/seal" "$1/seal.sha" 2>/dev/null) || return 2
+    vr2_n=0
+    # shellcheck disable=SC2034
+    while IFS=' 	' read -r vr2_l vr2_c vr2_rest; do
+        [ "$vr2_n" -lt 3 ] || break;vr2_n=$((vr2_n+1))
+        case $vr2_l:$vr2_c in *[!0-9:]*|:*|*:) return 2 ;; esac
+        [ "$vr2_c" -le 1048576 ] && [ "$vr2_l" -le 4096 ] || return 2
+    done <<EOF
+$vr2_out
+EOF
+    [ "$vr2_n" -eq 3 ] || return 2
+    # vr2_hash of the (already size-checked) seal; "$(cat F)" == vr2_slurp.
+    vr2_h=$(sha256sum < "$1/seal") || vr2_h=
+    vr2_h=${vr2_h%% *}
+    case $vr2_h in ''|*[!0-9a-f]*) vr2_h= ;; esac
+    [ "${#vr2_h}" = 64 ] || vr2_h=
+    vr2_slurp "$1/seal.sha";[ "$vr2_h" = "$vr2_sv" ] || return 3
     vr2_count=0;vr2_seen=' '
     exec 3< "$1/seal" || return 2
     IFS="$(printf '\t')" read -r vr2_type vr2_version vr2_generation vr2_extra <&3 || return 2
+    vr2_slurp "$1/generation"
     [ "$vr2_type" = "$2" ] && [ "$vr2_version" = 2 ] && [ -z "$vr2_extra" ] &&
-        [ "$vr2_generation" = "$(cat "$1/generation")" ] || return 3
-    printf '%s\n' "$vr2_generation" | grep -Eq '^g-[0-9a-f]{16}$' || return 2
+        [ "$vr2_generation" = "$vr2_sv" ] || return 3
+    # grep -Eq '^g-[0-9a-f]{16}$' on one line (read stops at a newline).
+    case $vr2_generation in
+        g-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+        *) return 2 ;;
+    esac
     # Same per-file checks as vr2_hash (regular, not a link, readable, <=1MiB,
     # <=4096 lines, exact digest; any failure = 3), but ONE wc and ONE sha256sum
     # for the whole closed set: a stage is validated ~15 times per request.
@@ -100,7 +135,7 @@ EOF
     set -- $vr2_names
     [ "$vr2_count" -eq "$#" ]
 )
-vr2_stage_valid() { vr2_private_dir "$1/decision" && vr2_seal_valid "$1" routing-stage "$(vr2_stage_files)"; }
+vr2_stage_valid() { vr2_private_dir "$1/decision" && vr2_seal_valid "$1" routing-stage "$vr2_stage_names"; }
 vr2_projection_valid() { vr2_seal_valid "$1" routing-projection 'atoms.tsv policy.tsv choices.tsv service dns.tsv upstream-keys.tsv'; }
 
 # Opaque logical URL keys and physical URL content are different axes. A

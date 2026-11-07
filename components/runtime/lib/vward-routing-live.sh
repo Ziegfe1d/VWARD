@@ -62,7 +62,7 @@ vrl_publication_label() {
 }
 # vrj_* fields are set by vrj_ls/vrj_slurp (journal library).
 # shellcheck disable=SC2154
-vrl_path_gate() (
+vrl_path_gate() {
     # /opt itself is the existing trusted Entware mount boundary. Below it,
     # reject aliases and writable-by-others directories; never follow a reused
     # metadata leaf or accept an API-provided path as a destination.
@@ -77,19 +77,28 @@ vrl_path_gate() (
         *) return 75 ;;
     esac
     case $1 in */../*|*/./*|*/..|*/.|*//*) return 75 ;; esac
-    vrl_pg_parent=${1%/*}
+    # One ls for the whole ancestor chain (was one per directory; same
+    # builtin tests and allowed modes for every directory, so row order is
+    # irrelevant). A newline would split a row: refuse it, as the old
+    # multi-line check did. No subshell: callers only test the status.
+    case $1 in *'
+'*) return 75 ;; esac
+    vrl_pg_parent=${1%/*};vrl_pg_n=0;set --
     while [ "$vrl_pg_parent" != "$vrl_pg_stop" ]; do
         [ -d "$vrl_pg_parent" ] && [ ! -L "$vrl_pg_parent" ] && [ -O "$vrl_pg_parent" ] || return 75
-        # shellcheck disable=SC2012
-        vrj_ls "$vrl_pg_parent" || return 75
-        case $vrj_lmode in
-            drwx------|drwxr-xr-x|drwxr-x---|drwx--x--x) ;; *) return 75 ;;
-        esac
+        set -- "$@" "$vrl_pg_parent";vrl_pg_n=$((vrl_pg_n+1))
         vrl_pg_parent=${vrl_pg_parent%/*}
         [ -n "$vrl_pg_parent" ] || return 75
     done
+    if [ "$#" -gt 0 ]; then
+        vrj_lsmodes "$@" || return 75
+        [ "$vrj_lcount" = "$vrl_pg_n" ] || return 75
+        for vrl_pg_m in $vrj_lmodes; do
+            case $vrl_pg_m in drwx------|drwxr-xr-x|drwxr-x---|drwx--x--x) ;; *) return 75 ;; esac
+        done
+    fi
     [ -d "$vrl_pg_stop" ] && [ -O "$vrl_pg_stop" ]
-)
+}
 
 vrl_refresh() {
     vrl_ready "$vrb_j" || return 75
@@ -174,7 +183,9 @@ vrl_parent_scope_hash() {
 vrl_context() {
     [ "${vrb_inside:-}" = locked-native ] &&
         [ "$vrb_e" = "${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing" ] &&
-        [ "$vrb_j" = "$vrb_e/journal" ] && vrl_ready "$vrb_j" &&
+        [ "$vrb_j" = "$vrb_e/journal" ] &&
+        # Fixed directory shape: proven once per coordinator (memo below).
+        { [ "${vrl_ready_memo:-}" = "$vrb_j|${vrj2_me:-}" ] || { vrl_ready "$vrb_j" && vrl_ready_memo="$vrb_j|${vrj2_me:-}"; }; } &&
         vward_routing_legacy_recovery_gate
 }
 
