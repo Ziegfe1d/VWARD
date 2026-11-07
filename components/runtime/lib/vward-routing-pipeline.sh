@@ -22,31 +22,33 @@ vrb_legacy_gate() (
 vrb_backend_context() {
     [ "${vrb_inside:-}" = locked-emulator ] && vrb_legacy_gate "$vrb_e"
 }
+# vrj_* fields are set by vrj_ls/vrj_slurp (journal library).
+# shellcheck disable=SC2154
 vrb_worker_context() {
     vrb_backend_context && vrj_dir "$vrb_j" &&
         vrb_data_ancestry "$vrb_edit_path/owner" && vrb_data_ancestry "$vrb_change_path/owner" &&
         vrj2_ready "$vrb_j" "$vrb_op" &&
-        { [ "$(cat "$vrb_j/$vrb_op/state")" = pending ] || [ "$(cat "$vrb_j/$vrb_op/state")" = unknown ]; } &&
-        [ "$(cat "$vrb_edit_path/owner" 2>/dev/null)" = "$(printf '%s\t%s\t%s' "${vrj2_me:-}" "${vrj2_start:-}" "${vrj2_boot:-}")" ] &&
-        [ "$(cat "$vrb_change_path/owner" 2>/dev/null)" = "$(printf '%s\t%s\t%s' "${vrj2_me:-}" "${vrj2_start:-}" "${vrj2_boot:-}")" ] &&
-        [ "$(vr2_hash "$vrb_edit_path/owner")" = "$(cat "$vrb_edit_path/owner.sha")" ] &&
-        [ "$(vr2_hash "$vrb_change_path/owner")" = "$(cat "$vrb_change_path/owner.sha")" ] &&
+        { vrj_slurp "$vrb_j/$vrb_op/state"; [ "$vrj_sv" = pending ] || [ "$vrj_sv" = unknown ]; } &&
+        { vrj_slurp "$vrb_edit_path/owner"; [ "$vrj_sv" = "$(printf '%s\t%s\t%s' "${vrj2_me:-}" "${vrj2_start:-}" "${vrj2_boot:-}")" ]; } &&
+        { vrj_slurp "$vrb_change_path/owner"; [ "$vrj_sv" = "$(printf '%s\t%s\t%s' "${vrj2_me:-}" "${vrj2_start:-}" "${vrj2_boot:-}")" ]; } &&
+        { vrj_slurp "$vrb_edit_path/owner.sha"; [ "$(vr2_hash "$vrb_edit_path/owner")" = "$vrj_sv" ]; } &&
+        { vrj_slurp "$vrb_change_path/owner.sha"; [ "$(vr2_hash "$vrb_change_path/owner")" = "$vrj_sv" ]; } &&
         [ "$(vward_lock_boot_id "$vrb_edit_path/boot")" = "${vrj2_boot:-}" ] &&
         [ "$(vward_lock_boot_id "$vrb_change_path/boot")" = "${vrj2_boot:-}" ] &&
-        [ "$(cat /proc/sys/kernel/random/boot_id)" = "${vrj2_boot:-}" ] &&
+        { vrj_slurp /proc/sys/kernel/random/boot_id; [ "$vrj_sv" = "${vrj2_boot:-}" ]; } &&
         vlg_boot="$vrj2_boot" vward_lock_gate_live "$vrj2_boot.$vrj2_me.$vrj2_start" &&
-        [ "$(cat "$vrb_coord_slot/pid" 2>/dev/null)" = "${vrj2_me:-}" ] &&
-        [ "$(cat "$vrb_coord_slot/pid_start" 2>/dev/null)" = "${vrj2_start:-}" ] &&
+        { vrj_slurp "$vrb_coord_slot/pid"; [ "$vrj_sv" = "${vrj2_me:-}" ]; } &&
+        { vrj_slurp "$vrb_coord_slot/pid_start"; [ "$vrj_sv" = "${vrj2_start:-}" ]; } &&
         [ ! -e "$VWARD_ROOT_PREFIX/tmp/vward-update-requested" ] && [ ! -L "$VWARD_ROOT_PREFIX/tmp/vward-update-requested" ] &&
         [ ! -e "$VWARD_ROOT_PREFIX/tmp/vward-update.lock" ] && [ ! -L "$VWARD_ROOT_PREFIX/tmp/vward-update.lock" ] || return 75
     case ${vrb_role:-} in
         forward)
-            [ "$(cat "$vrb_j/$vrb_op/state")" = pending ] &&
-                [ "$(cat "$vrb_j/$vrb_op/step.$vrb_active_step/state" 2>/dev/null)" = pending ] ;;
+            { vrj_slurp "$vrb_j/$vrb_op/state"; [ "$vrj_sv" = pending ]; } &&
+                { vrj_slurp "$vrb_j/$vrb_op/step.$vrb_active_step/state"; [ "$vrj_sv" = pending ]; } ;;
         inverse)
-            [ "$(cat "$vrb_j/$vrb_op/step.$vrb_active_step/state" 2>/dev/null)" = compensating ] ;;
-        save) [ "$(cat "$vrb_j/$vrb_op/state")" = pending ] && [ "$(cat "$vrb_j/$vrb_op/save" 2>/dev/null)" = pending ] ;;
-        baseline-save) [ "$(cat "$vrb_j/$vrb_op/rollback-save" 2>/dev/null)" = pending ] ;;
+            { vrj_slurp "$vrb_j/$vrb_op/step.$vrb_active_step/state"; [ "$vrj_sv" = compensating ]; } ;;
+        save) { vrj_slurp "$vrb_j/$vrb_op/state"; [ "$vrj_sv" = pending ]; } && { vrj_slurp "$vrb_j/$vrb_op/save"; [ "$vrj_sv" = pending ]; } ;;
+        baseline-save) { vrj_slurp "$vrb_j/$vrb_op/rollback-save"; [ "$vrj_sv" = pending ]; } ;;
         *) return 75 ;;
     esac
 }
@@ -103,20 +105,23 @@ vrb_reap_publisher_slots() (
 # child). A dead operation cannot leave a child able to publish after recovery.
 # Durable intent remains after death; quiet checks never infer death from PID
 # alone. This certifies DATA publication, not completion of a remote transport.
+# vrj_* fields are set by vrj_ls/vrj_slurp (journal library).
+# shellcheck disable=SC2154
 vrb_single_link() {
     # Only the numeric metadata field is read; filename text is never parsed.
     # Keenetic's stat may lack -c, whereas ls -ldn is supported on both stores.
     # shellcheck disable=SC2012
-    [ "$(LC_ALL=C ls -ldn "$1" | awk '{print $2}')" = 1 ]
+    vrj_ls "$1" && [ "$vrj_llinks" = 1 ]
 }
 # Only numeric mode/owner metadata is parsed; filename bytes are not fields.
-# shellcheck disable=SC2012
+# shellcheck disable=SC2012,SC2154
 vrb_owned_data_file() {
     if [ "$(vrb_publication_label "$1")" = enabled ]; then
         [ -f "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] && [ -r "$1" ] || return 75
         # Registry contains public IDs/targets. Only this exact legacy file
         # accepts 0644; private proofs/URLs/decision files remain private.
-        case $(ls -ldn "$1" | awk '{print substr($1,1,10)}') in -rw-------|-r--------|-rw-r--r--) ;; *) return 75 ;; esac
+        vrj_ls "$1" || return 75
+        case $vrj_lmode in -rw-------|-r--------|-rw-r--r--) ;; *) return 75 ;; esac
         [ "$(wc -c < "$1")" -le 1048576 ]
     else vrj2_file "$1";fi
 }
@@ -136,13 +141,13 @@ vrb_publication_label() (
     esac
     printf '%s\n' "$vrb_pm_label"
 )
-# shellcheck disable=SC2012
+# shellcheck disable=SC2012,SC2154
 vrb_publication_mode() (
     vrb_pm_label=$(vrb_publication_label "$1") || return 75
     if [ "$vrb_pm_label" = saved-cfg ]; then
         case ${vrb_role:-} in save|baseline-save) ;; *) return 75 ;; esac
         if [ -e "$1" ] || [ -L "$1" ]; then
-            vrj2_file "$1" && [ "$(ls -ldn "$1" | awk '{print substr($1,1,10)}')" = -rw------- ] || return 75
+            vrj2_file "$1" && vrj_ls "$1" && [ "$vrj_lmode" = -rw------- ] || return 75
         fi
         printf '%s\n' 0600;return 0
     fi
@@ -156,7 +161,8 @@ vrb_publication_mode() (
     vrb_pm_current=absent
     if [ -e "$1" ] || [ -L "$1" ]; then
         vrb_owned_data_file "$1" && vrb_single_link "$1" || return 75
-        vrb_pm_current=$(ls -ldn "$1" | awk '{print substr($1,1,10),$3}') || return 75
+        vrj_ls "$1" || return 75
+        vrb_pm_current="$vrj_lmode $vrj_luid"
     fi
     vrb_pm_uid=$(id -u) || return 75
     if [ "$vrb_pm_old" = absent ]; then

@@ -73,6 +73,34 @@ vrsi_consistent_read() (
     vrs_one() {
         if [ ! -e "$2" ] && [ ! -L "$2" ]; then printf '%s absent\n' "$1"; return 0; fi
         if [ -L "$2" ] || [ ! -f "$2" ] || [ ! -r "$2" ]; then printf '%s bad\n' "$1"; return 0; fi
+        # Process budget (runs ~50 files x 2 per consistent read): ONE ls -ldin
+        # gives inode, mode, uid and byte size of this regular file. Same output
+        # fields as the separate wc -c / ls -di / ls -ldn path below, which stays
+        # the fallback whenever that single line cannot be parsed.
+        vrs_ll=$(LC_ALL=C ls -ldin "$2" 2>/dev/null) || vrs_ll=
+        case $vrs_ll in *'
+'*) vrs_ll= ;; esac
+        vrs_ll=${vrs_ll#"${vrs_ll%%[! 	]*}"}
+        vrs_ino=${vrs_ll%%[ 	]*};vrs_ll=${vrs_ll#"$vrs_ino"};vrs_ll=${vrs_ll#"${vrs_ll%%[! 	]*}"}
+        vrs_am=${vrs_ll%%[ 	]*};vrs_am=${vrs_am%"${vrs_am#??????????}"}
+        vrs_ll=${vrs_ll#*[ 	]};vrs_ll=${vrs_ll#"${vrs_ll%%[! 	]*}"}
+        vrs_ll=${vrs_ll#*[ 	]};vrs_ll=${vrs_ll#"${vrs_ll%%[! 	]*}"};vrs_au=${vrs_ll%%[ 	]*}
+        vrs_ll=${vrs_ll#*[ 	]};vrs_ll=${vrs_ll#"${vrs_ll%%[! 	]*}"}
+        vrs_ll=${vrs_ll#*[ 	]};vrs_ll=${vrs_ll#"${vrs_ll%%[! 	]*}"};vrs_sz=${vrs_ll%%[ 	]*}
+        case $vrs_ino:$vrs_au:$vrs_sz in
+            *[!0-9:]*|:*|*::*|*:) ;;
+            *)  if [ "${#vrs_am}" = 10 ]; then
+                    if [ "$vrs_sz" -gt 1048576 ]; then printf '%s oversize\n' "$1"; return 0; fi
+                    vrs_crc=$(sha256sum < "$2" 2>/dev/null) || { printf '%s bad\n' "$1"; return 0; }
+                    vrs_crc=${vrs_crc%% *}
+                    case $vrs_crc in ''|*[!0-9a-f]*) printf '%s bad\n' "$1"; return 0 ;; esac
+                    [ "${#vrs_crc}" = 64 ] || { printf '%s bad\n' "$1"; return 0; }
+                    vrs_mt=$(date -r "$2" +%s 2>/dev/null)
+                    case $vrs_mt in ''|*[!0-9]*) printf '%s nostat\n' "$1"; return 0 ;; esac
+                    printf '%s %s %s %s %s %s %s\n' "$1" "$vrs_crc" "$vrs_sz" "$vrs_ino" "$vrs_mt" "$vrs_am" "$vrs_au"
+                    return 0
+                fi ;;
+        esac
         vrs_sz=$(wc -c < "$2" 2>/dev/null) || { printf '%s bad\n' "$1"; return 0; }
         if [ "$vrs_sz" -gt 1048576 ]; then printf '%s oversize\n' "$1"; return 0; fi
         vrs_crc=$(sha256sum < "$2" 2>/dev/null) || { printf '%s bad\n' "$1"; return 0; }
@@ -81,12 +109,22 @@ vrsi_consistent_read() (
         [ "${#vrs_crc}" = 64 ] || { printf '%s bad\n' "$1"; return 0; }
         # BusyBox on Keenetic has no stat format option: inode from ls -di, mtime seconds from date -r.
         # shellcheck disable=SC2012
-        vrs_ino=$(ls -di "$2" 2>/dev/null | awk '{print $1}')
+        # One fork per field instead of ls|awk pipelines (same fields as awk
+        # $1 / substr($1,1,10),$3); multi-line output fails closed as nostat.
+        vrs_ino=$(LC_ALL=C ls -di "$2" 2>/dev/null)
+        case $vrs_ino in *'
+'*) vrs_ino= ;; esac
+        vrs_ino=${vrs_ino#"${vrs_ino%%[! 	]*}"};vrs_ino=${vrs_ino%%[ 	]*}
         vrs_mt=$(date -r "$2" +%s 2>/dev/null)
         case $vrs_ino$vrs_mt in ''|*[!0-9]*) printf '%s nostat\n' "$1"; return 0 ;; esac
         # shellcheck disable=SC2012
-        vrs_auth=$(ls -ldn "$2" 2>/dev/null | awk '{print substr($1,1,10),$3}')
-        [ -n "$vrs_auth" ] || { printf '%s nostat\n' "$1"; return 0; }
+        vrs_auth=$(LC_ALL=C ls -ldn "$2" 2>/dev/null)
+        case $vrs_auth in *'
+'*|'') printf '%s nostat\n' "$1"; return 0 ;; esac
+        vrs_am=${vrs_auth%%[ 	]*};vrs_am=${vrs_am%"${vrs_am#??????????}"}
+        vrs_auth=${vrs_auth#*[ 	]};vrs_auth=${vrs_auth#"${vrs_auth%%[! 	]*}"}
+        vrs_auth=${vrs_auth#*[ 	]};vrs_auth=${vrs_auth#"${vrs_auth%%[! 	]*}"}
+        vrs_auth="$vrs_am ${vrs_auth%%[ 	]*}"
         printf '%s %s %s %s %s %s\n' "$1" "$vrs_crc" "$vrs_sz" "$vrs_ino" "$vrs_mt" "$vrs_auth"
     }
     # Directory entries, bounded to 256, names restricted to the identifier charset.
@@ -310,13 +348,25 @@ vrsi_consistent_read() (
         done
         if [ "$vrs_read_kind" = legacy-observation ]; then printf 'routing-state\t0\n' > "$vrs_out/decision/version.tsv" || return 2;fi
         printf 'routing-stage\t2\t%s\n' "$vrs_gen" > "$vrs_out/seal" || return 2
-        for vrs_name in intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv native.cfg enabled.tsv agh.json inputs.fp probes.tsv \
-            decision/version.tsv decision/choices.tsv decision/bindings.tsv decision/evidence.tsv \
-            decision/policies.tsv decision/saved.tsv decision/queue.tsv decision/tombstones.tsv \
-            decision/context.tsv decision/resources.tsv decision/proofs.tsv decision/upstreams.tsv; do
-            vrs_ck=$(sha256sum < "$vrs_out/$vrs_name") || return 2
-            printf '%s\t%s\n' "${vrs_ck%% *}" "$vrs_name" >> "$vrs_out/seal" || return 2
-        done
+        vrs_names='intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv native.cfg enabled.tsv agh.json inputs.fp probes.tsv
+            decision/version.tsv decision/choices.tsv decision/bindings.tsv decision/evidence.tsv
+            decision/policies.tsv decision/saved.tsv decision/queue.tsv decision/tombstones.tsv
+            decision/context.tsv decision/resources.tsv decision/proofs.tsv decision/upstreams.tsv'
+        # ONE sha256sum for the closed name set (was one per file, every read).
+        # Rows must come back in argument order with exactly these names.
+        # shellcheck disable=SC2086
+        vrs_ck=$(cd "$vrs_out" && LC_ALL=C sha256sum $vrs_names) || return 2
+        # shellcheck disable=SC2086
+        vrs_want=$(printf '%s ' $vrs_names)
+        while IFS=' 	' read -r vrs_h vrs_name vrs_rest; do
+            [ "$vrs_name" = "${vrs_want%% *}" ] && [ -z "$vrs_rest" ] && [ "${#vrs_h}" = 64 ] || return 2
+            case $vrs_h in *[!0-9a-f]*) return 2 ;; esac
+            printf '%s\t%s\n' "$vrs_h" "$vrs_name" >> "$vrs_out/seal" || return 2
+            vrs_want=${vrs_want#* }
+        done <<EOF
+$vrs_ck
+EOF
+        [ -z "$vrs_want" ] || return 2
         vrs_ck=$(sha256sum < "$vrs_out/seal") || return 2
         printf '%s\n' "${vrs_ck%% *}" > "$vrs_out/seal.sha" || return 2
     fi

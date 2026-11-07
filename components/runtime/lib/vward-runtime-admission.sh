@@ -348,15 +348,24 @@ vward_lock_gate_live() {
     return 1
 }
 # Metadata fields only; paths are never parsed as ls output.
+# vward_lock_ls PATH sets vl_lsmode (first 10 chars of field 1, as awk
+# substr($1,1,10)) and vl_lslinks (field 2) from ONE ls, without an awk
+# pipeline: lock checks run hundreds of times per routing request.
 # shellcheck disable=SC2012
+vward_lock_ls() {
+    vl_lst=$(LC_ALL=C ls -ldn "$1" 2>/dev/null) || return 1
+    case $vl_lst in *'
+'*|'') return 1 ;; esac
+    vl_lsmode=${vl_lst%%[ 	]*};vl_lsmode=${vl_lsmode%"${vl_lsmode#??????????}"}
+    vl_lst=${vl_lst#*[ 	]};vl_lst=${vl_lst#"${vl_lst%%[! 	]*}"};vl_lslinks=${vl_lst%%[ 	]*}
+}
 vward_lock_gate_dir() {
-    [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] &&
-        [ "$(ls -ldn "$1" | awk '{print substr($1,1,10)}')" = drwx------ ]
+    [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] && vward_lock_ls "$1" && [ "$vl_lsmode" = drwx------ ]
 }
 vward_lock_gate_number() {
     [ -f "$1/number" ] && [ ! -L "$1/number" ] && [ -O "$1/number" ] || return 1
     # shellcheck disable=SC2012
-    [ "$(ls -ldn "$1/number" | awk '{print substr($1,1,10),$2}')" = '-rw------- 1' ] || return 2
+    vward_lock_ls "$1/number" && [ "$vl_lsmode $vl_lslinks" = '-rw------- 1' ] || return 2
     vlg_n=;read -r vlg_n < "$1/number" || return 2
     case $vlg_n in ''|*[!0-9]*|0*) return 2 ;; esac
     [ "${#vlg_n}" -le 10 ] && [ "$vlg_n" -lt 2147483647 ] || return 2
@@ -382,7 +391,7 @@ vward_lock_gate_quiet() {
         [ -e "$vlg_lease" ] || [ -L "$vlg_lease" ] || continue
         [ -f "$vlg_lease" ] && [ ! -L "$vlg_lease" ] && [ -O "$vlg_lease" ] || return 2
         # shellcheck disable=SC2012
-        [ "$(ls -ldn "$vlg_lease" | awk '{print substr($1,1,10),$2}')" = '-rw------- 1' ] || return 2
+        vward_lock_ls "$vlg_lease" && [ "$vl_lsmode $vl_lslinks" = '-rw------- 1' ] || return 2
         vlg_exec_key=${vlg_lease##*/exec.}
         vlg_exec_boot=;read -r vlg_exec_boot < "$vlg_lease" || return 2
         vlg_exec_rc=0;vward_lock_gate_live "$vlg_exec_boot.$vlg_exec_key" || vlg_exec_rc=$?
@@ -479,7 +488,8 @@ vward_lock_boot_id() {
     [ -f "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] || return 1
     # Authority metadata only, not filename fields.
     # shellcheck disable=SC2012
-    case $(ls -ldn "$1" | awk '{print substr($1,1,10),$2}') in '-rw------- 1'|'-r-------- 1') ;; *) return 1 ;; esac
+    vward_lock_ls "$1" || return 1
+    case "$vl_lsmode $vl_lslinks" in '-rw------- 1'|'-r-------- 1') ;; *) return 1 ;; esac
     vl_boot=;read -r vl_boot < "$1" || return 1
     printf '%s\n' "$vl_boot" | grep -Eq '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' || return 1
     printf '%s\n' "$vl_boot"

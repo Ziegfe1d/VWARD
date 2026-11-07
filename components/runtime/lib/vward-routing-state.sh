@@ -2,6 +2,8 @@
 # One physical local-state transaction, like one native group with several
 # commands. Every file delta/prefix is frozen before BEGIN; version is last.
 # No schema migration flag grants native/DNS permissions.
+# vrj_* fields are set by vrj_ls/vrj_slurp (journal library).
+# shellcheck disable=SC2154
 vrb_state_image() (
     [ "$#" -eq 2 ] && vrj_dir "$1" || return 2
     for vrb_si_file in "$1"/*; do
@@ -13,11 +15,10 @@ vrb_state_image() (
         vrb_si_file=$1/$vrb_si_key.tsv
         if [ ! -e "$vrb_si_file" ] && [ ! -L "$vrb_si_file" ]; then printf '%s\t-\t-\t-\n' "$vrb_si_key" >> "$2"
         else
-            vrj2_file "$vrb_si_file" && vrb_single_link "$vrb_si_file" || return 75
-            # Numeric owner and mode only, no filename fields.
-            # shellcheck disable=SC2012
-            vrb_si_meta=$(ls -ldn "$vrb_si_file" | awk '{print substr($1,1,10) "\t" $3}') || return 75
-            printf '%s\t%s\t%s\n' "$vrb_si_key" "$(vr2_hash "$vrb_si_file")" "$vrb_si_meta" >> "$2" || return 1
+            # vrj2_file leaves this file's ls fields in vrj_*: numeric owner,
+            # mode and link count only, no filename fields.
+            vrj2_file "$vrb_si_file" && [ "$vrj_llinks" = 1 ] || return 75
+            printf '%s\t%s\t%s\t%s\n' "$vrb_si_key" "$(vr2_hash "$vrb_si_file")" "$vrj_lmode" "$vrj_luid" >> "$2" || return 1
         fi
     done
 )

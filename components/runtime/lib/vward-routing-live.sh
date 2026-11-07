@@ -60,6 +60,8 @@ vrl_publication_label() {
         *) return 75 ;;
     esac
 }
+# vrj_* fields are set by vrj_ls/vrj_slurp (journal library).
+# shellcheck disable=SC2154
 vrl_path_gate() (
     # /opt itself is the existing trusted Entware mount boundary. Below it,
     # reject aliases and writable-by-others directories; never follow a reused
@@ -79,7 +81,8 @@ vrl_path_gate() (
     while [ "$vrl_pg_parent" != "$vrl_pg_stop" ]; do
         [ -d "$vrl_pg_parent" ] && [ ! -L "$vrl_pg_parent" ] && [ -O "$vrl_pg_parent" ] || return 75
         # shellcheck disable=SC2012
-        case $(ls -ldn "$vrl_pg_parent" | awk '{print substr($1,1,10)}') in
+        vrj_ls "$vrl_pg_parent" || return 75
+        case $vrj_lmode in
             drwx------|drwxr-xr-x|drwxr-x---|drwx--x--x) ;; *) return 75 ;;
         esac
         vrl_pg_parent=${vrl_pg_parent%/*}

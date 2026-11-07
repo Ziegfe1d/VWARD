@@ -33,10 +33,42 @@
 vrj2_id() { vrj_id "$1" && [ "${#1}" -le 32 ]; }
 vrj2_seq() { case $1 in ''|0*|*[!0-9]*) return 2 ;; esac; [ "${#1}" -le 4 ] && [ "$1" -le 4096 ]; }
 vrj2_gen() { printf '%s\n' "$1" | grep -Eq '^g-[0-9a-f]{16}$'; }
+# vrj_ls PATH: fields of ONE ls -ldn, without an awk pipeline (these checks
+# run hundreds of times per request): vrj_lmode = first 10 chars of field 1
+# (as awk substr($1,1,10)), vrj_llinks/vrj_luid/vrj_lsize = fields 2/3/5.
+# Multi-line output fails closed. Read only numeric metadata, never filename text.
+# vrj_llinks/vrj_luid are read by the pipeline/state libraries.
+# shellcheck disable=SC2012,SC2034
+vrj_ls() {
+    vrj_lt=$(LC_ALL=C ls -ldn "$1" 2>/dev/null) || return 1
+    case $vrj_lt in *'
+'*|'') return 1 ;; esac
+    vrj_lmode=${vrj_lt%%[ 	]*};vrj_lmode=${vrj_lmode%"${vrj_lmode#??????????}"}
+    vrj_lt=${vrj_lt#*[ 	]};vrj_lt=${vrj_lt#"${vrj_lt%%[! 	]*}"};vrj_llinks=${vrj_lt%%[ 	]*}
+    vrj_lt=${vrj_lt#*[ 	]};vrj_lt=${vrj_lt#"${vrj_lt%%[! 	]*}"};vrj_luid=${vrj_lt%%[ 	]*}
+    vrj_lt=${vrj_lt#*[ 	]};vrj_lt=${vrj_lt#"${vrj_lt%%[! 	]*}"}
+    vrj_lt=${vrj_lt#*[ 	]};vrj_lt=${vrj_lt#"${vrj_lt%%[! 	]*}"};vrj_lsize=${vrj_lt%%[ 	]*}
+}
+# vrj_slurp FILE: vrj_sv = exactly what "$(cat FILE 2>/dev/null)" yields
+# (all lines, trailing newlines removed; empty when unreadable), without a
+# fork+exec: these small state files are compared hundreds of times per request.
+vrj_slurp() {
+    vrj_sv=;vrj_sn=;vrj_sr=0
+    { while IFS= read -r vrj_sl || [ -n "$vrj_sl" ]; do
+        vrj_sv=$vrj_sv$vrj_sn$vrj_sl;vrj_sn='
+'
+      done; } 2>/dev/null < "$1" || vrj_sr=1
+    while :; do case $vrj_sv in *'
+') vrj_sv=${vrj_sv%?} ;; *) break ;; esac; done
+    return "$vrj_sr"
+}
 vrj2_file() {
     [ -f "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] && [ -r "$1" ] || return 2
-    case $(ls -ldn "$1" | awk '{print substr($1,1,10)}') in -rw-------|-r--------) ;; *) return 2 ;; esac
-    [ "$(wc -c < "$1")" -le 1048576 ]
+    vrj_ls "$1" || return 2
+    case $vrj_lmode in -rw-------|-r--------) ;; *) return 2 ;; esac
+    # Regular file (checked above): ls size field = byte count, as wc -c.
+    case $vrj_lsize in ''|*[!0-9]*) return 2 ;; esac
+    [ "$vrj_lsize" -le 1048576 ]
 }
 vrj2_pid_start() {
     [ -r "/proc/$1/stat" ] || return 1
@@ -115,11 +147,11 @@ vrj2_plan_valid() {
 vrj2_ready() {
     vrj_dir "$1" && vrj2_id "$2" && vrj_dir "$1/$2" || return 2
     for vrj2_f in schema plan plan.sha state generation; do vrj2_file "$1/$2/$vrj2_f" || return 2; done
-    [ "$(cat "$1/$2/schema")" = "$(printf 'routing-journal\t2')" ] || return 2
+    vrj_slurp "$1/$2/schema";[ "$vrj_sv" = "$(printf 'routing-journal\t2')" ] || return 2
     vrj2_digest=$(vrj_hash "$1/$2/plan") || return 2
-    [ "$vrj2_digest" = "$(cat "$1/$2/plan.sha")" ] && vrj2_plan_valid "$1/$2/plan" || return 2
-    vrj2_gen "$(cat "$1/$2/generation")" || return 2
-    case $(cat "$1/$2/state") in planned|pending|unknown|committed|compensated) ;; *) return 2 ;; esac
+    vrj_slurp "$1/$2/plan.sha";[ "$vrj2_digest" = "$vrj_sv" ] && vrj2_plan_valid "$1/$2/plan" || return 2
+    vrj_slurp "$1/$2/generation";vrj2_gen "$vrj_sv" || return 2
+    vrj_slurp "$1/$2/state";case $vrj_sv in planned|pending|unknown|committed|compensated) ;; *) return 2 ;; esac
 }
 vrj2_step_row() { awk -F'\t' -v n="$2" '$1=="step" && $2==n {print;found=1} END{exit found?0:1}' "$1/plan"; }
 vrj2_decode() { printf '%s\n' "$1" | tr '|' '\t'; }
@@ -128,9 +160,9 @@ vrj2_step_valid() {
     vrj2_row=$(vrj2_step_row "$1/$2" "$3") || return 2
     vrj2_pre=$(printf '%s\n' "$vrj2_row" | cut -f6);vrj2_post=$(printf '%s\n' "$vrj2_row" | cut -f7)
     for vrj2_f in pre post state generation; do vrj2_file "$1/$2/step.$3/$vrj2_f" || return 2; done
-    [ "$(vrj2_decode "$vrj2_pre")" = "$(cat "$1/$2/step.$3/pre")" ] &&
-        [ "$(vrj2_decode "$vrj2_post")" = "$(cat "$1/$2/step.$3/post")" ] || return 2
-    case $(cat "$1/$2/step.$3/state") in pending|done|failed|unknown|compensating|compensated) ;; *) return 2 ;; esac
+    vrj_slurp "$1/$2/step.$3/pre";[ "$(vrj2_decode "$vrj2_pre")" = "$vrj_sv" ] || return 2
+    vrj_slurp "$1/$2/step.$3/post";[ "$(vrj2_decode "$vrj2_post")" = "$vrj_sv" ] || return 2
+    vrj_slurp "$1/$2/step.$3/state";case $vrj_sv in pending|done|failed|unknown|compensating|compensated) ;; *) return 2 ;; esac
 }
 vrj2_gate_except() (
     [ "$#" -eq 2 ] && vrj_dir "$1" || return 2
@@ -359,7 +391,7 @@ vrj_id() { case $1 in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.:-]*) return 1 ;; esac; [ "
 vrj_dir() {
     case $1 in /*) ;; *) return 2 ;; esac
     [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] && [ -w "$1" ] || return 2
-    [ "$(ls -ldn "$1" 2>/dev/null | awk '{print substr($1,1,10)}')" = drwx------ ] || return 2
+    vrj_ls "$1" && [ "$vrj_lmode" = drwx------ ] || return 2
 }
 
 # Atomic durable record: tmp, rename, sync. A failure leaves the previous state intact.

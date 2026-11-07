@@ -2,17 +2,33 @@
 # B v2 decision projection. Functions only; no caller, installed-state path or transport.
 # All scratch belongs to the explicitly supplied private output directory.
 
+# Process budget: these checks run hundreds of times per request; one fork per
+# check instead of a pipeline (ls|awk) or two wc runs. Same fields, same limits.
+# vr2_ls PATH: vr2_lmode = first 10 chars of field 1 (as awk substr($1,1,10)).
+# Multi-line output fails closed.
+# Read only numeric metadata, never filename text; BusyBox stat may lack -c.
+# shellcheck disable=SC2012
+vr2_ls() {
+    vr2_lt=$(LC_ALL=C ls -ldn "$1" 2>/dev/null) || return 1
+    case $vr2_lt in *'
+'*|'') return 1 ;; esac
+    vr2_lmode=${vr2_lt%%[ 	]*};vr2_lmode=${vr2_lmode%"${vr2_lmode#??????????}"}
+}
+# vr2_wc PATH: vr2_wl lines and vr2_wb bytes from ONE wc -lc (POSIX order l,w,c).
+vr2_wc() {
+    vr2_wt=$(wc -lc < "$1") || return 1
+    vr2_wt=${vr2_wt#"${vr2_wt%%[! 	]*}"};vr2_wl=${vr2_wt%%[!0-9]*};vr2_wt=${vr2_wt#"$vr2_wl"}
+    vr2_wt=${vr2_wt#"${vr2_wt%%[! 	]*}"};vr2_wb=${vr2_wt%%[!0-9]*};vr2_wt=${vr2_wt#"$vr2_wb"}
+    [ -n "$vr2_wl" ] && [ -n "$vr2_wb" ] && [ -z "${vr2_wt#"${vr2_wt%%[! 	]*}"}" ]
+}
 vr2_private_dir() {
     case $1 in /*) ;; *) return 2 ;; esac
-    # Read only mode metadata, never filename text; BusyBox stat may lack -c.
-    # shellcheck disable=SC2012
-    [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] &&
-        [ "$(ls -ldn "$1" | awk '{print substr($1,1,10)}')" = drwx------ ]
+    [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] && vr2_ls "$1" && [ "$vr2_lmode" = drwx------ ]
 }
 
 vr2_file() {
-    [ -f "$1" ] && [ ! -L "$1" ] && [ -r "$1" ] &&
-        [ "$(wc -c < "$1")" -le 1048576 ] && [ "$(wc -l < "$1")" -le 4096 ]
+    [ -f "$1" ] && [ ! -L "$1" ] && [ -r "$1" ] && vr2_wc "$1" &&
+        [ "$vr2_wb" -le 1048576 ] && [ "$vr2_wl" -le 4096 ]
 }
 vr2_hash() {
     vr2_file "$1" || return 2
@@ -36,16 +52,52 @@ vr2_seal_valid() (
     [ "$vr2_type" = "$2" ] && [ "$vr2_version" = 2 ] && [ -z "$vr2_extra" ] &&
         [ "$vr2_generation" = "$(cat "$1/generation")" ] || return 3
     printf '%s\n' "$vr2_generation" | grep -Eq '^g-[0-9a-f]{16}$' || return 2
+    # Same per-file checks as vr2_hash (regular, not a link, readable, <=1MiB,
+    # <=4096 lines, exact digest; any failure = 3), but ONE wc and ONE sha256sum
+    # for the whole closed set: a stage is validated ~15 times per request.
+    # Output rows follow argument order; a newline-free private dir and closed
+    # names keep one row per file, and any short/extra output fails closed.
+    case $1 in *'
+'*) return 2 ;; esac
+    vr2_dir=$1;vr2_names=$3;vr2_digests=
+    set --
     while IFS="$(printf '\t')" read -r vr2_digest vr2_path vr2_extra <&3; do
         [ -z "$vr2_extra" ] || return 2
-        case " $3 " in *" $vr2_path "*) ;; *) return 2 ;; esac
+        case " $vr2_names " in *" $vr2_path "*) ;; *) return 2 ;; esac
         case "$vr2_seen" in *" $vr2_path "*) return 2 ;; esac
-        [ "$(vr2_hash "$1/$vr2_path")" = "$vr2_digest" ] || return 3
+        case $vr2_digest in *[!0-9a-f]*) return 3 ;; esac
+        [ "${#vr2_digest}" = 64 ] || return 3
+        [ -f "$vr2_dir/$vr2_path" ] && [ ! -L "$vr2_dir/$vr2_path" ] && [ -r "$vr2_dir/$vr2_path" ] || return 3
+        set -- "$@" "$vr2_dir/$vr2_path";vr2_digests="$vr2_digests$vr2_digest "
         vr2_seen="$vr2_seen$vr2_path ";vr2_count=$((vr2_count+1))
     done
+    if [ "$#" -gt 0 ]; then
+        vr2_out=$(LC_ALL=C wc -lc "$@" 2>/dev/null) || return 3
+        vr2_n=0
+        # shellcheck disable=SC2034
+        while IFS=' 	' read -r vr2_l vr2_c vr2_rest; do
+            vr2_n=$((vr2_n+1));[ "$vr2_n" -le "$#" ] || break
+            case $vr2_l:$vr2_c in *[!0-9:]*|:*|*:) return 3 ;; esac
+            [ "$vr2_c" -le 1048576 ] && [ "$vr2_l" -le 4096 ] || return 3
+        done <<EOF
+$vr2_out
+EOF
+        [ "$vr2_n" -ge "$#" ] || return 3
+        vr2_out=$(LC_ALL=C sha256sum "$@" 2>/dev/null) || return 3
+        vr2_n=0;vr2_want=$vr2_digests
+        # shellcheck disable=SC2034
+        while IFS=' 	' read -r vr2_h vr2_rest; do
+            vr2_n=$((vr2_n+1))
+            [ "$vr2_h" = "${vr2_want%% *}" ] || return 3
+            vr2_want=${vr2_want#* }
+        done <<EOF
+$vr2_out
+EOF
+        [ "$vr2_n" -eq "$#" ] && [ -z "$vr2_want" ] || return 3
+    fi
     # Closed, compiled-in names only; shell word splitting counts that set.
     # shellcheck disable=SC2086
-    set -- $3
+    set -- $vr2_names
     [ "$vr2_count" -eq "$#" ]
 )
 vr2_stage_valid() { vr2_private_dir "$1/decision" && vr2_seal_valid "$1" routing-stage "$(vr2_stage_files)"; }

@@ -25,6 +25,7 @@ for CASE in \
     check-live-membership.py \
     check-service-withdrawal.py \
     check-live-bootstrap.py \
+    check-validation-primitives.py \
     check-live-first-request.py \
     check-live-cold-map.py \
     check-live-cold-map-lifetime.py \
