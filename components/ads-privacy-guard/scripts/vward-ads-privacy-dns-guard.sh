@@ -50,6 +50,7 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo "FAIL: common library not found" >&2; exit 1; }
 . "$LIB"
+ads_source_registry_merge
 
 CONF="${VWARD_DNS_GUARD_CONF:-$ADS_ETC/dns-guard.conf}"
 STATE="${VWARD_DNS_GUARD_STATE:-/tmp/vward-dns-guard.state}"

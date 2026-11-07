@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""Dead reclaimers must not block forever or erase the next live lock owner."""
+import os,signal,subprocess,time
+from fixture import PipelineFixture,SHELL,LIBDIR,function_source
+
+def until(path):
+    end=time.monotonic()+8
+    while not path.exists() and time.monotonic()<end:time.sleep(.02)
+    assert path.exists(),path.name
+def stop(p):
+    if p is not None:
+        try:os.killpg(p.pid,signal.SIGKILL)
+        except ProcessLookupError:pass
+        p.communicate(timeout=5)
+
+def paused_exec_source():
+    # Static BusyBox may exec its own rm applet without PATH lookup. Pause the
+    # ACTUAL leased publisher after final guards instead of wrapping rm in PATH.
+    # Every production guard/lease and the final exec remain unchanged.
+    source=function_source(LIBDIR/'vward-runtime-admission.sh','vward_lock_gate_exec')
+    point='    exec "$@"\n'
+    assert source.count(point)==1,'leased final exec fault point changed'
+    fault='''    if [ "$#" = 3 ] && [ "$1:$2" = rm:-rf ] && [ "$3" = "$MATCH" ];then
+        IFS=' ' read -r fixture_writer _ < /proc/self/stat || return 75
+        printf '%s\n' "$fixture_writer" > "$PAUSED"
+        while [ ! -f "$RESUME" ];do sleep .02;done
+    fi
+'''
+    return source.replace(point,fault+point)
+
+# Private constructors enforce their own modes even for a permissive caller.
+with PipelineFixture() as f:
+    j=f.p/'permissive-lock';j.mkdir(mode=0o700)
+    command='''umask 022
+    vrj2_lock "$1" && vrj_dir "$1/.lock" || exit 75
+    for leaf in pid pid_start boot owner owner.sha;do vrj2_file "$1/.lock/$leaf" || exit 75;done
+    case $(umask) in 0022|022) ;; *) exit 75 ;; esac
+    vrj2_unlock "$1"
+    '''
+    r=f.run(f.script(command),*f.libs,j)
+    assert r.returncode==0 and not (j/'.lock').exists(),(r.returncode,r.stderr,'private lock depended on ambient umask')
+
+# Removing cat must not turn a prefix/extra-line record into owner authority.
+for suffix,expected in [('',0),('\n\n',0),('\nforeign',75)]:
+    with PipelineFixture() as f:
+        lock=f.p/'decimal-record'
+        cmd='''vward_lock_gate_enter "$1" || exit $?
+        printf '%s%s' "$vlg_me" "$2" > "$vlg_claim/pid"
+        vward_lock_gate_leave "$1"
+        '''
+        r=f.run(f.script(cmd),*f.libs,lock,suffix)
+        assert r.returncode==expected,(suffix,r.returncode,r.stderr,'owner record shape changed')
+
+for suffix,expected in [('',0),('\n\n',0),('\nforeign',1)]:
+    with PipelineFixture() as f:
+        lock=f.p/'release-record'
+        cmd='''vward_lock_take "$1" || exit $?
+        read -r original < "$1/pid_start" || exit 75
+        printf '%s%s' "$original" "$2" > "$1/pid_start"
+        vward_lock_release "$1"
+        '''
+        r=f.run(f.script(cmd),*f.libs,lock,suffix)
+        assert r.returncode==expected,(suffix,r.returncode,r.stderr,'release accepted extra owner data')
+
+with PipelineFixture() as f:
+    path=f.p/'gate-target';ready=f.p/'ready'
+    args=SHELL+['-c',f.script('vward_lock_gate_enter "$1" || exit $?; : > "$2"; sleep 30'),'owner',*map(str,f.libs),str(path),str(ready)]
+    p=subprocess.Popen(args,env=f.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+    try:
+        until(ready)
+    finally:stop(p)
+    r=f.run(f.script('vward_lock_gate_enter "$1" && vward_lock_gate_leave "$1"'),*f.libs,path)
+    assert r.returncode==0,(r.returncode,r.stderr,'SIGKILL left an eternal reclaimer')
+    assert not (f.p/'.reclaim').exists()
+
+with PipelineFixture() as f:
+    path=f.p/'legacy.lock';path.mkdir(mode=0o700)
+    dead=subprocess.Popen(['true']);dead.wait();(path/'pid').write_text(str(dead.pid)+'\n')
+    paused=f.p/'paused';resume=f.p/'resume';held=f.p/'held';entered=f.p/'entered'
+    command='dir_lock "$1" || exit $?; : > "$2"; sleep 30'
+    p=subprocess.Popen(SHELL+['-c',f.script(paused_exec_source()+command),'reclaim',*map(str,f.libs),str(path),str(held)],
+        env=f.env|{'PAUSED':str(paused),'RESUME':str(resume),'MATCH':str(path)},stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+    q=None
+    try:
+        until(paused)
+        q=subprocess.Popen(SHELL+['-c',f.script('dir_lock "$1" || exit $?; : > "$2"; sleep 30'),'contender',*map(str,f.libs),str(path),str(entered)],
+            env=f.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+        time.sleep(.4)
+        assert not entered.exists(),'a second contender entered during stale reclaim'
+        resume.touch();until(held);time.sleep(.25)
+        assert not entered.exists(),'stale reclaimer erased/replaced another live owner'
+        pid=int((path/'pid').read_text());os.kill(pid,0)
+    finally:
+        stop(q);stop(p)
+
+# Kill ONLY the gate holder while its real rm child is paused. The child
+# remains the final writer, so its ticket must fence every new acquirer.
+with PipelineFixture() as f:
+    path=f.p/'legacy.lock';path.mkdir(mode=0o700)
+    dead=subprocess.Popen(['true']);dead.wait();(path/'pid').write_text(str(dead.pid)+'\n')
+    paused=f.p/'paused';resume=f.p/'resume'
+    p=subprocess.Popen(SHELL+['-c',f.script(paused_exec_source()+'vward_lock_take "$1"'),'parent',*map(str,f.libs),str(path)],
+        env=f.env|{'PAUSED':str(paused),'RESUME':str(resume),'MATCH':str(path)},
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+    try:
+        until(paused);worker=int(paused.read_text());os.kill(p.pid,signal.SIGKILL);p.wait(timeout=5)
+        os.kill(worker,0)
+        r=f.invoke('vward_lock_take',path)
+        assert r.returncode!=0,'orphan final rm lost its exclusion lease'
+        assert (path/'pid').read_text()==str(dead.pid)+'\n','contender replaced the lock under a live final rm'
+        resume.touch()
+        end=time.monotonic()+5
+        from pathlib import Path
+        while time.monotonic()<end:
+            stat=Path(f'/proc/{worker}/stat')
+            if not stat.exists() or stat.read_text().rsplit(') ',1)[1].split()[0]=='Z':break
+            time.sleep(.02)
+        r=f.invoke('vward_lock_take',path)
+        assert r.returncode==0,(r.returncode,r.stderr,'a completed final writer blocked recovery forever')
+    finally:stop(p)
+
+# Release must use the same protocol; even a v1 caller cannot pass a live
+# final v2 release utility merely because its parent died.
+with PipelineFixture() as f:
+    j=f.p/'locks';j.mkdir(mode=0o700);path=j/'.lock'
+    paused=f.p/'paused';resume=f.p/'resume'
+    p=subprocess.Popen(SHELL+['-c',f.script(paused_exec_source()+'vrj2_lock "$1" && vrj2_unlock "$1"'),'release',*map(str,f.libs),str(j)],
+        env=f.env|{'PAUSED':str(paused),'RESUME':str(resume),'MATCH':str(path)},
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+    q=None
+    try:
+        until(paused);worker=int(paused.read_text());os.kill(p.pid,signal.SIGKILL);p.wait(timeout=5)
+        r=f.invoke('vrj_lock',j)
+        assert r.returncode==75 and path.exists(),'v1 bypassed an orphan v2 release utility'
+        r=f.invoke('vrj2_lock',j)
+        assert r.returncode==75 and path.exists(),'v2 bypassed an orphan release utility'
+        resume.touch()
+        end=time.monotonic()+5
+        from pathlib import Path
+        while time.monotonic()<end:
+            stat=Path(f'/proc/{worker}/stat')
+            if not stat.exists() or stat.read_text().rsplit(') ',1)[1].split()[0]=='Z':break
+            time.sleep(.02)
+        held=f.p/'new-held'
+        q=subprocess.Popen(SHELL+['-c',f.script('vrj2_lock "$1" || exit $?; : > "$2";sleep 30'),'new',*map(str,f.libs),str(j),str(held)],
+            env=f.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+        until(held)
+        assert path.exists() and int((path/'pid').read_text())==q.pid,'delayed old release erased the new owner'
+        r=f.invoke('vrj_lock',j)
+        assert r.returncode==75 and path.exists(),'v1 stole a live v2 lock'
+    finally:stop(q);stop(p)
+# A metadata writer must not outlive its owner and write into a replacement
+# shared lock. Pause AFTER its first real pid write; kill only the parent.
+for metadata_kind in ('journal','legacy'):
+    with PipelineFixture() as f:
+        j=f.p/'metadata-race';j.mkdir(mode=0o700);path=j/'.lock'
+        paused=f.p/'meta-paused';resume=f.p/'meta-resume';held=f.p/'replacement-held'
+        hook='''
+        printf() {
+            command printf "$@"
+            if [ -f "$META_LOCK/pid" ] && [ ! -e "$META_PAUSED" ];then
+                IFS=' ' read -r meta_writer _ < /proc/self/stat || return 1
+                command printf '%s\n' "$meta_writer" > "$META_PAUSED"
+                while [ ! -f "$META_RESUME" ];do sleep .02;done
+            fi
+        }
+        METADATA_CALL
+        '''.replace('METADATA_CALL','vrj2_lock "$1"' if metadata_kind=='journal' else 'vward_lock_take "$1/.lock"')
+        p=subprocess.Popen(SHELL+['-c',f.script(hook),'metadata',*map(str,f.libs),str(j)],
+            env=f.env|{'META_LOCK':str(path),'META_PAUSED':str(paused),'META_RESUME':str(resume)},
+            stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+        q=None
+        try:
+            until(paused);writer=int(paused.read_text())
+            os.kill(p.pid,signal.SIGKILL);p.wait(timeout=5)
+            time.sleep(.05)  # distinguish actual starttime even at coarse kernel ticks
+            q=subprocess.Popen(SHELL+['-c',f.script('vward_lock_take "$1" || exit $?; : > "$2";sleep 30'),'replacement',*map(str,f.libs),str(path),str(held)],
+                env=f.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+            until(held)
+            baseline={x.name:(x.read_bytes(),x.stat().st_mode&0o777) for x in path.iterdir()}
+            assert (path/'pid').read_text()==str(q.pid)+'\n'
+            resume.touch()
+            if writer!=p.pid:
+                end=time.monotonic()+5
+                from pathlib import Path
+                while time.monotonic()<end:
+                    stat=Path(f'/proc/{writer}/stat')
+                    if not stat.exists() or stat.read_text().rsplit(') ',1)[1].split()[0]=='Z':break
+                    time.sleep(.02)
+            after={x.name:(x.read_bytes(),x.stat().st_mode&0o777) for x in path.iterdir()}
+            assert after==baseline,'orphan metadata writer corrupted a replacement live owner'
+        finally:stop(q);stop(p)
+print('B_LOCK_ELECTION=PASS actual legacy stale-reclaim serialization, live owner preserved, killed gate owner recoverable')

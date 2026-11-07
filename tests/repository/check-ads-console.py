@@ -145,7 +145,7 @@ esac
         {"id": "custom-0123456789", "url": "https://ok.example/list.txt", "format": "hosts", "weight": 999, "single_source_block": True},
         {"id": "custom-aaaaaaaaaa", "url": "http://evil.example/list.txt", "format": "hosts"},
         {"id": "hagezi-pro", "url": "https://evil.example/list.txt", "format": "hosts"}]}))
-    merged = subprocess.run(["sh", "-c", f'. "{ROOT}/components/ads-privacy-guard/lib/vward-ads-privacy-common.sh"; cat "$ADS_SOURCE_REGISTRY"'],
+    merged = subprocess.run(["sh", "-c", f'. "{ROOT}/components/ads-privacy-guard/lib/vward-ads-privacy-common.sh"; ads_source_registry_merge; cat "$ADS_SOURCE_REGISTRY"'],
                             env=env, text=True, capture_output=True).stdout
     sources = {s["id"]: s for s in json.loads(merged)["sources"]}
     if "custom-aaaaaaaaaa" in sources or sources["custom-0123456789"]["weight"] != 40 or sources["custom-0123456789"]["single_source_block"]:

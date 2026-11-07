@@ -1,0 +1,488 @@
+#!/bin/sh
+# B v2 decision projection. Functions only; no caller, installed-state path or transport.
+# All scratch belongs to the explicitly supplied private output directory.
+
+# Process budget: these checks run hundreds of times per request; one fork per
+# check instead of a pipeline (ls|awk) or two wc runs. Same fields, same limits.
+# vr2_ls PATH: vr2_lmode = first 10 chars of field 1 (as awk substr($1,1,10)).
+# Multi-line output fails closed.
+# Read only numeric metadata, never filename text; BusyBox stat may lack -c.
+# shellcheck disable=SC2012
+vr2_ls() {
+    vr2_lt=$(LC_ALL=C ls -ldn "$1" 2>/dev/null) || return 1
+    case $vr2_lt in *'
+'*|'') return 1 ;; esac
+    vr2_lmode=${vr2_lt%%[ 	]*};vr2_lmode=${vr2_lmode%"${vr2_lmode#??????????}"}
+}
+# vr2_wc PATH: vr2_wl lines and vr2_wb bytes from ONE wc -lc (POSIX order l,w,c).
+vr2_wc() {
+    vr2_wt=$(wc -lc < "$1") || return 1
+    vr2_wt=${vr2_wt#"${vr2_wt%%[! 	]*}"};vr2_wl=${vr2_wt%%[!0-9]*};vr2_wt=${vr2_wt#"$vr2_wl"}
+    vr2_wt=${vr2_wt#"${vr2_wt%%[! 	]*}"};vr2_wb=${vr2_wt%%[!0-9]*};vr2_wt=${vr2_wt#"$vr2_wb"}
+    [ -n "$vr2_wl" ] && [ -n "$vr2_wb" ] && [ -z "${vr2_wt#"${vr2_wt%%[! 	]*}"}" ]
+}
+vr2_private_dir() {
+    case $1 in /*) ;; *) return 2 ;; esac
+    [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] && vr2_ls "$1" && [ "$vr2_lmode" = drwx------ ]
+}
+
+vr2_file() {
+    [ -f "$1" ] && [ ! -L "$1" ] && [ -r "$1" ] && vr2_wc "$1" &&
+        [ "$vr2_wb" -le 1048576 ] && [ "$vr2_wl" -le 4096 ]
+}
+vr2_hash() {
+    vr2_file "$1" || return 2
+    vr2_h=$(sha256sum < "$1") || return 2
+    vr2_h=${vr2_h%% *}
+    case $vr2_h in ''|*[!0-9a-f]*) return 2 ;; esac
+    [ "${#vr2_h}" = 64 ] && printf '%s\n' "$vr2_h"
+}
+vr2_stage_files() {
+    printf '%s\n' 'intents.tsv snapshot.tsv identity.tsv legacy.tsv inventory.tsv groups.tsv native.cfg enabled.tsv agh.json inputs.fp probes.tsv decision/version.tsv decision/choices.tsv decision/bindings.tsv decision/evidence.tsv decision/policies.tsv decision/saved.tsv decision/queue.tsv decision/tombstones.tsv decision/context.tsv decision/resources.tsv decision/proofs.tsv decision/upstreams.tsv'
+}
+# Integrity of published preparation files, including the exact expected file
+# set. A valid-looking edit cannot keep using an earlier content generation.
+vr2_seal_valid() (
+    [ "$#" -eq 3 ] && vr2_private_dir "$1" || return 2
+    vr2_file "$1/generation" && vr2_file "$1/seal" && vr2_file "$1/seal.sha" || return 2
+    [ "$(vr2_hash "$1/seal")" = "$(cat "$1/seal.sha")" ] || return 3
+    vr2_count=0;vr2_seen=' '
+    exec 3< "$1/seal" || return 2
+    IFS="$(printf '\t')" read -r vr2_type vr2_version vr2_generation vr2_extra <&3 || return 2
+    [ "$vr2_type" = "$2" ] && [ "$vr2_version" = 2 ] && [ -z "$vr2_extra" ] &&
+        [ "$vr2_generation" = "$(cat "$1/generation")" ] || return 3
+    printf '%s\n' "$vr2_generation" | grep -Eq '^g-[0-9a-f]{16}$' || return 2
+    # Same per-file checks as vr2_hash (regular, not a link, readable, <=1MiB,
+    # <=4096 lines, exact digest; any failure = 3), but ONE wc and ONE sha256sum
+    # for the whole closed set: a stage is validated ~15 times per request.
+    # Output rows follow argument order; a newline-free private dir and closed
+    # names keep one row per file, and any short/extra output fails closed.
+    case $1 in *'
+'*) return 2 ;; esac
+    vr2_dir=$1;vr2_names=$3;vr2_digests=
+    set --
+    while IFS="$(printf '\t')" read -r vr2_digest vr2_path vr2_extra <&3; do
+        [ -z "$vr2_extra" ] || return 2
+        case " $vr2_names " in *" $vr2_path "*) ;; *) return 2 ;; esac
+        case "$vr2_seen" in *" $vr2_path "*) return 2 ;; esac
+        case $vr2_digest in *[!0-9a-f]*) return 3 ;; esac
+        [ "${#vr2_digest}" = 64 ] || return 3
+        [ -f "$vr2_dir/$vr2_path" ] && [ ! -L "$vr2_dir/$vr2_path" ] && [ -r "$vr2_dir/$vr2_path" ] || return 3
+        set -- "$@" "$vr2_dir/$vr2_path";vr2_digests="$vr2_digests$vr2_digest "
+        vr2_seen="$vr2_seen$vr2_path ";vr2_count=$((vr2_count+1))
+    done
+    if [ "$#" -gt 0 ]; then
+        vr2_out=$(LC_ALL=C wc -lc "$@" 2>/dev/null) || return 3
+        vr2_n=0
+        # shellcheck disable=SC2034
+        while IFS=' 	' read -r vr2_l vr2_c vr2_rest; do
+            vr2_n=$((vr2_n+1));[ "$vr2_n" -le "$#" ] || break
+            case $vr2_l:$vr2_c in *[!0-9:]*|:*|*:) return 3 ;; esac
+            [ "$vr2_c" -le 1048576 ] && [ "$vr2_l" -le 4096 ] || return 3
+        done <<EOF
+$vr2_out
+EOF
+        [ "$vr2_n" -ge "$#" ] || return 3
+        vr2_out=$(LC_ALL=C sha256sum "$@" 2>/dev/null) || return 3
+        vr2_n=0;vr2_want=$vr2_digests
+        # shellcheck disable=SC2034
+        while IFS=' 	' read -r vr2_h vr2_rest; do
+            vr2_n=$((vr2_n+1))
+            [ "$vr2_h" = "${vr2_want%% *}" ] || return 3
+            vr2_want=${vr2_want#* }
+        done <<EOF
+$vr2_out
+EOF
+        [ "$vr2_n" -eq "$#" ] && [ -z "$vr2_want" ] || return 3
+    fi
+    # Closed, compiled-in names only; shell word splitting counts that set.
+    # shellcheck disable=SC2086
+    set -- $vr2_names
+    [ "$vr2_count" -eq "$#" ]
+)
+vr2_stage_valid() { vr2_private_dir "$1/decision" && vr2_seal_valid "$1" routing-stage "$(vr2_stage_files)"; }
+vr2_projection_valid() { vr2_seal_valid "$1" routing-projection 'atoms.tsv policy.tsv choices.tsv service dns.tsv upstream-keys.tsv'; }
+
+# Opaque logical URL keys and physical URL content are different axes. A
+# mutable key must never let edited native bytes reuse a previous own proof.
+# Only hashes leave this helper; URL/token never appears in its output.
+vr2_upstream_keys() (
+    umask 077
+    [ "$#" -eq 1 ] && vr2_file "$1" || return 2
+    # Same accepted URL alphabet as the existing Smart DNS writer. Avoid awk
+    # interval expressions as Keenetic builds differ in their support.
+    LC_ALL=C awk 'BEGIN{FS="\t"}
+        function url(s,a,n,h,p) {
+            if(length(s)>300 || s!~/^https:\/\/[A-Za-z0-9.:-]+\/[A-Za-z0-9._~\/%+=&?-]*$/)return 0
+            h=substr(s,9);p=index(h,"/");h=substr(h,1,p-1);n=split(h,a,":")
+            if(a[1]!~/^[A-Za-z0-9.-]+$/ || n>2)return 0
+            if(n==2 && (a[2]!~/^[0-9]+$/ || length(a[2])>5 || a[2]+0<1 || a[2]+0>65535))return 0
+            return 1
+        }
+        {if(++n>256 || NF!=2 || length($1)>64 || $1!~/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/ ||
+            !url($2) || seen[$1]++ || uris[$2]++)bad=1}
+        END{exit bad?2:0}' "$1" || return 2
+    vr2_ktmp=$(mktemp -d "${1%/*}/.keys.XXXXXX") || return 1
+    trap 'rm -rf "$vr2_ktmp"' EXIT
+    : > "$vr2_ktmp/result"
+    while IFS="$(printf '\t')" read -r vr2_key vr2_uri || [ -n "$vr2_key" ]; do
+        vr2_sha=$(printf '%s' "$vr2_uri" | sha256sum) || return 2
+        vr2_sha=${vr2_sha%% *}
+        case $vr2_sha in *[!0-9a-f]*) return 2 ;; esac
+        [ "${#vr2_sha}" = 64 ] || return 2
+        printf '%s\tuh-%s\n' "$vr2_key" "${vr2_sha%????????????????}" >> "$vr2_ktmp/result" || return 1
+    done < "$1"
+    cat "$vr2_ktmp/result"
+)
+
+# Configuration observations, NOT ownership. Native global HTTPS rows count as
+# slots; AGH shared rows become individual domain references. Private URLs stay
+# solely in the sealed input/private scratch and are never returned in this view.
+vr2_dns_view() (
+    umask 077
+    [ "$#" -eq 1 ] && vr2_stage_valid "$1" || return 2
+    vr2_dtmp=$(mktemp -d "$1/.dns-view.XXXXXX") || return 1
+    trap 'rm -rf "$vr2_dtmp"' EXIT
+    awk '{sub(/\r$/,"")} /^dns-proxy$/ {dns=1;next} /^[^ \t]/ {dns=0}
+        dns && $1=="https" && $2=="upstream" {
+            d=($(NF-1)=="domain"?$NF:"-");$1=$1;print $3 "\t" d "\t" $0
+        }' "$1/native.cfg" > "$vr2_dtmp/native.rows" || return 2
+    vr2_native_slots=$(wc -l < "$vr2_dtmp/native.rows")
+    : > "$vr2_dtmp/native"
+    if [ "$vr2_native_slots" -gt 8 ]; then printf 'state\tkeenetic\tunknown\n' >> "$vr2_dtmp/native";fi
+    while IFS="$(printf '\t')" read -r vr2_uri vr2_domain vr2_raw; do
+        vr2_native_content=-
+        if [ "$vr2_native_slots" -le 8 ]; then
+            vr2_native_sha=$(printf '%s\n' "$vr2_raw" | sha256sum) || return 2
+            vr2_native_sha=${vr2_native_sha%% *}
+            vr2_native_content=${vr2_native_sha%????????????????}
+        fi
+        printf 'keenetic\t%s\t%s\t%s\n' "$vr2_uri" "$vr2_domain" "$vr2_native_content" >> "$vr2_dtmp/native" || return 1
+    done < "$vr2_dtmp/native.rows"
+    vr2_upstream_keys "$1/decision/upstreams.tsv" > "$vr2_dtmp/keys" || return 2
+    # jq variables are intentionally literal, not shell expansion.
+    # shellcheck disable=SC2016
+    if ! "${JQ:-jq}" -er '
+        if (.upstream_dns | type) != "array" or (.upstream_dns | length) > 4096 or
+            any(.upstream_dns[]; type != "string" or length > 4096)
+        then error("unknown") else
+            (["state","agh",(if (.upstream_dns_file // "") == "" then "known" else "unknown" end)] | @tsv),
+            (limit(4097; .upstream_dns[] | select(startswith("[/") and ((index("/]") // -1) > 1)) |
+                . as $r | .[2:index("/]")] | split("/")[] |
+                ["agh",$r[($r | index("/]"))+2:],ascii_downcase] | @tsv))
+        end' "$1/agh.json" > "$vr2_dtmp/agh" 2>/dev/null; then
+        printf 'state\tagh\tunknown\n' > "$vr2_dtmp/agh"
+    fi
+    vr2_dview=$(LC_ALL=C awk '
+        BEGIN {FS=OFS="\t";for(c=32;c<127;c++)ord[sprintf("%c",c)]=c;hex="0123456789abcdef";state["keenetic"]="known"}
+        function id(s){return length(s)<=64 && s~/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/}
+        function hex8(v,i,r){r="";for(i=0;i<8;i++){r=substr(hex,v%16+1,1) r;v=int(v/16)}return r}
+        function hash(s,i,c,a,b){a=5381;b=52711;for(i=1;i<=length(s);i++){c=ord[substr(s,i,1)];a=(a*131+c)%4294967291;b=(b*257+c+i)%4294967279}return hex8(a) hex8(b)}
+        function domain(s,a,n,i){if(length(s)>253 || s!~/^[a-z0-9.-]+$/)return 0;n=split(s,a,".");if(n<2 || a[n]~/^[0-9]+$/)return 0
+            for(i=1;i<=n;i++)if(length(a[i])>63 || a[i]!~/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/)return 0;return 1}
+        {bytes[FILENAME]+=length($0)+1;if(FNR>4097 || bytes[FILENAME]>1048576){bad=1;next}}
+        FILENAME==ARGV[1] {
+            if(NF!=2 || !id($1) || length($2)>300 || $2!~/^https:\/\/[A-Za-z0-9.:-]+\/[A-Za-z0-9._~\/%+=&?-]*$/ || ($1 in uri) || ($2 in urlkey)){bad=1;next}
+            uri[$1]=$2;urlkey[$2]=$1;next
+        }
+        FILENAME==ARGV[2] {
+            if(NF!=7 || !id($1) || !id($7) || ($1 in policyseen)){bad=1;next}
+            policyseen[$1]=1
+            # An observation can be compatible with several logical policy IDs
+            # that currently use one URL. Choose a deterministic label; planner
+            # matches physical URL key/backend, never grants this label rights.
+            if(!($7 in policy) || "x" $1<"x" policy[$7])policy[$7]=$1
+            next
+        }
+        FILENAME==ARGV[3] {content[$1]=$2;next}
+        $1=="state" {if(NF!=3 || $2!~/^(keenetic|agh)$/ || $3!~/^(known|unknown)$/)bad=1;state[$2]=$3;next}
+        {
+            if(($1=="agh" && NF!=3) || ($1=="keenetic" && NF!=4) ||
+                $1!~/^(keenetic|agh)$/ || $2=="" || $2~/[[:space:]\\]/){state[$1]="unknown";next}
+            d=$3
+            if(d!="-" && !domain(d)) {if(index(d,"."))state[$1]="unknown";next}
+            u=($2 in urlkey)?urlkey[$2]:"observed-" hash($2)
+            if(u in uri && uri[u]!=$2){bad=1;next}uri[u]=$2
+            p=(u in policy)?policy[u]:"observed-" hash($2)
+            native=(u in content)?content[u]:"observed-" hash($2)
+            canon=$1 "|" $2 "|" d "|subtree";rid="dv-" hash(canon)
+            if(rid in canonical && canonical[rid]!=canon){bad=1;next}canonical[rid]=canon
+            if(rid in row && $1=="keenetic")state[$1]="unknown"
+            row[rid]="dns" OFS rid OFS "upstream:" native OFS d OFS "subtree" OFS "ISP" OFS p OFS $1 OFS "manual" OFS "reference" OFS "-"
+            if($1=="keenetic" && $4!="-")witness[rid]=$4
+            else if($1=="agh" && u in content)witness[rid]=substr(content[u],4)
+            slots[$1]++;if(++records>4096)bad=1
+        }
+        END{
+            if(bad)exit 2
+            for(k in row)print row[k]
+            for(k in witness)print "witness",k,witness[k]
+            print "backend","keenetic",state["keenetic"],slots["keenetic"]+0
+            print "backend","agh",(state["agh"]=="known"?"known":"unknown"),slots["agh"]+0
+        }' "$1/decision/upstreams.tsv" "$1/decision/policies.tsv" "$vr2_dtmp/keys" "$vr2_dtmp/native" "$vr2_dtmp/agh") || return 2
+    printf '%s\n' "$vr2_dview" | LC_ALL=C sort
+)
+
+# Common DNS authority check for service AND server lifecycle plans. Observed
+# rows alone never grant rights. Exact content proof and actual backend witness
+# are required; consumer changes do not create new physical ownership.
+vr2_dns_owned_authority() (
+    [ "$#" -eq 3 ] && vr2_file "$1" && vr2_file "$2" && vr2_file "$3" || return 2
+    LC_ALL=C awk -F'\t' '
+        BEGIN{OFS="\t"}
+        function prefix(s,a,i,v){split(s,a,OFS);v=a[1];for(i=2;i<=10;i++)v=v OFS a[i];return v}
+        FILENAME==ARGV[1]{if(NF!=11 || $1!~/^(route|dns)$/ || seen[$2]++){bad=1;next}
+            if($1=="dns" && $9=="vward")own[$2]=$0;next}
+        FILENAME==ARGV[2]{if(NF!=11 || proof_seen[$2]++){bad=1;next}
+            proof[$2]=prefix($0);split($11,p,":");content[$2]=p[2];next}
+        $1=="dns" {key=$3 SUBSEP $4 SUBSEP $5 SUBSEP $8
+            if(key in obs){bad=1;next}obs[key]=$2;next}
+        $1=="witness"{witness[$2]=$3;next}
+        END{if(bad)exit 2
+            for(r in own){split(own[r],a,OFS);key=a[3] SUBSEP a[4] SUBSEP a[5] SUBSEP a[8]
+                reason="authorized"
+                if(proof[r]!=prefix(own[r]))reason="ownership-unproven"
+                else if(!(key in obs))reason="native-dns-resource-changed"
+                else if(!(obs[key] in witness) || content[r]!=witness[obs[key]])reason="native-dns-proof-changed"
+                print r,reason}}' "$1" "$2" "$3"
+)
+
+# STAGE SID CANONICAL_NEXT_CHOICES OUTDIR -> OUTDIR/atoms.tsv, policy.tsv.
+# Atoms keep unknown membership/client policy explicit. This does not claim ownership.
+# A retired catalog entry cannot authorize on. Explicit vpn->auto withdrawal
+# may use only an already accepted, exact PRIVATE own scope. This also proves
+# that every legacy service registration is a projection of canonical state;
+# a missing/foreign/unknown registration never disappears behind this bridge.
+vr2_own_service_withdrawal() (
+    [ "$#" -eq 3 ] && vr2_stage_valid "$1" || return 75
+    awk -F'\t' -v sid="$2" '
+        function refs(s,r){return index("," s ",",",S:" r ",")>0}
+        function prefix(s,a,n,i,r){n=split(s,a,"\t");r=a[1];for(i=2;i<=10;i++)r=r "\t" a[i];return r}
+        FILENAME==ARGV[1]{if($1=="service"){mode[$2]=$4;target[$2]=$5}next}
+        FILENAME==ARGV[2]{if($1=="service" && $2==sid && $4=="auto")withdraw=1;next}
+        FILENAME==ARGV[3]{proof[$2]=prefix($0);next}
+        FILENAME==ARGV[4]{
+            if(refs($11,sid) && ($1!="route" || $9!="vward" || proof[$2]!=prefix($0)))bad=1
+            if($1=="route" && $9=="vward" && proof[$2]==prefix($0)){
+                g=$3;sub(/^group:/,"",g);key=g SUBSEP $4 SUBSEP $6
+                own[key]=$11;expected[g]++;if(refs($11,sid))requested++
+            }next
+        }
+        FILENAME==ARGV[5]{if($1=="resource"){
+            g=$3;actual[g]++;key=g SUBSEP $4 SUBSEP $6
+            if($5=="exact" && $7=="default" && $8=="vward" && $10=="verified" && (key in own)){
+                matched[g]++;native_refs[g]=native_refs[g] "," own[key]
+            }
+        }next}
+        {if(NF!=3 || seen[$1]++ || mode[$1]!="vpn" ||
+            !((target[$1]=="VPN:auto" && $3=="auto") || target[$1]=="VPN:" $3) ||
+            actual[$2]<1 || actual[$2]!=expected[$2] || actual[$2]!=matched[$2] || !refs(native_refs[$2],$1))bad=1;n++}
+        END{exit bad || mode[sid]!="vpn" || !withdraw || requested<1 || n<1}' \
+        "$1/decision/choices.tsv" "$3" "$1/decision/proofs.tsv" "$1/decision/resources.tsv" "$1/inventory.tsv" "$1/enabled.tsv"
+)
+
+vward_routing_project2() (
+    umask 077
+    [ "$#" -eq 4 ] || return 2
+    vr2_private_dir "$1" && vr2_private_dir "$4" || return 2
+    vr2_stage_dir=$(CDPATH='' cd -- "$1" && pwd -P) || return 2
+    vr2_out_dir=$(CDPATH='' cd -- "$4" && pwd -P) || return 2
+    case "$vr2_out_dir/" in "$vr2_stage_dir/"*) return 2 ;; esac
+    rm -f "$4/generation" "$4/seal" "$4/seal.sha" || return 2
+    vr2_stage_valid "$1" || return 3
+    for vr2_f in "$1/generation" "$1/decision/version.tsv" "$1/decision/bindings.tsv" \
+        "$1/decision/evidence.tsv" "$1/decision/context.tsv" "$1/decision/resources.tsv" \
+        "$1/intents.tsv" "$1/snapshot.tsv" "$3"; do
+        vr2_file "$vr2_f" || return 2
+    done
+    [ "$(cat "$1/decision/version.tsv")" = "$(printf 'routing-state\t2')" ] || return 2
+    vr2_tmp=$(mktemp -d "$4/.projection.XXXXXX") || return 2
+    trap 'rm -rf "$vr2_tmp"' EXIT
+    vr2_next_hash=$(vr2_hash "$3") || return 2
+    cp "$3" "$vr2_tmp/choices" || return 2
+    [ "$vr2_next_hash" = "$(vr2_hash "$vr2_tmp/choices")" ] || return 3
+    vr2_current=$(awk -F'\t' -v s="$2" '$1=="service" && $2==s {print $4,$5,$6,$3;found=1} END{if(!found) print "auto - - 0"}' "$vr2_tmp/choices")
+    # Recompute the ENTIRE candidate from the staged ledger through the real
+    # canonical transition. This binds epoch/revision and preserves every peer.
+    # No callback can smuggle in a second service choice through NEXT_CHOICES.
+    # shellcheck disable=SC2086
+    set -- "$1" "$2" "$3" "$4" $vr2_current
+    [ "$#" -eq 8 ] || return 2
+    vr2_old_rev=$(awk -F'\t' -v s="$2" '$1=="service" && $2==s {print $3;found=1} END{if(!found)print 0}' "$1/decision/choices.tsv")
+    vward_routing_choice "$1/decision/choices.tsv" "$2" "$5" "$6" "$7" "$vr2_old_rev" > "$vr2_tmp/expected" || return 2
+    cmp -s "$vr2_tmp/expected" "$vr2_tmp/choices" || return 3
+    vr2_withdraw=0
+    if [ "$5" = auto ]; then
+        vr2_own_service_withdrawal "$1" "$2" "$vr2_tmp/choices" && vr2_withdraw=1
+    fi
+    VWARD_B_SID=$2 VWARD_B_WITHDRAW=$vr2_withdraw LC_ALL=C awk '
+    BEGIN {FS=OFS="\t";sid=ENVIRON["VWARD_B_SID"];withdraw=ENVIRON["VWARD_B_WITHDRAW"]==1}
+    function id(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/}
+    function refid(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:@-]*$/}
+    function service(s) {return length(s)<=63 && s ~ /^[a-z0-9][a-z0-9.@_-]*$/}
+    function domain(s, a,n,i) {
+        if(length(s)>253 || s !~ /^[a-z0-9.-]+$/) return 0
+        n=split(s,a,".");if(n<2 || a[n] ~ /^[0-9]+$/) return 0
+        for(i=1;i<=n;i++) if(length(a[i])>63 || a[i] !~ /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/) return 0
+        return 1
+    }
+    function covers(p,d,s) {return p==d || (s=="subtree" && length(d)>length(p) && substr(d,length(d)-length(p))=="." p)}
+    function selected_target(s,t, k,r) {
+        if(t!="VPN:auto")return t
+        k="service-vpn:" s
+        r=(k in ctx)?ctx[k]:ctx["default-vpn"]
+        # Preserve the logical selector in choices. Only this projection may
+        # resolve it using captured inputs; unknown never becomes Provider.
+        return r~/^VPN:/ && id(substr(r,5)) && r!="VPN:auto" ? r : "VPN:auto"
+    }
+    function emit(line) {if(++out_n>4096 || (out_bytes+=length(line)+1)>1048576) exit 2;print line}
+    function binding(s,d, i,result) {
+        result="none"
+        for(i=1;i<=nb;i++) if(bs[i]==s && covers(bd[i],d,bsc[i])) {
+            if(ba[i]=="excluded") return "excluded"
+            if(ba[i]!="confirmed" || bf[i]=="unknown" || bc[i]=="unknown") result="unknown"
+            else if(result=="none") result="confirmed"
+        }
+        return result
+    }
+    {bytes[FILENAME]+=length($0)+1;if(FNR>4096 || bytes[FILENAME]>1048576) {bad=1;next}}
+    FILENAME==ARGV[1] {
+        if(FNR==1 && $1=="schema" && $2==1 && NF==2) next
+        mode[$2]=$4;tgt[$2]=$5;dns[$2]=$6;rev[$2]=$3;floor[$2]=$7;next
+    }
+    FILENAME==ARGV[2] {
+        if(NF!=6 || !service($1) || !domain($2) || $3 !~ /^(exact|subtree)$/ ||
+           $4 !~ /^(confirmed|excluded|shared|unknown)$/ || $5 !~ /^(ipv4|dual|unknown)$/ ||
+           $6 !~ /^(known|unknown)$/ || seenb[$1 SUBSEP $2 SUBSEP $3]++) {bad=1;next}
+        bs[++nb]=$1;bd[nb]=$2;bsc[nb]=$3;ba[nb]=$4;bf[nb]=$5;bc[nb]=$6;domains[$2]=1
+        if($1==sid) {scope[$2]=$3;own[$2]=1}
+        next
+    }
+    FILENAME==ARGV[3] {
+        if(NF!=10 || $1 !~ /^[MSA]$/ || !refid($2) || !domain($3) || $4 !~ /^(exact|subtree)$/ ||
+           ($5!="ISP" && !($5 ~ /^VPN:/ && id(substr($5,5)))) || !id($6) || $7 !~ /^[01]$/ ||
+           $8 !~ /^(explicit|active|positive|history|unknown)$/ || $9 !~ /^[0-9]+$/ || $9+0>2147483647 ||
+           ($10!="-" && !service($10)) || seene[$1 SUBSEP $2]++) {bad=1;next}
+        if(($1!="A" && ($8!="explicit" || $9+0!=0)) || ($1=="A" && $8=="explicit")) {bad=1;next}
+        e[++ne]=$0;es[ne]=$1;er[ne]=$2;ed[ne]=$3;escp[ne]=$4;et[ne]=$5;ep[ne]=$6
+        selected[ne]=$7;kind[ne]=$8;epoch[ne]=$9;origin[ne]=$10;domains[$3]=1;next
+    }
+    FILENAME==ARGV[4] {if(NF!=2 || ($1 in ctx)) bad=1;ctx[$1]=$2;next}
+    FILENAME==ARGV[5] {
+        if(NF!=11 || !id($2) || ($4!="-" && !domain($4)) || $5 !~ /^(exact|subtree)$/) {bad=1;next}
+        if($4!="-") domains[$4]=1
+        if(index("," $11 ",",",S:" sid ",")) {own[$4]=1;if(!($4 in scope)) scope[$4]=$5}
+        if($1=="route" && $9=="vward") {
+            own_key[$2]=$3 SUBSEP $4 SUBSEP $5 SUBSEP $6 SUBSEP $7
+            own_prefix[$2]=$1;for(j=2;j<=10;j++)own_prefix[$2]=own_prefix[$2] OFS $j
+        }
+        next
+    }
+    FILENAME==ARGV[6] {
+        # Native manual rules remain independent explicit contributors. Their
+        # observed presence is not replaced by an empty v2 evidence file.
+        if($1!="M") next
+        es[++ne]="M";er[ne]=$2;ed[ne]=$3;escp[ne]=$4;et[ne]=$5;ep[ne]=$6
+        selected[ne]=$7;kind[ne]="explicit";epoch[ne]=0;origin[ne]="-";domains[$3]=1;native_ref[ne]=$2;next
+    }
+    FILENAME==ARGV[7] {
+        if($1=="source" && $4=="unknown") native_unknown[$2]=1
+        next
+    }
+    FILENAME==ARGV[8] {
+        if($1=="resource" && $8=="vward" && $10=="verified")
+            native_group[$12]="group:" $3
+        next
+    }
+    FILENAME==ARGV[9] {
+        p=$1;for(j=2;j<=10;j++)p=p OFS $j
+        if(NF==11)origin_proof[$2]=p
+        next
+    }
+    FILENAME==ARGV[10] {
+        if($2=="intent" && $3=="M" && $8=="verified")intent_container[$1]=$4
+        next
+    }
+    FILENAME==ARGV[11] {if(NF!=2 || ($1 in probe))bad=1;probe[$1]=$2;next}
+    END {
+        if(!service(sid) || nb>1024 || ne>4096 || bad) exit 2
+        if(!(sid in mode)) {mode[sid]="auto";tgt[sid]="-";dns[sid]="-";rev[sid]=floor[sid]=0}
+        # A native projection of this same managed physical resource is not a
+        # second manual source. Require BOTH exact private native proof and the
+        # v2 origin/content row; names or a manifest alone never suppress M.
+        for(r in own_key) if(origin_proof[r]==own_prefix[r])common_key[own_key[r]]=1
+        for(i in native_ref) {
+            c=intent_container[native_ref[i]]
+            if(!(c in native_group))continue
+            k=native_group[c] SUBSEP ed[i] SUBSEP escp[i] SUBSEP et[i] SUBSEP ep[i]
+            if(k in common_key)common_native[i]=1
+        }
+        for(d in domains) {
+            member=binding(sid,d)
+            if(member=="none" && !own[d]) continue
+            if(++nd>1024) exit 2
+            sc=(d in scope) ? scope[d] : "exact";why="-"
+            if(member=="unknown" && !(withdraw && own[d])) why="membership-unknown"
+            if(ctx["source:S"]!="0" && ctx["source:S"]!="1" && mode[sid]!="auto") why="service-source-unknown"
+            for(src in native_unknown) if(ctx["source:" src]!="0" && !(src=="S" && withdraw)) why="native-source-unknown"
+            for(i=1;i<=ne;i++) if(covers(ed[i],d,escp[i]) && selected[i]==1 &&
+                ctx["source:" es[i]]!="0" && ctx["source:" es[i]]!="1") why="source-unknown"
+            for(s in mode) if(s!=sid && mode[s]!="auto") {
+                peer=binding(s,d)
+                if(peer=="unknown") why="peer-membership-unknown"
+                if(peer=="confirmed" && ctx["source:S"]!="0" && ctx["source:S"]!="1") why="service-source-unknown"
+            }
+            m=mode[sid];t=selected_target(sid,tgt[sid]);p=dns[sid]
+            # A global source switch disables its contribution, not the saved
+            # owner choice. Re-enabling S uses that same accepted choice. M/A
+            # still pass through the real common policy, including its floor.
+            if(ctx["source:S"]=="0") {m="auto";t=p="-"}
+            if(member=="none" || member=="excluded") {m="auto";t=p="-"}
+            if(m=="vpn" && t=="VPN:auto" && why=="-")why="default-vpn-unknown"
+            emit("atom" OFS d OFS sc OFS m OFS t OFS p OFS rev[sid] OFS floor[sid] OFS why)
+            for(i=1;i<=ne;i++) if(covers(ed[i],d,escp[i])) {
+                if(i in common_native) continue
+                if(es[i]=="S" && origin[i]==sid) continue
+                sel=(ctx["source:" es[i]]=="1") ? selected[i] : 0
+                k=kind[i];membership=(es[i]=="A") ? (member=="unknown" ? "unknown" : (member=="excluded" ? "excluded" : "bound")) : "peer"
+                if(es[i]=="A" && origin[i]!="-" && origin[i]!=sid) membership="unknown"
+                if(es[i]=="A" && (k=="positive" || k=="active") && probe[er[i]]!="fresh") {
+                    if(probe[er[i]]=="old-boot" || probe[er[i]]=="expired") {k="history";sel=0}
+                    else k="unknown"
+                }
+                emit("intent" OFS d OFS es[i] OFS er[i] OFS et[i] OFS ep[i] OFS sel OFS k OFS epoch[i] OFS membership)
+            }
+            for(s in mode) if(s!=sid && mode[s]!="auto" && binding(s,d)=="confirmed")
+                emit("intent" OFS d OFS "S" OFS s OFS selected_target(s,tgt[s]) OFS dns[s] OFS (ctx["source:S"]=="1" ? 1 : 0) OFS "explicit" OFS 0 OFS "peer")
+        }
+    }' "$vr2_tmp/choices" "$1/decision/bindings.tsv" "$1/decision/evidence.tsv" "$1/decision/context.tsv" \
+        "$1/decision/resources.tsv" "$1/intents.tsv" "$1/snapshot.tsv" "$1/inventory.tsv" "$1/decision/proofs.tsv" "$1/identity.tsv" "$1/probes.tsv" > "$vr2_tmp/input" || return 2
+    awk -F'\t' '$1=="atom"' "$vr2_tmp/input" | LC_ALL=C sort -t "$(printf '\t')" -k2,2 > "$vr2_tmp/atoms"
+    : > "$vr2_tmp/policy"
+    while IFS="$(printf '\t')" read -r _vr2_tag vr2_d _vr2_scope vr2_mode vr2_target vr2_dns vr2_rev vr2_floor vr2_why; do
+        { printf 'schema\t1\n'; awk -F'\t' -v d="$vr2_d" 'BEGIN{OFS="\t"} $1=="intent" && $2==d {for(i=3;i<=10;i++) printf "%s%s",$i,(i==10?ORS:OFS)}' "$vr2_tmp/input"; } > "$vr2_tmp/evidence"
+        vward_routing_service_policy "$vr2_mode" "$vr2_target" "$vr2_dns" "$vr2_rev" "$vr2_floor" "$vr2_tmp/evidence" > "$vr2_tmp/one" || return 2
+        if [ "$vr2_why" != - ]; then
+            printf '%s\tpolicy\t1\tunknown\tdenied\tunknown\n' "$vr2_d" >> "$vr2_tmp/policy"
+        fi
+        awk -F'\t' -v d="$vr2_d" -v s="$2" -v why="$vr2_why" 'BEGIN{OFS="\t"}
+            $1=="policy" && why!="-" {next}
+            $1=="contribution" && $2=="S" && $3=="choice" {$3=s}
+            {print d,$0}' "$vr2_tmp/one" >> "$vr2_tmp/policy"
+    done < "$vr2_tmp/atoms"
+    vr2_file "$vr2_tmp/policy" || return 2
+    vr2_dns_view "$1" > "$vr2_tmp/dns.tsv" || return 2
+    vr2_upstream_keys "$1/decision/upstreams.tsv" > "$vr2_tmp/upstream-keys.tsv" || return 2
+    [ "$vr2_next_hash" = "$(vr2_hash "$3")" ] && vr2_stage_valid "$1" || return 3
+    printf '%s\n' "$2" > "$vr2_tmp/service" || return 2
+    cp "$1/generation" "$vr2_tmp/generation" || return 2
+    mv "$vr2_tmp/atoms" "$4/atoms.tsv" && mv "$vr2_tmp/policy" "$4/policy.tsv" &&
+        mv "$vr2_tmp/choices" "$4/choices.tsv" && mv "$vr2_tmp/service" "$4/service" &&
+        mv "$vr2_tmp/dns.tsv" "$4/dns.tsv" && mv "$vr2_tmp/upstream-keys.tsv" "$4/upstream-keys.tsv" || return 2
+    printf 'routing-projection\t2\t%s\n' "$(cat "$vr2_tmp/generation")" > "$4/seal" || return 2
+    for vr2_f in atoms.tsv policy.tsv choices.tsv service dns.tsv upstream-keys.tsv; do
+        printf '%s\t%s\n' "$(vr2_hash "$4/$vr2_f")" "$vr2_f" >> "$4/seal" || return 2
+    done
+    vr2_hash "$4/seal" > "$4/seal.sha" || return 2
+    mv "$vr2_tmp/generation" "$4/generation"
+)

@@ -74,7 +74,8 @@ with tempfile.TemporaryDirectory() as tmp:
         "VWARD_SNAPSHOT_DIR": str(tmp / "snaps"), "VWARD_POLICY_SYNC_BIN": str(tmp / "no-sync"),
     }
     admission = tmp / "admission.sh"
-    admission.write_text("vward_admission_enter() { return 0; }\nvward_admission_leave() { return 0; }\n")
+    admission.write_text(f'. "{ROOT / "components/runtime/lib/vward-runtime-admission.sh"}"\n' +
+                         "vward_admission_enter() { return 0; }\nvward_admission_leave() { return 0; }\n")
     env["VWARD_ADMISSION_LIB"] = str(admission)
     env["VWARD_DOH_RETRY_DELAY"] = "0"
     env["VWARD_ADGUARD_CONFIG"] = str(tmp / "missing.yaml")
@@ -202,7 +203,7 @@ with tempfile.TemporaryDirectory() as tmp:
     env.update({"VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_ADS_CONTROL_BIN": str(ROOT / "components/ads-privacy-guard/scripts/vward-ads-privacy-control.sh"),
                 "VWARD_ADS_LIB": str(ROOT / "components/ads-privacy-guard/lib/vward-ads-privacy-common.sh"),
                 "VWARD_ADS_ETC": str(tmp / "ads"), "VWARD_ADS_STATE": str(tmp / "ads-state"),
-                "VWARD_ADS_LOG_DIR": str(tmp / "ads-log"), "VWARD_ADS_JQ": shutil.which("jq"), "VWARD_ADS_CURL": str(curl),
+                "VWARD_ADS_LOG_DIR": str(tmp / "ads-log"), "VWARD_ADS_BACKUP_ROOT": str(tmp / "ads-backup"), "VWARD_ADS_JQ": shutil.which("jq"), "VWARD_ADS_CURL": str(curl),
                 "VWARD_ADS_AGH_AUTH_FILE": str(auth), "VWARD_ADS_CONTROL_LOCK": str(tmp / "ads.lock"),
                 "AGH_API_BASE": "http://192.0.2.1:3001/control", "TMPDIR": str(tmp)})
     upstreams = ["[/claude.ai/]" + own, "[/claude.ai/]" + other, "9.9.9.9"]

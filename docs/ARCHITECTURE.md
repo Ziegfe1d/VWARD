@@ -138,3 +138,10 @@ Keenetic RCI и running-config. Live acceptance автоматического d
 Неизвестные/пользовательские группы автоматически не присваиваются.
 Панель/API сохраняются, переключатели трёх источников независимы.
 До «Выпускаем» без merge, VERSION/feed/release и изменений устройства.
+
+Уточнение 04.11.2026, база dev `3f4802b` (fix.35.6 уже выпущен): один канонический service
+choice, VPN-тумблер и режим — его проекции. Pure choice/policy дополняют прежний audit;
+off снимает S VPN-вклад, DNS/ISP suppress Auto-intent, peer-конфликт остаётся unresolved.
+Физические rules/ownership от suppression не меняются. Stage/model не подключены к API/engine,
+нет нового daemon/state writer. Контракт — ROUTING_AUDIT_CONTRACT.md; проверенная дельта,
+этапы и конкретный первый VPN-only writer с Gi/компенсацией — RS7_EXECUTOR_WIRING_DESIGN.md §F.

@@ -28,6 +28,7 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo "FAIL: common library not found" >&2; exit 1; }
 . "$LIB"
+ads_source_registry_merge
 
 STATUS="${VWARD_ROUTE_DNS_STATUS:-/tmp/vward-route-dns.status}"
 # Off unless switched on: on the owner's router Keenetic's DNS took the chain for a

@@ -7,6 +7,7 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo "HEALTH=FAIL"; echo "REASON=common_library_missing"; exit 1; }
 . "$LIB"
+ads_source_registry_merge
 ads_mkdirs >/dev/null 2>&1 || true
 FAIL=0; WARN=0
 check_file(){ if [ -r "$2" ]; then echo "$1=PASS"; else echo "$1=FAIL"; FAIL=$((FAIL+1)); fi; }
