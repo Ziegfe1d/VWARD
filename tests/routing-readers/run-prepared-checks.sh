@@ -33,6 +33,7 @@ for CASE in \
     check-live-raw-intent.py \
     check-live-bootstrap-ancestry.py \
     check-live-bootstrap-lifetime.py \
+    check-live-root0-recovery.py \
     check-live-transport.py \
     check-live-transport-faults.py \
     check-live-native-foreign.py \

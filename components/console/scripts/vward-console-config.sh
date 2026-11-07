@@ -315,9 +315,29 @@ routing_gate_load() {
 routing_live_dispatch() {
     [ "$OP" = service ] || return 0
     case $ARG1 in on|tunnel|off) ;; *) return 0 ;; esac
+    routing_live_load || return 0
+    rld_rc=0;rld_out=$(vward_routing_live_command "$ARG1" "$ARG2" "$ARG3") || rld_rc=$?
+    [ "$rld_rc" = 0 ] || { [ -z "$rld_out" ] || printf '%s\n' "$rld_out";die routing_not_applied "$rld_rc"; }
+    rld_result=changed
+    if printf '%s\n' "$rld_out" | grep -q '^outcome[[:space:]]unchanged[[:space:]]'; then rld_result=unchanged;fi
+    done_ok "service $ARG1 $ARG2 common routing" "$rld_result"
+}
+# Explicit owner recovery of a first ROOT stranded at observation0. Runs before
+# routing_operation_check: that gate itself refuses while such a ROOT exists.
+routing_root0_dispatch() {
+    [ "$OP" = routing-root ] || return 0
+    case $ARG1 in inspect|abort|compensate) ;; *) die invalid_value 64 ;; esac
+    routing_live_load || die routing_unavailable 75
+    rr_rc=0;rr_out=$(vward_routing_root0 "$ARG1") || rr_rc=$?
+    [ -z "$rr_out" ] || printf '%s\n' "$rr_out"
+    [ "$rr_rc" = 0 ] || die routing_root0_refused "$rr_rc"
+    case $ARG1 in inspect) done_ok "routing-root inspect" unchanged ;; *) done_ok "routing-root $ARG1" changed ;; esac
+}
+# Returns 1 when the common routing closure is not installed at all.
+routing_live_load() {
     rld_lib=${VWARD_ROOT_PREFIX:-}/opt/lib/vward
     if [ ! -e "$rld_lib/routing-capabilities.tsv" ] && [ ! -L "$rld_lib/routing-capabilities.tsv" ] &&
-       [ ! -e "$rld_lib/vward-routing-command.sh" ] && [ ! -L "$rld_lib/vward-routing-command.sh" ]; then return 0;fi
+       [ ! -e "$rld_lib/vward-routing-command.sh" ] && [ ! -L "$rld_lib/vward-routing-command.sh" ]; then return 1;fi
     [ -f "$rld_lib/vward-routing-loader.sh" ] && [ ! -L "$rld_lib/vward-routing-loader.sh" ] &&
         [ -O "$rld_lib/vward-routing-loader.sh" ] || die routing_unavailable 75
     # This first source cannot rely on a helper inside the yet-untrusted file.
@@ -335,11 +355,6 @@ routing_live_dispatch() {
     # shellcheck source=/dev/null
     . "$rld_lib/vward-routing-loader.sh" || die routing_unavailable 75
     vward_routing_live_modules_load "$rld_lib" || die routing_unavailable 75
-    rld_rc=0;rld_out=$(vward_routing_live_command "$ARG1" "$ARG2" "$ARG3") || rld_rc=$?
-    [ "$rld_rc" = 0 ] || { [ -z "$rld_out" ] || printf '%s\n' "$rld_out";die routing_not_applied "$rld_rc"; }
-    rld_result=changed
-    if printf '%s\n' "$rld_out" | grep -q '^outcome[[:space:]]unchanged[[:space:]]'; then rld_result=unchanged;fi
-    done_ok "service $ARG1 $ARG2 common routing" "$rld_result"
 }
 
 routing_native_check() {
@@ -5519,7 +5534,7 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store|routing-root) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
@@ -5554,6 +5569,7 @@ ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 command -v vward_agent_acts >/dev/null 2>&1 || vward_agent_acts() { return 0; }
 vward_admission_enter console-config || die updater_busy 75
 routing_live_dispatch
+routing_root0_dispatch
 routing_operation_check
 
 # Register every descendant before it can write. If its original AI parent died
