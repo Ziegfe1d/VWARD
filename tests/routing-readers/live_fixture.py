@@ -112,14 +112,15 @@ if (base/'native-lost-reply').exists() and (base/'native-lost-reply').read_text(
         if (LIBDIR/'vward-routing-live-agh.sh').exists():self.libs += (LIBDIR/'vward-routing-live-agh.sh',)
         if (LIBDIR/'vward-routing-bootstrap.sh').exists():self.libs += (LIBDIR/'vward-routing-bootstrap.sh',)
 
-    def console(self,*args):
+    def console(self,*args,preserve_profile=False):
         device=self.etc/'device.conf'
-        device.write_text('VWARD_LAN_ADDRESS=10.77.0.1\nVWARD_LAN_SUBNET=10.77.0.0/24\n'
+        if not preserve_profile:
+            device.write_text('VWARD_LAN_ADDRESS=10.77.0.1\nVWARD_LAN_SUBNET=10.77.0.0/24\n'
                           'VWARD_LAN_DEVICE=br0\nVWARD_LAN_INTERFACE=Bridge0\n'
                           'VWARD_WAN_DEVICE=eth3\nVWARD_WAN_INTERFACE=GigabitEthernet1\n'
                           'VWARD_TUNNEL_INTERFACE=Wireguard0\nVWARD_TUNNEL_DEVICE=nwg0\n'
                           'VWARD_POLICY_GROUP=Mine\n')
-        device.chmod(0o600)
+            device.chmod(0o600)
         env=self.env|{'VWARD_PROFILE_LIB':self.env.get('VWARD_PROFILE_LIB',str(LIBDIR/'vward-device-profile.sh')),
                       'VWARD_ADMISSION_LIB':self.env.get('VWARD_ADMISSION_LIB',str(LIBDIR/'vward-runtime-admission.sh')),
                       'VWARD_DEVICE_CONFIG_OWNER_UID':str(os.getuid()),

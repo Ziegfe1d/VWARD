@@ -20,6 +20,9 @@ vrl_interface_observe() (
 vrl_inputs_compile() (
     [ "$#" -eq 5 ] && vr2_stage_valid "$1" && vrj_dir "$2" && vrj_dir "$4" || return 75
     vrl_ic_stage=$1;vrl_ic_raw=$2;vrl_ic_sid=$3;vrl_ic_out=$4
+    # Match the existing profile's private owned 0600/0400 trust boundary;
+    # capturing otherwise consistent bytes does not grant configuration rights.
+    vrj2_file "$vrl_ic_raw/dev" || return 75
     case $5 in off) vrl_ic_withdraw=1 ;; vpn) vrl_ic_withdraw=0 ;; *) return 75 ;; esac
     printf '%s\n' "$vrl_ic_sid" | grep -Eq '^[a-z0-9][a-z0-9.@_-]{0,62}$' || return 75
     for vrl_ic_key in $(vrb_state_names); do
@@ -81,7 +84,10 @@ vrl_inputs_compile() (
         END{if(bad || def!=1)exit 2;print "default-vpn","VPN:" default_t}' \
         "$vrl_ic_out/context" "$vrl_ic_raw/dev" "$vrl_ic_categories" "$vrl_ic_out/catalog" > "$vrl_ic_out/context.next" || return 75
     vrl_ic_wan=$(awk -F= '$1=="VWARD_WAN_DEVICE"{if(++n>1)exit 2;print $2}' "$vrl_ic_raw/dev") || return 75
-    vrl_ic_vpns=$(vward_map_vpns "$(cat "$vrl_ic_raw/map")" "$vrl_ic_wan") || return 75
+    vrl_ic_wan_name=$(awk -F= '$1=="VWARD_WAN_INTERFACE"{if(++n>1)exit 2;print $2}END{if(n!=1)exit 2}' "$vrl_ic_raw/dev") || return 75
+    vward_valid_ndm_name "$vrl_ic_wan_name" || return 75
+    vrl_ic_map=$(cat "$vrl_ic_raw/map") || return 75
+    vrl_ic_vpns=$(vward_map_vpns "$vrl_ic_map" "$vrl_ic_wan" | awk -v wan="$vrl_ic_wan_name" '$1!=wan') || return 75
     vrl_ic_n=0
     while read -r vrl_ic_vpn _vrl_ic_kernel; do
         [ -n "$vrl_ic_vpn" ] || continue

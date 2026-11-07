@@ -21,6 +21,7 @@ for CASE in \
     check-live-loader-trust.py \
     check-live-console-entry.py \
     check-live-inputs.py \
+    check-live-profile-boundary.py \
     check-live-membership.py \
     check-service-withdrawal.py \
     check-live-bootstrap.py \
