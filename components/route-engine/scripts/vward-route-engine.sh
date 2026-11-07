@@ -613,7 +613,7 @@ probe()
     H="$1"
     IFACE="$2"
     IP="$3"
-    P_EXEC=no P_CLASS=UNKNOWN P_WHY= P_RC=- P_CODE=000 P_TIME=-
+    P_EXEC=no P_CLASS=UNKNOWN P_WHY='' P_RC=- P_CODE=000 P_TIME=-
 
     # curl crashed on HTTPS within the hour (Entware's OpenSSL 3.5.5 on some MIPS routers):
     # «could not check», and no crash again. Every decision here needs a check that passed.
@@ -697,7 +697,7 @@ probe_unknown()
 {
     state_path "$1"
     printf '%s %s\n' "${QNOW:-$(date +%s)}" "$2" > "$VOLATILE_DIR/$SF_NAME.unknown" 2>/dev/null
-    echo "$(date '+%Y-%m-%d %H:%M:%S')|PROBE_UNKNOWN|$1|stage=$2|executed=$P_EXEC|why=$P_WHY|rc=$P_RC|http=$P_CODE" >> "$EVENT_LOG"
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|PROBE_UNKNOWN|$1|stage=$2|class=$P_CLASS|executed=$P_EXEC|why=$P_WHY|rc=$P_RC|http=$P_CODE" >> "$EVENT_LOG"
 }
 
 

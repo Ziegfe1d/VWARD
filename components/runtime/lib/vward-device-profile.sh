@@ -149,7 +149,7 @@ vward_rci_get()
 _vward_tls_proc()
 {
     # FILE (a /proc/PID/stat): _vt_ps = PID START. Read by the builtin: /proc/self is THIS (sub)shell.
-    _vt_ps= _vt_line=
+    _vt_ps='' _vt_line=''
     read -r _vt_line 2>/dev/null < "$1" || [ -n "$_vt_line" ] || return 1
     _vt_rest=${_vt_line##*) }
     [ "$_vt_rest" != "$_vt_line" ] || return 1
