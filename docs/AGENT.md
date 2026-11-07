@@ -299,6 +299,8 @@ sh/BB1.37/staticBB1.36 + negative missing-dependency control PASS. Runtime не�
 
 07.11.2026 08:56 МСК / PR38 service-entry checkpoint `aa72a645e9beddeae4d4e119c1eab9a017d16f02`: actual copied console service on/tunnel/off проходит через fixed common J2, fresh captured membership/category/configuration health; логический VPN:auto сохраняется. SH/BusyBox адресные проверки PASS, два Important review закрыты RED→GREEN. Deployment capsule и новые libs ещё НЕ в signed78/package-map; первый запуск/cold map/recovery, остальные writers/режимы/API/Panel/lifecycle/ABI ещё открыты. Новый full CI и выпуск не запускались; промежуточный SDK не готов к публикации.
 
+07.11.2026 09:15 МСК / PR38 `5ac6fda31efc1ad1c18db4ee4474b6f5ea924969`: actual console RED→GREEN закрыл два обхода в fresh inputs — private profile0600/0400 и WAN identity независимо от stale kernel name. SH/BB PASS, новый8-йcase зарегистрирован; SHA1414. Cold bootstrap/recovery/весь GO ещё не завершены, SDK по-прежнему uninstalled; CI/release/router нет.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -1015,6 +1017,20 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   Environment restart сохранил workspace/index/logs. Router не подключался/не менялся,
   Agents Observation/manual rules/NextDNS/owner-removed DNS неизменны, hardware не принят.
 
+- 07.11.2026 09:15 МСК — [Агент], PR38, code `5ac6fda31efc1ad1c18db4ee4474b6f5ea924969`.
+  Actual copied CLI воспроизвёл два обхода: writable device.conf дал rc0/native change;
+  provider PPTP WAN при stale WAN_DEVICE был опрошен/выбран как VPN и также дал rc0.
+  Fresh input compiler использует существующий vrj2_file для owned0600/0400 profile;
+  source конфигурации не добавлен. Captured WAN_INTERFACE валидируется и исключается
+  независимо от WAN_DEVICE; отсутствующий map больше не скрывает cat error под pipeline.
+  SH+BB actual negative cases PASS, valid0400 positive PASS, no timeout/assert weakening.
+  Fixture preserve_profile keyword действует только в тесте; нового production override
+  нет. Case зарегистрирован8-м, syntax/Python/sh/BB/no-new SC/privacy/SHA1414 PASS.
+  Это закрывает eligibility при существующем control state, НЕ cold first publication:
+  preflight/discovery/Root0 recovery и остальные общие writers/modes/API/Panel/package/
+  ABI/downgrade/CI/rollback/public остаются открыты. Signed78/map/VERSION/feed прежние;
+  dev/main/устройство не изменялись, production keys не читались.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -1165,6 +1181,8 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
 - 07.11.2026 02:46 МСК / PR38 e863946: physical transport adapters обоих DNS stores проверены на fixtures, но общая пользовательская цепочка ещё не завершена. Следующие технические gates — actual CLI/API/Panel + свежие canonical inputs/auto selectors, все legacy callbacks, lifecycle/installed ABI/recovery/downgrade, затем новый exact CI/rollback/public dev. AGH read failure пока глобально failclosed в prototype; selective unrelated behavior ещё нужен. Signed78 targets/map прежние, новые libs не установлены. Разрешение полного GO действует, partial native/DNS-only пакет не выпускать; hardware/роутер не принимались.
 
 - 07.11.2026 08:56 МСК / PR38 `aa72a64`: actual ordinary CLI и свежие source observations проверены на fixtures, но общий GO ещё не завершён. Следом — первый root/cold map и безопасный recovery, все остальные entrypoints/backwriters и источники/режимы, lifecycle/API/Panel/package/ABI/downgrade; затем новый exact CI/rollback/public dev. Native full-read latency и legitimate long-history cost остаются рисками для MIPS; isolated host PASS не hardware. Все текущие7cases SH/BB приняты адресно, не полный suite. Signed78 и VERSION прежние, никаких release/router actions.
+
+- 07.11.2026 09:15 МСК / PR38 `5ac6fda`: profile trust и WAN candidate boundary в ordinary SDK закрыты адресными SH/BB fixtures. Публикационный кандидат ещё не готов: первым нужен cold bootstrap/discovery и Root0 recovery до включения всей installed цепочки; весь полный GO продолжается без нового согласования. Никакого CI/release/router действия на этом checkpoint.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 

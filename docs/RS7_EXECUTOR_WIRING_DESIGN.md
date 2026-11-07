@@ -957,3 +957,13 @@ physical ACK/last native preflight не ослаблялись, history cache/pr
 installed closure+authenticated ABI/downgrade/connected faults, адресный review конечной
 связи, новый exact CI/rollback/dev-public verification. Current on/off SDK не выпуск.
 Owner GO действует без новых approval menus; router/main/stable вне действий агента.
+
+#### G.5.2. Profile trust и WAN identity (07.11.2026 09:15 МСК)
+
+Code `5ac6fda31efc1ad1c18db4ee4474b6f5ea924969`. Actual CLI RED: writable profile был принят; provider WAN при stale kernel
+name стал VPN candidate/physical target. GREEN: existing private owned0600/0400 guard,
+валидный captured WAN_INTERFACE исключён независимо от WAN_DEVICE, map read errors не
+скрываются. SH+BB actual negatives и valid0400 positive PASS; fixture-only preserve_profile,
+новых runtime overrides нет. Новый8-йcase/runner, syntax/no-new SC/privacy/SHA1414 PASS.
+Cold initialization/preflight/discovery/Root0 recovery, all writers/modes/lifecycle/API/Panel/
+installed ABI/downgrade/final gates ещё открыты; SDK uninstalled/signed78 unchanged.
