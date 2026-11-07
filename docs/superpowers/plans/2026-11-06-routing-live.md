@@ -95,3 +95,9 @@
   same pure preflight avoids J2 on denied selections. No packaged activation yet. First
   bootstrap/cold discovery/recovery/all writers/full modes/APIUI/lifecycle/ABI/final gates
   remain open; AGENT§3/G.5.1 record exact local limits and host timeout/isolated evidence.
+
+- 868f7d3: actual first-request preflight before ROOT, same importer/state-set/ACK;
+  addressed per-member S attribution and ancestry races; cold discovery only private
+  RAM (actual late-child shared overwrite RED→GREEN). Targeted SH/BB and default DATA
+  import/downgrade verified by checkpoints; see AGENT§3/G.5.3 for limits. Raw-intent
+  RED/Root0 recovery/all-writer and full integration gates still open. No publication.

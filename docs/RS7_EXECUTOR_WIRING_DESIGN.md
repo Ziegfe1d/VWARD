@@ -967,3 +967,14 @@ name стал VPN candidate/physical target. GREEN: existing private owned0600/0
 новых runtime overrides нет. Новый8-йcase/runner, syntax/no-new SC/privacy/SHA1414 PASS.
 Cold initialization/preflight/discovery/Root0 recovery, all writers/modes/lifecycle/API/Panel/
 installed ABI/downgrade/final gates ещё открыты; SDK uninstalled/signed78 unchanged.
+
+
+#### G.5.3. Prepublication readiness и private cold discovery (07.11.2026 10:22 МСК)
+
+Code `868f7d3f663cd1c6edf2e23fcca17d8220816c2a`. Первый candidate до canonical ROOT готовит SAME legacy stage/archive/metadata-only state-set; после leased same-PID transfer/sourcegone/inode/seal/actual ACK — real executor fresh CAS/versionlast J2. Неверные обязательные inputs не оставляют canonical0/2; valid first ordinary CLI SH/BB PASS. Private failed candidate самовольно не удаляется, Root0 explicit recovery ещё нужен.
+
+Addressed Important RED→GREEN: S resources требуют per-member exact catalog attribution (full private group proof не означает service membership); parent ancestry проверяется заново перед prepare/final exec (actual symlink race preserved); cold discovery не пишет shared map. Actual parent-only kill/replacement-map/late completion воспроизвёл старое overwrite, новый private RAM path сохраняет inode/bytes shared map SH/BB. Both bootstrap и ordinary inputs используют SAME map_prepare/native reader/archive path; existing map не перезаписывается. Прежний TTL/freshness существующего cache не изменён. Reviewer закрыл эти дельты без новых Important/Critical; тесты сам не запускал.
+
+SH/BB first-request/cold-map available-unavailable/attribution/ancestry/late-child и прежний publisher lifetime PASS. В lifetime разрешены только необходимые show running-config reads; запрет native mutation/save подтверждён обоими running/startup bytes, все leases/noACK/noadoption/8s guards прежние. DATA legacy import/byte+mode downgrade/re-import/refusal SH/BB PASS; это не physical router/downgrade активного пакета. 5новыхcases/runner, syntax/privacy/no-new SC/SHA1419 PASS. Detailed exact limits и explicit-pin old timeout45 (НЕ proof удаления) — AGENT§3.
+
+Rawauto intent сейчас ещё нормализуется к physical route — отдельный actual RED, не готовый продукт. Root0 own recovery, все normal old writers/M/A/режимы/lifecycle/API/Panel/installed ABI/downgrade/connected matrix/final exact CI/rollback/dev-public остаются открыты. UNINSTALLED, signed78/map/allowlists/workflow/VERSION/feed прежние, router/main/dev untouched. Historical local full FAIL/Chromium SKIP/beta marker SKIP сохраняются. Full owner GO продолжает действовать без module approval.

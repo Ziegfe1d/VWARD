@@ -301,6 +301,8 @@ sh/BB1.37/staticBB1.36 + negative missing-dependency control PASS. Runtime не�
 
 07.11.2026 09:15 МСК / PR38 `5ac6fda31efc1ad1c18db4ee4474b6f5ea924969`: actual console RED→GREEN закрыл два обхода в fresh inputs — private profile0600/0400 и WAN identity независимо от stale kernel name. SH/BB PASS, новый8-йcase зарегистрирован; SHA1414. Cold bootstrap/recovery/весь GO ещё не завершены, SDK по-прежнему uninstalled; CI/release/router нет.
 
+- 07.11.2026 10:22 МСК / PR38 first-request checkpoint `868f7d3`: SAME legacy stage/archive/state-set compile перенесён ДО leased first-ROOT publication; actual ACK/fresh CAS перед execute сохранены. Invalid inputs не оставляют canonical0/2, cold map берётся existing profile discovery ТОЛЬКО в unique private RAM, не shared cache. Catalog-confirmed per-member S attribution и повторная ancestry validation закрыли addressed Important. Targeted SH/BB PASS; не весь connected suite/не hardware. Новые5cases/runner, SHA1419/privacy/syntax/no-new SC PASS. Root0 recovery/raw legacy intent/all writers/API/Panel/package/ABI/final gates ещё открыты, release не готов.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -1031,6 +1033,21 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
   ABI/downgrade/CI/rollback/public остаются открыты. Signed78/map/VERSION/feed прежние;
   dev/main/устройство не изменялись, production keys не читались.
 
+### 07.11.2026 10:22 МСК — [Агент] PR38: первый обычный запрос без stranded ROOT и late shared-cache writer
+
+Code `868f7d3f663cd1c6edf2e23fcca17d8220816c2a`; PR https://github.com/Ziegfe1d/VWARD/pull/38 draft, full owner GO §G.5 действует. Actual RED: bad catalog оставлял canonical0, отсутствующий map/unsafe profile — canonical2 до отказа первого CLI. Теперь SAME legacy observation compiler/архив/metadata-only state-set готовятся в private candidate под actual admission/EDIT/CHANGE ДО публикации. Cache/read readiness разделены без изменения тела native observer. Same-PID leased no-clobber rename/sourcegone/inode/seal/ACK остаются; только после ACK actual executor делает fresh CAS/versionlast J2.
+
+Addressed review нашёл3 Important, все закрыты кодом и адресными regressions (reviewer тесты не запускал):
+- Full-group private proof ошибочно давал unmatched member `S:SID`. Actual rawauto RED доказал false attribution; explicit-pin off на старом коде достиг timeout45, удаление НЕ доказано. S import теперь только exact catalog member; unknown остаётся observation без S права, fullcoverage/withdrawal guards прежние. Cold off с private fullproof+manual extra SH/BB: refusal, running/startup/registry/proof byte exact, extra не S.
+- Замена parent на symlink после initial ancestry: actual prepare RED писал private aliased subtree; final publisher RED действительно создавал ROOT через alias(rc3 позже). Старый closed walk до trusted /opt повторяется при init_parent перед prepare и final leased exec. SH/BB обе fault границы PASS, чужие/aliased bytes сохранены.
+- Первый cold discovery писал shared map из unleased child. Actual parent-only kill/new replacement/late completion RED перезаписывал новый map. Теперь existing profile discovery пишет только unique private RAM observation; SAME map path используется reader/archive. Нормальный второй action envelope также вызывает SAME map_prepare; shared map не публикуется. SH/BB late-child regression сохраняет replacement inode/bytes и native/startup. Existing shared cache TTL поведение не менялось.
+
+Targeted результаты по checkpoints: first-request valid/native-write/save + invalid catalog/map/profile SH/BB PASS; cold actual console+existing profile/RCI show-only available/unavailable SH/BB PASS; per-member attribution/ancestry/late discovery SH/BB PASS. Actual lifetime suite SH/BB PASS: parent-only kill/late0/updater/foreign empty-matching-extra/noACK/noadoption/inode прежние. Старый no-queries assert реально RED после нужного read-only preflight; заменён требованием ALL native calls=show running-config И running/startup byte exact, запрет mutation/save и bounds8s сохранены. Default DATA legacy-import/re-import/byte+mode downgrade/refusal SH/BB PASS на этом checkpoint. Cold discovery fixture перехватывает curl executable, только whitelist show/interface/system-name; real network/router не использовались.
+
+5новыхcases зарегистрированы общим SH/BB runner. Invoke45/probe55/fault8/resource budgets неизменны. Static sh/BB/Python, no-new ShellCheck, privacy, diff, SHA1419 PASS. Full local consistency исторически FAIL(read-only /opt/var/check-dryrun199), local Chromium SKIP(noPlaywright), beta marker SKIP(origin/beta unavailable) остаются. Старый CI813 не читался/не переносится, нового полного CI/merge/dev/feed/VERSION/package activation/release/router действия нет; signed78/map/allowlists/workflow прежние, libs UNINSTALLED.
+
+Следом уже подтверждён отдельный raw-intent RED: old importer заменяет auto наблюдаемым VPN:Wireguard0; регрессия raw auto/pin/missing/observed ISP ещё НЕ GREEN. Explicit Root0 inspection/own abort/recovery, все normal old callbacks/M/A/list/category/modes/lifecycle/API/Panel/installed ABI/downgrade/connected faults/final exact CI/rollback/public dev ещё нужны. Fixtures не клиентский путь/аппаратная приёмка.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
@@ -1183,6 +1200,8 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
 - 07.11.2026 08:56 МСК / PR38 `aa72a64`: actual ordinary CLI и свежие source observations проверены на fixtures, но общий GO ещё не завершён. Следом — первый root/cold map и безопасный recovery, все остальные entrypoints/backwriters и источники/режимы, lifecycle/API/Panel/package/ABI/downgrade; затем новый exact CI/rollback/public dev. Native full-read latency и legitimate long-history cost остаются рисками для MIPS; isolated host PASS не hardware. Все текущие7cases SH/BB приняты адресно, не полный suite. Signed78 и VERSION прежние, никаких release/router actions.
 
 - 07.11.2026 09:15 МСК / PR38 `5ac6fda`: profile trust и WAN candidate boundary в ordinary SDK закрыты адресными SH/BB fixtures. Публикационный кандидат ещё не готов: первым нужен cold bootstrap/discovery и Root0 recovery до включения всей installed цепочки; весь полный GO продолжается без нового согласования. Никакого CI/release/router действия на этом checkpoint.
+
+- 07.11.2026 10:22 МСК / PR38 `868f7d3`: prepublication readiness/parent ancestry/per-member S attribution/cold private discovery закрыты адресно, не весь GO. Raw-intent RED и Root0 explicit recovery остаются первыми gates; затем все writers/sources/modes/lifecycle/API/Panel/installed ABI/downgrade/final CI/rollback/public dev. Shared-cache late writer не добавлялся; unknown/private barriers/no-autoreplay прежние. Исторические full-local FAIL/Chromium SKIP/beta SKIP и hardware unknown не скрыты; router untouched.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 
