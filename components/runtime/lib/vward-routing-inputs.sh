@@ -121,6 +121,13 @@ vrl_inputs_refresh() {
     # Fresh observations may be semantically unchanged. Do not manufacture a
     # physical matching-image transaction or a new receipt for a no-op. The
     # following action still captures/checks its own generation under the lock.
+    # Unchanged inputs: this verified stage IS the snapshot the following
+    # service read would take (nothing was written since, same locks). The
+    # pipeline copies it instead of reading the same router/files again; its
+    # first physical step still takes its own fresh read and CAS.
+    # Read by vward_routing_pipeline2 in the same shell.
+    # shellcheck disable=SC2034
+    if [ "$vrl_if_changed" = 1 ]; then vrb_stage_reuse=;else vrb_stage_reuse=$vrl_if_work/stage;fi
     if [ "$vrl_if_changed" = 1 ]; then
         # Eligibility uses the SAME pure canonical projection/planner against
         # prospective observations. This is a denied preview, never execution

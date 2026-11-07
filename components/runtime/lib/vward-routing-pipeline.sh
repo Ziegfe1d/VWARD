@@ -42,6 +42,8 @@ vrb_worker_static() {
         [ "$(vward_lock_boot_id "$vrb_change_path/boot")" = "${vrj2_boot:-}" ] || return 75
     vrb_ws_memo="$vrb_j|$vrb_op|${vrj2_me:-}|${vrj2_start:-}|${vrj2_boot:-}"
 }
+# vrj_tab comes from the journal library loaded before this one.
+# shellcheck disable=SC2154
 vrb_worker_context() {
     if [ "${vrb_ws_memo:-}" != "$vrb_j|$vrb_op|${vrj2_me:-}|${vrj2_start:-}|${vrj2_boot:-}" ]; then
         vrb_worker_static || return 75
@@ -731,6 +733,7 @@ vward_routing_pipeline2() (
             return 0
         fi
     fi
+    vrb_stage_reuse=
     vrb_inputs_refresh "$3" "$4" "$5" "$6" "$7" || return 75
     vrb_t=$(mktemp -d "$vrb_j/.operation.XXXXXX") || return 1
     # Keep compiled sidecars after failure/crash: recovery never reconstructs a
@@ -738,8 +741,16 @@ vward_routing_pipeline2() (
     mkdir "$vrb_t/stage" "$vrb_t/project" "$vrb_t/fresh" "$vrb_t/lowered" || return 1
     # The reader expects running-config. Real data file is bound by a copy,
     # never a symlink; refreshes below use only the emulator file.
-    vrb_transport_refresh || return 1
-    vward_routing_consistent_read2 "$vrb_t/stage" "$vrb_e/decision" > "$vrb_t/read.status" || return 3
+    if [ -n "${vrb_stage_reuse:-}" ] && vr2_stage_valid "$vrb_stage_reuse" &&
+        cp -R "$vrb_stage_reuse/." "$vrb_t/stage" && vr2_stage_valid "$vrb_t/stage"; then
+        # Same-request snapshot from vrb_inputs_refresh (see there).
+        printf 'ok\t%s\n' "$(cat "$vrb_t/stage/generation")" > "$vrb_t/read.status" || return 1
+    else
+        rm -rf "$vrb_t/stage" && mkdir "$vrb_t/stage" || return 1
+        vrb_transport_refresh || return 1
+        vward_routing_consistent_read2 "$vrb_t/stage" "$vrb_e/decision" > "$vrb_t/read.status" || return 3
+    fi
+    vrb_stage_reuse=
     vward_routing_choice "$vrb_t/stage/decision/choices.tsv" "$3" "$4" "$5" "$6" "$7" > "$vrb_t/choices.next" || return 75
     vward_routing_project2 "$vrb_t/stage" "$3" "$vrb_t/choices.next" "$vrb_t/project" || return 3
     vward_routing_plan2 "$vrb_t/stage" "$vrb_t/project" "$vrb_op" > "$vrb_t/typed" || return 3
@@ -782,6 +793,7 @@ vrb_execute2() {
         printf 'outcome\tunchanged\tconfigured\tverified\tfalse\t%s\n' "$(vrb_execution_evidence)";return 0
     fi
     mkdir "$vrb_t/fresh" || return 1
+    vrb_fresh_after=
     vward_journal2_plan "$vrb_j" "$vrb_op" "$vrb_t/plan" || return 75
     if [ -e "$vrb_t/withdrawal" ] || [ -L "$vrb_t/withdrawal" ]; then
         vrj2_file "$vrb_t/withdrawal" || return 75
@@ -800,8 +812,18 @@ vrb_execute2() {
     vrb_gen=$(cat "$vrb_t/generation")
     while IFS="$(printf '\t')" read -r vrb_tag vrb_n _vrb_action vrb_kind vrb_id vrb_pre vrb_post _vrb_proof _vrb_refs _vrb_checks _vrb_inverse; do
         [ "$vrb_tag" = step ] || continue
-        vrb_transport_refresh || return 1
-        vrb_now=$(vrb_fresh_stage) || return 3
+        if [ "${vrb_fresh_after:-}" = "$vrb_op:$vrb_gen" ]; then
+            # The previous step's verified readback IS the current fresh
+            # snapshot: only this coordinator's own journal records were
+            # written since. Re-reading the same router/files here repeated
+            # that check. A later foreign edit is still refused by the native
+            # compile/content CAS before dispatch and by vrb_delta_valid.
+            vrb_now=$vrb_gen
+        else
+            vrb_transport_refresh || return 1
+            vrb_now=$(vrb_fresh_stage) || return 3
+        fi
+        vrb_fresh_after=
         if [ "$vrb_now" != "$vrb_gen" ]; then
             vward_journal2_unknown "$vrb_j" "$vrb_op" input-changed-before-step
             printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\t%s\n' "$(vrb_execution_evidence)";return 3
@@ -841,7 +863,9 @@ vrb_execute2() {
         }
         # Transport status alone is not proof; readback above is authoritative.
         [ "$vrb_rc" = 0 ] || printf 'lost-reply\t%s\tverified-postimage\n' "$vrb_n" >> "$vrb_t/events"
+        vrb_fresh_after=$vrb_op:$vrb_gen
     done < "$vrb_t/plan"
+    vrb_fresh_after=
     vward_journal2_saved "$vrb_j" "$vrb_op" pending || return 1
     vrb_role=save
     vrb_publish_quiet "$vrb_j/$vrb_op" || return 75

@@ -83,6 +83,7 @@ vrj_mc_load() {
         esac
         case $vrj_mc_cur in "$vrj_mc_b") vrj_mc_rel= ;; "$vrj_mc_b"/*) vrj_mc_rel=${vrj_mc_cur#"$vrj_mc_b"/}/ ;; *) continue ;; esac
         vrj_mc_t=$vrj_mc_l;vrj_mc_f=
+        # shellcheck disable=SC2034
         for vrj_mc_i in 1 2 3 4 5 6 7 8; do
             vrj_mc_w=${vrj_mc_t%%[ ]*};vrj_mc_f="$vrj_mc_f $vrj_mc_w"
             vrj_mc_t=${vrj_mc_t#*[ ]};vrj_mc_t=${vrj_mc_t#"${vrj_mc_t%%[! ]*}"}
@@ -239,10 +240,13 @@ vrj2_lock() {
     vward_lock_gate_leave "$1/.lock" || return 75
     return "$vrj2_take_rc"
 }
+# vl_boot is set by vward_lock_boot_var (runtime admission library).
+# shellcheck disable=SC2154
 vrj2_unlock() {
-    [ ! -L "$1/.lock" ] && [ "$(cat "$1/.lock/pid" 2>/dev/null)" = "${vrj2_me:-}" ] &&
-        [ "$(cat "$1/.lock/pid_start" 2>/dev/null)" = "${vrj2_start:-}" ] &&
-        [ "$(vward_lock_boot_id "$1/.lock/boot")" = "${vrj2_boot:-}" ] || return 1
+    # vrj_slurp == "$(cat F 2>/dev/null)"; vward_lock_boot_var == lock_boot_id.
+    [ ! -L "$1/.lock" ] && { vrj_slurp "$1/.lock/pid";[ "$vrj_sv" = "${vrj2_me:-}" ]; } &&
+        { vrj_slurp "$1/.lock/pid_start";[ "$vrj_sv" = "${vrj2_start:-}" ]; } &&
+        { vward_lock_boot_var "$1/.lock/boot" || :;[ "$vl_boot" = "${vrj2_boot:-}" ]; } || return 1
     vward_lock_release "$1/.lock"
 }
 # Batch atomic files then ONE compulsory flush per journal boundary. The caller
@@ -340,6 +344,12 @@ vrj2_plan_counts() {
         case $vrj2_p4 in route|dns|group|dns-scope) vrj2_native=1 ;; esac
       done; } < "$1" || return 1
 }
+# Read-only cache for ONE operation directory and its step directories.
+vrj2_cache_op() {
+    set -- "$1" "$1"
+    for vrj2_s in "$1"/step.*; do [ -d "$vrj2_s" ] && [ ! -L "$vrj2_s" ] && set -- "$@" "$vrj2_s"; done
+    vrj_mc_load "$@"
+}
 # Load the read-only cache for JDIR, its v2 operations and their steps.
 vrj2_cache_ops() {
     if [ -n "${1%/*}" ]; then set -- "${1%/*}" "${1%/*}" "$1";else set -- "$1" "$1";fi
@@ -434,21 +444,23 @@ vward_journal2_begin() (
     vrj2_ready "$1" "$2" || return 2
     vrj2_lock "$1" || return $?
     trap 'vrj2_unlock "$1"' EXIT
-    case $(cat "$1/$2/state") in planned|pending) ;; *) return 75 ;; esac
+    vrj_slurp "$1/$2/state";case $vrj_sv in planned|pending) ;; *) return 75 ;; esac
     vrj2_gate_except "$1" "$2" || return 75
-    [ "$(cat "$1/$2/generation")" = "$4" ] || return 75
+    vrj_slurp "$1/$2/generation";[ "$vrj_sv" = "$4" ] || return 75
     [ ! -e "$1/$2/step.$3" ] && [ ! -L "$1/$2/step.$3" ] || return 75
+    # Read-only checks of this operation's earlier steps: one ls for all.
+    vrj2_cache_op "$1/$2"
     vrj2_n=1
     while [ "$vrj2_n" -lt "$3" ]; do
-        vrj2_step_valid "$1" "$2" "$vrj2_n" && [ "$(cat "$1/$2/step.$vrj2_n/state")" = 'done' ] || return 75
+        vrj2_step_valid "$1" "$2" "$vrj2_n" && { vrj_slurp "$1/$2/step.$vrj2_n/state";[ "$vrj_sv" = 'done' ]; } || return 75
         vrj2_n=$((vrj2_n+1))
     done
-    vrj2_row=$(vrj2_step_row "$1/$2" "$3") || return 2
-    vrj2_pre=$(printf '%s\n' "$vrj2_row" | cut -f6);vrj2_post=$(printf '%s\n' "$vrj2_row" | cut -f7)
-    [ "$(vrj2_decode "$vrj2_pre")" = "$(cat "$5")" ] || return 75
+    vrj_mc_off
+    vrj2_row_fields "$1/$2" "$3" || return 2
+    vrj_slurp "$5";[ "$vrj2_dpre" = "$vrj_sv" ] || return 75
     mkdir "$1/$2/step.$3" || return 1
-    vrj2_put "$1/$2/step.$3/pre" "$(vrj2_decode "$vrj2_pre")" &&
-        vrj2_put "$1/$2/step.$3/post" "$(vrj2_decode "$vrj2_post")" &&
+    vrj2_put "$1/$2/step.$3/pre" "$vrj2_dpre" &&
+        vrj2_put "$1/$2/step.$3/post" "$vrj2_dpost" &&
         vrj2_put "$1/$2/step.$3/generation" "$4" && vrj2_put "$1/$2/step.$3/state" pending &&
         vrj2_put "$1/$2/state" pending && vrj2_flush
 )

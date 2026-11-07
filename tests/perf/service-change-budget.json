@@ -1,0 +1,7 @@
+{
+  "comment": "Processes created by ONE request of each type through the actual copied console closure (tests/perf/check-service-change-budget.py, NDMC fixture). Budget = the larger of sh (dash) and BusyBox ash, measured with strace fork counts on the process-budget HEAD of PR38 (2026-11-07), plus ~5%. Before this package (4cf3388): cold 25 878, change 22 618, repeat 2 782. The owner's targets (target) are NOT met yet: per-step full snapshot/journal/readback is the remaining floor; see docs/AGENT.md 07.11 process budget. Never raise a budget without a recorded reason; lower it whenever a pass lands.",
+  "measured": {"sh": {"cold": 14768, "change": 9314, "repeat": 1610, "off": 7432},
+               "busybox": {"cold": 15053, "change": 9534, "repeat": 1610, "off": 7608}},
+  "budget": {"cold": 15800, "change": 10000, "repeat": 1700, "off": 8000},
+  "target": {"cold": 1500, "change": 500, "repeat": 150, "off": 500}
+}

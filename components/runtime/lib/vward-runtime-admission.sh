@@ -334,7 +334,8 @@ vward_lock_gate_live() {
     case $vlg_key_pid:$vlg_key_start in *[!0-9:]*|:*|*:) return 2 ;; esac
     [ "${#vlg_key_pid}" -le 10 ] && [ "${#vlg_key_start}" -le 20 ] || return 2
     [ "$vlg_key_boot" = "$vlg_boot" ] || return 1
-    vlg_live_start=$(vward_admission_pid_start "$vlg_key_pid") || vlg_live_start=
+    # Same value as $(vward_admission_pid_start PID), without the subshell.
+    if vward_pid_start_var "$vlg_key_pid"; then vlg_live_start=$VA_PS;else vlg_live_start=;fi
     if [ -n "$vlg_live_start" ]; then
         [ "$vlg_live_start" = "$vlg_key_start" ] || return 1
         vlg_stat=;read -r vlg_stat < "/proc/$vlg_key_pid/stat" || return 2
@@ -379,7 +380,7 @@ vward_lock_gate_exec() (
     umask 077
     vward_lock_gate_dir "$vlg_claim" && vward_lock_gate_live "$vlg_key" || return 75
     IFS=' ' read -r vlg_exec_pid _ < /proc/self/stat || return 75
-    vlg_exec_start=$(vward_admission_pid_start "$vlg_exec_pid") || return 75
+    vward_pid_start_var "$vlg_exec_pid" || return 75;vlg_exec_start=$VA_PS
     (umask 077;printf '%s\n' "$vlg_boot" > "$vlg_claim/exec.$vlg_exec_pid.$vlg_exec_start") || return 75
     # If the parent died before registration, no write may start. If it dies
     # after this test, contenders see this actual exec PID until it is gone.
@@ -400,6 +401,20 @@ vward_lock_gate_quiet() {
 }
 # Read one decimal owner record with shell builtins. Like command-substitution
 # cat, trailing empty lines are harmless; an embedded/extra field is not.
+# Same parse as vward_lock_gate_decimal, result in vlg_dec (no subshell).
+# A failed parse leaves vlg_dec empty, as "$(... 2>/dev/null)" was.
+vward_lock_gate_decimal_var() {
+    vlg_dec=;vlg_dtail=;vlg_dv=
+    {
+        IFS= read -r vlg_dv || [ -n "$vlg_dv" ] || return 2
+        case $vlg_dv in ''|*[!0-9]*) return 2 ;; esac
+        [ "${#vlg_dv}" -le 20 ] || return 2
+        while IFS= read -r vlg_dtail || [ -n "$vlg_dtail" ]; do
+            [ -z "$vlg_dtail" ] || return 2
+        done
+    } < "$1" 2>/dev/null || return 2
+    vlg_dec=$vlg_dv
+}
 vward_lock_gate_decimal() (
     vlg_decimal=;vlg_decimal_tail=
     {
@@ -416,14 +431,16 @@ vward_lock_gate_leave() {
     [ -n "${vlg_claim:-}" ] && [ "${vlg_claim%/*}" = "$1.gate" ] || return 75
     vward_lock_gate_dir "$vlg_claim" || return 75
     IFS=' ' read -r vlg_leave_pid _ < /proc/self/stat || return 75
-    [ "$(vward_lock_gate_decimal "$vlg_claim/pid" 2>/dev/null)" = "$vlg_leave_pid" ] &&
-        [ "$(vward_lock_gate_decimal "$vlg_claim/start" 2>/dev/null)" = "$(vward_admission_pid_start "$vlg_leave_pid")" ] || return 75
+    vward_pid_start_var "$vlg_leave_pid" || VA_PS=
+    # A failed parse compares as empty, exactly as "$(...)" did.
+    { vward_lock_gate_decimal_var "$vlg_claim/pid" || :;[ "$vlg_dec" = "$vlg_leave_pid" ]; } &&
+        { vward_lock_gate_decimal_var "$vlg_claim/start" || :;[ "$vlg_dec" = "$VA_PS" ]; } || return 75
     rm -rf "$vlg_claim"
 }
 vward_lock_gate_enter() {
     case $1 in /*) ;; *) return 75 ;; esac
     IFS=' ' read -r vlg_me _ < /proc/self/stat || return 75
-    vlg_start=$(vward_admission_pid_start "$vlg_me") || return 75
+    vward_pid_start_var "$vlg_me" || return 75;vlg_start=$VA_PS
     IFS= read -r vlg_boot < /proc/sys/kernel/random/boot_id || return 75
     vlg_dir=$1.gate
     if [ -e "$vlg_dir" ] || [ -L "$vlg_dir" ]; then
@@ -484,14 +501,26 @@ vward_lock_gate_enter() {
 # owner id for an hour.
 # Native boot identity is checked before PID/start; a reused pair after reboot
 # is not the old owner. A missing legacy boot stamp keeps the older PID rule.
-vward_lock_boot_id() {
+# vward_lock_boot_var FILE: vl_boot, or rc 1 (vl_boot empty). Same checks as
+# before; the UUID shape grep is a case pattern (read yields one line).
+vward_lock_boot_var() {
+    vl_boot=;vl_bv=
     [ -f "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] || return 1
     # Authority metadata only, not filename fields.
     # shellcheck disable=SC2012
     vward_lock_ls "$1" || return 1
     case "$vl_lsmode $vl_lslinks" in '-rw------- 1'|'-r-------- 1') ;; *) return 1 ;; esac
-    vl_boot=;read -r vl_boot < "$1" || return 1
-    printf '%s\n' "$vl_boot" | grep -Eq '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' || return 1
+    read -r vl_bv < "$1" || return 1
+    vl_hx='[0-9a-f]'
+    # shellcheck disable=SC2254
+    case $vl_bv in
+        $vl_hx$vl_hx$vl_hx$vl_hx$vl_hx$vl_hx$vl_hx$vl_hx-$vl_hx$vl_hx$vl_hx$vl_hx-$vl_hx$vl_hx$vl_hx$vl_hx-$vl_hx$vl_hx$vl_hx$vl_hx-$vl_hx$vl_hx$vl_hx$vl_hx$vl_hx$vl_hx$vl_hx$vl_hx$vl_hx$vl_hx$vl_hx$vl_hx) ;;
+        *) return 1 ;;
+    esac
+    vl_boot=$vl_bv
+}
+vward_lock_boot_id() {
+    vward_lock_boot_var "$1" || return 1
     printf '%s\n' "$vl_boot"
 }
 vward_lock_stale() {
@@ -558,10 +587,10 @@ vward_lock_release() {
     if [ ! -e "$1" ] && [ ! -L "$1" ]; then vl_release_rc=0
     elif [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ]; then
         IFS=' ' read -r vl_release_pid _ < /proc/self/stat || vl_release_pid=
-        vl_release_start=$(vward_admission_pid_start "$vl_release_pid") || vl_release_start=
-        if [ -n "$vl_release_start" ] && [ "$(vward_lock_gate_decimal "$1/pid" 2>/dev/null)" = "$vl_release_pid" ] &&
-            [ "$(vward_lock_gate_decimal "$1/pid_start" 2>/dev/null)" = "$vl_release_start" ] &&
-            [ "$(vward_lock_boot_id "$1/boot")" = "$vlg_boot" ]; then
+        if vward_pid_start_var "$vl_release_pid"; then vl_release_start=$VA_PS;else vl_release_start=;fi
+        if [ -n "$vl_release_start" ] && { vward_lock_gate_decimal_var "$1/pid" || :;[ "$vlg_dec" = "$vl_release_pid" ]; } &&
+            { vward_lock_gate_decimal_var "$1/pid_start" || :;[ "$vlg_dec" = "$vl_release_start" ]; } &&
+            { vward_lock_boot_var "$1/boot" || :;[ "$vl_boot" = "$vlg_boot" ]; }; then
             vward_lock_gate_exec rm -rf "$1" && vl_release_rc=0
         fi
     fi

@@ -134,6 +134,7 @@ vrsi_consistent_read() (
     # rows vrs_one_file would print (mtime as epoch seconds, as date -r +%s).
     # Any input the batch cannot prove (unsupported option, vanished file,
     # unparsable row, name mismatch) falls back to vrs_one_file for that input.
+    # shellcheck disable=SC2154
     vrs_one() {
         vrs_k=$((vrs_k+1))
         if [ "$vrs_fp_mode" = collect ]; then
@@ -165,6 +166,8 @@ vrsi_consistent_read() (
         vrs_eo=$(((vrs_ezh*60+vrs_ezm)*60));[ "${3%"${3#?}"}" = + ] || vrs_eo=$((0-vrs_eo))
         vrs_ev=$(((vrs_era*146097+vrs_doe-719468)*86400+vrs_eh*3600+vrs_emi*60+vrs_es-vrs_eo))
     }
+    # vrs_p_N/vrs_r_N are set through eval below.
+    # shellcheck disable=SC2154
     vrs_fp_batch() {
         vrs_n=$vrs_k;vrs_i=0;set --
         while [ "$vrs_i" -lt "$vrs_n" ]; do
