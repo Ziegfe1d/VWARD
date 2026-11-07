@@ -6,6 +6,8 @@ with PipelineFixture() as f:
     (f.e/'running.cfg').write_text(CFG)
     work=f.p/'compile';work.mkdir(mode=0o700)
     expected=f.p/'expected';expected.write_text('https upstream https://dns.example/secret-token domain smart.example\n')
+    # The compiler accepts only private inputs (vrj2_file 0600/0400); do not depend on the runner umask.
+    expected.chmod(0o600)
     before=(f.e/'running.cfg').read_bytes()
     def compile(cmd):
         return f.invoke('vrb_native_dns_compile',cmd,f.e/'running.cfg',expected,work)

@@ -13,7 +13,7 @@ def consumers(f,path,obj):
     ui=subprocess.run(['node','-e',program],input=r.stdout,capture_output=True,text=True,timeout=5)
     assert ui.returncode==0 and 'не подключён' in ui.stdout and 'Путь устройства не проверен' in ui.stdout,ui.stderr
     assert '<button' not in ui.stdout and 'data-' not in ui.stdout,'DTO presentation added an action'
-    for field,value in [('client_verified',True),('activation','live')]:
+    for field,value in [('client_verified',True),('client_path_verified',True),('activation','live')]:
         bad=f.p/'bad-outcome.json';bad.write_text(json.dumps(obj|{field:value})+'\n');bad.chmod(0o600)
         (f.p/'bad-outcome.json.sha').write_text(hashlib.sha256(bad.read_bytes()).hexdigest()+'\n')
         r=f.run(api+'\nJQ=jq;routing_b_outcome_json "$1"',bad)

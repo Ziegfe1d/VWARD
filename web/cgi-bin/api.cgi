@@ -22,14 +22,15 @@ routing_b_outcome_json() {
     # URL/token/raw native inputs are never presentation fields. An unsupported
     # activation or a claimed packet proof refuses, rather than becoming green.
     printf '%s\n' "$routing_b_body" | "$JQ" -ce '
-      select(.schema==2 and .activation=="off" and .evidence=="configuration" and .client_verified==false) |
+      select(.schema==2 and .activation=="off" and .evidence=="configuration" and .client_verified==false and
+        (.client_path_verified // false)==false) |
       select(.configured.state|IN("verified","observed","partial","mixed","unknown")) |
       select(.desired.mode|IN("auto","vpn","dns","isp","server-policy")) |
       select(.coverage.total>=0 and .coverage.total<=1024 and .coverage.known>=0 and .coverage.unknown>=0 and
         .coverage.known+.coverage.unknown==.coverage.total) |
       select((.sources|type)=="array" and (.sources|length)<=4096 and all(.sources[];.source|IN("M","S","A"))) |
       select(all(..|strings;contains("://")|not)) |
-      {schema,activation,evidence,client_verified,scope,source_switches:{M:.source_switches.M,S:.source_switches.S,A:.source_switches.A},service,operation:{state:.operation.state},
+      {schema,activation,evidence,client_verified,client_path_verified:false,scope,source_switches:{M:.source_switches.M,S:.source_switches.S,A:.source_switches.A},service,operation:{state:.operation.state},
        desired:{mode:.desired.mode,target:.desired.target,policy:.desired.policy,revision:.desired.revision,generation:.desired.generation,
          resources:[.desired.resources[]|{id,domain,scope,target,policy,consumers}]},
        configured:{state:.configured.state,persisted:.configured.persisted,generation:.configured.generation,

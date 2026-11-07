@@ -159,11 +159,15 @@ with Fixture() as f:
     d = [r for r in sh if r[1] == 'services']
     assert d and all(r[3] == 'service-target-defaulted' and r[2] == 'diverge' and r[4] == 'info' and r[5] == 'low' for r in d), d
     assert 'source\tS\t1\tunknown' in (out/'snapshot.tsv').read_text()   # RS-6 keeps unknown
-    # (c) no categories.tsv at all: Services default, RS-6 source S unknown.
+    # (c) no categories.tsv at all: Services default. Since aa72a64 exact absence of the
+    # OPTIONAL category file means the profile default (source S known), so RS-6 and the
+    # legacy default agree; only a bad/unreadable/alias file stays unknown (case b above).
     f.cats.unlink()
     r, out = snap(f); assert r.returncode == 0
     assert all(x[7] == 'service-target-defaulted' for x in pick(rows(out), 'services'))
-    assert all(r[3] == 'service-target-defaulted' for r in shadow(f, out) if r[1] == 'services')
+    assert 'source\tS\t1\tknown' in (out/'snapshot.tsv').read_text()
+    d = [r for r in shadow(f, out) if r[1] == 'services']
+    assert d and all(r[2] == 'match' and r[8] == 'rs=VPN:Wireguard0|legacy=VPN:Wireguard0' for r in d), d
     f.cats.write_text('ai\tWireguard0\n')
 
     # ---- tunnel-guard: saved moves, return, quality switch -----------------------------
