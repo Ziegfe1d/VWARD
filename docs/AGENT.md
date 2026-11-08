@@ -1263,6 +1263,12 @@ probe-codes, isp-control, routing-state-errors, RS6 observe PASS. Адресны
 `.broken`, удержание во время DNS/ndmc, старый флаг, лишние паузы) исправлены. Не тронуто
 (старое): UNKNOWN в `classify_isp_vs_vpn` сбрасывает гистерезис и пишет `ADAPTIVE_ISP_UNKNOWN`
 (не состояние отказа).
+CI на `f31a207`: updater-tests — SHA256SUMS (обновлён, `8de0008`); resource-audit — chaos
+`wget-crash` «BusyBox wget crashed 2 times»: гонка двух агентов в `vward_rci_get` без curl (оба
+доходили до wget до отметки падения; локально 5/5 PASS). Исправлено: первую пробу wget, не
+известного как рабочий, делает один вызов (атомарный mkdir `.try`, брошенная проба снимается
+через минуту), рабочий отмечается `.ok` (дальше без процессов). `check-rci-wget-once.py` RED
+(6 запусков падающего wget) → GREEN; chaos wget-crash и curl-https-crash PASS.
 
 ## 4. Открытые вопросы и нужные данные
 

@@ -114,6 +114,19 @@ vward_rci_get()
     for _vrg_w in ${VWARD_RCI_WGET:-/opt/bin/busybox:wget /bin/busybox:wget wget}; do
         _vrg_k=$(printf '%s' "$_vrg_w" | tr '/:' '__')
         [ ! -e "$_vrg_bad/$_vrg_k" ] || continue
+        # Not known to work yet: one caller tries it (an atomic mkdir), the others skip it
+        # meanwhile - two agents of the same minute crashed it twice (chaos CI 08.11). A try left
+        # by a killed caller is taken away after a minute. Known to work (.ok): no process here.
+        _vrg_try=
+        if [ ! -e "$_vrg_bad/$_vrg_k.ok" ]; then
+            [ -d "$_vrg_bad" ] || mkdir -p "$_vrg_bad" 2>/dev/null
+            if ! mkdir "$_vrg_bad/$_vrg_k.try" 2>/dev/null; then
+                [ -z "$(find "$_vrg_bad/$_vrg_k.try" -maxdepth 0 -mmin +1 2>/dev/null)" ] ||
+                    rmdir "$_vrg_bad/$_vrg_k.try" 2>/dev/null
+                continue
+            fi
+            _vrg_try=1
+        fi
         case "$_vrg_w" in
             *:wget) [ -x "${_vrg_w%:wget}" ] || continue
                     _vrg_out=$("${_vrg_w%:wget}" wget -q -T "$_vrg_t" -O - "$_vrg_url" 2>/dev/null) ;;
@@ -121,8 +134,16 @@ vward_rci_get()
                _vrg_out=$("$_vrg_w" -q -T "$_vrg_t" -O - "$_vrg_url" 2>/dev/null) ;;
         esac
         _vrg_rc=$?
+        if [ -n "$_vrg_try" ]; then
+            # The result noted before the try is given up: crashed - never again; ran - works.
+            if [ "$_vrg_rc" -lt 128 ]; then : > "$_vrg_bad/$_vrg_k.ok" 2>/dev/null
+            else : > "$_vrg_bad/$_vrg_k" 2>/dev/null; fi
+            rmdir "$_vrg_bad/$_vrg_k.try" 2>/dev/null
+        elif [ "$_vrg_rc" -ge 128 ]; then
+            # A known-good wget that crashes after all: never again either.
+            mkdir -p "$_vrg_bad" 2>/dev/null; : > "$_vrg_bad/$_vrg_k" 2>/dev/null
+        fi
         [ "$_vrg_rc" = 0 ] && [ -n "$_vrg_out" ] && { printf '%s\n' "$_vrg_out"; _vrg_out=; return 0; }
-        [ "$_vrg_rc" -lt 128 ] || { mkdir -p "$_vrg_bad" 2>/dev/null; : > "$_vrg_bad/$_vrg_k" 2>/dev/null; }
     done
     _vrg_out=
     return 1
