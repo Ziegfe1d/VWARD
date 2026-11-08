@@ -63,6 +63,8 @@ echo $$ > "$LOCK/pid"
 
 cleanup()
 {
+    # The shared HTTPS turn this run holds (probe_run), before anything else.
+    ! command -v rc_turn_give >/dev/null 2>&1 || rc_turn_give
     rm -rf "${LOCK:?}"
     rm -f "$TARGETS"
     vward_admission_leave 2>/dev/null || true
@@ -126,38 +128,115 @@ force_vpn_match()
 
     [ -f "$F" ] || return 1
 
-    while IFS= read -r L; do
-        D=$(echo "$L" | sed 's/#.*//' | tr 'A-Z' 'a-z' | awk '{print $1}')
-        [ -n "$D" ] || continue
-
-        case "$D" in
-            \*.*) D="${D#*.}" ;;
-        esac
-
-        case "$H" in
-            "$D"|*."$D") return 0 ;;
-        esac
-    done < "$F"
-
-    return 1
+    # One process for the whole list (it was sed|tr|awk per line: 18 processes for 6 lines).
+    # A line: its first word before «#», any case; «*.example» is example and its subdomains.
+    FVM_H=$H awk '
+        BEGIN { h = ENVIRON["FVM_H"] }
+        {
+            sub(/#.*/, "")
+            d = tolower($1)
+            if (d == "") next
+            if (substr(d, 1, 2) == "*.") d = substr(d, 3)
+            if (h == d || (length(h) > length(d) && substr(h, length(h) - length(d)) == "." d)) { found = 1; exit }
+        }
+        END { exit !found }
+    ' "$F"
 }
 
-probe_result()
+# The shared HTTPS turn (vward_tls_take, P0-1) is taken once and kept across the checks of a
+# run (CI #814: take/done around each of the 5 checks cost 82 processes, budget 64), in THIS
+# shell - never in a $(...) subshell, which would hold it under its own short-lived PID.
+# A check starts on the held turn only while it still ends within RC_TURN_HOLD (10) seconds of
+# the take (held + a check's 3 s limit). A download (vward_fetch: updater, lists) waits 20 s for
+# the turn, so it always gets it; a site check of the route engine waits 5 s when curl works and
+# may get «could not check» (UNKNOWN: no state, tried again in 60 s) - as before, when this run
+# took the turn again at once after each check. Past the limit the turn is given back and taken
+# again only a second later (a waiter tries once a second, so it gets the turn first: nobody
+# starves). Given back also before vward_isp_control (it takes its own) and at the end of the
+# run (cleanup). A removal's two checks run in $(...) children of this shell: they use its turn
+# (curl in a descendant of the owner) and never give it back (RC_BORROW).
+RC_TURN=0 RC_TURN_T0= RC_TURN_RC=0 RC_YIELD=0 RC_NOW= RC_BORROW=0
+RC_TURN_HOLD=${VWARD_RECONCILER_TURN_HOLD:-10}
+case "$RC_TURN_HOLD" in ''|*[!0-9]*) RC_TURN_HOLD=10 ;; esac
+
+# rc_now: RC_NOW = seconds since boot in hundredths, no process; empty when unreadable (then
+# nothing is held: every check takes and gives back the turn, as before).
+rc_now()
+{
+    RC_NOW=
+    read -r rc_up _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}" || return 1
+    case "$rc_up" in [0-9]*.[0-9][0-9]) ;; *) return 1 ;; esac
+    RC_NOW=${rc_up%.*}${rc_up#*.}
+    case "$RC_NOW" in *[!0-9]*) RC_NOW=; return 1 ;; esac
+    # No leading zero: «0.05» would read as octal in $((...)).
+    while :; do case "$RC_NOW" in 0?*) RC_NOW=${RC_NOW#0} ;; *) break ;; esac; done
+}
+
+# rc_turn_fits [N]: N more checks (3 s each, 1 by default) on the held turn still end within
+# RC_TURN_HOLD; a crash noted meanwhile (a file test, no process) - never.
+rc_turn_fits()
+{
+    [ ! -e "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" ] || return 1
+    rc_now || return 1
+    case "$RC_TURN_T0" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$RC_NOW" -ge "$RC_TURN_T0" ] || return 1
+    [ $((RC_NOW - RC_TURN_T0 + 300 * ${1:-1})) -le $((RC_TURN_HOLD * 100)) ]
+}
+
+# rc_turn_give: the turn given back (only ours, by vward_tls_done) with the last curl result.
+rc_turn_give()
+{
+    [ "$RC_TURN" = 1 ] || return 0
+    RC_TURN=0
+    vward_tls_done "$RC_TURN_RC"
+}
+
+# rc_turn_check [N]: between names (or before N checks of a removal) - a turn held past the
+# limit is given back now (a slow name lookup is no reason to keep others waiting).
+rc_turn_check()
+{
+    [ "$RC_TURN" = 1 ] || return 0
+    rc_turn_fits "${1:-1}" && return 0
+    rc_turn_give
+    RC_YIELD=1
+}
+
+# probe_run HOST IFACE IP: PRC|PCODE|PTIME of one check, in this shell. PRC 2 with PCODE 000:
+# the check did not run (curl broken within the hour, the turn not given).
+probe_run()
 {
     H="$1"
     IFACE="$2"
     IP="$3"
+    PRC=2 PCODE=000 PTIME=-
 
+    # A turn held past the limit is given back first; after that the next take waits a second
+    # (a waiter tries once a second: it gets the turn first). A borrowing child (probe_result
+    # under a held turn) only runs its curl: the owner judges the time and gives it back.
+    if [ "$RC_BORROW" = 1 ]; then
+        :
+    elif [ "$RC_TURN" = 1 ] && ! rc_turn_fits; then
+        RC_TURN=0
+        vward_tls_done "$RC_TURN_RC"
+        RC_YIELD=1
+    fi
+    if [ "$RC_YIELD" = 1 ] && [ "$RC_BORROW" != 1 ]; then
+        RC_YIELD=0
+        sleep 1
+    fi
     # curl crashed on HTTPS within the hour (Entware's OpenSSL 3.5.5 on some MIPS routers):
     # «could not check», and no crash again (the router emulator's broken environment, fix.24).
-    if vward_https_broken; then
-        echo "2|000|-"
-        return 0
-    fi
-    # The shared HTTPS turn (vward_tls_take, P0-1): not given - could not check (2), no verdict.
-    if command -v vward_tls_take >/dev/null 2>&1 && ! vward_tls_take; then
-        echo "2|000|-"
-        return 0
+    # vward_tls_take refuses such a curl itself (1, no process while no crash was ever noted)
+    # and gives no turn within its wait (2): could not check either way.
+    if [ "$RC_TURN" != 1 ]; then
+        if command -v vward_tls_take >/dev/null 2>&1; then
+            vward_tls_take || return 0
+            RC_TURN=1 RC_TURN_RC=0
+            rc_now || :
+            RC_TURN_T0=$RC_NOW
+        elif vward_https_broken; then
+            return 0
+        fi
     fi
 
     OUT=$(
@@ -174,43 +253,47 @@ probe_result()
           "https://$H/" 2>/dev/null
     )
 
-    RC=$?
-    ! command -v vward_tls_done >/dev/null 2>&1 || vward_tls_done "$RC"
-    # A crash (a signal of curl's own fault) is noted for an hour, as vward_fetch does.
-    case "$RC" in 132|134|135|136|139) : > "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" 2>/dev/null ;; esac
-    CODE=${OUT%%|*}
-    TIME=${OUT#*|}
+    PRC=$?
+    RC_TURN_RC=$PRC
+    # A crash (a signal of curl's own fault) is noted for an hour, as vward_fetch does, and the
+    # turn is given back at once (vward_tls_done notes it).
+    case "$PRC" in
+        132|134|135|136|139)
+            if [ "$RC_TURN" = 1 ] && [ "$RC_BORROW" != 1 ]; then RC_TURN=0; vward_tls_done "$PRC"
+            else : > "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" 2>/dev/null; fi ;;
+    esac
+    PCODE=${OUT%%|*}
+    PTIME=${OUT#*|}
 
-    [ -n "$CODE" ] || CODE="000"
-    [ -n "$TIME" ] || TIME="-"
+    [ -n "$PCODE" ] || PCODE="000"
+    [ -n "$PTIME" ] || PTIME="-"
+    return 0
+}
 
-    echo "$RC|$CODE|$TIME"
+# probe_result HOST IFACE IP: «RC|CODE|TIME» of one check, for $(...) callers. Under a turn
+# this run holds the child borrows it (never gives it back); otherwise it takes its own and gives
+# it back before it ends - a child never leaves a turn behind under its own PID.
+probe_result()
+{
+    [ "$RC_TURN" != 1 ] || RC_BORROW=1
+    probe_run "$@"
+    [ "$RC_BORROW" = 1 ] || rc_turn_give
+    echo "$PRC|$PCODE|$PTIME"
 }
 
 
+# probe HOST IFACE IP: 0 - the site answered; 1 - the check ran and failed; 2 - it did not run
+# or its end says nothing about the site (P0-2: never a failure state). PROBE_RC = the same.
 probe()
 {
-    H="$1"
-    IFACE="$2"
-    IP="$3"
-
-    PR=$(probe_result "$H" "$IFACE" "$IP")
-
-    OLDIFS="$IFS"
-    IFS='|'
-    set -- $PR
-    PRC="$1"
-    PCODE="$2"
-    IFS="$OLDIFS"
-
-    case "$PRC" in
-        ''|*[!0-9]*) return 1 ;;
-    esac
-
+    probe_run "$1" "$2" "$3"
+    PROBE_RC=2
+    isp_check_ran "$PRC" || return 2
+    PROBE_RC=1
     [ "$PRC" -eq 0 ] || return 1
     [ "$PCODE" != "000" ] || return 1
     [ "$PCODE" != "451" ] || return 1
-
+    PROBE_RC=0
     return 0
 }
 
@@ -300,12 +383,23 @@ classify_isp_vs_vpn()
     echo "$CLASS|$IRC|$IC|$VRC|$VC"
 }
 
+# safe_name NAME: SAFE_NAME = NAME with / : * ? as _ (a file name). A plain name needs no
+# process (echo|tr only for a name with one of them, or a backslash echo may read).
+safe_name()
+{
+    case "$1" in
+        *[/:*?\\]*) SAFE_NAME=$(echo "$1" | tr '/:*?' '____') ;;
+        *) SAFE_NAME=$1 ;;
+    esac
+}
+
 save_state()
 {
     H="$1"
     STATUS="$2"
 
-    SAFE=$(echo "$H" | tr '/:*?' '____')
+    safe_name "$H"
+    SAFE=$SAFE_NAME
     F="$STATE/$SAFE.state"
     T="$F.tmp.$$"
 
@@ -351,6 +445,9 @@ remove_adaptive()
         VRC="-"
         VC="000"
     else
+        # Its two checks run in $(...) children: on this run's turn while both fit within the
+        # limit, otherwise the turn is given back first and each child takes and gives its own.
+        rc_turn_check 2
         CR=$(classify_isp_vs_vpn "$H" "$MIP")
 
         OLDIFS="$IFS"
@@ -369,7 +466,7 @@ remove_adaptive()
             ;;
 
         ISP_BAD)
-            SAFE_H=$(echo "$H" | tr '/:*?' '____')
+            safe_name "$H"; SAFE_H=$SAFE_NAME
             rm -f "$HYST_DIR/$SAFE_H.state"
             save_state "$H" "ADAPTIVE_ISP_BAD"
             echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_ISP_BAD|$H|ISP=$IC|VPN=$VC" >> "$LOG"
@@ -378,7 +475,7 @@ remove_adaptive()
             ;;
 
         *)
-            SAFE_H=$(echo "$H" | tr '/:*?' '____')
+            safe_name "$H"; SAFE_H=$SAFE_NAME
             rm -f "$HYST_DIR/$SAFE_H.state"
             save_state "$H" "ADAPTIVE_ISP_UNKNOWN"
             echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_ISP_UNKNOWN|$H|ISP=$IC|VPN=$VC" >> "$LOG"
@@ -392,7 +489,7 @@ remove_adaptive()
     # минимум 3 успешные проверки с интервалом >= 240 сек.
     # --------------------------------------------------------
 
-    SAFE_H=$(echo "$H" | tr '/:*?' '____')
+    safe_name "$H"; SAFE_H=$SAFE_NAME
     HF="$HYST_DIR/$SAFE_H.state"
 
     HSTREAK=0
@@ -549,6 +646,7 @@ while [ "$DONE" -lt "$MAX_PER_RUN" ] &&
     DONE=$((DONE + 1))
 
     [ -z "$H" ] && continue
+    rc_turn_check
 
     AGH=$(nslookup "$H" $VWARD_DNS_SERVER 2>&1)
 
@@ -580,10 +678,17 @@ while [ "$DONE" -lt "$MAX_PER_RUN" ] &&
         fi
     fi
 
+    # The direct check did not run (the turn not given, curl broken or crashed, stopped from
+    # outside): nothing is known about the name - no state, no VPN check (P0-2).
+    if [ "$PROBE_RC" = 2 ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_PROBE_UNKNOWN|$H|iface=wan|rc=$PRC" >> "$LOG"
+        continue
+    fi
+
     # The direct check failed: does it work at all (01.11: api.ozon.ru, wb.ru «broken», ISP=000)?
     # If the control sites fail too, no name is judged for the rest of this run (no marks, no load).
     ISPC=0
-    ! command -v vward_isp_control >/dev/null 2>&1 || { vward_isp_control; ISPC=$?; }
+    ! command -v vward_isp_control >/dev/null 2>&1 || { rc_turn_give; vward_isp_control; ISPC=$?; }
     if [ "$ISPC" = 1 ]; then
         save_state "$H" "ADAPTIVE_ISP_UNRELIABLE"
         echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_ISP_PROBE_UNRELIABLE|$H|left=$((MAX_PER_RUN - DONE))" >> "$LOG"
@@ -596,12 +701,15 @@ while [ "$DONE" -lt "$MAX_PER_RUN" ] &&
     elif probe "$H" "$WG" "$IP"; then
         save_state "$H" "AUTO_VPN"
         echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_VPN_OK|$H" >> "$LOG"
+    elif [ "$PROBE_RC" = 2 ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_PROBE_UNKNOWN|$H|iface=vpn|rc=$PRC" >> "$LOG"
     else
         save_state "$H" "BROKEN"
         echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_BROKEN|$H" >> "$LOG"
     fi
 
 done
+rc_turn_give
 
 [ "$TUN_SKIPPED" = 0 ] || echo "$(date '+%Y-%m-%d %H:%M:%S')|MAINT_TUNNEL_DOWN|skipped=$TUN_SKIPPED" >> "$LOG"
 

@@ -166,6 +166,7 @@ python3 tests/repository/check-probe-codes.py || fail "a real answer of the serv
 python3 tests/repository/check-route-engine-probe-unknown.py || fail "P0-2: an unexecuted check is UNKNOWN, never a failure state, route or list move"
 python3 tests/repository/check-tls-turn.py || fail "P0-1: the shared HTTPS turn never succeeds without ownership"
 python3 tests/repository/check-tls-turn-owner.py || fail "shared HTTPS turn owner: take, curl and done in one process"
+python3 tests/repository/check-reconciler-tls-hold.py || fail "route reconciler: one HTTPS turn per run, bounded hold, borrowed by its checks, nothing saved on unknown"
 python3 tests/repository/check-route-state-commit.py || fail "P0-3: save_state keeps the previous record and reports failure"
 python3 tests/repository/check-isp-control.py || fail "a failed direct check is not a verdict when the direct check itself does not work"
 python3 tests/repository/check-keenetic-shared-age.py || fail "one read of the configuration serves the minute"
