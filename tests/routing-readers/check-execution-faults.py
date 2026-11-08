@@ -25,11 +25,16 @@ with PipelineFixture() as f:
     assert r.returncode==3,(r.returncode,r.stdout,r.stderr)
     assert (f.j/'genedit/state').read_text()=='unknown\n','foreign decision edit was adopted as an own Gi'
     assert 'source:S\t0\n' in (f.decision/'context.tsv').read_text()
-    assert (f.decision/'choices.tsv').read_text()=='schema\t1\n'
-    assert (f.decision/'resources.tsv').read_text()==''
+    # Batch executor (owner decision 08.11.2026): the edit is detected by the
+    # ONE shared readback after the batch, so the own later steps of this
+    # batch were already dispatched; none of them may be committed and each
+    # one is compensated from its own journal record below.
+    assert (f.j/'genedit/reason').read_text()=='input-changed-during-step\n'
     r=f.invoke('vward_routing_pipeline_recover2',f.j,'genedit','compensate')
     assert r.returncode==0,(r.returncode,r.stdout,r.stderr)
     assert 'source:S\t0\n' in (f.decision/'context.tsv').read_text(),'inverse overwrote the external choice'
+    assert (f.decision/'choices.tsv').read_text()=='schema\t1\n'
+    assert (f.decision/'resources.tsv').read_text()==''
     assert 'object-group fqdn domain-list' not in (f.e/'running.cfg').read_text()
     assert not f.trace.exists()
 print('B_EXECUTION_FAULTS=PASS unexpected input edit closes Gi, own compensation preserves external decision')

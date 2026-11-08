@@ -23,6 +23,8 @@ vward_routing_live_command() (
     fi
     vward_routing_state_gate 2 "$vrl_root/decision" || return 75
     vrl_cmd_rev=$(awk -F'\t' -v s="$vrl_cmd_sid" '$1=="service"&&$2==s {print $3;n++}END{if(!n)print 0;if(n>1)exit 2}' "$vrl_root/decision/choices.tsv") || return 75
+    # Read-only repeat fast path; anything unproven takes the full coordinator.
+    if vrl_converged_try "$vrl_cmd_sid" "$vrl_cmd_mode" "$vrl_cmd_target" "$vrl_cmd_dns"; then return 0;fi
     # Revision is rechecked under actual EDIT+CHANGE. A concurrent owner action
     # may refuse this request, never silently overwrite a newer accepted choice.
     # Installed ordinary actions always refresh inputs in that SAME envelope.

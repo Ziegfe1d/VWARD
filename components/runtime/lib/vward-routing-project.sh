@@ -53,7 +53,47 @@ vr2_stage_files() {
 }
 # Integrity of published preparation files, including the exact expected file
 # set. A valid-looking edit cannot keep using an earlier content generation.
+#
+# Per-request memo (process budget): a coordinator binds vr2_seal_memo to a
+# file in ITS private per-request directory. A full validation appends
+# DIR TYPE GENERATION SEAL-DIGEST there; a later check of the SAME directory in
+# the same request whose generation and seal.sha bytes are unchanged (read with
+# builtins) is answered from it. Any other value, a missing/foreign memo file
+# or a rewritten seal runs the full validation again. Unset = no memo.
+vr2_seal_memo_hit() {
+    [ -n "${vr2_seal_memo:-}" ] && [ -f "$vr2_seal_memo" ] && [ ! -L "$vr2_seal_memo" ] && [ -O "$vr2_seal_memo" ] || return 1
+    [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] || return 1
+    for vr2_mf in generation seal seal.sha; do
+        [ -f "$1/$vr2_mf" ] && [ ! -L "$1/$vr2_mf" ] && [ -r "$1/$vr2_mf" ] || return 1
+    done
+    vr2_slurp "$1/generation";vr2_mg=$vr2_sv
+    vr2_slurp "$1/seal.sha";vr2_ms=$vr2_sv
+    case $vr2_mg:$vr2_ms in *[!0-9a-fg:-]*|:*|*:) return 1 ;; esac
+    vr2_mw="$1	$2	$vr2_mg	$vr2_ms"
+    while IFS= read -r vr2_ml; do
+        [ "$vr2_ml" != "$vr2_mw" ] || return 0
+    done < "$vr2_seal_memo"
+    return 1
+}
 vr2_seal_valid() (
+    [ "$#" -eq 3 ] || return 2
+    if vr2_seal_memo_hit "$1" "$2"; then return 0;fi
+    vr2_slurp "$1/generation";vr2_mg0=$vr2_sv
+    vr2_slurp "$1/seal.sha";vr2_ms0=$vr2_sv
+    vr2_seal_full "$@" || return $?
+    # Record only a full PASS of the SAME seal bytes read before it; a memo
+    # write failure never changes the verdict.
+    if [ -n "${vr2_seal_memo:-}" ] && [ -f "$vr2_seal_memo" ] && [ ! -L "$vr2_seal_memo" ] && [ -O "$vr2_seal_memo" ]; then
+        vr2_slurp "$1/generation";vr2_mg=$vr2_sv
+        vr2_slurp "$1/seal.sha";vr2_ms=$vr2_sv
+        if [ "$vr2_mg" = "$vr2_mg0" ] && [ "$vr2_ms" = "$vr2_ms0" ]; then
+            case $1:$vr2_mg:$vr2_ms in *'
+'*|*'	'*) ;; *) printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$vr2_mg" "$vr2_ms" >> "$vr2_seal_memo" 2>/dev/null || : ;; esac
+        fi
+    fi
+    return 0
+)
+vr2_seal_full() (
     [ "$#" -eq 3 ] && vr2_private_dir "$1" || return 2
     # vr2_file for the three seal files with ONE wc (rows in argument order).
     for vr2_f in generation seal seal.sha; do

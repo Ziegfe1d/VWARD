@@ -33,7 +33,7 @@ vrsi_consistent_read() (
     umask 077
     [ "$#" -eq 2 ] || return 2
     vrs_read_kind=$2
-    case $vrs_read_kind in strict|legacy-observation) ;; *) return 2 ;; esac
+    case $vrs_read_kind in strict|legacy-observation|fingerprint) ;; *) return 2 ;; esac
     if ! command -v vward_routing_read >/dev/null 2>&1 || ! command -v vward_routing_observe >/dev/null 2>&1; then
         printf '%s\n' 'routing snapshot: reader and observers must be loaded' >&2; return 2
     fi
@@ -343,6 +343,29 @@ EOF
         vrs_unknown config-cache-stale; return 3
     fi
 
+    if [ "$vrs_read_kind" = fingerprint ]; then
+        # Fingerprint-only re-read (process budget): the SAME input set as a
+        # strict read, fingerprinted twice; equal passes give the generation a
+        # strict read of these inputs would have. No copies, readers or
+        # observers; OUTDIR receives only inputs.fp and, last, generation.
+        vrs_fingerprint > "$vrs_tmp/fp.after" || return 2
+        cmp -s "$vrs_tmp/fp.before" "$vrs_tmp/fp.after" || { vrs_unknown changed-during-read; return 3; }
+        vrs_gen=$(awk '{print $1, $2, $3, $6, $7}' "$vrs_tmp/fp.before" | LC_ALL=C awk '
+            BEGIN {for(c=32;c<127;c++) ord[sprintf("%c",c)]=c; hd="0123456789abcdef"}
+            function hex8(n, i,r) {r=""; for(i=0;i<8;i++) {r=substr(hd,(n%16)+1,1) r; n=int(n/16)} return r}
+            {s=s $0 "\n"}
+            END {
+                a=5381; b=52711
+                for(i=1;i<=length(s);i++) {c=ord[substr(s,i,1)]; if(c=="") c=63; a=(a*131+c)%4294967291; b=(b*257+c+i)%4294967279}
+                print "g-" hex8(a) hex8(b)
+            }') || return 2
+        case $vrs_gen in g-????????????????) ;; *) vrs_unknown generation-failed; return 3 ;; esac
+        rm -f "$vrs_out/inputs.fp" "$vrs_out/generation" 2>/dev/null
+        cp "$vrs_tmp/fp.before" "$vrs_out/inputs.fp" || return 2
+        printf '%s\n' "$vrs_gen" > "$vrs_out/generation" || return 2
+        printf 'ok\t%s\n' "$vrs_gen"
+        return 0
+    fi
     # Verified copies for the observers. Every copy must match the fingerprint taken
     # BEFORE copying (content CRC+size); the originals are re-fingerprinted afterwards.
     vrs_stage=$vrs_tmp/stage
@@ -538,6 +561,14 @@ vward_routing_consistent_read2() (
     VWARD_ROUTING_INPUTS=$2
     export VWARD_ROUTING_INPUTS
     vrsi_consistent_read "$1" strict
+)
+# Generation of the CURRENT strict inputs without staging them (see the
+# fingerprint kind above). Never a stage: it proves "unchanged", nothing else.
+vward_routing_fingerprint_read2() (
+    [ "$#" -eq 2 ] || return 2
+    VWARD_ROUTING_INPUTS=$2
+    export VWARD_ROUTING_INPUTS
+    vrsi_consistent_read "$1" fingerprint
 )
 # Observes a legacy bootstrap only. It always emits version0, including after
 # a partial/final version marker, so ordinary project2 cannot grant authority.

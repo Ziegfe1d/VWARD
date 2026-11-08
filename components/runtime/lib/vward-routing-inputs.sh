@@ -128,6 +128,10 @@ vrl_inputs_refresh() {
     # Read by vward_routing_pipeline2 in the same shell.
     # shellcheck disable=SC2034
     if [ "$vrl_if_changed" = 1 ]; then vrb_stage_reuse=;else vrb_stage_reuse=$vrl_if_work/stage;fi
+    # Read by vrl_converged_record: only a request whose compiled inputs were
+    # already current may leave a repeat convergence receipt.
+    # shellcheck disable=SC2034
+    if [ "$vrl_if_changed" = 1 ]; then vrl_inputs_unchanged=0;else vrl_inputs_unchanged=1;fi
     if [ "$vrl_if_changed" = 1 ]; then
         # Eligibility uses the SAME pure canonical projection/planner against
         # prospective observations. This is a denied preview, never execution

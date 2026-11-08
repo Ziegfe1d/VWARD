@@ -496,6 +496,11 @@ vrb_write_scope() (
             vrb_command_sha=$(vr2_hash "$vrb_t/commands.$vrb_write_step") || return 3
             printf '%s\n' "$vrb_write_row" | awk -F'\t' -v h="$vrb_command_sha" '
                 {n=split($10,a,",");for(i=1;i<=n;i++)if(a[i]=="commands:" h)ok=1}END{exit ok?0:1}' || return 3
+            # Batch executor with a transport that sends one group as one
+            # batch (live NDMC): proof comes from the coordinator's readback.
+            if [ "${vrb_batch_mode:-}" = 1 ] && command -v vrb_group_batch >/dev/null 2>&1; then
+                vrb_group_batch "$vrb_write_step" "$vrb_write_id";return $?
+            fi
             # Re-read before EVERY native command. Prefixes were authorised by
             # the immutable parent plan before the FIRST command, not invented
             # after a lost reply. No whole running-config per domain is needed.
@@ -588,7 +593,8 @@ vrb_envelope() {
     IFS=' ' read -r vrj2_me _ < /proc/self/stat || return 1
     vrj2_start=$(vrj2_pid_start "$vrj2_me") || return 1
     IFS= read -r vrj2_boot < /proc/sys/kernel/random/boot_id || return 1
-    trap '[ "$vrb_change" != 1 ] || vrb_shared_unlock "$vrb_change_path"
+    trap 'vrj2_release || :
+          [ "$vrb_change" != 1 ] || vrb_shared_unlock "$vrb_change_path"
           [ "$vrb_edit" != 1 ] || vrb_shared_unlock "$vrb_edit_path"
           vrb_reap_publisher_slots
           vrb_self_leave "$vrb_coord_slot"
@@ -629,6 +635,8 @@ vrb_execution_context() { vrb_inside=locked-emulator; }
 vrb_transport_refresh() { cp "$(vrb_native_path)" "$vrb_e/running-config"; }
 vrb_transport_saved() { cmp -s "$(vrb_native_path)" "$vrb_e/saved.cfg"; }
 vrb_transport_requests_quiet() { return 0; }
+vrb_transport_complete() { return 0; }
+vrb_converged_record() { return 0; }
 vrb_scope_derived_deltas() { return 0; }
 vrb_inputs_refresh() { return 0; }
 
@@ -639,6 +647,21 @@ vrb_fresh_stage() {
         vward_routing_bootstrap_read2 "$vrb_t/fresh" "$vrb_e/decision" > "$vrb_t/read.status" || return 3
     else vward_routing_consistent_read2 "$vrb_t/fresh" "$vrb_e/decision" > "$vrb_t/read.status" || return 3;fi
     cat "$vrb_t/fresh/generation"
+}
+# Generation of the current inputs from a fingerprint-only re-read (no stage).
+vrb_fresh_fingerprint() {
+    rm -rf "$vrb_t/fpcheck" && mkdir "$vrb_t/fpcheck" || return 1
+    vward_routing_fingerprint_read2 "$vrb_t/fpcheck" "$vrb_e/decision" > "$vrb_t/fpcheck.status" || return 3
+    cat "$vrb_t/fpcheck/generation"
+}
+# The verified planning stage of this operation (vrb_plan_stage, set by the
+# caller that planned it) is the fresh stage when the current inputs have its
+# generation: every staged file is a function of the fingerprinted inputs.
+vrb_fresh_from_plan_stage() {
+    [ -n "${vrb_plan_stage:-}" ] && [ ! -e "$vrb_t/reader" ] && [ ! -L "$vrb_t/reader" ] || return 1
+    vr2_stage_valid "$vrb_plan_stage" || return 1
+    [ "$(cat "$vrb_plan_stage/generation")" = "$1" ] || return 1
+    rm -rf "$vrb_t/fresh" && cp -R "$vrb_plan_stage" "$vrb_t/fresh" && vr2_stage_valid "$vrb_t/fresh" || return 1
 }
 vrb_probe_deltas() {
     # An expiry/reboot is never an own Gi. Only a changed exact A record or
@@ -771,13 +794,20 @@ vward_routing_pipeline2() (
     vward_routing_lower2 "$vrb_t/stage" "$vrb_t/typed" "$vrb_t/lowered" || return 75
     vrb_parent=$vrb_t
     vrb_outcome_bind "$vrb_parent/stage" "$vrb_parent/lowered" "$vrb_parent/project" || return 75
+    vrb_plan_stage=$vrb_parent/stage
     vrb_result=0;vrb_execute2 "$vrb_parent/lowered" || vrb_result=$?
+    vrb_plan_stage=
     vrb_outcome_stage=$vrb_parent/lowered/fresh
     [ -e "$vrb_outcome_stage/generation" ] || vrb_outcome_stage=$vrb_parent/stage
     vrb_outcome_emit "$vrb_outcome_stage" "$vrb_parent/lowered" || return 3
     if [ -d "$vrb_j/$vrb_op/prepared" ] && cmp -s "$vrb_parent/lowered/plan" "$vrb_j/$vrb_op/plan"; then
         cp "$vrb_parent/lowered/outcome.json" "$vrb_j/$vrb_op/prepared/outcome.json" &&
             cp "$vrb_parent/lowered/outcome.json.sha" "$vrb_j/$vrb_op/prepared/outcome.json.sha" || return 3
+    fi
+    # Convergence receipt for the read-only repeat fast path (live binding).
+    if [ "$vrb_result" = 0 ]; then
+        vrb_cr_kind=unchanged;grep -q '^step' "$vrb_parent/lowered/plan" && vrb_cr_kind=committed
+        vrb_converged_record "$3" "$4" "$5" "$6" "$vrb_outcome_stage" "$vrb_parent/lowered/plan" "$vrb_cr_kind"
     fi
     return "$vrb_result"
 )
@@ -810,6 +840,201 @@ vrb_execute2() {
     # Once per request, in this coordinator shell (see vrb_worker_static).
     vrb_worker_static && vrb_backend_context || return 75
     vrb_gen=$(cat "$vrb_t/generation")
+    # Batch (owner decision 08.11.2026) whenever every step owns a distinct
+    # scope; a plan with two steps on one scope keeps the per-step loop, whose
+    # readback after each step is the only proof of the intermediate image.
+    vrb_x_rc=0
+    if vrb_plan_scopes_unique "$vrb_t/plan"; then
+        { vrb_execute2_batch && vrb_execute2_save; } || vrb_x_rc=$?
+    else
+        { vrb_execute2_steps && vrb_execute2_save; } || vrb_x_rc=$?
+    fi
+    # The coordinator's journal lock (batch) ends with this operation; a
+    # failed release leaves an ordinary lock that dies with this process.
+    vrj2_release || :
+    return "$vrb_x_rc"
+}
+
+# A plan whose steps all have distinct KIND:ID scopes (builtins only).
+vrb_plan_scopes_unique() {
+    vrb_pu_seen=' '
+    while IFS="$(printf '\t')" read -r vrb_pu_tag _vrb_pu_n _vrb_pu_a vrb_pu_kind vrb_pu_id _vrb_pu_rest; do
+        [ "$vrb_pu_tag" = step ] || continue
+        case $vrb_pu_seen in *" $vrb_pu_kind:$vrb_pu_id "*) return 1 ;; esac
+        vrb_pu_seen="$vrb_pu_seen$vrb_pu_kind:$vrb_pu_id "
+    done < "$1"
+}
+
+# Batch executor (owner decision 08.11.2026). Order of evidence:
+#   1. ONE fresh read immediately before the batch; its generation must be the
+#      plan's (CAS) and every step's scope must equal its plan pre-image;
+#   2. EVERY step becomes pending in the journal BEFORE the first dispatch;
+#   3. steps are dispatched in plan order; the first non-zero writer status
+#      ends the segment (nothing after it is sent);
+#   4. ONE shared readback: only the union of the dispatched steps' declared
+#      scopes may differ from (1); each dispatched step is then done (post),
+#      failed (pre) or unknown from that readback alone;
+#   5. a refused/unconfirmed write is unknown, never replayed. A lost reply
+#      whose step is PROVED done by the readback continues with the next
+#      segment (same as the per-step loop), the readback being its fresh
+#      "before" image.
+# The per-step journal records, receipts and recovery are unchanged; the
+# journal lock is held by this coordinator for the whole batch (vrj2_hold).
+vrb_execute2_batch() {
+    vrj2_hold "$vrb_j" || return 75
+    vrb_batch_total=$(awk -F'\t' '$1=="step"{n++}END{print n+0}' "$vrb_t/plan") || return 75
+    rm -rf "$vrb_t/batch" && mkdir "$vrb_t/batch" || return 1
+    # CAS read immediately before the batch. When its inputs still have the
+    # planning generation, the planning stage is reused instead of staging
+    # the same inputs again; anything else takes a full fresh stage.
+    vrb_transport_refresh || return 1
+    vrb_now=
+    if [ -n "${vrb_plan_stage:-}" ] && [ ! -e "$vrb_t/reader" ]; then
+        vrb_now=$(vrb_fresh_fingerprint) || vrb_now=
+        if [ "$vrb_now" = "$vrb_gen" ] && vrb_fresh_from_plan_stage "$vrb_now"; then :;else vrb_now=;fi
+    fi
+    if [ -z "$vrb_now" ]; then vrb_now=$(vrb_fresh_stage) || return 3;fi
+    if [ "$vrb_now" != "$vrb_gen" ]; then
+        vward_journal2_unknown "$vrb_j" "$vrb_op" input-changed-before-step
+        printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\t%s\n' "$(vrb_execution_evidence)";return 3
+    fi
+    # Sidecars are bound to the plan by digest; check them all before begin.
+    while IFS="$(printf '\t')" read -r vrb_tag vrb_n _vrb_action vrb_kind vrb_id vrb_pre vrb_post _vrb_rest; do
+        [ "$vrb_tag" = step ] || continue
+        [ "$(vr2_hash "$vrb_t/pre.$vrb_n")" = "$vrb_pre" ] &&
+            [ "$(vr2_hash "$vrb_t/post.$vrb_n")" = "$vrb_post" ] || return 3
+        vrb_parent_scope_hash "$vrb_t/fresh" "$vrb_kind" "$vrb_id" "$vrb_t/batch/current.$vrb_n" || return 3
+        if [ "$(cat "$vrb_t/batch/current.$vrb_n")" = "$vrb_post" ] &&
+            ! vrb_dispatch_valid "$vrb_j" "$vrb_op" "$vrb_n" forward "$vrb_post"; then
+            vward_journal2_unknown "$vrb_j" "$vrb_op" matching-image-not-dispatched
+            printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\t%s\n' "$(vrb_execution_evidence)";return 3
+        fi
+    done < "$vrb_t/plan"
+    vward_journal2_begin_all "$vrb_j" "$vrb_op" "$vrb_gen" "$vrb_t/batch" || return 75
+    vrb_batch_from=1
+    while [ "$vrb_batch_from" -le "$vrb_batch_total" ]; do
+        rm -rf "$vrb_t/before" || return 1
+        cp -R "$vrb_t/fresh" "$vrb_t/before" || return 1
+        : > "$vrb_t/batch/scopes" || return 1
+        vrb_batch_to=$((vrb_batch_from-1));vrb_rc=0
+        while IFS="$(printf '\t')" read -r vrb_tag vrb_n _vrb_action vrb_kind vrb_id _vrb_rest; do
+            [ "$vrb_tag" = step ] || continue
+            [ "$vrb_n" -ge "$vrb_batch_from" ] || continue
+            printf '%s\t%s\n' "$vrb_kind" "$vrb_id" >> "$vrb_t/batch/scopes" || return 1
+            vrb_batch_to=$vrb_n
+            vrb_batch_mode=1
+            vrb_write_scope "$vrb_kind" "$vrb_id" "$vrb_n" post || vrb_rc=$?
+            vrb_batch_mode=
+            [ "$vrb_rc" = 0 ] || break
+        done < "$vrb_t/plan"
+        [ "$vrb_batch_to" -ge "$vrb_batch_from" ] || return 2
+        vrb_transport_refresh || return 1
+        vrb_gen=$(vrb_fresh_stage) || { vward_journal2_unknown "$vrb_j" "$vrb_op" readback-unavailable;return 3; }
+        # Batch transport requests are resolved ONLY from this readback.
+        vrb_transport_complete "$vrb_t/fresh" || return 1
+        vrb_transport_requests_quiet || vrb_rc=75
+        if ! vrb_delta_valid_set "$vrb_t/before" "$vrb_t/fresh" "$vrb_t/batch/scopes"; then
+            vward_journal2_unknown "$vrb_j" "$vrb_op" input-changed-during-step
+            printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\t%s\n' "$(vrb_execution_evidence)";return 3
+        fi
+        vrb_last_kind=;vrb_last_post=
+        while IFS="$(printf '\t')" read -r vrb_tag vrb_n _vrb_action vrb_kind vrb_id _vrb_pre vrb_post _vrb_rest; do
+            [ "$vrb_tag" = step ] || continue
+            [ "$vrb_n" -ge "$vrb_batch_from" ] && [ "$vrb_n" -le "$vrb_batch_to" ] || continue
+            vrb_parent_scope_hash "$vrb_t/fresh" "$vrb_kind" "$vrb_id" "$vrb_t/batch/current.$vrb_n" || return 3
+            vrb_last_kind=$vrb_kind:$vrb_id;vrb_last_post=$vrb_post
+        done < "$vrb_t/plan"
+        # Only the LAST step of a segment can have a non-zero writer status.
+        if [ "$vrb_rc" = 75 ] || { [ "$vrb_last_kind" = dns-scope:agh ] && [ "$vrb_rc" != 0 ]; }; then
+            vward_journal2_unknown "$vrb_j" "$vrb_op" unconfirmed-or-refused-write
+            printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\t%s\n' "$(vrb_execution_evidence)";return 3
+        fi
+        vrb_n=$vrb_batch_from
+        while [ "$vrb_n" -le "$vrb_batch_to" ]; do
+            vrb_post=$(awk -F'\t' -v n="$vrb_n" '$1=="step"&&$2==n{print $7}' "$vrb_t/plan") || return 3
+            if [ "$(cat "$vrb_t/batch/current.$vrb_n")" = "$vrb_post" ] &&
+                ! vrb_dispatch_valid "$vrb_j" "$vrb_op" "$vrb_n" forward "$vrb_post"; then
+                vward_journal2_unknown "$vrb_j" "$vrb_op" matching-image-not-dispatched
+                printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\t%s\n' "$(vrb_execution_evidence)";return 3
+            fi
+            vrb_n=$((vrb_n+1))
+        done
+        vward_journal2_finish_range "$vrb_j" "$vrb_op" "$vrb_gen" "$vrb_t/batch" "$vrb_batch_from" "$vrb_batch_to" || {
+            vward_journal2_unknown "$vrb_j" "$vrb_op" incomplete-step
+            printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\t%s\n' "$(vrb_execution_evidence)";return 3;
+        }
+        # Transport status alone is not proof; the shared readback is.
+        [ "$vrb_rc" = 0 ] || printf 'lost-reply\t%s\tverified-postimage\n' "$vrb_batch_to" >> "$vrb_t/events"
+        vrb_batch_from=$((vrb_batch_to+1))
+    done
+    # The save that follows may use this verified readback as its "before".
+    vrb_transport_fresh=$vrb_op
+}
+
+# vrb_delta_valid for a SET of declared scopes (one KIND<TAB>ID per line):
+# between BEFORE and AFTER only those scopes (and their own derived probe/AGH
+# facts) may differ; native bytes outside all declared groups / the declared
+# HTTPS upstream scope and AGH bytes outside upstream_dns must be identical.
+vrb_delta_valid_set() (
+    [ "$#" -eq 3 ] && vr2_stage_valid "$1" && vr2_stage_valid "$2" && [ -f "$3" ] || return 2
+    vrb_ds_allowed=' ';vrb_ds_groups=' ';vrb_ds_https=0;vrb_ds_agh=0
+    : > "$1/.probe-deltas" || return 3
+    while IFS="$(printf '\t')" read -r vrb_ds_kind vrb_ds_id; do
+        case $vrb_ds_kind in
+            saved)
+                if [ "$vrb_ds_id" = routing-state ]; then vrb_ds_label=state-set
+                else vrb_ds_label=$(vrb_legacy_scope "$vrb_ds_id" label) || return 2;fi ;;
+            group) vrb_ds_label=cfg;vrb_ds_groups="$vrb_ds_groups$vrb_ds_id " ;;
+            nativeproof) vrb_ds_label=owned:$vrb_ds_id ;;
+            manifest) vrb_ds_label=v2-$vrb_ds_id ;;
+            registry) [ "$vrb_ds_id" = enabled ] || return 2;vrb_ds_label=enabled ;;
+            dns-scope)
+                case $vrb_ds_id in keenetic) vrb_ds_label=cfg;vrb_ds_https=1 ;; agh) vrb_ds_label=obs-agh-image;vrb_ds_agh=1 ;; *) return 2 ;; esac ;;
+            *) return 2 ;;
+        esac
+        vrb_ds_allowed="$vrb_ds_allowed$vrb_ds_label "
+        vrb_probe_deltas "$1" "$2" "$vrb_ds_kind" "$vrb_ds_id" >> "$1/.probe-deltas" || return 3
+        vrb_scope_derived_deltas "$1" "$2" "$vrb_ds_kind" "$vrb_ds_id" >> "$1/.probe-deltas" || return 3
+    done < "$3"
+    awk -v allowed="$vrb_ds_allowed" -v uid="$(id -u)" '
+        BEGIN{n=split(allowed,a," ");for(i=1;i<=n;i++)ok[a[i]]=1}
+        FILENAME==ARGV[1] {probe[$1]=1;next}
+        FILENAME==ARGV[2] {before_n[$1]++;k=$1 SUBSEP before_n[$1];before[k]=$1 " " $2 " " $3 " " $6 " " $7;bmode[k]=$6;buid[k]=$7;label[k]=$1;next}
+        {after_n[$1]++;k=$1 SUBSEP after_n[$1];after[k]=$1 " " $2 " " $3 " " $6 " " $7;amode[k]=$6;auid[k]=$7;label[k]=$1}
+        END{for(k in label) {
+            own=((label[k] in ok) || (label[k] in probe) || (("state-set" in ok) && label[k]~/^v2-(version|choices|bindings|context|resources|proofs|upstreams|policies|tombstones|saved|queue|evidence)$/))
+            if(before[k]!=after[k] && !own)bad=1
+            if(own) {
+                if(bmode[k]!="" && amode[k]!="" && (bmode[k]!=amode[k] || buid[k]!=auid[k]))bad=1
+                if(bmode[k]=="" && amode[k]!="" && (amode[k]!="-rw-------" || auid[k]!=uid))bad=1
+            }
+        }exit bad?1:0}' \
+        "$1/.probe-deltas" "$1/inputs.fp" "$2/inputs.fp" || return 3
+    if [ "$vrb_ds_groups" != ' ' ] || [ "$vrb_ds_https" = 1 ]; then
+        for vrb_side in "$1" "$2"; do
+            awk -v groups="$vrb_ds_groups" -v https="$vrb_ds_https" '
+                BEGIN{n=split(groups,a," ");for(i=1;i<=n;i++)own[a[i]]=1}
+                /^object-group fqdn / {skip=($3 in own)}
+                skip {if($0=="!")skip=0;next}
+                /^dns-proxy$/ {dns=1}
+                /^!/ {dns=0}
+                dns && $1=="route" && $2=="object-group" && ($3 in own) {next}
+                /^[^ \t]/ && $0!="dns-proxy" {dns=0}
+                dns && https && $1=="https" && $2=="upstream" {next}
+                {print}' "$vrb_side/native.cfg" > "$vrb_side/.outside" || return 2
+        done
+        cmp -s "$1/.outside" "$2/.outside" || return 3
+    fi
+    if [ "$vrb_ds_agh" = 1 ]; then
+        for vrb_side in "$1" "$2"; do
+            "${JQ:-jq}" -ceS 'del(.upstream_dns)' "$vrb_side/agh.json" > "$vrb_side/.outside" || return 2
+        done
+        cmp -s "$1/.outside" "$2/.outside" || return 3
+    fi
+)
+
+vrb_execute2_steps() {
+    vrb_fresh_after=
     while IFS="$(printf '\t')" read -r vrb_tag vrb_n _vrb_action vrb_kind vrb_id vrb_pre vrb_post _vrb_proof _vrb_refs _vrb_checks _vrb_inverse; do
         [ "$vrb_tag" = step ] || continue
         if [ "${vrb_fresh_after:-}" = "$vrb_op:$vrb_gen" ]; then
@@ -866,6 +1091,9 @@ vrb_execute2() {
         vrb_fresh_after=$vrb_op:$vrb_gen
     done < "$vrb_t/plan"
     vrb_fresh_after=
+}
+
+vrb_execute2_save() {
     vward_journal2_saved "$vrb_j" "$vrb_op" pending || return 1
     vrb_role=save
     vrb_publish_quiet "$vrb_j/$vrb_op" || return 75
@@ -880,7 +1108,13 @@ vrb_execute2() {
         vward_journal2_unknown "$vrb_j" "$vrb_op" save-readback-mismatch;return 3
     fi
     vrb_transport_refresh || return 1
-    vrb_now=$(vrb_fresh_stage) || { vward_journal2_unknown "$vrb_j" "$vrb_op" save-generation-unavailable;return 3; }
+    # Generation check only (the verified readback stage stays the outcome
+    # stage): a fingerprint re-read of the same inputs, no new stage.
+    if [ ! -e "$vrb_t/reader" ] && [ ! -L "$vrb_t/reader" ]; then
+        vrb_now=$(vrb_fresh_fingerprint) || { vward_journal2_unknown "$vrb_j" "$vrb_op" save-generation-unavailable;return 3; }
+    else
+        vrb_now=$(vrb_fresh_stage) || { vward_journal2_unknown "$vrb_j" "$vrb_op" save-generation-unavailable;return 3; }
+    fi
     if [ "$vrb_now" != "$vrb_gen" ]; then
         vward_journal2_unknown "$vrb_j" "$vrb_op" input-changed-on-save
         printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\t%s\n' "$(vrb_execution_evidence)";return 3

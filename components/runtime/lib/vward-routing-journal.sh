@@ -230,8 +230,73 @@ vrj2_take_under_gate() {
     umask "$vrj2_metadata_umask" || return 1
     return "$vrj2_metadata_rc"
 }
+# One journal lock per request (owner decision 08.11.2026). The coordinator
+# takes the SAME elected lock once (vrj2_hold) in its own process and keeps it
+# until vrj2_release or its death: a dead holder leaves an ordinary stale lock
+# that the existing election reclaims. A journal writer subshell of that
+# coordinator borrows the held lock only when (a) the holder identity recorded
+# at hold time still owns .lock, (b) the holder is alive with the same start
+# time and boot, and (c) the writer is a DESCENDANT of the holder (an orphan
+# whose coordinator died is reparented and therefore refused). Any other
+# process takes the lock through the election as before and sees a live owner.
+vrj2_hold() {
+    if [ -n "${vrj2_held:-}" ]; then
+        # Re-entrant for the SAME journal in the SAME holder process only.
+        IFS=' ' read -r vrj2_hd_me _ < /proc/self/stat || return 1
+        [ "$vrj2_held" = "$1" ] && [ "$vrj2_hd_me" = "$vrj2_hme" ] || return 75
+        vrj2_borrow "$1" || return 75
+        vrj2_borrowed=;return 0
+    fi
+    vrj2_lock "$1" || return $?
+    vrj2_held=$1;vrj2_hme=$vrj2_me;vrj2_hstart=$vrj2_start;vrj2_hboot=$vrj2_boot
+}
+vrj2_release() {
+    [ -n "${vrj2_held:-}" ] || return 0
+    vrj2_rl_dir=$vrj2_held
+    IFS=' ' read -r vrj2_rl_me _ < /proc/self/stat || return 1
+    [ "$vrj2_rl_me" = "$vrj2_hme" ] || return 75
+    vrj2_me=$vrj2_hme;vrj2_start=$vrj2_hstart;vrj2_boot=$vrj2_hboot
+    vrj2_held=;vrj2_borrowed=
+    vrj2_unlock "$vrj2_rl_dir"
+}
+# Builtins only: walk the parent chain from this process to the holder.
+vrj2_descends_from_holder() {
+    vrj2_dp=self;vrj2_dn=0
+    while [ "$vrj2_dn" -lt 16 ]; do
+        vrj2_dl=;IFS= read -r vrj2_dl < "/proc/$vrj2_dp/stat" 2>/dev/null || return 1
+        vrj2_dl=${vrj2_dl##*) }
+        # shellcheck disable=SC2086
+        set -- $vrj2_dl
+        [ "$#" -ge 20 ] || return 1
+        case $2 in ''|*[!0-9]*) return 1 ;; esac
+        [ "$2" -gt 1 ] || return 1
+        if [ "$2" = "$vrj2_hme" ]; then
+            vward_pid_start_var "$2" && [ "$VA_PS" = "$vrj2_hstart" ] || return 1
+            return 0
+        fi
+        vrj2_dp=$2;vrj2_dn=$((vrj2_dn+1))
+    done
+    return 1
+}
+vrj2_borrow() {
+    [ -n "${vrj2_held:-}" ] && [ "$vrj2_held" = "$1" ] && [ -n "${vrj2_hme:-}" ] || return 1
+    IFS=' ' read -r vrj2_bme _ < /proc/self/stat || return 1
+    # The holder itself: it already owns the lock.
+    if [ "$vrj2_bme" != "$vrj2_hme" ]; then vrj2_descends_from_holder || return 75;fi
+    [ ! -L "$1/.lock" ] && vrj_dir "$1/.lock" || return 75
+    vrj_slurp "$1/.lock/owner";[ "$vrj_sv" = "$vrj2_hme$vrj_tab$vrj2_hstart$vrj_tab$vrj2_hboot" ] || return 75
+    vrj_slurp "$1/.lock/pid";[ "$vrj_sv" = "$vrj2_hme" ] || return 75
+    vrj_slurp "$1/.lock/pid_start";[ "$vrj_sv" = "$vrj2_hstart" ] || return 75
+    vrj_slurp /proc/sys/kernel/random/boot_id;[ "$vrj_sv" = "$vrj2_hboot" ] || return 75
+    vlg_boot=$vrj2_hboot vward_lock_gate_live "$vrj2_hboot.$vrj2_hme.$vrj2_hstart" || return 75
+    vrj2_borrowed=$1
+}
 vrj2_lock() {
     vrj_lock_runtime || return 75
+    vrj2_borrowed=
+    vrj2_brc=0;vrj2_borrow "$1" || vrj2_brc=$?
+    [ "$vrj2_brc" != 0 ] || return 0
+    [ "$vrj2_brc" = 1 ] || return 75
     IFS=' ' read -r vrj2_me _ < /proc/self/stat || return 1
     vrj2_start=$(vrj2_pid_start "$vrj2_me") || return 1
     IFS= read -r vrj2_boot < /proc/sys/kernel/random/boot_id || return 1
@@ -243,6 +308,8 @@ vrj2_lock() {
 # vl_boot is set by vward_lock_boot_var (runtime admission library).
 # shellcheck disable=SC2154
 vrj2_unlock() {
+    # A borrowed lock stays with its holder (released by vrj2_release).
+    if [ -n "${vrj2_borrowed:-}" ] && [ "$vrj2_borrowed" = "$1" ]; then vrj2_borrowed=;return 0;fi
     # vrj_slurp == "$(cat F 2>/dev/null)"; vward_lock_boot_var == lock_boot_id.
     [ ! -L "$1/.lock" ] && { vrj_slurp "$1/.lock/pid";[ "$vrj_sv" = "${vrj2_me:-}" ]; } &&
         { vrj_slurp "$1/.lock/pid_start";[ "$vrj_sv" = "${vrj2_start:-}" ]; } &&
@@ -463,6 +530,79 @@ vward_journal2_begin() (
         vrj2_put "$1/$2/step.$3/post" "$vrj2_dpost" &&
         vrj2_put "$1/$2/step.$3/generation" "$4" && vrj2_put "$1/$2/step.$3/state" pending &&
         vrj2_put "$1/$2/state" pending && vrj2_flush
+)
+# Batch form of begin (owner decision 08.11.2026): EVERY step of a planned
+# operation becomes pending BEFORE anything is dispatched, with exactly the
+# per-step records of vward_journal2_begin (pre/post/generation/state), so the
+# existing recovery and compensation read them unchanged. CURDIR/current.N is
+# the fresh scope hash of step N; each must equal the plan pre-image. One
+# gate, one lock (normally borrowed from the coordinator), one flush.
+vward_journal2_begin_all() (
+    umask 077
+    [ "$#" -eq 4 ] && vrj2_gen "$3" && vrj_dir "$4" || return 2
+    vrj2_ready "$1" "$2" || return 2
+    vrj2_lock "$1" || return $?
+    trap 'vrj2_unlock "$1"' EXIT
+    vrj_slurp "$1/$2/state";[ "$vrj_sv" = planned ] || return 75
+    vrj2_gate_except "$1" "$2" || return 75
+    vrj_slurp "$1/$2/generation";[ "$vrj_sv" = "$3" ] || return 75
+    for vrj2_s in "$1/$2"/step.*; do
+        [ ! -e "$vrj2_s" ] && [ ! -L "$vrj2_s" ] || return 75
+    done
+    vrj2_plan_counts "$1/$2/plan" || return 2
+    [ "$vrj2_count" -gt 0 ] || return 2
+    vrj2_n=1
+    while [ "$vrj2_n" -le "$vrj2_count" ]; do
+        vrj2_file "$4/current.$vrj2_n" || return 2
+        vrj2_row_fields "$1/$2" "$vrj2_n" || return 2
+        vrj_slurp "$4/current.$vrj2_n";[ "$vrj2_dpre" = "$vrj_sv" ] || return 75
+        vrj2_n=$((vrj2_n+1))
+    done
+    vrj2_n=1
+    while [ "$vrj2_n" -le "$vrj2_count" ]; do
+        vrj2_row_fields "$1/$2" "$vrj2_n" || return 2
+        mkdir "$1/$2/step.$vrj2_n" || return 1
+        vrj2_put "$1/$2/step.$vrj2_n/pre" "$vrj2_dpre" &&
+            vrj2_put "$1/$2/step.$vrj2_n/post" "$vrj2_dpost" &&
+            vrj2_put "$1/$2/step.$vrj2_n/generation" "$3" &&
+            vrj2_put "$1/$2/step.$vrj2_n/state" pending || return 1
+        vrj2_n=$((vrj2_n+1))
+    done
+    vrj2_put "$1/$2/state" pending && vrj2_flush
+)
+# Batch form of finish for steps FROM..TO from ONE shared readback: the same
+# per-step verdict as vward_journal2_finish (post = done, pre = failed, other =
+# unknown). rc 0 all done, 1 a proved failure (none unknown), 3 unknown.
+vward_journal2_finish_range() (
+    umask 077
+    [ "$#" -eq 6 ] && vrj2_gen "$3" && vrj_dir "$4" && vrj2_seq "$5" && vrj2_seq "$6" && [ "$5" -le "$6" ] || return 2
+    vrj2_ready "$1" "$2" || return 2
+    vrj2_lock "$1" || return $?
+    trap 'vrj2_unlock "$1"' EXIT
+    case $(cat "$1/$2/state") in pending|unknown) ;; *) return 75 ;; esac
+    vrj2_n=$5
+    while [ "$vrj2_n" -le "$6" ]; do
+        vrj2_step_valid "$1" "$2" "$vrj2_n" && vrj2_file "$4/current.$vrj2_n" || return 2
+        vrj_slurp "$1/$2/step.$vrj2_n/state";case $vrj_sv in pending|unknown) ;; *) return 75 ;; esac
+        vrj2_n=$((vrj2_n+1))
+    done
+    vrj2_rc=0;vrj2_n=$5
+    while [ "$vrj2_n" -le "$6" ]; do
+        vrj2_result=unknown
+        if cmp -s "$4/current.$vrj2_n" "$1/$2/step.$vrj2_n/post"; then vrj2_result='done'
+        elif cmp -s "$4/current.$vrj2_n" "$1/$2/step.$vrj2_n/pre"; then vrj2_result=failed;fi
+        vrj_slurp "$4/current.$vrj2_n"
+        vrj2_put "$1/$2/step.$vrj2_n/observed" "$vrj_sv" && vrj2_put "$1/$2/step.$vrj2_n/state" "$vrj2_result" || return 1
+        case $vrj2_result in
+            failed) [ "$vrj2_rc" = 3 ] || vrj2_rc=1 ;;
+            unknown) vrj2_rc=3 ;;
+        esac
+        vrj2_n=$((vrj2_n+1))
+    done
+    if [ "$vrj2_rc" = 0 ]; then vrj2_put "$1/$2/generation" "$3" || return 1;fi
+    [ "$vrj2_rc" != 3 ] || vrj2_put "$1/$2/state" unknown || return 1
+    vrj2_flush || return 1
+    return "$vrj2_rc"
 )
 vward_journal2_finish() (
     umask 077

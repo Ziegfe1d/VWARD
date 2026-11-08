@@ -1,6 +1,9 @@
 #!/bin/sh
 # Fixed installed dependency closure. No executor path is an API argument;
 # sourcing this loader only defines functions and never changes native state.
+# Never inherited: only vward_routing_live_modules_load sets this for its own
+# immediate common-module load (an environment value cannot skip the proof).
+vrload_closure_trusted=
 vward_routing_source_trusted() {
     [ "$#" -eq 1 ] && [ -f "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] && [ -r "$1" ] || return 75
     # shellcheck disable=SC2012
@@ -8,6 +11,32 @@ vward_routing_source_trusted() {
         -rw-------|-r--------|-rwx------|-r-x------|-rw-r-----|-rwxr-x---|-rw-r--r--|-rwxr-xr-x|-r-xr-xr-x) return 0 ;;
         *) return 75 ;;
     esac
+}
+# The same per-file verdict for a SET of files with ONE ls (process budget:
+# the closure has ~25 files and loads on every request). Builtin tests per
+# file, then one ls -ldn: exactly one row per file and every mode in the same
+# allowed set (no filename text is parsed, so row order is irrelevant).
+vward_routing_sources_trusted() {
+    [ "$#" -gt 0 ] || return 75
+    for vrst_f in "$@"; do
+        [ -f "$vrst_f" ] && [ ! -L "$vrst_f" ] && [ -O "$vrst_f" ] && [ -r "$vrst_f" ] || return 75
+        case $vrst_f in *'
+'*) return 75 ;; esac
+    done
+    # shellcheck disable=SC2012
+    vrst_out=$(LC_ALL=C ls -ldn "$@" 2>/dev/null) || return 75
+    vrst_n=0
+    while IFS= read -r vrst_l; do
+        vrst_n=$((vrst_n+1))
+        vrst_m=${vrst_l%%[ 	]*};vrst_m=${vrst_m%"${vrst_m#??????????}"}
+        case $vrst_m in
+            -rw-------|-r--------|-rwx------|-r-x------|-rw-r-----|-rwxr-x---|-rw-r--r--|-rwxr-xr-x|-r-xr-xr-x) ;;
+            *) return 75 ;;
+        esac
+    done <<VRST
+$vrst_out
+VRST
+    [ "$vrst_n" -eq "$#" ] || return 75
 }
 vward_routing_modules_load() {
     case ${1:-} in /*) ;; *) return 75 ;; esac
@@ -19,9 +48,14 @@ vward-routing-workers.sh vward-routing-migrate.sh vward-routing-dns.sh
 vward-routing-lifecycle.sh vward-routing-legacy.sh vward-routing-state.sh
 vward-routing-outcome.sh vward-routing-dispatch.sh vward-routing-pipeline.sh
 vward-routing-admission.sh'
-    for vrload_file in $vrload_names; do
-        vward_routing_source_trusted "$1/$vrload_file" || return 75
-    done
+    if [ "${vrload_closure_trusted:-}" != "$1" ]; then
+        set -- "$1"
+        for vrload_file in $vrload_names; do set -- "$@" "$1/$vrload_file";done
+        vrload_dir=$1;shift
+        vward_routing_sources_trusted "$@" || return 75
+        set -- "$vrload_dir"
+    fi
+    vrload_closure_trusted=
     for vrload_file in $vrload_names; do
         # shellcheck source=/dev/null
         . "$1/$vrload_file" || return 75
@@ -44,9 +78,21 @@ vward_routing_live_modules_load() {
     vward_routing_source_trusted "$vrload_cap" &&
         printf 'routing-runtime\t2\n' | cmp -s - "$vrload_cap" || return 75
     vrload_live='vward-device-profile.sh vward-routing-live.sh vward-routing-live-agh.sh vward-routing-bootstrap.sh vward-routing-inputs.sh vward-routing-command.sh'
-    for vrload_file in $vrload_live; do
-        vward_routing_source_trusted "$1/$vrload_file" || return 75
-    done
+    vrload_names='vward-runtime-admission.sh vward-routing-read.sh vward-routing-observe.sh
+vward-routing-snapshot.sh vward-routing-audit.sh vward-routing-project.sh
+vward-routing-plan.sh vward-routing-journal.sh
+vward-routing-workers.sh vward-routing-migrate.sh vward-routing-dns.sh
+vward-routing-lifecycle.sh vward-routing-legacy.sh vward-routing-state.sh
+vward-routing-outcome.sh vward-routing-dispatch.sh vward-routing-pipeline.sh
+vward-routing-admission.sh'
+    # The whole closure (live + common modules) is proven with one ls, then
+    # the common loader sources it without repeating that proof.
+    set -- "$1"
+    for vrload_file in $vrload_live $vrload_names; do set -- "$@" "$1/$vrload_file";done
+    vrload_dir=$1;shift
+    vward_routing_sources_trusted "$@" || return 75
+    set -- "$vrload_dir"
+    vrload_closure_trusted=$1
     vward_routing_modules_load "$1" || return 75
     for vrload_file in $vrload_live; do
         # shellcheck source=/dev/null

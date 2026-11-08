@@ -33,7 +33,11 @@ vrb_outcome_scope_hash() (
         saved:raw*) vrb_osh_label=$(vrb_legacy_scope "$3" label) || return 75 ;;
         *) return 75 ;;
     esac
-    vrb_osh_hash=$(awk -v key="$vrb_osh_label" '$1==key {if($2=="absent")print "-";else if(length($2)==64 && $2~/^[0-9a-f]+$/)print $2;else exit 2;n++}END{if(n!=1)exit 2}' "$1/inputs.fp") || return 75
+    # A directory-listed input (owned:/list:) has a row only while the file
+    # exists: no row is its absence. A fixed input always has exactly one row.
+    case $vrb_osh_label in owned:*|list:*) vrb_osh_listed=1 ;; *) vrb_osh_listed=0 ;; esac
+    vrb_osh_hash=$(awk -v key="$vrb_osh_label" -v listed="$vrb_osh_listed" '$1==key {if($2=="absent")print "-";else if(length($2)==64 && $2~/^[0-9a-f]+$/)print $2;else exit 2;n++}
+        END{if(n==0 && listed==1){print "-";exit 0};if(n!=1)exit 2}' "$1/inputs.fp") || return 75
     if [ "$vrb_osh_hash" = - ]; then printf '%s\n' - | sha256sum | awk '{print $1}'
     else printf '%s\n' "$vrb_osh_hash";fi
 )
