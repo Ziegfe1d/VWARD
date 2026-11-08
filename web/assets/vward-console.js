@@ -1673,9 +1673,10 @@ function aiPage() {
   const sdDead = a && sd.alive === 'no' ? panel('Smart DNS не отвечает', '<p class="result-note warn">Сервер Smart DNS не отвечает на DNS-запросы: сайты, привязанные к нему (' +
     fmtInt((sd.keenetic || 0) + (sd.agh_domains || 0)) + '), не открываются. Уберите сервер кнопкой ниже или переведите сервисы на VPN.</p>') : '';
   return loadError(['ai']) + actionRecovery(a && a.recovery) + sdDead + aiQuestion(sd) + aiRoomPanel(sd) +
-    panel('Smart DNS', '<dl class="kv">' + ctrlRow('Smart DNS', sw('data-sd-feature', !!(a && a.smartdns_enabled), 'Smart DNS', !cfgOk() || !a),
+    panel('Smart DNS', '<dl class="kv">' + ctrlRow('Smart DNS', sw('data-sd-feature', !!(a && a.smartdns_enabled), 'Smart DNS', !cfgOk() || !a || (!a.smartdns_enabled && !sd.own)),
         a && a.smartdns_enabled ? 'включён: режим «DNS» доступен, пока сервер отвечает; Keenetic - не больше 8 строк' :
-          'выключен: VWARD не пишет строки Smart DNS в Keenetic и AdGuard Home и не проверяет сервер; включается, только если сервер задан и отвечает') + '</dl>' +
+          'выключен: VWARD не пишет строки Smart DNS в Keenetic и AdGuard Home и не проверяет сервер; ' +
+          (a && !sd.own ? 'включить можно, когда задан свой сервер DoH (ниже)' : 'включается, только если сервер отвечает')) + '</dl>' +
       confirmBox('sd-off', 'Выключить Smart DNS? VWARD снимет свои строки Smart DNS (по адресу своего сервера) из Keenetic и AdGuard Home, с откатом при ошибке. Чужие строки, NextDNS, ваши правила DNS и DNS провайдера не трогаются. Адрес сервера сохранится.', 'Выключить', true) + kv([
         (sd.server_rows || []).length ? null : ['Сервер', !a ? '…' : 'не задан', a && noSd ? 'warn' : ''],
         ['Домены Smart DNS', 'открыть', '', 'd-smartdns', '', 'и агент: держит их мимо VPN']]) + sdStoreRow(a, sd) +
