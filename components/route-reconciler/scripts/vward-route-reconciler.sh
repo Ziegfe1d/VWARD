@@ -77,7 +77,12 @@ trap 'exit 1' HUP INT TERM
 # gone meanwhile). VWARD_RECONCILER_ONE_LOOK=0: a fresh read each time, as before.
 adaptive_names()
 {
-    if [ "${VWARD_RECONCILER_ONE_LOOK:-1}" = 1 ] && [ "${1:-}" != fresh ] &&
+    # The groups through RCI when proven (owner 08.11): a fresh read every time, 0.1 s instead of a
+    # whole configuration; otherwise as before.
+    if [ "${VWARD_RECONCILER_ONE_LOOK:-1}" = 1 ] && command -v vward_keenetic_part >/dev/null 2>&1 &&
+       AN_CFG=$(vward_keenetic_part groups) && [ -n "$AN_CFG" ]; then
+        :
+    elif [ "${VWARD_RECONCILER_ONE_LOOK:-1}" = 1 ] && [ "${1:-}" != fresh ] &&
        command -v vward_keenetic_config >/dev/null 2>&1; then
         AN_CFG=$(vward_keenetic_config) && [ -n "$AN_CFG" ] ||
             AN_CFG=$(vward_running_config) || return 1

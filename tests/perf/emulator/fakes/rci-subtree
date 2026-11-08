@@ -1,0 +1,30 @@
+#!/bin/sh
+# Keenetic's RCI configuration subtrees (object-group/fqdn, dns-proxy, ip/name-server, ip/route)
+# as JSON, made from /emu/running-config: the narrow reads VWARD proves against the whole one.
+awk -v part="$1" '
+    function q(s) {gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return "\"" s "\""}
+    /^[^ \t!]/ {ctx = ""; if ($1 == "object-group" && $2 == "fqdn") {ctx = "g"; g = $3; order[++ng] = g} else if ($1 == "dns-proxy" && NF == 1) ctx = "d"}
+    /^!/ {ctx = ""}
+    {l = $0; sub(/^[ \t]+/, "", l); n = split(l, f, " ")}
+    ctx == "g" && f[1] == "include" {inc[g] = inc[g] (inc[g] == "" ? "" : ",") "{\"address\":" q(f[2]) "}"}
+    ctx == "g" && f[1] == "description" {d = substr(l, 13); if (d ~ /^".*"$/) d = substr(d, 2, length(d) - 2); desc[g] = d}
+    ctx == "d" && f[1] == "route" && f[2] == "object-group" {r = r (r == "" ? "" : ",") "{\"object-group\":" q(f[3]) ",\"interface\":" q(f[4]) (f[5] == "auto" ? ",\"auto\":true" : "") "}"}
+    ctx == "d" && f[1] == "https" && f[2] == "upstream" {
+        u = "{\"url\":" q(f[3]); if (n >= 4 && f[4] != "on" && f[4] != "domain") u = u ",\"format\":" q(f[4])
+        for (i = 4; i < n; i++) {if (f[i] == "on") u = u ",\"on\":" q(f[i + 1]); if (f[i] == "domain") u = u ",\"domain\":" q(f[i + 1])}
+        h = h (h == "" ? "" : ",") u "}"}
+    /^ip name-server / {
+        a = f[3]; p = ""; if (a ~ /:[0-9]+$/) {p = a; sub(/.*:/, "", p); sub(/:[0-9]+$/, "", a)}
+        e = "{\"address\":" q(a) (p != "" ? ",\"port\":" p : "")
+        for (i = 4; i <= n; i++) {if (f[i] == "on") {e = e ",\"interface\":" q(f[i + 1]); i++} else if (f[i] != "\"\"") e = e ",\"domain\":" q(f[i])}
+        ns = ns (ns == "" ? "" : ",") e "}"}
+    /^ip route / {
+        if (f[4] ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) e = "{\"network\":" q(f[3]) ",\"mask\":" q(f[4]) ",\"interface\":" q(f[5]) (f[6] == "auto" ? ",\"auto\":true" : "") "}"
+        else e = "{\"host\":" q(f[3]) ",\"interface\":" q(f[4]) (f[5] == "auto" ? ",\"auto\":true" : "") "}"
+        rt = rt (rt == "" ? "" : ",") e}
+    END {
+        if (part == "groups") {printf "{"; for (i = 1; i <= ng; i++) {x = order[i]; printf "%s%s:{%s\"include\":[%s]}", (i > 1 ? "," : ""), q(x), (x in desc ? "\"description\":" q(desc[x]) "," : ""), inc[x]}; print "}"}
+        else if (part == "dnsproxy") print "{\"route\":[" r "],\"https\":{\"upstream\":[" h "]}}"
+        else if (part == "nameservers") print "[" ns "]"
+        else if (part == "iproutes") print "[" rt "]"
+    }' /emu/running-config

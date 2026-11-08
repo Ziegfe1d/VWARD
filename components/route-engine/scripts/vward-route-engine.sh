@@ -1973,6 +1973,10 @@ AGH_BIND_FREE=${VWARD_AGH_BIND_FREE:-8}
 # A look before a change (refresh forced to 0) stays fresh. VWARD_ENGINE_SHARED_CONFIG=0: fresh.
 shared_config()
 {
+    # Groups, dns-proxy and name servers through RCI (owner 08.11); the whole shared copy otherwise.
+    if [ "${VWARD_ENGINE_SHARED_CONFIG:-1}" = 1 ] && command -v vward_keenetic_parts >/dev/null 2>&1; then
+        vward_keenetic_parts groups dnsproxy nameservers && return 0
+    fi
     if [ "${VWARD_ENGINE_SHARED_CONFIG:-1}" = 1 ] && command -v vward_keenetic_config >/dev/null 2>&1; then
         vward_keenetic_config && return 0
     fi

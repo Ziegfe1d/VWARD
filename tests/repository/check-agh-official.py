@@ -195,8 +195,10 @@ for _m, _od, _want in (("mips", "", "mipsle_softfloat"), ("mips", " 1", "mipsle_
                        ("mips", " 2", ""), ("aarch64", " 1", "")):
     with tempfile.TemporaryDirectory() as _t:
         Path(_t, "uname").write_text(f"#!/bin/sh\necho {_m}\n"); Path(_t, "uname").chmod(0o755)
-        Path(_t, "od").write_text(f"#!/bin/sh\ncat >/dev/null; echo '{_od}'\n" if _od else "#!/bin/sh\nexit 127\n"); Path(_t, "od").chmod(0o755)
-        _r = subprocess.run(["sh", "-c", f"PATH={_t}:$PATH; audit() {{ :; }}\n" + _fn + "agh_official_arch"], capture_output=True, text=True)
+        # The ELF header byte 5 (no od: Keenetic's BusyBox od has no -A, owner 08.11); none: unreadable.
+        if _od:
+            Path(_t, "elf").write_bytes(b"\x7fELF\x01" + bytes([int(_od)]))
+        _r = subprocess.run(["sh", "-c", f"PATH={_t}:$PATH; VWARD_ELF_PROBE={_t}/elf; audit() {{ :; }}\n" + _fn + "agh_official_arch"], capture_output=True, text=True)
         if _r.stdout.strip() != _want:
             fail(f"processor {_m}/{_od!r}: {_r.stdout.strip()!r}, expected {_want!r}")
 print("AGH_OFFICIAL=PASS")

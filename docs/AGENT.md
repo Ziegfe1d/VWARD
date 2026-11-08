@@ -1175,7 +1175,7 @@ P0-3: `save_state` пишет tmp, проверяет запись, переим
 
 ```sh
 ( set -e; D=/tmp/vward-core-proto; trap 'cd /; rm -rf "$D"' EXIT; rm -rf "$D"; mkdir -p "$D"; cd "$D"
-  case "$(uname -m)" in mips*) if [ "$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null | od -An -tu1 | tr -d ' ')" = 2 ]; then A=mips S=ed436d651b6972c3ca67835594b8adb8ebfe287d0d0897d772a731d27b0c197f; else A=mipsle S=a50315b3cbe8822093633f4f24fefd894cf038e72175c229bb3e64ea2b2b1b0b; fi ;; *) echo "не MIPS: $(uname -m)"; exit 1 ;; esac
+  case "$(uname -m)" in mips*) if [ "$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null)" = "$(printf '\002')" ]; then A=mips S=ed436d651b6972c3ca67835594b8adb8ebfe287d0d0897d772a731d27b0c197f; else A=mipsle S=a50315b3cbe8822093633f4f24fefd894cf038e72175c229bb3e64ea2b2b1b0b; fi ;; *) echo "не MIPS: $(uname -m)"; exit 1 ;; esac
   . /opt/lib/vward/vward-device-profile.sh; vward_profile_load >/dev/null 2>&1 || true
   vward_fetch -fsS --max-time 180 -o core.gz "https://raw.githubusercontent.com/Ziegfe1d/VWARD/07ea43974aac4c7f2887b3cb410692e71f9f8fc7/tools/vward-core/dist/vward-core-linux-$A.gz"
   gunzip -f core.gz; [ "$(sha256sum core | cut -d' ' -f1)" = "$S" ] || { echo "SHA-256 не совпал"; exit 1; }

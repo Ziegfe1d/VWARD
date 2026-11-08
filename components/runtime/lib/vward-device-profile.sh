@@ -670,6 +670,145 @@ _vward_kc_fresh()
     [ "$_vkf_d" -ge 0 ] && [ "$_vkf_d" -lt "$1" ]
 }
 
+# ---- Narrow reads of Keenetic's configuration (owner 08.11) -----------------------------------
+# A whole «show running-config» took 5.5 s through RCI and 12.7 s through ndmc on the Viva; the
+# subtrees VWARD reads take 0.04-0.13 s. vward_keenetic_part PART prints the lines of one part in
+# the form of running-config, so the agents' parsers stay as they are:
+#   groups       object-group fqdn NAME / description / include / exclude / !   (rci object-group/fqdn)
+#   dnsproxy     dns-proxy / route object-group ... / https upstream ... / !    (rci dns-proxy)
+#   nameservers  ip name-server ADDRESS [DOMAIN] [on IFACE]                     (rci ip/name-server)
+#   iproutes     ip route NET MASK TARGET [auto]                                (rci ip/route)
+# Proven, not assumed: the first use of a part in a boot compares it with the same lines of the
+# whole configuration (the shared copy); a difference (once more after a fresh read, a change may
+# fall between) makes that part read whole until the next boot, logged once. VWARD_KEENETIC_NARROW=0:
+# always whole. Verdicts in RAM (VWARD_KPART).
+VWARD_KPART=${VWARD_KPART:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-part}
+
+_vward_kpart_jq()
+{
+    case "$1" in
+        groups) printf '%s' '
+            (if type == "object" and (keys | length) == 1 and has("fqdn") then .fqdn else . end) as $g
+            | (if ($g | type) == "object" then [$g | to_entries[] | {n: .key, b: .value}]
+               elif ($g | type) == "array" then [$g[] | {n: .name, b: .}] else error("shape") end)
+            | .[] | select((.n | type) == "string")
+            | "object-group fqdn \(.n)",
+              (.b | if type != "object" then empty else
+                 (if (.description | type) == "string" and .description != "" then "    description \(.description)" else empty end),
+                 ((.include // []) | (if type == "array" then .[] else . end)
+                    | (if type == "string" then . else (.address // .fqdn // .name // .domain // empty) end) | "    include \(.)"),
+                 ((.exclude // []) | (if type == "array" then .[] else . end)
+                    | (if type == "string" then . else (.address // .fqdn // .name // .domain // empty) end) | "    exclude \(.)")
+               end),
+              "!"' ;;
+        dnsproxy) printf '%s' '
+            if type != "object" then error("shape") else . end
+            | "dns-proxy",
+              ((.route // []) | (if type == "array" then .[] else . end) | select(type == "object")
+                 | "    route object-group \(.["object-group"] // .group // .name) \(.interface // .target // .gateway)"
+                   + (if .auto == true then " auto" else "" end) + (if .reject == true then " reject" else "" end)),
+              ((.https.upstream // []) | (if type == "array" then .[] else . end) | select(type == "object")
+                 | "    https upstream \(.url // .address)"
+                   + (if (.format | type) == "string" then " \(.format)" else "" end)
+                   + (if ((.on // .interface) | type) == "string" then " on \(.on // .interface)" else "" end)
+                   + (if (.domain | type) == "string" then " domain \(.domain)" else "" end)),
+              "!"' ;;
+        nameservers) printf '%s' '
+            (if type == "object" then (.["name-server"] // .server // .servers // [.]) else . end)
+            | (if type == "array" then .[] else error("shape") end) | select(type == "object")
+            | ((.address // .server // .ip) | tostring) as $a
+            | (if (.port | type) == "number" or (.port | type) == "string" then "\($a):\(.port)" else $a end) as $h
+            | "ip name-server \($h)" + (if (.domain | type) == "string" and .domain != "" then " \(.domain)" else "" end)
+              + (if ((.interface // .on) | type) == "string" then " on \(.interface // .on)" else "" end)' ;;
+        iproutes) printf '%s' '
+            (if type == "object" then (.route // .routes // [.]) else . end)
+            | (if type == "array" then .[] else error("shape") end) | select(type == "object")
+            | (.network // .address // .host) as $n
+            | "ip route \($n)" + (if (.mask | type) == "string" then " \(.mask)" else "" end)
+              + " \(.interface // .gateway)" + (if .auto == true then " auto" else "" end)' ;;
+        *) return 1 ;;
+    esac
+}
+
+# _vward_kpart_lines PART: the lines of PART in a whole configuration on stdin, canonical: no
+# indentation, no empty "" token, a description without its quotes, sorted, unique.
+_vward_kpart_lines()
+{
+    awk -v p="$1" '
+        /^[^ \t!]/ {ctx = ""; if ($1 == "object-group" && $2 == "fqdn") ctx = "g"; else if ($1 == "dns-proxy" && NF == 1) ctx = "d"}
+        /^!/ {ctx = ""}
+        {l = $0; sub(/^[ \t]+/, "", l); sub(/[ \t]+$/, "", l); gsub(/ ""/, "", l)
+         if (l ~ /^description "/ && l ~ /"$/) l = "description " substr(l, 14, length(l) - 14)
+         if (p == "groups" && ctx == "g" && (l ~ /^object-group fqdn / || l ~ /^(include|exclude|description) /)) print l
+         else if (p == "dnsproxy" && ctx == "d" && (l ~ /^route object-group / || l ~ /^https upstream /)) print l
+         else if (p == "nameservers" && l ~ /^ip name-server /) print l
+         else if (p == "iproutes" && l ~ /^ip route /) print l}' | LC_ALL=C sort -u
+}
+
+# _vward_kpart_narrow PART: the part through its RCI subtree (lines as running-config), or 1.
+_vward_kpart_narrow()
+{
+    _vkn_jq=${VWARD_JQ_BIN:-$(vward_tool jq)}
+    [ -n "$_vkn_jq" ] || return 1
+    case "$1" in groups) _vkn_p=object-group/fqdn ;; dnsproxy) _vkn_p=dns-proxy ;; nameservers) _vkn_p=ip/name-server ;; iproutes) _vkn_p=ip/route ;; *) return 1 ;; esac
+    # The answer first: a failed or empty read is no part (never an empty part with success).
+    _vkn_raw=$(vward_rci_get "$_vkn_p" 15) && [ -n "$_vkn_raw" ] || { _vkn_raw=; return 1; }
+    _vkn_out=$(printf '%s\n' "$_vkn_raw" | "$_vkn_jq" -r "$(_vward_kpart_jq "$1")" 2>/dev/null) || { _vkn_raw=; return 1; }
+    _vkn_raw=
+    printf '%s\n' "$_vkn_out"
+    _vkn_out=
+}
+
+# vward_keenetic_part PART: the part through RCI when proven this boot (0), else 3 and nothing
+# printed: the caller takes the whole configuration (vward_keenetic_parts does).
+vward_keenetic_part()
+{
+    case "$1" in groups|dnsproxy|nameservers|iproutes) ;; *) return 2 ;; esac
+    [ "${VWARD_KEENETIC_NARROW:-1}" = 1 ] && [ ! -e "$VWARD_KPART/$1.bad" ] || return 3
+    if [ -e "$VWARD_KPART/$1.ok" ]; then
+        _vward_kpart_narrow "$1" && return 0
+        return 3
+    fi
+    # First use this boot: proven against the whole configuration (the shared copy).
+    mkdir -p "$VWARD_KPART" 2>/dev/null
+    _vkp_n=$(_vward_kpart_narrow "$1") || return 3
+    _vkp_a=$(printf '%s\n' "$_vkp_n" | _vward_kpart_lines "$1")
+    _vkp_w=$(vward_keenetic_config) || return 3
+    [ -n "$_vkp_w" ] || return 3
+    _vkp_b=$(printf '%s\n' "$_vkp_w" | _vward_kpart_lines "$1")
+    if [ "$_vkp_a" != "$_vkp_b" ]; then
+        # A change may have fallen between the two reads: once more, both fresh.
+        vward_keenetic_dirty
+        _vkp_n=$(_vward_kpart_narrow "$1") || return 3
+        _vkp_a=$(printf '%s\n' "$_vkp_n" | _vward_kpart_lines "$1")
+        _vkp_w=$(vward_keenetic_config) || return 3
+        _vkp_b=$(printf '%s\n' "$_vkp_w" | _vward_kpart_lines "$1")
+    fi
+    _vkp_w=
+    if [ "$_vkp_a" = "$_vkp_b" ]; then
+        : > "$VWARD_KPART/$1.ok" 2>/dev/null
+        printf '%s\n' "$_vkp_n"
+        return 0
+    fi
+    printf '%s|narrow=%s|whole=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$(printf '%s\n' "$_vkp_a" | grep -c .)" \
+        "$(printf '%s\n' "$_vkp_b" | grep -c .)" > "$VWARD_KPART/$1.bad" 2>/dev/null
+    return 3
+}
+
+# vward_keenetic_parts PART...: the parts, each through RCI; when any is not proven, the whole
+# configuration once instead (the shared copy, as before).
+vward_keenetic_parts()
+{
+    _vkps_out=
+    for _vkps in "$@"; do
+        _vkps_one=$(vward_keenetic_part "$_vkps") || { _vkps_out=; vward_keenetic_config; return; }
+        _vkps_out="$_vkps_out$_vkps_one
+"
+    done
+    printf '%s' "$_vkps_out"
+    _vkps_out=
+}
+
 # vward_keenetic_config [AGE]: Keenetic's running configuration (ndmc text, no CR), shared.
 vward_keenetic_config()
 {

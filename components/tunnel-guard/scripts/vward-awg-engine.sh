@@ -71,7 +71,9 @@ engine_arch() {
         aarch64|arm64) echo arm64 ;;
         armv7*|armv6*|arm*) echo arm ;;
         mips*)
-            e=$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null | od -An -tu1 | tr -d ' ')
+            # Byte 5 of the ELF header (1 little-endian, 2 big-endian), without od: Keenetic's own
+            # BusyBox od has no -A (owner 08.11).
+            e=1; [ "$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null)" != "$(printf '\002')" ] || e=2
             if [ "$e" = 2 ]; then echo mips; else echo mipsle; fi ;;
         *) return 1 ;;
     esac

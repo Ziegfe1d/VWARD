@@ -4781,7 +4781,8 @@ agh_official_arch() {
     esac
     # Byte order from an ELF header (byte 5: 1 little, 2 big); unreadable - little (the MIPS
     # routers Keenetic makes are little-endian).
-    oa_e=$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null | od -An -tu1 2>/dev/null | tr -d ' ')
+    # Byte 5 of the ELF header without od (Keenetic's BusyBox od has no -A).
+    oa_e=1; [ "$(dd if="${VWARD_ELF_PROBE:-/bin/sh}" bs=1 skip=5 count=1 2>/dev/null)" != "$(printf '\002')" ] || oa_e=2
     case "$oa_m:$oa_e" in
         mipsel*|mipsle*|*:1|*:) echo mipsle_softfloat ;;
         *) audit "ext-agh-official arch: uname=$oa_m byte_order=$oa_e (big-endian, no build)"; return 1 ;;
