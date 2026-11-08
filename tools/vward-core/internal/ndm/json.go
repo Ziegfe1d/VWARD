@@ -228,3 +228,38 @@ func shape(v any, depth int) string {
 	}
 	return "?"
 }
+
+// FilterFromRCI: GET /rci/dns-proxy/filter, where Keenetic keeps its DNS filter profiles (NextDNS
+// among them: «filter profile DnsProfile0», owner 08.11). Its shape is kept raw; every string that
+// names NextDNS (any key or value, any case) is counted. An answer that is not JSON is not read.
+func FilterFromRCI(b []byte, m *Model) error {
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return fmt.Errorf("dns-proxy filter: %v", err)
+	}
+	n := 0
+	var walk func(any)
+	walk = func(x any) {
+		switch t := x.(type) {
+		case map[string]any:
+			for k, y := range t {
+				if strings.Contains(strings.ToLower(k), "next") {
+					n++
+				}
+				walk(y)
+			}
+		case []any:
+			for _, y := range t {
+				walk(y)
+			}
+		case string:
+			if strings.Contains(strings.ToLower(t), "next") {
+				n++
+			}
+		}
+	}
+	walk(v)
+	m.Filter, m.FilterNext = string(b), n
+	m.Read["filter"] = true
+	return nil
+}

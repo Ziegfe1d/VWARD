@@ -78,7 +78,7 @@ func setup(t *testing.T, cfg string) *env {
 }
 
 func (e *env) model(t *testing.T) *ndm.Model {
-	m, err := e.r.Read([]string{"groups", "routes", "doh"})
+	m, err := e.r.Read([]string{"groups", "routes", "doh", "filter"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,4 +323,39 @@ func TestDoHLimit(t *testing.T) {
 		t.Fatalf("rows %d", n)
 	}
 	protectedIntact(t, e)
+}
+
+// Owner 08.11: NextDNS lives in dns-proxy/filter. Smart DNS rows are never written without that
+// part read, and no command naming NextDNS or outside the allowlist ever leaves the core, whether
+// NextDNS was found or not.
+func TestNextDNSProtectionIndependentOfDetection(t *testing.T) {
+	e := setup(t, ownerCfg)
+	m, err := e.r.Read([]string{"groups", "routes", "doh"}) // filter not read
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := plan.Desired{DoH: []plan.DoHRow{{URL: "https://smart.example/x", Iface: "ISP", Domain: "chatgpt.com"}}, OwnedDoH: map[string]bool{}}
+	p, err := plan.Build(m, want, nil)
+	if err != nil || len(p.Steps) != 0 || len(p.Refused) != 1 || !strings.Contains(p.Refused[0], "dns-filter-unread") {
+		t.Fatalf("no filter read: nothing written: %v %+v", err, p)
+	}
+	full := e.model(t)
+	if full.FilterNext == 0 {
+		t.Fatalf("NextDNS not found in dns-proxy/filter: %q", full.Filter)
+	}
+	// Even "found nothing" never allows a command outside the allowlist.
+	full.FilterNext, full.NextDNS = 0, 0
+	for _, bad := range []plan.Step{
+		{Area: "doh", Cmd: "dns-proxy filter profile DnsProfile0 nextdns off", Undo: "x"},
+		{Area: "doh", Cmd: "dns-proxy no filter engine", Undo: "x"},
+		{Area: "group:domain-list0", Cmd: "no object-group fqdn domain-list0 include t.me", Undo: "x"},
+		{Area: "doh", Cmd: "dns-proxy https upstream https://dns.nextdns.io/abc dnsm on ISP domain x.example", Undo: "x"},
+	} {
+		if bad2, _ := plan.DefaultProtected(bad.Cmd); bad2 {
+			continue
+		}
+		if err := plan.Check(bad.Cmd, plan.Desired{OwnedGroups: map[string]bool{"domain-list7": true}}); err == nil {
+			t.Fatalf("%q must not be allowed", bad.Cmd)
+		}
+	}
 }

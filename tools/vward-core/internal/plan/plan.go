@@ -37,7 +37,8 @@ func (r DoHRow) Raw() string {
 // Desired: the whole desired image of what VWARD owns, and what it owns now.
 type Desired struct {
 	Groups      []Group
-	OwnedGroups map[string]bool // groups proven VWARD's (signature in services/owned) or created by this plan
+	OwnedGroups map[string]bool // groups proven VWARD's (claim or creation journal) or created by this plan
+	RouteGroups map[string]bool // the owner's managed lists: their dns-proxy route only
 	DoH         []DoHRow        // complete set of VWARD's rows
 	OwnedDoH    map[string]bool // raw rows proven VWARD's
 	DoHLimit    int
@@ -115,9 +116,17 @@ func Build(cur *ndm.Model, want Desired, protected Protected) (*Plan, error) {
 			continue
 		}
 		have, exists := cur.Groups[g.Name]
-		if exists && !want.OwnedGroups[g.Name] {
+		routeOnly := exists && !want.OwnedGroups[g.Name] && want.RouteGroups[g.Name]
+		if exists && !want.OwnedGroups[g.Name] && !routeOnly {
 			p.Refused = append(p.Refused, g.Name+": foreign")
 			continue
+		}
+		if routeOnly {
+			// A managed list: its domains are the owner's; only its route follows the choice.
+			if g.Delete || g.Description != "" || !sameSet(have.Include, g.Include) {
+				p.Refused = append(p.Refused, g.Name+": route-only (managed list: domains stay the owner's)")
+				continue
+			}
 		}
 		if g.Delete {
 			if !exists {
@@ -206,9 +215,91 @@ func Build(cur *ndm.Model, want Desired, protected Protected) (*Plan, error) {
 			if bad, why := protected(c); bad {
 				return nil, fmt.Errorf("plan: protected object in %q: %s", c, why)
 			}
+			// Allowlist (owner 08.11: NextDNS protected even when it is not found): only these
+			// forms on VWARD's own objects ever leave the core; anything else stops the plan.
+			if why := allowed(c, want); why != "" {
+				return nil, fmt.Errorf("plan: %q is not a command the routing core may send: %s", c, why)
+			}
 		}
 	}
 	return p, nil
+}
+
+// Check: an error when cmd is not a command the core may send for this desired image.
+func Check(cmd string, want Desired) error {
+	if why := allowed(cmd, want); why != "" {
+		return fmt.Errorf("%s", why)
+	}
+	return nil
+}
+
+func sameSet(a, b []string) bool {
+	x, y := set(a), set(b)
+	if len(x) != len(y) {
+		return false
+	}
+	for k := range x {
+		if !y[k] {
+			return false
+		}
+	}
+	return true
+}
+
+// allowed: "" when cmd is one of the forms the core may send, on an object it may change.
+//
+//	[no ]object-group fqdn OWNED [include|exclude DOMAIN | description TEXT]
+//	dns-proxy [no ]route object-group OWNED|MANAGED TARGET [auto]
+//	dns-proxy [no ]https upstream URL dnsm [on IFACE] domain DOMAIN   (VWARD's rows; never NextDNS)
+//	system configuration save
+func allowed(cmd string, want Desired) string {
+	if cmd == "system configuration save" {
+		return ""
+	}
+	f := strings.Fields(cmd)
+	if len(f) > 0 && f[0] == "no" {
+		f = f[1:]
+	}
+	if strings.Contains(strings.ToLower(cmd), "next") {
+		return "names NextDNS"
+	}
+	switch {
+	case len(f) >= 3 && f[0] == "object-group" && f[1] == "fqdn":
+		if !want.OwnedGroups[f[2]] {
+			return "group not VWARD's"
+		}
+		switch {
+		case len(f) == 3:
+			return ""
+		case len(f) == 5 && (f[3] == "include" || f[3] == "exclude"):
+			return ""
+		case len(f) >= 4 && f[3] == "description":
+			return ""
+		}
+		return "unknown group command"
+	case len(f) >= 2 && f[0] == "dns-proxy":
+		g := f[1:]
+		if len(g) > 0 && g[0] == "no" {
+			g = g[1:]
+		}
+		switch {
+		case len(g) >= 4 && len(g) <= 5 && g[0] == "route" && g[1] == "object-group":
+			if !want.OwnedGroups[g[2]] && !want.RouteGroups[g[2]] {
+				return "route of a group not VWARD's"
+			}
+			if len(g) == 5 && g[4] != "auto" {
+				return "unknown route option"
+			}
+			return ""
+		case len(g) >= 6 && g[0] == "https" && g[1] == "upstream" && g[3] == "dnsm" && g[len(g)-2] == "domain":
+			if len(g) != 6 && !(len(g) == 8 && g[4] == "on") {
+				return "unknown Smart DNS row form"
+			}
+			return ""
+		}
+		return "dns-proxy command outside routes and VWARD's Smart DNS rows"
+	}
+	return "outside groups, routes and Smart DNS rows"
 }
 
 func (p *Plan) doh(cur *ndm.Model, want Desired) error {
@@ -217,6 +308,14 @@ func (p *Plan) doh(cur *ndm.Model, want Desired) error {
 	}
 	if !cur.Read["doh"] {
 		return fmt.Errorf("plan: area doh not read: unknown, no plan")
+	}
+	// Smart DNS rows share dns-proxy with the owner's filter profiles (NextDNS): without that part
+	// read and recognised, no row is written (not found is not «free to change»).
+	if !cur.Read["filter"] {
+		for _, r := range want.DoH {
+			p.Refused = append(p.Refused, r.Raw()+": dns-filter-unread")
+		}
+		return nil
 	}
 	limit := want.DoHLimit
 	if limit <= 0 {

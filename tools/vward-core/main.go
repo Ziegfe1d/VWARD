@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/ndm"
+	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/own"
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/plan"
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/rci"
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/router"
@@ -74,7 +75,7 @@ func probe(args []string) {
 	c := rci.New(*addr, true)
 	fmt.Println("RCI_PROBE=read-only")
 	fmt.Println("endpoint\tok\tms\tbytes\tshape")
-	paths := []string{"show/version", "show/running-config", "object-group/fqdn", "dns-proxy", "dns-proxy/route",
+	paths := []string{"show/version", "show/running-config", "object-group/fqdn", "dns-proxy", "dns-proxy/route", "dns-proxy/filter",
 		"ip/route", "ip/name-server", "show/object-group/fqdn", "show/interface", "show/internet/status", "show/ip/hotspot"}
 	for _, p := range paths {
 		t0 := time.Now()
@@ -144,34 +145,6 @@ func deviceTunnel(etc string) string {
 	return ""
 }
 
-// owned: the ownership proof of the shell core (services/owned/GROUP: 0600, this user,
-// the stored signature equal to the group's signature now).
-func owned(etc string, m *ndm.Model, g string) (bool, string) {
-	p := filepath.Join(etc, "services/owned", g)
-	st, err := os.Lstat(p)
-	if err != nil {
-		return false, "no-proof"
-	}
-	if !st.Mode().IsRegular() || st.Mode().Perm()&0o077 != 0 {
-		return false, "proof-mode"
-	}
-	if sys, ok := statUID(st); ok && sys != os.Getuid() {
-		return false, "proof-owner"
-	}
-	b, err := os.ReadFile(p)
-	if err != nil {
-		return false, "proof-unreadable"
-	}
-	sig, ok := m.Signature(g)
-	if !ok {
-		return false, "group-absent"
-	}
-	if ndm.CanonicalSignature(string(b)) != sig {
-		return false, "changed-since-claim"
-	}
-	return true, "verified"
-}
-
 func compare(a, b *ndm.Model, area string) (bool, string) {
 	var x, y []string
 	switch area {
@@ -204,6 +177,7 @@ func dryRun(args []string) {
 	fs := flag.NewFlagSet("dry-run", flag.ExitOnError)
 	addr := fs.String("rci", "127.0.0.1:79", "RCI address")
 	etc := fs.String("etc", "/opt/etc/vward", "VWARD settings (read only)")
+	backup := fs.String("backup", "/opt/var/backups/vward/console-config", "the shell core's transaction journal (read only)")
 	full := fs.Bool("full", false, "plan from the full read even when the narrow one matches")
 	fs.Parse(args)
 	start := time.Now()
@@ -243,8 +217,9 @@ func dryRun(args []string) {
 		base = narrow
 	}
 
-	// Protected objects: counted, never in a plan.
-	g8, ns16, next := 0, 0, 0
+	// Protected objects: counted for the report; the core never writes them whatever is found
+	// (allowlist of command forms on VWARD's own objects, plan.Check).
+	g8, ns16 := 0, 0
 	for _, x := range fullModel.IPRoutes {
 		if x.Target == "OpkgTun4" {
 			g8++
@@ -254,16 +229,18 @@ func dryRun(args []string) {
 		if x.Iface == "OpkgTun4" {
 			ns16++
 		}
-		if strings.Contains(strings.ToLower(x.Raw), "nextdns") {
-			next++
+	}
+	filt := "unread"
+	if b, err := c.Get("dns-proxy/filter"); err == nil {
+		fm := &ndm.Model{Groups: map[string]*ndm.Group{}, Read: map[string]bool{}}
+		if ndm.FilterFromRCI(b, fm) == nil {
+			filt = fmt.Sprintf("%d (shape %s)", fm.FilterNext, ndm.Shape(b, 3))
+			base.Read["filter"] = true
 		}
 	}
-	for _, x := range fullModel.DoH {
-		if strings.Contains(strings.ToLower(x.Raw), "nextdns") {
-			next++
-		}
-	}
-	fmt.Printf("PROTECTED ip_route_OpkgTun4=%d name_server_OpkgTun4=%d nextdns_rows=%d (the core never writes them)\n", g8, ns16, next)
+	fmt.Printf("PROTECTED ip_route_OpkgTun4=%d name_server_OpkgTun4=%d nextdns_lines_in_config=%d nextdns_in_dns_proxy_filter=%s dns_proxy_other_lines=%d\n",
+		g8, ns16, fullModel.NextDNS, filt, len(fullModel.DNSOther))
+	fmt.Println("PROTECTION=allowlist (only VWARD's groups, their routes and VWARD's Smart DNS rows; nothing naming NextDNS; independent of what is found)")
 
 	// Desired image of the owned service groups from the saved choices (enabled.tsv):
 	// includes as they are, one route to the pinned tunnel («auto» = the default tunnel).
@@ -274,21 +251,30 @@ func dryRun(args []string) {
 	def := deviceTunnel(*etc)
 	want := plan.Desired{OwnedGroups: map[string]bool{}}
 	nOwned := 0
+	want.RouteGroups = map[string]bool{}
+	op := own.Paths{Etc: *etc, Backup: *backup}
+	levels := map[string]int{}
 	for _, s := range svcs {
-		ok, why := owned(*etc, fullModel, s.group)
-		fmt.Printf("SERVICE %s group=%s pin=%s ownership=%s\n", s.id, s.group, s.pin, why)
-		if !ok {
+		v := own.Service(op, fullModel, s.id, s.group, s.pin, def)
+		levels[v.Level.String()]++
+		fmt.Printf("SERVICE %s group=%s pin=%s ownership=%s (%s)\n", s.id, s.group, s.pin, v.Level, v.Reason)
+		g := base.Groups[s.group]
+		if g == nil || v.Level == own.None {
 			continue
 		}
-		nOwned++
-		want.OwnedGroups[s.group] = true
 		t := s.pin
 		if t == "auto" {
 			t = def
 		}
-		g := base.Groups[s.group]
+		if v.Level == own.Full {
+			nOwned++
+			want.OwnedGroups[s.group] = true
+		} else {
+			want.RouteGroups[s.group] = true
+		}
 		want.Groups = append(want.Groups, plan.Group{Name: s.group, Include: append([]string(nil), g.Include...), Target: t, Options: "auto"})
 	}
+	fmt.Printf("OWNERSHIP full=%d route=%d none=%d\n", levels["full"], levels["route"], levels["none"])
 	t0 = time.Now()
 	p, err := plan.Build(base, want, nil)
 	tPlan := time.Since(t0)

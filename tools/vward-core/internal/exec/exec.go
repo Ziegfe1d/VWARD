@@ -165,7 +165,8 @@ func readAreas(areas []string) []string {
 		case strings.HasPrefix(a, "route:"):
 			need["routes"] = true
 		case a == "doh":
-			need["doh"] = true
+			// Smart DNS rows only with the owner's filter profiles (NextDNS) read alongside.
+			need["doh"], need["filter"] = true, true
 		}
 	}
 	var out []string

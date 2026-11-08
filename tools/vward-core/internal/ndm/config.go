@@ -63,7 +63,11 @@ type Model struct {
 	NameServers []NameServer
 	IPRoutes    []IPRoute
 	Interfaces  []string
-	Read        map[string]bool // area -> was read (groups, routes, doh, nameservers, iproutes, interfaces)
+	DNSOther    []string        // every other line of dns-proxy (filter profiles: NextDNS ...), verbatim
+	NextDNS     int             // lines of the whole configuration that name NextDNS (any section)
+	Filter      string          // the dns-proxy/filter subtree as read (raw JSON), "" when not read
+	FilterNext  int             // places in it that name NextDNS
+	Read        map[string]bool // area -> was read (groups, routes, doh, nameservers, iproutes, interfaces, filter)
 }
 
 func newModel() *Model {
@@ -75,7 +79,7 @@ func fields(s string) []string { return strings.Fields(s) }
 // ParseRunning builds the model from «show running-config» text. Every area is marked read.
 func ParseRunning(text string) *Model {
 	m := newModel()
-	for _, a := range []string{"groups", "routes", "doh", "nameservers", "iproutes", "interfaces"} {
+	for _, a := range []string{"groups", "routes", "doh", "nameservers", "iproutes", "interfaces", "filter"} {
 		m.Read[a] = true
 	}
 	m.Routes, m.DoH, m.NameServers, m.IPRoutes, m.Interfaces = []Route{}, []DoH{}, []NameServer{}, []IPRoute{}, []string{}
@@ -87,6 +91,9 @@ func ParseRunning(text string) *Model {
 		line := strings.TrimRight(sc.Text(), "\r")
 		if line == "" {
 			continue
+		}
+		if strings.Contains(strings.ToLower(line), "nextdns") {
+			m.NextDNS++
 		}
 		if strings.HasPrefix(line, "!") {
 			ctx, cur = "", nil
@@ -138,6 +145,8 @@ func ParseRunning(text string) *Model {
 				m.Routes = append(m.Routes, Route{Group: f[2], Target: f[3], Options: strings.Join(f[4:], " ")})
 			case len(f) >= 3 && f[0] == "https" && f[1] == "upstream":
 				m.DoH = append(m.DoH, parseDoH(body))
+			default:
+				m.DNSOther = append(m.DNSOther, body)
 			}
 		}
 	}

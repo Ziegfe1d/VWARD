@@ -26,13 +26,15 @@ type fakeKeenetic struct {
 	refuseOn string      // refuse any command containing this
 	dropAt   int         // close the connection without an answer after this many commands applied (-1: none)
 	batches  [][]string
+	filter   string
 	reads    int
 	fullRead int
 	srv      *httptest.Server
 }
 
 func newFake(t *testing.T, cfg string) *fakeKeenetic {
-	f := &fakeKeenetic{groups: map[string][]string{}, dropAt: -1}
+	f := &fakeKeenetic{groups: map[string][]string{}, dropAt: -1,
+		filter: `{"profile":[{"name":"DnsProfile0","engine":"nextdns","nextdns":{"id":"abcdef"}}]}`}
 	cur, dns := "", false
 	for _, l := range strings.Split(cfg, "\n") {
 		if strings.TrimSpace(l) == "" {
@@ -144,6 +146,11 @@ func (f *fakeKeenetic) serve(w http.ResponseWriter, r *http.Request) {
 			ups = append(ups, u)
 		}
 		json.NewEncoder(w).Encode(map[string]any{"route": rs, "https": map[string]any{"upstream": ups}})
+	case r.Method == "GET" && r.URL.Path == "/rci/dns-proxy/filter":
+		// The owner's NextDNS profile (owner 08.11: «filter profile DnsProfile0»); the exact form of
+		// the Viva's answer is pinned in testdata when the owner sends it.
+		f.reads++
+		w.Write([]byte(f.filter))
 	case r.Method == "POST" && r.URL.Path == "/rci/":
 		body, _ := io.ReadAll(r.Body)
 		var cmds []struct {
