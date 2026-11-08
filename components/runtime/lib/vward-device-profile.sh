@@ -192,12 +192,12 @@ vward_tls_take()
 {
     _vt_flag=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
     _vt_ok=${_vt_flag%.broken}.ok _vt_lock=${_vt_flag%.broken}.probe _vt_mine=0 _vt_w=0 _vt_r=0
-    [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ] || return 1
+    { [ ! -e "$_vt_flag" ] || [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ]; } || return 1
     _vt_wait=${1:-}
     case "$_vt_wait" in
         ''|*[!0-9]*)
             _vt_wait=20
-            [ -z "$(find "$_vt_ok" -mmin -60 2>/dev/null)" ] || _vt_wait=${VWARD_TLS_TURN_WAIT_OK:-5} ;;
+            { [ ! -e "$_vt_ok" ] || [ -z "$(find "$_vt_ok" -mmin -60 2>/dev/null)" ]; } || _vt_wait=${VWARD_TLS_TURN_WAIT_OK:-5} ;;
     esac
     _vward_tls_proc /proc/self/stat || _vt_ps="$$ 0"
     _vt_id=$_vt_ps
@@ -210,13 +210,14 @@ vward_tls_take()
         fi
         # A dead owner's turn is taken away at once (bounded: a live one is never touched).
         if [ "$_vt_r" -lt 3 ] && _vward_tls_reap; then _vt_r=$((_vt_r + 1)); continue; fi
-        [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ] || return 1
+        { [ ! -e "$_vt_flag" ] || [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ]; } || return 1
         [ "$_vt_w" -lt "$_vt_wait" ] || return 2
         sleep 1; _vt_w=$((_vt_w + 1))
     done
     _vt_mine=1
     # The turn came after another caller: its crash may be noted by now.
-    if [ -n "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ]; then
+    # find only for a flag that exists (a missing file is «not recent» either way, no process).
+    if [ -e "$_vt_flag" ] && [ -n "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ]; then
         _vward_tls_give
         return 1
     fi

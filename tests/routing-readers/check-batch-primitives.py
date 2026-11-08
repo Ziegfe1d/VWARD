@@ -136,9 +136,11 @@ with PipelineFixture() as f:
                 if not l.name.endswith('.sha'):
                     b = (OTHER + '\n').encode(); l.write_bytes(b); Path(str(l) + '.sha').write_text(H(b) + '\n')
         def leaselinks(o):
-            for l in (o/'workers').glob('*'):
+            # Every lease gets a second name: the receipt may name any of them (glob order is not
+            # the receipt's; linking only the first one did not always touch the named lease).
+            for l in list((o/'workers').glob('*')):
                 if not l.name.endswith('.sha'):
-                    os.link(l, o/('lease-alias-' + l.name)); break
+                    os.link(l, o/('lease-alias-' + l.name))
         return [('ok', ok), ('missing', missing), ('badsha', badsha), ('extra', extra), ('wrong-plan', wrongplan),
                 ('mode644', mode644), ('hardlink', hardlink), ('lines>4096', biglines), ('lease-gone', leasegone),
                 ('lease-sha', leasesha), ('lease-boot', leaseboot), ('lease-links', leaselinks)]
