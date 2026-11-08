@@ -37,7 +37,15 @@ WAN_IF="$VWARD_WAN_DEVICE"
 WG_IF="$VWARD_TUNNEL_DEVICE"
 
 MAX_HEALTH_AGE=180
-DOWN_CONFIRM=1
+# A tunnel is acted on (or an action proposed) only after it has stayed silent DOWN_CONFIRM
+# minutes by the clock, not runs (sentinel events start this guard at once, so runs come in
+# bursts), and only when the real-time watcher saw its link go down or lose its address in that
+# time (owner 08.11: one minute of silence switched VPN off over a 1-2 s glitch). At least 3.
+DOWN_CONFIRM=${VWARD_GUARD_DOWN_CONFIRM:-3}
+case "$DOWN_CONFIRM" in ''|*[!0-9]*) DOWN_CONFIRM=3 ;; esac
+[ "$DOWN_CONFIRM" -ge 3 ] || DOWN_CONFIRM=3
+SENTINEL_EVENTS=${VWARD_SENTINEL_EVENTS:-/tmp/vward-sentinel-events}
+DOWN_SINCE=
 RECOVERY_INTERVAL=300
 DISABLE_FILE="${VWARD_ETC:-/opt/etc/vward}/tunnel-guard.disabled"
 # Several tunnels: when the one VWARD routes through dies, its routes go to the best other
@@ -387,6 +395,7 @@ if [ -f "$STATE" ]; then
         case "$K" in
             MODE) OLD_MODE=$V ;;
             DOWN_STREAK) DOWN_STREAK=$V ;;
+            DOWN_SINCE) DOWN_SINCE=$V ;;
             FAILOPEN_ACTIVE) FAILOPEN_ACTIVE=$V ;;
             LAST_RECOVERY_TEST) LAST_RECOVERY_TEST=$V ;;
             LAST_ACTION) OLD_ACTION=$V ;;
@@ -402,6 +411,19 @@ case "$FAILOPEN_REASON" in *[!a-z_,]*) FAILOPEN_REASON= ;; esac
 case "$DOWN_STREAK" in
     ''|*[!0-9]*) DOWN_STREAK=0 ;;
 esac
+case "$DOWN_SINCE" in *[!0-9]*) DOWN_SINCE= ;; esac
+OLD_SINCE=$DOWN_SINCE
+
+# sentinel_saw_down: the watcher noted «link DEV down» or «addr DEV lost» of the tunnel's device
+# since the silence began, or up to 10 minutes before it (the link goes down at once; the health
+# check notices the silence a few minutes later).
+sentinel_saw_down()
+{
+    ssd_at=
+    [ -r "$SENTINEL_EVENTS/$WG_IF.down" ] && read -r ssd_at < "$SENTINEL_EVENTS/$WG_IF.down" 2>/dev/null || return 1
+    case "$ssd_at" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$ssd_at" -ge $(( ${DOWN_SINCE:-$NOW} - 600 )) ]
+}
 
 case "$FAILOPEN_ACTIVE" in
     1) ;;
@@ -569,10 +591,16 @@ else
                     else
 
                         DOWN_STREAK=$((DOWN_STREAK + 1))
+                        [ -n "$DOWN_SINCE" ] || DOWN_SINCE=$NOW
 
-                        if [ "$DOWN_STREAK" -lt "$DOWN_CONFIRM" ]; then
+                        if [ $((NOW - DOWN_SINCE)) -lt $((DOWN_CONFIRM * 60 - 30)) ]; then
 
                             ACTION="WAIT_DOWN_CONFIRM"
+
+                        elif ! sentinel_saw_down; then
+
+                            # Silent, but its link never went down: no action, said so.
+                            ACTION="WAIT_SENTINEL_CONFIRM"
 
                         else
 
@@ -714,11 +742,13 @@ fi
 
 # Not held by the guard any more: nothing to tell.
 [ "$FAILOPEN_ACTIVE" = 1 ] || FAILOPEN_AT= FAILOPEN_REASON=
+# The silence ended (or was never counted): its start goes with it.
+[ "$DOWN_STREAK" -gt 0 ] || DOWN_SINCE=
 
 # The state survives reboots (fail-open must be undone), so it stays on USB,
 # but it is rewritten only when something in it changes.
-if [ "$MODE|$DOWN_STREAK|$FAILOPEN_ACTIVE|$LAST_RECOVERY_TEST|$ACTION|$FAILOPEN_AT" != \
-     "$OLD_MODE|$OLD_STREAK|$OLD_ACTIVE|$OLD_RECOVERY|$OLD_ACTION|$OLD_FO_AT" ] ||
+if [ "$MODE|$DOWN_STREAK|$FAILOPEN_ACTIVE|$LAST_RECOVERY_TEST|$ACTION|$FAILOPEN_AT|$DOWN_SINCE" != \
+     "$OLD_MODE|$OLD_STREAK|$OLD_ACTIVE|$OLD_RECOVERY|$OLD_ACTION|$OLD_FO_AT|$OLD_SINCE" ] ||
    [ ! -f "$STATE" ]; then
 
     TMP="$STATE.tmp.$$"
@@ -726,6 +756,7 @@ if [ "$MODE|$DOWN_STREAK|$FAILOPEN_ACTIVE|$LAST_RECOVERY_TEST|$ACTION|$FAILOPEN_
     {
         echo "MODE=$MODE"
         echo "DOWN_STREAK=$DOWN_STREAK"
+        [ -z "$DOWN_SINCE" ] || echo "DOWN_SINCE=$DOWN_SINCE"
         echo "FAILOPEN_ACTIVE=$FAILOPEN_ACTIVE"
         echo "LAST_RECOVERY_TEST=$LAST_RECOVERY_TEST"
         echo "LAST_ACTION=$ACTION"

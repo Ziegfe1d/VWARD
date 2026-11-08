@@ -146,6 +146,11 @@ class Router:
         self.minute += 1
         chaos.advance(self.root)
         chaos.set_faults(self.root, list(faults), self.minute)
+        # «link»: the tunnel's link goes down (WireGuard/OpkgTun device lost): the real-time watcher
+        # notes it once, at the start (owner 08.11: the VPN guard acts only with that event).
+        if "link" in faults and not getattr(self, "_link", False):
+            self.sh("mkdir -p /tmp/vward-sentinel-events; date +%s > /tmp/vward-sentinel-events/nwg1.down")
+        self._link = "link" in faults
         off = int((self.root / "emu/clock-offset").read_text())
         t = datetime.datetime.fromtimestamp(time.time() + off, datetime.timezone.utc)
         jobs = []
@@ -223,9 +228,10 @@ def s_vpn_blip(r, out):
 
 
 def s_vpn_down(r, out):
-    r.run(2); r.run(18, ["tunnel"]); r.run(14)
+    r.run(2); r.run(18, ["tunnel", "link"]); r.run(14)
     down = r.cmds("interface Wireguard1 down")
-    expect(bool(down) and 4 <= down[0] <= 6, f"the dead VPN is taken out within 2-4 minutes (at minute {down[:1]}, fault from 3)", out)
+    # Owner 08.11: silent 3 minutes by the clock and the watcher saw the link go down.
+    expect(bool(down) and 6 <= down[0] <= 9, f"the dead VPN is taken out after 3-6 minutes (at minute {down[:1]}, fault from 3)", out)
     ups = r.cmds("interface Wireguard1 up", 3, 20)
     expect(len(ups) <= 18 // 5 + 1, f"recovery tests during the fault every 5 minutes at most ({len(ups)} in 18 min: {ups})", out)
     g = r.guard()
@@ -236,12 +242,21 @@ def s_vpn_down(r, out):
     expect(bool(last_up) and last_up[0] <= 28, f"switched back within 8 minutes after the VPN answers (at {last_up[:1]})", out)
 
 
+def s_vpn_silent(r, out):
+    # Owner 08.11: a tunnel that stops answering while its link stays up (no event of the watcher)
+    # is never switched off; the guard says why.
+    r.run(2); r.run(12, ["tunnel"]); r.run(4)
+    expect(not r.cmds("interface Wireguard1 down"), "a silent VPN without a link event is not switched off", out)
+    log = r.root / "opt/var/log/vward-tunnel-guard.log"
+    expect(log.exists() and "WAIT_SENTINEL_CONFIRM" in log.read_text(), "the guard writes why it waits (WAIT_SENTINEL_CONFIRM)", out)
+
+
 def s_vpn_spare(r, out, stay=False):
     if stay:
         (r.root / "opt/etc/vward/tunnel-return.disabled").write_text("off\n")
-    r.run(4); r.run(14, ["tunnel"])
+    r.run(4); r.run(14, ["tunnel", "link"])
     on2 = [m for m, c in r.log if "route object-group vpn-sites Wireguard2" in c and " no " not in c]
-    expect(bool(on2) and on2[0] <= 9, f"VWARD's routes move to the second tunnel (at {on2[:1]}, fault from 5)", out)
+    expect(bool(on2) and on2[0] <= 12, f"VWARD's routes move to the second tunnel (at {on2[:1]}, fault from 5)", out)
     expect(not r.cmds("interface Wireguard1 down"), "nothing goes direct while another tunnel answers", out)
     expect(r.device("VWARD_TUNNEL_INTERFACE") == "Wireguard2", f"the second tunnel is VWARD's now ({r.device('VWARD_TUNNEL_INTERFACE')})", out)
     # Back after 15 minutes of answers in a row (fix.28.1: 3 minutes moved 19 lists back and forth).
@@ -259,12 +274,12 @@ def s_vpn_spare(r, out, stay=False):
 def s_guard_off(r, out):
     flag = r.root / "opt/etc/vward/tunnel-guard.disabled"
     flag.write_text("off\n")
-    r.run(2); r.run(8, ["tunnel"])
+    r.run(2); r.run(8, ["tunnel", "link"])
     expect(not r.cmds("interface Wireguard1 down"), "«Агент VPN» off: a dead VPN is left alone", out)
     flag.unlink()
-    r.run(6, ["tunnel"])
+    r.run(6, ["tunnel", "link"])
     on = r.cmds("interface Wireguard1 down", 11)
-    expect(bool(on) and on[0] <= 14, f"on again: it acts within 3 minutes (at {on[:1]}, on from 11)", out)
+    expect(bool(on) and on[0] <= 16, f"on again: it acts within 5 minutes (at {on[:1]}, on from 11)", out)
     r.run(10)
     expect(r.guard().get("FAILOPEN_ACTIVE") == "0", "and brings the VPN back afterwards", out)
 
@@ -347,14 +362,29 @@ def s_engine_kill(r, out):
 
     def kill():
         r.sh("for p in $(ps w | grep '[v]ward-route-engine.sh' | awk '{print $1}'); do kill -9 $p; done; true")
+    def within(sec):
+        t0 = time.time()
+        while time.time() - t0 < sec:
+            if pids() >= 1:
+                return True
+            time.sleep(0.5)
+        return False
+    # Owner 08.11: the components agent keeps it running (every 10 s), no per-minute cron watchdog.
     r.run(2)
-    expect(pids() >= 1, "the route engine runs", out)
+    expect(within(25), "the route engine runs", out)
     kill(); r.run(1)
-    expect(pids() >= 1, "killed: running again the next minute", out)
-    for _ in range(6):
-        kill(); r.run(1)
+    expect(within(25), "killed: running again within the agent's round", out)
+    for _ in range(2):
+        kill(); r.run(1); within(25)
     n = pids()
-    expect(1 <= n <= 3, f"killed every minute for 6 minutes: running, no pile-up ({n} processes)", out)
+    expect(1 <= n <= 3, f"killed again and again: running, no pile-up ({n} processes)", out)
+    # The agent's restart limit (fix.32: 5 starts an hour): a program that keeps dying is left
+    # stopped and the owner told, not started in a loop.
+    for _ in range(3):
+        kill(); r.run(1); within(15)
+    sup = r.root / "opt/var/log/vward-cron-supervisor.log"
+    expect(pids() == 0 and sup.exists() and "RESTART_LIMIT|route-engine" in sup.read_text(),
+           "killed again and again within the hour: left stopped by the restart limit, told", out)
 
 
 def s_agh_starter(r, out):
@@ -405,9 +435,9 @@ def s_sentinel(r, out):
 def s_both_dead(r, out):
     r.run(3)
     (r.root / "emu/fault-tunnel2").write_text("1\n")
-    r.run(10, ["tunnel"])
+    r.run(10, ["tunnel", "link"])
     down = r.cmds("interface Wireguard1 down")
-    expect(bool(down) and down[0] <= 9, f"both tunnels dead: the lists go direct (at {down[:1]})", out)
+    expect(bool(down) and down[0] <= 12, f"both tunnels dead: the lists go direct (at {down[:1]})", out)
     (r.root / "emu/fault-tunnel2").unlink()
     r.run(14)
     g = r.guard()
@@ -426,7 +456,7 @@ def s_vpn_flap(r, out):
 
 
 def s_reboot_failopen(r, out):
-    r.run(2); r.run(6, ["tunnel"])
+    r.run(2); r.run(8, ["tunnel", "link"])
     expect(r.guard().get("FAILOPEN_ACTIVE") == "1", "the dead VPN is taken out", out)
     # A reboot: the programs and RAM are gone, the USB stick stays; Keenetic starts the tunnel
     # from its saved configuration (the guard does not save its «down»).
@@ -438,7 +468,7 @@ def s_reboot_failopen(r, out):
         (r.root / f"sys/class/net/nwg1/{f}").write_text(v + "\n")
     subprocess.run(["mount", "-t", "proc", "proc", str(r.root / "proc")], check=True)
     subprocess.run(["mount", "--bind", str(r.root / "opt"), str(r.root / "opt")], check=True)
-    r.run(6, ["tunnel"])
+    r.run(6, ["tunnel", "link"])
     expect(r.guard().get("FAILOPEN_ACTIVE") == "1" and "Wireguard1" in (r.root / "emu/iface-down").read_text().split(),
            "after the reboot, still dead: taken out again (the guard remembered)", out)
     r.run(10)
@@ -447,7 +477,7 @@ def s_reboot_failopen(r, out):
 
 
 def s_vpn_and_agh(r, out):
-    r.run(2); r.run(10, ["tunnel", "agh"])
+    r.run(2); r.run(12, ["tunnel", "link", "agh"])
     expect(bool(r.cmds("interface Wireguard1 down")) and bool(r.chain_cmds("no " + NS)),
            "VPN and AdGuard Home down together: each guard does its part", out)
     r.run(14)
@@ -497,14 +527,20 @@ def s_vward_off(r, out, nodns=False):
     expect("rc=0" in o and sorted(after.splitlines()) == sorted(before.splitlines()), "on: Keenetic's configuration exactly as before", out)
     expect(not (r.root / "opt/etc/vward/components/vward.off").exists(), "on: the switch is gone", out)
     r.run(2)
-    _, o, _ = r.sh("p=$(cat /opt/var/run/vward/route-engine.pid 2>/dev/null); [ -n \"$p\" ] && kill -0 $p 2>/dev/null && echo alive || echo gone")
+    # The components agent starts it within its 10-second round (owner 08.11).
+    t0 = time.time()
+    while True:
+        _, o, _ = r.sh("p=$(cat /opt/var/run/vward/route-engine.pid 2>/dev/null); [ -n \"$p\" ] && kill -0 $p 2>/dev/null && echo alive || echo gone")
+        if "alive" in o or time.time() - t0 > 25:
+            break
+        time.sleep(0.5)
     expect("alive" in o, "on: the route engine runs again", out)
     _, o, _ = r.sh("/opt/bin/vward-off.sh status")
     expect("state=on" in o, "status: on", out)
 
 
 SCENARIOS = {
-    "vpn-blip": (s_vpn_blip, False), "vpn-down": (s_vpn_down, False), "vpn-spare": (s_vpn_spare, True),
+    "vpn-blip": (s_vpn_blip, False), "vpn-down": (s_vpn_down, False), "vpn-silent": (s_vpn_silent, False), "vpn-spare": (s_vpn_spare, True),
     "vpn-spare-stay": (lambda r, o: s_vpn_spare(r, o, stay=True), True), "guard-off": (s_guard_off, False),
     "wan-down": (s_wan_down, False), "agh-loop": (s_agh_loop, False), "agh-silent": (s_agh_silent, False),
     "agh-blip": (s_agh_blip, False), "agh-one-crash": (s_agh_one_crash, False), "agh-update": (s_agh_update, False), "agh-and-wan": (s_agh_and_wan, False), "engine-kill": (s_engine_kill, False),

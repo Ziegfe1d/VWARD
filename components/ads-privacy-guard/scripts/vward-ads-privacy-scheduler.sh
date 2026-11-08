@@ -2,6 +2,8 @@
 
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+# «dns»: only the DNS guard's minute tick (its own cron line); empty: the whole round (every 5 min).
+SCH_MODE=${1:-}
 
 # The script's own folder, by the shell (no process: some of these run every minute).
 case "$0" in */*) SELF_DIR=${0%/*} ;; *) SELF_DIR=. ;; esac
@@ -17,10 +19,13 @@ VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admissio
 . "$VWARD_ADMISSION_LIB"
 # DNS lines of Keenetic into a dead server on the router (AdGuard Home gone with the USB stick)
 # go whatever the state of ad blocking - off, not set up, AdGuard Home never connected (fix.32).
-# Every 5 minutes of uptime; the other minutes cost no process.
+# Every 5 minutes: on minutes of uptime divisible by 5, or when the last check is older than
+# 4 minutes (cron runs this every 5 minutes since 08.11, at wall-clock minutes).
 SCH_UP=; read -r SCH_UP _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"; SCH_UP=${SCH_UP%%.*}
+SCH_MARK=${VWARD_ADS_ORPHAN_MARK:-/tmp/vward-ads-orphan.last}
 case "$SCH_UP" in ''|*[!0-9]*) ;; *)
-    if [ $((SCH_UP / 60 % 5)) = 0 ]; then
+    if [ "$SCH_MODE" != dns ] && { [ $((SCH_UP / 60 % 5)) = 0 ] || [ -z "$(find "$SCH_MARK" -mmin -4 2>/dev/null)" ]; }; then
+        : > "$SCH_MARK" 2>/dev/null || :
         SCH_G="${VWARD_ADS_DNS_GUARD:-/opt/bin/vward-ads-privacy-dns-guard.sh}"
         [ -x "$SCH_G" ] || SCH_G="$SELF_DIR/vward-ads-privacy-dns-guard.sh"
         [ ! -x "$SCH_G" ] || "$SCH_G" orphan >/dev/null 2>&1 || :
@@ -179,12 +184,18 @@ LAST_SCAN="$(ads_num "$ST_SCAN" 0)"
 LAST_SOURCE="$(ads_num "$ST_SOURCE" 0)"
 OLD_SIG=$ST_SIG
 
+# DNS of every device through AdGuard Home: rules back after a firewall rebuild,
+# redirect off while AdGuard Home's DNS is down.  No process when it is off.
+# Every minute on its own cron line («dns»): its silence counts are minutes (owner 08.11: the rest
+# of this scheduler runs every 5 minutes; the DNS chain must not wait for it).
+if [ "$SCH_MODE" = dns ]; then
+    [ ! -x "$DNS_GUARD" ] || "$DNS_GUARD" tick >/dev/null 2>&1 || true
+    echo "SCHEDULER=DNS_TICK"
+    exit 0
+fi
 # Device names in AdGuard Home do not depend on ad blocking being on or paused.
 # A tick with the same devices makes no AdGuard Home call.
 [ ! -x "$CLIENTS_SYNC" ] || "$CLIENTS_SYNC" tick >/dev/null 2>&1 || true
-# DNS of every device through AdGuard Home: rules back after a firewall rebuild,
-# redirect off while AdGuard Home's DNS is down.  No process when it is off.
-[ ! -x "$DNS_GUARD" ] || "$DNS_GUARD" tick >/dev/null 2>&1 || true
 # Domains Keenetic routes by name go through Keenetic's DNS, so its routes learn
 # every address a device gets.  A check every 5 minutes; nothing while it is off.
 [ ! -x "$ROUTE_DNS" ] || "$ROUTE_DNS" tick >/dev/null 2>&1 || true

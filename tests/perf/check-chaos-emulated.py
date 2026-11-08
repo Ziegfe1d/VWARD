@@ -365,7 +365,7 @@ def main():
                 if crashes["curl"] > 2:
                     who = collections.Counter(" ".join(l.split()[1:]) for l in (root / "emu/crash.log").read_text().splitlines() if l.startswith("curl "))
                     findings.append((name, minute, "-", "crash loop", f"curl crashed on HTTPS {crashes['curl']} times: {who.most_common()}"))
-                feed = root / "opt/var/lib/vward/updater/feed.state"
+                feed = root / "tmp/vward-update-feed.state"  # in RAM since 08.11
                 if not crashes["curl"] or not feed.exists() or "fail_at=" not in feed.read_text():
                     findings.append((name, minute, "-", "not seen", f"the update feed's failure is not noted for «Стабильность» (curl crashes {crashes['curl']})"))
             # The profile reached what it breaks (else it proves nothing).

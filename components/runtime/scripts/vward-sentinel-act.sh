@@ -57,6 +57,11 @@ case "$EVENT" in
         DEV=${2:-}
         valid "$DEV" || exit 64
         log "$EVENT|$DEV|${3:-}"
+        # For the VPN guard: when this device last went down or lost its address (RAM).
+        case "$EVENT:${3:-}" in
+            link:down|addr:lost) mkdir -p "${VWARD_SENTINEL_EVENTS:-/tmp/vward-sentinel-events}" 2>/dev/null &&
+                date +%s > "${VWARD_SENTINEL_EVENTS:-/tmp/vward-sentinel-events}/$DEV.down" 2>/dev/null || : ;;
+        esac
         if [ "$DEV" = "$(wan_device)" ]; then
             "$BIN_DIR/vward-wan-guard.sh" </dev/null >/dev/null 2>&1
         else
@@ -104,6 +109,9 @@ case "$EVENT" in
         log "chain-fail"
         G=${VWARD_DNS_GUARD_BIN:-$BIN_DIR/vward-ads-privacy-dns-guard.sh}
         [ -x "$G" ] || exit 1
+        # The ads scheduler (and with it the guard's minute tick) runs every 5 minutes (owner
+        # 08.11): the redirect into a silent AdGuard Home is taken off here, within seconds.
+        "$G" tick </dev/null >/dev/null 2>&1 || :
         "$G" chain-out </dev/null 2>/dev/null | grep -q '^chain_state=out$'
         ;;
     *) exit 64 ;;

@@ -73,7 +73,22 @@ echo result=changed
                         "VWARD_TUNNEL_QUALITY_BIN": str(bin_ / "quality"), "VWARD_CONSOLE_CONFIG_BIN": str(bin_ / "helper"),
                         "VWARD_CURL_BIN": str(bin_ / "curl"), "VWARD_NDMC": str(bin_ / "ndmc")}
 
-    def run(status, summary):
+    events = tmp / "sentinel-events"
+    events.mkdir()
+    env["VWARD_SENTINEL_EVENTS"] = str(events)
+
+    def confirmed():
+        # The silence already lasted 10 minutes and the watcher saw the link go down (owner 08.11:
+        # nothing is done before that; the confirmation itself is checked at the end).
+        st = gdir / "state"
+        lines = [l for l in (st.read_text().splitlines() if st.exists() else []) if not l.startswith("DOWN_SINCE=")]
+        st.write_text("\n".join(lines + [f"DOWN_SINCE={int(time.time()) - 600}"]) + "\n")
+        for d in ("nwg0", "nwg1", "nwg2", "opkgtun2"):
+            (events / f"{d}.down").write_text(f"{int(time.time()) - 300}\n")
+
+    def run(status, summary, confirm=True):
+        if status == "DOWN" and confirm:
+            confirmed()
         health.write_text(f"STATUS={status}\nLAST_CHECK={int(time.time())}\nCONFIG_STATE=up\n")
         (tmp / "summary").write_text(summary)
         r = subprocess.run(["sh", str(GUARD)], env=env, text=True, capture_output=True, timeout=60)
@@ -398,6 +413,7 @@ echo result=changed
     (gdir / "state").write_text("MODE=AUTO\nDOWN_STREAK=0\nFAILOPEN_ACTIVE=0\nLAST_RECOVERY_TEST=0\nLAST_ACTION=KEEP_UP\n")
     (tmp / "vless.log").write_text(""); (tmp / "ndmc.log").write_text("")
     env["VWARD_GUARD_KICK_WAIT"] = "0"
+    confirmed()
     health.write_text(f"STATUS=DOWN\nLAST_CHECK={int(time.time())}\nCONFIG_STATE=up\n")
     r = subprocess.run(["sh", str(GUARD)], env=env, text=True, capture_output=True, timeout=60)
     if r.stdout.split("\n", 1)[0] != "ACTION=ENGINE_RESTARTED":
@@ -408,6 +424,7 @@ echo result=changed
     (tmp / "kicked").unlink()
     (bin_ / "vless").write_text(f'#!/bin/sh\necho "$*" >> "{tmp}/vless.log"\necho result=changed\n')
     (gdir / "state").write_text("MODE=AUTO\nDOWN_STREAK=0\nFAILOPEN_ACTIVE=0\nLAST_RECOVERY_TEST=0\nLAST_ACTION=KEEP_UP\n")
+    confirmed()
     r = subprocess.run(["sh", str(GUARD)], env=env, text=True, capture_output=True, timeout=60)
     if r.stdout.split("\n", 1)[0] != "ACTION=FAILOPEN_DOWN":
         fail(f"a tunnel silent after its restart goes direct: {r.stdout[:120]}")
@@ -483,4 +500,28 @@ with tempfile.TemporaryDirectory() as t2:
         fail(f"an Xray tunnel measured by pages, not ping: {out!r}")
 if 'grep -qx "$name"' not in qsrc or "http_probe \"$dev\"" not in qsrc:
     fail("the quality check must measure the VLESS tunnels by pages")
+    # Confirmation (owner 08.11): DOWN_CONFIRM minutes by the clock, plus the watcher's link event.
+    for f in list(gdir.iterdir()):
+        f.unlink()
+    for f in events.iterdir():
+        f.unlink()
+    (tmp / "iface").write_text("Wireguard0 nwg0")
+    (tmp / "ndmc.log").write_text("")
+    for _ in range(5):  # a burst of runs (sentinel events) within the first minute is not confirmation
+        if run("DOWN", alive, confirm=False) != "ACTION=WAIT_DOWN_CONFIRM":
+            fail(f"a burst of runs must not confirm: {(tmp / 'guard.log').read_text()[-300:]}")
+    st = (gdir / "state").read_text()
+    if "DOWN_SINCE=" not in st:
+        fail(f"the start of the silence must be kept: {st!r}")
+    (gdir / "state").write_text(st.replace([l for l in st.splitlines() if l.startswith("DOWN_SINCE=")][0], f"DOWN_SINCE={int(time.time()) - 600}"))
+    if run("DOWN", alive, confirm=False) != "ACTION=WAIT_SENTINEL_CONFIRM":
+        fail("silent 10 minutes without a link event: no action")
+    (events / "nwg0.down").write_text(f"{int(time.time()) - 7200}\n")
+    if run("DOWN", alive, confirm=False) != "ACTION=WAIT_SENTINEL_CONFIRM":
+        fail("a link event from before the silence does not confirm it")
+    if (tmp / "ndmc.log").read_text():
+        fail("nothing may be sent before confirmation")
+    run("UP", "")
+    if "DOWN_SINCE" in (gdir / "state").read_text():
+        fail("an answer ends the silence")
 print("TUNNEL_FALLBACK=PASS")

@@ -152,6 +152,12 @@ vu_state_set() {
     value=$2
     [ -d "$VU_STATE_DIR" ] || mkdir -p "$VU_STATE_DIR" || return 1
     file=${3:-$VU_STATE_DIR/state}
+    # The same single line already there: no rewrite, no sync (owner 08.11: fewer USB writes; the
+    # check every 15 minutes rewrote unchanged state). Duplicates or another value: as before.
+    if [ -r "$file" ] && grep -qxF -- "$key=$value" "$file" 2>/dev/null &&
+       [ "$(grep -c "^${key}=" "$file" 2>/dev/null)" = 1 ]; then
+        return 0
+    fi
     tmp=$file.tmp.$$
     if [ -r "$file" ]; then
         sed "/^${key}=/d" "$file" > "$tmp" || return 1

@@ -407,6 +407,23 @@ process_requests()
     done
 }
 
+# keep_route_engine (owner 08.11): this agent keeps the route engine running instead of the
+# per-minute S91 cron watchdog (now off by default). Every round: a pid test in the shell, no
+# process; S91 only when the engine is gone, within the restart limit, never during an update,
+# not when it is switched off in «Компоненты».
+keep_route_engine()
+{
+    RE_P=
+    [ ! -r "$RUN_DIR/route-engine.pid" ] || read -r RE_P < "$RUN_DIR/route-engine.pid" 2>/dev/null || :
+    case "$RE_P" in ''|*[!0-9]*) RE_P= ;; esac
+    [ -z "$RE_P" ] || ! kill -0 "$RE_P" 2>/dev/null || return 0
+    [ -x "$INITD/S91vward-route-engine" ] || return 0
+    ! command -v vward_update_pending >/dev/null 2>&1 || ! vward_update_pending || return 0
+    ! command -v vward_component_enabled >/dev/null 2>&1 || vward_component_enabled route-engine || return 0
+    restart_allowed route-engine || return 0
+    start_of route-engine && log_event "STARTED|route-engine|by=watch"
+}
+
 # ---- Watching the other agents ---------------------------------------------------------------
 # The components agent also watches the network, updates and maintenance agents: each must have
 # run lately, none may hang, none may run twice at a time. A hung run is stopped (the next one
@@ -710,6 +727,7 @@ while :; do
     fi
 
     TICK=$((TICK + 1))
+    [ -e "$OFF_FLAG" ] || keep_route_engine
     # Once a minute, not on the first round: at boot S93 starts the Panel just after.
     [ $((TICK % WATCH_EVERY)) -ne 0 ] || watch_services
 

@@ -79,9 +79,11 @@ etag_after=$(sed -n 's/^manifest_etag=//p' "$STATE/watcher.state")
 set +e; run_watch 200 >/dev/null 2>&1; rc=$?; set -e
 [ "$rc" -eq 0 ] && ok 'HTTP 200 exact installed manifest is no-update' || bad 'exact installed 200'
 # «Стабильность» in the Panel: the feed answered (ok_at); a failure keeps the last answer.
-grep -q '^ok_at=[0-9][0-9]*$' "$STATE/feed.state" && ok 'feed answer is noted for the Panel' || bad 'feed.state ok_at'
+# In RAM since 08.11 (no USB write every 15 minutes).
+FEED="$ROOT/tmp/vward-update-feed.state"
+grep -q '^ok_at=[0-9][0-9]*$' "$FEED" && [ ! -e "$STATE/feed.state" ] && ok 'feed answer is noted for the Panel' || bad 'feed.state ok_at'
 set +e; run_watch 503 >/dev/null 2>&1; set -e
-grep -q '^ok_at=[0-9][0-9]*$' "$STATE/feed.state" && grep -q '^fail_at=[0-9][0-9]*$' "$STATE/feed.state" && grep -q '^fail_rc=[0-9]' "$STATE/feed.state" &&
+grep -q '^ok_at=[0-9][0-9]*$' "$FEED" && grep -q '^fail_at=[0-9][0-9]*$' "$FEED" && grep -q '^fail_rc=[0-9]' "$FEED" &&
     ok 'feed failure is noted, the last answer kept' || bad 'feed.state fail_at'
 
 new_root quarantine; make_package qbad; make_manifest qbad CRITICAL 1 0.1.1-dev

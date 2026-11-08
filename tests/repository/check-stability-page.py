@@ -35,7 +35,7 @@ with tempfile.TemporaryDirectory() as tmp:
            "VWARD_PROFILE_LIB": "/nonexistent", "VWARD_SENTINEL_STATE": str(tmp / "st"), "VWARD_SENTINEL_HOURS": str(tmp / "hours.tsv"),
            "VWARD_CPU_DIR": str(tmp / "cpu"), "VWARD_SENTINEL_LOG": str(tmp / "s.log"), "VWARD_SUPERVISOR_LOG": str(tmp / "sup.log"),
            "VWARD_SENTINEL_PIDFILE": str(tmp / "none.pid"), "VWARD_SENTINEL_BIN": str(tmp / "none"),
-           "VWARD_TUNNEL_QUALITY_DIR": str(tmp / "q"), "VWARD_UPDATE_STATE_DIR": str(tmp / "upd"),
+           "VWARD_TUNNEL_QUALITY_DIR": str(tmp / "q"), "VWARD_UPDATE_STATE_DIR": str(tmp / "upd"), "VWARD_UPDATE_FEED_STATE": str(tmp / "no-ram-feed"),
            "VWARD_TLS_BROKEN_FLAG": str(tmp / "tls"), "VWARD_RCI_FAIL_LOG": str(tmp / "rci.log")}
     import time
     now = int(time.time())

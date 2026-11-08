@@ -1500,7 +1500,10 @@ if [ "$ACTION" = ads-control ]; then
     source-add) /opt/bin/vward-ads-privacy-source-control.sh add "$SURL" "$SFMT" >"$OUT" 2>&1||RC=$? ;;
     source-delete) /opt/bin/vward-ads-privacy-source-control.sh delete "$SID" >"$OUT" 2>&1||RC=$? ;;
     source-category) /opt/bin/vward-ads-privacy-source-control.sh category "$SPUR" "$SST" >"$OUT" 2>&1||RC=$? ;;
-    enqueue) [ "$JOB" = probe ] || DOMAIN=""; /opt/bin/vward-ads-privacy-job.sh enqueue "$JOB" "$DOMAIN" >"$OUT" 2>&1||RC=$? ;;
+    # The queue is worked at once, in the background (owner 08.11: by the event, not by the
+    # scheduler's next round, which runs every 5 minutes now).
+    enqueue) [ "$JOB" = probe ] || DOMAIN=""; /opt/bin/vward-ads-privacy-job.sh enqueue "$JOB" "$DOMAIN" >"$OUT" 2>&1||RC=$?
+        [ "$RC" != 0 ] || ( "${VWARD_ADS_JOB_BIN:-/opt/bin/vward-ads-privacy-job.sh}" drain </dev/null >/dev/null 2>&1 & ) ;;
     # «Выполнить очередь»: the queue now, detached (a scan takes minutes); the page follows it.
     job-run) ( "${VWARD_ADS_JOB_BIN:-/opt/bin/vward-ads-privacy-job.sh}" drain </dev/null >/dev/null 2>&1 & ) ; echo "JOB=DRAIN_STARTED" > "$OUT" ;;
     job-cancel) "${VWARD_ADS_JOB_BIN:-/opt/bin/vward-ads-privacy-job.sh}" cancel "$JID" >"$OUT" 2>&1||RC=$? ;;
@@ -3461,7 +3464,10 @@ if [ "$ACTION" = stability ]; then
             "${VWARD_TUNNEL_QUALITY_DIR:-/tmp/vward-tunnel-quality}/samples.tsv" 2>/dev/null || printf '[]'
     } > "$SD/tunnels"
     FEED_OK= FEED_FAIL= FEED_RC=
-    kv_file "${VWARD_UPDATE_STATE_DIR:-/opt/var/lib/vward/updater}/feed.state" ok_at=FEED_OK fail_at=FEED_FAIL fail_rc=FEED_RC
+    # The feed's last look lives in RAM since 08.11; the old file after a reboot, until the next check.
+    UFEED_FILE=${VWARD_UPDATE_FEED_STATE:-/tmp/vward-update-feed.state}
+    [ -r "$UFEED_FILE" ] || UFEED_FILE="${VWARD_UPDATE_STATE_DIR:-/opt/var/lib/vward/updater}/feed.state"
+    kv_file "$UFEED_FILE" ok_at=FEED_OK fail_at=FEED_FAIL fail_rc=FEED_RC
     TLS_AT=
     TLS_FLAG=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
     [ -z "$(find "$TLS_FLAG" -mmin -60 2>/dev/null)" ] || TLS_AT=$(date -r "$TLS_FLAG" +%s 2>/dev/null)
@@ -3810,7 +3816,9 @@ COMPONENTS="$($JQ -c '.components // {}' "$UPDATER_STATE/components.json" 2>/dev
 kv_file "$UPDATER_STATE/committed.state" installed_update_id=INSTALLED_UPDATE_ID last_sequence=LAST_SEQUENCE last_health_check=LAST_HEALTH
 # The update feed's last look (vward-update-watch): «Последняя проверка» in «Обновления» (fix.33.2;
 # last_health_check is the check after an installation).
-kv_file "${VWARD_UPDATE_STATE_DIR:-$UPDATER_STATE}/feed.state" ok_at=UFEED_OK fail_at=UFEED_FAIL fail_rc=UFEED_RC
+UFEED_FILE=${VWARD_UPDATE_FEED_STATE:-/tmp/vward-update-feed.state}
+[ -r "$UFEED_FILE" ] || UFEED_FILE="${VWARD_UPDATE_STATE_DIR:-$UPDATER_STATE}/feed.state"
+kv_file "$UFEED_FILE" ok_at=UFEED_OK fail_at=UFEED_FAIL fail_rc=UFEED_RC
 kv_file "$UPDATER_STATE/journal.state" phase=UPDATE_PHASE
 kv_file "$UPDATER_STATE/trust.state" highest_seen_sequence=HIGHEST_SEQUENCE
 ACTIVE_SLOT="$(CDPATH= cd -- /opt/share/vward/updater/current 2>/dev/null && pwd -P)"

@@ -61,14 +61,15 @@ BETA_CRON_MARKERS='
 # router on its own. Must equal config/cron/root.crontab byte for byte;
 # tests/repository/check-cutover-cron-parity.py enforces that in CI.
 DEV_CRONTAB='*/5 * * * * /opt/bin/vward-route-reconciler.sh > /tmp/vward-route-reconciler-maint.cron.out 2>&1; RC=$?; date > /tmp/vward-route-reconciler-maint.cron.last; echo $RC > /tmp/vward-route-reconciler-maint.cron.rc; if [ $RC -eq 0 ]; then date > /tmp/vward-route-reconciler-maint.cron.ok; else date > /tmp/vward-route-reconciler-maint.cron.fail; fi
-* * * * * /opt/etc/init.d/S91vward-route-engine start >/tmp/vward-route-engine-watchdog.cron.out 2>&1; RC=$?; date > /tmp/vward-route-engine-watchdog.cron.last; echo $RC > /tmp/vward-route-engine-watchdog.cron.rc; if [ $RC -eq 0 ]; then date > /tmp/vward-route-engine-watchdog.cron.ok; else date > /tmp/vward-route-engine-watchdog.cron.fail; fi
+# off: the components agent keeps it running # * * * * * /opt/etc/init.d/S91vward-route-engine start >/tmp/vward-route-engine-watchdog.cron.out 2>&1; RC=$?; date > /tmp/vward-route-engine-watchdog.cron.last; echo $RC > /tmp/vward-route-engine-watchdog.cron.rc; if [ $RC -eq 0 ]; then date > /tmp/vward-route-engine-watchdog.cron.ok; else date > /tmp/vward-route-engine-watchdog.cron.fail; fi
 10 0 * * * /opt/bin/vward-policy-chain.sh > /tmp/vward-policy-chain.cron.out 2>&1 && /opt/bin/vward-policy-reconcile.sh > /tmp/vward-policy-reconcile.cron.out 2>&1; RC=$?; date > /tmp/vward-policy-chain.cron.last; echo $RC > /tmp/vward-policy-chain.cron.rc; if [ $RC -eq 0 ]; then date > /tmp/vward-policy-chain.cron.ok; else date > /tmp/vward-policy-chain.cron.fail; fi
 25 4 * * * /opt/bin/vward-route-hints-update.sh > /tmp/vward-route-hints-update.cron.out 2>&1; RC=$?; date > /tmp/vward-route-hints-update.cron.last; echo $RC > /tmp/vward-route-hints-update.cron.rc; if [ $RC -eq 0 ]; then date > /tmp/vward-route-hints-update.cron.ok; else date > /tmp/vward-route-hints-update.cron.fail; fi
 * * * * * /opt/bin/vward-tunnel-health.sh > /tmp/vward-tunnel-health-watch.cron.out 2>&1 && /opt/bin/vward-tunnel-guard.sh > /tmp/vward-tunnel-guard-guard.cron.out 2>&1; RC=$?; date > /tmp/vward-tunnel-health-chain.cron.last; echo $RC > /tmp/vward-tunnel-health-chain.cron.rc; if [ $RC -eq 0 ]; then date > /tmp/vward-tunnel-health-chain.cron.ok; else date > /tmp/vward-tunnel-health-chain.cron.fail; fi
 * * * * * /opt/etc/init.d/S92vward-runtime start > /tmp/vward-cron-supervisor-watch.cron.out 2>&1; RC=$?; date > /tmp/vward-cron-supervisor-watch.cron.last; echo $RC > /tmp/vward-cron-supervisor-watch.cron.rc; if [ $RC -eq 0 ]; then date > /tmp/vward-cron-supervisor-watch.cron.ok; else date > /tmp/vward-cron-supervisor-watch.cron.fail; fi
 * * * * * /opt/bin/vward-wan-guard.sh > /tmp/vward-wan-guard.cron.out 2>&1; RC=$?; date > /tmp/vward-wan-guard.cron.last; echo $RC > /tmp/vward-wan-guard.cron.rc
 17 * * * * /opt/bin/vward-housekeeping.sh > /tmp/vward-housekeeping.cron.out 2>&1; RC=$?; date > /tmp/vward-housekeeping.cron.last; echo $RC > /tmp/vward-housekeeping.cron.rc; if [ $RC -eq 0 ]; then date > /tmp/vward-housekeeping.cron.ok; else date > /tmp/vward-housekeeping.cron.fail; fi
-* * * * * /opt/bin/vward-ads-privacy-scheduler.sh > /tmp/vward-ads-scheduler.cron.out 2>&1; RC=$?; date > /tmp/vward-ads-scheduler.cron.last; echo $RC > /tmp/vward-ads-scheduler.cron.rc; if [ $RC -eq 0 ]; then date > /tmp/vward-ads-scheduler.cron.ok; else date > /tmp/vward-ads-scheduler.cron.fail; fi
+*/5 * * * * /opt/bin/vward-ads-privacy-scheduler.sh > /tmp/vward-ads-scheduler.cron.out 2>&1; RC=$?; date > /tmp/vward-ads-scheduler.cron.last; echo $RC > /tmp/vward-ads-scheduler.cron.rc; if [ $RC -eq 0 ]; then date > /tmp/vward-ads-scheduler.cron.ok; else date > /tmp/vward-ads-scheduler.cron.fail; fi
+* * * * * /opt/bin/vward-ads-privacy-scheduler.sh dns > /tmp/vward-ads-dns-tick.cron.out 2>&1; RC=$?; date > /tmp/vward-ads-dns-tick.cron.last; echo $RC > /tmp/vward-ads-dns-tick.cron.rc
 */5 * * * * /opt/bin/vward-wifi-client-scheduler.sh > /tmp/vward-wifi-client-guard.cron.out 2>&1; RC=$?; date > /tmp/vward-wifi-client-guard.cron.last; echo $RC > /tmp/vward-wifi-client-guard.cron.rc; if [ $RC -eq 0 ]; then date > /tmp/vward-wifi-client-guard.cron.ok; else date > /tmp/vward-wifi-client-guard.cron.fail; fi'
 
 # Init scripts beta owns that dev replaces with differently-named ones and
@@ -242,7 +243,7 @@ add_dev_cron_lines() {
     crontab_cmd -l > "$tmp" 2>/dev/null || : > "$tmp"
     printf '%s\n' "$DEV_CRONTAB" | while IFS= read -r line; do
         [ -n "$line" ] || continue
-        marker=$(printf '%s\n' "$line" | grep -oE '/opt/(bin|etc/init\.d)/[A-Za-z0-9_.-]+' | head -n 1)
+        marker=$(printf '%s\n' "$line" | grep -oE '/opt/(bin|etc/init\.d)/[A-Za-z0-9_.-]+( [a-z][a-z-]*)?' | head -n 1)
         [ -n "$marker" ] || continue
         grep -qF "$marker" "$tmp" || printf '%s\n' "$line" >> "$tmp"
     done

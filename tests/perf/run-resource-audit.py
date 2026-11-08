@@ -38,7 +38,9 @@ FAKES = {"/opt/bin/curl", "/opt/bin/ping", "/opt/bin/nslookup", "/opt/bin/wg", "
 
 # Periodic jobs from config/cron/root.crontab: (name, command, runs per day).
 JOBS = [
-    ("route-engine watchdog (S91)", "/opt/etc/init.d/S91vward-route-engine start", 1440),
+    # Owner 08.11: no per-minute cron watchdog; the components agent starts S91 only when the
+    # engine is gone. Still measured (its budget), counted 0 a day.
+    ("route-engine watchdog (S91)", "/opt/etc/init.d/S91vward-route-engine start", 0),
     ("tunnel health", "/opt/bin/vward-tunnel-health.sh", 1440),
     ("tunnel guard", "/opt/bin/vward-tunnel-guard.sh", 1440),
     ("runtime watchdog (S92)", "/opt/etc/init.d/S92vward-runtime start", 1440),
@@ -46,7 +48,8 @@ JOBS = [
     # The scheduler starts the DNS guard on the minutes of uptime divisible by 5 (fix.32): its cost
     # depended on the clock when it was measured (CI 2026-10-24: 31-32 processes on dev and on the
     # branch, 24-25 locally). Both minutes measured, the uptime fixed (VWARD_UPTIME_FILE).
-    ("ads scheduler", "/opt/bin/vward-ads-privacy-scheduler.sh", 1152, {"VWARD_UPTIME_FILE": "/emu/uptime-minute-1"}),
+    # Every 5 minutes since 08.11 (owner): each run is the DNS guard minute (its own 5-minute mark).
+    ("ads scheduler", "/opt/bin/vward-ads-privacy-scheduler.sh", 0, {"VWARD_UPTIME_FILE": "/emu/uptime-minute-1"}),
     ("ads scheduler (DNS guard minute)", "/opt/bin/vward-ads-privacy-scheduler.sh", 288, {"VWARD_UPTIME_FILE": "/emu/uptime-minute-5"}),
     ("route reconciler", "/opt/bin/vward-route-reconciler.sh", 288),
     ("Wi-Fi scheduler", "/opt/bin/vward-wifi-client-scheduler.sh", 288),

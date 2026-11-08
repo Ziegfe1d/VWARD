@@ -327,6 +327,50 @@ if [ -s "$ADS_ETC_DIR/agh-api.auth" ] && [ ! -e "$ADS_ETC_DIR/clients-sync.disab
     rm -f "$CRON_NEW"
 fi
 
+# ---------- Schedules of the owner's decision 08.11 (speed) ----------
+# Installed routers keep their crontab across updates (the installer only adds missing lines),
+# so the new defaults come here, each with a file that turns it back:
+#   the ads scheduler every 5 minutes        back: /opt/etc/vward/ads-scheduler.every-minute
+#   (its DNS guard keeps a minute line of its own, added when missing)
+#   no per-minute S91 cron watchdog (the     back: /opt/etc/vward/route-engine.cron-watchdog
+#   components agent keeps the route engine running)
+# The crontab before a change goes to the backups (cron-old); one crontab write a change at most.
+cron_set_schedule()
+{
+    [ -f "$CRON_ROOT" ] || return 0
+    CS_NEW="$R/tmp/vward-housekeeping-cron.$$"
+    CS_ADS=1; [ ! -e "$R/opt/etc/vward/ads-scheduler.every-minute" ] || CS_ADS=0
+    CS_S91=1; [ ! -e "$R/opt/etc/vward/route-engine.cron-watchdog" ] || CS_S91=0
+    awk -v ads="$CS_ADS" -v s91="$CS_S91" '
+        $0 ~ /^[ \t]*#/ && index($0, "# off: the components agent keeps it running # ") == 1 {
+            if (!s91) {print substr($0, length("# off: the components agent keeps it running # ") + 1); next}
+            print; next
+        }
+        /^[ \t]*#/ {print; next}
+        $6 == "/opt/bin/vward-ads-privacy-scheduler.sh" && $7 == "dns" {dns = 1}
+        $6 == "/opt/bin/vward-ads-privacy-scheduler.sh" && $7 != "dns" && $2 == "*" && $3 == "*" && $4 == "*" && $5 == "*" {
+            if (ads && $1 == "*") {print "*/5" substr($0, 2); next}
+            if (!ads && $1 == "*/5") {print "*" substr($0, 4); next}
+        }
+        $1 == "*" && $2 == "*" && $3 == "*" && $4 == "*" && $5 == "*" && $6 == "/opt/etc/init.d/S91vward-route-engine" && $7 == "start" {
+            if (s91) {print "# off: the components agent keeps it running # " $0; next}
+        }
+        {print}
+        END {
+            # The DNS guard keeps its minute on its own line (the scheduler runs every 5 minutes).
+            if (!dns) print "* * * * * /opt/bin/vward-ads-privacy-scheduler.sh dns > /tmp/vward-ads-dns-tick.cron.out 2>&1; RC=$?; date > /tmp/vward-ads-dns-tick.cron.last; echo $RC > /tmp/vward-ads-dns-tick.cron.rc"
+        }' "$CRON_ROOT" > "$CS_NEW" 2>/dev/null || { rm -f "$CS_NEW"; return 0; }
+    if cmp -s "$CS_NEW" "$CRON_ROOT"; then rm -f "$CS_NEW"; return 0; fi
+    if mkdir -p "$CRON_OLD" && cp -p "$CRON_ROOT" "$CRON_OLD/root.before-schedule-$(date +%Y%m%d%H%M%S)" &&
+       "${VWARD_CRONTAB:-crontab}" -c "$CRON_DIR" "$CS_NEW" >/dev/null 2>&1; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|cron_schedule=set|ads_every_5=$CS_ADS|s91_cron_off=$CS_S91" >> "$HOUSE_LOG"
+    else
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|cron_schedule=kept" >> "$HOUSE_LOG"
+    fi
+    rm -f "$CS_NEW"
+}
+cron_set_schedule
+
 # ---------- One-time move to Update Engine 2 ----------
 # Engine 1 cannot read the per-file feed and cannot replace itself.  This hourly
 # job moves it over once, without a command: the signed v2 manifest is checked
