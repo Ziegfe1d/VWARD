@@ -96,9 +96,9 @@ func sortStrings(a []string) { sort.SliceStable(a, func(i, j int) bool { return 
 // Choice is vward_routing_choice LEDGER SID ACTION TARGET DNS EXPECTED_REV.
 func Choice(ledger, sid, action, target, dns, expected string) (string, error) {
 	type row struct {
-		rev                 float64
-		mode, tgt, pol      string
-		floor               float64
+		rev            float64
+		mode, tgt, pol string
+		floor          float64
 	}
 	rows := map[string]*row{}
 	var keys []string
