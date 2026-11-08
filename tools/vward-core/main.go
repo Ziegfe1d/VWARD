@@ -75,7 +75,7 @@ func probe(args []string) {
 	c := rci.New(*addr, true)
 	fmt.Println("RCI_PROBE=read-only")
 	fmt.Println("endpoint\tok\tms\tbytes\tshape")
-	paths := []string{"show/version", "show/running-config", "object-group/fqdn", "dns-proxy", "dns-proxy/route", "dns-proxy/filter",
+	paths := []string{"show/version", "show/running-config", "object-group/fqdn", "dns-proxy", "dns-proxy/route",
 		"ip/route", "ip/name-server", "show/object-group/fqdn", "show/interface", "show/internet/status", "show/ip/hotspot"}
 	for _, p := range paths {
 		t0 := time.Now()
@@ -230,17 +230,9 @@ func dryRun(args []string) {
 			ns16++
 		}
 	}
-	filt := "unread"
-	if b, err := c.Get("dns-proxy/filter"); err == nil {
-		fm := &ndm.Model{Groups: map[string]*ndm.Group{}, Read: map[string]bool{}}
-		if ndm.FilterFromRCI(b, fm) == nil {
-			filt = fmt.Sprintf("%d (shape %s)", fm.FilterNext, ndm.Shape(b, 3))
-			base.Read["filter"] = true
-		}
-	}
-	fmt.Printf("PROTECTED ip_route_OpkgTun4=%d name_server_OpkgTun4=%d nextdns_lines_in_config=%d nextdns_in_dns_proxy_filter=%s dns_proxy_other_lines=%d\n",
-		g8, ns16, fullModel.NextDNS, filt, len(fullModel.DNSOther))
-	fmt.Println("PROTECTION=allowlist (only VWARD's groups, their routes and VWARD's Smart DNS rows; nothing naming NextDNS; independent of what is found)")
+	fmt.Printf("PROTECTED ip_route_OpkgTun4=%d name_server_OpkgTun4=%d dns_proxy_other_lines=%d\n",
+		g8, ns16, len(fullModel.DNSOther))
+	fmt.Println("PROTECTION=allowlist (only VWARD's groups, their routes and VWARD's Smart DNS rows; no write into dns-proxy filter/profiles)")
 
 	// Desired image of the owned service groups from the saved choices (enabled.tsv):
 	// includes as they are, one route to the pinned tunnel («auto» = the default tunnel).

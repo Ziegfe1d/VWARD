@@ -66,16 +66,6 @@ func (r *RCI) Read(areas []string) (*ndm.Model, error) {
 			}
 		case "routes", "doh":
 			needDNS = true
-		case "filter":
-			if err := r.timed("narrow:filter", func() error {
-				b, err := r.C.Get("dns-proxy/filter")
-				if err != nil {
-					return err
-				}
-				return ndm.FilterFromRCI(b, m)
-			}); err != nil {
-				return nil, fmt.Errorf("dns-proxy filter: %w", err)
-			}
 		default:
 			return nil, fmt.Errorf("unknown area %q", a)
 		}

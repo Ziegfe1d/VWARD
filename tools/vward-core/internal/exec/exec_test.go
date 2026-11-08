@@ -78,7 +78,7 @@ func setup(t *testing.T, cfg string) *env {
 }
 
 func (e *env) model(t *testing.T) *ndm.Model {
-	m, err := e.r.Read([]string{"groups", "routes", "doh", "filter"})
+	m, err := e.r.Read([]string{"groups", "routes", "doh"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func protectedIntact(t *testing.T, e *env) {
 		}
 	}
 	if !found {
-		t.Fatal("NextDNS row gone")
+		t.Fatal("foreign Smart DNS row gone")
 	}
 }
 
@@ -223,12 +223,12 @@ func TestProtectedRefused(t *testing.T) {
 			t.Fatal("ip route must be protected")
 		}
 	}
-	for _, c := range []string{"no ip name-server 8.8.8.8 youtube.com on OpkgTun4", "dns-proxy no https upstream https://dns.nextdns.io/abc dnsm on ISP domain nextdns.example"} {
+	for _, c := range []string{"no ip name-server 8.8.8.8 youtube.com on OpkgTun4", "dns-proxy filter profile DnsProfile0 tls upstream 1.1.1.1"} {
 		if bad, _ := plan.DefaultProtected(c); !bad {
 			t.Fatalf("%s must be protected", c)
 		}
 	}
-	// A desired image that would remove the NextDNS row (not owned) plans nothing for it.
+	// A desired image that would remove a foreign Smart DNS row (not owned) plans nothing for it.
 	pl, err := plan.Build(m, plan.Desired{DoH: []plan.DoHRow{}, OwnedDoH: map[string]bool{}}, nil)
 	if err != nil || len(pl.Steps) != 0 {
 		t.Fatalf("%v %+v", err, pl)
@@ -325,37 +325,43 @@ func TestDoHLimit(t *testing.T) {
 	protectedIntact(t, e)
 }
 
-// Owner 08.11: NextDNS lives in dns-proxy/filter. Smart DNS rows are never written without that
-// part read, and no command naming NextDNS or outside the allowlist ever leaves the core, whether
-// NextDNS was found or not.
-func TestNextDNSProtectionIndependentOfDetection(t *testing.T) {
+// Owner 08.11: no write into Keenetic's DNS filter or its profiles, ever (every form, with or
+// without «no», and not the whole dns-proxy); Smart DNS rows do not depend on reading them.
+func TestNoWriteIntoDNSFilter(t *testing.T) {
 	e := setup(t, ownerCfg)
-	m, err := e.r.Read([]string{"groups", "routes", "doh"}) // filter not read
+	m, err := e.r.Read([]string{"groups", "routes", "doh"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := plan.Desired{DoH: []plan.DoHRow{{URL: "https://smart.example/x", Iface: "ISP", Domain: "chatgpt.com"}}, OwnedDoH: map[string]bool{}}
-	p, err := plan.Build(m, want, nil)
-	if err != nil || len(p.Steps) != 0 || len(p.Refused) != 1 || !strings.Contains(p.Refused[0], "dns-filter-unread") {
-		t.Fatalf("no filter read: nothing written: %v %+v", err, p)
+	if p, err := plan.Build(m, want, nil); err != nil || len(p.Steps) != 1 {
+		t.Fatalf("own Smart DNS row: %v %+v", err, p)
 	}
-	full := e.model(t)
-	if full.FilterNext == 0 {
-		t.Fatalf("NextDNS not found in dns-proxy/filter: %q", full.Filter)
-	}
-	// Even "found nothing" never allows a command outside the allowlist.
-	full.FilterNext, full.NextDNS = 0, 0
-	for _, bad := range []plan.Step{
-		{Area: "doh", Cmd: "dns-proxy filter profile DnsProfile0 nextdns off", Undo: "x"},
-		{Area: "doh", Cmd: "dns-proxy no filter engine", Undo: "x"},
-		{Area: "group:domain-list0", Cmd: "no object-group fqdn domain-list0 include t.me", Undo: "x"},
-		{Area: "doh", Cmd: "dns-proxy https upstream https://dns.nextdns.io/abc dnsm on ISP domain x.example", Undo: "x"},
+	own := map[string]bool{"domain-list7": true}
+	for _, bad := range []string{
+		"dns-proxy filter profile DnsProfile0 tls upstream 1.1.1.1",
+		"dns-proxy no filter engine",
+		"dns-proxy filter engine public",
+		"no dns-proxy filter profile DnsProfile0",
+		"dns-proxy filter profile DnsProfile0 https upstream https://smart.example/x",
+		"no dns-proxy",
+		"DNS-PROXY  FILTER profile X",
+		"ip hotspot host 00:11:22:33:44:55 filter profile DnsProfile0",
 	} {
-		if bad2, _ := plan.DefaultProtected(bad.Cmd); bad2 {
-			continue
+		if p, _ := plan.DefaultProtected(bad); !p {
+			t.Fatalf("%q must be protected", bad)
 		}
-		if err := plan.Check(bad.Cmd, plan.Desired{OwnedGroups: map[string]bool{"domain-list7": true}}); err == nil {
-			t.Fatalf("%q must not be allowed", bad.Cmd)
+		if err := plan.Check(bad, plan.Desired{OwnedGroups: own}); err == nil {
+			t.Fatalf("%q must not be allowed", bad)
+		}
+	}
+	for _, ok := range []string{
+		"dns-proxy https upstream https://smart.example/x dnsm on ISP domain chatgpt.com",
+		"dns-proxy no https upstream https://smart.example/x dnsm on ISP domain chatgpt.com",
+		"dns-proxy route object-group domain-list7 OpkgTun4 auto",
+	} {
+		if p, why := plan.DefaultProtected(ok); p {
+			t.Fatalf("%q protected by mistake: %s", ok, why)
 		}
 	}
 }

@@ -194,6 +194,8 @@ vrl_context() {
 # A request receipt proves only dispatch. Only the waiting owner may record
 # successful transport completion AND fresh readback; matching bytes do not ACK.
 vrl_native_exec() (
+    # Owner 08.11: no write into Keenetic's DNS filter or its profiles (nor removal of dns-proxy).
+    case " $1 " in *' dns-proxy filter'*|*' dns-proxy no filter'*|*' filter profile '*|' no dns-proxy ') return 75 ;; esac
     vrb_worker_context && vrb_self_admit routing-publisher || return 75
     : "${vrb_t:?}"
     IFS=' ' read -r vrb_pub_pid _ < /proc/self/stat || return 75

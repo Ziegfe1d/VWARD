@@ -1,7 +1,7 @@
 // Package plan turns a desired state of VWARD's own objects into Keenetic commands, each
 // with its inverse and the area it changes. It never emits a command for an object VWARD
 // does not own, and refuses outright any command on a protected object (the owner's 8
-// Google subnets, the 16 «ip name-server ... on OpkgTun4» rules, NextDNS rows, foreign or
+// Google subnets, the 16 «ip name-server ... on OpkgTun4» rules, DNS filter profiles, foreign or
 // unknown groups).
 package plan
 
@@ -59,20 +59,48 @@ type Plan struct {
 type Protected func(cmd string) (bool, string)
 
 // DefaultProtected: the owner's fixed objects (ROADMAP 4.3/§7): any «ip route» or
-// «ip name-server» (VWARD's routing core never writes them), NextDNS rows, OpkgTun4
-// name servers.
+// «ip name-server» (VWARD's routing core never writes them), and Keenetic's DNS filter
+// profiles (owner 08.11: «dns-proxy filter ...», «filter profile ...», the whole dns-proxy):
+// no write into them, whatever they hold.
 func DefaultProtected(cmd string) (bool, string) {
 	f := strings.Fields(strings.TrimPrefix(cmd, "no "))
 	if len(f) >= 2 && f[0] == "ip" && (f[1] == "route" || f[1] == "name-server") {
 		return true, "static routes and name servers are never written by the routing core"
 	}
-	if strings.Contains(strings.ToLower(cmd), "nextdns") {
-		return true, "NextDNS rows are the owner's"
+	if FilterWrite(cmd) {
+		return true, "DNS filter profiles are never written"
 	}
 	if f2 := strings.Fields(cmd); len(f2) >= 2 && (f2[0] == "system" || f2[0] == "erase" || f2[0] == "copy") && !(len(f2) == 3 && f2[1] == "configuration" && f2[2] == "save") {
 		return true, "system commands"
 	}
 	return false, ""
+}
+
+// FilterWrite: cmd writes into Keenetic's DNS filter or its profiles (any form, with or
+// without «no»), or removes the whole dns-proxy (which holds them).
+func FilterWrite(cmd string) bool {
+	f := strings.Fields(strings.ToLower(cmd))
+	if len(f) > 0 && f[0] == "no" {
+		f = f[1:]
+	}
+	if len(f) == 1 && f[0] == "dns-proxy" {
+		return true
+	}
+	if len(f) >= 2 && f[0] == "dns-proxy" {
+		g := f[1:]
+		if g[0] == "no" {
+			g = g[1:]
+		}
+		if len(g) > 0 && g[0] == "filter" {
+			return true
+		}
+	}
+	for i := 0; i+1 < len(f); i++ {
+		if f[i] == "filter" && f[i+1] == "profile" {
+			return true
+		}
+	}
+	return false
 }
 
 func set(a []string) map[string]bool {
@@ -215,8 +243,8 @@ func Build(cur *ndm.Model, want Desired, protected Protected) (*Plan, error) {
 			if bad, why := protected(c); bad {
 				return nil, fmt.Errorf("plan: protected object in %q: %s", c, why)
 			}
-			// Allowlist (owner 08.11: NextDNS protected even when it is not found): only these
-			// forms on VWARD's own objects ever leave the core; anything else stops the plan.
+			// Allowlist: only these forms on VWARD's own objects ever leave the core; anything
+			// else stops the plan.
 			if why := allowed(c, want); why != "" {
 				return nil, fmt.Errorf("plan: %q is not a command the routing core may send: %s", c, why)
 			}
@@ -250,7 +278,7 @@ func sameSet(a, b []string) bool {
 //
 //	[no ]object-group fqdn OWNED [include|exclude DOMAIN | description TEXT]
 //	dns-proxy [no ]route object-group OWNED|MANAGED TARGET [auto]
-//	dns-proxy [no ]https upstream URL dnsm [on IFACE] domain DOMAIN   (VWARD's rows; never NextDNS)
+//	dns-proxy [no ]https upstream URL dnsm [on IFACE] domain DOMAIN   (VWARD's rows)
 //	system configuration save
 func allowed(cmd string, want Desired) string {
 	if cmd == "system configuration save" {
@@ -260,8 +288,8 @@ func allowed(cmd string, want Desired) string {
 	if len(f) > 0 && f[0] == "no" {
 		f = f[1:]
 	}
-	if strings.Contains(strings.ToLower(cmd), "next") {
-		return "names NextDNS"
+	if FilterWrite(cmd) {
+		return "DNS filter profiles are never written"
 	}
 	switch {
 	case len(f) >= 3 && f[0] == "object-group" && f[1] == "fqdn":
@@ -308,14 +336,6 @@ func (p *Plan) doh(cur *ndm.Model, want Desired) error {
 	}
 	if !cur.Read["doh"] {
 		return fmt.Errorf("plan: area doh not read: unknown, no plan")
-	}
-	// Smart DNS rows share dns-proxy with the owner's filter profiles (NextDNS): without that part
-	// read and recognised, no row is written (not found is not «free to change»).
-	if !cur.Read["filter"] {
-		for _, r := range want.DoH {
-			p.Refused = append(p.Refused, r.Raw()+": dns-filter-unread")
-		}
-		return nil
 	}
 	limit := want.DoHLimit
 	if limit <= 0 {

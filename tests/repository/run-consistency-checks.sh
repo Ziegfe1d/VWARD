@@ -217,6 +217,7 @@ python3 tests/repository/check-smartdns-orphan-clear.py || fail "fix.35.3 Smart 
 python3 tests/repository/check-doh-alive.py || fail "fix.35.4 Smart DNS probe: a whole DNS answer, not HTTP 200; cache key without cksum"
 python3 tests/repository/check-smartdns-keenetic-forms.py || fail "Smart DNS in Keenetic: refused forms journaled, shorter forms tried"
 python3 tests/repository/check-smartdns-feature.py || fail "Smart DNS switch (owner 08.11)"
+python3 tests/repository/check-dns-filter-no-write.py || fail "no write into the DNS filter profiles (owner 08.11)"
 python3 tests/repository/check-component-ops.py || fail "components: AdGuard Home off, on, setup, removal"
 python3 tests/repository/check-policy-audit-tunnel.py || fail "IP categories judged only through a working tunnel"
 python3 tests/repository/check-policy-audit-pause.py || fail "IP categories' night check waits while Keenetic is busy, reasons in its summary"

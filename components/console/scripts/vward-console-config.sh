@@ -395,6 +395,8 @@ routing_operation_check() {
 }
 
 ndm() {
+    # Owner 08.11: no write into Keenetic's DNS filter or its profiles (nor removal of dns-proxy).
+    case " $1 " in *' dns-proxy filter'*|*' dns-proxy no filter'*|*' filter profile '*|' no dns-proxy ') NDM_CMD=$1; NDM_REPLY='refused: DNS filter profiles are never written'; return 75 ;; esac
     _crg_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
     if [ -e "$_crg_root" ] || [ -L "$_crg_root" ]; then routing_native_check "$1" || return 75;fi
     out=$("$NDMC" -c "$1" 2>&1)
@@ -415,6 +417,8 @@ ndm() {
 # preshared).  It reaches the router in the body of an RCI request, read from a
 # root-only file, never in a process's arguments, which any process list shows.
 ndm_secret() {
+    # Owner 08.11: no write into Keenetic's DNS filter or its profiles (nor removal of dns-proxy).
+    case " $1 " in *' dns-proxy filter'*|*' dns-proxy no filter'*|*' filter profile '*|' no dns-proxy ') return 1 ;; esac
     case "$1" in *'"'*|*"$(printf '\134')"*) return 1 ;; esac
     NS_FILE=$(umask 077; mktemp /tmp/vward-console-rci.XXXXXX 2>/dev/null) || { NS_FILE=; return 1; }
     printf '[{"parse":"%s"}]\n' "$1" > "$NS_FILE" || return 1

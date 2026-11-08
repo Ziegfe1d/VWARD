@@ -250,6 +250,8 @@ prefix_mask()
 ndm()
 {
     CMD="$1"
+    # Owner 08.11: no write into Keenetic's DNS filter or its profiles (nor removal of dns-proxy).
+    case " $1 " in *' dns-proxy filter'*|*' dns-proxy no filter'*|*' filter profile '*|' no dns-proxy ') log "NDM_REFUSED cmd=$CMD reason=dns-filter"; return 1 ;; esac
 
     OUT="$(ndmc -c "$CMD" 2>&1)"
     RC=$?
