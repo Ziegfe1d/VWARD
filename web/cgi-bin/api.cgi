@@ -132,6 +132,19 @@ ndm_cached()
     [ -z "${VWARD_CONSOLE_CACHE_TTL:-}" ] || nc_ttl=$VWARD_CONSOLE_CACHE_TTL
     # Keenetic's configuration: the copy every VWARD agent shares (one read, not one per reader).
     if [ "$1" = running ] && [ -z "${4:-}" ] && [ "$nc_ttl" -gt 0 ] 2>/dev/null && command -v vward_keenetic_config >/dev/null 2>&1; then
+        # A page (GET) opens at once (owner 08.11): a copy older than the TTL but younger than
+        # CONFIG_STALE is shown now and renewed in the background for the page's next refresh. Every
+        # change VWARD makes drops the copy, so after a change only a fresh read is ever shown.
+        if [ "${REQUEST_METHOD:-GET}" = GET ] && command -v _vward_kc_fresh >/dev/null 2>&1 &&
+           ! _vward_kc_fresh "$nc_ttl" && _vward_kc_fresh "${VWARD_CONSOLE_CONFIG_STALE:-300}" &&
+           cat "$VWARD_KCACHE/running-config" 2>/dev/null; then
+            (umask 077; mkdir -p "$NDM_CACHE_DIR") 2>/dev/null
+            [ -z "$(find "$NDM_CACHE_DIR/running-refresh.lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] || rmdir "$NDM_CACHE_DIR/running-refresh.lock" 2>/dev/null
+            if mkdir "$NDM_CACHE_DIR/running-refresh.lock" 2>/dev/null; then
+                ( vward_keenetic_config "$nc_ttl" >/dev/null 2>&1; rmdir "$NDM_CACHE_DIR/running-refresh.lock" ) </dev/null >/dev/null 2>&1 &
+            fi
+            return 0
+        fi
         vward_keenetic_config "$nc_ttl"; return
     fi
     if [ "$nc_ttl" -gt 0 ] 2>/dev/null && [ -r "$nc_file" ]; then

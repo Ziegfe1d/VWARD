@@ -78,6 +78,8 @@ with tempfile.TemporaryDirectory() as tmp:
         "VWARD_CONSOLE_ETC": str(etc), "VWARD_ROUTE_STATE": str(state),
         "VWARD_CONSOLE_BACKUP_DIR": str(tmp / "backup"), "VWARD_CONSOLE_AUDIT_LOG": str(tmp / "audit.log"),
         "VWARD_ROUTE_CHANGE_LOCK": str(tmp / "change.lock"), "VWARD_NDMC": str(ndmc),
+        "VWARD_CONSOLE_EDIT_LOCK": str(tmp / "edit.lock"), "VWARD_CONSOLE_SETTINGS_LOCK": str(tmp / "settings.lock"),
+        "VWARD_AGENTS_CONF": str(tmp / "agents.conf"),
         "VWARD_PROFILE_LIB": str(profile), "VWARD_ROOT_PREFIX": str(tmp / "root"),
         "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
     }
@@ -145,6 +147,18 @@ with tempfile.TemporaryDirectory() as tmp:
     (lock / "pid").unlink(); lock.rmdir()
     if lock.exists():
         fail("change lock must be released")
+
+    # Owner 08.11: a setting no routing step reads does not wait for a routing change (its own lock).
+    elock = tmp / "edit.lock"; elock.mkdir(); (elock / "pid").write_text(f"{os.getpid()}\n")
+    run("agents-mode", "network", "watch", expect="result=changed")
+    run("force-vpn", "add", "x.example", expect="error=route_change_busy", rc=75)
+    (elock / "pid").unlink(); elock.rmdir()
+    slock = tmp / "settings.lock"; slock.mkdir(); (slock / "pid").write_text(f"{os.getpid()}\n")
+    run("agents-mode", "network", "act", expect="error=settings_busy", rc=75)
+    (slock / "pid").unlink(); slock.rmdir()
+    run("agents-mode", "network", "act", expect="result=changed")
+    if slock.exists():
+        fail("the settings lock must be released")
 
     # AdaptiveAuto: pin moves the domain to the policy group, remove drops it everywhere.
     run("adaptive", "pin", "slow.example", expect="result=changed")

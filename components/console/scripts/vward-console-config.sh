@@ -168,6 +168,7 @@ cleanup() {
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
     [ "$LOCKED" != 1 ] || vward_lock_release "$CHANGE_LOCK"
     [ "$EDIT_LOCKED" != 1 ] || vward_lock_release "$EDIT_LOCK"
+    [ "${SETTINGS_LOCKED:-0}" != 1 ] || vward_lock_release "$SETTINGS_LOCK"
     [ -z "$AI_CHILD_SLOT" ] || rm -f "$AI_CHILD_SLOT"
     [ -z "$AO_TMP" ] || rm -rf "${AO_TMP:?}"
     [ "$EXT_LOCKED" != 1 ] || rm -rf "${EXT_STATE:?}/lock"
@@ -295,6 +296,8 @@ change_lock() {
 # or quick clicks must not lose each other's change.
 EDIT_LOCK=${VWARD_CONSOLE_EDIT_LOCK:-/tmp/vward-console-edit.lock}
 EDIT_LOCKED=0
+SETTINGS_LOCK=${VWARD_CONSOLE_SETTINGS_LOCK:-/tmp/vward-console-settings.lock}
+SETTINGS_LOCKED=0
 edit_lock() {
     dir_lock "$EDIT_LOCK" || die route_change_busy 75
     EDIT_LOCKED=1
@@ -5584,10 +5587,15 @@ if [ -n "${VWARD_AI_CHILD_DIR:-}" ]; then
 fi
 
 case "$OP" in
-    force-vpn|domain-category|tunnel-guard|tunnel-fallback|tunnel-return|tunnel-auto|wan-guard|component|\
-    adaptive-mode|classifier|ip-category|console-auth|console-devices|update-feed|domain-list-watch|list-adopt|\
-    smartdns-guard|smartdns-domain|smartdns-server|smartdns-store|wifi|update|wan-param|wifi-host|service|service-category|services-refresh|ext-auto|firmware|journal|agents-mode|cleanup|reset|package-install)
+    force-vpn|domain-category|tunnel-guard|tunnel-fallback|tunnel-return|tunnel-auto|component|\
+    adaptive-mode|classifier|ip-category|domain-list-watch|list-adopt|\
+    smartdns-guard|smartdns-domain|smartdns-server|smartdns-store|wifi|update|wan-param|wifi-host|service|service-category|services-refresh|firmware|cleanup|reset|package-install)
         edit_lock ;;
+    # Settings no routing step reads (owner 08.11: a switch does not wait for a long routing change):
+    # their own short lock, not the routing edit lock.
+    wan-guard|console-auth|console-devices|update-feed|ext-auto|journal|agents-mode)
+        dir_lock "$SETTINGS_LOCK" || die settings_busy 75
+        SETTINGS_LOCKED=1 ;;
 esac
 
 # Check before any file-only/AGH-only dispatch, then again under CHANGE for

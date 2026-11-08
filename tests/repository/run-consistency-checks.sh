@@ -173,6 +173,7 @@ python3 tests/repository/check-console-log-feed.py || fail "journals as cards wi
 python3 tests/repository/check-policy-shrink-guard.py || fail "IP categories shrink guard"
 python3 tests/repository/check-dns-rules-boot.py || fail "DNS rules of the tunnel after a boot"
 python3 tests/repository/check-observation-defaults.py || fail "Observation by default (owner 08.11)"
+python3 tests/repository/check-panel-stale-config.py || fail "Panel pages open from the shared copy at once (owner 08.11)"
 python3 tests/repository/check-console-doh-retry.py || fail "Smart DNS line removal retried"
 python3 tests/repository/check-boot-env.py || fail "Entware programs do not take the firmware's library path"
 python3 tests/repository/check-fetch-fallback.py || fail "downloads do not survive a curl that crashes on HTTPS"
