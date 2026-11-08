@@ -42,7 +42,7 @@ def fn(name):
 hold = re.search(r"^RC_TURN=0 .*?\nRC_TURN_HOLD=.*?\ncase \"\$RC_TURN_HOLD\".*?esac\n", RECON, re.S | re.M)
 check("hold settings", hold is not None)
 FUNCS = (hold.group(0) if hold else "") + "".join(
-    fn(n) for n in ("rc_now", "rc_turn_fits", "rc_turn_give", "rc_turn_check", "probe_run",
+    fn(n) for n in ("rc_now", "rc_broken", "rc_turn_fits", "rc_turn_name", "rc_turn_give", "rc_turn_check", "probe_run",
                     "probe_result", "probe", "isp_check_ran", "classify_isp_vs_vpn"))
 
 for shell in SHELLS:
@@ -65,7 +65,7 @@ for shell in SHELLS:
             (t / "uptime").write_text("100.00 0\n")
             script = (f'PATH="{t}/bin:$PATH"\n. "{PROFILE}"\nVWARD_TLS_BROKEN_FLAG="{t}/tls.broken"\n'
                       f'VWARD_UPTIME_FILE="{t}/uptime"\nVWARD_TLS_TURN_WAIT_OK=1\n: > "{t}/tls.ok"\n'
-                      f'vward_https_broken() {{ return 1; }}\n{extra}\n{FUNCS}\n'
+                      f'{extra}\n{FUNCS}\n'
                       # Count the takes and the yields (the real take runs inside).
                       f'eval "$(echo "_real_take()"; type vward_tls_take >/dev/null 2>&1 && '
                       f'sed -n "/^vward_tls_take()/,/^}}/p" "{PROFILE}" | sed 1d)"\n'
@@ -102,10 +102,22 @@ for shell in SHELLS:
 
         # 4. Past the hold limit: given back, yield, taken again.
         r = run(f'probe h eth3 192.0.2.1; echo "107.01 0" > "{t}/uptime"; probe h eth3 192.0.2.1; echo "turn=$RC_TURN"\n'
-                f'echo "117.00 0" > "{t}/uptime"; rc_turn_check; [ -d "{t}/tls.probe" ] || echo checked-free; echo "y=$RC_YIELD"')
-        check(f"{n} hold limit", lines("takes") == ["t", "t"] and lines("sleeps") == ["s"] and "turn=1" in r.stdout,
+                f'echo "117.00 0" > "{t}/uptime"; rc_turn_name; [ -d "{t}/tls.probe" ] || echo name-free')
+        check(f"{n} hold limit", lines("takes") == ["t", "t"] and lines("sleeps") == ["s", "s"] and "turn=1" in r.stdout,
               r.stdout + r.stderr + str(lines("takes")) + str(lines("sleeps")))
-        check(f"{n} between names past the limit", "checked-free" in r.stdout and "y=1" in r.stdout, r.stdout + r.stderr)
+        check(f"{n} given back at a new name", "name-free" in r.stdout, r.stdout + r.stderr)
+        r = run(f'probe h eth3 192.0.2.1; rc_turn_name; [ -d "{t}/tls.probe" ] || echo free; echo "turn=$RC_TURN"')
+        check(f"{n} new name within the limit: given back, no wait", "free" in r.stdout and "turn=0" in r.stdout
+              and lines("sleeps") == [], r.stdout + r.stderr + str(lines("sleeps")))
+        # An old crash note (over an hour) does not stop the hold.
+        r = run(f': > "{t}/tls.broken"; touch -d "2 hours ago" "{t}/tls.broken"; probe h eth3 192.0.2.1; probe h eth3 192.0.2.1; rc_turn_give')
+        check(f"{n} old crash note: still one take", lines("takes") == ["t"] and lines("curl.log") == ["owned"] * 2,
+              r.stdout + r.stderr + str(lines("takes")))
+        # A borrowing child that crashes: its sibling runs no curl, the owner gives back without «works».
+        r = run(f'probe h eth3 192.0.2.1; rm -f "{t}/tls.ok"; echo 139 > "{t}/curl.rc"; CR=$(classify_isp_vs_vpn h 192.0.2.1); echo "cr=$CR"\n'
+                f'rc_turn_give; [ -d "{t}/tls.probe" ] || echo free; [ -e "{t}/tls.ok" ] || echo no-ok')
+        check(f"{n} borrowed crash: no second curl", lines("curl.log") == ["owned", "owned"] and "cr=UNKNOWN|139|200|2|000" in r.stdout
+              and "free" in r.stdout and "no-ok" in r.stdout, r.stdout + r.stderr + str(lines("curl.log")))
         r = run(f'probe h eth3 192.0.2.1; echo "106.99 0" > "{t}/uptime"; probe h eth3 192.0.2.1; rc_turn_give')
         check(f"{n} within the limit kept", lines("takes") == ["t"] and lines("sleeps") == [], str(lines("takes")))
 
@@ -144,6 +156,8 @@ check("turn given back before the ISP control", "rc_turn_give; vward_isp_control
 check("turn given back after the loop", after.lstrip().startswith("rc_turn_give"))
 check("cleanup gives the turn back", "rc_turn_give" in fn("cleanup"))
 check("no subshell takes for a removal", "rc_turn_check 2\n        CR=$(classify_isp_vs_vpn" in RECON)
+check("removal gives back before router changes", 'CR=$(classify_isp_vs_vpn "$H" "$MIP")\n        # Router changes follow: the turn is not held during them.\n        rc_turn_give' in RECON)
+check("given back before a name's lookups", "rc_turn_name\n\n    AGH=$(nslookup" in body)
 
 if fails:
     raise SystemExit("RECONCILER_TLS_HOLD=FAIL\n" + "\n".join(fails))

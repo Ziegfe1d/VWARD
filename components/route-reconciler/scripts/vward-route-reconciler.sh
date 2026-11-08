@@ -152,10 +152,12 @@ force_vpn_match()
 # may get «could not check» (UNKNOWN: no state, tried again in 60 s) - as before, when this run
 # took the turn again at once after each check. Past the limit the turn is given back and taken
 # again only a second later (a waiter tries once a second, so it gets the turn first: nobody
-# starves). Given back also before vward_isp_control (it takes its own) and at the end of the
-# run (cleanup). A removal's two checks run in $(...) children of this shell: they use its turn
-# (curl in a descendant of the owner) and never give it back (RC_BORROW).
-RC_TURN=0 RC_TURN_T0= RC_TURN_RC=0 RC_YIELD=0 RC_NOW= RC_BORROW=0
+# starves). Not held while nothing uses it: given back at the start of each name (before its
+# name lookups), after a removal's checks (before ndmc), before vward_isp_control (it takes its
+# own) and at the end of the run (cleanup). A removal's two checks run in $(...) children of
+# this shell: they use its turn (curl in a descendant of the owner), never give it back
+# (RC_BORROW) and run no curl once a crash is noted (a broken curl crashes once).
+RC_TURN=0 RC_TURN_T0= RC_TURN_RC=0 RC_NOW= RC_BORROW=0
 RC_TURN_HOLD=${VWARD_RECONCILER_TURN_HOLD:-10}
 case "$RC_TURN_HOLD" in ''|*[!0-9]*) RC_TURN_HOLD=10 ;; esac
 
@@ -172,11 +174,18 @@ rc_now()
     while :; do case "$RC_NOW" in 0?*) RC_NOW=${RC_NOW#0} ;; *) break ;; esac; done
 }
 
+# rc_broken: a crash of curl noted within the hour (find only for a flag that exists: no
+# process on the healthy path; an old flag left in /tmp does not count).
+rc_broken()
+{
+    [ -e "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" ] && vward_https_broken
+}
+
 # rc_turn_fits [N]: N more checks (3 s each, 1 by default) on the held turn still end within
-# RC_TURN_HOLD; a crash noted meanwhile (a file test, no process) - never.
+# RC_TURN_HOLD; a crash noted meanwhile (by a borrowing child) - never.
 rc_turn_fits()
 {
-    [ ! -e "${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}" ] || return 1
+    rc_broken && return 1
     rc_now || return 1
     case "$RC_TURN_T0" in ''|*[!0-9]*) return 1 ;; esac
     [ "$RC_NOW" -ge "$RC_TURN_T0" ] || return 1
@@ -188,17 +197,32 @@ rc_turn_give()
 {
     [ "$RC_TURN" = 1 ] || return 0
     RC_TURN=0
+    # A child's crash under this turn (its code never reaches here): no «works» note over it.
+    ! rc_broken || RC_TURN_RC=143
     vward_tls_done "$RC_TURN_RC"
 }
 
-# rc_turn_check [N]: between names (or before N checks of a removal) - a turn held past the
-# limit is given back now (a slow name lookup is no reason to keep others waiting).
+# rc_turn_check [N]: before N checks of a removal - a turn held past the limit is given back
+# now, and a second passes before anyone here asks again (a waiter gets it first).
 rc_turn_check()
 {
     [ "$RC_TURN" = 1 ] || return 0
     rc_turn_fits "${1:-1}" && return 0
     rc_turn_give
-    RC_YIELD=1
+    sleep 1
+}
+
+# rc_turn_name: the start of a name - the turn is given back before its name lookups (a slow
+# DNS is no reason to keep others waiting); past the limit a second passes as above.
+rc_turn_name()
+{
+    [ "$RC_TURN" = 1 ] || return 0
+    if rc_turn_fits; then
+        rc_turn_give
+    else
+        rc_turn_give
+        sleep 1
+    fi
 }
 
 # probe_run HOST IFACE IP: PRC|PCODE|PTIME of one check, in this shell. PRC 2 with PCODE 000:
@@ -214,14 +238,9 @@ probe_run()
     # (a waiter tries once a second: it gets the turn first). A borrowing child (probe_result
     # under a held turn) only runs its curl: the owner judges the time and gives it back.
     if [ "$RC_BORROW" = 1 ]; then
-        :
+        ! rc_broken || return 0
     elif [ "$RC_TURN" = 1 ] && ! rc_turn_fits; then
-        RC_TURN=0
-        vward_tls_done "$RC_TURN_RC"
-        RC_YIELD=1
-    fi
-    if [ "$RC_YIELD" = 1 ] && [ "$RC_BORROW" != 1 ]; then
-        RC_YIELD=0
+        rc_turn_give
         sleep 1
     fi
     # curl crashed on HTTPS within the hour (Entware's OpenSSL 3.5.5 on some MIPS routers):
@@ -431,7 +450,10 @@ remove_adaptive()
         return 0
     fi
 
-    MIP=$(
+    # The address the direct checks just used (the loop resolved it a moment ago); resolved
+    # here only when not given.
+    MIP=${2:-}
+    [ -n "$MIP" ] || MIP=$(
         /opt/bin/vward-route-resolve4.sh "$H" 2>/dev/null |
         awk '/^Address [0-9]+:/ &&
              $3 ~ /^[0-9]+\./ {ip=$3}
@@ -449,6 +471,8 @@ remove_adaptive()
         # limit, otherwise the turn is given back first and each child takes and gives its own.
         rc_turn_check 2
         CR=$(classify_isp_vs_vpn "$H" "$MIP")
+        # Router changes follow: the turn is not held during them.
+        rc_turn_give
 
         OLDIFS="$IFS"
         IFS='|'
@@ -646,7 +670,7 @@ while [ "$DONE" -lt "$MAX_PER_RUN" ] &&
     DONE=$((DONE + 1))
 
     [ -z "$H" ] && continue
-    rc_turn_check
+    rc_turn_name
 
     AGH=$(nslookup "$H" $VWARD_DNS_SERVER 2>&1)
 
@@ -673,7 +697,7 @@ while [ "$DONE" -lt "$MAX_PER_RUN" ] &&
         sleep 1
 
         if probe "$H" "$WAN" "$IP"; then
-            remove_adaptive "$H"
+            remove_adaptive "$H" "$IP"
             continue
         fi
     fi
