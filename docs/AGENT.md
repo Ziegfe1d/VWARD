@@ -1175,9 +1175,9 @@ P0-3: `save_state` пишет tmp, проверяет запись, переим
 
 ```sh
 ( set -e; D=/tmp/vward-core-proto; trap 'cd /; rm -rf "$D"' EXIT; rm -rf "$D"; mkdir -p "$D"; cd "$D"
-  case "$(uname -m)" in mips*) if [ "$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null)" = "$(printf '\002')" ]; then A=mips S=ed436d651b6972c3ca67835594b8adb8ebfe287d0d0897d772a731d27b0c197f; else A=mipsle S=a50315b3cbe8822093633f4f24fefd894cf038e72175c229bb3e64ea2b2b1b0b; fi ;; *) echo "не MIPS: $(uname -m)"; exit 1 ;; esac
+  case "$(uname -m)" in mips*) if [ "$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null)" = "$(printf '\002')" ]; then A=mips S=b4b36f17611474b5e7f0bb4d89cc60aaa78a895048ec12f63096f23d73010b48; else A=mipsle S=cb7e1921e93afaca951ae6b305251180f18fa29e1a255ae22e3445060718f9d5; fi ;; *) echo "не MIPS: $(uname -m)"; exit 1 ;; esac
   . /opt/lib/vward/vward-device-profile.sh; vward_profile_load >/dev/null 2>&1 || true
-  vward_fetch -fsS --max-time 180 -o core.gz "https://raw.githubusercontent.com/Ziegfe1d/VWARD/07ea43974aac4c7f2887b3cb410692e71f9f8fc7/tools/vward-core/dist/vward-core-linux-$A.gz"
+  vward_fetch -fsS --max-time 180 -o core.gz "https://raw.githubusercontent.com/Ziegfe1d/VWARD/7aeb767632d313623b923f597e18fe1278dc8931/tools/vward-core/dist/vward-core-linux-$A.gz"
   gunzip -f core.gz; [ "$(sha256sum core | cut -d' ' -f1)" = "$S" ] || { echo "SHA-256 не совпал"; exit 1; }
   chmod 700 core; ./core version; ./core probe; ./core dry-run
   echo "== обращений к Keenetic по часам:"; for f in /tmp/vward-keenetic-calls/*; do [ -f "$f" ] && printf '%s:%s ' "${f##*/}" "$(wc -c < "$f")"; done; echo
@@ -1191,6 +1191,12 @@ P0-3: `save_state` пишет tmp, проверяет запись, переим
 `ccr-71f611bd-ntawe4` перенесена в `work/unified-routing-20261104` перемоткой (`e30ca07..c52e8b3`), ветка — в реестре кандидатов на удаление; дальше работа только в ветке PR38. Команда владельца для текущего выпуска на роутере (policy-reconcile `DRY_RUN=1` для ночного и догоняющего запуска, `dns_rules_check=0`; только чтение / применить с копией и проверкой / откат) — `tools/termius/observe-policy-dns-20261108.txt`, проверена на BusyBox (применение, повтор без изменений, побайтный откат). Команда dry-run: `trap` на EXIT, без строки замера процесса.
 
 Таблица шага 1 — настройками по умолчанию выпуска (`docs/SPEED_AUDIT_2026-11-08.md` §5): policy-reconcile, r6, перенос списков и привязки DNS route-engine — «только наблюдение»; сторож VPN — ≥3 мин по часам + событие sentinel; планировщик рекламы */5 при ежеминутном сторожe DNS; S91-сторож в cron выключен, route-engine держит агент компонентов; обновлятор не переписывает неизменное состояние, отметка ленты — в RAM; установленные роутеры переводит housekeeping, у каждого — файл/ключ возврата. Шаг 2: страницы отвечают из общей копии до 5 мин с фоновым обновлением; немаршрутные настройки — свой замок. Проверки: затронутые repository-тесты, все симуляции обновлятора (38/23/29/2/66), эмулятор автоматики (все сценарии, новые vpn-silent и предел перезапусков). Полный CI не запускался ([skip ci]). Узкие RCI в изменениях — после dry-run владельца.
+
+Форма ответа `dns-proxy/filter` (только чтение; значения строк скрыты, ключи и структура видны) — для теста на реальной форме:
+
+```sh
+curl -s http://127.0.0.1:79/rci/dns-proxy/filter | /opt/bin/jq -c 'walk(if type == "string" then (if ascii_downcase | contains("next") then "…next…" else "…" end) else . end)'
+```
 
 ## 4. Открытые вопросы и нужные данные
 
