@@ -231,7 +231,8 @@ lists_fallback()
     if [ ! -s "$LISTS_FALLBACK" ]; then
         [ ! -e "$FALLBACK_OFF" ] && awk -F '\t' '$11 >= 2 {f = 1} END {exit f ? 0 : 1}' "$LW/q" || return 0
     fi
-    vward_keenetic_config > "$LW/rc"
+    # Only dns-proxy is needed: its RCI subtree when proven (owner 08.11), else the whole config.
+    { if command -v vward_keenetic_parts >/dev/null 2>&1; then vward_keenetic_parts dnsproxy; else vward_keenetic_config; fi; } > "$LW/rc"
     grep -q '^dns-proxy' "$LW/rc" || return 0
     awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "route" && $2 == "object-group" {print $3 "\t" $4}' "$LW/rc" > "$LW/routes"
@@ -783,7 +784,7 @@ lost_sweep()
     ls_at="$DIR/lost-sweep.at"
     [ -z "$(find "$ls_at" -mmin "-${VWARD_LOST_SWEEP_MIN:-30}" 2>/dev/null)" ] || return 0
     : > "$ls_at" 2>/dev/null || return 0
-    ls_cands=$(vward_keenetic_config | awk -v cur="$VWARD_TUNNEL_INTERFACE" '
+    ls_cands=$({ if command -v vward_keenetic_parts >/dev/null 2>&1; then vward_keenetic_parts dnsproxy iproutes; else vward_keenetic_config; fi; } | awk -v cur="$VWARD_TUNNEL_INTERFACE" '
         { for (k = 3; k <= NF; k++) if ($k ~ /^OpkgTun[0-9]+$/ && $k != cur && ($1 == "route" || ($1 == "ip" && $2 == "route"))) print $k }' | sort -u)
     for ls_if in $ls_cands; do
         engine_of "$ls_if" >/dev/null && continue

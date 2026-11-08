@@ -51,16 +51,16 @@ vward_keenetic_config() {{ echo "read $1" >> "{t}/reads"; sleep "${{SLOW:-0}}"; 
             reads = (t / "reads").read_text().splitlines() if (t / "reads").exists() else []
             return r.stdout, reads, took
 
-        out, reads, took = run(age=120, slow=2)
+        out, reads, took = run(age=7200, slow=2)
         if out != "old\n" or took > 1.5:
-            fail(f"{sh} a 2-minute-old copy must be answered at once: {out!r} in {took:.1f} s")
+            fail(f"{sh} a 2-hour-old copy (Panel opened after a pause) must be answered at once: {out!r} in {took:.1f} s")
         time.sleep(2)
         reads = (t / "reads").read_text().splitlines() if (t / "reads").exists() else []
         if reads != ["read 60"] or (kc / "running-config").read_text() != "fresh\n":
             fail(f"{sh} one background refresh renews it: {reads}")
         if (t / "nc/running-refresh.lock").exists():
             fail("the refresh lock goes with the refresh")
-        for label, kw in (("POST", {"method": "POST", "age": 120}), ("no copy", {}), ("10 minutes old", {"age": 600})):
+        for label, kw in (("POST", {"method": "POST", "age": 120}), ("no copy", {}), ("25 hours old", {"age": 90000})):
             out, reads, _ = run(**kw)
             if out != "fresh\n" or reads != ["read 60"]:
                 fail(f"{sh} {label}: a fresh read, waited for: {out!r} {reads}")

@@ -400,7 +400,9 @@ dns_rules_check()
         echo "$NOW_TEXT|DNS_RULES result=no_live_file" >> "$DR_LOG"
         return 0
     fi
-    DR_RUN=$(vward_running_config 2>/dev/null) || return 0
+    # Only «ip name-server»: its RCI subtree when proven (owner 08.11), else the whole config.
+    if command -v vward_keenetic_part >/dev/null 2>&1 && DR_RUN=$(vward_keenetic_part nameservers 2>/dev/null) && [ -n "$DR_RUN" ]; then :
+    else DR_RUN=$(vward_running_config 2>/dev/null) || return 0; fi
     [ -n "$DR_RUN" ] || return 0
     DR_RULES=$(printf '%s\n' "$DR_RUN" | tr -d '\r' | awk -v t="$VWARD_TUNNEL_INTERFACE" '
         $1 == "ip" && $2 == "name-server" && NF == 6 && $5 == "on" && $6 == t {print $3, tolower($4)}')

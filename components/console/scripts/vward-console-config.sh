@@ -460,6 +460,18 @@ snapshot() {
     "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && config_snapshot_valid "$RUNCFG" || die router_config_unavailable
 }
 
+# snapshot_groups: only Keenetic's domain lists in RUNCFG, for a step that reads nothing else:
+# their RCI subtree when proven this boot (owner 08.11: ~0.1 s instead of a whole configuration,
+# ~4 s on the Viva; vward_keenetic_part), else the whole configuration as before.
+snapshot_groups() {
+    [ -n "$RUNCFG" ] || RUNCFG=$(mktemp /tmp/vward-console-config.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    if command -v vward_keenetic_part >/dev/null 2>&1 && vward_keenetic_part groups > "$RUNCFG" 2>/dev/null &&
+       grep -q '^object-group fqdn ' "$RUNCFG"; then
+        return 0
+    fi
+    snapshot
+}
+
 in_group() {
     awk -v g="$1" -v d="$2" '
         /^object-group fqdn / {cur=$3; next}
@@ -509,14 +521,14 @@ drop_line() {
 
 route_group_change() {
     # route_group_change GROUP DOMAIN add|remove: verified, rolled back on failure.
-    snapshot
+    snapshot_groups
     want=0; [ "$3" = add ] && want=1
     have=0; in_group "$1" "$2" && have=1
     [ "$want" != "$have" ] || return 3
     if ! group_set "$1" "$2" "$3"; then
         die router_rejected
     fi
-    snapshot
+    snapshot_groups
     have=0; in_group "$1" "$2" && have=1
     if [ "$want" != "$have" ]; then
         if [ "$3" = add ]; then group_set "$1" "$2" remove; else group_set "$1" "$2" add; fi
@@ -546,7 +558,7 @@ op_list_domain() {
     [ "$2" != "$ADAPTIVE_GROUP" ] && [ "$2" != "${VWARD_POLICY_GROUP:-}" ] || die invalid_group 64
     change_lock
     list_dns_inactive "$2"
-    snapshot
+    snapshot_groups
     grep -q "^object-group fqdn $2\$" "$RUNCFG" || die list_not_found
     ld_has() {
         awk -v g="$2" -v d="$3" -v k="$ld_kind" '
@@ -560,7 +572,7 @@ op_list_domain() {
     if [ "$ld_want" = 1 ]; then ld_cmd="object-group fqdn $2 $ld_kind $3"; ld_undo="no $ld_cmd"
     else ld_cmd="no object-group fqdn $2 $ld_kind $3"; ld_undo="object-group fqdn $2 $ld_kind $3"; fi
     ndm "$ld_cmd" || die router_rejected
-    snapshot
+    snapshot_groups
     ld_have=0; ld_has "$@" && ld_have=1
     [ "$ld_want" = "$ld_have" ] || { ndm "$ld_undo"; die verification_failed; }
     save_router || die config_save_failed
