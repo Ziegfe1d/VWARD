@@ -24,6 +24,11 @@ vrl_agh_observe() {
         else:
             assert r.returncode==3,(r.returncode,r.stdout,r.stderr)
             assert (f.live/'journal/derived/state').read_text()=='unknown\n'
-            assert (f.live/'decision/choices.tsv').read_text()=='schema\t1\n' and (f.live/'decision/proofs.tsv').read_text()==''
+            # Batch executor (owner decision 08.11.2026): the foreign derived
+            # input is found by the ONE shared readback after the batch, so
+            # own later steps were dispatched; none is committed and recovery
+            # compensates each from its own journal record.
+            assert (f.live/'journal/derived/reason').read_text()=='input-changed-during-step\n'
+            assert (f.live/'journal/derived/state').read_text()!='committed\n'
         assert any(c[0]=='POST' for c in f.http_calls),'fixture did not reach physical AGH write'
 print('LIVE_AGH_DERIVED=PASS actual foreign derived-input edit rejected; removing exact relationship check admits it (negative control), no guard weakening')

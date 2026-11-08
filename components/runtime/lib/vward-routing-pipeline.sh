@@ -238,6 +238,7 @@ vrb_publish() (
     [ "$#" -eq 3 ] || return 2
     case $3 in *[!0-9a-f]*) return 2 ;; esac
     [ "${#3}" -eq 64 ] || return 2
+    if vrb_publish_local_kind; then vrb_publish_local "$@";return $?;fi
     vrb_worker_context || return 75
     vrb_self_admit routing-publisher || return 75
     if [ "$1" != - ]; then vrj2_file "$1" && vrb_single_link "$1" || return 75;fi
@@ -278,28 +279,208 @@ vrb_publish() (
     if [ "$1" = - ]; then exec rm -f "$2";fi
     exec mv "$1" "$2"
 )
+# Terminal (committed/compensated) operation whose publisher quiet was fully
+# proven by its coordinator (vrb_quiet_mark): no writer acts on a terminal
+# operation again, so the same plan with the SAME lease names stays quiet.
+# Builtins only; any difference (new lease, other plan/state, damaged marker)
+# makes the caller run the full lease check.
+vrb_pq_settled() {
+    [ -f "$1/quiet" ] && [ ! -L "$1/quiet" ] && [ -O "$1/quiet" ] || return 1
+    vrj_slurp "$1/state";case $vrj_sv in committed|compensated) ;; *) return 1 ;; esac
+    vrj_slurp "$1/plan.sha";vrb_ps_plan=$vrj_sv
+    vrb_ps_names=
+    if [ -e "$1/workers" ] || [ -L "$1/workers" ]; then
+        [ -d "$1/workers" ] && [ ! -L "$1/workers" ] || return 1
+        for vrb_ps_l in "$1/workers"/*; do
+            [ -e "$vrb_ps_l" ] || [ -L "$vrb_ps_l" ] || continue
+            vrb_ps_names="$vrb_ps_names ${vrb_ps_l##*/}"
+        done
+    fi
+    vrj_slurp "$1/quiet"
+    [ "$vrj_sv" = "quiet${vrj_tab}2${vrj_tab}$vrb_ps_plan${vrj_tab}${vrb_ps_names# }" ]
+}
+# Coordinator only, after its own operation became terminal.
+vrb_quiet_mark() {
+    vrj_slurp "$1/state";case $vrj_sv in committed|compensated) ;; *) return 0 ;; esac
+    rm -f "$1/quiet" 2>/dev/null || return 0
+    vrb_publish_quiet "$1" || return 0
+    vrj_slurp "$1/plan.sha";vrb_qm_plan=$vrj_sv
+    vrb_qm_names=
+    if [ -d "$1/workers" ]; then
+        for vrb_qm_l in "$1/workers"/*; do
+            [ -e "$vrb_qm_l" ] || [ -L "$vrb_qm_l" ] || continue
+            vrb_qm_names="$vrb_qm_names ${vrb_qm_l##*/}"
+        done
+    fi
+    vrj2_put "$1/quiet" "quiet${vrj_tab}2${vrj_tab}$vrb_qm_plan${vrj_tab}${vrb_qm_names# }" || rm -f "$1/quiet"
+    return 0
+}
+# Process budget for the plain local-file kinds (manifest, nativeproof,
+# registry) in a forward/inverse step: the SAME guard sequence as the generic
+# path (static checks, then before-lease, after-lease and after-receipt
+# rounds), but facts that cannot change during ONE publication (target label,
+# the plan row's attrs binding, the planned old mode, uid, the source scope)
+# are computed once. EVERY round still re-reads the ancestor chain, the
+# target's metadata (one ls: type/owner/mode/links/size) and its content CAS,
+# and the final round re-hashes the source. Other kinds use the generic path.
+vrb_publish_local_kind() {
+    case ${vrb_role:-} in forward|inverse) ;; *) return 1 ;; esac
+    vrj2_seq "${vrb_active_step:-}" && [ -n "${vrb_t:-}" ] || return 1
+    vrj2_row_fields "$vrb_j/$vrb_op" "$vrb_active_step" || return 1
+    vrb_pk_k=${vrj2_row#*"$vrj_tab"*"$vrj_tab"*"$vrj_tab"};vrb_pk_k=${vrb_pk_k%%"$vrj_tab"*}
+    case $vrb_pk_k in manifest|nativeproof|registry) return 0 ;; *) return 1 ;; esac
+}
+# Dynamic part of vrb_publication_mode for a known label (sets vrb_pl_m and
+# vrb_pl_cur). Same verdicts; owned_data_file + single_link from ONE ls.
+vrb_pl_mode() {
+    vrb_pl_cur=absent
+    if [ -e "$1" ] || [ -L "$1" ]; then
+        if [ "$vrb_pl_label" = enabled ]; then
+            [ -f "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] && [ -r "$1" ] && vrj_ls "$1" || return 75
+            case $vrj_lmode in -rw-------|-r--------|-rw-r--r--) ;; *) return 75 ;; esac
+            case $vrj_lsize in ''|*[!0-9]*) return 75 ;; esac
+            [ "$vrj_lsize" -le 1048576 ] || return 75
+        else vrj2_file "$1" || return 75;fi
+        [ "$vrj_llinks" = 1 ] || return 75
+        vrb_pl_cur="$vrj_lmode $vrj_luid"
+    fi
+    if [ "$vrb_pl_old" = absent ]; then
+        if [ "$vrb_pl_cur" != absent ]; then
+            [ "$vrb_role" = inverse ] && [ "$vrb_pl_cur" = "-rw------- $vrb_pl_uid" ] || return 75
+        fi
+        vrb_pl_m=0600;return 0
+    fi
+    case $vrb_pl_old in
+        "-rw------- $vrb_pl_uid") vrb_pl_m=0600 ;;
+        "-r-------- $vrb_pl_uid") vrb_pl_m=0400 ;;
+        "-rw-r--r-- $vrb_pl_uid") [ "$vrb_pl_label" = enabled ] || return 75;vrb_pl_m=0644 ;;
+        *) return 75 ;;
+    esac
+    if [ "$vrb_pl_cur" = absent ]; then
+        # A plain local kind restores an absent leaf only to its own "-" post.
+        [ "$vrb_role" = inverse ] && [ "$vrb_pl_post" = - ] || return 75
+    else [ "$vrb_pl_cur" = "$vrb_pl_old" ] || return 75;fi
+}
+# Content CAS of the target (vrb_content_cas, same rejection record).
+vrb_pl_cas() {
+    if [ "$vrb_pl_cur" = absent ]; then vrb_pl_have=$vrb_pl_dash
+    else vrb_pl_have=$(vr2_hash "$1") || vrb_pl_have=;fi
+    [ -n "$vrb_pl_have" ] && [ "$vrb_pl_have" = "$2" ] && return 0
+    if printf '%s\n' content-cas > "$vrb_j/$vrb_op/step.$vrb_active_step/rejected"; then vrj2_flush || :;fi
+    return 75
+}
+vrb_publish_local() {
+    vrb_pl_src=$1;vrb_pl_dst=$2;vrb_pl_pre=$3
+    vrb_worker_context || return 75
+    vrb_self_admit routing-publisher || return 75
+    if [ "$1" != - ]; then vrj2_file "$1" && [ "$vrj_llinks" = 1 ] || return 75;fi
+    vrb_data_ancestry "$2" || return 75
+    vrb_pl_label=$(vrb_publication_label "$2") || return 75
+    [ "$vrb_pl_label" != saved-cfg ] || return 75
+    vrj2_file "$vrb_t/inputs.fp" || return 75
+    vrb_pl_attrs=$(vr2_hash "$vrb_t/inputs.fp") || return 75
+    case ",$(printf '%s\n' "$vrj2_row" | cut -f10)," in *",attrs:$vrb_pl_attrs,"*) ;; *) return 75 ;; esac
+    vrb_pl_old=absent;vrb_pl_rows=0
+    set -f
+    while IFS= read -r vrb_pl_line || [ -n "$vrb_pl_line" ]; do
+        # shellcheck disable=SC2086
+        set -- $vrb_pl_line
+        [ "${1:-}" = "$vrb_pl_label" ] || continue
+        vrb_pl_rows=$((vrb_pl_rows+1))
+        if [ "$#" -eq 7 ]; then vrb_pl_old="$6 $7"
+        elif [ "${2:-}" = absent ]; then vrb_pl_old=absent
+        else set +f;return 75;fi
+    done < "$vrb_t/inputs.fp"
+    set +f
+    set -- "$vrb_pl_src" "$vrb_pl_dst" "$vrb_pl_pre"
+    [ "$vrb_pl_rows" -le 1 ] || return 75
+    vrb_pl_uid=$(id -u) || return 75
+    vrj_slurp "$vrb_t/post.$vrb_active_step";vrb_pl_post=$vrj_sv
+    vrb_pl_dash=$(printf '%s\n' - | sha256sum) || return 75;vrb_pl_dash=${vrb_pl_dash%% *}
+    if [ "$1" = - ]; then vrb_pl_scope=$vrb_pl_dash;else vrb_pl_scope=$(vr2_hash "$1") || return 75;fi
+    vrb_pl_mode "$2" && vrb_pub_mode=$vrb_pl_m || return 75
+    vrb_pl_cas "$2" "$3" || return 75
+    [ "$1" = - ] || chmod "$vrb_pub_mode" "$1" || return 1
+    if [ ! -e "$vrb_j/$vrb_op/workers" ]; then mkdir "$vrb_j/$vrb_op/workers" || return 1;fi
+    vrj_dir "$vrb_j/$vrb_op/workers" || return 75
+    IFS=' ' read -r vrb_pub_pid _ < /proc/self/stat || return 1
+    vward_pid_start_var "$vrb_pub_pid" || return 1;vrb_pub_start=$VA_PS
+    vrj_slurp /proc/sys/kernel/random/boot_id
+    printf '%s\n' "$vrj_sv" > "$vrb_j/$vrb_op/workers/$vrj2_boot.$vrb_pub_pid.$vrb_pub_start" || return 1
+    vr2_hash "$vrb_j/$vrb_op/workers/$vrj2_boot.$vrb_pub_pid.$vrb_pub_start" > "$vrb_j/$vrb_op/workers/$vrj2_boot.$vrb_pub_pid.$vrb_pub_start.sha" || return 1
+    vrj2_flush || return 1
+    if [ -f "$vrb_e/publish-pause" ]; then
+        printf '%s\t%s\n' "$vrb_pub_pid" "$vrb_pub_start" > "$vrb_e/publish-waiting" || return 1
+        while [ -f "$vrb_e/publish-pause" ]; do sleep 0.05;done
+    fi
+    vrb_worker_context && vrb_data_ancestry "$2" || return 75
+    vrb_pl_mode "$2" && [ "$vrb_pl_m" = "$vrb_pub_mode" ] || return 75
+    vrb_pl_cas "$2" "$3" || return 75
+    vrb_dm_file=;vrb_dm_scope=;vrb_dm_new=0
+    vrb_pub_scope_known=$vrb_pl_scope
+    vrb_dispatch_mark "$1" "$2" || return 75
+    vrb_pub_scope_known=
+    if [ "$1" = - ]; then vrb_pl_now=$vrb_pl_dash;else vrb_pl_now=$(vr2_hash "$1") || vrb_pl_now=;fi
+    if ! vrb_worker_context || ! vrb_data_ancestry "$2" || ! vrb_pl_mode "$2" || [ "$vrb_pl_m" != "$vrb_pub_mode" ] ||
+       ! vrb_pl_cas "$2" "$3" || [ "$vrb_pl_now" != "$vrb_dm_scope" ]; then
+        # A final guard refusal withdraws this attempt BEFORE exec.
+        if [ "$vrb_dm_new" = 1 ]; then rm -f "$vrb_dm_file" "$vrb_dm_file.sha" && vrj2_flush || return 1;fi
+        return 75
+    fi
+    if [ "$1" = - ]; then exec rm -f "$2";fi
+    exec mv "$1" "$2"
+}
 vrb_publish_quiet() (
     [ ! -L "$1/workers" ] || return 75
+    if vrb_pq_settled "$1"; then return 0;fi
     [ -e "$1/workers" ] || return 0
     vrj_dir "$1/workers" || return 75
-    vrb_pq_boot=$(cat /proc/sys/kernel/random/boot_id) || return 75
-    for vrb_pq_lease in "$1/workers"/*; do
+    # Same value as $(cat /proc/sys/kernel/random/boot_id).
+    vrj_slurp /proc/sys/kernel/random/boot_id;vrb_pq_boot=$vrj_sv
+    [ -n "$vrb_pq_boot" ] || return 75
+    # Process budget: ONE ls -ln (vrj_mc cache: mode/links/uid/size of every
+    # lease) and ONE sha256sum for every lease, then the same per-lease checks
+    # as before with builtins. Anything the batch cannot prove fails closed.
+    vrb_pq_dir=$1
+    vrj_mc_load "$vrb_pq_dir/workers" "$vrb_pq_dir/workers"
+    set --
+    for vrb_pq_lease in "$vrb_pq_dir/workers"/*; do
         [ ! -e "$vrb_pq_lease" ] && [ ! -L "$vrb_pq_lease" ] && continue
         vrj2_file "$vrb_pq_lease" || return 75
         case $vrb_pq_lease in *.sha) vrj2_file "${vrb_pq_lease%.sha}" || return 75;continue ;; esac
-        vrj2_file "$vrb_pq_lease.sha" && [ "$(vr2_hash "$vrb_pq_lease")" = "$(cat "$vrb_pq_lease.sha")" ] || return 75
+        vrj2_file "$vrb_pq_lease.sha" || return 75
+        case $vrb_pq_lease in *'
+'*) return 75 ;; esac
+        set -- "$@" "$vrb_pq_lease"
+    done
+    [ "$#" -gt 0 ] || return 0
+    vrb_pq_sums=$(LC_ALL=C sha256sum "$@" 2>/dev/null) || return 75
+    for vrb_pq_lease in "$@"; do
+        vrb_pq_line=${vrb_pq_sums%%"$vrj_nl"*};vrb_pq_sums=${vrb_pq_sums#"$vrb_pq_line"};vrb_pq_sums=${vrb_pq_sums#"$vrj_nl"}
+        [ "${vrb_pq_line#*  }" = "$vrb_pq_lease" ] || return 75
+        vrb_pq_hash=${vrb_pq_line%%  *}
+        case $vrb_pq_hash in *[!0-9a-f]*) return 75 ;; esac
+        [ "${#vrb_pq_hash}" -eq 64 ] || return 75
+        vrj_slurp "$vrb_pq_lease.sha";[ "$vrb_pq_hash" = "$vrj_sv" ] || return 75
         vrb_pq_key=${vrb_pq_lease##*/}
         vrb_pq_key_boot=${vrb_pq_key%%.*};vrb_pq_key=${vrb_pq_key#*.}
         vrb_pq_pid=${vrb_pq_key%%.*};vrb_pq_start=${vrb_pq_key#*.}
         case $vrb_pq_pid:$vrb_pq_start in *[!0-9:]*|:*|*:) return 75 ;; esac
         # A different boot proves all publishers of that boot gone. Same boot
         # needs both PID and starttime; an unparseable live PID remains unknown.
-        vrb_pq_oldboot=$(cat "$vrb_pq_lease")
+        vrj_slurp "$vrb_pq_lease";vrb_pq_oldboot=$vrj_sv
         [ "$vrb_pq_key_boot" = "$vrb_pq_oldboot" ] || return 75
-        printf '%s\n' "$vrb_pq_oldboot" | grep -Eq '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' || return 75
+        # grep -Eq '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' on one line.
+        vrb_pq_h='[0-9a-f]'
+        # shellcheck disable=SC2254
+        case $vrb_pq_oldboot in
+            $vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h-$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h-$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h-$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h-$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h$vrb_pq_h) ;;
+            *) return 75 ;;
+        esac
         vrb_pq_live=0;vlg_boot="$vrb_pq_boot" vward_lock_gate_live "$vrb_pq_oldboot.$vrb_pq_pid.$vrb_pq_start" || vrb_pq_live=$?
         [ "$vrb_pq_live" = 1 ] || return 75
     done
+    [ -z "$vrb_pq_sums" ] || return 75
 )
 vrb_publish_image() (
     [ "$#" -eq 3 ] || return 2
@@ -637,6 +818,19 @@ vrb_transport_saved() { cmp -s "$(vrb_native_path)" "$vrb_e/saved.cfg"; }
 vrb_transport_requests_quiet() { return 0; }
 vrb_transport_complete() { return 0; }
 vrb_converged_record() { return 0; }
+vrb_inputs_scratch_done() { return 0; }
+vrb_scratch_done() {
+    case ${vrb_parent:-} in "$vrb_j"/.operation.*) ;; *) return 0 ;; esac
+    [ -d "$vrb_parent" ] && [ ! -L "$vrb_parent" ] || return 0
+    if [ "$1" = committed ]; then
+        vrj_slurp "$vrb_j/$vrb_op/state";[ "$vrj_sv" = committed ] || return 0
+        [ -d "$vrb_j/$vrb_op/prepared" ] && cmp -s "$vrb_parent/lowered/plan" "$vrb_j/$vrb_op/plan" &&
+            cmp -s "$vrb_parent/lowered/outcome.json" "$vrb_j/$vrb_op/prepared/outcome.json" || return 0
+    fi
+    rm -rf "$vrb_parent" 2>/dev/null || :
+    vrb_inputs_scratch_done
+    return 0
+}
 vrb_scope_derived_deltas() { return 0; }
 vrb_inputs_refresh() { return 0; }
 
@@ -808,6 +1002,11 @@ vward_routing_pipeline2() (
     if [ "$vrb_result" = 0 ]; then
         vrb_cr_kind=unchanged;grep -q '^step' "$vrb_parent/lowered/plan" && vrb_cr_kind=committed
         vrb_converged_record "$3" "$4" "$5" "$6" "$vrb_outcome_stage" "$vrb_parent/lowered/plan" "$vrb_cr_kind"
+        # Confirmed completion only: scratch of THIS request is no longer
+        # needed (an executed plan, its sidecars and outcome live in the
+        # journal's prepared copy; an unchanged request wrote nothing). An
+        # unknown/failed request keeps its scratch for diagnosis.
+        vrb_scratch_done "$vrb_cr_kind"
     fi
     return "$vrb_result"
 )
@@ -949,16 +1148,12 @@ vrb_execute2_batch() {
             vward_journal2_unknown "$vrb_j" "$vrb_op" unconfirmed-or-refused-write
             printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\t%s\n' "$(vrb_execution_evidence)";return 3
         fi
-        vrb_n=$vrb_batch_from
-        while [ "$vrb_n" -le "$vrb_batch_to" ]; do
-            vrb_post=$(awk -F'\t' -v n="$vrb_n" '$1=="step"&&$2==n{print $7}' "$vrb_t/plan") || return 3
-            if [ "$(cat "$vrb_t/batch/current.$vrb_n")" = "$vrb_post" ] &&
-                ! vrb_dispatch_valid "$vrb_j" "$vrb_op" "$vrb_n" forward "$vrb_post"; then
-                vward_journal2_unknown "$vrb_j" "$vrb_op" matching-image-not-dispatched
-                printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\t%s\n' "$(vrb_execution_evidence)";return 3
-            fi
-            vrb_n=$((vrb_n+1))
-        done
+        # Every step whose readback matches its post-image needs this
+        # operation's own dispatch receipt (one batched verification).
+        if ! vrb_dispatch_valid_range "$vrb_j" "$vrb_op" "$vrb_batch_from" "$vrb_batch_to" "$vrb_t/batch"; then
+            vward_journal2_unknown "$vrb_j" "$vrb_op" matching-image-not-dispatched
+            printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\t%s\n' "$(vrb_execution_evidence)";return 3
+        fi
         vward_journal2_finish_range "$vrb_j" "$vrb_op" "$vrb_gen" "$vrb_t/batch" "$vrb_batch_from" "$vrb_batch_to" || {
             vward_journal2_unknown "$vrb_j" "$vrb_op" incomplete-step
             printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\t%s\n' "$(vrb_execution_evidence)";return 3;
@@ -1121,6 +1316,7 @@ vrb_execute2_save() {
     fi
     vward_journal2_saved "$vrb_j" "$vrb_op" 'done' &&
         vward_journal2_commit "$vrb_j" "$vrb_op" "$vrb_gen" || return 3
+    vrb_quiet_mark "$vrb_j/$vrb_op"
     printf 'outcome\tcommitted\tconfigured\tverified\tfalse\t%s\n' "$(vrb_execution_evidence)"
 }
 
@@ -1230,5 +1426,6 @@ vward_routing_pipeline_recover2() (
     vrb_gen=$(vrb_fresh_stage) || return 3
     printf '%s\n' "$vrb_gen" > "$vrb_t/baseline/generation"
     vward_journal2_abort "$vrb_j" "$vrb_op" "$vrb_gen" "$vrb_t/baseline" || return 75
+    vrb_quiet_mark "$vrb_j/$vrb_op"
     printf 'outcome\tcompensated\tdesired-only\tbaseline\tfalse\t%s\n' "$(vrb_execution_evidence)"
 )

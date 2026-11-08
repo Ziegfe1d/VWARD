@@ -364,9 +364,22 @@ vrl_group_batch() {
         printf '%s\t%s\n' group "$vrl_gb_group" > "$vrl_call/scope" &&
         printf '%s\n' pending > "$vrl_call/request.pending" && vrj2_flush || return 1
     vrb_worker_context || return 75
-    vrl_gb_i=0;vrl_gb_sent=0
+    vrl_gb_i=0;vrl_gb_sent=0;vrl_gb_prev=$(printf '%s\n' "$vrb_write_row" | cut -f6) || return 3
     while IFS="$(printf '\t')" read -r vrl_gb_h vrl_gb_c; do
         vrl_gb_i=$((vrl_gb_i+1))
+        case $vrl_gb_c in
+            "no object-group fqdn $vrl_gb_group")
+                # The only destructive command (the whole group, including
+                # anything added since the pre-batch read): a fresh read right
+                # before it must show exactly the expected own prefix. A
+                # foreign include stops the batch here, unsent (unknown).
+                vrl_refresh < /dev/null || return 75
+                vrb_cfg_image "$vrl_cache/running-config" "$vrl_gb_group" > "$vrl_call/before-delete" || return 75
+                if [ "$(vr2_hash "$vrl_call/before-delete")" != "$vrl_gb_prev" ]; then
+                    printf 'stopped-before\t%s\n' "$vrl_gb_i" > "$vrl_call/status" && vrj2_flush
+                    return 3
+                fi ;;
+        esac
         vrl_gb_sl=${vrl_gb_sums%%"$vrj_nl"*};vrl_gb_sums=${vrl_gb_sums#"$vrl_gb_sl"};vrl_gb_sums=${vrl_gb_sums#"$vrj_nl"}
         [ "${vrl_gb_sl#*  }" = "$vrl_gb_i" ] || return 75
         vrl_gb_rsha=${vrl_gb_sl%%  *}
@@ -387,11 +400,11 @@ vrl_group_batch() {
             [ ! -e "$VWARD_ROOT_PREFIX/tmp/vward-update-requested" ] && [ ! -L "$VWARD_ROOT_PREFIX/tmp/vward-update-requested" ] &&
                 [ ! -e "$VWARD_ROOT_PREFIX/tmp/vward-update.lock" ] && [ ! -L "$VWARD_ROOT_PREFIX/tmp/vward-update.lock" ] || exit 75
             exec "$vrl_ndmc" -c "$vrl_gb_c"
-        ) > "$vrl_call/stdout.$vrl_gb_i" 2> "$vrl_call/stderr.$vrl_gb_i" || vrl_gb_rc=$?
+        ) < /dev/null > "$vrl_call/stdout.$vrl_gb_i" 2> "$vrl_call/stderr.$vrl_gb_i" || vrl_gb_rc=$?
         # A failed/lost reply is UNKNOWN even if the readback later matches:
         # stop here, keep the request pending, never replay or compensate.
         [ "$vrl_gb_rc" = 0 ] && ! grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command)([^a-z]|$)' "$vrl_call/stdout.$vrl_gb_i" "$vrl_call/stderr.$vrl_gb_i" || return 75
-        vrl_gb_sent=$vrl_gb_i
+        vrl_gb_sent=$vrl_gb_i;vrl_gb_prev=$vrl_gb_h
     done < "$vrl_call/command"
     [ "$vrl_gb_sent" = "$vrl_gb_n" ] || return 75
     printf '%s\n' sent-ok > "$vrl_call/status" && vrj2_flush || return 1
@@ -575,6 +588,7 @@ vrl_bind() {
     }
     vrb_group_batch() { vrl_group_batch "$@"; }
     vrb_converged_record() { vrl_converged_record "$@"; }
+    vrb_inputs_scratch_done() { vrl_inputs_scratch_done; }
     vrb_transport_complete() { vrl_transport_complete "$@"; }
     vrb_transport_saved() { vrl_saved; }
     vrb_agh_path() { printf '%s/agh.json\n' "$vrl_cache"; }
@@ -625,6 +639,13 @@ vrl_converged_code() {
     [ "${#vrl_cc_sum}" -eq 64 ] || return 1
     printf '%s\n' "$vrl_cc_sum"
 }
+vrl_converged_decision() {
+    vrl_cd_sum=$(LC_ALL=C sha256sum "$1"/*.tsv 2>/dev/null | sha256sum) || return 1
+    vrl_cd_sum=${vrl_cd_sum%% *}
+    case $vrl_cd_sum in *[!0-9a-f]*|'') return 1 ;; esac
+    [ "${#vrl_cd_sum}" -eq 64 ] || return 1
+    printf '%s\n' "$vrl_cd_sum"
+}
 vrl_converged_journal() {
     vrl_cj=
     for vrl_cj_op in "$1"/*; do
@@ -671,16 +692,29 @@ vrl_converged_try() (
             3:generation) [ -z "$vrl_cv_b" ] && vrj2_gen "$vrl_cv_a" || return 1;vrl_cv_gen=$vrl_cv_a ;;
             4:journal) [ -z "$vrl_cv_b" ] || return 1;vrl_cv_jr=$vrl_cv_a ;;
             5:code) [ -z "$vrl_cv_b" ] || return 1;vrl_cv_code=$vrl_cv_a ;;
-            6:outcome) [ "$vrl_cv_a" = unchanged ] && [ "$vrl_cv_b:$vrl_cv_c:$vrl_cv_d" = configured:verified:false ] &&
+            6:decision) [ -z "$vrl_cv_b" ] || return 1;vrl_cv_dec=$vrl_cv_a ;;
+            7:outcome) [ "$vrl_cv_a" = unchanged ] && [ "$vrl_cv_b:$vrl_cv_c:$vrl_cv_d" = configured:verified:false ] &&
                     [ "$vrl_cv_e" = native ] && [ -z "$vrl_cv_f" ] || return 1
                 vrl_cv_out="outcome$vrj_tab$vrl_cv_a$vrj_tab$vrl_cv_b$vrj_tab$vrl_cv_c$vrj_tab$vrl_cv_d$vrj_tab$vrl_cv_e" ;;
             *) return 1 ;;
         esac
     done < "$vrl_cv"
-    [ "$vrl_cv_n" = 6 ] && [ -n "$vrl_cv_head" ] && [ -n "$vrl_cv_out" ] || return 1
+    [ "$vrl_cv_n" = 7 ] && [ -n "$vrl_cv_head" ] && [ -n "$vrl_cv_out" ] || return 1
     [ "$vrl_cv_req" = "$1|$2|$3|$4" ] || return 1
+    # An off whose current choice is not VPN is answered by the full path
+    # WITHOUT any backend read; never probe the router for it here.
+    if [ "$2" = off ]; then
+        vrl_cv_mode=
+        while IFS="$vrj_tab" read -r vrl_cv_t vrl_cv_s _vrl_cv_r vrl_cv_m _vrl_cv_rest; do
+            [ "$vrl_cv_t" = service ] && [ "$vrl_cv_s" = "$1" ] && vrl_cv_mode=$vrl_cv_m
+        done < "$vrl_root/decision/choices.tsv"
+        [ "$vrl_cv_mode" = vpn ] || return 1
+    fi
     [ "$(vrl_converged_journal "$vrl_root/journal")" = "$vrl_cv_jr " ] || return 1
     [ "$(vrl_converged_code)" = "$vrl_cv_code" ] || return 1
+    # Decision files are part of G; checking them first avoids any router
+    # read when they changed (the full path then decides).
+    [ "$(vrl_converged_decision "$vrl_root/decision")" = "$vrl_cv_dec" ] || return 1
     vrl_map=${VWARD_ROOT_PREFIX:-}/tmp/vward-device-map.tsv
     [ -f "$vrl_map" ] && [ ! -L "$vrl_map" ] && [ -O "$vrl_map" ] && [ -r "$vrl_map" ] || return 1
     vrl_ndmc=${NDMC:-${VWARD_NDMC:-ndmc}}
@@ -732,11 +766,23 @@ vrl_converged_record() {
     vrl_cr_gen=$(cat "$5/generation") && vrj2_gen "$vrl_cr_gen" || { rm -f "$vrl_cr";return 0; }
     vrl_cr_jr=$(vrl_converged_journal "$vrl_root/journal") || { rm -f "$vrl_cr";return 0; }
     vrl_cr_code=$(vrl_converged_code) || { rm -f "$vrl_cr";return 0; }
+    vrl_cr_dec=$(vrl_converged_decision "$vrl_root/decision") || { rm -f "$vrl_cr";return 0; }
     case "$1$2$3$4" in *"$vrj_tab"*|*"$vrj_nl"*) rm -f "$vrl_cr";return 0 ;; esac
     vrl_cr_tmp=$vrl_cr.tmp.$$
     if ! { printf 'converged\t1\n';printf 'request\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4"
            printf 'generation\t%s\n' "$vrl_cr_gen";printf 'journal\t%s\n' "${vrl_cr_jr% }"
-           printf 'code\t%s\n' "$vrl_cr_code";printf 'outcome\tunchanged\tconfigured\tverified\tfalse\tnative\n'; } > "$vrl_cr_tmp" ||
+           printf 'code\t%s\n' "$vrl_cr_code";printf 'decision\t%s\n' "$vrl_cr_dec";printf 'outcome\tunchanged\tconfigured\tverified\tfalse\tnative\n'; } > "$vrl_cr_tmp" ||
        ! mv -f "$vrl_cr_tmp" "$vrl_cr"; then rm -f "$vrl_cr_tmp" "$vrl_cr" 2>/dev/null;fi
+    return 0
+}
+
+# The inputs refresh scratch of this request after confirmed completion.
+vrl_inputs_scratch_done() {
+    case ${vrl_if_work:-} in "$vrb_j"/.inputs.*) ;; *) return 0 ;; esac
+    [ -d "$vrl_if_work" ] && [ ! -L "$vrl_if_work" ] || return 0
+    # A refresh that executed its own state-set keeps its scratch (rare:
+    # changed catalog/profile/health); only a no-change refresh is removed.
+    if [ -f "$vrl_if_work/lowered/plan" ] && grep -q '^step' "$vrl_if_work/lowered/plan"; then return 0;fi
+    rm -rf "$vrl_if_work" 2>/dev/null || :
     return 0
 }

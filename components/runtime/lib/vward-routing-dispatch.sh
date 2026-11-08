@@ -9,18 +9,95 @@ vrb_dispatch_valid() (
     case $5 in *[!0-9a-f]*) return 75 ;; esac
     [ "${#5}" -eq 64 ] || return 75
     vrb_dv_file=$1/$2/step.$3/$vrb_dv_name.$5
-    vrj2_file "$vrb_dv_file" && vrj2_file "$vrb_dv_file.sha" &&
-        vrb_single_link "$vrb_dv_file" && vrb_single_link "$vrb_dv_file.sha" &&
-        [ "$(vr2_hash "$vrb_dv_file")" = "$(cat "$vrb_dv_file.sha")" ] || return 75
+    # vrj2_file leaves vrj_llinks: single_link of the same ls (cache-aware).
+    vrj2_file "$vrb_dv_file" && [ "$vrj_llinks" = 1 ] && vrj2_file "$vrb_dv_file.sha" && [ "$vrj_llinks" = 1 ] || return 75
+    vrb_dv_hash "$vrb_dv_file" && vrj_slurp "$vrb_dv_file.sha" && [ "$vrb_dvh" = "$vrj_sv" ] || return 75
     IFS="$(printf '\t')" read -r vrb_dv_tag vrb_dv_ver vrb_dv_op vrb_dv_n vrb_dv_scope vrb_dv_pid vrb_dv_start vrb_dv_boot vrb_dv_plan vrb_dv_extra < "$vrb_dv_file" || return 75
+    vrj_slurp "$1/$2/plan.sha"
     [ "$vrb_dv_tag" = "$vrb_dv_name" ] && [ "$vrb_dv_ver" = 2 ] && [ "$vrb_dv_op" = "$2" ] &&
         [ "$vrb_dv_n" = "$3" ] && [ "$vrb_dv_scope" = "$5" ] && [ -z "$vrb_dv_extra" ] &&
-        [ "$vrb_dv_plan" = "$(cat "$1/$2/plan.sha")" ] || return 75
+        [ "$vrb_dv_plan" = "$vrj_sv" ] || return 75
     case $vrb_dv_pid:$vrb_dv_start in *[!0-9:]*|:*|*:) return 75 ;; esac
     vrb_dv_lease=$1/$2/workers/$vrb_dv_boot.$vrb_dv_pid.$vrb_dv_start
-    vrj2_file "$vrb_dv_lease" && vrj2_file "$vrb_dv_lease.sha" &&
-        [ "$(vr2_hash "$vrb_dv_lease")" = "$(cat "$vrb_dv_lease.sha")" ] &&
-        [ "$(vward_lock_boot_id "$vrb_dv_lease")" = "$vrb_dv_boot" ]
+    vrj2_file "$vrb_dv_lease" && vrb_dv_links=$vrj_llinks && vrj_lmode_l=$vrj_lmode && vrj2_file "$vrb_dv_lease.sha" || return 75
+    vrb_dv_hash "$vrb_dv_lease" && vrj_slurp "$vrb_dv_lease.sha" && [ "$vrb_dvh" = "$vrj_sv" ] || return 75
+    # vward_lock_boot_id: 0600/0400 single-link owned leaf whose first line
+    # (read -r, default IFS) is a UUID; here it must equal the issuer's boot.
+    case "$vrj_lmode_l $vrb_dv_links" in '-rw------- 1'|'-r-------- 1') ;; *) return 75 ;; esac
+    vrb_dv_lb=;read -r vrb_dv_lb < "$vrb_dv_lease" || return 75
+    vrb_dv_x='[0-9a-f]'
+    # shellcheck disable=SC2254
+    case $vrb_dv_lb in
+        $vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x-$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x-$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x-$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x-$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x$vrb_dv_x) ;;
+        *) return 75 ;;
+    esac
+    [ "$vrb_dv_lb" = "$vrb_dv_boot" ]
+)
+# vrb_dvh = vr2_hash FILE: from the batch map of vrb_dispatch_valid_range when
+# that map proved this file (same size/line limits), else vr2_hash itself.
+vrb_dv_hash() {
+    vrb_dvh=
+    if [ -n "${vrb_dvm_base:-}" ]; then
+        case $1 in "$vrb_dvm_base"/*)
+            if vrj_mc_key "${1#"$vrb_dvm_base"/}"; then
+                eval "vrb_dvh=\${vrb_dvm_$vrj_mk-}"
+                [ -z "$vrb_dvh" ] || return 0
+            fi ;;
+        esac
+    fi
+    vrb_dvh=$(vr2_hash "$1") || return 1
+    [ -n "$vrb_dvh" ]
+}
+# Read-only batch form for steps FROM..TO of one operation: for every step
+# whose current scope (CURDIR/current.N) equals its plan post-image, the same
+# vrb_dispatch_valid verdict, with ONE ls -ln for the operation/step/worker
+# directories and ONE wc -lc + ONE sha256sum for all receipts and leases.
+vrb_dispatch_valid_range() (
+    [ "$#" -eq 5 ] && vrj2_seq "$3" && vrj2_seq "$4" && [ -d "$5" ] || return 75
+    vrb_dvr_j=$1;vrb_dvr_o=$2;vrb_dvr_from=$3;vrb_dvr_to=$4;vrb_dvr_cur=$5;vrb_dvr_op=$1/$2
+    set -- "$vrb_dvr_op"
+    for vrb_dvr_s in "$vrb_dvr_op"/step.*; do [ -d "$vrb_dvr_s" ] && [ ! -L "$vrb_dvr_s" ] && set -- "$@" "$vrb_dvr_s";done
+    if [ -d "$vrb_dvr_op/workers" ] && [ ! -L "$vrb_dvr_op/workers" ]; then set -- "$@" "$vrb_dvr_op/workers";fi
+    vrj_mc_load "$vrb_dvr_op" "$@"
+    vrj_mc_plans "$vrb_dvr_op/plan"
+    set --
+    for vrb_dvr_f in "$vrb_dvr_op"/step.*/dispatched.* "$vrb_dvr_op"/workers/*; do
+        [ -f "$vrb_dvr_f" ] && [ ! -L "$vrb_dvr_f" ] && [ -r "$vrb_dvr_f" ] || continue
+        case $vrb_dvr_f in *.sha|*'
+'*) continue ;; esac
+        set -- "$@" "$vrb_dvr_f"
+    done
+    vrb_dvm_base=
+    if [ "$#" -gt 0 ]; then
+        vrb_dvr_wc=$(LC_ALL=C wc -lc "$@" 2>/dev/null) && vrb_dvr_sum=$(LC_ALL=C sha256sum "$@" 2>/dev/null) && {
+            vrb_dvr_ok=1
+            for vrb_dvr_f in "$@"; do
+                vrb_dvr_l=${vrb_dvr_wc%%"$vrj_nl"*};vrb_dvr_wc=${vrb_dvr_wc#"$vrb_dvr_l"};vrb_dvr_wc=${vrb_dvr_wc#"$vrj_nl"}
+                vrb_dvr_h=${vrb_dvr_sum%%"$vrj_nl"*};vrb_dvr_sum=${vrb_dvr_sum#"$vrb_dvr_h"};vrb_dvr_sum=${vrb_dvr_sum#"$vrj_nl"}
+                # shellcheck disable=SC2086
+                set -- $vrb_dvr_l
+                [ "$#" -eq 3 ] && [ "$3" = "$vrb_dvr_f" ] && [ "${vrb_dvr_h#*  }" = "$vrb_dvr_f" ] || { vrb_dvr_ok=0;break; }
+                case $1:$2 in *[!0-9:]*|:*|*:) vrb_dvr_ok=0;break ;; esac
+                # vr2_file limits; a file over them has no map entry (vr2_hash fails it).
+                [ "$2" -le 1048576 ] && [ "$1" -le 4096 ] || continue
+                vrb_dvr_h=${vrb_dvr_h%%  *}
+                case $vrb_dvr_h in *[!0-9a-f]*) vrb_dvr_ok=0;break ;; esac
+                [ "${#vrb_dvr_h}" -eq 64 ] || { vrb_dvr_ok=0;break; }
+                vrj_mc_key "${vrb_dvr_f#"$vrb_dvr_op"/}" || continue
+                eval "vrb_dvm_$vrj_mk=\$vrb_dvr_h"
+            done
+            [ "$vrb_dvr_ok" = 1 ] && vrb_dvm_base=$vrb_dvr_op
+        }
+    fi
+    vrb_dvr_n=$vrb_dvr_from
+    while [ "$vrb_dvr_n" -le "$vrb_dvr_to" ]; do
+        vrj2_row_fields "$vrb_dvr_op" "$vrb_dvr_n" || return 75
+        vrj_slurp "$vrb_dvr_cur/current.$vrb_dvr_n"
+        if [ "$vrj_sv" = "$vrj2_post" ]; then
+            vrb_dispatch_valid "$vrb_dvr_j" "$vrb_dvr_o" "$vrb_dvr_n" forward "$vrj2_post" || return 75
+        fi
+        vrb_dvr_n=$((vrb_dvr_n+1))
+    done
 )
 vrb_dispatch_scope() (
     : "${vrb_j:?}" "${vrb_op:?}" "${vrb_active_step:?}" "${vrb_e:?}" "${vrb_t:?}" "${vrb_pub_pid:?}" "${vrb_pub_mode:?}"
@@ -61,7 +138,13 @@ vrb_dispatch_mark() {
     : "${vrb_role:?}" "${vrb_pub_start:?}" "${vrj2_boot:?}"
     case $vrb_role in save|baseline-save) return 0 ;; forward|inverse) ;; *) return 75 ;; esac
     vrb_dm_new=0
-    vrb_dm_scope=$(vrb_dispatch_scope "$1" "$2") || return 75
+    # A plain local-file publication (vrb_publish_local) supplies the scope it
+    # computed from the same source bytes: the scope of such a kind IS the
+    # source content (vrb_dispatch_scope's last case); destination checked.
+    if [ -n "${vrb_pub_scope_known:-}" ]; then
+        [ "$(vrb_local_path "$vrb_pk_k" "$(printf '%s\n' "$vrj2_row" | cut -f5)")" = "$2" ] || return 75
+        vrb_dm_scope=$vrb_pub_scope_known
+    else vrb_dm_scope=$(vrb_dispatch_scope "$1" "$2") || return 75;fi
     vrb_dm_row=$(vrj2_step_row "$vrb_j/$vrb_op" "$vrb_active_step") || return 75
     if [ "$vrb_role" = forward ]; then
         printf '%s\n' "$vrb_dm_row" | awk -F'\t' -v h="$vrb_dm_scope" '

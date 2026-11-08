@@ -21,8 +21,10 @@ BOUNDARY={
         '    vrb_execute2 "$vrb_j/.migrations/$vrb_op/lowered"\n'),
     'after-plan':('vward-routing-pipeline.sh',
         '    vward_journal2_plan "$vrb_j" "$vrb_op" "$vrb_t/plan" || return 75\n'),
+    # Batch executor (08.11.2026): after a step's write, before the shared
+    # readback and J2 finish of the batch.
     'after-write':('vward-routing-pipeline.sh',
-        '        vrb_rc=0;vrb_write_scope "$vrb_kind" "$vrb_id" "$vrb_n" post || vrb_rc=$?\n'),
+        '            vrb_write_scope "$vrb_kind" "$vrb_id" "$vrb_n" post || vrb_rc=$?\n'),
 }
 
 def arm(f,point):

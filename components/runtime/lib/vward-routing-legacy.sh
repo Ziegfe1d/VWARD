@@ -333,8 +333,13 @@ vrb_compile_legacy_prune() (
 # persistent unknown barrier after every originating PID has exited.
 vward_routing_update_eligibility2() (
     [ "$#" -eq 1 ] && vrj_dir "$1" && vward_journal2_gate "$1" || return 75
+    # Read-only: ONE ls -ln answers the per-operation directory checks.
+    vrj_mc_load "$1" "$1"
     for vrb_ue_op in "$1"/*; do
         [ ! -e "$vrb_ue_op" ] && [ ! -L "$vrb_ue_op" ] && continue
+        # A settled terminal operation (vrb_pq_settled) has no lease/pending
+        # left to check; anything else gets the full checks below.
+        if vrb_pq_settled "$vrb_ue_op"; then vrj_dir "$vrb_ue_op" || return 75;continue;fi
         vrj_dir "$vrb_ue_op" && vrb_publish_quiet "$vrb_ue_op" || return 75
         for vrb_ue_pending in "$vrb_ue_op"/dns-evidence/*/request.pending "$vrb_ue_op"/dns-inverse.*/evidence/request.pending "$vrb_ue_op"/native.*/request.pending; do
             [ ! -e "$vrb_ue_pending" ] && [ ! -L "$vrb_ue_pending" ] || return 75
