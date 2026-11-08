@@ -22,12 +22,31 @@ on:
       - 'updates/beta/**'
       - '.github/workflows/updater-ci.yml'
       - 'SHA256SUMS'
+      - 'tools/vward-core/**'
 
 permissions:
   contents: read
   actions: write
 
 jobs:
+  routing-core-go:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.1"
+          cache: false
+      - name: Install BusyBox (decision parity with the shell core on sh and BusyBox)
+        run: sudo apt-get update && sudo apt-get install -y busybox
+      - name: "Go routing core - vet, tests, parity with the shell decisions"
+        run: cd tools/vward-core && GOTOOLCHAIN=go1.25.1 go vet ./... && GOTOOLCHAIN=go1.25.1 go test -count=1 ./...
+      - name: "Go routing core - reproducible build equals the pinned sums and the prototype builds"
+        run: |
+          sh tools/vward-core/build.sh "$PWD/core-out" --check
+          for a in mipsle mips; do cmp "core-out/vward-core-linux-$a.gz" "tools/vward-core/dist/vward-core-linux-$a.gz"; done
+
   repository-consistency:
     runs-on: ubuntu-latest
     steps:

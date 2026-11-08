@@ -214,11 +214,17 @@ func (m *Model) Signature(g string) (string, bool) {
 		lines = append(lines, "route="+r.Target+"\t"+o)
 	}
 	sort.Strings(lines)
+	if len(lines) == 0 {
+		return "", true // sort of nothing prints nothing
+	}
 	return strings.Join(lines, "\n") + "\n", true
 }
 
 // CanonicalSignature normalises a stored signature the same way (service_canonical).
 func CanonicalSignature(s string) string {
+	if s == "" {
+		return ""
+	}
 	var lines []string
 	for _, l := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
 		lines = append(lines, canonicalDescription(l))

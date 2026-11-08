@@ -1,0 +1,3 @@
+Prototype builds of tools/vward-core (read-only commands only: version, probe, dry-run),
+for the owner's one-time measurement in /tmp. Reproducible: build.sh OUT --check must give
+the sums in ../SHA256SUMS. Not part of the installation package (not in package-map.tsv).
