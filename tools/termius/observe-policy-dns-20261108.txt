@@ -1,0 +1,49 @@
+# 08.11.2026: policy-reconcile -> DRY_RUN=1 (ночной и догоняющий запуск), повтор 16 правил DNS в tunnel-health -> выключен (dns_rules_check=0).
+# 1) только чтение
+( C=/opt/var/spool/cron/crontabs; F=/opt/etc/vward/route-engine/domain-lists.conf
+  echo "== cron, сверка политик:"; crontab -c $C -l 2>/dev/null | grep 'vward-policy-reconcile' || echo "  строки нет"
+  echo "== cron, обслуживание (догоняющий запуск сверки):"; crontab -c $C -l 2>/dev/null | grep 'vward-housekeeping' || echo "  строки нет"
+  echo "== DRY_RUN=1 в cron: $(crontab -c $C -l 2>/dev/null | grep -c 'DRY_RUN=1 /opt/bin/vward-') из 2"
+  M=$(grep -h '^Mode' /tmp/vward-policy-reconcile.cron.out 2>/dev/null | tail -n 1); echo "== режим последнего ночного прогона сверки: ${M:-нет данных}"
+  if [ -f "$F" ]; then echo "== dns_rules_check: $(awk -F= '$1=="dns_rules_check"{v=$2} END{print (v==""?"не задан (= повтор включён)":v)}' "$F")"; ls -ln "$F"
+  else echo "== $F: нет файла (= повтор включён)"; fi
+  echo "== проверка 16 правил в этой загрузке:"; cat /tmp/vward-dns-rules 2>/dev/null || echo "  ещё не выполнялась"
+  echo "== последние DNS_RULES:"; grep 'DNS_RULES' /opt/var/log/vward-tunnel-health.log 2>/dev/null | tail -5
+  echo "== строк ip name-server … on OpkgTun4 в конфигурации: $(ndmc -c 'show running-config' 2>/dev/null | grep -c '^ip name-server .* on OpkgTun4$')"
+  echo "== резервные копии прошлых применений:"; ls -d /opt/var/backups/vward/manual-observe-* 2>/dev/null || echo "  нет" )
+
+# 2) применить (резервная копия /opt/var/backups/vward/manual-observe-*, проверка)
+( set -e; C=/opt/var/spool/cron/crontabs; F=/opt/etc/vward/route-engine/domain-lists.conf
+  if [ "$(crontab -c $C -l 2>/dev/null | grep -c 'DRY_RUN=1 /opt/bin/vward-')" = 2 ] && [ "$(awk -F= '$1=="dns_rules_check"{v=$2} END{print v}' "$F" 2>/dev/null)" = 0 ]; then echo "УЖЕ ПРИМЕНЕНО, ничего не меняю"; exit 0; fi
+  B=/opt/var/backups/vward/manual-observe-$(date +%Y%m%d-%H%M%S); mkdir -p "$B"; chmod 700 "$B"
+  crontab -c $C -l > "$B/crontab.before"
+  if [ -f "$F" ]; then cp -p "$F" "$B/domain-lists.conf.before"; else : > "$B/domain-lists.conf.absent"; fi
+  sed -e 's#&& /opt/bin/vward-policy-reconcile.sh #\&\& DRY_RUN=1 /opt/bin/vward-policy-reconcile.sh #' \
+      -e 's#^\(\([^ ]* \)\{5\}\)/opt/bin/vward-housekeeping.sh #\1DRY_RUN=1 /opt/bin/vward-housekeeping.sh #' "$B/crontab.before" > "$B/crontab.new"
+  [ "$(grep -c 'DRY_RUN=1 /opt/bin/vward-policy-reconcile.sh ' "$B/crontab.new")" = 1 ] || { echo "ОТКАЗ: строка сверки политик не найдена ровно один раз; ничего не изменено"; exit 1; }
+  [ "$(grep -c 'DRY_RUN=1 /opt/bin/vward-housekeeping.sh ' "$B/crontab.new")" = 1 ] || { echo "ОТКАЗ: строка обслуживания не найдена ровно один раз; ничего не изменено"; exit 1; }
+  sed 's#DRY_RUN=1 ##g' "$B/crontab.before" > "$B/crontab.plain"
+  [ "$(sed 's#DRY_RUN=1 ##g' "$B/crontab.new" | cmp - "$B/crontab.plain" >/dev/null && echo same)" = same ] || { echo "ОТКАЗ: изменилось бы больше двух вставок; ничего не изменено"; exit 1; }
+  mkdir -p "${F%/*}"; T="$F.tmp.$$"
+  if [ -f "$F" ]; then cp -p "$F" "$T"; awk -F= '$1!="dns_rules_check"' "$F" > "$T"; else : > "$T"; chmod 644 "$T"; fi
+  echo dns_rules_check=0 >> "$T"
+  crontab -c $C "$B/crontab.new"
+  mv -f "$T" "$F"
+  crontab -c $C -l | cmp - "$B/crontab.new" >/dev/null && [ "$(awk -F= '$1=="dns_rules_check"{print $2}' "$F")" = 0 ] &&
+    echo "ПРИМЕНЕНО. Копия: $B" || { echo "ПРОВЕРКА НЕ ПРОШЛА: выполните команду отката"; exit 1; }
+  crontab -c $C -l | grep -E 'policy-reconcile|housekeeping'; grep '^dns_rules_check=' "$F" )
+
+# 3) откат
+( set -e; C=/opt/var/spool/cron/crontabs; F=/opt/etc/vward/route-engine/domain-lists.conf
+  B=$(ls -d /opt/var/backups/vward/manual-observe-* 2>/dev/null | tail -n 1); [ -n "$B" ] || { echo "нет резервной копии"; exit 1; }
+  T=/tmp/vward-observe-rollback.$$; crontab -c $C -l | sed 's#DRY_RUN=1 /opt/bin/vward-policy-reconcile.sh #/opt/bin/vward-policy-reconcile.sh #; s#DRY_RUN=1 /opt/bin/vward-housekeeping.sh #/opt/bin/vward-housekeeping.sh #' > "$T"
+  crontab -c $C "$T"; rm -f "$T"
+  if [ -f "$B/domain-lists.conf.before" ]; then cp -p "$F" "$F.tmp.$$"
+    if awk -F= '$1!="dns_rules_check"' "$F" | cmp -s - "$B/domain-lists.conf.k" 2>/dev/null || { awk -F= '$1!="dns_rules_check"' "$B/domain-lists.conf.before" > "$B/domain-lists.conf.k"; awk -F= '$1!="dns_rules_check"' "$F" | cmp -s - "$B/domain-lists.conf.k"; }
+    then cat "$B/domain-lists.conf.before" > "$F.tmp.$$"
+    else { awk -F= '$1!="dns_rules_check"' "$F"; grep '^dns_rules_check=' "$B/domain-lists.conf.before" || :; } > "$F.tmp.$$"; fi
+    mv -f "$F.tmp.$$" "$F"
+  elif [ -f "$F" ]; then cp -p "$F" "$F.tmp.$$"; awk -F= '$1!="dns_rules_check"' "$F" > "$F.tmp.$$"; if [ -s "$F.tmp.$$" ]; then mv -f "$F.tmp.$$" "$F"; else rm -f "$F" "$F.tmp.$$"; fi; fi
+  ! grep -q '^RESULT=off' /tmp/vward-dns-rules 2>/dev/null || rm -f /tmp/vward-dns-rules
+  [ "$(crontab -c $C -l | grep -c 'DRY_RUN=1 /opt/bin/vward-')" = 0 ] && echo "ОТКАТ ВЫПОЛНЕН (копия $B сохранена)"
+  crontab -c $C -l | grep -E 'policy-reconcile|housekeeping'; grep '^dns_rules_check=' "$F" 2>/dev/null || echo "dns_rules_check: как до изменения" )
