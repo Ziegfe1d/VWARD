@@ -30,7 +30,8 @@ def func(name):
     return m.group(0) if m else ""
 
 
-FUNCS = "".join(func(n) for n in NAMES)
+# The owner's list_watch_act=1 (08.11: observation by default, tested in check-list-watch).
+FUNCS = "re_acts() { return 0; }\n" + "".join(func(n) for n in NAMES)
 CONST = "\n".join(re.findall(r"^(?:DIRECT_COOLDOWN|FAIL_COOLDOWN|UNKNOWN_COOLDOWN|ADAPTIVE_RECHECK)=\d+$", ENGINE, re.M))
 SHELLS = [["sh"]] + ([["busybox", "ash"]] if shutil.which("busybox") else [])
 fails = []

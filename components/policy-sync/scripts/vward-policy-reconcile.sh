@@ -35,7 +35,16 @@ ROLLBACK="/tmp/vpn-reconcile-rollback.$$"
 POSTSAVE="/tmp/vpn-reconcile-postsave.$$"
 
 MAX_AGE=14400
-DRY_RUN="${DRY_RUN:-0}"
+# Observation only by default (owner 08.11): this run removes domains from every group routed
+# through the tunnel, the owner's own lists too, so it only writes what it would remove
+# (WOULD_REMOVE) unless policy_reconcile=act in domain-lists.conf. DRY_RUN=0|1 still decides when given.
+DRY_RUN="${DRY_RUN:-}"
+if [ -z "$DRY_RUN" ]; then
+    case "$(awk -F= '$1 == "policy_reconcile" {print $2; exit}' "${VWARD_DOMAIN_LISTS_CONF:-/opt/etc/vward/route-engine/domain-lists.conf}" 2>/dev/null)" in
+        act|1) DRY_RUN=0 ;;
+        *) DRY_RUN=1 ;;
+    esac
+fi
 
 BACKUP_DIR="/opt/var/backups/vpn-reconcile"
 

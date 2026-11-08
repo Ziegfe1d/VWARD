@@ -52,6 +52,14 @@ SMARTDNS="$VOLATILE_DIR/smartdns-domains.txt"
 # through the Panel writer, the same way as the manual switch.
 LISTS_CONF="${VWARD_DOMAIN_LISTS_CONF:-/opt/etc/vward/route-engine/domain-lists.conf}"
 LIST_WATCH_MAP="$VOLATILE_DIR/list-watch.map"
+# re_acts KEY: the owner turned this writer on (KEY=1 in domain-lists.conf). Observation by default
+# (owner 08.11, until the routing core takes these decisions): moving a list into the tunnel
+# (list_watch_act) and binding list domains to AdGuard Home in Keenetic (dns_bind_act) are only
+# logged as WOULD lines; nothing is sent to Keenetic.
+re_acts()
+{
+    [ "$(awk -F= -v k="$1" '$1 == k {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" = 1 ]
+}
 SKIP_DOMAINS="/opt/etc/vward/route-engine/skip-domains.conf"
 HINTS="/opt/etc/vward/route-engine/hints.conf"
 LIST_WATCH_COOLDOWN=60
@@ -1920,6 +1928,11 @@ list_watch_check()
         return 0
     fi
 
+    if ! re_acts list_watch_act; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|LIST_AUTO_VPN_WOULD|$1|$LW_G|observation" >> "$EVENT_LOG"
+        rm -f "$LW_ST"
+        return 0
+    fi
     LW_RES=$("$CONSOLE_CONFIG_BIN" domain-list "$LW_G" vpn 2>/dev/null | tail -n 1)
     echo "$(date '+%Y-%m-%d %H:%M:%S')|LIST_AUTO_VPN|$1|$LW_G|$LW_RES" >> "$EVENT_LOG"
     rm -f "$LW_ST"
@@ -2066,6 +2079,14 @@ agh_bind_one()
         printf '' > "$AGH_BIND_RUN/full" 2>/dev/null
         return 0
     fi
+    if ! re_acts dns_bind_act; then
+        # Once per domain and boot (RAM), nothing sent.
+        grep -qxF "$1" "$AGH_BIND_RUN/observed" 2>/dev/null || {
+            printf '%s\n' "$1" >> "$AGH_BIND_RUN/observed" 2>/dev/null
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_BIND_WOULD|$1|$AB_NS|observation" >> "$EVENT_LOG"
+        }
+        return 0
+    fi
     AB_OUT=$(ndmc -c "ip name-server $AB_NS $1" 2>&1 </dev/null); AB_STATUS=$?
     # Keenetic may report a rejected command in text while returning exit status zero.
     if [ "$AB_STATUS" = 0 ] && ! printf '%s\n' "$AB_OUT" | grep -Eqi 'error|failed|invalid|unknown command|not found|too many elements'; then
@@ -2105,6 +2126,10 @@ agh_bind_prune()
     AP_N=$((0 - AP_ROOM))
     awk '$2 ~ /:[0-9]+$/' "$AGH_BIND" | tail -n "$AP_N" > "$AGH_BIND.drop"
     while read -r AP_D AP_NS; do
+        if ! re_acts dns_bind_act; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_UNBIND_WOULD|$AP_D|keenetic=no_room|observation" >> "$EVENT_LOG"
+            continue
+        fi
         ndmc -c "no ip name-server $AP_NS $AP_D" </dev/null >/dev/null 2>&1 || continue
         echo "$(date '+%Y-%m-%d %H:%M:%S')|AGH_UNBIND|$AP_D|keenetic=no_room" >> "$EVENT_LOG"
         awk -v d="$AP_D" '$1 != d' "$AGH_BIND" > "$AGH_BIND.new" && mv -f "$AGH_BIND.new" "$AGH_BIND"

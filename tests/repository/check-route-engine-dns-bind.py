@@ -22,8 +22,16 @@ QNOW=1000
 agh_ns() { echo 192.0.2.1:5353; }
 agh_ns_room() { echo 10; }
 shared_config() { printf 'dns-proxy\\n!\\n'; }
+re_acts() { return 0; }
 ndmc() { echo "$*" >> "$T/calls"; if [ -e "$T/refuse" ]; then echo 'Command::Base error: busy'; return "$(cat "$T/refuse")"; fi; return 0; }
 '''
+        # The default (owner 08.11): observation - logged once, nothing sent, nothing recorded.
+        obs = setup.replace('re_acts() { return 0; }', 're_acts() { return 1; }')
+        r=subprocess.run(shell+['-c', obs+functions+'agh_bind_one example.com; agh_bind_one example.com'], env={'PATH':'/usr/bin:/bin','T':td}, capture_output=True, text=True)
+        ev=(p/'events').read_text() if (p/'events').exists() else ''
+        if r.returncode or (p/'calls').exists() or (p/'bind').exists() or ev.count('AGH_BIND_WOULD|example.com|192.0.2.1:5353|observation') != 1:
+            raise SystemExit('DNS_BIND=FAIL observation: '+r.stderr+ev)
+        (p/'events').unlink(missing_ok=True); (p/'run'/'observed').unlink(missing_ok=True)
         # A failed row must expire, an old no-timestamp failed row must be retried.
         cases = [
             ('legacy failure', 'echo "example.com failed" > "$AGH_BIND"; ! agh_bound api.example.com'),

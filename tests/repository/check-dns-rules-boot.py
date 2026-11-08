@@ -62,6 +62,27 @@ vward_running_config() {{ cat "{t}/config"; }}
         state = (t / "state").read_text() if (t / "state").exists() else ""
         return state, (t / "ndmc.log").read_text().splitlines(), (t / "health.log").read_text() if (t / "health.log").exists() else ""
 
+    # The default (owner 08.11): observation only - the mismatch logged once a boot, nothing sent.
+    (t / "ndnproxymain.conf").write_text(live(RULES[:1]))
+    for conf in (None, "dns_rules_check=observe\n"):
+        if conf is None:
+            (t / "lists.conf").unlink(missing_ok=True)
+        else:
+            (t / "lists.conf").write_text(conf)
+        (t / "state").unlink(missing_ok=True)
+        (t / "health.log").unlink(missing_ok=True)
+        state, ndmc, log = run()
+        if ndmc or "RESULT=observed" not in state or "LIVE=1" not in state:
+            fail(f"observation must send nothing: {ndmc[:2]} {state!r}")
+        if "DNS_RULES result=mismatch_observed config=16 live=1 would_reapply=15" not in log:
+            fail(f"the observed mismatch must be logged: {log!r}")
+        state, ndmc, _ = run()
+        if ndmc:
+            fail("observation: once a boot")
+    (t / "state").unlink()
+    (t / "health.log").unlink()
+    (t / "lists.conf").write_text("dns_rules_check=1\n")
+
     # Too early after a boot: nothing.
     (t / "ndnproxymain.conf").write_text(live(RULES[:1]))
     state, ndmc, _ = run(uptime=120)
@@ -118,7 +139,7 @@ vward_running_config() {{ cat "{t}/config"; }}
         fail(f"0 of 16 live: nothing done: {state!r}")
 
     # Turned off.
-    (t / "state").unlink()
+    (t / "state").unlink(missing_ok=True)
     (t / "lists.conf").write_text("dns_rules_check=0\n")
     state, ndmc, _ = run()
     if ndmc or "RESULT=off" not in state:
