@@ -1355,6 +1355,11 @@ vward_doh_alive()
 {
     # VWARD_DOH_ALIVE=0: not checked («cannot tell», the behaviour before; tests without network).
     [ "${VWARD_DOH_ALIVE:-1}" = 1 ] || return 2
+    # The owner's switch «Smart DNS» off (owner 08.11): its server is not asked («cannot tell»).
+    if [ "${VWARD_DOH_ALIVE_FORCE:-0}" != 1 ]; then
+        _vda_on=; read -r _vda_on 2>/dev/null < "${VWARD_SMARTDNS_SWITCH:-${VWARD_ROOT_PREFIX:-}/opt/etc/vward/smartdns.switch}" || :
+        [ "$_vda_on" = 1 ] || return 2
+    fi
     case "$1" in https://*) ;; *) return 2 ;; esac
     _vda_curl=${VWARD_CURL_BIN:-curl}
     command -v "$_vda_curl" >/dev/null 2>&1 || return 2

@@ -667,7 +667,16 @@ vward_agh_pidfiles_clean() {
 # 0: nothing to do, 10: started again, 11: the start did not help (the caller waits longer;
 # VD_WHY: not_running - the client is not running at all, not_listening - it runs, the port is shut;
 # VD_INIT: the start scripts run).
+# vward_smartdns_on: the owner's switch «Smart DNS» (owner 08.11, off by default): «1» in
+# smartdns.switch. Off: no Smart DNS row is written anywhere, its DoH client is not kept running and
+# its server is not checked.
+vward_smartdns_on() {
+    _vso=; read -r _vso 2>/dev/null < "${VWARD_SMARTDNS_SWITCH:-${VWARD_ROOT_PREFIX:-}/opt/etc/vward/smartdns.switch}" || :
+    [ "$_vso" = 1 ]
+}
+
 vward_doh_keep() {
+    vward_smartdns_on || return 0
     vd_cfg=${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}
     [ -r "$vd_cfg" ] || vd_cfg=/opt/etc/AdGuardHome.yaml
     [ -r "$vd_cfg" ] || return 0

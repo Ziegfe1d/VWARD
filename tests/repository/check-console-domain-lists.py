@@ -174,7 +174,7 @@ with tempfile.TemporaryDirectory() as tmp:
     devconf = tmp / "device.conf"; devconf.write_text(DEVICE_CONF); devconf.chmod(0o600)
     etc = tmp / "etc"
     (tmp / "root/tmp").mkdir(parents=True)
-    env = os.environ | {
+    env = os.environ | {"VWARD_SMARTDNS_SWITCH": str(ROOT / "tests/repository/fixtures/smartdns-on"), 
         "VWARD_NDMC": str(ndmc), "VWARD_CURL_BIN": str(curl), "VWARD_DEVICE_CONFIG": str(devconf),
         "VWARD_DEVICE_CONFIG_OWNER_UID": str(os.getuid()),
         "VWARD_DEVICE_MAP_CACHE": str(tmp / "map.tsv"), "VWARD_SYSFS_NET": str(tmp / "sys"),

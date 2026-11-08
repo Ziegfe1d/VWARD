@@ -65,7 +65,7 @@ with tempfile.TemporaryDirectory() as tmp:
     lib = (ROOT / "components/ads-privacy-guard/lib/vward-ads-privacy-common.sh").read_text()
     patched = tmp / "lib.sh"
     patched.write_text(lib.replace('case "$ads_auth_meta" in "0 -rw-------"', f'case "$ads_auth_meta" in "{os.getuid()} -rw-------"'))
-    env = os.environ | {
+    env = os.environ | {"VWARD_SMARTDNS_SWITCH": str(ROOT / "tests/repository/fixtures/smartdns-on"), 
         "VWARD_ADS_LIB": str(patched), "VWARD_ADS_ETC": str(etc), "VWARD_ADS_STATE": str(tmp / "state"), "VWARD_ADS_LOG_DIR": str(tmp / "log"),
         "VWARD_ADS_BACKUP_ROOT": str(tmp / "backups"),
         "VWARD_ADS_JQ": shutil.which("jq"), "VWARD_ADS_CURL": str(curl), "VWARD_ADS_AGH_AUTH_FILE": str(auth),

@@ -877,6 +877,8 @@ if [ "$ACTION" = config ]; then
         wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;
         component) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=COMPONENT_DISABLE ;;
         adaptive-mode|classifier|smartdns-guard|tunnel-fallback|tunnel-return) set -- "$OP" "$VALUE" ;;
+        # «Smart DNS» on/off (owner 08.11); off takes VWARD's own rows away: confirmed.
+        smartdns-feature) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=SMARTDNS_OFF ;;
         journal|agents-mode) set -- "$OP" "$TARGET" "$VALUE" ;;
         cleanup) set -- "$OP" "$TARGET"; [ "$TARGET" != sizes ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; } ;;
         reset) set -- "$OP" "$TARGET"; REQUIRED=RESET_SETTINGS ;;
@@ -2583,7 +2585,11 @@ if [ "$ACTION" = lists-data ]; then
     [ -n "$LD_LISTS" ] || LD_LISTS='[]'
     LD_STATE=not_configured
     LD_URL=$(awk -F= '$1=="SMARTDNS_URL" {print substr($0,index($0,"=")+1); exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)
-    if [ -n "$LD_URL" ]; then
+    # The owner's switch «Smart DNS» off (owner 08.11): the «DNS» mode is not offered, the server is not asked.
+    LD_SW=; read -r LD_SW 2>/dev/null < "${VWARD_SMARTDNS_SWITCH:-$CONFIG_ETC/smartdns.switch}" || :
+    if [ "$LD_SW" != 1 ]; then
+        LD_STATE=off
+    elif [ -n "$LD_URL" ]; then
         LD_STATE=unknown
         if command -v vward_doh_alive >/dev/null 2>&1; then
             VWARD_DOH_ALIVE_MT=4 vward_doh_alive "$LD_URL"; LD_RC=$?
@@ -2765,11 +2771,16 @@ if [ "$ACTION" = ai-data ]; then
     # Does the server answer (01.11.2026: the subscription ended, the domains stopped resolving): the
     # owner's own server, else the one Keenetic's lines and AdGuard Home's rows use most. 5 min cache.
     AI_ALIVE=""
+    AI_SD_ON=false
+    AI_SW=; read -r AI_SW 2>/dev/null < "${VWARD_SMARTDNS_SWITCH:-$CONFIG_ETC/smartdns.switch}" || :
+    [ "$AI_SW" != 1 ] || AI_SD_ON=true
     AI_URL="$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)"
     [ -n "$AI_URL" ] || AI_URL="$({ printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print $3}'
         command -v vward_agh_smartdns_urls >/dev/null 2>&1 && vward_agh_smartdns_urls; } | sort | uniq -c | sort -rn | awk 'NR == 1 {print $2}')"
-    if [ -n "$AI_URL" ] && command -v vward_doh_alive >/dev/null 2>&1; then
+    if [ "$AI_SD_ON" != true ]; then
+        AI_ALIVE=off
+    elif [ -n "$AI_URL" ] && command -v vward_doh_alive >/dev/null 2>&1; then
         VWARD_DOH_ALIVE_MT=${VWARD_DOH_ALIVE_MT:-4} vward_doh_alive "$AI_URL"
         case $? in 0) AI_ALIVE=yes ;; 1) AI_ALIVE=no ;; *) AI_ALIVE=unknown ;; esac
     fi
@@ -2810,6 +2821,7 @@ if [ "$ACTION" = ai-data ]; then
         --arg alive_host "$AI_ALIVE_HOST" --arg agh_hosts "$AI_AGH_HOSTS" --arg alive_why "$AI_ALIVE_WHY" \
         --arg cap_supported "$AI_CAP_SUPPORTED" --arg cap_available "$AI_CAP_AVAILABLE" --arg cap_why "$AI_CAP_WHY" --arg handler "$AI_HANDLER" --arg store_target "$AI_STORE_TARGET" --argjson snapshot_ok "$AI_SNAPSHOT_OK" \
         --arg reference_token "$AI_REFERENCE_TOKEN" --arg claims "$AI_CLAIMS" --arg default_tunnel "${VWARD_TUNNEL_INTERFACE:-}" \
+        --argjson smartdns_on "$AI_SD_ON" \
         --argjson agh_on "$([ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] && echo true || echo false)" '
         ($doh | split("\n") | map(select(length > 0) | split("\t"))) as $k
         | ($agh | split("\n") | map(select(length > 0))) as $a
@@ -2833,7 +2845,7 @@ if [ "$ACTION" = ai-data ]; then
                | {d: $d, k: (if $d == $id then 0 elif $own then 1 elif ($l | length) == 2 then 2 else 3 end), n: ($l | length)}]
             | sort_by(.k, .n, .d) | map(.d)
             | reduce .[] as $d ([]; if any(.[]; . as $k | $d | endswith("." + $k)) then . else . + [$d] end) | .[:4];
-        {ok: true, evidence: "configuration", client_path_verified: false, recovery: $recovery, reference_token: $reference_token,
+        {ok: true, smartdns_enabled: $smartdns_on, evidence: "configuration", client_path_verified: false, recovery: $recovery, reference_token: $reference_token,
          smartdns: {store: $store, keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_running: $agh_run, agh_domains: ($a | length),
                     storage: {component: "AdGuard Home", supported: ($cap_supported == "1"), available: ($cap_available == "1"), reason: $cap_why, handler: $handler, target: $store_target},
                     waiting: ($wait | split("\n") | map(select(length > 0))),

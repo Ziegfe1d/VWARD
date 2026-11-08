@@ -295,6 +295,7 @@ const API_ERRORS = {
   service_list: 'список сервиса не создан в Keenetic', invalid_arguments: 'неверные параметры запроса', helper_failed: 'действие завершилось без ответа',
   doh_limit: 'в Keenetic нет места для ещё одного сервера DNS-over-HTTPS', doh_remove_failed: 'Keenetic не удалил строку Smart DNS', doh_remove_unsafe: 'строка Smart DNS используется не только VWARD: не удалена',
   package_install_refused: 'установка пакета отклонена проверкой безопасности или зависимостей', package_recovery_required: 'нужно разобрать незавершённую установку пакета', engine_in_use: 'у движка уже есть настроенные туннели', install_recovery_required: 'нужно разобрать незавершённую установку Xray', unzip_unavailable: 'не найдена программа распаковки ZIP',
+  smartdns_off: 'Smart DNS выключен: включите его на странице «DNS»', settings_busy: 'настройки сохраняются, повторите через секунду',
   smartdns_dead: 'Smart DNS-сервер не отвечает', smartdns_unknown: 'ответ Smart DNS-сервера не подтверждён', list_dns_shared_domain: 'домен используется другим списком: нет права менять его DNS', list_dns_reference_only: 'DNS или список изменены вне операции: запись остановлена', list_dns_conflict: 'для домена уже настроен другой DNS-сервер', list_dns_concurrent: 'настройки изменились во время операции', list_dns_write_failed: 'роутер отклонил запись DNS списка', list_dns_verification_failed: 'результат записи DNS не подтверждён',
   list_dns_active: 'сначала выберите для списка VPN или Провайдер, затем меняйте домены или удаляйте список', operation_still_running: 'операция ещё выполняется, результат появится в журнале', install_busy: 'установка Xray уже выполняется', install_concurrent: 'файлы Xray изменились во время загрузки',
   group_not_found: 'список не найден в Keenetic', group_not_routed: 'у списка нет маршрута', unknown_group: 'нет такого списка', invalid_group: 'недопустимое имя списка', list_not_found: 'список не найден', component_busy: 'уже идёт другая операция с компонентом', agh_credentials_required: 'нужны логин и пароль для AdGuard Home', agh_not_installed: 'AdGuard Home не установлен', agh_setup_failed: 'AdGuard Home не принял настройки', agh_stop_failed: 'AdGuard Home не остановился', no_free_port: 'нет свободного порта', dns_release_failed: 'не удалось убрать DNS-строки из Keenetic', default_tunnel_in_module: 'туннель по умолчанию в этом модуле: выберите, куда перевести маршруты', list_too_long: 'в объединённом списке будет больше 300 доменов',
@@ -1324,13 +1325,13 @@ const LIST_MODES = [['auto', 'Авто'], ['vpn', 'VPN'], ['dns', 'DNS'], ['bypa
 const listMode = l => l.dns_mode ? 'dns' : l.watch ? 'auto' : viaIs(l, 'vpn') ? 'vpn' : viaIs(l, 'bypass') ? 'bypass' : '';
 function listDnsWhy(l) {
   const d = S.lists || {}, state = d.smartdns_state;
-  if (state !== 'ready') return state === 'not_configured' ? 'Smart DNS-сервер не настроен' : state === 'dead' ? 'Smart DNS-сервер не отвечает' : 'Ответ Smart DNS-сервера не подтверждён';
+  if (state !== 'ready') return state === 'off' ? 'Smart DNS выключен' : state === 'not_configured' ? 'Smart DNS-сервер не настроен' : state === 'dead' ? 'Smart DNS-сервер не отвечает' : 'Ответ Smart DNS-сервера не подтверждён';
   const rows = (d.smartdns_sources && d.smartdns_sources.keenetic) || [], used = num(d.doh_used) || 0, limit = num(d.doh_limit) || 8;
   const need = (l.domains || []).filter(x => rows.indexOf(x) < 0).length;
   return l.count > limit || used + need > limit ? 'Недоступно: лимит ' + used + ' из ' + limit + ', списку нужно ещё ' + need : '';
 }
-function listModes(l) { const why = listDnsWhy(l); return LIST_MODES.map(o => [o[0], o[1], !!LISTBULK.busy || o[0] === 'dns' && !!why]); }
-function listAllModes(ls) { const d = S.lists || {}, rows = (d.smartdns_sources && d.smartdns_sources.keenetic) || [], needed = new Set(); ls.forEach(l => (l.domains || []).forEach(x => { if (rows.indexOf(x) < 0) needed.add(x); })); const why = ls.some(l => !!listDnsWhy(l)) || (num(d.doh_used) || 0) + needed.size > (num(d.doh_limit) || 8); return LIST_MODES.map(o => [o[0], o[1], !!LISTBULK.busy || o[0] === 'dns' && why]); }
+function listModes(l) { const why = listDnsWhy(l); return LIST_MODES.filter(o => !(o[0] === 'dns' && (S.lists || {}).smartdns_state === 'off' && !l.dns_mode)).map(o => [o[0], o[1], !!LISTBULK.busy || o[0] === 'dns' && !!why]); }
+function listAllModes(ls) { const d = S.lists || {}, rows = (d.smartdns_sources && d.smartdns_sources.keenetic) || [], needed = new Set(); ls.forEach(l => (l.domains || []).forEach(x => { if (rows.indexOf(x) < 0) needed.add(x); })); const why = ls.some(l => !!listDnsWhy(l)) || (num(d.doh_used) || 0) + needed.size > (num(d.doh_limit) || 8); return LIST_MODES.filter(o => !(o[0] === 'dns' && (S.lists || {}).smartdns_state === 'off')).map(o => [o[0], o[1], !!LISTBULK.busy || o[0] === 'dns' && why]); }
 const LISTPICK = new Set(), LISTBULK = { busy: '' };
 function listDelText(ls) {
   const n = ls.reduce((a, l) => a + (l.count || 0), 0), vpn = ls.filter(l => viaIs(l, 'vpn'));
@@ -1564,11 +1565,15 @@ function routingOutcomeNote(o) {
   return '<p class="seg-note muted">Новый режим не подключён. Конфигурация на тестовых данных: ' + esc(state) + '. Путь устройства не проверен.</p>';
 }
 // dnsDown: the Smart DNS server does not answer or is not set - its segment is off, with the reason.
+// The owner's switch «Smart DNS» (08.11, off by default): its way is not offered while it is off.
+const sdFeatureOff = () => !!S.ai && S.ai.smartdns_enabled === false;
 function aiSlider(id, cur, label, off, dnsDown, dnsWhy) {
-  const to = Math.max(0, AI_VIA.findIndex(o => o[0] === cur)), on = cfgOk() && !!S.ai && !SVC.busy && !off;
+  const VIA = AI_VIA.filter(o => !(o[0] === 'dns' && sdFeatureOff() && cur !== 'dns'));
+  if (sdFeatureOff()) { dnsDown = cur === 'dns'; dnsWhy = 'Smart DNS выключен'; }
+  const to = Math.max(0, VIA.findIndex(o => o[0] === cur)), on = cfgOk() && !!S.ai && !SVC.busy && !off;
   const from = aiPrev[id] != null ? aiPrev[id] : to; aiPrev[id] = to;
   return '<div class="seg-slider' + (on ? '' : ' off') + (cur ? '' : ' none') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
-    AI_VIA.map(o => { const dis = !on || (o[0] === 'dns' && dnsDown && cur !== 'dns');
+    VIA.map(o => { const dis = !on || (o[0] === 'dns' && dnsDown && cur !== 'dns');
       return '<button type="button" role="radio" data-ai-via="' + o[0] + '" data-ai="' + esc(id) + '" aria-checked="' + (o[0] === cur) + '"' + (dis ? ' disabled' : '') + (o[0] === 'dns' && dnsDown ? ' title="' + esc(dnsWhy || 'сервер не отвечает') + '"' : '') + '>' + o[1] + '</button>'; }).join('') + '</div>' +
     (dnsDown ? '<p class="seg-note">Smart DNS: ' + esc(dnsWhy || 'сервер не отвечает') + '</p>' : '') +
     (S.ai && !on && !off && (SVC.busy ? AIBUSY === id : !cfgOk()) ? '<p class="seg-note muted">' + (SVC.busy ? 'Переключается…' : 'Изменение недоступно: нет прав на настройку') + '</p>' : '');
@@ -1668,7 +1673,10 @@ function aiPage() {
   const sdDead = a && sd.alive === 'no' ? panel('Smart DNS не отвечает', '<p class="result-note warn">Сервер Smart DNS не отвечает на DNS-запросы: сайты, привязанные к нему (' +
     fmtInt((sd.keenetic || 0) + (sd.agh_domains || 0)) + '), не открываются. Уберите сервер кнопкой ниже или переведите сервисы на VPN.</p>') : '';
   return loadError(['ai']) + actionRecovery(a && a.recovery) + sdDead + aiQuestion(sd) + aiRoomPanel(sd) +
-    panel('Smart DNS', kv([
+    panel('Smart DNS', '<dl class="kv">' + ctrlRow('Smart DNS', sw('data-sd-feature', !!(a && a.smartdns_enabled), 'Smart DNS', !cfgOk() || !a),
+        a && a.smartdns_enabled ? 'включён: режим «DNS» доступен, пока сервер отвечает; Keenetic - не больше 8 строк' :
+          'выключен: VWARD не пишет строки Smart DNS в Keenetic и AdGuard Home и не проверяет сервер; включается, только если сервер задан и отвечает') + '</dl>' +
+      confirmBox('sd-off', 'Выключить Smart DNS? VWARD снимет свои строки Smart DNS (по адресу своего сервера) из Keenetic и AdGuard Home, с откатом при ошибке. Чужие строки, NextDNS, ваши правила DNS и DNS провайдера не трогаются. Адрес сервера сохранится.', 'Выключить', true) + kv([
         (sd.server_rows || []).length ? null : ['Сервер', !a ? '…' : 'не задан', a && noSd ? 'warn' : ''],
         ['Домены Smart DNS', 'открыть', '', 'd-smartdns', '', 'и агент: держит их мимо VPN']]) + sdStoreRow(a, sd) +
       sdServers(a, sd) +
@@ -4754,6 +4762,7 @@ const CONFIRMED = {
   'wan-renew': () => wanOp('wan-renew', 'WAN_RENEW', 'Адрес запрошен заново'),
   'wan-bounce': () => wanOp('wan-bounce', 'WAN_BOUNCE', 'Интернет переподключён'),
   'tg-off': () => cfgSet({ op: 'tunnel-guard', value: '0', confirm: 'TUNNEL_GUARD_DISABLE' }, 'Агент VPN выключен', ['status']),
+  'sd-off': () => cfgSet({ op: 'smartdns-feature', value: '0', confirm: 'SMARTDNS_OFF' }, 'Smart DNS выключен, строки VWARD сняты', ['ai', 'lists']),
   'wifi-ctl-on': () => cfgSet({ op: 'wifi', target: 'CONTROL_ENABLED', value: '1', confirm: 'WIFI_CONTROL_ENABLE' }, 'Ручное управление включено', ['wifi']),
   'wifi-bind': c => { const op = c.op, mac = current.slice(2), token = { 'bind-2g': 'WIFI_BIND_2G', 'bind-5g': 'WIFI_BIND_5G', auto: 'WIFI_BAND_AUTO' }[op]; return runAction('wifi', 'wifi-control', { op: op, mac: mac, confirm: token }, 'Диапазон изменён').then(() => load('wifi', true)).then(render); }
 };
@@ -5257,6 +5266,10 @@ document.addEventListener('change', e => {
   if (t.dataset.cfgTq) { const on = t.checked; t.disabled = true; cfgSet({ op: t.dataset.cfgTq, value: on ? '1' : '0' }, t.dataset.cfgTq === 'tunnel-fallback' ? (on ? 'Запасной туннель включён' : 'Запасной туннель выключен') : (on ? 'Возврат на основной включён' : 'Возврат на основной выключен'), ['tq']); return; }
   if (t.dataset.listVia) { const v = t.value; t.disabled = true; cfgSet({ op: 'domain-list', target: t.dataset.listVia, value: v }, v === 'bypass' ? 'Список идёт через провайдера' : 'Список идёт через ' + v, ['lists']); return; }
   if (t.hasAttribute('data-theme-pick')) { setTheme(t.value); return; }
+  if (t.hasAttribute('data-sd-feature')) {
+    if (!t.checked) { t.checked = true; confirm = { id: 'sd-off' }; render(); return; }
+    cfgSet({ op: 'smartdns-feature', value: '1' }, 'Smart DNS включён', ['ai', 'lists']); return;
+  }
   if (t.hasAttribute('data-smartdns-guard')) { cfgSet({ op: 'smartdns-guard', value: t.checked ? '1' : '0' }, t.checked ? 'Агент Smart DNS включён' : 'Агент Smart DNS выключен', ['lists']); return; }
   if (t.dataset.extAuto) { cfgSet({ op: 'ext-auto', target: t.dataset.extAuto, value: t.checked ? '1' : '0' }, t.checked ? 'Будет обновляться автоматически' : 'Обновление только вручную', ['ext']); return; }
   if (t.hasAttribute('data-policy-group')) { if (t.value) cfgSet({ op: 'policy-group', target: t.value }, 'Мои домены теперь добавляются в ' + t.value, ['route', 'security']); return; }

@@ -55,7 +55,7 @@ print("ok")''')
     ndmc = t / 'ndmc'; ndmc.write_text(fake); ndmc.chmod(0o755)
     device = t / 'device.conf'; device.write_text(ns['DEVICE_CONF']); device.chmod(0o600)
     lconf = etc / 'route-engine/domain-lists.conf'; lconf.write_text('managed.domain-list3=1\nwatch.domain-list3=1\n')
-    env = dict(os.environ, VWARD_NDMC=str(ndmc), VWARD_DEVICE_CONFIG=str(device),
+    env = dict(os.environ, VWARD_SMARTDNS_SWITCH=str(ROOT / 'tests/repository/fixtures/smartdns-on'), VWARD_NDMC=str(ndmc), VWARD_DEVICE_CONFIG=str(device),
                VWARD_DEVICE_CONFIG_OWNER_UID=str(os.getuid()), VWARD_ROOT_PREFIX=str(t / 'root'),
                VWARD_DEVICE_MAP_CACHE=str(t / 'map'), VWARD_SYSFS_NET=str(t / 'sys'),
                VWARD_CONSOLE_ETC=str(etc), VWARD_ROUTE_STATE=str(t / 'route'),

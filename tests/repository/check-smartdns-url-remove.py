@@ -75,7 +75,7 @@ with tempfile.TemporaryDirectory() as tmp:
     (tmp / "policy").mkdir(); (tmp / "root/tmp").mkdir(parents=True); (tmp / "etc").mkdir()
     adm = tmp / "admission.sh"; adm.write_text(f'. "{ROOT / "components/runtime/lib/vward-runtime-admission.sh"}"\n' +
         "vward_admission_enter() { return 0; }\nvward_admission_leave() { return 0; }\n")
-    env = os.environ | {
+    env = os.environ | {"VWARD_SMARTDNS_SWITCH": str(ROOT / "tests/repository/fixtures/smartdns-on"), 
         "VWARD_NDMC": str(ndmc), "VWARD_DEVICE_CONFIG": str(devconf), "VWARD_DEVICE_CONFIG_OWNER_UID": str(os.getuid()),
         "VWARD_DEVICE_MAP_CACHE": str(tmp / "map.tsv"), "VWARD_SYSFS_NET": str(tmp / "sys"),
         "VWARD_PROFILE_LIB": str(ROOT / "components/runtime/lib/vward-device-profile.sh"), "VWARD_ADMISSION_LIB": str(adm),

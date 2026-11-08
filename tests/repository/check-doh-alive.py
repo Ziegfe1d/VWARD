@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory() as tmp:
         (tmp / "body.bin").write_bytes(bytes.fromhex(h))
 
     def probe(path=None, fresh="1"):
-        env = os.environ | {"VWARD_CURL_BIN": str(curl), "VWARD_DOH_ALIVE_DIR": str(tmp / "cache"),
+        env = os.environ | {"VWARD_SMARTDNS_SWITCH": str(ROOT / "tests/repository/fixtures/smartdns-on"), "VWARD_CURL_BIN": str(curl), "VWARD_DOH_ALIVE_DIR": str(tmp / "cache"),
                             "VWARD_DOH_ALIVE_FRESH": fresh, "VWARD_TLS_BROKEN_FLAG": str(tmp / "none")}
         if path:
             env["PATH"] = path

@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory() as tmp:
     start.chmod(0o755)
     (t / "init.d/S90other").write_text("#!/bin/sh\necho other >> \"%s/other\"\n" % t)
     (t / "init.d/S90other").chmod(0o755)
-    env = os.environ | {"VWARD_ADGUARD_CONFIG": str(agh), "VWARD_PROC_NET": str(t / "net"), "VWARD_INITD": str(t / "init.d"),
+    env = os.environ | {"VWARD_SMARTDNS_SWITCH": str(ROOT / "tests/repository/fixtures/smartdns-on"), "VWARD_ADGUARD_CONFIG": str(agh), "VWARD_PROC_NET": str(t / "net"), "VWARD_INITD": str(t / "init.d"),
                         "VWARD_DOH_RESTARTS": str(t / "restarts"), "VWARD_TLS_BROKEN_FLAG": str(t / "tls.broken"),
                         "VWARD_DOH_BROKEN_FLAG": str(t / "doh.broken"),
                         "VWARD_DOH_SETTLE": "0"}

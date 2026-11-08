@@ -639,7 +639,8 @@ pkg_repair_text()
 # reinstalled, with a copy of their files first, at most once a day; the owner is told the
 # stick spoils files. Intact files: nothing reinstalled (it would not help). curl is not touched.
 DOH_PKGS=${VWARD_DOH_PKGS:-https-dns-proxy libcares libev libnghttp2 libcurl libopenssl}
-if [ -n "$(find "$REPAIR_DOH_FLAG" -mmin -360 2>/dev/null)" ] &&
+if { ! command -v vward_smartdns_on >/dev/null 2>&1 || vward_smartdns_on; } &&
+   [ -n "$(find "$REPAIR_DOH_FLAG" -mmin -360 2>/dev/null)" ] &&
    vward_agent_acts maintenance repair:doh "Клиент DoH Smart DNS перезапускался 3 раза: сверить его пакеты с Entware и переустановить испорченные" && repair_due doh; then
     rm -f "$REPAIR_DOH_FLAG"
     rd_out=$R/tmp/vward-doh-damaged.$$

@@ -1579,6 +1579,7 @@ op_list_dns() {
     list_steerable "$1"
     list_managed "$1" || die list_not_managed 64
     case "$2" in dns|vpn|bypass|auto) ;; *) is_tunnel "$2" || die invalid_value 64 ;; esac
+    [ "$2" != dns ] || smartdns_need_on
     [ "${EDIT_LOCKED:-0}" = 1 ] || edit_lock
     change_lock
     snapshot
@@ -3875,6 +3876,12 @@ op_wifi_host() {
 # holds at most 8 of them.
 SMARTDNS_CONF=${VWARD_SMARTDNS_CONF:-$ETC/smartdns.conf}
 SMARTDNS_KEENETIC_MAX=8
+# The owner's switch «Smart DNS» (owner 08.11, off by default): «1» in smartdns.switch.
+# Off: no Smart DNS row is written (Keenetic's dns-proxy, AdGuard Home), «DNS» modes are refused;
+# removals of VWARD's own rows stay possible.
+SMARTDNS_SWITCH=${VWARD_SMARTDNS_SWITCH:-$ETC/smartdns.switch}
+smartdns_on() { so_v=; read -r so_v 2>/dev/null < "$SMARTDNS_SWITCH" || :; [ "$so_v" = 1 ]; }
+smartdns_need_on() { smartdns_on || die smartdns_off 75; }
 smartdns_url() {
     su=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
     [ -n "$su" ] || su=$(doh_lines | awk '$(NF-1) == "domain" {n[$3]++} END {for (u in n) if (n[u] > m) {m = n[u]; b = u}; print b}')
@@ -3887,6 +3894,7 @@ keenetic_smartdns() {
     snapshot
     ks_have=$(doh_lines | awk -v d="$2" '$(NF-1) == "domain" && tolower($NF) == d')
     if [ "$1" = add ]; then
+        smartdns_need_on
         ks_url=$(smartdns_url) || die smartdns_not_configured
         # fix.35.5 (A4): «unchanged» only when the domain already goes to this very server; a line
         # to another server is not rewritten unasked, and it is not reported as done either.
@@ -3974,6 +3982,7 @@ op_smartdns_domain() {
     load_profile_base
     JOURNAL=$(umask 077; mktemp /tmp/vward-console-smartdns.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     if [ "$1" = add ]; then
+        smartdns_need_on
         snapshot
         sd_u=$(smartdns_write_url) || die smartdns_not_configured
         sd_existing=$(smartdns_existing_urls "$2") || die config_unavailable
@@ -4211,7 +4220,8 @@ op_smartdns_server() {
              rm -f "$SD_TMPCONF.all"
              # The owner's own address goes only with its own server (no selector, or the same host).
              ss_drop_own=0
-             if [ -n "$ss_own" ]; then
+             # The «Smart DNS» switch going off keeps the address for a later «on».
+             if [ -n "$ss_own" ] && [ "${VWARD_SMARTDNS_KEEP_URL:-0}" != 1 ]; then
                  if [ -z "$ss_sel" ]; then ss_drop_own=1
                  elif [ -n "$ss_old" ] && SS_A=$ss_own SS_B=$ss_old awk 'function host(u) {sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); return tolower(u)}
                          BEGIN {exit !(host(ENVIRON["SS_A"]) == host(ENVIRON["SS_B"]))}'; then ss_drop_own=1
@@ -4489,6 +4499,7 @@ op_ai() {
     service_pending_check
     routing_recovery_check
     if [ "$2" = dns ]; then
+        smartdns_need_on
         load_profile_base; snapshot
         ai_url=$(smartdns_write_url) || die smartdns_not_configured
         vward_doh_alive "$ai_url"; ai_alive=$?
@@ -5395,6 +5406,43 @@ op_agh_component() {
 }
 
 # smartdns-keenetic add|remove DOMAIN: only Keenetic's own Smart DNS line (AdGuard Home off).
+# smartdns-feature 1|0: the owner's switch «Smart DNS». On: only with a server set that answers
+# (the reason otherwise); the Keenetic limit of 8 rows stays with each write. Off: the switch first
+# (nothing new is written from then on), then VWARD's own rows of its server go from Keenetic and
+# AdGuard Home by its address, with the rollback of «smartdns-server clear»; the server address stays
+# for a later «on»; rows of other servers, NextDNS, the owner's name servers are not touched.
+op_smartdns_feature() {
+    case "$1" in 0|1) ;; *) die invalid_value 64 ;; esac
+    sf_url=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
+    if [ "$1" = 1 ]; then
+        smartdns_on && done_ok "smartdns-feature 1" unchanged
+        [ -n "$sf_url" ] || die smartdns_not_configured
+        load_profile_base
+        VWARD_DOH_ALIVE_FORCE=1 vward_doh_alive "$sf_url"; sf_alive=$?
+        case "$sf_alive" in 0) ;; 1) die smartdns_dead ;; *) die smartdns_unknown ;; esac
+    else
+        smartdns_on || [ -n "$(sf_rows_left)" ] || done_ok "smartdns-feature 0" unchanged
+    fi
+    new_tmp "$SMARTDNS_SWITCH" || die write_failed
+    printf '%s\n' "$1" > "$TMPFILE" || die write_failed
+    install_tmp "$SMARTDNS_SWITCH" 0644 || die write_failed
+    [ "$1" = 0 ] || done_ok "smartdns-feature 1" changed
+    # Off: VWARD's own rows of its server, by its address (the same journal and rollback as the
+    # Panel's «clear»), the address kept.
+    [ -n "$sf_url" ] || done_ok "smartdns-feature 0" changed
+    sf_out=$(printf '%s\n' "$sf_url" | VWARD_SMARTDNS_SELECTOR=1 VWARD_SMARTDNS_KEEP_URL=1 sh "$0" smartdns-server clear 2>/dev/null); sf_rc=$?
+    printf '%s\n' "$sf_out" | grep '^cleared=' || :
+    [ "$sf_rc" = 0 ] || die "$(printf '%s\n' "$sf_out" | sed -n 's/^error=//p' | tail -n 1 | tr -cd 'a-z0-9_')" "$sf_rc"
+    done_ok "smartdns-feature 0" changed
+}
+# sf_rows_left: VWARD's server still has rows in Keenetic (a switch already off with rows left).
+sf_rows_left() {
+    sl_url=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
+    [ -n "$sl_url" ] || return 0
+    load_profile_base; snapshot
+    doh_lines | awk -v u="$sl_url" '$3 == u && $(NF-1) == "domain"' | head -n 1
+}
+
 op_smartdns_keenetic() {
     case "$1" in add|remove) ;; *) die invalid_operation 64 ;; esac
     valid_domain "$2" || die invalid_domain 64
@@ -5538,7 +5586,7 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store|routing-root) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store|smartdns-feature|routing-root) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
@@ -5654,6 +5702,7 @@ case "$OP" in
     backup-restore) op_backup_restore "$ARG1" ;;
     cleanup) op_cleanup "$ARG1" ;;
     smartdns-server) op_smartdns_server "$ARG1" ;;
+    smartdns-feature) op_smartdns_feature "$ARG1" ;;
     ai) op_ai "$ARG1" "$ARG2" "$ARG3" ;;
     list) op_list "$ARG1" "$ARG2" "$ARG3" ;;
     agh-component) op_agh_component "$ARG1" "$ARG2" ;;

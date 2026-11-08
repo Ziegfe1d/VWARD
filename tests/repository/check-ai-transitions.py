@@ -46,7 +46,7 @@ def setup(tmp, lines=(), own=True):
     (tmp / "root/tmp").mkdir(parents=True)
     if own:
         (etc / "smartdns.conf").write_text("SMARTDNS_URL=" + OWN + "\nSMARTDNS_STORE=keenetic\n"); (etc / "smartdns.conf").chmod(0o600)
-    env = os.environ | {
+    env = os.environ | {"VWARD_SMARTDNS_SWITCH": str(ROOT / "tests/repository/fixtures/smartdns-on"), 
         "VWARD_NDMC": str(ndmc), "VWARD_DEVICE_CONFIG": str(dev), "VWARD_DEVICE_CONFIG_OWNER_UID": str(os.getuid()),
         "VWARD_DEVICE_MAP_CACHE": str(tmp / "map.tsv"), "VWARD_SYSFS_NET": str(tmp / "sys"),
         "VWARD_PROFILE_LIB": str(ROOT / "components/runtime/lib/vward-device-profile.sh"),
