@@ -43,6 +43,7 @@ def request(f, *args):
                    'VWARD_ROUTE_CHANGE_LOCK': str(f.prefix/'tmp/vward-route-change.lock'),
                    'VWARD_CONSOLE_AUDIT_LOG': str(f.p/'console-audit')}
     cmd = [*SHELL, str(f.console_path), *args]
+    reads0 = f.calls.read_text().count('\tshow running-config\n') if f.calls.exists() else 0
     t0 = time.monotonic()
     if STRACE:
         log = f.p / 'budget.strace'
@@ -58,7 +59,8 @@ def request(f, *args):
             pid_max = int(fh.read())
         n = (after - before if after >= before else after + pid_max - before) - 1
     last = (p.stdout.strip().splitlines() or [''])[-1]
-    return {'rc': p.returncode, 'result': last, 'processes': n, 'wall_s': round(time.monotonic() - t0, 1)}
+    reads = (f.calls.read_text().count('\tshow running-config\n') if f.calls.exists() else 0) - reads0
+    return {'rc': p.returncode, 'result': last, 'processes': n, 'reads': reads, 'wall_s': round(time.monotonic() - t0, 1)}
 
 
 def main():
@@ -83,12 +85,14 @@ def main():
             bad.append(f"{kind}: rc={got['rc']} result={got['result']!r}, expected {expect}")
         elif got['processes'] > limit:
             bad.append(f"{kind}: {got['processes']} processes > budget {limit} (owner target {BUDGET['target'][kind]})")
+        elif got['reads'] > BUDGET['reads'][kind]:
+            bad.append(f"{kind}: {got['reads']} show running-config reads > budget {BUDGET['reads'][kind]} (owner target {BUDGET['target_reads']})")
     print(json.dumps(out, ensure_ascii=False))
     if bad:
         print('SERVICE_CHANGE_BUDGET=FAIL ' + '; '.join(bad))
         return 1
     print('SERVICE_CHANGE_BUDGET=PASS ' + ', '.join(
-        f"{k} {out[k]['processes']}/{BUDGET['budget'][k]}" for k in want))
+        f"{k} {out[k]['processes']}/{BUDGET['budget'][k]} reads {out[k]['reads']}/{BUDGET['reads'][k]}" for k in want))
     return 0
 
 

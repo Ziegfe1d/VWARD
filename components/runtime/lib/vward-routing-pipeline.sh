@@ -327,6 +327,7 @@ vrb_publish_local_kind() {
     case ${vrb_role:-} in forward|inverse) ;; *) return 1 ;; esac
     vrj2_seq "${vrb_active_step:-}" && [ -n "${vrb_t:-}" ] || return 1
     vrj2_row_fields "$vrb_j/$vrb_op" "$vrb_active_step" || return 1
+    # shellcheck disable=SC2154
     vrb_pk_k=${vrj2_row#*"$vrj_tab"*"$vrj_tab"*"$vrj_tab"};vrb_pk_k=${vrb_pk_k%%"$vrj_tab"*}
     case $vrb_pk_k in manifest|nativeproof|registry) return 0 ;; *) return 1 ;; esac
 }
@@ -338,6 +339,7 @@ vrb_pl_mode() {
         if [ "$vrb_pl_label" = enabled ]; then
             [ -f "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] && [ -r "$1" ] && vrj_ls "$1" || return 75
             case $vrj_lmode in -rw-------|-r--------|-rw-r--r--) ;; *) return 75 ;; esac
+            # shellcheck disable=SC2154
             case $vrj_lsize in ''|*[!0-9]*) return 75 ;; esac
             [ "$vrj_lsize" -le 1048576 ] || return 75
         else vrj2_file "$1" || return 75;fi
@@ -419,6 +421,7 @@ vrb_publish_local() {
     vrb_dm_file=;vrb_dm_scope=;vrb_dm_new=0
     vrb_pub_scope_known=$vrb_pl_scope
     vrb_dispatch_mark "$1" "$2" || return 75
+    # shellcheck disable=SC2034
     vrb_pub_scope_known=
     if [ "$1" = - ]; then vrb_pl_now=$vrb_pl_dash;else vrb_pl_now=$(vr2_hash "$1") || vrb_pl_now=;fi
     if ! vrb_worker_context || ! vrb_data_ancestry "$2" || ! vrb_pl_mode "$2" || [ "$vrb_pl_m" != "$vrb_pub_mode" ] ||
@@ -988,6 +991,7 @@ vward_routing_pipeline2() (
     vward_routing_lower2 "$vrb_t/stage" "$vrb_t/typed" "$vrb_t/lowered" || return 75
     vrb_parent=$vrb_t
     vrb_outcome_bind "$vrb_parent/stage" "$vrb_parent/lowered" "$vrb_parent/project" || return 75
+    # shellcheck disable=SC2030
     vrb_plan_stage=$vrb_parent/stage
     vrb_result=0;vrb_execute2 "$vrb_parent/lowered" || vrb_result=$?
     vrb_plan_stage=
@@ -1088,6 +1092,7 @@ vrb_execute2_batch() {
     # the same inputs again; anything else takes a full fresh stage.
     vrb_transport_refresh || return 1
     vrb_now=
+    # shellcheck disable=SC2031
     if [ -n "${vrb_plan_stage:-}" ] && [ ! -e "$vrb_t/reader" ]; then
         vrb_now=$(vrb_fresh_fingerprint) || vrb_now=
         if [ "$vrb_now" = "$vrb_gen" ] && vrb_fresh_from_plan_stage "$vrb_now"; then :;else vrb_now=;fi
@@ -1136,12 +1141,13 @@ vrb_execute2_batch() {
             vward_journal2_unknown "$vrb_j" "$vrb_op" input-changed-during-step
             printf 'outcome\tunknown\tdesired-only\tunknown\tfalse\t%s\n' "$(vrb_execution_evidence)";return 3
         fi
-        vrb_last_kind=;vrb_last_post=
+        vrb_last_kind=
         while IFS="$(printf '\t')" read -r vrb_tag vrb_n _vrb_action vrb_kind vrb_id _vrb_pre vrb_post _vrb_rest; do
             [ "$vrb_tag" = step ] || continue
+            # shellcheck disable=SC2015
             [ "$vrb_n" -ge "$vrb_batch_from" ] && [ "$vrb_n" -le "$vrb_batch_to" ] || continue
             vrb_parent_scope_hash "$vrb_t/fresh" "$vrb_kind" "$vrb_id" "$vrb_t/batch/current.$vrb_n" || return 3
-            vrb_last_kind=$vrb_kind:$vrb_id;vrb_last_post=$vrb_post
+            vrb_last_kind=$vrb_kind:$vrb_id
         done < "$vrb_t/plan"
         # Only the LAST step of a segment can have a non-zero writer status.
         if [ "$vrb_rc" = 75 ] || { [ "$vrb_last_kind" = dns-scope:agh ] && [ "$vrb_rc" != 0 ]; }; then
@@ -1163,6 +1169,7 @@ vrb_execute2_batch() {
         vrb_batch_from=$((vrb_batch_to+1))
     done
     # The save that follows may use this verified readback as its "before".
+    # shellcheck disable=SC2034
     vrb_transport_fresh=$vrb_op
 }
 

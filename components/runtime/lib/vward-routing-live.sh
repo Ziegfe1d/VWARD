@@ -357,6 +357,7 @@ vrl_group_batch() {
         vrl_gb_i=$((vrl_gb_i+1))
         printf 'dispatched\t2\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$vrb_op" "$vrl_gb_step" "$vrl_gb_h" "$vrb_pub_pid" "$vrb_pub_start" "$vrj2_boot" "$vrl_gb_plansha" > "$vrl_call/receipts/$vrl_gb_i" || return 1
     done < "$vrl_call/command"
+    # shellcheck disable=SC2046
     vrl_gb_sums=$(cd "$vrl_call/receipts" && LC_ALL=C sha256sum $(vrl_gb_seq "$vrl_gb_n")) || return 1
     vr2_hash "$vrl_call/command" > "$vrl_call/command.sha" &&
         printf '%s\n' "$vrb_t/post.$vrl_gb_step" > "$vrl_call/expected.path" &&
@@ -418,8 +419,11 @@ vrl_gb_seq() { vrl_gs_i=0;while [ "$vrl_gs_i" -lt "$1" ]; do vrl_gs_i=$((vrl_gs_
 vrl_transport_complete() {
     [ "$#" -eq 1 ] && vr2_stage_valid "$1" || return 75
     for vrl_tc_call in "$vrb_j/$vrb_op"/native.*; do
+        # shellcheck disable=SC2015
         [ -d "$vrl_tc_call" ] && [ ! -L "$vrl_tc_call" ] || continue
+        # shellcheck disable=SC2015
         [ -e "$vrl_tc_call/request.pending" ] && [ -e "$vrl_tc_call/scope" ] || continue
+        # shellcheck disable=SC2015
         vrj2_file "$vrl_tc_call/status" && vrj2_file "$vrl_tc_call/scope" && vrj2_file "$vrl_tc_call/expected" || continue
         [ "$(cat "$vrl_tc_call/status")" = sent-ok ] || continue
         [ "$(vr2_hash "$vrl_tc_call/command")" = "$(cat "$vrl_tc_call/command.sha")" ] || continue
@@ -448,7 +452,9 @@ vrl_requests_quiet() {
 vrl_rq_batch_acked() {
     case $1 in "$vrb_j/$vrb_op"/native.*) ;; *) return 1 ;; esac
     [ -d "$1" ] && [ ! -L "$1" ] && vrj2_file "$1/scope" && vrj2_file "$1/status" || return 1
-    vrj_slurp "$1/status";[ "$vrj_sv" = sent-ok ]
+    vrj_slurp "$1/status"
+    # shellcheck disable=SC2154
+    [ "$vrj_sv" = sent-ok ]
 }
 vrl_saved() {
     case ${vrl_last_save:-} in "$vrb_j/$vrb_op/native."*) ;; *) return 75 ;; esac
@@ -520,6 +526,7 @@ vrl_envelope() {
     # Per-request seal memo in this coordinator's private cache (see
     # vr2_seal_valid): removed with the cache, never shared between requests.
     : > "$vrl_cache/.seal-memo" || return 1
+    # shellcheck disable=SC2034
     vr2_seal_memo=$vrl_cache/.seal-memo
     VWARD_KCACHE=$vrl_cache;RUNCFG=$vrl_cache/running-config
     VWARD_CONSOLE_ETC=$vrl_etc
@@ -669,6 +676,7 @@ vrl_converged_health() {
         [ -n "$vrl_ch_vpn" ] || continue
         vrl_ch_n=$((vrl_ch_n+1));[ "$vrl_ch_n" -le 128 ] || return 1
         vrl_ch_state=$(vrl_interface_observe "$vrl_ch_vpn") || return 1
+        # shellcheck disable=SC2154
         vrl_ch_rows="${vrl_ch_rows}VPN:$vrl_ch_vpn$vrj_tab$vrl_ch_state$vrj_nl"
     done <<VRLCH
 $vrl_ch_vpns
@@ -763,6 +771,7 @@ vrl_converged_record() {
         esac
     fi
     if [ "$vrl_cr_ok" != 1 ]; then rm -f "$vrl_cr" 2>/dev/null;return 0;fi
+    # shellcheck disable=SC2015
     vrl_cr_gen=$(cat "$5/generation") && vrj2_gen "$vrl_cr_gen" || { rm -f "$vrl_cr";return 0; }
     vrl_cr_jr=$(vrl_converged_journal "$vrl_root/journal") || { rm -f "$vrl_cr";return 0; }
     vrl_cr_code=$(vrl_converged_code) || { rm -f "$vrl_cr";return 0; }

@@ -27,6 +27,10 @@ for CASE in \
     check-live-bootstrap.py \
     check-validation-primitives.py \
     check-process-budget-primitives.py \
+    check-batch-primitives.py \
+    check-journal-hold.py \
+    check-live-batch-executor.py \
+    check-live-repeat-fast-path.py \
     check-live-first-request.py \
     check-live-cold-map.py \
     check-live-cold-map-lifetime.py \

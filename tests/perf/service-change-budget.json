@@ -1,7 +1,10 @@
 {
-  "comment": "Processes created by ONE request of each type through the actual copied console closure (tests/perf/check-service-change-budget.py, NDMC fixture). Budget = the larger of sh (dash) and BusyBox ash, measured with strace fork counts on the process-budget HEAD of PR38 (2026-11-07), plus ~5%. Before this package (4cf3388): cold 25 878, change 22 618, repeat 2 782. The owner's targets (target) are NOT met yet: per-step full snapshot/journal/readback is the remaining floor; see docs/AGENT.md 07.11 process budget. Never raise a budget without a recorded reason; lower it whenever a pass lands.",
-  "measured": {"sh": {"cold": 14768, "change": 9314, "repeat": 1610, "off": 7432},
-               "busybox": {"cold": 15053, "change": 9534, "repeat": 1610, "off": 7608}},
-  "budget": {"cold": 15800, "change": 10000, "repeat": 1700, "off": 8000},
-  "target": {"cold": 1500, "change": 500, "repeat": 150, "off": 500}
+  "comment": "Processes (strace forks) and native 'show running-config' reads of ONE request of each type through the actual copied console closure (tests/perf/check-service-change-budget.py, NDMC fixture, 2-domain service). Budget = the larger of sh (dash) and BusyBox ash measured on the batch-executor HEAD of PR38 (2026-11-08) plus ~5%; repeat is capped at the owner's threshold. History: c9d39f4 cold 14 768 / change 9 314 / repeat 1 610 / off 7 432 (reads cold 27, change 29, repeat 1, off 19); 4cf3388 cold 25 878 / change 22 618 / repeat 2 782. Owner release threshold 08.11.2026: change <=1 500, cold <=3 000, repeat <=150, <=2 reads per request; targets 500 / 1 500 / 150. Change, cold and reads are NOT yet within the threshold (docs/AGENT.md 08.11). Never raise a budget without a recorded reason; lower it whenever a pass lands.",
+  "measured": {"sh": {"cold": 10382, "change": 3594, "repeat": 145, "off": 3120},
+               "busybox": {"cold": 10415, "change": 3605, "repeat": 145, "off": 3132}},
+  "budget": {"cold": 10950, "change": 3800, "repeat": 150, "off": 3300},
+  "reads": {"cold": 12, "change": 5, "repeat": 1, "off": 5},
+  "target": {"cold": 1500, "change": 500, "repeat": 150, "off": 500},
+  "threshold": {"cold": 3000, "change": 1500, "repeat": 150},
+  "target_reads": 2
 }

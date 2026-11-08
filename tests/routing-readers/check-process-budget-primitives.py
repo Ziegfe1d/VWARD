@@ -32,9 +32,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 def old_lib(tmp, name):
+    # Byte-exact reference copy (CI checks out without git history).
     p = Path(tmp) / ("old-" + name)
-    p.write_bytes(subprocess.run(["git", "-C", str(ROOT), "show", f"{BASE}:components/runtime/lib/{name}"],
-                                 capture_output=True, check=True).stdout)
+    p.write_bytes((Path(__file__).resolve().parent / "reference" / BASE / name).read_bytes())
     return p
 
 
