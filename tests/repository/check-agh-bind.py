@@ -58,6 +58,8 @@ for shell in shells:
         script = t / "run.sh"
         script.write_text(f"""STATE_DIR="{t}"; MANUAL="{t}/manual"; ADAPTIVE="{t}/adaptive"; EVENT_LOG="{t}/events"
 VWARD_DNS_SERVER=192.0.2.1
+LISTS_CONF="{t}/domain-lists.conf"
+re_acts() {{ [ "$(awk -F= -v k="$1" '$1 == k {{print $2; exit}}' "$LISTS_CONF" 2>/dev/null)" = 1 ]; }}
 vward_running_config() {{ cat "{rc}"; }}
 {fns}
 case "$1" in
@@ -107,6 +109,11 @@ esac
             fail(f"{shell[0]} route-dns on: a binding back would make a circle: {asked()}")
         (t / "route-dns.enabled").unlink()
 
+        # Owner 08.11: observation by default - without dns_bind_act=1 Keenetic is asked nothing.
+        run("bind", "rr1---sn-a.googlevideo.com")
+        if asked() or lines():
+            fail(f"{shell[0]} observation by default: a list domain bound without dns_bind_act=1: {asked()}")
+        (t / "domain-lists.conf").write_text("dns_bind_act=1\n")
         run("bind", "rr1---sn-a.googlevideo.com")
         if asked() != ["ip name-server 192.0.2.1:65053 googlevideo.com"] or lines() != ["googlevideo.com 192.0.2.1:65053"]:
             fail(f"{shell[0]} the list domain of a video server bound once: {asked()} {lines()}")

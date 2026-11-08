@@ -40,6 +40,9 @@ at = js.index('  const status = s => {', js.index('function aiPage()'))
 status = js[at:js.index('\n  };', at)+5]
 at = js.index('function aiSlider(')
 slider = js[at:js.index('\n}', at)+2]
+# The owner's «Smart DNS» switch (08.11) the slider reads; S.ai has no smartdns_enabled here (on).
+feature = re.search(r"^const sdFeatureOff = .*$", js, re.M).group()
+slider = feature + "\n" + slider
 # Rendering must meet the contract even when the reason is assembled rather
 # than written as one source-code literal. No UI guard is bypassed here.
 checks = '''
