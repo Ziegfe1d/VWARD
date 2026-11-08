@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -110,7 +111,7 @@ for shell in SHELLS:
         check(f"{n} new name within the limit: given back, no wait", "free" in r.stdout and "turn=0" in r.stdout
               and lines("sleeps") == [], r.stdout + r.stderr + str(lines("sleeps")))
         # An old crash note (over an hour) does not stop the hold.
-        r = run(f': > "{t}/tls.broken"; touch -d "2 hours ago" "{t}/tls.broken"; probe h eth3 192.0.2.1; probe h eth3 192.0.2.1; rc_turn_give')
+        r = run(f': > "{t}/tls.broken"; touch -d "{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() - 7200))}" "{t}/tls.broken"; probe h eth3 192.0.2.1; probe h eth3 192.0.2.1; rc_turn_give')
         check(f"{n} old crash note: still one take", lines("takes") == ["t"] and lines("curl.log") == ["owned"] * 2,
               r.stdout + r.stderr + str(lines("takes")))
         # A borrowing child that crashes: its sibling runs no curl, the owner gives back without «works».
