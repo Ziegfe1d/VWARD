@@ -1161,8 +1161,36 @@ P0-3: `save_state` пишет tmp, проверяет запись, переим
 
 **Регрессии:** полный `run-prepared-checks` (sh) на `6bf35ae`: 68/72, 4 отказа — описанные изменения семантики/шва, исправлены и проверены адресно; повторный полный прогон на `f8f9675` — см. §4. Новые: `check-journal-hold`, `check-batch-primitives` (sh+BB), `check-live-batch-executor`, `check-live-repeat-fast-path`. Не закрыто: API/Панель не подключены к координатору (`routing_b_outcome_json` в api.cgi без вызывающего и требует `activation=="off"`, живой итог — `live`), асинхронная операция Панели с опросом, DNS keenetic/AGH и обратные (inverse) команды групп по-прежнему по одной команде с чтениями, пакет state-set для холодного запроса, аппаратная приёмка.
 
+### 08.11.2026 — [Claude Code] скорость Панели: проверка «на чистоту», замер Панели, прототип Go-ядра
+
+Поручение владельца 08.11 (второе, ROADMAP §7 «главный приоритет — скорость»). Ветка `ccr-71f611bd-ntawe4` от HEAD PR #38 `e30ca07`; роутер не подключался. Полный отчёт и таблицы — `docs/SPEED_AUDIT_2026-11-08.md`.
+
+**Шаг 1 (только чтение и отчёт).** Ресурсный аудит эмулятора на `e30ca07`: ~671 тыс. процессов в сутки, route-engine 291/мин (62 %), supervisor 33/мин, ежеминутные цепочки сети ~15 %. Найдено: `tunnel-guard` `DOWN_CONFIRM=1` (одна неудачная минута = действие — причина отключений VPN на перебой 1–2 с; под Наблюдением); **не под Наблюдением**: route-engine (AdaptiveAuto, привязки `ip name-server`, list-watch), route-reconciler, **policy-reconcile (ночью убирает домены из всех туннельных групп, включая ручные списки, без проверки владения)**, tunnel-health r6 (повторно применяет 16 защищённых `ip name-server … on OpkgTun4`). 3–5 писателей на области AdaptiveAuto, группы списков, `dns-proxy route`, `ip name-server`. Предложения — в таблице; ничего не отключено до решения владельца.
+
+**Шаг 2.** Новый `tests/perf/measure-panel.py` (диагностика): холодное открытие почти любой страницы ≈ 4,8 с на Keenetic (оценка: `status`/`config-data`/… читают всю конфигурацию раз в 55 с), домен в список ≈ 9 с (2 полных чтения), смена сервиса ядром B ≈ 56 с; немаршрутные тумблеры 0,3–0,6 с, но ждут общий замок правок до 10 с, пока идёт долгая операция.
+
+**Шаг 3.** `tools/vward-core` (Go, stdlib, воспроизводимая статическая сборка mipsle/mips, 3,3 МБ / 1,1 МБ gzip; сборка без пути записи): RCI-клиент с режимом «только чтение», побайтный перенос `vward_routing_choice/service_policy/audit` (равенство с shell на sh и BusyBox, мутации ловятся), модель назначений владельца, план только по своим объектам с защитой, журнал с семантикой shell, исполнитель «CAS → pending → одна пачка RCI → одно чтение → доказательство или компенсация». Тесты на поддельном Keenetic — сценарии владельца (см. отчёт). Не перенесено: snapshot/legacy-импорт/миграция, источники из сохранённого состояния, процедура восстановления, API/Панель. Go-тесты добавлены в VWARD CI (`routing-core-go`). CI не запускался (коммиты [skip ci]).
+
+**Команда владельца (только чтение; прототип во /tmp, затем удаляется):**
+
+```sh
+( set -e; D=/tmp/vward-core-proto; rm -rf "$D"; mkdir -p "$D"; cd "$D"
+  case "$(uname -m)" in mips*) if [ "$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null | od -An -tu1 | tr -d ' ')" = 2 ]; then A=mips S=ed436d651b6972c3ca67835594b8adb8ebfe287d0d0897d772a731d27b0c197f; else A=mipsle S=a50315b3cbe8822093633f4f24fefd894cf038e72175c229bb3e64ea2b2b1b0b; fi ;; *) echo "не MIPS: $(uname -m)"; exit 1 ;; esac
+  . /opt/lib/vward/vward-device-profile.sh; vward_profile_load >/dev/null 2>&1 || true
+  vward_fetch -fsS --max-time 180 -o core.gz "https://raw.githubusercontent.com/Ziegfe1d/VWARD/07ea43974aac4c7f2887b3cb410692e71f9f8fc7/tools/vward-core/dist/vward-core-linux-$A.gz"
+  gunzip -f core.gz; [ "$(sha256sum core | cut -d' ' -f1)" = "$S" ] || { echo "SHA-256 не совпал"; exit 1; }
+  chmod 700 core; ./core version; ./core probe; ./core dry-run
+  echo "== обращений к Keenetic по часам:"; for f in /tmp/vward-keenetic-calls/*; do [ -f "$f" ] && printf '%s:%s ' "${f##*/}" "$(wc -c < "$f")"; done; echo
+  echo "== из них дольше 1 с:"; for f in /tmp/vward-keenetic-slow/*; do [ -f "$f" ] && printf '%s:%s ' "${f##*/}" "$(wc -c < "$f")"; done; echo
+  echo "== самые долгие ожидания:"; sort -t'|' -k5 -rn /opt/var/log/vward/keenetic-slow.log 2>/dev/null | head -15
+  echo "== кто ждал чаще:"; cut -d'|' -f3,4 /opt/var/log/vward/keenetic-slow.log 2>/dev/null | sort | uniq -c | sort -rn | head -10
+  echo "== цена 200 процессов:"; time sh -c 'i=0; while [ $i -lt 200 ]; do /bin/true; i=$((i+1)); done'
+  cd /; rm -rf "$D" )
+```
+
 ## 4. Открытые вопросы и нужные данные
 
+- 08.11.2026 / скорость: **нужно решение владельца** по таблице шага 1 (`docs/SPEED_AUDIT_2026-11-08.md` §1): что оставить, что «только наблюдение» (предложено сразу: policy-reconcile `DRY_RUN=1`, tunnel-health r6, list-watch и привязки route-engine), что объединить/перенести в Go-ядро. И вывод команды dry-run (§3 08.11): время узкого/полного чтения RCI на 5.1.8, `NARROW_EQUALS_FULL`, `RSS_PEAK`, цена процесса — от них зависит переход ядра PR #38 на Go.
 - 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
   на479f268: все3 mandatory SUCCESS, dispatch-transition main-only SKIPPED. Это не закрывает
   общий pipeline/аппаратную приёмку. Следующая граница — staged binding/epochs/typed plan,
