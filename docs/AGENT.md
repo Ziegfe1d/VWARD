@@ -1270,7 +1270,45 @@ CI на `f31a207`: updater-tests — SHA256SUMS (обновлён, `8de0008`); r
 через минуту), рабочий отмечается `.ok` (дальше без процессов). `check-rci-wget-once.py` RED
 (6 запусков падающего wget) → GREEN; chaos wget-crash и curl-https-crash PASS.
 
+### 09.11.2026 — [Claude Code] fix.36 опубликован в dev (sequence 2026110801)
+
+Разрешение владельца 09.11 (все условия выполнены). PR #38 HEAD `85f6b28`, CI run 42530667043:
+repository-consistency, updater-tests, resource-audit (часовой стресс, Chromium, бюджет процессов),
+routing-core-go — SUCCESS; dispatch-transition main-only SKIPPED. Squash в dev `e10622a`
+(`expected_head_sha`, `[skip ci]`); дерево равно `85f6b28`. [Release 42588043679](https://github.com/Ziegfe1d/VWARD/actions/runs/42588043679)
+SUCCESS: validate, сборка, rehearsal over beta, подпись/stage, staged validation, publish
+`8dc0044` (кроме `updates/dev` изменён только SHA256SUMS). Публичная проверка raw dev: v1 и v2
+подписи — PASS немодифицированным `--self-test` с доверенным public key (не менялся с `3f4802b`);
+подделанный sequence отвергнут (rc=31). Параметры: 0.2.0-rc.2.fix.36, sequence 2026110801, dev,
+IMPORTANT, min_vward 0.1.9-beta, health full, rollback automatic, без перезагрузки, engine 2.0.10.
+Пакет 666148 байт, SHA-256 `d735f60f61db97615720b6bb9438083a82bc5ae85d41afd18e5ad16259b7fa6f`
+(скачан публично, совпал); все 78 уникальных v2 blobs совпали по SHA. Main не менялся, роутер не
+трогали (только read-only вывод владельца: auto_apply=1, auto_important=1, phase=IDLE,
+last_sequence 2026110401). Откат на роутере:
+`sh /opt/share/vward/updater/current/vward-update.sh --rollback` (в /opt/bin скрипта нет).
+
+**Однократный локальный отказ «AdGuard Home not back in the DNS chain»** (полный стресс-прогон
+08.11, `tests/perf/check-stress-emulated.py`). Журнал того прогона остался в прежнем контейнере и
+недоступен: этап (soak или disk-full) и минута неизвестны. Не воспроизводится: CI 42530667043
+(тот же seed 1, 60 мин) — PASS; локальный повтор 09.11 на `e10622a` (seed 1, 60 мин) — находки
+AGH нет. Проверка `recovered()` требует строку `ip name-server 192.0.2.1:65053` после 12 здоровых
+минут soak или после 4 здоровых минут disk-full. Механизмы, при которых сторож DNS законно не
+возвращает AGH за это окно (по коду, без правок продукта): (1) возврат — только после 3 удачных
+минутных проверок подряд; каждая проверка — до 3 nslookup в реальном времени, одна неудача
+обнуляет счёт `oks`, а при нагрузке хоста таймауты реальны (в повторе ads scheduler отложен по
+load 5,56 на 4 CPU); (2) после 2 или 3 изъятий за эмулируемый час нужно 9 или 15 ответов подряд:
+в режиме наблюдения изъятия по тишине и «порт пуст» ограничены одним в час, но изъятие `update`
+(`chain_planned`) этим не ограничено; (3) пока стоит барьер обновления (`/tmp/vward-update.lock`),
+`vward_admission_enter` отказывает и минутный тик `scheduler.sh dns` пропускается. Дефект продукта
+не доказан; если отказ повторится, по `soak_debug` отчёта сначала смотреть `outs` и `oks` в
+каталоге цепочки и журнал DNS_CHAIN_* сторожа.
+Попутно в локальном повторе другая находка: soak «processes pile up 6 -> 13»
+(`vward-route-eng` 5, `awk` 2). В CI на том же дереве её нет; хост был нагружен. Не разбиралась,
+это открытый вопрос (§4).
+
 ## 4. Открытые вопросы и нужные данные
+
+- 09.11.2026 / fix.36 опубликован: нужна приёмка владельцем на роутере (Ozon/WB, Lampa TV, ночной скан 00:10, экраны Панели, журнал сторожа DNS на возврат AdGuard Home в цепочку). Локальный стресс 09.11: однократное «processes pile up 6 -> 13» (route engine 5), в CI нет; при повторе разобрать по `soak_debug`.
 
 - 08.11.2026 / Go-ядро: ~~вывод формы `dns-proxy/filter`~~ получен (NextDNS не используется, тесты не нужны); тест записи пачки на эмуляторе и подключение к API/Панели — следующий отдельный шаг после fix.36.
 
