@@ -17,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 LIB = ROOT / "components/runtime/lib/vward-runtime-admission.sh"
 S89 = ROOT / "components/runtime/init.d/S89vward-update-recovery"
+SHELL = [os.environ["RS6_BUSYBOX"], "ash"] if os.environ.get("RS6_BUSYBOX") else ["sh"]
 
 
 def fail(message: str) -> None:
@@ -60,7 +61,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     def sh(script, extra=None):
         env = os.environ | {"VWARD_ROOT_PREFIX": str(root)} | (extra or {})
-        return subprocess.run(["sh", "-c", f'. "{LIB}"; {script}'], env=env, capture_output=True, text=True)
+        return subprocess.run(SHELL + ["-c", f'. "{LIB}"; {script}'], env=env, capture_output=True, text=True)
 
     def check(locks, how):
         for name in ("dead_flash", "reused_pid", "ownerless_old"):
@@ -71,6 +72,36 @@ with tempfile.TemporaryDirectory() as tmp:
                 fail(f"{how}: the {name} lock must stay")
         if list(root.rglob("*.stale.*")):
             fail(f"{how}: nothing of a removed lock may stay")
+
+    # Healthy persistent locks are observed without creating election records
+    # or writing their USB directory. Stale candidates are rechecked inside
+    # the election before any deletion (the race regression lives below B).
+    live_flash=lock('/opt/var/lib/vward/live-only.lock',pid=me,start=pid_start(me))
+    before={str(p.relative_to(root)):(p.is_dir(),None if p.is_dir() else p.read_bytes()) for p in root.rglob('*')}
+    r=sh('VWARD_LOCKS="/opt/var/lib/vward/live-only.lock"; vward_locks_sweep')
+    assert r.returncode==0,(r.stdout,r.stderr)
+    after={str(p.relative_to(root)):(p.is_dir(),None if p.is_dir() else p.read_bytes()) for p in root.rglob('*')}
+    assert after==before,'observing a healthy persistent lock wrote election artifacts on USB'
+    # A dead candidate becomes a live owner after preliminary observation,
+    # precisely at gate creation. The stale observation grants no deletion.
+    (live_flash/'pid').write_text(str(dead.pid)+'\n')
+    (live_flash/'pid_start').write_text('1\n')
+    interleave = r'''
+    VWARD_LOCKS="/opt/var/lib/vward/live-only.lock"
+    mkdir() {
+        if [ "$1" = "$SWEEP_LOCK.gate" ]; then
+            printf '%s\n' "$NEW_PID" > "$SWEEP_LOCK/pid"
+            printf '%s\n' "$NEW_START" > "$SWEEP_LOCK/pid_start"
+            : > "$SWEEP_LOCK/replaced"
+        fi
+        command mkdir "$@"
+    }
+    vward_locks_sweep
+    '''
+    r=sh(interleave,{'SWEEP_LOCK':str(live_flash),'NEW_PID':str(me),'NEW_START':pid_start(me)})
+    assert r.returncode==0 and (live_flash/'replaced').exists(),(r.returncode,r.stdout,r.stderr)
+    assert (live_flash/'pid').read_text()==str(me)+'\n','stale observation erased the replacement live owner'
+
 
     locks = setup()
     out = sh("vward_locks_sweep").stdout
@@ -83,7 +114,7 @@ with tempfile.TemporaryDirectory() as tmp:
     state = tmp / "state"; state.mkdir(exist_ok=True)
     (state / "journal.state").write_text("phase=IDLE\n")
     boot = tmp / "boot-id"; boot.write_text("boot\n")
-    r = subprocess.run(["sh", str(S89), "start"], capture_output=True, text=True,
+    r = subprocess.run(SHELL + [str(S89), "start"], capture_output=True, text=True,
                        env=os.environ | {"VWARD_ROOT_PREFIX": str(root), "VWARD_ADMISSION_LIB": str(LIB),
                                          "VWARD_UPDATER": "/nonexistent", "VWARD_UPDATE_STATE_DIR": str(state),
                                          "VWARD_UPDATE_JOURNAL": str(state / "journal.state"),

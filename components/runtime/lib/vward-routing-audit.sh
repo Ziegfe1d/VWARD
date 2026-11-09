@@ -186,3 +186,159 @@ vward_routing_audit() (
         }
     }' "$vra_intents" "$vra_snapshot"
 )
+
+# B proposal, intent-only: canonical service choice, not a writer or permission.
+# vward_routing_choice LEDGER SID ACTION TARGET DNS EXPECTED_REV
+# No installed-state path, clock, checksum command, transport, lock or write.
+# rc 2 invalid input; rc 3 stale input revision. Both emit no partial stdout.
+vward_routing_choice() (
+    [ "$#" -eq 6 ] || { printf '%s\n' 'routing choice: expected LEDGER SID ACTION TARGET DNS EXPECTED_REV' >&2; return 2; }
+    case $1 in /*) ;; *) printf '%s\n' 'routing choice: absolute ledger required' >&2; return 2 ;; esac
+    [ -f "$1" ] && [ -r "$1" ] && [ ! -L "$1" ] || { printf '%s\n' 'routing choice: readable regular ledger required' >&2; return 2; }
+    VWARD_B_SID=$2 VWARD_B_ACTION=$3 VWARD_B_TARGET=$4 VWARD_B_DNS=$5 VWARD_B_REV=$6 LC_ALL=C awk '
+    BEGIN {
+        FS=OFS="\t"
+        sid=ENVIRON["VWARD_B_SID"];action=ENVIRON["VWARD_B_ACTION"]
+        target=ENVIRON["VWARD_B_TARGET"];dns=ENVIRON["VWARD_B_DNS"];expected=ENVIRON["VWARD_B_REV"]
+    }
+    function service(s) {return length(s)<=63 && s ~ /^[a-z0-9][a-z0-9.@_-]*$/}
+    function id(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/}
+    function revision(s) {return s ~ /^[0-9]+$/ && s+0<=2147483647}
+    function valid(mode,t,d) {
+        if(mode=="auto") return t=="-" && d=="-"
+        if(mode=="vpn") return t ~ /^VPN:/ && id(substr(t,5)) && d=="default"
+        if(mode=="dns") return t=="ISP" && id(d) && d!="default"
+        return mode=="isp" && t=="ISP" && d=="default"
+    }
+    function sort(a,n, width,left,mid,right,i,j,k,tmp) {
+        for(width=1;width<n;width*=2) {
+            for(left=1;left<=n;left+=2*width) {
+                mid=left+width;right=left+2*width
+                if(mid>n+1) mid=n+1
+                if(right>n+1) right=n+1
+                i=left;j=mid
+                for(k=left;k<right;k++)
+                    if(i<mid && (j>=right || "x" a[i]<="x" a[j])) tmp[k]=a[i++]
+                    else tmp[k]=a[j++]
+            }
+            for(k=1;k<=n;k++) a[k]=tmp[k]
+        }
+    }
+    {
+        bytes+=length($0)+1
+        if(FNR>4096 || bytes>1048576) {bad=1;next}
+        if(FNR==1 && NF==2 && $1=="schema" && $2=="1") {header=1;next}
+        if(NF!=7 || $1!="service" || !service($2) || !revision($3) ||
+           !valid($4,$5,$6) || !revision($7) || $7+0>$3+0 || ($2 in mode)) {bad=1;next}
+        key=$2; rev[key]=$3+0;mode[key]=$4;tgt[key]=$5;policy[key]=$6;floor[key]=$7+0
+        keys[++n]=key
+    }
+    END {
+        proposed=(action=="on") ? "vpn" : action
+        if(!header || !service(sid) || !revision(expected) || n>1024 ||
+           (action!="off" && !valid(proposed,target,dns)) ||
+           (action=="off" && (target!="-" || dns!="-"))) bad=1
+        if(bad) {print "routing choice: invalid input or limit exceeded" > "/dev/stderr";exit 2}
+        oldrev=(sid in mode) ? rev[sid] : 0
+        if(oldrev!=expected+0) {print "routing choice: stale-revision" > "/dev/stderr";exit 3}
+        oldmode=(sid in mode) ? mode[sid] : "auto"
+        oldtarget=(sid in mode) ? tgt[sid] : "-"
+        olddns=(sid in mode) ? policy[sid] : "-"
+        if(action=="off") {
+            proposed=(oldmode=="vpn") ? "auto" : oldmode
+            target=(oldmode=="vpn") ? "-" : oldtarget
+            dns=(oldmode=="vpn") ? "-" : olddns
+        }
+        changed=(proposed!=oldmode || target!=oldtarget || dns!=olddns)
+        if(changed) {
+            if(oldrev==2147483647 || (!(sid in mode) && n==1024)) {
+                print "routing choice: revision or service limit" > "/dev/stderr";exit 2
+            }
+            if(!(sid in mode)) keys[++n]=sid
+            rev[sid]=oldrev+1;mode[sid]=proposed;tgt[sid]=target;policy[sid]=dns
+            if(!(sid in floor)) floor[sid]=0
+            if((oldmode=="dns" || oldmode=="isp") && (proposed=="auto" || proposed=="vpn")) floor[sid]=rev[sid]
+        }
+        sort(keys,n)
+        print "schema",1
+        for(i=1;i<=n;i++) {k=keys[i];print "service",k,rev[k],mode[k],tgt[k],policy[k],floor[k]}
+    }' "$1"
+)
+
+# Intent-only projection for ONE prevalidated domain/scope atom. No area inference,
+# health verdict, physical deletion, ownership, permission or packet-path proof.
+# vward_routing_service_policy MODE TARGET DNS REV AUTO_FLOOR EVIDENCE
+vward_routing_service_policy() (
+    [ "$#" -eq 6 ] || { printf '%s\n' 'routing policy: expected MODE TARGET DNS REV FLOOR EVIDENCE' >&2; return 2; }
+    case $6 in /*) ;; *) printf '%s\n' 'routing policy: absolute evidence required' >&2; return 2 ;; esac
+    [ -f "$6" ] && [ -r "$6" ] && [ ! -L "$6" ] || { printf '%s\n' 'routing policy: readable regular evidence required' >&2; return 2; }
+    VWARD_B_MODE=$1 VWARD_B_TARGET=$2 VWARD_B_DNS=$3 VWARD_B_REV=$4 VWARD_B_FLOOR=$5 LC_ALL=C awk '
+    BEGIN {
+        FS=OFS="\t"
+        mode=ENVIRON["VWARD_B_MODE"];target=ENVIRON["VWARD_B_TARGET"];dns=ENVIRON["VWARD_B_DNS"]
+        rev=ENVIRON["VWARD_B_REV"];floor=ENVIRON["VWARD_B_FLOOR"]
+    }
+    function id(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/}
+    function refid(s) {return length(s)<=64 && s ~ /^[A-Za-z0-9][A-Za-z0-9_.:@-]*$/}
+    function revision(s) {return s ~ /^[0-9]+$/ && s+0<=2147483647}
+    function route(t,d) {return (t=="ISP" || (t ~ /^VPN:/ && id(substr(t,5)))) && id(d)}
+    function add(key,src,ref,t,d,state,reason) {
+        rows[key]="contribution" OFS src OFS ref OFS t OFS d OFS state OFS reason
+        keys[++n]=key
+        if(state=="active") {pairs[t SUBSEP d]=1;active=1}
+        if(state=="unknown") uncertain=1
+    }
+    {
+        bytes+=length($0)+1
+        if(FNR>4096 || bytes>1048576) {bad=1;next}
+        if(FNR==1 && NF==2 && $1=="schema" && $2=="1") {header=1;next}
+        k=$1 ":" $2
+        if(NF!=8 || $1 !~ /^[MSA]$/ || !refid($2) || !route($3,$4) || $5 !~ /^[01]$/ ||
+           !revision($7) || $7+0>rev+0 || k in seen || ($1=="S" && $2=="choice")) {bad=1;next}
+        seen[k]=1
+        if($1=="A") {
+            if($6 !~ /^(active|positive|history|unknown)$/ || $8 !~ /^(bound|excluded|unknown)$/) {bad=1;next}
+            state="inactive";reason="history"
+            if($5==0) reason="not-selected"
+            else if($8=="excluded") reason="outside-service-scope"
+            else if($8=="unknown" || $6=="unknown") {state="unknown";reason="evidence-unknown"}
+            else if($6!="history") {
+                if(($6=="positive" && $7+0!=rev+0) || $7+0<floor+0) reason="stale-auto-evidence"
+                else if(mode=="dns" || mode=="isp" || (mode=="vpn" && ($3!=target || $4!=dns))) {
+                    state="suppressed";reason="explicit-pin"
+                } else {state="active";reason="auto-evidence"}
+            }
+        } else {
+            if($6!="explicit" || $7+0!=0 || $8!="peer") {bad=1;next}
+            state=($5==1) ? "active" : "inactive";reason=($5==1) ? "peer-explicit" : "not-selected"
+        }
+        add(k,$1,$2,$3,$4,state,reason)
+    }
+    END {
+        valid=(mode=="auto" && target=="-" && dns=="-") ||
+              (mode=="vpn" && target ~ /^VPN:/ && id(substr(target,5)) && dns=="default") ||
+              (mode=="dns" && target=="ISP" && id(dns) && dns!="default") ||
+              (mode=="isp" && target=="ISP" && dns=="default")
+        if(!header || !valid || !revision(rev) || !revision(floor) || floor+0>rev+0 || n>1024 || bad) {
+            print "routing policy: invalid input or limit exceeded" > "/dev/stderr";exit 2
+        }
+        if(mode!="auto") add("S:choice","S","choice",target,dns,"active","desired-explicit")
+        for(k in pairs) count++
+        verdict=(count>1) ? "unresolved" : (uncertain ? "unknown" : (active ? "desired" : "inactive"))
+        print "policy",1,verdict,"denied","unknown"
+        # Bounded keys, merge sort; no external sort or platform utilities.
+        for(width=1;width<n;width*=2) {
+            for(left=1;left<=n;left+=2*width) {
+                mid=left+width;right=left+2*width
+                if(mid>n+1) mid=n+1
+                if(right>n+1) right=n+1
+                i=left;j=mid
+                for(k=left;k<right;k++)
+                    if(i<mid && (j>=right || "x" keys[i]<="x" keys[j])) tmp[k]=keys[i++]
+                    else tmp[k]=keys[j++]
+            }
+            for(k=1;k<=n;k++) keys[k]=tmp[k]
+        }
+        for(i=1;i<=n;i++) print rows[keys[i]]
+    }' "$6"
+)

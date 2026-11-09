@@ -34,6 +34,7 @@ ln -s /bin/busybox "$ROOT/opt/bin/sh"
 ln -s /bin/busybox "$ROOT/opt/bin/busybox"
 for tool in curl ping nslookup wg opkg; do cp "$FAKES/$tool" "$ROOT/opt/bin/$tool"; done
 cp "$FAKES/ndmc" "$ROOT/bin/ndmc"
+cp "$FAKES/rci-subtree" "$ROOT/emu/rci-subtree"
 cp "$FAKES/ip" "$ROOT/opt/sbin/ip"
 cp "$FAKES/ps" "$ROOT/opt/bin/ps"
 chmod 755 "$ROOT"/opt/bin/* "$ROOT"/opt/sbin/* "$ROOT/bin/ndmc"

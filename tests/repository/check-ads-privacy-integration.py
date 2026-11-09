@@ -25,5 +25,8 @@ for target in (
     assert target in ads_targets, target
 
 cron = (ROOT / "config/cron/root.crontab").read_text()
-assert cron.count("/opt/bin/vward-ads-privacy-scheduler.sh") == 1
+# The scheduler every 5 minutes, its DNS guard every minute (owner 08.11): one line each.
+assert cron.count("*/5 * * * * /opt/bin/vward-ads-privacy-scheduler.sh >") == 1
+assert cron.count("* * * * * /opt/bin/vward-ads-privacy-scheduler.sh dns >") == 1
+assert cron.count("/opt/bin/vward-ads-privacy-scheduler.sh") == 2
 print("ADS_PRIVACY_INTEGRATION=PASS")

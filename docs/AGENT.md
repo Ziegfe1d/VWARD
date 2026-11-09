@@ -205,6 +205,112 @@ jobs запрещён владельцем. Требуется согласов�
 
 04.11.2026 11:03 МСК — fix.35.6 опубликован только dev, signed sequence2026110401/IMPORTANT. CI41778782842 наf142f56: все3обязательных SUCCESS; mergece767eb tree совпал; release41788816630 SUCCESS, publishaa35521. Public v1/v2 Ed25519 + packageSHA7348515377b845a8441c7cd9d9d096454456791a41d74b7d28a9758721c60f24 + 78targets/88blobs PASS. Приёмка роутера не выполнена. Подробный итог/команда/граница native pending — SERVICE_RECOVERY_FIX35_6.md.
 
+04.11.2026 12:58 МСК — продолжение архитектуры B по новому поручению, база dev `3f4802b`
+(PR #37/fix.35.6 уже выпущен отдельно), ветка `work/unified-routing-20261104`, code `a96fc66`
+(модель `e0efe6e`, literal-ID `f787472`, связанный layout `a96fc66`).
+Pure canonical choice и policy одной подготовленной области реализованы, v1 audit неизменён.
+Service-off не ISP-pin; DNS/ISP/VPN и Auto evidence/peer conflicts моделируются без installed
+state и live callers. Длинный статус Панели вынесен под название/кнопку; общий apply не добавлен.
+Общая цепочка adapters/plan/writers/Auto/restore/API ещё не
+соединена. Проект конкретного первого VPN-only writer и отката — RS7_EXECUTOR_WIRING_DESIGN.md §F.
+Локальные адресные PASS sh/BusyBox1.37 ash+awk, 8/24+repeat, 6 mutation controls и real-template
+UI layout. Полный локальный consistency запущен однократно: FAIL RS7 dryrun, read-only /opt/var
+host (stderr подтверждён адресно); остаток не принят. CI конечного HEAD обязателен, ещё не запущен.
+Новый номер/sequence не назначены; live этап и архитектурный выпуск требуют отдельного согласования.
+
+04.11.2026 15:35 МСК — PR [#38](https://github.com/Ziegfe1d/VWARD/pull/38), B model: штатный
+[CI 41815122230](https://github.com/Ziegfe1d/VWARD/actions/runs/41815122230), attempt1,
+на exact HEAD `479f268cb712bb170646c07334da5382e0c110f3`,
+tree `bb763bacb2940b819e183256130798567a66a663` — **SUCCESS**.
+repository-consistency / updater-tests / resource-audit — все SUCCESS, main-only
+dispatch-transition — SKIPPED. Rehearsal, Chromium, hour stress и resource budget — SUCCESS.
+CI завершён 04.11 в11:53:10UTC/14:53:10МСК, проверен однократно после отложенного ожидания.
+Это закрывает CI-ворота **модели**, не аппаратную приёмку/общий pipeline. PR остаётся draft,
+база dev `3f4802b`; журнальная добавка — отдельный docs [skip ci] коммит на ветке PR,
+только AGENT.md + SHA256SUMS, runtime идентичен проверенному HEAD. Длительные проверки
+не перезапускаются. Local consistency остаётся FAIL из-за read-only /opt/var; причина сохранена.
+
+05.11.2026 / PR38, продолжение G4: локальный checkpoint `0e87c0714118d0bc3def557e875645ceccbecabd`
+содержит OFF bootstrap/import/downgrade, единый state-set/J2, boot-qualified leases/lock election,
+конечный content CAS, dispatch receipts и общий configuration outcome. Нормальные legacy
+callers/updater **не подключены** к подготовленным B eligibility/reconcile functions; новые
+библиотеки не установлены и не добавлены в signed78 targets. Следующий итоговый code HEAD ещё
+требует собственного CI; прежний CI41815122230 не переносится на G4. PR остаётся draft.
+
+05.11.2026 / PR38, финальная OFF подготовка: runtime `a5814b391a1f85345d2de99e798948221d12bc58`,
+предыдущий journal `ca15c4c7fc5ad69f01d35c6dae468b39d8814a52`. Связанный повтор на этом runtime:
+sh native execution PASS260.64s; BusyBox1.37 ash+awk DNS PASS339.94s и TERM/SIGKILL PASS44.80s;
+journal2 sh/BusyBox PASS(cost + missing/alias/non-done). Каждый invoke по-прежнему≤45s.
+Новый конечный HEAD дополнит только регистрацию32 cases для штатных sh/BusyBox gates и SHA;
+он требует одного полного CI. Пока нет exact-HEAD official PASS; live/router/release OFF.
+
+05.11.2026 / PR38: [CI42000443090](https://github.com/Ziegfe1d/VWARD/actions/runs/42000443090)
+на exact HEAD `77dc0271c81992dea2edc0b4f646b7ff6666c5dd`, tree
+`dbfad33af02893cce99d22b2d8c8d1625b2f17ca` прочитан однократно: repository-consistency FAILURE,
+updater-tests/resource-audit IN_PROGRESS. Отказ ранний: compatibility grep нашёл запрещённый
+literal `stat -c` в поясняющем комментарии vward-routing-legacy.sh:56, не в вызове команды.
+Исправляется только wording комментария; grep/guards/workflow остаются прежними. Остаток suite
+не принят; другие jobs не отменяются и их pending не объявлен SUCCESS. Новый HEAD требует CI.
+
+05.11.2026 14:38 МСК / PR38: CI[42000841257](https://github.com/Ziegfe1d/VWARD/actions/runs/42000841257)
+на exact ced666eb6595a27cd47b408504903e0abf8d8055 завершён **FAILURE**, прочитан однократно.
+repository-consistency127155341118 FAILURE (first AGH preflight fixture, rc75 вместо3);
+updater-tests127155341536 **SUCCESS**, включая official rehearsal;
+resource-audit127155341722 FAILURE (budget: reconciler execs67>64; housekeeping47>28,opt_ops10>3).
+Stress/Chromium в resource job SUCCESS; main-only dispatch-transition127160558461 SKIPPED.
+Код исправления `531fe7a635642b17126bb9f93a80b6ba02d8e220`: private constructors/fixtures приumask022,
+owner-process metadata lifetime и read-only healthy sweep; budgets/guards/workflow прежние.
+Адресные RED→GREEN и review закрыты; новый exact-HEAD CI ещё требуется, остаток не принят.
+
+05.11.2026 17:03 МСК / PR38: [CI42020983953](https://github.com/Ziegfe1d/VWARD/actions/runs/42020983953)
+на exact04e45911fb980c290de1abce0c64db908d2c8163/tree4589934b37c6b2ef025e9899d25d53e2251bfaa8
+завершён FAILURE; прочитан однократно. Updater-tests127223390990 SUCCESS(rehearsal),
+repository-consistency127223391052 FAILURE(BusyBox lock-election fault point не достигнут),
+resource-audit127223390622 FAILURE(reconciler67exec>64); main-only127253422871 SKIPPED.
+Housekeeping уже PASS26exec≤28/2opt_ops≤3; stress/Chromium SUCCESS. Все32 sh cases PASS,
+включая8/24/8repeat/24native DATA calls(host495.96s), но BusyBox остаток после lock case не принят.
+Static BusyBox PATH-bypass воспроизведён; пауза перенесена в actual leased worker передexec,
+assertions/таймауты сохранены. Локальный targeted emulator reconciler RED69→GREEN61≤64,
+2opt_ops≤4, без изменения методики/бюджета. Новый exact CI всё равно обязателен; live OFF.
+
+05.11.2026 19:21 МСК / PR38: [CI42041878759](https://github.com/Ziegfe1d/VWARD/actions/runs/42041878759)
+exactba24acd5593da5df279cd82b2a8c8bba60c67b41/tree2a31b68854f1da54faee3176c470a6e60054f3fa
+завершён FAILURE, проверен однократно. Updater127294494148 и resource-audit127294494143
+**SUCCESS**, включая rehearsal/stress/Chromium/неизменный resource budget. Все32Bcases наsh
+иBusyBox PASS; cube8/24/8repeat/24DATAcalls host366.76s/sh и192.78s/BB, неMIPS.
+Consistency127294493897 FAILURE только в следующем old check-routing-state-errors.py;
+остаток после него не принят. Main-only127326028280 SKIPPED. Причина: extracted remove_adaptive
+вызывал vward_lock_take без общей library и завершался ДО persist ветки. Test-only correction
+подключает настоящую admission library, проверяет реальный branch reach и own release;
+sh/BB1.37/staticBB1.36 + negative missing-dependency control PASS. Runtime неизменён;
+новый exact-HEAD CI обязателен. Никакого live/router/merge/release.
+
+05.11.2026 21:49 МСК / PR38 CI811: exacta7236ff/treec9f9ace5, [run42064101678](https://github.com/Ziegfe1d/VWARD/actions/runs/42064101678) completed FAILURE. Updater127373353240 и resource127373353230 SUCCESS; consistency127373352612 FAILURE в old SmartDNS clear, main-only127411549796 SKIPPED. Test-only actual lock dependency/private backup fixture correction + sh/BB PASS; прежний runtime неизменён. Непринятый suffix проверен локально до конца, но новый exact CI/all3 ещё нужен. Live OFF.
+
+06.11.2026 00:03 МСК / PR38: [CI812/42088055302](https://github.com/Ziegfe1d/VWARD/actions/runs/42088055302) наexact209278374192e9642ac6e64daa2cd811ee26c944/tree428e351fb8992437ee14dbf022d175dad74c367f: consistency127458395533 и updater127458395452 SUCCESS; resource127458394925 FAILURE(updater check62>61), main-only127503063069 SKIPPED. Реальный targeted RED63→GREEN54; только2строки updater directory cost + regression. Новый exact CI all3 нужен, общий PASS не заявлен; live OFF.
+
+06.11.2026 02:12 МСК / PR38: **OFF-подготовка закрыта по software gates**. [CI813/42109284350](https://github.com/Ziegfe1d/VWARD/actions/runs/42109284350) exact168a853bf12073e3b499002c67e2182e6ea3c7a5/tree7597f8e12418d66157b039b33ec2524efeb4ed7a: repository-consistency127532263462, updater-tests127532262882, resource-audit127532263711 **SUCCESS**; main-only127577196956 SKIPPED. Draft PR38/base dev3f4802b6574c0c7b441bf3da84e6841abb173349 совпали. Только итоговые docs[skip ci]+SHA; без повторного CI. Live/merge/release не разрешены; следующая граница VPN-only §F.3/G.4.
+
+06.11.2026 08:47 МСК / PR38 — владелец явно разрешил общую production цепочку VPN→DNS/ISP/Auto/server lifecycle/API/Панель/package migration и самостоятельный dev-выпуск после review/exact CI/rollback/public verification. Прежний OFF/отдельный GO исторический в этих границах; CI813 остаётся baseline и не rerun. Router/main/stable/режимы устройства вне разрешения. Работа начата с e8f6b11, свежий dev3f4802b6574c0c7b441bf3da84e6841abb173349 подтверждён.
+
+06.11.2026 21:00 МСК / PR38 production wiring: codec77adde15a5baf99012aa6e3351c6718a6219bb6 — fixed native adapter общего J2, metadata-only first bootstrap/import, actual publisher lifetime и Auto pre-local-write fences. Адресные fixtures/review закрывают этот scope; libs ещё UNINSTALLED/endpoint не подключён, общий пакет не готов. Старый CI813 не повторялся; нового полного CI/публикации/роутера нет.
+
+07.11.2026 02:46 МСК / PR38 wiring checkpoint e863946406da16a4e5c5f687bdaf2278cf35fe4c: существующие DNS workers связаны с actual leased NDMC/curl HTTP, обоими stores и общим J2. Native/AGH циклы и unknown/lifetime fixtures PASS; Important побочной ADS записи закрыт RED→GREEN. API/Panel/all old callbacks/package ещё не подключены, кандидат не готов; полного нового CI/merge/release/router нет.
+
+07.11.2026 08:56 МСК / PR38 service-entry checkpoint `aa72a645e9beddeae4d4e119c1eab9a017d16f02`: actual copied console service on/tunnel/off проходит через fixed common J2, fresh captured membership/category/configuration health; логический VPN:auto сохраняется. SH/BusyBox адресные проверки PASS, два Important review закрыты RED→GREEN. Deployment capsule и новые libs ещё НЕ в signed78/package-map; первый запуск/cold map/recovery, остальные writers/режимы/API/Panel/lifecycle/ABI ещё открыты. Новый full CI и выпуск не запускались; промежуточный SDK не готов к публикации.
+
+07.11.2026 09:15 МСК / PR38 `5ac6fda31efc1ad1c18db4ee4474b6f5ea924969`: actual console RED→GREEN закрыл два обхода в fresh inputs — private profile0600/0400 и WAN identity независимо от stale kernel name. SH/BB PASS, новый8-йcase зарегистрирован; SHA1414. Cold bootstrap/recovery/весь GO ещё не завершены, SDK по-прежнему uninstalled; CI/release/router нет.
+
+- 07.11.2026 10:22 МСК / PR38 first-request checkpoint `868f7d3`: SAME legacy stage/archive/state-set compile перенесён ДО leased first-ROOT publication; actual ACK/fresh CAS перед execute сохранены. Invalid inputs не оставляют canonical0/2, cold map берётся existing profile discovery ТОЛЬКО в unique private RAM, не shared cache. Catalog-confirmed per-member S attribution и повторная ancestry validation закрыли addressed Important. Targeted SH/BB PASS; не весь connected suite/не hardware. Новые5cases/runner, SHA1419/privacy/syntax/no-new SC PASS. Root0 recovery/raw legacy intent/all writers/API/Panel/package/ABI/final gates ещё открыты, release не готов.
+
+- 07.11.2026 12:40 МСК / PR38 handoff Codex → Claude Code: исходный HEAD `a65a10d4fd9dc8e113fb3a9a25a9eedf41ad0dd1` (docs), код `868f7d3`, dev `3f4802b`; PR не менялся после снимка владельца, параллельного writer нет. Локальная рабочая копия Codex НЕ доступна: незакоммиченные изменения неизвестны и не выдаются ни за потерянные, ни за завершённые; продолжение — с последнего опубликованного коммита. Raw legacy intent RED восстановлен заново на production importer и закрыт (§3). Далее в этом же PR: P0-2 → P0-1 → P0-3, затем ревизия PR/веток (ROADMAP §7, 07.11). Release по-прежнему не готов.
+
+- 07.11.2026 18:30 МСК / PR38 `8c344c0`+`7bc491e`: check-live-first-request — причина ~52k fork/запрос в повторных проверках целостности; примитивы на один fork и пакетные wc/sha256sum (вердикты те же, check-validation-primitives sh+BB); холодный запрос 38–40 с, лимит 45 с не менялся. Аудит владельца TLS-очереди: схема «take в подоболочке, curl в родителе» не встречается, закреплено check-tls-turn-owner. Три давних RED (outcome/observe/native-dns-compiler) исправлены. Панель ждёт API ≤20 с — API/Панель подключать только фоновой задачей. Root0/writers/источники/режимы/lifecycle/API/Panel/ABI/матрица/аудит/CI открыты; release не готов.
+
+- 07.11.2026 21:30 МСК / PR38 Root0: застрявший первый ROOT (observation0, версия 0) после гибели координатора между переносом и J2 блокировал навсегда все запросы и все старые записи маршрутизации (RED на 4 точках). Новая команда `routing-root inspect|abort|compensate`: inspect только читает; abort переносит весь ROOT байт-в-байт в `.routing-root0.<op>` (не удаляет) лишь для своего, мёртвого и незаписанного; compensate — существующая компенсация своей J2. Следующий запрос делает новый импорт. sh+BB PASS. Замер смены сервиса: холодная 26 184 процесса/47 с, обычная 22 621/35,5 с, повтор 2 781/4,5 с. Writers/источники/режимы/lifecycle/API/Panel/ABI/матрица/аудит/CI открыты; release не готов.
+
+- 07.11.2026 22:00 МСК / PR38 сокращение процессов смены сервиса (поручение 07.11, вечер): профиль strace+bash по функциям, пакетные примитивы (одна `ls --full-time`/`sha256sum`/`wc`/`awk` на набор), кэш метаданных журнала, неизменяемые проверки исполнителя один раз за запрос, повторное чтение снимка «до шага» и «для плана» убрано. strace-форки: холодный 25 878 → 14 768 (BB 15 053), обычная смена 22 618 → 9 314 (BB 9 534), повтор 2 782 → 1 610, выключение 7 432. Цели владельца (≤1 500/≤500/≤150) НЕ достигнуты: упор — пошаговая модель исполнителя (полный снимок, J2 begin/finish с выборами блокировки, тройные проверки публикации на каждый из 8 шагов). Новые check-process-budget-primitives (равенство с 4cf3388, sh+BB) и бюджет CI check-service-change-budget. Структурный вариант предложен владельцу до правок (§3, §4). Release не готов.
+
 ## 3. Журнал работ (новые записи внизу)
 
 Формат: `ГГГГ-ММ-ДД ЧЧ:ММ · автор · пакет · что · почему · результат · проверено`
@@ -464,7 +570,724 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
 
 Отложенная задача выпуска приостановлена после SUCCESS, дубликатов нет. Agent/NextDNS/Google8/DNS16/удалённыеSmartDNS и роутер не менялись. Вывод прежней narrowROкоманды не получен; Claude/Cursor/Gemini и клиентские приложения/actualroute/ownership/persist/reboot проверяет владелец. A1/A6/A7/A10/перенос остаются открыты. После этого выпуска рекомендована новая сессия сGitHub HEAD; лимиты контекста/использования не сбрасываются.
 
+- 2026-11-04 12:58 МСК · [Агент / Codex] · B единая маршрутизация/DNS, стадия модели · База
+  dev3f4802b подтверждена fetch, зависимость PR37 уже интегрирована, ветка work/unified-routing-20261104.
+  Один исполнитель, ранее предложен доступный Sol/High; новый daemon/опрос/writer не добавляется.
+  Code e0efe6e + f787472: к прежней pure audit библиотеке добавлены choice и single-scope policy. Один service
+  mode вместо двух stores; off при DNS/ISP no-op; off VPN снимает только S. Pins suppress bound Auto,
+  независимый explicit M/S конфликт не переопределяется. История не считается новой пробой; floor
+  при DNS/ISP→VPN→off не допускает прежний persist. Output denied/packet unknown, не live permission.
+  **RED→GREEN:** отсутствующие функции → новые проверки; отдельный pin→VPN→off regression сначала
+  падал, исправлен epoch floor. Дополнительный RED literal-ID: awk -v декодировал backslash до
+  валидации, исправлено передачей исходных строк только в окружение одного awk-процесса.
+  Новые escape-ID negative fixtures PASS. PASS sh и фактические BusyBox1.37 ash+awk: 8 M/S/A/24 перехода+повтор,
+  DNS/ISP/off/Auto/tunnel change, peers/history/unknown/excluded, revision CAS/overflow, schema/bounds/
+  symlink/FIFO и no partial stdout. Pure input immutable, poisoned transports/comm/cksum не вызваны.
+  Шесть отдельных mutant (repeat, floor, peer priority, suppress, history, granted permission) отвергнуты
+  целевыми assertions. Canonical choice на1024 keys: BusyBox host0.0315s; прежний bounded audit
+  64 domains/128refs/449454bytes:0.162s при неизменном лимите3s. Это не RAM/CPU/flash замер MIPS.
+  PASS existing audit simulations sh+ash, readers, planner sh+ash, source-v1 prefix byte equality,
+  shellcheck/syntax, version/no-personal-data/SHA. Общий локальный consistency выполнен один раз:
+  FAIL check-dryrun.py:199, expected done, got failed. Адресное добавление stderr к диагностике
+  неизменного fixture подтвердило mkdir /opt/var: Read-only file system, component directories
+  unavailable. Защиты/fixture/assert не ослаблены. До отказа прошли model, catalog, identity,
+  snapshot/shadow/observers/planner/journal; остаток полного локального suite не принят.
+  Chromium локально SKIP (нет playwright). CI точного конечного HEAD ещё впереди.
+  **Документы:** ROADMAP4.3d/e/7, ARCHITECTURE, B implementation, contract, RS7§F, UI spec и unreleased
+  CHANGELOG уточнены. Code a96fc66: связанный layout aiPage/CSS — статус отдельно под названием
+  и кнопкой на полную ширину. RED→GREEN реального card template/DOM; прежние status/guard/spinner
+  assertions сохранены. PASS diag UI/storage UI/route evidence/responsive/Node syntax; визуально
+  только штатный CI/затем Keenetic. Production writers/workflow/package-map/VERSION/feed не меняются.
+  **Первичные данные владельца:** fix35.5,04.11 08:30:36МСК, запрос Claude одного LAN-клиента без
+  VPN на нём → IPv4 160.79.104.10 с tunnel NAT198.18.4.1; establishedTCP2/otherTCP2/UDP2. Это
+  клиентский IPv4 VPN в этом окне, не IPv6/весь каталог. Старый eth3 lookup утечку не доказывает.
+  Cursor/GeminiRC143/shared8.47.69.0 остаются ограниченными данными, не повод широкого опроса.
+  Старую txn.xs72ii владелец архивировал03.11 19:05 без измененияDNS/FQDN, исходная причина unknown;
+  прежний вопрос о выборе superseded. Роутер/настройки/NextDNS/Google8/DNS16/агенты не затрагивались,
+  истёкший Smart DNS не пробовался. Приватный clientIP/URL/token/raw вывод не переносились.
+
+- 2026-11-04 15:35 МСК · [Агент / Codex] · PR38, B model, фактический CI итог · Продолжена
+  только проверка этапа; исходный HEAD479f268 и treebb763bac сверены с чистым worktree и GitHub.
+  PR38 открыт/draft, head479f268, base3f4802b, без merge. Один раз прочитаны run41815122230
+  и jobs: repository-consistency126523805997 SUCCESS, updater-tests126523922194 SUCCESS,
+  resource-audit126523810622 SUCCESS; dispatch-transition126532430798 SKIPPED (main-only).
+  Run attempt1 завершён11:53:10UTC. В обязательных jobs SUCCESS также official release rehearsal
+  over beta, SHA manifest/coverage, Chromium pages, hour stress и resource budget. Тесты/workflow/
+  signatures/ownership/admission не менялись и не повторялись; старый SUCCESS не подменяет
+  этот exact HEAD. Локальный полный consistency **не PASS**: прежний check-dryrun.py199,
+  expected done/got failed, stderr mkdir /opt/var read-only / cannot create component directories;
+  CI SUCCESS не переписывает этот результат. Local Chromium SKIP был только ограничением host,
+  штатный Chromium теперь SUCCESS; Keenetic/реальное переключение этим не проверены.
+  Добавлены только append-only записи AGENT§2/3/4 и штатно SHA256SUMS, отдельный docs[skip ci]
+  коммит на work/unified-routing-20261104, без нового full CI. PR body обновляется точным итогом
+  и docs SHA. Единственная отложенная проверка закрыта, новых расписаний/poll/rerun нет.
+  Общая цепочка ещё отсутствует: choice/policy работает на одной подготовленной области,
+  permission denied/packet unknown. Staged binding/epochs, typed delta, migration/downgrade,
+  recovery/конкуренция — следующие off-этапы. Проект первого VPN-only writer/locks/Gi/rollback
+  остаётся RS7_EXECUTOR_WIRING_DESIGN.md §F.3; live wiring — только после адресного review и
+  конкретного согласования владельца. Роутер/DNS/агенты/защищённые правила не затрагивались.
+  Нет merge/dev/main/feed/VERSION/sequence/release; fix35.6/PR37 повторно не открывались.
+
+- 05.11.2026 / PR38 G4: один исполнитель продолжил подготовку в той же ветке, без live wiring.
+  Согласованный stage включает native inputs и 12 decision-файлов; bootstrap всегда version0,
+  opaque legacy return/DNS proofs не дают ownership. Импорт реального legacy DATA и normalized
+  migration/downgrade идут через тот же state-set/J2; version-last и prefix CAS сохраняют400/600,
+  exact registry644 и отказ при accepted choice/foreign chmod. Probe boot+monotonic deadline
+  ограничены55s; reboot/expiry/history не становятся свежим Auto.
+  Lease и dispatch receipt связывают OP/step/plan/scope SHA с actual publisher PID/start/boot;
+  matching post без dispatch не становится своим. Утерянный AGH POST сохраняет private
+  before/planned/request.pending и общий barrier. Короткая общая lock election покрывает
+  acquire/reclaim/release, старые v1 и J2; actual orphan rm/mkdir сохраняют свою lease.
+  Legacy server prune использует настоящий helper над private clone, сохраняет другие URI,
+  profile и modes; одинаковые basename/second/PID получают разные private backup-файлы.
+  Общий executor outcome/serializer/optional UI различает desired/configured/partial/mixed/
+  unknown; activation=off, client_path_verified=false. API endpoint и UI actions не подключены.
+  Адресный независимый review закрыл найденные Important в рамках OFF DATA: final CAS,
+  admission identity, chmod, lock ABA/orphan/reboot, probe lifetime, RAW ancestry, matching
+  foreign post и zombie owner. Это не review разрешения live transport.
+  Локально подтверждены адресные native/DNS/cube/migration/lifecycle/locks/outcome/negative
+  fixtures на разных checkpoints; старый sh cube8/24/8repeat:24 native DATA calls,579.95s
+  под конкурентной нагрузкой, не MIPS и не сопоставимый isolated benchmark. Последний повтор
+  native execution выявил устаревшую fault injection: чужой edit добавлялся в own candidate
+  ДО publisher. Guard корректно отказал; injection перенесена ПОСЛЕ own DATA publication,
+  assertion сохранности foreign edit оставлен. Текущий связанный повтор ещё выполняется.
+  Дополнительный timeout45 в move воспроизведён: gate дважды валидировал каждый закрытый
+  исторический step. RED count assertion подтвердил дублирование. После одного exact-pass
+  и проверки cardinality committed полнота/missing/alias/extra/non-done/corruption/save guards
+  сохранены; sh/BusyBox journal2 PASS, адресный review без новых Important. Таймаут45 не менялся.
+  Связанный native execution sh PASS(260.64s вся suite, каждый invoke≤45s), включая corrected
+  foreign-after injection, migration/downgrade/move/partial/save/CAS; DNS/signals ещё проверяются.
+  Все32 новые routing cases зарегистрированы для sh/BusyBox в штатном consistency; прежние
+  checks/assertions/budgets/workflow/targets/version/feed не ослаблены. Новый exact CI пока
+  не запущен. Исторические local full consistency FAIL(read-only /opt/var) и Chromium SKIP
+  сохраняются; fixture PASS не является hardware acceptance. Роутер не подключался.
+
+- 05.11.2026 / PR38, завершение адресной подготовки после ca15c4c: durable logs подтвердили
+  native sh260.64s, DNS BusyBox339.94s, TERM(native post)/SIGKILL(late metadata) BusyBox44.80s.
+  Последние два не теряют parent pending после PID death; inspect не пишет, только явная
+  собственная compensation возвращает byte-exact native/config ledger и снимает barrier.
+  DNS: both stores/repeat/VPN/ISP/Auto/foreign rows/capacity8; unknown AGH POST не inverse,
+  отказ local registration компенсирует exact own backend, unrelated AGH не вызывается VPN.
+  Native: schema migration/downgrade/move/new name/off/partial/save/foreign-edit preservation.
+  Это один текущий runtime a5814b3; более ранние cube/lifecycle/import/outcome/fault cases
+  остаются результатами своих checkpoints и должны войти в финальный exact CI вместе.
+  Runtime review закрыт, включая эквивалентность gate single-pass без ослабления checks.
+  Shell/BusyBox syntax,9 новых routing libs + new runner ShellCheck, Python/Node/diagnostic UI,
+  version/privacy/append-only/SHA проверки PASS; старые local full FAIL/Chromium SKIP прежние.
+  Следующий code commit регистрирует32 новых cases, затем один official CI. Нет merge/release.
+
+- 05.11.2026 / PR38 CI42000443090: job127153999187 repository-consistency остановился на
+  compatibility grep (stat option literal в комментарии legacy library). Это не PASS остатка
+  и не недостаток BusyBox metadata implementation(ls -ldn). Точная правка wording без изменения
+  поведения и без ослабления guard; финальный исправленный HEAD требует собственного CI.
+  На первом чтении updater-tests127153999124/resource-audit127153998894 IN_PROGRESS, не
+  отменяются/не перечитываются циклом. Нет merge/dev/main/feed/release/router действий.
+
+- 05.11.2026 14:38 МСК / PR38, CI42000841257: first new AGH preflight case rc75 воспроизведён
+  приumask022. Path.mkdir(parents=True,mode0700) оставлял services parent0755; private DATA gate
+  правильно отказывал ДО операции. Fixture теперь явно создаёт parent0700; то же исправлено
+  для legacy route-engine parents и нового worker.sha0600. Production read/ownership guard
+  не ослаблен. Читатели projection/pipeline/DNS-view и при022 уже PASS, их не меняли.
+  Direct J2/private envelope также зависели от ambient umask: .lock0755/metadata0644 не мог
+  закрыться. Leased mkdir и operation context теперь private; owner metadata временно077 с
+  восстановлением caller umask. Отдельный metadata writer-child недопустим: addressed review
+  выявил lifetime race, реальный regression остановил его послеpid, убил толькоparent,
+  заменил lock живым holder и возобновил child — получено повреждение нового lock(RED).
+  Теперь journal и generic take пишут shared metadata самим elected owner; тот же test для
+  обоих вариантов GREEN, без увеличенияtimeouts. Новых Important/Critical по closure нет.
+  Resource FAIL исследован отдельно: sweep создавал election/писал USB даже для healthy lock,
+  first choosing scan повторно проверял свой ticket. Preliminary stale read теперь только
+  пропускает healthy; stale повторно проверяется ВНУТРИ SAME election перед leased rm.
+  Regression healthy flash tree без изменений RED→GREEN и replacement-owner interleaving PASS.
+  Own ticket учитывается в том же256 bound, final exec/leave проверяют его private claim.
+  Host real-tool invocation profile gate enter/leave:9→7; это НЕ полный emulator budget PASS.
+  Бюджеты64/28/3 и assertions/workflow/targets78/package-map/allowlists/VERSION/feed прежние.
+  Адресные PASS при022: sh/BusyBox1.37 ash+awk lock election/orphan/metadata lifetime/private
+  modes/restore; shared legacy/B contention; AGH preflight refusal; stale sweep/boot hook.
+  BusyBox reboot57.34s, actual legacy import/downgrade91.81s и both-store legacy server188.00s;
+  BusyBox J2 5.53s и sh v1 journal5.77s PASS. Каждый invoke budget45s прежний; время suite
+  не latency MIPS. Syntax/Python/privacy/diff и отсутствие новых ShellCheck diagnostics PASS.
+  Runtime `531fe7a635642b17126bb9f93a80b6ba02d8e220` ещё требует полного CI; resource budget и
+  непройденный остаток32 новых cases не объявлены зелёными. Прежние local full FAIL(read-only
+  /opt/var)/Chromium localSKIP сохранены; official Chromium SUCCESS относится кced666e.
+  Это OFF software preparation: legacy eligibility/updater callbacks ещё НЕ WIRED, libs
+  UNINSTALLED, API endpoint/actions не включены. Роутер не подключался; merge/release нет.
+
+- 05.11.2026 17:03 МСК / PR38 CI42020983953: полный sh prepared subset из32 cases прошёл,
+  но BusyBox остановился check-lock-election.py:53 until(paused), поэтому его остаток НЕ PASS.
+  Local Ubuntu24.04 dynamic BusyBox1.36.1 case PASS; static1.36.1 воспроизвёл тот же RED:
+  exec rm выбирает applet и обходит PATH shim. Точный build CI бинарника в логе не печатался;
+  подтверждённый локальный static repro устраняется переносом fault point в исходник actual
+  leased worker, после его guards/lease и перед тем же finalexec. Marker — actual /proc PID;
+  все stale/reclaim/orphan/release/v1-v2/metadata assertions и8s bounds сохранены, skips нет.
+  Sh/BusyBox1.37 и Ubuntu static1.36 race/stale cases GREEN; это не permission live transport.
+  Reconciler budget67>64 также сохранён как отдельный отказ. В isolated Ubuntu24.04 Docker
+  выполнен штатный build-rootfs + run-resource-audit.measure(runs5), crond paused как в audit:
+  RED69[70,69,67,70,66]exec/2opt_ops. Trace показал лишние failed mkdir existing.gate и cat
+  owner fields. Existing gate теперь проходит прежнюю private validation без лишнего mkdir;
+  absent/create race сохраняет fallback. Decimal builtin reader заменяет cat в leave/release:
+  actualPID/start/boot/lease checks прежние, EOF/trailing blank допустимы как раньше, extra
+  nonempty/invalid fields отказывают. Новые shape tests PASS; addressed review без Important.
+  После первых сокращений median64[61,64,58,64,64]; конечный targeted GREEN61[62,75,57,55,61],
+  opt_ops2. Выброс75 не скрыт: штатный median-of5 и budget64/4 не изменены. Это только
+  targeted local resource result, НЕ весь job/full local consistency и НЕ MIPS.
+  Sh/BB lock election PASS; BB shared locks6.26s, J2 5.11s, sh v1 journal4.96s; stale tests
+  sh/BB/static1.36 PASS. Public workflow/map/allowlists78/version/feed unchanged; raw traces
+  и Docker setup остались вне repo. Full exact CI исправленного HEAD ещё требуется.
+  Старые local full FAIL(readonly/opt/var) и Chromium localSKIP не переписаны; official
+  stress/Chromium SUCCESS относятся к04e4591. Libs UNINSTALLED, legacy/updater callbacks
+  PREPARED NOT WIRED, packet/clientprooffalse; роутер не подключался, merge/release нет.
+
+- 05.11.2026 19:21 МСК / PR38 CI810: общий resource job и updater/rehearsal наконец SUCCESS
+  наba24acd, все новые32case×sh/BB прошли, включая portable lease pause. Старые SUCCESS не
+  переносятся на другой tree. Единственный отказ consistency далее — check-routing-state-errors:
+  unknown/error-text/write-error/absent/present все rc1 с `vward_lock_take: not found`.
+  Сообщение absent:lost persist означало НЕ достигнутую ветку, не доказанное повреждение runtime.
+  Подтверждённый RED: прежний harness извлекал actual remove_adaptive после перехода к common
+  lock API, но не подключал его настоящую зависимость. Test-only fix sources actual runtime
+  admission functions (без whole CLI/daemon), все прежние config/read/write/ownership/assertions
+  сохранены. Spy подтверждает ровно одну ожидаемую native remove attempt каждого scenario;
+  после него собственный CHANGE lock должен быть released. Early refusal больше не выдаётся
+  за успешный тест сохранности. Удаление source из private copy воспроизводит FAIL нового
+  branch-reach assertion. Sh, BusyBox1.37 ash, Ubuntu static1.36 ash приumask022 GREEN;
+  штатная BB проверка этого legacy failure fixture добавлена рядом сsh, безskip/новыхtimeouts.
+  Production components/web/config/map/allowlists78/VERSION/feed/workflow не менялись;
+  последний исправленный runtime остаётся побайтовоba24acd. Новому test/doc HEAD нужен свой
+  полный CI, остаток позднего consistency не объявлен принятым. Исторические local full
+  FAIL(readonly/opt/var) и Chromium localSKIP сохранены; official Chromium/runtime budget
+  SUCCESS относятся кba24acd. Router не подключался; bridges PREPARED NOT WIRED, libs
+  UNINSTALLED/API actionsOFF/clientprooffalse. A1/A6/A7/A10/storage/hardware остаются открыты.
+
+- 05.11.2026 21:49 МСК / [Агент] / PR38 CI811: CI811 /42064101678 exacta7236ffe91e96d8fab7c9155692cb6c6a64458a7
+  (treec9f9ace545d470b2f355833a8490c91e4562efd0) завершён FAILURE, прочитан однократно.
+  Updater127373353240 SUCCESS(official rehearsal), resource127373353230 SUCCESS(полный
+  budget/stress/Chromium), main-only127411549796 SKIPPED. Consistency127373352612 прошёл
+  новые32 Bcases наsh/BusyBox и исправленный persist fixture, затем остановился на old
+  check-smartdns-clear.py: route_change_busy. Остаток этого официального suite не принят.
+
+  Точная причина test harness воспроизведена: три старых Smart DNS fixture заменяли всю
+  admission library двумя idle enter/leave функциями, поэтому actual dir_lock не находил
+  vward_lock_take и отказывал ДО удаления. Test-only correction sources настоящую common
+  library, оставляя прежнюю idle updater модель только для enter/leave. Fake-success lock,
+  production fallback, ослабления guards/assertions/timeouts нет. Clear и orphan-clear также
+  получили свой temporary ADS_BACKUP_ROOT: default /opt/var на read-only host мешал дойти до
+  их AGH assertions; production mkdir refusal не менялся. AST исходных assert и вызовов fail
+  не изменён. Sh иBusyBox1.37 при022: все3 fixture PASS; private missing
+  lock source control снова воспроизводит отказ. Runtime/components/web/config/scripts/
+  package-map/allowlists78/workflow/VERSION/feed побайтовоa7236ff/ba24acd.
+
+  Ранее непринятый хвост consistency от SmartDNS clear до конца штатного runner проверен
+  по последовательным checkpoint: все оставшиеся проверки PASS. Это только suffix, НЕ полный
+  local consistency PASS. Три исправленных fixture проверены отдельно sh/BusyBox1.37 при022;
+  основной suffix — isolated Ubuntu24.04/static BusyBox1.36 с исходными runner assertions,
+  без изменения production/runtime/workflow. Host ограничения обнаружены честно: component-ops
+  требовал разрешённый local HTTP; hardcoded /usr/bin BusyBox и default /opt/var потребовали
+  изолированный контейнер; diagnostics DNS/cutover требовали curl/git и прошли на host.
+  Никаких host/CI safeguards ради результата не ослабляли. Исторические
+  local full FAIL(readonly/opt/var/check-dryrun.py199) и local Chromium SKIP остаются в истории.
+  Новый exact test/doc HEAD ещё требует всех3 обязательных jobs; прежние SUCCESS не переносятся.
+  OFF/libs UNINSTALLED/API noendpoint/clientprooffalse/bridges PREPARED NOT WIRED сохранены.
+  Следующая live граница только конкретный VPN-only GO §F.3/G.4 с legacy fences/quiescence/
+  transport completion и owner acceptance; A1/A6/A7/A10/storage/hardware открыты.
+  Роутер не подключался; merge/dev/main/feed/VERSION/release/live wiring отсутствуют.
+
+
+- 06.11.2026 00:03 МСК / [Агент] / PR38 CI812: CI812 /42088055302 exact209278374192e9642ac6e64daa2cd811ee26c944,
+  tree428e351fb8992437ee14dbf022d175dad74c367f, PR38/base dev3f4802b6574c0c7b441bf3da84e6841abb173349:
+  repository-consistency127458395533 SUCCESS, updater-tests127458395452 SUCCESS(official
+  rehearsal), resource-audit127458394925 FAILURE только на budget updater check62exec>61;
+  main-only127503063069 SKIPPED. Preceding resource stabilization/stress/Chromium SUCCESS.
+  Run/jobs прочитаны однократно; старые successful jobs не rerun и не перенесены на новый tree.
+  Полный consistency на этом exact HEAD впервые принят; общий software gate ещё НЕ PASS.
+
+  Изолированный Ubuntu24.04 + штатные build-rootfs и run-resource-audit.measure(runs5),
+  crond paused, actual updater watch --once: RED median63exec [63,62,65,61,63],19opt_ops.
+  Трасса показала10 mkdir, включая4 лишних -p для уже существующих log/state каталогов.
+  Минимальная production дельта — только2 строки vu_log/vu_state_set в updater common base:
+  существующий каталог проверяется builtin; отсутствующий по-прежнему создаёт настоящий mkdir.
+  Ошибки создания/записи, stderr logging/best-effort contract, atomic state replacement,
+  mode600, sync, locks, replay/signature/barriers/rollback не изменены. Symlink к каталогу
+  сохраняет прежнюю mkdir -p семантику, новых ownership полномочий не добавлено.
+  Новый check-updater-directory-cost.py: first create, repeated bytes/other-key/modes,
+  real create refusal/failed write/file collision/logger refusal/symlink compatibility.
+  Счётчик вызывает command mkdir, не fake-success; baseline RED на repeated cost, затем
+  sh/BusyBox1.37 и isolated static BusyBox1.36 при022 GREEN; регистрация в обычном runner.
+  Base updater simulations38/38 PASS, WAN fallback/openssl refusal PASS, syntax/privacy/
+  no-new-ShellCheck/package-map78 PASS. Отдельный addressed review только этих2строк/нового
+  теста закрыт без новых Important/Critical, общий аудит не повторялся.
+
+  Тот же targeted emulator job после фикса: median54exec [62,54,54,60,52],19opt_ops;
+  mkdir10→6. Outlier62 выше61 сохранён; median5/бюджеты/методика/workflow не менялись.
+  Разницу median не приписываем целиком четырём вызовам: полные samples приведены выше.
+  Это targeted local job, НЕ полный resource-audit PASS/НЕ MIPS/НЕ аппаратная приёмка.
+  Новый exact code HEAD должен снова пройти все3mandatory jobs, прежние SUCCESS не заменяют их.
+
+  Уточнение предыдущей записи CI811: cutover beta-marker cross-check был SKIP, поскольку
+  origin/beta локально недоступен. Остальной suffix PASS по checkpoints не означает PASS
+  этой подпроверки или full-local suite. Исторические full-local FAIL(readonly/opt/var,
+  check-dryrun.py199) и local Chromium SKIP(noPlaywright) остаются в истории.
+  OFF pipeline/libs UNINSTALLED/normal legacy+updater bridges PREPARED NOT WIRED/API noendpoint/
+  activationoff/client_path_verifiedfalse не изменены. Package-map/allowlists78/VERSION/feed/
+  workflow/budgets прежние; production delta относительно2092783 явно учтена: updater base2строки.
+  Следующий live шаг только конкретный VPN-only GO §F.3/G.4 с legacy fences/updater quiescence/
+  physical completion/readback/save/ownCASrollback/schema и owner acceptance. DNS/ISP/Auto/
+  manual/unknown/shared migration writes закрыты; A1/A6/A7/A10/storage/hardware открыты.
+  Нет router/merge/dev/main/feed/release/install/live wiring.
+
+- 06.11.2026 02:12 МСК / [Агент] / PR38 завершение OFF: [CI813 /42109284350](https://github.com/Ziegfe1d/VWARD/actions/runs/42109284350)
+  завершён **SUCCESS** на exact code HEAD `168a853bf12073e3b499002c67e2182e6ea3c7a5`,
+  tested tree `7597f8e12418d66157b039b33ec2524efeb4ed7a`,
+  base dev `3f4802b6574c0c7b441bf3da84e6841abb173349`, [PR38](https://github.com/Ziegfe1d/VWARD/pull/38).
+  Run/jobs прочитаны однократно; PR head/tree и base совпали, worktree чистый, draft сохранён.
+
+  - repository-consistency **127532263462 SUCCESS**: полный штатный suite, включая32 новых
+    B cases наsh/BusyBox, прежний поздний хвост и новый updater directory-cost regression.
+  - updater-tests **127532262882 SUCCESS**, включая штатный Release rehearsal over beta.
+  - resource-audit **127532263711 SUCCESS**: полный прежний budget, stabilization, часовой
+    random-fault stress и все страницы Панели в Chromium на эмуляторе.
+  - main-only dispatch-transition **127577196956 SKIPPED**, необязателен для этой ветки.
+
+  Это собственные ворота168a853, не перенос старых SUCCESS. CI812 и предыдущие отказы/
+  RED→GREEN остаются в истории. Две последние runtime строки updater common base и их
+  regression вошли в прошедшее дерево; map/allowlists78/budgets/workflow/VERSION/feed прежние.
+  Адресные reviews закрыты без оставшихся Important/Critical в проверенном OFF scope;
+  общий аудит не повторялся. Успешные длительные проверки не rerun. Для этого итогового
+  журнала — отдельный docs[skip ci]+штатный SHA256SUMS; runtime/tests должны остаться
+  побайтово tested168a853, нового полного CI ради записи нет.
+
+  **OFF архитектурная подготовка закрыта по software gates.** Это не live wiring и не выпуск.
+  Native+12decision stage→actual choice/policy→typed plan→parentJ2/Gi→EXISTING locked console/
+  AGH workers на FIXED private DATA→readback/save/ownCAS проверены как OFF цепочка.
+  Новые libs UNINSTALLED/не signed78 targets; normal OLD legacy eligibility/reconcile и
+  updater bridge PREPARED ONLY / НЕ WIRED. Shared lock не заменяет wiring. API serializer
+  только definition/noendpoint; optional gray UI/actions прежние; activation=off,
+  client_path_verified=false, новые форматы denied, packet/client path unknown. M/S/A —
+  источники, не режимы агентов. Unknown AGH POST сохраняет private before/planned/
+  request.pending+barrier, без autoreplay/blind inverse. Receipt доказывает issued attempt,
+  не hardware ACK/клиентский путь.
+
+  Исторические full-local consistency FAIL(readonly/opt/var/check-dryrun.py199), local
+  Chromium SKIP(noPlaywright), beta-marker cross-check SKIP(origin/beta локально недоступен)
+  сохранены. Успех штатного CI не переписывает эти локальные результаты и не даёт аппаратной
+  приёмки. Новых router outputs нет; owner ничего не устанавливал, роутер не подключался.
+
+  Следующая граница — ОДИН конкретный VPN-only GO §F.3/G.4: service-owned exactscope
+  move/repeat/back; ВСЕ пересекающиеся legacy backwriters получают scoped eligibility и
+  updater quiescence ДОwrite; common admission→EDIT→CHANGE→J2/internalworker/nochildCLI;
+  physical transport completion/lease/readback/save; failclosed disable/ownCAS rollback/
+  schema/downgrade; одна owner acceptance actualroute/registry/claim/manual preservation/
+  repeat/restart/persist. Проект документально подготовлен, wiring НЕ согласован.
+  DNS/ISP/Auto/manual/unknown/shared migration writes закрыты; A1/A6/A7/A10/storage/hardware
+  открыты. Никакого merge/dev/main/feed/VERSION/sequence/release/install/live wiring.
+  Разовая B-задача6aeb0aa808408191877cad08d219e816 подлежит отключению после записи итога;
+  старый release task не переоткрывается.
+
+- 06.11.2026 08:47 МСК / [Владелец, поручение 06.11; Агент фиксирует] / PR38 новое GO: **06.11.2026 — явный GO владельца на завершение общей маршрутизации и dev-выпуск**
+  (поручение `VWARD_PR38_GO_Complete_And_Release_DEV_2026-11-06.md`). В PR38 разрешены
+  production wiring общей snapshot→choice/membership→policy→typed plan→coordinator/
+  существующие workers→readback/save→outcome цепочки, API/Панель, установка необходимых
+  библиотек в точный package-map/signed состав, migration/downgrade, затем самостоятельный
+  PR/merge в dev, версия, штатная production подпись/публикация и public verification после
+  software gates, addressed review и проверенного отката. Прежние «только OFF», «новый GO
+  перед каждым writer» и «отдельное Выпускаем» становятся историческими ТОЛЬКО в этих границах.
+  Порядок внутренних этапов: сначала VPN, затем DNS/ISP/Auto, server lifecycle и остальные
+  потребители; конечный результат НЕ ограничивается двумя VPN или выключенной моделью.
+  Один implementer, независимый review только рискованного wiring/locks/ownership/recovery/
+  миграции/package integration. Один полный CI на связанном конечном code HEAD; CI813 не
+  покрывает будущий wiring, успешные проверки того же дерева не rerun. При FAIL — конкретный
+  RED→GREEN без ослабления protections/budgets/signatures и новый exact CI исправленного кода.
+  Роутер не подключать/не менять/не устанавливать/не перезагружать, main/stable не менять;
+  выбор режимов/компонентов и hardware acceptance за владельцем. Agents Observation, ручные
+  защищённые правила и удалённые владельцем SmartDNS привязки не менять. Unknown AGH POST/
+  private recovery/barrier/own CAS и запрет blind replay остаются. Dev publication не hardware.
+
+- 06.11.2026 21:00 МСК / [Агент] / PR38 native checkpoint c77adde15a5baf99012aa6e3351c6718a6219bb6:
+  SAME choice/policy/typed plan/J2 и существующий locked console worker связаны с отдельным
+  actual NDMC process: PID/start/BOOT lease, same-PID exec, ACK+fresh readback+save;
+  DATA receipt не выдаётся за native ACK. RAM observations, private durable J2 evidence.
+  ROOT создаётся observation0 под EDIT+CHANGE через final publisher в SAME CHANGE election;
+  parent требует sourcegone/inode/seal+ACK, затем actual legacy importer/state-set/versionlast.
+  Pre-B pending отказывает ДО ROOT; actual old console service-recover accept остаётся доступен.
+  Bundled catalog fallback/private exact proof import сохранён; manual group/все старые bytes+modes
+  не меняются. Parent-only death/lateRoot0/empty+matching+extra foreignRoot: без adoption/replay,
+  updater после quiescence блокирует поздний неизвестный ROOT. Zombie не execution authority;
+  live/unknown kernel identity блокирует. Inspect native pending без transport; compensate
+  unresolved request отказывает, inverse rc75 не превращается в matching-bytes ACK.
+  Cache prediction не отменяет последний actual native preflight; ACK handoff same worker;
+  parent scope hash привязан к sealed Gi. First service running-config reads RED34→GREEN≤24,
+  последний guard сохранён; actual foreign edit после prediction/ACK сохраняется/даёт unknown.
+  Serial SH native 1/2/3 VPN A→B→C→A/repeat/off/missing-target PASS: actual fixture route,
+  startup/registry/proof, manual preservation; off != ISP. Ранее 45s failures под конкурентной
+  нагрузкой не скрыты, timeout не повышен; это не MIPS/аппаратная скорость.
+  SH+BB1.37 bootstrap(bundled/import/pending), root publisher lifetime, actual actor lifetime/IFS,
+  actual four old Auto restore/add/hint/persist handoff и native recovery PASS. Positive unrelated
+  domain control доказывает рабочий loader/reader, а не отказ отсутствующей зависимости.
+  Native lost ACK/save failure/parent-only kill до+после записи SH PASS на этом checkpoint;
+  прежние BB native/fault результаты на своих checkpoints. DATA modes/foreign mode/import+
+  guarded byte/mode exact downgrade SH PASS; base updater simulations38/38 PASS с новыми guards.
+  Syntax Python/sh/BB, no-new ShellCheck diagnostic versus cb8, privacy/diff/SHA PASS.
+  Addressed reviewer native/ROOT/actor/recovery+Auto delta: новых Important/Critical нет,
+  тесты запускал implementer; весь backwriter/migration gate этим не закрыт.
+  Новые libs пока UNINSTALLED, AGH live adapter ещё отказывает при наличии AGH; это временная
+  незавершённость, не продуктовый fallback. Полные M/S/A/DNS/ISP/Auto/lifecycle, остальные old
+  writers, реальные API/Panel/package/ABI downgrade, exact CI/rollback/public dev ещё открыты.
+  Historical full-local consistency FAIL(read-only /opt/var), Chromium localSKIP(noPlaywright),
+  beta cross-check SKIP(origin/beta недоступен) сохранены. Router не подключался/не менялся.
+
+- 07.11.2026 02:46 МСК / [Агент] / PR38 DNS transport e863946406da16a4e5c5f687bdaf2278cf35fe4c:
+  SAME typed plan/J2/существующие helpers используют fixed native HTTPS compiler и actual
+  same-PID NDMC/curl publishers PID/start/BOOT. HTTP credentials — private curl config,
+  request body/path закрыты; subscription/DoH endpoint не опрашивается. Receipt != ACK.
+  Existing7AGH function bodies перенесены BYTE-EXACT из control.sh в signed common.sh;
+  ни nested CLI, ни новый backend. Actual helper lock/CAS/asserts сохранены.
+  Native Keenetic DNS→VPN→ISP→DNS→Auto SH PASS; loss of first/final reply, capacity8,
+  foreign-after-own same URL refusal PASS. Real last-command lostACK negative control
+  показал premature claims до позднего save refusal без post-worker request guard;
+  с guard выбор/proofs не публикуются, pending сохраняется, replay/inverse запрещены.
+  Actual AGH loopback HTTP+real curl, DNS/repeat→VPN→ISP→DNS→Auto SH+BB1.37 PASS:
+  same-URL foreign neighbour, plain resolver/settings, native readback/save сохранены.
+  AGH-only действие не записывает/не сохраняет unrelated native config. Dispatch lease
+  принадлежит actual curl executable, не shell. SH+BB lostHTTPreply/killONLYcoordinator
+  до+после serverwrite: old/new/updater fenced, before/planned/pending остаются после
+  позднего ответа, без ACK/adoption/replay. Это software fixture, не hardware acceptance.
+  Первый HTTP prototype дал input-changed-during-step: actual observer менял и agh-domains.
+  Разрешена только доказанная derived agh-delta из ОБОИХ SAME sealed API JSON: exact hash,
+  private mode600/uid; другие JSON fields/attrs/CAS прежние. SH tamper+label-only negative
+  control PASS, нельзя просто allowlist agh и скрыть чужую подмену input.
+  Addressed review нашёл Important: source common.sh выполнял top-level custom registry
+  merge вне CONTROL/J2. Configured-custom-source observation реально воспроизвела запись.
+  В common только definitions/config, SAME merge явно вызывают все17 прежних entrypoints
+  сразу после source (прежний порядок); env bypass не добавлен. SH+BB actual observation+
+  refused missingVPN не трогают ADS state; actual old CLI сохраняет initialization.
+  Review закрыл Important; иных доказанных Important/Critical в просмотренной дельте нет,
+  reviewer тесты не запускал, остальные gates не принимал. Production guards не ослаблялись.
+  Совместимость: old AGH SmartDNS/settings и ADSconsole PASS, old restore safety PASS при
+  owned external backup dir. Первый old restore local FAIL был ДО POST (/opt/var read-only,
+  отсутствовал fixture backup env), не native rollback corruption; тест/asserts не менялись.
+  Full DATA DNS suite SH PASS: оба stores/transitions/repeats/unknown/noinverse/owninverse/
+  unrelated-unavailable-AGH/capacity8. Syntax/Python/sh/BB/no-new ShellCheck/privacy/diff/
+  SHA1403 PASS. Runner новые cases зарегистрировал, workflow/budgets/maps/allowlists78 прежние.
+  Все новые live libs пока UNINSTALLED, entrypoint/API/Panel не wired. Реальные all-old
+  callbacks, fresh canonical inputs/selectors/first bootstrap recovery, server lifecycle,
+  selective unrelated AGH failure, installed ABI/downgrade и connected acceptance открыты.
+  CI813 не перечитывался/не переносится; новый full exact CI будет после complete package.
+  Historical full-local consistency FAIL/Chromium localSKIP/beta cross-check SKIP сохранены.
+  Dev/main/VERSION/feed/sequence/release/роутер не менялись; Agents Observation неизменны.
+
+- 07.11.2026 08:56 МСК — [Агент], PR38 owner GO, code `aa72a645e9beddeae4d4e119c1eab9a017d16f02` поверх cd3c904.
+  Ordinary service on/tunnel/off подключены до старых EDIT/CHANGE к fixed installed
+  closure/canonical path и общему admission→EDIT→CHANGE→J2/internal workers. Actual copied
+  CLI/profile/libs проверены на внешнем native fixture: registry/proof/readback/save,
+  off/repeat/missing explicit tunnel; no nested CLI/old transaction. Корректная ABI2
+  capsule требуется целиком, missing/wrong/extra bytes/code отказывают без native query.
+  Trust RED: owned world-writable code реально исполнялся при source. Теперь все source
+  files и ancestors проверяются до source; first loader проверяется самим console.
+  SH+BusyBox code/ancestor/actual first-source marker controls PASS, без нового override.
+  VPN:auto — raw selector в choices и legacy registration. Только captured category/default
+  разрешает physical target; explicit pin выше категории, missing target не Provider.
+  Fresh catalog/dev/categories архивируются из SAME generation. Native show interface
+  даёт только configuration/link availability, online unknown не объявлен отказом;
+  packet/client path не проверен. Catalog membership не native ownership/не full coverage.
+  Addressed review нашёл два Important: retired domain оставался confirmed и мог получить
+  запись; retired SID не позволял off. Actual CLI RED обоих воспроизведён. Retired
+  confirmation становится unknown, excluded/shared не стираются. Explicit vpn→auto
+  withdrawal требует canonical resource+origin prefix и actual PRIVATE full native group,
+  ВСЕ legacy registrations должны быть покрыты canonical VPN projections. Только этот
+  own S withdrawal может разрешить retired membership/legacy S unknown; M/A/peer unknown
+  не разрешены. Actual missing proof/foreign member/unbound registration отказаны;
+  independent A active без fresh native-boot probe остаётся typed HOLD. SH+BB PASS.
+  Off уже auto/DNS/ISP — no-op под admission/locks/journal gate/canonical expectedRev CAS,
+  сохраняет иной intent и не опрашивает backend. Ответ desired-only/unknown/client=false,
+  не новый configured proof. Semantic repeat не создаёт matching-image state transaction:
+  все12 prospective files сравниваются с SAME stage до J2, physical guards не обходятся.
+  Optional category file: только истинное отсутствие означает profile default; alias,
+  directory/malformed остаются unknown. Direct SH+BB и старый reader8/24/parity PASS.
+  Current check-live-inputs SH+BB PASS: captured category→VPN2, raw auto, repeat/no extra
+  J2, missing category target отказ, unknown interface не cached UP, absent file→VPN0.
+  До physical metadata J2 теперь SAME pure choice/project/typed preview; HOLD не создаёт
+  durable observation receipt. Allowed preview DISCARDED, затем real metadata J2 и real
+  fresh re-plan под SAME actual C/locks, без path/backend/executable от API.
+  Cost/limits: первая BB серия отказала45s на ПОСЛЕДНЕМ category→default move; ранние шаги
+  прошли. Совпало с параллельным old native-boundary SH/BB (это тоже resource load).
+  Изолированные private profiles: first33.50/move39.31; full first31.27, rejected9.65/10.15,
+  move38.38s. Причинность closed-history/исходного timeout НЕ доказана, MIPS не измерялся.
+  Отдельно измерены ненужные metadata J2 на denied choice5.00/5.31s; regression RED→GREEN
+  проверяет ранний pure HOLD без J2, не ослабляет history/Gi/CAS/last native preflight.
+  Последняя серия строго serial: inputs/membership/console entry SH+BB и withdrawal BB PASS;
+  withdrawal SH на предшествующем checkpoint PASS. Лимит каждого invoke45s не увеличен.
+  Fixture timeout теперь через существующий process-group runner, OUR descendants reaped.
+  Новые7cases зарегистрированы в общем SH/BB runner. Pure selector/projection SH+BB,
+  old native-boundary SH+BB, syntax/Python/sh/BB/no-new ShellCheck/privacy/version и SHA1413
+  PASS. Full local consistency НЕ заявлен: прежний read-only /opt/var FAIL, Chromium local
+  SKIP и beta-marker SKIP сохраняются. CI813 не reread/rerun и не относится к этому code.
+  Новые libs/capsule UNINSTALLED, map/allowlists signed78/workflow/VERSION/feed прежние.
+  First ROOT/cold discovery/preflight/recovery, все legacy callbacks/M/A/list/category,
+  оба-store lifecycle/общие API/status/Panel, installed ABI/downgrade/connected faults,
+  новый exact CI/rollback/dev/public gates ещё открыты; partial on/off не выпускать.
+  Environment restart сохранил workspace/index/logs. Router не подключался/не менялся,
+  Agents Observation/manual rules/NextDNS/owner-removed DNS неизменны, hardware не принят.
+
+- 07.11.2026 09:15 МСК — [Агент], PR38, code `5ac6fda31efc1ad1c18db4ee4474b6f5ea924969`.
+  Actual copied CLI воспроизвёл два обхода: writable device.conf дал rc0/native change;
+  provider PPTP WAN при stale WAN_DEVICE был опрошен/выбран как VPN и также дал rc0.
+  Fresh input compiler использует существующий vrj2_file для owned0600/0400 profile;
+  source конфигурации не добавлен. Captured WAN_INTERFACE валидируется и исключается
+  независимо от WAN_DEVICE; отсутствующий map больше не скрывает cat error под pipeline.
+  SH+BB actual negative cases PASS, valid0400 positive PASS, no timeout/assert weakening.
+  Fixture preserve_profile keyword действует только в тесте; нового production override
+  нет. Case зарегистрирован8-м, syntax/Python/sh/BB/no-new SC/privacy/SHA1414 PASS.
+  Это закрывает eligibility при существующем control state, НЕ cold first publication:
+  preflight/discovery/Root0 recovery и остальные общие writers/modes/API/Panel/package/
+  ABI/downgrade/CI/rollback/public остаются открыты. Signed78/map/VERSION/feed прежние;
+  dev/main/устройство не изменялись, production keys не читались.
+
+### 07.11.2026 10:22 МСК — [Агент] PR38: первый обычный запрос без stranded ROOT и late shared-cache writer
+
+Code `868f7d3f663cd1c6edf2e23fcca17d8220816c2a`; PR https://github.com/Ziegfe1d/VWARD/pull/38 draft, full owner GO §G.5 действует. Actual RED: bad catalog оставлял canonical0, отсутствующий map/unsafe profile — canonical2 до отказа первого CLI. Теперь SAME legacy observation compiler/архив/metadata-only state-set готовятся в private candidate под actual admission/EDIT/CHANGE ДО публикации. Cache/read readiness разделены без изменения тела native observer. Same-PID leased no-clobber rename/sourcegone/inode/seal/ACK остаются; только после ACK actual executor делает fresh CAS/versionlast J2.
+
+Addressed review нашёл3 Important, все закрыты кодом и адресными regressions (reviewer тесты не запускал):
+- Full-group private proof ошибочно давал unmatched member `S:SID`. Actual rawauto RED доказал false attribution; explicit-pin off на старом коде достиг timeout45, удаление НЕ доказано. S import теперь только exact catalog member; unknown остаётся observation без S права, fullcoverage/withdrawal guards прежние. Cold off с private fullproof+manual extra SH/BB: refusal, running/startup/registry/proof byte exact, extra не S.
+- Замена parent на symlink после initial ancestry: actual prepare RED писал private aliased subtree; final publisher RED действительно создавал ROOT через alias(rc3 позже). Старый closed walk до trusted /opt повторяется при init_parent перед prepare и final leased exec. SH/BB обе fault границы PASS, чужие/aliased bytes сохранены.
+- Первый cold discovery писал shared map из unleased child. Actual parent-only kill/new replacement/late completion RED перезаписывал новый map. Теперь existing profile discovery пишет только unique private RAM observation; SAME map path используется reader/archive. Нормальный второй action envelope также вызывает SAME map_prepare; shared map не публикуется. SH/BB late-child regression сохраняет replacement inode/bytes и native/startup. Existing shared cache TTL поведение не менялось.
+
+Targeted результаты по checkpoints: first-request valid/native-write/save + invalid catalog/map/profile SH/BB PASS; cold actual console+existing profile/RCI show-only available/unavailable SH/BB PASS; per-member attribution/ancestry/late discovery SH/BB PASS. Actual lifetime suite SH/BB PASS: parent-only kill/late0/updater/foreign empty-matching-extra/noACK/noadoption/inode прежние. Старый no-queries assert реально RED после нужного read-only preflight; заменён требованием ALL native calls=show running-config И running/startup byte exact, запрет mutation/save и bounds8s сохранены. Default DATA legacy-import/re-import/byte+mode downgrade/refusal SH/BB PASS на этом checkpoint. Cold discovery fixture перехватывает curl executable, только whitelist show/interface/system-name; real network/router не использовались.
+
+5новыхcases зарегистрированы общим SH/BB runner. Invoke45/probe55/fault8/resource budgets неизменны. Static sh/BB/Python, no-new ShellCheck, privacy, diff, SHA1419 PASS. Full local consistency исторически FAIL(read-only /opt/var/check-dryrun199), local Chromium SKIP(noPlaywright), beta marker SKIP(origin/beta unavailable) остаются. Старый CI813 не читался/не переносится, нового полного CI/merge/dev/feed/VERSION/package activation/release/router действия нет; signed78/map/allowlists/workflow прежние, libs UNINSTALLED.
+
+Следом уже подтверждён отдельный raw-intent RED: old importer заменяет auto наблюдаемым VPN:Wireguard0; регрессия raw auto/pin/missing/observed ISP ещё НЕ GREEN. Explicit Root0 inspection/own abort/recovery, все normal old callbacks/M/A/list/category/modes/lifecycle/API/Panel/installed ABI/downgrade/connected faults/final exact CI/rollback/public dev ещё нужны. Fixtures не клиентский путь/аппаратная приёмка.
+
+### 07.11.2026 12:40 МСК — [Claude Code] PR38: handoff и raw legacy intent RED→GREEN
+
+Передача Codex → Claude Code по поручению владельца 07.11 (ROADMAP §7). Исходный опубликованный HEAD `a65a10d`; незакоммиченная работа Codex недоступна, поэтому RED не «восстановлен из diff», а написан заново по описанию §G.5.3 и проверен на `a65a10d`.
+
+Первопричина: `vrb_legacy_observation_compile` (`vward-routing-legacy.sh`) брал цель выбора из наблюдаемого native route (`inventory $6`) и игнорировал третий столбец `enabled.tsv` (`auto|TUNNEL`, формат `service_state_set` Панели). Поэтому raw `auto` становился пином `VPN:Wireguard0`, пин `Wireguard1`/отсутствующий `Wireguard9` переносился на наблюдаемый `Wireguard0`, а пустой выбор заполнялся наблюдением. Это же ломало `vr2_own_service_withdrawal` (сверка `VPN:auto`↔`auto`), что согласуется с прежним timeout45 explicit-pin off.
+
+Исправление адресное: выбор = raw (auto→`VPN:auto`, туннель→`VPN:TUNNEL`, проверка id как у `vward_routing_choice`); пустой/некорректный raw — отказ импорта до ROOT. Наблюдаемый маршрут по-прежнему обязан быть одним VPN-маршрутом (ISP/отсутствие — прежний отказ), а ресурсы/доказательства S импортируются как раньше; смысл «выбрано/применено/источник», чужие route entries и exact per-member attribution не менялись.
+
+Тесты: новый `check-live-raw-intent.py` (actual copied console CLI, первый ROOT): raw auto+Wireguard0, pin Wireguard1 при наблюдаемом Wireguard0, pin OpkgTun4 (VLESS) и auto при наблюдаемом OpkgTun4, pin отсутствующего Wireguard9, observed ISP и пустой raw. На `a65a10d` RED (4 выбора нормализованы к физическому маршруту, пустой raw импортирован); после исправления GREEN на sh (dash) и BusyBox v1.36.1 (Ubuntu). BusyBox 1.37.0 владельца здесь не проверялся. Две прежние регрессии (`check-legacy-import`, `check-live-bootstrap`) закрепляли саму ошибку (`auto`→`VPN:Wireguard0`); их ожидание исправлено на `VPN:auto` с комментарием, остальные утверждения не тронуты; обе GREEN sh+BB. Также GREEN (sh): import-attribution(+BB), service-withdrawal, live-console-entry, live-inputs, live-membership, live-vpn-transitions (1/2/3 VPN), live-native-boundary, live-default-binding, state-migration. `check-live-first-request` в этой среде превышает invoke45 так же на неизменном `a65a10d` (CPU-время fork/exec, 4 ядра); лимит не увеличивался, это ресурсный риск, а не PASS. Роутер не подключался; release/merge нет.
+
+### 07.11.2026 13:05 МСК — [Claude Code] PR38: P0-2 → P0-1 → P0-3 (Route Engine, общая очередь HTTPS, состояние)
+
+Порядок владельца соблюдён: сначала различимый UNKNOWN, затем строгая очередь. Все три — RED на коде `ab0b3ab`, GREEN на sh (dash) и BusyBox v1.36.1; 1.37.0 владельца не проверялся. Первопричины подтверждены кодом; их роль в исторических 15/26 событиях Keenetic НЕ доказана.
+
+P0-2 (`vward-route-engine.sh`): `probe()` возвращает 0 SUCCESS / 1 NETWORK_FAIL / 2 UNKNOWN_NOT_EXECUTED и `P_EXEC/P_CLASS/P_WHY`. UNKNOWN: тайм-аут/отказ очереди, `tls_broken`, curl 2/27/43/126/127 и ≥128 (132–139 свой сбой, 137/143 остановка извне, 141 pipe); сетевые 6/7/28/35/52/56/60 и HTTP 451 остаются NETWORK_FAIL. Потребители `handle_new`, `handle_adaptive`, `add_adaptive`, `handle_hint` (в т.ч. нет IPv4 и `vward_isp_control`=2), `alt_tunnel`, `list_watch_check` (теперь через ту же очередь; UNKNOWN не меняет `LW_FAILS` и не вызывает `domain-list … vpn`) ничего не сохраняют при UNKNOWN; RAM-заметка `<host>.unknown` даёт 60 с паузы и одну строку `PROBE_UNKNOWN|host|stage|executed|why|rc|http`. Подтверждения/cooldown реальных отказов прежние. Выявлено старым кодом в тесте: UNKNOWN-проба на домене с постоянным `AUTO_VPN` сохраняла `ISP_FAIL_WG_FAIL` в RAM и удаляла USB-копию `AUTO_VPN`. `domain-list` вызывается через консоль, где `edit_lock`→`routing_operation_check` уже ставит scope gate PR38. Reconciler: прямая проверка, которая не выполнялась, теперь `UNKNOWN`, не `ISP_BAD` (оба держали маршрут; ложное подтверждение отказа провайдера убрано).
+
+P0-1 (`vward-device-profile.sh`): `vward_tls_take [WAIT]` — 0 только владельцу (`owner` = PID+start из /proc), 1 сломан в течение часа, 2 очередь не дана (ограниченно 20 с без свежего `.ok`, 5 с с ним; `vward_fetch` и housekeeping ждут 20 с). Мёртвый/PID-reused владелец снимается сразу, живой — только старше 10 мин, без владельца — старше минуты; снятие сериализовано `.reap` и атомарным `mv`; `vward_tls_done` отдаёт только свою очередь. `vward_fetch` при 2 идёт в штатный fallback (uclient/Xray), curl без очереди не запускается. Компромисс разработчика (2 с за свежим `.ok`) заменён ограниченной политикой: исключительность сохраняется, проба ждёт ≤5 с, при занятости — UNKNOWN (P0-2), а не ложный отказ. Замеры теста: занято+`.ok` 2 возвращается за ~5 с, без `.ok` ~20 с, fetch fallback ~20 с; после SIGKILL владельца очередь получена <2,5 с; 6 параллельных без перекрытий. `.ok` по-прежнему означает лишь отсутствие кода аварии, не HTTP-успех. Panel api.cgi диагностический curl (`api.cgi:1832`) в очередь не включён — отдельный пункт.
+
+P0-3: `save_state` пишет tmp, проверяет запись, переименовывает другую копию в сторону (`*.state.prev.PID`, та же ФС), публикует, затем удаляет отложенную; при сбое возвращает прежнюю копию; readback через `read_state` обязан дать именно новую запись. Отказ → 1 и `STATE_SAVE_FAIL|host|status|step`; все 25 вызовов передают отказ (под `change_lock` с `change_unlock`), успех не журналируется; `AUTO_VPN` после реального `ndmc` пишет прежнюю строку маршрута, но без сохранённого состояния возвращает 1 без «AUTO_VPN: host». `state_recover` при старте возвращает запись, отложенную убитым save, если обеих копий нет, иначе удаляет только свои `.prev`; чужие/неизвестные файлы (в т.ч. 11 нераспознанных у владельца) не трогаются. Сохранённый статус по-прежнему не означает применённый FQDN-маршрут.
+
+Тесты: новые `check-route-engine-probe-unknown.py`, `check-tls-turn.py`, `check-route-state-commit.py` (реальные функции, sh+BB). `check-list-watch.py` теперь извлекает и общий `probe_ran` (иначе срез fail-closed давал UNKNOWN). Прочие route-engine/fetch/isp-control/stale-lock/state-errors проверки PASS; `check-vward-fetch` требует собранного Go-бинаря (среда) — не запускался. API/Панель: новые события не входят в карту событий и не показываются как «VPN сломан»; UI-код не менялся. Роутер не подключался.
+
+### 07.11.2026 14:00 МСК — [Claude Code] ревизия GitHub (§8 поручения 07.11)
+
+Полная история (клон был shallow: без `--unshallow` 19 исторических PR ложно выглядели «впереди dev»). 22 открытых PR → 1 (#38). Закрыты без merge после повторного readback: 19 PR, чьи HEAD — предки `dev` через `75cd38e` (PR #29, fix.35); #32 (каждая добавленная строка кода и все 10 тестов уже в дереве через #33 и позже; не перенесены только VERSION/SHA256SUMS/версии fix.36); #30 (решение владельца 01.11 о строке версии перенесено дословно в ROADMAP §3/§7, коммит `422bbe0`). 52 ветки инвентаризированы; 33 кандидата на удаление и 13 веток с уникальными коммитами показаны владельцу в `docs/GITHUB_REVISION_2026-11-07.md`, ничего не удалено. `dev`/`main`/VERSION/лента не менялись, workflow не запускались. Закрытие PR не доказывает завершённость ПО.
+
+### 07.11.2026 18:30 МСК — [Claude Code] PR38: check-live-first-request (бюджет процессов) и адресный аудит владельца TLS-очереди
+
+**check-live-first-request (47,3 с при лимите invoke45).** Причина найдена замером, лимит 45 с не менялся. Не сон и не ожидание: strace/xtrace одного холодного `service on` на неизменном коде — ~52 000 fork и ~36 500 exec (wc/sha256sum/`ls|awk`), 58 с user CPU; даже обычный (не холодный) запрос ~56 с. Почти всё — повторная проверка целостности по одному файлу: `vr2_file` (два `wc`), `vr2_hash`, `vrj2_file`/`vrj_dir`/`vrb_single_link` (конвейер `ls -ldn | awk`), `vrs_one` в отпечатке snapshot (5 процессов на файл × ~45 файлов × 2 на каждое свежее чтение, ~19 чтений), `vr2_seal_valid` (23 файла по одному, ~15 раз за запрос), запись печати стадии (23 `sha256sum`). Повторные свежие чтения/CAS — намеренная защита, их число не трогалось.
+
+Решение — минимальное, без изменения вердиктов: поля `ls -ldn` разбираются оболочкой (один fork вместо `ls|awk`; многострочный вывод — отказ), размер регулярного файла берётся из того же `ls` (поле 5) вместо отдельного `wc -c`, `vr2_file` — один `wc -lc`, `vrs_one` — один `ls -ldin` (запасной путь прежний), `vr2_seal_valid` и запись печати — один `wc`/`sha256sum` на весь закрытый набор, сравнение малых файлов состояния в `vrb_worker_context`/`vrj2_ready`/`vrj2_step_valid` — `vrj_slurp` (ровно значение `$(cat F 2>/dev/null)` без fork). Итог в этой среде (4 ядра, sh/dash): форки 51 662 → 27 641, холодный `service on` 69 → 38,3 с (BusyBox 1.36.1: 40,1 с), обычный 56 → 32,2 с (BB 34,5 с); весь check-live-first-request (4 сценария) PASS: sh 42,4/43,8 с, BB 45,3/44,0 с на файл, каждый вызов в пределах invoke45, и PASS даже в параллельном прогоне набора.
+
+Эквивалентность доказана, а не предполагается: новый `check-validation-primitives.py` (sh + BusyBox 1.36.1) сравнивает каждый примитив с прежним конвейером на 15 файлах (0600/0400/0644, пустой, без перевода строки, >1 МиБ, >4096 строк, каталоги 0700/0755, симлинк, жёсткая ссылка, отсутствует, хвостовые/внутренние переводы строк, пробелы/табы/обратная косая) и фиксирует коды `vr2_seal_valid` для 15 видов порчи печати (контент, дайджест, нет файла/строки, дубль, чужое имя, симлинк, каталог, размер/строки и ровно на пределе, лишнее поле, тип, не-hex) — на прежнем коде те же коды (проверено до замены). `vrs_one` старый/новый — побайтно одинаковый вывод на тех же файлах. Полный набор routing-readers (77 проверок, 2 параллельно, sh): 74 PASS; 3 FAIL оказались красными уже на исходном `fcdf52f` (проверено в отдельном worktree) и исправлены отдельным коммитом `7bc491e`: (1) `check-outcome` — с `c77adde` итог цепочки несёт `client_path_verified:false`, а `routing_b_outcome_json` в api.cgi его терял; проекция сохраняет `false` и отказывает на заявленном `true` (новый негативный случай); (2) `check-observe` (c) ждал `source S unknown` без `categories.tsv`, хотя `aa72a64` намеренно сделал отсутствие необязательного файла значением профиля по умолчанию (bisect: e863946 PASS → aa72a64 FAIL) — ожидание обновлено, проверка испорченного файла (b) прежняя; (3) `check-native-dns-compiler` зависел от umask среды (приватный `expected` создавался без режима). После исправлений все три PASS (observe — sh и BB). Также PASS: routing-audit (service-choice/policy, run-simulations), console-backup-collision, tls-turn, route-state-commit, route-engine-probe-unknown. Новых замечаний ShellCheck нет.
+
+Риск, который это НЕ закрывает: запас до 45 с ~11–15 % на x86; на MIPS Keenetic fork дороже, время не замерено. Панель ждёт ответ API ≤20 с (`apiFetch`), а смена сервиса через новую цепочку даже здесь ~32–40 с: подключение API/Панели к цепочке возможно только фоновой задачей с опросом результата (есть механизм задач api.cgi), синхронный вызов `$CONFIG_HELPER` не подойдёт. Дальнейшее сокращение (батч отпечатка snapshot, `cat`→`read` в остальных проверках) — отдельный шаг, без ослабления проверок.
+
+**Аудит владельца TLS-очереди (take в подоболочке, curl в родителе).** Владелец — процесс, вызвавший `vward_tls_take` (PID+start из `/proc/self`). Подоболочка, взявшая очередь и завершившаяся, оставляет мёртвого владельца: следующий вызов снимает очередь сразу, пока curl родителя ещё идёт, а `vward_tls_done` родителя ничего не отдаёт (`_vt_mine` не выставлен) — исключительность теряется. Все 6 мест вызова (`probe`, `list_watch_check`, проверка reconciler, `vward_isp_control`, `em_fetch`, `vward_fetch`) берут очередь, запускают curl и отдают её в одном процессе (curl в `$(...)` — потомок владельца, это безопасно); обратной схемы в коде нет. Новый `check-tls-turn-owner.py` (sh+BB): динамически — take в подоболочке теряется сразу; take в родителе держит очередь всё время работы curl-потомка; `done` не-владельца не снимает чужую очередь; статически — каждое место вызова на уровне оператора (не в `$(...)`/`(...)`/конвейере) и в той же функции, что curl и done. Мутация (take в `$(...)` в функции-подоболочке, curl у вызывающего) — RED. Panel diagnostic curl в `api.cgi` по-прежнему вне очереди (известный пункт).
+
+Роутер не подключался; dev/main/VERSION/лента/workflow не менялись; CI не запускался (все коммиты пакета `[skip ci]` до финального).
+
+### 07.11.2026 21:30 МСК — [Claude Code] PR38: Root0 inspect / abort / recovery и замер смены сервиса
+
+**RED (на `7b1a912`).** Новый `check-live-root0-recovery.py` (actual copied console closure) убивает SIGKILL'ом фактического координатора первого запроса в четырёх точках установленной цепочки: до ACK переноса, после ACK до J2, после плана J2 до первого шага, после записи state-set до завершения шага J2. Во всех случаях канонический ROOT остаётся (версия 0, либо версия 2 при незавершённой J2), каждый следующий `service` отказывает, а ворота `vward_routing_scope_admit` (требуют версию 2) отказывают и всем старым записям маршрутизации через `ndmc`/консоль — бессрочно; явного пути восстановления не было (консоль: `error=usage`).
+
+**Исправление** (`vward-routing-bootstrap.sh`, консоль): `vward-console-config.sh routing-root inspect|abort|compensate`, диспетчеризация до `routing_operation_check` (тот сам отказывает при таком ROOT). Классификация: `absent|ready|foreign|live|journal-unresolved|modified|abortable` (+ стадия и op из запечатанного parent, не от вызывающего).
+- inspect — только чтение (без блокировок, без записи; проверено digest и журналом NDMC).
+- abort — под той же admission/EDIT/CHANGE оболочкой классификация повторяется; затем финальная утилита, арендованная в той же CHANGE-election (как издатель bootstrap), делает `mv -nT ROOT .routing-root0.<op>` (no-clobber); проверяются исчезновение ROOT и тот же inode. Условия: верхний уровень только `decision/journal/.bootstrap`, закрытый набор `.bootstrap`, запечатанные parent/decision/completion/publisher; координатор, издатель, аренды, journal `.lock`/`.lock.gate` доказанно мертвы (живой/неизвестный — отказ); журнал содержит только свою миграцию и свою J2 (planned без шагов или compensated); текущий decision == запечатанный образ == свежий observation0. Ничего не удаляется, ничего не дописывается и не воспроизводится; native/DNS IO нет.
+- compensate — только для своей нерешённой J2 bootstrap (в т.ч. версия 2 при pending): существующая `vward_routing_live_recover <op> compensate` (неизменяемые pre-образы, свежий CAS); затем abort.
+- Общий `vrl_init_empty` вынесен из `vrl_init_root` (те же байты).
+
+**GREEN:** все 4 точки → inspect → (compensate) → abort → новый `service on` (версия 2, Wireguard1, save) — sh (dash) с бюджетом invoke45 (207 с на файл) и BusyBox v1.36.1 (Ubuntu; полный прогон BB — с увеличенным только в рабочей копии тайм-аутом, отказные случаи — с 45 с). Отказы без изменения байтов: живой parent, изменённый decision, лишняя запись в ROOT, пустой чужой ROOT, ready-ROOT, занятое имя карантина. Регрессии PASS (sh): live-bootstrap, -lifetime, -ancestry, -loader-trust, -console-entry, -raw-intent, -first-request (43 с), repository console-config/security. ShellCheck: новых замечаний нет; sh/ash -n OK. Кейс внесён в `run-prepared-checks.sh`.
+
+**Замер (поручение владельца):** `tests/perf/measure-service-change.py` — процессы одного запроса по дельте счётчика PID ядра (`/proc/loadavg`, без strace; верхняя оценка), фикстуры, 4 ядра x86, sh: холодный первый запрос 26 184 процесса / 47,2 с; обычная смена 22 621 / 35,5 с; повтор без изменений 2 781 / 4,5 с (~1,6–1,8 мс на процесс). Оценка для Keenetic = процессы × цена процесса на роутере; цену можно снять там только чтением: `time sh -c 'i=0; while [ $i -lt 500 ]; do /bin/true; i=$((i+1)); done'` (÷500; реальные awk/sha256sum дороже). Время меряется разово, это не бюджет; лимиты не менялись. Запас до invoke45 у холодного запроса здесь нулевой/отрицательный под нагрузкой (один прогон first-request до 45 с дал TIMEOUT и на неизменном `7b1a912`) — ресурсный риск, не PASS.
+
+**Не закрыто этим пакетом:** приватные кандидаты `.routing-init.*` от отказавшей подготовки по-прежнему не удаляются (inspect показывает их число); пути явной компенсации обычных (не bootstrap) J2-операций из консоли/API нет — войдёт в API/Panel; Панель/API команду `routing-root` пока не вызывают. Роутер не подключался; dev/main/VERSION/лента не менялись; CI не запускался.
+
+
+### 07.11.2026 22:00 МСК — [Claude Code] PR38: сокращение процессов в цепочке смены сервиса
+
+Поручение владельца 07.11 (замер BusyBox v1.37.0 на Keenetic: ~10 мс на процесс; смена сервиса через новую цепочку ≈ 3,8 мин). Исходный HEAD `4cf3388`. Рабочая ветка этого пакета — `ccr-6066d217-0zaty3` от `4cf3388` (см. отчёт владельцу; PR38 не перезаписывался).
+
+**1. Профиль (до правок, `tests/perf/measure-service-change.py` + strace + трассировка bash с именами функций).** strace-форки: холодный первый запрос 25 878, обычная смена 22 618 (план из 8 шагов: group+nativeproof×2, manifest×3, registry), повтор 2 782. exec обычной смены: ls 4 722, sha256sum 2 009, awk 1 829, wc 1 751, cat 1 201, date 848, mv/cp/rm/mkdir ~1 600, grep 511, cut 362, tr 305; остальное — подоболочки `$(…)` и функции `( … )`. Топ по функциям (bash, включительно, обычная смена): (1) 19 полных согласованных снимков × ~450 = 8 534, из них отпечаток файлов 4 710 (~45 файлов × ls+sha256sum+date, дважды на снимок); (2) `vward_journal2_begin` 8 × 510 = 4 076 — внутри `vrj2_gate_except` 11 × 325 = 3 579, полный обход ВСЕЙ истории журнала на каждый шаг (растёт с числом прошлых операций); (3) `vrb_worker_context` 79 × 56 = 4 424 — перед каждой командой роутеру и трижды в каждой публикации; (4) `vrj2_ready`/`vrj2_step_valid` 141+140 вызовов × 22 (O(n²) по шагам в `begin`); (5) `vrb_outcome_emit` 2 095; (6) `vr2_seal_valid` 47 × 40; (7) `vrl_path_gate`+`vrb_data_ancestry` 430 вызовов (ls на каждый родительский каталог); (8) выборы блокировок журнала (enter/leave/release) ~1 500; (9) `vward_journal2_finish` 8 × 129; (10) `update_eligibility`+`publish_quiet` ~2 000. `show running-config` через ndmc — 37 раз за одну смену.
+
+**2. Какие проверки что закрывают и что изменено (семантика решений прежняя).**
+- Целостность файлов на флешке (размер/режим/владелец/хэш): сохранена, но одной командой на набор — отпечаток снимка: одна `ls -ldin --full-time` + одна `sha256sum` на весь набор, mtime переводится в секунды эпохи арифметикой shell (равно `date -r +%s`); без поддержки `--full-time` или при любом сомнении (исчезнувший файл, имя, разбор) — прежний путь по файлу. Копии для наблюдателей проверяются одной `sha256sum` и одной `wc -c`. Печати этапов: три служебных файла — одна `wc`, хэш печати — одна `sha256sum`, `cat`/`grep` → встроенные.
+- Журнал (откат, запрет повтора, gate): та же логика `vrj2_gate_except`/`ready`/`step_valid`, но внутри только-читающей проверки метаданные всех операций и шагов — одна `ls -ln` по набору каталогов, хэши планов — одна `sha256sum`, схема планов — один `awk` (`vrj2_plan_awk`, NR → FNR), строка шага/поля 6–7/декодирование — встроенными средствами (неканонический номер строки → прежний awk/cut). Число процессов gate больше не растёт с историей. Кэш живёт только в подоболочке проверки и выключается перед записью. `begin` проверяет предыдущие шаги своей операции по кэшу.
+- Владение (замки EDIT/CHANGE, координатор): неизменяемые в течение запроса факты (форма каталогов журнала, запись плана, хэши owner, boot-штампы) доказываются один раз `vrb_worker_static` в оболочке координатора; перед каждой командой остаются встроенные проверки state/generation, owner-записей, boot_id, живого координатора, слота и барьера обновления. В замках `$(…)` и `grep` заменены встроенными (`vward_pid_start_var`, `vward_lock_gate_decimal_var`, `vward_lock_boot_var`; ошибка разбора сравнивается как пустая строка — как раньше).
+- Цепочки родительских каталогов (`vrl_path_gate`): одна `ls -ldn` на всю цепочку; все каталоги проверяются одним множеством режимов, поэтому порядок строк не важен и имена файлов не разбираются; функция без подоболочки. `vward_routing_legacy_recovery_gate` — тоже без подоболочки (только встроенные).
+- Чужое изменение настроек роутера (CAS): убраны два повторения внутри запроса. (а) Снимок «до шага N+1» равен проверенному снимку «после шага N» (между ними только собственные записи журнала) — повторное чтение того же роутера/файлов убрано; первый шаг по-прежнему читает свежий снимок, перед отправкой в роутер остаются native compile/content CAS, после шага — `vrb_delta_valid`. Единственное отличие: чужая правка, пришедшая в миллисекундное окно между записью журнала шага N и отправкой шага N+1, обнаруживается не «до» шага N+1, а сразу после него (unknown + recovery, как и раньше). (б) Снимок для планирования берётся копией только что проверенного снимка обновления входных данных, если то ничего не записало.
+
+**3. Эквивалентность.** Новый `check-process-budget-primitives.py` (sh и BusyBox 1.36.1) запускает исходные реализации из `4cf3388` в отдельной оболочке и сравнивает: gate/except/ready/step_valid на 64 журналах (32 вида порчи × committed/compensated: режимы, симлинк, отсутствующие/лишние/алиасные шаги, `01`/`1.0`, пустой/без перевода строки/>1 МиБ план, многострочная generation, save и т. д.); строки плана (8 видов); boot-id/десятичные записи замков (14 видов); path gate на 7 режимах каталогов с симлинком и `..`/`//`; `inputs.fp`/generation согласованного чтения — байт в байт (обычный путь, `ls` без `--full-time`, мягкие и фатальные входы). Мутация (кэш всегда отдаёт 0600) даёт FAIL. `check-validation-primitives` PASS на обеих оболочках. ShellCheck: новых замечаний нет; `sh -n`/`busybox ash -n` OK. Регрессии: весь `run-prepared-checks.sh` (72 проверки) PASS на sh; BusyBox адресно PASS: journal2, execution, live-console-entry, live-root0-recovery (теперь в пределах invoke45 без увеличения тайм-аута), lock-election, snapshot/journal/readers/observe/dryrun/plan, process-budget-primitives, validation-primitives. check-live-first-request целиком 22 с (sh) / 26 с (BB), было 42–45 с; лимит 45 с не менялся.
+
+**4. Результат (strace-форки одного запроса; sh / BusyBox):** холодный 25 878 → 14 768 / 15 053; обычная смена 22 618 → 9 314 / 9 534; повтор 2 782 → 1 610 / 1 610; выключение сервиса 7 432 / 7 608. exec обычной смены: ls 1 705, wc 793, awk 759, sha256sum 603, cat 415, mv 367, cp 325, rm 303, date 0. Время в этой среде: холодный ~18 с, смена ~12 с, повтор ~1,7 с. Оценка на Keenetic при 10 мс/процесс: холодный ≈ 2,5 мин, смена ≈ 1,5 мин, повтор ≈ 16 с — всё ещё неприемлемо и выше целей владельца.
+
+**5. Бюджет в CI.** `tests/perf/check-service-change-budget.py` + `service-change-budget.json`: точный счёт форков через strace (`--seccomp-bpf`, ~1 мин), без strace — дельта счётчика PID; бюджеты = измеренное + ~5 % (холодный 15 800, смена 10 000, повтор 1 700, выключение 8 000), цели владельца записаны рядом и помечены как недостигнутые. Подключён в `run-consistency-checks.sh` для sh и BusyBox.
+
+**6. Где упор и предложение (до правок, нужно решение владельца).** Остаток — модель исполнителя «на каждый шаг»: на смену из 8 шагов ~1 100 процессов на шаг: полный снимок после шага (~70–100), J2 begin/finish с выборами блокировки журнала (~150), запись (group: компиляция + 2 `show running-config` + регистрация + квитанции ~340; локальная публикация с тройной проверкой перед `exec` ~160), `vrb_delta_valid` (~80), хэши областей, receipts. Без изменения этой модели целей ≤500/≤150 не достичь. Вариант (сохраняет журнал, CAS, владение и откат, но меняет гранулярность): (а) одна блокировка журнала на весь запрос вместо выборов на каждую запись; (б) одна пачка ndmc на все native-шаги и одна пачка локальных публикаций, с записью pending для каждого шага ДО отправки и одним общим чтением после пачки (проверка delta по объединению объявленных областей, компенсация по прежним pre-образам каждого шага); (в) один полный снимок на запрос + адресное перечтение только затронутых областей; (г) итог/eligibility из итогового снимка без повторной проверки печатей. Ожидание: смена ~1,5–2,5 тыс., повтор ~0,5–0,8 тыс., холодный ~4–5 тыс.; для ≤500/≤150 потребуется ещё убрать отдельную J2 обновления входных данных и полный снимок из повтора без изменений. Это изменение семантики журнала (пачка вместо шага) — требует согласования и адресного аудита.
+
+**Не закрыто:** временные каталоги `.operation.*`/`.inputs.*` остаются в журнале после успешных запросов (рост на флешке); `show running-config` ~30 раз за смену (нагрузка ndm); check-live-first-request теперь ~20 с холодный (лимит 45 с не менялся). Роутер не подключался; dev/main/VERSION/лента/workflow не менялись.
+
+### 08.11.2026 — [Claude Code] PR38: пакетный исполнитель, быстрый повтор, чтения конфигурации
+
+Поручение `VWARD_prompt_routing_architecture_2026-11-08_FINAL.md` (решение владельца записано в ROADMAP §7). Исходный HEAD `c9d39f4` (сверен с GitHub: PR38 draft, `work/unified-routing-20261104`; `dev` = `3f4802b`). Работа только в ветке PR38. Роутер не подключался; dev/main/VERSION/лента/workflow не менялись; CI не запускался (коммиты `[skip ci]`).
+
+**Профиль до правок** (`tests/perf/profile-service-change.py` — новый диагностический инструмент: bash xtrace + strace, процессы по функциям; не гейт). На тестовом сервисе из 2 доменов `show running-config`: холодный 27, смена 29, выключение 19, повтор 1. Причина роста с размером сервиса: каждая команда группы шла через `vrl_native_ndm` с чтением конфигурации ДО и ПОСЛЕ (сервис со 175 доменами ⇒ ≥350 чтений ≈ 23 мин работы `ndm` по замеру владельца 4 с/чтение). Прочее: полный снимок после каждого шага, выборы блокировки журнала на каждую запись, повторная проверка печати одного снимка (~1 600 процессов на смену), `update_eligibility2`/`publish_quiet` по всей истории журнала на каждый запрос (растёт с числом прошлых операций).
+
+**Что сделано (семантика журнала по шагам сохранена — существующее восстановление/компенсация читают те же записи):**
+1. Одна блокировка журнала на запрос: `vrj2_hold`/`vrj2_release` в процессе координатора; писатель журнала заимствует её только если он ПОТОМОК живого владельца (цепочка родителей по `/proc`, тот же start/boot), владелец записан в `.lock/owner`. Чужой процесс, подделанные переменные, сирота после гибели владельца — отказ; мёртвый владелец оставляет обычную устаревшую блокировку, её забирают штатные выборы. Тест `check-journal-hold` (sh+BB).
+2. Пакет вместо шага (`vrb_execute2_batch`, планы с различными областями шагов; при двух шагах на одну область остаётся пошаговый цикл): (а) чтение непосредственно перед пачкой — CAS поколения плана (при совпадении G снимок плана переиспользуется через сверку отпечатка входов, без повторной постановки); (б) `vward_journal2_begin_all` — pending ВСЕХ шагов до первой отправки; (в) отправка в порядке плана, первый ненулевой статус завершает сегмент; (г) одно общее чтение после: только объединение объявленных областей может отличаться (`vrb_delta_valid_set`), итог каждого шага — `vward_journal2_finish_range`; (д) потерянный ответ при доказанном post — следующий сегмент (как в пошаговом цикле); отказ/неподтверждение — unknown, без повтора.
+3. Пакет группы для живого NDMC (`vrl_group_batch`): без чтений внутри пачки; каждая команда — из закрытой грамматики, префикс привязан к неизменяемой строке плана, квитанция `dispatched.<prefix>` пишется перед самой командой, каждый дочерний `ndmc` регистрирует свою аренду до exec. Единственная разрушающая команда — удаление всей группы — получает собственное свежее чтение и сравнение с ожидаемым префиксом; чужая запись останавливает пачку до отправки (RED без этой защиты: удаление стирало чужой include и давало `committed`; тест `check-live-native-foreign` переведён на шов транспорта). Разрешение запроса — только из общего чтения (`vrl_transport_complete`); `save` использует проверенное общее чтение как «до», чтение после `save` — как итоговое (сверка отпечатком).
+4. Быстрый повтор: квитанция сходимости `ROOT/.converged` пишется только полным координатором под EDIT/CHANGE после доказанного «повтор не даёт шагов» (полный путь unchanged, либо verified commit с пустым собственным перепланом и без записи компилируемых входов). Повтор отвечает «без изменений» без журнала и записи, если совпадают запрос, установленный код, список операций журнала, дайджест решений, поколение G (свежее чтение конфигурации + AGH + полный отпечаток входов планировщика) и состояние туннелей; нет барьера обновления; `off` при выборе не-VPN — всегда полный путь (он отвечает без обращений к роутеру). Тест `check-live-repeat-fast-path`: каждый признак изменения уводит в полный путь.
+5. Целостность без повторов: memo печати снимка в пределах запроса (полная проверка один раз на снимок/поколение); одна `ls` на замыкание загрузчика; `vrb_publish_quiet` — одна `ls` + одна `sha256sum` на все аренды; квитанция «тишина доказана» для завершённых операций (`vrb_pq_settled`/`vrb_quiet_mark`: тот же план и набор аренд, иначе полная проверка); `vrb_publish_local` для простых локальных видов (инварианты публикации один раз, каждая из трёх проверок по-прежнему перечитывает цепочку каталогов, метаданные и CAS цели); `vrb_dispatch_valid_range`. Эквивалентность с эталоном `c9d39f4` — `check-batch-primitives` (sh+BB, 17 наборов аренд, 12 повреждений квитанций; каждый случай проверяет свой вердикт).
+6. Очистка: `.operation.*`/`.inputs.*` удаляются только после подтверждённого `committed`/`unchanged` (план, его файлы и итог уже в `journal/<op>/prepared`); при unknown/сбое остаются; `.inputs.*` с собственным state-set сохраняется.
+7. Попутно (RED→GREEN): итог `committed` смены туннеля показывал `configured: partial` 7/8 (воспроизводится на `c9d39f4`): удалённое доказательство владения (`owned:`) не имеет строки в отпечатке, это «отсутствует», а не «неизвестно». И: `check-process-budget-primitives` брал эталон через `git show`, а штатный CI делает checkout глубины 1 — эталоны положены в `tests/routing-readers/reference/`.
+
+**Изменение семантики (одобренная пачка, тесты адаптированы явно):** чужая правка во время пачки обнаруживается общим чтением ПОСЛЕ пачки, поэтому собственные последующие шаги этой пачки уже отправлены; операция unknown и компенсируется по шагам (`check-execution-faults`, `check-live-agh-derived` проверяют unknown + причину и восстановление; точка SIGKILL `check-live-root0-recovery` перенесена на строку отправки в пачке).
+
+**Замеры (strace-форки, фикстура NDMC, sh / BusyBox 1.36.1; x86, не Keenetic):** холодный 14 768 → 10 382 / 10 415; смена 9 314 → 3 594 / 3 605; повтор 1 610 → 145 / 145; выключение 7 432 → 3 120 / 3 132. `show running-config` на запрос: холодный 27 → 12, смена 29 → 5, повтор 1, выключение 19 → 5; сервис из 40 доменов — та же константа (`check-live-batch-executor`), раньше ≥2 на команду. Бюджет CI (`service-change-budget.json`) снижен до измеренного +5 % и теперь гейтит и число чтений. **Порог выпуска владельца выполнен только для повтора (≤150).** Смена (≤1 500), первый запрос (≤3 000) и ≤2 чтения — НЕ выполнены. Оценка на Keenetic при 10 мс/процесс: смена ≈ 36 с, холодный ≈ 1,7 мин, повтор ≈ 1,5 с (оценка, не замер).
+
+**Почему 5 чтений, а не 2:** вход (снимок для обновления входов и плана), CAS непосредственно перед пачкой (условие владельца), свежее чтение перед удалением группы (иначе теряется чужая запись — см. п. 3), общее чтение после пачки (доказательство), чтение после `save` (проверка, что сохранено то же). До 2 можно дойти только ослаблением: CAS по чтению входа (правка во время планирования ловится после пачки как unknown, а не до отправки), без чтения после `save`, без отдельного чтения перед удалением группы (или без удаления пустых групп). Это решение владельца, не исполнителя.
+
+**Где остаток процессов смены (~3 600):** планировщик (project2/plan2/lower2 ≈ 600), итог с перепланом (≈ 400), обновление входов со своим снимком (≈ 450), общий снимок после пачки (≈ 250), публикации локальных файлов и квитанции, конверт блокировок/admission и очистка. Холодный: импорт + state-set из 12 файлов решения через общую публикацию. Дальнейшее — уже не дубли, а перестройка планировщика/итога/снимка; это и есть материал для этапа 2 (аудит, сравнение Shell/Go/C на прототипах).
+
+**Регрессии:** полный `run-prepared-checks` (sh) на `6bf35ae`: 68/72, 4 отказа — описанные изменения семантики/шва, исправлены и проверены адресно; повторный полный прогон на `f8f9675` — см. §4. Новые: `check-journal-hold`, `check-batch-primitives` (sh+BB), `check-live-batch-executor`, `check-live-repeat-fast-path`. Не закрыто: API/Панель не подключены к координатору (`routing_b_outcome_json` в api.cgi без вызывающего и требует `activation=="off"`, живой итог — `live`), асинхронная операция Панели с опросом, DNS keenetic/AGH и обратные (inverse) команды групп по-прежнему по одной команде с чтениями, пакет state-set для холодного запроса, аппаратная приёмка.
+
+### 08.11.2026 — [Claude Code] скорость Панели: проверка «на чистоту», замер Панели, прототип Go-ядра
+
+Поручение владельца 08.11 (второе, ROADMAP §7 «главный приоритет — скорость»). Ветка `ccr-71f611bd-ntawe4` от HEAD PR #38 `e30ca07`; роутер не подключался. Полный отчёт и таблицы — `docs/SPEED_AUDIT_2026-11-08.md`.
+
+**Шаг 1 (только чтение и отчёт).** Ресурсный аудит эмулятора на `e30ca07`: ~671 тыс. процессов в сутки, route-engine 291/мин (62 %), supervisor 33/мин, ежеминутные цепочки сети ~15 %. Найдено: `tunnel-guard` `DOWN_CONFIRM=1` (одна неудачная минута = действие — причина отключений VPN на перебой 1–2 с; под Наблюдением); **не под Наблюдением**: route-engine (AdaptiveAuto, привязки `ip name-server`, list-watch), route-reconciler, **policy-reconcile (ночью убирает домены из всех туннельных групп, включая ручные списки, без проверки владения)**, tunnel-health r6 (повторно применяет 16 защищённых `ip name-server … on OpkgTun4`). 3–5 писателей на области AdaptiveAuto, группы списков, `dns-proxy route`, `ip name-server`. Предложения — в таблице; ничего не отключено до решения владельца.
+
+**Шаг 2.** Новый `tests/perf/measure-panel.py` (диагностика): холодное открытие почти любой страницы ≈ 4,8 с на Keenetic (оценка: `status`/`config-data`/… читают всю конфигурацию раз в 55 с), домен в список ≈ 9 с (2 полных чтения), смена сервиса ядром B ≈ 56 с; немаршрутные тумблеры 0,3–0,6 с, но ждут общий замок правок до 10 с, пока идёт долгая операция.
+
+**Шаг 3.** `tools/vward-core` (Go, stdlib, воспроизводимая статическая сборка mipsle/mips, 3,3 МБ / 1,1 МБ gzip; сборка без пути записи): RCI-клиент с режимом «только чтение», побайтный перенос `vward_routing_choice/service_policy/audit` (равенство с shell на sh и BusyBox, мутации ловятся), модель назначений владельца, план только по своим объектам с защитой, журнал с семантикой shell, исполнитель «CAS → pending → одна пачка RCI → одно чтение → доказательство или компенсация». Тесты на поддельном Keenetic — сценарии владельца (см. отчёт). Не перенесено: snapshot/legacy-импорт/миграция, источники из сохранённого состояния, процедура восстановления, API/Панель. Go-тесты добавлены в VWARD CI (`routing-core-go`). CI не запускался (коммиты [skip ci]).
+
+**Команда владельца (только чтение; прототип во /tmp, затем удаляется):**
+
+```sh
+( set -e; D=/tmp/vward-core-proto; trap 'cd /; rm -rf "$D"' EXIT; rm -rf "$D"; mkdir -p "$D"; cd "$D"
+  case "$(uname -m)" in mips*) if [ "$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null)" = "$(printf '\002')" ]; then A=mips S=b4b36f17611474b5e7f0bb4d89cc60aaa78a895048ec12f63096f23d73010b48; else A=mipsle S=cb7e1921e93afaca951ae6b305251180f18fa29e1a255ae22e3445060718f9d5; fi ;; *) echo "не MIPS: $(uname -m)"; exit 1 ;; esac
+  . /opt/lib/vward/vward-device-profile.sh; vward_profile_load >/dev/null 2>&1 || true
+  vward_fetch -fsS --max-time 180 -o core.gz "https://raw.githubusercontent.com/Ziegfe1d/VWARD/7aeb767632d313623b923f597e18fe1278dc8931/tools/vward-core/dist/vward-core-linux-$A.gz"
+  gunzip -f core.gz; [ "$(sha256sum core | cut -d' ' -f1)" = "$S" ] || { echo "SHA-256 не совпал"; exit 1; }
+  chmod 700 core; ./core version; ./core probe; ./core dry-run
+  echo "== обращений к Keenetic по часам:"; for f in /tmp/vward-keenetic-calls/*; do [ -f "$f" ] && printf '%s:%s ' "${f##*/}" "$(wc -c < "$f")"; done; echo
+  echo "== из них дольше 1 с:"; for f in /tmp/vward-keenetic-slow/*; do [ -f "$f" ] && printf '%s:%s ' "${f##*/}" "$(wc -c < "$f")"; done; echo
+  echo "== самые долгие ожидания:"; sort -t'|' -k5 -rn /opt/var/log/vward/keenetic-slow.log 2>/dev/null | head -15
+  echo "== кто ждал чаще:"; cut -d'|' -f3,4 /opt/var/log/vward/keenetic-slow.log 2>/dev/null | sort | uniq -c | sort -rn | head -10 )
+```
+
+### 08.11.2026 — [Claude Code] решение владельца по таблице шага 1 и начало шага 2 (ветка PR38)
+
+`ccr-71f611bd-ntawe4` перенесена в `work/unified-routing-20261104` перемоткой (`e30ca07..c52e8b3`), ветка — в реестре кандидатов на удаление; дальше работа только в ветке PR38. Команда владельца для текущего выпуска на роутере (policy-reconcile `DRY_RUN=1` для ночного и догоняющего запуска, `dns_rules_check=0`; только чтение / применить с копией и проверкой / откат) — `tools/termius/observe-policy-dns-20261108.txt`, проверена на BusyBox (применение, повтор без изменений, побайтный откат). Команда dry-run: `trap` на EXIT, без строки замера процесса.
+
+Таблица шага 1 — настройками по умолчанию выпуска (`docs/SPEED_AUDIT_2026-11-08.md` §5): policy-reconcile, r6, перенос списков и привязки DNS route-engine — «только наблюдение»; сторож VPN — ≥3 мин по часам + событие sentinel; планировщик рекламы */5 при ежеминутном сторожe DNS; S91-сторож в cron выключен, route-engine держит агент компонентов; обновлятор не переписывает неизменное состояние, отметка ленты — в RAM; установленные роутеры переводит housekeeping, у каждого — файл/ключ возврата. Шаг 2: страницы отвечают из общей копии до 5 мин с фоновым обновлением; немаршрутные настройки — свой замок. Проверки: затронутые repository-тесты, все симуляции обновлятора (38/23/29/2/66), эмулятор автоматики (все сценарии, новые vpn-silent и предел перезапусков). Полный CI не запускался ([skip ci]). Узкие RCI в изменениях — после dry-run владельца.
+
+Форма ответа `dns-proxy/filter` (только чтение; значения строк скрыты, ключи и структура видны) — для теста на реальной форме:
+
+```sh
+curl -s http://127.0.0.1:79/rci/dns-proxy/filter | /opt/bin/jq -c 'walk(if type == "string" then (if ascii_downcase | contains("next") then "…next…" else "…" end) else . end)'
+```
+
+### 08.11.2026 — [Claude Code] после dry-run владельца: узкие чтения, владение, NextDNS, Smart DNS
+
+Решение владельца: ядро PR38 переводится на Go, shell — откат до аппаратной приёмки. Сделано (подробно — `docs/SPEED_AUDIT_2026-11-08.md` §6): узкие RCI-чтения с самопроверкой для сторожа DNS, route-engine, сверки, качества туннелей, IP-категорий (`check-keenetic-parts`, эмуляторы route-engine/сверки PASS); владение Go-ядра по доказательствам shell (`internal/own`, равенство с `service_origin` на sh/BusyBox); NextDNS — белый список команд и обязательное чтение `dns-proxy/filter` перед строками Smart DNS; порядок байтов без `od`; тумблер «Smart DNS» (выкл по умолчанию, `check-smartdns-feature`). Не сделано: подключение Go-ядра к API/Панели (ждёт реальной формы `dns-proxy/filter` и разрешения на замер записи пачки), перенос файлов-подписей владения (при подключении). CI не запускался ([skip ci]).
+
+### 08.11.2026 — [Claude Code] PR38 → выпуск fix.36 на shell-ядре
+
+Поручение владельца 08.11 (NextDNS, запрет записей в фильтр, гейты выпуска). Сделано: `803c89f` —
+запрет записей в `dns-proxy filter`/профили (Go `plan.FilterWrite`, shell-обёртки Панели,
+policy-sync, policy-reconcile, исполнителя B; `check-dns-filter-no-write`, RED без защиты), всё
+NextDNS-специфичное из Go-ядра убрано; `7a34c33` — правка домена в списке читает только группы,
+страницы из копии до 24 ч, узкие чтения у переключения списков/lost_sweep сторожа VPN и r6
+(`check-console-narrow-groups`). Снятие Smart DNS `dns-proxy no https upstream <URL>` профиль не
+задевает: команда точная по URL своего сервера; dry-run владельца `NARROW_EQUALS_FULL doh=true`
+показал, что https-upstream профиля не стоит строкой `https upstream` в блоке `dns-proxy`; плюс
+прежняя защита `doh_remove_url` (строки других серверов сверяются и возвращаются).
+Go-ядро к API/Панели не подключено — по правилу владельца выпуск на shell-ядре, Go в ветке.
+Эмулятор: тумблеры в Chromium PASS (46, 0 проблем), обход 91 страницы PASS. Открыто:
+`check-batch-primitives` (lease-links, ядро B, не в пакете и не в CI) падает и на `ce3629b` —
+ошибка самого случая теста.
+
+### 08.11.2026 — [Claude Code] fix.36: CI #814 красный, выпуск остановлен (handoff)
+
+CI run 42503290691 на `eedacd4`: routing-core-go, updater-tests SUCCESS; repository-consistency —
+`check-batch-primitives` (случай lease-links связывал одну аренду; теперь все — PASS);
+resource-audit — chaos: тест запускал полный планировщик рекламы каждую минуту, а после 08.11
+сторож DNS тикает только из `scheduler.sh dns` (тест приведён к cron) **и настоящий дефект**:
+после изъятия AdGuard Home без других `ip name-server` узкое чтение пусто, `chain_sync` считал это
+отказом и не возвращал AdGuard Home (исправлено в `ndm_running`, chaos 3 сценария RED→GREEN,
+полный chaos PASS, автоматика PASS, `check-ads-dns-guard` PASS). Очередь HTTPS: `find` только для
+существующего флага (эквивалентно; `check-tls-turn*` PASS).
+**Не выполнено (блокирует выпуск):** ресурсный бюджет `route reconciler` 82 > 64 процессов (было
+≤64 в CI #813; рост от общей очереди HTTPS P0-1 `664f46a`: take/done на каждую из 5 проверок).
+Решение: одна очередь на все проверки прогона (take → 5 curl → done в одном процессе) — правка
+исполнителя P0-1, нужен адресный аудит; бюджет не ослаблять. После неё: полный набор, один CI,
+выпуск по чек-листу (squash в dev, build-dev-release sequence 2026110801 IMPORTANT, подпись).
+Стресс/fuzz/обход в CI ещё не прошли (пропущены после chaos); локально обход и тумблеры PASS.
+
+### 08.11.2026 — [Claude Code] fix.36: одна очередь HTTPS на прогон сверки маршрутов
+
+Поручение владельца 08.11 (п. 1–3). `11a4d09` + правки после аудита: сверка берёт общую
+очередь HTTPS один раз в своём процессе (`probe_run`, не в подоболочке) и держит её через
+проверки; две проверки удаления (`classify_isp_vs_vpn`, дети `$(...)`) пользуются очередью
+владельца и не отдают её; без удержания ребёнок берёт и отдаёт свою. **Удержание:** проверка
+стартует, только пока «удержано + 3 с» ≤ 10 с (`VWARD_RECONCILER_TURN_HOLD`); за пределом —
+отдача и пауза 1 с перед новым взятием (ждущий опрашивает раз в секунду и успевает). Очередь не
+держится без дела: отдаётся в начале каждого имени (до nslookup), после проверок удаления (до
+ndmc), перед `vward_isp_control`, после цикла и в `cleanup`. **Кто ждёт:** загрузки
+`vward_fetch` (обновление, списки, housekeeping, Панель) ждут 20 с — всегда получают (худшее
+удержание ≈10 с); проверка сайта движком маршрутов ждёт 5 с при рабочем curl и может получить
+UNKNOWN (состояние не меняется, повтор через 60 с) — как и раньше, когда сверка брала очередь
+сразу после каждой проверки. Голодания нет. Падение curl: под своей очередью — отдача сразу и
+отметка на час; у заимствующего ребёнка — следующий curl не запускается, `.ok` поверх свежего
+`.broken` не пишется; старый флаг (>60 мин) удержание не отключает. Попутно (P0-2): проверка,
+которая не выполнялась (очередь не дана, падение, остановка извне), больше не ведёт к
+AUTO_VPN/BROKEN — `MAINT_PROBE_UNKNOWN`, состояние не пишется. Без изменения поведения:
+`force_vpn_match` одним awk (последняя строка без перевода строки теперь учитывается), имя файла
+без `tr` для обычного имени, адрес для проверок удаления — тот, что цикл только что разрешил.
+Ресурсный аудит локально: route reconciler 84 → 62 (бюджет 64 не менялся); housekeeping 29 > 28
+локально и на исходном `892fa82` (окружение; в CI #814 не падал). Тест
+`check-reconciler-tls-hold.py` (sh + BusyBox ash), RED на `892fa82`; `check-tls-turn*`,
+probe-codes, isp-control, routing-state-errors, RS6 observe PASS. Адресный аудит (Opus): дефектов
+владения/самоблокировки нет; 5 замечаний (заимствующий ребёнок после падения, `.ok` поверх
+`.broken`, удержание во время DNS/ndmc, старый флаг, лишние паузы) исправлены. Не тронуто
+(старое): UNKNOWN в `classify_isp_vs_vpn` сбрасывает гистерезис и пишет `ADAPTIVE_ISP_UNKNOWN`
+(не состояние отказа).
+CI на `f31a207`: updater-tests — SHA256SUMS (обновлён, `8de0008`); resource-audit — chaos
+`wget-crash` «BusyBox wget crashed 2 times»: гонка двух агентов в `vward_rci_get` без curl (оба
+доходили до wget до отметки падения; локально 5/5 PASS). Исправлено: первую пробу wget, не
+известного как рабочий, делает один вызов (атомарный mkdir `.try`, брошенная проба снимается
+через минуту), рабочий отмечается `.ok` (дальше без процессов). `check-rci-wget-once.py` RED
+(6 запусков падающего wget) → GREEN; chaos wget-crash и curl-https-crash PASS.
+
 ## 4. Открытые вопросы и нужные данные
+
+- 08.11.2026 / Go-ядро: ~~вывод формы `dns-proxy/filter`~~ получен (NextDNS не используется, тесты не нужны); тест записи пачки на эмуляторе и подключение к API/Панели — следующий отдельный шаг после fix.36.
+
+- 08.11.2026 / скорость: ~~**нужно решение владельца** по таблице шага 1~~ (принято 08.11, выполнено — §3 «решение владельца по таблице»); остаётся вывод dry-run (`docs/SPEED_AUDIT_2026-11-08.md` §1): что оставить, что «только наблюдение» (предложено сразу: policy-reconcile `DRY_RUN=1`, tunnel-health r6, list-watch и привязки route-engine), что объединить/перенести в Go-ядро. И вывод команды dry-run (§3 08.11): время узкого/полного чтения RCI на 5.1.8, `NARROW_EQUALS_FULL`, `RSS_PEAK`, цена процесса — от них зависит переход ядра PR #38 на Go.
+- 04.11.2026 15:35 МСК / PR38: запрос CI в предыдущих записях закрыт — run41815122230
+  на479f268: все3 mandatory SUCCESS, dispatch-transition main-only SKIPPED. Это не закрывает
+  общий pipeline/аппаратную приёмку. Следующая граница — staged binding/epochs/typed plan,
+  versioned migration/rollback и recovery/конкуренция в выключенном исполнении; перед первым
+  live writer нужны адресный review и отдельное согласование конкретного проекта RS7§F.3.
+  A1/A6/A7/A10/storage migration и IPv6/весь каталог/новые переходы Keenetic остаются открыты.
+
+- 04.11.2026, B code a96fc66 (pure model f787472): первичный Claude IPv4 path и решение по txn.xs72ii теперь
+  получены (новая запись §3 и ROADMAP4.3e), прежние запросы этих данных не повторять. IPv6/весь
+  каталог и новые переходы не приняты. Нужен CI конечного HEAD; после модели — staged binding/
+  epochs, typed planner, versioned migration/downgrade и fixture recovery/конкуренции. Проект
+  первого live VPN writer — RS7§F.3, wiring только после адресного review и конкретного GO.
+  До этого общий apply/API/UI не включены. SmartDNS lifecycle/storage A1/A6/A7/A10 не закрыты.
 
 - 04.11.2026 11:03 МСК / fix.35.6: прежние pendingCI/release ворота закрыты CI41778782842 + release41788816630 + publicverification PASS. Осталась установка владельцем и аппаратная приёмка по отчёту. У native pending нет атомарного expected-targetpin; это явно описано и записано в ROADMAP Н, отдельный updater guard ещё не сделан. Нужны installedVERSION/time/FQDN/clientpolicy/flow из ранее подготовленной однойROкоманды; прежние localeth3/RC143/sharedIP не дают причинного диагноза.
 
@@ -553,6 +1376,61 @@ CI [41778782842](https://github.com/Ziegfe1d/VWARD/actions/runs/41778782842) о�
 - 02.11.2026 / fix.36: требуется штатный CI конечного кандидата и подпись/публикация dev после SUCCESS; GO уже дан владельцем. На роутере не менять режимы агентов, DNS/NextDNS/ручные подсети и не перезагружать. После установки владельцем — подтвердить отсутствие orphan/WATCHDOG_RESTART и длительности START_PHASE; старые PID/этапы задним числом не восстанавливаются. Ozon/Wildberries в приложениях, Lampa TV, экраны и ночной скан 03.11 00:10 остаются на его проверке. ADAPTIVE_RU_OUT при отсутствии новой чистки не повторяется; фактическое положение первой строки в архиве на устройстве не читалось.
 
 - 02.11.2026 13:25 МСК / fix.36: CI #789 красный только по статическому trap-контракту; фикс `99af534` и целевые проверки PASS. Необходимо разрешение на новый полный CI исправленного HEAD, поскольку текущий workflow запускает все три jobs, а два уже успешных длительных jobs владелец запретил повторять. До нового зелёного CI подписанная публикация не разрешена. Никакого автоматического переноса старых SUCCESS на другой SHA или изменения workflow ради обхода ворот.
+
+- 05.11.2026 / PR38 G4: перед подключением нужны exact-HEAD CI и конкретный VPN-only GO
+  по RS7§F.3/G.4: wire legacy scope eligibility и updater quiescence до любого нового writer,
+  один lock/admission envelope и настоящие transport receipts. Подготовленные функции пока
+  не защищают неподключённые старые daemons. DNS/live/API actions остаются закрыты; A1/A6/A7/
+  A10/storage migration и аппаратная приёмка остаются открыты. Merge/release не разрешены.
+
+- 05.11.2026 / PR38: адресный native/DNS/signal повтор закрыт, следующая обязательная
+  программная граница — один штатный CI конечного HEAD со всеми32 новыми cases в обеих shell
+  ветках. Прежние pending строки выше исторические. Успех фикстур не закрывает настоящие
+  transport completion/legacy entry-point wiring/updater quiescence/owner acceptance §G.4.
+
+- 05.11.2026 / PR38: прежний запрос CI ещё открыт: первый новый run42000443090 обнаружил
+  ранний static compatibility отказ. Исправление комментария не доказывает непройденный остаток;
+  новая exact-HEAD штатная проверка обязательна. Live/router/аппаратная приёмка не разрешены.
+
+- 05.11.2026 14:38 МСК / PR38: exact CIced666e имеет два конкретных отказа; updater/rehearsal,
+  stress и Chromium прошли. Исправление private-mode/lifetime/cost проверено адресно, но
+  новый полный exact-HEAD CI обязан подтвердить resource budget и весь остаток. После него
+  только конкретный VPN-only GO §F.3/G.4; legacy wiring/quiescence/physical transport и
+  hardware не выполнены. A1/A6/A7/A10/storage остаются открыты; публикация не разрешена.
+
+- 05.11.2026 17:03 МСК / PR38: CI809 не зелёный — BusyBox portable fault injection и
+  reconciler budget исправлены адресно; нужны exact-HEAD all3mandatory SUCCESS и остаток
+  BusyBox subset. Штатный общий resource job не объявлен локальным PASS на основании одной
+  targeted job. Следующая live граница остаётся VPN-only §F.3/G.4 с отдельным конкретным GO;
+  legacy wiring/quiescence/physical transport/hardware/A1/A6/A7/A10/storage открыты.
+
+- 05.11.2026 19:21 МСК / PR38: budget/rehearsal и32×2 новые Bcases подтверждены CI810,
+  но общий software gate ещё открыт из-за old persist error harness. Runtime unchanged,
+  test-only dependency/coverage correction PASS; следующий exact-HEAD CI обязан принять
+  остаток consistency. Live VPN-only §F.3/G.4 по-прежнему требует конкретного GO/legacy fences/
+  updater quiescence/physical transport/owner acceptance; merge/release не разрешены.
+
+- 05.11.2026 21:49 МСК / PR38: CI811 не зелёный. Все3 SmartDNS fixture исправлены без runtime delta; локально ранее непринятый suffix PASS по checkpoints, НЕ весь local suite. Нужен новый exact-HEAD CI all3. VPN-only GO/legacy wiring/quiescence/physical transport/hardware остаются следующей границей; merge/release не разрешены.
+
+- 06.11.2026 00:03 МСК / PR38: полный consistency и updater/rehearsal на2092783 приняты CI812; resource budget ещё отказал(updater62>61). Minimal directory cost fix и targeted54/19 PASS не заменяют новый exact all3mandatory CI. Local beta cross-check SKIP, full-local FAIL/Chromium localSKIP сохранены. Следующая live граница VPN-only GO/legacy fences/quiescence/physical transport/hardware, не merge/release.
+
+- 06.11.2026 02:12 МСК / PR38: вопрос exact-tree software gate закрыт CI813/168a853 — все3 mandatory SUCCESS, optional main-only SKIPPED. Это закрывает предыдущие запросы нового CI в истории, но не live wiring/аппаратную приёмку. VPN-only GO §F.3/G.4, ВСЕ legacy fences + updater quiescence ДОwrite, physical completion/own rollback/schema и одна owner acceptance остаются открытой границей. DNS/ISP/Auto/manual/unknown/shared migration writes закрыты; A1/A6/A7/A10/storage/hardware открыты. Full-local FAIL/Chromium SKIP/beta-marker SKIP сохраняются. Merge/release/router не выполнялись.
+
+- 06.11.2026 08:47 МСК / PR38: permission gate на wiring/dev-выпуск снят явным поручением 06.11.2026; повторное согласование внутренних этапов не нужно. Технические gates — все scoped legacy fences/real transport completion/координатор, полный режимный цикл и installed layout, fault matrix, адресный review, конечный CI, rollback и public artifacts. Hardware acceptance остаётся за владельцем, реальных новых router outputs нет.
+
+- 06.11.2026 21:00 МСК / PR38 c77adde: first native binding/bootstrap и адресные lifetime/fault/recovery software gates пройдены на fixtures, не на устройстве. Общая live цепочка/API/package ещё не подключена; AGH отсутствует в этом native checkpoint. Auto старые direct writers защищены, common A handoff/остальные callbacks пока открыты. Разрешение полного GO действует; продолжение — оба DNS stores, все источники/потребители и migration/package closure, затем новый exact CI/rollback/dev/public verification. Ни partial native-only, ни OFF prototype не выпускать.
+
+- 07.11.2026 02:46 МСК / PR38 e863946: physical transport adapters обоих DNS stores проверены на fixtures, но общая пользовательская цепочка ещё не завершена. Следующие технические gates — actual CLI/API/Panel + свежие canonical inputs/auto selectors, все legacy callbacks, lifecycle/installed ABI/recovery/downgrade, затем новый exact CI/rollback/public dev. AGH read failure пока глобально failclosed в prototype; selective unrelated behavior ещё нужен. Signed78 targets/map прежние, новые libs не установлены. Разрешение полного GO действует, partial native/DNS-only пакет не выпускать; hardware/роутер не принимались.
+
+- 07.11.2026 08:56 МСК / PR38 `aa72a64`: actual ordinary CLI и свежие source observations проверены на fixtures, но общий GO ещё не завершён. Следом — первый root/cold map и безопасный recovery, все остальные entrypoints/backwriters и источники/режимы, lifecycle/API/Panel/package/ABI/downgrade; затем новый exact CI/rollback/public dev. Native full-read latency и legitimate long-history cost остаются рисками для MIPS; isolated host PASS не hardware. Все текущие7cases SH/BB приняты адресно, не полный suite. Signed78 и VERSION прежние, никаких release/router actions.
+
+- 07.11.2026 09:15 МСК / PR38 `5ac6fda`: profile trust и WAN candidate boundary в ordinary SDK закрыты адресными SH/BB fixtures. Публикационный кандидат ещё не готов: первым нужен cold bootstrap/discovery и Root0 recovery до включения всей installed цепочки; весь полный GO продолжается без нового согласования. Никакого CI/release/router действия на этом checkpoint.
+
+- 07.11.2026 10:22 МСК / PR38 `868f7d3`: prepublication readiness/parent ancestry/per-member S attribution/cold private discovery закрыты адресно, не весь GO. Raw-intent RED и Root0 explicit recovery остаются первыми gates; затем все writers/sources/modes/lifecycle/API/Panel/installed ABI/downgrade/final CI/rollback/public dev. Shared-cache late writer не добавлялся; unknown/private barriers/no-autoreplay прежние. Исторические full-local FAIL/Chromium SKIP/beta SKIP и hardware unknown не скрыты; router untouched.
+
+- 07.11.2026 22:00 МСК / PR38 (закрыто 08.11: владелец одобрил пачку, реализовано — §3 08.11): ~~**нужно решение владельца** по структурному варианту исполнителя~~ (пачка вместо шага, одна блокировка журнала на запрос, один снимок + адресные перечтения; §3 22:00 п. 6). Без него бюджеты процессов (смена 10 000, повтор 1 700) — потолок CI, цели 500/150/1 500 недостижимы. API/Панель только фоновой задачей.
+
+- 08.11.2026 / PR38: **нужно решение владельца** — сколько чтений `show running-config` допустимо на смену. Сейчас 5 при полном CAS (вход, перед пачкой, перед удалением группы, после пачки, после save). До 2 — только при ослаблении: CAS по чтению входа (правка во время планирования → unknown после пачки, а не отказ до отправки), без чтения после save, без отдельного чтения перед удалением группы. Без решения остаётся 5. Также открыто: смена 3 600 и холодный 10 400 процессов выше порога (1 500 / 3 000) — остаток в планировщике/итоге/снимке, не дубли; API/Панель → координатор (async) не подключены; аппаратная приёмка за владельцем.
 
 ## 5. Приложение A. Данные и замеры (факты на 2026-10-24)
 

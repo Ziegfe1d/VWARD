@@ -50,6 +50,7 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo "FAIL: common library not found" >&2; exit 1; }
 . "$LIB"
+ads_source_registry_merge
 
 CONF="${VWARD_DNS_GUARD_CONF:-$ADS_ETC/dns-guard.conf}"
 STATE="${VWARD_DNS_GUARD_STATE:-/tmp/vward-dns-guard.state}"
@@ -359,7 +360,13 @@ ndm() {
 # there (one read for all, «Роутер отвечает медленно», fix.28.2), else asked directly.
 ndm_running() {
     if [ -z "${VWARD_NDMC:-}" ] && [ -r "$ADS_DEVICE_PROFILE_LIB" ]; then
-        ( . "$ADS_DEVICE_PROFILE_LIB" >/dev/null 2>&1 && vward_keenetic_config ) && return 0
+        # Only its «ip name-server» lines are read (owner 08.11: the whole configuration took 6-18 s
+        # every 1-2 minutes, 253 waits); the whole one when the narrow read is not proven.
+        # A proven part with no «ip name-server» at all (AdGuard Home taken out, nothing else set) is
+        # an answer, not a failed read: «!» closes it so the caller does not take it for one (CI #814).
+        ( . "$ADS_DEVICE_PROFILE_LIB" >/dev/null 2>&1 &&
+          if command -v vward_keenetic_part >/dev/null 2>&1 && nr_part=$(vward_keenetic_part nameservers); then printf '%s\n!\n' "$nr_part"
+          elif command -v vward_keenetic_parts >/dev/null 2>&1; then vward_keenetic_parts nameservers; else vward_keenetic_config; fi ) && return 0
     fi
     "$NDMC" -c "show running-config" 2>/dev/null
 }

@@ -35,7 +35,16 @@ ROLLBACK="/tmp/vpn-reconcile-rollback.$$"
 POSTSAVE="/tmp/vpn-reconcile-postsave.$$"
 
 MAX_AGE=14400
-DRY_RUN="${DRY_RUN:-0}"
+# Observation only by default (owner 08.11): this run removes domains from every group routed
+# through the tunnel, the owner's own lists too, so it only writes what it would remove
+# (WOULD_REMOVE) unless policy_reconcile=act in domain-lists.conf. DRY_RUN=0|1 still decides when given.
+DRY_RUN="${DRY_RUN:-}"
+if [ -z "$DRY_RUN" ]; then
+    case "$(awk -F= '$1 == "policy_reconcile" {print $2; exit}' "${VWARD_DOMAIN_LISTS_CONF:-/opt/etc/vward/route-engine/domain-lists.conf}" 2>/dev/null)" in
+        act|1) DRY_RUN=0 ;;
+        *) DRY_RUN=1 ;;
+    esac
+fi
 
 BACKUP_DIR="/opt/var/backups/vpn-reconcile"
 
@@ -139,6 +148,8 @@ group_members()
 ndm_cmd()
 {
     CMD="$1"
+    # Owner 08.11: no write into Keenetic's DNS filter or its profiles (nor removal of dns-proxy).
+    case " $1 " in *' dns-proxy filter'*|*' dns-proxy no filter'*|*' filter profile '*|' no dns-proxy ') NDM_LAST_OUT='refused: dns-filter'; NDM_LAST_RC=75; return 1 ;; esac
 
     NDM_LAST_OUT="$(ndmc -c "$CMD" 2>&1)"
     NDM_LAST_RC=$?

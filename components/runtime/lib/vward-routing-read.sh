@@ -1,14 +1,14 @@
 #!/bin/sh
 # RS-6: native persisted inputs -> RS-5 TSV; explicit invocation, stdout only.
 # Reads the existing shared cache; NEVER refreshes it or invokes a writer.
-# Modes: intents | snapshot (RS5 TSV) | identity (RS-6 stable identity table).
+# Modes: intents | snapshot (RS5 TSV) | identity | inventory (v2 native names + stable IDs).
 # REF = hash of canonical content (source, container, domain, scope, route, DNS),
 # never a row position: reordering lines cannot rename a record. Identity is not
 # ownership: only a private proof file that matches the group exactly says
 # `verified`; the right to change is always `reference` here.
 vward_routing_read() (
     [ "$#" = 1 ] || return 2
-    case "$1" in intents|snapshot|identity) VRR_MODE=$1 ;; *) return 2 ;; esac
+    case "$1" in intents|snapshot|identity|inventory) VRR_MODE=$1 ;; *) return 2 ;; esac
     VRR_ETC=${VWARD_CONSOLE_ETC:-/opt/etc/vward}
     VRR_STATE=${VWARD_ROUTE_STATE:-/opt/var/lib/vward/route-engine}
     VRR_CFG=${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}/running-config
@@ -51,6 +51,11 @@ vward_routing_read() (
             vrr_meta=$(ls -ln "$vrr_proof" 2>/dev/null | awk '{print $1}')
             case "$vrr_meta" in -rw-------|-r--------) printf 'private\t%s\n' "${vrr_proof##*/}" ;; esac
         done
+        # Category pins are optional in the existing console: exact absence
+        # selects the profile default. Bad/unreadable/alias files stay unknown.
+        if [ ! -e "$VRR_ETC/services/categories.tsv" ] && [ ! -L "$VRR_ETC/services/categories.tsv" ]; then
+            printf 'optional-absent\tcategories\n'
+        fi
         # A durable pending/reservation after reboot makes the observation unknown.
         for vrr_pending in "$VRR_BACKUP"/service-transactions/*/pending "$VRR_BACKUP-recovery"/smartdns.*; do
             if [ -e "$vrr_pending" ] || [ -L "$vrr_pending" ]; then printf 'pending\t1\n'; fi
@@ -236,6 +241,7 @@ vward_routing_read() (
         else {nc++; cid[nc]=$2; ccat[nc]=$3; cd[nc]=tolower($4)}; next
     }
     $1=="readable" && NF==2 {readable[$2]=1;next}
+    $1=="optional-absent" && $2=="categories" && NF==2 {categories_absent=1;next}
     $1=="private" && id($2) {private[$2]=1;next}
     $1=="proofpresent" && id($2) {proofpresent[$2]=1;next}
     $1=="pending" {pending=1;next}
@@ -244,6 +250,7 @@ vward_routing_read() (
         load(ENVIRON["VRR_DEV"],"dev"); load(ENVIRON["VRR_MAP"],"map")
         load(ENVIRON["VRR_CFG"],"cfg"); load(ENVIRON["VRR_AGH"],"agh")
         load(etc "/services/enabled.tsv","enabled"); load(etc "/services/categories.tsv","categories")
+        if(categories_absent)known["categories"]=1
         load(state "/adaptive-persist.txt","persist")
         mk=known["cfg"] ? "known":"unknown"; sk=known["enabled"] ? "known":"unknown"
         ak=known["persist"] ? "known":"unknown"
@@ -267,7 +274,8 @@ vward_routing_read() (
                 if(known["cfg"] && mode!="intents") {
                     rr=mkid("r","R|" g "|" d "|exact|" t "|" dns(d))
                     if(mode=="snapshot") emit("route" OFS rr OFS d OFS "exact" OFS t OFS dns(d) OFS owner OFS "reference",d)
-                    else emit(rr OFS "route" OFS "-" OFS gcont[g] OFS gcontent[g] OFS mkid("t","T|exact|" t "|" dns(d)) OFS lnk OFS identstate(g) OFS "reference",d)
+                    else if(mode=="identity") emit(rr OFS "route" OFS "-" OFS gcont[g] OFS gcontent[g] OFS mkid("t","T|exact|" t "|" dns(d)) OFS lnk OFS identstate(g) OFS "reference",d)
+                    else if(mode=="inventory") emit("resource" OFS rr OFS g OFS d OFS "exact" OFS t OFS dns(d) OFS owner OFS gcontent[g] OFS identstate(g) OFS "reference" OFS gcont[g] OFS mkid("u","U|" g "|" d "|exact"),d)
                 }
                 if(known["cfg"] && !(g in used) && g!="AdaptiveAuto") intent("M",g,d,t,gcont[g],gcontent[g],lnk,identstate(g))
             }

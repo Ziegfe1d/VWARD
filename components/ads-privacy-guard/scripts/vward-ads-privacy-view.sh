@@ -12,6 +12,7 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo '{"ok":false,"error":"ads_library_unavailable"}'; exit 1; }
 . "$LIB"
+ads_source_registry_merge
 [ -x "$ADS_JQ" ] || { echo '{"ok":false,"error":"jq_unavailable"}'; exit 1; }
 [ -r "$ADS_CONFIG" ] && ads_load_config
 case "${1:-}" in stats|querylog|agh|check) ads_agh_base_export ;; esac

@@ -64,6 +64,8 @@ VU_BARRIER_OWNED=0
 VU_LOCK_OWNED=0
 VU_LOCK_TOKEN=
 VU_RUNTIME_QUIESCED=0
+VU_ROUTING_EDIT_OWNED=0
+VU_ROUTING_EDIT=${VU_ROOT_PREFIX}/tmp/vward-console-edit.lock
 VU_RESTART_CROND=0
 VU_RESTART_LIVE=0
 VU_RESTART_SUPERVISOR=0
@@ -76,7 +78,7 @@ VU_QUARANTINE_FILE=$VU_STATE_DIR/quarantine.state
 vu_log() {
     level=$1
     shift
-    mkdir -p "$VU_LOG_DIR" 2>/dev/null || :
+    [ -d "$VU_LOG_DIR" ] || mkdir -p "$VU_LOG_DIR" 2>/dev/null || :
     message="$(date -u '+%Y-%m-%dT%H:%M:%SZ') [$level] $*"
     printf '%s\n' "$message" >&2
     [ "${VWARD_NO_PERSIST_LOG:-0}" = 1 ] || printf '%s\n' "$message" >> "$VU_LOG_DIR/updater.log" 2>/dev/null || :
@@ -148,8 +150,14 @@ vu_state_get() {
 vu_state_set() {
     key=$1
     value=$2
-    mkdir -p "$VU_STATE_DIR" || return 1
+    [ -d "$VU_STATE_DIR" ] || mkdir -p "$VU_STATE_DIR" || return 1
     file=${3:-$VU_STATE_DIR/state}
+    # The same single line already there: no rewrite, no sync (owner 08.11: fewer USB writes; the
+    # check every 15 minutes rewrote unchanged state). Duplicates or another value: as before.
+    if [ -r "$file" ] && grep -qxF -- "$key=$value" "$file" 2>/dev/null &&
+       [ "$(grep -c "^${key}=" "$file" 2>/dev/null)" = 1 ]; then
+        return 0
+    fi
     tmp=$file.tmp.$$
     if [ -r "$file" ]; then
         sed "/^${key}=/d" "$file" > "$tmp" || return 1
@@ -255,6 +263,38 @@ vu_pid_start() {
     [ -r "/proc/$proc_pid/stat" ] || return 1
     sed 's/^.*) //' "/proc/$proc_pid/stat" 2>/dev/null | awk 'NF>=20 {print $20; exit}'
 }
+
+# Fixed kernel reader. 1 means gone; 2 means identity could not be established.
+# No pathname/executable selector or "assume dead" fallback is accepted.
+vu_process_stat() {
+    vu_ps_pid=$1
+    [ -d "/proc/$vu_ps_pid" ] || return 1
+    vu_ps_line=
+    if [ -r "/proc/$vu_ps_pid/stat" ] && IFS= read -r vu_ps_line < "/proc/$vu_ps_pid/stat"; then return 0;fi
+    if [ -d "/proc/$vu_ps_pid" ]; then return 2;fi
+    return 1
+}
+vu_actor_status() (
+    IFS=' '
+    [ "$#" -eq 2 ] || return 2
+    case $1 in ''|0*|*[!0-9]*) return 2 ;; esac
+    case $2 in ''|*[!0-9]*) return 2 ;; esac
+    vu_as_expected=$2
+    vu_process_stat "$1" || return $?
+    vu_as_rest=${vu_ps_line##*) }
+    [ "$vu_as_rest" != "$vu_ps_line" ] || return 2
+    # Kernel comm can contain spaces/parentheses; only the fields after its
+    # final delimiter are split. A zombie cannot issue more IO, but its lost
+    # HTTP/native request still remains fenced by the persistent journal.
+    # shellcheck disable=SC2086
+    set -- $vu_as_rest
+    [ "$#" -ge 20 ] || return 2
+    case $1 in Z|X|x) return 1 ;; [A-Za-z]) ;; *) return 2 ;; esac
+    shift 19
+    case $1 in ''|*[!0-9]*) return 2 ;; esac
+    [ "$1" = "$vu_as_expected" ] && return 0
+    return 1
+)
 
 vu_owner_status() {
     token=$1
@@ -983,9 +1023,12 @@ vu_activity_clear() {
             active_pid=$(cat "$active_slot/pid" 2>/dev/null) || return 1
             active_saved_start=$(cat "$active_slot/pid_start" 2>/dev/null) || return 1
             case "$active_pid:$active_saved_start" in *[!0-9:]*|:*|*:) return 1 ;; esac
-            active_live_start=$(vu_pid_start "$active_pid" 2>/dev/null || :)
-            [ -z "$active_live_start" ] || [ "$active_live_start" != "$active_saved_start" ] ||
-                { VU_ACTIVITY_WHY="active:$(tr -cd 'A-Za-z0-9._-' < "$active_slot/component" 2>/dev/null | cut -c1-40)"; return 1; }
+            active_status=0;vu_actor_status "$active_pid" "$active_saved_start" || active_status=$?
+            case $active_status in
+                0) VU_ACTIVITY_WHY="active:$(tr -cd 'A-Za-z0-9._-' < "$active_slot/component" 2>/dev/null | cut -c1-40)";return 1 ;;
+                1) ;; # Gone/reused/zombie: no execution authority; never an IO ACK.
+                *) VU_ACTIVITY_WHY="active-unknown:$(tr -cd 'A-Za-z0-9._-' < "$active_slot/component" 2>/dev/null | cut -c1-40)";return 1 ;;
+            esac
             active_reap="${active_slot}.stale.$$"
             [ ! -e "$active_reap" ] || return 1
             mv "$active_slot" "$active_reap" 2>/dev/null || return 1
@@ -1148,12 +1191,83 @@ vu_hard_safety_check() {
     done
 }
 
+vu_routing_request_thaw() {
+    [ "$VU_ROUTING_EDIT_OWNED" = 1 ] || return 0
+    vward_lock_release "$VU_ROUTING_EDIT" || return 1
+    VU_ROUTING_EDIT_OWNED=0
+}
+
+# Recheck after quiescence too: a final leased bootstrap publisher may have
+# survived its coordinator and made incomplete state visible after the first
+# EDIT check. A request marker freezes new admission, not an already issued IO.
+vu_routing_quiet_check() {
+    vu_rq_root=$VU_ROOT_PREFIX/opt/var/lib/vward/routing
+    [ -e "$vu_rq_root" ] || [ -L "$vu_rq_root" ] || return 0
+    VU_QUIESCE_WHY=routing-admission
+    vu_rq_lib=$VU_ROOT_PREFIX/opt/lib/vward
+    [ -f "$vu_rq_lib/vward-routing-loader.sh" ] && [ ! -L "$vu_rq_lib/vward-routing-loader.sh" ] &&
+        [ -O "$vu_rq_lib/vward-routing-loader.sh" ] && [ -r "$vu_rq_lib/vward-routing-loader.sh" ] || return 1
+    # shellcheck source=/dev/null
+    . "$vu_rq_lib/vward-routing-loader.sh" || return 1
+    vward_routing_modules_load "$vu_rq_lib" &&
+        vrj_dir "$vu_rq_root" && vrj_dir "$vu_rq_root/decision" && vrj_dir "$vu_rq_root/journal" &&
+        vrj2_file "$vu_rq_root/decision/version.tsv" &&
+        [ "$(cat "$vu_rq_root/decision/version.tsv")" = "$(printf 'routing-state\t2')" ] &&
+        vward_routing_state_gate 2 "$vu_rq_root/decision" &&
+        vward_routing_update_eligibility2 "$vu_rq_root/journal" || return 1
+    VU_QUIESCE_WHY=
+}
+
+# Freeze admission, inspect durable state, then publish the ordinary updater
+# request under EDIT. Release EDIT before waiting for runtime quiescence. A
+# coordinator waiting for EDIT must recheck this request before its first write.
+vu_routing_request_freeze() {
+    vu_rr_root=$VU_ROOT_PREFIX/opt/var/lib/vward/routing
+    vu_rr_lib=$VU_ROOT_PREFIX/opt/lib/vward
+    if [ ! -e "$vu_rr_root" ] && [ ! -L "$vu_rr_root" ] &&
+       [ ! -e "$vu_rr_lib/vward-routing-loader.sh" ] && [ ! -L "$vu_rr_lib/vward-routing-loader.sh" ]; then
+        return 0
+    fi
+    VU_QUIESCE_WHY=routing-admission
+    [ -f "$vu_rr_lib/vward-routing-loader.sh" ] && [ ! -L "$vu_rr_lib/vward-routing-loader.sh" ] &&
+        [ -O "$vu_rr_lib/vward-routing-loader.sh" ] && [ -r "$vu_rr_lib/vward-routing-loader.sh" ] || return 1
+    # shellcheck source=/dev/null
+    . "$vu_rr_lib/vward-routing-loader.sh" || return 1
+    vward_routing_modules_load "$vu_rr_lib" || return 1
+    vward_lock_take "$VU_ROUTING_EDIT" || return 1
+    VU_ROUTING_EDIT_OWNED=1
+    if ! vu_routing_quiet_check; then
+        vu_routing_request_thaw || return 1
+        return 1
+    fi
+    VU_QUIESCE_WHY=
+}
+
 vu_barrier_request() {
     vu_barrier_recover_stale || return 1
+    vu_routing_request_freeze || return 1
+    vu_barrier_request_publish
+    vu_rr_request_rc=$?
+    vu_routing_request_thaw || return 1
+    return "$vu_rr_request_rc"
+}
+
+vu_barrier_request_publish() {
     mkdir -p "$(dirname "$VU_REQUEST_MARKER")" || return 1
     [ ! -e "$VU_REQUEST_MARKER" ] && [ ! -L "$VU_REQUEST_MARKER" ] || return 1
-    (umask 077; set -C; printf '%s\n' "$VU_LOCK_TOKEN" > "$VU_REQUEST_MARKER") 2>/dev/null || return 1
-    VU_REQUEST_OWNED=1
+    # Publish in the elected EDIT owner, never in an unleased child that can
+    # outlive it and write after another coordinator has reclaimed EDIT.
+    vu_rr_umask=$(umask) || return 1
+    vu_rr_noclobber=0
+    case $- in *C*) vu_rr_noclobber=1 ;; esac
+    umask 077
+    set -C
+    vu_rr_publish_rc=0
+    printf '%s\n' "$VU_LOCK_TOKEN" > "$VU_REQUEST_MARKER" 2>/dev/null || vu_rr_publish_rc=$?
+    [ "$vu_rr_publish_rc" != 0 ] || VU_REQUEST_OWNED=1
+    [ "$vu_rr_noclobber" = 1 ] || set +C
+    umask "$vu_rr_umask" || return 1
+    return "$vu_rr_publish_rc"
 }
 
 vu_barrier_enter() {
@@ -1164,6 +1278,7 @@ vu_barrier_enter() {
         waited=$((waited + 1))
     done
     vu_activity_clear || return 1
+    vu_routing_quiet_check || return 1
     mkdir "$VU_BARRIER_LOCK" 2>/dev/null || return 1
     printf '%s\n' "$VU_LOCK_TOKEN" > "$VU_BARRIER_LOCK/owner" || return 1
     VU_BARRIER_OWNED=1
@@ -1172,10 +1287,12 @@ vu_barrier_enter() {
     [ -z "$VU_ROOT_PREFIX" ] || [ -z "${VWARD_TEST_FEED_BEFORE_BARRIER:-}" ] ||
         sed -i "s#^manifest_url=.*#manifest_url=$VWARD_TEST_FEED_BEFORE_BARRIER#" "$VU_CONFIG"
     vu_activity_clear || return 1
+    vu_routing_quiet_check || return 1
     return 0
 }
 
 vu_barrier_leave() {
+    vu_routing_request_thaw || return 1
     if [ "$VU_BARRIER_OWNED" = 1 ] && [ -d "$VU_BARRIER_LOCK" ]; then
         current=$(sed -n '1p' "$VU_BARRIER_LOCK/owner" 2>/dev/null || :)
         [ "$current" = "$VU_LOCK_TOKEN" ] || return 1

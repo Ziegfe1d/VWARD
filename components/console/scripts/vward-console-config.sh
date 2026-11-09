@@ -166,14 +166,15 @@ cleanup() {
     [ -z "$DEVCONF_ORIG" ] || rm -f "$DEVCONF_ORIG"
     case "${SD_TMPCONF:-}" in /tmp/vward-console-sdconf.*) rm -f "$SD_TMPCONF" "$SD_TMPCONF.all" ;; esac
     [ "$POLICY_LOCKED" != 1 ] || rm -rf "$POLICY_STATE/lock"
-    [ "$LOCKED" != 1 ] || rm -rf "${CHANGE_LOCK:?}"
-    [ "$EDIT_LOCKED" != 1 ] || rm -rf "${EDIT_LOCK:?}"
+    [ "$LOCKED" != 1 ] || vward_lock_release "$CHANGE_LOCK"
+    [ "$EDIT_LOCKED" != 1 ] || vward_lock_release "$EDIT_LOCK"
+    [ "${SETTINGS_LOCKED:-0}" != 1 ] || vward_lock_release "$SETTINGS_LOCK"
     [ -z "$AI_CHILD_SLOT" ] || rm -f "$AI_CHILD_SLOT"
     [ -z "$AO_TMP" ] || rm -rf "${AO_TMP:?}"
     [ "$EXT_LOCKED" != 1 ] || rm -rf "${EXT_STATE:?}/lock"
     [ -z "${AGH_PLANNED:-}" ] || "$DNS_GUARD" planned-done >/dev/null 2>&1 || :
     # A component operation that failed: its own steps undone, the mark and the lock go.
-    if [ "${COMP_LOCKED:-0}" = 1 ]; then comp_undo; rm -f "$COMP_PENDING"; rm -rf "${COMP_LOCK:?}"; fi
+    if [ "${COMP_LOCKED:-0}" = 1 ]; then comp_undo; rm -f "$COMP_PENDING"; vward_lock_release "$COMP_LOCK"; fi
     # The owner's AdGuard Home login the Panel handed over: gone with the operation that used it.
     [ "${OP:-}" != agh-component ] || case "${VWARD_AGH_CRED_FILE:-}" in /tmp/vward-agh-cred.*) rm -f "$VWARD_AGH_CRED_FILE" ;; esac
     command -v vward_admission_leave >/dev/null 2>&1 && vward_admission_leave 2>/dev/null
@@ -214,7 +215,10 @@ backup_file() {
     [ -f "$1" ] || return 0
     mkdir -p "$BACKUP_DIR" || return 1
     base=$(basename "$1")
-    cp -p "$1" "$BACKUP_DIR/$base.$(date '+%Y%m%d-%H%M%S').$$" || return 1
+    # Return state and DNS proof share a basename. Two backups within one
+    # process/second must preserve BOTH originals, including a private0400 one.
+    backup_leaf=$(umask 077;mktemp "$BACKUP_DIR/$base.$(date '+%Y%m%d-%H%M%S').$$.XXXXXX") || return 1
+    if ! cp -p "$1" "$backup_leaf"; then rm -f "$backup_leaf";return 1;fi
     ls -1t "$BACKUP_DIR/$base".* 2>/dev/null | tail -n +$((BACKUP_KEEP + 1)) | while IFS= read -r old; do rm -f "$old"; done
     return 0
 }
@@ -254,29 +258,15 @@ set_kv() {
 
 # ---------- Router configuration ----------
 
-# dir_lock DIR: the lock DIR for this process, waiting up to 10 s for another holder.
-# A holder that is gone (its pid dead), or a lock without a pid for 3 s (its holder was
-# killed between mkdir and writing the pid), is taken over.
+# Same shared election as runtime take/sweep. No dead-owner observation is
+# carried across another contender's acquisition; ownerless locks stay unknown.
 dir_lock() {
-    dl_n=0 dl_nopid=0
-    while ! mkdir "$1" 2>/dev/null; do
-        dl_old=
-        read -r dl_old 2>/dev/null < "$1/pid" || :
-        if [ -n "$dl_old" ] && ! kill -0 "$dl_old" 2>/dev/null; then
-            rm -rf "${1:?}"
-            continue
-        fi
-        if [ -z "$dl_old" ]; then
-            dl_nopid=$((dl_nopid + 1))
-            [ "$dl_nopid" -lt 3 ] || { rm -rf "${1:?}"; dl_nopid=0; continue; }
-        else
-            dl_nopid=0
-        fi
-        dl_n=$((dl_n + 1))
+    dl_n=0
+    while ! vward_lock_take "$1"; do
+        dl_n=$((dl_n+1))
         [ "$dl_n" -lt 10 ] || return 1
         sleep 1
     done
-    echo $$ > "$1/pid"
 }
 
 # Persistent AGH undo is unresolved evidence, including an empty reservation
@@ -298,18 +288,117 @@ change_lock() {
     dir_lock "$CHANGE_LOCK" || die route_change_busy 75
     LOCKED=1
     routing_recovery_check
+    _crg_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    if [ -e "$_crg_root" ] || [ -L "$_crg_root" ]; then routing_operation_check;fi
 }
 
 # Quick edits of VWARD's own files (read, change, write back) go one at a time: two tabs
 # or quick clicks must not lose each other's change.
 EDIT_LOCK=${VWARD_CONSOLE_EDIT_LOCK:-/tmp/vward-console-edit.lock}
 EDIT_LOCKED=0
+SETTINGS_LOCK=${VWARD_CONSOLE_SETTINGS_LOCK:-/tmp/vward-console-settings.lock}
+SETTINGS_LOCKED=0
 edit_lock() {
     dir_lock "$EDIT_LOCK" || die route_change_busy 75
     EDIT_LOCKED=1
+    _crg_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    if [ -e "$_crg_root" ] || [ -L "$_crg_root" ]; then routing_operation_check;fi
+}
+
+routing_gate_load() {
+    command -v vward_routing_scope_gate >/dev/null 2>&1 && return 0
+    _crg_lib=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+    [ -f "$_crg_lib" ] && [ ! -L "$_crg_lib" ] && [ -O "$_crg_lib" ] && [ -r "$_crg_lib" ] || return 75
+    # Definitions only: validation/discovery remains with the original action.
+    # shellcheck source=/dev/null
+    . "$_crg_lib"
+}
+# Run before OLD EDIT/CHANGE acquisition: the fixed coordinator owns its own
+# admission/locks and calls internal workers, never a second console CLI.
+routing_live_dispatch() {
+    [ "$OP" = service ] || return 0
+    case $ARG1 in on|tunnel|off) ;; *) return 0 ;; esac
+    routing_live_load || return 0
+    rld_rc=0;rld_out=$(vward_routing_live_command "$ARG1" "$ARG2" "$ARG3") || rld_rc=$?
+    [ "$rld_rc" = 0 ] || { [ -z "$rld_out" ] || printf '%s\n' "$rld_out";die routing_not_applied "$rld_rc"; }
+    rld_result=changed
+    if printf '%s\n' "$rld_out" | grep -q '^outcome[[:space:]]unchanged[[:space:]]'; then rld_result=unchanged;fi
+    done_ok "service $ARG1 $ARG2 common routing" "$rld_result"
+}
+# Explicit owner recovery of a first ROOT stranded at observation0. Runs before
+# routing_operation_check: that gate itself refuses while such a ROOT exists.
+routing_root0_dispatch() {
+    [ "$OP" = routing-root ] || return 0
+    case $ARG1 in inspect|abort|compensate) ;; *) die invalid_value 64 ;; esac
+    routing_live_load || die routing_unavailable 75
+    rr_rc=0;rr_out=$(vward_routing_root0 "$ARG1") || rr_rc=$?
+    [ -z "$rr_out" ] || printf '%s\n' "$rr_out"
+    [ "$rr_rc" = 0 ] || die routing_root0_refused "$rr_rc"
+    case $ARG1 in inspect) done_ok "routing-root inspect" unchanged ;; *) done_ok "routing-root $ARG1" changed ;; esac
+}
+# Returns 1 when the common routing closure is not installed at all.
+routing_live_load() {
+    rld_lib=${VWARD_ROOT_PREFIX:-}/opt/lib/vward
+    if [ ! -e "$rld_lib/routing-capabilities.tsv" ] && [ ! -L "$rld_lib/routing-capabilities.tsv" ] &&
+       [ ! -e "$rld_lib/vward-routing-command.sh" ] && [ ! -L "$rld_lib/vward-routing-command.sh" ]; then return 1;fi
+    [ -f "$rld_lib/vward-routing-loader.sh" ] && [ ! -L "$rld_lib/vward-routing-loader.sh" ] &&
+        [ -O "$rld_lib/vward-routing-loader.sh" ] || die routing_unavailable 75
+    # This first source cannot rely on a helper inside the yet-untrusted file.
+    for rld_parent in "$rld_lib" "${rld_lib%/*}"; do
+        [ -d "$rld_parent" ] && [ ! -L "$rld_parent" ] && [ -O "$rld_parent" ] || die routing_unavailable 75
+        # shellcheck disable=SC2012
+        case $(ls -ldn "$rld_parent" | awk '{print substr($1,1,10)}') in
+            drwx------|drwxr-x---|drwxr-xr-x|drwx--x--x) ;; *) die routing_unavailable 75 ;;
+        esac
+    done
+    # shellcheck disable=SC2012
+    case $(ls -ldn "$rld_lib/vward-routing-loader.sh" | awk '{print substr($1,1,10)}') in
+        -rw-------|-r--------|-rwx------|-r-x------|-rw-r-----|-rwxr-x---|-rw-r--r--|-rwxr-xr-x|-r-xr-xr-x) ;; *) die routing_unavailable 75 ;;
+    esac
+    # shellcheck source=/dev/null
+    . "$rld_lib/vward-routing-loader.sh" || die routing_unavailable 75
+    vward_routing_live_modules_load "$rld_lib" || die routing_unavailable 75
+}
+
+routing_native_check() {
+    _crg_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    [ -e "$_crg_root" ] || [ -L "$_crg_root" ] || return 0
+    routing_gate_load && vward_routing_ndmc_gate -c "$1"
+}
+routing_scope_check() {
+    _crg_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    [ -e "$_crg_root" ] || [ -L "$_crg_root" ] || return 0
+    routing_gate_load && vward_routing_scope_gate "$1" "$2" || die routing_policy_handoff 75
+}
+
+# Semantic scope is checked before the FIRST file/native mutation, then again
+# after waiting for each shared lock. Low-level ndmc alone would allow an empty
+# group to be created before refusing its later protected include.
+routing_operation_check() {
+    _cro_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    [ -e "$_cro_root" ] || [ -L "$_cro_root" ] || return 0
+    case ${OP:-} in
+        route-domain|force-vpn|adaptive|smartdns-domain)
+            routing_scope_check domain "${ARG2:-}" ;;
+        domain-list|domain-list-watch|list-mode|list-adopt)
+            routing_scope_check group "${ARG1:-}" ;;
+        list-domain)
+            routing_scope_check group "${ARG1:-}"
+            routing_scope_check domain "${ARG3:-}" ;;
+        list|domain-category|service|service-category|services-refresh|service-recover|ai|policy-group|ip-category|\
+        smartdns-server|smartdns-store|smartdns-keenetic|smartdns-guard|adaptive-mode|classifier|\
+        tunnel|tunnel-delete|tunnel-subnet|tunnel-conf|vless-server|tunnel-guard|tunnel-auto|\
+        tunnel-return|tunnel-fallback|backup-restore|reset|cleanup|agh-component|module-component|\
+        component|component-recover)
+            routing_scope_check all routing-state ;;
+    esac
 }
 
 ndm() {
+    # Owner 08.11: no write into Keenetic's DNS filter or its profiles (nor removal of dns-proxy).
+    case " $1 " in *' dns-proxy filter'*|*' dns-proxy no filter'*|*' filter profile '*|' no dns-proxy ') NDM_CMD=$1; NDM_REPLY='refused: DNS filter profiles are never written'; return 75 ;; esac
+    _crg_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    if [ -e "$_crg_root" ] || [ -L "$_crg_root" ]; then routing_native_check "$1" || return 75;fi
     out=$("$NDMC" -c "$1" 2>&1)
     rc=$?
     if [ "$rc" -ne 0 ] || printf '%s\n' "$out" | grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found|no such entry)'; then
@@ -328,6 +417,8 @@ ndm() {
 # preshared).  It reaches the router in the body of an RCI request, read from a
 # root-only file, never in a process's arguments, which any process list shows.
 ndm_secret() {
+    # Owner 08.11: no write into Keenetic's DNS filter or its profiles (nor removal of dns-proxy).
+    case " $1 " in *' dns-proxy filter'*|*' dns-proxy no filter'*|*' filter profile '*|' no dns-proxy ') return 1 ;; esac
     case "$1" in *'"'*|*"$(printf '\134')"*) return 1 ;; esac
     NS_FILE=$(umask 077; mktemp /tmp/vward-console-rci.XXXXXX 2>/dev/null) || { NS_FILE=; return 1; }
     printf '[{"parse":"%s"}]\n' "$1" > "$NS_FILE" || return 1
@@ -369,6 +460,18 @@ snapshot() {
     "$NDMC" -c "show running-config" > "$RUNCFG" 2>/dev/null && config_snapshot_valid "$RUNCFG" || die router_config_unavailable
 }
 
+# snapshot_groups: only Keenetic's domain lists in RUNCFG, for a step that reads nothing else:
+# their RCI subtree when proven this boot (owner 08.11: ~0.1 s instead of a whole configuration,
+# ~4 s on the Viva; vward_keenetic_part), else the whole configuration as before.
+snapshot_groups() {
+    [ -n "$RUNCFG" ] || RUNCFG=$(mktemp /tmp/vward-console-config.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    if command -v vward_keenetic_part >/dev/null 2>&1 && vward_keenetic_part groups > "$RUNCFG" 2>/dev/null &&
+       grep -q '^object-group fqdn ' "$RUNCFG"; then
+        return 0
+    fi
+    snapshot
+}
+
 in_group() {
     awk -v g="$1" -v d="$2" '
         /^object-group fqdn / {cur=$3; next}
@@ -380,6 +483,22 @@ in_group() {
 group_set() {
     # group_set GROUP DOMAIN add|remove
     if [ "$3" = add ]; then ndm "object-group fqdn $1 include $2"; else ndm "no object-group fqdn $1 include $2"; fi
+}
+
+# B preparation: internal worker, no CLI dispatch/caller is wired. The OFF
+# coordinator supplies a checked locked context and a DATA-only ndm emulator.
+# There is deliberately no API argument or environment flag to skip locks.
+vward_routing_console_group_locked() {
+    vrb_worker_context || return 75
+    case $1 in
+        create) ndm "object-group fqdn $2" ;;
+        include) group_set "$2" "$3" "$4" ;;
+        route)
+            if [ "$4" = add ]; then ndm "dns-proxy route object-group $2 $3 auto"
+            else ndm "dns-proxy no route object-group $2 $3 auto";fi ;;
+        delete) ndm "no object-group fqdn $2" ;;
+        *) return 2 ;;
+    esac
 }
 
 save_router() {
@@ -402,14 +521,14 @@ drop_line() {
 
 route_group_change() {
     # route_group_change GROUP DOMAIN add|remove: verified, rolled back on failure.
-    snapshot
+    snapshot_groups
     want=0; [ "$3" = add ] && want=1
     have=0; in_group "$1" "$2" && have=1
     [ "$want" != "$have" ] || return 3
     if ! group_set "$1" "$2" "$3"; then
         die router_rejected
     fi
-    snapshot
+    snapshot_groups
     have=0; in_group "$1" "$2" && have=1
     if [ "$want" != "$have" ]; then
         if [ "$3" = add ]; then group_set "$1" "$2" remove; else group_set "$1" "$2" add; fi
@@ -439,7 +558,7 @@ op_list_domain() {
     [ "$2" != "$ADAPTIVE_GROUP" ] && [ "$2" != "${VWARD_POLICY_GROUP:-}" ] || die invalid_group 64
     change_lock
     list_dns_inactive "$2"
-    snapshot
+    snapshot_groups
     grep -q "^object-group fqdn $2\$" "$RUNCFG" || die list_not_found
     ld_has() {
         awk -v g="$2" -v d="$3" -v k="$ld_kind" '
@@ -453,7 +572,7 @@ op_list_domain() {
     if [ "$ld_want" = 1 ]; then ld_cmd="object-group fqdn $2 $ld_kind $3"; ld_undo="no $ld_cmd"
     else ld_cmd="no object-group fqdn $2 $ld_kind $3"; ld_undo="object-group fqdn $2 $ld_kind $3"; fi
     ndm "$ld_cmd" || die router_rejected
-    snapshot
+    snapshot_groups
     ld_have=0; ld_has "$@" && ld_have=1
     [ "$ld_want" = "$ld_have" ] || { ndm "$ld_undo"; die verification_failed; }
     save_router || die config_save_failed
@@ -851,7 +970,7 @@ op_tunnel() {
     fi
     rm -f "$TUNNEL_GUARD_STATE" "$TUNNEL_HEALTH_STATE"
     rm -rf "$POLICY_STATE/lock"; POLICY_LOCKED=0
-    rm -rf "${CHANGE_LOCK:?}"; LOCKED=0
+    vward_lock_release "$CHANGE_LOCK"; LOCKED=0
     [ ! -x "$ROUTE_ENGINE_INIT" ] || "$ROUTE_ENGINE_INIT" restart </dev/null >/dev/null 2>&1 || true
     # IP routes follow in the background (policy-sync withdraws them from the old device).
     [ ! -x "$POLICY_SYNC_BIN" ] || (trap '' HUP; exec "$POLICY_SYNC_BIN" --reconcile) </dev/null >/dev/null 2>&1 &
@@ -1476,6 +1595,7 @@ op_list_dns() {
     list_steerable "$1"
     list_managed "$1" || die list_not_managed 64
     case "$2" in dns|vpn|bypass|auto) ;; *) is_tunnel "$2" || die invalid_value 64 ;; esac
+    [ "$2" != dns ] || smartdns_need_on
     [ "${EDIT_LOCKED:-0}" = 1 ] || edit_lock
     change_lock
     snapshot
@@ -2017,7 +2137,7 @@ svr_auto() {
     ! svr_live "$svr_auto_dir" || return 1
     if [ -f "$svr_auto_dir/ai" ]; then
         svr_auto_edit=$EDIT_LOCKED
-        if [ "$EDIT_LOCKED" = 1 ]; then rm -rf "${EDIT_LOCK:?}"; EDIT_LOCKED=0; fi
+        if [ "$EDIT_LOCKED" = 1 ]; then vward_lock_release "$EDIT_LOCK"; EDIT_LOCKED=0; fi
         svr_auto_result=0; ai_resume "$svr_auto_dir" || svr_auto_result=1
         [ "$svr_auto_edit" != 1 ] || edit_lock
         return "$svr_auto_result"
@@ -2434,7 +2554,7 @@ service_route() {
 
 release_lock() {
     [ "$LOCKED" = 1 ] || return 0
-    rm -rf "${CHANGE_LOCK:?}"
+    vward_lock_release "$CHANGE_LOCK"
     LOCKED=0
 }
 
@@ -3232,7 +3352,7 @@ op_tunnel_conf() {
                 [ -x "$AWG_ENGINE" ] || die conf_rejected_awg
                 audit "tunnel-conf create $NEW_IF: AmneziaWG refused by the firmware, engine instead"
                 printf 'info.engine=firmware_refused\n'
-                rm -rf "${CHANGE_LOCK:?}"; LOCKED=0
+                vward_lock_release "$CHANGE_LOCK"; LOCKED=0
                 create_on_engine
             fi
             AP_AWG_SOFT=0
@@ -3772,6 +3892,12 @@ op_wifi_host() {
 # holds at most 8 of them.
 SMARTDNS_CONF=${VWARD_SMARTDNS_CONF:-$ETC/smartdns.conf}
 SMARTDNS_KEENETIC_MAX=8
+# The owner's switch «Smart DNS» (owner 08.11, off by default): «1» in smartdns.switch.
+# Off: no Smart DNS row is written (Keenetic's dns-proxy, AdGuard Home), «DNS» modes are refused;
+# removals of VWARD's own rows stay possible.
+SMARTDNS_SWITCH=${VWARD_SMARTDNS_SWITCH:-$ETC/smartdns.switch}
+smartdns_on() { so_v=; read -r so_v 2>/dev/null < "$SMARTDNS_SWITCH" || :; [ "$so_v" = 1 ]; }
+smartdns_need_on() { smartdns_on || die smartdns_off 75; }
 smartdns_url() {
     su=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
     [ -n "$su" ] || su=$(doh_lines | awk '$(NF-1) == "domain" {n[$3]++} END {for (u in n) if (n[u] > m) {m = n[u]; b = u}; print b}')
@@ -3784,6 +3910,7 @@ keenetic_smartdns() {
     snapshot
     ks_have=$(doh_lines | awk -v d="$2" '$(NF-1) == "domain" && tolower($NF) == d')
     if [ "$1" = add ]; then
+        smartdns_need_on
         ks_url=$(smartdns_url) || die smartdns_not_configured
         # fix.35.5 (A4): «unchanged» only when the domain already goes to this very server; a line
         # to another server is not rewritten unasked, and it is not reported as done either.
@@ -3871,6 +3998,7 @@ op_smartdns_domain() {
     load_profile_base
     JOURNAL=$(umask 077; mktemp /tmp/vward-console-smartdns.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     if [ "$1" = add ]; then
+        smartdns_need_on
         snapshot
         sd_u=$(smartdns_write_url) || die smartdns_not_configured
         sd_existing=$(smartdns_existing_urls "$2") || die config_unavailable
@@ -4108,7 +4236,8 @@ op_smartdns_server() {
              rm -f "$SD_TMPCONF.all"
              # The owner's own address goes only with its own server (no selector, or the same host).
              ss_drop_own=0
-             if [ -n "$ss_own" ]; then
+             # The «Smart DNS» switch going off keeps the address for a later «on».
+             if [ -n "$ss_own" ] && [ "${VWARD_SMARTDNS_KEEP_URL:-0}" != 1 ]; then
                  if [ -z "$ss_sel" ]; then ss_drop_own=1
                  elif [ -n "$ss_old" ] && SS_A=$ss_own SS_B=$ss_old awk 'function host(u) {sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); return tolower(u)}
                          BEGIN {exit !(host(ENVIRON["SS_A"]) == host(ENVIRON["SS_B"]))}'; then ss_drop_own=1
@@ -4276,7 +4405,7 @@ ai_journal_begin() {
          while IFS= read -r aij_g; do
              service_signature "$aij_g" > "$AI_DIR/group.$aij_g" && group_routes "$aij_g" > "$AI_DIR/route.$aij_g" || exit 1
          done < "$AI_DIR/groups" && : > "$AI_DIR/pending") || die backup_failed
-        rm -rf "${EDIT_LOCK:?}"; EDIT_LOCKED=0
+        vward_lock_release "$EDIT_LOCK"; EDIT_LOCKED=0
     fi
     printf '%s\n' "$$" > "$AI_DIR/pid" && vward_admission_pid_start $$ > "$AI_DIR/pid_start" || die write_failed
     AI_TXN=1
@@ -4386,6 +4515,7 @@ op_ai() {
     service_pending_check
     routing_recovery_check
     if [ "$2" = dns ]; then
+        smartdns_need_on
         load_profile_base; snapshot
         ai_url=$(smartdns_write_url) || die smartdns_not_configured
         vward_doh_alive "$ai_url"; ai_alive=$?
@@ -4678,7 +4808,8 @@ agh_official_arch() {
     esac
     # Byte order from an ELF header (byte 5: 1 little, 2 big); unreadable - little (the MIPS
     # routers Keenetic makes are little-endian).
-    oa_e=$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null | od -An -tu1 2>/dev/null | tr -d ' ')
+    # Byte 5 of the ELF header without od (Keenetic's BusyBox od has no -A).
+    oa_e=1; [ "$(dd if="${VWARD_ELF_PROBE:-/bin/sh}" bs=1 skip=5 count=1 2>/dev/null)" != "$(printf '\002')" ] || oa_e=2
     case "$oa_m:$oa_e" in
         mipsel*|mipsle*|*:1|*:) echo mipsle_softfloat ;;
         *) audit "ext-agh-official arch: uname=$oa_m byte_order=$oa_e (big-endian, no build)"; return 1 ;;
@@ -5291,6 +5422,43 @@ op_agh_component() {
 }
 
 # smartdns-keenetic add|remove DOMAIN: only Keenetic's own Smart DNS line (AdGuard Home off).
+# smartdns-feature 1|0: the owner's switch «Smart DNS». On: only with a server set that answers
+# (the reason otherwise); the Keenetic limit of 8 rows stays with each write. Off: the switch first
+# (nothing new is written from then on), then VWARD's own rows of its server go from Keenetic and
+# AdGuard Home by its address, with the rollback of «smartdns-server clear»; the server address stays
+# for a later «on»; rows of other servers, NextDNS, the owner's name servers are not touched.
+op_smartdns_feature() {
+    case "$1" in 0|1) ;; *) die invalid_value 64 ;; esac
+    sf_url=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
+    if [ "$1" = 1 ]; then
+        smartdns_on && done_ok "smartdns-feature 1" unchanged
+        [ -n "$sf_url" ] || die smartdns_not_configured
+        load_profile_base
+        VWARD_DOH_ALIVE_FORCE=1 vward_doh_alive "$sf_url"; sf_alive=$?
+        case "$sf_alive" in 0) ;; 1) die smartdns_dead ;; *) die smartdns_unknown ;; esac
+    else
+        smartdns_on || [ -n "$(sf_rows_left)" ] || done_ok "smartdns-feature 0" unchanged
+    fi
+    new_tmp "$SMARTDNS_SWITCH" || die write_failed
+    printf '%s\n' "$1" > "$TMPFILE" || die write_failed
+    install_tmp "$SMARTDNS_SWITCH" 0644 || die write_failed
+    [ "$1" = 0 ] || done_ok "smartdns-feature 1" changed
+    # Off: VWARD's own rows of its server, by its address (the same journal and rollback as the
+    # Panel's «clear»), the address kept.
+    [ -n "$sf_url" ] || done_ok "smartdns-feature 0" changed
+    sf_out=$(printf '%s\n' "$sf_url" | VWARD_SMARTDNS_SELECTOR=1 VWARD_SMARTDNS_KEEP_URL=1 sh "$0" smartdns-server clear 2>/dev/null); sf_rc=$?
+    printf '%s\n' "$sf_out" | grep '^cleared=' || :
+    [ "$sf_rc" = 0 ] || die "$(printf '%s\n' "$sf_out" | sed -n 's/^error=//p' | tail -n 1 | tr -cd 'a-z0-9_')" "$sf_rc"
+    done_ok "smartdns-feature 0" changed
+}
+# sf_rows_left: VWARD's server still has rows in Keenetic (a switch already off with rows left).
+sf_rows_left() {
+    sl_url=$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$SMARTDNS_CONF" 2>/dev/null)
+    [ -n "$sl_url" ] || return 0
+    load_profile_base; snapshot
+    doh_lines | awk -v u="$sl_url" '$3 == u && $(NF-1) == "domain"' | head -n 1
+}
+
 op_smartdns_keenetic() {
     case "$1" in add|remove) ;; *) die invalid_operation 64 ;; esac
     valid_domain "$2" || die invalid_domain 64
@@ -5434,7 +5602,7 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store|smartdns-feature|routing-root) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
@@ -5468,6 +5636,9 @@ ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 . "$ADMISSION_LIB"
 command -v vward_agent_acts >/dev/null 2>&1 || vward_agent_acts() { return 0; }
 vward_admission_enter console-config || die updater_busy 75
+routing_live_dispatch
+routing_root0_dispatch
+routing_operation_check
 
 # Register every descendant before it can write. If its original AI parent died
 # before registration, refuse even when a retry has already acquired the intent.
@@ -5481,10 +5652,15 @@ if [ -n "${VWARD_AI_CHILD_DIR:-}" ]; then
 fi
 
 case "$OP" in
-    force-vpn|domain-category|tunnel-guard|tunnel-fallback|tunnel-return|tunnel-auto|wan-guard|component|\
-    adaptive-mode|classifier|ip-category|console-auth|console-devices|update-feed|domain-list-watch|list-adopt|\
-    smartdns-guard|smartdns-domain|smartdns-server|smartdns-store|wifi|update|wan-param|wifi-host|service|service-category|services-refresh|ext-auto|firmware|journal|agents-mode|cleanup|reset|package-install)
+    force-vpn|domain-category|tunnel-guard|tunnel-fallback|tunnel-return|tunnel-auto|component|\
+    adaptive-mode|classifier|ip-category|domain-list-watch|list-adopt|\
+    smartdns-guard|smartdns-domain|smartdns-server|smartdns-store|wifi|update|wan-param|wifi-host|service|service-category|services-refresh|firmware|cleanup|reset|package-install)
         edit_lock ;;
+    # Settings no routing step reads (owner 08.11: a switch does not wait for a long routing change):
+    # their own short lock, not the routing edit lock.
+    wan-guard|console-auth|console-devices|update-feed|ext-auto|journal|agents-mode)
+        dir_lock "$SETTINGS_LOCK" || die settings_busy 75
+        SETTINGS_LOCKED=1 ;;
 esac
 
 # Check before any file-only/AGH-only dispatch, then again under CHANGE for
@@ -5542,6 +5718,7 @@ case "$OP" in
     backup-restore) op_backup_restore "$ARG1" ;;
     cleanup) op_cleanup "$ARG1" ;;
     smartdns-server) op_smartdns_server "$ARG1" ;;
+    smartdns-feature) op_smartdns_feature "$ARG1" ;;
     ai) op_ai "$ARG1" "$ARG2" "$ARG3" ;;
     list) op_list "$ARG1" "$ARG2" "$ARG3" ;;
     agh-component) op_agh_component "$ARG1" "$ARG2" ;;

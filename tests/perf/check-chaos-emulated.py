@@ -3,8 +3,8 @@
 
 The emulated clock moves one minute a round (a stand-in for date in /opt/bin); each round
 runs what cron runs every minute (route engine watchdog, tunnel health + guard, runtime
-watchdog, WAN guard, ads scheduler with the DNS guard) and every five minutes (route
-reconciler, Wi-Fi scheduler). Faults are flags the fake router tools read:
+watchdog, WAN guard, the DNS guard's «scheduler.sh dns») and every five minutes (the ads
+scheduler round, route reconciler, Wi-Fi scheduler). Faults are flags the fake router tools read:
 
   wan            no internet (pings, sites, Keenetic's internet status)
   tunnel         the VPN server is silent (old handshake, nothing through nwg1)
@@ -62,9 +62,12 @@ MINUTE_JOBS = [
     ("tunnel guard", "/opt/bin/vward-tunnel-guard.sh"),
     ("runtime watchdog", "/opt/etc/init.d/S92vward-runtime start"),
     ("WAN guard", "/opt/bin/vward-wan-guard.sh"),
-    ("ads scheduler", "/opt/bin/vward-ads-privacy-scheduler.sh"),
+    # Owner 08.11 (housekeeping's cron): the DNS guard keeps its own minute line, the rest of the
+    # ads scheduler runs every 5 minutes.
+    ("ads scheduler", "/opt/bin/vward-ads-privacy-scheduler.sh dns"),
 ]
 FIVE_JOBS = [
+    ("ads scheduler round", "/opt/bin/vward-ads-privacy-scheduler.sh"),
     ("route reconciler", "/opt/bin/vward-route-reconciler.sh"),
     ("Wi-Fi scheduler", "/opt/bin/vward-wifi-client-scheduler.sh"),
 ]
@@ -365,7 +368,7 @@ def main():
                 if crashes["curl"] > 2:
                     who = collections.Counter(" ".join(l.split()[1:]) for l in (root / "emu/crash.log").read_text().splitlines() if l.startswith("curl "))
                     findings.append((name, minute, "-", "crash loop", f"curl crashed on HTTPS {crashes['curl']} times: {who.most_common()}"))
-                feed = root / "opt/var/lib/vward/updater/feed.state"
+                feed = root / "tmp/vward-update-feed.state"  # in RAM since 08.11
                 if not crashes["curl"] or not feed.exists() or "fail_at=" not in feed.read_text():
                     findings.append((name, minute, "-", "not seen", f"the update feed's failure is not noted for «Стабильность» (curl crashes {crashes['curl']})"))
             # The profile reached what it breaks (else it proves nothing).

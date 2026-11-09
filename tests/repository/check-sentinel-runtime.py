@@ -189,10 +189,11 @@ with tempfile.TemporaryDirectory() as tmp:
     subprocess.run(["sh", "-c", script], text=True, capture_output=True, timeout=60)
     if (tmp / "done").exists() or list(req.iterdir()):
         fail("VWARD switched off: requests are dropped, nothing starts")
-    # AdGuard Home silent in the chain: the DNS guard takes it out (it checks again itself).
+    # AdGuard Home silent in the chain: the DNS guard's tick first (the redirect off at once: the
+    # ads scheduler runs every 5 minutes since 08.11), then it takes it out (it checks again itself).
     guardbin = obin / "vward-ads-privacy-dns-guard.sh"
     guardbin.write_text(f'#!/bin/sh\necho "dns-guard $*" >> "{tmp}/done"\necho chain_state=out\n'); guardbin.chmod(0o755)
-    if act("chain-fail") != (0, ["dns-guard chain-out"]):
+    if act("chain-fail") != (0, ["dns-guard tick", "dns-guard chain-out"]):
         fail(f"chain-fail: the DNS guard takes AdGuard Home out: {act('chain-fail')}")
     guardbin.write_text(f'#!/bin/sh\necho "dns-guard $*" >> "{tmp}/done"\necho chain_state=in\n')
     if act("chain-fail")[0] == 0:

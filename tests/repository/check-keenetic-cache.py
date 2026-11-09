@@ -142,8 +142,12 @@ echo "answer $*"
 
 # Who reads the shared copy, and who drops it.
 uses = {
-    "components/tunnel-guard/scripts/vward-tunnel-guard.sh": ["vward_keenetic_config > \"$LW/rc\"", "FB_RC=$(vward_keenetic_config)"],
-    "components/tunnel-guard/scripts/vward-tunnel-quality.sh": ["vward_keenetic_config |"],
+    # Owner 08.11: the list fallback and the lost sweep take parts through RCI when proven, the shared copy otherwise.
+    "components/tunnel-guard/scripts/vward-tunnel-guard.sh": ["vward_keenetic_parts dnsproxy; else vward_keenetic_config; fi; } > \"$LW/rc\"",
+                                                             "vward_keenetic_parts dnsproxy iproutes; else vward_keenetic_config; fi; }",
+                                                             "FB_RC=$(vward_keenetic_config)"],
+    # Owner 08.11: only dns-proxy through RCI when proven, the shared copy otherwise.
+    "components/tunnel-guard/scripts/vward-tunnel-quality.sh": ["vward_keenetic_parts dnsproxy; else vward_keenetic_config; fi; } |"],
     "components/ads-privacy-guard/scripts/vward-ads-privacy-dns-guard.sh": ["ndm_running | chain_line \"$co_ns\"", "cs_rc=$(ndm_running)", "ndm_running | chain_line \"$cp_ns\"", "/tmp/vward-keenetic}/running-config\" 2>/dev/null\n    nd_out="],
     "web/cgi-bin/api.cgi": ["vward_keenetic_config \"$nc_ttl\""],
     "components/console/scripts/vward-console-config.sh": ["/tmp/vward-keenetic}/running-config\" 2>/dev/null"],

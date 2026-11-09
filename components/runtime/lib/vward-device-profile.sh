@@ -114,6 +114,19 @@ vward_rci_get()
     for _vrg_w in ${VWARD_RCI_WGET:-/opt/bin/busybox:wget /bin/busybox:wget wget}; do
         _vrg_k=$(printf '%s' "$_vrg_w" | tr '/:' '__')
         [ ! -e "$_vrg_bad/$_vrg_k" ] || continue
+        # Not known to work yet: one caller tries it (an atomic mkdir), the others skip it
+        # meanwhile - two agents of the same minute crashed it twice (chaos CI 08.11). A try left
+        # by a killed caller is taken away after a minute. Known to work (.ok): no process here.
+        _vrg_try=
+        if [ ! -e "$_vrg_bad/$_vrg_k.ok" ]; then
+            [ -d "$_vrg_bad" ] || mkdir -p "$_vrg_bad" 2>/dev/null
+            if ! mkdir "$_vrg_bad/$_vrg_k.try" 2>/dev/null; then
+                [ -z "$(find "$_vrg_bad/$_vrg_k.try" -maxdepth 0 -mmin +1 2>/dev/null)" ] ||
+                    rmdir "$_vrg_bad/$_vrg_k.try" 2>/dev/null
+                continue
+            fi
+            _vrg_try=1
+        fi
         case "$_vrg_w" in
             *:wget) [ -x "${_vrg_w%:wget}" ] || continue
                     _vrg_out=$("${_vrg_w%:wget}" wget -q -T "$_vrg_t" -O - "$_vrg_url" 2>/dev/null) ;;
@@ -121,41 +134,129 @@ vward_rci_get()
                _vrg_out=$("$_vrg_w" -q -T "$_vrg_t" -O - "$_vrg_url" 2>/dev/null) ;;
         esac
         _vrg_rc=$?
+        if [ -n "$_vrg_try" ]; then
+            # The result noted before the try is given up: crashed - never again; ran - works.
+            if [ "$_vrg_rc" -lt 128 ]; then : > "$_vrg_bad/$_vrg_k.ok" 2>/dev/null
+            else : > "$_vrg_bad/$_vrg_k" 2>/dev/null; fi
+            rmdir "$_vrg_bad/$_vrg_k.try" 2>/dev/null
+        elif [ "$_vrg_rc" -ge 128 ]; then
+            # A known-good wget that crashes after all: never again either.
+            mkdir -p "$_vrg_bad" 2>/dev/null; : > "$_vrg_bad/$_vrg_k" 2>/dev/null
+        fi
         [ "$_vrg_rc" = 0 ] && [ -n "$_vrg_out" ] && { printf '%s\n' "$_vrg_out"; _vrg_out=; return 0; }
-        [ "$_vrg_rc" -lt 128 ] || { mkdir -p "$_vrg_bad" 2>/dev/null; : > "$_vrg_bad/$_vrg_k" 2>/dev/null; }
     done
     _vrg_out=
     return 1
 }
 
-# vward_tls_take: curl may be run on HTTPS now (it did not crash within the hour). Not known to
-# work within the hour either: one caller tries first and the others wait for its result (up to
-# 20 s), so a broken curl crashes once, not once per agent starting in the same minute (chaos
-# run: 3 crashes at once). vward_tls_done RC: the result noted (a crash: broken for an hour; an
-# answer: works for an hour), the turn given back. A crash is a signal of curl's own fault (132
-# illegal instruction, 134 abort, 135 bus error, 136 arithmetic, 139 memory); a stop from outside
-# (137, 143: a time limit) or a closed pipe (141) is none (each marked a working curl broken for
-# an hour, Viva 2026-10-17).
+# vward_tls_take [WAIT]: the shared HTTPS turn for curl. 0: THIS caller owns the turn
+# (_vt_mine=1) and may run curl now; it gives the turn back with vward_tls_done. 1: curl crashed
+# on HTTPS within the hour (no curl for an hour). 2: the turn was not given within WAIT seconds -
+# nothing may be concluded from it: a check is UNKNOWN, a download takes its fallback. There is
+# no success without the turn (P0-1, 07.11.2026: a busy turn used to return 0 after the wait).
+# Why a turn: a broken curl crashes once, not once per agent starting in the same minute (chaos
+# run: 3 crashes at once). WAIT: 20 s while curl is not known to work within the hour; 5 s when it
+# is (.ok: no crash code in the last hour - NOT an HTTP success; a check takes at most ~3 s, so a
+# check queued behind another one still gets its turn). A download asks for 20 s itself.
+# The turn is a directory with the owner's «PID START» (field 22 of /proc/PID/stat): a dead owner
+# (killed, crashed shell, PID reused) is taken away at once, a live one only past
+# VWARD_TLS_TURN_MAX_MIN minutes (10: no curl here runs longer than 120 s). A turn without an owner
+# (made before this version, or the instant between mkdir and the owner line) after a minute.
+# vward_tls_done RC: the result noted (a crash: broken for an hour; an end that is no crash:
+# works for an hour) and the turn given back - only the caller's own. A crash is a signal of
+# curl's own fault (132 illegal instruction, 134 abort, 135 bus error, 136 arithmetic, 139 memory);
+# a stop from outside (137, 143: a time limit) or a closed pipe (141) is none (each marked a
+# working curl broken for an hour, Viva 2026-10-17).
+_vward_tls_proc()
+{
+    # FILE (a /proc/PID/stat): _vt_ps = PID START. Read by the builtin: /proc/self is THIS (sub)shell.
+    _vt_ps='' _vt_line=''
+    read -r _vt_line 2>/dev/null < "$1" || [ -n "$_vt_line" ] || return 1
+    _vt_rest=${_vt_line##*) }
+    [ "$_vt_rest" != "$_vt_line" ] || return 1
+    # shellcheck disable=SC2086
+    set -- $_vt_rest
+    [ "$#" -ge 20 ] || return 1
+    eval "_vt_ps=\"\${_vt_line%% *} \${20}\""
+    case "$_vt_ps" in *[!0-9\ ]*) _vt_ps=; return 1 ;; esac
+}
+
+_vward_tls_reap()
+{
+    # 0: a dead or expired turn was taken away (try mkdir again); 1: the turn is someone's.
+    [ -d "$_vt_lock" ] || return 1
+    # One reaper at a time: two could otherwise judge the same dead turn and the second take
+    # away the new owner's. A reaper that died leaves its empty note: gone after a minute.
+    [ -z "$(find "$_vt_lock.reap" -maxdepth 0 -mmin +1 2>/dev/null)" ] || rmdir "$_vt_lock.reap" 2>/dev/null
+    mkdir "$_vt_lock.reap" 2>/dev/null || return 1
+    _vt_o=
+    [ ! -r "$_vt_lock/owner" ] || read -r _vt_o 2>/dev/null < "$_vt_lock/owner"
+    _vt_dead=1
+    case "$_vt_o" in
+        [0-9]*' '[0-9]*)
+            if _vward_tls_proc "/proc/${_vt_o%% *}/stat" && [ "$_vt_ps" = "$_vt_o" ] &&
+               [ -z "$(find "$_vt_lock" -maxdepth 0 -mmin +"${VWARD_TLS_TURN_MAX_MIN:-10}" 2>/dev/null)" ]; then
+                _vt_dead=0
+            fi ;;
+        *) [ -n "$(find "$_vt_lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] || _vt_dead=0 ;;
+    esac
+    if [ "$_vt_dead" = 1 ] && mv "$_vt_lock" "$_vt_lock.gone.$$" 2>/dev/null; then
+        rm -f "$_vt_lock.gone.$$/owner"; rmdir "$_vt_lock.gone.$$" 2>/dev/null
+        rmdir "$_vt_lock.reap" 2>/dev/null
+        return 0
+    fi
+    rmdir "$_vt_lock.reap" 2>/dev/null
+    return 1
+}
+
 vward_tls_take()
 {
     _vt_flag=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
-    _vt_ok=${_vt_flag%.broken}.ok _vt_lock=${_vt_flag%.broken}.probe _vt_mine=0 _vt_w=0
-    [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ] || return 1
-    # Known to work: still one at a time for a moment. Two callers at the same second both
-    # crashed when curl began to crash (CI chaos run, fix.31: 3 crashes); a crash is instant, so
-    # 2 s behind another caller is enough to see it, and a long download is not waited for.
-    _vt_wait=20
-    [ -z "$(find "$_vt_ok" -mmin -60 2>/dev/null)" ] || _vt_wait=2
-    [ -z "$(find "$_vt_lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] || rmdir "$_vt_lock" 2>/dev/null
-    until mkdir "$_vt_lock" 2>/dev/null; do
-        [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ] || return 1
-        [ "$_vt_w" -lt "$_vt_wait" ] || return 0
+    _vt_ok=${_vt_flag%.broken}.ok _vt_lock=${_vt_flag%.broken}.probe _vt_mine=0 _vt_w=0 _vt_r=0
+    { [ ! -e "$_vt_flag" ] || [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ]; } || return 1
+    _vt_wait=${1:-}
+    case "$_vt_wait" in
+        ''|*[!0-9]*)
+            _vt_wait=20
+            { [ ! -e "$_vt_ok" ] || [ -z "$(find "$_vt_ok" -mmin -60 2>/dev/null)" ]; } || _vt_wait=${VWARD_TLS_TURN_WAIT_OK:-5} ;;
+    esac
+    _vward_tls_proc /proc/self/stat || _vt_ps="$$ 0"
+    _vt_id=$_vt_ps
+    while :; do
+        if mkdir "$_vt_lock" 2>/dev/null; then
+            printf '%s\n' "$_vt_id" 2>/dev/null > "$_vt_lock/owner" && break
+            # No owner line, no turn: never run curl on a turn nobody can recognise.
+            rm -f "$_vt_lock/owner"; rmdir "$_vt_lock" 2>/dev/null
+            return 2
+        fi
+        # A dead owner's turn is taken away at once (bounded: a live one is never touched).
+        if [ "$_vt_r" -lt 3 ] && _vward_tls_reap; then _vt_r=$((_vt_r + 1)); continue; fi
+        { [ ! -e "$_vt_flag" ] || [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ]; } || return 1
+        [ "$_vt_w" -lt "$_vt_wait" ] || return 2
         sleep 1; _vt_w=$((_vt_w + 1))
     done
     _vt_mine=1
     # The turn came after another caller: its crash may be noted by now.
-    [ -z "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ] || { rmdir "$_vt_lock" 2>/dev/null; _vt_mine=0; return 1; }
+    # find only for a flag that exists (a missing file is «not recent» either way, no process).
+    if [ -e "$_vt_flag" ] && [ -n "$(find "$_vt_flag" -mmin -60 2>/dev/null)" ]; then
+        _vward_tls_give
+        return 1
+    fi
     return 0
+}
+
+_vward_tls_give()
+{
+    # Gives back only OUR turn: a turn taken away from us meanwhile is someone else's now.
+    if [ "${_vt_mine:-0}" = 1 ]; then
+        _vt_l=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
+        _vt_l=${_vt_l%.broken}.probe _vt_o=
+        [ ! -r "$_vt_l/owner" ] || read -r _vt_o 2>/dev/null < "$_vt_l/owner"
+        if [ -n "$_vt_o" ] && [ "$_vt_o" = "${_vt_id:-}" ]; then
+            rm -f "$_vt_l/owner"; rmdir "$_vt_l" 2>/dev/null
+        fi
+    fi
+    _vt_mine=0
 }
 
 vward_tls_done()
@@ -165,8 +266,7 @@ vward_tls_done()
         132|134|135|136|139) : > "$_vt_flag" 2>/dev/null; rm -f "${_vt_flag%.broken}.ok" ;;
         *) [ "$1" -ge 126 ] 2>/dev/null || : > "${_vt_flag%.broken}.ok" 2>/dev/null ;;
     esac
-    [ "${_vt_mine:-0}" = 0 ] || rmdir "${_vt_flag%.broken}.probe" 2>/dev/null
-    _vt_mine=0
+    _vward_tls_give
     return 0
 }
 
@@ -182,7 +282,8 @@ vward_fetch()
 {
     _vf_curl=${VWARD_CURL_BIN:-$(vward_tool curl)} _vf_rc=127
     _vf_flag=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
-    if [ -n "$_vf_curl" ] && vward_tls_take; then
+    # A download waits up to 20 s for the turn; not given: the fallback below, never curl unowned.
+    if [ -n "$_vf_curl" ] && vward_tls_take 20; then
         # HTTP/1.1: Entware's curl crashed in libnghttp2 (HTTP/2) on HTTPS, 81 times in two hours
         # (Viva 2026-10-12, «SIGSEGV ... in libnghttp2.so»); small downloads gain nothing from HTTP/2.
         "$_vf_curl" --http1.1 "$@"
@@ -529,6 +630,33 @@ vward_keenetic_timed()
     return 0
 }
 
+# OLD native writers are fenced only after common state exists. Ordinary boot
+# must not create a routing intention, and read-only diagnostics stay available
+# even during incomplete migration or a persistent unknown operation.
+vward_routing_installed_load() {
+    _vrng_lib=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+    _vrng_lib=${_vrng_lib%/*}/vward-routing-loader.sh
+    [ -f "$_vrng_lib" ] && [ ! -L "$_vrng_lib" ] && [ -O "$_vrng_lib" ] && [ -r "$_vrng_lib" ] || return 75
+    # shellcheck source=/dev/null
+    . "$_vrng_lib" || return 75
+    vward_routing_modules_load "${_vrng_lib%/*}"
+}
+vward_routing_ndmc_gate() {
+    _vrng_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    [ -e "$_vrng_root" ] || [ -L "$_vrng_root" ] || return 0
+    [ "$#" -eq 2 ] && [ "$1" = -c ] || return 75
+    case $2 in 'show running-config'|'show ip name-server') return 0 ;; esac
+    vward_routing_installed_load || return 75
+    vward_routing_native_admit "$2"
+}
+vward_routing_scope_gate() {
+    _vrsg_root=${VWARD_ROOT_PREFIX:-}/opt/var/lib/vward/routing
+    [ -e "$_vrsg_root" ] || [ -L "$_vrsg_root" ] || return 0
+    [ "$#" -eq 2 ] || return 75
+    vward_routing_installed_load || return 75
+    vward_routing_scope_admit "$1" "$2"
+}
+
 # Every ndmc of the programs that load this library is timed the same way (fix.33.2, WP-A: who
 # keeps Keenetic busy). Only where Keenetic's ndmc is a program, so «command -v ndmc» still says
 # whether there is one; a stand-in named by VWARD_NDMC (the tests) is called by its path and stays
@@ -537,6 +665,7 @@ case "$(command -v ndmc 2>/dev/null)" in
     /*)
         ndmc()
         {
+            vward_routing_ndmc_gate "$@" || return $?
             [ "${VWARD_KEENETIC_TIMING:-1}" = 1 ] || { command ndmc "$@"; return; }
             vward_uptime_cs; _vnd_t0=$_VCS
             command ndmc "$@"
@@ -561,6 +690,145 @@ _vward_kc_fresh()
     _vkf_m=$(date -r "$VWARD_KCACHE/running-config" +%s 2>/dev/null) || return 1
     _vkf_d=$(( $(date +%s) - _vkf_m ))
     [ "$_vkf_d" -ge 0 ] && [ "$_vkf_d" -lt "$1" ]
+}
+
+# ---- Narrow reads of Keenetic's configuration (owner 08.11) -----------------------------------
+# A whole «show running-config» took 5.5 s through RCI and 12.7 s through ndmc on the Viva; the
+# subtrees VWARD reads take 0.04-0.13 s. vward_keenetic_part PART prints the lines of one part in
+# the form of running-config, so the agents' parsers stay as they are:
+#   groups       object-group fqdn NAME / description / include / exclude / !   (rci object-group/fqdn)
+#   dnsproxy     dns-proxy / route object-group ... / https upstream ... / !    (rci dns-proxy)
+#   nameservers  ip name-server ADDRESS [DOMAIN] [on IFACE]                     (rci ip/name-server)
+#   iproutes     ip route NET MASK TARGET [auto]                                (rci ip/route)
+# Proven, not assumed: the first use of a part in a boot compares it with the same lines of the
+# whole configuration (the shared copy); a difference (once more after a fresh read, a change may
+# fall between) makes that part read whole until the next boot, logged once. VWARD_KEENETIC_NARROW=0:
+# always whole. Verdicts in RAM (VWARD_KPART).
+VWARD_KPART=${VWARD_KPART:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-part}
+
+_vward_kpart_jq()
+{
+    case "$1" in
+        groups) printf '%s' '
+            (if type == "object" and (keys | length) == 1 and has("fqdn") then .fqdn else . end) as $g
+            | (if ($g | type) == "object" then [$g | to_entries[] | {n: .key, b: .value}]
+               elif ($g | type) == "array" then [$g[] | {n: .name, b: .}] else error("shape") end)
+            | .[] | select((.n | type) == "string")
+            | "object-group fqdn \(.n)",
+              (.b | if type != "object" then empty else
+                 (if (.description | type) == "string" and .description != "" then "    description \(.description)" else empty end),
+                 ((.include // []) | (if type == "array" then .[] else . end)
+                    | (if type == "string" then . else (.address // .fqdn // .name // .domain // empty) end) | "    include \(.)"),
+                 ((.exclude // []) | (if type == "array" then .[] else . end)
+                    | (if type == "string" then . else (.address // .fqdn // .name // .domain // empty) end) | "    exclude \(.)")
+               end),
+              "!"' ;;
+        dnsproxy) printf '%s' '
+            if type != "object" then error("shape") else . end
+            | "dns-proxy",
+              ((.route // []) | (if type == "array" then .[] else . end) | select(type == "object")
+                 | "    route object-group \(.["object-group"] // .group // .name) \(.interface // .target // .gateway)"
+                   + (if .auto == true then " auto" else "" end) + (if .reject == true then " reject" else "" end)),
+              ((.https.upstream // []) | (if type == "array" then .[] else . end) | select(type == "object")
+                 | "    https upstream \(.url // .address)"
+                   + (if (.format | type) == "string" then " \(.format)" else "" end)
+                   + (if ((.on // .interface) | type) == "string" then " on \(.on // .interface)" else "" end)
+                   + (if (.domain | type) == "string" then " domain \(.domain)" else "" end)),
+              "!"' ;;
+        nameservers) printf '%s' '
+            (if type == "object" then (.["name-server"] // .server // .servers // [.]) else . end)
+            | (if type == "array" then .[] else error("shape") end) | select(type == "object")
+            | ((.address // .server // .ip) | tostring) as $a
+            | (if (.port | type) == "number" or (.port | type) == "string" then "\($a):\(.port)" else $a end) as $h
+            | "ip name-server \($h)" + (if (.domain | type) == "string" and .domain != "" then " \(.domain)" else "" end)
+              + (if ((.interface // .on) | type) == "string" then " on \(.interface // .on)" else "" end)' ;;
+        iproutes) printf '%s' '
+            (if type == "object" then (.route // .routes // [.]) else . end)
+            | (if type == "array" then .[] else error("shape") end) | select(type == "object")
+            | (.network // .address // .host) as $n
+            | "ip route \($n)" + (if (.mask | type) == "string" then " \(.mask)" else "" end)
+              + " \(.interface // .gateway)" + (if .auto == true then " auto" else "" end)' ;;
+        *) return 1 ;;
+    esac
+}
+
+# _vward_kpart_lines PART: the lines of PART in a whole configuration on stdin, canonical: no
+# indentation, no empty "" token, a description without its quotes, sorted, unique.
+_vward_kpart_lines()
+{
+    awk -v p="$1" '
+        /^[^ \t!]/ {ctx = ""; if ($1 == "object-group" && $2 == "fqdn") ctx = "g"; else if ($1 == "dns-proxy" && NF == 1) ctx = "d"}
+        /^!/ {ctx = ""}
+        {l = $0; sub(/^[ \t]+/, "", l); sub(/[ \t]+$/, "", l); gsub(/ ""/, "", l)
+         if (l ~ /^description "/ && l ~ /"$/) l = "description " substr(l, 14, length(l) - 14)
+         if (p == "groups" && ctx == "g" && (l ~ /^object-group fqdn / || l ~ /^(include|exclude|description) /)) print l
+         else if (p == "dnsproxy" && ctx == "d" && (l ~ /^route object-group / || l ~ /^https upstream /)) print l
+         else if (p == "nameservers" && l ~ /^ip name-server /) print l
+         else if (p == "iproutes" && l ~ /^ip route /) print l}' | LC_ALL=C sort -u
+}
+
+# _vward_kpart_narrow PART: the part through its RCI subtree (lines as running-config), or 1.
+_vward_kpart_narrow()
+{
+    _vkn_jq=${VWARD_JQ_BIN:-$(vward_tool jq)}
+    [ -n "$_vkn_jq" ] || return 1
+    case "$1" in groups) _vkn_p=object-group/fqdn ;; dnsproxy) _vkn_p=dns-proxy ;; nameservers) _vkn_p=ip/name-server ;; iproutes) _vkn_p=ip/route ;; *) return 1 ;; esac
+    # The answer first: a failed or empty read is no part (never an empty part with success).
+    _vkn_raw=$(vward_rci_get "$_vkn_p" 15) && [ -n "$_vkn_raw" ] || { _vkn_raw=; return 1; }
+    _vkn_out=$(printf '%s\n' "$_vkn_raw" | "$_vkn_jq" -r "$(_vward_kpart_jq "$1")" 2>/dev/null) || { _vkn_raw=; return 1; }
+    _vkn_raw=
+    printf '%s\n' "$_vkn_out"
+    _vkn_out=
+}
+
+# vward_keenetic_part PART: the part through RCI when proven this boot (0), else 3 and nothing
+# printed: the caller takes the whole configuration (vward_keenetic_parts does).
+vward_keenetic_part()
+{
+    case "$1" in groups|dnsproxy|nameservers|iproutes) ;; *) return 2 ;; esac
+    [ "${VWARD_KEENETIC_NARROW:-1}" = 1 ] && [ ! -e "$VWARD_KPART/$1.bad" ] || return 3
+    if [ -e "$VWARD_KPART/$1.ok" ]; then
+        _vward_kpart_narrow "$1" && return 0
+        return 3
+    fi
+    # First use this boot: proven against the whole configuration (the shared copy).
+    mkdir -p "$VWARD_KPART" 2>/dev/null
+    _vkp_n=$(_vward_kpart_narrow "$1") || return 3
+    _vkp_a=$(printf '%s\n' "$_vkp_n" | _vward_kpart_lines "$1")
+    _vkp_w=$(vward_keenetic_config) || return 3
+    [ -n "$_vkp_w" ] || return 3
+    _vkp_b=$(printf '%s\n' "$_vkp_w" | _vward_kpart_lines "$1")
+    if [ "$_vkp_a" != "$_vkp_b" ]; then
+        # A change may have fallen between the two reads: once more, both fresh.
+        vward_keenetic_dirty
+        _vkp_n=$(_vward_kpart_narrow "$1") || return 3
+        _vkp_a=$(printf '%s\n' "$_vkp_n" | _vward_kpart_lines "$1")
+        _vkp_w=$(vward_keenetic_config) || return 3
+        _vkp_b=$(printf '%s\n' "$_vkp_w" | _vward_kpart_lines "$1")
+    fi
+    _vkp_w=
+    if [ "$_vkp_a" = "$_vkp_b" ]; then
+        : > "$VWARD_KPART/$1.ok" 2>/dev/null
+        printf '%s\n' "$_vkp_n"
+        return 0
+    fi
+    printf '%s|narrow=%s|whole=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$(printf '%s\n' "$_vkp_a" | grep -c .)" \
+        "$(printf '%s\n' "$_vkp_b" | grep -c .)" > "$VWARD_KPART/$1.bad" 2>/dev/null
+    return 3
+}
+
+# vward_keenetic_parts PART...: the parts, each through RCI; when any is not proven, the whole
+# configuration once instead (the shared copy, as before).
+vward_keenetic_parts()
+{
+    _vkps_out=
+    for _vkps in "$@"; do
+        _vkps_one=$(vward_keenetic_part "$_vkps") || { _vkps_out=; vward_keenetic_config; return; }
+        _vkps_out="$_vkps_out$_vkps_one
+"
+    done
+    printf '%s' "$_vkps_out"
+    _vkps_out=
 }
 
 # vward_keenetic_config [AGE]: Keenetic's running configuration (ndmc text, no CR), shared.
@@ -1109,6 +1377,11 @@ vward_doh_alive()
 {
     # VWARD_DOH_ALIVE=0: not checked («cannot tell», the behaviour before; tests without network).
     [ "${VWARD_DOH_ALIVE:-1}" = 1 ] || return 2
+    # The owner's switch «Smart DNS» off (owner 08.11): its server is not asked («cannot tell»).
+    if [ "${VWARD_DOH_ALIVE_FORCE:-0}" != 1 ]; then
+        _vda_on=; read -r _vda_on 2>/dev/null < "${VWARD_SMARTDNS_SWITCH:-${VWARD_ROOT_PREFIX:-}/opt/etc/vward/smartdns.switch}" || :
+        [ "$_vda_on" = 1 ] || return 2
+    fi
     case "$1" in https://*) ;; *) return 2 ;; esac
     _vda_curl=${VWARD_CURL_BIN:-curl}
     command -v "$_vda_curl" >/dev/null 2>&1 || return 2

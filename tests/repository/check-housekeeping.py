@@ -163,7 +163,11 @@ with tempfile.TemporaryDirectory() as tmp:
 
     if sorted(p.name for p in cron.iterdir()) != ["root"]:
         fail(f"crontab copies must leave the cron folder: {sorted(p.name for p in cron.iterdir())}")
-    if sorted(p.name for p in (b / "cron-old").iterdir()) != ["root.bak-20260904-171211", "root.before-clients-sync", "root.before-daily"]:
+    # Owner 08.11: the new schedules (DNS guard on its own minute line) change the crontab once,
+    # with one copy of the crontab before it.
+    kept = sorted(p.name for p in (b / "cron-old").iterdir())
+    if [k for k in kept if not k.startswith("root.before-schedule-")] != ["root.bak-20260904-171211", "root.before-clients-sync", "root.before-daily"] or \
+            len([k for k in kept if k.startswith("root.before-schedule-")]) != 1:
         fail(f"crontab copies are kept in backups: {sorted(p.name for p in (b / 'cron-old').iterdir())}")
     lines = (cron / "root").read_text().splitlines()
     if not lines[0].startswith("# off:") or not lines[0].endswith(old_line) or lines[1] != "17 * * * * /opt/bin/vward-housekeeping.sh":

@@ -56,6 +56,11 @@ subprocess.run([str(REPO / "tests/perf/emulator/build-rootfs.sh"), str(root)], c
 (root / "opt/var/run/vward").mkdir(parents=True, exist_ok=True)
 (root / "opt/etc/AdGuardHome").mkdir(parents=True, exist_ok=True)
 (root / "opt/etc/AdGuardHome/AdGuardHome.yaml").write_text("dns:\n  bind_hosts:\n    - 192.0.2.1\n  port: 65053\n")
+# The owner turned the AdGuard Home bindings on (owner 08.11: observation by default, its WOULD lines
+# are tested in check-route-engine-dns-bind); this run checks the bindings themselves.
+lists_conf = root / "opt/etc/vward/route-engine/domain-lists.conf"
+lists_conf.parent.mkdir(parents=True, exist_ok=True)
+lists_conf.write_text((lists_conf.read_text() if lists_conf.exists() else "") + "dns_bind_act=1\n")
 subprocess.run(["mount", "-t", "proc", "proc", str(root / "proc")], check=True)
 subprocess.run(["mount", "--bind", str(root / "opt"), str(root / "opt")], check=True)
 try:

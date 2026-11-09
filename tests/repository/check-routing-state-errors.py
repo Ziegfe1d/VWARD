@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run production failure branches: unknown config is not absence; retain DNS ownership."""
 import re
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -8,6 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 REC = ROOT / 'components/route-reconciler/scripts/vward-route-reconciler.sh'
 DNS = ROOT / 'components/ads-privacy-guard/scripts/vward-ads-privacy-dns-guard.sh'
+ADMISSION = ROOT / 'components/runtime/lib/vward-runtime-admission.sh'
+SHELL = [os.environ['RS6_BUSYBOX'], 'ash'] if os.environ.get('RS6_BUSYBOX') else ['sh']
 
 
 def function(path, name):
@@ -27,9 +30,12 @@ with tempfile.TemporaryDirectory() as d:
         resolver = t / 'resolve'
         resolver.write_text('#!/bin/sh\nprintf "Address 1: 203.0.113.4\\n"\n')
         resolver.chmod(0o755)
+        calls = t / 'ndmc.calls'
+        calls.unlink(missing_ok=True)
         cfg = {'unknown': 'return 1', 'error-text': 'printf "error: config unavailable\\n"', 'write-error': 'printf "dns-proxy\\n!\\n"', 'absent': 'printf "dns-proxy\\n!\\n"',
                'present': 'printf "object-group fqdn AdaptiveAuto\\n    include example.org\\n!\\n"'}[mode]
-        setup = f'''STATE="{t}"
+        setup = f'''. "{ADMISSION}"
+STATE="{t}"
 LOG="{t}/events"
 HYST_DIR="{t}"
 CHANGE="{t}/change"
@@ -41,13 +47,18 @@ DIRECT_OK_THRESHOLD=1
 DIRECT_OK_MIN_INTERVAL=0
 force_vpn_match() {{ return 1; }}
 classify_isp_vs_vpn() {{ echo 'ISP_OK|0|200|0|200'; }}
-ndmc() {{ return 1; }}
+ndmc() {{ printf '%s\\n' "$*" >> "{calls}"; return 1; }}
 vward_running_config() {{ {cfg}; }}
 '''
         script = setup + function(REC, 'adaptive_names') + function(REC, 'save_state')
         script += function(REC, 'remove_adaptive').replace('/opt/bin/vward-route-resolve4.sh', str(resolver)).replace('/opt/var/backups/vward/route-reconciler', str(t / 'backups'))
         script += ('mv() { return 1; }\n' if mode == 'write-error' else '') + 'remove_adaptive example.org\n'
-        r = subprocess.run(['sh', '-c', script], capture_output=True, text=True)
+        r = subprocess.run(SHELL + ['-c', script], capture_output=True, text=True)
+        # The real shared lock must be acquired and released before accepting
+        # a persist assertion. Early refusal cannot masquerade as preservation.
+        if not calls.exists() or calls.read_text() != '-c no object-group fqdn AdaptiveAuto include example.org\n':
+            errors.append(mode + ': production removal branch not reached: ' + r.stderr.strip())
+        if (t / 'change').exists(): errors.append(mode + ': own shared lock not released')
         want = 'other.example\n' if mode == 'absent' else 'example.org\nother.example\n'
         if persist.read_text() != want: errors.append(mode + ': lost persist')
         state = t / 'example.org.state'
@@ -70,7 +81,7 @@ chain_line() {{ return 1; }}
         if operation == 'agh_unbind': script += 'agh_unbind\n'
         else:
             script += "ns_release '127.0.0.1:65053' 'ip name-server 127.0.0.1:65053 ok.example\nip name-server 127.0.0.1:65053 bad.example' outage\n"
-        subprocess.run(['sh', '-c', script], capture_output=True, text=True, check=True)
+        subprocess.run(SHELL + ['-c', script], capture_output=True, text=True, check=True)
         got = ledger.read_text() if ledger.exists() else ''
         if got != original.split('\n', 1)[1]: errors.append(operation + ': unconfirmed/foreign ownership discarded')
     # Real ndm reply validation: rc=0 text errors are refusals. A failed local
@@ -95,7 +106,7 @@ chain_line() {{ return 1; }}
             if fault == 'mv-error': script += 'mv() { return 1; }\n'
             call = 'agh_unbind\n' if operation == 'agh_unbind' else "ns_release '127.0.0.1:65053' 'ip name-server 127.0.0.1:65053 ok.example\nip name-server 127.0.0.1:65053 bad.example' outage\n"
             script += call * (2 if fault == 'repeat' else 1)
-            r = subprocess.run(['sh', '-c', script], capture_output=True, text=True)
+            r = subprocess.run(SHELL + ['-c', script], capture_output=True, text=True)
             want = original if fault == 'mv-error' else original.split('\n', 1)[1]
             if ledger.read_text() != want: errors.append(operation + '/' + fault + ': lost retry evidence')
             if fault == 'mv-error' and r.returncode == 0: errors.append(operation + ': failed ledger write reported success')

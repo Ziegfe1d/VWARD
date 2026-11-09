@@ -15,6 +15,8 @@ while [ $# -gt 0 ]; do
         *) url=$1; shift ;;
     esac
 done
+# Every RCI request noted (tests/perf/measure-panel.py).
+case "$url" in */rci/*) printf '%s\n' "$url" >> /emu/rci.log 2>/dev/null || : ;; esac
 host=${url#*://}
 host=${host%%/*}
 # Broken environment (check-chaos-emulated.py): Entware's OpenSSL dies on the TLS handshake
@@ -56,6 +58,10 @@ body() {
         */rci/show/interface\?name=*) cat /emu/rci-isp.json ;;
         */rci/show/internet/status) cat /emu/rci-internet.json ;;
         */rci/show/running-config) echo "rci $(tr '\000' ' ' < /proc/$PPID/cmdline 2>/dev/null | cut -c1-80)" >> /emu/config-reads.log; "$JQ" -Rn '{message: [inputs]}' < /emu/running-config ;;
+        */rci/object-group/fqdn) sh /emu/rci-subtree groups ;;
+        */rci/dns-proxy) sh /emu/rci-subtree dnsproxy ;;
+        */rci/ip/name-server) sh /emu/rci-subtree nameservers ;;
+        */rci/ip/route) sh /emu/rci-subtree iproutes ;;
         */rci/*) echo '{}' ;;
         */control/status) echo '{"running":true,"protection_enabled":true,"version":"v0.107.0"}' ;;
         */control/stats*|*/control/querylog*) echo '{"data":[],"num_dns_queries":0}' ;;

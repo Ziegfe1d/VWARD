@@ -13,6 +13,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 ENGINE = (ROOT / "components/route-engine/scripts/vward-route-engine.sh").read_text()
 FUNCS = ENGINE[ENGINE.index("list_watch_map()\n"):ENGINE.index("handle_host()\n")]
+# The shared classifier of curl exit codes (P0-2): which end is a result about the network.
+FUNCS = ENGINE[ENGINE.index("probe_ran()\n"):ENGINE.index("unknown_recent()\n")] + FUNCS
+# The owner's switch (08.11): observation unless list_watch_act=1.
+FUNCS = ENGINE[ENGINE.index("re_acts()\n"):ENGINE.index("}\n", ENGINE.index("re_acts()\n")) + 2] + FUNCS
 
 CFG = """dns-proxy
     route object-group domain-list4 ISP auto
@@ -74,6 +78,13 @@ esac
     watch_map = sorted((tmp / "vol/list-watch.map").read_text().splitlines())
     if watch_map != ["claude.ai domain-list4", "claude.com domain-list4"]:
         fail(f"only watched lists around the tunnel belong in the map: {watch_map}")
+
+    # The default (owner 08.11): observation - the move is logged as WOULD, the Panel writer is not called.
+    check("claude.com", "302 https://claude.com/app-unavailable-in-region")
+    check("claude.com", "302 https://claude.com/app-unavailable-in-region")
+    if calls() or "LIST_AUTO_VPN_WOULD|claude.com|domain-list4|observation" not in (tmp / "events").read_text():
+        fail(f"observation must not move the list: {calls()}")
+    (tmp / "lists.conf").write_text("watch.domain-list4=1\nwatch.domain-list0=1\nwatch.domain-list3=0\nlist_watch_act=1\n")
 
     # A region redirect twice: the second one moves the list into the tunnel.
     check("claude.com", "302 https://claude.com/app-unavailable-in-region")

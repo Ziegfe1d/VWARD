@@ -16,6 +16,24 @@ vward_admission_enter policy-sync || exit $?
 
 VERSION="2.0"
 WG="$VWARD_TUNNEL_DEVICE"
+# policy_config: the parts this pass reads - groups, dns-proxy, name servers, static routes -
+# through RCI when proven (owner 08.11: 0.2 s instead of 5-13 s for the whole configuration); else
+# the whole configuration read fresh, as before.
+policy_config()
+{
+    if command -v vward_keenetic_part >/dev/null 2>&1; then
+        pc_out= pc_ok=
+        for pc_p in groups dnsproxy nameservers iproutes; do
+            pc_one=$(vward_keenetic_part "$pc_p") || { pc_out=; break; }
+            pc_out="$pc_out$pc_one
+"
+            pc_ok=$pc_p
+        done
+        if [ -n "$pc_out" ] && [ "$pc_ok" = iproutes ]; then printf '%s' "$pc_out"; pc_out=; return 0; fi
+    fi
+    vward_running_config
+}
+
 # Keenetic takes the interface name in "ip route", not the kernel device.
 RT="${VWARD_TUNNEL_INTERFACE:-$WG}"
 MODE="${1:-sync}"
@@ -232,6 +250,8 @@ prefix_mask()
 ndm()
 {
     CMD="$1"
+    # Owner 08.11: no write into Keenetic's DNS filter or its profiles (nor removal of dns-proxy).
+    case " $1 " in *' dns-proxy filter'*|*' dns-proxy no filter'*|*' filter profile '*|' no dns-proxy ') log "NDM_REFUSED cmd=$CMD reason=dns-filter"; return 1 ;; esac
 
     OUT="$(ndmc -c "$CMD" 2>&1)"
     RC=$?
@@ -983,7 +1003,7 @@ fi
 RUN_RAW="$WORK/running.raw"
 RUN="$WORK/running"
 
-vward_running_config > "$RUN_RAW" || {
+policy_config > "$RUN_RAW" || {
     echo "ERROR=CANNOT_READ_RUNNING_CONFIG"
     exit 1
 }

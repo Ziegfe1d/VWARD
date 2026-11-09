@@ -79,7 +79,7 @@ with tempfile.TemporaryDirectory() as tmp:
     cat = tmp / "catalog.json"; cat.write_text(CATALOG)
     etc = tmp / "etc"; etc.mkdir()
     (tmp / "root/tmp").mkdir(parents=True)
-    env = os.environ | {
+    env = os.environ | {"VWARD_SMARTDNS_SWITCH": str(ROOT / "tests/repository/fixtures/smartdns-on"), 
         "VWARD_NDMC": str(ndmc), "VWARD_DEVICE_CONFIG": str(devconf), "VWARD_DEVICE_CONFIG_OWNER_UID": str(os.getuid()),
         "VWARD_DEVICE_MAP_CACHE": str(tmp / "map.tsv"), "VWARD_SYSFS_NET": str(tmp / "sys"),
         "VWARD_PROFILE_LIB": str(ROOT / "components/runtime/lib/vward-device-profile.sh"),

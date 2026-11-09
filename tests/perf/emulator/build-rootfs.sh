@@ -36,6 +36,7 @@ copy_bin "$(command -v jq)" /opt/bin/jq
 copy_bin "$(command -v openssl)" /opt/bin/openssl
 for tool in curl ping nslookup wg; do cp "$FAKES/$tool" "$ROOT/opt/bin/$tool"; done
 cp "$FAKES/ndmc" "$ROOT/bin/ndmc"
+cp "$FAKES/rci-subtree" "$ROOT/emu/rci-subtree"
 cp "$FAKES/ip" "$ROOT/opt/sbin/ip"
 cc -O2 -static -o "$ROOT/opt/sbin/tcpdump" "$FAKES/tcpdump.c"
 cc -O2 -static -o "$ROOT/opt/sbin/crond" "$FAKES/crond.c"

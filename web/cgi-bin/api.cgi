@@ -9,6 +9,36 @@ export VWARD_FOREGROUND
 JQ=${JQ:-/opt/bin/jq}
 CURL=${CURL:-/opt/bin/curl}
 
+# Prepared common-outcome consumer. No endpoint/caller is connected to the
+# OFF pipeline; normal AI actions continue to use the existing routes.
+routing_b_outcome_json() {
+    [ "$#" -eq 1 ] && [ -f "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] &&
+        [ "$(wc -c < "$1")" -le 1048576 ] || return 75
+    [ -f "$1.sha" ] && [ ! -L "$1.sha" ] && [ -O "$1.sha" ] || return 75
+    routing_b_body=$(cat "$1") || return 75
+    [ "${#routing_b_body}" -le 1048576 ] || return 75
+    routing_b_sum=$(printf '%s\n' "$routing_b_body" | sha256sum) || return 75
+    [ "${routing_b_sum%% *}" = "$(cat "$1.sha")" ] || return 75
+    # URL/token/raw native inputs are never presentation fields. An unsupported
+    # activation or a claimed packet proof refuses, rather than becoming green.
+    printf '%s\n' "$routing_b_body" | "$JQ" -ce '
+      select(.schema==2 and .activation=="off" and .evidence=="configuration" and .client_verified==false and
+        (.client_path_verified // false)==false) |
+      select(.configured.state|IN("verified","observed","partial","mixed","unknown")) |
+      select(.desired.mode|IN("auto","vpn","dns","isp","server-policy")) |
+      select(.coverage.total>=0 and .coverage.total<=1024 and .coverage.known>=0 and .coverage.unknown>=0 and
+        .coverage.known+.coverage.unknown==.coverage.total) |
+      select((.sources|type)=="array" and (.sources|length)<=4096 and all(.sources[];.source|IN("M","S","A"))) |
+      select(all(..|strings;contains("://")|not)) |
+      {schema,activation,evidence,client_verified,client_path_verified:false,scope,source_switches:{M:.source_switches.M,S:.source_switches.S,A:.source_switches.A},service,operation:{state:.operation.state},
+       desired:{mode:.desired.mode,target:.desired.target,policy:.desired.policy,revision:.desired.revision,generation:.desired.generation,
+         resources:[.desired.resources[]|{id,domain,scope,target,policy,consumers}]},
+       configured:{state:.configured.state,persisted:.configured.persisted,generation:.configured.generation,
+         matched_steps:.configured.matched_steps,total_steps:.configured.total_steps},
+       sources:[.sources[]|{domain,source,id,target,policy,state,reason}],coverage:{total:.coverage.total,known:.coverage.known,unknown:.coverage.unknown}}
+    ' 2>/dev/null || return 75
+}
+
 VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 VWARD_RCI_BASE=http://127.0.0.1:79/rci
 PROFILE_READY=false
@@ -102,6 +132,20 @@ ndm_cached()
     [ -z "${VWARD_CONSOLE_CACHE_TTL:-}" ] || nc_ttl=$VWARD_CONSOLE_CACHE_TTL
     # Keenetic's configuration: the copy every VWARD agent shares (one read, not one per reader).
     if [ "$1" = running ] && [ -z "${4:-}" ] && [ "$nc_ttl" -gt 0 ] 2>/dev/null && command -v vward_keenetic_config >/dev/null 2>&1; then
+        # A page (GET) opens at once (owner 08.11): a copy older than the TTL but younger than
+        # CONFIG_STALE (24 h; the copy lives in RAM, so never from before a reboot) is shown now and
+        # renewed in the background for the page's next refresh (15 s). Every change VWARD makes
+        # drops the copy, so after a change only a fresh read is ever shown.
+        if [ "${REQUEST_METHOD:-GET}" = GET ] && command -v _vward_kc_fresh >/dev/null 2>&1 &&
+           ! _vward_kc_fresh "$nc_ttl" && _vward_kc_fresh "${VWARD_CONSOLE_CONFIG_STALE:-86400}" &&
+           cat "$VWARD_KCACHE/running-config" 2>/dev/null; then
+            (umask 077; mkdir -p "$NDM_CACHE_DIR") 2>/dev/null
+            [ -z "$(find "$NDM_CACHE_DIR/running-refresh.lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] || rmdir "$NDM_CACHE_DIR/running-refresh.lock" 2>/dev/null
+            if mkdir "$NDM_CACHE_DIR/running-refresh.lock" 2>/dev/null; then
+                ( vward_keenetic_config "$nc_ttl" >/dev/null 2>&1; rmdir "$NDM_CACHE_DIR/running-refresh.lock" ) </dev/null >/dev/null 2>&1 &
+            fi
+            return 0
+        fi
         vward_keenetic_config "$nc_ttl"; return
     fi
     if [ "$nc_ttl" -gt 0 ] 2>/dev/null && [ -r "$nc_file" ]; then
@@ -834,6 +878,8 @@ if [ "$ACTION" = config ]; then
         wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;
         component) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=COMPONENT_DISABLE ;;
         adaptive-mode|classifier|smartdns-guard|tunnel-fallback|tunnel-return) set -- "$OP" "$VALUE" ;;
+        # «Smart DNS» on/off (owner 08.11); off takes VWARD's own rows away: confirmed.
+        smartdns-feature) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=SMARTDNS_OFF ;;
         journal|agents-mode) set -- "$OP" "$TARGET" "$VALUE" ;;
         cleanup) set -- "$OP" "$TARGET"; [ "$TARGET" != sizes ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; } ;;
         reset) set -- "$OP" "$TARGET"; REQUIRED=RESET_SETTINGS ;;
@@ -1470,7 +1516,10 @@ if [ "$ACTION" = ads-control ]; then
     source-add) /opt/bin/vward-ads-privacy-source-control.sh add "$SURL" "$SFMT" >"$OUT" 2>&1||RC=$? ;;
     source-delete) /opt/bin/vward-ads-privacy-source-control.sh delete "$SID" >"$OUT" 2>&1||RC=$? ;;
     source-category) /opt/bin/vward-ads-privacy-source-control.sh category "$SPUR" "$SST" >"$OUT" 2>&1||RC=$? ;;
-    enqueue) [ "$JOB" = probe ] || DOMAIN=""; /opt/bin/vward-ads-privacy-job.sh enqueue "$JOB" "$DOMAIN" >"$OUT" 2>&1||RC=$? ;;
+    # The queue is worked at once, in the background (owner 08.11: by the event, not by the
+    # scheduler's next round, which runs every 5 minutes now).
+    enqueue) [ "$JOB" = probe ] || DOMAIN=""; /opt/bin/vward-ads-privacy-job.sh enqueue "$JOB" "$DOMAIN" >"$OUT" 2>&1||RC=$?
+        [ "$RC" != 0 ] || ( "${VWARD_ADS_JOB_BIN:-/opt/bin/vward-ads-privacy-job.sh}" drain </dev/null >/dev/null 2>&1 & ) ;;
     # «Выполнить очередь»: the queue now, detached (a scan takes minutes); the page follows it.
     job-run) ( "${VWARD_ADS_JOB_BIN:-/opt/bin/vward-ads-privacy-job.sh}" drain </dev/null >/dev/null 2>&1 & ) ; echo "JOB=DRAIN_STARTED" > "$OUT" ;;
     job-cancel) "${VWARD_ADS_JOB_BIN:-/opt/bin/vward-ads-privacy-job.sh}" cancel "$JID" >"$OUT" 2>&1||RC=$? ;;
@@ -2537,7 +2586,11 @@ if [ "$ACTION" = lists-data ]; then
     [ -n "$LD_LISTS" ] || LD_LISTS='[]'
     LD_STATE=not_configured
     LD_URL=$(awk -F= '$1=="SMARTDNS_URL" {print substr($0,index($0,"=")+1); exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)
-    if [ -n "$LD_URL" ]; then
+    # The owner's switch «Smart DNS» off (owner 08.11): the «DNS» mode is not offered, the server is not asked.
+    LD_SW=; read -r LD_SW 2>/dev/null < "${VWARD_SMARTDNS_SWITCH:-$CONFIG_ETC/smartdns.switch}" || :
+    if [ "$LD_SW" != 1 ]; then
+        LD_STATE=off
+    elif [ -n "$LD_URL" ]; then
         LD_STATE=unknown
         if command -v vward_doh_alive >/dev/null 2>&1; then
             VWARD_DOH_ALIVE_MT=4 vward_doh_alive "$LD_URL"; LD_RC=$?
@@ -2719,11 +2772,16 @@ if [ "$ACTION" = ai-data ]; then
     # Does the server answer (01.11.2026: the subscription ended, the domains stopped resolving): the
     # owner's own server, else the one Keenetic's lines and AdGuard Home's rows use most. 5 min cache.
     AI_ALIVE=""
+    AI_SD_ON=false
+    AI_SW=; read -r AI_SW 2>/dev/null < "${VWARD_SMARTDNS_SWITCH:-$CONFIG_ETC/smartdns.switch}" || :
+    [ "$AI_SW" != 1 ] || AI_SD_ON=true
     AI_URL="$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)"
     [ -n "$AI_URL" ] || AI_URL="$({ printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print $3}'
         command -v vward_agh_smartdns_urls >/dev/null 2>&1 && vward_agh_smartdns_urls; } | sort | uniq -c | sort -rn | awk 'NR == 1 {print $2}')"
-    if [ -n "$AI_URL" ] && command -v vward_doh_alive >/dev/null 2>&1; then
+    if [ "$AI_SD_ON" != true ]; then
+        AI_ALIVE=off
+    elif [ -n "$AI_URL" ] && command -v vward_doh_alive >/dev/null 2>&1; then
         VWARD_DOH_ALIVE_MT=${VWARD_DOH_ALIVE_MT:-4} vward_doh_alive "$AI_URL"
         case $? in 0) AI_ALIVE=yes ;; 1) AI_ALIVE=no ;; *) AI_ALIVE=unknown ;; esac
     fi
@@ -2764,6 +2822,7 @@ if [ "$ACTION" = ai-data ]; then
         --arg alive_host "$AI_ALIVE_HOST" --arg agh_hosts "$AI_AGH_HOSTS" --arg alive_why "$AI_ALIVE_WHY" \
         --arg cap_supported "$AI_CAP_SUPPORTED" --arg cap_available "$AI_CAP_AVAILABLE" --arg cap_why "$AI_CAP_WHY" --arg handler "$AI_HANDLER" --arg store_target "$AI_STORE_TARGET" --argjson snapshot_ok "$AI_SNAPSHOT_OK" \
         --arg reference_token "$AI_REFERENCE_TOKEN" --arg claims "$AI_CLAIMS" --arg default_tunnel "${VWARD_TUNNEL_INTERFACE:-}" \
+        --argjson smartdns_on "$AI_SD_ON" \
         --argjson agh_on "$([ -r "${VWARD_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ] && echo true || echo false)" '
         ($doh | split("\n") | map(select(length > 0) | split("\t"))) as $k
         | ($agh | split("\n") | map(select(length > 0))) as $a
@@ -2787,7 +2846,7 @@ if [ "$ACTION" = ai-data ]; then
                | {d: $d, k: (if $d == $id then 0 elif $own then 1 elif ($l | length) == 2 then 2 else 3 end), n: ($l | length)}]
             | sort_by(.k, .n, .d) | map(.d)
             | reduce .[] as $d ([]; if any(.[]; . as $k | $d | endswith("." + $k)) then . else . + [$d] end) | .[:4];
-        {ok: true, evidence: "configuration", client_path_verified: false, recovery: $recovery, reference_token: $reference_token,
+        {ok: true, smartdns_enabled: $smartdns_on, evidence: "configuration", client_path_verified: false, recovery: $recovery, reference_token: $reference_token,
          smartdns: {store: $store, keenetic: ($k | length), keenetic_max: 8, agh: $agh_on, agh_running: $agh_run, agh_domains: ($a | length),
                     storage: {component: "AdGuard Home", supported: ($cap_supported == "1"), available: ($cap_available == "1"), reason: $cap_why, handler: $handler, target: $store_target},
                     waiting: ($wait | split("\n") | map(select(length > 0))),
@@ -3431,7 +3490,10 @@ if [ "$ACTION" = stability ]; then
             "${VWARD_TUNNEL_QUALITY_DIR:-/tmp/vward-tunnel-quality}/samples.tsv" 2>/dev/null || printf '[]'
     } > "$SD/tunnels"
     FEED_OK= FEED_FAIL= FEED_RC=
-    kv_file "${VWARD_UPDATE_STATE_DIR:-/opt/var/lib/vward/updater}/feed.state" ok_at=FEED_OK fail_at=FEED_FAIL fail_rc=FEED_RC
+    # The feed's last look lives in RAM since 08.11; the old file after a reboot, until the next check.
+    UFEED_FILE=${VWARD_UPDATE_FEED_STATE:-/tmp/vward-update-feed.state}
+    [ -r "$UFEED_FILE" ] || UFEED_FILE="${VWARD_UPDATE_STATE_DIR:-/opt/var/lib/vward/updater}/feed.state"
+    kv_file "$UFEED_FILE" ok_at=FEED_OK fail_at=FEED_FAIL fail_rc=FEED_RC
     TLS_AT=
     TLS_FLAG=${VWARD_TLS_BROKEN_FLAG:-/tmp/vward-curl-tls.broken}
     [ -z "$(find "$TLS_FLAG" -mmin -60 2>/dev/null)" ] || TLS_AT=$(date -r "$TLS_FLAG" +%s 2>/dev/null)
@@ -3780,7 +3842,9 @@ COMPONENTS="$($JQ -c '.components // {}' "$UPDATER_STATE/components.json" 2>/dev
 kv_file "$UPDATER_STATE/committed.state" installed_update_id=INSTALLED_UPDATE_ID last_sequence=LAST_SEQUENCE last_health_check=LAST_HEALTH
 # The update feed's last look (vward-update-watch): «Последняя проверка» in «Обновления» (fix.33.2;
 # last_health_check is the check after an installation).
-kv_file "${VWARD_UPDATE_STATE_DIR:-$UPDATER_STATE}/feed.state" ok_at=UFEED_OK fail_at=UFEED_FAIL fail_rc=UFEED_RC
+UFEED_FILE=${VWARD_UPDATE_FEED_STATE:-/tmp/vward-update-feed.state}
+[ -r "$UFEED_FILE" ] || UFEED_FILE="${VWARD_UPDATE_STATE_DIR:-$UPDATER_STATE}/feed.state"
+kv_file "$UFEED_FILE" ok_at=UFEED_OK fail_at=UFEED_FAIL fail_rc=UFEED_RC
 kv_file "$UPDATER_STATE/journal.state" phase=UPDATE_PHASE
 kv_file "$UPDATER_STATE/trust.state" highest_seen_sequence=HIGHEST_SEQUENCE
 ACTIVE_SLOT="$(CDPATH= cd -- /opt/share/vward/updater/current 2>/dev/null && pwd -P)"

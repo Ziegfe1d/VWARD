@@ -79,7 +79,7 @@ text = cfg.read_text()'''.replace('\n+', '\n'))
         dev.write_text(DEVICE)
         dev.chmod(0o600)
         (tmp / 'root/tmp').mkdir(parents=True)
-        self.env = os.environ | {
+        self.env = os.environ | {"VWARD_SMARTDNS_SWITCH": str(ROOT / "tests/repository/fixtures/smartdns-on"), 
             'VWARD_NDMC': str(ndmc), 'VWARD_CURL_BIN': str(curl),
             'VWARD_DEVICE_CONFIG': str(dev), 'VWARD_DEVICE_CONFIG_OWNER_UID': str(os.getuid()),
             'VWARD_PROFILE_LIB': str(ROOT / 'components/runtime/lib/vward-device-profile.sh'),

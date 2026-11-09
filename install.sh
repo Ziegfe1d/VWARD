@@ -372,7 +372,8 @@ configure() {
     cp "$CRON_BACKUP" "$tmp"
     while IFS= read -r l; do
         [ -n "$l" ] || continue
-        m=$(printf '%s\n' "$l" | grep -oE '/opt/(bin|etc/init\.d)/[A-Za-z0-9_.-]+' | head -n 1)
+        # The program and its first word argument: «scheduler.sh» and «scheduler.sh dns» are two lines.
+        m=$(printf '%s\n' "$l" | grep -oE '/opt/(bin|etc/init\.d)/[A-Za-z0-9_.-]+( [a-z][a-z-]*)?' | head -n 1)
         [ -n "$m" ] || continue
         grep -qF "$m" "$tmp" || printf '%s\n' "$l" >> "$tmp"
     done < "$WORK/root.crontab"

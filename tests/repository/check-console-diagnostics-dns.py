@@ -43,7 +43,7 @@ with tempfile.TemporaryDirectory() as tmp:
     comp = root / "opt/var/lib/vward/updater/components.json"
     comp.parent.mkdir(parents=True)
     comp.write_text(json.dumps({"components": {"x": {"files": {f: hashlib.sha256(b).hexdigest() for f, b in files.items()}}}}))
-    env = os.environ | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=diagnostics", "JQ": shutil.which("jq"), "CURL": "/bin/false",
+    env = os.environ | {"VWARD_SMARTDNS_SWITCH": str(ROOT / "tests/repository/fixtures/smartdns-on"), "REQUEST_METHOD": "GET", "QUERY_STRING": "action=diagnostics", "JQ": shutil.which("jq"), "CURL": "/bin/false",
                         "PATH": f"{tools}:{os.environ['PATH']}", "VWARD_NDMC": str(ndmc), "VWARD_NSLOOKUP": str(tools / "nslookup"),
                         "VWARD_DOH_ALIVE": "0", "VWARD_PROFILE_LIB": str(ROOT / "components/runtime/lib/vward-device-profile.sh"),
                         "VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_ROOT_PREFIX": str(root), "VWARD_LAN_ADDRESS": "192.168.1.1",

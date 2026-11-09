@@ -147,7 +147,8 @@ services() {
     # The tunnels answering now: name and device.
     summary | awk -F '\t' '$5 >= 2 && $3 < 100 {print $1 "\t" $2}' > "$L/alive"
     [ "$(grep -c . "$L/alive")" -ge 2 ] || { rm -f "$SERVICES_DIR/state.tsv"; return 0; }
-    vward_keenetic_config |
+    # Only dns-proxy through RCI when proven (owner 08.11), else the shared whole copy.
+    { if command -v vward_keenetic_parts >/dev/null 2>&1; then vward_keenetic_parts dnsproxy; else vward_keenetic_config; fi; } |
         awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
             ctx && $1 == "route" && $2 == "object-group" {print $3 "\t" $4}' > "$L/routes"
     [ -s "$L/routes" ] || return 1

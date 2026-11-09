@@ -76,7 +76,8 @@ with tempfile.TemporaryDirectory() as tmp:
                        "VWARD_WAN_DEVICE=eth3\nVWARD_WAN_INTERFACE=GigabitEthernet1\nVWARD_TUNNEL_INTERFACE=Wireguard0\nVWARD_TUNNEL_DEVICE=nwg0\n"
                        "VWARD_POLICY_GROUP=Mine\n"); devconf.chmod(0o600)
     (tmp / "policy").mkdir(); (tmp / "root/tmp").mkdir(parents=True); (tmp / "etc").mkdir()
-    adm = tmp / "admission.sh"; adm.write_text("vward_admission_enter() { return 0; }\nvward_admission_leave() { return 0; }\n")
+    adm = tmp / "admission.sh"; adm.write_text(f'. "{ROOT / "components/runtime/lib/vward-runtime-admission.sh"}"\n' +
+        "vward_admission_enter() { return 0; }\nvward_admission_leave() { return 0; }\n")
     # The old server is dead (seeded answer «does not answer»): clear must not depend on it.
     alive = tmp / "alive"; alive.mkdir()
     k = subprocess.run(["sh", "-c", 'printf %s "$U" | cksum | cut -d" " -f1'], env={"U": OLD, "PATH": "/usr/bin:/bin"},
@@ -104,7 +105,8 @@ with tempfile.TemporaryDirectory() as tmp:
         "VWARD_DOH_RETRY_DELAY": "0", "VWARD_SNAPSHOT_RETRY": "0", "VWARD_DOH_ALIVE": "1", "VWARD_DOH_ALIVE_DIR": str(alive),
         "VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_ADS_CONTROL_BIN": str(ROOT / "components/ads-privacy-guard/scripts/vward-ads-privacy-control.sh"),
         "VWARD_ADS_LIB": str(patched), "VWARD_ADS_ETC": str(tmp / "ads"), "VWARD_ADS_STATE": str(tmp / "ads-state"),
-        "VWARD_ADS_LOG_DIR": str(tmp / "ads-log"), "VWARD_ADS_JQ": shutil.which("jq"), "VWARD_ADS_CURL": str(curl),
+        "VWARD_ADS_LOG_DIR": str(tmp / "ads-log"), "VWARD_ADS_BACKUP_ROOT": str(tmp / "ads-backup"),
+        "VWARD_ADS_JQ": shutil.which("jq"), "VWARD_ADS_CURL": str(curl),
         "VWARD_ADS_AGH_AUTH_FILE": str(auth), "VWARD_ADS_CONTROL_LOCK": str(tmp / "ads.lock"),
         "AGH_API_BASE": "http://192.0.2.1:3001/control", "TMPDIR": str(tmp),
         # The API says it sends a selector on stdin (fix.35.5: without the flag stdin is not read).

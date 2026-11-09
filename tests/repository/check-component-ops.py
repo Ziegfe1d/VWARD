@@ -111,7 +111,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # Something already listens on 3000: the web interface takes the next port.
     (netd / "tcp").write_text("  sl  local_address rem_address   st\n   0: 00000000:0BB8 00000000:0000 0A\n")
     (tmp / "root/tmp").mkdir(parents=True)
-    env = os.environ | {
+    env = os.environ | {"VWARD_SMARTDNS_SWITCH": str(ROOT / "tests/repository/fixtures/smartdns-on"), 
         "VWARD_NDMC": str(tools / "ndmc"), "VWARD_DEVICE_CONFIG": str(devconf), "VWARD_DEVICE_CONFIG_OWNER_UID": str(os.getuid()),
         "VWARD_DEVICE_MAP_CACHE": str(tmp / "map.tsv"), "VWARD_SYSFS_NET": str(tmp / "sys"),
         "VWARD_PROFILE_LIB": str(ROOT / "components/runtime/lib/vward-device-profile.sh"),

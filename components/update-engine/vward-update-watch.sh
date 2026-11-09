@@ -29,9 +29,10 @@ process_pending() {
 # The last answer kept when it fails: ok_at, then fail_at and the error.
 feed_note() {
     [ "$feed_tried" = 1 ] || return 0
-    fn_file=$VU_STATE_DIR/feed.state
-    fn_ok=$(sed -n 's/^ok_at=\([0-9]*\)$/\1/p' "$fn_file" 2>/dev/null | tail -n 1)
-    mkdir -p "$VU_STATE_DIR" 2>/dev/null || return 0
+    # In RAM (owner 08.11: no USB write every 15 minutes); the Panel falls back to the old file.
+    fn_file=${VWARD_UPDATE_FEED_STATE:-${VU_ROOT_PREFIX:-}/tmp/vward-update-feed.state}
+    fn_ok=$(sed -n 's/^ok_at=\([0-9]*\)$/\1/p' "$fn_file" "$VU_STATE_DIR/feed.state" 2>/dev/null | tail -n 1)
+    mkdir -p "${fn_file%/*}" 2>/dev/null || return 0
     if [ "$feed_reached" = 1 ]; then
         (umask 077; printf 'ok_at=%s\n' "$(date +%s)" > "$fn_file.$$") || return 0
     else

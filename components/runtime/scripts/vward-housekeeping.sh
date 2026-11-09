@@ -327,6 +327,50 @@ if [ -s "$ADS_ETC_DIR/agh-api.auth" ] && [ ! -e "$ADS_ETC_DIR/clients-sync.disab
     rm -f "$CRON_NEW"
 fi
 
+# ---------- Schedules of the owner's decision 08.11 (speed) ----------
+# Installed routers keep their crontab across updates (the installer only adds missing lines),
+# so the new defaults come here, each with a file that turns it back:
+#   the ads scheduler every 5 minutes        back: /opt/etc/vward/ads-scheduler.every-minute
+#   (its DNS guard keeps a minute line of its own, added when missing)
+#   no per-minute S91 cron watchdog (the     back: /opt/etc/vward/route-engine.cron-watchdog
+#   components agent keeps the route engine running)
+# The crontab before a change goes to the backups (cron-old); one crontab write a change at most.
+cron_set_schedule()
+{
+    [ -f "$CRON_ROOT" ] || return 0
+    CS_NEW="$R/tmp/vward-housekeeping-cron.$$"
+    CS_ADS=1; [ ! -e "$R/opt/etc/vward/ads-scheduler.every-minute" ] || CS_ADS=0
+    CS_S91=1; [ ! -e "$R/opt/etc/vward/route-engine.cron-watchdog" ] || CS_S91=0
+    awk -v ads="$CS_ADS" -v s91="$CS_S91" '
+        $0 ~ /^[ \t]*#/ && index($0, "# off: the components agent keeps it running # ") == 1 {
+            if (!s91) {print substr($0, length("# off: the components agent keeps it running # ") + 1); next}
+            print; next
+        }
+        /^[ \t]*#/ {print; next}
+        $6 == "/opt/bin/vward-ads-privacy-scheduler.sh" && $7 == "dns" {dns = 1}
+        $6 == "/opt/bin/vward-ads-privacy-scheduler.sh" && $7 != "dns" && $2 == "*" && $3 == "*" && $4 == "*" && $5 == "*" {
+            if (ads && $1 == "*") {print "*/5" substr($0, 2); next}
+            if (!ads && $1 == "*/5") {print "*" substr($0, 4); next}
+        }
+        $1 == "*" && $2 == "*" && $3 == "*" && $4 == "*" && $5 == "*" && $6 == "/opt/etc/init.d/S91vward-route-engine" && $7 == "start" {
+            if (s91) {print "# off: the components agent keeps it running # " $0; next}
+        }
+        {print}
+        END {
+            # The DNS guard keeps its minute on its own line (the scheduler runs every 5 minutes).
+            if (!dns) print "* * * * * /opt/bin/vward-ads-privacy-scheduler.sh dns > /tmp/vward-ads-dns-tick.cron.out 2>&1; RC=$?; date > /tmp/vward-ads-dns-tick.cron.last; echo $RC > /tmp/vward-ads-dns-tick.cron.rc"
+        }' "$CRON_ROOT" > "$CS_NEW" 2>/dev/null || { rm -f "$CS_NEW"; return 0; }
+    if cmp -s "$CS_NEW" "$CRON_ROOT"; then rm -f "$CS_NEW"; return 0; fi
+    if mkdir -p "$CRON_OLD" && cp -p "$CRON_ROOT" "$CRON_OLD/root.before-schedule-$(date +%Y%m%d%H%M%S)" &&
+       "${VWARD_CRONTAB:-crontab}" -c "$CRON_DIR" "$CS_NEW" >/dev/null 2>&1; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|cron_schedule=set|ads_every_5=$CS_ADS|s91_cron_off=$CS_S91" >> "$HOUSE_LOG"
+    else
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|cron_schedule=kept" >> "$HOUSE_LOG"
+    fi
+    rm -f "$CS_NEW"
+}
+cron_set_schedule
+
 # ---------- One-time move to Update Engine 2 ----------
 # Engine 1 cannot read the per-file feed and cannot replace itself.  This hourly
 # job moves it over once, without a command: the signed v2 manifest is checked
@@ -363,7 +407,8 @@ engine_move()
             # em_fetch URL|NAME OUTPUT MAX_BYTES
             if [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ]; then cp "$VWARD_ENGINE_MOVE_SOURCE/$1" "$2"; return; fi
             # One agent tries a curl not known to work first (vward_tls_take); a crash noted there stops here.
-            ! command -v vward_tls_take >/dev/null 2>&1 || vward_tls_take || exit 3
+            # Not given within 20 s (2): the move is tried again later, never with curl unowned.
+            ! command -v vward_tls_take >/dev/null 2>&1 || vward_tls_take 20 || exit 3
             curl --http1.1 -fsS --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 120 --max-filesize "$3" -o "$2" "$1" 2>/dev/null
             em_rc=$?
             ! command -v vward_tls_done >/dev/null 2>&1 || vward_tls_done "$em_rc"
@@ -594,7 +639,8 @@ pkg_repair_text()
 # reinstalled, with a copy of their files first, at most once a day; the owner is told the
 # stick spoils files. Intact files: nothing reinstalled (it would not help). curl is not touched.
 DOH_PKGS=${VWARD_DOH_PKGS:-https-dns-proxy libcares libev libnghttp2 libcurl libopenssl}
-if [ -n "$(find "$REPAIR_DOH_FLAG" -mmin -360 2>/dev/null)" ] &&
+if { ! command -v vward_smartdns_on >/dev/null 2>&1 || vward_smartdns_on; } &&
+   [ -n "$(find "$REPAIR_DOH_FLAG" -mmin -360 2>/dev/null)" ] &&
    vward_agent_acts maintenance repair:doh "Клиент DoH Smart DNS перезапускался 3 раза: сверить его пакеты с Entware и переустановить испорченные" && repair_due doh; then
     rm -f "$REPAIR_DOH_FLAG"
     rd_out=$R/tmp/vward-doh-damaged.$$
