@@ -89,6 +89,23 @@ for gone in ("DNS_CHAIN", "WOULD_TAKE_OUT", "loop_upstream"):
     if gone in f.replace("<wbr>", ""):
         fail(f"internal code {gone!r} shown")
 
+# A VLESS supervisor fork is an attempted recovery, not a proven VPN connection.
+# User-facing text is plain Russian; tunnel ids remain only in details.
+h4 = h.split("const T = [")[0] + """
+const events = [
+  '2026-11-09 20:32:29|VLESS_ENGINE|restart_attempted OpkgTun4|by=components-agent',
+  '2026-11-09 20:33:10|VLESS_ENGINE|started OpkgTun4 by request|by=owner'
+].map(logEntry);
+console.log(JSON.stringify(events.map(e => [e.text, e.more.join(' '), e.level])));
+"""
+r = subprocess.run(["node", "-e", h4], capture_output=True, text=True, env=os.environ | {"TZ": "Europe/Moscow"})
+if r.returncode:
+    fail(r.stderr[-400:])
+events = json.loads(r.stdout)
+if events[0] != ["Xray: попытка перезапуска", "Туннель OpkgTun4 by: components-agent", "warn"] or \
+   events[1] != ["Xray: процесс запущен, соединение не проверено", "Туннель OpkgTun4 by: owner", "info"]:
+    fail(f"Xray recovery event truth / Panel rendering: {events}")
+
 # The API cuts «Журналы» to the last 24 hours (hours=24); without hours a section page still sees
 # its last events however old; a journal without times is shown as it is; an empty window is said.
 import tempfile, datetime as dt

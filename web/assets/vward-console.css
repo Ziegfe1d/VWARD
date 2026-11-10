@@ -630,4 +630,4 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
    the reason is the note under it. Recovery actions wrap on a phone. */
 .seg-slider.off button[aria-checked="true"]{color:var(--accent-text)}
 .panel-actions.wrap{flex-wrap:wrap}
-.panel-actions.wrap .btn{white-space:normal;text-align:left}
+.panel-actions.wrap .btn{white-space:normal;text-align:center;word-break:normal;overflow-wrap:normal}

@@ -800,14 +800,27 @@ integrity_snapshot()
     # Each file: the time of change («date -r»: Keenetic's BusyBox has no stat with a format)
     # and the checksum. The size is not needed: the time and the contents tell it all.
     # shellcheck disable=SC2086
-    find $is_roots -xdev -type f ! -path '*/opt/lib/opkg/*' ! -name '*.pyc' 2>/dev/null > "$INTEG_DIR/list.$$"
-    while IFS= read -r is_f; do
-        is_m=$(date -r "$is_f" +%s 2>/dev/null) || continue
-        is_h=$(md5sum < "$is_f" 2>/dev/null) || continue
-        printf '%s\t-\t%s\t%s\n' "${is_f#"$R"}" "$is_m" "${is_h%% *}"
-    done < "$INTEG_DIR/list.$$" | sort > "$1"
-    rm -f "$INTEG_DIR/list.$$"
-    [ -s "$1" ]
+    # Incomplete reads must NOT look like REMOVED files or establish a new
+    # trusted baseline. BusyBox sh has no pipefail; write unsorted output first
+    # so failures of date/md5sum propagate independently of sort.
+    find $is_roots -xdev -type f ! -path '*/opt/lib/opkg/*' ! -name '*.pyc' 2>/dev/null > "$INTEG_DIR/list.$" || {
+        rm -f "$INTEG_DIR/list.$"
+        return 1
+    }
+    if ! (
+        while IFS= read -r is_f; do
+            is_m=$(date -r "$is_f" +%s 2>/dev/null) || exit 1
+            is_h=$(md5sum < "$is_f" 2>/dev/null) || exit 1
+            printf '%s\t-\t%s\t%s\n' "${is_f#"$R"}" "$is_m" "${is_h%% *}" || exit 1
+        done < "$INTEG_DIR/list.$"
+    ) > "$INTEG_DIR/raw.$"; then
+        rm -f "$INTEG_DIR/list.$" "$INTEG_DIR/raw.$" "$1"
+        return 1
+    fi
+    LC_ALL=C sort "$INTEG_DIR/raw.$" > "$1"
+    is_rc=$?
+    rm -f "$INTEG_DIR/list.$" "$INTEG_DIR/raw.$"
+    [ "$is_rc" = 0 ] && [ -s "$1" ]
 }
 integrity_watch()
 {
@@ -817,9 +830,10 @@ integrity_watch()
     iw_prev_at=0
     [ ! -s "$INTEG_DIR/snapshot.tsv" ] || iw_prev_at=$(date -r "$INTEG_DIR/snapshot.tsv" +%s 2>/dev/null || echo 0)
     if ! integrity_snapshot "$INTEG_DIR/snapshot.new"; then
-        # No stat or md5sum on this router: said once, the look waits a day.
+        # Missing tool, I/O error, or a file lost during enumeration: unknown,
+        # NEVER silently accept the remaining files as the new baseline.
         rm -f "$INTEG_DIR/snapshot.new"
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|SKIPPED|no_tools" >> "$INTEG_LOG"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|SKIPPED|snapshot_incomplete" >> "$INTEG_LOG"
         { [ ! -r "$INTEG_DIR/state" ] || grep -v '^skipped=' "$INTEG_DIR/state"; echo "skipped=$(date +%s)"; } > "$INTEG_DIR/state.$$" && mv -f "$INTEG_DIR/state.$$" "$INTEG_DIR/state"
         return 0
     fi
@@ -864,7 +878,21 @@ integrity_watch()
             REMOVED) [ "$iw_rem" -gt 20 ] || echo "$iw_now|REMOVED|$iw_f" >> "$INTEG_LOG" ;;
         esac
     done < "$INTEG_DIR/diff"
-    mv -f "$INTEG_DIR/snapshot.new" "$INTEG_DIR/snapshot.tsv"
+    # A changed hash with unchanged mtime is evidence of suspected corruption,
+    # not a new trusted baseline. Retain the previous hashes even if repair is
+    # disabled, refused, interrupted, or fails. A future clean observation can
+    # advance the baseline only after the file matches its former good hash.
+    if [ "$iw_sp" -gt 0 ]; then
+        mv -f "$INTEG_DIR/snapshot.new" "$INTEG_DIR/snapshot.suspect.tsv" || rm -f "$INTEG_DIR/snapshot.new"
+        echo "$iw_now|BASELINE_HELD|spoiled=$iw_sp|reason=unverified" >> "$INTEG_LOG"
+    else
+        if ! mv -f "$INTEG_DIR/snapshot.new" "$INTEG_DIR/snapshot.tsv"; then
+            echo "$iw_now|SKIPPED|baseline_write_failed" >> "$INTEG_LOG"
+            rm -f "$INTEG_DIR/diff"
+            return 0
+        fi
+        rm -f "$INTEG_DIR/snapshot.suspect.tsv"
+    fi
     rm -f "$INTEG_DIR/diff"
     iw_n=$(grep -c . "$INTEG_DIR/snapshot.tsv")
     iw_pk=${iw_pk# }

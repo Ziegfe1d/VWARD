@@ -847,6 +847,20 @@ function logEntry(raw) {
     const what = r === 'changed' ? 'изменены' : r === 'unchanged' ? 'без изменений' : r === 'checked' ? 'проверены' : er ? 'действие не выполнено' + (API_ERRORS[er] ? ': ' + API_ERRORS[er] : '') : 'действие';
     return { t: t, src: src, code: code, text: 'Настройки Панели VWARD: ' + what, more: [all].concat(more), level: er ? 'warn' : logLevel(code + ' ' + body) };
   }
+  // A fork is not a restored VPN channel. Show the attempt as a warning, not
+  // a successful recovery; put the technical tunnel identifier in details.
+  if (code === 'VLESS_ENGINE') {
+    const event = parts[0] || '';
+    const attempted = /^restart_attempted (OpkgTun[0-9])(?: on its adapter)?$/.exec(event);
+    const started = /^started (OpkgTun[0-9]) by request$/.exec(event);
+    if (attempted || started) {
+      const tun = (attempted || started)[1];
+      return { t: t, src: src, code: code,
+        text: attempted ? 'Xray: попытка перезапуска' : 'Xray: процесс запущен, соединение не проверено',
+        more: ['Туннель ' + tun].concat(parts.slice(1).map(logField), more),
+        level: attempted ? 'warn' : 'info' };
+    }
+  }
   const words = (code ? (LOG_CODES[code] || code.toLowerCase().replace(/_/g, ' ')) : '') + (parts.length ? (code ? ': ' : '') + parts.map(logField).join(' · ') : '');
   return { t: t, src: src, code: code, text: words.replace(/\bCONSOLE\b/g, 'Панель VWARD').replace(/Консоль/g, 'Панель VWARD'), more: more, level: logLevel(code + ' ' + body) };
 }
