@@ -88,7 +88,7 @@ import signal as _signal
 import tempfile as _tempfile
 
 supervisor = (ROOT / "components/runtime/scripts/vward-cron-supervisor.sh").read_text()
-fm = _re.search(r"^keep_route_engine\\(\\)\\n\\{\\n.*?^\\}\\n", supervisor, _re.M | _re.S)
+fm = _re.search(r"^keep_route_engine\(\)\n\{\n.*?^\}\n", supervisor, _re.M | _re.S)
 if not fm:
     fail("the components supervisor has no keep_route_engine")
 
@@ -99,7 +99,7 @@ with _tempfile.TemporaryDirectory() as td:
     bin_dir.mkdir()
     run_dir.mkdir()
     fake = bin_dir / "vward-route-engine.sh"
-    fake.write_text("#!/bin/sh\\nsleep 30\\n")
+    fake.write_text("#!/bin/sh\nsleep 30\n")
     fake.chmod(0o755)
     starts = t / "starts"
     events = t / "events"
@@ -109,15 +109,15 @@ with _tempfile.TemporaryDirectory() as td:
         time.sleep(0.1)
         script = (f"BIN_DIR={_shlex.quote(str(bin_dir))}; RUN_DIR={_shlex.quote(str(run_dir))}; "
                   f"INITD={_shlex.quote(str(t))}; START_LOG={_shlex.quote(str(starts))}; "
-                  f"EVENT_LOG={_shlex.quote(str(events))}\\n"
-                  'vward_component_enabled(){ return 0; }\\n'
-                  'vward_update_pending(){ return 1; }\\n'
-                  'restart_allowed(){ return 0; }\\n'
-                  'start_of(){ echo called >> "$START_LOG"; }\\n'
-                  'log_event(){ echo "$1" >> "$EVENT_LOG"; }\\n'
-                  + fm.group(0) + "\\nkeep_route_engine\\n")
+                  f"EVENT_LOG={_shlex.quote(str(events))}\n"
+                  'vward_component_enabled(){ return 0; }\n'
+                  'vward_update_pending(){ return 1; }\n'
+                  'restart_allowed(){ return 0; }\n'
+                  'start_of(){ echo called >> "$START_LOG"; }\n'
+                  'log_event(){ echo "$1" >> "$EVENT_LOG"; }\n'
+                  + fm.group(0) + "\nkeep_route_engine\n")
         def check(pid):
-            pidfile.write_text(str(pid) + "\\n")
+            pidfile.write_text(str(pid) + "\n")
             run = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=5)
             if run.returncode:
                 fail(f"supervisor identity check exited unexpectedly: {run.stderr}")
