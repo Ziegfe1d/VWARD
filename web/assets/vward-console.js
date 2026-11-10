@@ -857,7 +857,7 @@ function logEntry(raw) {
       const tun = (attempted || started)[1];
       return { t: t, src: src, code: code,
         text: attempted ? 'Xray: попытка перезапуска' : 'Xray: процесс запущен, соединение не проверено',
-        more: ['Туннель ' + tun].concat(parts.slice(1), more),
+        more: ['Туннель ' + tun].concat(parts.slice(1).map(logField), more),
         level: attempted ? 'warn' : 'info' };
     }
   }
