@@ -385,6 +385,17 @@ pid_of() {
         s=$(cat "${VWARD_PROC:-/proc}/$p/stat" 2>/dev/null) || p=
         s=${s##*) }
         case "$s" in Z*|X*) p= ;; esac
+        # A stale PID may have been reused by an unrelated process. Its mere
+        # existence is not proof that this slot still has a running Xray.
+        if [ -n "$p" ]; then
+            po_comm=
+            read -r po_comm < "${VWARD_PROC:-/proc}/$p/comm" 2>/dev/null || po_comm=
+            [ "$po_comm" = "${VWARD_ENGINE_COMM:-xray}" ] || p=
+        fi
+        if [ -n "$p" ]; then
+            grep -q -F -- "$ENGINE_ETC/v$1.json" \
+                "${VWARD_PROC:-/proc}/$p/cmdline" 2>/dev/null || p=
+        fi
     fi
     [ -n "$p" ] || p=$(procs_of "$1" | head -n 1)
     [ -n "$p" ] || return 1
@@ -584,7 +595,7 @@ op_supervise() {
         ! failover_busy "$n" || continue
         if [ -z "$(pid_of "$n")" ]; then
             restart_due "$n" "$name" || continue
-            start_one "$n" && started=$((started + 1)) && log "restarted $name"
+            start_one "$n" && started=$((started + 1)) && log "restart_attempted $name"
             continue
         fi
         link_up "$(adapter_of "$name")"
@@ -618,7 +629,7 @@ op_supervise() {
         restart_due "$n" "$name" || continue
         echo $((fails + 1)) > "$ENGINE_RUN/v$n.fails"
         stop_one "$n"
-        start_one "$n" && started=$((started + 1)) && log "restarted $name on its adapter"
+        start_one "$n" && started=$((started + 1)) && log "restart_attempted $name on its adapter"
     done < "$TUNNELS"
     [ "$started" = 0 ] && echo "result=unchanged" || echo "result=changed"
 }
@@ -946,6 +957,10 @@ op_start() {
     n=$(printf '%s' "$row" | cut -f1)
     stop_one "$n"
     start_one "$n" || die engine_start_failed
+    # A successful fork only means an attempt. Do not tell the Panel that the
+    # program started if it immediately exited (including a SIGSEGV).
+    sleep 1
+    [ -n "$(pid_of "$n")" ] || die engine_start_failed
     log "started $1 by request"
     echo "result=changed"
 }
