@@ -127,6 +127,30 @@ esac
         fail(f"a spoiled VWARD file: {out2}")
     if any(o.startswith("install") for o in (t / "opkg.log").read_text().splitlines()[n_ops:]):
         fail("a package reinstalled for a VWARD file")
+    # A VWARD file cannot be auto-repaired. Its corruption MUST still appear
+    # next day, without replacing the previous trusted (good) checksums.
+    baseline = r / "opt/var/lib/vward/integrity/snapshot.tsv"
+    trusted_before = baseline.read_bytes()
+    out2 = new_lines(out); out += out2
+    if "SPOILED|/opt/share/vward/engine.sh|pkg=vward" not in out2 or \
+       "BASELINE_HELD|spoiled=" not in out2 or baseline.read_bytes() != trusted_before:
+        fail("unrepaired VWARD file silently accepted as new baseline")
+
+    # A failed checksum during snapshot is UNKNOWN, not REMOVED. Even one
+    # unreadable file must not poison the baseline.
+    real_md5sum = shutil.which("md5sum") or fail("md5sum missing")
+    md5_override = t / "mockbin"
+    md5_override.mkdir()
+    wrapper = md5_override / "md5sum"
+    wrapper.write_text('#!/bin/sh\\n[ "${VWARD_MOCK_MD5_FAIL:-0}" != 1 ] || exit 1\\nexec "' +
+                       real_md5sum + '" "$@"\\n')
+    wrapper.chmod(0o755)
+    env["PATH"] = str(md5_override) + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin")
+    env["VWARD_MOCK_MD5_FAIL"] = "1"
+    out2 = new_lines(out); out += out2
+    del env["VWARD_MOCK_MD5_FAIL"]
+    if "|SKIPPED|snapshot_incomplete" not in out2 or baseline.read_bytes() != trusted_before:
+        fail("incomplete checksum snapshot was accepted or trusted baseline changed")
     # A program writes a file (its time changes): only written down, by whom when known.
     tool.write_bytes(b"#!/bin/sh\necho tool v2\n")
     out2 = new_lines(out); out += out2
