@@ -142,8 +142,8 @@ esac
     md5_override = t / "mockbin"
     md5_override.mkdir()
     wrapper = md5_override / "md5sum"
-    wrapper.write_text('#!/bin/sh\\n[ "${VWARD_MOCK_MD5_FAIL:-0}" != 1 ] || exit 1\\nexec "' +
-                       real_md5sum + '" "$@"\\n')
+    wrapper.write_text('#!/bin/sh\n[ "${VWARD_MOCK_MD5_FAIL:-0}" != 1 ] || exit 1\nexec "' +
+                       real_md5sum + '" "$@"\n')
     wrapper.chmod(0o755)
     env["PATH"] = str(md5_override) + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin")
     env["VWARD_MOCK_MD5_FAIL"] = "1"
