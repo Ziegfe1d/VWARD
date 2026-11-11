@@ -144,6 +144,10 @@ esac
     # production script and its protected PATH remain untouched.
     scratch_script = t / "housekeeping-md5-fault.sh"
     original_script = SCRIPT.read_text()
+    # Admission registration is not a singleton: parallel runs need separate scratch files.
+    for scratch in ("list", "raw"):
+        if f'"$INTEG_DIR/{scratch}.$$"' not in original_script or f'"$INTEG_DIR/{scratch}.$"' in original_script:
+            fail("integrity snapshot scratch files must be PID-scoped")
     checksum_call = 'is_h=$(md5sum < "$is_f" 2>/dev/null) || exit 1'
     if original_script.count(checksum_call) != 1:
         fail("housekeeping checksum contract changed")
