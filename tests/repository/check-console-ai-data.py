@@ -42,11 +42,17 @@ with tempfile.TemporaryDirectory() as tmp:
     lib = (ROOT / "components/runtime/lib/vward-device-profile.sh").read_text()
     start = lib.index("vward_agh_smartdns_domains()")
     end = lib.index("# vward_doh_alive URL")
-    (tmp / "profile.sh").write_text("vward_profile_load(){ VWARD_WAN_INTERFACE=GigabitEthernet1; return 0; }\n" + lib[start:end])
+    url_reads = tmp / "url-reads"
+    readers = lib[start:end].replace("vward_agh_smartdns_urls()", "fixture_agh_smartdns_urls()")
+    (tmp / "profile.sh").write_text(
+        "vward_profile_load(){ VWARD_WAN_INTERFACE=GigabitEthernet1; return 0; }\n"
+        + readers
+        + 'vward_agh_smartdns_urls() { echo read >> "$FIXTURE_URL_READS"; fixture_agh_smartdns_urls; }\n'
+    )
     env = os.environ | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=ai-data", "JQ": shutil.which("jq"),
                         "VWARD_PROFILE_LIB": str(tmp / "profile.sh"), "VWARD_ROOT_PREFIX": str(tmp / "root"),
                         "VWARD_NDMC": str(ndmc), "VWARD_CONSOLE_CACHE_TTL": "0", "VWARD_CONSOLE_ETC": str(etc),
-                        "VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_DOH_ALIVE": "0",
+                        "VWARD_ADGUARD_CONFIG": str(yaml), "VWARD_DOH_ALIVE": "0", "FIXTURE_URL_READS": str(url_reads),
                         "VWARD_SERVICES_FETCHED": str(tmp / "none.json"),
                         "VWARD_SERVICES_BUNDLED": str(ROOT / "components/console/data/services-catalog.json")}
     r = subprocess.run(["sh", str(API)], env=env, text=True, capture_output=True, timeout=120)
@@ -79,4 +85,7 @@ with tempfile.TemporaryDirectory() as tmp:
     claude = svc.get("claude.ai")
     if not claude or claude["via"] != "vpn" or claude.get("lists"):
         fail("the service's own list is its way, not a conflict: " + json.dumps(claude))
+    reads = url_reads.read_text().splitlines() if url_reads.exists() else []
+    if len(reads) != 1:
+        fail(f"one AGH URL scan per ai-data request, observed {len(reads)}")
 print("CONSOLE_AI_DATA=PASS")

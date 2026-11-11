@@ -2765,6 +2765,7 @@ if [ "$ACTION" = ai-data ]; then
     AI_DOH="$(printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {h = $3; sub(/^https:\/\//, "", h); sub(/[\/:].*$/, "", h); print tolower($NF) "\t" h}')"
     AI_AGH="$(command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains | head -n 400)"
+    AI_AGH_URLS="$(command -v vward_agh_smartdns_urls >/dev/null 2>&1 && vward_agh_smartdns_urls)"
     # Where Smart DNS domains go (fix.32): auto (AdGuard Home when it works), keenetic, agh.
     AI_STORE="$(awk -F= '$1 == "SMARTDNS_STORE" {print $2; exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)"
     case "$AI_STORE" in keenetic|agh) ;; *) AI_STORE=auto ;; esac
@@ -2778,7 +2779,7 @@ if [ "$ACTION" = ai-data ]; then
     AI_URL="$(awk -F= '$1 == "SMARTDNS_URL" {print substr($0, index($0, "=") + 1); exit}' "$CONFIG_ETC/smartdns.conf" 2>/dev/null)"
     [ -n "$AI_URL" ] || AI_URL="$({ printf '%s\n' "$AI_RUN" | awk '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "https" && $2 == "upstream" && $(NF-1) == "domain" {print $3}'
-        command -v vward_agh_smartdns_urls >/dev/null 2>&1 && vward_agh_smartdns_urls; } | sort | uniq -c | sort -rn | awk 'NR == 1 {print $2}')"
+        [ -z "$AI_AGH_URLS" ] || printf '%s\n' "$AI_AGH_URLS"; } | sort | uniq -c | sort -rn | awk 'NR == 1 {print $2}')"
     if [ "$AI_SD_ON" != true ]; then
         AI_ALIVE=off
     elif [ -n "$AI_URL" ] && command -v vward_doh_alive >/dev/null 2>&1; then
@@ -2791,7 +2792,11 @@ if [ "$ACTION" = ai-data ]; then
     # the Panel lists each server still in use with its own «Убрать» (fix.35.3: rows of an expired
     # server stayed after its own address was gone, and no button was left to take them out).
     AI_ALIVE_HOST="$(printf '%s\n' "$AI_URL" | awk '{u = $0; sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); print tolower(u); exit}')"
-    AI_AGH_HOSTS="$(command -v vward_agh_smartdns_urls >/dev/null 2>&1 && vward_agh_smartdns_urls | head -n 400 | awk '{u = $0; sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); print tolower(u)}')"
+    AI_AGH_HOSTS=
+    if [ -n "$AI_AGH_URLS" ]; then
+        AI_AGH_HOSTS="$(printf '%s\n' "$AI_AGH_URLS" | awk 'NR > 400 {exit} {u = $0; sub(/^https:\/\//, "", u); sub(/[\/:].*$/, "", u); print tolower(u)}')"
+    fi
+    unset AI_AGH_URLS
     AI_URL=
     AI_ON="$(awk -F'\t' 'NF >= 3 {print $1 "\t" $2 "\t" $3}' "$CONFIG_ETC/services/enabled.tsv" 2>/dev/null)"
     # The services waiting for room in Smart DNS (op_ai), and whether AdGuard Home runs.
