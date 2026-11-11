@@ -422,6 +422,8 @@ keep_route_engine()
     # must not suppress recovery now that the S91 cron watchdog is disabled.
     # /proc/PID/cmdline is read by the shell itself (BusyBox ash skips NUL);
     # no ps/grep/awk is spawned on the supervisor's 10-second hot path.
+    # Autopodbor in Go running (S91 started it instead of the shell engine): nothing to keep.
+    ! command -v vward_core_adaptive_pid >/dev/null 2>&1 || ! vward_core_adaptive_pid >/dev/null || return 0
     RE_STALE=0
     if [ -n "$RE_P" ] && kill -0 "$RE_P" 2>/dev/null; then
         RE_CMD=

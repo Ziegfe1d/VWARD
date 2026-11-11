@@ -90,9 +90,18 @@ choose() {
 # ---------- downloads ----------
 
 fetch() {
-    curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
-        --connect-timeout 15 --max-time 120 --retry 3 --max-filesize 4194304 \
-        --output "$2.part" "$1" 2>/dev/null && mv "$2.part" "$2"
+    # curl crashing on HTTPS now and then (Entware's OpenSSL 3.5.5 on MIPS: SIGILL, rc 132): a
+    # crash is tried again, up to 6 times; any other failure is an answer.
+    fetch_n=0
+    while :; do
+        curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --connect-timeout 15 --max-time 120 --retry 3 --max-filesize 4194304 \
+            --output "$2.part" "$1" 2>/dev/null && { mv "$2.part" "$2"; return; }
+        fetch_rc=$?
+        fetch_n=$((fetch_n + 1))
+        [ "$fetch_rc" -ge 128 ] && [ "$fetch_n" -lt 6 ] || { rm -f "$2.part"; return "$fetch_rc"; }
+        sleep 2
+    done
 }
 
 # repo_get PATH OUT: a repository file, checked against SHA256SUMS.

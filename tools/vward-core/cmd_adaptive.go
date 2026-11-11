@@ -13,6 +13,7 @@ import (
 
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/adaptive"
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/journal"
+	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/ndm"
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/rci"
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/router"
 )
@@ -49,9 +50,10 @@ func (l *eventLog) put(event, host, why string) {
 
 type adaptiveFlags struct {
 	rciAddr, lan, wan, tunDev, group, jdir, logPath, dns string
-	apply                                                bool
+	ownedPath, shellPersist                              string
+	apply, reconcile                                     bool
 	workers, limit                                       int
-	batch, saveEvery, refresh, timeout                   time.Duration
+	batch, saveEvery, refresh, timeout, reconcileTick    time.Duration
 }
 
 func parseAdaptive(name string, args []string) (*adaptiveFlags, *flag.FlagSet) {
@@ -66,11 +68,15 @@ func parseAdaptive(name string, args []string) (*adaptiveFlags, *flag.FlagSet) {
 	fs.StringVar(&f.logPath, "log", "/opt/var/log/vward-core-adaptive.log", "event log (- : stdout)")
 	fs.StringVar(&f.dns, "dns", "", "resolver for the checks (empty: the router's)")
 	fs.BoolVar(&f.apply, "apply", false, "write into the group (without: observation, nothing sent)")
+	fs.BoolVar(&f.reconcile, "reconcile", true, "take names out again once they open directly (3 checks in a row)")
+	fs.StringVar(&f.ownedPath, "owned", "/opt/var/lib/vward/core-adaptive/owned.json", "the names Autopodbor added itself")
+	fs.StringVar(&f.shellPersist, "shell-persist", "/opt/var/lib/vward/route-engine/adaptive-persist.txt", "the shell engine's list, taken over once")
 	fs.IntVar(&f.workers, "workers", 3, "names checked at the same time")
 	fs.IntVar(&f.limit, "limit", 290, "names the group may hold (Keenetic keeps 300)")
 	fs.DurationVar(&f.batch, "batch", 10*time.Second, "names found within this go as one batch")
 	fs.DurationVar(&f.saveEvery, "save-every", 30*time.Minute, "configuration saved at most this often")
 	fs.DurationVar(&f.refresh, "refresh", 5*time.Minute, "the router's groups read again this often")
+	fs.DurationVar(&f.reconcileTick, "reconcile-tick", 5*time.Minute, "how often the names due for a check are looked at")
 	fs.DurationVar(&f.timeout, "timeout", 3*time.Second, "one check (connection, TLS, answer), as the shell engine's 3 s")
 	fs.Parse(args)
 	if f.wan == "" {
@@ -126,6 +132,20 @@ func runAdaptive(args []string) {
 		log.put("JOURNAL_BLOCKED", "-", err.Error()+" (vward-core recover)")
 		w.Observe = true
 	}
+	owned, err := adaptive.LoadOwned(f.ownedPath)
+	if err != nil {
+		log.put("OWNED_UNREAD", f.ownedPath, err.Error()+" (starting an empty list)")
+	}
+	var omu sync.Mutex // owned and the writer: one change at a time
+	inGroup := func(m *ndm.Model) map[string]bool {
+		out := map[string]bool{}
+		if g, ok := m.Groups[f.group]; ok {
+			for _, d := range g.Include {
+				out[d] = true
+			}
+		}
+		return out
+	}
 	refresh := func() bool {
 		m, err := r.Read([]string{"groups", "routes", "doh"})
 		if err != nil {
@@ -133,6 +153,12 @@ func runAdaptive(args []string) {
 			return false
 		}
 		e.SetConfig(m)
+		omu.Lock()
+		if n := owned.Forget(inGroup(m)); n > 0 {
+			log.put("OWNED_FORGOTTEN", "-", fmt.Sprintf("%d names no longer in %s", n, f.group))
+			owned.Save()
+		}
+		omu.Unlock()
 		if _, ok := m.Groups[f.group]; !ok || len(m.RoutesOf(f.group)) == 0 {
 			log.put("NO_ROUTE", f.group, "the group is missing or not routed to the VPN: nothing is added")
 		}
@@ -140,6 +166,14 @@ func runAdaptive(args []string) {
 	}
 	for !refresh() {
 		time.Sleep(30 * time.Second)
+	}
+	if m, err := r.Read([]string{"groups"}); err == nil {
+		omu.Lock()
+		if n := owned.ImportShell(f.shellPersist, inGroup(m), time.Now()); n > 0 {
+			log.put("OWNED_IMPORTED", f.shellPersist, fmt.Sprintf("%d names the shell engine added", n))
+			owned.Save()
+		}
+		omu.Unlock()
 	}
 	capt, err := adaptive.OpenCapture(f.lan)
 	if err != nil {
@@ -216,6 +250,65 @@ func runAdaptive(args []string) {
 		}()
 	}
 
+	if f.reconcile {
+		rc := adaptive.DefaultReconcile()
+		prober := adaptive.NewProber(f.timeout, f.dns)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tick := time.NewTicker(f.reconcileTick)
+			defer tick.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+				}
+				omu.Lock()
+				// The checks themselves run without the lock held for long: a copy of what is due.
+				snap := &adaptive.Owned{Names: map[string]*adaptive.Name{}}
+				for h, n := range owned.Names {
+					c := *n
+					snap.Names[h] = &c
+				}
+				omu.Unlock()
+				remove, ev := adaptive.Reconcile(ctx, snap, prober, f.wan, rc, time.Now())
+				omu.Lock()
+				for h, n := range snap.Names {
+					if cur, ok := owned.Names[h]; ok {
+						cur.Streak, cur.LastOK, cur.Checked = n.Streak, n.LastOK, n.Checked
+					}
+				}
+				for _, x := range ev {
+					if x.Event != "REMOVE" {
+						log.put("MAINT_"+x.Event, x.Host, fmt.Sprintf("streak=%d/%d %s", x.Streak, rc.Threshold, x.Why))
+					}
+				}
+				if len(remove) > 0 {
+					b, err := w.Remove(remove, time.Now())
+					switch {
+					case err != nil:
+						log.put("REMOVE_FAILED", strings.Join(remove, ","), err.Error())
+					case b != nil:
+						for _, h := range b.Removed {
+							log.put("REMOVED", h, "opened directly 3 times in a row")
+							delete(owned.Names, h)
+							e.Forget(h)
+						}
+						for _, h := range b.Would {
+							log.put("WOULD_REMOVE", h, "opened directly 3 times in a row")
+						}
+					}
+				}
+				owned.Save()
+				omu.Unlock()
+				if len(remove) > 0 {
+					refresh()
+				}
+			}
+		}()
+	}
+
 	batch := time.NewTicker(f.batch)
 	defer batch.Stop()
 	reread := time.NewTicker(f.refresh)
@@ -224,6 +317,8 @@ func runAdaptive(args []string) {
 		select {
 		case <-ctx.Done():
 			wg.Wait()
+			omu.Lock()
+			defer omu.Unlock()
 			if saved, err := w.Flush(time.Now(), true); err != nil {
 				log.put("SAVE_FAILED", "-", err.Error())
 			} else if saved {
@@ -242,6 +337,7 @@ func runAdaptive(args []string) {
 			}
 			pending = map[string]bool{}
 			mu.Unlock()
+			omu.Lock()
 			if len(hosts) > 0 {
 				b, err := w.Add(hosts, time.Now())
 				switch {
@@ -253,6 +349,12 @@ func runAdaptive(args []string) {
 				case b != nil:
 					for _, h := range b.Added {
 						log.put("ADDED", h, f.group)
+						owned.Names[h] = &adaptive.Name{Added: time.Now()}
+					}
+					if len(b.Added) > 0 {
+						if err := owned.Save(); err != nil {
+							log.put("OWNED_UNSAVED", f.ownedPath, err.Error())
+						}
 					}
 					for _, h := range b.Would {
 						log.put("WOULD_ADD", h, f.group)
@@ -260,13 +362,16 @@ func runAdaptive(args []string) {
 					if len(b.Added) == 0 && len(b.Would) == 0 && b.Why != "" {
 						log.put("ADD_SKIPPED", strings.Join(hosts, ","), b.Why)
 					}
-					if b.Model != nil && len(b.Added) > 0 {
-						refresh()
-					}
 				}
 			}
-			if saved, err := w.Flush(time.Now(), false); err != nil {
-				log.put("SAVE_FAILED", "-", err.Error())
+			saved, ferr := w.Flush(time.Now(), false)
+			added := len(hosts) > 0
+			omu.Unlock()
+			if added {
+				refresh()
+			}
+			if ferr != nil {
+				log.put("SAVE_FAILED", "-", ferr.Error())
 			} else if saved {
 				log.put("SAVED", "-", "")
 			}

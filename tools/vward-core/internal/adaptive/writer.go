@@ -13,10 +13,10 @@ import (
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/plan"
 )
 
-// Writer puts names into the group through the executor: the names found within a few
-// seconds go as one batch (CAS read, pending record, one RCI request, a read that proves it,
-// compensation). Only «include» lines of this one group are ever sent: no route, no other
-// group, no removal (taking names out stays with the route reconciler for now). The
+// Writer puts names into the group and takes them out through the executor: the names of a
+// few seconds go as one batch (CAS read, pending record, one RCI request, a read that proves
+// it, compensation). Only «include» lines of this one group are ever sent: no route, no other
+// group; only names Autopodbor added itself are taken out (Owned). The
 // configuration is saved at most every SaveEvery, not after every batch (the USB stick).
 type Writer struct {
 	R         exec.Router
@@ -37,6 +37,7 @@ type Batch struct {
 	Added   []string // in the group, proven
 	Would   []string // observation: what would have been added
 	Skipped []string // already in the group, or no room
+	Removed []string // taken out, proven
 	Model   *ndm.Model
 	Why     string // why nothing was written ("" when written)
 }
@@ -148,4 +149,79 @@ func (w *Writer) Flush(now time.Time, force bool) (bool, error) {
 	}
 	w.dirty, w.lastSave = false, now
 	return true, nil
+}
+
+// Remove takes owned names out of the group as one batch. A name not in the group is
+// already out. Observe: only says what would go.
+func (w *Writer) Remove(hosts []string, now time.Time) (*Batch, error) {
+	b := &Batch{}
+	cur, err := w.R.Read([]string{"groups", "routes"})
+	if err != nil {
+		return nil, fmt.Errorf("adaptive: read: %w", err)
+	}
+	b.Model = cur
+	g, ok := cur.Groups[w.Group]
+	routes := cur.RoutesOf(w.Group)
+	if !ok || len(routes) != 1 {
+		b.Why = w.Group + " missing or not routed once to the VPN: not changed"
+		return b, ErrNoGroup
+	}
+	drop := map[string]bool{}
+	for _, h := range hosts {
+		drop[h] = true
+	}
+	var keep, gone []string
+	for _, d := range g.Include {
+		if drop[d] {
+			gone = append(gone, d)
+		} else {
+			keep = append(keep, d)
+		}
+	}
+	if len(gone) > 0 && len(keep) == 0 {
+		// Never the last name: an empty group is not Autopodbor's to leave behind (the group
+		// and its route are the owner's routing); it goes at the next round, after a new name.
+		keep, gone = append(keep, gone[len(gone)-1]), gone[:len(gone)-1]
+	}
+	if len(gone) == 0 {
+		b.Why = "already out"
+		return b, nil
+	}
+	if w.Observe {
+		b.Would = gone
+		b.Why = "observation: nothing sent"
+		return b, nil
+	}
+	r := routes[0]
+	want := plan.Desired{
+		Groups:      []plan.Group{{Name: w.Group, Include: keep, Target: r.Target, Options: r.Options}},
+		OwnedGroups: map[string]bool{w.Group: true},
+	}
+	p, err := plan.Build(cur, want, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range p.Steps {
+		if s.Area != "group:"+w.Group || !strings.HasPrefix(s.Cmd, "no object-group fqdn "+w.Group+" include ") {
+			return nil, fmt.Errorf("adaptive: the plan goes beyond removing names: %q", s.Cmd)
+		}
+	}
+	w.seq++
+	op := fmt.Sprintf("adaptive-%d-%d", now.Unix(), w.seq)
+	res, err := exec.RunWith(w.R, w.J, op, cur, p, exec.Options{NoSave: w.SaveEvery > 0})
+	if err != nil {
+		return b, err
+	}
+	if res.Outcome.State != "done" {
+		b.Why = res.Outcome.State + ": " + res.Outcome.Reason
+		return b, nil
+	}
+	for _, s := range p.Steps {
+		b.Removed = append(b.Removed, strings.TrimPrefix(s.Cmd, "no object-group fqdn "+w.Group+" include "))
+	}
+	w.dirty = w.SaveEvery > 0
+	if w.KeepOps > 0 {
+		w.J.Prune("adaptive-", w.KeepOps)
+	}
+	return b, nil
 }

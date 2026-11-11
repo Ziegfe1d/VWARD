@@ -30,6 +30,20 @@ vward_extra() {
 # Panel shows them off and switches them on as before.
 VWARD_LITE_OFF=${VWARD_LITE_OFF-tunnel-guard wan-guard wifi-client-guard policy-sync ads-privacy-guard}
 
+# Autopodbor in Go (owner 11.11.2026): vward_core_adaptive_pid prints the PID of the routing
+# core's own process («vward-core adaptive») when it runs. While it runs it is the only writer
+# of AdaptiveAuto: the shell engine and the shell route reconciler stand aside. The command
+# line is read by the shell itself (BusyBox ash skips the NULs): no process.
+VWARD_CORE_PIDFILE=${VWARD_CORE_PIDFILE:-${VWARD_ROOT_PREFIX:-}/opt/var/run/vward/core-adaptive.pid}
+vward_core_adaptive_pid() {
+    _vca=; read -r _vca 2>/dev/null < "$VWARD_CORE_PIDFILE" || :
+    case "$_vca" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$_vca" 2>/dev/null || return 1
+    _vcc=; IFS= read -r _vcc 2>/dev/null < "${VWARD_PROC:-/proc}/$_vca/cmdline" || :
+    case "$_vcc" in *vward-core*adaptive*) echo "$_vca"; return 0 ;; esac
+    return 1
+}
+
 # vward_component_gate ID [RC]: leave quietly when the component is disabled.
 # Scheduled jobs exit 0; manual tools pass a non-zero RC.
 vward_component_gate() {

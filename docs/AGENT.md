@@ -1464,6 +1464,20 @@ WOULD_ADD без отправки; запись — одна команда incl
 заблокированному сайту ~7 с. Сборка воспроизводима, mipsle 2,1 МБ gzip (TLS). На роутере не
 запускалось; S91 и установка не переключены на Go (следующий этап).
 
+### 11.11.2026 — [Claude Code] этап 3: сверка AdaptiveAuto на Go и запуск ядра из S91
+
+`internal/adaptive/owned.go`, `reconcile.go`, `Writer.Remove`: имена, добавленные автоподбором
+(импорт `adaptive-persist.txt` один раз), убираются после 3 прямых удач подряд (≥4 мин), сброс при
+неудаче/unknown, последнее имя не убирается; только `no object-group fqdn AdaptiveAuto include`.
+`S91`: `engine_start` — ядро при `/opt/share/vward/core/vward-core` (иначе shell + фоновый
+`S91 core-install`, раз в час; сумма закреплена в `core_sum`, сверяется `check-core-adaptive.py` с
+`tools/vward-core/SHA256SUMS` и `dist/`), отказ старта → shell на час; `engine.shell`, `core.observe`,
+`adaptive.disabled`. `vward_core_adaptive_pid` (admission) — агент компонентов и shell-сверка
+стоят в стороне. Отдельный скрипт установки отвергнут: явный allowlist целей модуля обновлений
+2.0.10 (`check-package-map.py`) не примет новый путь. install.sh: повтор при падении curl (rc≥128,
+до 6). На роутере не запускалось. **Доставка на роутер владельца невозможна до восстановления
+Entware** (jq/libc удалены: модуль обновлений не проверит манифест, opkg без DNS, SSH не пускает).
+
 ## 4. Открытые вопросы и нужные данные
 
 - 09.11.2026 / fix.36 опубликован: нужна приёмка владельцем на роутере (Ozon/WB, Lampa TV, ночной скан 00:10, экраны Панели, журнал сторожа DNS на возврат AdGuard Home в цепочку). Локальный стресс 09.11: однократное «processes pile up 6 -> 13» (route engine 5), в CI нет; при повторе разобрать по `soak_debug`.

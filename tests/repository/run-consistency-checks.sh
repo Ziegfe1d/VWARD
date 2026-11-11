@@ -150,6 +150,8 @@ python3 tests/repository/check-keenetic-cache.py || fail "one shared read of the
 python3 tests/repository/check-keenetic-parts.py || fail "Narrow reads of Keenetic configuration, proven (owner 08.11)"
 python3 tests/repository/check-flash-watch.py || fail "USB stick watch"
 python3 tests/repository/check-lite-defaults.py || fail "lightened VWARD: only Adaptive auto and the VPN by default"
+python3 tests/repository/check-core-adaptive.py || fail "Autopodbor in Go: S91 runs the core, one writer of AdaptiveAuto"
+python3 tests/repository/check-install-fetch-retry.py || fail "install.sh: a curl crash on HTTPS is tried again"
 python3 tests/repository/check-integrity-watch.py || fail "file integrity journal: spoiled files found and repaired without a loop"
 python3 tests/repository/check-agents-watch.py || fail "agents observation mode"
 python3 tests/repository/check-vless-countries.py || fail "VLESS servers by country"
