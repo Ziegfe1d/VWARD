@@ -1357,6 +1357,38 @@ stop_orphans; компонент tunnel-guard — тот же, что в fix.36.
 доказано: SSH (новые соединения не доходят до dropbear), реклама (AGH querylog), Route Engine не
 стартует — ждут данных владельца.
 
+### 11.11.2026 — [Claude Code] P0 «Manifest structure/signature verification failed» (журнал vward-all до 21:27)
+
+**Формат манифеста не виноват, откатывать нечего.** Опубликованные raw dev v1/v2 побайтно равны
+`d0ddaca`; структура v2 fix.36.1 совпадает с fix.36 (изменились только значения); код движка 2.0.10
+в `8dc0044` (fix.36, стоит на роутере) = HEAD. Полный путь роутера на копии 2.0.10 (сторож
+`--once`, ответ 200 → `--check`, production-ключ, установлен fix.36/2026110801): манифест принят,
+VERIFIED → AVAILABLE. Тот же прогон с jq или openssl, падающим по SIGILL: ровно «Manifest
+structure/signature verification failed», rc=31, без строк загрузки — как в журнале
+(CHECKING → ERROR за ≤1 с, 09:00–18:15 UTC).
+**Причина — инструмент проверки на роутере (jq; openssl не исключён).** Доказательства из журнала:
+(1) до 09:00 UTC «Manifest unchanged» — ответ 304, ни jq, ни openssl не вызываются, поломка была
+скрыта до первого нового манифеста; (2) `engine_move=failed rc=4` уже в 00:17 МСК 11.11 — за 10 ч до
+fix.36.1, на манифесте fix.36: rc=4 = `jq -cS`/`openssl pkeyutl`/`jq -e` (rc=3 был бы загрузкой);
+(3) реклама: `SOURCES_UPDATE_FAIL|healthy=0|active=0` без единой строки `SOURCE_FAIL|id=…` — цикл по
+`jq -r '.sources[].id'` не выполнился ни разу. Воспроизведено на копии кода (dash): curl, падающий
+только на HTTPS, даёт `SOURCE_FAIL|reason=download` на каждый источник, а чтение querylog работает
+(AGH — HTTP на localhost); jq с SIGILL даёт ровно картину роутера: healthy=0 без SOURCE_FAIL и
+«cannot read allowed AdGuard Home queries» (query-read rc=3). (4) Целостность 02:17 МСК: SPOILED
+`/opt/lib/libm-2.27.so` (pkg=libc), libnss_files, libpcre2, ldconfig; jq использует libm (по
+устройству jq; индекс Entware из контейнера недоступен — не сверено), dropbear — libnss_files.
+**Гипотеза владельца про curl 132 для рекламы опровергнута:** общий HTTPS-fallback не поможет; curl 132
+(интервалами 22:45–01:00, 03:15, 10:45–11:15, 15:30–16:45 UTC) — отдельная, уже обходимая проблема.
+**Исправление выпуском невозможно:** движок 2.0.10 проверяет любой манифест через jq/openssl — пока
+они не работают, роутер не примет ни один выпуск. Нужен ремонт пакетов Entware на роутере (только с
+разрешения владельца), затем сторож сам примет fix.36.1 в течение 15 мин.
+**Route Engine «каждые 6 часов»** — не расписание: `restart_allowed` (`vward-cron-supervisor.sh`)
+пишет RESTART_LIMIT не чаще раза в 21600 с. Движок падает непрерывно (5 запусков в час, стоп до
+конца часа). Route Engine jq не вызывает; причина падения не доказана — нужен
+`/opt/var/log/vward-route-engine-events.log` и `tail /tmp/vward-route-engine*`.
+**Не сделано:** экраны и связь «пустой ответ» ↔ обрыв ppp0/sstp0 (api.cgi: 149 вызовов jq —
+с неработающим jq «пустой ответ» ожидаем и без обрыва WAN; не проверено).
+
 ## 4. Открытые вопросы и нужные данные
 
 - 09.11.2026 / fix.36 опубликован: нужна приёмка владельцем на роутере (Ozon/WB, Lampa TV, ночной скан 00:10, экраны Панели, журнал сторожа DNS на возврат AdGuard Home в цепочку). Локальный стресс 09.11: однократное «processes pile up 6 -> 13» (route engine 5), в CI нет; при повторе разобрать по `soak_debug`.
