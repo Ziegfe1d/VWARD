@@ -268,6 +268,10 @@ esac
     died_then([3000, 2500, 2000, 1500, 1000, 600], "result=unchanged", "6 starts within the hour: left as it is")
     if not (starts / "v0.gaveup").exists() or "перезапускался 6 раз за час" not in notes.joinpath("notes.tsv").read_text():
         fail("6 starts within the hour: one notification")
+    # 11.11.2026: the engine tries again 15 minutes after the last start (below); the note
+    # must not say it waits for the end of the hour.
+    if "до конца часа" in notes.joinpath("notes.tsv").read_text() or "через 15 минут" not in notes.joinpath("notes.tsv").read_text():
+        fail("the note does not tell the real retry: 15 minutes after the last start")
     died_then([3000, 2500, 2000, 1500, 1000, 600], "result=unchanged", "still 6 within the hour")
     if notes.joinpath("notes.tsv").read_text().count("перезапускался") != 1:
         fail("one notification, not one a minute")

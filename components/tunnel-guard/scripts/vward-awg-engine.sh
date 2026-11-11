@@ -228,12 +228,12 @@ restart_due() {
     if [ "$rd_c" -ge "${VWARD_ENGINE_STARTS_MAX:-6}" ]; then
         [ ! -e "$STARTS_DIR/t$1.gaveup" ] || return 1
         : > "$STARTS_DIR/t$1.gaveup"
-        log "$2: started $rd_c times within the hour, not started again until the hour has passed"
+        log "$2: started $rd_c times within the hour, next try 15 minutes after the last start"
         command -v vward_note >/dev/null 2>&1 ||
             { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
         ! command -v vward_note >/dev/null 2>&1 ||
             vward_note warn "«{t}» перезапускался $rd_c раз за час" \
-                "Туннель не работает после перезапусков: программа останавливается или сервер не отвечает. VWARD не перезапускает его до конца часа, чтобы не ронять канал снова и снова. Проверьте сервер или подписку; кнопка «Перезапустить» работает и сейчас." \
+                "Туннель не работает после перезапусков: программа останавливается или сервер не отвечает. Следующая попытка - через 15 минут после последней, и так пока туннель не заработает. Проверьте сервер или подписку; кнопка «Перезапустить» работает и сейчас." \
                 "t-$2"
         return 1
     fi

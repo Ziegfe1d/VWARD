@@ -179,6 +179,8 @@ esac
     # Never a loop: libx reinstalled twice this week and spoiled again - left alone, named.
     book = r / "opt/var/lib/vward/repair/packages.tsv"
     now = int(time.time())
+    # The package was installed long ago (not since the last look): a change now is the stick.
+    os.utime(r / "opt/lib/opkg/info/libx.list", (OLD, OLD))
     book.write_text(f"{now - 3 * 86400} libx integrity\n{now - 2 * 86400} libx integrity\n")
     notes.unlink()
     out = log.read_text()
@@ -191,5 +193,46 @@ esac
         fail("reinstalled again in a loop")
     if "чтобы не повторять по кругу: libx" not in notes.read_text():
         fail(f"the package left alone is not named: {notes.read_text()}")
+
+    # 11.11.2026: a baseline taken over a spoiled copy (before fix.36.1 the baseline moved on after
+    # SPOILED), then the owner or VWARD reinstalls the package. opkg keeps the package's own file
+    # times, so the repaired file has the same time and other contents - but opkg rewrote the
+    # package's file list after the last look: written by opkg, not spoiled by the stick.
+    import hashlib
+    snap = r / "opt/var/lib/vward/integrity/snapshot.tsv"
+    st_file = r / "opt/var/lib/vward/integrity/state"
+    bad_hash = hashlib.md5(lib.read_bytes()).hexdigest()
+    rows = []
+    for row in snap.read_text().splitlines():
+        f = row.split("\t")
+        if f[0] == "/opt/lib/libx.so.1":
+            f[3] = bad_hash
+        rows.append("\t".join(f))
+    snap.write_text("\n".join(rows) + "\n")
+    now = int(time.time())
+    st_file.write_text(f"at={now - 1000}\nfiles=3\n")
+    os.utime(snap, (now - 1000, now - 1000))
+    lib.write_bytes(good); os.utime(lib, (OLD, OLD))
+    (r / "opt/lib/opkg/info/libx.list").write_text("/opt/lib/libx.so.1\n")
+    os.utime(r / "opt/lib/opkg/info/libx.list", (now - 500, now - 500))
+    if notes.exists():
+        notes.unlink()
+    out = log.read_text()
+    out2 = new_lines(out); out += out2
+    if "|WRITTEN|/opt/lib/libx.so.1|by=opkg:libx" not in out2 or "|SPOILED|/opt/lib/libx.so.1" in out2 or \
+       "pkg=libx" in out2 or (notes.exists() and "libx" in notes.read_text()):
+        fail(f"a package reinstalled by opkg reported as spoiled by the stick: {out2}")
+    if f"\t{hashlib.md5(good).hexdigest()}" not in snap.read_text():
+        fail("the baseline does not take the reinstalled package's file")
+    # The next day the reinstalled file is not told again (while the VWARD file stays spoiled,
+    # only that file keeps its former checksum), and the spoiled VWARD file still is.
+    out2 = new_lines(out); out += out2
+    if "/opt/lib/libx.so.1" in out2 or "|SPOILED|/opt/share/vward/engine.sh|" not in out2 or "/opt/bin/tool" in out2:
+        fail(f"a held baseline repeats reinstalled or written files, or drops the spoiled one: {out2}")
+    # The same package spoiled after that reinstall (the list is older than the last look): spoiled.
+    spoil(lib, b"libx SPOILED third")
+    out2 = new_lines(out); out += out2
+    if "|SPOILED|/opt/lib/libx.so.1|pkg=libx" not in out2:
+        fail(f"a spoiled file after an earlier reinstall is not found: {out2}")
 
 print("INTEGRITY_WATCH=PASS")

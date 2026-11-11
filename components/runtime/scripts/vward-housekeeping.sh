@@ -856,12 +856,26 @@ integrity_watch()
         END {for (f in s) if (!(f in seen)) print "REMOVED\t" f}' "$INTEG_DIR/snapshot.tsv" "$INTEG_DIR/snapshot.new" > "$INTEG_DIR/diff"
     iw_sp=0 iw_wr=0 iw_un=0 iw_vw= iw_pk=
     iw_add=$(grep -c '^ADDED' "$INTEG_DIR/diff") iw_rem=$(grep -c '^REMOVED' "$INTEG_DIR/diff")
+    # The end of the last look (its state, written after its own repairs): builtins only.
+    iw_look=0
+    [ ! -r "$INTEG_DIR/state" ] || while IFS='=' read -r iw_sk iw_sv; do
+        [ "$iw_sk" != at ] || iw_look=$iw_sv
+    done < "$INTEG_DIR/state"
+    case "$iw_look" in ''|*[!0-9]*) iw_look=0 ;; esac
     while IFS="$(printf '\t')" read -r iw_k iw_f; do
         iw_pkg=$(grep -lx -- "$iw_f" "$R"/opt/lib/opkg/info/*.list 2>/dev/null | head -n 1)
         iw_pkg=${iw_pkg##*/}; iw_pkg=${iw_pkg%.list}
+        # opkg keeps the package's own file times: a package (re)installed since the last look
+        # (opkg rewrote its file list) has the same time and other contents - a repair of a
+        # spoiled copy (11.11.2026: libc, libpcre2), not the stick. Written by opkg.
+        if [ "$iw_k" = SPOILED ] && [ -n "$iw_pkg" ] && [ "$iw_look" -gt 0 ] &&
+           [ "$(date -r "$R/opt/lib/opkg/info/$iw_pkg.list" +%s 2>/dev/null || echo 0)" -ge "$iw_look" ]; then
+            iw_k=WRITTEN
+        fi
         case "$iw_k" in
             SPOILED)
                 iw_sp=$((iw_sp + 1))
+                printf '%s\n' "$iw_f" >> "$INTEG_DIR/spoiled.$$"
                 echo "$iw_now|SPOILED|$iw_f|pkg=${iw_pkg:-vward}" >> "$INTEG_LOG"
                 if [ -n "$iw_pkg" ]; then case " $iw_pk " in *" $iw_pkg "*) ;; *) iw_pk="$iw_pk $iw_pkg" ;; esac
                 else iw_vw="$iw_vw${iw_vw:+, }$iw_f"; fi ;;
@@ -879,12 +893,24 @@ integrity_watch()
         esac
     done < "$INTEG_DIR/diff"
     # A changed hash with unchanged mtime is evidence of suspected corruption,
-    # not a new trusted baseline. Retain the previous hashes even if repair is
-    # disabled, refused, interrupted, or fails. A future clean observation can
-    # advance the baseline only after the file matches its former good hash.
+    # not a new trusted baseline. The SPOILED files keep their previous hashes
+    # even if repair is disabled, refused, interrupted, or fails: such a file
+    # advances only after it matches its former good hash (or opkg reinstalls
+    # its package). Every other file advances, so a write or a reinstall is not
+    # reported again every day while one file stays spoiled (11.11.2026).
     if [ "$iw_sp" -gt 0 ]; then
+        if awk -F '\t' 'FNR == 1 {part++}
+                part == 1 {k[$0] = 1; next}
+                part == 2 {if ($1 in k) print; next}
+                !($1 in k)' "$INTEG_DIR/spoiled.$$" "$INTEG_DIR/snapshot.tsv" "$INTEG_DIR/snapshot.new" > "$INTEG_DIR/held.$$" &&
+           LC_ALL=C sort "$INTEG_DIR/held.$$" > "$INTEG_DIR/snapshot.held.$$" && [ -s "$INTEG_DIR/snapshot.held.$$" ] &&
+           mv -f "$INTEG_DIR/snapshot.held.$$" "$INTEG_DIR/snapshot.tsv"; then
+            echo "$iw_now|BASELINE_HELD|spoiled=$iw_sp|reason=unverified" >> "$INTEG_LOG"
+        else
+            echo "$iw_now|BASELINE_HELD|spoiled=$iw_sp|reason=unverified|whole=1" >> "$INTEG_LOG"
+        fi
+        rm -f "$INTEG_DIR/held.$$" "$INTEG_DIR/snapshot.held.$$"
         mv -f "$INTEG_DIR/snapshot.new" "$INTEG_DIR/snapshot.suspect.tsv" || rm -f "$INTEG_DIR/snapshot.new"
-        echo "$iw_now|BASELINE_HELD|spoiled=$iw_sp|reason=unverified" >> "$INTEG_LOG"
     else
         if ! mv -f "$INTEG_DIR/snapshot.new" "$INTEG_DIR/snapshot.tsv"; then
             echo "$iw_now|SKIPPED|baseline_write_failed" >> "$INTEG_LOG"
@@ -893,7 +919,7 @@ integrity_watch()
         fi
         rm -f "$INTEG_DIR/snapshot.suspect.tsv"
     fi
-    rm -f "$INTEG_DIR/diff"
+    rm -f "$INTEG_DIR/diff" "$INTEG_DIR/spoiled.$$"
     iw_n=$(grep -c . "$INTEG_DIR/snapshot.tsv")
     iw_pk=${iw_pk# }
     PR_DONE= PR_HELD= PR_STILL= PR_COPY= PR_OPKG=
