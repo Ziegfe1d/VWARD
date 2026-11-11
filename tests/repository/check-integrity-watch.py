@@ -140,30 +140,20 @@ esac
 
     # A failed checksum during snapshot is UNKNOWN, not REMOVED. Even one
     # unreadable file must not poison the baseline.
-    real_md5sum = shutil.which("md5sum") or fail("md5sum missing")
-    md5_override = t / "mockbin"
-    md5_override.mkdir()
-    wrapper = md5_override / "md5sum"
-    wrapper.write_text('#!/bin/sh\n[ "${VWARD_MOCK_MD5_FAIL:-0}" != 1 ] || exit 1\nexec "' +
-                       real_md5sum + '" "$@"\n')
-    wrapper.chmod(0o755)
-    # The production housekeeping script deliberately resets PATH to a fixed
-    # trusted value. Do not weaken that security boundary to inject a test.
-    # Run a temporary copy with ONLY its PATH assignment changed, so the
-    # deliberately failing md5sum wrapper is actually reached in this test.
+    # Inject failure at the checksum call in a disposable script. The
+    # production script and its protected PATH remain untouched.
     scratch_script = t / "housekeeping-md5-fault.sh"
     original_script = SCRIPT.read_text()
-    fixed_path = "PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
-    if original_script.count(fixed_path) != 1:
-        fail("housekeeping PATH security contract changed")
-    scratch_script.write_text(original_script.replace(fixed_path, "PATH=" + str(md5_override) + ":/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin", 1))
-    env["VWARD_MOCK_MD5_FAIL"] = "1"
+    checksum_call = 'is_h=$(md5sum < "$is_f" 2>/dev/null) || exit 1'
+    if original_script.count(checksum_call) != 1:
+        fail("housekeeping checksum contract changed")
+    scratch_script.write_text(original_script.replace(
+        checksum_call, 'is_h=$(false < "$is_f" 2>/dev/null) || exit 1', 1))
     script_under_test = scratch_script
     try:
         out2 = new_lines(out); out += out2
     finally:
         script_under_test = SCRIPT
-        del env["VWARD_MOCK_MD5_FAIL"]
     if "|SKIPPED|snapshot_incomplete" not in out2 or baseline.read_bytes() != trusted_before:
         fail("incomplete checksum snapshot was accepted or trusted baseline changed")
     # A program writes a file (its time changes): only written down, by whom when known.
