@@ -77,4 +77,69 @@ if "WATCHDOG_RESTART|reason=$UNHEALTHY" not in S91:
 if "|procs=$(core_detail)" not in S91 or S91.count("|procs=$(core_detail)") != 2 or "START_FAILED|wait=${N}s|last_stop=$(last_stop)|alive=" not in S91:
     fail("WATCHDOG_RESTART and START_FAILED must name the processes and the lock they saw")
 
+
+# The components supervisor checks every 10 s, while S91 cron is intentionally off.
+# A *reused* PID must not masquerade as the Route Engine or prevent its restart.
+# This test runs the actual keep_route_engine function with synthetic pid files,
+# no Keenetic commands and no changes outside a temporary directory.
+import re as _re
+import shlex as _shlex
+import signal as _signal
+import tempfile as _tempfile
+
+supervisor = (ROOT / "components/runtime/scripts/vward-cron-supervisor.sh").read_text()
+fm = _re.search(r"^keep_route_engine\(\)\n\{\n.*?^\}\n", supervisor, _re.M | _re.S)
+if not fm:
+    fail("the components supervisor has no keep_route_engine")
+
+with _tempfile.TemporaryDirectory() as td:
+    t = Path(td)
+    bin_dir = t / "bin"
+    run_dir = t / "run"
+    bin_dir.mkdir()
+    run_dir.mkdir()
+    fake = bin_dir / "vward-route-engine.sh"
+    fake.write_text("#!/bin/sh\nsleep 30\n")
+    fake.chmod(0o755)
+    # keep_route_engine acts only when the S91 start script is there (as on the router).
+    s91 = t / "S91vward-route-engine"
+    s91.write_text("#!/bin/sh\nexit 0\n")
+    s91.chmod(0o755)
+    starts = t / "starts"
+    events = t / "events"
+    pidfile = run_dir / "route-engine.pid"
+    p = subprocess.Popen([str(fake)], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(0.1)
+        script = (f"BIN_DIR={_shlex.quote(str(bin_dir))}; RUN_DIR={_shlex.quote(str(run_dir))}; "
+                  f"INITD={_shlex.quote(str(t))}; START_LOG={_shlex.quote(str(starts))}; "
+                  f"EVENT_LOG={_shlex.quote(str(events))}\n"
+                  'vward_component_enabled(){ return 0; }\n'
+                  'vward_update_pending(){ return 1; }\n'
+                  'restart_allowed(){ return 0; }\n'
+                  'start_of(){ echo called >> "$START_LOG"; }\n'
+                  'log_event(){ echo "$1" >> "$EVENT_LOG"; }\n'
+                  + fm.group(0) + "\nkeep_route_engine\n")
+        def check(pid):
+            pidfile.write_text(str(pid) + "\n")
+            run = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=5)
+            if run.returncode:
+                fail(f"supervisor identity check exited unexpectedly: {run.stderr}")
+        check(p.pid)
+        if starts.exists():
+            fail("the supervisor tried to restart an actual Route Engine")
+        check(os.getpid())  # a *live* Python process, not the Route Engine
+        if not starts.exists() or starts.read_text().count("called") != 1 or \
+           not events.exists() or "ROUTE_ENGINE_PID_STALE|" not in events.read_text():
+            fail("reused PID stopped the Route Engine recovery or was not logged")
+        check(99999999)  # dead PID
+        if starts.read_text().count("called") != 2:
+            fail("dead Route Engine PID did not trigger recovery")
+    finally:
+        try:
+            os.killpg(p.pid, _signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        p.wait(timeout=5)
+
 print("ROUTE_ENGINE_WATCHDOG=PASS")

@@ -369,10 +369,28 @@ adapter_of() { printf 'opkgtun%s\n' "${1#OpkgTun}"; }
 # procs_of SLOT: every running program started with the slot's configuration, whatever the
 # pid file says. A stale pid file left an old program holding the adapter while a «restart»
 # started a second one beside it (Viva 2026-10-04: the broken Xray lived on for hours).
+# cmdline_has PID TEXT: the program's command line holds TEXT. Read by the shell itself (it drops
+# the NULs between the arguments): the router's BusyBox grep stops at the first NUL of a line and
+# never finds the configuration after «xray run -c» (11.11.2026).
+cmdline_has() {
+    ch_l=
+    IFS= read -r ch_l < "${VWARD_PROC:-/proc}/$1/cmdline" 2>/dev/null || :
+    case "$ch_l" in *"$2"*) return 0 ;; esac
+    return 1
+}
+
+# xray_pids: the running programs named like the engine (comm), builtins only.
+xray_pids() {
+    for xp_d in "${VWARD_PROC:-/proc}"/[0-9]*; do
+        xp_c=
+        read -r xp_c < "$xp_d/comm" 2>/dev/null || continue
+        [ "$xp_c" = "${VWARD_ENGINE_COMM:-xray}" ] && echo "${xp_d##*/}"
+    done
+}
+
 procs_of() {
-    grep -l -F -- "$ENGINE_ETC/v$1.json" "${VWARD_PROC:-/proc}"/[0-9]*/cmdline 2>/dev/null | while IFS= read -r f; do
-        d=${f%/cmdline}
-        [ "$(cat "$d/comm" 2>/dev/null)" = "${VWARD_ENGINE_COMM:-xray}" ] && echo "${d##*/}"
+    for po_p in $(xray_pids); do
+        ! cmdline_has "$po_p" "$ENGINE_ETC/v$1.json" || echo "$po_p"
     done
 }
 
@@ -385,6 +403,14 @@ pid_of() {
         s=$(cat "${VWARD_PROC:-/proc}/$p/stat" 2>/dev/null) || p=
         s=${s##*) }
         case "$s" in Z*|X*) p= ;; esac
+        # A stale PID may have been reused by an unrelated process. Its mere
+        # existence is not proof that this slot still has a running Xray.
+        if [ -n "$p" ]; then
+            po_comm=
+            read -r po_comm < "${VWARD_PROC:-/proc}/$p/comm" 2>/dev/null || po_comm=
+            [ "$po_comm" = "${VWARD_ENGINE_COMM:-xray}" ] || p=
+        fi
+        [ -z "$p" ] || cmdline_has "$p" "$ENGINE_ETC/v$1.json" || p=
     fi
     [ -n "$p" ] || p=$(procs_of "$1" | head -n 1)
     [ -n "$p" ] || return 1
@@ -437,9 +463,9 @@ restart_due() {
     if [ "$rd_c" -ge "${VWARD_ENGINE_STARTS_MAX:-6}" ]; then
         [ ! -e "$STARTS_DIR/v$1.gaveup" ] || return 1
         : > "$STARTS_DIR/v$1.gaveup"
-        log "$2: started $rd_c times within the hour, not started again until the hour has passed"
+        log "$2: started $rd_c times within the hour, next try 15 minutes after the last start"
         bell warn "«{t}» перезапускался $rd_c раз за час" \
-            "Туннель не работает после перезапусков: программа останавливается или сервер не отвечает. VWARD не перезапускает его до конца часа, чтобы не ронять канал снова и снова. Проверьте сервер или подписку; кнопка «Перезапустить» работает и сейчас." \
+            "Туннель не работает после перезапусков: программа останавливается или сервер не отвечает. Следующая попытка - через 15 минут после последней, и так пока туннель не заработает. Проверьте сервер или подписку; кнопка «Перезапустить» работает и сейчас." \
             "$2"
         return 1
     fi
@@ -550,14 +576,13 @@ op_remove() {
 # stop_orphans: a program whose slot no tunnel has any more (a removal that did not stop
 # it, seen on Viva 2026-10-04) holds an adapter and memory for nothing: it is stopped.
 stop_orphans() {
-    grep -l -F -- "$ENGINE_ETC/v" "${VWARD_PROC:-/proc}"/[0-9]*/cmdline 2>/dev/null | while IFS= read -r f; do
-        d=${f%/cmdline}
-        [ "$(cat "$d/comm" 2>/dev/null)" = "${VWARD_ENGINE_COMM:-xray}" ] || continue
-        c=$(tr '\000' '\n' 2>/dev/null < "$f" | grep -F -- "$ENGINE_ETC/v" | head -n 1)
-        k=${c##*/v}; k=${k%.json}
-        case "$k" in ''|*[!0-9]*) continue ;; esac
-        awk -F '\t' -v n="$k" '$1 == n {f = 1} END {exit !f}' "$TUNNELS" 2>/dev/null && continue
-        kill "${d##*/}" 2>/dev/null && log "stopped the program of a removed tunnel (slot $k)"
+    for so_p in $(xray_pids); do
+        cmdline_has "$so_p" "$ENGINE_ETC/v" || continue
+        so_c=$(tr '\000' '\n' 2>/dev/null < "${VWARD_PROC:-/proc}/$so_p/cmdline" | grep -F -- "$ENGINE_ETC/v" | head -n 1)
+        so_k=${so_c##*/v}; so_k=${so_k%.json}
+        case "$so_k" in ''|*[!0-9]*) continue ;; esac
+        awk -F '\t' -v n="$so_k" '$1 == n {f = 1} END {exit !f}' "$TUNNELS" 2>/dev/null && continue
+        kill "$so_p" 2>/dev/null && log "stopped the program of a removed tunnel (slot $so_k)"
     done
 }
 
@@ -584,7 +609,7 @@ op_supervise() {
         ! failover_busy "$n" || continue
         if [ -z "$(pid_of "$n")" ]; then
             restart_due "$n" "$name" || continue
-            start_one "$n" && started=$((started + 1)) && log "restarted $name"
+            start_one "$n" && started=$((started + 1)) && log "restart_attempted $name"
             continue
         fi
         link_up "$(adapter_of "$name")"
@@ -618,7 +643,7 @@ op_supervise() {
         restart_due "$n" "$name" || continue
         echo $((fails + 1)) > "$ENGINE_RUN/v$n.fails"
         stop_one "$n"
-        start_one "$n" && started=$((started + 1)) && log "restarted $name on its adapter"
+        start_one "$n" && started=$((started + 1)) && log "restart_attempted $name on its adapter"
     done < "$TUNNELS"
     [ "$started" = 0 ] && echo "result=unchanged" || echo "result=changed"
 }
@@ -946,6 +971,10 @@ op_start() {
     n=$(printf '%s' "$row" | cut -f1)
     stop_one "$n"
     start_one "$n" || die engine_start_failed
+    # A successful fork only means an attempt. Do not tell the Panel that the
+    # program started if it immediately exited (including a SIGSEGV).
+    sleep 1
+    [ -n "$(pid_of "$n")" ] || die engine_start_failed
     log "started $1 by request"
     echo "result=changed"
 }

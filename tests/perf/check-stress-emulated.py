@@ -180,6 +180,16 @@ def stage_soak(root, minutes, seed, findings, info):
     if any(f[0] == "soak" and f[1] == "not recovered" for f in findings) or (sizes and sizes[-1][2] > 1_000_000):
         info["soak_debug"] = debug_state(root)
     end_ps, names = ps_count(root)
+    # A pile-up stays; one look can land in a burst of the running route engine (its subshells,
+    # awk, curl: CI 42957512471 saw 12 at the end while minutes 60 and 70 had 5). Looked at again
+    # for up to 15 s, the fewest counts; leaked processes are still there then.
+    for _ in range(5):
+        if end_ps <= start_ps + 4:
+            break
+        time.sleep(3)
+        again, names_again = ps_count(root)
+        if again < end_ps:
+            end_ps, names = again, names_again
     # Daemons (route engine, crond, supervisor, sentinel) may run; nothing may pile up.
     if end_ps > start_ps + 4:
         findings.append(("soak", "processes pile up", f"{start_ps} -> {end_ps}: {dict(names.most_common(6))}"))

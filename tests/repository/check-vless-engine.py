@@ -32,6 +32,18 @@ def fail(message: str) -> None:
 
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
+    # 11.11.2026: the router's grep is BusyBox, which stops at the first NUL of a line: a
+    # /proc/PID/cmdline match that GNU grep finds is never found there. The engine runs here
+    # with Keenetic's grep first in its own fixed PATH (a disposable copy of the script).
+    bb = shutil.which("busybox") or fail("busybox is needed (the router's grep)")
+    bbdir = tmp / "keenetic-bin"; bbdir.mkdir()
+    (bbdir / "grep").symlink_to(bb)
+    engine_src = ENGINE.read_text()
+    if engine_src.count("PATH=/opt/bin:") != 1:
+        fail("the engine's fixed PATH changed")
+    ENGINE = tmp / "vward-vless-engine.sh"
+    ENGINE.write_text(engine_src.replace("PATH=/opt/bin:", f"PATH={bbdir}:/opt/bin:", 1))
+    ENGINE.chmod(0o755)
     bin_ = tmp / "bin"; bin_.mkdir()
     etc, share, run_ = tmp / "etc", tmp / "share", tmp / "run"
     (tmp / "rc").write_text("interface OpkgTun0\n!\n")
@@ -268,6 +280,10 @@ esac
     died_then([3000, 2500, 2000, 1500, 1000, 600], "result=unchanged", "6 starts within the hour: left as it is")
     if not (starts / "v0.gaveup").exists() or "перезапускался 6 раз за час" not in notes.joinpath("notes.tsv").read_text():
         fail("6 starts within the hour: one notification")
+    # 11.11.2026: the engine tries again 15 minutes after the last start (below); the note
+    # must not say it waits for the end of the hour.
+    if "до конца часа" in notes.joinpath("notes.tsv").read_text() or "через 15 минут" not in notes.joinpath("notes.tsv").read_text():
+        fail("the note does not tell the real retry: 15 minutes after the last start")
     died_then([3000, 2500, 2000, 1500, 1000, 600], "result=unchanged", "still 6 within the hour")
     if notes.joinpath("notes.tsv").read_text().count("перезапускался") != 1:
         fail("one notification, not one a minute")
@@ -279,7 +295,7 @@ esac
     pid2 = (run_ / "v0.pid").read_text()
     if engine("supervise") != ["result=unchanged"] or (run_ / "v0.pid").read_text() != pid2:
         fail("no adapter to look at: nothing to do")
-    if "restarted OpkgTun1 on its adapter" not in (tmp / "engine.log").read_text():
+    if "restart_attempted OpkgTun1 on its adapter" not in (tmp / "engine.log").read_text():
         fail("the restart on the adapter must be logged")
     del env["VWARD_SYSFS_NET"]
     # A stale pid file (Viva 2026-10-04): «restart» stopped nothing and the broken Xray lived on
@@ -298,6 +314,13 @@ esac
     old = copies(etc / "v0.json")
     if len(old) != 1:
         fail(f"one Xray before the restart: {old}")
+    # A stale numeric PID can be reused by a live unrelated process. It is
+    # not Xray, even though kill -0 and /proc/PID/stat succeed.
+    (run_ / "v0.pid").write_text(f"{os.getpid()}\n")
+    current = engine("status")
+    if not any(line.startswith("tunnel=OpkgTun1\t1\t") for line in current) or \
+       (run_ / "v0.pid").read_text().strip() not in old:
+        fail("a reused PID of another process must not impersonate Xray")
     (run_ / "v0.pid").write_text("999999\n")
     if engine("restart", "OpkgTun1")[-1] != "result=changed":
         fail("restart with a stale pid file")
