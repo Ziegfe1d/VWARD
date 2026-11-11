@@ -80,8 +80,10 @@ esac
                         "VWARD_INTEGRITY_NOW": "1", "VWARD_DMESG_BIN": str(t / "none")}
     log = r / "opt/var/log/vward-integrity.log"
 
+    script_under_test = SCRIPT
+
     def run() -> str:
-        res = subprocess.run([busybox, "sh", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=120)
+        res = subprocess.run([busybox, "sh", str(script_under_test)], env=env, capture_output=True, text=True, timeout=120)
         if res.returncode != 0:
             fail(f"housekeeping failed: {res.stderr[-300:]}")
         return log.read_text() if log.exists() else ""
@@ -145,10 +147,23 @@ esac
     wrapper.write_text('#!/bin/sh\n[ "${VWARD_MOCK_MD5_FAIL:-0}" != 1 ] || exit 1\nexec "' +
                        real_md5sum + '" "$@"\n')
     wrapper.chmod(0o755)
-    env["PATH"] = str(md5_override) + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin")
+    # The production housekeeping script deliberately resets PATH to a fixed
+    # trusted value. Do not weaken that security boundary to inject a test.
+    # Run a temporary copy with ONLY its PATH assignment changed, so the
+    # deliberately failing md5sum wrapper is actually reached in this test.
+    scratch_script = t / "housekeeping-md5-fault.sh"
+    original_script = SCRIPT.read_text()
+    fixed_path = "PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
+    if original_script.count(fixed_path) != 1:
+        fail("housekeeping PATH security contract changed")
+    scratch_script.write_text(original_script.replace(fixed_path, "PATH=" + str(md5_override) + ":/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin", 1))
     env["VWARD_MOCK_MD5_FAIL"] = "1"
-    out2 = new_lines(out); out += out2
-    del env["VWARD_MOCK_MD5_FAIL"]
+    script_under_test = scratch_script
+    try:
+        out2 = new_lines(out); out += out2
+    finally:
+        script_under_test = SCRIPT
+        del env["VWARD_MOCK_MD5_FAIL"]
     if "|SKIPPED|snapshot_incomplete" not in out2 or baseline.read_bytes() != trusted_before:
         fail("incomplete checksum snapshot was accepted or trusted baseline changed")
     # A program writes a file (its time changes): only written down, by whom when known.
