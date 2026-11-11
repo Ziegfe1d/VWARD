@@ -416,11 +416,25 @@ keep_route_engine()
     RE_P=
     [ ! -r "$RUN_DIR/route-engine.pid" ] || read -r RE_P < "$RUN_DIR/route-engine.pid" 2>/dev/null || :
     case "$RE_P" in ''|*[!0-9]*) RE_P= ;; esac
-    [ -z "$RE_P" ] || ! kill -0 "$RE_P" 2>/dev/null || return 0
+    # A PID number can be reused after a crash. A live *unrelated* process
+    # must not suppress recovery now that the S91 cron watchdog is disabled.
+    # /proc/PID/cmdline is read by the shell itself (BusyBox ash skips NUL);
+    # no ps/grep/awk is spawned on the supervisor's 10-second hot path.
+    RE_STALE=0
+    if [ -n "$RE_P" ] && kill -0 "$RE_P" 2>/dev/null; then
+        RE_CMD=
+        IFS= read -r RE_CMD < "/proc/$RE_P/cmdline" 2>/dev/null || :
+        case "$RE_CMD" in
+            "$BIN_DIR/vward-route-engine.sh"*|"/bin/sh$BIN_DIR/vward-route-engine.sh"*|"/opt/bin/sh$BIN_DIR/vward-route-engine.sh"*)
+                return 0 ;;
+        esac
+        RE_STALE=1
+    fi
     [ -x "$INITD/S91vward-route-engine" ] || return 0
     ! command -v vward_update_pending >/dev/null 2>&1 || ! vward_update_pending || return 0
     ! command -v vward_component_enabled >/dev/null 2>&1 || vward_component_enabled route-engine || return 0
     restart_allowed route-engine || return 0
+    [ "$RE_STALE" != 1 ] || log_event "ROUTE_ENGINE_PID_STALE|pid=$RE_P|reason=identity_mismatch"
     start_of route-engine && log_event "STARTED|route-engine|by=watch"
 }
 

@@ -61,4 +61,12 @@ colors = re.findall(r"#[0-9a-fA-F]{3,8}\b", body.split("*{box-sizing", 1)[1])
 if len(colors) > 6:
     fail("цвета заданы вне токенов: " + ", ".join(colors[:6]))
 
+# All action buttons have centred labels. The dedicated wrapping group may break
+# between words but must never split a word in the middle or left-align a button.
+# A narrow phone should not require a special-case style that contradicts this.
+if ".panel-actions.wrap .btn{white-space:normal;text-align:center;word-break:normal;overflow-wrap:normal}" not in css:
+    fail("группа кнопок с длинными подписями: слова должны быть целыми, текст по центру")
+if ".panel-actions.wrap .btn{white-space:normal;text-align:left}" in css:
+    fail("для кнопок не допускается исключение с левым выравниванием")
+
 print("CONSOLE_RESPONSIVE=PASS")

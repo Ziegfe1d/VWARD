@@ -800,14 +800,27 @@ integrity_snapshot()
     # Each file: the time of change («date -r»: Keenetic's BusyBox has no stat with a format)
     # and the checksum. The size is not needed: the time and the contents tell it all.
     # shellcheck disable=SC2086
-    find $is_roots -xdev -type f ! -path '*/opt/lib/opkg/*' ! -name '*.pyc' 2>/dev/null > "$INTEG_DIR/list.$$"
-    while IFS= read -r is_f; do
-        is_m=$(date -r "$is_f" +%s 2>/dev/null) || continue
-        is_h=$(md5sum < "$is_f" 2>/dev/null) || continue
-        printf '%s\t-\t%s\t%s\n' "${is_f#"$R"}" "$is_m" "${is_h%% *}"
-    done < "$INTEG_DIR/list.$$" | sort > "$1"
-    rm -f "$INTEG_DIR/list.$$"
-    [ -s "$1" ]
+    # Incomplete reads must NOT look like REMOVED files or establish a new
+    # trusted baseline. BusyBox sh has no pipefail; write unsorted output first
+    # so failures of date/md5sum propagate independently of sort.
+    find $is_roots -xdev -type f ! -path '*/opt/lib/opkg/*' ! -name '*.pyc' 2>/dev/null > "$INTEG_DIR/list.$$" || {
+        rm -f "$INTEG_DIR/list.$$"
+        return 1
+    }
+    if ! (
+        while IFS= read -r is_f; do
+            is_m=$(date -r "$is_f" +%s 2>/dev/null) || exit 1
+            is_h=$(md5sum < "$is_f" 2>/dev/null) || exit 1
+            printf '%s\t-\t%s\t%s\n' "${is_f#"$R"}" "$is_m" "${is_h%% *}" || exit 1
+        done < "$INTEG_DIR/list.$$"
+    ) > "$INTEG_DIR/raw.$$"; then
+        rm -f "$INTEG_DIR/list.$$" "$INTEG_DIR/raw.$$" "$1"
+        return 1
+    fi
+    LC_ALL=C sort "$INTEG_DIR/raw.$$" > "$1"
+    is_rc=$?
+    rm -f "$INTEG_DIR/list.$$" "$INTEG_DIR/raw.$$"
+    [ "$is_rc" = 0 ] && [ -s "$1" ]
 }
 integrity_watch()
 {
@@ -817,9 +830,10 @@ integrity_watch()
     iw_prev_at=0
     [ ! -s "$INTEG_DIR/snapshot.tsv" ] || iw_prev_at=$(date -r "$INTEG_DIR/snapshot.tsv" +%s 2>/dev/null || echo 0)
     if ! integrity_snapshot "$INTEG_DIR/snapshot.new"; then
-        # No stat or md5sum on this router: said once, the look waits a day.
+        # Missing tool, I/O error, or a file lost during enumeration: unknown,
+        # NEVER silently accept the remaining files as the new baseline.
         rm -f "$INTEG_DIR/snapshot.new"
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|SKIPPED|no_tools" >> "$INTEG_LOG"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|SKIPPED|snapshot_incomplete" >> "$INTEG_LOG"
         { [ ! -r "$INTEG_DIR/state" ] || grep -v '^skipped=' "$INTEG_DIR/state"; echo "skipped=$(date +%s)"; } > "$INTEG_DIR/state.$$" && mv -f "$INTEG_DIR/state.$$" "$INTEG_DIR/state"
         return 0
     fi
@@ -840,14 +854,34 @@ integrity_watch()
         m[$1] == $3 && s[$1] == $2 && h[$1] != $4 {print "SPOILED\t" $1; next}
         m[$1] != $3 || s[$1] != $2 || h[$1] != $4 {print "WRITTEN\t" $1}
         END {for (f in s) if (!(f in seen)) print "REMOVED\t" f}' "$INTEG_DIR/snapshot.tsv" "$INTEG_DIR/snapshot.new" > "$INTEG_DIR/diff"
-    iw_sp=0 iw_wr=0 iw_un=0 iw_vw= iw_pk=
+    iw_sp=0 iw_wr=0 iw_un=0 iw_vw= iw_pk= iw_rok= iw_rbad=
     iw_add=$(grep -c '^ADDED' "$INTEG_DIR/diff") iw_rem=$(grep -c '^REMOVED' "$INTEG_DIR/diff")
+    # The end of the last look (its state, written after its own repairs): builtins only.
+    iw_look=0
+    [ ! -r "$INTEG_DIR/state" ] || while IFS='=' read -r iw_sk iw_sv; do
+        [ "$iw_sk" != at ] || iw_look=$iw_sv
+    done < "$INTEG_DIR/state"
+    case "$iw_look" in ''|*[!0-9]*) iw_look=0 ;; esac
     while IFS="$(printf '\t')" read -r iw_k iw_f; do
         iw_pkg=$(grep -lx -- "$iw_f" "$R"/opt/lib/opkg/info/*.list 2>/dev/null | head -n 1)
         iw_pkg=${iw_pkg##*/}; iw_pkg=${iw_pkg%.list}
+        # opkg keeps the package's own file times: a package (re)installed since the last look
+        # (opkg rewrote its file list) has the same time and other contents - a repair of a
+        # spoiled copy (11.11.2026: libc, libpcre2), not the stick. Written by opkg - unless the
+        # package differs from the same version in Entware (spoiled after the reinstall): a check
+        # only (download into RAM), whatever the agents' mode; once a package a look.
+        if [ "$iw_k" = SPOILED ] && [ -n "$iw_pkg" ] && [ "$iw_look" -gt 0 ] &&
+           [ "$(date -r "$R/opt/lib/opkg/info/$iw_pkg.list" +%s 2>/dev/null || echo 0)" -ge "$iw_look" ]; then
+            case " $iw_rok $iw_rbad " in
+                *" $iw_pkg "*) ;;
+                *) if [ -z "$(pkg_damaged "$iw_pkg" </dev/null)" ]; then iw_rok="$iw_rok $iw_pkg"; else iw_rbad="$iw_rbad $iw_pkg"; fi ;;
+            esac
+            case " $iw_rok " in *" $iw_pkg "*) iw_k=WRITTEN ;; esac
+        fi
         case "$iw_k" in
             SPOILED)
                 iw_sp=$((iw_sp + 1))
+                printf '%s\n' "$iw_f" >> "$INTEG_DIR/spoiled.$$"
                 echo "$iw_now|SPOILED|$iw_f|pkg=${iw_pkg:-vward}" >> "$INTEG_LOG"
                 if [ -n "$iw_pkg" ]; then case " $iw_pk " in *" $iw_pkg "*) ;; *) iw_pk="$iw_pk $iw_pkg" ;; esac
                 else iw_vw="$iw_vw${iw_vw:+, }$iw_f"; fi ;;
@@ -864,8 +898,34 @@ integrity_watch()
             REMOVED) [ "$iw_rem" -gt 20 ] || echo "$iw_now|REMOVED|$iw_f" >> "$INTEG_LOG" ;;
         esac
     done < "$INTEG_DIR/diff"
-    mv -f "$INTEG_DIR/snapshot.new" "$INTEG_DIR/snapshot.tsv"
-    rm -f "$INTEG_DIR/diff"
+    # A changed hash with unchanged mtime is evidence of suspected corruption,
+    # not a new trusted baseline. The SPOILED files keep their previous hashes
+    # even if repair is disabled, refused, interrupted, or fails: such a file
+    # advances only after it matches its former good hash (or opkg reinstalls
+    # its package). Every other file advances, so a write or a reinstall is not
+    # reported again every day while one file stays spoiled (11.11.2026).
+    if [ "$iw_sp" -gt 0 ]; then
+        if awk -F '\t' 'FNR == 1 {part++}
+                part == 1 {k[$0] = 1; next}
+                part == 2 {if ($1 in k) print; next}
+                !($1 in k)' "$INTEG_DIR/spoiled.$$" "$INTEG_DIR/snapshot.tsv" "$INTEG_DIR/snapshot.new" > "$INTEG_DIR/held.$$" &&
+           LC_ALL=C sort "$INTEG_DIR/held.$$" > "$INTEG_DIR/snapshot.held.$$" && [ -s "$INTEG_DIR/snapshot.held.$$" ] &&
+           mv -f "$INTEG_DIR/snapshot.held.$$" "$INTEG_DIR/snapshot.tsv"; then
+            echo "$iw_now|BASELINE_HELD|spoiled=$iw_sp|reason=unverified" >> "$INTEG_LOG"
+        else
+            echo "$iw_now|BASELINE_HELD|spoiled=$iw_sp|reason=unverified|whole=1" >> "$INTEG_LOG"
+        fi
+        rm -f "$INTEG_DIR/held.$$" "$INTEG_DIR/snapshot.held.$$"
+        mv -f "$INTEG_DIR/snapshot.new" "$INTEG_DIR/snapshot.suspect.tsv" || rm -f "$INTEG_DIR/snapshot.new"
+    else
+        if ! mv -f "$INTEG_DIR/snapshot.new" "$INTEG_DIR/snapshot.tsv"; then
+            echo "$iw_now|SKIPPED|baseline_write_failed" >> "$INTEG_LOG"
+            rm -f "$INTEG_DIR/diff"
+            return 0
+        fi
+        rm -f "$INTEG_DIR/snapshot.suspect.tsv"
+    fi
+    rm -f "$INTEG_DIR/diff" "$INTEG_DIR/spoiled.$$"
     iw_n=$(grep -c . "$INTEG_DIR/snapshot.tsv")
     iw_pk=${iw_pk# }
     PR_DONE= PR_HELD= PR_STILL= PR_COPY= PR_OPKG=
