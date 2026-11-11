@@ -101,6 +101,10 @@ with _tempfile.TemporaryDirectory() as td:
     fake = bin_dir / "vward-route-engine.sh"
     fake.write_text("#!/bin/sh\nsleep 30\n")
     fake.chmod(0o755)
+    # keep_route_engine acts only when the S91 start script is there (as on the router).
+    s91 = t / "S91vward-route-engine"
+    s91.write_text("#!/bin/sh\nexit 0\n")
+    s91.chmod(0o755)
     starts = t / "starts"
     events = t / "events"
     pidfile = run_dir / "route-engine.pid"
