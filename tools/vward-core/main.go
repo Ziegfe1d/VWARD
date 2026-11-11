@@ -1,11 +1,16 @@
-// vward-core: prototype of VWARD's routing core in Go (owner 08.11). This build has NO
-// write path: every command below only reads (RCI GET, «show» parse), prints to stdout
-// and writes no file. The executor (internal/exec) is exercised by the tests only.
+// vward-core: VWARD's routing core in Go (owner 08.11; write path 11.11.2026). Only
+// selftest --yes writes to the router, and only its own test group; recover writes only the
+// local journal. Everything else only reads (RCI GET, «show» parse) and prints to stdout.
 //
 //	vward-core version
-//	vward-core probe   [--rci 127.0.0.1:79]           time of RCI reads, narrow and full
-//	vward-core dry-run [--rci ...] [--etc /opt/etc/vward] [--full]
-//	                    the plan the core WOULD send for the saved service choices; nothing sent
+//	vward-core probe    [--rci 127.0.0.1:79]           time of RCI reads, narrow and full
+//	vward-core dry-run  [--rci ...] [--etc /opt/etc/vward] [--full]
+//	                     the plan the core WOULD send for the saved service choices; nothing sent
+//	vward-core selftest [--rci ...] [--journal DIR] [--tunnel NAME] [--backup DIR] [--yes]
+//	                     the first write on the router: the group VwardTest created, proven,
+//	                     removed, proven; without --yes only the plan
+//	vward-core recover  [--rci ...] [--journal DIR] [--yes]
+//	                     operations a crash left open, closed by a read of the router (no replay)
 package main
 
 import (
@@ -27,7 +32,7 @@ import (
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/router"
 )
 
-var version = "proto-1"
+var version = "proto-2"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -35,18 +40,23 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "version":
-		fmt.Printf("vward-core %s %s/%s read-only\n", version, runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("vward-core %s %s/%s write=selftest-only\n", version, runtime.GOOS, runtime.GOARCH)
 	case "probe":
 		probe(os.Args[2:])
 	case "dry-run":
 		dryRun(os.Args[2:])
+	case "selftest":
+		selfTest(os.Args[2:])
+	case "recover":
+		recoverOpen(os.Args[2:])
 	default:
 		usage()
 	}
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: vward-core version | probe [--rci ADDR] | dry-run [--rci ADDR] [--etc DIR] [--full]")
+	fmt.Fprintln(os.Stderr, "usage: vward-core version | probe [--rci ADDR] | dry-run [--rci ADDR] [--etc DIR] [--full]\n"+
+		"       | selftest [--rci ADDR] [--journal DIR] [--tunnel NAME] [--backup DIR] [--yes] | recover [--rci ADDR] [--journal DIR] [--yes]")
 	os.Exit(2)
 }
 

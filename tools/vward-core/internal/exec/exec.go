@@ -155,6 +155,9 @@ func Run(r Router, j *journal.Journal, op string, planned *ndm.Model, p *plan.Pl
 	return res, nil
 }
 
+// ReadAreas: the router areas behind plan areas (recovery reads the same ones).
+func ReadAreas(areas []string) []string { return readAreas(areas) }
+
 // readAreas: the router areas behind plan areas.
 func readAreas(areas []string) []string {
 	need := map[string]bool{}

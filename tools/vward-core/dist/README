@@ -1,3 +1,5 @@
-Prototype builds of tools/vward-core (read-only commands only: version, probe, dry-run),
-for the owner's one-time measurement in /tmp. Reproducible: build.sh OUT --check must give
-the sums in ../SHA256SUMS. Not part of the installation package (not in package-map.tsv).
+Builds of tools/vward-core for a run by the owner's command in /tmp: version, probe, dry-run
+(read only), recover (reads the router, writes only the local journal) and selftest (the first
+write: the group VwardTest created, proven, removed, proven; without --yes the plan only).
+Reproducible: build.sh OUT --check must give the sums in ../SHA256SUMS. Not part of the
+installation package (not in package-map.tsv).
