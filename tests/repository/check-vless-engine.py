@@ -32,6 +32,18 @@ def fail(message: str) -> None:
 
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
+    # 11.11.2026: the router's grep is BusyBox, which stops at the first NUL of a line: a
+    # /proc/PID/cmdline match that GNU grep finds is never found there. The engine runs here
+    # with Keenetic's grep first in its own fixed PATH (a disposable copy of the script).
+    bb = shutil.which("busybox") or fail("busybox is needed (the router's grep)")
+    bbdir = tmp / "keenetic-bin"; bbdir.mkdir()
+    (bbdir / "grep").symlink_to(bb)
+    engine_src = ENGINE.read_text()
+    if engine_src.count("PATH=/opt/bin:") != 1:
+        fail("the engine's fixed PATH changed")
+    ENGINE = tmp / "vward-vless-engine.sh"
+    ENGINE.write_text(engine_src.replace("PATH=/opt/bin:", f"PATH={bbdir}:/opt/bin:", 1))
+    ENGINE.chmod(0o755)
     bin_ = tmp / "bin"; bin_.mkdir()
     etc, share, run_ = tmp / "etc", tmp / "share", tmp / "run"
     (tmp / "rc").write_text("interface OpkgTun0\n!\n")
