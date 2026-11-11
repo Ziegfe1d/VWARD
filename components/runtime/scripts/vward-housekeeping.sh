@@ -803,8 +803,8 @@ integrity_snapshot()
     # Incomplete reads must NOT look like REMOVED files or establish a new
     # trusted baseline. BusyBox sh has no pipefail; write unsorted output first
     # so failures of date/md5sum propagate independently of sort.
-    find $is_roots -xdev -type f ! -path '*/opt/lib/opkg/*' ! -name '*.pyc' 2>/dev/null > "$INTEG_DIR/list.$" || {
-        rm -f "$INTEG_DIR/list.$"
+    find $is_roots -xdev -type f ! -path '*/opt/lib/opkg/*' ! -name '*.pyc' 2>/dev/null > "$INTEG_DIR/list.$$" || {
+        rm -f "$INTEG_DIR/list.$$"
         return 1
     }
     if ! (
@@ -812,14 +812,14 @@ integrity_snapshot()
             is_m=$(date -r "$is_f" +%s 2>/dev/null) || exit 1
             is_h=$(md5sum < "$is_f" 2>/dev/null) || exit 1
             printf '%s\t-\t%s\t%s\n' "${is_f#"$R"}" "$is_m" "${is_h%% *}" || exit 1
-        done < "$INTEG_DIR/list.$"
-    ) > "$INTEG_DIR/raw.$"; then
-        rm -f "$INTEG_DIR/list.$" "$INTEG_DIR/raw.$" "$1"
+        done < "$INTEG_DIR/list.$$"
+    ) > "$INTEG_DIR/raw.$$"; then
+        rm -f "$INTEG_DIR/list.$$" "$INTEG_DIR/raw.$$" "$1"
         return 1
     fi
-    LC_ALL=C sort "$INTEG_DIR/raw.$" > "$1"
+    LC_ALL=C sort "$INTEG_DIR/raw.$$" > "$1"
     is_rc=$?
-    rm -f "$INTEG_DIR/list.$" "$INTEG_DIR/raw.$"
+    rm -f "$INTEG_DIR/list.$$" "$INTEG_DIR/raw.$$"
     [ "$is_rc" = 0 ] && [ -s "$1" ]
 }
 integrity_watch()
