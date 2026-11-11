@@ -22,7 +22,7 @@ b58cdb3f2af2cc8d5607747ccf0c9a8f78c6b56aab1d38cc19ffa50cf6188412  components/ads
 1d5dd2b5ef075d769a8d45a503aa118f1af39daf789c55a4c85c25c50ca2df08  components/ads-privacy-guard/lib/vward-ads-privacy-common.sh
 eda3e99d0dee35ee007925f95ac0a76061097c7b45829038e8ebd85efa462da8  components/ads-privacy-guard/scripts/vward-ads-privacy-clients.sh
 20a10133a27a3337eae0de064bd6ecd7f9983d05ef85bb2b1896849738e9622f  components/ads-privacy-guard/scripts/vward-ads-privacy-control.sh
-d01c33a4107ed0a96e8dd5e5230353ab146c4b3dd7935a2d5aa65efa894bf2b7  components/ads-privacy-guard/scripts/vward-ads-privacy-dns-guard.sh
+7b0f6c041d093dab8929147752355984de4f0a20e419161c0fe9d45777ce626c  components/ads-privacy-guard/scripts/vward-ads-privacy-dns-guard.sh
 f219e862907916f8e0040511b53e6da7fb80b66a9b7d52a5d688288eb17b67b7  components/ads-privacy-guard/scripts/vward-ads-privacy-guard.sh
 a1d9f1438ef818859089184bda29ef36f260ed55b4f908bb0a327d0a2bd921f3  components/ads-privacy-guard/scripts/vward-ads-privacy-health.sh
 f54881c580c10f2ee2756b07d006912d9cca29c964bae314a2390514673215cd  components/ads-privacy-guard/scripts/vward-ads-privacy-https.sh
@@ -32,7 +32,7 @@ a92cfbf15df3d218bee7aedd949746390be07df94da067a83cc5b9df7a3a28b5  components/ads
 751cb13c714ec81444a87e07414fe5d1a2667c040fb0ed80e290e79fe4d93af0  components/ads-privacy-guard/scripts/vward-ads-privacy-query-read.sh
 f2c33345994fcfce69253e99e9e29e8015197d7a0753eab711f4d74b2bfd93d0  components/ads-privacy-guard/scripts/vward-ads-privacy-route-dns.sh
 d54ba073d2ce8ee02033973e104404c57790b98c1ccc329b34587dac75de8a7b  components/ads-privacy-guard/scripts/vward-ads-privacy-rules-rebuild.sh
-eb0ca468a2cb278ab2f08eed93940260ed759f51e7b58d87ce10a47399f45b08  components/ads-privacy-guard/scripts/vward-ads-privacy-scheduler.sh
+39114bfd31727c06787d83f9409faa2ecbf0ea1b79ef02663d717f267da99a48  components/ads-privacy-guard/scripts/vward-ads-privacy-scheduler.sh
 134a5c523f27427ac7ba4e7309f62002112ee479226f5259736b99b65de29aa7  components/ads-privacy-guard/scripts/vward-ads-privacy-settings.sh
 3b04ccc658768eb4d893bc724abf46c65753bfde763871742363c01409da16a1  components/ads-privacy-guard/scripts/vward-ads-privacy-source-control.sh
 93460d328e433c7cf63f32fd52a4e770ce2d2e3ad59cb052d7be010774606b55  components/ads-privacy-guard/scripts/vward-ads-privacy-sources-update.sh
@@ -281,7 +281,7 @@ dc66dd9c225c4d0717ca7c025fa0c48a8c7fed6b9aca3e2c8f9355efd726731f  tests/reposito
 85566f8fd0f00c4030fe92fd08e1906d3c928801f939e0560be6bcebad7e878d  tests/repository/check-ads-dns-guard.py
 36326e34ad78f3a3c602698a7ad66017e00053e0bea79713b24bef4490939eed  tests/repository/check-ads-jobs.py
 62f4a14036d1a6e5c44a36337c86bf57ed5d8a19dbcb7e78a000266682970a2b  tests/repository/check-ads-page-speed.py
-749e1983ad809a48c7da5ad72111eebbb5fc67711e8a5a786d67b4ac5ddb0b4a  tests/repository/check-ads-privacy-integration.py
+d2acefdc3bd2b3645ec8033f66314aa85029acf5c51e7cd081d572117af3438b  tests/repository/check-ads-privacy-integration.py
 5e564b031b0875b0f368faa6dd8eb7331757fd9f4e614327756b29e1d5a981ad  tests/repository/check-ads-privacy-settings-registry.py
 3a09af18367067277a5366d28f01eeb9ba4feed9922fa2d9bdabe7bdada641f6  tests/repository/check-ads-route-dns.py
 cd58c71f041fab131021b8c2cc8121894ea538df28b5d5b77e35f2a02d63fcb9  tests/repository/check-agents-watch.py

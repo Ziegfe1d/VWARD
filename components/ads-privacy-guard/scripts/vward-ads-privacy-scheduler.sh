@@ -11,7 +11,7 @@ LIB="${VWARD_ADS_LIB:-/opt/share/vward/ads-privacy-guard/vward-ads-privacy-commo
 [ -r "$LIB" ] || LIB="$SELF_DIR/../lib/vward-ads-privacy-common.sh"
 [ -r "$LIB" ] || { echo "FAIL: common library not found" >&2; exit 1; }
 . "$LIB"
-ads_source_registry_merge
+[ "$SCH_MODE" = dns ] || ads_source_registry_merge
 
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$VWARD_ADMISSION_LIB" ] || VWARD_ADMISSION_LIB="$SELF_DIR/../../runtime/lib/vward-runtime-admission.sh"
@@ -46,6 +46,15 @@ fi
 ads_mkdirs || ads_die "cannot create component directories"
 ads_load_config
 
+# The DNS guard has its own minute tick and configuration.
+if [ "$SCH_MODE" = dns ]; then
+    DNS_GUARD="${VWARD_ADS_DNS_GUARD:-/opt/bin/vward-ads-privacy-dns-guard.sh}"
+    [ -x "$DNS_GUARD" ] || DNS_GUARD="$SELF_DIR/vward-ads-privacy-dns-guard.sh"
+    [ ! -x "$DNS_GUARD" ] || "$DNS_GUARD" tick >/dev/null 2>&1 || true
+    echo "SCHEDULER=DNS_TICK"
+    exit 0
+fi
+
 ENABLED="${ENABLED:-1}"
 RUN_MODE="${RUN_MODE:-scheduled}"
 SCHEDULE_INTERVAL_MIN="$(ads_num "${SCHEDULE_INTERVAL_MIN:-10}" 10)"
@@ -72,8 +81,6 @@ QUERY_READER="${VWARD_ADS_QUERY_READER:-/opt/bin/vward-ads-privacy-query-read.sh
 [ -x "$QUERY_READER" ] || QUERY_READER="$SELF_DIR/vward-ads-privacy-query-read.sh"
 CLIENTS_SYNC="${VWARD_ADS_CLIENTS_SYNC:-/opt/bin/vward-ads-privacy-clients.sh}"
 [ -x "$CLIENTS_SYNC" ] || CLIENTS_SYNC="$SELF_DIR/vward-ads-privacy-clients.sh"
-DNS_GUARD="${VWARD_ADS_DNS_GUARD:-/opt/bin/vward-ads-privacy-dns-guard.sh}"
-[ -x "$DNS_GUARD" ] || DNS_GUARD="$SELF_DIR/vward-ads-privacy-dns-guard.sh"
 ROUTE_DNS="${VWARD_ADS_ROUTE_DNS:-/opt/bin/vward-ads-privacy-route-dns.sh}"
 [ -x "$ROUTE_DNS" ] || ROUTE_DNS="$SELF_DIR/vward-ads-privacy-route-dns.sh"
 
@@ -184,15 +191,6 @@ LAST_SCAN="$(ads_num "$ST_SCAN" 0)"
 LAST_SOURCE="$(ads_num "$ST_SOURCE" 0)"
 OLD_SIG=$ST_SIG
 
-# DNS of every device through AdGuard Home: rules back after a firewall rebuild,
-# redirect off while AdGuard Home's DNS is down.  No process when it is off.
-# Every minute on its own cron line («dns»): its silence counts are minutes (owner 08.11: the rest
-# of this scheduler runs every 5 minutes; the DNS chain must not wait for it).
-if [ "$SCH_MODE" = dns ]; then
-    [ ! -x "$DNS_GUARD" ] || "$DNS_GUARD" tick >/dev/null 2>&1 || true
-    echo "SCHEDULER=DNS_TICK"
-    exit 0
-fi
 # Device names in AdGuard Home do not depend on ad blocking being on or paused.
 # A tick with the same devices makes no AdGuard Home call.
 [ ! -x "$CLIENTS_SYNC" ] || "$CLIENTS_SYNC" tick >/dev/null 2>&1 || true
