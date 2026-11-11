@@ -1306,6 +1306,42 @@ load 5,56 на 4 CPU); (2) после 2 или 3 изъятий за эмули�
 (`vward-route-eng` 5, `awk` 2). В CI на том же дереве её нет; хост был нагружен. Не разбиралась,
 это открытый вопрос (§4).
 
+### 11.11.2026 — [Claude Code] fix.36.1 опубликован в dev (sequence 2026111101)
+
+Срочный разбор после fix.36 (поручение владельца 11.11). PR #48 (единственный исполнитель после
+ChatGPT) HEAD `a0f39de`, CI run 42965560311: repository-consistency, updater-tests, resource-audit
+(часовой стресс, Chromium, RESOURCE_BUDGET=PASS), routing-core-go — SUCCESS. Squash в dev `707a673`
+(`expected_head_sha`, `[skip ci]`), дерево = `a0f39de`. Release run 42975643332 SUCCESS, publish
+`d0ddaca` (кроме `updates/dev` только SHA256SUMS). Публичный raw dev: v1 и v2 — `--self-test` с
+доверенным ключом PASS; подделанный sequence отвергнут (rc=31); пакет 668219 байт, SHA-256
+`19966dc0f21fce9bc4ed5b15769a65137a43e8b8a7cd7f4a966ac2e1e5a562c7` совпал; 88 blobs v2 совпали по
+SHA и размеру; 78 файлов v2 все в пакете. Ни xray, ни библиотек Entware в пакете нет (в /opt/lib
+только /opt/lib/vward/*). IMPORTANT, min_vward 0.1.9-beta, rollback automatic, без перезагрузки.
+Откат: `sh /opt/share/vward/updater/current/vward-update.sh --rollback`.
+**Сверх PR #48 (ChatGPT):** (1) адресный аудит: `pid_of`/`procs_of`/`stop_orphans` искали путь
+конфигурации в `/proc/PID/cmdline` grep'ом; BusyBox grep не видит текст после первого NUL — живой
+Xray считался мёртвым (дубль, ложный engine_start_failed). Теперь чтение встроенным `read`;
+`check-vless-engine.py` гоняет движок с BusyBox grep (RED→GREEN). Тот же паттерн остаётся в
+`vward-awg-engine.sh` (procs_of/stop_orphans) и в `diag_running` api.cgi — не трогали, зависит от
+grep роутера (открыто). (2) Целостность: SPOILED с переписанным opkg `info/<pkg>.list` после
+прошлой проверки — запись opkg, если пакет совпадает с Entware (`pkg_damaged`, только проверка, в
+любом режиме агентов); удерживаются только испорченные файлы базы. (3) Уведомление после 6
+запусков за час больше не обещает «до конца часа»: повтор через 15 мин (так было в коде). (4)
+Тесты: фикстура S91 в `check-route-engine-watchdog.py` (CI 833 красный); стресс soak — накопление
+процессов считается по повторному замеру до 15 с (CI 42957512471: один снимок 12 при 5 на 60/70
+мин; локальный soak 20 мин без ROUTE_ENGINE_PID_STALE/лишних стартов). PR #40/#42/#44/#47 закрыты
+как superseded (сверка файлов).
+**Данные владельца 11.11 (экспорт 06:06, самотест 06:14), выводы:** xray SIGSEGV по 17 разным
+адресам 10.11 09:48–11.11 00:33, излечен переустановкой VWARD 01:10 (старые бинарники в
+`vless-engine/recovery-20261111-0110*`) — порча файла на носителе вероятна, SHA не сверены.
+`rc.unslung: Illegal instruction` при загрузке 10.11 — Entware на носителе был повреждён уже тогда;
+SPOILED 02:17: ldconfig, libpcre2, libnss_files, libm (REPAIR нет — агент обслуживания в
+наблюдении). curl 132 — только HTTPS (известный OpenSSL 3.5.5 Entware на MIPS), обход сработал;
+не порча. Route Engine на 06:14 не запущен (нет процесса, tcpdump, dnscap; RESTART_LIMIT 03:50).
+SSH: dropbear 17832 жив (порт 22), последняя сессия 01:13:50 открыта, новых «Child connection»
+нет — причина не доказана (гипотеза: libnss_files/libc; SIGILL ядро не логирует). Реклама «cannot
+read allowed AdGuard Home queries» с 10.11 14:05 — причина не найдена.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 09.11.2026 / fix.36 опубликован: нужна приёмка владельцем на роутере (Ozon/WB, Lampa TV, ночной скан 00:10, экраны Панели, журнал сторожа DNS на возврат AdGuard Home в цепочку). Локальный стресс 09.11: однократное «processes pile up 6 -> 13» (route engine 5), в CI нет; при повторе разобрать по `soak_debug`.
