@@ -102,6 +102,8 @@ cp "$REPO"/components/update-engine/vward-update*.sh "$ROOT/opt/share/vward/upda
 chmod 755 "$ROOT"/opt/share/vward/updater/slot-a/*.sh
 ln -s slot-a "$ROOT/opt/share/vward/updater/current"
 cp "$REPO/config/updater/update-public.pem" "$ROOT/opt/etc/vward/update-public.pem"
+# Every optional part on (lightened VWARD keeps them off by default): the cutover is checked with all.
+mkdir -p "$ROOT/opt/etc/vward/components" && : > "$ROOT/opt/etc/vward/components/all.on"
 cp "$REPO/config/updater/update.conf.production" "$ROOT/opt/etc/vward/update.conf"
 sed -i "s#/VWARD/dev/updates/#/VWARD/beta/updates/#" "$ROOT/opt/etc/vward/update.conf"
 printf 'installed_version=%s\ninstalled_update_id=vward-0.1.9-beta\nlast_sequence=2026091701\nmanifest_hash=beta\nlast_health_check=beta\n' \

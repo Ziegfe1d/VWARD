@@ -16,6 +16,20 @@ vward_component_enabled() {
     [ ! -e "$VWARD_COMPONENT_STATE/$1.disabled" ]
 }
 
+# Lightened VWARD (owner 11.11.2026): by default only Adaptive auto and the VPN run; every
+# other part is switched on one by one. vward_extra NAME: an optional part is on only with
+# NAME.on here. all.on here (or VWARD_EXTRAS=all) turns every part on and keeps every component
+# as it was, as before the lightening.
+vward_extras_all() { [ "${VWARD_EXTRAS:-}" = all ] || [ -e "$VWARD_COMPONENT_STATE/all.on" ]; }
+vward_extra() {
+    case "${1:-}" in ''|*[!a-z0-9-]*) return 1 ;; esac
+    vward_extras_all && return 0
+    [ -e "$VWARD_COMPONENT_STATE/$1.on" ]
+}
+# Components off by default: written once as <id>.disabled (housekeeping, install.sh), so the
+# Panel shows them off and switches them on as before.
+VWARD_LITE_OFF=${VWARD_LITE_OFF-tunnel-guard wan-guard wifi-client-guard policy-sync ads-privacy-guard}
+
 # vward_component_gate ID [RC]: leave quietly when the component is disabled.
 # Scheduled jobs exit 0; manual tools pass a non-zero RC.
 vward_component_gate() {

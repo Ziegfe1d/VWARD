@@ -31,7 +31,9 @@ with tempfile.TemporaryDirectory() as tmp:
     harness.write_text(f"""R="{root}" HOUSE_LOG="{tmp}/house.log"
 VWARD_FLASH_STATE="{tmp}/flash" VWARD_DMESG_BIN="{tmp}/dmesg" VWARD_CONSOLE_NOTES="{tmp}/notes"
 VWARD_PROFILE_LIB="{ROOT}/components/runtime/lib/vward-device-profile.sh"
+VWARD_COMPONENT_STATE="{tmp}/components"
 export VWARD_CONSOLE_NOTES
+. "{ROOT}/components/runtime/lib/vward-runtime-admission.sh"
 {FUNC}
 flash_watch
 """)
@@ -42,6 +44,13 @@ flash_watch
         notes = (tmp / "notes/notes.tsv").read_text().splitlines() if (tmp / "notes/notes.tsv").exists() else []
         return log, notes
 
+    # Off by default (lightened VWARD, owner 11.11.2026): errors on the stick, nothing looked at.
+    dmesg.write_text(EXT4.format(ino=ino) + "\n")
+    log, notes = run()
+    if log or notes or (tmp / "flash").exists():
+        fail(f"the watch is off by default: {log} {notes}")
+    (tmp / "components").mkdir()
+    (tmp / "components/flash-watch.on").write_text("")
     # A clean stick: nothing written.
     dmesg.write_text("[    1.0] usb 1-1: new high-speed USB device\n[    2.0] EXT4-fs (sda1): mounted filesystem with ordered data mode\n")
     log, notes = run()

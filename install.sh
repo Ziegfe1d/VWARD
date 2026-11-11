@@ -344,6 +344,18 @@ configure() {
             fail "не выключить раздел «Реклама»"
         skip "«Реклама» выключена (нет AdGuard Home); включается в VWARD → Компоненты"
     fi
+    # Lightened VWARD (owner 11.11.2026): only Adaptive auto and the VPN run; the guards and the
+    # night check of IP categories start switched off (Панель VWARD → Компоненты switches them on).
+    mkdir -p "$ETC/components" || fail "не записать состояние компонентов"
+    [ -e "$ETC/components/all.on" ] && lite_list= || lite_list="tunnel-guard wan-guard wifi-client-guard policy-sync"
+    for c in $lite_list; do
+        [ -e "$ETC/components/$c.disabled" ] ||
+            printf 'disabled by default %s (lightened VWARD)\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$ETC/components/$c.disabled" ||
+            fail "не выключить компонент $c"
+        : > "$ETC/components/$c.lite"
+    done
+    [ ! -e "$ETC/components/ads-privacy-guard.disabled" ] || : > "$ETC/components/ads-privacy-guard.lite"
+    [ -z "$lite_list" ] || skip "сторожа туннеля и интернета, Wi-Fi и ночная сверка категорий выключены; включаются в Панели VWARD → Компоненты"
 
     # VWARD's own domain list, routed to the VPN: what autopick finds goes there.
     rc_now=$(ndmc -c 'show running-config' 2>/dev/null)

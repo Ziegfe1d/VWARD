@@ -84,6 +84,8 @@ EOF
 chmod 600 "$ROOT/opt/etc/vward/device.conf"
 # The agents watch by default (owner 2026-10-18); the emulator checks what they do when they act.
 printf 'all=act\n' > "$ROOT/opt/etc/vward/agents.conf"
+# Every optional part on (lightened VWARD keeps them off by default): the emulator checks them all.
+mkdir -p "$ROOT/opt/etc/vward/components" && : > "$ROOT/opt/etc/vward/components/all.on"
 cp "$REPO/config/cron/root.crontab" "$ROOT/opt/var/spool/cron/crontabs/root"
 
 # Update Engine in its slot, as the bootstrap installs it.

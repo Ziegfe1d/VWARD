@@ -91,6 +91,8 @@ COMP_PENDING_FILE=${VWARD_COMPONENT_PENDING:-/opt/etc/vward/component-ops/pendin
 AGH_OFF_FILE=${VWARD_AGH_DISABLED:-$COMP_STATE_DIR/adguardhome.disabled}
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ ! -r "$VWARD_ADMISSION_LIB" ] || . "$VWARD_ADMISSION_LIB"
+# An admission library of an older release: every optional part on, as before.
+command -v vward_extra >/dev/null 2>&1 || vward_extra() { return 0; }
 UPTIME_FILE=${VWARD_UPTIME_FILE:-/proc/uptime}
 WATCH_EVERY=6
 PANEL_DOWN=0
@@ -677,11 +679,18 @@ watch_services()
     fi
 
     # The real-time watcher (vward-sentinel) sees leaks within seconds; without it this
-    # minute's check does.
-    if sentinel_alive; then
+    # minute's check does. Both off by default (lightened VWARD, owner 11.11.2026): a watcher
+    # left running from before is stopped once.
+    if ! vward_extra sentinel; then
+        if [ "${SENTINEL_STOPPED:-0}" = 0 ] && sentinel_alive && [ -x "$SENTINEL_CTL" ]; then
+            $UNNICE "$SENTINEL_CTL" stop </dev/null >/dev/null 2>&1 && log_event "SENTINEL_STOPPED|off by default"
+        fi
+        SENTINEL_STOPPED=1
+        ! vward_extra memory-watch || watch_memory
+    elif sentinel_alive; then
         :
     else
-        watch_memory
+        ! vward_extra memory-watch || watch_memory
         if [ -x "$SENTINEL_BIN" ] && [ -x "$SENTINEL_CTL" ]; then
             if [ "$SENTINEL_SKIP" -gt 0 ]; then
                 SENTINEL_SKIP=$((SENTINEL_SKIP - 1))
