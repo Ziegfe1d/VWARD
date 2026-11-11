@@ -466,7 +466,9 @@ engine_move
 # keeps AdGuard Home and the DNS chain alive; switched off with AdGuard Home in the Panel).
 lite_defaults()
 {
-    ld_dir=${VWARD_COMPONENT_STATE:-$R/opt/etc/vward/components}
+    # Under R like every path here (the shared library's default has no R: tests must not
+    # write the host's /opt).
+    ld_dir=${VWARD_LITE_STATE:-$R/opt/etc/vward/components}
     [ "${VWARD_EXTRAS:-}" != all ] && [ ! -e "$ld_dir/all.on" ] || return 0
     for ld_id in ${VWARD_LITE_OFF:-}; do
         [ ! -e "$ld_dir/$ld_id.lite" ] || continue

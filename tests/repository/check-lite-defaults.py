@@ -29,7 +29,7 @@ FUNC = HK[HK.index("\nlite_defaults()\n"):HK.index("\nlite_defaults\n")]
 def run(tmp: Path, extra_env: str = "") -> list[str]:
     h = tmp / "h.sh"
     h.write_text(f"""R="{tmp}/root" HOUSE_LOG="{tmp}/house.log"
-VWARD_COMPONENT_STATE="{tmp}/components"
+VWARD_COMPONENT_STATE="{tmp}/components" VWARD_LITE_STATE="{tmp}/components"
 VWARD_TUNNEL_GUARD_STATE="{tmp}/guard.state"
 VWARD_ADGUARD_CONFIG="{tmp}/AdGuardHome.yaml"
 {extra_env}
@@ -73,6 +73,21 @@ with tempfile.TemporaryDirectory() as t:
     names = run(tmp)
     if "tunnel-guard.disabled" not in names or "ads-privacy-guard.disabled" not in names:
         fail(f"once safe they go off: {names}")
+
+with tempfile.TemporaryDirectory() as t:
+    tmp = Path(t)
+    # Without its own setting the step writes under R, never the host's /opt (the shared
+    # library's VWARD_COMPONENT_STATE has no R).
+    h = tmp / "r.sh"
+    h.write_text(f"""R="{tmp}/root" HOUSE_LOG="{tmp}/house.log" VWARD_ADGUARD_CONFIG="{tmp}/none"
+VWARD_TUNNEL_GUARD_STATE="{tmp}/none"
+. "{LIB}"
+{FUNC}
+lite_defaults
+""")
+    subprocess.run(["sh", str(h)], check=True, timeout=30)
+    if not (tmp / "root/opt/etc/vward/components/tunnel-guard.disabled").exists():
+        fail("lite_defaults does not write under R")
 
 with tempfile.TemporaryDirectory() as t:
     tmp = Path(t)
