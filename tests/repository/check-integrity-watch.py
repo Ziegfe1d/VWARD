@@ -229,6 +229,17 @@ esac
     out2 = new_lines(out); out += out2
     if "/opt/lib/libx.so.1" in out2 or "|SPOILED|/opt/share/vward/engine.sh|" not in out2 or "/opt/bin/tool" in out2:
         fail(f"a held baseline repeats reinstalled or written files, or drops the spoiled one: {out2}")
+    # Reinstalled since the last look, but the file differs from the same version in Entware
+    # (spoiled after the reinstall): the reinstall does not hide the stick - still spoiled.
+    st_file.write_text(f"at={int(time.time()) - 1000}\nfiles=3\n")
+    os.utime(r / "opt/lib/opkg/info/libx.list", (time.time() - 500, time.time() - 500))
+    spoil(lib, b"libx after reinstall")
+    out2 = new_lines(out); out += out2
+    if "|SPOILED|/opt/lib/libx.so.1|pkg=libx" not in out2 or "|WRITTEN|/opt/lib/libx.so.1|" in out2:
+        fail(f"a file spoiled after a reinstall is accepted as written by opkg: {out2}")
+    lib.write_bytes(good); os.utime(lib, (OLD, OLD))
+    os.utime(r / "opt/lib/opkg/info/libx.list", (OLD, OLD))
+    run(); out = log.read_text()
     # The same package spoiled after that reinstall (the list is older than the last look): spoiled.
     spoil(lib, b"libx SPOILED third")
     out2 = new_lines(out); out += out2

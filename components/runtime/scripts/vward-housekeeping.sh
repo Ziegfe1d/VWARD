@@ -854,7 +854,7 @@ integrity_watch()
         m[$1] == $3 && s[$1] == $2 && h[$1] != $4 {print "SPOILED\t" $1; next}
         m[$1] != $3 || s[$1] != $2 || h[$1] != $4 {print "WRITTEN\t" $1}
         END {for (f in s) if (!(f in seen)) print "REMOVED\t" f}' "$INTEG_DIR/snapshot.tsv" "$INTEG_DIR/snapshot.new" > "$INTEG_DIR/diff"
-    iw_sp=0 iw_wr=0 iw_un=0 iw_vw= iw_pk=
+    iw_sp=0 iw_wr=0 iw_un=0 iw_vw= iw_pk= iw_rok= iw_rbad=
     iw_add=$(grep -c '^ADDED' "$INTEG_DIR/diff") iw_rem=$(grep -c '^REMOVED' "$INTEG_DIR/diff")
     # The end of the last look (its state, written after its own repairs): builtins only.
     iw_look=0
@@ -867,10 +867,16 @@ integrity_watch()
         iw_pkg=${iw_pkg##*/}; iw_pkg=${iw_pkg%.list}
         # opkg keeps the package's own file times: a package (re)installed since the last look
         # (opkg rewrote its file list) has the same time and other contents - a repair of a
-        # spoiled copy (11.11.2026: libc, libpcre2), not the stick. Written by opkg.
+        # spoiled copy (11.11.2026: libc, libpcre2), not the stick. Written by opkg - unless the
+        # package differs from the same version in Entware (spoiled after the reinstall): a check
+        # only (download into RAM), whatever the agents' mode; once a package a look.
         if [ "$iw_k" = SPOILED ] && [ -n "$iw_pkg" ] && [ "$iw_look" -gt 0 ] &&
            [ "$(date -r "$R/opt/lib/opkg/info/$iw_pkg.list" +%s 2>/dev/null || echo 0)" -ge "$iw_look" ]; then
-            iw_k=WRITTEN
+            case " $iw_rok $iw_rbad " in
+                *" $iw_pkg "*) ;;
+                *) if [ -z "$(pkg_damaged "$iw_pkg" </dev/null)" ]; then iw_rok="$iw_rok $iw_pkg"; else iw_rbad="$iw_rbad $iw_pkg"; fi ;;
+            esac
+            case " $iw_rok " in *" $iw_pkg "*) iw_k=WRITTEN ;; esac
         fi
         case "$iw_k" in
             SPOILED)
