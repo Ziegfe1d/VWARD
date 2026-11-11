@@ -64,8 +64,17 @@ func equal(a, b map[string]string) bool {
 	return true
 }
 
-// Run executes p, planned from the model planned.
+// Options of one run. NoSave: no «system configuration save» after a proven batch (a caller
+// that writes often, Autopodbor, saves on its own schedule).
+type Options struct{ NoSave bool }
+
+// Run executes p, planned from the model planned, and saves the configuration once proven.
 func Run(r Router, j *journal.Journal, op string, planned *ndm.Model, p *plan.Plan) (*Result, error) {
+	return RunWith(r, j, op, planned, p, Options{})
+}
+
+// RunWith: Run with options.
+func RunWith(r Router, j *journal.Journal, op string, planned *ndm.Model, p *plan.Plan, opt Options) (*Result, error) {
 	res := &Result{}
 	if len(p.Steps) == 0 {
 		// A converged repeat: nothing read again, nothing written, no journal.
@@ -117,10 +126,12 @@ func Run(r Router, j *journal.Journal, op string, planned *ndm.Model, p *plan.Pl
 	switch {
 	case equal(got, post):
 		o := journal.Outcome{State: "done", Reason: "verified", Applied: len(p.Steps), Results: notes}
-		if sr, err := r.Send([]string{"system configuration save"}); err == nil && len(sr) == 1 && sr[0].Status != "error" {
-			o.Saved = true
+		if !opt.NoSave {
+			if sr, err := r.Send([]string{"system configuration save"}); err == nil && len(sr) == 1 && sr[0].Status != "error" {
+				o.Saved = true
+			}
+			res.Batches++
 		}
-		res.Batches++
 		j.Finish(op, o)
 		res.Outcome = o
 		return res, nil

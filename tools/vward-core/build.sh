@@ -1,5 +1,5 @@
 #!/bin/sh
-# Reproducible static build of vward-core (only selftest --yes writes, its own test group) for the
+# Reproducible static build of vward-core (writes: selftest --yes, adaptive --apply) for the
 # routers' processors, the way tools/vward-awg is built: the same Go release gives the same
 # bytes; `build.sh OUT --check` fails on any difference from SHA256SUMS.
 set -eu

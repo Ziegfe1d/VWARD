@@ -190,3 +190,33 @@ func (j *Journal) Resolve(op, state, reason string) error {
 	b, _ := json.Marshal(Outcome{State: state, Reason: reason})
 	return writeAtomic(filepath.Join(j.dir(op), "resolved"), b)
 }
+
+// Prune: of the closed operations (done, failed, resolved) whose id starts with prefix, only
+// the newest keep stay (ids sort by time: «PREFIX-UNIXTIME-...»). Open ones always stay.
+func (j *Journal) Prune(prefix string, keep int) error {
+	ents, err := os.ReadDir(j.Dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	var closed []string
+	for _, e := range ents {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+			continue
+		}
+		switch j.State(e.Name()) {
+		case "done", "failed", "resolved":
+			closed = append(closed, e.Name())
+		}
+	}
+	sort.Strings(closed)
+	for len(closed) > keep {
+		if err := os.RemoveAll(j.dir(closed[0])); err != nil {
+			return err
+		}
+		closed = closed[1:]
+	}
+	return nil
+}

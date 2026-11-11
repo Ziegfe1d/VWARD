@@ -1,6 +1,6 @@
-// vward-core: VWARD's routing core in Go (owner 08.11; write path 11.11.2026). Only
-// selftest --yes writes to the router, and only its own test group; recover writes only the
-// local journal. Everything else only reads (RCI GET, «show» parse) and prints to stdout.
+// vward-core: VWARD's routing core in Go (owner 08.11; write path 11.11.2026). Writes to the
+// router: selftest --yes (its own test group) and adaptive --apply (names into AdaptiveAuto);
+// recover writes only the local journal. Everything else only reads (RCI GET, «show» parse) and prints to stdout.
 //
 //	vward-core version
 //	vward-core probe    [--rci 127.0.0.1:79]           time of RCI reads, narrow and full
@@ -11,6 +11,12 @@
 //	                     removed, proven; without --yes only the plan
 //	vward-core recover  [--rci ...] [--journal DIR] [--yes]
 //	                     operations a crash left open, closed by a read of the router (no replay)
+//	vward-core adaptive --tunnel-dev DEV [--lan br0] [--wan DEV] [--group AdaptiveAuto] [--apply] ...
+//	                     Autopodbor: DNS queries on the LAN, checks direct and through the VPN,
+//	                     names that open only through the VPN into the group (observation
+//	                     without --apply: nothing sent)
+//	vward-core check-host --tunnel-dev DEV [--wan DEV] HOST
+//	                     one name checked the same way; nothing sent
 package main
 
 import (
@@ -32,7 +38,7 @@ import (
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/router"
 )
 
-var version = "proto-2"
+var version = "proto-3"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -40,7 +46,7 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "version":
-		fmt.Printf("vward-core %s %s/%s write=selftest-only\n", version, runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("vward-core %s %s/%s write=selftest,adaptive\n", version, runtime.GOOS, runtime.GOARCH)
 	case "probe":
 		probe(os.Args[2:])
 	case "dry-run":
@@ -49,6 +55,10 @@ func main() {
 		selfTest(os.Args[2:])
 	case "recover":
 		recoverOpen(os.Args[2:])
+	case "adaptive":
+		runAdaptive(os.Args[2:])
+	case "check-host":
+		checkHost(os.Args[2:])
 	default:
 		usage()
 	}
@@ -56,7 +66,8 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: vward-core version | probe [--rci ADDR] | dry-run [--rci ADDR] [--etc DIR] [--full]\n"+
-		"       | selftest [--rci ADDR] [--journal DIR] [--tunnel NAME] [--backup DIR] [--yes] | recover [--rci ADDR] [--journal DIR] [--yes]")
+		"       | selftest [--rci ADDR] [--journal DIR] [--tunnel NAME] [--backup DIR] [--yes] | recover [--rci ADDR] [--journal DIR] [--yes]\n"+
+		"       | adaptive --tunnel-dev DEV [--lan br0] [--wan DEV] [--group AdaptiveAuto] [--apply] | check-host --tunnel-dev DEV [--wan DEV] HOST")
 	os.Exit(2)
 }
 
