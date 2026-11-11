@@ -553,7 +553,7 @@ watch_agents()
 '
     done
     IFS=$OLDIFS_A
-    printf 'at=%s\nnetwork=%s\ncomponents=ok\nupdates=%s\nmaintenance=%s\n' "$WA_NOW" "$WA_NET" "$WA_UPD" "$WA_MNT" > "$AGENTS_STATE.tmp" &&
+    printf 'at=%s\nnetwork=%s\ncomponents=ok\nupdates=%s\nmaintenance=%s\nssh=%s\n' "$WA_NOW" "$WA_NET" "$WA_UPD" "$WA_MNT" "$SSH_LOGIN" > "$AGENTS_STATE.tmp" &&
         mv -f "$AGENTS_STATE.tmp" "$AGENTS_STATE"
 }
 
@@ -654,12 +654,56 @@ ssh_unstick()
     fi
 }
 
+# ssh_login_check (owner 11.11: dropbear alive, «Child connection» logged for each try, yet no
+# session went further: the session process fails before the login). A live server is not
+# enough: every 10 minutes a fresh Entware process looks up the user root (the same library path
+# as dropbear's login: libnss_files), every 30 minutes the port must answer with its banner.
+# Logged on a change, the owner told once, the state for the Panel (ssh= in the agents' state).
+# Nothing is restarted or reinstalled: a restart does not mend a broken library.
+SSH_LOGIN=unknown SSH_PROBE_N=0 SSH_LOGIN_TOLD=
+ssh_login_check()
+{
+    SSH_PROBE_N=$((SSH_PROBE_N + 1))
+    [ $((SSH_PROBE_N % 10)) -eq 1 ] || return 0
+    SL_ID=${VWARD_SSH_ID_BIN:-/opt/bin/busybox}
+    SL_NSS=skip
+    if [ -x "$SL_ID" ]; then
+        "$SL_ID" id root </dev/null >/dev/null 2>&1
+        SL_NSS=$?
+    fi
+    SL_BAN=skip
+    SL_CURL=${VWARD_SSH_CURL_BIN:-/opt/bin/curl}
+    if [ $((SSH_PROBE_N % 30)) -eq 1 ] && [ -x "$SL_CURL" ]; then
+        SL_B=$("$SL_CURL" -s -m 3 "telnet://127.0.0.1:${VWARD_SSH_PORT:-22}" </dev/null 2>/dev/null | head -c 7)
+        # curl that crashed itself (its HTTPS on MIPS, 11.11) says nothing about SSH.
+        "$SL_CURL" --version >/dev/null 2>&1 || SL_B=skip
+        case "$SL_B" in SSH-2.0*|SSH-1.9*) SL_BAN=yes ;; skip) ;; *) SL_BAN=no ;; esac
+    fi
+    SL_NEW=$SSH_LOGIN
+    case "$SL_NSS" in skip) ;; 0|1|2) SL_NEW=ok ;; *) [ "$SL_NSS" -lt 128 ] && SL_NEW=ok || SL_NEW=broken ;; esac
+    [ "$SL_BAN" != no ] || SL_NEW=broken
+    [ "$SL_NEW" != "$SSH_LOGIN" ] || return 0
+    SSH_LOGIN=$SL_NEW
+    if [ "$SL_NEW" = broken ]; then
+        log_event "SSH_LOGIN_BROKEN|user_lookup_rc=$SL_NSS|banner=$SL_BAN"
+        [ -n "$SSH_LOGIN_TOLD" ] && return 0
+        SSH_LOGIN_TOLD=1
+        command -v vward_note >/dev/null 2>&1 ||
+            { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+        ! command -v vward_note >/dev/null 2>&1 || vward_note err "Вход по SSH не проходит" \
+            "Сервер SSH работает, но проверка входа не прошла (код $SL_NSS, баннер: $SL_BAN). Код 132 или 139 - программа Entware падает при поиске пользователя: вероятно, повреждена библиотека на накопителе. VWARD ничего не переустанавливает сам; подробности: Система → Журналы." utils
+    else
+        log_event "SSH_LOGIN_OK|user_lookup_rc=$SL_NSS|banner=$SL_BAN"
+    fi
+}
+
 keep_ssh()
 {
     [ -x "$SSH_INIT" ] && ! grep -q '^ENABLED=no' "$SSH_INIT" 2>/dev/null || return 0
     if ssh_running; then
         SSH_DOWN=0 SSH_WAIT=1 SSH_SKIP=0
         ssh_unstick
+        ssh_login_check
         return 0
     fi
     if [ "$SSH_SKIP" -gt 0 ]; then

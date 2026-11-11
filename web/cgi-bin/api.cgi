@@ -3789,7 +3789,7 @@ CROND_PID=${1:--}
 [ "$CROND_PID" != - ] || CROND_PID=""
 SUPERVISOR=${2:-0}
 # The other agents as the components agent sees them (ok, late, hung; off), a minute old at most.
-AGENTS="$(awk -F= '$1 ~ /^(network|updates|maintenance|state)$/ && $2 ~ /^(ok|late|hung|off)$/ {printf "%s%s=%s", (n++ ? "," : ""), $1, $2}' "${VWARD_AGENTS_STATE:-/tmp/vward-agents.state}" 2>/dev/null)"
+AGENTS="$(awk -F= '$1 ~ /^(network|updates|maintenance|state|ssh)$/ && $2 ~ /^(ok|late|hung|off|broken)$/ {printf "%s%s=%s", (n++ ? "," : ""), $1, $2}' "${VWARD_AGENTS_STATE:-/tmp/vward-agents.state}" 2>/dev/null)"
 ADGUARD=${3:-0}
 # «Компоненты» (fix.32): VWARD's real-time watcher, the DNS capture and Smart DNS's DoH client.
 SENTINEL_RUN=${6:-0} DOH_RUN=${7:-0} DNSCAP_RUN=${5:-0}

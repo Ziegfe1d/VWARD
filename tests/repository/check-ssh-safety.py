@@ -150,6 +150,46 @@ mkdir -p "{proc}/4242"; ln -sf /opt/sbin/dropbear "{proc}/4242/exe"; echo "4242 
     if "restart=wait" not in out or (t / "kills").exists():
         fail(f"a second restart within 30 minutes must wait: {out!r}")
 
+# 11.11 (owner): «Child connection» for each try, no login: the server is alive, the session dies
+# before the login. The check is of the login path, not of a process: a fresh Entware process looks
+# up root (libnss_files, every 10 min), the port answers with its banner (every 30 min). A crash
+# (code >= 128) or no banner: logged once, the Panel's ssh=broken; nothing restarted.
+lfn = re.search(r"^ssh_login_check\(\)\n\{\n.*?^\}\n", sup, re.S | re.M)
+if not lfn or "        ssh_login_check\n" not in sup or "ssh=%s" not in sup:
+    fail("the supervisor does not check the SSH login itself")
+if "|ssh)$/" not in (ROOT / "web/cgi-bin/api.cgi").read_text() or "ag.ssh === 'broken'" not in (ROOT / "web/assets/vward-console.js").read_text():
+    fail("the Panel does not show the SSH login state")
+with tempfile.TemporaryDirectory() as tmp:
+    t = Path(tmp)
+    def tool(name, body):
+        (t / name).write_text("#!/bin/sh\n" + body); (t / name).chmod(0o755)
+    log = t / "sup.log"
+    def probe(id_rc, banner, rounds=1, curl_ok=True):
+        tool("id", f"exit {id_rc}\n")
+        tool("curl", ('[ "$1" = --version ] && exit 0\n' if curl_ok else 'kill -ILL $$\n') + f"printf '{banner}'\n")
+        if log.exists():
+            log.unlink()
+        body = (f"VWARD_SSH_ID_BIN={t}/id\nVWARD_SSH_CURL_BIN={t}/curl\nVWARD_PROFILE_LIB=/nonexistent\n"
+                f'log_event() {{ echo "$*" >> {log}; }}\n' + lfn.group(0).replace("SSH_LOGIN=unknown SSH_PROBE_N=0 SSH_LOGIN_TOLD=\n", "")
+                + "SSH_LOGIN=unknown SSH_PROBE_N=0 SSH_LOGIN_TOLD=\n" + "ssh_login_check\n" * rounds + 'echo "STATE=$SSH_LOGIN"\n')
+        r = subprocess.run(["sh", "-c", body], text=True, capture_output=True, timeout=30)
+        return r.stdout.strip().splitlines()[-1], (log.read_text() if log.exists() else "")
+    st, out = probe(0, "SSH-2.0-dropbear\r\n")
+    if st != "STATE=ok" or "SSH_LOGIN_OK|user_lookup_rc=0|banner=yes" not in out:
+        fail(f"a working login: {st} {out!r}")
+    st, out = probe(132, "SSH-2.0-dropbear\r\n", rounds=12)
+    if st != "STATE=broken" or out.count("SSH_LOGIN_BROKEN|user_lookup_rc=132") != 1:
+        fail(f"a crash at the user lookup (SIGILL) must be logged once: {st} {out!r}")
+    st, out = probe(0, "")
+    if st != "STATE=broken" or "banner=no" not in out:
+        fail(f"no banner on the SSH port: {st} {out!r}")
+    st, out = probe(0, "", curl_ok=False)
+    if st != "STATE=ok":
+        fail(f"a crashed curl says nothing about SSH: {st} {out!r}")
+    st, out = probe(1, "SSH-2.0-x")
+    if st != "STATE=ok":
+        fail("an unknown user (code 1) is no crash")
+
 RANGES = "0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16 198.18.0.0/15 224.0.0.0/3"
 for path in ("components/policy-sync/scripts/vward-policy-sync.sh", "components/console/scripts/vward-console-config.sh"):
     if f'split("{RANGES}"' not in (ROOT / path).read_text():

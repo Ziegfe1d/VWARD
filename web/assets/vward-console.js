@@ -1549,7 +1549,10 @@ function agentsPanel() {
     ['Агент сети', 'интернет, VPN, DNS', pill(ag.network, jobOk(['vward-tunnel-health.sh', 'vward-wan-guard.sh', 'vward-route-reconciler.sh'])), 'wan'],
     ['Агент компонентов', 'программы и модули', pill(null, known ? !!sv.supervisor : null), 'd-components'],
     ['Агент обновлений', 'обновления программ', pill(ag.updates, known ? !!sv.crond : null), 'u-vward'],
-    ['Агент обслуживания', 'журналы и накопитель', pill(ag.maintenance, jobOk(['vward-housekeeping.sh'])), 'logs']
+    ['Агент обслуживания', 'журналы и накопитель', pill(ag.maintenance, jobOk(['vward-housekeeping.sh'])), 'logs'],
+    // 11.11: the server alive is not enough, the login itself is checked by the components agent.
+    ['Вход по SSH', 'проверка входа, не только процесса', ag.ssh === 'broken' ? ST.bad.concat('вход не проходит, см. журналы') :
+      ag.ssh === 'ok' ? ST.on.concat('') : ['', '—', ''], 'logs']
   ];
   // The mode and the proposed actions are on the same page below: no rows leading to it (owner 2026-10-18).
   return panel('Агенты', kv(rows.map(r => [r[0], r[2][1], r[2][0], r[3], '', r[2][2] ? r[1] + ' · ' + r[2][2] : r[1]])),
