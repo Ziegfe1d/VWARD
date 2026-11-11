@@ -143,6 +143,7 @@ if command -v busybox >/dev/null 2>&1; then
 fi
 python3 tests/repository/check-awg-engine.py || fail "Tunnel engine (AmneziaWG)"
 python3 tests/repository/check-vless-engine.py || fail "VLESS engine (Xray)"
+python3 tests/repository/check-diag-running.py || fail "Panel diagnostics see running scripts with any grep"
 python3 tests/repository/check-boot-watch.py || fail "boot watch: the Panel and AdGuard Home after boot"
 python3 tests/repository/check-agh-start-gate.py || fail "AdGuard Home start gate"
 python3 tests/repository/check-agh-official.py || fail "AdGuard Home official build"

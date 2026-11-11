@@ -142,4 +142,71 @@ with _tempfile.TemporaryDirectory() as td:
             pass
         p.wait(timeout=5)
 
+
+# 11.11 (Route Engine down from 03:50 to past 06:14, nothing in the journals): a down engine that is
+# not started says why, and a stale S91 control lock (dead/foreign owner, or no pid) does not keep
+# every start at «control busy» for ever.
+with _tempfile.TemporaryDirectory() as td:
+    t = Path(td)
+    (t / "S91vward-route-engine").write_text("#!/bin/sh\nexit 0\n")
+    (t / "S91vward-route-engine").chmod(0o755)
+    held = supervisor[supervisor.index("RE_HELD= RE_HELD_AT=0\n"):] if "RE_HELD= RE_HELD_AT=0\n" in supervisor else ""
+    held = held[:held.index("\n}\n") + 3] if held else ""
+    ev = t / "events"
+    def run_keep(pending, start_rc, rounds=1):
+        if ev.exists():
+            ev.unlink()
+        script = (f"BIN_DIR=/nonexistent; RUN_DIR={_shlex.quote(str(t))}; INITD={_shlex.quote(str(t))}; "
+                  f"UPTIME_FILE=/proc/uptime; EVENT_LOG={_shlex.quote(str(ev))}\n"
+                  'vward_component_enabled(){ return 0; }\n'
+                  f'vward_update_pending(){{ return {0 if pending else 1}; }}\n'
+                  'restart_allowed(){ return 0; }\n'
+                  f'start_of(){{ return {start_rc}; }}\n'
+                  'log_event(){ echo "$1" >> "$EVENT_LOG"; }\n'
+                  + held + fm.group(0) + "\n" + "keep_route_engine\n" * rounds)
+        subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=10)
+        return ev.read_text() if ev.exists() else ""
+    if "ROUTE_ENGINE_NOT_STARTED|reason=update_pending" not in run_keep(True, 0):
+        fail("a down Route Engine held by an update marker must be logged")
+    out = run_keep(False, 1, rounds=3)
+    if out.count("ROUTE_ENGINE_NOT_STARTED|reason=start_failed rc=1") != 1:
+        fail(f"a failed S91 start must be logged once per hour, not every round: {out!r}")
+    if "STARTED|route-engine" not in run_keep(False, 0):
+        fail("a successful start must still be logged")
+
+def s91_fn(name):
+    i = S91.index(name + "()\n")
+    return S91[i:S91.index("\n}\n", i) + 3]
+lock_fns = s91_fn("control_owner_alive") if "control_owner_alive()\n" in S91 else ""
+lock_fns += s91_fn("control_lock")
+with _tempfile.TemporaryDirectory() as td:
+    lock = Path(td) / "control.lock"
+    ev = Path(td) / "events"
+    def try_lock(owner):
+        if lock.exists():
+            subprocess.run(["rm", "-rf", str(lock)])
+        lock.mkdir()
+        if owner is not None:
+            (lock / "pid").write_text(f"{owner}\n")
+        script = (f"CONTROL_LOCK={_shlex.quote(str(lock))}; EVENT_LOG={_shlex.quote(str(ev))}; CONTROL_WAIT=2\n"
+                  + lock_fns + "control_lock && echo GOT || echo BUSY\n")
+        return subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=20).stdout.strip()
+    if try_lock(os.getpid()) != "GOT":
+        fail("a control lock held by a reused pid (not S91) must be taken over")
+    if try_lock(None) != "GOT":
+        fail("a control lock without an owner pid must be taken over after the wait")
+    if try_lock(99999999) != "GOT":
+        fail("a control lock of a dead owner must be taken over")
+    real = subprocess.Popen(["sh", "-c", "sleep 30", "S91vward-route-engine"])
+    try:
+        time.sleep(0.2)
+        if try_lock(real.pid) != "BUSY":
+            fail("a control lock held by a live S91 must be respected")
+    finally:
+        real.kill(); real.wait()
+    if "CONTROL_LOCK_STALE|owner=" not in (ev.read_text() if ev.exists() else ""):
+        fail("taking over a stale control lock must be logged")
+if "|CONTROL_BUSY|cmd=$1|" not in S91:
+    fail("«control busy» must be logged in the engine's event log")
+
 print("ROUTE_ENGINE_WATCHDOG=PASS")

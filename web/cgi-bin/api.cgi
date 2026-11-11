@@ -1888,8 +1888,10 @@ if [ "$ACTION" = "diagnostics" ]; then
     ADAPTIVE_STATUS=FAIL
     # diag_running REGEX: a process whose command line matches (one grep over /proc; «[v]ward»
     # does not match grep's own line). Not through ps: the Panel's ps did not show running VWARD
-    # scripts (a Viva, 2026-10-11: «Агент компонентов FAIL» with the agent running).
-    diag_running() { grep -qs -- "$1" /proc/[0-9]*/cmdline 2>/dev/null; }
+    # scripts (a Viva, 2026-10-11: «Агент компонентов FAIL» with the agent running). The NULs
+    # between the arguments become new lines first: the router's BusyBox grep stops at the first
+    # NUL and never saw a script after «/bin/sh» (11.11.2026).
+    diag_running() { cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\000' '\n' | grep -qs -- "$1"; }
     diag_running '[c]rond' && CROND_STATUS=PASS
     diag_running '[v]ward-cron-supervisor[.]sh' && SUPERVISOR_STATUS=PASS
     diag_running '[A]dGuardHome' && ADGUARD_STATUS=PASS
