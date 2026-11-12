@@ -419,7 +419,7 @@ configure() {
         : > "$ETC/components/$c.lite"
     done
     [ ! -e "$ETC/components/ads-privacy-guard.disabled" ] || : > "$ETC/components/ads-privacy-guard.lite"
-    [ -z "$lite_list" ] || skip "сторожа туннеля и интернета, Wi-Fi и ночная сверка категорий выключены; включаются в Панели VWARD → Компоненты"
+    [ -z "$lite_list" ] || skip "агент VPN, восстановление интернета, контроль Wi-Fi и ночная сверка категорий выключены; включаются в Панели VWARD → Компоненты"
 
     # DNS left by an AdGuard Home that is gone: out, so Keenetic answers by itself (owner 12.11.2026).
     stale_dns > "$WORK/dns-stale"
