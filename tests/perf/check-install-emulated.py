@@ -466,6 +466,7 @@ dns-proxy
     route object-group AdaptiveAuto OpkgTun4 auto
 !
 ip route 91.108.4.0 255.255.252.0 OpkgTun4 auto
+ip name-server 8.8.8.8 youtube.com on OpkgTun4
 """
 
 
@@ -496,14 +497,15 @@ def part9_old_tunnel(work, release):
         r = sh(root, "sh /emu/repo/install.sh --yes")
         out = r.stdout
         if r.returncode != 0 or "[ PASS ] VWARD установлен" not in out or "VPN: Wireguard1" not in out or \
-                "туннели VWARD без настроек" not in out or "OpkgTun4: списков доменов 2, подсетей 1" not in out or \
-                "перенесено в Wireguard1: списков доменов 2, подсетей 1 (было через OpkgTun4" not in out:
+                "туннели VWARD без настроек" not in out or "OpkgTun4: списков доменов 2, подсетей 1, DNS через туннель 1" not in out or \
+                "перенесено в Wireguard1: списков доменов 2, подсетей 1, DNS через туннель 1 (было через OpkgTun4" not in out:
             fail(f"install with an old tunnel failed:\n{out}")
         changes = read(root / "emu/ndmc-changes.log").splitlines()
         want = ["dns-proxy route object-group AdaptiveAuto Wireguard1 auto", "dns-proxy no route object-group AdaptiveAuto OpkgTun4",
                 "dns-proxy route object-group YouTube Wireguard1 auto", "dns-proxy no route object-group YouTube OpkgTun4",
                 "dns-proxy no route object-group Discord OpkgTun4",
                 "ip route 91.108.4.0 255.255.252.0 Wireguard1 auto", "no ip route 91.108.4.0 255.255.252.0 OpkgTun4",
+                "ip name-server 8.8.8.8 youtube.com on Wireguard1", "no ip name-server 8.8.8.8 youtube.com on OpkgTun4",
                 "system configuration save"]
         if changes != want:
             fail(f"RED: everything on the old tunnel moves to the working VPN, nothing else: {changes}\n{out}")
@@ -519,8 +521,10 @@ def part9_old_tunnel(work, release):
         back = changes[changes.index("system configuration save") + 1:]
         want = ["dns-proxy no route object-group AdaptiveAuto Wireguard1",
                 "dns-proxy no route object-group YouTube Wireguard1", "no ip route 91.108.4.0 255.255.252.0 Wireguard1",
+                "no ip name-server 8.8.8.8 youtube.com on Wireguard1",
                 "dns-proxy route object-group YouTube OpkgTun4 auto", "dns-proxy route object-group Discord OpkgTun4 auto",
-                "ip route 91.108.4.0 255.255.252.0 OpkgTun4 auto", "dns-proxy route object-group AdaptiveAuto OpkgTun4 auto",
+                "ip route 91.108.4.0 255.255.252.0 OpkgTun4 auto", "ip name-server 8.8.8.8 youtube.com on OpkgTun4",
+                "dns-proxy route object-group AdaptiveAuto OpkgTun4 auto",
                 "system configuration save"]
         if r.returncode == 0 or back != want:
             fail(f"a failed installation must put the old tunnel's routes back: {back}\n{r.stdout}")

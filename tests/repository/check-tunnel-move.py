@@ -34,6 +34,9 @@ ip route 10.20.0.0 255.255.0.0 OpkgTun2 auto
 ip route 10.30.0.0 255.255.0.0 OpkgTun2 auto
 ip route 10.40.0.0 255.255.0.0 OpkgTun2 auto
 ip route 10.50.0.0 255.255.0.0 OpkgTun2 auto
+ip name-server 8.8.8.8 youtube.com on OpkgTun2
+ip name-server 1.1.1.1 youtube.com on OpkgTun2
+ip name-server 9.9.9.9 example.org on Wireguard0
 """
 
 # Keenetic over a text file. A refused command prints its reason on one line and a bare
@@ -117,7 +120,11 @@ def run(tmp: Path, busybox: bool) -> None:
         fail("a route Keenetic replaced itself is on the default tunnel:\n" + text)
     if "ip route 10.40.0.0 255.255.0.0 OpkgTun2 auto" not in text:
         fail("an IP category's route is left to policy-sync:\n" + text)
-    if "info.moved=lists:1,subnets:2,failed:1,ip_categories:1" not in r.stdout:
+    # DNS through the tunnel goes with its routes (owner's Viva 12.11.2026: 16 lines stayed behind).
+    if "ip name-server 8.8.8.8 youtube.com on Wireguard0" not in text or "ip name-server 1.1.1.1 youtube.com on Wireguard0" not in text \
+            or "on OpkgTun2" in text or "ip name-server 9.9.9.9 example.org on Wireguard0" not in text:
+        fail("DNS through the old tunnel moves to the default one:\n" + text)
+    if "info.moved=lists:1,subnets:2,failed:1,ip_categories:1,dns:2" not in r.stdout:
         fail(f"the result counts: {r.stdout}")
     if "tunnel-move OpkgTun2 subnet 10.30.0.0 255.255.0.0 refused: Network::RoutingTable: error: synthetic refusal" not in audit:
         fail("the journal names the refused subnet with Keenetic's whole answer, not its last «[»:\n" + audit)

@@ -1007,6 +1007,12 @@ op_tunnel() {
         done < "$JOURNAL.nets"
     fi
     nets=$(grep -c . "$JOURNAL.nets")
+    # 3b. DNS through the old tunnel (all only, as the subnets).
+    DNS_MOVED=0
+    if [ "$MOVE_ALL" = 1 ]; then
+        dns_on_move "$OLD_IF" "$NEW_IF"
+        if [ "$DNS_MOVED" != 0 ]; then snapshot; ! dns_on_left "$OLD_IF" || die verification_failed; fi
+    fi
 
     # 4. device.conf: the tunnel, and the policy group pinned so discovery no
     #    longer depends on which tunnel its route points to.
@@ -1046,7 +1052,7 @@ op_tunnel() {
     [ ! -x "$POLICY_SYNC_BIN" ] || (trap '' HUP; exec "$POLICY_SYNC_BIN" --reconcile) </dev/null >/dev/null 2>&1 &
     # The owner chose this tunnel: the guard does not take the routes back anywhere else.
     [ "${VWARD_TUNNEL_BY_GUARD:-}" = 1 ] || rm -f "${VWARD_TUNNEL_FALLBACK_STATE:-/opt/var/lib/vward/tunnel-guard/fallback}"
-    done_ok "tunnel $OLD_IF($OLD_DEV) -> $NEW_IF($NEW_DEV) group=$GROUP routes=$moved subnets=$nets" changed
+    done_ok "tunnel $OLD_IF($OLD_DEV) -> $NEW_IF($NEW_DEV) group=$GROUP routes=$moved subnets=$nets dns=$DNS_MOVED" changed
 }
 
 # ---------- Domain lists: around the tunnel or through it ----------
@@ -3524,6 +3530,30 @@ op_tunnel_state() {
     done_ok "tunnel-state $1 $2" changed
 }
 
+# dns_on_move OLD NEW: Keenetic's «ip name-server SERVER [DOMAIN] on OLD» (DNS through the tunnel:
+# 16 lines for YouTube and Instagram stayed on the dead OpkgTun4 of the owner's Viva, 12.11.2026)
+# go with the routes to NEW; NEW «-»: taken out. Journaled for the undo; DNS_MOVED counts them.
+dns_on_move() {
+    awk -v i="$1" '$1 == "ip" && $2 == "name-server" && $(NF - 1) == "on" && $NF == i' "$RUNCFG" > "$JOURNAL.dnson"
+    DNS_MOVED=0
+    while IFS= read -r dl; do
+        [ -n "$dl" ] || continue
+        dm_base=${dl% on *}
+        if [ "$2" != - ] && ! grep -Fqx "$dm_base on $2" "$RUNCFG"; then
+            ndm "$dm_base on $2" || die router_rejected
+            echo "no $dm_base on $2" >> "$JOURNAL"
+        fi
+        ndm "no $dl" || die router_rejected
+        echo "$dl" >> "$JOURNAL"
+        DNS_MOVED=$((DNS_MOVED + 1))
+    done < "$JOURNAL.dnson"
+    rm -f "$JOURNAL.dnson"
+}
+# dns_on_left OLD: a DNS line still on OLD after the move (the verification).
+dns_on_left() {
+    awk -v i="$1" '$1 == "ip" && $2 == "name-server" && $(NF - 1) == "on" && $NF == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG"
+}
+
 op_tunnel_delete() {
     # tunnel-delete NAME TARGET [move]: move its lists and subnets to TARGET (bypass, vpn
     # or another tunnel), then remove the interface.  The VWARD tunnel stays.  move: only
@@ -3592,7 +3622,10 @@ op_tunnel_delete() {
         ndm "no ip route $net $1" || die router_rejected
         echo "ip route $net $1 auto" >> "$JOURNAL"
     done < "$JOURNAL.nets"
+    # DNS through the tunnel goes where its routes go.
+    dns_on_move "$1" "$td_to"
     snapshot
+    ! dns_on_left "$1" || die verification_failed
     while IFS= read -r g; do [ -z "$g" ] || ! route_present "$g" "$1" || die verification_failed; done < "$JOURNAL.lists"
     if [ "${3:-}" = move ]; then
         # Not moved: only what is still on the old tunnel after the move (Viva 2026-10-19: 450
@@ -3609,7 +3642,7 @@ op_tunnel_delete() {
         td_nets=$(( $(grep -c . "$JOURNAL.nets") - td_fail ))
         # Each refused subnet with Keenetic's own answer (the first 20).
         head -n 20 "$JOURNAL.failed" | while IFS='|' read -r tf_net tf_why; do audit "tunnel-move $1 subnet $tf_net refused: ${tf_why:-no answer}"; done
-        [ $((td_lists + td_nets)) -gt 0 ] || { TXN=0; rm -f "$JOURNAL.lists" "$JOURNAL.nets" "$JOURNAL.failed" "$JOURNAL.owned"
+        [ $((td_lists + td_nets + DNS_MOVED)) -gt 0 ] || { TXN=0; rm -f "$JOURNAL.lists" "$JOURNAL.nets" "$JOURNAL.failed" "$JOURNAL.owned"
             [ "$td_fail" = 0 ] || die router_rejected; done_ok "tunnel-move $1 nothing to move ip_categories=$td_own" unchanged; }
         save_router || die config_save_failed
         TXN=0
@@ -3618,8 +3651,8 @@ op_tunnel_delete() {
         if [ "$td_own" != 0 ] && [ -x "$POLICY_SYNC_BIN" ]; then
             (trap '' HUP; exec "$POLICY_SYNC_BIN" --reconcile) </dev/null >/dev/null 2>&1 &
         fi
-        echo "info.moved=lists:$td_lists,subnets:$td_nets,failed:$td_fail,ip_categories:$td_own"
-        done_ok "tunnel-move $1 lists=$td_lists subnets=$td_nets failed=$td_fail ip_categories=$td_own to=$2" changed
+        echo "info.moved=lists:$td_lists,subnets:$td_nets,failed:$td_fail,ip_categories:$td_own,dns:$DNS_MOVED"
+        done_ok "tunnel-move $1 lists=$td_lists subnets=$td_nets dns=$DNS_MOVED failed=$td_fail ip_categories=$td_own to=$2" changed
     fi
     ! awk -v i="$1" "$ROUTE_AWK"' $1 == "ip" && $2 == "route" && rdev() == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG" || die verification_failed
     # Last step: nothing depends on the interface any more.
