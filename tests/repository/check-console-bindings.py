@@ -77,7 +77,7 @@ if (pages | details) - renderers:
     fail("разделы без отрисовки: " + ", ".join(sorted((pages | details) - renderers)))
 targets = set(re.findall(r"data-go=\"([a-z][a-z-]*)\"", js)) | set(re.findall(r"'(d-[a-z-]+|u-[a-z-]+|c-[a-z-]+)'\]", js))
 targets |= {m for m in re.findall(r"\['[^']+', [^\]]*?'([a-z][a-z-]+)'(?:, '[^']*')?\]", js) if m in pages or m in details}
-components = set(re.findall(r"\{ id: '([a-z-]+)', name: '", js))
+components = set(re.findall(r"\{ id: '([a-z-]+)', when: '", js))
 unknown = {t for t in targets if t not in pages and t not in details and not (t.startswith("c-") and t[2:] in components)}
 if unknown:
     fail("переходы на несуществующие страницы: " + ", ".join(sorted(unknown)))

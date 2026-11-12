@@ -126,17 +126,21 @@ for c in ("tunnel-guard", "wan-guard", "wifi-client-guard", "policy-sync"):
 import re as _re
 HELPER = (ROOT / "components/console/scripts/vward-console-config.sh").read_text()
 JSX = (ROOT / "web/assets/vward-console.js").read_text()
-names = _re.search(r'VWARD_EXTRA_NAMES="([^"]+)"', HELPER).group(1).split()
 used = set(_re.findall(r"vward_extra ([a-z-]+)", HK + SUP))
 import json as _json
-REG = _json.loads((ROOT / "config/settings/settings-registry.json").read_text(encoding="utf-8"))
-panel_names = [p["id"] for p in REG["parts"] if p["switch"] == "extra"]
-if used - set(names) or set(names) != set(panel_names):
-    fail(f"every optional part has a switch: code {sorted(used)}, helper {names}, registry {panel_names}")
-fn = HELPER[HELPER.index("op_extra() {"):HELPER.index("\n}\n", HELPER.index("op_extra() {")) + 3]
+REG_PATH = ROOT / "config/settings/settings-registry.json"
+REG = _json.loads(REG_PATH.read_text(encoding="utf-8"))
+names = [p["id"] for p in REG["parts"] if p["switch"] == "extra"]
+if used - set(names):
+    fail(f"every optional part has a switch in the registry: code {sorted(used)}, registry {names}")
+# The helper knows the parts from the registry only (fix.38: one list of names).
+if "VWARD_EXTRA_NAMES" in HELPER or "reg_has '.parts[] | select(.switch == \"extra\") | .id' \"$1\"" not in HELPER:
+    fail("op_extra must check the name against the parts' registry, not a list of its own")
+cut = lambda name: HELPER[HELPER.index(name + "() {"):HELPER.index("\n}\n", HELPER.index(name + "() {")) + 3]
+fn = cut("reg_has") + cut("op_extra")
 with tempfile.TemporaryDirectory() as td2:
     st = Path(td2) / "components"
-    pre = (f'COMPONENT_STATE={st}; VWARD_EXTRA_NAMES="{" ".join(names)}"; die() {{ echo "error=$1"; exit 1; }}; '
+    pre = (f'COMPONENT_STATE={st}; JQ=jq; SETTINGS_REG={REG_PATH}; die() {{ echo "error=$1"; exit 1; }}; '
            'done_ok() { echo "result=$2"; exit 0; }\n')
     def op(*a):
         return subprocess.run(["sh", "-c", pre + fn + 'op_extra "$@"', "x", *a], capture_output=True, text=True).stdout.strip()

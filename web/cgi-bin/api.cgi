@@ -3991,7 +3991,7 @@ PARTS_FACTS=$(
     if [ "$CORE_RUN" = 1 ]; then printf 'dnscap\t1\t1\t1\tавтоподбор на Go ловит запросы сам\n'
     else printf 'dnscap\t%s\t1\t%s\t\n' "$DNSCAP_INST" "$([ "${DNSCAP_RUN:-0}" -gt 0 ] 2>/dev/null && echo 1 || echo 0)"; fi
     printf 'sentinel\t%s\t%s\t%s\t\n' "$SENTINEL_INST" "$(extra_on sentinel)" "$SENTINEL_RUN"
-    for x in memory-watch ssh-watch repair backup flash-watch integrity services-refresh ext-update; do
+    for x in $("$JQ" -r '.parts[] | select(.switch == "extra" and .id != "sentinel") | .id' "$PARTS_REG" 2>/dev/null); do
         printf '%s\t1\t%s\t\t\n' "$x" "$(extra_on "$x")"
     done)
 PARTS_JSON=$(printf '%s\n' "$PARTS_FACTS" | "$JQ" -Rn --slurpfile reg "$PARTS_REG" '

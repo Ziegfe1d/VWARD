@@ -4750,11 +4750,18 @@ op_journal() {
     done_ok "journal $1=$2" changed
 }
 
+# The parts' registry (fix.38): the one list of VWARD's parts, their names and switches; it comes
+# with every release, next to the Panel. reg_has QUERY NAME: NAME is one of the ids QUERY gives.
+SETTINGS_REG=${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}
+reg_has() {
+    case "$2" in ''|*[!a-z0-9-]*) return 1 ;; esac
+    "$JQ" -e --arg n "$2" "[$1] | index(\$n) != null" "$SETTINGS_REG" >/dev/null 2>&1
+}
+
 # op_extra NAME 0|1: an optional part of the lightened VWARD (owner 11.11.2026: switched on one by
 # one) - NAME.on next to the components' state; vward_extra (the admission library) reads it.
-VWARD_EXTRA_NAMES="sentinel memory-watch ssh-watch repair backup flash-watch integrity ext-update services-refresh"
 op_extra() {
-    case " $VWARD_EXTRA_NAMES " in *" $1 "*) ;; *) die invalid_value 64 ;; esac
+    reg_has '.parts[] | select(.switch == "extra") | .id' "$1" || die invalid_value 64
     case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
     # NAME.on switches a part on; NAME.off keeps it off even with every part on (all.on).
     ex_f="$COMPONENT_STATE/$1.on" ex_o="$COMPONENT_STATE/$1.off"
@@ -4772,11 +4779,8 @@ op_extra() {
 # op_agents_mode AGENT MODE: «Наблюдение | Действие» (fix.28.6). all sets every agent (their own
 # choices go); one agent: its own choice. Read by vward_agent_mode (the admission library).
 op_agents_mode() {
-    case "$1:$2" in
-        all:act|all:watch) ;;
-        network:act|network:watch|components:act|components:watch|updates:act|updates:watch|maintenance:act|maintenance:watch) ;;
-        *) die invalid_value 64 ;;
-    esac
+    case "$2" in act|watch) ;; *) die invalid_value 64 ;; esac
+    [ "$1" = all ] || reg_has '.parts_agents | keys[]' "$1" || die invalid_value 64
     am_conf=${VWARD_AGENTS_CONF:-$ETC/agents.conf}
     if [ "$1" = all ]; then
         am_old=$(cat "$am_conf" 2>/dev/null)

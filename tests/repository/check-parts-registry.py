@@ -61,14 +61,17 @@ used = set(re.findall(r"vward_extra ([a-z-]+)", code))
 if used != extras:
     fail(f"optional parts: code {sorted(used)} / registry {sorted(extras)}")
 helper = (ROOT / "components/console/scripts/vward-console-config.sh").read_text()
-if set(re.search(r'VWARD_EXTRA_NAMES="([^"]+)"', helper).group(1).split()) != extras:
+if "reg_has '.parts[] | select(.switch == \"extra\") | .id' \"$1\"" not in helper:
     fail("the helper switches the registry's optional parts only")
 api = (ROOT / "web/cgi-bin/api.cgi").read_text()
 for need in ("PARTS_REG=${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}", "  parts:$parts,", "--argjson parts \"$PARTS_JSON\""):
     if need not in api:
         fail(f"the router's answer lacks {need!r}")
 facts = api[api.index("PARTS_FACTS=$("):api.index("PARTS_JSON=$(")]
-missing = [i for i in ids if not re.search(r"(^|[\s'])" + re.escape(i) + r"(\\t|[\s;])", facts)]
+# The optional parts (but sentinel, which has its own facts) come from the registry in one loop.
+loop = 'select(.switch == "extra" and .id != "sentinel")' in facts
+missing = [i for i in ids if not re.search(r"(^|[\s'])" + re.escape(i) + r"(\\t|[\s;])", facts)
+           and not (loop and i in extras and i != "sentinel")]
 if missing:
     fail(f"the router says nothing of {missing}")
 print(f"PARTS_REGISTRY=PASS: {len(parts)} parts in {len(groups)} groups, one name each")
