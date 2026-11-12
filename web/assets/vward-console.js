@@ -824,7 +824,7 @@ function mergeLogs(parts, newestFirst, info, limit) {
 let logImportant = (typeof store === 'undefined' ? null : store.get('vward-log-view')) !== 'all';
 const LOG_CODES = {
   DNS_CHAIN_OUT: 'AdGuard Home выведен из цепочки DNS, Keenetic спрашивает DNS провайдера', DNS_CHAIN_IN: 'AdGuard Home снова в цепочке DNS',
-  DNS_CHAIN_KEEP: 'AdGuard Home оставлен в цепочке: DNS провайдера тоже не отвечает', WOULD_TAKE_OUT: 'Наблюдение: VWARD вывел бы AdGuard Home из цепочки, Keenetic не изменён',
+  DNS_CHAIN_KEEP: 'AdGuard Home оставлен в цепочке: DNS провайдера тоже не отвечает', WOULD_TAKE_OUT: 'Песочница: VWARD вывел бы AdGuard Home из цепочки, Keenetic не изменён',
   START_PHASE: 'Запуск движка: этап',
   HINT_DIRECT_OK: 'Проверка напрямую: открывается', HINT_ADAPTIVE_CHECK: 'Проверка автоподбора', HINT_WG_UNAVAILABLE: 'Подсказка: VPN недоступен, проверка без него',
   HINT_SKIP_RU_ZONE: 'Российский домен: не через VPN', HINT_AGH_BLOCKED: 'Подсказка: домен блокирует AdGuard Home', HINT_SKIP_ADAPTIVE_OFF: 'Подсказка: автоподбор выключен',
@@ -1699,7 +1699,7 @@ function agentsPanel() {
 function agentsRow() {
   const sv = st().services || {}, ag = sv.agents || {}, am = agentsMode(), watching = agentList().filter(a => am[a[0]] === 'watch').length;
   const bad = ['network', 'updates', 'maintenance'].filter(k => ag[k] === 'late' || ag[k] === 'hung').length + (st().services && !sv.supervisor ? 1 : 0);
-  return ['Агенты', bad ? 'не работает: ' + bad : 'работают: ' + agentList().length, bad ? 'crit' : 'ok', 'd-agents', '', watching ? (watching === agentList().length ? 'режим наблюдения' : 'наблюдение у ' + watching + ' из ' + agentList().length) : ''];
+  return ['Агенты', bad ? 'не работает: ' + bad : 'работают: ' + agentList().length, bad ? 'crit' : 'ok', 'd-agents', '', watching ? (watching === agentList().length ? 'все в песочнице' : 'в песочнице ' + watching + ' из ' + agentList().length) : ''];
 }
 
 /* ---------- ИИ-сервисы ----------
@@ -2077,9 +2077,10 @@ function agentsMode() {
   return Object.fromEntries([['all', all]].concat(agentList().map(a => [a[0], m[a[0]] === 'watch' || m[a[0]] === 'act' ? m[a[0]] : all])));
 }
 const modePrev = {};
-// «Наблюдение | Действие» as one slider, like the Wi-Fi bands.
+// «Песочница | Вкл» as one slider, like the Wi-Fi bands (fix.38.1, owner 12.11.2026: one scheme
+// «Выкл · Песочница · Вкл» for everything that can change the system; agents always run).
 function modeSlider(agent, cur, label) {
-  const ops = [['watch', 'Наблюдение'], ['act', 'Действие']], to = cur === 'act' ? 1 : 0, from = modePrev[agent] != null ? modePrev[agent] : to, on = cfgOk();
+  const ops = [['watch', 'Песочница'], ['act', 'Вкл']], to = cur === 'act' ? 1 : 0, from = modePrev[agent] != null ? modePrev[agent] : to, on = cfgOk();
   modePrev[agent] = to;
   return '<div class="seg-slider two' + (on ? '' : ' off') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
     ops.map(o => '<button type="button" role="radio" data-agent-mode="' + agent + '" data-mode="' + o[0] + '" aria-checked="' + (o[0] === cur) + '"' + (on ? '' : ' disabled') + '>' + o[1] + '</button>').join('') + '</div>';
@@ -2411,16 +2412,16 @@ const RENDER = {
   'd-agents'() {
     const am = agentsMode(), pr = ((S.config && S.config.agents) || {}).proposed || [];
     return loadError(['config']) + agentsPanel() +
-      panel('Режим', '<p class="panel-desc">Наблюдение: только замечает и пишет в журнал. Действие: сам исправляет.</p>' +
+      panel('Режим', '<p class="panel-desc">Песочница: агент работает, но только пишет в журнал, что сделал бы. Вкл: сам исправляет.</p>' +
         '<dl class="kv">' + ctrlRow('Все агенты', modeSlider('all', agentList().every(a => am[a[0]] === 'watch') ? 'watch' : 'act', 'Режим всех агентов'), '', 'stack') + '</dl>' +
-        // fix.38.1 (owner 12.11.2026): one switch an agent, on - «Действие»; no stack of sliders.
-        '<dl class="kv">' + agentList().map(a => ctrlRow(a[1], sw('data-agent-act="' + a[0] + '"', am[a[0]] === 'act', a[1] + ': сам исправляет', !cfgOk()), am[a[0]] === 'act' ? 'сам исправляет' : 'только записывает')).join('') + '</dl>' + resultBox('agents')) +
-      panel('События и реакции', kv(AGENT_PROTOCOLS.map(r => [r[1], am[r[0]] === 'act' ? 'Действие' : 'Наблюдение', am[r[0]] === 'act' ? 'ok' : 'info', null, '', agentName(r[0]) + ': ' + r[2] + ' → ' + r[3]])),
-        { desc: 'Что агент замечает и что делает. В наблюдении он только записывает это в «Предполагаемые действия».' }) +
+        // fix.38.1 (owner 12.11.2026): one switch an agent, on - «Вкл», off - «Песочница»; no stack of sliders.
+        '<dl class="kv">' + agentList().map(a => ctrlRow(a[1], sw('data-agent-act="' + a[0] + '"', am[a[0]] === 'act', a[1] + ': сам исправляет', !cfgOk()), am[a[0]] === 'act' ? 'вкл: сам исправляет' : 'песочница: записывает, что сделал бы')).join('') + '</dl>' + resultBox('agents')) +
+      panel('События и реакции', kv(AGENT_PROTOCOLS.map(r => [r[1], am[r[0]] === 'act' ? 'Вкл' : 'Песочница', am[r[0]] === 'act' ? 'ok' : 'info', null, '', agentName(r[0]) + ': ' + r[2] + ' → ' + r[3]])),
+        { desc: 'Что агент замечает и что делает. В песочнице он только записывает это в «Что агент сделал бы».' }) +
       panel('Работают всегда', kv(AGENT_LOCKED.map(r => [r[0], 'Включено', 'ok', null, '', r[1]])),
-        { desc: 'Без этого роутер может остаться без интернета или без доступа к Панели, поэтому режим наблюдения их не останавливает.' }) +
-      panel('Предполагаемые действия', proposedHtml(pr),
-        { desc: 'Что агент сделал бы в режиме «Действие». Одно и то же действие записывается не чаще раза в час.' }) + soonPanel('d-agents');
+        { desc: 'Без этого роутер может остаться без интернета или без доступа к Панели, поэтому песочница их не останавливает.' }) +
+      panel('Что агент сделал бы', proposedHtml(pr),
+        { desc: 'Записи песочницы: что агент сделал бы во «Вкл». Одно и то же действие записывается не чаще раза в час.' }) + soonPanel('d-agents');
   },
   // The VLESS module's programs (Xray), one row a tunnel: moved here from the tunnel's page,
   // which only says so when the program has stopped (owner 2026-10-17).
@@ -3145,7 +3146,7 @@ function vpnGuardPanel() {
   ]) +
     // fix.38.1 (owner 12.11.2026): the mode is chosen here, the row no longer leads to the agents' list.
     '<dl class="kv">' + ctrlRow('Восстановление VPN', modeSlider('network', watch ? 'watch' : 'act', 'Режим агента сети'),
-      (watch ? 'только записывает, что сделал бы' : 'проверка туннеля каждые 6 минут') + '; это режим агента сети - и для интернета, и для DNS') + '</dl>' +
+      (watch ? 'песочница: только записывает, что сделал бы' : 'вкл: проверка туннеля каждые 6 минут') + '; это режим агента сети - и для интернета, и для DNS') + '</dl>' +
     kv([['Отказов подряд', String(num(wg.down_streak) || 0)]]) + '<div class="panel-actions even">' + btn('tunnel-health', 'check', 'Проверить') + '</div>' + resultBox('tunnel-health'),
   {});
 }
@@ -5341,7 +5342,7 @@ document.addEventListener('click', e => {
   if (t.dataset.agentMode) {
     if (t.getAttribute('aria-checked') === 'true') return;
     const m = t.dataset.mode, ag = t.dataset.agentMode;
-    cfgSet({ op: 'agents-mode', target: ag, value: m }, (ag === 'all' ? 'Все агенты' : agentName(ag)) + ': ' + (m === 'watch' ? 'наблюдение' : 'действие'));
+    cfgSet({ op: 'agents-mode', target: ag, value: m }, (ag === 'all' ? 'Все агенты' : agentName(ag)) + ': ' + (m === 'watch' ? 'песочница' : 'вкл'));
     return;
   }
   if (t.dataset.seg) { if (t.getAttribute('aria-checked') !== 'true') segPick(t.dataset.seg, t.dataset.v); return; }
@@ -5524,7 +5525,7 @@ document.addEventListener('change', e => {
     return;
   }
   if (t.dataset.agentAct) { const ag = t.dataset.agentAct, m = t.checked ? 'act' : 'watch'; t.disabled = true;
-    cfgSet({ op: 'agents-mode', target: ag, value: m }, agentName(ag) + ': ' + (m === 'watch' ? 'наблюдение' : 'действие')); return; }
+    cfgSet({ op: 'agents-mode', target: ag, value: m }, agentName(ag) + ': ' + (m === 'watch' ? 'песочница' : 'вкл')); return; }
   if (t.dataset.listPick) { if (t.checked) LISTPICK.add(t.dataset.listPick); else LISTPICK.delete(t.dataset.listPick); render(); return; }
   if (t.dataset.tunsw) {
     const n = t.dataset.tunsw;
