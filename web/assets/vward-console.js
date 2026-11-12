@@ -1426,6 +1426,12 @@ function wanHistory(text) {
 }
 
 // How a Keenetic domain list goes: through which tunnel, around VPN or nowhere.
+// fix.38.1 (owner 12.11.2026): the route in technical words - «VPN», «провайдер», «Smart DNS», «авто».
+function listRoute(l) {
+  const tuns = (st().wg && st().wg.interfaces) || [], tun = tuns.length > 1 && l.route && tuns.some(t => t.name === l.route) ? 'VPN (' + tunLabel(l.route) + ')' : 'VPN';
+  return l.dns_mode ? 'Smart DNS' : l.managed && l.watch ? 'авто, сейчас ' + (viaIs(l, 'vpn') ? tun : 'провайдер')
+    : viaIs(l, 'vpn') ? tun : l.route && !['vpn', 'bypass', 'none'].includes(l.via) ? l.route : viaIs(l, 'bypass') ? 'провайдер' : 'не задан';
+}
 function listPath(l) {
   const tuns = (st().wg && st().wg.interfaces) || [];
   return tuns.length > 1 && l.route && tuns.some(t => t.name === l.route) ? 'через ' + tunLabel(l.route) : viaIs(l, 'vpn') ? 'через VPN' : viaIs(l, 'bypass') ? 'в обход VPN' + (l.doh.length ? ', Smart DNS: ' + l.doh.join(', ') : '') : viaIs(l, 'none') ? 'без маршрута' : 'через ' + l.route;
@@ -1475,7 +1481,7 @@ async function listModeSet(group, mode) {
   try { x = await listModeWrite(group, mode); }
   catch (e) { x = { ok: false, error: e.message }; }
   LISTBULK.busy = '';
-  actionResult = { id: 'lists', text: x.ok ? (x.result === 'unchanged' ? 'Уже сохранено' : 'Путь списка изменён') : 'Не сохранено: ' + errText(x) };
+  actionResult = { id: 'lists', text: x.ok ? (x.result === 'unchanged' ? 'Уже сохранено' : 'Маршрут списка изменён') : 'Не сохранено: ' + errText(x) };
   await Promise.all(['config', 'lists'].map(k => load(k, true))); render();
 }
 // One Keenetic domain list: where it goes, its domains and exclusions, all editable here.
@@ -1531,12 +1537,12 @@ const exampleDomain = inc => (inc && inc[0] ? String(inc[0]).replace(/^\*\./, ''
 // owner confirms), then gets the chosen way. A catalog service's list goes with its service.
 function listWayRows(l, tuns, title) {
   const x = svcOf(l.name);
-  if (x) return ctrlRow('Куда идёт', '<button class="btn small" type="button" data-go="s-' + esc(x.id) + '">Сервис</button>', 'путь задаётся на странице сервиса');
-  const mode = listMode(l), hint = mode === 'auto' ? 'VWARD выбирает сам, сейчас ' + (viaIs(l, 'vpn') ? 'через VPN' : 'напрямую')
-    : mode === 'vpn' ? 'всегда через VPN' : mode === 'bypass' ? 'всегда напрямую, без VPN' : mode === 'dns' ? 'через Smart DNS' : listPath(l);
-  let rows = ctrlRow('Куда идёт', choiceSlider('list-mode:' + l.name, listModes(l), mode, 'Путь списка ' + title), hint);
+  if (x) return ctrlRow('Маршрут', '<button class="btn small" type="button" data-go="s-' + esc(x.id) + '">Сервис</button>', 'задаётся на странице сервиса');
+  const mode = listMode(l), hint = mode === 'auto' ? 'по проверке доступности, сейчас ' + (viaIs(l, 'vpn') ? 'VPN' : 'провайдер')
+    : mode === 'vpn' || mode === 'bypass' ? 'фиксированный: ' + listRoute(l) : mode === 'dns' ? 'Smart DNS' : 'сейчас: ' + listRoute(l);
+  let rows = ctrlRow('Маршрут', choiceSlider('list-mode:' + l.name, listModes(l), mode, 'Маршрут списка ' + title), hint);
   // Several tunnels: which one carries a list that goes through VPN.
-  if (tuns.length > 1 && mode === 'vpn') rows += ctrlRow('Туннель', listTunPick(l, tuns), 'через какой VPN идёт список');
+  if (tuns.length > 1 && mode === 'vpn') rows += ctrlRow('Туннель', listTunPick(l, tuns), 'интерфейс маршрута списка');
   return rows;
 }
 function listTunPick(l, tuns) {
@@ -1546,20 +1552,20 @@ function listTunPick(l, tuns) {
 }
 function listAdoptBox(l) {
   if (!confirm || confirm.id !== 'list-adopt' || confirm.name !== l.name) return '';
-  const how = { auto: ' и выбирать его сам', vpn: ' и пустить его через VPN', bypass: ' и пустить его напрямую, через провайдера', dns: ' и пустить его через Smart DNS' }[confirm.then] || '';
-  return confirmBox('list-adopt', 'Список «' + (l.description || l.name) + '» создан не в VWARD. Разрешить VWARD менять его путь' + how + '? Домены не меняются.', 'Разрешить');
+  const m = LIST_MODES.find(o => o[0] === confirm.then);
+  return confirmBox('list-adopt', 'Список «' + (l.description || l.name) + '» не под управлением VWARD. Взять под управление и установить маршрут' + (m ? ' «' + m[1] + '»' : '') + '? Домены не изменятся.', 'Взять');
 }
 // VWARD's own list (was «Мои домены»): the domains VWARD and the owner send through VPN.
 // Always through VPN; added and removed through route-domain, a pin keeps a domain in VPN.
 function ownListPage(l) {
   const r = cfgRoute(), list = myDomains(), forced = myForced(), title = l.description || l.name;
-  const fixed = choiceSlider('list-own', [['auto', 'Авто', true], ['vpn', 'VPN'], ['bypass', 'Провайдер', true]], 'vpn', 'Путь списка ' + title);
+  const fixed = choiceSlider('list-own', [['auto', 'Авто', true], ['vpn', 'VPN'], ['bypass', 'Провайдер', true]], 'vpn', 'Маршрут списка ' + title);
   return cfgNote() +
-    panel(title, '<dl class="kv">' + ctrlRow('Куда идёт', fixed, 'всегда через VPN: сюда VWARD добавляет найденные домены') + (policyGroupRow() || '') + '</dl>' +
+    panel(title, '<dl class="kv">' + ctrlRow('Маршрут', fixed, 'фиксированный: ' + listRoute(l) + '; список VWARD - в него добавляют домены автоподбор и «Проверка адреса»') + (policyGroupRow() || '') + '</dl>' +
       kv([['IP-адреса', l.addresses != null ? fmtInt(l.addresses) : '—', '', 'ip-' + l.name, '', 'адреса, которые Keenetic узнал для доменов списка']])) +
     panel('Домены', addForm('route-domain', 'например, claude.ai') +
       (S.config && !r.router_available ? empty('Не удалось прочитать конфигурацию роутера') : myRows(list, forced) || empty('Список пуст')) + myListClear((r.domains || []).length),
-      { desc: 'Домен действует вместе с поддоменами и идёт через ' + (prof().tunnel_interface ? tunLabel(prof().tunnel_interface) : 'VPN') + '. Булавка - домен остаётся в VPN, даже если начнёт открываться напрямую.' });
+      { desc: 'Правило действует на домен и его поддомены; маршрут - ' + (prof().tunnel_interface ? tunLabel(prof().tunnel_interface) : 'VPN') + '. Булавка: автоподбор и сверка маршрутов не снимают домен с VPN.' });
 }
 function listPage(name) {
   const l = ((S.lists && S.lists.lists) || []).find(x => x.name === name), d = S.listd, ok = cfgOk();
@@ -2721,10 +2727,9 @@ const RENDER = {
     // fix.38 (owner 12.11.2026, mock-up v3): the Panel's own look, the way each list goes in words
     // (no «авто», «мои» badges), one search over every list's domains; «Мои домены» is the list
     // VWARD adds found domains to; the path is chosen on a list's own page.
-    const way = l => l.dns_mode ? 'через Smart DNS' : l.managed && l.watch ? 'VWARD выбирает сам, сейчас ' + (viaIs(l, 'vpn') ? 'через VPN' : 'напрямую')
-      : viaIs(l, 'vpn') || (l.route && !['vpn', 'bypass', 'none'].includes(l.via)) ? listPath(l) : viaIs(l, 'bypass') ? 'напрямую, без VPN' : 'путь не задан';
-    const words = l => fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + ' · ' + way(l) +
-      (l.name === own ? ' · сюда VWARD добавляет найденные домены' : !l.managed ? ' · VWARD этот список не меняет' : '');
+    // fix.38.1 (owner 12.11.2026): technical words - «маршрут: VPN», «список VWARD», «не под управлением VWARD».
+    const words = l => fmtInt(l.count) + ' ' + plural(l.count, 'домен', 'домена', 'доменов') + ' · маршрут: ' + listRoute(l) +
+      (l.name === own ? ' · список VWARD' : !l.managed ? ' · не под управлением VWARD' : '');
     const row = l => '<li class="row link" role="button" tabindex="0" data-go="l-' + esc(l.name) + '" data-find="' + esc((l.domains || []).join(' ').toLowerCase()) + '">' +
       '<div class="row-main"><b>' + esc(l.description || l.name) + '</b><small>' + esc(words(l)) + '</small>' +
       (l.smartdns_conflict || (l.auto && viaIs(l, 'vpn')) ? '<small class="st warn">' + (l.smartdns_conflict ? 'конфликт со Smart DNS' : 'переведён на VPN автоматически') + '</small>' : '') + '</div>' +
@@ -2738,9 +2743,9 @@ const RENDER = {
     return cfgNote() + listDupPanel(items) + (pick ? panel('Список VWARD', '<dl class="kv">' + pick + '</dl>', { desc: 'Список Keenetic, в который VWARD добавляет найденные домены.' }) : '') +
       panel('Доменные списки', '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти домен" aria-label="Найти домен во всех списках" autocomplete="off"></label>' +
         '<ul class="rows" data-list-rows>' + ordered.map(row).join('') + '</ul>' +
-        (mine.length > 1 ? '<dl class="kv">' + ctrlRow('Все списки VWARD', choiceSlider('list-mode-all', listAllModes(mine), common, 'Путь всех списков VWARD'), common ? '' : 'у списков разный путь', 'stack') + '</dl>' : '') +
+        (mine.length > 1 ? '<dl class="kv">' + ctrlRow('Все списки VWARD', choiceSlider('list-mode-all', listAllModes(mine), common, 'Маршрут всех списков VWARD'), common ? '' : 'у списков разные маршруты', 'stack') + '</dl>' : '') +
         (LISTBULK.busy ? '<p class="panel-desc">' + esc(LISTBULK.busy) + '</p>' : '') + resultBox('lists'),
-        { desc: 'Списки доменов Keenetic. Сайты из списка открываются так, как написано под ним.' }) + soonPanel('lists');
+        { desc: 'Доменные списки Keenetic (object-group fqdn) и маршрут каждого.' }) + soonPanel('lists');
   },
 
   'd-wanrec'() {
@@ -3464,7 +3469,7 @@ function segPick(key, v) {
     if (ls.length) listBulk({ op: 'list-mode', value: v }, ls.map(l => l.name), 'Все списки: ' + LIST_MODES.find(m => m[0] === v)[1]); }
   else if (key.startsWith('list-mode:')) { const g = key.slice(10), l = ((S.lists && S.lists.lists) || []).find(x => x.name === g);
     if (l && !l.managed && !l.dns_mode) { confirm = { id: 'list-adopt', name: g, then: v }; render(); } else listModeSet(g, v); }
-  else if (key.startsWith('list-tun:')) cfgSet({ op: 'domain-list', target: key.slice(9), value: v }, 'Список идёт через ' + tunLabel(v), ['lists']);
+  else if (key.startsWith('list-tun:')) cfgSet({ op: 'domain-list', target: key.slice(9), value: v }, 'Маршрут списка: ' + tunLabel(v), ['lists']);
   else if (key.startsWith('svc-tun:')) { if (!SVC.busy) serviceJob({ op: 'tunnel', id: key.slice(8), tunnel: v }, v === 'auto' ? 'Туннель выбирается автоматически' : 'Закреплён за ' + tunLabel(v)); }
 }
 // Update channels (owner 2026-11-01): «Стабильная» = branch main, «Разработка» = branch dev.
@@ -3884,7 +3889,7 @@ function servicePage(id) {
   return cfgNote() + panel(x.title, '<dl class="kv">' +
       ctrlRow('Через VPN', sw('data-svc="' + esc(id) + '"', !!e, (e ? 'Выключить ' : 'Включить ') + x.title, !ok || x.too_big), e ? svcVia(e) : 'выключен - идёт напрямую') +
       (e ? ctrlRow('Туннель', tuns.length + 1 <= 4 ? choiceSlider('svc-tun:' + id, [['auto', 'Авто', !ok]].concat(tuns.map(t => [t.name, tunLabel(t.name), !ok])), e.tunnel, 'Туннель для ' + x.title)
-        : sel('data-svc-tun="' + esc(id) + '"' + (ok ? '' : ' disabled'), 'Туннель для ' + x.title, [['auto', 'Автоматически']].concat(tuns.map(t => [t.name, tunLabel(t.name)])), e.tunnel), e.tunnel === 'auto' ? 'VWARD выбирает сам' : 'закреплён') : '') + '</dl>' +
+        : sel('data-svc-tun="' + esc(id) + '"' + (ok ? '' : ' disabled'), 'Туннель для ' + x.title, [['auto', 'Автоматически']].concat(tuns.map(t => [t.name, tunLabel(t.name)])), e.tunnel), e.tunnel === 'auto' ? 'автовыбор по проверке туннелей' : 'туннель закреплён') : '') + '</dl>' +
       (l ? kv([['IP-адреса', l.addresses != null ? fmtInt(l.addresses) : '—', '', 'ip-' + l.name, '', 'адреса, которые Keenetic узнал для доменов сервиса']]) : '') + resultBox('svc'),
       { desc: (l ? 'В Keenetic - доменный список «' + (l.description || l.name) + '». ' : '') + 'Домены из каталога iplist, обновляются сами раз в сутки.' }) +
     (e && e.tunnel === 'auto' && tuns.length >= 2 ? svcProbePanel(id) : '') +
@@ -3939,13 +3944,6 @@ async function tunUseJob(name, move) {
   runningId = null;
   toast(j.ok ? (j.x.result === 'unchanged' ? 'Уже туннель по умолчанию' : 'Маршруты VWARD идут через ' + tunLabel(name)) : !j.done ? 'Переключение ещё выполняется, проверьте позже' : 'Не переключено: ' + errText(j.x), j.ok ? 'ok' : !j.done ? 'info' : 'err', 'a-tunnel');
   await Promise.all(['config', 'status', 'security', 'route', 'lists'].map(k => load(k, true))); render();
-}
-// With several tunnels a list chooses its way: the provider or any tunnel.
-function listViaSel(l, tuns, ok) {
-  const cur = viaIs(l, 'bypass') ? 'bypass' : tuns.some(t => t.name === l.route) ? l.route : '';
-  const opts = [['bypass', 'Провайдер (в обход VPN)']].concat(tuns.map(t => [t.name, tunLabel(t.name)]));
-  if (!cur) opts.unshift(['', l.route ? 'через ' + l.route : 'без маршрута', true]);
-  return sel('data-list-via="' + esc(l.name) + '"' + (ok && (cur || !l.route) ? '' : ' disabled'), 'Куда идёт «' + (l.description || l.name) + '»', opts, cur);
 }
 document.addEventListener('input', e => { const f = e.target.closest && e.target.closest('[data-form="tunnel-conf"]'); if (f && (e.target.name === 'conf' || /^tc-/.test(e.target.name)) && f.dataset.checked) { f.dataset.checked = ''; $('tcPreview').innerHTML = ''; f.querySelector('[type=submit]').hidden = false; f.querySelector('[type=submit]').textContent = 'Проверить'; } });
 async function wifiHostSet(fields, okMsg) {
@@ -5503,16 +5501,9 @@ document.addEventListener('change', e => {
         if (id === 'wan-guard' && cfg().wan_guard && cfg().wan_guard.enabled === false) cfgSet({ op: 'wan-guard', value: '1' }, '«' + compName(id) + '» включён'); });
     return;
   }
-  if (t.dataset.listBypass) {
-    const g = t.dataset.listBypass, around = t.checked;
-    t.disabled = true;
-    cfgSet({ op: 'domain-list', target: g, value: around ? 'bypass' : 'vpn' }, around ? 'Список идёт в обход VPN' : 'Список идёт через VPN', ['lists']);
-    return;
-  }
   if (t.dataset.agentAct) { const ag = t.dataset.agentAct, m = t.checked ? 'act' : 'watch'; t.disabled = true;
     cfgSet({ op: 'agents-mode', target: ag, value: m }, agentName(ag) + ': ' + (m === 'watch' ? 'наблюдение' : 'действие')); return; }
   if (t.dataset.listPick) { if (t.checked) LISTPICK.add(t.dataset.listPick); else LISTPICK.delete(t.dataset.listPick); render(); return; }
-  if (t.dataset.listWatch) { cfgSet({ op: 'domain-list-watch', target: t.dataset.listWatch, value: t.checked ? '1' : '0' }, t.checked ? 'Слежение включено' : 'Слежение выключено', ['lists']); return; }
   if (t.dataset.tunsw) {
     const n = t.dataset.tunsw;
     t.disabled = true; tunnelState(t.checked ? 'up' : 'down', n);

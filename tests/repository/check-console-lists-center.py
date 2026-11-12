@@ -24,7 +24,7 @@ page = JS[JS.index("  lists() {"):JS.index("  'd-wanrec'()")]
 # fix.38 (owner 12.11.2026, mock-up v3): the way in words under each list, one search over the
 # domains of every list, the path switch on a list's own page; «Все списки VWARD» stays.
 for need in ("Доменных списков пока нет", "VWARD сам чужих списков не переносит", "ctrlRow('Все списки VWARD'",
-             "VWARD выбирает сам, сейчас ", "напрямую, без VPN", "VWARD этот список не меняет", "сюда VWARD добавляет найденные домены",
+             "' · маршрут: ' + listRoute(l)", "' · список VWARD'", "' · не под управлением VWARD'",
              "data-list-filter placeholder=\"Найти домен\"", "data-find=", "ordered.map(row)"):
     if need not in page:
         fail(f"lists page: {need} missing")
@@ -35,13 +35,15 @@ if "const LIST_MODES = [['auto', 'Авто'], ['vpn', 'VPN'], ['dns', 'DNS'], ['
     fail("the ways are «Авто | VPN | DNS | Провайдер» everywhere")
 # fix.38.1 (owner 12.11.2026): one slider on every list's page; a list made outside VWARD is taken under
 # management first (the owner confirms), then gets the way; VWARD's own list opens its own page.
-for need in ("let rows = ctrlRow('Куда идёт', choiceSlider('list-mode:' + l.name, listModes(l), mode,",
+for need in ("let rows = ctrlRow('Маршрут', choiceSlider('list-mode:' + l.name, listModes(l), mode,",
              "if (l && !l.managed && !l.dns_mode) { confirm = { id: 'list-adopt', name: g, then: v }; render(); } else listModeSet(g, v); }",
              "if (x && x.ok && c.then) return listModeSet(c.name, c.then);",
              "if (listOwn(l)) return ownListPage(l);", "data-go=\"l-' + esc(l.name) + '\""):
     if need not in JS:
         fail(f"list page: {need!r} is missing")
-for gone in ("data-list-watch=", "data-list-bypass=", "go('d-mydomains')", "'Взять под управление'"):
+# fix.38.1 (owner 12.11.2026): technical words, no «Куда идёт», «сюда VWARD…», «выбирает сам».
+for gone in ("data-list-watch=", "data-list-bypass=", "go('d-mydomains')", "'Взять под управление'", "ctrlRow('Куда идёт'",
+             "сюда VWARD добавляет", "VWARD этот список не меняет", "'VWARD выбирает сам"):
     if gone in JS:
         fail(f"list page: {gone!r} is back")
 # The mass switch skips service lists and lists already on the chosen way.
