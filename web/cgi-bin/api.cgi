@@ -1897,7 +1897,13 @@ if [ "$ACTION" = "diagnostics" ]; then
     diag_running '[c]rond' && CROND_STATUS=PASS
     diag_running '[v]ward-cron-supervisor[.]sh' && SUPERVISOR_STATUS=PASS
     diag_running '[A]dGuardHome' && ADGUARD_STATUS=PASS
+    # AdGuard Home is optional (owner 12.11.2026): not installed is not a failure, the row is left out.
+    ADGUARD_HAVE=0
+    for AGH_D in ${VWARD_AGH_BIN_DIRS:-/opt/sbin /opt/bin}; do [ ! -x "$AGH_D/AdGuardHome" ] || ADGUARD_HAVE=1; done
+    [ ! -x "${VWARD_AGH_INIT:-/opt/etc/init.d/S99adguardhome}" ] || ADGUARD_HAVE=1
+    # Autopodbor is the routing core («vward-core adaptive», owner 11.11.2026) or the shell engine.
     diag_running '[v]ward-route-engine[.]sh' && ADAPTIVE_STATUS=PASS
+    diag_running '[v]ward-core.adaptive' && ADAPTIVE_STATUS=PASS
 
     UPDATE_STATUS=FAIL
     [ -x /opt/share/vward/updater/current/vward-update.sh ] && UPDATE_STATUS=PASS
@@ -2186,7 +2192,7 @@ if [ "$ACTION" = "diagnostics" ]; then
       --arg opt "$OPT_STATUS" --arg jq "$JQ_STATUS" --arg curl "$CURL_STATUS" --arg curl_detail "$CURL_DETAIL" --arg boot "$BOOT_STATUS" \
       --arg tcpdump "$TCPDUMP_STATUS" --arg lighttpd "$LIGHTTPD_STATUS" \
       --arg crond "$CROND_STATUS" --arg supervisor "$SUPERVISOR_STATUS" \
-      --arg adguard "$ADGUARD_STATUS" --arg adaptive "$ADAPTIVE_STATUS" \
+      --arg adguard "$ADGUARD_STATUS" --arg adguard_have "$ADGUARD_HAVE" --arg adaptive "$ADAPTIVE_STATUS" \
       --arg updater "$UPDATE_STATUS" --arg config "$CONFIG_STATUS" --arg cgi "$CGI_STATUS" \
       --arg wan "$WAN_STATUS" --arg wg "$WG_STATUS" --arg wg_detail "$WG_DETAIL" \
       --arg smartdns "$SMARTDNS_STATUS" --arg smartdns_detail "$SMARTDNS_DETAIL" --arg lampa "$LAMPA_STATUS" --arg lampa_detail "$LAMPA_DETAIL" \
@@ -2196,7 +2202,7 @@ if [ "$ACTION" = "diagnostics" ]; then
       '{ok:true,checks:[
         {id:"console-api",component:"console",label:"Панель VWARD",status:$cgi,detail:"интерфейс данных (api.cgi) отвечает"},
         {id:"opt",component:"runtime",label:"Флешка Entware (/opt)",status:$opt,detail:("свободно "+(if $opt_free >= 1024 then (($opt_free/1024|floor)|tostring)+" МБ" else ($opt_free|tostring)+" КБ" end))},
-        {id:"boot",component:"runtime",label:"Запуск после перезагрузки",status:$boot,detail:(if $boot == "PASS" then "программы Entware запустятся сами" else "запуск Entware отключён (rc.unslung): после перезагрузки VWARD, SSH и AdGuard Home не запустятся" end)},
+        {id:"boot",component:"runtime",label:"Запуск после перезагрузки",status:$boot,detail:(if $boot == "PASS" then "программы Entware запустятся сами" else "запуск Entware отключён (rc.unslung): после перезагрузки VWARD и SSH" + (if $adguard_have == "1" then ", AdGuard Home" else "" end) + " не запустятся" end)},
         {id:"jq",component:"runtime",label:"Разбор данных (jq)",status:$jq,detail:"нужен всем разделам Панели"},
         {id:"curl",component:"runtime",label:"HTTPS-запросы (curl)",status:$curl,detail:$curl_detail},
         {id:"tcpdump",component:"route-engine",label:"Наблюдение DNS (vward-dnscap или tcpdump)",status:$tcpdump,detail:"автоподбор узнаёт новые домены"},
@@ -2213,7 +2219,7 @@ if [ "$ACTION" = "diagnostics" ]; then
         {id:"files",component:"update-engine",label:"Файлы VWARD",status:$files,detail:$files_detail},
         {id:"updater",component:"update-engine",label:"Движок обновлений",status:$updater,detail:"рабочая копия движка на месте"},
         {id:"update-config",component:"update-engine",label:"Настройки обновлений",status:$config,detail:"файл настроек читается"}
-      ]}'
+      ]} | if $adguard_have == "1" then . else .checks |= map(select(.id != "adguard")) end'
     exit 0
 fi
 

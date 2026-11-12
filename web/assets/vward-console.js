@@ -1765,8 +1765,11 @@ function sdStoreRow(a, sd) {
   const target = cap.target === 'agh' ? component : cap.target === 'keenetic' ? 'Роутер' : 'недоступно';
   const note = counts + '. ' + (sd.store === 'auto' || !sd.store ? 'Новые привязки: ' + target : 'Выбрано: ' + (sd.store === 'agh' ? component : 'Роутер')) +
     (sd.store === 'agh' && !cap.available ? ' · ' + reason : '') + '. Выбор действует только на новые привязки; существующие не переносятся.';
+  // No AdGuard Home on the router (owner 12.11.2026: nothing pushes it): only «Авто» and «Роутер»,
+  // unless it is already chosen or holds domains - then its state stays in view.
+  const aghOpt = cap.reason !== 'not_installed' || sd.store === 'agh' || (sd.agh_domains || 0) > 0;
   return '<dl class="kv sd-storage">' + ctrlRow('Хранилище Smart DNS', choiceSlider('sd-store',
-    [['auto', 'Авто', SDSTORE_BUSY], ['keenetic', 'Роутер', SDSTORE_BUSY], ['agh', String(component).replace(/ Home$/, ''), SDSTORE_BUSY]], sd.store || 'auto', 'Хранилище Smart DNS'), note) + '</dl>';
+    [['auto', 'Авто', SDSTORE_BUSY], ['keenetic', 'Роутер', SDSTORE_BUSY]].concat(aghOpt ? [['agh', String(component).replace(/ Home$/, ''), SDSTORE_BUSY]] : []), sd.store || 'auto', 'Хранилище Smart DNS'), note) + '</dl>';
 }
 async function sdStoreSet(v) {
   if (SDSTORE_BUSY) return;

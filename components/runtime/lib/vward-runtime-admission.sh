@@ -366,7 +366,9 @@ vward_lock_gate_live() {
     if vward_pid_start_var "$vlg_key_pid"; then vlg_live_start=$VA_PS;else vlg_live_start=;fi
     if [ -n "$vlg_live_start" ]; then
         [ "$vlg_live_start" = "$vlg_key_start" ] || return 1
-        vlg_stat=;read -r vlg_stat < "/proc/$vlg_key_pid/stat" || return 2
+        # The owner may exit between the two reads (CI 12.11.2026: «cannot open /proc/N/stat», a
+        # race of two writers ended rc=1): its /proc entry gone is a finished owner, as below.
+        vlg_stat=;read -r vlg_stat 2>/dev/null < "/proc/$vlg_key_pid/stat" || { [ -e "/proc/$vlg_key_pid" ] && return 2; return 1; }
         vlg_stat=${vlg_stat##*) }
         # A finished final utility can remain a zombie under an unreaping
         # container init. Z/X cannot execute another filesystem operation.

@@ -43,6 +43,7 @@ CRON_BACKUP=
 MADE_DEVICE_CONF=0
 MADE_ADAPTIVE_GROUP=0
 MADE_ADAPTIVE_ROUTE=0
+DNS_FIXED=
 TUNNEL=
 TUNNEL_DEV=
 LAN_CHOICE=
@@ -127,6 +128,15 @@ ndm() {
 installed() { [ -e "$UPDATER_STATE/committed.state" ] || [ -e /opt/etc/init.d/S91vward-route-engine ] || [ -e "$SHARE/VERSION" ]; }
 beta_present() { [ -e /opt/etc/init.d/S91adaptive-live ] || [ -e /opt/bin/agh-adaptive-live.sh ]; }
 agh_present() { [ -r /opt/etc/AdGuardHome/AdGuardHome.yaml ] || [ -x /opt/bin/AdGuardHome ] || [ -x /opt/sbin/AdGuardHome ]; }
+# stale_dns: Keenetic's DNS settings left by an AdGuard Home that is no longer here (owner 12.11.2026:
+# a reformatted USB drive takes AdGuard Home with it, Keenetic keeps asking 192.168.1.1:65053 or keeps
+# its own DNS off). One line each, as in the running configuration; nothing when AdGuard Home is here.
+stale_dns() {
+    agh_present && return 0
+    ndmc -c 'show running-config' 2>/dev/null | awk '
+        $1 == "ip" && $2 == "name-server" && $3 ~ /:65053$/ && $0 !~ / on / {print; next}
+        $1 == "opkg" && $2 == "dns-override" && NF == 2 {print}'
+}
 
 # A package counts as there by Entware's own list or by its file: Entware moves files between
 # releases (2026-10: tcpdump in /opt/bin, mod_setenv built into lighttpd 1.4.82, its package only
@@ -174,6 +184,8 @@ preflight() {
     ok "VWARD ещё не установлен"
     if agh_present; then ok "AdGuard Home найден - раздел «Реклама» будет работать"
     else skip "AdGuard Home не найден - раздел «Реклама» будет выключен, остальное работает"; fi
+    sd=$(stale_dns)
+    [ -z "$sd" ] || warn "в Keenetic остались настройки DNS от AdGuard Home, которого нет: $(printf '%s' "$sd" | tr '\n' ';' | sed 's/;$//; s/;/; /g'). Установщик их уберёт: DNS снова будет отвечать сам Keenetic"
 }
 
 packages() {
@@ -287,7 +299,11 @@ undo() {
     fi
     if [ "$MADE_ADAPTIVE_ROUTE" = 1 ]; then ndm "dns-proxy no route object-group $ADAPTIVE_GROUP $TUNNEL" || :; fi
     if [ "$MADE_ADAPTIVE_GROUP" = 1 ]; then ndm "no object-group fqdn $ADAPTIVE_GROUP" || :; fi
-    if [ "$MADE_ADAPTIVE_ROUTE" = 1 ] || [ "$MADE_ADAPTIVE_GROUP" = 1 ]; then ndm "system configuration save" || :; fi
+    # The DNS settings taken out go back as they were.
+    if [ -n "$DNS_FIXED" ] && [ -s "$WORK/dns-removed" ]; then
+        while IFS= read -r l; do [ -z "$l" ] || ndm "$l" || :; done < "$WORK/dns-removed"
+    fi
+    if [ "$MADE_ADAPTIVE_ROUTE" = 1 ] || [ "$MADE_ADAPTIVE_GROUP" = 1 ] || [ -n "$DNS_FIXED" ]; then ndm "system configuration save" || :; fi
     [ -z "$CRON_BACKUP" ] || crontab_cmd "$CRON_BACKUP" >/dev/null 2>&1 || :
     rm -rf "${UPDATER_ROOT:?}" "${UPDATER_STATE:?}" /opt/var/cache/vward/updater
     rm -f "$ETC/update.conf" "$ETC/update-public.pem" "$INSTALL_STATE"
@@ -365,6 +381,17 @@ configure() {
     done
     [ ! -e "$ETC/components/ads-privacy-guard.disabled" ] || : > "$ETC/components/ads-privacy-guard.lite"
     [ -z "$lite_list" ] || skip "сторожа туннеля и интернета, Wi-Fi и ночная сверка категорий выключены; включаются в Панели VWARD → Компоненты"
+
+    # DNS left by an AdGuard Home that is gone: out, so Keenetic answers by itself (owner 12.11.2026).
+    stale_dns > "$WORK/dns-stale"
+    while IFS= read -r l; do
+        [ -n "$l" ] || continue
+        ndm "no $l" || fail "Keenetic не убрал «$l»"
+        printf '%s\n' "$l" >> "$WORK/dns-removed"
+        DNS_FIXED=1
+        ok "убрано «$l»: AdGuard Home на флешке нет"
+    done < "$WORK/dns-stale"
+    [ -z "$DNS_FIXED" ] || { ndm "system configuration save" || fail "Keenetic не сохранил настройки"; ok "DNS отвечает сам Keenetic"; }
 
     # VWARD's own domain list, routed to the VPN: what autopick finds goes there.
     rc_now=$(ndmc -c 'show running-config' 2>/dev/null)

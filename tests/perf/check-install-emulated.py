@@ -17,8 +17,11 @@ this repository with a release signed by a one-time key.
   4. --check changes nothing.
   5. KeeneticOS 4 is refused.
   6. KeeneticOS 5.0, AdGuard Home present, two VPN connections: the installer takes
-     one by itself (routed, else connected, else the first); VWARD routes through it and «Реклама» stays on. After
-     --uninstall the same router installs again.
+     one by itself (routed, else connected, else the first); VWARD routes through it and «Реклама» stays on;
+     AdGuard Home's own DNS server in Keenetic stays. After --uninstall the same router installs again.
+  7. A reformatted USB drive (owner 12.11.2026): AdGuard Home is gone, Keenetic still asks
+     192.0.2.1:65053 and has its own DNS off. --check says so and changes nothing; install takes both out
+     (Keenetic answers DNS by itself again) before anything else.
 
 Needs root (chroot, mknod, mount) and busybox, jq, openssl, cc.
 """
@@ -283,6 +286,7 @@ def part6_choice_agh_reinstall(work, release):
         (root / "sys/class/net/ovpn_br0/tun_flags").write_text("0x1002\n")
         (root / "opt/etc/AdGuardHome").mkdir(parents=True)
         (root / "opt/etc/AdGuardHome/AdGuardHome.yaml").write_text("http:\n  address: 127.0.0.1:3000\n")
+        (root / "emu/running-config").write_text(read(root / "emu/running-config") + "ip name-server 192.0.2.1:65053\n")
         # Enter: install (no question about packages or the VPN).
         r = on_terminal(root, "sh /emu/repo/install.sh", "\n")
         out = r.stdout.replace("\r", "")
@@ -299,6 +303,8 @@ def part6_choice_agh_reinstall(work, release):
             fail(f"AdaptiveAuto must go through the chosen VPN:\n{read(root / 'emu/ndmc-changes.log')}")
         if (root / "opt/etc/vward/components/ads-privacy-guard.disabled").exists():
             fail("with AdGuard Home «Реклама» stays on")
+        if "name-server" in read(root / "emu/ndmc-changes.log"):
+            fail(f"AdGuard Home is here: its DNS server in Keenetic stays:\n{read(root / 'emu/ndmc-changes.log')}")
         un = sh(root, "sh /emu/repo/install.sh --uninstall --yes")
         if un.returncode != 0 or "[ PASS ] VWARD удалён" not in un.stdout:
             fail(f"uninstall failed:\n{un.stdout}")
@@ -311,6 +317,28 @@ def part6_choice_agh_reinstall(work, release):
         if not re.search(r"^\d+$", read(root / "opt/var/run/vward-console-lighttpd.pid").strip()):
             fail("the Panel is not running after the reinstall")
         print("ok - KeeneticOS 5.0, AdGuard Home, the connected VPN taken; uninstall and install again")
+    finally:
+        teardown(root)
+
+
+def part7_reformatted_drive(work, release):
+    root = build(work, "clean7", release)
+    try:
+        (root / "emu/running-config").write_text(read(root / "emu/running-config") + "ip name-server 192.0.2.1:65053\nopkg dns-override\n")
+        chk = sh(root, "sh /emu/repo/install.sh --check")
+        if "остались настройки DNS от AdGuard Home" not in chk.stdout or "192.0.2.1:65053" not in chk.stdout or read(root / "emu/ndmc-changes.log").strip():
+            fail(f"--check must name the DNS left by AdGuard Home and change nothing:\n{chk.stdout}")
+        r = sh(root, "sh /emu/repo/install.sh --yes")
+        if r.returncode != 0 or "[ PASS ] VWARD установлен" not in r.stdout:
+            fail(f"install failed:\n{r.stdout}")
+        changes = read(root / "emu/ndmc-changes.log").splitlines()
+        want = ["no ip name-server 192.0.2.1:65053", "no opkg dns-override", "system configuration save",
+                "object-group fqdn AdaptiveAuto", "dns-proxy route object-group AdaptiveAuto Wireguard1 auto", "system configuration save"]
+        if changes != want:
+            fail(f"RED: the DNS of a gone AdGuard Home must go first: {changes}")
+        if "DNS отвечает сам Keenetic" not in r.stdout:
+            fail(f"install must say DNS is Keenetic's own again:\n{r.stdout}")
+        print("ok - reformatted drive: the DNS left by AdGuard Home is taken out, Keenetic answers")
     finally:
         teardown(root)
 
@@ -330,6 +358,7 @@ def main():
         part4_check(work, release)
         part5_old_firmware(work, release)
         part6_choice_agh_reinstall(work, release)
+        part7_reformatted_drive(work, release)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print("INSTALL_EMULATED=PASS")

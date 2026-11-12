@@ -1,7 +1,7 @@
 #!/bin/sh
 # VWARD DNS mode: one selector, three MUTUALLY EXCLUSIVE handlers. Defines functions only.
 #
-#   agh      AdGuard Home (default, current installations): Keenetic :53 -> AGH :65053
+#   agh      AdGuard Home (the default where it is installed): Keenetic :53 -> AGH :65053
 #   dnsmasq  Entware dnsmasq-full instead of AGH:          Keenetic :53 -> dnsmasq :PORT
 #   native   neither: Keenetic's own DNS -> configured upstream
 #
@@ -27,7 +27,17 @@ vwd_domain() { printf '%s\n' "$1" | grep -Eq '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9]
 vward_dns_mode_get() (
     vwd_root
     f=$VWD_ETC/dns-mode.conf
-    if [ ! -e "$f" ] && [ ! -L "$f" ]; then printf 'agh\tdefault\n'; return 0; fi
+    if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+        # No choice recorded: AdGuard Home only where it is installed (owner 12.11.2026: a router
+        # without it is not «Keenetic :53 -> 192.168.1.1:65053»), else Keenetic's own DNS.
+        if [ -r "$VWD_R/opt/etc/AdGuardHome/AdGuardHome.yaml" ] || [ -x "$VWD_R/opt/bin/AdGuardHome" ] ||
+           [ -x "$VWD_R/opt/sbin/AdGuardHome" ] || [ -x "$VWD_R/opt/etc/init.d/S99adguardhome" ]; then
+            printf 'agh\tdefault\n'
+        else
+            printf 'native\tdefault-no-agh\n'
+        fi
+        return 0
+    fi
     [ -f "$f" ] && [ ! -L "$f" ] || { printf 'unknown\tunsafe-file\n'; return 75; }
     m=$(awk -F= '$1 == "mode" {n++; v = $2} END {if (n == 1) print v}' "$f")
     case $m in agh|dnsmasq|native) printf '%s\tconfigured\n' "$m" ;; *) printf 'unknown\tinvalid\n'; return 75 ;; esac
