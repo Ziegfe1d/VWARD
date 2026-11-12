@@ -25,6 +25,11 @@ this repository with a release signed by a one-time key.
   8. A router that lived before (owner 12.11.2026): lists of its own (YouTube, Discord), AdaptiveAuto with
      names routed into another VPN that is not connected, a subnet and a Smart DNS line. The installer
      takes the connected VPN, moves only AdaptiveAuto's route there and leaves everything else as it is.
+  9. The old VPN tunnel (owner 12.11.2026): a VWARD engine tunnel (OpkgTun4) whose settings went with the
+     USB drive still carries lists, AdaptiveAuto and a subnet; the installer names them. With a working VPN they all move there
+     (a list already on it only loses the dead route); a list on the working VPN is not touched; a
+     failed installation puts everything back. With nothing but the dead tunnel nothing moves and
+     the installer says how to bring the lists back.
 
 Needs root (chroot, mknod, mount) and busybox, jq, openssl, cc.
 """
@@ -432,6 +437,108 @@ def part8_lived_router(work, release):
         teardown(root)
 
 
+OLD_TUNNEL_CONFIG = """system
+    hostname Keenetic
+!
+interface Wireguard1
+    description "My VPN"
+!
+interface OpkgTun4
+    description "VLESS Germany"
+!
+object-group fqdn YouTube
+    include youtube.com
+!
+object-group fqdn Discord
+    include discord.com
+!
+object-group fqdn Telegram
+    include telegram.org
+!
+object-group fqdn AdaptiveAuto
+    include chatgpt.com
+!
+dns-proxy
+    route object-group YouTube OpkgTun4 auto
+    route object-group Discord OpkgTun4 auto
+    route object-group Discord Wireguard1 auto
+    route object-group Telegram Wireguard1 auto
+    route object-group AdaptiveAuto OpkgTun4 auto
+!
+ip route 91.108.4.0 255.255.252.0 OpkgTun4 auto
+"""
+
+
+def old_tunnel_router(work, name, wireguard=True):
+    root = build(work, name, OLD_TUNNEL_RELEASE[0])
+    ifs = json.loads(read(root / "emu/rci-interface.json"))
+    ifs["OpkgTun4"] = {"type": "OpkgTun", "security-level": "public", "description": "VLESS Germany", "connected": "no", "link": "down"}
+    if not wireguard:
+        ifs.pop("Wireguard1")
+    (root / "emu/rci-interface.json").write_text(json.dumps(ifs))
+    curl = root / "opt/bin/curl"
+    curl.write_text(read(curl).replace("s/Wireguard1/nwg1/", "s/Wireguard1/nwg1/;s/OpkgTun4/opkgtun4/"))
+    (root / "sys/class/net/opkgtun4").mkdir()
+    (root / "sys/class/net/opkgtun4/tun_flags").write_text("0x1001\n")
+    cfg = OLD_TUNNEL_CONFIG if wireguard else OLD_TUNNEL_CONFIG.replace("interface Wireguard1\n    description \"My VPN\"\n!\n", "").replace(
+        "    route object-group Discord Wireguard1 auto\n", "").replace("    route object-group Telegram Wireguard1 auto\n", "")
+    (root / "emu/running-config").write_text(cfg)
+    return root
+
+
+OLD_TUNNEL_RELEASE = [None]
+
+
+def part9_old_tunnel(work, release):
+    OLD_TUNNEL_RELEASE[0] = release
+    root = old_tunnel_router(work, "clean9")
+    try:
+        r = sh(root, "sh /emu/repo/install.sh --yes")
+        out = r.stdout
+        if r.returncode != 0 or "[ PASS ] VWARD установлен" not in out or "VPN: Wireguard1" not in out or \
+                "туннели VWARD без настроек" not in out or "YouTube (OpkgTun4)" not in out or "91.108.4.0 (OpkgTun4)" not in out:
+            fail(f"install with an old tunnel failed:\n{out}")
+        changes = read(root / "emu/ndmc-changes.log").splitlines()
+        want = ["dns-proxy route object-group AdaptiveAuto Wireguard1 auto", "dns-proxy no route object-group AdaptiveAuto OpkgTun4",
+                "dns-proxy route object-group YouTube Wireguard1 auto", "dns-proxy no route object-group YouTube OpkgTun4",
+                "dns-proxy no route object-group Discord OpkgTun4",
+                "ip route 91.108.4.0 255.255.252.0 Wireguard1 auto", "no ip route 91.108.4.0 255.255.252.0 OpkgTun4",
+                "system configuration save"]
+        if changes != want:
+            fail(f"RED: everything on the old tunnel moves to the working VPN, nothing else: {changes}\n{out}")
+        print("ok - old tunnel: its lists, AdaptiveAuto and subnet moved to the working VPN; Telegram untouched")
+    finally:
+        teardown(root)
+    root = old_tunnel_router(work, "clean9b")
+    try:
+        cdir = root / "opt/var/spool/cron/crontabs"
+        shutil.rmtree(cdir, ignore_errors=True); cdir.parent.mkdir(parents=True, exist_ok=True); cdir.write_text("")
+        r = sh(root, "sh /emu/repo/install.sh --yes")
+        changes = read(root / "emu/ndmc-changes.log").splitlines()
+        back = changes[changes.index("system configuration save") + 1:]
+        want = ["dns-proxy no route object-group AdaptiveAuto Wireguard1",
+                "dns-proxy no route object-group YouTube Wireguard1", "no ip route 91.108.4.0 255.255.252.0 Wireguard1",
+                "dns-proxy route object-group YouTube OpkgTun4 auto", "dns-proxy route object-group Discord OpkgTun4 auto",
+                "ip route 91.108.4.0 255.255.252.0 OpkgTun4 auto", "dns-proxy route object-group AdaptiveAuto OpkgTun4 auto",
+                "system configuration save"]
+        if r.returncode == 0 or back != want:
+            fail(f"a failed installation must put the old tunnel's routes back: {back}\n{r.stdout}")
+        print("ok - old tunnel, failed installation: every route is back on it")
+    finally:
+        teardown(root)
+    root = old_tunnel_router(work, "clean9c", wireguard=False)
+    try:
+        r = sh(root, "sh /emu/repo/install.sh --yes")
+        out = r.stdout
+        if r.returncode != 0 or "[ PASS ] VWARD установлен" not in out or "туннель VWARD без настроек" not in out or "переедет туда само" not in out:
+            fail(f"only the old tunnel: install, say how the lists come back:\n{out}")
+        if any("no route" in c or c.startswith("ip route") for c in read(root / "emu/ndmc-changes.log").splitlines()):
+            fail(f"only the old tunnel: nothing may move:\n{read(root / 'emu/ndmc-changes.log')}")
+        print("ok - only the old tunnel: nothing moves, the installer says how the lists come back")
+    finally:
+        teardown(root)
+
+
 def main():
     if os.geteuid() != 0:
         sys.exit("check-install-emulated: needs root (chroot, mknod, mount)")
@@ -449,6 +556,7 @@ def main():
         part6_choice_agh_reinstall(work, release)
         part7_reformatted_drive(work, release)
         part8_lived_router(work, release)
+        part9_old_tunnel(work, release)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print("INSTALL_EMULATED=PASS")

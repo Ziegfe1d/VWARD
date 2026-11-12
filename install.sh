@@ -44,6 +44,8 @@ MADE_DEVICE_CONF=0
 MADE_ADAPTIVE_GROUP=0
 MADE_ADAPTIVE_ROUTE=0
 DNS_FIXED=
+DEAD_TUNNELS=
+LOST=
 TUNNEL=
 TUNNEL_DEV=
 LAN_CHOICE=
@@ -131,6 +133,24 @@ agh_present() { [ -r /opt/etc/AdGuardHome/AdGuardHome.yaml ] || [ -x /opt/bin/Ad
 # stale_dns: Keenetic's DNS settings left by an AdGuard Home that is no longer here (owner 12.11.2026:
 # a reformatted USB drive takes AdGuard Home with it, Keenetic keeps asking 192.168.1.1:65053 or keeps
 # its own DNS off). One line each, as in the running configuration; nothing when AdGuard Home is here.
+# dead_routes: the routes Keenetic still sends into VWARD engine tunnels whose settings went with the
+# old USB drive (DEAD_TUNNELS, owner 12.11.2026: «старый VPN туннель»). One line each, tab-separated:
+#   L GROUP TUNNEL «route object-group GROUP TUNNEL ...»   a domain list (AdaptiveAuto is moved apart)
+#   S -     TUNNEL «ip route ...»                          a subnet
+dead_routes() {
+    [ -n "$DEAD_TUNNELS" ] || return 0
+    ndmc -c 'show running-config' 2>/dev/null | awk -v dead=" $DEAD_TUNNELS " -v g="$ADAPTIVE_GROUP" '
+        /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
+        ctx && $1 == "route" && $2 == "object-group" && $3 != g && index(dead, " " $4 " ") {sub(/^[ \t]+/, ""); print "L\t" $3 "\t" $4 "\t" $0; next}
+        $1 == "ip" && $2 == "route" {t = ($3 ~ /\// || $4 !~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) ? $4 : $5
+            if (index(dead, " " t " ")) print "S\t-\t" t "\t" $0}'
+}
+# no_ip_route LINE: the command that takes a subnet route out (as vward-off.sh: the tunnel kept).
+no_ip_route() {
+    # shellcheck disable=SC2086
+    set -- $1
+    if [ "${3#*/}" != "$3" ]; then echo "no ip route $3 $4"; else echo "no ip route $3 $4 $5"; fi
+}
 stale_dns() {
     agh_present && return 0
     ndmc -c 'show running-config' 2>/dev/null | awk '
@@ -248,12 +268,24 @@ network() {
     lost=
     [ -n "$k" ] || { k=1; lost=1; }
     TUNNEL=$(sed -n "${k}p" "$list" | cut -f1); TUNNEL_DEV=$(sed -n "${k}p" "$list" | cut -f2)
+    LOST=$lost
+    # VWARD engine tunnels left without their settings (the chosen one aside).
+    DEAD_TUNNELS=$(awk -F '\t' -v t="$TUNNEL" 'NR == FNR {own[$1] = 1; next} $4 == "opkgtun" && !($1 in own) && $1 != t {printf "%s ", $1}' "$list.engines" "$list")
+    [ -z "$lost" ] || DEAD_TUNNELS="$DEAD_TUNNELS$TUNNEL"
     if [ -n "$lost" ]; then
         warn "VPN: $TUNNEL - туннель VWARD без настроек (флешка заменена). Добавьте туннель заново: Панель VWARD → VPN → «Добавить туннель», затем «Использовать для маршрутов»"
     elif [ "$n" -eq 1 ]; then
         ok "VPN: $TUNNEL ($(cut -f5 "$list"))"
     else
         ok "VPN: $TUNNEL (из $n; сменить: Панель VWARD → VPN → туннель → «Использовать для маршрутов»)"
+    fi
+    # What still goes into a tunnel without settings: nowhere today (its routes are «auto», so
+    # Keenetic sends it straight to the provider).
+    dr=$(dead_routes | awk -F '\t' '{if ($1 == "L") n = $2; else {split($4, a, " "); n = a[3]}; print n " (" $3 ")"}' | awk '!s[$0]++' | tr '\n' ';' | sed 's/;$//; s/;/, /g')
+    if [ -n "$dr" ] && [ -n "$lost" ]; then
+        warn "через туннели VWARD без настроек идут: $dr - пока туннель не добавлен заново, они идут напрямую. Панель VWARD → VPN → «Добавить туннель», затем «Использовать для маршрутов»: всё это переедет туда само"
+    elif [ -n "$dr" ]; then
+        warn "через туннели VWARD без настроек (флешка заменена) идут: $dr. Установщик перенесёт их в $TUNNEL"
     fi
 
     # The home network: the profile's own choice, or the owner's when there are several.
@@ -298,6 +330,9 @@ undo() {
         remove_program quiet
     fi
     if [ "$MADE_ADAPTIVE_ROUTE" = 1 ]; then ndm "dns-proxy no route object-group $ADAPTIVE_GROUP $TUNNEL" || :; fi
+    # Lists and subnets moved off a tunnel without settings go back where they were.
+    if [ -s "$WORK/dead-added" ]; then while IFS= read -r c; do [ -z "$c" ] || ndm "$c" || :; done < "$WORK/dead-added"; fi
+    if [ -s "$WORK/dead-removed" ]; then while IFS= read -r c; do [ -z "$c" ] || ndm "$c" || :; done < "$WORK/dead-removed"; fi
     # The list's old routes go back as they were.
     if [ -s "$WORK/adaptive-moved" ]; then
         while IFS= read -r r; do [ -z "$r" ] || ndm "dns-proxy $r" || :; done < "$WORK/adaptive-moved"
@@ -307,7 +342,7 @@ undo() {
     if [ -n "$DNS_FIXED" ] && [ -s "$WORK/dns-removed" ]; then
         while IFS= read -r l; do [ -z "$l" ] || ndm "$l" || :; done < "$WORK/dns-removed"
     fi
-    if [ "$MADE_ADAPTIVE_ROUTE" = 1 ] || [ "$MADE_ADAPTIVE_GROUP" = 1 ] || [ -n "$DNS_FIXED" ]; then ndm "system configuration save" || :; fi
+    if [ "$MADE_ADAPTIVE_ROUTE" = 1 ] || [ "$MADE_ADAPTIVE_GROUP" = 1 ] || [ -n "$DNS_FIXED" ] || [ -s "$WORK/dead-removed" ]; then ndm "system configuration save" || :; fi
     [ -z "$CRON_BACKUP" ] || crontab_cmd "$CRON_BACKUP" >/dev/null 2>&1 || :
     rm -rf "${UPDATER_ROOT:?}" "${UPDATER_STATE:?}" /opt/var/cache/vward/updater
     rm -f "$ETC/update.conf" "$ETC/update-public.pem" "$INSTALL_STATE"
@@ -432,7 +467,37 @@ EOF_ROUTES
         if [ -n "$ad_from" ]; then ok "маршрут списка $ADAPTIVE_GROUP перенесён: $ad_from → $TUNNEL"
         else ok "список $ADAPTIVE_GROUP идёт через $TUNNEL"; fi
     fi
-    if [ "$MADE_ADAPTIVE_GROUP" = 1 ] || [ "$MADE_ADAPTIVE_ROUTE" = 1 ]; then
+    # The owner's lists and subnets on VWARD engine tunnels without settings go to $TUNNEL, as the
+    # Panel's «Использовать для маршрутов» moves them off such a tunnel (Viva 2026-10-19); nothing is
+    # moved when the chosen tunnel is itself one of them. Undone with the rest on a failure.
+    DEAD_MOVED=
+    if [ -z "$LOST" ] && [ -n "$DEAD_TUNNELS" ]; then
+        dead_routes > "$WORK/dead-routes"
+        tab=$(printf '\t')
+        while IFS="$tab" read -r kind grp from rest; do
+            [ -n "$kind" ] || continue
+            if [ "$kind" = L ]; then
+                if ! printf '%s\n' "$rc_now" | awk -v g="$grp" -v t="$TUNNEL" '/^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
+                        ctx && $1 == "route" && $2 == "object-group" && $3 == g && $4 == t {f = 1} END {exit !f}'; then
+                    ndm "dns-proxy route object-group $grp $TUNNEL auto" || fail "Keenetic не принял маршрут $grp → $TUNNEL"
+                    printf '%s\n' "dns-proxy no route object-group $grp $TUNNEL" >> "$WORK/dead-added"
+                fi
+                ndm "dns-proxy no route object-group $grp $from" || fail "Keenetic не убрал маршрут $grp → $from"
+                printf '%s\n' "dns-proxy $rest" >> "$WORK/dead-removed"
+                what=$grp
+            else
+                new=$(printf '%s\n' "$rest" | awk -v f="$from" -v t="$TUNNEL" '{for (i = 4; i <= NF; i++) if ($i == f) {$i = t; break}; print}')
+                ndm "$new" || fail "Keenetic не принял «$new»"
+                no_ip_route "$new" >> "$WORK/dead-added"
+                ndm "$(no_ip_route "$rest")" || fail "Keenetic не убрал «$rest»"
+                printf '%s\n' "$rest" >> "$WORK/dead-removed"
+                what=$(printf '%s\n' "$rest" | awk '{print $3 ($3 ~ /\// ? "" : " " $4)}')
+            fi
+            DEAD_MOVED=1
+            ok "перенесено в $TUNNEL: $what (было через $from - туннель VWARD без настроек)"
+        done < "$WORK/dead-routes"
+    fi
+    if [ "$MADE_ADAPTIVE_GROUP" = 1 ] || [ "$MADE_ADAPTIVE_ROUTE" = 1 ] || [ -n "$DEAD_MOVED" ]; then
         ndm "system configuration save" || fail "Keenetic не сохранил настройки"
     fi
 
