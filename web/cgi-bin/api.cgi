@@ -795,7 +795,16 @@ if [ "$ACTION" = config-data ]; then
         fi
     fi
     FORCE="$(sed 's/#.*//' "$CONFIG_ETC/route-engine/force-vpn.conf" 2>/dev/null | awk 'NF{print tolower($1)}' | head -n 500 | list_json)"
-    ADAPT="$(awk '{sub(/\r$/, "")} NF {print tolower($1)}' "$CONFIG_ROUTE_STATE/adaptive-persist.txt" 2>/dev/null | head -n 500 | list_json)"
+    # Autopick's domains: the AdaptiveAuto group in Keenetic itself (the Go core keeps no
+    # adaptive-persist.txt: the Panel showed «0 доменов» with 60 in the group, owner 12.11.2026);
+    # the shell engine's file only when the router's configuration is not at hand.
+    ADAPT=
+    [ -z "${RUNNING:-}" ] || ADAPT="$(printf '%s\n' "$RUNNING" | awk -v g="${ADAPTIVE_GROUP:-AdaptiveAuto}" '
+        /^object-group fqdn / {cur=$3; next}
+        /^!/ {cur=""; next}
+        cur==g && $1=="include" {print tolower($2)}' | head -n 500 | list_json)"
+    [ -n "$ADAPT" ] && [ "$ADAPT" != "[]" ] ||
+        ADAPT="$(awk '{sub(/\r$/, "")} NF {print tolower($1)}' "$CONFIG_ROUTE_STATE/adaptive-persist.txt" 2>/dev/null | head -n 500 | list_json)"
     CATS="$(awk -F'|' 'NF>=5 && $1!~/^[[:space:]]*#/ {print $1 "\t" $2 "\t" $5}' "$CONFIG_ETC/route-engine/categories.tsv" 2>/dev/null | head -n 100 |
         "$JQ" -Rn '[inputs|split("\t")|{id:.[0],title:.[1],enabled:(.[2]=="1")}]')"
     TG=true; [ -e "$CONFIG_ETC/tunnel-guard.disabled" ] && TG=false
@@ -1724,9 +1733,17 @@ EOF_HSTATS
         [ -n "$v" ] || { DOMAIN_ROWS=0 DOMAIN_UNIQUE=0 DOMAIN_CATEGORIES=0 DOMAIN_ITDOG=0 DOMAIN_V2FLY=0; break; }
     done
 
-    ADAPTIVE_COUNT="$(wc -l 2>/dev/null < "$ADAPTIVE_PERSIST")"
+    # Autopick on Go keeps its names in owned.json, not in the shell engine's file (the Panel
+    # showed «0 доменов» with 60 in the group, owner 12.11.2026): that list first.
+    CORE_OWNED=${VWARD_CORE_OWNED:-/opt/var/lib/vward/core-adaptive/owned.json}
+    ADAPTIVE_COUNT= ADAPTIVE_RECENT=
+    if [ -r "$CORE_OWNED" ]; then
+        ADAPTIVE_COUNT="$("$JQ" -r '.names // {} | length' "$CORE_OWNED" 2>/dev/null)"
+        ADAPTIVE_RECENT="$("$JQ" -c '[.names // {} | to_entries | sort_by(.value.added) | .[-20:][] | .key]' "$CORE_OWNED" 2>/dev/null)"
+    fi
+    case "$ADAPTIVE_COUNT" in ''|*[!0-9]*) ADAPTIVE_COUNT="$(wc -l 2>/dev/null < "$ADAPTIVE_PERSIST")" ADAPTIVE_RECENT= ;; esac
     [ -n "$ADAPTIVE_COUNT" ] || ADAPTIVE_COUNT=0
-    ADAPTIVE_RECENT="$(
+    [ -n "$ADAPTIVE_RECENT" ] || ADAPTIVE_RECENT="$(
         if [ -r "$ADAPTIVE_PERSIST" ]; then
             tail -n 20 "$ADAPTIVE_PERSIST" 2>/dev/null |
             "$JQ" -Rsc 'split("\n") | map(select(length>0))'
