@@ -74,6 +74,12 @@ func (p *NetProber) Probe(ctx context.Context, host, dev string) ProbeResult {
 	if err != nil || len(ips) == 0 {
 		return ProbeResult{Unknown, "no address"}
 	}
+	// 0.0.0.0 from DNS: a DNS filter blocks the name (AdGuard Home, the provider) -
+	// an advert or a tracker, not a site VPN would open: never a reason for a route
+	// (ad.doubleclick.net, api.mixpanel.com in the owner's autopick, 12.11.2026).
+	if ips[0].IsUnspecified() {
+		return ProbeResult{Unknown, "dns blocked"}
+	}
 	addr := net.JoinHostPort(ips[0].String(), p.Port)
 	d := net.Dialer{Timeout: p.timeout, Control: bindControl(dev)}
 	cctx, cancel := context.WithTimeout(ctx, p.timeout)
@@ -91,7 +97,8 @@ func (p *NetProber) Probe(ctx context.Context, host, dev string) ProbeResult {
 	if _, err := conn.Write([]byte("HEAD / HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nConnection: close\r\n\r\n")); err != nil {
 		return classify(err, "write")
 	}
-	line, err := bufio.NewReader(conn).ReadString('\n')
+	br := bufio.NewReader(conn)
+	line, err := br.ReadString('\n')
 	if err != nil {
 		return classify(err, "answer")
 	}
@@ -102,7 +109,37 @@ func (p *NetProber) Probe(ctx context.Context, host, dev string) ProbeResult {
 	if f[1] == "451" {
 		return ProbeResult{Blocked, "http 451"}
 	}
+	// A redirect to a «not available in your region» page is the site refusing this country:
+	// claude.ai answers 302 to anthropic.com/app-unavailable-in-region and stayed direct
+	// (owner 12.11.2026). Only the headers are read, at most 40 lines.
+	if strings.HasPrefix(f[1], "3") {
+		for i := 0; i < 40; i++ {
+			h, err := br.ReadString('\n')
+			h = strings.TrimSpace(h)
+			if h == "" || err != nil {
+				break
+			}
+			if k, v, ok := strings.Cut(h, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "location") && GeoBlockPage(v) {
+				return ProbeResult{Blocked, "http " + f[1] + " region"}
+			}
+		}
+	}
 	return ProbeResult{Open, "http " + f[1]}
+}
+
+// geoMarks: words of the pages sites send a refused country to.
+var geoMarks = []string{"unavailable", "unsupported", "not-available", "not_available", "notavailable",
+	"restricted", "geoblock", "geo-block", "region-block", "blocked-region", "country-not", "not-supported-country"}
+
+// GeoBlockPage: a redirect target that is a «not available in your region» page.
+func GeoBlockPage(location string) bool {
+	l := strings.ToLower(location)
+	for _, m := range geoMarks {
+		if strings.Contains(l, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // classify: errors of the router itself (no permission, no device, no memory) are Unknown,

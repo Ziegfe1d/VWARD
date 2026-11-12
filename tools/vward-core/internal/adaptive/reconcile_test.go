@@ -170,3 +170,19 @@ func TestAdoptGroupOnFirstStart(t *testing.T) {
 		t.Fatalf("a second adoption added %d", n)
 	}
 }
+
+type dnsBlocked struct{}
+
+func (dnsBlocked) Probe(context.Context, string, string) ProbeResult {
+	return ProbeResult{Unknown, "dns blocked"}
+}
+
+// A name DNS filters (0.0.0.0) leaves the group at its first check: VPN gets the same DNS answer.
+func TestReconcileDNSBlockedRemoved(t *testing.T) {
+	rc := ReconcileConfig{Every: time.Minute, Batch: 8, Threshold: 3, MinGap: 4 * time.Minute}
+	o := &Owned{Names: map[string]*Name{"ad.doubleclick.net": {}}}
+	rm, ev := Reconcile(context.Background(), o, dnsBlocked{}, "ppp0", rc, time.Unix(60, 0))
+	if len(rm) != 1 || rm[0] != "ad.doubleclick.net" || len(ev) != 1 || ev[0].Event != "REMOVE" || ev[0].Why != "dns blocked" {
+		t.Fatalf("dns blocked: %v %+v", rm, ev)
+	}
+}

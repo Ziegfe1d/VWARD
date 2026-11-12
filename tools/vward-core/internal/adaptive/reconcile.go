@@ -53,6 +53,13 @@ func Reconcile(ctx context.Context, o *Owned, p Prober, wanDev string, rc Reconc
 			n.Streak, n.LastOK = 0, time.Time{}
 			ev = append(ev, ReconcileEvent{h, "DIRECT_FAIL", 0, r.Why})
 		default:
+			// Filtered by DNS (0.0.0.0): the same DNS answers through VPN, so VPN gives nothing -
+			// out of the group (ad.doubleclick.net in the owner's autopick, 12.11.2026).
+			if r.Why == "dns blocked" {
+				remove = append(remove, h)
+				ev = append(ev, ReconcileEvent{h, "REMOVE", n.Streak, r.Why})
+				continue
+			}
 			n.Streak, n.LastOK = 0, time.Time{}
 			ev = append(ev, ReconcileEvent{h, "DIRECT_UNKNOWN", 0, r.Why})
 		}
