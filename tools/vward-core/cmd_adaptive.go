@@ -19,10 +19,49 @@ import (
 )
 
 // eventLog: one line per event, «date|EVENT|host|why», the shell engine's format; the file
-// goes to .1 at 512 KiB.
+// goes to .1 at 512 KiB. Lines are kept in memory and written together (owner 12.11.2026: fewer
+// writes to the USB drive): when 64 are waiting, when the oldest waits flushEvery, on flush()
+// (the service calls it every few minutes and at stop) and at once for a start, a stop and a
+// failure. A power cut loses at most those few minutes of the journal, never a decision.
 type eventLog struct {
-	mu   sync.Mutex
-	path string
+	mu    sync.Mutex
+	path  string
+	buf   []string
+	since time.Time
+	every time.Duration
+}
+
+const logBatch = 64
+
+// urgentEvent: written at once (the process may end right after, the owner wants to see it now).
+func urgentEvent(event string) bool {
+	return event == "START" || event == "STOP" || event == "JOURNAL_BLOCKED" || strings.HasSuffix(event, "_FAILED")
+}
+
+func (l *eventLog) flush() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.flushLocked()
+}
+
+func (l *eventLog) flushLocked() {
+	if len(l.buf) == 0 {
+		return
+	}
+	if st, err := os.Stat(l.path); err == nil && st.Size() > 512<<10 {
+		os.Rename(l.path, l.path+".1")
+	}
+	f, err := os.OpenFile(l.path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		for _, line := range l.buf {
+			fmt.Fprintln(os.Stderr, line)
+		}
+		l.buf = l.buf[:0]
+		return
+	}
+	f.WriteString(strings.Join(l.buf, "\n") + "\n")
+	f.Close()
+	l.buf = l.buf[:0]
 }
 
 func (l *eventLog) put(event, host, why string) {
@@ -38,16 +77,17 @@ func (l *eventLog) put(event, host, why string) {
 		fmt.Println(line)
 		return
 	}
-	if st, err := os.Stat(l.path); err == nil && st.Size() > 512<<10 {
-		os.Rename(l.path, l.path+".1")
+	if len(l.buf) == 0 {
+		l.since = time.Now()
 	}
-	f, err := os.OpenFile(l.path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, line)
-		return
+	l.buf = append(l.buf, line)
+	every := l.every
+	if every <= 0 {
+		every = 5 * time.Minute
 	}
-	f.WriteString(line + "\n")
-	f.Close()
+	if urgentEvent(event) || len(l.buf) >= logBatch || time.Since(l.since) >= every {
+		l.flushLocked()
+	}
 }
 
 type adaptiveFlags struct {
@@ -141,6 +181,8 @@ func runAdaptive(args []string) {
 		log.put("OWNED_UNREAD", f.ownedPath, err.Error()+" (starting an empty list)")
 	}
 	var omu sync.Mutex // owned and the writer: one change at a time
+	const ownedEvery = 30 * time.Minute
+	ownedSaved := time.Now()
 	inGroup := func(m *ndm.Model) map[string]bool {
 		out := map[string]bool{}
 		if g, ok := m.Groups[f.group]; ok {
@@ -326,7 +368,13 @@ func runAdaptive(args []string) {
 						}
 					}
 				}
-				owned.Save()
+				// The streaks of the checks are saved at most every ownedEvery (owner 12.11.2026: fewer
+				// writes to the USB drive; a power cut only delays a return by a check or two); a
+				// removal at once.
+				if len(remove) > 0 || time.Since(ownedSaved) >= ownedEvery {
+					owned.Save()
+					ownedSaved = time.Now()
+				}
 				omu.Unlock()
 				if len(remove) > 0 {
 					refresh()
@@ -370,11 +418,16 @@ func runAdaptive(args []string) {
 			} else if saved {
 				log.put("SAVED", "-", "at stop")
 			}
+			if err := owned.Save(); err != nil {
+				log.put("OWNED_UNSAVED", f.ownedPath, err.Error())
+			}
 			log.put("STOP", "-", "")
+			log.flush()
 			return
 		case <-reread.C:
 			refresh()
 			e.Prune()
+			log.flush()
 		case <-hourly.C:
 			summary()
 		case <-batch.C:

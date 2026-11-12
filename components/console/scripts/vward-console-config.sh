@@ -4857,6 +4857,15 @@ EXT_R=${VWARD_EXT_ROOT:-}
 # automatic, by hand only with a second confirmation.
 EXT_CRITICAL=" libc libgcc libpthread librt libssp libstdcpp busybox opkg entware-opt entware-release entware-upgrade dropbear "
 EXT_MIN_FREE_KB=20480
+# opt_free_kb: free KiB of the USB drive (/opt). -P keeps one line per file system: without it
+# BusyBox df puts a long device name on a line of its own and the number was read as empty -
+# «нет места» on a drive with room (owner 12.11.2026). An answer that is not a number is
+# «unknown» (rc 1), never «full».
+opt_free_kb() {
+    ofk=$(df -Pk "${EXT_R:-}/opt" 2>/dev/null | awk 'NR == 2 {print $4}')
+    case "$ofk" in ''|*[!0-9]*) return 1 ;; esac
+    printf '%s\n' "$ofk"
+}
 OPKG_STATUS=/opt/lib/opkg/status
 OPKG_INFO=/opt/lib/opkg/info
 
@@ -5020,8 +5029,7 @@ op_ext_agh_official() {
         agh_official_adopt
         done_ok "ext-agh-official $AGH_OFFICIAL_VERSION installed already" unchanged
     fi
-    free=$(df -k "$EXT_R/opt" 2>/dev/null | awk 'NR == 2 {print $4}')
-    case "$free" in ''|*[!0-9]*) free=0 ;; esac
+    free=$(opt_free_kb) || die space_unknown
     [ "$free" -ge "$AGH_OFFICIAL_MIN_FREE_KB" ] || die no_space
 
     echo "Загрузка AdGuard Home $AGH_OFFICIAL_VERSION ($ao_arch)..."
@@ -5165,8 +5173,7 @@ op_ext_upgrade() {
     [ -n "$line" ] || die not_upgradable
     from=$(printf '%s\n' "$line" | cut -f2); to=$(printf '%s\n' "$line" | cut -f3)
     ! ext_critical "$1" || [ "$2" = critical ] || die confirmation_required
-    free=$(df -k "$EXT_R/opt" 2>/dev/null | awk 'NR == 2 {print $4}')
-    case "$free" in ''|*[!0-9]*) free=0 ;; esac
+    free=$(opt_free_kb) || die space_unknown
     [ "$free" -ge "$EXT_MIN_FREE_KB" ] || die no_space
     load_profile_base
 
@@ -5498,8 +5505,7 @@ op_agh_component() {
             ai_had=$(agh_bin_now) || ai_had=
             [ "$1" = install ] || [ -n "$ai_had" ] || die agh_not_installed
             [ "$1" != install ] || [ -z "$ai_had" ] || [ ! -s "$AGH_YAML" ] || { comp_end; done_ok "agh-component install: installed already" unchanged; }
-            free=$(df -k "$EXT_R/opt" 2>/dev/null | awk 'NR == 2 {print $4}'); case "$free" in ''|*[!0-9]*) free=0 ;; esac
-            [ -n "$ai_had" ] || [ "$free" -ge "$AGH_OFFICIAL_MIN_FREE_KB" ] || die no_space
+            if [ -z "$ai_had" ]; then free=$(opt_free_kb) || die space_unknown; [ "$free" -ge "$AGH_OFFICIAL_MIN_FREE_KB" ] || die no_space; fi
             # A new setup of AdGuard Home needs the owner's login: kept by VWARD or given now.
             ai_need=1; [ ! -s "$AGH_YAML" ] || [ "$1" = reset ] || ai_need=0
             [ "$ai_need" = 0 ] || agh_creds >/dev/null || die agh_credentials_required

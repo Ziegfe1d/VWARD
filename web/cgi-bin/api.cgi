@@ -3907,6 +3907,14 @@ case "$FAILOPEN_REASON" in *[!a-z_,]*) FAILOPEN_REASON= ;; esac
 
 set -- $(df -PTk /opt 2>/dev/null | awk 'NR==2 {print $2, $3, $4, $5}')
 OPT_FS=${1:-} OPT_TOTAL_KB=${2:-} OPT_USED_KB=${3:-} OPT_FREE_KB=${4:-}
+# A df without -T (a BusyBox built without it): the sizes from plain «df -Pk», the file system from
+# /proc/mounts - an unanswered df is «unknown», never «0 free» (owner 12.11.2026).
+case "$OPT_FREE_KB" in ''|*[!0-9]*)
+  set -- $(df -Pk /opt 2>/dev/null | awk 'NR==2 {print $2, $3, $4}')
+  OPT_TOTAL_KB=${1:-} OPT_USED_KB=${2:-} OPT_FREE_KB=${3:-}
+  OPT_FS=$(awk '$2 == "/opt" {print $3; exit}' "${VWARD_PROC_MOUNTS:-/proc/mounts}" 2>/dev/null)
+  case "$OPT_FREE_KB" in ''|*[!0-9]*) OPT_TOTAL_KB= OPT_USED_KB= OPT_FREE_KB= ;; esac ;;
+esac
 # The USB stick as the maintenance agent saw it this boot (fix.28.2): file system and read/write
 # errors in the kernel's messages, and the damaged places it found.
 FLASH_DIR=${VWARD_FLASH_STATE:-/tmp/vward-flash}
