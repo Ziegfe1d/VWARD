@@ -206,7 +206,8 @@ const STAB_WATCH = n => n === 'route-engine' ? 'Маршрутизация' : n 
 const PROG_NAME = { 'vward-route-engine.sh': 'Маршрутизация', 'vward-sentinel': 'Контроль состояния', 'vward-cron-supervisor.sh': 'Агент компонентов', 'vward-dnscap': 'Захват DNS-запросов',
   'vward-awg': 'AmneziaWG', xray: 'Xray', lighttpd: 'Панель VWARD', AdGuardHome: 'AdGuard Home', https_dns_proxy: 'DoH-клиент', 'sing-box': 'sing-box', dnsmasq: 'dnsmasq' };
 // A duration for people (owner 02.11): «8 ч 28 мин», seconds only under a minute.
-const fmtDur = sec => { const n = Math.round(+sec || 0); if (n < 60) return (Math.round((+sec || 0) * 10) / 10).toString().replace('.', ',') + ' с'; const d = Math.floor(n / 86400), h = Math.floor(n % 86400 / 3600), m = Math.floor(n % 3600 / 60); return d ? d + ' д ' + h + ' ч' : h ? h + ' ч ' + m + ' мин' : m + ' мин'; };
+// A number and its unit never part across lines (owner 12.11: «0,73» and «с» on two lines): U+00A0.
+const fmtDur = sec => { const n = Math.round(+sec || 0); if (n < 60) return (Math.round((+sec || 0) * 10) / 10).toString().replace('.', ',') + '\u00a0с'; const d = Math.floor(n / 86400), h = Math.floor(n % 86400 / 3600), m = Math.floor(n % 3600 / 60); return d ? d + '\u00a0д ' + h + '\u00a0ч' : h ? h + '\u00a0ч ' + m + '\u00a0мин' : m + '\u00a0мин'; };
 function stabEvent(w) {
   const f = String(w || '').split('|');
   const name = STAB_WATCH(f[2] || '');
@@ -831,7 +832,7 @@ function logField(f) {
   if ((!k || k === 'reason') && LOG_VALUES[v0]) return (k ? 'причина: ' : '') + LOG_VALUES[v0];
   let v = v0.replace(/\b(\d+)\.(\d{3,})\b/g, (x, a, b) => (Math.round(+(a + '.' + b) * 100) / 100).toString().replace('.', ','));
   // A time field, or a bare fraction with 3+ decimals (curl's time of a probe): seconds.
-  if ((/time|took|elapsed|dur|wait/i.test(k) && /^\d+([.,]\d+)?$/.test(v)) || (!k && /^\d+\.\d{3,}$/.test(v0))) v += ' с';
+  if ((/time|took|elapsed|dur|wait/i.test(k) && /^\d+([.,]\d+)?$/.test(v)) || (!k && /^\d+\.\d{3,}$/.test(v0))) v += '\u00a0с';
   return (k ? k.replace(/_/g, ' ') + ': ' : '') + v;
 }
 function logEntry(raw) {
@@ -1590,10 +1591,12 @@ function aiSlider(id, cur, label, off, dnsDown, dnsWhy) {
   if (sdFeatureOff()) { dnsDown = cur === 'dns'; dnsWhy = 'Smart DNS выключен'; }
   const to = Math.max(0, VIA.findIndex(o => o[0] === cur)), on = cfgOk() && !!S.ai && !SVC.busy && !off;
   const from = aiPrev[id] != null ? aiPrev[id] : to; aiPrev[id] = to;
-  return '<div class="seg-slider' + (on ? '' : ' off') + (cur ? '' : ' none') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
+  // The grid follows the ways offered (owner 12.11: two ways in three columns left a gap).
+  return '<div class="seg-slider' + (['', '', ' two', '', ' four'][VIA.length] || '') + (on ? '' : ' off') + (cur ? '' : ' none') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
     VIA.map(o => { const dis = !on || (o[0] === 'dns' && dnsDown && cur !== 'dns');
       return '<button type="button" role="radio" data-ai-via="' + o[0] + '" data-ai="' + esc(id) + '" aria-checked="' + (o[0] === cur) + '"' + (dis ? ' disabled' : '') + (o[0] === 'dns' && dnsDown ? ' title="' + esc(dnsWhy || 'сервер не отвечает') + '"' : '') + '>' + o[1] + '</button>'; }).join('') + '</div>' +
-    (dnsDown ? '<p class="seg-note">Smart DNS: ' + esc(dnsWhy || 'сервер не отвечает') + '</p>' : '') +
+    (dnsDown && !sdFeatureOff() ? '<p class="seg-note">Smart DNS: ' + esc(dnsWhy || 'сервер не отвечает') + '</p>' : '') +
+    (!cur && id === 'all' && S.ai ? '<p class="seg-note muted">Разные: у сервисов разный путь</p>' : '') +
     (S.ai && !on && !off && (SVC.busy ? AIBUSY === id : !cfgOk()) ? '<p class="seg-note muted">' + (SVC.busy ? 'Переключается…' : 'Изменение недоступно: нет прав на настройку') + '</p>' : '');
 }
 /* An unfinished service operation (fix.35.4, 03.11: «service on» refused with
@@ -1746,7 +1749,7 @@ function sdStoreRow(a, sd) {
   const note = counts + '. ' + (sd.store === 'auto' || !sd.store ? 'Новые привязки: ' + target : 'Выбрано: ' + (sd.store === 'agh' ? component : 'Роутер')) +
     (sd.store === 'agh' && !cap.available ? ' · ' + reason : '') + '. Выбор действует только на новые привязки; существующие не переносятся.';
   return '<dl class="kv sd-storage">' + ctrlRow('Хранилище Smart DNS', choiceSlider('sd-store',
-    [['auto', 'Авто', SDSTORE_BUSY], ['keenetic', 'Роутер', SDSTORE_BUSY], ['agh', component, SDSTORE_BUSY]], sd.store || 'auto', 'Хранилище Smart DNS'), note) + '</dl>';
+    [['auto', 'Авто', SDSTORE_BUSY], ['keenetic', 'Роутер', SDSTORE_BUSY], ['agh', String(component).replace(/ Home$/, ''), SDSTORE_BUSY]], sd.store || 'auto', 'Хранилище Smart DNS'), note) + '</dl>';
 }
 async function sdStoreSet(v) {
   if (SDSTORE_BUSY) return;
@@ -2613,7 +2616,7 @@ const RENDER = {
     const own = cfgRoute().group || prof().policy_group;
     const one = l => { const m = mine.indexOf(l) >= 0;
       return '<div class="list-item">' + row(l).replace('</small>', '</small>' + (m ? '<small class="tag-mark">под управлением VWARD</small>' : l.name === own ? '' : '<small class="tag-mark off">не под управлением VWARD</small>')) +
-        (m ? choiceSlider('list-mode:' + l.name, listModes(l), listMode(l), 'Путь списка ' + (l.description || l.name)) + (listDnsWhy(l) ? '<p class="panel-desc">DNS: ' + esc(listDnsWhy(l)) + '</p>' : '') : '') + '</div>'; };
+        (m ? choiceSlider('list-mode:' + l.name, listModes(l), listMode(l), 'Путь списка ' + (l.description || l.name)) + (listDnsWhy(l) && (S.lists || {}).smartdns_state !== 'off' ? '<p class="panel-desc">DNS: ' + esc(listDnsWhy(l)) + '</p>' : '') : '') + '</div>'; };
     return cfgNote() + listDupPanel(items) +
       panel('Доменные списки', (mine.length ? '<dl class="kv">' +
         ctrlRow('Все списки', choiceSlider('list-mode-all', listAllModes(mine), common, 'Путь всех списков VWARD'), common ? 'списки под управлением VWARD' : 'Разные: у списков разный путь', 'stack') + '</dl>' : '') +
@@ -3345,7 +3348,7 @@ function fmtBytes(b) { b = num(b); if (b == null) return '—'; const u = ['Б',
 const hsSec = t => { const h = t && t.handshake != null ? num(t.handshake) : null; return h == null || isNaN(h) || h >= 315360000 ? null : h; };
 function agoText(sec) { if (sec == null || isNaN(sec)) return '—'; if (sec < 60) return sec + ' с назад'; if (sec < 3600) return Math.round(sec / 60) + ' мин назад'; if (sec < 86400) return Math.round(sec / 3600) + ' ч назад'; return Math.round(sec / 86400) + ' д назад'; }
 // An interval in plain units: 900 → «15 мин», 86400 → «24 ч».
-function durText(sec) { const n = num(sec); if (n == null) return '—'; if (n < 60) return n + ' с'; if (n < 3600) return Math.round(n / 60) + ' мин'; return Math.round(n / 3600) + ' ч'; }
+function durText(sec) { const n = num(sec); if (n == null) return '—'; if (n < 60) return n + '\u00a0с'; if (n < 3600) return Math.round(n / 60) + '\u00a0мин'; return Math.round(n / 3600) + '\u00a0ч'; }
 const JOB_NAMES = { 'vward-route-reconciler.sh': 'Сверка маршрутов', 'S91vward-route-engine': 'Перезапуск маршрутизации', 'vward-policy-chain.sh': 'Обновление IP-категорий', 'vward-route-hints-update.sh': 'Подсказки каталога', 'vward-tunnel-health.sh': 'Агент VPN', 'S92vward-runtime': 'Агент компонентов', 'vward-wan-guard.sh': 'Восстановление интернета', 'vward-housekeeping.sh': 'Сжатие журналов', 'vward-ads-privacy-scheduler.sh': 'Блокировка рекламы', 'vward-wifi-client-scheduler.sh': 'Контроль Wi-Fi клиентов' };
 const JOB_COMPONENT = { 'S91vward-route-engine': 'route-engine' };
 function cronText(c) {

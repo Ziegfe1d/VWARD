@@ -122,12 +122,15 @@ body::after{content:"";position:fixed;z-index:19;left:0;right:0;bottom:0;height:
 @keyframes flash{0%,40%{background:var(--accent-soft)}100%{background:transparent}}
 .tabbar.flash{animation:flash 1.6s ease}
 .panel-actions{display:flex;flex-wrap:wrap;gap:8px;padding:8px 16px 16px}
+.panel-actions:empty{display:none}
 .panel-actions.even>.btn{flex:1 1 120px;min-width:0;padding-inline:10px}
 /* One size of buttons on a phone: a single one takes the row (owner 2026-10-17). */
 @media (max-width:600px){.panel-actions>.btn:only-child{flex:1 1 auto}}
 .block-head .switch{margin-left:4px}
 .input.compact{width:auto;min-height:36px;padding:6px 10px}
 @media (max-width:359px){.topbar{gap:2px;padding-inline:8px}.icon-btn{width:36px;height:36px}}
+/* A long page title stays on one line on a phone where it fits at a smaller size (owner 12.11). */
+@media (max-width:420px){.topbar-title h1{font-size:calc(var(--fs-lg) - 2px)}}
 /* A phone bar: five labels of up to nine letters fit whole. */
 @media (max-width:439px){.tabbar{left:6px;right:6px;padding:5px;column-gap:0}.tab{letter-spacing:-.15px}}
 @media (max-width:339px){.tabbar{left:4px;right:4px;padding:4px}.tabbar .tab{padding:0;font-size:9.5px;letter-spacing:-.25px}}
@@ -504,7 +507,6 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 .kv-row.stack .seg-slider button{padding:9px 2px}
 .sd-storage .kv-row{display:block}
 .sd-storage .seg-slider{width:100%;margin:8px 0}
-.sd-storage .seg-slider button{white-space:normal;overflow:visible;text-overflow:clip;min-height:44px;line-height:1.25}
 .seg-slider:not(.off) button:disabled{opacity:.45}
 .seg-slider.four{grid-template-columns:repeat(4,minmax(0,1fr))}
 .seg-slider.four .seg-thumb{width:calc((100% - 8px) / 4)}
@@ -519,6 +521,7 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 .switch input:disabled+i{opacity:.4;cursor:not-allowed}
 @media (prefers-reduced-motion:reduce){.seg-thumb,.seg-slider button{transition:none}}
 .log-at{margin:6px 2px 0;color:var(--faint);font-size:var(--fs-xs)}
+.panel .log-at{margin:8px 16px 6px}
 .events{list-style:none;margin:0;padding:0}
 .ev{display:flex;gap:10px;align-items:flex-start;padding:12px 16px;border-top:1px solid var(--line)}
 .ev:first-child{border-top:0}
@@ -592,6 +595,8 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
 .list-item{border-top:1px solid var(--line)}
 .list-item:first-child{border-top:0}
 .list-item>.seg-slider{margin:0 16px 10px}
+/* A list's row has the panel's side padding like every other row (owner 12.11: the name sat on the frame). */
+.list-all .row{padding-inline:16px}
 .tag-mark{display:block;color:var(--accent);font-size:var(--fs-xs)}
 .tag-mark.off{color:var(--muted)}
 .dom-row .row-main b{font-size:var(--fs-sm);font-weight:500;overflow-wrap:normal;word-break:normal}
@@ -611,7 +616,8 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
 .logfeed.nowrap .log-t{white-space:nowrap}
 .log-sources>summary{display:flex;align-items:center;gap:8px;margin:0 16px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-md);cursor:pointer;list-style:none;font-size:var(--fs-sm)}
 .log-sources>summary::-webkit-details-marker{display:none}
-.log-sources>summary small{margin-left:auto;color:var(--muted)}
+.log-sources>summary small{margin-left:auto;color:var(--muted);white-space:nowrap}
+.log-sources>summary span{white-space:nowrap}
 .log-view{margin-top:0}
 
 /* fix.35.4: the journal's two choices say what they choose; a Smart DNS server is one row - its

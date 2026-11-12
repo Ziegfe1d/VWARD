@@ -37,7 +37,7 @@ if r.returncode:
 import json
 o = json.loads(r.stdout)
 imp, al = o["imp"], o["all"]
-for need in ("<time>00:12:00</time>", "<time>00:10:44</time>", "Настройки Панели VWARD: изменены", "1,26 с",
+for need in ("<time>00:12:00</time>", "<time>00:10:44</time>", "Настройки Панели VWARD: изменены", "1,26\u00a0с",
              "Автоподбор: 2 проверки", "Перезапуск после сбоя", 'log-day">02.11.2026', 'log-day">01.11.2026', "log-e warn"):
     if need not in imp:
         fail(f"«Важное» lacks {need!r}")
