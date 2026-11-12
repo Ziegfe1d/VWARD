@@ -72,6 +72,24 @@ func (o *Owned) ImportShell(path string, inGroup map[string]bool, now time.Time)
 	return n
 }
 
+// AdoptGroup: on the core's first start (no list of its own yet), every name already in the group
+// is taken as Autopodbor's (owner 12.11.2026): a router that lived before - a new USB drive, the
+// shell engine's list gone with it - keeps its old names under the same checks as the shell
+// engine did (all of AdaptiveAuto, VWARD's own group), instead of leaving them in the VPN for good.
+// Names added by hand after the first start are not taken.
+func (o *Owned) AdoptGroup(inGroup map[string]bool, now time.Time) int {
+	n := 0
+	for h := range inGroup {
+		// Only a name as Keenetic keeps it: another spelling would read as «taken out» next time.
+		if normalizeName(h) != h || o.Names[h] != nil {
+			continue
+		}
+		o.Names[h] = &Name{Added: now}
+		n++
+	}
+	return n
+}
+
 // Save atomically (a cut power never leaves half a file).
 func (o *Owned) Save() error {
 	if err := os.MkdirAll(filepath.Dir(o.Path), 0o700); err != nil {

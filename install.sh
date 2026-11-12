@@ -298,6 +298,10 @@ undo() {
         remove_program quiet
     fi
     if [ "$MADE_ADAPTIVE_ROUTE" = 1 ]; then ndm "dns-proxy no route object-group $ADAPTIVE_GROUP $TUNNEL" || :; fi
+    # The list's old routes go back as they were.
+    if [ -s "$WORK/adaptive-moved" ]; then
+        while IFS= read -r r; do [ -z "$r" ] || ndm "dns-proxy $r" || :; done < "$WORK/adaptive-moved"
+    fi
     if [ "$MADE_ADAPTIVE_GROUP" = 1 ]; then ndm "no object-group fqdn $ADAPTIVE_GROUP" || :; fi
     # The DNS settings taken out go back as they were.
     if [ -n "$DNS_FIXED" ] && [ -s "$WORK/dns-removed" ]; then
@@ -402,14 +406,31 @@ configure() {
         MADE_ADAPTIVE_GROUP=1
         ok "создан список $ADAPTIVE_GROUP (сюда автоподбор добавляет сайты для VPN)"
     fi
-    if printf '%s\n' "$rc_now" | awk -v g="$ADAPTIVE_GROUP" '
+    # The list's routes as they are («route object-group AdaptiveAuto TUNNEL auto» each). A router that
+    # lived before may route it elsewhere (owner 12.11.2026: an old engine's tunnel gone with the USB
+    # drive, another VPN): autopick checks through $TUNNEL, so the list goes there too; the old route
+    # comes back if the installation fails.
+    ad_routes=$(printf '%s\n' "$rc_now" | awk -v g="$ADAPTIVE_GROUP" '
         /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
-        ctx && $1 == "route" && $2 == "object-group" && $3 == g {f = 1} END {exit !f}'; then
-        ok "маршрут списка $ADAPTIVE_GROUP уже есть"
+        ctx && $1 == "route" && $2 == "object-group" && $3 == g {sub(/^[ \t]+/, ""); print}')
+    if printf '%s\n' "$ad_routes" | awk -v t="$TUNNEL" '$4 == t {f = 1} END {exit !f}'; then
+        ok "маршрут списка $ADAPTIVE_GROUP уже есть: через $TUNNEL"
     else
         ndm "dns-proxy route object-group $ADAPTIVE_GROUP $TUNNEL auto" || fail "Keenetic не принял маршрут $ADAPTIVE_GROUP → $TUNNEL"
         MADE_ADAPTIVE_ROUTE=1
-        ok "список $ADAPTIVE_GROUP идёт через $TUNNEL"
+        ad_from=
+        while IFS= read -r r; do
+            [ -n "$r" ] || continue
+            # shellcheck disable=SC2086
+            set -- $r
+            ndm "dns-proxy no route object-group $ADAPTIVE_GROUP $4" || fail "Keenetic не убрал прежний маршрут $ADAPTIVE_GROUP → $4"
+            printf '%s\n' "$r" >> "$WORK/adaptive-moved"
+            ad_from="$ad_from${ad_from:+, }$4"
+        done <<EOF_ROUTES
+$ad_routes
+EOF_ROUTES
+        if [ -n "$ad_from" ]; then ok "маршрут списка $ADAPTIVE_GROUP перенесён: $ad_from → $TUNNEL"
+        else ok "список $ADAPTIVE_GROUP идёт через $TUNNEL"; fi
     fi
     if [ "$MADE_ADAPTIVE_GROUP" = 1 ] || [ "$MADE_ADAPTIVE_ROUTE" = 1 ]; then
         ndm "system configuration save" || fail "Keenetic не сохранил настройки"

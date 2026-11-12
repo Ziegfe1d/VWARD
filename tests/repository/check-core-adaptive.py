@@ -204,6 +204,10 @@ for word in ("core-install)", "core_install()", "CORE_INSTALLED", "checksum_mism
 API = (ROOT / "web/cgi-bin/api.cgi").read_text()
 JS = (ROOT / "web/assets/vward-console.js").read_text()
 CMD = (ROOT / "tools/vward-core/cmd_adaptive.go").read_text()
+# A router that lived before (owner 12.11.2026): on the core's first start the names already in
+# AdaptiveAuto are rechecked, as the shell engine rechecked the whole group (TestAdoptGroupOnFirstStart).
+if "firstStart := os.IsNotExist(ownedErr)" not in CMD or "owned.AdoptGroup(inGroup(m), time.Now())" not in CMD or "OWNED_ADOPTED" not in CMD:
+    fail("the core's first start must recheck the names already in AdaptiveAuto")
 if "echo /opt/var/log/vward-core-adaptive.log" not in API or "{ id: 'core', label: 'Автоподбор (Go)' }" not in JS:
     fail("the core's journal is not a Panel journal")
 if '"2006-01-02T15:04:05-0700"' not in CMD or 'log.put("STATS"' not in CMD:

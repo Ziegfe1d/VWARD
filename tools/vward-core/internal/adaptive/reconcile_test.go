@@ -150,3 +150,23 @@ func TestRefusedNotChecked(t *testing.T) {
 		t.Fatalf("after the refusal: %+v", r)
 	}
 }
+
+// A router that lived before (owner 12.11.2026): on the core's first start every name already in
+// AdaptiveAuto is rechecked, as the shell engine rechecked the whole group; names it already owns
+// keep their history, and a second call adds nothing.
+func TestAdoptGroupOnFirstStart(t *testing.T) {
+	dir := t.TempDir()
+	o, _ := LoadOwned(filepath.Join(dir, "owned.json"))
+	o.Names["kept.example.com"] = &Name{Added: time.Unix(5, 0), Streak: 2}
+	in := map[string]bool{"old.example.com": true, "Old2.Example.com.": true, "kept.example.com": true}
+	in["new.example.com"] = true
+	if n := o.AdoptGroup(in, time.Unix(9, 0)); n != 2 || o.Names["old.example.com"] == nil || o.Names["new.example.com"] == nil || len(o.Names) != 3 {
+		t.Fatalf("adopted %d: %v", n, o.Names)
+	}
+	if o.Names["kept.example.com"].Streak != 2 || !o.Names["kept.example.com"].Added.Equal(time.Unix(5, 0)) {
+		t.Fatalf("an owned name lost its history: %+v", o.Names["kept.example.com"])
+	}
+	if n := o.AdoptGroup(in, time.Unix(10, 0)); n != 0 {
+		t.Fatalf("a second adoption added %d", n)
+	}
+}

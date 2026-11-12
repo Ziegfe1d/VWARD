@@ -22,6 +22,9 @@ this repository with a release signed by a one-time key.
   7. A reformatted USB drive (owner 12.11.2026): AdGuard Home is gone, Keenetic still asks
      192.0.2.1:65053 and has its own DNS off. --check says so and changes nothing; install takes both out
      (Keenetic answers DNS by itself again) before anything else.
+  8. A router that lived before (owner 12.11.2026): lists of its own (YouTube, Discord), AdaptiveAuto with
+     names routed into another VPN that is not connected, a subnet and a Smart DNS line. The installer
+     takes the connected VPN, moves only AdaptiveAuto's route there and leaves everything else as it is.
 
 Needs root (chroot, mknod, mount) and busybox, jq, openssl, cc.
 """
@@ -343,6 +346,92 @@ def part7_reformatted_drive(work, release):
         teardown(root)
 
 
+LIVED_CONFIG = """system
+    hostname Keenetic
+!
+interface Wireguard1
+    description "My VPN"
+!
+interface OpenVPN0
+    description "Old VPN"
+!
+object-group fqdn YouTube
+    include youtube.com
+    include googlevideo.com
+!
+object-group fqdn Discord
+    include discord.com
+!
+object-group fqdn AdaptiveAuto
+    include chatgpt.com
+    include old.example.com
+!
+dns-proxy
+    route object-group YouTube Wireguard1 auto
+    route object-group Discord Wireguard1 auto
+    route object-group AdaptiveAuto OpenVPN0 auto
+    https upstream https://dns.example/dns-query domain chatgpt.com
+!
+ip route 8.8.8.0 255.255.255.0 Wireguard1 auto
+"""
+
+
+def part8_lived_router(work, release):
+    root = build(work, "clean8", release)
+    try:
+        ifs = json.loads(read(root / "emu/rci-interface.json"))
+        ifs["OpenVPN0"] = {"type": "OpenVPN", "security-level": "public", "description": "Old VPN", "connected": "no", "link": "down"}
+        (root / "emu/rci-interface.json").write_text(json.dumps(ifs))
+        curl = root / "opt/bin/curl"
+        curl.write_text(read(curl).replace("s/Wireguard1/nwg1/", "s/Wireguard1/nwg1/;s/OpenVPN0/ovpn_br0/"))
+        (root / "sys/class/net/ovpn_br0").mkdir()
+        (root / "sys/class/net/ovpn_br0/tun_flags").write_text("0x1002\n")
+        (root / "emu/running-config").write_text(LIVED_CONFIG)
+        r = sh(root, "sh /emu/repo/install.sh --yes")
+        out = r.stdout
+        if r.returncode != 0 or "[ PASS ] VWARD установлен" not in out:
+            fail(f"install on a lived router failed:\n{out}")
+        for text in ("VPN: Wireguard1", "список AdaptiveAuto уже есть", "маршрут списка AdaptiveAuto перенесён: OpenVPN0 → Wireguard1"):
+            if text not in out:
+                fail(f"install output lacks {text!r}:\n{out}")
+        changes = read(root / "emu/ndmc-changes.log").splitlines()
+        want = ["dns-proxy route object-group AdaptiveAuto Wireguard1 auto", "dns-proxy no route object-group AdaptiveAuto OpenVPN0",
+                "system configuration save"]
+        if changes != want:
+            fail(f"RED: only AdaptiveAuto's route moves on a lived router, nothing else is touched: {changes}")
+        if read(root / "opt/etc/vward/device.conf").strip() != "VWARD_TUNNEL_INTERFACE=Wireguard1":
+            fail(f"device.conf: {read(root / 'opt/etc/vward/device.conf')!r}")
+        print("ok - lived router: own lists, subnet and Smart DNS kept; AdaptiveAuto moved to the VPN autopick checks through")
+    finally:
+        teardown(root)
+    # The same router, the installation failing after the move (cron cannot be written): AdaptiveAuto's
+    # old route comes back as it was.
+    root = build(work, "clean8b", release)
+    try:
+        ifs = json.loads(read(root / "emu/rci-interface.json"))
+        ifs["OpenVPN0"] = {"type": "OpenVPN", "security-level": "public", "description": "Old VPN", "connected": "no", "link": "down"}
+        (root / "emu/rci-interface.json").write_text(json.dumps(ifs))
+        curl = root / "opt/bin/curl"
+        curl.write_text(read(curl).replace("s/Wireguard1/nwg1/", "s/Wireguard1/nwg1/;s/OpenVPN0/ovpn_br0/"))
+        (root / "sys/class/net/ovpn_br0").mkdir()
+        (root / "sys/class/net/ovpn_br0/tun_flags").write_text("0x1002\n")
+        (root / "emu/running-config").write_text(LIVED_CONFIG)
+        cdir = root / "opt/var/spool/cron/crontabs"
+        shutil.rmtree(cdir, ignore_errors=True); cdir.parent.mkdir(parents=True, exist_ok=True); cdir.write_text("")
+        r = sh(root, "sh /emu/repo/install.sh --yes")
+        if r.returncode == 0:
+            fail(f"the installation had to fail on cron:\n{r.stdout}")
+        changes = read(root / "emu/ndmc-changes.log").splitlines()
+        want = ["dns-proxy route object-group AdaptiveAuto Wireguard1 auto", "dns-proxy no route object-group AdaptiveAuto OpenVPN0",
+                "system configuration save", "dns-proxy no route object-group AdaptiveAuto Wireguard1",
+                "dns-proxy route object-group AdaptiveAuto OpenVPN0 auto", "system configuration save"]
+        if changes != want:
+            fail(f"a failed installation must put AdaptiveAuto's old route back: {changes}\n{r.stdout}")
+        print("ok - lived router, failed installation: AdaptiveAuto's old route is back")
+    finally:
+        teardown(root)
+
+
 def main():
     if os.geteuid() != 0:
         sys.exit("check-install-emulated: needs root (chroot, mknod, mount)")
@@ -359,6 +448,7 @@ def main():
         part5_old_firmware(work, release)
         part6_choice_agh_reinstall(work, release)
         part7_reformatted_drive(work, release)
+        part8_lived_router(work, release)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print("INSTALL_EMULATED=PASS")

@@ -134,6 +134,8 @@ func runAdaptive(args []string) {
 		log.put("JOURNAL_BLOCKED", "-", err.Error()+" (vward-core recover)")
 		w.Observe = true
 	}
+	_, ownedErr := os.Stat(f.ownedPath)
+	firstStart := os.IsNotExist(ownedErr)
 	owned, err := adaptive.LoadOwned(f.ownedPath)
 	if err != nil {
 		log.put("OWNED_UNREAD", f.ownedPath, err.Error()+" (starting an empty list)")
@@ -179,6 +181,13 @@ func runAdaptive(args []string) {
 		omu.Lock()
 		if n := owned.ImportShell(f.shellPersist, inGroup(m), time.Now()); n > 0 {
 			log.put("OWNED_IMPORTED", f.shellPersist, fmt.Sprintf("%d names the shell engine added", n))
+			owned.Save()
+		}
+		// The first start: the names already in the group are rechecked as the shell engine did;
+		// the list is saved even when empty, so names added by hand later are never taken.
+		if firstStart {
+			n := owned.AdoptGroup(inGroup(m), time.Now())
+			log.put("OWNED_ADOPTED", f.group, fmt.Sprintf("%d names already in the group, rechecked from now on", n))
 			owned.Save()
 		}
 		omu.Unlock()
