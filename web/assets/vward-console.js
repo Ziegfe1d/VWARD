@@ -923,7 +923,7 @@ const DETAILS = {
   'd-control': { title: 'Управление', parent: 'system', data: ['config', 'status', 'ads', 'lists', 'ext'] },
   'd-cron': { title: 'Задания по расписанию', parent: 'd-diag' },
   'u-vward': { title: 'VWARD', parent: 'system', data: ['status', 'update', 'config'] },
-  'u-agh': { title: 'AdGuard Home', parent: 'system', data: ['ext'] },
+  'u-agh': { title: 'Обновление AdGuard Home', parent: 'system', data: ['ext'] },
   'u-fw': { title: 'Прошивка Keenetic', parent: 'system', data: ['ext'] },
   'u-opkg': { title: 'Пакеты Entware', parent: 'system', data: ['ext'] },
   'd-notes': { title: 'Что нового', parent: 'u-vward', data: ['status', 'update'] },
@@ -963,7 +963,9 @@ const DETAILS = {
   'd-aghfilters': { title: 'Фильтры AdGuard Home', parent: 'd-agh', data: ['agh', 'ads'] },
   'd-aghservices': { title: 'Блокировка сервисов', parent: 'd-agh', data: ['agh', 'ads'] }
 };
-COMPONENTS.forEach(c => { DETAILS['c-' + c.id] = { get title() { return compName(c.id); }, parent: 'utils' }; DETAILS['deps-' + c.id] = { title: 'Зависимости', parent: 'c-' + c.id }; });
+// fix.38.1 (Panel audit 12.11.2026): the «Зависимости» pages had no way in since stage 3 - gone; an old
+// address opens the component (idOf), the links between parts stay in the switch-off confirmation.
+COMPONENTS.forEach(c => { DETAILS['c-' + c.id] = { get title() { return compName(c.id); }, parent: 'utils' }; });
 function page(id) {
   if (!id) return null;
   const p = PAGES.find(x => x.id === id);
@@ -979,7 +981,7 @@ function page(id) {
 }
 const parentOf = id => { const p = page(id); return p && p.parent; };
 // Every page has its own address, built from the way to it: /network, /vpn/tunnel/<name>,
-// /domains/lists/<list>/ip, /system/components/<id>/deps.  Old #addresses still open.
+// /domains/lists/<list>/ip.  Old #addresses still open.
 const SLUG = { ai: 'ai', 'd-control': 'control', overview: '', wan: 'network', vpn: 'vpn', routes: 'domains', lists: 'lists', wifi: 'wifi', ads: 'ads', system: 'system', settings: 'settings', logs: 'logs', utils: 'utilities', 'd-agh': 'adguard-home', 'd-awg': 'amneziawg',
   'd-mydomains': 'my', 'd-force': 'always-vpn', 'd-adaptive': 'autopick', 'd-rsources': 'sources', 'd-services': 'services', 'd-ipcats': 'ip-categories', 'd-wanrec': 'recovery', 'd-wificlients': 'clients',
   'u-vward': 'vward', 'u-agh': 'adguard-home-update', 'u-fw': 'firmware', 'u-opkg': 'entware', 'd-dnsex': 'exceptions', 'd-aghfilters': 'filters', 'd-aghservices': 'services', 'd-adcats': 'categories',
@@ -987,11 +989,11 @@ const SLUG = { ai: 'ai', 'd-control': 'control', overview: '', wan: 'network', v
   'd-dnsmasq': 'dnsmasq', 'd-singbox': 'sing-box', 'd-dnscap': 'dns-capture', 'd-doh': 'doh-client' };
 function slugOf(id) {
   if (Object.prototype.hasOwnProperty.call(SLUG, id)) return SLUG[id];
-  const m = /^(deps|ip|tn|[duactlsw])-(.+)$/.exec(id);
+  const m = /^(ip|tn|[duactlsw])-(.+)$/.exec(id);
   const enc = v => encodeURIComponent(v).replace(/%3A/gi, ':');
   if (!m) return enc(id);
   const k = m[1], v = m[2];
-  return k === 'a' ? 'events-' + v : k === 'deps' ? 'deps' : k === 'ip' ? 'ip' : k === 'tn' ? 'subnets' : k === 't' ? 'tunnel/' + enc(v) : enc(v);
+  return k === 'a' ? 'events-' + v : k === 'ip' ? 'ip' : k === 'tn' ? 'subnets' : k === 't' ? 'tunnel/' + enc(v) : enc(v);
 }
 function pathOf(id) {
   const seg = []; let x = id, n = 0;
@@ -1016,6 +1018,8 @@ function idOf(path) {
   if (r && r.length === 1) return 'w-' + r[0];
   r = under(pathOf('d-services'));
   if (r && r.length === 1) return 's-' + r[0];
+  // A bookmark of a removed «Зависимости» page (…/<component>/deps) opens the component.
+  if (/\/deps$/.test(p)) return idOf(p.slice(0, -5));
   return null;
 }
 const navId = id => { let x = id; while (parentOf(x)) x = parentOf(x); return x; };
@@ -1381,7 +1385,7 @@ function cardData(id) {
     case 'system': { const hv = verHuman(p.version, p.last_sequence), vm = /^(.*?) (#.*)$/.exec(hv); return { icon: 'platform', title: 'Система', to: 'system', value: vm ? vm[1] : hv || '—',
       // One short line on a phone: the components are on the System page.
       sub: vm ? vm[2] : comps ? comps + ' ' + plural(comps, 'компонент', 'компонента', 'компонентов') : 'версия VWARD', pill: p.version ? ['ok', 'Работает'] : ['', '—'] }; }
-    case 'updates': return { icon: 'refresh', title: 'Обновления', to: 'system', value: ['IDLE', 'COMMITTED', undefined, ''].includes(p.phase) ? 'Новых нет' : phaseText(p.phase), sub: num(p.feed_ok_at) != null ? 'проверено ' + fmtStamp(p.feed_ok_at) : 'канал ' + (p.channel || '—'), pill: ['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase) ? ['crit', 'Ошибка'] : ['', ''] };
+    case 'updates': return { icon: 'refresh', title: 'Обновления', to: 'u-vward', value: ['IDLE', 'COMMITTED', undefined, ''].includes(p.phase) ? 'Новых нет' : phaseText(p.phase), sub: num(p.feed_ok_at) != null ? 'проверено ' + fmtStamp(p.feed_ok_at) : 'канал ' + (p.channel || '—'), pill: ['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase) ? ['crit', 'Ошибка'] : ['', ''] };
     case 'wan': return { icon: 'globe', title: 'Интернет', to: 'wan', value: w.internet ? 'В сети' : w.internet === false ? 'Нет связи' : s.wan ? 'Роутер отвечает медленно' : '—', sub: w.speed ? 'порт ' + fmtSpeed(w.speed) : w.address || 'адрес не получен', pill: w.internet ? ['ok', 'Работает'] : w.internet === false ? ['crit', 'Не работает'] : s.wan ? ['warn', 'Нет ответа'] : ['', '—'] };
     // Only switched-on tunnels count: one the owner switched off is not a fault (owner 2026-10-12).
     case 'vpn': {
@@ -4440,15 +4444,6 @@ function compPage(c) {
       '<div class="panel-actions even">' + (c.page ? '<button class="btn" type="button" data-go="' + c.page + '">Открыть раздел</button>' : '') + (activityOf(c.log) ? '<button class="btn" type="button" data-go="a-' + activityOf(c.log) + '">События</button>' : '') + '</div>' + cfgNote(),
     { desc: capFirst((partOf(c.id) || {}).desc || ''), right: headPill(!on ? 'warn' : x.health === 'PASS' ? 'ok' : '', !on ? 'Выключен' : x.health === 'PASS' ? 'Работает' : 'Нет данных') });
 }
-function depsPage(c) {
-  const g = graphOf(c.id), all = cfg().components || [];
-  const link = (id, note) => '<li class="row link" role="button" tabindex="0" data-go="c-' + id + '"><div class="row-main"><b>' + esc(compName(id)) + '</b>' + (note ? '<small>' + esc(note) + '</small>' : '') + '</div>' + (compOn(id) ? '' : '<span class="pill warn">Выключен</span>') + ico('chevron', 'chev') + '</li>';
-  if (!g) return panel('Зависимости', empty('Загрузка…'));
-  const deps = g.depends_on, needs = g.requires_running, users = all.filter(d => d.depends_on.includes(c.id) || d.uses.includes(c.id));
-  return panel('Зависит от', deps.length ? '<ul class="rows">' + deps.map(id => link(id, needs.includes(id) ? 'должен работать' : 'нужны его файлы')).join('') + '</ul>' : empty('Не зависит от других компонентов')) +
-    panel('Нужен для', users.length ? '<ul class="rows">' + users.map(d => link(d.id, d.requires_running.includes(c.id) ? 'остановится вместе с ним' : d.depends_on.includes(c.id) ? 'берёт его файлы' : 'берёт его данные')).join('') + '</ul>' : empty('Никто'),
-      { desc: 'Выключение компонента учитывает эти связи.' });
-}
 
 /* ---------- Навигация ---------- */
 // A wide screen holds every section in the bar; a phone holds the chosen ones plus «Ещё».
@@ -4620,7 +4615,7 @@ function render() {
   back.classList.toggle('detail', !!p.parent);
   back.hidden = current === 'overview';
   back.setAttribute('aria-label', p.parent ? 'Назад: ' + page(p.parent).title : 'Назад к обзору');
-  const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('deps-') ? depsPage(comp(current.slice(5))) : current.startsWith('l-') ? listPage(current.slice(2)) : current.startsWith('ip-') ? addrPage(current.slice(3)) : current.startsWith('s-') ? servicePage(current.slice(2)) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('tn-') ? tunnelNetsPage(current.slice(3)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
+  const html = current.startsWith('c-') ? compPage(comp(current.slice(2))) : current.startsWith('l-') ? listPage(current.slice(2)) : current.startsWith('ip-') ? addrPage(current.slice(3)) : current.startsWith('s-') ? servicePage(current.slice(2)) : current.startsWith('t-') ? tunnelPage(current.slice(2)) : current.startsWith('tn-') ? tunnelNetsPage(current.slice(3)) : current.startsWith('w-') ? wifiClientPage(current.slice(2)) : RENDER[current]();
   // The page title and, when the page's own block has a long explanation, its «?» right by it.
   // No «?» in the top bar on any page (owner 02.11): back, title, search, bell, theme; the page's
   // own explanation is shown in its block instead.

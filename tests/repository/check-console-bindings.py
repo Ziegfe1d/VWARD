@@ -148,6 +148,12 @@ for need in ("tuns.length + 1 <= 4 ? choiceSlider('svc-tun:' + id,", "else if (k
 # fix.38.1: a page with its data on the screen is renewed quietly; «медленно» only with data missing.
 if "keys && keys.every(k => S[k] != null))) return; b.slow = true;" not in js or "busyStart(id, keys)" not in js:
     fail("fix.38.1: the slow-router words show although the page's data is on the screen")
+# fix.38.1 (Panel audit 12.11.2026): no «Зависимости» pages without a way in (an old address opens the
+# component); the Overview's «Обновления» opens VWARD's updates; the AdGuard Home update page has its own title.
+if "DETAILS['deps-'" in js or "function depsPage(" in js or "if (/\\/deps$/.test(p)) return idOf(p.slice(0, -5));" not in js:
+    fail("fix.38.1: the «Зависимости» pages are back, or an old address of one opens nothing")
+if "title: 'Обновления', to: 'u-vward'," not in js or "'u-agh': { title: 'Обновление AdGuard Home'," not in js:
+    fail("fix.38.1: «Обновления» on the Overview or the AdGuard Home update page title")
 if "watch ? 'd-agents' : null" in js or "compact-modes" in js:
     fail("fix.38.1: «Восстановление VPN» leads to the agents' list again, or the per-agent sliders are back")
 
