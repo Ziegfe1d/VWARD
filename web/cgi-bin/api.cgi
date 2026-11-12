@@ -987,8 +987,8 @@ if [ "$ACTION" = cron-data ]; then
             case "$TAG" in ''|*[!A-Za-z0-9_.-]*) LASTV=""; RCV="" ;; *)
                 LASTV="$(head -n 1 "/tmp/$TAG.cron.last" 2>/dev/null | cut -c1-60)"; RCV="$(head -n 1 "/tmp/$TAG.cron.rc" 2>/dev/null)" ;; esac
             case "$RCV" in *[!0-9]*) RCV="" ;; esac
-            printf '%s\t%s\t%s\t%s\n' "$SCHED" "$SCRIPT" "$LASTV" "$RCV"
-        done | "$JQ" -Rn --argjson owners "$OWNERS" '[inputs | split("\t") | {schedule: .[0], script: .[1], name: (.[1] | split("/") | last), component: ($owners[.[1]] // ""), last: .[2], rc: (.[3] | tonumber? // null)}]')"
+            printf '%s\t%s\t%s\t%s\t%s\n' "$SCHED" "$SCRIPT" "$LASTV" "$RCV" "$TAG"
+        done | "$JQ" -Rn --argjson owners "$OWNERS" '[inputs | split("\t") | {schedule: .[0], script: .[1], name: (.[1] | split("/") | last), component: ($owners[.[1]] // ""), last: .[2], rc: (.[3] | tonumber? // null), tag: (.[4] // "")}]')"
     [ -n "$JOBS" ] || JOBS='[]'
     CRON_UP=false; pidof crond >/dev/null 2>&1 && CRON_UP=true
     "$JQ" -cn --argjson jobs "$JOBS" --argjson up "$CRON_UP" '{ok: true, crond: $up, jobs: $jobs}'

@@ -154,6 +154,18 @@ if "DETAILS['deps-'" in js or "function depsPage(" in js or "if (/\\/deps$/.test
     fail("fix.38.1: the «Зависимости» pages are back, or an old address of one opens nothing")
 if "title: 'Обновления', to: 'u-vward'," not in js or "'u-agh': { title: 'Обновление AdGuard Home'," not in js:
     fail("fix.38.1: «Обновления» on the Overview or the AdGuard Home update page title")
+# fix.38.1 (owner 12.11.2026, technical clutter): no «Запрошено в» under a history, «Отказов подряд» only above
+# zero, «Очистка» only what takes space, no per-part version and date, no «opkg», no «HTTPS-фильтр: недоступен»,
+# two cron lines of one script told apart.
+for need in ("(num(wg.down_streak) ? kv([['Отказов подряд'", "const rows = CLEAN.filter(g => kb[g[0]]).map(", "kv([['Запуск', c.when]]) +",
+             "S.https && S.https.ok ? ['HTTPS-фильтр'", "esc(JOB_TAGS[x.tag] || JOB_NAMES[x.name] || x.name)"):
+    if need not in js:
+        fail(f"fix.38.1 clutter: {need!r} is missing")
+for gone in ("'<p class=\"log-at\">Запрошено в '", "['Обновляется через'", "['Версия', verHuman(x.release"):
+    if gone in js:
+        fail(f"fix.38.1 clutter: {gone!r} is back")
+if 'tag: (.[4] // "")' not in api:
+    fail("fix.38.1: cron-data gives each line its status tag")
 if "watch ? 'd-agents' : null" in js or "compact-modes" in js:
     fail("fix.38.1: «Восстановление VPN» leads to the agents' list again, or the per-agent sliders are back")
 

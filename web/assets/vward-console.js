@@ -2015,11 +2015,12 @@ const CLEAN = [['archive', 'Архив журналов', 'сжатые стар
   ['ads', 'Копии фильтров рекламы', 'последняя каждого вида остаётся']];
 function cleanupPanel() {
   const c = S.cleanup, kb = (c && c.kb) || {}, ok = cfgOk();
-  const rows = CLEAN.map(g => '<div class="kv-row" data-key="' + esc(g[1]) + '"><dt>' + esc(g[1]) + (g[2] ? '<span class="hint">' + esc(g[2]) + '</span>' : '') + '</dt><dd><span class="num' + (kb[g[0]] ? '' : ' none') + '">' + (kb[g[0]] ? fmtKB(kb[g[0]]) : 'пусто') + '</span>' +
+  // fix.38.1 (owner 12.11.2026): only what takes space; eight «пусто» rows said nothing.
+  const rows = CLEAN.filter(g => kb[g[0]]).map(g => '<div class="kv-row" data-key="' + esc(g[1]) + '"><dt>' + esc(g[1]) + (g[2] ? '<span class="hint">' + esc(g[2]) + '</span>' : '') + '</dt><dd><span class="num' + (kb[g[0]] ? '' : ' none') + '">' + (kb[g[0]] ? fmtKB(kb[g[0]]) : 'пусто') + '</span>' +
     (kb[g[0]] ? '<button class="icon-btn" type="button" data-act="ask" data-confirm="cleanup" data-what="' + g[0] + '" aria-label="Очистить: ' + esc(g[1]) + '" title="Очистить"' + (ok ? '' : ' disabled') + '>' + ico('broom') + '</button>' : '') + '</dd></div>').join('');
   const cg = confirm && confirm.id === 'cleanup' ? (confirm.what === 'all' ? [0, 'всё временное'] : CLEAN.find(g => g[0] === confirm.what) || [0, '']) : null;
   const any = CLEAN.some(g => kb[g[0]]);
-  return panel('Очистка', !c ? empty('Загрузка…') : '<dl class="kv">' + rows +
+  return panel('Очистка', !c ? empty('Загрузка…') : (rows ? '' : '<p class="panel-desc">Временных файлов нет.</p>') + '<dl class="kv">' + rows +
       '<div class="kv-row" data-key="Журналы"><dt>Журналы<span class="hint">не удаляются, сжимаются кнопкой</span></dt><dd><span class="num">' + (kb.journals ? fmtKB(kb.journals) : '—') + '</span></dd></div></dl>' +
       (cg ? confirmBox('cleanup', 'Очистить: ' + cg[1].toLowerCase() + '? Это не вернуть.', 'Очистить', true) :
         '<div class="panel-actions even">' + btn('ask', 'broom', 'Очистить временное', '', ' data-confirm="cleanup" data-what="all"' + (ok && any ? '' : ' disabled')) + btn('housekeeping', 'archive', 'Сжать журналы') + '</div>') + resultBox('storage'),
@@ -2300,7 +2301,7 @@ const RENDER = {
         ['Категории блокировки', (a.categories || []).filter(x => x.active).length + ' из ' + (a.categories || []).length + ' включены', '', 'd-adcats'],
         ['Мои правила', fmtInt((a.manual_rules || []).length), '', 'd-rules'],
         ['Источники', (a.sources || []).filter(x => x.mode === 'active').length + ' из ' + (a.sources || []).length + ' активны', '', 'd-sources'],
-        ['HTTPS-фильтр', S.https && S.https.ok ? (S.https.status && isTrue(S.https.status.ENABLED) ? 'включён' : 'выключен') : 'недоступен', '', 'd-https'],
+        S.https && S.https.ok ? ['HTTPS-фильтр', S.https.status && isTrue(S.https.status.ENABLED) ? 'включён' : 'выключен', '', 'd-https'] : null,
         ['Настройки проверки', ({ scheduled: 'по расписанию', dynamic: 'по запросам', manual: 'вручную' })[runMode] || '', '', 'd-adsettings']
       ])) + adsCheckPanel() + aghTopPanel() +
       // AdGuard Home is a program of its own: its page lives in «Компоненты» (no «Дополнительно», owner 2026-10-17).
@@ -2523,8 +2524,7 @@ const RENDER = {
     return loadError(['ext']) +
       panel('AdGuard Home', kv([
         ['Установлена', official ? o.installed + ', официальная сборка' : a.installed ? extVer(a.installed) : 'не установлен', broken ? 'crit' : ''],
-        ['Доступна', official ? (newer ? o.pinned : 'новее нет') : a.available ? extVer(a.available) : 'новее нет', (official ? newer : a.available) ? 'info' : ''],
-        ['Обновляется через', official ? 'VWARD' : 'opkg']
+        ['Доступна', official ? (newer ? o.pinned : 'новее нет') : a.available ? extVer(a.available) : 'новее нет', (official ? newer : a.available) ? 'info' : '']
       ]) + (conf || (act ? '<div class="panel-actions">' + act + '</div>' : '')) + extRunNote(run, 'adguardhome-go') + resultBox('ext'),
       { desc: official ? 'Сборка AdGuard для процессора этого роутера: сборка Entware на нём не запускается. Новые версии приходят с обновлениями VWARD.'
         : broken ? 'Программа AdGuard Home не запускается на процессоре этого роутера. Официальная сборка AdGuard работает.' : 'AdGuard Home обновляется через Entware.' }) +
@@ -2717,7 +2717,7 @@ const RENDER = {
     const jobs = cr && cr.ok ? cr.jobs : [];
     // A job without its component (someone else's line in VWARD's crontab) is not a link.
     const row = x => { const comp = JOB_COMPONENT[x.name] || x.component, on = !comp || compOn(comp), ok = x.rc === 0;
-      return '<li class="row' + (comp ? ' link" role="button" tabindex="0" data-go="c-' + esc(comp) : '') + '"><div class="row-main"><b>' + esc(JOB_NAMES[x.name] || x.name) + '</b><small>' + esc(cronText(x.schedule)) + ' · ' + esc(fmtStamp(x.last) || 'ещё не запускалось') + '</small></div>' +
+      return '<li class="row' + (comp ? ' link" role="button" tabindex="0" data-go="c-' + esc(comp) : '') + '"><div class="row-main"><b>' + esc(JOB_TAGS[x.tag] || JOB_NAMES[x.name] || x.name) + '</b><small>' + esc(cronText(x.schedule)) + ' · ' + esc(fmtStamp(x.last) || 'ещё не запускалось') + '</small></div>' +
         '<span class="pill ' + (!on ? 'warn' : x.rc == null ? '' : ok ? 'ok' : 'crit') + '">' + (!on ? 'Выключен' : x.rc == null ? 'Нет данных' : ok ? 'Успешно' : 'Ошибка, код ' + x.rc) + '</span>' + (comp ? ico('chevron', 'chev') : '') + '</li>'; };
     return panel('Планировщик', kv([['Планировщик заданий', sv.crond ? 'Работает' : 'Не работает', sv.crond ? 'ok' : 'crit'], ['Агент компонентов', sv.supervisor ? 'Работает' : 'Не работает', sv.supervisor ? 'ok' : 'crit']])) +
       panel('Задания', !cr ? empty('Загрузка…') : !cr.ok ? empty(errText(cr)) : jobs.length ? '<ul class="rows">' + jobs.map(row).join('') + '</ul>' : empty('Задания не найдены'),
@@ -3151,7 +3151,8 @@ function vpnGuardPanel() {
     // fix.38.1 (owner 12.11.2026): the mode is chosen here, the row no longer leads to the agents' list.
     '<dl class="kv">' + ctrlRow('Восстановление VPN', modeSlider('network', watch ? 'watch' : 'act', 'Режим агента сети'),
       (watch ? 'песочница: только записывает, что сделал бы' : 'вкл: проверка туннеля каждые 6 минут') + '; это режим агента сети - и для интернета, и для DNS') + '</dl>' +
-    kv([['Отказов подряд', String(num(wg.down_streak) || 0)]]) + '<div class="panel-actions even">' + btn('tunnel-health', 'check', 'Проверить') + '</div>' + resultBox('tunnel-health'),
+    // fix.38.1 (owner 12.11.2026): the counter only when the tunnel failed; «0» said nothing.
+    (num(wg.down_streak) ? kv([['Отказов подряд', String(num(wg.down_streak))]]) : '') + '<div class="panel-actions even">' + btn('tunnel-health', 'check', 'Проверить') + '</div>' + resultBox('tunnel-health'),
   {});
 }
 // wanNowRows: the manual repair buttons of «Восстановление интернета».
@@ -3382,7 +3383,6 @@ function activityPage(k) {
   const more = all.length > show || ACTFULL[k];
   return (a.topOwn ? top : '') + panel(a.title, (a.topOwn ? '' : top) + head + (ev.length ? '<ul class="events">' + ev.map(row).join('') + '</ul>'
     : empty('Пока ничего не происходило')) +
-    (t ? '<p class="log-at">Запрошено в ' + esc(new Date(t).toLocaleTimeString('ru-RU')) + '</p>' : '') +
     '<div class="panel-actions even">' + (more ? btn('act-more', '', 'Показать ещё ' + ACT_STEP, '', ' data-k="' + k + '"') : '') +
       btn('act-reload', 'refresh', 'Обновить', '', ' data-k="' + k + '"' + (ACTRUN[k] ? ' disabled' : '')) + '</div>', { desc: a.desc });
 }
@@ -3569,6 +3569,8 @@ const hsSec = t => { const h = t && t.handshake != null ? num(t.handshake) : nul
 function agoText(sec) { if (sec == null || isNaN(sec)) return '—'; if (sec < 60) return sec + ' с назад'; if (sec < 3600) return Math.round(sec / 60) + ' мин назад'; if (sec < 86400) return Math.round(sec / 3600) + ' ч назад'; return Math.round(sec / 86400) + ' д назад'; }
 // An interval in plain units: 900 → «15 мин», 86400 → «24 ч».
 function durText(sec) { const n = num(sec); if (n == null) return '—'; if (n < 60) return n + '\u00a0с'; if (n < 3600) return Math.round(n / 60) + '\u00a0мин'; return Math.round(n / 3600) + '\u00a0ч'; }
+// fix.38.1: one script, two cron lines - told apart by the line's status file.
+const JOB_TAGS = { 'vward-ads-scheduler': 'Блокировка рекламы: проверка доменов', 'vward-ads-dns-tick': 'Блокировка рекламы: слежение за DNS' };
 const JOB_NAMES = { 'vward-route-reconciler.sh': 'Сверка маршрутов', 'S91vward-route-engine': 'Перезапуск маршрутизации', 'vward-policy-chain.sh': 'Обновление IP-категорий', 'vward-route-hints-update.sh': 'Подсказки каталога', 'vward-tunnel-health.sh': 'Агент VPN', 'S92vward-runtime': 'Агент компонентов', 'vward-wan-guard.sh': 'Восстановление интернета', 'vward-housekeeping.sh': 'Сжатие журналов', 'vward-ads-privacy-scheduler.sh': 'Блокировка рекламы', 'vward-wifi-client-scheduler.sh': 'Контроль Wi-Fi клиентов' };
 const JOB_COMPONENT = { 'S91vward-route-engine': 'route-engine' };
 function cronText(c) {
@@ -4440,7 +4442,8 @@ function compPage(c) {
   const sw1 = core ? '<span class="num">Всегда</span>' : sw('data-comp="' + c.id + '"', on, 'Компонент «' + compName(c.id) + '» включён', !cfgOk() || !g);
   return panel(compName(c.id), '<dl class="kv">' + ctrlRow('Компонент включён', sw1, core ? 'базовый компонент: без него VWARD не работает' : on ? '' : 'файлы установлены, но компонент не запускается') + '</dl>' +
       compConfirm(c) +
-      kv([['Запуск', c.when], ['Версия', verHuman(x.release || plat().version) || '—'], ['Установлен', fmtStamp(x.installed_at) || '—']]) +
+      // fix.38.1: «Версия» and «Установлен» were VWARD's own version and «—» on every part - gone.
+      kv([['Запуск', c.when]]) +
       '<div class="panel-actions even">' + (c.page ? '<button class="btn" type="button" data-go="' + c.page + '">Открыть раздел</button>' : '') + (activityOf(c.log) ? '<button class="btn" type="button" data-go="a-' + activityOf(c.log) + '">События</button>' : '') + '</div>' + cfgNote(),
     { desc: capFirst((partOf(c.id) || {}).desc || ''), right: headPill(!on ? 'warn' : x.health === 'PASS' ? 'ok' : '', !on ? 'Выключен' : x.health === 'PASS' ? 'Работает' : 'Нет данных') });
 }
