@@ -1987,7 +1987,8 @@ function controlPage() {
   const compRow = id => { const c = comp(id), on = id === 'tunnel-guard' ? guardOn() : compOn(id);
     return ctrlRow(c.name, sw('data-comp="' + id + '"', on, c.name, !ok || !graphOf(id)), c.desc); };
   const box = ids => ids.map(id => compConfirm(comp(id))).join('');
-  const group = (title, rows, after) => panel(title, '<dl class="kv">' + rows.filter(Boolean).join('') + '</dl>' + (after || ''));
+  // A group with nothing to set is left out (fix.38: no empty cards).
+  const group = (title, rows, after) => rows.filter(Boolean).length ? panel(title, '<dl class="kv">' + rows.filter(Boolean).join('') + '</dl>' + (after || '')) : '';
   // fix.38: the parts' own switches (components, agents) live in «Компоненты» only; here the settings.
   return loadError(['config']) + cfgNote() +
     panel('Компоненты и агенты', kv([['Включить или выключить часть VWARD', 'в «Компонентах»', '', 'utils']])) +
@@ -2314,7 +2315,8 @@ const RENDER = {
     const missing = [];
     const groups = (P.groups || []).map(g => {
       const rows = P.list.filter(p => p.group === g).map(p => {
-        if (p.installed === false && (p.kind === 'module' || p.kind === 'service')) { missing.push(partRow(p)); return ''; }
+        // Programs not installed fold into one line (owner 02.11); VWARD's own core stays in its group.
+        if (p.installed === false && (p.kind === 'module' || p.kind === 'service' && p.id !== 'routing-core')) { missing.push(partRow(p)); return ''; }
         return partRow(p);
       }).filter(Boolean);
       const confirms = P.list.filter(p => p.group === g && p.switch === 'component' && comp(p.id)).map(p => compConfirm(comp(p.id))).join('');
