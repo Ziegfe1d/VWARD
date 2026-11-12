@@ -135,8 +135,17 @@ if "data-log-go" in js or "'open-log'" in js:
 if 'data-go="a-adaptive">' not in js:
     fail("autopick's page lacks «Вся история»")
 for row in ("['Сверка маршрутов', '', '', 'a-routing']",
-            "['История агента VPN', '', '', 'a-tunnel']", "['Восстановление VPN', watch ? 'Наблюдение' : 'автоматическое'"):
+            "['История агента VPN', '', '', 'a-tunnel']", "ctrlRow('Восстановление VPN', modeSlider('network',"):
     if row not in js:
         fail(f"Panel row changed: {row}")
+
+# fix.38.1 (owner 12.11.2026): the service's tunnel is a slider when it fits; «Восстановление VPN» is the
+# network agent's mode in place (no jump to the agents' list); each agent is one switch, no stack of sliders.
+for need in ("tuns.length + 1 <= 4 ? choiceSlider('svc-tun:' + id,", "else if (key.startsWith('svc-tun:'))",
+             "sw('data-agent-act=\"' + a[0] + '\"'", "if (t.dataset.agentAct) {"):
+    if need not in js:
+        fail(f"fix.38.1: {need!r} is missing")
+if "watch ? 'd-agents' : null" in js or "compact-modes" in js:
+    fail("fix.38.1: «Восстановление VPN» leads to the agents' list again, or the per-agent sliders are back")
 
 print("CONSOLE_BINDINGS=PASS")

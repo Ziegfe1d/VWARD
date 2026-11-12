@@ -123,7 +123,8 @@ body::after{content:"";position:fixed;z-index:19;left:0;right:0;bottom:0;height:
 .tabbar.flash{animation:flash 1.6s ease}
 .panel-actions{display:flex;flex-wrap:wrap;gap:8px;padding:8px 16px 16px}
 .panel-actions:empty{display:none}
-.panel-actions.even>.btn{flex:1 1 120px;min-width:0;padding-inline:10px}
+/* fix.38.1: a button as wide as its words at least; two that do not fit go one under another (a long label spilled its icon out of the button). */
+.panel-actions.even>.btn{flex:1 1 0;min-width:max-content;padding-inline:10px}
 /* One size of buttons on a phone: a single one takes the row (owner 2026-10-17). */
 @media (max-width:600px){.panel-actions>.btn:only-child{flex:1 1 auto}}
 .block-head .switch{margin-left:4px}
@@ -580,8 +581,6 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
 /* 02.11 (owner): a button's label is never broken inside a word. */
 .kv-row .btn.small{white-space:nowrap}
 /* «Агенты»: the agents' modes as compact rows; the proposed actions readable, left-aligned. */
-.compact-modes .kv-row{padding-top:6px;padding-bottom:6px}
-.compact-modes .seg-slider{max-width:240px}
 .prop-agent{margin:12px 16px 4px;font-size:var(--fs-sm);color:var(--muted);font-weight:600}
 .props{list-style:none;margin:0;padding:0}
 .prop{padding:8px 16px;border-top:1px solid var(--line);text-align:left}

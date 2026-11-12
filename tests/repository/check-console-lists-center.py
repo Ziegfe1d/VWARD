@@ -33,8 +33,17 @@ for gone in ("'Удалить выбранные'", "data-list-pick", "'Друг
         fail(f"RED: lists page still has {gone} (owner 02.11)")
 if "const LIST_MODES = [['auto', 'Авто'], ['vpn', 'VPN'], ['dns', 'DNS'], ['bypass', 'Провайдер']];" not in JS:
     fail("the ways are «Авто | VPN | DNS | Провайдер» everywhere")
-if "(l.dns_mode || (l.managed && l.name !== (cfgRoute().group || prof().policy_group)) ? ctrlRow('Куда идёт', choiceSlider('list-mode:'" not in JS:
-    fail("only managed lists (not «Мои домены») get the path switch, on their own page")
+# fix.38.1 (owner 12.11.2026): one slider on every list's page; a list made outside VWARD is taken under
+# management first (the owner confirms), then gets the way; VWARD's own list opens its own page.
+for need in ("let rows = ctrlRow('Куда идёт', choiceSlider('list-mode:' + l.name, listModes(l), mode,",
+             "if (l && !l.managed && !l.dns_mode) { confirm = { id: 'list-adopt', name: g, then: v }; render(); } else listModeSet(g, v); }",
+             "if (x && x.ok && c.then) return listModeSet(c.name, c.then);",
+             "if (listOwn(l)) return ownListPage(l);", "data-go=\"l-' + esc(l.name) + '\""):
+    if need not in JS:
+        fail(f"list page: {need!r} is missing")
+for gone in ("data-list-watch=", "data-list-bypass=", "go('d-mydomains')", "'Взять под управление'"):
+    if gone in JS:
+        fail(f"list page: {gone!r} is back")
 # The mass switch skips service lists and lists already on the chosen way.
 if "l.managed && !svcOf(l.name)" not in JS or "listMode(l) !== v" not in JS:
     fail("«Все списки» must only touch managed non-service lists that differ")
