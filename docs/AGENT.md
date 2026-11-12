@@ -1595,6 +1595,12 @@ tick, visibilitychange и refreshPage журналы не грузят. Исто
 - Помощник: `reg_has QUERY NAME` по `settings-registry.json` (`VWARD_SETTINGS_REGISTRY`); `op_extra` и `op_agents_mode` больше не держат свои списки. api.cgi: части агентов в `PARTS_FACTS` — циклом из реестра.
 - Тесты: новый `check-parts-names.py` (RED на 3ee8252, GREEN); `check-lite-defaults`, `check-agents-watch`, `check-parts-registry`, `check-console-bindings` переведены на реестр.
 
+### 12.11.2026 — [Claude Code] установка с нуля на роутере владельца
+
+- Viva KN-1913, KeeneticOS 5.1.8: флешка инициализирована в Keenetic (swap + ext4, метка `EXT4-…`), Entware `mipsel` (в `show version` - `arch: mips`; ссылка `mips` даёт `exec format error`), установщик fix.37 - PASS, остатки AdGuard Home убраны, туннель `OpkgTun4` без настроек (24 списка, ~1043 подсети идут напрямую до нового туннеля).
+- По итогам: `docs/INSTALL.md` - проверенная пошаговая инструкция (каждая команда отдельно, ожидаемые ответы); install.sh считает маршруты мёртвого туннеля вместо списка.
+- **После выпуска fix.38 владелец снова форматирует флешку и повторяет установку с нуля по `docs/INSTALL.md` вместе с агентом.**
+
 ## 4. Открытые вопросы и нужные данные
 
 - 09.11.2026 / fix.36 опубликован: нужна приёмка владельцем на роутере (Ozon/WB, Lampa TV, ночной скан 00:10, экраны Панели, журнал сторожа DNS на возврат AdGuard Home в цепочку). Локальный стресс 09.11: однократное «processes pile up 6 -> 13» (route engine 5), в CI нет; при повторе разобрать по `soak_debug`.
