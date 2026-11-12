@@ -1,0 +1,639 @@
+#!/bin/sh
+
+PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
+[ -r "$VWARD_PROFILE_LIB" ] || exit 1
+. "$VWARD_PROFILE_LIB"
+vward_profile_load || exit 1
+
+# Component switch: when route-engine is disabled, start/restart stop it instead.
+VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+COMPONENT_ENABLED=1
+if [ -r "$VWARD_ADMISSION_LIB" ]; then
+    . "$VWARD_ADMISSION_LIB"
+    vward_component_enabled route-engine || COMPONENT_ENABLED=0
+fi
+
+PIDFILE="/opt/var/run/vward/route-engine.pid"
+SCRIPT="/opt/bin/vward-route-engine.sh"
+DNSCAP=${VWARD_DNSCAP_BIN:-/opt/share/vward/dnscap/vward-dnscap}
+SENTINEL_CTL=${VWARD_SENTINEL_CTL:-/opt/bin/vward-sentinel.sh}
+LOG="/opt/var/log/vward-route-engine.log"
+EVENT_LOG="/opt/var/log/vward-route-engine-events.log"
+UNHEALTHY=""
+
+LIVE_LOCK="/tmp/vward-route-engine.lock"
+CONTROL_LOCK="/tmp/S91vward-route-engine.control.lock"
+PLANNED_FLAG="/tmp/vward-route-engine.restarting"
+CHILD_STATE="/tmp/S91vward-route-engine.tcpdump-missing"
+START_WAIT=12
+START_WAIT_SLOW=${VWARD_ROUTE_ENGINE_START_SLOW:-60}
+STOP_WAIT=6
+CONTROL_WAIT=20
+
+
+# control_owner_alive PID: PID is a running copy of this script. A lock left by a copy that was
+# killed holds a number another process may get later (pids are reused): only a copy of S91
+# keeps the lock.
+control_owner_alive()
+{
+    kill -0 "$1" 2>/dev/null || return 1
+    case "$(tr '\000' ' ' < "/proc/$1/cmdline" 2>/dev/null)" in
+        *S91vward-route-engine*) return 0 ;;
+    esac
+    return 1
+}
+
+
+control_lock()
+{
+    N=0
+    EMPTY=0
+
+    while ! mkdir "$CONTROL_LOCK" 2>/dev/null; do
+
+        OLD=$(cat "$CONTROL_LOCK/pid" 2>/dev/null)
+
+        # 11.11: a lock with a dead or foreign owner, or one whose owner never wrote its pid
+        # (killed right after mkdir, /tmp full) for the whole wait, was kept for ever: every
+        # start answered «control busy» and the engine stayed down.
+        if { [ -n "$OLD" ] && ! control_owner_alive "$OLD"; } ||
+           { [ -z "$OLD" ] && [ "$EMPTY" -ge "$CONTROL_WAIT" ]; }; then
+
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|CONTROL_LOCK_STALE|owner=${OLD:-none}" >> "$EVENT_LOG" 2>/dev/null
+            rm -rf "${CONTROL_LOCK:?}"
+            EMPTY=0
+            continue
+        fi
+
+        [ -n "$OLD" ] && EMPTY=0 || EMPTY=$((EMPTY + 1))
+
+        sleep 1
+        N=$((N + 1))
+
+        [ "$N" -gt "$CONTROL_WAIT" ] && return 1
+    done
+
+    echo $$ > "$CONTROL_LOCK/pid"
+    return 0
+}
+
+
+control_unlock()
+{
+    rm -rf "${CONTROL_LOCK:?}"
+}
+
+
+# BusyBox "ps w" prints "PID USER VSZ STAT /bin/sh SCRIPT"; some builds add
+# "{comm}" before the command, so the script may be one field later.
+adaptive_live_pids()
+{
+    ps w |
+    awk '
+        $6=="/opt/bin/vward-route-engine.sh" ||
+        ($5 ~ /^[{]/ && $7=="/opt/bin/vward-route-engine.sh") {
+            print $1
+        }
+    '
+}
+
+
+# The engine's own subshells (a probe inside $(...), a pipeline) carry the same
+# command line; only processes whose parent is not the engine are cores.
+adaptive_core_count()
+{
+    # shellcheck disable=SC2046
+    ACC_LIVE=" $(echo $(adaptive_live_pids)) "
+    ACC_N=0
+    for ACC_P in $ACC_LIVE; do
+        # /proc/PID/stat: pid (comm) state ppid ...; read is a builtin.
+        read -r _ _ _ ACC_PP _ 2>/dev/null < "/proc/$ACC_P/stat" || continue
+        case "$ACC_LIVE" in *" $ACC_PP "*) ;; *) ACC_N=$((ACC_N + 1)) ;; esac
+    done
+    echo "$ACC_N"
+}
+
+
+# core_detail: "pid:ppid" of every process the core count looks at (01.11, for the event log only: a
+# second core is then a named process with its parent, not a bare number).
+core_detail()
+{
+    for CD_P in $(adaptive_live_pids); do
+        read -r _ _ _ CD_PP _ 2>/dev/null < "/proc/$CD_P/stat" || continue
+        echo "$CD_P:$CD_PP"
+    done | tr '\n' ','
+}
+
+
+adaptive_tcpdump_pids()
+{
+    ps w |
+    awk -v subnet="$VWARD_LAN_SUBNET" -v address="$VWARD_LAN_ADDRESS" '
+        $5=="tcpdump" &&
+        index($0,"src net " subnet) &&
+        index($0,"dst host " address) {
+            print $1
+            next
+        }
+        # vward-dnscap DEVICE SUBNET DNS, the engine'"'"'s own capture program.
+        ($5 ~ /\/vward-dnscap$/ || $6 ~ /\/vward-dnscap$/) &&
+        index($0," " subnet " ") {
+            print $1
+        }
+    '
+}
+
+
+kill_all_live()
+{
+    for P in $(adaptive_live_pids); do
+        kill "$P" 2>/dev/null
+    done
+
+    N=0
+
+    while [ "$N" -lt "$STOP_WAIT" ]; do
+
+        CNT=$(adaptive_live_pids | wc -l)
+
+        [ "$CNT" -eq 0 ] && return 0
+
+        sleep 1
+        N=$((N + 1))
+    done
+
+    for P in $(adaptive_live_pids); do
+        kill -9 "$P" 2>/dev/null
+    done
+
+    sleep 1
+}
+
+
+kill_adaptive_tcpdump()
+{
+    for P in $(adaptive_tcpdump_pids); do
+        kill "$P" 2>/dev/null
+    done
+
+    sleep 1
+
+    for P in $(adaptive_tcpdump_pids); do
+        kill -9 "$P" 2>/dev/null
+    done
+}
+
+
+
+clean_service()
+{
+    kill_all_live
+    kill_adaptive_tcpdump
+
+    rm -f "$PIDFILE"
+    rm -f "$CHILD_STATE"
+    rm -rf "${LIVE_LOCK:?}"
+}
+
+
+# last_stop: the reason in the engine's STOP line after its last START (fix.33.2), none without one.
+last_stop()
+{
+    tail -n 300 "$EVENT_LOG" 2>/dev/null | awk -F'|' '
+        $2 == "START" {r = "none"}
+        $2 == "STOP" {r = "?"; for (i = 3; i <= NF; i++) if ($i ~ /^reason=/) r = substr($i, 8)
+                      for (i = 3; i <= NF; i++) if ($i ~ /^rc=/) r = r "/" $i}
+        END {print (r == "" ? "none" : r)}'
+}
+
+# stop_request CMD: who asked the engine to stop (the parent of this script), for the event log.
+stop_request()
+{
+    SR_BY=$(tr '\000' ' ' < "/proc/$PPID/cmdline" 2>/dev/null | cut -c1-100)
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|STOP_REQUEST|cmd=$1|by=${SR_BY:-?}" >> "$EVENT_LOG" 2>/dev/null
+}
+
+
+# Core health belongs to the main Live process.
+# tcpdump is a self-healing child owned by vward-route-engine.sh.
+service_healthy()
+{
+    PID=$(cat "$PIDFILE" 2>/dev/null)
+    LOCKPID=$(cat "$LIVE_LOCK/pid" 2>/dev/null)
+
+    UNHEALTHY=no_pidfile
+    [ -n "$PID" ] || return 1
+    UNHEALTHY=lock_mismatch
+    [ "$PID" = "$LOCKPID" ] || return 1
+
+    UNHEALTHY=core_dead
+    kill -0 "$PID" 2>/dev/null || return 1
+
+    LCNT=$(adaptive_core_count)
+
+    UNHEALTHY=cores=$LCNT
+    [ "$LCNT" -eq 1 ] || return 1
+
+    UNHEALTHY=""
+    return 0
+}
+
+
+# tcpdump_starts: tcpdump --version ends well, or is still running after 3 s (then it
+# started); a crash at start (Bus error) or no tcpdump at all: not.
+tcpdump_starts()
+{
+    command -v tcpdump >/dev/null 2>&1 || return 1
+    tcpdump --version >/dev/null 2>&1 </dev/null &
+    TP=$!
+    N=0
+    while kill -0 "$TP" 2>/dev/null && [ "$N" -lt 3 ]; do sleep 1; N=$((N + 1)); done
+    if kill -0 "$TP" 2>/dev/null; then
+        kill "$TP" 2>/dev/null
+        wait "$TP" 2>/dev/null
+        return 0
+    fi
+    wait "$TP"
+}
+
+
+start_service()
+{
+    if service_healthy; then
+
+        PID=$(cat "$PIDFILE")
+        TCNT=$(adaptive_tcpdump_pids | wc -l)
+
+        if [ "$TCNT" -eq 1 ]; then
+            rm -f "$CHILD_STATE"
+            echo "Adaptive Live already running PID=$PID tcpdump=1"
+            return 0
+        fi
+
+        # tcpdump can legitimately disappear briefly while Live
+        # performs its own 2-second self-healing cycle.
+        sleep 3
+
+        if ! service_healthy; then
+            echo "Adaptive Live core became unhealthy during child grace"
+        else
+            TCNT=$(adaptive_tcpdump_pids | wc -l)
+
+            if [ "$TCNT" -eq 1 ]; then
+                rm -f "$CHILD_STATE"
+                echo "Adaptive Live child recovered PID=$PID tcpdump=1"
+                return 0
+            fi
+
+            MISS=$(cat "$CHILD_STATE" 2>/dev/null)
+
+            case "$MISS" in
+                ''|*[!0-9]*) MISS=0 ;;
+            esac
+
+            MISS=$((MISS + 1))
+            echo "$MISS" > "$CHILD_STATE"
+
+            if [ "$MISS" -lt 3 ]; then
+                echo "Adaptive Live core healthy PID=$PID tcpdump=$TCNT child_grace=$MISS/3"
+                return 0
+            fi
+
+            echo "Adaptive Live tcpdump unhealthy for 3 consecutive watchdog checks - restarting"
+            UNHEALTHY=tcpdump=$TCNT
+        fi
+    fi
+
+    # A second core seen once (01.11: WATCHDOG_RESTART cores=2 -> STOP TERM -> START_FAILED, every
+    # ~14 min): looked at again after 2 s, the restart only when it is still there. A real second
+    # engine stays and is restarted as before; a passing one (a subshell between its fork and its
+    # parent's wait, an engine that was ending) no longer costs a restart.
+    case "$UNHEALTHY" in
+        cores=[2-9]*|cores=1[0-9]*)
+            CORES_SEEN=$UNHEALTHY CORES_PROCS=$(core_detail)
+            sleep 2
+            if service_healthy; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S')|WATCHDOG_CORES_TRANSIENT|seen=$CORES_SEEN|procs=$CORES_PROCS" >> "$EVENT_LOG" 2>/dev/null
+                return 0
+            fi
+            ;;
+    esac
+
+    # Why the engine is (re)started, for the event log, with how the engine itself ended (its
+    # STOP line after its last START; none: killed without a word, kill -9 or out of memory).
+    [ -z "$UNHEALTHY" ] || [ "$UNHEALTHY" = no_pidfile ] ||
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|WATCHDOG_RESTART|reason=$UNHEALTHY|last_stop=$(last_stop)|pid=${PID:-}|lock=${LOCKPID:-}|procs=$(core_detail)|by=$(tr '\000' ' ' < "/proc/$PPID/cmdline" 2>/dev/null | cut -c1-60)" >> "$EVENT_LOG" 2>/dev/null
+
+    # Only core failure, duplicate core process, or persistent child
+    # failure reaches this point.
+    clean_service
+
+    mkdir -p "${PIDFILE%/*}" || return 1
+
+    # tcpdump that dies at start (a broken libpcap) and no vward-dnscap yet: fetch it
+    # first, or the startup check below cannot pass. At most 20 s (a boot without the
+    # internet must not wait for the download); a fetch still going finishes on its own and
+    # the engine takes the program at its next capture start.
+    if [ ! -x "$DNSCAP" ] && [ -x "$SENTINEL_CTL" ] && ! tcpdump_starts; then
+        "$SENTINEL_CTL" install-dnscap </dev/null >/dev/null 2>&1 &
+        FP=$!
+        N=0
+        while kill -0 "$FP" 2>/dev/null && [ "$N" -lt 20 ]; do sleep 1; N=$((N + 1)); done
+    fi
+
+    "$SCRIPT" >> "$LOG" 2>&1 &
+    PID=$!
+
+    echo "$PID" > "$PIDFILE"
+
+    N=0
+
+    # The engine's start (restore of AdaptiveAuto: the route-change lock up to 10 s, Keenetic's
+    # configuration 5-14 s on a loaded Viva, up to 8 s of writes) can take longer than START_WAIT.
+    # Killing it then was the loop of 1.11 (START_FAILED wait=12s, STOP TERM, PERSIST_RESTORE_LOCK_FAIL).
+    # After START_WAIT the wait goes on, up to START_WAIT_SLOW, only for an engine that is alive,
+    # holds its own lock and is the only one; anything else fails at START_WAIT as before.
+    while [ "$N" -lt "$START_WAIT_SLOW" ]; do
+
+        kill -0 "$PID" 2>/dev/null || break
+
+        LOCKPID=$(cat "$LIVE_LOCK/pid" 2>/dev/null)
+        LCNT=$(adaptive_core_count)
+        TCNT=$(adaptive_tcpdump_pids | wc -l)
+
+        if [ "$LOCKPID" = "$PID" ] &&
+           [ "$LCNT" -eq 1 ] &&
+           [ "$TCNT" -eq 1 ]; then
+
+            rm -f "$CHILD_STATE"
+
+            [ "$N" -lt "$START_WAIT" ] ||
+                echo "$(date '+%Y-%m-%d %H:%M:%S')|START_SLOW|wait=${N}s" >> "$EVENT_LOG" 2>/dev/null
+            echo "Adaptive Live started PID=$PID tcpdump=1 wait=${N}s"
+            return 0
+        fi
+
+        if [ "$N" -ge "$START_WAIT" ] &&
+           ! { [ "$LOCKPID" = "$PID" ] && [ "$LCNT" -eq 1 ]; }; then
+            break
+        fi
+
+        sleep 1
+        N=$((N + 1))
+    done
+
+    echo "Adaptive Live failed startup health check after ${N}s"
+    kill -0 "$PID" 2>/dev/null && SF_ALIVE=1 || SF_ALIVE=0
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|START_FAILED|wait=${N}s|last_stop=$(last_stop)|alive=$SF_ALIVE|lock=$(cat "$LIVE_LOCK/pid" 2>/dev/null)|pid=$PID|cores=$(adaptive_core_count)|tcpdump=$(adaptive_tcpdump_pids | wc -l)|procs=$(core_detail)" >> "$EVENT_LOG" 2>/dev/null
+
+    clean_service
+    return 1
+}
+stop_service()
+{
+    clean_service
+    echo "Adaptive Live stopped"
+}
+
+
+
+status_service()
+{
+    PID=$(cat "$PIDFILE" 2>/dev/null)
+    LOCKPID=$(cat "$LIVE_LOCK/pid" 2>/dev/null)
+
+    LCNT=$(adaptive_core_count)
+    TCNT=$(adaptive_tcpdump_pids | wc -l)
+
+    if service_healthy; then
+
+        if [ "$TCNT" -eq 1 ]; then
+            echo "Adaptive Live RUNNING PID=$PID"
+            echo "Adaptive process count=1"
+            echo "Adaptive tcpdump count=1"
+            return 0
+        fi
+
+        MISS=$(cat "$CHILD_STATE" 2>/dev/null)
+        [ -n "$MISS" ] || MISS=0
+
+        echo "Adaptive Live RUNNING/DEGRADED PID=$PID"
+        echo "Adaptive process count=1"
+        echo "Adaptive tcpdump count=$TCNT"
+        echo "Adaptive tcpdump missing streak=$MISS/3"
+        return 1
+    fi
+
+    echo "Adaptive Live UNHEALTHY/STOPPED"
+    echo "PIDFILE=${PID:-none}"
+    echo "LOCKPID=${LOCKPID:-none}"
+    echo "Adaptive process count=$LCNT"
+    echo "Adaptive tcpdump count=$TCNT"
+
+    return 1
+}
+# ---- Autopodbor in Go (owner 11.11.2026) -------------------------------------------------
+# When the routing core is installed («S91vward-route-engine core-install»), «vward-core adaptive» runs instead
+# of the shell engine: the only writer of AdaptiveAuto, it also takes names out again (the shell
+# reconciler stands aside). /opt/etc/vward/route-engine/engine.shell keeps the shell engine;
+# core.observe (or Autopodbor switched off in the Panel) runs it without writing. A core that
+# does not start: the shell engine for an hour, then the core again. No core yet: the shell
+# engine, and the core is fetched in the background (at most once an hour).
+CORE_BIN=${VWARD_CORE_BIN:-/opt/share/vward/core/vward-core}
+CORE_SELF=${VWARD_CORE_SELF:-$0}
+CORE_URL=${VWARD_CORE_URL:-https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/tools/vward-core/dist}
+CORE_LOG=${VWARD_CORE_LOG:-/opt/var/log/vward-core-adaptive.log}
+CORE_FALLBACK=${VWARD_CORE_FALLBACK:-/tmp/vward-core-adaptive.fallback}
+CORE_FETCH_TRY=${VWARD_CORE_FETCH_TRY:-/tmp/vward-core-install.try}
+CORE_ETC=${VWARD_ROUTE_ENGINE_ETC:-/opt/etc/vward/route-engine}
+VWARD_CORE_PIDFILE=${VWARD_CORE_PIDFILE:-/opt/var/run/vward/core-adaptive.pid}
+command -v vward_core_adaptive_pid >/dev/null 2>&1 || vward_core_adaptive_pid() {
+    _vca=; read -r _vca 2>/dev/null < "$VWARD_CORE_PIDFILE" || :
+    case "$_vca" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$_vca" 2>/dev/null || return 1
+    _vcc=; IFS= read -r _vcc 2>/dev/null < "/proc/$_vca/cmdline" || :
+    case "$_vcc" in *vward-core*adaptive*) echo "$_vca"; return 0 ;; esac
+    return 1
+}
+
+# core_sum ARCH: SHA-256 of the unpacked routing core (tools/vward-core/SHA256SUMS, a reproducible
+# build). core_install puts it at CORE_BIN for this processor: downloaded through vward_fetch
+# (curl, or the VLESS module's Xray when curl crashes on HTTPS), checked, run once («version»).
+core_sum()
+{
+    case "$1" in
+        mipsle) echo e9664348f19c69434ce7072c7b8f02d67474808a4d0abf7fc253235649538021 ;;
+        mips) echo ef54e5d1305480420ef2f2c9722b41cc2062e18dea1869aad34d6fee0d0723c7 ;;
+        arm64) echo 0cde7cb4f823ca055d09feffc6522a55a19a808dfd03d21e608293008702876c ;;
+        *) return 1 ;;
+    esac
+}
+
+core_arch()
+{
+    [ -z "${VWARD_CORE_ARCH:-}" ] || { echo "$VWARD_CORE_ARCH"; return 0; }
+    case "$(uname -m)" in
+        aarch64|arm64) echo arm64 ;;
+        mips*)
+            # Byte 5 of the ELF header of the router's own shell (1 little-, 2 big-endian); no od.
+            CA_E=1; [ "$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null)" != "$(printf '\002')" ] || CA_E=2
+            if [ "$CA_E" = 2 ]; then echo mips; else echo mipsle; fi ;;
+        *) return 1 ;;
+    esac
+}
+
+core_install()
+{
+    CI_A=$(core_arch) || { echo "error=arch_unsupported"; return 1; }
+    CI_WANT=$(core_sum "$CI_A") || { echo "error=arch_unsupported"; return 1; }
+    if [ -x "$CORE_BIN" ] && [ "$(sha256sum "$CORE_BIN" 2>/dev/null | cut -d' ' -f1)" = "$CI_WANT" ]; then
+        echo "result=unchanged"
+        return 0
+    fi
+    CI_DIR=${CORE_BIN%/*}
+    mkdir -p "$CI_DIR" || { echo "error=write_failed"; return 1; }
+    CI_T=$(mktemp -d "$CI_DIR/.install.XXXXXX" 2>/dev/null) || { echo "error=write_failed"; return 1; }
+    CI_ERR=
+    if ! { command -v vward_fetch >/dev/null 2>&1 && vward_fetch -fsSL --connect-timeout 15 --max-time 300 --max-filesize 16777216 \
+            -o "$CI_T/c.gz" "$CORE_URL/vward-core-linux-$CI_A.gz"; } 2>/dev/null; then CI_ERR=download_failed
+    elif ! gunzip -c "$CI_T/c.gz" > "$CI_T/vward-core" 2>/dev/null; then CI_ERR=package_damaged
+    elif [ "$(sha256sum "$CI_T/vward-core" | cut -d' ' -f1)" != "$CI_WANT" ]; then CI_ERR=checksum_mismatch
+    elif ! chmod 0755 "$CI_T/vward-core" || ! "$CI_T/vward-core" version >/dev/null 2>&1; then CI_ERR=binary_not_runnable
+    elif ! mv -f "$CI_T/vward-core" "$CORE_BIN"; then CI_ERR=write_failed
+    fi
+    rm -rf "${CI_T:?}"
+    if [ -n "$CI_ERR" ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|CORE_INSTALL_FAILED|$CI_ERR|arch=$CI_A" >> "$EVENT_LOG" 2>/dev/null
+        echo "error=$CI_ERR"
+        return 1
+    fi
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|CORE_INSTALLED|arch=$CI_A" >> "$EVENT_LOG" 2>/dev/null
+    echo "result=changed"
+}
+
+core_wanted()
+{
+    [ ! -e "$CORE_ETC/engine.shell" ] || return 1
+    if [ ! -x "$CORE_BIN" ]; then
+        # Fetched in the background; the shell engine works meanwhile.
+        if [ -z "$(find "$CORE_FETCH_TRY" -mmin -60 2>/dev/null)" ]; then
+            printf '' > "$CORE_FETCH_TRY" 2>/dev/null
+            ( "$CORE_SELF" core-install </dev/null >/dev/null 2>&1 & )
+        fi
+        return 1
+    fi
+    [ -z "$(find "$CORE_FALLBACK" -mmin -60 2>/dev/null)" ]
+}
+
+core_stop()
+{
+    CS_P=$(vward_core_adaptive_pid) || { rm -f "$VWARD_CORE_PIDFILE"; return 0; }
+    kill "$CS_P" 2>/dev/null
+    CS_N=0
+    while kill -0 "$CS_P" 2>/dev/null && [ "$CS_N" -lt 8 ]; do sleep 1; CS_N=$((CS_N + 1)); done
+    kill -9 "$CS_P" 2>/dev/null
+    rm -f "$VWARD_CORE_PIDFILE"
+}
+
+core_start()
+{
+    if CS_P=$(vward_core_adaptive_pid); then
+        echo "Autopodbor (Go) already running PID=$CS_P"
+        return 0
+    fi
+    # One writer of AdaptiveAuto: the shell engine goes first.
+    stop_service >/dev/null 2>&1
+    CS_MODE=--apply
+    [ ! -e "$CORE_ETC/adaptive.disabled" ] && [ ! -e "$CORE_ETC/core.observe" ] || CS_MODE=
+    mkdir -p "${VWARD_CORE_PIDFILE%/*}" "${CORE_LOG%/*}" 2>/dev/null
+    "$CORE_BIN" adaptive --lan "${VWARD_LAN_DEVICE:-br0}" --wan "${VWARD_WAN_DEVICE:-}" \
+        --tunnel-dev "${VWARD_TUNNEL_DEVICE:-}" --log "$CORE_LOG" $CS_MODE </dev/null >> "$CORE_LOG.out" 2>&1 &
+    echo "$!" > "$VWARD_CORE_PIDFILE"
+    sleep 3
+    if CS_P=$(vward_core_adaptive_pid); then
+        rm -f "$CORE_FALLBACK"
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|CORE_STARTED|pid=$CS_P|mode=${CS_MODE:+apply}${CS_MODE:-observe}" >> "$EVENT_LOG" 2>/dev/null
+        echo "Autopodbor (Go) started PID=$CS_P"
+        return 0
+    fi
+    rm -f "$VWARD_CORE_PIDFILE"
+    printf '' > "$CORE_FALLBACK" 2>/dev/null
+    echo "$(date '+%Y-%m-%d %H:%M:%S')|CORE_START_FAILED|the shell engine for an hour|$(tail -n 2 "$CORE_LOG.out" 2>/dev/null | tr '\n|' '  ' | cut -c1-200)" >> "$EVENT_LOG" 2>/dev/null
+    return 1
+}
+
+# engine_start: the core when wanted (the shell engine when it fails), else the shell engine.
+engine_start()
+{
+    if core_wanted; then
+        core_start && return 0
+    else
+        core_stop
+    fi
+    start_service
+}
+
+case "$1" in
+
+    core-install)
+        # The core fetched (in the background from core_wanted): Autopodbor moves to it at once.
+        CI_OUT=$(core_install)
+        echo "$CI_OUT"
+        [ "$CI_OUT" != "result=changed" ] || exec "$0" restart
+        case "$CI_OUT" in result=*) exit 0 ;; *) exit 1 ;; esac
+        ;;
+
+    status)
+        if CS_P=$(vward_core_adaptive_pid); then echo "Autopodbor (Go) running PID=$CS_P"; exit 0; fi
+        status_service
+        ;;
+
+    start|stop|restart)
+
+        if ! control_lock; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|CONTROL_BUSY|cmd=$1|owner=$(cat "$CONTROL_LOCK/pid" 2>/dev/null)" >> "$EVENT_LOG" 2>/dev/null
+            echo "Adaptive control busy"
+            exit 1
+        fi
+
+        trap 'control_unlock' EXIT
+        trap 'exit 1' INT TERM
+
+        if [ "$COMPONENT_ENABLED" = 0 ] && [ "$1" != stop ]; then
+            core_stop
+            stop_service >/dev/null 2>&1
+            echo "COMPONENT_DISABLED=route-engine"
+            exit 0
+        fi
+
+        case "$1" in
+            start)
+                engine_start
+                ;;
+            stop)
+                core_stop
+                stop_request stop
+                stop_service
+                ;;
+            restart)
+                # A planned restart (a tunnel switch): the real-time agent sees the engine go
+                # and must not start it again in the same second (Viva 2026-10-19).
+                printf '' > "$PLANNED_FLAG" 2>/dev/null
+                core_stop
+                stop_request restart
+                stop_service
+                sleep 1
+                engine_start
+                rm -f "$PLANNED_FLAG"
+                ;;
+        esac
+        ;;
+
+    *)
+        echo "Usage: $0 {start|stop|restart|status|core-install}"
+        exit 1
+        ;;
+esac
