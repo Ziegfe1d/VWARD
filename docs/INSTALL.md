@@ -49,6 +49,10 @@ VWARD работает в Entware, поэтому сначала роутеру 
 
    Затем `system configuration save`. Через 3-5 минут Entware готова (ход установки
    виден в «Диагностика → Системный журнал»).
+   Если в журнале `exec format error` и `Opkg::Manager: process /opt/etc/init.d/doinstall: failed
+   to start` - скачан установщик не для этой архитектуры. Сверьте `arch` в `show version`, выполните
+   `no opkg disk` и `system configuration save`, снова отформатируйте флешку (на ней остались чужие
+   файлы) и повторите `opkg disk` с командой из нужной строки таблицы.
 4. **Вход в Entware.** С компьютера: `ssh root@192.168.1.1 -p 222` (порт 222, если в
    Keenetic стоит компонент «Сервер SSH», иначе `-p 22`). Пароль `keenetic`; сразу смените
    его командой `passwd`.
