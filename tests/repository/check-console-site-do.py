@@ -89,8 +89,8 @@ if o["unblock"] != ["ads-control:agh remove block"]:
     fail(f"a blocked domain chosen directly is unblocked first: {o['unblock']}")
 if o["block"] != ["ads-control:agh add block"] or not o["did"][0].startswith("x.com: блокировка в AdGuard Home добавлена"):
     fail(f"block: {o['block']} {o['did']}")
-if o["nogroup"] != [] or "не выбран список" not in " ".join(o["nogroupDid"]):
-    fail(f"VPN without a list for «Мои домены»: nothing written, the owner told: {o['nogroup']} {o['nogroupDid']}")
+if o["nogroup"][-1:] != ["config:route-domain add"] or "список «VWARD»" not in " ".join(o["nogroupDid"]):
+    fail(f"VPN without a list for «Мои домены»: into VWARD's own list on the router: {o['nogroup']} {o['nogroupDid']}")
 if "станут недоступны для всех устройств сети" not in o["htmlConfirm"]:
     fail("blocking asks first")
 if "route-domain|force-vpn|adaptive|smartdns-domain) set --" not in API:

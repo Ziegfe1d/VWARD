@@ -466,8 +466,6 @@ async function siteDo(how, d) {
   };
   const cfgStep = (op, action, text) => step({ op: op, action: action, target: d }, text);
   try {
-    // Checked before anything changes: Smart DNS is not taken off for a VPN that cannot be set.
-    if (how === 'vpn' && !s.vpn && !s.force && !s.group) { did.push({ text: d + ': не добавлен - не выбран список для «Моих доменов». Выберите его в «Маршруты → Мои домены» и повторите.', ok: false }); return; }
     if (how === 'block') { await step({ op: 'agh', setting: 'user-rule', value: 'add', kind: 'block', domain: d }, d + ': блокировка в AdGuard Home добавлена', 'ads-control'); return; }
     if (how === 'unblock' || s.userBlock) {
       if (!await step({ op: 'agh', setting: 'user-rule', value: 'remove', kind: 'block', domain: d }, d + ': блокировка в AdGuard Home снята', 'ads-control') || how === 'unblock') return;
@@ -478,10 +476,10 @@ async function siteDo(how, d) {
       else did.push({ text: d + ': Smart DNS задан для родительского домена, изменение выполняется на странице «Smart DNS»', ok: false });
     }
     if (how === 'vpn') {
-      // Without a group for «Мои домены» there is nowhere to put it in Keenetic: «всегда через VPN»
-      // (force-vpn.conf) is read by the shell engine only, the Go core does not - the domain stayed
-      // direct while the Panel said «через VPN» (claude.ai, owner 12.11.2026).
-      if (!s.vpn && !s.force) await cfgStep('route-domain', 'add', d + ': добавлен в «Мои домены», маршрут через VPN');
+      // Always a Keenetic list: force-vpn.conf is read by the shell engine only, so with no group
+      // claude.ai stayed direct while the Panel said «через VPN» (owner 12.11.2026). No list for
+      // «Мои домены» yet: the router makes VWARD's own list «VWARD» through the VPN.
+      if (!s.vpn && !s.force) await cfgStep('route-domain', 'add', d + (s.group ? ': добавлен в «Мои домены», маршрут через VPN' : ': добавлен в список «VWARD» через VPN'));
       return;
     }
     if (s.mine && !await cfgStep('route-domain', 'remove', d + ': удалён из «Мои домены»')) return;

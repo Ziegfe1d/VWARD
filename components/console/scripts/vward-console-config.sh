@@ -485,6 +485,39 @@ load_profile() {
     case "$VWARD_POLICY_GROUP" in *[!A-Za-z0-9_.-]*) die policy_group_unavailable ;; esac
 }
 
+# load_profile_own: as load_profile, but with no group for «Мои домены» VWARD makes its own:
+# Keenetic's list «VWARD» routed through the default tunnel, written to device.conf (owner
+# 12.11.2026: after the switch to a new tunnel there was no group, «VPN» did nothing for
+# claude.ai). A list «VWARD» already there is taken as it is. Undone if any step is refused.
+OWN_GROUP=VWARD
+load_profile_own() {
+    load_profile_base
+    case "${VWARD_POLICY_GROUP:-}" in ''|"$ADAPTIVE_GROUP") ;; *) load_profile; return 0 ;; esac
+    vward_valid_ndm_name "${VWARD_TUNNEL_INTERFACE:-}" || die tunnel_unavailable
+    [ "${LOCKED:-0}" = 1 ] || change_lock
+    snapshot
+    og_made=0 og_routed=0
+    if ! grep -qx "object-group fqdn $OWN_GROUP" "$RUNCFG"; then
+        ndm "object-group fqdn $OWN_GROUP" || die router_rejected
+        og_made=1
+    fi
+    if ! route_present "$OWN_GROUP" "$VWARD_TUNNEL_INTERFACE"; then
+        ndm "dns-proxy route object-group $OWN_GROUP $VWARD_TUNNEL_INTERFACE auto" ||
+            { [ "$og_made" = 0 ] || ndm "no object-group fqdn $OWN_GROUP"; die router_rejected; }
+        og_routed=1
+    fi
+    set_kv "$VWARD_DEVICE_CONFIG" VWARD_POLICY_GROUP "$OWN_GROUP" 0600 || :
+    rm -f "$VWARD_DEVICE_MAP_CACHE"
+    ( unset VWARD_POLICY_GROUP; vward_profile_load >/dev/null 2>&1 && [ "$VWARD_POLICY_GROUP" = "$OWN_GROUP" ] ) || {
+        [ "$og_routed" = 0 ] || ndm "dns-proxy no route object-group $OWN_GROUP $VWARD_TUNNEL_INTERFACE"
+        [ "$og_made" = 0 ] || ndm "no object-group fqdn $OWN_GROUP"
+        die profile_verification_failed; }
+    [ $((og_made + og_routed)) = 0 ] || save_router || die config_save_failed
+    audit "policy-group $OWN_GROUP made=$og_made routed=$og_routed via=$VWARD_TUNNEL_INTERFACE"
+    VWARD_POLICY_GROUP=$OWN_GROUP
+    snapshot
+}
+
 config_snapshot_valid() {
     [ -s "$1" ] && awk '
         /^[[:space:]]*(Command::|[Ee][Rr][Rr][Oo][Rr][: ]|[Ff]ailed[: ])/ {bad=1}
@@ -631,8 +664,8 @@ op_list_domain() {
 op_route_domain() {
     case "$1" in add|remove) ;; *) die invalid_operation 64 ;; esac
     valid_domain "$2" || die invalid_domain 64
-    load_profile
-    change_lock
+    if [ "$1" = add ]; then load_profile_own; else load_profile; fi
+    [ "${LOCKED:-0}" = 1 ] || change_lock
     core_list "$1" "$VWARD_POLICY_GROUP" "$2"
     case $? in
         0) done_ok "route-domain $1 $2 group=$VWARD_POLICY_GROUP by=core" changed ;;
@@ -646,7 +679,7 @@ op_route_domain() {
 op_adaptive() {
     case "$1" in remove|pin) ;; *) die invalid_operation 64 ;; esac
     valid_domain "$2" || die invalid_domain 64
-    [ "$1" = remove ] || load_profile
+    [ "$1" = remove ] || load_profile_own
     change_lock
     changed=0 router=0
     # The core: the name out of AdaptiveAuto (and into «Мои домены» for pin) as one batch.
