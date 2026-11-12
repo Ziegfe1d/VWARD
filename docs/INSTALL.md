@@ -52,11 +52,12 @@ VWARD работает в Entware, поэтому сначала роутеру 
    | mips | `opkg disk OPKG:/ https://bin.entware.net/mipssf-k3.4/installer/mips-installer.tar.gz` |
    | aarch64 | `opkg disk OPKG:/ https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz` |
 
-   Затем `system configuration save`. Через 3-5 минут Entware готова (ход установки
+   Затем отдельной командой `system configuration save`. Каждую команду вводите отдельно: одну строку,
+   Enter, потом следующую (две команды вместе роутер не разберёт: `argument parse error`). Через 3-5 минут Entware готова (ход установки
    виден в «Диагностика → Системный журнал»).
    Если в журнале `exec format error` и `Opkg::Manager: process /opt/etc/init.d/doinstall: failed
    to start` - скачан установщик не для этой архитектуры. Сверьте `arch` в `show version`, выполните
-   `no opkg disk` и `system configuration save`, снова отформатируйте флешку (на ней остались чужие
+   `no opkg disk`, затем (отдельной командой) `system configuration save`, снова отформатируйте флешку (на ней остались чужие
    файлы) и повторите `opkg disk` с командой из нужной строки таблицы.
 4. **Вход в Entware.** С компьютера: `ssh root@192.168.1.1 -p 222` (порт 222, если в
    Keenetic стоит компонент «Сервер SSH», иначе `-p 22`). Пароль `keenetic`; сразу смените
@@ -105,8 +106,8 @@ DNS-сервер (`192.168.1.1:65053`) и выключенный DNS самог�
 Keenetic. Ставить AdGuard Home заново не нужно - VWARD работает без него.
 
 Если после форматирования на роутере совсем нет DNS (не открываются сайты и не проходит
-`opkg update`), в `http://192.168.1.1/a` выполните `no opkg dns-override` и
-`system configuration save` - это вернёт DNS Keenetic, дальше как обычно.
+`opkg update`), в `http://192.168.1.1/a` выполните `no opkg dns-override`, затем отдельной
+командой `system configuration save` - это вернёт DNS Keenetic, дальше как обычно.
 
 ## 3. Что делает установщик
 
