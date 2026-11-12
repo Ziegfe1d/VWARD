@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """One registry of VWARD's parts (owner 12.11.2026: «по порядочку, без дублей»).
 
-config/components/component-registry.json «parts»: every part the owner sees - the package's
+config/settings/settings-registry.json «parts» (a file every release brings; the component
+registry lives with the update engine and changes only with it): every part the owner sees - the package's
 components, the VPN and DNS programs, the routing core, the optional parts of the agents - once,
 with its one name, its group, what switches it and which agent runs it. The Panel and the router
 read their names from here; this test keeps it whole:
@@ -22,7 +23,8 @@ def fail(m):
     raise SystemExit(f"PARTS_REGISTRY=FAIL: {m}")
 
 
-reg = json.loads((ROOT / "config/components/component-registry.json").read_text(encoding="utf-8"))
+reg = json.loads((ROOT / "config/settings/settings-registry.json").read_text(encoding="utf-8"))
+creg = json.loads((ROOT / "config/components/component-registry.json").read_text(encoding="utf-8"))
 parts = reg.get("parts") or fail("no parts")
 if reg.get("parts_schema") != 1:
     fail("parts_schema must be 1")
@@ -44,7 +46,7 @@ for p in parts:
     for t in (p["title"], p["desc"]):
         if re.search(r"[Сс]торож|[Сс]траж", t):
             fail(f"{p['id']}: «{t}»")
-comps = {c["id"]: c for c in reg["components"]}
+comps = {c["id"]: c for c in creg["components"]}
 by = {p["id"]: p for p in parts}
 for cid, c in comps.items():
     if cid not in by or by[cid]["kind"] != "component":
@@ -61,4 +63,12 @@ if used != extras:
 helper = (ROOT / "components/console/scripts/vward-console-config.sh").read_text()
 if set(re.search(r'VWARD_EXTRA_NAMES="([^"]+)"', helper).group(1).split()) != extras:
     fail("the helper switches the registry's optional parts only")
+api = (ROOT / "web/cgi-bin/api.cgi").read_text()
+for need in ("PARTS_REG=${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}", "  parts:$parts,", "--argjson parts \"$PARTS_JSON\""):
+    if need not in api:
+        fail(f"the router's answer lacks {need!r}")
+facts = api[api.index("PARTS_FACTS=$("):api.index("PARTS_JSON=$(")]
+missing = [i for i in ids if not re.search(r"(^|[\s'])" + re.escape(i) + r"(\\t|[\s;])", facts)]
+if missing:
+    fail(f"the router says nothing of {missing}")
 print(f"PARTS_REGISTRY=PASS: {len(parts)} parts in {len(groups)} groups, one name each")

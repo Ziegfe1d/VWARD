@@ -3813,10 +3813,12 @@ set -- $(ps w 2>/dev/null | awk -v subnet="$VWARD_LAN_SUBNET" -v address="$VWARD
     /[A]dGuardHome/ { agh = 1 }
     /[v]ward-sentinel( |$)/ && !/vward-sentinel-act/ { sen = 1 }
     /[h]ttps-dns-proxy/ { doh = 1 }
+    /[v]less-engine\/xray( |$)|[x]ray run/ { xray = 1 }
+    /[a]wg-engine\/vward-awg( |$)/ { awg = 1 }
     $6 == "/opt/bin/vward-route-engine.sh" || ($5 ~ /^[{]/ && $7 == "/opt/bin/vward-route-engine.sh") { live++ }
     $5 == "tcpdump" && index($0, "src net " subnet) && index($0, "dst host " address) { tcp++ }
     ($5 ~ /\/vward-dnscap$/ || $6 ~ /\/vward-dnscap$/) && index($0, " " subnet " ") { tcp++ }
-    END { print (crond == "" ? "-" : crond), sup + 0, agh + 0, live + 0, tcp + 0, sen + 0, doh + 0 }')
+    END { print (crond == "" ? "-" : crond), sup + 0, agh + 0, live + 0, tcp + 0, sen + 0, doh + 0, xray + 0, awg + 0 }')
 CROND_PID=${1:--}
 [ "$CROND_PID" != - ] || CROND_PID=""
 SUPERVISOR=${2:-0}
@@ -3824,7 +3826,7 @@ SUPERVISOR=${2:-0}
 AGENTS="$(awk -F= '$1 ~ /^(network|updates|maintenance|state|ssh)$/ && $2 ~ /^(ok|late|hung|off|broken)$/ {printf "%s%s=%s", (n++ ? "," : ""), $1, $2}' "${VWARD_AGENTS_STATE:-/tmp/vward-agents.state}" 2>/dev/null)"
 ADGUARD=${3:-0}
 # «Компоненты» (fix.32): VWARD's real-time watcher, the DNS capture and Smart DNS's DoH client.
-SENTINEL_RUN=${6:-0} DOH_RUN=${7:-0} DNSCAP_RUN=${5:-0}
+SENTINEL_RUN=${6:-0} DOH_RUN=${7:-0} DNSCAP_RUN=${5:-0} XRAY_RUN=${8:-0} AWG_RUN=${9:-0}
 SENTINEL_INST=0; [ ! -x "${VWARD_SENTINEL_BIN:-/opt/share/vward/sentinel/vward-sentinel}" ] || SENTINEL_INST=1
 DNSCAP_INST=0; [ ! -x "${VWARD_DNSCAP_BIN:-/opt/share/vward/dnscap/vward-dnscap}" ] || DNSCAP_INST=1
 # Lightened VWARD (owner 11.11.2026): the optional parts switched on (NAME.on, all.on = every part),
@@ -3953,6 +3955,53 @@ if [ ! -s "$VERSIONS_CACHE" ] || [ /opt/lib/opkg/status -nt "$VERSIONS_CACHE" ];
 fi
 kv_file "$VERSIONS_CACHE" jq=JQ_VERSION curl=CURL_VERSION lighttpd=LIGHTTPD_VERSION
 
+# VWARD's parts (fix.38, owner 12.11.2026: one list, one name each, no page without its data): the
+# registry's parts with what the router knows of each - on, installed, running ("" = not known
+# here) and why. Built here, in the answer every page reads.
+# The parts come with every release (settings-registry.json, the Panel's own file).
+PARTS_REG=${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}
+part_on() { [ ! -e "$CSTATE/$1" ] && echo 1 || echo 0; }
+extra_on() { if [ "$EXTRAS_ALL" = 1 ] || [ -e "$COMPONENT_STATE/$1.on" ]; then echo 1; else echo 0; fi; }
+rc_ok() { case "$1" in '') echo "" ;; 0) echo 1 ;; *) echo 0 ;; esac; }
+pkg_of() { printf '%s\n' "$COMPONENTS_TSV" | awk -F '\t' -v p="$1" '$1 == p {print $3; exit}'; }
+PARTS_FACTS=$(
+    PF_RE=0; { [ "$CORE_RUN" = 1 ] || [ "${LIVE_COUNT:-0}" -gt 0 ] 2>/dev/null; } && PF_RE=1
+    PF_CORE_INST=0; [ ! -x "${VWARD_CORE_BIN:-/opt/share/vward/core/vward-core}" ] || PF_CORE_INST=1
+    PF_CORE_ON=1; [ ! -e "${VWARD_ROUTE_ENGINE_ETC:-/opt/etc/vward/route-engine}/engine.shell" ] || PF_CORE_ON=0
+    PF_XRAY=0; [ ! -x "${VWARD_XRAY_BIN:-/opt/share/vward/vless-engine/xray}" ] || PF_XRAY=1
+    PF_AWG=0; [ ! -x "${VWARD_AWG_BIN:-/opt/share/vward/awg-engine/vward-awg}" ] || PF_AWG=1
+    for c in route-engine route-reconciler route-tools policy-sync tunnel-guard wan-guard wifi-client-guard ads-privacy-guard; do
+        case $c in
+            route-engine) r=$PF_RE ;; route-reconciler) r=$(rc_ok "$RRC") ;; tunnel-guard) r=$(rc_ok "$WGRC") ;; wan-guard) r=$(rc_ok "$GRC") ;; *) r= ;;
+        esac
+        printf '%s\t1\t%s\t%s\t\n' "$c" "$(part_on "$c.disabled")" "$r"
+    done
+    printf 'runtime\t1\t1\t%s\t\n' "$SUPERVISOR"
+    printf 'console\t1\t1\t%s\t\n' "$([ -n "$CONSOLE_PID" ] && echo 1 || echo 0)"
+    printf 'update-engine\t1\t1\t%s\t\n' "$CROND"
+    printf 'platform-core\t1\t1\t\t\n'
+    printf 'routing-core\t%s\t%s\t%s\t%s\n' "$PF_CORE_INST" "$PF_CORE_ON" "$CORE_RUN" "$([ "$PF_CORE_INST" = 1 ] || echo 'скачивается само; пока работает прежний автоподбор')"
+    printf 'vless\t%s\t%s\t%s\t\n' "$PF_XRAY" "$(part_on module-vless.disabled)" "$XRAY_RUN"
+    printf 'awg\t%s\t%s\t%s\t\n' "$PF_AWG" "$(part_on module-awg.disabled)" "$AWG_RUN"
+    s=$(pkg_of sing-box-go); printf 'singbox\t%s\t1\t%s\t\n' "$(case $s in not-installed|'') echo 0 ;; *) echo 1 ;; esac)" "$(case $s in running*) echo 1 ;; installed-off) echo 0 ;; esac)"
+    s=$(pkg_of dnsmasq-full); printf 'dnsmasq\t%s\t1\t%s\t\n' "$(case $s in not-installed|'') echo 0 ;; *) echo 1 ;; esac)" "$(case $s in running*) echo 1 ;; installed-off) echo 0 ;; esac)"
+    printf 'agh\t%s\t%s\t%s\t\n' "$AGH_INSTALLED" "$(part_on adguardhome.disabled)" "$ADGUARD"
+    printf 'doh\t%s\t1\t%s\t\n' "$DOH_INST" "$DOH_RUN"
+    if [ "$CORE_RUN" = 1 ]; then printf 'dnscap\t1\t1\t1\tавтоподбор на Go ловит запросы сам\n'
+    else printf 'dnscap\t%s\t1\t%s\t\n' "$DNSCAP_INST" "$([ "${DNSCAP_RUN:-0}" -gt 0 ] 2>/dev/null && echo 1 || echo 0)"; fi
+    printf 'sentinel\t%s\t%s\t%s\t\n' "$SENTINEL_INST" "$(extra_on sentinel)" "$SENTINEL_RUN"
+    for x in memory-watch ssh-watch repair backup flash-watch integrity services-refresh ext-update; do
+        printf '%s\t1\t%s\t\t\n' "$x" "$(extra_on "$x")"
+    done)
+PARTS_JSON=$(printf '%s\n' "$PARTS_FACTS" | "$JQ" -Rn --slurpfile reg "$PARTS_REG" '
+    [inputs | split("\t") | select(length >= 4) | {(.[0]): {installed: (.[1] == "1"), enabled: (.[2] == "1"),
+      running: (if .[3] == "1" then true elif .[3] == "0" then false else null end), why: (.[4] // "")}}] | add as $f |
+    $reg[0] | if (.parts | type) == "array" then
+      {groups: .parts_groups, agents: .parts_agents, all_extras: '"$([ "$EXTRAS_ALL" = 1 ] && echo true || echo false)"',
+       list: [.parts[] | . + ($f[.id] // {installed: null, enabled: null, running: null, why: ""})]}
+    else null end' 2>/dev/null)
+[ -n "$PARTS_JSON" ] || PARTS_JSON=null
+
 header_json
 
 "$JQ" -n \
@@ -3976,7 +4025,7 @@ header_json
   --arg adguard "$ADGUARD" --arg adguard_installed "$AGH_INSTALLED" \
   --arg agh_off "$AGH_OFF" --arg mod_off "$MOD_OFF" --arg comp_op "$COMP_OP" \
   --arg sen_run "$SENTINEL_RUN" --arg sen_inst "$SENTINEL_INST" --arg cap_run "$DNSCAP_RUN" --arg cap_inst "$DNSCAP_INST" --arg doh_run "$DOH_RUN" --arg doh_inst "$DOH_INST" --arg sen_fresh "$SENTINEL_FRESH" --arg cap_fresh "$DNSCAP_FRESH" --arg comps "$COMPONENTS_TSV" \
-  --arg extras_all "$EXTRAS_ALL" --arg extras_on "$EXTRAS_ON" --arg core_run "$CORE_RUN" \
+  --arg extras_all "$EXTRAS_ALL" --arg extras_on "$EXTRAS_ON" --arg core_run "$CORE_RUN" --argjson parts "$PARTS_JSON" \
   --arg agh_broken "$AGH_BROKEN" \
   --arg uptime "$UPTIME_SEC" \
   --arg grc "$GRC" \
@@ -4024,6 +4073,7 @@ header_json
 
   timestamp:$ts,
 
+  parts:$parts,
   platform:{
     name:"VWARD Platform",
     version:$vward_version,

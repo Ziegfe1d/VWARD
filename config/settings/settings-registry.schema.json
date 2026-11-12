@@ -103,6 +103,73 @@
         },
         "additionalProperties": false
       }
+    },
+    "parts_schema": {
+      "const": 1
+    },
+    "parts_groups": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "parts_agents": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "parts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "group",
+          "desc",
+          "switch",
+          "agent"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "component",
+              "module",
+              "service",
+              "extra"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string"
+          },
+          "desc": {
+            "type": "string"
+          },
+          "switch": {
+            "enum": [
+              null,
+              "component",
+              "module",
+              "extra"
+            ]
+          },
+          "agent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
     }
   },
   "additionalProperties": false
