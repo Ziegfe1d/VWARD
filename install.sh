@@ -131,7 +131,7 @@ installed() { [ -e "$UPDATER_STATE/committed.state" ] || [ -e /opt/etc/init.d/S9
 beta_present() { [ -e /opt/etc/init.d/S91adaptive-live ] || [ -e /opt/bin/agh-adaptive-live.sh ]; }
 agh_present() { [ -r /opt/etc/AdGuardHome/AdGuardHome.yaml ] || [ -x /opt/bin/AdGuardHome ] || [ -x /opt/sbin/AdGuardHome ]; }
 # stale_dns: Keenetic's DNS settings left by an AdGuard Home that is no longer here (owner 12.11.2026:
-# a reformatted USB drive takes AdGuard Home with it, Keenetic keeps asking 192.168.1.1:65053 or keeps
+# a reformatted USB drive takes AdGuard Home with it, Keenetic keeps asking the router's :65053 or keeps
 # its own DNS off). One line each, as in the running configuration; nothing when AdGuard Home is here.
 # dead_routes: the routes Keenetic still sends into VWARD engine tunnels whose settings went with the
 # old USB drive (DEAD_TUNNELS, owner 12.11.2026: «старый VPN туннель»). One line each, tab-separated:

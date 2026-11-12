@@ -29,7 +29,7 @@ vward_dns_mode_get() (
     f=$VWD_ETC/dns-mode.conf
     if [ ! -e "$f" ] && [ ! -L "$f" ]; then
         # No choice recorded: AdGuard Home only where it is installed (owner 12.11.2026: a router
-        # without it is not «Keenetic :53 -> 192.168.1.1:65053»), else Keenetic's own DNS.
+        # without it is not «Keenetic :53 -> the router's :65053»), else Keenetic's own DNS.
         if [ -r "$VWD_R/opt/etc/AdGuardHome/AdGuardHome.yaml" ] || [ -x "$VWD_R/opt/bin/AdGuardHome" ] ||
            [ -x "$VWD_R/opt/sbin/AdGuardHome" ] || [ -x "$VWD_R/opt/etc/init.d/S99adguardhome" ]; then
             printf 'agh\tdefault\n'
