@@ -108,18 +108,23 @@ func (f *fakeKeenetic) serve(w http.ResponseWriter, r *http.Request) {
 		out := map[string]any{}
 		for _, g := range f.order {
 			body := map[string]any{}
-			var inc []any
+			var inc, exc []any
 			for _, l := range f.groups[g] {
 				fl := strings.Fields(l)
 				switch fl[0] {
 				case "include":
 					inc = append(inc, map[string]any{"address": fl[1]})
+				case "exclude":
+					exc = append(exc, map[string]any{"address": fl[1]})
 				case "description":
 					body["description"] = strings.Trim(strings.TrimPrefix(l, "description "), `"`)
 				}
 			}
 			if inc != nil {
 				body["include"] = inc
+			}
+			if exc != nil {
+				body["exclude"] = exc
 			}
 			out[g] = body
 		}

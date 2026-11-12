@@ -172,3 +172,56 @@ func TestBlockedJournal(t *testing.T) {
 		t.Fatalf("an open operation blocks: %v %+v", err, res)
 	}
 }
+
+func TestExcludeUnexclude(t *testing.T) {
+	res, r, before := run(t, Op{Kind: "exclude", Group: "domain-list0", Domain: "kids.t.me"})
+	if res.State != "changed" || strings.Join(cmds(r), "|") != "object-group fqdn domain-list0 exclude kids.t.me" {
+		t.Fatalf("exclude: %+v %q", res, cmds(r))
+	}
+	if !contains(r.m.Groups["domain-list0"].Exclude, "kids.t.me") || len(r.m.Groups["domain-list0"].Include) != len(before.Groups["domain-list0"].Include) {
+		t.Fatal("exclude changed more than the exclusion")
+	}
+	r.m.Apply("object-group fqdn domain-list5 exclude music.youtube.com")
+	res, err := Run(r, &journal.Journal{Dir: t.TempDir()}, Op{Kind: "unexclude", Group: "domain-list5", Domain: "music.youtube.com"}, time.Unix(2, 0))
+	if err != nil || res.State != "changed" || len(r.m.Groups["domain-list5"].Exclude) != 0 {
+		t.Fatalf("unexclude: %v %+v", err, res)
+	}
+}
+
+func TestUnadaptAndPin(t *testing.T) {
+	res, r, before := run(t, Op{Kind: "unadapt", Domain: "blocked.example.com"})
+	if res.State != "changed" || strings.Join(cmds(r), "|") != "no object-group fqdn AdaptiveAuto include blocked.example.com" {
+		t.Fatalf("unadapt: %+v %q", res, cmds(r))
+	}
+	same(t, r, before, "route:AdaptiveAuto", "group:domain-list0", "group:domain-list5")
+	res, r, before = run(t, Op{Kind: "pin", Group: "domain-list5", Domain: "blocked.example.com"})
+	got := cmds(r)
+	if res.State != "changed" || len(r.batches) != 2 || len(got) != 2 ||
+		!contains(got, "object-group fqdn domain-list5 include blocked.example.com") ||
+		!contains(got, "no object-group fqdn AdaptiveAuto include blocked.example.com") {
+		t.Fatalf("pin: one batch, the name into the list and out of AdaptiveAuto: %+v %q", res, r.batches)
+	}
+	same(t, r, before, "route:AdaptiveAuto", "route:domain-list5", "group:domain-list0")
+	// AdaptiveAuto is still not a list for the other operations.
+	if res, _, _ := run(t, Op{Kind: "add", Group: "AdaptiveAuto", Domain: "x.example.com"}); res.State != "refused" {
+		t.Fatalf("add into AdaptiveAuto: %+v", res)
+	}
+}
+
+func TestRetarget(t *testing.T) {
+	res, r, before := run(t, Op{Kind: "retarget", From: "OpkgTun4", Target: "Wireguard1", Groups: []string{"domain-list0", "AdaptiveAuto"}})
+	if res.State != "changed" || len(r.batches) != 2 {
+		t.Fatalf("retarget: one batch: %+v %q", res, r.batches)
+	}
+	for _, g := range []string{"domain-list0", "AdaptiveAuto"} {
+		rs := r.m.RoutesOf(g)
+		if len(rs) != 1 || rs[0].Target != "Wireguard1" || rs[0].Options != "auto" {
+			t.Fatalf("%s: %+v", g, rs)
+		}
+	}
+	same(t, r, before, "group:domain-list0", "group:AdaptiveAuto", "route:domain-list5", "group:domain-list5")
+	// A group routed elsewhere is not moved silently.
+	if res, r, _ := run(t, Op{Kind: "retarget", From: "Wireguard9", Target: "Wireguard1", Groups: []string{"domain-list0"}}); res.State != "refused" || len(r.batches) != 0 {
+		t.Fatalf("routed elsewhere: %+v", res)
+	}
+}

@@ -594,8 +594,8 @@ op_list_domain() {
     }
     ld_have=0; ld_has "$@" && ld_have=1
     [ "$ld_want" != "$ld_have" ] || done_ok "list-domain $1 $2 $3" unchanged
-    if [ "$ld_kind" = include ]; then
-        ld_op=remove; [ "$ld_want" = 0 ] || ld_op=add
+    if [ "$ld_kind" = include ] || [ "$ld_kind" = exclude ]; then
+        case "$ld_kind:$ld_want" in include:1) ld_op=add ;; include:0) ld_op=remove ;; exclude:1) ld_op=exclude ;; *) ld_op=unexclude ;; esac
         core_list "$ld_op" "$2" "$3"
         case $? in
             0) done_ok "list-domain $1 $2 $3 by=core" changed ;;
@@ -617,6 +617,11 @@ op_route_domain() {
     valid_domain "$2" || die invalid_domain 64
     load_profile
     change_lock
+    core_list "$1" "$VWARD_POLICY_GROUP" "$2"
+    case $? in
+        0) done_ok "route-domain $1 $2 group=$VWARD_POLICY_GROUP by=core" changed ;;
+        1) done_ok "route-domain $1 $2 by=core" unchanged ;;
+    esac
     route_group_change "$VWARD_POLICY_GROUP" "$2" "$1" || done_ok "route-domain $1 $2" unchanged
     save_router || die config_save_failed
     done_ok "route-domain $1 $2 group=$VWARD_POLICY_GROUP" changed
@@ -628,10 +633,16 @@ op_adaptive() {
     [ "$1" = remove ] || load_profile
     change_lock
     changed=0 router=0
-    if [ "$1" = pin ]; then
-        route_group_change "$VWARD_POLICY_GROUP" "$2" add && router=1
-    fi
-    route_group_change "$ADAPTIVE_GROUP" "$2" remove && router=1
+    # The core: the name out of AdaptiveAuto (and into «Мои домены» for pin) as one batch.
+    if [ "$1" = pin ]; then core_list pin "$VWARD_POLICY_GROUP" "$2"; else core_list unadapt "$2"; fi
+    case $? in
+        0) changed=1 ;;
+        1) ;;
+        *) if [ "$1" = pin ]; then
+               route_group_change "$VWARD_POLICY_GROUP" "$2" add && router=1
+           fi
+           route_group_change "$ADAPTIVE_GROUP" "$2" remove && router=1 ;;
+    esac
     # The persist list is authoritative: the reconciler re-adds anything left in it.
     drop_line "$PERSIST" "$2"; case $? in 0) changed=1 ;; 3) ;; *) die write_failed ;; esac
     drop_line "$ADAPTIVE" "$2"; case $? in 0) changed=1 ;; 3) ;; *) die write_failed ;; esac
@@ -915,9 +926,35 @@ op_tunnel() {
         case "$opt" in -|auto|reject|"auto reject"|"reject auto") ;; *) exit 1 ;; esac
     done || die unsupported_route
 
-    # 1. New routes first, so the groups never lose their route.
     printf '%s\n' "$moves" > "$JOURNAL.moves"
-    while IFS="$tab" read -r ctx g t opt; do
+    # The core moves the routes of all these groups as ONE batch per (old -> new) target, proven
+    # and compensated by itself; the shell journal gets the same undo lines it would have
+    # written, so a later failure (subnets, device.conf) still takes the routes back.
+    CT_DONE=0
+    if [ -s "$JOURNAL.moves" ] && ! awk -F '\t' 'NF && $1 != "dns-proxy" {f = 1} END {exit !f}' "$JOURNAL.moves"; then
+        CT_DONE=1
+        for ct_t in $(awk -F '\t' 'NF {print $3}' "$JOURNAL.moves" | awk '!s[$0]++'); do
+            ct_nt=$NEW_IF; [ "$ct_t" = "$OLD_DEV" ] && [ "$OLD_DEV" != "$OLD_IF" ] && ct_nt=$NEW_DEV
+            # shellcheck disable=SC2046
+            core_list retarget "$ct_t" "$ct_nt" $(awk -F '\t' -v t="$ct_t" '$3 == t {print $2}' "$JOURNAL.moves")
+            case $? in 0|1) ;; *) CT_DONE=0; break ;; esac
+        done
+        if [ "$CT_DONE" = 1 ]; then
+            while IFS="$tab" read -r ctx g t opt; do
+                [ -n "$g" ] || continue
+                nt=$NEW_IF; [ "$t" = "$OLD_DEV" ] && [ "$OLD_DEV" != "$OLD_IF" ] && nt=$NEW_DEV
+                echo "dns-proxy no route object-group $g $nt" >> "$JOURNAL"
+            done < "$JOURNAL.moves"
+            while IFS="$tab" read -r ctx g t opt; do
+                [ -n "$g" ] || continue
+                o=; [ "$opt" = - ] || o=" $opt"
+                echo "dns-proxy route object-group $g $t$o" >> "$JOURNAL"
+            done < "$JOURNAL.moves"
+            snapshot
+        fi
+    fi
+    # 1. New routes first, so the groups never lose their route.
+    [ "$CT_DONE" = 1 ] || while IFS="$tab" read -r ctx g t opt; do
         [ -n "$g" ] || continue
         p=; [ "$ctx" = - ] || p="$ctx "
         o=; [ "$opt" = - ] || o=" $opt"
@@ -927,7 +964,7 @@ op_tunnel() {
         echo "${p}no route object-group $g $nt" >> "$JOURNAL"
     done < "$JOURNAL.moves"
     # 2. Withdraw the old routes.
-    while IFS="$tab" read -r ctx g t opt; do
+    [ "$CT_DONE" = 1 ] || while IFS="$tab" read -r ctx g t opt; do
         [ -n "$g" ] || continue
         p=; [ "$ctx" = - ] || p="$ctx "
         o=; [ "$opt" = - ] || o=" $opt"

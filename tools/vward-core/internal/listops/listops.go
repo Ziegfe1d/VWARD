@@ -1,6 +1,7 @@
 // Package listops: the owner's lists edited from the Panel through the routing core - a domain
-// in or out, a list cleared, deleted or merged into another, its route moved to another
-// tunnel. Each change is ONE batch through the executor (CAS read, pending record, one RCI
+// in or out (or excluded), a list cleared, deleted or merged into another, its route moved to
+// another tunnel; a domain taken out of AdaptiveAuto or pinned from it into a list; the routes
+// of several groups moved from one tunnel to another (the default tunnel switched). Each change is ONE batch through the executor (CAS read, pending record, one RCI
 // request, a read that proves it, compensation) instead of the shell's command-by-command
 // writes. The owner asked for exactly this change (OwnerCommand): their list is written; the
 // protected objects, the DNS filter and AdaptiveAuto (Autopodbor's) stay out of reach.
@@ -24,14 +25,20 @@ var Reserved = map[string]bool{"AdaptiveAuto": true}
 const Limit = 300
 
 type Op struct {
-	Kind    string // add | remove | clear | delete | merge | route
+	Kind    string // add | remove | exclude | unexclude | clear | delete | merge | route | pin | unadapt | retarget
 	Group   string // the list (merge: the one that stays)
 	Domain  string // add, remove
 	Src     string // merge: the list that goes into Group
 	Target  string // route: the interface; "" with NoRoute
 	Options string // route: "auto" or ""
 	NoRoute bool
+	From    string   // retarget: the tunnel the routes leave (Target: where they go)
+	Groups  []string // retarget: the groups whose route moves
 }
+
+// Adaptive: Autopodbor's group. The Panel takes a name out of it (unadapt, pin) or moves its
+// route with the default tunnel (retarget); nothing else.
+const Adaptive = "AdaptiveAuto"
 
 type Result struct {
 	State   string // changed | unchanged | refused | failed | unknown | blocked
@@ -81,6 +88,52 @@ func route(cur *ndm.Model, g string) (string, string, error) {
 // Desired: the image the operation wants, from what the router holds now.
 func Desired(cur *ndm.Model, op Op) (plan.Desired, error) {
 	want := plan.Desired{OwnedGroups: map[string]bool{}, OwnerCommand: true}
+	switch op.Kind {
+	case "unadapt":
+		op.Group = Adaptive
+		op.Kind = "remove"
+		return desired(cur, op, want, map[string]bool{Adaptive: true})
+	case "pin":
+		w, err := desired(cur, Op{Kind: "add", Group: op.Group, Domain: op.Domain}, want, nil)
+		if err != nil {
+			return w, err
+		}
+		if cur.Groups[Adaptive] != nil {
+			w2, err := desired(cur, Op{Kind: "remove", Group: Adaptive, Domain: op.Domain}, plan.Desired{OwnedGroups: map[string]bool{}, OwnerCommand: true}, map[string]bool{Adaptive: true})
+			if err != nil {
+				return w, err
+			}
+			w.Groups = append(w.Groups, w2.Groups...)
+			w.OwnedGroups[Adaptive] = true
+		}
+		return w, nil
+	case "retarget":
+		if !validName(op.From) || !validName(op.Target) || op.From == op.Target {
+			return want, fmt.Errorf("invalid tunnels %q -> %q", op.From, op.Target)
+		}
+		for _, g := range op.Groups {
+			if !validName(g) || cur.Groups[g] == nil {
+				return want, fmt.Errorf("group %q not found", g)
+			}
+			t, o, err := route(cur, g)
+			if err != nil {
+				return want, err
+			}
+			if t != op.From && t != op.Target {
+				return want, fmt.Errorf("%s is routed to %s, not %s", g, t, op.From)
+			}
+			want.OwnedGroups[g] = true
+			want.Groups = append(want.Groups, plan.Group{Name: g, Include: append([]string(nil), cur.Groups[g].Include...), Target: op.Target, Options: o})
+		}
+		if len(want.Groups) == 0 {
+			return want, fmt.Errorf("no group to move")
+		}
+		return want, nil
+	}
+	return desired(cur, op, want, nil)
+}
+
+func desired(cur *ndm.Model, op Op, want plan.Desired, allow map[string]bool) (plan.Desired, error) {
 	names := []string{op.Group}
 	if op.Kind == "merge" {
 		names = append(names, op.Src)
@@ -89,7 +142,7 @@ func Desired(cur *ndm.Model, op Op) (plan.Desired, error) {
 		if !validName(n) {
 			return want, fmt.Errorf("invalid list name %q", n)
 		}
-		if Reserved[n] {
+		if Reserved[n] && !allow[n] {
 			return want, fmt.Errorf("%s is not a list the Panel edits", n)
 		}
 		if cur.Groups[n] == nil {
@@ -99,6 +152,8 @@ func Desired(cur *ndm.Model, op Op) (plan.Desired, error) {
 	}
 	g := cur.Groups[op.Group]
 	inc := append([]string(nil), g.Include...)
+	exc := append([]string(nil), g.Exclude...)
+	setEx := false
 	t, o, err := route(cur, op.Group)
 	if err != nil {
 		return want, err
@@ -120,6 +175,18 @@ func Desired(cur *ndm.Model, op Op) (plan.Desired, error) {
 			return want, fmt.Errorf("invalid domain %q", op.Domain)
 		}
 		inc = without(inc, d)
+	case "exclude", "unexclude":
+		if !validDomain(d) {
+			return want, fmt.Errorf("invalid domain %q", op.Domain)
+		}
+		setEx = true
+		if op.Kind == "exclude" {
+			if !contains(exc, d) {
+				exc = append(exc, d)
+			}
+		} else {
+			exc = without(exc, d)
+		}
 	case "clear":
 		inc = nil
 	case "delete":
@@ -150,7 +217,7 @@ func Desired(cur *ndm.Model, op Op) (plan.Desired, error) {
 	default:
 		return want, fmt.Errorf("unknown operation %q", op.Kind)
 	}
-	want.Groups = append(want.Groups, plan.Group{Name: op.Group, Include: inc, Target: t, Options: o})
+	want.Groups = append(want.Groups, plan.Group{Name: op.Group, Include: inc, Target: t, Options: o, Exclude: exc, SetExclude: setEx})
 	return want, nil
 }
 

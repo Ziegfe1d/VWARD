@@ -232,7 +232,25 @@ func restore(cur, pre *ndm.Model, areas []string, doh map[string]bool) []string 
 					cmds = append(cmds, "object-group fqdn "+name+" include "+d)
 				}
 			}
+			haveEx := map[string]bool{}
 			if cok {
+				for _, d := range cg.Exclude {
+					haveEx[d] = true
+				}
+			}
+			wantEx := map[string]bool{}
+			for _, d := range pg.Exclude {
+				wantEx[d] = true
+				if !haveEx[d] {
+					cmds = append(cmds, "object-group fqdn "+name+" exclude "+d)
+				}
+			}
+			if cok {
+				for _, d := range cg.Exclude {
+					if !wantEx[d] {
+						cmds = append(cmds, "no object-group fqdn "+name+" exclude "+d)
+					}
+				}
 				for _, d := range cg.Include {
 					if !want[d] {
 						cmds = append(cmds, "no object-group fqdn "+name+" include "+d)

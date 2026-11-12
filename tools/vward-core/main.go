@@ -18,7 +18,8 @@
 //	                     without --apply: nothing sent)
 //	vward-core check-host --tunnel-dev DEV [--wan DEV] HOST
 //	                     one name checked the same way; nothing sent
-//	vward-core list add|remove LIST DOMAIN | clear|delete LIST | merge SRC DST | route LIST IFACE|none
+//	vward-core list add|remove|exclude|unexclude|pin LIST DOMAIN | unadapt DOMAIN | clear|delete LIST |
+//	                merge SRC DST | route LIST IFACE|none | retarget FROM TO GROUP...
 //	                     the Panel's list operations: one batch, proven, compensated
 package main
 
@@ -41,7 +42,7 @@ import (
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/router"
 )
 
-var version = "proto-4"
+var version = "proto-5"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -73,7 +74,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "usage: vward-core version | probe [--rci ADDR] | dry-run [--rci ADDR] [--etc DIR] [--full]\n"+
 		"       | selftest [--rci ADDR] [--journal DIR] [--tunnel NAME] [--backup DIR] [--yes] | recover [--rci ADDR] [--journal DIR] [--yes]\n"+
 		"       | adaptive --tunnel-dev DEV [--lan br0] [--wan DEV] [--group AdaptiveAuto] [--apply] | check-host --tunnel-dev DEV [--wan DEV] HOST\n"+
-		"       | list add|remove LIST DOMAIN | clear|delete LIST | merge SRC DST | route LIST IFACE|none")
+		"       | list add|remove|exclude|unexclude|pin LIST DOMAIN | unadapt DOMAIN | clear|delete LIST | merge SRC DST\n"+
+		"       | list route LIST IFACE|none | retarget FROM TO GROUP...")
 	os.Exit(2)
 }
 

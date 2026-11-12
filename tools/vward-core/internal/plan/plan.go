@@ -21,6 +21,8 @@ type Group struct {
 	Target      string   // dns-proxy route target; "" = no route
 	Options     string   // "auto"
 	Delete      bool     // the group goes away entirely
+	Exclude     []string // complete set of exclusions, with SetExclude
+	SetExclude  bool     // false: exclusions left as they are
 }
 
 // DoHRow: a Smart DNS row VWARD owns («https upstream URL dnsm on IFACE domain D»).
@@ -216,6 +218,32 @@ func Build(cur *ndm.Model, want Desired, protected Protected) (*Plan, error) {
 		sort.Strings(dels)
 		for _, d := range dels {
 			p.add(Step{"group:" + g.Name, "no object-group fqdn " + g.Name + " include " + d, "object-group fqdn " + g.Name + " include " + d})
+		}
+		if g.SetExclude && (exists || len(adds) > 0) {
+			var curEx []string
+			if exists {
+				curEx = have.Exclude
+			}
+			haveEx, wantEx := set(curEx), set(g.Exclude)
+			var exAdd, exDel []string
+			for _, d := range g.Exclude {
+				if !haveEx[d] {
+					exAdd = append(exAdd, d)
+				}
+			}
+			for _, d := range curEx {
+				if !wantEx[d] {
+					exDel = append(exDel, d)
+				}
+			}
+			sort.Strings(exAdd)
+			sort.Strings(exDel)
+			for _, d := range exAdd {
+				p.add(Step{"group:" + g.Name, "object-group fqdn " + g.Name + " exclude " + d, "no object-group fqdn " + g.Name + " exclude " + d})
+			}
+			for _, d := range exDel {
+				p.add(Step{"group:" + g.Name, "no object-group fqdn " + g.Name + " exclude " + d, "object-group fqdn " + g.Name + " exclude " + d})
+			}
 		}
 		// Route: exactly one wanted target (or none).
 		var routes []ndm.Route

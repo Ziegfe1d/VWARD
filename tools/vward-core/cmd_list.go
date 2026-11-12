@@ -13,7 +13,8 @@ import (
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/router"
 )
 
-// vward-core list add|remove LIST DOMAIN | clear|delete LIST | merge SRC DST | route LIST IFACE|none
+// vward-core list add|remove|exclude|unexclude|pin LIST DOMAIN | unadapt DOMAIN | clear|delete LIST |
+// merge SRC DST | route LIST IFACE|none | retarget FROM TO GROUP...
 // The Panel's list operations through the core: one batch, proven, compensated.
 // Output: RESULT=changed|unchanged|refused|failed|unknown|blocked, WHY=..., OP=..., MS=...
 func listCmd(args []string) {
@@ -24,7 +25,8 @@ func listCmd(args []string) {
 	fs.Parse(args)
 	a := fs.Args()
 	usage := func() {
-		fmt.Fprintln(os.Stderr, "usage: vward-core list add|remove LIST DOMAIN | clear|delete LIST | merge SRC DST | route LIST IFACE|none")
+		fmt.Fprintln(os.Stderr, "usage: vward-core list add|remove|exclude|unexclude|pin LIST DOMAIN | unadapt DOMAIN | clear|delete LIST |\n"+
+			"       merge SRC DST | route LIST IFACE|none | retarget FROM TO GROUP...")
 		os.Exit(2)
 	}
 	if len(a) < 2 {
@@ -32,8 +34,12 @@ func listCmd(args []string) {
 	}
 	op := listops.Op{Kind: a[0]}
 	switch {
-	case (a[0] == "add" || a[0] == "remove") && len(a) == 3:
+	case (a[0] == "add" || a[0] == "remove" || a[0] == "exclude" || a[0] == "unexclude" || a[0] == "pin") && len(a) == 3:
 		op.Group, op.Domain = a[1], a[2]
+	case a[0] == "unadapt" && len(a) == 2:
+		op.Domain = a[1]
+	case a[0] == "retarget" && len(a) >= 4:
+		op.From, op.Target, op.Groups = a[1], a[2], a[3:]
 	case (a[0] == "clear" || a[0] == "delete") && len(a) == 2:
 		op.Group = a[1]
 	case a[0] == "merge" && len(a) == 3:

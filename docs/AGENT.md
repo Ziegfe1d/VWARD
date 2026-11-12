@@ -1558,6 +1558,15 @@ kept_copy=... key=... jq ...`; VU_ENGINE_VERSION 2.0.11 (файлы движка
 `check-updater-verify-reason.py` RED→GREEN, `run-v2-simulations.sh` 65/65, все симуляции
 обновлений PASS (170 ok). Сборка ядра пересобрана, суммы в S91 синхронизированы.
 
+### 12.11.2026 — [Claude Code] пункты 1–3: «Мои домены», AdaptiveAuto из Панели, смена туннеля, исключения (proto-5)
+
+listops: `exclude/unexclude`, `unadapt`, `pin` (две группы одной пачкой), `retarget FROM TO GROUP...`;
+plan: `Exclude`/`SetExclude`; ndm.Apply и exec.restore — строки exclude. Панель: route-domain,
+adaptive remove/pin, list-domain exclude/unexclude, op_tunnel (маршруты групп — ядро, подсети —
+shell; обратные команды в JOURNAL после успеха ядра). Подделка RCI в тестах исполнителя отдаёт
+exclude в узком JSON (как ждёт GroupsFromRCI; на реальном Keenetic форма не сверена — при
+расхождении операция честно «не применилось»). Все тесты Панели PASS; ядро пересобрано, суммы в S91.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 09.11.2026 / fix.36 опубликован: нужна приёмка владельцем на роутере (Ozon/WB, Lampa TV, ночной скан 00:10, экраны Панели, журнал сторожа DNS на возврат AdGuard Home в цепочку). Локальный стресс 09.11: однократное «processes pile up 6 -> 13» (route engine 5), в CI нет; при повторе разобрать по `soak_debug`.

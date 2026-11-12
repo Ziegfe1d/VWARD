@@ -235,6 +235,42 @@ esac
     if "tunnel Wireguard8 error=router_rejected reason=" not in (tmp / "audit.log").read_text():
         fail("a refused command must be audited with its reason")
 
+    # The Go routing core installed (owner 12.11.2026): it moves the routes of the groups, one call
+    # per old -> new target; the shell journal gets the undo lines, so a failure after it (here the
+    # save) still takes every route back. The stand-in core writes through the same fake router.
+    core = tools / "vward-core"
+    core.write_text(f"""#!/bin/sh
+echo "$*" >> "{tmp}/core.calls"
+shift 3
+[ "$1" = retarget ] || {{ echo RESULT=refused; exit 1; }}
+from=$2 to=$3; shift 3
+for g in "$@"; do
+    "{ndmc}" -c "dns-proxy route object-group $g $to auto" >/dev/null
+    "{ndmc}" -c "dns-proxy no route object-group $g $from" >/dev/null
+done
+echo RESULT=changed
+""")
+    core.chmod(0o755)
+    cenv = env | {"VWARD_CORE_BIN": str(core), "VWARD_CORE_JOURNAL": str(tmp / "core-journal")}
+    cfg.write_text(RUNNING); devconf.write_text(DEVICE_CONF); devconf.chmod(0o600)
+    (tmp / "core.calls").unlink(missing_ok=True)
+    (tmp / "running.cfg.nosave").touch()
+    r = subprocess.run(["sh", str(HELPER), "tunnel", "Wireguard8"], env=cenv, text=True, capture_output=True)
+    (tmp / "running.cfg.nosave").unlink()
+    if "error=config_save_failed" not in r.stdout or routes(cfg) != before_routes or devconf.read_text() != DEVICE_CONF:
+        fail(f"core: a failure after the core's move takes the routes back: {r.stdout!r} {routes(cfg)}")
+    calls = (tmp / "core.calls").read_text().splitlines()
+    want = ["list --journal %s retarget Wireguard3 Wireguard8 streaming" % (tmp / "core-journal"),
+            "list --journal %s retarget nwg3 nwg8 AdaptiveAuto" % (tmp / "core-journal")]
+    if calls != want:
+        fail(f"core calls: {calls} != {want}")
+    (tmp / "core.calls").unlink()
+    r = subprocess.run(["sh", str(HELPER), "tunnel", "Wireguard8"], env=cenv, text=True, capture_output=True)
+    if r.stdout.strip().splitlines()[-1] != "result=changed" or routes(cfg) != sorted(["streaming Wireguard8 auto", "AdaptiveAuto nwg8 auto", "other Wireguard3 auto"]):
+        fail(f"core: switch: {r.stdout!r} {routes(cfg)}")
+    if len((tmp / "core.calls").read_text().splitlines()) != 2:
+        fail("core: one call per target")
+
 
 # policy-sync: owned IP routes move to the new tunnel (Keenetic takes interface names).
 

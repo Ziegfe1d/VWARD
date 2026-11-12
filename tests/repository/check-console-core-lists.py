@@ -110,6 +110,12 @@ with tempfile.TemporaryDirectory() as t:
         (("list", "merge", "domain-list2", "domain-list1"), "list merge domain-list2 domain-list1"),
         (("list", "delete", "domain-list2"), "list delete domain-list2"),
         (("domain-list", "domain-list1", "OpkgTun4"), "list route domain-list1 OpkgTun4"),
+        (("list-domain", "exclude", "domain-list1", "kids.youtube.com"), "list exclude domain-list1 kids.youtube.com"),
+        (("list-domain", "unexclude", "domain-list1", "music.youtube.com"), "list unexclude domain-list1 music.youtube.com"),
+        (("route-domain", "add", "mine.example.com"), "list add MyVPN mine.example.com"),
+        (("route-domain", "remove", "old.example"), "list remove MyVPN old.example"),
+        (("adaptive", "remove", "slow.example"), "list unadapt slow.example"),
+        (("adaptive", "pin", "slow.example"), "list pin MyVPN slow.example"),
     ]
     for args, want in cases:
         rc, out = run(*args)
@@ -131,10 +137,6 @@ with tempfile.TemporaryDirectory() as t:
             fail(f"{res}: the core's reason is not in the journal")
     calls()
     (tmp / "core.result").write_text("changed")
-    # Exclusions stay with the shell.
-    rc, out = run("list-domain", "exclude", "domain-list1", "kids.youtube.com")
-    if calls() or writes() != ["object-group fqdn domain-list1 exclude kids.youtube.com"]:
-        fail("exclusions are written by the shell")
     # core.panel.off, or no core: the shell writes as before.
     (etc / "route-engine/core.panel.off").write_text("")
     rc, out = run("list-domain", "add", "domain-list1", "shell.example.com")
