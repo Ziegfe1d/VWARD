@@ -128,9 +128,11 @@ HELPER = (ROOT / "components/console/scripts/vward-console-config.sh").read_text
 JSX = (ROOT / "web/assets/vward-console.js").read_text()
 names = _re.search(r'VWARD_EXTRA_NAMES="([^"]+)"', HELPER).group(1).split()
 used = set(_re.findall(r"vward_extra ([a-z-]+)", HK + SUP))
-panel_names = _re.findall(r"\['([a-z-]+)', '[^']+', '[^']+'\]", JSX[JSX.index("const EXTRAS = ["):JSX.index("];", JSX.index("const EXTRAS = ["))])
+import json as _json
+REG = _json.loads((ROOT / "config/settings/settings-registry.json").read_text(encoding="utf-8"))
+panel_names = [p["id"] for p in REG["parts"] if p["switch"] == "extra"]
 if used - set(names) or set(names) != set(panel_names):
-    fail(f"every optional part has a switch: code {sorted(used)}, helper {names}, Panel {panel_names}")
+    fail(f"every optional part has a switch: code {sorted(used)}, helper {names}, registry {panel_names}")
 fn = HELPER[HELPER.index("op_extra() {"):HELPER.index("\n}\n", HELPER.index("op_extra() {")) + 3]
 with tempfile.TemporaryDirectory() as td2:
     st = Path(td2) / "components"
@@ -142,8 +144,9 @@ with tempfile.TemporaryDirectory() as td2:
            op("../etc", "1"), op("all", "1"), op("backup", "2")]
     if got != ["result=changed", "True", "result=unchanged", "result=changed", "False", "error=invalid_value", "error=invalid_value", "error=invalid_value"]:
         fail(f"op_extra: {got}")
-for need in ("function extrasPanel()", "cfgSet({ op: 'extra', target: e[0], value: t.checked ? '1' : '0' }", "'выключен в облегчённой VWARD'",
-             "'d-components': { title: 'Компоненты VWARD', parent: 'system', data: ['config'] }"):
+# fix.38: the switches are the parts' rows in «Компоненты», drawn from the registry the router sends.
+for need in ("function partRow(p) {", "'data-extra=\"' + p.id + '\"'", "cfgSet({ op: 'extra', target: id, value: t.checked ? '1' : '0' }",
+             "const MOVED = { 'd-components': 'utils' };"):
     if need not in JSX:
         fail(f"the Panel lacks {need!r}")
 API = (ROOT / "web/cgi-bin/api.cgi").read_text()

@@ -619,6 +619,9 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
 .log-sources>summary small{margin-left:auto;color:var(--muted);white-space:nowrap}
 .log-sources>summary span{white-space:nowrap}
 .log-view{margin-top:0}
+/* «Компоненты» (fix.38): a part's switch and the way to its page, side by side. */
+.part-ctl{display:inline-flex;align-items:center;gap:2px}
+.part-go{width:32px;height:32px;color:var(--muted)}
 /* «Журналы» (owner 12.11.2026): the main button across the card, «Показать ещё» under the feed. */
 .panel-actions>.log-show{flex:1 1 100%}
 .log-more-row{padding-top:0}
