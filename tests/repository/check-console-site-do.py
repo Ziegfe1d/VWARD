@@ -24,6 +24,7 @@ def piece(start, end):
 
 script = "\n".join([
     piece("const esc =", "\n"), piece("const BTN_ICONS =", "\nconst btn =") + "\n", piece("const btn =", "\n"), piece("function confirmBox(", "\nfunction resultBox"),
+    piece("const choicePrev = {};", "\nfunction segPick("),
     piece("const hasDom", "async function siteCheck("),
 ]) + r"""
 const ico = () => '', errText = x => x.error || 'ошибка', render = () => {};
@@ -33,7 +34,7 @@ const apiPost = async (api, f) => { calls.push(api + ':' + (f.op === 'agh' ? 'ag
 const load = async () => {};
 const siteCheck = async d => { RPROBE = { value: d, x: RPROBE.x, b: RPROBE.b }; };
 function setup(d, o) {
-  CFG = { group: 'domain-list0', domains: o.mine ? [d] : [], force_vpn: [], adaptive: o.adaptive ? [d] : [] };
+  CFG = { group: o.nogroup ? '' : 'domain-list0', domains: o.mine ? [d] : [], force_vpn: [], adaptive: o.adaptive ? [d] : [] };
   S = { lists: { smartdns_domains: o.smart ? [o.smart] : ['claude.ai'], smartdns_sources: { adguard: ['claude.ai'] },
                  lists: [{ name: 'domain-list3', description: 'Google', domains: o.own ? [d] : ['google.com'] }] } };
   RPROBE = { value: d, x: { ok: true, type: 'domain', value: d, adaptive_auto: false, names: {},
@@ -58,7 +59,10 @@ function setup(d, o) {
   await siteDo('direct', 'x.com'); out.unblock = calls;
   setup('x.com', {});
   await siteDo('block', 'x.com'); out.block = calls; out.did = RPROBE.did.map(x => x.text);
-  confirm = { id: 'site-block' }; out.htmlConfirm = siteDoText(RPROBE);
+  confirm = { id: 'site-block' }; out.htmlConfirm = siteDoText(RPROBE); confirm = null;
+  // No list for «Мои домены»: nothing is written and the owner is told (claude.ai, 12.11.2026).
+  setup('claude.ai', { nogroup: true });
+  await siteDo('vpn', 'claude.ai'); out.nogroup = calls; out.nogroupDid = RPROBE.did.map(x => x.text);
   console.log(JSON.stringify(out));
 })();
 """
@@ -67,10 +71,11 @@ if r.returncode:
     fail(r.stderr[-600:])
 o = json.loads(r.stdout)
 h = o["html"]
-for need in ("VPN-туннель · активно", "Smart DNS", "Провайдер (без VPN)", "Блокировка", 'data-how="block"', "Политика маршрутизации"):
+# One slider (owner 12.11.2026): «VPN | Smart DNS | Провайдер | Блок», the current way checked.
+for need in ('data-seg="site-do" data-v="vpn" aria-checked="true"', ">Smart DNS<", ">Провайдер<", 'data-v="block"', "Как открывать"):
     if need not in h:
         fail(f"choices: {need!r} missing in {h}")
-if "Smart DNS · активно" not in o["htmlSmart"] or "Снять блокировку" not in o["htmlBlocked"]:
+if 'data-v="smart" aria-checked="true"' not in o["htmlSmart"] or "Снять блокировку" not in o["htmlBlocked"]:
     fail("the current way is marked; a block of your own is lifted with «Разблокировать»")
 if o["smart"] != ["config:route-domain remove", "config:smartdns-domain add"]:
     fail(f"Smart DNS takes the domain out of VPN first: {o['smart']}")
@@ -84,6 +89,8 @@ if o["unblock"] != ["ads-control:agh remove block"]:
     fail(f"a blocked domain chosen directly is unblocked first: {o['unblock']}")
 if o["block"] != ["ads-control:agh add block"] or not o["did"][0].startswith("x.com: блокировка в AdGuard Home добавлена"):
     fail(f"block: {o['block']} {o['did']}")
+if o["nogroup"] != [] or "не выбран список" not in " ".join(o["nogroupDid"]):
+    fail(f"VPN without a list for «Мои домены»: nothing written, the owner told: {o['nogroup']} {o['nogroupDid']}")
 if "станут недоступны для всех устройств сети" not in o["htmlConfirm"]:
     fail("blocking asks first")
 if "route-domain|force-vpn|adaptive|smartdns-domain) set --" not in API:

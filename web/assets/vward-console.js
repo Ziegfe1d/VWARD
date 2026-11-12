@@ -436,20 +436,20 @@ function siteState(r) {
 }
 const siteNow = s => s.blocked ? 'block' : s.smart ? 'smart' : s.vpn || s.force ? 'vpn' : 'direct';
 // «Политика маршрутизации»: every way the domain can go; the active one is marked, blocking asks first.
+let SITEDOM = '';
 function siteDoText(r) {
   if (!r || r.busy || !r.x || !r.x.ok || r.x.type !== 'domain') return '';
   const s = siteState(r), now = siteNow(s), ok = cfgOk() && !r.doing;
-  const opt = (k, icon, label, cls, extra) => btn('site-do', now === k ? 'check' : icon, label + (now === k ? ' · активно' : ''), now === k ? '' : cls,
-    ' data-how="' + k + '" data-dom="' + esc(s.d) + '"' + (ok && now !== k ? '' : ' disabled') + (extra || ''));
-  const acts = [opt('vpn', 'shield', 'VPN-туннель', now === 'direct' ? 'primary' : '')];
-  if (s.smartHere) acts.push(opt('smart', 'globe', 'Smart DNS', ''));
-  acts.push(opt('direct', 'route', 'Провайдер (без VPN)', ''));
-  if (s.agh) acts.push(s.userBlock ? btn('site-do', 'close', 'Снять блокировку', '', ' data-how="unblock" data-dom="' + esc(s.d) + '"' + (r.doing ? ' disabled' : ''))
-    : opt('block', 'block', 'Блокировка', 'danger', ''));
+  // One slider, as on «Smart DNS» and the lists (owner 12.11.2026), not a stack of buttons.
+  const ways = [['vpn', 'VPN']].concat(s.smartHere ? [['smart', 'Smart DNS']] : [], [['direct', 'Провайдер']], s.agh && !s.userBlock ? [['block', 'Блок']] : [])
+    .map(w => [w[0], w[1], !ok]);
+  SITEDOM = s.d;
+  const acts = [choiceSlider('site-do', ways, now, 'Как открывать ' + s.d, true)];
+  if (s.agh && s.userBlock) acts.push('<div class="panel-actions">' + btn('site-do', 'close', 'Снять блокировку', '', ' data-how="unblock" data-dom="' + esc(s.d) + '"' + (r.doing ? ' disabled' : '')) + '</div>');
   const steps = r.did ? '<ul class="fix-steps">' + r.did.map(f => '<li class="' + (f.ok === false ? 'crit' : f.ok ? 'ok' : '') + '">' + esc(f.text) + '</li>').join('') + '</ul>' : '';
-  return '<p class="form-label site-head">Политика маршрутизации</p>' +
+  return '<p class="form-label site-head">Как открывать</p>' +
     (confirmBox('site-block', 'Заблокировать ' + s.d + ' в AdGuard Home? Домен и его поддомены станут недоступны для всех устройств сети.', 'Заблокировать', true) ||
-     '<div class="panel-actions">' + acts.join('') + '</div>') + steps +
+     acts.join('')) + steps +
     (s.blocked && !s.userBlock ? '<p class="result-note">Домен блокируется списком фильтрации AdGuard Home. Исключение добавляется в «Реклама → Проверка адреса».</p>' : '');
 }
 // One choice as the steps it takes; the check runs again at the end.
@@ -466,6 +466,8 @@ async function siteDo(how, d) {
   };
   const cfgStep = (op, action, text) => step({ op: op, action: action, target: d }, text);
   try {
+    // Checked before anything changes: Smart DNS is not taken off for a VPN that cannot be set.
+    if (how === 'vpn' && !s.vpn && !s.force && !s.group) { did.push({ text: d + ': не добавлен - не выбран список для «Моих доменов». Выберите его в «Маршруты → Мои домены» и повторите.', ok: false }); return; }
     if (how === 'block') { await step({ op: 'agh', setting: 'user-rule', value: 'add', kind: 'block', domain: d }, d + ': блокировка в AdGuard Home добавлена', 'ads-control'); return; }
     if (how === 'unblock' || s.userBlock) {
       if (!await step({ op: 'agh', setting: 'user-rule', value: 'remove', kind: 'block', domain: d }, d + ': блокировка в AdGuard Home снята', 'ads-control') || how === 'unblock') return;
@@ -476,7 +478,10 @@ async function siteDo(how, d) {
       else did.push({ text: d + ': Smart DNS задан для родительского домена, изменение выполняется на странице «Smart DNS»', ok: false });
     }
     if (how === 'vpn') {
-      if (!s.vpn && !s.force) await (s.group ? cfgStep('route-domain', 'add', d + ': добавлен в «Мои домены», маршрут через VPN') : cfgStep('force-vpn', 'add', d + ': добавлен в «Мои домены», всегда через VPN'));
+      // Without a group for «Мои домены» there is nowhere to put it in Keenetic: «всегда через VPN»
+      // (force-vpn.conf) is read by the shell engine only, the Go core does not - the domain stayed
+      // direct while the Panel said «через VPN» (claude.ai, owner 12.11.2026).
+      if (!s.vpn && !s.force) await cfgStep('route-domain', 'add', d + ': добавлен в «Мои домены», маршрут через VPN');
       return;
     }
     if (s.mine && !await cfgStep('route-domain', 'remove', d + ': удалён из «Мои домены»')) return;
@@ -3352,6 +3357,7 @@ function choiceSlider(key, opts, cur, label, local) {
     opts.map(o => '<button type="button" role="radio" data-seg="' + key + '" data-v="' + esc(o[0]) + '" aria-checked="' + (o[0] === cur) + '"' + (on && !o[2] ? '' : ' disabled') + '>' + esc(o[1]) + '</button>').join('') + '</div>';
 }
 function segPick(key, v) {
+  if (key === 'site-do') { if (v === 'block') { confirm = { id: 'site-block', dom: SITEDOM }; render(); } else siteDo(v, SITEDOM); return; }
   if (key === 'vsrv-sort') { VVIEW.sort = v; vViewSave(); render(); }
   else if (key === 'sd-store') sdStoreSet(v);
   else if (key === 'upd-mode') updateMode(v);
