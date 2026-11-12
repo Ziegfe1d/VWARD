@@ -2740,7 +2740,7 @@ const RENDER = {
     const mine = items.filter(l => l.managed && l.name !== own), modes = mine.map(listMode), common = modes.length && modes.every(m => m === modes[0]) ? modes[0] : '';
     const ordered = items.filter(l => l.name === own).concat(items.filter(l => l.name !== own));
     const pick = !cfgRoute().group && policyGroupRow();
-    return cfgNote() + listDupPanel(items) + (pick ? panel('Список VWARD', '<dl class="kv">' + pick + '</dl>', { desc: 'Список Keenetic, в который VWARD добавляет найденные домены.' }) : '') +
+    return cfgNote() + listDupPanel(items) + listEmptyPanel(items) + (pick ? panel('Список VWARD', '<dl class="kv">' + pick + '</dl>', { desc: 'Список Keenetic, в который VWARD добавляет найденные домены.' }) : '') +
       panel('Доменные списки', '<label class="search-field list-filter">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти домен" aria-label="Найти домен во всех списках" autocomplete="off"></label>' +
         '<ul class="rows" data-list-rows>' + ordered.map(row).join('') + '</ul>' +
         (mine.length > 1 ? '<dl class="kv">' + ctrlRow('Все списки VWARD', choiceSlider('list-mode-all', listAllModes(mine), common, 'Маршрут всех списков VWARD'), common ? '' : 'у списков разные маршруты', 'stack') + '</dl>' : '') +
@@ -3583,6 +3583,24 @@ function listDups(items) {
   const own = cfgRoute().group || prof().policy_group, by = {};
   items.filter(l => l.name !== 'AdaptiveAuto' && l.name !== own).forEach(l => { const k = listKey(l.name); if (k) (by[k] = by[k] || []).push(l); });
   return Object.values(by).filter(g => g.length > 1).map(g => g.sort((a, b) => num(b.count) - num(a.count)));
+}
+// fix.38.1 (owner 12.11.2026, «пустые списки можешь удалять, наводи порядок»): lists with no domain
+// keep a route and carry nothing; VWARD names them and deletes them on the owner's one confirmation
+// (each with its backup, as «Удалить список»). Never on its own: a list that is not VWARD's is the owner's.
+const listEmpty = items => items.filter(l => !l.count && !listOwn(l) && l.name !== 'AdaptiveAuto' && !svcOf(l.name));
+function listEmptyPanel(items) {
+  const e = listEmpty(items);
+  if (!e.length) return '';
+  const names = e.map(l => '«' + (l.description || l.name) + '»').join(', ');
+  return panel('Пустые списки', (confirmBox('list-empty-del', 'Удалить ' + e.length + ' ' + plural(e.length, 'пустой список', 'пустых списка', 'пустых списков') + ' (' + names + ')? Из Keenetic уйдут списки и их маршруты; доменов в них нет. Перед каждым сохранится копия настроек.', 'Удалить', true) ||
+      '<p class="panel-desc">Без доменов: ' + esc(names) + '. Маршрут у них есть, направлять нечего.</p><div class="panel-actions">' +
+      btn('ask', 'trash', 'Удалить пустые', 'danger', ' data-confirm="list-empty-del"' + (cfgOk() && !LISTBULK.busy ? '' : ' disabled')) + '</div>'));
+}
+async function listEmptyDelete() {
+  // The lists are read again first: a list that got a domain meanwhile is left alone.
+  await load('lists', true);
+  const names = listEmpty(((S.lists && S.lists.lists) || []).filter(l => !svcOf(l.name))).map(l => l.name);
+  if (names.length) await listBulk({ op: 'list', action: 'delete', confirm: 'LIST_DELETE' }, names, 'Удаление пустых списков'); else render();
 }
 function listDupPanel(items) {
   const dups = listDups(items);
@@ -4998,6 +5016,7 @@ const CONFIRMED = {
   'list-clear': c => cfgSet({ op: 'list', action: 'clear', target: c.name, confirm: 'LIST_CLEAR' }, 'Список очищен', ['lists', 'listd']),
   'lists-del': () => { const ns = [...LISTPICK]; LISTPICK.clear(); return listBulk({ op: 'list', action: 'delete', confirm: 'LIST_DELETE' }, ns, 'Удаление списков'); },
   'list-adopt': c => cfgSet({ op: 'list-adopt', target: c.name, value: '1', confirm: 'LIST_ADOPT' }, 'Список под управлением VWARD', ['lists']).then(x => { if (x && x.ok && c.then) return listModeSet(c.name, c.then); }),
+  'list-empty-del': () => listEmptyDelete(),
   'list-del': c => cfgSet({ op: 'list', action: 'delete', target: c.name, confirm: 'LIST_DELETE' }, 'Список удалён', ['lists']).then(x => { if (x && x.ok && current === 'l-' + c.name) go('lists'); }),
   'cleanup': c => cfgSet({ op: 'cleanup', target: c.what }, 'Очищено', ['cleanup', 'status']),
   // «Очистить» in «Журналы» (owner 12.11.2026): the live journal(s) emptied on the router, archives kept.

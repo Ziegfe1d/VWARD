@@ -41,6 +41,13 @@ for need in ("let rows = ctrlRow('Маршрут', choiceSlider('list-mode:' + l
              "if (listOwn(l)) return ownListPage(l);", "data-go=\"l-' + esc(l.name) + '\""):
     if need not in JS:
         fail(f"list page: {need!r} is missing")
+# fix.38.1 (owner 12.11.2026): empty lists are named and deleted on one confirmation, read again first;
+# VWARD's own list, AdaptiveAuto and a service's list are never offered.
+for need in ("const listEmpty = items => items.filter(l => !l.count && !listOwn(l) && l.name !== 'AdaptiveAuto' && !svcOf(l.name));",
+             "listDupPanel(items) + listEmptyPanel(items)", "'list-empty-del': () => listEmptyDelete(),",
+             "await load('lists', true);\n  const names = listEmpty("):
+    if need not in JS:
+        fail(f"empty lists: {need!r} is missing")
 # fix.38.1 (owner 12.11.2026): technical words, no «Куда идёт», «сюда VWARD…», «выбирает сам».
 for gone in ("data-list-watch=", "data-list-bypass=", "go('d-mydomains')", "'Взять под управление'", "ctrlRow('Куда идёт'",
              "сюда VWARD добавляет", "VWARD этот список не меняет", "'VWARD выбирает сам"):

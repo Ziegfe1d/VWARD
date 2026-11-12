@@ -18,6 +18,7 @@ RUNNING = "\n".join([
     "    route object-group domain-list4 Wireguard0 auto",
     "    route object-group domain-list0 Wireguard0 auto",
     "    route object-group domain-list5 Wireguard0 auto",
+    "    route object-group domain-list6 Wireguard0 auto",
     "!",
     "object-group fqdn domain-list4", "    description \"Video\"",
     "    include video.example", "    include cdn.example", "    exclude music.video.example", "!",
@@ -25,6 +26,8 @@ RUNNING = "\n".join([
     "object-group fqdn domain-list7", "    include svc.example", "!",
     "object-group fqdn domain-list5", "    description \"video\"", "    include video.example", "    include extra.example", "!",
     "object-group fqdn AdaptiveAuto", "    include auto.example", "!",
+    # fix.38.1: a list with no domain and a route (the owner's «Canva», 12.11.2026).
+    "object-group fqdn domain-list6", "    description \"Canva\"", "!",
 ]) + "\n"
 
 # A Keenetic CLI over a text file: object groups and dns-proxy routes; .fail holds a command
@@ -167,6 +170,11 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("the list and only its route go:\n" + text)
     if (etc / "route-engine/domain-lists/domain-list4").exists() or "domain-list4" in (etc / "route-engine/domain-lists.conf").read_text():
         fail("VWARD's notes about a deleted list go with it")
+    # fix.38.1 («Удалить пустые»): a list with no domain goes with its route like any other.
+    if run("delete", "domain-list6") != "result=changed":
+        fail("an empty list is deleted")
+    if "domain-list6" in cfg.read_text():
+        fail("the empty list and its route go:\n" + cfg.read_text())
     # Named by the second: two changes within one second leave one copy (the later state).
     if not [p for p in (tmp / "snaps").iterdir() if p.name.endswith("-prelist.tar.gz")]:
         fail("a copy of the settings before every change")
