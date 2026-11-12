@@ -4756,13 +4756,15 @@ VWARD_EXTRA_NAMES="sentinel memory-watch ssh-watch repair backup flash-watch int
 op_extra() {
     case " $VWARD_EXTRA_NAMES " in *" $1 "*) ;; *) die invalid_value 64 ;; esac
     case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
-    ex_f="$COMPONENT_STATE/$1.on"
+    # NAME.on switches a part on; NAME.off keeps it off even with every part on (all.on).
+    ex_f="$COMPONENT_STATE/$1.on" ex_o="$COMPONENT_STATE/$1.off"
     if [ "$2" = 1 ]; then
-        [ ! -e "$ex_f" ] || done_ok "extra $1=1" unchanged
-        mkdir -p "$COMPONENT_STATE" && printf '' > "$ex_f" 2>/dev/null || die write_failed
+        [ -e "$ex_o" ] || [ ! -e "$ex_f" ] || done_ok "extra $1=1" unchanged
+        mkdir -p "$COMPONENT_STATE" && rm -f "$ex_o" && printf '' > "$ex_f" 2>/dev/null || die write_failed
     else
-        [ -e "$ex_f" ] || done_ok "extra $1=0" unchanged
+        [ ! -e "$ex_f" ] && { [ -e "$ex_o" ] || [ ! -e "$COMPONENT_STATE/all.on" ]; } && done_ok "extra $1=0" unchanged
         rm -f "$ex_f" || die write_failed
+        [ ! -e "$COMPONENT_STATE/all.on" ] || printf '' > "$ex_o" 2>/dev/null || die write_failed
     fi
     done_ok "extra $1=$2" changed
 }

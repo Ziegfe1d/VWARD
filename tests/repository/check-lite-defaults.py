@@ -144,6 +144,15 @@ with tempfile.TemporaryDirectory() as td2:
            op("../etc", "1"), op("all", "1"), op("backup", "2")]
     if got != ["result=changed", "True", "result=unchanged", "result=changed", "False", "error=invalid_value", "error=invalid_value", "error=invalid_value"]:
         fail(f"op_extra: {got}")
+    # Every part on (all.on): a part the owner switches off stays off (NAME.off), and back on.
+    (st / "all.on").write_text("")
+    adm = ROOT / "components/runtime/lib/vward-runtime-admission.sh"
+    on = lambda n: subprocess.run(["sh", "-c", f'VWARD_COMPONENT_STATE={st}; . "{adm}"; vward_extra {n} && echo on || echo off'],
+                                  capture_output=True, text=True).stdout.strip()
+    got = [on("backup"), op("backup", "0"), str((st / "backup.off").exists()), on("backup"), op("backup", "0"), on("integrity"),
+           op("backup", "1"), str((st / "backup.off").exists()), on("backup")]
+    if got != ["on", "result=changed", "True", "off", "result=unchanged", "on", "result=changed", "False", "on"]:
+        fail(f"RED: a part switched off with every part on must stay off: {got}")
 # fix.38: the switches are the parts' rows in «Компоненты», drawn from the registry the router sends.
 for need in ("function partRow(p) {", "'data-extra=\"' + p.id + '\"'", "cfgSet({ op: 'extra', target: id, value: t.checked ? '1' : '0' }",
              "const MOVED = { 'd-components': 'utils' };"):

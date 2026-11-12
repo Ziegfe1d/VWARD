@@ -23,6 +23,8 @@ vward_component_enabled() {
 vward_extras_all() { [ "${VWARD_EXTRAS:-}" = all ] || [ -e "$VWARD_COMPONENT_STATE/all.on" ]; }
 vward_extra() {
     case "${1:-}" in ''|*[!a-z0-9-]*) return 1 ;; esac
+    # NAME.off: the owner switched this part off in the Panel - also when every part is on (all.on).
+    [ ! -e "$VWARD_COMPONENT_STATE/$1.off" ] || return 1
     vward_extras_all && return 0
     [ -e "$VWARD_COMPONENT_STATE/$1.on" ]
 }

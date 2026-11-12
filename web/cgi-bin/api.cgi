@@ -3961,7 +3961,7 @@ kv_file "$VERSIONS_CACHE" jq=JQ_VERSION curl=CURL_VERSION lighttpd=LIGHTTPD_VERS
 # The parts come with every release (settings-registry.json, the Panel's own file).
 PARTS_REG=${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}
 part_on() { [ ! -e "$CSTATE/$1" ] && echo 1 || echo 0; }
-extra_on() { if [ "$EXTRAS_ALL" = 1 ] || [ -e "$COMPONENT_STATE/$1.on" ]; then echo 1; else echo 0; fi; }
+extra_on() { if [ -e "$COMPONENT_STATE/$1.off" ]; then echo 0; elif [ "$EXTRAS_ALL" = 1 ] || [ -e "$COMPONENT_STATE/$1.on" ]; then echo 1; else echo 0; fi; }
 rc_ok() { case "$1" in '') echo "" ;; 0) echo 1 ;; *) echo 0 ;; esac; }
 pkg_of() { printf '%s\n' "$COMPONENTS_TSV" | awk -F '\t' -v p="$1" '$1 == p {print $3; exit}'; }
 PARTS_FACTS=$(
