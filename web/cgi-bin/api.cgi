@@ -1736,11 +1736,15 @@ EOF_HSTATS
     # Autopick on Go keeps its names in owned.json, not in the shell engine's file (the Panel
     # showed «0 доменов» with 60 in the group, owner 12.11.2026): that list first.
     CORE_OWNED=${VWARD_CORE_OWNED:-/opt/var/lib/vward/core-adaptive/owned.json}
-    ADAPTIVE_COUNT= ADAPTIVE_RECENT=
+    ADAPTIVE_COUNT= ADAPTIVE_RECENT= ADAPTIVE_NAMES=
     if [ -r "$CORE_OWNED" ]; then
         ADAPTIVE_COUNT="$("$JQ" -r '.names // {} | length' "$CORE_OWNED" 2>/dev/null)"
         ADAPTIVE_RECENT="$("$JQ" -c '[.names // {} | to_entries | sort_by(.value.added) | .[-20:][] | .key]' "$CORE_OWNED" 2>/dev/null)"
+        # Each name with when it came and its direct checks (the autopick page, fix.38).
+        ADAPTIVE_NAMES="$("$JQ" -c '[.names // {} | to_entries | sort_by(.value.added) | reverse | .[:500][] |
+            {d: .key, added: (.value.added // ""), streak: (.value.streak // 0), checked: (.value.checked // "")}]' "$CORE_OWNED" 2>/dev/null)"
     fi
+    [ -n "${ADAPTIVE_NAMES:-}" ] || ADAPTIVE_NAMES='[]'
     case "$ADAPTIVE_COUNT" in ''|*[!0-9]*) ADAPTIVE_COUNT="$(wc -l 2>/dev/null < "$ADAPTIVE_PERSIST")" ADAPTIVE_RECENT= ;; esac
     [ -n "$ADAPTIVE_COUNT" ] || ADAPTIVE_COUNT=0
     [ -n "$ADAPTIVE_RECENT" ] || ADAPTIVE_RECENT="$(
@@ -1808,6 +1812,7 @@ EOF_ISTATS
       --argjson domain_v2fly "$DOMAIN_V2FLY" \
       --argjson adaptive_count "$ADAPTIVE_COUNT" \
       --argjson adaptive_recent "$ADAPTIVE_RECENT" \
+      --argjson adaptive_names "$ADAPTIVE_NAMES" \
       --argjson ip_categories "$IP_CATEGORIES" \
       --argjson ip_cidr_total "$IP_CIDR_TOTAL" \
       --argjson active_count "$ACTIVE_COUNT" \
@@ -1828,7 +1833,7 @@ EOF_ISTATS
             sources:{itdog:$domain_itdog,v2fly:$domain_v2fly},
             last_update:$hint_last
         },
-        adaptive:{count:$adaptive_count,recent:$adaptive_recent},
+        adaptive:{count:$adaptive_count,recent:$adaptive_recent,names:$adaptive_names},
         ip:{
             categories:$ip_categories,
             cidr_total:$ip_cidr_total,

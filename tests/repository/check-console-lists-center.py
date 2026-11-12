@@ -21,8 +21,11 @@ def fail(message: str) -> None:
 
 
 page = JS[JS.index("  lists() {"):JS.index("  'd-wanrec'()")]
-for need in ("Доменных списков пока нет", "VWARD сам списков не создаёт и чужие не переносит", "ctrlRow('Все списки'",
-             "'Разные: у списков разный путь'", "под управлением VWARD", "items.map(one)", "row(l)"):
+# fix.38 (owner 12.11.2026, mock-up v3): the way in words under each list, one search over the
+# domains of every list, the path switch on a list's own page; «Все списки VWARD» stays.
+for need in ("Доменных списков пока нет", "VWARD сам чужих списков не переносит", "ctrlRow('Все списки VWARD'",
+             "VWARD выбирает сам, сейчас ", "напрямую, без VPN", "VWARD этот список не меняет", "сюда VWARD добавляет найденные домены",
+             "data-list-filter placeholder=\"Найти домен\"", "data-find=", "ordered.map(row)"):
     if need not in page:
         fail(f"lists page: {need} missing")
 for gone in ("'Удалить выбранные'", "data-list-pick", "'Другие списки'", "panel('Списки VWARD'"):
@@ -30,8 +33,8 @@ for gone in ("'Удалить выбранные'", "data-list-pick", "'Друг
         fail(f"RED: lists page still has {gone} (owner 02.11)")
 if "const LIST_MODES = [['auto', 'Авто'], ['vpn', 'VPN'], ['dns', 'DNS'], ['bypass', 'Провайдер']];" not in JS:
     fail("the ways are «Авто | VPN | DNS | Провайдер» everywhere")
-if "l.managed && l.name !== (cfgRoute().group || prof().policy_group)" not in page:
-    fail("only managed lists (not «Мои домены») get the switches")
+if "(l.dns_mode || (l.managed && l.name !== (cfgRoute().group || prof().policy_group)) ? ctrlRow('Куда идёт', choiceSlider('list-mode:'" not in JS:
+    fail("only managed lists (not «Мои домены») get the path switch, on their own page")
 # The mass switch skips service lists and lists already on the chosen way.
 if "l.managed && !svcOf(l.name)" not in JS or "listMode(l) !== v" not in JS:
     fail("«Все списки» must only touch managed non-service lists that differ")
