@@ -1248,7 +1248,7 @@ function notifications() {
   const total = num(stg.total_kb), free = num(stg.free_kb);
   if (total && free != null && lowDisk(total, free)) n.push({ sev: 'warn', title: 'Мало места в хранилище', text: 'свободно ' + fmtKB(free), to: 'system' });
   if (['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase)) n.push({ sev: 'crit', title: 'Обновление требует внимания', text: phaseText(p.phase), to: 'u-vward' });
-  if (S.update && S.update.pending && S.update.pending.present && S.update.pending.feed !== 'other') n.push({ sev: 'news', icon: 'save', title: 'Вышла новая версия VWARD', text: (S.update.pending.version || '') + ' - нажмите, чтобы посмотреть и установить', to: 'u-vward' });
+  if (S.update && S.update.pending && S.update.pending.present && S.update.pending.feed !== 'other') n.push({ sev: 'news', icon: 'save', title: 'Вышла новая версия VWARD', text: verHuman(S.update.pending.version, S.update.pending.sequence) + ' - нажмите, чтобы посмотреть и установить', to: 'u-vward' });
   const wc = ((S.wifi && S.wifi.clients) || []).filter(c => c.health === 'WARNING').length;
   if (wc) n.push({ sev: 'warn', title: 'Wi-Fi: ' + wc + ' ' + plural(wc, 'клиент требует', 'клиента требуют', 'клиентов требуют') + ' внимания', text: 'частые переходы между 2.4 и 5 ГГц', to: 'wifi' });
   const offComps = ((S.config && S.config.components) || []).filter(x => x.enabled === false && x.off_with !== 'install');
@@ -1283,16 +1283,25 @@ function wifiWarnText(wf) {
 const CARD_KEY = { system: 'status', updates: 'status', wan: 'status', vpn: 'status', storage: 'status', lists: 'lists', routes: 'route', wifi: 'wifi', ads: 'ads' };
 // Little space: under 256 MB, or under a tenth and under 1 GB (a tenth of a big drive is plenty).
 const lowDisk = (total, free) => free < 262144 || (free / total < 0.1 && free < 1048576);
+// The version for people (owner 01.11.2026, ROADMAP §3): «0.2.0 RC2 #36.1.261111» - the stage, the
+// release N.P and the build date (the first digits of the signed build number). Inside, the SemVer
+// (VERSION), its comparison and the build number stay as they are; this is only how it is shown.
+function verHuman(v, seq) {
+  const m = /^(\d+\.\d+\.\d+)(?:-(rc|rp)\.(\d+))?(?:\.fix\.(\d+)(?:\.(\d+))?)?$/.exec(String(v || ''));
+  if (!m) return v || '';
+  const d = /^20(\d{6})\d*$/.exec(String(seq || ''));
+  return m[1] + (m[2] ? ' ' + m[2].toUpperCase() + m[3] : '') + (m[4] ? ' #' + m[4] + '.' + (m[5] || '0') + (d ? '.' + d[1] : '') : '');
+}
 function cardData(id) {
   const s = st(), p = plat(), w = s.wan || {}, wg = s.wg || {}, sv = s.services || {}, g = s.storage || {}, r = S.route || {}, wf = S.wifi || {}, a = S.ads || {};
   const tunnels = wg.interfaces || [], up = tunnels.filter(t => isTrue(t.connected)).length;
   const comps = Object.keys(p.components || {}).length;
   const warnWifi = (wf.clients || []).filter(c => c.health === 'WARNING').length;
   switch (id) {
-    // «0.2.0-rc.1.fix.19»: the release on the card, its fix number under it.
-    case 'system': { const vm = /^(.*?)\.fix\.(\d+(?:\.\d+)*)$/.exec(p.version || ''); return { icon: 'platform', title: 'Система', to: 'system', value: vm ? vm[1] : p.version || '—',
+    // «0.2.0 RC2» on the card, «#36.1.261111» under it (owner 01.11.2026).
+    case 'system': { const hv = verHuman(p.version, p.last_sequence), vm = /^(.*?) (#.*)$/.exec(hv); return { icon: 'platform', title: 'Система', to: 'system', value: vm ? vm[1] : hv || '—',
       // One short line on a phone: the components are on the System page.
-      sub: vm ? 'исправление ' + vm[2] : comps ? comps + ' ' + plural(comps, 'компонент', 'компонента', 'компонентов') : 'версия VWARD', pill: p.version ? ['ok', 'Работает'] : ['', '—'] }; }
+      sub: vm ? vm[2] : comps ? comps + ' ' + plural(comps, 'компонент', 'компонента', 'компонентов') : 'версия VWARD', pill: p.version ? ['ok', 'Работает'] : ['', '—'] }; }
     case 'updates': return { icon: 'refresh', title: 'Обновления', to: 'system', value: ['IDLE', 'COMMITTED', undefined, ''].includes(p.phase) ? 'Новых нет' : phaseText(p.phase), sub: num(p.feed_ok_at) != null ? 'проверено ' + fmtStamp(p.feed_ok_at) : 'канал ' + (p.channel || '—'), pill: ['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase) ? ['crit', 'Ошибка'] : ['', ''] };
     case 'wan': return { icon: 'globe', title: 'Интернет', to: 'wan', value: w.internet ? 'В сети' : w.internet === false ? 'Нет связи' : s.wan ? 'Роутер отвечает медленно' : '—', sub: w.speed ? 'порт ' + fmtSpeed(w.speed) : w.address || 'адрес не получен', pill: w.internet ? ['ok', 'Работает'] : w.internet === false ? ['crit', 'Не работает'] : s.wan ? ['warn', 'Нет ответа'] : ['', '—'] };
     // Only switched-on tunnels count: one the owner switched off is not a fault (owner 2026-10-12).
@@ -2375,11 +2384,11 @@ const RENDER = {
   updatesPanel() {
     const p = plat(), u = S.update || {}, pend = u.pending || {}, x = S.ext || {}, fw = x.firmware || {}, agh = x.agh || {};
     const pk = x.packages || [], checked = x.checked_at ? fmtStamp(x.checked_at) : '';
-    const pon = pend.present && pend.feed !== 'other', vwardVal = pon ? 'доступна ' + (pend.version || 'новая версия') : (p.version || '—');
+    const pon = pend.present && pend.feed !== 'other', vwardVal = pon ? 'доступна ' + (verHuman(pend.version, pend.sequence) || 'новая версия') : (verHuman(p.version, p.last_sequence) || '—');
     const aghVal = agh.available ? 'доступна ' + extVer(agh.available) : agh.installed ? extVer(agh.installed) : S.ext ? 'не установлен' : '—';
     const fwVal = !x.firmware ? (S.ext ? 'нет данных' : '—') : fw.update_available ? 'доступна новая' : fw.title || fw.release;
     return panel('Обновления', kv([
-        ['VWARD', vwardVal, pon ? 'info' : '', 'u-vward', '', pon ? 'установлена ' + (p.version || '—') : autoText(isTrue(p.auto_apply))],
+        ['VWARD', vwardVal, pon ? 'info' : '', 'u-vward', '', pon ? 'установлена ' + (verHuman(p.version, p.last_sequence) || '—') : autoText(isTrue(p.auto_apply))],
         ['AdGuard Home', aghVal, agh.available ? 'info' : '', 'u-agh', '', agh.available ? 'установлена ' + extVer(agh.installed) : autoText(x.auto && x.auto.agh)],
         ['Прошивка Keenetic', fwVal, fw.update_available ? 'info' : '', 'u-fw', '', fw.channel ? 'канал ' + fwChannel(fw.channel) + ' · ' + autoText(fw.auto_update) : ''],
         ['Пакеты Entware', pk.length ? pk.length + ' ' + plural(pk.length, 'обновление', 'обновления', 'обновлений') : S.ext && !x.checked_at ? 'не проверялись' : 'актуальны', pk.length ? 'info' : '', 'u-opkg', '', x.installed_count ? 'установлено ' + x.installed_count + ' · ' + autoText(x.auto && x.auto.entware) : '']
@@ -2457,16 +2466,16 @@ const RENDER = {
     if (al.retry) acts.push(btn('ask', 'refresh', 'Повторить', '', ' data-confirm="update-retry"'));
     if (al.rollback) acts.push(btn('ask', 'undo', 'Откатить', 'danger', ' data-confirm="update-rollback"'));
     if (al.recover) acts.push(btn('ask', 'alert', 'Восстановить', 'danger', ' data-confirm="update-recover"'));
-    const conf = confirmBox('update-apply', 'Установить обновление ' + (pend.version || '') + '? Компоненты перезапустятся.', 'Установить') ||
+    const conf = confirmBox('update-apply', 'Установить обновление ' + verHuman(pend.version, pend.sequence) + '? Компоненты перезапустятся.', 'Установить') ||
       confirmBox('update-retry', 'Повторить установку обновления?', 'Повторить') ||
       confirmBox('update-rollback', 'Вернуть предыдущую версию? Компоненты перезапустятся.', 'Откатить', true) ||
       confirmBox('update-recover', 'Восстановить прерванное обновление?', 'Восстановить', true);
     return loadError(['update', 'status']) +
       panel('Состояние', kv([
-        ['Версия', p.version || '—', '', 'd-notes', '', [p.last_sequence ? 'сборка № ' + p.last_sequence : '', lastApplyNote(u.last_apply, u.last_method)].filter(Boolean).join(' · ')],
+        ['Версия', verHuman(p.version, p.last_sequence) || '—', '', 'd-notes', '', lastApplyNote(u.last_apply, u.last_method)],
         // Found on the other channel before the switch: the updater will not install it here (owner 2026-11-01).
-        pend.present && pend.feed === 'other' ? ['Найдено на другом канале', pend.version || '—', '', 'd-notes', '', 'не установится, пока выбран текущий канал'] :
-        pend.present ? ['Доступно', (pend.version || '') + (pend.priority ? ' · ' + ({ ROUTINE: 'обычное', IMPORTANT: 'важное', CRITICAL: 'критическое' }[String(pend.priority).toUpperCase()] || pend.priority) : ''), 'info', 'd-notes'] : null,
+        pend.present && pend.feed === 'other' ? ['Найдено на другом канале', verHuman(pend.version, pend.sequence) || '—', '', 'd-notes', '', 'не установится, пока выбран текущий канал'] :
+        pend.present ? ['Доступно', verHuman(pend.version, pend.sequence) + (pend.priority ? ' · ' + ({ ROUTINE: 'обычное', IMPORTANT: 'важное', CRITICAL: 'критическое' }[String(pend.priority).toUpperCase()] || pend.priority) : ''), 'info', 'd-notes'] : null,
         feedCheckRow(p),
         p.last_health_check ? ['Проверка после установки', fmtStamp(p.last_health_check), '', 'a-updater'] : null
       ]) + (conf || (acts.length ? '<div class="panel-actions even">' + acts.join('') + '</div>' : '')) + resultBox('updates'),
@@ -2784,7 +2793,7 @@ const RENDER = {
   'd-notes'() {
     const p = plat(), pend = (S.update && S.update.pending) || {};
     return (pend.present && pend.version ? panel('Доступно: ' + pend.version, notesHtml(pend.version)) : '') +
-      panel('Установлено: ' + (p.version || '—'), notesHtml(p.version));
+      panel('Установлено: ' + (verHuman(p.version, p.last_sequence) || '—'), notesHtml(p.version));
   },
   'd-jobs'() {
     const a = S.ads || {}, j = a.jobs || {}, cur = j.current || {}, last = j.last || {}, queue = j.queue || [];
@@ -4246,7 +4255,7 @@ function compPage(c) {
   const sw1 = core ? '<span class="num">Всегда</span>' : sw('data-comp="' + c.id + '"', on, 'Компонент «' + c.name + '» включён', !cfgOk() || !g);
   return panel(c.name, '<dl class="kv">' + ctrlRow('Компонент включён', sw1, core ? 'базовый компонент: без него VWARD не работает' : on ? '' : 'файлы установлены, но компонент не запускается') + '</dl>' +
       compConfirm(c) +
-      kv([['Запуск', c.when], ['Версия', x.release || plat().version || '—'], ['Установлен', fmtStamp(x.installed_at) || '—']]) +
+      kv([['Запуск', c.when], ['Версия', verHuman(x.release || plat().version) || '—'], ['Установлен', fmtStamp(x.installed_at) || '—']]) +
       '<div class="panel-actions even">' + (c.page ? '<button class="btn" type="button" data-go="' + c.page + '">Открыть раздел</button>' : '') + (activityOf(c.log) ? '<button class="btn" type="button" data-go="a-' + activityOf(c.log) + '">События</button>' : '') + '</div>' + cfgNote(),
     { desc: c.desc, right: headPill(!on ? 'warn' : x.health === 'PASS' ? 'ok' : '', !on ? 'Выключен' : x.health === 'PASS' ? 'Работает' : 'Нет данных') });
 }
@@ -4922,12 +4931,12 @@ function updOverlayShow(o) {
   const base = rb ? 50 : step[2], cap = rb ? 95 : next ? next[2] - 3 : 100;
   u.pct = u.done ? 100 : Math.min(cap, Math.max(u.pct || 0, base) + (u.pct >= base ? 1 : 0));
   const head = u.done ? (u.ok ? (rb ? 'Откат выполнен' : 'Обновление установлено') : 'Обновление не установлено') : (rb ? 'Откат обновления VWARD' : 'Обновление VWARD');
-  const stage = u.done ? (u.ok ? 'VWARD ' + (u.version || '') + ' работает' : 'Прежняя версия работает') : rb ? 'Возврат прежней версии' : step[1];
+  const stage = u.done ? (u.ok ? 'VWARD ' + verHuman(u.version) + ' работает' : 'Прежняя версия работает') : rb ? 'Возврат прежней версии' : step[1];
   const text = u.done ? (u.ok ? 'Обновите страницу, чтобы открыть новую версию.' : (u.error || 'Установщик вернул прежнюю версию, всё работает как раньше. Подробности - в «Журналах» → «Обновления».'))
     : 'Не закрывайте страницу, пока не завершится обновление. Роутер и интернет продолжают работать.';
   const state = u.done ? (u.ok ? ' ok' : ' crit') : '';
   el.innerHTML = '<div class="upd-page' + state + '" role="dialog" aria-live="polite" aria-label="' + esc(head) + '">' +
-    '<h2>' + esc(head) + '</h2>' + (u.version && !u.done ? '<p class="upd-ver">' + esc((u.from ? u.from + ' → ' : '') + u.version) + '</p>' : '') +
+    '<h2>' + esc(head) + '</h2>' + (u.version && !u.done ? '<p class="upd-ver">' + esc((u.from ? verHuman(u.from) + ' → ' : '') + verHuman(u.version)) + '</p>' : '') +
     '<p class="upd-text">' + esc(text) + '</p>' + ringHtml(u.pct, u.done, u.ok) +
     '<p class="upd-stage">' + esc(stage) + '</p>' +
     (u.done ? '<div class="panel-actions">' + (u.ok ? '<button class="btn primary" type="button" data-act="upd-reload">Обновить страницу</button>' : '<button class="btn" type="button" data-act="upd-close">Закрыть</button>') + '</div>' : '') + '</div>';
