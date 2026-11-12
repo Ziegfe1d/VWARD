@@ -145,6 +145,9 @@ for need in ("tuns.length + 1 <= 4 ? choiceSlider('svc-tun:' + id,", "else if (k
              "sw('data-agent-act=\"' + a[0] + '\"'", "if (t.dataset.agentAct) {"):
     if need not in js:
         fail(f"fix.38.1: {need!r} is missing")
+# fix.38.1: a page with its data on the screen is renewed quietly; «медленно» only with data missing.
+if "keys && keys.every(k => S[k] != null))) return; b.slow = true;" not in js or "busyStart(id, keys)" not in js:
+    fail("fix.38.1: the slow-router words show although the page's data is on the screen")
 if "watch ? 'd-agents' : null" in js or "compact-modes" in js:
     fail("fix.38.1: «Восстановление VPN» leads to the agents' list again, or the per-agent sliders are back")
 

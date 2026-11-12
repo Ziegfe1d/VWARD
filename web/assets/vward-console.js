@@ -4644,19 +4644,22 @@ function go(id, key, mode) {
    after 3 seconds «Роутер отвечает медленно…» (owner 2026-10-12). The background refresh every
    few seconds stays quiet. */
 let pageBusy = null;
-function busyStart(id) {
+function busyStart(id, keys) {
   // The same page still loading (the first answers, then the rest): the same 3 seconds.
   if (pageBusy && pageBusy.id === id) return pageBusy;
   const b = pageBusy = { id: id, slow: false };
   document.body.classList.add('loading'); document.body.classList.remove('slow');
   // «Обзор» says it in its own line under the title; other pages - under the top bar.
-  setTimeout(() => { if (pageBusy !== b) return; b.slow = true; document.body.classList.toggle('slow', id !== 'overview'); if (current === id) render(); }, 3000);
+  // fix.38.1 (owner 12.11.2026, «роутер медленно отвечает» on every page): a page whose data is
+  // already on the screen (the last refresh or the kept copy) is renewed quietly - the thin line
+  // under the top bar only; the words come when after 3 s some of its data is still missing.
+  setTimeout(() => { if (pageBusy !== b || (keys && keys.every(k => S[k] != null))) return; b.slow = true; document.body.classList.toggle('slow', id !== 'overview'); if (current === id) render(); }, 3000);
   return b;
 }
 function busyEnd(b) { if (!b || pageBusy !== b) return; pageBusy = null; document.body.classList.remove('loading', 'slow'); }
 const busyOn = id => !!pageBusy && pageBusy.id === id;
 async function refreshPage(busy, auto) {
-  const id = current, keys = DATA_FOR(id).concat('off', 'notes'), b = busy ? busyStart(id) : null;
+  const id = current, keys = DATA_FOR(id).concat('off', 'notes'), b = busy ? busyStart(id, keys) : null;
   // owner 12.11.2026: «Журналы» load on «Показать журнал» only; a history loads on opening and on
   // «Обновить», never by the 15 s refresh.
   if (id === 'logs') { busyEnd(b); load('journal').then(() => { if (current === 'logs') render(); }, () => {}); return; }
