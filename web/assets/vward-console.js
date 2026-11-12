@@ -3497,19 +3497,20 @@ document.addEventListener('change', e => { if (e.target.matches && e.target.matc
 function tunnelPage(name) {
   const wg = st().wg || {}, t = (wg.interfaces || []).find(x => x.name === name) || { name: name };
   const up = isTrue(t.connected), cur = prof().tunnel_interface, managed = cur === name, failopen = isTrue(wg.failopen_active);
-  const use = managed ? '' : tunOff(t) ? '<p class="field-warn">Туннель выключен: назначить его туннелем по умолчанию можно после включения.</p>' : failopen ? '<p class="field-warn">Сейчас VPN недоступен и трафик идёт напрямую: переключение станет доступно, когда ' + esc(cur ? tunLabel(cur) : 'текущий туннель') + ' восстановится.</p>' :
+  const use = managed || tunLost(t) ? '' : tunOff(t) ? '<p class="field-warn">Туннель выключен: назначить его туннелем по умолчанию можно после включения.</p>' : failopen ? '<p class="field-warn">Сейчас VPN недоступен и трафик идёт напрямую: переключение станет доступно, когда ' + esc(cur ? tunLabel(cur) : 'текущий туннель') + ' восстановится.</p>' :
     tunUseConfirm(name, cur, up) ||
     '<div class="panel-actions">' + btn('ask', 'route', 'Сделать туннелем по умолчанию', up ? 'primary' : '', ' data-confirm="tunnel-use"' + (cfgOk() ? '' : ' disabled')) + '</div>';
-  const off = tunOff(t), e = awgOf(name), v = vlessOf(name), mp = tunnelManagePanel(name, managed);
+  // Without settings it cannot be switched on: no «Включить», no switch; how to bring it back - first (owner 12.11.2026).
+  const lost = tunLost(t), off = tunOff(t) && !lost, e = awgOf(name), v = vlessOf(name), mp = tunnelManagePanel(name, managed);
   const rx = t.rx != null ? t.rx : e && e.rx, tx = t.tx != null ? t.tx : e && e.tx;
   const gOff = tunGuardOff(t), wgs = st().wg || {};
-  return (gOff ? panel('Выключен агентом', '<p class="panel-desc">' + esc((wgs.failopen_at ? 'С ' + fmtTime(wgs.failopen_at * 1000) + '. ' : '') + (foText(wgs) ? 'Причина: ' + foText(wgs) + '. ' : '') +
+  return (lost ? mp[0] : '') + (gOff ? panel('Выключен агентом', '<p class="panel-desc">' + esc((wgs.failopen_at ? 'С ' + fmtTime(wgs.failopen_at * 1000) + '. ' : '') + (foText(wgs) ? 'Причина: ' + foText(wgs) + '. ' : '') +
       'Сайты из списков идут напрямую. Агент проверяет туннель раз в 5 минут и включит его сам, когда туннель ответит.') + '</p>') : '') +
     (off ? panel('Туннель выключен', '<p class="panel-desc">Трафик через туннель не идёт' + (managed ? ': он назначен по умолчанию, списки VPN идут напрямую. Его выключили в настройках Keenetic или вне Панели. ' : '. ') + '«Включить» включит его' + (e || v ? ' вместе с программой модуля' : '') + ' и сохранит настройку.</p>' +
       '<div class="panel-actions">' + btn('tunnel-up', 'check', 'Включить', 'primary', ' data-name="' + esc(name) + '"' + (cfgOk() && !TUNBUSY[name] ? '' : ' disabled')) + '</div>') : '') +
     panel(tunLabel(name), kv([
     ['Системное имя', name + (e ? ' · модуль AmneziaWG (VWARD)' : v ? ' · VLESS (VWARD)' : t.type ? ' · ' + (t.type === 'wireguard' && t.awg ? 'AmneziaWG' : TUN_TYPE[t.type] || t.type) : '')],
-    ['Канал связи', t.link === 'up' ? 'есть' : t.link === 'down' ? 'нет' : t.link || '—'], ['Состояние в Keenetic', off ? 'выключен' : gOff ? 'выключен агентом VPN' : t.state === 'up' ? 'включён' : t.state || '—', off || gOff ? 'warn' : ''],
+    ['Канал связи', t.link === 'up' ? 'есть' : t.link === 'down' ? 'нет' : t.link || '—'], ['Состояние в Keenetic', lost ? 'нет настроек' : off ? 'выключен' : gOff ? 'выключен агентом VPN' : t.state === 'up' ? 'включён' : t.state || '—', off || gOff ? 'warn' : ''],
     ['Сервер', t.endpoint || (e && e.endpoint) || (v && (v.server_name ? v.server_name + ' · ' + v.server : v.server)) || '—'], ['Адрес в туннеле', t.address || '—'], ['MTU', t.mtu != null ? String(t.mtu) : '—'],
     e ? ['Последнее рукопожатие', e.off || off ? 'туннель выключен' : e.handshake != null ? agoText(e.handshake) : e.running ? 'не было' : 'программа остановлена', !off && !e.off && (e.handshake == null || e.handshake > 180) ? 'warn' : '']
       : v ? null : ['Последнее рукопожатие', hsSec(t) != null ? agoText(hsSec(t)) : t.handshake != null ? 'не было' : '—', t.handshake != null && (hsSec(t) == null || hsSec(t) > 180) ? 'warn' : ''],
@@ -3521,10 +3522,10 @@ function tunnelPage(name) {
   ]) + (awgLost().some(x => x.name === name) ? '' : t.type === 'wireguard' && t.handshake != null && hsSec(t) == null ? '<p class="field-warn">Сервер ни разу не ответил. Если это файл Amnezia Premium (AmneziaWG 3.x), загруженный прямо в Keenetic, - Keenetic выбросил часть его настроек. Удалите этот туннель и добавьте тот же файл через «Добавить туннель»: его поднимет модуль AmneziaWG.</p>' : '') +
     confirmBox('tunnel-down', 'Выключить ' + tunLabel(name) + '? Трафик через него остановится, списки и подсети этого туннеля будут недоступны, пока он выключен. Настройка сохранится.', 'Выключить', true) +
     use + cfgNote(), { desc: managed ? 'Туннель по умолчанию: через него идут маршруты VWARD.' : 'Маршруты VWARD можно перевести на этот туннель, назначив его туннелем по умолчанию.',
-      right: headPill(tunPill(t)[0], tunPill(t)[1]) + (managed ? '' : sw('data-tun-onoff="' + esc(name) + '"', !off, off ? 'Включить туннель' : 'Выключить туннель', !cfgOk() || !!TUNBUSY[name])) }) +
+      right: headPill(tunPill(t)[0], tunPill(t)[1]) + (managed || lost ? '' : sw('data-tun-onoff="' + esc(name) + '"', !off, off ? 'Включить туннель' : 'Выключить туннель', !cfgOk() || !!TUNBUSY[name])) }) +
     // Every block of the management panels: an engine's tunnel has three (firmware note,
     // configuration, deletion) and the deletion must not get lost.
-    awgLostPanel(name) + mp[0] + tunnelProbePanel(name) + tunnelTrafficPanel(name) + mp.slice(1).join('');
+    awgLostPanel(name) + (lost ? '' : mp[0]) + tunnelProbePanel(name) + tunnelTrafficPanel(name) + mp.slice(1).join('');
 }
 // Tunnels Keenetic took from AmneziaWG 3.x files without their header protection
 // (awg-data lost[]): the same files move them to the engine, matched by server key.
@@ -3635,7 +3636,8 @@ const tunLost = t => !!(t && S.awg && S.awg.vless && Array.isArray(S.awg.vless.t
 // are on the tunnel's own page.
 const tunSub = t => {
   const v = vlessOf(t.name), e = awgOf(t.name);
-  if (tunLost(t)) return 'настройки не найдены';
+  // «Нет настроек» is its status already: no second line saying the same (owner 12.11.2026).
+  if (tunLost(t)) return '';
   // The status says it; why - on the tunnel's page (one status a row, owner 2026-10-18).
   if (tunGuardOff(t)) return '';
   if (v) return 'VLESS' + (v.running || tunOff(t) ? '' : ' · программа остановлена');
@@ -4072,8 +4074,9 @@ function tunnelManagePanel(name, managed) {
   const mv = !managed && routed ? (confirmBox('tunnel-move', 'Перенести списки и подсети ' + tunLabel(name) + ' (' + tunUseExtra(name) + ') на ' + tunLabel(prof().tunnel_interface) + '? Туннель останется, удалить его можно потом.', 'Перенести') ||
     '<p class="field-warn">На туннеле ' + esc(String(tunUseExtra(name))) + ' списков и подсетей: пока он без настроек, эти сайты идут напрямую через провайдера.</p><div class="panel-actions">' + btn('ask', 'route', 'Перенести на туннель по умолчанию', 'primary', ' data-confirm="tunnel-move"' + (cfgOk() ? '' : ' disabled')) + '</div>') : '';
   if (lost)
-    return [panel('Настройки не найдены', '<p class="panel-desc">Ключей и адреса сервера этого туннеля нет на флешке (например, после её замены или форматирования). Добавьте туннель заново: VPN → «Добавить туннель»' +
-      (managed ? ', сделайте новый туннелем по умолчанию, затем удалите этот.' : ', а этот удалите.') + '</p>' + mv + (managed ? '' : del))];
+    return [panel('Нет настроек', '<p class="panel-desc">Настройки туннеля хранились на флешке и пропали вместе с ней, поэтому включить его нельзя. Добавьте туннель заново - ключ, ссылку или файл' +
+      (managed ? ', затем у нового нажмите «Сделать туннелем по умолчанию»: списки и подсети переедут на него. Этот туннель потом удалите.' : '. Этот туннель потом удалите.') + '</p>' +
+      '<div class="panel-actions">' + btn('tunnel-create', 'plus', 'Добавить туннель', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + mv + (managed ? '' : del))];
   const vl = vlessOf(name);
   if (vl)
     return [vlessServersPanel(name),
