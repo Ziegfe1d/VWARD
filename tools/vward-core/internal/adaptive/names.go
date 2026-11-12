@@ -60,6 +60,20 @@ func coveredBy(name string, list map[string]bool) string {
 	}
 }
 
+// routerOwn: the router's own services - KeenDNS names (remote access to the router, its SSTP
+// server through the cloud), Keenetic's cloud and updates, under both brands (owner 12.11.2026:
+// remote access did not always connect). Never through the VPN: the cloud reaches the router on
+// the provider's address.
+func routerOwn(name string) bool {
+	for _, z := range []string{"keenetic.pro", "keenetic.link", "keenetic.name", "keenetic.io", "keenetic.net", "keenetic.com",
+		"netcraze.pro", "netcraze.link", "netcraze.name", "netcraze.io", "netcraze.net", "netcraze.com"} {
+		if name == z || strings.HasSuffix(name, "."+z) {
+			return true
+		}
+	}
+	return false
+}
+
 // ruZone: names the owner keeps on the provider (ROADMAP: «.ru не в Автоподбор»; the shell
 // engine's ru_zone): .ru, .рф, .su and the Russian services that answer the same either way.
 func ruZone(name string) bool {

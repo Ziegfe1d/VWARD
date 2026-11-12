@@ -192,3 +192,22 @@ func (s *slowProber) Probe(ctx context.Context, host, dev string) ProbeResult {
 	time.Sleep(s.d)
 	return ProbeResult{s.ans[dev+" "+host], "slow"}
 }
+
+// Owner 12.11.2026 (remote access to the router did not always connect): KeenDNS and Keenetic's
+// cloud never go into AdaptiveAuto, under either brand.
+func TestRouterOwnNamesStayOnTheProvider(t *testing.T) {
+	for _, h := range []string{"silentlink.netcraze.pro", "my.keenetic.pro", "x.keenetic.link", "netcraze.pro", "ndss.keenetic.io"} {
+		if !routerOwn(h) {
+			t.Fatalf("%s must stay on the provider", h)
+		}
+	}
+	for _, h := range []string{"notkeenetic.pro", "netcraze.pro.example.com", "chatgpt.com"} {
+		if routerOwn(h) {
+			t.Fatalf("%s is not the router's own", h)
+		}
+	}
+	e := New(Config{}, nil)
+	if r := e.Check(context.Background(), "silentlink.netcraze.pro"); r.Outcome != Skip {
+		t.Fatalf("KeenDNS name checked: %+v", r)
+	}
+}
