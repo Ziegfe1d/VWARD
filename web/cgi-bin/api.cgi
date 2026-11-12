@@ -1131,7 +1131,9 @@ if [ "$ACTION" = tunnel-conf ]; then
     servers)
       # The servers of a VLESS tunnel's subscription with the time each takes to answer.
       [ -n "$TNAME" ] || { echo '{"ok":false,"error":"invalid_tunnel"}'; exit 0; }
-      TOUT="$("$CONFIG_HELPER" vless-server servers "$TNAME" 2>/dev/null)"
+      # «Обновить» (fresh=1) fetches the subscription again; a look reads the copy of 6 hours.
+      TFRESH=; [ "$(form_value fresh)" != 1 ] || TFRESH=fresh
+      TOUT="$("$CONFIG_HELPER" vless-server servers "$TNAME" $TFRESH 2>/dev/null)"
       case "$(printf '%s\n' "$TOUT" | tail -n 1)" in
         result=checked)
           printf '%s\n' "$TOUT" | sed -n 's/^info\.server\.\([0-9]*\)=/\1|/p' | "$JQ" -Rn --argjson cur "$(printf '%s\n' "$TOUT" | sed -n 's/^info\.current=\([0-9]*\)$/\1/p' | head -n 1 | grep . || echo 0)" \

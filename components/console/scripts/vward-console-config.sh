@@ -3255,7 +3255,8 @@ op_vless_server() {
     [ -x "$VLESS_ENGINE" ] || die engine_unavailable
     case "$2" in OpkgTun[0-9]) ;; *) die invalid_tunnel 64 ;; esac
     case "$1" in
-        servers) vs_out=$("$VLESS_ENGINE" list "$2" 2>/dev/null) ;;
+        servers) case "${3:-}" in ""|fresh) ;; *) die invalid_value 64 ;; esac
+                vs_out=$("$VLESS_ENGINE" list "$2" ${3:-} 2>/dev/null) ;;
         # A country on or off, or failover between countries (fix.28.2).
         countries) case "$3:$4" in cross:0|cross:1|--:0|--:1|[A-Z][A-Z]:0|[A-Z][A-Z]:1) ;; *) die invalid_value 64 ;; esac
                 vs_out=$("$VLESS_ENGINE" countries "$2" "$3" "$4" 2>/dev/null) ;;

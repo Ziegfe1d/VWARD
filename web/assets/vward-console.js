@@ -4169,10 +4169,10 @@ async function vlessCountry(name, code, on) {
   }
   render();
 }
-async function vlessServers(name) {
+async function vlessServers(name, fresh) {
   VSRV[name] = Object.assign(VSRV[name] || {}, { busy: true, error: '' }); render();
   let r;
-  try { r = await apiPost('tunnel-conf', { op: 'servers', name: name }); } catch (e) { r = { ok: false, error: e.message }; }
+  try { r = await apiPost('tunnel-conf', fresh ? { op: 'servers', name: name, fresh: '1' } : { op: 'servers', name: name }); } catch (e) { r = { ok: false, error: e.message }; }
   VSRV[name] = r.ok ? { data: r } : { error: errText(r) };
   render();
 }
@@ -5251,7 +5251,7 @@ document.addEventListener('click', e => {
   else if (a === 'site-do') { if (t.dataset.how === 'block') { confirm = { id: 'site-block', dom: t.dataset.dom }; render(); } else siteDo(t.dataset.how, t.dataset.dom); }
   else if (a === 'site-move') { const m = RPROBE && RPROBE.move; t.disabled = true; cfgSet({ op: 'domain-list', target: t.dataset.list, value: t.dataset.to }, 'Список идёт через ' + tunLabel(t.dataset.to), ['lists']).then(x => { if (RPROBE) RPROBE.move = null; if (x && x.ok && m) siteCheck(RPROBE.value); }); }
   else if (a === 'tunnel-up' || a === 'tunnel-restart') tunnelState(a === 'tunnel-up' ? 'up' : 'restart', t.dataset.name);
-  else if (a === 'vless-servers') vlessServers(t.dataset.name);
+  else if (a === 'vless-servers') vlessServers(t.dataset.name, true);
   else if (a === 'ai-check') aiCheck(t.dataset.ai, t.dataset.dom);
   else if (a === 'ai-answer') aiAnswer(t.dataset.way);
   else if (a === 'ai-reference') aiReference(t.dataset.ai, t.dataset.group, t.dataset.token);
@@ -5571,9 +5571,9 @@ async function onSubmit(e, f) {
         try { x = await apiPost('tunnel-conf', { op: 'check', conf: text.trim() }); } catch (err) { tcMsg('Ошибка: ' + err.message); return; }
         if (!x.ok) { tcMsg('Не подходит: ' + errText(x)); return; }
         const n = +x.servers || 0, rows = [];
-        for (let i = 1; i <= n; i++) { const p = String(x['server.' + i] || '').split('|'); rows.push({ i: i, name: p[0] || 'Сервер ' + i, host: p[1] || '', port: p[2] || '', sec: p[3] || 'none', net: p[4] || 'tcp' }); }
+        for (let i = 1; i <= n; i++) { if (!x['server.' + i]) continue; const p = String(x['server.' + i]).split('|'); if (!p[1] || !p[2]) continue; rows.push({ i: i, name: p[0] || 'Сервер ' + i, host: p[1] || '', port: p[2] || '', sec: p[3] || 'none', net: p[4] || 'tcp' }); }
         if (!rows.length) { tcMsg('В ссылке или подписке нет серверов VLESS'); return; }
-        $('tcPreview').innerHTML = '<div class="rows vless-pick" role="radiogroup" aria-label="Сервер">' + rows.map(r => '<label class="row"><input type="radio" name="vless-server" value="' + r.i + '"' + (r.i === 1 ? ' checked' : '') + ' data-vname="' + esc(r.name) + '">' +
+        $('tcPreview').innerHTML = '<div class="rows vless-pick" role="radiogroup" aria-label="Сервер">' + rows.map(r => '<label class="row"><input type="radio" name="vless-server" value="' + r.i + '"' + (r === rows[0] ? ' checked' : '') + ' data-vname="' + esc(r.name) + '">' +
           '<div class="row-main"><b>' + esc(r.name) + '</b><small>' + esc(r.host + ':' + r.port + ' · ' + (r.sec === 'none' ? 'без шифрования' : r.sec.toUpperCase()) + ' · ' + r.net) + '</small></div></label>').join('') + '</div>' +
           '<p class="field-warn">Туннель поднимет Xray - программа около 36 МБ на флешке, скачивается один раз с GitHub (XTLS/Xray-core), 30-60 МБ памяти. В Keenetic он будет подключением OpkgTun.</p>';
         // The subscription's own name, not the first server's (owner 2026-10-18).
