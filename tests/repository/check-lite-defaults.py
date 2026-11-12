@@ -121,4 +121,48 @@ if "vward_extra repair || repair_if_crashing() { return 0; }" not in HK:
 for c in ("tunnel-guard", "wan-guard", "wifi-client-guard", "policy-sync"):
     if c not in INSTALL[INSTALL.index("Lightened VWARD"):INSTALL.index("Lightened VWARD") + 800]:
         fail(f"install.sh does not start {c} switched off")
+# The Panel shows each optional part and switches it (owner 12.11.2026: «старые компоненты с пометкой»):
+# the helper writes NAME.on for the known parts only; every part of vward_extra is in the Panel's list.
+import re as _re
+HELPER = (ROOT / "components/console/scripts/vward-console-config.sh").read_text()
+JSX = (ROOT / "web/assets/vward-console.js").read_text()
+used = set(_re.findall(r"vward_extra ([a-z-]+)", HK + SUP))
+import json as _json
+REG_PATH = ROOT / "config/settings/settings-registry.json"
+REG = _json.loads(REG_PATH.read_text(encoding="utf-8"))
+names = [p["id"] for p in REG["parts"] if p["switch"] == "extra"]
+if used - set(names):
+    fail(f"every optional part has a switch in the registry: code {sorted(used)}, registry {names}")
+# The helper knows the parts from the registry only (fix.38: one list of names).
+if "VWARD_EXTRA_NAMES" in HELPER or "reg_has '.parts[] | select(.switch == \"extra\") | .id' \"$1\"" not in HELPER:
+    fail("op_extra must check the name against the parts' registry, not a list of its own")
+cut = lambda name: HELPER[HELPER.index(name + "() {"):HELPER.index("\n}\n", HELPER.index(name + "() {")) + 3]
+fn = cut("reg_has") + cut("op_extra")
+with tempfile.TemporaryDirectory() as td2:
+    st = Path(td2) / "components"
+    pre = (f'COMPONENT_STATE={st}; JQ=jq; SETTINGS_REG={REG_PATH}; die() {{ echo "error=$1"; exit 1; }}; '
+           'done_ok() { echo "result=$2"; exit 0; }\n')
+    def op(*a):
+        return subprocess.run(["sh", "-c", pre + fn + 'op_extra "$@"', "x", *a], capture_output=True, text=True).stdout.strip()
+    got = [op("backup", "1"), str((st / "backup.on").exists()), op("backup", "1"), op("backup", "0"), str((st / "backup.on").exists()),
+           op("../etc", "1"), op("all", "1"), op("backup", "2")]
+    if got != ["result=changed", "True", "result=unchanged", "result=changed", "False", "error=invalid_value", "error=invalid_value", "error=invalid_value"]:
+        fail(f"op_extra: {got}")
+    # Every part on (all.on): a part the owner switches off stays off (NAME.off), and back on.
+    (st / "all.on").write_text("")
+    adm = ROOT / "components/runtime/lib/vward-runtime-admission.sh"
+    on = lambda n: subprocess.run(["sh", "-c", f'VWARD_COMPONENT_STATE={st}; . "{adm}"; vward_extra {n} && echo on || echo off'],
+                                  capture_output=True, text=True).stdout.strip()
+    got = [on("backup"), op("backup", "0"), str((st / "backup.off").exists()), on("backup"), op("backup", "0"), on("integrity"),
+           op("backup", "1"), str((st / "backup.off").exists()), on("backup")]
+    if got != ["on", "result=changed", "True", "off", "result=unchanged", "on", "result=changed", "False", "on"]:
+        fail(f"RED: a part switched off with every part on must stay off: {got}")
+# fix.38: the switches are the parts' rows in «Компоненты», drawn from the registry the router sends.
+for need in ("function partRow(p) {", "'data-extra=\"' + p.id + '\"'", "cfgSet({ op: 'extra', target: id, value: t.checked ? '1' : '0' }",
+             "const MOVED = { 'd-components': 'utils' };"):
+    if need not in JSX:
+        fail(f"the Panel lacks {need!r}")
+API = (ROOT / "web/cgi-bin/api.cgi").read_text()
+if "extra) set -- \"$OP\" \"$TARGET\" \"$VALUE\" ;;" not in API or "extras:{all:($extras_all==\"1\")" not in API:
+    fail("the API reads and switches the optional parts")
 print("LITE_DEFAULTS=PASS")

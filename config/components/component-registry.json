@@ -1,13 +1,13 @@
 {
   "schema": 1,
   "platform": "VWARD Platform",
-  "platform_version": "0.2.0-rc.2.fix.37",
+  "platform_version": "0.2.0-rc.2.fix.38",
   "component_version_policy": "platform-release",
   "components": [
     {
       "id": "platform-core",
       "name": "VWARD Platform Core",
-      "name_ru": "Ядро платформы VWARD",
+      "name_ru": "Платформа VWARD",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "default",
@@ -23,7 +23,7 @@
     {
       "id": "route-engine",
       "name": "VWARD Route Engine",
-      "name_ru": "Движок адаптивной маршрутизации VWARD",
+      "name_ru": "Маршрутизация",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "route-engine",
@@ -53,7 +53,7 @@
     {
       "id": "route-reconciler",
       "name": "VWARD Route Reconciler",
-      "name_ru": "Сверка адаптивных маршрутов VWARD",
+      "name_ru": "Сверка маршрутов",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "route-engine",
@@ -66,7 +66,9 @@
       "requires_running": [
         "route-engine"
       ],
-      "uses": ["tunnel-guard"],
+      "uses": [
+        "tunnel-guard"
+      ],
       "runtime_targets": [
         "/opt/bin/vward-route-reconciler.sh"
       ]
@@ -74,7 +76,7 @@
     {
       "id": "route-tools",
       "name": "VWARD Route Tools",
-      "name_ru": "Инструменты маршрутизации VWARD",
+      "name_ru": "Инструменты маршрутов",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "route-tools",
@@ -95,7 +97,7 @@
     {
       "id": "tunnel-guard",
       "name": "VWARD Tunnel Guard",
-      "name_ru": "Защита VPN-туннеля VWARD",
+      "name_ru": "Агент VPN",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "tunnel-guard",
@@ -119,7 +121,7 @@
     {
       "id": "wan-guard",
       "name": "VWARD WAN Guard",
-      "name_ru": "Защита WAN VWARD",
+      "name_ru": "Восстановление интернета",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "wan-guard",
@@ -137,7 +139,7 @@
     {
       "id": "wifi-client-guard",
       "name": "VWARD Wi-Fi Client Guard",
-      "name_ru": "Контроль Wi-Fi клиентов VWARD",
+      "name_ru": "Контроль Wi-Fi клиентов",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "wifi-client-guard",
@@ -157,7 +159,7 @@
     {
       "id": "policy-sync",
       "name": "VWARD Policy Sync",
-      "name_ru": "Синхронизация сетевых политик VWARD",
+      "name_ru": "IP-категории",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "policy-sync",
@@ -182,7 +184,7 @@
     {
       "id": "runtime",
       "name": "VWARD Runtime",
-      "name_ru": "Среда выполнения VWARD",
+      "name_ru": "Среда выполнения",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "runtime",
@@ -237,7 +239,7 @@
     {
       "id": "update-engine",
       "name": "VWARD Update Engine",
-      "name_ru": "Движок обновлений VWARD",
+      "name_ru": "Установщик обновлений",
       "legacy_ids": [],
       "update_method": "slot-installer",
       "health_profile": "updater",
@@ -254,7 +256,7 @@
     {
       "id": "ads-privacy-guard",
       "name": "VWARD Ads & Privacy Guard",
-      "name_ru": "Защита от рекламы и трекинга VWARD",
+      "name_ru": "Блокировка рекламы",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "ads-privacy-guard",

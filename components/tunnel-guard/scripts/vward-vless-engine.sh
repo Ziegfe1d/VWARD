@@ -259,6 +259,39 @@ parse() {
         }'
 }
 
+# brief FILE: «I<TAB>name<TAB>host<TAB>port» for the first 50 links, in ONE awk (the Panel's server
+# list: a parse and five awks per server did not fit in 20 s on a Viva, owner 12.11.2026). A line
+# without a host or port is not a server (a subscription's note) and is left out; I stays the
+# link's own number, the one «select» takes.
+brief() {
+    LC_ALL=C awk '
+        function dec(s,   o, i, c, h) {
+            o = ""
+            for (i = 1; i <= length(s); i++) {
+                c = substr(s, i, 1)
+                if (c == "%" && i + 2 <= length(s)) { h = toupper(substr(s, i + 1, 2)); o = o sprintf("%c", index("0123456789ABCDEF", substr(h, 1, 1)) * 16 + index("0123456789ABCDEF", substr(h, 2, 1)) - 17); i += 2 }
+                else if (c == "+") o = o " "
+                else o = o c
+            }
+            return o
+        }
+        NR > 50 {exit}
+        {
+            i = index($0, "://"); if (!i) next
+            s = substr($0, i + 3); frag = ""
+            i = index(s, "#"); if (i) { frag = substr(s, i + 1); s = substr(s, 1, i - 1) }
+            i = index(s, "?"); if (i) s = substr(s, 1, i - 1)
+            sub(/\/$/, "", s)
+            i = index(s, "@"); if (!i) next
+            hp = substr(s, i + 1)
+            if (substr(hp, 1, 1) == "[") { i = index(hp, "]"); host = substr(hp, 2, i - 2); port = substr(hp, i + 2) }
+            else { i = index(hp, ":"); if (!i) next; host = substr(hp, 1, i - 1); port = substr(hp, i + 1) }
+            if (host == "" || port !~ /^[0-9]+$/ || host ~ /[^A-Za-z0-9.:_-]/) next
+            name = dec(frag); gsub(/[|"\\\t]/, "", name)
+            print NR "\t" substr(name, 1, 64) "\t" host "\t" port
+        }' "$1"
+}
+
 # config LINK TUN OUT: the Xray configuration of the link on Keenetic's adapter TUN.
 config() {
     parse "$1" > "$3.kv" || return 2
@@ -317,13 +350,19 @@ op_servers() {
     TMPD=$(mktemp -d /tmp/vward-vless.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     links "$1" "$TMPD/links"; rc=$?
     case "$rc" in 0) ;; 2) die vless_syntax 64 ;; 3) die subscription_unavailable ;; 4) die subscription_expired ;; *) die vless_no_servers 64 ;; esac
-    i=0
+    # Each server keeps its link's number («select» and «#server=» take it); a line that is not a
+    # server (no host: the subscription's note, «Сервер 51 - : без шифрования», owner 12.11.2026)
+    # is not printed, and info.servers is the last number printed, not the line count.
+    i=0 k=0
     while IFS= read -r l; do
-        i=$((i + 1))
-        [ "$i" -le 50 ] || break
+        k=$((k + 1))
+        [ "$k" -le 50 ] || break
         parse "$l" > "$TMPD/kv" 2>/dev/null || continue
         v() { awk -F '\t' -v k="$1" '$1 == k {print substr($0, length(k) + 2); exit}' "$TMPD/kv" | tr -d '|"\\' | cut -c1-64; }
-        printf 'info.server.%s=%s|%s|%s|%s|%s\n' "$i" "$(v name)" "$(v host)" "$(v port)" "$(v q.security)" "$(v q.type)"
+        h=$(v host) pt=$(v port)
+        case "$h:$pt" in *[!A-Za-z0-9.:_-]*|:*|*:) continue ;; esac
+        i=$k
+        printf 'info.server.%s=%s|%s|%s|%s|%s\n' "$k" "$(v name)" "$h" "$pt" "$(v q.security)" "$(v q.type)"
     done < "$TMPD/links"
     printf 'info.kind=vless\ninfo.servers=%s\n' "$i"
     [ -z "${lk_title:-}" ] || printf 'info.title=%s\n' "$lk_title"
@@ -783,6 +822,12 @@ tunnel_links() {
     [ -s "$ENGINE_ETC/v$n.src" ] || [ -s "$ENGINE_ETC/v$n.links" ] || die no_source 64
     TMPD=$(mktemp -d /tmp/vward-vless.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     tl_rc=1
+    # The Panel's server list reads the copy made within 6 hours (TL_CACHED=1): the subscription is
+    # fetched again only when older or asked for («Обновить»), not on every look - up to 30 s and a
+    # write to the USB drive each time (owner 12.11.2026, the servers did not load in 20 s).
+    if [ "${TL_CACHED:-0}" = 1 ] && [ -s "$ENGINE_ETC/v$n.links" ] && [ -n "$(find "$ENGINE_ETC/v$n.links" -mmin -360 2>/dev/null)" ]; then
+        cp "$ENGINE_ETC/v$n.links" "$TMPD/links" && stubs_drop "$TMPD/links" && return 0
+    fi
     [ ! -s "$ENGINE_ETC/v$n.src" ] || { links "$ENGINE_ETC/v$n.src" "$TMPD/links"; tl_rc=$?; }
     sub_state "$n" "$1" "$tl_rc"
     if [ "$tl_rc" = 0 ]; then (umask 077; cp "$TMPD/links" "$ENGINE_ETC/v$n.links")
@@ -793,35 +838,31 @@ tunnel_links() {
 # country flag), address, the time a TCP connection to it takes from the router (empty: it does
 # not answer), and which one the tunnel uses now. Never the ids or the subscription's address.
 op_list() {
+    TL_CACHED=1; [ "${2:-}" != fresh ] || TL_CACHED=0
     tunnel_links "$1"
     cur=$(cat "$ENGINE_ETC/v$n.idx" 2>/dev/null); case "$cur" in ''|*[!0-9]*) cur=1 ;; esac
-    i=0
-    while IFS= read -r l; do
-        i=$((i + 1))
-        [ "$i" -le 50 ] || break
-        parse "$l" > "$TMPD/kv.$i" 2>/dev/null || continue
-        h=$(awk -F '\t' '$1 == "host" {print $2; exit}' "$TMPD/kv.$i")
-        pt=$(awk -F '\t' '$1 == "port" {print $2; exit}' "$TMPD/kv.$i")
-        case "$h:$pt" in *[!A-Za-z0-9.:_-]*|:*|*:) continue ;; esac
-        # Ten at a time: a TCP connection each, at most 2 s. A plain HTTP request: Entware's curl
+    brief "$TMPD/links" > "$TMPD/brief"
+    tab=$(printf '\t') last=0 k=0
+    while IFS="$tab" read -r j nm h pt; do
+        [ -n "$j" ] || continue
+        last=$j k=$((k + 1))
+        # Sixteen at a time: a TCP connection each, at most 2 s. A plain HTTP request: Entware's curl
         # has no telnet:// (every server was «not answering», Viva 2026-10-11); the connection
         # time is written also when the server does not speak HTTP (0 = no connection).
         case "$h" in *:*) hp="[$h]" ;; *) hp=$h ;; esac
         # Its exit code says why one did not answer: 6 name not found, 7 refused, 28 no answer in time.
-        ( "$CURL" -s -o /dev/null --noproxy '*' --connect-timeout 2 --max-time 2 -w '%{time_connect}' "http://$hp:$pt/" </dev/null > "$TMPD/ms.$i" 2>/dev/null
-          echo "$?" > "$TMPD/rc.$i" ) &
-        [ $((i % 10)) != 0 ] || wait
-    done < "$TMPD/links"
+        ( "$CURL" -s -o /dev/null --noproxy '*' --connect-timeout 2 --max-time 2 -w '%{time_connect}' "http://$hp:$pt/" </dev/null > "$TMPD/ms.$j" 2>/dev/null
+          echo "$?" > "$TMPD/rc.$j" ) &
+        [ $((k % 16)) != 0 ] || wait
+    done < "$TMPD/brief"
     wait
-    j=0
-    while [ "$j" -lt "$i" ]; do
-        j=$((j + 1))
-        [ -s "$TMPD/kv.$j" ] || continue
-        v() { awk -F '\t' -v k="$1" '$1 == k {print substr($0, length(k) + 2); exit}' "$TMPD/kv.$j" | tr -d '|"\\' | cut -c1-64; }
+    while IFS="$tab" read -r j nm h pt; do
+        [ -n "$j" ] || continue
         ms=$(awk '{t = $1 * 1000; if (t > 0) printf "%d", t + 0.5}' "$TMPD/ms.$j" 2>/dev/null)
         why=; [ -n "$ms" ] || case "$(cat "$TMPD/rc.$j" 2>/dev/null)" in 6) why=dns ;; 7) why=refused ;; *) why=timeout ;; esac
-        printf 'info.server.%s=%s|%s|%s|%s|%s|%s\n' "$j" "$(v name)" "$(v host)" "$(v port)" "$ms" "$([ "$j" = "$cur" ] && echo 1 || echo 0)" "$why"
-    done
+        printf 'info.server.%s=%s|%s|%s|%s|%s|%s\n' "$j" "$nm" "$h" "$pt" "$ms" "$([ "$j" = "$cur" ] && echo 1 || echo 0)" "$why"
+    done < "$TMPD/brief"
+    i=$last
     co_cross=$(countries_get "$n" cross)
     printf 'info.current=%s\ninfo.servers=%s\ninfo.countries.off=%s\ninfo.countries.cross=%s\n' "$cur" "$i" "$(countries_get "$n" off)" "${co_cross:-1}"
     echo "result=checked"
@@ -1037,7 +1078,7 @@ case "${1:-}" in
     kick) [ "$#" -eq 2 ] || die usage 64; op_kick "$2" ;;
     start) [ "$#" -eq 2 ] || die usage 64; op_start "$2" ;;
     failover) [ "$#" -eq 2 ] || die usage 64; op_failover "$2" ;;
-    list) [ "$#" -eq 2 ] || die usage 64; op_list "$2" ;;
+    list) [ "$#" -ge 2 ] && [ "$#" -le 3 ] || die usage 64; op_list "$2" "${3:-}" ;;
     select) [ "$#" -eq 3 ] || die usage 64; op_select "$2" "$3" ;;
     countries) [ "$#" -eq 2 ] || [ "$#" -eq 4 ] || die usage 64; op_countries "$2" "${3:-}" "${4:-}" ;;
     disable) [ "$#" -eq 2 ] || die usage 64; op_disable "$2"; sentinel_reload ;;

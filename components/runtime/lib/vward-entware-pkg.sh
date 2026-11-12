@@ -273,7 +273,8 @@ vward_entware_apply() (
     isz=$(tar -xzOf "$2" ./control.tar.gz 2>/dev/null | tar -xzO 2>/dev/null | sed -n 's/^Installed-Size: //p' | head -n 1)
     case $isz in ''|*[!0-9]*) isz=$(wc -c < "$2") ;; esac
     need=$(( (isz * 2 + $(wc -c < "$2")) / 1024 + 1 ))
-    free=$(df -k "$VWE_R/opt" 2>/dev/null | awk 'NR == 2 {print $4}')
+    # -P: one line per file system (BusyBox df puts a long device name on a line of its own).
+    free=$(df -Pk "$VWE_R/opt" 2>/dev/null | awk 'NR == 2 {print $4}')
     case $free in ''|*[!0-9]*) return 75 ;; esac
     [ "$free" -ge "$need" ] || { printf '%s\trefuse\tno-space-%sKB-needed\n' "$1" "$need"; return 75; }
     # Rollback image: the previously verified package must be in the private cache, or the

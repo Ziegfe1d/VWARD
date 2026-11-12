@@ -54,7 +54,7 @@ with tempfile.TemporaryDirectory() as tmp:
     root = tmp / "root"; (root / "tmp").mkdir(parents=True)
     henv = os.environ | {"VWARD_CONSOLE_ETC": str(tmp / "etc"), "VWARD_AGENTS_CONF": str(conf), "VWARD_ROOT_PREFIX": str(root),
                          "VWARD_CONSOLE_AUDIT_LOG": str(tmp / "audit.log"), "VWARD_CONSOLE_BACKUP_DIR": str(tmp / "backup"),
-                         "VWARD_ADMISSION_LIB": str(LIB), "VWARD_COMPONENT_STATE": str(tmp / "components"), "VWARD_ROUTE_STATE": str(tmp / "route")}
+                         "VWARD_ADMISSION_LIB": str(LIB), "VWARD_SETTINGS_REGISTRY": str(ROOT / "config/settings/settings-registry.json"), "VWARD_COMPONENT_STATE": str(tmp / "components"), "VWARD_ROUTE_STATE": str(tmp / "route")}
     helper = lambda *a: subprocess.run(["sh", str(HELPER), *a], env=henv, text=True, capture_output=True, timeout=60).stdout.strip().splitlines()[-1:]
     if helper("agents-mode", "all", "act") != ["result=changed"] or conf.read_text() != "all=act\n":
         fail(f"all=act: {conf.read_text()!r}")

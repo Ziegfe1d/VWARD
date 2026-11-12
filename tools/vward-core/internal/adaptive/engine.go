@@ -168,6 +168,9 @@ func (e *Engine) Check(ctx context.Context, raw string) Result {
 	if !e.cfg.AllowRU && ruZone(h) {
 		return Result{h, Skip, "ru zone stays on the provider"}
 	}
+	if routerOwn(h) {
+		return Result{h, Skip, "the router's own service (KeenDNS, cloud) stays on the provider"}
+	}
 	e.mu.Lock()
 	switch {
 	case coveredBy(h, e.skip) != "":

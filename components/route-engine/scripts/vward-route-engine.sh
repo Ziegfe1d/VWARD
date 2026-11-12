@@ -1010,6 +1010,18 @@ ru_zone()
     return 1
 }
 
+# router_own NAME: the router's own services (KeenDNS remote access and the SSTP server through
+# the cloud, Keenetic's cloud and updates, both brands) stay on the provider (owner 12.11.2026).
+router_own()
+{
+    case "$1" in
+        keenetic.pro|*.keenetic.pro|keenetic.link|*.keenetic.link|keenetic.name|*.keenetic.name|keenetic.io|*.keenetic.io|\
+        keenetic.net|*.keenetic.net|keenetic.com|*.keenetic.com|netcraze.pro|*.netcraze.pro|netcraze.link|*.netcraze.link|\
+        netcraze.name|*.netcraze.name|netcraze.io|*.netcraze.io|netcraze.net|*.netcraze.net|netcraze.com|*.netcraze.com) return 0 ;;
+    esac
+    return 1
+}
+
 add_adaptive()
 {
     H="$1"
@@ -1021,6 +1033,10 @@ add_adaptive()
 
     if ru_zone "$H"; then
         echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_SKIP_RU_ZONE|$H" >> "$EVENT_LOG"
+        return 0
+    fi
+    if router_own "$H"; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|ADD_SKIP_ROUTER_OWN|$H" >> "$EVENT_LOG"
         return 0
     fi
 
@@ -1663,6 +1679,10 @@ add_hint_adaptive()
 
     if ru_zone "$H"; then
         echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_SKIP_RU_ZONE|$H" >> "$EVENT_LOG"
+        return 0
+    fi
+    if router_own "$H"; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|HINT_SKIP_ROUTER_OWN|$H" >> "$EVENT_LOG"
         return 0
     fi
 

@@ -414,9 +414,12 @@ func (p *Plan) doh(cur *ndm.Model, want Desired) error {
 
 func (p *Plan) add(s Step) { p.Steps = append(p.Steps, s) }
 
+// routeCmd: the options go only with an added route. Keenetic 5.1.8 does not take
+// «dns-proxy no route object-group G T auto» over RCI («no such command: auto», the route
+// stays; Viva 12.11.2026): a route is taken back by its group and target alone.
 func routeCmd(no, g, t, o string) string {
 	c := "dns-proxy " + no + "route object-group " + g + " " + t
-	if o != "" {
+	if o != "" && no == "" {
 		c += " " + o
 	}
 	return c

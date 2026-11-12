@@ -41,7 +41,9 @@ dns-proxy
 """
 FAKE_CORE = """#!/bin/sh
 echo "$@" >> "@T@/core.calls"
-r=$(cat "@T@/core.result" 2>/dev/null || echo changed)
+if [ "$1" = recover ]; then cat "@T@/core.recover" 2>/dev/null; exit 0; fi
+if [ -s "@T@/core.next" ]; then r=$(head -n 1 "@T@/core.next"); sed -i 1d "@T@/core.next"
+else r=$(cat "@T@/core.result" 2>/dev/null || echo changed); fi
 echo "RESULT=$r"
 [ "$r" = changed ] || [ "$r" = unchanged ] || { echo "WHY=fake $r"; exit 1; }
 """
@@ -137,6 +139,18 @@ with tempfile.TemporaryDirectory() as t:
             fail(f"{res}: the core's reason is not in the journal")
     calls()
     (tmp / "core.result").write_text("changed")
+    # An operation left open: the core's own check closes it, then the operation runs again;
+    # an «unknown» batch its check finds applied is done (the owner did it in SSH, 12.11.2026).
+    (tmp / "core.recover").write_text("OP=panel-1-retarget\twas=unknown\tnow=done\twhy=applied\nRECOVER=OK\nOPEN=0\n")
+    (tmp / "core.next").write_text("blocked\nchanged\n")
+    rc, out = run("list-domain", "add", "domain-list1", "after.example.com")
+    if rc != 0 or "result=changed" not in out or [c.split()[0] for c in calls()] != ["list", "recover", "list"]:
+        fail(f"blocked, recovered, done: {out}")
+    (tmp / "core.next").write_text("unknown\n")
+    rc, out = run("list-domain", "add", "domain-list1", "unk.example.com")
+    if rc != 0 or "result=changed" not in out:
+        fail(f"unknown, found applied: {out}")
+    calls(); (tmp / "core.recover").unlink()
     # core.panel.off, or no core: the shell writes as before.
     (etc / "route-engine/core.panel.off").write_text("")
     rc, out = run("list-domain", "add", "domain-list1", "shell.example.com")

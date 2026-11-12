@@ -409,6 +409,13 @@ esac
         fail(f"the list of servers: {out}")
     if "secret-fo" in "\n".join(out) or UUID in "\n".join(out):
         fail("the list shows the subscription's address or the id")
+    # A look at the list reads the copy made within 6 hours: the subscription is not fetched on
+    # every look (owner 12.11.2026: the servers did not load in 20 s); «fresh» fetches it.
+    _sub = (tmp / "sub").read_text()
+    (tmp / "sub").write_text(base64.b64encode(vl("203.0.113.99", "NEW").encode()).decode())
+    if sum(l.startswith("info.server.") for l in engine("list", tn)) != 3:
+        fail("a look at the list fetches the subscription again")
+    (tmp / "sub").write_text(_sub)
     # Chosen in the Panel: the tunnel moves when the server answers, else it stays where it was.
     out = engine("select", tn, "2")
     if out != ["info.server=2", "info.host=203.0.113.12:443", "result=changed"] or (etc / f"v{sn}.idx").read_text().strip() != "2":
@@ -479,7 +486,7 @@ esac
     kept = (etc / f"v{sn}.links").read_text()
     def bell():
         return (tmp / "bell/notes.tsv").read_text() if (tmp / "bell/notes.tsv").exists() else ""
-    out = engine("list", tn)
+    out = engine("list", tn, "fresh")
     if (etc / f"v{sn}.links").read_text() != kept or sum(l.startswith("info.server.") for l in out) != 3 or "expired" in "\n".join(out):
         fail(f"an expired subscription: the servers kept stay, no notes among them: {out}")
     if not (run_ / f"v{sn}.expired").exists() or bell().count("Подписка VLESS истекла") != 1:
@@ -487,7 +494,7 @@ esac
     addr = (tmp / "xray.addr").read_text()
     if engine("failover", tn) != ["info.failover=expired", "result=unchanged"] or (tmp / "xray.addr").read_text() != addr:
         fail("an expired subscription: no server is tried")
-    engine("list", tn)
+    engine("list", tn, "fresh")
     if bell().count("Подписка VLESS истекла") != 1:
         fail("an expired subscription: told once, not on every look")
     # The minute check: a silent tunnel is neither restarted nor moved while it lasts.
@@ -500,7 +507,7 @@ esac
     (tmp / "sub").write_text(base64.b64encode("\n".join(real).encode()).decode())
     (tmp / "sub.hdr").write_text("HTTP/1.1 200 OK\r\nSubscription-Userinfo: upload=0; download=1; total=0; expire=1000\r\n\r\n")
     (run_ / f"v{sn}.expired").unlink()
-    engine("list", tn)
+    engine("list", tn, "fresh")
     if not (run_ / f"v{sn}.expired").exists():
         fail("a subscription whose date is past is not taken for expired")
     # Renewed: a date ahead, a note among the servers left out; the minute check looks again

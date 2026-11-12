@@ -49,7 +49,7 @@ if "рукопожатие" in piece("const tunSub = t => {", "\n};\n"):
 for need in ("'<span class=\"st ok\">по умолчанию</span>'", "'Сделать туннелем по умолчанию'", "['Туннель по умолчанию', managed ? 'Да' : 'Нет'",
              "' · модуль AmneziaWG (VWARD)'", "t.endpoint || (e && e.endpoint) || (v && (v.server_name ? v.server_name + ' · ' + v.server : v.server))", "['Память программы'",
              "const rx = t.rx != null ? t.rx : e && e.rx", "sw('data-tun-onoff=\"' + esc(name) + '\"', !off", "confirm = { id: 'tunnel-down' }",
-             "'tunnel-down': () => tunnelState('down', current.slice(2))", "(managed ? '' : sw('data-tun-onoff", "mp[0] + tunnelProbePanel(name) + tunnelTrafficPanel(name) + mp.slice(1).join('')"):
+             "'tunnel-down': () => tunnelState('down', current.slice(2))", "(managed || lost ? '' : sw('data-tun-onoff", "(lost ? '' : mp[0]) + tunnelProbePanel(name) + tunnelTrafficPanel(name) + mp.slice(1).join('')"):
     if need not in JS:
         fail(f"the Panel lacks {need}")
 if "для маршрутов" in JS:

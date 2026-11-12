@@ -137,13 +137,15 @@ agh_present() { [ -r /opt/etc/AdGuardHome/AdGuardHome.yaml ] || [ -x /opt/bin/Ad
 # old USB drive (DEAD_TUNNELS, owner 12.11.2026: «старый VPN туннель»). One line each, tab-separated:
 #   L GROUP TUNNEL «route object-group GROUP TUNNEL ...»   a domain list (AdaptiveAuto is moved apart)
 #   S -     TUNNEL «ip route ...»                          a subnet
+#   D -     TUNNEL «ip name-server SERVER DOMAIN on TUNNEL» DNS through the tunnel (owner 12.11.2026)
 dead_routes() {
     [ -n "$DEAD_TUNNELS" ] || return 0
     ndmc -c 'show running-config' 2>/dev/null | awk -v dead=" $DEAD_TUNNELS " -v g="$ADAPTIVE_GROUP" '
         /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)} /^!/ {ctx = 0}
         ctx && $1 == "route" && $2 == "object-group" && $3 != g && index(dead, " " $4 " ") {sub(/^[ \t]+/, ""); print "L\t" $3 "\t" $4 "\t" $0; next}
         $1 == "ip" && $2 == "route" {t = ($3 ~ /\// || $4 !~ /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/) ? $4 : $5
-            if (index(dead, " " t " ")) print "S\t-\t" t "\t" $0}'
+            if (index(dead, " " t " ")) print "S\t-\t" t "\t" $0; next}
+        $1 == "ip" && $2 == "name-server" && $(NF - 1) == "on" && index(dead, " " $NF " ") {print "D\t-\t" $NF "\t" $0}'
 }
 # no_ip_route LINE: the command that takes a subnet route out (as vward-off.sh: the tunnel kept).
 no_ip_route() {
@@ -281,7 +283,9 @@ network() {
     fi
     # What still goes into a tunnel without settings: nowhere today (its routes are «auto», so
     # Keenetic sends it straight to the provider).
-    dr=$(dead_routes | awk -F '\t' '{if ($1 == "L") n = $2; else {split($4, a, " "); n = a[3]}; print n " (" $3 ")"}' | awk '!s[$0]++' | tr '\n' ';' | sed 's/;$//; s/;/, /g')
+    # Counted per tunnel, not listed: a router that lived before has hundreds of subnets (owner 12.11.2026).
+    dr=$(dead_routes | awk -F '\t' '{k = $1 == "L" ? $2 : $4; if (s[$3 SUBSEP k]++) next; t[$3]; if ($1 == "L") l[$3]++; else if ($1 == "D") dn[$3]++; else n[$3]++}
+        END {for (x in t) {o = ""; if (l[x]) o = "списков доменов " l[x]; if (n[x]) o = o (o ? ", " : "") "подсетей " n[x]; if (dn[x]) o = o (o ? ", " : "") "DNS через туннель " dn[x]; printf "%s%s: %s", (c++ ? ", " : ""), x, o}}')
     if [ -n "$dr" ] && [ -n "$lost" ]; then
         warn "через туннели VWARD без настроек идут: $dr - пока туннель не добавлен заново, они идут напрямую. Панель VWARD → VPN → «Добавить туннель», затем «Использовать для маршрутов»: всё это переедет туда само"
     elif [ -n "$dr" ]; then
@@ -419,7 +423,7 @@ configure() {
         : > "$ETC/components/$c.lite"
     done
     [ ! -e "$ETC/components/ads-privacy-guard.disabled" ] || : > "$ETC/components/ads-privacy-guard.lite"
-    [ -z "$lite_list" ] || skip "сторожа туннеля и интернета, Wi-Fi и ночная сверка категорий выключены; включаются в Панели VWARD → Компоненты"
+    [ -z "$lite_list" ] || skip "агент VPN, восстановление интернета, контроль Wi-Fi и ночная сверка категорий выключены; включаются в Панели VWARD → Компоненты"
 
     # DNS left by an AdGuard Home that is gone: out, so Keenetic answers by itself (owner 12.11.2026).
     stale_dns > "$WORK/dns-stale"
@@ -470,7 +474,7 @@ EOF_ROUTES
     # The owner's lists and subnets on VWARD engine tunnels without settings go to $TUNNEL, as the
     # Panel's «Использовать для маршрутов» moves them off such a tunnel (Viva 2026-10-19); nothing is
     # moved when the chosen tunnel is itself one of them. Undone with the rest on a failure.
-    DEAD_MOVED=
+    DEAD_MOVED= dm_l=0 dm_n=0 dm_d=0 dm_from=
     if [ -z "$LOST" ] && [ -n "$DEAD_TUNNELS" ]; then
         dead_routes > "$WORK/dead-routes"
         tab=$(printf '\t')
@@ -484,18 +488,27 @@ EOF_ROUTES
                 fi
                 ndm "dns-proxy no route object-group $grp $from" || fail "Keenetic не убрал маршрут $grp → $from"
                 printf '%s\n' "dns-proxy $rest" >> "$WORK/dead-removed"
-                what=$grp
+                dm_l=$((dm_l + 1))
+            elif [ "$kind" = D ]; then
+                new="${rest% on *} on $TUNNEL"
+                ndm "$new" || fail "Keenetic не принял «$new»"
+                printf '%s\n' "no $new" >> "$WORK/dead-added"
+                ndm "no $rest" || fail "Keenetic не убрал «$rest»"
+                printf '%s\n' "$rest" >> "$WORK/dead-removed"
+                dm_d=$((dm_d + 1))
             else
                 new=$(printf '%s\n' "$rest" | awk -v f="$from" -v t="$TUNNEL" '{for (i = 4; i <= NF; i++) if ($i == f) {$i = t; break}; print}')
                 ndm "$new" || fail "Keenetic не принял «$new»"
                 no_ip_route "$new" >> "$WORK/dead-added"
                 ndm "$(no_ip_route "$rest")" || fail "Keenetic не убрал «$rest»"
                 printf '%s\n' "$rest" >> "$WORK/dead-removed"
-                what=$(printf '%s\n' "$rest" | awk '{print $3 ($3 ~ /\// ? "" : " " $4)}')
+                dm_n=$((dm_n + 1))
             fi
             DEAD_MOVED=1
-            ok "перенесено в $TUNNEL: $what (было через $from - туннель VWARD без настроек)"
+            case " $dm_from " in *" $from "*) ;; *) dm_from="${dm_from:+$dm_from }$from" ;; esac
         done < "$WORK/dead-routes"
+        # One line, not one per subnet: a router that lived before has hundreds (owner 12.11.2026).
+        [ -z "$DEAD_MOVED" ] || ok "перенесено в $TUNNEL: списков доменов $dm_l, подсетей $dm_n, DNS через туннель $dm_d (было через $dm_from - туннель VWARD без настроек)"
     fi
     if [ "$MADE_ADAPTIVE_GROUP" = 1 ] || [ "$MADE_ADAPTIVE_ROUTE" = 1 ] || [ -n "$DEAD_MOVED" ]; then
         ndm "system configuration save" || fail "Keenetic не сохранил настройки"

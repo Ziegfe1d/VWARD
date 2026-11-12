@@ -203,6 +203,22 @@ core_list() {
     [ -x "$CORE_BIN" ] && [ ! -e "$CORE_PANEL_OFF" ] || return 2
     cl_out=$("$CORE_BIN" list --journal "$CORE_JOURNAL" "$@" 2>&1)
     cl_res=$(printf '%s\n' "$cl_out" | sed -n 's/^RESULT=//p' | head -n 1)
+    # An earlier operation left open (a lost answer, a partial batch): the core's own check reads
+    # the router and closes it by evidence (it never writes to Keenetic); then this one again.
+    # The owner did it by hand in SSH (vward-core recover, Viva 12.11.2026).
+    if [ "$cl_res" = blocked ] || [ "$cl_res" = unknown ]; then
+        cl_rec=$("$CORE_BIN" recover --journal "$CORE_JOURNAL" --yes 2>&1)
+        audit "core recover after $cl_res: $(printf '%s\n' "$cl_rec" | sed -n 's/^RECOVER=//p' | head -n 1)"
+        if printf '%s\n' "$cl_rec" | grep -qx 'RECOVER=OK'; then
+            if [ "$cl_res" = unknown ]; then
+                # The batch of this very operation: recovery says whether it was applied.
+                printf '%s\n' "$cl_rec" | grep -q 'now=done' && return 0
+                die router_rejected
+            fi
+            cl_out=$("$CORE_BIN" list --journal "$CORE_JOURNAL" "$@" 2>&1)
+            cl_res=$(printf '%s\n' "$cl_out" | sed -n 's/^RESULT=//p' | head -n 1)
+        fi
+    fi
     RELAY_REASON=$(printf '%s\n' "$cl_out" | sed -n 's/^WHY=//p' | head -n 1 | cut -c1-200)
     case "$cl_res" in
         changed) return 0 ;;
@@ -469,6 +485,39 @@ load_profile() {
     case "$VWARD_POLICY_GROUP" in *[!A-Za-z0-9_.-]*) die policy_group_unavailable ;; esac
 }
 
+# load_profile_own: as load_profile, but with no group for «Мои домены» VWARD makes its own:
+# Keenetic's list «VWARD» routed through the default tunnel, written to device.conf (owner
+# 12.11.2026: after the switch to a new tunnel there was no group, «VPN» did nothing for
+# claude.ai). A list «VWARD» already there is taken as it is. Undone if any step is refused.
+OWN_GROUP=VWARD
+load_profile_own() {
+    load_profile_base
+    case "${VWARD_POLICY_GROUP:-}" in ''|"$ADAPTIVE_GROUP") ;; *) load_profile; return 0 ;; esac
+    vward_valid_ndm_name "${VWARD_TUNNEL_INTERFACE:-}" || die tunnel_unavailable
+    [ "${LOCKED:-0}" = 1 ] || change_lock
+    snapshot
+    og_made=0 og_routed=0
+    if ! grep -qx "object-group fqdn $OWN_GROUP" "$RUNCFG"; then
+        ndm "object-group fqdn $OWN_GROUP" || die router_rejected
+        og_made=1
+    fi
+    if ! route_present "$OWN_GROUP" "$VWARD_TUNNEL_INTERFACE"; then
+        ndm "dns-proxy route object-group $OWN_GROUP $VWARD_TUNNEL_INTERFACE auto" ||
+            { [ "$og_made" = 0 ] || ndm "no object-group fqdn $OWN_GROUP"; die router_rejected; }
+        og_routed=1
+    fi
+    set_kv "$VWARD_DEVICE_CONFIG" VWARD_POLICY_GROUP "$OWN_GROUP" 0600 || :
+    rm -f "$VWARD_DEVICE_MAP_CACHE"
+    ( unset VWARD_POLICY_GROUP; vward_profile_load >/dev/null 2>&1 && [ "$VWARD_POLICY_GROUP" = "$OWN_GROUP" ] ) || {
+        [ "$og_routed" = 0 ] || ndm "dns-proxy no route object-group $OWN_GROUP $VWARD_TUNNEL_INTERFACE"
+        [ "$og_made" = 0 ] || ndm "no object-group fqdn $OWN_GROUP"
+        die profile_verification_failed; }
+    [ $((og_made + og_routed)) = 0 ] || save_router || die config_save_failed
+    audit "policy-group $OWN_GROUP made=$og_made routed=$og_routed via=$VWARD_TUNNEL_INTERFACE"
+    VWARD_POLICY_GROUP=$OWN_GROUP
+    snapshot
+}
+
 config_snapshot_valid() {
     [ -s "$1" ] && awk '
         /^[[:space:]]*(Command::|[Ee][Rr][Rr][Oo][Rr][: ]|[Ff]ailed[: ])/ {bad=1}
@@ -615,8 +664,8 @@ op_list_domain() {
 op_route_domain() {
     case "$1" in add|remove) ;; *) die invalid_operation 64 ;; esac
     valid_domain "$2" || die invalid_domain 64
-    load_profile
-    change_lock
+    if [ "$1" = add ]; then load_profile_own; else load_profile; fi
+    [ "${LOCKED:-0}" = 1 ] || change_lock
     core_list "$1" "$VWARD_POLICY_GROUP" "$2"
     case $? in
         0) done_ok "route-domain $1 $2 group=$VWARD_POLICY_GROUP by=core" changed ;;
@@ -630,7 +679,7 @@ op_route_domain() {
 op_adaptive() {
     case "$1" in remove|pin) ;; *) die invalid_operation 64 ;; esac
     valid_domain "$2" || die invalid_domain 64
-    [ "$1" = remove ] || load_profile
+    [ "$1" = remove ] || load_profile_own
     change_lock
     changed=0 router=0
     # The core: the name out of AdaptiveAuto (and into «Мои домены» for pin) as one batch.
@@ -1007,6 +1056,12 @@ op_tunnel() {
         done < "$JOURNAL.nets"
     fi
     nets=$(grep -c . "$JOURNAL.nets")
+    # 3b. DNS through the old tunnel (all only, as the subnets).
+    DNS_MOVED=0
+    if [ "$MOVE_ALL" = 1 ]; then
+        dns_on_move "$OLD_IF" "$NEW_IF"
+        if [ "$DNS_MOVED" != 0 ]; then snapshot; ! dns_on_left "$OLD_IF" || die verification_failed; fi
+    fi
 
     # 4. device.conf: the tunnel, and the policy group pinned so discovery no
     #    longer depends on which tunnel its route points to.
@@ -1046,7 +1101,7 @@ op_tunnel() {
     [ ! -x "$POLICY_SYNC_BIN" ] || (trap '' HUP; exec "$POLICY_SYNC_BIN" --reconcile) </dev/null >/dev/null 2>&1 &
     # The owner chose this tunnel: the guard does not take the routes back anywhere else.
     [ "${VWARD_TUNNEL_BY_GUARD:-}" = 1 ] || rm -f "${VWARD_TUNNEL_FALLBACK_STATE:-/opt/var/lib/vward/tunnel-guard/fallback}"
-    done_ok "tunnel $OLD_IF($OLD_DEV) -> $NEW_IF($NEW_DEV) group=$GROUP routes=$moved subnets=$nets" changed
+    done_ok "tunnel $OLD_IF($OLD_DEV) -> $NEW_IF($NEW_DEV) group=$GROUP routes=$moved subnets=$nets dns=$DNS_MOVED" changed
 }
 
 # ---------- Domain lists: around the tunnel or through it ----------
@@ -3255,7 +3310,8 @@ op_vless_server() {
     [ -x "$VLESS_ENGINE" ] || die engine_unavailable
     case "$2" in OpkgTun[0-9]) ;; *) die invalid_tunnel 64 ;; esac
     case "$1" in
-        servers) vs_out=$("$VLESS_ENGINE" list "$2" 2>/dev/null) ;;
+        servers) case "${3:-}" in ""|fresh) ;; *) die invalid_value 64 ;; esac
+                vs_out=$("$VLESS_ENGINE" list "$2" ${3:-} 2>/dev/null) ;;
         # A country on or off, or failover between countries (fix.28.2).
         countries) case "$3:$4" in cross:0|cross:1|--:0|--:1|[A-Z][A-Z]:0|[A-Z][A-Z]:1) ;; *) die invalid_value 64 ;; esac
                 vs_out=$("$VLESS_ENGINE" countries "$2" "$3" "$4" 2>/dev/null) ;;
@@ -3523,6 +3579,30 @@ op_tunnel_state() {
     done_ok "tunnel-state $1 $2" changed
 }
 
+# dns_on_move OLD NEW: Keenetic's «ip name-server SERVER [DOMAIN] on OLD» (DNS through the tunnel:
+# 16 lines for YouTube and Instagram stayed on the dead OpkgTun4 of the owner's Viva, 12.11.2026)
+# go with the routes to NEW; NEW «-»: taken out. Journaled for the undo; DNS_MOVED counts them.
+dns_on_move() {
+    awk -v i="$1" '$1 == "ip" && $2 == "name-server" && $(NF - 1) == "on" && $NF == i' "$RUNCFG" > "$JOURNAL.dnson"
+    DNS_MOVED=0
+    while IFS= read -r dl; do
+        [ -n "$dl" ] || continue
+        dm_base=${dl% on *}
+        if [ "$2" != - ] && ! grep -Fqx "$dm_base on $2" "$RUNCFG"; then
+            ndm "$dm_base on $2" || die router_rejected
+            echo "no $dm_base on $2" >> "$JOURNAL"
+        fi
+        ndm "no $dl" || die router_rejected
+        echo "$dl" >> "$JOURNAL"
+        DNS_MOVED=$((DNS_MOVED + 1))
+    done < "$JOURNAL.dnson"
+    rm -f "$JOURNAL.dnson"
+}
+# dns_on_left OLD: a DNS line still on OLD after the move (the verification).
+dns_on_left() {
+    awk -v i="$1" '$1 == "ip" && $2 == "name-server" && $(NF - 1) == "on" && $NF == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG"
+}
+
 op_tunnel_delete() {
     # tunnel-delete NAME TARGET [move]: move its lists and subnets to TARGET (bypass, vpn
     # or another tunnel), then remove the interface.  The VWARD tunnel stays.  move: only
@@ -3591,7 +3671,10 @@ op_tunnel_delete() {
         ndm "no ip route $net $1" || die router_rejected
         echo "ip route $net $1 auto" >> "$JOURNAL"
     done < "$JOURNAL.nets"
+    # DNS through the tunnel goes where its routes go.
+    dns_on_move "$1" "$td_to"
     snapshot
+    ! dns_on_left "$1" || die verification_failed
     while IFS= read -r g; do [ -z "$g" ] || ! route_present "$g" "$1" || die verification_failed; done < "$JOURNAL.lists"
     if [ "${3:-}" = move ]; then
         # Not moved: only what is still on the old tunnel after the move (Viva 2026-10-19: 450
@@ -3608,7 +3691,7 @@ op_tunnel_delete() {
         td_nets=$(( $(grep -c . "$JOURNAL.nets") - td_fail ))
         # Each refused subnet with Keenetic's own answer (the first 20).
         head -n 20 "$JOURNAL.failed" | while IFS='|' read -r tf_net tf_why; do audit "tunnel-move $1 subnet $tf_net refused: ${tf_why:-no answer}"; done
-        [ $((td_lists + td_nets)) -gt 0 ] || { TXN=0; rm -f "$JOURNAL.lists" "$JOURNAL.nets" "$JOURNAL.failed" "$JOURNAL.owned"
+        [ $((td_lists + td_nets + DNS_MOVED)) -gt 0 ] || { TXN=0; rm -f "$JOURNAL.lists" "$JOURNAL.nets" "$JOURNAL.failed" "$JOURNAL.owned"
             [ "$td_fail" = 0 ] || die router_rejected; done_ok "tunnel-move $1 nothing to move ip_categories=$td_own" unchanged; }
         save_router || die config_save_failed
         TXN=0
@@ -3617,8 +3700,8 @@ op_tunnel_delete() {
         if [ "$td_own" != 0 ] && [ -x "$POLICY_SYNC_BIN" ]; then
             (trap '' HUP; exec "$POLICY_SYNC_BIN" --reconcile) </dev/null >/dev/null 2>&1 &
         fi
-        echo "info.moved=lists:$td_lists,subnets:$td_nets,failed:$td_fail,ip_categories:$td_own"
-        done_ok "tunnel-move $1 lists=$td_lists subnets=$td_nets failed=$td_fail ip_categories=$td_own to=$2" changed
+        echo "info.moved=lists:$td_lists,subnets:$td_nets,failed:$td_fail,ip_categories:$td_own,dns:$DNS_MOVED"
+        done_ok "tunnel-move $1 lists=$td_lists subnets=$td_nets dns=$DNS_MOVED failed=$td_fail ip_categories=$td_own to=$2" changed
     fi
     ! awk -v i="$1" "$ROUTE_AWK"' $1 == "ip" && $2 == "route" && rdev() == i {f = 1} END {exit f ? 0 : 1}' "$RUNCFG" || die verification_failed
     # Last step: nothing depends on the interface any more.
@@ -4750,14 +4833,37 @@ op_journal() {
     done_ok "journal $1=$2" changed
 }
 
+# The parts' registry (fix.38): the one list of VWARD's parts, their names and switches; it comes
+# with every release, next to the Panel. reg_has QUERY NAME: NAME is one of the ids QUERY gives.
+SETTINGS_REG=${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}
+reg_has() {
+    case "$2" in ''|*[!a-z0-9-]*) return 1 ;; esac
+    "$JQ" -e --arg n "$2" "[$1] | index(\$n) != null" "$SETTINGS_REG" >/dev/null 2>&1
+}
+
+# op_extra NAME 0|1: an optional part of the lightened VWARD (owner 11.11.2026: switched on one by
+# one) - NAME.on next to the components' state; vward_extra (the admission library) reads it.
+op_extra() {
+    reg_has '.parts[] | select(.switch == "extra") | .id' "$1" || die invalid_value 64
+    case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
+    # NAME.on switches a part on; NAME.off keeps it off even with every part on (all.on).
+    ex_f="$COMPONENT_STATE/$1.on" ex_o="$COMPONENT_STATE/$1.off"
+    if [ "$2" = 1 ]; then
+        [ -e "$ex_o" ] || [ ! -e "$ex_f" ] || done_ok "extra $1=1" unchanged
+        mkdir -p "$COMPONENT_STATE" && rm -f "$ex_o" && printf '' > "$ex_f" 2>/dev/null || die write_failed
+    else
+        [ ! -e "$ex_f" ] && { [ -e "$ex_o" ] || [ ! -e "$COMPONENT_STATE/all.on" ]; } && done_ok "extra $1=0" unchanged
+        rm -f "$ex_f" || die write_failed
+        [ ! -e "$COMPONENT_STATE/all.on" ] || printf '' > "$ex_o" 2>/dev/null || die write_failed
+    fi
+    done_ok "extra $1=$2" changed
+}
+
 # op_agents_mode AGENT MODE: «Наблюдение | Действие» (fix.28.6). all sets every agent (their own
 # choices go); one agent: its own choice. Read by vward_agent_mode (the admission library).
 op_agents_mode() {
-    case "$1:$2" in
-        all:act|all:watch) ;;
-        network:act|network:watch|components:act|components:watch|updates:act|updates:watch|maintenance:act|maintenance:watch) ;;
-        *) die invalid_value 64 ;;
-    esac
+    case "$2" in act|watch) ;; *) die invalid_value 64 ;; esac
+    [ "$1" = all ] || reg_has '.parts_agents | keys[]' "$1" || die invalid_value 64
     am_conf=${VWARD_AGENTS_CONF:-$ETC/agents.conf}
     if [ "$1" = all ]; then
         am_old=$(cat "$am_conf" 2>/dev/null)
@@ -4857,6 +4963,15 @@ EXT_R=${VWARD_EXT_ROOT:-}
 # automatic, by hand only with a second confirmation.
 EXT_CRITICAL=" libc libgcc libpthread librt libssp libstdcpp busybox opkg entware-opt entware-release entware-upgrade dropbear "
 EXT_MIN_FREE_KB=20480
+# opt_free_kb: free KiB of the USB drive (/opt). -P keeps one line per file system: without it
+# BusyBox df puts a long device name on a line of its own and the number was read as empty -
+# «нет места» on a drive with room (owner 12.11.2026). An answer that is not a number is
+# «unknown» (rc 1), never «full».
+opt_free_kb() {
+    ofk=$(df -Pk "${EXT_R:-}/opt" 2>/dev/null | awk 'NR == 2 {print $4}')
+    case "$ofk" in ''|*[!0-9]*) return 1 ;; esac
+    printf '%s\n' "$ofk"
+}
 OPKG_STATUS=/opt/lib/opkg/status
 OPKG_INFO=/opt/lib/opkg/info
 
@@ -5020,8 +5135,7 @@ op_ext_agh_official() {
         agh_official_adopt
         done_ok "ext-agh-official $AGH_OFFICIAL_VERSION installed already" unchanged
     fi
-    free=$(df -k "$EXT_R/opt" 2>/dev/null | awk 'NR == 2 {print $4}')
-    case "$free" in ''|*[!0-9]*) free=0 ;; esac
+    free=$(opt_free_kb) || die space_unknown
     [ "$free" -ge "$AGH_OFFICIAL_MIN_FREE_KB" ] || die no_space
 
     echo "Загрузка AdGuard Home $AGH_OFFICIAL_VERSION ($ao_arch)..."
@@ -5165,8 +5279,7 @@ op_ext_upgrade() {
     [ -n "$line" ] || die not_upgradable
     from=$(printf '%s\n' "$line" | cut -f2); to=$(printf '%s\n' "$line" | cut -f3)
     ! ext_critical "$1" || [ "$2" = critical ] || die confirmation_required
-    free=$(df -k "$EXT_R/opt" 2>/dev/null | awk 'NR == 2 {print $4}')
-    case "$free" in ''|*[!0-9]*) free=0 ;; esac
+    free=$(opt_free_kb) || die space_unknown
     [ "$free" -ge "$EXT_MIN_FREE_KB" ] || die no_space
     load_profile_base
 
@@ -5498,8 +5611,7 @@ op_agh_component() {
             ai_had=$(agh_bin_now) || ai_had=
             [ "$1" = install ] || [ -n "$ai_had" ] || die agh_not_installed
             [ "$1" != install ] || [ -z "$ai_had" ] || [ ! -s "$AGH_YAML" ] || { comp_end; done_ok "agh-component install: installed already" unchanged; }
-            free=$(df -k "$EXT_R/opt" 2>/dev/null | awk 'NR == 2 {print $4}'); case "$free" in ''|*[!0-9]*) free=0 ;; esac
-            [ -n "$ai_had" ] || [ "$free" -ge "$AGH_OFFICIAL_MIN_FREE_KB" ] || die no_space
+            if [ -z "$ai_had" ]; then free=$(opt_free_kb) || die space_unknown; [ "$free" -ge "$AGH_OFFICIAL_MIN_FREE_KB" ] || die no_space; fi
             # A new setup of AdGuard Home needs the owner's login: kept by VWARD or given now.
             ai_need=1; [ ! -s "$AGH_YAML" ] || [ "$1" = reset ] || ai_need=0
             [ "$ai_need" = 0 ] || agh_creds >/dev/null || die agh_credentials_required
@@ -5878,6 +5990,7 @@ case "$OP" in
     ext-agh-official) op_ext_agh_official "$ARG1" ;;
     journal) op_journal "$ARG1" "$ARG2" ;;
     agents-mode) op_agents_mode "$ARG1" "$ARG2" ;;
+    extra) op_extra "$ARG1" "$ARG2" ;;
     firmware) op_firmware "$ARG1" "$ARG2" ;;
     *) die invalid_operation 64 ;;
 esac

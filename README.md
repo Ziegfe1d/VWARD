@@ -4,7 +4,7 @@
 автоматического восстановления, диагностики и безопасных обновлений на роутерах
 Keenetic с Entware.
 
-Текущая версия ветки `dev`: **0.2.0-rc.2.fix.37** (RC2: облегчённая VWARD — по умолчанию только VPN и автоподбор доменов; автоподбор и списки Панели на Go-ядре; «Журналы» по кнопке; в Панели версия видна как «0.2.0 RC2 #37.0.ГГММДД»).. Этапы выпуска:
+Текущая версия ветки `dev`: **0.2.0-rc.2.fix.38** (RC2: смена туннеля с DNS через туннель, автоподбор понимает гео-блокировку и рекламу, свой список VWARD, «Маршруты», «Доменные списки» и «Автоподбор доменов» по новому макету, одна страница «Компоненты»; в Панели версия видна как «0.2.0 RC2 #38.0.ГГММДД»).. Этапы выпуска:
 RC1 → RC2 → RP1 → RP2 → RETAIL, см. [`docs/RELEASE_0.2.0.md`](docs/RELEASE_0.2.0.md).
 Это ещё не стабильный релиз.
 
@@ -52,10 +52,10 @@ Production-профиль проверен на Keenetic автора; уста�
 Подготовка роутера и Entware - в [`docs/INSTALL.md`](docs/INSTALL.md). Затем по SSH:
 
 ```sh
-opkg update && opkg install curl
-curl -fsSL https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/install.sh -o /tmp/vward-install.sh
-sh /tmp/vward-install.sh
+opkg update && opkg install curl && curl -fsSL https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/install.sh -o /tmp/vward-install.sh && sh /tmp/vward-install.sh
 ```
+
+Одна строка; если оборвалась на скачивании - повторите её.
 
 Полный путь, команды проверки, recovery и удаление: [`docs/INSTALL.md`](docs/INSTALL.md).
 Карта source → runtime: [`docs/INSTALLATION_MAP.md`](docs/INSTALLATION_MAP.md).

@@ -465,9 +465,9 @@ command -v vward_core_adaptive_pid >/dev/null 2>&1 || vward_core_adaptive_pid() 
 core_sum()
 {
     case "$1" in
-        mipsle) echo e9664348f19c69434ce7072c7b8f02d67474808a4d0abf7fc253235649538021 ;;
-        mips) echo ef54e5d1305480420ef2f2c9722b41cc2062e18dea1869aad34d6fee0d0723c7 ;;
-        arm64) echo 0cde7cb4f823ca055d09feffc6522a55a19a808dfd03d21e608293008702876c ;;
+        mipsle) echo c339942ab038793558b88b83e0d283135b2ab83508b55a24c3c6219940238863 ;;
+        mips) echo 7e56c0aca069a79ad64a6bdb5b09d5d75f1ae02d385b44141ef750d3580d9e97 ;;
+        arm64) echo 6fa9e0bed84fa8d55358c67878dab81f55e0b6ae5753894f4e01f4b3f31f6a9d ;;
         *) return 1 ;;
     esac
 }

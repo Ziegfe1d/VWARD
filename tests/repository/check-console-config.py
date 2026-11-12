@@ -82,6 +82,7 @@ with tempfile.TemporaryDirectory() as tmp:
         "VWARD_AGENTS_CONF": str(tmp / "agents.conf"),
         "VWARD_PROFILE_LIB": str(profile), "VWARD_ROOT_PREFIX": str(tmp / "root"),
         "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
+        "VWARD_SETTINGS_REGISTRY": str(ROOT / "config/settings/settings-registry.json"),
     }
 
     def run(*args, expect=None, rc=None):

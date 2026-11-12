@@ -200,7 +200,7 @@ esac
         fail("policy-sync must be started to move the IP routes")
     if "system configuration save" not in (tmp / "running.cfg.log").read_text().splitlines()[-1]:
         fail("router configuration must be saved last")
-    if "tunnel Wireguard3(nwg3) -> Wireguard8(nwg8) group=streaming routes=2 subnets=0 result=changed" not in (tmp / "audit.log").read_text():
+    if "tunnel Wireguard3(nwg3) -> Wireguard8(nwg8) group=streaming routes=2 subnets=0 dns=0 result=changed" not in (tmp / "audit.log").read_text():
         fail("audit line missing")
     if (tmp / "change.lock").exists() or (policy / "lock").exists() or list(tmp.glob("device.conf.console.*")):
         fail("locks or temporary files left behind")
@@ -228,7 +228,7 @@ esac
                    "ip route 203.0.113.0 255.255.255.0 Wireguard3 auto", "ip route 100.64.9.0 255.255.255.0 Wireguard5 auto"])
     if nets != want:
         fail(f"all: subnets {nets} != {want}")
-    if "routes=3 subnets=2 result=changed" not in (tmp / "audit.log").read_text():
+    if "routes=3 subnets=2 dns=0 result=changed" not in (tmp / "audit.log").read_text():
         fail("all: audit line must count the lists and subnets")
 
     # A refusal goes to the journal with the router's answer.

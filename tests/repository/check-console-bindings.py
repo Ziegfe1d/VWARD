@@ -77,8 +77,8 @@ if (pages | details) - renderers:
     fail("разделы без отрисовки: " + ", ".join(sorted((pages | details) - renderers)))
 targets = set(re.findall(r"data-go=\"([a-z][a-z-]*)\"", js)) | set(re.findall(r"'(d-[a-z-]+|u-[a-z-]+|c-[a-z-]+)'\]", js))
 targets |= {m for m in re.findall(r"\['[^']+', [^\]]*?'([a-z][a-z-]+)'(?:, '[^']*')?\]", js) if m in pages or m in details}
-components = set(re.findall(r"\{ id: '([a-z-]+)', name: '", js))
-unknown = {t for t in targets if t not in pages and t not in details and not (t.startswith("c-") and t[2:] in components)}
+components = set(re.findall(r"\{ id: '([a-z-]+)', when: '", js))
+unknown = {t for t in targets if t not in pages and t not in details and not (t.startswith("c-") and t[2:] in components) and not (t.startswith("a-") and t[2:] in activity)}
 if unknown:
     fail("переходы на несуществующие страницы: " + ", ".join(sorted(unknown)))
 
@@ -131,7 +131,10 @@ if not tcpdump_counter or "udp dst port 53" in tcpdump_counter.group(0):
 # not shown as a setting nobody can change.
 if "data-log-go" in js or "'open-log'" in js:
     fail("a section still sends the user to the raw journals")
-for row in ("['История автоподбора', '', '', 'a-adaptive']", "['История сверки маршрутов', '', '', 'a-routing']",
+# fix.38: autopick's history is «Вся история» on its own page; route reconciliation keeps its row.
+if 'data-go="a-adaptive">' not in js:
+    fail("autopick's page lacks «Вся история»")
+for row in ("['Сверка маршрутов', '', '', 'a-routing']",
             "['История агента VPN', '', '', 'a-tunnel']", "['Восстановление VPN', watch ? 'Наблюдение' : 'автоматическое'"):
     if row not in js:
         fail(f"Panel row changed: {row}")
