@@ -306,9 +306,10 @@ func hasRoute(rs []ndm.Route, r ndm.Route) bool {
 	return false
 }
 
+// routeCmd: options only with an added route (see plan.routeCmd, Viva 12.11.2026).
 func routeCmd(no string, r ndm.Route) string {
 	c := "dns-proxy " + no + "route object-group " + r.Group + " " + r.Target
-	if r.Options != "" {
+	if r.Options != "" && no == "" {
 		c += " " + r.Options
 	}
 	return c

@@ -86,7 +86,7 @@ func Run(r exec.Router, j *journal.Journal, tunnel string, now time.Time, write 
 		rep.Steps = append(rep.Steps, Step{Name: "add", Op: id + "-add", Commands: add.Commands()})
 		del := []string{}
 		if tunnel != "" {
-			del = append(del, "dns-proxy no route object-group "+Group+" "+tunnel+" auto")
+			del = append(del, "dns-proxy no route object-group "+Group+" "+tunnel)
 		}
 		del = append(del, "no object-group fqdn "+Group+" include "+Domain, "no object-group fqdn "+Group)
 		rep.Steps = append(rep.Steps, Step{Name: "remove", Op: id + "-remove", Commands: del})
