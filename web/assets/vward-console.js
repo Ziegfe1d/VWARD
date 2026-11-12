@@ -708,7 +708,7 @@ const PAGES = [
   // ИИ-сервисы (owner 2026-10-17): each AI service through VPN, Smart DNS or the provider.
   { id: 'ai', title: 'DNS', icon: 'spark', group: 'Сеть', data: ['ai', 'status', 'config'] },
   // Programs VWARD works with (AdGuard Home, later its own tunnel engine): each has its page here.
-  { id: 'utils', title: 'Компоненты', icon: 'tools', group: 'VWARD', data: ['status', 'ads', 'agh', 'security', 'ext', 'awg'] },
+  { id: 'utils', title: 'Компоненты', icon: 'tools', group: 'VWARD', data: ['status', 'config', 'ads', 'agh', 'security', 'ext', 'awg'] },
   { id: 'system', title: 'Система', icon: 'platform', group: 'VWARD', data: ['status', 'diag', 'security', 'config', 'stab', 'cron', 'cleanup', 'backups', 'update', 'ext'] },
   { id: 'settings', title: 'Настройки', icon: 'sliders', group: 'VWARD', data: ['security', 'auth', 'status', 'config'] },
   // The raw journals: diagnostics to save or send; each section shows its own events itself.
@@ -896,7 +896,7 @@ function logFeed(text) {
   return out.join('');
 }
 const DETAILS = {
-  'd-components': { title: 'Компоненты VWARD', parent: 'system' },
+  'd-components': { title: 'Компоненты VWARD', parent: 'system', data: ['config'] },
   'd-diag': { title: 'Диагностика', parent: 'system' },
   'd-stability': { title: 'Стабильность', parent: 'system', data: ['stab', 'status'] },
   'd-files': { title: 'Файлы VWARD', parent: 'system', data: ['files'] },
@@ -1083,6 +1083,27 @@ function compStatus(f) {
 }
 // System services: a process is not enough, the work must be fresh (state file of the sentinel
 // within 3 minutes; domains captured within 15 minutes). No fresh data is «Нет данных», not green.
+// extrasPanel: the parts the lightened VWARD keeps off, each with its switch (none when all is on).
+function extrasPanel() {
+  const x = extrasOf();
+  if (!x || x.all) return '';
+  const on = EXTRAS.filter(e => extraOn(e[0])).length;
+  return panel('Части агентов', '<dl class="kv">' + EXTRAS.map(e => ctrlRow(e[1], sw('data-extra="' + e[0] + '"', extraOn(e[0]), e[1], !cfgOk()), e[2])).join('') + '</dl>',
+    { desc: 'Облегчённая VWARD: работают VPN и автоподбор доменов, остальное включается по одному. Включено: ' + on + ' из ' + EXTRAS.length + '.' });
+}
+// Lightened VWARD (owner 11.11.2026): optional parts of the agents, off until switched on one by one.
+const EXTRAS = [['sentinel', 'Контроль состояния', 'следит за программами VWARD в реальном времени'],
+  ['memory-watch', 'Наблюдение за памятью', 'перезапускает программу VWARD, у которой растёт память'],
+  ['ssh-watch', 'Сторож SSH', 'возвращает вход по SSH, если он перестал отвечать'],
+  ['repair', 'Ремонт пакетов Entware', 'переставляет пакеты Entware, которые падают при запуске'],
+  ['backup', 'Резервные копии по расписанию', 'копия настроек VWARD раз в сутки'],
+  ['flash-watch', 'Наблюдение за флешкой', 'ошибки чтения и записи флешки в журнале системы'],
+  ['integrity', 'Целостность файлов', 'раз в сутки сверяет файлы программ'],
+  ['ext-update', 'Обновления Entware и AdGuard Home', 'раз в сутки проверяет и ставит сам'],
+  ['services-refresh', 'Каталог сервисов', 'раз в сутки обновляет списки сервисов']];
+const extrasOf = () => (st().services || {}).extras || null;
+// An older router answer without «extras»: every part on, as before the lightening.
+const extraOn = n => { const x = extrasOf(); return !x || !!x.all || (x.on || []).includes(n); };
 const sentinelFacts = (se, known) => ({ known, installed: !!se.installed, enabled: true, selected: !!se.installed, running: !!se.running,
   works: !se.running ? false : se.fresh === true ? true : se.fresh === false ? false : null });
 const dnscapFacts = (cp, known) => ({ known, installed: !!cp.installed, enabled: true, selected: !!cp.installed, running: !!cp.running,
@@ -2260,6 +2281,8 @@ const RENDER = {
     const sb = Object.assign(pkgFacts('sing-box-go'), { selected: false });
     // Системные службы: a process is not enough, the work must be fresh.
     const seF = sentinelFacts(sv.sentinel || {}, known), cpF = dnscapFacts(sv.dnscap || {}, known);
+    // Autopodbor on the routing core captures DNS itself; the real-time watcher is off in the lightened VWARD.
+    const coreOn = !!(sv.core && sv.core.running);
     // Not installed (owner 02.11): out of their groups, folded into one line «Не установлены (N)».
     const missing = [], keep = (r, f) => { if (f && f.installed === false && f.known !== false) { missing.push(r); return null; } return r; };
     const aghNone = agh[1] === ST.none[1];
@@ -2270,8 +2293,10 @@ const RENDER = {
     return (known ? loadError(['status']) : '') +
       (has(dns) ? panel('DNS и фильтрация', kv(dns), { desc: 'Активный DNS выбирается в настройках: AdGuard Home, dnsmasq или штатный DNS Keenetic. Одновременно работает только один.' }) : '') +
       (has(vpn) ? panel('VPN-движки', kv(vpn), { desc: 'Движок используется, когда обслуживает туннель. Один туннель - один движок.' }) : '') +
-      panel('Системные службы', kv([row('Контроль состояния', seF, 'd-stability', 'Мониторинг VWARD'), row('Захват DNS-запросов', cpF, 'd-dnscap', 'Автоподбор доменов')]),
+      panel('Системные службы', kv([extraOn('sentinel') ? row('Контроль состояния', seF, 'd-stability', 'Мониторинг VWARD') : ['Контроль состояния', CS.off[1], CS.off[0], 'd-stability', '', 'выключен в облегчённой VWARD'],
+          coreOn ? ['Захват DNS-запросов', CS.works[1], CS.works[0], 'd-dnscap', '', 'автоподбор на Go ловит запросы сам'] : row('Захват DNS-запросов', cpF, 'd-dnscap', 'Автоподбор доменов')]),
         { desc: '«Работает» - только когда проверка подтверждает работу, а не одно наличие процесса.' }) +
+      extrasPanel() +
       (missing.length ? '<details class="block missing-comps"><summary class="block-head"><h2>' + ico('box', 'head-ico') + 'Не установлены (' + missing.length + ')</h2></summary><div class="panel">' + kv(missing) + '</div></details>' : '');
   },
   // Cards of the components added on 01.11.2026: what is known, nothing that cannot be done yet.
@@ -5351,6 +5376,7 @@ document.addEventListener('change', e => {
     cfgSet({ op: 'wifi', target: key, value: v }, 'Сохранено', ['wifi']); return;
   }
   if (t.dataset.cfgRt) { cfgSet({ op: t.dataset.cfgRt, value: t.checked ? '1' : '0' }, 'Сохранено'); return; }
+  if (t.dataset.extra) { const e = EXTRAS.find(x => x[0] === t.dataset.extra) || [t.dataset.extra, t.dataset.extra]; cfgSet({ op: 'extra', target: e[0], value: t.checked ? '1' : '0' }, e[1] + (t.checked ? ': включено' : ': выключено'), ['status']); return; }
   if (t.dataset.ipcat) { cfgSet({ op: 'ip-category', target: t.dataset.ipcat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена - применится при следующей сверке'); return; }
   if (t.dataset.cfgCat) { cfgSet({ op: 'domain-category', target: t.dataset.cfgCat, value: t.checked ? '1' : '0' }, t.checked ? 'Категория включена' : 'Категория выключена'); return; }
   if (t.dataset.wifiAccess) {

@@ -880,6 +880,7 @@ if [ "$ACTION" = config ]; then
         adaptive-mode|classifier|smartdns-guard|tunnel-fallback|tunnel-return) set -- "$OP" "$VALUE" ;;
         # «Smart DNS» on/off (owner 08.11); off takes VWARD's own rows away: confirmed.
         smartdns-feature) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=SMARTDNS_OFF ;;
+        extra) set -- "$OP" "$TARGET" "$VALUE" ;;
         journal|agents-mode) set -- "$OP" "$TARGET" "$VALUE"
             # «Очистить» in «Журналы» (owner 12.11.2026): the live journal is emptied, archives stay.
             [ "$OP:$TARGET" != journal:clear ] || REQUIRED=LOG_CLEAR ;;
@@ -3826,6 +3827,13 @@ ADGUARD=${3:-0}
 SENTINEL_RUN=${6:-0} DOH_RUN=${7:-0} DNSCAP_RUN=${5:-0}
 SENTINEL_INST=0; [ ! -x "${VWARD_SENTINEL_BIN:-/opt/share/vward/sentinel/vward-sentinel}" ] || SENTINEL_INST=1
 DNSCAP_INST=0; [ ! -x "${VWARD_DNSCAP_BIN:-/opt/share/vward/dnscap/vward-dnscap}" ] || DNSCAP_INST=1
+# Lightened VWARD (owner 11.11.2026): the optional parts switched on (NAME.on, all.on = every part),
+# and whether Autopodbor runs on the routing core (it captures DNS itself: no vward-dnscap needed).
+EXTRAS_ALL=0; [ ! -e "$COMPONENT_STATE/all.on" ] || EXTRAS_ALL=1
+EXTRAS_ON=$(for EX_F in "$COMPONENT_STATE"/*.on; do [ -e "$EX_F" ] || continue; EX_N=${EX_F##*/}; EX_N=${EX_N%.on}; case "$EX_N" in all|*[!a-z0-9-]*) ;; *) printf '%s ' "$EX_N" ;; esac; done)
+CORE_RUN=0
+CORE_PID=$(cat "${VWARD_CORE_PIDFILE:-/opt/var/run/vward/core-adaptive.pid}" 2>/dev/null)
+case "$CORE_PID" in ''|*[!0-9]*) ;; *) tr '\000' ' ' < "/proc/$CORE_PID/cmdline" 2>/dev/null | grep -q 'vward-core.*adaptive' && CORE_RUN=1 ;; esac
 DOH_INST=0; [ ! -x "${VWARD_DOH_BIN:-/opt/sbin/https-dns-proxy}" ] || DOH_INST=1
 # Proof of work, not only of a process (owner 2026-11-01): the watcher wrote its state within
 # 3 minutes (1 = yes, 0 = stale, "" = no file); the DNS capture produced host states within
@@ -3968,6 +3976,7 @@ header_json
   --arg adguard "$ADGUARD" --arg adguard_installed "$AGH_INSTALLED" \
   --arg agh_off "$AGH_OFF" --arg mod_off "$MOD_OFF" --arg comp_op "$COMP_OP" \
   --arg sen_run "$SENTINEL_RUN" --arg sen_inst "$SENTINEL_INST" --arg cap_run "$DNSCAP_RUN" --arg cap_inst "$DNSCAP_INST" --arg doh_run "$DOH_RUN" --arg doh_inst "$DOH_INST" --arg sen_fresh "$SENTINEL_FRESH" --arg cap_fresh "$DNSCAP_FRESH" --arg comps "$COMPONENTS_TSV" \
+  --arg extras_all "$EXTRAS_ALL" --arg extras_on "$EXTRAS_ON" --arg core_run "$CORE_RUN" \
   --arg agh_broken "$AGH_BROKEN" \
   --arg uptime "$UPTIME_SEC" \
   --arg grc "$GRC" \
@@ -4125,6 +4134,8 @@ header_json
     modules_off:($mod_off | split(" ") | map(select(length > 0))),
     component_op:(if $comp_op == "" then null else $comp_op end),
     dnscap:{installed:($cap_inst=="1"),running:(($cap_run|tonumber? // 0) > 0),fresh:(if $cap_fresh == "1" then true else null end)},
+    extras:{all:($extras_all=="1"),on:($extras_on | split(" ") | map(select(length > 0)))},
+    core:{running:($core_run=="1")},
     components:($comps | split("\n") | map(select(length > 0) | split("\t") | select(length == 5) | {id: .[0], source: .[1], state: .[2], version: .[3], label: .[4]})),
     doh:{installed:($doh_inst=="1"),running:($doh_run=="1")},
     adaptive_live_pid:$live_pid,

@@ -4750,6 +4750,23 @@ op_journal() {
     done_ok "journal $1=$2" changed
 }
 
+# op_extra NAME 0|1: an optional part of the lightened VWARD (owner 11.11.2026: switched on one by
+# one) - NAME.on next to the components' state; vward_extra (the admission library) reads it.
+VWARD_EXTRA_NAMES="sentinel memory-watch ssh-watch repair backup flash-watch integrity ext-update services-refresh"
+op_extra() {
+    case " $VWARD_EXTRA_NAMES " in *" $1 "*) ;; *) die invalid_value 64 ;; esac
+    case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
+    ex_f="$COMPONENT_STATE/$1.on"
+    if [ "$2" = 1 ]; then
+        [ ! -e "$ex_f" ] || done_ok "extra $1=1" unchanged
+        mkdir -p "$COMPONENT_STATE" && printf '' > "$ex_f" 2>/dev/null || die write_failed
+    else
+        [ -e "$ex_f" ] || done_ok "extra $1=0" unchanged
+        rm -f "$ex_f" || die write_failed
+    fi
+    done_ok "extra $1=$2" changed
+}
+
 # op_agents_mode AGENT MODE: «Наблюдение | Действие» (fix.28.6). all sets every agent (their own
 # choices go); one agent: its own choice. Read by vward_agent_mode (the admission library).
 op_agents_mode() {
@@ -5884,6 +5901,7 @@ case "$OP" in
     ext-agh-official) op_ext_agh_official "$ARG1" ;;
     journal) op_journal "$ARG1" "$ARG2" ;;
     agents-mode) op_agents_mode "$ARG1" "$ARG2" ;;
+    extra) op_extra "$ARG1" "$ARG2" ;;
     firmware) op_firmware "$ARG1" "$ARG2" ;;
     *) die invalid_operation 64 ;;
 esac
