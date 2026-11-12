@@ -52,10 +52,10 @@ Production-профиль проверен на Keenetic автора; уста�
 Подготовка роутера и Entware - в [`docs/INSTALL.md`](docs/INSTALL.md). Затем по SSH:
 
 ```sh
-opkg update && opkg install curl
-curl -fsSL https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/install.sh -o /tmp/vward-install.sh
-sh /tmp/vward-install.sh
+opkg update && opkg install curl && curl -fsSL https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/install.sh -o /tmp/vward-install.sh && sh /tmp/vward-install.sh
 ```
+
+Одна строка; если оборвалась на скачивании - повторите её.
 
 Полный путь, команды проверки, recovery и удаление: [`docs/INSTALL.md`](docs/INSTALL.md).
 Карта source → runtime: [`docs/INSTALLATION_MAP.md`](docs/INSTALLATION_MAP.md).

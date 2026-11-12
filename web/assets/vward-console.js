@@ -2009,12 +2009,10 @@ function controlPage() {
    and deleting lists) show here instead of controls that would fail; the drafts are in git history.
    What is planned shows at its place, grey (owner 2026-10-17): what it will be and in which release. */
 const SOON = {
-  // Release numbers as in ROADMAP (renumbered 01.11.2026); the setup wizard is dropped by the owner.
-  system: [['Сертификаты', 'fix.42', 'каким корневым сертификатам доверяет VWARD: системные, каталог (Минцифры и другие), свои'],
-           ['Полный сброс', 'fix.31', 'убрать из Keenetic всё, что добавил VWARD, с копией настроек']],
-  settings: [['Язык Панели', 'fix.42', 'русский и другие языки']],
-  vless: [['Шапка подписки', 'fix.31', 'трафик, срок, поддержка провайдера'], ['Замер скорости серверов', 'fix.31', 'скорость каждого сервера по кнопке']],
-  awg: [['AmneziaWG Premium', 'fix.31', 'страны без ключа']]
+  // Release numbers as in ROADMAP; 12.11.2026 (owner, ROADMAP §8): certificates, the Panel's
+  // languages and AmneziaWG Premium are not planned any more.
+  system: [['Полный сброс', 'fix.39', 'убрать из Keenetic всё, что добавил VWARD, с копией настроек']],
+  vless: [['Шапка подписки', 'fix.39', 'трафик, срок, поддержка провайдера'], ['Замер скорости серверов', 'fix.39', 'скорость каждого сервера по кнопке']],
 };
 function soonPanel(key) {
   const l = SOON[key] || [];
