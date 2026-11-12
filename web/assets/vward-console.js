@@ -3261,7 +3261,7 @@ function activityPage(k) {
   const more = all.length > show || ACTFULL[k];
   return (a.topOwn ? top : '') + panel(a.title, (a.topOwn ? '' : top) + head + (ev.length ? '<ul class="events">' + ev.map(row).join('') + '</ul>'
     : empty('Пока ничего не происходило')) +
-    (t ? '<p class="log-at">Запрошено в ' + esc(new Date(t).toLocaleTimeString('ru-RU')) + ' · само не обновляется</p>' : '') +
+    (t ? '<p class="log-at">Запрошено в ' + esc(new Date(t).toLocaleTimeString('ru-RU')) + '</p>' : '') +
     '<div class="panel-actions even">' + (more ? btn('act-more', '', 'Показать ещё ' + ACT_STEP, '', ' data-k="' + k + '"') : '') +
       btn('act-reload', 'refresh', 'Обновить', '', ' data-k="' + k + '"' + (ACTRUN[k] ? ' disabled' : '')) + '</div>', { desc: a.desc });
 }
@@ -4668,7 +4668,7 @@ function logSources() {
 }
 function logStamp(tab) {
   const t = S.loadedAt['log:' + tab];
-  return t ? 'Запрошено в ' + new Date(t).toLocaleTimeString('ru-RU') + ' · само не обновляется' : '';
+  return t ? 'Запрошено в ' + new Date(t).toLocaleTimeString('ru-RU') : '';
 }
 
 /* ---------- Всплывающие панели ---------- */
@@ -5325,7 +5325,11 @@ document.addEventListener('click', e => {
     if (navigator.share) navigator.share({ title: 'Журнал VWARD: ' + logLabel(logTab), text: text }).catch(err => { if (err && err.name !== 'AbortError') copyText(text); });
     else copyText(text);
   }
-  else if (a === 'log-save') { const tab = logTab; if (!logShown[tab]) logShown[tab] = logN; (S.logs[tab] != null && !LOGRUN[tab] && S.loadedAt['log:' + tab] ? Promise.resolve(S.logs[tab]) : loadLog(tab, true)).then(text => download('vward-' + tab + '-' + today() + '.txt', text || '')); render(); }
+  // «Скачать» saves what is on the screen: no new request, no redraw (owner 12.11.2026: the journal
+  // reloaded on a download). Nothing shown yet: one quiet request, the page stays as it is.
+  else if (a === 'log-save') { const tab = logTab, name = 'vward-' + tab + '-' + today() + '.txt';
+    if (logShown[tab] && S.logs[tab] != null) download(name, S.logs[tab]);
+    else loadLogOnce(tab).then(text => download(name, text || ''), e => toast('Журнал не скачан: ' + e.message)); }
   // The whole history, the archived journals included: the router packs it as it sends it.
   else if (a === 'log-save-all') { const l = document.createElement('a'); l.href = API + '?action=log-archive'; l.download = ''; document.body.appendChild(l); l.click(); l.remove(); toast('Архив журналов скачивается'); }
 });

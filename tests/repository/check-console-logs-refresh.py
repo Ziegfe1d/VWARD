@@ -150,7 +150,7 @@ if not (got[0].startswith("err:") and "502" in got[0] and got[1] == "err:код 
     fail("apiText must fail on HTTP errors, JSON errors and a stalled body: " + json.dumps(got))
 # owner 12.11.2026: nothing loads by itself; «Показать журнал» asks for N entries, «Показать ещё» for N more.
 for need in ("apiText('log', { name: 'all', count: want, hours: LOG_HOURS })", "else if (a === 'log-show') { logShown[logTab] = logN;",
-             "Math.min(LOG_MAX, (logShown[logTab] || logN) + logN)", "само не обновляется", 'id="logSrc"', 'id="logWarn"', "Показать журнал", "Обновить журнал"):
+             "Math.min(LOG_MAX, (logShown[logTab] || logN) + logN)", 'id="logSrc"', 'id="logWarn"', "Показать журнал", "Обновить журнал"):
     if need not in JS:
         fail("the Panel lacks " + need)
 if "loadLog(logTab, true, true)" in JS or "обновляется само" in JS:

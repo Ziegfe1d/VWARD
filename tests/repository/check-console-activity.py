@@ -118,7 +118,7 @@ for key, texts in got.items():
 # «Показать ещё» and «Обновить» on request; the 15 s refresh leaves it alone.
 for need in ("const ACT_LINES = 200, ACT_STEP = 50", "apiText('log', { name: n, count: lines })", "btn('act-more'", "btn('act-reload'",
              "if (id.startsWith('a-') && !(auto && ACTAT[id.slice(2)])) loadActivity(id.slice(2));", "refreshPage(false, true);",
-             "само не обновляется"):
+             "Запрошено в "):
     if need not in JS:
         fail(f"the histories lack {need!r}")
 if "count: 1000 }" in JS or "обновляется само" in JS:

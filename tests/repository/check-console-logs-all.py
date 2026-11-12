@@ -37,7 +37,7 @@ if got != want:
     fail(f"timeline: {got}")
 for need in ("const LOG_VIEW = [{ id: 'all', label: 'Все' }].concat(LOG_TABS);", "logTab = 'all'",
              "LOG_VIEW.map(t => '<button type=\"button\" data-log=\"'", "const info = [], merged = mergeLogs(parts, logNewest, info, want);",
-             "else copyText(text);", "LOG_TABS.filter(tb => tb.id !== 'cron')", "download('vward-' + tab + '-' + today() + '.txt'"):
+             "else copyText(text);", "LOG_TABS.filter(tb => tb.id !== 'cron')", "name = 'vward-' + tab + '-' + today() + '.txt'", "if (logShown[tab] && S.logs[tab] != null) download(name, S.logs[tab]);"):
     if need not in JS:
         fail(f"the Panel lacks {need}")
 # Owner 2026-11-01: newest first by default (the choice kept in the browser); an entry keeps its
@@ -141,3 +141,8 @@ with tempfile.TemporaryDirectory() as tmp:
             if '"invalid_value"' not in clear("passwd") and '"invalid_operation"' not in clear("passwd"):
                 fail("an unknown journal is refused")
 print("CONSOLE_LOGS_ALL=PASS")
+
+# «Скачать» saves what is shown: no reload, no redraw (owner 12.11.2026).
+_a = JS.index("else if (a === 'log-save')"); _b = JS.index("else if", _a + 10)
+if "render()" in JS[_a:_b] or "loadLog(" in JS[_a:_b]:
+    raise SystemExit("CONSOLE_LOGS_ALL=FAIL: «Скачать» reloads or redraws the journal")
