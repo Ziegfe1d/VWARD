@@ -97,6 +97,104 @@ mkdir -p "{proc}/4242"; ln -sf /opt/sbin/dropbear "{proc}/4242/exe"; echo 4242 >
     if (t / "init.calls").exists():
         fail("ENABLED=no must be respected")
 
+# 11.11: dropbear alive on port 22 but no new session reaches it. A server that leaves
+# connections in the accept queue 3 minutes in a row is restarted (only the listening one, the
+# open sessions stay), logged with what its processes do; once in 30 minutes at most.
+fns2 = "".join(re.search(rf"^{n}\(\)\n\{{\n.*?^\}}\n", sup, re.S | re.M).group(0)
+               for n in ("ssh_backlog", "ssh_unstick", "ssh_running", "keep_ssh"))
+with tempfile.TemporaryDirectory() as tmp:
+    t = Path(tmp); proc = t / "proc"; (proc / "net").mkdir(parents=True)
+    run_ = t / "run"; run_.mkdir()
+    init = t / "S51dropbear"
+    init.write_text(f"""#!/bin/sh
+PIDFILE="{run_}/dropbear.pid"
+echo "$1" >> "{t}/init.calls"
+mkdir -p "{proc}/4242"; ln -sf /opt/sbin/dropbear "{proc}/4242/exe"; echo "4242 (dropbear) S 1 1" > "{proc}/4242/stat"
+""")
+    init.chmod(0o755)
+    for pid, ppid in (("500", "1"), ("501", "500")):
+        (proc / pid).mkdir(); os.symlink("/opt/sbin/dropbear", proc / pid / "exe")
+        (proc / pid / "stat").write_text(f"{pid} (dropbear) S {ppid} 1 1\n")
+        (proc / pid / "wchan").write_text("do_select\n")
+    (t / "pidof").write_text(f'#!/bin/sh\nfor d in {proc}/*; do [ -L "$d/exe" ] && basename "$d"; done | tr "\\n" " "\n')
+    (t / "pidof").chmod(0o755)
+    (t / "uptime").write_text("100000.00 1.00\n")
+    head = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+    def tcp(backlog):
+        (proc / "net/tcp").write_text(head + f"   0: 00000000:0016 00000000:0000 0A 00000000:{backlog:08X} 00:00000000 00000000     0        0 1\n"
+                                      + "   1: 0100007F:0035 00000000:0000 0A 00000000:00000009 00:00000000 00000000     0        0 2\n")
+    env = dict(os.environ, PATH=f"{t}:{os.environ['PATH']}")
+    log = t / "sup.log"
+    def keep(times=1, state="", watch=True):
+        # ssh-watch is off by default (lightened VWARD, owner 11.11.2026): on here unless asked.
+        body = (f'PROC={proc}\nSSH_INIT={init}\nUNNICE=\nUPTIME_FILE={t}/uptime\nSSH_DOWN=0 SSH_WAIT=1 SSH_SKIP=0\nSSH_STUCK=0 SSH_UNSTUCK_AT=0\n{state}'
+                f'vward_extra() {{ {"return 0" if watch else "return 1"}; }}\n'
+                f'log_event() {{ echo "$*" >> {log}; }}\nsleep() {{ :; }}\n'
+                f'kill() {{ echo "kill $*" >> {t}/kills; [ "$1" != -0 ]; }}\n' + fns2 + "keep_ssh\n" * times)
+        r = subprocess.run(["sh", "-c", body], env=env, text=True, capture_output=True, timeout=20)
+        if r.returncode != 0:
+            fail(f"keep_ssh (stuck): {r.returncode} {r.stderr}")
+        return log.read_text() if log.exists() else ""
+    tcp(3)
+    if keep(times=5, watch=False) or (t / "kills").exists():
+        fail("ssh-watch off (the default): a stuck queue is not acted on")
+    tcp(0)
+    if keep(times=5) or (t / "kills").exists():
+        fail("a server that takes its connections must be left alone")
+    tcp(3)
+    if keep(times=2) or (t / "kills").exists():
+        fail("two minutes of waiting connections are not yet a stuck server")
+    out = keep(times=3)
+    kills = (t / "kills").read_text()
+    if "SSH_NOT_ACCEPTING|backlog=3|" not in out or "500:S:ppid=1:do_select" not in out or "SSH_RESTARTED|reason=not_accepting" not in out:
+        fail(f"a stuck server must be logged and restarted: {out!r}")
+    if "kill 500" not in kills or "501" in kills:
+        fail(f"only the listening server is stopped, never an open session: {kills!r}")
+    log.unlink(); (t / "kills").unlink()
+    out = keep(times=3, state="SSH_UNSTUCK_AT=99000\n")
+    if "restart=wait" not in out or (t / "kills").exists():
+        fail(f"a second restart within 30 minutes must wait: {out!r}")
+
+# 11.11 (owner): «Child connection» for each try, no login: the server is alive, the session dies
+# before the login. The check is of the login path, not of a process: a fresh Entware process looks
+# up root (libnss_files, every 10 min), the port answers with its banner (every 30 min). A crash
+# (code >= 128) or no banner: logged once, the Panel's ssh=broken; nothing restarted.
+lfn = re.search(r"^ssh_login_check\(\)\n\{\n.*?^\}\n", sup, re.S | re.M)
+if not lfn or "            ssh_login_check\n" not in sup or "ssh=%s" not in sup or "if vward_extra ssh-watch; then" not in sup:
+    fail("the supervisor does not check the SSH login itself")
+if "|ssh)$/" not in (ROOT / "web/cgi-bin/api.cgi").read_text() or "ag.ssh === 'broken'" not in (ROOT / "web/assets/vward-console.js").read_text():
+    fail("the Panel does not show the SSH login state")
+with tempfile.TemporaryDirectory() as tmp:
+    t = Path(tmp)
+    def tool(name, body):
+        (t / name).write_text("#!/bin/sh\n" + body); (t / name).chmod(0o755)
+    log = t / "sup.log"
+    def probe(id_rc, banner, rounds=1, curl_ok=True):
+        tool("id", f"exit {id_rc}\n")
+        tool("curl", ('[ "$1" = --version ] && exit 0\n' if curl_ok else 'kill -ILL $$\n') + f"printf '{banner}'\n")
+        if log.exists():
+            log.unlink()
+        body = (f"VWARD_SSH_ID_BIN={t}/id\nVWARD_SSH_CURL_BIN={t}/curl\nVWARD_PROFILE_LIB=/nonexistent\n"
+                f'log_event() {{ echo "$*" >> {log}; }}\n' + lfn.group(0).replace("SSH_LOGIN=unknown SSH_PROBE_N=0 SSH_LOGIN_TOLD=\n", "")
+                + "SSH_LOGIN=unknown SSH_PROBE_N=0 SSH_LOGIN_TOLD=\n" + "ssh_login_check\n" * rounds + 'echo "STATE=$SSH_LOGIN"\n')
+        r = subprocess.run(["sh", "-c", body], text=True, capture_output=True, timeout=30)
+        return r.stdout.strip().splitlines()[-1], (log.read_text() if log.exists() else "")
+    st, out = probe(0, "SSH-2.0-dropbear\r\n")
+    if st != "STATE=ok" or "SSH_LOGIN_OK|user_lookup_rc=0|banner=yes" not in out:
+        fail(f"a working login: {st} {out!r}")
+    st, out = probe(132, "SSH-2.0-dropbear\r\n", rounds=12)
+    if st != "STATE=broken" or out.count("SSH_LOGIN_BROKEN|user_lookup_rc=132") != 1:
+        fail(f"a crash at the user lookup (SIGILL) must be logged once: {st} {out!r}")
+    st, out = probe(0, "")
+    if st != "STATE=broken" or "banner=no" not in out:
+        fail(f"no banner on the SSH port: {st} {out!r}")
+    st, out = probe(0, "", curl_ok=False)
+    if st != "STATE=ok":
+        fail(f"a crashed curl says nothing about SSH: {st} {out!r}")
+    st, out = probe(1, "SSH-2.0-x")
+    if st != "STATE=ok":
+        fail("an unknown user (code 1) is no crash")
+
 RANGES = "0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16 198.18.0.0/15 224.0.0.0/3"
 for path in ("components/policy-sync/scripts/vward-policy-sync.sh", "components/console/scripts/vward-console-config.sh"):
     if f'split("{RANGES}"' not in (ROOT / path).read_text():

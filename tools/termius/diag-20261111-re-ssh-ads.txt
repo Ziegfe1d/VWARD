@@ -1,0 +1,109 @@
+Diagnostic only, changes nothing (11.11.2026). Two pastes (termius-standard 1.7).
+Why the Route Engine stayed down after RESTART_LIMIT 03:50, why new SSH sessions
+do not reach dropbear, why ads say «cannot read allowed AdGuard Home queries»,
+which grep the router has. No secrets, domain names or client addresses printed.
+Paste 1, then paste 2.
+
+=== PASTE 1 ===
+cat > /tmp/dg11.sh <<'EOF'
+clear
+PFX="vward-diag11"
+OUT="/tmp/${PFX}-$(date +%Y%m%d-%H%M%S).txt"
+LAST="/tmp/last_result.txt"
+MAXB=30000
+KEEP=5
+ESC=$(printf '\033')
+ls -1t /tmp/${PFX}-*.txt 2>/dev/null |
+  tail -n +"$KEEP" |
+  while read -r F; do rm -f "$F"; done
+: > "$OUT"
+ln -sfn "$OUT" "$LAST"
+ln -sfn "$OUT" "/tmp/last_${PFX}.txt"
+send_out() {
+  [ -s "$OUT" ] || return 1
+  sed "s/${ESC}\[[0-9;?]*[a-zA-Z]//g" "$OUT" |
+    tail -c "$MAXB" | base64 | tr -d '\r\n' |
+    { read -r B; printf '\033]52;c;%s\a' "$B"; }
+}
+on_abort() {
+  trap '' INT TERM HUP
+  send_out
+  printf '\n[ ABORTED ]: PARTIAL IN %s\n' "$LAST"
+  exit 130
+}
+trap on_abort INT TERM HUP
+EOF
+
+=== PASTE 2 ===
+cat >> /tmp/dg11.sh <<'EOF'
+SL=/opt/var/log/vward-cron-supervisor.log
+E=/opt/var/log/vward-route-engine-events.log
+{
+echo " VWARD DIAG-11 $(date '+%Y-%m-%d %H:%M:%S')"
+echo "ver: $(cat /opt/share/vward/VERSION 2>/dev/null)"
+echo "up: $(cut -d' ' -f1 /proc/uptime) load: $(cut -d' ' -f1-3 /proc/loadavg)"
+echo "=== 1. COMPONENTS AGENT ==="
+echo "hb=$(cat /tmp/vward-cron-supervisor.last 2>/dev/null)"
+for D in /proc/[0-9]*; do
+  L=$(tr '\000' ' ' < $D/cmdline 2>/dev/null)
+  case "$L" in *vward-cron-supervisor*)
+    read -r S < $D/stat; S=${S##*) }
+    echo "proc ${D#/proc/} state=${S%% *}" ;;
+  esac
+done
+grep -E 'route-engine|RESTART|NOT_STARTED|SSH|SUPERVISOR_START' "$SL" |
+  tail -n 30 | cut -c1-160
+echo "=== 2. ROUTE ENGINE GATES ==="
+tail -n 8 /tmp/vward-restarts/route-engine 2>/dev/null
+for F in /tmp/vward-update-requested /tmp/vward-update.lock \
+ /opt/etc/vward/components/route-engine.disabled \
+ /opt/etc/vward/components/vward.off; do
+  [ -e "$F" ] && echo "EXISTS $(ls -ld "$F")"
+done
+RP=$(cat /opt/var/run/vward/route-engine.pid 2>/dev/null)
+echo "re.pid=${RP:-none} cmd=$(tr '\000' ' ' < /proc/${RP:-0}/cmdline 2>/dev/null | cut -c1-80)"
+L=/tmp/S91vward-route-engine.control.lock
+[ -d $L ] && { CP=$(cat $L/pid 2>/dev/null)
+ echo "control.lock pid=${CP:-EMPTY} $(ls -ld $L)"
+ echo "owner=$(tr '\000' ' ' < /proc/${CP:-0}/cmdline 2>/dev/null | cut -c1-80)"; }
+echo "live.lock pid=$(cat /tmp/vward-route-engine.lock/pid 2>/dev/null || echo none)"
+grep -E 'START|STOP|CONTROL|WATCHDOG' "$E" | tail -n 15 | cut -c1-200
+ps w | grep -E 'route-engine|tcpdump|dnscap|S91' | grep -v grep | cut -c1-100
+echo "=== 3. SSH ==="
+for D in /proc/[0-9]*; do
+  X=$(readlink $D/exe 2>/dev/null)
+  case "$X" in *dropbear*|*sshd*) ;; *) continue ;; esac
+  read -r S < $D/stat; S=${S##*) }; set -- $S
+  echo "${D#/proc/} exe=$X st=$1 ppid=$2 wchan=$(cat $D/wchan 2>/dev/null) fd=$(ls $D/fd 2>/dev/null | wc -l)"
+done
+echo "port 22 sockets (st 0A=listen 01=estab 03=syn_recv; q=tx:rx, rx on listen = waiting):"
+grep -h ':0016 ' /proc/net/tcp /proc/net/tcp6 2>/dev/null |
+  awk '{print $2, $3, "st=" $4, "q=" $5}' | head -n 12
+grep -E 'ENABLED|PORT|PIDFILE|ARGS' /opt/etc/init.d/S51dropbear 2>/dev/null | head -n 6
+command -v nc >/dev/null && echo "banner: $(echo | nc -w 3 127.0.0.1 22 2>&1 | head -c 30)"
+echo "=== 4. ADS / AGH QUERYLOG ==="
+grep -E 'FAIL|cannot' /opt/var/log/vward-ads-privacy-guard.log 2>/dev/null |
+  tail -n 5 | cut -c1-160
+J=/opt/bin/jq
+echo "jq: $($J --version 2>&1) rc=$(echo '{"a":1}' | $J -e .a >/dev/null 2>&1; echo $?)"
+Q=/opt/etc/AdGuardHome/data/querylog.json
+ls -l $Q $Q.1 2>/dev/null
+echo "last line rc=$(tail -n 1 $Q 2>/dev/null | $J -e . >/dev/null 2>&1; echo $?)"
+echo "tail 2000 rc=$(tail -n 2000 $Q 2>/dev/null | $J -c . >/dev/null 2>&1; echo $?)"
+R=/opt/bin/vward-ads-privacy-query-read.sh
+for M in auto file; do
+  RC=$(VWARD_ADS_QUERY_WINDOW_DIR=/tmp/dg11-win QUERY_SOURCE=$M $R 200 window 2>/tmp/dg11.err >/dev/null; echo $?)
+  echo "reader $M: rc=$RC $(tail -n 2 /tmp/dg11.err | cut -c1-120 | tr '\n' ' ')"
+done
+rm -rf /tmp/dg11.err /tmp/dg11-win
+echo "=== 5. GREP / KERNEL ==="
+grep --version 2>&1 | head -n 1; readlink -f "$(command -v grep)"
+dmesg 2>/dev/null | grep -iE 'segfault|illegal|dropbear|jq|oom' |
+  tail -n 8 | cut -c1-150
+} 2>&1 | tee -a "$OUT"
+echo "SUMMARY: lines=$(wc -l < "$OUT")"
+send_out
+echo "RESULT SENT (OSC52)"
+echo "RAW: $LAST"
+EOF
+(sh -n /tmp/dg11.sh && sh /tmp/dg11.sh)

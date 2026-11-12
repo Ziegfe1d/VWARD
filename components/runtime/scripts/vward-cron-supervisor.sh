@@ -434,12 +434,31 @@ keep_route_engine()
         esac
         RE_STALE=1
     fi
-    [ -x "$INITD/S91vward-route-engine" ] || return 0
-    ! command -v vward_update_pending >/dev/null 2>&1 || ! vward_update_pending || return 0
-    ! command -v vward_component_enabled >/dev/null 2>&1 || vward_component_enabled route-engine || return 0
-    restart_allowed route-engine || return 0
+    [ -x "$INITD/S91vward-route-engine" ] || { re_held no_s91; return 0; }
+    ! command -v vward_update_pending >/dev/null 2>&1 || ! vward_update_pending || { re_held update_pending; return 0; }
+    ! command -v vward_component_enabled >/dev/null 2>&1 || vward_component_enabled route-engine || { re_held disabled; return 0; }
+    restart_allowed route-engine || { re_held restart_limit; return 0; }
     [ "$RE_STALE" != 1 ] || log_event "ROUTE_ENGINE_PID_STALE|pid=$RE_P|reason=identity_mismatch"
-    start_of route-engine && log_event "STARTED|route-engine|by=watch"
+    if start_of route-engine; then
+        log_event "STARTED|route-engine|by=watch"
+        RE_HELD=
+    else
+        re_held "start_failed rc=$?"
+    fi
+}
+
+# re_held WHY (11.11: the engine was down from 03:50 to past 06:14 with no line saying why): a
+# Route Engine that is down and not started is logged with the reason, again only when the reason
+# changes or after an hour. Nothing runs while the engine is up.
+RE_HELD= RE_HELD_AT=0
+re_held()
+{
+    RH_NOW=; [ ! -r "$UPTIME_FILE" ] || read -r RH_NOW _ < "$UPTIME_FILE" 2>/dev/null || :
+    RH_NOW=${RH_NOW%%.*}
+    case "$RH_NOW" in ''|*[!0-9]*) RH_NOW=0 ;; esac
+    [ "$RE_HELD" != "$1" ] || [ $((RH_NOW - RE_HELD_AT)) -ge 3600 ] || return 0
+    RE_HELD=$1 RE_HELD_AT=$RH_NOW
+    log_event "ROUTE_ENGINE_NOT_STARTED|reason=$1"
 }
 
 # ---- Watching the other agents ---------------------------------------------------------------
@@ -538,7 +557,7 @@ watch_agents()
 '
     done
     IFS=$OLDIFS_A
-    printf 'at=%s\nnetwork=%s\ncomponents=ok\nupdates=%s\nmaintenance=%s\n' "$WA_NOW" "$WA_NET" "$WA_UPD" "$WA_MNT" > "$AGENTS_STATE.tmp" &&
+    printf 'at=%s\nnetwork=%s\ncomponents=ok\nupdates=%s\nmaintenance=%s\nssh=%s\n' "$WA_NOW" "$WA_NET" "$WA_UPD" "$WA_MNT" "$SSH_LOGIN" > "$AGENTS_STATE.tmp" &&
         mv -f "$AGENTS_STATE.tmp" "$AGENTS_STATE"
 }
 
@@ -567,11 +586,132 @@ ssh_running()
     return 1
 }
 
+# ssh_backlog: connections waiting on the SSH port (22) for the server to take them: the accept
+# queue of the listening socket in /proc/net/tcp{,6}. A working server takes each at once (0).
+ssh_backlog()
+{
+    SBF=
+    for SBT in "$PROC/net/tcp" "$PROC/net/tcp6"; do [ ! -r "$SBT" ] || SBF="$SBF $SBT"; done
+    [ -n "$SBF" ] || { echo 0; return 0; }
+    # shellcheck disable=SC2086
+    awk 'function hex(h,  i, v) { v = 0; h = toupper(h)
+             for (i = 1; i <= length(h); i++) v = v * 16 + index("0123456789ABCDEF", substr(h, i, 1)) - 1
+             return v }
+         $4 == "0A" && $2 ~ /:0016$/ { split($5, q, ":"); n = hex(q[2]); if (n > m) m = n }
+         END { print m + 0 }' $SBF 2>/dev/null
+}
+
+# ssh_unstick (11.11: dropbear alive on port 22, yet no new session reached it for hours, the
+# cause unknown): a server that leaves connections waiting 3 minutes in a row is not taking
+# them. What it does is logged (states of its processes), then only the listening server is
+# restarted; the open sessions are processes of their own and stay. Once in 30 minutes at most;
+# a start that fails is taken up by keep_ssh the next minute (the server is not running then).
+SSH_STUCK=0 SSH_UNSTUCK_AT=0
+ssh_unstick()
+{
+    SB=$(ssh_backlog)
+    case "$SB" in ''|*[!0-9]*|0) SSH_STUCK=0; return 0 ;; esac
+    SSH_STUCK=$((SSH_STUCK + 1))
+    [ "$SSH_STUCK" -ge 3 ] || return 0
+    SU_NOW=; read -r SU_NOW _ 2>/dev/null < "$UPTIME_FILE" || :
+    SU_NOW=${SU_NOW%%.*}; case "$SU_NOW" in ''|*[!0-9]*) SU_NOW=0 ;; esac
+    SS_ALL=$(pidof dropbear 2>/dev/null)
+    SS_INFO= SS_MAIN=
+    for SR in $SS_ALL; do
+        case "$(readlink "$PROC/$SR/exe" 2>/dev/null)" in /opt/*) ;; *) continue ;; esac
+        SR_ST=; read -r SR_ST 2>/dev/null < "$PROC/$SR/stat" || continue
+        SR_ST=${SR_ST##*) }
+        SR_W=; read -r SR_W 2>/dev/null < "$PROC/$SR/wchan" || :
+        # shellcheck disable=SC2086
+        set -- $SR_ST
+        SS_INFO="$SS_INFO $SR:$1:ppid=$2:${SR_W:-?}"
+        # The listening server: its parent is no dropbear (a session's parent is the server).
+        case " $SS_ALL " in *" $2 "*) ;; *) SS_MAIN="$SS_MAIN $SR" ;; esac
+    done
+    if [ "$SSH_UNSTUCK_AT" -gt 0 ] && [ $((SU_NOW - SSH_UNSTUCK_AT)) -lt 1800 ]; then
+        [ "$SSH_STUCK" != 3 ] || log_event "SSH_NOT_ACCEPTING|backlog=$SB|procs=$SS_INFO|restart=wait"
+        return 0
+    fi
+    log_event "SSH_NOT_ACCEPTING|backlog=$SB|procs=$SS_INFO|restart=${SS_MAIN:- none}"
+    SSH_STUCK=0 SSH_UNSTUCK_AT=$SU_NOW
+    [ -n "$SS_MAIN" ] || return 0
+    # shellcheck disable=SC2086
+    kill $SS_MAIN 2>/dev/null
+    SW=0
+    while [ "$SW" -lt 5 ]; do
+        SA=0
+        for SR in $SS_MAIN; do kill -0 "$SR" 2>/dev/null && SA=1; done
+        [ "$SA" = 1 ] || break
+        sleep 1; SW=$((SW + 1))
+    done
+    # shellcheck disable=SC2086
+    [ "$SA" != 1 ] || kill -9 $SS_MAIN 2>/dev/null
+    SSH_PF=$(sed -n "s/^PIDFILE=[\"']*\([^\"' ]*\).*/\1/p" "$SSH_INIT" | head -n 1)
+    rm -f "${SSH_PF:-/opt/var/run/dropbear.pid}"
+    $UNNICE "$SSH_INIT" start </dev/null >/dev/null 2>&1
+    sleep 1
+    if ssh_running; then
+        log_event "SSH_RESTARTED|reason=not_accepting|backlog=$SB"
+    else
+        log_event "SSH_START_FAILED|$SSH_INIT|after=not_accepting"
+        SSH_DOWN=1
+    fi
+}
+
+# ssh_login_check (owner 11.11: dropbear alive, «Child connection» logged for each try, yet no
+# session went further: the session process fails before the login). A live server is not
+# enough: every 10 minutes a fresh Entware process looks up the user root (the same library path
+# as dropbear's login: libnss_files), every 30 minutes the port must answer with its banner.
+# Logged on a change, the owner told once, the state for the Panel (ssh= in the agents' state).
+# Nothing is restarted or reinstalled: a restart does not mend a broken library.
+SSH_LOGIN=unknown SSH_PROBE_N=0 SSH_LOGIN_TOLD=
+ssh_login_check()
+{
+    SSH_PROBE_N=$((SSH_PROBE_N + 1))
+    [ $((SSH_PROBE_N % 10)) -eq 1 ] || return 0
+    SL_ID=${VWARD_SSH_ID_BIN:-/opt/bin/busybox}
+    SL_NSS=skip
+    if [ -x "$SL_ID" ]; then
+        "$SL_ID" id root </dev/null >/dev/null 2>&1
+        SL_NSS=$?
+    fi
+    SL_BAN=skip
+    SL_CURL=${VWARD_SSH_CURL_BIN:-/opt/bin/curl}
+    if [ $((SSH_PROBE_N % 30)) -eq 1 ] && [ -x "$SL_CURL" ]; then
+        SL_B=$("$SL_CURL" -s -m 3 "telnet://127.0.0.1:${VWARD_SSH_PORT:-22}" </dev/null 2>/dev/null | head -c 7)
+        # curl that crashed itself (its HTTPS on MIPS, 11.11) says nothing about SSH.
+        "$SL_CURL" --version >/dev/null 2>&1 || SL_B=skip
+        case "$SL_B" in SSH-2.0*|SSH-1.9*) SL_BAN=yes ;; skip) ;; *) SL_BAN=no ;; esac
+    fi
+    SL_NEW=$SSH_LOGIN
+    case "$SL_NSS" in skip) ;; 0|1|2) SL_NEW=ok ;; *) [ "$SL_NSS" -lt 128 ] && SL_NEW=ok || SL_NEW=broken ;; esac
+    [ "$SL_BAN" != no ] || SL_NEW=broken
+    [ "$SL_NEW" != "$SSH_LOGIN" ] || return 0
+    SSH_LOGIN=$SL_NEW
+    if [ "$SL_NEW" = broken ]; then
+        log_event "SSH_LOGIN_BROKEN|user_lookup_rc=$SL_NSS|banner=$SL_BAN"
+        [ -n "$SSH_LOGIN_TOLD" ] && return 0
+        SSH_LOGIN_TOLD=1
+        command -v vward_note >/dev/null 2>&1 ||
+            { [ ! -r "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}" ] || . "${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}"; } 2>/dev/null
+        ! command -v vward_note >/dev/null 2>&1 || vward_note err "Вход по SSH не проходит" \
+            "Сервер SSH работает, но проверка входа не прошла (код $SL_NSS, баннер: $SL_BAN). Код 132 или 139 - программа Entware падает при поиске пользователя: вероятно, повреждена библиотека на накопителе. VWARD ничего не переустанавливает сам; подробности: Система → Журналы." utils
+    else
+        log_event "SSH_LOGIN_OK|user_lookup_rc=$SL_NSS|banner=$SL_BAN"
+    fi
+}
+
 keep_ssh()
 {
     [ -x "$SSH_INIT" ] && ! grep -q '^ENABLED=no' "$SSH_INIT" 2>/dev/null || return 0
     if ssh_running; then
         SSH_DOWN=0 SSH_WAIT=1 SSH_SKIP=0
+        # Watching SSH beyond «is the server running» is off by default (lightened VWARD, owner
+        # 11.11.2026): ssh-watch.on (or all.on) turns on the stuck-queue restart and the login check.
+        if vward_extra ssh-watch; then
+            ssh_unstick
+            ssh_login_check
+        fi
         return 0
     fi
     if [ "$SSH_SKIP" -gt 0 ]; then

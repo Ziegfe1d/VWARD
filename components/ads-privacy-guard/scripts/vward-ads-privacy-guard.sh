@@ -111,7 +111,12 @@ NEW_REVIEW="$WORK/review.tsv"
 QUERY_READER="${VWARD_ADS_QUERY_READER:-/opt/bin/vward-ads-privacy-query-read.sh}"
 [ -x "$QUERY_READER" ] || QUERY_READER="$SELF_DIR/vward-ads-privacy-query-read.sh"
 [ -x "$QUERY_READER" ] || ads_die "query reader missing"
-QUERY_SOURCE="$QUERY_SOURCE" "$QUERY_READER" "$SCAN_TAIL_LINES" window > "$RAW" || ads_die "cannot read allowed AdGuard Home queries"
+# 10.11: «cannot read» for hours with no clue which read failed: the reader's code and its last
+# error line go with it (3: the AdGuard Home API only; other: the querylog file read through jq).
+QR_ERR="$WORK/query.err"
+QR_RC=0
+QUERY_SOURCE="$QUERY_SOURCE" "$QUERY_READER" "$SCAN_TAIL_LINES" window > "$RAW" 2> "$QR_ERR" || QR_RC=$?
+[ "$QR_RC" = 0 ] || ads_die "cannot read allowed AdGuard Home queries (rc=$QR_RC source=$QUERY_SOURCE $(tail -n 1 "$QR_ERR" 2>/dev/null | tr -cd 'A-Za-z0-9 ._:=/-' | cut -c1-120))"
 
 # Normalize and reject reverse/local/invalid names before aggregation.
 awk -F'\t' '

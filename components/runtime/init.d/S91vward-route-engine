@@ -34,25 +34,46 @@ STOP_WAIT=6
 CONTROL_WAIT=20
 
 
+# control_owner_alive PID: PID is a running copy of this script. A lock left by a copy that was
+# killed holds a number another process may get later (pids are reused): only a copy of S91
+# keeps the lock.
+control_owner_alive()
+{
+    kill -0 "$1" 2>/dev/null || return 1
+    case "$(tr '\000' ' ' < "/proc/$1/cmdline" 2>/dev/null)" in
+        *S91vward-route-engine*) return 0 ;;
+    esac
+    return 1
+}
+
+
 control_lock()
 {
     N=0
+    EMPTY=0
 
     while ! mkdir "$CONTROL_LOCK" 2>/dev/null; do
 
         OLD=$(cat "$CONTROL_LOCK/pid" 2>/dev/null)
 
-        if [ -n "$OLD" ] &&
-           ! kill -0 "$OLD" 2>/dev/null; then
+        # 11.11: a lock with a dead or foreign owner, or one whose owner never wrote its pid
+        # (killed right after mkdir, /tmp full) for the whole wait, was kept for ever: every
+        # start answered «control busy» and the engine stayed down.
+        if { [ -n "$OLD" ] && ! control_owner_alive "$OLD"; } ||
+           { [ -z "$OLD" ] && [ "$EMPTY" -ge "$CONTROL_WAIT" ]; }; then
 
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|CONTROL_LOCK_STALE|owner=${OLD:-none}" >> "$EVENT_LOG" 2>/dev/null
             rm -rf "${CONTROL_LOCK:?}"
+            EMPTY=0
             continue
         fi
+
+        [ -n "$OLD" ] && EMPTY=0 || EMPTY=$((EMPTY + 1))
 
         sleep 1
         N=$((N + 1))
 
-        [ "$N" -ge "$CONTROL_WAIT" ] && return 1
+        [ "$N" -gt "$CONTROL_WAIT" ] && return 1
     done
 
     echo $$ > "$CONTROL_LOCK/pid"
@@ -573,6 +594,7 @@ case "$1" in
     start|stop|restart)
 
         if ! control_lock; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|CONTROL_BUSY|cmd=$1|owner=$(cat "$CONTROL_LOCK/pid" 2>/dev/null)" >> "$EVENT_LOG" 2>/dev/null
             echo "Adaptive control busy"
             exit 1
         fi

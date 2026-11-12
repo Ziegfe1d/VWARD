@@ -1888,8 +1888,10 @@ if [ "$ACTION" = "diagnostics" ]; then
     ADAPTIVE_STATUS=FAIL
     # diag_running REGEX: a process whose command line matches (one grep over /proc; «[v]ward»
     # does not match grep's own line). Not through ps: the Panel's ps did not show running VWARD
-    # scripts (a Viva, 2026-10-11: «Агент компонентов FAIL» with the agent running).
-    diag_running() { grep -qs -- "$1" /proc/[0-9]*/cmdline 2>/dev/null; }
+    # scripts (a Viva, 2026-10-11: «Агент компонентов FAIL» with the agent running). The NULs
+    # between the arguments become new lines first: the router's BusyBox grep stops at the first
+    # NUL and never saw a script after «/bin/sh» (11.11.2026).
+    diag_running() { cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\000' '\n' | grep -qs -- "$1"; }
     diag_running '[c]rond' && CROND_STATUS=PASS
     diag_running '[v]ward-cron-supervisor[.]sh' && SUPERVISOR_STATUS=PASS
     diag_running '[A]dGuardHome' && ADGUARD_STATUS=PASS
@@ -3787,7 +3789,7 @@ CROND_PID=${1:--}
 [ "$CROND_PID" != - ] || CROND_PID=""
 SUPERVISOR=${2:-0}
 # The other agents as the components agent sees them (ok, late, hung; off), a minute old at most.
-AGENTS="$(awk -F= '$1 ~ /^(network|updates|maintenance|state)$/ && $2 ~ /^(ok|late|hung|off)$/ {printf "%s%s=%s", (n++ ? "," : ""), $1, $2}' "${VWARD_AGENTS_STATE:-/tmp/vward-agents.state}" 2>/dev/null)"
+AGENTS="$(awk -F= '$1 ~ /^(network|updates|maintenance|state|ssh)$/ && $2 ~ /^(ok|late|hung|off|broken)$/ {printf "%s%s=%s", (n++ ? "," : ""), $1, $2}' "${VWARD_AGENTS_STATE:-/tmp/vward-agents.state}" 2>/dev/null)"
 ADGUARD=${3:-0}
 # «Компоненты» (fix.32): VWARD's real-time watcher, the DNS capture and Smart DNS's DoH client.
 SENTINEL_RUN=${6:-0} DOH_RUN=${7:-0} DNSCAP_RUN=${5:-0}

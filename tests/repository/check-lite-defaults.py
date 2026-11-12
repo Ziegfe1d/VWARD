@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory() as t:
 # The optional parts are behind their switch in the code.
 for part, where in (("backup", HK), ("repair", HK), ("ext-update", HK), ("sentinel", HK),
                     ("services-refresh", HK), ("flash-watch", HK), ("integrity", HK),
-                    ("sentinel", SUP), ("memory-watch", SUP)):
+                    ("sentinel", SUP), ("memory-watch", SUP), ("ssh-watch", SUP)):
     if f"vward_extra {part}" not in where:
         fail(f"{part} is not behind vward_extra")
 if "vward_extra repair || repair_if_crashing() { return 0; }" not in HK:

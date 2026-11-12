@@ -112,6 +112,18 @@ def tool(path: Path, text: str) -> Path:
 
 with tempfile.TemporaryDirectory() as t:
     t = Path(t)
+    # 11.11.2026: the router's grep is BusyBox, which stops at the first NUL of a line: the slot's
+    # configuration after «-c» in /proc/PID/cmdline is never found by it. The engine runs here with
+    # Keenetic's grep first in its own fixed PATH (a disposable copy of the script).
+    bb = shutil.which("busybox") or fail("busybox is needed (the router's grep)")
+    bbdir = t / "keenetic-bin"; bbdir.mkdir()
+    (bbdir / "grep").symlink_to(bb)
+    engine_src = ENGINE.read_text()
+    if engine_src.count("PATH=/opt/bin:") != 1:
+        fail("the engine's fixed PATH changed")
+    ENGINE = t / "vward-awg-engine.sh"
+    ENGINE.write_text(engine_src.replace("PATH=/opt/bin:", f"PATH={bbdir}:/opt/bin:", 1))
+    ENGINE.chmod(0o755)
     st = t / "state"; st.mkdir()
     tools = t / "tools"; tools.mkdir()
     curl = tool(tools / "curl", FAKE_CURL.replace("@ST@", str(st)))
