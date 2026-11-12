@@ -58,12 +58,18 @@ const st=()=>({wg:{interfaces:[]}}); const prof=()=>({tunnel_interface:'Wireguar
 const siteState=()=>({}); const errText=()=>'';
 '''+fn+'''
 const assert=require('node:assert/strict');
-let text=probeText({value:'lampa.mx',x:{ok:true,type:'domain',value:'lampa.mx',routes:[],groups:[],dns:{ipv4:['198.51.100.20']},router_routes:[{ip:'198.51.100.20',known:true,device:'tun9',gateway:'',source:''}]}});
+// The verdict on top, the router's route and DNS folded under «Подробности» (owner 12.11.2026).
+const both=r=>probeText(r)+probeDetails(r);
+let text=both({value:'lampa.mx',x:{ok:true,type:'domain',value:'lampa.mx',routes:[],groups:[],dns:{ipv4:['198.51.100.20']},router_routes:[{ip:'198.51.100.20',known:true,device:'tun9',gateway:'',source:''}]}});
 assert(!text.includes('через провайдера (без VPN)'),text);
-assert(text.includes('tun9') && text.includes('Путь устройства не проверен'),text);
+assert(text.includes('tun9') && text.includes('путь самого устройства'),text);
+assert(probeText({x:{ok:true,type:'domain',value:'lampa.mx',routes:[],groups:[],dns:{ipv4:[]},router_routes:[]}}).includes('напрямую - не входит ни в один список'));
+// The router's own address (lo) is not shown as the site's route or DNS answer.
+text=both({x:{ok:true,type:'domain',value:'claude.ai',routes:[],groups:[],dns:{ipv4:['160.79.104.10','192.168.1.1']},router_routes:[{ip:'160.79.104.10',known:true,device:'eth3',gateway:'100.84.0.1'},{ip:'192.168.1.1',known:true,device:'lo'}]}});
+assert(!text.includes('192.168.1.1') && !text.includes(' lo'),text);
 text=probeText({x:{ok:true,type:'ip',value:'198.51.100.20',configured_route:false,router_routes:[{ip:'198.51.100.20',known:true,device:'tun9'}]}});
 assert(!text.includes('через провайдера (без VPN)') && text.includes('tun9'),text);
-text=probeText({x:{ok:true,type:'domain',value:'game.example',routes:[],dns:{ipv4:[]},router_routes:[]}});
+text=both({x:{ok:true,type:'domain',value:'game.example',routes:[],dns:{ipv4:[]},router_routes:[]}});
 assert(!text.includes('через провайдера (без VPN)') && text.includes('не определены'),text);
 console.log('ROUTE_PROBE_UI_EVIDENCE=PASS');
 '''

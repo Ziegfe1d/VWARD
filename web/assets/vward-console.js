@@ -416,7 +416,7 @@ async function adsChainBlock(doms) {
 const hostOf = v => String(v || '').trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/^[^@/]*@/, '').replace(/[/?#].*$/, '').replace(/:\d+$/, '').replace(/^\*\./, '').replace(/\.$/, '');
 function sitePanel() {
   return panel('Проверка адреса', inputBar({ form: 'probe', label: 'Домен, ссылка или IPv4-адрес', id: 'probeInput', value: RPROBE && RPROBE.value, placeholder: 'например, youtube.com',
-    aria: 'Домен, ссылка или IPv4-адрес', busy: RPROBE && (RPROBE.busy || RPROBE.fixing || RPROBE.doing), icon: 'search', btn: 'Проверить' }) + '<div id="probeResult">' + probeText(RPROBE) + siteDoText(RPROBE) + siteTestText(RPROBE) + '</div>',
+    aria: 'Домен, ссылка или IPv4-адрес', busy: RPROBE && (RPROBE.busy || RPROBE.fixing || RPROBE.doing), icon: 'search', btn: 'Проверить' }) + '<div id="probeResult">' + probeText(RPROBE) + siteTestText(RPROBE) + siteDoText(RPROBE) + probeDetails(RPROBE) + '</div>',
     { fixed: true, desc: 'Текущий маршрут домена и его основание, доступность через провайдера и каждый туннель, выбор политики маршрутизации.' });
 }
 // What is set up for a checked domain: VWARD's lists, Smart DNS, a block in AdGuard Home.
@@ -500,15 +500,16 @@ async function siteDo(how, d) {
 const DIRECT = 'direct';
 const siteVia = v => v === DIRECT ? 'Провайдер (без VPN)' : 'VPN «' + tunLabel(v) + '»';
 // fix.35.3: an answer is not «доступен» unless it is a page or a redirect (403/404/5xx named as they are).
-const siteVal = y => y.verdict === 'open' ? 'доступен · ' + fmtInt(y.ms) + ' мс' : y.verdict === 'blocked' ? 'доступ ограничен (HTTP ' + y.code + ')' :
-  y.verdict === 'denied' ? 'отказ в доступе (HTTP 403)' : y.verdict === 'error' ? 'ошибка сервера (HTTP ' + y.code + ')' : y.verdict === 'answer' ? 'ответ HTTP ' + y.code + ': работа сайта не подтверждена' : 'нет ответа, таймаут 6 с';
+const siteVal = y => y.verdict === 'open' ? 'доступен · ' + fmtInt(y.ms) + ' мс' : y.verdict === 'blocked' ? 'ограничен (HTTP ' + y.code + ')' :
+  y.verdict === 'denied' ? 'отказ (HTTP 403)' : y.verdict === 'error' ? 'ошибка сервера (HTTP ' + y.code + ')' : y.verdict === 'answer' ? 'ответ HTTP ' + y.code + ': работа сайта не подтверждена' : 'нет ответа, таймаут 6 с';
 // Where the tested address came from: a Smart DNS domain may get the Smart DNS proxy's address, then a
 // «direct» answer is that proxy's, not the provider's path to the site.
 const siteSrc = x => 'Адрес ' + x.ip + (x.dns ? ' от DNS ' + x.dns : '') + (x.smartdns ? ': домен идёт через Smart DNS - ответ «без VPN» может быть от прокси Smart DNS, прямой путь не подтверждён' : '');
 function siteTestText(r) {
   if (!r || r.busy || !r.t) return '';
   const x = r.t;
-  const rows = x.ok ? kv(x.results.map(y => [siteVia(y.via), siteVal(y), y.verdict === 'open' ? (x.smartdns && y.via === DIRECT ? 'warn' : 'ok') : y.verdict === 'answer' ? 'warn' : 'crit'])) + '<p class="panel-desc">' + esc(siteSrc(x)) + '</p>' :
+  const rows = x.ok ? kv(x.results.map(y => [siteVia(y.via), siteVal(y), y.verdict === 'open' ? (x.smartdns && y.via === DIRECT ? 'warn' : 'ok') : y.verdict === 'answer' ? 'warn' : 'crit'])) + (x.smartdns ? '<p class="panel-desc">' + esc(siteSrc(x)) + '</p>' : '') +
+      (x.results.some(y => y.via !== DIRECT && y.verdict === 'denied') ? '<p class="panel-desc">Отказ 403 через VPN часто означает защиту сайта от программ: проверка с роутера её не проходит, а в браузере сайт может открыться.</p>' : '') :
     '<p class="field-warn">' + esc(x.error === 'domain_not_resolved' ? 'Домен не разрешается в DNS: проверьте написание.' : errText(x)) + '</p>';
   const mv = r.move && !r.fixing ? '<div class="panel-actions">' + btn('site-move', 'route', 'Перевести список на «' + tunLabel(r.move.to) + '»', 'primary', ' data-list="' + esc(r.move.list) + '" data-to="' + esc(r.move.to) + '"') + '</div>' : '';
   const fix = r.fix ? '<ul class="fix-steps">' + r.fix.map(f => '<li class="' + (f.ok === false ? 'crit' : f.ok ? 'ok' : '') + '">' + esc(f.text) + '</li>').join('') + '</ul>' : '';
@@ -577,7 +578,7 @@ function probeText(r) {
   if (!x.ok) return '<p class="field-warn">' + esc(errText(x)) + '</p>';
   const tuns = ((st().wg && st().wg.interfaces) || []).map(t => t.name);
   const via = t => tuns.includes(t) || t === prof().tunnel_interface ? 'через VPN «' + tunLabel(t) + '»' : t === prof().wan_interface || t === 'ISP' ? 'через провайдера (без VPN)' : 'через ' + t;
-  const routerRows = x.router_routes || [];
+  const routerRows = (x.router_routes || []).filter(p => p.device !== 'lo');
   const routerText = routerRows.length ? routerRows.map(p => p.ip + ': ' + (p.known ? 'через ' + p.device + (p.gateway ? ', шлюз ' + p.gateway : '') : 'маршрут не определён')).join('; ') : 'нет данных о маршруте IPv4';
   const clientNote = '<p class="panel-desc">Путь устройства не проверен. Маршрут роутера может отличаться от маршрута приложения, UDP и IPv6.</p>';
   if (x.type === 'ip') {
@@ -593,14 +594,25 @@ function probeText(r) {
   const hints = [...new Set((x.hints || []).map(h => h.category))];
   const s = siteState(r);
   const head2 = s.blocked ? esc(x.value) + ': заблокирован в AdGuard Home' : s.smart && !routes.length ? esc(x.value) + ': настроен Smart DNS' : head;
-  return '<p class="probe-verdict ' + (routes.length || s.blocked ? 'vpn' : '') + '">' + head2 + '</p>' + kv([
-    ['Основание', why],
+  // One line says it: «claude.ai: напрямую - не входит ни в один список» (no «Основание» repeating it).
+  const head3 = !routes.length && !(x.groups || []).length && !s.blocked && !s.smart ? esc(x.value) + ': напрямую - не входит ни в один список' : head2;
+  return '<p class="probe-verdict ' + (routes.length || s.blocked ? 'vpn' : '') + '">' + head3 + '</p>' + kv([
+    head3 === head2 ? ['Основание', why] : null,
     s.smart ? ['Smart DNS', s.smartOwn ? 'задан для домена' : 'задан для родительского домена'] : null,
     s.agh ? ['AdGuard Home', s.blocked ? (s.userBlock ? 'блокировка пользовательским правилом' : 'блокировка списком фильтрации') : 'не фильтруется'] : null,
-    ['Маршрут роутера IPv4', routerText],
-    ['IPv4 проверочного DNS', ((x.dns && x.dns.ipv4) || []).join(', ') || 'не определены'],
     hints.length ? ['В каталоге сервисов', hints.slice(0, 3).join(', ')] : null
-  ]) + clientNote;
+  ].filter(Boolean));
+}
+// The router's route and DNS answer: for a closer look, folded under the result (owner 12.11.2026).
+function probeDetails(r) {
+  if (!r || r.busy || r.error || !r.x || !r.x.ok || r.x.type === 'ip') return '';
+  const x = r.x, lo = (x.router_routes || []).filter(p => p.device === 'lo').map(p => p.ip), rows = (x.router_routes || []).filter(p => p.device !== 'lo');
+  const ips = ((x.dns && x.dns.ipv4) || []).filter(ip => !lo.includes(ip));
+  return '<details class="prop-old"><summary>Подробности: маршрут роутера и DNS</summary>' + kv([
+    ['Маршрут роутера IPv4', rows.length ? rows.map(p => p.ip + ': ' + (p.known ? 'через ' + p.device + (p.gateway ? ', шлюз ' + p.gateway : '') : 'маршрут не определён')).join('; ') : 'нет данных'],
+    ['Адреса от DNS', ips.join(', ') || 'не определены'],
+    r.t && r.t.ok && r.t.dns ? ['Проверка шла на', r.t.ip + ' (DNS ' + r.t.dns + ')'] : null
+  ].filter(Boolean)) + '<p class="panel-desc">Проверка идёт с роутера: путь самого устройства (приложение, UDP, IPv6) может отличаться.</p></details>';
 }
 const ADSV = { filter: 'all', search: '', blockedSearch: '', allowedSearch: '', filtersOpen: false };
 // Files page: the open folder.
