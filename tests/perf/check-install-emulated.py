@@ -496,7 +496,8 @@ def part9_old_tunnel(work, release):
         r = sh(root, "sh /emu/repo/install.sh --yes")
         out = r.stdout
         if r.returncode != 0 or "[ PASS ] VWARD установлен" not in out or "VPN: Wireguard1" not in out or \
-                "туннели VWARD без настроек" not in out or "YouTube (OpkgTun4)" not in out or "91.108.4.0 (OpkgTun4)" not in out:
+                "туннели VWARD без настроек" not in out or "OpkgTun4: списков доменов 2, подсетей 1" not in out or \
+                "перенесено в Wireguard1: списков доменов 2, подсетей 1 (было через OpkgTun4" not in out:
             fail(f"install with an old tunnel failed:\n{out}")
         changes = read(root / "emu/ndmc-changes.log").splitlines()
         want = ["dns-proxy route object-group AdaptiveAuto Wireguard1 auto", "dns-proxy no route object-group AdaptiveAuto OpkgTun4",
