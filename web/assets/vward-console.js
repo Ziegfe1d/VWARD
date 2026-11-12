@@ -2455,12 +2455,8 @@ const RENDER = {
   system() {
     const s = st(), r = s.router || {}, g = s.storage || {}, dg = S.diag && S.diag.checks || [], fl = g.flash || null;
     const bad = dg.filter(x => x.status !== 'PASS').length;
-    return loadError(['status', 'update', 'ext']) +
-      panel('Устройство', kv([
-        ['Модель', r.model || '—'], ['KeeneticOS', r.version || '—'],
-        ['Веб-интерфейс Keenetic', prof().lan_address || location.hostname, '', 'http://' + (prof().lan_address || location.hostname) + '/'],
-        ['Время работы', fmtUptime(r.uptime_sec)]
-      ])) +
+    // fix.38.1 (owner 12.11.2026): VWARD first - its updates and state; the router itself below.
+    return loadError(['status', 'update', 'ext']) + RENDER.updatesPanel() +
       panel('Состояние', kv([
         (() => { const off = ((S.config && S.config.components) || []).filter(x => x.enabled === false).map(x => compName(x.id));
           // fix.38.1: the number on the right, the names under it (six lines on a phone before).
@@ -2469,7 +2465,6 @@ const RENDER = {
         ['Диагностика', dg.length ? (dg.length - bad) + ' из ' + dg.length + ' в норме' : 'не запускалась', bad ? 'warn' : '', 'd-diag'],
         (() => { const sc = stabScore(stabRows(S.stab, 86400), stabChecks(S.stab)); return ['Стабильность', sc && sc.index != null ? sc.index + '% за сутки' : S.stab ? 'не проверено' : '…', stabCls(sc && sc.index), 'd-stability']; })()
       ])) +
-      RENDER.updatesPanel() +
       panel('Хранилище', kv([['Свободно', fmtKB(g.free_kb) + ' из ' + fmtKB(g.total_kb)], ['Файловая система', g.filesystem || '—'],
         (() => { const f = !fl ? ['', '—'] : fl.errors ? ST.bad : ST.on;
           return ['Флешка', f[1], f[0], '', '', !fl ? '' : fl.errors ? 'ошибок: ' + fl.errors + (fl.io ? ', из них чтения и записи: ' + fl.io : '') + (fl.where && fl.where.length ? ' · ' + fl.where.join(', ') : '') : 'ошибок нет']; })(),
@@ -2480,7 +2475,13 @@ const RENDER = {
             'проверено ' + fmtInt(it.files) + ' ' + plural(it.files, 'файл', 'файла', 'файлов') + ' · ' + fmtStamp(it.at) + (it.unknown ? ' · изменено неизвестно кем: ' + it.unknown : '')]; })(),
         ['Файлы VWARD', 'открыть', '', 'd-files']])) +
       cleanupPanel() +
-      backupPanel() + soonPanel('system') + resetPanel() + offPanel();
+      backupPanel() +
+      panel('Устройство', kv([
+        ['Модель', r.model || '—'], ['KeeneticOS', r.version || '—'],
+        ['Веб-интерфейс Keenetic', prof().lan_address || location.hostname, '', 'http://' + (prof().lan_address || location.hostname) + '/'],
+        ['Время работы', fmtUptime(r.uptime_sec)]
+      ])) +
+      soonPanel('system') + resetPanel() + offPanel();
   },
 
   updatesPanel() {
