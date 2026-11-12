@@ -53,7 +53,7 @@ routine_max_delay_seconds=86400
 update_method=full
 # This engine's own version: a manifest may ask for a newer one (min_updater_version),
 # and a signed manifest carrying a newer engine makes it update itself.
-VU_ENGINE_VERSION=2.0.10
+VU_ENGINE_VERSION=2.0.11
 minimum_updater_version=$VU_ENGINE_VERSION
 manifest_v2_url=
 
@@ -560,6 +560,15 @@ vu_manifest_validate() {
 vu_signed_hash() {
     manifest=$1
     jq -cS '.signed' "$manifest" | sha256sum | awk '{print $1}'
+}
+
+# vu_tool_state PROGRAM ARGS...: «runs», or «rc=N» (N 128 and up: the program itself crashed -
+# 132 illegal instruction, 139 memory) - for the journal when a check fails (11.11.2026: «Manifest
+# structure/signature verification failed» did not say which tool, and it could not be told).
+vu_tool_state() {
+    "$@" </dev/null >/dev/null 2>&1
+    vts_rc=$?
+    if [ "$vts_rc" = 0 ]; then echo runs; else echo "rc=$vts_rc"; fi
 }
 
 vu_manifest_verify_signature() {

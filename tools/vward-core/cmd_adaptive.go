@@ -26,7 +26,9 @@ type eventLog struct {
 }
 
 func (l *eventLog) put(event, host, why string) {
-	line := time.Now().Format("2006-01-02 15:04:05") + "|" + event + "|" + host
+	// The zone written out: a static program on the router may not know the local zone, and the
+	// Panel's merged journal orders lines by time (a line without a zone is taken as local).
+	line := time.Now().Format("2006-01-02T15:04:05-0700") + "|" + event + "|" + host
 	if why != "" {
 		line += "|" + strings.ReplaceAll(why, "\n", " ")
 	}
@@ -223,6 +225,10 @@ func runAdaptive(args []string) {
 
 	var mu sync.Mutex
 	pending := map[string]bool{}
+	// An hour's summary (owner 12.11.2026): whether Autopodbor works at all is seen in the journal
+	// even when nothing changes - names seen, checked, and how the checks ended.
+	stats := map[string]int{}
+	count := func(k string, n int) { mu.Lock(); stats[k] += n; mu.Unlock() }
 	last := map[string]adaptive.Outcome{}
 	var wg sync.WaitGroup
 	for i := 0; i < f.workers; i++ {
@@ -235,11 +241,14 @@ func runAdaptive(args []string) {
 					return
 				case n := <-names:
 					res := e.Check(ctx, n)
+					count("seen", 1)
 					switch res.Outcome {
 					case adaptive.Skip, adaptive.Known, adaptive.Cached:
 						continue
 					}
 					mu.Lock()
+					stats["checked"]++
+					stats[string(res.Outcome)]++
 					if last[res.Host] != res.Outcome {
 						log.put(string(res.Outcome), res.Host, res.Why)
 						last[res.Host] = res.Outcome
@@ -294,8 +303,10 @@ func runAdaptive(args []string) {
 					b, err := w.Remove(remove, time.Now())
 					switch {
 					case err != nil:
+						count("write_failed", 1)
 						log.put("REMOVE_FAILED", strings.Join(remove, ","), err.Error())
 					case b != nil:
+						count("removed", len(b.Removed))
 						for _, h := range b.Removed {
 							log.put("REMOVED", h, "opened directly 3 times in a row")
 							delete(owned.Names, h)
@@ -319,10 +330,30 @@ func runAdaptive(args []string) {
 	defer batch.Stop()
 	reread := time.NewTicker(f.refresh)
 	defer reread.Stop()
+	hourly := time.NewTicker(time.Hour)
+	defer hourly.Stop()
+	summary := func() {
+		mu.Lock()
+		s := stats
+		stats = map[string]int{}
+		mu.Unlock()
+		n := 0
+		if m, err := r.Read([]string{"groups"}); err == nil && m.Groups[f.group] != nil {
+			n = len(m.Groups[f.group].Include)
+		}
+		omu.Lock()
+		owns := len(owned.Names)
+		omu.Unlock()
+		log.put("STATS", "-", fmt.Sprintf("mode=%s seen=%d checked=%d direct_ok=%d vpn_only=%d vpn_fail=%d unknown=%d isp_unreliable=%d added=%d removed=%d write_failed=%d group=%d/%d own=%d",
+			mode, s["seen"], s["checked"], s[string(adaptive.DirectOK)], s[string(adaptive.Add)],
+			s[string(adaptive.TunnelFail)]+s[string(adaptive.TunnelUnstable)], s[string(adaptive.ProbeUnknown)],
+			s[string(adaptive.ISPUnreliable)], s["added"], s["removed"], s["write_failed"], n, f.limit, owns))
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			wg.Wait()
+			summary()
 			omu.Lock()
 			defer omu.Unlock()
 			if saved, err := w.Flush(time.Now(), true); err != nil {
@@ -335,6 +366,8 @@ func runAdaptive(args []string) {
 		case <-reread.C:
 			refresh()
 			e.Prune()
+		case <-hourly.C:
+			summary()
 		case <-batch.C:
 			mu.Lock()
 			var hosts []string
@@ -348,11 +381,13 @@ func runAdaptive(args []string) {
 				b, err := w.Add(hosts, time.Now())
 				switch {
 				case err != nil:
+					count("write_failed", 1)
 					log.put("ADD_FAILED", strings.Join(hosts, ","), err.Error())
 					for _, h := range hosts {
 						e.Forget(h)
 					}
 				case b != nil:
+					count("added", len(b.Added))
 					for _, h := range b.Added {
 						log.put("ADDED", h, f.group)
 						owned.Names[h] = &adaptive.Name{Added: time.Now()}

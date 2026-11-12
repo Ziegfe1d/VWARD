@@ -3564,6 +3564,10 @@ if [ "$ACTION" = "log" ]; then
         adaptive)
             FILE=/opt/var/log/vward-route-engine-events.log
             ;;
+        core)
+            # Autopodbor in Go (vward-core adaptive, owner 11.11.2026): its own journal.
+            FILE=/opt/var/log/vward-core-adaptive.log
+            ;;
         updater)
             # Every engine run, from the hourly watch and from the Panel alike.
             FILE=/opt/var/log/vward/updater.log

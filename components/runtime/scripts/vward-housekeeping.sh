@@ -422,28 +422,35 @@ engine_move()
         }
         if [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ]; then src=manifest.json; else src=$EM_URL; fi
         em_fetch "$src" "$EM_T/manifest.json" 262144 || exit 3
-        jq -cS '.signed' "$EM_T/manifest.json" > "$EM_T/signed" &&
-            jq -r '.signature' "$EM_T/manifest.json" | openssl base64 -d -A > "$EM_T/sig" &&
-            openssl pkeyutl -verify -pubin -inkey "$EM_KEY" -rawin -in "$EM_T/signed" -sigfile "$EM_T/sig" >/dev/null 2>&1 || exit 4
-        jq -e --arg ch "$EM_CHANNEL" '.signed.schema == 2 and .signed.channel == $ch' "$EM_T/manifest.json" >/dev/null || exit 4
+        # Why a move stops (rc 4) goes into the journal: which step, and whether jq and openssl run
+        # at all (11.11.2026: «engine_move=failed rc=4» three times a day, the cause unknown).
+        em_why() { em_s=runs; "$@" </dev/null >/dev/null 2>&1 || em_s="rc=$?"; printf '%s' "$em_s"; }
+        jq -cS '.signed' "$EM_T/manifest.json" > "$EM_T/signed" || { echo "step=manifest jq=$(em_why jq -n 1)" > "$EM_T/why"; exit 4; }
+        { jq -r '.signature' "$EM_T/manifest.json" | openssl base64 -d -A > "$EM_T/sig"; } 2>/dev/null &&
+            openssl pkeyutl -verify -pubin -inkey "$EM_KEY" -rawin -in "$EM_T/signed" -sigfile "$EM_T/sig" >/dev/null 2>&1 ||
+            { echo "step=signature openssl=$(em_why openssl version) jq=$(em_why jq -n 1)" > "$EM_T/why"; exit 4; }
+        jq -e --arg ch "$EM_CHANNEL" '.signed.schema == 2 and .signed.channel == $ch' "$EM_T/manifest.json" >/dev/null ||
+            { echo "step=schema_or_channel channel=$EM_CHANNEL" > "$EM_T/why"; exit 4; }
         if [ -n "$EM_CUR" ]; then
             em_new=$(jq -r '.signed.engine.version // empty' "$EM_T/manifest.json")
             case "$em_new" in [0-9]*.[0-9]*.[0-9]*) ;; *) exit 6 ;; esac
             [ "$em_new" != "$EM_CUR" ] && [ "$(printf '%s\n%s\n' "$EM_CUR" "$em_new" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)" = "$em_new" ] || exit 6
         fi
         base=$(jq -r '.signed.files_base' "$EM_T/manifest.json")
-        case "$base" in https://*/) ;; *) exit 4 ;; esac
+        case "$base" in https://*/) ;; *) echo "step=files_base" > "$EM_T/why"; exit 4 ;; esac
         jq -r '.signed.engine.files[] | [.name, .sha256, (.size | tostring)] | @tsv' "$EM_T/manifest.json" |
         while IFS="$(printf '\t')" read -r name sha size; do
-            case "$name" in ''|*[!A-Za-z0-9._-]*) exit 4 ;; esac
+            case "$name" in ''|*[!A-Za-z0-9._-]*) echo "step=file_name" > "$EM_T/why"; exit 4 ;; esac
             if [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ]; then src=files/$sha; else src=$base$sha; fi
             em_fetch "$src" "$EM_T/$name" "$((size + 1))" || exit 3
-            [ "$(wc -c < "$EM_T/$name" | tr -d ' ')" = "$size" ] && [ "$(sha256sum "$EM_T/$name" | awk '{print $1}')" = "$sha" ] || exit 4
+            [ "$(wc -c < "$EM_T/$name" | tr -d ' ')" = "$size" ] && [ "$(sha256sum "$EM_T/$name" | awk '{print $1}')" = "$sha" ] ||
+                { echo "step=file_checksum file=$name" > "$EM_T/why"; exit 4; }
         done || exit $?
         unset VWARD_ENGINE_SWITCHED
         sh "$EM_T/vward-update.sh" --engine-adopt "$EM_T" "$EM_T/manifest.json" >/dev/null 2>&1 || exit 5
     )
     EM_RC=$?
+    EM_WHY=; [ ! -r "$EM_T/why" ] || read -r EM_WHY < "$EM_T/why" || :
     # Checked: the next check in 6 hours. Not downloaded (the network, curl): the next hour
     # (Viva 2026-10-13: the first check after fix.27 met curl 77 and then waited 6 hours).
     if [ -n "$EM_CUR" ] && [ "$EM_RC" != 3 ]; then
@@ -453,7 +460,7 @@ engine_move()
     case "$EM_RC" in
         0) echo "ENGINE_MOVED|v2"; echo "$(date '+%Y-%m-%d %H:%M:%S')|engine_move=done${EM_CUR:+ from=$EM_CUR}" >> "$HOUSE_LOG" ;;
         3|6) : ;;
-        *) echo "$(date '+%Y-%m-%d %H:%M:%S')|engine_move=failed rc=$EM_RC" >> "$HOUSE_LOG" ;;
+        *) echo "$(date '+%Y-%m-%d %H:%M:%S')|engine_move=failed rc=$EM_RC${EM_WHY:+ $EM_WHY}" >> "$HOUSE_LOG" ;;
     esac
     return 0
 }

@@ -154,6 +154,7 @@ python3 tests/repository/check-lite-defaults.py || fail "lightened VWARD: only A
 python3 tests/repository/check-core-adaptive.py || fail "Autopodbor in Go: S91 runs the core, one writer of AdaptiveAuto"
 python3 tests/repository/check-install-fetch-retry.py || fail "install.sh: a curl crash on HTTPS is tried again"
 python3 tests/repository/check-console-core-lists.py || fail "Panel lists through the Go core, the shell without it"
+python3 tests/repository/check-updater-verify-reason.py || fail "the updater says which manifest check failed and why"
 python3 tests/repository/check-integrity-watch.py || fail "file integrity journal: spoiled files found and repaired without a loop"
 python3 tests/repository/check-agents-watch.py || fail "agents observation mode"
 python3 tests/repository/check-vless-countries.py || fail "VLESS servers by country"

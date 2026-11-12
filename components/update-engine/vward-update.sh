@@ -69,8 +69,17 @@ fetch_and_verify_manifest() {
     fi
     manifest_bytes=$(wc -c < "$manifest" | tr -d ' ')
     [ "$manifest_bytes" -le "$max_manifest_size" ] || return "$VU_VERIFY_ERROR"
-    vu_manifest_validate_any "$manifest" || return "$VU_VERIFY_ERROR"
-    vu_manifest_verify_signature "$manifest" || return "$VU_VERIFY_ERROR"
+    if ! vu_manifest_validate_any "$manifest"; then
+        vu_log WARN "Manifest structure check failed: schema=$(vu_manifest_schema "$manifest" || :) bytes=$manifest_bytes jq $(vu_tool_state jq -n 1)"
+        return "$VU_VERIFY_ERROR"
+    fi
+    if ! vu_manifest_verify_signature "$manifest"; then
+        vmv_kept=none
+        [ ! -x "$(vu_openssl_dir)/openssl" ] || vmv_kept=$(vu_tool_state "$(vu_openssl_dir)/openssl" version)
+        vmv_key=missing; [ ! -r "$public_key_file" ] || vmv_key=readable
+        vu_log WARN "Manifest signature check failed: openssl $(vu_tool_state openssl version) kept_copy=$vmv_kept key=$vmv_key jq $(vu_tool_state jq -n 1)"
+        return "$VU_VERIFY_ERROR"
+    fi
     persist_trust_now=${persist_trust:-1}
     vu_manifest_check_policy "$manifest" "$persist_trust_now"
     policy_rc=$?

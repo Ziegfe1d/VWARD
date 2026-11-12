@@ -200,4 +200,12 @@ if "vward-core-install" in (ROOT / "config/components/package-map.tsv").read_tex
 for word in ("core-install)", "core_install()", "CORE_INSTALLED", "checksum_mismatch"):
     if word not in S91:
         fail(f"S91 core-install: {word} missing")
+# 5. Its journal in the Panel (and in «Все журналы»), with the zone written out.
+API = (ROOT / "web/cgi-bin/api.cgi").read_text()
+JS = (ROOT / "web/assets/vward-console.js").read_text()
+CMD = (ROOT / "tools/vward-core/cmd_adaptive.go").read_text()
+if "FILE=/opt/var/log/vward-core-adaptive.log" not in API or "{ id: 'core', label: 'Автоподбор (Go)' }" not in JS:
+    fail("the core's journal is not a Panel journal")
+if '"2006-01-02T15:04:05-0700"' not in CMD or 'log.put("STATS"' not in CMD:
+    fail("the core's journal: the zone in every line and an hourly summary")
 print("CORE_ADAPTIVE=PASS")
