@@ -203,6 +203,22 @@ core_list() {
     [ -x "$CORE_BIN" ] && [ ! -e "$CORE_PANEL_OFF" ] || return 2
     cl_out=$("$CORE_BIN" list --journal "$CORE_JOURNAL" "$@" 2>&1)
     cl_res=$(printf '%s\n' "$cl_out" | sed -n 's/^RESULT=//p' | head -n 1)
+    # An earlier operation left open (a lost answer, a partial batch): the core's own check reads
+    # the router and closes it by evidence (it never writes to Keenetic); then this one again.
+    # The owner did it by hand in SSH (vward-core recover, Viva 12.11.2026).
+    if [ "$cl_res" = blocked ] || [ "$cl_res" = unknown ]; then
+        cl_rec=$("$CORE_BIN" recover --journal "$CORE_JOURNAL" --yes 2>&1)
+        audit "core recover after $cl_res: $(printf '%s\n' "$cl_rec" | sed -n 's/^RECOVER=//p' | head -n 1)"
+        if printf '%s\n' "$cl_rec" | grep -qx 'RECOVER=OK'; then
+            if [ "$cl_res" = unknown ]; then
+                # The batch of this very operation: recovery says whether it was applied.
+                printf '%s\n' "$cl_rec" | grep -q 'now=done' && return 0
+                die router_rejected
+            fi
+            cl_out=$("$CORE_BIN" list --journal "$CORE_JOURNAL" "$@" 2>&1)
+            cl_res=$(printf '%s\n' "$cl_out" | sed -n 's/^RESULT=//p' | head -n 1)
+        fi
+    fi
     RELAY_REASON=$(printf '%s\n' "$cl_out" | sed -n 's/^WHY=//p' | head -n 1 | cut -c1-200)
     case "$cl_res" in
         changed) return 0 ;;
