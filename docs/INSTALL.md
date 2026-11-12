@@ -46,11 +46,12 @@ VWARD работает в Entware, поэтому сначала роутеру 
    В таблице имя - `OPKG`: если у вашей флешки метка, например, `MyFlash`, то вместо `OPKG:/`
    пишите `MyFlash:/`. Регистр букв важен.
 
-   | arch | Команда |
+   | Модель | Команда |
    |---|---|
-   | mipsel (большинство моделей) | `opkg disk OPKG:/ https://bin.entware.net/mipselsf-k3.4/installer/mipsel-installer.tar.gz` |
-   | mips | `opkg disk OPKG:/ https://bin.entware.net/mipssf-k3.4/installer/mips-installer.tar.gz` |
-   | aarch64 | `opkg disk OPKG:/ https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz` |
+   | почти все модели, в том числе Viva KN-1913 (в `show version` может быть `arch: mips` - это не имя установщика) | `opkg disk OPKG:/ https://bin.entware.net/mipselsf-k3.4/installer/mipsel-installer.tar.gz` |
+   | `arch: aarch64` (Peak, Ultra и другие на ARM) | `opkg disk OPKG:/ https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz` |
+
+   Если `exec format error` - установщик не подошёл процессору: попробуйте другую строку.
 
    Затем отдельной командой `system configuration save`. Каждую команду вводите отдельно: одну строку,
    Enter, потом следующую (две команды вместе роутер не разберёт: `argument parse error`). Через 3-5 минут Entware готова (ход установки
