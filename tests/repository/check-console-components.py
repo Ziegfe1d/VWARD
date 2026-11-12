@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""«Компоненты» (owner 2026-11-01): equal components in three groups, one state model.
+"""«Компоненты» (owner 2026-11-01; fix.38: the groups from the parts' registry): one state model.
 
 Installed / selected / enabled / running / works / known are separate facts; the user sees
 Работает, Установлен, Выключен, Не используется, Не установлен, Не работает, Нет связи or
@@ -22,23 +22,30 @@ def fail(message: str) -> None:
 
 
 page = JS[JS.index("  utils() {"):JS.index("  'd-dnsmasq'()")]
-for group in ("'DNS и фильтрация'", "'VPN-движки'", "'Системные службы'"):
-    if "panel(" + group not in page:
-        fail(f"group {group} missing")
-for name, desc in (("AdGuard Home", "DNS и фильтрация"), ("dnsmasq", "DNS и кэширование"), ("Xray", "VLESS, Trojan"),
-                   ("AmneziaWG", "VPN-туннели"), ("sing-box", "Сетевые протоколы"),
-                   ("Контроль состояния", "Мониторинг VWARD"), ("Захват DNS-запросов", "Автоподбор доменов")):
-    if f"'{name}'" not in page or f"'{desc}'" not in page:
-        fail(f"{name} - «{desc}» missing")
+# fix.38 (owner 12.11.2026, stages 1-4): the groups, names and descriptions come from the parts'
+# registry the router sends; the page draws every registry group that has parts.
+REG = json.loads((ROOT / "config/settings/settings-registry.json").read_text(encoding="utf-8"))
+parts = {p["id"]: p for p in REG["parts"]}
+for need in ("const groups = (P.groups || []).map(g => {", "P.list.filter(p => p.group === g)", "agentsPanel() + groups"):
+    if need not in page:
+        fail(f"the page is not drawn from the registry: {need!r}")
+for group in ("DNS и реклама", "VPN", "Обслуживание"):
+    if group not in REG["parts_groups"]:
+        fail(f"group {group!r} missing in the registry")
+for pid, title in (("agh", "AdGuard Home"), ("dnsmasq", "dnsmasq"), ("vless", "Xray (VLESS)"), ("awg", "AmneziaWG"),
+                   ("singbox", "sing-box"), ("sentinel", "Контроль состояния"), ("dnscap", "Захват DNS-запросов")):
+    if parts.get(pid, {}).get("title") != title or not parts[pid].get("desc"):
+        fail(f"{pid} - «{title}» with a description missing in the registry")
 for word in ("Основной", "Альтернативный", "Отключён"):
     if word in page:
         fail(f"no «{word}» on «Компоненты»")
-# Every component opens its card.
+# Every program opens its card.
+pp = JS[JS.index("const PART_PAGE = {"):JS.index("};", JS.index("const PART_PAGE = {"))]
 for slug in ("'d-agh'", "'d-dnsmasq'", "'d-doh'", "'d-vless'", "'d-awg'", "'d-singbox'", "'d-stability'", "'d-dnscap'"):
-    if slug not in page:
+    if slug not in pp:
         fail(f"no card link {slug}")
 # sing-box serves no tunnel until the owner moves one: never selected here.
-if "pkgFacts('sing-box-go'), { selected: false }" not in page:
+if "pkgFacts('sing-box-go'), { selected: false }" not in JS:
     fail("sing-box must not be selected by itself")
 if not shutil.which("node"):
     print("CONSOLE_COMPONENTS=PASS (node not found: model not run)")

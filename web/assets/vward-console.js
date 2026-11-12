@@ -2030,7 +2030,7 @@ function soonPanel(key) {
   return l.length ? panel('В разработке', '<dl class="kv soon">' + l.map(x => '<div class="kv-row" data-key="' + esc(x[0]) + '"><dt>' + esc(x[0]) + '<span class="hint">' + esc(x[2]) + '</span></dt><dd><span class="tag soon">скоро</span></dd></div>').join('') + '</dl>', { icon: 'clock' }) : '';
 }
 // Observation mode (fix.28.2; watch by default since fix.28.6): an agent that only watches writes down what it would do.
-// The agents and their names: the parts' registry the router sends (fix.38, one list of names).
+// The agents and their names: the parts' registry the router sends (one list of names, 12.11.2026).
 const agentList = () => Object.entries((st().parts && st().parts.agents) || {});
 const agentName = k => ((st().parts && st().parts.agents) || {})[k] || 'Агент';
 function agentsMode() {
