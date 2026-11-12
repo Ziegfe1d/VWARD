@@ -1478,6 +1478,17 @@ WOULD_ADD без отправки; запись — одна команда incl
 до 6). На роутере не запускалось. **Доставка на роутер владельца невозможна до восстановления
 Entware** (jq/libc удалены: модуль обновлений не проверит манифест, opkg без DNS, SSH не пускает).
 
+### 12.11.2026 — [Claude Code] тумблеры списков Панели через Go-ядро (proto-4)
+
+`internal/listops` + `vward-core list add|remove|clear|delete|merge|route`; `plan.Desired.OwnerCommand`
+(без отказа foreign-coverage для явной команды владельца). `vward-console-config.sh` `core_list`:
+list-domain include add/remove, list clear/delete, list merge, domain-list туннель→туннель; ответы
+ядра → `core_refused`/`core_journal_blocked`/`router_rejected`/`verification_failed`/`core_failed`
+(тексты в JS). Без ядра или с `core.panel.off` — прежний shell. Не переведено: исключения, сервисы,
+Smart DNS, перевод из «напрямую»/в «напрямую» с DoH/AGH (там DNS). Автоподбор: имя, убранное
+владельцем из AdaptiveAuto (Forget), — `Refused` на 30 дней (`OWNER_REMOVED`). Агент компонентов,
+обновления и ротация журналов остаются; сторожа выключены (ответ владельцу 12.11).
+
 ## 4. Открытые вопросы и нужные данные
 
 - 09.11.2026 / fix.36 опубликован: нужна приёмка владельцем на роутере (Ozon/WB, Lampa TV, ночной скан 00:10, экраны Панели, журнал сторожа DNS на возврат AdGuard Home в цепочку). Локальный стресс 09.11: однократное «processes pile up 6 -> 13» (route engine 5), в CI нет; при повторе разобрать по `soak_debug`.

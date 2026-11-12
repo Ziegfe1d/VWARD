@@ -1,5 +1,6 @@
 // vward-core: VWARD's routing core in Go (owner 08.11; write path 11.11.2026). Writes to the
-// router: selftest --yes (its own test group) and adaptive --apply (names into AdaptiveAuto);
+// router: selftest --yes (its own test group), adaptive --apply (names into AdaptiveAuto) and
+// list (the owner's lists, asked for in the Panel);
 // recover writes only the local journal. Everything else only reads (RCI GET, «show» parse) and prints to stdout.
 //
 //	vward-core version
@@ -17,6 +18,8 @@
 //	                     without --apply: nothing sent)
 //	vward-core check-host --tunnel-dev DEV [--wan DEV] HOST
 //	                     one name checked the same way; nothing sent
+//	vward-core list add|remove LIST DOMAIN | clear|delete LIST | merge SRC DST | route LIST IFACE|none
+//	                     the Panel's list operations: one batch, proven, compensated
 package main
 
 import (
@@ -38,7 +41,7 @@ import (
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/router"
 )
 
-var version = "proto-3"
+var version = "proto-4"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -46,7 +49,7 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "version":
-		fmt.Printf("vward-core %s %s/%s write=selftest,adaptive\n", version, runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("vward-core %s %s/%s write=selftest,adaptive,list\n", version, runtime.GOOS, runtime.GOARCH)
 	case "probe":
 		probe(os.Args[2:])
 	case "dry-run":
@@ -59,6 +62,8 @@ func main() {
 		runAdaptive(os.Args[2:])
 	case "check-host":
 		checkHost(os.Args[2:])
+	case "list":
+		listCmd(os.Args[2:])
 	default:
 		usage()
 	}
@@ -67,7 +72,8 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: vward-core version | probe [--rci ADDR] | dry-run [--rci ADDR] [--etc DIR] [--full]\n"+
 		"       | selftest [--rci ADDR] [--journal DIR] [--tunnel NAME] [--backup DIR] [--yes] | recover [--rci ADDR] [--journal DIR] [--yes]\n"+
-		"       | adaptive --tunnel-dev DEV [--lan br0] [--wan DEV] [--group AdaptiveAuto] [--apply] | check-host --tunnel-dev DEV [--wan DEV] HOST")
+		"       | adaptive --tunnel-dev DEV [--lan br0] [--wan DEV] [--group AdaptiveAuto] [--apply] | check-host --tunnel-dev DEV [--wan DEV] HOST\n"+
+		"       | list add|remove LIST DOMAIN | clear|delete LIST | merge SRC DST | route LIST IFACE|none")
 	os.Exit(2)
 }
 

@@ -14,9 +14,14 @@ import (
 // (the shell engine kept the same list in adaptive-persist.txt; it is taken over once). A name
 // the owner adds by hand is not here and is never removed.
 type Owned struct {
-	Path  string `json:"-"`
+	Path  string           `json:"-"`
 	Names map[string]*Name `json:"names"`
+	// Names the owner took out of the group (not Autopodbor): not put back for RefuseFor.
+	Refused map[string]time.Time `json:"refused,omitempty"`
 }
+
+// RefuseFor: how long a name the owner took out stays out.
+const RefuseFor = 30 * 24 * time.Hour
 
 type Name struct {
 	Added   time.Time `json:"added"`
@@ -26,7 +31,7 @@ type Name struct {
 }
 
 func LoadOwned(path string) (*Owned, error) {
-	o := &Owned{Path: path, Names: map[string]*Name{}}
+	o := &Owned{Path: path, Names: map[string]*Name{}, Refused: map[string]time.Time{}}
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return o, nil
@@ -35,11 +40,14 @@ func LoadOwned(path string) (*Owned, error) {
 		return o, err
 	}
 	if err := json.Unmarshal(b, o); err != nil {
-		return &Owned{Path: path, Names: map[string]*Name{}}, err
+		return &Owned{Path: path, Names: map[string]*Name{}, Refused: map[string]time.Time{}}, err
 	}
 	o.Path = path
 	if o.Names == nil {
 		o.Names = map[string]*Name{}
+	}
+	if o.Refused == nil {
+		o.Refused = map[string]time.Time{}
 	}
 	return o, nil
 }
@@ -89,16 +97,36 @@ func (o *Owned) Save() error {
 	return os.Rename(tmp, o.Path)
 }
 
-// Forget names no longer in the group (the owner took them out): nothing to maintain.
-func (o *Owned) Forget(inGroup map[string]bool) int {
-	n := 0
+// Forget names no longer in the group: the owner took them out (Autopodbor's own removals
+// leave Names first). They are refused from now; the names forgotten are returned.
+func (o *Owned) Forget(inGroup map[string]bool, now time.Time) []string {
+	var out []string
 	for h := range o.Names {
 		if !inGroup[h] {
 			delete(o.Names, h)
-			n++
+			if o.Refused == nil {
+				o.Refused = map[string]time.Time{}
+			}
+			o.Refused[h] = now
+			out = append(out, h)
 		}
 	}
-	return n
+	sort.Strings(out)
+	return out
+}
+
+// StillRefused: the refused names whose time has not run out (the others are dropped), with
+// the time left.
+func (o *Owned) StillRefused(now time.Time) map[string]time.Duration {
+	out := map[string]time.Duration{}
+	for h, t := range o.Refused {
+		if left := RefuseFor - now.Sub(t); left > 0 {
+			out[h] = left
+		} else {
+			delete(o.Refused, h)
+		}
+	}
+	return out
 }
 
 // Due: up to max owned names to check now, the longest unchecked first.

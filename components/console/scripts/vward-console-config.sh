@@ -191,6 +191,31 @@ audit() {
 
 # A change done (a background job finishes after its request) drops the Panel's short cache
 # of the router's answers, so the next page shows the router as it is now.
+# The routing core (Go, owner 11.11.2026) writes the owner's lists for the Panel when it is
+# installed: the whole change as ONE batch, proven by a read and compensated by the core itself.
+# Without it, or with route-engine/core.panel.off, the shell writes them as before.
+CORE_BIN=${VWARD_CORE_BIN:-/opt/share/vward/core/vward-core}
+CORE_PANEL_OFF=${VWARD_CORE_PANEL_OFF:-$ETC/route-engine/core.panel.off}
+CORE_JOURNAL=${VWARD_CORE_JOURNAL:-/opt/var/lib/vward/core-journal}
+# core_list ARGS (vward-core list ...): 0 changed, 1 unchanged, 2 not used (the shell writes);
+# anything else ends the operation with the core's reason.
+core_list() {
+    [ -x "$CORE_BIN" ] && [ ! -e "$CORE_PANEL_OFF" ] || return 2
+    cl_out=$("$CORE_BIN" list --journal "$CORE_JOURNAL" "$@" 2>&1)
+    cl_res=$(printf '%s\n' "$cl_out" | sed -n 's/^RESULT=//p' | head -n 1)
+    RELAY_REASON=$(printf '%s\n' "$cl_out" | sed -n 's/^WHY=//p' | head -n 1 | cut -c1-200)
+    case "$cl_res" in
+        changed) return 0 ;;
+        unchanged) return 1 ;;
+        refused) die core_refused ;;
+        blocked) die core_journal_blocked ;;
+        unknown) die verification_failed ;;
+        failed) die router_rejected ;;
+    esac
+    RELAY_REASON=$(printf '%s' "$cl_out" | tail -n 2 | tr '\n' ' ' | cut -c1-200)
+    die core_failed
+}
+
 done_ok() {
     [ "$2" != changed ] || rm -rf "${VWARD_CONSOLE_CACHE_DIR:-/tmp/vward-console-cache}" "${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}/running-config" 2>/dev/null
     audit "$1 result=$2"; printf 'result=%s\n' "$2"; exit 0
@@ -569,6 +594,14 @@ op_list_domain() {
     }
     ld_have=0; ld_has "$@" && ld_have=1
     [ "$ld_want" != "$ld_have" ] || done_ok "list-domain $1 $2 $3" unchanged
+    if [ "$ld_kind" = include ]; then
+        ld_op=remove; [ "$ld_want" = 0 ] || ld_op=add
+        core_list "$ld_op" "$2" "$3"
+        case $? in
+            0) done_ok "list-domain $1 $2 $3 by=core" changed ;;
+            1) done_ok "list-domain $1 $2 $3 by=core" unchanged ;;
+        esac
+    fi
     if [ "$ld_want" = 1 ]; then ld_cmd="object-group fqdn $2 $ld_kind $3"; ld_undo="no $ld_cmd"
     else ld_cmd="no object-group fqdn $2 $ld_kind $3"; ld_undo="object-group fqdn $2 $ld_kind $3"; fi
     ndm "$ld_cmd" || die router_rejected
@@ -1286,6 +1319,13 @@ op_domain_list() {
 
     if [ "$2" != bypass ] && [ "$cur_t" != "$TUN" ] && [ -n "$cur_t" ] && is_tunnel "$cur_t"; then
         # From one tunnel to another: only the route moves, Smart DNS lines are already out.
+        TXN=0
+        core_list route "$G" "$TUN"
+        case $? in
+            0|1) [ -z "${VWARD_SERVICE_ID:-}" ] || service_claim "$G"
+                 done_ok "domain-list $G $2 route=$cur_t->$TUN by=core" changed ;;
+        esac
+        TXN=1
         ndm "dns-proxy route object-group $G $TUN auto" || die router_rejected
         echo "dns-proxy no route object-group $G $TUN" >> "$JOURNAL"
         ndm "dns-proxy no route object-group $G $cur_t" || die router_rejected
@@ -3673,6 +3713,10 @@ op_list() {
     snapshot
     grep -qx "object-group fqdn $2" "$RUNCFG" || die list_not_found
     ( op_backup_create prelist ) >/dev/null || die backup_failed
+    core_list "$1" "$2"; LC_RC=$?
+    if [ "$LC_RC" = 1 ]; then done_ok "list $1 $2 by=core" unchanged; fi
+    if [ "$LC_RC" = 0 ]; then :
+    else
     JOURNAL=$(mktemp /tmp/vward-console-list.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     TXN=1
     if [ "$1" = clear ]; then
@@ -3701,6 +3745,7 @@ op_list() {
     fi
     save_router || die config_save_failed
     TXN=0
+    fi
     if [ "$1" = delete ]; then
         rm -f "${LISTS_STATE:?}/${2:?}"
         [ ! -f "$LISTS_CONF" ] || { grep -v "^[a-z_]*\.$2=" "$LISTS_CONF" > "$LISTS_CONF.$$" && cat "$LISTS_CONF.$$" > "$LISTS_CONF"; rm -f "$LISTS_CONF.$$"; }
@@ -3723,6 +3768,11 @@ op_list_merge() {
     snapshot
     grep -qx "object-group fqdn $1" "$RUNCFG" && grep -qx "object-group fqdn $2" "$RUNCFG" || die list_not_found
     ( op_backup_create prelist ) >/dev/null || die backup_failed
+    core_list merge "$1" "$2"
+    case $? in
+        0) rm -f "${LISTS_STATE:?}/${1:?}"; done_ok "list merge $1 $2 by=core" changed ;;
+        1) done_ok "list merge $1 $2 by=core" unchanged ;;
+    esac
     JOURNAL=$(mktemp /tmp/vward-console-list.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     TXN=1
     group_domains "$2" > "$JOURNAL.have"

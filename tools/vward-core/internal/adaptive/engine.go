@@ -135,6 +135,11 @@ func (e *Engine) remember(r Result, d time.Duration) Result {
 	return r
 }
 
+// Refuse: a name the owner took out of the group is not put back for d.
+func (e *Engine) Refuse(host string, d time.Duration) {
+	e.remember(Result{host, Skip, "taken out by the owner"}, d)
+}
+
 // Forget a name (after a write that failed: it is checked again later).
 func (e *Engine) Forget(host string) {
 	e.mu.Lock()
@@ -188,6 +193,9 @@ func (e *Engine) Check(ctx context.Context, raw string) Result {
 	}
 	if m, ok := e.seen[h]; ok && e.Now().Before(m.until) {
 		e.mu.Unlock()
+		if m.res.Outcome == Skip {
+			return m.res
+		}
 		r := m.res
 		r.Outcome, r.Why = Cached, string(m.res.Outcome)
 		return r

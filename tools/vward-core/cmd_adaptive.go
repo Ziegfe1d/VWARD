@@ -154,8 +154,11 @@ func runAdaptive(args []string) {
 		}
 		e.SetConfig(m)
 		omu.Lock()
-		if n := owned.Forget(inGroup(m)); n > 0 {
-			log.put("OWNED_FORGOTTEN", "-", fmt.Sprintf("%d names no longer in %s", n, f.group))
+		if gone := owned.Forget(inGroup(m), time.Now()); len(gone) > 0 {
+			for _, h := range gone {
+				log.put("OWNER_REMOVED", h, "taken out of "+f.group+" by the owner: not put back for 30 days")
+				e.Refuse(h, adaptive.RefuseFor)
+			}
 			owned.Save()
 		}
 		omu.Unlock()
@@ -166,6 +169,9 @@ func runAdaptive(args []string) {
 	}
 	for !refresh() {
 		time.Sleep(30 * time.Second)
+	}
+	for h, left := range owned.StillRefused(time.Now()) {
+		e.Refuse(h, left)
 	}
 	if m, err := r.Read([]string{"groups"}); err == nil {
 		omu.Lock()

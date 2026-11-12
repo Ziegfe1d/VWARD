@@ -21,14 +21,21 @@ func TestOwnedImportForgetSave(t *testing.T) {
 	if n := o.ImportShell(shell, in, time.Unix(2, 0)); n != 0 {
 		t.Fatal("imported twice")
 	}
-	if n := o.Forget(map[string]bool{"a.example.com": true}); n != 1 || len(o.Names) != 1 {
-		t.Fatalf("forget: %d %v", n, o.Names)
+	if gone := o.Forget(map[string]bool{"a.example.com": true}, time.Unix(100, 0)); len(gone) != 1 || len(o.Names) != 1 || o.Refused["b.example.com"].IsZero() {
+		t.Fatalf("forget: %v %v", gone, o.Names)
 	}
+	if left := o.StillRefused(time.Unix(100, 0).Add(RefuseFor - time.Hour)); left["b.example.com"] != time.Hour {
+		t.Fatalf("still refused: %v", left)
+	}
+	if left := o.StillRefused(time.Unix(100, 0).Add(RefuseFor + time.Hour)); len(left) != 0 || len(o.Refused) != 0 {
+		t.Fatalf("refusal over: %v", left)
+	}
+	o.Refused["b.example.com"] = time.Unix(100, 0)
 	if err := o.Save(); err != nil {
 		t.Fatal(err)
 	}
 	back, err := LoadOwned(o.Path)
-	if err != nil || len(back.Names) != 1 || back.Names["a.example.com"] == nil {
+	if err != nil || len(back.Names) != 1 || back.Names["a.example.com"] == nil || back.Refused["b.example.com"].IsZero() {
 		t.Fatalf("reload: %v %v", err, back.Names)
 	}
 }
@@ -127,4 +134,19 @@ func contains(a []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// A name the owner took out is skipped, not checked, until the refusal runs out.
+func TestRefusedNotChecked(t *testing.T) {
+	e, p := engine(map[string][]Verdict{"ppp0 x.example.com": {B, B}, "opkgtun4 x.example.com": {O, O}, "ppp0 ya.ru": {O}})
+	now := time.Unix(1000, 0)
+	e.Now = func() time.Time { return now }
+	e.Refuse("x.example.com", time.Hour)
+	if r := e.Check(context.Background(), "x.example.com"); r.Outcome != Skip || len(p.calls) != 0 {
+		t.Fatalf("refused: %+v %v", r, p.calls)
+	}
+	now = now.Add(2 * time.Hour)
+	if r := e.Check(context.Background(), "x.example.com"); r.Outcome != Add {
+		t.Fatalf("after the refusal: %+v", r)
+	}
 }

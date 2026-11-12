@@ -42,6 +42,10 @@ type Desired struct {
 	DoH         []DoHRow        // complete set of VWARD's rows
 	OwnedDoH    map[string]bool // raw rows proven VWARD's
 	DoHLimit    int
+	// OwnerCommand: the owner asked for exactly this change in the Panel (a domain into one of
+	// their lists): a domain another group routes elsewhere is added all the same - the owner's
+	// explicit choice, as the shell Panel did. Protected objects and the allowlist still hold.
+	OwnerCommand bool
 }
 
 type Step struct {
@@ -179,7 +183,7 @@ func Build(cur *ndm.Model, want Desired, protected Protected) (*Plan, error) {
 			if now[d] {
 				continue
 			}
-			if fs, ok := foreign[d]; ok && !sameTarget(fs, g.Target) {
+			if fs, ok := foreign[d]; ok && !sameTarget(fs, g.Target) && !want.OwnerCommand {
 				p.Refused = append(p.Refused, d+": foreign-coverage "+strings.Join(fs, ","))
 				continue
 			}
