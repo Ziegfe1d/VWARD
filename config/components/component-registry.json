@@ -7,7 +7,7 @@
     {
       "id": "platform-core",
       "name": "VWARD Platform Core",
-      "name_ru": "Ядро платформы VWARD",
+      "name_ru": "Платформа VWARD",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "default",
@@ -23,7 +23,7 @@
     {
       "id": "route-engine",
       "name": "VWARD Route Engine",
-      "name_ru": "Движок адаптивной маршрутизации VWARD",
+      "name_ru": "Маршрутизация",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "route-engine",
@@ -53,7 +53,7 @@
     {
       "id": "route-reconciler",
       "name": "VWARD Route Reconciler",
-      "name_ru": "Сверка адаптивных маршрутов VWARD",
+      "name_ru": "Сверка маршрутов",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "route-engine",
@@ -66,7 +66,9 @@
       "requires_running": [
         "route-engine"
       ],
-      "uses": ["tunnel-guard"],
+      "uses": [
+        "tunnel-guard"
+      ],
       "runtime_targets": [
         "/opt/bin/vward-route-reconciler.sh"
       ]
@@ -74,7 +76,7 @@
     {
       "id": "route-tools",
       "name": "VWARD Route Tools",
-      "name_ru": "Инструменты маршрутизации VWARD",
+      "name_ru": "Инструменты маршрутов",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "route-tools",
@@ -95,7 +97,7 @@
     {
       "id": "tunnel-guard",
       "name": "VWARD Tunnel Guard",
-      "name_ru": "Защита VPN-туннеля VWARD",
+      "name_ru": "Агент VPN",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "tunnel-guard",
@@ -119,7 +121,7 @@
     {
       "id": "wan-guard",
       "name": "VWARD WAN Guard",
-      "name_ru": "Защита WAN VWARD",
+      "name_ru": "Восстановление интернета",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "wan-guard",
@@ -137,7 +139,7 @@
     {
       "id": "wifi-client-guard",
       "name": "VWARD Wi-Fi Client Guard",
-      "name_ru": "Контроль Wi-Fi клиентов VWARD",
+      "name_ru": "Контроль Wi-Fi клиентов",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "wifi-client-guard",
@@ -157,7 +159,7 @@
     {
       "id": "policy-sync",
       "name": "VWARD Policy Sync",
-      "name_ru": "Синхронизация сетевых политик VWARD",
+      "name_ru": "IP-категории",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "policy-sync",
@@ -182,7 +184,7 @@
     {
       "id": "runtime",
       "name": "VWARD Runtime",
-      "name_ru": "Среда выполнения VWARD",
+      "name_ru": "Среда выполнения",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "runtime",
@@ -237,7 +239,7 @@
     {
       "id": "update-engine",
       "name": "VWARD Update Engine",
-      "name_ru": "Движок обновлений VWARD",
+      "name_ru": "Установщик обновлений",
       "legacy_ids": [],
       "update_method": "slot-installer",
       "health_profile": "updater",
@@ -254,7 +256,7 @@
     {
       "id": "ads-privacy-guard",
       "name": "VWARD Ads & Privacy Guard",
-      "name_ru": "Защита от рекламы и трекинга VWARD",
+      "name_ru": "Блокировка рекламы",
       "legacy_ids": [],
       "update_method": "signed-package",
       "health_profile": "ads-privacy-guard",
@@ -288,6 +290,285 @@
         "/opt/share/vward/ads-privacy-guard/https/vward-ads-privacy-https-common.sh",
         "/opt/share/vward/ads-privacy-guard/https/providers/3proxy.sh"
       ]
+    }
+  ],
+  "parts_schema": 1,
+  "parts_groups": [
+    "Маршрутизация",
+    "VPN",
+    "Сеть",
+    "DNS и реклама",
+    "Обслуживание",
+    "Обновления",
+    "Платформа"
+  ],
+  "parts_agents": {
+    "network": "Агент сети",
+    "components": "Агент компонентов",
+    "updates": "Агент обновлений",
+    "maintenance": "Агент обслуживания"
+  },
+  "parts": [
+    {
+      "id": "route-engine",
+      "kind": "component",
+      "title": "Маршрутизация",
+      "group": "Маршрутизация",
+      "desc": "сайты через VPN и автоподбор доменов",
+      "switch": "component",
+      "agent": "components"
+    },
+    {
+      "id": "routing-core",
+      "kind": "service",
+      "title": "Ядро маршрутизации на Go",
+      "group": "Маршрутизация",
+      "desc": "автоподбор и операции списков; без него работает прежний автоподбор",
+      "switch": null,
+      "agent": "components"
+    },
+    {
+      "id": "route-reconciler",
+      "kind": "component",
+      "title": "Сверка маршрутов",
+      "group": "Маршрутизация",
+      "desc": "возвращает напрямую то, что снова открывается",
+      "switch": "component",
+      "agent": "network"
+    },
+    {
+      "id": "route-tools",
+      "kind": "component",
+      "title": "Инструменты маршрутов",
+      "group": "Маршрутизация",
+      "desc": "проверка адресов и подсказки автоподбору",
+      "switch": "component",
+      "agent": null
+    },
+    {
+      "id": "policy-sync",
+      "kind": "component",
+      "title": "IP-категории",
+      "group": "Маршрутизация",
+      "desc": "подсети сервисов через VPN, ночная сверка",
+      "switch": "component",
+      "agent": "network"
+    },
+    {
+      "id": "tunnel-guard",
+      "kind": "component",
+      "title": "Агент VPN",
+      "group": "VPN",
+      "desc": "проверяет туннели и пускает списки напрямую, пока VPN не работает",
+      "switch": "component",
+      "agent": "network"
+    },
+    {
+      "id": "vless",
+      "kind": "module",
+      "title": "Xray (VLESS)",
+      "group": "VPN",
+      "desc": "туннели VLESS и Trojan",
+      "switch": "module",
+      "agent": "components"
+    },
+    {
+      "id": "awg",
+      "kind": "module",
+      "title": "AmneziaWG",
+      "group": "VPN",
+      "desc": "туннели AmneziaWG",
+      "switch": "module",
+      "agent": "components"
+    },
+    {
+      "id": "singbox",
+      "kind": "module",
+      "title": "sing-box",
+      "group": "VPN",
+      "desc": "сетевые протоколы",
+      "switch": null,
+      "agent": null
+    },
+    {
+      "id": "wan-guard",
+      "kind": "component",
+      "title": "Восстановление интернета",
+      "group": "Сеть",
+      "desc": "переподключает провайдера, когда пропал интернет",
+      "switch": "component",
+      "agent": "network"
+    },
+    {
+      "id": "wifi-client-guard",
+      "kind": "component",
+      "title": "Контроль Wi-Fi клиентов",
+      "group": "Сеть",
+      "desc": "переводит устройства между 2,4 и 5 ГГц",
+      "switch": "component",
+      "agent": "network"
+    },
+    {
+      "id": "ads-privacy-guard",
+      "kind": "component",
+      "title": "Блокировка рекламы",
+      "group": "DNS и реклама",
+      "desc": "реклама и трекеры через AdGuard Home",
+      "switch": "component",
+      "agent": "network"
+    },
+    {
+      "id": "agh",
+      "kind": "module",
+      "title": "AdGuard Home",
+      "group": "DNS и реклама",
+      "desc": "DNS-сервер с блокировкой рекламы",
+      "switch": "module",
+      "agent": null
+    },
+    {
+      "id": "dnsmasq",
+      "kind": "module",
+      "title": "dnsmasq",
+      "group": "DNS и реклама",
+      "desc": "DNS и кэширование",
+      "switch": null,
+      "agent": null
+    },
+    {
+      "id": "doh",
+      "kind": "service",
+      "title": "DoH-клиент",
+      "group": "DNS и реклама",
+      "desc": "Smart DNS через DoH",
+      "switch": null,
+      "agent": null
+    },
+    {
+      "id": "dnscap",
+      "kind": "service",
+      "title": "Захват DNS-запросов",
+      "group": "DNS и реклама",
+      "desc": "прежний автоподбор узнаёт новые домены; ядро на Go ловит их само",
+      "switch": null,
+      "agent": "components"
+    },
+    {
+      "id": "sentinel",
+      "kind": "extra",
+      "title": "Контроль состояния",
+      "group": "Обслуживание",
+      "desc": "следит за программами VWARD в реальном времени",
+      "switch": "extra",
+      "agent": "components"
+    },
+    {
+      "id": "memory-watch",
+      "kind": "extra",
+      "title": "Наблюдение за памятью",
+      "group": "Обслуживание",
+      "desc": "перезапускает программу VWARD, у которой растёт память",
+      "switch": "extra",
+      "agent": "components"
+    },
+    {
+      "id": "ssh-watch",
+      "kind": "extra",
+      "title": "Вход по SSH",
+      "group": "Обслуживание",
+      "desc": "возвращает вход по SSH, если он перестал отвечать",
+      "switch": "extra",
+      "agent": "components"
+    },
+    {
+      "id": "repair",
+      "kind": "extra",
+      "title": "Ремонт пакетов Entware",
+      "group": "Обслуживание",
+      "desc": "переставляет пакеты Entware, которые падают при запуске",
+      "switch": "extra",
+      "agent": "components"
+    },
+    {
+      "id": "backup",
+      "kind": "extra",
+      "title": "Резервные копии по расписанию",
+      "group": "Обслуживание",
+      "desc": "копия настроек VWARD раз в сутки",
+      "switch": "extra",
+      "agent": "maintenance"
+    },
+    {
+      "id": "flash-watch",
+      "kind": "extra",
+      "title": "Наблюдение за флешкой",
+      "group": "Обслуживание",
+      "desc": "ошибки чтения и записи флешки в журнале системы",
+      "switch": "extra",
+      "agent": "maintenance"
+    },
+    {
+      "id": "integrity",
+      "kind": "extra",
+      "title": "Целостность файлов",
+      "group": "Обслуживание",
+      "desc": "раз в сутки сверяет файлы программ",
+      "switch": "extra",
+      "agent": "maintenance"
+    },
+    {
+      "id": "services-refresh",
+      "kind": "extra",
+      "title": "Каталог сервисов",
+      "group": "Обслуживание",
+      "desc": "раз в сутки обновляет списки сервисов",
+      "switch": "extra",
+      "agent": "maintenance"
+    },
+    {
+      "id": "update-engine",
+      "kind": "component",
+      "title": "Установщик обновлений",
+      "group": "Обновления",
+      "desc": "проверяет и ставит подписанные обновления VWARD",
+      "switch": null,
+      "agent": "updates"
+    },
+    {
+      "id": "ext-update",
+      "kind": "extra",
+      "title": "Обновления Entware и AdGuard Home",
+      "group": "Обновления",
+      "desc": "раз в сутки проверяет и ставит сам",
+      "switch": "extra",
+      "agent": "maintenance"
+    },
+    {
+      "id": "console",
+      "kind": "component",
+      "title": "Панель VWARD",
+      "group": "Платформа",
+      "desc": "эта Панель",
+      "switch": null,
+      "agent": null
+    },
+    {
+      "id": "runtime",
+      "kind": "component",
+      "title": "Среда выполнения",
+      "group": "Платформа",
+      "desc": "агенты, расписание, общие библиотеки",
+      "switch": null,
+      "agent": null
+    },
+    {
+      "id": "platform-core",
+      "kind": "component",
+      "title": "Платформа VWARD",
+      "group": "Платформа",
+      "desc": "версия и состав пакета",
+      "switch": null,
+      "agent": null
     }
   ]
 }
