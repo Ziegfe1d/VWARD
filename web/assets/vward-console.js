@@ -1334,6 +1334,8 @@ function partPill(p) {
   if (p.id === 'dnsmasq') { const f = Object.assign(pkgFacts('dnsmasq-full'), { selected: mode === 'dnsmasq' }); if (f.selected) f.works = f.running ? null : false; return compStatus(f); }
   if (p.id === 'singbox') return compStatus(Object.assign(pkgFacts('sing-box-go'), { selected: false }));
   if (p.enabled === false) return p.kind === 'extra' ? ['off', 'Выключено'] : CS.off;
+  // The two agents with a switch of their own besides the component's: off when that one is.
+  if ((p.id === 'tunnel-guard' && (cfg().tunnel_guard || {}).enabled === false) || (p.id === 'wan-guard' && (cfg().wan_guard || {}).enabled === false)) return CS.off;
   if (p.installed === false) return CS.none;
   if (p.running === true) return CS.works;
   // A job that runs by the clock ended its last run with an error; a service that should run does not.
@@ -1346,7 +1348,10 @@ function partRow(p) {
   const pill = partPill(p), page = partPage(p), why = p.why || pill[2] || '';
   if (p.switch === 'component' || p.switch === 'extra') {
     const attr = p.switch === 'component' ? 'data-comp="' + p.id + '"' : 'data-extra="' + p.id + '"';
-    const on = p.id === 'tunnel-guard' ? guardOn() : p.id === 'wan-guard' ? p.enabled !== false && (cfg().wan_guard || {}).enabled !== false : p.enabled !== false;
+    // One source for the line and the switch: the router's answer (plus the agent's own switch, which
+    // the component's switch turns on with it).
+    const own = p.id === 'tunnel-guard' ? (cfg().tunnel_guard || {}).enabled !== false : p.id === 'wan-guard' ? (cfg().wan_guard || {}).enabled !== false : true;
+    const on = p.enabled !== false && own;
     const go = page ? '<button class="icon-btn part-go" type="button" data-go="' + page + '" aria-label="' + esc(p.title) + ': подробнее">' + ico('chevron') + '</button>' : '';
     // The state always in sight under the name; what the part does too when the line has room.
     const line = pill[1] + ' · ' + (why || p.desc), sub = line.length <= HINT_MAX ? line : pill[1] + (why && (pill[1] + ' · ' + why).length <= HINT_MAX ? ' · ' + why : '');

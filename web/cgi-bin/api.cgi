@@ -3977,7 +3977,8 @@ PARTS_FACTS=$(
         printf '%s\t1\t%s\t%s\t\n' "$c" "$(part_on "$c.disabled")" "$r"
     done
     printf 'runtime\t1\t1\t%s\t\n' "$SUPERVISOR"
-    printf 'console\t1\t1\t%s\t\n' "$([ -n "$CONSOLE_PID" ] && echo 1 || echo 0)"
+    # This answer is the Panel's own: it works.
+    printf 'console\t1\t1\t1\t\n'
     printf 'update-engine\t1\t1\t%s\t\n' "$CROND"
     printf 'platform-core\t1\t1\t\t\n'
     printf 'routing-core\t%s\t%s\t%s\t%s\n' "$PF_CORE_INST" "$PF_CORE_ON" "$CORE_RUN" "$([ "$PF_CORE_INST" = 1 ] || echo 'скачивается само; пока работает прежний автоподбор')"
