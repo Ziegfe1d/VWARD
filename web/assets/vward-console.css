@@ -619,6 +619,11 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
 .log-sources>summary small{margin-left:auto;color:var(--muted);white-space:nowrap}
 .log-sources>summary span{white-space:nowrap}
 .log-view{margin-top:0}
+/* «Журналы» (owner 12.11.2026): the main button across the card, «Показать ещё» under the feed. */
+.panel-actions>.log-show{flex:1 1 100%}
+.log-more-row{padding-top:0}
+.log-more-row>.btn{flex:1 1 auto}
+.log-sum{margin-top:-4px}
 
 /* fix.35.4: the journal's two choices say what they choose; a Smart DNS server is one row - its
    name wraps inside the card, its domains and its answer below, its button aside; a service's

@@ -4691,7 +4691,56 @@ op_smartdns_guard() {
 
 # journal keep DAYS | size MB: how long and how much of the technical journals is kept
 # (housekeeping applies it every hour; MB 0: no limit but the USB drive).
+# journal_file NAME: a «Журналы» source's live file (the same names as api.cgi's log_file;
+# check-console-logs-all compares them).
+journal_file() {
+    case "$1" in
+        wan) echo /opt/var/log/vward-wan-guard.log ;;
+        recovery) echo /opt/var/log/vward-wan-guard-recovery.log ;;
+        cron) echo /opt/var/log/crond.log ;;
+        routing) echo /tmp/vward-route-reconciler-maint.cron.out ;;
+        adaptive) echo /opt/var/log/vward-route-engine-events.log ;;
+        core) echo /opt/var/log/vward-core-adaptive.log ;;
+        updater) echo /opt/var/log/vward/updater.log ;;
+        tunnel) echo /opt/var/log/vward-tunnel-guard.log ;;
+        policy) echo /opt/var/log/vward-policy-audit-summary.log ;;
+        policysync) echo /opt/var/log/vward-policy-sync-sync.log ;;
+        console) echo /opt/var/log/vward/console-audit.log ;;
+        wifi) echo /opt/var/log/vward-wifi-client-guard.log ;;
+        ads) echo /opt/var/log/vward-ads-privacy-guard.log ;;
+        awg) echo /opt/var/log/vward-awg-engine.log ;;
+        vless) echo /opt/var/log/vward-vless-engine.log ;;
+        sentinel) echo /opt/var/log/vward-sentinel.log ;;
+        supervisor) echo /opt/var/log/vward-cron-supervisor.log ;;
+        housekeeping) echo /opt/var/log/vward-housekeeping.log ;;
+        integrity) echo /opt/var/log/vward-integrity.log ;;
+        off) echo /opt/var/log/vward-off.log ;;
+        *) return 1 ;;
+    esac
+}
+
+# op_journal_clear NAME|all: «Очистить» in «Журналы» (owner 12.11.2026). The live journal is
+# emptied in place (a program writing it keeps its handle); the archives stay. «all» is every
+# source of «Все» (crond's own record is not one). The audit line is written after, so the
+# cleared console journal starts with who cleared it.
+op_journal_clear() {
+    case "$1" in
+        all) jc_names="wan recovery tunnel adaptive core routing policy wifi ads updater console awg vless sentinel supervisor housekeeping integrity off" ;;
+        *) journal_file "$1" >/dev/null || die invalid_value 64; jc_names=$1 ;;
+    esac
+    jc_done=0
+    for jc_n in $jc_names; do
+        jc_f="${VWARD_ROOT_PREFIX:-}$(journal_file "$jc_n")"
+        [ -f "$jc_f" ] && [ ! -L "$jc_f" ] && [ -s "$jc_f" ] || continue
+        printf '' > "$jc_f" 2>/dev/null || die write_failed
+        jc_done=$((jc_done + 1))
+    done
+    [ "$jc_done" -gt 0 ] || done_ok "journal clear $1" unchanged
+    done_ok "journal clear $1 files=$jc_done" changed
+}
+
 op_journal() {
+    [ "$1" != clear ] || op_journal_clear "$2"
     case "$1:$2" in
         keep:1|keep:3|keep:7|keep:30|keep:180|keep:365) jk=KEEP_DAYS ;;
         size:0|size:1|size:5|size:10|size:30) jk=MAX_MB ;;

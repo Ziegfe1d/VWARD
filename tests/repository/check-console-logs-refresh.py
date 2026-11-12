@@ -31,13 +31,20 @@ merge = JS[JS.index("function logTime"):JS.index("\n}\n", JS.index("function mer
 loader = block("const LOGRUN = {}", "function logStamp(")
 api_text = block("async function apiBody(", "async function apiGet(") + block("async function apiText(", "async function apiPost(")
 script = r"""
-const S = { logs: {}, loadedAt: {} }, LOGINFO = [], LOG_HOURS = 24;
-let logNewest = true, current = 'other', logTab = 'all', calls = 0, mode = {};
+const S = { logs: {}, loadedAt: {} }, LOGINFO = [], LOG_HOURS = 24, LOG_MAX = 1000, LOGMORE = {};
+let logNewest = true, current = 'other', logTab = 'all', calls = 0, mode = {}, logShown = {}, logN = 50, editing = false;
 const LOG_TABS = [{ id: 'wan', label: 'Интернет' }, { id: 'tunnel', label: 'VPN' }, { id: 'cron', label: 'Расписание' }];
 const render = () => {}, $ = () => null, esc = x => String(x), ico = () => '', fmtTime = x => x, errText = x => x.error;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// «Все» is one request (owner 12.11.2026): every source after its «@@VWARD-LOG name» line; a
+// source the answer lacks is that source's failure, a request that fails is every source's.
 async function apiText(action, p) {
   calls++; await sleep(20);
+  if (p.name === 'all') {
+    const names = LOG_TABS.filter(t => t.id !== 'cron').map(t => t.id);
+    if (names.every(n => mode[n] === 'fail')) throw new Error('роутер не ответил за 20 секунд');
+    return names.filter(n => mode[n] !== 'fail').map(n => '@@VWARD-LOG ' + n + '\n' + (mode[n] || '')).join('\n');
+  }
   const m = mode[p.name];
   if (m === 'fail') throw new Error('роутер не ответил за 20 секунд');
   return m || '';
@@ -101,9 +108,9 @@ if o["backoffCalls"] != 0:
     fail("the automatic refresh right after a failed one must wait: " + json.dumps(o))
 if o["empty"] != "Журналы пусты" or o["warn4"]:
     fail("an empty window answered by the sources: " + json.dumps(o))
-if not o["samePromise"] or o["autoCalls"] != 2:
-    fail("automatic refreshes must not pile up (one run of 2 requests): " + json.dumps(o))
-if o["ownerCalls"] != 4 or not o["latest"] or not o["q"]:
+if not o["samePromise"] or o["autoCalls"] != 1:
+    fail("RED: «Все» is one request, and refreshes must not pile up: " + json.dumps(o))
+if o["ownerCalls"] != 2 or not o["latest"] or not o["q"]:
     fail("the owner's request during a run must run once more and end with the newest answer: " + json.dumps(o))
 if not o["fresh"].startswith("Журналы не прочитаны") :
     fail("RED: a failed first load must not read «Журналы пусты»: " + json.dumps(o))
@@ -141,8 +148,11 @@ if not (got[0].startswith("err:") and "502" in got[0] and got[1] == "err:код 
         and "20 секунд" in got[2] and got[3] == "ok:2026-11-02 21:00:00 ok"
         and got[4] == "json:роутер не передал ответ за 20 секунд" and got[5] == "timer:1"):
     fail("apiText must fail on HTTP errors, JSON errors and a stalled body: " + json.dumps(got))
-# The in-place refresh updates the warning and the sources too; the automatic tick never piles up.
-for need in ("src.innerHTML = logSources()", "w.textContent = LOGWARN[tab] || ''", "loadLog(logTab, true, true);", 'id="logSrc"', 'id="logWarn"'):
+# owner 12.11.2026: nothing loads by itself; «Показать журнал» asks for N entries, «Показать ещё» for N more.
+for need in ("apiText('log', { name: 'all', count: want, hours: LOG_HOURS })", "else if (a === 'log-show') { logShown[logTab] = logN;",
+             "Math.min(LOG_MAX, (logShown[logTab] || logN) + logN)", "само не обновляется", 'id="logSrc"', 'id="logWarn"', "Показать журнал", "Обновить журнал"):
     if need not in JS:
         fail("the Panel lacks " + need)
+if "loadLog(logTab, true, true)" in JS or "обновляется само" in JS:
+    fail("RED: «Журналы» must not refresh by themselves")
 print("CONSOLE_LOGS_REFRESH=PASS")

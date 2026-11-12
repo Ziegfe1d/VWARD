@@ -82,7 +82,7 @@ const num = v => (v == null || v === '' || isNaN(Number(v))) ? null : Number(v);
 const fmtInt = v => num(v) == null ? '—' : String(Number(v));
 function plural(n, one, few, many) { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; }
 const wifiName = mac => mac === 'aa:bb:cc:dd:ee:01' ? 'Ноутбук' : mac;
-const S = { logs: @LOGS@, loadedAt: {} };
+const S = { act: @LOGS@, logs: {}, loadedAt: {} };
 @BLOCK@
 const out = {};
 Object.keys(ACTIVITY).forEach(k => { out[k] = activityEvents(k).map(e => e.text + (e.n > 1 ? ' x' + e.n : '')); });
@@ -114,4 +114,13 @@ for key, texts in got.items():
         if "=" in t or "|" in t or any(w.isupper() and "_" in w for w in t.split()):
             fail(f"technical text reached the page: {key}: {t}")
 
+# owner 12.11.2026: a history reads its last lines once (not 1000 every 15 s), shows 50 events,
+# «Показать ещё» and «Обновить» on request; the 15 s refresh leaves it alone.
+for need in ("const ACT_LINES = 200, ACT_STEP = 50", "apiText('log', { name: n, count: lines })", "btn('act-more'", "btn('act-reload'",
+             "if (id.startsWith('a-') && !(auto && ACTAT[id.slice(2)])) loadActivity(id.slice(2));", "refreshPage(false, true);",
+             "само не обновляется"):
+    if need not in JS:
+        fail(f"the histories lack {need!r}")
+if "count: 1000 }" in JS or "обновляется само" in JS:
+    fail("RED: a history still reads 1000 lines or refreshes itself")
 print("CONSOLE_ACTIVITY=PASS")

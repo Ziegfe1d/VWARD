@@ -17,7 +17,7 @@ def fail(m):
     raise SystemExit(f"CONSOLE_LOG_FEED=FAIL: {m}")
 
 
-if "copyText(S.logs[logTab] || '')" not in JS or "logFeed(text)" not in JS or 'data-act="log-view"' not in JS:
+if "else copyText(text);" not in JS or "logFeed(text)" not in JS or "chips('Важность', 'data-act=\"log-view\"'" not in JS:
     fail("the feed, the «Важное/Все» switch and the raw copy")
 if not shutil.which("node"):
     print("CONSOLE_LOG_FEED=PASS (node not found)"); sys.exit(0)

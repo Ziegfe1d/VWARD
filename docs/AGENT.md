@@ -1576,6 +1576,19 @@ durText, значения журналов), короткая метка «AdGua
 Заметки Smart DNS скрыты при выключенном Smart DNS. check-console-log-feed ждёт `1,26\u00a0с`.
 Panel crawl PASS (91 страница, 0 проблем), тесты check-console-* PASS.
 
+### 12.11.2026 — [Claude Code] «Журналы» по кнопке, истории без автообновления
+
+Решение владельца по макету. API: `log_file NAME` (одно соответствие имён и файлов), `log_show`,
+`action=log&name=all` — все источники «Все» одним ответом, перед каждым строка `@@VWARD-LOG имя`
+(`LOG_ALL_NAMES`, без `cron`). Очистка: `config op=journal target=clear value=имя|all`,
+подтверждение `LOG_CLEAR`; помощник `op_journal_clear` усекает живые файлы на месте (`printf ''`),
+архивы не трогает, запись аудита после очистки. Имена файлов в api.cgi и в помощнике сверяет
+check-console-logs-all. Панель: `logShown/logN/LOGMORE`, `mergeLogs(..., limit)`, `logSplit`, `logPick`;
+tick, visibilitychange и refreshPage журналы не грузят. Истории: `S.act`, 200 строк, 50 событий,
+`act-more`/`act-reload`, автообновление пропускает загруженную историю (`refreshPage(false, true)`).
+Эмулятор: 16 с без нажатия — 0 запросов журналов; «Показать журнал» — один запрос
+`name=all&count=50&hours=24`. Panel crawl 91 страница, api-fuzz 51 действие — 0 проблем.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 09.11.2026 / fix.36 опубликован: нужна приёмка владельцем на роутере (Ozon/WB, Lampa TV, ночной скан 00:10, экраны Панели, журнал сторожа DNS на возврат AdGuard Home в цепочку). Локальный стресс 09.11: однократное «processes pile up 6 -> 13» (route engine 5), в CI нет; при повторе разобрать по `soak_debug`.
