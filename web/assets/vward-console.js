@@ -1307,6 +1307,8 @@ function verHuman(v, seq) {
 // ---- VWARD's parts (fix.38): one registry, one name, one state, one switch ----
 // Where a part's own page is (a component's is «c-ID»).
 const PART_PAGE = { agh: 'd-agh', awg: 'd-awg', vless: 'd-vless', dnsmasq: 'd-dnsmasq', singbox: 'd-singbox', doh: 'd-doh', dnscap: 'd-dnscap', sentinel: 'd-stability', 'routing-core': 'c-route-engine' };
+// Parts that run by the clock (their last run's result), not all the time.
+const PART_RUNS = ['route-reconciler', 'tunnel-guard', 'wan-guard'];
 const partsList = () => (st().parts && st().parts.list) || [];
 const partOf = id => partsList().find(p => p.id === id);
 const partTitle = id => (partOf(id) || {}).title || id;
@@ -1334,7 +1336,9 @@ function partPill(p) {
   if (p.enabled === false) return p.kind === 'extra' ? ['off', 'Выключено'] : CS.off;
   if (p.installed === false) return CS.none;
   if (p.running === true) return CS.works;
-  if (p.running === false) return p.kind === 'component' ? ['warn', 'С ошибкой', 'последний запуск закончился ошибкой'] : ['off', 'Не запущен'];
+  // A job that runs by the clock ended its last run with an error; a service that should run does not.
+  if (p.running === false) return PART_RUNS.includes(p.id) ? ['warn', 'С ошибкой', 'последний запуск закончился ошибкой'] :
+    p.kind === 'component' ? ['crit', 'Не работает'] : ['off', 'Не запущен'];
   return p.kind === 'extra' ? ['ok', 'Включено'] : ['ok', 'Включён'];
 }
 // partRow PART: a switch where the part has one (state in the line under its name), else its state.
@@ -1344,7 +1348,9 @@ function partRow(p) {
     const attr = p.switch === 'component' ? 'data-comp="' + p.id + '"' : 'data-extra="' + p.id + '"';
     const on = p.id === 'tunnel-guard' ? guardOn() : p.id === 'wan-guard' ? p.enabled !== false && (cfg().wan_guard || {}).enabled !== false : p.enabled !== false;
     const go = page ? '<button class="icon-btn part-go" type="button" data-go="' + page + '" aria-label="' + esc(p.title) + ': подробнее">' + ico('chevron') + '</button>' : '';
-    return ctrlRow(p.title, '<span class="part-ctl">' + sw(attr, on, p.title, !cfgOk()) + go + '</span>', pill[1] + ' · ' + (why || p.desc));
+    // The state always in sight under the name; what the part does too when the line has room.
+    const line = pill[1] + ' · ' + (why || p.desc), sub = line.length <= HINT_MAX ? line : pill[1] + (why && (pill[1] + ' · ' + why).length <= HINT_MAX ? ' · ' + why : '');
+    return ctrlRow(p.title, '<span class="part-ctl">' + sw(attr, on, p.title, !cfgOk()) + go + '</span>', sub);
   }
   return kv([[p.title, pill[1], pill[0], page, '', why || p.desc]]).replace(/^<dl class="kv">|<\/dl>$/g, '');
 }
