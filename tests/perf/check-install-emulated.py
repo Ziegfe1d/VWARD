@@ -17,8 +17,19 @@ this repository with a release signed by a one-time key.
   4. --check changes nothing.
   5. KeeneticOS 4 is refused.
   6. KeeneticOS 5.0, AdGuard Home present, two VPN connections: the installer takes
-     one by itself (routed, else connected, else the first); VWARD routes through it and «Реклама» stays on. After
-     --uninstall the same router installs again.
+     one by itself (routed, else connected, else the first); VWARD routes through it and «Реклама» stays on;
+     AdGuard Home's own DNS server in Keenetic stays. After --uninstall the same router installs again.
+  7. A reformatted USB drive (owner 12.11.2026): AdGuard Home is gone, Keenetic still asks
+     192.0.2.1:65053 and has its own DNS off. --check says so and changes nothing; install takes both out
+     (Keenetic answers DNS by itself again) before anything else.
+  8. A router that lived before (owner 12.11.2026): lists of its own (YouTube, Discord), AdaptiveAuto with
+     names routed into another VPN that is not connected, a subnet and a Smart DNS line. The installer
+     takes the connected VPN, moves only AdaptiveAuto's route there and leaves everything else as it is.
+  9. The old VPN tunnel (owner 12.11.2026): a VWARD engine tunnel (OpkgTun4) whose settings went with the
+     USB drive still carries lists, AdaptiveAuto and a subnet; the installer names them. With a working VPN they all move there
+     (a list already on it only loses the dead route); a list on the working VPN is not touched; a
+     failed installation puts everything back. With nothing but the dead tunnel nothing moves and
+     the installer says how to bring the lists back.
 
 Needs root (chroot, mknod, mount) and busybox, jq, openssl, cc.
 """
@@ -283,6 +294,7 @@ def part6_choice_agh_reinstall(work, release):
         (root / "sys/class/net/ovpn_br0/tun_flags").write_text("0x1002\n")
         (root / "opt/etc/AdGuardHome").mkdir(parents=True)
         (root / "opt/etc/AdGuardHome/AdGuardHome.yaml").write_text("http:\n  address: 127.0.0.1:3000\n")
+        (root / "emu/running-config").write_text(read(root / "emu/running-config") + "ip name-server 192.0.2.1:65053\n")
         # Enter: install (no question about packages or the VPN).
         r = on_terminal(root, "sh /emu/repo/install.sh", "\n")
         out = r.stdout.replace("\r", "")
@@ -299,6 +311,8 @@ def part6_choice_agh_reinstall(work, release):
             fail(f"AdaptiveAuto must go through the chosen VPN:\n{read(root / 'emu/ndmc-changes.log')}")
         if (root / "opt/etc/vward/components/ads-privacy-guard.disabled").exists():
             fail("with AdGuard Home «Реклама» stays on")
+        if "name-server" in read(root / "emu/ndmc-changes.log"):
+            fail(f"AdGuard Home is here: its DNS server in Keenetic stays:\n{read(root / 'emu/ndmc-changes.log')}")
         un = sh(root, "sh /emu/repo/install.sh --uninstall --yes")
         if un.returncode != 0 or "[ PASS ] VWARD удалён" not in un.stdout:
             fail(f"uninstall failed:\n{un.stdout}")
@@ -311,6 +325,216 @@ def part6_choice_agh_reinstall(work, release):
         if not re.search(r"^\d+$", read(root / "opt/var/run/vward-console-lighttpd.pid").strip()):
             fail("the Panel is not running after the reinstall")
         print("ok - KeeneticOS 5.0, AdGuard Home, the connected VPN taken; uninstall and install again")
+    finally:
+        teardown(root)
+
+
+def part7_reformatted_drive(work, release):
+    root = build(work, "clean7", release)
+    try:
+        (root / "emu/running-config").write_text(read(root / "emu/running-config") + "ip name-server 192.0.2.1:65053\nopkg dns-override\n")
+        chk = sh(root, "sh /emu/repo/install.sh --check")
+        if "остались настройки DNS от AdGuard Home" not in chk.stdout or "192.0.2.1:65053" not in chk.stdout or read(root / "emu/ndmc-changes.log").strip():
+            fail(f"--check must name the DNS left by AdGuard Home and change nothing:\n{chk.stdout}")
+        r = sh(root, "sh /emu/repo/install.sh --yes")
+        if r.returncode != 0 or "[ PASS ] VWARD установлен" not in r.stdout:
+            fail(f"install failed:\n{r.stdout}")
+        changes = read(root / "emu/ndmc-changes.log").splitlines()
+        want = ["no ip name-server 192.0.2.1:65053", "no opkg dns-override", "system configuration save",
+                "object-group fqdn AdaptiveAuto", "dns-proxy route object-group AdaptiveAuto Wireguard1 auto", "system configuration save"]
+        if changes != want:
+            fail(f"RED: the DNS of a gone AdGuard Home must go first: {changes}")
+        if "DNS отвечает сам Keenetic" not in r.stdout:
+            fail(f"install must say DNS is Keenetic's own again:\n{r.stdout}")
+        print("ok - reformatted drive: the DNS left by AdGuard Home is taken out, Keenetic answers")
+    finally:
+        teardown(root)
+
+
+LIVED_CONFIG = """system
+    hostname Keenetic
+!
+interface Wireguard1
+    description "My VPN"
+!
+interface OpenVPN0
+    description "Old VPN"
+!
+object-group fqdn YouTube
+    include youtube.com
+    include googlevideo.com
+!
+object-group fqdn Discord
+    include discord.com
+!
+object-group fqdn AdaptiveAuto
+    include chatgpt.com
+    include old.example.com
+!
+dns-proxy
+    route object-group YouTube Wireguard1 auto
+    route object-group Discord Wireguard1 auto
+    route object-group AdaptiveAuto OpenVPN0 auto
+    https upstream https://dns.example/dns-query domain chatgpt.com
+!
+ip route 8.8.8.0 255.255.255.0 Wireguard1 auto
+"""
+
+
+def part8_lived_router(work, release):
+    root = build(work, "clean8", release)
+    try:
+        ifs = json.loads(read(root / "emu/rci-interface.json"))
+        ifs["OpenVPN0"] = {"type": "OpenVPN", "security-level": "public", "description": "Old VPN", "connected": "no", "link": "down"}
+        (root / "emu/rci-interface.json").write_text(json.dumps(ifs))
+        curl = root / "opt/bin/curl"
+        curl.write_text(read(curl).replace("s/Wireguard1/nwg1/", "s/Wireguard1/nwg1/;s/OpenVPN0/ovpn_br0/"))
+        (root / "sys/class/net/ovpn_br0").mkdir()
+        (root / "sys/class/net/ovpn_br0/tun_flags").write_text("0x1002\n")
+        (root / "emu/running-config").write_text(LIVED_CONFIG)
+        r = sh(root, "sh /emu/repo/install.sh --yes")
+        out = r.stdout
+        if r.returncode != 0 or "[ PASS ] VWARD установлен" not in out:
+            fail(f"install on a lived router failed:\n{out}")
+        for text in ("VPN: Wireguard1", "список AdaptiveAuto уже есть", "маршрут списка AdaptiveAuto перенесён: OpenVPN0 → Wireguard1"):
+            if text not in out:
+                fail(f"install output lacks {text!r}:\n{out}")
+        changes = read(root / "emu/ndmc-changes.log").splitlines()
+        want = ["dns-proxy route object-group AdaptiveAuto Wireguard1 auto", "dns-proxy no route object-group AdaptiveAuto OpenVPN0",
+                "system configuration save"]
+        if changes != want:
+            fail(f"RED: only AdaptiveAuto's route moves on a lived router, nothing else is touched: {changes}")
+        if read(root / "opt/etc/vward/device.conf").strip() != "VWARD_TUNNEL_INTERFACE=Wireguard1":
+            fail(f"device.conf: {read(root / 'opt/etc/vward/device.conf')!r}")
+        print("ok - lived router: own lists, subnet and Smart DNS kept; AdaptiveAuto moved to the VPN autopick checks through")
+    finally:
+        teardown(root)
+    # The same router, the installation failing after the move (cron cannot be written): AdaptiveAuto's
+    # old route comes back as it was.
+    root = build(work, "clean8b", release)
+    try:
+        ifs = json.loads(read(root / "emu/rci-interface.json"))
+        ifs["OpenVPN0"] = {"type": "OpenVPN", "security-level": "public", "description": "Old VPN", "connected": "no", "link": "down"}
+        (root / "emu/rci-interface.json").write_text(json.dumps(ifs))
+        curl = root / "opt/bin/curl"
+        curl.write_text(read(curl).replace("s/Wireguard1/nwg1/", "s/Wireguard1/nwg1/;s/OpenVPN0/ovpn_br0/"))
+        (root / "sys/class/net/ovpn_br0").mkdir()
+        (root / "sys/class/net/ovpn_br0/tun_flags").write_text("0x1002\n")
+        (root / "emu/running-config").write_text(LIVED_CONFIG)
+        cdir = root / "opt/var/spool/cron/crontabs"
+        shutil.rmtree(cdir, ignore_errors=True); cdir.parent.mkdir(parents=True, exist_ok=True); cdir.write_text("")
+        r = sh(root, "sh /emu/repo/install.sh --yes")
+        if r.returncode == 0:
+            fail(f"the installation had to fail on cron:\n{r.stdout}")
+        changes = read(root / "emu/ndmc-changes.log").splitlines()
+        want = ["dns-proxy route object-group AdaptiveAuto Wireguard1 auto", "dns-proxy no route object-group AdaptiveAuto OpenVPN0",
+                "system configuration save", "dns-proxy no route object-group AdaptiveAuto Wireguard1",
+                "dns-proxy route object-group AdaptiveAuto OpenVPN0 auto", "system configuration save"]
+        if changes != want:
+            fail(f"a failed installation must put AdaptiveAuto's old route back: {changes}\n{r.stdout}")
+        print("ok - lived router, failed installation: AdaptiveAuto's old route is back")
+    finally:
+        teardown(root)
+
+
+OLD_TUNNEL_CONFIG = """system
+    hostname Keenetic
+!
+interface Wireguard1
+    description "My VPN"
+!
+interface OpkgTun4
+    description "VLESS Germany"
+!
+object-group fqdn YouTube
+    include youtube.com
+!
+object-group fqdn Discord
+    include discord.com
+!
+object-group fqdn Telegram
+    include telegram.org
+!
+object-group fqdn AdaptiveAuto
+    include chatgpt.com
+!
+dns-proxy
+    route object-group YouTube OpkgTun4 auto
+    route object-group Discord OpkgTun4 auto
+    route object-group Discord Wireguard1 auto
+    route object-group Telegram Wireguard1 auto
+    route object-group AdaptiveAuto OpkgTun4 auto
+!
+ip route 91.108.4.0 255.255.252.0 OpkgTun4 auto
+"""
+
+
+def old_tunnel_router(work, name, wireguard=True):
+    root = build(work, name, OLD_TUNNEL_RELEASE[0])
+    ifs = json.loads(read(root / "emu/rci-interface.json"))
+    ifs["OpkgTun4"] = {"type": "OpkgTun", "security-level": "public", "description": "VLESS Germany", "connected": "no", "link": "down"}
+    if not wireguard:
+        ifs.pop("Wireguard1")
+    (root / "emu/rci-interface.json").write_text(json.dumps(ifs))
+    curl = root / "opt/bin/curl"
+    curl.write_text(read(curl).replace("s/Wireguard1/nwg1/", "s/Wireguard1/nwg1/;s/OpkgTun4/opkgtun4/"))
+    (root / "sys/class/net/opkgtun4").mkdir()
+    (root / "sys/class/net/opkgtun4/tun_flags").write_text("0x1001\n")
+    cfg = OLD_TUNNEL_CONFIG if wireguard else OLD_TUNNEL_CONFIG.replace("interface Wireguard1\n    description \"My VPN\"\n!\n", "").replace(
+        "    route object-group Discord Wireguard1 auto\n", "").replace("    route object-group Telegram Wireguard1 auto\n", "")
+    (root / "emu/running-config").write_text(cfg)
+    return root
+
+
+OLD_TUNNEL_RELEASE = [None]
+
+
+def part9_old_tunnel(work, release):
+    OLD_TUNNEL_RELEASE[0] = release
+    root = old_tunnel_router(work, "clean9")
+    try:
+        r = sh(root, "sh /emu/repo/install.sh --yes")
+        out = r.stdout
+        if r.returncode != 0 or "[ PASS ] VWARD установлен" not in out or "VPN: Wireguard1" not in out or \
+                "туннели VWARD без настроек" not in out or "YouTube (OpkgTun4)" not in out or "91.108.4.0 (OpkgTun4)" not in out:
+            fail(f"install with an old tunnel failed:\n{out}")
+        changes = read(root / "emu/ndmc-changes.log").splitlines()
+        want = ["dns-proxy route object-group AdaptiveAuto Wireguard1 auto", "dns-proxy no route object-group AdaptiveAuto OpkgTun4",
+                "dns-proxy route object-group YouTube Wireguard1 auto", "dns-proxy no route object-group YouTube OpkgTun4",
+                "dns-proxy no route object-group Discord OpkgTun4",
+                "ip route 91.108.4.0 255.255.252.0 Wireguard1 auto", "no ip route 91.108.4.0 255.255.252.0 OpkgTun4",
+                "system configuration save"]
+        if changes != want:
+            fail(f"RED: everything on the old tunnel moves to the working VPN, nothing else: {changes}\n{out}")
+        print("ok - old tunnel: its lists, AdaptiveAuto and subnet moved to the working VPN; Telegram untouched")
+    finally:
+        teardown(root)
+    root = old_tunnel_router(work, "clean9b")
+    try:
+        cdir = root / "opt/var/spool/cron/crontabs"
+        shutil.rmtree(cdir, ignore_errors=True); cdir.parent.mkdir(parents=True, exist_ok=True); cdir.write_text("")
+        r = sh(root, "sh /emu/repo/install.sh --yes")
+        changes = read(root / "emu/ndmc-changes.log").splitlines()
+        back = changes[changes.index("system configuration save") + 1:]
+        want = ["dns-proxy no route object-group AdaptiveAuto Wireguard1",
+                "dns-proxy no route object-group YouTube Wireguard1", "no ip route 91.108.4.0 255.255.252.0 Wireguard1",
+                "dns-proxy route object-group YouTube OpkgTun4 auto", "dns-proxy route object-group Discord OpkgTun4 auto",
+                "ip route 91.108.4.0 255.255.252.0 OpkgTun4 auto", "dns-proxy route object-group AdaptiveAuto OpkgTun4 auto",
+                "system configuration save"]
+        if r.returncode == 0 or back != want:
+            fail(f"a failed installation must put the old tunnel's routes back: {back}\n{r.stdout}")
+        print("ok - old tunnel, failed installation: every route is back on it")
+    finally:
+        teardown(root)
+    root = old_tunnel_router(work, "clean9c", wireguard=False)
+    try:
+        r = sh(root, "sh /emu/repo/install.sh --yes")
+        out = r.stdout
+        if r.returncode != 0 or "[ PASS ] VWARD установлен" not in out or "туннель VWARD без настроек" not in out or "переедет туда само" not in out:
+            fail(f"only the old tunnel: install, say how the lists come back:\n{out}")
+        if any("no route" in c or c.startswith("ip route") for c in read(root / "emu/ndmc-changes.log").splitlines()):
+            fail(f"only the old tunnel: nothing may move:\n{read(root / 'emu/ndmc-changes.log')}")
+        print("ok - only the old tunnel: nothing moves, the installer says how the lists come back")
     finally:
         teardown(root)
 
@@ -330,6 +554,9 @@ def main():
         part4_check(work, release)
         part5_old_firmware(work, release)
         part6_choice_agh_reinstall(work, release)
+        part7_reformatted_drive(work, release)
+        part8_lived_router(work, release)
+        part9_old_tunnel(work, release)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print("INSTALL_EMULATED=PASS")

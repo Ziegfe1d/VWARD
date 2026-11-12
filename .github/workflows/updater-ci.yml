@@ -45,7 +45,7 @@ jobs:
       - name: "Go routing core - reproducible build equals the pinned sums and the prototype builds"
         run: |
           sh tools/vward-core/build.sh "$PWD/core-out" --check
-          for a in mipsle mips; do cmp "core-out/vward-core-linux-$a.gz" "tools/vward-core/dist/vward-core-linux-$a.gz"; done
+          for a in mipsle mips arm64; do cmp "core-out/vward-core-linux-$a.gz" "tools/vward-core/dist/vward-core-linux-$a.gz"; done
 
   repository-consistency:
     runs-on: ubuntu-latest

@@ -19,7 +19,8 @@ with tempfile.TemporaryDirectory() as td:
         return {l.split('\t')[0]: l.split('\t')[1:] for l in r.stdout.splitlines()}
     st = rep()
     if st['dnsmasq-full'] != ['entware', 'not-installed', '-', 'Не установлен'] or st['sing-box-go'][1] != 'not-installed': fail(str(st))
-    if st['dns-mode'][1:] != ['agh', '-', 'AdGuard Home'] or any(st[f'entware-auto-{a}'][1] != 'off' for a in ('check', 'download', 'apply')): fail('defaults ' + str(st))
+    # No AdGuard Home on this router: Keenetic's own DNS (owner 12.11.2026), not «AdGuard Home».
+    if st['dns-mode'][1:] != ['native', '-', 'DNS Keenetic'] or any(st[f'entware-auto-{a}'][1] != 'off' for a in ('check', 'download', 'apply')): fail('defaults ' + str(st))
     (R/'opt/lib/opkg/status').write_text('Package: dnsmasq-full\nVersion: 2.90-1\nArchitecture: mipselsf-k3.4\nStatus: install user installed\n\n')
     (R/'opt/lib/opkg/info/dnsmasq-full.list').write_text('/opt/etc/init.d/S56dnsmasq\n/opt/sbin/dnsmasq\n')
     (R/'opt/etc/init.d/S56dnsmasq').write_text('#!/bin/sh\nENABLED=no\n')

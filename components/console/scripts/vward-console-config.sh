@@ -191,6 +191,31 @@ audit() {
 
 # A change done (a background job finishes after its request) drops the Panel's short cache
 # of the router's answers, so the next page shows the router as it is now.
+# The routing core (Go, owner 11.11.2026) writes the owner's lists for the Panel when it is
+# installed: the whole change as ONE batch, proven by a read and compensated by the core itself.
+# Without it, or with route-engine/core.panel.off, the shell writes them as before.
+CORE_BIN=${VWARD_CORE_BIN:-/opt/share/vward/core/vward-core}
+CORE_PANEL_OFF=${VWARD_CORE_PANEL_OFF:-$ETC/route-engine/core.panel.off}
+CORE_JOURNAL=${VWARD_CORE_JOURNAL:-/opt/var/lib/vward/core-journal}
+# core_list ARGS (vward-core list ...): 0 changed, 1 unchanged, 2 not used (the shell writes);
+# anything else ends the operation with the core's reason.
+core_list() {
+    [ -x "$CORE_BIN" ] && [ ! -e "$CORE_PANEL_OFF" ] || return 2
+    cl_out=$("$CORE_BIN" list --journal "$CORE_JOURNAL" "$@" 2>&1)
+    cl_res=$(printf '%s\n' "$cl_out" | sed -n 's/^RESULT=//p' | head -n 1)
+    RELAY_REASON=$(printf '%s\n' "$cl_out" | sed -n 's/^WHY=//p' | head -n 1 | cut -c1-200)
+    case "$cl_res" in
+        changed) return 0 ;;
+        unchanged) return 1 ;;
+        refused) die core_refused ;;
+        blocked) die core_journal_blocked ;;
+        unknown) die verification_failed ;;
+        failed) die router_rejected ;;
+    esac
+    RELAY_REASON=$(printf '%s' "$cl_out" | tail -n 2 | tr '\n' ' ' | cut -c1-200)
+    die core_failed
+}
+
 done_ok() {
     [ "$2" != changed ] || rm -rf "${VWARD_CONSOLE_CACHE_DIR:-/tmp/vward-console-cache}" "${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}/running-config" 2>/dev/null
     audit "$1 result=$2"; printf 'result=%s\n' "$2"; exit 0
@@ -569,6 +594,14 @@ op_list_domain() {
     }
     ld_have=0; ld_has "$@" && ld_have=1
     [ "$ld_want" != "$ld_have" ] || done_ok "list-domain $1 $2 $3" unchanged
+    if [ "$ld_kind" = include ] || [ "$ld_kind" = exclude ]; then
+        case "$ld_kind:$ld_want" in include:1) ld_op=add ;; include:0) ld_op=remove ;; exclude:1) ld_op=exclude ;; *) ld_op=unexclude ;; esac
+        core_list "$ld_op" "$2" "$3"
+        case $? in
+            0) done_ok "list-domain $1 $2 $3 by=core" changed ;;
+            1) done_ok "list-domain $1 $2 $3 by=core" unchanged ;;
+        esac
+    fi
     if [ "$ld_want" = 1 ]; then ld_cmd="object-group fqdn $2 $ld_kind $3"; ld_undo="no $ld_cmd"
     else ld_cmd="no object-group fqdn $2 $ld_kind $3"; ld_undo="object-group fqdn $2 $ld_kind $3"; fi
     ndm "$ld_cmd" || die router_rejected
@@ -584,6 +617,11 @@ op_route_domain() {
     valid_domain "$2" || die invalid_domain 64
     load_profile
     change_lock
+    core_list "$1" "$VWARD_POLICY_GROUP" "$2"
+    case $? in
+        0) done_ok "route-domain $1 $2 group=$VWARD_POLICY_GROUP by=core" changed ;;
+        1) done_ok "route-domain $1 $2 by=core" unchanged ;;
+    esac
     route_group_change "$VWARD_POLICY_GROUP" "$2" "$1" || done_ok "route-domain $1 $2" unchanged
     save_router || die config_save_failed
     done_ok "route-domain $1 $2 group=$VWARD_POLICY_GROUP" changed
@@ -595,10 +633,16 @@ op_adaptive() {
     [ "$1" = remove ] || load_profile
     change_lock
     changed=0 router=0
-    if [ "$1" = pin ]; then
-        route_group_change "$VWARD_POLICY_GROUP" "$2" add && router=1
-    fi
-    route_group_change "$ADAPTIVE_GROUP" "$2" remove && router=1
+    # The core: the name out of AdaptiveAuto (and into «Мои домены» for pin) as one batch.
+    if [ "$1" = pin ]; then core_list pin "$VWARD_POLICY_GROUP" "$2"; else core_list unadapt "$2"; fi
+    case $? in
+        0) changed=1 ;;
+        1) ;;
+        *) if [ "$1" = pin ]; then
+               route_group_change "$VWARD_POLICY_GROUP" "$2" add && router=1
+           fi
+           route_group_change "$ADAPTIVE_GROUP" "$2" remove && router=1 ;;
+    esac
     # The persist list is authoritative: the reconciler re-adds anything left in it.
     drop_line "$PERSIST" "$2"; case $? in 0) changed=1 ;; 3) ;; *) die write_failed ;; esac
     drop_line "$ADAPTIVE" "$2"; case $? in 0) changed=1 ;; 3) ;; *) die write_failed ;; esac
@@ -882,9 +926,35 @@ op_tunnel() {
         case "$opt" in -|auto|reject|"auto reject"|"reject auto") ;; *) exit 1 ;; esac
     done || die unsupported_route
 
-    # 1. New routes first, so the groups never lose their route.
     printf '%s\n' "$moves" > "$JOURNAL.moves"
-    while IFS="$tab" read -r ctx g t opt; do
+    # The core moves the routes of all these groups as ONE batch per (old -> new) target, proven
+    # and compensated by itself; the shell journal gets the same undo lines it would have
+    # written, so a later failure (subnets, device.conf) still takes the routes back.
+    CT_DONE=0
+    if [ -s "$JOURNAL.moves" ] && ! awk -F '\t' 'NF && $1 != "dns-proxy" {f = 1} END {exit !f}' "$JOURNAL.moves"; then
+        CT_DONE=1
+        for ct_t in $(awk -F '\t' 'NF {print $3}' "$JOURNAL.moves" | awk '!s[$0]++'); do
+            ct_nt=$NEW_IF; [ "$ct_t" = "$OLD_DEV" ] && [ "$OLD_DEV" != "$OLD_IF" ] && ct_nt=$NEW_DEV
+            # shellcheck disable=SC2046
+            core_list retarget "$ct_t" "$ct_nt" $(awk -F '\t' -v t="$ct_t" '$3 == t {print $2}' "$JOURNAL.moves")
+            case $? in 0|1) ;; *) CT_DONE=0; break ;; esac
+        done
+        if [ "$CT_DONE" = 1 ]; then
+            while IFS="$tab" read -r ctx g t opt; do
+                [ -n "$g" ] || continue
+                nt=$NEW_IF; [ "$t" = "$OLD_DEV" ] && [ "$OLD_DEV" != "$OLD_IF" ] && nt=$NEW_DEV
+                echo "dns-proxy no route object-group $g $nt" >> "$JOURNAL"
+            done < "$JOURNAL.moves"
+            while IFS="$tab" read -r ctx g t opt; do
+                [ -n "$g" ] || continue
+                o=; [ "$opt" = - ] || o=" $opt"
+                echo "dns-proxy route object-group $g $t$o" >> "$JOURNAL"
+            done < "$JOURNAL.moves"
+            snapshot
+        fi
+    fi
+    # 1. New routes first, so the groups never lose their route.
+    [ "$CT_DONE" = 1 ] || while IFS="$tab" read -r ctx g t opt; do
         [ -n "$g" ] || continue
         p=; [ "$ctx" = - ] || p="$ctx "
         o=; [ "$opt" = - ] || o=" $opt"
@@ -894,7 +964,7 @@ op_tunnel() {
         echo "${p}no route object-group $g $nt" >> "$JOURNAL"
     done < "$JOURNAL.moves"
     # 2. Withdraw the old routes.
-    while IFS="$tab" read -r ctx g t opt; do
+    [ "$CT_DONE" = 1 ] || while IFS="$tab" read -r ctx g t opt; do
         [ -n "$g" ] || continue
         p=; [ "$ctx" = - ] || p="$ctx "
         o=; [ "$opt" = - ] || o=" $opt"
@@ -1286,6 +1356,13 @@ op_domain_list() {
 
     if [ "$2" != bypass ] && [ "$cur_t" != "$TUN" ] && [ -n "$cur_t" ] && is_tunnel "$cur_t"; then
         # From one tunnel to another: only the route moves, Smart DNS lines are already out.
+        TXN=0
+        core_list route "$G" "$TUN"
+        case $? in
+            0|1) [ -z "${VWARD_SERVICE_ID:-}" ] || service_claim "$G"
+                 done_ok "domain-list $G $2 route=$cur_t->$TUN by=core" changed ;;
+        esac
+        TXN=1
         ndm "dns-proxy route object-group $G $TUN auto" || die router_rejected
         echo "dns-proxy no route object-group $G $TUN" >> "$JOURNAL"
         ndm "dns-proxy no route object-group $G $cur_t" || die router_rejected
@@ -3673,6 +3750,10 @@ op_list() {
     snapshot
     grep -qx "object-group fqdn $2" "$RUNCFG" || die list_not_found
     ( op_backup_create prelist ) >/dev/null || die backup_failed
+    core_list "$1" "$2"; LC_RC=$?
+    if [ "$LC_RC" = 1 ]; then done_ok "list $1 $2 by=core" unchanged; fi
+    if [ "$LC_RC" = 0 ]; then :
+    else
     JOURNAL=$(mktemp /tmp/vward-console-list.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     TXN=1
     if [ "$1" = clear ]; then
@@ -3701,6 +3782,7 @@ op_list() {
     fi
     save_router || die config_save_failed
     TXN=0
+    fi
     if [ "$1" = delete ]; then
         rm -f "${LISTS_STATE:?}/${2:?}"
         [ ! -f "$LISTS_CONF" ] || { grep -v "^[a-z_]*\.$2=" "$LISTS_CONF" > "$LISTS_CONF.$$" && cat "$LISTS_CONF.$$" > "$LISTS_CONF"; rm -f "$LISTS_CONF.$$"; }
@@ -3723,6 +3805,11 @@ op_list_merge() {
     snapshot
     grep -qx "object-group fqdn $1" "$RUNCFG" && grep -qx "object-group fqdn $2" "$RUNCFG" || die list_not_found
     ( op_backup_create prelist ) >/dev/null || die backup_failed
+    core_list merge "$1" "$2"
+    case $? in
+        0) rm -f "${LISTS_STATE:?}/${1:?}"; done_ok "list merge $1 $2 by=core" changed ;;
+        1) done_ok "list merge $1 $2 by=core" unchanged ;;
+    esac
     JOURNAL=$(mktemp /tmp/vward-console-list.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     TXN=1
     group_domains "$2" > "$JOURNAL.have"
@@ -4604,7 +4691,56 @@ op_smartdns_guard() {
 
 # journal keep DAYS | size MB: how long and how much of the technical journals is kept
 # (housekeeping applies it every hour; MB 0: no limit but the USB drive).
+# journal_file NAME: a «Журналы» source's live file (the same names as api.cgi's log_file;
+# check-console-logs-all compares them).
+journal_file() {
+    case "$1" in
+        wan) echo /opt/var/log/vward-wan-guard.log ;;
+        recovery) echo /opt/var/log/vward-wan-guard-recovery.log ;;
+        cron) echo /opt/var/log/crond.log ;;
+        routing) echo /tmp/vward-route-reconciler-maint.cron.out ;;
+        adaptive) echo /opt/var/log/vward-route-engine-events.log ;;
+        core) echo /opt/var/log/vward-core-adaptive.log ;;
+        updater) echo /opt/var/log/vward/updater.log ;;
+        tunnel) echo /opt/var/log/vward-tunnel-guard.log ;;
+        policy) echo /opt/var/log/vward-policy-audit-summary.log ;;
+        policysync) echo /opt/var/log/vward-policy-sync-sync.log ;;
+        console) echo /opt/var/log/vward/console-audit.log ;;
+        wifi) echo /opt/var/log/vward-wifi-client-guard.log ;;
+        ads) echo /opt/var/log/vward-ads-privacy-guard.log ;;
+        awg) echo /opt/var/log/vward-awg-engine.log ;;
+        vless) echo /opt/var/log/vward-vless-engine.log ;;
+        sentinel) echo /opt/var/log/vward-sentinel.log ;;
+        supervisor) echo /opt/var/log/vward-cron-supervisor.log ;;
+        housekeeping) echo /opt/var/log/vward-housekeeping.log ;;
+        integrity) echo /opt/var/log/vward-integrity.log ;;
+        off) echo /opt/var/log/vward-off.log ;;
+        *) return 1 ;;
+    esac
+}
+
+# op_journal_clear NAME|all: «Очистить» in «Журналы» (owner 12.11.2026). The live journal is
+# emptied in place (a program writing it keeps its handle); the archives stay. «all» is every
+# source of «Все» (crond's own record is not one). The audit line is written after, so the
+# cleared console journal starts with who cleared it.
+op_journal_clear() {
+    case "$1" in
+        all) jc_names="wan recovery tunnel adaptive core routing policy wifi ads updater console awg vless sentinel supervisor housekeeping integrity off" ;;
+        *) journal_file "$1" >/dev/null || die invalid_value 64; jc_names=$1 ;;
+    esac
+    jc_done=0
+    for jc_n in $jc_names; do
+        jc_f="${VWARD_ROOT_PREFIX:-}$(journal_file "$jc_n")"
+        [ -f "$jc_f" ] && [ ! -L "$jc_f" ] && [ -s "$jc_f" ] || continue
+        printf '' > "$jc_f" 2>/dev/null || die write_failed
+        jc_done=$((jc_done + 1))
+    done
+    [ "$jc_done" -gt 0 ] || done_ok "journal clear $1" unchanged
+    done_ok "journal clear $1 files=$jc_done" changed
+}
+
 op_journal() {
+    [ "$1" != clear ] || op_journal_clear "$2"
     case "$1:$2" in
         keep:1|keep:3|keep:7|keep:30|keep:180|keep:365) jk=KEEP_DAYS ;;
         size:0|size:1|size:5|size:10|size:30) jk=MAX_MB ;;

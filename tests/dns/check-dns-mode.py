@@ -25,7 +25,11 @@ with tempfile.TemporaryDirectory() as td:
     def w(name, text): p = td/name; p.write_text(text); return p
 
     # ---- mode: default agh, explicit, unsafe/invalid -> unknown ------------------------------
-    if L('vward_dns_mode_get').stdout != 'agh\tdefault\n': fail('default must be AGH')
+    # Owner 12.11.2026: nothing recorded and no AdGuard Home is Keenetic's own DNS, never «:65053»;
+    # with AdGuard Home installed the default stays AGH.
+    if L('vward_dns_mode_get').stdout != 'native\tdefault-no-agh\n': fail('RED: without AdGuard Home the default must be native')
+    (R/'opt/etc/AdGuardHome').mkdir(parents=True); (R/'opt/etc/AdGuardHome/AdGuardHome.yaml').write_text('dns:\n')
+    if L('vward_dns_mode_get').stdout != 'agh\tdefault\n': fail('default must be AGH where it is installed')
     mc = R/'opt/etc/vward/dns-mode.conf'
     for text, want in (('mode=dnsmasq\n', 'dnsmasq\tconfigured\n'), ('mode=native\n', 'native\tconfigured\n'),
                        ('mode=both\n', 'unknown\tinvalid\n'), ('mode=agh\nmode=dnsmasq\n', 'unknown\tinvalid\n'), ('', 'unknown\tinvalid\n')):

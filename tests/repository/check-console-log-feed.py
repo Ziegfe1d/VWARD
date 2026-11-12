@@ -17,7 +17,7 @@ def fail(m):
     raise SystemExit(f"CONSOLE_LOG_FEED=FAIL: {m}")
 
 
-if "copyText(S.logs[logTab] || '')" not in JS or "logFeed(text)" not in JS or 'data-act="log-view"' not in JS:
+if "else copyText(text);" not in JS or "logFeed(text)" not in JS or "chips('Важность', 'data-act=\"log-view\"'" not in JS:
     fail("the feed, the «Важное/Все» switch and the raw copy")
 if not shutil.which("node"):
     print("CONSOLE_LOG_FEED=PASS (node not found)"); sys.exit(0)
@@ -37,7 +37,7 @@ if r.returncode:
 import json
 o = json.loads(r.stdout)
 imp, al = o["imp"], o["all"]
-for need in ("<time>00:12:00</time>", "<time>00:10:44</time>", "Настройки Панели VWARD: изменены", "1,26 с",
+for need in ("<time>00:12:00</time>", "<time>00:10:44</time>", "Настройки Панели VWARD: изменены", "1,26\u00a0с",
              "Автоподбор: 2 проверки", "Перезапуск после сбоя", 'log-day">02.11.2026', 'log-day">01.11.2026', "log-e warn"):
     if need not in imp:
         fail(f"«Важное» lacks {need!r}")

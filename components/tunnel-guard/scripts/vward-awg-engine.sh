@@ -156,10 +156,28 @@ adapter_of() { printf 'opkgtun%s\n' "${1#OpkgTun}"; }
 # procs_of SLOT: every running program started with the slot's configuration, whatever the
 # pid file says. A stale pid file left an old program holding the adapter while a «restart»
 # started a second one beside it (Viva 2026-10-04: the broken Xray lived on for hours).
+# cmdline_has PID TEXT: the program's command line holds TEXT. Read by the shell itself (it drops
+# the NULs between the arguments): the router's BusyBox grep stops at the first NUL of a line and
+# never finds the configuration after «-c» (11.11.2026, as in the VLESS engine).
+cmdline_has() {
+    ch_l=
+    IFS= read -r ch_l < "${VWARD_PROC:-/proc}/$1/cmdline" 2>/dev/null || :
+    case "$ch_l" in *"$2"*) return 0 ;; esac
+    return 1
+}
+
+# engine_pids: the running programs named like the engine (comm), builtins only.
+engine_pids() {
+    for ep_d in "${VWARD_PROC:-/proc}"/[0-9]*; do
+        ep_c=
+        read -r ep_c < "$ep_d/comm" 2>/dev/null || continue
+        [ "$ep_c" = "${VWARD_ENGINE_COMM:-vward-awg}" ] && echo "${ep_d##*/}"
+    done
+}
+
 procs_of() {
-    grep -l -F -- "$ENGINE_ETC/t$1.conf" "${VWARD_PROC:-/proc}"/[0-9]*/cmdline 2>/dev/null | while IFS= read -r f; do
-        d=${f%/cmdline}
-        [ "$(cat "$d/comm" 2>/dev/null)" = "${VWARD_ENGINE_COMM:-vward-awg}" ] && echo "${d##*/}"
+    for po_p in $(engine_pids); do
+        ! cmdline_has "$po_p" "$ENGINE_ETC/t$1.conf" || echo "$po_p"
     done
 }
 
@@ -394,14 +412,13 @@ op_remove() {
 # stop_orphans: a program whose slot no tunnel has any more (a removal that did not stop
 # it, seen on Viva 2026-10-04) holds an adapter and memory for nothing: it is stopped.
 stop_orphans() {
-    grep -l -F -- "$ENGINE_ETC/t" "${VWARD_PROC:-/proc}"/[0-9]*/cmdline 2>/dev/null | while IFS= read -r f; do
-        d=${f%/cmdline}
-        [ "$(cat "$d/comm" 2>/dev/null)" = "${VWARD_ENGINE_COMM:-vward-awg}" ] || continue
-        c=$(tr '\000' '\n' 2>/dev/null < "$f" | grep -F -- "$ENGINE_ETC/t" | head -n 1)
+    for so_p in $(engine_pids); do
+        cmdline_has "$so_p" "$ENGINE_ETC/t" || continue
+        c=$(tr '\000' '\n' 2>/dev/null < "${VWARD_PROC:-/proc}/$so_p/cmdline" | grep -F -- "$ENGINE_ETC/t" | head -n 1)
         k=${c##*/t}; k=${k%.conf}
         case "$k" in ''|*[!0-9]*) continue ;; esac
         awk -F '\t' -v n="$k" '$1 == n {f = 1} END {exit !f}' "$TUNNELS" 2>/dev/null && continue
-        kill "${d##*/}" 2>/dev/null && log "stopped the program of a removed tunnel (slot $k)"
+        kill "$so_p" 2>/dev/null && log "stopped the program of a removed tunnel (slot $k)"
     done
 }
 

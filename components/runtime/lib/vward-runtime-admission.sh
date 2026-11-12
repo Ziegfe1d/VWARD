@@ -16,6 +16,34 @@ vward_component_enabled() {
     [ ! -e "$VWARD_COMPONENT_STATE/$1.disabled" ]
 }
 
+# Lightened VWARD (owner 11.11.2026): by default only Adaptive auto and the VPN run; every
+# other part is switched on one by one. vward_extra NAME: an optional part is on only with
+# NAME.on here. all.on here (or VWARD_EXTRAS=all) turns every part on and keeps every component
+# as it was, as before the lightening.
+vward_extras_all() { [ "${VWARD_EXTRAS:-}" = all ] || [ -e "$VWARD_COMPONENT_STATE/all.on" ]; }
+vward_extra() {
+    case "${1:-}" in ''|*[!a-z0-9-]*) return 1 ;; esac
+    vward_extras_all && return 0
+    [ -e "$VWARD_COMPONENT_STATE/$1.on" ]
+}
+# Components off by default: written once as <id>.disabled (housekeeping, install.sh), so the
+# Panel shows them off and switches them on as before.
+VWARD_LITE_OFF=${VWARD_LITE_OFF-tunnel-guard wan-guard wifi-client-guard policy-sync ads-privacy-guard}
+
+# Autopodbor in Go (owner 11.11.2026): vward_core_adaptive_pid prints the PID of the routing
+# core's own process («vward-core adaptive») when it runs. While it runs it is the only writer
+# of AdaptiveAuto: the shell engine and the shell route reconciler stand aside. The command
+# line is read by the shell itself (BusyBox ash skips the NULs): no process.
+VWARD_CORE_PIDFILE=${VWARD_CORE_PIDFILE:-${VWARD_ROOT_PREFIX:-}/opt/var/run/vward/core-adaptive.pid}
+vward_core_adaptive_pid() {
+    _vca=; read -r _vca 2>/dev/null < "$VWARD_CORE_PIDFILE" || :
+    case "$_vca" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$_vca" 2>/dev/null || return 1
+    _vcc=; IFS= read -r _vcc 2>/dev/null < "${VWARD_PROC:-/proc}/$_vca/cmdline" || :
+    case "$_vcc" in *vward-core*adaptive*) echo "$_vca"; return 0 ;; esac
+    return 1
+}
+
 # vward_component_gate ID [RC]: leave quietly when the component is disabled.
 # Scheduled jobs exit 0; manual tools pass a non-zero RC.
 vward_component_gate() {
@@ -338,7 +366,9 @@ vward_lock_gate_live() {
     if vward_pid_start_var "$vlg_key_pid"; then vlg_live_start=$VA_PS;else vlg_live_start=;fi
     if [ -n "$vlg_live_start" ]; then
         [ "$vlg_live_start" = "$vlg_key_start" ] || return 1
-        vlg_stat=;read -r vlg_stat < "/proc/$vlg_key_pid/stat" || return 2
+        # The owner may exit between the two reads (CI 12.11.2026: «cannot open /proc/N/stat», a
+        # race of two writers ended rc=1): its /proc entry gone is a finished owner, as below.
+        vlg_stat=;read -r vlg_stat 2>/dev/null < "/proc/$vlg_key_pid/stat" || { [ -e "/proc/$vlg_key_pid" ] && return 2; return 1; }
         vlg_stat=${vlg_stat##*) }
         # A finished final utility can remain a zombie under an unreaping
         # container init. Z/X cannot execute another filesystem operation.

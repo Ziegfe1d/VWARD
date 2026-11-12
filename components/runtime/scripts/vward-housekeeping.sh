@@ -17,6 +17,9 @@ cleanup() { vward_admission_leave 2>/dev/null || true; }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
+# An admission library of an older release: every optional part on, as before.
+command -v vward_extra >/dev/null 2>&1 || vward_extra() { return 0; }
+
 # The root of every path below; tests point it at a scratch tree.
 R=${VWARD_ROOT_PREFIX:-}
 HOUSE_LOG="$R/opt/var/log/vward-housekeeping.log"
@@ -419,28 +422,35 @@ engine_move()
         }
         if [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ]; then src=manifest.json; else src=$EM_URL; fi
         em_fetch "$src" "$EM_T/manifest.json" 262144 || exit 3
-        jq -cS '.signed' "$EM_T/manifest.json" > "$EM_T/signed" &&
-            jq -r '.signature' "$EM_T/manifest.json" | openssl base64 -d -A > "$EM_T/sig" &&
-            openssl pkeyutl -verify -pubin -inkey "$EM_KEY" -rawin -in "$EM_T/signed" -sigfile "$EM_T/sig" >/dev/null 2>&1 || exit 4
-        jq -e --arg ch "$EM_CHANNEL" '.signed.schema == 2 and .signed.channel == $ch' "$EM_T/manifest.json" >/dev/null || exit 4
+        # Why a move stops (rc 4) goes into the journal: which step, and whether jq and openssl run
+        # at all (11.11.2026: «engine_move=failed rc=4» three times a day, the cause unknown).
+        em_why() { em_s=runs; "$@" </dev/null >/dev/null 2>&1 || em_s="rc=$?"; printf '%s' "$em_s"; }
+        jq -cS '.signed' "$EM_T/manifest.json" > "$EM_T/signed" || { echo "step=manifest jq=$(em_why jq -n 1)" > "$EM_T/why"; exit 4; }
+        { jq -r '.signature' "$EM_T/manifest.json" | openssl base64 -d -A > "$EM_T/sig"; } 2>/dev/null &&
+            openssl pkeyutl -verify -pubin -inkey "$EM_KEY" -rawin -in "$EM_T/signed" -sigfile "$EM_T/sig" >/dev/null 2>&1 ||
+            { echo "step=signature openssl=$(em_why openssl version) jq=$(em_why jq -n 1)" > "$EM_T/why"; exit 4; }
+        jq -e --arg ch "$EM_CHANNEL" '.signed.schema == 2 and .signed.channel == $ch' "$EM_T/manifest.json" >/dev/null ||
+            { echo "step=schema_or_channel channel=$EM_CHANNEL" > "$EM_T/why"; exit 4; }
         if [ -n "$EM_CUR" ]; then
             em_new=$(jq -r '.signed.engine.version // empty' "$EM_T/manifest.json")
             case "$em_new" in [0-9]*.[0-9]*.[0-9]*) ;; *) exit 6 ;; esac
             [ "$em_new" != "$EM_CUR" ] && [ "$(printf '%s\n%s\n' "$EM_CUR" "$em_new" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)" = "$em_new" ] || exit 6
         fi
         base=$(jq -r '.signed.files_base' "$EM_T/manifest.json")
-        case "$base" in https://*/) ;; *) exit 4 ;; esac
+        case "$base" in https://*/) ;; *) echo "step=files_base" > "$EM_T/why"; exit 4 ;; esac
         jq -r '.signed.engine.files[] | [.name, .sha256, (.size | tostring)] | @tsv' "$EM_T/manifest.json" |
         while IFS="$(printf '\t')" read -r name sha size; do
-            case "$name" in ''|*[!A-Za-z0-9._-]*) exit 4 ;; esac
+            case "$name" in ''|*[!A-Za-z0-9._-]*) echo "step=file_name" > "$EM_T/why"; exit 4 ;; esac
             if [ -n "${VWARD_ENGINE_MOVE_SOURCE:-}" ]; then src=files/$sha; else src=$base$sha; fi
             em_fetch "$src" "$EM_T/$name" "$((size + 1))" || exit 3
-            [ "$(wc -c < "$EM_T/$name" | tr -d ' ')" = "$size" ] && [ "$(sha256sum "$EM_T/$name" | awk '{print $1}')" = "$sha" ] || exit 4
+            [ "$(wc -c < "$EM_T/$name" | tr -d ' ')" = "$size" ] && [ "$(sha256sum "$EM_T/$name" | awk '{print $1}')" = "$sha" ] ||
+                { echo "step=file_checksum file=$name" > "$EM_T/why"; exit 4; }
         done || exit $?
         unset VWARD_ENGINE_SWITCHED
         sh "$EM_T/vward-update.sh" --engine-adopt "$EM_T" "$EM_T/manifest.json" >/dev/null 2>&1 || exit 5
     )
     EM_RC=$?
+    EM_WHY=; [ ! -r "$EM_T/why" ] || read -r EM_WHY < "$EM_T/why" || :
     # Checked: the next check in 6 hours. Not downloaded (the network, curl): the next hour
     # (Viva 2026-10-13: the first check after fix.27 met curl 77 and then waited 6 hours).
     if [ -n "$EM_CUR" ] && [ "$EM_RC" != 3 ]; then
@@ -450,18 +460,48 @@ engine_move()
     case "$EM_RC" in
         0) echo "ENGINE_MOVED|v2"; echo "$(date '+%Y-%m-%d %H:%M:%S')|engine_move=done${EM_CUR:+ from=$EM_CUR}" >> "$HOUSE_LOG" ;;
         3|6) : ;;
-        *) echo "$(date '+%Y-%m-%d %H:%M:%S')|engine_move=failed rc=$EM_RC" >> "$HOUSE_LOG" ;;
+        *) echo "$(date '+%Y-%m-%d %H:%M:%S')|engine_move=failed rc=$EM_RC${EM_WHY:+ $EM_WHY}" >> "$HOUSE_LOG" ;;
     esac
     return 0
 }
 engine_move
 
+# Lightened VWARD (owner 11.11.2026): the components outside Adaptive auto and the VPN go off
+# once, the way the Panel switches them off (<id>.disabled); <id>.lite marks one done, so a
+# component the owner switches back on stays on. Kept for now: a tunnel guard holding the
+# tunnel down (it restores it first), and the ad protection while AdGuard Home is in use (it
+# keeps AdGuard Home and the DNS chain alive; switched off with AdGuard Home in the Panel).
+lite_defaults()
+{
+    # Under R like every path here (the shared library's default has no R: tests must not
+    # write the host's /opt).
+    ld_dir=${VWARD_LITE_STATE:-$R/opt/etc/vward/components}
+    [ "${VWARD_EXTRAS:-}" != all ] && [ ! -e "$ld_dir/all.on" ] || return 0
+    for ld_id in ${VWARD_LITE_OFF:-}; do
+        [ ! -e "$ld_dir/$ld_id.lite" ] || continue
+        case "$ld_id" in
+            tunnel-guard)
+                [ "$(awk -F= '$1 == "FAILOPEN_ACTIVE" {print $2}' "${VWARD_TUNNEL_GUARD_STATE:-$R/opt/var/lib/vward/tunnel-guard/state}" 2>/dev/null)" != 1 ] || continue ;;
+            ads-privacy-guard)
+                ld_agh=${VWARD_ADGUARD_CONFIG:-$R/opt/etc/AdGuardHome/AdGuardHome.yaml}
+                [ -e "$ld_dir/adguardhome.disabled" ] || [ ! -e "$ld_agh" ] || continue ;;
+        esac
+        mkdir -p "$ld_dir" 2>/dev/null || return 0
+        if [ ! -e "$ld_dir/$ld_id.disabled" ]; then
+            printf 'disabled by default %s (lightened VWARD)\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$ld_dir/$ld_id.disabled" || continue
+            echo "$(date '+%Y-%m-%d %H:%M:%S')|lite_off=$ld_id" >> "$HOUSE_LOG"
+        fi
+        : > "$ld_dir/$ld_id.lite" 2>/dev/null || :
+    done
+}
+lite_defaults
+
 # Daily snapshot of VWARD's settings (the helper skips it when one is younger than a day).
 # The day already handled is kept in RAM, so the other 23 hourly runs start nothing.
 BACKUP_HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
 BACKUP_DAY_FILE=${VWARD_BACKUP_DAY_FILE:-/tmp/vward-backup-day}
-if [ -x "$BACKUP_HELPER" ]; then
-    BACKUP_NOW="$(date '+%Y-%m-%d %H:%M:%S')"
+BACKUP_NOW="$(date '+%Y-%m-%d %H:%M:%S')"
+if [ -x "$BACKUP_HELPER" ] && vward_extra backup; then
     BACKUP_DAY=""
     [ ! -r "$BACKUP_DAY_FILE" ] || read -r BACKUP_DAY < "$BACKUP_DAY_FILE" || :
     if [ "$BACKUP_DAY" != "${BACKUP_NOW%% *}" ]; then
@@ -512,6 +552,9 @@ repair_if_crashing()
 REPAIR_CURL=${VWARD_REPAIR_CURL:-/opt/bin/curl}
 REPAIR_JQ=${VWARD_REPAIR_JQ:-/opt/bin/jq}
 REPAIR_OPENSSL=${VWARD_REPAIR_OPENSSL:-/opt/bin/openssl}
+# Off by default (lightened VWARD): «opkg install --force-reinstall» removes the packages first and
+# leaves them removed when the download fails (11.11.2026: libc, jq, libpcre2, ldconfig gone).
+vward_extra repair || repair_if_crashing() { return 0; }
 repair_if_crashing curl curl "$REPAIR_CURL" -s -o /dev/null --noproxy '*' --connect-timeout 3 --max-time 5 http://127.0.0.1:79/rci/show/version
 # curl noted as crashing on HTTPS within the hour (vward_fetch, the probes - only a real crash is
 # noted since fix.28.1: a stop from outside or a DoH client's trouble marked a working curl and it
@@ -540,7 +583,7 @@ repair_due()
     [ $((rd_now - rd_last)) -ge 86400 ] || return 1
     mkdir -p "$REPAIR_DIR" && echo "$rd_now" > "$REPAIR_DIR/$1"
 }
-if [ -x "$REPAIR_CURL" ] && [ -n "$(find "$REPAIR_TLS_FLAG" -mmin -60 2>/dev/null)" ] &&
+if vward_extra repair && [ -x "$REPAIR_CURL" ] && [ -n "$(find "$REPAIR_TLS_FLAG" -mmin -60 2>/dev/null)" ] &&
    vward_agent_acts maintenance repair:curl-https "curl падает на HTTPS: переустановить libnghttp2, libcurl, curl и сертификаты" && repair_due curl-https; then
     "$OPKG" install --force-reinstall libnghttp2 libcurl curl ca-bundle </dev/null >/dev/null 2>&1
     rh_opkg=$?
@@ -639,7 +682,7 @@ pkg_repair_text()
 # reinstalled, with a copy of their files first, at most once a day; the owner is told the
 # stick spoils files. Intact files: nothing reinstalled (it would not help). curl is not touched.
 DOH_PKGS=${VWARD_DOH_PKGS:-https-dns-proxy libcares libev libnghttp2 libcurl libopenssl}
-if { ! command -v vward_smartdns_on >/dev/null 2>&1 || vward_smartdns_on; } &&
+if vward_extra repair && { ! command -v vward_smartdns_on >/dev/null 2>&1 || vward_smartdns_on; } &&
    [ -n "$(find "$REPAIR_DOH_FLAG" -mmin -360 2>/dev/null)" ] &&
    vward_agent_acts maintenance repair:doh "Клиент DoH Smart DNS перезапускался 3 раза: сверить его пакеты с Entware и переустановить испорченные" && repair_due doh; then
     rm -f "$REPAIR_DOH_FLAG"
@@ -670,6 +713,8 @@ FLASH_STATE=${VWARD_FLASH_STATE:-$R/tmp/vward-flash}
 FLASH_DMESG=${VWARD_DMESG_BIN:-dmesg}
 flash_watch()
 {
+    # Off by default (lightened VWARD, owner 11.11.2026).
+    vward_extra flash-watch || return 0
     # The quiet hour costs one program: the kernel's messages that matter, compared by their
     # length with the last look (CI budget: the maintenance agent runs 24 times a day).
     fw_raw=$("$FLASH_DMESG" 2>/dev/null) fw_all=
@@ -824,6 +869,8 @@ integrity_snapshot()
 }
 integrity_watch()
 {
+    # Off by default (lightened VWARD, owner 11.11.2026).
+    vward_extra integrity || return 0
     integrity_due || return 0
     mkdir -p "$INTEG_DIR" 2>/dev/null || return 0
     iw_t0=$(date +%s)
@@ -960,7 +1007,7 @@ if ! vward_off; then
 # once a day, in the hour VWARD installs its own updates; the first check at
 # once.  Detached: opkg may take minutes.  Builtins only until it is due.
 EXT_DAY_FILE=${VWARD_EXT_DAY_FILE:-/tmp/vward-ext-update-day}
-if [ -x "$BACKUP_HELPER" ]; then
+if [ -x "$BACKUP_HELPER" ] && vward_extra ext-update; then
     EXT_TODAY=${BACKUP_NOW%% *}; EXT_NOW_HOUR=${BACKUP_NOW#* }; EXT_NOW_HOUR=${EXT_NOW_HOUR%%:*}
     EXT_DAY=""
     [ ! -r "$EXT_DAY_FILE" ] || read -r EXT_DAY < "$EXT_DAY_FILE" || :
@@ -984,14 +1031,14 @@ fi
 # The real-time watcher: its program for this processor (pinned SHA-256), and what it
 # watches (tunnels come and go). Without it everything works as before.
 SENTINEL_CTL=${VWARD_SENTINEL_CTL:-/opt/bin/vward-sentinel.sh}
-if [ -x "$SENTINEL_CTL" ]; then
+if [ -x "$SENTINEL_CTL" ] && vward_extra sentinel; then
     { "$SENTINEL_CTL" install && "$SENTINEL_CTL" reload; } </dev/null >/dev/null 2>&1 &
 fi
 
 # Services catalog (iplist, rebuilt by VWARD's workflow every night): once a day
 # from 06:00; the lists of services switched on follow it.  Detached.
 SERVICES_DAY_FILE=${VWARD_SERVICES_DAY_FILE:-/tmp/vward-services-day}
-if [ -x "$BACKUP_HELPER" ]; then
+if [ -x "$BACKUP_HELPER" ] && vward_extra services-refresh; then
     SV_TODAY=${BACKUP_NOW%% *}; SV_HOUR=${BACKUP_NOW#* }; SV_HOUR=${SV_HOUR%%:*}
     SV_DAY=""
     [ ! -r "$SERVICES_DAY_FILE" ] || read -r SV_DAY < "$SERVICES_DAY_FILE" || :

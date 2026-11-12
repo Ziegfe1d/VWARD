@@ -173,6 +173,12 @@ with Fixture() as f:
     for p in ps: p.wait()
     rcs = sorted((j/f'{op}.rc').read_text().strip() for op in ('op-a', 'op-b'))
     assert rcs == ['rc=0', 'rc=75'], rcs                                       # one PENDING, the other refused
+    # CI 12.11.2026 (the race above ended rc=1 now and then): an owner seen alive that exits before
+    # its stat is read again is a finished owner (1), never «unknown» (2) with a shell error.
+    adm = Path(JOURNAL).parent/'vward-runtime-admission.sh'
+    r = subprocess.run([*SHELL, '-c', '. "$1"; vward_pid_start_var() { VA_PS=4242; return 0; }; vlg_boot=01234567-89ab-cdef-0123-456789abcdef; '
+                        'vward_lock_gate_live "$vlg_boot.999999.4242"', 'w', str(adm)], env=env, capture_output=True, text=True)
+    assert r.returncode == 1 and 'stat' not in r.stderr, (r.returncode, r.stderr)
     j = mk(f.p, 'j12'); assert planned(j).returncode == 0
     (j/'.lock').mkdir(); (j/'.lock/pid').write_text('999999\n')                # owner killed (SIGKILL / reboot)
     assert J('vward_journal_begin', j, 'op-1', GEN, pre, post, 'c').returncode == 0

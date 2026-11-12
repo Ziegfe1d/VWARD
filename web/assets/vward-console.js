@@ -206,7 +206,8 @@ const STAB_WATCH = n => n === 'route-engine' ? 'Маршрутизация' : n 
 const PROG_NAME = { 'vward-route-engine.sh': 'Маршрутизация', 'vward-sentinel': 'Контроль состояния', 'vward-cron-supervisor.sh': 'Агент компонентов', 'vward-dnscap': 'Захват DNS-запросов',
   'vward-awg': 'AmneziaWG', xray: 'Xray', lighttpd: 'Панель VWARD', AdGuardHome: 'AdGuard Home', https_dns_proxy: 'DoH-клиент', 'sing-box': 'sing-box', dnsmasq: 'dnsmasq' };
 // A duration for people (owner 02.11): «8 ч 28 мин», seconds only under a minute.
-const fmtDur = sec => { const n = Math.round(+sec || 0); if (n < 60) return (Math.round((+sec || 0) * 10) / 10).toString().replace('.', ',') + ' с'; const d = Math.floor(n / 86400), h = Math.floor(n % 86400 / 3600), m = Math.floor(n % 3600 / 60); return d ? d + ' д ' + h + ' ч' : h ? h + ' ч ' + m + ' мин' : m + ' мин'; };
+// A number and its unit never part across lines (owner 12.11: «0,73» and «с» on two lines): U+00A0.
+const fmtDur = sec => { const n = Math.round(+sec || 0); if (n < 60) return (Math.round((+sec || 0) * 10) / 10).toString().replace('.', ',') + '\u00a0с'; const d = Math.floor(n / 86400), h = Math.floor(n % 86400 / 3600), m = Math.floor(n % 3600 / 60); return d ? d + '\u00a0д ' + h + '\u00a0ч' : h ? h + '\u00a0ч ' + m + '\u00a0мин' : m + '\u00a0мин'; };
 function stabEvent(w) {
   const f = String(w || '').split('|');
   const name = STAB_WATCH(f[2] || '');
@@ -271,6 +272,7 @@ const API_ERRORS = {
   config_unavailable: 'файл настроек недоступен', invalid_mac: 'неверный MAC-адрес',
   invalid_value: 'недопустимое значение', invalid_window: 'начало и конец окна совпадают', invalid_category: 'нет такой категории',
   router_rejected: 'роутер отклонил изменение', verification_failed: 'изменение не подтвердилось и отменено',
+  core_refused: 'ядро маршрутизации отказалось: объект защищён или не найден', core_journal_blocked: 'прошлая операция не завершена: нужна проверка (vward-core recover)', core_failed: 'ядро маршрутизации не ответило',
   ai_verification_failed: 'итоговый путь сервисов не подтвердился; проверь фактические маршруты, ручные изменения сохранены',
   saved_state_unknown: 'данные возврата DNS повреждены или недоступны; запись остановлена, данные сохранены',
   config_save_failed: 'роутер не сохранил конфигурацию', router_config_unavailable: 'не удалось прочитать конфигурацию роутера',
@@ -311,7 +313,7 @@ const errText = x => errBase(x) + (x && x.reason ? (x.error === 'conf_unknown_se
 const errBase = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.error || '') ? 'роутер не принял настройку ' + x.error.slice(14).replace(/_/g, ' ') + ' - туннель не изменён' : '') || (x && x.error) || (x && x.rc != null ? 'код ' + x.rc : 'роутер ответил без данных');
 
 /* ---------- Данные ---------- */
-const S = { tq: null, auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, ext: null, listd: null, laddr: null, services: null, svcd: null, awg: null, wanhist: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
+const S = { act: {}, tq: null, auth: null, cron: null, status: null, route: null, lists: null, update: null, security: null, diag: null, wifi: null, ads: null, https: null, config: null, adsstats: null, adspub: null, agh: null, ext: null, listd: null, laddr: null, services: null, svcd: null, awg: null, wanhist: null, backups: null, qlog: null, review: null, blocked: null, logs: {}, tprobe: {}, errors: {}, loadedAt: {} };
 // The last address check stays on the page until the next one (the page redraws itself).
 let RPROBE = null;
 // Where the check says traffic goes, in words: through which tunnel, or past the VPN.
@@ -750,7 +752,7 @@ function compCascade(id, off) {
 const compNames = ids => ids.map(x => '«' + ((comp(x) || {}).name || x) + '»').join(', ');
 const LOG_TABS = [
   { id: 'wan', label: 'Интернет' }, { id: 'recovery', label: 'Восстановление' }, { id: 'tunnel', label: 'VPN' },
-  { id: 'adaptive', label: 'Автоподбор доменов' }, { id: 'routing', label: 'Сверка маршрутов' }, { id: 'policy', label: 'IP-категории' }, { id: 'wifi', label: 'Wi-Fi' },
+  { id: 'adaptive', label: 'Автоподбор доменов' }, { id: 'core', label: 'Автоподбор (Go)' }, { id: 'routing', label: 'Сверка маршрутов' }, { id: 'policy', label: 'IP-категории' }, { id: 'wifi', label: 'Wi-Fi' },
   { id: 'ads', label: 'Реклама' }, { id: 'updater', label: 'Обновления' }, { id: 'cron', label: 'Расписание' }, { id: 'console', label: 'Панель VWARD' },
   { id: 'awg', label: 'AmneziaWG' }, { id: 'vless', label: 'VLESS' }, { id: 'sentinel', label: 'Реальное время' },
   { id: 'supervisor', label: 'Агент компонентов' }, { id: 'housekeeping', label: 'Обслуживание' }, { id: 'integrity', label: 'Целостность файлов' }, { id: 'off', label: 'Отключение VWARD' }
@@ -774,7 +776,7 @@ function logTime(line) {
 // its continuation lines under its own time whatever the order. info (optional) receives
 // each source's state - its last event, empty, not created or unreadable - so a source with
 // nothing new is not «broken» and a broken one is not silently left out.
-function mergeLogs(parts, newestFirst, info) {
+function mergeLogs(parts, newestFirst, info, limit) {
   const entries = [];
   parts.forEach(p => {
     let last = null, latest = null, n = 0;
@@ -790,7 +792,9 @@ function mergeLogs(parts, newestFirst, info) {
     if (info) info.push({ label: p.label, last: latest, state: n ? 'ok' : /^Журнал недоступен/.test(first) ? 'error' : /^Журнал ещё не создан/.test(first) ? 'missing' : /^За последние \d+ ч записей нет/.test(first) ? 'quiet' : 'empty' });
   });
   entries.sort((a, b) => newestFirst ? b.t - a.t || b.n - a.n : a.t - b.t || a.n - b.n);
-  return entries.map(e => e.lines.join('\n')).join('\n');
+  // limit: the newest LIMIT entries of the timeline, in the chosen order.
+  const kept = !limit || entries.length <= limit ? entries : newestFirst ? entries.slice(0, limit) : entries.slice(-limit);
+  return kept.map(e => e.lines.join('\n')).join('\n');
 }
 /* The journals as cards (owner 02.11, display only - copy, save and share keep the raw files):
    time HH:MM:SS (the date once a day), a level sign, words instead of internal codes, numbers
@@ -830,7 +834,7 @@ function logField(f) {
   if ((!k || k === 'reason') && LOG_VALUES[v0]) return (k ? 'причина: ' : '') + LOG_VALUES[v0];
   let v = v0.replace(/\b(\d+)\.(\d{3,})\b/g, (x, a, b) => (Math.round(+(a + '.' + b) * 100) / 100).toString().replace('.', ','));
   // A time field, or a bare fraction with 3+ decimals (curl's time of a probe): seconds.
-  if ((/time|took|elapsed|dur|wait/i.test(k) && /^\d+([.,]\d+)?$/.test(v)) || (!k && /^\d+\.\d{3,}$/.test(v0))) v += ' с';
+  if ((/time|took|elapsed|dur|wait/i.test(k) && /^\d+([.,]\d+)?$/.test(v)) || (!k && /^\d+\.\d{3,}$/.test(v0))) v += '\u00a0с';
   return (k ? k.replace(/_/g, ' ') + ': ' : '') + v;
 }
 function logEntry(raw) {
@@ -1024,6 +1028,12 @@ let current = 'overview', editing = false, confirm = null, logTab = 'all', logWr
 // «Все»: newest first unless the viewer chose otherwise (kept in this browser); each source's state.
 let logNewest = store.get('vward-log-order') !== 'oldest';
 const LOGINFO = [];
+// «Журналы» load on the owner's request only (owner 12.11.2026: «Показать журнал», the last N
+// entries, more on request, nothing by itself). logShown: what each source was asked for on this
+// visit (nothing: not shown); logN: entries a time, kept in this browser.
+const LOG_STEPS = [50, 100, 200], LOG_MAX = 1000, LOGMORE = {};
+let logN = LOG_STEPS.includes(+store.get('vward-log-n')) ? +store.get('vward-log-n') : 50;
+let logShown = {}, logFilters = false, logQuery = '';
 
 /* ---------- Построение блоков ---------- */
 // The heading and its description sit above the card; the card holds only the content.
@@ -1238,7 +1248,7 @@ function notifications() {
   const total = num(stg.total_kb), free = num(stg.free_kb);
   if (total && free != null && lowDisk(total, free)) n.push({ sev: 'warn', title: 'Мало места в хранилище', text: 'свободно ' + fmtKB(free), to: 'system' });
   if (['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase)) n.push({ sev: 'crit', title: 'Обновление требует внимания', text: phaseText(p.phase), to: 'u-vward' });
-  if (S.update && S.update.pending && S.update.pending.present && S.update.pending.feed !== 'other') n.push({ sev: 'news', icon: 'save', title: 'Вышла новая версия VWARD', text: (S.update.pending.version || '') + ' - нажмите, чтобы посмотреть и установить', to: 'u-vward' });
+  if (S.update && S.update.pending && S.update.pending.present && S.update.pending.feed !== 'other') n.push({ sev: 'news', icon: 'save', title: 'Вышла новая версия VWARD', text: verHuman(S.update.pending.version, S.update.pending.sequence) + ' - нажмите, чтобы посмотреть и установить', to: 'u-vward' });
   const wc = ((S.wifi && S.wifi.clients) || []).filter(c => c.health === 'WARNING').length;
   if (wc) n.push({ sev: 'warn', title: 'Wi-Fi: ' + wc + ' ' + plural(wc, 'клиент требует', 'клиента требуют', 'клиентов требуют') + ' внимания', text: 'частые переходы между 2.4 и 5 ГГц', to: 'wifi' });
   const offComps = ((S.config && S.config.components) || []).filter(x => x.enabled === false && x.off_with !== 'install');
@@ -1273,16 +1283,25 @@ function wifiWarnText(wf) {
 const CARD_KEY = { system: 'status', updates: 'status', wan: 'status', vpn: 'status', storage: 'status', lists: 'lists', routes: 'route', wifi: 'wifi', ads: 'ads' };
 // Little space: under 256 MB, or under a tenth and under 1 GB (a tenth of a big drive is plenty).
 const lowDisk = (total, free) => free < 262144 || (free / total < 0.1 && free < 1048576);
+// The version for people (owner 01.11.2026, ROADMAP §3): «0.2.0 RC2 #36.1.261111» - the stage, the
+// release N.P and the build date (the first digits of the signed build number). Inside, the SemVer
+// (VERSION), its comparison and the build number stay as they are; this is only how it is shown.
+function verHuman(v, seq) {
+  const m = /^(\d+\.\d+\.\d+)(?:-(rc|rp)\.(\d+))?(?:\.fix\.(\d+)(?:\.(\d+))?)?$/.exec(String(v || ''));
+  if (!m) return v || '';
+  const d = /^20(\d{6})\d*$/.exec(String(seq || ''));
+  return m[1] + (m[2] ? ' ' + m[2].toUpperCase() + m[3] : '') + (m[4] ? ' #' + m[4] + '.' + (m[5] || '0') + (d ? '.' + d[1] : '') : '');
+}
 function cardData(id) {
   const s = st(), p = plat(), w = s.wan || {}, wg = s.wg || {}, sv = s.services || {}, g = s.storage || {}, r = S.route || {}, wf = S.wifi || {}, a = S.ads || {};
   const tunnels = wg.interfaces || [], up = tunnels.filter(t => isTrue(t.connected)).length;
   const comps = Object.keys(p.components || {}).length;
   const warnWifi = (wf.clients || []).filter(c => c.health === 'WARNING').length;
   switch (id) {
-    // «0.2.0-rc.1.fix.19»: the release on the card, its fix number under it.
-    case 'system': { const vm = /^(.*?)\.fix\.(\d+(?:\.\d+)*)$/.exec(p.version || ''); return { icon: 'platform', title: 'Система', to: 'system', value: vm ? vm[1] : p.version || '—',
+    // «0.2.0 RC2» on the card, «#36.1.261111» under it (owner 01.11.2026).
+    case 'system': { const hv = verHuman(p.version, p.last_sequence), vm = /^(.*?) (#.*)$/.exec(hv); return { icon: 'platform', title: 'Система', to: 'system', value: vm ? vm[1] : hv || '—',
       // One short line on a phone: the components are on the System page.
-      sub: vm ? 'исправление ' + vm[2] : comps ? comps + ' ' + plural(comps, 'компонент', 'компонента', 'компонентов') : 'версия VWARD', pill: p.version ? ['ok', 'Работает'] : ['', '—'] }; }
+      sub: vm ? vm[2] : comps ? comps + ' ' + plural(comps, 'компонент', 'компонента', 'компонентов') : 'версия VWARD', pill: p.version ? ['ok', 'Работает'] : ['', '—'] }; }
     case 'updates': return { icon: 'refresh', title: 'Обновления', to: 'system', value: ['IDLE', 'COMMITTED', undefined, ''].includes(p.phase) ? 'Новых нет' : phaseText(p.phase), sub: num(p.feed_ok_at) != null ? 'проверено ' + fmtStamp(p.feed_ok_at) : 'канал ' + (p.channel || '—'), pill: ['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase) ? ['crit', 'Ошибка'] : ['', ''] };
     case 'wan': return { icon: 'globe', title: 'Интернет', to: 'wan', value: w.internet ? 'В сети' : w.internet === false ? 'Нет связи' : s.wan ? 'Роутер отвечает медленно' : '—', sub: w.speed ? 'порт ' + fmtSpeed(w.speed) : w.address || 'адрес не получен', pill: w.internet ? ['ok', 'Работает'] : w.internet === false ? ['crit', 'Не работает'] : s.wan ? ['warn', 'Нет ответа'] : ['', '—'] };
     // Only switched-on tunnels count: one the owner switched off is not a fault (owner 2026-10-12).
@@ -1526,7 +1545,7 @@ function journalPanel() {
         ['Самая старая запись', oldest ? 'с ' + oldest : 'архива пока нет']
       ]) : S.errors.journal ? '<p class="field-warn">Настройки хранения не загружены: ' + esc(S.errors.journal) + '</p><div class="panel-actions">' + btn('journal-reload', 'refresh', 'Повторить', 'small') + '</div>' :
         empty('Загрузка настроек хранения…')) +
-    '<div class="panel-actions">' + btn('log-save-all', 'archive', 'Скачать все журналы') + '</div>',
+    '',
     { desc: 'Журналы не стираются: старые записи сжимаются в архив и хранятся весь срок. Если журналы займут больше заданного размера, первыми уходят самые старые. «Скачать все журналы» - полная история одним архивом.' });
 }
 
@@ -1549,7 +1568,10 @@ function agentsPanel() {
     ['Агент сети', 'интернет, VPN, DNS', pill(ag.network, jobOk(['vward-tunnel-health.sh', 'vward-wan-guard.sh', 'vward-route-reconciler.sh'])), 'wan'],
     ['Агент компонентов', 'программы и модули', pill(null, known ? !!sv.supervisor : null), 'd-components'],
     ['Агент обновлений', 'обновления программ', pill(ag.updates, known ? !!sv.crond : null), 'u-vward'],
-    ['Агент обслуживания', 'журналы и накопитель', pill(ag.maintenance, jobOk(['vward-housekeeping.sh'])), 'logs']
+    ['Агент обслуживания', 'журналы и накопитель', pill(ag.maintenance, jobOk(['vward-housekeeping.sh'])), 'logs'],
+    // 11.11: the server alive is not enough, the login itself is checked by the components agent.
+    ['Вход по SSH', 'проверка входа, не только процесса', ag.ssh === 'broken' ? ST.bad.concat('вход не проходит, см. журналы') :
+      ag.ssh === 'ok' ? ST.on.concat('') : ['', '—', ''], 'logs']
   ];
   // The mode and the proposed actions are on the same page below: no rows leading to it (owner 2026-10-18).
   return panel('Агенты', kv(rows.map(r => [r[0], r[2][1], r[2][0], r[3], '', r[2][2] ? r[1] + ' · ' + r[2][2] : r[1]])),
@@ -1586,10 +1608,12 @@ function aiSlider(id, cur, label, off, dnsDown, dnsWhy) {
   if (sdFeatureOff()) { dnsDown = cur === 'dns'; dnsWhy = 'Smart DNS выключен'; }
   const to = Math.max(0, VIA.findIndex(o => o[0] === cur)), on = cfgOk() && !!S.ai && !SVC.busy && !off;
   const from = aiPrev[id] != null ? aiPrev[id] : to; aiPrev[id] = to;
-  return '<div class="seg-slider' + (on ? '' : ' off') + (cur ? '' : ' none') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
+  // The grid follows the ways offered (owner 12.11: two ways in three columns left a gap).
+  return '<div class="seg-slider' + (['', '', ' two', '', ' four'][VIA.length] || '') + (on ? '' : ' off') + (cur ? '' : ' none') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
     VIA.map(o => { const dis = !on || (o[0] === 'dns' && dnsDown && cur !== 'dns');
       return '<button type="button" role="radio" data-ai-via="' + o[0] + '" data-ai="' + esc(id) + '" aria-checked="' + (o[0] === cur) + '"' + (dis ? ' disabled' : '') + (o[0] === 'dns' && dnsDown ? ' title="' + esc(dnsWhy || 'сервер не отвечает') + '"' : '') + '>' + o[1] + '</button>'; }).join('') + '</div>' +
-    (dnsDown ? '<p class="seg-note">Smart DNS: ' + esc(dnsWhy || 'сервер не отвечает') + '</p>' : '') +
+    (dnsDown && !sdFeatureOff() ? '<p class="seg-note">Smart DNS: ' + esc(dnsWhy || 'сервер не отвечает') + '</p>' : '') +
+    (!cur && id === 'all' && S.ai ? '<p class="seg-note muted">Разные: у сервисов разный путь</p>' : '') +
     (S.ai && !on && !off && (SVC.busy ? AIBUSY === id : !cfgOk()) ? '<p class="seg-note muted">' + (SVC.busy ? 'Переключается…' : 'Изменение недоступно: нет прав на настройку') + '</p>' : '');
 }
 /* An unfinished service operation (fix.35.4, 03.11: «service on» refused with
@@ -1741,8 +1765,11 @@ function sdStoreRow(a, sd) {
   const target = cap.target === 'agh' ? component : cap.target === 'keenetic' ? 'Роутер' : 'недоступно';
   const note = counts + '. ' + (sd.store === 'auto' || !sd.store ? 'Новые привязки: ' + target : 'Выбрано: ' + (sd.store === 'agh' ? component : 'Роутер')) +
     (sd.store === 'agh' && !cap.available ? ' · ' + reason : '') + '. Выбор действует только на новые привязки; существующие не переносятся.';
+  // No AdGuard Home on the router (owner 12.11.2026: nothing pushes it): only «Авто» and «Роутер»,
+  // unless it is already chosen or holds domains - then its state stays in view.
+  const aghOpt = cap.reason !== 'not_installed' || sd.store === 'agh' || (sd.agh_domains || 0) > 0;
   return '<dl class="kv sd-storage">' + ctrlRow('Хранилище Smart DNS', choiceSlider('sd-store',
-    [['auto', 'Авто', SDSTORE_BUSY], ['keenetic', 'Роутер', SDSTORE_BUSY], ['agh', component, SDSTORE_BUSY]], sd.store || 'auto', 'Хранилище Smart DNS'), note) + '</dl>';
+    [['auto', 'Авто', SDSTORE_BUSY], ['keenetic', 'Роутер', SDSTORE_BUSY]].concat(aghOpt ? [['agh', String(component).replace(/ Home$/, ''), SDSTORE_BUSY]] : []), sd.store || 'auto', 'Хранилище Smart DNS'), note) + '</dl>';
 }
 async function sdStoreSet(v) {
   if (SDSTORE_BUSY) return;
@@ -1924,7 +1951,6 @@ const SOON = {
   system: [['Сертификаты', 'fix.42', 'каким корневым сертификатам доверяет VWARD: системные, каталог (Минцифры и другие), свои'],
            ['Полный сброс', 'fix.31', 'убрать из Keenetic всё, что добавил VWARD, с копией настроек']],
   settings: [['Язык Панели', 'fix.42', 'русский и другие языки']],
-  logs: [['Поиск и фильтры в журналах', 'fix.37', 'по агенту, программе и времени']],
   vless: [['Шапка подписки', 'fix.31', 'трафик, срок, поддержка провайдера'], ['Замер скорости серверов', 'fix.31', 'скорость каждого сервера по кнопке']],
   awg: [['AmneziaWG Premium', 'fix.31', 'страны без ключа']]
 };
@@ -2361,11 +2387,11 @@ const RENDER = {
   updatesPanel() {
     const p = plat(), u = S.update || {}, pend = u.pending || {}, x = S.ext || {}, fw = x.firmware || {}, agh = x.agh || {};
     const pk = x.packages || [], checked = x.checked_at ? fmtStamp(x.checked_at) : '';
-    const pon = pend.present && pend.feed !== 'other', vwardVal = pon ? 'доступна ' + (pend.version || 'новая версия') : (p.version || '—');
+    const pon = pend.present && pend.feed !== 'other', vwardVal = pon ? 'доступна ' + (verHuman(pend.version, pend.sequence) || 'новая версия') : (verHuman(p.version, p.last_sequence) || '—');
     const aghVal = agh.available ? 'доступна ' + extVer(agh.available) : agh.installed ? extVer(agh.installed) : S.ext ? 'не установлен' : '—';
     const fwVal = !x.firmware ? (S.ext ? 'нет данных' : '—') : fw.update_available ? 'доступна новая' : fw.title || fw.release;
     return panel('Обновления', kv([
-        ['VWARD', vwardVal, pon ? 'info' : '', 'u-vward', '', pon ? 'установлена ' + (p.version || '—') : autoText(isTrue(p.auto_apply))],
+        ['VWARD', vwardVal, pon ? 'info' : '', 'u-vward', '', pon ? 'установлена ' + (verHuman(p.version, p.last_sequence) || '—') : autoText(isTrue(p.auto_apply))],
         ['AdGuard Home', aghVal, agh.available ? 'info' : '', 'u-agh', '', agh.available ? 'установлена ' + extVer(agh.installed) : autoText(x.auto && x.auto.agh)],
         ['Прошивка Keenetic', fwVal, fw.update_available ? 'info' : '', 'u-fw', '', fw.channel ? 'канал ' + fwChannel(fw.channel) + ' · ' + autoText(fw.auto_update) : ''],
         ['Пакеты Entware', pk.length ? pk.length + ' ' + plural(pk.length, 'обновление', 'обновления', 'обновлений') : S.ext && !x.checked_at ? 'не проверялись' : 'актуальны', pk.length ? 'info' : '', 'u-opkg', '', x.installed_count ? 'установлено ' + x.installed_count + ' · ' + autoText(x.auto && x.auto.entware) : '']
@@ -2443,16 +2469,16 @@ const RENDER = {
     if (al.retry) acts.push(btn('ask', 'refresh', 'Повторить', '', ' data-confirm="update-retry"'));
     if (al.rollback) acts.push(btn('ask', 'undo', 'Откатить', 'danger', ' data-confirm="update-rollback"'));
     if (al.recover) acts.push(btn('ask', 'alert', 'Восстановить', 'danger', ' data-confirm="update-recover"'));
-    const conf = confirmBox('update-apply', 'Установить обновление ' + (pend.version || '') + '? Компоненты перезапустятся.', 'Установить') ||
+    const conf = confirmBox('update-apply', 'Установить обновление ' + verHuman(pend.version, pend.sequence) + '? Компоненты перезапустятся.', 'Установить') ||
       confirmBox('update-retry', 'Повторить установку обновления?', 'Повторить') ||
       confirmBox('update-rollback', 'Вернуть предыдущую версию? Компоненты перезапустятся.', 'Откатить', true) ||
       confirmBox('update-recover', 'Восстановить прерванное обновление?', 'Восстановить', true);
     return loadError(['update', 'status']) +
       panel('Состояние', kv([
-        ['Версия', p.version || '—', '', 'd-notes', '', [p.last_sequence ? 'сборка № ' + p.last_sequence : '', lastApplyNote(u.last_apply, u.last_method)].filter(Boolean).join(' · ')],
+        ['Версия', verHuman(p.version, p.last_sequence) || '—', '', 'd-notes', '', lastApplyNote(u.last_apply, u.last_method)],
         // Found on the other channel before the switch: the updater will not install it here (owner 2026-11-01).
-        pend.present && pend.feed === 'other' ? ['Найдено на другом канале', pend.version || '—', '', 'd-notes', '', 'не установится, пока выбран текущий канал'] :
-        pend.present ? ['Доступно', (pend.version || '') + (pend.priority ? ' · ' + ({ ROUTINE: 'обычное', IMPORTANT: 'важное', CRITICAL: 'критическое' }[String(pend.priority).toUpperCase()] || pend.priority) : ''), 'info', 'd-notes'] : null,
+        pend.present && pend.feed === 'other' ? ['Найдено на другом канале', verHuman(pend.version, pend.sequence) || '—', '', 'd-notes', '', 'не установится, пока выбран текущий канал'] :
+        pend.present ? ['Доступно', verHuman(pend.version, pend.sequence) + (pend.priority ? ' · ' + ({ ROUTINE: 'обычное', IMPORTANT: 'важное', CRITICAL: 'критическое' }[String(pend.priority).toUpperCase()] || pend.priority) : ''), 'info', 'd-notes'] : null,
         feedCheckRow(p),
         p.last_health_check ? ['Проверка после установки', fmtStamp(p.last_health_check), '', 'a-updater'] : null
       ]) + (conf || (acts.length ? '<div class="panel-actions even">' + acts.join('') + '</div>' : '')) + resultBox('updates'),
@@ -2492,20 +2518,34 @@ const RENDER = {
   },
 
   logs() {
-    const text = S.logs[logTab];
-    return '<section class="block" aria-label="Журналы"><div class="block-head"><div class="panel-tools">' +
-      '<button class="icon-btn" type="button" data-act="log-copy" aria-label="Копировать" title="Копировать">' + ico('copy') + '</button>' +
-      '<button class="icon-btn" type="button" data-act="log-share" aria-label="Поделиться" title="Поделиться">' + ico('share') + '</button>' +
-      '<button class="icon-btn" type="button" data-act="log-save" aria-label="Сохранить журнал в .txt" title="Сохранить журнал в .txt">' + ico('save') + '</button>' +
-      '<button class="icon-btn" type="button" data-act="log-save-all" aria-label="Сохранить все журналы" title="Сохранить все журналы">' + ico('archive') + '</button>' +
-      (logTab === 'all' ? '<button class="icon-btn" type="button" data-act="log-order" aria-pressed="' + logNewest + '" aria-label="' + (logNewest ? 'Сначала новые' : 'Сначала старые') + '" title="' + (logNewest ? 'Сначала новые' : 'Сначала старые') + '">' + ico('sort') + '</button>' : '') +
-      '<button class="icon-btn" type="button" data-act="log-wrap" aria-pressed="' + logWrap + '" aria-label="Перенос строк" title="Перенос строк">' + ico('wrap') + '</button>' +
-      '<button class="icon-btn" type="button" data-act="log-reload" aria-label="Обновить журнал" title="Обновить журнал">' + ico('refresh') + '</button></div></div><div class="panel">' +
-      '<p class="chips-label">Источник</p><div class="chips" role="group" aria-label="Источник журнала">' + LOG_VIEW.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
-      '<p class="chips-label">Важность</p><div class="chips log-view" role="group" aria-label="Важность записей"><button type="button" data-act="log-view" data-v="important" aria-pressed="' + logImportant + '">Важное</button><button type="button" data-act="log-view" data-v="all" aria-pressed="' + !logImportant + '">Все</button></div>' +
-      '<div class="logfeed' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + logFeed(text) + '</div>' +
-      '<p class="field-warn" id="logWarn"' + (LOGWARN[logTab] ? '' : ' hidden') + '>' + esc(LOGWARN[logTab] || '') + '</p>' +
-      '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p>' + (logTab === 'all' ? '<div id="logSrc">' + logSources() + '</div>' : '') + '</div></section>' + journalPanel() + soonPanel('logs');
+    // owner 12.11.2026: nothing loads by itself; «Показать журнал» asks for the last N entries in one
+    // request, «Показать ещё» for more; the filters sit under the button by the search, the
+    // actions are buttons with words under the journal.
+    const shown = !!logShown[logTab], text = shown ? S.logs[logTab] : null, busy = !!LOGRUN[logTab];
+    const set = logTab !== 'all' || !logImportant || logN !== 50 || !logNewest || !logWrap;
+    const fbtn = '<button class="icon-btn filter-btn' + (set ? ' on' : '') + '" type="button" data-act="log-filters" aria-expanded="' + logFilters + '" aria-label="Фильтр" title="Фильтр">' + ico('sliders') + '</button>';
+    const chips = (label, attr, opts, cur) => '<p class="chips-label">' + label + '</p><div class="chips" role="group" aria-label="' + label + '">' +
+      opts.map(o => '<button type="button" ' + attr + ' data-v="' + o[0] + '" aria-pressed="' + (String(o[0]) === String(cur)) + '">' + esc(o[1]) + '</button>').join('') + '</div>';
+    const sum = [logLabel(logTab) === 'Все' ? 'Все источники' : logLabel(logTab), logImportant ? 'важное' : 'все записи', 'по ' + logN].concat(logTab === 'all' && !logNewest ? ['сначала старые'] : []).join(' · ');
+    const name = logTab === 'all' ? 'все журналы' : 'журнал «' + logLabel(logTab) + '»';
+    return '<section class="block" aria-label="Журналы"><div class="panel">' + searchBar('log-search', logQuery, 'Найти в журнале', fbtn) +
+      (logFilters ? '<p class="chips-label">Источник</p><div class="chips" role="group" aria-label="Источник журнала">' + LOG_VIEW.map(t => '<button type="button" data-log="' + t.id + '" aria-pressed="' + (t.id === logTab) + '">' + esc(t.label) + '</button>').join('') + '</div>' +
+        chips('Важность', 'data-act="log-view"', [['important', 'Важное'], ['all', 'Все']], logImportant ? 'important' : 'all') +
+        chips('Записей за раз', 'data-act="log-n"', LOG_STEPS.map(n => [n, String(n)]), logN) +
+        (logTab === 'all' ? chips('Порядок', 'data-act="log-order"', [['newest', 'Сначала новые'], ['oldest', 'Сначала старые']], logNewest ? 'newest' : 'oldest') : '') +
+        chips('Длинные строки', 'data-act="log-wrap"', [['1', 'Переносить'], ['0', 'В одну строку']], logWrap ? '1' : '0') +
+        (logTab === 'all' && shown ? '<div id="logSrc">' + logSources() + '</div>' : '')
+        : '<p class="panel-desc log-sum">' + esc(sum) + '</p>') +
+      (shown ? '<div class="logfeed' + (logWrap ? '' : ' nowrap') + '" id="logBox">' + logFeed(logPick(text, logQuery)) + '</div>' +
+          (LOGMORE[logTab] && !logQuery ? '<div class="panel-actions log-more-row">' + btn('log-more', '', 'Показать ещё ' + logN, 'small') + '</div>' : '')
+        : '<div class="empty" id="logBox">' + (busy ? 'Загрузка записей…' : 'Журнал не загружен. «Показать журнал» принесёт последние ' + logN + ' ' + plural(logN, 'запись', 'записи', 'записей') + ' одним запросом.') + '</div>') +
+      '<p class="field-warn" id="logWarn"' + (shown && LOGWARN[logTab] ? '' : ' hidden') + '>' + esc(LOGWARN[logTab] || '') + '</p>' +
+      (shown ? '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p>' : '') +
+      '<div class="panel-actions"><button class="btn primary log-show' + (busy ? ' spinning' : '') + '" type="button" data-act="log-show"' + (busy ? ' disabled aria-busy="true"' : '') + '>' + ico(shown ? 'refresh' : 'logs') + (shown ? 'Обновить журнал' : 'Показать журнал') + '</button></div>' +
+      '<div class="panel-actions even log-acts">' + btn('log-save', 'download', 'Скачать') + btn('log-share', 'share', 'Поделиться') + btn('log-save-all', 'archive', 'Архивировать') +
+        btn('ask', 'trash', 'Очистить', 'danger', ' data-confirm="log-clear" data-what="' + esc(logTab) + '"') + '</div>' +
+      confirmBox('log-clear', 'Очистить ' + name + '? Записи удалятся с роутера, архивы останутся.', 'Очистить', true) +
+      '</div></section>' + journalPanel();
   },
 
   'd-components'() {
@@ -2609,7 +2649,7 @@ const RENDER = {
     const own = cfgRoute().group || prof().policy_group;
     const one = l => { const m = mine.indexOf(l) >= 0;
       return '<div class="list-item">' + row(l).replace('</small>', '</small>' + (m ? '<small class="tag-mark">под управлением VWARD</small>' : l.name === own ? '' : '<small class="tag-mark off">не под управлением VWARD</small>')) +
-        (m ? choiceSlider('list-mode:' + l.name, listModes(l), listMode(l), 'Путь списка ' + (l.description || l.name)) + (listDnsWhy(l) ? '<p class="panel-desc">DNS: ' + esc(listDnsWhy(l)) + '</p>' : '') : '') + '</div>'; };
+        (m ? choiceSlider('list-mode:' + l.name, listModes(l), listMode(l), 'Путь списка ' + (l.description || l.name)) + (listDnsWhy(l) && (S.lists || {}).smartdns_state !== 'off' ? '<p class="panel-desc">DNS: ' + esc(listDnsWhy(l)) + '</p>' : '') : '') + '</div>'; };
     return cfgNote() + listDupPanel(items) +
       panel('Доменные списки', (mine.length ? '<dl class="kv">' +
         ctrlRow('Все списки', choiceSlider('list-mode-all', listAllModes(mine), common, 'Путь всех списков VWARD'), common ? 'списки под управлением VWARD' : 'Разные: у списков разный путь', 'stack') + '</dl>' : '') +
@@ -2756,7 +2796,7 @@ const RENDER = {
   'd-notes'() {
     const p = plat(), pend = (S.update && S.update.pending) || {};
     return (pend.present && pend.version ? panel('Доступно: ' + pend.version, notesHtml(pend.version)) : '') +
-      panel('Установлено: ' + (p.version || '—'), notesHtml(p.version));
+      panel('Установлено: ' + (verHuman(p.version, p.last_sequence) || '—'), notesHtml(p.version));
   },
   'd-jobs'() {
     const a = S.ads || {}, j = a.jobs || {}, cur = j.current || {}, last = j.last || {}, queue = j.queue || [];
@@ -3128,7 +3168,7 @@ function evAt(ts) {
 // Events of a section, newest first; the same event in a row is shown once with a count.
 function activityEvents(k) {
   const a = ACTIVITY[k], out = [];
-  a.logs.forEach(n => String(S.logs[n] || '').split('\n').forEach(line => {
+  a.logs.forEach(n => String(S.act[n] || '').split('\n').forEach(line => {
     const t = evTime(line.trim()); if (!t) return;
     let e = null; try { e = a.read(t.rest, n); } catch (x) { e = null; }
     if (e) out.push(Object.assign(e, { ts: t.ts }));
@@ -3136,24 +3176,40 @@ function activityEvents(k) {
   out.sort((x, y) => y.ts - x.ts);
   return out.reduce((acc, e) => { const last = acc[acc.length - 1]; if (last && last.text === e.text) last.n = (last.n || 1) + 1; else acc.push(e); return acc; }, []);
 }
+// owner 12.11.2026: a history reads the last ACT_LINES lines of its journals (it read 1000 every
+// 15 s), shows the last 50 events, «Показать ещё» shows 50 more (reading further back when its
+// lines run out), «Обновить» reads again; nothing by itself.
+const ACT_LINES = 200, ACT_STEP = 50, ACTLINES = {}, ACTSHOW = {}, ACTAT = {}, ACTFULL = {}, ACTRUN = {};
 async function loadActivity(k) {
-  const a = ACTIVITY[k]; if (!a) return;
-  await Promise.all(a.logs.map(async n => {
-    try { S.logs[n] = await apiText('log', { name: n, count: 1000 }); S.loadedAt['log:' + n] = Date.now(); }
-    catch (e) { if (S.logs[n] == null) S.logs[n] = ''; }
-  }));
+  const a = ACTIVITY[k]; if (!a || ACTRUN[k]) return;
+  const lines = ACTLINES[k] || ACT_LINES; ACTRUN[k] = true;
+  let full = false;
+  try {
+    await Promise.all(a.logs.map(async n => {
+      try { const x = await apiText('log', { name: n, count: lines }); S.act[n] = x; if (x.split('\n').filter(Boolean).length >= lines) full = true; }
+      catch (e) { if (S.act[n] == null) S.act[n] = ''; }
+    }));
+  } finally { ACTRUN[k] = false; }
+  ACTFULL[k] = full && lines < LOG_MAX; ACTAT[k] = Date.now();
   if (current === 'a-' + k && !editing) render();
+}
+// «Показать ещё»: 50 more events; when the lines read hold no more, read twice as far back.
+function activityMore(k) {
+  const have = activityEvents(k).length;
+  ACTSHOW[k] = (ACTSHOW[k] || ACT_STEP) + ACT_STEP;
+  if (have < ACTSHOW[k] && ACTFULL[k]) { ACTLINES[k] = Math.min(LOG_MAX, (ACTLINES[k] || ACT_LINES) * 2); loadActivity(k); }
+  render();
 }
 function activityPage(k) {
   const a = ACTIVITY[k];
-  if (a.logs.some(n => S.logs[n] == null)) return panel(a.title, empty('Загрузка…'), { desc: a.desc });
-  const ev = activityEvents(k).slice(0, 150);
+  if (a.logs.some(n => S.act[n] == null)) return panel(a.title, empty('Загрузка…'), { desc: a.desc });
+  const all = activityEvents(k), show = ACTSHOW[k] || ACT_STEP, ev = all.slice(0, show);
   let head = '';
   if (k === 'routing') {
-    const m = /Checked=(\d+)\s+Total=(\d+)/.exec(S.logs.routing || '');
+    const m = /Checked=(\d+)\s+Total=(\d+)/.exec(S.act.routing || '');
     if (m) head = kv([['Последняя сверка', 'проверено ' + fmtInt(m[1]) + ' из ' + fmtInt(m[2]) + ' ' + plural(num(m[2]) || 0, 'домена', 'доменов', 'доменов')]]);
   }
-  const t = Math.max.apply(null, a.logs.map(n => S.loadedAt['log:' + n] || 0));
+  const t = ACTAT[k] || 0;
   const top = a.top ? a.top() : '', seen = new Set();
   const row = e => {
     // A domain's controls sit on its newest event only.
@@ -3161,9 +3217,12 @@ function activityPage(k) {
     return '<li class="ev ' + (e.tone || 'info') + (e.go && page(e.go) ? ' link" role="button" tabindex="0" data-go="' + esc(e.go) + '"' : '"') + '><span class="ev-dot" aria-hidden="true"></span><span class="ev-text">' + esc(e.text) + (e.n > 1 ? ' <span class="ev-n">×' + e.n + '</span>' : '') + '</span>' +
       (acts ? '<span class="row-acts ev-acts">' + acts + '</span>' : '') + '<span class="ev-at">' + esc(evAt(e.ts)) + '</span></li>';
   };
+  const more = all.length > show || ACTFULL[k];
   return (a.topOwn ? top : '') + panel(a.title, (a.topOwn ? '' : top) + head + (ev.length ? '<ul class="events">' + ev.map(row).join('') + '</ul>'
-    : empty('Пока ничего не происходило')), { desc: a.desc }) +
-    (t ? '<p class="log-at">Обновлено в ' + esc(new Date(t).toLocaleTimeString('ru-RU')) + ' · обновляется само</p>' : '');
+    : empty('Пока ничего не происходило')) +
+    (t ? '<p class="log-at">Запрошено в ' + esc(new Date(t).toLocaleTimeString('ru-RU')) + ' · само не обновляется</p>' : '') +
+    '<div class="panel-actions even">' + (more ? btn('act-more', '', 'Показать ещё ' + ACT_STEP, '', ' data-k="' + k + '"') : '') +
+      btn('act-reload', 'refresh', 'Обновить', '', ' data-k="' + k + '"' + (ACTRUN[k] ? ' disabled' : '')) + '</div>', { desc: a.desc });
 }
 Object.keys(ACTIVITY).forEach(k => {
   DETAILS['a-' + k] = { title: ACTIVITY[k].title, parent: ACTIVITY[k].parent, data: ACTIVITY[k].data || [] };
@@ -3341,7 +3400,7 @@ function fmtBytes(b) { b = num(b); if (b == null) return '—'; const u = ['Б',
 const hsSec = t => { const h = t && t.handshake != null ? num(t.handshake) : null; return h == null || isNaN(h) || h >= 315360000 ? null : h; };
 function agoText(sec) { if (sec == null || isNaN(sec)) return '—'; if (sec < 60) return sec + ' с назад'; if (sec < 3600) return Math.round(sec / 60) + ' мин назад'; if (sec < 86400) return Math.round(sec / 3600) + ' ч назад'; return Math.round(sec / 86400) + ' д назад'; }
 // An interval in plain units: 900 → «15 мин», 86400 → «24 ч».
-function durText(sec) { const n = num(sec); if (n == null) return '—'; if (n < 60) return n + ' с'; if (n < 3600) return Math.round(n / 60) + ' мин'; return Math.round(n / 3600) + ' ч'; }
+function durText(sec) { const n = num(sec); if (n == null) return '—'; if (n < 60) return n + '\u00a0с'; if (n < 3600) return Math.round(n / 60) + '\u00a0мин'; return Math.round(n / 3600) + '\u00a0ч'; }
 const JOB_NAMES = { 'vward-route-reconciler.sh': 'Сверка маршрутов', 'S91vward-route-engine': 'Перезапуск маршрутизации', 'vward-policy-chain.sh': 'Обновление IP-категорий', 'vward-route-hints-update.sh': 'Подсказки каталога', 'vward-tunnel-health.sh': 'Агент VPN', 'S92vward-runtime': 'Агент компонентов', 'vward-wan-guard.sh': 'Восстановление интернета', 'vward-housekeeping.sh': 'Сжатие журналов', 'vward-ads-privacy-scheduler.sh': 'Блокировка рекламы', 'vward-wifi-client-scheduler.sh': 'Контроль Wi-Fi клиентов' };
 const JOB_COMPONENT = { 'S91vward-route-engine': 'route-engine' };
 function cronText(c) {
@@ -4199,7 +4258,7 @@ function compPage(c) {
   const sw1 = core ? '<span class="num">Всегда</span>' : sw('data-comp="' + c.id + '"', on, 'Компонент «' + c.name + '» включён', !cfgOk() || !g);
   return panel(c.name, '<dl class="kv">' + ctrlRow('Компонент включён', sw1, core ? 'базовый компонент: без него VWARD не работает' : on ? '' : 'файлы установлены, но компонент не запускается') + '</dl>' +
       compConfirm(c) +
-      kv([['Запуск', c.when], ['Версия', x.release || plat().version || '—'], ['Установлен', fmtStamp(x.installed_at) || '—']]) +
+      kv([['Запуск', c.when], ['Версия', verHuman(x.release || plat().version) || '—'], ['Установлен', fmtStamp(x.installed_at) || '—']]) +
       '<div class="panel-actions even">' + (c.page ? '<button class="btn" type="button" data-go="' + c.page + '">Открыть раздел</button>' : '') + (activityOf(c.log) ? '<button class="btn" type="button" data-go="a-' + activityOf(c.log) + '">События</button>' : '') + '</div>' + cfgNote(),
     { desc: c.desc, right: headPill(!on ? 'warn' : x.health === 'PASS' ? 'ok' : '', !on ? 'Выключен' : x.health === 'PASS' ? 'Работает' : 'Нет данных') });
 }
@@ -4409,6 +4468,8 @@ function go(id, key, mode) {
     if (mode === 'replace' || sheet) history.replaceState({ p: id, d: histDepth() }, '', pathOf(id));
     else if (id !== current) history.pushState({ p: id, d: histDepth() + 1 }, '', pathOf(id));
   }
+  // «Журналы» opened anew show nothing until asked (owner 12.11.2026).
+  if (id === 'logs' && current !== 'logs') { logShown = {}; logQuery = ''; }
   current = id; editing = false; confirm = null; actionResult = null; FERR = null;
   closeLayer(true); render(); window.scrollTo(0, 0);
   if (key) { const row = [...document.querySelectorAll('[data-key]')].find(r => r.dataset.key === key); if (row) { row.scrollIntoView({ block: 'center' }); row.classList.add('flash'); } }
@@ -4430,10 +4491,12 @@ function busyStart(id) {
 }
 function busyEnd(b) { if (!b || pageBusy !== b) return; pageBusy = null; document.body.classList.remove('loading', 'slow'); }
 const busyOn = id => !!pageBusy && pageBusy.id === id;
-async function refreshPage(busy) {
+async function refreshPage(busy, auto) {
   const id = current, keys = DATA_FOR(id).concat('off', 'notes'), b = busy ? busyStart(id) : null;
-  if (id === 'logs') { busyEnd(b); loadLog(logTab); load('journal').then(() => { if (current === 'logs') render(); }, () => {}); return; }
-  if (id.startsWith('a-')) loadActivity(id.slice(2));
+  // owner 12.11.2026: «Журналы» load on «Показать журнал» only; a history loads on opening and on
+  // «Обновить», never by the 15 s refresh.
+  if (id === 'logs') { busyEnd(b); load('journal').then(() => { if (current === 'logs') render(); }, () => {}); return; }
+  if (id.startsWith('a-') && !(auto && ACTAT[id.slice(2)])) loadActivity(id.slice(2));
   if (id.startsWith('t-')) keys.push('status', 'lists', 'awg', 'ext', 'tq');
   if (id.startsWith('tn-')) keys.push('status', 'lists');
   if (id.startsWith('l-')) keys.push('listd');
@@ -4471,19 +4534,32 @@ function loadLog(tab, force, auto) {
   if (!force && S.logs[tab] != null) render();
   const run = LOGRUN[tab] = { again: false };
   run.p = (async () => { let out; do { run.again = false; out = await loadLogOnce(tab); } while (run.again); return out; })()
-    .finally(() => { delete LOGRUN[tab]; });
+    // Asked by the owner: the page is drawn anew once the load ends (the button, «Показать ещё», the time).
+    .finally(() => { delete LOGRUN[tab]; if (current === 'logs' && logTab === tab && !editing) render(); });
   return run.p;
 }
 const logFailed = x => /^Журнал недоступен/.test(String(x || '').trim());
 async function loadLogOnce(tab) {
   const hhmm = t => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const want = logShown[tab] || logN;
   if (tab === 'all') {
     // «Расписание» is crond's own record of every start, not events: only in its tab.
     // The last 24 hours only, cut by the API (owner 02.11); older entries stay in the files and archives.
-    const parts = await Promise.all(LOG_TABS.filter(tb => tb.id !== 'cron').map(tb => apiText('log', { name: tb.id, count: 200, hours: LOG_HOURS })
-      .then(x => { S.logs[tb.id] = x; S.loadedAt['log:' + tb.id] = Date.now(); if (!logFailed(x)) LOGGOOD[tb.id] = { text: x, at: Date.now() }; return { label: tb.label, text: x }; },
-            e => { const g = LOGGOOD[tb.id]; return { label: tb.label, text: g ? g.text : 'Журнал недоступен: ' + e.message, err: e.message, at: g && g.at }; })));
-    const info = [], merged = mergeLogs(parts, logNewest, info);
+    // One request for every source (owner 12.11.2026), each source after its «@@VWARD-LOG name» line.
+    const srcs = LOG_TABS.filter(tb => tb.id !== 'cron'), old = (tb, why) => { const g = LOGGOOD[tb.id]; return { label: tb.label, text: g ? g.text : 'Журнал недоступен: ' + why, err: why, at: g && g.at }; };
+    let parts;
+    try {
+      const got = logSplit(await apiText('log', { name: 'all', count: want, hours: LOG_HOURS }));
+      parts = srcs.map(tb => {
+        const x = got[tb.id];
+        if (x == null) return old(tb, 'нет в ответе роутера');
+        if (!logFailed(x)) LOGGOOD[tb.id] = { text: x, at: Date.now() };
+        return { label: tb.label, text: x };
+      });
+    } catch (e) { parts = srcs.map(tb => old(tb, e.message)); }
+    LOGPARTS.length = 0; parts.forEach(p => LOGPARTS.push(p));
+    const info = [], merged = mergeLogs(parts, logNewest, info, want);
+    LOGMORE.all = want < LOG_MAX && merged.split('\n').filter(l => l && !l.startsWith('    ')).length >= want;
     parts.forEach((p, i) => { if (p.err) Object.assign(info[i], p.at ? { state: 'stale', at: p.at } : { state: 'error' }, { err: p.err }); });
     LOGINFO.length = 0; info.forEach(i => LOGINFO.push(i));
     const bad = parts.filter(p => p.err), why = bad.length ? bad[0].err : '';
@@ -4500,8 +4576,9 @@ async function loadLogOnce(tab) {
     }
   } else {
     try {
-      const x = await apiText('log', { name: tab, count: 200, hours: LOG_HOURS });
+      const x = await apiText('log', { name: tab, count: want, hours: LOG_HOURS });
       S.logs[tab] = x; S.loadedAt['log:' + tab] = Date.now(); LOGWARN[tab] = ''; LOGBACK[tab] = 0;
+      LOGMORE[tab] = want < LOG_MAX && x.split('\n').filter(Boolean).length >= want;
       if (!logFailed(x)) LOGGOOD[tab] = { text: x, at: Date.now() };
     } catch (e) {
       const g = LOGGOOD[tab]; LOGBACK[tab] = Date.now() + 60000;
@@ -4509,15 +4586,29 @@ async function loadLogOnce(tab) {
       else { S.logs[tab] = 'Журнал недоступен: ' + e.message; LOGWARN[tab] = ''; }
     }
   }
-  if (current === 'logs' && logTab === tab) {
-    const b = $('logBox'), at = $('logAt'), src = $('logSrc'), w = $('logWarn');
-    if (b && at && w && (tab !== 'all' || src)) {
-      if (b.dataset.raw !== S.logs[tab]) { b.innerHTML = logFeed(S.logs[tab]); b.dataset.raw = S.logs[tab]; }
-      at.textContent = logStamp(tab); w.textContent = LOGWARN[tab] || ''; w.hidden = !LOGWARN[tab];
-      if (src) { const open = src.querySelector('details') && src.querySelector('details').open; src.innerHTML = logSources(); if (open && src.querySelector('details')) src.querySelector('details').open = true; }
-    } else render();
-  }
   return S.logs[tab];
+}
+// logSplit TEXT: {name: text} of the «Все» answer, one «@@VWARD-LOG name» line before each source.
+function logSplit(text) {
+  const out = {}; let cur = null;
+  String(text || '').split('\n').forEach(l => {
+    const m = /^@@VWARD-LOG ([a-z]+)$/.exec(l);
+    if (m) { cur = m[1]; out[cur] = ''; } else if (cur != null) out[cur] += (out[cur] ? '\n' : '') + l;
+  });
+  return out;
+}
+const LOGPARTS = [];
+// logPick TEXT, Q: the entries whose words hold Q (an entry keeps its continuation lines).
+function logPick(text, q) {
+  q = String(q || '').trim().toLowerCase();
+  if (!q || text == null) return text;
+  const out = []; let keep = false;
+  String(text).split('\n').forEach(l => {
+    if (logTime(l.replace(/^\[[^\]]+\] /, '')) != null || !out.length && !keep) keep = l.toLowerCase().includes(q);
+    else if (!keep && l.toLowerCase().includes(q)) keep = true;
+    if (keep) out.push(l);
+  });
+  return out.length ? out.join('\n') : 'Ничего не найдено';
 }
 // The last event of each source, apart from the moment the journals were loaded; a source that did
 // not answer this time says so, with the time of the entries still shown for it.
@@ -4526,12 +4617,12 @@ function logSources() {
   const st1 = { empty: 'записей нет', missing: 'ещё не создан', error: 'не читается', quiet: 'за 24 ч записей нет' };
   const val = i => i.state === 'stale' ? 'не обновился, записи на ' + new Date(i.at).toLocaleTimeString('ru-RU') : i.state === 'error' && i.err ? 'не прочитан: ' + i.err :
     i.last != null ? fmtTime(new Date(i.last).toISOString()) : st1[i.state];
-  return '<details class="log-sources"><summary>' + ico('sort', 'log-sign') + '<span>' + (logNewest ? 'Сначала новые' : 'Сначала старые') + '</span><small>источники</small>' + ico('chevron', 'chev') + '</summary><dl class="kv">' +
+  return '<details class="log-sources"><summary>' + ico('clock', 'log-sign') + '<span>Последняя запись по источникам</span>' + ico('chevron', 'chev') + '</summary><dl class="kv">' +
     LOGINFO.map(i => '<div class="kv-row"><dt>' + esc(i.label) + '</dt><dd' + (i.state === 'error' || i.state === 'stale' ? ' class="warn"' : '') + '>' + esc(val(i)) + '</dd></div>').join('') + '</dl></details>';
 }
 function logStamp(tab) {
   const t = S.loadedAt['log:' + tab];
-  return t ? 'Обновлено в ' + new Date(t).toLocaleTimeString('ru-RU') + ' · обновляется само' : '';
+  return t ? 'Запрошено в ' + new Date(t).toLocaleTimeString('ru-RU') + ' · само не обновляется' : '';
 }
 
 /* ---------- Всплывающие панели ---------- */
@@ -4742,6 +4833,12 @@ const CONFIRMED = {
   'list-adopt': c => cfgSet({ op: 'list-adopt', target: c.name, value: '1', confirm: 'LIST_ADOPT' }, 'Список под управлением VWARD', ['lists']),
   'list-del': c => cfgSet({ op: 'list', action: 'delete', target: c.name, confirm: 'LIST_DELETE' }, 'Список удалён', ['lists']).then(x => { if (x && x.ok && current === 'l-' + c.name) go('lists'); }),
   'cleanup': c => cfgSet({ op: 'cleanup', target: c.what }, 'Очищено', ['cleanup', 'status']),
+  // «Очистить» in «Журналы» (owner 12.11.2026): the live journal(s) emptied on the router, archives kept.
+  'log-clear': c => cfgSet({ op: 'journal', target: 'clear', value: c.what, confirm: 'LOG_CLEAR' }, c.what === 'all' ? 'Журналы очищены' : 'Журнал очищен', ['journal']).then(x => {
+    if (!x || !x.ok) return;
+    Object.keys(LOGGOOD).forEach(k => { if (c.what === 'all' || k === c.what || k === 'all') delete LOGGOOD[k]; });
+    if (logShown[c.what]) loadLog(c.what, true);
+  }),
   'reset': () => cfgSet({ op: 'reset', target: 'settings', confirm: 'RESET_SETTINGS' }, 'Настройки VWARD сброшены', ['status', 'config', 'backups']),
   'vward-off': () => vwardPower('off'),
   'tunnel-down': () => tunnelState('down', current.slice(2)),
@@ -4837,12 +4934,12 @@ function updOverlayShow(o) {
   const base = rb ? 50 : step[2], cap = rb ? 95 : next ? next[2] - 3 : 100;
   u.pct = u.done ? 100 : Math.min(cap, Math.max(u.pct || 0, base) + (u.pct >= base ? 1 : 0));
   const head = u.done ? (u.ok ? (rb ? 'Откат выполнен' : 'Обновление установлено') : 'Обновление не установлено') : (rb ? 'Откат обновления VWARD' : 'Обновление VWARD');
-  const stage = u.done ? (u.ok ? 'VWARD ' + (u.version || '') + ' работает' : 'Прежняя версия работает') : rb ? 'Возврат прежней версии' : step[1];
+  const stage = u.done ? (u.ok ? 'VWARD ' + verHuman(u.version) + ' работает' : 'Прежняя версия работает') : rb ? 'Возврат прежней версии' : step[1];
   const text = u.done ? (u.ok ? 'Обновите страницу, чтобы открыть новую версию.' : (u.error || 'Установщик вернул прежнюю версию, всё работает как раньше. Подробности - в «Журналах» → «Обновления».'))
     : 'Не закрывайте страницу, пока не завершится обновление. Роутер и интернет продолжают работать.';
   const state = u.done ? (u.ok ? ' ok' : ' crit') : '';
   el.innerHTML = '<div class="upd-page' + state + '" role="dialog" aria-live="polite" aria-label="' + esc(head) + '">' +
-    '<h2>' + esc(head) + '</h2>' + (u.version && !u.done ? '<p class="upd-ver">' + esc((u.from ? u.from + ' → ' : '') + u.version) + '</p>' : '') +
+    '<h2>' + esc(head) + '</h2>' + (u.version && !u.done ? '<p class="upd-ver">' + esc((u.from ? verHuman(u.from) + ' → ' : '') + verHuman(u.version)) + '</p>' : '') +
     '<p class="upd-text">' + esc(text) + '</p>' + ringHtml(u.pct, u.done, u.ok) +
     '<p class="upd-stage">' + esc(stage) + '</p>' +
     (u.done ? '<div class="panel-actions">' + (u.ok ? '<button class="btn primary" type="button" data-act="upd-reload">Обновить страницу</button>' : '<button class="btn" type="button" data-act="upd-close">Закрыть</button>') + '</div>' : '') + '</div>';
@@ -5029,7 +5126,8 @@ document.addEventListener('click', e => {
   if (t.dataset.qfilter && t.dataset.go) { ADSV.filter = t.dataset.qfilter; S.qlog = null; }
   if (t.dataset.vserver) { vlessSelect(t.dataset.name, t.dataset.vserver); return; }
   if (t.dataset.go) { if (t.closest('.preview')) return; go(t.dataset.go, t.dataset.key); return; }
-  if (t.dataset.log) { logTab = t.dataset.log; render(); loadLog(logTab, true); return; }
+  // Another source: shown at once only when the owner already asked for a journal on this visit.
+  if (t.dataset.log) { const was = Object.keys(logShown).length; logTab = t.dataset.log; if (was) { logShown[logTab] = logN; loadLog(logTab, true); } render(); return; }
   if (t.dataset.adsRemove) { adsControl({ op: 'remove-override', domain: t.dataset.adsRemove, scope: t.dataset.scope || 'exact' }, 'Правило удалено', 'ads-rule'); return; }
   if (t.dataset.qfilter && !t.dataset.go) { ADSV.filter = t.dataset.qfilter; S.qlog = null; render(); load('qlog', true).then(render); return; }
   if (t.dataset.adsRule) { const d = t.dataset.domain; t.disabled = true; adsControl({ op: t.dataset.adsRule, domain: d, scope: 'exact' }, (t.dataset.adsRule === 'allow' ? d + ' разрешён' : d + ' заблокирован'), 'ads-rule').then(adsViews); return; }
@@ -5164,17 +5262,24 @@ document.addEventListener('click', e => {
   else if (a === 'ads-job-run') { t.disabled = true; adsControl({ op: 'job-run' }, 'Очередь запущена', 'ads-job-run'); }
   else if (a === 'ads-job-cancel') { t.disabled = true; adsControl({ op: 'job-cancel', id: t.dataset.id }, 'Задание отменено', 'ads-job-run'); }
   else if (a === 'https-op') runAction('https', 'ads-https-control', { op: t.dataset.op }, 'Готово').then(() => load('https', true)).then(render);
-  else if (a === 'log-reload') loadLog(logTab, true);
-  else if (a === 'log-order') { logNewest = !logNewest; store.set('vward-log-order', logNewest ? 'newest' : 'oldest'); loadLog('all', true); }
-  else if (a === 'log-wrap') { logWrap = !logWrap; t.setAttribute('aria-pressed', logWrap); const b = $('logBox'); if (b) b.classList.toggle('nowrap', !logWrap); }
-  else if (a === 'log-copy') copyText(S.logs[logTab] || '');
+  else if (a === 'act-more') activityMore(t.dataset.k);
+  else if (a === 'act-reload') { loadActivity(t.dataset.k); render(); }
+  else if (a === 'log-show') { logShown[logTab] = logN; loadLog(logTab, true); render(); }
+  else if (a === 'log-more') { logShown[logTab] = Math.min(LOG_MAX, (logShown[logTab] || logN) + logN); loadLog(logTab, true); render(); }
+  else if (a === 'log-filters') { logFilters = !logFilters; render(); }
+  else if (a === 'log-n') { logN = +t.dataset.v; store.set('vward-log-n', String(logN)); if (logShown[logTab]) { logShown[logTab] = logN; loadLog(logTab, true); } render(); }
+  // The order re-sorts the entries already here: no request.
+  else if (a === 'log-order') { logNewest = t.dataset.v !== 'oldest'; store.set('vward-log-order', logNewest ? 'newest' : 'oldest'); if (LOGPARTS.length) S.logs.all = mergeLogs(LOGPARTS, logNewest, null, logShown.all || logN) || S.logs.all; render(); }
+  else if (a === 'log-wrap') { logWrap = t.dataset.v !== '0'; render(); }
   else if (a === 'log-view') { logImportant = t.dataset.v !== 'all'; store.set('vward-log-view', logImportant ? 'important' : 'all'); render(); }
   else if (a === 'log-share') {
+    // A phone's own share menu (copying is there); a computer copies the text.
+    if (!logShown[logTab]) { toast('Сначала нажмите «Показать журнал»'); return; }
     const text = S.logs[logTab] || '';
-    if (navigator.share) navigator.share({ title: 'Журнал VWARD: ' + logLabel(logTab), text: text }).catch(err => { if (err && err.name !== 'AbortError') toast('Поделиться не удалось - используйте «Сохранить»'); });
-    else toast('«Поделиться» недоступно в этом браузере - используйте «Копировать» или «Сохранить»');
+    if (navigator.share) navigator.share({ title: 'Журнал VWARD: ' + logLabel(logTab), text: text }).catch(err => { if (err && err.name !== 'AbortError') copyText(text); });
+    else copyText(text);
   }
-  else if (a === 'log-save') { const tab = logTab; loadLog(tab, true).then(text => download('vward-' + tab + '-' + today() + '.txt', text || '')); }
+  else if (a === 'log-save') { const tab = logTab; if (!logShown[tab]) logShown[tab] = logN; (S.logs[tab] != null && !LOGRUN[tab] && S.loadedAt['log:' + tab] ? Promise.resolve(S.logs[tab]) : loadLog(tab, true)).then(text => download('vward-' + tab + '-' + today() + '.txt', text || '')); render(); }
   // The whole history, the archived journals included: the router packs it as it sends it.
   else if (a === 'log-save-all') { const l = document.createElement('a'); l.href = API + '?action=log-archive'; l.download = ''; document.body.appendChild(l); l.click(); l.remove(); toast('Архив журналов скачивается'); }
 });
@@ -5182,7 +5287,14 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeLayer();
   if ((e.key === 'Enter' || e.key === ' ') && e.target.getAttribute && e.target.getAttribute('role') === 'button') { e.preventDefault(); e.target.click(); }
 });
-document.addEventListener('input', e => { if (e.target.id === 'searchInput') renderResults(e.target.value); });
+document.addEventListener('input', e => {
+  if (e.target.id === 'searchInput') renderResults(e.target.value);
+  // «Найти в журнале»: among the entries already here, as the owner types; no request.
+  if (e.target.closest && e.target.closest('[data-form="log-search"]')) {
+    logQuery = e.target.value; const b = $('logBox');
+    if (b && logShown[logTab]) b.innerHTML = logFeed(logPick(S.logs[logTab], logQuery));
+  }
+});
 // Filters a long list in place: no re-render per key press.
 document.addEventListener('input', e => {
   if (!e.target.hasAttribute('data-list-filter')) return;
@@ -5343,6 +5455,8 @@ document.addEventListener('submit', async e => {
   finally { if (b && b.isConnected) { b.classList.remove('busy'); b.disabled = false; } }
 });
 async function onSubmit(e, f) {
+  // «Найти в журнале» filters as the owner types (the input handler); Enter changes nothing.
+  if (f === 'log-search') return;
   if (f === 'ai-dns-add') {
     const v = e.target.querySelector('input').value.trim();
     if (!/^https:\/\/[A-Za-z0-9.-]+(:\d{1,5})?(\/[A-Za-z0-9._~\/-]{0,200})?$/.test(v)) { fieldErr(e.target, 'Адрес DoH: https://сервер/путь'); return; }
@@ -5516,7 +5630,7 @@ function tick() {
   else if (updOverlay && !updOverlay.done && !updOverlay.manual && ph === 'IDLE' && updOverlay.seenBusy) updOverlayShow({ done: true, ok: true, version: plat().version });
   if (updOverlay && UPD_BUSY.includes(ph)) updOverlay.seenBusy = true;
   if (theme === 'time') applyTheme();
-  if (current !== 'logs') refreshPage(); else loadLog(logTab, true, true);
+  if (current !== 'logs') refreshPage(false, true);
   load('status', true).then(renderNav);
 }
 function restartTimer() {
@@ -5527,7 +5641,6 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   // tick() reloads the open journal too; otherwise the journal alone.
   if (Date.now() - (S.loadedAt.status || 0) >= REFRESH_SEC * 1000) tick();
-  else if (current === 'logs') loadLog(logTab, true, true);
 });
 
 $('backBtn').innerHTML = ico('back');

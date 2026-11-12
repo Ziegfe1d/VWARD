@@ -1357,6 +1357,238 @@ stop_orphans; компонент tunnel-guard — тот же, что в fix.36.
 доказано: SSH (новые соединения не доходят до dropbear), реклама (AGH querylog), Route Engine не
 стартует — ждут данных владельца.
 
+### 11.11.2026 — [Claude Code] P0 «Manifest structure/signature verification failed» (журнал vward-all до 21:27)
+
+**Формат манифеста не виноват, откатывать нечего.** Опубликованные raw dev v1/v2 побайтно равны
+`d0ddaca`; структура v2 fix.36.1 совпадает с fix.36 (изменились только значения); код движка 2.0.10
+в `8dc0044` (fix.36, стоит на роутере) = HEAD. Полный путь роутера на копии 2.0.10 (сторож
+`--once`, ответ 200 → `--check`, production-ключ, установлен fix.36/2026110801): манифест принят,
+VERIFIED → AVAILABLE. Тот же прогон с jq или openssl, падающим по SIGILL: ровно «Manifest
+structure/signature verification failed», rc=31, без строк загрузки — как в журнале
+(CHECKING → ERROR за ≤1 с, 09:00–18:15 UTC).
+**Причина — инструмент проверки на роутере (jq; openssl не исключён).** Доказательства из журнала:
+(1) до 09:00 UTC «Manifest unchanged» — ответ 304, ни jq, ни openssl не вызываются, поломка была
+скрыта до первого нового манифеста; (2) `engine_move=failed rc=4` уже в 00:17 МСК 11.11 — за 10 ч до
+fix.36.1, на манифесте fix.36: rc=4 = `jq -cS`/`openssl pkeyutl`/`jq -e` (rc=3 был бы загрузкой);
+(3) реклама: `SOURCES_UPDATE_FAIL|healthy=0|active=0` без единой строки `SOURCE_FAIL|id=…` — цикл по
+`jq -r '.sources[].id'` не выполнился ни разу. Воспроизведено на копии кода (dash): curl, падающий
+только на HTTPS, даёт `SOURCE_FAIL|reason=download` на каждый источник, а чтение querylog работает
+(AGH — HTTP на localhost); jq с SIGILL даёт ровно картину роутера: healthy=0 без SOURCE_FAIL и
+«cannot read allowed AdGuard Home queries» (query-read rc=3). (4) Целостность 02:17 МСК: SPOILED
+`/opt/lib/libm-2.27.so` (pkg=libc), libnss_files, libpcre2, ldconfig; jq использует libm (по
+устройству jq; индекс Entware из контейнера недоступен — не сверено), dropbear — libnss_files.
+**Гипотеза владельца про curl 132 для рекламы опровергнута:** общий HTTPS-fallback не поможет; curl 132
+(интервалами 22:45–01:00, 03:15, 10:45–11:15, 15:30–16:45 UTC) — отдельная, уже обходимая проблема.
+**Исправление выпуском невозможно:** движок 2.0.10 проверяет любой манифест через jq/openssl — пока
+они не работают, роутер не примет ни один выпуск. Нужен ремонт пакетов Entware на роутере (только с
+разрешения владельца), затем сторож сам примет fix.36.1 в течение 15 мин.
+**Route Engine «каждые 6 часов»** — не расписание: `restart_allowed` (`vward-cron-supervisor.sh`)
+пишет RESTART_LIMIT не чаще раза в 21600 с. Движок падает непрерывно (5 запусков в час, стоп до
+конца часа). Route Engine jq не вызывает; причина падения не доказана — нужен
+`/opt/var/log/vward-route-engine-events.log` и `tail /tmp/vward-route-engine*`.
+**Не сделано:** экраны и связь «пустой ответ» ↔ обрыв ppp0/sstp0 (api.cgi: 149 вызовов jq —
+с неработающим jq «пустой ответ» ожидаем и без обрыва WAN; не проверено).
+
+**Ответ владельца 11.11 (позже):** `jq -c .` на `{"a":1}` rc=0, `openssl pkey` rc=0, копия openssl
+есть (18.10), dmesg без ошибок ext4/I/O; пакеты: jq 1.8.1-2, libc 2.27-12, libopenssl 3.5.5-1,
+libpcre2 10.47-1, curl 8.15.0-2. Падение jq по SIGILL **не подтверждено**; открыт вариант «jq 1.8.x
+ведёт себя иначе на фильтрах VWARD» (проверить на 1.8.x не удалось: загрузка бинарника jq из
+контейнера запрещена). **Инцидент по моей рекомендации:** `opkg install --force-reinstall libc jq
+libpcre2 ldconfig` — opkg сначала удалил все четыре пакета, затем не смог скачать
+(`wget: bad address 'bin.entware.net'`: без libnss из libc имя не резолвится). Пакеты удалены;
+восстановление — загрузкой .ipk по IP-адресу с заголовком Host и `opkg install` из локальных файлов.
+Урок: никогда не переустанавливать libc через `--force-reinstall`; сначала `opkg download`, затем
+установка из файлов.
+
+**Последствие:** владелец вышел из SSH — войти больше нельзя (dropbear без libnss_files не находит
+пользователя; есть ли ещё ld.so/libc.so.6 — неизвестно: wget после удаления запускался). Удалённого
+пути восстановления нет; нужен доступ к флешке (данные из .ipk в корень раздела Entware) и затем
+`opkg install /opt/tmp/rescue/*.ipk`. До этого — не перезагружать роутер (Entware не стартует, AGH
+в цепочке DNS). **Тот же дефект в продукте:** `vward-housekeeping.sh` (`repair_if_crashing`,
+curl-https, `pkg_repair`) вызывает `opkg install --force-reinstall` без предварительной загрузки —
+при сбое сети пакеты удаляются и не возвращаются. Исправить: `opkg download` в RAM, затем установка
+из файлов; libc не трогать никогда.
+
+### 11.11.2026 — [Claude Code] handoff: дальше только Go-ядро
+
+Роутер не восстанавливается (владель вне дома, без компьютера); позже — форматирование флешки.
+Нынешнюю VWARD владелец ставить заново **не будет**; install.sh/выпуски shell-версии не готовить.
+Работа — только `tools/vward-core` (Go): этап 1 — путь записи и восстановление после сбоя + команда
+пробы на тестовой группе `VwardTest` (решение 11.11 в ROADMAP §7, без эмулятора); этап 2 —
+автоподбор на Go (перехват DNS в ядре, проверка напрямую/через VPN параллельно своим TLS, запись
+в AdaptiveAuto RCI, правила shell-движка: .ru/.рф/.su, повтор, контроль провайдера, лимит 300,
+Smart DNS, unknown ≠ маршрут; сначала наблюдение); затем перенос состояния, Панель, CI, выпуск по
+«Выпускаем». Go-тесты на HEAD проходят. Открыто: jq 1.8.x против фильтров VWARD не проверен
+(загрузка бинарника jq в контейнер запрещена). Черновик next/ удалён (`98b9fd8`).
+
+### 11.11.2026 — [Claude Code] облегчённая VWARD и этап 1 Go-ядра (запись, восстановление, проба)
+
+**Облегчение (`c0b14d7`):** по умолчанию только Adaptive auto и VPN; компоненты tunnel-guard,
+wan-guard, wifi-client-guard, policy-sync, ads-privacy-guard (без AdGuard Home) выключаются один
+раз штатным `<id>.disabled`; необязательные части за `vward_extra` (sentinel, memory-watch, repair,
+integrity, flash-watch, ext-update, services-refresh, backup); `all.on`/`VWARD_EXTRAS=all` — как
+раньше (корни эмулятора с ним). `check-lite-defaults.py` RED→GREEN.
+**Этап 1 Go-ядра (`tools/vward-core`, proto-2):** `recover` — открытые операции журнала
+(pending/unknown) закрываются по чтению роутера: пост-образ → done, пред-образ → failed, иное —
+остаётся открытым (без повтора и без компенсации; пишется только локальный журнал). `selftest` —
+первая запись на роутере (решение 11.11 вместо эмулятора): группа `VwardTest` с одним доменом
+(и маршрутом в туннель при `--tunnel`) создаётся, доказывается чтением, удаляется, доказывается;
+существующая группа с этим именем — стоп без записи; перед записью копия running-config в
+`/opt/var/backups/vward`; без `--yes` только план. Тесты: модельный роутер (успех, план без
+отправки, чужая группа, отказ маршрута → компенсация, неверное имя туннеля, потерянный ответ →
+unknown блокирует → recover закрывает) и через настоящий HTTP RCI (конфигурация владельца
+побайтно та же, 6 команд только по `VwardTest`). Сборка воспроизводима (две сборки равны,
+`build.sh --check` PASS), SHA256SUMS и `dist/` обновлены. На роутере не запускалось.
+Команда для владельца (когда роутер будет): `vward-core selftest --tunnel OpkgTun4` (план), затем
+то же с `--yes`.
+
+### 11.11.2026 — [Claude Code] этап 2 Go-ядра: автоподбор (proto-3)
+
+`tools/vward-core/internal/adaptive` + команды `adaptive` (служба) и `check-host` (разовая проверка).
+Перехват DNS-запросов в ядре Linux (AF_PACKET + BPF «udp dst port 53», IPv4/IPv6/VLAN, без
+libpcap/tcpdump/dnscap); проверка сайта своим TLS (HEAD, любой HTTP-ответ кроме 451 — открывается;
+без curl/openssl/libc Entware), сокет привязан к устройству (WAN/туннель). Правила shell-движка:
+напрямую дважды; контроль провайдера (ya.ru, vk.com напрямую; кэш 2 мин); через VPN дважды;
+Unknown никогда не маршрут; .ru/.рф/.su/Яндекс/VK — нет; имена других групп (списки владельца) и
+Smart DNS — нет; skip-список. Быстрее: VPN-проверки стартуют после первой неудачи напрямую,
+параллельно второй прямой и контролю; открытый напрямую сайт через VPN не проверяется; таймаут 3 с
+(как shell). Запись — `Writer` через исполнитель (CAS, pending, одна пачка include, чтение-доказательство,
+компенсация), только `object-group fqdn AdaptiveAuto include`; без маршрута у группы — стоп; лимит
+290 из 300; сохранение конфигурации не чаще 30 мин и при остановке; журнал хранит 50 операций.
+Удаление из AdaptiveAuto не переносилось (остаётся route-reconciler). Тесты: решения (21 случай),
+кэш, контроль один раз, параллельность, разбор DNS, перехват на lo (root), проверка через устройство
+на локальном TLS, запись на модели (одна пачка, наблюдение, лимит, без маршрута, изменение между
+планом и пачкой, чистка журнала) и через HTTP RCI (конфигурация владельца та же, кроме двух имён).
+Сквозной запуск в контейнере (поддельный RCI/DNS/TLS, «прямо» eth0, «VPN» lo): наблюдение —
+WOULD_ADD без отправки; запись — одна команда include + save, операция в журнале; решение по
+заблокированному сайту ~7 с. Сборка воспроизводима, mipsle 2,1 МБ gzip (TLS). На роутере не
+запускалось; S91 и установка не переключены на Go (следующий этап).
+
+### 11.11.2026 — [Claude Code] этап 3: сверка AdaptiveAuto на Go и запуск ядра из S91
+
+`internal/adaptive/owned.go`, `reconcile.go`, `Writer.Remove`: имена, добавленные автоподбором
+(импорт `adaptive-persist.txt` один раз), убираются после 3 прямых удач подряд (≥4 мин), сброс при
+неудаче/unknown, последнее имя не убирается; только `no object-group fqdn AdaptiveAuto include`.
+`S91`: `engine_start` — ядро при `/opt/share/vward/core/vward-core` (иначе shell + фоновый
+`S91 core-install`, раз в час; сумма закреплена в `core_sum`, сверяется `check-core-adaptive.py` с
+`tools/vward-core/SHA256SUMS` и `dist/`), отказ старта → shell на час; `engine.shell`, `core.observe`,
+`adaptive.disabled`. `vward_core_adaptive_pid` (admission) — агент компонентов и shell-сверка
+стоят в стороне. Отдельный скрипт установки отвергнут: явный allowlist целей модуля обновлений
+2.0.10 (`check-package-map.py`) не примет новый путь. install.sh: повтор при падении curl (rc≥128,
+до 6). На роутере не запускалось. **Доставка на роутер владельца невозможна до восстановления
+Entware** (jq/libc удалены: модуль обновлений не проверит манифест, opkg без DNS, SSH не пускает).
+
+### 12.11.2026 — [Claude Code] тумблеры списков Панели через Go-ядро (proto-4)
+
+`internal/listops` + `vward-core list add|remove|clear|delete|merge|route`; `plan.Desired.OwnerCommand`
+(без отказа foreign-coverage для явной команды владельца). `vward-console-config.sh` `core_list`:
+list-domain include add/remove, list clear/delete, list merge, domain-list туннель→туннель; ответы
+ядра → `core_refused`/`core_journal_blocked`/`router_rejected`/`verification_failed`/`core_failed`
+(тексты в JS). Без ядра или с `core.panel.off` — прежний shell. Не переведено: исключения, сервисы,
+Smart DNS, перевод из «напрямую»/в «напрямую» с DoH/AGH (там DNS). Автоподбор: имя, убранное
+владельцем из AdaptiveAuto (Forget), — `Refused` на 30 дней (`OWNER_REMOVED`). Агент компонентов,
+обновления и ротация журналов остаются; сторожа выключены (ответ владельцу 12.11).
+### 11.11.2026 — [Claude Code] P0 после fix.36.1: Route Engine, SSH, реклама, grep (не выпущено)
+
+Ветка `ccr-27ea2022-9bjfsl` от `ee6ea13`. Причина простоя Route Engine 03:50→06:14 **не доказана**
+(нужен вывод `tools/termius/diag-20261111-re-ssh-ads.txt`), поэтому выпуска нет.
+(1) Route Engine. Повтор после лимита есть: скользящее окно `restart_allowed` (5 запусков/ч),
+через ≤1 ч агент компонентов снова вызывает S91 (запись «15 мин» относилась к туннелям). Тихих путей
+было четыре: флаг обновления (`/tmp/vward-update-requested|.lock`), выключенный компонент, провал
+`S91 start` (STARTED не писался, ошибка — нигде) и, в fix.36, живой чужой PID в pid-файле (закрыт
+fix.36.1). Найден детерминированный дефект: `control_lock` S91 с пустым `pid` или PID, занятым
+чужим процессом, не снимался никогда — каждый старт «Adaptive control busy» молча. Фикс: владелец
+блокировки — только живой S91 (`/proc/PID/cmdline`), пустая снимается после ожидания
+(`CONTROL_LOCK_STALE`), «busy» пишется (`CONTROL_BUSY`); агент пишет
+`ROUTE_ENGINE_NOT_STARTED|reason=update_pending|disabled|restart_limit|start_failed rc=N` (раз в час
+или при смене причины, без процессов, пока движок жив). Xray: повтор через 900 с после последнего
+старта работает всегда; Панель: 1,2,4,8, далее каждые 15 мин — без лимита. RED→GREEN
+`check-route-engine-watchdog.py`.
+(2) SSH: причина не доказана. Агент раз в минуту читает очередь accept слушающего :22
+(`/proc/net/tcp{,6}`, одна awk); 3 минуты подряд >0 — `SSH_NOT_ACCEPTING` (состояния, wchan, ppid
+процессов dropbear) и перезапуск только слушающего dropbear (сессии остаются), не чаще раза в
+30 мин; неудачный старт подхватывает прежний `keep_ssh`. Если соединения не доходят до сокета
+(очередь 0), не трогает ничего. Кнопка в Панели — не сделана (следующий шаг). `check-ssh-safety.py`.
+(3) Реклама: при неудаче чтения `ads_die` теперь пишет `rc`, источник и последнюю строку ошибки
+читателя. Гипотеза: API AGH и запасное чтение файла через jq оба падают; 10.11 совпадает с порчей
+Entware (libm в SPOILED, jq зависит от libm) — не доказано.
+(4) grep: `vward-awg-engine.sh` procs_of/stop_orphans — как в VLESS (builtin read; BusyBox `grep -F`
+не видит текст после NUL, проверено локально); `diag_running` — `cat | tr '\000' '\n' | grep`.
+RED→GREEN: `check-awg-engine.py` (BusyBox grep в PATH), новый `check-diag-running.py` (строгий grep).
+
+### 11.11.2026 — [Claude Code] SSH: вход, а не процесс; handoff (PR #84)
+
+Данные владельца (журнал Keenetic до 13:48): после 06:16:07 девять попыток с LAN — у каждой
+«dropbear[PID] Child connection», но нет ни «Password auth succeeded», ни «Exit». Значит, родитель
+dropbear принимает соединения (очередь accept пуста, `ssh_unstick` из записи выше здесь не
+срабатывает и не нужен), а дочерний процесс гибнет до входа. Гипотеза (не доказана): падение при
+поиске пользователя (`getpwnam` → dlopen `libnss_files`, SPOILED 02:17); перезапуск dropbear это не
+лечит. Xray стабилен с 00:33. Сделано: `ssh_login_check` в агенте компонентов — раз в 10 мин новый
+процесс Entware `/opt/bin/busybox id root` (тот же путь через libnss_files; код ≥128 = падение), раз
+в 30 мин баннер порта 22 (`curl telnet://`, упавший curl баннер не оценивает); `SSH_LOGIN_BROKEN|
+user_lookup_rc=N|banner=` / `SSH_LOGIN_OK` при смене, одно уведомление, `ssh=` в состоянии агентов
+→ строка «Вход по SSH» в «Агентах» Панели. Ничего не перезапускает и не переустанавливает
+(запрет владельца на изменения библиотек Entware). `check-ssh-safety.py`. Read-only команда
+`tools/termius/diag-20261111-ssh-libs.txt` (поиск пользователя, ldd dropbear, SHA файлов против ipk
+пакета-владельца из ленты Entware, носитель; шаг 3 по желанию — dropbear -F -E на 2222 на 180 с).
+Варианты восстановления — только описание владельцу (отчёт сессии), решение за ним.
+**Handoff:** ветка `ccr-27ea2022-9bjfsl`, draft PR #84 в `dev`, не выпущено. Следующая сессия:
+дождаться штатного CI конечного HEAD #84; при зелёном — выпуск пачкой (S91 lock + журнал причин,
+grep NUL, проверка входа SSH) по разрешению владельца на доказанные фиксы; затем P0 #53, #54, #60,
+#65 и новые #70, #72, #81, #82; draft #57, #61, #62 — независимая проверка. Кнопка SSH в Панели не
+сделана (восстановление требует решения владельца).
+
+### 12.11.2026 — [Claude Code] разбор открытых PR (решение владельца «Да, делай»)
+
+#84 влит в `ccr-333e01b9-bhu7oy` (`f730a1e`): зависший замок S91, причины незапуска Route Engine,
+AWG/diag_running без grep после NUL, ошибка чтения рекламы; сторож SSH (`ssh_unstick`,
+`ssh_login_check`) — за `vward_extra ssh-watch`, выключен по умолчанию; `resource-audit` #84
+(housekeeping 29 > 28, прогоны 25/30/28/29/30) — шум замера, PR housekeeping не менял.
+Закрыты с комментариями: #84 (влит), #62 (дорожная карта на состояние до 11.11 — переписать после
+выпуска), #61 и #57 (оптимизации рекламы и экрана DNS — выключены по умолчанию; ветки оставлены).
+Открытых PR нет.
+
+### 12.11.2026 — [Claude Code] журналы: причина в строке (модуль обновлений 2.0.11)
+
+`vward-update.sh`: отказ проверки манифеста пишет шаг и состояние инструментов (`vu_tool_state`):
+`Manifest structure check failed: ... jq rc=N` / `Manifest signature check failed: openssl rc=N
+kept_copy=... key=... jq ...`; VU_ENGINE_VERSION 2.0.11 (файлы движка изменились: роутеры примут
+его самообновлением). `engine_move=failed rc=4 step=...`. Go-автоподбор: вкладка «Автоподбор (Go)»
+(`api.cgi log name=core`), время с поясом, `STATS` раз в час и при остановке. Тесты:
+`check-updater-verify-reason.py` RED→GREEN, `run-v2-simulations.sh` 65/65, все симуляции
+обновлений PASS (170 ok). Сборка ядра пересобрана, суммы в S91 синхронизированы.
+
+### 12.11.2026 — [Claude Code] пункты 1–3: «Мои домены», AdaptiveAuto из Панели, смена туннеля, исключения (proto-5)
+
+listops: `exclude/unexclude`, `unadapt`, `pin` (две группы одной пачкой), `retarget FROM TO GROUP...`;
+plan: `Exclude`/`SetExclude`; ndm.Apply и exec.restore — строки exclude. Панель: route-domain,
+adaptive remove/pin, list-domain exclude/unexclude, op_tunnel (маршруты групп — ядро, подсети —
+shell; обратные команды в JOURNAL после успеха ядра). Подделка RCI в тестах исполнителя отдаёт
+exclude в узком JSON (как ждёт GroupsFromRCI; на реальном Keenetic форма не сверена — при
+расхождении операция честно «не применилось»). Все тесты Панели PASS; ядро пересобрано, суммы в S91.
+
+### 12.11.2026 — [Claude Code] оформление Панели по скриншотам владельца
+
+Проверено снимками эмулятора 390 px (скрипт в scratchpad на основе check-panel-crawl-emulated).
+Исправлено: отступ строки списка (`.list-all .row`), число колонок слайдера ИИ по `VIA.length`,
+`.panel-actions:empty`, `.panel .log-at`, неразрывный пробел между числом и единицей (fmtDur,
+durText, значения журналов), короткая метка «AdGuard», заголовок ≤420 px на 2 px меньше.
+Заметки Smart DNS скрыты при выключенном Smart DNS. check-console-log-feed ждёт `1,26\u00a0с`.
+Panel crawl PASS (91 страница, 0 проблем), тесты check-console-* PASS.
+
+### 12.11.2026 — [Claude Code] «Журналы» по кнопке, истории без автообновления
+
+Решение владельца по макету. API: `log_file NAME` (одно соответствие имён и файлов), `log_show`,
+`action=log&name=all` — все источники «Все» одним ответом, перед каждым строка `@@VWARD-LOG имя`
+(`LOG_ALL_NAMES`, без `cron`). Очистка: `config op=journal target=clear value=имя|all`,
+подтверждение `LOG_CLEAR`; помощник `op_journal_clear` усекает живые файлы на месте (`printf ''`),
+архивы не трогает, запись аудита после очистки. Имена файлов в api.cgi и в помощнике сверяет
+check-console-logs-all. Панель: `logShown/logN/LOGMORE`, `mergeLogs(..., limit)`, `logSplit`, `logPick`;
+tick, visibilitychange и refreshPage журналы не грузят. Истории: `S.act`, 200 строк, 50 событий,
+`act-more`/`act-reload`, автообновление пропускает загруженную историю (`refreshPage(false, true)`).
+Эмулятор: 16 с без нажатия — 0 запросов журналов; «Показать журнал» — один запрос
+`name=all&count=50&hours=24`. Panel crawl 91 страница, api-fuzz 51 действие — 0 проблем.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 09.11.2026 / fix.36 опубликован: нужна приёмка владельцем на роутере (Ozon/WB, Lampa TV, ночной скан 00:10, экраны Панели, журнал сторожа DNS на возврат AdGuard Home в цепочку). Локальный стресс 09.11: однократное «processes pile up 6 -> 13» (route engine 5), в CI нет; при повторе разобрать по `soak_debug`.

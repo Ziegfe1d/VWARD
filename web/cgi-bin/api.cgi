@@ -880,7 +880,9 @@ if [ "$ACTION" = config ]; then
         adaptive-mode|classifier|smartdns-guard|tunnel-fallback|tunnel-return) set -- "$OP" "$VALUE" ;;
         # «Smart DNS» on/off (owner 08.11); off takes VWARD's own rows away: confirmed.
         smartdns-feature) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=SMARTDNS_OFF ;;
-        journal|agents-mode) set -- "$OP" "$TARGET" "$VALUE" ;;
+        journal|agents-mode) set -- "$OP" "$TARGET" "$VALUE"
+            # «Очистить» in «Журналы» (owner 12.11.2026): the live journal is emptied, archives stay.
+            [ "$OP:$TARGET" != journal:clear ] || REQUIRED=LOG_CLEAR ;;
         cleanup) set -- "$OP" "$TARGET"; [ "$TARGET" != sizes ] || { echo '{"ok":false,"error":"invalid_value"}'; exit 0; } ;;
         reset) set -- "$OP" "$TARGET"; REQUIRED=RESET_SETTINGS ;;
         list) set -- "$OP" "$ACT" "$TARGET"; case "$ACT" in clear) REQUIRED=LIST_CLEAR ;; merge) set -- "$OP" "$ACT" "$TARGET" "$VALUE"; REQUIRED=LIST_MERGE ;; *) REQUIRED=LIST_DELETE ;; esac ;;
@@ -1888,12 +1890,20 @@ if [ "$ACTION" = "diagnostics" ]; then
     ADAPTIVE_STATUS=FAIL
     # diag_running REGEX: a process whose command line matches (one grep over /proc; «[v]ward»
     # does not match grep's own line). Not through ps: the Panel's ps did not show running VWARD
-    # scripts (a Viva, 2026-10-11: «Агент компонентов FAIL» with the agent running).
-    diag_running() { grep -qs -- "$1" /proc/[0-9]*/cmdline 2>/dev/null; }
+    # scripts (a Viva, 2026-10-11: «Агент компонентов FAIL» with the agent running). The NULs
+    # between the arguments become new lines first: the router's BusyBox grep stops at the first
+    # NUL and never saw a script after «/bin/sh» (11.11.2026).
+    diag_running() { cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\000' '\n' | grep -qs -- "$1"; }
     diag_running '[c]rond' && CROND_STATUS=PASS
     diag_running '[v]ward-cron-supervisor[.]sh' && SUPERVISOR_STATUS=PASS
     diag_running '[A]dGuardHome' && ADGUARD_STATUS=PASS
+    # AdGuard Home is optional (owner 12.11.2026): not installed is not a failure, the row is left out.
+    ADGUARD_HAVE=0
+    for AGH_D in ${VWARD_AGH_BIN_DIRS:-/opt/sbin /opt/bin}; do [ ! -x "$AGH_D/AdGuardHome" ] || ADGUARD_HAVE=1; done
+    [ ! -x "${VWARD_AGH_INIT:-/opt/etc/init.d/S99adguardhome}" ] || ADGUARD_HAVE=1
+    # Autopodbor is the routing core («vward-core adaptive», owner 11.11.2026) or the shell engine.
     diag_running '[v]ward-route-engine[.]sh' && ADAPTIVE_STATUS=PASS
+    diag_running '[v]ward-core.adaptive' && ADAPTIVE_STATUS=PASS
 
     UPDATE_STATUS=FAIL
     [ -x /opt/share/vward/updater/current/vward-update.sh ] && UPDATE_STATUS=PASS
@@ -2182,7 +2192,7 @@ if [ "$ACTION" = "diagnostics" ]; then
       --arg opt "$OPT_STATUS" --arg jq "$JQ_STATUS" --arg curl "$CURL_STATUS" --arg curl_detail "$CURL_DETAIL" --arg boot "$BOOT_STATUS" \
       --arg tcpdump "$TCPDUMP_STATUS" --arg lighttpd "$LIGHTTPD_STATUS" \
       --arg crond "$CROND_STATUS" --arg supervisor "$SUPERVISOR_STATUS" \
-      --arg adguard "$ADGUARD_STATUS" --arg adaptive "$ADAPTIVE_STATUS" \
+      --arg adguard "$ADGUARD_STATUS" --arg adguard_have "$ADGUARD_HAVE" --arg adaptive "$ADAPTIVE_STATUS" \
       --arg updater "$UPDATE_STATUS" --arg config "$CONFIG_STATUS" --arg cgi "$CGI_STATUS" \
       --arg wan "$WAN_STATUS" --arg wg "$WG_STATUS" --arg wg_detail "$WG_DETAIL" \
       --arg smartdns "$SMARTDNS_STATUS" --arg smartdns_detail "$SMARTDNS_DETAIL" --arg lampa "$LAMPA_STATUS" --arg lampa_detail "$LAMPA_DETAIL" \
@@ -2192,7 +2202,7 @@ if [ "$ACTION" = "diagnostics" ]; then
       '{ok:true,checks:[
         {id:"console-api",component:"console",label:"Панель VWARD",status:$cgi,detail:"интерфейс данных (api.cgi) отвечает"},
         {id:"opt",component:"runtime",label:"Флешка Entware (/opt)",status:$opt,detail:("свободно "+(if $opt_free >= 1024 then (($opt_free/1024|floor)|tostring)+" МБ" else ($opt_free|tostring)+" КБ" end))},
-        {id:"boot",component:"runtime",label:"Запуск после перезагрузки",status:$boot,detail:(if $boot == "PASS" then "программы Entware запустятся сами" else "запуск Entware отключён (rc.unslung): после перезагрузки VWARD, SSH и AdGuard Home не запустятся" end)},
+        {id:"boot",component:"runtime",label:"Запуск после перезагрузки",status:$boot,detail:(if $boot == "PASS" then "программы Entware запустятся сами" else "запуск Entware отключён (rc.unslung): после перезагрузки VWARD и SSH" + (if $adguard_have == "1" then ", AdGuard Home" else "" end) + " не запустятся" end)},
         {id:"jq",component:"runtime",label:"Разбор данных (jq)",status:$jq,detail:"нужен всем разделам Панели"},
         {id:"curl",component:"runtime",label:"HTTPS-запросы (curl)",status:$curl,detail:$curl_detail},
         {id:"tcpdump",component:"route-engine",label:"Наблюдение DNS (vward-dnscap или tcpdump)",status:$tcpdump,detail:"автоподбор узнаёт новые домены"},
@@ -2209,7 +2219,7 @@ if [ "$ACTION" = "diagnostics" ]; then
         {id:"files",component:"update-engine",label:"Файлы VWARD",status:$files,detail:$files_detail},
         {id:"updater",component:"update-engine",label:"Движок обновлений",status:$updater,detail:"рабочая копия движка на месте"},
         {id:"update-config",component:"update-engine",label:"Настройки обновлений",status:$config,detail:"файл настроек читается"}
-      ]}'
+      ]} | if $adguard_have == "1" then . else .checks |= map(select(.id != "adguard")) end'
     exit 0
 fi
 
@@ -3542,76 +3552,84 @@ if [ "$ACTION" = "ping" ]; then
     exit 0
 fi
 
-if [ "$ACTION" = "log" ]; then
-
-    NAME="$(qget name)"
-
-    case "$NAME" in
+# log_file NAME: the journal file a «Журналы» source reads (nothing: unknown). The same names as
+# vward-console-config.sh's op_journal clear (check-console-logs-all compares them).
+log_file() {
+    case "$1" in
         wan)
-            FILE=/opt/var/log/vward-wan-guard.log
+            echo /opt/var/log/vward-wan-guard.log
             ;;
         recovery)
-            FILE=/opt/var/log/vward-wan-guard-recovery.log
+            echo /opt/var/log/vward-wan-guard-recovery.log
             ;;
         cron)
-            FILE=/opt/var/log/crond.log
+            echo /opt/var/log/crond.log
             ;;
         routing)
-            FILE=/tmp/vward-route-reconciler-maint.cron.out
+            echo /tmp/vward-route-reconciler-maint.cron.out
             ;;
         adaptive)
-            FILE=/opt/var/log/vward-route-engine-events.log
+            echo /opt/var/log/vward-route-engine-events.log
+            ;;
+        core)
+            # Autopodbor in Go (vward-core adaptive, owner 11.11.2026): its own journal.
+            echo /opt/var/log/vward-core-adaptive.log
             ;;
         updater)
             # Every engine run, from the hourly watch and from the Panel alike.
-            FILE=/opt/var/log/vward/updater.log
+            echo /opt/var/log/vward/updater.log
             ;;
         tunnel)
-            FILE=/opt/var/log/vward-tunnel-guard.log
+            echo /opt/var/log/vward-tunnel-guard.log
             ;;
         policy)
-            FILE=/opt/var/log/vward-policy-audit-summary.log
+            echo /opt/var/log/vward-policy-audit-summary.log
             ;;
         policysync)
-            FILE=/opt/var/log/vward-policy-sync-sync.log
+            echo /opt/var/log/vward-policy-sync-sync.log
             ;;
         console)
-            FILE=/opt/var/log/vward/console-audit.log
+            echo /opt/var/log/vward/console-audit.log
             ;;
         wifi)
-            FILE=/opt/var/log/vward-wifi-client-guard.log
+            echo /opt/var/log/vward-wifi-client-guard.log
             ;;
         ads)
-            FILE=/opt/var/log/vward-ads-privacy-guard.log
+            echo /opt/var/log/vward-ads-privacy-guard.log
             ;;
         awg)
-            FILE=/opt/var/log/vward-awg-engine.log
+            echo /opt/var/log/vward-awg-engine.log
             ;;
         vless)
-            FILE=/opt/var/log/vward-vless-engine.log
+            echo /opt/var/log/vward-vless-engine.log
             ;;
         sentinel)
-            FILE=/opt/var/log/vward-sentinel.log
+            echo /opt/var/log/vward-sentinel.log
             ;;
         supervisor)
-            FILE=/opt/var/log/vward-cron-supervisor.log
+            echo /opt/var/log/vward-cron-supervisor.log
             ;;
         housekeeping)
-            FILE=/opt/var/log/vward-housekeeping.log
+            echo /opt/var/log/vward-housekeeping.log
             ;;
         integrity)
-            FILE=/opt/var/log/vward-integrity.log
+            echo /opt/var/log/vward-integrity.log
             ;;
         off)
-            FILE=/opt/var/log/vward-off.log
+            echo /opt/var/log/vward-off.log
             ;;
         *)
-            FILE=
+            return 1
             ;;
     esac
+}
+# «Все» in one answer (owner 12.11.2026: one request instead of one per journal): every source
+# but crond's own record, each after a «@@VWARD-LOG name» line; the Panel merges them.
+LOG_ALL_NAMES="wan recovery tunnel adaptive core routing policy wifi ads updater console awg vless sentinel supervisor housekeeping integrity off"
 
-    # Tests run on a copy of the router's files (empty prefix on the router).
-    [ -z "$FILE" ] || FILE="${VWARD_ROOT_PREFIX:-}$FILE"
+if [ "$ACTION" = "log" ]; then
+
+    NAME="$(qget name)"
     COUNT="$(qget count)"
     case "$COUNT" in ''|*[!0-9]*) COUNT=200 ;; esac
     # Up to 1000 lines: a section's own page keeps the few events worth showing.
@@ -3623,50 +3641,65 @@ if [ "$ACTION" = "log" ]; then
     case "$HOURS" in ''|*[!0-9]*) HOURS="" ;; esac
     [ -z "$HOURS" ] || { [ "$HOURS" -ge 1 ] && [ "$HOURS" -le 168 ]; } || HOURS=24
 
-    header_text
+    # log_show FILE: the last COUNT lines of FILE (of the last HOURS hours when asked), or why not.
+    log_show() {
+        FILE="$1"
 
-    # Empty, not created yet and unreadable are different states (owner 2026-11-01): the
-    # Panel shows which source has nothing and which cannot be read.
-    if [ -z "$FILE" ]; then
-        echo "Журнал недоступен: неизвестный журнал."
-    elif [ -r "$FILE" ] && [ -s "$FILE" ] && [ -n "$HOURS" ]; then
-        # An entry starts with its time («2026-11-02 10:51:03», «…T…», with «Z»/«+0300» or
-        # without - then the router's own time); lines without a time belong to the entry above.
-        # A journal without times at all (a program's raw output) is shown as it is.
-        LOG_NOW="$(date +%s)" LOG_TZ="$(date +%z)"
-        LOG_OUT="$(tail -n $((COUNT * 5)) "$FILE" 2>/dev/null | awk -v now="$LOG_NOW" -v tz="$LOG_TZ" -v h="$HOURS" '
-            function ep(t, z,    y, m, d, o) {
-                y = substr(t, 1, 4) + 0; m = substr(t, 6, 2) + 0; d = substr(t, 9, 2) + 0
-                if (m <= 2) { y--; m += 9 } else m -= 3
-                d = 365 * y + int(y / 4) - int(y / 100) + int(y / 400) + int((153 * m + 2) / 5) + d - 719469
-                if (z == "") z = tz
-                o = 0; if (z != "Z") { gsub(/:/, "", z); o = (substr(z, 1, 1) == "-" ? -1 : 1) * (substr(z, 2, 2) * 3600 + substr(z, 4, 2) * 60) }
-                return d * 86400 + substr(t, 12, 2) * 3600 + substr(t, 15, 2) * 60 + substr(t, 18, 2) - o
-            }
-            {
-                if (match($0, /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ T][0-9][0-9]:[0-9][0-9]:[0-9][0-9]/)) {
-                    dated++; z = substr($0, 20); sub(/^\.[0-9]+/, "", z); sub(/^ +/, "", z)
-                    if (z ~ /^Z/) z = "Z"; else if (z ~ /^[+-][0-9][0-9]:?[0-9][0-9]/) { z = substr(z, 1, 6); sub(/[^0-9]$/, "", z) } else z = ""
-                    keep = (ep($0, z) >= now - h * 3600)
+        # Empty, not created yet and unreadable are different states (owner 2026-11-01): the
+        # Panel shows which source has nothing and which cannot be read.
+        if [ -z "$FILE" ]; then
+            echo "Журнал недоступен: неизвестный журнал."
+        elif [ -r "$FILE" ] && [ -s "$FILE" ] && [ -n "$HOURS" ]; then
+            # An entry starts with its time («2026-11-02 10:51:03», «…T…», with «Z»/«+0300» or
+            # without - then the router's own time); lines without a time belong to the entry above.
+            # A journal without times at all (a program's raw output) is shown as it is.
+            LOG_NOW="$(date +%s)" LOG_TZ="$(date +%z)"
+            LOG_OUT="$(tail -n $((COUNT * 5)) "$FILE" 2>/dev/null | awk -v now="$LOG_NOW" -v tz="$LOG_TZ" -v h="$HOURS" '
+                function ep(t, z,    y, m, d, o) {
+                    y = substr(t, 1, 4) + 0; m = substr(t, 6, 2) + 0; d = substr(t, 9, 2) + 0
+                    if (m <= 2) { y--; m += 9 } else m -= 3
+                    d = 365 * y + int(y / 4) - int(y / 100) + int(y / 400) + int((153 * m + 2) / 5) + d - 719469
+                    if (z == "") z = tz
+                    o = 0; if (z != "Z") { gsub(/:/, "", z); o = (substr(z, 1, 1) == "-" ? -1 : 1) * (substr(z, 2, 2) * 3600 + substr(z, 4, 2) * 60) }
+                    return d * 86400 + substr(t, 12, 2) * 3600 + substr(t, 15, 2) * 60 + substr(t, 18, 2) - o
                 }
-                if (keep) print; else if (!dated) raw[++nr] = $0
-            }
-            END { if (!dated) for (i = 1; i <= nr; i++) print raw[i] }')"
-        if [ -n "$LOG_OUT" ]; then
-            printf '%s\n' "$LOG_OUT" | tail -n "$COUNT"
+                {
+                    if (match($0, /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ T][0-9][0-9]:[0-9][0-9]:[0-9][0-9]/)) {
+                        dated++; z = substr($0, 20); sub(/^\.[0-9]+/, "", z); sub(/^ +/, "", z)
+                        if (z ~ /^Z/) z = "Z"; else if (z ~ /^[+-][0-9][0-9]:?[0-9][0-9]/) { z = substr(z, 1, 6); sub(/[^0-9]$/, "", z) } else z = ""
+                        keep = (ep($0, z) >= now - h * 3600)
+                    }
+                    if (keep) print; else if (!dated) raw[++nr] = $0
+                }
+                END { if (!dated) for (i = 1; i <= nr; i++) print raw[i] }')"
+            if [ -n "$LOG_OUT" ]; then
+                printf '%s\n' "$LOG_OUT" | tail -n "$COUNT"
+            else
+                echo "За последние $HOURS ч записей нет: старые записи остаются в файле журнала и в архиве."
+            fi
+        elif [ -r "$FILE" ] && [ -s "$FILE" ]; then
+            tail -n "$COUNT" "$FILE" 2>/dev/null
+        elif [ -r "$FILE" ]; then
+            echo "Журнал пуст: записей пока нет."
+        elif [ -e "$FILE" ]; then
+            echo "Журнал недоступен: нет прав на чтение."
         else
-            echo "За последние $HOURS ч записей нет: старые записи остаются в файле журнала и в архиве."
+            echo "Журнал ещё не создан: программа пока ничего не записала."
         fi
-    elif [ -r "$FILE" ] && [ -s "$FILE" ]; then
-        tail -n "$COUNT" "$FILE" 2>/dev/null
-    elif [ -r "$FILE" ]; then
-        echo "Журнал пуст: записей пока нет."
-    elif [ -e "$FILE" ]; then
-        echo "Журнал недоступен: нет прав на чтение."
-    else
-        echo "Журнал ещё не создан: программа пока ничего не записала."
-    fi
+    }
 
+    header_text
+    if [ "$NAME" = all ]; then
+        for LN in $LOG_ALL_NAMES; do
+            echo "@@VWARD-LOG $LN"
+            # Tests run on a copy of the router's files (empty prefix on the router).
+            log_show "${VWARD_ROOT_PREFIX:-}$(log_file "$LN")"
+        done
+    else
+        FILE="$(log_file "$NAME")" || FILE=
+        [ -z "$FILE" ] || FILE="${VWARD_ROOT_PREFIX:-}$FILE"
+        log_show "$FILE"
+    fi
     exit 0
 fi
 
@@ -3787,7 +3820,7 @@ CROND_PID=${1:--}
 [ "$CROND_PID" != - ] || CROND_PID=""
 SUPERVISOR=${2:-0}
 # The other agents as the components agent sees them (ok, late, hung; off), a minute old at most.
-AGENTS="$(awk -F= '$1 ~ /^(network|updates|maintenance|state)$/ && $2 ~ /^(ok|late|hung|off)$/ {printf "%s%s=%s", (n++ ? "," : ""), $1, $2}' "${VWARD_AGENTS_STATE:-/tmp/vward-agents.state}" 2>/dev/null)"
+AGENTS="$(awk -F= '$1 ~ /^(network|updates|maintenance|state|ssh)$/ && $2 ~ /^(ok|late|hung|off|broken)$/ {printf "%s%s=%s", (n++ ? "," : ""), $1, $2}' "${VWARD_AGENTS_STATE:-/tmp/vward-agents.state}" 2>/dev/null)"
 ADGUARD=${3:-0}
 # «Компоненты» (fix.32): VWARD's real-time watcher, the DNS capture and Smart DNS's DoH client.
 SENTINEL_RUN=${6:-0} DOH_RUN=${7:-0} DNSCAP_RUN=${5:-0}

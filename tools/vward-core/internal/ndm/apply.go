@@ -77,6 +77,15 @@ func (m *Model) Apply(cmd string) error {
 				g.Include = append(g.Include, d)
 				g.Lines = append(g.Lines, "include "+d)
 			}
+		case f[3] == "exclude" && len(f) == 5:
+			d := strings.ToLower(f[4])
+			if no {
+				g.Exclude = without(g.Exclude, d)
+				g.Lines = without(g.Lines, "exclude "+d)
+			} else if !contains(g.Exclude, d) {
+				g.Exclude = append(g.Exclude, d)
+				g.Lines = append(g.Lines, "exclude "+d)
+			}
 		case f[3] == "description":
 			var keep []string
 			for _, l := range g.Lines {

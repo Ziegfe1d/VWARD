@@ -12,6 +12,11 @@ VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admissio
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
 . "$VWARD_ADMISSION_LIB"
 vward_component_gate route-reconciler
+# Autopodbor in Go takes names out of AdaptiveAuto itself (owner 11.11.2026): one writer.
+if command -v vward_core_adaptive_pid >/dev/null 2>&1 && vward_core_adaptive_pid >/dev/null; then
+    echo "Autopodbor in Go runs: it reconciles AdaptiveAuto itself"
+    exit 0
+fi
 # fix.33.2 (WP-C): started by cron, 35 s after the minute's agents; upkeep waits while Keenetic
 # answers slowly (at most 30 minutes in a row).
 command -v vward_spread >/dev/null 2>&1 && vward_spread "${VWARD_RECONCILER_SPREAD:-35}"

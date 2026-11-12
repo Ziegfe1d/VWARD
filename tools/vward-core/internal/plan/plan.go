@@ -21,6 +21,8 @@ type Group struct {
 	Target      string   // dns-proxy route target; "" = no route
 	Options     string   // "auto"
 	Delete      bool     // the group goes away entirely
+	Exclude     []string // complete set of exclusions, with SetExclude
+	SetExclude  bool     // false: exclusions left as they are
 }
 
 // DoHRow: a Smart DNS row VWARD owns («https upstream URL dnsm on IFACE domain D»).
@@ -42,6 +44,10 @@ type Desired struct {
 	DoH         []DoHRow        // complete set of VWARD's rows
 	OwnedDoH    map[string]bool // raw rows proven VWARD's
 	DoHLimit    int
+	// OwnerCommand: the owner asked for exactly this change in the Panel (a domain into one of
+	// their lists): a domain another group routes elsewhere is added all the same - the owner's
+	// explicit choice, as the shell Panel did. Protected objects and the allowlist still hold.
+	OwnerCommand bool
 }
 
 type Step struct {
@@ -179,7 +185,7 @@ func Build(cur *ndm.Model, want Desired, protected Protected) (*Plan, error) {
 			if now[d] {
 				continue
 			}
-			if fs, ok := foreign[d]; ok && !sameTarget(fs, g.Target) {
+			if fs, ok := foreign[d]; ok && !sameTarget(fs, g.Target) && !want.OwnerCommand {
 				p.Refused = append(p.Refused, d+": foreign-coverage "+strings.Join(fs, ","))
 				continue
 			}
@@ -212,6 +218,32 @@ func Build(cur *ndm.Model, want Desired, protected Protected) (*Plan, error) {
 		sort.Strings(dels)
 		for _, d := range dels {
 			p.add(Step{"group:" + g.Name, "no object-group fqdn " + g.Name + " include " + d, "object-group fqdn " + g.Name + " include " + d})
+		}
+		if g.SetExclude && (exists || len(adds) > 0) {
+			var curEx []string
+			if exists {
+				curEx = have.Exclude
+			}
+			haveEx, wantEx := set(curEx), set(g.Exclude)
+			var exAdd, exDel []string
+			for _, d := range g.Exclude {
+				if !haveEx[d] {
+					exAdd = append(exAdd, d)
+				}
+			}
+			for _, d := range curEx {
+				if !wantEx[d] {
+					exDel = append(exDel, d)
+				}
+			}
+			sort.Strings(exAdd)
+			sort.Strings(exDel)
+			for _, d := range exAdd {
+				p.add(Step{"group:" + g.Name, "object-group fqdn " + g.Name + " exclude " + d, "no object-group fqdn " + g.Name + " exclude " + d})
+			}
+			for _, d := range exDel {
+				p.add(Step{"group:" + g.Name, "no object-group fqdn " + g.Name + " exclude " + d, "object-group fqdn " + g.Name + " exclude " + d})
+			}
 		}
 		// Route: exactly one wanted target (or none).
 		var routes []ndm.Route

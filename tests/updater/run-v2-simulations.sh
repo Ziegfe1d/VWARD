@@ -262,7 +262,7 @@ housekeeping() {
 }
 jq '.signature = "AAAA"' "$MANIFEST" > "$source_dir/manifest.json"
 housekeeping
-check 'the move refuses an unsigned manifest' sh -c '[ "$1" = "$2" ] && grep -q "engine_move=failed" "$3"' sh "$(slot)" "$SLOTS/slots/A" "$ROOT/opt/var/log/vward-housekeeping.log"
+check 'the move refuses an unsigned manifest' sh -c '[ "$1" = "$2" ] && grep -q "engine_move=failed rc=4 step=signature openssl=runs jq=runs" "$3"' sh "$(slot)" "$SLOTS/slots/A" "$ROOT/opt/var/log/vward-housekeeping.log"
 cp "$MANIFEST" "$source_dir/manifest.json"
 housekeeping
 check 'housekeeping moves engine 1 to engine 2' sh -c 'grep -q ENGINE_MOVED "$1" && [ "$2" = "$3" ] && grep -q "^VU_ENGINE_VERSION=2" "$3/vward-update-common-base.sh"' sh "$WORK/last.out" "$(slot)" "$SLOTS/slots/B"
