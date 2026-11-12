@@ -732,7 +732,8 @@ const COMPONENTS = [
 const comp = id => COMPONENTS.find(c => c.id === id);
 /* Граф компонентов приходит из реестра через API (config-data). */
 const graphOf = id => ((cfg().components) || []).find(x => x.id === id);
-const compOn = id => { const g = graphOf(id); return !g || g.enabled !== false; };
+// On or off: the router's answer about the part (fix.38, one source for every page), else the graph.
+const compOn = id => { const p = (st().parts && st().parts.list || []).find(x => x.id === id); if (p && p.enabled != null) return p.enabled; const g = graphOf(id); return !g || g.enabled !== false; };
 let adsStatsAsked = false;
 // Ads switched off as a component: its page's own answer, or the registry when that is loaded.
 const adsOff = () => (S.ads && S.ads.component_enabled === false) || !compOn('ads-privacy-guard');
@@ -1983,10 +1984,6 @@ function resetPanel() {
    confirmations as on their own pages, so nothing new runs on the router. */
 function controlPage() {
   const ok = cfgOk(), a = S.ads || {}, g = a.dns_guard || {}, L = S.lists, x = S.ext || {}, fw = x.firmware || {};
-  const wanOn = !S.config || !cfg().wan_guard || cfg().wan_guard.enabled !== false;
-  const compRow = id => { const c = comp(id), on = id === 'tunnel-guard' ? guardOn() : compOn(id);
-    return ctrlRow(c.name, sw('data-comp="' + id + '"', on, c.name, !ok || !graphOf(id)), c.desc); };
-  const box = ids => ids.map(id => compConfirm(comp(id))).join('');
   // A group with nothing to set is left out (fix.38: no empty cards).
   const group = (title, rows, after) => rows.filter(Boolean).length ? panel(title, '<dl class="kv">' + rows.filter(Boolean).join('') + '</dl>' + (after || '')) : '';
   // fix.38: the parts' own switches (components, agents) live in «Компоненты» only; here the settings.
@@ -2116,7 +2113,7 @@ const RENDER = {
   },
 
   wan() {
-    const w = st().wan || {}, pr = prof(), stage = num(w.recovery_stage) || 0, guardOn = !S.config || !cfg().wan_guard || cfg().wan_guard.enabled !== false;
+    const w = st().wan || {}, pr = prof(), stage = num(w.recovery_stage) || 0, guardOn = wanOn();
     const STAGE = { 1: 'сбой замечен, проверяем ещё раз', 2: 'запрошен новый адрес у провайдера', 3: 'интернет переподключается' };
     // The address check is the routing's (one place: «Маршрутизация», owner 2026-10-12).
     return loadError(['status']) +
@@ -3026,6 +3023,8 @@ function tunnelsQualityPanel() {
 // The VPN agent is on when its component runs and its automation is allowed: one switch for both,
 // the same state on the VPN page and on the component's page.
 const guardOn = () => compOn('tunnel-guard') && (!S.config || (cfg().tunnel_guard || {}).enabled !== false);
+// «Восстановление интернета» is on when its component and its own switch are (fix.38: the same on every page).
+const wanOn = () => compOn('wan-guard') && (!S.config || !cfg().wan_guard || cfg().wan_guard.enabled !== false);
 function vpnGuardPanel() {
   const wg = st().wg || {}, ti = prof().tunnel_interface, dt = (wg.interfaces || []).find(t => t.name === ti);
   // Keenetic's «auto» routes skip a tunnel that is down: the lists then go direct whatever the agent did.
@@ -5390,7 +5389,13 @@ document.addEventListener('change', e => {
     t.disabled = true; tunnelState(t.checked ? 'up' : 'down', n);
     return;
   }
-  if (t.hasAttribute('data-cfg-wg')) { if (!t.checked) { t.checked = true; confirm = { id: 'wg-off' }; render(); } else cfgSet({ op: 'wan-guard', value: '1' }, 'Восстановление интернета включено'); return; }
+  if (t.hasAttribute('data-cfg-wg')) {
+    if (!t.checked) { t.checked = true; confirm = { id: 'wg-off' }; render(); return; }
+    // On here is on everywhere: the component too, when it was switched off (fix.38).
+    (async () => { if (!compOn('wan-guard')) await cfgSet({ op: 'component', target: 'wan-guard', value: '1' }, 'Восстановление интернета включено', ['status']);
+      cfgSet({ op: 'wan-guard', value: '1' }, 'Восстановление интернета включено', ['status']); })();
+    return;
+  }
   if (t.hasAttribute('data-cfg-tg')) {
     if (!t.checked) { t.checked = true; confirm = { id: 'tg-off' }; render(); return; }
     (async () => { if (!compOn('tunnel-guard')) await cfgSet({ op: 'component', target: 'tunnel-guard', value: '1' }, 'Агент VPN включён', ['status']);
