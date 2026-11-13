@@ -289,7 +289,7 @@ const API_ERRORS = {
   temporary_file_unavailable: 'нет места для временного файла', component_disabled: 'компонент выключен: включите его в «Система → Компоненты»',
   core_component: 'базовый компонент нельзя выключить', wrong_credentials: 'неверный логин или пароль', invalid_mac: 'неверный MAC-адрес', invalid_backup: 'неверное имя копии', unknown_backup: 'копия не найдена', backup_damaged: 'копия повреждена', backup_failed: 'не удалось создать копию', restore_failed: 'не удалось восстановить', adguard_rejected: 'AdGuard Home не принял изменение', unknown_filter: 'такого списка нет в AdGuard Home', invalid_service: 'неизвестный сервис', invalid_setting: 'неизвестная настройка', invalid_name: 'недопустимое название', invalid_password: 'пароль: только латиница, цифры и обычные знаки, до 128 символов', too_many_attempts: 'слишком много попыток - подождите 5 минут',
   router_auth_unavailable: 'роутер не ответил на проверку пароля', invalid_login: 'недопустимый логин', auth_required: 'нужно войти', invalid_url: 'неверный адрес: нужен https без пробелов и логина', invalid_format: 'неизвестный формат списка',
-  adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', registry_unavailable: 'реестр компонентов недоступен',
+  adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', retired_part: 'эта часть убрана из VWARD', registry_unavailable: 'реестр компонентов недоступен',
   // fix.31: the codes the Panel showed as they are.
   smartdns_doh_component: 'В Keenetic нет компонента «Прокси-сервер DNS-over-HTTPS»: установите его в веб-интерфейсе Keenetic («Общие настройки» → «Изменить набор компонентов»), роутер перезагрузится',
   smartdns_not_configured: 'Smart DNS не настроен: укажите сервер DoH в разделе «ИИ-сервисы»',
@@ -638,7 +638,7 @@ const LOADERS = {
 // The last answers are kept in the browser: a reopened console shows them at once
 // and refreshes from the router in the background.  Nothing secret is in them;
 // a login prompt or «Выйти» drops them.
-const CACHE_KEYS = ['tq', 'status', 'route', 'lists', 'update', 'security', 'wifi', 'ads', 'config', 'adsstats', 'agh', 'backups', 'cron', 'awg', 'ext', 'diag', 'adspub', 'services', 'notes'];
+const CACHE_KEYS = ['tq', 'status', 'route', 'lists', 'update', 'security', 'ads', 'config', 'adsstats', 'agh', 'backups', 'cron', 'awg', 'ext', 'diag', 'adspub', 'services', 'notes'];
 const CACHE_TTL = 86400000, CACHE_MAX = 400000;
 S.cached = {};
 function cacheRead() {
@@ -715,8 +715,8 @@ const cfgRoute = () => cfg().route || {};
 
 /* ---------- Структура разделов ---------- */
 const PAGES = [
-  { id: 'overview', title: 'Обзор', icon: 'home', group: 'Главное', data: ['status', 'route', 'wifi', 'ads', 'adsstats', 'lists', 'awg', 'tq'] },
-  { id: 'wan', title: 'Сеть', icon: 'globe', group: 'Сеть', data: ['status', 'security', 'config', 'wifi'] },
+  { id: 'overview', title: 'Обзор', icon: 'home', group: 'Главное', data: ['status', 'route', 'ads', 'adsstats', 'lists', 'awg', 'tq'] },
+  { id: 'wan', title: 'Сеть', icon: 'globe', group: 'Сеть', data: ['status', 'security', 'config'] },
   { id: 'vpn', title: 'VPN', icon: 'shield', group: 'Сеть', data: ['status', 'security', 'config', 'route', 'awg', 'ext', 'tq'] },
   { id: 'routes', title: 'Маршруты', icon: 'list', group: 'Сеть', data: ['route', 'security', 'status', 'config', 'lists', 'services'] },
   { id: 'ads', title: 'Реклама и трекеры', icon: 'block', group: 'Сеть', data: ['ads', 'security', 'adspub'] },
@@ -739,7 +739,6 @@ const COMPONENTS = [
   { id: 'policy-sync', when: 'раз в сутки, в 00:10', page: 'routes', log: 'policy' },
   { id: 'tunnel-guard', when: 'каждую минуту', page: 'vpn', log: 'tunnel' },
   { id: 'wan-guard', when: 'каждую минуту', page: 'wan', log: 'wan' },
-  { id: 'wifi-client-guard', when: 'каждые 5 минут', page: 'wifi', log: 'wifi' },
   { id: 'ads-privacy-guard', when: 'каждую минуту', page: 'ads', log: 'ads' },
   { id: 'runtime', when: 'проверка раз в минуту', page: 'system', log: 'cron' },
   { id: 'console', when: 'веб-сервер, без расписания', page: 'settings', log: 'console' },
@@ -773,9 +772,9 @@ function compCascade(id, off) {
 const compNames = ids => ids.map(x => '«' + compName(x) + '»').join(', ');
 const LOG_TABS = [
   { id: 'wan', label: 'Интернет' }, { id: 'recovery', label: 'Восстановление' }, { id: 'tunnel', label: 'VPN' },
-  { id: 'adaptive', label: 'Автоподбор доменов' }, { id: 'core', label: 'Автоподбор (Go)' }, { id: 'routing', label: 'Сверка маршрутов' }, { id: 'policy', label: 'IP-категории' }, { id: 'wifi', label: 'Wi-Fi' },
+  { id: 'adaptive', label: 'Автоподбор доменов' }, { id: 'core', label: 'Автоподбор (Go)' }, { id: 'routing', label: 'Сверка маршрутов' }, { id: 'policy', label: 'IP-категории' },
   { id: 'ads', label: 'Реклама' }, { id: 'updater', label: 'Обновления' }, { id: 'cron', label: 'Расписание' }, { id: 'console', label: 'Панель VWARD' },
-  { id: 'awg', label: 'AmneziaWG' }, { id: 'vless', label: 'VLESS' }, { id: 'sentinel', label: 'Реальное время' },
+  { id: 'awg', label: 'AmneziaWG' }, { id: 'vless', label: 'VLESS' },
   { id: 'supervisor', label: 'Агент компонентов' }, { id: 'housekeeping', label: 'Обслуживание' }, { id: 'integrity', label: 'Целостность файлов' }, { id: 'off', label: 'Отключение VWARD' }
 ];
 // «Все»: every journal in one timeline (first, and open by default).
@@ -1042,7 +1041,7 @@ if (!store.get('vward-tabs-logs-moved', false)) {
 let theme = store.get('vward-theme', 'system'); if (!['system', 'time', 'light', 'dark'].includes(theme)) theme = 'system';
 const REFRESH_SEC = 15;
 // No «Среда выполнения»: a stopped scheduler is a notification in the bell (owner 2026-10-12).
-const CARD_IDS = ['system', 'updates', 'wan', 'vpn', 'lists', 'routes', 'wifi', 'ads', 'storage'];
+const CARD_IDS = ['system', 'updates', 'wan', 'vpn', 'lists', 'routes', 'ads', 'storage'];
 let cardOrder = store.get('vward-card-order', CARD_IDS).filter(id => CARD_IDS.includes(id));
 CARD_IDS.forEach((id, i) => { if (!cardOrder.includes(id)) cardOrder.splice(Math.min(i, cardOrder.length), 0, id); });
 let hiddenCards = store.get('vward-card-hidden', []).filter(id => CARD_IDS.includes(id));
@@ -1278,8 +1277,6 @@ function notifications() {
   if (total && free != null && lowDisk(total, free)) n.push({ sev: 'warn', title: 'Мало места в хранилище', text: 'свободно ' + fmtKB(free), to: 'system' });
   if (['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase)) n.push({ sev: 'crit', title: 'Обновление требует внимания', text: phaseText(p.phase), to: 'u-vward' });
   if (S.update && S.update.pending && S.update.pending.present && S.update.pending.feed !== 'other') n.push({ sev: 'news', icon: 'save', title: 'Вышла новая версия VWARD', text: verHuman(S.update.pending.version, S.update.pending.sequence) + ' - нажмите, чтобы посмотреть и установить', to: 'u-vward' });
-  const wc = ((S.wifi && S.wifi.clients) || []).filter(c => c.health === 'WARNING').length;
-  if (wc) n.push({ sev: 'warn', title: 'Wi-Fi: ' + wc + ' ' + plural(wc, 'клиент требует', 'клиента требуют', 'клиентов требуют') + ' внимания', text: 'частые переходы между 2.4 и 5 ГГц', to: 'wifi' });
   const offComps = ((S.config && S.config.components) || []).filter(x => x.enabled === false && x.off_with !== 'install');
   if (offComps.length) n.push({ sev: 'warn', title: 'Выключено компонентов: ' + offComps.length, text: offComps.map(x => compName(x.id)).join(', '), to: 'utils' });
   if (S.config && S.config.wan_guard && S.config.wan_guard.enabled === false) n.push({ sev: 'warn', title: 'Восстановление интернета выключено', text: 'при сбое интернет не восстановится автоматически', to: 'wan' });
@@ -1327,6 +1324,8 @@ const PART_PAGE = { agh: 'd-agh', awg: 'd-awg', vless: 'd-vless', dnsmasq: 'd-dn
 // Parts that run by the clock (their last run's result), not all the time.
 const PART_RUNS = ['route-reconciler', 'tunnel-guard', 'wan-guard'];
 const partsList = () => (st().parts && st().parts.list) || [];
+// Retired parts (owner 13.11.2026, fix.39): hidden here, off on the router; their files stay for now.
+const partHidden = id => ((st().parts && st().parts.hidden) || []).includes(id);
 const partOf = id => partsList().find(p => p.id === id);
 const partPage = p => p.kind === 'component' ? 'c-' + p.id : PART_PAGE[p.id] || null;
 // The VPN programs work when their tunnels are connected (their page's own facts, when loaded).
@@ -2179,7 +2178,6 @@ const RENDER = {
         ['Шлюз', (w.gateway || '—') + (w.gateway ? (w.gateway_accessible ? ' · доступен' : ' · недоступен') : '')],
         ['DNS', w.dns_accessible ? 'отвечает' : 'не отвечает']
       ]), { right: st().wan && w.internet === false ? headPill('crit', 'Нет связи') : '' }) +
-      panel('Домашняя сеть', kv([['Wi-Fi клиенты', !S.wifi ? '—' : !S.wifi.enabled ? 'сбор данных выключен' : fmtInt(((S.wifi.clients) || []).length) + ' ' + plural(((S.wifi.clients) || []).length, 'устройство', 'устройства', 'устройств'), '', 'wifi']])) +
       panel('Восстановление интернета', '<dl class="kv">' +
         ctrlRow('Восстанавливать автоматически', sw('data-cfg-wg', guardOn, 'Восстанавливать интернет автоматически', !cfgOk()), guardOn ? '' : 'выключено: при сбое воспользуйтесь кнопками ниже') +
         (guardOn ? ctrlRow('Проверять', sel('data-cfg-wanp="CHECK_INTERVAL_MIN"' + (cfgOk() ? '' : ' disabled'), 'Как часто проверять интернет', [[1, 'раз в минуту'], [2, 'раз в 2 минуты'], [5, 'раз в 5 минут'], [10, 'раз в 10 минут'], [15, 'раз в 15 минут'], [30, 'раз в 30 минут']], ((cfg().wan_guard || {}).params || {}).CHECK_INTERVAL_MIN || 1), 'при сбое - каждую минуту, пока связь не вернётся') : '') + '</dl>' +
@@ -2673,14 +2671,8 @@ const RENDER = {
     if (!d) return loadError(['stab']) + panel('Стабильность', empty('Загрузка…'));
     if (!d.ok) return panel('Стабильность', empty(errText(d)));
     const st = d.state || {}, chk = stabChecks(d), day = stabScore(stabRows(d, 86400), chk), week = stabScore(stabRows(d, 7 * 86400));
-    const sen = d.sentinel || {};
-    const senText = sen.running ? 'работает' : sen.installed ? 'остановлен' : 'ещё не установлен';
     const idx = sc => sc && sc.index != null ? sc.index + '%' : 'не проверено';
     const times = (n, one, few, many) => n + ' ' + plural(n, one, few, many);
-    const watch = (st.watch || []).map(w => [STAB_WATCH(w.name), w.pid ? fmtKB(w.rss_kb) : 'не запущен',
-      w.pid ? (w.limit_kb && w.rss_kb > w.limit_kb ? 'crit' : 'ok') : '', '', '',
-      [w.pid && w.base_kb > 0 ? 'обычно ' + fmtKB(w.base_kb) : '', w.pid ? 'процессор ' + (w.cpu_x100 / 100).toFixed(1).replace('.', ',') + '%' : '',
-       'предел ' + fmtKB(w.limit_kb), w.downs ? 'пропадал ' + times(w.downs, 'раз', 'раза', 'раз') : '', w.leaks ? times(w.leaks, 'утечка', 'утечки', 'утечек') : ''].filter(Boolean).join(' · ')]);
     // Load (owner 02.11): the total in hours and minutes, the average of one run and the share of
     // the router's uptime; a run of 5 s and more is marked.
     const up = num((st().router || {}).uptime_sec);
@@ -2701,20 +2693,13 @@ const RENDER = {
       ['Часов с нехваткой памяти', day ? String(day.low) : '—', day && day.low ? 'warn' : ''],
       ...stabCheckRows(chk)
     ]), { desc: 'Индекс за сутки: DNS отвечал 28%, программы VWARD не падали 14%, починки помогли 14%, памяти хватало 14%, туннель передавал трафик 10%, обновления скачивались 10%, HTTPS работал 5%, Keenetic отвечал вовремя 5%. Что не проверено, в индекс не входит; проверено меньше половины - «не проверено». За неделю - только данные агента реального времени. 95% и выше — норма.' }) +
-      panel('Агент реального времени', kv([
-        ['Состояние', senText, sen.running ? 'ok' : 'warn'],
-        ['Память роутера', st.mem_kb >= 0 ? 'свободно ' + fmtKB(st.mem_kb) : '—', st.mem_low ? 'crit' : '', '', '', st.mem_min_kb >= 0 ? 'меньше всего было ' + fmtKB(st.mem_min_kb) : ''],
-        ['Нагрузка', st.load_x100 != null ? (st.load_x100 / 100).toFixed(2).replace('.', ',') : '—', st.busy ? 'warn' : '', '', '', st.busy ? 'роутер занят: необязательная работа VWARD ждёт' : st.load_max_x100 ? 'больше всего ' + (st.load_max_x100 / 100).toFixed(2).replace('.', ',') : ''],
-        ['Событий обработано', String(st.events || 0), '', '', '', (st.link_events || 0) + ' от интерфейсов']
-      ]), { desc: sen.running ? 'Следит за памятью и нагрузкой каждые 2 секунды, за интерфейсами — мгновенно, за DNS — каждые 30 секунд.' : 'Агент ставится сам в течение часа; пока его нет, проверки идут раз в минуту.' }) +
       (progRows.length || memRow ? panel('Программы VWARD', kv([memRow].concat(progRows)), { desc: 'Память каждой работающей программы VWARD и AdGuard Home (резидентная и в swap), одним способом.' }) : '') +
-      (watch.length ? panel('Под наблюдением агента', kv(watch)) : '') +
       (cpu.length ? panel('Нагрузка', kv(cpu), { desc: 'Суммарное время работы процессора каждого задания VWARD с загрузки роутера' + (up ? ' (роутер работает ' + fmtUptime(up) + ')' : '') + '. Отмечены задания дольше 5 с за запуск.' }) : '') +
       panel('Последние события', ev ? '<ul class="rows">' + ev + '</ul>' : empty('Событий пока нет'));
   },
   'd-cron'() {
     const sv = st().services || {}, cr = S.cron;
-    const jobs = cr && cr.ok ? cr.jobs : [];
+    const jobs = (cr && cr.ok ? cr.jobs : []).filter(x => !partHidden(JOB_COMPONENT[x.name] || x.component));
     // A job without its component (someone else's line in VWARD's crontab) is not a link.
     const row = x => { const comp = JOB_COMPONENT[x.name] || x.component, on = !comp || compOn(comp), ok = x.rc === 0;
       return '<li class="row' + (comp ? ' link" role="button" tabindex="0" data-go="c-' + esc(comp) : '') + '"><div class="row-main"><b>' + esc(JOB_TAGS[x.tag] || JOB_NAMES[x.name] || x.name) + '</b><small>' + esc(cronText(x.schedule)) + ' · ' + esc(fmtStamp(x.last) || 'ещё не запускалось') + '</small></div>' +
@@ -4859,8 +4844,7 @@ const SEARCH_INDEX = [
   ['wan', 'Интерфейс'], ['wan', 'IPv4'], ['wan', 'Шлюз'], ['wan', 'Восстанавливать автоматически'], ['wan', 'Проверять'], ['wan', 'Обновить адрес'], ['wan', 'Переподключить'], ['d-wanrec', 'Неудачных проверок подряд'],
   ['settings', 'Только зарегистрированные устройства'], ['vpn', 'Агент VPN'], ['vpn', 'Маршрутизация списков'], ['vpn', 'История агента VPN'],
   ['d-smartdns', 'Агент Smart DNS'],
-  ['routes', 'Автоподбор доменов'], ['routes', 'Доменные списки'], ['routes', 'Источники'], ['vpn', 'IP-категории'], ['wan', 'Wi-Fi клиенты'],
-  ['wifi', 'Сбор данных'], ['wifi', 'Ручное управление'], ['wifi', 'Домашний сегмент'], ['wifi', 'Окно анализа'], ['wifi', 'Слабый сигнал 5 ГГц'],
+  ['routes', 'Автоподбор доменов'], ['routes', 'Доменные списки'], ['routes', 'Источники'], ['vpn', 'IP-категории'],
   ['utils', 'AdGuard Home'], ['d-agh', 'Имена устройств из Keenetic'], ['d-agh', 'Все устройства через AdGuard Home'], ['d-agh', 'Не давать обходить фильтрацию'], ['d-agh', 'Выводить AdGuard Home из DNS при сбое'], ['ads', 'Последняя проверка'], ['ads', 'Правила в AdGuard Home'], ['ads', 'Журнал запросов'], ['ads', 'На проверке'], ['ads', 'Категории блокировки'], ['ads', 'Не опубликовано'], ['ads', 'Мои правила'], ['ads', 'Источники'], ['ads', 'HTTPS-фильтр'], ['ads', 'Режим работы'],
   ['u-vward', 'Установка обновлений'], ['u-vward', 'Время установки'], ['u-vward', 'Интервал проверки'], ['u-vward', 'Канал'],
   ['settings', 'Адрес Панели'], ['settings', 'Тема'], ['u-vward', 'Версия'], ['d-diag', 'Задания по расписанию'], ['settings', 'Вход по учётной записи Keenetic'], ['settings', 'Разделы на панели']

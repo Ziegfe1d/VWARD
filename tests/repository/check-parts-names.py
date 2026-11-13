@@ -40,7 +40,8 @@ ids = re.findall(r"\{ id: '([a-z-]+)'", comps)
 for i in ids:
     if i not in parts or parts[i]["kind"] != "component":
         fail(f"COMPONENTS: {i} is not a component of the registry")
-reg_comps = [p["id"] for p in REG["parts"] if p["kind"] == "component"]
+# Retired parts (fix.39 stage 1) are hidden: the Panel lists no section for them.
+reg_comps = [p["id"] for p in REG["parts"] if p["kind"] == "component" and p["id"] not in REG.get("parts_hidden", [])]
 if sorted(ids) != sorted(reg_comps):
     fail(f"COMPONENTS {sorted(ids)} and the registry's components {sorted(reg_comps)} differ")
 m = re.search(r"const PART_PAGE = \{([^}]*)\}", JS)

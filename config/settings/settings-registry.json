@@ -761,6 +761,13 @@
     }
   ],
   "parts_schema": 1,
+  "parts_hidden": [
+    "sentinel",
+    "memory-watch",
+    "repair",
+    "wifi-client-guard",
+    "singbox"
+  ],
   "parts_groups": [
     "Маршрутизация",
     "VPN",

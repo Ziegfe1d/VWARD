@@ -49,10 +49,13 @@ for ID in platform-core route-engine route-reconciler route-tools tunnel-guard \
 do
     grep -Fq "\"id\": \"$ID\"" config/components/component-registry.json ||
         fail "registry component missing: $ID"
-    grep -Fq "{ id: '$ID', when: '" web/assets/vward-console.js || fail "Panel component mapping missing: $ID"
+    # A retired component (fix.39 stage 1) is hidden: the Panel has no section for it.
+    [ "$ID" = wifi-client-guard ] ||
+        grep -Fq "{ id: '$ID', when: '" web/assets/vward-console.js || fail "Panel component mapping missing: $ID"
 done
 
-for LOG_NAME in wan recovery cron routing updater tunnel policy console wifi ads
+# «Wi-Fi» left with its retired part (fix.39 stage 1).
+for LOG_NAME in wan recovery cron routing updater tunnel policy console ads
 do
     grep -Fq "{ id: '$LOG_NAME', label: '" web/assets/vward-console.js ||
         fail "Panel log tab missing: $LOG_NAME"
@@ -154,6 +157,7 @@ python3 tests/repository/check-lite-defaults.py || fail "lightened VWARD: only A
 python3 tests/repository/check-core-adaptive.py || fail "Autopodbor in Go: S91 runs the core, one writer of AdaptiveAuto"
 python3 tests/repository/check-flash-writes.py || fail "USB drive: free space read right, fewer writes"
 python3 tests/repository/check-parts-registry.py || fail "one registry of VWARD's parts, one name each"
+python3 tests/repository/check-hidden-parts.py || fail "retired parts: hidden in the Panel and off for good (fix.39 stage 1)"
 python3 tests/repository/check-parts-names.py || fail "names of parts and agents only from the registry"
 python3 tests/repository/check-tunnel-lost.py || fail "a tunnel without settings: no «Включить», «Добавить туннель» first"
 python3 tests/repository/check-adaptive-count.py || fail "autopick counted from the core and the Keenetic group"

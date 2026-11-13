@@ -102,8 +102,8 @@ with tempfile.TemporaryDirectory() as t:
 with tempfile.TemporaryDirectory() as t:
     tmp = Path(t)
     out = subprocess.run(["sh", "-c", f'VWARD_COMPONENT_STATE="{tmp}"; . "{LIB}"; '
-                          'vward_extra sentinel && echo on1; touch "$VWARD_COMPONENT_STATE/sentinel.on"; '
-                          'vward_extra sentinel && echo on2; vward_extra integrity || echo off3; '
+                          'vward_extra flash-watch && echo on1; touch "$VWARD_COMPONENT_STATE/flash-watch.on"; '
+                          'vward_extra flash-watch && echo on2; vward_extra integrity || echo off3; '
                           'VWARD_EXTRAS=all vward_extra integrity && echo on4; vward_extra "../x" || echo bad5; '
                           'touch "$VWARD_COMPONENT_STATE/all.on"; vward_extra backup && echo on6'],
                          capture_output=True, text=True, check=True).stdout.split()

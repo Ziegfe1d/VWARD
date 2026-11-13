@@ -832,7 +832,9 @@ if [ "$ACTION" = config-data ]; then
     OFF_WITH="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && printf '%s\t%s\n' "$(basename "$F" .disabled)" "$(sed -n 's/.*(with \([a-z0-9-]*\))$/\1/p;s/^disabled by install\.sh.*/install/p' "$F" | head -n 1)"; done |
         "$JQ" -Rsc '[split("\n")[] | select(length > 0) | split("\t") | {(.[0]): (.[1] // "")}] | add // {}' 2>/dev/null)"
     [ -n "$OFF_WITH" ] || OFF_WITH='{}'
-    COMPONENTS="$("$JQ" -c --argjson off "${DISABLED:-[]}" --argjson with "$OFF_WITH" '[.components[] | {id, core:(.core == true), depends_on:(.depends_on // []), requires_running:(.requires_running // []), uses:(.uses // []), enabled:((.id | IN($off[])) | not), off_with:($with[.id] // "")}]' "$COMPONENT_REGISTRY" 2>/dev/null)"
+    # Retired parts (owner 13.11.2026, fix.39): hidden in the Panel, their files stay for now.
+    HIDDEN_PARTS="$("$JQ" -c '.parts_hidden // []' "${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}" 2>/dev/null)"
+    COMPONENTS="$("$JQ" -c --argjson off "${DISABLED:-[]}" --argjson with "$OFF_WITH" --argjson hidden "${HIDDEN_PARTS:-[]}" '[.components[] | select(.id | IN($hidden[]) | not) | {id, core:(.core == true), depends_on:(.depends_on // []), requires_running:(.requires_running // []), uses:(.uses // []), enabled:((.id | IN($off[])) | not), off_with:($with[.id] // "")}]' "$COMPONENT_REGISTRY" 2>/dev/null)"
     [ -n "$COMPONENTS" ] || COMPONENTS='[]'
     [ "$W_EN" = 1 ] || W_EN=0
     [ "$W_CTL" = 1 ] || W_CTL=0
@@ -3650,7 +3652,7 @@ log_file() {
 }
 # «Все» in one answer (owner 12.11.2026: one request instead of one per journal): every source
 # but crond's own record, each after a «@@VWARD-LOG name» line; the Panel merges them.
-LOG_ALL_NAMES="wan recovery tunnel adaptive core routing policy wifi ads updater console awg vless sentinel supervisor housekeeping integrity off"
+LOG_ALL_NAMES="wan recovery tunnel adaptive core routing policy ads updater console awg vless supervisor housekeeping integrity off"
 
 if [ "$ACTION" = "log" ]; then
 
@@ -3905,7 +3907,8 @@ read_first /tmp/vward-route-reconciler-maint.cron.last RLAST
 
 read_first /opt/share/vward/VERSION VWARD_VERSION
 UPDATER_STATE=/opt/var/lib/vward/updater
-COMPONENTS="$($JQ -c '.components // {}' "$UPDATER_STATE/components.json" 2>/dev/null || echo '{}')"
+HIDDEN_PARTS="$($JQ -c '.parts_hidden // []' "${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}" 2>/dev/null)"
+COMPONENTS="$($JQ -c --argjson hidden "${HIDDEN_PARTS:-[]}" '.components // {} | with_entries(select(.key | IN($hidden[]) | not))' "$UPDATER_STATE/components.json" 2>/dev/null || echo '{}')"
 kv_file "$UPDATER_STATE/committed.state" installed_update_id=INSTALLED_UPDATE_ID last_sequence=LAST_SEQUENCE last_health_check=LAST_HEALTH
 # The update feed's last look (vward-update-watch): «Последняя проверка» in «Обновления» (fix.33.2;
 # last_health_check is the check after an installation).
@@ -4022,8 +4025,8 @@ PARTS_JSON=$(printf '%s\n' "$PARTS_FACTS" | "$JQ" -Rn --slurpfile reg "$PARTS_RE
     [inputs | split("\t") | select(length >= 4) | {(.[0]): {installed: (.[1] == "1"), enabled: (.[2] == "1"),
       running: (if .[3] == "1" then true elif .[3] == "0" then false else null end), why: (.[4] // "")}}] | add as $f |
     $reg[0] | if (.parts | type) == "array" then
-      {groups: .parts_groups, agents: .parts_agents, all_extras: '"$([ "$EXTRAS_ALL" = 1 ] && echo true || echo false)"',
-       list: [.parts[] | . + ($f[.id] // {installed: null, enabled: null, running: null, why: ""})]}
+      {groups: .parts_groups, agents: .parts_agents, hidden: (.parts_hidden // []), all_extras: '"$([ "$EXTRAS_ALL" = 1 ] && echo true || echo false)"',
+       list: [.parts[] | select(.id | IN((($reg[0].parts_hidden) // [])[]) | not) | . + ($f[.id] // {installed: null, enabled: null, running: null, why: ""})]}
     else null end' 2>/dev/null)
 [ -n "$PARTS_JSON" ] || PARTS_JSON=null
 

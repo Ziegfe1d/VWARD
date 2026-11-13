@@ -113,6 +113,14 @@
         "type": "string"
       }
     },
+    "parts_hidden": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]+$"
+      }
+    },
     "parts_agents": {
       "type": "object",
       "additionalProperties": {

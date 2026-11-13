@@ -4808,7 +4808,7 @@ journal_file() {
 # cleared console journal starts with who cleared it.
 op_journal_clear() {
     case "$1" in
-        all) jc_names="wan recovery tunnel adaptive core routing policy wifi ads updater console awg vless sentinel supervisor housekeeping integrity off" ;;
+        all) jc_names="wan recovery tunnel adaptive core routing policy ads updater console awg vless supervisor housekeeping integrity off" ;;
         *) journal_file "$1" >/dev/null || die invalid_value 64; jc_names=$1 ;;
     esac
     jc_done=0
@@ -4846,6 +4846,8 @@ reg_has() {
 op_extra() {
     reg_has '.parts[] | select(.switch == "extra") | .id' "$1" || die invalid_value 64
     case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
+    # A retired part (owner 13.11.2026, fix.39) is hidden and off for good: it is not switched on.
+    [ "$2" = 0 ] || ! reg_has '.parts_hidden[]?' "$1" || die retired_part 64
     # NAME.on switches a part on; NAME.off keeps it off even with every part on (all.on).
     ex_f="$COMPONENT_STATE/$1.on" ex_o="$COMPONENT_STATE/$1.off"
     if [ "$2" = 1 ]; then
@@ -4900,6 +4902,7 @@ op_component() {
     case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
     [ -r "$COMPONENT_REGISTRY" ] || die registry_unavailable
     "$JQ" -e --arg id "$1" 'any(.components[]; .id == $id)' "$COMPONENT_REGISTRY" >/dev/null 2>&1 || die invalid_component 64
+    [ "$2" = 0 ] || ! reg_has '.parts_hidden[]?' "$1" || die retired_part 64
     set_ids=$(component_closure "$1" "$2") || die registry_unavailable
     # Back on: the components that went off with it (their flag says «with ID») come back
     # too, with what they need; one the owner switched off by itself stays off.
