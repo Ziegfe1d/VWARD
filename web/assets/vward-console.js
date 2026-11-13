@@ -289,7 +289,7 @@ const API_ERRORS = {
   temporary_file_unavailable: 'нет места для временного файла', component_disabled: 'компонент выключен: включите его в «Система → Компоненты»',
   core_component: 'базовый компонент нельзя выключить', wrong_credentials: 'неверный логин или пароль', invalid_mac: 'неверный MAC-адрес', invalid_backup: 'неверное имя копии', unknown_backup: 'копия не найдена', backup_damaged: 'копия повреждена', backup_failed: 'не удалось создать копию', restore_failed: 'не удалось восстановить', adguard_rejected: 'AdGuard Home не принял изменение', unknown_filter: 'такого списка нет в AdGuard Home', invalid_service: 'неизвестный сервис', invalid_setting: 'неизвестная настройка', invalid_name: 'недопустимое название', invalid_password: 'пароль: только латиница, цифры и обычные знаки, до 128 символов', too_many_attempts: 'слишком много попыток - подождите 5 минут',
   router_auth_unavailable: 'роутер не ответил на проверку пароля', invalid_login: 'недопустимый логин', auth_required: 'нужно войти', invalid_url: 'неверный адрес: нужен https без пробелов и логина', invalid_format: 'неизвестный формат списка',
-  adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', retired_part: 'эта часть убрана из VWARD', registry_unavailable: 'реестр компонентов недоступен',
+  adguard_unavailable: 'AdGuard Home не ответил', adguard_not_configured: 'AdGuard Home не подключён: нет адреса в профиле роутера', adguard_auth_required: 'AdGuard Home требует логин и пароль — подключение не настроено', invalid_search: 'в поиске допустимы буквы, цифры, точки и дефисы', invalid_category: 'нет такой категории', invalid_component: 'нет такого компонента', retired_part: 'эта часть заморожена и не включается', registry_unavailable: 'реестр компонентов недоступен',
   // fix.31: the codes the Panel showed as they are.
   smartdns_doh_component: 'В Keenetic нет компонента «Прокси-сервер DNS-over-HTTPS»: установите его в веб-интерфейсе Keenetic («Общие настройки» → «Изменить набор компонентов»), роутер перезагрузится',
   smartdns_not_configured: 'Smart DNS не настроен: укажите сервер DoH в разделе «ИИ-сервисы»',
@@ -1324,7 +1324,7 @@ const PART_PAGE = { agh: 'd-agh', awg: 'd-awg', vless: 'd-vless', dnsmasq: 'd-dn
 // Parts that run by the clock (their last run's result), not all the time.
 const PART_RUNS = ['route-reconciler', 'tunnel-guard', 'wan-guard'];
 const partsList = () => (st().parts && st().parts.list) || [];
-// Retired parts (owner 13.11.2026, fix.39): hidden here, off on the router; their files stay for now.
+// Frozen parts (owner 13.11.2026, fix.39): hidden here, off on the router; their code is kept.
 const partHidden = id => ((st().parts && st().parts.hidden) || []).includes(id);
 const partOf = id => partsList().find(p => p.id === id);
 const partPage = p => p.kind === 'component' ? 'c-' + p.id : PART_PAGE[p.id] || null;

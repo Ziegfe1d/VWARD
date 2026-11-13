@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Retired parts, stage 1 (owner 13.11.2026, fix.39): hidden in the Panel and off for good.
+"""Frozen parts (owner 13.11.2026, fix.39): hidden in the Panel and off for good, code kept.
 
 sentinel («Контроль состояния»), «Наблюдение за памятью», «Ремонт пакетов Entware», «Контроль
-Wi-Fi клиентов» and sing-box leave VWARD in steps. Stage 1 removes nothing from the router: the
-parts are not shown and do not run, whatever the owner switched on before (NAME.on, all.on). A
-later release removes their files (update engine 2.1, retire list). This test keeps stage 1 whole:
+Wi-Fi клиентов» and sing-box are frozen (ROADMAP §8): not shown, not run, whatever the owner
+switched on before (NAME.on, all.on), not developed. Nothing is removed: their code stays and their
+files ship as they are, so a part can come back. This test keeps the freeze whole:
   * settings-registry.json «parts_hidden» names them; they are still parts (their files are there);
   * the admission library keeps the switchable ones off: vward_extra / vward_component_enabled
     say «off» even with NAME.on and all.on, other parts behave as before;
@@ -35,11 +35,11 @@ JS = (ROOT / "web/assets/vward-console.js").read_text(encoding="utf-8")
 EXPECTED = ["sentinel", "memory-watch", "repair", "wifi-client-guard", "singbox"]
 hidden = REG.get("parts_hidden")
 if hidden != EXPECTED:
-    fail(f"parts_hidden must name the five retired parts: {hidden}")
+    fail(f"parts_hidden must name the five frozen parts: {hidden}")
 parts = {p["id"]: p for p in REG["parts"]}
 for h in hidden:
     if h not in parts:
-        fail(f"{h}: a hidden part stays a part until its files are removed")
+        fail(f"{h}: a hidden part stays a part: its code and files are kept")
 switchable = [h for h in hidden if parts[h]["switch"] in ("extra", "component")]
 m = re.search(r'^VWARD_RETIRED_PARTS="([^"]*)"$', LIB.read_text(encoding="utf-8"), re.M)
 if not m or m.group(1).split() != switchable:
@@ -59,9 +59,9 @@ with tempfile.TemporaryDirectory() as t:
     want = ["sentinel=off", "memory-watch=off", "repair=off", "flash-watch=on", "backup=on",
             "wifi=off", "wan=on", "COMPONENT_DISABLED=wifi-client-guard"]
     if out != want:
-        fail(f"RED: retired parts must stay off with NAME.on and all.on: {out}")
+        fail(f"RED: frozen parts must stay off with NAME.on and all.on: {out}")
 
-# The Panel helper: a retired part is not switched on (switched off: as before).
+# The Panel helper: a frozen part is not switched on (switched off: as before).
 cut = lambda name: HELPER[HELPER.index(name + "() {"):HELPER.index("\n}\n", HELPER.index(name + "() {")) + 3]
 fn = cut("reg_has") + cut("op_extra")
 with tempfile.TemporaryDirectory() as t:
@@ -70,10 +70,10 @@ with tempfile.TemporaryDirectory() as t:
     op = lambda *a: subprocess.run(["sh", "-c", pre + fn + 'op_extra "$@"', "x", *a], capture_output=True, text=True).stdout.strip()
     got = [op("sentinel", "1"), op("repair", "1"), op("sentinel", "0"), op("flash-watch", "1")]
     if got != ["error=retired_part", "error=retired_part", "result=unchanged", "result=changed"]:
-        fail(f"RED: the helper switches a retired part on: {got}")
+        fail(f"RED: the helper switches a frozen part on: {got}")
 comp = cut("op_component")
 if "[ \"$2\" = 0 ] || ! reg_has '.parts_hidden[]?' \"$1\" || die retired_part 64" not in comp:
-    fail("op_component must refuse to switch a retired component on")
+    fail("op_component must refuse to switch a frozen component on")
 if "retired_part: '" not in JS:
     fail("the Panel has no words for retired_part")
 
@@ -87,11 +87,11 @@ except ValueError:
     fail(f"the parts answer is not JSON: {res.stdout[:200]!r} {res.stderr[:200]!r}")
 shown = [p["id"] for p in pj["list"]]
 if set(shown) & set(hidden) or len(shown) != len(parts) - len(hidden) or pj.get("hidden") != hidden:
-    fail(f"RED: the router shows retired parts: {sorted(set(shown) & set(hidden))}, hidden={pj.get('hidden')}")
+    fail(f"RED: the router shows frozen parts: {sorted(set(shown) & set(hidden))}, hidden={pj.get('hidden')}")
 for need in ("--argjson hidden \"${HIDDEN_PARTS:-[]}\" '[.components[] | select(.id | IN($hidden[]) | not) |",
              "'.components // {} | with_entries(select(.key | IN($hidden[]) | not))'"):
     if need not in API:
-        fail(f"the router's answer keeps retired components: {need!r}")
+        fail(f"the router's answer keeps frozen components: {need!r}")
 
 # The Panel: no section, card, job, journal tab or search entry.
 def block(start):
@@ -102,7 +102,7 @@ if "'wifi'" in block("const CARD_IDS = ["):
     fail("the overview keeps the Wi-Fi card")
 tabs = re.findall(r"\{ id: '([a-z]+)', label: '", block("const LOG_TABS = ["))
 if {"wifi", "sentinel"} & set(tabs):
-    fail(f"«Журналы» keep tabs of retired parts: {tabs}")
+    fail(f"«Журналы» keep tabs of frozen parts: {tabs}")
 if re.search(r"\['(wifi|wan)', 'Wi-Fi", block("const SEARCH_INDEX = [")):
     fail("the search still finds the Wi-Fi page")
 for gone in ("panel('Агент реального времени'", "panel('Под наблюдением агента'", "panel('Домашняя сеть', kv([['Wi-Fi клиенты'",

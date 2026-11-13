@@ -4846,7 +4846,7 @@ reg_has() {
 op_extra() {
     reg_has '.parts[] | select(.switch == "extra") | .id' "$1" || die invalid_value 64
     case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
-    # A retired part (owner 13.11.2026, fix.39) is hidden and off for good: it is not switched on.
+    # A frozen part (owner 13.11.2026, fix.39) is hidden and off for good: it is not switched on.
     [ "$2" = 0 ] || ! reg_has '.parts_hidden[]?' "$1" || die retired_part 64
     # NAME.on switches a part on; NAME.off keeps it off even with every part on (all.on).
     ex_f="$COMPONENT_STATE/$1.on" ex_o="$COMPONENT_STATE/$1.off"

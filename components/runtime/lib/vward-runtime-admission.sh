@@ -17,10 +17,10 @@ vward_component_enabled() {
     [ ! -e "$VWARD_COMPONENT_STATE/$1.disabled" ]
 }
 
-# Retired parts (owner 13.11.2026, fix.39 stage 1): hidden in the Panel and off for good, whatever
-# the owner switched on before (NAME.on, all.on, no NAME.disabled). Their files stay until a later
-# release removes them. The same ids as «parts_hidden» in settings-registry.json (sing-box there
-# is a package VWARD never starts on its own).
+# Frozen parts (owner 13.11.2026, fix.39, ROADMAP §8): hidden in the Panel and off for good, whatever
+# the owner switched on before (NAME.on, all.on, no NAME.disabled). Their code and files are kept, so
+# a part can come back. The same ids as «parts_hidden» in settings-registry.json (sing-box there is
+# a package VWARD never starts on its own).
 VWARD_RETIRED_PARTS="sentinel memory-watch repair wifi-client-guard"
 vward_retired() {
     case " $VWARD_RETIRED_PARTS " in *" ${1:-} "*) return 0 ;; esac

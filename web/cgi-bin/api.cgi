@@ -832,7 +832,7 @@ if [ "$ACTION" = config-data ]; then
     OFF_WITH="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && printf '%s\t%s\n' "$(basename "$F" .disabled)" "$(sed -n 's/.*(with \([a-z0-9-]*\))$/\1/p;s/^disabled by install\.sh.*/install/p' "$F" | head -n 1)"; done |
         "$JQ" -Rsc '[split("\n")[] | select(length > 0) | split("\t") | {(.[0]): (.[1] // "")}] | add // {}' 2>/dev/null)"
     [ -n "$OFF_WITH" ] || OFF_WITH='{}'
-    # Retired parts (owner 13.11.2026, fix.39): hidden in the Panel, their files stay for now.
+    # Frozen parts (owner 13.11.2026, fix.39): hidden in the Panel, their code and files are kept.
     HIDDEN_PARTS="$("$JQ" -c '.parts_hidden // []' "${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}" 2>/dev/null)"
     COMPONENTS="$("$JQ" -c --argjson off "${DISABLED:-[]}" --argjson with "$OFF_WITH" --argjson hidden "${HIDDEN_PARTS:-[]}" '[.components[] | select(.id | IN($hidden[]) | not) | {id, core:(.core == true), depends_on:(.depends_on // []), requires_running:(.requires_running // []), uses:(.uses // []), enabled:((.id | IN($off[])) | not), off_with:($with[.id] // "")}]' "$COMPONENT_REGISTRY" 2>/dev/null)"
     [ -n "$COMPONENTS" ] || COMPONENTS='[]'
