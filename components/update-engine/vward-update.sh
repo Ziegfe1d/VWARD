@@ -179,7 +179,6 @@ print_plan() {
         "$(jq '.files | length' "$VU_FULL_DIR/package-manifest.json")" "$VU_FETCHED_BYTES"
     printf '%s\n' 'Files:'
     jq -r '.files[] | "  [\(.component)] \(.target) mode=\(.mode)"' "$package_dir/package-manifest.json"
-    vu_retire_print
 }
 
 create_backup() {
@@ -216,32 +215,10 @@ create_backup() {
             printf '%s\t0\t%s\t-\t-\n' "$target" "$new_mode" >> "$backup/files.tsv"
         fi
     done || vu_die "$VU_INSTALL_ERROR" "Backup failed"
-    # Files of retired parts: kept like replaced ones, so a rollback puts them back.
-    if [ -n "$VU_RETIRE_DIR" ] && [ -s "$VU_RETIRE_DIR/files.tsv" ]; then
-        (while IFS="$(printf '\t')" read -r retired_part target; do
-            vu_safe_target "$target" && ! vu_local_target "$target" || exit 1
-            source=$VU_ROOT_PREFIX$target
-            mode=$(vu_file_mode "$source")
-            [ -n "$mode" ] || exit 1
-            mkdir -p "$backup/files$(dirname "$target")" || exit 1
-            cp -p "$source" "$backup/files$target" || exit 1
-            original_sha=$(sha256sum "$source" | awk '{print $1}')
-            backup_sha=$(sha256sum "$backup/files$target" | awk '{print $1}')
-            [ "$original_sha" = "$backup_sha" ] || exit 1
-            printf '%s\t1\t%s\t%s\t%s\n' "$target" "$mode" "$original_sha" "$backup_sha" >> "$backup/files.tsv"
-        done < "$VU_RETIRE_DIR/files.tsv") || vu_die "$VU_INSTALL_ERROR" "Backup of retired files failed"
-    fi
-    crontab_sha=-
-    if [ -n "$VU_RETIRE_DIR" ] && [ -r "$VU_RETIRE_DIR/crontab.new" ]; then
-        cp "$VU_RETIRE_CRONTAB" "$backup/crontab" || vu_die "$VU_INSTALL_ERROR" "Cannot back up the crontab"
-        crontab_sha=$(sha256sum "$backup/crontab" | awk '{print $1}')
-        [ "$crontab_sha" = "$(sha256sum "$VU_RETIRE_CRONTAB" | awk '{print $1}')" ] || vu_die "$VU_INSTALL_ERROR" "Crontab backup differs"
-        printf '%s\n' "$VU_RETIRE_CRONTAB" > "$backup/crontab.path" || vu_die "$VU_INSTALL_ERROR" "Cannot back up the crontab"
-    fi
     index_sha=$(sha256sum "$backup/files.tsv" | awk '{print $1}')
     if [ -r "$backup/committed.state" ]; then committed_sha=$(sha256sum "$backup/committed.state" | awk '{print $1}'); else committed_sha=-; fi
     if [ -r "$backup/components.json" ]; then components_sha=$(sha256sum "$backup/components.json" | awk '{print $1}'); else components_sha=-; fi
-    printf 'index_sha=%s\ncommitted_sha=%s\ncomponents_sha=%s\ncrontab_sha=%s\n' "$index_sha" "$committed_sha" "$components_sha" "$crontab_sha" > "$backup/backup.meta" || vu_die "$VU_INSTALL_ERROR" "Cannot write backup metadata"
+    printf 'index_sha=%s\ncommitted_sha=%s\ncomponents_sha=%s\n' "$index_sha" "$committed_sha" "$components_sha" > "$backup/backup.meta" || vu_die "$VU_INSTALL_ERROR" "Cannot write backup metadata"
     vu_journal_set active_backup "$backup" || vu_die "$VU_INSTALL_ERROR" "Cannot record backup"
     VU_BACKUP=$backup
 }
@@ -331,15 +308,6 @@ apply_update() {
     # channel any more (its helper is refused while an update holds the barrier), so a change
     # made during the download is seen here and nothing after it can slip in.
     [ "${VU_FIRST_INSTALL:-0}" = 1 ] || vu_feed_bound || feed_blocked
-    # Retired parts once more, inside the barrier: the crontab or the files may have changed since
-    # the plan (hourly housekeeping rewrites the crontab), and the backup must hold what is replaced.
-    if [ -n "$VU_ROOT_PREFIX" ] && [ -n "${VWARD_TEST_CRONTAB_LATE:-}" ]; then
-        printf '%s\n' "$VWARD_TEST_CRONTAB_LATE" >> "$VU_RETIRE_CRONTAB"
-    fi
-    if [ -n "$VU_RETIRE_DIR" ]; then
-        vu_retire_plan "$manifest" "${VU_FULL_DIR:-$package_dir}/package-manifest.json" "$VU_RETIRE_DIR" ||
-            vu_die "$VU_VERIFY_ERROR" "Retire list conflicts with the release or cannot be planned"
-    fi
 
     manifest_hash=$(vu_signed_hash "$manifest")
     update_id=$(jq -r '.signed.update_id' "$manifest")
@@ -356,7 +324,7 @@ apply_update() {
     create_backup "$package_dir"
     backup=$VU_BACKUP
     vu_transition INSTALLING
-    if ! install_package "$package_dir" || ! vu_retire_apply; then
+    if ! install_package "$package_dir"; then
         rollback_policy=$(jq -r '.signed.rollback_policy' "$manifest")
         if [ "$rollback_policy" = automatic ]; then
             if VWARD_INTERNAL_ROLLBACK=1 VWARD_INTERNAL_ROLLBACK_TOKEN="$VU_LOCK_TOKEN" "$SELF_DIR/vward-update-rollback.sh" "$backup"; then
@@ -394,7 +362,6 @@ apply_update() {
     health_time=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
     # A per-file update records every signed file, changed or not.
     vu_component_state_write "$manifest" "${VU_FULL_DIR:-$package_dir}" "$health_time" || vu_die "$VU_INSTALL_ERROR" "Cannot commit component state"
-    vu_retire_state_prune || vu_die "$VU_INSTALL_ERROR" "Cannot record the retired parts"
     vu_journal_set candidate_version "$version" || vu_die "$VU_INSTALL_ERROR" "Cannot journal candidate version"
     vu_journal_set candidate_update_id "$update_id" || vu_die "$VU_INSTALL_ERROR" "Cannot journal candidate update id"
     vu_journal_set candidate_sequence "$sequence" || vu_die "$VU_INSTALL_ERROR" "Cannot journal candidate sequence"
@@ -611,9 +578,6 @@ else
     package_dir=$VU_PACKAGE_DIR
     method_used=full
 fi
-# What the release retires, against the full list of its files: a retired file it still ships is refused.
-vu_retire_plan "$manifest" "${VU_FULL_DIR:-$package_dir}/package-manifest.json" "${package_dir%/*}/retire" ||
-    vu_die "$VU_VERIFY_ERROR" "Retire list conflicts with the release or cannot be planned"
 print_plan "$manifest" "$package_dir"
 
 case "$command" in

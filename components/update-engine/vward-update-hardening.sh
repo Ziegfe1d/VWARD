@@ -234,12 +234,6 @@ vu_hard_safety_check() {
         source=$VU_ROOT_PREFIX$target
         [ ! -f "$source" ] || wc -c < "$source"
     done > "$backup_sizes" || return 1
-    # Files of retired parts are backed up too.
-    if [ -n "${VU_RETIRE_DIR:-}" ] && [ -s "$VU_RETIRE_DIR/files.tsv" ]; then
-        awk -F '\t' '{print $2}' "$VU_RETIRE_DIR/files.tsv" | while IFS= read -r target; do
-            [ ! -f "$VU_ROOT_PREFIX$target" ] || wc -c < "$VU_ROOT_PREFIX$target"
-        done >> "$backup_sizes" || return 1
-    fi
 
     backup_bytes=$(awk '{sum += $1} END {print sum+0}' "$backup_sizes")
     backup_required=$(((backup_bytes + 1023) / 1024 + minimum_free_kb))

@@ -47,21 +47,13 @@ PACKAGE_SIZE="$(jq -r '.package_size' "$OUT/candidate/candidate-metadata.json")"
 UNPACKED_SIZE="$(jq -r '.unpacked_size' "$OUT/candidate/candidate-metadata.json")"
 COMPONENTS="$(awk -F '\t' '!/^#/ && NF {print $1}' "$ROOT/config/components/package-map.tsv" | LC_ALL=C sort -u | jq -R . | jq -s .)"
 PUBLISHED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-# Parts this release removes from the routers (engine 2.1), signed into both manifests.
-RETIRED="$ROOT/config/components/retired.json"
-jq -e '.schema == 1 and (.parts | type == "array")' "$RETIRED" >/dev/null 2>&1 || fail "config/components/retired.json is not valid"
-RETIRE="$(jq -c '[.parts[] | {part, files, dirs: (.dirs // []), cron: (.cron // []), services: (.services // [])}]' "$RETIRED")" ||
-    fail "config/components/retired.json is not valid"
-awk -F '\t' '!/^#/ && NF {print $3}' "$ROOT/config/components/package-map.tsv" |
-    jq -R -s --argjson retire "$RETIRE" -e 'split("\n") as $map | all($retire[].files[]; . as $t | any($map[]; . == $t) | not)' >/dev/null ||
-    fail "a retired file is still in package-map.tsv"
 URL="https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/packages/vward-$VERSION.tar.gz"
 
 jq -n --arg version "$VERSION" --arg update_id "vward-$VERSION" --argjson sequence "$SEQUENCE" \
     --arg published_at "$PUBLISHED_AT" --arg url "$URL" --arg sha256 "$PACKAGE_SHA" \
     --argjson size "$PACKAGE_SIZE" --argjson unpacked_size "$UNPACKED_SIZE" \
-    --arg min_vward "$MIN_VWARD" --argjson components "$COMPONENTS" --arg priority "$PRIORITY" --argjson retire "$RETIRE" \
-    '{schema:1,update_id:$update_id,sequence:$sequence,version:$version,channel:"dev",priority:$priority,published_at:$published_at,min_updater_version:"1.2.0",package:{url:$url,sha256:$sha256,size:$size,unpacked_size:$unpacked_size},compatibility:{min_vward:$min_vward,max_vward:$version},affected_components:$components,affected_services:[],health_profile:"full",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}} + (if ($retire | length) > 0 then {retire:$retire} else {} end)' > "$OUT/signed.json"
+    --arg min_vward "$MIN_VWARD" --argjson components "$COMPONENTS" --arg priority "$PRIORITY" \
+    '{schema:1,update_id:$update_id,sequence:$sequence,version:$version,channel:"dev",priority:$priority,published_at:$published_at,min_updater_version:"1.2.0",package:{url:$url,sha256:$sha256,size:$size,unpacked_size:$unpacked_size},compatibility:{min_vward:$min_vward,max_vward:$version},affected_components:$components,affected_services:[],health_profile:"full",requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$OUT/signed.json"
 
 # sign_manifest SIGNED OUTPUT: the canonical signed part, signed and verified.
 sign_manifest() {
@@ -105,7 +97,7 @@ for source in components/update-engine/vward-update-bootstrap.sh components/upda
 done
 jq -n --arg version "$VERSION" --arg update_id "vward-$VERSION" --argjson sequence "$SEQUENCE" \
     --arg published_at "$PUBLISHED_AT" --arg base "$V2_BASE" --arg min_vward "$MIN_VWARD" --arg engine "$ENGINE_VERSION" --arg priority "$PRIORITY" \
-    --rawfile files "$V2/files.tsv" --rawfile engine_files "$V2/engine.tsv" --argjson retire "$RETIRE" \
+    --rawfile files "$V2/files.tsv" --rawfile engine_files "$V2/engine.tsv" \
     '($files | split("\n") | map(select(length > 0) | split("\t")
         | {target: .[0], sha256: .[1], size: (.[2] | tonumber), mode: .[3], component: .[4]})) as $f
      | ($engine_files | split("\n") | map(select(length > 0) | split("\t")
@@ -114,8 +106,7 @@ jq -n --arg version "$VERSION" --arg update_id "vward-$VERSION" --argjson sequen
         published_at:$published_at,min_updater_version:"2.0.0",files_base:$base,files:$f,
         engine:{version:$engine,files:$e},compatibility:{min_vward:$min_vward,max_vward:$version},
         affected_components:($f | map(.component) | unique),affected_services:[],health_profile:"full",
-        requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}
-     + (if ($retire | length) > 0 then {retire:$retire} else {} end)' > "$V2/signed.json"
+        requires_reboot:false,rollback_policy:"automatic",signature:{algorithm:"Ed25519",key_id:"vward-prod-2026-01"}}' > "$V2/signed.json"
 sign_manifest "$V2/signed.json" "$V2/manifest.json"
 
 if [ "$STAGE" -eq 1 ]; then

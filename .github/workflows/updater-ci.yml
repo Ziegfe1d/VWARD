@@ -153,9 +153,6 @@ jobs:
       - name: Update Engine 2 per-file and self-update simulations
         run: tests/updater/run-v2-simulations.sh
 
-      - name: Update Engine 2.1 retired parts (before, after, rollback) simulations
-        run: tests/updater/run-retire-simulations.sh
-
       - name: Release rehearsal over beta
         run: |
           git fetch --no-tags --depth=1 origin beta:refs/remotes/origin/beta || echo "beta branch unavailable: minimal seed"
