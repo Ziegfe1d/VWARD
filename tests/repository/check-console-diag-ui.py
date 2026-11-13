@@ -34,8 +34,10 @@ if "в Keenetic строк ' + (c.keenetic || 0)" not in js or "Убирать �
 # off with its reason when the server does not answer; not installed components folded.
 if "{ id: 'ai', title: 'DNS'," not in js or "const SHORT = { ai: 'DNS'," not in js:
     fail("«ИИ-сервисы»/«ИИ» must be «DNS»")
-if "[/^Проверить/, 'refresh']" not in js or "[/^Переустановить/, 'refresh']" not in js:
-    fail("«Проверить» and «Переустановить» use the refresh icon")
+# Owner 13.11.2026: three actions, three icons - «Проверить» a pulse, «Перезапустить» refresh,
+# «Обновить серверы» a download (one icon for all three on a tunnel's page).
+if "[/^Проверить/, 'pulse']" not in js or "[/^Переустановить/, 'refresh']" not in js or "[/^Обновить серверы/, 'download']" not in js:
+    fail("«Проверить», «Перезапустить» and «Обновить серверы» each with its own icon")
 at = js.index('  const status = s => {', js.index('function aiPage()'))
 status = js[at:js.index('\n  };', at)+5]
 at = js.index('function aiSlider(')

@@ -1069,8 +1069,13 @@ const headPill = (cls, text) => '<span class="pill ' + (cls || '') + ' head-pill
 // Collapsed blocks, per page and title, kept in this browser (at most 300).
 const FOLDED = store.get('vward-folded', {});
 const foldKey = title => current + '|' + title;
+// «В разработке» starts folded (owner 13.11.2026: a third of the screen for two «скоро»); the owner's own
+// choice is kept: 1 folded, 0 open, none - as by default.
+const foldDefault = key => /\|В разработке$/.test(key);
+const isFolded = key => Object.prototype.hasOwnProperty.call(FOLDED, key) ? !!FOLDED[key] : foldDefault(key);
 function foldToggle(key) {
-  if (FOLDED[key]) delete FOLDED[key]; else FOLDED[key] = 1;
+  const to = !isFolded(key);
+  if (to === foldDefault(key)) delete FOLDED[key]; else FOLDED[key] = to ? 1 : 0;
   const keys = Object.keys(FOLDED);
   keys.slice(0, Math.max(0, keys.length - 300)).forEach(k => delete FOLDED[k]);
   store.set('vward-folded', FOLDED);
@@ -1161,7 +1166,7 @@ function panel(title, body, opts) {
   const p = page(current), same = p && p.title === title, extra = opts.readonly || opts.right;
   // A block under its own title folds to that title (the page's main block and the address
   // check do not); the state on the right of the title stays visible.
-  const foldable = !same && !opts.fixed && !!title, key = foldable ? foldKey(title) : '', folded = foldable && !!FOLDED[key];
+  const foldable = !same && !opts.fixed && !!title, key = foldable ? foldKey(title) : '', folded = foldable && isFolded(key);
   const toggle = foldable ? '<button class="block-toggle" type="button" data-fold="' + esc(key) + '" aria-expanded="' + !folded + '" aria-label="' + (folded ? 'Развернуть' : 'Свернуть') + ' «' + esc(title) + '»" title="' + (folded ? 'Развернуть' : 'Свернуть') + '">' + ico('chevron') + '</button>' : '';
   const longDesc = opts.desc && String(opts.desc).length > DESC_MAX && !!title, dq = 'p:' + title;
   // A page's own block: its «?» goes next to the page title at the top (owner 2026-11-01:
@@ -1203,8 +1208,8 @@ const sw = (attr, on, label, disabled) => '<label class="switch"><input type="ch
 const sel = (attr, label, opts, value) => '<select class="input compact" ' + attr + ' aria-label="' + esc(label) + '">' + opts.map(o => '<option value="' + esc(o[0]) + '"' + (String(value) === String(o[0]) ? ' selected' : '') + (o[2] ? ' disabled' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select>';
 // One sign per action across the Panel (owner 2026-10-17): delete - a bin, clear - a broom...
 const BTN_ICONS = [[/^Удалить/, 'trash'], [/^Очистить/, 'broom'], [/^Скачать/, 'download'], [/^Установить/, 'box'], [/^Выйти/, 'logout'],
-  [/^Сбросить|^Полный сброс/, 'reset'], [/^(Выключить|Отключить|Включить)/, 'power'], [/^(Перезапустить|Обновить|Повторить)/, 'refresh'],
-  [/^Проверить/, 'refresh'], [/^Переустановить/, 'refresh'], [/^Добавить/, 'plus'], [/^Сохранить|^Применить/, 'save'], [/^Восстановить|^Вернуть/, 'undo'], [/^Отмена/, 'close']];
+  [/^Сбросить|^Полный сброс/, 'reset'], [/^(Выключить|Отключить|Включить)/, 'power'], [/^Обновить серверы/, 'download'], [/^(Перезапустить|Обновить|Повторить)/, 'refresh'],
+  [/^Проверить/, 'pulse'], [/^Обновить серверы/, 'download'], [/^Переустановить/, 'refresh'], [/^Добавить/, 'plus'], [/^Сохранить|^Применить/, 'save'], [/^Восстановить|^Вернуть/, 'undo'], [/^Отмена/, 'close']];
 const btnIcon = (label, icon) => { const m = BTN_ICONS.find(x => x[0].test(label || '')); return m ? m[1] : icon; };
 const btn = (act, icon, label, cls, extra) => { const i = btnIcon(label, icon); return '<button class="btn' + (cls ? ' ' + cls : '') + '" type="button" data-act="' + act + '"' + (extra || '') + '>' + (i ? ico(i) : '') + esc(label) + '</button>'; };
 const empty = t => '<div class="empty">' + esc(t) + '</div>';
@@ -4231,6 +4236,16 @@ document.addEventListener('input', e => {
   const q = e.target.value.trim();
   document.querySelectorAll('#netRows [data-net]').forEach(li => { li.hidden = !!q && !li.dataset.net.includes(q); });
 });
+// Deleting a tunnel: where its lists and subnets go, the confirmation, the button (owner 13.11.2026: in
+// «Управление» with check and restart). The default tunnel is not deleted yet (fix.40, «VWARD без VPN»).
+function tunnelDeleteHtml(name, managed) {
+  const others = ((st().wg && st().wg.interfaces) || []).filter(t => t.name !== name);
+  const rs = routeSummary(), routed = (rs.listsOf(name) || []).length > 0 || (rs.netsOf(name) || 0) > 0;
+  return managed ? '<p class="panel-desc">Это туннель по умолчанию, его нельзя удалить или выключить. Сначала назначьте туннелем по умолчанию другой туннель.</p>' :
+    (confirm && confirm.id === 'tunnel-delete' ? '<div class="confirm danger"><span>Удалить ' + esc(tunLabel(name)) + '? Его списки и подсети перейдут: ' + esc(confirm.to === 'bypass' ? 'на провайдера' : confirm.to === 'vpn' ? 'в туннель по умолчанию' : tunLabel(confirm.to)) + '. Ключи туннеля удалятся.</span><button class="btn small danger" type="button" data-act="confirm-yes">Удалить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' :
+      (routed ? '<dl class="kv">' + ctrlRow('Куда передать списки и подсети', sel('data-tunnel-del-to', 'Куда передать', [['vpn', 'Туннель по умолчанию'], ['bypass', 'Провайдер']].concat(others.filter(t => t.name !== prof().tunnel_interface).map(t => [t.name, tunLabel(t.name)])), 'vpn')) + '</dl>' : '') +
+      '<div class="panel-actions even">' + btn('tunnel-delete', 'trash', 'Удалить туннель', 'danger', cfgOk() ? '' : ' disabled') + '</div>');
+}
 function tunnelManagePanel(name, managed) {
   // Only a WireGuard (AmneziaWG) tunnel takes a .conf; the others are set up in Keenetic.
   // VWARD's engines (AmneziaWG, VLESS) are Keenetic «OpkgTun» connections: checked first.
@@ -4241,12 +4256,9 @@ function tunnelManagePanel(name, managed) {
     return [panel('Конфигурация', '<p class="panel-desc">Туннель настраивается в Keenetic, VWARD только направляет через него маршруты.</p>')];
   const others = ((st().wg && st().wg.interfaces) || []).filter(t => t.name !== name);
   const rs = routeSummary(), routed = (rs.listsOf(name) || []).length > 0 || (rs.netsOf(name) || 0) > 0;
-  const del = managed ? '<p class="panel-desc">Это туннель по умолчанию, его нельзя удалить или выключить. Сначала назначьте туннелем по умолчанию другой туннель.</p>' :
-    (confirm && confirm.id === 'tunnel-delete' ? '<div class="confirm danger"><span>Удалить ' + esc(tunLabel(name)) + '? Его списки и подсети перейдут: ' + esc(confirm.to === 'bypass' ? 'на провайдера' : confirm.to === 'vpn' ? 'в туннель по умолчанию' : tunLabel(confirm.to)) + '. Ключи туннеля удалятся.</span><button class="btn small danger" type="button" data-act="confirm-yes">Удалить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' :
-      (routed ? '<dl class="kv">' + ctrlRow('Куда передать списки и подсети', sel('data-tunnel-del-to', 'Куда передать', [['vpn', 'Туннель по умолчанию'], ['bypass', 'Провайдер']].concat(others.filter(t => t.name !== prof().tunnel_interface).map(t => [t.name, tunLabel(t.name)])), 'vpn')) + '</dl>' : '') +
-      '<div class="panel-actions even">' + btn('tunnel-delete', 'trash', 'Удалить туннель', 'danger', cfgOk() ? '' : ' disabled') + '</div>');
   // The default tunnel cannot be removed: no section for it at all (owner 2026-10-17).
-  const delPanel = managed ? '' : panel('Удаление', del, { desc: routed ? 'Списки и подсети туннеля перейдут, куда выберете.' : 'У туннеля нет списков и подсетей.' });
+  // The delete is in «Управление» now (owner 13.11.2026): no section of its own.
+  const delPanel = '';
   // Its lists and subnets go nowhere (the route is withdrawn, sites go via the provider):
   // one tap moves them to the default tunnel, the tunnel itself stays (fix.32).
   const mv = !managed && routed ? (confirmBox('tunnel-move', 'Перенести списки и подсети ' + tunLabel(name) + ' (' + tunUseExtra(name) + ') на ' + tunLabel(prof().tunnel_interface) + '? Туннель останется, удалить его можно потом.', 'Перенести') ||
@@ -4254,7 +4266,7 @@ function tunnelManagePanel(name, managed) {
   if (lost)
     return [panel('Нет настроек', '<p class="panel-desc">Настройки туннеля хранились на флешке и пропали вместе с ней, поэтому включить его нельзя. Добавьте туннель заново - ключ, ссылку или файл' +
       (managed ? ', затем у нового нажмите «Сделать туннелем по умолчанию»: списки и подсети переедут на него. Этот туннель потом удалите.' : '. Этот туннель потом удалите.') + '</p>' +
-      '<div class="panel-actions">' + btn('tunnel-create', 'plus', 'Добавить туннель', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + mv + (managed ? '' : del))];
+      '<div class="panel-actions">' + btn('tunnel-create', 'plus', 'Добавить туннель', 'primary', cfgOk() ? '' : ' disabled') + '</div>' + mv)];  // the delete is in «Управление» (owner 13.11.2026)
   const vl = vlessOf(name);
   if (vl)
     return [vlessServersPanel(name),
@@ -4306,7 +4318,7 @@ function vlessServersPanel(name) {
   const v = VSRV[name];
   // Shown at once when the tunnel's page opens: no button first (owner 2026-10-17).
   if (!v) { setTimeout(() => { if (!VSRV[name]) vlessServers(name); }, 0); return panel('Серверы', empty('Проверка серверов…')); }
-  const head = '<div class="panel-actions">' + btn('vless-servers', 'refresh', v.busy ? 'Проверяем…' : 'Обновить', '', ' data-name="' + esc(name) + '"' + (v.busy ? ' disabled' : '')) + '</div>';
+  const head = '<div class="panel-actions">' + btn('vless-servers', 'download', v.busy ? 'Проверяем…' : 'Обновить серверы', '', ' data-name="' + esc(name) + '"' + (v.busy ? ' disabled' : '')) + '</div>';
   if (v.busy && !v.data) return panel('Серверы', empty('Проверка серверов…'));
   if (v.error) return panel('Серверы', '<p class="field-warn">' + esc(v.error) + '</p>' + head);
   const d = v.data, off = new Set((d.countries && d.countries.off) || []), all = d.servers || [];
@@ -4328,7 +4340,7 @@ function vlessServersPanel(name) {
       // The country's switch in its own row, the arrow opens it (owner 2026-10-17).
       return '<div class="vgroup' + (isOff ? ' muted' : '') + (open ? ' open' : '') + '"><div class="vhead">' +
         '<div class="row-main link" role="button" tabindex="0" data-act="vsrv-open" data-code="' + c + '" data-name="' + esc(name) + '" aria-expanded="' + open + '"><b>' + esc((vFlag(c) ? vFlag(c) + ' ' : '') + vCountry(c)) + '</b><small>' + g.length + ' ' + plural(g.length, 'сервер', 'сервера', 'серверов') +
-        (g.some(x => x.current) ? ' · подключён' : isOff ? ' · выключена' : b < 1e9 ? ' · лучший ' + b + ' мс' : ' · нет ответа') + '</small></div>' +
+        (g.some(x => x.current) ? ' · подключён' : isOff ? ' · выключена' : b < 1e9 ? ' · лучший ' + b + ' мс' : ' · <span class="st warn">нет ответа</span>') + '</small></div>' +
         sw('data-vcountry="' + c + '" data-name="' + esc(name) + '"', !isOff, vCountry(c), !cfgOk() || g.some(x => x.current)) +
         '<button class="icon-btn vchev" type="button" data-act="vsrv-open" data-code="' + c + '" data-name="' + esc(name) + '" aria-expanded="' + open + '" aria-label="' + (open ? 'Свернуть' : 'Развернуть') + '">' + ico('down') + '</button></div>' +
         (open ? '<ul class="rows">' + vSort(g).map(s => vRow(name, s, isOff && !s.current)).join('') + '</ul>' : '') + '</div>';
@@ -4428,10 +4440,12 @@ function tunnelProbePanel(name) {
     vlessOf(name) ? null : ['Обфускация AmneziaWG', sv.awg ? 'Включена' : 'Выключена'],
     vlessOf(name) ? null : ['Keepalive', sv.keepalive ? sv.keepalive + ' с' : 'выключен']
   ]) + '<p class="panel-desc">Проверено в ' + esc(r.at) + '</p>';
-  // On and off: the switch in the tunnel's own header (owner 2026-10-17); here two buttons.
-  return panel('Проверка', body +
+  // On and off: the switch in the tunnel's own header (owner 2026-10-17); here what is done with it -
+  // check, restart, delete - in one place (owner 13.11.2026: «Управление», the delete moved here).
+  return panel('Управление', body +
     '<div class="panel-actions even">' + btn('tunnel-probe', 'check', 'Проверить', 'primary', ' data-name="' + esc(name) + '"' + (r && r.busy ? ' disabled' : '')) +
-    btn('tunnel-restart', 'refresh', 'Перезапустить', '', ' data-name="' + esc(name) + '"' + (cfgOk() && !TUNBUSY[name] && !TUNUP[name] ? '' : ' disabled')) + '</div>');
+    btn('tunnel-restart', 'refresh', 'Перезапустить', '', ' data-name="' + esc(name) + '"' + (cfgOk() && !TUNBUSY[name] && !TUNUP[name] ? '' : ' disabled')) + '</div>' +
+    tunnelDeleteHtml(name, name === prof().tunnel_interface));
 }
 const wifiHost = mac => { const c = ((S.wifi && S.wifi.clients) || []).find(x => x.mac === mac); return (c && c.host) || null; };
 const wifiName = mac => { const h = wifiHost(mac); return (h && (h.name || h.hostname)) || mac; };
