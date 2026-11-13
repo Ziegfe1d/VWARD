@@ -1725,19 +1725,22 @@ function offNotice() {
 }
 /* ---------- Хранение журналов ---------- */
 // How long and how much of the technical journals the router keeps; nothing goes before that.
-const JOURNAL_KEEP = [[1, '1 день'], [3, '3 дня'], [7, 'Неделя'], [30, 'Месяц'], [180, '6 месяцев'], [365, 'Год']];
-const JOURNAL_SIZE = [1, 5, 10, 30, 0];
-const journalSizeText = mb => mb ? mb + ' МБ' : 'Без ограничений';
+// Four positions each, as everywhere (owner 13.11.2026: the slider of Smart DNS); 0 - «Без ограничений».
+// An older term or size (1 or 3 days, half a year, 1 or 5 MB) still works; it selects no position.
+const JOURNAL_KEEP = [['7', 'Неделя'], ['30', 'Месяц'], ['365', 'Год'], ['0', 'Без ограничений']];
+const JOURNAL_SIZE = [['10', '10 МБ'], ['30', '30 МБ'], ['100', '100 МБ'], ['0', 'Без ограничений']];
+const journalKeepText = d => ({ 0: 'без ограничений', 1: '1 день', 3: '3 дня', 7: 'неделя', 30: 'месяц', 180: '6 месяцев', 365: 'год' })[d] || d + ' дн.';
+const journalSizeText = mb => +mb ? mb + ' МБ' : 'без ограничений';
 function journalPanel() {
   const j = S.journal || {}, a = j.archived || {}, l = j.live || {};
-  const keep = j.keep_days || 30, max = j.max_mb != null ? j.max_mb : 30, pos = Math.max(0, JOURNAL_SIZE.indexOf(max));
+  const keep = j.keep_days != null ? j.keep_days : 30, max = j.max_mb != null ? j.max_mb : 30;
   const oldest = a.oldest ? new Date(a.oldest).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
   // The settings are shown at once (owner 13.11.2026: «90% of it is static»), with the last known values
   // and locked until the router answers; only the two numbers below wait for it.
   const ready = !!S.journal && !S.cached.journal, lock = ready ? '' : ' disabled';
   return panel('Хранение журналов', '<dl class="kv">' +
-      ctrlRow('Срок хранения', sel('data-journal="keep"' + lock, 'Срок хранения журналов', JOURNAL_KEEP, keep)) +
-      ctrlRow('Предельный размер', '<span class="range-field"><input class="range" type="range" min="0" max="' + (JOURNAL_SIZE.length - 1) + '" step="1" value="' + pos + '"' + lock + ' data-journal-size aria-label="Предельный размер журналов" aria-valuetext="' + esc(journalSizeText(max)) + '"><output id="journalSize">' + esc(journalSizeText(max)) + '</output></span>') +
+      ctrlRow('Срок хранения', choiceSlider('j-keep', JOURNAL_KEEP.map(o => [o[0], o[1], !ready]), String(keep), 'Срок хранения журналов'), '', 'stack') +
+      ctrlRow('Предельный размер', choiceSlider('j-size', JOURNAL_SIZE.map(o => [o[0], o[1], !ready]), String(max), 'Предельный размер журналов'), '', 'stack') +
       '</dl>' + kv([
         ['Сейчас', S.journal ? fmtKB(Math.round(((a.bytes || 0) + (l.bytes || 0)) / 1024)) : S.errors.journal ? 'не загружено' : '…', S.errors.journal && !S.journal ? 'warn' : ''],
         ['Самая старая запись', S.journal ? (oldest ? 'с ' + oldest : 'архива пока нет') : S.errors.journal ? 'не загружено' : '…']
@@ -3538,6 +3541,8 @@ function segPick(key, v) {
   if (key === 'site-do') { if (v === 'block') { confirm = { id: 'site-block', dom: SITEDOM }; render(); } else siteDo(v, SITEDOM); return; }
   if (key === 'vsrv-sort') { VVIEW.sort = v; vViewSave(); render(); }
   else if (key === 'sd-store') sdStoreSet(v);
+  else if (key === 'j-keep') cfgSet({ op: 'journal', target: 'keep', value: v }, 'Срок хранения: ' + journalKeepText(+v), ['journal']);
+  else if (key === 'j-size') cfgSet({ op: 'journal', target: 'size', value: v }, 'Предельный размер: ' + journalSizeText(v), ['journal']);
   else if (key === 'upd-mode') updateMode(v);
   else if (key === 'upd-method') cfgSet({ op: 'update', target: 'update_method', value: v }, v === 'files' ? 'Способ: изменённые файлы' : 'Способ: целиком', ['status']);
   else if (key === 'tq-speed') cfgSet({ op: 'tunnel-auto', target: 'speed', value: v }, 'Замер скорости: ' + (TQ_SPEED.find(o => o[0] === v) || [, v])[1], ['tq']);
@@ -4256,12 +4261,6 @@ function tunnelNetsPage(name) {
       return fmtInt(all) + ' подсетей идут через «' + tunLabel(name) + '».' + (all > nets.length ? ' Показаны первые ' + fmtInt(nets.length) + '.' : '');
     })() });
 }
-// The size slider says where it stands while it moves; the setting is saved when it is let go.
-document.addEventListener('input', e => {
-  if (!e.target.hasAttribute || !e.target.hasAttribute('data-journal-size')) return;
-  const txt = journalSizeText(JOURNAL_SIZE[+e.target.value]), o = $('journalSize');
-  if (o) o.textContent = txt; e.target.setAttribute('aria-valuetext', txt);
-});
 document.addEventListener('input', e => {
   if (!e.target.dataset || !e.target.dataset.netFilter) return;
   const q = e.target.value.trim();
@@ -5609,8 +5608,6 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', e => {
   const t = e.target;
-  if (t.dataset.journal) { cfgSet({ op: 'journal', target: 'keep', value: t.value }, 'Срок хранения: ' + ((JOURNAL_KEEP.find(k => String(k[0]) === t.value) || [])[1] || t.value).toLowerCase(), ['journal']); return; }
-  if (t.hasAttribute('data-journal-size')) { const mb = JOURNAL_SIZE[+t.value]; cfgSet({ op: 'journal', target: 'size', value: String(mb) }, 'Предельный размер: ' + journalSizeText(mb).toLowerCase(), ['journal']); return; }
   if (t.dataset.tabpick) {
     const id = t.dataset.tabpick;
     if (t.checked) { if (tabIds.length >= TAB_MAX) { t.checked = false; toast('На панели помещается не больше ' + TAB_MAX + ' разделов'); return; } tabIds.push(id); }

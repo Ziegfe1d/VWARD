@@ -69,8 +69,8 @@ MAX_MB=30
 if [ -r "$JOURNAL_CONF" ]; then
     while IFS='=' read -r JK JV; do
         case "$JK:$JV" in
-            KEEP_DAYS:1|KEEP_DAYS:3|KEEP_DAYS:7|KEEP_DAYS:30|KEEP_DAYS:180|KEEP_DAYS:365) KEEP_DAYS=$JV ;;
-            MAX_MB:0|MAX_MB:1|MAX_MB:5|MAX_MB:10|MAX_MB:30) MAX_MB=$JV ;;
+            KEEP_DAYS:0|KEEP_DAYS:1|KEEP_DAYS:3|KEEP_DAYS:7|KEEP_DAYS:30|KEEP_DAYS:180|KEEP_DAYS:365) KEEP_DAYS=$JV ;;
+            MAX_MB:0|MAX_MB:1|MAX_MB:5|MAX_MB:10|MAX_MB:30|MAX_MB:100) MAX_MB=$JV ;;
         esac
     done < "$JOURNAL_CONF"
 fi
@@ -277,7 +277,8 @@ fi
 # Technical journals: archived ones older than the owner's term go; then, while the archive and
 # the live journals together are over the size limit, the oldest archived one.
 if [ -d "$ARCHIVE" ]; then
-    find "$ARCHIVE" -type f -name '*.gz' -mtime +$((KEEP_DAYS - 1)) 2>/dev/null | while IFS= read -r JOLD; do
+    # KEEP_DAYS 0: no term (owner 13.11.2026), only the size limit below takes the oldest.
+    [ "$KEEP_DAYS" -eq 0 ] || find "$ARCHIVE" -type f -name '*.gz' -mtime +$((KEEP_DAYS - 1)) 2>/dev/null | while IFS= read -r JOLD; do
         echo "RETENTION_DELETE|$JOLD"
         rm -f "$JOLD"
     done

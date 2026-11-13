@@ -155,8 +155,15 @@ with tempfile.TemporaryDirectory() as tmp:
     left = [f for f in big if f.exists()]
     if res.returncode != 0 or not big[-1].exists() or big[0].exists() or len(left) > 2:
         fail(f"1 MB: the oldest archived journals go, the newest stays: {[f.name for f in left]}")
+    # «Без ограничений» for the term (owner 13.11.2026): KEEP_DAYS=0 takes nothing by age.
+    ancient = arch / "vward-wan-guard.log.20250101-000000.gz"; ancient.write_bytes(gzip.compress(b"a")); aged(ancient, 400 * 1440)
+    (etc / "journal.conf").write_text("KEEP_DAYS=0\nMAX_MB=0\n")
+    res = subprocess.run([busybox, "sh", str(SCRIPT)], env=env, capture_output=True, text=True)
+    if res.returncode != 0 or not ancient.exists() or "RETENTION_DELETE" in res.stdout:
+        fail(f"RED: no term must keep every archived journal: {res.stdout[-300:]} {res.stderr[-300:]}")
+    ancient.unlink()
     # A limit nobody can set is ignored.
-    (etc / "journal.conf").write_text("KEEP_DAYS=0\nMAX_MB=-5\n")
+    (etc / "journal.conf").write_text("KEEP_DAYS=-1\nMAX_MB=-5\n")
     res = subprocess.run([busybox, "sh", str(SCRIPT)], env=env, capture_output=True, text=True)
     if res.returncode != 0 or not big[-1].exists():
         fail("a broken journal.conf must fall back to the defaults")

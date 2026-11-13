@@ -4825,8 +4825,10 @@ op_journal_clear() {
 op_journal() {
     [ "$1" != clear ] || op_journal_clear "$2"
     case "$1:$2" in
-        keep:1|keep:3|keep:7|keep:30|keep:180|keep:365) jk=KEEP_DAYS ;;
-        size:0|size:1|size:5|size:10|size:30) jk=MAX_MB ;;
+        # 0: no term / no limit (owner 13.11.2026: «Без ограничений» for both); the older terms and
+        # sizes stay valid until the owner picks another.
+        keep:0|keep:1|keep:3|keep:7|keep:30|keep:180|keep:365) jk=KEEP_DAYS ;;
+        size:0|size:1|size:5|size:10|size:30|size:100) jk=MAX_MB ;;
         *) die invalid_value 64 ;;
     esac
     set_kv "$JOURNAL_CONF" "$jk" "$2" 0644 || done_ok "journal $1=$2" unchanged

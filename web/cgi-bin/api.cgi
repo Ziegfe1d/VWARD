@@ -944,8 +944,8 @@ journal_files() {
 if [ "$ACTION" = journal-data ]; then
     header_json
     JC=${VWARD_JOURNAL_CONF:-/opt/etc/vward/journal.conf}
-    KEEP="$(sed -n 's/^KEEP_DAYS=//p' "$JC" 2>/dev/null | tail -n 1)"; case "$KEEP" in 1|3|7|30|180|365) ;; *) KEEP=30 ;; esac
-    MAXMB="$(sed -n 's/^MAX_MB=//p' "$JC" 2>/dev/null | tail -n 1)"; case "$MAXMB" in 0|1|5|10|30) ;; *) MAXMB=30 ;; esac
+    KEEP="$(sed -n 's/^KEEP_DAYS=//p' "$JC" 2>/dev/null | tail -n 1)"; case "$KEEP" in 0|1|3|7|30|180|365) ;; *) KEEP=30 ;; esac
+    MAXMB="$(sed -n 's/^MAX_MB=//p' "$JC" 2>/dev/null | tail -n 1)"; case "$MAXMB" in 0|1|5|10|30|100) ;; *) MAXMB=30 ;; esac
     journal_files | ( cd "$LOG_ROOT" 2>/dev/null && while IFS= read -r F; do ls -ln "$F"; done ) | awk -v now="$(date +%s)" '
         {name = $0; for (i = 1; i <= 8; i++) sub(/^[^ ]+ +/, "", name)
          if (name ~ /^vward\/archive\//) {an++; ab += $5; s = name; sub(/.*\.log\./, "", s); sub(/(-[0-9]+)?\.gz$/, "", s)
