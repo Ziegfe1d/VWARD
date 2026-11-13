@@ -69,7 +69,10 @@ const fs = require('fs');
   for (const w of [320, 390]) {
     const p = await b.newPage({ viewport: { width: w, height: 600 } });
     await p.setContent(html);
-    out[w] = await p.$$eval('.btn', bs => bs.map(x => [Math.round(x.getBoundingClientRect().top), x.scrollWidth <= x.clientWidth + 1]));
+    // fix.38.1: a centred label that is too long spills out on both sides - scrollWidth does not see the left
+    // side (the owner's «Очистить всё временное», its broom outside the button); every part must be inside.
+    out[w] = await p.$$eval('.btn', bs => bs.map(x => { const r = x.getBoundingClientRect(), g = document.createRange(); g.selectNodeContents(x); const c = g.getBoundingClientRect();
+      return [Math.round(r.top), c.left >= r.left - 0.5 && c.right <= r.right + 0.5]; }));
     await p.close();
   }
   await b.close();

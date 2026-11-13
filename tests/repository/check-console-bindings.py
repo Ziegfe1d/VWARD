@@ -135,8 +135,38 @@ if "data-log-go" in js or "'open-log'" in js:
 if 'data-go="a-adaptive">' not in js:
     fail("autopick's page lacks «Вся история»")
 for row in ("['Сверка маршрутов', '', '', 'a-routing']",
-            "['История агента VPN', '', '', 'a-tunnel']", "['Восстановление VPN', watch ? 'Наблюдение' : 'автоматическое'"):
+            "['История агента VPN', '', '', 'a-tunnel']", "ctrlRow('Восстановление VPN', modeSlider('network',"):
     if row not in js:
         fail(f"Panel row changed: {row}")
+
+# fix.38.1 (owner 12.11.2026): the service's tunnel is a slider when it fits; «Восстановление VPN» is the
+# network agent's mode in place (no jump to the agents' list); each agent is one switch, no stack of sliders.
+for need in ("tuns.length + 1 <= 4 ? choiceSlider('svc-tun:' + id,", "else if (key.startsWith('svc-tun:'))",
+             "sw('data-agent-act=\"' + a[0] + '\"'", "if (t.dataset.agentAct) {"):
+    if need not in js:
+        fail(f"fix.38.1: {need!r} is missing")
+# fix.38.1: a page with its data on the screen is renewed quietly; «медленно» only with data missing.
+if "keys && keys.every(k => S[k] != null))) return; b.slow = true;" not in js or "busyStart(id, keys)" not in js:
+    fail("fix.38.1: the slow-router words show although the page's data is on the screen")
+# fix.38.1 (Panel audit 12.11.2026): no «Зависимости» pages without a way in (an old address opens the
+# component); the Overview's «Обновления» opens VWARD's updates; the AdGuard Home update page has its own title.
+if "DETAILS['deps-'" in js or "function depsPage(" in js or "if (/\\/deps$/.test(p)) return idOf(p.slice(0, -5));" not in js:
+    fail("fix.38.1: the «Зависимости» pages are back, or an old address of one opens nothing")
+if "title: 'Обновления', to: 'u-vward'," not in js or "'u-agh': { title: 'Обновление AdGuard Home'," not in js:
+    fail("fix.38.1: «Обновления» on the Overview or the AdGuard Home update page title")
+# fix.38.1 (owner 12.11.2026, technical clutter): no «Запрошено в» under a history, «Отказов подряд» only above
+# zero, «Очистка» only what takes space, no per-part version and date, no «opkg», no «HTTPS-фильтр: недоступен»,
+# two cron lines of one script told apart.
+for need in ("(num(wg.down_streak) ? kv([['Отказов подряд'", "const rows = CLEAN.filter(g => kb[g[0]]).map(", "kv([['Запуск', c.when]]) +",
+             "S.https && S.https.ok ? ['HTTPS-фильтр'", "esc(JOB_TAGS[x.tag] || JOB_NAMES[x.name] || x.name)"):
+    if need not in js:
+        fail(f"fix.38.1 clutter: {need!r} is missing")
+for gone in ("'<p class=\"log-at\">Запрошено в '", "['Обновляется через'", "['Версия', verHuman(x.release"):
+    if gone in js:
+        fail(f"fix.38.1 clutter: {gone!r} is back")
+if 'tag: (.[4] // "")' not in api:
+    fail("fix.38.1: cron-data gives each line its status tag")
+if "watch ? 'd-agents' : null" in js or "compact-modes" in js:
+    fail("fix.38.1: «Восстановление VPN» leads to the agents' list again, or the per-agent sliders are back")
 
 print("CONSOLE_BINDINGS=PASS")

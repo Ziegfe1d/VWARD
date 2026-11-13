@@ -81,7 +81,7 @@ f = r.stdout
 if f.count('class="log-e') != 4:
     fail(f"three WOULD_TAKE_OUT in a row from one journal are one card, another journal's one is not: {f.count('class=\"log-e')}")
 for need in ("AdGuard Home выведен из цепочки DNS", "причина: AdGuard Home отправляет запросы обратно роутеру",
-             "Наблюдение: VWARD вывел бы AdGuard Home", "AdGuard Home не отвечал", "Повторилось 3 раза подряд, 10:49:00–10:51:00",
+             "Песочница: VWARD вывел бы AdGuard Home", "AdGuard Home не отвечал", "Повторилось 3 раза подряд, 10:49:00–10:51:00",
              "AdGuard Home снова в цепочке DNS", 'log-e ok', 'log-e warn'):
     if need not in f.replace("<wbr>", ""):
         fail(f"DNS guard events: {need!r} missing")
