@@ -67,8 +67,10 @@ if '"$ENG" enable "$2"' not in body:
 # goes through the VPN, and must say the lists go direct (card, notification, tunnel page).
 # Switched off by the owner (owner 2026-10-12): the Overview and the tunnel page say the lists
 # go direct, the bell stays quiet (check-console-tunnel-status.py runs it).
-for need in ("!on.some(t => t.name === prof().tunnel_interface) ? 'списки идут напрямую'",
-             "down = tunnels.filter(t => !isTrue(t.connected) && !tunOff(t) && !tunGuardOff(t) && !tunLost(t))",
+# One meaning of «not connected» for the card and the bell (owner 13.11.2026): vpnSummary.
+for need in ("!vs.viaDefault ? 'списки идут напрямую'", "viaDefault: on.some(t => t.name === prof().tunnel_interface)",
+             "down: tunnels.filter(t => !isTrue(t.connected) && !tunOff(t) && !tunGuardOff(t) && !tunLost(t))",
+             "const vs = vpnSummary(), tunnels = vs.tunnels, down = vs.down, lostT = vs.lost;",
              "он назначен по умолчанию, списки VPN идут напрямую"):
     if need not in JS:
         fail(f"a default tunnel switched off outside the Panel: lacks {need}")

@@ -1278,7 +1278,7 @@ function notifications() {
   const w = s.wan || {}, wg = s.wg || {}, sv = s.services || {}, p = s.platform || {}, stg = s.storage || {};
   if (w.internet === false) n.push({ sev: 'crit', title: 'Нет интернета', text: 'VWARD восстанавливает подключение', to: 'wan' });
   // A tunnel the owner switched off is the owner's choice, not news; one the VPN agent switched off is (below).
-  const tunnels = wg.interfaces || [], down = tunnels.filter(t => !isTrue(t.connected) && !tunOff(t) && !tunGuardOff(t) && !tunLost(t)), lostT = tunnels.filter(tunLost);
+  const vs = vpnSummary(), tunnels = vs.tunnels, down = vs.down, lostT = vs.lost;
   // Keenetic takes no two tunnels with one address: the second one never connects.
   tunDupAddresses(tunnels).forEach(d => n.push({ sev: 'warn', title: 'У двух туннелей один адрес', text: d.names.map(tunLabel).join(', ') + ': ' + d.addr + '. Keenetic не соединит второй туннель - замените конфигурацию одного из них.', to: 't-' + d.names[1] }));
   // A VWARD tunnel whose settings went with the old USB drive: one note with what to do, not «не в сети».
@@ -1296,11 +1296,11 @@ function notifications() {
   if (isTrue(wg.failopen_active)) { const ti = prof().tunnel_interface; n.push({ sev: 'warn', own: true, title: '«' + tunLabel(ti) + '» выключен агентом VPN' + (wg.failopen_at ? ' ' + fmtTime(wg.failopen_at * 1000) : ''), text: (foText(wg) ? 'Причина: ' + foText(wg) + '. ' : '') + 'Сайты из списков идут напрямую. Агент проверяет туннель раз в 5 минут и включит его сам.', to: 't-' + ti }); }
   if (sv.adguard === false && sv.adguard_broken) n.push({ sev: 'crit', title: 'AdGuard Home не запускается', text: 'Она не запускается даже с --version. VWARD сам ставит официальную сборку AdGuard Home, или нажмите «Установить официальную сборку».', to: 'u-agh' });
   // An update stops the jobs for its minute: not news while it runs.
-  const updating = ['VERIFIED', 'BACKING_UP', 'INSTALLING', 'VERIFYING', 'COMMIT_PREPARED', 'ROLLING_BACK'].includes(p.phase);
+  const us = updateSummary(), updating = us.running;
   if (!updating && (sv.crond === false || sv.supervisor === false)) n.push({ sev: 'crit', title: 'Задания по расписанию остановлены', text: 'расписание заданий не работает', to: 'd-cron' });
   const total = num(stg.total_kb), free = num(stg.free_kb);
   if (total && free != null && lowDisk(total, free)) n.push({ sev: 'warn', title: 'Мало места в хранилище', text: 'свободно ' + fmtKB(free), to: 'system' });
-  if (['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase)) n.push({ sev: 'crit', title: 'Обновление требует внимания', text: phaseText(p.phase), to: 'u-vward' });
+  if (us.failed) n.push({ sev: 'crit', title: 'Обновление требует внимания', text: phaseText(us.phase), to: 'u-vward' });
   if (S.update && S.update.pending && S.update.pending.present && S.update.pending.feed !== 'other') n.push({ sev: 'news', icon: 'save', title: 'Вышла новая версия VWARD', text: verHuman(S.update.pending.version, S.update.pending.sequence) + ' - нажмите, чтобы посмотреть и установить', to: 'u-vward' });
   const offComps = compsOffUnexpected();
   if (offComps.length) n.push({ sev: 'warn', title: 'Выключено компонентов: ' + offComps.length, text: offComps.map(x => compName(x.id)).join(', '), to: 'utils' });
@@ -1331,6 +1331,7 @@ function routeSummary() {
   const netsOf = name => !L ? null : (L.subnet_counts || {})[name] != null ? num(L.subnet_counts[name]) || 0 : ((L.subnets || {})[name] || []).length;
   const tunnels = L ? Object.keys(Object.assign({}, L.subnet_counts || {}, L.subnets || {})) : [];
   return {
+    all: all ? all.length : null,
     lists: own ? own.length : null,
     domains: own ? own.reduce((n, l) => n + (num(l.count) || 0), 0) : null,
     vpnLists: all ? all.filter(l => viaIs(l, 'vpn')).length : null,
@@ -1423,6 +1424,22 @@ function partRow(p) {
   }
   return kv([[p.title, pill[1], pill[0], page, '', why || p.desc]]).replace(/^<dl class="kv">|<\/dl>$/g, '');
 }
+// ---- VPN and updates: one summary each (owner 13.11.2026, one value - one place) ----
+// The card said «0 из 1 · не на связи» for a tunnel the VPN agent switched off or one without settings,
+// the bell did not: one meaning of «not connected» for both.
+function vpnSummary() {
+  const s = st(), wg = s.wg || {}, tunnels = wg.interfaces || [], on = tunnels.filter(t => !tunOff(t));
+  return { known: !!s.wg && !wg.interfaces_unknown, tunnels, on, off: tunnels.length - on.length,
+    up: on.filter(t => isTrue(t.connected)), lost: tunnels.filter(tunLost), guardOff: tunnels.filter(tunGuardOff),
+    down: tunnels.filter(t => !isTrue(t.connected) && !tunOff(t) && !tunGuardOff(t) && !tunLost(t)),
+    viaDefault: on.some(t => t.name === prof().tunnel_interface) };
+}
+// The updater's state: the updates page's own answer when there is one (fresher), else the status's.
+function updateSummary() {
+  const phase = (S.update && S.update.phase) || plat().phase;
+  return { phase, failed: ['FAILED', 'RECOVERY_REQUIRED'].includes(phase), idle: ['IDLE', 'COMMITTED', undefined, null, ''].includes(phase),
+    running: ['VERIFIED', 'BACKING_UP', 'INSTALLING', 'VERIFYING', 'COMMIT_PREPARED', 'ROLLING_BACK'].includes(phase) };
+}
 function cardData(id) {
   const s = st(), p = plat(), w = s.wan || {}, wg = s.wg || {}, sv = s.services || {}, g = s.storage || {}, r = S.route || {}, wf = S.wifi || {}, a = S.ads || {};
   const tunnels = wg.interfaces || [], up = tunnels.filter(t => isTrue(t.connected)).length;
@@ -1433,28 +1450,31 @@ function cardData(id) {
     case 'system': { const hv = verHuman(p.version, p.last_sequence), vm = /^(.*?) (#.*)$/.exec(hv); return { icon: 'platform', title: 'Система', to: 'system', value: vm ? vm[1] : hv || '—',
       // One short line on a phone: the components are on the System page.
       sub: vm ? vm[2] : comps ? comps + ' ' + plural(comps, 'компонент', 'компонента', 'компонентов') : 'версия VWARD', pill: p.version ? ['ok', 'Работает'] : ['', '—'] }; }
-    case 'updates': return { icon: 'refresh', title: 'Обновления', to: 'u-vward', value: ['IDLE', 'COMMITTED', undefined, ''].includes(p.phase) ? 'Новых нет' : phaseText(p.phase), sub: num(p.feed_ok_at) != null ? 'проверено ' + fmtStamp(p.feed_ok_at) : 'канал ' + (p.channel || '—'), pill: ['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase) ? ['crit', 'Ошибка'] : ['', ''] };
+    case 'updates': { const us = updateSummary(); return { icon: 'refresh', title: 'Обновления', to: 'u-vward', value: us.idle ? 'Новых нет' : phaseText(us.phase), sub: num(p.feed_ok_at) != null ? 'проверено ' + fmtStamp(p.feed_ok_at) : 'канал ' + (p.channel || '—'), pill: us.failed ? ['crit', 'Ошибка'] : ['', ''] }; }
     case 'wan': return { icon: 'globe', title: 'Интернет', to: 'wan', value: w.internet ? 'В сети' : w.internet === false ? 'Нет связи' : s.wan ? 'Роутер отвечает медленно' : '—', sub: w.speed ? 'порт ' + fmtSpeed(w.speed) : w.address || 'адрес не получен', pill: w.internet ? ['ok', 'Работает'] : w.internet === false ? ['crit', 'Не работает'] : s.wan ? ['warn', 'Нет ответа'] : ['', '—'] };
     // Only switched-on tunnels count: one the owner switched off is not a fault (owner 2026-10-12).
     case 'vpn': {
-      const on = tunnels.filter(t => !tunOff(t)), off = tunnels.length - on.length, upOn = on.filter(t => isTrue(t.connected)).length, gOff = tunnels.find(tunGuardOff);
+      const vs = vpnSummary(), on = vs.on, off = vs.off, upOn = vs.up.length, gOff = vs.guardOff[0];
       if (wg.interfaces_unknown) return { icon: 'shield', title: 'VPN', to: 'vpn', value: '—', sub: 'Keenetic не ответил', pill: ['', 'Нет данных'] };
       return { icon: 'shield', title: 'VPN', to: 'vpn', value: !tunnels.length ? '—' : !on.length ? 'Выключен' : upOn + ' из ' + on.length,
         // One short line (three lines a card, owner 2026-10-12): what is wrong first, then the switched off.
         sub: !tunnels.length ? 'туннелей нет' : !on.length ? 'все туннели выключены' : gOff ? 'выключен агентом: ' + tunLabel(gOff.name)
-          : upOn < on.length ? 'не на связи: ' + on.filter(t => !isTrue(t.connected)).map(t => tunLabel(t.name)).join(', ')
-          : !on.some(t => t.name === prof().tunnel_interface) ? 'списки идут напрямую' : off ? 'ещё ' + off + ' ' + plural(off, 'выключен', 'выключены', 'выключены') + ' вами' : 'трафик через VPN',
+          : vs.lost.length ? 'нет настроек: ' + vs.lost.map(t => tunLabel(t.name)).join(', ')
+          : vs.down.length ? 'не на связи: ' + vs.down.map(t => tunLabel(t.name)).join(', ')
+          : !vs.viaDefault ? 'списки идут напрямую' : off ? 'ещё ' + off + ' ' + plural(off, 'выключен', 'выключены', 'выключены') + ' вами' : 'трафик через VPN',
         pill: !tunnels.length ? ['', 'Нет туннелей'] : !on.length ? ['', 'Выключен'] : upOn === on.length ? ['ok', 'Работает'] : ['warn', 'Внимание'] };
     }
     case 'lists': {
       const rs = routeSummary(), vpn = rs.vpnLists || 0, around = rs.bypassLists || 0, auto = rs.autoMoved || 0;
-      return { icon: 'list', title: 'Доменные списки', to: 'lists', value: S.lists ? vpn + ' через VPN' : '—', sub: S.lists ? (vpn && vpnDirect() ? 'сейчас напрямую' : around + ' в обход') : 'списки Keenetic', pill: !S.lists ? ['', '—'] : vpn && vpnDirect() ? ['warn', 'Напрямую'] : auto ? ['warn', 'Переведено авто: ' + auto] : ['info', ls.length + ' ' + plural(ls.length, 'список', 'списка', 'списков')] };
+      return { icon: 'list', title: 'Доменные списки', to: 'lists', value: S.lists ? vpn + ' через VPN' : '—', sub: S.lists ? (vpn && vpnDirect() ? 'сейчас напрямую' : around + ' в обход') : 'списки Keenetic', pill: !S.lists ? ['', '—'] : vpn && vpnDirect() ? ['warn', 'Напрямую'] : auto ? ['warn', 'Переведено авто: ' + auto] : ['info', rs.all + ' ' + plural(rs.all, 'список', 'списка', 'списков')] };
     }
-    // Everything that goes through VPN: lists and their domains, the tunnels' subnets, the IP categories when on.
-    case 'routes': { const rs = routeSummary();
-      return { icon: 'route', title: 'Маршруты', to: 'routes', value: rs.lists == null ? '—' : fmtInt(rs.lists) + ' ' + plural(rs.lists, 'список', 'списка', 'списков'),
-        sub: vpnDirect() ? 'сейчас напрямую' : rs.lists == null ? 'списки и подсети' : [fmtInt(rs.domains) + '\u00a0' + plural(rs.domains, 'домен', 'домена', 'доменов'),
-          fmtInt(rs.nets) + '\u00a0' + plural(rs.nets, 'подсеть', 'подсети', 'подсетей')].concat(rs.ipOn && rs.ipActive ? [fmtInt(rs.ipActive) + '\u00a0' + plural(num(rs.ipActive), 'IP\u2011категория', 'IP\u2011категории', 'IP\u2011категорий')] : []).join(' · '),
+    // What goes through VPN, from the one summary: the tunnels' subnets (the IP categories' routes among them),
+    // and the domains of the lists under them; no subnets - the domains first. One short line under the value.
+    case 'routes': { const rs = routeSummary(), doms = fmtInt(rs.domains) + '\u00a0' + plural(rs.domains, 'домен', 'домена', 'доменов'),
+        inl = 'в ' + fmtInt(rs.lists) + '\u00a0' + plural(rs.lists, 'списке', 'списках', 'списках');
+      return { icon: 'route', title: 'Маршруты', to: 'routes',
+        value: rs.lists == null ? '—' : rs.nets ? fmtInt(rs.nets) + ' ' + plural(rs.nets, 'подсеть', 'подсети', 'подсетей') : doms,
+        sub: vpnDirect() ? 'сейчас напрямую' : rs.lists == null ? 'списки и подсети' : rs.nets ? doms + ' ' + inl : inl,
         pill: !S.route && !S.lists ? ['', '—'] : vpnDirect() ? ['warn', 'Напрямую'] : ['ok', 'Работает'] }; }
     case 'wifi': return { icon: 'wifi', title: 'Wi-Fi клиенты', to: 'wifi', value: S.wifi && !wf.enabled ? '—' : fmtInt(wf.count) + ' ' + plural(num(wf.count) || 0, 'клиент', 'клиента', 'клиентов'), sub: wf.enabled ? (warnWifi ? wifiWarnText(wf) : 'без замечаний') : 'сбор данных выключен', pill: !S.wifi ? ['', '—'] : warnWifi ? ['warn', 'Внимание'] : wf.enabled ? ['ok', 'Работает'] : ['', 'Выключен'] };
     // What AdGuard Home blocked today (the domains VWARD itself blocked are a handful and read as
@@ -2656,7 +2676,7 @@ const RENDER = {
         feedCheckRow(p),
         p.last_health_check ? ['Проверка после установки', fmtStamp(p.last_health_check), '', 'a-updater'] : null
       ]) + (conf || (acts.length ? '<div class="panel-actions even">' + acts.join('') + '</div>' : '')) + resultBox('updates'),
-      { right: ['FAILED', 'RECOVERY_REQUIRED'].includes(u.phase || p.phase) ? headPill('crit', phaseText(u.phase || p.phase)) : '' }) +
+      { right: updateSummary().failed ? headPill('crit', phaseText(updateSummary().phase)) : '' }) +
       panel('Настройки обновлений', '<dl class="kv">' +
         ctrlRow('Установка обновлений', choiceSlider('upd-mode', [['auto', 'Сама'], ['schedule', 'По времени'], ['manual', 'Вручную']], mode, 'Установка обновлений'), ({ auto: 'сразу после проверки подписи', schedule: 'критические исправления - сразу', manual: 'только проверка и уведомление' })[mode]) +
         (mode === 'schedule' ? ctrlRow('Время установки', sel('data-cfg-upd="install_time"', 'Время установки', withCur(HOURS, winStart, ''), winStart), 'обновление ставится при первой проверке после этого времени') : '') +
