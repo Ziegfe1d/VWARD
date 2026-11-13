@@ -1215,6 +1215,12 @@ function kv(rows) {
 function ctrlRow(key, control, hint, cls) { if (!cls && /<select|seg-slider/.test(control)) cls = 'stack'; return '<div class="kv-row' + (cls ? ' ' + cls : '') + '" data-key="' + esc(key) + '"><dt>' + dtHtml(key, hint) + '</dt><dd>' + control + '</dd></div>'; }
 const sw = (attr, on, label, disabled) => '<label class="switch"><input type="checkbox" ' + attr + (on ? ' checked' : '') + (disabled ? ' disabled' : '') + ' aria-label="' + esc(label) + '"><i></i></label>';
 const sel = (attr, label, opts, value) => '<select class="input compact" ' + attr + ' aria-label="' + esc(label) + '">' + opts.map(o => '<option value="' + esc(o[0]) + '"' + (String(value) === String(o[0]) ? ' selected' : '') + (o[2] ? ' disabled' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select>';
+// A choice of up to four as the Panel's slider (owner 13.11.2026: «as in Smart DNS», everywhere), working
+// through the select's own «change» handler: a hidden select carries the attribute and the value, a tap on
+// the slider sets it and fires «change» - the checks and the router's answer stay the select's.
+const segSel = (attr, label, opts, value) => { const off = /\bdisabled\b/.test(attr);
+  return '<span class="seg-sel">' + sel(attr + ' hidden', label, opts, value) +
+    choiceSlider('sel:' + label, opts.map(o => [String(o[0]), o[1], off || !!o[2]]), String(value), label, true) + '</span>'; };
 // One sign per action across the Panel (owner 2026-10-17): delete - a bin, clear - a broom...
 const BTN_ICONS = [[/^Удалить/, 'trash'], [/^Очистить/, 'broom'], [/^Скачать/, 'download'], [/^Установить/, 'box'], [/^Выйти/, 'logout'],
   [/^Сбросить|^Полный сброс/, 'reset'], [/^(Выключить|Отключить|Включить)/, 'power'], [/^Обновить серверы/, 'download'], [/^(Перезапустить|Обновить|Повторить)/, 'refresh'],
@@ -2264,7 +2270,7 @@ const RENDER = {
       ]), { right: st().wan && w.internet === false ? headPill('crit', 'Нет связи') : '' }) +
       panel('Восстановление интернета', '<dl class="kv">' +
         ctrlRow('Восстанавливать автоматически', sw('data-cfg-wg', guardOn, 'Восстанавливать интернет автоматически', !cfgOk()), guardOn ? '' : 'выключено: при сбое воспользуйтесь кнопками ниже') +
-        (guardOn ? ctrlRow('Проверять', sel('data-cfg-wanp="CHECK_INTERVAL_MIN"' + (cfgOk() ? '' : ' disabled'), 'Как часто проверять интернет', [[1, 'раз в минуту'], [2, 'раз в 2 минуты'], [5, 'раз в 5 минут'], [10, 'раз в 10 минут'], [15, 'раз в 15 минут'], [30, 'раз в 30 минут']], ((cfg().wan_guard || {}).params || {}).CHECK_INTERVAL_MIN || 1), 'при сбое - каждую минуту, пока связь не вернётся') : '') + '</dl>' +
+        (guardOn ? ctrlRow('Проверять', segSel('data-cfg-wanp="CHECK_INTERVAL_MIN"' + (cfgOk() ? '' : ' disabled'), 'Как часто проверять интернет', [[1, '1 мин'], [5, '5 мин'], [15, '15 мин'], [30, '30 мин']], ((cfg().wan_guard || {}).params || {}).CHECK_INTERVAL_MIN || 1), 'при сбое - каждую минуту, пока связь не вернётся') : '') + '</dl>' +
         confirmBox('wg-off', 'Выключить автоматическое восстановление? При сбое интернет придётся восстанавливать кнопками.', 'Выключить', true) +
         (guardOn && stage ? '<p class="field-warn">Сейчас: ' + esc(STAGE[stage] || 'идёт восстановление') + '</p>' : '') +
         // The manual buttons in the same section: two sections of one name were one too many (owner 2026-10-17).
@@ -2440,10 +2446,10 @@ const RENDER = {
     const recent = a.recent || [];
     return loadError(['ads']) +
       panel('Настройки проверки', '<dl class="kv">' +
-        ctrlRow('Режим работы', sel('data-ads-set="RUN_MODE"', 'Режим работы', [['scheduled', 'По расписанию'], ['dynamic', 'По запросам'], ['manual', 'Вручную']], runMode), ({ scheduled: 'новые домены проверяются пачкой раз в интервал', dynamic: 'каждый новый домен проверяется сразу', manual: 'проверка только по кнопке' })[runMode]) +
-        (runMode === 'scheduled' ? ctrlRow('Интервал', sel('data-ads-set="SCHEDULE_INTERVAL_MIN"', 'Интервал', [['5', '5 минут'], ['10', '10 минут'], ['30', '30 минут'], ['60', '1 час']], s.SCHEDULE_INTERVAL_MIN || '10')) : '') +
+        ctrlRow('Режим работы', segSel('data-ads-set="RUN_MODE"', 'Режим работы', [['scheduled', 'Расписание'], ['dynamic', 'По запросам'], ['manual', 'Вручную']], runMode), ({ scheduled: 'новые домены проверяются пачкой раз в интервал', dynamic: 'каждый новый домен проверяется сразу', manual: 'проверка только по кнопке' })[runMode]) +
+        (runMode === 'scheduled' ? ctrlRow('Интервал', segSel('data-ads-set="SCHEDULE_INTERVAL_MIN"', 'Интервал', [['5', '5 мин'], ['10', '10 мин'], ['30', '30 мин'], ['60', '1 час']], s.SCHEDULE_INTERVAL_MIN || '10')) : '') +
         ctrlRow('Обновлять источники автоматически', sw('data-ads-set="AUTO_SOURCE_UPDATE"', isTrue(s.AUTO_SOURCE_UPDATE), 'Обновлять источники автоматически', !S.ads), 'раз в ' + (s.SOURCE_UPDATE_INTERVAL_HOURS || 24) + ' ч') +
-        ctrlRow('Новые правила применять к', sel('data-ads-set="AUTO_RULE_SCOPE"', 'Новые правила', [['exact', 'Только домену'], ['suffix', 'Домену и поддоменам']], s.AUTO_RULE_SCOPE || 'exact')) +
+        ctrlRow('Новые правила применять к', segSel('data-ads-set="AUTO_RULE_SCOPE"', 'Новые правила', [['exact', 'Домену'], ['suffix', 'И поддоменам']], s.AUTO_RULE_SCOPE || 'exact')) +
         '</dl>' + resultBox('ads'));
   },
   // fix.38 (owner 12.11.2026: «по порядочку, без дублей»): every part of VWARD once, from the
@@ -2642,7 +2648,7 @@ const RENDER = {
       ]), { desc: f.update_available ? 'Прошивку ставит Keenetic, роутер перезагрузится.' : '' }) +
       panel('Настройки', '<dl class="kv">' +
         ctrlRow('Обновлять автоматически', sw('data-fw-auto', f.auto_update, 'Обновлять прошивку автоматически'), 'Keenetic сам установит новую версию канала, роутер перезагрузится') +
-        ctrlRow('Канал обновлений', sel('data-fw-channel', 'Канал обновлений', chans.map(c => [c.name, fwChannel(c.name)]), f.channel), (f.channel === 'stable' ? 'проверенные версии' : 'тестовые версии, возможны ошибки') + (cur.version ? ' · ' + cur.version : '')) +
+        ctrlRow('Канал обновлений', segSel('data-fw-channel', 'Канал обновлений', chans.map(c => [c.name, fwChannel(c.name)]), f.channel), (f.channel === 'stable' ? 'проверенные версии' : 'тестовые версии, возможны ошибки') + (cur.version ? ' · ' + cur.version : '')) +
         '</dl>' + confirmBox('fw-channel', 'Перейти на тестовый канал? Тестовые прошивки могут работать с ошибками.', 'Перейти', true),
         { desc: 'Те же настройки, что в Keenetic.' });
   },
@@ -2701,7 +2707,7 @@ const RENDER = {
       panel('Настройки обновлений', '<dl class="kv">' +
         ctrlRow('Установка обновлений', choiceSlider('upd-mode', [['auto', 'Сама'], ['schedule', 'По времени'], ['manual', 'Вручную']], mode, 'Установка обновлений'), ({ auto: 'сразу после проверки подписи', schedule: 'критические исправления - сразу', manual: 'только проверка и уведомление' })[mode]) +
         (mode === 'schedule' ? ctrlRow('Время установки', sel('data-cfg-upd="install_time"', 'Время установки', withCur(HOURS, winStart, ''), winStart), 'обновление ставится при первой проверке после этого времени') : '') +
-        ctrlRow('Интервал проверки', sel('data-cfg-upd="check_interval_seconds"', 'Интервал проверки', withCur([[900, '15 минут'], [1800, '30 минут'], [3600, '1 час'], [10800, '3 часа'], [21600, '6 часов'], [43200, '12 часов'], [86400, '24 часа']], interval, ' с'), interval)) +
+        ctrlRow('Интервал проверки', segSel('data-cfg-upd="check_interval_seconds"', 'Интервал проверки', [[900, '15 мин'], [3600, '1 час'], [21600, '6 часов'], [86400, '24 часа']], interval)) +
         ctrlRow('Способ обновления', choiceSlider('upd-method', [['full', 'Целиком'], ['files', 'Изменённые файлы']], uc.update_method === 'files' ? 'files' : 'full', 'Способ обновления'),
           uc.update_method === 'files' ? 'скачиваются только изменённые файлы; если не вышло - пакет целиком' : 'скачивается весь пакет; если не вышло - изменённые файлы') +
         (FEED_HINT[feed] ? ctrlRow('Канал', choiceSlider('upd-feed', [['main', 'Стабильная'], ['dev', 'Разработка']], feed, 'Канал обновлений'), FEED_HINT[feed]) : '') +
@@ -2846,19 +2852,19 @@ const RENDER = {
 
   'd-wanrec'() {
     const gp = Object.assign({ CONFIRM_FAILURES: 3, RENEW_COOLDOWN: 600, BOUNCE_COOLDOWN: 1800, MAX_RENEW_HOUR: 3, MAX_BOUNCE_HOUR: 2, MAX_BOUNCE_DAY: 6 }, (cfg().wan_guard || {}).params);
-    const gsel = (key, label, opts, unit) => sel('data-cfg-wanp="' + key + '"' + (cfgOk() ? '' : ' disabled'), label, withCur(opts, gp[key], unit || ''), gp[key]);
-    const counts = n => Array.from({ length: n }, (x, i) => [i + 1, String(i + 1)]);
+    // Four positions each, the defaults among them (owner 13.11.2026); an older value still works, it selects none.
+    const gsel = (key, label, opts) => segSel('data-cfg-wanp="' + key + '"' + (cfgOk() ? '' : ' disabled'), label, opts, gp[key]);
     const hist = wanHistory((S.wanhist && S.wanhist.text) || '');
     return cfgNote() +
-      panel('Расписание', '<dl class="kv">' + ctrlRow('Неудачных проверок подряд', gsel('CONFIRM_FAILURES', 'Неудачных проверок подряд', counts(10)), 'столько раз подряд интернет не отвечает, прежде чем VWARD вмешается') + '</dl>') +
+      panel('Расписание', '<dl class="kv">' + ctrlRow('Неудачных проверок подряд', gsel('CONFIRM_FAILURES', 'Неудачных проверок подряд', [[2, '2'], [3, '3'], [5, '5'], [10, '10']]), 'столько раз подряд интернет не отвечает, прежде чем VWARD вмешается') + '</dl>') +
       panel('Смена адреса', '<dl class="kv">' +
-        ctrlRow('Не чаще раза в', gsel('RENEW_COOLDOWN', 'Пауза между запросами адреса', [[60, '1 минуту'], [300, '5 минут'], [600, '10 минут'], [1800, '30 минут'], [3600, 'час']], ' с')) +
-        ctrlRow('Не больше в час', gsel('MAX_RENEW_HOUR', 'Запросов адреса в час', counts(10))) + '</dl>',
+        ctrlRow('Не чаще раза в', gsel('RENEW_COOLDOWN', 'Пауза между запросами адреса', [[300, '5 мин'], [600, '10 мин'], [1800, '30 мин'], [3600, '1 час']])) +
+        ctrlRow('Не больше в час', gsel('MAX_RENEW_HOUR', 'Запросов адреса в час', [[1, '1'], [3, '3'], [5, '5'], [10, '10']])) + '</dl>',
         { desc: 'Первый шаг, связь почти не прерывается.' }) +
       panel('Переподключение', '<dl class="kv">' +
-        ctrlRow('Не чаще раза в', gsel('BOUNCE_COOLDOWN', 'Пауза между переподключениями', [[300, '5 минут'], [900, '15 минут'], [1800, '30 минут'], [3600, 'час'], [7200, '2 часа']], ' с')) +
-        ctrlRow('Не больше в час', gsel('MAX_BOUNCE_HOUR', 'Переподключений в час', counts(6))) +
-        ctrlRow('Не больше в сутки', gsel('MAX_BOUNCE_DAY', 'Переподключений в сутки', counts(24))) + '</dl>',
+        ctrlRow('Не чаще раза в', gsel('BOUNCE_COOLDOWN', 'Пауза между переподключениями', [[900, '15 мин'], [1800, '30 мин'], [3600, '1 час'], [7200, '2 часа']])) +
+        ctrlRow('Не больше в час', gsel('MAX_BOUNCE_HOUR', 'Переподключений в час', [[1, '1'], [2, '2'], [3, '3'], [6, '6']])) +
+        ctrlRow('Не больше в сутки', gsel('MAX_BOUNCE_DAY', 'Переподключений в сутки', [[3, '3'], [6, '6'], [12, '12'], [24, '24']])) + '</dl>',
         { desc: 'Второй шаг: интернет пропадёт секунд на 10.' }) +
       panel('История', !S.wanhist ? empty('Загрузка…') : hist.length ? '<ul class="rows">' + hist.map(h => '<li class="row"><div class="row-main"><b>' + esc(h.what) + '</b><small>' + esc(h.when) + '</small></div><span class="st ' + (h.ok ? 'ok' : 'crit') + '">' + (h.ok ? 'выполнено' : 'не удалось') + '</span></li>').join('') + '</ul>' : empty('Восстановлений ещё не было'),
         { desc: 'Последние действия.' });
@@ -2994,7 +3000,7 @@ const RENDER = {
   },
   'd-sources'() {
     const src = (S.ads && S.ads.sources) || [];
-    return panel('Источники списков', src.length ? '<ul class="rows">' + src.map(x => '<li class="row"><div class="row-main"><b>' + esc(x.name || x.id) + '</b><small>' + esc(catText(x.purpose)) + (x.cached ? ' · загружен' : ' · ещё не загружен') + '</small></div>' + sel('data-ads-source="' + esc(x.id) + '"', 'Режим ' + (x.name || x.id), [['off', 'Выключен'], ['check', 'Проверка'], ['active', 'Активен']], x.mode) + (x.custom ? '<button class="icon-btn" type="button" data-ads-srcdel="' + esc(x.id) + '" aria-label="Удалить источник" title="Удалить источник">' + ico('close') + '</button>' : '') + '</li>').join('') + '</ul>' : empty('Источники не найдены'), { desc: '«Активен» блокирует, «Проверка» только подсказывает.' }) +
+    return panel('Источники списков', src.length ? '<ul class="rows">' + src.map(x => '<li class="row"><div class="row-main"><b>' + esc(x.name || x.id) + '</b><small>' + esc(catText(x.purpose)) + (x.cached ? ' · загружен' : ' · ещё не загружен') + '</small></div>' + segSel('data-ads-source="' + esc(x.id) + '"', 'Режим ' + (x.name || x.id), [['off', 'Выкл'], ['check', 'Песочница'], ['active', 'Вкл']], x.mode) + (x.custom ? '<button class="icon-btn" type="button" data-ads-srcdel="' + esc(x.id) + '" aria-label="Удалить источник" title="Удалить источник">' + ico('close') + '</button>' : '') + '</li>').join('') + '</ul>' : empty('Источники не найдены'), { desc: '«Активен» блокирует, «Проверка» только подсказывает.' }) +
       panel('Добавить свой источник', '<form class="inline-form multi" data-form="ads-srcadd">' + formLabel('Адрес списка и его формат') + '<input class="input" name="url" placeholder="https://example.org/list.txt" aria-label="Адрес списка" autocomplete="off" inputmode="url"><select class="input compact" name="format" aria-label="Формат"><option value="adblock">Adblock</option><option value="hosts">hosts</option><option value="domains">Список доменов</option></select><button class="btn primary" type="submit">' + ico('plus') + 'Добавить</button></form>' + resultBox('ads-src'),
         { desc: 'Список по https, до 10 своих источников.' });
   },
@@ -3203,7 +3209,7 @@ const tqShort = t => { const q = tq(t.name);
 const tqWhat = q => q && q.name && vlessOf(q.name) ? 'ответ страницы ' : 'пинг ';
 const tqText = q => !q ? 'замеров ещё нет' : q.last_loss >= 100 ? 'не отвечает' + (q.up_pct != null ? ' · доступен ' + q.up_pct + '% за 30 мин' : '') :
   tqWhat(q) + (q.avg_ms != null ? q.avg_ms + ' мс' : '—') + ' · потери ' + (q.loss_pct != null ? q.loss_pct : '—') + '%' + (q.jitter_ms != null ? ' · разброс ' + q.jitter_ms + ' мс' : '') + tqSpeed(q);
-const TQ_CRITERIA = [['balanced', 'сбалансированно'], ['speed', 'скорости'], ['ping', 'отклику (пингу)']];
+const TQ_CRITERIA = [['balanced', 'Баланс'], ['speed', 'Скорость'], ['ping', 'Отклик']];
 const TQ_SPEED = [['night', 'ночью'], ['6h', 'раз в 6 часов'], ['off', 'выключен']];
 function tunnelsQualityPanel() {
   const tuns = (st().wg && st().wg.interfaces) || [], x = S.tq || {};
@@ -3216,7 +3222,7 @@ function tunnelsQualityPanel() {
     ctrlRow('Запасной туннель', sw('data-cfg-tq="tunnel-fallback"', x.fallback !== false, 'Запасной туннель', !cfgOk()), 'туннель не отвечает - его маршруты и списки переходят на лучший отвечающий туннель; если такого нет - идут напрямую') +
     ctrlRow('Возвращать на основной', sw('data-cfg-tq="tunnel-return"', x.return_home !== false, 'Возвращать на основной', !cfgOk()), 'туннель отвечает 15 минут подряд - маршруты и списки возвращаются на него') +
     ctrlRow('Выбирать лучший туннель', sw('data-cfg-ta="enabled"', a.enabled === true, 'Выбирать лучший туннель', !cfgOk()), 'маршруты VWARD переходят на туннель, который лучше на 30% 15 минут подряд; не чаще раза в 30 минут - переключение рвёт открытые соединения') +
-    (a.enabled ? ctrlRow('Выбирать туннель по', sel('data-cfg-ta="criterion"' + (cfgOk() ? '' : ' disabled'), 'Выбирать туннель по', TQ_CRITERIA, a.criterion || 'balanced'),
+    (a.enabled ? ctrlRow('Выбирать туннель по', segSel('data-cfg-ta="criterion"' + (cfgOk() ? '' : ' disabled'), 'Выбирать туннель по', TQ_CRITERIA, a.criterion || 'balanced'),
       a.criterion === 'speed' ? 'по замеру скорости, потери учитываются' : a.criterion === 'ping' ? 'пинг и разброс - для игр и звонков' : 'потери и пинг, скорость - добавкой') : '') +
     ctrlRow('Замер скорости', choiceSlider('tq-speed', [['night', 'Ночью'], ['6h', 'Раз в 6 ч'], ['off', 'Выключен']], a.speed || 'night', 'Замер скорости'), (a.speed === 'off' ? '' : a.speed === '6h' ? '' : 'между 03:00 и 05:00; ') + '10 МБ через каждый туннель по очереди') + '</dl>' +
     (a.enabled ? kv([
@@ -5463,6 +5469,10 @@ document.addEventListener('click', e => {
     cfgSet({ op: 'agents-mode', target: ag, value: m }, (ag === 'all' ? 'Все агенты' : agentName(ag)) + ': ' + (m === 'watch' ? 'песочница' : 'вкл'));
     return;
   }
+  if (t.dataset.seg && t.dataset.seg.startsWith('sel:')) {
+    const sl = t.closest('.seg-sel') && t.closest('.seg-sel').querySelector('select');
+    if (sl && t.getAttribute('aria-checked') !== 'true') { sl.value = t.dataset.v; sl.dispatchEvent(new Event('change', { bubbles: true })); }
+    return; }
   if (t.dataset.seg) { if (t.getAttribute('aria-checked') !== 'true') segPick(t.dataset.seg, t.dataset.v); return; }
   if (t.dataset.aiVia) {
     if (t.getAttribute('aria-checked') === 'true' || SVC.busy) return;
