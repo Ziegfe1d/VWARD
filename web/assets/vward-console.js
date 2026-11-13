@@ -800,6 +800,15 @@ function logTime(line) {
 // its continuation lines under its own time whatever the order. info (optional) receives
 // each source's state - its last event, empty, not created or unreadable - so a source with
 // nothing new is not «broken» and a broken one is not silently left out.
+// One time zone in the timeline (owner 13.11.2026: the Go core writes UTC «+0000», the updater «Z»,
+// housekeeping local time without a zone): every entry's time in this device's zone, its offset said.
+// Each journal on its own keeps its raw lines.
+function logRestamp(line, t) {
+  const d = new Date(t), p2 = n => String(n).padStart(2, '0'), off = -d.getTimezoneOffset();
+  const stamp = d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds()) +
+    (off < 0 ? '-' : '+') + p2(Math.floor(Math.abs(off) / 60)) + p2(Math.abs(off) % 60);
+  return line.replace(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*(?:Z|[+-]\d{2}:?\d{2})?/, stamp);
+}
 function mergeLogs(parts, newestFirst, info, limit) {
   const entries = [];
   parts.forEach(p => {
@@ -810,7 +819,7 @@ function mergeLogs(parts, newestFirst, info, limit) {
       const t = logTime(line);
       if (t == null && last) { last.lines.push('    ' + line); return; }
       if (t == null) return;
-      last = { t: t, n: entries.length, lines: ['[' + p.label + '] ' + line] };
+      last = { t: t, n: entries.length, lines: ['[' + p.label + '] ' + logRestamp(line, t)] };
       entries.push(last); n++; if (latest == null || t > latest) latest = t;
     });
     if (info) info.push({ label: p.label, last: latest, state: n ? 'ok' : /^Журнал недоступен/.test(first) ? 'error' : /^Журнал ещё не создан/.test(first) ? 'missing' : /^За последние \d+ ч записей нет/.test(first) ? 'quiet' : 'empty' });

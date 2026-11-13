@@ -19,6 +19,8 @@ def fail(message: str) -> None:
 
 a = JS.index("function logTime")
 funcs = JS[a:JS.index("\n}\n", JS.index("function mergeLogs")) + 3]
+if "function logRestamp(line, t) {" not in funcs:
+    fail("RED: the timeline keeps each journal's own time zone")
 script = funcs + """
 console.log(JSON.stringify(mergeLogs([
   {label: "Интернет", text: "2026-10-04 11:40:00+0300 class=HEALTHY\\n2026-10-04 12:00:00+0300 class=DOWN\\n  details\\n"},
@@ -30,8 +32,10 @@ r = subprocess.run(["node", "-e", script], text=True, capture_output=True, env=o
 if r.returncode:
     fail(r.stderr[-400:])
 got = json.loads(r.stdout)
-want = ["[VPN] 2026-10-04 11:30:00|OK", "[Интернет] 2026-10-04 11:40:00+0300 class=HEALTHY",
-        "[Обновления] 2026-10-04T08:45:00Z [INFO] check", "    no time line", "[VPN] 2026-10-04 11:50:00|FAILOPEN_DOWN",
+# One time zone in the timeline, its offset said (owner 13.11.2026: UTC «+0000», «Z» and local
+# time without a zone side by side in one export).
+want = ["[VPN] 2026-10-04 11:30:00+0300|OK", "[Интернет] 2026-10-04 11:40:00+0300 class=HEALTHY",
+        "[Обновления] 2026-10-04 11:45:00+0300 [INFO] check", "    no time line", "[VPN] 2026-10-04 11:50:00+0300|FAILOPEN_DOWN",
         "[Интернет] 2026-10-04 12:00:00+0300 class=DOWN", "      details"]
 if got != want:
     fail(f"timeline: {got}")
@@ -82,7 +86,7 @@ if r.returncode:
 o = json.loads(r.stdout)
 if o["got"] != {"wan": "2026-11-12 10:00:00+0300 a", "tunnel": "Журнал пуст: записей пока нет.", "ads": ""}:
     fail(f"the «Все» answer split by source: {o['got']}")
-if o["newest"] != ["[VPN] 2026-11-12 12:00:00|z", "[VPN] 2026-11-12 11:00:00|y"] or o["oldest"] != ["[VPN] 2026-11-12 11:00:00|y", "[VPN] 2026-11-12 12:00:00|z"]:
+if o["newest"] != ["[VPN] 2026-11-12 12:00:00+0300|z", "[VPN] 2026-11-12 11:00:00+0300|y"] or o["oldest"] != ["[VPN] 2026-11-12 11:00:00+0300|y", "[VPN] 2026-11-12 12:00:00+0300|z"]:
     fail(f"the newest N of the timeline in either order: {o}")
 if o["pick"] != ["[VPN] 2026-11-12 09:00:00|alpha", "    more"] or o["none"] != "Ничего не найдено":
     fail(f"«Найти в журнале» keeps whole entries: {o}")
