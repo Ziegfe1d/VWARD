@@ -58,7 +58,7 @@ for own in ("subnet_counts", "filter(l => viaIs(l, 'vpn')).length", "filter(l =>
     if own in rest:
         fail(f"RED: a place counts the routes itself: {own!r}")
 card = JS[JS.index("    case 'routes': {"):JS.index("    case 'ads':")]
-for need in ("const rs = routeSummary();", "plural(rs.lists, 'список', 'списка', 'списков')", "plural(rs.domains, 'домен', 'домена', 'доменов')",
+for need in ("const rs = routeSummary(),", "plural(rs.lists, 'списке', 'списках', 'списках')", "plural(rs.domains, 'домен', 'домена', 'доменов')",
              "plural(rs.nets, 'подсеть', 'подсети', 'подсетей')"):
     if need not in card:
         fail(f"RED: the «Маршруты» card lacks {need!r}")
