@@ -638,7 +638,7 @@ const LOADERS = {
 // The last answers are kept in the browser: a reopened console shows them at once
 // and refreshes from the router in the background.  Nothing secret is in them;
 // a login prompt or «Выйти» drops them.
-const CACHE_KEYS = ['tq', 'status', 'route', 'lists', 'update', 'security', 'ads', 'config', 'adsstats', 'agh', 'backups', 'cron', 'awg', 'ext', 'diag', 'adspub', 'services', 'notes'];
+const CACHE_KEYS = ['tq', 'status', 'route', 'lists', 'update', 'security', 'ads', 'config', 'adsstats', 'agh', 'backups', 'cron', 'awg', 'ext', 'diag', 'adspub', 'services', 'notes', 'journal'];
 const CACHE_TTL = 86400000, CACHE_MAX = 400000;
 S.cached = {};
 function cacheRead() {
@@ -1732,14 +1732,16 @@ function journalPanel() {
   const j = S.journal || {}, a = j.archived || {}, l = j.live || {};
   const keep = j.keep_days || 30, max = j.max_mb != null ? j.max_mb : 30, pos = Math.max(0, JOURNAL_SIZE.indexOf(max));
   const oldest = a.oldest ? new Date(a.oldest).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
-  return panel('Хранение журналов', (S.journal ? '<dl class="kv">' +
-      ctrlRow('Срок хранения', sel('data-journal="keep"', 'Срок хранения журналов', JOURNAL_KEEP, keep)) +
-      ctrlRow('Предельный размер', '<span class="range-field"><input class="range" type="range" min="0" max="' + (JOURNAL_SIZE.length - 1) + '" step="1" value="' + pos + '" data-journal-size aria-label="Предельный размер журналов" aria-valuetext="' + esc(journalSizeText(max)) + '"><output id="journalSize">' + esc(journalSizeText(max)) + '</output></span>') +
+  // The settings are shown at once (owner 13.11.2026: «90% of it is static»), with the last known values
+  // and locked until the router answers; only the two numbers below wait for it.
+  const ready = !!S.journal && !S.cached.journal, lock = ready ? '' : ' disabled';
+  return panel('Хранение журналов', '<dl class="kv">' +
+      ctrlRow('Срок хранения', sel('data-journal="keep"' + lock, 'Срок хранения журналов', JOURNAL_KEEP, keep)) +
+      ctrlRow('Предельный размер', '<span class="range-field"><input class="range" type="range" min="0" max="' + (JOURNAL_SIZE.length - 1) + '" step="1" value="' + pos + '"' + lock + ' data-journal-size aria-label="Предельный размер журналов" aria-valuetext="' + esc(journalSizeText(max)) + '"><output id="journalSize">' + esc(journalSizeText(max)) + '</output></span>') +
       '</dl>' + kv([
-        ['Сейчас', fmtKB(Math.round(((a.bytes || 0) + (l.bytes || 0)) / 1024))],
-        ['Самая старая запись', oldest ? 'с ' + oldest : 'архива пока нет']
-      ]) : S.errors.journal ? '<p class="field-warn">Настройки хранения не загружены: ' + esc(S.errors.journal) + '</p><div class="panel-actions">' + btn('journal-reload', 'refresh', 'Повторить', 'small') + '</div>' :
-        empty('Загрузка настроек хранения…')) +
+        ['Сейчас', S.journal ? fmtKB(Math.round(((a.bytes || 0) + (l.bytes || 0)) / 1024)) : S.errors.journal ? 'не загружено' : '…', S.errors.journal && !S.journal ? 'warn' : ''],
+        ['Самая старая запись', S.journal ? (oldest ? 'с ' + oldest : 'архива пока нет') : S.errors.journal ? 'не загружено' : '…']
+      ]) + (S.errors.journal && !ready ? '<p class="field-warn">Роутер не ответил: ' + esc(S.errors.journal) + '</p><div class="panel-actions">' + btn('journal-reload', 'refresh', 'Повторить', 'small') + '</div>' : '') +
     '',
     { desc: 'Журналы не стираются: старые записи сжимаются в архив и хранятся весь срок. Если журналы займут больше заданного размера, первыми уходят самые старые. «Скачать все журналы» - полная история одним архивом.' });
 }
