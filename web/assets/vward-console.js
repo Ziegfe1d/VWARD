@@ -2646,12 +2646,22 @@ const RENDER = {
     const c = confirm && confirm.id === 'ext-upgrade' ? pk.find(p => p.name === confirm.pkg) : null;
     const rows = pk.map(p => '<div class="kv-row" data-key="' + esc(p.name) + '"><dt>' + esc(p.name) + '<span class="hint">' + esc(extVer(p.installed) + ' → ' + extVer(p.available)) + (p.critical ? ' · системный пакет' : '') + '</span></dt><dd>' +
       btn('ask', 'save', 'Обновить', 'small', ' data-confirm="ext-upgrade" data-pkg="' + esc(p.name) + '"') + '</dd></div>').join('');
+    // Owner 13.11.2026: the state first (when checked, the updates), then the actions, then the settings; the
+    // packages VWARD itself needs with their versions (the whole Entware list is the system's own).
+    const vp = x.vward || [], miss = vp.filter(p => !p.installed);
     return loadError(['ext']) +
-      panel('Пакеты Entware', pk.length ? '<dl class="kv">' + rows + '</dl>' +
-        (c ? confirmBox('ext-upgrade', (c.critical ? 'Системный пакет: если он сломается, может пропасть SSH или командная строка. ' : '') + 'Обновить ' + c.name + ' до ' + extVer(c.available) + '? Перед установкой сохранится копия, при сбое вернётся прежняя версия.', 'Обновить', c.critical) : '') +
-        extRunNote(run) + resultBox('ext') :
-        empty(x.checked_at ? (x.feed_ok === false ? 'Список пакетов Entware не скачался. Повторите проверку позже.' : 'Все пакеты актуальны.') : 'Пакеты ещё не проверялись.') + '<div class="panel-actions">' + extCheckBtn('Проверить') + '</div>' + resultBox('ext'),
+      panel('Пакеты Entware', kv([
+          ['Проверено', x.checked_at ? fmtStamp(x.checked_at) : 'ещё не проверялись', x.checked_at && x.feed_ok === false ? 'warn' : '', null, '',
+            x.checked_at && x.feed_ok === false ? 'список пакетов Entware не скачался' : ''],
+          ['Обновления', !x.checked_at ? '—' : pk.length ? fmtInt(pk.length) : 'нет', pk.length ? 'warn' : ''],
+          x.installed_count ? ['Установлено пакетов', fmtInt(x.installed_count)] : null
+        ]) + (pk.length ? '<dl class="kv">' + rows + '</dl>' +
+        (c ? confirmBox('ext-upgrade', (c.critical ? 'Системный пакет: если он сломается, может пропасть SSH или командная строка. ' : '') + 'Обновить ' + c.name + ' до ' + extVer(c.available) + '?', 'Обновить') : '') +
+        extRunNote(run) + resultBox('ext') : ''),
         { desc: 'Программы Entware, на которых работает VWARD.' }) +
+      (vp.length ? panel('Пакеты VWARD', kv(vp.map(p => [p.name, p.installed ? extVer(p.installed) : 'не установлен', p.installed ? '' : 'crit'])),
+        { desc: miss.length ? 'Без ' + miss.map(p => p.name).join(', ') + ' часть VWARD не работает: поставьте заново установщиком.' : 'Нужны VWARD; обновляются вместе с остальными пакетами.' }) : '') +
+      panel('Действия', '<div class="panel-actions">' + extCheckBtn('Проверить обновления') + '</div>' + (pk.length ? '' : resultBox('ext'))) +
       panel('Настройки', '<dl class="kv">' + ctrlRow('Обновлять автоматически', sw('data-ext-auto="entware"', x.auto && x.auto.entware, 'Обновлять пакеты Entware автоматически'), 'кроме системных пакетов: их - только вручную') + '</dl>') +
       extHistory(x.history, h => h.name !== 'adguardhome-go');
   },

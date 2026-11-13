@@ -3315,11 +3315,14 @@ if [ "$ACTION" = ext-update-data ]; then
         --argjson fw "$X_FW" --argjson hist "$X_HIST" --argjson run "$(run_json "$EXT_RUN_DIR")" \
         --argjson agh_auto "$X_AGH" --argjson ent_auto "$X_ENT" --arg aov "$X_AOV" --arg aop "$X_AOP" \
         --arg critical " libc libgcc libpthread librt libssp libstdcpp busybox opkg entware-opt entware-release entware-upgrade dropbear " \
+        --arg vward_pkgs "curl jq tcpdump openssl-util ca-bundle lighttpd lighttpd-mod-cgi lighttpd-mod-setenv cron" \
         '{ok: true, checked_at: $at, feed_ok: ($orc == 0), installed_count: ($inst | length),
           auto: {agh: ($agh_auto == 1), entware: ($ent_auto == 1)},
           agh: {installed: ($inst["adguardhome-go"] // null), available: ([$up[] | select(.name == "adguardhome-go") | .available][0] // null),
             official: {installed: (if $aov == "" then null else $aov end), pinned: (if $aop == "" then null else $aop end)}},
           packages: [$up[] | select(.name != "adguardhome-go") | . + {critical: ($critical | contains(" " + .name + " "))}],
+          # The packages VWARD itself needs (install.sh PACKAGES), with what is installed (owner 13.11.2026).
+          vward: [$vward_pkgs | split(" ")[] | {name: ., installed: ($inst[.] // null)}],
           firmware: $fw, history: $hist, run: $run}'
     exit 0
 fi
