@@ -42,7 +42,8 @@ def line(start):
 code = "".join([
     line("const isTrue = "), line("const vlessOf = "), line("const awgOf = "), line("const tunLost = "), line("const tunNow = "), line("const FO_WHY = "), line("const foText = "), grab("const tunPill = ", "];\n"), line("const tunGuardOff = "),
     line("const tunOff = "), line("const viaIs = "), line("const vpnDirect = "),
-    grab("function tunDupAddresses("), grab("function notifications() {"), grab("function cardData(id) {"),
+    grab("function tunDupAddresses("), grab("function vpnSummary() {"), grab("function updateSummary() {"), grab("function routeSummary() {"), line("const compsOff = "), line("const compsOffUnexpected = "),
+    grab("function notifications() {"), grab("function cardData(id) {"),
 ])
 harness = """
 let STATUS = null; const S = { errors: {}, lists: null };
