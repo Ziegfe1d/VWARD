@@ -338,6 +338,11 @@ func runAdaptive(args []string) {
 					snap.Names[h] = &c
 				}
 				omu.Unlock()
+				// The streak before this round: a name that stays blocked (it was 0 and is 0) is no news.
+				prev := make(map[string]int, len(snap.Names))
+				for h, n := range snap.Names {
+					prev[h] = n.Streak
+				}
 				remove, ev := adaptive.Reconcile(ctx, snap, prober, f.wan, rc, time.Now())
 				omu.Lock()
 				for h, n := range snap.Names {
@@ -345,11 +350,7 @@ func runAdaptive(args []string) {
 						cur.Streak, cur.LastOK, cur.Checked = n.Streak, n.LastOK, n.Checked
 					}
 				}
-				for _, x := range ev {
-					if x.Event != "REMOVE" {
-						log.put("MAINT_"+x.Event, x.Host, fmt.Sprintf("streak=%d/%d %s", x.Streak, rc.Threshold, x.Why))
-					}
-				}
+				maintLog(prev, ev, rc.Threshold, log.put)
 				if len(remove) > 0 {
 					b, err := w.Remove(remove, time.Now())
 					switch {
@@ -479,5 +480,29 @@ func runAdaptive(args []string) {
 				log.put("SAVED", "-", "")
 			}
 		}
+	}
+}
+
+// maintLog writes a reconcile round: one line a name only when something changed; a name that
+// stays blocked (its streak was 0 and is 0) goes into one line a round with the count (owner's
+// diagnostics 13.11.2026: the journal was nearly all «MAINT_DIRECT_FAIL … streak=0/3»).
+func maintLog(prev map[string]int, ev []adaptive.ReconcileEvent, threshold int, put func(code, host, detail string)) {
+	still, unknown := 0, 0
+	for _, x := range ev {
+		if x.Event == "REMOVE" {
+			continue
+		}
+		if (x.Event == "DIRECT_FAIL" || x.Event == "DIRECT_UNKNOWN") && prev[x.Host] == 0 {
+			if x.Event == "DIRECT_FAIL" {
+				still++
+			} else {
+				unknown++
+			}
+			continue
+		}
+		put("MAINT_"+x.Event, x.Host, fmt.Sprintf("streak=%d/%d %s", x.Streak, threshold, x.Why))
+	}
+	if still+unknown > 0 {
+		put("MAINT_STILL_BLOCKED", "-", fmt.Sprintf("still=%d unknown=%d", still, unknown))
 	}
 }
