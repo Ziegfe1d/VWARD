@@ -4020,7 +4020,7 @@ PARTS_FACTS=$(
     s=$(pkg_of dnsmasq-full); printf 'dnsmasq\t%s\t1\t%s\t\n' "$(case $s in not-installed|'') echo 0 ;; *) echo 1 ;; esac)" "$(case $s in running*) echo 1 ;; installed-off) echo 0 ;; esac)"
     printf 'agh\t%s\t%s\t%s\t\n' "$AGH_INSTALLED" "$(part_on adguardhome.disabled)" "$ADGUARD"
     printf 'doh\t%s\t1\t%s\t\n' "$DOH_INST" "$DOH_RUN"
-    if [ "$CORE_RUN" = 1 ]; then printf 'dnscap\t1\t1\t1\tавтоподбор на Go ловит запросы сам\n'
+    if [ "$CORE_RUN" = 1 ]; then printf 'dnscap\t1\t1\t1\tотдельная программа не нужна\n'
     else printf 'dnscap\t%s\t1\t%s\t\n' "$DNSCAP_INST" "$([ "${DNSCAP_RUN:-0}" -gt 0 ] 2>/dev/null && echo 1 || echo 0)"; fi
     printf 'sentinel\t%s\t%s\t%s\t\n' "$SENTINEL_INST" "$(extra_on sentinel)" "$SENTINEL_RUN"
     for x in $("$JQ" -r '.parts[] | select(.switch == "extra" and .id != "sentinel") | .id' "$PARTS_REG" 2>/dev/null); do

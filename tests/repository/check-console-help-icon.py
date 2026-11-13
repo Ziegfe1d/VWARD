@@ -20,7 +20,7 @@ def fail(message: str) -> None:
 panel = JS[JS.index("function panel(title, body, opts) {"):JS.index("\n}\n", JS.index("function panel(title, body, opts) {"))]
 if "(opts.desc && (!longDesc || same || qOpen(dq))" not in panel:
     fail("a page's own block must show its explanation in place (its «?» left the top bar)")
-if "qGlue(title, longDesc && !folded ? qBtn(dq, title) : '') + '</h2>'" not in panel:
+if "'<span>' + qGlue(title, longDesc && !folded ? qBtn(dq, title) : '') + '</span></h2>'" not in panel:
     fail("RED: a block's «?» must sit in its title, right after the last word")
 dt = JS[JS.index("function dtHtml(key, hint) {"):JS.index("\n}\n", JS.index("function dtHtml(key, hint) {"))]
 if "qGlue(key, qBtn('r:' + key, key))" not in dt:

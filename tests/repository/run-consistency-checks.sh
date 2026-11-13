@@ -157,6 +157,7 @@ python3 tests/repository/check-lite-defaults.py || fail "lightened VWARD: only A
 python3 tests/repository/check-core-adaptive.py || fail "Autopodbor in Go: S91 runs the core, one writer of AdaptiveAuto"
 python3 tests/repository/check-flash-writes.py || fail "USB drive: free space read right, fewer writes"
 python3 tests/repository/check-parts-registry.py || fail "one registry of VWARD's parts, one name each"
+python3 tests/repository/check-console-route-summary.py || fail "one summary of the routes for the page, the cards and a tunnel"
 python3 tests/repository/check-hidden-parts.py || fail "frozen parts: hidden in the Panel and off for good, code kept (fix.39)"
 python3 tests/repository/check-parts-names.py || fail "names of parts and agents only from the registry"
 python3 tests/repository/check-tunnel-lost.py || fail "a tunnel without settings: no «Включить», «Добавить туннель» first"

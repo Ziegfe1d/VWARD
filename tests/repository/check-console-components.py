@@ -2,7 +2,7 @@
 """«Компоненты» (owner 2026-11-01; fix.38: the groups from the parts' registry): one state model.
 
 Installed / selected / enabled / running / works / known are separate facts; the user sees
-Работает, Установлен, Выключен, Не используется, Не установлен, Не работает, Нет связи or
+Работает, Установлен, Выкл (owner 13.11.2026: «Выкл · Песочница · Вкл»), Не используется, Не установлен, Не работает, Нет связи or
 Нет данных. Green only when the work is confirmed; never green from a process alone, from
 unknown data, from the browser's copy or after the router stopped answering. New Entware
 components (dnsmasq, sing-box) are never selected by themselves."""
@@ -124,7 +124,7 @@ if r.returncode:
     fail(r.stderr.strip()[-600:])
 got = json.loads(r.stdout)
 want = {
-    "model": {"unknown": "|Нет данных", "missing": "|Нет данных", "none": "off|Не установлен", "off": "off|Выключен",
+    "model": {"unknown": "|Нет данных", "missing": "|Нет данных", "none": "off|Не установлен", "off": "off|Выкл",
               "installed": "off|Установлен", "unused": "off|Не используется", "works": "ok|Работает", "bad": "crit|Не работает",
               "nolink": "crit|Нет связи", "nodata": "|Нет данных"},
     "sentinel": ["ok|Работает", "crit|Не работает", "|Нет данных", "crit|Не работает", "off|Не установлен", "|Нет данных"],

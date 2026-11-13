@@ -45,7 +45,7 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;display:flex;align-items:center;gap:8px;height:var(--topbar-h);padding-inline:16px;background:var(--surface);border-bottom:1px solid var(--line)}
 .topbar-title{flex:1;min-width:0;display:flex;align-items:center;gap:8px}
 .topbar-title h1{margin:0;font-size:var(--fs-lg);font-weight:650;line-height:1.2;display:flex;align-items:center;gap:2px;min-width:0}
-.topbar-title .page-title-text{overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;min-width:0}
+.topbar-title .page-title-text{overflow:hidden;display:block;white-space:nowrap;text-overflow:ellipsis;min-width:0}
 .topbar-title h1 .q-btn{margin:-6px 0}
 .icon-btn{position:relative;display:inline-grid;place-items:center;width:40px;height:40px;border:0;border-radius:var(--r-md);background:transparent;color:var(--muted)}
 .icon-btn:active{background:var(--surface-2)}
@@ -366,7 +366,7 @@ small.st .icon{width:14px;height:14px}
 .note-item.unread{background:var(--surface-2)}
 .note-item.unread::before{content:"";position:absolute;left:6px;top:24px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
 .notes-bar{position:sticky;top:-4px;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:40px;padding:4px 16px;background:var(--surface);border-bottom:1px solid var(--line);color:var(--muted);font-size:var(--fs-xs)}
-.notes-bar>span{flex:1}
+.notes-bar>span{flex:1 1 auto;white-space:nowrap}
 /* Знак важности: в уведомлениях колокольчика и во всплывающих. */
 .sev{flex:none;display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:var(--accent-soft);color:var(--accent)}
 .sev.ok{background:var(--ok-soft);color:var(--ok)}

@@ -72,4 +72,13 @@ if errors:
     for e in errors:
         print("FAIL:", e)
     sys.exit(1)
+# One state of a part in «Компоненты» and on its page (owner 13.11.2026: «Захват DNS-запросов» said
+# «Работает» there and «Не установлен» here while autopick in Go caught the queries itself).
+if "if (p.id === 'dnscap' && coreCaptures()) return ['ok', 'Делает автоподбор на Go'];" not in JS:
+    fail("RED: «Захват DNS-запросов» must say who catches the queries")
+_dc = JS[JS.index("  'd-dnscap'() {"):JS.index("  },", JS.index("  'd-dnscap'() {"))]
+if "c = p ? partPill(p)" not in _dc or "['Кто ловит запросы', 'автоподбор на Go'" not in _dc:
+    fail("RED: the page «Захват DNS-запросов» must show the part's own state")
+if "function mgmtNote(text) { return '<section class=\"block\"><p class=\"block-desc\">'" not in JS:
+    fail("a note of what a page cannot do is no section «Управление»")
 print("PARTS_NAMES=PASS")
