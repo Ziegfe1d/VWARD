@@ -2454,6 +2454,12 @@ const RENDER = {
     if (!P || !Array.isArray(P.list)) return (known ? loadError(['status']) : '') + panel('Компоненты', empty(S.status ? 'Роутер не прислал список частей: обновите VWARD' : 'Загрузка…'));
     const missing = [];
     const groups = (P.groups || []).map(g => {
+      // VWARD's base (the Panel, the runtime, the version files) is always on, nothing to switch: one line,
+      // the details on «Система» (owner 13.11.2026, ROADMAP fix.39 item 8).
+      if (g === 'Платформа') {
+        const base = P.list.filter(p => p.group === g), pills = base.map(partPill), bad = pills.find(x => x[0] === 'crit') || pills.find(x => x[0] === 'warn');
+        return base.length ? panel(g, kv([['Основа VWARD', bad ? bad[1] : 'Работает', bad ? bad[0] : 'ok', 'system', '', base.map(p => p.title).join(', ')]])) : '';
+      }
       const rows = P.list.filter(p => p.group === g).map(p => {
         // Programs not installed fold into one line (owner 02.11); VWARD's own core stays in its group.
         if (p.installed === false && (p.kind === 'module' || p.kind === 'service' && p.id !== 'routing-core')) { missing.push(partRow(p)); return ''; }
@@ -2463,7 +2469,7 @@ const RENDER = {
       return rows.length ? panel(g, '<dl class="kv">' + rows.join('') + '</dl>' + confirms,
         g === 'Обслуживание' && !P.all_extras ? { desc: 'Облегчённая VWARD: работают VPN и автоподбор доменов, остальное включается по одному.' } : null) : '';
     }).join('');
-    return (known ? loadError(['status']) : '') + agentsPanel() + groups +
+    return (known ? loadError(['status']) : '') + panel('Агенты', kv([agentsRow()])) + groups +
       (missing.length ? '<details class="block missing-comps"><summary class="block-head"><h2>' + ico('box', 'head-ico') + 'Не установлены (' + missing.length + ')</h2></summary><div class="panel"><dl class="kv">' + missing.join('') + '</dl></div></details>' : '');
   },
   // Cards of the components added on 01.11.2026: what is known, nothing that cannot be done yet.

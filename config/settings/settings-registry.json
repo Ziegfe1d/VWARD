@@ -923,7 +923,7 @@
       "id": "dnscap",
       "kind": "service",
       "title": "Захват DNS-запросов",
-      "group": "DNS и реклама",
+      "group": "Маршрутизация",
       "desc": "прежний автоподбор узнаёт новые домены; ядро на Go ловит их само",
       "switch": null,
       "agent": "components"
@@ -995,7 +995,7 @@
       "id": "services-refresh",
       "kind": "extra",
       "title": "Каталог сервисов",
-      "group": "Обслуживание",
+      "group": "Маршрутизация",
       "desc": "раз в сутки обновляет списки сервисов",
       "switch": "extra",
       "agent": "maintenance"
@@ -1012,9 +1012,9 @@
     {
       "id": "ext-update",
       "kind": "extra",
-      "title": "Обновления Entware и AdGuard Home",
+      "title": "Обновления пакетов",
       "group": "Обновления",
-      "desc": "раз в сутки проверяет и ставит сам",
+      "desc": "пакеты Entware и AdGuard Home: раз в сутки проверяет и ставит сам",
       "switch": "extra",
       "agent": "maintenance"
     },

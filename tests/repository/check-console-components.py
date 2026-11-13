@@ -26,7 +26,10 @@ page = JS[JS.index("  utils() {"):JS.index("  'd-dnsmasq'()")]
 # registry the router sends; the page draws every registry group that has parts.
 REG = json.loads((ROOT / "config/settings/settings-registry.json").read_text(encoding="utf-8"))
 parts = {p["id"]: p for p in REG["parts"]}
-for need in ("const groups = (P.groups || []).map(g => {", "P.list.filter(p => p.group === g)", "agentsPanel() + groups"):
+# Owner 13.11.2026: the agents one line here (their page has them all), VWARD's base one line (details on
+# «Система»), each part in the group of its work.
+for need in ("const groups = (P.groups || []).map(g => {", "P.list.filter(p => p.group === g)", "panel('Агенты', kv([agentsRow()])) + groups",
+             "if (g === 'Платформа') {", "kv([['Основа VWARD', bad ? bad[1] : 'Работает', bad ? bad[0] : 'ok', 'system', '',"):
     if need not in page:
         fail(f"the page is not drawn from the registry: {need!r}")
 for group in ("DNS и реклама", "VPN", "Обслуживание"):
@@ -142,4 +145,8 @@ for key, value in want.items():
 # Nothing on the page is green unless compStatus said so: no literal 'ok' pill for the rows.
 if "'Работает', 'ok'" in page:
     fail("a literal «Работает» on «Компоненты»")
+_parts = {p["id"]: p for p in REG["parts"]}
+for _id, _g in (("services-refresh", "Маршрутизация"), ("dnscap", "Маршрутизация"), ("ext-update", "Обновления")):
+    if _parts[_id]["group"] != _g:
+        fail(f"RED: {_id} belongs to «{_g}», not «{_parts[_id]['group']}»")
 print("CONSOLE_COMPONENTS=PASS")
