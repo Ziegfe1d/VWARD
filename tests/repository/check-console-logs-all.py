@@ -41,7 +41,7 @@ if got != want:
     fail(f"timeline: {got}")
 for need in ("const LOG_VIEW = [{ id: 'all', label: 'Все' }].concat(LOG_TABS);", "logTab = 'all'",
              "LOG_VIEW.map(t => '<button type=\"button\" data-log=\"'", "const info = [], merged = mergeLogs(parts, logNewest, info, want);",
-             "else copyText(text);", "LOG_TABS.filter(tb => tb.id !== 'cron')", "name = 'vward-' + tab + '-' + today() + '.txt'", "logFull(tab).then(text => download(name, text || '')"):
+             "btn('log-copy', 'copy', 'Копировать')", "copyText(S.logs[logTab] || '');", "LOG_TABS.filter(tb => tb.id !== 'cron')", "name = 'vward-' + tab + '-' + today() + '.txt'", "logFull(tab).then(text => download(name, text || '')"):
     if need not in JS:
         fail(f"the Panel lacks {need}")
 # Owner 2026-11-01: newest first by default (the choice kept in the browser); an entry keeps its

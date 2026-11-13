@@ -2738,7 +2738,7 @@ const RENDER = {
       '<p class="field-warn" id="logWarn"' + (shown && LOGWARN[logTab] ? '' : ' hidden') + '>' + esc(LOGWARN[logTab] || '') + '</p>' +
       (shown ? '<p class="log-at" id="logAt">' + esc(logStamp(logTab)) + '</p>' : '') +
       '<div class="panel-actions"><button class="btn primary log-show' + (busy ? ' spinning' : '') + '" type="button" data-act="log-show"' + (busy ? ' disabled aria-busy="true"' : '') + '>' + ico(shown ? 'refresh' : 'logs') + (shown ? 'Обновить журнал' : 'Показать журнал') + '</button></div>' +
-      '<div class="panel-actions even log-acts">' + btn('log-save', 'download', 'Скачать') + btn('log-share', 'share', 'Поделиться') + btn('log-save-all', 'archive', 'Архивировать') +
+      '<div class="panel-actions even log-acts">' + btn('log-save', 'download', 'Скачать') + btn('log-copy', 'copy', 'Копировать') + btn('log-save-all', 'archive', 'Архивировать') +
         btn('ask', 'trash', 'Очистить', 'danger', ' data-confirm="log-clear" data-what="' + esc(logTab) + '"') + '</div>' +
       confirmBox('log-clear', 'Очистить ' + name + '? Записи удалятся с роутера, архивы останутся.', 'Очистить', true) +
       '</div></section>' + journalPanel();
@@ -5575,12 +5575,11 @@ document.addEventListener('click', e => {
   else if (a === 'log-order') { logNewest = t.dataset.v !== 'oldest'; store.set('vward-log-order', logNewest ? 'newest' : 'oldest'); if (LOGPARTS.length) S.logs.all = mergeLogs(LOGPARTS, logNewest, null, logShown.all || logN) || S.logs.all; render(); }
   else if (a === 'log-wrap') { logWrap = t.dataset.v !== '0'; render(); }
   else if (a === 'log-view') { logImportant = t.dataset.v !== 'all'; store.set('vward-log-view', logImportant ? 'important' : 'all'); render(); }
-  else if (a === 'log-share') {
-    // A phone's own share menu (copying is there); a computer copies the text.
+  // «Копировать» (owner 13.11.2026: «Поделиться» only copied - the Panel at http:// has no share menu):
+  // the entries shown, at once (the clipboard takes text only right after the tap).
+  else if (a === 'log-copy') {
     if (!logShown[logTab]) { toast('Сначала нажмите «Показать журнал»'); return; }
-    const text = S.logs[logTab] || '';
-    if (navigator.share) navigator.share({ title: 'Журнал VWARD: ' + logLabel(logTab), text: text }).catch(err => { if (err && err.name !== 'AbortError') copyText(text); });
-    else copyText(text);
+    copyText(S.logs[logTab] || '');
   }
   // «Скачать» saves the whole live journal of the source (owner 13.11.2026: it saved only the entries
   // shown, «Показать ещё» is for the eyes): one quiet request, the page is not redrawn (owner 12.11.2026).
