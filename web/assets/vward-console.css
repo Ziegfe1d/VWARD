@@ -366,6 +366,7 @@ small.st .icon{width:14px;height:14px}
 .note-item.unread{background:var(--surface-2)}
 .note-item.unread::before{content:"";position:absolute;left:6px;top:24px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
 .notes-bar{position:sticky;top:-4px;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:40px;padding:4px 16px;background:var(--surface);border-bottom:1px solid var(--line);color:var(--muted);font-size:var(--fs-xs)}
+.notes-bar>span{flex:1}
 /* Знак важности: в уведомлениях колокольчика и во всплывающих. */
 .sev{flex:none;display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:var(--accent-soft);color:var(--accent)}
 .sev.ok{background:var(--ok-soft);color:var(--ok)}

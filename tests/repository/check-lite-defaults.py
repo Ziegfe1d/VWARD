@@ -165,4 +165,20 @@ for need in ("function partRow(p) {", "'data-extra=\"' + p.id + '\"'", "cfgSet({
 API = (ROOT / "web/cgi-bin/api.cgi").read_text()
 if "extra) set -- \"$OP\" \"$TARGET\" \"$VALUE\" ;;" not in API or "extras:{all:($extras_all==\"1\")" not in API:
     fail("the API reads and switches the optional parts")
+# A component off by default is not a warning (owner 13.11.2026): the router's answer marks it
+# «default», the Panel's one list of the unexpected ones leaves it out (the bell and «Система»).
+_a = API.index('OFF_WITH="$(for F in "$COMPONENT_STATE"/*.disabled'); line = API[_a:API.index("2>/dev/null)\"", _a) + len("2>/dev/null)\"")]
+with tempfile.TemporaryDirectory() as td3:
+    cs = Path(td3)
+    (cs / "wan-guard.disabled").write_text("disabled by default 2026-11-12T10:00:00+0300 (lightened VWARD)\n")
+    (cs / "policy-sync.disabled").write_text("disabled by install.sh 2026-11-12\n")
+    (cs / "tunnel-guard.disabled").write_text("disabled 2026-11-13 (with route-engine)\n")
+    (cs / "ads-privacy-guard.disabled").write_text("disabled 2026-11-13\n")
+    got = subprocess.run(["sh", "-c", f'COMPONENT_STATE="{cs}"; JQ=jq\n{line}\nprintf "%s" "$OFF_WITH"'], capture_output=True, text=True).stdout
+    if _json.loads(got) != {"wan-guard": "default", "policy-sync": "install", "tunnel-guard": "route-engine", "ads-privacy-guard": ""}:
+        fail(f"RED: off by default must be told apart: {got}")
+if "const compsOffUnexpected = () => compsOff().filter(x => x.off_with !== 'install' && x.off_with !== 'default');" not in JSX or \
+   JSX.count("compsOffUnexpected()") < 2 or "((S.config && S.config.components) || []).filter(x => x.enabled === false)" in JSX.replace(
+       "const compsOff = () => ((S.config && S.config.components) || []).filter(x => x.enabled === false);", ""):
+    fail("the switched-off components are counted in one place, the default ones are no warning")
 print("LITE_DEFAULTS=PASS")

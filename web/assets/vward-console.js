@@ -751,6 +751,10 @@ const compName = id => (((st().parts || {}).list || []).find(p => p.id === id) |
 const capFirst = t => t ? t[0].toUpperCase() + t.slice(1) : t;
 /* Граф компонентов приходит из реестра через API (config-data). */
 const graphOf = id => ((cfg().components) || []).find(x => x.id === id);
+// Switched-off components, one place (owner 13.11.2026): every one, and those worth a warning - not the
+// ones off by default (lightened VWARD) or since the installation.
+const compsOff = () => ((S.config && S.config.components) || []).filter(x => x.enabled === false);
+const compsOffUnexpected = () => compsOff().filter(x => x.off_with !== 'install' && x.off_with !== 'default');
 // On or off: the router's answer about the part (fix.38, one source for every page), else the graph.
 const compOn = id => { const p = (st().parts && st().parts.list || []).find(x => x.id === id); if (p && p.enabled != null) return p.enabled; const g = graphOf(id); return !g || g.enabled !== false; };
 let adsStatsAsked = false;
@@ -1283,7 +1287,7 @@ function notifications() {
   if (total && free != null && lowDisk(total, free)) n.push({ sev: 'warn', title: 'Мало места в хранилище', text: 'свободно ' + fmtKB(free), to: 'system' });
   if (['FAILED', 'RECOVERY_REQUIRED'].includes(p.phase)) n.push({ sev: 'crit', title: 'Обновление требует внимания', text: phaseText(p.phase), to: 'u-vward' });
   if (S.update && S.update.pending && S.update.pending.present && S.update.pending.feed !== 'other') n.push({ sev: 'news', icon: 'save', title: 'Вышла новая версия VWARD', text: verHuman(S.update.pending.version, S.update.pending.sequence) + ' - нажмите, чтобы посмотреть и установить', to: 'u-vward' });
-  const offComps = ((S.config && S.config.components) || []).filter(x => x.enabled === false && x.off_with !== 'install');
+  const offComps = compsOffUnexpected();
   if (offComps.length) n.push({ sev: 'warn', title: 'Выключено компонентов: ' + offComps.length, text: offComps.map(x => compName(x.id)).join(', '), to: 'utils' });
   if (S.config && S.config.wan_guard && S.config.wan_guard.enabled === false) n.push({ sev: 'warn', title: 'Восстановление интернета выключено', text: 'при сбое интернет не восстановится автоматически', to: 'wan' });
   if (S.config && S.config.tunnel_guard && S.config.tunnel_guard.enabled === false) n.push({ sev: 'warn', title: 'Агент VPN выключен', text: 'при падении туннеля сайты из списков VPN будут недоступны', to: 'vpn' });
@@ -2474,9 +2478,9 @@ const RENDER = {
     // fix.38.1 (owner 12.11.2026): VWARD first - its updates and state; the router itself below.
     return loadError(['status', 'update', 'ext']) + RENDER.updatesPanel() +
       panel('Состояние', kv([
-        (() => { const off = ((S.config && S.config.components) || []).filter(x => x.enabled === false).map(x => compName(x.id));
+        (() => { const off = compsOff().map(x => compName(x.id)), odd = compsOffUnexpected().length;
           // fix.38.1: the number on the right, the names under it (six lines on a phone before).
-          return ['Управление', off.length ? 'выключено ' + off.length : 'всё включено', off.length ? 'warn' : '', 'd-control', '', off.length ? off.join(', ') : 'все выключатели VWARD']; })(),
+          return ['Управление', off.length ? 'выключено ' + off.length : 'всё включено', odd ? 'warn' : '', 'd-control', '', off.length ? off.join(', ') : 'все выключатели VWARD']; })(),
         agentsRow(),
         ['Диагностика', dg.length ? (dg.length - bad) + ' из ' + dg.length + ' в норме' : 'не запускалась', bad ? 'warn' : '', 'd-diag'],
         (() => { const sc = stabScore(stabRows(S.stab, 86400), stabChecks(S.stab)); return ['Стабильность', sc && sc.index != null ? sc.index + '% за сутки' : S.stab ? 'не проверено' : '…', stabCls(sc && sc.index), 'd-stability']; })()
@@ -4834,14 +4838,24 @@ function showLogin() {
 const noteWhen = at => { const d = new Date(at * 1000), now = new Date(); return d.toDateString() === now.toDateString() ? d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : fmtTime(at * 1000); };
 // «{t}» in a note the router's agents wrote: the tunnel's name as the Panel shows it.
 const noteTun = (x, t) => x.to && /^t-/.test(x.to) ? String(t || '').replace(/\{t\}/g, tunLabel(x.to.slice(2))) : t;
-const noteItem = (x, cls, when) => '<' + (x.to ? 'button type="button" data-go="' + esc(x.to) + '"' : 'div') + ' class="note-item' + (cls ? ' ' + cls : '') + '"><span class="sev ' + esc(x.sev) + '">' + ico(x.icon || NOTE_ICON[x.sev] || 'alert') + '</span><span class="note-main"><b>' + esc(noteTun(x, x.title)) + '</b>' + (x.text ? '<small>' + esc(noteTun(x, x.text)) + '</small>' : '') + '</span>' + (when ? '<time>' + esc(when) + '</time>' : '') + '</' + (x.to ? 'button' : 'div') + '>';
+// One way to write a version (owner 13.11.2026): the update engine writes «0.2.0-rc.2.fix.38.1», the
+// Panel shows it as everywhere else; «целиком» (the whole package) says nothing to the owner.
+const noteVer = t => String(t || '').replace(/\b\d+\.\d+\.\d+(?:-(?:rc|rp)\.\d+)?(?:\.fix\.\d+(?:\.\d+)?)?\b/g, v => verHuman(v));
+const noteText = x => /^Установлено обновление /.test(x.title || '') && x.text === 'целиком' ? '' : x.text;
+// News of a version is history only while it can be installed: once installed (or gone) it leaves.
+const noteMoot = x => x.sev === 'news' && x.to === 'u-vward' && !(S.update && S.update.pending && S.update.pending.present);
+const noteItem = (x, cls, when) => '<' + (x.to ? 'button type="button" data-go="' + esc(x.to) + '"' : 'div') + ' class="note-item' + (cls ? ' ' + cls : '') + '"><span class="sev ' + esc(x.sev) + '">' + ico(x.icon || NOTE_ICON[x.sev] || 'alert') + '</span><span class="note-main"><b>' + esc(noteVer(noteTun(x, x.title))) + '</b>' + (noteText(x) ? '<small>' + esc(noteTun(x, noteText(x))) + '</small>' : '') + '</span>' + (when ? '<time>' + esc(when) + '</time>' : '') + '</' + (x.to ? 'button' : 'div') + '>';
 // «Требует внимания»: what is wrong at this moment, goes by itself. «История»: what popped up, newest first, unread marked.
+let NOTES_CLEAR = false;
 function openNotes() {
   const n = notifications(), nt = S.notes || {}, hist = nt.items || [], unread = notesUnread().length;
   const now = n.length ? '<div class="result-group">Требует внимания</div>' + n.map(x => noteItem(x)).join('') : '';
-  const head = '<div class="notes-bar"><span>' + (unread ? 'Непрочитанных: ' + unread : hist.length ? 'Всё прочитано' : '') + '</span>' + (unread ? '<button class="link-btn" type="button" data-act="notes-read">Прочитать все</button>' : '') + '</div>';
+  const head = '<div class="notes-bar"><span>' + (unread ? 'Непрочитанных: ' + unread : hist.length ? 'Всё прочитано' : '') + '</span>' + (unread ? '<button class="link-btn" type="button" data-act="notes-read">Прочитать все</button>' : '') +
+    (hist.length && !NOTES_CLEAR ? '<button class="link-btn" type="button" data-act="notes-clear">Очистить</button>' : '') + '</div>' +
+    (NOTES_CLEAR && hist.length ? '<div class="confirm danger"><span>Очистить историю уведомлений на всех устройствах? «Требует внимания» останется.</span>' +
+      '<button class="btn small danger" type="button" data-act="notes-clear-yes">' + ico('trash') + 'Очистить</button><button class="btn small" type="button" data-act="notes-clear-no">Отмена</button></div>' : '');
   // A warning still shown above is not repeated below; it moves there when it goes.
-  const keys = new Set(n.map(noteKey)), shown = hist.filter(x => !x.key || !keys.has(x.key));
+  const keys = new Set(n.map(noteKey)), shown = hist.filter(x => (!x.key || !keys.has(x.key)) && !(S.update && noteMoot(x)));
   const past = shown.length ? '<div class="result-group">История</div>' + shown.map(x => noteItem(x, x.at > (nt.read_at || 0) ? 'unread' : '', noteWhen(x.at))).join('') : '';
   openSheet('Уведомления', '<div class="sheet-body">' + (n.length || hist.length ? head + now + past : empty('Всё работает штатно')) + '</div>', 'notes', 'bellBtn');
 }
@@ -5350,6 +5364,13 @@ document.addEventListener('click', e => {
   }
   const a = t.dataset.act;
   if (a === 'close') closeLayer();
+  else if (a === 'notes-clear' || a === 'notes-clear-no') { NOTES_CLEAR = a === 'notes-clear'; openNotes(); }
+  else if (a === 'notes-clear-yes') {
+    // The history goes here at once; the router clears it for the other devices too.
+    NOTES_CLEAR = false; S.notes = Object.assign({}, S.notes || {}, { items: [], read_at: Math.floor(Date.now() / 1000) }); renderNav(); openNotes();
+    apiPost('notes', { op: 'clear' }).then(x => { if (x && x.ok) { S.notes = x; cacheWrite('notes'); renderNav(); openNotes(); } else toast('Не удалось очистить: ' + errText(x)); },
+      e => toast('Не удалось очистить: ' + e.message));
+  }
   else if (a === 'notes-read') {
     // Read at once here; the router keeps it for the other devices.
     S.notes = Object.assign({}, S.notes || {}, { read_at: Math.floor(Date.now() / 1000) }); renderNav(); openNotes();

@@ -566,6 +566,11 @@ if [ "$ACTION" = notes ]; then
     case "$(form_value op)" in
       read)
         printf '%s\n' "$NO_NOW" > "$NOTES_DIR/notes.read.$$" && mv -f "$NOTES_DIR/notes.read.$$" "$NOTES_DIR/notes.read" ;;
+      # clear: the history goes for every device (owner 13.11.2026); what is wrong now is not
+      # history - the Panel shows it from the router's state and it goes by itself.
+      clear)
+        (umask 077; : > "$NOTES.$$") && mv -f "$NOTES.$$" "$NOTES" || { rm -f "$NOTES.$$"; echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+        printf '%s\n' "$NO_NOW" > "$NOTES_DIR/notes.read.$$" && mv -f "$NOTES_DIR/notes.read.$$" "$NOTES_DIR/notes.read" ;;
       add)
         NO_SEV="$(form_value sev)"; NO_TO="$(form_value to)"; NO_KEY="$(form_value key)"
         case "$NO_SEV" in ok|err|info|warn|crit|news) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
@@ -829,7 +834,7 @@ if [ "$ACTION" = config-data ]; then
     DISABLED="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && basename "$F" .disabled; done | list_json)"
     # Which component a switched-off one went off with (its flag ends «(with ID)»): it comes back with it;
     # «install»: the installer left it off (Ads without AdGuard Home), not news for the bell.
-    OFF_WITH="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && printf '%s\t%s\n' "$(basename "$F" .disabled)" "$(sed -n 's/.*(with \([a-z0-9-]*\))$/\1/p;s/^disabled by install\.sh.*/install/p' "$F" | head -n 1)"; done |
+    OFF_WITH="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && printf '%s\t%s\n' "$(basename "$F" .disabled)" "$(sed -n 's/.*(with \([a-z0-9-]*\))$/\1/p;s/^disabled by install\.sh.*/install/p;s/^disabled by default .*(lightened VWARD)$/default/p' "$F" | head -n 1)"; done |
         "$JQ" -Rsc '[split("\n")[] | select(length > 0) | split("\t") | {(.[0]): (.[1] // "")}] | add // {}' 2>/dev/null)"
     [ -n "$OFF_WITH" ] || OFF_WITH='{}'
     # Frozen parts (owner 13.11.2026, fix.39): hidden in the Panel, their code and files are kept.
