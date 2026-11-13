@@ -138,12 +138,14 @@ body::after{content:"";position:fixed;z-index:19;left:0;right:0;bottom:0;height:
 .kv dd select.input{max-width:190px;font-size:var(--fs-sm);font-weight:400}
 .kv-row .hint{display:block;margin-top:2px;color:var(--faint);font-size:var(--fs-xs)}
 .kv-row .hint[hidden]{display:none}
-.dt-t{display:inline-flex;align-items:center;gap:2px}
+.dt-t{display:inline}
+.q-glue{white-space:nowrap}
+.q-glue .q-btn{vertical-align:middle;margin-left:2px}
 .q-btn{display:inline-grid;place-items:center;width:28px;height:28px;margin:-6px 0;padding:0;border:0;border-radius:50%;background:transparent;color:var(--muted);cursor:pointer;flex:none}
 .icon-btn.pin[aria-pressed="true"]{color:var(--accent)}
 .q-btn .icon{width:17px;height:17px}
 .q-btn[aria-expanded="true"]{color:var(--accent)}
-.block-head h2+.q-btn{margin-left:-4px}
+.block-head h2 .q-btn{margin-left:2px}
 .kv-row.sub dt{padding-left:14px}
 /* A slider with its value next to it (journal size). */
 .range-field{display:inline-flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap;justify-content:flex-end}

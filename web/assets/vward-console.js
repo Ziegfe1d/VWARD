@@ -1162,7 +1162,7 @@ function panel(title, body, opts) {
   // A page's own block: its «?» goes next to the page title at the top (owner 2026-11-01:
   // the title and its «?» together, never apart); the explanation opens in the block.
   if (same && longDesc) PAGEQ = { k: dq, title: title, shown: true };
-  const head = same && !extra ? '' : '<div class="block-head' + (foldable ? ' foldable' : '') + '"' + (foldable ? ' data-fold="' + esc(key) + '"' : '') + '>' + (same ? '' : '<h2>' + ico(opts.icon || headIcon(title), 'head-ico') + esc(title) + '</h2>') + (longDesc && !folded && !same ? qBtn(dq, title) : '') + (opts.beta ? '<span class="tag beta">Бета</span>' : '') + (opts.readonly ? '<span class="note">' + ico('lock') + 'Только чтение</span>' : '') + (opts.right || '') + toggle + '</div>';
+  const head = same && !extra ? '' : '<div class="block-head' + (foldable ? ' foldable' : '') + '"' + (foldable ? ' data-fold="' + esc(key) + '"' : '') + '>' + (same ? '' : '<h2>' + ico(opts.icon || headIcon(title), 'head-ico') + qGlue(title, longDesc && !folded ? qBtn(dq, title) : '') + '</h2>') + (opts.beta ? '<span class="tag beta">Бета</span>' : '') + (opts.readonly ? '<span class="note">' + ico('lock') + 'Только чтение</span>' : '') + (opts.right || '') + toggle + '</div>';
   return '<section class="block' + (folded ? ' folded' : '') + '"' + (same ? ' aria-label="' + esc(title) + '"' : '') + '>' + head + (folded ? '' : (opts.desc && (!longDesc || same || qOpen(dq)) ? '<p class="block-desc">' + esc(opts.desc) + '</p>' : '') + (body ? '<div class="panel">' + body + '</div>' : '')) + '</section>';
 }
 /* A long explanation hides behind «?» next to its title and opens in place (owner 2026-10-17);
@@ -1170,11 +1170,17 @@ function panel(title, body, opts) {
 const HINT_MAX = 40, DESC_MAX = 70, QOPEN = new Set();
 const qKey = k => current + '|' + k, qOpen = k => QOPEN.has(qKey(k));
 const qBtn = (k, what) => '<button class="q-btn" type="button" data-q="' + esc(k) + '" aria-expanded="' + qOpen(k) + '" aria-label="Пояснение: ' + esc(what) + '" title="Пояснение">' + ico('help') + '</button>';
+// The «?» right after the last word, wrapping with it, never on its own (owner 13.11.2026).
+function qGlue(text, q) {
+  const t = String(text), i = t.lastIndexOf(' ');
+  if (!q) return esc(t);
+  return (i < 0 ? '' : esc(t.slice(0, i + 1))) + '<span class="q-glue">' + esc(t.slice(i + 1)) + q + '</span>';
+}
 function dtHtml(key, hint) {
   if (!hint) return esc(key);
   const s = String(hint);
   if (s.length <= HINT_MAX) return esc(key) + '<span class="hint">' + esc(s) + '</span>';
-  return '<span class="dt-t">' + esc(key) + qBtn('r:' + key, key) + '</span><span class="hint more"' + (qOpen('r:' + key) ? '' : ' hidden') + '>' + esc(s) + '</span>';
+  return '<span class="dt-t">' + qGlue(key, qBtn('r:' + key, key)) + '</span><span class="hint more"' + (qOpen('r:' + key) ? '' : ' hidden') + '>' + esc(s) + '</span>';
 }
 /* Строка: [название, значение, метка состояния, переход (страница или http-адрес), доп. атрибуты перехода, подсказка] */
 function kv(rows) {
@@ -4259,7 +4265,7 @@ function vlessServersPanel(name) {
   if (v.error) return panel('Серверы', '<p class="field-warn">' + esc(v.error) + '</p>' + head);
   const d = v.data, off = new Set((d.countries && d.countries.off) || []), all = d.servers || [];
   const view = '<dl class="kv">' + ctrlRow('Группировать по странам', sw('data-vsrv-group', VVIEW.group, 'Группировать по странам')) +
-    ctrlRow('Переходить между странами', sw('data-vcross="' + esc(name) + '"', !d.countries || d.countries.cross !== false, 'Переходить между странами', !cfgOk()),
+    ctrlRow('Переходить между странами', sw('data-vcross="' + esc(name) + '"', !!(d.countries && d.countries.cross === true), 'Переходить между странами', !cfgOk()),
       'сервер не отвечает - туннель перейдёт на сервер другой включённой страны') + '</dl>' +
     '<p class="panel-desc">Сортировка</p>' + choiceSlider('vsrv-sort', VSORT.filter(o => !(VVIEW.group && o[0] === 'country')), VVIEW.group && VVIEW.sort === 'country' ? 'ping' : VVIEW.sort, 'Сортировка', true);
   let body;
@@ -4290,7 +4296,7 @@ async function vlessCountry(name, code, on) {
   try { r = await apiPost('tunnel-conf', { op: 'countries', name: name, target: code, value: on ? '1' : '0' }); } catch (e) { r = { ok: false, error: e.message }; }
   if (!r.ok) toast('Не сохранено: ' + errText(r));
   else if (VSRV[name] && VSRV[name].data) {
-    const c = VSRV[name].data.countries = VSRV[name].data.countries || { off: [], cross: true };
+    const c = VSRV[name].data.countries = VSRV[name].data.countries || { off: [], cross: false };
     if (code === 'cross') c.cross = on; else c.off = c.off.filter(x => x !== code).concat(on ? [] : [code]);
   }
   render();
@@ -5840,7 +5846,7 @@ WIDE.addEventListener('change', renderNav);
 $('searchBtn').innerHTML = ico('search');
 $('searchBtn').addEventListener('click', openSearch);
 $('bellBtn').addEventListener('click', openNotes);
-$('themeBtn').addEventListener('click', () => { setTheme(({ system: 'time', time: 'light', light: 'dark', dark: 'system' })[theme] || 'system'); toast('Тема: ' + THEMES[theme]); });
+$('themeBtn').addEventListener('click', () => { setTheme(({ system: 'time', time: 'light', light: 'dark', dark: 'system' })[theme] || 'system'); });
 applyTheme();
 { const h = decodeURIComponent(location.hash.slice(1)), id = h && page(h) ? h : idOf(location.pathname); if (id && page(id)) current = id; }
 cacheRead();

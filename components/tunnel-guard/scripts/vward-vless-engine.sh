@@ -864,7 +864,7 @@ op_list() {
     done < "$TMPD/brief"
     i=$last
     co_cross=$(countries_get "$n" cross)
-    printf 'info.current=%s\ninfo.servers=%s\ninfo.countries.off=%s\ninfo.countries.cross=%s\n' "$cur" "$i" "$(countries_get "$n" off)" "${co_cross:-1}"
+    printf 'info.current=%s\ninfo.servers=%s\ninfo.countries.off=%s\ninfo.countries.cross=%s\n' "$cur" "$i" "$(countries_get "$n" off)" "${co_cross:-0}"
     echo "result=checked"
 }
 
@@ -921,11 +921,11 @@ op_countries() {
             *) die invalid_value 64 ;;
         esac
         co_off=$(printf '%s\n' $co_off | grep -E '^(--|[A-Z][A-Z])$' | sort -u | tr '\n' ' ' | sed 's/ $//')
-        (umask 077; printf 'off=%s\ncross=%s\n' "$co_off" "${co_cross:-1}" > "$ENGINE_ETC/v$n.countries") || die write_failed
-        log "countries $1: off=${co_off:-none} cross=${co_cross:-1}"
+        (umask 077; printf 'off=%s\ncross=%s\n' "$co_off" "${co_cross:-0}" > "$ENGINE_ETC/v$n.countries") || die write_failed
+        log "countries $1: off=${co_off:-none} cross=${co_cross:-0}"
     fi
     co_cross=$(countries_get "$n" cross)
-    printf 'info.countries.off=%s\ninfo.countries.cross=%s\n' "$(countries_get "$n" off)" "${co_cross:-1}"
+    printf 'info.countries.off=%s\ninfo.countries.cross=%s\n' "$(countries_get "$n" off)" "${co_cross:-0}"
     # Not «result=${2:+changed}${2:-checked}»: with a change that printed «result=changedcross»,
     # the Panel took it for a failure (engine_failed, Viva 2026-10-19, fix.33.1).
     if [ -n "${2:-}" ]; then echo "result=changed"; else echo "result=checked"; fi
@@ -958,7 +958,8 @@ op_failover() {
     nm() { parse "$1" 2>/dev/null | awk -F '\t' '$1 == "name" {print substr($0, 6); exit}'; }
     flag=$(nm "$(sed -n "${cur}p" "$TMPD/links")" | LC_ALL=C cut -b1-8)
     case "$flag" in "$(printf '\360\237\207')"*) ;; *) flag= ;; esac
-    # Countries switched off are never tried; without «cross» only the same country.
+    # Countries switched off are never tried; without «cross» (off by default, owner 13.11.2026) only
+    # the same country. A server without a flag has no known country: every server, as before.
     fo_off=" $(countries_get "$n" off) " fo_cross=$(countries_get "$n" cross)
     i=0
     while IFS= read -r l; do
@@ -966,7 +967,7 @@ op_failover() {
         [ "$i" != "$cur" ] || continue
         case "$fo_off" in "  ") ;; *) case "$fo_off" in *" $(cc "$(nm "$l")") "*) continue ;; esac ;; esac
         if [ -n "$flag" ] && [ "$(nm "$l" | LC_ALL=C cut -b1-8)" = "$flag" ]; then echo "$i" >> "$TMPD/same"
-        elif [ "${fo_cross:-1}" != 0 ]; then echo "$i" >> "$TMPD/other"; fi
+        elif [ -z "$flag" ] || [ "${fo_cross:-0}" != 0 ]; then echo "$i" >> "$TMPD/other"; fi
     done < "$TMPD/links"
     cat "$TMPD/same" "$TMPD/other" 2>/dev/null | head -n "${VWARD_VLESS_FAILOVER_MAX:-8}" > "$TMPD/try"
     cp "$ENGINE_ETC/v$n.json" "$TMPD/old.json" || die write_failed

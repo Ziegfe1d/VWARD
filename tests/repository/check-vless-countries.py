@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory() as tmp:
         if got != want:
             fail(f"country of {n!r}: {got!r}, want {want}")
     out = sh("op_countries OpkgTun2")
-    if out != "info.countries.off=\ninfo.countries.cross=1\nresult=checked\n":
+    if out != "info.countries.off=\ninfo.countries.cross=0\nresult=checked\n":  # off by default (owner 13.11.2026)
         fail(f"defaults: {out!r}")
     sh("op_countries OpkgTun2 DE 0 >/dev/null; op_countries OpkgTun2 NL 0 >/dev/null; op_countries OpkgTun2 DE 1 >/dev/null; op_countries OpkgTun2 cross 0 >/dev/null")
     if (tmp / "etc/v2.countries").read_text() != "off=NL\ncross=0\n":
@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
 # The failover: switched-off countries skipped, other countries only with cross.
 fo = func("op_failover")
-for need in ('fo_off=" $(countries_get "$n" off) "', '*" $(cc "$(nm "$l")") "*) continue', 'elif [ "${fo_cross:-1}" != 0 ]; then echo "$i" >> "$TMPD/other"'):
+for need in ('fo_off=" $(countries_get "$n" off) "', '*" $(cc "$(nm "$l")") "*) continue', 'elif [ -z "$flag" ] || [ "${fo_cross:-0}" != 0 ]; then echo "$i" >> "$TMPD/other"'):
     if need not in fo:
         fail(f"failover lacks {need}")
 if "info.countries.off=" not in func("op_list") or '"$ENGINE_ETC/v$n.countries"' not in func("op_remove"):

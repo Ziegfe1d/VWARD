@@ -455,6 +455,13 @@ esac
         fail("the subscription's address or the id leaked")
     (run_ / f"v{sn}.failover.at").write_text("0\n")
     (tmp / "ok.203.0.113.12").write_text("")
+    # Only the US server answers: another country, off by default (owner 13.11.2026) - no move.
+    out = engine("kick", tn)
+    if "info.server=2" in out or (etc / f"v{sn}.idx").read_text().strip() != "3":
+        fail(f"RED: without «Переходить между странами» the kick stays in the country: {out}")
+    if engine("countries", tn, "cross", "1")[-1] != "result=changed":
+        fail("«Переходить между странами» switched on")
+    (run_ / f"v{sn}.failover.at").write_text("0\n")
     out = engine("kick", tn)
     if out != ["info.server=2", "info.host=203.0.113.12:443", "result=changed"]:
         fail(f"the guard's kick moves to another server when a restart does not help: {out}")

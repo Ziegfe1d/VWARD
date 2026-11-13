@@ -1149,7 +1149,7 @@ if [ "$ACTION" = tunnel-conf ]; then
         result=checked)
           printf '%s\n' "$TOUT" | sed -n 's/^info\.server\.\([0-9]*\)=/\1|/p' | "$JQ" -Rn --argjson cur "$(printf '%s\n' "$TOUT" | sed -n 's/^info\.current=\([0-9]*\)$/\1/p' | head -n 1 | grep . || echo 0)" \
               --arg off "$(printf '%s\n' "$TOUT" | sed -n 's/^info\.countries\.off=//p' | head -n 1)" --arg cross "$(printf '%s\n' "$TOUT" | sed -n 's/^info\.countries\.cross=//p' | head -n 1)" '
-            {ok: true, current: $cur, countries: {off: ($off | split(" ") | map(select(length == 2))), cross: ($cross != "0")}, servers: [inputs | split("|") | {n: (.[0] | tonumber), name: .[1], host: .[2], port: (.[3] | tonumber? // null), ms: (.[4] | tonumber? // null), current: (.[5] == "1"), why: (.[6] // "")}]}' ;;
+            {ok: true, current: $cur, countries: {off: ($off | split(" ") | map(select(length == 2))), cross: ($cross == "1")}, servers: [inputs | split("|") | {n: (.[0] | tonumber), name: .[1], host: .[2], port: (.[3] | tonumber? // null), ms: (.[4] | tonumber? // null), current: (.[5] == "1"), why: (.[6] // "")}]}' ;;
         error=*) E="$(printf '%s\n' "$TOUT" | tail -n 1)"; E=${E#error=}; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac; printf '{"ok":false,"error":"%s"}\n' "$E" ;;
         *) echo '{"ok":false,"error":"helper_failed"}' ;;
       esac ;;
