@@ -101,7 +101,8 @@ vu_manifest_validate_any() {
         2) vu_manifest_validate_v2 "$1" ;;
         1) vu_manifest_validate "$1" ;;
         *) return 1 ;;
-    esac
+    esac || return 1
+    vu_retire_validate "$1"
 }
 
 # ---------- Files ----------
@@ -262,6 +263,7 @@ vu_last_apply_write() {
         printf 'schema=%s\n' "$2"
         printf 'changed_files=%s\n' "$3"
         printf 'fetched_bytes=%s\n' "$4"
+        printf 'retired_files=%s\n' "$(vu_retire_files_count)"
         printf 'engine_version=%s\n' "$VU_ENGINE_VERSION"
         printf 'applied_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     } > "$VU_STATE_DIR/last-apply.state.tmp.$$" && mv -f "$VU_STATE_DIR/last-apply.state.tmp.$$" "$VU_STATE_DIR/last-apply.state"
@@ -377,4 +379,194 @@ vu_engine_check_dir() {
         [ "$(wc -c < "$1/$name" | tr -d ' ')" = "$size" ] || exit 1
         [ "$(sha256sum "$1/$name" | awk '{print $1}')" = "$sha" ] || exit 1
     done
+}
+
+# ---------- Retired parts (engine 2.1, fix.39) ----------
+#
+# A release that drops a part of VWARD lists it in its signed manifest (v1 and v2 alike):
+#   "retire": [{"part": "sentinel", "files": [...], "dirs": [...], "cron": [...], "services": [...]}]
+# files     program files the part had on the router; removed, each backed up first;
+# dirs      folders of the part, removed when nothing else is left in them;
+# cron      programs whose crontab lines go away (every line naming one as a whole word);
+# services  init.d scripts of the part (also in its files), stopped before removal.
+# The list is declarative and stays in later releases: a router that missed the removal (an older
+# engine, a part skipped) is cleaned by the next update that finds the files still there.  The
+# removal is part of the update transaction: same backup, same rollback (files and the crontab
+# come back), same quarantine.  A part is skipped, with a warning, never half-removed, when the
+# engine's component registry still owns one of its files or a live crontab line names it
+# together with another VWARD program (removing the line would stop that one too).
+
+VU_RETIRE_DIR=
+VU_RETIRE_CRONTAB=${VWARD_UPDATE_CRONTAB:-$VU_ROOT_PREFIX/opt/var/spool/cron/crontabs/root}
+
+# vu_retire_validate MANIFEST: the retire section, when there is one, is well formed and names
+# only VWARD's own program places.
+vu_retire_validate() {
+    vr_m=$1
+    jq -e "$VU_JQ_V2_DEFS"'
+      def plist: type == "array" and length <= 256 and
+        all(.[]; type == "string" and length > 1 and length <= 200 and startswith("/"));
+      (.signed.retire // []) as $r |
+      ($r | type == "array" and length <= 64) and
+      all($r[]; type == "object") and
+      ([$r[].part] | length == (unique | length)) and
+      all($r[]; . as $p |
+        ($p.part | fname) and
+        (($p.files // []) | plist and length > 0) and
+        (($p.dirs // []) | plist) and (($p.cron // []) | plist) and (($p.services // []) | plist) and
+        all(($p.services // [])[]; . as $s | any(($p.files // [])[]; . == $s)))
+    ' "$vr_m" >/dev/null 2>&1 || return 1
+    jq -r '(.signed.retire // [])[] | ((.files // [])[] | "file\t" + .),
+        ((.dirs // [])[] | "dir\t" + .), ((.cron // [])[] | "cron\t" + .), ((.services // [])[] | "service\t" + .)' "$vr_m" |
+    while IFS="$(printf '\t')" read -r vr_kind vr_path; do
+        case "$vr_path" in *../*|*/..|*/./*|*//*|*/|*[!A-Za-z0-9/._-]*) exit 1 ;; esac
+        case "$vr_kind" in
+            file) vu_safe_target "$vr_path" && ! vu_local_target "$vr_path" || exit 1 ;;
+            dir)
+                case "$vr_path" in /opt/share/vward/updater|/opt/share/vward/updater/*) exit 1 ;; esac
+                case "$vr_path" in /opt/share/vward/?*|/opt/lib/vward/?*) ;; *) exit 1 ;; esac ;;
+            cron) case "$vr_path" in /opt/bin/vward-?*|/opt/etc/init.d/S[0-9][0-9]vward-?*) ;; *) exit 1 ;; esac ;;
+            service) case "$vr_path" in /opt/etc/init.d/S[0-9][0-9]vward-?*) ;; *) exit 1 ;; esac ;;
+            *) exit 1 ;;
+        esac
+    done
+}
+
+# vu_retire_cron_awk MODE: crontab filter.  The first file holds the retired programs, one per
+# line; the second is the crontab.  MODE "count" prints how many lines name one, "shared" how
+# many live lines name one together with another VWARD program, "keep" the crontab without them.
+vu_retire_cron_awk() {
+    awk -v mode="$1" '
+        FNR == NR { if (length($0)) gone[$0] = 1; next }
+        {
+            n = split($0, tok, /[ \t;&|<>()"]+/); hit = 0; other = 0
+            for (i = 1; i <= n; i++) {
+                if (tok[i] == "") continue
+                if (tok[i] in gone) hit = 1
+                else if (tok[i] ~ /^\/opt\/bin\/vward-/ || tok[i] ~ /^\/opt\/etc\/init\.d\/S[0-9][0-9]vward-/) other = 1
+            }
+            if (mode == "count") { if (hit) c++; next }
+            if (mode == "shared") { if (hit && other && $0 !~ /^[ \t]*#/) c++; next }
+            if (!hit) print
+        }
+        END { if (mode != "keep") print c + 0 }' "$2" "$3"
+}
+
+# vu_retire_plan MANIFEST PACKAGE_MANIFEST DIR: what this update removes, in DIR (parts.tsv,
+# files.tsv, dirs.txt, services.txt, prune.txt, crontab.new).  PACKAGE_MANIFEST lists every file
+# of the release: a retired file the release still installs is a broken release (refused, 1).
+vu_retire_plan() {
+    vr_m=$1 vr_full=$2 vr_dir=$3
+    VU_RETIRE_DIR=$vr_dir
+    rm -rf "${vr_dir:?}" && mkdir -p "$vr_dir" || return 1
+    for vr_f in parts.tsv files.tsv dirs.txt services.txt prune.txt cron.paths; do : > "$vr_dir/$vr_f" || return 1; done
+    jq -e '(.signed.retire // []) | length > 0' "$vr_m" >/dev/null 2>&1 || return 0
+    jq -r '.files[].target' "$vr_full" > "$vr_dir/release.txt" || return 1
+    jq -r '.signed.retire[].files[]' "$vr_m" | while IFS= read -r vr_t; do
+        ! grep -qxF -- "$vr_t" "$vr_dir/release.txt" || exit 1
+    done || return 1
+    for vr_part in $(jq -r '.signed.retire[].part' "$vr_m"); do
+        jq -r --arg p "$vr_part" '.signed.retire[] | select(.part == $p) | (.cron // [])[]' "$vr_m" > "$vr_dir/part.cron" || return 1
+        vr_why=
+        for vr_t in $(jq -r --arg p "$vr_part" '.signed.retire[] | select(.part == $p) | .files[]' "$vr_m"); do
+            vr_owner=$(vu_component_owner "$vr_t")
+            [ -z "$vr_owner" ] || { vr_why="component $vr_owner still owns $vr_t"; break; }
+        done
+        if [ -z "$vr_why" ] && [ -s "$vr_dir/part.cron" ] && [ -f "$VU_RETIRE_CRONTAB" ]; then
+            vr_shared=$(vu_retire_cron_awk shared "$vr_dir/part.cron" "$VU_RETIRE_CRONTAB") || return 1
+            [ "$vr_shared" = 0 ] || vr_why="$vr_shared crontab line(s) also run another VWARD program"
+        fi
+        if [ -n "$vr_why" ]; then
+            printf '%s\tskip\t%s\n' "$vr_part" "$vr_why" >> "$vr_dir/parts.tsv"
+            continue
+        fi
+        cat "$vr_dir/part.cron" >> "$vr_dir/cron.paths" || return 1
+        jq -r --arg p "$vr_part" '.signed.retire[] | select(.part == $p) | .files[]' "$vr_m" |
+        while IFS= read -r vr_t; do
+            printf '%s\n' "$vr_t" >> "$vr_dir/prune.txt"
+            # Only regular files are removed (and backed up); anything else at the place stays.
+            [ -f "$VU_ROOT_PREFIX$vr_t" ] && [ ! -L "$VU_ROOT_PREFIX$vr_t" ] || continue
+            printf '%s\t%s\n' "$vr_part" "$vr_t" >> "$vr_dir/files.tsv"
+        done || return 1
+        jq -r --arg p "$vr_part" '.signed.retire[] | select(.part == $p) | (.services // [])[]' "$vr_m" |
+        while IFS= read -r vr_s; do
+            [ ! -x "$VU_ROOT_PREFIX$vr_s" ] || printf '%s\n' "$vr_s" >> "$vr_dir/services.txt"
+        done || return 1
+        jq -r --arg p "$vr_part" '.signed.retire[] | select(.part == $p) | (.dirs // [])[]' "$vr_m" >> "$vr_dir/dirs.txt" || return 1
+        printf '%s\tapply\t%s\n' "$vr_part" "$(awk -F '\t' -v p="$vr_part" '$1 == p {n++} END {print n + 0}' "$vr_dir/files.tsv") file(s)" >> "$vr_dir/parts.tsv"
+    done
+    if [ -s "$vr_dir/cron.paths" ] && [ -f "$VU_RETIRE_CRONTAB" ]; then
+        vr_lines=$(vu_retire_cron_awk count "$vr_dir/cron.paths" "$VU_RETIRE_CRONTAB") || return 1
+        if [ "$vr_lines" != 0 ]; then
+            vu_retire_cron_awk keep "$vr_dir/cron.paths" "$VU_RETIRE_CRONTAB" > "$vr_dir/crontab.new" || return 1
+            printf '%s\n' "$vr_lines" > "$vr_dir/crontab.lines"
+        fi
+    fi
+    return 0
+}
+
+# vu_retire_print: the plan, for --dry-run and the log.
+vu_retire_print() {
+    [ -n "$VU_RETIRE_DIR" ] && [ -s "$VU_RETIRE_DIR/parts.tsv" ] || return 0
+    printf '%s\n' 'Retire:'
+    while IFS="$(printf '\t')" read -r vr_part vr_how vr_what; do
+        printf '  [%s] %s: %s\n' "$vr_part" "$vr_how" "$vr_what"
+    done < "$VU_RETIRE_DIR/parts.tsv"
+    while IFS="$(printf '\t')" read -r vr_part vr_t; do
+        printf '  [%s] remove %s\n' "$vr_part" "$vr_t"
+    done < "$VU_RETIRE_DIR/files.tsv"
+    [ ! -r "$VU_RETIRE_DIR/crontab.lines" ] || printf '  crontab: %s line(s) removed\n' "$(cat "$VU_RETIRE_DIR/crontab.lines")"
+}
+
+# vu_retire_apply: inside the update transaction, after the backup and the new files.  Services
+# stop, the crontab loses the lines, the files and then the empty folders go.  1 = the update
+# fails and is rolled back like a failed install.
+vu_retire_apply() {
+    [ -n "$VU_RETIRE_DIR" ] && [ -s "$VU_RETIRE_DIR/parts.tsv" ] || return 0
+    while IFS= read -r vr_s; do
+        "$VU_ROOT_PREFIX$vr_s" stop >/dev/null 2>&1 || vu_log WARN "Retire: $vr_s did not stop; removed all the same"
+    done < "$VU_RETIRE_DIR/services.txt"
+    if [ -r "$VU_RETIRE_DIR/crontab.new" ]; then
+        vu_atomic_write "$VU_RETIRE_CRONTAB" "$VU_RETIRE_DIR/crontab.new" || return 1
+    fi
+    if [ -n "$VU_ROOT_PREFIX" ] && [ "${VWARD_TEST_FAIL_RETIRE:-0}" = 1 ]; then return 1; fi
+    while IFS="$(printf '\t')" read -r vr_part vr_t; do
+        rm -f "$VU_ROOT_PREFIX$vr_t" && [ ! -e "$VU_ROOT_PREFIX$vr_t" ] || return 1
+    done < "$VU_RETIRE_DIR/files.tsv"
+    # Deepest first; a folder with anything left in it stays.
+    sort -r "$VU_RETIRE_DIR/dirs.txt" | while IFS= read -r vr_d; do
+        [ ! -d "$VU_ROOT_PREFIX$vr_d" ] || [ -L "$VU_ROOT_PREFIX$vr_d" ] || rmdir "$VU_ROOT_PREFIX$vr_d" 2>/dev/null ||
+            vu_log INFO "Retire: $vr_d kept, it is not empty"
+    done
+    while IFS="$(printf '\t')" read -r vr_part vr_how vr_what; do
+        case "$vr_how" in
+            apply) vu_log INFO "Retire: part $vr_part removed ($vr_what)" ;;
+            *) vu_log WARN "Retire: part $vr_part skipped: $vr_what" ;;
+        esac
+    done < "$VU_RETIRE_DIR/parts.tsv"
+    [ ! -r "$VU_RETIRE_DIR/crontab.lines" ] || vu_log INFO "Retire: $(cat "$VU_RETIRE_DIR/crontab.lines") crontab line(s) removed"
+    sync
+}
+
+# vu_retire_files_count: how many files this update removes.
+vu_retire_files_count() {
+    if [ -n "$VU_RETIRE_DIR" ] && [ -r "$VU_RETIRE_DIR/files.tsv" ]; then grep -c . "$VU_RETIRE_DIR/files.tsv"; else printf '0\n'; fi
+}
+
+# vu_retire_state_prune: the installed-files record forgets the files of the removed parts, and
+# a component left without files.  Runs before the commit; the backup holds the record before.
+vu_retire_state_prune() {
+    [ -n "$VU_RETIRE_DIR" ] && [ -s "$VU_RETIRE_DIR/prune.txt" ] && [ -r "$VU_COMPONENT_STATE_FILE" ] || return 0
+    vr_tmp=$VU_STATE_DIR/components.prune.$$
+    jq --rawfile gone "$VU_RETIRE_DIR/prune.txt" '
+        ($gone | split("\n") | map(select(length > 0))) as $g
+        | def gone($k): any($g[]; . == $k);
+        .components |= with_entries(
+            if any((.value.files // {}) | keys[]; gone(.)) then
+                .value.files |= with_entries(select(gone(.key) | not))
+                | if (.value.files | length) == 0 then empty else . end
+            else . end)
+    ' "$VU_COMPONENT_STATE_FILE" > "$vr_tmp" || { rm -f "$vr_tmp"; return 1; }
+    vu_atomic_write "$VU_COMPONENT_STATE_FILE" "$vr_tmp" || { rm -f "$vr_tmp"; return 1; }
+    rm -f "$vr_tmp"
 }

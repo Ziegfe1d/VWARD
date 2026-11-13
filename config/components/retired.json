@@ -1,0 +1,5 @@
+{
+  "schema": 1,
+  "about": "Parts of VWARD removed from the routers by updates (fix.39). Every release signs this list into its manifests (field retire); the update engine 2.1 removes what is still on the router, with a backup and a rollback. Entries stay here for good: a router that updates from an old release is cleaned too. A file listed here can never be in package-map.tsv or in the component registry again.",
+  "parts": []
+}

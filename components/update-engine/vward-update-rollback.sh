@@ -83,6 +83,17 @@ if [ "$(sed -n '1p' "$backup/components.existed" 2>/dev/null || :)" = 1 ]; then
         rollback_fail "Component metadata backup hash mismatch"
 fi
 
+# The crontab, when the update removed lines of retired parts (engine 2.1; older backups have none).
+crontab_restore=0
+if [ -r "$backup/crontab.path" ]; then
+    [ "$(sed -n '1p' "$backup/crontab.path")" = "$VU_RETIRE_CRONTAB" ] || rollback_fail "Crontab backup is for another place"
+    expected_crontab_sha=$(vu_state_get crontab_sha "$backup/backup.meta" 2>/dev/null || :)
+    actual_crontab_sha=$(sha256sum "$backup/crontab" 2>/dev/null | awk '{print $1}')
+    [ -n "$expected_crontab_sha" ] && [ "$expected_crontab_sha" = "$actual_crontab_sha" ] ||
+        rollback_fail "Crontab backup hash mismatch"
+    crontab_restore=1
+fi
+
 vu_transition ROLLING_BACK
 
 while IFS="$(printf '\t')" read -r target existed mode original_sha backup_sha; do
@@ -120,6 +131,10 @@ while IFS="$(printf '\t')" read -r target existed mode original_sha backup_sha; 
         rm -f "$destination" || rollback_fail "Cannot remove newly installed $target"
     fi
 done < "$backup/files.tsv"
+
+if [ "$crontab_restore" = 1 ]; then
+    vu_atomic_write "$VU_RETIRE_CRONTAB" "$backup/crontab" || rollback_fail "Cannot restore the crontab"
+fi
 
 committed_existed=$(sed -n '1p' "$backup/committed.existed" 2>/dev/null || :)
 case "$committed_existed" in
