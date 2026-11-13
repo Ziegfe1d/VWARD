@@ -4813,6 +4813,12 @@ function loadLog(tab, force, auto) {
   return run.p;
 }
 const logFailed = x => /^Журнал недоступен/.test(String(x || '').trim());
+// logFull TAB: the whole live journal of a source; «Все» - every source in one timeline, as on the screen.
+async function logFull(tab) {
+  if (tab !== 'all') return apiText('log', { name: tab, full: 1 });
+  const got = logSplit(await apiText('log', { name: 'all', full: 1 }));
+  return mergeLogs(LOG_TABS.filter(tb => tb.id !== 'cron').map(tb => ({ label: tb.label, text: got[tb.id] || '' })), logNewest, null, 0);
+}
 async function loadLogOnce(tab) {
   const hhmm = t => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   const want = logShown[tab] || logN;
@@ -5576,11 +5582,11 @@ document.addEventListener('click', e => {
     if (navigator.share) navigator.share({ title: 'Журнал VWARD: ' + logLabel(logTab), text: text }).catch(err => { if (err && err.name !== 'AbortError') copyText(text); });
     else copyText(text);
   }
-  // «Скачать» saves what is on the screen: no new request, no redraw (owner 12.11.2026: the journal
-  // reloaded on a download). Nothing shown yet: one quiet request, the page stays as it is.
+  // «Скачать» saves the whole live journal of the source (owner 13.11.2026: it saved only the entries
+  // shown, «Показать ещё» is for the eyes): one quiet request, the page is not redrawn (owner 12.11.2026).
   else if (a === 'log-save') { const tab = logTab, name = 'vward-' + tab + '-' + today() + '.txt';
-    if (logShown[tab] && S.logs[tab] != null) download(name, S.logs[tab]);
-    else loadLogOnce(tab).then(text => download(name, text || ''), e => toast('Журнал не скачан: ' + e.message)); }
+    toast('Журнал скачивается');
+    logFull(tab).then(text => download(name, text || ''), e => toast('Журнал не скачан: ' + e.message)); }
   // The whole history, the archived journals included: the router packs it as it sends it.
   else if (a === 'log-save-all') { const l = document.createElement('a'); l.href = API + '?action=log-archive'; l.download = ''; document.body.appendChild(l); l.click(); l.remove(); toast('Архив журналов скачивается'); }
 });

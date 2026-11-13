@@ -3672,6 +3672,9 @@ if [ "$ACTION" = "log" ]; then
     HOURS="$(qget hours)"
     case "$HOURS" in ''|*[!0-9]*) HOURS="" ;; esac
     [ -z "$HOURS" ] || { [ "$HOURS" -ge 1 ] && [ "$HOURS" -le 168 ]; } || HOURS=24
+    # full=1: the whole live journal, for «Скачать» (owner 13.11.2026: it saved only the entries shown).
+    # The archives of earlier days come with «Архивировать».
+    FULL="$(qget full)"; [ "$FULL" = 1 ] || FULL=
 
     # log_show FILE: the last COUNT lines of FILE (of the last HOURS hours when asked), or why not.
     log_show() {
@@ -3681,6 +3684,8 @@ if [ "$ACTION" = "log" ]; then
         # Panel shows which source has nothing and which cannot be read.
         if [ -z "$FILE" ]; then
             echo "Журнал недоступен: неизвестный журнал."
+        elif [ -n "$FULL" ] && [ -r "$FILE" ] && [ -s "$FILE" ]; then
+            cat "$FILE" 2>/dev/null
         elif [ -r "$FILE" ] && [ -s "$FILE" ] && [ -n "$HOURS" ]; then
             # An entry starts with its time («2026-11-02 10:51:03», «…T…», with «Z»/«+0300» or
             # without - then the router's own time); lines without a time belong to the entry above.
