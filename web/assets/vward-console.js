@@ -1092,8 +1092,12 @@ function foldToggle(key) {
 // The icon of a block's title (owner 2026-10-17: every section with its sign), by its words.
 const HEAD_ICONS = [
   [/^Добавить|^Новый/, 'plus'],
+  // Neighbours with one sign (the audit of 13.11.2026 on all the pages): each its own, by what it is.
+  [/^Туннели$/, 'link'], [/^Проверка адреса|^Проверка блокировки/, 'search'], [/^Проверка VWARD/, 'pulse'], [/^Домены через VPN/, 'list'],
+  [/^Подсети через VPN/, 'route'], [/^Списки и правила/, 'filter'], [/^Агенты$/, 'auto'], [/^Обслуживание$/, 'tools'], [/^Состояние$/, 'pulse'],
+  [/^Устройство$/, 'cpu'], [/^Действия$/, 'tools'], [/^Оформление$/, 'sun'], [/^Меню$/, 'list'], [/^Задания$/, 'list'], [/^Восстановление интернета/, 'undo'],
   // Each section its own sign (owner 02.11: one «i» for different sections).
-  [/Хранение журнал/, 'archive'], [/Восстановление интернета/, 'globe'], [/^Исключени/, 'filter'], [/^Режим/, 'sliders'], [/События и реакции/, 'pulse'],
+  [/Хранение журнал/, 'archive'], [/^Исключени/, 'filter'], [/^Режим/, 'sliders'], [/События и реакции/, 'pulse'],
   [/Удален|Корзин/, 'trash'], [/Очистк/, 'broom'], [/Сброс/, 'reset'], [/Аварийн/, 'power'], [/Резервн/, 'archive'],
   [/Сертификат/, 'cert'], [/ИИ-сервис/, 'spark'], [/Управлени/, 'sliders'], [/Агент|Работают всегда|Решения агента|Предполагаем/, 'shield'],
   [/Сервер|Страны/, 'server'], [/Smart DNS|DNS/, 'dns'], [/AdGuard|Фильтр|Блокиров|Заблокир|Разрешено|Правил|На проверке/, 'block'],
@@ -1731,10 +1735,11 @@ function offNotice() {
 }
 /* ---------- Хранение журналов ---------- */
 // How long and how much of the technical journals the router keeps; nothing goes before that.
-// Four positions each, as everywhere (owner 13.11.2026: the slider of Smart DNS); 0 - «Без ограничений».
+// Four positions each, as everywhere (owner 13.11.2026: the slider of Smart DNS); 0 - «Без лимита» (no term, no size limit;
+// «Без ограничений» did not fit a phone's segment).
 // An older term or size (1 or 3 days, half a year, 1 or 5 MB) still works; it selects no position.
-const JOURNAL_KEEP = [['7', 'Неделя'], ['30', 'Месяц'], ['365', 'Год'], ['0', 'Без ограничений']];
-const JOURNAL_SIZE = [['10', '10 МБ'], ['30', '30 МБ'], ['100', '100 МБ'], ['0', 'Без ограничений']];
+const JOURNAL_KEEP = [['7', 'Неделя'], ['30', 'Месяц'], ['365', 'Год'], ['0', 'Без лимита']];
+const JOURNAL_SIZE = [['10', '10 МБ'], ['30', '30 МБ'], ['100', '100 МБ'], ['0', 'Без лимита']];
 const journalKeepText = d => ({ 0: 'без ограничений', 1: '1 день', 3: '3 дня', 7: 'неделя', 30: 'месяц', 180: '6 месяцев', 365: 'год' })[d] || d + ' дн.';
 const journalSizeText = mb => +mb ? mb + ' МБ' : 'без ограничений';
 function journalPanel() {
@@ -2475,7 +2480,7 @@ const RENDER = {
       return rows.length ? panel(g, '<dl class="kv">' + rows.join('') + '</dl>' + confirms,
         g === 'Обслуживание' && !P.all_extras ? { desc: 'Облегчённая VWARD: работают VPN и автоподбор доменов, остальное включается по одному.' } : null) : '';
     }).join('');
-    return (known ? loadError(['status']) : '') + panel('Агенты', kv([agentsRow()])) + groups +
+    return (known ? loadError(['status']) : '') + panel('Агенты', kv([['Все агенты'].concat(agentsRow().slice(1))])) + groups +
       (missing.length ? '<details class="block missing-comps"><summary class="block-head"><h2>' + ico('box', 'head-ico') + 'Не установлены (' + missing.length + ')</h2></summary><div class="panel"><dl class="kv">' + missing.join('') + '</dl></div></details>' : '');
   },
   // Cards of the components added on 01.11.2026: what is known, nothing that cannot be done yet.
@@ -2660,7 +2665,8 @@ const RENDER = {
       btn('ask', 'save', 'Обновить', 'small', ' data-confirm="ext-upgrade" data-pkg="' + esc(p.name) + '"') + '</dd></div>').join('');
     // Owner 13.11.2026: the state first (when checked, the updates), then the actions, then the settings; the
     // packages VWARD itself needs with their versions (the whole Entware list is the system's own).
-    const vp = x.vward || [], miss = vp.filter(p => !p.installed);
+    // The opkg database not read (installed_count 0): nothing is known - «—», never a red «не установлен».
+    const vp = x.vward || [], known = num(x.installed_count) > 0, miss = known ? vp.filter(p => !p.installed) : [];
     return loadError(['ext']) +
       panel('Пакеты Entware', kv([
           ['Проверено', x.checked_at ? fmtStamp(x.checked_at) : 'ещё не проверялись', x.checked_at && x.feed_ok === false ? 'warn' : '', null, '',
@@ -2671,8 +2677,8 @@ const RENDER = {
         (c ? confirmBox('ext-upgrade', (c.critical ? 'Системный пакет: если он сломается, может пропасть SSH или командная строка. ' : '') + 'Обновить ' + c.name + ' до ' + extVer(c.available) + '?', 'Обновить') : '') +
         extRunNote(run) + resultBox('ext') : ''),
         { desc: 'Программы Entware, на которых работает VWARD.' }) +
-      (vp.length ? panel('Пакеты VWARD', kv(vp.map(p => [p.name, p.installed ? extVer(p.installed) : 'не установлен', p.installed ? '' : 'crit'])),
-        { desc: miss.length ? 'Без ' + miss.map(p => p.name).join(', ') + ' часть VWARD не работает: поставьте заново установщиком.' : 'Нужны VWARD; обновляются вместе с остальными пакетами.' }) : '') +
+      (vp.length ? panel('Пакеты VWARD', kv(vp.map(p => [p.name, !known ? '—' : p.installed ? extVer(p.installed) : 'не установлен', known && !p.installed ? 'crit' : ''])),
+        { desc: !known ? 'Список установленных пакетов не прочитан.' : miss.length ? 'Без ' + miss.map(p => p.name).join(', ') + ' часть VWARD не работает: поставьте заново установщиком.' : 'Нужны VWARD; обновляются вместе с остальными пакетами.' }) : '') +
       panel('Действия', '<div class="panel-actions">' + extCheckBtn('Проверить обновления') + '</div>' + (pk.length ? '' : resultBox('ext'))) +
       panel('Настройки', '<dl class="kv">' + ctrlRow('Обновлять автоматически', sw('data-ext-auto="entware"', x.auto && x.auto.entware, 'Обновлять пакеты Entware автоматически'), 'кроме системных пакетов: их - только вручную') + '</dl>') +
       extHistory(x.history, h => h.name !== 'adguardhome-go');
@@ -4630,7 +4636,8 @@ function patchContent(html, whole) {
    holder, so forms and the change handlers work as before. */
 function ddLabel(sel) { const o = sel.options[sel.selectedIndex]; return o ? o.textContent : ''; }
 function ddEnhance(root) {
-  root.querySelectorAll('select.input:not([data-dd])').forEach(sel => {
+  // A select under a slider (segSel) is never shown: no button of its own.
+  root.querySelectorAll('select.input:not([data-dd]):not([hidden])').forEach(sel => {
     sel.setAttribute('data-dd', '1'); sel.classList.add('dd-native'); sel.tabIndex = -1;
     const b = document.createElement('button');
     b.type = 'button'; b.className = sel.className.replace('dd-native', '').trim() + ' dd-btn';

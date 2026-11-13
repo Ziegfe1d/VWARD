@@ -28,7 +28,7 @@ REG = json.loads((ROOT / "config/settings/settings-registry.json").read_text(enc
 parts = {p["id"]: p for p in REG["parts"]}
 # Owner 13.11.2026: the agents one line here (their page has them all), VWARD's base one line (details on
 # «Система»), each part in the group of its work.
-for need in ("const groups = (P.groups || []).map(g => {", "P.list.filter(p => p.group === g)", "panel('Агенты', kv([agentsRow()])) + groups",
+for need in ("const groups = (P.groups || []).map(g => {", "P.list.filter(p => p.group === g)", "panel('Агенты', kv([['Все агенты'].concat(agentsRow().slice(1))])) + groups",
              "if (g === 'Платформа') {", "kv([['Основа VWARD', bad ? bad[1] : 'Работает', bad ? bad[0] : 'ok', 'system', '',"):
     if need not in page:
         fail(f"the page is not drawn from the registry: {need!r}")

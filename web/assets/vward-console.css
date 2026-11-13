@@ -647,3 +647,6 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
 .seg-slider.off button[aria-checked="true"]{color:var(--accent-text)}
 .panel-actions.wrap{flex-wrap:wrap}
 .panel-actions.wrap .btn{white-space:normal;text-align:center;word-break:normal;overflow-wrap:normal}
+/* A short choice as the slider over its hidden select (owner 13.11.2026): the select is never seen. */
+.seg-sel{display:block;width:100%}
+.seg-sel>select{display:none!important}

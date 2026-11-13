@@ -40,4 +40,12 @@ if len(re.findall(r"(?m)^\.switch\{", CSS)) != 1 or re.search(r"\.switch\{[^}]*w
     fail("one switch size for the whole Panel")
 if "[['off', 'Выкл'], ['check', 'Песочница'], ['active', 'Вкл']]" not in JS:
     fail("an ads source's modes are «Выкл · Песочница · Вкл»")
+# The slider's select is never seen: no dropdown button of its own, hidden by the style too.
+if "querySelectorAll('select.input:not([data-dd]):not([hidden])')" not in JS or ".seg-sel>select{display:none!important}" not in CSS:
+    fail("RED: the select under a slider showed beside it")
+# Neighbouring sections with one sign (the audit of 13.11.2026 over all the pages): their own signs.
+for need in ("[/^Туннели$/, 'link']", "[/^Домены через VPN/, 'list']", "[/^Подсети через VPN/, 'route']", "[/^Агенты$/, 'auto']",
+             "[/^Обслуживание$/, 'tools']", "[/^Состояние$/, 'pulse']", "[/^Устройство$/, 'cpu']", "[/^Оформление$/, 'sun']", "[/^Восстановление интернета/, 'undo']"):
+    if need not in JS:
+        fail(f"a section's own sign is gone: {need}")
 print("CONSOLE_UI_STYLE=PASS")
