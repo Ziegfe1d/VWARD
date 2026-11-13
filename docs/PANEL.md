@@ -84,6 +84,7 @@ API принимает POST только с заголовком `X-VWARD-Reques
 | `update apply_window window/any` | «По расписанию» / «Автоматически» (вместе с `auto_apply` через `settings`) | `/opt/etc/vward/update.conf` |
 | `update-feed main/dev` | канал: «Стабильная» (ветка main) или «Разработка» (ветка dev, токен `UPDATE_FEED_DEV`); прежняя `beta` распознаётся и сама не меняется | `manifest_url` в `update.conf` |
 | `adaptive-mode 0/1` | «Автоподбор доменов» добавляет новые домены | `/opt/etc/vward/route-engine/adaptive.disabled` |
+| `adaptive-vpncheck off/sandbox` | «Проверка через VPN» автоподбора: домен, который не открывается ни напрямую, ни через VPN; в песочнице ядро только пишет, что убрало бы («Вкл» — после проверки на роутере владельца) | `/opt/etc/vward/route-engine/adaptive.vpncheck` |
 | `classifier 0/1` | автоопределение категории новых доменов | `CLASSIFIER_ENABLED` в `domain-classifier.conf` |
 | `ip-category NAME 0/1` | IP-категория может получать маршруты | `/opt/etc/vward/policy-sync/excluded.categories` |
 | `console-auth 0/1` | вход по учётной записи Keenetic (только через `auth`) | `/opt/etc/vward/console/auth.conf` |

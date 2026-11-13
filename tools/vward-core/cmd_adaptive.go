@@ -92,7 +92,7 @@ func (l *eventLog) put(event, host, why string) {
 
 type adaptiveFlags struct {
 	rciAddr, lan, wan, tunDev, group, jdir, logPath, dns string
-	ownedPath, shellPersist                              string
+	ownedPath, shellPersist, etc                         string
 	apply, reconcile                                     bool
 	workers, limit                                       int
 	batch, saveEvery, refresh, timeout, reconcileTick    time.Duration
@@ -109,6 +109,7 @@ func parseAdaptive(name string, args []string) (*adaptiveFlags, *flag.FlagSet) {
 	fs.StringVar(&f.jdir, "journal", defaultJournal, "journal directory")
 	fs.StringVar(&f.logPath, "log", "/opt/var/log/vward-core-adaptive.log", "event log (- : stdout)")
 	fs.StringVar(&f.dns, "dns", "", "resolver for the checks (empty: the router's)")
+	fs.StringVar(&f.etc, "etc", "", "settings directory read while running: adaptive.disabled, core.observe (no writing), adaptive.vpncheck (off, sandbox, on)")
 	fs.BoolVar(&f.apply, "apply", false, "write into the group (without: observation, nothing sent)")
 	fs.BoolVar(&f.reconcile, "reconcile", true, "take names out again once they open directly (3 checks in a row)")
 	fs.StringVar(&f.ownedPath, "owned", "/opt/var/lib/vward/core-adaptive/owned.json", "the names Autopodbor added itself")
@@ -165,22 +166,47 @@ func runAdaptive(args []string) {
 	cfg.Group, cfg.WanDev, cfg.TunnelDev = f.group, f.wan, f.tunDev
 	e := adaptive.New(cfg, adaptive.NewProber(f.timeout, f.dns))
 	w := &adaptive.Writer{R: r, J: j, Group: f.group, Limit: f.limit, Observe: !f.apply, SaveEvery: f.saveEvery, KeepOps: 50}
-	mode := "observe"
-	if f.apply {
-		mode = "apply"
+	// The owner's switches are read while running (fix.39): Autopodbor switched off in the Panel
+	// stops writing within seconds, not at the next restart. held: this start may not write at all.
+	held := !f.apply
+	modes := adaptive.ReadModes(f.etc)
+	modeName := func(m adaptive.Modes) string {
+		if held || m.Observe {
+			return "observe"
+		}
+		return "apply"
 	}
-	log.put("START", "-", fmt.Sprintf("mode=%s lan=%s wan=%s tunnel=%s group=%s", mode, f.lan, f.wan, f.tunDev, f.group))
+	mode := modeName(modes)
+	log.put("START", "-", fmt.Sprintf("mode=%s vpn_check=%s lan=%s wan=%s tunnel=%s group=%s", mode, modes.VPNCheck, f.lan, f.wan, f.tunDev, f.group))
 	if err := j.Gate(); err != nil {
 		log.put("JOURNAL_BLOCKED", "-", err.Error()+" (vward-core recover)")
-		w.Observe = true
+		held = true
+		mode = "observe"
 	}
+	w.Observe = held || modes.Observe
 	_, ownedErr := os.Stat(f.ownedPath)
 	firstStart := os.IsNotExist(ownedErr)
 	owned, err := adaptive.LoadOwned(f.ownedPath)
 	if err != nil {
 		log.put("OWNED_UNREAD", f.ownedPath, err.Error()+" (starting an empty list)")
 	}
-	var omu sync.Mutex // owned and the writer: one change at a time
+	var omu sync.Mutex // owned, the writer and the modes: one change at a time
+	// reread (omu held): the switches now; a change is one journal line.
+	reread := func() {
+		m := adaptive.ReadModes(f.etc)
+		if m == modes {
+			return
+		}
+		if modeName(m) != modeName(modes) {
+			log.put("MODE", "-", modeName(m))
+		}
+		if m.VPNCheck != modes.VPNCheck {
+			log.put("VPN_CHECK", "-", string(m.VPNCheck))
+		}
+		modes = m
+		mode = modeName(m)
+		w.Observe = held || m.Observe
+	}
 	const ownedEvery = 30 * time.Minute
 	ownedSaved := time.Now()
 	inGroup := func(m *ndm.Model) map[string]bool {
@@ -275,7 +301,7 @@ func runAdaptive(args []string) {
 	}()
 
 	var mu sync.Mutex
-	pending := map[string]bool{}
+	pending := map[string]string{} // name -> why the direct check failed
 	// An hour's summary (owner 12.11.2026): whether Autopodbor works at all is seen in the journal
 	// even when nothing changes - names seen, checked, and how the checks ended.
 	stats := map[string]int{}
@@ -305,7 +331,7 @@ func runAdaptive(args []string) {
 						last[res.Host] = res.Outcome
 					}
 					if res.Outcome == adaptive.Add {
-						pending[res.Host] = true
+						pending[res.Host] = res.DirectWhy()
 					}
 					if len(last) > 4096 {
 						last = map[string]adaptive.Outcome{}
@@ -331,6 +357,8 @@ func runAdaptive(args []string) {
 				case <-tick.C:
 				}
 				omu.Lock()
+				reread()
+				rc.TunnelDev, rc.VPNCheck = f.tunDev, modes.VPNCheck
 				// The checks themselves run without the lock held for long: a copy of what is due.
 				snap := &adaptive.Owned{Names: map[string]*adaptive.Name{}}
 				for h, n := range owned.Names {
@@ -345,12 +373,20 @@ func runAdaptive(args []string) {
 				}
 				remove, ev := adaptive.Reconcile(ctx, snap, prober, f.wan, rc, time.Now())
 				omu.Lock()
+				reread()
 				for h, n := range snap.Names {
 					if cur, ok := owned.Names[h]; ok {
 						cur.Streak, cur.LastOK, cur.Checked = n.Streak, n.LastOK, n.Checked
+						cur.Why, cur.VPNFail, cur.LastVPNFail = n.Why, n.VPNFail, n.LastVPNFail
 					}
 				}
 				maintLog(prev, ev, rc.Threshold, log.put)
+				whyOut := map[string]string{}
+				for _, x := range ev {
+					if x.Event == "REMOVE" {
+						whyOut[x.Host] = x.Why
+					}
+				}
 				if len(remove) > 0 {
 					b, err := w.Remove(remove, time.Now())
 					switch {
@@ -360,12 +396,12 @@ func runAdaptive(args []string) {
 					case b != nil:
 						count("removed", len(b.Removed))
 						for _, h := range b.Removed {
-							log.put("REMOVED", h, "opened directly 3 times in a row")
+							log.put("REMOVED", h, whyOut[h])
 							delete(owned.Names, h)
 							e.Forget(h)
 						}
 						for _, h := range b.Would {
-							log.put("WOULD_REMOVE", h, "opened directly 3 times in a row")
+							log.put("WOULD_REMOVE", h, whyOut[h])
 						}
 					}
 				}
@@ -386,8 +422,8 @@ func runAdaptive(args []string) {
 
 	batch := time.NewTicker(f.batch)
 	defer batch.Stop()
-	reread := time.NewTicker(f.refresh)
-	defer reread.Stop()
+	rereadTick := time.NewTicker(f.refresh)
+	defer rereadTick.Stop()
 	hourly := time.NewTicker(time.Hour)
 	defer hourly.Stop()
 	summary := func() {
@@ -400,9 +436,15 @@ func runAdaptive(args []string) {
 			n = len(m.Groups[f.group].Include)
 		}
 		omu.Lock()
-		owns := len(owned.Names)
+		owns, neither := len(owned.Names), 0
+		for _, x := range owned.Names {
+			if x.VPNFail >= adaptive.DefaultReconcile().Threshold {
+				neither++
+			}
+		}
+		mode, vpnCheck := mode, modes.VPNCheck
 		omu.Unlock()
-		log.put("STATS", "-", fmt.Sprintf("mode=%s seen=%d checked=%d direct_ok=%d vpn_only=%d vpn_fail=%d unknown=%d isp_unreliable=%d added=%d removed=%d write_failed=%d group=%d/%d own=%d",
+		log.put("STATS", "-", fmt.Sprintf("vpn_check=%s neither_way=%d ", vpnCheck, neither)+fmt.Sprintf("mode=%s seen=%d checked=%d direct_ok=%d vpn_only=%d vpn_fail=%d unknown=%d isp_unreliable=%d added=%d removed=%d write_failed=%d group=%d/%d own=%d",
 			mode, s["seen"], s["checked"], s[string(adaptive.DirectOK)], s[string(adaptive.Add)],
 			s[string(adaptive.TunnelFail)]+s[string(adaptive.TunnelUnstable)], s[string(adaptive.ProbeUnknown)],
 			s[string(adaptive.ISPUnreliable)], s["added"], s["removed"], s["write_failed"], n, f.limit, owns))
@@ -425,7 +467,7 @@ func runAdaptive(args []string) {
 			log.put("STOP", "-", "")
 			log.flush()
 			return
-		case <-reread.C:
+		case <-rereadTick.C:
 			refresh()
 			e.Prune()
 			log.flush()
@@ -434,12 +476,14 @@ func runAdaptive(args []string) {
 		case <-batch.C:
 			mu.Lock()
 			var hosts []string
+			whyIn := pending
 			for h := range pending {
 				hosts = append(hosts, h)
 			}
-			pending = map[string]bool{}
+			pending = map[string]string{}
 			mu.Unlock()
 			omu.Lock()
+			reread()
 			if len(hosts) > 0 {
 				b, err := w.Add(hosts, time.Now())
 				switch {
@@ -453,7 +497,7 @@ func runAdaptive(args []string) {
 					count("added", len(b.Added))
 					for _, h := range b.Added {
 						log.put("ADDED", h, f.group)
-						owned.Names[h] = &adaptive.Name{Added: time.Now()}
+						owned.Names[h] = &adaptive.Name{Added: time.Now(), Why: whyIn[h]}
 					}
 					if len(b.Added) > 0 {
 						if err := owned.Save(); err != nil {

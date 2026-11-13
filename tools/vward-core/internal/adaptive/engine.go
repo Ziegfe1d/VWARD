@@ -18,6 +18,7 @@ package adaptive
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,6 +67,17 @@ type Result struct {
 	Host    string
 	Outcome Outcome
 	Why     string
+}
+
+// DirectWhy: why the direct check failed, from an AUTO_VPN result («direct: X; vpn: Y»); kept
+// with the name (the Panel says it, «the VPN's smart refusal» needs it).
+func (r Result) DirectWhy() string {
+	rest, ok := strings.CutPrefix(r.Why, "direct: ")
+	if !ok {
+		return ""
+	}
+	d, _, _ := strings.Cut(rest, "; vpn: ")
+	return d
 }
 
 type memo struct {

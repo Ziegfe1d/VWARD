@@ -847,7 +847,10 @@ const LOG_CODES = {
   ADAPTIVE_RU_OUT: 'Российские домены выведены из VPN', AUTO_VPN: 'Через VPN (автоподбор)', AUTO_DIRECT_MAINT: 'Снова напрямую', VPN_OK: 'Открывается через VPN', VPN_OK_RETRY: 'Открывается через VPN',
   DIRECT_OK: 'Открывается напрямую', DIRECT_UNSTABLE: 'Напрямую нестабильно', NO_IPV4: 'Нет IPv4-адреса', ADAPTIVE_NO_IPV4: 'Нет IPv4-адреса', RECHECK_ADAPTIVE: 'Повторная проверка',
   BROKEN_ISP_AND_VPN: 'Не открывается ни напрямую, ни через VPN', MAINT_BROKEN: 'Не открывается ни напрямую, ни через VPN', MAINT_VPN_OK: 'Открывается через VPN',
-  MAINT_STILL_BLOCKED: 'Проверка списка автоподбора: по-прежнему не открываются напрямую', MAINT_ISP_UNKNOWN: 'Проверка через провайдера без ответа', MAINT_ISP_BAD: 'Провайдер не пропускает', MAINT_DIRECT_CONFIRM: 'Напрямую: подтверждение', MAINT_DIRECT_CONFIRM_WAIT: 'Напрямую: ждём подтверждения',
+  MAINT_STILL_BLOCKED: 'Проверка списка автоподбора: по-прежнему не открываются напрямую',
+  MAINT_VPN_FAIL: 'Не открывается ни напрямую, ни через VPN', MAINT_VPN_WOULD_REMOVE: 'Песочница: VWARD убрал бы домен из VPN - не открывается ни напрямую, ни через VPN',
+  MAINT_VPN_UNRELIABLE: 'Проверка через VPN не засчитана: VPN сейчас не открывает проверочные сайты', MODE: 'Автоподбор: режим записи', VPN_CHECK: 'Проверка через VPN: режим',
+  CORE_OUTDATED: 'Ядро маршрутизации от прошлого выпуска: загружается новое', CORE_INSTALLED: 'Ядро маршрутизации установлено', CORE_INSTALL_FAILED: 'Ядро маршрутизации не установлено', MAINT_ISP_UNKNOWN: 'Проверка через провайдера без ответа', MAINT_ISP_BAD: 'Провайдер не пропускает', MAINT_DIRECT_CONFIRM: 'Напрямую: подтверждение', MAINT_DIRECT_CONFIRM_WAIT: 'Напрямую: ждём подтверждения',
   MAINT_ISP_PROBE_UNRELIABLE: 'Проверка через провайдера недостоверна: сайты не оцениваются', ADD_ABORT_ISP_UNRELIABLE: 'Не добавлен в VPN: проверка через провайдера недостоверна',
   ADD_SKIP_RU_ZONE: 'Российский домен: не через VPN', ADD_SKIP_ROUTER_OWN: 'Служба роутера (KeenDNS, облако): не через VPN', HINT_SKIP_ROUTER_OWN: 'Служба роутера (KeenDNS, облако): не через VPN', ADD_ABORT_WG_FAIL: 'Не добавлен: VPN тоже не открывает', ADD_ABORT_DIRECT_RECOVERED: 'Не добавлен: открылся напрямую',
   ABORTED_ISP_PROBE_UNRELIABLE: 'Проверка IP-категорий остановлена: проверка через провайдера недостоверна', ABORTED_TUNNEL_DOWN: 'Проверка IP-категорий остановлена: туннель не отвечает',
@@ -2938,8 +2941,12 @@ const RENDER = {
     const names = raw.length ? raw : (cfgRoute().adaptive || []).map(d => ({ d: typeof d === 'string' ? d : d.domain || '' }));
     const on = cfgRoute().adaptive_enabled !== false, day = Date.now() - 86400000;
     const when = n => { const t = Date.parse(n.added || ''); return isNaN(t) ? '' : new Date(t).toDateString() === new Date().toDateString() ? 'с сегодня ' + adHm(t) : 'с ' + new Date(t).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }); };
-    const sub = n => n.streak > 0 ? 'через VPN · <span class="st ok">скоро вернётся напрямую</span>' : esc(('через VPN ' + when(n)).trim());
-    let shown = names.filter(n => (ADV.show === 'all' || (ADV.show === 'back' ? n.streak > 0 : Date.parse(n.added || '') > day)));
+    // fix.39, the VPN check: names that open neither directly nor through the VPN; the sandbox only says so.
+    const vc = cfgRoute().adaptive_vpncheck || 'sandbox', neither = names.filter(n => n.vpn_fail >= AD_NEITHER);
+    const sub = n => (n.streak > 0 ? 'через VPN · <span class="st ok">скоро вернётся напрямую</span>' :
+      vc !== 'off' && n.vpn_fail >= AD_NEITHER ? 'через VPN · <span class="st warn">не открывается и через VPN</span>' : esc(('через VPN ' + when(n)).trim())) +
+      (sharedCdn(n.d) ? ' · общее имя CDN: с ним через VPN идут и другие сайты' : '');
+    let shown = names.filter(n => (ADV.show === 'all' || (ADV.show === 'back' ? n.streak > 0 : ADV.show === 'neither' ? n.vpn_fail >= AD_NEITHER : Date.parse(n.added || '') > day)));
     if (ADV.order === 'az') shown = shown.slice().sort((a, b) => a.d.localeCompare(b.d));
     const lim = shown.slice(0, ADV.lim);
     const row = n => { const open = ADV.open === n.d;
@@ -2952,13 +2959,16 @@ const RENDER = {
     // Opened by its address too (not only through go()): the feed is read once on the first draw.
     if (!ADV.feed && !ADV.busy && !ADV.tried) { ADV.tried = true; setTimeout(adFeedLoad, 0); }
     return cfgNote() +
-      panel('Автоподбор доменов', '<dl class="kv">' + ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', on, 'Автоподбор доменов', !cfgOk()), 'не открылся напрямую - идёт через VPN') + '</dl>') +
+      panel('Автоподбор доменов', '<dl class="kv">' + ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', on, 'Автоподбор доменов', !cfgOk()), 'не открылся напрямую - идёт через VPN') +
+        ctrlRow('Проверка через VPN', choiceSlider('ad-vpncheck', [['off', 'Выкл'], ['sandbox', 'Песочница']], vc === 'off' ? 'off' : 'sandbox', 'Проверка через VPN'),
+          'домену, который не открывается ни напрямую, ни через VPN, в списке не место. В песочнице VWARD ничего не убирает, только записывает в журнал, что убрал бы. «Вкл» появится после проверки на вашем роутере') + '</dl>' +
+        (vc === 'off' ? '' : '<p class="panel-desc">' + (neither.length ? 'Песочница: убрал бы ' + fmtInt(neither.length) + '\u00a0' + plural(neither.length, 'домен', 'домена', 'доменов') + ' - не открываются и через VPN.' : 'Песочница: убирать нечего.') + '</p>')) +
       panel('Сейчас', '<div id="adFeed">' + adFeedHtml() + '</div>' +
         '<div class="panel-actions"><button class="btn small" type="button" data-act="ad-pause">' + ico(ADV.paused ? 'refresh' : 'power') + (ADV.paused ? 'Продолжить' : 'Пауза') + '</button>' +
         '<button class="btn small" type="button" data-go="a-adaptive">' + ico('clock') + 'Вся история</button></div>') +
       panel('Домены', '<div class="search-bar"><label class="search-field">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти домен" aria-label="Найти домен" autocomplete="off"></label>' +
           '<button class="icon-btn filter-btn' + (fset ? ' on' : '') + '" type="button" data-act="ad-filters" aria-expanded="' + !!fopen + '" aria-label="Фильтр" title="Фильтр">' + ico('sliders') + '</button></div>' +
-        (fopen ? '<p class="chips-label">Показать</p>' + chips('show', [['all', 'Все'], ['back', 'Скоро вернутся напрямую'], ['new', 'Новые за сутки']]) +
+        (fopen ? '<p class="chips-label">Показать</p>' + chips('show', [['all', 'Все'], ['back', 'Скоро вернутся напрямую'], ['new', 'Новые за сутки']].concat(vc === 'off' ? [] : [['neither', 'Не открываются и через VPN']])) +
           '<p class="chips-label">Порядок</p>' + chips('order', [['new', 'Сначала новые'], ['az', 'По алфавиту']]) : '') +
         (lim.length ? '<ul class="rows" data-list-rows>' + lim.map(row).join('') + '</ul>' : empty(names.length ? 'Ничего не найдено' : 'Пока пусто')) +
         (shown.length > lim.length ? '<div class="panel-actions"><button class="btn small" type="button" data-act="ad-more">Показать ещё</button></div>' : ''),
@@ -3125,13 +3135,23 @@ const AD_EV = {
   ADDED: ['bad', 'напрямую не открылся - добавлен в VPN'], DIRECT_OK: ['ok', 'открывается напрямую'],
   ISP_FAIL_VPN_FAIL: ['warn', 'не открылся ни напрямую, ни через VPN'], ISP_FAIL_VPN_UNSTABLE: ['warn', 'через VPN открывается нестабильно'],
   ISP_UNRELIABLE: ['warn', 'провайдер сейчас не отвечает - не проверялся'], MAINT_DIRECT_CONFIRM: ['ok', 'снова открывается напрямую'],
-  MAINT_REMOVE: ['ok', 'вернулся напрямую'], REMOVED: ['ok', 'вернулся напрямую'], MAINT_DIRECT_FAIL: ['', 'проверка: напрямую не открывается, остаётся в VPN']
+  MAINT_REMOVE: ['ok', 'вернулся напрямую'], REMOVED: ['ok', 'вернулся напрямую'], MAINT_DIRECT_FAIL: ['', 'проверка: напрямую не открывается, остаётся в VPN'],
+  // fix.39, the VPN check: a name that opens neither way; the sandbox says what it would do.
+  MAINT_VPN_FAIL: ['warn', 'не открывается и через VPN'], MAINT_VPN_WOULD_REMOVE: ['warn', 'Песочница: убрал бы из VPN - не открывается ни напрямую, ни через VPN'],
+  gone: ['warn', 'убран из VPN: не открывается и через VPN']
 };
+// Shared CDN names (owner's journal 12.11.2026): Keenetic routes the name's addresses, and on a CDN's
+// own name they are the addresses of many other sites too - those go through the VPN with it.
+const CDN_ZONES = ['akamai.net', 'akamaiedge.net', 'akamaized.net', 'akamaihd.net', 'edgekey.net', 'edgesuite.net', 'fastly.net', 'fastlylb.net',
+  'cloudfront.net', 'azureedge.net', 'cdn.cloudflare.net', 'llnwd.net', 'edgecastcdn.net', 'cdn77.org', 'b-cdn.net', 'gcdn.co'];
+const sharedCdn = d => { d = String(d || '').toLowerCase(); return CDN_ZONES.some(z => d === z || d.endsWith('.' + z)); };
+const AD_NEITHER = 3; // rounds a name opened neither way before the VPN check would take it out (the core's Threshold)
 function adFeedParse(text) {
   return String(text || '').split('\n').map(l => l.split('|')).filter(f => f.length >= 3 && (AD_EV[f[1]] || (f[1] === 'PROBE_UNKNOWN' && /dns blocked/.test(f[3] || '')))).map(f => {
-    const ev = f[1] === 'PROBE_UNKNOWN' || /dns blocked/.test(f[3] || '') && f[1] === 'MAINT_REMOVE' ? ['warn', f[1] === 'MAINT_REMOVE' ? 'убран: возможно, реклама' : 'возможно, реклама: не добавлен'] : AD_EV[f[1]];
+    const gone = f[1] === 'REMOVED' && /through the VPN either/.test(f[3] || '');
+    const ev = f[1] === 'PROBE_UNKNOWN' || /dns blocked/.test(f[3] || '') && f[1] === 'MAINT_REMOVE' ? ['warn', f[1] === 'MAINT_REMOVE' ? 'убран: возможно, реклама' : 'возможно, реклама: не добавлен'] : gone ? AD_EV.gone : AD_EV[f[1]];
     const streak = /streak=(\d+)\/(\d+)/.exec(f[3] || '');
-    return { t: Date.parse(f[0]), host: f[2], code: f[1] === 'PROBE_UNKNOWN' || (f[1] === 'MAINT_REMOVE' && /dns blocked/.test(f[3] || '')) ? 'ad' : f[1], tone: ev[0], text: ev[1] + (f[1] === 'MAINT_DIRECT_CONFIRM' && streak ? ' (' + streak[1] + ' из ' + streak[2] + ')' : '') };
+    return { t: Date.parse(f[0]), host: f[2], code: f[1] === 'PROBE_UNKNOWN' || (f[1] === 'MAINT_REMOVE' && /dns blocked/.test(f[3] || '')) ? 'ad' : gone ? 'gone' : f[1], tone: ev[0], text: ev[1] + ((f[1] === 'MAINT_DIRECT_CONFIRM' || f[1] === 'MAINT_VPN_FAIL') && streak ? ' (' + streak[1] + ' из ' + streak[2] + ')' : '') };
   }).reverse();
 }
 function adFeedHtml() {
@@ -3569,6 +3589,7 @@ function choiceSlider(key, opts, cur, label, local) {
 function segPick(key, v) {
   if (key === 'ad-way') { const d = ADV.open; if (!d || v === 'auto') return; ADV.open = '';
     cfgSet({ op: 'adaptive', action: v === 'vpn' ? 'pin' : 'remove', target: d }, v === 'vpn' ? d + ': всегда через VPN' : d + ': напрямую, автоподбор его больше не берёт', ['route', 'config']); return; }
+  if (key === 'ad-vpncheck') { cfgSet({ op: 'adaptive-vpncheck', value: v }, 'Проверка через VPN: ' + (v === 'off' ? 'выкл' : 'песочница'), ['config']); return; }
   if (key === 'site-do') { if (v === 'block') { confirm = { id: 'site-block', dom: SITEDOM }; render(); } else siteDo(v, SITEDOM); return; }
   if (key === 'vsrv-sort') { VVIEW.sort = v; vViewSave(); render(); }
   else if (key === 'sd-store') sdStoreSet(v);

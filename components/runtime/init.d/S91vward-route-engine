@@ -439,7 +439,8 @@ status_service()
 # When the routing core is installed («S91vward-route-engine core-install»), «vward-core adaptive» runs instead
 # of the shell engine: the only writer of AdaptiveAuto, it also takes names out again (the shell
 # reconciler stands aside). /opt/etc/vward/route-engine/engine.shell keeps the shell engine;
-# core.observe (or Autopodbor switched off in the Panel) runs it without writing. A core that
+# core.observe runs it without writing; Autopodbor switched off in the Panel - the core itself
+# stops writing (it reads adaptive.disabled while running). A core that
 # does not start: the shell engine for an hour, then the core again. No core yet: the shell
 # engine, and the core is fetched in the background (at most once an hour).
 CORE_BIN=${VWARD_CORE_BIN:-/opt/share/vward/core/vward-core}
@@ -465,9 +466,9 @@ command -v vward_core_adaptive_pid >/dev/null 2>&1 || vward_core_adaptive_pid() 
 core_sum()
 {
     case "$1" in
-        mipsle) echo c339942ab038793558b88b83e0d283135b2ab83508b55a24c3c6219940238863 ;;
-        mips) echo 7e56c0aca069a79ad64a6bdb5b09d5d75f1ae02d385b44141ef750d3580d9e97 ;;
-        arm64) echo 6fa9e0bed84fa8d55358c67878dab81f55e0b6ae5753894f4e01f4b3f31f6a9d ;;
+        mipsle) echo d6a3d60b9449805a0e99686ee74590afd8c2769c82f414ae7a60531fa0996a70 ;;
+        mips) echo 9d38fc39b36caaef29c8d87e96891a438f5dc20590e18703187a7eb60cc431b1 ;;
+        arm64) echo a433d09be6e9aae411a340418cd470e9be4602f8551b74663ed7e6fbb87a9d7d ;;
         *) return 1 ;;
     esac
 }
@@ -510,6 +511,7 @@ core_install()
         echo "error=$CI_ERR"
         return 1
     fi
+    rm -f "$CORE_FALLBACK"   # the new program is tried at once, not after the old one's hour
     echo "$(date '+%Y-%m-%d %H:%M:%S')|CORE_INSTALLED|arch=$CI_A" >> "$EVENT_LOG" 2>/dev/null
     echo "result=changed"
 }
@@ -524,6 +526,16 @@ core_wanted()
             ( "$CORE_SELF" core-install </dev/null >/dev/null 2>&1 & )
         fi
         return 1
+    fi
+    # A core left by the previous release (not the pinned build) keeps working; the pinned one is
+    # fetched in the background and «core-install» restarts Autopodbor on it (fix.39: a router
+    # updated from fix.37 kept fix.37's core for good).
+    if CW_A=$(core_arch 2>/dev/null) && CW_WANT=$(core_sum "$CW_A") &&
+        [ -z "$(find "$CORE_FETCH_TRY" -mmin -60 2>/dev/null)" ] &&
+        [ "$(sha256sum "$CORE_BIN" 2>/dev/null | cut -d' ' -f1)" != "$CW_WANT" ]; then
+        printf '' > "$CORE_FETCH_TRY" 2>/dev/null
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|CORE_OUTDATED|arch=$CW_A|fetching the build of this release" >> "$EVENT_LOG" 2>/dev/null
+        ( "$CORE_SELF" core-install </dev/null >/dev/null 2>&1 & )
     fi
     [ -z "$(find "$CORE_FALLBACK" -mmin -60 2>/dev/null)" ]
 }
@@ -546,11 +558,22 @@ core_start()
     fi
     # One writer of AdaptiveAuto: the shell engine goes first.
     stop_service >/dev/null 2>&1
-    CS_MODE=--apply
-    [ ! -e "$CORE_ETC/adaptive.disabled" ] && [ ! -e "$CORE_ETC/core.observe" ] || CS_MODE=
+    # The core reads the owner's switches in CORE_ETC while it runs (--etc, fix.39): Autopodbor
+    # switched off (adaptive.disabled) stops writing within seconds and writes again when switched
+    # on, without a restart; the VPN check's mode (adaptive.vpncheck) the same. core.observe is the
+    # start without the right to write at all.
+    # A core of the previous release (it works until the pinned one is fetched, core_wanted) does
+    # not know --etc: it is started the old way - switched off means no --apply until a restart.
+    CS_MODE=--apply CS_ETC=
+    if "$CORE_BIN" adaptive -h 2>&1 </dev/null | grep -q -- '-etc '; then
+        CS_ETC=$CORE_ETC
+        [ ! -e "$CORE_ETC/core.observe" ] || CS_MODE=
+    else
+        [ ! -e "$CORE_ETC/adaptive.disabled" ] && [ ! -e "$CORE_ETC/core.observe" ] || CS_MODE=
+    fi
     mkdir -p "${VWARD_CORE_PIDFILE%/*}" "${CORE_LOG%/*}" 2>/dev/null
     "$CORE_BIN" adaptive --lan "${VWARD_LAN_DEVICE:-br0}" --wan "${VWARD_WAN_DEVICE:-}" \
-        --tunnel-dev "${VWARD_TUNNEL_DEVICE:-}" --log "$CORE_LOG" $CS_MODE </dev/null >> "$CORE_LOG.out" 2>&1 &
+        --tunnel-dev "${VWARD_TUNNEL_DEVICE:-}" --log "$CORE_LOG" ${CS_ETC:+--etc "$CS_ETC"} $CS_MODE </dev/null >> "$CORE_LOG.out" 2>&1 &
     echo "$!" > "$VWARD_CORE_PIDFILE"
     sleep 3
     if CS_P=$(vward_core_adaptive_pid); then

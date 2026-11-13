@@ -92,6 +92,11 @@ func (p *NetProber) Probe(ctx context.Context, host, dev string) ProbeResult {
 	_ = raw.SetDeadline(time.Now().Add(p.timeout))
 	conn := tls.Client(raw, &tls.Config{ServerName: host, InsecureSkipVerify: true, NextProtos: []string{"http/1.1"}})
 	if err := conn.HandshakeContext(cctx); err != nil {
+		// The server's own TLS answer «no application protocol»: it is there and speaks, only not
+		// HTTP/1.1 - the site opens (tunnel.googlezip.net stayed in the VPN, owner 12.11.2026).
+		if strings.Contains(err.Error(), "remote error") && strings.Contains(err.Error(), "no application protocol") {
+			return ProbeResult{Open, "tls: no application protocol"}
+		}
 		return classify(err, "tls")
 	}
 	if _, err := conn.Write([]byte("HEAD / HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nConnection: close\r\n\r\n")); err != nil {

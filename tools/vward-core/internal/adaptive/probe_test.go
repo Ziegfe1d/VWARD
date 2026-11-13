@@ -2,6 +2,7 @@ package adaptive
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -86,9 +87,9 @@ func TestProbeRegionRedirect(t *testing.T) {
 func TestGeoBlockPage(t *testing.T) {
 	for loc, want := range map[string]bool{
 		"https://www.anthropic.com/app-unavailable-in-region": true,
-		"/unsupported_country":                                 true,
-		"https://example.com/login?next=/":                     false,
-		"https://www.google.com/":                              false,
+		"/unsupported_country":                                true,
+		"https://example.com/login?next=/":                    false,
+		"https://www.google.com/":                             false,
 	} {
 		if GeoBlockPage(loc) != want {
 			t.Fatalf("%s: want %v", loc, want)
@@ -104,5 +105,35 @@ func TestProbeDNSBlocked(t *testing.T) {
 	p.Lookup = func(context.Context, string) ([]net.IP, error) { return []net.IP{net.ParseIP("0.0.0.0")}, nil }
 	if r := p.Probe(context.Background(), "ad.doubleclick.net", "lo"); r.Verdict != Unknown || r.Why != "dns blocked" {
 		t.Fatalf("0.0.0.0: %+v", r)
+	}
+}
+
+// «tls: no application protocol» is the server's own answer (it speaks, only not HTTP/1.1):
+// the site opens (tunnel.googlezip.net stayed in the VPN for good, owner's journal 12.11.2026).
+func TestProbeNoApplicationProtocolOpens(t *testing.T) {
+	needRoot(t)
+	srv := httptest.NewTLSServer(nil)
+	cert := srv.TLS.Certificates[0]
+	srv.Close()
+	l, err := tls.Listen("tcp4", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}, NextProtos: []string{"x-other"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() { c.(*tls.Conn).Handshake(); c.Close() }()
+		}
+	}()
+	_, port, _ := net.SplitHostPort(l.Addr().String())
+	p := NewProber(2*time.Second, "")
+	p.Port = port
+	p.Lookup = func(context.Context, string) ([]net.IP, error) { return []net.IP{net.ParseIP("127.0.0.1")}, nil }
+	if r := p.Probe(context.Background(), "tunnel.googlezip.net", "lo"); r.Verdict != Open {
+		t.Fatalf("the server answered (no application protocol): %+v", r)
 	}
 }

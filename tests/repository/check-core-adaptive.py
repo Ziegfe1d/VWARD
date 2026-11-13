@@ -5,9 +5,10 @@
    every pinned build is in tools/vward-core/dist (gunzip gives the pinned SHA-256).
 2. S91's core block, taken as it is, with stand-ins for the shell engine and the core:
    no core yet -> fetched in the background once an hour, the shell engine runs; a core ->
-   it runs (--apply), the shell engine is stopped first; core.observe / Autopodbor off ->
-   no --apply; a core that dies at start -> the shell engine for an hour; engine.shell ->
-   the core is stopped, the shell engine runs.
+   it runs (--apply --etc: it reads Autopodbor's switch itself), the shell engine is stopped
+   first; core.observe -> no --apply; a core that dies at start -> the shell engine for an hour; engine.shell ->
+   the core is stopped, the shell engine runs; a core that is not the pinned build keeps
+   running while the pinned one is fetched in the background.
 3. vward_core_adaptive_pid knows the core's process by its command line; while it runs the
    components agent does not start the shell engine and the shell reconciler stands aside.
 4. Installing the core needs no new file in the package: the updater's target allowlist (2.0.10
@@ -71,11 +72,14 @@ def calls(tmp):
     return out
 
 
-def fake_core(tmp: Path, dies=False):
+def fake_core(tmp: Path, dies=False, old=False):
+    """old: a core of the previous release - it does not know --etc (and would die on it)."""
     (tmp / "share").mkdir(exist_ok=True)
     c = tmp / "share/vward-core"
     body = "exit 3" if dies else 'echo "$@" > "%s/args"; sleep 60' % tmp
-    c.write_text(f"#!/bin/sh\n[ \"$1\" = adaptive ] || exit 0\n{body}\n")
+    usage = "echo '  -apply' >&2" if old else "echo '  -apply' >&2; echo '  -etc string' >&2"
+    refuse = 'case " $* " in *" --etc "*) echo "flag provided but not defined: -etc" >&2; exit 2 ;; esac' if old else ":"
+    c.write_text(f"#!/bin/sh\n[ \"$1\" = adaptive ] || exit 0\n[ \"$2\" != -h ] || {{ {usage}; exit 0; }}\n{refuse}\n{body}\n")
     c.chmod(0o755)
 
 
@@ -118,6 +122,11 @@ with tempfile.TemporaryDirectory() as t:
         if calls(tmp) != ["shell-start"] or (tmp / "run/core.pid").exists():
             fail("engine.shell keeps the shell engine")
         (tmp / "etc/engine.shell").unlink()
+        # Autopodbor switched off in the Panel: the core is given the settings directory and stops
+        # writing itself (ReadModes: adaptive.disabled), at once and without a restart - started
+        # without --apply it could not write again when switched back on.
+        if args[args.index("--etc") + 1] != f"{tmp}/etc":
+            fail(f"the core must read the owner's switches while running (--etc): {args}")
         # core.observe: no --apply.
         (tmp / "etc/core.observe").write_text("")
         run(tmp, "engine_start")
@@ -125,6 +134,34 @@ with tempfile.TemporaryDirectory() as t:
         if "--apply" in (tmp / "args").read_text().split():
             fail("core.observe must run without --apply")
         run(tmp, "core_stop")
+        (tmp / "etc/core.observe").unlink()
+        # Autopodbor switched off before the start: the new core still starts with the right to
+        # write (it holds itself while the switch is off, and writes again when it is on).
+        (tmp / "etc/adaptive.disabled").write_text("")
+        run(tmp, "engine_start")
+        calls(tmp)
+        args = (tmp / "args").read_text().split()
+        if "--apply" not in args or "--etc" not in args:
+            fail(f"switched off: the new core reads the switch itself: {args}")
+        run(tmp, "core_stop")
+        # A core of the previous release (until the pinned one is fetched) does not know --etc:
+        # it is started the old way, and switched off - without --apply.
+        fake_core(tmp, old=True)
+        out = run(tmp, "engine_start")
+        calls(tmp)
+        args = (tmp / "args").read_text().split() if "started" in out else []
+        if "--etc" in args or "--apply" in args or not args:
+            fail(f"an old core, Autopodbor switched off: no --etc and no --apply: {out!r} {args}")
+        run(tmp, "core_stop")
+        (tmp / "etc/adaptive.disabled").unlink()
+        run(tmp, "engine_start")
+        calls(tmp)
+        args = (tmp / "args").read_text().split()
+        if "--etc" in args or "--apply" not in args:
+            fail(f"an old core, Autopodbor on: --apply without --etc: {args}")
+        run(tmp, "core_stop")
+        (tmp / "etc/core.observe").write_text("")
+        fake_core(tmp)
     finally:
         subprocess.run(["pkill", "-f", f"{tmp}/share/vward-core"], capture_output=True)
     # A core that dies at start: the shell engine, and for an hour.
@@ -139,6 +176,36 @@ with tempfile.TemporaryDirectory() as t:
     run(tmp, "engine_start")
     if calls(tmp) != ["shell-start"]:
         fail("within the hour after a failed start: the shell engine")
+
+# A core left by the previous release (its sum is not the pinned one): it keeps running and the
+# pinned build is fetched in the background, once an hour (fix.39: a router updated from fix.37
+# kept fix.37's core for good - «no such command: auto» in Keenetic's journal, owner 13.11.2026).
+with tempfile.TemporaryDirectory() as t:
+    tmp = Path(t)
+    (tmp / "etc").mkdir()
+    (tmp / "install.sh").write_text(f'#!/bin/sh\necho "$@" >> "{tmp}/installed"\n')
+    (tmp / "install.sh").chmod(0o755)
+    fake_core(tmp, old=True)
+    old_sum = hashlib.sha256((tmp / "share/vward-core").read_bytes()).hexdigest()
+    try:
+        out = run(tmp, "VWARD_CORE_ARCH=mipsle\nengine_start")
+        time.sleep(0.5)
+        if "Autopodbor (Go) started" not in out:
+            fail(f"an old core keeps working until the new one is fetched: {out!r}")
+        if not (tmp / "installed").exists() or (tmp / "installed").read_text().split() != ["core-install"]:
+            fail("a core that is not the pinned build is never replaced (no background core-install)")
+        run(tmp, "VWARD_CORE_ARCH=mipsle\ncore_stop\nengine_start")
+        time.sleep(0.5)
+        if len((tmp / "installed").read_text().splitlines()) != 1:
+            fail("the fetch of a newer core is tried at most once an hour")
+        (tmp / "installed").unlink()
+        (tmp / "try").unlink()
+        run(tmp, f'VWARD_CORE_ARCH=mipsle\ncore_sum() {{ echo {old_sum}; }}\ncore_stop\nengine_start')
+        time.sleep(0.5)
+        if (tmp / "installed").exists():
+            fail("the pinned core is not fetched again")
+    finally:
+        subprocess.run(["pkill", "-f", f"{tmp}/share/vward-core"], capture_output=True)
 
 # core_install: a local build stands in for the download (file://), its sum for the pinned one.
 with tempfile.TemporaryDirectory() as t:
@@ -206,6 +273,9 @@ JS = (ROOT / "web/assets/vward-console.js").read_text()
 CMD = (ROOT / "tools/vward-core/cmd_adaptive.go").read_text()
 # A router that lived before (owner 12.11.2026): on the core's first start the names already in
 # AdaptiveAuto are rechecked, as the shell engine rechecked the whole group (TestAdoptGroupOnFirstStart).
+MODES = (ROOT / "tools/vward-core/internal/adaptive/modes.go").read_text()
+if '"adaptive.disabled", "core.observe"' not in MODES or "w.Observe = held || m.Observe" not in CMD or CMD.count("reread()") < 3:
+    fail("the core must reread adaptive.disabled before every write (batch, reconcile round)")
 if "firstStart := os.IsNotExist(ownedErr)" not in CMD or "owned.AdoptGroup(inGroup(m), time.Now())" not in CMD or "OWNED_ADOPTED" not in CMD:
     fail("the core's first start must recheck the names already in AdaptiveAuto")
 if "echo /opt/var/log/vward-core-adaptive.log" not in API or "{ id: 'core', label: 'Автоподбор (Go)' }" not in JS:

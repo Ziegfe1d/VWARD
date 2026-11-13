@@ -28,6 +28,13 @@ type Name struct {
 	Streak  int       `json:"streak"`            // direct checks in a row that opened
 	LastOK  time.Time `json:"last_ok,omitempty"` // the last of them
 	Checked time.Time `json:"checked,omitempty"` // the last check of any result
+	// Why the direct check failed last (connect: timeout, tls: reset...): what «the VPN's smart
+	// refusal» needs (fix.40) and what the Panel says.
+	Why string `json:"why,omitempty"`
+	// Rounds in a row the name opened neither directly nor through the VPN (the VPN itself
+	// working); LastVPNFail - the last of them.
+	VPNFail     int       `json:"vpn_fail,omitempty"`
+	LastVPNFail time.Time `json:"last_vpn_fail,omitempty"`
 }
 
 func LoadOwned(path string) (*Owned, error) {
