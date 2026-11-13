@@ -41,6 +41,10 @@ ids.forEach(id => { const p = pathOf(id); if (seen[p]) bad.push('same address ' 
   if (idOf(p) !== id) bad.push(id + ' -> ' + p + ' -> ' + idOf(p)); if (!/^\\/[a-z0-9\\/:._-]*$/.test(p)) bad.push('address ' + p); });
 ['t-Wireguard0', 't-OpenVPN0', 'l-domain-list5', 'ip-domain-list5', 'w-aa:bb:cc:dd:ee:ff', 's-youtube.com', 's-jetbrains@cdn'].forEach(id => { const p = pathOf(id); if (idOf(p) !== id) bad.push(id + ' -> ' + p + ' -> ' + idOf(p)); });
 if (idOf('/') !== 'overview' || idOf('/nothing/here') !== null) bad.push('root or unknown address');
+// Addresses by the sections' names (fix.39 item 5); old addresses and bookmarks still open.
+[['/routes', 'routes'], ['/components', 'utils'], ['/dns', 'ai'], ['/domains', 'routes'], ['/domains/lists/domain-list5/ip', 'ip-domain-list5'],
+ ['/utilities', 'utils'], ['/utilities/adguard-home', 'd-agh'], ['/ai', 'ai']]
+  .forEach(([a, id]) => { if (idOf(a) !== id) bad.push('old or named address ' + a + ' -> ' + idOf(a) + ', not ' + id); });
 console.log(JSON.stringify({ n: ids.length, bad, vpn: pathOf('t-Wireguard0'), ip: pathOf('ip-domain-list5'), wifi: pathOf('w-aa:bb:cc:dd:ee:ff') }));
 """.replace("ACT.forEach", "const ACT = " + json.dumps(act) + "; ACT.forEach", 1)
 r = subprocess.run(["node", "-e", harness], capture_output=True, text=True, timeout=30)
@@ -49,7 +53,7 @@ if r.returncode != 0:
 got = json.loads(r.stdout)
 if got["bad"]:
     fail("; ".join(got["bad"]))
-if (got["vpn"], got["ip"], got["wifi"]) != ("/vpn/tunnel/Wireguard0", "/domains/lists/domain-list5/ip", "/network/wifi/aa:bb:cc:dd:ee:ff"):
+if (got["vpn"], got["ip"], got["wifi"]) != ("/vpn/tunnel/Wireguard0", "/routes/lists/domain-list5/ip", "/network/wifi/aa:bb:cc:dd:ee:ff"):
     fail(f"addresses: {got}")
 if got["n"] < 60:
     fail(f"too few pages: {got['n']}")

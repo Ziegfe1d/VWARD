@@ -993,8 +993,8 @@ function page(id) {
 }
 const parentOf = id => { const p = page(id); return p && p.parent; };
 // Every page has its own address, built from the way to it: /network, /vpn/tunnel/<name>,
-// /domains/lists/<list>/ip.  Old #addresses still open.
-const SLUG = { ai: 'ai', 'd-control': 'control', overview: '', wan: 'network', vpn: 'vpn', routes: 'domains', lists: 'lists', wifi: 'wifi', ads: 'ads', system: 'system', settings: 'settings', logs: 'logs', utils: 'utilities', 'd-agh': 'adguard-home', 'd-awg': 'amneziawg',
+// /routes/lists/<list>/ip.  Old #addresses and the addresses before fix.39 still open.
+const SLUG = { ai: 'dns', 'd-control': 'control', overview: '', wan: 'network', vpn: 'vpn', routes: 'routes', lists: 'lists', wifi: 'wifi', ads: 'ads', system: 'system', settings: 'settings', logs: 'logs', utils: 'components', 'd-agh': 'adguard-home', 'd-awg': 'amneziawg',
   'd-mydomains': 'my', 'd-force': 'always-vpn', 'd-adaptive': 'autopick', 'd-rsources': 'sources', 'd-services': 'services', 'd-ipcats': 'ip-categories', 'd-wanrec': 'recovery', 'd-wificlients': 'clients',
   'u-vward': 'vward', 'u-agh': 'adguard-home-update', 'u-fw': 'firmware', 'u-opkg': 'entware', 'd-dnsex': 'exceptions', 'd-aghfilters': 'filters', 'd-aghservices': 'services', 'd-adcats': 'categories',
   'd-adrecent': 'recent', 'd-adspub': 'publish', 'd-adprobe': 'probe', 'd-adsettings': 'settings',
@@ -1016,6 +1016,9 @@ function idOf(path) {
   let p = '/' + String(path || '').split(/[?#]/)[0].replace(/^\/+|\/+$/g, '');
   // «Обновления» live in «Система» since 2026-10-17: old links still open.
   if (p === '/updates' || p.startsWith('/updates/')) p = '/system' + p.slice(8);
+  // Sections' addresses by their names since fix.39: old addresses and bookmarks still open.
+  const OLD = { '/domains': '/routes', '/utilities': '/components', '/ai': '/dns' };
+  Object.keys(OLD).forEach(o => { if (p === o || p.startsWith(o + '/')) p = OLD[o] + p.slice(o.length); });
   if (p === '/' || p === '/index.html') return 'overview';
   const hit = PAGES.map(x => x.id).concat(Object.keys(DETAILS)).find(id => pathOf(id) === p);
   if (hit) return hit;
