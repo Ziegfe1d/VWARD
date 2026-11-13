@@ -68,6 +68,8 @@ if "VWARD_LAN_INTERFACE" not in control or "vward_discover_lan_interface" not in
     raise SystemExit("FAIL: control must take the home segment from the device profile")
 
 import os, subprocess, tempfile
+# The part is frozen (fix.39): off on the router. Its own code is still checked, with the freeze lifted.
+os.environ["VWARD_RETIRED_PARTS"] = ""
 with tempfile.TemporaryDirectory() as tmp:
     tmp=Path(tmp)
     tools=tmp/"tools"; tools.mkdir()

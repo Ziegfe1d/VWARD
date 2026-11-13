@@ -23,11 +23,12 @@ for rule in (".card-value{grid-area:value;", ".card-sub{grid-area:sub;", ".card-
     css = CSS[CSS.index(rule):CSS.index("}", CSS.index(rule))]
     if "white-space:nowrap" not in css or "text-overflow:ellipsis" not in css:
         fail(f"{rule} must stay on one line: {css}")
-if "const CARD_IDS = ['system', 'updates', 'wan', 'vpn', 'lists', 'routes', 'wifi', 'ads', 'storage'];" not in JS or "'Среда выполнения', to:" in JS:
+if "const CARD_IDS = ['system', 'updates', 'wan', 'vpn', 'lists', 'routes', 'ads', 'storage'];" not in JS or "'Среда выполнения', to:" in JS:
     fail("no «Среда выполнения» card")
 if "{ id: 'routes', title: 'Маршруты'" not in JS or "routes: 'Маршруты'" not in JS:
     fail("the routing section is «Маршруты» on the card, the page and the bottom bar")
-if "data: ['status', 'route', 'wifi', 'ads', 'adsstats', 'lists', 'awg', 'tq']" not in JS:
+# No Wi-Fi card: «Контроль Wi-Fi клиентов» is frozen (fix.39).
+if "data: ['status', 'route', 'ads', 'adsstats', 'lists', 'awg', 'tq']" not in JS:
     fail("the Overview loads AdGuard Home's statistics")
 API = (ROOT / "web/cgi-bin/api.cgi").read_text()
 if '(if $inet | has("internet") then $inet.internet else null end)' not in API:

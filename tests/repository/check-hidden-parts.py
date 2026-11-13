@@ -41,7 +41,7 @@ for h in hidden:
     if h not in parts:
         fail(f"{h}: a hidden part stays a part: its code and files are kept")
 switchable = [h for h in hidden if parts[h]["switch"] in ("extra", "component")]
-m = re.search(r'^VWARD_RETIRED_PARTS="([^"]*)"$', LIB.read_text(encoding="utf-8"), re.M)
+m = re.search(r'^VWARD_RETIRED_PARTS=\$\{VWARD_RETIRED_PARTS-"([^"]*)"\}$', LIB.read_text(encoding="utf-8"), re.M)
 if not m or m.group(1).split() != switchable:
     fail(f"the admission library keeps off {m and m.group(1)!r}, the registry {switchable}")
 

@@ -83,7 +83,9 @@ if unknown:
     fail("переходы на несуществующие страницы: " + ", ".join(sorted(unknown)))
 
 # Components: the Panel lists exactly the registry.
-registry_ids = {c["id"] for c in registry["components"]}
+# Frozen components (fix.39, settings-registry «parts_hidden») have no section.
+hidden = set(json.loads((root / "config/settings/settings-registry.json").read_text(encoding="utf-8")).get("parts_hidden", []))
+registry_ids = {c["id"] for c in registry["components"]} - hidden
 if components != registry_ids:
     fail("компоненты Панель VWARD не совпадают с реестром: " + ", ".join(sorted(components ^ registry_ids)))
 
