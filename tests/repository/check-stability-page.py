@@ -44,6 +44,15 @@ with tempfile.TemporaryDirectory() as tmp:
                                        f"{now - 120}\tWireguard0\tnwg0\t100\t-\n{now - 60}\tOpkgTun0\topkgtun0\t33\t90\nbad\tline\n")
     (tmp / "upd/feed.state").write_text(f"ok_at={now - 3600}\nfail_at=\nfail_rc=\n")
     (tmp / "rci.log").write_text(f"{now - 90000}\t28\n{now - 500}\t28\n{now - 100}\t7\n")
+    # A router without «Контроль состояния» (frozen in fix.39; a clean installation has none of its
+    # files) and without tunnel checks yet: the page still gets an answer - memory, load, Keenetic's
+    # requests - not «stability_unavailable».
+    bare = env | {"VWARD_SENTINEL_STATE": str(tmp / "no-st"), "VWARD_SENTINEL_HOURS": str(tmp / "no-hours.tsv"), "VWARD_TUNNEL_QUALITY_DIR": str(tmp / "no-q"),
+                  "VWARD_SENTINEL_LOG": str(tmp / "no-s.log"), "VWARD_SUPERVISOR_LOG": str(tmp / "no-sup.log"), "VWARD_CPU_DIR": str(tmp / "no-cpu")}
+    rb = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=bare, text=True, capture_output=True, timeout=30)
+    db = json.loads(rb.stdout.split("\n\n", 1)[1])
+    if db.get("ok") is not True or db.get("hours") != [] or db.get("state") != {"watch": []} or db["checks"].get("tunnels") != [] or db.get("cpu") != []:
+        fail(f"no files of «Контроль состояния»: the answer must be empty lists, not an error: {rb.stdout[-300:]}")
     r = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=env, text=True, capture_output=True, timeout=30)
     d = json.loads(r.stdout.split("\n\n", 1)[1])
     # fix.33.2: «Обновления → Последняя проверка» is the feed's last look, not the check after an

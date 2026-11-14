@@ -3494,15 +3494,18 @@ if [ "$ACTION" = stability ]; then
     [ ! -x "$SN_BIN" ] || INSTALLED=true
     SD=$(umask 077; mktemp -d /tmp/vward-stability.XXXXXX 2>/dev/null) || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
     trap 'rm -rf "${SD:?}"' EXIT
+    # The files of «Контроль состояния» and of the tunnel checks may not exist (the part is frozen
+    # since fix.39; a clean installation): each is read through cat, so awk always ends its list -
+    # a missing file opened by awk itself left «{{}» and the whole answer was an error.
     {
         # State: numbers as numbers; watch=name|pid|rss|base|max|limit|cpu_x100|downs|leaks.
-        awk -F= 'BEGIN {printf "{"}
+        cat "$SN_STATE/state" 2>/dev/null | awk -F= 'BEGIN {printf "{"}
             $1 == "watch" {split($2, w, "|"); if (w[1] !~ /^[A-Za-z0-9_.-]+$/) next; ws = ws (ws ? "," : "") sprintf("{\"name\":\"%s\",\"pid\":%d,\"rss_kb\":%d,\"base_kb\":%d,\"max_kb\":%d,\"limit_kb\":%d,\"cpu_x100\":%d,\"downs\":%d,\"leaks\":%d}", w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9]); next}
             $1 ~ /^[a-z_0-9]+$/ && $2 ~ /^-?[0-9]+$/ {printf "%s\"%s\":%s", (n++ ? "," : ""), $1, $2 + 0}
-            END {printf "%s\"watch\":[%s]}", (n ? "," : ""), ws}' "$SN_STATE/state" 2>/dev/null || printf '{}'
+            END {printf "%s\"watch\":[%s]}", (n ? "," : ""), ws}'
     } > "$SD/state"
     {
-        awk -F'\t' 'BEGIN {printf "["} NF >= 10 && $1 ~ /^[0-9]+$/ {printf "%s[%d,%d,%d,%d,%d,%d,%d,%d,%d,%d]", (n++ ? "," : ""), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10} END {printf "]"}' "$SN_HOURS" 2>/dev/null || printf '[]'
+        cat "$SN_HOURS" 2>/dev/null | awk -F'\t' 'BEGIN {printf "["} NF >= 10 && $1 ~ /^[0-9]+$/ {printf "%s[%d,%d,%d,%d,%d,%d,%d,%d,%d,%d]", (n++ ? "," : ""), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10} END {printf "]"}'
     } > "$SD/hours"
     {
         printf '['
@@ -3530,10 +3533,9 @@ if [ "$ACTION" = stability ]; then
     # Keenetic answered in time. Nothing known - null, «не проверено» in the Panel.
     NOW=$(date +%s)
     {
-        awk -F'\t' -v cut="$((NOW - 3600))" 'BEGIN {printf "["}
+        cat "${VWARD_TUNNEL_QUALITY_DIR:-/tmp/vward-tunnel-quality}/samples.tsv" 2>/dev/null | awk -F'\t' -v cut="$((NOW - 3600))" 'BEGIN {printf "["}
             $1 ~ /^[0-9]+$/ && $1 >= cut && $2 ~ /^[A-Za-z0-9_.-]+$/ && $4 ~ /^[0-9]+$/ {n[$2]++; if ($4 + 0 < 100) ok[$2]++}
-            END {for (k in n) printf "%s{\"name\":\"%s\",\"n\":%d,\"ok\":%d}", (c++ ? "," : ""), k, n[k], ok[k]; printf "]"}' \
-            "${VWARD_TUNNEL_QUALITY_DIR:-/tmp/vward-tunnel-quality}/samples.tsv" 2>/dev/null || printf '[]'
+            END {for (k in n) printf "%s{\"name\":\"%s\",\"n\":%d,\"ok\":%d}", (c++ ? "," : ""), k, n[k], ok[k]; printf "]"}'
     } > "$SD/tunnels"
     FEED_OK= FEED_FAIL= FEED_RC=
     # The feed's last look lives in RAM since 08.11; the old file after a reboot, until the next check.
@@ -3550,6 +3552,12 @@ if [ "$ACTION" = stability ]; then
     read -r RCI_UP _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
     RCI_UP=${RCI_UP%%.*}
     RCI_CALLS=$(cat "$RCI_CD"/* 2>/dev/null | awk -v h="$((${RCI_UP:-0} / 3600))" '/^[0-9]+$/ {ok = ($1 > h - 24); next} ok {n += length($0)} END {printf "%d", n}')
+    # Who asked Keenetic through ndmc (fix.39): the sessions by program, 24 hours of uptime.
+    NDMC_BY='[]'
+    ! command -v vward_keenetic_ndmc_json >/dev/null 2>&1 || NDMC_BY=$(vward_keenetic_ndmc_json 2>/dev/null)
+    "$JQ" -e 'type == "array"' >/dev/null 2>&1 <<EOF_NDMC_BY || NDMC_BY='[]'
+$NDMC_BY
+EOF_NDMC_BY
     # Memory of the router and of every running program of VWARD and AdGuard Home (owner 02.11:
     # the list was partial, AdGuard Home the largest): resident and swapped out, one way for all
     # (/proc/PID/status VmRSS/VmSwap).
@@ -3572,12 +3580,12 @@ if [ "$ACTION" = stability ]; then
         --argjson mem "{${MEM}}" --slurpfile progs "$SD/progs" \
         --slurpfile state "$SD/state" --slurpfile hours "$SD/hours" \
         --slurpfile cpu "$SD/cpu" --slurpfile events "$SD/events" --slurpfile tunnels "$SD/tunnels" \
-        --arg now "$NOW" --arg fok "$FEED_OK" --arg ffail "$FEED_FAIL" --arg frc "$FEED_RC" --arg tls "$TLS_AT" --arg rci "${RCI_DAY:-0 0}" --arg rcalls "${RCI_CALLS:-0}" \
+        --arg now "$NOW" --arg fok "$FEED_OK" --arg ffail "$FEED_FAIL" --arg frc "$FEED_RC" --arg tls "$TLS_AT" --arg rci "${RCI_DAY:-0 0}" --arg rcalls "${RCI_CALLS:-0}" --argjson ndmc "$NDMC_BY" \
         'def num: tonumber? // null;
          {ok: true, sentinel: {running: $running, installed: $installed}, state: $state[0], hours: $hours[0], cpu: $cpu[0], events: $events[0],
           mem: $mem, progs: ($progs[0] | map(select(.name as $n | . as $p | ($progs[0] | any(.pid == $p.ppid and .name == $n)) | not))),
           checks: {now: ($now | num), tunnels: $tunnels[0], feed_ok_at: ($fok | num), feed_fail_at: ($ffail | num), feed_fail_rc: ($frc | num),
-                   https_crash_at: ($tls | num), rci_fails_day: ($rci | split(" ")[0] | num), rci_calls_day: ($rcalls | num), rci_fail_at: ($rci | split(" ")[1] | num | if . == 0 then null else . end)}}' 2>/dev/null ||
+                   https_crash_at: ($tls | num), rci_fails_day: ($rci | split(" ")[0] | num), rci_calls_day: ($rcalls | num), ndmc_by: $ndmc, rci_fail_at: ($rci | split(" ")[1] | num | if . == 0 then null else . end)}}' 2>/dev/null ||
         echo '{"ok":false,"error":"stability_unavailable"}'
     exit 0
 fi

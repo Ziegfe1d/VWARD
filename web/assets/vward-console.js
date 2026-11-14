@@ -2788,6 +2788,7 @@ const RENDER = {
         { desc: 'Нажмите, чтобы открыть задания.' }) +
       panel('Диагностика', (d && d.checks ? '<ul class="rows">' + d.checks.map(x => { const to = x.id === 'smartdns' && /IP-категория/.test(x.detail || '') ? 'd-ipcats' : map[x.id]; return '<li class="row' + (to ? ' link" role="button" tabindex="0" data-go="' + to + '"' : '"') + '><div class="row-main"><b>' + esc(x.label) + '</b><small>' + esc(x.detail || '') + '</small></div><span class="pill ' + (x.status === 'PASS' ? 'ok' : x.status === 'FAIL' ? 'crit' : 'warn') + '">' + (x.status === 'PASS' ? 'Работает' : x.status === 'FAIL' ? 'Не работает' : x.status === 'FOREIGN' ? 'Чужой маршрут' : 'Внимание') + '</span>' + (to ? ico('chevron', 'chev') : '') + '</li>'; }).join('') + '</ul>' : empty(S.errors.diag ? 'Диагностика не выполнена: ' + S.errors.diag : 'Загрузка…')) +
       diagRunNote() + '<div class="panel-actions">' + btn('diag-run', 'check', DIAG_RUN && DIAG_RUN.busy ? 'Проверка выполняется…' : 'Запустить проверку', 'primary', DIAG_RUN && DIAG_RUN.busy ? ' disabled aria-busy="true"' : '') + '</div>') +
+      keeneticCallsPanel() +
       panel('Журналы', kv([['Технические журналы', 'для сохранения и отправки', '', 'logs']]), { desc: 'Журналы как есть, для диагностики.' });
   },
   'd-stability'() {
@@ -3697,6 +3698,19 @@ function durText(sec) { const n = num(sec); if (n == null) return '—'; if (n <
 // fix.38.1: one script, two cron lines - told apart by the line's status file.
 const JOB_TAGS = { 'vward-ads-scheduler': 'Блокировка рекламы: проверка доменов', 'vward-ads-dns-tick': 'Блокировка рекламы: слежение за DNS' };
 const JOB_NAMES = { 'vward-route-reconciler.sh': 'Сверка маршрутов', 'S91vward-route-engine': 'Перезапуск маршрутизации', 'vward-policy-chain.sh': 'Обновление IP-категорий', 'vward-route-hints-update.sh': 'Подсказки каталога', 'vward-tunnel-health.sh': 'Агент VPN', 'S92vward-runtime': 'Агент компонентов', 'vward-wan-guard.sh': 'Восстановление интернета', 'vward-housekeeping.sh': 'Сжатие журналов', 'vward-ads-privacy-scheduler.sh': 'Блокировка рекламы', 'vward-wifi-client-scheduler.sh': 'Контроль Wi-Fi клиентов' };
+// Who asks Keenetic (fix.39 item 30): ndmc sessions by program for the last 24 hours of the router's
+// uptime, and the RCI requests (they leave no line in Keenetic's journal).
+const KEENETIC_WHO = { 'api.cgi': 'Панель VWARD: чтение', 'vward-console-config.sh': 'Панель VWARD: изменение настроек', 'vward-cron-supervisor.sh': 'Агент компонентов',
+  'vward-tunnel-guard.sh': 'Агент туннелей', 'vward-route-engine.sh': 'Маршрутизация', 'vward-policy-sync.sh': 'IP-категории', 'vward-policy-reconcile.sh': 'IP-категории: сверка' };
+function keeneticCallsPanel() {
+  const c = (S.stab && S.stab.checks) || {}, by = (c.ndmc_by || []).slice().sort((a, b) => b.day - a.day || a.name.localeCompare(b.name));
+  if (!S.stab || !S.stab.ok) return '';
+  const day = by.reduce((n, x) => n + x.day, 0), prev = by.reduce((n, x) => n + x.prev, 0), n = v => fmtInt(v) + '\u00a0' + plural(v, 'сессия', 'сессии', 'сессий');
+  const rows = [['Сессии ndmc', n(day) + ' за сутки', '', '', '', 'за прошлый час: ' + fmtInt(prev)]]
+    .concat(by.map(x => [KEENETIC_WHO[x.name] || JOB_NAMES[x.name] || x.name, fmtInt(x.day), '', '', '', 'за прошлый час: ' + fmtInt(x.prev)]))
+    .concat(c.rci_calls_day != null ? [['Запросы RCI', fmtInt(c.rci_calls_day) + ' за сутки', '', '', '', 'в журнал Keenetic не записываются']] : []);
+  return panel('Обращения к Keenetic', kv(rows), { desc: 'Каждая команда ndmc - сессия и две строки в журнале Keenetic («Core::Session»). Счёт по программам VWARD за последние сутки работы роутера.' });
+}
 const JOB_COMPONENT = { 'S91vward-route-engine': 'route-engine' };
 function cronText(c) {
   const f = String(c || '').split(' ');

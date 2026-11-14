@@ -566,6 +566,10 @@ VWARD_KEENETIC_SLOW_LOG=${VWARD_KEENETIC_SLOW_LOG:-${VWARD_ROOT_PREFIX:-}/opt/va
 VWARD_KEENETIC_CALLS=${VWARD_KEENETIC_CALLS:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-calls}
 VWARD_KEENETIC_SLOWN=${VWARD_KEENETIC_SLOWN:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-slow}
 VWARD_KEENETIC_LAST=${VWARD_KEENETIC_LAST:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-last}
+# Who asks Keenetic through ndmc (fix.39): every ndmc command is a session in Keenetic's own
+# journal (two lines, «Core::Session started/disconnected»; RCI leaves none) - 2 566 of about 4 000
+# lines on the owner's router, 13.11.2026. A line with the program's name a session, by the hour.
+VWARD_KEENETIC_NDMC=${VWARD_KEENETIC_NDMC:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-ndmc}
 
 # vward_uptime_cs: _VCS = hundredths of a second since boot (shell built-ins only: every request to
 # Keenetic is timed, fix.33.2).
@@ -580,8 +584,9 @@ vward_uptime_cs()
     esac
 }
 
-# _vward_hour_dot DIR: one dot in the file of this hour of uptime (25 files by the hour, the hour
-# on the first line; a file of another hour starts anew). Shell built-ins only, no process.
+# _vward_hour_dot DIR [NAME]: one dot in the file of this hour of uptime (25 files by the hour, the
+# hour on the first line; a file of another hour starts anew), or a line NAME when given (who made
+# the request). Shell built-ins only, no process.
 _vward_hour_dot()
 {
     _vhd_h=
@@ -592,7 +597,22 @@ _vward_hour_dot()
     [ -d "$1" ] || mkdir -p "$1" 2>/dev/null
     read -r _vhd_fh 2>/dev/null < "$1/$((_vhd_h % 25))"
     [ "$_vhd_fh" = "$_vhd_h" ] || printf '%s\n' "$_vhd_h" 2>/dev/null > "$1/$((_vhd_h % 25))"
-    printf . 2>/dev/null >> "$1/$((_vhd_h % 25))"
+    if [ -n "${2:-}" ]; then printf '%s\n' "$2" 2>/dev/null >> "$1/$((_vhd_h % 25))"
+    else printf . 2>/dev/null >> "$1/$((_vhd_h % 25))"; fi
+}
+
+# vward_keenetic_ndmc_json: the programs that asked Keenetic through ndmc in the last 24 hours of
+# uptime - [{name, day, hour (this hour so far), prev (the last full hour)}].
+vward_keenetic_ndmc_json()
+{
+    _vkn_h=
+    read -r _vkn_h _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
+    _vkn_h=${_vkn_h%%.*}
+    case "$_vkn_h" in ''|*[!0-9]*) _vkn_h=0 ;; esac
+    cat "$VWARD_KEENETIC_NDMC"/* 2>/dev/null | awk -v h="$((_vkn_h / 3600))" '
+        /^[0-9]+$/ {hr = $0 + 0; next}
+        hr > h - 24 && hr <= h && /^[A-Za-z0-9_.-]+$/ && /[A-Za-z]/ {d[$0]++; if (hr == h) c[$0]++; if (hr == h - 1) p[$0]++}
+        END {printf "["; for (k in d) printf "%s{\"name\":\"%s\",\"day\":%d,\"hour\":%d,\"prev\":%d}", (n++ ? "," : ""), k, d[k], c[k], p[k]; print "]"}'
 }
 
 # vward_keenetic_timed WHAT T0 [STATUS]: every request to Keenetic (RCI, ndmc) counted by the hour
@@ -670,6 +690,7 @@ case "$(command -v ndmc 2>/dev/null)" in
             vward_uptime_cs; _vnd_t0=$_VCS
             command ndmc "$@"
             _vnd_rc=$?
+            _vward_hour_dot "$VWARD_KEENETIC_NDMC" "${0##*/}"
             # A refused command is an answer; a killed or missing ndmc is none.
             _vnd_st=; [ "$_vnd_rc" -lt 126 ] || _vnd_st=rc=$_vnd_rc
             vward_keenetic_timed "ndmc:$*" "$_vnd_t0" "$_vnd_st"
