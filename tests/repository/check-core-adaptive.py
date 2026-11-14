@@ -5,7 +5,8 @@
    every pinned build is in tools/vward-core/dist (gunzip gives the pinned SHA-256).
 2. S91's core block, taken as it is, with stand-ins for the shell engine and the core:
    no core yet -> fetched in the background once an hour, the shell engine runs; a core ->
-   it runs (--apply), the shell engine is stopped first; core.observe / Autopodbor off ->
+   it runs (--apply), the shell engine is stopped first; an older core than the package pins ->
+   it runs on and the pinned one is fetched in the background; core.observe / Autopodbor off ->
    no --apply; a core that dies at start -> the shell engine for an hour; engine.shell ->
    the core is stopped, the shell engine runs.
 3. vward_core_adaptive_pid knows the core's process by its command line; while it runs the
@@ -139,6 +140,31 @@ with tempfile.TemporaryDirectory() as t:
     run(tmp, "engine_start")
     if calls(tmp) != ["shell-start"]:
         fail("within the hour after a failed start: the shell engine")
+
+# An older core than the package pins (an update of VWARD brought a new build; found 14.11.2026:
+# the core was fetched only when there was none, so a router kept its first build for good): the
+# present core runs on, the pinned one is fetched in the background at most once an hour; the
+# pinned build itself and a processor without a build are left alone.
+with tempfile.TemporaryDirectory() as t:
+    tmp = Path(t)
+    (tmp / "etc").mkdir()
+    (tmp / "install.sh").write_text(f'#!/bin/sh\necho "$@" >> "{tmp}/installed"\n')
+    (tmp / "install.sh").chmod(0o755)
+    fake_core(tmp)
+    have = hashlib.sha256((tmp / "share/vward-core").read_bytes()).hexdigest()
+    try:
+        for case, pre, want in (
+                ("a processor without a build", "", 0),
+                ("the pinned build", f'VWARD_CORE_ARCH=amd64; core_sum() {{ echo {have}; }}', 0),
+                ("an older build", f'VWARD_CORE_ARCH=amd64; core_sum() {{ echo {"0" * 64}; }}', 1),
+                ("an older build, within the hour", f'VWARD_CORE_ARCH=amd64; core_sum() {{ echo {"0" * 64}; }}', 1)):
+            out = run(tmp, pre + "\nengine_start")
+            time.sleep(0.5)
+            n = len((tmp / "installed").read_text().splitlines()) if (tmp / "installed").exists() else 0
+            if n != want or "Autopodbor (Go)" not in out or "shell-start" in calls(tmp):
+                fail(f"{case}: {n} background fetches (want {want}), the present core runs: {out!r}")
+    finally:
+        subprocess.run(["pkill", "-f", f"{tmp}/share/vward-core"], capture_output=True)
 
 # core_install: a local build stands in for the download (file://), its sum for the pinned one.
 with tempfile.TemporaryDirectory() as t:

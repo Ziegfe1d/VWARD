@@ -441,7 +441,8 @@ status_service()
 # reconciler stands aside). /opt/etc/vward/route-engine/engine.shell keeps the shell engine;
 # core.observe (or Autopodbor switched off in the Panel) runs it without writing. A core that
 # does not start: the shell engine for an hour, then the core again. No core yet: the shell
-# engine, and the core is fetched in the background (at most once an hour).
+# engine, and the core is fetched in the background (at most once an hour); an older core than the
+# package pins runs on and is replaced the same way.
 CORE_BIN=${VWARD_CORE_BIN:-/opt/share/vward/core/vward-core}
 CORE_SELF=${VWARD_CORE_SELF:-$0}
 CORE_URL=${VWARD_CORE_URL:-https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/tools/vward-core/dist}
@@ -465,9 +466,9 @@ command -v vward_core_adaptive_pid >/dev/null 2>&1 || vward_core_adaptive_pid() 
 core_sum()
 {
     case "$1" in
-        mipsle) echo c339942ab038793558b88b83e0d283135b2ab83508b55a24c3c6219940238863 ;;
-        mips) echo 7e56c0aca069a79ad64a6bdb5b09d5d75f1ae02d385b44141ef750d3580d9e97 ;;
-        arm64) echo 6fa9e0bed84fa8d55358c67878dab81f55e0b6ae5753894f4e01f4b3f31f6a9d ;;
+        mipsle) echo 4a5020dd80d10c6573d4f289b0dcec2dd2390999cd0bf2d268e3bef33a88c06c ;;
+        mips) echo 31b259de33cf7f5061c4bd3be06119b4f1ffe897a3c806cd766e2d484e8d0455 ;;
+        arm64) echo 0120ece8f5d8043f19d7b4480c100d0dcc3a2beb90c1544594e6c29bdb91497b ;;
         *) return 1 ;;
     esac
 }
@@ -514,17 +515,34 @@ core_install()
     echo "result=changed"
 }
 
+# core_fetch_bg: «core-install» in the background, at most once an hour.
+core_fetch_bg()
+{
+    [ -z "$(find "$CORE_FETCH_TRY" -mmin -60 2>/dev/null)" ] || return 0
+    printf '' > "$CORE_FETCH_TRY" 2>/dev/null
+    ( "$CORE_SELF" core-install </dev/null >/dev/null 2>&1 & )
+}
+
+# core_current: the installed core is the build this package pins (a processor without a build:
+# nothing to compare with, left alone).
+core_current()
+{
+    CC_A=$(core_arch) && CC_S=$(core_sum "$CC_A") || return 0
+    [ "$(sha256sum "$CORE_BIN" 2>/dev/null | cut -d' ' -f1)" = "$CC_S" ]
+}
+
 core_wanted()
 {
     [ ! -e "$CORE_ETC/engine.shell" ] || return 1
     if [ ! -x "$CORE_BIN" ]; then
         # Fetched in the background; the shell engine works meanwhile.
-        if [ -z "$(find "$CORE_FETCH_TRY" -mmin -60 2>/dev/null)" ]; then
-            printf '' > "$CORE_FETCH_TRY" 2>/dev/null
-            ( "$CORE_SELF" core-install </dev/null >/dev/null 2>&1 & )
-        fi
+        core_fetch_bg
         return 1
     fi
+    # An older build than the package pins (an update of VWARD brought a new core; before 14.11.2026
+    # the core was fetched only when there was none): the present one works meanwhile, «core-install»
+    # checks the new one and restarts onto it.
+    core_current || core_fetch_bg
     [ -z "$(find "$CORE_FALLBACK" -mmin -60 2>/dev/null)" ]
 }
 
