@@ -12,19 +12,17 @@ for need in ("data-cfg-rt=\"adaptive-mode\"", "panel('Сейчас'", "data-act=
              "choiceSlider('ad-way', [['auto', 'Авто'], ['vpn', 'VPN'], ['direct', 'Провайдер']]", "скоро вернётся напрямую"):
     if need not in page:
         fail(f"page lacks {need!r}")
-# fix.39: the VPN check of the names that do not open directly - «Выкл · Песочница» (no «Вкл» yet:
-# the rule «сначала песочница»), what the sandbox would do, the names marked, shared CDN names marked.
-for need in ("choiceSlider('ad-vpncheck', [['off', 'Выкл'], ['sandbox', 'Песочница']]", "Песочница: убрал бы", "['neither', 'Не открываются и через VPN']",
-             "общее имя CDN"):
+# fix.39: a name that opens neither directly nor through the VPN leaves the list (a rule of autopick
+# itself: no switch and no sandbox, owner 14.11.2026); the row says so while it is counted; shared
+# CDN names are marked.
+for need in ("не открывается и через VPN (' + Math.min(n.vpn_fail, AD_NEITHER) + ' из ' + AD_NEITHER", "общее имя CDN", "не открывается и через VPN - убирается из списка"):
     if need not in page:
         fail(f"page lacks {need!r}")
-if "['on', 'Вкл']" in page:
-    fail("«Вкл» of the VPN check comes only after the sandbox on the owner's router")
-if "if (key === 'ad-vpncheck')" not in JS or "op: 'adaptive-vpncheck'" not in JS:
-    fail("the VPN check's slider must set adaptive-vpncheck")
+if "vpncheck" in JS.lower() or "Песочница: убрал бы" in JS:
+    fail("the VPN check is a rule of autopick: no switch, no sandbox")
 API = (Path(__file__).resolve().parents[2] / "web/cgi-bin/api.cgi").read_text(encoding="utf-8")
-if "adaptive_vpncheck:" not in API or "vpn_fail: (.value.vpn_fail // 0)" not in API or 'adaptive-mode|adaptive-vpncheck|' not in API:
-    fail("the router must answer the VPN check's mode and each name's count, and take the switch")
+if "vpn_fail: (.value.vpn_fail // 0)" not in API:
+    fail("the router must answer each name's count of checks that opened neither way")
 if "if (current === 'd-adaptive' && !ADV.paused) adFeedLoad();" not in JS:
     fail("the feed refreshes only on its page, not paused")
 if "if (key === 'ad-way')" not in JS or "action: v === 'vpn' ? 'pin' : 'remove'" not in JS:
@@ -40,7 +38,6 @@ ADV.feed = adFeedParse([t(30) + '|DIRECT_OK|dl.google.com|http 302', t(12) + '|P
   t(5) + '|AUTO_VPN|chatgpt.com|direct: tls', t(5) + '|ADDED|chatgpt.com|AdaptiveAuto', t(2) + '|MAINT_REMOVE|cdn.discordapp.com|streak=3/3 http 200',
   t(1) + '|MAINT_REMOVE|api.mixpanel.com|streak=0/3 dns blocked', t(1) + '|STATS|-|seen=1',
   t(0.9) + '|MAINT_VPN_FAIL|ftp.lug.ro|streak=2/3 direct: connect: timeout; vpn: connect: timeout',
-  t(0.8) + '|MAINT_VPN_WOULD_REMOVE|tracker.opentrackr.org|streak=3/3 direct: connect: timeout; vpn: connect: timeout',
   t(0.7) + '|REMOVED|old.example.com|does not open through the VPN either (direct: tls: reset; vpn: tls: reset)',
   t(0.6) + '|REMOVED|back.example.com|opened directly 3 times in a row'].join('\\n'));
 console.log(JSON.stringify({ html: adFeedHtml(), n: ADV.feed.length, hosts: ADV.feed.map(e => e.host),
@@ -50,8 +47,8 @@ r = subprocess.run(["node", "-e", h], capture_output=True, text=True, timeout=30
 if r.returncode:
     fail(r.stderr[-500:])
 o = json.loads(r.stdout)
-if "Песочница: убрал бы из VPN - не открывается ни напрямую, ни через VPN" not in o["html"] or "не открывается и через VPN (2 из 3)" not in o["html"]:
-    fail(f"the sandbox's line and the count in words: {o['html'][:900]}")
+if "не открывается и через VPN (2 из 3)" not in o["html"]:
+    fail(f"the count in words: {o['html'][:900]}")
 if "убран из VPN: не открывается и через VPN" not in o["html"] or o["html"].count("вернулся напрямую") != 2:
     fail("a name removed because the VPN does not open it either must not read «вернулся напрямую»")
 if o["cdn"] != [True, True, True, False, False]:

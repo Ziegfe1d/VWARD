@@ -109,7 +109,7 @@ func parseAdaptive(name string, args []string) (*adaptiveFlags, *flag.FlagSet) {
 	fs.StringVar(&f.jdir, "journal", defaultJournal, "journal directory")
 	fs.StringVar(&f.logPath, "log", "/opt/var/log/vward-core-adaptive.log", "event log (- : stdout)")
 	fs.StringVar(&f.dns, "dns", "", "resolver for the checks (empty: the router's)")
-	fs.StringVar(&f.etc, "etc", "", "settings directory read while running: adaptive.disabled, core.observe (no writing), adaptive.vpncheck (off, sandbox, on)")
+	fs.StringVar(&f.etc, "etc", "", "settings directory read while running: adaptive.disabled, core.observe (no writing)")
 	fs.BoolVar(&f.apply, "apply", false, "write into the group (without: observation, nothing sent)")
 	fs.BoolVar(&f.reconcile, "reconcile", true, "take names out again once they open directly (3 checks in a row)")
 	fs.StringVar(&f.ownedPath, "owned", "/opt/var/lib/vward/core-adaptive/owned.json", "the names Autopodbor added itself")
@@ -177,7 +177,7 @@ func runAdaptive(args []string) {
 		return "apply"
 	}
 	mode := modeName(modes)
-	log.put("START", "-", fmt.Sprintf("mode=%s vpn_check=%s lan=%s wan=%s tunnel=%s group=%s", mode, modes.VPNCheck, f.lan, f.wan, f.tunDev, f.group))
+	log.put("START", "-", fmt.Sprintf("mode=%s lan=%s wan=%s tunnel=%s group=%s", mode, f.lan, f.wan, f.tunDev, f.group))
 	if err := j.Gate(); err != nil {
 		log.put("JOURNAL_BLOCKED", "-", err.Error()+" (vward-core recover)")
 		held = true
@@ -199,9 +199,6 @@ func runAdaptive(args []string) {
 		}
 		if modeName(m) != modeName(modes) {
 			log.put("MODE", "-", modeName(m))
-		}
-		if m.VPNCheck != modes.VPNCheck {
-			log.put("VPN_CHECK", "-", string(m.VPNCheck))
 		}
 		modes = m
 		mode = modeName(m)
@@ -358,7 +355,7 @@ func runAdaptive(args []string) {
 				}
 				omu.Lock()
 				reread()
-				rc.TunnelDev, rc.VPNCheck = f.tunDev, modes.VPNCheck
+				rc.TunnelDev = f.tunDev
 				// The checks themselves run without the lock held for long: a copy of what is due.
 				snap := &adaptive.Owned{Names: map[string]*adaptive.Name{}}
 				for h, n := range owned.Names {
@@ -436,15 +433,10 @@ func runAdaptive(args []string) {
 			n = len(m.Groups[f.group].Include)
 		}
 		omu.Lock()
-		owns, neither := len(owned.Names), 0
-		for _, x := range owned.Names {
-			if x.VPNFail >= adaptive.DefaultReconcile().Threshold {
-				neither++
-			}
-		}
-		mode, vpnCheck := mode, modes.VPNCheck
+		owns := len(owned.Names)
+		mode := mode
 		omu.Unlock()
-		log.put("STATS", "-", fmt.Sprintf("vpn_check=%s neither_way=%d ", vpnCheck, neither)+fmt.Sprintf("mode=%s seen=%d checked=%d direct_ok=%d vpn_only=%d vpn_fail=%d unknown=%d isp_unreliable=%d added=%d removed=%d write_failed=%d group=%d/%d own=%d",
+		log.put("STATS", "-", fmt.Sprintf("mode=%s seen=%d checked=%d direct_ok=%d vpn_only=%d vpn_fail=%d unknown=%d isp_unreliable=%d added=%d removed=%d write_failed=%d group=%d/%d own=%d",
 			mode, s["seen"], s["checked"], s[string(adaptive.DirectOK)], s[string(adaptive.Add)],
 			s[string(adaptive.TunnelFail)]+s[string(adaptive.TunnelUnstable)], s[string(adaptive.ProbeUnknown)],
 			s[string(adaptive.ISPUnreliable)], s["added"], s["removed"], s["write_failed"], n, f.limit, owns))

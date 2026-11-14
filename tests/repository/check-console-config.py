@@ -292,20 +292,6 @@ with tempfile.TemporaryDirectory() as tmp:
     if not (etc / "route-engine/adaptive.disabled").exists():
         fail("AdaptiveAuto switch must create its flag")
     run("adaptive-mode", "1", expect="result=changed")
-    # The VPN check of autopick's names (fix.39): «Выкл · Песочница»; «Вкл» only after the sandbox
-    # on the owner's router (the rule «сначала песочница») - the helper refuses it for now.
-    vc = etc / "route-engine/adaptive.vpncheck"
-    run("adaptive-vpncheck", "off", expect="result=changed")
-    if vc.read_text().strip() != "off":
-        fail("adaptive-vpncheck off must write the word the core reads")
-    run("adaptive-vpncheck", "off", expect="result=unchanged")
-    run("adaptive-vpncheck", "sandbox", expect="result=changed")
-    if vc.read_text().strip() != "sandbox":
-        fail("adaptive-vpncheck sandbox must write the word the core reads")
-    run("adaptive-vpncheck", "on", expect="error=sandbox_first")
-    run("adaptive-vpncheck", "1", expect="error=invalid_value")
-    if vc.read_text().strip() != "sandbox":
-        fail("a refused value must not change the VPN check's mode")
     run("classifier", "0", expect="result=changed")
     if "CLASSIFIER_ENABLED=0" not in (etc / "route-engine/domain-classifier.conf").read_text() or \
             stat.S_IMODE((etc / "route-engine/domain-classifier.conf").stat().st_mode) != 0o600:

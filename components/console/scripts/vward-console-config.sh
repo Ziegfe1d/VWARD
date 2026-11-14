@@ -34,7 +34,6 @@ JOURNAL_CONF=${VWARD_JOURNAL_CONF:-$ETC/journal.conf}
 LISTS_STATE="$ETC/route-engine/domain-lists"
 WAN_GUARD_FLAG="$ETC/wan-guard.disabled"
 ADAPTIVE_FLAG="$ETC/route-engine/adaptive.disabled"
-ADAPTIVE_VPNCHECK="$ETC/route-engine/adaptive.vpncheck"
 CLASSIFIER_FILE="$ETC/route-engine/domain-classifier.conf"
 IP_EXCLUDED=${VWARD_POLICY_EXCLUDED:-$ETC/policy-sync/excluded.categories}
 AUTH_CONF=${VWARD_CONSOLE_AUTH_CONF:-$ETC/console/auth.conf}
@@ -5856,7 +5855,7 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|adaptive-vpncheck|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store|smartdns-feature|routing-root) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store|smartdns-feature|routing-root) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
@@ -5912,7 +5911,7 @@ case "$OP" in
         edit_lock ;;
     # Settings no routing step reads (owner 08.11: a switch does not wait for a long routing change):
     # their own short lock, not the routing edit lock.
-    wan-guard|console-auth|console-devices|update-feed|ext-auto|journal|agents-mode|adaptive-vpncheck)
+    wan-guard|console-auth|console-devices|update-feed|ext-auto|journal|agents-mode)
         dir_lock "$SETTINGS_LOCK" || die settings_busy 75
         SETTINGS_LOCKED=1 ;;
 esac
@@ -5940,16 +5939,6 @@ case "$OP" in
     wan-guard) op_guard_flag wan-guard "$WAN_GUARD_FLAG" "$ARG1" ;;
     component) op_component "$ARG1" "$ARG2" ;;
     adaptive-mode) op_guard_flag adaptive "$ADAPTIVE_FLAG" "$ARG1" ;;
-    # The VPN check of autopick's names (fix.39): the core reads the word while it runs. «Вкл»
-    # (the core takes such names out) only after the sandbox on the owner's router.
-    adaptive-vpncheck)
-        case "$ARG1" in off|sandbox) ;; on) die sandbox_first 64 ;; *) die invalid_value 64 ;; esac
-        avc_cur=sandbox; [ ! -r "$ADAPTIVE_VPNCHECK" ] || read -r avc_cur < "$ADAPTIVE_VPNCHECK" || :
-        [ -e "$ADAPTIVE_VPNCHECK" ] || [ "$ARG1" != sandbox ] || avc_cur=
-        [ "$avc_cur" != "$ARG1" ] || done_ok "adaptive-vpncheck $ARG1" unchanged
-        mkdir -p "${ADAPTIVE_VPNCHECK%/*}" && printf '%s\n' "$ARG1" > "$ADAPTIVE_VPNCHECK.tmp.$$" &&
-            mv -f "$ADAPTIVE_VPNCHECK.tmp.$$" "$ADAPTIVE_VPNCHECK" || { rm -f "$ADAPTIVE_VPNCHECK.tmp.$$"; die write_failed; }
-        done_ok "adaptive-vpncheck $ARG1" changed ;;
     classifier) case "$ARG1" in 0|1) ;; *) die invalid_value 64 ;; esac
         set_kv "$CLASSIFIER_FILE" CLASSIFIER_ENABLED "$ARG1" 0600 || done_ok "classifier enabled=$ARG1" unchanged
         done_ok "classifier enabled=$ARG1" changed ;;

@@ -187,9 +187,9 @@ func TestReconcileDNSBlockedRemoved(t *testing.T) {
 	}
 }
 
-func vpnRC(mode Mode) ReconcileConfig {
+func vpnRC() ReconcileConfig {
 	return ReconcileConfig{Every: time.Minute, Batch: 8, Threshold: 3, MinGap: 4 * time.Minute,
-		TunnelDev: "opkgtun4", VPNCheck: mode, VPNControl: []string{"ctl.example.org"}}
+		TunnelDev: "opkgtun4", VPNControl: []string{"ctl.example.org"}}
 }
 
 func round(o *Owned, p Prober, rc ReconcileConfig, min int) ([]string, []ReconcileEvent) {
@@ -201,7 +201,7 @@ func round(o *Owned, p Prober, rc ReconcileConfig, min int) ([]string, []Reconci
 func TestReconcileVPNCheckRemoves(t *testing.T) {
 	o := &Owned{Names: map[string]*Name{"ftp.lug.ro": {}}}
 	p := &scripted{ans: map[string][]Verdict{"ppp0 ftp.lug.ro": {B}, "opkgtun4 ftp.lug.ro": {B}, "opkgtun4 ctl.example.org": {O}}}
-	rc := vpnRC(ModeOn)
+	rc := vpnRC()
 	for i, want := range []string{"VPN_FAIL", "VPN_FAIL", "REMOVE"} {
 		rm, ev := round(o, p, rc, i*10)
 		if len(ev) != 1 || ev[0].Event != want || o.Names["ftp.lug.ro"].VPNFail != i+1 || (want == "REMOVE") != (len(rm) == 1) {
@@ -213,28 +213,12 @@ func TestReconcileVPNCheckRemoves(t *testing.T) {
 	}
 }
 
-// In the sandbox nothing leaves: the journal says once what would be done, then stays quiet.
-func TestReconcileVPNCheckSandbox(t *testing.T) {
-	o := &Owned{Names: map[string]*Name{"ftp.lug.ro": {}}}
-	p := &scripted{ans: map[string][]Verdict{"ppp0 ftp.lug.ro": {B}, "opkgtun4 ftp.lug.ro": {B}, "opkgtun4 ctl.example.org": {O}}}
-	rc := vpnRC(ModeSandbox)
-	for i, want := range []string{"VPN_FAIL", "VPN_FAIL", "VPN_WOULD_REMOVE", "DIRECT_FAIL", "DIRECT_FAIL"} {
-		rm, ev := round(o, p, rc, i*10)
-		if len(rm) != 0 || len(ev) != 1 || ev[0].Event != want {
-			t.Fatalf("round %d: %+v remove %v, want %s and nothing removed", i, ev, rm, want)
-		}
-	}
-	if o.Names["ftp.lug.ro"].VPNFail < 3 {
-		t.Fatalf("the count the Panel shows: %+v", o.Names["ftp.lug.ro"])
-	}
-}
-
 // A name the VPN opens stays (that is what the group is for) and its count starts over; a VPN
-// that does not open the control sites proves nothing; with the check off the VPN is not asked.
+// that does not open the control sites proves nothing; without a VPN device the VPN is not asked.
 func TestReconcileVPNCheckKeeps(t *testing.T) {
 	o := &Owned{Names: map[string]*Name{"x.example.com": {}}}
 	p := &scripted{ans: map[string][]Verdict{"ppp0 x.example.com": {B}, "opkgtun4 x.example.com": {B, B, O, B}, "opkgtun4 ctl.example.org": {O}}}
-	rc := vpnRC(ModeOn)
+	rc := vpnRC()
 	for i, want := range []int{1, 2, 0, 1} {
 		rm, _ := round(o, p, rc, i*10)
 		if len(rm) != 0 || o.Names["x.example.com"].VPNFail != want {
@@ -257,15 +241,14 @@ func TestReconcileVPNCheckKeeps(t *testing.T) {
 
 	o = &Owned{Names: map[string]*Name{"x.example.com": {}}}
 	p = &scripted{ans: map[string][]Verdict{"ppp0 x.example.com": {B}, "opkgtun4 x.example.com": {B}, "opkgtun4 ctl.example.org": {O}}}
-	for k, rc := range []ReconcileConfig{vpnRC(ModeOff), vpnRC(""), {Every: time.Minute, Batch: 8, Threshold: 3, VPNCheck: ModeOn}} {
-		for i := 0; i < 4; i++ {
-			if rm, ev := round(o, p, rc, 1000*(k+1)+i*10); len(rm) != 0 || len(ev) != 1 || ev[0].Event != "DIRECT_FAIL" {
-				t.Fatalf("check off: %v %+v", rm, ev)
-			}
+	rc.TunnelDev = ""
+	for i := 0; i < 4; i++ {
+		if rm, ev := round(o, p, rc, 1000+i*10); len(rm) != 0 || len(ev) != 1 || ev[0].Event != "DIRECT_FAIL" {
+			t.Fatalf("no VPN device: %v %+v", rm, ev)
 		}
 	}
 	if p.count("opkgtun4") != 0 {
-		t.Fatalf("check off: the VPN was asked: %v", p.calls)
+		t.Fatalf("no VPN device: the VPN was asked: %v", p.calls)
 	}
 }
 
@@ -273,7 +256,7 @@ func TestReconcileVPNCheckKeeps(t *testing.T) {
 func TestReconcileDirectOpenClearsVPNCount(t *testing.T) {
 	o := &Owned{Names: map[string]*Name{"x.example.com": {VPNFail: 2, LastVPNFail: time.Unix(1, 0), Why: "connect: timeout"}}}
 	p := &scripted{ans: map[string][]Verdict{"ppp0 x.example.com": {O}}}
-	round(o, p, vpnRC(ModeOn), 10)
+	round(o, p, vpnRC(), 10)
 	if n := o.Names["x.example.com"]; n.VPNFail != 0 || n.Why != "" || n.Streak != 1 {
 		t.Fatalf("%+v", n)
 	}
@@ -281,17 +264,8 @@ func TestReconcileDirectOpenClearsVPNCount(t *testing.T) {
 
 func TestReadModes(t *testing.T) {
 	dir := t.TempDir()
-	if m := ReadModes(dir); m.Observe || m.VPNCheck != ModeSandbox {
-		t.Fatalf("no files: write, the VPN check in the sandbox: %+v", m)
-	}
-	if m := ReadModes(""); m.Observe || m.VPNCheck != ModeSandbox {
-		t.Fatalf("no directory: %+v", m)
-	}
-	for word, want := range map[string]Mode{"off\n": ModeOff, "on": ModeOn, "sandbox\n": ModeSandbox, "": ModeSandbox, "yes": ModeSandbox} {
-		os.WriteFile(filepath.Join(dir, "adaptive.vpncheck"), []byte(word), 0o644)
-		if m := ReadModes(dir); m.VPNCheck != want {
-			t.Fatalf("%q: %v, want %v", word, m.VPNCheck, want)
-		}
+	if ReadModes(dir).Observe || ReadModes("").Observe {
+		t.Fatal("no files, no directory: write")
 	}
 	for _, f := range []string{"adaptive.disabled", "core.observe"} {
 		os.WriteFile(filepath.Join(dir, f), nil, 0o644)

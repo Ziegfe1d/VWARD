@@ -466,9 +466,9 @@ command -v vward_core_adaptive_pid >/dev/null 2>&1 || vward_core_adaptive_pid() 
 core_sum()
 {
     case "$1" in
-        mipsle) echo d6a3d60b9449805a0e99686ee74590afd8c2769c82f414ae7a60531fa0996a70 ;;
-        mips) echo 9d38fc39b36caaef29c8d87e96891a438f5dc20590e18703187a7eb60cc431b1 ;;
-        arm64) echo a433d09be6e9aae411a340418cd470e9be4602f8551b74663ed7e6fbb87a9d7d ;;
+        mipsle) echo 95f3c134b6dc8b988250dd7fbc4fc86a08f5f929e613c77ef7da4a9049fadab4 ;;
+        mips) echo a4a6ff05dfd861c9d0520c653e38f95390f4713897db3cc7b3df09e6bfd04597 ;;
+        arm64) echo cd9d87848b485532f6fbd40d392e6fc2abe578aa4a2c9bfaf98551dbdabfc78c ;;
         *) return 1 ;;
     esac
 }
@@ -560,8 +560,7 @@ core_start()
     stop_service >/dev/null 2>&1
     # The core reads the owner's switches in CORE_ETC while it runs (--etc, fix.39): Autopodbor
     # switched off (adaptive.disabled) stops writing within seconds and writes again when switched
-    # on, without a restart; the VPN check's mode (adaptive.vpncheck) the same. core.observe is the
-    # start without the right to write at all.
+    # on, without a restart. core.observe is the start without the right to write at all.
     # A core of the previous release (it works until the pinned one is fetched, core_wanted) does
     # not know --etc: it is started the old way - switched off means no --apply until a restart.
     CS_MODE=--apply CS_ETC=

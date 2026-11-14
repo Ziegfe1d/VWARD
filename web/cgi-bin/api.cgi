@@ -815,9 +815,6 @@ if [ "$ACTION" = config-data ]; then
     TG=true; [ -e "$CONFIG_ETC/tunnel-guard.disabled" ] && TG=false
     WG_ON=true; [ -e "$CONFIG_ETC/wan-guard.disabled" ] && WG_ON=false
     AD_ON=true; [ -e "$CONFIG_ETC/route-engine/adaptive.disabled" ] && AD_ON=false
-    # The VPN check of autopick's names (fix.39): no file is the sandbox, as the core reads it.
-    AD_VPNCHECK=sandbox; [ ! -r "$CONFIG_ETC/route-engine/adaptive.vpncheck" ] || read -r AD_VPNCHECK < "$CONFIG_ETC/route-engine/adaptive.vpncheck" || :
-    case "$AD_VPNCHECK" in off|on) ;; *) AD_VPNCHECK=sandbox ;; esac
     kv_file "$CONFIG_ETC/route-engine/domain-classifier.conf" CLASSIFIER_ENABLED=CL_FLAG
     CL_ON=true; [ "$CL_FLAG" = 0 ] && CL_ON=false
     IPX="$(awk 'NF{print $1}' "${VWARD_POLICY_EXCLUDED:-$CONFIG_ETC/policy-sync/excluded.categories}" 2>/dev/null | head -n 500 | list_json)"
@@ -857,7 +854,7 @@ if [ "$ACTION" = config-data ]; then
       --arg group "${VWARD_POLICY_GROUP:-}" --argjson groups "${TGROUPS:-[]}" --argjson router "$ROUTER" \
       --argjson route_domains "${ROUTE_DOMAINS:-[]}" --argjson force "${FORCE:-[]}" --argjson adaptive "${ADAPT:-[]}" \
       --argjson categories "${CATS:-[]}" --argjson tunnel_guard "$TG" --argjson wan_guard "$WG_ON" --argjson components "$COMPONENTS" \
-      --argjson adaptive_on "$AD_ON" --arg adaptive_vpncheck "$AD_VPNCHECK" --argjson classifier_on "$CL_ON" --argjson ip_excluded "${IPX:-[]}" \
+      --argjson adaptive_on "$AD_ON" --argjson classifier_on "$CL_ON" --argjson ip_excluded "${IPX:-[]}" \
       --argjson w_en "$W_EN" --argjson w_ctl "$W_CTL" \
       --argjson wan_params "$WAN_PARAMS" --argjson agents_mode "$AGENTS_MODE" --argjson proposed "$PROPOSED" \
       --arg w_window "$(wnum "$W_WIN" 86400)" --arg w_switch "$(wnum "$W_SW" 20)" \
@@ -866,7 +863,7 @@ if [ "$ACTION" = config-data ]; then
       --arg u_feed "$(printf '%s\n' "$U_URL" | sed -n -E 's#^https://raw[.]githubusercontent[.]com/[^/]+/[^/]+/(main|beta|dev)/updates/[a-z0-9-]+/update-manifest[.]json$#\1#p')" \
       --argjson writable "$([ -x "$CONFIG_HELPER" ] && echo true || echo false)" \
       '{ok:true,writable:$writable,
-        route:{group:$group,groups:$groups,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,adaptive_vpncheck:$adaptive_vpncheck,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
+        route:{group:$group,groups:$groups,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
         agents:{mode:$agents_mode,proposed:$proposed},
         tunnel_guard:{enabled:$tunnel_guard},wan_guard:{enabled:$wan_guard,params:$wan_params},components:$components,
         wifi:{ENABLED:($w_en==1),CONTROL_ENABLED:($w_ctl==1),WINDOW_SEC:($w_window|(tonumber? // null)),BAND_SWITCH_WARN:($w_switch|(tonumber? // null)),WEAK_5G_SAMPLE_WARN:($w_weak|(tonumber? // null)),WEAK_5G_RSSI:($w_rssi|(tonumber? // null))},
@@ -896,7 +893,7 @@ if [ "$ACTION" = config ]; then
         tunnel-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=TUNNEL_GUARD_DISABLE ;;
         wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;
         component) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=COMPONENT_DISABLE ;;
-        adaptive-mode|adaptive-vpncheck|classifier|smartdns-guard|tunnel-fallback|tunnel-return) set -- "$OP" "$VALUE" ;;
+        adaptive-mode|classifier|smartdns-guard|tunnel-fallback|tunnel-return) set -- "$OP" "$VALUE" ;;
         # «Smart DNS» on/off (owner 08.11); off takes VWARD's own rows away: confirmed.
         smartdns-feature) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=SMARTDNS_OFF ;;
         extra) set -- "$OP" "$TARGET" "$VALUE" ;;

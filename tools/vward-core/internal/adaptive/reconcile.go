@@ -13,16 +13,8 @@ import (
 // checked through the VPN too. One that opens neither way Threshold rounds in a row, the VPN
 // itself working (a control site opens through it), has no reason to be in the group: addresses
 // with no HTTPS at all stayed in the VPN for good (2.datadog.pool.ntp.org, ftp.lug.ro,
-// tracker.opentrackr.org). In the sandbox the name stays and the journal says what would be done.
-
-// Mode of a rule that can change routing: off, the sandbox (counts and says, changes nothing), on.
-type Mode string
-
-const (
-	ModeOff     Mode = "off"
-	ModeSandbox Mode = "sandbox"
-	ModeOn      Mode = "on"
-)
+// tracker.opentrackr.org). A rule of Autopodbor itself, not a new part: it works at once, with
+// no sandbox (owner 14.11.2026).
 
 type ReconcileConfig struct {
 	Every     time.Duration // a name is checked again after this
@@ -31,7 +23,6 @@ type ReconcileConfig struct {
 	MinGap    time.Duration // between two counted checks
 
 	TunnelDev  string   // the VPN's device ("" - no VPN check)
-	VPNCheck   Mode     // "" is off
 	VPNControl []string // sites that must open through the VPN for a VPN failure to count
 }
 
@@ -44,8 +35,8 @@ func DefaultReconcile() ReconcileConfig {
 type ReconcileEvent struct {
 	Host string
 	// DIRECT_CONFIRM | DIRECT_FAIL | DIRECT_UNKNOWN | REMOVE | VPN_FAIL (opens neither way, counted) |
-	// VPN_WOULD_REMOVE (the sandbox, once, when the count is reached) | VPN_UNRELIABLE (the VPN
-	// itself does not open the control sites: nothing counted this round; Host "-").
+	// VPN_UNRELIABLE (the VPN itself does not open the control sites: nothing counted this round;
+	// Host "-").
 	Event  string
 	Streak int
 	Why    string
@@ -55,7 +46,7 @@ type ReconcileEvent struct {
 func Reconcile(ctx context.Context, o *Owned, p Prober, wanDev string, rc ReconcileConfig, now time.Time) ([]string, []ReconcileEvent) {
 	var remove []string
 	var ev []ReconcileEvent
-	vpnCheck := rc.TunnelDev != "" && (rc.VPNCheck == ModeSandbox || rc.VPNCheck == ModeOn)
+	vpnCheck := rc.TunnelDev != ""
 	vpnWorks := Unknown // asked once a round, when the first name fails through the VPN
 	for _, h := range o.Due(now, rc.Every, rc.Batch) {
 		n := o.Names[h]
@@ -111,18 +102,13 @@ func Reconcile(ctx context.Context, o *Owned, p Prober, wanDev string, rc Reconc
 			if n.LastVPNFail.IsZero() || now.Sub(n.LastVPNFail) >= rc.MinGap {
 				n.VPNFail++
 				n.LastVPNFail = now
-				switch {
-				case n.VPNFail < rc.Threshold:
+				if n.VPNFail < rc.Threshold {
 					ev = append(ev, ReconcileEvent{h, "VPN_FAIL", n.VPNFail, why})
 					continue
-				case rc.VPNCheck == ModeOn:
-					remove = append(remove, h)
-					ev = append(ev, ReconcileEvent{h, "REMOVE", n.VPNFail, "does not open through the VPN either (" + why + ")"})
-					continue
-				case n.VPNFail == rc.Threshold:
-					ev = append(ev, ReconcileEvent{h, "VPN_WOULD_REMOVE", n.VPNFail, why})
-					continue
 				}
+				remove = append(remove, h)
+				ev = append(ev, ReconcileEvent{h, "REMOVE", n.VPNFail, "does not open through the VPN either (" + why + ")"})
+				continue
 			}
 			ev = append(ev, ReconcileEvent{h, "DIRECT_FAIL", 0, r.Why})
 		default:
