@@ -43,4 +43,10 @@ func TestEventLogBatches(t *testing.T) {
 	if n := lines(); n != 6+logBatch {
 		t.Fatalf("lines waiting longer than every are written: %d", n)
 	}
+	// The owner has just moved «Реклама и счётчики мимо VPN» in the Panel: seen at once.
+	sw := &eventLog{path: p, every: time.Hour}
+	sw.put("ADS_MODE", "shadow", "")
+	if n := lines(); n != 7+logBatch {
+		t.Fatalf("a change of the sandbox switch waits: %d", n)
+	}
 }

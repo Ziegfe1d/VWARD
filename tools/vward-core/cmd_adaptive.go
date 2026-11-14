@@ -33,9 +33,10 @@ type eventLog struct {
 
 const logBatch = 64
 
-// urgentEvent: written at once (the process may end right after, the owner wants to see it now).
+// urgentEvent: written at once (the process may end right after, the owner wants to see it now;
+// ADS_MODE: the owner has just moved the switch in the Panel).
 func urgentEvent(event string) bool {
-	return event == "START" || event == "STOP" || event == "JOURNAL_BLOCKED" || strings.HasSuffix(event, "_FAILED")
+	return event == "START" || event == "STOP" || event == "JOURNAL_BLOCKED" || event == "ADS_MODE" || strings.HasSuffix(event, "_FAILED")
 }
 
 func (l *eventLog) flush() {
@@ -92,7 +93,7 @@ func (l *eventLog) put(event, host, why string) {
 
 type adaptiveFlags struct {
 	rciAddr, lan, wan, tunDev, group, jdir, logPath, dns string
-	ownedPath, shellPersist                              string
+	ownedPath, shellPersist, adsFile, adsReport          string
 	apply, reconcile                                     bool
 	workers, limit                                       int
 	batch, saveEvery, refresh, timeout, reconcileTick    time.Duration
@@ -113,6 +114,8 @@ func parseAdaptive(name string, args []string) (*adaptiveFlags, *flag.FlagSet) {
 	fs.BoolVar(&f.reconcile, "reconcile", true, "take names out again once they open directly (3 checks in a row)")
 	fs.StringVar(&f.ownedPath, "owned", "/opt/var/lib/vward/core-adaptive/owned.json", "the names Autopodbor added itself")
 	fs.StringVar(&f.shellPersist, "shell-persist", "/opt/var/lib/vward/route-engine/adaptive-persist.txt", "the shell engine's list, taken over once")
+	fs.StringVar(&f.adsFile, "ads-mode", "/opt/etc/vward/route-engine/adaptive-ads.mode", "«ads and counters past the VPN»: the Panel's choice (shadow: the sandbox)")
+	fs.StringVar(&f.adsReport, "ads-report", "/tmp/vward-core-ads-sandbox.json", "the sandbox's result for the Panel (a file in memory)")
 	fs.IntVar(&f.workers, "workers", 3, "names checked at the same time")
 	fs.IntVar(&f.limit, "limit", 290, "names the group may hold (Keenetic keeps 300)")
 	fs.DurationVar(&f.batch, "batch", 10*time.Second, "names found within this go as one batch")
@@ -234,6 +237,21 @@ func runAdaptive(args []string) {
 		}
 		omu.Unlock()
 	}
+	// «Реклама и счётчики мимо VPN» in the sandbox (owner 13.11.2026): the Panel's choice is read
+	// again every few minutes, no restart; the sandbox only writes what it would have done.
+	ads := &adaptive.AdsSandbox{}
+	adsLook := func() {
+		omu.Lock()
+		hosts := make([]string, 0, len(owned.Names))
+		for h := range owned.Names {
+			hosts = append(hosts, h)
+		}
+		omu.Unlock()
+		now := time.Now()
+		adsRound(ads, adaptive.ReadAdsMode(f.adsFile), hosts, now, log.put)
+		adaptive.SaveAdsReport(f.adsReport, ads.Report(hosts, now))
+	}
+	adsLook()
 	capt, err := adaptive.OpenCapture(f.lan)
 	if err != nil {
 		log.put("CAPTURE_FAILED", f.lan, err.Error())
@@ -306,6 +324,9 @@ func runAdaptive(args []string) {
 					}
 					if res.Outcome == adaptive.Add {
 						pending[res.Host] = true
+						if z, ok := ads.WouldSkip(res.Host); ok {
+							log.put("WOULD_SKIP_AD", res.Host, "zone="+z)
+						}
 					}
 					if len(last) > 4096 {
 						last = map[string]adaptive.Outcome{}
@@ -402,10 +423,11 @@ func runAdaptive(args []string) {
 		omu.Lock()
 		owns := len(owned.Names)
 		omu.Unlock()
-		log.put("STATS", "-", fmt.Sprintf("mode=%s seen=%d checked=%d direct_ok=%d vpn_only=%d vpn_fail=%d unknown=%d isp_unreliable=%d added=%d removed=%d write_failed=%d group=%d/%d own=%d",
+		adSkip, adRemove := ads.Counts()
+		log.put("STATS", "-", fmt.Sprintf("mode=%s seen=%d checked=%d direct_ok=%d vpn_only=%d vpn_fail=%d unknown=%d isp_unreliable=%d added=%d removed=%d write_failed=%d group=%d/%d own=%d ads=%s ads_would_skip=%d ads_would_remove=%d",
 			mode, s["seen"], s["checked"], s[string(adaptive.DirectOK)], s[string(adaptive.Add)],
 			s[string(adaptive.TunnelFail)]+s[string(adaptive.TunnelUnstable)], s[string(adaptive.ProbeUnknown)],
-			s[string(adaptive.ISPUnreliable)], s["added"], s["removed"], s["write_failed"], n, f.limit, owns))
+			s[string(adaptive.ISPUnreliable)], s["added"], s["removed"], s["write_failed"], n, f.limit, owns, ads.Mode(), adSkip, adRemove))
 	}
 	for {
 		select {
@@ -422,11 +444,13 @@ func runAdaptive(args []string) {
 			if err := owned.Save(); err != nil {
 				log.put("OWNED_UNSAVED", f.ownedPath, err.Error())
 			}
+			adaptive.SaveAdsReport(f.adsReport, nil)
 			log.put("STOP", "-", "")
 			log.flush()
 			return
 		case <-reread.C:
 			refresh()
+			adsLook()
 			e.Prune()
 			log.flush()
 		case <-hourly.C:
@@ -504,5 +528,17 @@ func maintLog(prev map[string]int, ev []adaptive.ReconcileEvent, threshold int, 
 	}
 	if still+unknown > 0 {
 		put("MAINT_STILL_BLOCKED", "-", fmt.Sprintf("still=%d unknown=%d", still, unknown))
+	}
+}
+
+// adsRound: the sandbox of «ads and counters past the VPN» looks at the Panel's choice and at the
+// names Autopodbor holds: a change of the choice is one line, an ad name already in the group is
+// told once («would take out»). Nothing else is done with the names.
+func adsRound(ads *adaptive.AdsSandbox, mode adaptive.AdsMode, owned []string, now time.Time, put func(code, host, detail string)) {
+	if ads.SetMode(mode, now) {
+		put("ADS_MODE", string(ads.Mode()), "")
+	}
+	for _, a := range ads.WouldRemove(owned) {
+		put("WOULD_REMOVE_AD", a.Host, "zone="+a.Zone)
 	}
 }
