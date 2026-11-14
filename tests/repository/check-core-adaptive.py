@@ -5,9 +5,14 @@
    every pinned build is in tools/vward-core/dist (gunzip gives the pinned SHA-256).
 2. S91's core block, taken as it is, with stand-ins for the shell engine and the core:
    no core yet -> fetched in the background once an hour, the shell engine runs; a core ->
-   it runs (--apply), the shell engine is stopped first; core.observe / Autopodbor off ->
-   no --apply; a core that dies at start -> the shell engine for an hour; engine.shell ->
-   the core is stopped, the shell engine runs.
+   it runs (--apply), the shell engine is stopped first; core.observe -> no --apply; a core
+   that dies at start -> the shell engine for an hour; engine.shell -> the core is stopped, the
+   shell engine runs.
+   fix.39: the Panel's switches go to the core as files it looks at itself (--observe-if
+   adaptive.disabled, --ads-sandbox-if ads.sandbox): no restart is needed for «выкл». A core of
+   an older build (its sum is not the pinned one) is started with the options of its own
+   release and the pinned build is fetched in the background - before, an installed core was
+   never replaced.
 3. vward_core_adaptive_pid knows the core's process by its command line; while it runs the
    components agent does not start the shell engine and the shell reconciler stands aside.
 4. Installing the core needs no new file in the package: the updater's target allowlist (2.0.10
@@ -48,7 +53,9 @@ for arch, s in sums.items():
 BLOCK = S91[S91.index("# ---- Autopodbor in Go"):S91.index('\ncase "$1" in')]
 
 
-def run(tmp: Path, script: str) -> str:
+def run(tmp: Path, script: str, stale=False) -> str:
+    # The pinned sum: the stand-in core's own (the build this release wants) or another one.
+    pinned = "echo 0000" if stale else 'sha256sum "$VWARD_CORE_BIN" 2>/dev/null | cut -d" " -f1'
     h = tmp / "h.sh"
     h.write_text(f"""EVENT_LOG="{tmp}/events.log"
 VWARD_CORE_BIN="{tmp}/share/vward-core" VWARD_CORE_SELF="{tmp}/install.sh"
@@ -59,6 +66,8 @@ stop_service() {{ echo shell-stop >> "{tmp}/calls"; }}
 start_service() {{ echo shell-start >> "{tmp}/calls"; }}
 . "{LIB}"
 {BLOCK}
+core_arch() {{ echo test; }}
+core_sum() {{ {pinned}; }}
 {script}
 """)
     return subprocess.run(["sh", str(h)], capture_output=True, text=True, timeout=60).stdout
@@ -106,6 +115,13 @@ with tempfile.TemporaryDirectory() as t:
             fail(f"core arguments: {args}")
         if "CORE_STARTED" not in (tmp / "events.log").read_text():
             fail("CORE_STARTED not logged")
+        # fix.39: the switches are files the core reads while it runs.
+        if args[args.index("--observe-if") + 1] != f"{tmp}/etc/adaptive.disabled" or args[args.index("--ads-sandbox-if") + 1] != f"{tmp}/etc/ads.sandbox":
+            fail(f"the Panel's switch files are not given to the core: {args}")
+        if (tmp / "share/vward-core.sum").read_text().strip() != hashlib.sha256((tmp / "share/vward-core").read_bytes()).hexdigest():
+            fail("the checked core's sum is kept beside it")
+        if len((tmp / "installed").read_text().splitlines()) != 1:
+            fail("the pinned build is installed: nothing is fetched")
         # 3. The helper knows it; a second start does nothing.
         got = subprocess.run(["sh", "-c", f'VWARD_CORE_PIDFILE="{tmp}/run/core.pid"; . "{LIB}"; vward_core_adaptive_pid'], capture_output=True, text=True).stdout.strip()
         if got != pid:
@@ -125,6 +141,36 @@ with tempfile.TemporaryDirectory() as t:
         if "--apply" in (tmp / "args").read_text().split():
             fail("core.observe must run without --apply")
         run(tmp, "core_stop")
+        (tmp / "etc/core.observe").unlink()
+        # Autopodbor switched off in the Panel: the pinned core still runs with --apply and is told
+        # the file - it stops writing itself, and writes again when the file goes.
+        (tmp / "etc/adaptive.disabled").write_text("")
+        run(tmp, "engine_start")
+        calls(tmp)
+        args = (tmp / "args").read_text().split()
+        if "--apply" not in args or "--observe-if" not in args:
+            fail(f"Autopodbor off: the core is told the switch file: {args}")
+        run(tmp, "core_stop")
+        # An older build (not the pinned sum): the options of its own release - no new ones, the
+        # switch as before - and the pinned build fetched in the background, once.
+        (tmp / "try").unlink()
+        run(tmp, "engine_start", stale=True)
+        time.sleep(0.5)
+        calls(tmp)
+        args = (tmp / "args").read_text().split()
+        if "--observe-if" in args or "--ads-sandbox-if" in args or "--apply" in args:
+            fail(f"an older build gets only the options it knows (Autopodbor off: no --apply): {args}")
+        if (tmp / "installed").read_text().split() != ["core-install", "core-install"]:
+            fail("an older build: the pinned one is fetched in the background")
+        run(tmp, "core_stop")
+        (tmp / "etc/adaptive.disabled").unlink()
+        run(tmp, "engine_start", stale=True)
+        time.sleep(0.5)
+        calls(tmp)
+        if "--apply" not in (tmp / "args").read_text().split() or len((tmp / "installed").read_text().splitlines()) != 2:
+            fail("an older build works on (--apply); the fetch is not started twice within the hour")
+        run(tmp, "core_stop")
+        (tmp / "etc/core.observe").write_text("")
     finally:
         subprocess.run(["pkill", "-f", f"{tmp}/share/vward-core"], capture_output=True)
     # A core that dies at start: the shell engine, and for an hour.
@@ -166,6 +212,13 @@ core_install
     sum_amd64 = f'core_sum() {{ [ "$1" = amd64 ] && echo {good}; }}'
     if install("amd64", sum_amd64) != "result=changed" or not os.access(tmp / "share/vward-core", os.X_OK):
         fail("core_install: a good build is installed")
+    if (tmp / "share/vward-core.sum").read_text().strip() != good:
+        fail("core_install: the installed build's sum is kept beside it")
+    # The real program knows the options S91 gives the pinned build (an unknown one would end it).
+    usage = subprocess.run([str(tmp / "share/vward-core"), "adaptive", "--help"], capture_output=True, text=True).stderr
+    for opt in ("-observe-if", "-ads-sandbox-if"):
+        if opt not in usage:
+            fail(f"the core does not know {opt}")
     if install("amd64", sum_amd64) != "result=unchanged":
         fail("core_install: the same build again is unchanged")
     (dist / "vward-core-linux-amd64.gz").write_bytes(gzip.compress(raw + b"x"))

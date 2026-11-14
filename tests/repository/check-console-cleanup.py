@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory() as tmp:
     files(bk / "snapshots", ["vward-20261001-010101.tar.gz"])
     files(logs, ["vward-route.log"], 4096)
     (etc / "tunnels").mkdir(); (etc / "tunnels/key.conf").write_text("PrivateKey = SECRET\n")
-    for f in ("tunnel-guard.disabled", "wan-guard.disabled", "agents.conf", "route-engine/adaptive.disabled", "components/wifi-client-guard.disabled", "components/vward.off.keep"):
+    for f in ("tunnel-guard.disabled", "wan-guard.disabled", "agents.conf", "route-engine/adaptive.disabled", "route-engine/ads.sandbox", "components/wifi-client-guard.disabled", "components/vward.off.keep"):
         (etc / f).write_text("x\n")
     (etc / "route-engine/domain-lists.conf").write_text("smartdns_guard=0\nwatch.list1=1\n")
     (etc / "update.conf").write_text("manifest_url=https://example.invalid/updates/dev/update-manifest.json\n")
@@ -90,7 +90,7 @@ with tempfile.TemporaryDirectory() as tmp:
     out = run("reset", "settings")
     if out[-1] != "result=changed":
         fail(f"reset: {out}")
-    for f in ("tunnel-guard.disabled", "wan-guard.disabled", "agents.conf", "route-engine/adaptive.disabled", "components/wifi-client-guard.disabled"):
+    for f in ("tunnel-guard.disabled", "wan-guard.disabled", "agents.conf", "route-engine/adaptive.disabled", "route-engine/ads.sandbox", "components/wifi-client-guard.disabled"):
         if (etc / f).exists():
             fail(f"reset must remove {f}")
     if "smartdns_guard=1" not in (etc / "route-engine/domain-lists.conf").read_text() or "watch.list1=1" not in (etc / "route-engine/domain-lists.conf").read_text():

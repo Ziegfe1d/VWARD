@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"reflect"
 	"testing"
 
@@ -33,5 +34,47 @@ func TestMaintLogOnlyChanges(t *testing.T) {
 	maintLog(map[string]int{}, nil, 3, func(code, host, detail string) { got = append(got, [3]string{code, host, detail}) })
 	if got != nil {
 		t.Fatalf("a round with nothing checked writes nothing: %v", got)
+	}
+}
+
+// fix.39: a failure through the VPN too is a step to removal - a line; a VPN that does not work
+// is returned to the caller (said once an hour), removals are written where the name is taken out.
+func TestMaintLogVPN(t *testing.T) {
+	ev := []adaptive.ReconcileEvent{
+		{Host: "-", Event: "VPN_DOWN", Why: "x"},
+		{Host: "a.example", Event: "VPN_FAIL", Streak: 2, Why: "direct: connect: timeout; vpn: connect: timeout"},
+		{Host: "b.example", Event: "DROP", Streak: 3, Why: "direct: connect: timeout; vpn: connect: refused"},
+		{Host: "c.example", Event: "REMOVE", Streak: 3, Why: "http 200"},
+		{Host: "d.example", Event: "REMOVE", Why: "dns blocked"},
+	}
+	var got [][3]string
+	down := maintLog(map[string]int{}, ev, 3, func(code, host, detail string) { got = append(got, [3]string{code, host, detail}) })
+	want := [][3]string{{"MAINT_NO_PATH", "a.example", "fails=2/3 direct: connect: timeout; vpn: connect: timeout"}}
+	if !down || !reflect.DeepEqual(got, want) {
+		t.Fatalf("down %v, lines %v", down, got)
+	}
+	if maintLog(map[string]int{}, ev[1:], 3, func(string, string, string) {}) {
+		t.Fatal("no VPN_DOWN - not down")
+	}
+	l := removalLines(ev)
+	if !l["b.example"].drop || l["b.example"].why != "opens neither directly nor through the VPN: direct: connect: timeout; vpn: connect: refused" ||
+		l["c.example"] != (removal{false, "opened directly 3 times in a row"}) || l["d.example"] != (removal{false, "dns blocked"}) || len(l) != 3 {
+		t.Fatalf("removal lines: %+v", l)
+	}
+}
+
+func TestModeFiles(t *testing.T) {
+	dir := t.TempDir()
+	off := dir + "/adaptive.disabled"
+	list := splitList(" " + dir + "/core.observe, " + off + ",")
+	if len(list) != 2 || anyExists(list) {
+		t.Fatalf("no file - not paused: %v", list)
+	}
+	os.WriteFile(off, nil, 0o644)
+	if !anyExists(list) || anyExists(nil) {
+		t.Fatal("the switch file pauses the writes")
+	}
+	if someNames(nil, 3) != "" || someNames([]string{"a", "b", "c", "d"}, 3) != ": a, b, c and 1 more" {
+		t.Fatalf("names: %q", someNames([]string{"a", "b", "c", "d"}, 3))
 	}
 }

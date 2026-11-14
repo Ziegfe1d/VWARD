@@ -1,6 +1,9 @@
 package adaptive
 
-import "strings"
+import (
+	_ "embed"
+	"strings"
+)
 
 // normalizeName: lower case, no trailing dot; "" when the name is not one Keenetic takes in
 // «object-group fqdn ... include» or not a public site.
@@ -85,3 +88,41 @@ func ruZone(name string) bool {
 	}
 	return false
 }
+
+// suffixOf: the entry of list that is name or a parent domain of it, or "".
+func suffixOf(name string, list []string) string {
+	for _, z := range list {
+		if name == z || strings.HasSuffix(name, "."+z) {
+			return z
+		}
+	}
+	return ""
+}
+
+// sharedCDN: the common names of the content networks. Keenetic routes a name of the group by
+// the addresses it resolves to, and behind these names the addresses belong to thousands of
+// sites: one such name in the group takes other sites' traffic into the VPN too (owner's journal
+// 12.11.2026: *.akamai.net, *.sni.global.fastly.net). The name is only marked for the Panel.
+var sharedCDN = []string{"akamai.net", "akamaiedge.net", "akamaized.net", "akamaihd.net", "akamaitechnologies.com",
+	"edgekey.net", "edgesuite.net", "fastly.net", "fastlylb.net", "cloudfront.net", "cdn.cloudflare.net",
+	"azureedge.net", "azurefd.net", "trafficmanager.net", "llnwd.net", "cdn77.org", "b-cdn.net", "gcdn.co",
+	"edgecastcdn.net", "footprint.net", "hwcdn.net", "kxcdn.com", "cdngslb.com"}
+
+// SharedCDN: name is a content network's common name (the entry, or "").
+func SharedCDN(name string) string { return suffixOf(name, sharedCDN) }
+
+//go:embed ads.txt
+var adsText string
+
+var adNames = func() []string {
+	var out []string
+	for _, l := range strings.Split(adsText, "\n") {
+		if l = strings.TrimSpace(l); l != "" && l[0] != '#' {
+			out = append(out, l)
+		}
+	}
+	return out
+}()
+
+// AdName: name is an advert, a counter or telemetry (the list's entry, or ""): ads.txt.
+func AdName(name string) string { return suffixOf(name, adNames) }

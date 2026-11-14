@@ -2,6 +2,7 @@ package adaptive
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -104,5 +105,35 @@ func TestProbeDNSBlocked(t *testing.T) {
 	p.Lookup = func(context.Context, string) ([]net.IP, error) { return []net.IP{net.ParseIP("0.0.0.0")}, nil }
 	if r := p.Probe(context.Background(), "ad.doubleclick.net", "lo"); r.Verdict != Unknown || r.Why != "dns blocked" {
 		t.Fatalf("0.0.0.0: %+v", r)
+	}
+}
+
+// «tls: no application protocol» (tunnel.googlezip.net, owner's journal 12.11.2026): the server
+// answered the handshake and refused only the protocol offered - it is reached, it opens.
+func TestProbeNoApplicationProtocol(t *testing.T) {
+	needRoot(t)
+	// A certificate from a test server; the listener itself speaks only a protocol the check does not offer.
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+	l, err := tls.Listen("tcp4", "127.0.0.1:0", &tls.Config{Certificates: srv.TLS.Certificates, NextProtos: []string{"spdy/3"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() { c.(*tls.Conn).Handshake(); c.Close() }()
+		}
+	}()
+	_, port, _ := net.SplitHostPort(l.Addr().String())
+	p := NewProber(2*time.Second, "")
+	p.Port = port
+	p.Lookup = func(context.Context, string) ([]net.IP, error) { return []net.IP{net.ParseIP("127.0.0.1")}, nil }
+	if r := p.Probe(context.Background(), "tunnel.googlezip.net", "lo"); r.Verdict != Open || r.Why != "tls: no application protocol" {
+		t.Fatalf("a server that refuses only the protocol opens: %+v", r)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -92,7 +93,7 @@ func (l *eventLog) put(event, host, why string) {
 
 type adaptiveFlags struct {
 	rciAddr, lan, wan, tunDev, group, jdir, logPath, dns string
-	ownedPath, shellPersist                              string
+	ownedPath, shellPersist, observeIf, adsIf            string
 	apply, reconcile                                     bool
 	workers, limit                                       int
 	batch, saveEvery, refresh, timeout, reconcileTick    time.Duration
@@ -110,6 +111,8 @@ func parseAdaptive(name string, args []string) (*adaptiveFlags, *flag.FlagSet) {
 	fs.StringVar(&f.logPath, "log", "/opt/var/log/vward-core-adaptive.log", "event log (- : stdout)")
 	fs.StringVar(&f.dns, "dns", "", "resolver for the checks (empty: the router's)")
 	fs.BoolVar(&f.apply, "apply", false, "write into the group (without: observation, nothing sent)")
+	fs.StringVar(&f.observeIf, "observe-if", "", "files, comma-separated: while one of them exists nothing is written (Autopodbor switched off in the Panel)")
+	fs.StringVar(&f.adsIf, "ads-sandbox-if", "", "file: while it exists adverts and counters are named in the journal (sandbox, nothing changes)")
 	fs.BoolVar(&f.reconcile, "reconcile", true, "take names out again once they open directly (3 checks in a row)")
 	fs.StringVar(&f.ownedPath, "owned", "/opt/var/lib/vward/core-adaptive/owned.json", "the names Autopodbor added itself")
 	fs.StringVar(&f.shellPersist, "shell-persist", "/opt/var/lib/vward/route-engine/adaptive-persist.txt", "the shell engine's list, taken over once")
@@ -165,14 +168,22 @@ func runAdaptive(args []string) {
 	cfg.Group, cfg.WanDev, cfg.TunnelDev = f.group, f.wan, f.tunDev
 	e := adaptive.New(cfg, adaptive.NewProber(f.timeout, f.dns))
 	w := &adaptive.Writer{R: r, J: j, Group: f.group, Limit: f.limit, Observe: !f.apply, SaveEvery: f.saveEvery, KeepOps: 50}
-	mode := "observe"
-	if f.apply {
-		mode = "apply"
+	// The Panel's switch (adaptive.disabled) is a file: looked at with every batch, so «выкл» stops
+	// the writes within seconds and «вкл» brings them back, without a restart (before fix.39 the
+	// running core went on writing until its next start).
+	observeIf := splitList(f.observeIf)
+	blocked, paused := false, f.apply && anyExists(observeIf)
+	modeOf := func() string {
+		if !f.apply || blocked || paused {
+			return "observe"
+		}
+		return "apply"
 	}
-	log.put("START", "-", fmt.Sprintf("mode=%s lan=%s wan=%s tunnel=%s group=%s", mode, f.lan, f.wan, f.tunDev, f.group))
+	w.Observe = modeOf() == "observe"
+	log.put("START", "-", fmt.Sprintf("mode=%s lan=%s wan=%s tunnel=%s group=%s", modeOf(), f.lan, f.wan, f.tunDev, f.group))
 	if err := j.Gate(); err != nil {
 		log.put("JOURNAL_BLOCKED", "-", err.Error()+" (vward-core recover)")
-		w.Observe = true
+		blocked, w.Observe = true, true
 	}
 	_, ownedErr := os.Stat(f.ownedPath)
 	firstStart := os.IsNotExist(ownedErr)
@@ -180,7 +191,40 @@ func runAdaptive(args []string) {
 	if err != nil {
 		log.put("OWNED_UNREAD", f.ownedPath, err.Error()+" (starting an empty list)")
 	}
-	var omu sync.Mutex // owned and the writer: one change at a time
+	var omu sync.Mutex // owned, the writer and the mode: one change at a time
+	// syncMode (omu held): the switch file read again.
+	syncMode := func() {
+		if p := f.apply && anyExists(observeIf); p != paused {
+			paused = p
+			if p {
+				log.put("MODE", "-", "observe: Autopodbor is switched off, nothing is written")
+			} else {
+				log.put("MODE", "-", modeOf())
+			}
+		}
+		w.Observe = modeOf() == "observe"
+	}
+	// «Реклама и счётчики» in the sandbox (owner 13.11.2026; the rule «сначала песочница»): the
+	// names of ads.txt are only named - what would not be sent to the VPN and what would be
+	// taken out of it. Nothing is changed: they are added and kept as before.
+	var ads atomic.Bool
+	adsKnown := false
+	// syncAds (omu held): the sandbox's file read again; the names marked for the Panel.
+	syncAds := func() {
+		on := f.adsIf != "" && anyExists([]string{f.adsIf})
+		turned := on != ads.Load() || !adsKnown
+		ads.Store(on)
+		adsKnown = true
+		if owned.Mark(on) {
+			if err := owned.Save(); err != nil {
+				log.put("OWNED_UNSAVED", f.ownedPath, err.Error())
+			}
+		}
+		if turned && on {
+			names := owned.Ads()
+			log.put("SANDBOX_AD_GROUP", "-", fmt.Sprintf("would take out of the VPN %d of %d%s", len(names), len(owned.Names), someNames(names, 12)))
+		}
+	}
 	const ownedEvery = 30 * time.Minute
 	ownedSaved := time.Now()
 	inGroup := func(m *ndm.Model) map[string]bool {
@@ -234,6 +278,9 @@ func runAdaptive(args []string) {
 		}
 		omu.Unlock()
 	}
+	omu.Lock()
+	syncAds()
+	omu.Unlock()
 	capt, err := adaptive.OpenCapture(f.lan)
 	if err != nil {
 		log.put("CAPTURE_FAILED", f.lan, err.Error())
@@ -275,7 +322,7 @@ func runAdaptive(args []string) {
 	}()
 
 	var mu sync.Mutex
-	pending := map[string]bool{}
+	pending := map[string]string{} // the name -> why it did not open directly
 	// An hour's summary (owner 12.11.2026): whether Autopodbor works at all is seen in the journal
 	// even when nothing changes - names seen, checked, and how the checks ended.
 	stats := map[string]int{}
@@ -303,9 +350,13 @@ func runAdaptive(args []string) {
 					if last[res.Host] != res.Outcome {
 						log.put(string(res.Outcome), res.Host, res.Why)
 						last[res.Host] = res.Outcome
+						if res.Outcome == adaptive.Add && res.Ad != "" && ads.Load() {
+							stats["ads_would_skip"]++
+							log.put("SANDBOX_AD_SKIP", res.Host, "would not send to the VPN: an advert or a counter ("+res.Ad+")")
+						}
 					}
 					if res.Outcome == adaptive.Add {
-						pending[res.Host] = true
+						pending[res.Host] = res.Direct
 					}
 					if len(last) > 4096 {
 						last = map[string]adaptive.Outcome{}
@@ -318,7 +369,9 @@ func runAdaptive(args []string) {
 
 	if f.reconcile {
 		rc := adaptive.DefaultReconcile()
+		rc.TunnelDev = f.tunDev
 		prober := adaptive.NewProber(f.timeout, f.dns)
+		var vpnDownSaid time.Time
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -348,24 +401,41 @@ func runAdaptive(args []string) {
 				for h, n := range snap.Names {
 					if cur, ok := owned.Names[h]; ok {
 						cur.Streak, cur.LastOK, cur.Checked = n.Streak, n.LastOK, n.Checked
+						cur.Why, cur.VPNFail, cur.LastVPNFail = n.Why, n.VPNFail, n.LastVPNFail
 					}
 				}
-				maintLog(prev, ev, rc.Threshold, log.put)
+				// A VPN that does not answer its control sites: said once an hour, not every round.
+				if maintLog(prev, ev, rc.Threshold, log.put) && time.Since(vpnDownSaid) >= time.Hour {
+					vpnDownSaid = time.Now()
+					log.put("MAINT_VPN_DOWN", "-", "the control sites do not open through the VPN: names that fail through it are not counted")
+				}
+				syncMode()
 				if len(remove) > 0 {
+					lines := removalLines(ev)
 					b, err := w.Remove(remove, time.Now())
 					switch {
 					case err != nil:
 						count("write_failed", 1)
 						log.put("REMOVE_FAILED", strings.Join(remove, ","), err.Error())
 					case b != nil:
-						count("removed", len(b.Removed))
 						for _, h := range b.Removed {
-							log.put("REMOVED", h, "opened directly 3 times in a row")
+							l := lines[h]
+							if l.drop {
+								count("dropped", 1)
+								log.put("DROPPED", h, l.why)
+							} else {
+								count("removed", 1)
+								log.put("REMOVED", h, l.why)
+							}
 							delete(owned.Names, h)
 							e.Forget(h)
 						}
 						for _, h := range b.Would {
-							log.put("WOULD_REMOVE", h, "opened directly 3 times in a row")
+							if l := lines[h]; l.drop {
+								log.put("WOULD_DROP", h, l.why)
+							} else {
+								log.put("WOULD_REMOVE", h, l.why)
+							}
 						}
 					}
 				}
@@ -402,10 +472,13 @@ func runAdaptive(args []string) {
 		omu.Lock()
 		owns := len(owned.Names)
 		omu.Unlock()
-		log.put("STATS", "-", fmt.Sprintf("mode=%s seen=%d checked=%d direct_ok=%d vpn_only=%d vpn_fail=%d unknown=%d isp_unreliable=%d added=%d removed=%d write_failed=%d group=%d/%d own=%d",
+		omu.Lock()
+		mode := modeOf()
+		omu.Unlock()
+		log.put("STATS", "-", fmt.Sprintf("mode=%s seen=%d checked=%d direct_ok=%d vpn_only=%d vpn_fail=%d unknown=%d isp_unreliable=%d added=%d removed=%d write_failed=%d group=%d/%d own=%d dropped=%d ads_would_skip=%d",
 			mode, s["seen"], s["checked"], s[string(adaptive.DirectOK)], s[string(adaptive.Add)],
 			s[string(adaptive.TunnelFail)]+s[string(adaptive.TunnelUnstable)], s[string(adaptive.ProbeUnknown)],
-			s[string(adaptive.ISPUnreliable)], s["added"], s["removed"], s["write_failed"], n, f.limit, owns))
+			s[string(adaptive.ISPUnreliable)], s["added"], s["removed"], s["write_failed"], n, f.limit, owns, s["dropped"], s["ads_would_skip"]))
 	}
 	for {
 		select {
@@ -434,12 +507,15 @@ func runAdaptive(args []string) {
 		case <-batch.C:
 			mu.Lock()
 			var hosts []string
+			why := pending
 			for h := range pending {
 				hosts = append(hosts, h)
 			}
-			pending = map[string]bool{}
+			pending = map[string]string{}
 			mu.Unlock()
 			omu.Lock()
+			syncMode()
+			syncAds()
 			if len(hosts) > 0 {
 				b, err := w.Add(hosts, time.Now())
 				switch {
@@ -453,9 +529,10 @@ func runAdaptive(args []string) {
 					count("added", len(b.Added))
 					for _, h := range b.Added {
 						log.put("ADDED", h, f.group)
-						owned.Names[h] = &adaptive.Name{Added: time.Now()}
+						owned.Names[h] = &adaptive.Name{Added: time.Now(), Why: why[h]}
 					}
 					if len(b.Added) > 0 {
+						owned.Mark(ads.Load())
 						if err := owned.Save(); err != nil {
 							log.put("OWNED_UNSAVED", f.ownedPath, err.Error())
 						}
@@ -485,11 +562,20 @@ func runAdaptive(args []string) {
 
 // maintLog writes a reconcile round: one line a name only when something changed; a name that
 // stays blocked (its streak was 0 and is 0) goes into one line a round with the count (owner's
-// diagnostics 13.11.2026: the journal was nearly all «MAINT_DIRECT_FAIL … streak=0/3»).
-func maintLog(prev map[string]int, ev []adaptive.ReconcileEvent, threshold int, put func(code, host, detail string)) {
-	still, unknown := 0, 0
+// diagnostics 13.11.2026: the journal was nearly all «MAINT_DIRECT_FAIL … streak=0/3»). A check
+// that failed through the VPN too is a step to removal: a line. Removals are written where the
+// name is taken out. It returns whether the round found the VPN itself not working.
+func maintLog(prev map[string]int, ev []adaptive.ReconcileEvent, threshold int, put func(code, host, detail string)) bool {
+	still, unknown, vpnDown := 0, 0, false
 	for _, x := range ev {
-		if x.Event == "REMOVE" {
+		switch x.Event {
+		case "REMOVE", "DROP":
+			continue
+		case "VPN_DOWN":
+			vpnDown = true
+			continue
+		case "VPN_FAIL":
+			put("MAINT_NO_PATH", x.Host, fmt.Sprintf("fails=%d/%d %s", x.Streak, threshold, x.Why))
 			continue
 		}
 		if (x.Event == "DIRECT_FAIL" || x.Event == "DIRECT_UNKNOWN") && prev[x.Host] == 0 {
@@ -505,4 +591,59 @@ func maintLog(prev map[string]int, ev []adaptive.ReconcileEvent, threshold int, 
 	if still+unknown > 0 {
 		put("MAINT_STILL_BLOCKED", "-", fmt.Sprintf("still=%d unknown=%d", still, unknown))
 	}
+	return vpnDown
+}
+
+// removal: how a name taken out is written - REMOVED (opens directly again; or DNS filters it)
+// or DROPPED (opens through neither path).
+type removal struct {
+	drop bool
+	why  string
+}
+
+func removalLines(ev []adaptive.ReconcileEvent) map[string]removal {
+	out := map[string]removal{}
+	for _, x := range ev {
+		switch {
+		case x.Event == "DROP":
+			out[x.Host] = removal{true, "opens neither directly nor through the VPN: " + x.Why}
+		case x.Event == "REMOVE" && x.Why == "dns blocked":
+			out[x.Host] = removal{false, "dns blocked"}
+		case x.Event == "REMOVE":
+			out[x.Host] = removal{false, "opened directly 3 times in a row"}
+		}
+	}
+	return out
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func anyExists(paths []string) bool {
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// someNames: «: a, b, c» with at most max names and how many more.
+func someNames(names []string, max int) string {
+	if len(names) == 0 {
+		return ""
+	}
+	more := ""
+	if len(names) > max {
+		more = fmt.Sprintf(" and %d more", len(names)-max)
+		names = names[:max]
+	}
+	return ": " + strings.Join(names, ", ") + more
 }
