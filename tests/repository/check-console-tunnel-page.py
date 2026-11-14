@@ -130,4 +130,15 @@ if r.returncode:
 for w, got in json.loads(r.stdout).items():
     if not all(all(x) for x in got):
         fail(f"at {w}px a tunnel's switch is not on its state's line or overflows: {got}")
+# Owner 13.11.2026: what is done with a tunnel - check, restart, delete - in «Управление» (no section
+# «Удаление» of its own, no second delete on a tunnel without settings); a country without an answer in
+# the warning colour; «Обновить серверы» says what it refreshes; «В разработке» starts folded.
+_pp = JS[JS.index("function tunnelProbePanel(name) {"):JS.index("\n}\n", JS.index("function tunnelProbePanel(name) {"))]
+if "panel('Управление', body +" not in _pp or "tunnelDeleteHtml(name, name === prof().tunnel_interface)" not in _pp:
+    fail("RED: the tunnel's delete must be in «Управление»")
+if "panel('Удаление', del" in JS or "+ mv + (managed ? '' : del))" in JS:
+    fail("RED: the delete has one place only")
+for need in ("' · <span class=\"st warn\">нет ответа</span>'", "'Обновить серверы'", "const foldDefault = key => /\\|В разработке$/.test(key);"):
+    if need not in JS:
+        fail(f"RED: the tunnel's page lacks {need!r}")
 print("CONSOLE_TUNNEL_PAGE=PASS")
