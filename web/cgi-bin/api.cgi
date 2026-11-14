@@ -300,13 +300,22 @@ ACTION="$(qget action)"
 [ -n "$ACTION" ] || ACTION=status
 
 case "$ACTION" in
-    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data|site-test|tunnel-quality|stability|vward-off|notes|journal-data|log-archive|cleanup-data|ai-data|smartdns-server) ;;
+    status|ping|log|settings|security-data|route-data|lists-data|list-addrs|diagnostics|route-probe|tunnel-probe|update-data|control-data|control|update-control|config-data|config|cron-data|auth|wifi-data|wifi-control|ads-data|ads-view|ads-https-data|ads-settings|ads-control|ads-https-control|agh-auth|tunnel-conf|backup-data|backup-control|backup-download|wifi-host|files|release-notes|ext-update-data|ext-update-control|list-data|services-data|services|awg-data|site-test|tunnel-quality|stability|api-timing|vward-off|notes|journal-data|log-archive|cleanup-data|ai-data|smartdns-server) ;;
     *)
         header_json
         echo '{"ok":false,"error":"unknown_action"}'
         exit 0
         ;;
 esac
+
+# tstep NAME: a step of a slow answer begins (fix.39: lists-data 3.7 s, status 1.9 s on the owner's
+# Viva). Only when VWARD_API_TIMING names a file - set by action=api-timing for its one measured
+# run, never by an HTTP request - a line «NAME<TAB>seconds since boot»; otherwise nothing at all.
+if [ -n "${VWARD_API_TIMING:-}" ]; then
+    tstep() { _ts=; read -r _ts _ 2>/dev/null < /proc/uptime; printf '%s\t%s\n' "$1" "$_ts" >> "$VWARD_API_TIMING" 2>/dev/null; }
+else
+    tstep() { :; }
+fi
 
 # Panel access settings.  One pass over the file, no process: this runs on
 # every request.
@@ -779,6 +788,7 @@ if [ "$ACTION" = config-data ]; then
     header_json
     [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
     list_json(){ "$JQ" -Rn '[inputs|select(length>0)]'; }
+    tstep running-config
     ROUTER=false; ROUTE_DOMAINS='[]'; TGROUPS='[]'
     if [ "$PROFILE_READY" = true ]; then
         RUNNING="$(ndm_cached running "$CONFIG_TTL" "show running-config")"
@@ -799,6 +809,7 @@ if [ "$ACTION" = config-data ]; then
                 "$JQ" -Rn '[inputs|split("\t")|{name:.[0],description:(.[1] // "")}]')"
         fi
     fi
+    tstep route-settings
     FORCE="$(sed 's/#.*//' "$CONFIG_ETC/route-engine/force-vpn.conf" 2>/dev/null | awk 'NF{print tolower($1)}' | head -n 500 | list_json)"
     # Autopick's domains: the AdaptiveAuto group in Keenetic itself (the Go core keeps no
     # adaptive-persist.txt: the Panel showed «0 доменов» with 60 in the group, owner 12.11.2026);
@@ -830,6 +841,7 @@ if [ "$ACTION" = config-data ]; then
     kv_file "$WCONF" ENABLED=W_EN CONTROL_ENABLED=W_CTL WINDOW_SEC=W_WIN BAND_SWITCH_WARN=W_SW WEAK_5G_SAMPLE_WARN=W_WEAK WEAK_5G_RSSI=W_RSSI
     wnum(){ case "$1" in ''|*[!0-9-]*) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
     kv_file "$UCONF" safe_window_start=U_START safe_window_end=U_END check_interval_seconds=U_INTERVAL apply_window=U_WINDOW update_method=U_METHOD manifest_url=U_URL
+    tstep components
     COMPONENT_REGISTRY=${VWARD_COMPONENT_REGISTRY:-/opt/share/vward/updater/current/component-registry.json}
     DISABLED="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && basename "$F" .disabled; done | list_json)"
     # Which component a switched-off one went off with (its flag ends «(with ID)»): it comes back with it;
@@ -843,6 +855,7 @@ if [ "$ACTION" = config-data ]; then
     [ -n "$COMPONENTS" ] || COMPONENTS='[]'
     [ "$W_EN" = 1 ] || W_EN=0
     [ "$W_CTL" = 1 ] || W_CTL=0
+    tstep agents
     # Observation mode of the agents and what they proposed (the newest 100 first).
     AGENTS_MODE="$(awk -F= '$1 ~ /^(all|network|components|updates|maintenance)$/ && $2 ~ /^(act|watch)$/ {printf "%s\t%s\n", $1, $2}' "${VWARD_AGENTS_CONF:-$CONFIG_ETC/agents.conf}" 2>/dev/null |
         "$JQ" -Rsc '[split("\n")[] | select(length > 0) | split("\t") | {(.[0]): .[1]}] | add // {}' 2>/dev/null)"
@@ -2621,8 +2634,10 @@ fi
 if [ "$ACTION" = lists-data ]; then
     header_json
     [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    tstep running-config
     RUNNING="$(ndm_cached running "$CONFIG_TTL" "show running-config")"
     [ -n "$RUNNING" ] || { echo '{"ok":false,"error":"router_config_unavailable"}'; exit 0; }
+    tstep smartdns-state
     LISTS_CONF=${VWARD_DOMAIN_LISTS_CONF:-$CONFIG_ETC/route-engine/domain-lists.conf}
     LISTS_STATE=$CONFIG_ETC/route-engine/domain-lists
     LD_LISTS=$(find "$LISTS_STATE.dns" -maxdepth 1 -type f 2>/dev/null | sed 's#.*/##' | "$JQ" -Rn '[inputs | select(length > 0)]')
@@ -2641,6 +2656,7 @@ if [ "$ACTION" = lists-data ]; then
         fi
     fi
     LD_URL=
+    tstep lists-settings
     WATCHED="$(awk -F= '$1 ~ /^watch\./ && $2 == "1" {print substr($1, 7)}' "$LISTS_CONF" 2>/dev/null | "$JQ" -Rn '[inputs | select(length > 0)]')"
     RETURNS="$(ls "$LISTS_STATE" 2>/dev/null | "$JQ" -Rn '[inputs | select(length > 0)]')"
     # Lists VWARD manages (r-lists, owner 2026-11-01): taken under management by the owner
@@ -2656,6 +2672,7 @@ if [ "$ACTION" = lists-data ]; then
     [ -n "$WATCHED" ] || WATCHED='[]'
     [ -n "$RETURNS" ] || RETURNS='[]'
     [ -n "$AUTO" ] || AUTO='{}'
+    tstep fqdn-counts
     # Addresses Keenetic learned for each group from DNS answers: 0 on a used list
     # means its domains' queries do not pass the router's DNS.
     # The answer lists every learned address (hundreds of KB on a busy router):
@@ -2664,6 +2681,7 @@ if [ "$ACTION" = lists-data ]; then
     ADDRS="$(ndm_cached_bg fqdn-counts 120 "show object-group fqdn" fqdn_counts |
         "$JQ" -Rn '[inputs | split("\t") | {(.[0]): (.[1] | tonumber? // null)}] | add // {}' 2>/dev/null)"
     [ -n "$ADDRS" ] || ADDRS='{}'
+    tstep answer
     # G name / N name description / I name domain / R name target / D domain (Smart DNS)
     printf '%s\n' "$RUNNING" | awk '
         /^object-group fqdn / {cur = $3; print "G\t" cur "\t"; next}
@@ -3474,6 +3492,30 @@ if [ "$ACTION" = "control" ] || [ "$ACTION" = "update-control" ]; then
     exit 0
 fi
 
+# «Диагностика → Замер скорости Панели» (fix.39): one of the slow answers asked once more with its
+# steps marked - {of, total_ms, steps: [{step, ms}]}; «start» is the time before the first mark
+# (the shell, the settings, the access check). Nothing is changed on the router.
+if [ "$ACTION" = api-timing ]; then
+    header_json
+    [ "${REQUEST_METHOD:-GET}" = GET ] && [ -z "${VWARD_API_TIMING:-}" ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
+    AT_OF="$(qget of)"
+    case "$AT_OF" in status|lists-data|config-data) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+    AT_FILE=$(umask 077; mktemp "${TMPDIR:-/tmp}/vward-api-timing.XXXXXX" 2>/dev/null) || { echo '{"ok":false,"error":"temporary_file_unavailable"}'; exit 0; }
+    trap 'rm -f "${AT_FILE:?}"' EXIT
+    AT_T0=; read -r AT_T0 _ 2>/dev/null < /proc/uptime
+    VWARD_API_TIMING="$AT_FILE" QUERY_STRING="action=$AT_OF" REQUEST_METHOD=GET sh "$0" </dev/null >/dev/null 2>&1
+    AT_T1=; read -r AT_T1 _ 2>/dev/null < /proc/uptime
+    awk -F'\t' -v of="$AT_OF" -v t0="$AT_T0" -v t1="$AT_T1" '
+        function ms(v) {return int(v * 1000 + 0.5)}
+        BEGIN {n = 1; name[1] = "start"; at[1] = ms(t0)}
+        NF == 2 && $1 ~ /^[a-z0-9-]+$/ && $2 ~ /^[0-9]+(\.[0-9]+)?$/ {n++; name[n] = $1; at[n] = ms($2)}
+        END {end = ms(t1); printf "{\"ok\":true,\"of\":\"%s\",\"total_ms\":%d,\"steps\":[", of, end - at[1]
+             for (i = 1; i <= n; i++) {d = (i < n ? at[i + 1] : end) - at[i]; if (d < 0) d = 0
+                 printf "%s{\"step\":\"%s\",\"ms\":%d}", (i > 1 ? "," : ""), name[i], d}
+             print "]}"}' "$AT_FILE" 2>/dev/null || echo '{"ok":false,"error":"timing_unavailable"}'
+    exit 0
+fi
+
 # «Система → Стабильность»: what the real-time watcher (vward-sentinel) saw - its state now,
 # an hourly line for 7 days, the CPU of each component since boot, the latest events of
 # the watcher's actions and of the cron supervisor. The Panel computes the index.
@@ -3752,6 +3794,7 @@ if [ "$ACTION" = "log" ]; then
     exit 0
 fi
 
+tstep router-queries
 # The four router queries run side by side: one after another they were most of
 # the time the overview waited for.
 ISP_URL=""
@@ -3779,6 +3822,7 @@ fi
 [ -n "$ISP" ] || ISP='{}'
 [ -n "$INET" ] || INET='{}'
 [ -n "$IFACES" ] || IFACES='{}'
+tstep interfaces
 # Keenetic busy (right after a tunnel is created or removed) answers nothing within the time:
 # the last answer of the last 10 minutes stands in, with its age; none - «unknown», never
 # «no tunnels» (a Viva 2026-10-12: «Туннели WireGuard не найдены» with three tunnels).
@@ -3828,6 +3872,7 @@ WG_INTERFACES="$(
 
 GOUT=/tmp/vward-wan-guard.cron.out
 
+tstep wan-report
 # Last WAN guard report: one pass over the file instead of a pipeline per field.
 GVERSION="" GMODE="" GCLASS="" GACTION="" DETAIL=""
 if [ -r "$GOUT" ]; then
@@ -3854,6 +3899,7 @@ done
 [ -n "$REC_COUNT" ] || REC_COUNT=0
 [ -n "$REC_STAGE" ] || REC_STAGE=0
 
+tstep processes
 # One process list for every process check.
 set -- $(ps w 2>/dev/null | awk -v subnet="$VWARD_LAN_SUBNET" -v address="$VWARD_LAN_ADDRESS" '
     /[c]rond -b/ && crond == "" { crond = $1 }
@@ -3870,6 +3916,7 @@ set -- $(ps w 2>/dev/null | awk -v subnet="$VWARD_LAN_SUBNET" -v address="$VWARD
 CROND_PID=${1:--}
 [ "$CROND_PID" != - ] || CROND_PID=""
 SUPERVISOR=${2:-0}
+tstep agents
 # The other agents as the components agent sees them (ok, late, hung; off), a minute old at most.
 AGENTS="$(awk -F= '$1 ~ /^(network|updates|maintenance|state|ssh)$/ && $2 ~ /^(ok|late|hung|off|broken)$/ {printf "%s%s=%s", (n++ ? "," : ""), $1, $2}' "${VWARD_AGENTS_STATE:-/tmp/vward-agents.state}" 2>/dev/null)"
 ADGUARD=${3:-0}
@@ -3893,6 +3940,7 @@ SEN_AGE=$(age_of "${VWARD_SENTINEL_STATE:-/tmp/vward-sentinel}/state")
 SENTINEL_FRESH=""; [ -z "$SEN_AGE" ] || { if [ "$SEN_AGE" -le 180 ]; then SENTINEL_FRESH=1; else SENTINEL_FRESH=0; fi; }
 CAP_AGE=$(age_of "${VWARD_ROUTE_VOLATILE_STATE:-/tmp/vward-route-engine-state}")
 DNSCAP_FRESH=""; [ -z "$CAP_AGE" ] || [ "$CAP_AGE" -gt 900 ] || DNSCAP_FRESH=1
+tstep dns-mode
 # dnsmasq, sing-box, the DNS mode and Entware update permissions: one read-only report
 # (functions only; nothing is started). Absent libraries -> no data, never a guess.
 COMPONENTS_TSV=""
@@ -3932,6 +3980,7 @@ UPDATER_STATE=/opt/var/lib/vward/updater
 HIDDEN_PARTS="$($JQ -c '.parts_hidden // []' "${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}" 2>/dev/null)"
 COMPONENTS="$($JQ -c --argjson hidden "${HIDDEN_PARTS:-[]}" '.components // {} | with_entries(select(.key | IN($hidden[]) | not))' "$UPDATER_STATE/components.json" 2>/dev/null || echo '{}')"
 kv_file "$UPDATER_STATE/committed.state" installed_update_id=INSTALLED_UPDATE_ID last_sequence=LAST_SEQUENCE last_health_check=LAST_HEALTH
+tstep updates
 # The update feed's last look (vward-update-watch): «Последняя проверка» in «Обновления» (fix.33.2;
 # last_health_check is the check after an installation).
 UFEED_FILE=${VWARD_UPDATE_FEED_STATE:-/tmp/vward-update-feed.state}
@@ -3966,6 +4015,7 @@ case "$FAILOPEN_REASON" in *[!a-z_,]*) FAILOPEN_REASON= ;; esac
 
 set -- $(df -PTk /opt 2>/dev/null | awk 'NR==2 {print $2, $3, $4, $5}')
 OPT_FS=${1:-} OPT_TOTAL_KB=${2:-} OPT_USED_KB=${3:-} OPT_FREE_KB=${4:-}
+tstep storage
 # A df without -T (a BusyBox built without it): the sizes from plain «df -Pk», the file system from
 # /proc/mounts - an unanswered df is «unknown», never «0 free» (owner 12.11.2026).
 case "$OPT_FREE_KB" in ''|*[!0-9]*)
@@ -3993,6 +4043,7 @@ if [ -r "$INTEG_STATE" ]; then
   done < "$INTEG_STATE"
 fi
 
+tstep tool-versions
 # Tool versions change only with opkg; they are cached in RAM until then.
 VERSIONS_CACHE=/tmp/vward-console-versions
 if [ ! -s "$VERSIONS_CACHE" ] || [ /opt/lib/opkg/status -nt "$VERSIONS_CACHE" ]; then
@@ -4004,6 +4055,7 @@ if [ ! -s "$VERSIONS_CACHE" ] || [ /opt/lib/opkg/status -nt "$VERSIONS_CACHE" ];
 fi
 kv_file "$VERSIONS_CACHE" jq=JQ_VERSION curl=CURL_VERSION lighttpd=LIGHTTPD_VERSION
 
+tstep parts
 # VWARD's parts (fix.38, owner 12.11.2026: one list, one name each, no page without its data): the
 # registry's parts with what the router knows of each - on, installed, running ("" = not known
 # here) and why. Built here, in the answer every page reads.

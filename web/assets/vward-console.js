@@ -2788,7 +2788,7 @@ const RENDER = {
         { desc: 'Нажмите, чтобы открыть задания.' }) +
       panel('Диагностика', (d && d.checks ? '<ul class="rows">' + d.checks.map(x => { const to = x.id === 'smartdns' && /IP-категория/.test(x.detail || '') ? 'd-ipcats' : map[x.id]; return '<li class="row' + (to ? ' link" role="button" tabindex="0" data-go="' + to + '"' : '"') + '><div class="row-main"><b>' + esc(x.label) + '</b><small>' + esc(x.detail || '') + '</small></div><span class="pill ' + (x.status === 'PASS' ? 'ok' : x.status === 'FAIL' ? 'crit' : 'warn') + '">' + (x.status === 'PASS' ? 'Работает' : x.status === 'FAIL' ? 'Не работает' : x.status === 'FOREIGN' ? 'Чужой маршрут' : 'Внимание') + '</span>' + (to ? ico('chevron', 'chev') : '') + '</li>'; }).join('') + '</ul>' : empty(S.errors.diag ? 'Диагностика не выполнена: ' + S.errors.diag : 'Загрузка…')) +
       diagRunNote() + '<div class="panel-actions">' + btn('diag-run', 'check', DIAG_RUN && DIAG_RUN.busy ? 'Проверка выполняется…' : 'Запустить проверку', 'primary', DIAG_RUN && DIAG_RUN.busy ? ' disabled aria-busy="true"' : '') + '</div>') +
-      keeneticCallsPanel() +
+      keeneticCallsPanel() + apiTimingPanel() +
       panel('Журналы', kv([['Технические журналы', 'для сохранения и отправки', '', 'logs']]), { desc: 'Журналы как есть, для диагностики.' });
   },
   'd-stability'() {
@@ -3710,6 +3710,45 @@ function keeneticCallsPanel() {
     .concat(by.map(x => [KEENETIC_WHO[x.name] || JOB_NAMES[x.name] || x.name, fmtInt(x.day), '', '', '', 'за прошлый час: ' + fmtInt(x.prev)]))
     .concat(c.rci_calls_day != null ? [['Запросы RCI', fmtInt(c.rci_calls_day) + ' за сутки', '', '', '', 'в журнал Keenetic не записываются']] : []);
   return panel('Обращения к Keenetic', kv(rows), { desc: 'Каждая команда ndmc - сессия и две строки в журнале Keenetic («Core::Session»). Счёт по программам VWARD за последние сутки работы роутера.' });
+}
+// «Замер скорости Панели» (fix.39 item 3): the router answers its three slowest requests once more
+// with the steps timed (action=api-timing); the table shows where the time goes, «Копировать» gives
+// the text for a report. Run only by the button: each answer is asked one after another.
+const API_TIMED = [['status', 'Состояние (status)'], ['lists-data', 'Списки маршрутизации (lists-data)'], ['config-data', 'Настройки (config-data)']];
+const API_STEP = { start: 'запуск и проверка доступа', 'router-queries': 'запросы к Keenetic (RCI)', interfaces: 'интерфейсы и туннели', 'wan-report': 'отчёт агента интернета',
+  processes: 'список процессов', agents: 'агенты', 'dns-mode': 'режим DNS и пакеты Entware', updates: 'состояние обновлений', storage: 'накопитель', 'tool-versions': 'версии программ',
+  parts: 'части VWARD и сборка ответа', 'running-config': 'конфигурация Keenetic', 'smartdns-state': 'состояние Smart DNS', 'lists-settings': 'настройки списков',
+  'fqdn-counts': 'адреса списков в Keenetic', answer: 'сборка ответа', 'route-settings': 'настройки маршрутизации', components: 'компоненты' };
+const API_TIMING = { busy: false, res: null };
+const apiTimingText = () => ['VWARD ' + ((st().platform || {}).version || '') + ' · замер скорости Панели · ' + new Date().toISOString()]
+  .concat((API_TIMING.res || []).map(r => r.ok ? r.of + ': ' + r.total_ms + ' мс\n' + r.steps.map(x => '  ' + x.step + ' ' + x.ms).join('\n') : r.of + ': ' + (r.error || 'нет ответа'))).join('\n');
+function apiTimingPanel() {
+  const res = API_TIMING.res, sec = ms => ms < 1000 ? fmtInt(ms) + '\u00a0мс' : (ms / 1000).toFixed(1).replace('.', ',') + '\u00a0с';
+  const rows = [];
+  (res || []).forEach(r => { const title = (API_TIMED.find(x => x[0] === r.of) || [0, r.of])[1];
+    if (!r.ok) { rows.push([title, 'нет ответа', 'warn']); return; }
+    rows.push([title, sec(r.total_ms), r.total_ms >= 1500 ? 'warn' : '']);
+    r.steps.slice().sort((a, b) => b.ms - a.ms).slice(0, 3).filter(x => x.ms > 0).forEach(x => rows.push(['· ' + (API_STEP[x.step] || x.step), sec(x.ms), '', '', '', Math.round(x.ms / Math.max(r.total_ms, 1) * 100) + ' % времени ответа'])); });
+  return panel('Замер скорости Панели', (rows.length ? kv(rows) + '<pre class="logfeed" id="apiTimingBox" hidden>' + esc(apiTimingText()) + '</pre>' : '') +
+    '<div class="panel-actions">' + btn('api-timing-run', 'clock', API_TIMING.busy ? 'Замер выполняется…' : 'Запустить замер', '', API_TIMING.busy ? ' disabled aria-busy="true"' : '') +
+    (rows.length ? '<button class="btn" type="button" data-act="api-timing-copy">' + ico('copy') + 'Копировать</button>' : '') + '</div>',
+    { desc: 'Роутер ещё раз готовит три самых долгих ответа для Панели и измеряет время каждого шага. На роутере ничего не меняется.' });
+}
+async function apiTimingRun() {
+  if (API_TIMING.busy) return;
+  API_TIMING.busy = true; API_TIMING.res = []; render();
+  for (const x of API_TIMED) {
+    let r; try { r = await apiGet('api-timing', { of: x[0] }); } catch (e) { r = null; }
+    API_TIMING.res.push(r && r.ok ? r : { ok: false, of: x[0], error: (r && r.error) || 'no_answer' }); render();
+  }
+  API_TIMING.busy = false; render();
+}
+function apiTimingCopy() {
+  const text = apiTimingText(), box = $('apiTimingBox');
+  const fallback = () => { if (!box) return; box.hidden = false; const r = document.createRange(); r.selectNodeContents(box); const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    let ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    if (ok) { s.removeAllRanges(); box.hidden = true; } toast(ok ? 'Замер скопирован' : 'Текст выделен - скопируйте его вручную'); };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(() => toast('Замер скопирован'), fallback); else fallback();
 }
 const JOB_COMPONENT = { 'S91vward-route-engine': 'route-engine' };
 function cronText(c) {
@@ -5626,6 +5665,8 @@ document.addEventListener('click', e => {
   else if (a === 'update-op') updateOp(t.dataset.op);
   else if (a === 'panel-reload') location.reload();
   else if (a === 'diag-run') diagRun();
+  else if (a === 'api-timing-run') apiTimingRun();
+  else if (a === 'api-timing-copy') apiTimingCopy();
   else if (a === 'agh-clients') aghClientsOp('sync');
   else if (a === 'ads-job') adsControl({ op: 'enqueue', job: t.dataset.job }, 'Задание поставлено в очередь', 'ads-job');
   else if (a === 'ads-job-run') { t.disabled = true; adsControl({ op: 'job-run' }, 'Очередь запущена', 'ads-job-run'); }

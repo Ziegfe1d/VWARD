@@ -161,6 +161,7 @@ python3 tests/repository/check-console-ui-style.py || fail "one style across the
 python3 tests/repository/check-console-route-summary.py || fail "one summary of the routes for the page, the cards and a tunnel"
 python3 tests/repository/check-hidden-parts.py || fail "frozen parts: hidden in the Panel and off for good, code kept (fix.39)"
 python3 tests/repository/check-keenetic-ndmc-who.py || fail "ndmc sessions counted by program and shown in «Диагностика» (fix.39)"
+python3 tests/repository/check-api-timing.py || fail "the Panel's slow answers timed step by step from «Диагностика» (fix.39)"
 python3 tests/repository/check-parts-names.py || fail "names of parts and agents only from the registry"
 python3 tests/repository/check-tunnel-lost.py || fail "a tunnel without settings: no «Включить», «Добавить туннель» first"
 python3 tests/repository/check-adaptive-count.py || fail "autopick counted from the core and the Keenetic group"
