@@ -2944,29 +2944,30 @@ const RENDER = {
     const when = n => { const t = Date.parse(n.added || ''); return isNaN(t) ? '' : new Date(t).toDateString() === new Date().toDateString() ? 'с сегодня ' + adHm(t) : 'с ' + new Date(t).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }); };
     // fix.39, the VPN check: a name that opens neither directly nor through the VPN leaves the list
     // after AD_NEITHER checks in a row; until then the row says so.
-    const sub = n => (n.streak > 0 ? 'через VPN · <span class="st ok">скоро вернётся напрямую</span>' :
-      n.vpn_fail > 0 ? 'через VPN · <span class="st warn">не открывается и через VPN (' + Math.min(n.vpn_fail, AD_NEITHER) + ' из ' + AD_NEITHER + ')</span>' : esc(('через VPN ' + when(n)).trim())) +
-      (sharedCdn(n.d) ? ' · общее имя CDN: с ним через VPN идут и другие сайты' : '');
+    // Words of the wording dictionary (owner 14.11.2026, docs/PANEL.md): the route, available or not, a check N of M.
+    const sub = n => (n.streak > 0 ? '<span class="st ok">доступен через провайдера: проверка ' + Math.min(n.streak, AD_NEITHER) + ' из ' + AD_NEITHER + '</span>' :
+      n.vpn_fail > 0 ? '<span class="st warn">недоступен и через VPN: проверка ' + Math.min(n.vpn_fail, AD_NEITHER) + ' из ' + AD_NEITHER + '</span>' : esc(('в списке ' + when(n)).trim())) +
+      (sharedCdn(n.d) ? ' · общий адрес CDN: маршрут VPN получают и другие сайты' : '');
     let shown = names.filter(n => (ADV.show === 'all' || (ADV.show === 'back' ? n.streak > 0 : Date.parse(n.added || '') > day)));
     if (ADV.order === 'az') shown = shown.slice().sort((a, b) => a.d.localeCompare(b.d));
     const lim = shown.slice(0, ADV.lim);
     const row = n => { const open = ADV.open === n.d;
       return '<li class="row link' + (open ? ' open' : '') + '" role="button" tabindex="0" data-act="ad-open" data-dom="' + esc(n.d) + '"><div class="row-main"><b>' + dom(n.d) + '</b><small>' + sub(n) + '</small></div>' + ico(open ? 'down' : 'chevron', 'chev') +
-        (open ? '<div class="row-x">' + choiceSlider('ad-way', [['auto', 'Авто'], ['vpn', 'VPN'], ['direct', 'Провайдер']], 'auto', 'Как открывать ' + n.d) +
-          '<p class="panel-desc">Авто: VWARD проверяет, открывается ли домен напрямую, и сам вернёт его. VPN - всегда через VPN. Провайдер - напрямую, автоподбор его больше не берёт.</p>' +
+        (open ? '<div class="row-x">' + choiceSlider('ad-way', [['auto', 'Авто'], ['vpn', 'VPN'], ['direct', 'Провайдер']], 'auto', 'Маршрут для ' + n.d) +
+          '<p class="panel-desc">Авто: VWARD проверяет доступность через провайдера и сам исключает домен. VPN: маршрут закреплён. Провайдер: домен исключён, автоподбор его не добавляет.</p>' +
           '<div class="panel-actions"><button class="btn small" type="button" data-act="ad-probe" data-dom="' + esc(n.d) + '">' + ico('search') + 'Проверить и адреса</button></div></div>' : '') + '</li>'; };
     const chips = (k, opts) => '<div class="chips" role="group">' + opts.map(o => '<button type="button" data-act="ad-chip" data-k="' + k + '" data-v="' + o[0] + '" aria-pressed="' + (ADV[k] === o[0]) + '">' + o[1] + '</button>').join('') + '</div>';
     const fopen = ADV.filters, fset = ADV.show !== 'all' || ADV.order !== 'new';
     // Opened by its address too (not only through go()): the feed is read once on the first draw.
     if (!ADV.feed && !ADV.busy && !ADV.tried) { ADV.tried = true; setTimeout(adFeedLoad, 0); }
     return cfgNote() +
-      panel('Автоподбор доменов', '<dl class="kv">' + ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', on, 'Автоподбор доменов', !cfgOk()), 'не открылся напрямую - идёт через VPN; не открывается и через VPN - убирается из списка') + '</dl>') +
+      panel('Автоподбор доменов', '<dl class="kv">' + ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', on, 'Автоподбор доменов', !cfgOk()), 'Домен, недоступный через провайдера, получает маршрут VPN. Недоступный и через VPN исключается') + '</dl>') +
       panel('Сейчас', '<div id="adFeed">' + adFeedHtml() + '</div>' +
         '<div class="panel-actions"><button class="btn small" type="button" data-act="ad-pause">' + ico(ADV.paused ? 'refresh' : 'power') + (ADV.paused ? 'Продолжить' : 'Пауза') + '</button>' +
         '<button class="btn small" type="button" data-go="a-adaptive">' + ico('clock') + 'Вся история</button></div>') +
       panel('Домены', '<div class="search-bar"><label class="search-field">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти домен" aria-label="Найти домен" autocomplete="off"></label>' +
           '<button class="icon-btn filter-btn' + (fset ? ' on' : '') + '" type="button" data-act="ad-filters" aria-expanded="' + !!fopen + '" aria-label="Фильтр" title="Фильтр">' + ico('sliders') + '</button></div>' +
-        (fopen ? '<p class="chips-label">Показать</p>' + chips('show', [['all', 'Все'], ['back', 'Скоро вернутся напрямую'], ['new', 'Новые за сутки']]) +
+        (fopen ? '<p class="chips-label">Показать</p>' + chips('show', [['all', 'Все'], ['back', 'Доступны через провайдера'], ['new', 'Новые за сутки']]) +
           '<p class="chips-label">Порядок</p>' + chips('order', [['new', 'Сначала новые'], ['az', 'По алфавиту']]) : '') +
         (lim.length ? '<ul class="rows" data-list-rows>' + lim.map(row).join('') + '</ul>' : empty(names.length ? 'Ничего не найдено' : 'Пока пусто')) +
         (shown.length > lim.length ? '<div class="panel-actions"><button class="btn small" type="button" data-act="ad-more">Показать ещё</button></div>' : ''),
@@ -3130,13 +3131,13 @@ function rowBtn(op, action, d, icon, label) { return '<button class="icon-btn" t
 const adHm = t => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 const ADV = { q: '', show: 'all', order: 'new', open: '', lim: 50, filters: false, paused: false, feed: null, at: 0, busy: false };
 const AD_EV = {
-  ADDED: ['bad', 'напрямую не открылся - добавлен в VPN'], DIRECT_OK: ['ok', 'открывается напрямую'],
-  ISP_FAIL_VPN_FAIL: ['warn', 'не открылся ни напрямую, ни через VPN'], ISP_FAIL_VPN_UNSTABLE: ['warn', 'через VPN открывается нестабильно'],
-  ISP_UNRELIABLE: ['warn', 'провайдер сейчас не отвечает - не проверялся'], MAINT_DIRECT_CONFIRM: ['ok', 'снова открывается напрямую'],
-  MAINT_REMOVE: ['ok', 'вернулся напрямую'], REMOVED: ['ok', 'вернулся напрямую'], MAINT_DIRECT_FAIL: ['', 'проверка: напрямую не открывается, остаётся в VPN'],
+  ADDED: ['bad', 'недоступен через провайдера: маршрут VPN'], DIRECT_OK: ['ok', 'доступен через провайдера'],
+  ISP_FAIL_VPN_FAIL: ['warn', 'недоступен через провайдера и VPN'], ISP_FAIL_VPN_UNSTABLE: ['warn', 'через VPN доступен нестабильно'],
+  ISP_UNRELIABLE: ['warn', 'провайдер не отвечает: проверка отложена'], MAINT_DIRECT_CONFIRM: ['ok', 'доступен через провайдера: проверка'],
+  MAINT_REMOVE: ['ok', 'исключён: доступен через провайдера'], REMOVED: ['ok', 'исключён: доступен через провайдера'], MAINT_DIRECT_FAIL: ['', 'недоступен через провайдера: маршрут VPN сохранён'],
   // fix.39, the VPN check: a name that opens neither way leaves the group after AD_NEITHER rounds.
-  MAINT_VPN_FAIL: ['warn', 'не открывается и через VPN'],
-  gone: ['warn', 'убран из VPN: не открывается и через VPN']
+  MAINT_VPN_FAIL: ['warn', 'недоступен и через VPN: проверка'],
+  gone: ['warn', 'исключён: недоступен и через VPN']
 };
 // Shared CDN names (owner's journal 12.11.2026): Keenetic routes the name's addresses, and on a CDN's
 // own name they are the addresses of many other sites too - those go through the VPN with it.
@@ -3147,9 +3148,9 @@ const AD_NEITHER = 3; // rounds a name opened neither way before it leaves the g
 function adFeedParse(text) {
   return String(text || '').split('\n').map(l => l.split('|')).filter(f => f.length >= 3 && (AD_EV[f[1]] || (f[1] === 'PROBE_UNKNOWN' && /dns blocked/.test(f[3] || '')))).map(f => {
     const gone = f[1] === 'REMOVED' && /through the VPN either/.test(f[3] || '');
-    const ev = f[1] === 'PROBE_UNKNOWN' || /dns blocked/.test(f[3] || '') && f[1] === 'MAINT_REMOVE' ? ['warn', f[1] === 'MAINT_REMOVE' ? 'убран: возможно, реклама' : 'возможно, реклама: не добавлен'] : gone ? AD_EV.gone : AD_EV[f[1]];
+    const ev = f[1] === 'PROBE_UNKNOWN' || /dns blocked/.test(f[3] || '') && f[1] === 'MAINT_REMOVE' ? ['warn', f[1] === 'MAINT_REMOVE' ? 'исключён: DNS-фильтр блокирует' : 'не добавлен: DNS-фильтр блокирует'] : gone ? AD_EV.gone : AD_EV[f[1]];
     const streak = /streak=(\d+)\/(\d+)/.exec(f[3] || '');
-    return { t: Date.parse(f[0]), host: f[2], code: f[1] === 'PROBE_UNKNOWN' || (f[1] === 'MAINT_REMOVE' && /dns blocked/.test(f[3] || '')) ? 'ad' : gone ? 'gone' : f[1], tone: ev[0], text: ev[1] + ((f[1] === 'MAINT_DIRECT_CONFIRM' || f[1] === 'MAINT_VPN_FAIL') && streak ? ' (' + streak[1] + ' из ' + streak[2] + ')' : '') };
+    return { t: Date.parse(f[0]), host: f[2], code: f[1] === 'PROBE_UNKNOWN' || (f[1] === 'MAINT_REMOVE' && /dns blocked/.test(f[3] || '')) ? 'ad' : gone ? 'gone' : f[1], tone: ev[0], text: ev[1] + ((f[1] === 'MAINT_DIRECT_CONFIRM' || f[1] === 'MAINT_VPN_FAIL') && streak ? ' ' + streak[1] + ' из ' + streak[2] : '') };
   }).reverse();
 }
 function adFeedHtml() {
@@ -3157,7 +3158,7 @@ function adFeedHtml() {
   if (!f) return empty(ADV.busy ? 'Загрузка…' : 'Нет данных');
   const dayAgo = Date.now() - 86400000, recent = f.filter(e => e.t > dayAgo);
   const n = codes => recent.filter(e => codes.includes(e.code)).length;
-  const sum = recent.length ? '<p class="panel-desc">За сутки: ' + [n(['ADDED']) + ' добавлено', n(['MAINT_REMOVE', 'REMOVED']) + ' вернулись напрямую', n(['ad']) + ' пропущено как реклама'].join(', ') + '.</p>' : '';
+  const sum = recent.length ? '<p class="panel-desc">За сутки: ' + ['добавлено ' + n(['ADDED']), 'исключено ' + n(['MAINT_REMOVE', 'REMOVED', 'gone']), 'DNS-фильтр ' + n(['ad'])].join(', ') + '.</p>' : '';
   return sum + (f.length ? '<ul class="events">' + f.slice(0, 20).map(e => '<li class="ev ' + (e.tone || 'info') + '"><span class="ev-dot" aria-hidden="true"></span><span class="ev-text"><b>' + dom(e.host) + '</b> - ' + esc(e.text) + '</span><span class="ev-at">' + esc(isNaN(e.t) ? '' : adHm(e.t)) + '</span></li>').join('') + '</ul>' : empty('Событий пока нет'));
 }
 // Light: the core's journal tail, about 10 KB, only while the page is open and not paused.
@@ -3586,7 +3587,7 @@ function choiceSlider(key, opts, cur, label, local) {
 }
 function segPick(key, v) {
   if (key === 'ad-way') { const d = ADV.open; if (!d || v === 'auto') return; ADV.open = '';
-    cfgSet({ op: 'adaptive', action: v === 'vpn' ? 'pin' : 'remove', target: d }, v === 'vpn' ? d + ': всегда через VPN' : d + ': напрямую, автоподбор его больше не берёт', ['route', 'config']); return; }
+    cfgSet({ op: 'adaptive', action: v === 'vpn' ? 'pin' : 'remove', target: d }, v === 'vpn' ? d + ': маршрут VPN закреплён' : d + ': исключён из автоподбора', ['route', 'config']); return; }
   if (key === 'site-do') { if (v === 'block') { confirm = { id: 'site-block', dom: SITEDOM }; render(); } else siteDo(v, SITEDOM); return; }
   if (key === 'vsrv-sort') { VVIEW.sort = v; vViewSave(); render(); }
   else if (key === 'sd-store') sdStoreSet(v);

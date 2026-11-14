@@ -9,13 +9,13 @@ JS = (Path(__file__).resolve().parents[2] / "web/assets/vward-console.js").read_
 def fail(m): raise SystemExit(f"AUTOPICK_PAGE=FAIL: {m}")
 page = JS[JS.index("  'd-adaptive'() {"):JS.index("  'd-ipcats'() {")]
 for need in ("data-cfg-rt=\"adaptive-mode\"", "panel('Сейчас'", "data-act=\"ad-pause\"", "data-go=\"a-adaptive\"", "data-list-filter placeholder=\"Найти домен\"",
-             "choiceSlider('ad-way', [['auto', 'Авто'], ['vpn', 'VPN'], ['direct', 'Провайдер']]", "скоро вернётся напрямую"):
+             "choiceSlider('ad-way', [['auto', 'Авто'], ['vpn', 'VPN'], ['direct', 'Провайдер']]", "доступен через провайдера: проверка"):
     if need not in page:
         fail(f"page lacks {need!r}")
 # fix.39: a name that opens neither directly nor through the VPN leaves the list (a rule of autopick
 # itself: no switch and no sandbox, owner 14.11.2026); the row says so while it is counted; shared
 # CDN names are marked.
-for need in ("не открывается и через VPN (' + Math.min(n.vpn_fail, AD_NEITHER) + ' из ' + AD_NEITHER", "общее имя CDN", "не открывается и через VPN - убирается из списка"):
+for need in ("недоступен и через VPN: проверка ' + Math.min(n.vpn_fail, AD_NEITHER) + ' из ' + AD_NEITHER", "общий адрес CDN", "Недоступный и через VPN исключается"):
     if need not in page:
         fail(f"page lacks {need!r}")
 if "vpncheck" in JS.lower() or "Песочница: убрал бы" in JS:
@@ -47,16 +47,20 @@ r = subprocess.run(["node", "-e", h], capture_output=True, text=True, timeout=30
 if r.returncode:
     fail(r.stderr[-500:])
 o = json.loads(r.stdout)
-if "не открывается и через VPN (2 из 3)" not in o["html"]:
+if "недоступен и через VPN: проверка 2 из 3" not in o["html"]:
     fail(f"the count in words: {o['html'][:900]}")
-if "убран из VPN: не открывается и через VPN" not in o["html"] or o["html"].count("вернулся напрямую") != 2:
-    fail("a name removed because the VPN does not open it either must not read «вернулся напрямую»")
+if "исключён: недоступен и через VPN" not in o["html"] or o["html"].count("исключён: доступен через провайдера") != 2:
+    fail("a name removed because the VPN does not open it either must not read «доступен через провайдера»")
 if o["cdn"] != [True, True, True, False, False]:
     fail(f"shared CDN names: {o['cdn']}")
-if "За сутки: 1 добавлено, 2 вернулись напрямую, 2 пропущено как реклама." not in o["html"]:
+if "За сутки: добавлено 1, исключено 3, DNS-фильтр 2." not in o["html"]:
     fail(f"the day's counts: {o['html'][:300]}")
 if o["hosts"].count("chatgpt.com") != 1 or "-" in o["hosts"]:
     fail(f"one step a line, no service lines: {o['hosts']}")
-if "возможно, реклама: не добавлен" not in o["html"] or "убран: возможно, реклама" not in o["html"]:
-    fail("ads in words")
+if "не добавлен: DNS-фильтр блокирует" not in o["html"] or "исключён: DNS-фильтр блокирует" not in o["html"]:
+    fail("names the DNS filter blocks, in words")
+# The wording dictionary (owner 14.11.2026): no colloquial words on the autopick page and in its feed.
+for word in ("напрямую", "вернётся", "вернулся", "идёт через", "идут через", "открыва", "убран"):
+    if word in page or word in code:
+        fail(f"colloquial wording on the autopick page: {word!r}")
 print("AUTOPICK_PAGE=PASS")
