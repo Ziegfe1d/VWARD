@@ -34,6 +34,7 @@ JOURNAL_CONF=${VWARD_JOURNAL_CONF:-$ETC/journal.conf}
 LISTS_STATE="$ETC/route-engine/domain-lists"
 WAN_GUARD_FLAG="$ETC/wan-guard.disabled"
 ADAPTIVE_FLAG="$ETC/route-engine/adaptive.disabled"
+ADAPTIVE_ADS_MODE="$ETC/route-engine/adaptive-ads.mode"
 CLASSIFIER_FILE="$ETC/route-engine/domain-classifier.conf"
 IP_EXCLUDED=${VWARD_POLICY_EXCLUDED:-$ETC/policy-sync/excluded.categories}
 AUTH_CONF=${VWARD_CONSOLE_AUTH_CONF:-$ETC/console/auth.conf}
@@ -749,6 +750,25 @@ op_guard_flag() {
         *) die invalid_value 64 ;;
     esac
     done_ok "$1 enabled=$3" changed
+}
+
+# adaptive-ads off|shadow: «Реклама и счётчики мимо VPN» of Autopodbor (owner 13.11.2026). This
+# release knows «Выкл» and «Песочница» only («Вкл» - after the sandbox has run on the owner's
+# router). One word in a file the Go core reads every few minutes; the sandbox changes nothing in
+# Keenetic, so this is a setting, not a routing step.
+op_adaptive_ads() {
+    case "$1" in
+        shadow)
+            [ "$(cat "$ADAPTIVE_ADS_MODE" 2>/dev/null)" != shadow ] || done_ok "adaptive-ads mode=shadow" unchanged
+            new_tmp "$ADAPTIVE_ADS_MODE" || die write_failed
+            printf 'shadow\n' > "$TMPFILE" || die write_failed
+            install_tmp "$ADAPTIVE_ADS_MODE" 0644 || die write_failed ;;
+        off)
+            [ -e "$ADAPTIVE_ADS_MODE" ] || done_ok "adaptive-ads mode=off" unchanged
+            rm -f "$ADAPTIVE_ADS_MODE" || die write_failed ;;
+        *) die invalid_value 64 ;;
+    esac
+    done_ok "adaptive-ads mode=$1" changed
 }
 
 # tunnel-auto enabled 0|1 | criterion balanced|speed|ping | speed off|night|6h: the tunnel
@@ -3987,7 +4007,7 @@ op_reset() {
     ( op_backup_create prereset ) >/dev/null || die backup_failed
     rs_route=
     [ ! -e "$COMPONENT_STATE/route-engine.disabled" ] || rs_route=1
-    rm -f "$TUNNEL_GUARD_FLAG" "$TUNNEL_FALLBACK_FLAG" "$TUNNEL_RETURN_FLAG" "$WAN_GUARD_FLAG" "$ADAPTIVE_FLAG" \
+    rm -f "$TUNNEL_GUARD_FLAG" "$TUNNEL_FALLBACK_FLAG" "$TUNNEL_RETURN_FLAG" "$WAN_GUARD_FLAG" "$ADAPTIVE_FLAG" "$ADAPTIVE_ADS_MODE" \
         "$ETC/agents.conf" "$TUNNEL_AUTO_CONF" "$JOURNAL_CONF" "$COMPONENT_STATE"/*.disabled 2>/dev/null
     [ ! -f "$LISTS_CONF" ] || set_kv "$LISTS_CONF" smartdns_guard 1 0644 || true
     [ ! -f "$EXT_CONF" ] || { set_kv "$EXT_CONF" AGH_AUTO 0 0600; set_kv "$EXT_CONF" ENTWARE_AUTO 0 0600; } || true
@@ -5855,7 +5875,7 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store|smartdns-feature|routing-root) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|adaptive-ads|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store|smartdns-feature|routing-root) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
@@ -5911,7 +5931,7 @@ case "$OP" in
         edit_lock ;;
     # Settings no routing step reads (owner 08.11: a switch does not wait for a long routing change):
     # their own short lock, not the routing edit lock.
-    wan-guard|console-auth|console-devices|update-feed|ext-auto|journal|agents-mode)
+    wan-guard|console-auth|console-devices|update-feed|ext-auto|journal|agents-mode|adaptive-ads)
         dir_lock "$SETTINGS_LOCK" || die settings_busy 75
         SETTINGS_LOCKED=1 ;;
 esac
@@ -5939,6 +5959,7 @@ case "$OP" in
     wan-guard) op_guard_flag wan-guard "$WAN_GUARD_FLAG" "$ARG1" ;;
     component) op_component "$ARG1" "$ARG2" ;;
     adaptive-mode) op_guard_flag adaptive "$ADAPTIVE_FLAG" "$ARG1" ;;
+    adaptive-ads) op_adaptive_ads "$ARG1" ;;
     classifier) case "$ARG1" in 0|1) ;; *) die invalid_value 64 ;; esac
         set_kv "$CLASSIFIER_FILE" CLASSIFIER_ENABLED "$ARG1" 0600 || done_ok "classifier enabled=$ARG1" unchanged
         done_ok "classifier enabled=$ARG1" changed ;;

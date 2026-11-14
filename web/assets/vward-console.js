@@ -836,6 +836,7 @@ function mergeLogs(parts, newestFirst, info, limit) {
 let logImportant = (typeof store === 'undefined' ? null : store.get('vward-log-view')) !== 'all';
 const LOG_CODES = {
   DNS_CHAIN_OUT: 'AdGuard Home выведен из цепочки DNS, Keenetic спрашивает DNS провайдера', DNS_CHAIN_IN: 'AdGuard Home снова в цепочке DNS',
+  WOULD_SKIP_AD: 'Песочница: автоподбор не отправил бы в VPN', WOULD_REMOVE_AD: 'Песочница: автоподбор убрал бы из VPN', ADS_MODE: 'Реклама и счётчики мимо VPN',
   DNS_CHAIN_KEEP: 'AdGuard Home оставлен в цепочке: DNS провайдера тоже не отвечает', WOULD_TAKE_OUT: 'Песочница: VWARD вывел бы AdGuard Home из цепочки, Keenetic не изменён',
   START_PHASE: 'Запуск движка: этап',
   HINT_DIRECT_OK: 'Проверка напрямую: открывается', HINT_ADAPTIVE_CHECK: 'Проверка автоподбора', HINT_WG_UNAVAILABLE: 'Подсказка: VPN недоступен, проверка без него',
@@ -853,7 +854,8 @@ const LOG_CODES = {
   ABORTED_ISP_PROBE_UNRELIABLE: 'Проверка IP-категорий остановлена: проверка через провайдера недостоверна', ABORTED_TUNNEL_DOWN: 'Проверка IP-категорий остановлена: туннель не отвечает',
   AGH_BIND_FULL: 'Нет места для DNS-привязки в Keenetic', AGH_UNBIND: 'DNS-привязка снята', ADAPTIVE_FULL: 'AdaptiveAuto полон'
 };
-const logLevel = t => /ERROR|FAILED\b|_FAIL\b|CRASH|BROKEN|ошибк|не удал/i.test(t) ? 'err' :
+// The sandbox of «Реклама и счётчики мимо VPN» says what it would do: a note, not a warning (its code has SKIP).
+const logLevel = t => /^(WOULD_(SKIP|REMOVE)_AD|ADS_MODE)\b/.test(t) ? 'info' : /ERROR|FAILED\b|_FAIL\b|CRASH|BROKEN|ошибк|не удал/i.test(t) ? 'err' :
   /WARN|UNSTABLE|UNRELIABLE|TIMEOUT|_DOWN\b|RESTART|ABORT|SKIP|FULL\b|не отвечает|DNS_CHAIN_OUT|WOULD_TAKE_OUT/i.test(t) ? 'warn' :
   /_OK\b|\bOK\b|PASS|SUCCESS|RECOVERED|RESTORED|_UP\b|DNS_CHAIN_IN\b/.test(t) ? 'ok' : 'info';
 const LOG_SIGN = { err: 'alert', warn: 'alert', ok: 'check', info: 'info' };
@@ -861,14 +863,15 @@ const wbr = h => h.replace(/([.\-\/])(?=[A-Za-z0-9А-Яа-я])/g, '$1<wbr>');
 // Reasons the DNS guard writes (DNS_CHAIN_OUT reason=…, WOULD_TAKE_OUT …): words, not codes.
 const LOG_VALUES = { loop_upstream: 'AdGuard Home отправляет запросы обратно роутеру', loop: 'AdGuard Home перезапускался по кругу', silent: 'AdGuard Home не отвечал',
   silent_10min: 'AdGuard Home не отвечал 10 минут', fast: 'AdGuard Home не отвечал 15 с', update: 'плановый перезапуск AdGuard Home', keenetic_busy: 'Keenetic был занят',
-  provider_silent: 'DNS провайдера тоже не отвечал', hourly_limit: 'уже выводился в этот час' };
+  provider_silent: 'DNS провайдера тоже не отвечал', hourly_limit: 'уже выводился в этот час', shadow: 'песочница', off: 'выкл' };
+const LOG_KEYS = { zone: 'реклама или счётчик' };
 function logField(f) {
   const m = /^([a-z_]+)=(.*)$/i.exec(f), k = m ? m[1] : '', v0 = m ? m[2] : f;
   if ((!k || k === 'reason') && LOG_VALUES[v0]) return (k ? 'причина: ' : '') + LOG_VALUES[v0];
   let v = v0.replace(/\b(\d+)\.(\d{3,})\b/g, (x, a, b) => (Math.round(+(a + '.' + b) * 100) / 100).toString().replace('.', ','));
   // A time field, or a bare fraction with 3+ decimals (curl's time of a probe): seconds.
   if ((/time|took|elapsed|dur|wait/i.test(k) && /^\d+([.,]\d+)?$/.test(v)) || (!k && /^\d+\.\d{3,}$/.test(v0))) v += '\u00a0с';
-  return (k ? k.replace(/_/g, ' ') + ': ' : '') + v;
+  return (k ? (LOG_KEYS[k] || k.replace(/_/g, ' ')) + ': ' : '') + v;
 }
 function logEntry(raw) {
   let src = '', line = raw.split('\n')[0], more = raw.split('\n').slice(1).map(x => x.trim()).filter(Boolean);
@@ -2935,8 +2938,11 @@ const RENDER = {
     const names = raw.length ? raw : (cfgRoute().adaptive || []).map(d => ({ d: typeof d === 'string' ? d : d.domain || '' }));
     const on = cfgRoute().adaptive_enabled !== false, day = Date.now() - 86400000;
     const when = n => { const t = Date.parse(n.added || ''); return isNaN(t) ? '' : new Date(t).toDateString() === new Date().toDateString() ? 'с сегодня ' + adHm(t) : 'с ' + new Date(t).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }); };
-    const sub = n => n.streak > 0 ? 'через VPN · <span class="st ok">скоро вернётся напрямую</span>' : esc(('через VPN ' + when(n)).trim());
-    let shown = names.filter(n => (ADV.show === 'all' || (ADV.show === 'back' ? n.streak > 0 : Date.parse(n.added || '') > day)));
+    const mark = n => { const m = adsMark(n.d); return m ? ' · <span class="st">' + esc(m) + '</span>' : ''; };
+    const sub = n => (n.streak > 0 ? 'через VPN · <span class="st ok">скоро вернётся напрямую</span>' : esc(('через VPN ' + when(n)).trim())) + mark(n);
+    const adsAny = !!adsReport() && names.some(n => adsMark(n.d));
+    if (ADV.show === 'ads' && !adsAny) ADV.show = 'all';
+    let shown = names.filter(n => (ADV.show === 'all' || (ADV.show === 'ads' ? !!adsMark(n.d) : ADV.show === 'back' ? n.streak > 0 : Date.parse(n.added || '') > day)));
     if (ADV.order === 'az') shown = shown.slice().sort((a, b) => a.d.localeCompare(b.d));
     const lim = shown.slice(0, ADV.lim);
     const row = n => { const open = ADV.open === n.d;
@@ -2949,13 +2955,16 @@ const RENDER = {
     // Opened by its address too (not only through go()): the feed is read once on the first draw.
     if (!ADV.feed && !ADV.busy && !ADV.tried) { ADV.tried = true; setTimeout(adFeedLoad, 0); }
     return cfgNote() +
-      panel('Автоподбор доменов', '<dl class="kv">' + ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', on, 'Автоподбор доменов', !cfgOk()), 'не открылся напрямую - идёт через VPN') + '</dl>') +
+      panel('Автоподбор доменов', '<dl class="kv">' + ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', on, 'Автоподбор доменов', !cfgOk()), 'не открылся напрямую - идёт через VPN') +
+        // Owner 13.11.2026: ads and counters are not what the VPN is for. New rules start in the sandbox; «Вкл» after the owner's router.
+        ctrlRow('Реклама и счётчики мимо VPN', choiceSlider('ad-ads', [['off', 'Выкл'], ['shadow', 'Песочница']], adsMode(), 'Реклама и счётчики мимо VPN'),
+          'Рекламные сети и счётчики посещений в VPN не отправлять. Песочница: автоподбор работает как раньше и только пишет в журнал, что не отправил бы. «Вкл» появится после проверки на роутере.') + '</dl>' + adsSandboxHtml()) +
       panel('Сейчас', '<div id="adFeed">' + adFeedHtml() + '</div>' +
         '<div class="panel-actions"><button class="btn small" type="button" data-act="ad-pause">' + ico(ADV.paused ? 'refresh' : 'power') + (ADV.paused ? 'Продолжить' : 'Пауза') + '</button>' +
         '<button class="btn small" type="button" data-go="a-adaptive">' + ico('clock') + 'Вся история</button></div>') +
       panel('Домены', '<div class="search-bar"><label class="search-field">' + ico('search') + '<input class="input" type="search" data-list-filter placeholder="Найти домен" aria-label="Найти домен" autocomplete="off"></label>' +
           '<button class="icon-btn filter-btn' + (fset ? ' on' : '') + '" type="button" data-act="ad-filters" aria-expanded="' + !!fopen + '" aria-label="Фильтр" title="Фильтр">' + ico('sliders') + '</button></div>' +
-        (fopen ? '<p class="chips-label">Показать</p>' + chips('show', [['all', 'Все'], ['back', 'Скоро вернутся напрямую'], ['new', 'Новые за сутки']]) +
+        (fopen ? '<p class="chips-label">Показать</p>' + chips('show', [['all', 'Все'], ['back', 'Скоро вернутся напрямую'], ['new', 'Новые за сутки']].concat(adsAny ? [['ads', 'Реклама и счётчики']] : [])) +
           '<p class="chips-label">Порядок</p>' + chips('order', [['new', 'Сначала новые'], ['az', 'По алфавиту']]) : '') +
         (lim.length ? '<ul class="rows" data-list-rows>' + lim.map(row).join('') + '</ul>' : empty(names.length ? 'Ничего не найдено' : 'Пока пусто')) +
         (shown.length > lim.length ? '<div class="panel-actions"><button class="btn small" type="button" data-act="ad-more">Показать ещё</button></div>' : ''),
@@ -3122,8 +3131,25 @@ const AD_EV = {
   ADDED: ['bad', 'напрямую не открылся - добавлен в VPN'], DIRECT_OK: ['ok', 'открывается напрямую'],
   ISP_FAIL_VPN_FAIL: ['warn', 'не открылся ни напрямую, ни через VPN'], ISP_FAIL_VPN_UNSTABLE: ['warn', 'через VPN открывается нестабильно'],
   ISP_UNRELIABLE: ['warn', 'провайдер сейчас не отвечает - не проверялся'], MAINT_DIRECT_CONFIRM: ['ok', 'снова открывается напрямую'],
-  MAINT_REMOVE: ['ok', 'вернулся напрямую'], REMOVED: ['ok', 'вернулся напрямую'], MAINT_DIRECT_FAIL: ['', 'проверка: напрямую не открывается, остаётся в VPN']
+  MAINT_REMOVE: ['ok', 'вернулся напрямую'], REMOVED: ['ok', 'вернулся напрямую'], MAINT_DIRECT_FAIL: ['', 'проверка: напрямую не открывается, остаётся в VPN'],
+  // «Реклама и счётчики мимо VPN» in the sandbox: the working autopick did as before, the sandbox says what it would do.
+  WOULD_SKIP_AD: ['info', 'Песочница: не отправил бы в VPN (реклама или счётчик)'], WOULD_REMOVE_AD: ['info', 'Песочница: убрал бы из VPN (реклама или счётчик)']
 };
+// «Реклама и счётчики мимо VPN» (owner 13.11.2026; this release: «Выкл · Песочница»). The choice comes from the
+// settings, the sandbox's result from the core (the ad names of autopick's group it would not have in the VPN);
+// a result the core has not refreshed for 15 minutes is no result.
+const adsMode = () => cfgRoute().adaptive_ads === 'shadow' ? 'shadow' : 'off';
+function adsReport() { const r = ((S.route || {}).adaptive || {}).ads_sandbox; return adsMode() === 'shadow' && r && Date.now() - Date.parse(r.at || '') < 900000 ? r : null; }
+function adsMark(d) { const r = adsReport(); return r && r.ads && r.ads[d] ? 'Песочница: не отправил бы в VPN' : ''; }
+function adsSandboxHtml() {
+  if (adsMode() !== 'shadow') return '';
+  const r = adsReport();
+  if (!r) return '<p class="panel-desc">Песочница: данных пока нет - автоподбор читает переключатель раз в 5 минут.</p>';
+  const n = Object.keys(r.ads || {}).length, all = (((S.route || {}).adaptive || {}).names || []).length, t = Date.parse(r.since || '');
+  const since = isNaN(t) ? '' : ' Работает с ' + new Date(t).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' + adHm(t) + '.';
+  return '<p class="panel-desc">' + (n ? 'Песочница: расхождения - ' + n + (all ? ' из ' + all + ' ' + plural(all, 'домена', 'доменов', 'доменов') : ' ' + plural(n, 'домен', 'домена', 'доменов')) + ' автоподбора не отправил бы в VPN (реклама или счётчик). Автоподбор работает как раньше; домены отмечены в списке.'
+    : 'Песочница: совпало - рекламы и счётчиков среди доменов автоподбора нет.') + esc(since) + '</p>';
+}
 function adFeedParse(text) {
   return String(text || '').split('\n').map(l => l.split('|')).filter(f => f.length >= 3 && (AD_EV[f[1]] || (f[1] === 'PROBE_UNKNOWN' && /dns blocked/.test(f[3] || '')))).map(f => {
     const ev = f[1] === 'PROBE_UNKNOWN' || /dns blocked/.test(f[3] || '') && f[1] === 'MAINT_REMOVE' ? ['warn', f[1] === 'MAINT_REMOVE' ? 'убран: возможно, реклама' : 'возможно, реклама: не добавлен'] : AD_EV[f[1]];
@@ -3275,6 +3301,7 @@ const evFields = parts => { const f = {}; parts.forEach(w => { const i = String(
 const evFill = (t, f) => t.replace(/\{(\w+)\}/g, (_, k) => f[k] != null && f[k] !== '' ? f[k] : '—');
 const toRoute = '{h} напрямую не открывается - теперь через VPN', toDirect = '{h} снова открывается напрямую - убран из VPN';
 const ROUTE_ADAPTIVE = {
+  WOULD_SKIP_AD: ['info', 'Песочница: не отправил бы {h} в VPN - реклама или счётчик'], WOULD_REMOVE_AD: ['info', 'Песочница: убрал бы {h} из VPN - реклама или счётчик'],
   AUTO_VPN: ['ok', toRoute], HINT_AUTO_VPN: ['ok', '{h} - через VPN по подсказке каталога'], LIST_AUTO_VPN: ['ok', '{h} из списка не открывается напрямую - через VPN'],
   LIST_AUTO_VPN_SKIP: ['warn', '{h} из списка не открывается, а VPN сейчас не работает'], LIST_BYPASS_FAIL: ['warn', '{h} из списка не открывается напрямую'],
   AUTO_DIRECT: ['info', toDirect], AUTO_DIRECT_MAINT: ['info', toDirect], AUTO_DIRECT_NIGHT: ['info', toDirect],
@@ -3564,6 +3591,8 @@ function choiceSlider(key, opts, cur, label, local) {
     opts.map(o => '<button type="button" role="radio" data-seg="' + key + '" data-v="' + esc(o[0]) + '" aria-checked="' + (o[0] === cur) + '"' + (on && !o[2] ? '' : ' disabled') + '>' + esc(o[1]) + '</button>').join('') + '</div>';
 }
 function segPick(key, v) {
+  if (key === 'ad-ads') { if (v === adsMode()) return;
+    cfgSet({ op: 'adaptive-ads', value: v }, 'Реклама и счётчики мимо VPN: ' + (v === 'shadow' ? 'песочница' : 'выкл'), ['route']); return; }
   if (key === 'ad-way') { const d = ADV.open; if (!d || v === 'auto') return; ADV.open = '';
     cfgSet({ op: 'adaptive', action: v === 'vpn' ? 'pin' : 'remove', target: d }, v === 'vpn' ? d + ': всегда через VPN' : d + ': напрямую, автоподбор его больше не берёт', ['route', 'config']); return; }
   if (key === 'site-do') { if (v === 'block') { confirm = { id: 'site-block', dom: SITEDOM }; render(); } else siteDo(v, SITEDOM); return; }
