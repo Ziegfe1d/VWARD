@@ -23,11 +23,12 @@ for rule in (".card-value{grid-area:value;", ".card-sub{grid-area:sub;", ".card-
     css = CSS[CSS.index(rule):CSS.index("}", CSS.index(rule))]
     if "white-space:nowrap" not in css or "text-overflow:ellipsis" not in css:
         fail(f"{rule} must stay on one line: {css}")
-if "const CARD_IDS = ['system', 'updates', 'wan', 'vpn', 'lists', 'routes', 'wifi', 'ads', 'storage'];" not in JS or "'Среда выполнения', to:" in JS:
+if "const CARD_IDS = ['system', 'updates', 'wan', 'vpn', 'lists', 'routes', 'ads', 'storage'];" not in JS or "'Среда выполнения', to:" in JS:
     fail("no «Среда выполнения» card")
 if "{ id: 'routes', title: 'Маршруты'" not in JS or "routes: 'Маршруты'" not in JS:
     fail("the routing section is «Маршруты» on the card, the page and the bottom bar")
-if "data: ['status', 'route', 'wifi', 'ads', 'adsstats', 'lists', 'awg', 'tq']" not in JS:
+# No Wi-Fi card: «Контроль Wi-Fi клиентов» is frozen (fix.39).
+if "data: ['status', 'route', 'ads', 'adsstats', 'lists', 'awg', 'tq']" not in JS:
     fail("the Overview loads AdGuard Home's statistics")
 API = (ROOT / "web/cgi-bin/api.cgi").read_text()
 if '(if $inet | has("internet") then $inet.internet else null end)' not in API:
@@ -51,7 +52,8 @@ def line(start):
 
 
 code = "".join([line("const isTrue = "), grab("const tunPill = ", "];\n"), line("const tunGuardOff = "), line("const tunOff = "), line("const viaIs = "),
-                line("const vpnDirect = "), line("const lowDisk = "), line("const adsOff = "), grab("function wifiWarnText("), grab("function cardData(id) {")])
+                line("const vpnDirect = "), line("const lowDisk = "), line("const adsOff = "), grab("function wifiWarnText("), line("const tunLost = "),
+                grab("function routeSummary() {"), grab("function vpnSummary() {"), grab("function updateSummary() {"), grab("function cardData(id) {")])
 harness = """
 let STATUS = {}; const S = { lists: null, route: null, wifi: null, ads: null, adsstats: null };
 const st = () => STATUS; const prof = () => ({ tunnel_interface: 'OpkgTun2' }); const plat = () => ({});
@@ -60,12 +62,13 @@ const tunLabel = n => n; const fmtTime = t => 'T' + t; const num = v => v == nul
 const fmtInt = v => String(v); const phaseText = v => v; const durText = v => v; const fmtSpeed = v => (v / 1000) + ' Гбит/с';
 const plural = (n, a, b, c) => { n = Math.abs(n) % 100; const m = n % 10; return n > 10 && n < 20 ? c : m > 1 && m < 5 ? b : m === 1 ? a : c; };
 const wifiName = mac => mac === 'aa' ? 'iPhone' : mac;
-const compOn = id => true;
+const compOn = id => true; const svcOf = g => null;
 """ + code + """
 const T = (name, connected, state) => ({ name, connected: connected ? 'yes' : 'no', state });
 STATUS = { wan: { internet: true, address: '100.86.0.1', speed: 1000 }, storage: { total_kb: 60606054, free_kb: 60186624 },
   wg: { interfaces: [T('OpkgTun0', false, 'down'), T('OpkgTun2', true, 'up')] } };
-S.lists = { lists: [{ via: 'vpn' }, { via: 'vpn' }, { via: 'bypass' }] }; S.route = { ip: { managed_routes: 431, active_count: 8 } };
+S.lists = { lists: [{ name: 'a', via: 'vpn', count: 300 }, { name: 'b', via: 'vpn', count: 100 }, { name: 'c', via: 'bypass', count: 18 }], subnet_counts: { OpkgTun2: 431 } };
+S.route = { ip: { managed_routes: 431, active_count: 8 } };
 S.wifi = { enabled: true, count: 6, clients: [{ mac: 'aa', health: 'WARNING', recommendation: 'bind_2g' }, { mac: 'bb', health: 'OK' }] };
 S.ads = { counts: { blocked: 1 } }; S.adsstats = { ok: true, blocked: 12430 };
 const out = {};
@@ -85,7 +88,7 @@ if r.returncode:
 o = json.loads(r.stdout)
 if o.pop("slow") != ["Роутер отвечает медленно", "Нет ответа"] or o.pop("down") != ["Нет связи", "Не работает"]:
     fail("Keenetic's late answer about the internet reads as «no internet» (Viva 2026-10-13)")
-if o.pop("adsoff") != ["выключено", "компонент выключен", "Выключен"]:
+if o.pop("adsoff") != ["выключено", "компонент выключен", "Выкл"]:
     fail("the ads component switched off: the card says «выключено»")
 if o.pop("low") != [False, True, True, False]:
     fail("«Мало места» by a share alone: a big drive with gigabytes free warns")
@@ -93,7 +96,8 @@ want = {
     "wan": ["Интернет", "В сети", "порт 1 Гбит/с"],
     "vpn": ["VPN", "1 из 1", "ещё 1 выключен вами"],
     "lists": ["Доменные списки", "2 через VPN", "1 в обход"],
-    "routes": ["Маршруты", "431 подсеть", "8 IP‑категорий"],
+    # One summary (owner 13.11.2026): the tunnels' subnets and the lists' domains, not the IP categories alone.
+    "routes": ["Маршруты", "431 подсеть", "418 доменов в 3 списках"],
     "wifi": ["Wi-Fi клиенты", "6 клиентов", "iPhone: лучше 2,4 ГГц"],
     "ads": ["Реклама", "12430", "блокировок за сутки"],
     "storage": ["Хранилище", "0.4 ГБ", "занято из 57.8 ГБ"],

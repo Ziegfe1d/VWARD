@@ -19,6 +19,8 @@ def fail(message: str) -> None:
 
 a = JS.index("function logTime")
 funcs = JS[a:JS.index("\n}\n", JS.index("function mergeLogs")) + 3]
+if "function logRestamp(line, t) {" not in funcs:
+    fail("RED: the timeline keeps each journal's own time zone")
 script = funcs + """
 console.log(JSON.stringify(mergeLogs([
   {label: "Интернет", text: "2026-10-04 11:40:00+0300 class=HEALTHY\\n2026-10-04 12:00:00+0300 class=DOWN\\n  details\\n"},
@@ -30,14 +32,16 @@ r = subprocess.run(["node", "-e", script], text=True, capture_output=True, env=o
 if r.returncode:
     fail(r.stderr[-400:])
 got = json.loads(r.stdout)
-want = ["[VPN] 2026-10-04 11:30:00|OK", "[Интернет] 2026-10-04 11:40:00+0300 class=HEALTHY",
-        "[Обновления] 2026-10-04T08:45:00Z [INFO] check", "    no time line", "[VPN] 2026-10-04 11:50:00|FAILOPEN_DOWN",
+# One time zone in the timeline, its offset said (owner 13.11.2026: UTC «+0000», «Z» and local
+# time without a zone side by side in one export).
+want = ["[VPN] 2026-10-04 11:30:00+0300|OK", "[Интернет] 2026-10-04 11:40:00+0300 class=HEALTHY",
+        "[Обновления] 2026-10-04 11:45:00+0300 [INFO] check", "    no time line", "[VPN] 2026-10-04 11:50:00+0300|FAILOPEN_DOWN",
         "[Интернет] 2026-10-04 12:00:00+0300 class=DOWN", "      details"]
 if got != want:
     fail(f"timeline: {got}")
 for need in ("const LOG_VIEW = [{ id: 'all', label: 'Все' }].concat(LOG_TABS);", "logTab = 'all'",
              "LOG_VIEW.map(t => '<button type=\"button\" data-log=\"'", "const info = [], merged = mergeLogs(parts, logNewest, info, want);",
-             "else copyText(text);", "LOG_TABS.filter(tb => tb.id !== 'cron')", "name = 'vward-' + tab + '-' + today() + '.txt'", "if (logShown[tab] && S.logs[tab] != null) download(name, S.logs[tab]);"):
+             "btn('log-copy', 'copy', 'Копировать')", "copyText(S.logs[logTab] || '');", "LOG_TABS.filter(tb => tb.id !== 'cron')", "name = 'vward-' + tab + '-' + today() + '.txt'", "logFull(tab).then(text => download(name, text || '')"):
     if need not in JS:
         fail(f"the Panel lacks {need}")
 # Owner 2026-11-01: newest first by default (the choice kept in the browser); an entry keeps its
@@ -82,7 +86,7 @@ if r.returncode:
 o = json.loads(r.stdout)
 if o["got"] != {"wan": "2026-11-12 10:00:00+0300 a", "tunnel": "Журнал пуст: записей пока нет.", "ads": ""}:
     fail(f"the «Все» answer split by source: {o['got']}")
-if o["newest"] != ["[VPN] 2026-11-12 12:00:00|z", "[VPN] 2026-11-12 11:00:00|y"] or o["oldest"] != ["[VPN] 2026-11-12 11:00:00|y", "[VPN] 2026-11-12 12:00:00|z"]:
+if o["newest"] != ["[VPN] 2026-11-12 12:00:00+0300|z", "[VPN] 2026-11-12 11:00:00+0300|y"] or o["oldest"] != ["[VPN] 2026-11-12 11:00:00+0300|y", "[VPN] 2026-11-12 12:00:00+0300|z"]:
     fail(f"the newest N of the timeline in either order: {o}")
 if o["pick"] != ["[VPN] 2026-11-12 09:00:00|alpha", "    more"] or o["none"] != "Ничего не найдено":
     fail(f"«Найти в журнале» keeps whole entries: {o}")
@@ -119,6 +123,11 @@ with tempfile.TemporaryDirectory() as tmp:
     heads = re.findall(r"^@@VWARD-LOG ([a-z]+)$", out, re.M)
     if heads != all_api or "class=HEALTHY" not in out or out.count("|OK") != 20 or "10:39:00|OK" not in out:
         fail(f"RED: name=all must answer every source once, each cut to count: {heads} {out[:400]!r}")
+    # «Скачать» (owner 13.11.2026): the whole live journal, not the entries shown.
+    e["QUERY_STRING"] = "action=log&name=all&count=20&full=1"
+    out = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=e, capture_output=True, text=True).stdout.split("\n\n", 1)[-1]
+    if out.count("|OK") != 40 or "10:00:00|OK" not in out:
+        fail(f"RED: full=1 must answer the whole live journal: {out.count('|OK')} entries")
     if jq:
         def clear(value, confirm="LOG_CLEAR"):
             body = f"op=journal&target=clear&value={value}" + (f"&confirm={confirm}" if confirm else "")
@@ -142,7 +151,9 @@ with tempfile.TemporaryDirectory() as tmp:
                 fail("an unknown journal is refused")
 print("CONSOLE_LOGS_ALL=PASS")
 
-# «Скачать» saves what is shown: no reload, no redraw (owner 12.11.2026).
+# «Скачать»: no reload, no redraw (owner 12.11.2026), the whole live journal (owner 13.11.2026).
 _a = JS.index("else if (a === 'log-save')"); _b = JS.index("else if", _a + 10)
 if "render()" in JS[_a:_b] or "loadLog(" in JS[_a:_b]:
     raise SystemExit("CONSOLE_LOGS_ALL=FAIL: «Скачать» reloads or redraws the journal")
+if "logFull(tab)" not in JS[_a:_b] or "apiText('log', { name: 'all', full: 1 })" not in JS:
+    raise SystemExit("CONSOLE_LOGS_ALL=FAIL: RED: «Скачать» must save the whole live journal")

@@ -62,6 +62,18 @@ with tempfile.TemporaryDirectory() as tmp:
     d = api("POST", {"op": "read"})
     if not d.get("ok") or d["read_at"] < 1_700_000_000:
         fail(f"«Прочитать все» is not kept: {d.get('read_at')}")
+    # «Очистить» (owner 13.11.2026): the history goes for every device, kept root-only; new notes come after.
+    d = api("POST", {"op": "clear"})
+    if not d.get("ok") or d["items"] != [] or d["read_at"] < 1_700_000_000 or (t / "notes/notes.tsv").stat().st_mode & 0o077:
+        fail(f"RED: «Очистить» must empty the history: {d.get('ok')}, {len(d.get('items') or [])}")
+    if [x["title"] for x in api("POST", {"op": "add", "sev": "ok", "title": "после", "text": "", "to": "", "key": ""})["items"]] != ["после"]:
+        fail("a note after «Очистить» is the only one")
+    js = (ROOT / "web/assets/vward-console.js").read_text(encoding="utf-8")
+    for need in ('data-act="notes-clear">Очистить</button>', "apiPost('notes', { op: 'clear' })", "«Требует внимания» останется.",
+                 # One version format; news of a version leaves once nothing is to install; no «целиком».
+                 "esc(noteVer(noteTun(x, x.title)))", "&& !(S.update && noteMoot(x))", "x.text === 'целиком' ? '' : x.text"):
+        if need not in js:
+            fail(f"the Panel lacks {need!r}")
     # The router's own agents write to the same history (the Panel may be closed).
     lib = ROOT / "components/runtime/lib/vward-device-profile.sh"
     r = subprocess.run(["sh", "-c", '. "$1"; vward_note warn "«{t}» выключен агентом VPN" "строка\tс табом" t-Wireguard0', "sh", str(lib)],

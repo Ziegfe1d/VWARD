@@ -93,7 +93,18 @@ api, js = read("web/cgi-bin/api.cgi"), read("web/assets/vward-console.js")
 for need in ("journal|agents-mode) set --", "agents:{mode:$agents_mode,proposed:$proposed}"):
     if need not in api:
         fail(f"the API lacks {need}")
-for need in ("'d-agents': { title: 'Агенты'", "data-agent-mode=", "op: 'agents-mode'", "'Песочница'", "'Вкл'", "panel('Работают всегда'", "panel('Что агент сделал бы'"):
+for need in ("'d-agents': { title: 'Агенты'", "data-agent-mode=", "op: 'agents-mode'", "'Песочница'", "'Вкл'", "panel('Работают всегда'", "panel('Действия агентов'"):
     if need not in js:
         fail(f"the Panel lacks {need}")
+# Owner 13.11.2026: the sandbox's records hidden (they are in «Журналы»), kept to come back; the mode once
+# per agent, not on every event; no «Включено» on the always-on rows; frozen parts' and AdGuard Home's
+# rows only when theirs is there.
+for need in ("const AGENT_ACTIONS_SHOWN = false;", "(AGENT_ACTIONS_SHOWN ? panel('Действия агентов'", "' · ' + (am[a[0]] === 'act' ? 'Вкл' : 'Песочница')",
+             "kv(AGENT_LOCKED.filter(r => agentRowShown(r[2])).map(r => [r[0], '', '', null, '', agentName(r[1])]))",
+             "'Программа занимает много памяти'", "'memory-watch'],", "'repair'],", "'agh'],"):
+    if need not in js:
+        fail(f"RED: «Агенты» lacks {need!r}")
+for gone in ("'Что агент сделал бы'", "'Включено', 'ok', null", "«Что агент сделал бы»"):
+    if gone in js:
+        fail(f"«Агенты» still shows {gone!r}")
 print("AGENTS_WATCH=PASS")
