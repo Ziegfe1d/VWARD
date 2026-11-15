@@ -7,7 +7,7 @@ const html = fs.readFileSync(require('node:path').join(__dirname,'index.html'),'
 const inline = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)].at(-1)?.[1] || '';
 
 test('standalone HTML embeds valid JavaScript, not a remote script', () => {
-  assert.ok(html.startsWith('<!doctype html>'));
+  assert.match(html,/^<!doctype html>/i);
   assert.match(inline,/cgi-bin\/api.cgi/);
   assert.doesNotMatch(html,/<script\b[^>]*\bsrc=/i);
   assert.doesNotThrow(() => new vm.Script(inline));
@@ -20,6 +20,9 @@ test('every bottom navigation item targets this single page', () => {
   assert.match(inline,/addEventListener\('scroll'/);
   assert.match(inline,/scrollIntoView/);
   assert.match(inline,/markNav/);
+  assert.match(inline,/const anchors=/);
+  assert.match(inline,/renderParts/);
+  assert.match(inline,/smartState/);
 });
 test('no invented statistics or inert demo controls', () => {
   for (const str of ['Нет данных','Ожидает ответа API','Интерактивный макет','Данные загружаются','Маршрут не подтверждён']) {
