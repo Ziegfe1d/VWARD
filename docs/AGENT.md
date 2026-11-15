@@ -1919,6 +1919,14 @@ tick, visibilitychange и refreshPage журналы не грузят. Исто
   fix.39 скачает закреплённое ядро из `dev`, сверит сумму и перезапустит автоподбор на нём (в журнале
   `CORE_INSTALLED`, затем `CORE_STARTED|mode=apply`). Без этого ядро сменится только при следующем перезапуске
   службы (смена туннеля, перезагрузка роутера).
+- **Владелец заменил ядро вручную 15.11 21:05 (+0300)** командой из Termius (`S91 core-install`): было
+  `e9664348…` (fix.37), стало `ac568dab…` (закреплённая сборка fix.39 для mipsle), `CORE_INSTALLED` 21:05:06,
+  `CORE_STARTED|pid=12168` 21:05:14, `START … mode=apply lan=br0 wan=eth3 tunnel=opkgtun0 group=AdaptiveAuto`,
+  `-help` нового ядра знает `-observe-if`. Старое ядро — `/opt/share/vward/core/vward-core.bak`.
+  Дальше на роутере: журнал «Все» через 1-2 часа — `MAINT_STILL_BLOCKED` одной строкой вместо строки на домен,
+  `MAINT_NO_PATH`/`DROPPED` для адресов без HTTPS; «Реклама и счётчики мимо VPN» выключена по умолчанию.
+- **Попутно (fix.39.1):** строка `CORE_STARTED` писала `mode=apply--apply` (с fix.37) — теперь `mode=apply` или
+  `mode=observe`; тест в `check-core-adaptive.py` (RED на прежней строке).
 - **Прочее в журнале:** `Download failed (curl 28/35); retrying directly through eth3` у ленты обновлений — повтор
   напрямую срабатывает, как раньше; `VLESS_ENGINE restart_attempted OpkgTun0 … by=components-agent` — 6 раз за 3 дня,
   как до fix.39. Новых ошибок нет.

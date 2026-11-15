@@ -614,7 +614,9 @@ core_start()
     sleep 3
     if CS_P=$(vward_core_adaptive_pid); then
         rm -f "$CORE_FALLBACK"
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|CORE_STARTED|pid=$CS_P|mode=${CS_MODE:+apply}${CS_MODE:-observe}" >> "$EVENT_LOG" 2>/dev/null
+        # «apply» or «observe» (the journal read «mode=apply--apply» until fix.39.1).
+        CS_WORD=observe; [ -z "$CS_MODE" ] || CS_WORD=apply
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|CORE_STARTED|pid=$CS_P|mode=$CS_WORD" >> "$EVENT_LOG" 2>/dev/null
         echo "Autopodbor (Go) started PID=$CS_P"
         return 0
     fi

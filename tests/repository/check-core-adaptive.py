@@ -115,6 +115,9 @@ with tempfile.TemporaryDirectory() as t:
             fail(f"core arguments: {args}")
         if "CORE_STARTED" not in (tmp / "events.log").read_text():
             fail("CORE_STARTED not logged")
+        # One word for the mode (the owner's journal read «mode=apply--apply» until fix.39.1).
+        if "|mode=apply\n" not in (tmp / "events.log").read_text() or "--apply" in (tmp / "events.log").read_text():
+            fail(f"CORE_STARTED mode: {(tmp / 'events.log').read_text()[-200:]!r}")
         # fix.39: the switches are files the core reads while it runs.
         if args[args.index("--observe-if") + 1] != f"{tmp}/etc/adaptive.disabled" or args[args.index("--ads-sandbox-if") + 1] != f"{tmp}/etc/ads.sandbox":
             fail(f"the Panel's switch files are not given to the core: {args}")
