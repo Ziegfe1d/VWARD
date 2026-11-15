@@ -1,5 +1,6 @@
 <!doctype html>
 
+
 <html lang="ru">
 <head>
 <meta charset="utf-8"/>
@@ -54,43 +55,215 @@ body::after{content:"";position:fixed;bottom:0;left:0;right:0;z-index:19;height:
 @media(max-width:339px){.tabbar{left:4px;right:4px;padding:4px}.tabbar .tab{font-size:9.5px;letter-spacing:-.25px}}
 @media(prefers-reduced-motion:reduce){.tabbar .tab{transition:none}}
 
-.live-map{min-height:140px}.live-map svg{display:block;width:100%;height:auto;max-height:390px}.live-map text{font-family:inherit;fill:#f0ebff;font-size:14px}.live-map text.muted{fill:#aaa1c2;font-size:11px}
-#live-services{display:grid;gap:8px}.live-service{display:grid;grid-template-columns:minmax(145px,1fr) 1.3fr;gap:12px;padding:14px;border:1px solid #383152;border-radius:13px;background:#151329}.live-service strong{font-size:14px}.live-service small{display:block;color:var(--muted);font-size:12px;margin-top:4px;overflow-wrap:anywhere}
-.live-route{display:flex;gap:5px;flex-wrap:wrap}.live-route span{font-size:12px;font-weight:600;color:#dac9ff;background:#2b2447;border:1px solid #534270;border-radius:9px;padding:7px 10px}.live-service a{min-height:40px;display:inline-flex;align-items:center;font-size:12px;color:var(--purple);text-decoration:underline}
-.live-data{display:grid;gap:4px}.data-line{display:flex;align-items:start;justify-content:space-between;gap:8px;padding:10px 0;border-bottom:1px solid #34304a}.data-line span{color:var(--muted)}.data-line strong{text-align:right;overflow-wrap:anywhere}
-.dist-chart{display:grid;gap:14px}.dist-line{display:grid;grid-template-columns:106px 1fr 40px;gap:9px;align-items:center}.dist-line>span{font-size:12px;color:var(--muted)}.dist-line strong{font-size:13px;text-align:right}.dist-track{height:12px;background:#28233e;border-radius:10px;overflow:hidden}.dist-track i{height:100%;display:block;border-radius:10px;background:linear-gradient(90deg,#a98eff,#56d7e8)}
-.empty-live{padding:16px 0;color:var(--muted);font-size:13px}.live-message{position:fixed;right:12px;top:64px;z-index:25;max-width:min(420px,calc(100% - 24px));border-radius:12px;background:#291f3a;border:1px solid #795e9f;padding:11px 14px}.live-message[hidden]{display:none}.button{min-height:44px}.live-status{color:var(--muted);font-size:12px}
-@media(max-width:600px){.live-service{grid-template-columns:1fr}.dist-line{grid-template-columns:76px 1fr 38px}}
-@media(prefers-reduced-motion:reduce){.flow-top{animation:none!important}}
-
-.live-map-mobile{display:none}
-@media(max-width:680px){
- .live-map svg{display:none}
- .live-map-mobile{display:grid;gap:8px}
- .live-map-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 12px;background:#1e1a32;border:1px solid #383152;border-radius:12px}
- .live-map-row span{overflow-wrap:anywhere;min-width:0;font-size:12px;font-weight:600}
- .live-map-row strong{flex:none;color:#73dbe7;font-size:12px;text-align:right}
- .kpi-val{font-size:clamp(19px,5vw,28px);white-space:normal;overflow-wrap:normal}
-}
+/* VWARD: one continuous page, no mock metrics. */
+html{scroll-behavior:smooth;scroll-padding-top:18px}
+#overview{scroll-margin-top:0}
+.section, article[id], .components-section{scroll-margin-top:18px}
+.main{padding-bottom:calc(116px + env(safe-area-inset-bottom,0px));}
+.components-section{display:block}
+.components-section>.card{width:100%}
+.route-distribution{padding:14px 24px 22px;border-top:1px solid #29243f;color:var(--muted);min-height:56px}
+.route-dist-bar{height:10px;border-radius:6px;overflow:hidden;display:flex;background:#29243f;margin:4px 0 12px}
+.route-dist-bar span{display:block;height:100%;min-width:0}
+.route-dist-legend{display:flex;gap:10px 17px;flex-wrap:wrap;font-size:12px}
+.route-dist-legend>span{display:inline-flex;gap:7px;align-items:center}
+.route-dist-legend i{width:8px;height:8px;flex:none;border-radius:50%}
+.service-list{padding:4px 18px 18px;min-height:64px;color:var(--muted)}
+.service-list .service-item{border-top:1px solid #312b49;padding:15px 4px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.service-list .service-item:first-child{border-top:0}
+.service-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:13px;margin:4px 0;color:var(--muted)}
+.service-row strong{font-weight:650;color:var(--ink);text-align:right;overflow-wrap:anywhere}
+.service-row strong.pending{color:var(--orange)}
+.service-list .service-title{font-size:15px;overflow-wrap:anywhere}
+.tunnel-list{display:grid;gap:0;color:var(--muted);min-height:42px}
+.tunnel-item{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:11px 0;border-top:1px solid #312b49}
+.tunnel-item:first-child{border-top:0}
+.tunnel-item strong{color:var(--ink);font-size:14px;min-width:0;overflow-wrap:anywhere}
+.tunnel-item .status{flex:none;font-size:13px}
+.simple-status{padding:17px 19px;margin-top:15px;border-radius:13px;border:1px solid #332d4d;background:#18162b;color:var(--text);font-weight:650}
+#events .events{min-height:28px}
+.tabbar .tab.is-active{color:#cbb9ff;background:#302748}
+#more-toggle.is-active{color:#cbb9ff;background:#302748}
+.more-links a.is-active{color:#d3bfff;background:#302748}
+@media(max-width:850px){.components-section>.card{width:100%}}
+@media(max-width:600px){.service-list .service-item{display:block}.service-right{margin-top:8px}.route-distribution{padding:14px 18px 18px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 </style>
-</head>
+<style>
+#live-routes {padding:12px 18px 20px;display:grid;gap:8px;min-height:160px;align-content:start;color:var(--muted)}
+.live-route {display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:13px 15px;border:1px solid #353153;background:#19182e;border-radius:13px}
+.live-route strong{color:var(--ink);font-weight:600;overflow-wrap:anywhere}.live-route span{white-space:nowrap;color:var(--cyan)}
+.live-error{color:var(--orange)!important}.event-empty{padding:16px 0;color:var(--muted)}
+.service-item button:disabled{opacity:.72}.live-no-data{color:var(--muted);font-size:14px;min-height:80px;display:flex;align-items:center}
+</style></head>
 <body>
 <svg aria-hidden="true" style="display:none"><symbol id="i-spark" viewbox="0 0 24 24"><path d="M12 2.5 14.4 9.6 21.5 12l-7.1 2.4L12 21.5l-2.4-7.1L2.5 12l7.1-2.4L12 2.5Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"></path></symbol><symbol id="i-grid" viewbox="0 0 24 24"><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="3" y="3"></rect><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="14" y="3"></rect><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="3" y="14"></rect><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="14" y="14"></rect></symbol><symbol id="i-route" viewbox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"><circle cx="6" cy="5" r="2.3"></circle><circle cx="18" cy="19" r="2.3"></circle><path d="M6 7.6v7.2a4.2 4.2 0 004.2 4.2H15.5M10.5 5H17a3 3 0 013 3v2m-3-3 3 3 3-3"></path></g></symbol><symbol id="i-globe" viewbox="0 0 24 24"><circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" stroke-width="1.8"></circle><path d="M3 12h18M12 3c-5 5-5 13 0 18M12 3c5 5 5 13 0 18" fill="none" stroke="currentColor" stroke-width="1.6"></path></symbol><symbol id="i-shield" viewbox="0 0 24 24"><path d="m12 2 8 3.5v5.8c0 5.2-3.3 8.5-8 10.7-4.7-2.2-8-5.5-8-10.7V5.5L12 2Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"></path><path d="m8.5 12 2.2 2.2 4.8-4.8" fill="none" stroke="currentColor" stroke-width="1.8"></path></symbol><symbol id="i-pulse" viewbox="0 0 24 24"><path d="M2 12h5l3-6 4 12 3-6h5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"></path></symbol><symbol id="i-sliders" viewbox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"><path d="M4 7h16M4 17h16"></path><circle cx="9" cy="7" fill="#19172e" r="3"></circle><circle cx="16" cy="17" fill="#19172e" r="3"></circle></g></symbol><symbol id="i-clock" viewbox="0 0 24 24"><circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" stroke-width="1.8"></circle><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"></path></symbol><symbol id="i-refresh" viewbox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14-4L4 9m0-5v5h5M4 13a8 8 0 0 0 14 4l2-2m0 5v-5h-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"></path></symbol><symbol id="i-lock" viewbox="0 0 24 24"><rect fill="none" height="11" rx="2" stroke="currentColor" stroke-width="1.8" width="14" x="5" y="10"></rect><path d="M8 10V7a4 4 0 018 0v3" fill="none" stroke="currentColor" stroke-width="1.8"></path></symbol><symbol id="i-server" viewbox="0 0 24 24"><rect fill="none" height="7" rx="2" stroke="currentColor" stroke-width="1.7" width="18" x="3" y="4"></rect><rect fill="none" height="7" rx="2" stroke="currentColor" stroke-width="1.7" width="18" x="3" y="13"></rect><circle cx="7" cy="7.5" fill="currentColor" r="1"></circle><circle cx="7" cy="16.5" fill="currentColor" r="1"></circle></symbol><symbol id="i-info" viewbox="0 0 24 24"><circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" stroke-width="1.8"></circle><path d="M12 10.5v6M12 7.5h.01" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path></symbol><symbol id="i-menu" viewbox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" stroke-width="1.8"></path></symbol><symbol id="i-home" viewbox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5M6 9v11h4.5v-5.5h3V20H18V9"></path></symbol><symbol id="i-list" viewbox="0 0 24 24"><rect height="17" rx="2" width="15" x="4.5" y="3.5"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></symbol><symbol id="i-block" viewbox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="m6.4 6.4 11.2 11.2"></path></symbol><symbol id="i-tools" viewbox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L4 17v3h3l5.4-5.4a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.6-.4-.4-2.6z"></path></symbol><symbol id="i-platform" viewbox="0 0 24 24"><rect height="6.5" rx="1.5" width="6.5" x="4" y="4"></rect><rect height="6.5" rx="1.5" width="6.5" x="13.5" y="4"></rect><rect height="6.5" rx="1.5" width="6.5" x="4" y="13.5"></rect><rect height="6.5" rx="1.5" width="6.5" x="13.5" y="13.5"></rect></symbol><symbol id="i-logs" viewbox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01"></path></symbol><symbol id="i-more" viewbox="0 0 24 24"><circle cx="5.5" cy="12" fill="currentColor" r="1" stroke="none"></circle><circle cx="12" cy="12" fill="currentColor" r="1" stroke="none"></circle><circle cx="18.5" cy="12" fill="currentColor" r="1" stroke="none"></circle></symbol></svg>
 <div class="layout">
-
 <main class="main" id="overview">
 <header class="header"><div><div class="eyebrow">Состояние сети</div><h1>Панель VWARD</h1><p class="subtitle">Маршрутизация, DNS и VPN — всё важное на одном экране.</p></div><div class="head-actions"><button aria-label="Обновить обзор" class="button text-btn" id="refresh"><svg><use href="#i-refresh"></use></svg>Обновить</button></div></header>
+<section aria-label="Состояние компонентов" class="kpis section" id="network">
+<div class="card kpi" style="--accent:var(--green)"><div class="kpi-top"><span>Интернет</span><span class="kpi-icon"><svg><use href="#i-globe"></use></svg></span></div><div class="kpi-val">—</div><div class="kpi-foot">—</div></div>
+<div class="card kpi vpn-overview" style="--accent:var(--purple)"><div class="kpi-top"><span>VPN</span><span class="kpi-icon"><svg><use href="#i-shield"></use></svg></span></div><div class="kpi-val">—</div><div class="kpi-foot">—</div></div>
+<div class="card kpi" style="--accent:var(--cyan)"><div class="kpi-top"><span>Ответ DNS</span><span class="kpi-icon"><svg><use href="#i-pulse"></use></svg></span></div><div class="kpi-val">—</div><div class="kpi-foot">—</div></div>
+<div class="card kpi" style="--accent:var(--orange)"><div class="kpi-top"><span>Домены в маршрутах</span><span class="kpi-icon"><svg><use href="#i-route"></use></svg></span></div><div class="kpi-val">—</div><div class="kpi-foot">—</div></div>
+</section><section class="card section" id="vpn"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">VPN</h2></div></div><div class="tunnel-list" id="vpn-tunnels">—</div></div></section>
+<section aria-label="Карта маршрутов" class="card section" id="routes"><div class="card-inner" style="padding-bottom:4px"><div class="section-head"><div><h2 class="title-accent">Карта маршрутов</h2></div></div></div>
+<div class="route-map" id="live-routes">—</div><div class="route-distribution" id="route-distribution">—</div></section>
+<section aria-label="Активность и компоненты" class="section components-section">
+<article class="card" id="components"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Компоненты</h2></div></div><div class="status-list" id="component-list"><div class="status-item"><div class="status-icon"><svg><use href="#i-globe"></use></svg></div><div><div class="status-name">Интернет</div><div class="status-sub">—</div></div><span class="status-value">—</span></div><div class="status-item"><div class="status-icon"><svg><use href="#i-shield"></use></svg></div><div><div class="status-name">VPN</div><div class="status-sub">—</div></div><span class="status-value">—</span></div><div class="status-item"><div class="status-icon"><svg><use href="#i-server"></use></svg></div><div><div class="status-name">Блокировка рекламы</div><div class="status-sub">—</div></div><span class="status-value">—</span></div><div class="status-item"><div class="status-icon"><svg><use href="#i-route"></use></svg></div><div><div class="status-name">Автоподбор доменов</div><div class="status-sub">—</div></div><span class="status-value dim">—</span></div></div></div></article></section>
+<section class="card service-card section" id="control"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Маршруты сервисов</h2></div></div></div>
 
-<section class="kpis section" id="network"><div class="card kpi"><div class="kpi-top"><span>Интернет</span><span class="dot" data-light="metric-internet"></span></div><div class="kpi-val" id="metric-internet">—</div><div class="kpi-foot" id="metric-internet-detail">Нет данных</div></div><div class="card kpi"><div class="kpi-top"><span>VPN</span><span class="dot" data-light="metric-vpn"></span></div><div class="kpi-val" id="metric-vpn">—</div><div class="kpi-foot" id="metric-vpn-detail">Нет данных</div></div><div class="card kpi"><div class="kpi-top"><span>Smart DNS</span><span class="dot" data-light="metric-dns"></span></div><div class="kpi-val" id="metric-dns">—</div><div class="kpi-foot" id="metric-dns-detail">Нет данных</div></div><div class="card kpi"><div class="kpi-top"><span>Домены в списках</span><span class="dot" data-light="metric-domains"></span></div><div class="kpi-val" id="metric-domains">—</div><div class="kpi-foot" id="metric-domains-detail">Нет данных</div></div></section>
-<section class="card section" id="routes"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Карта маршрутов</h2><p>Конфигурация доменных списков Keenetic</p></div></div><div class="live-map" id="live-map">Загрузка…</div><p class="secondary-text">Назначение маршрутов, не проверенный путь клиентского трафика.</p></div></section>
-<section class="chart-row section"><article class="card" ><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Распределение маршрутов</h2><p>По спискам Keenetic</p></div></div><div class="dist-chart" id="live-chart">Загрузка…</div><p class="secondary-text" id="chart-count"></p></div></article><article class="card" id="system"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Состояние компонентов</h2><p>Только подтверждённые состояния</p></div></div><div class="status-list" id="components">Загрузка…</div></div></article></section>
-<section class="card section" id="control"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Управление маршрутами</h2><p>Выбрано и применено — разные состояния</p></div><a class="button ghost" href="/dns">Управление</a></div><div id="live-services">Загрузка…</div></div></section>
-<section class="secondary-row section"><article class="card" id="dns"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">DNS и Smart DNS</h2><p>Состояние по данным VWARD</p></div></div><div class="live-data" id="live-dns">Загрузка…</div></div></article><article class="card" id="ads"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Реклама и трекеры</h2><p>Состояние своего компонента</p></div></div><div class="live-data" id="live-ads">Загрузка…</div></div></article></section>
-<section class="card section" id="events"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Последние события</h2><p>История уведомлений VWARD</p></div><a class="button ghost" href="/logs">Журналы</a></div><div class="events" id="live-events">Загрузка…</div></div></section>
 
 
-<section class="card section" id="settings"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Панель VWARD</h2><p>Версия и обслуживание</p></div><a class="button ghost" href="/settings">Настройки</a></div><div class="settings-grid"><div class="setting-tile"><span>Версия</span><strong id="live-version">—</strong></div><div class="setting-tile"><span>Канал</span><strong id="live-channel">—</strong></div><div class="setting-tile"><span>Обновлено</span><strong id="live-updated">—</strong></div></div></div></section></main></div>
+<div class="service-list" id="service-list">—</div></section>
+<section class="secondary-row section"><article class="card" id="dns"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">DNS и Smart DNS</h2></div></div><div class="simple-status" id="smartdns-status">—</div></div></article>
+<article class="card" id="ads"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Реклама и трекеры</h2></div></div><div class="simple-status" id="ads-status">—</div></div></article></section>
+<section class="card section" id="events"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Последние события</h2></div></div><div class="events">—</div></div></section>
+<section class="card section" id="system"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Система</h2></div></div><div class="settings-grid"><div class="setting-tile"><span>Версия</span><strong id="system-version">—</strong></div><div class="setting-tile"><span>Интернет</span><strong id="system-wan">—</strong></div><div class="setting-tile"><span>VPN</span><strong id="system-vpn">—</strong></div></div></div></section><section class="card section" id="settings">
+<div class="card-inner">
+<div class="section-head"><div><h2 class="title-accent">Настройки</h2></div></div>
 
+<div class="settings-grid"><div class="setting-tile"><span>Версия VWARD</span><strong id="setting-version">—</strong></div><div class="setting-tile"><span>Канал обновлений</span><strong id="setting-channel">—</strong></div></div></div></section></main></div>
 <nav aria-label="Основная навигация" class="tabbar"><a aria-current="page" class="tab tab-mobile is-active" data-nav="overview" href="#overview"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-home"></use></svg><span>Обзор</span></a><a class="tab tab-mobile" data-nav="wan" href="#network"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-globe"></use></svg><span>Сеть</span></a><a class="tab tab-mobile" data-nav="vpn" href="#vpn"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-shield"></use></svg><span>VPN</span></a><a class="tab tab-mobile" data-nav="routes" href="#routes"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-list"></use></svg><span>Маршруты</span></a><button aria-controls="more-sheet" aria-expanded="false" class="tab tab-mobile" id="more-toggle" type="button"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-more"></use></svg><span>Ещё</span></button><a aria-current="page" class="tab tab-desktop is-active" data-nav="overview" href="#overview"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-home"></use></svg><span>Обзор</span></a><a class="tab tab-desktop" data-nav="wan" href="#network"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-globe"></use></svg><span>Сеть</span></a><a class="tab tab-desktop" data-nav="vpn" href="#vpn"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-shield"></use></svg><span>VPN</span></a><a class="tab tab-desktop" data-nav="routes" href="#routes"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-list"></use></svg><span>Маршруты</span></a><a class="tab tab-desktop" data-nav="ads" href="#ads"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-block"></use></svg><span>Реклама</span></a><a class="tab tab-desktop" data-nav="ai" href="#dns"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-spark"></use></svg><span>DNS</span></a><a class="tab tab-desktop" data-nav="utils" href="#components"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-tools"></use></svg><span>Компоненты</span></a><a class="tab tab-desktop" data-nav="system" href="#system"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-platform"></use></svg><span>Система</span></a><a class="tab tab-desktop" data-nav="settings" href="#settings"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-sliders"></use></svg><span>Настройки</span></a><a class="tab tab-desktop" data-nav="logs" href="#events"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-logs"></use></svg><span>Журналы</span></a></nav><div class="more-sheet" hidden="" id="more-sheet"><div class="more-title">Разделы</div><div class="more-links"><a data-nav="ads" href="#ads"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-block"></use></svg><span>Реклама</span></a><a data-nav="ai" href="#dns"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-spark"></use></svg><span>DNS</span></a><a data-nav="utils" href="#components"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-tools"></use></svg><span>Компоненты</span></a><a data-nav="system" href="#system"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-platform"></use></svg><span>Система</span></a><a data-nav="settings" href="#settings"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-sliders"></use></svg><span>Настройки</span></a><a data-nav="logs" href="#events"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-logs"></use></svg><span>Журналы</span></a></div></div><div aria-live="polite" class="toast-layer" id="toasts"></div>
-<div id="live-message" role="status" aria-live="polite" class="live-message" hidden></div><script src="./app.js" defer></script>
-</body></html>
+<div class="modal-shade" id="modal-shade" role="presentation"><div aria-labelledby="dialog-title" aria-modal="true" class="modal" role="dialog"><h2 id="dialog-title">Выбрать маршрут?</h2><p id="dialog-description"></p><div class="modal-actions"><button class="button ghost" id="dialog-cancel">Отмена</button><button class="button primary" id="dialog-ok">Выбрать</button></div></div></div>
+<script>(function(){'use strict';
+const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
+const DASH='—';
+const text=(s)=>{const e=document.createElement('span');e.textContent=s;return e;};
+const set=(sel,v)=>{const e=$(sel);if(e)e.textContent=v==null||v===''?DASH:String(v)};
+const num=v=>v==null||v===''||!Number.isFinite(Number(v))?null:Number(v);
+const fmt=v=>num(v)==null?DASH:Number(v).toLocaleString('ru-RU');
+const isUp=v=>v===true||v===1||v==='1'||v==='yes'||v==='up'||v==='true';
+const clean=v=>String(v==null?'':v).replace(/[\x00-\x1f]/g,'').slice(0,180);
+const mode=v=>v==null?DASH:({vpn:'VPN',isp:'Провайдер',bypass:'Провайдер',dns:'Smart DNS',auto:'Авто',mixed:'Смешанный',unknown:DASH,none:DASH})[String(v).toLowerCase()]||DASH;
+let loading=false;
+const cards=$$('.kpi');
+function card(i,v,foot){const e=cards[i];if(!e)return;const main=e.querySelector('.kpi-val'),sub=e.querySelector('.kpi-foot');if(main)main.textContent=v==null?DASH:String(v);if(sub)sub.textContent=foot==null?DASH:String(foot)}
+async function api(action){
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
+ try{const r=await fetch('/cgi-bin/api.cgi?action='+encodeURIComponent(action),{credentials:'same-origin',cache:'no-store',signal:controller.signal});
+ if(!r.ok)throw new Error('HTTP '+r.status);
+ const d=await r.json();if(!d||typeof d!=='object'||d.ok===false)throw new Error('API');return d;
+ }finally{clearTimeout(timer)}
+}
+function component(name,value,description){const item=$$('#component-list .status-item').find(el=>el.querySelector('.status-name')?.textContent.trim()===name);if(!item)return;
+const val=item.querySelector('.status-value'),desc=item.querySelector('.status-sub');
+if(val)val.textContent=value==null?DASH:String(value);
+if(desc)desc.textContent=description==null?DASH:String(description);
+}
+function clearStatus(){card(0,DASH,DASH);card(1,DASH,DASH);component('Интернет',DASH,DASH);component('VPN',DASH,DASH);set('#system-wan',DASH);set('#system-vpn',DASH);set('#system-version',DASH);set('#setting-version',DASH);set('#setting-channel',DASH);set('#vpn-tunnels',DASH)}
+function renderStatus(s){const wan=s.wan||{},wg=s.wg||{},platform=s.platform||{};
+const internet=wan.internet===true?'В сети':wan.internet===false?'Нет связи':DASH;
+card(0,internet,wan.internet===true?'Работает':DASH);
+component('Интернет',internet,wan.internet===false?'Нет связи':DASH);set('#system-wan',internet);
+const tunnels=Array.isArray(wg.interfaces)&&wg.interfaces_unknown!==true?wg.interfaces:null;
+if(!tunnels){card(1,DASH,DASH);component('VPN',DASH,DASH);set('#system-vpn',DASH);set('#vpn-tunnels',DASH)}
+else{
+  const on=tunnels.filter(t=>t&&t.disabled!==true&&t.enabled!==false);
+  const up=on.filter(t=>isUp(t.connected));
+  const v=on.some(t=>t.connected==null)?DASH:up.length+' из '+on.length;
+  card(1,v,'Подключено');component('VPN',v,on.length===0?'Туннели отключены':DASH);set('#system-vpn',v);
+  const el=$('#vpn-tunnels');if(el){el.replaceChildren();if(!tunnels.length){el.append(text(DASH));}else for(const [index,t] of tunnels.entries()){
+    const r=document.createElement('div');r.className='tunnel-item';
+    const name=document.createElement('strong');name.textContent=clean(t.title||t.label||('VPN '+(index+1)));
+    const v=document.createElement('span');v.className='status';v.textContent=t.disabled===true||t.enabled===false?'Выключен':t.connected==null?DASH:isUp(t.connected)?'Подключён':'Нет соединения';
+    r.append(name,v);el.append(r);
+  }}
+}
+const version=platform.version;if(version!=null){set('#setting-version',clean(version));set('#system-version',clean(version));}
+if(platform.channel!=null)set('#setting-channel',clean(platform.channel));
+}
+const classMode=l=>l&&l.dns_mode?'dns':l?.via==='vpn'?'vpn':l?.via==='bypass'||l?.via==='isp'?'isp':l?.route==='ISP'?'isp':'unknown';
+const modeLabel={vpn:'VPN',isp:'Провайдер',dns:'Smart DNS',unknown:DASH};
+const modeColor={vpn:'var(--purple)',isp:'var(--cyan)',dns:'var(--orange)',unknown:'var(--soft)'};
+function clearLists(){card(3,DASH,DASH);set('#live-routes',DASH);set('#route-distribution',DASH)}
+function renderLists(d){const list=Array.isArray(d.lists)?d.lists:null;if(!list){clearLists();return}
+ const counts={vpn:0,isp:0,dns:0,unknown:0};let count=0,knownCounts=0;
+ for(const l of list){counts[classMode(l)]++;if(num(l.count)!=null){knownCounts++;count+=num(l.count)}}
+ card(3,knownCounts===list.length?fmt(count):DASH,list.length+' '+(list.length===1?'список':list.length>=2&&list.length<=4?'списка':'списков'));
+ const root=$('#live-routes');if(root){root.replaceChildren();if(!list.length)root.append(text(DASH));else {
+  for(const l of list.slice(0,30)){
+   const row=document.createElement('div');row.className='live-route';
+   const title=document.createElement('strong');title.textContent=clean(l.title||l.name||DASH);
+   const route=document.createElement('span');route.textContent=modeLabel[classMode(l)];
+   row.append(title,route);root.append(row);
+  }
+  if(list.length>30)root.append(text('Ещё '+(list.length-30)));
+ }}
+ const dist=$('#route-distribution');if(dist){dist.replaceChildren();if(!list.length){dist.append(text(DASH))}else{
+  const bar=document.createElement('div');bar.className='route-dist-bar';bar.setAttribute('aria-label','Распределение доменных списков');
+  const legend=document.createElement('div');legend.className='route-dist-legend';
+  for(const key of ['vpn','isp','dns','unknown']){
+   if(!counts[key])continue;
+   const piece=document.createElement('span');piece.style.width=(100*counts[key]/list.length)+'%';piece.style.background=modeColor[key];bar.append(piece);
+   const label=document.createElement('span');const dot=document.createElement('i');dot.style.background=modeColor[key];label.append(dot,text(modeLabel[key]+' · '+counts[key]));legend.append(label);
+  }dist.append(bar,legend);
+ }}
+}
+function clearAI(){set('#service-list',DASH);set('#smartdns-status',DASH);card(2,DASH,DASH)}
+function renderAI(d){const services=Array.isArray(d.services)?d.services:null;
+const sd=d.smartdns&&typeof d.smartdns==='object'?d.smartdns:null;
+const a=sd?.alive;set('#smartdns-status',a==='yes'?'Сервер отвечает':a==='no'?'Сервер недоступен':DASH);
+const root=$('#service-list');if(!root)return;root.replaceChildren();if(!services||!services.length){root.append(text(DASH));return}
+for(const s of services.slice(0,100)){
+ const row=document.createElement('div');row.className='service-item';
+ const name=document.createElement('div');name.className='service-title';name.textContent=clean(s.title||s.name||s.id||DASH);
+ const right=document.createElement('div');right.className='service-right';
+ const makeRow=(label,v)=>{const el=document.createElement('div');el.className='service-row';const lab=text(label),value=document.createElement('strong');value.textContent=mode(v);if(v&&v!=='unknown'&&v!=='none'&&label==='Применено'&&s.selected!=null&&s.selected!==s.effective)value.classList.add('pending');el.append(lab,value);return el};
+ right.append(makeRow('Выбрано',s.selected),makeRow('Применено',s.effective));row.append(name,right);root.append(row);
+}if(services.length>100)root.append(text('Ещё '+(services.length-100)));
+}
+function clearAds(){set('#ads-status',DASH);component('Блокировка рекламы',DASH,DASH)}
+function renderAds(d){const v=d.component_enabled===false?'Выключено':d.paused===true?'На паузе':d.component_enabled===true&&d.paused===false?'Включено':DASH;
+set('#ads-status',v);component('Блокировка рекламы',v,DASH)}
+function clearNotes(){set('#events .events',DASH)}
+function renderNotes(d){const root=$('#events .events');if(!root)return;root.replaceChildren();const a=Array.isArray(d.notes)?d.notes:Array.isArray(d.items)?d.items:Array.isArray(d.events)?d.events:null;
+if(!a||!a.length){root.append(text(DASH));return}
+for(const it of a.slice(0,15)){
+ const row=document.createElement('div');row.className='event';const dot=document.createElement('span');dot.className='dot';
+ const block=document.createElement('div');const title=document.createElement('div');title.className='event-title';title.textContent=clean(it.title||it.text||it.message||DASH);block.append(title);row.append(dot,block);root.append(row);
+}}
+async function refresh(){if(loading)return;loading=true;const button=$('#refresh');if(button)button.disabled=true;
+const a=['status','lists-data','ai-data','ads-data','notes'];
+try{const results=await Promise.allSettled(a.map(api));
+ const fns=[renderStatus,renderLists,renderAI,renderAds,renderNotes],fails=[clearStatus,clearLists,clearAI,clearAds,clearNotes];
+ results.forEach((r,i)=>r.status==='fulfilled'?fns[i](r.value):fails[i]());
+}finally{loading=false;if(button)button.disabled=false;}
+}
+// Every navigation destination is a real section of the same continuous document.
+const navTargets=[['overview','#overview'],['wan','#network'],['vpn','#vpn'],['routes','#routes'],['utils','#components'],['ai','#dns'],['ads','#ads'],['system','#system'],['logs','#events'],['settings','#settings']]
+ .map(([id,selector])=>({id,el:$(selector)})).filter(x=>x.el);
+const more=$('#more-sheet'),toggle=$('#more-toggle');let current='overview',freezeUntil=0,selected=null,scrollTick=false;
+const primary=new Set(['overview','wan','vpn','routes']);
+function closeMore(){if(more)more.hidden=true;if(toggle)toggle.setAttribute('aria-expanded','false')}
+function markNav(id){current=id;for(const el of $$('.tabbar a[data-nav],.more-links a[data-nav]')){
+ const on=el.dataset.nav===id;el.classList.toggle('is-active',on);if(on)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');
+}
+if(toggle){const on=!primary.has(id);toggle.classList.toggle('is-active',on);toggle.setAttribute('aria-label',on?'Ещё — '+({'ai':'DNS','ads':'Реклама','utils':'Компоненты','system':'Система','settings':'Настройки','logs':'Журналы'}[id]||'раздел'):'Ещё');}
+}
+function sectionAtScroll(){const offset=Math.min(130,window.innerHeight*0.24);let best='overview',bestTop=-Infinity;
+for(const section of navTargets){const y=section.el.getBoundingClientRect().top;if(y<=offset&&y>=bestTop-1){if(y>bestTop+2){best=section.id;bestTop=y}else if(section.id===current){best=section.id;bestTop=y}}}
+// Near document end: the last card must be reachable and correctly highlighted.
+if(window.innerHeight+window.scrollY>=document.documentElement.scrollHeight-6){const last=navTargets.filter(x=>x.el.getBoundingClientRect().top<window.innerHeight-90).at(-1);if(last)best=last.id}
+return best}
+function track(){scrollTick=false;if(Date.now()<freezeUntil&&selected)return;selected=null;const id=sectionAtScroll();if(id!==current)markNav(id)}
+window.addEventListener('scroll',()=>{if(scrollTick)return;scrollTick=true;requestAnimationFrame(track)},{passive:true});
+window.addEventListener('resize',()=>requestAnimationFrame(track));
+document.addEventListener('click',event=>{
+if(event.target.closest('#more-toggle')){event.preventDefault();const open=more&&more.hidden;if(more)more.hidden=!open;if(toggle)toggle.setAttribute('aria-expanded',String(!!open));return;}
+const link=event.target.closest('a[data-nav]');if(link){const sec=navTargets.find(x=>x.id===link.dataset.nav);if(!sec)return;
+event.preventDefault();closeMore();selected=sec.id;freezeUntil=Date.now()+950;markNav(sec.id);
+sec.el.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});
+if(window.history.replaceState)window.history.replaceState(null,'','#'+sec.el.id);
+return;
+}
+if(more&&!more.hidden&&!event.target.closest('#more-sheet'))closeMore();
+});
+window.addEventListener('keydown',e=>{if(e.key==='Escape')closeMore()});
+$('#refresh')?.addEventListener('click',refresh);
+markNav('overview');
+const fragment=location.hash.replace(/^#/,'');const target=navTargets.find(x=>x.el.id===fragment);if(target){markNav(target.id);requestAnimationFrame(()=>target.el.scrollIntoView({behavior:'instant',block:'start'}))}
+refresh();
+})();
+</script></body>
+</html>
