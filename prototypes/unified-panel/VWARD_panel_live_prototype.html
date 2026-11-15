@@ -153,6 +153,28 @@ html{scroll-behavior:smooth;scroll-padding-top:18px}
 .compact-header .load-track{position:absolute;top:auto;bottom:-7px;right:0;left:auto;width:170px;max-width:75%;height:2px}
 @media(max-width:460px){.header.compact-header{min-height:38px;margin-bottom:13px;flex-wrap:nowrap;align-items:center}.header.compact-header>.head-actions{width:auto;flex:0 0 auto;order:0;justify-content:flex-end;gap:6px}}
 @media(prefers-reduced-motion:reduce){.compact-header #refresh.refreshing .action-svg{animation:none}}
+
+/* v8 — catalogue, About, license, change history, instructions */
+.v8-section .section-head{margin-bottom:17px}.v8-section .section-sub{font-size:13px;line-height:1.5;color:var(--muted);margin:6px 0 12px;max-width:75ch}
+.system-jump-links{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.system-jump-links a,.about-links a{padding:9px 12px;border:1px solid var(--line);border-radius:11px;color:var(--ink);text-decoration:none;font-size:13px;background:var(--card2)}
+.system-jump-links a:hover,.about-links a:hover,.dir-row:hover{background:rgba(148,120,244,.12);border-color:var(--purple)}
+.dir-index{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.dir-group{min-width:0;overflow:hidden;border:1px solid var(--line);border-radius:13px;background:var(--card2)}
+.dir-group summary{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 15px;cursor:pointer;color:var(--ink);font-size:14px;font-weight:650;list-style:none}
+.dir-group summary::-webkit-details-marker{display:none}.dir-group summary::after{content:'⌄';color:var(--muted)}.dir-group[open] summary::after{content:'⌃'}
+.dir-count{font-size:11px;color:var(--muted);font-weight:400;white-space:nowrap}.dir-links{padding:0 10px 11px}
+.dir-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 8px;border-radius:8px;text-decoration:none;color:var(--ink);border:1px solid transparent;font-size:13px;line-height:1.35}
+.dir-row[hidden]{display:none!important}.dir-row span{min-width:0;overflow-wrap:anywhere}.dir-row small{white-space:nowrap;color:var(--muted);font-size:10px;text-align:right}
+.dir-row.dir-root{color:var(--purple);font-weight:650}.dir-components{margin-top:8px}
+.about-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:16px}.about-details>div{padding:13px;background:var(--card2);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;gap:7px;min-width:0}.about-details span{font-size:12px;color:var(--muted)}.about-details strong{font-size:16px;color:var(--ink);overflow-wrap:anywhere}
+.about-links{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 18px}.license-details{border:1px solid var(--line);border-radius:12px;padding:12px 14px}.license-details summary{cursor:pointer;font-size:13px;color:var(--ink)}.license-details pre{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font-size:11px;line-height:1.55;color:var(--muted);max-height:400px;overflow:auto}
+.about-subtitle{font-size:15px;margin:25px 0 6px;color:var(--ink)}.thirdparty-table{border:1px solid var(--line);border-radius:12px;overflow:hidden}.thirdparty-heading,.thirdparty-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:8px;padding:12px;border-bottom:1px solid var(--line);font-size:12px}.thirdparty-heading{color:var(--muted);font-weight:650;background:var(--card2)}.thirdparty-row:last-child{border-bottom:0}.thirdparty-row>span{min-width:0;overflow-wrap:anywhere}
+.release-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.release-item{border:1px solid var(--line);background:var(--card2);border-radius:12px;padding:13px;min-width:0}.release-item strong{color:var(--ink)}.release-item span{display:block;color:var(--muted);font-size:11px;margin-top:5px}.release-item p{font-size:12px;margin:10px 0 0;color:var(--muted);line-height:1.5}
+.help-links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.help-links a{display:flex;flex-direction:column;gap:5px;padding:14px;background:var(--card2);border:1px solid var(--line);border-radius:12px;color:var(--ink);text-decoration:none}.help-links a:hover{border-color:var(--purple)}.help-links small{color:var(--muted);font-size:12px}
+.more-sheet:not([hidden]){max-height:calc(100vh - 115px);max-height:calc(100dvh - 115px);overflow-y:auto;overscroll-behavior:contain}
+@media(max-width:700px){.dir-index,.release-list,.help-links{grid-template-columns:1fr}.about-details{grid-template-columns:repeat(2,minmax(0,1fr))}.dir-row small{white-space:normal;max-width:100px}}
+@media(max-width:350px){.about-details{grid-template-columns:1fr}.thirdparty-heading,.thirdparty-row{grid-template-columns:2fr 1fr 1fr;font-size:11px;padding:9px}.dir-row{font-size:12px}}
 </style>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport"/>
@@ -462,10 +484,135 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
 <div class="card kpi" style="--accent:var(--orange)"><div class="kpi-top"><span>Домены в маршрутах</span><span class="kpi-icon"><svg><use href="#i-route"></use></svg></span></div><div class="kpi-val">—</div><div class="kpi-foot">—</div></div>
 </section><section class="card section" id="vpn"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">VPN</h2></div></div><div class="tunnel-list" id="vpn-tunnels">—</div></div></section><section aria-label="Карта маршрутов" class="card section" id="routes"><div class="card-inner" style="padding-bottom:4px"><div class="section-head"><div><h2 class="title-accent">Доменные списки</h2></div><p class="section-explainer">Назначения списков, не измерение трафика.</p></div></div>
 <div class="route-map" id="live-routes">—</div><div class="route-distribution" id="route-distribution">—</div></section><section class="card service-card section" id="control"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Сервисы и маршруты</h2></div></div></div>
-<div class="service-list" id="service-list">—</div></section><section class="card section compact-section" id="ads"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Реклама и трекеры</h2></div></div><div class="simple-status" id="ads-status">—</div></div></section><section class="card section compact-section" id="dns"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">DNS и Smart DNS</h2></div></div><div class="simple-status" id="smartdns-status">—</div></div></section><section class="card section" id="components"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Компоненты</h2></div></div><div class="status-list" id="component-list">—</div></div></section><section class="card section" id="system"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Система</h2></div></div><div class="settings-grid"><div class="setting-tile"><span>Версия</span><strong id="system-version">—</strong></div><div class="setting-tile"><span>Свободно на диске</span><strong id="system-disk">—</strong></div><div class="setting-tile"><span>Компонентов VWARD</span><strong id="system-components">—</strong></div></div></div></section><section class="card section" id="settings">
+<div class="service-list" id="service-list">—</div></section><section class="card section compact-section" id="ads"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Реклама и трекеры</h2></div></div><div class="simple-status" id="ads-status">—</div></div></section><section class="card section compact-section" id="dns"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">DNS и Smart DNS</h2></div></div><div class="simple-status" id="smartdns-status">—</div></div></section><section class="card section" id="components"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Компоненты</h2></div></div><div class="status-list" id="component-list">—</div></div></section><section class="card section" id="system"><div class="card-inner"><nav class="system-jump-links" aria-label="Дополнительные страницы"><a href="#directory">Все разделы</a><a href="#about">О программе</a><a href="#changes">Список изменений</a><a href="#help">Инструкции</a></nav><div class="section-head"><div><h2 class="title-accent">Система</h2></div></div><div class="settings-grid"><div class="setting-tile"><span>Версия</span><strong id="system-version">—</strong></div><div class="setting-tile"><span>Свободно на диске</span><strong id="system-disk">—</strong></div><div class="setting-tile"><span>Компонентов VWARD</span><strong id="system-components">—</strong></div></div></div></section><section class="card section" id="settings">
 <div class="card-inner">
 <div class="section-head"><div><h2 class="title-accent">Настройки</h2></div><span class="quiet-tag">Только просмотр</span></div>
-<div class="settings-grid"><div class="setting-tile"><span>Версия VWARD</span><strong id="setting-version">—</strong></div><div class="setting-tile"><span>Канал обновлений</span><strong id="setting-channel">—</strong></div><div class="setting-tile"><span>Тема оформления</span><strong id="theme-mode">как в системе</strong></div></div></div></section><section class="card section" id="events"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Уведомления</h2></div></div><div class="events">—</div></div></section></main></div>
+<div class="settings-grid"><div class="setting-tile"><span>Версия VWARD</span><strong id="setting-version">—</strong></div><div class="setting-tile"><span>Канал обновлений</span><strong id="setting-channel">—</strong></div><div class="setting-tile"><span>Тема оформления</span><strong id="theme-mode">как в системе</strong></div></div></div></section>
+<section class="card section v8-section" id="directory" aria-label="Все разделы Панели VWARD"><div class="card-inner">
+  <div class="section-head"><div><h2 class="title-accent">Разделы Панели</h2><p class="section-sub">Полный каталог действующих адресов разделов. Основные — здесь, вложенные открываются в штатной Панели.</p></div></div>
+  <div class="dir-index" id="directory-index">
+<details class="dir-group" ><summary><span>Обзор</span><span class="dir-count"></span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#overview"><span>Обзор</span><small>В этом прототипе</small></a>
+</div></details>
+<details class="dir-group" ><summary><span>Сеть</span><span class="dir-count">3 вложенных</span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#network"><span>Сеть</span><small>В этом прототипе</small></a>
+<a class="dir-row" data-page-id="d-wanrec" data-live-path="/network/recovery" href="/network/recovery" title="Открыть в действующей Панели VWARD"><span>Восстановление: дополнительно</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-wificlients" data-live-path="/network/wifi/clients" href="/network/wifi/clients" title="Открыть в действующей Панели VWARD"><span>Все клиенты</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="wifi" data-live-path="/network/wifi" href="/network/wifi" title="Открыть в действующей Панели VWARD"><span>Wi-Fi клиенты</span><small>Открыть действующую Панель</small></a>
+</div></details>
+<details class="dir-group" ><summary><span>VPN</span><span class="dir-count"></span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#vpn"><span>VPN</span><small>В этом прототипе</small></a>
+</div></details>
+<details class="dir-group" open><summary><span>Маршруты</span><span class="dir-count">7 вложенных</span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#routes"><span>Маршруты</span><small>В этом прототипе</small></a>
+<a class="dir-row" data-page-id="d-mydomains" data-live-path="/domains/my" href="/domains/my" title="Открыть в действующей Панели VWARD"><span>Мои домены</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-force" data-live-path="/domains/always-vpn" href="/domains/always-vpn" title="Открыть в действующей Панели VWARD"><span>Мои домены · постоянный VPN</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-adaptive" data-live-path="/domains/autopick" href="/domains/autopick" title="Открыть в действующей Панели VWARD"><span>Автоподбор доменов</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-rsources" data-live-path="/domains/sources" href="/domains/sources" title="Открыть в действующей Панели VWARD"><span>Источники</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-services" data-live-path="/domains/services" href="/domains/services" title="Открыть в действующей Панели VWARD"><span>Сервисы</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-ipcats" data-live-path="/domains/ip-categories" href="/domains/ip-categories" title="Открыть в действующей Панели VWARD"><span>IP-категории</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="lists" data-live-path="/domains/lists" href="/domains/lists" title="Открыть в действующей Панели VWARD"><span>Доменные списки</span><small>Открыть действующую Панель</small></a>
+</div></details>
+<details class="dir-group" ><summary><span>Реклама и трекеры</span><span class="dir-count">13 вложенных</span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#ads"><span>Реклама и трекеры</span><small>В этом прототипе</small></a>
+<a class="dir-row" data-page-id="d-querylog" data-live-path="/ads/querylog" href="/ads/querylog" title="Открыть в действующей Панели VWARD"><span>Журнал запросов</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-adrecent" data-live-path="/ads/recent" href="/ads/recent" title="Открыть в действующей Панели VWARD"><span>Решения агента</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-adspub" data-live-path="/ads/publish" href="/ads/publish" title="Открыть в действующей Панели VWARD"><span>Правила в AdGuard Home</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-adprobe" data-live-path="/ads/probe" href="/ads/probe" title="Открыть в действующей Панели VWARD"><span>Подробный разбор</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-adsettings" data-live-path="/ads/settings" href="/ads/settings" title="Открыть в действующей Панели VWARD"><span>Настройки проверки</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-review" data-live-path="/ads/review" href="/ads/review" title="Открыть в действующей Панели VWARD"><span>На проверке</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-blocked" data-live-path="/ads/blocked" href="/ads/blocked" title="Открыть в действующей Панели VWARD"><span>Заблокировано</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-allowed" data-live-path="/ads/allowed" href="/ads/allowed" title="Открыть в действующей Панели VWARD"><span>Разрешено</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-adcats" data-live-path="/ads/categories" href="/ads/categories" title="Открыть в действующей Панели VWARD"><span>Категории блокировки</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-rules" data-live-path="/ads/rules" href="/ads/rules" title="Открыть в действующей Панели VWARD"><span>Мои правила</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-sources" data-live-path="/ads/sources" href="/ads/sources" title="Открыть в действующей Панели VWARD"><span>Источники списков</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-jobs" data-live-path="/ads/jobs" href="/ads/jobs" title="Открыть в действующей Панели VWARD"><span>Задания</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-https" data-live-path="/ads/https" href="/ads/https" title="Открыть в действующей Панели VWARD"><span>HTTPS-фильтр</span><small>Открыть действующую Панель</small></a>
+</div></details>
+<details class="dir-group" ><summary><span>DNS</span><span class="dir-count">1 вложенных</span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#dns"><span>DNS</span><small>В этом прототипе</small></a>
+<a class="dir-row" data-page-id="d-smartdns" data-live-path="/ai/smartdns" href="/ai/smartdns" title="Открыть в действующей Панели VWARD"><span>Домены Smart DNS</span><small>Открыть действующую Панель</small></a>
+</div></details>
+<details class="dir-group" ><summary><span>Компоненты</span><span class="dir-count">11 вложенных</span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#components"><span>Компоненты</span><small>В этом прототипе</small></a>
+<a class="dir-row" data-page-id="d-agh" data-live-path="/utilities/adguard-home" href="/utilities/adguard-home" title="Открыть в действующей Панели VWARD"><span>AdGuard Home</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-dnsex" data-live-path="/utilities/adguard-home/exceptions" href="/utilities/adguard-home/exceptions" title="Открыть в действующей Панели VWARD"><span>Исключения фильтрации</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-awg" data-live-path="/utilities/amneziawg" href="/utilities/amneziawg" title="Открыть в действующей Панели VWARD"><span>AmneziaWG</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-vless" data-live-path="/utilities/vless" href="/utilities/vless" title="Открыть в действующей Панели VWARD"><span>Модуль VLESS</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-dnsmasq" data-live-path="/utilities/dnsmasq" href="/utilities/dnsmasq" title="Открыть в действующей Панели VWARD"><span>dnsmasq</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-singbox" data-live-path="/utilities/sing-box" href="/utilities/sing-box" title="Открыть в действующей Панели VWARD"><span>sing-box</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-dnscap" data-live-path="/utilities/dns-capture" href="/utilities/dns-capture" title="Открыть в действующей Панели VWARD"><span>Захват DNS-запросов</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-doh" data-live-path="/utilities/doh-client" href="/utilities/doh-client" title="Открыть в действующей Панели VWARD"><span>DoH-клиент</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-agents" data-live-path="/utilities/agents" href="/utilities/agents" title="Открыть в действующей Панели VWARD"><span>Агенты</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-aghfilters" data-live-path="/utilities/adguard-home/filters" href="/utilities/adguard-home/filters" title="Открыть в действующей Панели VWARD"><span>Фильтры AdGuard Home</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-aghservices" data-live-path="/utilities/adguard-home/services" href="/utilities/adguard-home/services" title="Открыть в действующей Панели VWARD"><span>Блокировка сервисов</span><small>Открыть действующую Панель</small></a>
+</div></details>
+<details class="dir-group" open><summary><span>Система</span><span class="dir-count">10 вложенных</span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#system"><span>Система</span><small>В этом прототипе</small></a>
+<a class="dir-row" data-page-id="d-diag" data-live-path="/system/diag" href="/system/diag" title="Открыть в действующей Панели VWARD"><span>Диагностика</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-stability" data-live-path="/system/stability" href="/system/stability" title="Открыть в действующей Панели VWARD"><span>Стабильность</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-files" data-live-path="/system/files" href="/system/files" title="Открыть в действующей Панели VWARD"><span>Файлы VWARD</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-control" data-live-path="/system/control" href="/system/control" title="Открыть в действующей Панели VWARD"><span>Управление</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-cron" data-live-path="/system/diag/cron" href="/system/diag/cron" title="Открыть в действующей Панели VWARD"><span>Задания по расписанию</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="u-vward" data-live-path="/system/vward" href="/system/vward" title="Открыть в действующей Панели VWARD"><span>VWARD</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="u-agh" data-live-path="/system/adguard-home-update" href="/system/adguard-home-update" title="Открыть в действующей Панели VWARD"><span>Обновление AdGuard Home</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="u-fw" data-live-path="/system/firmware" href="/system/firmware" title="Открыть в действующей Панели VWARD"><span>Прошивка Keenetic</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="u-opkg" data-live-path="/system/entware" href="/system/entware" title="Открыть в действующей Панели VWARD"><span>Пакеты Entware</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-notes" data-live-path="/system/vward/notes" href="/system/vward/notes" title="Открыть в действующей Панели VWARD"><span>Что нового</span><small>Открыть действующую Панель</small></a>
+</div></details>
+<details class="dir-group" ><summary><span>Настройки</span><span class="dir-count"></span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#settings"><span>Настройки</span><small>В этом прототипе</small></a>
+</div></details>
+<details class="dir-group" ><summary><span>Журналы</span><span class="dir-count"></span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#events"><span>Журналы</span><small>В этом прототипе</small></a>
+</div></details>
+<div id="live-component-links" class="dir-components" aria-label="Страницы установленных компонентов"></div></div>
+</div></section>
+<section class="card section v8-section" id="about" aria-label="О программе"><div class="card-inner">
+  <div class="section-head"><div><h2 class="title-accent">О программе</h2></div></div>
+  <div class="about-details"><div><span>Программа</span><strong>VWARD</strong></div><div><span>Установленная версия</span><strong id="about-version">—</strong></div><div><span>Канал</span><strong id="about-channel">—</strong></div><div><span>Лицензия VWARD</span><strong>MIT</strong></div></div>
+  <div class="about-links"><a href="https://github.com/Ziegfe1d/VWARD" target="_blank" rel="noopener noreferrer">Исходный код VWARD</a><a href="https://github.com/Ziegfe1d/VWARD/blob/dev/LICENSE" target="_blank" rel="noopener noreferrer">Файл лицензии</a><a href="https://github.com/Ziegfe1d/VWARD/blob/dev/docs/DEPENDENCIES.md" target="_blank" rel="noopener noreferrer">Список зависимостей</a></div>
+  <details class="license-details"><summary>Текст лицензии VWARD (MIT)</summary><pre>MIT License
+
+Copyright (c) 2026 Ziegfe1d
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.</pre></details>
+  <h3 class="about-subtitle">Компоненты и лицензии</h3>
+  <p class="section-sub">Установленные версии берутся с роутера, когда API их сообщает. Лицензии сторонних программ пока не подтверждены манифестом — показан прочерк, а не догадка.</p>
+  <div class="thirdparty-table" role="table"><div class="thirdparty-heading" role="row"><span>Компонент</span><span>Версия</span><span>Лицензия</span></div><div id="about-dependencies"><div class="thirdparty-row"><span>—</span><span>—</span><span>—</span></div></div></div>
+</div></section>
+<section class="card section v8-section" id="changes" aria-label="Список изменений"><div class="card-inner">
+  <div class="section-head"><div><h2 class="title-accent">Список изменений</h2><p class="section-sub">Последние опубликованные записи из CHANGELOG в репозитории. Это не история установки на твоём роутере.</p></div></div>
+  <div class="release-list"><div class="release-item"><strong>0.2.0 RC2 #39.1</strong><span>15.11.2026</span><p>Ядро автоподбора заменяется после обновления</p></div>
+<div class="release-item"><strong>0.2.0 RC2 #39</strong><span>15.11.2026</span><p>Заморозка отжившего, автоподбор через VPN, песочница рекламы</p></div>
+<div class="release-item"><strong>0.2.0 RC2 #38.1</strong><span>12.11.2026</span><p>Каждый доменный список своей страницей, переключатели маршрутов</p></div>
+<div class="release-item"><strong>0.2.0 RC2 #38</strong><span>12.11.2026</span><p>Смена туннеля, автоподбор, списки и компоненты</p></div>
+<div class="release-item"><strong>0.2.0 RC2 #37</strong><span>12.11.2026</span><p>Облегчённая VWARD, автоподбор и списки на Go</p></div>
+<div class="release-item"><strong>0.2.0 RC2 #36.1</strong><span>11.11.2026</span><p>Контроль целостности, восстановление процессов и Панель</p></div></div>
+  <div class="about-links"><a href="https://github.com/Ziegfe1d/VWARD/blob/dev/CHANGELOG.md" target="_blank" rel="noopener noreferrer">Полный список изменений</a><a href="https://github.com/Ziegfe1d/VWARD/releases" target="_blank" rel="noopener noreferrer">Выпуски VWARD</a></div>
+</div></section>
+<section class="card section v8-section" id="help" aria-label="Инструкции и документация"><div class="card-inner">
+  <div class="section-head"><div><h2 class="title-accent">Инструкции</h2></div></div>
+  <div class="help-links"><a href="https://github.com/Ziegfe1d/VWARD/blob/dev/docs/INSTALL.md" target="_blank" rel="noopener noreferrer"><strong>Установка и обновление</strong><small>Руководство по установке</small></a><a href="https://github.com/Ziegfe1d/VWARD/blob/dev/docs/PANEL.md" target="_blank" rel="noopener noreferrer"><strong>Работа с Панелью</strong><small>Разделы и их назначение</small></a><a href="https://github.com/Ziegfe1d/VWARD/blob/dev/docs/ROADMAP.md" target="_blank" rel="noopener noreferrer"><strong>План развития</strong><small>Задачи и версии</small></a><a href="https://github.com/Ziegfe1d/VWARD/blob/dev/docs/ARCHITECTURE.md" target="_blank" rel="noopener noreferrer"><strong>Архитектура</strong><small>Устройство VWARD</small></a></div>
+  <p class="section-sub">Документация открывается по ссылкам на GitHub. Автономная документация и реестр лицензий для установки на роутере пока не созданы.</p>
+</div></section>
+<section class="card section" id="events"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Уведомления</h2></div></div><div class="events">—</div></div></section></main></div>
 <nav aria-label="Основная навигация" class="tabbar"><a aria-current="page" class="tab tab-mobile is-active" data-nav="overview" href="#overview"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-home"></use></svg><span>Обзор</span></a><a class="tab tab-mobile" data-nav="wan" href="#network"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-globe"></use></svg><span>Сеть</span></a><a class="tab tab-mobile" data-nav="vpn" href="#vpn"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-shield"></use></svg><span>VPN</span></a><a class="tab tab-mobile" data-nav="routes" href="#routes"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-list"></use></svg><span>Маршруты</span></a><button aria-controls="more-sheet" aria-expanded="false" class="tab tab-mobile" id="more-toggle" type="button"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-more"></use></svg><span>Ещё</span></button><a aria-current="page" class="tab tab-desktop is-active" data-nav="overview" href="#overview"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-home"></use></svg><span>Обзор</span></a><a class="tab tab-desktop" data-nav="wan" href="#network"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-globe"></use></svg><span>Сеть</span></a><a class="tab tab-desktop" data-nav="vpn" href="#vpn"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-shield"></use></svg><span>VPN</span></a><a class="tab tab-desktop" data-nav="routes" href="#routes"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-list"></use></svg><span>Маршруты</span></a><a class="tab tab-desktop" data-nav="ads" href="#ads"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-block"></use></svg><span>Реклама</span></a><a class="tab tab-desktop" data-nav="ai" href="#dns"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-spark"></use></svg><span>DNS</span></a><a class="tab tab-desktop" data-nav="utils" href="#components"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-tools"></use></svg><span>Компоненты</span></a><a class="tab tab-desktop" data-nav="system" href="#system"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-platform"></use></svg><span>Система</span></a><a class="tab tab-desktop" data-nav="settings" href="#settings"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-sliders"></use></svg><span>Настройки</span></a><a class="tab tab-desktop" data-nav="logs" href="#events"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-logs"></use></svg><span>Журналы</span></a></nav>
 <!-- One shared place for transient operation messages, just above the bottom navigation. -->
 <div id="ui-status" class="ui-status is-info" role="status" aria-live="polite" aria-atomic="true" hidden>
@@ -473,7 +620,7 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
   <span id="ui-status-text" class="ui-status-text"></span>
   <button id="ui-status-dismiss" class="ui-status-dismiss" type="button" aria-label="Закрыть сообщение" hidden><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-close" xlink:href="#i-close"></use></svg></button>
 </div>
-<div class="more-sheet" hidden="" id="more-sheet"><div class="more-title">Разделы</div><div class="more-links"><a data-nav="ads" href="#ads"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-block"></use></svg><span>Реклама</span></a><a data-nav="ai" href="#dns"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-spark"></use></svg><span>DNS</span></a><a data-nav="utils" href="#components"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-tools"></use></svg><span>Компоненты</span></a><a data-nav="system" href="#system"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-platform"></use></svg><span>Система</span></a><a data-nav="settings" href="#settings"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-sliders"></use></svg><span>Настройки</span></a><a data-nav="logs" href="#events"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-logs"></use></svg><span>Журналы</span></a></div></div>
+<div class="more-sheet" hidden="" id="more-sheet"><div class="more-title">Разделы</div><div class="more-links"><a data-nav="ads" href="#ads"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-block"></use></svg><span>Реклама</span></a><a data-nav="ai" href="#dns"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-spark"></use></svg><span>DNS</span></a><a data-nav="utils" href="#components"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-tools"></use></svg><span>Компоненты</span></a><a data-nav="system" href="#system"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-platform"></use></svg><span>Система</span></a><a data-nav="settings" href="#settings"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-sliders"></use></svg><span>Настройки</span></a><a data-nav="logs" href="#events"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-logs"></use></svg><span>Журналы</span></a><a href="#directory" data-nav="utils"><span>Все разделы</span></a><a href="#about" data-nav="system"><span>О программе</span></a><a href="#changes" data-nav="system"><span>Список изменений</span></a><a href="#help" data-nav="system"><span>Инструкции</span></a></div></div>
 <div class="ui-overlay" hidden="" id="ui-overlay"><button aria-label="Закрыть" class="ui-scrim" data-close-overlay="" type="button"></button><div class="ui-popover" role="presentation"><div class="overlay-top"><button aria-label="Закрыть" class="overlay-close" data-close-overlay="" id="overlay-close" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-close" xlink:href="#i-close"></use></svg></button></div><section aria-label="Поиск по Панели VWARD" aria-modal="true" id="search-panel" role="dialog"><input aria-label="Поиск по Панели VWARD" autocomplete="off" id="search-input" placeholder="Поиск по Панели VWARD" type="search"/><div class="search-results" id="search-results">—</div></section><section aria-label="Уведомления" aria-modal="true" hidden="" id="notes-panel" role="dialog"><h2>Уведомления</h2><div class="notes-content" id="notes-content">—</div></section></div></div><script>/* VWARD unified Panel v7 — read-only HTML5, ES5 syntax for legacy browsers.
    No external scripts, timers polling Keenetic, POSTs or fictional metrics. */
 (function () {
@@ -556,9 +703,9 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
   }
   function clearStatus() {
     kpi(0,DASH,DASH); kpi(1,DASH,DASH);
-    each(['#system-version','#setting-version','#system-disk','#system-components','#setting-channel'],function (s) {put(s,DASH);});
+    each(['#system-version','#setting-version','#system-disk','#system-components','#setting-channel','#about-version','#about-channel'],function (s) {put(s,DASH);});
     var root = sv('vpn-tunnels'); clear(root); if (root) root.appendChild(text(DASH));
-    root = sv('component-list'); clear(root); if(root)root.appendChild(text(DASH));
+    root = sv('component-list'); clear(root); if(root)root.appendChild(text(DASH));renderAbout(null);renderComponentPages(null);
   }
   function tunnelOff(t, wg) {
     return t && String(t.state || '').toLowerCase() === 'down' && !(yes(wg.failopen_active) && t.name === wg.default_tunnel);
@@ -588,7 +735,7 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
     put('#setting-channel',p.channel==null?DASH:short(p.channel));
     var kb = num(s.storage && s.storage.free_kb);
     put('#system-disk', kb === null ? DASH : kb >= 1048576 ? (kb/1048576).toFixed(1)+' ГБ' : Math.round(kb/1024)+' МБ');
-    renderParts(s.parts);
+    renderParts(s.parts);renderAbout(s);renderComponentPages(s);
   }
   var routeNames={vpn:'VPN', isp:'Провайдер', dns:'Smart DNS',unknown:DASH};
   var routeColors={vpn:'var(--purple)',isp:'var(--cyan)',dns:'var(--orange)',unknown:'var(--soft)'};
@@ -738,7 +885,7 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
   }
 
   /* Fixed bottom bar: the scroll position and current section remain linked. */
-  var anchors=[['overview','overview'],['wan','network'],['vpn','vpn'],['routes','routes'],['routes','control'],['ads','ads'],['ai','dns'],['utils','components'],['system','system'],['settings','settings'],['logs','events']];
+  var anchors=[['overview','overview'],['wan','network'],['vpn','vpn'],['routes','routes'],['routes','control'],['ads','ads'],['ai','dns'],['utils','components'],['system','system'],['settings','settings'],['utils','directory'],['system','about'],['system','changes'],['system','help'],['logs','events']];
   var current='overview', navLock=0, navChoice=null, pendingScroll=false;
   var primary=['overview','wan','vpn','routes'];
   function markNav(id){current=id;each(all('.tabbar a[data-nav],.more-links a[data-nav]'),function(el){var active=el.getAttribute('data-nav')===id;
@@ -759,7 +906,7 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
   function closeMore(){var m=sv('more-sheet'),toggle=sv('more-toggle');if(m)m.hidden=true;attr(toggle,'aria-expanded','false');}
   function focusTo(id,updateUrl){var target=sv(id);if(!target)return;
     navChoice=navOf(id);navLock=now()+1100;markNav(navChoice);closeMore();
-    try{target.scrollIntoView({behavior:reduceMotion()?'auto':'smooth',block:'start'});}catch(e){target.scrollIntoView(true);}
+    var far=Math.abs(target.getBoundingClientRect().top)>(window.innerHeight||800)*1.6;try{target.scrollIntoView({behavior:reduceMotion()||far?'auto':'smooth',block:'start'});}catch(e){target.scrollIntoView(true);}
     if(updateUrl){try{window.history.replaceState(null,'','#'+id);}catch(e){window.location.hash=id;}}
   }
 
@@ -783,11 +930,11 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
     applyTheme();if(!refreshing)showNotice('Тема: '+themeLabels[theme],'info',false);}
 
   /* Search and notifications: local indexes of fetched API data; never fake entries. */
-  var sections=[['overview','Обзор','Состояние сети'],['network','Сеть','Интернет'],['vpn','VPN','Туннели'],['routes','Маршруты','Доменные списки'],['control','Сервисы','Выбрано Применено'],['ads','Реклама','Фильтрация'],['dns','DNS','Smart DNS'],['components','Компоненты','Части'],['system','Система','Версия'],['settings','Настройки','Канал'],['events','Журналы','Уведомления']];
+  var sections=[['overview','Обзор','Состояние сети'],['network','Сеть','Интернет'],['vpn','VPN','Туннели'],['routes','Маршруты','Доменные списки'],['control','Сервисы','Выбрано Применено'],['ads','Реклама','Фильтрация'],['dns','DNS','Smart DNS'],['components','Компоненты','Части'],['system','Система','Версия'],['settings','Настройки','Канал'],['events','Журналы','Уведомления'],['directory','Разделы Панели','Меню'],['about','О программе','Лицензия MIT'],['changes','Список изменений','Версии'],['help','Инструкции','Документация']];
   var searchRows=[];
   function addSearch(id,title,kind){if(!title||title===DASH)return;searchRows.push({id:id,title:short(title),kind:kind});}
   function buildSearch(){searchRows=[];
-    each(sections,function(s){addSearch(s[0],s[1],s[2]);});
+    each(sections,function(s){addSearch(s[0],s[1],s[2]);});each(livePages,function(p){searchRows.push({id:'directory',title:p.title,kind:'Страница действующей Панели',path:p.path});});
     if(data.status){each(((data.status.wg||{}).interfaces||[]),function(t){addSearch('vpn',t.description||t.title||t.name,'VPN');});
       var parts=data.status.parts||{},hidden=array(parts.hidden)?parts.hidden:[];
       each(parts.list||[],function(p){if(p&&p.id&&hidden.indexOf(p.id)===-1&&p.kind!=='retired')addSearch('components',p.title,'Компоненты');});}
@@ -799,7 +946,7 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
     var q=String(input.value||'').toLowerCase().replace(/^\s+|\s+$/g,'');clear(result);var shown=0;
     each(searchRows,function(item){if(shown>=40||q&&(item.title+' '+item.kind).toLowerCase().indexOf(q)===-1)return;
       shown++;var row=document.createElement('button'),head=document.createElement('strong'),sub=document.createElement('small');
-      row.type='button';row.className='search-result';attr(row,'data-anchor',item.id);
+      row.type='button';row.className='search-result';if(item.path)attr(row,'data-live-path',item.path);else attr(row,'data-anchor',item.id);
       head.textContent=item.title;sub.textContent=item.kind;
       row.appendChild(head);row.appendChild(sub);result.appendChild(row);
     });
@@ -834,7 +981,55 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
       each(sectionsNodes,function(el){klass(el,'can-reveal',true);observer.observe(el);});
     }
   }
+
+  /* v8: source maps follow PAGES + DETAILS paths in the live dev panel. */
+  var livePages=[{"id":"d-diag","title":"Диагностика","path":"/system/diag"},{"id":"d-stability","title":"Стабильность","path":"/system/stability"},{"id":"d-files","title":"Файлы VWARD","path":"/system/files"},{"id":"d-control","title":"Управление","path":"/system/control"},{"id":"d-cron","title":"Задания по расписанию","path":"/system/diag/cron"},{"id":"u-vward","title":"VWARD","path":"/system/vward"},{"id":"u-agh","title":"Обновление AdGuard Home","path":"/system/adguard-home-update"},{"id":"u-fw","title":"Прошивка Keenetic","path":"/system/firmware"},{"id":"u-opkg","title":"Пакеты Entware","path":"/system/entware"},{"id":"d-notes","title":"Что нового","path":"/system/vward/notes"},{"id":"d-mydomains","title":"Мои домены","path":"/domains/my"},{"id":"d-force","title":"Мои домены","path":"/domains/always-vpn"},{"id":"d-adaptive","title":"Автоподбор доменов","path":"/domains/autopick"},{"id":"d-smartdns","title":"Домены Smart DNS","path":"/ai/smartdns"},{"id":"d-wanrec","title":"Восстановление: дополнительно","path":"/network/recovery"},{"id":"d-rsources","title":"Источники","path":"/domains/sources"},{"id":"d-services","title":"Сервисы","path":"/domains/services"},{"id":"d-wificlients","title":"Все клиенты","path":"/network/wifi/clients"},{"id":"d-ipcats","title":"IP-категории","path":"/domains/ip-categories"},{"id":"lists","title":"Доменные списки","path":"/domains/lists"},{"id":"wifi","title":"Wi-Fi клиенты","path":"/network/wifi"},{"id":"d-querylog","title":"Журнал запросов","path":"/ads/querylog"},{"id":"d-adrecent","title":"Решения агента","path":"/ads/recent"},{"id":"d-adspub","title":"Правила в AdGuard Home","path":"/ads/publish"},{"id":"d-adprobe","title":"Подробный разбор","path":"/ads/probe"},{"id":"d-adsettings","title":"Настройки проверки","path":"/ads/settings"},{"id":"d-review","title":"На проверке","path":"/ads/review"},{"id":"d-blocked","title":"Заблокировано","path":"/ads/blocked"},{"id":"d-allowed","title":"Разрешено","path":"/ads/allowed"},{"id":"d-adcats","title":"Категории блокировки","path":"/ads/categories"},{"id":"d-rules","title":"Мои правила","path":"/ads/rules"},{"id":"d-sources","title":"Источники списков","path":"/ads/sources"},{"id":"d-jobs","title":"Задания","path":"/ads/jobs"},{"id":"d-https","title":"HTTPS-фильтр","path":"/ads/https"},{"id":"d-agh","title":"AdGuard Home","path":"/utilities/adguard-home"},{"id":"d-dnsex","title":"Исключения фильтрации","path":"/utilities/adguard-home/exceptions"},{"id":"d-awg","title":"AmneziaWG","path":"/utilities/amneziawg"},{"id":"d-vless","title":"Модуль VLESS","path":"/utilities/vless"},{"id":"d-dnsmasq","title":"dnsmasq","path":"/utilities/dnsmasq"},{"id":"d-singbox","title":"sing-box","path":"/utilities/sing-box"},{"id":"d-dnscap","title":"Захват DNS-запросов","path":"/utilities/dns-capture"},{"id":"d-doh","title":"DoH-клиент","path":"/utilities/doh-client"},{"id":"d-agents","title":"Агенты","path":"/utilities/agents"},{"id":"d-aghfilters","title":"Фильтры AdGuard Home","path":"/utilities/adguard-home/filters"},{"id":"d-aghservices","title":"Блокировка сервисов","path":"/utilities/adguard-home/services"}];
+  var dynamicComponentRoutes={
+    'route-engine':'/utilities/route-engine','route-reconciler':'/utilities/route-reconciler',
+    'route-tools':'/utilities/route-tools','policy-sync':'/utilities/policy-sync',
+    'tunnel-guard':'/utilities/tunnel-guard','wan-guard':'/utilities/wan-guard',
+    'ads-privacy-guard':'/utilities/ads-privacy-guard','runtime':'/utilities/runtime',
+    'console':'/utilities/console','update-engine':'/utilities/update-engine',
+    'platform-core':'/utilities/platform-core','vless':'/utilities/vless','agh':'/utilities/adguard-home'
+  };
+  function renderAbout(s){var p=s&&s.platform||{};
+    put('#about-version',p.version?version(p.version,p.last_sequence):DASH);
+    put('#about-channel',p.channel==null?DASH:short(p.channel));
+    var root=sv('about-dependencies');if(!root)return;clear(root);
+    var known=s&&s.parts&&array(s.parts.list)?s.parts.list:[],hidden=s&&s.parts&&array(s.parts.hidden)?s.parts.hidden:[],n=0;
+    each(known,function(part){if(!part||!part.id||hidden.indexOf(part.id)!==-1||part.kind==='retired')return;
+      var row=document.createElement('div');row.className='thirdparty-row';
+      var label=document.createElement('span'),ver=document.createElement('span'),license=document.createElement('span');
+      label.textContent=short(part.title||DASH);ver.textContent=part.version?short(part.version):DASH;license.textContent=DASH;
+      row.appendChild(label);row.appendChild(ver);row.appendChild(license);root.appendChild(row);n++;
+    });
+    if(!n){var empty=document.createElement('div');empty.className='thirdparty-row';
+      each([DASH,DASH,DASH],function(t){var el=document.createElement('span');el.textContent=t;empty.appendChild(el);});root.appendChild(empty);}
+  }
+  function renderComponentPages(s){var root=sv('live-component-links');if(!root)return;clear(root);
+    if(s&&s.parts&&array(s.parts.hidden)){
+      var hiddenPartPages={'d-agh':'agh','d-dnsex':'agh','d-aghfilters':'agh','d-aghservices':'agh',
+        'd-awg':'awg','d-vless':'vless','d-dnsmasq':'dnsmasq','d-singbox':'singbox',
+        'd-dnscap':'dnscap','d-doh':'doh'};
+      each(all('#directory-index [data-page-id]'),function(a){
+        var p=hiddenPartPages[a.getAttribute('data-page-id')];a.hidden=!!(p&&s.parts.hidden.indexOf(p)!==-1);
+      });
+    }
+    var parts=s&&s.parts||{},known=array(parts.list)?parts.list:[],hidden=array(parts.hidden)?parts.hidden:[],group=null,rows=0;
+    each(known,function(part){if(!part||!part.id||hidden.indexOf(part.id)!==-1||part.kind==='retired')return;
+      var path=dynamicComponentRoutes[part.id];if(!path)return;
+      if(!group){group=document.createElement('details');group.className='dir-group';
+        var summary=document.createElement('summary');summary.textContent='Страницы компонентов (из API)';group.appendChild(summary);
+        var box=document.createElement('div');box.className='dir-links';group.appendChild(box);root.appendChild(group);}
+      var a=document.createElement('a'),span=document.createElement('span'),small=document.createElement('small');
+      a.className='dir-row';a.setAttribute('href',path);a.setAttribute('data-live-path',path);
+      span.textContent=short(part.title||DASH);small.textContent='Открыть действующую Панель';a.appendChild(span);a.appendChild(small);
+      group.lastChild.appendChild(a);rows++;
+    });
+  }
+
   function boot(){
+    document.documentElement.style.scrollBehavior='auto';
     var more=sv('more-sheet'),toggle=sv('more-toggle');
     event(toggle,'click',function(e){e.preventDefault();if(!more)return;more.hidden=!more.hidden;attr(toggle,'aria-expanded',!more.hidden);});
     event(document,'click',function(e){
@@ -842,6 +1037,10 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
       if(link){var href=link.getAttribute('href')||'',id=href.slice(1);if(id&&sv(id)){
         e.preventDefault();focusTo(id,true);return;
       }}
+      var liveLink=closest(target,'[data-live-path]');if(liveLink){
+        e.preventDefault();var livePath=liveLink.getAttribute('data-live-path');
+        if(window.location.protocol==='file:')showNotice('Вложенная страница откроется при запуске Панели на роутере','warning',false);
+        else if(livePath&&livePath.charAt(0)==='/'){window.location.assign(livePath);}return;}
       var searchLink=closest(target,'[data-anchor]');if(searchLink){var sid=searchLink.getAttribute('data-anchor');closeOverlay();focusTo(sid,true);return;}
       if(closest(target,'[data-close-overlay]')){closeOverlay();return;}
       if(more&&!more.hidden&&!closest(target,'#more-sheet')&&!closest(target,'#more-toggle'))closeMore();
