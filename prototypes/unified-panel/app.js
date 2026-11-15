@@ -124,7 +124,7 @@
     if (!v.ads) { empty(el, state.errors.ads || 'Нет данных о компоненте'); return; }
     el.classList.remove('empty-live');
     const off = v.ads.component_enabled === false;
-    const running = off ? 'Выключен' : v.ads.paused === true ? 'На паузе' : v.ads.paused === false ? 'Включён' : 'Не подтверждено';
+    const running = off ? 'Выключен' : v.ads.paused === true ? 'На паузе' : v.ads.paused === false ? 'Не на паузе' : 'Не подтверждено';
     el.innerHTML = row('Режим', running)
       + row('Проверка доменов', known(v.ads.total_checked) ? fmt(number(v.ads.total_checked)) : '—')
       + '<a href="/ads" class="button ghost">Реклама и трекеры</a>';
@@ -231,9 +231,10 @@
     b.disabled=true;b.setAttribute('aria-busy','true');
     try {
       await load('status','status');
+      if (/вход|доступ/i.test(state.errors.status || '')) return;
       await Promise.all([load('lists','lists-data'),load('ai','ai-data')]);
       await Promise.all([load('ads','ads-data'),load('notes','notes')]);
-      state.last=Date.now();render();
+      if (state.status || state.lists || state.ai || state.ads || state.notes) state.last=Date.now(); render();
       const failed=Object.keys(state.errors).filter(k=>state.errors[k]);
       if(failed.length)alertMessage('Часть данных недоступна: '+failed.map(k=>state.errors[k]).join('; ').slice(0,200));
     } finally {state.busy=false;b.disabled=false;b.removeAttribute('aria-busy');}
