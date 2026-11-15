@@ -74,7 +74,22 @@
     return { wan: wan.internet === true ? true : wan.internet === false ? false : null,
       wanAddress: wan.address || null, interfaces, active, up, lists: ls, counts, domains, sd,
       services: state.ai && Array.isArray(state.ai.services) ? state.ai.services : null,
-      ads: state.ads, platform: s.platform || null };
+      smart: smartState(sd), ads: state.ads, platform: s.platform || null };
+  }
+  function smartState(sd) {
+    if (!sd) return { title: '—', component: 'Нет данных', health: 'unknown' };
+    if (Array.isArray(sd.server_rows) && !sd.server_rows.length && !sd.own)
+      return { title: 'Не настроен', component: 'Не настроен', health: 'warn' };
+    if (sd.alive === 'yes') return { title: 'Доступен', component: 'Работает', health: 'ok' };
+    if (sd.alive === 'no') return { title: 'Недоступен', component: 'Нет ответа', health: 'bad' };
+    return { title: 'Не проверен', component: 'Не проверен', health: 'warn' };
+  }
+  function versionText(v, seq) {
+    const m = /^(\d+\.\d+\.\d+)(?:-(rc|rp)\.(\d+))?(?:\.fix\.(\d+)(?:\.(\d+))?)?$/.exec(String(v || ''));
+    if (!m) return v || '—';
+    const d = /^20(\d{6})\d*$/.exec(String(seq || ''));
+    return m[1] + (m[2] ? ' ' + m[2].toUpperCase() + m[3] : '') +
+      (m[4] ? ' #' + m[4] + '.' + (m[5] || '0') + (d ? '.' + d[1] : '') : '');
   }
   function viaOf(item) {
     if (item && (item.dns_mode === true || item.dns_mode === 1 || item.dns_mode === '1')) return 'dns';
@@ -98,12 +113,12 @@
     setMetric('metric-vpn', vpnN, v.active === null ? state.errors.status || 'Нет данных' : v.active.length ? 'Подключённые туннели' : 'Активных туннелей нет',
       v.active === null ? 'unknown' : v.up.length === v.active.length ? 'ok' : 'warn');
     const sd = v.sd;
-    setMetric('metric-dns', !sd ? '—' : sd.alive === 'yes' ? 'Доступен' : sd.alive === 'no' ? 'Недоступен' : 'Не проверен',
-      !sd ? state.errors.ai || 'Нет данных' : sd.alive === 'yes' ? 'Сервер отвечает' : 'Проверка Smart DNS',
-      !sd || sd.alive !== 'yes' ? 'warn' : 'ok');
+    setMetric('metric-dns', v.smart.title,
+      !sd ? state.errors.ai || 'Нет данных' : v.smart.health === 'ok' ? 'Сервер отвечает' : 'Проверка Smart DNS',
+      v.smart.health);
     setMetric('metric-domains', fmt(v.domains), v.lists ? v.lists.length + ' доменных списков' : state.errors.lists || 'Нет данных',
       v.lists ? 'ok' : 'unknown');
-    $('live-version').textContent = v.platform ? present(v.platform.version) : '—';
+    $('live-version').textContent = v.platform ? versionText(v.platform.version, v.platform.last_sequence) : '—';
     $('live-channel').textContent = v.platform ? present(v.platform.channel) : '—';
     $('live-updated').textContent = state.last ? new Date(state.last).toLocaleTimeString('ru-RU') : '—';
   }
@@ -115,7 +130,7 @@
     if (!v.sd) { empty(el, state.errors.ai || 'Состояние Smart DNS недоступно'); return; }
     el.classList.remove('empty-live');
     const serverCount = Array.isArray(v.sd.server_rows) ? v.sd.server_rows.length : null;
-    el.innerHTML = row('Smart DNS', v.sd.alive === 'yes' ? 'Работает' : v.sd.alive === 'no' ? 'Нет ответа' : 'Не проверен')
+    el.innerHTML = row('Smart DNS', v.smart.component)
       + row('Серверы', known(serverCount) ? serverCount : null)
       + row('DNS роутера', 'Keenetic') + '<a href="/dns" class="button ghost">Открыть DNS</a>';
   }
@@ -134,7 +149,7 @@
     const values = [
       ['Интернет', v.wan === null ? 'Нет данных' : v.wan ? 'Работает' : 'Нет связи'],
       ['VPN', v.active === null ? 'Нет данных' : v.active.length ? v.up.length + ' из ' + v.active.length : 'Выключен'],
-      ['Smart DNS', !v.sd ? 'Нет данных' : v.sd.alive === 'yes' ? 'Работает' : v.sd.alive === 'no' ? 'Не отвечает' : 'Не проверен'],
+      ['Smart DNS', v.smart.component],
       ['Реклама', !v.ads ? 'Нет данных' : v.ads.component_enabled === false ? 'Выключена' : v.ads.paused === true ? 'На паузе' : 'Состояние не подтверждено']
     ];
     el.innerHTML = values.map(x => '<div class="status-item"><span class="status-icon">●</span><div class="status-name">' + esc(x[0]) + '</div><div class="status-value">' + esc(x[1]) + '</div></div>').join('');
