@@ -166,6 +166,7 @@ python3 tests/repository/check-adaptive-count.py || fail "autopick counted from 
 python3 tests/repository/check-own-group.py || fail "«Мои домены» without a group: VWARD's own list"
 python3 tests/repository/check-autopick-page.py || fail "autopick page: live feed, counts, search, way slider"
 python3 tests/repository/check-keenetic-ndmc-sessions.py || fail "Keenetic: the shared configuration through RCI, ndmc sessions counted by program"
+python3 tests/repository/check-lock-gate-leaver.py || fail "lock election: a contender that leaves while it is looked at is no contender"
 python3 tests/repository/check-install-fetch-retry.py || fail "install.sh: a curl crash on HTTPS is tried again"
 python3 tests/repository/check-console-core-lists.py || fail "Panel lists through the Go core, the shell without it"
 python3 tests/repository/check-updater-verify-reason.py || fail "the updater says which manifest check failed and why"

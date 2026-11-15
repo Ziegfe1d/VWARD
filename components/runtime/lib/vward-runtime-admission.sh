@@ -502,7 +502,14 @@ vward_lock_gate_enter() {
         # the same 256-ticket bound without spawning metadata tools for self;
         # the final utility and leave still validate our own private claim.
         [ "$vlg_other" != "$vlg_claim" ] || continue
-        vward_lock_gate_dir "$vlg_other" || { vward_lock_gate_leave "$1";return 75; }
+        # A contender that left between the listing and this look (its own «leave» removes its
+        # ticket) is no contender: the same as listing a moment later. Before fix.39 the vanished
+        # ticket read as «not a ticket» and the holder's next entry was refused (two writers of
+        # the journal: none began, CI 12.11 and 15.11.2026). A path that is still there and is
+        # not a ticket directory refuses as before.
+        vward_lock_gate_dir "$vlg_other" || {
+            [ -e "$vlg_other" ] || [ -L "$vlg_other" ] || continue
+            vward_lock_gate_leave "$1";return 75; }
         vlg_rc=0;vward_lock_gate_live "${vlg_other##*/}" || vlg_rc=$?
         [ "$vlg_rc" != 2 ] || { vward_lock_gate_leave "$1";return 75; }
         if [ "$vlg_rc" != 0 ]; then
@@ -521,7 +528,10 @@ vward_lock_gate_enter() {
         for vlg_other in "$vlg_dir"/*; do
             [ -e "$vlg_other" ] || [ -L "$vlg_other" ] || continue
             [ "$vlg_other" != "$vlg_claim" ] || continue
-            vward_lock_gate_dir "$vlg_other" || { vward_lock_gate_leave "$1";return 75; }
+            # Gone since the listing: it left, nothing to wait for (see the first loop).
+            vward_lock_gate_dir "$vlg_other" || {
+                [ -e "$vlg_other" ] || [ -L "$vlg_other" ] || continue
+                vward_lock_gate_leave "$1";return 75; }
             vlg_rc=0;vward_lock_gate_live "${vlg_other##*/}" || vlg_rc=$?
             [ "$vlg_rc" != 2 ] || { vward_lock_gate_leave "$1";return 75; }
             if [ "$vlg_rc" != 0 ]; then
