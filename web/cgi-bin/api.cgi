@@ -2224,7 +2224,18 @@ if [ "$ACTION" = "diagnostics" ]; then
     LAST_WG_RC="$(cat /tmp/vward-tunnel-health-chain.cron.rc 2>/dev/null)"
     LAST_ROUTE_RC="$(cat /tmp/vward-route-reconciler-maint.cron.rc 2>/dev/null)"
 
-    "$JQ" -n \
+    # Whose ndmc sessions fill Keenetic's journal (fix.39): by program - this hour, the hour before,
+    # the last 24 hours of uptime - and every request to Keenetic (RCI and ndmc) of those 24 hours.
+    NDMC_BY='[]' KCALLS_DAY=0
+    if command -v vward_ndmc_calls_report >/dev/null 2>&1; then
+        NDMC_BY="$(vward_ndmc_calls_report 2>/dev/null | "$JQ" -Rnc '[inputs | split(" ") | select(length == 4) |
+            {p: .[0], now: (.[1] | tonumber), last: (.[2] | tonumber), day: (.[3] | tonumber)}] | sort_by(-.day)' 2>/dev/null)"
+        KC_UP=; read -r KC_UP _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"; KC_UP=${KC_UP%%.*}
+        vward_hour_sum "${VWARD_KEENETIC_CALLS:-/tmp/vward-keenetic-calls}" $((${KC_UP:-0} / 3600 - 23)) $((${KC_UP:-0} / 3600)); KCALLS_DAY=$_VHS
+    fi
+    case "$NDMC_BY" in '['*) ;; *) NDMC_BY='[]' ;; esac
+    case "$KCALLS_DAY" in ''|*[!0-9]*) KCALLS_DAY=0 ;; esac
+    "$JQ" -n --argjson ndmc_by "$NDMC_BY" --argjson kcalls_day "$KCALLS_DAY" \
       --arg opt "$OPT_STATUS" --arg jq "$JQ_STATUS" --arg curl "$CURL_STATUS" --arg curl_detail "$CURL_DETAIL" --arg boot "$BOOT_STATUS" \
       --arg tcpdump "$TCPDUMP_STATUS" --arg lighttpd "$LIGHTTPD_STATUS" \
       --arg crond "$CROND_STATUS" --arg supervisor "$SUPERVISOR_STATUS" \
@@ -2255,7 +2266,8 @@ if [ "$ACTION" = "diagnostics" ]; then
         {id:"files",component:"update-engine",label:"Файлы VWARD",status:$files,detail:$files_detail},
         {id:"updater",component:"update-engine",label:"Движок обновлений",status:$updater,detail:"рабочая копия движка на месте"},
         {id:"update-config",component:"update-engine",label:"Настройки обновлений",status:$config,detail:"файл настроек читается"}
-      ]} | if $adguard_have == "1" then . else .checks |= map(select(.id != "adguard")) end'
+      ]} | if $adguard_have == "1" then . else .checks |= map(select(.id != "adguard")) end
+         | .keenetic = {ndmc: $ndmc_by, calls_day: $kcalls_day}'
     exit 0
 fi
 
@@ -3552,7 +3564,12 @@ if [ "$ACTION" = stability ]; then
     RCI_CD=${VWARD_RCI_CALLS:-/tmp/vward-rci-calls} RCI_UP=
     read -r RCI_UP _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
     RCI_UP=${RCI_UP%%.*}
-    RCI_CALLS=$(cat "$RCI_CD"/* 2>/dev/null | awk -v h="$((${RCI_UP:-0} / 3600))" '/^[0-9]+$/ {ok = ($1 > h - 24); next} ok {n += length($0)} END {printf "%d", n}')
+    # Each hour's file by itself (fix.39): read together, the files glued the next hour to the dots
+    # before it, and every hour counted as the first file's - all of them, or none.
+    RCI_CALLS=0
+    if command -v vward_hour_sum >/dev/null 2>&1; then
+        vward_hour_sum "$RCI_CD" $((${RCI_UP:-0} / 3600 - 23)) $((${RCI_UP:-0} / 3600)); RCI_CALLS=$_VHS
+    fi
     # Memory of the router and of every running program of VWARD and AdGuard Home (owner 02.11:
     # the list was partial, AdGuard Home the largest): resident and swapped out, one way for all
     # (/proc/PID/status VmRSS/VmSwap).

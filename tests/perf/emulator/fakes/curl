@@ -57,7 +57,7 @@ body() {
         */rci/show/interface/system-name\?name=*) n=${url##*name=}; "$JQ" -n --arg n "$n" '$n' | sed 's/Bridge0/br0/;s/Wireguard1/nwg1/;s/ISP/eth2.2/' ;;
         */rci/show/interface\?name=*) cat /emu/rci-isp.json ;;
         */rci/show/internet/status) cat /emu/rci-internet.json ;;
-        */rci/show/running-config) echo "rci $(tr '\000' ' ' < /proc/$PPID/cmdline 2>/dev/null | cut -c1-80)" >> /emu/config-reads.log; "$JQ" -Rn '{message: [inputs]}' < /emu/running-config ;;
+        */rci/show/running-config) [ ! -e /emu/fault-config-slow ] || sleep "$(cat /emu/fault-config-slow)"; echo "rci $(tr '\000' ' ' < /proc/$PPID/cmdline 2>/dev/null | cut -c1-80)" >> /emu/config-reads.log; "$JQ" -Rn '{message: [inputs]}' < /emu/running-config ;;
         */rci/object-group/fqdn) sh /emu/rci-subtree groups ;;
         */rci/dns-proxy) sh /emu/rci-subtree dnsproxy ;;
         */rci/ip/name-server) sh /emu/rci-subtree nameservers ;;
