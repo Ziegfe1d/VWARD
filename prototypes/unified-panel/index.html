@@ -412,12 +412,49 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
 @media(prefers-reduced-motion:reduce){
  *,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important;}
 }
+
+/* v7: one status message above the floating bottom navigation, never under header buttons. */
+.ui-status{position:fixed;z-index:32;bottom:86px;bottom:calc(86px + env(safe-area-inset-bottom,0px));left:50%;
+  -webkit-transform:translate(-50%,9px);transform:translate(-50%,9px);
+  display:-webkit-box;display:-ms-flexbox;display:flex;-webkit-box-align:center;-ms-flex-align:center;align-items:center;
+  -webkit-box-pack:center;-ms-flex-pack:center;justify-content:center;gap:9px;
+  width:-webkit-max-content;width:max-content;max-width:calc(100% - 24px);min-height:38px;
+  padding:8px 12px;border:1px solid #524a75;border-radius:18px;
+  background:#24203d;color:#e4d9ff;box-shadow:0 12px 30px rgba(0,0,0,.25);
+  text-align:center;font:600 12.5px/1.35 system-ui,-apple-system,'Segoe UI',Arial,sans-serif;
+  opacity:0;pointer-events:none;-webkit-transition:opacity .18s ease,-webkit-transform .18s ease;transition:opacity .18s ease,transform .18s ease;
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+}
+.ui-status.is-visible{opacity:1;pointer-events:auto;-webkit-transform:translate(-50%,0);transform:translate(-50%,0)}
+.ui-status.is-busy,.ui-status.is-info{background:#24203d;border-color:#534674;color:#e9dcff}
+.ui-status.is-success{background:#153b32;border-color:#2c7e62;color:#b8f4da}
+.ui-status.is-warning{background:#3d2e17;border-color:#916728;color:#ffdfa0}
+.ui-status.is-error{background:#4a2632;border-color:#a75469;color:#ffd2dc}
+.ui-status-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 17px;height:17px;font-weight:800;font-size:15px;line-height:17px}
+.ui-status-icon::before{content:'i'}
+.ui-status.is-busy .ui-status-icon::before{content:'';width:13px;height:13px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:ui-status-spin .85s linear infinite}
+.ui-status.is-success .ui-status-icon::before{content:'✓'}
+.ui-status.is-warning .ui-status-icon::before{content:'!'}
+.ui-status.is-error .ui-status-icon::before{content:'×'}
+.ui-status-text{min-width:0;overflow-wrap:break-word}
+.ui-status-dismiss{display:inline-flex;align-items:center;justify-content:center;flex:0 0 23px;width:23px;height:23px;
+  padding:3px;margin:-2px -5px -2px 0;background:transparent;border:0;border-radius:7px;color:inherit;cursor:pointer}
+.ui-status-dismiss:hover{background:rgba(255,255,255,.1)}
+.ui-status-dismiss svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+@keyframes ui-status-spin{to{transform:rotate(360deg)}}
+:root[data-theme="light"] .ui-status.is-info,:root[data-theme="light"] .ui-status.is-busy{background:#f0eafb;border-color:#cbb9ec;color:#65458f}
+:root[data-theme="light"] .ui-status.is-success{background:#e3f6ec;border-color:#a1d6ba;color:#11623e}
+:root[data-theme="light"] .ui-status.is-warning{background:#fff2d2;border-color:#e5bf6d;color:#875414}
+:root[data-theme="light"] .ui-status.is-error{background:#ffe6e9;border-color:#e6a8b1;color:#9d334b}
+@media(max-width:460px){.ui-status{font-size:12px;min-height:36px;padding:7px 11px;border-radius:16px;max-width:calc(100% - 16px)}}
+@media screen and (-ms-high-contrast:active), (-ms-high-contrast:none){.ui-status{width:auto;max-width:calc(100% - 24px);background:#24203d}.theme-light .ui-status.is-warning{background:#fff2d2;color:#875414}}
+@media(prefers-reduced-motion:reduce){.ui-status,.ui-status-icon::before{animation:none!important;transition:none!important}}
 </style></head>
 <body>
 <svg aria-hidden="true" style="display:none"><symbol id="i-spark" viewbox="0 0 24 24"><path d="M12 2.5 14.4 9.6 21.5 12l-7.1 2.4L12 21.5l-2.4-7.1L2.5 12l7.1-2.4L12 2.5Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"></path></symbol><symbol id="i-grid" viewbox="0 0 24 24"><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="3" y="3"></rect><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="14" y="3"></rect><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="3" y="14"></rect><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="14" y="14"></rect></symbol><symbol id="i-route" viewbox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"><circle cx="6" cy="5" r="2.3"></circle><circle cx="18" cy="19" r="2.3"></circle><path d="M6 7.6v7.2a4.2 4.2 0 004.2 4.2H15.5M10.5 5H17a3 3 0 013 3v2m-3-3 3 3 3-3"></path></g></symbol><symbol id="i-globe" viewbox="0 0 24 24"><circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" stroke-width="1.8"></circle><path d="M3 12h18M12 3c-5 5-5 13 0 18M12 3c5 5 5 13 0 18" fill="none" stroke="currentColor" stroke-width="1.6"></path></symbol><symbol id="i-shield" viewbox="0 0 24 24"><path d="m12 2 8 3.5v5.8c0 5.2-3.3 8.5-8 10.7-4.7-2.2-8-5.5-8-10.7V5.5L12 2Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"></path><path d="m8.5 12 2.2 2.2 4.8-4.8" fill="none" stroke="currentColor" stroke-width="1.8"></path></symbol><symbol id="i-pulse" viewbox="0 0 24 24"><path d="M2 12h5l3-6 4 12 3-6h5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"></path></symbol><symbol id="i-sliders" viewbox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"><path d="M4 7h16M4 17h16"></path><circle cx="9" cy="7" fill="#19172e" r="3"></circle><circle cx="16" cy="17" fill="#19172e" r="3"></circle></g></symbol><symbol id="i-clock" viewbox="0 0 24 24"><circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" stroke-width="1.8"></circle><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"></path></symbol><symbol id="i-refresh" viewbox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14-4L4 9m0-5v5h5M4 13a8 8 0 0 0 14 4l2-2m0 5v-5h-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"></path></symbol><symbol id="i-lock" viewbox="0 0 24 24"><rect fill="none" height="11" rx="2" stroke="currentColor" stroke-width="1.8" width="14" x="5" y="10"></rect><path d="M8 10V7a4 4 0 018 0v3" fill="none" stroke="currentColor" stroke-width="1.8"></path></symbol><symbol id="i-server" viewbox="0 0 24 24"><rect fill="none" height="7" rx="2" stroke="currentColor" stroke-width="1.7" width="18" x="3" y="4"></rect><rect fill="none" height="7" rx="2" stroke="currentColor" stroke-width="1.7" width="18" x="3" y="13"></rect><circle cx="7" cy="7.5" fill="currentColor" r="1"></circle><circle cx="7" cy="16.5" fill="currentColor" r="1"></circle></symbol><symbol id="i-info" viewbox="0 0 24 24"><circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" stroke-width="1.8"></circle><path d="M12 10.5v6M12 7.5h.01" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path></symbol><symbol id="i-menu" viewbox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" stroke-width="1.8"></path></symbol><symbol id="i-home" viewbox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5M6 9v11h4.5v-5.5h3V20H18V9"></path></symbol><symbol id="i-list" viewbox="0 0 24 24"><rect height="17" rx="2" width="15" x="4.5" y="3.5"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></symbol><symbol id="i-block" viewbox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="m6.4 6.4 11.2 11.2"></path></symbol><symbol id="i-tools" viewbox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L4 17v3h3l5.4-5.4a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.6-.4-.4-2.6z"></path></symbol><symbol id="i-platform" viewbox="0 0 24 24"><rect height="6.5" rx="1.5" width="6.5" x="4" y="4"></rect><rect height="6.5" rx="1.5" width="6.5" x="13.5" y="4"></rect><rect height="6.5" rx="1.5" width="6.5" x="4" y="13.5"></rect><rect height="6.5" rx="1.5" width="6.5" x="13.5" y="13.5"></rect></symbol><symbol id="i-logs" viewbox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01"></path></symbol><symbol id="i-more" viewbox="0 0 24 24"><circle cx="5.5" cy="12" fill="currentColor" r="1" stroke="none"></circle><circle cx="12" cy="12" fill="currentColor" r="1" stroke="none"></circle><circle cx="18.5" cy="12" fill="currentColor" r="1" stroke="none"></circle></symbol><symbol fill="none" id="i-search" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><circle cx="11" cy="11" r="6.6"></circle><path d="m16 16 4.5 4.5"></path></symbol><symbol fill="none" id="i-bell" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z"></path><path d="M10 21h4"></path></symbol><symbol fill="none" id="i-moon" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><path d="M20.2 15.4A8.8 8.8 0 0 1 8.6 3.8 8.9 8.9 0 1 0 20.2 15.4Z"></path></symbol><symbol fill="none" id="i-sun" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"></path></symbol><symbol fill="none" id="i-auto" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><rect height="15" rx="4" width="17" x="3.5" y="4.5"></rect><path d="M3.5 12h17"></path></symbol><symbol fill="none" id="i-close" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"></path></symbol></svg>
 <div class="layout">
 <main class="main" id="overview">
-<header class="header compact-header" aria-label="Инструменты Панели VWARD"><h1 class="visually-hidden">Панель VWARD</h1><div class="head-actions"><button aria-label="Обновить данные" class="head-icon" id="refresh" title="Обновить данные" type="button"><svg aria-hidden="true" class="action-svg" viewBox="0 0 24 24"><use href="#i-refresh" xlink:href="#i-refresh"></use></svg></button><button aria-controls="ui-overlay" aria-expanded="false" aria-label="Поиск" class="head-icon" id="searchBtn" title="Поиск" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-search" xlink:href="#i-search"></use></svg></button><button aria-controls="ui-overlay" aria-expanded="false" aria-label="Уведомления" class="head-icon" id="bellBtn" title="Уведомления" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-bell" xlink:href="#i-bell"></use></svg><span class="badge-count" hidden="" id="unread-count"></span></button><button aria-label="Тема оформления" class="head-icon" id="themeBtn" title="Тема оформления" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-auto" xlink:href="#i-auto"></use></svg></button></div><span aria-live="polite" id="load-label" role="status" class="visually-hidden"></span><div aria-label="Загрузка данных" aria-valuemax="100" aria-valuemin="0" aria-valuenow="0" class="load-track" hidden="" id="load-track" role="progressbar"><i></i></div></header>
+<header class="header compact-header" aria-label="Инструменты Панели VWARD"><h1 class="visually-hidden">Панель VWARD</h1><div class="head-actions"><button aria-label="Обновить данные" class="head-icon" id="refresh" title="Обновить данные" type="button"><svg aria-hidden="true" class="action-svg" viewBox="0 0 24 24"><use href="#i-refresh" xlink:href="#i-refresh"></use></svg></button><button aria-controls="ui-overlay" aria-expanded="false" aria-label="Поиск" class="head-icon" id="searchBtn" title="Поиск" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-search" xlink:href="#i-search"></use></svg></button><button aria-controls="ui-overlay" aria-expanded="false" aria-label="Уведомления" class="head-icon" id="bellBtn" title="Уведомления" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-bell" xlink:href="#i-bell"></use></svg><span class="badge-count" hidden="" id="unread-count"></span></button><button aria-label="Тема оформления" class="head-icon" id="themeBtn" title="Тема оформления" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-auto" xlink:href="#i-auto"></use></svg></button></div></header>
 <section aria-label="Состояние компонентов" class="kpis section" id="network">
 <div class="card kpi" style="--accent:var(--green)"><div class="kpi-top"><span>Интернет</span><span class="kpi-icon"><svg><use href="#i-globe"></use></svg></span></div><div class="kpi-val">—</div><div class="kpi-foot">—</div></div>
 <div class="card kpi vpn-overview" style="--accent:var(--purple)"><div class="kpi-top"><span>VPN</span><span class="kpi-icon"><svg><use href="#i-shield"></use></svg></span></div><div class="kpi-val">—</div><div class="kpi-foot">—</div></div>
@@ -429,8 +466,15 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
 <div class="card-inner">
 <div class="section-head"><div><h2 class="title-accent">Настройки</h2></div><span class="quiet-tag">Только просмотр</span></div>
 <div class="settings-grid"><div class="setting-tile"><span>Версия VWARD</span><strong id="setting-version">—</strong></div><div class="setting-tile"><span>Канал обновлений</span><strong id="setting-channel">—</strong></div><div class="setting-tile"><span>Тема оформления</span><strong id="theme-mode">как в системе</strong></div></div></div></section><section class="card section" id="events"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Уведомления</h2></div></div><div class="events">—</div></div></section></main></div>
-<nav aria-label="Основная навигация" class="tabbar"><a aria-current="page" class="tab tab-mobile is-active" data-nav="overview" href="#overview"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-home"></use></svg><span>Обзор</span></a><a class="tab tab-mobile" data-nav="wan" href="#network"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-globe"></use></svg><span>Сеть</span></a><a class="tab tab-mobile" data-nav="vpn" href="#vpn"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-shield"></use></svg><span>VPN</span></a><a class="tab tab-mobile" data-nav="routes" href="#routes"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-list"></use></svg><span>Маршруты</span></a><button aria-controls="more-sheet" aria-expanded="false" class="tab tab-mobile" id="more-toggle" type="button"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-more"></use></svg><span>Ещё</span></button><a aria-current="page" class="tab tab-desktop is-active" data-nav="overview" href="#overview"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-home"></use></svg><span>Обзор</span></a><a class="tab tab-desktop" data-nav="wan" href="#network"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-globe"></use></svg><span>Сеть</span></a><a class="tab tab-desktop" data-nav="vpn" href="#vpn"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-shield"></use></svg><span>VPN</span></a><a class="tab tab-desktop" data-nav="routes" href="#routes"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-list"></use></svg><span>Маршруты</span></a><a class="tab tab-desktop" data-nav="ads" href="#ads"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-block"></use></svg><span>Реклама</span></a><a class="tab tab-desktop" data-nav="ai" href="#dns"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-spark"></use></svg><span>DNS</span></a><a class="tab tab-desktop" data-nav="utils" href="#components"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-tools"></use></svg><span>Компоненты</span></a><a class="tab tab-desktop" data-nav="system" href="#system"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-platform"></use></svg><span>Система</span></a><a class="tab tab-desktop" data-nav="settings" href="#settings"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-sliders"></use></svg><span>Настройки</span></a><a class="tab tab-desktop" data-nav="logs" href="#events"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-logs"></use></svg><span>Журналы</span></a></nav><div class="more-sheet" hidden="" id="more-sheet"><div class="more-title">Разделы</div><div class="more-links"><a data-nav="ads" href="#ads"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-block"></use></svg><span>Реклама</span></a><a data-nav="ai" href="#dns"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-spark"></use></svg><span>DNS</span></a><a data-nav="utils" href="#components"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-tools"></use></svg><span>Компоненты</span></a><a data-nav="system" href="#system"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-platform"></use></svg><span>Система</span></a><a data-nav="settings" href="#settings"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-sliders"></use></svg><span>Настройки</span></a><a data-nav="logs" href="#events"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-logs"></use></svg><span>Журналы</span></a></div></div>
-<div class="ui-overlay" hidden="" id="ui-overlay"><button aria-label="Закрыть" class="ui-scrim" data-close-overlay="" type="button"></button><div class="ui-popover" role="presentation"><div class="overlay-top"><button aria-label="Закрыть" class="overlay-close" data-close-overlay="" id="overlay-close" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-close" xlink:href="#i-close"></use></svg></button></div><section aria-label="Поиск по Панели VWARD" aria-modal="true" id="search-panel" role="dialog"><input aria-label="Поиск по Панели VWARD" autocomplete="off" id="search-input" placeholder="Поиск по Панели VWARD" type="search"/><div class="search-results" id="search-results">—</div></section><section aria-label="Уведомления" aria-modal="true" hidden="" id="notes-panel" role="dialog"><h2>Уведомления</h2><div class="notes-content" id="notes-content">—</div></section></div></div><script>/* VWARD unified Panel v5 — read-only HTML5, ES5 syntax for legacy browsers.
+<nav aria-label="Основная навигация" class="tabbar"><a aria-current="page" class="tab tab-mobile is-active" data-nav="overview" href="#overview"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-home"></use></svg><span>Обзор</span></a><a class="tab tab-mobile" data-nav="wan" href="#network"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-globe"></use></svg><span>Сеть</span></a><a class="tab tab-mobile" data-nav="vpn" href="#vpn"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-shield"></use></svg><span>VPN</span></a><a class="tab tab-mobile" data-nav="routes" href="#routes"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-list"></use></svg><span>Маршруты</span></a><button aria-controls="more-sheet" aria-expanded="false" class="tab tab-mobile" id="more-toggle" type="button"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-more"></use></svg><span>Ещё</span></button><a aria-current="page" class="tab tab-desktop is-active" data-nav="overview" href="#overview"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-home"></use></svg><span>Обзор</span></a><a class="tab tab-desktop" data-nav="wan" href="#network"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-globe"></use></svg><span>Сеть</span></a><a class="tab tab-desktop" data-nav="vpn" href="#vpn"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-shield"></use></svg><span>VPN</span></a><a class="tab tab-desktop" data-nav="routes" href="#routes"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-list"></use></svg><span>Маршруты</span></a><a class="tab tab-desktop" data-nav="ads" href="#ads"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-block"></use></svg><span>Реклама</span></a><a class="tab tab-desktop" data-nav="ai" href="#dns"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-spark"></use></svg><span>DNS</span></a><a class="tab tab-desktop" data-nav="utils" href="#components"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-tools"></use></svg><span>Компоненты</span></a><a class="tab tab-desktop" data-nav="system" href="#system"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-platform"></use></svg><span>Система</span></a><a class="tab tab-desktop" data-nav="settings" href="#settings"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-sliders"></use></svg><span>Настройки</span></a><a class="tab tab-desktop" data-nav="logs" href="#events"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-logs"></use></svg><span>Журналы</span></a></nav>
+<!-- One shared place for transient operation messages, just above the bottom navigation. -->
+<div id="ui-status" class="ui-status is-info" role="status" aria-live="polite" aria-atomic="true" hidden>
+  <span class="ui-status-icon" aria-hidden="true"></span>
+  <span id="ui-status-text" class="ui-status-text"></span>
+  <button id="ui-status-dismiss" class="ui-status-dismiss" type="button" aria-label="Закрыть сообщение" hidden><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-close" xlink:href="#i-close"></use></svg></button>
+</div>
+<div class="more-sheet" hidden="" id="more-sheet"><div class="more-title">Разделы</div><div class="more-links"><a data-nav="ads" href="#ads"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-block"></use></svg><span>Реклама</span></a><a data-nav="ai" href="#dns"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-spark"></use></svg><span>DNS</span></a><a data-nav="utils" href="#components"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-tools"></use></svg><span>Компоненты</span></a><a data-nav="system" href="#system"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-platform"></use></svg><span>Система</span></a><a data-nav="settings" href="#settings"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-sliders"></use></svg><span>Настройки</span></a><a data-nav="logs" href="#events"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-logs"></use></svg><span>Журналы</span></a></div></div>
+<div class="ui-overlay" hidden="" id="ui-overlay"><button aria-label="Закрыть" class="ui-scrim" data-close-overlay="" type="button"></button><div class="ui-popover" role="presentation"><div class="overlay-top"><button aria-label="Закрыть" class="overlay-close" data-close-overlay="" id="overlay-close" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-close" xlink:href="#i-close"></use></svg></button></div><section aria-label="Поиск по Панели VWARD" aria-modal="true" id="search-panel" role="dialog"><input aria-label="Поиск по Панели VWARD" autocomplete="off" id="search-input" placeholder="Поиск по Панели VWARD" type="search"/><div class="search-results" id="search-results">—</div></section><section aria-label="Уведомления" aria-modal="true" hidden="" id="notes-panel" role="dialog"><h2>Уведомления</h2><div class="notes-content" id="notes-content">—</div></section></div></div><script>/* VWARD unified Panel v7 — read-only HTML5, ES5 syntax for legacy browsers.
    No external scripts, timers polling Keenetic, POSTs or fictional metrics. */
 (function () {
   'use strict';
@@ -638,36 +682,61 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
       xhr.ontimeout=function(){finish('timeout');};xhr.onerror=function(){finish('network');};xhr.send(null);
     }catch(e){finish('network');}
   }
+
+  /* One transient status output for all Panel operations. No second label near buttons. */
+  var noticeTimer=0,noticeSlowTimer=0,noticeEpoch=0;
+  function hideNotice(){var el=sv('ui-status');if(!el)return;
+    noticeEpoch++;if(noticeTimer){window.clearTimeout(noticeTimer);noticeTimer=0;}
+    klass(el,'is-visible',false);el.hidden=true;
+  }
+  function showNotice(message,kind,hold){var el=sv('ui-status'),copy=sv('ui-status-text'),close=sv('ui-status-dismiss');
+    if(!el||!copy)return;
+    noticeEpoch++;var epoch=noticeEpoch;
+    if(noticeTimer){window.clearTimeout(noticeTimer);noticeTimer=0;}
+    el.className='ui-status is-'+(kind||'info');
+    attr(el,'role',kind==='error'?'alert':'status');
+    attr(el,'aria-live',kind==='error'?'assertive':'polite');
+    copy.textContent=String(message||'');
+    if(close)close.hidden=!(kind==='error'||kind==='warning'&&hold);
+    el.hidden=false;klass(el,'is-visible',true);
+    if(!hold){noticeTimer=window.setTimeout(function(){if(epoch===noticeEpoch)hideNotice();},kind==='success'?3000:kind==='info'?2500:5000);}
+  }
   var work=[['status',renderStatus,clearStatus],['lists-data',renderLists,clearLists],['ai-data',renderAI,clearAI],['ads-data',renderAds,clearAds],['notes',renderNotes,clearNotes]];
   function startRefresh(){
-    if(refreshing)return;refreshing=true;errorCount=0;
-    var index=0,pending=0,finished=0,button=sv('refresh'),bar=sv('load-track'),status=sv('load-label');
+    if(refreshing)return;
+    refreshing=true;errorCount=0;
+    var index=0,pending=0,finished=0,success=0,unauthorized=false,networkFailure=false,statusDone=false;
+    var button=sv('refresh');
     if(button){button.disabled=true;klass(button,'refreshing',true);attr(button,'aria-busy','true');}
-    if(bar){bar.hidden=false;attr(bar,'aria-valuenow',0);}
-    if(status)status.textContent='Обновляем данные…';
+    showNotice('Обновляем данные…','busy',true);
+    if(noticeSlowTimer)window.clearTimeout(noticeSlowTimer);
+    noticeSlowTimer=window.setTimeout(function(){
+      noticeSlowTimer=0;
+      if(refreshing)showNotice(statusDone?'Получение данных задерживается…':'Роутер отвечает медленно…','warning',true);
+    },6000);
     function settle(){
       if(finished!==work.length)return;
       refreshing=false;
+      if(noticeSlowTimer){window.clearTimeout(noticeSlowTimer);noticeSlowTimer=0;}
       if(button){button.disabled=false;klass(button,'refreshing',false);button.removeAttribute('aria-busy');}
-      if(bar){attr(bar,'aria-valuenow',100);bar.hidden=true;}
-      if(status)status.textContent=errorCount?'Часть данных недоступна':'Данные обновлены';
-      buildSearch(); updateOverlay();
-      window.setTimeout(function(){if(!refreshing&&status)status.textContent='';},2700);
+      if(unauthorized)showNotice('Требуется вход в Панель','error',true);
+      else if(success===0)showNotice(networkFailure?'Нет связи с Панелью':'Не удалось получить данные','error',true);
+      else if(errorCount)showNotice('Часть данных недоступна','warning',true);
+      else showNotice('Данные обновлены','success',false);
+      buildSearch();updateOverlay();
     }
     function run(){while(pending<2&&index<work.length){
-      (function (job){pending++;api(job[0],function(err,payload){
-        pending--;finished++;
+      (function(job){pending++;api(job[0],function(err,payload){
+        pending--;finished++;if(job[0]==='status')statusDone=true;
         var slot=job[0]==='status'?'status':job[0]==='lists-data'?'lists':job[0]==='ai-data'?'ai':job[0]==='ads-data'?'ads':'notes';
-        if(err){data[slot]=null;errorCount++;job[2]();if(err==='auth'&&status)status.textContent='Требуется вход в Панель';}
-        else{data[slot]=payload;job[1](payload);}
-        if(bar)attr(bar,'aria-valuenow',Math.round(100*finished/work.length));
-        buildSearch();updateOverlay();
-        run();settle();
+        if(err){data[slot]=null;errorCount++;job[2]();if(err==='auth')unauthorized=true;if(err==='network'||err==='timeout')networkFailure=true;}
+        else{data[slot]=payload;success++;job[1](payload);}
+        buildSearch();updateOverlay();run();settle();
       });})(work[index++]);
     }}
     run();
   }
-  
+
   /* Fixed bottom bar: the scroll position and current section remain linked. */
   var anchors=[['overview','overview'],['wan','network'],['vpn','vpn'],['routes','routes'],['routes','control'],['ads','ads'],['ai','dns'],['utils','components'],['system','system'],['settings','settings'],['logs','events']];
   var current='overview', navLock=0, navChoice=null, pendingScroll=false;
@@ -711,7 +780,7 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
   }
   function cycleTheme(){var i=themes.indexOf(theme);theme=themes[(i+1)%themes.length];
     try{window.localStorage.setItem('vward-theme',theme);}catch(e){}
-    applyTheme();}
+    applyTheme();if(!refreshing)showNotice('Тема: '+themeLabels[theme],'info',false);}
 
   /* Search and notifications: local indexes of fetched API data; never fake entries. */
   var sections=[['overview','Обзор','Состояние сети'],['network','Сеть','Интернет'],['vpn','VPN','Туннели'],['routes','Маршруты','Доменные списки'],['control','Сервисы','Выбрано Применено'],['ads','Реклама','Фильтрация'],['dns','DNS','Smart DNS'],['components','Компоненты','Части'],['system','Система','Версия'],['settings','Настройки','Канал'],['events','Журналы','Уведомления']];
@@ -787,6 +856,7 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
       if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].indexOf(key)!==-1)stopNavigation();
     });
     event(sv('refresh'),'click',startRefresh);
+    event(sv('ui-status-dismiss'),'click',hideNotice);
     event(sv('searchBtn'),'click',function(){openOverlay('search');});
     event(sv('bellBtn'),'click',function(){openOverlay('notes');});
     event(sv('themeBtn'),'click',cycleTheme);
