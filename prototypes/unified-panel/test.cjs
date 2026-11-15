@@ -99,3 +99,18 @@ test('HTML preserves original bottom navigation and has no demo metrics', () => 
   assert.ok(!script.includes("method: 'POST'"));
   assert.match(html,/src="\.\/app\.js"/);
 });
+
+test('server readiness is not green when Smart DNS has no server', async () => {
+  const d = JSON.parse(JSON.stringify(normal));
+  d['ai-data'].smartdns = {alive:'yes',server_rows:[],own:false};
+  const x = await run(d);
+  assert.equal(x.byId('metric-dns').textContent,'Не настроен');
+  assert.match(x.byId('components').innerHTML,/Не настроен/);
+});
+test('version is formatted for the owner, not a service identifier', async () => {
+  const d = JSON.parse(JSON.stringify(normal));
+  d.status.platform.version = '0.2.0-rc.2.fix.36.1';
+  d.status.platform.last_sequence = '2026111502';
+  const x = await run(d);
+  assert.equal(x.byId('live-version').textContent, '0.2.0 RC2 #36.1.261115');
+});
