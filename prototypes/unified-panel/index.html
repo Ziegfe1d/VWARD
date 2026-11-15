@@ -317,26 +317,30 @@ const anchors=[
  ['overview','#overview'],['wan','#network'],['vpn','#vpn'],['routes','#routes'],['routes','#control'],
  ['ads','#ads'],['ai','#dns'],['utils','#components'],['system','#system'],['settings','#settings'],['logs','#events']
 ].map(([id,selector])=>({id,el:$(selector)})).filter(x=>x.el);
-const more=$('#more-sheet'),toggle=$('#more-toggle');let active='overview',lock=0,scrollPending=false;
+const more=$('#more-sheet'),toggle=$('#more-toggle');let active='overview',lock=0,scrollPending=false,navSelection=null;
 const primary=new Set(['overview','wan','vpn','routes']);
 function closeMore(){if(more)more.hidden=true;if(toggle)toggle.setAttribute('aria-expanded','false')}
 function markNav(id){active=id;
  for(const el of $$('.tabbar a[data-nav],.more-links a[data-nav]')){const on=el.dataset.nav===id;el.classList.toggle('is-active',on);if(on)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current')}
  if(toggle){const on=!primary.has(id);toggle.classList.toggle('is-active',on);toggle.setAttribute('aria-label',on?'Ещё — '+({'ai':'DNS','ads':'Реклама','utils':'Компоненты','system':'Система','settings':'Настройки','logs':'Журналы'}[id]||'раздел'):'Ещё')}
 }
-function atScroll(){const offset=Math.min(160,Math.max(80,innerHeight*.25));let found='overview';
+function atScroll(){const offset=72;let found='overview';
  for(const entry of anchors){if(entry.el.getBoundingClientRect().top<=offset)found=entry.id}
  // The final section must be active even when there is not enough content below it to align at the top.
  if(innerHeight+scrollY>=document.documentElement.scrollHeight-4)found=anchors.at(-1)?.id||found;
  return found}
-function track(){scrollPending=false;if(Date.now()<lock)return;const id=atScroll();if(active!==id)markNav(id)}
+function track(){scrollPending=false;if(navSelection||Date.now()<lock)return;const id=atScroll();if(active!==id)markNav(id)}
 window.addEventListener('scroll',()=>{if(!scrollPending){scrollPending=true;requestAnimationFrame(track)}},{passive:true});
 window.addEventListener('resize',()=>requestAnimationFrame(track));
-for(const event of ['wheel','touchstart'])window.addEventListener(event,()=>{lock=0},{passive:true});
+for(const event of ['wheel','touchstart','pointerdown'])window.addEventListener(event,e=>{
+  if(e.target&&e.target.closest&&e.target.closest('.tabbar,#more-sheet'))return;
+  navSelection=null;lock=0
+},{passive:true});
+window.addEventListener('keydown',e=>{if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(e.key)){navSelection=null;lock=0}});
 document.addEventListener('click',event=>{
  if(event.target.closest('#more-toggle')){event.preventDefault();const open=!!(more&&more.hidden);if(more)more.hidden=!open;if(toggle)toggle.setAttribute('aria-expanded',String(open));return}
  const link=event.target.closest('a[data-nav]');if(link){const target=anchors.find(a=>a.id===link.dataset.nav);if(!target)return;
- event.preventDefault();closeMore();markNav(target.id);lock=Date.now()+1250;
+ event.preventDefault();closeMore();navSelection=target.id;markNav(target.id);lock=Date.now()+1250;
  const behavior=window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth';
  target.el.scrollIntoView({behavior,block:'start'});history.replaceState(null,'','#'+target.el.id);return}
  if(more&&!more.hidden&&!event.target.closest('#more-sheet'))closeMore();
@@ -344,7 +348,7 @@ document.addEventListener('click',event=>{
 window.addEventListener('keydown',e=>{if(e.key==='Escape')closeMore()});
 $('#refresh')?.addEventListener('click',refresh);
 markNav('overview');
-const target=anchors.find(a=>a.el.id===location.hash.slice(1));if(target){markNav(target.id);requestAnimationFrame(()=>target.el.scrollIntoView({behavior:'instant',block:'start'}))}
+const target=anchors.find(a=>a.el.id===location.hash.slice(1));if(target){navSelection=target.id;markNav(target.id);requestAnimationFrame(()=>target.el.scrollIntoView({behavior:'instant',block:'start'}))}
 refresh();
 })();</script></body>
 </html>
