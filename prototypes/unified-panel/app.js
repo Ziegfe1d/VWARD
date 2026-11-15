@@ -181,6 +181,18 @@
       addSvg(svg,'text',{x:278,y:y+5,'text-anchor':'end'},name);
     });
     if(v.lists.length>6)addSvg(svg,'text',{x:30,y:height-5,class:'muted'},'И ещё '+(v.lists.length-6)+' списков');
+    const compact=document.createElement('div');compact.className='live-map-mobile';
+    top.forEach(item=>{
+      const entry=document.createElement('div');entry.className='live-map-row';
+      const title=document.createElement('span');title.textContent=nameOf(item);
+      const dest=document.createElement('strong');dest.textContent=label(viaOf(item));
+      entry.append(title,dest);compact.append(entry);
+    });
+    if(v.lists.length>6){
+      const more=document.createElement('div');more.className='live-status';
+      more.textContent='И ещё '+(v.lists.length-6)+' списков';compact.append(more);
+    }
+    el.append(compact);
   }
   function drawServices(v) {
     const el = $('live-services');
