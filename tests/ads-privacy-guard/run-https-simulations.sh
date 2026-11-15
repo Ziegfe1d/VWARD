@@ -18,7 +18,9 @@ mkdir -p "$FAKE_PROC_ROOT/$pid"; printf 'fake-3proxy-daemon\000300\000' > "$FAKE
 exit 0
 EOS
 chmod 0755 "$TMP/fake-3proxy"
-cp "$(command -v sleep)" "$TMP/fake-3proxy-daemon"; chmod 0755 "$TMP/fake-3proxy-daemon"
+# The stand-in daemon only waits. Not a copy of `sleep` under another name: where `sleep` is one
+# multi-call program (the CI runner image since 11.2026) such a copy ends at once (rc=33 here).
+printf '#!/bin/sh\nexec sleep "$@"\n' > "$TMP/fake-3proxy-daemon"; chmod 0755 "$TMP/fake-3proxy-daemon"
 : > "$TMP/SSLPlugin.ld.so"
 : > "$TMP/PCREPlugin.ld.so"
 : > "$TMP/upstream-ca.crt"

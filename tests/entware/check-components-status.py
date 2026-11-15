@@ -3,6 +3,7 @@
 package state; never "Работает"; DNS mode and the owner's update permissions (off by default)."""
 import os, subprocess, sys, tempfile
 from pathlib import Path
+from standin import write_daemon
 ROOT = Path(__file__).resolve().parents[2]
 LIBS = [ROOT/'components/runtime/lib/vward-entware-pkg.sh', ROOT/'components/runtime/lib/vward-dns-mode.sh',
         ROOT/'components/runtime/lib/vward-components-status.sh']
@@ -27,7 +28,7 @@ with tempfile.TemporaryDirectory() as td:
     if rep()['dnsmasq-full'] != ['entware', 'installed-off', '2.90-1', 'Установлен, выключен']: fail('installed-off: ' + str(rep()['dnsmasq-full']))
     (R/'opt/etc/init.d/S56dnsmasq').write_text('#!/bin/sh\nENABLED=yes\n')
     if rep()['dnsmasq-full'][1:] != ['enabled-not-running', '2.90-1', 'Включён, не запущен']: fail('enabled')
-    import shutil; shutil.copy(shutil.which('sleep'), R/'opt/sbin/dnsmasq')
+    write_daemon(R/'opt/sbin/dnsmasq')
     p = subprocess.Popen([str(R/'opt/sbin/dnsmasq'), '30'])
     try:
         got = rep()['dnsmasq-full']
