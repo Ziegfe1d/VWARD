@@ -28,9 +28,14 @@ permissions:
   contents: read
   actions: write
 
+# The runner image is named, not «latest» (15.11.2026): the process and resource budgets of the
+# tests are measured on Ubuntu 24.04 (dash, GNU coreutils). When GitHub moved «ubuntu-latest» to a
+# newer image the same code counted about 7 % more processes (service-change budget: 3 854 against
+# 3 594 here and on 24.04) and a copy of `sleep` under another name stopped working. A move to a
+# newer image is a decision of its own: measure there first, then record the new numbers.
 jobs:
   routing-core-go:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,7 +53,7 @@ jobs:
           for a in mipsle mips arm64; do cmp "core-out/vward-core-linux-$a.gz" "tools/vward-core/dist/vward-core-linux-$a.gz"; done
 
   repository-consistency:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,7 +61,7 @@ jobs:
         run: tests/repository/run-consistency-checks.sh
 
   resource-audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -111,7 +116,7 @@ jobs:
           cat "$RUNNER_TEMP/resource-audit.md" >> "$GITHUB_STEP_SUMMARY"
 
   updater-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -182,7 +187,7 @@ jobs:
     needs:
       - repository-consistency
       - updater-tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Dispatch transition publish workflow
         env:
