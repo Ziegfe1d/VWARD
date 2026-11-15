@@ -62,6 +62,16 @@ body::after{content:"";position:fixed;bottom:0;left:0;right:0;z-index:19;height:
 .empty-live{padding:16px 0;color:var(--muted);font-size:13px}.live-message{position:fixed;right:12px;top:64px;z-index:25;max-width:min(420px,calc(100% - 24px));border-radius:12px;background:#291f3a;border:1px solid #795e9f;padding:11px 14px}.live-message[hidden]{display:none}.button{min-height:44px}.live-status{color:var(--muted);font-size:12px}
 @media(max-width:600px){.live-service{grid-template-columns:1fr}.dist-line{grid-template-columns:76px 1fr 38px}}
 @media(prefers-reduced-motion:reduce){.flow-top{animation:none!important}}
+
+.live-map-mobile{display:none}
+@media(max-width:680px){
+ .live-map svg{display:none}
+ .live-map-mobile{display:grid;gap:8px}
+ .live-map-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 12px;background:#1e1a32;border:1px solid #383152;border-radius:12px}
+ .live-map-row span{overflow-wrap:anywhere;min-width:0;font-size:12px;font-weight:600}
+ .live-map-row strong{flex:none;color:#73dbe7;font-size:12px;text-align:right}
+ .kpi-val{font-size:clamp(19px,5vw,28px);white-space:normal;overflow-wrap:normal}
+}
 </style>
 </head>
 <body>
