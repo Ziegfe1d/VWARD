@@ -115,6 +115,9 @@ with tempfile.TemporaryDirectory() as t:
             fail(f"core arguments: {args}")
         if "CORE_STARTED" not in (tmp / "events.log").read_text():
             fail("CORE_STARTED not logged")
+        # One word for the mode (the owner's journal read «mode=apply--apply» until fix.39.1).
+        if "|mode=apply\n" not in (tmp / "events.log").read_text() or "--apply" in (tmp / "events.log").read_text():
+            fail(f"CORE_STARTED mode: {(tmp / 'events.log').read_text()[-200:]!r}")
         # fix.39: the switches are files the core reads while it runs.
         if args[args.index("--observe-if") + 1] != f"{tmp}/etc/adaptive.disabled" or args[args.index("--ads-sandbox-if") + 1] != f"{tmp}/etc/ads.sandbox":
             fail(f"the Panel's switch files are not given to the core: {args}")
@@ -185,6 +188,76 @@ with tempfile.TemporaryDirectory() as t:
     run(tmp, "engine_start")
     if calls(tmp) != ["shell-start"]:
         fail("within the hour after a failed start: the shell engine")
+
+# fix.39.1: the core that already runs is checked too - an update of VWARD does not restart it
+# (15.11.2026: fix.39 installed, the core of fix.37 kept running). core_check_running: the pinned
+# build running - nothing; another build running - the pinned one fetched in the background, once
+# within the hour, CORE_OUTDATED in the journal; no core running - nothing (its start checks).
+with tempfile.TemporaryDirectory() as t:
+    tmp = Path(t)
+    (tmp / "etc").mkdir()
+    (tmp / "install.sh").write_text(f'#!/bin/sh\necho "$@" >> "{tmp}/installed"\n')
+    (tmp / "install.sh").chmod(0o755)
+    if "result=not_running" not in run(tmp, "core_check_running"):
+        fail("no core running: nothing to check")
+    fake_core(tmp)
+    run(tmp, "engine_start")
+    calls(tmp)
+    try:
+        out = run(tmp, "core_check_running")
+        if "result=unchanged" not in out or (tmp / "installed").exists():
+            fail(f"the pinned build running: nothing fetched: {out!r}")
+        (tmp / "try").unlink(missing_ok=True)
+        out = run(tmp, "core_check_running", stale=True)
+        time.sleep(0.5)
+        if "result=fetching" not in out or (tmp / "installed").read_text().split() != ["core-install"]:
+            fail(f"another build running: the pinned one fetched: {out!r}")
+        if "|CORE_OUTDATED|" not in (tmp / "events.log").read_text():
+            fail("CORE_OUTDATED not logged")
+        out = run(tmp, "core_check_running", stale=True)
+        time.sleep(0.5)
+        if "result=fetch_pending" not in out or len((tmp / "installed").read_text().split()) != 1:
+            fail(f"within the hour the fetch is not started again: {out!r}")
+        if (tmp / "events.log").read_text().count("|CORE_OUTDATED|") != 1:
+            fail("CORE_OUTDATED once, not every check")
+        run(tmp, "core_stop")
+    finally:
+        subprocess.run(["pkill", "-f", f"{tmp}/share/vward-core"], capture_output=True)
+for word in ("    core-check)\n        core_check_running", "|core-install|core-check}"):
+    if word not in S91:
+        fail(f"S91 core-check: {word!r} missing")
+
+# The components agent asks it: on its first round with the core running, then once an hour; in
+# the background, never on its own hot path.
+SUPV = (ROOT / "components/runtime/scripts/vward-cron-supervisor.sh").read_text()
+if "vward_core_adaptive_pid >/dev/null || { core_check; return 0; }" not in SUPV:
+    fail("the components agent must check the running core")
+cc = SUPV[SUPV.index("CORE_CHECK_AT=\ncore_check()"):SUPV.index("keep_route_engine()")]
+with tempfile.TemporaryDirectory() as t:
+    tmp = Path(t)
+    (tmp / "init.d").mkdir()
+    s91 = tmp / "init.d/S91vward-route-engine"
+    s91.write_text(f'#!/bin/sh\necho "$1" >> "{tmp}/asked"\n')
+    s91.chmod(0o755)
+    up = tmp / "uptime"
+
+    def tick(uptimes):
+        script = f'INITD="{tmp}/init.d" UPTIME_FILE="{up}" UNNICE=\n{cc}\n'
+        for u in uptimes:
+            script += f'echo "{u}.00 1.00" > "{up}"; core_check\n'
+        subprocess.run(["sh", "-c", script], timeout=30)
+        time.sleep(0.5)
+        p = tmp / "asked"
+        got = p.read_text().split() if p.exists() else []
+        p.unlink(missing_ok=True)
+        return got
+
+    if tick([100]) != ["core-check"]:
+        fail("the first round asks at once")
+    if tick([100, 110, 3699]) != ["core-check"]:
+        fail("not again within the hour")
+    if tick([100, 3700, 3710, 7300]) != ["core-check"] * 3:
+        fail("once an hour after that")
 
 # core_install: a local build stands in for the download (file://), its sum for the pinned one.
 with tempfile.TemporaryDirectory() as t:

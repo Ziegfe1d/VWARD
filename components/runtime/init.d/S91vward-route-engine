@@ -537,13 +537,33 @@ core_current()
 # failed download tried again every 10 minutes within it.
 core_fetch()
 {
-    [ -z "$(find "$CORE_FETCH_TRY" -mmin -60 2>/dev/null)" ] || return 0
+    [ -z "$(find "$CORE_FETCH_TRY" -mmin -60 2>/dev/null)" ] || return 1
     printf '' > "$CORE_FETCH_TRY" 2>/dev/null
     ( CF_N=0
       while [ "$CF_N" -lt 6 ]; do
           "$CORE_SELF" core-install && break
           CF_N=$((CF_N + 1)); sleep "${VWARD_CORE_FETCH_RETRY:-600}"
       done </dev/null >/dev/null 2>&1 & )
+}
+
+# core_check_running (fix.39.1): the core that runs now is the pinned build, or the pinned one is
+# fetched (core-install restarts Autopodbor on it). An update of VWARD does not restart the core,
+# and core_current was asked only when S91 started it: on the owner's router fix.39 was installed
+# at 15:15 on 15.11.2026 and the core of fix.37 went on running (no CORE_INSTALLED, the journal
+# still one line a name). The components agent asks this after its own start - it starts again
+# after every update - and then once an hour. Nothing happens when the core does not run (its
+# start checks) or is the pinned one.
+core_check_running()
+{
+    vward_core_adaptive_pid >/dev/null || { echo "result=not_running"; return 0; }
+    core_current && { echo "result=unchanged"; return 0; }
+    if core_fetch; then
+        CK_A=$(core_arch 2>/dev/null)
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|CORE_OUTDATED|the running core is not this release's build: the pinned one is fetched|arch=$CK_A" >> "$EVENT_LOG" 2>/dev/null
+        echo "result=fetching"
+    else
+        echo "result=fetch_pending"
+    fi
 }
 
 core_wanted()
@@ -594,7 +614,9 @@ core_start()
     sleep 3
     if CS_P=$(vward_core_adaptive_pid); then
         rm -f "$CORE_FALLBACK"
-        echo "$(date '+%Y-%m-%d %H:%M:%S')|CORE_STARTED|pid=$CS_P|mode=${CS_MODE:+apply}${CS_MODE:-observe}" >> "$EVENT_LOG" 2>/dev/null
+        # «apply» or «observe» (the journal read «mode=apply--apply» until fix.39.1).
+        CS_WORD=observe; [ -z "$CS_MODE" ] || CS_WORD=apply
+        echo "$(date '+%Y-%m-%d %H:%M:%S')|CORE_STARTED|pid=$CS_P|mode=$CS_WORD" >> "$EVENT_LOG" 2>/dev/null
         echo "Autopodbor (Go) started PID=$CS_P"
         return 0
     fi
@@ -623,6 +645,10 @@ case "$1" in
         echo "$CI_OUT"
         [ "$CI_OUT" != "result=changed" ] || exec "$0" restart
         case "$CI_OUT" in result=*) exit 0 ;; *) exit 1 ;; esac
+        ;;
+
+    core-check)
+        core_check_running
         ;;
 
     status)
@@ -672,7 +698,7 @@ case "$1" in
         ;;
 
     *)
-        echo "Usage: $0 {start|stop|restart|status|core-install}"
+        echo "Usage: $0 {start|stop|restart|status|core-install|core-check}"
         exit 1
         ;;
 esac

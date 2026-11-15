@@ -413,6 +413,23 @@ process_requests()
 # per-minute S91 cron watchdog (now off by default). Every round: a pid test in the shell, no
 # process; S91 only when the engine is gone, within the restart limit, never during an update,
 # not when it is switched off in «Компоненты».
+# core_check (fix.39.1): Autopodbor in Go runs - is it this release's build? An update of VWARD does
+# not restart the core (15.11.2026: fix.39 installed, the core of fix.37 kept running). Asked on the
+# first round after this agent starts - it starts again after every update - then once an hour;
+# S91 core-check reads a kept sum (no hashing on the hot path) and fetches the pinned build in the
+# background when it differs. Never waits.
+CORE_CHECK_AT=
+core_check()
+{
+    [ -x "$INITD/S91vward-route-engine" ] || return 0
+    CC_NOW=; [ ! -r "$UPTIME_FILE" ] || read -r CC_NOW _ < "$UPTIME_FILE" 2>/dev/null || :
+    CC_NOW=${CC_NOW%%.*}
+    case "$CC_NOW" in ''|*[!0-9]*) return 0 ;; esac
+    [ -z "$CORE_CHECK_AT" ] || [ $((CC_NOW - CORE_CHECK_AT)) -ge "${VWARD_CORE_CHECK_EVERY:-3600}" ] || return 0
+    CORE_CHECK_AT=$CC_NOW
+    ( $UNNICE "$INITD/S91vward-route-engine" core-check </dev/null >/dev/null 2>&1 & )
+}
+
 keep_route_engine()
 {
     RE_P=
@@ -423,7 +440,7 @@ keep_route_engine()
     # /proc/PID/cmdline is read by the shell itself (BusyBox ash skips NUL);
     # no ps/grep/awk is spawned on the supervisor's 10-second hot path.
     # Autopodbor in Go running (S91 started it instead of the shell engine): nothing to keep.
-    ! command -v vward_core_adaptive_pid >/dev/null 2>&1 || ! vward_core_adaptive_pid >/dev/null || return 0
+    ! command -v vward_core_adaptive_pid >/dev/null 2>&1 || ! vward_core_adaptive_pid >/dev/null || { core_check; return 0; }
     RE_STALE=0
     if [ -n "$RE_P" ] && kill -0 "$RE_P" 2>/dev/null; then
         RE_CMD=
