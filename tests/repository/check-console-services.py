@@ -162,6 +162,14 @@ with tempfile.TemporaryDirectory() as tmp:
     run("service", "on", "bad.tv", "auto", expect="error=unknown_service", rc=64)
     run("service", "tunnel", "claude.ai", "auto", expect="error=service_not_enabled", rc=64)
     run("service", "off", "claude.ai", expect="result=unchanged", rc=0)
+    # fix.39.2 (owner 15.11.2026): «off» for a service that is not on needs nothing of the router -
+    # a Panel with an old state sent it again and got «профиль устройства не определён».
+    devconf.chmod(0o644)
+    run("service", "off", "claude.ai", expect="result=unchanged", rc=0)
+    r = subprocess.run(["sh", str(HELPER), "service", "on", "claude.ai", "auto"], env=env, text=True, capture_output=True)
+    if r.stdout.strip().splitlines()[-2:] != ["reason=device.conf must be root-owned and mode 0600 or 0400", "error=profile_unavailable"]:
+        fail(f"a profile that does not load says why: {r.stdout!r}")
+    devconf.chmod(0o600)
     run("service", "dance", "claude.ai", "auto", expect="error=invalid_operation", rc=64)
     if cfg.read_text() != RUNNING:
         fail("a refused request changed the router")
@@ -267,4 +275,27 @@ with tempfile.TemporaryDirectory() as tmp:
     if state.read_text() or cfg.read_text() != before:
         fail("catalog similarity must not claim, repoint or duplicate a user group")
 
+# fix.39.2 (owner 15.11.2026): the step in progress and its result are notices at the bottom, as
+# «Роутер отвечает медленно», not a line under the switch that stays after it changed; a profile
+# that did not load is said in the Panel's words.
+JS = (ROOT / "web/assets/vward-console.js").read_text()
+job = JS[JS.index("async function serviceJob("):JS.index("async function tunUseJob(")]
+for need in ("popup({ sev: 'info', stay: true, title:", "if (gone) gone();", "toast(j.ok ?", "'Уже так: ' + okMsg"):
+    if need not in job:
+        fail(f"serviceJob lacks {need!r}")
+if "actionResult = { id: 'svc'" in job:
+    fail("serviceJob must not leave a line under the switch")
+if "  return gone;\n}" not in JS[JS.index("function popup(n) {"):JS.index("function noteKeep(")]:
+    fail("popup must return its own close")
+import shutil
+if shutil.which("node"):
+    a = JS.index("const errText = x =>"); b = JS.index("const profileWhy = r =>")
+    b = JS.index("\n", b)
+    h = "const API_ERRORS = { profile_unavailable: 'профиль устройства не определён' }, errBase = x => API_ERRORS[x.error] || x.error;\n" + JS[a:b] + """
+console.log(JSON.stringify([errText({ error: 'profile_unavailable', reason: 'tunnel device is missing or ambiguous; VPN candidates: none' }),
+  errText({ error: 'profile_unavailable', reason: 'something new' }), errText({ error: 'profile_unavailable' })]));"""
+    r = subprocess.run(["node", "-e", h], capture_output=True, text=True, timeout=30)
+    got = json.loads(r.stdout) if r.returncode == 0 else r.stderr
+    if got != ["профиль устройства не определён: не найден туннель VPN", "профиль устройства не определён: something new", "профиль устройства не определён"]:
+        fail(f"profile reason in words: {got}")
 print("CONSOLE_SERVICES=PASS")
