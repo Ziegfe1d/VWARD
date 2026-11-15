@@ -97,7 +97,8 @@ test('HTML preserves original bottom navigation and has no demo metrics', () => 
   for (const x of ['Обзор','Сеть','VPN','Маршруты','Ещё']) assert.ok(html.includes(x));
   for (const x of ['1 248','27 614','58%','Интерактивный макет']) assert.ok(!html.includes(x));
   assert.ok(!script.includes("method: 'POST'"));
-  assert.match(html,/src="\.\/app\.js"/);
+  assert.match(html,/const navTargets=/);
+  assert.ok(!html.includes('src="./app.js"'));
 });
 
 test('server readiness is not green when Smart DNS has no server', async () => {
