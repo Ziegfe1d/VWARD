@@ -99,7 +99,9 @@ func (p *NetProber) Probe(ctx context.Context, host, dev string) ProbeResult {
 		}
 		return classify(err, "tls")
 	}
-	if _, err := conn.Write([]byte("HEAD / HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nConnection: close\r\n\r\n")); err != nil {
+	// GET, not HEAD (fix.39.2): a refusal of the country is said in the body of a 403 (only that
+	// body is read; any other answer is closed after its headers).
+	if _, err := conn.Write([]byte("GET / HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nConnection: close\r\n\r\n")); err != nil {
 		return classify(err, "write")
 	}
 	br := bufio.NewReader(conn)
@@ -113,6 +115,23 @@ func (p *NetProber) Probe(ctx context.Context, host, dev string) ProbeResult {
 	}
 	if f[1] == "451" {
 		return ProbeResult{Blocked, "http 451"}
+	}
+	// A 403 that names the country is a refusal of the country (owner's router 16.11.2026:
+	// api.openai.com «unsupported_country_region_territory»; Cloudflare's 1009 «banned the
+	// country or region»). The headers, then at most 32 KiB of the body.
+	if f[1] == "403" {
+		body := make([]byte, 0, 4096)
+		buf := make([]byte, 4096)
+		for len(body) < 32<<10 {
+			n, err := br.Read(buf)
+			body = append(body, buf[:n]...)
+			if err != nil {
+				break
+			}
+		}
+		if RegionRefusal(string(body)) {
+			return ProbeResult{Blocked, "http 403 region"}
+		}
 	}
 	// A redirect to a «not available in your region» page is the site refusing this country:
 	// claude.ai answers 302 to anthropic.com/app-unavailable-in-region and stayed direct
@@ -130,6 +149,41 @@ func (p *NetProber) Probe(ctx context.Context, host, dev string) ProbeResult {
 		}
 	}
 	return ProbeResult{Open, "http " + f[1]}
+}
+
+// regionWords: the words of a refusal of the country in a 403 (OpenAI's API, Cloudflare's 1009
+// page, the usual «not available in your country/region» texts). Lower case.
+var regionWords = []string{"unsupported_country", "unsupported country", "country, region, or territory",
+	"country or region", "not available in your country", "not available in your region",
+	"not supported in your country", "not supported in your region", "unavailable in your country",
+	"unavailable in your region", "unsupported_region", "region_not_supported", "error code: 1009"}
+
+// RegionRefusal: the answer's text refuses the country.
+func RegionRefusal(text string) bool {
+	t := strings.ToLower(text)
+	for _, w := range regionWords {
+		if strings.Contains(t, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// HTTPCode: the status of an answer's Why («http 403», «http 302 region»), or "".
+func HTTPCode(why string) string {
+	f := strings.Fields(why)
+	if len(f) >= 2 && f[0] == "http" {
+		return f[1]
+	}
+	return ""
+}
+
+// RefusedHere: the site refuses this path and answers the VPN (fix.39.2, owner 16.11.2026:
+// api.anthropic.com answers 403 «Request not allowed» directly, without a word of the
+// country): a direct 403 and any other answer through the VPN.
+func RefusedHere(direct, vpn ProbeResult) bool {
+	return direct.Verdict == Open && HTTPCode(direct.Why) == "403" &&
+		vpn.Verdict == Open && HTTPCode(vpn.Why) != "" && HTTPCode(vpn.Why) != "403"
 }
 
 // geoMarks: words of the pages sites send a refused country to.

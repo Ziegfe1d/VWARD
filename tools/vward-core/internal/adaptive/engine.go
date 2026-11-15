@@ -210,6 +210,13 @@ func (e *Engine) Check(ctx context.Context, raw string) Result {
 	d1 := e.p.Probe(ctx, h, e.cfg.WanDev)
 	switch d1.Verdict {
 	case Open:
+		// A direct 403: the VPN asked once - another answer there is a refusal of this path
+		// (api.anthropic.com, owner 16.11.2026), into the group as any blocked site.
+		if HTTPCode(d1.Why) == "403" && e.cfg.TunnelDev != "" {
+			if v := e.p.Probe(ctx, h, e.cfg.TunnelDev); RefusedHere(d1, v) {
+				return e.remember(Result{Host: h, Outcome: Add, Why: "direct: " + d1.Why + " refused; vpn: " + v.Why, Direct: d1.Why + " refused", Ad: AdName(h)}, e.cfg.FailFor)
+			}
+		}
 		return e.remember(Result{Host: h, Outcome: DirectOK, Why: d1.Why}, e.cfg.OKFor)
 	case Unknown:
 		return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "direct: " + d1.Why}, e.cfg.UnknownFor)

@@ -3150,7 +3150,8 @@ const AD_EV = {
 // Why a name did not open directly (the core's words «connect: timeout», «tls: reset», «http 451»).
 function adWhy(w) {
   w = String(w || '');
-  return /451/.test(w) ? 'сайт закрыт по требованию (451)' : /region/.test(w) ? 'сайт не работает в этом регионе' : /timeout/.test(w) ? 'нет ответа' :
+  return /451/.test(w) ? 'сайт закрыт по требованию (451)' : /region/.test(w) ? 'сайт не работает в этом регионе' :
+    /403 refused/.test(w) ? 'сайт отказывает отсюда (403), через VPN отвечает' : /timeout/.test(w) ? 'нет ответа' :
     /reset/.test(w) ? 'соединение сброшено' : /refused/.test(w) ? 'соединение отклонено' : /closed|EOF/.test(w) ? 'соединение закрыто' : '';
 }
 function adFeedParse(text) {

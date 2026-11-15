@@ -56,7 +56,7 @@ ADV.feed = adFeedParse([t(50) + '|MAINT_NO_PATH|2.datadog.pool.ntp.org|fails=2/3
   t(9) + '|AUTO_VPN|www.googleadservices.com|direct: tls: reset; vpn: http 200', t(9) + '|SANDBOX_AD_SKIP|www.googleadservices.com|would not send to the VPN: an advert or a counter (googleadservices.com)',
   t(8) + '|ADDED|www.googleadservices.com|AdaptiveAuto', t(3) + '|MAINT_VPN_DOWN|-|x', t(2) + '|MODE|-|apply', t(1) + '|SANDBOX_AD_GROUP|-|would take out of the VPN 2 of 40: a, b'].join('\\n'));
 console.log(JSON.stringify({ html: adFeedHtml(), hosts: ADV.feed.map(e => e.host), quiet, busy: adSandboxText(2, 40),
-  why: [adWhy('connect: timeout'), adWhy('tls: reset'), adWhy('http 451'), adWhy('http 302 region'), adWhy('connect: refused'), adWhy('')] }));
+  why: [adWhy('connect: timeout'), adWhy('tls: reset'), adWhy('http 451'), adWhy('http 302 region'), adWhy('connect: refused'), adWhy(''), adWhy('http 403 refused'), adWhy('http 403 region')] }));
 """
 r = subprocess.run(["node", "-e", h2], capture_output=True, text=True, timeout=30)
 if r.returncode:
@@ -74,6 +74,6 @@ if not o["quiet"].startswith("Песочница: совпало с автопо
     fail(f"sandbox, nothing to do: {o['quiet']}")
 if not o["busy"].startswith("Песочница: расхождения с автоподбором - убрал бы из VPN 2 из 40 доменов, за сутки не отправил бы в VPN 1") or "Ничего не меняется" not in o["busy"]:
     fail(f"sandbox, what it would do: {o['busy']}")
-if o["why"] != ["нет ответа", "соединение сброшено", "сайт закрыт по требованию (451)", "сайт не работает в этом регионе", "соединение отклонено", ""]:
+if o["why"] != ["нет ответа", "соединение сброшено", "сайт закрыт по требованию (451)", "сайт не работает в этом регионе", "соединение отклонено", "", "сайт отказывает отсюда (403), через VPN отвечает", "сайт не работает в этом регионе"]:
     fail(f"why it did not open directly, in words: {o['why']}")
 print("AUTOPICK_PAGE=PASS")
