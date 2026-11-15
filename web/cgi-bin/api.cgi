@@ -566,6 +566,11 @@ if [ "$ACTION" = notes ]; then
     case "$(form_value op)" in
       read)
         printf '%s\n' "$NO_NOW" > "$NOTES_DIR/notes.read.$$" && mv -f "$NOTES_DIR/notes.read.$$" "$NOTES_DIR/notes.read" ;;
+      # clear: the history goes for every device (owner 13.11.2026); what is wrong now is not
+      # history - the Panel shows it from the router's state and it goes by itself.
+      clear)
+        (umask 077; : > "$NOTES.$$") && mv -f "$NOTES.$$" "$NOTES" || { rm -f "$NOTES.$$"; echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+        printf '%s\n' "$NO_NOW" > "$NOTES_DIR/notes.read.$$" && mv -f "$NOTES_DIR/notes.read.$$" "$NOTES_DIR/notes.read" ;;
       add)
         NO_SEV="$(form_value sev)"; NO_TO="$(form_value to)"; NO_KEY="$(form_value key)"
         case "$NO_SEV" in ok|err|info|warn|crit|news) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
@@ -810,6 +815,8 @@ if [ "$ACTION" = config-data ]; then
     TG=true; [ -e "$CONFIG_ETC/tunnel-guard.disabled" ] && TG=false
     WG_ON=true; [ -e "$CONFIG_ETC/wan-guard.disabled" ] && WG_ON=false
     AD_ON=true; [ -e "$CONFIG_ETC/route-engine/adaptive.disabled" ] && AD_ON=false
+    # «Реклама и счётчики» of Autopodbor (fix.39): off | sandbox.
+    AD_ADS=off; [ ! -e "$CONFIG_ETC/route-engine/ads.sandbox" ] || AD_ADS=sandbox
     kv_file "$CONFIG_ETC/route-engine/domain-classifier.conf" CLASSIFIER_ENABLED=CL_FLAG
     CL_ON=true; [ "$CL_FLAG" = 0 ] && CL_ON=false
     IPX="$(awk 'NF{print $1}' "${VWARD_POLICY_EXCLUDED:-$CONFIG_ETC/policy-sync/excluded.categories}" 2>/dev/null | head -n 500 | list_json)"
@@ -829,10 +836,12 @@ if [ "$ACTION" = config-data ]; then
     DISABLED="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && basename "$F" .disabled; done | list_json)"
     # Which component a switched-off one went off with (its flag ends «(with ID)»): it comes back with it;
     # «install»: the installer left it off (Ads without AdGuard Home), not news for the bell.
-    OFF_WITH="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && printf '%s\t%s\n' "$(basename "$F" .disabled)" "$(sed -n 's/.*(with \([a-z0-9-]*\))$/\1/p;s/^disabled by install\.sh.*/install/p' "$F" | head -n 1)"; done |
+    OFF_WITH="$(for F in "$COMPONENT_STATE"/*.disabled; do [ -e "$F" ] && printf '%s\t%s\n' "$(basename "$F" .disabled)" "$(sed -n 's/.*(with \([a-z0-9-]*\))$/\1/p;s/^disabled by install\.sh.*/install/p;s/^disabled by default .*(lightened VWARD)$/default/p' "$F" | head -n 1)"; done |
         "$JQ" -Rsc '[split("\n")[] | select(length > 0) | split("\t") | {(.[0]): (.[1] // "")}] | add // {}' 2>/dev/null)"
     [ -n "$OFF_WITH" ] || OFF_WITH='{}'
-    COMPONENTS="$("$JQ" -c --argjson off "${DISABLED:-[]}" --argjson with "$OFF_WITH" '[.components[] | {id, core:(.core == true), depends_on:(.depends_on // []), requires_running:(.requires_running // []), uses:(.uses // []), enabled:((.id | IN($off[])) | not), off_with:($with[.id] // "")}]' "$COMPONENT_REGISTRY" 2>/dev/null)"
+    # Frozen parts (owner 13.11.2026, fix.39): hidden in the Panel, their code and files are kept.
+    HIDDEN_PARTS="$("$JQ" -c '.parts_hidden // []' "${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}" 2>/dev/null)"
+    COMPONENTS="$("$JQ" -c --argjson off "${DISABLED:-[]}" --argjson with "$OFF_WITH" --argjson hidden "${HIDDEN_PARTS:-[]}" '[.components[] | select(.id | IN($hidden[]) | not) | {id, core:(.core == true), depends_on:(.depends_on // []), requires_running:(.requires_running // []), uses:(.uses // []), enabled:((.id | IN($off[])) | not), off_with:($with[.id] // "")}]' "$COMPONENT_REGISTRY" 2>/dev/null)"
     [ -n "$COMPONENTS" ] || COMPONENTS='[]'
     [ "$W_EN" = 1 ] || W_EN=0
     [ "$W_CTL" = 1 ] || W_CTL=0
@@ -847,7 +856,7 @@ if [ "$ACTION" = config-data ]; then
       --arg group "${VWARD_POLICY_GROUP:-}" --argjson groups "${TGROUPS:-[]}" --argjson router "$ROUTER" \
       --argjson route_domains "${ROUTE_DOMAINS:-[]}" --argjson force "${FORCE:-[]}" --argjson adaptive "${ADAPT:-[]}" \
       --argjson categories "${CATS:-[]}" --argjson tunnel_guard "$TG" --argjson wan_guard "$WG_ON" --argjson components "$COMPONENTS" \
-      --argjson adaptive_on "$AD_ON" --argjson classifier_on "$CL_ON" --argjson ip_excluded "${IPX:-[]}" \
+      --argjson adaptive_on "$AD_ON" --arg adaptive_ads "$AD_ADS" --argjson classifier_on "$CL_ON" --argjson ip_excluded "${IPX:-[]}" \
       --argjson w_en "$W_EN" --argjson w_ctl "$W_CTL" \
       --argjson wan_params "$WAN_PARAMS" --argjson agents_mode "$AGENTS_MODE" --argjson proposed "$PROPOSED" \
       --arg w_window "$(wnum "$W_WIN" 86400)" --arg w_switch "$(wnum "$W_SW" 20)" \
@@ -856,7 +865,7 @@ if [ "$ACTION" = config-data ]; then
       --arg u_feed "$(printf '%s\n' "$U_URL" | sed -n -E 's#^https://raw[.]githubusercontent[.]com/[^/]+/[^/]+/(main|beta|dev)/updates/[a-z0-9-]+/update-manifest[.]json$#\1#p')" \
       --argjson writable "$([ -x "$CONFIG_HELPER" ] && echo true || echo false)" \
       '{ok:true,writable:$writable,
-        route:{group:$group,groups:$groups,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
+        route:{group:$group,groups:$groups,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,adaptive_ads:$adaptive_ads,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
         agents:{mode:$agents_mode,proposed:$proposed},
         tunnel_guard:{enabled:$tunnel_guard},wan_guard:{enabled:$wan_guard,params:$wan_params},components:$components,
         wifi:{ENABLED:($w_en==1),CONTROL_ENABLED:($w_ctl==1),WINDOW_SEC:($w_window|(tonumber? // null)),BAND_SWITCH_WARN:($w_switch|(tonumber? // null)),WEAK_5G_SAMPLE_WARN:($w_weak|(tonumber? // null)),WEAK_5G_RSSI:($w_rssi|(tonumber? // null))},
@@ -886,7 +895,7 @@ if [ "$ACTION" = config ]; then
         tunnel-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=TUNNEL_GUARD_DISABLE ;;
         wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;
         component) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=COMPONENT_DISABLE ;;
-        adaptive-mode|classifier|smartdns-guard|tunnel-fallback|tunnel-return) set -- "$OP" "$VALUE" ;;
+        adaptive-mode|adaptive-ads|classifier|smartdns-guard|tunnel-fallback|tunnel-return) set -- "$OP" "$VALUE" ;;
         # «Smart DNS» on/off (owner 08.11); off takes VWARD's own rows away: confirmed.
         smartdns-feature) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=SMARTDNS_OFF ;;
         extra) set -- "$OP" "$TARGET" "$VALUE" ;;
@@ -937,8 +946,8 @@ journal_files() {
 if [ "$ACTION" = journal-data ]; then
     header_json
     JC=${VWARD_JOURNAL_CONF:-/opt/etc/vward/journal.conf}
-    KEEP="$(sed -n 's/^KEEP_DAYS=//p' "$JC" 2>/dev/null | tail -n 1)"; case "$KEEP" in 1|3|7|30|180|365) ;; *) KEEP=30 ;; esac
-    MAXMB="$(sed -n 's/^MAX_MB=//p' "$JC" 2>/dev/null | tail -n 1)"; case "$MAXMB" in 0|1|5|10|30) ;; *) MAXMB=30 ;; esac
+    KEEP="$(sed -n 's/^KEEP_DAYS=//p' "$JC" 2>/dev/null | tail -n 1)"; case "$KEEP" in 0|1|3|7|30|180|365) ;; *) KEEP=30 ;; esac
+    MAXMB="$(sed -n 's/^MAX_MB=//p' "$JC" 2>/dev/null | tail -n 1)"; case "$MAXMB" in 0|1|5|10|30|100) ;; *) MAXMB=30 ;; esac
     journal_files | ( cd "$LOG_ROOT" 2>/dev/null && while IFS= read -r F; do ls -ln "$F"; done ) | awk -v now="$(date +%s)" '
         {name = $0; for (i = 1; i <= 8; i++) sub(/^[^ ]+ +/, "", name)
          if (name ~ /^vward\/archive\//) {an++; ab += $5; s = name; sub(/.*\.log\./, "", s); sub(/(-[0-9]+)?\.gz$/, "", s)
@@ -1147,7 +1156,7 @@ if [ "$ACTION" = tunnel-conf ]; then
         result=checked)
           printf '%s\n' "$TOUT" | sed -n 's/^info\.server\.\([0-9]*\)=/\1|/p' | "$JQ" -Rn --argjson cur "$(printf '%s\n' "$TOUT" | sed -n 's/^info\.current=\([0-9]*\)$/\1/p' | head -n 1 | grep . || echo 0)" \
               --arg off "$(printf '%s\n' "$TOUT" | sed -n 's/^info\.countries\.off=//p' | head -n 1)" --arg cross "$(printf '%s\n' "$TOUT" | sed -n 's/^info\.countries\.cross=//p' | head -n 1)" '
-            {ok: true, current: $cur, countries: {off: ($off | split(" ") | map(select(length == 2))), cross: ($cross != "0")}, servers: [inputs | split("|") | {n: (.[0] | tonumber), name: .[1], host: .[2], port: (.[3] | tonumber? // null), ms: (.[4] | tonumber? // null), current: (.[5] == "1"), why: (.[6] // "")}]}' ;;
+            {ok: true, current: $cur, countries: {off: ($off | split(" ") | map(select(length == 2))), cross: ($cross == "1")}, servers: [inputs | split("|") | {n: (.[0] | tonumber), name: .[1], host: .[2], port: (.[3] | tonumber? // null), ms: (.[4] | tonumber? // null), current: (.[5] == "1"), why: (.[6] // "")}]}' ;;
         error=*) E="$(printf '%s\n' "$TOUT" | tail -n 1)"; E=${E#error=}; case "$E" in *[!a-z0-9_]*) E=helper_failed;; esac; printf '{"ok":false,"error":"%s"}\n' "$E" ;;
         *) echo '{"ok":false,"error":"helper_failed"}' ;;
       esac ;;
@@ -1742,7 +1751,9 @@ EOF_HSTATS
         ADAPTIVE_RECENT="$("$JQ" -c '[.names // {} | to_entries | sort_by(.value.added) | .[-20:][] | .key]' "$CORE_OWNED" 2>/dev/null)"
         # Each name with when it came and its direct checks (the autopick page, fix.38).
         ADAPTIVE_NAMES="$("$JQ" -c '[.names // {} | to_entries | sort_by(.value.added) | reverse | .[:500][] |
-            {d: .key, added: (.value.added // ""), streak: (.value.streak // 0), checked: (.value.checked // "")}]' "$CORE_OWNED" 2>/dev/null)"
+            ({d: .key, added: (.value.added // ""), streak: (.value.streak // 0), checked: (.value.checked // "")} +
+             # fix.39: why it did not open directly, checks failed through the VPN too, the marks of the core.
+             ((.value | {why, vpn_fail, cdn, ad}) | with_entries(select(.value != null and .value != "" and .value != 0))))]' "$CORE_OWNED" 2>/dev/null)"
     fi
     [ -n "${ADAPTIVE_NAMES:-}" ] || ADAPTIVE_NAMES='[]'
     case "$ADAPTIVE_COUNT" in ''|*[!0-9]*) ADAPTIVE_COUNT="$(wc -l 2>/dev/null < "$ADAPTIVE_PERSIST")" ADAPTIVE_RECENT= ;; esac
@@ -2213,7 +2224,18 @@ if [ "$ACTION" = "diagnostics" ]; then
     LAST_WG_RC="$(cat /tmp/vward-tunnel-health-chain.cron.rc 2>/dev/null)"
     LAST_ROUTE_RC="$(cat /tmp/vward-route-reconciler-maint.cron.rc 2>/dev/null)"
 
-    "$JQ" -n \
+    # Whose ndmc sessions fill Keenetic's journal (fix.39): by program - this hour, the hour before,
+    # the last 24 hours of uptime - and every request to Keenetic (RCI and ndmc) of those 24 hours.
+    NDMC_BY='[]' KCALLS_DAY=0
+    if command -v vward_ndmc_calls_report >/dev/null 2>&1; then
+        NDMC_BY="$(vward_ndmc_calls_report 2>/dev/null | "$JQ" -Rnc '[inputs | split(" ") | select(length == 4) |
+            {p: .[0], now: (.[1] | tonumber), last: (.[2] | tonumber), day: (.[3] | tonumber)}] | sort_by(-.day)' 2>/dev/null)"
+        KC_UP=; read -r KC_UP _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"; KC_UP=${KC_UP%%.*}
+        vward_hour_sum "${VWARD_KEENETIC_CALLS:-/tmp/vward-keenetic-calls}" $((${KC_UP:-0} / 3600 - 23)) $((${KC_UP:-0} / 3600)); KCALLS_DAY=$_VHS
+    fi
+    case "$NDMC_BY" in '['*) ;; *) NDMC_BY='[]' ;; esac
+    case "$KCALLS_DAY" in ''|*[!0-9]*) KCALLS_DAY=0 ;; esac
+    "$JQ" -n --argjson ndmc_by "$NDMC_BY" --argjson kcalls_day "$KCALLS_DAY" \
       --arg opt "$OPT_STATUS" --arg jq "$JQ_STATUS" --arg curl "$CURL_STATUS" --arg curl_detail "$CURL_DETAIL" --arg boot "$BOOT_STATUS" \
       --arg tcpdump "$TCPDUMP_STATUS" --arg lighttpd "$LIGHTTPD_STATUS" \
       --arg crond "$CROND_STATUS" --arg supervisor "$SUPERVISOR_STATUS" \
@@ -2244,7 +2266,8 @@ if [ "$ACTION" = "diagnostics" ]; then
         {id:"files",component:"update-engine",label:"Файлы VWARD",status:$files,detail:$files_detail},
         {id:"updater",component:"update-engine",label:"Движок обновлений",status:$updater,detail:"рабочая копия движка на месте"},
         {id:"update-config",component:"update-engine",label:"Настройки обновлений",status:$config,detail:"файл настроек читается"}
-      ]} | if $adguard_have == "1" then . else .checks |= map(select(.id != "adguard")) end'
+      ]} | if $adguard_have == "1" then . else .checks |= map(select(.id != "adguard")) end
+         | .keenetic = {ndmc: $ndmc_by, calls_day: $kcalls_day}'
     exit 0
 fi
 
@@ -3308,11 +3331,14 @@ if [ "$ACTION" = ext-update-data ]; then
         --argjson fw "$X_FW" --argjson hist "$X_HIST" --argjson run "$(run_json "$EXT_RUN_DIR")" \
         --argjson agh_auto "$X_AGH" --argjson ent_auto "$X_ENT" --arg aov "$X_AOV" --arg aop "$X_AOP" \
         --arg critical " libc libgcc libpthread librt libssp libstdcpp busybox opkg entware-opt entware-release entware-upgrade dropbear " \
+        --arg vward_pkgs "curl jq tcpdump openssl-util ca-bundle lighttpd lighttpd-mod-cgi lighttpd-mod-setenv cron" \
         '{ok: true, checked_at: $at, feed_ok: ($orc == 0), installed_count: ($inst | length),
           auto: {agh: ($agh_auto == 1), entware: ($ent_auto == 1)},
           agh: {installed: ($inst["adguardhome-go"] // null), available: ([$up[] | select(.name == "adguardhome-go") | .available][0] // null),
             official: {installed: (if $aov == "" then null else $aov end), pinned: (if $aop == "" then null else $aop end)}},
           packages: [$up[] | select(.name != "adguardhome-go") | . + {critical: ($critical | contains(" " + .name + " "))}],
+          # The packages VWARD itself needs (install.sh PACKAGES), with what is installed (owner 13.11.2026).
+          vward: [$vward_pkgs | split(" ")[] | {name: ., installed: ($inst[.] // null)}],
           firmware: $fw, history: $hist, run: $run}'
     exit 0
 fi
@@ -3538,7 +3564,12 @@ if [ "$ACTION" = stability ]; then
     RCI_CD=${VWARD_RCI_CALLS:-/tmp/vward-rci-calls} RCI_UP=
     read -r RCI_UP _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
     RCI_UP=${RCI_UP%%.*}
-    RCI_CALLS=$(cat "$RCI_CD"/* 2>/dev/null | awk -v h="$((${RCI_UP:-0} / 3600))" '/^[0-9]+$/ {ok = ($1 > h - 24); next} ok {n += length($0)} END {printf "%d", n}')
+    # Each hour's file by itself (fix.39): read together, the files glued the next hour to the dots
+    # before it, and every hour counted as the first file's - all of them, or none.
+    RCI_CALLS=0
+    if command -v vward_hour_sum >/dev/null 2>&1; then
+        vward_hour_sum "$RCI_CD" $((${RCI_UP:-0} / 3600 - 23)) $((${RCI_UP:-0} / 3600)); RCI_CALLS=$_VHS
+    fi
     # Memory of the router and of every running program of VWARD and AdGuard Home (owner 02.11:
     # the list was partial, AdGuard Home the largest): resident and swapped out, one way for all
     # (/proc/PID/status VmRSS/VmSwap).
@@ -3650,7 +3681,7 @@ log_file() {
 }
 # «Все» in one answer (owner 12.11.2026: one request instead of one per journal): every source
 # but crond's own record, each after a «@@VWARD-LOG name» line; the Panel merges them.
-LOG_ALL_NAMES="wan recovery tunnel adaptive core routing policy wifi ads updater console awg vless sentinel supervisor housekeeping integrity off"
+LOG_ALL_NAMES="wan recovery tunnel adaptive core routing policy ads updater console awg vless supervisor housekeeping integrity off"
 
 if [ "$ACTION" = "log" ]; then
 
@@ -3665,6 +3696,9 @@ if [ "$ACTION" = "log" ]; then
     HOURS="$(qget hours)"
     case "$HOURS" in ''|*[!0-9]*) HOURS="" ;; esac
     [ -z "$HOURS" ] || { [ "$HOURS" -ge 1 ] && [ "$HOURS" -le 168 ]; } || HOURS=24
+    # full=1: the whole live journal, for «Скачать» (owner 13.11.2026: it saved only the entries shown).
+    # The archives of earlier days come with «Архивировать».
+    FULL="$(qget full)"; [ "$FULL" = 1 ] || FULL=
 
     # log_show FILE: the last COUNT lines of FILE (of the last HOURS hours when asked), or why not.
     log_show() {
@@ -3674,6 +3708,8 @@ if [ "$ACTION" = "log" ]; then
         # Panel shows which source has nothing and which cannot be read.
         if [ -z "$FILE" ]; then
             echo "Журнал недоступен: неизвестный журнал."
+        elif [ -n "$FULL" ] && [ -r "$FILE" ] && [ -s "$FILE" ]; then
+            cat "$FILE" 2>/dev/null
         elif [ -r "$FILE" ] && [ -s "$FILE" ] && [ -n "$HOURS" ]; then
             # An entry starts with its time («2026-11-02 10:51:03», «…T…», with «Z»/«+0300» or
             # without - then the router's own time); lines without a time belong to the entry above.
@@ -3905,7 +3941,8 @@ read_first /tmp/vward-route-reconciler-maint.cron.last RLAST
 
 read_first /opt/share/vward/VERSION VWARD_VERSION
 UPDATER_STATE=/opt/var/lib/vward/updater
-COMPONENTS="$($JQ -c '.components // {}' "$UPDATER_STATE/components.json" 2>/dev/null || echo '{}')"
+HIDDEN_PARTS="$($JQ -c '.parts_hidden // []' "${VWARD_SETTINGS_REGISTRY:-/opt/share/vward/settings-registry.json}" 2>/dev/null)"
+COMPONENTS="$($JQ -c --argjson hidden "${HIDDEN_PARTS:-[]}" '.components // {} | with_entries(select(.key | IN($hidden[]) | not))' "$UPDATER_STATE/components.json" 2>/dev/null || echo '{}')"
 kv_file "$UPDATER_STATE/committed.state" installed_update_id=INSTALLED_UPDATE_ID last_sequence=LAST_SEQUENCE last_health_check=LAST_HEALTH
 # The update feed's last look (vward-update-watch): «Последняя проверка» in «Обновления» (fix.33.2;
 # last_health_check is the check after an installation).
@@ -4012,7 +4049,7 @@ PARTS_FACTS=$(
     s=$(pkg_of dnsmasq-full); printf 'dnsmasq\t%s\t1\t%s\t\n' "$(case $s in not-installed|'') echo 0 ;; *) echo 1 ;; esac)" "$(case $s in running*) echo 1 ;; installed-off) echo 0 ;; esac)"
     printf 'agh\t%s\t%s\t%s\t\n' "$AGH_INSTALLED" "$(part_on adguardhome.disabled)" "$ADGUARD"
     printf 'doh\t%s\t1\t%s\t\n' "$DOH_INST" "$DOH_RUN"
-    if [ "$CORE_RUN" = 1 ]; then printf 'dnscap\t1\t1\t1\tавтоподбор на Go ловит запросы сам\n'
+    if [ "$CORE_RUN" = 1 ]; then printf 'dnscap\t1\t1\t1\tотдельная программа не нужна\n'
     else printf 'dnscap\t%s\t1\t%s\t\n' "$DNSCAP_INST" "$([ "${DNSCAP_RUN:-0}" -gt 0 ] 2>/dev/null && echo 1 || echo 0)"; fi
     printf 'sentinel\t%s\t%s\t%s\t\n' "$SENTINEL_INST" "$(extra_on sentinel)" "$SENTINEL_RUN"
     for x in $("$JQ" -r '.parts[] | select(.switch == "extra" and .id != "sentinel") | .id' "$PARTS_REG" 2>/dev/null); do
@@ -4022,8 +4059,8 @@ PARTS_JSON=$(printf '%s\n' "$PARTS_FACTS" | "$JQ" -Rn --slurpfile reg "$PARTS_RE
     [inputs | split("\t") | select(length >= 4) | {(.[0]): {installed: (.[1] == "1"), enabled: (.[2] == "1"),
       running: (if .[3] == "1" then true elif .[3] == "0" then false else null end), why: (.[4] // "")}}] | add as $f |
     $reg[0] | if (.parts | type) == "array" then
-      {groups: .parts_groups, agents: .parts_agents, all_extras: '"$([ "$EXTRAS_ALL" = 1 ] && echo true || echo false)"',
-       list: [.parts[] | . + ($f[.id] // {installed: null, enabled: null, running: null, why: ""})]}
+      {groups: .parts_groups, agents: .parts_agents, hidden: (.parts_hidden // []), all_extras: '"$([ "$EXTRAS_ALL" = 1 ] && echo true || echo false)"',
+       list: [.parts[] | select(.id | IN((($reg[0].parts_hidden) // [])[]) | not) | . + ($f[.id] // {installed: null, enabled: null, running: null, why: ""})]}
     else null end' 2>/dev/null)
 [ -n "$PARTS_JSON" ] || PARTS_JSON=null
 

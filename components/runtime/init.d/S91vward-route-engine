@@ -439,9 +439,12 @@ status_service()
 # When the routing core is installed («S91vward-route-engine core-install»), «vward-core adaptive» runs instead
 # of the shell engine: the only writer of AdaptiveAuto, it also takes names out again (the shell
 # reconciler stands aside). /opt/etc/vward/route-engine/engine.shell keeps the shell engine;
-# core.observe (or Autopodbor switched off in the Panel) runs it without writing. A core that
-# does not start: the shell engine for an hour, then the core again. No core yet: the shell
-# engine, and the core is fetched in the background (at most once an hour).
+# core.observe runs it without writing. The Panel's switches are files the core looks at itself
+# (fix.39): adaptive.disabled stops its writes within seconds and without a restart, ads.sandbox
+# is «Реклама и счётчики» in the sandbox. A core that does not start: the shell engine for an
+# hour, then the core again. No core yet: the shell engine, and the core is fetched in the
+# background (at most once an hour). A core of an older build goes on working, started as its
+# own release started it, until the build this release pins is fetched (core_current).
 CORE_BIN=${VWARD_CORE_BIN:-/opt/share/vward/core/vward-core}
 CORE_SELF=${VWARD_CORE_SELF:-$0}
 CORE_URL=${VWARD_CORE_URL:-https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/tools/vward-core/dist}
@@ -465,9 +468,9 @@ command -v vward_core_adaptive_pid >/dev/null 2>&1 || vward_core_adaptive_pid() 
 core_sum()
 {
     case "$1" in
-        mipsle) echo c339942ab038793558b88b83e0d283135b2ab83508b55a24c3c6219940238863 ;;
-        mips) echo 7e56c0aca069a79ad64a6bdb5b09d5d75f1ae02d385b44141ef750d3580d9e97 ;;
-        arm64) echo 6fa9e0bed84fa8d55358c67878dab81f55e0b6ae5753894f4e01f4b3f31f6a9d ;;
+        mipsle) echo ac568dab97c6e34f6b4abb1848491ae1bfa6bf2b65a767a8f03f11b09409769c ;;
+        mips) echo f76ac304f5a4c6f71de8341964282f423a3f490cbcaacfa046d0169e7497c8ce ;;
+        arm64) echo e230d13b0a65b8c63ab9171e37d575b51d8f287d458b1965877b31ec30dde16c ;;
         *) return 1 ;;
     esac
 }
@@ -510,8 +513,37 @@ core_install()
         echo "error=$CI_ERR"
         return 1
     fi
+    echo "$CI_WANT" > "$CORE_BIN.sum" 2>/dev/null || :
     echo "$(date '+%Y-%m-%d %H:%M:%S')|CORE_INSTALLED|arch=$CI_A" >> "$EVENT_LOG" 2>/dev/null
     echo "result=changed"
+}
+
+# core_current: the installed core is the build this release pins. Before fix.39 only «is there a
+# core» was asked: a router that already had one kept its old build for good, and a fix made in
+# the core never reached it (the route taken back without «auto», fix.38, stayed unfixed on a
+# router with the fix.37 build). The sum of the checked program is kept beside it, so the file
+# is hashed once, not at every start.
+core_current()
+{
+    CC_A=$(core_arch) && CC_WANT=$(core_sum "$CC_A") && [ -n "$CC_WANT" ] || return 1
+    CC_HAVE=; read -r CC_HAVE 2>/dev/null < "$CORE_BIN.sum" || :
+    if [ "$CC_HAVE" = "$CC_WANT" ] && [ ! "$CORE_BIN.sum" -ot "$CORE_BIN" ]; then return 0; fi
+    [ "$(sha256sum "$CORE_BIN" 2>/dev/null | cut -d' ' -f1)" = "$CC_WANT" ] || return 1
+    echo "$CC_WANT" > "$CORE_BIN.sum" 2>/dev/null || :
+    return 0
+}
+
+# core_fetch: the pinned build fetched in the background - started at most once an hour, a
+# failed download tried again every 10 minutes within it.
+core_fetch()
+{
+    [ -z "$(find "$CORE_FETCH_TRY" -mmin -60 2>/dev/null)" ] || return 0
+    printf '' > "$CORE_FETCH_TRY" 2>/dev/null
+    ( CF_N=0
+      while [ "$CF_N" -lt 6 ]; do
+          "$CORE_SELF" core-install && break
+          CF_N=$((CF_N + 1)); sleep "${VWARD_CORE_FETCH_RETRY:-600}"
+      done </dev/null >/dev/null 2>&1 & )
 }
 
 core_wanted()
@@ -519,12 +551,11 @@ core_wanted()
     [ ! -e "$CORE_ETC/engine.shell" ] || return 1
     if [ ! -x "$CORE_BIN" ]; then
         # Fetched in the background; the shell engine works meanwhile.
-        if [ -z "$(find "$CORE_FETCH_TRY" -mmin -60 2>/dev/null)" ]; then
-            printf '' > "$CORE_FETCH_TRY" 2>/dev/null
-            ( "$CORE_SELF" core-install </dev/null >/dev/null 2>&1 & )
-        fi
+        core_fetch
         return 1
     fi
+    # An older build: it works on while the pinned one is fetched (core-install restarts with it).
+    core_current || core_fetch
     [ -z "$(find "$CORE_FALLBACK" -mmin -60 2>/dev/null)" ]
 }
 
@@ -547,10 +578,18 @@ core_start()
     # One writer of AdaptiveAuto: the shell engine goes first.
     stop_service >/dev/null 2>&1
     CS_MODE=--apply
-    [ ! -e "$CORE_ETC/adaptive.disabled" ] && [ ! -e "$CORE_ETC/core.observe" ] || CS_MODE=
+    if core_current; then
+        # The pinned build reads the Panel's switches itself, while it runs.
+        [ ! -e "$CORE_ETC/core.observe" ] || CS_MODE=
+        set -- --observe-if "$CORE_ETC/adaptive.disabled" --ads-sandbox-if "$CORE_ETC/ads.sandbox"
+    else
+        # An older build knows only the options of its own release.
+        [ ! -e "$CORE_ETC/adaptive.disabled" ] && [ ! -e "$CORE_ETC/core.observe" ] || CS_MODE=
+        set --
+    fi
     mkdir -p "${VWARD_CORE_PIDFILE%/*}" "${CORE_LOG%/*}" 2>/dev/null
     "$CORE_BIN" adaptive --lan "${VWARD_LAN_DEVICE:-br0}" --wan "${VWARD_WAN_DEVICE:-}" \
-        --tunnel-dev "${VWARD_TUNNEL_DEVICE:-}" --log "$CORE_LOG" $CS_MODE </dev/null >> "$CORE_LOG.out" 2>&1 &
+        --tunnel-dev "${VWARD_TUNNEL_DEVICE:-}" --log "$CORE_LOG" $CS_MODE "$@" </dev/null >> "$CORE_LOG.out" 2>&1 &
     echo "$!" > "$VWARD_CORE_PIDFILE"
     sleep 3
     if CS_P=$(vward_core_adaptive_pid); then

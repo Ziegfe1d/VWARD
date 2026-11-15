@@ -45,7 +45,7 @@ input,select,textarea{font:inherit;color:inherit;-webkit-user-select:text;user-s
 .topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;display:flex;align-items:center;gap:8px;height:var(--topbar-h);padding-inline:16px;background:var(--surface);border-bottom:1px solid var(--line)}
 .topbar-title{flex:1;min-width:0;display:flex;align-items:center;gap:8px}
 .topbar-title h1{margin:0;font-size:var(--fs-lg);font-weight:650;line-height:1.2;display:flex;align-items:center;gap:2px;min-width:0}
-.topbar-title .page-title-text{overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;min-width:0}
+.topbar-title .page-title-text{overflow:hidden;display:block;white-space:nowrap;text-overflow:ellipsis;min-width:0}
 .topbar-title h1 .q-btn{margin:-6px 0}
 .icon-btn{position:relative;display:inline-grid;place-items:center;width:40px;height:40px;border:0;border-radius:var(--r-md);background:transparent;color:var(--muted)}
 .icon-btn:active{background:var(--surface-2)}
@@ -138,12 +138,14 @@ body::after{content:"";position:fixed;z-index:19;left:0;right:0;bottom:0;height:
 .kv dd select.input{max-width:190px;font-size:var(--fs-sm);font-weight:400}
 .kv-row .hint{display:block;margin-top:2px;color:var(--faint);font-size:var(--fs-xs)}
 .kv-row .hint[hidden]{display:none}
-.dt-t{display:inline-flex;align-items:center;gap:2px}
+.dt-t{display:inline}
+.q-glue{white-space:nowrap}
+.q-glue .q-btn{vertical-align:middle;margin-left:2px}
 .q-btn{display:inline-grid;place-items:center;width:28px;height:28px;margin:-6px 0;padding:0;border:0;border-radius:50%;background:transparent;color:var(--muted);cursor:pointer;flex:none}
 .icon-btn.pin[aria-pressed="true"]{color:var(--accent)}
 .q-btn .icon{width:17px;height:17px}
 .q-btn[aria-expanded="true"]{color:var(--accent)}
-.block-head h2+.q-btn{margin-left:-4px}
+.block-head h2 .q-btn{margin-left:2px}
 .kv-row.sub dt{padding-left:14px}
 /* A slider with its value next to it (journal size). */
 .range-field{display:inline-flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap;justify-content:flex-end}
@@ -364,6 +366,7 @@ small.st .icon{width:14px;height:14px}
 .note-item.unread{background:var(--surface-2)}
 .note-item.unread::before{content:"";position:absolute;left:6px;top:24px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
 .notes-bar{position:sticky;top:-4px;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:40px;padding:4px 16px;background:var(--surface);border-bottom:1px solid var(--line);color:var(--muted);font-size:var(--fs-xs)}
+.notes-bar>span{flex:1 1 auto;white-space:nowrap}
 /* Знак важности: в уведомлениях колокольчика и во всплывающих. */
 .sev{flex:none;display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:var(--accent-soft);color:var(--accent)}
 .sev.ok{background:var(--ok-soft);color:var(--ok)}
@@ -644,3 +647,6 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
 .seg-slider.off button[aria-checked="true"]{color:var(--accent-text)}
 .panel-actions.wrap{flex-wrap:wrap}
 .panel-actions.wrap .btn{white-space:normal;text-align:center;word-break:normal;overflow-wrap:normal}
+/* A short choice as the slider over its hidden select (owner 13.11.2026): the select is never seen. */
+.seg-sel{display:block;width:100%}
+.seg-sel>select{display:none!important}

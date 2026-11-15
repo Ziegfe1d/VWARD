@@ -34,6 +34,7 @@ JOURNAL_CONF=${VWARD_JOURNAL_CONF:-$ETC/journal.conf}
 LISTS_STATE="$ETC/route-engine/domain-lists"
 WAN_GUARD_FLAG="$ETC/wan-guard.disabled"
 ADAPTIVE_FLAG="$ETC/route-engine/adaptive.disabled"
+ADAPTIVE_ADS_FLAG="$ETC/route-engine/ads.sandbox"
 CLASSIFIER_FILE="$ETC/route-engine/domain-classifier.conf"
 IP_EXCLUDED=${VWARD_POLICY_EXCLUDED:-$ETC/policy-sync/excluded.categories}
 AUTH_CONF=${VWARD_CONSOLE_AUTH_CONF:-$ETC/console/auth.conf}
@@ -749,6 +750,21 @@ op_guard_flag() {
         *) die invalid_value 64 ;;
     esac
     done_ok "$1 enabled=$3" changed
+}
+
+# adaptive-ads off|sandbox: «Реклама и счётчики» of Autopodbor (owner 13.11.2026; the rule «сначала
+# песочница»). Sandbox - the core only names in its journal the adverts and counters it would not
+# send to the VPN and would take out of it; nothing on the router changes. The core looks at the
+# file itself, within seconds. «Вкл» comes with a later release, after the owner's check.
+op_adaptive_ads() {
+    case "$1" in
+        sandbox) [ ! -e "$ADAPTIVE_ADS_FLAG" ] || done_ok "adaptive-ads sandbox" unchanged
+           mkdir -p "$(dirname "$ADAPTIVE_ADS_FLAG")" && printf 'sandbox from VWARD Panel %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$ADAPTIVE_ADS_FLAG" || die write_failed ;;
+        off) [ -e "$ADAPTIVE_ADS_FLAG" ] || done_ok "adaptive-ads off" unchanged
+           rm -f "$ADAPTIVE_ADS_FLAG" || die write_failed ;;
+        *) die invalid_value 64 ;;
+    esac
+    done_ok "adaptive-ads $1" changed
 }
 
 # tunnel-auto enabled 0|1 | criterion balanced|speed|ping | speed off|night|6h: the tunnel
@@ -3987,7 +4003,7 @@ op_reset() {
     ( op_backup_create prereset ) >/dev/null || die backup_failed
     rs_route=
     [ ! -e "$COMPONENT_STATE/route-engine.disabled" ] || rs_route=1
-    rm -f "$TUNNEL_GUARD_FLAG" "$TUNNEL_FALLBACK_FLAG" "$TUNNEL_RETURN_FLAG" "$WAN_GUARD_FLAG" "$ADAPTIVE_FLAG" \
+    rm -f "$TUNNEL_GUARD_FLAG" "$TUNNEL_FALLBACK_FLAG" "$TUNNEL_RETURN_FLAG" "$WAN_GUARD_FLAG" "$ADAPTIVE_FLAG" "$ADAPTIVE_ADS_FLAG" \
         "$ETC/agents.conf" "$TUNNEL_AUTO_CONF" "$JOURNAL_CONF" "$COMPONENT_STATE"/*.disabled 2>/dev/null
     [ ! -f "$LISTS_CONF" ] || set_kv "$LISTS_CONF" smartdns_guard 1 0644 || true
     [ ! -f "$EXT_CONF" ] || { set_kv "$EXT_CONF" AGH_AUTO 0 0600; set_kv "$EXT_CONF" ENTWARE_AUTO 0 0600; } || true
@@ -4808,7 +4824,7 @@ journal_file() {
 # cleared console journal starts with who cleared it.
 op_journal_clear() {
     case "$1" in
-        all) jc_names="wan recovery tunnel adaptive core routing policy wifi ads updater console awg vless sentinel supervisor housekeeping integrity off" ;;
+        all) jc_names="wan recovery tunnel adaptive core routing policy ads updater console awg vless supervisor housekeeping integrity off" ;;
         *) journal_file "$1" >/dev/null || die invalid_value 64; jc_names=$1 ;;
     esac
     jc_done=0
@@ -4825,8 +4841,10 @@ op_journal_clear() {
 op_journal() {
     [ "$1" != clear ] || op_journal_clear "$2"
     case "$1:$2" in
-        keep:1|keep:3|keep:7|keep:30|keep:180|keep:365) jk=KEEP_DAYS ;;
-        size:0|size:1|size:5|size:10|size:30) jk=MAX_MB ;;
+        # 0: no term / no limit (owner 13.11.2026: «Без ограничений» for both); the older terms and
+        # sizes stay valid until the owner picks another.
+        keep:0|keep:1|keep:3|keep:7|keep:30|keep:180|keep:365) jk=KEEP_DAYS ;;
+        size:0|size:1|size:5|size:10|size:30|size:100) jk=MAX_MB ;;
         *) die invalid_value 64 ;;
     esac
     set_kv "$JOURNAL_CONF" "$jk" "$2" 0644 || done_ok "journal $1=$2" unchanged
@@ -4846,6 +4864,8 @@ reg_has() {
 op_extra() {
     reg_has '.parts[] | select(.switch == "extra") | .id' "$1" || die invalid_value 64
     case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
+    # A frozen part (owner 13.11.2026, fix.39) is hidden and off for good: it is not switched on.
+    [ "$2" = 0 ] || ! reg_has '.parts_hidden[]?' "$1" || die retired_part 64
     # NAME.on switches a part on; NAME.off keeps it off even with every part on (all.on).
     ex_f="$COMPONENT_STATE/$1.on" ex_o="$COMPONENT_STATE/$1.off"
     if [ "$2" = 1 ]; then
@@ -4900,6 +4920,7 @@ op_component() {
     case "$2" in 0|1) ;; *) die invalid_value 64 ;; esac
     [ -r "$COMPONENT_REGISTRY" ] || die registry_unavailable
     "$JQ" -e --arg id "$1" 'any(.components[]; .id == $id)' "$COMPONENT_REGISTRY" >/dev/null 2>&1 || die invalid_component 64
+    [ "$2" = 0 ] || ! reg_has '.parts_hidden[]?' "$1" || die retired_part 64
     set_ids=$(component_closure "$1" "$2") || die registry_unavailable
     # Back on: the components that went off with it (their flag says «with ID») come back
     # too, with what they need; one the owner switched off by itself stays off.
@@ -5850,7 +5871,7 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store|smartdns-feature|routing-root) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|adaptive-ads|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store|smartdns-feature|routing-root) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
@@ -5906,7 +5927,7 @@ case "$OP" in
         edit_lock ;;
     # Settings no routing step reads (owner 08.11: a switch does not wait for a long routing change):
     # their own short lock, not the routing edit lock.
-    wan-guard|console-auth|console-devices|update-feed|ext-auto|journal|agents-mode)
+    wan-guard|console-auth|console-devices|update-feed|ext-auto|journal|agents-mode|adaptive-ads)
         dir_lock "$SETTINGS_LOCK" || die settings_busy 75
         SETTINGS_LOCKED=1 ;;
 esac
@@ -5934,6 +5955,7 @@ case "$OP" in
     wan-guard) op_guard_flag wan-guard "$WAN_GUARD_FLAG" "$ARG1" ;;
     component) op_component "$ARG1" "$ARG2" ;;
     adaptive-mode) op_guard_flag adaptive "$ADAPTIVE_FLAG" "$ARG1" ;;
+    adaptive-ads) op_adaptive_ads "$ARG1" ;;
     classifier) case "$ARG1" in 0|1) ;; *) die invalid_value 64 ;; esac
         set_kv "$CLASSIFIER_FILE" CLASSIFIER_ENABLED "$ARG1" 0600 || done_ok "classifier enabled=$ARG1" unchanged
         done_ok "classifier enabled=$ARG1" changed ;;

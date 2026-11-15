@@ -269,4 +269,28 @@ if '"$BACKUP_HELPER" "$EXT_OP" now' not in HOUSE:
 _js = (ROOT / "web/assets/vward-console.js").read_text()
 if "allCheckBtn()" not in _js or "a === 'all-check') extOp('check').then(() => updateOp('check'))" not in _js:
     raise SystemExit("EXT_UPDATE=FAIL: «Проверить всё» must check VWARD as well")
+# «Пакеты Entware» (owner 13.11.2026): the state, the packages VWARD needs (install.sh's own list) with their
+# versions, «Действия» apart from «Настройки». The router's answer is run on an opkg database copy.
+import re as _re, os as _os, shutil as _sh, subprocess as _sp, tempfile as _tf, json as _js
+_inst = _re.search(r"^PACKAGES='([^']*)'", (ROOT / "install.sh").read_text(), _re.M).group(1)
+_want = [p.split(":")[0] for p in _inst.split()]
+_api = (ROOT / "web/cgi-bin/api.cgi").read_text(encoding="utf-8")
+_m = _re.search(r'--arg vward_pkgs "([^"]*)"', _api)
+if not _m or _m.group(1).split() != _want:
+    raise SystemExit(f"EXT_UPDATE=FAIL: RED: the router's list of VWARD's packages is install.sh's: {_m and _m.group(1)} / {_want}")
+if _sh.which("jq"):
+    with _tf.TemporaryDirectory() as _t:
+        _st = Path(_t) / "status"; _st.write_text("Package: jq\nVersion: 1.8.1-1\n\nPackage: curl\nVersion: 8.11.0-1\n\nPackage: nano\nVersion: 8.2-1\n")
+        _e = _os.environ | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=ext-update-data", "VWARD_OPKG_STATUS": str(_st), "JQ": _sh.which("jq"),
+                            "VWARD_PROFILE_LIB": str(Path(_t) / "none"), "VWARD_ROOT_PREFIX": _t, "VWARD_EXT_STATE": str(Path(_t) / "ext")}
+        _o = _sp.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=_e, capture_output=True, text=True).stdout.split("\n\n", 1)[-1]
+        _d = _js.loads(_o)
+        _v = {p["name"]: p["installed"] for p in _d.get("vward", [])}
+        if list(_v) != _want or _v["jq"] != "1.8.1-1" or _v["curl"] != "8.11.0-1" or _v["cron"] is not None or _d.get("installed_count") != 3:
+            raise SystemExit(f"EXT_UPDATE=FAIL: RED: VWARD's packages with their versions: {_v} {_d.get('installed_count')}")
+_js_src = (ROOT / "web/assets/vward-console.js").read_text(encoding="utf-8")
+_pg = _js_src[_js_src.index("  'u-opkg'() {"):_js_src.index("  'u-vward'() {")]
+for _need in ("panel('Пакеты VWARD'", "panel('Действия', '<div class=\"panel-actions\">' + extCheckBtn('Проверить обновления')", "['Проверено',", "['Обновления',"):
+    if _need not in _pg:
+        raise SystemExit(f"EXT_UPDATE=FAIL: «Пакеты Entware» lacks {_need!r}")
 print("EXT_UPDATE=PASS")

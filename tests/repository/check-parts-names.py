@@ -40,7 +40,8 @@ ids = re.findall(r"\{ id: '([a-z-]+)'", comps)
 for i in ids:
     if i not in parts or parts[i]["kind"] != "component":
         fail(f"COMPONENTS: {i} is not a component of the registry")
-reg_comps = [p["id"] for p in REG["parts"] if p["kind"] == "component"]
+# Frozen parts (fix.39) are hidden: the Panel lists no section for them.
+reg_comps = [p["id"] for p in REG["parts"] if p["kind"] == "component" and p["id"] not in REG.get("parts_hidden", [])]
 if sorted(ids) != sorted(reg_comps):
     fail(f"COMPONENTS {sorted(ids)} and the registry's components {sorted(reg_comps)} differ")
 m = re.search(r"const PART_PAGE = \{([^}]*)\}", JS)
@@ -71,4 +72,13 @@ if errors:
     for e in errors:
         print("FAIL:", e)
     sys.exit(1)
+# One state of a part in «Компоненты» and on its page (owner 13.11.2026: «Захват DNS-запросов» said
+# «Работает» there and «Не установлен» here while autopick in Go caught the queries itself).
+if "if (p.id === 'dnscap' && coreCaptures()) return ['ok', 'Делает автоподбор на Go'];" not in JS:
+    fail("RED: «Захват DNS-запросов» must say who catches the queries")
+_dc = JS[JS.index("  'd-dnscap'() {"):JS.index("  },", JS.index("  'd-dnscap'() {"))]
+if "c = p ? partPill(p)" not in _dc or "['Кто ловит запросы', 'автоподбор на Go'" not in _dc:
+    fail("RED: the page «Захват DNS-запросов» must show the part's own state")
+if "function mgmtNote(text) { return '<section class=\"block\"><p class=\"block-desc\">'" not in JS:
+    fail("a note of what a page cannot do is no section «Управление»")
 print("PARTS_NAMES=PASS")

@@ -28,6 +28,43 @@ type Name struct {
 	Streak  int       `json:"streak"`            // direct checks in a row that opened
 	LastOK  time.Time `json:"last_ok,omitempty"` // the last of them
 	Checked time.Time `json:"checked,omitempty"` // the last check of any result
+	// Why the name did not open directly, the last time it was seen («connect: timeout»,
+	// «tls: reset», «http 451»): kept for the Panel and for the VPN's failover (ROADMAP 0a).
+	Why string `json:"why,omitempty"`
+	// Checks in a row that opened neither directly nor through a working VPN, and the last of
+	// them: at the threshold the name leaves the group (the VPN gives it nothing).
+	VPNFail     int       `json:"vpn_fail,omitempty"`
+	LastVPNFail time.Time `json:"last_vpn_fail,omitempty"`
+	CDN         string    `json:"cdn,omitempty"` // a content network's common name (SharedCDN)
+	Ad          string    `json:"ad,omitempty"`  // an advert or a counter (AdName), the sandbox only
+}
+
+// Mark writes what the name itself tells (a content network's common name; an advert or a
+// counter when ads is set) and says whether anything changed.
+func (o *Owned) Mark(ads bool) bool {
+	changed := false
+	for h, n := range o.Names {
+		cdn, ad := SharedCDN(h), ""
+		if ads {
+			ad = AdName(h)
+		}
+		if n.CDN != cdn || n.Ad != ad {
+			n.CDN, n.Ad, changed = cdn, ad, true
+		}
+	}
+	return changed
+}
+
+// Ads: the owned names marked as adverts or counters, sorted.
+func (o *Owned) Ads() []string {
+	var out []string
+	for h, n := range o.Names {
+		if n.Ad != "" {
+			out = append(out, h)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func LoadOwned(path string) (*Owned, error) {

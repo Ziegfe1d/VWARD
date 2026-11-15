@@ -292,6 +292,16 @@ with tempfile.TemporaryDirectory() as tmp:
     if not (etc / "route-engine/adaptive.disabled").exists():
         fail("AdaptiveAuto switch must create its flag")
     run("adaptive-mode", "1", expect="result=changed")
+    # fix.39 «Реклама и счётчики»: off | sandbox (the core reads the file itself); no «on» yet.
+    run("adaptive-ads", "sandbox", expect="result=changed")
+    if not (etc / "route-engine/ads.sandbox").exists():
+        fail("the adverts sandbox must create its file")
+    run("adaptive-ads", "sandbox", expect="result=unchanged")
+    run("adaptive-ads", "on", expect="error=invalid_value")
+    run("adaptive-ads", "off", expect="result=changed")
+    if (etc / "route-engine/ads.sandbox").exists():
+        fail("the adverts sandbox switched off must leave no file")
+    run("adaptive-ads", "off", expect="result=unchanged")
     run("classifier", "0", expect="result=changed")
     if "CLASSIFIER_ENABLED=0" not in (etc / "route-engine/domain-classifier.conf").read_text() or \
             stat.S_IMODE((etc / "route-engine/domain-classifier.conf").stat().st_mode) != 0o600:

@@ -18,6 +18,7 @@ import tarfile
 import tempfile
 import time
 from pathlib import Path
+from standin import write_daemon
 
 ROOT = Path(__file__).resolve().parents[2]
 LIB = ROOT / 'components/runtime/lib/vward-entware-pkg.sh'
@@ -111,11 +112,10 @@ with tempfile.TemporaryDirectory() as td:
     (R/'opt/sbin/AdGuardHome').write_text('agh'); (R/'opt/bin/xray').write_text('xray')
     opkg = R/'opt/bin/opkg'; opkg.write_text(FAKE_OPKG); opkg.chmod(0o755)
     env = dict(os.environ, VWARD_ROOT_PREFIX=str(R), TMPDIR=str(td), VWARD_JOURNAL_SYNC='0')
-    sleep_bin = shutil.which('sleep')
     def L(script, *a, env_=None, timeout=60):
         return subprocess.run([*SHELL, '-c', f'. "{LIB}"\n' + script, 'x', *map(str, a)], env=env_ or env, text=True, capture_output=True, timeout=timeout)
     def files_dnsmasq(ver, conf='# default\n'):
-        # The daemon is a copy of `sleep`, so a started copy is a real, visible process.
+        # The daemon is a stand-in that only waits (standin.py): a started one is a real, visible process.
         return [('/opt/etc/init.d/S56dnsmasq', INIT, 0o755), ('/opt/etc/dnsmasq.conf', conf + f'# v{ver}\n', 0o644)]
     seq = [0]
     def build(ver, **kw):
@@ -124,7 +124,7 @@ with tempfile.TemporaryDirectory() as td:
         p = ipk(td/f'dnsmasq-full_{ver}.{seq[0]}.ipk', 'dnsmasq-full', ver, **kw)
         return p
     def install_daemon_binary():
-        shutil.copy(sleep_bin, R/'opt/sbin/dnsmasq'); (R/'opt/sbin/dnsmasq').chmod(0o755)
+        write_daemon(R/'opt/sbin/dnsmasq')
     install_daemon_binary()
     def status(): return L('vward_entware_status dnsmasq-full').stdout.strip().split('\t')
     def running(): return (R/'fake/dnsmasq.pid').exists() and subprocess.run(['kill', '-0', (R/'fake/dnsmasq.pid').read_text().strip()]).returncode == 0

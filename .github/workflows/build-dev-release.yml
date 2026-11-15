@@ -43,7 +43,10 @@ concurrency:
 
 jobs:
   build-candidate:
-    runs-on: ubuntu-latest
+    # The image is named, as in updater-ci.yml (15.11.2026): the checks this job repeats and their
+    # budgets are measured on Ubuntu 24.04; «ubuntu-latest» moved to a newer image that counts
+    # about 7 % more processes. A newer image only after a measurement there.
+    runs-on: ubuntu-24.04
     env:
       VWARD_SIGNING_KEY_PEM: ${{ secrets.VWARD_PROD_ED25519_PRIVATE_KEY_PEM }}
       VWARD_SIGNING_KEY_LEGACY: ${{ secrets.VWARD_PROD_ED25519_PRIVATE_KEY }}

@@ -186,3 +186,151 @@ func TestReconcileDNSBlockedRemoved(t *testing.T) {
 		t.Fatalf("dns blocked: %v %+v", rm, ev)
 	}
 }
+
+// fix.39 (owner's journal 12.11.2026): a name that does not open directly is checked through the
+// VPN too. Neither path 3 times in a row, at least MinGap apart, with the VPN itself working -
+// out of the group (DROP); a VPN that opens it, a VPN that could not be checked or a VPN whose
+// control sites fail counts nothing.
+func TestReconcileVPNCheck(t *testing.T) {
+	rc := ReconcileConfig{Every: time.Minute, Batch: 8, Threshold: 3, MinGap: 4 * time.Minute, TunnelDev: "opkgtun4", VPNControl: []string{"ctl.example.org"}}
+	o := &Owned{Names: map[string]*Name{"ntp.example.com": {}}}
+	p := &scripted{ans: map[string][]Verdict{
+		"ppp0 ntp.example.com":     {B},
+		"opkgtun4 ntp.example.com": {B, B, O, B, U, B, B, B},
+		"opkgtun4 ctl.example.org": {O, O, B, O}, // asked only when the name failed through the VPN
+	}}
+	n := o.Names["ntp.example.com"]
+	steps := []struct {
+		min   int
+		event string
+		fails int
+		down  bool
+	}{
+		{0, "VPN_FAIL", 1, false},
+		{2, "", 1, false},             // too soon after the last counted failure
+		{6, "DIRECT_FAIL", 0, false},  // the VPN opens it: it stays, the count starts over
+		{12, "DIRECT_FAIL", 0, true},  // the VPN's control site fails: nothing counted
+		{18, "DIRECT_FAIL", 0, false}, // the VPN could not be checked: nothing counted
+		{24, "VPN_FAIL", 1, false},
+		{30, "VPN_FAIL", 2, false},
+		{36, "DROP", 3, false},
+	}
+	for _, s := range steps {
+		rm, ev := Reconcile(context.Background(), o, p, "ppp0", rc, time.Unix(int64(s.min*60), 0))
+		got, down := "", false
+		for _, x := range ev {
+			if x.Event == "VPN_DOWN" {
+				down = true
+			} else {
+				got = x.Event
+			}
+		}
+		if got != s.event || n.VPNFail != s.fails || down != s.down {
+			t.Fatalf("minute %d: %q fails %d down %v, want %q %d %v (%+v)", s.min, got, n.VPNFail, down, s.event, s.fails, s.down, ev)
+		}
+		if (s.event == "DROP") != (len(rm) == 1) {
+			t.Fatalf("minute %d: remove %v", s.min, rm)
+		}
+	}
+	if n.Why != "blocked" {
+		t.Fatalf("the reason of the direct failure is kept: %q", n.Why)
+	}
+	// A direct success ends the count of failures.
+	o = &Owned{Names: map[string]*Name{"x.example.com": {VPNFail: 2, LastVPNFail: time.Unix(1, 0)}}}
+	p = &scripted{ans: map[string][]Verdict{"ppp0 x.example.com": {O}}}
+	Reconcile(context.Background(), o, p, "ppp0", rc, time.Unix(6000, 0))
+	if o.Names["x.example.com"].VPNFail != 0 || p.count("opkgtun4") != 0 {
+		t.Fatalf("a name that opens directly is not checked through the VPN: %+v %v", o.Names["x.example.com"], p.calls)
+	}
+	// Without the VPN's device nothing is asked through it and nothing dropped.
+	rc.TunnelDev = ""
+	o = &Owned{Names: map[string]*Name{"y.example.com": {VPNFail: 2}}}
+	p = &scripted{ans: map[string][]Verdict{"ppp0 y.example.com": {B}}}
+	if rm, ev := Reconcile(context.Background(), o, p, "ppp0", rc, time.Unix(6000, 0)); len(rm) != 0 || len(ev) != 1 || ev[0].Event != "DIRECT_FAIL" || len(p.calls) != 1 {
+		t.Fatalf("no VPN device: %v %+v %v", rm, ev, p.calls)
+	}
+}
+
+// The control sites are asked once a round, and only when a name failed through the VPN.
+func TestReconcileVPNControlOnce(t *testing.T) {
+	rc := ReconcileConfig{Every: time.Minute, Batch: 8, Threshold: 3, MinGap: time.Minute, TunnelDev: "opkgtun4", VPNControl: []string{"ctl.example.org"}}
+	o := &Owned{Names: map[string]*Name{"a.example.com": {}, "b.example.com": {}, "c.example.com": {}}}
+	p := &scripted{ans: map[string][]Verdict{
+		"ppp0 a.example.com": {B}, "ppp0 b.example.com": {B}, "ppp0 c.example.com": {B},
+		"opkgtun4 a.example.com": {B}, "opkgtun4 b.example.com": {B}, "opkgtun4 c.example.com": {O},
+		"opkgtun4 ctl.example.org": {O},
+	}}
+	Reconcile(context.Background(), o, p, "ppp0", rc, time.Unix(600, 0))
+	if p.count("opkgtun4 ctl.example.org") != 1 || o.Names["a.example.com"].VPNFail != 1 || o.Names["c.example.com"].VPNFail != 0 {
+		t.Fatalf("control once: %v", p.calls)
+	}
+	o = &Owned{Names: map[string]*Name{"c.example.com": {}}}
+	p = &scripted{ans: map[string][]Verdict{"ppp0 c.example.com": {B}, "opkgtun4 c.example.com": {O}, "opkgtun4 ctl.example.org": {O}}}
+	Reconcile(context.Background(), o, p, "ppp0", rc, time.Unix(600, 0))
+	if p.count("opkgtun4 ctl.example.org") != 0 {
+		t.Fatalf("no failure through the VPN - no control check: %v", p.calls)
+	}
+}
+
+func TestNamesCDNAndAds(t *testing.T) {
+	for name, want := range map[string]string{
+		"e1234.a.akamaiedge.net": "akamaiedge.net", "x.sni.global.fastly.net": "fastly.net", "d111.cloudfront.net": "cloudfront.net",
+		"akamai.net": "akamai.net", "notakamai.net": "", "chatgpt.com": "", "fastly.net.example.com": "",
+	} {
+		if got := SharedCDN(name); got != want {
+			t.Fatalf("SharedCDN(%s) = %q, want %q", name, got, want)
+		}
+	}
+	for name, want := range map[string]string{
+		"ad.doubleclick.net": "doubleclick.net", "pagead2.googlesyndication.com": "googlesyndication.com",
+		"www.googleadservices.com": "googleadservices.com", "api.mixpanel.com": "mixpanel.com", "mixpanel.com": "mixpanel.com",
+		"google.com": "", "www.google.com": "", "facebook.com": "", "notdoubleclick.net": "", "segment.com": "", "cdn.segment.com": "cdn.segment.com",
+	} {
+		if got := AdName(name); got != want {
+			t.Fatalf("AdName(%s) = %q, want %q", name, got, want)
+		}
+	}
+	// The list holds names Keenetic could keep (no comment or blank read as a name).
+	if len(adNames) < 30 {
+		t.Fatalf("ads.txt read short: %d", len(adNames))
+	}
+	for _, n := range adNames {
+		if normalizeName(n) != n {
+			t.Fatalf("ads.txt: %q is not a plain name", n)
+		}
+	}
+}
+
+// Marks for the Panel: a content network's common name always, an advert only in the sandbox;
+// switched off, the advert marks go. Saved with the names.
+func TestOwnedMark(t *testing.T) {
+	o, _ := LoadOwned(filepath.Join(t.TempDir(), "owned.json"))
+	o.Names = map[string]*Name{"x.sni.global.fastly.net": {}, "ad.doubleclick.net": {}, "chatgpt.com": {}}
+	if !o.Mark(false) || o.Names["x.sni.global.fastly.net"].CDN != "fastly.net" || o.Names["ad.doubleclick.net"].Ad != "" || o.Mark(false) {
+		t.Fatalf("cdn marks: %+v", o.Names["x.sni.global.fastly.net"])
+	}
+	if !o.Mark(true) || o.Names["ad.doubleclick.net"].Ad != "doubleclick.net" || o.Names["chatgpt.com"].Ad != "" || strings.Join(o.Ads(), ",") != "ad.doubleclick.net" {
+		t.Fatalf("ad marks: %v", o.Ads())
+	}
+	o.Names["ad.doubleclick.net"].Why, o.Names["ad.doubleclick.net"].VPNFail = "tls: reset", 2
+	o.Save()
+	back, err := LoadOwned(o.Path)
+	if n := back.Names["ad.doubleclick.net"]; err != nil || n.Ad != "doubleclick.net" || n.Why != "tls: reset" || n.VPNFail != 2 || back.Names["x.sni.global.fastly.net"].CDN != "fastly.net" {
+		t.Fatalf("reload: %v %+v", err, n)
+	}
+	if !o.Mark(false) || len(o.Ads()) != 0 {
+		t.Fatal("switched off: the advert marks go")
+	}
+}
+
+// AUTO_VPN carries why the name did not open directly and whether it is an advert.
+func TestAddCarriesReasonAndAd(t *testing.T) {
+	e, _ := engine(map[string][]Verdict{"ppp0 ad.doubleclick.net": {B, B}, "opkgtun4 ad.doubleclick.net": {O, O}, "ppp0 ya.ru": {O},
+		"ppp0 site.example.com": {B, B}, "opkgtun4 site.example.com": {O, O}})
+	if r := e.Check(context.Background(), "ad.doubleclick.net"); r.Outcome != Add || r.Direct != "blocked" || r.Ad != "doubleclick.net" {
+		t.Fatalf("advert: %+v", r)
+	}
+	if r := e.Check(context.Background(), "site.example.com"); r.Outcome != Add || r.Direct != "blocked" || r.Ad != "" {
+		t.Fatalf("site: %+v", r)
+	}
+}

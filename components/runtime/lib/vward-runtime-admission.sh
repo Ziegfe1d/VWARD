@@ -13,7 +13,18 @@ vward_off() { [ -e "$VWARD_COMPONENT_STATE/vward.off" ]; }
 vward_component_enabled() {
     ! vward_off || return 1
     case "${1:-}" in ''|*[!a-z0-9-]*) return 0 ;; esac
+    ! vward_retired "$1" || return 1
     [ ! -e "$VWARD_COMPONENT_STATE/$1.disabled" ]
+}
+
+# Frozen parts (owner 13.11.2026, fix.39, ROADMAP §8): hidden in the Panel and off for good, whatever
+# the owner switched on before (NAME.on, all.on, no NAME.disabled). Their code and files are kept, so
+# a part can come back. The same ids as «parts_hidden» in settings-registry.json (sing-box there is
+# a package VWARD never starts on its own). Tests of a frozen part's own code lift it (empty).
+VWARD_RETIRED_PARTS=${VWARD_RETIRED_PARTS-"sentinel memory-watch repair wifi-client-guard"}
+vward_retired() {
+    case " $VWARD_RETIRED_PARTS " in *" ${1:-} "*) return 0 ;; esac
+    return 1
 }
 
 # Lightened VWARD (owner 11.11.2026): by default only Adaptive auto and the VPN run; every
@@ -23,6 +34,7 @@ vward_component_enabled() {
 vward_extras_all() { [ "${VWARD_EXTRAS:-}" = all ] || [ -e "$VWARD_COMPONENT_STATE/all.on" ]; }
 vward_extra() {
     case "${1:-}" in ''|*[!a-z0-9-]*) return 1 ;; esac
+    ! vward_retired "$1" || return 1
     # NAME.off: the owner switched this part off in the Panel - also when every part is on (all.on).
     [ ! -e "$VWARD_COMPONENT_STATE/$1.off" ] || return 1
     vward_extras_all && return 0
@@ -490,7 +502,14 @@ vward_lock_gate_enter() {
         # the same 256-ticket bound without spawning metadata tools for self;
         # the final utility and leave still validate our own private claim.
         [ "$vlg_other" != "$vlg_claim" ] || continue
-        vward_lock_gate_dir "$vlg_other" || { vward_lock_gate_leave "$1";return 75; }
+        # A contender that left between the listing and this look (its own «leave» removes its
+        # ticket) is no contender: the same as listing a moment later. Before fix.39 the vanished
+        # ticket read as «not a ticket» and the holder's next entry was refused (two writers of
+        # the journal: none began, CI 12.11 and 15.11.2026). A path that is still there and is
+        # not a ticket directory refuses as before.
+        vward_lock_gate_dir "$vlg_other" || {
+            [ -e "$vlg_other" ] || [ -L "$vlg_other" ] || continue
+            vward_lock_gate_leave "$1";return 75; }
         vlg_rc=0;vward_lock_gate_live "${vlg_other##*/}" || vlg_rc=$?
         [ "$vlg_rc" != 2 ] || { vward_lock_gate_leave "$1";return 75; }
         if [ "$vlg_rc" != 0 ]; then
@@ -509,7 +528,10 @@ vward_lock_gate_enter() {
         for vlg_other in "$vlg_dir"/*; do
             [ -e "$vlg_other" ] || [ -L "$vlg_other" ] || continue
             [ "$vlg_other" != "$vlg_claim" ] || continue
-            vward_lock_gate_dir "$vlg_other" || { vward_lock_gate_leave "$1";return 75; }
+            # Gone since the listing: it left, nothing to wait for (see the first loop).
+            vward_lock_gate_dir "$vlg_other" || {
+                [ -e "$vlg_other" ] || [ -L "$vlg_other" ] || continue
+                vward_lock_gate_leave "$1";return 75; }
             vlg_rc=0;vward_lock_gate_live "${vlg_other##*/}" || vlg_rc=$?
             [ "$vlg_rc" != 2 ] || { vward_lock_gate_leave "$1";return 75; }
             if [ "$vlg_rc" != 0 ]; then

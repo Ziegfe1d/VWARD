@@ -90,16 +90,22 @@ try:
     reads = emu / "config-reads.log"
     sh(root, "rm -f /tmp/vward-keenetic/running-config /tmp/vward-keenetic-last /tmp/vward-defer/route-reconciler")
     reads.unlink(missing_ok=True)
+    # The whole configuration takes 4 s whichever way it is asked: the shared copy goes through RCI
+    # first (fix.39: no ndmc session in Keenetic's journal), ndmc only when RCI gives no answer.
     (emu / "fault-ndmc-slow").write_text("4\n")
+    (emu / "fault-config-slow").write_text("4\n")
     jobs = ["/opt/bin/vward-route-reconciler.sh", "/opt/bin/vward-tunnel-health.sh && /opt/bin/vward-tunnel-guard.sh",
             "/opt/bin/vward-wan-guard.sh", "/opt/etc/init.d/S91vward-route-engine start"]
     procs = [sh(root, j, background=True) for j in jobs]
     for p in procs:
         p.communicate(timeout=180)
     (emu / "fault-ndmc-slow").unlink()
+    (emu / "fault-config-slow").unlink()
     got = read(reads).splitlines()
     if len(got) > 1:
         fail(f"one read of the configuration for the peak, not one an agent: {got}")
+    if [g for g in got if g.startswith("ndmc ")]:
+        fail(f"the shared copy must be read through RCI, not ndmc: {got}")
     slow = read(root / "opt/var/log/vward/keenetic-slow.log")
     if "|running-config|4." not in slow and "|running-config|5." not in slow:
         fail(f"the slow read in «who waited»: {slow[-400:]}")

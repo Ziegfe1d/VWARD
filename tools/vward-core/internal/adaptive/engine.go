@@ -66,6 +66,8 @@ type Result struct {
 	Host    string
 	Outcome Outcome
 	Why     string
+	Direct  string // AUTO_VPN: why the name did not open directly («connect: timeout»)
+	Ad      string // AUTO_VPN: the name is an advert or a counter (AdName's entry)
 }
 
 type memo struct {
@@ -137,7 +139,7 @@ func (e *Engine) remember(r Result, d time.Duration) Result {
 
 // Refuse: a name the owner took out of the group is not put back for d.
 func (e *Engine) Refuse(host string, d time.Duration) {
-	e.remember(Result{host, Skip, "taken out by the owner"}, d)
+	e.remember(Result{Host: host, Outcome: Skip, Why: "taken out by the owner"}, d)
 }
 
 // Forget a name (after a write that failed: it is checked again later).
@@ -163,30 +165,30 @@ func (e *Engine) Prune() {
 func (e *Engine) Check(ctx context.Context, raw string) Result {
 	h := normalizeName(raw)
 	if h == "" {
-		return Result{raw, Skip, "not a public name"}
+		return Result{Host: raw, Outcome: Skip, Why: "not a public name"}
 	}
 	if !e.cfg.AllowRU && ruZone(h) {
-		return Result{h, Skip, "ru zone stays on the provider"}
+		return Result{Host: h, Outcome: Skip, Why: "ru zone stays on the provider"}
 	}
 	if routerOwn(h) {
-		return Result{h, Skip, "the router's own service (KeenDNS, cloud) stays on the provider"}
+		return Result{Host: h, Outcome: Skip, Why: "the router's own service (KeenDNS, cloud) stays on the provider"}
 	}
 	e.mu.Lock()
 	switch {
 	case coveredBy(h, e.skip) != "":
 		e.mu.Unlock()
-		return Result{h, Skip, "skip list"}
+		return Result{Host: h, Outcome: Skip, Why: "skip list"}
 	case coveredBy(h, e.group) != "":
 		e.mu.Unlock()
-		return Result{h, Known, "in " + e.cfg.Group}
+		return Result{Host: h, Outcome: Known, Why: "in " + e.cfg.Group}
 	case coveredBy(h, e.smart) != "":
 		e.mu.Unlock()
-		return Result{h, Skip, "Smart DNS name"}
+		return Result{Host: h, Outcome: Skip, Why: "Smart DNS name"}
 	}
 	for n := h; n != ""; {
 		if g, ok := e.other[n]; ok {
 			e.mu.Unlock()
-			return Result{h, Skip, "in the owner's list " + g}
+			return Result{Host: h, Outcome: Skip, Why: "in the owner's list " + g}
 		}
 		_, rest, ok := cut(n)
 		if !ok {
@@ -208,9 +210,9 @@ func (e *Engine) Check(ctx context.Context, raw string) Result {
 	d1 := e.p.Probe(ctx, h, e.cfg.WanDev)
 	switch d1.Verdict {
 	case Open:
-		return e.remember(Result{h, DirectOK, d1.Why}, e.cfg.OKFor)
+		return e.remember(Result{Host: h, Outcome: DirectOK, Why: d1.Why}, e.cfg.OKFor)
 	case Unknown:
-		return e.remember(Result{h, ProbeUnknown, "direct: " + d1.Why}, e.cfg.UnknownFor)
+		return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "direct: " + d1.Why}, e.cfg.UnknownFor)
 	}
 	// The first direct check failed: the VPN checks start now, alongside the second direct
 	// check and the control sites.
@@ -234,23 +236,23 @@ func (e *Engine) Check(ctx context.Context, raw string) Result {
 	v := <-vpn
 	switch {
 	case d2.Verdict == Open:
-		return e.remember(Result{h, DirectOK, "second direct check: " + d2.Why}, e.cfg.OKFor)
+		return e.remember(Result{Host: h, Outcome: DirectOK, Why: "second direct check: " + d2.Why}, e.cfg.OKFor)
 	case d2.Verdict == Unknown:
-		return e.remember(Result{h, ProbeUnknown, "direct retry: " + d2.Why}, e.cfg.UnknownFor)
+		return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "direct retry: " + d2.Why}, e.cfg.UnknownFor)
 	case ctl == Blocked:
-		return e.remember(Result{h, ISPUnreliable, "the control sites do not open directly either"}, e.cfg.UnknownFor)
+		return e.remember(Result{Host: h, Outcome: ISPUnreliable, Why: "the control sites do not open directly either"}, e.cfg.UnknownFor)
 	case ctl == Unknown:
-		return e.remember(Result{h, ProbeUnknown, "control sites could not be checked"}, e.cfg.UnknownFor)
+		return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "control sites could not be checked"}, e.cfg.UnknownFor)
 	case v.a.Verdict == Unknown:
-		return e.remember(Result{h, ProbeUnknown, "vpn: " + v.a.Why}, e.cfg.UnknownFor)
+		return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "vpn: " + v.a.Why}, e.cfg.UnknownFor)
 	case v.a.Verdict == Blocked:
-		return e.remember(Result{h, TunnelFail, "direct: " + d1.Why + "; vpn: " + v.a.Why}, e.cfg.FailFor)
+		return e.remember(Result{Host: h, Outcome: TunnelFail, Why: "direct: " + d1.Why + "; vpn: " + v.a.Why}, e.cfg.FailFor)
 	case v.b.Verdict == Unknown:
-		return e.remember(Result{h, ProbeUnknown, "vpn retry: " + v.b.Why}, e.cfg.UnknownFor)
+		return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "vpn retry: " + v.b.Why}, e.cfg.UnknownFor)
 	case v.b.Verdict == Blocked:
-		return e.remember(Result{h, TunnelUnstable, "vpn retry: " + v.b.Why}, e.cfg.FailFor)
+		return e.remember(Result{Host: h, Outcome: TunnelUnstable, Why: "vpn retry: " + v.b.Why}, e.cfg.FailFor)
 	}
-	return e.remember(Result{h, Add, "direct: " + d1.Why + "; vpn: " + v.a.Why}, e.cfg.FailFor)
+	return e.remember(Result{Host: h, Outcome: Add, Why: "direct: " + d1.Why + "; vpn: " + v.a.Why, Direct: d1.Why, Ad: AdName(h)}, e.cfg.FailFor)
 }
 
 // control: do the control sites open directly? One check at a time, the answer held for

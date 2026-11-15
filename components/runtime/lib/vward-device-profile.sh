@@ -527,22 +527,31 @@ vward_https_broken()
 # Keenetic's running configuration, one line per line.  RCI first: unlike ndmc
 # it leaves no session lines in the router's log (checked on a real router).
 # ndmc when RCI does not answer.  Nothing is printed until the whole reply parsed.
+# _vward_rc_rci: the whole configuration through RCI into _vrc_cfg; fails (and leaves it empty)
+# unless the whole reply parsed.
+_vward_rc_rci()
+{
+    _vrc_cfg=
+    _vrc_jq=${VWARD_JQ_BIN:-$(vward_tool jq)}
+    [ -n "$_vrc_jq" ] || return 1
+    _vrc_cfg=$(vward_rci_get show/running-config 30 |
+        "$_vrc_jq" -er '.message | if type == "array" and length > 0 then .[] else error("empty") end' 2>/dev/null) &&
+        [ -n "$_vrc_cfg" ] && return 0
+    _vrc_cfg=
+    return 1
+}
+
 vward_running_config()
 {
-    _vrc_jq=${VWARD_JQ_BIN:-$(vward_tool jq)}
     # Timed here as one read: the RCI request and ndmc inside are not timed again (_VKT_IN).
     vward_uptime_cs; _vrc_t0=$_VCS _VKT_IN=1
-    if [ -n "$_vrc_jq" ] &&
-       _vrc_cfg=$(vward_rci_get show/running-config 30 |
-           "$_vrc_jq" -er '.message | if type == "array" and length > 0 then .[] else error("empty") end' 2>/dev/null) &&
-       [ -n "$_vrc_cfg" ]; then
+    if _vward_rc_rci; then
         _VKT_IN=
         vward_keenetic_timed running-config "$_vrc_t0"
         printf '%s\n' "$_vrc_cfg"
         _vrc_cfg=
         return 0
     fi
-    _vrc_cfg=
     command -v ndmc >/dev/null 2>&1 || { _VKT_IN=; vward_keenetic_timed running-config "$_vrc_t0" failed; return 1; }
     ndmc -c 'show running-config' 2>/dev/null
     _vrc_rc=$? _VKT_IN=
@@ -566,6 +575,11 @@ VWARD_KEENETIC_SLOW_LOG=${VWARD_KEENETIC_SLOW_LOG:-${VWARD_ROOT_PREFIX:-}/opt/va
 VWARD_KEENETIC_CALLS=${VWARD_KEENETIC_CALLS:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-calls}
 VWARD_KEENETIC_SLOWN=${VWARD_KEENETIC_SLOWN:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-slow}
 VWARD_KEENETIC_LAST=${VWARD_KEENETIC_LAST:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic-last}
+# ndmc sessions by program (fix.39): every ndmc leaves «Core::Session started/disconnected» in
+# Keenetic's own journal (owner's diagnostics 13.11.2026: 2 566 of ~4 000 lines, about 85 an hour,
+# the journal held 15 hours), and nothing said whose they were. One directory a program, the
+# hours as in VWARD_KEENETIC_CALLS; RAM only.
+VWARD_NDMC_CALLS=${VWARD_NDMC_CALLS:-${VWARD_ROOT_PREFIX:-}/tmp/vward-ndmc-calls}
 
 # vward_uptime_cs: _VCS = hundredths of a second since boot (shell built-ins only: every request to
 # Keenetic is timed, fix.33.2).
@@ -593,6 +607,50 @@ _vward_hour_dot()
     read -r _vhd_fh 2>/dev/null < "$1/$((_vhd_h % 25))"
     [ "$_vhd_fh" = "$_vhd_h" ] || printf '%s\n' "$_vhd_h" 2>/dev/null > "$1/$((_vhd_h % 25))"
     printf . 2>/dev/null >> "$1/$((_vhd_h % 25))"
+}
+
+# _vward_ndmc_count: one ndmc session counted for the program that opens it (its file name).
+_vward_ndmc_count()
+{
+    _vnc_p=${0##*/}
+    case "$_vnc_p" in ''|.*|*[!A-Za-z0-9._-]*) _vnc_p=other ;; esac
+    _vward_hour_dot "$VWARD_NDMC_CALLS/$_vnc_p"
+}
+
+# vward_hour_sum DIR FROM TO: the dots of the files of DIR whose hour of uptime is FROM..TO, in
+# _VHS. Each file is read by itself: it does not end with a newline, so the files read together
+# («cat DIR/*») glue the next file's hour to the dots before it and every hour counts as the first.
+vward_hour_sum()
+{
+    _VHS=0
+    for _vhs_f in "$1"/*; do
+        [ -f "$_vhs_f" ] || continue
+        _vhs_h= _vhs_d=
+        { read -r _vhs_h; read -r _vhs_d; } 2>/dev/null < "$_vhs_f"
+        case "$_vhs_h" in ''|*[!0-9]*) continue ;; esac
+        [ "$_vhs_h" -ge "$2" ] && [ "$_vhs_h" -le "$3" ] || continue
+        _VHS=$((_VHS + ${#_vhs_d}))
+    done
+}
+
+# vward_ndmc_calls_report: «PROGRAM THIS_HOUR LAST_HOUR LAST_24_HOURS» a line - the ndmc sessions
+# each program opened in the hour of uptime now (not yet whole), in the whole hour before it, and
+# in the last 24 hours of uptime. Programs with none in 24 hours are left out.
+vward_ndmc_calls_report()
+{
+    _vnr_up=
+    read -r _vnr_up _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}"
+    _vnr_up=${_vnr_up%%.*}
+    case "$_vnr_up" in ''|*[!0-9]*) return 0 ;; esac
+    _vnr_h=$((_vnr_up / 3600))
+    for _vnr_d in "$VWARD_NDMC_CALLS"/*; do
+        [ -d "$_vnr_d" ] || continue
+        vward_hour_sum "$_vnr_d" $((_vnr_h - 23)) "$_vnr_h"; _vnr_day=$_VHS
+        [ "$_vnr_day" -gt 0 ] || continue
+        vward_hour_sum "$_vnr_d" "$_vnr_h" "$_vnr_h"; _vnr_now=$_VHS
+        vward_hour_sum "$_vnr_d" $((_vnr_h - 1)) $((_vnr_h - 1))
+        printf '%s %d %d %d\n' "${_vnr_d##*/}" "$_vnr_now" "$_VHS" "$_vnr_day"
+    done
 }
 
 # vward_keenetic_timed WHAT T0 [STATUS]: every request to Keenetic (RCI, ndmc) counted by the hour
@@ -667,6 +725,7 @@ case "$(command -v ndmc 2>/dev/null)" in
         {
             vward_routing_ndmc_gate "$@" || return $?
             [ "${VWARD_KEENETIC_TIMING:-1}" = 1 ] || { command ndmc "$@"; return; }
+            _vward_ndmc_count
             vward_uptime_cs; _vnd_t0=$_VCS
             command ndmc "$@"
             _vnd_rc=$?
@@ -894,7 +953,17 @@ vward_keenetic_config()
         return 0
     fi
     vward_uptime_cs; _vkc_t0=$_VCS _VKT_IN=1
-    "${VWARD_NDMC:-ndmc}" -c 'show running-config' 2>/dev/null | tr -d '\r' > "$VWARD_KCACHE/running-config.$_vkc_pid"
+    # RCI first (fix.39), as vward_running_config reads: no session line in Keenetic's journal
+    # (before, every renewal of the copy - about one a minute - was an ndmc session) and less than
+    # half the time (5.5 s against 12.7 s on a Viva, 08.11). ndmc when RCI gives no whole answer;
+    # a stand-in ndmc (the tests) is asked itself. VWARD_KEENETIC_CONFIG_RCI=0: ndmc as before.
+    if [ "${VWARD_KEENETIC_CONFIG_RCI:-1}" = 1 ] && [ -z "${VWARD_NDMC:-}" ] && _vward_rc_rci; then
+        # jq's lines carry no CR: written as they are, no process more than the ndmc read took.
+        printf '%s\n' "$_vrc_cfg" > "$VWARD_KCACHE/running-config.$_vkc_pid"
+        _vrc_cfg=
+    else
+        "${VWARD_NDMC:-ndmc}" -c 'show running-config' 2>/dev/null | tr -d '\r' > "$VWARD_KCACHE/running-config.$_vkc_pid"
+    fi
     _VKT_IN=
     if [ -s "$VWARD_KCACHE/running-config.$_vkc_pid" ]; then
         vward_keenetic_timed running-config "$_vkc_t0"
