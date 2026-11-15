@@ -64,9 +64,9 @@ func Reconcile(ctx context.Context, o *Owned, p Prober, wanDev string, rc Reconc
 		n := o.Names[h]
 		r := p.Probe(ctx, h, wanDev)
 		n.Checked = now
-		// A direct 403 that the VPN answers otherwise is no «opens directly» (fix.39.2): the name
-		// stays, as for a direct failure.
-		if r.Verdict == Open && HTTPCode(r.Why) == "403" && rc.TunnelDev != "" {
+		// A direct 403 or a certificate not for this name that the VPN answers properly is no
+		// «opens directly» (fix.39.2): the name stays, as for a direct failure.
+		if r.Verdict == Open && Suspect(r) && rc.TunnelDev != "" {
 			if v := p.Probe(ctx, h, rc.TunnelDev); RefusedHere(r, v) {
 				n.Streak, n.LastOK, n.VPNFail, n.LastVPNFail = 0, time.Time{}, 0, time.Time{}
 				n.Why = r.Why + " refused"

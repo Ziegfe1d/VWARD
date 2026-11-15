@@ -120,7 +120,8 @@ func TestProbe403Body(t *testing.T) {
 		p := NewProber(2*time.Second, "")
 		p.Port = port
 		p.Lookup = func(context.Context, string) ([]net.IP, error) { return []net.IP{net.ParseIP("127.0.0.1")}, nil }
-		r := p.Probe(context.Background(), "api.example.com", "lo")
+		// example.com: the name of httptest's certificate (no «wrong-cert» here).
+		r := p.Probe(context.Background(), "example.com", "lo")
 		srv.Close()
 		if r.Why != want {
 			t.Fatalf("403 %q: %+v, want %q", body, r, want)

@@ -86,6 +86,7 @@ type Engine struct {
 	other    map[string]string
 	smart    map[string]bool
 	skip     map[string]bool
+	hints    map[string]bool // the names of the domain sources (Hints)
 	ctrl     memo
 	ctrlBusy chan struct{}
 }
@@ -120,6 +121,13 @@ func (e *Engine) SetConfig(m *ndm.Model) {
 	}
 	e.mu.Lock()
 	e.group, e.other, e.smart = group, other, smart
+	e.mu.Unlock()
+}
+
+// SetHints: the names of the domain sources (shared, not changed by the engine).
+func (e *Engine) SetHints(set map[string]bool) {
+	e.mu.Lock()
+	e.hints = set
 	e.mu.Unlock()
 }
 
@@ -205,14 +213,19 @@ func (e *Engine) Check(ctx context.Context, raw string) Result {
 		r.Outcome, r.Why = Cached, string(m.res.Outcome)
 		return r
 	}
+	hinted := e.cfg.TunnelDev != "" && coveredBy(h, e.hints) != ""
 	e.mu.Unlock()
+	if hinted {
+		return e.checkHinted(ctx, h)
+	}
 
 	d1 := e.p.Probe(ctx, h, e.cfg.WanDev)
 	switch d1.Verdict {
 	case Open:
-		// A direct 403: the VPN asked once - another answer there is a refusal of this path
-		// (api.anthropic.com, owner 16.11.2026), into the group as any blocked site.
-		if HTTPCode(d1.Why) == "403" && e.cfg.TunnelDev != "" {
+		// A direct 403 or a certificate not for this name: the VPN asked once - another answer
+		// there is a refusal of this path or a spoof (api.anthropic.com, owner 16.11.2026; a
+		// provider's stub page), into the group as any blocked site.
+		if Suspect(d1) && e.cfg.TunnelDev != "" {
 			if v := e.p.Probe(ctx, h, e.cfg.TunnelDev); RefusedHere(d1, v) {
 				return e.remember(Result{Host: h, Outcome: Add, Why: "direct: " + d1.Why + " refused; vpn: " + v.Why, Direct: d1.Why + " refused", Ad: AdName(h)}, e.cfg.FailFor)
 			}
@@ -260,6 +273,40 @@ func (e *Engine) Check(ctx context.Context, raw string) Result {
 		return e.remember(Result{Host: h, Outcome: TunnelUnstable, Why: "vpn retry: " + v.b.Why}, e.cfg.FailFor)
 	}
 	return e.remember(Result{Host: h, Outcome: Add, Why: "direct: " + d1.Why + "; vpn: " + v.a.Why, Direct: d1.Why, Ad: AdName(h)}, e.cfg.FailFor)
+}
+
+// checkHinted: a name of the domain sources. Directly and through the VPN at the same time; a
+// site that opens directly is decided at once (the VPN's answer is not waited for); a refusal
+// directly with the control sites open and an answer through the VPN - into the group, without
+// the retry a second later and the second VPN check of an unknown name.
+func (e *Engine) checkHinted(ctx context.Context, h string) Result {
+	vpn := make(chan ProbeResult, 1)
+	go func() { vpn <- e.p.Probe(ctx, h, e.cfg.TunnelDev) }()
+	d := e.p.Probe(ctx, h, e.cfg.WanDev)
+	switch d.Verdict {
+	case Open:
+		if Suspect(d) {
+			if v := <-vpn; RefusedHere(d, v) {
+				return e.remember(Result{Host: h, Outcome: Add, Why: "direct: " + d.Why + " refused; vpn: " + v.Why + "; source lists", Direct: d.Why + " refused", Ad: AdName(h)}, e.cfg.FailFor)
+			}
+		}
+		return e.remember(Result{Host: h, Outcome: DirectOK, Why: d.Why}, e.cfg.OKFor)
+	case Unknown:
+		return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "direct: " + d.Why}, e.cfg.UnknownFor)
+	}
+	ctl := e.control(ctx)
+	v := <-vpn
+	switch {
+	case ctl == Blocked:
+		return e.remember(Result{Host: h, Outcome: ISPUnreliable, Why: "the control sites do not open directly either"}, e.cfg.UnknownFor)
+	case ctl == Unknown:
+		return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "control sites could not be checked"}, e.cfg.UnknownFor)
+	case v.Verdict == Open:
+		return e.remember(Result{Host: h, Outcome: Add, Why: "direct: " + d.Why + "; vpn: " + v.Why + "; source lists", Direct: d.Why, Ad: AdName(h)}, e.cfg.FailFor)
+	case v.Verdict == Blocked:
+		return e.remember(Result{Host: h, Outcome: TunnelFail, Why: "direct: " + d.Why + "; vpn: " + v.Why}, e.cfg.FailFor)
+	}
+	return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "vpn: " + v.Why}, e.cfg.UnknownFor)
 }
 
 // control: do the control sites open directly? One check at a time, the answer held for

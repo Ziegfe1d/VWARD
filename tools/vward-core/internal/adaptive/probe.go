@@ -99,6 +99,13 @@ func (p *NetProber) Probe(ctx context.Context, host, dev string) ProbeResult {
 		}
 		return classify(err, "tls")
 	}
+	// The certificate's name (not its chain: a router may have no CA list): a certificate for
+	// another name is the mark of a stub - a provider's block page or a spoofed DNS answer.
+	// Said in the Why («wrong-cert»); the decision compares it with the VPN (RefusedHere).
+	wrongCert := ""
+	if cs := conn.ConnectionState(); len(cs.PeerCertificates) > 0 && cs.PeerCertificates[0].VerifyHostname(host) != nil {
+		wrongCert = " wrong-cert"
+	}
 	// GET, not HEAD (fix.39.2): a refusal of the country is said in the body of a 403 (only that
 	// body is read; any other answer is closed after its headers).
 	if _, err := conn.Write([]byte("GET / HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nConnection: close\r\n\r\n")); err != nil {
@@ -148,7 +155,9 @@ func (p *NetProber) Probe(ctx context.Context, host, dev string) ProbeResult {
 			}
 		}
 	}
-	return ProbeResult{Open, "http " + f[1]}
+	// The refusals above come first (a block is a block whatever the certificate); an answer
+	// with a certificate for another name says so.
+	return ProbeResult{Open, "http " + f[1] + wrongCert}
 }
 
 // regionWords: the words of a refusal of the country in a 403 (OpenAI's API, Cloudflare's 1009
@@ -178,12 +187,28 @@ func HTTPCode(why string) string {
 	return ""
 }
 
-// RefusedHere: the site refuses this path and answers the VPN (fix.39.2, owner 16.11.2026:
-// api.anthropic.com answers 403 «Request not allowed» directly, without a word of the
-// country): a direct 403 and any other answer through the VPN.
+// WrongCert: the answer came with a certificate for another name.
+func WrongCert(r ProbeResult) bool { return strings.HasSuffix(r.Why, " wrong-cert") }
+
+// Suspect: a direct answer that may be a refusal of this path - a 403, or a certificate for
+// another name. Only these are compared with the VPN; any other answer is «opens directly»
+// at once, as before (no extra check on the common path).
+func Suspect(r ProbeResult) bool {
+	return r.Verdict == Open && (HTTPCode(r.Why) == "403" || WrongCert(r))
+}
+
+// RefusedHere: the site refuses this path and answers the VPN (fix.39.2, owner 16.11.2026):
+// a direct 403 and any other answer through the VPN (api.anthropic.com answers 403 «Request
+// not allowed» directly, without a word of the country); or a certificate for another name
+// directly and the right one through the VPN (a stub of the provider, a spoofed DNS answer).
 func RefusedHere(direct, vpn ProbeResult) bool {
-	return direct.Verdict == Open && HTTPCode(direct.Why) == "403" &&
-		vpn.Verdict == Open && HTTPCode(vpn.Why) != "" && HTTPCode(vpn.Why) != "403"
+	if direct.Verdict != Open || vpn.Verdict != Open || HTTPCode(vpn.Why) == "" {
+		return false
+	}
+	if HTTPCode(direct.Why) == "403" && HTTPCode(vpn.Why) != "403" && !WrongCert(vpn) {
+		return true
+	}
+	return WrongCert(direct) && !WrongCert(vpn)
 }
 
 // geoMarks: words of the pages sites send a refused country to.
