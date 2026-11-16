@@ -11,6 +11,132 @@ VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 [ -r "$VWARD_PROFILE_LIB" ] || { echo "VWARD device profile library is unavailable" >&2; exit 1; }
 . "$VWARD_PROFILE_LIB"
 vward_profile_load || exit 1
+
+# DNS rules of the tunnel after a boot (fix.34.1, r6). 25.10 after a reboot Keenetic's DNS proxy
+# took 1 of the 16 «ip name-server <server> <domain> on <tunnel>» lines of the configuration (the
+# live ndnproxymain.conf), Instagram did not resolve; «no» and the same line again fixed it. Once
+# a boot, the tunnel UP for DNS_RULES_UP_MIN minutes and the router up for 5: every such line of
+# the running configuration must be in the live file (its server and domain on one line); the
+# missing ones are given again, up to 3 tries a minute apart (none found: «unknown», nothing done). State in RAM (/tmp/vward-dns-rules).
+# dns_rules_check in domain-lists.conf: 1 - the missing lines are given again (as before);
+# 0 - no check at all; anything else, or no line - observation only (owner 08.11: the 16 rules are
+# his, VWARD does not write them by default): the mismatch is compared and logged, nothing is sent.
+dns_rules_check()
+{
+    DR=${VWARD_DNS_RULES_STATE:-/tmp/vward-dns-rules}
+    DR_LOG=${VWARD_DNS_RULES_LOG:-$LOG}
+    DR_RESULT='' DR_TRIES=0
+    [ ! -r "$DR" ] || while IFS='=' read -r K V; do
+        case "$K" in RESULT) DR_RESULT=$V ;; TRIES) DR_TRIES=$V ;; esac
+    done < "$DR"
+    case "$DR_RESULT" in ok|gave_up|no_live_file|unknown|off|observed) return 0 ;; esac
+    case "$DR_TRIES" in ''|*[!0-9]*) DR_TRIES=0 ;; esac
+    DR_CONF=${VWARD_DOMAIN_LISTS_CONF:-/opt/etc/vward/route-engine/domain-lists.conf}
+    DR_MODE=$(awk -F= '$1 == "dns_rules_check" {print $2; exit}' "$DR_CONF" 2>/dev/null)
+    case "$DR_MODE" in
+        0) printf 'RESULT=off\n' > "$DR"; return 0 ;;
+        1) DR_MODE=act ;;
+        *) DR_MODE=observe ;;
+    esac
+    DR_UP=
+    read -r DR_UP _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}" || return 0
+    DR_UP=${DR_UP%%.*}
+    case "$DR_UP" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$DR_UP" -ge "${VWARD_DNS_RULES_DELAY:-300}" ] || return 0
+
+    DR_LIVE=
+    for f in ${VWARD_NDNPROXY_CONF:-/var/ndnproxymain.conf /tmp/ndnproxymain.conf}; do
+        [ -r "$f" ] && { DR_LIVE=$f; break; }
+    done
+    if [ -z "$DR_LIVE" ]; then
+        # Nothing to compare with: nothing is done (a check that cannot see says so, not «ok»).
+        printf 'RESULT=no_live_file\nAT=%s\n' "$NOW_EPOCH" > "$DR"
+        echo "$NOW_TEXT|DNS_RULES result=no_live_file" >> "$DR_LOG"
+        return 0
+    fi
+    # Only «ip name-server»: its RCI subtree when proven (owner 08.11), else the whole config.
+    if command -v vward_keenetic_part >/dev/null 2>&1 && DR_RUN=$(vward_keenetic_part nameservers 2>/dev/null) && [ -n "$DR_RUN" ]; then :
+    else DR_RUN=$(vward_running_config 2>/dev/null) || return 0; fi
+    [ -n "$DR_RUN" ] || return 0
+    DR_RULES=$(printf '%s\n' "$DR_RUN" | tr -d '\r' | awk -v t="$VWARD_TUNNEL_INTERFACE" '
+        $1 == "ip" && $2 == "name-server" && NF == 6 && $5 == "on" && $6 == t {print $3, tolower($4)}')
+    DR_RUN=
+    DR_WANT=$(printf '%s\n' "$DR_RULES" | grep -c .)
+    DR_MISS=$(printf '%s\n' "$DR_RULES" | awk '
+        function tok(l,  a, n, i) {n = split(tolower(l), a, /[^a-z0-9._-]+/); for (i = 1; i <= n; i++) {sub(/[.]+$/, "", a[i]); if (a[i] != "") have[FNR, a[i]] = 1}}
+        NR == FNR {if (NF == 2) {srv[++m] = $1; dom[m] = $2}; next}
+        {tok($0); lines = FNR}
+        END {
+            for (r = 1; r <= m; r++) {
+                s = srv[r]; sub(/:[0-9]+$/, "", s); found = 0
+                for (l = 1; l <= lines && !found; l++) if (have[l, s] && have[l, dom[r]]) found = 1
+                if (!found) print srv[r], dom[r]
+            }
+        }' - "$DR_LIVE")
+    DR_MISSN=$(printf '%s\n' "$DR_MISS" | grep -c .)
+    DR_LIVEN=$((DR_WANT - DR_MISSN))
+    if [ "$DR_MISSN" -eq 0 ]; then
+        DR_RES=no
+        DR_FIRST=$(printf '%s\n' "$DR_RULES" | awk 'NF == 2 {print $2; exit}')
+        if [ -z "$DR_FIRST" ] || "${VWARD_NSLOOKUP:-nslookup}" "$DR_FIRST" 127.0.0.1 2>/dev/null |
+            awk '/^Name:/ {n = 1; next} n && /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+/ {ok = 1} END {exit !ok}'; then
+            DR_RES=yes
+        fi
+        printf 'RESULT=ok\nCONFIG=%s\nLIVE=%s\nTRIES=%s\nRESOLVES=%s\nAT=%s\n' "$DR_WANT" "$DR_LIVEN" "$DR_TRIES" "$DR_RES" "$NOW_EPOCH" > "$DR"
+        echo "$NOW_TEXT|DNS_RULES result=ok config=$DR_WANT live=$DR_LIVEN tries=$DR_TRIES resolves=$DR_RES" >> "$DR_LOG"
+        return 0
+    fi
+    if [ "$DR_LIVEN" -eq 0 ]; then
+        # Not one rule found: the file may be written otherwise than read here. Nothing is done.
+        printf 'RESULT=unknown\nCONFIG=%s\nLIVE=0\nAT=%s\n' "$DR_WANT" "$NOW_EPOCH" > "$DR"
+        echo "$NOW_TEXT|DNS_RULES result=unknown config=$DR_WANT live=0 file=$DR_LIVE" >> "$DR_LOG"
+        return 0
+    fi
+    if [ "$DR_MODE" = observe ]; then
+        # Observation: once a boot, what would be given again is logged; nothing is sent.
+        printf 'RESULT=observed\nCONFIG=%s\nLIVE=%s\nAT=%s\n' "$DR_WANT" "$DR_LIVEN" "$NOW_EPOCH" > "$DR"
+        echo "$NOW_TEXT|DNS_RULES result=mismatch_observed config=$DR_WANT live=$DR_LIVEN would_reapply=$DR_MISSN missing=$(printf '%s\n' "$DR_MISS" | awk 'NF == 2 {printf "%s%s", c, $2; c = ","}')" >> "$DR_LOG"
+        return 0
+    fi
+    if [ "$DR_TRIES" -ge 3 ]; then
+        printf 'RESULT=gave_up\nCONFIG=%s\nLIVE=%s\nTRIES=%s\nAT=%s\n' "$DR_WANT" "$DR_LIVEN" "$DR_TRIES" "$NOW_EPOCH" > "$DR"
+        echo "$NOW_TEXT|DNS_RULES result=gave_up config=$DR_WANT live=$DR_LIVEN tries=$DR_TRIES" >> "$DR_LOG"
+        return 0
+    fi
+    DR_FIX=0
+    while read -r S D; do
+        [ -n "$D" ] || continue
+        ndmc -c "no ip name-server $S $D on $VWARD_TUNNEL_INTERFACE" >/dev/null 2>&1
+        ndmc -c "ip name-server $S $D on $VWARD_TUNNEL_INTERFACE" >/dev/null 2>&1 && DR_FIX=$((DR_FIX + 1))
+    done <<EOF_DR
+$DR_MISS
+EOF_DR
+    command -v vward_keenetic_dirty >/dev/null 2>&1 && vward_keenetic_dirty
+    DR_TRIES=$((DR_TRIES + 1))
+    printf 'RESULT=reapplied\nCONFIG=%s\nLIVE=%s\nTRIES=%s\nAT=%s\n' "$DR_WANT" "$DR_LIVEN" "$DR_TRIES" "$NOW_EPOCH" > "$DR"
+    echo "$NOW_TEXT|DNS_RULES result=mismatch config=$DR_WANT live=$DR_LIVEN reapplied=$DR_FIX try=$DR_TRIES missing=$(printf '%s\n' "$DR_MISS" | awk 'NF == 2 {printf "%s%s", c, $2; c = ","}')" >> "$DR_LOG"
+}
+
+# «dns-rules» (16.11.2026): the check above alone, run by the components agent (always on) once a minute until
+# it is done for this boot - not by this agent's own rounds: the VPN agent is off by default since fix.37, and
+# the owner's Instagram rules stayed 1 of 16 after a reboot (www.instagram.com «имени нет» from the provider).
+# The component gate does not apply to it; the tunnel's device must be up.
+if [ "${1:-}" = dns-rules ]; then
+    [ -n "${VWARD_TUNNEL_INTERFACE:-}" ] || exit 0
+    DRT_DEV=${VWARD_TUNNEL_DEVICE:-}
+    if [ -n "$DRT_DEV" ]; then
+        DRT_SYS=${VWARD_SYSFS_NET:-/sys/class/net}/$DRT_DEV
+        [ -d "$DRT_SYS" ] || exit 0
+        DRT_FLAGS=; [ ! -r "$DRT_SYS/flags" ] || read -r DRT_FLAGS < "$DRT_SYS/flags" 2>/dev/null || :
+        case "$DRT_FLAGS" in 0x*) [ $((DRT_FLAGS & 1)) -eq 1 ] || exit 0 ;; esac
+    fi
+    # shellcheck disable=SC2046
+    set -- $(date '+%s %Y-%m-%d %H:%M:%S')
+    NOW_EPOCH=$1 NOW_TEXT="$2 $3" LOG=${VWARD_DNS_RULES_LOG:-/opt/var/log/vward-tunnel-health.log}
+    dns_rules_check
+    exit 0
+fi
+
 VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
 [ -r "$VWARD_ADMISSION_LIB" ] || { echo "VWARD runtime admission library is unavailable" >&2; exit 1; }
 . "$VWARD_ADMISSION_LIB"
@@ -358,115 +484,7 @@ if [ "$STATUS" != "$OLD_STATUS" ]; then
 fi
 
 
-# DNS rules of the tunnel after a boot (fix.34.1, r6). 25.10 after a reboot Keenetic's DNS proxy
-# took 1 of the 16 «ip name-server <server> <domain> on <tunnel>» lines of the configuration (the
-# live ndnproxymain.conf), Instagram did not resolve; «no» and the same line again fixed it. Once
-# a boot, the tunnel UP for DNS_RULES_UP_MIN minutes and the router up for 5: every such line of
-# the running configuration must be in the live file (its server and domain on one line); the
-# missing ones are given again, up to 3 tries a minute apart (none found: «unknown», nothing done). State in RAM (/tmp/vward-dns-rules).
-# dns_rules_check in domain-lists.conf: 1 - the missing lines are given again (as before);
-# 0 - no check at all; anything else, or no line - observation only (owner 08.11: the 16 rules are
-# his, VWARD does not write them by default): the mismatch is compared and logged, nothing is sent.
-dns_rules_check()
-{
-    DR=${VWARD_DNS_RULES_STATE:-/tmp/vward-dns-rules}
-    DR_LOG=${VWARD_DNS_RULES_LOG:-$LOG}
-    DR_RESULT='' DR_TRIES=0
-    [ ! -r "$DR" ] || while IFS='=' read -r K V; do
-        case "$K" in RESULT) DR_RESULT=$V ;; TRIES) DR_TRIES=$V ;; esac
-    done < "$DR"
-    case "$DR_RESULT" in ok|gave_up|no_live_file|unknown|off|observed) return 0 ;; esac
-    case "$DR_TRIES" in ''|*[!0-9]*) DR_TRIES=0 ;; esac
-    DR_CONF=${VWARD_DOMAIN_LISTS_CONF:-/opt/etc/vward/route-engine/domain-lists.conf}
-    DR_MODE=$(awk -F= '$1 == "dns_rules_check" {print $2; exit}' "$DR_CONF" 2>/dev/null)
-    case "$DR_MODE" in
-        0) printf 'RESULT=off\n' > "$DR"; return 0 ;;
-        1) DR_MODE=act ;;
-        *) DR_MODE=observe ;;
-    esac
-    DR_UP=
-    read -r DR_UP _ 2>/dev/null < "${VWARD_UPTIME_FILE:-/proc/uptime}" || return 0
-    DR_UP=${DR_UP%%.*}
-    case "$DR_UP" in ''|*[!0-9]*) return 0 ;; esac
-    [ "$DR_UP" -ge "${VWARD_DNS_RULES_DELAY:-300}" ] || return 0
 
-    DR_LIVE=
-    for f in ${VWARD_NDNPROXY_CONF:-/var/ndnproxymain.conf /tmp/ndnproxymain.conf}; do
-        [ -r "$f" ] && { DR_LIVE=$f; break; }
-    done
-    if [ -z "$DR_LIVE" ]; then
-        # Nothing to compare with: nothing is done (a check that cannot see says so, not «ok»).
-        printf 'RESULT=no_live_file\nAT=%s\n' "$NOW_EPOCH" > "$DR"
-        echo "$NOW_TEXT|DNS_RULES result=no_live_file" >> "$DR_LOG"
-        return 0
-    fi
-    # Only «ip name-server»: its RCI subtree when proven (owner 08.11), else the whole config.
-    if command -v vward_keenetic_part >/dev/null 2>&1 && DR_RUN=$(vward_keenetic_part nameservers 2>/dev/null) && [ -n "$DR_RUN" ]; then :
-    else DR_RUN=$(vward_running_config 2>/dev/null) || return 0; fi
-    [ -n "$DR_RUN" ] || return 0
-    DR_RULES=$(printf '%s\n' "$DR_RUN" | tr -d '\r' | awk -v t="$VWARD_TUNNEL_INTERFACE" '
-        $1 == "ip" && $2 == "name-server" && NF == 6 && $5 == "on" && $6 == t {print $3, tolower($4)}')
-    DR_RUN=
-    DR_WANT=$(printf '%s\n' "$DR_RULES" | grep -c .)
-    DR_MISS=$(printf '%s\n' "$DR_RULES" | awk '
-        function tok(l,  a, n, i) {n = split(tolower(l), a, /[^a-z0-9._-]+/); for (i = 1; i <= n; i++) {sub(/[.]+$/, "", a[i]); if (a[i] != "") have[FNR, a[i]] = 1}}
-        NR == FNR {if (NF == 2) {srv[++m] = $1; dom[m] = $2}; next}
-        {tok($0); lines = FNR}
-        END {
-            for (r = 1; r <= m; r++) {
-                s = srv[r]; sub(/:[0-9]+$/, "", s); found = 0
-                for (l = 1; l <= lines && !found; l++) if (have[l, s] && have[l, dom[r]]) found = 1
-                if (!found) print srv[r], dom[r]
-            }
-        }' - "$DR_LIVE")
-    DR_MISSN=$(printf '%s\n' "$DR_MISS" | grep -c .)
-    DR_LIVEN=$((DR_WANT - DR_MISSN))
-    if [ "$DR_MISSN" -eq 0 ]; then
-        DR_RES=no
-        DR_FIRST=$(printf '%s\n' "$DR_RULES" | awk 'NF == 2 {print $2; exit}')
-        if [ -z "$DR_FIRST" ] || "${VWARD_NSLOOKUP:-nslookup}" "$DR_FIRST" 127.0.0.1 2>/dev/null |
-            awk '/^Name:/ {n = 1; next} n && /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+/ {ok = 1} END {exit !ok}'; then
-            DR_RES=yes
-        fi
-        printf 'RESULT=ok\nCONFIG=%s\nLIVE=%s\nTRIES=%s\nRESOLVES=%s\nAT=%s\n' "$DR_WANT" "$DR_LIVEN" "$DR_TRIES" "$DR_RES" "$NOW_EPOCH" > "$DR"
-        echo "$NOW_TEXT|DNS_RULES result=ok config=$DR_WANT live=$DR_LIVEN tries=$DR_TRIES resolves=$DR_RES" >> "$DR_LOG"
-        return 0
-    fi
-    if [ "$DR_LIVEN" -eq 0 ]; then
-        # Not one rule found: the file may be written otherwise than read here. Nothing is done.
-        printf 'RESULT=unknown\nCONFIG=%s\nLIVE=0\nAT=%s\n' "$DR_WANT" "$NOW_EPOCH" > "$DR"
-        echo "$NOW_TEXT|DNS_RULES result=unknown config=$DR_WANT live=0 file=$DR_LIVE" >> "$DR_LOG"
-        return 0
-    fi
-    if [ "$DR_MODE" = observe ]; then
-        # Observation: once a boot, what would be given again is logged; nothing is sent.
-        printf 'RESULT=observed\nCONFIG=%s\nLIVE=%s\nAT=%s\n' "$DR_WANT" "$DR_LIVEN" "$NOW_EPOCH" > "$DR"
-        echo "$NOW_TEXT|DNS_RULES result=mismatch_observed config=$DR_WANT live=$DR_LIVEN would_reapply=$DR_MISSN missing=$(printf '%s\n' "$DR_MISS" | awk 'NF == 2 {printf "%s%s", c, $2; c = ","}')" >> "$DR_LOG"
-        return 0
-    fi
-    if [ "$DR_TRIES" -ge 3 ]; then
-        printf 'RESULT=gave_up\nCONFIG=%s\nLIVE=%s\nTRIES=%s\nAT=%s\n' "$DR_WANT" "$DR_LIVEN" "$DR_TRIES" "$NOW_EPOCH" > "$DR"
-        echo "$NOW_TEXT|DNS_RULES result=gave_up config=$DR_WANT live=$DR_LIVEN tries=$DR_TRIES" >> "$DR_LOG"
-        return 0
-    fi
-    DR_FIX=0
-    while read -r S D; do
-        [ -n "$D" ] || continue
-        ndmc -c "no ip name-server $S $D on $VWARD_TUNNEL_INTERFACE" >/dev/null 2>&1
-        ndmc -c "ip name-server $S $D on $VWARD_TUNNEL_INTERFACE" >/dev/null 2>&1 && DR_FIX=$((DR_FIX + 1))
-    done <<EOF_DR
-$DR_MISS
-EOF_DR
-    command -v vward_keenetic_dirty >/dev/null 2>&1 && vward_keenetic_dirty
-    DR_TRIES=$((DR_TRIES + 1))
-    printf 'RESULT=reapplied\nCONFIG=%s\nLIVE=%s\nTRIES=%s\nAT=%s\n' "$DR_WANT" "$DR_LIVEN" "$DR_TRIES" "$NOW_EPOCH" > "$DR"
-    echo "$NOW_TEXT|DNS_RULES result=mismatch config=$DR_WANT live=$DR_LIVEN reapplied=$DR_FIX try=$DR_TRIES missing=$(printf '%s\n' "$DR_MISS" | awk 'NF == 2 {printf "%s%s", c, $2; c = ","}')" >> "$DR_LOG"
-}
-
-# DNS rules of the tunnel after a boot: once the tunnel has been UP a few minutes.
-if [ "$STATUS" = UP ] && [ "$OK_COUNT" -ge "${DNS_RULES_UP_MIN:-3}" ] && [ -n "${VWARD_TUNNEL_INTERFACE:-}" ]; then
-    dns_rules_check
-fi
 
 
 echo "WG_STATUS=$STATUS"
