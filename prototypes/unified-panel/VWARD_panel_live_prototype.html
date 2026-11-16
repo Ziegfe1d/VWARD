@@ -471,6 +471,16 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
 @media(max-width:460px){.ui-status{font-size:12px;min-height:36px;padding:7px 11px;border-radius:16px;max-width:calc(100% - 16px)}}
 @media screen and (-ms-high-contrast:active), (-ms-high-contrast:none){.ui-status{width:auto;max-width:calc(100% - 24px);background:#24203d}.theme-light .ui-status.is-warning{background:#fff2d2;color:#875414}}
 @media(prefers-reduced-motion:reduce){.ui-status,.ui-status-icon::before{animation:none!important;transition:none!important}}
+
+/* v9: contextual destination links and live instance directory. */
+.tunnel-item,.live-route{display:flex;align-items:center;flex-wrap:wrap;column-gap:10px;row-gap:3px}
+.tunnel-item>strong,.live-route>strong{flex:1 1 110px;min-width:0;overflow-wrap:anywhere}
+.row-go{flex:0 0 auto;font-size:11px;line-height:1.35;padding:5px 9px;border:1px solid var(--line);border-radius:999px;text-decoration:none;color:var(--purple);white-space:nowrap;background:var(--card2)}
+.row-go:hover,.row-go:focus-visible{border-color:var(--purple);outline-offset:2px}
+.section-link-row{display:flex;justify-content:flex-end;padding-top:10px;padding-bottom:10px}
+.page-link{font-size:12px;color:var(--purple);text-decoration:none;border-bottom:1px solid currentColor;padding-bottom:2px}
+.dir-limit{font-size:11px;color:var(--muted);padding:6px 10px}
+@media(max-width:380px){.tunnel-item,.live-route{gap:5px}.row-go{padding:5px 7px;font-size:10px}}
 </style></head>
 <body>
 <svg aria-hidden="true" style="display:none"><symbol id="i-spark" viewbox="0 0 24 24"><path d="M12 2.5 14.4 9.6 21.5 12l-7.1 2.4L12 21.5l-2.4-7.1L2.5 12l7.1-2.4L12 2.5Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"></path></symbol><symbol id="i-grid" viewbox="0 0 24 24"><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="3" y="3"></rect><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="14" y="3"></rect><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="3" y="14"></rect><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="14" y="14"></rect></symbol><symbol id="i-route" viewbox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"><circle cx="6" cy="5" r="2.3"></circle><circle cx="18" cy="19" r="2.3"></circle><path d="M6 7.6v7.2a4.2 4.2 0 004.2 4.2H15.5M10.5 5H17a3 3 0 013 3v2m-3-3 3 3 3-3"></path></g></symbol><symbol id="i-globe" viewbox="0 0 24 24"><circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" stroke-width="1.8"></circle><path d="M3 12h18M12 3c-5 5-5 13 0 18M12 3c5 5 5 13 0 18" fill="none" stroke="currentColor" stroke-width="1.6"></path></symbol><symbol id="i-shield" viewbox="0 0 24 24"><path d="m12 2 8 3.5v5.8c0 5.2-3.3 8.5-8 10.7-4.7-2.2-8-5.5-8-10.7V5.5L12 2Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"></path><path d="m8.5 12 2.2 2.2 4.8-4.8" fill="none" stroke="currentColor" stroke-width="1.8"></path></symbol><symbol id="i-pulse" viewbox="0 0 24 24"><path d="M2 12h5l3-6 4 12 3-6h5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"></path></symbol><symbol id="i-sliders" viewbox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"><path d="M4 7h16M4 17h16"></path><circle cx="9" cy="7" fill="#19172e" r="3"></circle><circle cx="16" cy="17" fill="#19172e" r="3"></circle></g></symbol><symbol id="i-clock" viewbox="0 0 24 24"><circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" stroke-width="1.8"></circle><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"></path></symbol><symbol id="i-refresh" viewbox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14-4L4 9m0-5v5h5M4 13a8 8 0 0 0 14 4l2-2m0 5v-5h-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"></path></symbol><symbol id="i-lock" viewbox="0 0 24 24"><rect fill="none" height="11" rx="2" stroke="currentColor" stroke-width="1.8" width="14" x="5" y="10"></rect><path d="M8 10V7a4 4 0 018 0v3" fill="none" stroke="currentColor" stroke-width="1.8"></path></symbol><symbol id="i-server" viewbox="0 0 24 24"><rect fill="none" height="7" rx="2" stroke="currentColor" stroke-width="1.7" width="18" x="3" y="4"></rect><rect fill="none" height="7" rx="2" stroke="currentColor" stroke-width="1.7" width="18" x="3" y="13"></rect><circle cx="7" cy="7.5" fill="currentColor" r="1"></circle><circle cx="7" cy="16.5" fill="currentColor" r="1"></circle></symbol><symbol id="i-info" viewbox="0 0 24 24"><circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" stroke-width="1.8"></circle><path d="M12 10.5v6M12 7.5h.01" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path></symbol><symbol id="i-menu" viewbox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" stroke-width="1.8"></path></symbol><symbol id="i-home" viewbox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5M6 9v11h4.5v-5.5h3V20H18V9"></path></symbol><symbol id="i-list" viewbox="0 0 24 24"><rect height="17" rx="2" width="15" x="4.5" y="3.5"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></symbol><symbol id="i-block" viewbox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="m6.4 6.4 11.2 11.2"></path></symbol><symbol id="i-tools" viewbox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L4 17v3h3l5.4-5.4a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.6-.4-.4-2.6z"></path></symbol><symbol id="i-platform" viewbox="0 0 24 24"><rect height="6.5" rx="1.5" width="6.5" x="4" y="4"></rect><rect height="6.5" rx="1.5" width="6.5" x="13.5" y="4"></rect><rect height="6.5" rx="1.5" width="6.5" x="4" y="13.5"></rect><rect height="6.5" rx="1.5" width="6.5" x="13.5" y="13.5"></rect></symbol><symbol id="i-logs" viewbox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01"></path></symbol><symbol id="i-more" viewbox="0 0 24 24"><circle cx="5.5" cy="12" fill="currentColor" r="1" stroke="none"></circle><circle cx="12" cy="12" fill="currentColor" r="1" stroke="none"></circle><circle cx="18.5" cy="12" fill="currentColor" r="1" stroke="none"></circle></symbol><symbol fill="none" id="i-search" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><circle cx="11" cy="11" r="6.6"></circle><path d="m16 16 4.5 4.5"></path></symbol><symbol fill="none" id="i-bell" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z"></path><path d="M10 21h4"></path></symbol><symbol fill="none" id="i-moon" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><path d="M20.2 15.4A8.8 8.8 0 0 1 8.6 3.8 8.9 8.9 0 1 0 20.2 15.4Z"></path></symbol><symbol fill="none" id="i-sun" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"></path></symbol><symbol fill="none" id="i-auto" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><rect height="15" rx="4" width="17" x="3.5" y="4.5"></rect><path d="M3.5 12h17"></path></symbol><symbol fill="none" id="i-close" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"></path></symbol></svg>
@@ -484,7 +494,8 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
 <div class="card kpi" style="--accent:var(--orange)"><div class="kpi-top"><span>Домены в маршрутах</span><span class="kpi-icon"><svg><use href="#i-route"></use></svg></span></div><div class="kpi-val">—</div><div class="kpi-foot">—</div></div>
 </section><section class="card section" id="vpn"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">VPN</h2></div></div><div class="tunnel-list" id="vpn-tunnels">—</div></div></section><section aria-label="Карта маршрутов" class="card section" id="routes"><div class="card-inner" style="padding-bottom:4px"><div class="section-head"><div><h2 class="title-accent">Доменные списки</h2></div><p class="section-explainer">Назначения списков, не измерение трафика.</p></div></div>
 <div class="route-map" id="live-routes">—</div><div class="route-distribution" id="route-distribution">—</div></section><section class="card service-card section" id="control"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Сервисы и маршруты</h2></div></div></div>
-<div class="service-list" id="service-list">—</div></section><section class="card section compact-section" id="ads"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Реклама и трекеры</h2></div></div><div class="simple-status" id="ads-status">—</div></div></section><section class="card section compact-section" id="dns"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">DNS и Smart DNS</h2></div></div><div class="simple-status" id="smartdns-status">—</div></div></section><section class="card section" id="components"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Компоненты</h2></div></div><div class="status-list" id="component-list">—</div></div></section><section class="card section" id="system"><div class="card-inner"><nav class="system-jump-links" aria-label="Дополнительные страницы"><a href="#directory">Все разделы</a><a href="#about">О программе</a><a href="#changes">Список изменений</a><a href="#help">Инструкции</a></nav><div class="section-head"><div><h2 class="title-accent">Система</h2></div></div><div class="settings-grid"><div class="setting-tile"><span>Версия</span><strong id="system-version">—</strong></div><div class="setting-tile"><span>Свободно на диске</span><strong id="system-disk">—</strong></div><div class="setting-tile"><span>Компонентов VWARD</span><strong id="system-components">—</strong></div></div></div></section><section class="card section" id="settings">
+<div class="service-list" id="service-list">—</div>
+<div class="card-inner section-link-row"><a data-live-path="/domains/services" href="/domains/services" class="page-link">Сервисы в действующей Панели <span aria-hidden="true">↗</span></a></div></section><section class="card section compact-section" id="ads"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Реклама и трекеры</h2></div></div><div class="simple-status" id="ads-status">—</div></div></section><section class="card section compact-section" id="dns"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">DNS и Smart DNS</h2></div></div><div class="simple-status" id="smartdns-status">—</div></div></section><section class="card section" id="components"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Компоненты</h2></div></div><div class="status-list" id="component-list">—</div></div></section><section class="card section" id="system"><div class="card-inner"><nav class="system-jump-links" aria-label="Дополнительные страницы"><a href="#directory">Все разделы</a><a href="#about">О программе</a><a href="#changes">Список изменений</a><a href="#help">Инструкции</a></nav><div class="section-head"><div><h2 class="title-accent">Система</h2></div></div><div class="settings-grid"><div class="setting-tile"><span>Версия</span><strong id="system-version">—</strong></div><div class="setting-tile"><span>Свободно на диске</span><strong id="system-disk">—</strong></div><div class="setting-tile"><span>Компонентов VWARD</span><strong id="system-components">—</strong></div></div></div></section><section class="card section" id="settings">
 <div class="card-inner">
 <div class="section-head"><div><h2 class="title-accent">Настройки</h2></div><span class="quiet-tag">Только просмотр</span></div>
 <div class="settings-grid"><div class="setting-tile"><span>Версия VWARD</span><strong id="setting-version">—</strong></div><div class="setting-tile"><span>Канал обновлений</span><strong id="setting-channel">—</strong></div><div class="setting-tile"><span>Тема оформления</span><strong id="theme-mode">как в системе</strong></div></div></div></section>
@@ -566,7 +577,7 @@ button,a,input { -webkit-tap-highlight-color:transparent; }
 <details class="dir-group" ><summary><span>Журналы</span><span class="dir-count"></span></summary><div class="dir-links">
 <a class="dir-row dir-root" href="#events"><span>Журналы</span><small>В этом прототипе</small></a>
 </div></details>
-<div id="live-component-links" class="dir-components" aria-label="Страницы установленных компонентов"></div></div>
+<div id="live-runtime-links" class="dir-components" aria-label="Туннели и списки из ответа роутера"></div><div id="live-component-links" class="dir-components" aria-label="Страницы установленных компонентов"></div></div>
 </div></section>
 <section class="card section v8-section" id="about" aria-label="О программе"><div class="card-inner">
   <div class="section-head"><div><h2 class="title-accent">О программе</h2></div></div>
@@ -681,12 +692,30 @@ SOFTWARE.</pre></details>
     var d = /^20(\d{6})\d*$/.exec(String(seq || ''));
     return m[1] + (m[2] ? ' ' + m[2].toUpperCase() + m[3] : '') + (m[4] ? ' #' + m[4] + '.' + (m[5] || '0') + (d ? '.' + d[1] : '') : '');
   }
-  function makeRow(cls, label, state, stateCls) {
+  function encodeRouteSegment(value){
+    if(typeof value!=='string'||!value||value.length>128||value==='.'||value==='..'||/[\\/\x00-\x1f]/.test(value))return '';
+    try{return encodeURIComponent(value);}catch(e){return '';}
+  }
+  function tunnelPath(t){var seg=t&&encodeRouteSegment(t.name);return seg?'/vpn/tunnel/'+seg:'';}
+  function listPath(l){var seg=l&&encodeRouteSegment(l.name);return seg?'/domains/lists/'+seg:'';}
+  function createLiveLink(path,label,compact){
+    if(!path||path.charAt(0)!=='/'||path.charAt(1)==='/'||/[?#\\]/.test(path))return null;
+    var link=document.createElement('a');link.className=compact?'row-go':'dir-row';
+    link.href=path;link.setAttribute('data-live-path',path);
+    link.title='Открыть в действующей Панели VWARD';
+    if(compact){link.textContent='Подробнее';link.setAttribute('aria-label','Открыть: '+short(label||DASH));}
+    else{var name=document.createElement('span'),hint=document.createElement('small');
+      name.textContent=short(label||DASH);hint.textContent='Действующая Панель';link.appendChild(name);link.appendChild(hint);}
+    return link;
+  }
+  function makeRow(cls, label, state, stateCls, path) {
     var row = document.createElement('div'), name = document.createElement('strong'), val = document.createElement('span');
     row.className = cls; name.textContent = short(label || DASH); val.textContent = short(state || DASH);
     if (cls === 'status-item') { name.className = 'status-name'; val.className = 'status-value state-' + (stateCls || 'neutral'); }
     else { val.className = 'status'; klass(val, 'good', stateCls === 'ok'); klass(val, 'bad', stateCls === 'warn'); }
-    row.appendChild(name); row.appendChild(val); return row;
+    row.appendChild(name); row.appendChild(val);
+    if(path){var link=createLiveLink(path,label,true);if(link)row.appendChild(link);}
+    return row;
   }
   function renderParts(parts) {
     var root = sv('component-list'); if (!root) return;
@@ -729,7 +758,7 @@ SOFTWARE.</pre></details>
         enabled++;if(t.connected==null)known=false;else if(yes(t.connected))connected++;});
       kpi(1,known?connected+' из '+enabled:DASH, interfaces.length ? 'Туннели VPN' : 'Туннелей нет');
       if(root){if(!interfaces.length)root.appendChild(text(DASH));
-        each(interfaces,function(t){if(!t)return;var st=vpnState(t,wg);root.appendChild(makeRow('tunnel-item',t.description||t.title||t.label||DASH,st[0],st[1]));});}
+        each(interfaces,function(t){if(!t)return;var st=vpnState(t,wg);root.appendChild(makeRow('tunnel-item',t.description||t.title||t.label||t.name||DASH,st[0],st[1],tunnelPath(t)));});}
     }
     var v=version(p.version,p.last_sequence);put('#system-version',v);put('#setting-version',v);
     put('#setting-channel',p.channel==null?DASH:short(p.channel));
@@ -749,7 +778,7 @@ SOFTWARE.</pre></details>
     kpi(3,measured===lists.length?format(domains):DASH,lists.length+' '+pluralLists(lists.length));
     var root=sv('live-routes');clear(root);
     if(root){if(!lists.length)root.appendChild(text(DASH));
-      each(lists.slice(0,150),function(l){root.appendChild(makeRow('live-route',l.description||l.title||l.name||DASH,routeNames[via(l)],''));});
+      each(lists.slice(0,150),function(l){root.appendChild(makeRow('live-route',l.description||l.title||l.name||DASH,routeNames[via(l)],'',listPath(l)));});
       if(lists.length>150){var more=document.createElement('div');more.className='remaining';more.textContent='Показано 150 из '+lists.length;root.appendChild(more);}
     }
     var dist=sv('route-distribution');clear(dist);if(!dist)return;
@@ -876,8 +905,8 @@ SOFTWARE.</pre></details>
       (function(job){pending++;api(job[0],function(err,payload){
         pending--;finished++;if(job[0]==='status')statusDone=true;
         var slot=job[0]==='status'?'status':job[0]==='lists-data'?'lists':job[0]==='ai-data'?'ai':job[0]==='ads-data'?'ads':'notes';
-        if(err){data[slot]=null;errorCount++;job[2]();if(err==='auth')unauthorized=true;if(err==='network'||err==='timeout')networkFailure=true;}
-        else{data[slot]=payload;success++;job[1](payload);}
+        if(err){data[slot]=null;errorCount++;job[2]();if(slot==='status'||slot==='lists')renderRuntimePages();if(err==='auth')unauthorized=true;if(err==='network'||err==='timeout')networkFailure=true;}
+        else{data[slot]=payload;success++;job[1](payload);if(slot==='status'||slot==='lists')renderRuntimePages();}
         buildSearch();updateOverlay();run();settle();
       });})(work[index++]);
     }}
@@ -934,12 +963,26 @@ SOFTWARE.</pre></details>
   var searchRows=[];
   function addSearch(id,title,kind){if(!title||title===DASH)return;searchRows.push({id:id,title:short(title),kind:kind});}
   function buildSearch(){searchRows=[];
-    each(sections,function(s){addSearch(s[0],s[1],s[2]);});each(livePages,function(p){searchRows.push({id:'directory',title:p.title,kind:'Страница действующей Панели',path:p.path});});
-    if(data.status){each(((data.status.wg||{}).interfaces||[]),function(t){addSearch('vpn',t.description||t.title||t.name,'VPN');});
+    each(sections,function(s){addSearch(s[0],s[1],s[2]);});
+    each(livePages,function(p){if(visibleStaticPage(p.id))searchRows.push({id:'directory',title:p.title,kind:'Страница действующей Панели',path:p.path});});
+    if(data.status){
+      var wg=data.status.wg||{};
+      if(array(wg.interfaces)&&wg.interfaces_unknown!==true)each(wg.interfaces,function(t){
+        var path=tunnelPath(t),label=t&&short(t.description||t.title||t.label||t.name);
+        if(path&&label&&label!==DASH)searchRows.push({id:'vpn',title:label,kind:'Туннель',path:path});
+      });
       var parts=data.status.parts||{},hidden=array(parts.hidden)?parts.hidden:[];
-      each(parts.list||[],function(p){if(p&&p.id&&hidden.indexOf(p.id)===-1&&p.kind!=='retired')addSearch('components',p.title,'Компоненты');});}
-    if(data.lists)each(data.lists.lists||[],function(l){addSearch('routes',l.description||l.title||l.name,'Маршруты');});
-    if(data.ai)each(data.ai.services||[],function(s){addSearch('control',s.title||s.name||s.id,'Сервисы');});
+      if(array(parts.list))each(parts.list,function(p){
+        if(!p||!p.id||hidden.indexOf(p.id)!==-1||p.kind==='retired')return;
+        var path=dynamicComponentRoutes[p.id];if(path)searchRows.push({id:'components',title:short(p.title||p.id),kind:'Компонент',path:path});
+        else addSearch('components',p.title,'Компонент');
+      });
+    }
+    if(data.lists&&array(data.lists.lists))each(data.lists.lists,function(l){
+      var path=listPath(l),label=l&&short(l.description||l.title||l.name);
+      if(path&&label&&label!==DASH)searchRows.push({id:'routes',title:label,kind:'Доменный список',path:path});
+    });
+    if(data.ai&&array(data.ai.services))each(data.ai.services,function(s){addSearch('control',s.title||s.name||s.id,'Сервис');});
     renderSearch();
   }
   function renderSearch(){var input=sv('search-input'),result=sv('search-results');if(!result||!input)return;
@@ -1006,16 +1049,47 @@ SOFTWARE.</pre></details>
     if(!n){var empty=document.createElement('div');empty.className='thirdparty-row';
       each([DASH,DASH,DASH],function(t){var el=document.createElement('span');el.textContent=t;empty.appendChild(el);});root.appendChild(empty);}
   }
-  function renderComponentPages(s){var root=sv('live-component-links');if(!root)return;clear(root);
-    if(s&&s.parts&&array(s.parts.hidden)){
-      var hiddenPartPages={'d-agh':'agh','d-dnsex':'agh','d-aghfilters':'agh','d-aghservices':'agh',
+  /* v9: additional real instance pages; no service/tunnel/list IDs are built into HTML. */
+  function runtimeGroup(root,title,entries,wasOpen){
+    if(!entries.length)return;
+    var wrap=document.createElement('details'),summary=document.createElement('summary'),box=document.createElement('div');
+    wrap.className='dir-group';wrap.setAttribute('data-runtime',title);if(wasOpen)wrap.open=true;summary.textContent=title+' · '+entries.length;
+    box.className='dir-links';wrap.appendChild(summary);wrap.appendChild(box);
+    each(entries.slice(0,80),function(e){var link=createLiveLink(e.path,e.title,false);if(link)box.appendChild(link);});
+    if(entries.length>80){var n=document.createElement('div');n.className='dir-limit';n.textContent='Показано 80 из '+entries.length;box.appendChild(n);}
+    if(box.childNodes.length)root.appendChild(wrap);
+  }
+  function renderRuntimePages(){
+    var root=sv('live-runtime-links');if(!root)return;var open={};
+    each(all('#live-runtime-links details[open]'),function(d){open[d.getAttribute('data-runtime')]=true;});clear(root);
+    var s=data.status||{},wg=s.wg||{},interfaces=wg.interfaces_unknown===true?null:wg.interfaces;
+    var tunnels=[],lists=[],names={};
+    if(array(interfaces))each(interfaces,function(t){var path=tunnelPath(t);if(!path||names[path])return;
+      names[path]=true;tunnels.push({path:path,title:short(t.description||t.title||t.label||t.name)});});
+    var ldata=data.lists||{},raw=array(ldata.lists)?ldata.lists:null;names={};
+    if(raw)each(raw,function(l){var path=listPath(l);if(!path||names[path])return;
+      names[path]=true;lists.push({path:path,title:short(l.description||l.title||l.name)});});
+    runtimeGroup(root,'Туннели',tunnels,open['Туннели']);runtimeGroup(root,'Доменные списки',lists,open['Доменные списки']);
+  }
+  function visibleStaticPage(id){
+    var links=all('#directory-index [data-page-id]');for(var i=0;i<links.length;i++){
+      if(links[i].getAttribute('data-page-id')===id)return !links[i].hidden;
+    }
+    return false;
+  }
+  function renderComponentPages(s){var root=sv('live-component-links');if(!root)return;
+    var wasOpen=!!one('#live-component-links details[open]');clear(root);
+    // Frozen or absent parts never appear as active pages. No API = no verified part list.
+    var parts=s&&s.parts||{},known=array(parts.list)?parts.list:null,hidden=array(parts.hidden)?parts.hidden:[];
+    var hiddenPartPages={'d-agh':'agh','d-dnsex':'agh','d-aghfilters':'agh','d-aghservices':'agh',
         'd-awg':'awg','d-vless':'vless','d-dnsmasq':'dnsmasq','d-singbox':'singbox',
         'd-dnscap':'dnscap','d-doh':'doh'};
-      each(all('#directory-index [data-page-id]'),function(a){
-        var p=hiddenPartPages[a.getAttribute('data-page-id')];a.hidden=!!(p&&s.parts.hidden.indexOf(p)!==-1);
-      });
-    }
-    var parts=s&&s.parts||{},known=array(parts.list)?parts.list:[],hidden=array(parts.hidden)?parts.hidden:[],group=null,rows=0;
+    each(all('#directory-index [data-page-id]'),function(a){
+      var p=hiddenPartPages[a.getAttribute('data-page-id')];if(!p)return;
+      var present=false;if(known)each(known,function(part){if(part&&part.id===p&&part.kind!=='retired')present=true;});
+      a.hidden=!present||hidden.indexOf(p)!==-1;
+    });
+    var group=null,rows=0;known=known||[];
     each(known,function(part){if(!part||!part.id||hidden.indexOf(part.id)!==-1||part.kind==='retired')return;
       var path=dynamicComponentRoutes[part.id];if(!path)return;
       if(!group){group=document.createElement('details');group.className='dir-group';
@@ -1040,7 +1114,7 @@ SOFTWARE.</pre></details>
       var liveLink=closest(target,'[data-live-path]');if(liveLink){
         e.preventDefault();var livePath=liveLink.getAttribute('data-live-path');
         if(window.location.protocol==='file:')showNotice('Вложенная страница откроется при запуске Панели на роутере','warning',false);
-        else if(livePath&&livePath.charAt(0)==='/'){window.location.assign(livePath);}return;}
+        else if(livePath&&livePath.charAt(0)==='/'&&livePath.charAt(1)!=='/'&&!/[?#\\]/.test(livePath)){window.location.assign(livePath);}return;}
       var searchLink=closest(target,'[data-anchor]');if(searchLink){var sid=searchLink.getAttribute('data-anchor');closeOverlay();focusTo(sid,true);return;}
       if(closest(target,'[data-close-overlay]')){closeOverlay();return;}
       if(more&&!more.hidden&&!closest(target,'#more-sheet')&&!closest(target,'#more-toggle'))closeMore();
@@ -1064,7 +1138,7 @@ SOFTWARE.</pre></details>
     if(media&&media.addEventListener){media.addEventListener('change',function(){if(theme==='system')applyTheme();});}
     else if(media&&media.addListener){media.addListener(function(){if(theme==='system')applyTheme();});}
     event(document,'visibilitychange',function(){if(!document.hidden&&theme==='time')applyTheme();});
-    applyTheme();setUnread(null);buildSearch();revealSections();markNav('overview');
+    applyTheme();setUnread(null);renderComponentPages(null);renderRuntimePages();buildSearch();revealSections();markNav('overview');
     var hash=window.location.hash?window.location.hash.slice(1):'';if(hash&&sv(hash))frame(function(){focusTo(hash,false);});
     startRefresh();
   }
