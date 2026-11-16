@@ -3944,6 +3944,8 @@ CROND=0
 
 read -r UPTIME_SEC _ < /proc/uptime 2>/dev/null || UPTIME_SEC=""
 UPTIME_SEC=${UPTIME_SEC%%.*}
+# The router's memory (owner 16.11.2026: «ОЗУ 23 / 256 МБ» on a tunnel's page).
+MEM_TOTAL_KB=$(awk '$1 == "MemTotal:" {print $2; exit}' "${VWARD_PROC:-/proc}/meminfo" 2>/dev/null)
 
 read_first /tmp/vward-wan-guard.cron.rc GRC
 read_first /tmp/vward-wan-guard.cron.last GLAST
@@ -4103,6 +4105,7 @@ header_json
   --arg extras_all "$EXTRAS_ALL" --arg extras_on "$EXTRAS_ON" --arg core_run "$CORE_RUN" --argjson parts "$PARTS_JSON" \
   --arg agh_broken "$AGH_BROKEN" \
   --arg uptime "$UPTIME_SEC" \
+  --arg mem_total "${MEM_TOTAL_KB:-0}" \
   --arg grc "$GRC" \
   --arg glast "$GLAST" \
   --arg wgrc "$WGRC" \
@@ -4193,7 +4196,8 @@ header_json
     model:($ver.model // $ver.device // ""),
     version:($ver.title // $ver.release // ""),
     release:($ver.release // ""),
-    uptime_sec:($uptime|tonumber? // 0)
+    uptime_sec:($uptime|tonumber? // 0),
+    mem_total_kb:($mem_total|tonumber? // 0)
   },
 
   wan:{

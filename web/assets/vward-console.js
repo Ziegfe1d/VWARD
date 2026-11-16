@@ -1183,7 +1183,7 @@ function aghVerdict() {
 const headIcon = t => { const m = HEAD_ICONS.find(x => x[0].test(t || '')); return m ? m[1] : 'info'; };
 function panel(title, body, opts) {
   opts = opts || {};
-  const p = page(current), same = p && p.title === title, extra = opts.readonly || opts.right;
+  const p = page(current), same = p && p.title === title, extra = opts.readonly || opts.right || opts.left;
   // A block under its own title folds to that title (the page's main block and the address
   // check do not); the state on the right of the title stays visible.
   const foldable = !same && !opts.fixed && !!title, key = foldable ? foldKey(title) : '', folded = foldable && isFolded(key);
@@ -1192,7 +1192,7 @@ function panel(title, body, opts) {
   // A page's own block: its «?» goes next to the page title at the top (owner 2026-11-01:
   // the title and its «?» together, never apart); the explanation opens in the block.
   if (same && longDesc) PAGEQ = { k: dq, title: title, shown: true };
-  const head = same && !extra ? '' : '<div class="block-head' + (foldable ? ' foldable' : '') + '"' + (foldable ? ' data-fold="' + esc(key) + '"' : '') + '>' + (same ? '' : '<h2>' + ico(opts.icon || headIcon(title), 'head-ico') + '<span>' + qGlue(title, longDesc && !folded ? qBtn(dq, title) : '') + '</span></h2>') + (opts.beta ? '<span class="tag beta">Бета</span>' : '') + (opts.readonly ? '<span class="note">' + ico('lock') + 'Только чтение</span>' : '') + (opts.right || '') + toggle + '</div>';
+  const head = same && !extra ? '' : '<div class="block-head' + (foldable ? ' foldable' : '') + '"' + (foldable ? ' data-fold="' + esc(key) + '"' : '') + '>' + (same ? (opts.left ? '<h2 class="head-left"><span>' + esc(opts.left) + '</span></h2>' : '') : '<h2>' + ico(opts.icon || headIcon(title), 'head-ico') + '<span>' + qGlue(title, longDesc && !folded ? qBtn(dq, title) : '') + '</span></h2>') + (opts.beta ? '<span class="tag beta">Бета</span>' : '') + (opts.readonly ? '<span class="note">' + ico('lock') + 'Только чтение</span>' : '') + (opts.right || '') + toggle + '</div>';
   return '<section class="block' + (folded ? ' folded' : '') + '"' + (same ? ' aria-label="' + esc(title) + '"' : '') + '>' + head + (folded ? '' : (opts.desc && (!longDesc || same || qOpen(dq)) ? '<p class="block-desc">' + esc(opts.desc) + '</p>' : '') + (body ? '<div class="panel">' + body + '</div>' : '')) + '</section>';
 }
 /* A long explanation hides behind «?» next to its title and opens in place (owner 2026-10-17);
@@ -3844,24 +3844,42 @@ function tunnelPage(name) {
       'Сайты из списков идут напрямую. Агент проверяет туннель раз в 5 минут и включит его сам, когда туннель ответит.') + '</p>') : '') +
     (off ? panel('Туннель выключен', '<p class="panel-desc">Трафик через туннель не идёт' + (managed ? ': он назначен по умолчанию, списки VPN идут напрямую. Его выключили в настройках Keenetic или вне Панели. ' : '. ') + '«Включить» включит его' + (e || v ? ' вместе с программой модуля' : '') + ' и сохранит настройку.</p>' +
       '<div class="panel-actions">' + btn('tunnel-up', 'check', 'Включить', 'primary', ' data-name="' + esc(name) + '"' + (cfgOk() && !TUNBUSY[name] ? '' : ' disabled')) + '</div>') : '') +
+    // Owner 16.11.2026: «Основное» - only what a person looks for: the server's name (with its flag) at
+    // the top beside «В сети», its address, traffic, uptime; the link and Keenetic's state only when not
+    // well. Everything technical goes to the section «Подробнее» at the end (never a folding list).
     panel(tunLabel(name), kv([
-    ['Системное имя', name + (e ? ' · модуль AmneziaWG (VWARD)' : v ? ' · VLESS (VWARD)' : t.type ? ' · ' + (t.type === 'wireguard' && t.awg ? 'AmneziaWG' : TUN_TYPE[t.type] || t.type) : '')],
-    ['Канал связи', t.link === 'up' ? 'есть' : t.link === 'down' ? 'нет' : t.link || '—'], ['Состояние в Keenetic', lost ? 'нет настроек' : off ? 'выключен' : gOff ? 'выключен агентом VPN' : t.state === 'up' ? 'включён' : t.state || '—', off || gOff ? 'warn' : ''],
-    ['Сервер', t.endpoint || (e && e.endpoint) || (v && (v.server_name ? v.server_name + ' · ' + v.server : v.server)) || '—'], ['Адрес в туннеле', t.address || '—'], ['MTU', t.mtu != null ? String(t.mtu) : '—'],
-    e ? ['Последнее рукопожатие', e.off || off ? 'туннель выключен' : e.handshake != null ? agoText(e.handshake) : e.running ? 'не было' : 'программа остановлена', !off && !e.off && (e.handshake == null || e.handshake > 180) ? 'warn' : '']
-      : v ? null : ['Последнее рукопожатие', hsSec(t) != null ? agoText(hsSec(t)) : t.handshake != null ? 'не было' : '—', t.handshake != null && (hsSec(t) == null || hsSec(t) > 180) ? 'warn' : ''],
-    ['Трафик', rx != null || tx != null ? '↓ ' + fmtBytes(rx) + ' · ↑ ' + fmtBytes(tx) : '—'],
-    e || v ? ['Память программы', (e || v).rss_kb != null ? fmtKB((e || v).rss_kb) : (e || v).running ? '—' : 'программа остановлена'] : null,
+    t.link && t.link !== 'up' ? ['Канал связи', t.link === 'down' ? 'нет' : t.link, 'warn'] : null,
+    lost || off || gOff || (t.state && t.state !== 'up') ? ['Состояние в Keenetic', lost ? 'нет настроек' : off ? 'выключен' : gOff ? 'выключен агентом VPN' : t.state, 'warn'] : null,
+    ['Сервер', (v && v.server) || t.endpoint || (e && e.endpoint) || '—'],
+    rx != null || tx != null ? ['Трафик', '↓ ' + fmtBytes(rx) + ' · ↑ ' + fmtBytes(tx)] : null,
     ['Время работы', t.uptime != null ? fmtUptime(t.uptime) : '—'],
-    ['Качество за 30 минут', tqText(tq(name)), !tq(name) ? '' : tq(name).last_loss >= 100 ? 'crit' : tq(name).loss_pct >= 20 ? 'warn' : ''],
-    ['Туннель по умолчанию', managed ? 'Да' : 'Нет', managed ? 'info' : '']
+    // Owner 16.11.2026: the tunnel's own name, its address and what carries it (VWARD's module or Keenetic).
+    ['Системное имя', name], ['Адрес в туннеле', t.address || '—'],
+    ['Работает через', e ? 'VWARD · AmneziaWG' : v ? 'VWARD · VLESS' : 'Keenetic' + (t.type ? ' · ' + (t.type === 'wireguard' && t.awg ? 'AmneziaWG' : TUN_TYPE[t.type] || t.type) : '')]
   ]) + (awgLost().some(x => x.name === name) ? '' : t.type === 'wireguard' && t.handshake != null && hsSec(t) == null ? '<p class="field-warn">Сервер ни разу не ответил. Если это файл Amnezia Premium (AmneziaWG 3.x), загруженный прямо в Keenetic, - Keenetic выбросил часть его настроек. Удалите этот туннель и добавьте тот же файл через «Добавить туннель»: его поднимет модуль AmneziaWG.</p>' : '') +
     confirmBox('tunnel-down', 'Выключить ' + tunLabel(name) + '? Трафик через него остановится, списки и подсети этого туннеля будут недоступны, пока он выключен. Настройка сохранится.', 'Выключить', true) +
-    use + cfgNote(), { desc: managed ? 'Туннель по умолчанию: через него идут маршруты VWARD.' : 'Маршруты VWARD можно перевести на этот туннель, назначив его туннелем по умолчанию.',
+    use + cfgNote(), { desc: managed ? '' : 'Маршруты VWARD можно перевести на этот туннель, назначив его туннелем по умолчанию.',
+      left: v && v.server_name ? v.server_name : '',
       right: headPill(tunPill(t)[0], tunPill(t)[1]) + (managed || lost ? '' : sw('data-tun-onoff="' + esc(name) + '"', !off, off ? 'Включить туннель' : 'Выключить туннель', !cfgOk() || !!TUNBUSY[name])) }) +
     // Every block of the management panels: an engine's tunnel has three (firmware note,
     // configuration, deletion) and the deletion must not get lost.
-    awgLostPanel(name) + (lost ? '' : mp[0]) + tunnelProbePanel(name) + tunnelTrafficPanel(name) + mp.slice(1).join('');
+    awgLostPanel(name) + (lost ? '' : mp[0]) + tunnelProbePanel(name) + tunnelTrafficPanel(name) + mp.slice(1).join('') + tunnelMorePanel(name, t, e, v, managed);
+}
+// «Подробнее» of a tunnel (owner 16.11.2026): the technical facts, a section of its own at the end.
+function tunnelMorePanel(name, t, e, v, managed) {
+  const p = e || v, ram = p && p.rss_kb != null ? fmtKB(p.rss_kb) : p && p.running ? '—' : p ? 'программа остановлена' : '',
+    total = num((st().router || {}).mem_total_kb), q = tq(name);
+  return panel('Подробнее', kv([
+    // «23 / 256 МБ» (owner 16.11.2026): what the tunnel's program takes of the router's memory.
+    p ? ['ОЗУ', ram && p.rss_kb != null && total ? (/ МБ$/.test(ram) && / МБ$/.test(fmtKB(total)) ? ram.replace(/ МБ$/, '') : ram) + ' / ' + fmtKB(total) : ram] : null,
+    ['Качество за 30 минут', tqText(q), !q ? '' : q.last_loss >= 100 ? 'crit' : q.loss_pct >= 20 ? 'warn' : ''],
+    e ? ['Последнее рукопожатие', e.off ? 'туннель выключен' : e.handshake != null ? agoText(e.handshake) : e.running ? 'не было' : 'программа остановлена', !e.off && (e.handshake == null || e.handshake > 180) ? 'warn' : '']
+      : v ? null : ['Последнее рукопожатие', hsSec(t) != null ? agoText(hsSec(t)) : t.handshake != null ? 'не было' : '—', t.handshake != null && (hsSec(t) == null || hsSec(t) > 180) ? 'warn' : ''],
+    ['Канал связи', t.link === 'up' ? 'есть' : t.link === 'down' ? 'нет' : t.link || '—'],
+    ['Состояние в Keenetic', tunLost(t) ? 'нет настроек' : tunOff(t) ? 'выключен' : t.state === 'up' ? 'включён' : t.state || '—'],
+    ['MTU', t.mtu != null ? String(t.mtu) : '—'],
+    ['Туннель по умолчанию', managed ? 'Да' : 'Нет']
+  ]));
 }
 // Tunnels Keenetic took from AmneziaWG 3.x files without their header protection
 // (awg-data lost[]): the same files move them to the engine, matched by server key.
