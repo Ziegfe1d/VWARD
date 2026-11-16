@@ -3814,14 +3814,17 @@ SNAPSHOT_KEEP=7
 snapshot_name_ok() { printf '%s\n' "$1" | grep -Eq '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$'; }
 
 op_backup_create() {
-    # backup-create manual|auto|prerestore: auto only when the newest is a day old.
+    # backup-create manual|auto|prerestore|prereset|prelist: auto only when the newest is a day old;
+    # prelist (before a change of a domain list) only when there is no copy of the last 24 hours
+    # (owner 16.11.2026: not a copy for every list change - 4 in one minute on 13.11).
     case "$1" in manual|auto|prerestore|prereset|prelist) ;; *) die invalid_value 64 ;; esac
     (umask 077; mkdir -p "$SNAPSHOT_DIR") || die write_failed
-    if [ "$1" = auto ]; then
+    case "$1" in auto) bc_min=82800 ;; prelist) bc_min=${VWARD_PRELIST_MIN_AGE:-86400} ;; *) bc_min= ;; esac
+    if [ -n "$bc_min" ]; then
         bc_last=$(ls -1 "$SNAPSHOT_DIR" 2>/dev/null | grep -E '^vward-[0-9]{8}-[0-9]{6}' | sort | tail -n 1)
         if [ -n "$bc_last" ]; then
             bc_age=$(( $(date +%s) - $(date -r "$SNAPSHOT_DIR/$bc_last" +%s 2>/dev/null || echo 0) ))
-            [ "$bc_age" -ge 82800 ] || done_ok "backup-create auto" unchanged
+            [ "$bc_age" -ge "$bc_min" ] || done_ok "backup-create $1" unchanged
         fi
     fi
     bc_stage=$(mktemp -d /tmp/vward-backup.XXXXXX 2>/dev/null) || die temporary_file_unavailable

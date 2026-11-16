@@ -4507,7 +4507,7 @@ async function vlessSelect(name, n) {
 }
 // Snapshots of VWARD's settings: one a day automatically, or by the button.
 function backupPanel() {
-  const b = S.backups, list = (b && b.backups) || [], kinds = { manual: 'вручную', auto: 'автоматически', prerestore: 'перед восстановлением' };
+  const b = S.backups, list = (b && b.backups) || [], kinds = { manual: 'вручную', auto: 'автоматически', prerestore: 'перед восстановлением', prelist: 'перед изменением списков', prereset: 'перед сбросом' };
   const rows = list.map(x => '<li class="row"><div class="row-main"><b>' + esc(fmtTime(x.created)) + '</b><small>' + esc(kinds[x.kind] || x.kind) + ' · ' + esc(fmtBytes(x.size)) + '</small>' +
     '</div>' +
     '<span class="row-acts"><a class="icon-btn" href="/cgi-bin/api.cgi?action=backup-download&amp;name=' + encodeURIComponent(x.name) + '" download aria-label="Скачать" title="Скачать">' + ico('save') + '</a>' +

@@ -175,9 +175,11 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("an empty list is deleted")
     if "domain-list6" in cfg.read_text():
         fail("the empty list and its route go:\n" + cfg.read_text())
-    # Named by the second: two changes within one second leave one copy (the later state).
-    if not [p for p in (tmp / "snaps").iterdir() if p.name.endswith("-prelist.tar.gz")]:
-        fail("a copy of the settings before every change")
+    # A copy of the settings before a list change - one a day, not one per change (owner 16.11.2026: 4
+    # copies in one minute on 13.11); a later change within 24 hours makes none.
+    copies = [p for p in (tmp / "snaps").iterdir() if p.name.endswith("-prelist.tar.gz")]
+    if len(copies) != 1:
+        fail(f"one copy before the first list change of the day, none after it: {sorted(p.name for p in copies)}")
     API = (ROOT / "web/cgi-bin/api.cgi").read_text()
     if 'list) set -- "$OP" "$ACT" "$TARGET"; case "$ACT" in clear) REQUIRED=LIST_CLEAR ;; merge) set -- "$OP" "$ACT" "$TARGET" "$VALUE"; REQUIRED=LIST_MERGE ;; *) REQUIRED=LIST_DELETE ;; esac ;;' not in API:
         fail("the API asks for a confirmation")
