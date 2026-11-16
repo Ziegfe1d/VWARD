@@ -38,6 +38,12 @@ if "{ id: 'ai', title: 'DNS'," not in js or "const SHORT = { ai: 'DNS'," not in 
 # «Обновить серверы» a download (one icon for all three on a tunnel's page).
 if "[/^Проверить/, 'pulse']" not in js or "[/^Переустановить/, 'refresh']" not in js or "[/^Обновить серверы/, 'download']" not in js:
     fail("«Проверить», «Перезапустить» and «Обновить серверы» each with its own icon")
+# Owner 16.11.2026: «IP-категории» off in «Компоненты» while its page still showed switches and «через VPN»
+# - the page says the component is off, what is kept and what the mark means.
+ipc = js[js.index("  'd-ipcats'() {"):]
+ipc = ipc[:ipc.index("\n  },")]
+if "compOn('policy-sync')" not in ipc or 'IP-категории выключены в «Компонентах»' not in ipc:
+    fail("the IP categories page must say when the component is off")
 at = js.index('  const status = s => {', js.index('function aiPage()'))
 status = js[at:js.index('\n  };', at)+5]
 at = js.index('function aiSlider(')

@@ -2993,7 +2993,8 @@ const RENDER = {
     const ip = (S.route && S.route.ip) || {}, act = ip.active || [], idx = (ip.index || []).slice().sort((a, b) => (act.includes(b.name) - act.includes(a.name)) || a.name.localeCompare(b.name)), off = cfgRoute().ip_excluded || [], held = {};
     (ip.smartdns_held || []).forEach(h => { held[h.category] = held[h.category] || h.domain; });
     return cfgNote() + panel('IP-категории', idx.length ? '<dl class="kv">' + idx.map(x => ctrlRow(x.name, sw('data-ipcat="' + esc(x.name) + '"', !off.includes(x.name), 'IP-категория ' + x.name, !cfgOk()), fmtInt(x.cidr) + ' ' + plural(x.cidr, 'сеть', 'сети', 'сетей') + (act.includes(x.name) ? ' · сейчас через VPN' : held[x.name] ? ' · не включена: в ней адрес Smart DNS (' + esc(held[x.name]) + ')' : ''))).join('') + '</dl>' : empty('Каталог IP-категорий ещё не загружен'),
-      { desc: 'Подсети сервисов, которые идут через VPN.' });
+      { desc: compOn('policy-sync') ? 'Подсети сервисов, которые идут через VPN.' :
+        'IP-категории выключены в «Компонентах»: ночная сверка не идёт, выбор ниже сохраняется и применится после включения. Метка «сейчас через VPN» - маршруты, которые уже есть в Keenetic.' });
   },
   'd-querylog'() {
     const q = S.qlog, f = [['all', 'Все'], ['blocked', 'Заблокированные'], ['allowed', 'Разрешённые'], ['review', 'На проверке']];
