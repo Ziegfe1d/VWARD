@@ -1,0 +1,1311 @@
+<!doctype html>
+<html lang="ru">
+<head><style>/* Static value fallbacks for older browsers (IE11, early Safari). */
+
+:root{--bg:#080a15;--layer:#0e1021;--card:#121427;--card2:#16172d;--line:#2a2945;--line2:#343352;--ink:#f3f1ff;--muted:#9d9bb8;--soft:#71718d;--purple:#ae91ff;--purple2:#7867da;--cyan:#54d6e9;--orange:#ffb36f;--green:#65dbae;--red:#ff8197;--radius:21px}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:#f3f1ff;background:radial-gradient(ellipse at 26% 0%,#21183a 0,transparent 30%),radial-gradient(ellipse at 93% 5%,#0c2640 0,transparent 30%),#080a15;font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;overflow-x:hidden}button,input{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.38}button:focus-visible,a:focus-visible{outline:2px solid #54d6e9;outline-offset:3px}a{color:inherit;text-decoration:none}h1,h2,h3,p{margin:0}h1{font-size:clamp(26px,3vw,36px);line-height:1.13;letter-spacing:-.04em}h2{font-size:18px;letter-spacing:-.025em}h3{font-size:15px}small{font-size:12px}.layout{max-width:1530px;min-height:100vh;margin:auto;display:grid;grid-template-columns:245px minmax(0,1fr)}.sidebar{position:sticky;top:0;height:100vh;border-right:1px solid rgba(153,135,224,.11);padding:27px 18px;display:flex;flex-direction:column;background:rgba(10,9,25,.76);backdrop-filter:blur(18px);z-index:4}.brand{display:flex;align-items:center;gap:12px;padding:4px 11px 26px}.brandmark{width:38px;height:38px;border-radius:13px;display:grid;place-items:center;color:white;background:linear-gradient(145deg,#be9bff,#625bdf);box-shadow:0 7px 26px #6e5ac02e}.brandmark svg{width:24px;height:24px}.brand-title{font-size:17px;font-weight:850;letter-spacing:.055em}.brand-sub{font-size:11px;color:#9d9bb8}.side-label{font-size:10px;text-transform:uppercase;color:#71718d;padding:6px 12px 9px;letter-spacing:.16em;font-weight:800}.nav{display:grid;gap:4px}.nav a{display:flex;gap:12px;align-items:center;padding:12px;border-radius:12px;color:#a7a4be;font-weight:550;transition:background .15s,color .15s}.nav a svg{height:19px;width:19px;stroke-width:1.8;flex-shrink:0}.nav a:hover{background:#201d37;color:white}.nav a.active{background:#2a2345;color:#c9b6ff;box-shadow:inset 2px 0 0 #aa90ff}.nav .sep{height:1px;background:#28243c;margin:11px 5px}.side-bottom{margin-top:auto;padding:13px;border:1px solid #302949;border-radius:16px;background:linear-gradient(145deg,#1c1935,#111122)}.side-bottom .dot{margin-right:5px}.side-bottom strong{font-size:13px}.side-bottom p{color:#9d9bb8;font-size:11px;margin-top:6px}.main{min-width:0;padding:27px clamp(18px,3.1vw,45px) 86px}.header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:23px}.eyebrow{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#ae91ff;margin-bottom:7px}.subtitle{margin-top:9px;color:#a7a4bd}.head-actions{display:flex;gap:9px;align-items:center;padding-top:9px}.button{display:inline-flex;gap:9px;align-items:center;justify-content:center;min-height:42px;border-radius:12px;border:1px solid #38334f;color:#ded9ed;background:#19172e;padding:0 15px;font-weight:650;white-space:nowrap;transition:background .15s,transform .15s}.button:hover{background:#292442}.button:active{transform:scale(.98)}.button svg{width:17px;height:17px}.button.primary{background:#7f69d8;border-color:#8e7ae2;color:white}.button.primary:hover{background:#907ce5}.button.ghost{border-color:#302a48;background:#151426}.button.icon-only{padding:0;width:42px}.demo{display:flex;gap:12px;align-items:center;background:linear-gradient(90deg,rgba(149,117,230,.12),rgba(43,199,211,.04));border:1px solid #43385d;border-radius:13px;padding:11px 14px;margin-bottom:22px;color:#cabcec;font-size:12px}.demo svg{flex:none;width:17px;height:17px;color:#ae91ff}.demo strong{color:white}.section{scroll-margin-top:20px;margin-bottom:20px}.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:19px}.card{background:linear-gradient(158deg,#15152c 0%,#100f21 100%);border:1px solid #302a4c;box-shadow:0 12px 30px #04030c21, inset 0 1px #ffffff08;border-radius:21px;min-width:0}.kpi{padding:18px 19px 17px;min-height:166px;position:relative;overflow:hidden}.kpi::before{content:"";position:absolute;width:120px;height:120px;background:var(--accent);opacity:.055;filter:blur(30px);right:-35px;top:-45px}.kpi-top{display:flex;justify-content:space-between;align-items:center;gap:5px;color:#9d9bb8;font-weight:550}.kpi-icon{width:33px;height:33px;display:grid;place-items:center;background:color-mix(in srgb,var(--accent) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent) 22%,transparent);border-radius:10px;color:var(--accent)}.kpi-icon svg{width:17px;height:17px}.kpi-val{font-size:clamp(25px,2.5vw,36px);font-weight:730;letter-spacing:-.055em;margin:14px 0 7px;line-height:1.1;white-space:nowrap}.kpi-foot{font-size:12px;color:#9d9bb8}.pill-dot,.dot{width:8px;height:8px;border-radius:50%;background:#65dbae;display:inline-block;box-shadow:0 0 12px #65dbae55;vertical-align:middle}.dot.warn{background:#ffb36f;box-shadow:0 0 10px #ffb36f40}.dot.purple{background:#ae91ff;box-shadow:0 0 10px #ae91ff44}.dot.error{background:#ff8197}.card-inner{padding:23px 24px}.section-head{display:flex;align-items:start;justify-content:space-between;gap:16px;margin-bottom:18px}.section-head p{color:#9d9bb8;font-size:12px;margin-top:5px}.title-accent{color:#ae91ff}.tag{display:inline-flex;gap:6px;align-items:center;border:1px solid #3b3458;padding:5px 10px;border-radius:30px;background:#221d39;color:#c7b4f9;font-size:11px;white-space:nowrap}.subdued{color:#9d9bb8}.route-map{padding:0 18px 7px}.map-svg{display:block;width:100%;height:auto;max-height:400px;overflow:visible}.mobile-map-svg{display:none}.map-svg text{font-family:inherit;fill:#e7e3f6;font-size:15px;font-weight:600}.map-svg .hint{font-size:13px;fill:#9a94b7;font-weight:450}.map-svg .coltitle{font-size:14px;fill:#ad93f4;font-weight:720}.map-svg .node{filter:drop-shadow(0 0 9px currentColor)}.map-svg .flow{fill:none;stroke-width:3;stroke-linecap:round;opacity:.62}.map-svg .flow-top{stroke-width:1.5;fill:none;stroke-dasharray:5 17;animation:running 7s linear infinite;opacity:.8}.map-svg .halo{opacity:.11}.legend{display:flex;flex-wrap:wrap;gap:17px;color:#9d9bb8;font-size:12px;border-top:1px solid #292541;padding:14px 24px 18px}.legend-item{display:inline-flex;gap:8px;align-items:center}.swatch{width:10px;height:10px;border-radius:3px}.chart-row{display:grid;grid-template-columns:1.12fr .88fr;gap:16px;margin-top:18px}.mini-graph{min-height:265px}.time-chips{display:flex;gap:6px}.time-chips button{padding:8px 12px;border:1px solid #312d4a;color:#8783a2;background:#17142b;border-radius:10px;min-width:65px}.time-chips button.active{background:#2b2446;color:#d5c5ff;border-color:#8b73d2}.plot{width:100%;height:153px;display:block;margin-top:10px}.plot text{font:12px system-ui;fill:#817f9e}.foot-legend{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:8px;color:#9d9bb8;font-size:11px}.trend-number{font-size:26px;font-weight:750;letter-spacing:-.045em}.status-list{display:grid;gap:7px}.status-item{display:grid;grid-template-columns:27px 1fr auto;gap:10px;align-items:center;border:1px solid #29253e;border-radius:12px;background:#151326;padding:10px 11px}.status-icon{width:26px;height:26px;display:grid;place-items:center;color:#ae91ff;background:#29223e;border-radius:9px}.status-icon svg{width:16px;height:16px}.status-name{font-size:13px;font-weight:650}.status-sub{color:#9d9bb8;font-size:11px}.status-value{font-size:12px;color:#65dbae}.status-value.dim{color:#ffb36f}.service-card{overflow:hidden}.service-item{display:grid;grid-template-columns:minmax(155px,1fr) 1.7fr;gap:14px;padding:18px 23px;border-top:1px solid #2a253f;align-items:center}.service-item:first-of-type{border-top:0}.service-title{display:flex;align-items:center;gap:11px;font-size:14px;font-weight:730}.service-glyph{width:35px;height:35px;display:grid;place-items:center;flex:none;border-radius:12px;background:#29223f;color:#c9b5ff;font-size:16px;font-weight:800}.service-desc{margin-top:5px;color:#9d9bb8;font-size:11px;padding-left:46px}.service-right{min-width:0}.segment{display:flex;flex-wrap:wrap;gap:5px}.segment button{padding:8px 11px;border:1px solid #35304a;background:#19172b;color:#aaa5bc;min-height:36px;border-radius:9px;white-space:nowrap}.segment button:hover:not(:disabled){background:#312a4e;color:white}.segment button.chosen{background:#6a54a9;color:#fff;border-color:#ad93f5}.segment button.unavailable{border-style:dashed;opacity:.45}.apply-state{font-size:11px;color:#9d9bb8;margin-top:8px}.apply-state .waiting{color:#ffb36f}.apply-state .applied{color:#c0b1ee}.service-note{padding:12px 24px;border-top:1px solid #27233e;color:#8d8ba5;font-size:11px;background:#101022}.secondary-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}.dns-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.dns-stat{background:#1a172e;border:1px solid #302a45;border-radius:13px;padding:13px}.dns-stat .big{font-size:18px;font-weight:760;margin:7px 0 5px;white-space:nowrap}.dns-stat .label{color:#9d9bb8;font-size:11px}.step{display:flex;gap:9px;align-items:center;margin:15px 0;color:#b8b5cb;font-size:12px;flex-wrap:wrap}.step em{font-style:normal;color:#77738f}.events{display:grid;gap:0}.event{display:grid;grid-template-columns:10px 1fr auto;gap:11px;align-items:start;padding:12px 0;border-bottom:1px solid #29253e}.event:last-child{border:0}.event-title{font-size:12.5px;font-weight:630}.event-desc{font-size:11px;color:#9d9bb8;margin-top:3px}.event time{font-size:11px;color:#8d89a7;white-space:nowrap}.event .dot{margin-top:6px}.secondary-text{color:#9d9bb8;font-size:12px}.footer{padding-top:20px;margin-top:10px;text-align:center;font-size:11px;color:#716d8d}.toast-layer{position:fixed;right:22px;top:21px;z-index:30;display:grid;gap:8px;max-width:min(90vw,370px)}.toast{background:#28203f;border:1px solid #7362a1;color:white;box-shadow:0 16px 45px #0008;border-radius:12px;padding:13px 16px;font-size:13px;animation:toastIn .2s ease}.modal-shade{display:none;position:fixed;inset:0;background:#03030bbd;z-index:20;align-items:center;justify-content:center;padding:18px;backdrop-filter:blur(5px)}.modal-shade.visible{display:flex}.modal{width:min(100%,430px);padding:24px;background:#1b1932;border:1px solid #6e5c9e;border-radius:22px;box-shadow:0 35px 85px #000a}.modal h2{font-size:21px}.modal p{font-size:13px;color:#b6afcf;line-height:1.7;margin:13px 0 19px}.modal .modal-actions{display:flex;justify-content:flex-end;gap:9px}.bottom-nav{display:none}.inspector{padding:14px 23px;background:linear-gradient(90deg,#1c1730,#141228);border-top:1px solid #332b4a;display:flex;gap:9px;align-items:center;font-size:11px;color:#aaa0ca}.inspector svg{width:15px;flex:none;color:#ae91ff}
+@keyframes running{to{stroke-dashoffset:-180}}@keyframes toastIn{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0);opacity:1}}
+@media(max-width:1180px){.layout{grid-template-columns:215px minmax(0,1fr)}.main{padding:25px 22px 90px}.sidebar{padding:23px 12px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi{min-height:145px}.kpi-val{font-size:32px}}
+@media(max-width:850px){.layout{display:block}.sidebar{display:none}.main{padding:23px 16px 105px;max-width:720px;margin:auto}.chart-row,.secondary-row{grid-template-columns:1fr}.kpis{gap:11px}.kpi{min-height:140px;padding:15px}.bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:10;display:flex;justify-content:space-around;gap:2px;background:rgba(19,16,36,.94);border-top:1px solid #3c325a;padding:8px 7px calc(9px + env(safe-area-inset-bottom));backdrop-filter:blur(18px);box-shadow:0 -13px 38px #04030c50}.bottom-nav a{display:grid;place-items:center;gap:5px;min-width:61px;min-height:51px;color:#928da9;font-size:10px;padding:6px;border-radius:10px}.bottom-nav a.active{color:#c3a6ff;background:#2d2448}.bottom-nav svg{width:20px;height:20px}.section{scroll-margin-top:17px}.card-inner{padding:19px}.service-item{grid-template-columns:1fr;gap:12px;padding:16px 18px}.service-desc{padding-left:46px}.service-note{padding:11px 18px}.header{align-items:center}.head-actions .text-btn{display:none}}
+@media(max-width:460px){.main{padding:21px 12px 105px}.header{margin-bottom:17px}.header h1{font-size:27px}.subtitle{font-size:12px;line-height:1.45}.head-actions{padding:0}.eyebrow{font-size:10px}.kpi{min-height:142px;padding:15px 13px}.kpi-top{font-size:11px}.kpi-icon{height:27px;width:27px}.kpi-icon svg{height:15px;width:15px}.kpi-val{font-size:28px}.kpi-foot{font-size:10px;line-height:1.4}.kpis{gap:9px}.card{border-radius:17px}.card-inner{padding:17px 15px}.section-head{gap:7px}.section-head h2{font-size:17px}.route-map{padding:0 4px 6px}.map-svg{display:none}.mobile-map-svg{display:block;width:100%;height:auto;max-height:none;margin:-3px 0 0}.legend{padding:12px 14px;gap:10px;font-size:10px}.dns-grid{gap:5px}.dns-stat{padding:9px 7px;border-radius:10px}.dns-stat .big{font-size:16px}.dns-stat .label{font-size:10px}.event{gap:7px;grid-template-columns:9px 1fr auto}.event time{font-size:10px}.service-item{padding:15px}.segment button{padding:8px 10px;font-size:12px}.tag{font-size:10px;padding:5px 8px}.demo{align-items:flex-start}.time-chips button{min-width:65px;padding:7px 8px;font-size:11px;white-space:nowrap}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+
+/* VWARD v2 — only the navigation/scaffold, patterned on the original VWARD tabbar. */
+.layout{display:block;max-width:1460px;margin:auto;min-height:100vh}
+.main{width:100%;max-width:1390px;margin:auto;padding:28px clamp(14px,3vw,38px) 132px}
+.section{scroll-margin-top:22px}
+#network,#vpn,#components,#system,#settings{scroll-margin-top:22px}
+.tabbar{--tab-h:62px;position:fixed;left:50%;bottom:calc(10px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:20;display:grid;grid-template-columns:repeat(10,minmax(0,1fr));column-gap:2px;width:calc(100% - 20px);max-width:1080px;height:62px;padding:6px;background:rgba(23,21,43,.97);border:1px solid #403955;border-radius:28px;box-shadow:0 8px 24px #0008;backdrop-filter:blur(18px)}
+.tabbar .tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:0;padding:0 2px;border:0;border-radius:22px;background:transparent;color:#a19eb8;font-size:11.5px;font-weight:550;cursor:pointer;text-decoration:none;transition:background .16s,color .16s}
+.tabbar .tab>span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tabbar .tab.is-active,.tabbar .tab[aria-current=page]{color:#cbb9ff;background:#302748}
+.tabbar .tab:hover{color:white}
+.tabbar .tab-icon{display:block;flex:none;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tabbar .tab[aria-current=page] .tab-icon{stroke-width:2.1}
+.tabbar .tab-mobile{display:none}
+.more-sheet{display:none}
+body::after{content:"";position:fixed;bottom:0;left:0;right:0;z-index:19;height:calc(11px + env(safe-area-inset-bottom,0px) + 31px);background:#080a15;pointer-events:none}
+.settings-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.setting-tile{display:flex;flex-direction:column;gap:5px;padding:14px 15px;border:1px solid #302a45;border-radius:13px;background:#1a172e}
+.setting-tile span{font-size:11px;color:#9d9bb8}
+.setting-tile strong{font-size:14px;font-weight:650}
+@media(max-width:1180px){.main{padding:25px 22px 127px}}
+@media(max-width:899px){
+ .main{max-width:760px;padding:23px 16px 125px}
+ .tabbar{left:10px;right:10px;transform:none;width:auto;grid-template-columns:repeat(5,minmax(0,1fr))}
+ .tabbar .tab-mobile{display:flex}.tabbar .tab-desktop{display:none}
+ .tabbar .tab{font-size:11px}
+ .more-sheet:not([hidden]){position:fixed;display:block;bottom:calc(83px + env(safe-area-inset-bottom,0px));left:10px;right:10px;z-index:21;max-width:520px;margin:auto;padding:15px;background:#19162e;border:1px solid #49405f;border-radius:22px;box-shadow:0 18px 45px #000a}
+ .more-title{font-weight:700;font-size:13px;padding:2px 5px 12px;color:#d7d1ed}
+ .more-links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+ .more-links a{display:flex;align-items:center;gap:10px;padding:12px;border-radius:11px;color:#c5c0da;font-size:13px;min-width:0}
+ .more-links a:hover,.more-links a:focus-visible{background:#2c2547}
+ .more-links svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+ .chart-row,.secondary-row{grid-template-columns:1fr}
+ .settings-grid{grid-template-columns:1fr}
+}
+@media(max-width:460px){.main{padding:21px 12px 125px}.tabbar{left:6px;right:6px;padding:5px;column-gap:0}.tabbar .tab{font-size:10.5px;letter-spacing:-.15px}}
+@media(max-width:339px){.tabbar{left:4px;right:4px;padding:4px}.tabbar .tab{font-size:9.5px;letter-spacing:-.25px}}
+@media(prefers-reduced-motion:reduce){.tabbar .tab{transition:none}}
+
+/* VWARD: one continuous page, no mock metrics. */
+html{scroll-behavior:smooth;scroll-padding-top:18px}
+#overview{scroll-margin-top:0}
+.section, article[id], .components-section{scroll-margin-top:18px}
+.main{padding-bottom:calc(116px + env(safe-area-inset-bottom,0px));}
+.components-section{display:block}
+.components-section>.card{width:100%}
+.route-distribution{padding:14px 24px 22px;border-top:1px solid #29243f;color:#9d9bb8;min-height:56px}
+.route-dist-bar{height:10px;border-radius:6px;overflow:hidden;display:flex;background:#29243f;margin:4px 0 12px}
+.route-dist-bar span{display:block;height:100%;min-width:0}
+.route-dist-legend{display:flex;gap:10px 17px;flex-wrap:wrap;font-size:12px}
+.route-dist-legend>span{display:inline-flex;gap:7px;align-items:center}
+.route-dist-legend i{width:8px;height:8px;flex:none;border-radius:50%}
+.service-list{padding:4px 18px 18px;min-height:64px;color:#9d9bb8}
+.service-list .service-item{border-top:1px solid #312b49;padding:15px 4px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.service-list .service-item:first-child{border-top:0}
+.service-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:13px;margin:4px 0;color:#9d9bb8}
+.service-row strong{font-weight:650;color:#f3f1ff;text-align:right;overflow-wrap:anywhere}
+.service-row strong.pending{color:#ffb36f}
+.service-list .service-title{font-size:15px;overflow-wrap:anywhere}
+.tunnel-list{display:grid;gap:0;color:#9d9bb8;min-height:42px}
+.tunnel-item{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:11px 0;border-top:1px solid #312b49}
+.tunnel-item:first-child{border-top:0}
+.tunnel-item strong{color:#f3f1ff;font-size:14px;min-width:0;overflow-wrap:anywhere}
+.tunnel-item .status{flex:none;font-size:13px}
+.simple-status{padding:17px 19px;margin-top:15px;border-radius:13px;border:1px solid #332d4d;background:#18162b;color:var(--text);font-weight:650}
+#events .events{min-height:28px}
+.tabbar .tab.is-active{color:#cbb9ff;background:#302748}
+#more-toggle.is-active{color:#cbb9ff;background:#302748}
+.more-links a.is-active{color:#d3bfff;background:#302748}
+@media(max-width:850px){.components-section>.card{width:100%}}
+@media(max-width:600px){.service-list .service-item{display:block}.service-right{margin-top:8px}.route-distribution{padding:14px 18px 18px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+/* v4 — compact, quiet interface with one scroll path and no static data. */
+:root{--radius:18px}
+.main{max-width:1200px;padding-top:27px}
+.header{gap:10px;align-items:center;margin-bottom:21px}
+.header h1{font-size:clamp(25px,2.7vw,32px)}
+.subtitle{margin-top:7px}
+.button{min-height:40px}
+.button.refreshing svg{animation:turn 1s linear infinite}
+@keyframes turn{to{transform:rotate(360deg)}}
+.card{box-shadow:0 8px 26px #03020b24,inset 0 1px #ffffff08}
+.kpis{gap:12px;margin-bottom:14px}
+.kpi{min-height:142px;padding:16px 17px}
+.kpi-val{font-size:clamp(24px,2.6vw,31px);margin:12px 0 7px;overflow:hidden;text-overflow:ellipsis}
+.section{margin-bottom:14px;scroll-margin-top:22px}
+.section-head{align-items:center;margin-bottom:15px}
+.section-head h2{font-size:17px}
+.section-explainer{font-size:12px;color:#9d9bb8;margin:0}
+#routes .section-head{display:block}
+#routes .section-explainer{margin-top:6px}
+.route-map{padding:0 20px 17px}
+.live-route{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 14px;margin:7px 0;border:1px solid #322c4b;border-radius:11px;background:rgba(33,30,56,.58)}
+.live-route strong{font-size:13px;font-weight:650;min-width:0;overflow-wrap:anywhere}
+.live-route span{font-size:12px;color:#54d6e9;flex-shrink:0;white-space:nowrap}
+.route-dist-bar{height:8px}
+.route-distribution{padding:10px 23px 18px;min-height:30px}
+.service-list{padding:0 19px 12px}
+.service-list .service-item{padding:14px 2px}
+.service-row{font-size:12px}
+.tunnel-item .status{color:#9d9bb8}
+.tunnel-item .status.good{color:#65dbae}
+.tunnel-item .status.bad{color:#ffb36f}
+#component-list{color:#9d9bb8}
+#component-list .status-item{grid-template-columns:minmax(0,1fr) auto;gap:12px;background:rgba(31,28,51,.6)}
+#component-list .status-name{font-size:13px;color:#f3f1ff;font-weight:600;overflow-wrap:anywhere}
+#component-list .status-value{color:#9d9bb8;text-align:right;white-space:nowrap;font-size:12px}
+#component-list .status-value.state-ok{color:#65dbae}
+#component-list .status-value.state-warn{color:#ffb36f}
+#component-list .status-value.state-off{color:#9d9bb8}
+#component-list .status-value.state-neutral{color:#ae91ff}
+.compact-section .card-inner{padding:18px 22px}
+.compact-section .simple-status{padding:13px 15px;margin-top:8px;font-size:14px;color:#f3f1ff}
+.quiet-tag{font-size:10px;color:#9d9bb8;border:1px solid #2a2945;padding:5px 8px;border-radius:20px;white-space:nowrap}
+.event{grid-template-columns:10px 1fr;padding:11px 0}
+.event time{display:block;font-size:11px;color:#9d9bb8;margin-top:3px}
+.event .dot.neutral{background:#71718d;box-shadow:none}
+.remaining{text-align:center;padding:11px;font-size:11px;color:#9d9bb8}
+.settings-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.tabbar .tab.is-active{color:#d5c2ff;background:#33284e}
+:focus-visible{outline:2px solid #54d6e9;outline-offset:2px}
+@media(max-width:899px){.main{max-width:760px;padding:24px 16px calc(120px + env(safe-area-inset-bottom,0px))}.settings-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.button-label{display:none}.head-actions .text-btn{display:inline-flex;width:41px;padding:0}.header{align-items:center}}
+@media(max-width:500px){.main{padding:20px 12px calc(115px + env(safe-area-inset-bottom,0px))}.header h1{font-size:26px}.header{margin-bottom:16px}.kpi{padding:14px 13px;min-height:128px}.kpi-val{font-size:26px}.section-head h2{font-size:16px}.section-explainer{font-size:11px}.route-map{padding:0 12px 12px}.live-route{padding:10px}.settings-grid{grid-template-columns:1fr}.section{margin-bottom:12px}.compact-section .card-inner{padding:16px}.service-list .service-item{padding:13px 0}}
+@media(max-width:339px){.kpi-val{font-size:23px}.kpi-top{font-size:10px}.tabbar .tab{font-size:9.5px}}
+@media(prefers-reduced-motion:reduce){.button.refreshing svg{animation:none}}
+
+
+#live-routes {padding:12px 18px 20px;display:grid;gap:8px;min-height:160px;align-content:start;color:#9d9bb8}
+.live-route {display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:13px 15px;border:1px solid #353153;background:#19182e;border-radius:13px}
+.live-route strong{color:#f3f1ff;font-weight:600;overflow-wrap:anywhere}.live-route span{white-space:nowrap;color:#54d6e9}
+.live-error{color:#ffb36f!important}.event-empty{padding:16px 0;color:#9d9bb8}
+.service-item button:disabled{opacity:.72}.live-no-data{color:#9d9bb8;font-size:14px;min-height:80px;display:flex;align-items:center}
+
+/* v6: compact toolbar replaces the oversized heading, all four buttons are peers. */
+.visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;clip-path:inset(50%)!important;white-space:nowrap!important;border:0!important}
+.header.compact-header{position:relative;display:flex;flex-wrap:nowrap;justify-content:flex-end;align-items:center;min-height:42px;margin:0 0 13px;gap:0}
+.header.compact-header>.head-actions{display:flex;flex:0 0 auto;order:0;width:auto;align-items:center;justify-content:flex-end;gap:7px;padding:0}
+.compact-header #refresh:disabled{opacity:.65;cursor:default;transform:none}
+.compact-header #refresh.refreshing .action-svg{animation:turn 1s linear infinite}
+.compact-header .load-track{position:absolute;top:auto;bottom:-7px;right:0;left:auto;width:170px;max-width:75%;height:2px}
+@media(max-width:460px){.header.compact-header{min-height:38px;margin-bottom:13px;flex-wrap:nowrap;align-items:center}.header.compact-header>.head-actions{width:auto;flex:0 0 auto;order:0;justify-content:flex-end;gap:6px}}
+@media(prefers-reduced-motion:reduce){.compact-header #refresh.refreshing .action-svg{animation:none}}
+
+/* v8 — catalogue, About, license, change history, instructions */
+.v8-section .section-head{margin-bottom:17px}.v8-section .section-sub{font-size:13px;line-height:1.5;color:var(--muted);margin:6px 0 12px;max-width:75ch}
+.system-jump-links{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.system-jump-links a,.about-links a{padding:9px 12px;border:1px solid var(--line);border-radius:11px;color:var(--ink);text-decoration:none;font-size:13px;background:var(--card2)}
+.system-jump-links a:hover,.about-links a:hover,.dir-row:hover{background:rgba(148,120,244,.12);border-color:var(--purple)}
+.dir-index{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.dir-group{min-width:0;overflow:hidden;border:1px solid var(--line);border-radius:13px;background:var(--card2)}
+.dir-group summary{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 15px;cursor:pointer;color:var(--ink);font-size:14px;font-weight:650;list-style:none}
+.dir-group summary::-webkit-details-marker{display:none}.dir-group summary::after{content:'⌄';color:var(--muted)}.dir-group[open] summary::after{content:'⌃'}
+.dir-count{font-size:11px;color:var(--muted);font-weight:400;white-space:nowrap}.dir-links{padding:0 10px 11px}
+.dir-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 8px;border-radius:8px;text-decoration:none;color:var(--ink);border:1px solid transparent;font-size:13px;line-height:1.35}
+.dir-row[hidden]{display:none!important}.dir-row span{min-width:0;overflow-wrap:anywhere}.dir-row small{white-space:nowrap;color:var(--muted);font-size:10px;text-align:right}
+.dir-row.dir-root{color:var(--purple);font-weight:650}.dir-components{margin-top:8px}
+.about-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:16px}.about-details>div{padding:13px;background:var(--card2);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;gap:7px;min-width:0}.about-details span{font-size:12px;color:var(--muted)}.about-details strong{font-size:16px;color:var(--ink);overflow-wrap:anywhere}
+.about-links{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 18px}.license-details{border:1px solid var(--line);border-radius:12px;padding:12px 14px}.license-details summary{cursor:pointer;font-size:13px;color:var(--ink)}.license-details pre{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font-size:11px;line-height:1.55;color:var(--muted);max-height:400px;overflow:auto}
+.about-subtitle{font-size:15px;margin:25px 0 6px;color:var(--ink)}.thirdparty-table{border:1px solid var(--line);border-radius:12px;overflow:hidden}.thirdparty-heading,.thirdparty-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:8px;padding:12px;border-bottom:1px solid var(--line);font-size:12px}.thirdparty-heading{color:var(--muted);font-weight:650;background:var(--card2)}.thirdparty-row:last-child{border-bottom:0}.thirdparty-row>span{min-width:0;overflow-wrap:anywhere}
+.release-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.release-item{border:1px solid var(--line);background:var(--card2);border-radius:12px;padding:13px;min-width:0}.release-item strong{color:var(--ink)}.release-item span{display:block;color:var(--muted);font-size:11px;margin-top:5px}.release-item p{font-size:12px;margin:10px 0 0;color:var(--muted);line-height:1.5}
+.help-links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.help-links a{display:flex;flex-direction:column;gap:5px;padding:14px;background:var(--card2);border:1px solid var(--line);border-radius:12px;color:var(--ink);text-decoration:none}.help-links a:hover{border-color:var(--purple)}.help-links small{color:var(--muted);font-size:12px}
+.more-sheet:not([hidden]){max-height:calc(100vh - 115px);max-height:calc(100dvh - 115px);overflow-y:auto;overscroll-behavior:contain}
+@media(max-width:700px){.dir-index,.release-list,.help-links{grid-template-columns:1fr}.about-details{grid-template-columns:repeat(2,minmax(0,1fr))}.dir-row small{white-space:normal;max-width:100px}}
+@media(max-width:350px){.about-details{grid-template-columns:1fr}.thirdparty-heading,.thirdparty-row{grid-template-columns:2fr 1fr 1fr;font-size:11px;padding:9px}.dir-row{font-size:12px}}
+
+/* v10: native read-only details, same overlay and accessibility as search/notifications. */
+#detail-panel .detail-heading{margin-bottom:13px}
+#detail-panel .detail-eyebrow{display:block;color:var(--purple);font-size:11px;font-weight:750;letter-spacing:.075em;text-transform:uppercase;margin-bottom:6px}
+#detail-panel h2{font-size:20px;line-height:1.25;overflow-wrap:anywhere;font-weight:700;margin:0}
+#detail-title:focus{outline:none}
+.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:13px 0}
+.detail-fact{display:flex;flex-direction:column;gap:6px;padding:12px 13px;border:1px solid var(--line);border-radius:12px;background:var(--card2);min-width:0}
+.detail-fact dt{font-size:11px;line-height:1.35;color:var(--muted);margin:0}
+.detail-fact dd{font-size:14px;line-height:1.35;font-weight:650;color:var(--ink);margin:0;overflow-wrap:anywhere}
+.detail-explain{margin:12px 0;color:var(--muted);font-size:12px;line-height:1.55}
+.detail-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.detail-action{display:inline-flex;align-items:center;justify-content:center;text-align:center;padding:10px 14px;border-radius:11px;background:var(--card2);border:1px solid var(--line2);color:var(--ink);font-size:13px;font-weight:650;min-height:42px}
+.detail-action:focus-visible,.detail-open:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.detail-open{cursor:pointer;font:inherit}
+@media(max-width:360px){.detail-grid{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){.detail-action{transition:none!important}}
+</style>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport"/>
+<meta content="dark" name="color-scheme"/>
+<title>Панель VWARD</title>
+<style>
+:root{--bg:#080a15;--layer:#0e1021;--card:#121427;--card2:#16172d;--line:#2a2945;--line2:#343352;--ink:#f3f1ff;--muted:#9d9bb8;--soft:#71718d;--purple:#ae91ff;--purple2:#7867da;--cyan:#54d6e9;--orange:#ffb36f;--green:#65dbae;--red:#ff8197;--radius:21px}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--ink);background:radial-gradient(ellipse at 26% 0%,#21183a 0,transparent 30%),radial-gradient(ellipse at 93% 5%,#0c2640 0,transparent 30%),var(--bg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;overflow-x:hidden}button,input{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.38}button:focus-visible,a:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}a{color:inherit;text-decoration:none}h1,h2,h3,p{margin:0}h1{font-size:clamp(26px,3vw,36px);line-height:1.13;letter-spacing:-.04em}h2{font-size:18px;letter-spacing:-.025em}h3{font-size:15px}small{font-size:12px}.layout{max-width:1530px;min-height:100vh;margin:auto;display:grid;grid-template-columns:245px minmax(0,1fr)}.sidebar{position:sticky;top:0;height:100vh;border-right:1px solid rgba(153,135,224,.11);padding:27px 18px;display:flex;flex-direction:column;background:rgba(10,9,25,.76);backdrop-filter:blur(18px);z-index:4}.brand{display:flex;align-items:center;gap:12px;padding:4px 11px 26px}.brandmark{width:38px;height:38px;border-radius:13px;display:grid;place-items:center;color:white;background:linear-gradient(145deg,#be9bff,#625bdf);box-shadow:0 7px 26px #6e5ac02e}.brandmark svg{width:24px;height:24px}.brand-title{font-size:17px;font-weight:850;letter-spacing:.055em}.brand-sub{font-size:11px;color:var(--muted)}.side-label{font-size:10px;text-transform:uppercase;color:var(--soft);padding:6px 12px 9px;letter-spacing:.16em;font-weight:800}.nav{display:grid;gap:4px}.nav a{display:flex;gap:12px;align-items:center;padding:12px;border-radius:12px;color:#a7a4be;font-weight:550;transition:background .15s,color .15s}.nav a svg{height:19px;width:19px;stroke-width:1.8;flex-shrink:0}.nav a:hover{background:#201d37;color:white}.nav a.active{background:#2a2345;color:#c9b6ff;box-shadow:inset 2px 0 0 #aa90ff}.nav .sep{height:1px;background:#28243c;margin:11px 5px}.side-bottom{margin-top:auto;padding:13px;border:1px solid #302949;border-radius:16px;background:linear-gradient(145deg,#1c1935,#111122)}.side-bottom .dot{margin-right:5px}.side-bottom strong{font-size:13px}.side-bottom p{color:var(--muted);font-size:11px;margin-top:6px}.main{min-width:0;padding:27px clamp(18px,3.1vw,45px) 86px}.header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:23px}.eyebrow{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--purple);margin-bottom:7px}.subtitle{margin-top:9px;color:#a7a4bd}.head-actions{display:flex;gap:9px;align-items:center;padding-top:9px}.button{display:inline-flex;gap:9px;align-items:center;justify-content:center;min-height:42px;border-radius:12px;border:1px solid #38334f;color:#ded9ed;background:#19172e;padding:0 15px;font-weight:650;white-space:nowrap;transition:background .15s,transform .15s}.button:hover{background:#292442}.button:active{transform:scale(.98)}.button svg{width:17px;height:17px}.button.primary{background:#7f69d8;border-color:#8e7ae2;color:white}.button.primary:hover{background:#907ce5}.button.ghost{border-color:#302a48;background:#151426}.button.icon-only{padding:0;width:42px}.demo{display:flex;gap:12px;align-items:center;background:linear-gradient(90deg,rgba(149,117,230,.12),rgba(43,199,211,.04));border:1px solid #43385d;border-radius:13px;padding:11px 14px;margin-bottom:22px;color:#cabcec;font-size:12px}.demo svg{flex:none;width:17px;height:17px;color:var(--purple)}.demo strong{color:white}.section{scroll-margin-top:20px;margin-bottom:20px}.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:19px}.card{background:linear-gradient(158deg,#15152c 0%,#100f21 100%);border:1px solid #302a4c;box-shadow:0 12px 30px #04030c21, inset 0 1px #ffffff08;border-radius:var(--radius);min-width:0}.kpi{padding:18px 19px 17px;min-height:166px;position:relative;overflow:hidden}.kpi::before{content:"";position:absolute;width:120px;height:120px;background:var(--accent);opacity:.055;filter:blur(30px);right:-35px;top:-45px}.kpi-top{display:flex;justify-content:space-between;align-items:center;gap:5px;color:var(--muted);font-weight:550}.kpi-icon{width:33px;height:33px;display:grid;place-items:center;background:color-mix(in srgb,var(--accent) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent) 22%,transparent);border-radius:10px;color:var(--accent)}.kpi-icon svg{width:17px;height:17px}.kpi-val{font-size:clamp(25px,2.5vw,36px);font-weight:730;letter-spacing:-.055em;margin:14px 0 7px;line-height:1.1;white-space:nowrap}.kpi-foot{font-size:12px;color:var(--muted)}.pill-dot,.dot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;box-shadow:0 0 12px #65dbae55;vertical-align:middle}.dot.warn{background:var(--orange);box-shadow:0 0 10px #ffb36f40}.dot.purple{background:var(--purple);box-shadow:0 0 10px #ae91ff44}.dot.error{background:var(--red)}.card-inner{padding:23px 24px}.section-head{display:flex;align-items:start;justify-content:space-between;gap:16px;margin-bottom:18px}.section-head p{color:var(--muted);font-size:12px;margin-top:5px}.title-accent{color:var(--purple)}.tag{display:inline-flex;gap:6px;align-items:center;border:1px solid #3b3458;padding:5px 10px;border-radius:30px;background:#221d39;color:#c7b4f9;font-size:11px;white-space:nowrap}.subdued{color:var(--muted)}.route-map{padding:0 18px 7px}.map-svg{display:block;width:100%;height:auto;max-height:400px;overflow:visible}.mobile-map-svg{display:none}.map-svg text{font-family:inherit;fill:#e7e3f6;font-size:15px;font-weight:600}.map-svg .hint{font-size:13px;fill:#9a94b7;font-weight:450}.map-svg .coltitle{font-size:14px;fill:#ad93f4;font-weight:720}.map-svg .node{filter:drop-shadow(0 0 9px currentColor)}.map-svg .flow{fill:none;stroke-width:3;stroke-linecap:round;opacity:.62}.map-svg .flow-top{stroke-width:1.5;fill:none;stroke-dasharray:5 17;animation:running 7s linear infinite;opacity:.8}.map-svg .halo{opacity:.11}.legend{display:flex;flex-wrap:wrap;gap:17px;color:var(--muted);font-size:12px;border-top:1px solid #292541;padding:14px 24px 18px}.legend-item{display:inline-flex;gap:8px;align-items:center}.swatch{width:10px;height:10px;border-radius:3px}.chart-row{display:grid;grid-template-columns:1.12fr .88fr;gap:16px;margin-top:18px}.mini-graph{min-height:265px}.time-chips{display:flex;gap:6px}.time-chips button{padding:8px 12px;border:1px solid #312d4a;color:#8783a2;background:#17142b;border-radius:10px;min-width:65px}.time-chips button.active{background:#2b2446;color:#d5c5ff;border-color:#8b73d2}.plot{width:100%;height:153px;display:block;margin-top:10px}.plot text{font:12px system-ui;fill:#817f9e}.foot-legend{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:8px;color:var(--muted);font-size:11px}.trend-number{font-size:26px;font-weight:750;letter-spacing:-.045em}.status-list{display:grid;gap:7px}.status-item{display:grid;grid-template-columns:27px 1fr auto;gap:10px;align-items:center;border:1px solid #29253e;border-radius:12px;background:#151326;padding:10px 11px}.status-icon{width:26px;height:26px;display:grid;place-items:center;color:var(--purple);background:#29223e;border-radius:9px}.status-icon svg{width:16px;height:16px}.status-name{font-size:13px;font-weight:650}.status-sub{color:var(--muted);font-size:11px}.status-value{font-size:12px;color:var(--green)}.status-value.dim{color:var(--orange)}.service-card{overflow:hidden}.service-item{display:grid;grid-template-columns:minmax(155px,1fr) 1.7fr;gap:14px;padding:18px 23px;border-top:1px solid #2a253f;align-items:center}.service-item:first-of-type{border-top:0}.service-title{display:flex;align-items:center;gap:11px;font-size:14px;font-weight:730}.service-glyph{width:35px;height:35px;display:grid;place-items:center;flex:none;border-radius:12px;background:#29223f;color:#c9b5ff;font-size:16px;font-weight:800}.service-desc{margin-top:5px;color:var(--muted);font-size:11px;padding-left:46px}.service-right{min-width:0}.segment{display:flex;flex-wrap:wrap;gap:5px}.segment button{padding:8px 11px;border:1px solid #35304a;background:#19172b;color:#aaa5bc;min-height:36px;border-radius:9px;white-space:nowrap}.segment button:hover:not(:disabled){background:#312a4e;color:white}.segment button.chosen{background:#6a54a9;color:#fff;border-color:#ad93f5}.segment button.unavailable{border-style:dashed;opacity:.45}.apply-state{font-size:11px;color:var(--muted);margin-top:8px}.apply-state .waiting{color:var(--orange)}.apply-state .applied{color:#c0b1ee}.service-note{padding:12px 24px;border-top:1px solid #27233e;color:#8d8ba5;font-size:11px;background:#101022}.secondary-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}.dns-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.dns-stat{background:#1a172e;border:1px solid #302a45;border-radius:13px;padding:13px}.dns-stat .big{font-size:18px;font-weight:760;margin:7px 0 5px;white-space:nowrap}.dns-stat .label{color:var(--muted);font-size:11px}.step{display:flex;gap:9px;align-items:center;margin:15px 0;color:#b8b5cb;font-size:12px;flex-wrap:wrap}.step em{font-style:normal;color:#77738f}.events{display:grid;gap:0}.event{display:grid;grid-template-columns:10px 1fr auto;gap:11px;align-items:start;padding:12px 0;border-bottom:1px solid #29253e}.event:last-child{border:0}.event-title{font-size:12.5px;font-weight:630}.event-desc{font-size:11px;color:var(--muted);margin-top:3px}.event time{font-size:11px;color:#8d89a7;white-space:nowrap}.event .dot{margin-top:6px}.secondary-text{color:var(--muted);font-size:12px}.footer{padding-top:20px;margin-top:10px;text-align:center;font-size:11px;color:#716d8d}.toast-layer{position:fixed;right:22px;top:21px;z-index:30;display:grid;gap:8px;max-width:min(90vw,370px)}.toast{background:#28203f;border:1px solid #7362a1;color:white;box-shadow:0 16px 45px #0008;border-radius:12px;padding:13px 16px;font-size:13px;animation:toastIn .2s ease}.modal-shade{display:none;position:fixed;inset:0;background:#03030bbd;z-index:20;align-items:center;justify-content:center;padding:18px;backdrop-filter:blur(5px)}.modal-shade.visible{display:flex}.modal{width:min(100%,430px);padding:24px;background:#1b1932;border:1px solid #6e5c9e;border-radius:22px;box-shadow:0 35px 85px #000a}.modal h2{font-size:21px}.modal p{font-size:13px;color:#b6afcf;line-height:1.7;margin:13px 0 19px}.modal .modal-actions{display:flex;justify-content:flex-end;gap:9px}.bottom-nav{display:none}.inspector{padding:14px 23px;background:linear-gradient(90deg,#1c1730,#141228);border-top:1px solid #332b4a;display:flex;gap:9px;align-items:center;font-size:11px;color:#aaa0ca}.inspector svg{width:15px;flex:none;color:var(--purple)}
+@keyframes running{to{stroke-dashoffset:-180}}@keyframes toastIn{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0);opacity:1}}
+@media(max-width:1180px){.layout{grid-template-columns:215px minmax(0,1fr)}.main{padding:25px 22px 90px}.sidebar{padding:23px 12px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi{min-height:145px}.kpi-val{font-size:32px}}
+@media(max-width:850px){.layout{display:block}.sidebar{display:none}.main{padding:23px 16px 105px;max-width:720px;margin:auto}.chart-row,.secondary-row{grid-template-columns:1fr}.kpis{gap:11px}.kpi{min-height:140px;padding:15px}.bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:10;display:flex;justify-content:space-around;gap:2px;background:rgba(19,16,36,.94);border-top:1px solid #3c325a;padding:8px 7px calc(9px + env(safe-area-inset-bottom));backdrop-filter:blur(18px);box-shadow:0 -13px 38px #04030c50}.bottom-nav a{display:grid;place-items:center;gap:5px;min-width:61px;min-height:51px;color:#928da9;font-size:10px;padding:6px;border-radius:10px}.bottom-nav a.active{color:#c3a6ff;background:#2d2448}.bottom-nav svg{width:20px;height:20px}.section{scroll-margin-top:17px}.card-inner{padding:19px}.service-item{grid-template-columns:1fr;gap:12px;padding:16px 18px}.service-desc{padding-left:46px}.service-note{padding:11px 18px}.header{align-items:center}.head-actions .text-btn{display:none}}
+@media(max-width:460px){.main{padding:21px 12px 105px}.header{margin-bottom:17px}.header h1{font-size:27px}.subtitle{font-size:12px;line-height:1.45}.head-actions{padding:0}.eyebrow{font-size:10px}.kpi{min-height:142px;padding:15px 13px}.kpi-top{font-size:11px}.kpi-icon{height:27px;width:27px}.kpi-icon svg{height:15px;width:15px}.kpi-val{font-size:28px}.kpi-foot{font-size:10px;line-height:1.4}.kpis{gap:9px}.card{border-radius:17px}.card-inner{padding:17px 15px}.section-head{gap:7px}.section-head h2{font-size:17px}.route-map{padding:0 4px 6px}.map-svg{display:none}.mobile-map-svg{display:block;width:100%;height:auto;max-height:none;margin:-3px 0 0}.legend{padding:12px 14px;gap:10px;font-size:10px}.dns-grid{gap:5px}.dns-stat{padding:9px 7px;border-radius:10px}.dns-stat .big{font-size:16px}.dns-stat .label{font-size:10px}.event{gap:7px;grid-template-columns:9px 1fr auto}.event time{font-size:10px}.service-item{padding:15px}.segment button{padding:8px 10px;font-size:12px}.tag{font-size:10px;padding:5px 8px}.demo{align-items:flex-start}.time-chips button{min-width:65px;padding:7px 8px;font-size:11px;white-space:nowrap}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+
+/* VWARD v2 — only the navigation/scaffold, patterned on the original VWARD tabbar. */
+.layout{display:block;max-width:1460px;margin:auto;min-height:100vh}
+.main{width:100%;max-width:1390px;margin:auto;padding:28px clamp(14px,3vw,38px) 132px}
+.section{scroll-margin-top:22px}
+#network,#vpn,#components,#system,#settings{scroll-margin-top:22px}
+.tabbar{--tab-h:62px;position:fixed;left:50%;bottom:calc(10px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:20;display:grid;grid-template-columns:repeat(10,minmax(0,1fr));column-gap:2px;width:min(1080px,calc(100% - 20px));height:var(--tab-h);padding:6px;background:rgba(23,21,43,.97);border:1px solid #403955;border-radius:28px;box-shadow:0 8px 24px #0008;backdrop-filter:blur(18px)}
+.tabbar .tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:0;padding:0 2px;border:0;border-radius:22px;background:transparent;color:#a19eb8;font-size:11.5px;font-weight:550;cursor:pointer;text-decoration:none;transition:background .16s,color .16s}
+.tabbar .tab>span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tabbar .tab.is-active,.tabbar .tab[aria-current=page]{color:#cbb9ff;background:#302748}
+.tabbar .tab:hover{color:white}
+.tabbar .tab-icon{display:block;flex:none;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tabbar .tab[aria-current=page] .tab-icon{stroke-width:2.1}
+.tabbar .tab-mobile{display:none}
+.more-sheet{display:none}
+body::after{content:"";position:fixed;bottom:0;left:0;right:0;z-index:19;height:calc(11px + env(safe-area-inset-bottom,0px) + 31px);background:#080a15;pointer-events:none}
+.settings-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.setting-tile{display:flex;flex-direction:column;gap:5px;padding:14px 15px;border:1px solid #302a45;border-radius:13px;background:#1a172e}
+.setting-tile span{font-size:11px;color:var(--muted)}
+.setting-tile strong{font-size:14px;font-weight:650}
+@media(max-width:1180px){.main{padding:25px 22px 127px}}
+@media(max-width:899px){
+ .main{max-width:760px;padding:23px 16px 125px}
+ .tabbar{left:10px;right:10px;transform:none;width:auto;grid-template-columns:repeat(5,minmax(0,1fr))}
+ .tabbar .tab-mobile{display:flex}.tabbar .tab-desktop{display:none}
+ .tabbar .tab{font-size:11px}
+ .more-sheet:not([hidden]){position:fixed;display:block;bottom:calc(83px + env(safe-area-inset-bottom,0px));left:10px;right:10px;z-index:21;max-width:520px;margin:auto;padding:15px;background:#19162e;border:1px solid #49405f;border-radius:22px;box-shadow:0 18px 45px #000a}
+ .more-title{font-weight:700;font-size:13px;padding:2px 5px 12px;color:#d7d1ed}
+ .more-links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+ .more-links a{display:flex;align-items:center;gap:10px;padding:12px;border-radius:11px;color:#c5c0da;font-size:13px;min-width:0}
+ .more-links a:hover,.more-links a:focus-visible{background:#2c2547}
+ .more-links svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+ .chart-row,.secondary-row{grid-template-columns:1fr}
+ .settings-grid{grid-template-columns:1fr}
+}
+@media(max-width:460px){.main{padding:21px 12px 125px}.tabbar{left:6px;right:6px;padding:5px;column-gap:0}.tabbar .tab{font-size:10.5px;letter-spacing:-.15px}}
+@media(max-width:339px){.tabbar{left:4px;right:4px;padding:4px}.tabbar .tab{font-size:9.5px;letter-spacing:-.25px}}
+@media(prefers-reduced-motion:reduce){.tabbar .tab{transition:none}}
+
+/* VWARD: one continuous page, no mock metrics. */
+html{scroll-behavior:smooth;scroll-padding-top:18px}
+#overview{scroll-margin-top:0}
+.section, article[id], .components-section{scroll-margin-top:18px}
+.main{padding-bottom:calc(116px + env(safe-area-inset-bottom,0px));}
+.components-section{display:block}
+.components-section>.card{width:100%}
+.route-distribution{padding:14px 24px 22px;border-top:1px solid #29243f;color:var(--muted);min-height:56px}
+.route-dist-bar{height:10px;border-radius:6px;overflow:hidden;display:flex;background:#29243f;margin:4px 0 12px}
+.route-dist-bar span{display:block;height:100%;min-width:0}
+.route-dist-legend{display:flex;gap:10px 17px;flex-wrap:wrap;font-size:12px}
+.route-dist-legend>span{display:inline-flex;gap:7px;align-items:center}
+.route-dist-legend i{width:8px;height:8px;flex:none;border-radius:50%}
+.service-list{padding:4px 18px 18px;min-height:64px;color:var(--muted)}
+.service-list .service-item{border-top:1px solid #312b49;padding:15px 4px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.service-list .service-item:first-child{border-top:0}
+.service-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:13px;margin:4px 0;color:var(--muted)}
+.service-row strong{font-weight:650;color:var(--ink);text-align:right;overflow-wrap:anywhere}
+.service-row strong.pending{color:var(--orange)}
+.service-list .service-title{font-size:15px;overflow-wrap:anywhere}
+.tunnel-list{display:grid;gap:0;color:var(--muted);min-height:42px}
+.tunnel-item{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:11px 0;border-top:1px solid #312b49}
+.tunnel-item:first-child{border-top:0}
+.tunnel-item strong{color:var(--ink);font-size:14px;min-width:0;overflow-wrap:anywhere}
+.tunnel-item .status{flex:none;font-size:13px}
+.simple-status{padding:17px 19px;margin-top:15px;border-radius:13px;border:1px solid #332d4d;background:#18162b;color:var(--text);font-weight:650}
+#events .events{min-height:28px}
+.tabbar .tab.is-active{color:#cbb9ff;background:#302748}
+#more-toggle.is-active{color:#cbb9ff;background:#302748}
+.more-links a.is-active{color:#d3bfff;background:#302748}
+@media(max-width:850px){.components-section>.card{width:100%}}
+@media(max-width:600px){.service-list .service-item{display:block}.service-right{margin-top:8px}.route-distribution{padding:14px 18px 18px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+/* v4 — compact, quiet interface with one scroll path and no static data. */
+:root{--radius:18px}
+.main{max-width:1200px;padding-top:27px}
+.header{gap:10px;align-items:center;margin-bottom:21px}
+.header h1{font-size:clamp(25px,2.7vw,32px)}
+.subtitle{margin-top:7px}
+.button{min-height:40px}
+.button.refreshing svg{animation:turn 1s linear infinite}
+@keyframes turn{to{transform:rotate(360deg)}}
+.card{box-shadow:0 8px 26px #03020b24,inset 0 1px #ffffff08}
+.kpis{gap:12px;margin-bottom:14px}
+.kpi{min-height:142px;padding:16px 17px}
+.kpi-val{font-size:clamp(24px,2.6vw,31px);margin:12px 0 7px;overflow:hidden;text-overflow:ellipsis}
+.section{margin-bottom:14px;scroll-margin-top:22px}
+.section-head{align-items:center;margin-bottom:15px}
+.section-head h2{font-size:17px}
+.section-explainer{font-size:12px;color:var(--muted);margin:0}
+#routes .section-head{display:block}
+#routes .section-explainer{margin-top:6px}
+.route-map{padding:0 20px 17px}
+.live-route{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 14px;margin:7px 0;border:1px solid #322c4b;border-radius:11px;background:rgba(33,30,56,.58)}
+.live-route strong{font-size:13px;font-weight:650;min-width:0;overflow-wrap:anywhere}
+.live-route span{font-size:12px;color:var(--cyan);flex-shrink:0;white-space:nowrap}
+.route-dist-bar{height:8px}
+.route-distribution{padding:10px 23px 18px;min-height:30px}
+.service-list{padding:0 19px 12px}
+.service-list .service-item{padding:14px 2px}
+.service-row{font-size:12px}
+.tunnel-item .status{color:var(--muted)}
+.tunnel-item .status.good{color:var(--green)}
+.tunnel-item .status.bad{color:var(--orange)}
+#component-list{color:var(--muted)}
+#component-list .status-item{grid-template-columns:minmax(0,1fr) auto;gap:12px;background:rgba(31,28,51,.6)}
+#component-list .status-name{font-size:13px;color:var(--ink);font-weight:600;overflow-wrap:anywhere}
+#component-list .status-value{color:var(--muted);text-align:right;white-space:nowrap;font-size:12px}
+#component-list .status-value.state-ok{color:var(--green)}
+#component-list .status-value.state-warn{color:var(--orange)}
+#component-list .status-value.state-off{color:var(--muted)}
+#component-list .status-value.state-neutral{color:var(--purple)}
+.compact-section .card-inner{padding:18px 22px}
+.compact-section .simple-status{padding:13px 15px;margin-top:8px;font-size:14px;color:var(--ink)}
+.quiet-tag{font-size:10px;color:var(--muted);border:1px solid var(--line);padding:5px 8px;border-radius:20px;white-space:nowrap}
+.event{grid-template-columns:10px 1fr;padding:11px 0}
+.event time{display:block;font-size:11px;color:var(--muted);margin-top:3px}
+.event .dot.neutral{background:var(--soft);box-shadow:none}
+.remaining{text-align:center;padding:11px;font-size:11px;color:var(--muted)}
+.settings-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.tabbar .tab.is-active{color:#d5c2ff;background:#33284e}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+@media(max-width:899px){.main{max-width:760px;padding:24px 16px calc(120px + env(safe-area-inset-bottom,0px))}.settings-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.button-label{display:none}.head-actions .text-btn{display:inline-flex;width:41px;padding:0}.header{align-items:center}}
+@media(max-width:500px){.main{padding:20px 12px calc(115px + env(safe-area-inset-bottom,0px))}.header h1{font-size:26px}.header{margin-bottom:16px}.kpi{padding:14px 13px;min-height:128px}.kpi-val{font-size:26px}.section-head h2{font-size:16px}.section-explainer{font-size:11px}.route-map{padding:0 12px 12px}.live-route{padding:10px}.settings-grid{grid-template-columns:1fr}.section{margin-bottom:12px}.compact-section .card-inner{padding:16px}.service-list .service-item{padding:13px 0}}
+@media(max-width:339px){.kpi-val{font-size:23px}.kpi-top{font-size:10px}.tabbar .tab{font-size:9.5px}}
+@media(prefers-reduced-motion:reduce){.button.refreshing svg{animation:none}}
+</style>
+<style>
+#live-routes {padding:12px 18px 20px;display:grid;gap:8px;min-height:160px;align-content:start;color:var(--muted)}
+.live-route {display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:13px 15px;border:1px solid #353153;background:#19182e;border-radius:13px}
+.live-route strong{color:var(--ink);font-weight:600;overflow-wrap:anywhere}.live-route span{white-space:nowrap;color:var(--cyan)}
+.live-error{color:var(--orange)!important}.event-empty{padding:16px 0;color:var(--muted)}
+.service-item button:disabled{opacity:.72}.live-no-data{color:var(--muted);font-size:14px;min-height:80px;display:flex;align-items:center}
+</style><meta content="#080a15" name="theme-color"/><style>
+/* v5 — UI controls, subtle effects, accessiblity, responsive overlays. */
+:root[data-theme="light"] {
+ --bg:#eef0fa;--layer:#f4f5fb;--card:#ffffff;--card2:#f5f4fc;
+ --line:#d7d8e9;--line2:#c9cae0;--ink:#25233b;--muted:#62617b;--soft:#79778e;
+ --purple:#7051bf;--purple2:#735ac5;--cyan:#007e96;--orange:#b96424;--green:#12825b;--red:#b53d58;
+}
+html,body { min-height:100%; }
+button,a,input { -webkit-tap-highlight-color:transparent; }
+.header>div:first-child {min-width:0; flex:1 1 175px;}
+.head-actions { padding-top:0; gap:7px; flex:0 0 auto; }
+.head-icon {position:relative;display:inline-flex;align-items:center;justify-content:center;
+ width:42px;height:42px;border:1px solid var(--line2);border-radius:13px;
+ background:rgba(155,137,224,.08);color:var(--ink);cursor:pointer;
+ transition:transform .18s ease,border-color .18s ease,background-color .18s ease,box-shadow .18s ease;}
+.head-icon:hover {background:rgba(155,137,224,.17);border-color:var(--purple2);transform:translateY(-1px)}
+.head-icon:active {transform:scale(.96)}
+.head-icon:focus-visible,.search-result:focus-visible,.overlay-close:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
+.action-svg {height:19px;width:19px;display:block;stroke:currentColor;fill:none}
+.badge-count {position:absolute;top:-5px;right:-4px;min-width:18px;height:18px;padding:0 4px;
+ border-radius:10px;background:var(--red);color:#fff;font-size:10px;font-weight:700;line-height:18px;text-align:center;}
+[hidden] {display:none!important}
+.update-bar {display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:29px;margin-top:10px;position:relative}
+.refresh-compact {border:0;padding:3px 2px;background:transparent;display:inline-flex;align-items:center;gap:7px;
+ cursor:pointer;color:var(--muted);font-size:12px;min-height:27px;}
+.refresh-compact:hover{color:var(--ink)}
+.refresh-compact:disabled{opacity:.6;cursor:default}
+.refresh-compact svg{height:15px;width:15px;display:block}
+.refresh-compact.refreshing svg{animation:turn 1s linear infinite}
+#load-label{font-size:11px;color:var(--muted);min-height:16px;}
+.load-track{position:absolute;height:2px;width:min(210px,85%);max-width:210px;bottom:-5px;left:0;overflow:hidden;background:var(--line);border-radius:2px}
+.load-track i{display:block;width:36%;height:100%;background:var(--purple);border-radius:2px;animation:loading-track 1.1s ease-in-out infinite alternate}
+@keyframes loading-track { from{transform:translateX(-105%)}to{transform:translateX(290%)} }
+.ui-overlay{position:fixed;inset:0;z-index:60;pointer-events:none;}
+.ui-overlay:not([hidden]){pointer-events:auto;animation:fade-in .18s ease both}
+.ui-scrim{position:absolute;inset:0;border:0;padding:0;width:100%;height:100%;cursor:default;
+ background:rgba(4,5,15,.54);-webkit-backdrop-filter:blur(5px);backdrop-filter:blur(5px);}
+.ui-popover{position:absolute;top:75px;right:max(18px,calc((100vw - 1190px) / 2));width:min(440px,calc(100vw - 28px));
+ max-height:calc(100vh - 110px);overflow-y:auto;overscroll-behavior:contain;
+ background:var(--card);color:var(--ink);border:1px solid var(--line2);border-radius:20px;
+ box-shadow:0 24px 80px rgba(0,0,0,.35);padding:20px;animation:pop-enter .23s ease both;}
+.overlay-top{display:flex;justify-content:flex-end;margin:-8px -8px 9px}
+.overlay-close{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;border:1px solid var(--line);
+ color:var(--ink);background:var(--card2);cursor:pointer;}
+#search-input{width:100%;font:inherit;font-size:15px;color:var(--ink);background:var(--card2);
+ border:1px solid var(--line2);outline:0;border-radius:13px;padding:13px 15px;min-height:48px;}
+#search-input:focus{border-color:var(--purple);box-shadow:0 0 0 3px rgba(153,135,224,.13)}
+.search-results{margin-top:12px;max-height:60vh;overflow-y:auto;color:var(--muted);font-size:13px;}
+.search-result{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 10px;
+ border-radius:11px;background:transparent;color:var(--ink);border:0;border-bottom:1px solid var(--line);
+ text-align:left;cursor:pointer;font:inherit}
+.search-result strong{font-weight:600;overflow-wrap:anywhere}.search-result small{color:var(--muted);font-size:11px;flex:0 0 auto}
+.search-result:hover{background:var(--card2)}
+#notes-panel h2{font-size:17px;margin:0 0 12px;}
+.notes-content{max-height:65vh;overflow-y:auto;color:var(--muted);}
+.notes-content .event{margin-bottom:8px;padding:12px 5px;border-bottom:1px solid var(--line);}
+@keyframes fade-in{from{opacity:0}to{opacity:1}}
+@keyframes pop-enter{from{opacity:0;transform:translateY(-8px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+/* Only animate cards entering viewport, never keep repainting every chart. */
+@media(prefers-reduced-motion:no-preference){
+ .section.can-reveal:not(.is-visible){opacity:.58;transform:translateY(6px)}
+ .section.can-reveal.is-visible{opacity:1;transform:translateY(0);
+   transition:opacity .28s ease,transform .28s ease}
+}
+/* Light mode: override older hardcoded dark backgrounds without changing structure. */
+:root[data-theme="light"] body {background:radial-gradient(ellipse at 17% 0%,#e0daf9 0,transparent 32%),radial-gradient(ellipse at 94% 6%,#d9edf9 0,transparent 26%),var(--bg);color:var(--ink)}
+:root[data-theme="light"] .subtitle{color:var(--muted)}
+:root[data-theme="light"] .card,:root[data-theme="light"] .kpi,:root[data-theme="light"] .setting-tile{background:var(--card);border-color:var(--line)}
+:root[data-theme="light"] .live-route,:root[data-theme="light"] .tunnel-item,:root[data-theme="light"] .status-item,
+:root[data-theme="light"] .service-item,:root[data-theme="light"] .tabbar,:root[data-theme="light"] .more-sheet{background:#ffffff;border-color:var(--line)}
+:root[data-theme="light"] .tabbar .tab,:root[data-theme="light"] .more-sheet a{color:var(--muted)}
+:root[data-theme="light"] .tabbar .tab.is-active,:root[data-theme="light"] .more-sheet a.is-active{color:var(--purple);background:#f2effc}
+:root[data-theme="light"] .live-route strong,:root[data-theme="light"] .setting-tile strong,
+:root[data-theme="light"] .service-title,:root[data-theme="light"] .status-name{color:var(--ink)}
+:root[data-theme="light"] .route-distribution{border-color:var(--line)}
+:root[data-theme="light"] .kpi-foot,:root[data-theme="light"] .section-explainer{color:var(--muted)}
+:root[data-theme="light"] .kpi-val{color:var(--ink)}
+:root[data-theme="light"] .ui-scrim{background:rgba(20,22,55,.28)}
+/* IE11 fallback for layout, dark/light color and the bottom bar: no CSS grid, vars or blur required. */
+@media screen and (-ms-high-contrast: active), (-ms-high-contrast: none){
+ .layout{display:block!important}.main{padding:24px 20px 132px!important;max-width:1200px;width:100%;margin:auto;}
+ .kpis,.settings-grid,.chart-row,.secondary-row{display:-ms-flexbox!important;display:flex!important;-ms-flex-wrap:wrap;flex-wrap:wrap}
+ .kpis .kpi{display:block!important;width:calc(50% - 7px);margin:0 7px 12px 0}
+ .settings-grid>*{width:45%;margin:5px}
+ .tabbar{left:10px!important;right:10px!important;transform:none!important;max-width:1080px;margin:auto;width:calc(100% - 20px)!important;display:-ms-flexbox!important;display:flex!important;}
+ .tabbar .tab{display:-ms-flexbox!important;display:flex!important;min-width:0;-ms-flex:1;flex:1}
+ .ui-overlay{top:0;right:0;bottom:0;left:0}.ui-popover{right:20px;top:80px;width:420px;max-height:80%;}
+ .ui-scrim{background:rgba(4,5,15,.9)}
+ .head-icon{color:#f3f1ff;background:#19172e;border-color:#353153}
+ .refresh-compact,#load-label{color:#9d9bb8}
+ .theme-light body{background:#eef0fa!important;color:#25233b!important}
+ .theme-light .card,.theme-light .kpi,.theme-light .setting-tile,.theme-light .ui-popover{background:#fff!important;color:#25233b!important;border-color:#d7d8e9!important}
+ .theme-light .tabbar,.theme-light .more-sheet,.theme-light .live-route,.theme-light .status-item,.theme-light .service-item,.theme-light .tunnel-item{background:#fff!important;color:#25233b!important;border-color:#d7d8e9!important}
+ .theme-light .head-icon{background:#fff;color:#25233b;border-color:#d7d8e9}
+ .theme-light .kpi-val,.theme-light .live-route strong,.theme-light .setting-tile strong,.theme-light .service-title{color:#25233b!important}
+ .theme-light .subtitle,.theme-light .refresh-compact,.theme-light #load-label{color:#62617b!important}
+}
+@media(max-width:899px){
+ .ui-popover{top:66px;right:12px;left:12px;width:auto;max-width:500px;margin-left:auto;}
+}
+@media(max-width:460px){
+ .header{display:flex;flex-wrap:wrap;align-items:flex-start;row-gap:8px;}
+ .header>div:first-child{order:2;flex:1 1 100%;}
+ .head-actions{order:1;width:100%;justify-content:flex-end;}
+ .header h1{font-size:25px}
+ .head-icon{width:38px;height:38px;border-radius:12px}
+ .ui-popover{top:59px;left:8px;right:8px;max-height:calc(100vh - 80px);padding:16px;}
+ .update-bar{margin-top:5px}
+}
+@media(prefers-reduced-motion:reduce){
+ *,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important;}
+}
+
+/* v7: one status message above the floating bottom navigation, never under header buttons. */
+.ui-status{position:fixed;z-index:32;bottom:86px;bottom:calc(86px + env(safe-area-inset-bottom,0px));left:50%;
+  -webkit-transform:translate(-50%,9px);transform:translate(-50%,9px);
+  display:-webkit-box;display:-ms-flexbox;display:flex;-webkit-box-align:center;-ms-flex-align:center;align-items:center;
+  -webkit-box-pack:center;-ms-flex-pack:center;justify-content:center;gap:9px;
+  width:-webkit-max-content;width:max-content;max-width:calc(100% - 24px);min-height:38px;
+  padding:8px 12px;border:1px solid #524a75;border-radius:18px;
+  background:#24203d;color:#e4d9ff;box-shadow:0 12px 30px rgba(0,0,0,.25);
+  text-align:center;font:600 12.5px/1.35 system-ui,-apple-system,'Segoe UI',Arial,sans-serif;
+  opacity:0;pointer-events:none;-webkit-transition:opacity .18s ease,-webkit-transform .18s ease;transition:opacity .18s ease,transform .18s ease;
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+}
+.ui-status.is-visible{opacity:1;pointer-events:auto;-webkit-transform:translate(-50%,0);transform:translate(-50%,0)}
+.ui-status.is-busy,.ui-status.is-info{background:#24203d;border-color:#534674;color:#e9dcff}
+.ui-status.is-success{background:#153b32;border-color:#2c7e62;color:#b8f4da}
+.ui-status.is-warning{background:#3d2e17;border-color:#916728;color:#ffdfa0}
+.ui-status.is-error{background:#4a2632;border-color:#a75469;color:#ffd2dc}
+.ui-status-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 17px;height:17px;font-weight:800;font-size:15px;line-height:17px}
+.ui-status-icon::before{content:'i'}
+.ui-status.is-busy .ui-status-icon::before{content:'';width:13px;height:13px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:ui-status-spin .85s linear infinite}
+.ui-status.is-success .ui-status-icon::before{content:'✓'}
+.ui-status.is-warning .ui-status-icon::before{content:'!'}
+.ui-status.is-error .ui-status-icon::before{content:'×'}
+.ui-status-text{min-width:0;overflow-wrap:break-word}
+.ui-status-dismiss{display:inline-flex;align-items:center;justify-content:center;flex:0 0 23px;width:23px;height:23px;
+  padding:3px;margin:-2px -5px -2px 0;background:transparent;border:0;border-radius:7px;color:inherit;cursor:pointer}
+.ui-status-dismiss:hover{background:rgba(255,255,255,.1)}
+.ui-status-dismiss svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+@keyframes ui-status-spin{to{transform:rotate(360deg)}}
+:root[data-theme="light"] .ui-status.is-info,:root[data-theme="light"] .ui-status.is-busy{background:#f0eafb;border-color:#cbb9ec;color:#65458f}
+:root[data-theme="light"] .ui-status.is-success{background:#e3f6ec;border-color:#a1d6ba;color:#11623e}
+:root[data-theme="light"] .ui-status.is-warning{background:#fff2d2;border-color:#e5bf6d;color:#875414}
+:root[data-theme="light"] .ui-status.is-error{background:#ffe6e9;border-color:#e6a8b1;color:#9d334b}
+@media(max-width:460px){.ui-status{font-size:12px;min-height:36px;padding:7px 11px;border-radius:16px;max-width:calc(100% - 16px)}}
+@media screen and (-ms-high-contrast:active), (-ms-high-contrast:none){.ui-status{width:auto;max-width:calc(100% - 24px);background:#24203d}.theme-light .ui-status.is-warning{background:#fff2d2;color:#875414}}
+@media(prefers-reduced-motion:reduce){.ui-status,.ui-status-icon::before{animation:none!important;transition:none!important}}
+
+/* v9: contextual destination links and live instance directory. */
+.tunnel-item,.live-route{display:flex;align-items:center;flex-wrap:wrap;column-gap:10px;row-gap:3px}
+.tunnel-item>strong,.live-route>strong{flex:1 1 110px;min-width:0;overflow-wrap:anywhere}
+.row-go{flex:0 0 auto;font-size:11px;line-height:1.35;padding:5px 9px;border:1px solid var(--line);border-radius:999px;text-decoration:none;color:var(--purple);white-space:nowrap;background:var(--card2)}
+.row-go:hover,.row-go:focus-visible{border-color:var(--purple);outline-offset:2px}
+.section-link-row{display:flex;justify-content:flex-end;padding-top:10px;padding-bottom:10px}
+.page-link{font-size:12px;color:var(--purple);text-decoration:none;border-bottom:1px solid currentColor;padding-bottom:2px}
+.dir-limit{font-size:11px;color:var(--muted);padding:6px 10px}
+@media(max-width:380px){.tunnel-item,.live-route{gap:5px}.row-go{padding:5px 7px;font-size:10px}}
+
+/* v11: future voluntary diagnostics. The real writer, endpoint and opt-in do not exist. */
+.diag-sharing{margin-top:18px;padding:18px 18px 15px;border:1px solid var(--line);border-radius:16px;background:var(--card2)}
+.diag-sharing-row{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.diag-sharing-info{min-width:0}
+.diag-sharing-info h3{font-size:15px;line-height:1.3;font-weight:650;color:var(--ink);margin:0 0 6px}
+.diag-sharing-info p{font-size:12px;line-height:1.5;color:var(--muted);margin:0}
+.diag-sharing-control{flex:none;display:flex;align-items:center;gap:9px;opacity:.78;cursor:not-allowed}
+.diag-sharing-off{font-weight:650;font-size:12px;color:var(--muted);white-space:nowrap}
+.diag-sharing-control input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.diag-sharing-track{width:40px;height:24px;display:inline-block;position:relative;border-radius:30px;background:var(--line2);border:1px solid var(--line)}
+.diag-sharing-track:before{content:"";position:absolute;width:17px;height:17px;top:2px;left:3px;border-radius:50%;background:var(--muted)}
+.diag-sharing-note{color:var(--muted);font-size:11px;line-height:1.5;margin-top:13px}
+.diag-sharing-details{border-top:1px solid var(--line);margin-top:12px;padding-top:9px}
+.diag-sharing-details summary{font-size:12px;color:var(--purple);cursor:pointer;width:max-content;max-width:100%}
+.diag-sharing-details summary:focus-visible{outline:2px solid var(--purple);outline-offset:4px}
+.diag-sharing-details p{font-size:12px;color:var(--muted);line-height:1.6;margin:10px 0 0}
+@media(max-width:385px){.diag-sharing{padding:14px}.diag-sharing-row{gap:8px}.diag-sharing-control{gap:5px}.diag-sharing-info h3{font-size:13px}.diag-sharing-track{width:36px}}
+</style></head>
+<body>
+<svg aria-hidden="true" style="display:none"><symbol id="i-spark" viewbox="0 0 24 24"><path d="M12 2.5 14.4 9.6 21.5 12l-7.1 2.4L12 21.5l-2.4-7.1L2.5 12l7.1-2.4L12 2.5Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"></path></symbol><symbol id="i-grid" viewbox="0 0 24 24"><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="3" y="3"></rect><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="14" y="3"></rect><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="3" y="14"></rect><rect fill="none" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8" width="7" x="14" y="14"></rect></symbol><symbol id="i-route" viewbox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"><circle cx="6" cy="5" r="2.3"></circle><circle cx="18" cy="19" r="2.3"></circle><path d="M6 7.6v7.2a4.2 4.2 0 004.2 4.2H15.5M10.5 5H17a3 3 0 013 3v2m-3-3 3 3 3-3"></path></g></symbol><symbol id="i-globe" viewbox="0 0 24 24"><circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" stroke-width="1.8"></circle><path d="M3 12h18M12 3c-5 5-5 13 0 18M12 3c5 5 5 13 0 18" fill="none" stroke="currentColor" stroke-width="1.6"></path></symbol><symbol id="i-shield" viewbox="0 0 24 24"><path d="m12 2 8 3.5v5.8c0 5.2-3.3 8.5-8 10.7-4.7-2.2-8-5.5-8-10.7V5.5L12 2Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"></path><path d="m8.5 12 2.2 2.2 4.8-4.8" fill="none" stroke="currentColor" stroke-width="1.8"></path></symbol><symbol id="i-pulse" viewbox="0 0 24 24"><path d="M2 12h5l3-6 4 12 3-6h5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"></path></symbol><symbol id="i-sliders" viewbox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"><path d="M4 7h16M4 17h16"></path><circle cx="9" cy="7" fill="#19172e" r="3"></circle><circle cx="16" cy="17" fill="#19172e" r="3"></circle></g></symbol><symbol id="i-clock" viewbox="0 0 24 24"><circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" stroke-width="1.8"></circle><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"></path></symbol><symbol id="i-refresh" viewbox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14-4L4 9m0-5v5h5M4 13a8 8 0 0 0 14 4l2-2m0 5v-5h-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"></path></symbol><symbol id="i-lock" viewbox="0 0 24 24"><rect fill="none" height="11" rx="2" stroke="currentColor" stroke-width="1.8" width="14" x="5" y="10"></rect><path d="M8 10V7a4 4 0 018 0v3" fill="none" stroke="currentColor" stroke-width="1.8"></path></symbol><symbol id="i-server" viewbox="0 0 24 24"><rect fill="none" height="7" rx="2" stroke="currentColor" stroke-width="1.7" width="18" x="3" y="4"></rect><rect fill="none" height="7" rx="2" stroke="currentColor" stroke-width="1.7" width="18" x="3" y="13"></rect><circle cx="7" cy="7.5" fill="currentColor" r="1"></circle><circle cx="7" cy="16.5" fill="currentColor" r="1"></circle></symbol><symbol id="i-info" viewbox="0 0 24 24"><circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" stroke-width="1.8"></circle><path d="M12 10.5v6M12 7.5h.01" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path></symbol><symbol id="i-menu" viewbox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" stroke-width="1.8"></path></symbol><symbol id="i-home" viewbox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5M6 9v11h4.5v-5.5h3V20H18V9"></path></symbol><symbol id="i-list" viewbox="0 0 24 24"><rect height="17" rx="2" width="15" x="4.5" y="3.5"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></symbol><symbol id="i-block" viewbox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="m6.4 6.4 11.2 11.2"></path></symbol><symbol id="i-tools" viewbox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L4 17v3h3l5.4-5.4a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.6-.4-.4-2.6z"></path></symbol><symbol id="i-platform" viewbox="0 0 24 24"><rect height="6.5" rx="1.5" width="6.5" x="4" y="4"></rect><rect height="6.5" rx="1.5" width="6.5" x="13.5" y="4"></rect><rect height="6.5" rx="1.5" width="6.5" x="4" y="13.5"></rect><rect height="6.5" rx="1.5" width="6.5" x="13.5" y="13.5"></rect></symbol><symbol id="i-logs" viewbox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01"></path></symbol><symbol id="i-more" viewbox="0 0 24 24"><circle cx="5.5" cy="12" fill="currentColor" r="1" stroke="none"></circle><circle cx="12" cy="12" fill="currentColor" r="1" stroke="none"></circle><circle cx="18.5" cy="12" fill="currentColor" r="1" stroke="none"></circle></symbol><symbol fill="none" id="i-search" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><circle cx="11" cy="11" r="6.6"></circle><path d="m16 16 4.5 4.5"></path></symbol><symbol fill="none" id="i-bell" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z"></path><path d="M10 21h4"></path></symbol><symbol fill="none" id="i-moon" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><path d="M20.2 15.4A8.8 8.8 0 0 1 8.6 3.8 8.9 8.9 0 1 0 20.2 15.4Z"></path></symbol><symbol fill="none" id="i-sun" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"></path></symbol><symbol fill="none" id="i-auto" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><rect height="15" rx="4" width="17" x="3.5" y="4.5"></rect><path d="M3.5 12h17"></path></symbol><symbol fill="none" id="i-close" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"></path></symbol></svg>
+<div class="layout">
+<main class="main" id="overview">
+<header class="header compact-header" aria-label="Инструменты Панели VWARD"><h1 class="visually-hidden">Панель VWARD</h1><div class="head-actions"><button aria-label="Обновить данные" class="head-icon" id="refresh" title="Обновить данные" type="button"><svg aria-hidden="true" class="action-svg" viewBox="0 0 24 24"><use href="#i-refresh" xlink:href="#i-refresh"></use></svg></button><button aria-controls="ui-overlay" aria-expanded="false" aria-label="Поиск" class="head-icon" id="searchBtn" title="Поиск" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-search" xlink:href="#i-search"></use></svg></button><button aria-controls="ui-overlay" aria-expanded="false" aria-label="Уведомления" class="head-icon" id="bellBtn" title="Уведомления" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-bell" xlink:href="#i-bell"></use></svg><span class="badge-count" hidden="" id="unread-count"></span></button><button aria-label="Тема оформления" class="head-icon" id="themeBtn" title="Тема оформления" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-auto" xlink:href="#i-auto"></use></svg></button></div></header>
+<section aria-label="Состояние компонентов" class="kpis section" id="network">
+<div class="card kpi" style="--accent:var(--green)"><div class="kpi-top"><span>Интернет</span><span class="kpi-icon"><svg><use href="#i-globe"></use></svg></span></div><div class="kpi-val">—</div><div class="kpi-foot">—</div></div>
+<div class="card kpi vpn-overview" style="--accent:var(--purple)"><div class="kpi-top"><span>VPN</span><span class="kpi-icon"><svg><use href="#i-shield"></use></svg></span></div><div class="kpi-val">—</div><div class="kpi-foot">—</div></div>
+<div class="card kpi" style="--accent:var(--cyan)"><div class="kpi-top"><span>Smart DNS</span><span class="kpi-icon"><svg><use href="#i-pulse"></use></svg></span></div><div class="kpi-val">—</div><div class="kpi-foot">—</div></div>
+<div class="card kpi" style="--accent:var(--orange)"><div class="kpi-top"><span>Домены в маршрутах</span><span class="kpi-icon"><svg><use href="#i-route"></use></svg></span></div><div class="kpi-val">—</div><div class="kpi-foot">—</div></div>
+</section><section class="card section" id="vpn"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">VPN</h2></div></div><div class="tunnel-list" id="vpn-tunnels">—</div></div></section><section aria-label="Карта маршрутов" class="card section" id="routes"><div class="card-inner" style="padding-bottom:4px"><div class="section-head"><div><h2 class="title-accent">Доменные списки</h2></div><p class="section-explainer">Назначения списков, не измерение трафика.</p></div></div>
+<div class="route-map" id="live-routes">—</div><div class="route-distribution" id="route-distribution">—</div></section><section class="card service-card section" id="control"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Сервисы и маршруты</h2></div></div></div>
+<div class="service-list" id="service-list">—</div>
+<div class="card-inner section-link-row"><a data-live-path="/domains/services" href="/domains/services" class="page-link">Сервисы в действующей Панели <span aria-hidden="true">↗</span></a></div></section><section class="card section compact-section" id="ads"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Реклама и трекеры</h2></div></div><div class="simple-status" id="ads-status">—</div></div></section><section class="card section compact-section" id="dns"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">DNS и Smart DNS</h2></div></div><div class="simple-status" id="smartdns-status">—</div></div></section><section class="card section" id="components"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Компоненты</h2></div></div><div class="status-list" id="component-list">—</div></div></section><section class="card section" id="system"><div class="card-inner"><nav class="system-jump-links" aria-label="Дополнительные страницы"><a href="#directory">Все разделы</a><a href="#about">О программе</a><a href="#changes">Список изменений</a><a href="#help">Инструкции</a></nav><div class="section-head"><div><h2 class="title-accent">Система</h2></div></div><div class="settings-grid"><div class="setting-tile"><span>Версия</span><strong id="system-version">—</strong></div><div class="setting-tile"><span>Свободно на диске</span><strong id="system-disk">—</strong></div><div class="setting-tile"><span>Компонентов VWARD</span><strong id="system-components">—</strong></div></div></div></section><section class="card section" id="settings">
+<div class="card-inner">
+<div class="section-head"><div><h2 class="title-accent">Настройки</h2></div><span class="quiet-tag">Только просмотр</span></div>
+<div class="settings-grid"><div class="setting-tile"><span>Версия VWARD</span><strong id="setting-version">—</strong></div><div class="setting-tile"><span>Канал обновлений</span><strong id="setting-channel">—</strong></div><div class="setting-tile"><span>Тема оформления</span><strong id="theme-mode">как в системе</strong></div></div>
+<div class="diag-sharing" id="diagnostic-sharing" aria-labelledby="diagnostic-sharing-title">
+  <div class="diag-sharing-row">
+    <div class="diag-sharing-info">
+      <h3 id="diagnostic-sharing-title">Отправка диагностики</h3>
+      <p>Поможет находить ошибки VWARD на роутерах пользователей.</p>
+    </div>
+    <label class="diag-sharing-control" title="Функция ещё не реализована">
+      <span class="diag-sharing-off">Выкл</span>
+      <input id="diagnostic-sharing-toggle" type="checkbox" disabled aria-describedby="diagnostic-sharing-note" />
+      <span class="diag-sharing-track" aria-hidden="true"></span>
+    </label>
+  </div>
+  <div class="diag-sharing-note" id="diagnostic-sharing-note">В разработке. Сейчас никакие диагностические данные не отправляются.</div>
+  <details class="diag-sharing-details">
+    <summary>Что планируется</summary>
+    <p>По отдельному согласию: технические ошибки, версия VWARD и состояние компонентов. Состав отчёта, его просмотр перед отправкой и защищённая передача на сервер — отдельное решение. Адреса, домены, ключи и токены не должны отправляться автоматически.</p>
+  </details>
+</div></div></section>
+<section class="card section v8-section" id="directory" aria-label="Все разделы Панели VWARD"><div class="card-inner">
+  <div class="section-head"><div><h2 class="title-accent">Разделы Панели</h2><p class="section-sub">Полный каталог действующих адресов разделов. Основные — здесь, вложенные открываются в штатной Панели.</p></div></div>
+  <div class="dir-index" id="directory-index">
+<details class="dir-group" ><summary><span>Обзор</span><span class="dir-count"></span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#overview"><span>Обзор</span><small>В этом прототипе</small></a>
+</div></details>
+<details class="dir-group" ><summary><span>Сеть</span><span class="dir-count">3 вложенных</span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#network"><span>Сеть</span><small>В этом прототипе</small></a>
+<a class="dir-row" data-page-id="d-wanrec" data-live-path="/network/recovery" href="/network/recovery" title="Открыть в действующей Панели VWARD"><span>Восстановление: дополнительно</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-wificlients" data-live-path="/network/wifi/clients" href="/network/wifi/clients" title="Открыть в действующей Панели VWARD"><span>Все клиенты</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="wifi" data-live-path="/network/wifi" href="/network/wifi" title="Открыть в действующей Панели VWARD"><span>Wi-Fi клиенты</span><small>Открыть действующую Панель</small></a>
+</div></details>
+<details class="dir-group" ><summary><span>VPN</span><span class="dir-count"></span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#vpn"><span>VPN</span><small>В этом прототипе</small></a>
+</div></details>
+<details class="dir-group" open><summary><span>Маршруты</span><span class="dir-count">7 вложенных</span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#routes"><span>Маршруты</span><small>В этом прототипе</small></a>
+<a class="dir-row" data-page-id="d-mydomains" data-live-path="/domains/my" href="/domains/my" title="Открыть в действующей Панели VWARD"><span>Мои домены</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-force" data-live-path="/domains/always-vpn" href="/domains/always-vpn" title="Открыть в действующей Панели VWARD"><span>Мои домены · постоянный VPN</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-adaptive" data-live-path="/domains/autopick" href="/domains/autopick" title="Открыть в действующей Панели VWARD"><span>Автоподбор доменов</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-rsources" data-live-path="/domains/sources" href="/domains/sources" title="Открыть в действующей Панели VWARD"><span>Источники</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-services" data-live-path="/domains/services" href="/domains/services" title="Открыть в действующей Панели VWARD"><span>Сервисы</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-ipcats" data-live-path="/domains/ip-categories" href="/domains/ip-categories" title="Открыть в действующей Панели VWARD"><span>IP-категории</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="lists" data-live-path="/domains/lists" href="/domains/lists" title="Открыть в действующей Панели VWARD"><span>Доменные списки</span><small>Открыть действующую Панель</small></a>
+</div></details>
+<details class="dir-group" ><summary><span>Реклама и трекеры</span><span class="dir-count">13 вложенных</span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#ads"><span>Реклама и трекеры</span><small>В этом прототипе</small></a>
+<a class="dir-row" data-page-id="d-querylog" data-live-path="/ads/querylog" href="/ads/querylog" title="Открыть в действующей Панели VWARD"><span>Журнал запросов</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-adrecent" data-live-path="/ads/recent" href="/ads/recent" title="Открыть в действующей Панели VWARD"><span>Решения агента</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-adspub" data-live-path="/ads/publish" href="/ads/publish" title="Открыть в действующей Панели VWARD"><span>Правила в AdGuard Home</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-adprobe" data-live-path="/ads/probe" href="/ads/probe" title="Открыть в действующей Панели VWARD"><span>Подробный разбор</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-adsettings" data-live-path="/ads/settings" href="/ads/settings" title="Открыть в действующей Панели VWARD"><span>Настройки проверки</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-review" data-live-path="/ads/review" href="/ads/review" title="Открыть в действующей Панели VWARD"><span>На проверке</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-blocked" data-live-path="/ads/blocked" href="/ads/blocked" title="Открыть в действующей Панели VWARD"><span>Заблокировано</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-allowed" data-live-path="/ads/allowed" href="/ads/allowed" title="Открыть в действующей Панели VWARD"><span>Разрешено</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-adcats" data-live-path="/ads/categories" href="/ads/categories" title="Открыть в действующей Панели VWARD"><span>Категории блокировки</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-rules" data-live-path="/ads/rules" href="/ads/rules" title="Открыть в действующей Панели VWARD"><span>Мои правила</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-sources" data-live-path="/ads/sources" href="/ads/sources" title="Открыть в действующей Панели VWARD"><span>Источники списков</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-jobs" data-live-path="/ads/jobs" href="/ads/jobs" title="Открыть в действующей Панели VWARD"><span>Задания</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-https" data-live-path="/ads/https" href="/ads/https" title="Открыть в действующей Панели VWARD"><span>HTTPS-фильтр</span><small>Открыть действующую Панель</small></a>
+</div></details>
+<details class="dir-group" ><summary><span>DNS</span><span class="dir-count">1 вложенных</span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#dns"><span>DNS</span><small>В этом прототипе</small></a>
+<a class="dir-row" data-page-id="d-smartdns" data-live-path="/ai/smartdns" href="/ai/smartdns" title="Открыть в действующей Панели VWARD"><span>Домены Smart DNS</span><small>Открыть действующую Панель</small></a>
+</div></details>
+<details class="dir-group" ><summary><span>Компоненты</span><span class="dir-count">11 вложенных</span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#components"><span>Компоненты</span><small>В этом прототипе</small></a>
+<a class="dir-row" data-page-id="d-agh" data-live-path="/utilities/adguard-home" href="/utilities/adguard-home" title="Открыть в действующей Панели VWARD"><span>AdGuard Home</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-dnsex" data-live-path="/utilities/adguard-home/exceptions" href="/utilities/adguard-home/exceptions" title="Открыть в действующей Панели VWARD"><span>Исключения фильтрации</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-awg" data-live-path="/utilities/amneziawg" href="/utilities/amneziawg" title="Открыть в действующей Панели VWARD"><span>AmneziaWG</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-vless" data-live-path="/utilities/vless" href="/utilities/vless" title="Открыть в действующей Панели VWARD"><span>Модуль VLESS</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-dnsmasq" data-live-path="/utilities/dnsmasq" href="/utilities/dnsmasq" title="Открыть в действующей Панели VWARD"><span>dnsmasq</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-singbox" data-live-path="/utilities/sing-box" href="/utilities/sing-box" title="Открыть в действующей Панели VWARD"><span>sing-box</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-dnscap" data-live-path="/utilities/dns-capture" href="/utilities/dns-capture" title="Открыть в действующей Панели VWARD"><span>Захват DNS-запросов</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-doh" data-live-path="/utilities/doh-client" href="/utilities/doh-client" title="Открыть в действующей Панели VWARD"><span>DoH-клиент</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-agents" data-live-path="/utilities/agents" href="/utilities/agents" title="Открыть в действующей Панели VWARD"><span>Агенты</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-aghfilters" data-live-path="/utilities/adguard-home/filters" href="/utilities/adguard-home/filters" title="Открыть в действующей Панели VWARD"><span>Фильтры AdGuard Home</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-aghservices" data-live-path="/utilities/adguard-home/services" href="/utilities/adguard-home/services" title="Открыть в действующей Панели VWARD"><span>Блокировка сервисов</span><small>Открыть действующую Панель</small></a>
+</div></details>
+<details class="dir-group" open><summary><span>Система</span><span class="dir-count">10 вложенных</span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#system"><span>Система</span><small>В этом прототипе</small></a>
+<a class="dir-row" data-page-id="d-diag" data-live-path="/system/diag" href="/system/diag" title="Открыть в действующей Панели VWARD"><span>Диагностика</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-stability" data-live-path="/system/stability" href="/system/stability" title="Открыть в действующей Панели VWARD"><span>Стабильность</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-files" data-live-path="/system/files" href="/system/files" title="Открыть в действующей Панели VWARD"><span>Файлы VWARD</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-control" data-live-path="/system/control" href="/system/control" title="Открыть в действующей Панели VWARD"><span>Управление</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-cron" data-live-path="/system/diag/cron" href="/system/diag/cron" title="Открыть в действующей Панели VWARD"><span>Задания по расписанию</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="u-vward" data-live-path="/system/vward" href="/system/vward" title="Открыть в действующей Панели VWARD"><span>VWARD</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="u-agh" data-live-path="/system/adguard-home-update" href="/system/adguard-home-update" title="Открыть в действующей Панели VWARD"><span>Обновление AdGuard Home</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="u-fw" data-live-path="/system/firmware" href="/system/firmware" title="Открыть в действующей Панели VWARD"><span>Прошивка Keenetic</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="u-opkg" data-live-path="/system/entware" href="/system/entware" title="Открыть в действующей Панели VWARD"><span>Пакеты Entware</span><small>Открыть действующую Панель</small></a>
+<a class="dir-row" data-page-id="d-notes" data-live-path="/system/vward/notes" href="/system/vward/notes" title="Открыть в действующей Панели VWARD"><span>Что нового</span><small>Открыть действующую Панель</small></a>
+</div></details>
+<details class="dir-group" ><summary><span>Настройки</span><span class="dir-count"></span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#settings"><span>Настройки</span><small>В этом прототипе</small></a>
+</div></details>
+<details class="dir-group" ><summary><span>Журналы</span><span class="dir-count"></span></summary><div class="dir-links">
+<a class="dir-row dir-root" href="#events"><span>Журналы</span><small>В этом прототипе</small></a>
+</div></details>
+<div id="live-runtime-links" class="dir-components" aria-label="Туннели и списки из ответа роутера"></div><div id="live-component-links" class="dir-components" aria-label="Страницы установленных компонентов"></div></div>
+</div></section>
+<section class="card section v8-section" id="about" aria-label="О программе"><div class="card-inner">
+  <div class="section-head"><div><h2 class="title-accent">О программе</h2></div></div>
+  <div class="about-details"><div><span>Программа</span><strong>VWARD</strong></div><div><span>Установленная версия</span><strong id="about-version">—</strong></div><div><span>Канал</span><strong id="about-channel">—</strong></div><div><span>Лицензия VWARD</span><strong>MIT</strong></div></div>
+  <div class="about-links"><a href="https://github.com/Ziegfe1d/VWARD" target="_blank" rel="noopener noreferrer">Исходный код VWARD</a><a href="https://github.com/Ziegfe1d/VWARD/blob/dev/LICENSE" target="_blank" rel="noopener noreferrer">Файл лицензии</a><a href="https://github.com/Ziegfe1d/VWARD/blob/dev/docs/DEPENDENCIES.md" target="_blank" rel="noopener noreferrer">Список зависимостей</a></div>
+  <details class="license-details"><summary>Текст лицензии VWARD (MIT)</summary><pre>MIT License
+
+Copyright (c) 2026 Ziegfe1d
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.</pre></details>
+  <h3 class="about-subtitle">Компоненты и лицензии</h3>
+  <p class="section-sub">Установленные версии берутся с роутера, когда API их сообщает. Лицензии сторонних программ пока не подтверждены манифестом — показан прочерк, а не догадка.</p>
+  <div class="thirdparty-table" role="table"><div class="thirdparty-heading" role="row"><span>Компонент</span><span>Версия</span><span>Лицензия</span></div><div id="about-dependencies"><div class="thirdparty-row"><span>—</span><span>—</span><span>—</span></div></div></div>
+</div></section>
+<section class="card section v8-section" id="changes" aria-label="Список изменений"><div class="card-inner">
+  <div class="section-head"><div><h2 class="title-accent">Список изменений</h2><p class="section-sub">Последние опубликованные записи из CHANGELOG в репозитории. Это не история установки на твоём роутере.</p></div></div>
+  <div class="release-list"><div class="release-item"><strong>0.2.0 RC2 #39.1</strong><span>15.11.2026</span><p>Ядро автоподбора заменяется после обновления</p></div>
+<div class="release-item"><strong>0.2.0 RC2 #39</strong><span>15.11.2026</span><p>Заморозка отжившего, автоподбор через VPN, песочница рекламы</p></div>
+<div class="release-item"><strong>0.2.0 RC2 #38.1</strong><span>12.11.2026</span><p>Каждый доменный список своей страницей, переключатели маршрутов</p></div>
+<div class="release-item"><strong>0.2.0 RC2 #38</strong><span>12.11.2026</span><p>Смена туннеля, автоподбор, списки и компоненты</p></div>
+<div class="release-item"><strong>0.2.0 RC2 #37</strong><span>12.11.2026</span><p>Облегчённая VWARD, автоподбор и списки на Go</p></div>
+<div class="release-item"><strong>0.2.0 RC2 #36.1</strong><span>11.11.2026</span><p>Контроль целостности, восстановление процессов и Панель</p></div></div>
+  <div class="about-links"><a href="https://github.com/Ziegfe1d/VWARD/blob/dev/CHANGELOG.md" target="_blank" rel="noopener noreferrer">Полный список изменений</a><a href="https://github.com/Ziegfe1d/VWARD/releases" target="_blank" rel="noopener noreferrer">Выпуски VWARD</a></div>
+</div></section>
+<section class="card section v8-section" id="help" aria-label="Инструкции и документация"><div class="card-inner">
+  <div class="section-head"><div><h2 class="title-accent">Инструкции</h2></div></div>
+  <div class="help-links"><a href="https://github.com/Ziegfe1d/VWARD/blob/dev/docs/INSTALL.md" target="_blank" rel="noopener noreferrer"><strong>Установка и обновление</strong><small>Руководство по установке</small></a><a href="https://github.com/Ziegfe1d/VWARD/blob/dev/docs/PANEL.md" target="_blank" rel="noopener noreferrer"><strong>Работа с Панелью</strong><small>Разделы и их назначение</small></a><a href="https://github.com/Ziegfe1d/VWARD/blob/dev/docs/ROADMAP.md" target="_blank" rel="noopener noreferrer"><strong>План развития</strong><small>Задачи и версии</small></a><a href="https://github.com/Ziegfe1d/VWARD/blob/dev/docs/ARCHITECTURE.md" target="_blank" rel="noopener noreferrer"><strong>Архитектура</strong><small>Устройство VWARD</small></a></div>
+  <p class="section-sub">Документация открывается по ссылкам на GitHub. Автономная документация и реестр лицензий для установки на роутере пока не созданы.</p>
+</div></section>
+<section class="card section" id="events"><div class="card-inner"><div class="section-head"><div><h2 class="title-accent">Уведомления</h2></div></div><div class="events">—</div></div></section></main></div>
+<nav aria-label="Основная навигация" class="tabbar"><a aria-current="page" class="tab tab-mobile is-active" data-nav="overview" href="#overview"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-home"></use></svg><span>Обзор</span></a><a class="tab tab-mobile" data-nav="wan" href="#network"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-globe"></use></svg><span>Сеть</span></a><a class="tab tab-mobile" data-nav="vpn" href="#vpn"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-shield"></use></svg><span>VPN</span></a><a class="tab tab-mobile" data-nav="routes" href="#routes"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-list"></use></svg><span>Маршруты</span></a><button aria-controls="more-sheet" aria-expanded="false" class="tab tab-mobile" id="more-toggle" type="button"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-more"></use></svg><span>Ещё</span></button><a aria-current="page" class="tab tab-desktop is-active" data-nav="overview" href="#overview"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-home"></use></svg><span>Обзор</span></a><a class="tab tab-desktop" data-nav="wan" href="#network"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-globe"></use></svg><span>Сеть</span></a><a class="tab tab-desktop" data-nav="vpn" href="#vpn"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-shield"></use></svg><span>VPN</span></a><a class="tab tab-desktop" data-nav="routes" href="#routes"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-list"></use></svg><span>Маршруты</span></a><a class="tab tab-desktop" data-nav="ads" href="#ads"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-block"></use></svg><span>Реклама</span></a><a class="tab tab-desktop" data-nav="ai" href="#dns"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-spark"></use></svg><span>DNS</span></a><a class="tab tab-desktop" data-nav="utils" href="#components"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-tools"></use></svg><span>Компоненты</span></a><a class="tab tab-desktop" data-nav="system" href="#system"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-platform"></use></svg><span>Система</span></a><a class="tab tab-desktop" data-nav="settings" href="#settings"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-sliders"></use></svg><span>Настройки</span></a><a class="tab tab-desktop" data-nav="logs" href="#events"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-logs"></use></svg><span>Журналы</span></a></nav>
+<!-- One shared place for transient operation messages, just above the bottom navigation. -->
+<div id="ui-status" class="ui-status is-info" role="status" aria-live="polite" aria-atomic="true" hidden>
+  <span class="ui-status-icon" aria-hidden="true"></span>
+  <span id="ui-status-text" class="ui-status-text"></span>
+  <button id="ui-status-dismiss" class="ui-status-dismiss" type="button" aria-label="Закрыть сообщение" hidden><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-close" xlink:href="#i-close"></use></svg></button>
+</div>
+<div class="more-sheet" hidden="" id="more-sheet"><div class="more-title">Разделы</div><div class="more-links"><a data-nav="ads" href="#ads"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-block"></use></svg><span>Реклама</span></a><a data-nav="ai" href="#dns"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-spark"></use></svg><span>DNS</span></a><a data-nav="utils" href="#components"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-tools"></use></svg><span>Компоненты</span></a><a data-nav="system" href="#system"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-platform"></use></svg><span>Система</span></a><a data-nav="settings" href="#settings"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-sliders"></use></svg><span>Настройки</span></a><a data-nav="logs" href="#events"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-logs"></use></svg><span>Журналы</span></a><a href="#directory" data-nav="utils"><span>Все разделы</span></a><a href="#about" data-nav="system"><span>О программе</span></a><a href="#changes" data-nav="system"><span>Список изменений</span></a><a href="#help" data-nav="system"><span>Инструкции</span></a></div></div>
+<div class="ui-overlay" hidden="" id="ui-overlay"><button aria-label="Закрыть" class="ui-scrim" tabindex="-1" data-close-overlay="" type="button"></button><div class="ui-popover" role="presentation"><div class="overlay-top"><button aria-label="Закрыть" class="overlay-close" data-close-overlay="" id="overlay-close" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-close" xlink:href="#i-close"></use></svg></button></div><section aria-label="Поиск по Панели VWARD" aria-modal="true" id="search-panel" role="dialog"><input aria-label="Поиск по Панели VWARD" autocomplete="off" id="search-input" placeholder="Поиск по Панели VWARD" type="search"/><div class="search-results" id="search-results">—</div></section><section aria-label="Уведомления" aria-modal="true" hidden="" id="notes-panel" role="dialog"><h2>Уведомления</h2><div class="notes-content" id="notes-content">—</div></section><section aria-label="Сведения об объекте" aria-modal="true" hidden="" id="detail-panel" role="dialog"><div class="detail-heading"><span class="detail-eyebrow" id="detail-category">—</span><h2 id="detail-title" tabindex="-1">—</h2></div><div class="detail-grid" id="detail-content"></div><p class="detail-explain" id="detail-explain"></p><div class="detail-actions" id="detail-actions"></div></section></div></div><script>/* VWARD unified Panel v10 — read-only HTML5, ES5 syntax for legacy browsers.
+   No external scripts, timers polling Keenetic, POSTs or fictional metrics. */
+(function () {
+  'use strict';
+  var DASH = '—';
+  function one(s, root) { return (root || document).querySelector(s); }
+  function all(s, root) { return (root || document).querySelectorAll(s); }
+  function each(xs, fn) { for (var i = 0; i < xs.length; i++) fn(xs[i], i); }
+  function text(v) { var e = document.createElement('span'); e.textContent = String(v); return e; }
+  function clear(el) { if (!el) return; while (el.firstChild) el.removeChild(el.firstChild); }
+  function set(el, val) { if (el) el.textContent = val === null || val === undefined || val === '' ? DASH : String(val); }
+  function put(s, val) { set(one(s), val); }
+  function inside(root, s, val) { if (root) set(one(s, root), val); }
+  function klass(el, name, value) {
+    if (!el) return;
+    var re = new RegExp('(?:^|\\s)' + name + '(?=\\s|$)', 'g');
+    var current = String(el.className || '').replace(re, ' ').replace(/^\s+|\s+$/g, '');
+    el.className = current + (value ? (current ? ' ' : '') + name : '');
+  }
+  function closest(el, sel) {
+    while (el && el.nodeType === 1) {
+      if (el.matches ? el.matches(sel) : el.msMatchesSelector ? el.msMatchesSelector(sel) : false) return el;
+      el = el.parentNode;
+    }
+    return null;
+  }
+  function attr(el, key, value) { if (el) el.setAttribute(key, String(value)); }
+  function short(v) { return String(v == null ? '' : v).replace(/[\x00-\x1f]/g, '').slice(0, 160); }
+  function num(v) { if (v === null || v === undefined || v === '' || !isFinite(Number(v))) return null; return Number(v); }
+  function format(v) { var n = num(v); if (n === null) return DASH; try { return n.toLocaleString('ru-RU'); } catch (e) { return String(n); } }
+  function yes(v) { return v === true || v === 1 || v === '1' || v === 'yes' || v === 'up' || v === 'true'; }
+  function pretty(v) {
+    var d = { vpn: 'VPN', isp: 'Провайдер', bypass: 'Провайдер', dns: 'Smart DNS', auto: 'Авто', mixed: 'Смешанный', unknown: DASH, none: DASH };
+    return d[String(v || '').toLowerCase()] || DASH;
+  }
+  function array(v) { return Object.prototype.toString.call(v) === '[object Array]'; }
+  function now() { return +new Date(); }
+  function frame(fn) { if (window.requestAnimationFrame) window.requestAnimationFrame(fn); else window.setTimeout(fn, 16); }
+  function event(el, name, fn) { if (el) el.addEventListener(name, fn, false); }
+  function reduceMotion() { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+  function sv(name) { return document.getElementById(name); }
+
+  var data = { status: null, lists: null, ai: null, ads: null, notes: null };
+  var errorCount = 0, refreshing = false;
+  var cards = all('.kpi');
+  function kpi(i, val, foot) { if (cards[i]) { inside(cards[i], '.kpi-val', val); inside(cards[i], '.kpi-foot', foot); } }
+  function statusName(p) {
+    if (p.enabled === false) return ['Выключен', 'off'];
+    if (p.installed === false) return ['Не установлен', 'off'];
+    if (p.running === true) return ['Работает', 'ok'];
+    if (p.running === false) return [p.kind === 'component' ? 'Не работает' : 'Не запущен', 'warn'];
+    if (p.enabled === true) return ['Включён', 'neutral'];
+    return [DASH, 'neutral'];
+  }
+  function version(v, seq) {
+    var m = /^(\d+\.\d+\.\d+)(?:-(rc|rp)\.(\d+))?(?:\.fix\.(\d+)(?:\.(\d+))?)?$/.exec(String(v || ''));
+    if (!m) return v ? short(v) : DASH;
+    var d = /^20(\d{6})\d*$/.exec(String(seq || ''));
+    return m[1] + (m[2] ? ' ' + m[2].toUpperCase() + m[3] : '') + (m[4] ? ' #' + m[4] + '.' + (m[5] || '0') + (d ? '.' + d[1] : '') : '');
+  }
+  function encodeRouteSegment(value){
+    if(typeof value!=='string'||!value||value.length>128||value==='.'||value==='..'||/[\\/\x00-\x1f]/.test(value))return '';
+    try{return encodeURIComponent(value);}catch(e){return '';}
+  }
+  function tunnelPath(t){var seg=t&&encodeRouteSegment(t.name);return seg?'/vpn/tunnel/'+seg:'';}
+  function listPath(l){var seg=l&&encodeRouteSegment(l.name);return seg?'/domains/lists/'+seg:'';}
+  function createLiveLink(path,label,compact){
+    if(!path||path.charAt(0)!=='/'||path.charAt(1)==='/'||/[?#\\]/.test(path))return null;
+    var link=document.createElement('a');link.className=compact?'row-go':'dir-row';
+    link.href=path;link.setAttribute('data-live-path',path);
+    link.title='Открыть в действующей Панели VWARD';
+    if(compact){link.textContent='Подробнее';link.setAttribute('aria-label','Открыть: '+short(label||DASH));}
+    else{var name=document.createElement('span'),hint=document.createElement('small');
+      name.textContent=short(label||DASH);hint.textContent='Действующая Панель';link.appendChild(name);link.appendChild(hint);}
+    return link;
+  }
+  function makeDetailButton(type,key,label,compact){
+    if(!type||typeof key!=='string'||!key)return null;
+    var b=document.createElement('button');b.type='button';
+    b.className=compact?'row-go detail-open':'dir-row detail-open';
+    attr(b,'data-detail-type',type);attr(b,'data-detail-key',key);
+    if(compact){b.textContent='Подробнее';attr(b,'aria-label','Сведения: '+short(label||key));}
+    else{var name=document.createElement('span'),hint=document.createElement('small');
+      name.textContent=short(label||key);hint.textContent='Сведения здесь';b.appendChild(name);b.appendChild(hint);}
+    return b;
+  }
+  function makeRow(cls,label,state,stateCls,path,type,key){
+    var row=document.createElement('div'),name=document.createElement('strong'),val=document.createElement('span');
+    row.className=cls;name.textContent=short(label||DASH);val.textContent=short(state||DASH);
+    if(cls==='status-item'){name.className='status-name';val.className='status-value state-'+(stateCls||'neutral');}
+    else{val.className='status';klass(val,'good',stateCls==='ok');klass(val,'bad',stateCls==='warn');}
+    row.appendChild(name);row.appendChild(val);
+    if(type&&key){var detail=makeDetailButton(type,key,label,true);if(detail)row.appendChild(detail);}
+    else if(path){var link=createLiveLink(path,label,true);if(link)row.appendChild(link);}
+    return row;
+  }
+  function renderParts(parts) {
+    var root = sv('component-list'); if (!root) return;
+    clear(root);
+    if (!parts || !array(parts.list)) { put('#system-components', DASH); root.appendChild(text(DASH)); return; }
+    var hidden = array(parts.hidden) ? parts.hidden : [], count = 0;
+    each(parts.list, function (p) {
+      if (!p || !p.id || hidden.indexOf(p.id) !== -1 || p.kind === 'retired') return;
+      count++;
+      var st = statusName(p); root.appendChild(makeRow('status-item',p.title||p.id,st[0],st[1],null,'component',p.id));
+    });
+    put('#system-components', format(count));
+    if (!count) root.appendChild(text(DASH));
+  }
+  function clearStatus() {
+    kpi(0,DASH,DASH); kpi(1,DASH,DASH);
+    each(['#system-version','#setting-version','#system-disk','#system-components','#setting-channel','#about-version','#about-channel'],function (s) {put(s,DASH);});
+    var root = sv('vpn-tunnels'); clear(root); if (root) root.appendChild(text(DASH));
+    root = sv('component-list'); clear(root); if(root)root.appendChild(text(DASH));renderAbout(null);renderComponentPages(null);
+  }
+  function tunnelOff(t, wg) {
+    return t && String(t.state || '').toLowerCase() === 'down' && !(yes(wg.failopen_active) && t.name === wg.default_tunnel);
+  }
+  function vpnState(t, wg) {
+    if (t.disabled === true || t.enabled === false) return ['Выключен','off'];
+    if (String(t.state || '').toLowerCase() === 'down') return yes(wg.failopen_active) ? ['Выключен агентом','warn'] : ['Выключен','off'];
+    var conn=knownBoolean(t.connected);if(conn===null)return[DASH,'neutral'];
+    return conn?['Подключён','ok']:['Не в сети','warn'];
+  }
+  function renderStatus(s) {
+    var wan = s.wan || {}, wg = s.wg || {}, p = s.platform || {};
+    var internet = wan.internet === true ? 'В сети' : wan.internet === false ? 'Нет связи' : DASH;
+    kpi(0, internet, wan.internet === true ? 'Подключено' : wan.internet === false ? 'Нет соединения' : DASH);
+    var interfaces = array(wg.interfaces) && wg.interfaces_unknown !== true ? wg.interfaces : null, root = sv('vpn-tunnels');
+    clear(root);
+    if (!interfaces) { kpi(1,DASH,DASH); if (root) root.appendChild(text(DASH)); }
+    else {
+      var enabled=0,connected=0,known=true;
+      each(interfaces,function(t){if (!t || t.disabled === true || t.enabled === false || tunnelOff(t,wg))return;
+        enabled++;var conn=knownBoolean(t.connected);if(conn===null)known=false;else if(conn)connected++;});
+      kpi(1,known?connected+' из '+enabled:DASH, interfaces.length ? 'Туннели VPN' : 'Туннелей нет');
+      if(root){if(!interfaces.length)root.appendChild(text(DASH));
+        each(interfaces,function(t){if(!t)return;var st=vpnState(t,wg);root.appendChild(makeRow('tunnel-item',t.description||t.title||t.label||t.name||DASH,st[0],st[1],tunnelPath(t),'tunnel',t.name));});}
+    }
+    var v=version(p.version,p.last_sequence);put('#system-version',v);put('#setting-version',v);
+    put('#setting-channel',p.channel==null?DASH:short(p.channel));
+    var kb = num(s.storage && s.storage.free_kb);
+    put('#system-disk', kb === null ? DASH : kb >= 1048576 ? (kb/1048576).toFixed(1)+' ГБ' : Math.round(kb/1024)+' МБ');
+    renderParts(s.parts);renderAbout(s);renderComponentPages(s);
+  }
+  var routeNames={vpn:'VPN', isp:'Провайдер', dns:'Smart DNS',unknown:DASH};
+  var routeColors={vpn:'var(--purple)',isp:'var(--cyan)',dns:'var(--orange)',unknown:'var(--soft)'};
+  function via(l) { return l && l.dns_mode ? 'dns' : l && l.via === 'vpn' ? 'vpn' : l && (l.via === 'bypass' || l.via === 'isp' || l.route === 'ISP') ? 'isp' : 'unknown'; }
+  function clearLists(){kpi(3,DASH,DASH);put('#live-routes',DASH);put('#route-distribution',DASH);}
+  function pluralLists(n) {var a=n%10,b=n%100;return b>=11&&b<=14?'списков':a===1?'список':a>=2&&a<=4?'списка':'списков';}
+  function renderLists(d){
+    var lists = array(d.lists)?d.lists:null; if(!lists){clearLists();return;}
+    var count={vpn:0,isp:0,dns:0,unknown:0},domains=0,measured=0;
+    each(lists,function(l){count[via(l)]++;var n=num(l.count);if(n!==null){domains+=n;measured++;}});
+    kpi(3,measured===lists.length?format(domains):DASH,lists.length+' '+pluralLists(lists.length));
+    var root=sv('live-routes');clear(root);
+    if(root){if(!lists.length)root.appendChild(text(DASH));
+      each(lists.slice(0,150),function(l){root.appendChild(makeRow('live-route',l.description||l.title||l.name||DASH,routeNames[via(l)],'',listPath(l),'list',l.name));});
+      if(lists.length>150){var more=document.createElement('div');more.className='remaining';more.textContent='Показано 150 из '+lists.length;root.appendChild(more);}
+    }
+    var dist=sv('route-distribution');clear(dist);if(!dist)return;
+    if(!lists.length){dist.appendChild(text(DASH));return;}
+    var bar=document.createElement('div'),legend=document.createElement('div');bar.className='route-dist-bar';legend.className='route-dist-legend';
+    attr(bar,'role','img');attr(bar,'aria-label','Распределение доменных списков по назначению');
+    each(['vpn','isp','dns','unknown'],function(key){if(!count[key])return;
+      var piece=document.createElement('span'),item=document.createElement('span'),dot=document.createElement('i');
+      piece.style.width=(100*count[key]/lists.length)+'%';piece.style.background=routeColors[key];bar.appendChild(piece);
+      dot.style.background=routeColors[key];item.appendChild(dot);item.appendChild(text(routeNames[key]+' · '+count[key]));legend.appendChild(item);
+    });dist.appendChild(bar);dist.appendChild(legend);
+  }
+  function smartState(sd){if(!sd||typeof sd!=='object')return DASH;
+    var rows=array(sd.server_rows)?sd.server_rows:null;
+    if(rows&&rows.length===0&&sd.own===false)return 'Не настроен';
+    if(sd.alive==='yes')return rows&&rows.length===0&&!sd.own?'Не настроен':'Доступен';
+    if(sd.alive==='no')return 'Недоступен';return DASH;
+  }
+  function clearAI(){kpi(2,DASH,DASH);put('#smartdns-status',DASH);put('#service-list',DASH);}
+  function renderAI(d){var state=smartState(d.smartdns);kpi(2,state,state===DASH?DASH:'Smart DNS');put('#smartdns-status',state);
+    var root=sv('service-list');clear(root);if(!root)return;
+    if(!array(d.services)||!d.services.length){root.appendChild(text(DASH));return;}
+    each(d.services.slice(0,120),function(s){var row=document.createElement('div'),name=document.createElement('div'),right=document.createElement('div');
+      row.className='service-item';name.className='service-title';right.className='service-right';
+      name.textContent=short(s.title||s.name||s.id||DASH);
+      each([['Выбрано',s.selected],['Применено',s.effective]],function(k){var line=document.createElement('div'),caption=document.createElement('span'),v=document.createElement('strong');
+        line.className='service-row';caption.textContent=k[0];v.textContent=pretty(k[1]);
+        if(k[0]==='Применено'&&v.textContent!==DASH&&s.selected&&s.selected!==s.effective)klass(v,'pending',true);
+        line.appendChild(caption);line.appendChild(v);right.appendChild(line);});
+      row.appendChild(name);row.appendChild(right);root.appendChild(row);
+    });
+    if(d.services.length>120){var rest=document.createElement('div');rest.className='remaining';rest.textContent='Показано 120 из '+d.services.length;root.appendChild(rest);}
+  }
+  function clearAds(){put('#ads-status',DASH);}
+  function renderAds(d){put('#ads-status',d.component_enabled===false?'Выключено':d.paused===true?'На паузе':d.component_enabled===true&&d.paused===false?'Включено':DASH);}
+  function fmtDate(value){if(value===null||value===undefined||value==='')return '';
+    var n=Number(value),date=isFinite(n)?new Date(n<1e11?n*1000:n):new Date(value);
+    if(isNaN(date.getTime()))return '';try{return date.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}catch(e){return date.toLocaleString();}
+  }
+  function noteItems(d){return d&&(array(d.items)?d.items:array(d.notes)?d.notes:array(d.events)?d.events:null);}
+  function makeNote(item){var row=document.createElement('div'),dot=document.createElement('span'),body=document.createElement('div'),title=document.createElement('div');
+    var sev=String(item.sev||item.level||'').toLowerCase(),when=fmtDate(item.at!==undefined?item.at:item.time!==undefined?item.time:item.timestamp);
+    row.className='event';dot.className='dot';klass(dot,'warn',sev==='warn'||sev==='warning');klass(dot,'error',sev==='crit'||sev==='error');
+    klass(dot,'neutral',['warn','warning','crit','error','ok','success'].indexOf(sev)===-1);
+    title.className='event-title';title.textContent=short(item.title||item.text||item.message||DASH);body.appendChild(title);
+    if(when){var t=document.createElement('time');t.textContent=when;body.appendChild(t);}
+    row.appendChild(dot);row.appendChild(body);return row;
+  }
+  function clearNotes(){put('#events .events',DASH);setUnread(null);}
+  function renderNotes(d){var root=one('#events .events');clear(root);var items=noteItems(d);
+    if(!items||!items.length){if(root)root.appendChild(text(DASH));setUnread(items?0:null);return;}
+    if(root)each(items.slice(0,25),function(item){root.appendChild(makeNote(item));});
+    // A counter is shown only when the API actually supplies read state or read_at.
+    var count=null;if(typeof d.read_at==='number'){
+      count=0;each(items,function(n){if(num(n.at)!==null&&num(n.at)>d.read_at)count++;});
+    }else{
+      var known=true;count=0;each(items,function(n){if(typeof n.read!=='boolean'){known=false;return;}if(!n.read)count++;});
+      if(!known)count=null;
+    }
+    setUnread(count);
+  }
+  function setUnread(n){var badge=sv('unread-count'),bell=sv('bellBtn');if(!badge)return;
+    if(n===null||n===undefined||n<=0){badge.hidden=true;badge.textContent='';attr(bell,'aria-label','Уведомления');}
+    else{badge.textContent=n>99?'99+':String(n);badge.hidden=false;attr(bell,'aria-label','Уведомления: '+n);}
+  }
+  function api(action,done){var xhr=new XMLHttpRequest(),settled=false;
+    function finish(err,body){if(settled)return;settled=true;done(err,body);}
+    try{xhr.open('GET','/cgi-bin/api.cgi?action='+encodeURIComponent(action),true);xhr.withCredentials=true;
+      xhr.timeout=12000;xhr.setRequestHeader('Accept','application/json');
+      xhr.onreadystatechange=function(){if(xhr.readyState!==4||settled)return;
+        if(xhr.status===401||xhr.status===403){finish('auth');return;}
+        if(xhr.status<200||xhr.status>=300){finish('HTTP '+xhr.status);return;}
+        var result;try{result=JSON.parse(xhr.responseText);}catch(e){finish('json');return;}
+        if(!result||typeof result!=='object'||result.ok===false){finish('api');return;}
+        finish(null,result);
+      };
+      xhr.ontimeout=function(){finish('timeout');};xhr.onerror=function(){finish('network');};xhr.send(null);
+    }catch(e){finish('network');}
+  }
+
+  /* One transient status output for all Panel operations. No second label near buttons. */
+  var noticeTimer=0,noticeSlowTimer=0,noticeEpoch=0;
+  function hideNotice(){var el=sv('ui-status');if(!el)return;
+    noticeEpoch++;if(noticeTimer){window.clearTimeout(noticeTimer);noticeTimer=0;}
+    klass(el,'is-visible',false);el.hidden=true;
+  }
+  function showNotice(message,kind,hold){var el=sv('ui-status'),copy=sv('ui-status-text'),close=sv('ui-status-dismiss');
+    if(!el||!copy)return;
+    noticeEpoch++;var epoch=noticeEpoch;
+    if(noticeTimer){window.clearTimeout(noticeTimer);noticeTimer=0;}
+    el.className='ui-status is-'+(kind||'info');
+    attr(el,'role',kind==='error'?'alert':'status');
+    attr(el,'aria-live',kind==='error'?'assertive':'polite');
+    copy.textContent=String(message||'');
+    if(close)close.hidden=!(kind==='error'||kind==='warning'&&hold);
+    el.hidden=false;klass(el,'is-visible',true);
+    if(!hold){noticeTimer=window.setTimeout(function(){if(epoch===noticeEpoch)hideNotice();},kind==='success'?3000:kind==='info'?2500:5000);}
+  }
+  var work=[['status',renderStatus,clearStatus],['lists-data',renderLists,clearLists],['ai-data',renderAI,clearAI],['ads-data',renderAds,clearAds],['notes',renderNotes,clearNotes]];
+  function startRefresh(){
+    if(refreshing)return;
+    refreshing=true;errorCount=0;
+    var index=0,pending=0,finished=0,success=0,unauthorized=false,networkFailure=false,statusDone=false;
+    var button=sv('refresh');
+    if(button){button.disabled=true;klass(button,'refreshing',true);attr(button,'aria-busy','true');}
+    showNotice('Обновляем данные…','busy',true);
+    if(noticeSlowTimer)window.clearTimeout(noticeSlowTimer);
+    noticeSlowTimer=window.setTimeout(function(){
+      noticeSlowTimer=0;
+      if(refreshing)showNotice(statusDone?'Получение данных задерживается…':'Роутер отвечает медленно…','warning',true);
+    },6000);
+    function settle(){
+      if(finished!==work.length)return;
+      refreshing=false;
+      if(noticeSlowTimer){window.clearTimeout(noticeSlowTimer);noticeSlowTimer=0;}
+      if(button){button.disabled=false;klass(button,'refreshing',false);button.removeAttribute('aria-busy');}
+      if(unauthorized)showNotice('Требуется вход в Панель','error',true);
+      else if(success===0)showNotice(networkFailure?'Нет связи с Панелью':'Не удалось получить данные','error',true);
+      else if(errorCount)showNotice('Часть данных недоступна','warning',true);
+      else showNotice('Данные обновлены','success',false);
+      buildSearch();updateOverlay();
+    }
+    function run(){while(pending<2&&index<work.length){
+      (function(job){pending++;api(job[0],function(err,payload){
+        pending--;finished++;if(job[0]==='status')statusDone=true;
+        var slot=job[0]==='status'?'status':job[0]==='lists-data'?'lists':job[0]==='ai-data'?'ai':job[0]==='ads-data'?'ads':'notes';
+        if(err){data[slot]=null;errorCount++;job[2]();if(slot==='status'||slot==='lists')renderRuntimePages();if(err==='auth')unauthorized=true;if(err==='network'||err==='timeout')networkFailure=true;}
+        else{data[slot]=payload;success++;job[1](payload);if(slot==='status'||slot==='lists')renderRuntimePages();}
+        buildSearch();updateOverlay();if(slot==='status'||slot==='lists')updateDetailIfOpen();run();settle();
+      });})(work[index++]);
+    }}
+    run();
+  }
+
+  /* Fixed bottom bar: the scroll position and current section remain linked. */
+  var anchors=[['overview','overview'],['wan','network'],['vpn','vpn'],['routes','routes'],['routes','control'],['ads','ads'],['ai','dns'],['utils','components'],['system','system'],['settings','settings'],['utils','directory'],['system','about'],['system','changes'],['system','help'],['logs','events']];
+  var current='overview', navLock=0, navChoice=null, pendingScroll=false;
+  var primary=['overview','wan','vpn','routes'];
+  function markNav(id){current=id;each(all('.tabbar a[data-nav],.more-links a[data-nav]'),function(el){var active=el.getAttribute('data-nav')===id;
+    klass(el,'is-active',active);if(active)attr(el,'aria-current','page');else el.removeAttribute('aria-current');});
+    var button=sv('more-toggle'),isMore=primary.indexOf(id)===-1;
+    if(button){klass(button,'is-active',isMore);attr(button,'aria-label',isMore?'Ещё — '+({ai:'DNS',ads:'Реклама',utils:'Компоненты',system:'Система',settings:'Настройки',logs:'Журналы'}[id]||'Раздел'):'Ещё');}
+  }
+  function navOf(el){for(var i=0;i<anchors.length;i++){if(anchors[i][1]===el)return anchors[i][0];}return 'overview';}
+  function atScroll(){var found='overview',offset=80;
+    each(anchors,function(a){var target=sv(a[1]);if(target&&target.getBoundingClientRect().top<=offset)found=a[0];});
+    var height=Math.max(document.documentElement.scrollHeight,document.body.scrollHeight),scroll=window.pageYOffset||document.documentElement.scrollTop||0;
+    if((window.innerHeight||document.documentElement.clientHeight)+scroll>=height-4)found='logs';
+    return found;
+  }
+  function track(){pendingScroll=false;if(navChoice||now()<navLock)return;var next=atScroll();if(next!==current)markNav(next);}
+  function onScroll(){if(!pendingScroll){pendingScroll=true;frame(track);}}
+  function stopNavigation(){navChoice=null;navLock=0;}
+  function closeMore(){var m=sv('more-sheet'),toggle=sv('more-toggle');if(m)m.hidden=true;attr(toggle,'aria-expanded','false');}
+  function focusTo(id,updateUrl){var target=sv(id);if(!target)return;
+    navChoice=navOf(id);navLock=now()+1100;markNav(navChoice);closeMore();
+    var far=Math.abs(target.getBoundingClientRect().top)>(window.innerHeight||800)*1.6;try{target.scrollIntoView({behavior:reduceMotion()||far?'auto':'smooth',block:'start'});}catch(e){target.scrollIntoView(true);}
+    if(updateUrl){try{window.history.replaceState(null,'','#'+id);}catch(e){window.location.hash=id;}}
+  }
+
+  /* Theme: four modes match existing VWARD. A local preference is not a router setting. */
+  var themes=['system','time','light','dark'];
+  var theme='system';try{var saved=window.localStorage.getItem('vward-theme');if(themes.indexOf(saved)!==-1)theme=saved;}catch(e){}
+  var themeLabels={system:'как в системе',time:'по времени суток',light:'светлая',dark:'тёмная'};
+  function effectiveTheme(){if(theme==='time'){var h=new Date().getHours();return h>=7&&h<20?'light':'dark';}
+    if(theme==='system'){try{if(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)return 'light';}catch(e){}return 'dark';}
+    return theme;
+  }
+  function applyTheme(){var root=document.documentElement,actual=effectiveTheme(),b=sv('themeBtn');
+    attr(root,'data-theme',actual);klass(root,'theme-light',actual==='light');
+    if(b){attr(b,'aria-label','Тема: '+themeLabels[theme]);attr(b,'title','Тема: '+themeLabels[theme]);
+      var icon=one('use',b);if(icon){icon.setAttribute('href','#i-'+(theme==='light'?'sun':theme==='dark'?'moon':theme==='time'?'clock':'auto'));
+        icon.setAttributeNS('http://www.w3.org/1999/xlink','href','#i-'+(theme==='light'?'sun':theme==='dark'?'moon':theme==='time'?'clock':'auto'));}}
+    var label=sv('theme-mode');if(label)label.textContent=themeLabels[theme];
+  }
+  function cycleTheme(){var i=themes.indexOf(theme);theme=themes[(i+1)%themes.length];
+    try{window.localStorage.setItem('vward-theme',theme);}catch(e){}
+    applyTheme();if(!refreshing)showNotice('Тема: '+themeLabels[theme],'info',false);}
+
+  /* Search and notifications: local indexes of fetched API data; never fake entries. */
+  var sections=[['overview','Обзор','Состояние сети'],['network','Сеть','Интернет'],['vpn','VPN','Туннели'],['routes','Маршруты','Доменные списки'],['control','Сервисы','Выбрано Применено'],['ads','Реклама','Фильтрация'],['dns','DNS','Smart DNS'],['components','Компоненты','Части'],['system','Система','Версия'],['settings','Настройки','Канал'],['events','Журналы','Уведомления'],['directory','Разделы Панели','Меню'],['about','О программе','Лицензия MIT'],['changes','Список изменений','Версии'],['help','Инструкции','Документация']];
+  var searchRows=[];
+  function addSearch(id,title,kind){if(!title||title===DASH)return;searchRows.push({id:id,title:short(title),kind:kind});}
+  function buildSearch(){searchRows=[];
+    each(sections,function(s){addSearch(s[0],s[1],s[2]);});
+    each(livePages,function(p){if(visibleStaticPage(p.id))searchRows.push({id:'directory',title:p.title,kind:'Страница действующей Панели',path:p.path});});
+    if(data.status){
+      var wg=data.status.wg||{};
+      if(array(wg.interfaces)&&wg.interfaces_unknown!==true)each(wg.interfaces,function(t){
+        var path=tunnelPath(t),label=t&&short(t.description||t.title||t.label||t.name);
+        if(path&&label&&label!==DASH)searchRows.push({id:'vpn',title:label,kind:'Туннель',detail:'tunnel',key:t.name});
+      });
+      var parts=data.status.parts||{},hidden=array(parts.hidden)?parts.hidden:[];
+      if(array(parts.list))each(parts.list,function(p){
+        if(!p||!p.id||hidden.indexOf(p.id)!==-1||p.kind==='retired')return;
+        var path=dynamicComponentRoutes[p.id];if(path)searchRows.push({id:'components',title:short(p.title||p.id),kind:'Компонент',detail:'component',key:p.id});
+        else addSearch('components',p.title,'Компонент');
+      });
+    }
+    if(data.lists&&array(data.lists.lists))each(data.lists.lists,function(l){
+      var path=listPath(l),label=l&&short(l.description||l.title||l.name);
+      if(path&&label&&label!==DASH)searchRows.push({id:'routes',title:label,kind:'Доменный список',detail:'list',key:l.name});
+    });
+    if(data.ai&&array(data.ai.services))each(data.ai.services,function(s){addSearch('control',s.title||s.name||s.id,'Сервис');});
+    renderSearch();
+  }
+  function renderSearch(){var input=sv('search-input'),result=sv('search-results');if(!result||!input)return;
+    var q=String(input.value||'').toLowerCase().replace(/^\s+|\s+$/g,'');clear(result);var shown=0;
+    each(searchRows,function(item){if(shown>=40||q&&(item.title+' '+item.kind).toLowerCase().indexOf(q)===-1)return;
+      shown++;var row=document.createElement('button'),head=document.createElement('strong'),sub=document.createElement('small');
+      row.type='button';row.className='search-result';if(item.detail&&item.key){attr(row,'data-detail-type',item.detail);attr(row,'data-detail-key',item.key);}
+      else if(item.path)attr(row,'data-live-path',item.path);else attr(row,'data-anchor',item.id);
+      head.textContent=item.title;sub.textContent=item.kind;
+      row.appendChild(head);row.appendChild(sub);result.appendChild(row);
+    });
+    if(!shown)result.appendChild(text(DASH));
+  }
+  function notesOverlay(){var root=sv('notes-content');if(!root)return;clear(root);
+    var items=noteItems(data.notes);
+    if(!items||!items.length){root.appendChild(text(DASH));return;}
+    each(items.slice(0,40),function(item){root.appendChild(makeNote(item));});
+  }
+  function updateOverlay(){if(activeOverlay==='notes')notesOverlay();if(activeOverlay==='search')renderSearch();}
+  var activeOverlay=null,lastFocus=null,activeDetail=null;
+  function openOverlay(type){if(activeOverlay===type){closeOverlay();return;}
+    activeOverlay=type;lastFocus=document.activeElement;
+    var panel=sv('ui-overlay'),search=sv('search-panel'),notes=sv('notes-panel'),detail=sv('detail-panel');
+    if(!panel)return;
+    panel.hidden=false;search.hidden=type!=='search';notes.hidden=type!=='notes';if(detail)detail.hidden=type!=='detail';
+    klass(document.documentElement,'overlay-open',true);
+    attr(sv('searchBtn'),'aria-expanded',type==='search');attr(sv('bellBtn'),'aria-expanded',type==='notes');
+    if(type==='search'){buildSearch();window.setTimeout(function(){var input=sv('search-input');if(input)input.focus();},40);}
+    if(type==='notes'){notesOverlay();window.setTimeout(function(){var close=sv('overlay-close');if(close)close.focus();},40);}
+    if(type==='detail'){window.setTimeout(function(){var title=sv('detail-title');if(title)title.focus();},40);}
+  }
+  function closeOverlay(){if(!activeOverlay)return;activeOverlay=null;activeDetail=null;
+    var panel=sv('ui-overlay');if(panel)panel.hidden=true;
+    klass(document.documentElement,'overlay-open',false);
+    attr(sv('searchBtn'),'aria-expanded','false');attr(sv('bellBtn'),'aria-expanded','false');
+    if(lastFocus&&lastFocus.focus)lastFocus.focus();
+  }
+
+  /* v10: native read-only detail view. One API source for each fact. No router writes. */
+  function knownBoolean(value){
+    if(value===true||value===1||value==='1'||value==='yes'||value==='true'||value==='up')return true;
+    if(value===false||value===0||value==='0'||value==='no'||value==='false'||value==='down')return false;
+    return null;
+  }
+  function findDetail(type,key){
+    var i,items,hidden,parts,st,wg,record;
+    if(type==='tunnel'){
+      st=data.status;if(!st||!st.wg||st.wg.interfaces_unknown===true||!array(st.wg.interfaces))return null;
+      items=st.wg.interfaces;
+    }else if(type==='list'){
+      if(!data.lists||!array(data.lists.lists))return null;
+      items=data.lists.lists;
+    }else if(type==='component'){
+      st=data.status;parts=st&&st.parts;if(!parts||!array(parts.list))return null;
+      hidden=array(parts.hidden)?parts.hidden:[];
+      if(hidden.indexOf(key)!==-1)return null;
+      items=parts.list;
+    }else return null;
+    for(i=0;i<items.length;i++){
+      record=items[i];if(record&&record[ type==='component'?'id':'name']===key){
+        if(type==='component'&&record.kind==='retired')return null;
+        return record;
+      }
+    }
+    return null;
+  }
+  function detailFact(target,label,value){
+    var box=document.createElement('dl'),dt=document.createElement('dt'),dd=document.createElement('dd');
+    box.className='detail-fact';dt.textContent=label;dd.textContent=(value===null||value===undefined||value==='')?DASH:short(value);
+    box.appendChild(dt);box.appendChild(dd);target.appendChild(box);
+  }
+  function detailData(type,key){
+    var obj=findDetail(type,key),title,category,explain,path,rows=[];
+    if(!obj)return null;
+    if(type==='tunnel'){
+      title=obj.description||obj.title||obj.label||obj.name||DASH;
+      category='Туннель VPN';path=tunnelPath(obj);
+      rows.push(['Состояние',vpnState(obj,(data.status||{}).wg||{})[0]]);
+      var con=knownBoolean(obj.connected);
+      rows.push(['Соединение',con===null?DASH:con?'Подключён':'Не подключён']);
+      rows.push(['Название в Keenetic',obj.name||DASH]);
+      explain='Сведения о подключении, полученные от роутера. Они не доказывают прохождение трафика конкретного устройства.';
+    }else if(type==='list'){
+      title=obj.description||obj.title||obj.name||DASH;
+      category='Доменный список';path=listPath(obj);
+      rows.push(['Назначенный путь',routeNames[via(obj)]||DASH]);
+      var n=num(obj.count);rows.push(['Доменов в списке',n===null?DASH:format(n)]);
+      if(obj.watch===true||obj.watch===false)rows.push(['Автоматическое управление',obj.watch?'Включено':'Выключено']);
+      if(obj.via==='vpn'&&typeof obj.route==='string'&&obj.route&&obj.route!=='vpn')rows.push(['Выбранный туннель',obj.route]);
+      explain='Показано назначение списка, а не подтверждённый маршрут клиентского трафика. Применённое состояние отдельно не проверено.';
+    }else{
+      title=obj.title||obj.id||DASH;
+      category='Компонент VWARD';path=dynamicComponentRoutes[obj.id]||'';
+      rows.push(['Состояние',statusName(obj)[0]]);
+      var installed=knownBoolean(obj.installed),enabled=knownBoolean(obj.enabled),running=knownBoolean(obj.running);
+      rows.push(['Установлен',installed===null?DASH:installed?'Да':'Нет']);
+      rows.push(['Включён',enabled===null?DASH:enabled?'Да':'Нет']);
+      rows.push(['Запущен',running===null?DASH:running?'Да':'Нет']);
+      explain='Показано состояние из реестра VWARD. Запущенный процесс сам по себе не подтверждает исправность функции.';
+    }
+    return{title:title,category:category,path:path,rows:rows,explain:explain};
+  }
+  function renderDetail(){
+    if(!activeDetail)return false;
+    var v=detailData(activeDetail.type,activeDetail.key);
+    if(!v)return false;
+    put('#detail-category',v.category);put('#detail-title',v.title);put('#detail-explain',v.explain);
+    var root=sv('detail-content'),actions=sv('detail-actions');clear(root);clear(actions);
+    each(v.rows,function(row){detailFact(root,row[0],row[1]);});
+    if(v.path){var link=createLiveLink(v.path,'Открыть в действующей Панели',true);
+      if(link){link.className='detail-action';link.textContent='Открыть в действующей Панели';actions.appendChild(link);}}
+    return true;
+  }
+  function updateDetailIfOpen(){
+    if(activeOverlay==='detail'&&activeDetail&&!renderDetail())closeOverlay();
+  }
+  function openDetail(type,key){
+    var value=detailData(type,key);
+    if(!value){showNotice('Актуальные сведения недоступны','warning',false);return;}
+    if(activeOverlay)closeOverlay();
+    activeDetail={type:type,key:key};renderDetail();openOverlay('detail');
+  }
+  function revealSections(){var sectionsNodes=all('main .section');
+    if(window.IntersectionObserver&&!reduceMotion()){
+      var observer=new IntersectionObserver(function(entries){each(entries,function(entry){if(entry.isIntersecting){klass(entry.target,'is-visible',true);observer.unobserve(entry.target);}});},{rootMargin:'0px 0px 30px 0px',threshold:0.02});
+      each(sectionsNodes,function(el){klass(el,'can-reveal',true);observer.observe(el);});
+    }
+  }
+
+  /* v8: source maps follow PAGES + DETAILS paths in the live dev panel. */
+  var livePages=[{"id":"d-diag","title":"Диагностика","path":"/system/diag"},{"id":"d-stability","title":"Стабильность","path":"/system/stability"},{"id":"d-files","title":"Файлы VWARD","path":"/system/files"},{"id":"d-control","title":"Управление","path":"/system/control"},{"id":"d-cron","title":"Задания по расписанию","path":"/system/diag/cron"},{"id":"u-vward","title":"VWARD","path":"/system/vward"},{"id":"u-agh","title":"Обновление AdGuard Home","path":"/system/adguard-home-update"},{"id":"u-fw","title":"Прошивка Keenetic","path":"/system/firmware"},{"id":"u-opkg","title":"Пакеты Entware","path":"/system/entware"},{"id":"d-notes","title":"Что нового","path":"/system/vward/notes"},{"id":"d-mydomains","title":"Мои домены","path":"/domains/my"},{"id":"d-force","title":"Мои домены","path":"/domains/always-vpn"},{"id":"d-adaptive","title":"Автоподбор доменов","path":"/domains/autopick"},{"id":"d-smartdns","title":"Домены Smart DNS","path":"/ai/smartdns"},{"id":"d-wanrec","title":"Восстановление: дополнительно","path":"/network/recovery"},{"id":"d-rsources","title":"Источники","path":"/domains/sources"},{"id":"d-services","title":"Сервисы","path":"/domains/services"},{"id":"d-wificlients","title":"Все клиенты","path":"/network/wifi/clients"},{"id":"d-ipcats","title":"IP-категории","path":"/domains/ip-categories"},{"id":"lists","title":"Доменные списки","path":"/domains/lists"},{"id":"wifi","title":"Wi-Fi клиенты","path":"/network/wifi"},{"id":"d-querylog","title":"Журнал запросов","path":"/ads/querylog"},{"id":"d-adrecent","title":"Решения агента","path":"/ads/recent"},{"id":"d-adspub","title":"Правила в AdGuard Home","path":"/ads/publish"},{"id":"d-adprobe","title":"Подробный разбор","path":"/ads/probe"},{"id":"d-adsettings","title":"Настройки проверки","path":"/ads/settings"},{"id":"d-review","title":"На проверке","path":"/ads/review"},{"id":"d-blocked","title":"Заблокировано","path":"/ads/blocked"},{"id":"d-allowed","title":"Разрешено","path":"/ads/allowed"},{"id":"d-adcats","title":"Категории блокировки","path":"/ads/categories"},{"id":"d-rules","title":"Мои правила","path":"/ads/rules"},{"id":"d-sources","title":"Источники списков","path":"/ads/sources"},{"id":"d-jobs","title":"Задания","path":"/ads/jobs"},{"id":"d-https","title":"HTTPS-фильтр","path":"/ads/https"},{"id":"d-agh","title":"AdGuard Home","path":"/utilities/adguard-home"},{"id":"d-dnsex","title":"Исключения фильтрации","path":"/utilities/adguard-home/exceptions"},{"id":"d-awg","title":"AmneziaWG","path":"/utilities/amneziawg"},{"id":"d-vless","title":"Модуль VLESS","path":"/utilities/vless"},{"id":"d-dnsmasq","title":"dnsmasq","path":"/utilities/dnsmasq"},{"id":"d-singbox","title":"sing-box","path":"/utilities/sing-box"},{"id":"d-dnscap","title":"Захват DNS-запросов","path":"/utilities/dns-capture"},{"id":"d-doh","title":"DoH-клиент","path":"/utilities/doh-client"},{"id":"d-agents","title":"Агенты","path":"/utilities/agents"},{"id":"d-aghfilters","title":"Фильтры AdGuard Home","path":"/utilities/adguard-home/filters"},{"id":"d-aghservices","title":"Блокировка сервисов","path":"/utilities/adguard-home/services"}];
+  var dynamicComponentRoutes={
+    'route-engine':'/utilities/route-engine','route-reconciler':'/utilities/route-reconciler',
+    'route-tools':'/utilities/route-tools','policy-sync':'/utilities/policy-sync',
+    'tunnel-guard':'/utilities/tunnel-guard','wan-guard':'/utilities/wan-guard',
+    'ads-privacy-guard':'/utilities/ads-privacy-guard','runtime':'/utilities/runtime',
+    'console':'/utilities/console','update-engine':'/utilities/update-engine',
+    'platform-core':'/utilities/platform-core','vless':'/utilities/vless','agh':'/utilities/adguard-home'
+  };
+  function renderAbout(s){var p=s&&s.platform||{};
+    put('#about-version',p.version?version(p.version,p.last_sequence):DASH);
+    put('#about-channel',p.channel==null?DASH:short(p.channel));
+    var root=sv('about-dependencies');if(!root)return;clear(root);
+    var known=s&&s.parts&&array(s.parts.list)?s.parts.list:[],hidden=s&&s.parts&&array(s.parts.hidden)?s.parts.hidden:[],n=0;
+    each(known,function(part){if(!part||!part.id||hidden.indexOf(part.id)!==-1||part.kind==='retired')return;
+      var row=document.createElement('div');row.className='thirdparty-row';
+      var label=document.createElement('span'),ver=document.createElement('span'),license=document.createElement('span');
+      label.textContent=short(part.title||DASH);ver.textContent=part.version?short(part.version):DASH;license.textContent=DASH;
+      row.appendChild(label);row.appendChild(ver);row.appendChild(license);root.appendChild(row);n++;
+    });
+    if(!n){var empty=document.createElement('div');empty.className='thirdparty-row';
+      each([DASH,DASH,DASH],function(t){var el=document.createElement('span');el.textContent=t;empty.appendChild(el);});root.appendChild(empty);}
+  }
+  /* v9: additional real instance pages; no service/tunnel/list IDs are built into HTML. */
+  function runtimeGroup(root,title,entries,wasOpen){
+    if(!entries.length)return;
+    var wrap=document.createElement('details'),summary=document.createElement('summary'),box=document.createElement('div');
+    wrap.className='dir-group';wrap.setAttribute('data-runtime',title);if(wasOpen)wrap.open=true;summary.textContent=title+' · '+entries.length;
+    box.className='dir-links';wrap.appendChild(summary);wrap.appendChild(box);
+    each(entries.slice(0,80),function(e){var link=makeDetailButton(e.type,e.key,e.title,false);if(link)box.appendChild(link);});
+    if(entries.length>80){var n=document.createElement('div');n.className='dir-limit';n.textContent='Показано 80 из '+entries.length;box.appendChild(n);}
+    if(box.childNodes.length)root.appendChild(wrap);
+  }
+  function renderRuntimePages(){
+    var root=sv('live-runtime-links');if(!root)return;var open={};
+    each(all('#live-runtime-links details[open]'),function(d){open[d.getAttribute('data-runtime')]=true;});clear(root);
+    var s=data.status||{},wg=s.wg||{},interfaces=wg.interfaces_unknown===true?null:wg.interfaces;
+    var tunnels=[],lists=[],names={};
+    if(array(interfaces))each(interfaces,function(t){var path=tunnelPath(t);if(!path||names[path])return;
+      names[path]=true;tunnels.push({type:'tunnel',key:t.name,title:short(t.description||t.title||t.label||t.name)});});
+    var ldata=data.lists||{},raw=array(ldata.lists)?ldata.lists:null;names={};
+    if(raw)each(raw,function(l){var path=listPath(l);if(!path||names[path])return;
+      names[path]=true;lists.push({type:'list',key:l.name,title:short(l.description||l.title||l.name)});});
+    runtimeGroup(root,'Туннели',tunnels,open['Туннели']);runtimeGroup(root,'Доменные списки',lists,open['Доменные списки']);
+  }
+  function visibleStaticPage(id){
+    var links=all('#directory-index [data-page-id]');for(var i=0;i<links.length;i++){
+      if(links[i].getAttribute('data-page-id')===id)return !links[i].hidden;
+    }
+    return false;
+  }
+  function renderComponentPages(s){var root=sv('live-component-links');if(!root)return;
+    var wasOpen=!!one('#live-component-links details[open]');clear(root);
+    // Frozen or absent parts never appear as active pages. No API = no verified part list.
+    var parts=s&&s.parts||{},known=array(parts.list)?parts.list:null,hidden=array(parts.hidden)?parts.hidden:[];
+    var hiddenPartPages={'d-agh':'agh','d-dnsex':'agh','d-aghfilters':'agh','d-aghservices':'agh',
+        'd-awg':'awg','d-vless':'vless','d-dnsmasq':'dnsmasq','d-singbox':'singbox',
+        'd-dnscap':'dnscap','d-doh':'doh'};
+    each(all('#directory-index [data-page-id]'),function(a){
+      var p=hiddenPartPages[a.getAttribute('data-page-id')];if(!p)return;
+      var present=false;if(known)each(known,function(part){if(part&&part.id===p&&part.kind!=='retired')present=true;});
+      a.hidden=!present||hidden.indexOf(p)!==-1;
+    });
+    var group=null,rows=0;known=known||[];
+    each(known,function(part){if(!part||!part.id||hidden.indexOf(part.id)!==-1||part.kind==='retired')return;
+      var path=dynamicComponentRoutes[part.id];if(!path)return;
+      if(!group){group=document.createElement('details');group.className='dir-group';group.open=wasOpen;
+        var summary=document.createElement('summary');summary.textContent='Страницы компонентов (из API)';group.appendChild(summary);
+        var box=document.createElement('div');box.className='dir-links';group.appendChild(box);root.appendChild(group);}
+      var a=document.createElement('a'),span=document.createElement('span'),small=document.createElement('small');
+      a.className='dir-row';a.setAttribute('href',path);a.setAttribute('data-live-path',path);
+      span.textContent=short(part.title||DASH);small.textContent='Открыть действующую Панель';a.appendChild(span);a.appendChild(small);
+      group.lastChild.appendChild(a);rows++;
+    });
+  }
+
+  function boot(){
+    document.documentElement.style.scrollBehavior='auto';
+    var more=sv('more-sheet'),toggle=sv('more-toggle');
+    event(toggle,'click',function(e){e.preventDefault();if(!more)return;more.hidden=!more.hidden;attr(toggle,'aria-expanded',!more.hidden);});
+    event(document,'click',function(e){
+      var target=e.target || e.srcElement,link=closest(target,'a[data-nav]');
+      var detailTrigger=closest(target,'[data-detail-type]');
+      if(detailTrigger){e.preventDefault();openDetail(detailTrigger.getAttribute('data-detail-type'),detailTrigger.getAttribute('data-detail-key'));return;}
+      if(link){var href=link.getAttribute('href')||'',id=href.slice(1);if(id&&sv(id)){
+        e.preventDefault();focusTo(id,true);return;
+      }}
+      var liveLink=closest(target,'[data-live-path]');if(liveLink){
+        e.preventDefault();var livePath=liveLink.getAttribute('data-live-path');
+        if(window.location.protocol==='file:')showNotice('Вложенная страница откроется при запуске Панели на роутере','warning',false);
+        else if(livePath&&livePath.charAt(0)==='/'&&livePath.charAt(1)!=='/'&&!/[?#\\]/.test(livePath)){window.location.assign(livePath);}return;}
+      var searchLink=closest(target,'[data-anchor]');if(searchLink){var sid=searchLink.getAttribute('data-anchor');closeOverlay();focusTo(sid,true);return;}
+      if(closest(target,'[data-close-overlay]')){closeOverlay();return;}
+      if(more&&!more.hidden&&!closest(target,'#more-sheet')&&!closest(target,'#more-toggle'))closeMore();
+    });
+    event(window,'scroll',onScroll);event(window,'resize',onScroll);
+    event(window,'wheel',stopNavigation);event(window,'touchstart',stopNavigation);
+    event(window,'pointerdown',function(e){if(!closest(e.target,'.tabbar')&&!closest(e.target,'.more-sheet'))stopNavigation();});
+    event(document,'keydown',function(e){var key=e.key||'';
+      if(key==='Escape'||e.keyCode===27){closeOverlay();closeMore();return;}
+      if(activeOverlay&&(key==='Tab'||e.keyCode===9)){
+        var focusable=[],modal=sv('ui-overlay');
+        each(all('button, input, a[href]',modal),function(el){
+          if((el.offsetWidth||el.offsetHeight)&&!el.disabled&&el.getAttribute('tabindex')!=='-1')focusable.push(el);
+        });
+        if(focusable.length){var first=focusable[0],last=focusable[focusable.length-1];
+          if(e.shiftKey&&(document.activeElement===first||!modal.contains(document.activeElement))){e.preventDefault();last.focus();return;}
+          if(!e.shiftKey&&(document.activeElement===last||!modal.contains(document.activeElement))){e.preventDefault();first.focus();return;}
+        }
+      }
+      if((e.ctrlKey||e.metaKey)&&(key.toLowerCase()==='k'||e.keyCode===75)){
+        e.preventDefault();openOverlay('search');return;}
+      if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].indexOf(key)!==-1)stopNavigation();
+    });
+    event(sv('refresh'),'click',startRefresh);
+    event(sv('ui-status-dismiss'),'click',hideNotice);
+    event(sv('searchBtn'),'click',function(){openOverlay('search');});
+    event(sv('bellBtn'),'click',function(){openOverlay('notes');});
+    event(sv('themeBtn'),'click',cycleTheme);
+    event(sv('search-input'),'input',renderSearch);
+    var media=window.matchMedia?window.matchMedia('(prefers-color-scheme: light)'):null;
+    if(media&&media.addEventListener){media.addEventListener('change',function(){if(theme==='system')applyTheme();});}
+    else if(media&&media.addListener){media.addListener(function(){if(theme==='system')applyTheme();});}
+    event(document,'visibilitychange',function(){if(!document.hidden&&theme==='time')applyTheme();});
+    applyTheme();setUnread(null);renderComponentPages(null);renderRuntimePages();buildSearch();revealSections();markNav('overview');
+    var hash=window.location.hash?window.location.hash.slice(1):'';if(hash&&sv(hash))frame(function(){focusTo(hash,false);});
+    startRefresh();
+  }
+  if(document.readyState==='loading')event(document,'DOMContentLoaded',boot);else boot();
+})();
+</script></body>
+</html>
