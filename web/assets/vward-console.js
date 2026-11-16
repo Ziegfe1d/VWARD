@@ -1581,13 +1581,13 @@ async function listModeSet(group, mode) {
 // One Keenetic domain list: where it goes, its domains and exclusions, all editable here.
 // Where routing data comes from (vward-route-hints-update.sh, vward-policy-sync.sh).
 const ROUTE_SOURCES = [
-  { id: 'itdog', title: 'itdog - списки доменов', url: 'https://github.com/itdoginfo/allow-domains', unit: 'доменов', what: 'Заблокированные в России домены по сервисам и категориям', why: 'Подсказки автоподбору: такой домен при сбое напрямую сразу уходит в VPN' },
-  { id: 'v2fly', title: 'v2fly domain-list-community', url: 'https://github.com/v2fly/domain-list-community', unit: 'доменов', what: 'Справочник «домен - сервис»', why: 'Подсказки автоподбору и выбор IP-категорий' },
+  { id: 'itdog', title: 'itdog - списки доменов', url: 'https://github.com/itdoginfo/allow-domains', unit: 'доменов', what: 'Заблокированные в России домены по сервисам и категориям', why: 'Подсказки автоподбору: такой домен проверяется напрямую и через VPN сразу; не открылся напрямую - в VPN без повторов' },
+  { id: 'v2fly', title: 'v2fly domain-list-community', url: 'https://github.com/v2fly/domain-list-community', unit: 'доменов', what: 'Справочник «домен - сервис»', why: 'Выбор IP-категорий. Автоподбор его не берёт: в нём почти все сайты Google, Apple, Microsoft, большинство открываются напрямую' },
   { id: 'refilter', title: 'Re:filter community', url: 'https://github.com/1andrevich/Re-filter-lists', unit: 'доменов', what: 'Сервисы, которые сами не пускают пользователей из России', why: 'Подсказки автоподбору' },
   { id: 'antifilter', title: 'antifilter community', url: 'https://community.antifilter.download/', unit: 'доменов', what: 'Заблокированные домены, собранные сообществом antifilter', why: 'Подсказки автоподбору' },
-  { id: 'itdog-ip', title: 'itdog - подсети', url: 'https://github.com/itdoginfo/allow-domains/tree/main/Subnets', unit: 'подсетей', what: 'Подсети сервисов', why: 'Маршруты IP-категорий' },
-  { id: 'loyalsoldier', title: 'Loyalsoldier geoip', url: 'https://github.com/Loyalsoldier/geoip', unit: 'подсетей', what: 'Диапазоны адресов сервисов', why: 'Маршруты IP-категорий' },
-  { id: 'official', title: 'Официальные подсети сервисов', url: 'https://core.telegram.org/resources/cidr.txt', unit: 'подсетей', what: 'Подсети, которые публикует сам сервис (Telegram)', why: 'Маршруты IP-категорий - точнее любых сборок' }
+  { id: 'itdog-ip', title: 'itdog - подсети', url: 'https://github.com/itdoginfo/allow-domains/tree/main/Subnets', unit: 'подсетей', what: 'Подсети сервисов', why: 'Маршруты IP-категорий', ip: true },
+  { id: 'loyalsoldier', title: 'Loyalsoldier geoip', url: 'https://github.com/Loyalsoldier/geoip', unit: 'подсетей', what: 'Диапазоны адресов сервисов', why: 'Маршруты IP-категорий', ip: true },
+  { id: 'official', title: 'Официальные подсети сервисов', url: 'https://core.telegram.org/resources/cidr.txt', unit: 'подсетей', what: 'Подсети, которые публикует сам сервис (Telegram)', why: 'Маршруты IP-категорий - точнее любых сборок', ip: true }
 ];
 function routeSourcesRow(r) {
   const got = r.sources || [], bad = got.filter(x => !x.ok).length;
@@ -2928,8 +2928,10 @@ const RENDER = {
   'd-rsources'() {
     const got = ((S.route && S.route.sources) || []).reduce((m, x) => (m[x.id] = x, m), {});
     const row = x => {
-      const g = got[x.id], state = !g ? 'ещё не обновлялся' : g.ok ? 'обновлён ' + fmtStamp(g.ts) + ' · ' + fmtInt(g.count) + ' ' + x.unit
-        : 'не скачался ' + fmtStamp(g.ts) + (g.count ? ' · работает прошлая копия: ' + fmtInt(g.count) + ' ' + x.unit : '');
+      // The subnets are downloaded by the night run of «IP-категории»: switched off, they stay as they were
+      // (owner 16.11.2026 could not tell which sources still update).
+      const g = got[x.id], ipOff = x.ip && !compOn('policy-sync'), state = (!g ? 'ещё не обновлялся' : g.ok ? 'обновлён ' + fmtStamp(g.ts) + ' · ' + fmtInt(g.count) + ' ' + x.unit
+        : 'не скачался ' + fmtStamp(g.ts) + (g.count ? ' · работает прошлая копия: ' + fmtInt(g.count) + ' ' + x.unit : '')) + (ipOff ? ' · не обновляется: IP-категории выключены' : '');
       return '<li class="row"><div class="row-main"><b>' + esc(x.title) + '</b><small>' + esc(x.what) + '</small><small>' + esc(x.why) + '</small>' +
         '<small class="st' + (g && !g.ok ? ' warn' : '') + '">' + (g && !g.ok ? ico('alert') : '') + esc(state) + '</small></div>' +
         '<span class="row-acts"><a class="icon-btn" href="' + esc(x.url) + '" target="_blank" rel="noopener" aria-label="Открыть источник ' + esc(x.title) + '" title="Открыть источник">' + ico('external') + '</a></span></li>';
@@ -2940,7 +2942,7 @@ const RENDER = {
     return loadError(['route']) + panel('Источники', '<ul class="rows">' + ROUTE_SOURCES.map(row).join('') + svcRow + '</ul>' +
       kv([['Каталог обновлён', catalogStamp(((S.route && S.route.domains) || {}).last_update)]]) +
       '<div class="panel-actions">' + btn('refresh-hints', 'refresh', 'Обновить сейчас') + '</div>' + resultBox('routes'),
-      { desc: 'Подсказки для автоподбора; каталог обновляется ежедневно в 04:25. Решение по домену принимает автоподбор.' });
+      { desc: 'Списки доменов - подсказки для автоподбора, обновляются ежедневно в 04:25 («Инструменты маршрутов»); решение по домену принимает автоподбор. Подсети - для IP-категорий, обновляются их ночной сверкой.' });
   },
   'd-adaptive'() {
     // fix.38 (owner 12.11.2026, mock-up v3/v4): the switch; «Сейчас» - what autopick does, live while

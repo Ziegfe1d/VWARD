@@ -44,6 +44,14 @@ ipc = js[js.index("  'd-ipcats'() {"):]
 ipc = ipc[:ipc.index("\n  },")]
 if "compOn('policy-sync')" not in ipc or 'IP-категории выключены в «Компонентах»' not in ipc:
     fail("the IP categories page must say when the component is off")
+# Owner 16.11.2026 «Источники»: v2fly is no hint of autopick (fix.39.2), the subnet sources say when
+# «IP-категории» is off (its night run downloads them).
+src = js[js.index('const ROUTE_SOURCES = ['):]
+src = src[:src.index('];')]
+if 'Автоподбор его не берёт' not in src or src.count('ip: true') != 3 or 'при сбое напрямую сразу уходит' in src:
+    fail("the sources page must say what each source is for, as the core of fix.39.2 uses them")
+if "x.ip && !compOn('policy-sync')" not in js or 'не обновляется: IP-категории выключены' not in js:
+    fail("the subnet sources must say they do not update while «IP-категории» is off")
 at = js.index('  const status = s => {', js.index('function aiPage()'))
 status = js[at:js.index('\n  };', at)+5]
 at = js.index('function aiSlider(')
