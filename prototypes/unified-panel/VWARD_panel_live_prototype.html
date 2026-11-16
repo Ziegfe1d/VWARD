@@ -175,6 +175,23 @@ html{scroll-behavior:smooth;scroll-padding-top:18px}
 .more-sheet:not([hidden]){max-height:calc(100vh - 115px);max-height:calc(100dvh - 115px);overflow-y:auto;overscroll-behavior:contain}
 @media(max-width:700px){.dir-index,.release-list,.help-links{grid-template-columns:1fr}.about-details{grid-template-columns:repeat(2,minmax(0,1fr))}.dir-row small{white-space:normal;max-width:100px}}
 @media(max-width:350px){.about-details{grid-template-columns:1fr}.thirdparty-heading,.thirdparty-row{grid-template-columns:2fr 1fr 1fr;font-size:11px;padding:9px}.dir-row{font-size:12px}}
+
+/* v10: native read-only details, same overlay and accessibility as search/notifications. */
+#detail-panel .detail-heading{margin-bottom:13px}
+#detail-panel .detail-eyebrow{display:block;color:var(--purple);font-size:11px;font-weight:750;letter-spacing:.075em;text-transform:uppercase;margin-bottom:6px}
+#detail-panel h2{font-size:20px;line-height:1.25;overflow-wrap:anywhere;font-weight:700;margin:0}
+#detail-title:focus{outline:none}
+.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:13px 0}
+.detail-fact{display:flex;flex-direction:column;gap:6px;padding:12px 13px;border:1px solid var(--line);border-radius:12px;background:var(--card2);min-width:0}
+.detail-fact dt{font-size:11px;line-height:1.35;color:var(--muted);margin:0}
+.detail-fact dd{font-size:14px;line-height:1.35;font-weight:650;color:var(--ink);margin:0;overflow-wrap:anywhere}
+.detail-explain{margin:12px 0;color:var(--muted);font-size:12px;line-height:1.55}
+.detail-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.detail-action{display:inline-flex;align-items:center;justify-content:center;text-align:center;padding:10px 14px;border-radius:11px;background:var(--card2);border:1px solid var(--line2);color:var(--ink);font-size:13px;font-weight:650;min-height:42px}
+.detail-action:focus-visible,.detail-open:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.detail-open{cursor:pointer;font:inherit}
+@media(max-width:360px){.detail-grid{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){.detail-action{transition:none!important}}
 </style>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport"/>
@@ -632,7 +649,7 @@ SOFTWARE.</pre></details>
   <button id="ui-status-dismiss" class="ui-status-dismiss" type="button" aria-label="Закрыть сообщение" hidden><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-close" xlink:href="#i-close"></use></svg></button>
 </div>
 <div class="more-sheet" hidden="" id="more-sheet"><div class="more-title">Разделы</div><div class="more-links"><a data-nav="ads" href="#ads"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-block"></use></svg><span>Реклама</span></a><a data-nav="ai" href="#dns"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-spark"></use></svg><span>DNS</span></a><a data-nav="utils" href="#components"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-tools"></use></svg><span>Компоненты</span></a><a data-nav="system" href="#system"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-platform"></use></svg><span>Система</span></a><a data-nav="settings" href="#settings"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-sliders"></use></svg><span>Настройки</span></a><a data-nav="logs" href="#events"><svg aria-hidden="true" class="tab-icon" viewbox="0 0 24 24"><use href="#i-logs"></use></svg><span>Журналы</span></a><a href="#directory" data-nav="utils"><span>Все разделы</span></a><a href="#about" data-nav="system"><span>О программе</span></a><a href="#changes" data-nav="system"><span>Список изменений</span></a><a href="#help" data-nav="system"><span>Инструкции</span></a></div></div>
-<div class="ui-overlay" hidden="" id="ui-overlay"><button aria-label="Закрыть" class="ui-scrim" data-close-overlay="" type="button"></button><div class="ui-popover" role="presentation"><div class="overlay-top"><button aria-label="Закрыть" class="overlay-close" data-close-overlay="" id="overlay-close" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-close" xlink:href="#i-close"></use></svg></button></div><section aria-label="Поиск по Панели VWARD" aria-modal="true" id="search-panel" role="dialog"><input aria-label="Поиск по Панели VWARD" autocomplete="off" id="search-input" placeholder="Поиск по Панели VWARD" type="search"/><div class="search-results" id="search-results">—</div></section><section aria-label="Уведомления" aria-modal="true" hidden="" id="notes-panel" role="dialog"><h2>Уведомления</h2><div class="notes-content" id="notes-content">—</div></section></div></div><script>/* VWARD unified Panel v7 — read-only HTML5, ES5 syntax for legacy browsers.
+<div class="ui-overlay" hidden="" id="ui-overlay"><button aria-label="Закрыть" class="ui-scrim" tabindex="-1" data-close-overlay="" type="button"></button><div class="ui-popover" role="presentation"><div class="overlay-top"><button aria-label="Закрыть" class="overlay-close" data-close-overlay="" id="overlay-close" type="button"><svg aria-hidden="true" class="action-svg" viewbox="0 0 24 24"><use href="#i-close" xlink:href="#i-close"></use></svg></button></div><section aria-label="Поиск по Панели VWARD" aria-modal="true" id="search-panel" role="dialog"><input aria-label="Поиск по Панели VWARD" autocomplete="off" id="search-input" placeholder="Поиск по Панели VWARD" type="search"/><div class="search-results" id="search-results">—</div></section><section aria-label="Уведомления" aria-modal="true" hidden="" id="notes-panel" role="dialog"><h2>Уведомления</h2><div class="notes-content" id="notes-content">—</div></section><section aria-label="Сведения об объекте" aria-modal="true" hidden="" id="detail-panel" role="dialog"><div class="detail-heading"><span class="detail-eyebrow" id="detail-category">—</span><h2 id="detail-title" tabindex="-1">—</h2></div><div class="detail-grid" id="detail-content"></div><p class="detail-explain" id="detail-explain"></p><div class="detail-actions" id="detail-actions"></div></section></div></div><script>/* VWARD unified Panel v10 — read-only HTML5, ES5 syntax for legacy browsers.
    No external scripts, timers polling Keenetic, POSTs or fictional metrics. */
 (function () {
   'use strict';
@@ -708,13 +725,24 @@ SOFTWARE.</pre></details>
       name.textContent=short(label||DASH);hint.textContent='Действующая Панель';link.appendChild(name);link.appendChild(hint);}
     return link;
   }
-  function makeRow(cls, label, state, stateCls, path) {
-    var row = document.createElement('div'), name = document.createElement('strong'), val = document.createElement('span');
-    row.className = cls; name.textContent = short(label || DASH); val.textContent = short(state || DASH);
-    if (cls === 'status-item') { name.className = 'status-name'; val.className = 'status-value state-' + (stateCls || 'neutral'); }
-    else { val.className = 'status'; klass(val, 'good', stateCls === 'ok'); klass(val, 'bad', stateCls === 'warn'); }
-    row.appendChild(name); row.appendChild(val);
-    if(path){var link=createLiveLink(path,label,true);if(link)row.appendChild(link);}
+  function makeDetailButton(type,key,label,compact){
+    if(!type||typeof key!=='string'||!key)return null;
+    var b=document.createElement('button');b.type='button';
+    b.className=compact?'row-go detail-open':'dir-row detail-open';
+    attr(b,'data-detail-type',type);attr(b,'data-detail-key',key);
+    if(compact){b.textContent='Подробнее';attr(b,'aria-label','Сведения: '+short(label||key));}
+    else{var name=document.createElement('span'),hint=document.createElement('small');
+      name.textContent=short(label||key);hint.textContent='Сведения здесь';b.appendChild(name);b.appendChild(hint);}
+    return b;
+  }
+  function makeRow(cls,label,state,stateCls,path,type,key){
+    var row=document.createElement('div'),name=document.createElement('strong'),val=document.createElement('span');
+    row.className=cls;name.textContent=short(label||DASH);val.textContent=short(state||DASH);
+    if(cls==='status-item'){name.className='status-name';val.className='status-value state-'+(stateCls||'neutral');}
+    else{val.className='status';klass(val,'good',stateCls==='ok');klass(val,'bad',stateCls==='warn');}
+    row.appendChild(name);row.appendChild(val);
+    if(type&&key){var detail=makeDetailButton(type,key,label,true);if(detail)row.appendChild(detail);}
+    else if(path){var link=createLiveLink(path,label,true);if(link)row.appendChild(link);}
     return row;
   }
   function renderParts(parts) {
@@ -725,7 +753,7 @@ SOFTWARE.</pre></details>
     each(parts.list, function (p) {
       if (!p || !p.id || hidden.indexOf(p.id) !== -1 || p.kind === 'retired') return;
       count++;
-      var st = statusName(p); root.appendChild(makeRow('status-item', p.title, st[0], st[1]));
+      var st = statusName(p); root.appendChild(makeRow('status-item',p.title||p.id,st[0],st[1],null,'component',p.id));
     });
     put('#system-components', format(count));
     if (!count) root.appendChild(text(DASH));
@@ -742,8 +770,8 @@ SOFTWARE.</pre></details>
   function vpnState(t, wg) {
     if (t.disabled === true || t.enabled === false) return ['Выключен','off'];
     if (String(t.state || '').toLowerCase() === 'down') return yes(wg.failopen_active) ? ['Выключен агентом','warn'] : ['Выключен','off'];
-    if (t.connected == null) return [DASH,'neutral'];
-    return yes(t.connected) ? ['Подключён','ok'] : ['Не в сети','warn'];
+    var conn=knownBoolean(t.connected);if(conn===null)return[DASH,'neutral'];
+    return conn?['Подключён','ok']:['Не в сети','warn'];
   }
   function renderStatus(s) {
     var wan = s.wan || {}, wg = s.wg || {}, p = s.platform || {};
@@ -755,10 +783,10 @@ SOFTWARE.</pre></details>
     else {
       var enabled=0,connected=0,known=true;
       each(interfaces,function(t){if (!t || t.disabled === true || t.enabled === false || tunnelOff(t,wg))return;
-        enabled++;if(t.connected==null)known=false;else if(yes(t.connected))connected++;});
+        enabled++;var conn=knownBoolean(t.connected);if(conn===null)known=false;else if(conn)connected++;});
       kpi(1,known?connected+' из '+enabled:DASH, interfaces.length ? 'Туннели VPN' : 'Туннелей нет');
       if(root){if(!interfaces.length)root.appendChild(text(DASH));
-        each(interfaces,function(t){if(!t)return;var st=vpnState(t,wg);root.appendChild(makeRow('tunnel-item',t.description||t.title||t.label||t.name||DASH,st[0],st[1],tunnelPath(t)));});}
+        each(interfaces,function(t){if(!t)return;var st=vpnState(t,wg);root.appendChild(makeRow('tunnel-item',t.description||t.title||t.label||t.name||DASH,st[0],st[1],tunnelPath(t),'tunnel',t.name));});}
     }
     var v=version(p.version,p.last_sequence);put('#system-version',v);put('#setting-version',v);
     put('#setting-channel',p.channel==null?DASH:short(p.channel));
@@ -778,7 +806,7 @@ SOFTWARE.</pre></details>
     kpi(3,measured===lists.length?format(domains):DASH,lists.length+' '+pluralLists(lists.length));
     var root=sv('live-routes');clear(root);
     if(root){if(!lists.length)root.appendChild(text(DASH));
-      each(lists.slice(0,150),function(l){root.appendChild(makeRow('live-route',l.description||l.title||l.name||DASH,routeNames[via(l)],'',listPath(l)));});
+      each(lists.slice(0,150),function(l){root.appendChild(makeRow('live-route',l.description||l.title||l.name||DASH,routeNames[via(l)],'',listPath(l),'list',l.name));});
       if(lists.length>150){var more=document.createElement('div');more.className='remaining';more.textContent='Показано 150 из '+lists.length;root.appendChild(more);}
     }
     var dist=sv('route-distribution');clear(dist);if(!dist)return;
@@ -907,7 +935,7 @@ SOFTWARE.</pre></details>
         var slot=job[0]==='status'?'status':job[0]==='lists-data'?'lists':job[0]==='ai-data'?'ai':job[0]==='ads-data'?'ads':'notes';
         if(err){data[slot]=null;errorCount++;job[2]();if(slot==='status'||slot==='lists')renderRuntimePages();if(err==='auth')unauthorized=true;if(err==='network'||err==='timeout')networkFailure=true;}
         else{data[slot]=payload;success++;job[1](payload);if(slot==='status'||slot==='lists')renderRuntimePages();}
-        buildSearch();updateOverlay();run();settle();
+        buildSearch();updateOverlay();if(slot==='status'||slot==='lists')updateDetailIfOpen();run();settle();
       });})(work[index++]);
     }}
     run();
@@ -969,18 +997,18 @@ SOFTWARE.</pre></details>
       var wg=data.status.wg||{};
       if(array(wg.interfaces)&&wg.interfaces_unknown!==true)each(wg.interfaces,function(t){
         var path=tunnelPath(t),label=t&&short(t.description||t.title||t.label||t.name);
-        if(path&&label&&label!==DASH)searchRows.push({id:'vpn',title:label,kind:'Туннель',path:path});
+        if(path&&label&&label!==DASH)searchRows.push({id:'vpn',title:label,kind:'Туннель',detail:'tunnel',key:t.name});
       });
       var parts=data.status.parts||{},hidden=array(parts.hidden)?parts.hidden:[];
       if(array(parts.list))each(parts.list,function(p){
         if(!p||!p.id||hidden.indexOf(p.id)!==-1||p.kind==='retired')return;
-        var path=dynamicComponentRoutes[p.id];if(path)searchRows.push({id:'components',title:short(p.title||p.id),kind:'Компонент',path:path});
+        var path=dynamicComponentRoutes[p.id];if(path)searchRows.push({id:'components',title:short(p.title||p.id),kind:'Компонент',detail:'component',key:p.id});
         else addSearch('components',p.title,'Компонент');
       });
     }
     if(data.lists&&array(data.lists.lists))each(data.lists.lists,function(l){
       var path=listPath(l),label=l&&short(l.description||l.title||l.name);
-      if(path&&label&&label!==DASH)searchRows.push({id:'routes',title:label,kind:'Доменный список',path:path});
+      if(path&&label&&label!==DASH)searchRows.push({id:'routes',title:label,kind:'Доменный список',detail:'list',key:l.name});
     });
     if(data.ai&&array(data.ai.services))each(data.ai.services,function(s){addSearch('control',s.title||s.name||s.id,'Сервис');});
     renderSearch();
@@ -989,7 +1017,8 @@ SOFTWARE.</pre></details>
     var q=String(input.value||'').toLowerCase().replace(/^\s+|\s+$/g,'');clear(result);var shown=0;
     each(searchRows,function(item){if(shown>=40||q&&(item.title+' '+item.kind).toLowerCase().indexOf(q)===-1)return;
       shown++;var row=document.createElement('button'),head=document.createElement('strong'),sub=document.createElement('small');
-      row.type='button';row.className='search-result';if(item.path)attr(row,'data-live-path',item.path);else attr(row,'data-anchor',item.id);
+      row.type='button';row.className='search-result';if(item.detail&&item.key){attr(row,'data-detail-type',item.detail);attr(row,'data-detail-key',item.key);}
+      else if(item.path)attr(row,'data-live-path',item.path);else attr(row,'data-anchor',item.id);
       head.textContent=item.title;sub.textContent=item.kind;
       row.appendChild(head);row.appendChild(sub);result.appendChild(row);
     });
@@ -1001,22 +1030,108 @@ SOFTWARE.</pre></details>
     each(items.slice(0,40),function(item){root.appendChild(makeNote(item));});
   }
   function updateOverlay(){if(activeOverlay==='notes')notesOverlay();if(activeOverlay==='search')renderSearch();}
-  var activeOverlay=null,lastFocus=null;
+  var activeOverlay=null,lastFocus=null,activeDetail=null;
   function openOverlay(type){if(activeOverlay===type){closeOverlay();return;}
     activeOverlay=type;lastFocus=document.activeElement;
-    var panel=sv('ui-overlay'),search=sv('search-panel'),notes=sv('notes-panel');
+    var panel=sv('ui-overlay'),search=sv('search-panel'),notes=sv('notes-panel'),detail=sv('detail-panel');
     if(!panel)return;
-    panel.hidden=false;search.hidden=type!=='search';notes.hidden=type!=='notes';
+    panel.hidden=false;search.hidden=type!=='search';notes.hidden=type!=='notes';if(detail)detail.hidden=type!=='detail';
     klass(document.documentElement,'overlay-open',true);
     attr(sv('searchBtn'),'aria-expanded',type==='search');attr(sv('bellBtn'),'aria-expanded',type==='notes');
     if(type==='search'){buildSearch();window.setTimeout(function(){var input=sv('search-input');if(input)input.focus();},40);}
     if(type==='notes'){notesOverlay();window.setTimeout(function(){var close=sv('overlay-close');if(close)close.focus();},40);}
+    if(type==='detail'){window.setTimeout(function(){var title=sv('detail-title');if(title)title.focus();},40);}
   }
-  function closeOverlay(){if(!activeOverlay)return;activeOverlay=null;
+  function closeOverlay(){if(!activeOverlay)return;activeOverlay=null;activeDetail=null;
     var panel=sv('ui-overlay');if(panel)panel.hidden=true;
     klass(document.documentElement,'overlay-open',false);
     attr(sv('searchBtn'),'aria-expanded','false');attr(sv('bellBtn'),'aria-expanded','false');
     if(lastFocus&&lastFocus.focus)lastFocus.focus();
+  }
+
+  /* v10: native read-only detail view. One API source for each fact. No router writes. */
+  function knownBoolean(value){
+    if(value===true||value===1||value==='1'||value==='yes'||value==='true'||value==='up')return true;
+    if(value===false||value===0||value==='0'||value==='no'||value==='false'||value==='down')return false;
+    return null;
+  }
+  function findDetail(type,key){
+    var i,items,hidden,parts,st,wg,record;
+    if(type==='tunnel'){
+      st=data.status;if(!st||!st.wg||st.wg.interfaces_unknown===true||!array(st.wg.interfaces))return null;
+      items=st.wg.interfaces;
+    }else if(type==='list'){
+      if(!data.lists||!array(data.lists.lists))return null;
+      items=data.lists.lists;
+    }else if(type==='component'){
+      st=data.status;parts=st&&st.parts;if(!parts||!array(parts.list))return null;
+      hidden=array(parts.hidden)?parts.hidden:[];
+      if(hidden.indexOf(key)!==-1)return null;
+      items=parts.list;
+    }else return null;
+    for(i=0;i<items.length;i++){
+      record=items[i];if(record&&record[ type==='component'?'id':'name']===key){
+        if(type==='component'&&record.kind==='retired')return null;
+        return record;
+      }
+    }
+    return null;
+  }
+  function detailFact(target,label,value){
+    var box=document.createElement('dl'),dt=document.createElement('dt'),dd=document.createElement('dd');
+    box.className='detail-fact';dt.textContent=label;dd.textContent=(value===null||value===undefined||value==='')?DASH:short(value);
+    box.appendChild(dt);box.appendChild(dd);target.appendChild(box);
+  }
+  function detailData(type,key){
+    var obj=findDetail(type,key),title,category,explain,path,rows=[];
+    if(!obj)return null;
+    if(type==='tunnel'){
+      title=obj.description||obj.title||obj.label||obj.name||DASH;
+      category='Туннель VPN';path=tunnelPath(obj);
+      rows.push(['Состояние',vpnState(obj,(data.status||{}).wg||{})[0]]);
+      var con=knownBoolean(obj.connected);
+      rows.push(['Соединение',con===null?DASH:con?'Подключён':'Не подключён']);
+      rows.push(['Название в Keenetic',obj.name||DASH]);
+      explain='Сведения о подключении, полученные от роутера. Они не доказывают прохождение трафика конкретного устройства.';
+    }else if(type==='list'){
+      title=obj.description||obj.title||obj.name||DASH;
+      category='Доменный список';path=listPath(obj);
+      rows.push(['Назначенный путь',routeNames[via(obj)]||DASH]);
+      var n=num(obj.count);rows.push(['Доменов в списке',n===null?DASH:format(n)]);
+      if(obj.watch===true||obj.watch===false)rows.push(['Автоматическое управление',obj.watch?'Включено':'Выключено']);
+      if(obj.via==='vpn'&&typeof obj.route==='string'&&obj.route&&obj.route!=='vpn')rows.push(['Выбранный туннель',obj.route]);
+      explain='Показано назначение списка, а не подтверждённый маршрут клиентского трафика. Применённое состояние отдельно не проверено.';
+    }else{
+      title=obj.title||obj.id||DASH;
+      category='Компонент VWARD';path=dynamicComponentRoutes[obj.id]||'';
+      rows.push(['Состояние',statusName(obj)[0]]);
+      var installed=knownBoolean(obj.installed),enabled=knownBoolean(obj.enabled),running=knownBoolean(obj.running);
+      rows.push(['Установлен',installed===null?DASH:installed?'Да':'Нет']);
+      rows.push(['Включён',enabled===null?DASH:enabled?'Да':'Нет']);
+      rows.push(['Запущен',running===null?DASH:running?'Да':'Нет']);
+      explain='Показано состояние из реестра VWARD. Запущенный процесс сам по себе не подтверждает исправность функции.';
+    }
+    return{title:title,category:category,path:path,rows:rows,explain:explain};
+  }
+  function renderDetail(){
+    if(!activeDetail)return false;
+    var v=detailData(activeDetail.type,activeDetail.key);
+    if(!v)return false;
+    put('#detail-category',v.category);put('#detail-title',v.title);put('#detail-explain',v.explain);
+    var root=sv('detail-content'),actions=sv('detail-actions');clear(root);clear(actions);
+    each(v.rows,function(row){detailFact(root,row[0],row[1]);});
+    if(v.path){var link=createLiveLink(v.path,'Открыть в действующей Панели',true);
+      if(link){link.className='detail-action';link.textContent='Открыть в действующей Панели';actions.appendChild(link);}}
+    return true;
+  }
+  function updateDetailIfOpen(){
+    if(activeOverlay==='detail'&&activeDetail&&!renderDetail())closeOverlay();
+  }
+  function openDetail(type,key){
+    var value=detailData(type,key);
+    if(!value){showNotice('Актуальные сведения недоступны','warning',false);return;}
+    if(activeOverlay)closeOverlay();
+    activeDetail={type:type,key:key};renderDetail();openOverlay('detail');
   }
   function revealSections(){var sectionsNodes=all('main .section');
     if(window.IntersectionObserver&&!reduceMotion()){
@@ -1055,7 +1170,7 @@ SOFTWARE.</pre></details>
     var wrap=document.createElement('details'),summary=document.createElement('summary'),box=document.createElement('div');
     wrap.className='dir-group';wrap.setAttribute('data-runtime',title);if(wasOpen)wrap.open=true;summary.textContent=title+' · '+entries.length;
     box.className='dir-links';wrap.appendChild(summary);wrap.appendChild(box);
-    each(entries.slice(0,80),function(e){var link=createLiveLink(e.path,e.title,false);if(link)box.appendChild(link);});
+    each(entries.slice(0,80),function(e){var link=makeDetailButton(e.type,e.key,e.title,false);if(link)box.appendChild(link);});
     if(entries.length>80){var n=document.createElement('div');n.className='dir-limit';n.textContent='Показано 80 из '+entries.length;box.appendChild(n);}
     if(box.childNodes.length)root.appendChild(wrap);
   }
@@ -1065,10 +1180,10 @@ SOFTWARE.</pre></details>
     var s=data.status||{},wg=s.wg||{},interfaces=wg.interfaces_unknown===true?null:wg.interfaces;
     var tunnels=[],lists=[],names={};
     if(array(interfaces))each(interfaces,function(t){var path=tunnelPath(t);if(!path||names[path])return;
-      names[path]=true;tunnels.push({path:path,title:short(t.description||t.title||t.label||t.name)});});
+      names[path]=true;tunnels.push({type:'tunnel',key:t.name,title:short(t.description||t.title||t.label||t.name)});});
     var ldata=data.lists||{},raw=array(ldata.lists)?ldata.lists:null;names={};
     if(raw)each(raw,function(l){var path=listPath(l);if(!path||names[path])return;
-      names[path]=true;lists.push({path:path,title:short(l.description||l.title||l.name)});});
+      names[path]=true;lists.push({type:'list',key:l.name,title:short(l.description||l.title||l.name)});});
     runtimeGroup(root,'Туннели',tunnels,open['Туннели']);runtimeGroup(root,'Доменные списки',lists,open['Доменные списки']);
   }
   function visibleStaticPage(id){
@@ -1108,6 +1223,8 @@ SOFTWARE.</pre></details>
     event(toggle,'click',function(e){e.preventDefault();if(!more)return;more.hidden=!more.hidden;attr(toggle,'aria-expanded',!more.hidden);});
     event(document,'click',function(e){
       var target=e.target || e.srcElement,link=closest(target,'a[data-nav]');
+      var detailTrigger=closest(target,'[data-detail-type]');
+      if(detailTrigger){e.preventDefault();openDetail(detailTrigger.getAttribute('data-detail-type'),detailTrigger.getAttribute('data-detail-key'));return;}
       if(link){var href=link.getAttribute('href')||'',id=href.slice(1);if(id&&sv(id)){
         e.preventDefault();focusTo(id,true);return;
       }}
@@ -1124,6 +1241,16 @@ SOFTWARE.</pre></details>
     event(window,'pointerdown',function(e){if(!closest(e.target,'.tabbar')&&!closest(e.target,'.more-sheet'))stopNavigation();});
     event(document,'keydown',function(e){var key=e.key||'';
       if(key==='Escape'||e.keyCode===27){closeOverlay();closeMore();return;}
+      if(activeOverlay&&(key==='Tab'||e.keyCode===9)){
+        var focusable=[],modal=sv('ui-overlay');
+        each(all('button, input, a[href]',modal),function(el){
+          if((el.offsetWidth||el.offsetHeight)&&!el.disabled&&el.getAttribute('tabindex')!=='-1')focusable.push(el);
+        });
+        if(focusable.length){var first=focusable[0],last=focusable[focusable.length-1];
+          if(e.shiftKey&&(document.activeElement===first||!modal.contains(document.activeElement))){e.preventDefault();last.focus();return;}
+          if(!e.shiftKey&&(document.activeElement===last||!modal.contains(document.activeElement))){e.preventDefault();first.focus();return;}
+        }
+      }
       if((e.ctrlKey||e.metaKey)&&(key.toLowerCase()==='k'||e.keyCode===75)){
         e.preventDefault();openOverlay('search');return;}
       if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].indexOf(key)!==-1)stopNavigation();
