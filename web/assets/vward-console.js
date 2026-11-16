@@ -1895,21 +1895,28 @@ function aiPage() {
   const sdReason = noSd ? 'сервер не настроен' : sd.alive === 'no' ? 'сервер не отвечает' : sd.alive !== 'yes' ? 'ответ сервера не подтверждён' : sd.store === 'agh' && !(sd.storage && sd.storage.available) ? 'хранилище новых привязок недоступно' : '';
   const sdDown = !!a && !!sdReason;
   const wayName = { vpn: 'VPN', dns: 'Smart DNS', isp: 'Провайдер' };
+  // While a check runs only the button's icon turns (owner 16.11.2026: no «проверяется…» line); the
+  // line keeps what it said before the check, so the card does not jump.
   const status = s => {
-    const c = AICHK[s.id], w = s.via || 'isp';
-    if (s.selected === null && !(c && c.busy)) {
-      const paths = (s.paths || []).map(l => '«' + (l.title || l.group) + '»: ' + (l.route === 'ISP' ? 'провайдер' : tunLabel(l.route)));
+    const c0 = AICHK[s.id], busy = !!(c0 && c0.busy), c = busy ? c0.prev : c0, w = s.via || 'isp';
+    if (s.selected === null) {
+      // No way chosen for the service: its domains go by the owner's lists. Said in plain words with
+      // what to do (owner 16.11.2026: «Неполное покрытие каталога… Связь сервиса не задана» was unclear).
+      const paths = (s.paths || []).map(l => '«' + (l.title || l.group) + '» (' + (l.route === 'ISP' ? 'провайдер' : tunLabel(l.route)) + ')');
       const partial = s.coverage && s.coverage.routed < s.coverage.catalog;
-      return '<span class="stat"><i class="dot warn"></i>' + esc((s.effective === 'mixed' ? partial ? 'Неполное покрытие каталога: ' + s.coverage.routed + ' из ' + s.coverage.catalog : 'Пересекаются маршруты или DNS' : s.effective === 'unknown' ? 'Путь не подтверждён' : 'Маршрут из доменных списков') + (paths.length ? ' · ' + paths.join('; ') : '') + '. Связь сервиса не задана.') + '</span>';
+      const via = paths.length ? 'Через ' + paths.join(', ') + ' идут ' : 'Идут ';
+      const what = s.effective === 'mixed' ? partial ? via + s.coverage.routed + ' из ' + s.coverage.catalog + ' доменов сервиса' : 'Домены сервиса идут разными путями' + (paths.length ? ': ' + paths.join(', ') : '') :
+        s.effective === 'unknown' ? 'Путь сервиса не подтверждён' : 'Сервис идёт по спискам' + (paths.length ? ' ' + paths.join(', ') : '');
+      return '<span class="stat"><i class="dot warn"></i>' + esc(what + '. Выберите путь ниже - так пойдёт весь сервис.') + '</span>';
     }
-    if (c && c.busy) return '<span class="busy-pill"><i class="spin" aria-hidden="true"></i>проверяется…</span>';
+    if (busy && !c) return '<span class="stat" aria-busy="true">&nbsp;</span>';
     if (w === 'dns' && sdDown) return '<span class="stat"><i class="dot ' + (sdServerDown ? 'crit' : 'warn') + '"></i>Smart DNS · ' + esc(sdReason) + '</span>';
     const r = c && c.ok ? (c.results || []).find(x => w === 'vpn' ? 'direct' !== x.via : 'direct' === x.via) : null;
     // The chosen way is a policy; a list of the same domains may send them elsewhere (02.11: ChatGPT
     // «Провайдер» while the list «ChatGPT OpenAI (ISP)» went through VPN) - shown, never switched.
     const lst = (s.lists || []).filter(l => w === 'vpn' ? l.route && l.route !== (s.tunnel || prof().tunnel_interface) : l.route && l.route !== 'ISP')[0];
     if (w === 'vpn' && s.coverage && s.coverage.routed < s.coverage.catalog) return '<span class="stat"><i class="dot warn"></i>' + esc('Выбрано: VPN · маршруты для ' + s.coverage.routed + ' из ' + s.coverage.catalog + ' доменов каталога; покрытие неполное') + '</span>';
-    if (lst && !(c && c.busy)) return '<span class="stat"><i class="dot warn"></i>' + esc('Выбрано: ' + wayName[w] + ' · домены в списке «' + (l => l.title || l.group)(lst) + '» идут ' + (lst.route === 'ISP' ? 'через провайдера' : 'через «' + tunLabel(lst.route) + '»')) + '</span>';
+    if (lst) return '<span class="stat"><i class="dot warn"></i>' + esc('Выбрано: ' + wayName[w] + ' · домены в списке «' + (l => l.title || l.group)(lst) + '» идут ' + (lst.route === 'ISP' ? 'через провайдера' : 'через «' + tunLabel(lst.route) + '»')) + '</span>';
     const v = r ? r.verdict : '', sdProxy = w !== 'dns' && c && c.smartdns && r && 'direct' === r.via;
     const cls = !c ? '' : !c.ok ? 'warn' : v === 'open' && !sdProxy ? 'ok' : v === 'open' || v === 'answer' ? 'warn' : v ? 'crit' : 'warn';
     const txt = !c ? 'не проверен' : !c.ok ? 'проверка не удалась' + (c.why ? ': ' + c.why : '') : r ? ('direct' === r.via ? 'напрямую ' : '') + (SVC_VERDICT[v] || v) + (r.code && !/\d{3}/.test(SVC_VERDICT[v] || '') ? ' (' + r.code + ')' : '') + (sdProxy ? ', адрес от Smart DNS' : '') : 'нет данных';
@@ -2095,7 +2102,7 @@ function aiRoomPanel(sd) {
 }
 let AISEQ = 0;
 async function aiCheck(id, dom) {
-  const seq = ++AISEQ; AICHK[id] = { busy: true, seq: seq }; render();
+  const was = AICHK[id], seq = ++AISEQ; AICHK[id] = { busy: true, seq: seq, prev: was && was.busy ? was.prev : was }; render();
   let x; try { x = await apiGet('site-test', { domain: dom }); } catch (e) { x = { ok: false, error: e.message }; }
   // Only the answer of this very check ends it (an older one arriving late is dropped).
   if (!AICHK[id] || AICHK[id].seq !== seq) return;

@@ -562,7 +562,6 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 /* A compact pill with a spinner, the format of «Роутер отвечает медленно…»; a status line of a fixed height. */
 @keyframes spin{to{transform:rotate(360deg)}}
 .spin{display:inline-block;flex:none;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .9s linear infinite}
-.busy-pill{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:1px 10px;border-radius:999px;background:var(--surface-2);color:var(--muted);font-size:var(--fs-xs);line-height:18px;white-space:nowrap}
 .ai-head>small.ai-status{display:flex;flex-basis:100%;align-items:flex-start;min-height:20px;color:var(--muted);white-space:normal;overflow-wrap:anywhere}
 .ai-head>small.ai-status .stat{display:flex;align-items:flex-start;gap:6px;white-space:normal;overflow:visible;text-overflow:clip;min-width:0}
 .ai-head>small.ai-status .dot{margin-top:5px;flex:none}

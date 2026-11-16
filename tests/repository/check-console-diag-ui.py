@@ -29,8 +29,8 @@ if "sd.alive === 'no'" not in js or "Smart DNS не отвечает" not in js:
     fail("the Panel must say that the Smart DNS server does not answer")
 if "в Keenetic строк ' + (c.keenetic || 0)" not in js or "Убирать нечего" not in js:
     fail("«Убрать свой сервер» must report what was cleared, and say when there was nothing")
-# 13 (owner 02.11): «DNS» screen - one status line of the chosen way with a dot, a spinner pill while a
-# check runs (no toast), «Проверить» with the refresh icon and disabled meanwhile, Smart DNS segment
+# 13 (owner 02.11): «DNS» screen - one status line of the chosen way with a dot; while a check runs
+# only the button's icon turns (owner 16.11, no line; no toast), «Проверить» with the refresh icon and disabled meanwhile, Smart DNS segment
 # off with its reason when the server does not answer; not installed components folded.
 if "{ id: 'ai', title: 'DNS'," not in js or "const SHORT = { ai: 'DNS'," not in js:
     fail("«ИИ-сервисы»/«ИИ» must be «DNS»")
@@ -57,9 +57,17 @@ const wayName={vpn:'VPN',dns:'Smart DNS',isp:'Провайдер'};
 let sdDown=false,sdServerDown=false,sdReason='';
 '''+status+'\n'+slider+'''
 assert(status({id:'s',via:'vpn',selected:'vpn'}).includes('VPN · не проверен'));
+// Owner 16.11.2026: while a check runs only the button's icon turns - no «проверяется…» line; the
+// line keeps what it said before (the card does not jump), empty before the first check.
 AICHK.s={busy:true};
-let text=status({id:'s',via:'vpn',selected:null});
-assert(text.includes('busy-pill') && text.includes('class="spin"') && text.includes('проверяется'));
+let text=status({id:'s',via:'vpn',selected:'vpn'});
+assert(!text.includes('проверяется') && !text.includes('spin') && text.includes('aria-busy'));
+AICHK.s={busy:true,prev:{ok:true,results:[{via:'tun',verdict:'open'}]}};
+text=status({id:'s',via:'vpn',selected:'vpn'});
+assert(!text.includes('проверяется') && text.includes('VPN · ') && text.includes('dot ok'));
+// No way chosen: plain words and what to do (owner 16.11.2026), never «Связь сервиса не задана».
+text=status({id:'s',via:'vpn',selected:null,effective:'mixed',coverage:{routed:2,catalog:10},paths:[{title:'ChatGPT',route:'tun0'}]});
+assert(text.includes('Через «ChatGPT» (tun0) идут 2 из 10 доменов сервиса. Выберите путь ниже') && !text.includes('Связь сервиса') && !text.includes('покрытие'));
 delete AICHK.s; sdDown=true; sdServerDown=true;
 for(const why of ['сервер не отвечает','сервер не настроен','ответ сервера не подтверждён']) {
   sdReason=why;
