@@ -1,0 +1,65 @@
+Diagnostic (16.11.2026): which DNS servers the router uses and whether the provider's DNS lies.
+Command only reads, changes nothing. One block (standard v2.4).
+
+clear
+(
+PFX="vward-dnsdiag"
+OUT="/tmp/${PFX}-$(date +%Y%m%d-%H%M%S).txt"
+LAST="/tmp/last_result.txt"
+MAXB=30000
+ESC=$(printf '\033')
+ls -1t /tmp/${PFX}-*.txt 2>/dev/null | tail -n +5 | while read -r F; do rm -f "$F"; done
+: > "$OUT"; ln -sfn "$OUT" "$LAST"; ln -sfn "$OUT" "/tmp/last_${PFX}.txt"
+send_out() {
+  [ -s "$OUT" ] || return 1
+  sed "s/${ESC}\[[0-9;?]*[a-zA-Z]//g" "$OUT" | tail -c "$MAXB" | base64 | tr -d '\r\n' |
+    { read -r B; printf '\033]52;c;%s\a' "$B"; }
+}
+on_abort() {
+  trap '' INT TERM HUP; send_out
+  echo "[ ABORTED / DISCONNECTED ]: PARTIAL RESULT SAVED TO /tmp/last_result.txt"; exit 130
+}
+trap on_abort INT TERM HUP
+tmo() {
+  _ts=$1; shift
+  "$@" & _tp=$!
+  ( sleep "$_ts"; kill "$_tp" 2>/dev/null ) & _tw=$!
+  wait "$_tp"; _tr=$?
+  kill "$_tw" 2>/dev/null
+  return $_tr
+}
+# first IPv4 of an nslookup answer (skips the server's own lines)
+ns4() { tmo 6 nslookup "$1" "$2" 2>/dev/null | awk '/^Name:/ {n=1; next} n && /^Address/ {for (i=2;i<=NF;i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}'; }
+{
+echo "VWARD DNS-DIAG $(date '+%Y-%m-%d %H:%M:%S') vward=$(cat /opt/share/vward/VERSION 2>/dev/null)"
+ndmc -c "show version" 2>/dev/null | grep -E 'release|title|device'
+echo "=== 1. DNS SERVERS OF THE CONFIGURATION (ip name-server) ==="
+ndmc -c "show running-config" 2>/dev/null | grep -E '^ip name-server|^dns-proxy|name-servers|^ +ip dhcp client' | head -n 60
+echo "=== 2. DNS SERVERS KEENETIC USES NOW (show ip name-server) ==="
+ndmc -c "show ip name-server" 2>/dev/null | grep -E 'address|domain|interface|port|global' | head -n 80
+echo "=== 3. INTERFACES (name -> description) ==="
+ndmc -c "show interface" 2>/dev/null | awk '/^ *id:/ {id=$2} /^ *description:/ {sub(/^ *description: */,""); print id " = " $0}' | head -n 20
+echo "=== 4. THE ROUTER'S OWN RESOLVER (/etc/resolv.conf) ==="
+cat /etc/resolv.conf 2>/dev/null | head -n 5
+echo "=== 5. SAME NAME: PROVIDER DNS vs 8.8.8.8 vs 1.1.1.1 vs ROUTER (first IPv4) ==="
+PDNS=$(ndmc -c "show ip name-server" 2>/dev/null | awk '/address:/ {a=$2} /domain:/ {d=$2} /interface:/ {if (d == "" && $2 ~ /^GigabitEthernet|^PPPoE|^ISP/) {print a; exit}}')
+[ -n "$PDNS" ] || { echo "[ WARNING ] no provider DNS found"; PDNS=127.0.0.1; }
+echo "provider dns: $PDNS"
+for D in instagram.com www.instagram.com chatgpt.com claude.ai rutracker.org linkedin.com x.com example.com; do
+  P=$(ns4 "$D" "$PDNS"); G=$(ns4 "$D" 8.8.8.8); C=$(ns4 "$D" 1.1.1.1); R=$(ns4 "$D" 127.0.0.1)
+  if [ -n "$P" ] && [ -n "$C" ] && [ "${P%.*}" != "${C%.*}" ] && [ "${P%.*}" != "${G%.*}" ]; then S="[ WARNING ] differs"; else S="[ OK ]"; fi
+  echo "$S $D provider=${P:-none} google=${G:-none} cloudflare=${C:-none} router=${R:-none}"
+done
+echo "=== 6. HTTPS TO THE PROVIDER'S ANSWER FOR instagram.com (certificate name) ==="
+PI=$(ns4 instagram.com "$PDNS")
+if [ -n "$PI" ] && command -v openssl >/dev/null 2>&1; then
+  echo | tmo 8 openssl s_client -connect "$PI:443" -servername instagram.com 2>/dev/null | openssl x509 -noout -subject 2>/dev/null || echo "[ WARNING ] no certificate from $PI"
+else
+  echo "[ SKIPPED ] no address or no openssl"
+fi
+} 2>&1 | tee "$OUT"
+echo "SUMMARY: ok=$(grep -c '\[ OK \]' "$OUT") warn=$(grep -c '\[ WARNING \]' "$OUT") fail=$(grep -c '\[ FAIL \]' "$OUT")" | tee -a "$OUT"
+send_out
+echo "RESULT SENT (OSC52)"
+echo "RAW: /tmp/last_result.txt"
+)

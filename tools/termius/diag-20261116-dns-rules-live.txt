@@ -1,0 +1,70 @@
+Diagnostic (16.11.2026): all ip name-server rules with their interfaces, which ones Keenetic uses now
+(show ip name-server and the live ndnproxymain.conf), the state of the VWARD check of the tunnel DNS
+rules, raw answers of the provider DNS (blocked by name?), who serves a suspicious answer.
+Command only reads, changes nothing. One block (standard v2.4).
+
+clear
+(
+PFX="vward-dnsdiag2"
+OUT="/tmp/${PFX}-$(date +%Y%m%d-%H%M%S).txt"
+LAST="/tmp/last_result.txt"
+MAXB=30000
+ESC=$(printf '\033')
+ls -1t /tmp/${PFX}-*.txt 2>/dev/null | tail -n +5 | while read -r F; do rm -f "$F"; done
+: > "$OUT"; ln -sfn "$OUT" "$LAST"; ln -sfn "$OUT" "/tmp/last_${PFX}.txt"
+send_out() {
+  [ -s "$OUT" ] || return 1
+  sed "s/${ESC}\[[0-9;?]*[a-zA-Z]//g" "$OUT" | tail -c "$MAXB" | base64 | tr -d '\r\n' |
+    { read -r B; printf '\033]52;c;%s\a' "$B"; }
+}
+on_abort() {
+  trap '' INT TERM HUP; send_out
+  echo "[ ABORTED / DISCONNECTED ]: PARTIAL RESULT SAVED TO /tmp/last_result.txt"; exit 130
+}
+trap on_abort INT TERM HUP
+tmo() {
+  _ts=$1; shift
+  "$@" & _tp=$!
+  ( sleep "$_ts"; kill "$_tp" 2>/dev/null ) & _tw=$!
+  wait "$_tp"; _tr=$?
+  kill "$_tw" 2>/dev/null
+  return $_tr
+}
+{
+echo "VWARD DNS-DIAG-2 $(date '+%Y-%m-%d %H:%M:%S') vward=$(cat /opt/share/vward/VERSION 2>/dev/null)"
+echo "=== 1. ALL DNS SERVERS KEENETIC USES NOW: domain address interface ==="
+ndmc -c "show ip name-server" 2>/dev/null | awk '/address:/ {a=$2} /domain:/ {d=$2; if (d=="") d="(all)"} /interface:/ {print d, a, $2}' | sort > /tmp/dd2-ns.txt
+awk '{print $3}' /tmp/dd2-ns.txt | sort | uniq -c
+grep -v ' GigabitEthernet1$' /tmp/dd2-ns.txt
+grep -c . /tmp/dd2-ns.txt | sed 's/^/total: /'
+rm -f /tmp/dd2-ns.txt
+echo "=== 2. LIVE DNS PROXY FILE: tunnel rules (youtube/instagram/google) ==="
+for f in /var/ndnproxymain.conf /tmp/ndnproxymain.conf; do
+  [ -r "$f" ] || continue
+  echo "file: $f lines=$(grep -c . "$f")"
+  grep -nE 'instagram|youtu|googlevideo|ytimg|ggpht' "$f" | head -n 20
+done
+echo "=== 3. VWARD CHECK OF THESE RULES (tunnel-health journal) ==="
+grep 'DNS_RULES' /opt/var/log/vward-tunnel-health.log 2>/dev/null | tail -n 6
+cat /tmp/vward-dns-rules 2>/dev/null
+echo "dns_rules_check=$(awk -F= '$1 == "dns_rules_check" {print $2}' /opt/etc/vward/route-engine/domain-lists.conf 2>/dev/null)"
+echo "=== 4. PROVIDER DNS, RAW ANSWER (blocked by DNS?) ==="
+PDNS=$(ndmc -c "show ip name-server" 2>/dev/null | awk '/address:/ {a=$2} /domain:/ {d=$2} /interface:/ {if (d == "" && $2 ~ /^GigabitEthernet|^PPPoE|^ISP/) {print a; exit}}')
+for D in www.instagram.com rutracker.org; do
+  echo "--- $D"
+  tmo 6 nslookup "$D" "$PDNS" 2>&1 | tail -n +3 | head -n 6
+done
+echo "=== 5. WHO IS 8.47.69.0 (provider's answer for chatgpt.com and example.com) ==="
+for D in chatgpt.com example.com; do
+  echo "--- $D at 8.47.69.0: certificate"
+  echo | tmo 8 openssl s_client -connect 8.47.69.0:443 -servername "$D" 2>/dev/null | openssl x509 -noout -subject -issuer 2>/dev/null || echo "[ WARNING ] no certificate"
+done
+for IP in 8.47.69.0 104.18.32.47; do
+  echo "--- chatgpt.com via $IP: answer"
+  tmo 10 curl -skI --max-time 8 --resolve "chatgpt.com:443:$IP" https://chatgpt.com/ 2>&1 | grep -iE '^HTTP|^server:|^cf-ray|^location' | head -n 4
+done
+} 2>&1 | tee "$OUT"
+send_out
+echo "RESULT SENT (OSC52)"
+echo "RAW: /tmp/last_result.txt"
+)

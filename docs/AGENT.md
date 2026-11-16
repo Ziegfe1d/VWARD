@@ -2044,6 +2044,21 @@ tick, visibilitychange и refreshPage журналы не грузят. Исто
   без своего правила; `check-autopick-page.py` — подпись Панели; `go test -race` — ok.
 - Ядро: mipsle `27fa1339…`, mips `5779f072…`, arm64 `047e6a8b…`, суммы в S91 (сборка воспроизводима, `--check`).
 
+### 16.11.2026 — [Claude Code] DNS на роутере владельца: блокировка по имени, 1 из 16 строк туннеля, решение `vward-dns`
+
+- По скриншотам DNS Keenetic и трём диагностикам (`tools/termius/diag-20261116-dns-servers.txt`,
+  `diag-20261116-dns-rules-live.txt`, `diag-20261116-tunnel-health.txt`): DNS провайдера на `www.instagram.com`,
+  `rutracker.org` — «имени нет»; строки `ip name-server 8.8.8.8|1.1.1.1 <домен> on OpkgTun0` (16) живые 1 из 16
+  (`RESULT=observed CONFIG=16 LIVE=1`); проверку r6 выполнял `tunnel-guard`, он выключен (`COMPONENT_DISABLED`);
+  файл `domain-lists.conf` у владельца отсутствовал (создан с `dns_rules_check=1` — без `tunnel-guard` не действует,
+  безвреден); `8.47.69.0` — настоящий Cloudflare. AdGuard Home не в цепочке DNS.
+- Команда владельца `tools/termius/fix-20261116-dns-reapply.txt` (меняет DNS Keenetic, запущена владельцем): 15
+  строк поданы заново («no» + та же строка), живых 16 из 16, `www.instagram.com` находится. До перезагрузки.
+- Ошибка агента в промежуточной команде: `grep -v … > tmp && echo … >> tmp` на пустом файле — `grep` без строк
+  возвращает 1, строка не дописывалась ([ FAIL ], ничего не изменено); исправлено на `{ grep -v …; echo …; } > tmp`.
+- Решение владельца по DNS и порядок работ — ROADMAP («DNS: находки 16.11.2026 …»). Следующий пакет: возврат строк
+  туннеля в агенте компонентов (сразу), `vward-dns` и автоподбор для блокировки по имени — в Песочнице.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 09.11.2026 / fix.36 опубликован: нужна приёмка владельцем на роутере (Ozon/WB, Lampa TV, ночной скан 00:10, экраны Панели, журнал сторожа DNS на возврат AdGuard Home в цепочку). Локальный стресс 09.11: однократное «processes pile up 6 -> 13» (route engine 5), в CI нет; при повторе разобрать по `soak_debug`.

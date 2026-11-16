@@ -1,0 +1,49 @@
+Diagnostic (16.11.2026): why the VWARD check of the tunnel DNS rules does not run - cron, the state,
+the tunnel watched, one run of vward-tunnel-health.sh (what cron does every minute; with
+dns_rules_check=1 it gives missing rules again). Owner 16.11: COMPONENT_DISABLED=tunnel-guard.
+
+clear
+(
+PFX="vward-thdiag"
+OUT="/tmp/${PFX}-$(date +%Y%m%d-%H%M%S).txt"
+LAST="/tmp/last_result.txt"
+MAXB=30000
+ESC=$(printf '\033')
+ls -1t /tmp/${PFX}-*.txt 2>/dev/null | tail -n +5 | while read -r F; do rm -f "$F"; done
+: > "$OUT"; ln -sfn "$OUT" "$LAST"; ln -sfn "$OUT" "/tmp/last_${PFX}.txt"
+send_out() {
+  [ -s "$OUT" ] || return 1
+  sed "s/${ESC}\[[0-9;?]*[a-zA-Z]//g" "$OUT" | tail -c "$MAXB" | base64 | tr -d '\r\n' |
+    { read -r B; printf '\033]52;c;%s\a' "$B"; }
+}
+on_abort() {
+  trap '' INT TERM HUP; send_out
+  echo "[ ABORTED / DISCONNECTED ]: PARTIAL RESULT SAVED TO /tmp/last_result.txt"; exit 130
+}
+trap on_abort INT TERM HUP
+{
+echo "VWARD TUNNEL-HEALTH DIAG $(date '+%Y-%m-%d %H:%M:%S') vward=$(cat /opt/share/vward/VERSION 2>/dev/null)"
+echo "=== 1. CRON: is the tunnel check scheduled and running ==="
+crontab -l 2>/dev/null | grep -c 'vward-tunnel-health' | sed 's/^/crontab lines: /'
+for f in last rc ok fail; do printf '%s: ' "$f"; cat /tmp/vward-tunnel-health-chain.cron.$f 2>/dev/null || echo none; done
+echo "--- last cron output:"; head -c 600 /tmp/vward-tunnel-health-watch.cron.out 2>/dev/null; echo
+echo "=== 2. STATE OF THE CHECK ==="
+cat /tmp/vward-tunnel-health/state 2>/dev/null | head -n 12
+echo "--- component switch:"; ls /opt/etc/vward/components/ 2>/dev/null | head -n 30
+echo "=== 3. WHICH TUNNEL VWARD WATCHES ==="
+( . /opt/lib/vward/vward-device-profile.sh && vward_profile_load && echo "VWARD_TUNNEL_INTERFACE=$VWARD_TUNNEL_INTERFACE VWARD_TUNNEL_DEVICE=$VWARD_TUNNEL_DEVICE" ) 2>&1 | tail -n 3
+echo "=== 4. ONE RUN OF THE CHECK NOW (what cron does every minute) ==="
+/opt/bin/vward-tunnel-health.sh > /tmp/thdiag-run.txt 2>&1; echo "rc=$?"
+head -c 800 /tmp/thdiag-run.txt; rm -f /tmp/thdiag-run.txt
+echo "--- dns rules state:"; cat /tmp/vward-dns-rules 2>/dev/null || echo "[ WARNING ] no state written"
+echo "=== 5. JOURNAL OF THE CHECK (last lines) ==="
+tail -n 8 /opt/var/log/vward-tunnel-health.log 2>/dev/null
+echo "=== 6. LIVE DNS RULES AFTER ==="
+grep -E '^dns_server = .*(instagram|youtu)' /var/ndnproxymain.conf 2>/dev/null | head -n 16
+W=$(nslookup www.instagram.com 127.0.0.1 2>/dev/null | awk '/^Name:/ {n=1; next} n && /^Address/ {print $NF; exit}')
+if [ -n "$W" ]; then echo "[ PASS ] www.instagram.com resolves: $W"; else echo "[ WARNING ] www.instagram.com does not resolve"; fi
+} 2>&1 | tee "$OUT"
+send_out
+echo "RESULT SENT (OSC52)"
+echo "RAW: /tmp/last_result.txt"
+)

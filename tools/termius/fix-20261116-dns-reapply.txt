@@ -1,0 +1,59 @@
+Repair (16.11.2026, run by the owner): gives again the ip name-server ... on OpkgTun0 rules of the
+configuration that the live DNS proxy (/var/ndnproxymain.conf) lacks - «no» and the same line, as the
+tunnel agent did (fix.34.1, r6). Changes the DNS configuration of Keenetic (the same lines); a copy of
+all ip name-server lines goes to /opt/var first. Owner 16.11: 16 rules, 1 live -> 16 of 16, www.instagram.com
+resolves. Holds until the next reboot.
+
+clear
+(
+PFX="vward-dnsreapply"
+OUT="/tmp/${PFX}-$(date +%Y%m%d-%H%M%S).txt"
+LAST="/tmp/last_result.txt"
+MAXB=30000
+ESC=$(printf '\033')
+ls -1t /tmp/${PFX}-*.txt 2>/dev/null | tail -n +5 | while read -r F; do rm -f "$F"; done
+: > "$OUT"; ln -sfn "$OUT" "$LAST"; ln -sfn "$OUT" "/tmp/last_${PFX}.txt"
+send_out() {
+  [ -s "$OUT" ] || return 1
+  sed "s/${ESC}\[[0-9;?]*[a-zA-Z]//g" "$OUT" | tail -c "$MAXB" | base64 | tr -d '\r\n' |
+    { read -r B; printf '\033]52;c;%s\a' "$B"; }
+}
+on_abort() {
+  trap '' INT TERM HUP; send_out
+  echo "[ ABORTED / DISCONNECTED ]: PARTIAL RESULT SAVED TO /tmp/last_result.txt"; exit 130
+}
+trap on_abort INT TERM HUP
+{
+echo "VWARD DNS-RULES REAPPLY $(date '+%Y-%m-%d %H:%M:%S') vward=$(cat /opt/share/vward/VERSION 2>/dev/null)"
+T=OpkgTun0
+L=/var/ndnproxymain.conf
+ndmc -c "show running-config" 2>/dev/null | awk -v t="$T" '$1 == "ip" && $2 == "name-server" && $5 == "on" && $6 == t {print $3, $4}' > /tmp/dnsre-want.txt
+sed -n 's/^dns_server = \([^ ]*\) \([^ ]*\)$/\1 \2/p' "$L" 2>/dev/null > /tmp/dnsre-live.txt
+grep -vxF -f /tmp/dnsre-live.txt /tmp/dnsre-want.txt > /tmp/dnsre-miss.txt
+echo "rules on $T in the configuration: $(grep -c . /tmp/dnsre-want.txt), live: $(grep -cxF -f /tmp/dnsre-want.txt /tmp/dnsre-live.txt), missing: $(grep -c . /tmp/dnsre-miss.txt)"
+if [ ! -s /tmp/dnsre-want.txt ]; then
+  echo "[ FAIL ] no rules on $T found in the configuration, nothing changed"
+else
+  ndmc -c "show running-config" 2>/dev/null | grep '^ip name-server' > "/opt/var/vward-dns-rules-before-$(date +%s).txt" && echo "[ OK ] copy of all ip name-server lines saved in /opt/var"
+  N=0
+  while read -r S D; do
+    [ -n "$D" ] || continue
+    ndmc -c "no ip name-server $S $D on $T" >/dev/null 2>&1
+    if ndmc -c "ip name-server $S $D on $T" >/dev/null 2>&1; then N=$((N + 1)); else echo "[ FAIL ] could not give again: $S $D"; fi
+  done < /tmp/dnsre-miss.txt
+  echo "[ OK ] given again: $N"
+  sleep 5
+  ndmc -c "show running-config" 2>/dev/null | awk -v t="$T" '$1 == "ip" && $2 == "name-server" && $5 == "on" && $6 == t' | grep -c . | sed 's/^/configuration now: /'
+  sed -n 's/^dns_server = \([^ ]*\) \([^ ]*\)$/\1 \2/p' "$L" > /tmp/dnsre-live.txt
+  echo "live now: $(grep -cxF -f /tmp/dnsre-want.txt /tmp/dnsre-live.txt) of $(grep -c . /tmp/dnsre-want.txt)"
+  grep -E '^dns_server = .*(instagram|youtu)' "$L" | head -n 16
+  W=$(nslookup www.instagram.com 127.0.0.1 2>/dev/null | awk '/^Name:/ {n=1; next} n && /^Address/ {print $NF; exit}')
+  if [ -n "$W" ]; then echo "[ PASS ] www.instagram.com resolves: $W"; else echo "[ WARNING ] www.instagram.com still does not resolve"; fi
+fi
+rm -f /tmp/dnsre-want.txt /tmp/dnsre-live.txt /tmp/dnsre-miss.txt
+} 2>&1 | tee "$OUT"
+echo "SUMMARY: pass=$(grep -c '\[ PASS \]' "$OUT") ok=$(grep -c '\[ OK \]' "$OUT") warn=$(grep -c '\[ WARNING \]' "$OUT") fail=$(grep -c '\[ FAIL \]' "$OUT")" | tee -a "$OUT"
+send_out
+echo "RESULT SENT (OSC52)"
+echo "RAW: /tmp/last_result.txt"
+)
