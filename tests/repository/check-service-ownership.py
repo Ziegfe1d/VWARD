@@ -47,6 +47,14 @@ for case in ('adopt', 'off', 'retarget', 'category', 'refresh', 'auto-writer', '
                 failures.append(case + ': mutation permission not refused: ' + r.stdout.strip())
         elif r.returncode:
             failures.append(case + ': safe detach/skip failed: ' + r.stdout.strip())
+        # fix.39.4 sandbox (owner 16.11.2026): the refusal says how much of the catalog the user's list holds
+        # and what the service would add - in the journal as «Песочница: ... сделал бы ...»; nothing is written.
+        if case == 'adopt':
+            if 'info.cover=domain-list7|ISP|1|3|2|anthropic.com,claude.com' not in r.stdout:
+                failures.append('adopt: no coverage for the Panel: ' + r.stdout.strip())
+            log = (s.tmp / 'audit.log').read_text(encoding='utf-8') if (s.tmp / 'audit.log').exists() else ''
+            if not any(l.split('|', 2)[-1].startswith('Песочница:') and 'сделал бы: добавить 2' in l and 'domain-list7' in l for l in log.splitlines()):
+                failures.append('adopt: no sandbox line in the journal: ' + log.strip()[-300:])
 if failures:
     raise SystemExit('SERVICE_OWNERSHIP=FAIL: ' + '; '.join(failures))
 print('SERVICE_OWNERSHIP=PASS')

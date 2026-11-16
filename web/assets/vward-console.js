@@ -4157,8 +4157,11 @@ async function bgJob(fields, minutes) {
   const out = String(run.output || '').trim().split('\n'), last = out[out.length - 1] || '';
   const left = (out.filter(l => /^info\.left=/.test(l)).pop() || '').slice(10).split(',').filter(Boolean);
   const reason = (out.filter(l => /^reason=/.test(l)).pop() || '').slice(7), why = (out.filter(l => /^info\.why=/.test(l)).pop() || '').slice(9);
+  // fix.39.4: a user's list of the service is there already - what it holds of the catalog (sandbox).
+  const cv = (out.filter(l => /^info\.cover=/.test(l)).pop() || '').slice(11).split('|');
+  const cover = cv.length >= 5 ? { group: cv[0], route: cv[1], have: +cv[2], all: +cv[3], miss: +cv[4], first: (cv[5] || '').split(',').filter(Boolean) } : null;
   return run.rc === 0 ? { ok: true, done: true, left: left, why: why, x: { ok: true, result: last.replace(/^result=/, '') } } :
-    { ok: false, done: true, left: left, why: why, x: { ok: false, error: /^error=/.test(last) ? last.slice(6) : 'helper_failed', reason: reason } };
+    { ok: false, done: true, left: left, why: why, cover: cover, x: { ok: false, error: /^error=/.test(last) ? last.slice(6) : 'helper_failed', reason: reason } };
 }
 // Switching on writes up to 300 domains into Keenetic: a background job, as for tunnels.
 async function serviceJob(fields, okMsg) {
@@ -4170,6 +4173,15 @@ async function serviceJob(fields, okMsg) {
   SVC.busy = false; SVREC_ACTION = !j.ok && j.done;
   if (gone) gone();
   await Promise.all([load('services', true), load('lists', true)]); render();
+  // fix.39.4 (owner 16.11.2026): not «Не выполнено» for a list the owner made - it is there and works; what
+  // the service would add to it is the sandbox's answer, nothing is written.
+  if (!j.ok && j.cover && j.x && j.x.error === 'service_reference_only') {
+    const c = j.cover, l = ((S.lists && S.lists.lists) || []).find(x => x.name === c.group), name = (l && l.description) || c.group;
+    popup({ sev: 'info', stay: true, title: 'Список «' + name + '» уже есть',
+      text: 'В нём ' + c.have + ' из ' + c.all + ' доменов сервиса, путь: ' + (c.route === '-' ? 'не задан' : c.route) + '. VWARD не меняет ваш список. ' +
+        (c.miss ? 'Песочница: добавил бы ' + c.miss + ' (' + c.first.join(', ') + (c.miss > c.first.length ? ', …' : '') + ').' : 'Все домены сервиса в нём уже есть.') });
+    return;
+  }
   toast(j.ok ? (j.x.result === 'unchanged' ? 'Уже так: ' + okMsg : okMsg) : !j.done ? 'Ещё выполняется, проверьте позже' : 'Не выполнено: ' + errText(j.x), j.ok ? 'ok' : !j.done ? 'warn' : 'err', actKey(fields));
 }
 // The default tunnel: moving every list can take Keenetic a minute, so it is a background

@@ -2075,6 +2075,32 @@ service_txn_reconnect() {
     service_claim "$1"
 }
 
+# service_cover GROUP DOMAINS ID: how much of a service's catalog a user's list already holds (a domain
+# counts when it or a parent of it is included there) and the list's route - for the Panel
+# (info.cover=GROUP|ROUTE|HAVE|ALL|MISSING|FIRST,FIVE) and the journal's sandbox line. Reads only.
+service_cover() {
+    sc_route=$(group_route "$1"); sc_route=${sc_route%%"$(printf '\t')"*}
+    sc_route=$(printf '%s' "$sc_route" | tr -cd 'A-Za-z0-9_./-')
+    sc_cov=$(awk -v g="$1" '
+        NR == FNR {if (NF) want[++n] = tolower($1); next}
+        /^object-group fqdn / {cur = $3; next}
+        /^!/ {cur = ""}
+        cur == g && $1 == "include" {have[tolower($2)] = 1}
+        END {
+            for (i = 1; i <= n; i++) {
+                d = want[i]; f = 0
+                while (d != "") {if (d in have) {f = 1; break}; k = index(d, "."); d = k ? substr(d, k + 1) : ""}
+                if (f) c++; else m[++nm] = want[i]
+            }
+            s = ""; for (i = 1; i <= nm && i <= 5; i++) s = s (i > 1 ? "," : "") m[i]
+            printf "%d|%d|%d|%s\n", c, n, nm, s
+        }' "$2" "$RUNCFG") || return 0
+    printf 'info.cover=%s|%s|%s\n' "$1" "${sc_route:--}" "$sc_cov"
+    sc_add=$(printf '%s' "$sc_cov" | cut -d'|' -f3)
+    sc_first=$(printf '%s' "$sc_cov" | cut -d'|' -f4 | sed 's/,/, /g')
+    audit "Песочница: сервис $3: список $1 уже есть (путь ${sc_route:-нет}), в нём $(printf '%s' "$sc_cov" | cut -d'|' -f1) из $(printf '%s' "$sc_cov" | cut -d'|' -f2) доменов каталога; сделал бы: добавить $sc_add${sc_first:+ ($sc_first)}; список не изменён"
+}
+
 service_domains() {
     "$JQ" -r --arg i "$1" '.services[] | select(.id == $i) | .domains[]' "$SV_CAT" > "$2" 2>/dev/null || return 1
     [ -s "$2" ] || return 1
@@ -2929,6 +2955,9 @@ op_service() {
         G=$(printf '%s\n' "$sv_found" | awk 'NR == 1 {print $2}')
         sv_dups=$(printf '%s\n' "$sv_found" | awk 'NR > 1 {printf "%s%s", c, $2; c = ","}')
         # Do not repoint, refresh or delete a group discovered by similarity.
+        # Sandbox (fix.39.4, owner 16.11.2026): what the service would add to that list is said in the
+        # Panel and the journal; nothing is written.
+        service_cover "$G" "$JOURNAL.doh" "$sv_id"
         die service_reference_only 64
     fi
     G=$(free_list_name) || die no_free_list
