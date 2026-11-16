@@ -302,6 +302,15 @@ with tempfile.TemporaryDirectory() as tmp:
     if (etc / "route-engine/ads.sandbox").exists():
         fail("the adverts sandbox switched off must leave no file")
     run("adaptive-ads", "off", expect="result=unchanged")
+    # 16.11.2026 «Обход блокировки по имени»: sandbox by default (no file), off is a file the core reads.
+    run("adaptive-dnsblock", "sandbox", expect="result=unchanged")
+    run("adaptive-dnsblock", "off", expect="result=changed")
+    if not (etc / "route-engine/dnsblock.off").exists():
+        fail("«Обход блокировки по имени: выкл» must create its file")
+    run("adaptive-dnsblock", "on", expect="error=invalid_value")
+    run("adaptive-dnsblock", "sandbox", expect="result=changed")
+    if (etc / "route-engine/dnsblock.off").exists():
+        fail("the sandbox back on must leave no file")
     run("classifier", "0", expect="result=changed")
     if "CLASSIFIER_ENABLED=0" not in (etc / "route-engine/domain-classifier.conf").read_text() or \
             stat.S_IMODE((etc / "route-engine/domain-classifier.conf").stat().st_mode) != 0o600:

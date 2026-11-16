@@ -817,6 +817,7 @@ if [ "$ACTION" = config-data ]; then
     AD_ON=true; [ -e "$CONFIG_ETC/route-engine/adaptive.disabled" ] && AD_ON=false
     # «Реклама и счётчики» of Autopodbor (fix.39): off | sandbox.
     AD_ADS=off; [ ! -e "$CONFIG_ETC/route-engine/ads.sandbox" ] || AD_ADS=sandbox
+    AD_DNS=sandbox; [ ! -e "$CONFIG_ETC/route-engine/dnsblock.off" ] || AD_DNS=off
     kv_file "$CONFIG_ETC/route-engine/domain-classifier.conf" CLASSIFIER_ENABLED=CL_FLAG
     CL_ON=true; [ "$CL_FLAG" = 0 ] && CL_ON=false
     IPX="$(awk 'NF{print $1}' "${VWARD_POLICY_EXCLUDED:-$CONFIG_ETC/policy-sync/excluded.categories}" 2>/dev/null | head -n 500 | list_json)"
@@ -856,7 +857,7 @@ if [ "$ACTION" = config-data ]; then
       --arg group "${VWARD_POLICY_GROUP:-}" --argjson groups "${TGROUPS:-[]}" --argjson router "$ROUTER" \
       --argjson route_domains "${ROUTE_DOMAINS:-[]}" --argjson force "${FORCE:-[]}" --argjson adaptive "${ADAPT:-[]}" \
       --argjson categories "${CATS:-[]}" --argjson tunnel_guard "$TG" --argjson wan_guard "$WG_ON" --argjson components "$COMPONENTS" \
-      --argjson adaptive_on "$AD_ON" --arg adaptive_ads "$AD_ADS" --argjson classifier_on "$CL_ON" --argjson ip_excluded "${IPX:-[]}" \
+      --argjson adaptive_on "$AD_ON" --arg adaptive_ads "$AD_ADS" --arg adaptive_dnsblock "$AD_DNS" --argjson classifier_on "$CL_ON" --argjson ip_excluded "${IPX:-[]}" \
       --argjson w_en "$W_EN" --argjson w_ctl "$W_CTL" \
       --argjson wan_params "$WAN_PARAMS" --argjson agents_mode "$AGENTS_MODE" --argjson proposed "$PROPOSED" \
       --arg w_window "$(wnum "$W_WIN" 86400)" --arg w_switch "$(wnum "$W_SW" 20)" \
@@ -865,7 +866,7 @@ if [ "$ACTION" = config-data ]; then
       --arg u_feed "$(printf '%s\n' "$U_URL" | sed -n -E 's#^https://raw[.]githubusercontent[.]com/[^/]+/[^/]+/(main|beta|dev)/updates/[a-z0-9-]+/update-manifest[.]json$#\1#p')" \
       --argjson writable "$([ -x "$CONFIG_HELPER" ] && echo true || echo false)" \
       '{ok:true,writable:$writable,
-        route:{group:$group,groups:$groups,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,adaptive_ads:$adaptive_ads,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
+        route:{group:$group,groups:$groups,router_available:$router,domains:$route_domains,force_vpn:$force,adaptive:$adaptive,categories:$categories,adaptive_enabled:$adaptive_on,adaptive_ads:$adaptive_ads,adaptive_dnsblock:$adaptive_dnsblock,classifier_enabled:$classifier_on,ip_excluded:$ip_excluded},
         agents:{mode:$agents_mode,proposed:$proposed},
         tunnel_guard:{enabled:$tunnel_guard},wan_guard:{enabled:$wan_guard,params:$wan_params},components:$components,
         wifi:{ENABLED:($w_en==1),CONTROL_ENABLED:($w_ctl==1),WINDOW_SEC:($w_window|(tonumber? // null)),BAND_SWITCH_WARN:($w_switch|(tonumber? // null)),WEAK_5G_SAMPLE_WARN:($w_weak|(tonumber? // null)),WEAK_5G_RSSI:($w_rssi|(tonumber? // null))},
@@ -895,7 +896,7 @@ if [ "$ACTION" = config ]; then
         tunnel-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=TUNNEL_GUARD_DISABLE ;;
         wan-guard) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=WAN_GUARD_DISABLE ;;
         component) set -- "$OP" "$TARGET" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=COMPONENT_DISABLE ;;
-        adaptive-mode|adaptive-ads|classifier|smartdns-guard|tunnel-fallback|tunnel-return) set -- "$OP" "$VALUE" ;;
+        adaptive-mode|adaptive-ads|adaptive-dnsblock|classifier|smartdns-guard|tunnel-fallback|tunnel-return) set -- "$OP" "$VALUE" ;;
         # «Smart DNS» on/off (owner 08.11); off takes VWARD's own rows away: confirmed.
         smartdns-feature) set -- "$OP" "$VALUE"; [ "$VALUE" != 0 ] || REQUIRED=SMARTDNS_OFF ;;
         extra) set -- "$OP" "$TARGET" "$VALUE" ;;
@@ -1261,7 +1262,12 @@ if [ "$ACTION" = backup-data ]; then
   ls -ln "$SNAPSHOT_DIR" 2>/dev/null | awk '$9 ~ /^vward-[0-9]+-[0-9]+(-[a-z]+)?[.]tar[.]gz$/ {print $9 "\t" $5}' | sort -r |
     "$JQ" -Rn '[inputs | split("\t") | {name: .[0], size: (.[1] | tonumber? // 0),
       kind: (.[0] | ltrimstr("vward-") | rtrimstr(".tar.gz") | split("-") | if length > 2 then .[2] else "manual" end),
-      created: (.[0] | ltrimstr("vward-") | .[0:4] + "-" + .[4:6] + "-" + .[6:8] + "T" + .[9:11] + ":" + .[11:13] + ":" + .[13:15])}] | {ok: true, backups: .}'
+      created: (.[0] | ltrimstr("vward-") | .[0:4] + "-" + .[4:6] + "-" + .[6:8] + "T" + .[9:11] + ":" + .[11:13] + ":" + .[13:15])}] | {ok: true, backups: ., period: $period}' --arg period "$(
+    # «Периодичность»: off unless the extra «backup» is on (NAME.on, or all.on without NAME.off).
+    if { [ -e "$COMPONENT_STATE/backup.on" ] || [ -e "$COMPONENT_STATE/all.on" ]; } && [ ! -e "$COMPONENT_STATE/backup.off" ]; then
+      BPV="$(awk -F= '$1 == "period" {print $2; exit}' "${VWARD_BACKUP_CONF:-${CONFIG_ETC:-/opt/etc/vward}/backup.conf}" 2>/dev/null)"
+      case "$BPV" in auto|6|12|24) echo "$BPV" ;; *) echo 24 ;; esac
+    else echo off; fi)"
   exit 0
 fi
 # The copy that leaves the router holds no secrets: tunnel keys, the AdGuard Home
@@ -1417,6 +1423,13 @@ if [ "$ACTION" = backup-control ]; then
     restore) [ "$(form_value confirm)" = BACKUP_RESTORE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
       BN="$(form_value name)"; printf '%s\n' "$BN" | grep -Eq '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$' || { echo '{"ok":false,"error":"invalid_backup"}'; exit 0; }
       set -- backup-restore "$BN" ;;
+    delete) [ "$(form_value confirm)" = BACKUP_DELETE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+      BN="$(form_value name)"; printf '%s\n' "$BN" | grep -Eq '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$' || { echo '{"ok":false,"error":"invalid_backup"}'; exit 0; }
+      set -- backup-delete "$BN" ;;
+    delete_all) [ "$(form_value confirm)" = BACKUP_DELETE_ALL ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+      set -- backup-delete all ;;
+    period) BP="$(form_value value)"; case "$BP" in off|auto|6|12|24) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+      set -- backup-period "$BP" ;;
     *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
   esac
   BOUT="$("$CONFIG_HELPER" "$@" 2>/dev/null)"; BLAST="$(printf '%s\n' "$BOUT" | tail -n 1)"
@@ -3931,6 +3944,8 @@ CROND=0
 
 read -r UPTIME_SEC _ < /proc/uptime 2>/dev/null || UPTIME_SEC=""
 UPTIME_SEC=${UPTIME_SEC%%.*}
+# The router's memory (owner 16.11.2026: «ОЗУ 23 / 256 МБ» on a tunnel's page).
+MEM_TOTAL_KB=$(awk '$1 == "MemTotal:" {print $2; exit}' "${VWARD_PROC:-/proc}/meminfo" 2>/dev/null)
 
 read_first /tmp/vward-wan-guard.cron.rc GRC
 read_first /tmp/vward-wan-guard.cron.last GLAST
@@ -4090,6 +4105,7 @@ header_json
   --arg extras_all "$EXTRAS_ALL" --arg extras_on "$EXTRAS_ON" --arg core_run "$CORE_RUN" --argjson parts "$PARTS_JSON" \
   --arg agh_broken "$AGH_BROKEN" \
   --arg uptime "$UPTIME_SEC" \
+  --arg mem_total "${MEM_TOTAL_KB:-0}" \
   --arg grc "$GRC" \
   --arg glast "$GLAST" \
   --arg wgrc "$WGRC" \
@@ -4180,7 +4196,8 @@ header_json
     model:($ver.model // $ver.device // ""),
     version:($ver.title // $ver.release // ""),
     release:($ver.release // ""),
-    uptime_sec:($uptime|tonumber? // 0)
+    uptime_sec:($uptime|tonumber? // 0),
+    mem_total_kb:($mem_total|tonumber? // 0)
   },
 
   wan:{

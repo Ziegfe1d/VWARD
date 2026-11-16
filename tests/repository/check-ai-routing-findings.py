@@ -49,7 +49,9 @@ at = js.index('  const status = s => {', js.index('function aiPage()'))
 status = js[at:js.index('\n  };',at)+5]
 render = ('const AICHK={},esc=String,tunLabel=String;\n'+status+'''
 const text=status({id:'claude.ai',selected:null,effective:'mixed',coverage:{routed:2,catalog:21},paths:[{group:'domain-list4',route:'Wireguard0'}]});
-if(!text.toLowerCase().includes('неполное') || text.includes('Пересекаются DNS и маршруты')) throw Error(text);
+// Partial coverage said in plain words with what to do (owner 16.11.2026: «Неполное покрытие каталога… Связь
+// сервиса не задана» was unclear) - the share of the service's domains and the list, not «crossing routes».
+if(!text.includes('идут 2 из 21 доменов сервиса') || !text.includes('Выберите путь ниже') || text.includes('разными путями') || text.includes('Пересекаются DNS и маршруты')) throw Error(text);
 ''')
 r = subprocess.run(['node','-e',render],capture_output=True,text=True)
 assert r.returncode == 0, r.stderr

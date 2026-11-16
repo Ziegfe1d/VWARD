@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DNS rules of the tunnel after a boot (fix.34.1, r6). 25.10 after a reboot the live
+"""DNS rules of the tunnel after a boot (fix.34.1, r6; «vward-tunnel-health.sh dns-rules» from the components agent since 16.11.2026). 25.10 after a reboot the live
 ndnproxymain.conf had 1 of the 16 «ip name-server ... on OpkgTun4» lines of the configuration;
 Instagram did not resolve until «no» and the same line again. tunnel-health checks once a boot
 (router up 5 minutes, tunnel UP): the missing lines are given again and logged, the next minute
@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = (ROOT / "components/tunnel-guard/scripts/vward-tunnel-health.sh").read_text()
+SUP = (ROOT / "components/runtime/scripts/vward-cron-supervisor.sh").read_text()
 SH = ["busybox", "sh"] if shutil.which("busybox") else ["sh"]
 
 
@@ -21,8 +22,15 @@ def fail(message: str) -> None:
 
 
 m = re.search(r"^dns_rules_check\(\)\n\{\n.*?^\}\n", SRC, re.S | re.M)
-if not m or 'dns_rules_check\nfi' not in SRC:
-    fail("tunnel-health does not check the DNS rules of the tunnel")
+# 16.11.2026: the VPN agent (tunnel-guard) is off by default since fix.37 and the rules stayed 1 of 16 after a
+# reboot - the check is «vward-tunnel-health.sh dns-rules», before the agent's gate, run by the components
+# agent (always on) once a minute; the agent's own rounds no longer run it (no second writer).
+if not m or SRC.count("    dns_rules_check\n") != 1 or 'if [ "${1:-}" = dns-rules ]; then' not in SRC:
+    fail("vward-tunnel-health.sh dns-rules must check the DNS rules of the tunnel, and only that mode")
+if SRC.index('if [ "${1:-}" = dns-rules ]; then') > SRC.index("vward_component_gate tunnel-guard"):
+    fail("the mode must run whatever the VPN agent's switch")
+if "dns_rules_tick()" not in SUP or "|| dns_rules_tick" not in SUP or '"$DNS_RULES_BIN" dns-rules' not in SUP:
+    fail("the components agent must run the check once a minute")
 FUNC = m.group(0)
 
 DOMAINS = ["youtube.com", "youtu.be", "youtube-nocookie.com", "googlevideo.com", "ytimg.com", "ggpht.com",
@@ -36,6 +44,32 @@ CONFIG = ("dns-proxy\n    https upstream https://doh.example.net/dns-query dot d
 def live(rules) -> str:
     return "dns_server = 192.168.1.1:53 .\n" + "".join(f"dns_server = {s}:53 {d}.\n" for s, d in rules)
 
+
+# The script itself, as the components agent starts it: its tunnel down - nothing; up - the rules given again.
+with tempfile.TemporaryDirectory() as tmp:
+    t = Path(tmp)
+    (t / "config").write_text("".join(f"ip name-server {s} {d} on OpkgTun0\n" for s, d in RULES))
+    (t / "ndmc").write_text(f'#!/bin/sh\necho "$2" >> {t}/ndmc.log\n'); (t / "ndmc").chmod(0o755)
+    (t / "uptime").write_text("900.00 1.00\n")
+    (t / "live.conf").write_text("dns_server = 8.8.8.8 youtube.com\n")
+    (t / "lists.conf").write_text("dns_rules_check=1\n")
+    (t / "profile.sh").write_text(f"vward_profile_load() {{ VWARD_TUNNEL_INTERFACE=OpkgTun0; VWARD_TUNNEL_DEVICE=opkgtun0; }}\n"
+                                  f"vward_running_config() {{ cat {t}/config; }}\n"
+                                  f"ndmc() {{ echo \"$2\" >> {t}/ndmc.log; }}\n")
+    (t / "sys/opkgtun0").mkdir(parents=True)
+    env = {"PATH": f"{t}:/usr/bin:/bin", "VWARD_PROFILE_LIB": str(t / "profile.sh"), "VWARD_SYSFS_NET": str(t / "sys"),
+           "VWARD_UPTIME_FILE": str(t / "uptime"), "VWARD_NDNPROXY_CONF": str(t / "live.conf"), "VWARD_DOMAIN_LISTS_CONF": str(t / "lists.conf"),
+           "VWARD_DNS_RULES_STATE": str(t / "state"), "VWARD_DNS_RULES_LOG": str(t / "log"), "VWARD_NSLOOKUP": "true"}
+    script = ROOT / "components/tunnel-guard/scripts/vward-tunnel-health.sh"
+    (t / "sys/opkgtun0/flags").write_text("0x1002\n")
+    subprocess.run(SH + [str(script), "dns-rules"], env=env, timeout=60)
+    if (t / "state").exists() or (t / "ndmc.log").exists():
+        fail("a tunnel that is down: nothing looked at")
+    (t / "sys/opkgtun0/flags").write_text("0x1003\n")
+    r = subprocess.run(SH + [str(script), "dns-rules"], env=env, text=True, capture_output=True, timeout=60)
+    sent = (t / "ndmc.log").read_text().splitlines() if (t / "ndmc.log").exists() else []
+    if r.returncode != 0 or len(sent) != 30 or "RESULT=reapplied" not in (t / "state").read_text():
+        fail(f"the tunnel up: 15 rules given again by the script: rc={r.returncode} {r.stderr[-200:]} {sent[:2]}")
 
 with tempfile.TemporaryDirectory() as tmp:
     t = Path(tmp)

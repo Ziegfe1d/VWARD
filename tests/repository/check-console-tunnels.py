@@ -46,8 +46,16 @@ if got != want:
 if "рукопожатие" in piece("const tunSub = t => {", "\n};\n"):
     fail("the list shows no handshake")
 # On and off: the switch in the tunnel page's header, none for the default tunnel (owner 2026-10-17).
+# Owner 16.11.2026: never a folding «Подробнее» - the tunnel's page has none (a section of its own).
+tp = JS[JS.index("function tunnelPage(name) {"):JS.index("\n// Tunnels Keenetic took from AmneziaWG 3.x files")]
+if "<details" in tp:
+    fail("the tunnel's page must not fold anything under «Подробнее»")
 for need in ("'<span class=\"st ok\">по умолчанию</span>'", "'Сделать туннелем по умолчанию'", "['Туннель по умолчанию', managed ? 'Да' : 'Нет'",
-             "' · модуль AmneziaWG (VWARD)'", "t.endpoint || (e && e.endpoint) || (v && (v.server_name ? v.server_name + ' · ' + v.server : v.server))", "['Память программы'",
+             # Owner 16.11.2026: the server's name at the top, the address in «Сервер», what carries the
+             # tunnel in «Работает через», the technical rows (ОЗУ «23 / 256 МБ») in the section «Подробнее».
+             "left: v && v.server_name ? v.server_name : ''", "['Сервер', (v && v.server) || t.endpoint || (e && e.endpoint) || '—']",
+             "['Работает через', e ? 'VWARD · AmneziaWG' : v ? 'VWARD · VLESS' : 'Keenetic'", "['Системное имя', name]", "p ? ['ОЗУ',",
+             "tunnelMorePanel(name, t, e, v, managed)", "return panel('Подробнее', kv([",
              "const rx = t.rx != null ? t.rx : e && e.rx", "sw('data-tun-onoff=\"' + esc(name) + '\"', !off", "confirm = { id: 'tunnel-down' }",
              "'tunnel-down': () => tunnelState('down', current.slice(2))", "(managed || lost ? '' : sw('data-tun-onoff", "(lost ? '' : mp[0]) + tunnelProbePanel(name) + tunnelTrafficPanel(name) + mp.slice(1).join('')"):
     if need not in JS:

@@ -430,6 +430,19 @@ core_check()
     ( $UNNICE "$INITD/S91vward-route-engine" core-check </dev/null >/dev/null 2>&1 & )
 }
 
+# dns_rules_tick (16.11.2026): the DNS rules of the tunnel after a boot (vward-tunnel-health.sh dns-rules), once a minute
+# until the check is done for this boot (its state in RAM says so: then nothing is started).
+DNS_RULES_BIN=${VWARD_DNS_RULES_BIN:-/opt/bin/vward-tunnel-health.sh}
+DNS_RULES_STATE=${VWARD_DNS_RULES_STATE:-/tmp/vward-dns-rules}
+dns_rules_tick()
+{
+    [ -x "$DNS_RULES_BIN" ] || return 0
+    DRT_R=
+    [ ! -r "$DNS_RULES_STATE" ] || DRT_R=$(sed -n 's/^RESULT=//p' "$DNS_RULES_STATE" 2>/dev/null)
+    case "$DRT_R" in ok|gave_up|no_live_file|unknown|off|observed) return 0 ;; esac
+    ( $UNNICE "$DNS_RULES_BIN" dns-rules </dev/null >/dev/null 2>&1 & )
+}
+
 keep_route_engine()
 {
     RE_P=
@@ -912,6 +925,7 @@ while :; do
     [ -e "$OFF_FLAG" ] || keep_route_engine
     # Once a minute, not on the first round: at boot S93 starts the Panel just after.
     [ $((TICK % WATCH_EVERY)) -ne 0 ] || watch_services
+    [ -e "$OFF_FLAG" ] || [ $((TICK % WATCH_EVERY)) -ne 0 ] || dns_rules_tick
 
     # Until the next round; what another agent asks is done at once, the rounds keep their time.
     if [ "$WAIT_PIPE" = 1 ]; then

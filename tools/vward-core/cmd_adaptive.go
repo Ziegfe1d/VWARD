@@ -94,6 +94,7 @@ func (l *eventLog) put(event, host, why string) {
 type adaptiveFlags struct {
 	rciAddr, lan, wan, tunDev, group, jdir, logPath, dns string
 	ownedPath, shellPersist, observeIf, adsIf, hints     string
+	dnsBlockOff                                          string
 	apply, reconcile                                     bool
 	workers, limit                                       int
 	batch, saveEvery, refresh, timeout, reconcileTick    time.Duration
@@ -113,6 +114,7 @@ func parseAdaptive(name string, args []string) (*adaptiveFlags, *flag.FlagSet) {
 	fs.BoolVar(&f.apply, "apply", false, "write into the group (without: observation, nothing sent)")
 	fs.StringVar(&f.observeIf, "observe-if", "", "files, comma-separated: while one of them exists nothing is written (Autopodbor switched off in the Panel)")
 	fs.StringVar(&f.adsIf, "ads-sandbox-if", "", "file: while it exists adverts and counters are named in the journal (sandbox, nothing changes)")
+	fs.StringVar(&f.dnsBlockOff, "dnsblock-off-if", "", "file: while it exists the sandbox of «blocked by name» is off (default: on - a name the router's DNS has no address for is asked through the tunnel and checked through the VPN, only told)")
 	fs.StringVar(&f.hints, "hints", "/opt/etc/vward/route-engine/hints-catalog.tsv", "the domain sources of blocked sites (itdog, Re:filter, antifilter; v2fly left out); empty: none")
 	fs.BoolVar(&f.reconcile, "reconcile", true, "take names out again once they open directly (3 checks in a row)")
 	fs.StringVar(&f.ownedPath, "owned", "/opt/var/lib/vward/core-adaptive/owned.json", "the names Autopodbor added itself")
@@ -140,6 +142,7 @@ func checkHost(args []string) {
 	r := router.New(rci.New(f.rciAddr, true), true)
 	cfg := adaptive.DefaultConfig()
 	cfg.Group, cfg.WanDev, cfg.TunnelDev = f.group, f.wan, f.tunDev
+	cfg.DNSBlock = func() bool { return f.dnsBlockOff == "" || !anyExists([]string{f.dnsBlockOff}) }
 	e := adaptive.New(cfg, adaptive.NewProber(f.timeout, f.dns))
 	if m, err := r.Read([]string{"groups", "routes", "doh"}); err == nil {
 		e.SetConfig(m)
@@ -156,6 +159,9 @@ func checkHost(args []string) {
 	t0 := time.Now()
 	res := e.Check(context.Background(), fs.Arg(0))
 	fmt.Printf("HOST=%s\nRESULT=%s\nWHY=%s\nMS=%s\n", res.Host, res.Outcome, res.Why, ms(time.Since(t0)))
+	if res.DNSBlock != "" {
+		fmt.Printf("SANDBOX_DNS_BLOCK=%s\n", res.DNSBlock)
+	}
 }
 
 func runAdaptive(args []string) {
@@ -174,6 +180,7 @@ func runAdaptive(args []string) {
 	j := &journal.Journal{Dir: f.jdir}
 	cfg := adaptive.DefaultConfig()
 	cfg.Group, cfg.WanDev, cfg.TunnelDev = f.group, f.wan, f.tunDev
+	cfg.DNSBlock = func() bool { return f.dnsBlockOff == "" || !anyExists([]string{f.dnsBlockOff}) }
 	e := adaptive.New(cfg, adaptive.NewProber(f.timeout, f.dns))
 	w := &adaptive.Writer{R: r, J: j, Group: f.group, Limit: f.limit, Observe: !f.apply, SaveEvery: f.saveEvery, KeepOps: 50}
 	// The Panel's switch (adaptive.disabled) is a file: looked at with every batch, so «выкл» stops
@@ -384,6 +391,10 @@ func runAdaptive(args []string) {
 							stats["ads_would_skip"]++
 							log.put("SANDBOX_AD_SKIP", res.Host, "would not send to the VPN: an advert or a counter ("+res.Ad+")")
 						}
+						if d, why, ok := strings.Cut(res.DNSBlock, "|"); ok {
+							stats["dnsblock_would"]++
+							log.put("SANDBOX_DNS_BLOCK", res.Host, "would send to the VPN with its DNS through the tunnel ("+d+"): "+why)
+						}
 					}
 					if res.Outcome == adaptive.Add {
 						pending[res.Host] = res.Direct
@@ -404,6 +415,7 @@ func runAdaptive(args []string) {
 	if f.reconcile {
 		rc := adaptive.DefaultReconcile()
 		rc.TunnelDev = f.tunDev
+		rc.DNSBlock = func() bool { return f.dnsBlockOff == "" || !anyExists([]string{f.dnsBlockOff}) }
 		prober := adaptive.NewProber(f.timeout, f.dns)
 		var vpnDownSaid time.Time
 		wg.Add(1)
@@ -620,6 +632,12 @@ func maintLog(prev map[string]int, ev []adaptive.ReconcileEvent, threshold int, 
 			continue
 		case "VPN_FAIL":
 			put("MAINT_NO_PATH", x.Host, fmt.Sprintf("fails=%d/%d %s", x.Streak, threshold, x.Why))
+			continue
+		case "SANDBOX_DNS_BLOCK":
+			// The same line as for a new name (the Panel counts both): what would be done.
+			if d, why, ok := strings.Cut(x.Why, "|"); ok {
+				put("SANDBOX_DNS_BLOCK", x.Host, "would send to the VPN with its DNS through the tunnel ("+d+"): "+why)
+			}
 			continue
 		}
 		if (x.Event == "DIRECT_FAIL" || x.Event == "DIRECT_UNKNOWN") && prev[x.Host] == 0 {

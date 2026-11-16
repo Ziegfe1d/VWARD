@@ -2044,6 +2044,63 @@ tick, visibilitychange и refreshPage журналы не грузят. Исто
   без своего правила; `check-autopick-page.py` — подпись Панели; `go test -race` — ok.
 - Ядро: mipsle `27fa1339…`, mips `5779f072…`, arm64 `047e6a8b…`, суммы в S91 (сборка воспроизводима, `--check`).
 
+### 16.11.2026 — [Claude Code] DNS на роутере владельца: блокировка по имени, 1 из 16 строк туннеля, решение `vward-dns`
+
+- По скриншотам DNS Keenetic и трём диагностикам (`tools/termius/diag-20261116-dns-servers.txt`,
+  `diag-20261116-dns-rules-live.txt`, `diag-20261116-tunnel-health.txt`): DNS провайдера на `www.instagram.com`,
+  `rutracker.org` — «имени нет»; строки `ip name-server 8.8.8.8|1.1.1.1 <домен> on OpkgTun0` (16) живые 1 из 16
+  (`RESULT=observed CONFIG=16 LIVE=1`); проверку r6 выполнял `tunnel-guard`, он выключен (`COMPONENT_DISABLED`);
+  файл `domain-lists.conf` у владельца отсутствовал (создан с `dns_rules_check=1` — без `tunnel-guard` не действует,
+  безвреден); `8.47.69.0` — настоящий Cloudflare. AdGuard Home не в цепочке DNS.
+- Команда владельца `tools/termius/fix-20261116-dns-reapply.txt` (меняет DNS Keenetic, запущена владельцем): 15
+  строк поданы заново («no» + та же строка), живых 16 из 16, `www.instagram.com` находится. До перезагрузки.
+- Ошибка агента в промежуточной команде: `grep -v … > tmp && echo … >> tmp` на пустом файле — `grep` без строк
+  возвращает 1, строка не дописывалась ([ FAIL ], ничего не изменено); исправлено на `{ grep -v …; echo …; } > tmp`.
+- Решение владельца по DNS и порядок работ — ROADMAP («DNS: находки 16.11.2026 …»). Следующий пакет: возврат строк
+  туннеля в агенте компонентов (сразу), `vward-dns` и автоподбор для блокировки по имени — в Песочнице.
+
+### 16.11.2026 — [Claude Code] fix.39.2 опубликован и установлен; Claude через автоподбор
+
+- build-dev-release № 43779190388 (dev `847a44a`, выпуск агентом по правилу владельца 16.11) — success; с публичного
+  `dev`: подписи обоих манифестов PASS, sequence 2026111601/ROUTINE, версия 0.2.0-rc.2.fix.39.2, пакет
+  `c1eff511…` = манифест = локальная сборка, файлы v2 88/88, ядро mipsle `27fa1339…`, mips `5779f072…`, arm64
+  `047e6a8b…` = S91 — PASS. У владельца установлен 16.11 05:00 МСК (ядро перезапущено 02:01 UTC, `HINTS names=3649`).
+- Владелец: картинка в приложение Claude без VPN на телефоне не загружалась, позже загрузилась (без VPN).
+  Диагностика (`tools/termius/diag-20261116-claude-upload.txt`): `claude.ai` в AdaptiveAuto с 23:24 UTC 15.11
+  (`direct: http 302 region; vpn: http 403`), поддомены (`api.claude.ai`) покрыты; в 21:01 UTC
+  `ISP_FAIL_VPN_UNSTABLE` (через VPN `tls: timeout`). Неудачная попытка — до 23:24 UTC, при сбое туннеля или сразу
+  после обновления (перезапуск ядра; Keenetic узнаёт адреса группы при следующем DNS-запросе устройства) — не
+  установлено. При повторе после обновления — время и `diag-20261116-claude-upload.txt`.
+- `api.anthropic.com` — `DIRECT_OK http 403`: 403 и напрямую, и через VPN владельца (RefusedHere не срабатывает);
+  приложению Claude не нужен (ходит через `claude.ai`), для Claude Code/API без VPN на устройстве — открытый вопрос.
+
+### 16.11.2026 — [Claude Code] пакет «маршрутизация и DNS до конца» (владелец 16.11): первые шаги
+
+- **Строки «DNS через туннель» после загрузки** (`cd7164f`): проверка r6 (fix.34.1) — режим
+  `vward-tunnel-health.sh dns-rules` до шлюза компонента; запускает агент компонентов (работает всегда) раз в
+  минуту, пока проверка этой загрузки не завершена (состояние в `/tmp/vward-dns-rules`); свои круги агента VPN её
+  больше не делают (один писатель). Набор файлов прежний (новый путь потребовал бы правки списка обновлятора).
+  У владельца `dns_rules_check=1` (16.11) → недостающие строки подаются заново. `check-dns-rules-boot.py` запускает
+  сам режим; падает на старом коде.
+- **Автоподбор: «Обход блокировки по имени» — Песочница** (по умолчанию вкл, `--dnsblock-off-if dnsblock.off`):
+  имя, для которого DNS роутера не дал адреса (`no address`; провайдер «имени нет»), спрашивается через туннель
+  (`1.1.1.1:53`, затем `8.8.8.8:53`, сокет привязан к устройству туннеля) и проверяется через VPN по этому адресу;
+  открылся (HTTP, свой сертификат) — в журнал `SANDBOX_DNS_BLOCK host|would send to the VPN with its DNS through
+  the tunnel (домен без www): …`, исход остаётся `PROBE_UNKNOWN`, ничего не меняется. Реклама и счётчики не
+  смотрятся. Панель: «Обход блокировки по имени: Выкл · Песочница» на странице автоподбора, итог за сутки.
+  `check-host` печатает `SANDBOX_DNS_BLOCK=`. Тесты: `TestDNSBlockSandbox`, `TestLookupViaDevice` (настоящий
+  запрос через устройство `lo`), `check-console-config.py`, `check-autopick-page.py`, `check-core-adaptive.py`.
+  Журнал владельца 16.11 (`vward-all-2026-11-16`): провайдер прячет по имени и имена **уже в группе** —
+  `whatsapp.com`, `api.whatsapp.com`, `graph.whatsapp.com`, `www.whatsapp.com`, `windscribe.com`, `gw.amnezia.org`,
+  `pravda.com.ua` (`MAINT_DIRECT_UNKNOWN … no address` ~30 раз каждый): маршрут есть, адреса нет. Песочница добавлена
+  и в плановую проверку (`Reconcile`, `rc.DNSBlock`; та же строка `SANDBOX_DNS_BLOCK`, «in the group, …»), тесты
+  `TestReconcileDNSBlockSandbox`, `TestMaintLogDNSBlock`. Там же: fix.39.2 работает — `chatgpt.com` → `AUTO_VPN direct:
+  http 403 refused; vpn: http 200; source lists`, `android.chat.openai.com` → `403 region`; ядро заменилось само
+  (`CORE_OUTDATED` → `CORE_INSTALLED` → `CORE_STARTED mode=apply`); песочница рекламы: «убрал бы из VPN 12 из 86»;
+  туннель нестабилен (`vpn: tls: timeout/closed` у 29 имён, `VLESS restart_attempted`, обновления — повтор напрямую).
+  Ядро: mipsle `ae511ce7…`, mips `0511bbba…`, arm64 `be730da3…` (сборка воспроизводима). «Вкл» (в группу + строка
+  `ip name-server 1.1.1.1 ДОМЕН on ТУННЕЛЬ`, её держит проверка выше) — после дней песочницы на роутере владельца.
+
 ## 4. Открытые вопросы и нужные данные
 
 - 09.11.2026 / fix.36 опубликован: нужна приёмка владельцем на роутере (Ozon/WB, Lampa TV, ночной скан 00:10, экраны Панели, журнал сторожа DNS на возврат AdGuard Home в цепочку). Локальный стресс 09.11: однократное «processes pile up 6 -> 13» (route engine 5), в CI нет; при повторе разобрать по `soak_debug`.

@@ -1,0 +1,51 @@
+Diagnostic (16.11.2026): autopick decisions on Claude / Anthropic names, the lists they are in, and a check
+now directly and through the VPN (vward-core check-host). Command only reads, changes nothing. One block.
+
+clear
+(
+PFX="vward-claudeup"
+OUT="/tmp/${PFX}-$(date +%Y%m%d-%H%M%S).txt"
+LAST="/tmp/last_result.txt"
+MAXB=30000
+ESC=$(printf '\033')
+ls -1t /tmp/${PFX}-*.txt 2>/dev/null | tail -n +5 | while read -r F; do rm -f "$F"; done
+: > "$OUT"; ln -sfn "$OUT" "$LAST"; ln -sfn "$OUT" "/tmp/last_${PFX}.txt"
+send_out() {
+  [ -s "$OUT" ] || return 1
+  sed "s/${ESC}\[[0-9;?]*[a-zA-Z]//g" "$OUT" | tail -c "$MAXB" | base64 | tr -d '\r\n' |
+    { read -r B; printf '\033]52;c;%s\a' "$B"; }
+}
+on_abort() {
+  trap '' INT TERM HUP; send_out
+  echo "[ ABORTED / DISCONNECTED ]: PARTIAL RESULT SAVED TO /tmp/last_result.txt"; exit 130
+}
+trap on_abort INT TERM HUP
+tmo() {
+  _ts=$1; shift
+  "$@" & _tp=$!
+  ( sleep "$_ts"; kill "$_tp" 2>/dev/null ) & _tw=$!
+  wait "$_tp"; _tr=$?
+  kill "$_tw" 2>/dev/null
+  return $_tr
+}
+{
+echo "VWARD CLAUDE-UPLOAD DIAG $(date '+%Y-%m-%d %H:%M:%S') vward=$(cat /opt/share/vward/VERSION 2>/dev/null)"
+L=/opt/var/log/vward-core-adaptive.log
+C=/opt/share/vward/core/vward-core
+echo "core: $(sha256sum "$C" 2>/dev/null | cut -c1-12) running: $(pidof vward-core | wc -w)"
+grep -E '\|(START|HINTS|MODE)\|' "$L" 2>/dev/null | tail -n 3
+echo "=== 1. AUTOPICK DECISIONS ON CLAUDE / ANTHROPIC NAMES (last 40) ==="
+grep -iE 'claude|anthropic' "$L" 2>/dev/null | tail -n 40
+echo "=== 2. CLAUDE / ANTHROPIC NAMES IN AdaptiveAuto AND OTHER LISTS ==="
+ndmc -c "show running-config" 2>/dev/null | awk '/^object-group fqdn /{g=$3} /^ *include / && tolower($2) ~ /claude|anthropic/ {print g, $2}' | head -n 40
+echo "=== 3. CHECK NOW: DIRECT AND THROUGH THE VPN (vward-core check-host) ==="
+N=$( { echo claude.ai; echo api.anthropic.com; echo api.claude.ai; grep -ioE '\|[a-z0-9.-]*(claude|anthropic)[a-z0-9.-]*\|' "$L" 2>/dev/null | tr -d '|' | tr 'A-Z' 'a-z'; } | awk '!s[$0]++' | head -n 12)
+for H in $N; do
+  R=$(tmo 25 "$C" check-host --tunnel-dev opkgtun0 "$H" 2>&1 | grep -E '^(RESULT|WHY)=' | tr '\n' ' ')
+  echo "$H -> ${R:-no answer}"
+done
+} 2>&1 | tee "$OUT"
+send_out
+echo "RESULT SENT (OSC52)"
+echo "RAW: /tmp/last_result.txt"
+)

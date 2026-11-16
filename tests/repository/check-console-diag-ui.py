@@ -29,8 +29,8 @@ if "sd.alive === 'no'" not in js or "Smart DNS не отвечает" not in js:
     fail("the Panel must say that the Smart DNS server does not answer")
 if "в Keenetic строк ' + (c.keenetic || 0)" not in js or "Убирать нечего" not in js:
     fail("«Убрать свой сервер» must report what was cleared, and say when there was nothing")
-# 13 (owner 02.11): «DNS» screen - one status line of the chosen way with a dot, a spinner pill while a
-# check runs (no toast), «Проверить» with the refresh icon and disabled meanwhile, Smart DNS segment
+# 13 (owner 02.11): «DNS» screen - one status line of the chosen way with a dot; while a check runs
+# only the button's icon turns (owner 16.11, no line; no toast), «Проверить» with the refresh icon and disabled meanwhile, Smart DNS segment
 # off with its reason when the server does not answer; not installed components folded.
 if "{ id: 'ai', title: 'DNS'," not in js or "const SHORT = { ai: 'DNS'," not in js:
     fail("«ИИ-сервисы»/«ИИ» must be «DNS»")
@@ -38,6 +38,20 @@ if "{ id: 'ai', title: 'DNS'," not in js or "const SHORT = { ai: 'DNS'," not in 
 # «Обновить серверы» a download (one icon for all three on a tunnel's page).
 if "[/^Проверить/, 'pulse']" not in js or "[/^Переустановить/, 'refresh']" not in js or "[/^Обновить серверы/, 'download']" not in js:
     fail("«Проверить», «Перезапустить» and «Обновить серверы» each with its own icon")
+# Owner 16.11.2026: «IP-категории» off in «Компоненты» while its page still showed switches and «через VPN»
+# - the page says the component is off, what is kept and what the mark means.
+ipc = js[js.index("  'd-ipcats'() {"):]
+ipc = ipc[:ipc.index("\n  },")]
+if "compOn('policy-sync')" not in ipc or 'IP-категории выключены в «Компонентах»' not in ipc:
+    fail("the IP categories page must say when the component is off")
+# Owner 16.11.2026 «Источники»: v2fly is no hint of autopick (fix.39.2), the subnet sources say when
+# «IP-категории» is off (its night run downloads them).
+src = js[js.index('const ROUTE_SOURCES = ['):]
+src = src[:src.index('];')]
+if 'Автоподбор его не берёт' not in src or src.count('ip: true') != 3 or 'при сбое напрямую сразу уходит' in src:
+    fail("the sources page must say what each source is for, as the core of fix.39.2 uses them")
+if "x.ip && !compOn('policy-sync')" not in js or 'не обновляется: IP-категории выключены' not in js:
+    fail("the subnet sources must say they do not update while «IP-категории» is off")
 at = js.index('  const status = s => {', js.index('function aiPage()'))
 status = js[at:js.index('\n  };', at)+5]
 at = js.index('function aiSlider(')
@@ -57,9 +71,17 @@ const wayName={vpn:'VPN',dns:'Smart DNS',isp:'Провайдер'};
 let sdDown=false,sdServerDown=false,sdReason='';
 '''+status+'\n'+slider+'''
 assert(status({id:'s',via:'vpn',selected:'vpn'}).includes('VPN · не проверен'));
+// Owner 16.11.2026: while a check runs only the button's icon turns - no «проверяется…» line; the
+// line keeps what it said before (the card does not jump), empty before the first check.
 AICHK.s={busy:true};
-let text=status({id:'s',via:'vpn',selected:null});
-assert(text.includes('busy-pill') && text.includes('class="spin"') && text.includes('проверяется'));
+let text=status({id:'s',via:'vpn',selected:'vpn'});
+assert(!text.includes('проверяется') && !text.includes('spin') && text.includes('aria-busy'));
+AICHK.s={busy:true,prev:{ok:true,results:[{via:'tun',verdict:'open'}]}};
+text=status({id:'s',via:'vpn',selected:'vpn'});
+assert(!text.includes('проверяется') && text.includes('VPN · ') && text.includes('dot ok'));
+// No way chosen: plain words and what to do (owner 16.11.2026), never «Связь сервиса не задана».
+text=status({id:'s',via:'vpn',selected:null,effective:'mixed',coverage:{routed:2,catalog:10},paths:[{title:'ChatGPT',route:'tun0'}]});
+assert(text.includes('Через «ChatGPT» (tun0) идут 2 из 10 доменов сервиса. Выберите путь ниже') && !text.includes('Связь сервиса') && !text.includes('покрытие'));
 delete AICHK.s; sdDown=true; sdServerDown=true;
 for(const why of ['сервер не отвечает','сервер не настроен','ответ сервера не подтверждён']) {
   sdReason=why;

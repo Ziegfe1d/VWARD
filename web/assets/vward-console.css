@@ -515,6 +515,10 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 .seg-slider.four{grid-template-columns:repeat(4,minmax(0,1fr))}
 .seg-slider.four .seg-thumb{width:calc((100% - 8px) / 4)}
 .seg-slider[data-i="3"] .seg-thumb{transform:translateX(300%)}
+.seg-slider.five{grid-template-columns:repeat(5,minmax(0,1fr))}
+.seg-slider.five .seg-thumb{width:calc((100% - 8px) / 5)}
+.seg-slider[data-i="4"] .seg-thumb{transform:translateX(400%)}
+.seg-slider.five button{padding-inline:2px}
 /* 02.11 (owner): «Провайдер» in full - the last of four segments wider (0.9 : 0.9 : 0.9 : 1.3), the
    thumb follows: its width per segment, its shift in its own widths. */
 .seg-slider.four.last-wide{grid-template-columns:.9fr .9fr .9fr 1.3fr}
@@ -562,7 +566,6 @@ body.slow .topbar::before{opacity:1;transform:translate(-50%,0)}
 /* A compact pill with a spinner, the format of «Роутер отвечает медленно…»; a status line of a fixed height. */
 @keyframes spin{to{transform:rotate(360deg)}}
 .spin{display:inline-block;flex:none;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .9s linear infinite}
-.busy-pill{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:1px 10px;border-radius:999px;background:var(--surface-2);color:var(--muted);font-size:var(--fs-xs);line-height:18px;white-space:nowrap}
 .ai-head>small.ai-status{display:flex;flex-basis:100%;align-items:flex-start;min-height:20px;color:var(--muted);white-space:normal;overflow-wrap:anywhere}
 .ai-head>small.ai-status .stat{display:flex;align-items:flex-start;gap:6px;white-space:normal;overflow:visible;text-overflow:clip;min-width:0}
 .ai-head>small.ai-status .dot{margin-top:5px;flex:none}
@@ -650,3 +653,6 @@ details.missing-comps>summary::-webkit-details-marker{display:none}
 /* A short choice as the slider over its hidden select (owner 13.11.2026): the select is never seen. */
 .seg-sel{display:block;width:100%}
 .seg-sel>select{display:none!important}
+/* The tunnel's server name at the top of its page, beside the state (owner 16.11.2026). */
+.block-head .head-left{flex:1 1 auto;min-width:0}
+.block-head .head-left span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
