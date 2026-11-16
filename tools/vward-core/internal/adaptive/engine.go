@@ -18,6 +18,8 @@ package adaptive
 
 import (
 	"context"
+	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +29,13 @@ import (
 // Prober checks whether host answers through one device.
 type Prober interface {
 	Probe(ctx context.Context, host, dev string) ProbeResult
+}
+
+// TunnelResolver: a Prober that can also ask a name through the tunnel and check the site at the addresses
+// found there (the name the provider's DNS blocks, 16.11.2026).
+type TunnelResolver interface {
+	LookupVia(ctx context.Context, host, dev string) []net.IP
+	ProbeAt(ctx context.Context, host, dev string, ips []net.IP) ProbeResult
 }
 
 type Config struct {
@@ -41,6 +50,10 @@ type Config struct {
 	UnknownFor time.Duration // a check that could not tell
 	Control    []string      // sites that must open directly for a direct failure to count
 	ControlFor time.Duration // how long the control answer holds
+	// DNSBlock: the sandbox of «blocked by name» is on (owner 16.11.2026): a name the router's DNS has no
+	// address for is asked through the tunnel and checked through the VPN; the result is only told
+	// (Result.DNSBlock), nothing changes. nil: off.
+	DNSBlock func() bool
 }
 
 func DefaultConfig() Config {
@@ -68,6 +81,9 @@ type Result struct {
 	Why     string
 	Direct  string // AUTO_VPN: why the name did not open directly («connect: timeout»)
 	Ad      string // AUTO_VPN: the name is an advert or a counter (AdName's entry)
+	// DNSBlock (sandbox): the router's DNS has no address, the tunnel's has and the site opens through the
+	// VPN - what would be done, «DOMAIN|why»; the outcome stays PROBE_UNKNOWN.
+	DNSBlock string
 }
 
 type memo struct {
@@ -232,7 +248,7 @@ func (e *Engine) Check(ctx context.Context, raw string) Result {
 		}
 		return e.remember(Result{Host: h, Outcome: DirectOK, Why: d1.Why}, e.cfg.OKFor)
 	case Unknown:
-		return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "direct: " + d1.Why}, e.cfg.UnknownFor)
+		return e.remember(e.dnsBlocked(ctx, Result{Host: h, Outcome: ProbeUnknown, Why: "direct: " + d1.Why}, d1), e.cfg.UnknownFor)
 	}
 	// The first direct check failed: the VPN checks start now, alongside the second direct
 	// check and the control sites.
@@ -292,7 +308,7 @@ func (e *Engine) checkHinted(ctx context.Context, h string) Result {
 		}
 		return e.remember(Result{Host: h, Outcome: DirectOK, Why: d.Why}, e.cfg.OKFor)
 	case Unknown:
-		return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "direct: " + d.Why}, e.cfg.UnknownFor)
+		return e.remember(e.dnsBlocked(ctx, Result{Host: h, Outcome: ProbeUnknown, Why: "direct: " + d.Why}, d), e.cfg.UnknownFor)
 	}
 	ctl := e.control(ctx)
 	v := <-vpn
@@ -307,6 +323,30 @@ func (e *Engine) checkHinted(ctx context.Context, h string) Result {
 		return e.remember(Result{Host: h, Outcome: TunnelFail, Why: "direct: " + d.Why + "; vpn: " + v.Why}, e.cfg.FailFor)
 	}
 	return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "vpn: " + v.Why}, e.cfg.UnknownFor)
+}
+
+// dnsBlocked (sandbox, 16.11.2026): the router's DNS has no address for the name - the provider's DNS
+// blocks by name (www.instagram.com, rutracker.org «имени нет» on the owner's router). The name is asked
+// through the tunnel; an address there and the site opening through the VPN at it is told in DNSBlock:
+// the domain (without «www.») and why. Adverts and counters are not looked at. Nothing changes.
+func (e *Engine) dnsBlocked(ctx context.Context, r Result, d ProbeResult) Result {
+	if e.cfg.DNSBlock == nil || !e.cfg.DNSBlock() || e.cfg.TunnelDev == "" || d.Why != "no address" || AdName(r.Host) != "" {
+		return r
+	}
+	tr, ok := e.p.(TunnelResolver)
+	if !ok {
+		return r
+	}
+	ips := tr.LookupVia(ctx, r.Host, e.cfg.TunnelDev)
+	if len(ips) == 0 {
+		return r
+	}
+	v := tr.ProbeAt(ctx, r.Host, e.cfg.TunnelDev, ips)
+	if v.Verdict != Open || HTTPCode(v.Why) == "" || WrongCert(v) {
+		return r
+	}
+	r.DNSBlock = strings.TrimPrefix(r.Host, "www.") + "|the router's DNS has no address; through the tunnel " + ips[0].String() + "; vpn: " + v.Why
+	return r
 }
 
 // control: do the control sites open directly? One check at a time, the answer held for

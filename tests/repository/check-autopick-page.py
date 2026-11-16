@@ -46,16 +46,21 @@ for need in ("choiceSlider('ad-ads', [['off', 'Выкл'], ['sandbox', 'Песо
         fail(f"page lacks {need!r}")
 if "if (key === 'ad-ads') { cfgSet({ op: 'adaptive-ads', value: v }" not in JS:
     fail("the sandbox slider saves adaptive-ads")
-h2 = """const esc = s => String(s), dom = s => String(s), empty = s => '<empty>' + s + '</empty>', fmtInt = n => String(n);
+# 16.11.2026 «Обход блокировки по имени»: Выкл · Песочница (sandbox by default), its summary beside it.
+if "choiceSlider('ad-dns', [['off', 'Выкл'], ['sandbox', 'Песочница']], dnsMode" not in page or "adDnsText()" not in page or \
+        "if (key === 'ad-dns') { cfgSet({ op: 'adaptive-dnsblock', value: v }" not in JS or "cfgRoute().adaptive_dnsblock === 'off' ? 'off' : 'sandbox'" not in JS:
+    fail("the «blocked by name» sandbox slider and its summary")
+h2 = """const esc = s => String(s), dom = s => String(s), empty = s => '<empty>' + s + '</empty>', fmtInt = n => String(n), plural = (n, a, b, c) => n === 1 ? a : n < 5 ? b : c;
 """ + code + JS[JS.index("function adSandboxText("):JS.index("// Light: the core's journal tail")] + """
 const now = Date.now(), t = m => new Date(now - m * 60000).toISOString().replace('Z', '+0000').replace(/\\.\\d+/, '');
-const quiet = adSandboxText(0, 40);
+const quiet = adSandboxText(0, 40), dnsQuiet = (ADV.feed = [], adDnsText());
 ADV.feed = adFeedParse([t(50) + '|MAINT_NO_PATH|2.datadog.pool.ntp.org|fails=2/3 direct: connect: timeout; vpn: connect: timeout',
   t(20) + '|DROPPED|2.datadog.pool.ntp.org|opens neither directly nor through the VPN: direct: connect: timeout; vpn: connect: timeout',
   t(15) + '|REMOVED|ad.doubleclick.net|dns blocked', t(14) + '|REMOVED|cdn.discordapp.com|opened directly 3 times in a row',
   t(9) + '|AUTO_VPN|www.googleadservices.com|direct: tls: reset; vpn: http 200', t(9) + '|SANDBOX_AD_SKIP|www.googleadservices.com|would not send to the VPN: an advert or a counter (googleadservices.com)',
-  t(8) + '|ADDED|www.googleadservices.com|AdaptiveAuto', t(3) + '|MAINT_VPN_DOWN|-|x', t(2) + '|MODE|-|apply', t(1) + '|SANDBOX_AD_GROUP|-|would take out of the VPN 2 of 40: a, b'].join('\\n'));
-console.log(JSON.stringify({ html: adFeedHtml(), hosts: ADV.feed.map(e => e.host), quiet, busy: adSandboxText(2, 40),
+  t(8) + '|ADDED|www.googleadservices.com|AdaptiveAuto', t(3) + '|MAINT_VPN_DOWN|-|x', t(2) + '|MODE|-|apply', t(1) + '|SANDBOX_AD_GROUP|-|would take out of the VPN 2 of 40: a, b',
+  t(1) + "|SANDBOX_DNS_BLOCK|rutracker.org|would send to the VPN with its DNS through the tunnel (rutracker.org): the router's DNS has no address; through the tunnel 172.67.182.196; vpn: http 200"].join('\\n'));
+console.log(JSON.stringify({ html: adFeedHtml(), hosts: ADV.feed.map(e => e.host), quiet, busy: adSandboxText(2, 40), dnsQuiet, dns: adDnsText(),
   why: [adWhy('connect: timeout'), adWhy('tls: reset'), adWhy('http 451'), adWhy('http 302 region'), adWhy('connect: refused'), adWhy(''), adWhy('http 403 refused'), adWhy('http 403 region'), adWhy('http 200 wrong-cert refused'), adWhy('http 200 stall refused')] }));
 """
 r = subprocess.run(["node", "-e", h2], capture_output=True, text=True, timeout=30)
@@ -76,4 +81,8 @@ if not o["busy"].startswith("Песочница: расхождения с ав�
     fail(f"sandbox, what it would do: {o['busy']}")
 if o["why"] != ["нет ответа", "соединение сброшено", "сайт закрыт по требованию (451)", "сайт не работает в этом регионе", "соединение отклонено", "", "сайт отказывает отсюда (403), через VPN отвечает", "сайт не работает в этом регионе", "напрямую чужой сертификат (заглушка провайдера), через VPN настоящий", "напрямую обрыв после первых КБ (блокировка «16 КБ»), через VPN целиком"]:
     fail(f"why it did not open directly, in words: {o['why']}")
+if o["dnsQuiet"] != "Песочница: за сутки скрытых провайдером имён не встретилось. Ничего не меняется." or \
+        o["dns"] != "Песочница: за сутки провайдер скрыл 1 имя (rutracker.org): отправил бы в VPN, адреса спрашивал бы через туннель. Ничего не меняется." or \
+        "Песочница: провайдер скрывает имя - отправил бы в VPN, адрес через туннель" not in o["html"]:
+    fail(f"the «blocked by name» sandbox in words: {o['dnsQuiet']!r} {o['dns']!r}")
 print("AUTOPICK_PAGE=PASS")

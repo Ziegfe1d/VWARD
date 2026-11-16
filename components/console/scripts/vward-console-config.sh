@@ -35,6 +35,8 @@ LISTS_STATE="$ETC/route-engine/domain-lists"
 WAN_GUARD_FLAG="$ETC/wan-guard.disabled"
 ADAPTIVE_FLAG="$ETC/route-engine/adaptive.disabled"
 ADAPTIVE_ADS_FLAG="$ETC/route-engine/ads.sandbox"
+# «Обход блокировки по имени» (16.11.2026): the sandbox is on unless this file exists.
+ADAPTIVE_DNSBLOCK_OFF="$ETC/route-engine/dnsblock.off"
 CLASSIFIER_FILE="$ETC/route-engine/domain-classifier.conf"
 IP_EXCLUDED=${VWARD_POLICY_EXCLUDED:-$ETC/policy-sync/excluded.categories}
 AUTH_CONF=${VWARD_CONSOLE_AUTH_CONF:-$ETC/console/auth.conf}
@@ -774,6 +776,20 @@ op_adaptive_ads() {
         *) die invalid_value 64 ;;
     esac
     done_ok "adaptive-ads $1" changed
+}
+
+# adaptive-dnsblock off|sandbox: «Обход блокировки по имени» of Autopodbor (owner 16.11.2026; «сначала
+# песочница»): in the sandbox a name the router's DNS has no address for is asked through the tunnel and
+# checked through the VPN - only told in the journal (SANDBOX_DNS_BLOCK). On by default: off is a file.
+op_adaptive_dnsblock() {
+    case "$1" in
+        sandbox) [ -e "$ADAPTIVE_DNSBLOCK_OFF" ] || done_ok "adaptive-dnsblock sandbox" unchanged
+           rm -f "$ADAPTIVE_DNSBLOCK_OFF" || die write_failed ;;
+        off) [ ! -e "$ADAPTIVE_DNSBLOCK_OFF" ] || done_ok "adaptive-dnsblock off" unchanged
+           mkdir -p "$(dirname "$ADAPTIVE_DNSBLOCK_OFF")" && printf 'off from VWARD Panel %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$ADAPTIVE_DNSBLOCK_OFF" || die write_failed ;;
+        *) die invalid_value 64 ;;
+    esac
+    done_ok "adaptive-dnsblock $1" changed
 }
 
 # tunnel-auto enabled 0|1 | criterion balanced|speed|ping | speed off|night|6h: the tunnel
@@ -5939,7 +5955,7 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|adaptive-ads|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|backup-delete|backup-period|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store|smartdns-feature|routing-root) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|adaptive-ads|adaptive-dnsblock|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|backup-delete|backup-period|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store|smartdns-feature|routing-root) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
@@ -5995,7 +6011,7 @@ case "$OP" in
         edit_lock ;;
     # Settings no routing step reads (owner 08.11: a switch does not wait for a long routing change):
     # their own short lock, not the routing edit lock.
-    wan-guard|console-auth|console-devices|update-feed|ext-auto|journal|agents-mode|adaptive-ads)
+    wan-guard|console-auth|console-devices|update-feed|ext-auto|journal|agents-mode|adaptive-ads|adaptive-dnsblock)
         dir_lock "$SETTINGS_LOCK" || die settings_busy 75
         SETTINGS_LOCKED=1 ;;
 esac
@@ -6024,6 +6040,7 @@ case "$OP" in
     component) op_component "$ARG1" "$ARG2" ;;
     adaptive-mode) op_guard_flag adaptive "$ADAPTIVE_FLAG" "$ARG1" ;;
     adaptive-ads) op_adaptive_ads "$ARG1" ;;
+    adaptive-dnsblock) op_adaptive_dnsblock "$ARG1" ;;
     classifier) case "$ARG1" in 0|1) ;; *) die invalid_value 64 ;; esac
         set_kv "$CLASSIFIER_FILE" CLASSIFIER_ENABLED "$ARG1" 0600 || done_ok "classifier enabled=$ARG1" unchanged
         done_ok "classifier enabled=$ARG1" changed ;;

@@ -854,7 +854,7 @@ const LOG_CODES = {
   MAINT_STILL_BLOCKED: 'Проверка списка автоподбора: по-прежнему не открываются напрямую',
   MAINT_NO_PATH: 'Проверка списка автоподбора: не открывается ни напрямую, ни через VPN', MAINT_VPN_DOWN: 'Проверка списка автоподбора: VPN сейчас не отвечает, его отказы не считаются',
   DROPPED: 'Убран из автоподбора: не открывается ни напрямую, ни через VPN', WOULD_DROP: 'Наблюдение: убрал бы из автоподбора - не открывается ни напрямую, ни через VPN',
-  MODE: 'Автоподбор: режим записи', SANDBOX_AD_SKIP: 'Песочница: не отправил бы в VPN - реклама или счётчик', SANDBOX_AD_GROUP: 'Песочница: убрал бы из VPN рекламу и счётчики', MAINT_ISP_UNKNOWN: 'Проверка через провайдера без ответа', MAINT_ISP_BAD: 'Провайдер не пропускает', MAINT_DIRECT_CONFIRM: 'Напрямую: подтверждение', MAINT_DIRECT_CONFIRM_WAIT: 'Напрямую: ждём подтверждения',
+  MODE: 'Автоподбор: режим записи', SANDBOX_AD_SKIP: 'Песочница: не отправил бы в VPN - реклама или счётчик', SANDBOX_DNS_BLOCK: 'Песочница: провайдер скрывает имя - отправил бы в VPN, адрес через туннель', SANDBOX_AD_GROUP: 'Песочница: убрал бы из VPN рекламу и счётчики', MAINT_ISP_UNKNOWN: 'Проверка через провайдера без ответа', MAINT_ISP_BAD: 'Провайдер не пропускает', MAINT_DIRECT_CONFIRM: 'Напрямую: подтверждение', MAINT_DIRECT_CONFIRM_WAIT: 'Напрямую: ждём подтверждения',
   MAINT_ISP_PROBE_UNRELIABLE: 'Проверка через провайдера недостоверна: сайты не оцениваются', ADD_ABORT_ISP_UNRELIABLE: 'Не добавлен в VPN: проверка через провайдера недостоверна',
   ADD_SKIP_RU_ZONE: 'Российский домен: не через VPN', ADD_SKIP_ROUTER_OWN: 'Служба роутера (KeenDNS, облако): не через VPN', HINT_SKIP_ROUTER_OWN: 'Служба роутера (KeenDNS, облако): не через VPN', ADD_ABORT_WG_FAIL: 'Не добавлен: VPN тоже не открывает', ADD_ABORT_DIRECT_RECOVERED: 'Не добавлен: открылся напрямую',
   ABORTED_ISP_PROBE_UNRELIABLE: 'Проверка IP-категорий остановлена: проверка через провайдера недостоверна', ABORTED_TUNNEL_DOWN: 'Проверка IP-категорий остановлена: туннель не отвечает',
@@ -2955,6 +2955,7 @@ const RENDER = {
     // fix.39: the core's marks - a content network's common name, a name that fails through the
     // VPN too (it leaves after 3 such checks), an advert or a counter (the sandbox).
     const adsMode = cfgRoute().adaptive_ads === 'sandbox' ? 'sandbox' : 'off', adNames = names.filter(n => n.ad);
+    const dnsMode = cfgRoute().adaptive_dnsblock === 'off' ? 'off' : 'sandbox';
     const marks = n => (n.cdn ? ' · <span class="st warn">общее имя CDN</span>' : '') + (n.ad ? ' · <span class="st warn">реклама или счётчик</span>' : '') +
       (n.vpn_fail > 0 ? ' · <span class="st warn">не открывается и через VPN (' + esc(n.vpn_fail) + ' из 3)</span>' : '');
     const sub = n => (n.streak > 0 ? 'через VPN · <span class="st ok">скоро вернётся напрямую</span>' : esc(('через VPN ' + when(n)).trim())) + marks(n);
@@ -2977,8 +2978,13 @@ const RENDER = {
       panel('Автоподбор доменов', '<dl class="kv">' + ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', on, 'Автоподбор доменов', !cfgOk()), 'не открылся напрямую - идёт через VPN') +
         // fix.39 (owner 13.11.2026, «сначала песочница»): «Выкл · Песочница»; «Вкл» - a later release.
         ctrlRow('Реклама и счётчики мимо VPN', choiceSlider('ad-ads', [['off', 'Выкл'], ['sandbox', 'Песочница']], adsMode, 'Реклама и счётчики мимо VPN'),
-          'рекламе и счётчикам VPN не нужен: страницы работают и без них', 'stack') + '</dl>' +
-        (adsMode === 'sandbox' ? '<p class="panel-desc">' + adSandboxText(adNames.length, names.length) + '</p>' : '')) +
+          'рекламе и счётчикам VPN не нужен: страницы работают и без них', 'stack') +
+        // 16.11.2026 (owner: «добьём маршрутизацию и DNS»): the provider's DNS says «no such name» - the
+        // sandbox asks the name through the tunnel and checks it through the VPN; «Вкл» - after it.
+        ctrlRow('Обход блокировки по имени', choiceSlider('ad-dns', [['off', 'Выкл'], ['sandbox', 'Песочница']], dnsMode, 'Обход блокировки по имени'),
+          'провайдер отвечает «такого сайта нет»: имя спрашивается через туннель и проверяется через VPN', 'stack') + '</dl>' +
+        (adsMode === 'sandbox' ? '<p class="panel-desc">' + adSandboxText(adNames.length, names.length) + '</p>' : '') +
+        (dnsMode === 'sandbox' ? '<p class="panel-desc">' + adDnsText() + '</p>' : '')) +
       panel('Сейчас', '<div id="adFeed">' + adFeedHtml() + '</div>' +
         '<div class="panel-actions"><button class="btn small" type="button" data-act="ad-pause">' + ico(ADV.paused ? 'refresh' : 'power') + (ADV.paused ? 'Продолжить' : 'Пауза') + '</button>' +
         '<button class="btn small" type="button" data-go="a-adaptive">' + ico('clock') + 'Вся история</button></div>') +
@@ -3155,7 +3161,9 @@ const AD_EV = {
   MAINT_REMOVE: ['ok', 'вернулся напрямую'], REMOVED: ['ok', 'вернулся напрямую'], MAINT_DIRECT_FAIL: ['', 'проверка: напрямую не открывается, остаётся в VPN'],
   // fix.39: checked through the VPN too; an advert or a counter named by the sandbox.
   MAINT_NO_PATH: ['', 'проверка: не открывается ни напрямую, ни через VPN'], DROPPED: ['warn', 'убран: не открывается ни напрямую, ни через VPN'],
-  SANDBOX_AD_SKIP: ['info', 'Песочница: не отправил бы в VPN - реклама или счётчик']
+  SANDBOX_AD_SKIP: ['info', 'Песочница: не отправил бы в VPN - реклама или счётчик'],
+  // 16.11.2026: the provider's DNS says «no such name»; the tunnel's has the address and the site opens through the VPN.
+  SANDBOX_DNS_BLOCK: ['info', 'Песочница: провайдер скрывает имя - отправил бы в VPN, адрес через туннель']
 };
 // Why a name did not open directly (the core's words «connect: timeout», «tls: reset», «http 451»).
 function adWhy(w) {
@@ -3190,6 +3198,12 @@ function adSandboxText(inGroup, all) {
   if (!inGroup && !skip) return 'Песочница: совпало с автоподбором - рекламы и счётчиков среди ' + fmtInt(all) + ' доменов нет. Ничего не меняется.';
   return 'Песочница: расхождения с автоподбором - ' + [inGroup ? 'убрал бы из VPN ' + fmtInt(inGroup) + ' из ' + fmtInt(all) + ' доменов' : '', skip ? 'за сутки не отправил бы в VPN ' + fmtInt(skip) : ''].filter(Boolean).join(', ') +
     '. Ничего не меняется: домены видны в фильтре «Реклама и счётчики», записи - в «Вся история».';
+}
+// «Обход блокировки по имени» in the sandbox: which names the provider hides it would send to the VPN today.
+function adDnsText() {
+  const day = Date.now() - 86400000, got = [...new Set((ADV.feed || []).filter(e => e.code === 'SANDBOX_DNS_BLOCK' && e.t > day).map(e => e.host))];
+  if (!got.length) return 'Песочница: за сутки скрытых провайдером имён не встретилось. Ничего не меняется.';
+  return 'Песочница: за сутки провайдер скрыл ' + fmtInt(got.length) + ' ' + plural(got.length, 'имя', 'имени', 'имён') + ' (' + got.slice(0, 5).join(', ') + (got.length > 5 ? '…' : '') + '): отправил бы в VPN, адреса спрашивал бы через туннель. Ничего не меняется.';
 }
 // Light: the core's journal tail, about 10 KB, only while the page is open and not paused.
 function adFeedLoad() {
@@ -3619,6 +3633,7 @@ function choiceSlider(key, opts, cur, label, local) {
 function segPick(key, v) {
   if (key === 'ad-way') { const d = ADV.open; if (!d || v === 'auto') return; ADV.open = '';
     cfgSet({ op: 'adaptive', action: v === 'vpn' ? 'pin' : 'remove', target: d }, v === 'vpn' ? d + ': всегда через VPN' : d + ': напрямую, автоподбор его больше не берёт', ['route', 'config']); return; }
+  if (key === 'ad-dns') { cfgSet({ op: 'adaptive-dnsblock', value: v }, 'Обход блокировки по имени: ' + (v === 'sandbox' ? 'песочница' : 'выкл'), ['route']); return; }
   if (key === 'ad-ads') { cfgSet({ op: 'adaptive-ads', value: v }, 'Реклама и счётчики мимо VPN: ' + (v === 'sandbox' ? 'песочница' : 'выкл'), ['route']); return; }
   if (key === 'site-do') { if (v === 'block') { confirm = { id: 'site-block', dom: SITEDOM }; render(); } else siteDo(v, SITEDOM); return; }
   if (key === 'vsrv-sort') { VVIEW.sort = v; vViewSave(); render(); }

@@ -38,8 +38,10 @@ type NetProber struct {
 	resolver *net.Resolver
 	Lookup   func(ctx context.Context, host string) ([]net.IP, error)
 	Port     string
-	mu       sync.Mutex
-	srtt     map[string]time.Duration // smoothed connect time of each device (successes only)
+	// ViaLookup replaces LookupVia (tests).
+	ViaLookup func(ctx context.Context, host, dev string) []net.IP
+	mu        sync.Mutex
+	srtt      map[string]time.Duration // smoothed connect time of each device (successes only)
 }
 
 // The wait for a silent path, measured (fix.39.2, as COW's estimated timeout): six times the
@@ -139,6 +141,50 @@ func (p *NetProber) Probe(ctx context.Context, host, dev string) ProbeResult {
 	if err != nil || len(ips) == 0 {
 		return ProbeResult{Unknown, "no address"}
 	}
+	return p.probeAt(ctx, host, dev, ips)
+}
+
+// TunnelDNS: the resolvers asked through the tunnel when the router's DNS has no address for a name (the
+// provider's DNS blocks by name: «имени нет» for www.instagram.com, rutracker.org, owner 16.11.2026). Inside
+// the tunnel the provider cannot answer for them.
+var TunnelDNS = []string{"1.1.1.1:53", "8.8.8.8:53"}
+
+// LookupVia: the IPv4 addresses of host from TunnelDNS, asked through dev; nil when none answers with one.
+func (p *NetProber) LookupVia(ctx context.Context, host, dev string) []net.IP {
+	if p.ViaLookup != nil {
+		return p.ViaLookup(ctx, host, dev)
+	}
+	for _, srv := range TunnelDNS {
+		s := srv
+		r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			d := net.Dialer{Timeout: p.timeout, Control: bindControl(dev)}
+			return d.DialContext(ctx, "udp4", s)
+		}}
+		rctx, cancel := context.WithTimeout(ctx, p.timeout)
+		ips, err := r.LookupIP(rctx, "ip4", host)
+		cancel()
+		if err == nil && len(ips) > 0 && !ips[0].IsUnspecified() {
+			return ips
+		}
+	}
+	return nil
+}
+
+// ProbeAt: Probe with the addresses given (the ones found through the tunnel), not the router's DNS.
+func (p *NetProber) ProbeAt(ctx context.Context, host, dev string, ips []net.IP) ProbeResult {
+	if dev == "" {
+		return ProbeResult{Unknown, "no device"}
+	}
+	if _, err := net.InterfaceByName(dev); err != nil {
+		return ProbeResult{Unknown, "device " + dev + " missing"}
+	}
+	if len(ips) == 0 {
+		return ProbeResult{Unknown, "no address"}
+	}
+	return p.probeAt(ctx, host, dev, ips)
+}
+
+func (p *NetProber) probeAt(ctx context.Context, host, dev string, ips []net.IP) ProbeResult {
 	// 0.0.0.0 from DNS: a DNS filter blocks the name (AdGuard Home, the provider) -
 	// an advert or a tracker, not a site VPN would open: never a reason for a route
 	// (ad.doubleclick.net, api.mixpanel.com in the owner's autopick, 12.11.2026).
