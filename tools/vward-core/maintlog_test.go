@@ -94,3 +94,20 @@ func TestWriteNow(t *testing.T) {
 		t.Fatal("a batch time after a write: at once")
 	}
 }
+
+// 16.11.2026: a name in the group the provider hides - the sandbox's line, the same as for a new name.
+func TestMaintLogDNSBlock(t *testing.T) {
+	ev := []adaptive.ReconcileEvent{
+		{Host: "whatsapp.com", Event: "DIRECT_UNKNOWN", Why: "no address"},
+		{Host: "whatsapp.com", Event: "SANDBOX_DNS_BLOCK", Why: "whatsapp.com|in the group, the router's DNS has no address; through the tunnel 157.240.0.53; vpn: http 200"},
+	}
+	var got [][3]string
+	maintLog(map[string]int{"whatsapp.com": 0}, ev, 3, func(code, host, detail string) { got = append(got, [3]string{code, host, detail}) })
+	want := [][3]string{
+		{"SANDBOX_DNS_BLOCK", "whatsapp.com", "would send to the VPN with its DNS through the tunnel (whatsapp.com): in the group, the router's DNS has no address; through the tunnel 157.240.0.53; vpn: http 200"},
+		{"MAINT_STILL_BLOCKED", "-", "still=0 unknown=1"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v", got)
+	}
+}

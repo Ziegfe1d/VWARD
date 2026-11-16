@@ -2090,7 +2090,15 @@ tick, visibilitychange и refreshPage журналы не грузят. Исто
   смотрятся. Панель: «Обход блокировки по имени: Выкл · Песочница» на странице автоподбора, итог за сутки.
   `check-host` печатает `SANDBOX_DNS_BLOCK=`. Тесты: `TestDNSBlockSandbox`, `TestLookupViaDevice` (настоящий
   запрос через устройство `lo`), `check-console-config.py`, `check-autopick-page.py`, `check-core-adaptive.py`.
-  Ядро: mipsle `a5ef35f2…`, mips `38dd3aa3…`, arm64 `84111eec…` (сборка воспроизводима). «Вкл» (в группу + строка
+  Журнал владельца 16.11 (`vward-all-2026-11-16`): провайдер прячет по имени и имена **уже в группе** —
+  `whatsapp.com`, `api.whatsapp.com`, `graph.whatsapp.com`, `www.whatsapp.com`, `windscribe.com`, `gw.amnezia.org`,
+  `pravda.com.ua` (`MAINT_DIRECT_UNKNOWN … no address` ~30 раз каждый): маршрут есть, адреса нет. Песочница добавлена
+  и в плановую проверку (`Reconcile`, `rc.DNSBlock`; та же строка `SANDBOX_DNS_BLOCK`, «in the group, …»), тесты
+  `TestReconcileDNSBlockSandbox`, `TestMaintLogDNSBlock`. Там же: fix.39.2 работает — `chatgpt.com` → `AUTO_VPN direct:
+  http 403 refused; vpn: http 200; source lists`, `android.chat.openai.com` → `403 region`; ядро заменилось само
+  (`CORE_OUTDATED` → `CORE_INSTALLED` → `CORE_STARTED mode=apply`); песочница рекламы: «убрал бы из VPN 12 из 86»;
+  туннель нестабилен (`vpn: tls: timeout/closed` у 29 имён, `VLESS restart_attempted`, обновления — повтор напрямую).
+  Ядро: mipsle `ae511ce7…`, mips `0511bbba…`, arm64 `be730da3…` (сборка воспроизводима). «Вкл» (в группу + строка
   `ip name-server 1.1.1.1 ДОМЕН on ТУННЕЛЬ`, её держит проверка выше) — после дней песочницы на роутере владельца.
 
 ## 4. Открытые вопросы и нужные данные

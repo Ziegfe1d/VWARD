@@ -415,6 +415,7 @@ func runAdaptive(args []string) {
 	if f.reconcile {
 		rc := adaptive.DefaultReconcile()
 		rc.TunnelDev = f.tunDev
+		rc.DNSBlock = func() bool { return f.dnsBlockOff == "" || !anyExists([]string{f.dnsBlockOff}) }
 		prober := adaptive.NewProber(f.timeout, f.dns)
 		var vpnDownSaid time.Time
 		wg.Add(1)
@@ -631,6 +632,12 @@ func maintLog(prev map[string]int, ev []adaptive.ReconcileEvent, threshold int, 
 			continue
 		case "VPN_FAIL":
 			put("MAINT_NO_PATH", x.Host, fmt.Sprintf("fails=%d/%d %s", x.Streak, threshold, x.Why))
+			continue
+		case "SANDBOX_DNS_BLOCK":
+			// The same line as for a new name (the Panel counts both): what would be done.
+			if d, why, ok := strings.Cut(x.Why, "|"); ok {
+				put("SANDBOX_DNS_BLOCK", x.Host, "would send to the VPN with its DNS through the tunnel ("+d+"): "+why)
+			}
 			continue
 		}
 		if (x.Event == "DIRECT_FAIL" || x.Event == "DIRECT_UNKNOWN") && prev[x.Host] == 0 {

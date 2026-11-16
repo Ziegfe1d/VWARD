@@ -2,6 +2,7 @@ package adaptive
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -23,6 +24,11 @@ type ReconcileConfig struct {
 	MinGap     time.Duration // between two counted checks
 	TunnelDev  string        // the VPN's device ("": the VPN is not checked, as before fix.39)
 	VPNControl []string      // sites that must open through the VPN for a VPN failure to count
+	// DNSBlock: the sandbox «Обход блокировки по имени» (16.11.2026) also for the names in the group: one
+	// the router's DNS has no address for (whatsapp.com, gw.amnezia.org on the owner's router: in the group,
+	// yet devices get no address) is asked through the tunnel and checked through the VPN - only told
+	// (event SANDBOX_DNS_BLOCK), nothing changes. nil: off.
+	DNSBlock func() bool
 }
 
 func DefaultReconcile() ReconcileConfig {
@@ -33,7 +39,7 @@ func DefaultReconcile() ReconcileConfig {
 // ReconcileEvent of one name. VPN_DOWN (host "-") says the round could not count VPN failures.
 type ReconcileEvent struct {
 	Host   string
-	Event  string // DIRECT_CONFIRM | DIRECT_FAIL | DIRECT_UNKNOWN | REMOVE | VPN_FAIL | DROP | VPN_DOWN
+	Event  string // DIRECT_CONFIRM | DIRECT_FAIL | DIRECT_UNKNOWN | REMOVE | VPN_FAIL | DROP | VPN_DOWN | SANDBOX_DNS_BLOCK
 	Streak int    // direct successes in a row; for VPN_FAIL and DROP - failures of both paths
 	Why    string
 }
@@ -127,6 +133,15 @@ func Reconcile(ctx context.Context, o *Owned, p Prober, wanDev string, rc Reconc
 			}
 			n.Streak, n.LastOK = 0, time.Time{}
 			ev = append(ev, ReconcileEvent{h, "DIRECT_UNKNOWN", 0, r.Why})
+			if r.Why == "no address" && rc.DNSBlock != nil && rc.DNSBlock() && rc.TunnelDev != "" && AdName(h) == "" {
+				if tr, ok := p.(TunnelResolver); ok {
+					if ips := tr.LookupVia(ctx, h, rc.TunnelDev); len(ips) > 0 {
+						if v := tr.ProbeAt(ctx, h, rc.TunnelDev, ips); v.Verdict == Open && HTTPCode(v.Why) != "" && !WrongCert(v) {
+							ev = append(ev, ReconcileEvent{h, "SANDBOX_DNS_BLOCK", 0, strings.TrimPrefix(h, "www.") + "|in the group, the router's DNS has no address; through the tunnel " + ips[0].String() + "; vpn: " + v.Why})
+						}
+					}
+				}
+			}
 		}
 	}
 	return remove, ev
