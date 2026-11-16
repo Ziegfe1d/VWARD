@@ -3603,7 +3603,8 @@ function probeResult() {
     ['Запросов в журнале', q != null ? fmtInt(q) : '—']
   ]) + '<div class="panel-actions">' + adsRuleBtn(p.domain, 'allow') + adsRuleBtn(p.domain, 'block') + btn('probe-report', 'logs', 'Полный отчёт', 'small') + '</div>';
 }
-// A short choice of 2-4 options as one slider, like the Wi-Fi bands (owner 2026-10-17).
+// A short choice of 2-5 options as one slider, like the Wi-Fi bands (owner 2026-10-17; five - the period of
+// the backups, owner 16.11.2026).
 // OPTS: [value, label, disabled]; a click goes to segPick(KEY, value).
 const choicePrev = {};
 function choiceSlider(key, opts, cur, label, local) {
@@ -3612,7 +3613,7 @@ function choiceSlider(key, opts, cur, label, local) {
   choicePrev[key] = to;
   // A long last label (`Авто | VPN | DNS | Провайдер`, owner 02.11: «Провай…») gets a wider segment.
   const wide = opts.length === 4 && String(opts[3][1]).length >= 8 ? ' last-wide' : '';
-  return '<div class="seg-slider' + (['', '', ' two', '', ' four'][opts.length] || '') + wide + (on ? '' : ' off') + (at < 0 ? ' none' : '') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
+  return '<div class="seg-slider' + (['', '', ' two', '', ' four', ' five'][opts.length] || '') + wide + (on ? '' : ' off') + (at < 0 ? ' none' : '') + '" role="radiogroup" aria-label="' + esc(label) + '" data-i="' + from + '" data-to="' + to + '"><i class="seg-thumb"></i>' +
     opts.map(o => '<button type="button" role="radio" data-seg="' + key + '" data-v="' + esc(o[0]) + '" aria-checked="' + (o[0] === cur) + '"' + (on && !o[2] ? '' : ' disabled') + '>' + esc(o[1]) + '</button>').join('') + '</div>';
 }
 function segPick(key, v) {
@@ -4505,17 +4506,30 @@ async function vlessSelect(name, n) {
   await Promise.all([load('status', true), load('awg', true)]);
   await vlessServers(name);
 }
-// Snapshots of VWARD's settings: one a day automatically, or by the button.
+// Snapshots of VWARD's settings (owner 16.11.2026): «Периодичность» of the copies by schedule, a bin at
+// each copy, «Удалить все». A copy by schedule is made only when the settings changed; copies before a
+// restore, a reset and the first list change of a day are made whatever the period.
+const BACKUP_PERIODS = [['off', 'Выкл'], ['auto', 'Авто'], ['6', '6 ч'], ['12', '12 ч'], ['24', '24 ч']];
+const BACKUP_PERIOD_TEXT = { off: 'по расписанию не создаются; копия делается сама перед восстановлением, сбросом и первым за сутки изменением списков',
+  auto: 'каждый час, если настройки изменились', 6: 'раз в 6 часов, если настройки изменились', 12: 'раз в 12 часов, если настройки изменились', 24: 'раз в сутки, если настройки изменились' };
 function backupPanel() {
-  const b = S.backups, list = (b && b.backups) || [], kinds = { manual: 'вручную', auto: 'автоматически', prerestore: 'перед восстановлением', prelist: 'перед изменением списков', prereset: 'перед сбросом' };
+  const b = S.backups, list = (b && b.backups) || [], kinds = { manual: 'вручную', auto: 'по расписанию', prerestore: 'перед восстановлением', prelist: 'перед изменением списков', prereset: 'перед сбросом' };
+  const period = (b && b.period) || 'off', can = cfgOk() ? '' : ' disabled';
+  const ask = (id, name, text, yes) => confirm && confirm.id === id && confirm.name === name ? '<div class="confirm danger"><span>' + esc(text) + '</span><button class="btn small danger" type="button" data-act="confirm-yes">' + esc(yes) + '</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '';
   const rows = list.map(x => '<li class="row"><div class="row-main"><b>' + esc(fmtTime(x.created)) + '</b><small>' + esc(kinds[x.kind] || x.kind) + ' · ' + esc(fmtBytes(x.size)) + '</small>' +
     '</div>' +
     '<span class="row-acts"><a class="icon-btn" href="/cgi-bin/api.cgi?action=backup-download&amp;name=' + encodeURIComponent(x.name) + '" download aria-label="Скачать" title="Скачать">' + ico('save') + '</a>' +
-    '<button class="icon-btn" type="button" data-backup-restore="' + esc(x.name) + '" aria-label="Восстановить" title="Восстановить"' + (cfgOk() ? '' : ' disabled') + '>' + ico('undo') + '</button></span>' +
-    (confirm && confirm.id === 'backup-restore' && confirm.name === x.name ? '<div class="confirm danger"><span>Восстановить настройки VWARD на это время? Текущие сохранятся отдельной копией.</span><button class="btn small danger" type="button" data-act="confirm-yes">Восстановить</button><button class="btn small" type="button" data-act="confirm-no">Отмена</button></div>' : '') + '</li>').join('');
-  return panel('Резервные копии', (!b ? empty('Загрузка…') : !b.ok ? empty(errText(b)) : list.length ? '<ul class="rows">' + rows + '</ul>' : empty('Копий пока нет')) +
-    '<div class="panel-actions">' + btn('backup-create', 'archive', 'Создать копию сейчас', '', cfgOk() ? '' : ' disabled') + '</div>' + resultBox('backup'),
-    { desc: 'Раз в сутки, хранятся 7 копий.' });
+    '<button class="icon-btn" type="button" data-backup-restore="' + esc(x.name) + '" aria-label="Восстановить" title="Восстановить"' + can + '>' + ico('undo') + '</button>' +
+    '<button class="icon-btn" type="button" data-backup-delete="' + esc(x.name) + '" aria-label="Удалить" title="Удалить"' + can + '>' + ico('trash') + '</button></span>' +
+    ask('backup-restore', x.name, 'Восстановить настройки VWARD на это время? Текущие сохранятся отдельной копией.', 'Восстановить') +
+    ask('backup-delete', x.name, 'Удалить эту копию?', 'Удалить') + '</li>').join('');
+  return panel('Резервные копии', (!b ? empty('Загрузка…') : !b.ok ? empty(errText(b)) :
+      '<dl class="kv">' + ctrlRow('Периодичность', segSel('data-backup-period' + (b && b.ok ? can : ' disabled'), 'Периодичность', BACKUP_PERIODS, period), BACKUP_PERIOD_TEXT[period]) + '</dl>' +
+      (list.length ? '<ul class="rows">' + rows + '</ul>' : empty('Копий пока нет'))) +
+    '<div class="panel-actions">' + btn('backup-create', 'archive', 'Создать копию сейчас', '', can) +
+      (list.length ? btn('backup-delete-all', 'trash', 'Удалить все', 'danger', can) : '') + '</div>' +
+    ask('backup-delete-all', '', 'Удалить все ' + list.length + ' ' + plural(list.length, 'копию', 'копии', 'копий') + ' настроек? Вернуть их будет нельзя.', 'Удалить все') + resultBox('backup'),
+    { desc: 'Хранятся 7 последних копий.' });
 }
 // AdGuard Home's own ad settings, changed through its API (the rest stays in its web UI).
 function aghSettingsPanel(a) {
@@ -5247,6 +5261,8 @@ const CONFIRMED = {
   'https-start': () => runAction('https', 'ads-https-control', { op: 'start', confirm: 'HTTPS_START' }, 'HTTPS-фильтр запущен').then(() => load('https', true)).then(render),
   'https-ca': () => runAction('https', 'ads-https-control', { op: 'ca-init', confirm: 'HTTPS_CA_INIT' }, 'Сертификат создан').then(() => load('https', true)).then(render),
   'wifi-deny': c => wifiHostSet({ op: 'access', mac: c.mac, value: 'deny', confirm: 'WIFI_ACCESS_DENY' }, 'Интернет для устройства запрещён'),
+  'backup-delete': c => apiPost('backup-control', { op: 'delete', name: c.name, confirm: 'BACKUP_DELETE' }).then(x => { toast(x.ok ? 'Копия удалена' : 'Не удалено: ' + errText(x)); return load('backups', true); }, e => toast('Ошибка: ' + e.message)).then(render),
+  'backup-delete-all': () => apiPost('backup-control', { op: 'delete_all', confirm: 'BACKUP_DELETE_ALL' }).then(x => { toast(x.ok ? 'Копии удалены' : 'Не удалено: ' + errText(x)); return load('backups', true); }, e => toast('Ошибка: ' + e.message)).then(render),
   'backup-restore': c => apiPost('backup-control', { op: 'restore', name: c.name, confirm: 'BACKUP_RESTORE' }).then(x => { toast(x.ok ? 'Настройки восстановлены' : 'Не восстановлено: ' + errText(x)); return Promise.all(['backups', 'config', 'security', 'status'].map(k => load(k, true))); }, e => toast('Ошибка: ' + e.message)).then(render),
   'agh-protection-off': () => aghSet({ setting: 'protection', value: '0', confirm: 'AGH_PROTECTION_OFF' }, 'Фильтрация AdGuard Home выключена'),
   'agh-filter-remove': c => aghSet({ setting: 'filter-remove', url: c.url, confirm: 'AGH_FILTER_REMOVE' }, 'Список удалён'),
@@ -5506,7 +5522,7 @@ function copyText(text) {
 }
 
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-vserver],[data-go],[data-act],[data-tab],[data-card-toggle],[data-log],[data-move],[data-card-move],[data-view],[data-ads-remove],[data-wifi-bind],[data-agent-mode],[data-ai-via],[data-theme-set],[data-seg],[data-cfg-op],[data-my-pin],[data-my-rm],[data-ads-rule],[data-qfilter],[data-ads-srcdel],[data-agh-filter-rm],[data-backup-restore],[data-files-root],[data-files-dir],[data-files-open],[data-files-up]');
+  const t = e.target.closest('[data-vserver],[data-go],[data-act],[data-tab],[data-card-toggle],[data-log],[data-move],[data-card-move],[data-view],[data-ads-remove],[data-wifi-bind],[data-agent-mode],[data-ai-via],[data-theme-set],[data-seg],[data-cfg-op],[data-my-pin],[data-my-rm],[data-ads-rule],[data-qfilter],[data-ads-srcdel],[data-agh-filter-rm],[data-backup-restore],[data-backup-delete],[data-files-root],[data-files-dir],[data-files-open],[data-files-up]');
   if (!t || t.disabled) return;
   // A switch inside a row that opens a page: it switches, the page stays.
   if (t.dataset.go && e.target.closest('.switch')) return;
@@ -5528,6 +5544,7 @@ document.addEventListener('click', e => {
   if (t.dataset.filesOpen) { fileOpen(t.dataset.filesOpen); return; }
   if (t.dataset.filesUp) { if (FILES.path) filesGo(FILES.root, FILES.path.split('/').slice(0, -1).join('/')); else filesGo('', ''); return; }
   if (t.dataset.backupRestore) { confirm = { id: 'backup-restore', name: t.dataset.backupRestore }; render(); return; }
+  if (t.dataset.backupDelete) { confirm = { id: 'backup-delete', name: t.dataset.backupDelete }; render(); return; }
   if (t.dataset.aghFilterRm) { confirm = { id: 'agh-filter-remove', url: t.dataset.aghFilterRm }; render(); return; }
   if (t.dataset.listDom) {
     const v = t.dataset.dom, how = t.dataset.listDom, target = current.slice(2); t.disabled = true;
@@ -5631,6 +5648,7 @@ document.addEventListener('click', e => {
     apiGet('tunnel-probe', { name: n }).then(r => r, e => ({ ok: false, error: e.message }))
       .then(r => { S.tprobe[n] = Object.assign(r, { at: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) }); render(); });
   }
+  else if (a === 'backup-delete-all') { confirm = { id: 'backup-delete-all', name: '' }; render(); }
   else if (a === 'backup-create') { actionResult = { id: 'backup', text: 'Создаём копию…' }; render(); apiPost('backup-control', { op: 'create' }).then(x => { toast(x.ok ? 'Копия создана' : 'Не выполнено: ' + errText(x)); actionResult = null; return load('backups', true); }, e => { toast('Ошибка: ' + e.message); actionResult = null; }).then(render); }
   else if (a === 'upd-reload') location.reload();
   else if (a === 'upd-close') updOverlayClose();
@@ -5841,6 +5859,9 @@ document.addEventListener('change', e => {
   if (t.hasAttribute('data-ads-clients')) { aghClientsOp(t.checked ? 'on' : 'off'); return; }
   if (t.hasAttribute('data-route-dns')) { routeDnsOp(t.checked ? 'on' : 'off'); return; }
   if (t.hasAttribute('data-ads-pause')) { adsControl({ op: t.checked ? 'resume' : 'pause' }, t.checked ? 'Блокировка включена' : 'Блокировка на паузе'); return; }
+  if (t.hasAttribute('data-backup-period')) {
+    const v = t.value; apiPost('backup-control', { op: 'period', value: v }).then(x => { toast(x.ok ? 'Периодичность: ' + (BACKUP_PERIODS.find(o => o[0] === v) || [, v])[1] : 'Не сохранено: ' + errText(x)); return load('backups', true); }, e => toast('Ошибка: ' + e.message)).then(render); return;
+  }
   if (t.dataset.adsSet) { adsSetting(t.dataset.adsSet, t.type === 'checkbox' ? (t.checked ? '1' : '0') : t.value); return; }
   if (t.hasAttribute('data-auth-devices')) {
     const on = t.checked;

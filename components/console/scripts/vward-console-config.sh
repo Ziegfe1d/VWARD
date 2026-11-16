@@ -3810,8 +3810,23 @@ op_tunnel_subnet() {
 
 SNAPSHOT_DIR=${VWARD_SNAPSHOT_DIR:-/opt/var/backups/vward/snapshots}
 SNAPSHOT_KEEP=7
+# The period of the copies by schedule (owner 16.11.2026, «Периодичность»): auto (each hour the
+# settings changed), 6, 12 or 24 hours; «Выкл» is the extra «backup» off. No period written: 24.
+BACKUP_CONF=${VWARD_BACKUP_CONF:-$ETC/backup.conf}
+# The sum of the settings in the newest copy (next to the copies, not among them).
+BACKUP_FP=${VWARD_BACKUP_FP:-${SNAPSHOT_DIR%/*}/snapshot.fp}
 
 snapshot_name_ok() { printf '%s\n' "$1" | grep -Eq '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$'; }
+backup_period() {
+    bp=$(awk -F= '$1 == "period" {print $2; exit}' "$BACKUP_CONF" 2>/dev/null)
+    case "$bp" in auto|6|12|24) echo "$bp" ;; *) echo 24 ;; esac
+}
+# backup_fp: one sum of VWARD's settings (the nightly catalogs and the AdaptiveAuto state aside): a copy
+# by schedule is made only when it differs from the newest copy's - seven copies, seven states.
+backup_fp() {
+    ( cd "$ETC" 2>/dev/null && find . -type f ! -path ./route-engine/hints-catalog.tsv ! -path ./route-engine/hints-includes.tsv ! -path ./backup.conf \
+        -exec sha256sum {} \; 2>/dev/null | sort | sha256sum | cut -c1-64 )
+}
 
 op_backup_create() {
     # backup-create manual|auto|prerestore|prereset|prelist: auto only when the newest is a day old;
@@ -3819,13 +3834,18 @@ op_backup_create() {
     # (owner 16.11.2026: not a copy for every list change - 4 in one minute on 13.11).
     case "$1" in manual|auto|prerestore|prereset|prelist) ;; *) die invalid_value 64 ;; esac
     (umask 077; mkdir -p "$SNAPSHOT_DIR") || die write_failed
-    case "$1" in auto) bc_min=82800 ;; prelist) bc_min=${VWARD_PRELIST_MIN_AGE:-86400} ;; *) bc_min= ;; esac
-    if [ -n "$bc_min" ]; then
-        bc_last=$(ls -1 "$SNAPSHOT_DIR" 2>/dev/null | grep -E '^vward-[0-9]{8}-[0-9]{6}' | sort | tail -n 1)
-        if [ -n "$bc_last" ]; then
-            bc_age=$(( $(date +%s) - $(date -r "$SNAPSHOT_DIR/$bc_last" +%s 2>/dev/null || echo 0) ))
-            [ "$bc_age" -ge "$bc_min" ] || done_ok "backup-create $1" unchanged
-        fi
+    # auto: the period less 5 minutes (the hourly run drifts), and only when the settings changed.
+    case "$1" in
+        auto) case "$(backup_period)" in auto) bc_min=3300 ;; 6) bc_min=21300 ;; 12) bc_min=42900 ;; *) bc_min=86100 ;; esac ;;
+        prelist) bc_min=${VWARD_PRELIST_MIN_AGE:-86400} ;;
+        *) bc_min= ;;
+    esac
+    bc_fp=$(backup_fp)
+    bc_last=$(ls -1 "$SNAPSHOT_DIR" 2>/dev/null | grep -E '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$' | sort | tail -n 1)
+    if [ -n "$bc_min" ] && [ -n "$bc_last" ]; then
+        bc_age=$(( $(date +%s) - $(date -r "$SNAPSHOT_DIR/$bc_last" +%s 2>/dev/null || echo 0) ))
+        [ "$bc_age" -ge "$bc_min" ] || done_ok "backup-create $1" unchanged
+        [ "$1" != auto ] || [ -z "$bc_fp" ] || [ "$bc_fp" != "$(cat "$BACKUP_FP" 2>/dev/null)" ] || done_ok "backup-create auto: settings unchanged" unchanged
     fi
     bc_stage=$(mktemp -d /tmp/vward-backup.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     TMPFILE=$bc_stage.tar.gz
@@ -3846,8 +3866,39 @@ op_backup_create() {
     TMPFILE=
     ls -1 "$SNAPSHOT_DIR" 2>/dev/null | grep -E '^vward-[0-9]{8}-[0-9]{6}.*\.tar\.gz$' | sort -r | awk -v k="$SNAPSHOT_KEEP" 'NR > k' |
         while IFS= read -r old; do rm -f "$SNAPSHOT_DIR/$old"; done
+    [ -z "$bc_fp" ] || printf '%s\n' "$bc_fp" > "$BACKUP_FP" 2>/dev/null || :
     printf 'info.name=%s.tar.gz\n' "$bc_name"
     done_ok "backup-create $1 $bc_name" changed
+}
+
+# backup-delete NAME|all: one copy, or every copy (owner 16.11.2026: a bin at each copy, «Удалить все»).
+op_backup_delete() {
+    if [ "$1" = all ]; then
+        bd_n=$(ls -1 "$SNAPSHOT_DIR" 2>/dev/null | grep -cE '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$')
+        [ "${bd_n:-0}" -gt 0 ] || done_ok "backup-delete all" unchanged
+        ls -1 "$SNAPSHOT_DIR" | grep -E '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$' | while IFS= read -r bd_f; do rm -f "$SNAPSHOT_DIR/$bd_f"; done
+        rm -f "$BACKUP_FP"
+        ! ls -1 "$SNAPSHOT_DIR" 2>/dev/null | grep -qE '^vward-[0-9]{8}-[0-9]{6}' || die write_failed
+        done_ok "backup-delete all $bd_n" changed
+    fi
+    snapshot_name_ok "$1" || die invalid_backup 64
+    [ -f "$SNAPSHOT_DIR/$1" ] && [ ! -L "$SNAPSHOT_DIR/$1" ] || die unknown_backup
+    rm -f "$SNAPSHOT_DIR/$1" || die write_failed
+    # The newest copy gone: its sum no longer stands for a copy.
+    ls -1 "$SNAPSHOT_DIR" 2>/dev/null | grep -qE '^vward-[0-9]{8}-[0-9]{6}' || rm -f "$BACKUP_FP"
+    done_ok "backup-delete $1" changed
+}
+
+# backup-period off|auto|6|12|24: «Периодичность» of the copies by schedule; off switches the extra off.
+op_backup_period() {
+    case "$1" in off|auto|6|12|24) ;; *) die invalid_value 64 ;; esac
+    if [ "$1" = off ]; then
+        ( op_extra backup 0 ) >/dev/null || die write_failed
+        done_ok "backup-period off" changed
+    fi
+    bp_rc=0; set_kv "$BACKUP_CONF" period "$1" 0644 || bp_rc=$?
+    ( op_extra backup 1 ) >/dev/null || die write_failed
+    done_ok "backup-period $1" changed
 }
 
 # list clear|delete GROUP: a whole list emptied, or removed from Keenetic with its route and
@@ -5888,7 +5939,7 @@ fi
 [ "$#" -ge 2 ] && [ "$#" -le 5 ] || die usage 64
 OP=$1; shift
 case "$OP" in
-    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|adaptive-ads|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store|smartdns-feature|routing-root) [ "$#" -eq 1 ] || die usage 64 ;;
+    tunnel-guard|tunnel-fallback|tunnel-return|wan-guard|update-feed|adaptive-mode|adaptive-ads|classifier|console-auth|console-devices|smartdns-guard|backup-create|backup-restore|backup-delete|backup-period|ext-check|ext-daily|ext-agh-official|policy-group|services-refresh|cleanup|reset|smartdns-server|smartdns-store|smartdns-feature|routing-root) [ "$#" -eq 1 ] || die usage 64 ;;
     tunnel) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die usage 64 ;;
     tunnel-conf) [ "$#" -ge 2 ] && [ "$#" -le 4 ] || die usage 64 ;;
     tunnel-subnet|list-domain) [ "$#" -eq 3 ] || die usage 64 ;;
@@ -6001,6 +6052,8 @@ case "$OP" in
     tunnel-conf) op_tunnel_conf "$ARG1" "$ARG2" "$ARG3" "$ARG4" ;;
     vless-server) op_vless_server "$ARG1" "$ARG2" "$ARG3" "$ARG4" ;;
     backup-create) op_backup_create "$ARG1" ;;
+    backup-delete) op_backup_delete "$ARG1" ;;
+    backup-period) op_backup_period "$ARG1" ;;
     wifi-host) op_wifi_host "$ARG1" "$ARG2" "$ARG3" ;;
     backup-restore) op_backup_restore "$ARG1" ;;
     cleanup) op_cleanup "$ARG1" ;;

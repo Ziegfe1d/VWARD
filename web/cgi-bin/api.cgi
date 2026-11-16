@@ -1261,7 +1261,12 @@ if [ "$ACTION" = backup-data ]; then
   ls -ln "$SNAPSHOT_DIR" 2>/dev/null | awk '$9 ~ /^vward-[0-9]+-[0-9]+(-[a-z]+)?[.]tar[.]gz$/ {print $9 "\t" $5}' | sort -r |
     "$JQ" -Rn '[inputs | split("\t") | {name: .[0], size: (.[1] | tonumber? // 0),
       kind: (.[0] | ltrimstr("vward-") | rtrimstr(".tar.gz") | split("-") | if length > 2 then .[2] else "manual" end),
-      created: (.[0] | ltrimstr("vward-") | .[0:4] + "-" + .[4:6] + "-" + .[6:8] + "T" + .[9:11] + ":" + .[11:13] + ":" + .[13:15])}] | {ok: true, backups: .}'
+      created: (.[0] | ltrimstr("vward-") | .[0:4] + "-" + .[4:6] + "-" + .[6:8] + "T" + .[9:11] + ":" + .[11:13] + ":" + .[13:15])}] | {ok: true, backups: ., period: $period}' --arg period "$(
+    # «Периодичность»: off unless the extra «backup» is on (NAME.on, or all.on without NAME.off).
+    if { [ -e "$COMPONENT_STATE/backup.on" ] || [ -e "$COMPONENT_STATE/all.on" ]; } && [ ! -e "$COMPONENT_STATE/backup.off" ]; then
+      BPV="$(awk -F= '$1 == "period" {print $2; exit}' "${VWARD_BACKUP_CONF:-${CONFIG_ETC:-/opt/etc/vward}/backup.conf}" 2>/dev/null)"
+      case "$BPV" in auto|6|12|24) echo "$BPV" ;; *) echo 24 ;; esac
+    else echo off; fi)"
   exit 0
 fi
 # The copy that leaves the router holds no secrets: tunnel keys, the AdGuard Home
@@ -1417,6 +1422,13 @@ if [ "$ACTION" = backup-control ]; then
     restore) [ "$(form_value confirm)" = BACKUP_RESTORE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
       BN="$(form_value name)"; printf '%s\n' "$BN" | grep -Eq '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$' || { echo '{"ok":false,"error":"invalid_backup"}'; exit 0; }
       set -- backup-restore "$BN" ;;
+    delete) [ "$(form_value confirm)" = BACKUP_DELETE ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+      BN="$(form_value name)"; printf '%s\n' "$BN" | grep -Eq '^vward-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.tar\.gz$' || { echo '{"ok":false,"error":"invalid_backup"}'; exit 0; }
+      set -- backup-delete "$BN" ;;
+    delete_all) [ "$(form_value confirm)" = BACKUP_DELETE_ALL ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
+      set -- backup-delete all ;;
+    period) BP="$(form_value value)"; case "$BP" in off|auto|6|12|24) ;; *) echo '{"ok":false,"error":"invalid_value"}'; exit 0 ;; esac
+      set -- backup-period "$BP" ;;
     *) echo '{"ok":false,"error":"invalid_operation"}'; exit 0 ;;
   esac
   BOUT="$("$CONFIG_HELPER" "$@" 2>/dev/null)"; BLAST="$(printf '%s\n' "$BOUT" | tail -n 1)"

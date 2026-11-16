@@ -497,18 +497,19 @@ lite_defaults()
 }
 lite_defaults
 
-# Daily snapshot of VWARD's settings (the helper skips it when one is younger than a day).
-# The day already handled is kept in RAM, so the other 23 hourly runs start nothing.
+# Snapshots of VWARD's settings by schedule («Периодичность», owner 16.11.2026): asked once an hour;
+# the helper makes one when the period has passed and the settings changed (auto: each hour they
+# changed; 6, 12 or 24 hours). The hour already handled is kept in RAM; only a new copy is logged.
 BACKUP_HELPER=${VWARD_CONSOLE_CONFIG_BIN:-/opt/bin/vward-console-config.sh}
 BACKUP_DAY_FILE=${VWARD_BACKUP_DAY_FILE:-/tmp/vward-backup-day}
 BACKUP_NOW="$(date '+%Y-%m-%d %H:%M:%S')"
 if [ -x "$BACKUP_HELPER" ] && vward_extra backup; then
     BACKUP_DAY=""
     [ ! -r "$BACKUP_DAY_FILE" ] || read -r BACKUP_DAY < "$BACKUP_DAY_FILE" || :
-    if [ "$BACKUP_DAY" != "${BACKUP_NOW%% *}" ]; then
+    if [ "$BACKUP_DAY" != "${BACKUP_NOW%:*:*}" ]; then
         BACKUP_RESULT="$("$BACKUP_HELPER" backup-create auto 2>/dev/null | tail -n 1)"
-        echo "$BACKUP_NOW|snapshot=${BACKUP_RESULT:-none}" >> "$HOUSE_LOG"
-        case "$BACKUP_RESULT" in result=*) echo "${BACKUP_NOW%% *}" > "$BACKUP_DAY_FILE" 2>/dev/null || : ;; esac
+        [ "$BACKUP_RESULT" = result=unchanged ] || echo "$BACKUP_NOW|snapshot=${BACKUP_RESULT:-none}" >> "$HOUSE_LOG"
+        case "$BACKUP_RESULT" in result=*) echo "${BACKUP_NOW%:*:*}" > "$BACKUP_DAY_FILE" 2>/dev/null || : ;; esac
     fi
 fi
 

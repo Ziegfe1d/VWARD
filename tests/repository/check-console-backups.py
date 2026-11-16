@@ -39,7 +39,8 @@ with tempfile.TemporaryDirectory() as tmp:
                         "VWARD_SNAPSHOT_DIR": str(snaps), "VWARD_CONSOLE_AUDIT_LOG": str(tmp / "audit.log"),
                         "VWARD_CONSOLE_BACKUP_DIR": str(tmp / "backup"), "VWARD_ROOT_PREFIX": str(tmp / "root"),
                         "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
-                        "VWARD_DEVICE_MAP_CACHE": str(tmp / "map.tsv")}
+                        "VWARD_DEVICE_MAP_CACHE": str(tmp / "map.tsv"),
+                        "VWARD_COMPONENT_STATE": str(tmp / "comp"), "VWARD_SETTINGS_REGISTRY": str(ROOT / "config/settings/settings-registry.json")}
 
     def run(*args):
         r = subprocess.run(["sh", str(HELPER), *args], env=env, text=True, capture_output=True)
@@ -122,5 +123,47 @@ with tempfile.TemporaryDirectory() as tmp:
     with tarfile.open(snaps / newest) as t:
         if "./etc/tunnels/Wireguard0/current.conf" not in t.getnames():
             fail("the snapshot on the router must keep the tunnel store")
+
+    # Owner 16.11.2026: «Периодичность», a bin at each copy, «Удалить все».
+    def api(query="action=backup-data", body=None):
+        e = env | {"REQUEST_METHOD": "POST" if body else "GET", "QUERY_STRING": query, "JQ": shutil.which("jq"),
+                   "VWARD_PROFILE_LIB": "/nonexistent", "VWARD_CONFIG_HELPER": str(HELPER), "VWARD_CONSOLE_CONFIG_BIN": str(HELPER),
+                   "CONTENT_LENGTH": str(len(body or "")), "HTTP_X_VWARD_REQUEST": "console", "CONTENT_TYPE": "application/x-www-form-urlencoded"}
+        r = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], input=body or "", text=True, capture_output=True, env=e)
+        return json.loads(r.stdout.split("\n\n", 1)[1])
+    if api()["period"] != "off":
+        fail("no schedule switched on: the period is «off»")
+    if run("backup-period", "6")[-1] != "result=changed" or not (tmp / "comp/backup.on").exists() or "period=6" not in (etc / "backup.conf").read_text():
+        fail("a period switches the copies by schedule on and is kept")
+    if api()["period"] != "6":
+        fail("backup-data tells the period")
+    if run("backup-period", "7")[-1] != "error=invalid_value":
+        fail("only off, auto, 6, 12, 24")
+    # By schedule: nothing new while the settings did not change, even with the period passed.
+    for p in snaps.iterdir():
+        os.utime(p, (0, 0))
+    if run("backup-create", "auto")[-1] != "result=unchanged":
+        fail("no copy by schedule when the settings did not change since the newest copy")
+    (etc / "device.conf").write_text("VWARD_WAN_INTERFACE=Other\n")
+    if run("backup-create", "auto")[-1] != "result=changed":
+        fail("a copy by schedule once the settings changed and the period passed")
+    if run("backup-create", "auto")[-1] != "result=unchanged":
+        fail("the period holds the next one")
+    if run("backup-period", "off")[-1] != "result=changed" or (tmp / "comp/backup.on").exists() or api()["period"] != "off":
+        fail("«Выкл» switches the copies by schedule off")
+    # Delete one, then all; the API asks for a confirmation.
+    names = sorted(p.name for p in snaps.iterdir() if p.name.endswith(".tar.gz"))
+    if api("action=backup-control", "op=delete&name=" + names[0]).get("error") != "confirmation_required":
+        fail("a delete needs its confirmation")
+    if not api("action=backup-control", "op=delete&name=" + names[0] + "&confirm=BACKUP_DELETE")["ok"] or (snaps / names[0]).exists():
+        fail("one copy is deleted")
+    if run("backup-delete", "../x")[-1] != "error=invalid_backup" or run("backup-delete", names[0])[-1] != "error=unknown_backup":
+        fail("a wrong or gone name is refused")
+    if api("action=backup-control", "op=delete_all").get("error") != "confirmation_required":
+        fail("«Удалить все» needs its confirmation")
+    if not api("action=backup-control", "op=delete_all&confirm=BACKUP_DELETE_ALL")["ok"] or [p for p in snaps.iterdir() if p.name.endswith(".tar.gz")]:
+        fail("every copy is deleted")
+    if run("backup-delete", "all")[-1] != "result=unchanged":
+        fail("nothing left to delete")
 
 print("CONSOLE_BACKUPS=PASS")
